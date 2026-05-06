@@ -242,6 +242,14 @@ permission:
    ```
 7. 所有波次完成后，将任务2 标记为 `done`
 
+**设计一致性触发**：若用户 prompt 含 "对照 DESIGN.md"，在检视计划末尾追加一组，与规范检视组同波并行派发：
+
+```
+📊 检视组D：设计一致性 — S1-S7 全策略检查
+  输入: design_md_path + code_file_path + code_summary_path + 场景文件路径
+  该组与规范条例组在同一波次并行派发
+```
+
 **阶段3：行号校对**
 
 1. 将任务3 标记为 `in_progress`
@@ -275,7 +283,7 @@ permission:
    - 脚本路径 = `{base_directory}/scripts/get_gitcode_pr_diff.py`
 4. **获取 diff 并保存**：
    - `mkdir -p ./ops/.pr_diff`
-   - 执行脚本获取 diff（使用 `--output` 参数保存文件）
+   - 执行脚本获取 diff（注意必须传入完整URL,并使用 `--output` 参数保存文件）
 5. 从 diff 判断侧别和代码脉络
 6. 输出概要到 `./ops/pr-{pr_number}/code_summary.md`
 7. 将任务0 标记为 `done`
@@ -289,6 +297,59 @@ permission:
 5. 将任务1 标记为 `done`
 
 **阶段2-4**：流程同场景 A。子 Agent prompt 传 diff 文件路径。
+
+---
+
+### 场景 C：纯设计一致性检视
+
+**触发词**：设计实现一致性、设计一致性检查、对照 DESIGN.md、验证设计实现、DESIGN.md 一致性
+
+**⚠️ 此场景跳过规范条例检视，只执行设计一致性检查。**
+
+**[创建待办清单]** → 创建 4 个固定任务（不包含条例提取）
+
+**阶段0：获取代码 + 设计文档 + 代码概要**
+
+1. 将任务0 标记为 `in_progress`
+2. 用 `Read` 工具读取目标代码文件
+3. 用 `Read` 工具读取用户指定的 DESIGN.md
+4. 梳理代码脉络（入口 → 数据流 → 计算核心 → 输出）
+5. 输出概要到 `./ops/{operator_name}/code_summary.md`，末尾追加「设计映射」表：
+
+   | 设计维度 | DESIGN.md 要求 |
+   |---------|---------------|
+   | Kernel 类型 | {提取} |
+   | API 映射 | {提取} |
+   | 分支场景 | {提取} |
+   | 数据流 | {提取} |
+   | 核心约束 | {提取} |
+
+6. 将任务0 标记为 `done`
+
+**阶段1：跳过条例提取**
+
+将任务1 标记为 `done`（纯设计一致性不读规范文档，不提取条例）
+
+**阶段2：派发设计一致性子 Agent**
+
+1. 将任务2 标记为 `in_progress`
+2. 通过 `ascendc-code-review` skill 定位场景文件路径：`{base_directory}/scenarios/design-consistency.md`
+3. 派发单个子 Agent，使用设计一致性调用模板（见"子 Agent 调用模板"章节）
+4. 等待结果返回
+5. 将任务2 标记为 `done`
+
+**阶段3：行号校对**
+
+1. 将任务3 标记为 `in_progress`
+2. 对设计一致性结果中的所有 ❌ 项，用 `Grep` + `Read` 校对行号
+3. 将任务3 标记为 `done`
+
+**阶段4：撰写报告**
+
+1. 将任务4 标记为 `in_progress`
+2. 报告只有「设计一致性检查」章节
+3. 保存到 `./ops/{operator_name}/{source_file}_design_consistency_review.md`
+4. 将任务4 标记为 `done`
 
 ---
 
@@ -358,6 +419,20 @@ Agent({
 - `{diff_file_path}` 为阶段1写入的本地文件路径（如 `./ops/.pr_diff/3604.diff`）
 - 子 Agent 通过 `ascendc-code-review` skill 定位检视文档路径
 
+### 设计一致性检视调用模板
+
+若用户触发设计一致性检视（"对照 DESIGN.md"），使用以下模板：
+
+```json
+Agent({
+  "subagent_type": "general",
+  "description": "设计一致性：7策略检查",
+  "prompt": "设计一致性检视\n\n【输入】\n- 场景文件：{scenario_base_dir}/scenarios/design-consistency.md\n- 设计文档：{design_md_path}\n- 实现代码：{code_file_path}\n- 代码概要：{code_summary_path}\n\n【执行指令】\n1. Read 场景文件获取完整检视流程\n2. Read 设计文档提取设计期望\n3. Read 实现代码提取实现实际\n4. 严格按场景文件中的 7 策略逐项检视\n5. 按场景文件中的输出格式返回判定结果\n\n禁止生成报告文件，只返回结构化判定结果。"
+})
+```
+
+`{scenario_base_dir}` 通过 `ascendc-code-review` skill 定位后拼接 `/scenarios/design-consistency.md`。
+
 ---
 
 ## 结果聚合与报告生成
@@ -369,6 +444,7 @@ Agent({
 1. **汇总逐条结果**
    - 收集所有子 Agent 的 `[条例ID] [状态] 置信度` 结果
    - 统计：总条例数 / PASS 数 / FAIL 数 / SUSPICIOUS 数
+   - 若触发了设计一致性检视，收集设计一致性组的 S1-S7 判定结果
 
 2. **强制行号校对**（禁止跳过）
    - 对所有 FAIL/SUSPICIOUS 发现，使用 `Grep` 搜索关键代码模式
@@ -425,6 +501,20 @@ Agent({
 ## 通过条例
 
 {pass 条例 ID 列表，每行一条}
+
+## 设计一致性检查（如有触发）
+
+| 策略 | 维度 | 设计期望 | 实现实际 | 判定 |
+|------|------|---------|---------|------|
+| S1 | 架构匹配 | {描述} | {描述} | ✅/❌/N/A |
+| S2 | 分支覆盖 | {描述} | {描述} | ✅/❌/N/A |
+| S3 | API清单 | {描述} | {描述} | ✅/❌/N/A |
+| S4 | 数据流追踪 | {描述} | {描述} | ✅/❌/N/A |
+| S5 | 参数语义 | {描述} | {描述} | ✅/❌/N/A |
+| S6 | 伪代码映射 | {描述} | {描述} | ✅/❌/N/A |
+| S7 | 约束合规 | {描述} | {描述} | ✅/❌/N/A |
+
+**总体评级**: 一致 / 部分一致 / 不一致
 
 ---
 
