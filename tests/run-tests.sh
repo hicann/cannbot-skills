@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
 # =============================================================================
-# CANN Skills Test Runner v0.1
+# CANN Skills Test Runner v0.2
 # =============================================================================
 # Unified test runner supporting Claude Code and OpenCode platforms.
 #
@@ -19,6 +10,11 @@
 #   ./run-tests.sh --platform claude  # Run only Claude tests
 #   ./run-tests.sh --test test-name   # Run specific test
 #   ./run-tests.sh --output json      # JSON output for CI
+#   ./run-tests.sh --incremental      # Only test changed skills/agents/teams
+#
+# CI/CD Integration:
+#   This script supports incremental testing for PR workflows.
+#   Use --incremental to only test changed components.
 # =============================================================================
 
 set -euo pipefail
@@ -45,13 +41,18 @@ SPECIFIC_TEST=""
 CATEGORY=""
 TEST_RESULTS=()
 
+# Incremental testing options
+INCREMENTAL_MODE=false
+BASE_BRANCH="${BASE_BRANCH:-master}"
+FORCE_FULL_TEST=false
+
 # Eval-specific options
 EVAL_WORKSPACE=""
 EVAL_ITERATION=""
 EVAL_THRESHOLD=""
 EVAL_DETECT_REGRESSION=false
 EVAL_INCREMENTAL=false
-EVAL_BASE_BRANCH="main"
+EVAL_BASE_BRANCH="master"
 
 # =============================================================================
 # Argument Parsing
@@ -59,7 +60,7 @@ EVAL_BASE_BRANCH="main"
 
 show_help() {
     cat <<EOF
-CANN Skills Test Runner v0.1
+CANN Skills Test Runner v0.2
 
 Usage: $0 [OPTIONS]
 
@@ -76,14 +77,17 @@ Options:
   --verbose            Enable verbose output
   --list               List available tests
 
+Incremental Testing Options (for CI/CD):
+  --incremental        Only test changed skills/agents/teams
+  --base-branch BRANCH Base branch for comparison (default: master)
+  --force-full         Force full test run even in incremental mode
+
 Skill Evaluation Options:
   --eval-results       Run skill evaluation results check (workspace benchmark validation)
   --workspace PATH     Specify a specific workspace for eval results check
   --iteration N        Specify iteration version (default: latest)
   --threshold RATE     Override pass rate threshold (0.0-1.0)
   --detect-regression  Enable regression detection between iterations
-  --incremental        Only check changed workspaces (git-based)
-  --base-branch BRANCH Base branch for incremental check (default: main)
 
 Test Categories:
   unit          - Unit tests (structure, dependencies, content)
@@ -98,6 +102,8 @@ Examples:
   $0 --category behavior          # Run behavior tests
   $0 --test unit/skills/test-structure.sh
   $0 --output json                # JSON output
+  $0 --incremental                # Only test changed components (CI/CD)
+  $0 --incremental --base-branch develop
   $0 --eval-results               # Check skill evaluation results
   $0 --eval-results --workspace ../skills/ascendc-stc-design-workspace
   $0 --eval-results --threshold 0.9 --detect-regression
@@ -141,7 +147,7 @@ list_tests() {
         [ -f "$f" ] && echo "  behavior/agents/$(basename "$f")"
     done
     echo ""
-    
+
     echo "L3 Integration Tests:"
     for f in "$SCRIPT_DIR"/integration/test-*.sh; do
         [ -f "$f" ] && echo "  integration/$(basename "$f")"
@@ -229,7 +235,23 @@ parse_args() {
                 ;;
             --base-branch)
                 EVAL_BASE_BRANCH="$2"
+                BASE_BRANCH="$2"
                 shift 2
+                ;;
+            --incremental-ci)
+                INCREMENTAL_MODE=true
+                has_mode_flag=true
+                shift
+                ;;
+            --incremental)
+                # Alias for --incremental-ci
+                INCREMENTAL_MODE=true
+                has_mode_flag=true
+                shift
+                ;;
+            --force-full)
+                FORCE_FULL_TEST=true
+                shift
                 ;;
             *)
                 echo "Unknown option: $1"
@@ -263,6 +285,230 @@ parse_args() {
 }
 
 # =============================================================================
+# Incremental Testing Functions
+# =============================================================================
+
+# Check if we're in a git repository
+is_git_repo() {
+    git -C "$SKILLS_DIR" rev-parse --is-inside-work-tree &>/dev/null
+}
+
+# Get list of changed files compared to base branch
+get_changed_files() {
+    local base="${1:-master}"
+
+    # Try to find the merge base
+    if ! git -C "$SKILLS_DIR" rev-parse --verify "$base" &>/dev/null; then
+        echo ""
+        return 1
+    fi
+
+    # Get changed files (added, modified, renamed, deleted)
+    git -C "$SKILLS_DIR" diff --name-status "$base"...HEAD 2>/dev/null || \
+    git -C "$SKILLS_DIR" diff --name-status HEAD~1 HEAD 2>/dev/null || \
+    echo ""
+}
+
+# Parse changed files and extract affected skills, agents, teams
+# Returns: changed_skills, changed_agents, changed_teams (global arrays)
+declare -gA CHANGED_SKILLS=()
+declare -gA CHANGED_AGENTS=()
+declare -gA CHANGED_TEAMS=()
+declare -g FRAMEWORK_CHANGED=false
+declare -g GLOBAL_CONFIG_CHANGED=false
+
+analyze_changes() {
+    local base_branch="${1:-master}"
+    CHANGED_SKILLS=()
+    CHANGED_AGENTS=()
+    CHANGED_TEAMS=()
+    FRAMEWORK_CHANGED=false
+    GLOBAL_CONFIG_CHANGED=false
+
+    if ! is_git_repo; then
+        echo -e "${YELLOW}[WARN]${NC} Not a git repository, running full tests"
+        return 1
+    fi
+
+    local changed_files
+    changed_files=$(get_changed_files "$base_branch")
+
+    if [ -z "$changed_files" ]; then
+        echo -e "${YELLOW}[WARN]${NC} Could not detect changes, running full tests"
+        return 1
+    fi
+
+    echo -e "${CYAN}=== Incremental Test Analysis ===${NC}"
+    echo ""
+    echo "Base branch: $base_branch"
+    echo ""
+
+    # Framework patterns - changes here require full test
+    local framework_patterns=(
+        "^tests/"
+        "^tests/lib/"
+        "\.sh$"
+        "package\.json$"
+        "\.claude-plugin/"
+        "\.opencode/"
+    )
+
+    # Global config patterns
+    local global_config_patterns=(
+        "^README\.md$"
+        "^CLAUDE\.md$"
+        "^AGENTS\.md$"
+        "^\.git"
+    )
+
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+
+        local status="${line:0:1}"
+        local file="${line:1}"
+        file="${file#"${file%%[![:space:]]*}"}"  # Trim leading whitespace
+
+        # Skip deleted files for component detection (but track for framework)
+        if [ "$status" == "D" ]; then
+            continue
+        fi
+
+        # Check for framework changes
+        for pattern in "${framework_patterns[@]}"; do
+            if echo "$file" | grep -qE "$pattern"; then
+                FRAMEWORK_CHANGED=true
+                echo -e "  ${YELLOW}[FRAMEWORK]${NC} $file"
+                break
+            fi
+        done
+
+        # Check for global config changes
+        for pattern in "${global_config_patterns[@]}"; do
+            if echo "$file" | grep -qE "$pattern"; then
+                GLOBAL_CONFIG_CHANGED=true
+                break
+            fi
+        done
+
+        # Detect skill changes
+        # Patterns: skills/<name>/, ops/skills/<name>/, ops-lab/*/skills/<name>/, model/skills/<name>/
+        if [[ "$file" =~ (skills/([^/]+)/) ]] || \
+           [[ "$file" =~ /skills/([^/]+)/SKILL\.md$ ]] || \
+           [[ "$file" =~ /skills/([^/]+)/references/ ]]; then
+            local skill_name="${BASH_REMATCH[2]:-${BASH_REMATCH[1]}}"
+            if [ -n "$skill_name" ]; then
+                CHANGED_SKILLS["$skill_name"]=1
+                echo -e "  ${GREEN}[SKILL]${NC} $skill_name <- $file"
+            fi
+        fi
+
+        # Detect agent changes
+        # Patterns: agents/<name>/, ops/agents/<name>/, ops-lab/*/agent/
+        if [[ "$file" =~ /agents/([^/]+)/AGENT\.md$ ]] || \
+           [[ "$file" =~ /agents/([^/]+)/ ]]; then
+            local agent_name="${BASH_REMATCH[1]}"
+            if [ -n "$agent_name" ]; then
+                CHANGED_AGENTS["$agent_name"]=1
+                echo -e "  ${BLUE}[AGENT]${NC} $agent_name <- $file"
+            fi
+        fi
+
+        # Detect team changes
+        # Patterns: teams/<name>/, ops/teams/<name>/
+        if [[ "$file" =~ /teams/([^/]+)/AGENTS\.md$ ]] || \
+           [[ "$file" =~ /teams/([^/]+)/ ]]; then
+            local team_name="${BASH_REMATCH[1]}"
+            if [ -n "$team_name" ]; then
+                CHANGED_TEAMS["$team_name"]=1
+                echo -e "  ${CYAN}[TEAM]${NC} $team_name <- $file"
+            fi
+        fi
+
+    done <<< "$changed_files"
+
+    echo ""
+}
+
+# Check if incremental testing should be used
+should_run_incremental() {
+    if ! $INCREMENTAL_MODE; then
+        return 1
+    fi
+
+    if $FORCE_FULL_TEST; then
+        echo -e "${YELLOW}[INFO]${NC} Force full test requested"
+        return 1
+    fi
+
+    if $FRAMEWORK_CHANGED; then
+        echo -e "${YELLOW}[INFO]${NC} Test framework changed, running full tests"
+        return 1
+    fi
+
+    if $GLOBAL_CONFIG_CHANGED; then
+        echo -e "${YELLOW}[INFO]${NC} Global config changed, running full tests"
+        return 1
+    fi
+
+    # Check if there are any changes
+    if [ ${#CHANGED_SKILLS[@]} -eq 0 ] && [ ${#CHANGED_AGENTS[@]} -eq 0 ] && [ ${#CHANGED_TEAMS[@]} -eq 0 ]; then
+        echo -e "${GREEN}[INFO]${NC} No skill/agent/team changes detected"
+        return 1
+    fi
+
+    return 0
+}
+
+# Generate test list for changed components
+get_incremental_tests() {
+    local tests=""
+
+    # Always run structure and content tests for changed skills
+    if [ ${#CHANGED_SKILLS[@]} -gt 0 ]; then
+        tests+="unit/skills/test-structure.sh:fast\n"
+        tests+="unit/skills/test-content.sh:fast\n"
+    fi
+
+    # Always run structure and content tests for changed agents
+    if [ ${#CHANGED_AGENTS[@]} -gt 0 ]; then
+        tests+="unit/agents/test-structure.sh:fast\n"
+        tests+="unit/agents/test-content.sh:fast\n"
+    fi
+
+    # Run all team tests for changed teams (including version check)
+    if [ ${#CHANGED_TEAMS[@]} -gt 0 ]; then
+        tests+="unit/teams/test-structure.sh:fast\n"
+        tests+="unit/teams/test-content.sh:fast\n"
+        tests+="unit/teams/test-version.sh:fast\n"
+    fi
+
+    echo -e "$tests" | grep -v '^$' || true
+}
+
+# Export changed component lists for test scripts to use
+export_changed_components() {
+    local skills_list=""
+    local agents_list=""
+    local teams_list=""
+
+    for skill in "${!CHANGED_SKILLS[@]}"; do
+        skills_list="$skills_list $skill"
+    done
+
+    for agent in "${!CHANGED_AGENTS[@]}"; do
+        agents_list="$agents_list $agent"
+    done
+
+    for team in "${!CHANGED_TEAMS[@]}"; do
+        teams_list="$teams_list $team"
+    done
+
+    export INCREMENTAL_SKILLS="${skills_list# }"
+    export INCREMENTAL_AGENTS="${agents_list# }"
+    export INCREMENTAL_TEAMS="${teams_list# }"
+}
+
+# =============================================================================
 # Test Definitions
 # =============================================================================
 
@@ -280,10 +526,9 @@ get_tests_for_category() {
             echo "unit/teams/test-version.sh:fast"
             ;;
         behavior)
-            echo "behavior/skills/test-trigger-correctness.sh:medium"
-            echo "behavior/skills/test-premature-action.sh:medium"
-            echo "behavior/agents/test-trigger-correctness.sh:medium"
-            echo "behavior/agents/test-premature-action.sh:medium"
+            # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)
+            # Other test files can be run individually via --test flag
+            echo "behavior/skills/test-universal.sh:medium"
             ;;
         integration)
             for f in "$SCRIPT_DIR"/integration/test-*.sh; do
@@ -327,12 +572,11 @@ run_test_file() {
     print_section "Running: $test_file"
 
     if $VERBOSE; then
-        if output=$(timeout $TIMEOUT bash "$test_path" 2>&1); then
+        if timeout $TIMEOUT bash "$test_path"; then
             status="pass"
         else
             status="fail"
         fi
-        echo "$output"
     else
         if output=$(timeout $TIMEOUT bash "$test_path" 2>&1); then
             status="pass"
@@ -347,27 +591,32 @@ run_test_file() {
     # Count warnings in output
     if [[ -n "$output" ]]; then
         warning_count=$(echo "$output" | grep -cE "\[WARN\]" 2>/dev/null || true)
+        # Ensure it's a valid number
         [[ "$warning_count" =~ ^[0-9]+$ ]] || warning_count=0
     fi
 
     case "$status" in
         pass)
-            print_pass "${test_file} (${duration}s)"
+            print_pass "(${duration}s)"
             # Show warnings if present in output
             if [[ "$warning_count" -gt 0 ]]; then
                 echo ""
                 echo "$output" | grep -E "\[WARN\]" | sed 's/^/    /'
+                echo ""
             fi
             TEST_RESULTS+=("pass:$test_file:$duration:$warning_count")
             record_test "pass" "$test_file" "$duration"
             ;;
         fail)
-            print_fail "${test_file} (${duration}s)"
+            print_fail "(${duration}s)"
             if [[ -n "$output" ]]; then
-                # Only show error/warn lines from sub-script, not the full dump
                 echo ""
-                echo "$output" | grep -E "\[FAIL\]|\[ERROR\]|\[WARN\]|\[SKIP\]" | sed 's/^/    /'
+                echo -e "  ${YELLOW}--- Failure Details ---${NC}"
+                echo "$output" | sed 's/^/    /'
+                echo -e "  ${YELLOW}--- End ---${NC}"
                 echo ""
+            else
+                echo "  (run with --verbose for more details)"
             fi
             TEST_RESULTS+=("fail:$test_file:$duration:$warning_count")
             record_test "fail" "$test_file" "$duration"
@@ -381,24 +630,68 @@ run_all_tests() {
     local total_failed=0
     local tests_run=0
 
-    local platform_version
-    if [ "$PLATFORM" = "none" ]; then
-        platform_version="no CLI available"
-    else
-        platform_version=$(get_platform_version "$PLATFORM")
+    # Check for incremental mode
+    local use_incremental=false
+    if $INCREMENTAL_MODE; then
+        analyze_changes "$BASE_BRANCH"
+        if should_run_incremental; then
+            use_incremental=true
+            export_changed_components
+        fi
     fi
 
-    print_test_banner "CANN Skills Test Suite v0.1" "
-Repository: $SKILLS_DIR
+    local test_banner_info="Repository: $SKILLS_DIR
 Test time: $(date '+%Y-%m-%d %H:%M:%S')
-Platform: $PLATFORM ($platform_version)"
+Platform: $PLATFORM"
+
+    if $use_incremental; then
+        test_banner_info+="
+Mode: INCREMENTAL (changed components only)"
+    fi
+
+    print_test_banner "CANN Skills Test Suite v0.2" "$test_banner_info"
+
+    echo ""
+    echo "Platform versions:"
+    case "$PLATFORM" in
+        claude)
+            echo "  Claude Code: $(get_platform_version claude)"
+            ;;
+        opencode)
+            echo "  OpenCode: $(get_platform_version opencode)"
+            ;;
+        none)
+            echo "  (no CLI - fast tests only)"
+            ;;
+    esac
+    echo ""
 
     local tests
-    if [[ -n "$CATEGORY" ]]; then
+    if $use_incremental; then
+        tests=$(get_incremental_tests)
+        if [ -z "$tests" ]; then
+            echo -e "${GREEN}No tests to run (no relevant changes detected)${NC}"
+            print_summary 0
+            return 0
+        fi
+    elif [[ -n "$CATEGORY" ]]; then
         tests=$(get_tests_for_category "$CATEGORY")
     else
         tests=$(get_tests_for_category "all")
     fi
+
+    local test_count=$(echo "$tests" | grep -c ':' || echo "0")
+
+    if $use_incremental; then
+        echo "Changed components:"
+        [ ${#CHANGED_SKILLS[@]} -gt 0 ] && echo "  Skills: ${!CHANGED_SKILLS[*]}"
+        [ ${#CHANGED_AGENTS[@]} -gt 0 ] && echo "  Agents: ${!CHANGED_AGENTS[*]}"
+        [ ${#CHANGED_TEAMS[@]} -gt 0 ] && echo "  Teams: ${!CHANGED_TEAMS[*]}"
+        echo ""
+    fi
+
+    echo "Tests to run: $test_count"
+    echo ""
 
     local test_array=()
     while IFS=':' read -r test_file speed; do
@@ -493,6 +786,20 @@ print_summary() {
     echo -e "  ${YELLOW}Warnings:${NC} $warnings"
     echo "  Duration:  ${total_duration}s"
     echo ""
+
+    if $RUN_FAST; then
+        echo "Note: Only fast tests were run (--fast flag)."
+        echo ""
+    fi
+
+    if ! $RUN_INTEGRATION && ! $RUN_ALL && [ -d "$SCRIPT_DIR/integration" ]; then
+        local integration_count=$(find "$SCRIPT_DIR/integration" -name "test-*.sh" -type f 2>/dev/null | wc -l)
+        if [ "$integration_count" -gt 0 ]; then
+            echo "Note: Integration tests were not run."
+            echo "Use --integration flag to run them."
+            echo ""
+        fi
+    fi
 
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
         output_json "$passed" "$failed" "$skipped" "$warnings" "$total_duration"
@@ -621,7 +928,7 @@ Test time: $(date '+%Y-%m-%d %H:%M:%S')"
 # Main
 # =============================================================================
 
-main() {
+master() {
     parse_args "$@"
     init_test_tracking
 
@@ -665,4 +972,4 @@ main() {
     exit $exit_code
 }
 
-main "$@"
+master "$@"

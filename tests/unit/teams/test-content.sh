@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
 # =============================================================================
 # Test: Team Content
 # =============================================================================
@@ -15,7 +6,11 @@
 # Rules tested:
 # - T-CON-01: directory naming format ^[a-z0-9]+(-[a-z0-9]+)*$
 # - T-CON-02: description contains trigger keywords
-# - T-CON-03: description contains trigger conditions (warning: REQUIRED: when to use)
+# - T-CON-03: has core principles section
+# - T-CON-04: init.sh exists (optional)
+# - T-CON-05: quickstart.md exists (optional)
+#
+# Supports incremental testing via INCREMENTAL_TEAMS environment variable.
 # =============================================================================
 
 set -euo pipefail
@@ -23,31 +18,54 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
+echo "=== Test: Team Content ==="
+echo ""
+echo "This test validates content quality for all teams."
+echo "Run time: ~10 seconds (no CLI needed)"
+echo ""
+
+# Check for incremental mode
+if is_incremental_mode; then
+    echo -e "${CYAN}[INCREMENTAL MODE]${NC} Testing only changed teams"
+    echo ""
+fi
+
 # Counters
 total_teams=0
 pass_count=0
 fail_count=0
+skip_count=0
 
-# Get all teams dynamically
-ALL_TEAMS=$(get_all_teams)
-total_teams=$(echo "$ALL_TEAMS" | wc -l)
+# Get teams to test (filtered if in incremental mode)
+TEAMS_TO_TEST=$(get_teams_to_test)
+total_teams=$(echo "$TEAMS_TO_TEST" | grep -c . || echo "0")
 
-echo "Found $total_teams teams"
+echo "Teams to test: $total_teams"
 echo ""
 
 # ============================================
-# Validate all teams content
+# Validate teams content
 # ============================================
-print_section_header "Test: Team Content (T-CON-01..03)"
+print_section_header "Test: Team Content (T-CON-01 to T-CON-05)"
 
-for team in $ALL_TEAMS; do
-    team_file=$(find_team_file "$team")
-    
-    if [ ! -f "$team_file" ]; then
-        print_skip "$team: AGENTS.md not found"
+for team in $TEAMS_TO_TEST; do
+    [ -z "$team" ] && continue
+
+    # In incremental mode, check if this team should be tested
+    if is_incremental_mode && ! should_test_team "$team"; then
+        print_skip "$team: Not in changed list"
+        ((skip_count++)) || true
         continue
     fi
-    
+
+    team_file=$(find_team_file "$team")
+
+    if [ ! -f "$team_file" ]; then
+        print_skip "$team: AGENTS.md not found"
+        ((skip_count++)) || true
+        continue
+    fi
+
     if validate_team_content "$team_file"; then
         ((pass_count++)) || true
     else
@@ -67,6 +85,7 @@ echo ""
 echo "  Total teams: $total_teams"
 echo -e "  ${GREEN}Passed:${NC}       $pass_count"
 echo -e "  ${RED}Failed:${NC}       $fail_count"
+[ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}      $skip_count"
 echo ""
 
 if [ $fail_count -gt 0 ]; then

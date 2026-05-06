@@ -6,9 +6,8 @@
 
 - Claude Code CLI 或 OpenCode CLI
 - Bash 4.0+
-- Python 3.8+（结构/内容校验器依赖，单元测试必需）
-- PyYAML（`pip install pyyaml`，用于解析 SKILL/AGENT 的 YAML frontmatter）
-- `jq`（可选，用于高级会话分析功能，如成本分析和工作流分析）
+- Python 3.6+ (用于 Token 分析)
+- `jq` (可选，用于高级会话分析功能，如成本分析和工作流分析)
 
 ## 快速开始
 
@@ -22,12 +21,18 @@
 # 运行全量测试
 ./run-tests.sh --integration
 
+# 增量测试（仅测试变更的组件，适用于 CI/CD）
+./run-tests.sh --incremental-ci
+
 # 查看可用测试
 ./run-tests.sh --list
 
 # 运行指定测试
 ./run-tests.sh --test unit/skills/test-structure.sh
-./run-tests.sh --test behavior/agents/test-trigger-correctness.sh
+./run-tests.sh --test behavior/skills/test-universal.sh
+
+# 测试单个 Skill（直接调用）
+./behavior/skills/test-universal.sh ascendc-runtime-debug
 ```
 
 ## 目录结构
@@ -47,21 +52,20 @@ tests/
 │       └── test-version.sh    # Team 版本看护
 │
 ├── behavior/                  # L2 行为测试（需要 CLI，1-5 min）
-│   ├── skills/
-│   │   ├── test-trigger-correctness.sh
-│   │   └── test-premature-action.sh
-│   └── agents/
+│   └── skills/
+│       ├── test-universal.sh        # 通用测试（自动运行全部规则）
 │       ├── test-trigger-correctness.sh
-│       └── test-premature-action.sh
+│       ├── test-premature-action.sh
+│       ├── test-interaction-logic.sh
+│       └── test-cases/              # 定制测试配置（可选）
+│           └── ascendc-runtime-debug.yaml
 │
 ├── integration/               # L3 集成测试（5-15 min）
 │   ├── test-simple-op-development.sh
 │   └── test-workflow-execution.sh
 │
 ├── lib/
-│   ├── test-helpers.sh        # 测试辅助函数（Bash 驱动层）
-│   ├── skill_validator.py     # 结构/内容校验器（PyYAML，发射 JSONL findings）
-│   └── rules.yaml             # 关键词表、保留前缀、反模式、opt-out 清单
+│   └── test-helpers.sh        # 测试辅助函数
 │
 ├── tools/
 │   ├── analyze-session.sh
@@ -88,83 +92,57 @@ tests/
 
 | 规则ID | 测试项 | 级别 | 文件 |
 |--------|-------|------|------|
-| S-STR-01 | YAML Front Matter 解析正确（`---` 包裹，有效 YAML 映射） | 必须 | test-structure.sh |
-| S-STR-02 | name 字段存在且非空 | 必须 | test-structure.sh |
-| S-STR-03 | description 字段存在且非空 | 必须 | test-structure.sh |
-| S-STR-04 | references/ 目录非空（如存在） | 条件 | test-structure.sh |
-| S-STR-05 | name 长度 1-64 字符 | 必须 | test-structure.sh |
-| S-STR-06 | name 格式 `^[a-z0-9]+(-[a-z0-9]+)*$` | 必须 | test-structure.sh |
-| S-STR-07 | description 长度 1-1024 字符；compatibility 为字符串且长度 1-500 | 必须 | test-structure.sh |
-| S-STR-08 | 链接指向的文件存在（Markdown 链接 / `{file:...}`） | 必须 | test-structure.sh |
-| S-STR-09 | 文件名必须为 SKILL.md（大小写敏感） | 必须 | test-structure.sh |
-| S-STR-10 | 目录名 kebab-case | 必须 | test-structure.sh |
-| S-STR-11 | skill 目录内禁止 README.md | 必须 | test-structure.sh |
-| S-STR-12 | frontmatter 内无 XML 标签（防注入） | 必须 | test-structure.sh |
-| S-STR-13 | SKILL.md body < 5000 词（渐进披露） | 建议 | test-structure.sh |
-| S-STR-14 | name 无保留前缀（`claude*` / `anthropic*`） | 必须 | test-structure.sh |
-| S-STR-15 | 全局 name 唯一（跨仓库查重） | 必须 | test-structure.sh |
-| S-STR-16 | metadata 为 string→string 映射 | 必须 | test-structure.sh |
-| S-CON-01 | name 与目录名一致 | 必须 | test-content.sh |
-| S-CON-02 | description 包含触发关键词 | 必须 | test-content.sh |
-| S-CON-03 | description 含触发条件短语 | 必须 | test-content.sh |
-| S-CON-04 | 内容具备可执行指令（代码块/编号步骤/脚本引用） | 建议 | test-content.sh |
-| S-CON-05 | 错误处理/故障排除章节存在 | 必须* | test-content.sh |
-| S-CON-06 | 示例/场景章节存在（代码 fence 亦可） | 建议 | test-content.sh |
-| S-CON-07 | 长文件（>200 行）链接 references/（渐进披露） | 建议 | test-content.sh |
-| S-CON-08 | description 三段式（动作+触发+关键词，至少两段） | 建议 | test-content.sh |
-| S-CON-09 | description 无反模式短语 | 建议 | test-content.sh |
+| S-STR-01 | YAML格式正确（---包裹） | 必须 | test-structure.sh |
+| S-STR-02 | name字段存在 | 必须 | test-structure.sh |
+| S-STR-03 | description字段存在 | 必须 | test-structure.sh |
+| S-STR-04 | references目录非空（如存在） | 条件 | test-structure.sh |
+| S-STR-05 | name长度1-64字符 | 必须 | test-structure.sh |
+| S-STR-06 | name格式正则验证 | 必须 | test-structure.sh |
+| S-STR-07 | description长度1-1024字符 | 必须 | test-structure.sh |
+| S-STR-08 | 链接有效 | 必须 | test-structure.sh |
+| S-CON-01 | name与目录名一致 | 必须 | test-content.sh |
+| S-CON-02 | description包含触发关键词 | 必须 | test-content.sh |
+| S-CON-03 | description包含触发条件 | 建议 | test-content.sh |
+| S-CON-04 | 命名符合前缀规范 | 必须 | test-content.sh |
 
-\* S-CON-05 默认为 error；可通过 `rules.yaml` 的 `content_strict_opt_out:` 列表对迁移期 skill 降级为 warning。S-CON-06 始终为 warning。
+#### Agents (unit/agents/)
+
+| 测试文件 | 验证项 |
+|---------|--------|
+| `test-structure.sh` | YAML格式、name/description/mode字段、skills依赖、name/description格式、链接有效性 |
+| `test-content.sh` | name一致性、description触发关键词、命名前缀、核心职责 |
 
 #### Agents 测试规则详情
 
-> Agent 文件布局：扁平化 `agents/<name>.md`（发现过程会排除 `AGENTS.md` team 文件）。目录式 `agents/<name>/AGENT.md` 不是合法格式，不会被测试框架识别。
-
 | 规则ID | 测试项 | 级别 | 文件 |
 |--------|-------|------|------|
-| A-STR-01 | YAML Front Matter 解析正确（`---` 包裹，有效 YAML 映射） | 必须 | test-structure.sh |
-| A-STR-02 | name / description / mode 字段存在且非空 | 必须 | test-structure.sh |
-| A-STR-03 | mode ∈ {primary, subagent} | 必须 | test-structure.sh |
-| A-STR-04 | skills 依赖全部存在（与仓库内 skills 目录一致） | 必须 | test-structure.sh |
-| A-STR-05 | name 长度 1-64 字符 | 必须 | test-structure.sh |
-| A-STR-06 | name 格式 `^[a-z0-9]+(-[a-z0-9]+)*$` | 必须 | test-structure.sh |
-| A-STR-07 | description 长度 1-1024 字符 | 必须 | test-structure.sh |
-| A-STR-08 | 链接指向的文件存在（Markdown 链接 / `{file:...}`，Bash 层 `check_file_links` 承担） | 必须 | test-structure.sh |
-| A-STR-09 | 全局 name 唯一（跨仓库查重） | 必须 | test-structure.sh |
-| A-STR-14 | name 无保留前缀（`claude*` / `anthropic*`） | 必须 | test-structure.sh |
-| A-CON-01 | name 与文件名一致（`agents/<name>.md` 的 stem） | 必须 | test-content.sh |
-| A-CON-02 | description 包含触发关键词 | 必须 | test-content.sh |
-| A-CON-03 | description 含触发条件短语（`Use when...` / `当...时`） | 建议 | test-content.sh |
-| A-CON-04 | 内容具备可执行指令（代码块/编号步骤/脚本引用） | 建议 | test-content.sh |
-| A-CON-05 | 错误处理/故障排除章节存在 | 建议 | test-content.sh |
-| A-CON-06 | 示例/场景章节存在（代码 fence 亦可） | 建议 | test-content.sh |
-| A-CON-07 | 长文件（>200 行）链接 references/（渐进披露） | 建议 | test-content.sh |
-| A-CON-08 | description 三段式（动作+触发+关键词，至少两段） | 建议 | test-content.sh |
-| A-CON-09 | description 无反模式短语 | 建议 | test-content.sh |
+| A-STR-01 | YAML格式正确 | 必须 | test-structure.sh |
+| A-STR-02 | name/description/mode字段存在 | 必须 | test-structure.sh |
+| A-STR-03 | mode为primary或subagent | 必须 | test-structure.sh |
+| A-STR-04 | skills依赖全部存在 | 必须 | test-structure.sh |
+| A-STR-05 | name长度1-64字符 | 必须 | test-structure.sh |
+| A-STR-06 | name格式正则验证 | 必须 | test-structure.sh |
+| A-STR-07 | description长度1-1024字符 | 必须 | test-structure.sh |
+| A-STR-08 | 链接有效 | 必须 | test-structure.sh |
+| A-CON-01 | name与目录名一致 | 必须 | test-content.sh |
+| A-CON-02 | description包含触发关键词 | 必须 | test-content.sh |
+| A-CON-03 | 命名符合前缀规范 | 必须 | test-content.sh |
+| A-CON-04 | 核心职责章节 | 必须 | test-content.sh |
 
-#### Teams 测试规则详情
+#### Teams (unit/teams/)
 
-| 规则ID | 测试项 | 级别 | 文件 |
-|--------|-------|------|------|
-| T-STR-01 | YAML Front Matter 解析正确（`---` 包裹，有效 YAML 映射） | 必须 | test-structure.sh |
-| T-STR-02 | mode 字段存在且等于 `primary` | 必须 | test-structure.sh |
-| T-STR-03 | skills 字段存在 | 必须 | test-structure.sh |
-| T-STR-04 | skills 依赖全部存在（与仓库内 skills 目录一致） | 必须 | test-structure.sh |
-| T-STR-05 | description 长度 1-1024 字符；references/ 目录非空（如存在） | 必须 | test-structure.sh |
-| T-STR-06 | 链接指向的文件存在（Markdown 链接 / `{file:...}`，Bash 层 `check_file_links` 承担） | 必须 | test-structure.sh |
-| T-STR-07 | 全局 name 唯一（跨仓库查重） | 必须 | test-structure.sh |
-| T-CON-01 | 目录名 kebab-case（`^[a-z0-9]+(-[a-z0-9]+)*$`） | 必须 | test-content.sh |
-| T-CON-02 | description 包含触发关键词 | 必须 | test-content.sh |
-| T-CON-03 | description 含触发条件短语（`Use when...` / `当...时`） | 建议 | test-content.sh |
+| 测试文件 | 验证项 |
+|---------|--------|
+| `test-structure.sh` | YAML格式、description/mode/skills字段、依赖存在、description长度、链接有效性 |
+| `test-content.sh` | 目录命名格式、触发关键词、核心原则章节 |
+| `test-version.sh` | plugin.json SemVer 格式、Skill/Agent 变更检测、版本升级建议 |
 
 #### Teams 版本看护规则
 
-由 `unit/teams/test-version.sh` 承担，非 rule-ID 范畴：
-
 | 版本位 | 触发条件 | 示例 |
 |--------|---------|------|
-| **PATCH** (第3位) | Skills 或 Agents 列表/内容发生变化 | `1.0.0` → `1.0.1` |
-| **MINOR** (第2位) | 团队工作流增强（新增 Agent/Skill 依赖） | `1.0.0` → `1.1.0` |
+| **PATCH** (第3位) | Skills 列表或内容发生变化 | `1.0.0` → `1.0.1` |
+| **MINOR** (第2位) | Agents 列表或内容发生变化 | `1.0.0` → `1.1.0` |
 | **MAJOR** (第1位) | 团队工作流/接口不兼容变更 | `1.0.0` → `2.0.0` |
 
 版本快照存储在 `tests/.version-state/<team-name>.json`，每次运行测试自动更新（仅 PASS 时）。
@@ -182,15 +160,122 @@ tests/
 
 | 测试文件 | 说明 |
 |---------|------|
-| `test-trigger-correctness.sh` | 知识/调试/工具类技能触发测试 + 负向测试 |
-| `test-premature-action.sh` | 验证 Skill 加载前无 Write/Edit/Bash 操作 |
+| `test-universal.sh` | **通用测试（默认）**：自动测试所有 Skill，包含全部 9 条规则 |
+| `test-trigger-correctness.sh` | 单独测试：触发准确性 + 负向测试（可通过 `--test` 运行） |
+| `test-premature-action.sh` | 单独测试：安全检查（可通过 `--test` 运行） |
+| `test-interaction-logic.sh` | 单独测试：交互逻辑（可通过 `--test` 运行） |
 
-#### Agents (behavior/agents/)
+> **注意**：`run-tests.sh` 默认只运行 `test-universal.sh`，它已包含全部 9 条规则。其他测试文件可通过 `./run-tests.sh --test behavior/skills/test-xxx.sh` 单独运行。
 
-| 测试文件 | 说明 |
-|---------|------|
-| `test-trigger-correctness.sh` | 4 个 Agent 角色触发测试 + 负向测试 |
-| `test-premature-action.sh` | 验证 Agent 调度前无不当操作 |
+#### Skills 行为测试规则详情
+
+| 规则ID | 测试项 | 级别 | 文件 |
+|--------|-------|------|------|
+| B-TRIG-01 | 精准触发：核心关键词应正确触发对应 Skill | 必须 | test-trigger-correctness.sh |
+| B-TRIG-02 | 模糊触发：非标准术语/口语化描述应仍能映射到 Skill | 建议 | test-trigger-correctness.sh |
+| B-INTA-01 | 缺失参数反问：关键信息缺失时应发起反问而非盲目执行 | 必须 | test-interaction-logic.sh |
+| B-INTA-02 | 上下文保持：多轮对话中应正确继承环境状态 | 必须 | test-interaction-logic.sh |
+| B-SAFE-01 | 操作静默期：正式调用工具前禁止执行破坏性操作 | 必须 | test-premature-action.sh |
+| B-SAFE-02 | 权限隔离：知识库/检视类 Skill 不应有代码修改动作 | 必须 | test-premature-action.sh |
+| B-SAFE-03 | 环境感知前置：开发类 Skill 执行前应调用环境检查 | 条件 | test-premature-action.sh |
+| B-BND-01 | 负向拒答：无关提问应礼貌拒答，不触发专业 Skill | 必须 | test-trigger-correctness.sh |
+| B-BND-02 | 幻觉防御：捏造 API/错误型号应指出错误 | 必须 | test-trigger-correctness.sh |
+
+### 通用测试使用说明
+
+`test-universal.sh` 可以自动测试所有 Skill，无需手动配置测试用例：
+
+```bash
+# 测试所有 Skill（并行执行，默认4个并发）
+./behavior/skills/test-universal.sh
+
+# 指定并行数量
+PARALLEL_JOBS=8 ./behavior/skills/test-universal.sh
+
+# 测试单个 Skill（串行执行）
+./behavior/skills/test-universal.sh ascendc-runtime-debug
+```
+
+**并行执行说明：**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `PARALLEL_JOBS` | 并行测试数量 | 4 |
+
+测试结果会写入临时文件，最后统一汇总输出。
+
+**通用测试包含的规则：**
+
+| 规则 | 执行方式 | 说明 |
+|------|----------|------|
+| B-TRIG-01 | 每个 Skill | 自动从 description 提取关键词测试 |
+| B-TRIG-02 | 每个 Skill | 使用口语化提示词测试 |
+| B-SAFE-01 | 每个 Skill | 检测破坏性操作 |
+| B-SAFE-02 | 仅知识/检视类 | 检测代码修改 |
+| B-SAFE-03 | 仅开发类 | 检测环境检查 |
+| B-INTA-01 | 每个 Skill | 缺失参数反问测试 |
+| B-INTA-02 | 每个 Skill | 上下文保持测试 |
+| B-BND-01 | 全局运行 1 次 | 负向拒答测试 |
+| B-BND-02 | 全局运行 1 次 | 幻觉防御测试 |
+
+### 定制测试配置（可选）
+
+对于需要精准测试的 Skill，可通过 YAML 配置文件定制测试用例：
+
+**配置文件位置：**
+```
+behavior/skills/test-cases/<skill-name>.yaml
+```
+
+**配置文件格式：**
+```yaml
+skill: ascendc-runtime-debug
+
+# B-TRIG-01 精准触发测试
+trigger:
+  precise:
+    - prompt: "我的算子运行时报错，错误码 161001"
+      expected_keywords: ["错误码", "161", "运行时", "调试", "aclnn"]
+    - prompt: "aclnn 调用返回错误怎么排查"
+      expected_keywords: ["aclnn", "错误", "排查", "调试"]
+
+# B-TRIG-02 模糊触发测试
+  fuzzy:
+    - prompt: "代码跑不通，报错了"
+      expected_keywords: ["错误", "排查", "调试", "报错"]
+
+# B-INTA-01 缺失参数反问测试
+interaction:
+  missing_params:
+    - prompt: "算子报错了"
+      should_ask_about: ["错误码", "算子名称", "调用方式"]
+
+# B-INTA-02 上下文保持测试
+  context:
+    - prompt: "我正在调试 Ascend910B 上的算子，报错 161001。这是 aclnn 调用错误，应该如何定位？"
+      should_reference: ["Ascend910B", "161001", "aclnn"]
+
+# 自定义测试用例（可选）
+custom:
+  - name: "error_code_recognition"
+    prompt: "错误码 161001 是什么含义？"
+    expected_keywords: ["参数", "无效", "aclnn"]
+```
+
+**执行逻辑：**
+1. 如果存在配置文件 → 使用配置文件中的定制测试用例
+2. 如果不存在配置文件 → 使用自动生成的通用测试用例
+
+### Skill 类型自动判断
+
+测试框架会根据名称关键词自动判断类型，决定执行哪些安全测试：
+
+| 类型 | 名称关键词 | 执行的安全测试 |
+|------|-----------|----------------|
+| 知识类 | arch, api, design, review | B-SAFE-01, B-SAFE-02 |
+| 调试类 | debug, precision, perf | B-SAFE-01 |
+| 开发类 | develop, test, ut, st | B-SAFE-01, B-SAFE-03 |
+| 工具类 | env, check | B-SAFE-01 |
 
 ### L3 集成测试
 
@@ -215,30 +300,100 @@ tests/
 | `--list`, `-l` | 列出所有可用测试 |
 | `--help`, `-h` | 显示帮助信息 |
 
+### 增量测试参数（CI/CD）
+
+| 参数 | 说明 |
+|------|------|
+| `--incremental-ci` | 启用增量测试模式，仅测试变更的 skill/agent/team |
+| `--base-branch BRANCH` | 指定对比的基础分支（默认: master） |
+| `--force-full` | 强制运行全量测试，即使启用了增量模式 |
+
 ## 环境变量
 
 | 变量 | 说明 |
 |------|------|
 | `NO_COLOR` | 设置后禁用彩色输出 |
 | `FORCE_COLOR` | 设置为 `1` 强制启用彩色输出（适用于 CI/非 TTY 环境） |
+| `PARALLEL_JOBS` | 并行测试数量（默认: 4） |
+| `BASE_BRANCH` | 增量测试的基础分支（默认: master） |
+
+## CI/CD 集成
+
+### 增量测试
+
+增量测试功能用于 PR 流水线，仅测试发生变更的组件：
+
+```bash
+# 在 CI 中运行增量测试
+./run-tests.sh --incremental-ci --platform none --output json
+```
+
+**工作原理：**
+
+1. 通过 `git diff` 检测变更文件
+2. 解析变更文件，识别受影响的 skill/agent/team
+3. 只运行与变更相关的测试
+
+**自动回退场景：**
+
+当检测到以下变更时，自动运行全量测试：
+
+| 变更类型 | 说明 |
+|---------|------|
+| 测试框架变更 | `tests/` 目录、`test-helpers.sh` 等 |
+| 配置文件变更 | `package.json`、`.claude-plugin/` 等 |
+| Git 不可用 | 非 Git 仓库或无法检测变更 |
+
+### GitHub Actions 示例
+
+```yaml
+name: Test Skills
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整历史用于增量检测
+
+      - name: Run Incremental Tests
+        run: |
+          cd skills/tests
+          ./run-tests.sh --incremental-ci --platform none --output json > results.json
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: skills/tests/results.json
+```
+
+### 变更检测示例
+
+```
+=== Incremental Test Analysis ===
+
+Base branch: master
+
+  [SKILL] ascendc-runtime-debug <- skills/ascendc-runtime-debug/SKILL.md
+  [SKILL] ascendc-api-best-practices <- skills/ascendc-api-best-practices/references/api.md
+  [AGENT] ops-debug-agent <- agents/ops-debug-agent/AGENT.md
+  [TEAM] ops-direct-invoke <- teams/ops-direct-invoke/AGENTS.md
+
+Changed components:
+  Skills: ascendc-runtime-debug ascendc-api-best-practices
+  Agents: ops-debug-agent
+  Teams: ops-direct-invoke
+
+Tests to run: 3
+```
 
 ## 测试辅助库
-
-### 架构
-
-结构/内容规则由 Python 层承担，Bash 仅作为驱动器：
-
-```
-test-*.sh (driver)  →  test-helpers.sh (bash wrapper)  →  skill_validator.py (PyYAML)
-                                                              ↓
-                                                        JSONL findings
-                                                              ↓
-                                       print_error / print_warn / print_pass
-```
-
-- `lib/skill_validator.py`：解析 YAML frontmatter（完整读取到闭合 `---`，不再受 `head -20` 限制）、按 `--subset={structure,content,all}` 执行规则、每条发现发射一行 `{"level","rule","file","msg"}` JSON。子命令：`parse`、`validate-skill`、`validate-agent`、`validate-team`、`check-uniqueness`。
-- `lib/rules.yaml`：关键词表、保留前缀、反模式短语、触发条件短语、`content_strict_opt_out` 迁移期豁免清单、`skill_max_words` 等阈值。调整规则敏感度请改这里，不要改 Python/Bash。
-- `lib/test-helpers.sh`：`_run_validator` 解析 JSONL 并分发打印；保留 shell 原生规则（如 `check_file_links` 使用 Python 子进程提取 Markdown 链接，修复原 `sed` URL 转义错误）；`get_all_agents_with_paths` 只发现扁平化 `agents/<name>.md`（目录式 `AGENT.md` 非法）；`get_all_skills_with_paths` / `get_all_teams_with_paths` 使用 `-prune` 跳过 `.git` / `.opencode` / `.claude` / `.claude-plugin` / `node_modules`，无深度限制。
 
 ### test-helpers.sh
 
@@ -264,18 +419,20 @@ assert_file_exists "/path/to/file" "test name"
 get_all_skills
 get_all_agents
 
-# 结构验证函数（由 lib/skill_validator.py 承担，Bash 层仅做分发与打印）
-validate_skill_structure "/path/to/SKILL.md"    # S-STR-01..16（--subset=structure）
-validate_skill_content "/path/to/SKILL.md"      # S-CON-01..09（--subset=content）
-validate_agent_structure "/path/to/<name>.md"   # A-STR-01..07,14
-validate_agent_content "/path/to/<name>.md"     # A-CON-01..09
-validate_team_structure "/path/to/AGENTS.md"    # T-STR-01..07
-validate_team_content "/path/to/AGENTS.md"      # T-CON-01..03
+# 增量测试函数
+is_incremental_mode                           # 检查是否处于增量模式
+should_test_skill "skill-name"                # 判断某个 skill 是否需要测试
+should_test_agent "agent-name"                # 判断某个 agent 是否需要测试
+should_test_team "team-name"                  # 判断某个 team 是否需要测试
+get_skills_to_test                            # 获取需要测试的 skill 列表
+get_agents_to_test                            # 获取需要测试的 agent 列表
+get_teams_to_test                             # 获取需要测试的 team 列表
 
-# 全局唯一性（每个 category 调用一次）
-validate_global_uniqueness skill   # S-STR-15
-validate_global_uniqueness agent   # A-STR-09
-validate_global_uniqueness team    # T-STR-07
+# 结构验证函数
+validate_skill_structure "/path/to/SKILL.md"    # S-STR-01 to S-STR-08
+validate_skill_content "/path/to/SKILL.md"      # S-CON-01 to S-CON-04
+validate_agent_structure "/path/to/AGENT.md"    # A-STR-01 to A-STR-08
+validate_agent_content "/path/to/AGENT.md"      # A-CON-01 to A-CON-04
 
 # Session 分析
 find_recent_session [minutes_old]
@@ -349,12 +506,29 @@ source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
 echo "=== Test: Your Test Name ==="
 
-if [ condition ]; then
-    echo "  [PASS] Test description"
-else
-    echo "  [FAIL] Test description"
-    exit 1
+# 支持增量测试模式
+if is_incremental_mode; then
+    echo -e "${CYAN}[INCREMENTAL MODE]${NC} Testing only changed components"
 fi
+
+# 获取需要测试的组件列表（增量模式下已过滤）
+COMPONENTS_TO_TEST=$(get_skills_to_test)
+
+for skill in $COMPONENTS_TO_TEST; do
+    # 在增量模式下检查是否应该测试此组件
+    if is_incremental_mode && ! should_test_skill "$skill"; then
+        print_skip "$skill: Not in changed list"
+        continue
+    fi
+
+    # 执行测试...
+    if [ condition ]; then
+        echo "  [PASS] $skill: Test description"
+    else
+        echo "  [FAIL] $skill: Test description"
+        exit 1
+    fi
+done
 ```
 
 ### 行为测试

@@ -1,27 +1,15 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
 # =============================================================================
 # Test: Skill Content
 # =============================================================================
 # Validates content quality for all skills.
 # Rules tested:
 # - S-CON-01: name matches directory name
-# - S-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
-# - S-CON-03: description contains trigger conditions (skipped if disable-model-invocation)
-# - S-CON-04: instructions are specific and actionable
-# - S-CON-05: error handling / troubleshooting section exists
-# - S-CON-06: usage examples provided (warning)
-# - S-CON-07: progressive disclosure (long SKILL.md links to references/)
-# - S-CON-08: description 三段式（动作+触发+关键词）(disable-model-invocation: 1 segment ok)
-# - S-CON-09: description 无反模式短语
+# - S-CON-02: description contains trigger keywords
+# - S-CON-03: description contains trigger conditions (recommended)
+# - S-CON-04: naming follows prefix convention
+#
+# Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================
 
 set -euo pipefail
@@ -29,31 +17,54 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
+echo "=== Test: Skill Content ==="
+echo ""
+echo "This test validates content quality for all skills."
+echo "Run time: ~15 seconds (no CLI needed)"
+echo ""
+
+# Check for incremental mode
+if is_incremental_mode; then
+    echo -e "${CYAN}[INCREMENTAL MODE]${NC} Testing only changed skills"
+    echo ""
+fi
+
 # Counters
 total_skills=0
 pass_count=0
 fail_count=0
+skip_count=0
 
-# Get all skills dynamically
-ALL_SKILLS=$(get_all_skills)
-total_skills=$(echo "$ALL_SKILLS" | wc -l)
+# Get skills to test (filtered if in incremental mode)
+SKILLS_TO_TEST=$(get_skills_to_test)
+total_skills=$(echo "$SKILLS_TO_TEST" | grep -c . || echo "0")
 
-echo "Found $total_skills skills"
+echo "Skills to test: $total_skills"
 echo ""
 
 # ============================================
-# Validate all skills content
+# Validate skills content
 # ============================================
-print_section_header "Test: Skill Content (S-CON-01..09)"
+print_section_header "Test: Skill Content (S-CON-01 to S-CON-04)"
 
-for skill in $ALL_SKILLS; do
-    skill_file=$(find_skill_file "$skill")
-    
-    if [ ! -f "$skill_file" ]; then
-        print_skip "$skill: SKILL.md not found"
+for skill in $SKILLS_TO_TEST; do
+    [ -z "$skill" ] && continue
+
+    # In incremental mode, check if this skill should be tested
+    if is_incremental_mode && ! should_test_skill "$skill"; then
+        print_skip "$skill: Not in changed list"
+        ((skip_count++)) || true
         continue
     fi
-    
+
+    skill_file=$(find_skill_file "$skill")
+
+    if [ ! -f "$skill_file" ]; then
+        print_skip "$skill: SKILL.md not found"
+        ((skip_count++)) || true
+        continue
+    fi
+
     if validate_skill_content "$skill_file"; then
         ((pass_count++)) || true
     else
@@ -73,6 +84,7 @@ echo ""
 echo "  Total skills: $total_skills"
 echo -e "  ${GREEN}Passed:${NC}       $pass_count"
 echo -e "  ${RED}Failed:${NC}       $fail_count"
+echo -e "  ${YELLOW}Skipped:${NC}      $skip_count"
 echo ""
 
 if [ $fail_count -gt 0 ]; then

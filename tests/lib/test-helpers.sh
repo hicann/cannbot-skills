@@ -518,6 +518,123 @@ get_all_skills() {
     get_all_skills_with_paths | cut -d: -f1
 }
 
+# Check if incremental mode is active
+is_incremental_mode() {
+    [ -n "${INCREMENTAL_SKILLS:-}${INCREMENTAL_AGENTS:-}${INCREMENTAL_TEAMS:-}" ]
+}
+
+# Check if a specific skill should be tested in incremental mode
+should_test_skill() {
+    local skill_name="$1"
+
+    # If not in incremental mode, test everything
+    if ! is_incremental_mode; then
+        return 0
+    fi
+
+    # If INCREMENTAL_SKILLS is set, only test those skills
+    if [ -n "${INCREMENTAL_SKILLS:-}" ]; then
+        echo " $INCREMENTAL_SKILLS " | grep -q " $skill_name "
+        return $?
+    fi
+
+    # No skills specified in incremental mode, skip this skill
+    return 1
+}
+
+# Check if a specific agent should be tested in incremental mode
+should_test_agent() {
+    local agent_name="$1"
+
+    # If not in incremental mode, test everything
+    if ! is_incremental_mode; then
+        return 0
+    fi
+
+    # If INCREMENTAL_AGENTS is set, only test those agents
+    if [ -n "${INCREMENTAL_AGENTS:-}" ]; then
+        echo " $INCREMENTAL_AGENTS " | grep -q " $agent_name "
+        return $?
+    fi
+
+    # No agents specified in incremental mode, skip this agent
+    return 1
+}
+
+# Check if a specific team should be tested in incremental mode
+should_test_team() {
+    local team_name="$1"
+
+    # If not in incremental mode, test everything
+    if ! is_incremental_mode; then
+        return 0
+    fi
+
+    # If INCREMENTAL_TEAMS is set, only test those teams
+    if [ -n "${INCREMENTAL_TEAMS:-}" ]; then
+        echo " $INCREMENTAL_TEAMS " | grep -q " $team_name "
+        return $?
+    fi
+
+    # No teams specified in incremental mode, skip this team
+    return 1
+}
+
+# Get filtered list of skills for incremental testing
+# Returns: skill_name per line (only changed skills if in incremental mode)
+get_skills_to_test() {
+    local all_skills
+    all_skills=$(get_all_skills)
+
+    if ! is_incremental_mode || [ -z "${INCREMENTAL_SKILLS:-}" ]; then
+        echo "$all_skills"
+        return
+    fi
+
+    # Filter to only changed skills
+    for skill in $all_skills; do
+        if should_test_skill "$skill"; then
+            echo "$skill"
+        fi
+    done
+}
+
+# Get filtered list of agents for incremental testing
+get_agents_to_test() {
+    local all_agents
+    all_agents=$(get_all_agents)
+
+    if ! is_incremental_mode || [ -z "${INCREMENTAL_AGENTS:-}" ]; then
+        echo "$all_agents"
+        return
+    fi
+
+    # Filter to only changed agents
+    for agent in $all_agents; do
+        if should_test_agent "$agent"; then
+            echo "$agent"
+        fi
+    done
+}
+
+# Get filtered list of teams for incremental testing
+get_teams_to_test() {
+    local all_teams
+    all_teams=$(get_all_teams)
+
+    if ! is_incremental_mode || [ -z "${INCREMENTAL_TEAMS:-}" ]; then
+        echo "$all_teams"
+        return
+    fi
+
+    # Filter to only changed teams
+    for team in $all_teams; do
+        if should_test_team "$team"; then
+            echo "$team"
+        fi
+    done
+}
+
 # Find skill file by name
 # Usage: find_skill_file "skill-name"
 # Returns: full path to SKILL.md
@@ -1326,6 +1443,13 @@ export -f find_agent_file
 export -f get_all_teams
 export -f get_all_teams_with_paths
 export -f find_team_file
+export -f is_incremental_mode
+export -f should_test_skill
+export -f should_test_agent
+export -f should_test_team
+export -f get_skills_to_test
+export -f get_agents_to_test
+export -f get_teams_to_test
 export -f validate_skill_structure
 export -f validate_skill_content
 export -f validate_agent_structure

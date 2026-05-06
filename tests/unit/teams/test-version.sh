@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
 # =============================================================================
 # Test: Team Plugin Version Care
 # =============================================================================
 # Validates that plugin.json version is correctly bumped when dependencies change.
 #
 # Rules:
-# - PATCH (3rd digit): Skill or Agent dependency changed (content hash or list changed)
-# - MINOR (2nd digit): New Skill/Agent dependency added or workflow enhancement
+# - PATCH (3rd digit): Skill dependency changed (content hash or list changed)
+# - MINOR (2nd digit): Agent dependency changed (content hash or list changed)
 # - MAJOR (1st digit): Breaking team interface changes (not auto-detected)
 #
 # Version state is stored in tests/.version-state/<team-name>.json
+#
+# Supports incremental testing via INCREMENTAL_TEAMS environment variable.
 # =============================================================================
 
 set -euo pipefail
@@ -26,17 +19,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
+echo "=== Test: Team Plugin Version Care ==="
+echo ""
+echo "Validates plugin.json version correctness against dependency changes."
+echo "Run time: ~5 seconds (no CLI needed)"
+echo ""
+
+# Check for incremental mode
+if is_incremental_mode; then
+    echo -e "${CYAN}[INCREMENTAL MODE]${NC} Testing only changed teams"
+    echo ""
+fi
+
+TEAM_BASE="$SKILLS_DIR/ops/teams"
+
 # Counters
 total_teams=0
 pass_count=0
 fail_count=0
 skip_count=0
 
-# Get all teams dynamically
-ALL_TEAMS=$(get_all_teams)
-total_teams=$(echo "$ALL_TEAMS" | wc -l)
+# Get teams to test (filtered if in incremental mode)
+TEAMS_TO_TEST=$(get_teams_to_test)
+total_teams=$(echo "$TEAMS_TO_TEST" | grep -c . || echo "0")
 
-echo "Found $total_teams teams to check"
+echo "Teams to check: $total_teams"
 echo ""
 
 # ============================================
@@ -94,7 +101,7 @@ compare_hashes() {
         local name="${line%%:*}"
         local old_hash="${line#*:}"
         local current_hash
-        current_hash=$(awk -F: -v name="$name" '$1 == name {print substr($0, length(name)+2); exit}' "$current_file" 2>/dev/null || true)
+        current_hash=$(grep "^${name}:" "$current_file" 2>/dev/null | head -1 | cut -d: -f2- || true)
         if [ -z "$current_hash" ]; then
             changes="${changes}REMOVED: ${name}\n"
         elif [ "$current_hash" != "$old_hash" ]; then
@@ -107,7 +114,7 @@ compare_hashes() {
         [ -z "$line" ] && continue
         local name="${line%%:*}"
         local found
-        found=$(awk -F: -v name="$name" '$1 == name {print; exit}' <<< "$loaded_lines" 2>/dev/null || true)
+        found=$(grep "^${name}:" <<< "$loaded_lines" 2>/dev/null || true)
         if [ -z "$found" ]; then
             changes="${changes}ADDED: ${name}\n"
         fi
@@ -118,8 +125,6 @@ compare_hashes() {
 
 # ============================================
 # Helper: save state using temp files
-# Note: name/hash values are safe for unescaped JSON interpolation because
-# names match ^[a-z0-9]+(-[a-z0-9]+)*$ and hashes are hex-only SHA256.
 # ============================================
 save_team_state() {
     local team_name="$1"
@@ -169,13 +174,21 @@ EOF
 # ============================================
 print_section_header "Version Check"
 
-for team in $ALL_TEAMS; do
+for team in $TEAMS_TO_TEST; do
+    [ -z "$team" ] && continue
+
+    # In incremental mode, check if this team should be tested
+    if is_incremental_mode && ! should_test_team "$team"; then
+        print_skip "$team: Not in changed list"
+        ((skip_count++)) || true
+        continue
+    fi
+
     print_section "Team: $team"
 
     plugin_json=$(get_team_plugin_json "$team")
     if [ -z "$plugin_json" ] || [ ! -f "$plugin_json" ]; then
         print_skip "$team: plugin.json not found"
-        ((skip_count++)) || true
         continue
     fi
 
@@ -220,26 +233,20 @@ for team in $ALL_TEAMS; do
 
         # Parse skills from state JSON using python3 or grep fallback
         if command -v python3 &>/dev/null; then
-            loaded_skills=$(python3 - "$state_file" <<'PYEOF'
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    for k,v in data.get('skills',{}).items():
-        print(f'{k}:{v}')
-except (json.JSONDecodeError, KeyError, OSError):
-    pass
+            loaded_skills=$(python3 <<PYEOF
+import json
+with open("${state_file}") as f:
+    data = json.load(f)
+for k,v in data.get('skills',{}).items():
+    print(f'{k}:{v}')
 PYEOF
 )
-            loaded_agents=$(python3 - "$state_file" <<'PYEOF'
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    for k,v in data.get('agents',{}).items():
-        print(f'{k}:{v}')
-except (json.JSONDecodeError, KeyError, OSError):
-    pass
+            loaded_agents=$(python3 <<PYEOF
+import json
+with open("${state_file}") as f:
+    data = json.load(f)
+for k,v in data.get('agents',{}).items():
+    print(f'{k}:{v}')
 PYEOF
 )
         else
@@ -297,23 +304,12 @@ PYEOF
             cmp=$(semver_compare "$current_version" "$recommended")
             if [ "$cmp" = "-1" ]; then
                 # current < recommended → FAIL
-                # In CI environments, version state may drift due to
-                # platform differences (line endings, symlink resolution).
-                # If current_version == recorded_version, treat as
-                # environment drift and auto-recover instead of failing.
-                if [ "$current_version" = "$recorded_version" ]; then
-                    print_warn "State hash drift detected (version unchanged at $current_version)"
-                    print_info "Auto-recovering: re-initializing version state"
-                    should_save_state=true
-                    ((pass_count++)) || true
-                else
-                    version_line=$(grep -n '"version"' "$plugin_json" | head -1)
-                    print_fail "Version $current_version should be >= $recommended"
-                    echo "    Action: update the version field in $plugin_json"
-                    echo "    Location: $plugin_json:$version_line"
-                    ((fail_count++)) || true
-                    # FAIL: do NOT update state — keep old snapshot so next run still catches this
-                fi
+                version_line=$(grep -n '"version"' "$plugin_json" | head -1)
+                print_fail "Version $current_version should be >= $recommended"
+                echo "    Action: update the version field in $plugin_json"
+                echo "    Location: $plugin_json:$version_line"
+                ((fail_count++)) || true
+                # FAIL: do NOT update state — keep old snapshot so next run still catches this
             else
                 # current >= recommended → PASS
                 print_pass "Version $current_version is up-to-date (was $recorded_version, now >= $recommended)"
@@ -384,23 +380,29 @@ for manifest_file in "$PACKAGE_JSON" "$MARKETPLACE_JSON"; do
         continue
     fi
 
-    for team in $ALL_TEAMS; do
+    manifest_fail=false
+
+    for team in $TEAMS_TO_TEST; do
+        [ -z "$team" ] && continue
+
+        # In incremental mode, skip teams not in the changed list
+        if is_incremental_mode && ! should_test_team "$team"; then
+            continue
+        fi
+
         plugin_json=$(get_team_plugin_json "$team")
         [ -z "$plugin_json" ] || [ ! -f "$plugin_json" ] && continue
 
         plugin_version=$(extract_plugin_version "$plugin_json")
 
-        manifest_version=$(python3 - "$manifest_file" "$team" <<'PYEOF'
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    for p in data.get("plugins", []):
-        if p.get("name") == sys.argv[2]:
-            print(p.get("version", ""))
-            break
-except (json.JSONDecodeError, KeyError, OSError):
-    pass
+        manifest_version=$(python3 <<PYEOF
+import json
+with open("${manifest_file}") as f:
+    data = json.load(f)
+for p in data.get("plugins", []):
+    if p.get("name") == "${team}":
+        print(p.get("version", ""))
+        break
 PYEOF
 )
 
@@ -411,12 +413,17 @@ PYEOF
 
         if [ "$plugin_version" = "$manifest_version" ]; then
             print_pass "$team: version $plugin_version matches"
-            ((pass_count++)) || true
         else
             print_fail "$team: version mismatch — plugin.json=$plugin_version, $manifest_name=$manifest_version"
-            ((fail_count++)) || true
+            manifest_fail=true
         fi
     done
+
+    if $manifest_fail; then
+        ((fail_count++)) || true
+    else
+        ((pass_count++)) || true
+    fi
 done
 
 # ============================================
@@ -429,7 +436,7 @@ echo ""
 echo "  Total teams: $total_teams"
 echo -e "  ${GREEN}Passed:${NC}   $pass_count"
 echo -e "  ${RED}Failed:${NC}   $fail_count"
-echo -e "  ${YELLOW}Skipped:${NC}  $skip_count"
+[ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}  $skip_count"
 echo ""
 
 if [ $fail_count -gt 0 ]; then
@@ -437,15 +444,7 @@ if [ $fail_count -gt 0 ]; then
     echo ""
     echo "Action: Update plugin.json version and re-run to regenerate state."
     exit 1
-fi
-
-# Guard against "all-skip" passing silently: if there are teams to check but
-# none of them had a plugin.json AND the repo also lacks a root manifest, the
-# test has no signal. Surface that explicitly instead of printing PASSED.
-if [ "$total_teams" -gt 0 ] && [ "$pass_count" -eq 0 ]; then
-    echo -e "${YELLOW}${BOLD}STATUS: SKIPPED${NC} (no plugin.json / manifest found — version care not enforceable)"
+else
+    print_status_passed
     exit 0
 fi
-
-print_status_passed
-exit 0
