@@ -31,6 +31,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 |---------|---------|---------|
 | **Softmax/LayerNorm** | [api-reduce.md](references/api-reduce.md), [api-reduce-pattern.md](references/api-reduce-pattern.md), [api-arithmetic.md](references/api-arithmetic.md) | 标量操作、广播优化、Buffer 复用 |
 | **逐行处理（AR 模板）** | [api-arithmetic.md](references/api-arithmetic.md) | Adds/Muls、节省 UB |
+| **Transpose / 重排** | [api-transpose.md](references/api-transpose.md) | 2维度 转置性能 |
 | **多行广播（ARA 模板）** | [api-arithmetic.md](references/api-arithmetic.md) | BinaryRepeatParams.src1RepStride=0、分批处理 |
 | **半精度加减法（FP16/BF16 Add/Sub）** | [api-arithmetic.md](references/api-arithmetic.md), [api-precision.md](references/api-precision.md) | 默认升精度（除非 spec 明确同量级）、in-place 复用 |
 | **非对齐数据** | [api-datacopy.md](references/api-datacopy.md) | DataCopyPad、32 字节对齐 |

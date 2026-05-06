@@ -7,13 +7,13 @@
 当前这部分内容面向 small-channel transpose，常见特征是：
 
 - 输入输出元素总数相同，但维度顺序发生重排
-- 需求描述中出现 transpose / permute / NCHW→NHWC / `[M, N] -> [N, M]`
+- 需求描述中出现 transpose / permute / NCHW→NHWC / `[M, N] -> [N, M]2维场景`
 - 核心代价来自数据重排，不是跨元素归约
 - 通道维较小，可先按 `C <= 16` 判断
 - 其余维度可以展平成一条长轴 `N`
-- kernel 可以按 `[C, N] -> [N, C]` 或等价形式理解
+- kernel 可以按 `[C, N] -> [N, C]` 或等价形式理解, 通道维较小，可先按 `C <= 16` 判断，
 
----
+***
 
 ## 2. 如何合轴
 
@@ -36,7 +36,7 @@ small-channel transpose 的关键是先把问题整理成：
 
 如果被移动的轴在目标布局中不再相邻，或者 transpose 后还混入了更复杂的 layout 变换，就不要强行套这条分支。
 
----
+***
 
 ## 3. 路由原则
 
@@ -50,15 +50,15 @@ small-channel transpose 的关键是先把问题整理成：
 
 ### 这类融合场景下不推荐默认走的路线
 
-| 路线 | 为什么当前不优先 |
-|------|----------------|
-| 通用 transpose API | 在部分 small-channel 融合场景下，内部固定开销可能过大 |
-| 标量抽取再重排 | `GetValue / SetValue` 吞吐太差 |
-| 逐像素 DMA 提取 | `blockLen` 太小，DMA setup 成本占主导 |
+| 路线                 | 为什么当前不优先                           |
+| ------------------ | ---------------------------------- |
+| 通用 transpose 高级API | 在部分 small-channel 融合场景下，内部固定开销可能过大 |
+| 标量抽取再重排            | `GetValue / SetValue` 吞吐太差         |
+| 逐像素 DMA 提取         | `blockLen` 太小，DMA setup 成本占主导      |
 
 当前章节的核心是：**small-channel transpose 先做场景判断；如果目标是融合实现，再进一步参考这条分支。** 后续新增其他场景时，可以在同一文档下继续补充分支。
 
----
+***
 
 ## 4. 统一建模方式
 
@@ -81,21 +81,21 @@ small-channel transpose 的关键是先把问题整理成：
 - `C` 决定 buffer 预算、offset table 和写回宽度
 - `N` 决定 tile 数、多核切分和尾块处理
 
----
+***
 
 ## 5. Tiling 核心参数
 
 ### 参数定义
 
-| 参数 | 含义 |
-|------|------|
-| `C` | 小通道维 |
-| `N` | 展平后的长轴 |
-| `tileN` | 每个 tile 处理的有效元素数 |
-| `tileNA` | `tileN` 对齐后的 UB 宽度 |
-| `repeats` | `TransDataTo5HD` 的重复次数 |
-| `totalTiles` | 总 tile 数 |
-| `blockDim` | 实际使用的 vector core 数 |
+| 参数           | 含义                     |
+| ------------ | ---------------------- |
+| `C`          | 小通道维                   |
+| `N`          | 展平后的长轴                 |
+| `tileN`      | 每个 tile 处理的有效元素数       |
+| `tileNA`     | `tileN` 对齐后的 UB 宽度     |
+| `repeats`    | `TransDataTo5HD` 的重复次数 |
+| `totalTiles` | 总 tile 数               |
+| `blockDim`   | 实际使用的 vector core 数    |
 
 ### 对齐规则
 
@@ -112,7 +112,7 @@ repeats = tileNA / 16;
 
 这里的 `tileNA` 属于 host/tiling 设计口径。实际执行到尾块时，`TransDataTo5HD` 的 `repeats` 往往会按 `AlignUp(curN, 16) / 16` 计算；这是 runtime 的 tail-tile 口径，和固定 tile 宽度并不冲突。
 
----
+***
 
 ## 6. UB 预算公式
 
@@ -151,7 +151,7 @@ tileNA <= 4080
 - `repeats <= 255`
 - 向量对齐约束
 
----
+***
 
 ## 7. tile 大小计算方法
 
@@ -174,7 +174,7 @@ if (tileN > tileNMax) {
 - 单 tile 尽量大，减少调度开销
 - 但总 tile 数又足够多，能够铺满所有核
 
----
+***
 
 ## 8. 多核切分策略
 
@@ -201,31 +201,31 @@ endTile = Min(startTile + tilesPerCore, totalTiles);
 
 如果 `N` 较小，导致 `totalTiles < coreNum`，则实际只开 `totalTiles` 个核，不做空核占位。
 
----
+***
 
 ## 9. offset table 设计
 
-`Gather` 需要 host 侧预计算 offset table，并以额外 GM 参数传入 kernel。
+`Gather` 需要的offset 在device 侧提前生成，考虑性能使用Tbuff，全局管理只需要申请一次即可。
 
-### host 侧公式
+### 公式
 
 ```cpp
 for (uint32_t p = 0; p < tileNA; ++p) {
     for (uint32_t c = 0; c < C; ++c) {
-        offset[p * C + c] = (p * 16 + c) * sizeof(half);
+        offsetBuff.SetValue(p * C + c, (p * 16 + c) * sizeof(half));
     }
 }
 ```
 
 ### 设计要点
 
-- offset 表按 **对齐后的 `tileNA`** 构建，而不是按 `tileN`
+- offset 表按 **对齐后的** **`tileNA`** 构建，而不是按 `tileN`
 - 每个 16-half block 只前 `C` 个位置有效
 - 这张表可以在 kernel 初始化阶段一次 DMA 到 UB，后续 tile 复用
 
 如果 `C` 变化，offset table 也必须跟着重建；不要把它硬编码成某一个具体通道数的常量表。
 
----
+***
 
 ## 10. Kernel 侧执行骨架
 
@@ -243,7 +243,7 @@ for (uint32_t t = startTile; t < endTile; ++t) {
 - `Compute` 用 `tileNA` 组织 UB；尾块依靠对齐和有效 count 控制
 - `CopyOut` 按 `curN * C` 字节写回，非对齐场景优先 `DataCopyPad`
 
----
+***
 
 ## 11. 转置类算子设计检查表
 
