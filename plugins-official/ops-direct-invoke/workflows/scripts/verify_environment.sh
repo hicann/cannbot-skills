@@ -129,7 +129,7 @@ collect_env_info() {
     echo ""
 
     # 1. 检查环境变量
-    echo "[1/7] 检查环境变量..."
+    echo "[1/6] 检查环境变量..."
     echo "────────────────────────────────────────────────────────────────"
 
     if [ -z "$ASCEND_HOME_PATH" ]; then
@@ -151,7 +151,7 @@ collect_env_info() {
     
     # 2. 检查 CANN 安装
     echo ""
-    echo "[2/7] 检查 CANN 安装..."
+    echo "[2/6] 检查 CANN 安装..."
     echo "────────────────────────────────────────────────────────────────"
     
     if [ -d "$ASCEND_HOME_PATH" ]; then
@@ -181,7 +181,7 @@ collect_env_info() {
     
     # 3. 检查编译器
     echo ""
-    echo "[3/7] 检查 Ascend C 编译器..."
+    echo "[3/6] 检查 Ascend C 编译器..."
     echo "────────────────────────────────────────────────────────────────"
     
     ARCH_DIR="${ENV_DATA[arch_dir]:-aarch64-linux}"
@@ -207,7 +207,7 @@ collect_env_info() {
     
     # 4. 检查头文件
     echo ""
-    echo "[4/7] 检查头文件..."
+    echo "[4/6] 检查头文件..."
     echo "────────────────────────────────────────────────────────────────"
     
     HEADER_PATHS=(
@@ -240,7 +240,7 @@ collect_env_info() {
     
     # 5. 检查库文件
     echo ""
-    echo "[5/7] 检查库文件..."
+    echo "[5/6] 检查库文件..."
     echo "────────────────────────────────────────────────────────────────"
     
     LIB_REGISTER="$ASCEND_HOME_PATH/lib64/libregister.so"
@@ -269,7 +269,7 @@ collect_env_info() {
     
     # 6. 检查 asc-devkit
     echo ""
-    echo "[6/7] 检查 asc-devkit..."
+    echo "[6/6] 检查 asc-devkit..."
     echo "────────────────────────────────────────────────────────────────"
     
     # 自动检测 asc-devkit 路径
@@ -370,31 +370,6 @@ collect_env_info() {
         ENV_DATA[asc_devkit_exists]="false"
     fi
     
-    # 7. 检查 NPU 设备（可选）
-    echo ""
-    echo "[7/7] 检查 NPU 设备..."
-    echo "────────────────────────────────────────────────────────────────"
-    
-    NPU_DEVICE_COUNT=0
-    if command -v npu-smi &> /dev/null; then
-        if npu-smi info &> /dev/null; then
-            NPU_DEVICE_COUNT=$(npu-smi info -l 2>/dev/null | grep "Total Count" | sed 's/.*: //' | tr -d '[:space:]')
-            if [ -z "$NPU_DEVICE_COUNT" ] || ! [[ "$NPU_DEVICE_COUNT" =~ ^[0-9]+$ ]]; then
-                NPU_DEVICE_COUNT=$(npu-smi info -l 2>/dev/null | grep -c "NPU ID" || echo "0")
-            fi
-            success "NPU 设备可用，检测到 ${NPU_DEVICE_COUNT} 张卡"
-            ENV_DATA[npu_available]="true"
-            ENV_DATA[npu_device_count]="$NPU_DEVICE_COUNT"
-        else
-            warning "NPU 设备不可用（可继续开发，但无法运行测试）"
-            ENV_DATA[npu_available]="false"
-            ENV_DATA[npu_device_count]="0"
-        fi
-    else
-        warning "npu-smi 命令不存在（可继续开发，但无法运行测试）"
-        ENV_DATA[npu_available]="false"
-        ENV_DATA[npu_device_count]="0"
-    fi
 }
 
 # 生成 JSON 文件
@@ -422,9 +397,7 @@ generate_json() {
     "asc_devkit_exists": ${ENV_DATA[asc_devkit_exists]},
     "api_docs_exist": ${ENV_DATA[api_docs_exist]},
     "cmake_config_exists": ${ENV_DATA[cmake_config_exists]},
-    "examples_count": ${ENV_DATA[examples_count]},
-    "npu_available": ${ENV_DATA[npu_available]},
-    "npu_device_count": ${ENV_DATA[npu_device_count]}
+    "examples_count": ${ENV_DATA[examples_count]}
   },
   "validation": {
     "all_passed": $([ $ERRORS -eq 0 ] && echo "true" || echo "false"),

@@ -78,13 +78,9 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 #### 前置步骤：获取环境信息
 
-开始设计前需要获取环境信息：
-- 读取 `ops/{operator_name}/docs/environment.json`
-
-**需要的关键字段**：
-   - `cann.version` → 确定可用 API 集合和版本兼容性
-   - `npu.available` / `npu.soc_version` → 决定目标芯片架构和优化策略
-   - `cann.arch_dir` → 确认架构目录路径
+读取 `ops/{operator_name}/docs/environment.json`，获取：
+- `cann_version` → 确定可用 API 集合和版本兼容性
+- `arch_dir` → 确认架构目录路径
 
 #### Step 0：确定算子类型
 

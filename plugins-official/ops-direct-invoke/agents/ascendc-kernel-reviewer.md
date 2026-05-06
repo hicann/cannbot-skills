@@ -75,7 +75,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 - 已独立编译验证
 - 已完成 7 维度评分
 - 已执行同步策略逐项依赖分析
-- 已独立运行精度测试（NPU 可用时）
+- 已独立运行精度测试
 - REVIEW.md 已写入，包含判定结果和详细评分
 
 ### 审查流程
@@ -83,15 +83,9 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 #### Step 0：读取环境信息
 
 读取 `ops/{operator_name}/docs/environment.json`，获取：
-- `compiler.bisheng_path` → 用于独立构建验证的编译器路径
-- `cann.version` → 用于 API 合规性检查
-- `cann.ascend_home_path` → 用于构建环境配置
-- `npu.available` → 决定是否执行精度测试（NPU 不可用时跳过运行验证）
-- `npu.soc_version` → 用于芯片特定检查
-
-**如果 environment.json 不存在**：在 REVIEW.md 中记录警告「环境信息缺失，使用默认配置」，继续审查流程。
-
-**禁止**：重新运行 `verify_environment.sh` 或 `init_operator_project.sh`，环境检查由 Developer 在 Phase 0 完成。
+- `bisheng_path` → 独立构建验证的编译器路径
+- `cann_version` → API 合规性检查
+- `ascend_home_path` → 构建环境配置
 
 #### Step 1：独立构建验证
 
@@ -105,7 +99,7 @@ python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.
 
 **1.2 独立编译**：
 
-使用 environment.json 中的编译器路径和 ASCEND_HOME_PATH 独立编译，不依赖 Developer 的构建产物。如 NPU 不可用（`npu.available` 为 false），仅验证编译通过，跳过运行验证。
+使用 environment.json 中的编译器路径和 ASCEND_HOME_PATH 独立编译，不依赖 Developer 的构建产物。编译完成后运行验证。
 
 #### Step 2：代码质量评估
 
@@ -139,9 +133,7 @@ python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.
 
 **独立运行精度测试**，不信任 Developer 的自报结果。
 
-**NPU 可用性判断**（从 environment.json 的 `npu.available` 读取）：
-- **NPU 可用** → 正常执行精度测试流程
-- **NPU 不可用** → 在 REVIEW.md 中标注「精度测试因 NPU 不可用而跳过」，仅做代码层面精度策略审查（混合精度、除零保护、溢出处理等），维度 6 评分标注为「N/A - NPU 不可用」
+正常执行精度测试流程。
 
 ##### 6.1 精度测试执行
 
@@ -217,7 +209,7 @@ python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.
 - 4.2 多核并行（4 分）- 沿合适维度切分，核间负载均衡，空闲核正确跳过
 - 4.3 流水线/双缓冲（4 分）- 使用 TQue + BUFFER_NUM=2 实现搬运/计算重叠
 - 4.4 同步策略（4 分）- **必须执行逐项依赖分析**（见审查参考手册），按冗余率评分
-- 4.5 计算效率与上板性能（4 分）- 无循环内逐行 API 调用；使用批量操作；无不必要的重复 GM 读取；上板性能达标（NPU 可用时，Task Duration 与理论耗时差距 <20%）
+- 4.5 计算效率与上板性能（4 分）- 无循环内逐行 API 调用；使用批量操作；无不必要的重复 GM 读取；上板性能达标（Task Duration 与理论耗时差距 <20%）
 
 **维度 5：测试覆盖（15 分）**
 - 5.1 测试数据生成（4 分）
@@ -278,7 +270,7 @@ grep -n "blockIdx\s*=\s*[0-9]" ops/{operator_name}/*.asc
 | `docs/REVIEW.md` | 创建/覆盖 | 每轮审查写入完整报告 |
 | `docs/DESIGN.md` | 只读 | 设计合规检查参考 |
 | `docs/PLAN.md` | 只读 | 了解开发进度和已知问题 |
-| `docs/environment.json` | 只读 | 获取编译器路径、NPU 可用性等 |
+| `docs/environment.json` | 只读 | 获取编译器路径等 |
 | `docs/perf/` | 只读 + 独立采集 | 对比 Developer 性能数据，独立采集结果 |
 | 代码文件（`.asc` 等） | 只读 | 代码审查，禁止修改 |
 

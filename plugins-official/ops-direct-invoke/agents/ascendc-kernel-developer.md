@@ -91,7 +91,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 #### 阶段 1：读取设计方案
 
-**前置条件**：已完成环境检查，`ops/{operator_name}/docs/environment.json` 存在且 `validation.all_passed` 为 true。
+**环境信息**：读取 `ops/{operator_name}/docs/environment.json` 获取编译器路径、架构目录等。
 
 **目标**：理解设计方案，为实现做准备。
 
@@ -157,9 +157,7 @@ Level 2: 极值/零值  -> 边界情况验证
 
 #### 阶段 3.5：性能采集与优化
 
-**前置条件**：阶段 3 Level 3 测试通过，且 `environment.json` 中 `npu.available` 为 true。
-
-**NPU 不可用时**：在 `ops/{operator_name}/docs/PLAN.md` 中记录「性能采集因 NPU 不可用而跳过」，直接进入阶段 4。
+**前置条件**：阶段 3 测试通过。
 
 **目标**：使用 `ops-profiling` 在真实 NPU 上采集性能数据，判定是否达标，如不达标则迭代优化。
 

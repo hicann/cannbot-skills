@@ -81,9 +81,9 @@ Ascend C Kernel 直调算子开发工具 CANNBot，接收用户算子开发需�
 ```
 Step 1: 环境检查
     │
-    ├── all_passed == false → 告知用户，停止
+    ├── 运行检查脚本 → 失败则告知用户，停止
     │
-    ▼ all_passed == true
+    ▼ 全部通过
 Step 2: 设计（Architect）
     │
     ├── 只输出单文件 → 重新调用 Architect 要求拆分
@@ -120,11 +120,9 @@ Step 5: 修复循环（最多 3 轮）
     │       ├── FAIL + 轮次 < 3 → 重复 5a
     │       └── FAIL + 轮次 >= 3 → 暂停，上报用户
     ▼
-Step 6: 性能验收
-    │
-    ├── npu.available == false → 跳过，标注"因 NPU 不可用跳过"
-    │
-    ▼ npu.available == true → 调用 Developer 采集性能
+Step 6: 性能验收（Developer 采集性能数据）
+     │
+     ▼
 Step 7: 完成汇报
 ```
 
@@ -138,24 +136,22 @@ Step 7: 完成汇报
    ```bash
    bash workflows/scripts/init_operator_project.sh {operator_name}
    ```
-2. 运行环境验证脚本：
+2. 加载 `/ascendc-env-check` skill，按 skill 指引运行环境检查和 NPU 设备检查脚本。
+3. 运行开发环境验证脚本（生成 `environment.json`）：
    ```bash
    bash workflows/scripts/verify_environment.sh {operator_name}
    ```
-3. 读取 `operators/{operator_name}/docs/environment.json`，确认关键字段：
-   - `validation.all_passed`：是否全部检查通过
-   - `cann.version`：CANN 版本号
-   - `compiler.bisheng_path`：编译器路径
-   - `npu.available`：NPU 是否可用
 
 **失败处理**：
-- `validation.all_passed` 为 false → 告知用户失败原因（`validation.failed_checks`），**禁止进入 Step 2**
+- Skill 环境检查失败 → 告知用户失败原因，**禁止进入 Step 2**
+- Skill NPU 设备检查失败 → 告知用户「NPU 设备不可用，无法进行算子开发。如需继续请联系 lead 决策是否跳过」，**禁止进入 Step 2**
+- verify_environment.sh 验证失败（`validation.all_passed` 为 false）→ 告知用户失败原因，**禁止进入 Step 2**
 
 **完成判定**：`environment.json` 存在且 `validation.all_passed` 为 true → 继续 Step 2
 
 #### Step 2：设计
 
-**触发条件**：environment.json 存在且 `validation.all_passed` 为 true
+**触发条件**：Step 1 通过
 **调用模板**：[Step 2](workflows/task-prompts.md#step-2设计) — 读取此链接的完整内容作为 prompt
 **完成判定**：`operators/{operator_name}/docs/DESIGN.md` 和 `operators/{operator_name}/docs/PLAN.md` 都存在；如果只输出了单文件，重新调用 architect 要求拆分
 
@@ -207,10 +203,9 @@ Step 7: 完成汇报
 
 #### Step 6：性能验收
 
-**触发条件**：审查通过（PASS 或 PASS WITH NOTES），且 `environment.json` 中 `npu.available` 为 true
+**触发条件**：审查通过（PASS 或 PASS WITH NOTES）
 **调用模板**：[Step 6](workflows/task-prompts.md#step-6性能验收) — 读取此链接的完整内容作为 prompt
-**完成判定**：性能数据已归档（`operators/{operator_name}/docs/perf/round_NNN/` 至少存在一轮），达标判定已记录在 PLAN.md 中
-**NPU 不可用时**：跳过性能验收，在最终汇报中标注「性能验收因 NPU 不可用而跳过」，直接进入 Step 7
+**完成判定**：Developer 返回完成（性能数据已归档）
 
 #### Step 7：完成
 

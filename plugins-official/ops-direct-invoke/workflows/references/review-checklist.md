@@ -77,9 +77,7 @@ AscendC::Sub<float>(xLocal, xLocal, tmpLocal, totalSize);
 | 非连续访问效率 | DataCopyPad 的 stride 使用是否合理 | 中 |
 | 多次 GM 读取 | 是否有不必要的重复 GM 读取 | 高 |
 
-### 上板性能验证（NPU 可用时）
-
-**前置条件**：`environment.json` 中 `npu.available` 为 true。NPU 不可用时跳过此项，在 REVIEW.md 中标注「上板性能验证因 NPU 不可用而跳过」。
+### 上板性能验证
 
 **独立采集**：调用 `ops-profiling`，独立执行 msprof op 采集，不信任 Developer 的自报性能数据。
 

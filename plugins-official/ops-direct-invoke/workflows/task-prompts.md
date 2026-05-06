@@ -198,7 +198,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 
 【验收标准】
 - 编译成功（cmake .. && make）
-- 基础用例 可执行文件、PyTorch接入通路 测试通过（NPU 可用时）
+- 基础用例 可执行文件、PyTorch接入通路 测试通过
 - PLAN.md 已更新进度
   "
 }
@@ -227,7 +227,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 
 【推荐 Skill】
 - /ascendc-docs-search — 验证 API 约束、查找官方示例对照
-- /ops-profiling — NPU 可用时，独立采集性能数据验证
+- /ops-profiling — 独立采集性能数据验证
 - /ops-precision-standard — 精度验证阶段确认 atol/rtol 标准
 
 【验收标准】
