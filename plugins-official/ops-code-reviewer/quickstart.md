@@ -24,7 +24,7 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入代码检视 Team 目录
 cd skills/plugins-official/ops-code-reviewer
@@ -41,7 +41,7 @@ bash init.sh project trae       # Trae 用户
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入代码检视 Team 目录
 cd skills/plugins-official/ops-code-reviewer

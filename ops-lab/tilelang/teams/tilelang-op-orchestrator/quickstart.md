@@ -14,7 +14,7 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入 TileLang 算子开发目录
 cd skills/ops-lab/tilelang/teams/tilelang-op-orchestrator
@@ -35,7 +35,7 @@ cd ..
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入 TileLang 算子开发目录
 cd skills/ops-lab/tilelang/teams/tilelang-op-orchestrator

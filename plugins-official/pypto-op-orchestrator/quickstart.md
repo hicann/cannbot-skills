@@ -23,7 +23,7 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 
 ```bash
 # 注册 marketplace（首次，GitCode 仓库需完整 URL）
-/plugin marketplace add https://gitcode.com/cann/skills.git
+/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git
 
 # 安装插件
 /plugin install pypto-op-orchestrator@cannbot
@@ -32,7 +32,7 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 **备选：init.sh 脚本**
 
 ```bash
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 cd skills/plugins-official/pypto-op-orchestrator
 bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
@@ -43,7 +43,7 @@ bash init.sh global claude      # 全局级
 **首选：init.sh 脚本**
 
 ```bash
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 cd skills/plugins-official/pypto-op-orchestrator
 bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级

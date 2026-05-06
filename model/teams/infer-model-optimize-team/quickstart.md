@@ -14,7 +14,7 @@
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入推理优化 team 目录
 cd skills/model/teams/infer-model-optimize-team
@@ -30,7 +30,7 @@ bash init.sh project claude     # Claude Code 用户
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/skills.git
+git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入推理优化 team 目录
 cd skills/model/teams/infer-model-optimize-team

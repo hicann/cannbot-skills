@@ -11,13 +11,13 @@
 ### Step 1: Install the plugin
 
 ```bash
-opencode plugin cannbot@git+https://gitcode.com/cann/skills.git
+opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git
 ```
 
 For global installation (available in all projects):
 
 ```bash
-opencode plugin cannbot@git+https://gitcode.com/cann/skills.git -g
+opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git -g
 ```
 
 ### Step 2: Select a team (optional)
@@ -29,7 +29,7 @@ opencode plugin cannbot@git+https://gitcode.com/cann/skills.git -g
 ```json
 {
   "plugin": [
-    ["cannbot@git+https://gitcode.com/cann/skills.git", {"team": "all"}]
+    ["cannbot@git+https://gitcode.com/cann/cannbot-skills.git", {"team": "all"}]
   ]
 }
 ```
@@ -39,7 +39,7 @@ opencode plugin cannbot@git+https://gitcode.com/cann/skills.git -g
 ```json
 {
   "plugin": [
-    "cannbot@git+https://gitcode.com/cann/skills.git"
+    "cannbot@git+https://gitcode.com/cann/cannbot-skills.git"
   ]
 }
 ```
@@ -49,7 +49,7 @@ opencode plugin cannbot@git+https://gitcode.com/cann/skills.git -g
 ```json
 {
   "plugin": [
-    ["cannbot@git+https://gitcode.com/cann/skills.git", {"team": "pypto-op-orchestrator"}]
+    ["cannbot@git+https://gitcode.com/cann/cannbot-skills.git", {"team": "pypto-op-orchestrator"}]
   ]
 }
 ```
@@ -71,7 +71,7 @@ Restart OpenCode to load the plugin.
 ### 1. Clone the repository
 
 ```bash
-git clone https://gitcode.com/cann/skills.git ~/.config/opencode/cannbot
+git clone https://gitcode.com/cann/cannbot-skills.git ~/.config/opencode/cannbot
 ```
 
 ### 2. Run the installer
@@ -117,7 +117,7 @@ The agent should identify itself as CANNBot.
 ### Plugin mode
 
 ```bash
-opencode plugin cannbot@git+https://gitcode.com/cann/skills.git -f
+opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git -f
 ```
 
 ### Script mode
@@ -155,5 +155,5 @@ When AGENTS.md references Claude Code concepts, use OpenCode equivalents:
 
 ## Getting Help
 
-- Repository: https://gitcode.com/cann/skills
-- Issues: https://gitcode.com/cann/skills/issues
+- Repository: https://gitcode.com/cann/cannbot-skills
+- Issues: https://gitcode.com/cann/cannbot-skills/issues

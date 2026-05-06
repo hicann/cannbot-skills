@@ -5,8 +5,8 @@
   "author": {
     "name": "CANNBot"
   },
-  "homepage": "https://gitcode.com/cann/skills",
-  "repository": "https://gitcode.com/cann/skills",
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
   "license": "MIT",
   "dependencies": [
     "ops-code-reviewer-skills"

@@ -17,6 +17,7 @@
 &nbsp;
 
 ## 🔥 最新动态
+- **2026-04-30** — 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
 - **2026-04-29** — 新增自定义算子注册调用的脚手架工程，支持通过ACLNN和GEIR接入，ascendc-registry-invoke-template的Skill。
 - **2026-04-28** — 新增支持TRAE安装。
 - **2026-04-25** — 增强 ascendc-precision-debug和ascendc-runtime-debug的调试能力。
@@ -78,9 +79,9 @@ opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git -g
 | `ops-direct-invoke`（默认） | 3 | 11 |
 | `pypto-op-orchestrator` | 3 | 8 |
 
-也可让 OpenCode 自动安装：
+也可以让 OpenCode 自动安装：
 ```bash
-Fetch and follow instructions from https://gitcode.com/cann/skills/blob/.opencode/INSTALL.md
+Fetch and follow instructions from https://gitcode.com/cann/cannbot-skills/blob/.opencode/INSTALL.md
 ```
 
 
@@ -404,11 +405,11 @@ skills/
 
 ## 🤝 联系我们
 ### 需求、问题、咨询、任务、文档
-通过GitCode[【Issues】](https://gitcode.com/cann/skills/issues)提交。
+通过GitCode[【Issues】](https://gitcode.com/cann/cannbot-skills/issues)提交。
    
 ### 社区互动
-通过GitCode[【讨论】](https://gitcode.com/cann/skills/discussions)参与交流。
+通过GitCode[【讨论】](https://gitcode.com/cann/cannbot-skills/discussions)参与交流。
    
 ### 联系我们
-[【微信交流群】](https://gitcode.com/cann/skills/discussions/2)
+[【微信交流群】](https://gitcode.com/cann/cannbot-skills/discussions/2)
 
