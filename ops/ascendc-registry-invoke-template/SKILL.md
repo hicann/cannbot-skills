@@ -27,7 +27,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | ACLNN 接口开发 | `references/add_example/op_api/`（代码注释自表达，见下方说明） |
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
-| atvoss 算子开发（DAV_3510） | `references/atvoss_add_example/` + `ascendc-atvoss-design` + `ascendc-atvoss-devkit` |
+| atvoss 算子开发（DAV_3510） | `references/atvoss_add_example/` |
 
 #### ACLNN 接口开发指南
 
@@ -179,8 +179,6 @@ __global__ __aicore__ void {op_name}(
 
 ## 相关技能
 
-- `ascendc-atvoss-design` - atvoss 算子设计指南
-- `ascendc-atvoss-devkit` - atvoss API 参考
 - `ascendc-tiling-design` - Tiling 设计指南
 - `ascendc-api-best-practices` - API使用最佳实践
 - `ascendc-npu-arch` - NPU架构知识

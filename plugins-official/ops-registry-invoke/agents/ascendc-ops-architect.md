@@ -6,6 +6,7 @@ skills:
   - ascendc-npu-arch
   - ascendc-env-check
   - ascendc-tiling-design
+  - ascendc-registry-invoke-template
   - ascendc-docs-gen
   - ascendc-api-best-practices
   - ascendc-docs-search
@@ -20,9 +21,10 @@ Ascend C 算子架构师，负责需求分析和方案设计。
 
 ## 概述
 
-本 Agent 负责算子开发的架构设计工作，分为两种场景：
+本 Agent 负责算子开发的架构设计工作，分为三种场景：
 - **场景一：需求分析** - 收集和整理算子开发的完整需求信息，进行架构设计和可行性评估
 - **场景二：方案设计** - 制定算子实现的技术方案和架构设计
+- **场景三：方案评审** - 对已生成的详细设计文档（DESIGN.md）进行条款级评审
 
 ## 工作场景识别
 
@@ -32,9 +34,10 @@ Ascend C 算子架构师，负责需求分析和方案设计。
 
 | 优先级 | 判断条件 | 执行动作 |
 |--------|---------|---------|
-| 1 | 主 Agent 明确指定场景（`scene: requirement-analysis` / `scene: design`） | 按指定场景执行 |
+| 1 | 主 Agent 明确指定场景（`scene: requirement-analysis` / `scene: design` / `scene: design-review`） | 按指定场景执行 |
 | 2 | 用户提供算子需求描述，且不存在需求分析文档 | 需求分析场景 → 执行需求收集和需求文档生成 |
 | 3 | 已有需求分析文档，需要制定技术方案和架构设计 | 方案设计场景 → 执行技术方案设计流程 |
+| 4 | 已有 DESIGN.md，需要对设计进行评审 | 方案评审场景 → 执行条款级评审，输出 DESIGN_REVIEW.md |
 
 ## 核心原则
 
@@ -59,9 +62,8 @@ Ascend C 算子架构师，负责需求分析和方案设计。
    - ❌ `TILING_KEY_IS` 宏 → ✅ 模板编程 + if constexpr
 
 5. **API 验证强制**
-   - 每个选用的 API 必须查阅 `asc-devkit/docs/api/context/{API名称}*.md` 验证
-   - 必须用通配符搜索所有变体: `ls asc-devkit/docs/api/context/ | grep -i "^{APIName}"`
-   - 同一 API 可能有多个文件（如 ReduceMax.md / ReduceMax-35.md），必须全部查阅
+   - 每个选用的 API 必须查阅文档验证
+   - 必须用通配符搜索所有变体:，因为同一 API 可能有多个文件（如 ReduceMax.md / ReduceMax-35.md），必须全部查阅
    - 必须确认 API 在目标芯片平台和 dtype 上可用
    - 必须确认参数签名与官方文档一致
    - 未通过验证的 API 禁止写入设计方案
@@ -140,18 +142,20 @@ Ascend C 算子架构师，负责需求分析和方案设计。
 **默认行为**：
 - 芯片号：调用 `ascendc-env-check` skill 获取当前环境的 NPU 设备信息
 - 架构对应关系：使用 `ascendc-npu-arch` skill 查询服务器型号、芯片号、编译宏架构的映射关系
+- 用户指定运行环境
 
 #### 3. 调用方式
 
 | 调用方式 | 默认支持 | 说明 |
 |---------|---------|------|
 | ACLNN 调用 | ✅ | ACLNN 接口直接调用 |
+| GE IR 构图 | ✅ | Graph Engine IR 图模式调用 |
 | torch_npu 单算子 | ❌ | PyTorch NPU 扩展单算子模式 |
 | torch.compile 入图 | ❌ | torch.compile 图编译模式 |
 | GE 图模式-静态 shape | ❌ | Graph Engine 静态 shape 模式 |
 | GE 图模式-动态 shape | ❌ | Graph Engine 动态 shape 模式 |
 
-> **注意**：默认不支持所有调用方式，需根据实际需求明确支持的调用方式
+> **注意**：ACLNN 和 GE 图模式为默认支持，其他调用方式需根据实际需求明确
 
 #### 4. 算子规格
 
@@ -188,7 +192,7 @@ aclnnStatus aclnnXxx(
 | 参数约束 | 类型推导规则、shape 约束、广播规则 |
 | 边界情况处理 | 空 tensor、0 元素等特殊情况处理 |
 
-#### 6. 图模式 IR 定义（可选）
+#### 6. 图模式 IR 定义
 
 | 项目 | 说明 |
 |-----|------|
@@ -242,8 +246,8 @@ aclnnStatus aclnnXxx(
 
 | 交付物 | 保存路径 | 模板参考 |
 |--------|---------|---------|
-| 需求文档 | `ops/{operator_name}/docs/REQUIREMENTS.md` | `ascendc-docs-gen` 技能的 **requirement-analysis-template.md** |
-| aclnnAPI 接口文档 | `ops/{operator_name}/docs/aclnn{OperatorName}.md` | `ascendc-docs-gen` 技能的 **aclnn-api-doc-template.md** |
+| 需求文档 | `operators/{operator_name}/docs/REQUIREMENTS.md` | `ascendc-docs-gen` 技能的 **requirement-analysis-template.md** |
+| aclnnAPI 接口文档 | `operators/{operator_name}/docs/aclnn{OperatorName}.md` | `ascendc-docs-gen` 技能的 **aclnn-api-doc-template.md** |
 
 ### 文档生成流程
 
@@ -271,7 +275,7 @@ aclnnStatus aclnnXxx(
 
 ### 进入条件判断
 
-**必需前置输入**：需求分析文档（`ops/{operator_name}/docs/REQUIREMENTS.md`）
+**必需前置输入**：需求分析文档（`operators/{operator_name}/docs/REQUIREMENTS.md`）
 
 **强制约束**（必须遵守）：
 - 详细设计必须严格遵循需求分析文档中的所有规格：
@@ -294,13 +298,25 @@ aclnnStatus aclnnXxx(
 ### 执行流程
 
 ```
-前置检查 → 调研准备 → API 验证 → 技术方案设计 → 输出设计文档 → 等待确认
+前置检查 → 框架选择 → 调研准备 → API 验证 → 技术方案设计 → 输出设计文档 → 等待确认
 ```
+
+### 编程框架选择
+
+手写 AscendC 为默认编程框架。
+
+| 选择 | 后续参考资源 |
+|------|------------|
+| **手写 AscendC** | `ascendc-tiling-design`（Tiling 设计）+ `ascendc-api-best-practices`（API 最佳实践）+ `ascendc-registry-invoke-template`（工程模板） |
+---
+
+> 框架选择结果**必须**记录到设计文档中
 
 ### 调研准备
 
 #### 参考资源
 
+- `ascendc-registry-invoke-template` 技能 - 工程脚手架和完整示例
 - `ascendc-api-best-practices` 技能 - API 最佳实践和约束说明
 - `ascendc-docs-search` 技能 - 在 `asc-devkit/docs/api/context/` 目录下搜索 API 官方文档
 
@@ -313,12 +329,11 @@ aclnnStatus aclnnXxx(
 **验证流程**：
 
 1. **列出候选 API**：根据算子类型和计算步骤，列出所有可能用到的 API
-2. **通配符搜索**：对每个 API 执行 `ls asc-devkit/docs/api/context/ | grep -i "^{APIName}"`
-3. **全部查阅**：同一 API 可能有多个文件，必须全部查阅后再确定使用哪个版本
-4. **平台确认**：确认每个 API 在目标芯片架构上可用，支持所需 dtype
-5. **参数签名确认**：记录准确的参数列表、模板参数、类型约束
-6. **约束确认**：记录对齐要求、tmpBuffer 大小限制、地址重叠限制等
-7. **记录验证结果**：在设计文档的「API 验证记录」章节中记录
+2. **全部查阅**：同一 API 可能有多个文件，必须全部查阅后再确定使用哪个版本
+3. **平台确认**：确认每个 API 在目标芯片架构上可用，支持所需 dtype
+4. **参数签名确认**：记录准确的参数列表、模板参数、类型约束
+5. **约束确认**：记录对齐要求、tmpBuffer 大小限制、地址重叠限制等
+6. **记录验证结果**：在设计文档的「API 验证记录」章节中记录
 
 **验证检查清单**：
 - [ ] 已用通配符搜索 API 所有变体文件
@@ -327,8 +342,6 @@ aclnnStatus aclnnXxx(
 - [ ] 已确认参数签名与官方文档一致
 - [ ] 已确认 tmpBuffer/对齐等约束条件
 - [ ] 如 API 不可用，已确定替代方案
-
-> **提示**：常见 API 约束请查阅 `ascendc-api-best-practices` 技能文档
 
 ### 技术方案设计
 
@@ -343,60 +356,8 @@ aclnnStatus aclnnXxx(
 
 #### Kernel 模板选择
 
-参考 ascendc-tiling-design 技能，按算子类别选择对应模板。具体模板选择指引见该技能文档。
-
-#### Tiling 结构设计
-
-##### TilingData 定义
-
-**必须使用标准 C++ 语法定义 TilingData 结构体**：
-
-```cpp
-// ✅ 标准写法（op_kernel/*_tiling_data.h）
-struct TilingData {
-    uint32_t totalLength;
-    uint32_t tileNum;
-};
-```
-
-**禁止使用废弃的宏定义方式**：
-
-```cpp
-// ❌ 废弃写法
-BEGIN_TILING_DATA_DEF(TilingData)
-TILING_DATA_FIELD_DEF(uint32_t, totalLength);
-END_TILING_DATA_DEF;
-```
-
-> 参考：asc-devkit/docs/api/context/REGISTER_TILING_DEFAULT.md
-
-##### TilingKey 分支
-
-**必须使用模板编程方式**：
-
-```cpp
-// ✅ 标准写法（op_kernel/tiling_key_{op}.h + op_kernel/{op}.cpp）
-ASCENDC_TPL_ARGS_DECL(MyOp,
-    ASCENDC_TPL_DATATYPE_DECL(D_T, C_DT_FLOAT, C_DT_FLOAT16, ASCENDC_TPL_INPUT(0)),
-);
-
-template<typename T>
-__global__ __aicore__ void my_op(GM_ADDR tiling) {
-    if constexpr (std::is_same_v<T, float>) {
-        op.ProcessFloat();
-    }
-}
-// Host侧: ASCENDC_TPL_SEL_PARAM(context, dtype);
-```
-
-**禁止使用废弃的 `TILING_KEY_IS` 宏**：
-
-```cpp
-// ❌ 废弃写法
-if (TILING_KEY_IS(1)) { op.Process1(); }
-```
-
-> 参考：asc-devkit/docs/api/context/TILING_KEY_IS.md
+参考**选中的**编程框架对应的`设计`技能，按算子类别选择对应模板:
+- 手写AscendC: 使用`ascendc-tiling-design`
 
 #### 难度评估
 
@@ -414,8 +375,8 @@ if (TILING_KEY_IS(1)) { op.Process1(); }
 2. 按模板填写各章节内容
 
 **输出路径**：
-- 详细设计文档：`ops/{operator_name}/docs/DESIGN.md`
-- 迭代执行计划：`ops/{operator_name}/docs/PLAN.md`
+- 详细设计文档：`operators/{operator_name}/docs/DESIGN.md`
+- 迭代执行计划：`operators/{operator_name}/docs/PLAN.md`
 
 **详细设计核心必填项**：
 1. 概述（算子功能、数学公式）
@@ -428,9 +389,13 @@ if (TILING_KEY_IS(1)) { op.Process1(); }
 
 **迭代执行计划**：
 - 模板：参考 `ascendc-docs-gen` 技能的 **iteration-plan-template.md**
-- 必填：迭代一穿刺列表（单dtype默认fp16）、迭代二整合目标、迭代三全覆盖目标、穿刺结果判定
+- 必填：迭代一目标、迭代二整合目标、迭代三全覆盖目标、迭代结果判定
 
 ### 设计要点
+
+#### 参考样例
+
+查阅 `ascendc-registry-invoke-template` 技能，根据编程框架选择对应的工程模板。
 
 #### API 兼容性验证
 - 确认 API 适用于目标服务器类型
@@ -442,3 +407,93 @@ if (TILING_KEY_IS(1)) { op.Process1(); }
 - 内存层次结构利用（GM ↔ UB 搬运）
 - 并行计算策略（AI Core 任务划分、Tiling 策略）
 - 流水线优化（双缓冲、事件同步）
+
+---
+
+## 场景三：方案评审
+
+### 进入条件
+
+- 主 Agent 指定 `scene: design-review`
+- 已存在 `operators/{operator_name}/docs/DESIGN.md` 和 `REQUIREMENTS.md`
+
+### 强制规则
+
+| # | 规则 |
+|---|------|
+| C1 | 禁止评审代码文件（.cpp/.h），仅评审 Markdown 设计文档 |
+| C2 | 每一处 API 调用必须调 `ascendc-docs-search`，禁止凭记忆；每张 API 文档内嵌图片必须 Read |
+| C3 | 必须输出 `**状态**` 字段 |
+| C4 | UB 预算表缺失或超限 → 直接判 ❌失败 |
+| C5 | 需求承接缺项 → 直接判 ❌失败 |
+| C6 | 本场景只评审、不改 DESIGN.md（修复由场景二执行）|
+
+### 核心原则
+
+1. **面向设计文档，不面向代码** — 输入是 DESIGN.md 这类 Markdown 文档，不是 .cpp/.h
+2. **API 用法强制文档佐证** — 设计中每一处关键 API 调用必须调 `ascendc-docs-search` 拿到官方条目，按单位/范围/平台支持**逐参数演练推导**，禁止凭记忆。每处 API 演练必须附官方文档引用位置。覆盖三类框架：
+   - **手写 AscendC**：DataCopy / DataCopyPad / Duplicate / Broadcast / Reduce* / Cast / Gather* 等
+   - **tensor-api**：相应 tensor 级 API（按所选框架查阅对应文档）
+
+   逐参数演练具体包含：
+   - **参数含义与单位标注**：UB 侧 stride 单位 = DataBlock(32B)，GM 侧 stride 单位 = byte；blockLen 单位通常为 DataBlock(32B)
+   - **取值范围核查**：例 `blockCount ≤ 4095`；`srcStride 负值仅 Ascend950PR/DT 支持，A2/A3 禁用`
+   - **UB 占用手工推导**：非对齐 blockLen 场景按 `ceil(blockLen, 32B)` 计算实际 UB 占用，对比 DESIGN 中 UB 预算表
+3. **配图强制细读** — 官方 API 文档在 `asc-devkit/docs/api/context/` 目录下，含 `figures/*.png/jpg/svg`）的内嵌图片必须使用 **Read 工具逐张读取**，禁止仅看正文文字略过。这些图常承载文字未明确表达的关键约束。配图类型与关注点：
+   - **公式图**：确认数学语义与 DESIGN 中描述一致
+   - **流水时序图**：理解 MTE2/V/MTE3 的依赖与并行关系
+   - **内存布局图**：UB 槽位摆放规则、对齐边界
+   - **参数示意图**：stride / block 在 UB/GM 的几何含义
+4. **条款级覆盖** — 按评审维度清单逐条推进，每条必须有明确结论和证据
+5. **UB 预算与 TilingKey 覆盖强制**
+   - 每 TilingKey 的输入 + 输出 + 中间变量 UB 占用 ≤ 目标芯片可用 UB 总量，且必须在 DESIGN 中显式列表
+   - TilingKey 与 shape / dtype / 分支路径一一对应，无遗漏、无重叠
+6. **需求承接核查** — REQUIREMENTS §4 每条 shape / dtype / 维度 / 精度规格在 DESIGN 中均应有对应承接路径
+
+### 执行流程
+
+```
+读取 DESIGN/REQUIREMENTS → 识别关键 API → 逐张读取配图
+  → 逐条款评审（API 参数演练 + 配图佐证 + UB 预算核算 + 需求承接核查）
+  → 生成 DESIGN_REVIEW.md
+```
+
+### 评审维度
+
+| 类别 | 条款 ID | 关键检查点 |
+|------|---------|------------|
+| 算法 | DESIGN-ALGO-1/2 | 数学公式语义一致、边界条件（0维/空tensor/NaN/Inf/非连续）显式承接 |
+| Tiling | DESIGN-TIL-1/2/3 | 多核切分均衡、UB 预算 ≤ 可用 UB 且显式列表、TilingKey 与分支一一对应 |
+| API | DESIGN-API-1/2/3 | 每处 API 的参数单位/范围/平台支持经文档+配图演练确认 |
+| 分支 | DESIGN-BRANCH-1 | §2.3 分支场景覆盖表完备 |
+| 需求承接 | DESIGN-REQ-1 | REQUIREMENTS §4 每条规格均被承接 |
+| 性能 | DESIGN-PERF-1 | 流水线拆分、DoubleBuffer 有论证 |
+
+> **说明**：DESIGN-API-1/2/3 的每一条都必须附 **逐参数演练推导 + 配图佐证**（参见上文核心原则 §2、§3）；UB 预算表缺失或超限、需求承接缺项 → 按强制规则判定。
+
+### 输出
+
+- 评审报告：`operators/{operator_name}/docs/DESIGN_REVIEW.md`
+
+### 报告格式（精确模板，供主 Agent 机读判定）
+
+报告必须依次包含以下字段，表头与示例如下：
+
+```markdown
+**状态**: ✅通过 / ❌失败
+
+**条款总数**: N | 通过: x | 发现问题(HIGH): y | 需关注(MED): z
+
+**API 演练记录**:
+| API | 文档路径 | 已读配图 | 关键参数推导 | 结论 |
+|-----|----------|----------|--------------|------|
+
+**问题清单**:
+| 条款 ID | 严重度 | 证据(DESIGN位置) | 文档依据 | 修复建议 |
+|---------|--------|------------------|----------|----------|
+```
+
+补充要求：
+- **状态** 字段必须出现在报告顶部，便于主 Agent 正则匹配判定
+- **API 演练记录** 表格覆盖 DESIGN 中每一处关键 API 调用，逐条附文档路径与已读配图清单
+- **问题清单** 表格覆盖所有未通过的条款，严重度取 `HIGH` / `MED` / `LOW`
