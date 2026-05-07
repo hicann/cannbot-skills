@@ -21,9 +21,8 @@ echo "Requires: Claude Code CLI"
 echo ""
 
 if ! command -v claude &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} Claude Code CLI not found"
-    echo "Install Claude Code first: https://code.claude.com"
-    exit 1
+    echo -e "${YELLOW}[SKIP]${NC} Claude Code CLI not found — skipping behavior test"
+    exit 0
 fi
 
 TIMEOUT=25

@@ -24,7 +24,7 @@ skill_keywords:
   - 调试
   - debug
   - 测试
-  - test
+  - UT
   - 性能
   - perf
   - 精度
@@ -56,7 +56,7 @@ trigger_condition_phrases:
   - "when .*ask"
   - "asks to"
   - "if you"
-  - "当.*时"
+  - "当.*(需要|遇到|出现|用户|提及|问题)"
   - "触发条件"
   - "使用场景"
   - "适用于"
@@ -84,6 +84,11 @@ anti_pattern_phrases:
   - "Does.*stuff"
   - "General-purpose.*tool"
   - "Assists with.*tasks"
+  - "帮助.*项目"
+  - "处理.*文档"
+  - "通用.*工具"
+  - "辅助.*任务"
+  - "做.*事情"
 
 # Progressive-disclosure thresholds.
 skill_max_words: 5000          # S-STR-13

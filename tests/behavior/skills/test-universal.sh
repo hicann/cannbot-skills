@@ -40,7 +40,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
-SKILLS_DIR="$SCRIPT_DIR/../../../ops/skills"
+SKILLS_DIR="$SCRIPT_DIR/../../../ops"
 TEST_CASES_DIR="$SCRIPT_DIR/test-cases"
 TIMEOUT=60
 TIMESTAMP=$(date +%s)

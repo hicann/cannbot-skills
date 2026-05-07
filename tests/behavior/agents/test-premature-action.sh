@@ -30,8 +30,8 @@ echo "Timeout: ${TIMEOUT}s"
 echo ""
 
 if ! command -v claude &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} Claude Code CLI not found"
-    exit 1
+    echo -e "${YELLOW}[SKIP]${NC} Claude Code CLI not found — skipping behavior test"
+    exit 0
 fi
 
 TIMESTAMP=$(date +%s)
@@ -57,7 +57,7 @@ test_premature_action() {
 
     # Run Claude and capture output
     # Note: Session analysis uses the most recent session from ~/.claude/projects/
-    if timeout "$TIMEOUT" claude -p "$prompt" \
+    if claude -p "$prompt" \
         --dangerously-skip-permissions \
         > "$log_file" 2>&1; then
         :

@@ -32,6 +32,12 @@ step() { echo -e "${DIM}$*${NC}"; }
 BRAND="cannbot"
 VERSION="1.0.0"
 
+# --- Plugin-specific filters ---
+# Skill whitelist (space-separated list) - references shared ops + local workflow
+INCLUDED_SKILLS="ascendc-api-best-practices ascendc-code-review ascendc-docs-gen ascendc-docs-search ascendc-env-check ascendc-npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ops-precision-standard ops-profiling ops-registry-invoke-workflow"
+# Agent whitelist (shell pattern) - uses local agents/
+INCLUDED_AGENT_PATTERN="ascendc-ops-*"
+
 # --- Paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_NAME="$(basename "$SCRIPT_DIR")"
@@ -340,19 +346,37 @@ link_workflow_skill() {
     fi
 }
 
-if [ "$TOOL" = "opencode" ]; then
-    ln -sf "$SCRIPT_DIR/AGENTS.md" "$CONFIG_ROOT/AGENTS.md"
-    ok "AGENTS.md"
-    link_workflow_skill
-elif [ "$TOOL" = "trae" ]; then
-    ln -sf "$SCRIPT_DIR/AGENTS.md" "$CONFIG_ROOT/AGENTS.md"
-    ok "AGENTS.md"
-    link_workflow_skill
+if [ "$LEVEL" = "project" ]; then
+    # Project-level: config file should be in current directory (PWD)
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+        config_target="$PWD/AGENTS.md"
+    else
+        config_target="$PWD/CLAUDE.md"
+    fi
 else
-    ln -sf "$SCRIPT_DIR/AGENTS.md" "$CONFIG_ROOT/CLAUDE.md"
-    ok "CLAUDE.md"
-    link_workflow_skill
+    # Global-level: config file in CONFIG_ROOT
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+        config_target="$CONFIG_ROOT/AGENTS.md"
+    else
+        config_target="$CONFIG_ROOT/CLAUDE.md"
+    fi
 fi
+config_src="$SCRIPT_DIR/AGENTS.md"
+
+# Skip only when source file is already at target location
+if [ "$config_src" = "$config_target" ]; then
+    info "$(basename "$config_target") already at target location"
+else
+    ln -sf "$config_src" "$config_target"
+    ok "$(basename "$config_target")"
+fi
+
+# Also ensure CONFIG_ROOT has the config file (for consistency with other init.sh)
+if [ "$LEVEL" = "project" ] && [ "$config_target" != "$CONFIG_ROOT/$(basename "$config_target")" ]; then
+    ln -sf "$config_src" "$CONFIG_ROOT/$(basename "$config_target")"
+fi
+
+link_workflow_skill
 
 echo ""
 

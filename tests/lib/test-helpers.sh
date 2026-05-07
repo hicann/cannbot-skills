@@ -495,6 +495,20 @@ analyze_premature_actions() {
 
 # Get list of all skills with their full paths
 # Returns: skill_name:full_path per line
+# Return 0 if $file resides inside a nested git repo (not the repo root itself)
+_is_inside_nested_git_repo() {
+    local file="$1"
+    local dir
+    dir=$(dirname "$file")
+    while [ "$dir" != "$SKILLS_DIR" ] && [ "$dir" != "/" ]; do
+        if [ -d "$dir/.git" ]; then
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    return 1
+}
+
 get_all_skills_with_paths() {
     local tmpfile
     tmpfile=$(mktemp)
@@ -507,7 +521,12 @@ get_all_skills_with_paths() {
         -print 2>/dev/null > "$tmpfile" || true
 
     while IFS= read -r f; do
-        [ -f "$f" ] && echo "$(basename "$(dirname "$f")"):$f"
+        [ -f "$f" ] || continue
+        # Skip skills inside nested external git repos (e.g. pypto, asc-devkit)
+        if _is_inside_nested_git_repo "$f"; then
+            continue
+        fi
+        echo "$(basename "$(dirname "$f")"):$f"
     done < "$tmpfile" | sort -u -t: -k1,1
 
     rm -f "$tmpfile"
@@ -662,6 +681,10 @@ get_all_agents_with_paths() {
 
     while IFS= read -r f; do
         [ -f "$f" ] || continue
+        # Skip agents inside nested external git repos (e.g. pypto, asc-devkit)
+        if _is_inside_nested_git_repo "$f"; then
+            continue
+        fi
         local name
         name=$(basename "$f" .md)
         echo "${name}:${f}"
@@ -701,6 +724,13 @@ get_all_teams_with_paths() {
         \( -name ".opencode" -o -name ".claude" -o -name ".claude-plugin" \
            -o -name "node_modules" -o -name ".git" \) -prune -o \
         -path "*/teams/*/AGENTS.md" -print 2>/dev/null > "$tmpfile" || true
+
+    # Also discover teams under plugins-official/ (top-level AGENTS.md)
+    if [ -d "$SKILLS_DIR/plugins-official" ]; then
+        find "$SKILLS_DIR/plugins-official" -maxdepth 2 -name "AGENTS.md" \
+            -not -path "*/.opencode/*" -not -path "*/.claude/*" \
+            -not -path "*/.claude-plugin/*" 2>/dev/null >> "$tmpfile" || true
+    fi
 
     while IFS= read -r f; do
         [ -f "$f" ] && echo "$(basename "$(dirname "$f")"):$f"

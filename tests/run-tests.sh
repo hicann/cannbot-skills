@@ -135,7 +135,13 @@ list_tests() {
         [ -f "$f" ] && echo "  unit/teams/$(basename "$f")"
     done
     echo ""
-    
+
+    echo "L1 Unit Tests - Install:"
+    for f in "$SCRIPT_DIR"/unit/install/test-*.sh; do
+        [ -f "$f" ] && echo "  unit/install/$(basename "$f")"
+    done
+    echo ""
+
     echo "L2 Behavior Tests - Skills:"
     for f in "$SCRIPT_DIR"/behavior/skills/test-*.sh; do
         [ -f "$f" ] && echo "  behavior/skills/$(basename "$f")"
@@ -145,6 +151,12 @@ list_tests() {
     echo "L2 Behavior Tests - Agents:"
     for f in "$SCRIPT_DIR"/behavior/agents/test-*.sh; do
         [ -f "$f" ] && echo "  behavior/agents/$(basename "$f")"
+    done
+    echo ""
+
+    echo "L2 Behavior Tests - Install:"
+    for f in "$SCRIPT_DIR"/behavior/install/test-*.sh; do
+        [ -f "$f" ] && echo "  behavior/install/$(basename "$f")"
     done
     echo ""
 
@@ -524,11 +536,13 @@ get_tests_for_category() {
             echo "unit/teams/test-structure.sh:fast"
             echo "unit/teams/test-content.sh:fast"
             echo "unit/teams/test-version.sh:fast"
+            echo "unit/install/test-init-install.sh:fast"
             ;;
         behavior)
             # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)
             # Other test files can be run individually via --test flag
             echo "behavior/skills/test-universal.sh:medium"
+            echo "behavior/install/test-init-behavior.sh:fast"
             ;;
         integration)
             for f in "$SCRIPT_DIR"/integration/test-*.sh; do
@@ -539,6 +553,9 @@ get_tests_for_category() {
             get_tests_for_category "unit"
             if ! $RUN_FAST; then
                 get_tests_for_category "behavior"
+            else
+                # In fast mode, still run behavior tests marked as :fast
+                get_tests_for_category "behavior" | grep ':fast$' || true
             fi
             if $RUN_INTEGRATION || $RUN_ALL; then
                 get_tests_for_category "integration"
