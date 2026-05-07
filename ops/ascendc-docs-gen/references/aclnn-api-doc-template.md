@@ -1,7 +1,7 @@
 # aclnn{OperatorName}
 
 > 本模板用于编写开源 aclnnAPI 接口文档（gitcode 仓），以 aclnnAdd 为示例。
-> 文档存放路径：`ops/{operator_name}/docs/aclnn{OperatorName}.md`
+> 文档存放路径：`operators/{operator_name}/docs/aclnn{OperatorName}.md`
 
 ## 产品支持情况
 

@@ -12,8 +12,8 @@ description: Ascend C 算子系统测试（ST）设计技能。基于 aclnn 接�
 ### 1. 输入文件校准
 
 从以下文档获取算子接口信息：
-- 需求文档：`ops/{operator_name}/docs/REQUIREMENTS.md`
-- ACLNN 接口文档：`ops/{operator_name}/docs/aclnn{OperatorName}.md`
+- 需求文档：`operators/{operator_name}/docs/REQUIREMENTS.md`
+- ACLNN 接口文档：`operators/{operator_name}/docs/aclnn{OperatorName}.md`
 
 或者指定文件路径。
 
@@ -23,7 +23,7 @@ description: Ascend C 算子系统测试（ST）设计技能。基于 aclnn 接�
 **所有测试设计结果统一存放到算子目录下**：
 
 ```
-ops/{operator_name}/tests/st/
+operators/{operator_name}/tests/st/
 ├── testcases/                    # 最终测试用例（下游直接消费）
 │   ├── {operator_name}_L0_test_cases.csv
 │   ├── {operator_name}_L0_coverage_report.yaml
@@ -39,7 +39,7 @@ ops/{operator_name}/tests/st/
 ```
 
 **路径变量**：
-- `OPS_DIR`：算子目录，`ops/{operator_name}/`
+- `OPS_DIR`：算子目录，`operators/{operator_name}/`
 - `DESIGN_DIR`：测试设计中间产物目录，`{OPS_DIR}/tests/st/design/`
 - `TESTCASE_DIR`：最终测试用例目录，`{OPS_DIR}/tests/st/testcases/`
 
@@ -88,8 +88,8 @@ ops/{operator_name}/tests/st/
 
 ```bash
 python skills/ascendc-st-design/scripts/generate_test_factors.py \
-    ops/{operator_name}/tests/st/design/03_参数定义.yaml \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml
+    operators/{operator_name}/tests/st/design/03_参数定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml
 ```
 
 **脚本功能**：自动识别参数类型，提取所有测试因子（存在性、格式、维度、数据类型、取值范围、特殊值等），生成规范的 YAML 格式输出。
@@ -167,8 +167,8 @@ constraints:
 
 ```bash
 python skills/ascendc-st-design/scripts/generate_implicit_constraints.py \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml \
-    ops/{operator_name}/tests/st/design/05_约束定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml \
+    operators/{operator_name}/tests/st/design/05_约束定义.yaml \
     --verbose
 ```
 
@@ -189,8 +189,8 @@ python skills/ascendc-st-design/scripts/generate_implicit_constraints.py \
 
 ```bash
 python skills/ascendc-st-design/scripts/generate_solver_config.py \
-    ops/{operator_name}/tests/st/design/05_约束定义.yaml \
-    ops/{operator_name}/tests/st/design/06_求解配置.yaml
+    operators/{operator_name}/tests/st/design/05_约束定义.yaml \
+    operators/{operator_name}/tests/st/design/06_求解配置.yaml
 ```
 
 脚本解析约束定义，构建因子依赖图，拓扑排序确定求解层级，识别锚点因子（入度为0）。
@@ -214,10 +214,10 @@ solver:
 
 ```bash
 python skills/ascendc-st-design/scripts/generate_factor_values.py \
-    ops/{operator_name}/tests/st/design/06_求解配置.yaml \
-    ops/{operator_name}/tests/st/design/05_约束定义.yaml \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml \
-    ops/{operator_name}/tests/st/design/07_因子值.csv \
+    operators/{operator_name}/tests/st/design/06_求解配置.yaml \
+    operators/{operator_name}/tests/st/design/05_约束定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml \
+    operators/{operator_name}/tests/st/design/07_因子值.csv \
     --max-cases 10000
 ```
 
@@ -239,19 +239,19 @@ python skills/ascendc-st-design/scripts/generate_factor_values.py \
 ```bash
 # 步骤1: 生成 L0 用例（单因子覆盖，≤200条）
 python skills/ascendc-st-design/scripts/generate_test_cases.py \
-    ops/{operator_name}/tests/st/design/03_参数定义.yaml \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml \
-    ops/{operator_name}/tests/st/design/07_因子值.csv \
-    ops/{operator_name}/tests/st/testcases/ \
+    operators/{operator_name}/tests/st/design/03_参数定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml \
+    operators/{operator_name}/tests/st/design/07_因子值.csv \
+    operators/{operator_name}/tests/st/testcases/ \
     --level L0 \
     --verbose
 
 # 步骤2: 生成 L1 用例（两两组合覆盖，500~700条）
 python skills/ascendc-st-design/scripts/generate_test_cases.py \
-    ops/{operator_name}/tests/st/design/03_参数定义.yaml \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml \
-    ops/{operator_name}/tests/st/design/07_因子值.csv \
-    ops/{operator_name}/tests/st/testcases/ \
+    operators/{operator_name}/tests/st/design/03_参数定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml \
+    operators/{operator_name}/tests/st/design/07_因子值.csv \
+    operators/{operator_name}/tests/st/testcases/ \
     --level L1 \
     --target-count 500 \
     --seed 42 \
@@ -259,12 +259,12 @@ python skills/ascendc-st-design/scripts/generate_test_cases.py \
 
 # 步骤3: 生成 L2 用例（异常用例，每个异常场景一条用例）
 python skills/ascendc-st-design/scripts/generate_test_cases.py \
-    ops/{operator_name}/tests/st/design/03_参数定义.yaml \
-    ops/{operator_name}/tests/st/design/04_测试因子.yaml \
-    ops/{operator_name}/tests/st/design/07_因子值.csv \
-    ops/{operator_name}/tests/st/testcases/ \
+    operators/{operator_name}/tests/st/design/03_参数定义.yaml \
+    operators/{operator_name}/tests/st/design/04_测试因子.yaml \
+    operators/{operator_name}/tests/st/design/07_因子值.csv \
+    operators/{operator_name}/tests/st/testcases/ \
     --level L2 \
-    --constraints-file ops/aclnnAdds/tests/st/design/05_约束定义.yaml \
+    --constraints-file operators/aclnnAdds/tests/st/design/05_约束定义.yaml \
     --verbose
 ```
 
@@ -286,7 +286,7 @@ python skills/ascendc-st-design/scripts/generate_test_cases.py \
 
 ### 9. 测试设计结果总结
 
-在 `ops/{operator_name}/tests/st/` 目录总结算子测试设计过程与结果：
+在 `operators/{operator_name}/tests/st/` 目录总结算子测试设计过程与结果：
 
 - 算子参数定义
 - 提取测试因子

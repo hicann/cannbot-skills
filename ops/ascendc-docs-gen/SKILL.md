@@ -13,11 +13,11 @@ description: Ascend C 算子文档写作参考。提供需求分析、详细设�
 
 | 文档类型 | 模板路径 | 输出位置 |
 |---------|---------|---------|
-| 需求分析 | [requirement-analysis-template.md](references/requirement-analysis-template.md) | `ops/{operator_name}/docs/REQUIREMENTS.md` |
-| 详细设计 | [detailed-design-template.md](references/detailed-design-template.md) | `ops/{operator_name}/docs/DESIGN.md` |
-| 迭代计划 | [iteration-plan-template.md](references/iteration-plan-template.md) | `ops/{operator_name}/docs/PLAN.md` |
-| aclnnAPI 接口文档 | [aclnn-api-doc-template.md](references/aclnn-api-doc-template.md) | `ops/{operator_name}/docs/aclnn{OperatorName}.md` |
-| 算子 README | [operator-readme-template.md](references/operator-readme-template.md) | `ops/{operator_name}/README.md` |
+| 需求分析 | [requirement-analysis-template.md](references/requirement-analysis-template.md) | `operators/{operator_name}/docs/REQUIREMENTS.md` |
+| 详细设计 | [detailed-design-template.md](references/detailed-design-template.md) | `operators/{operator_name}/docs/DESIGN.md` |
+| 迭代计划 | [iteration-plan-template.md](references/iteration-plan-template.md) | `operators/{operator_name}/docs/PLAN.md` |
+| aclnnAPI 接口文档 | [aclnn-api-doc-template.md](references/aclnn-api-doc-template.md) | `operators/{operator_name}/docs/aclnn{OperatorName}.md` |
+| 算子 README | [operator-readme-template.md](references/operator-readme-template.md) | `operators/{operator_name}/README.md` |
 
 ## 使用方式
 

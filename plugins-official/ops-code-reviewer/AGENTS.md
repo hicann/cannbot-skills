@@ -87,7 +87,7 @@ permission:
 3. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
 4. **派发代码概要子 Agent**（使用"代码概要调用模板"）：
    - `subagent_type: "general"`
-   - 传入场景文件路径、代码文件路径、概要输出路径 `./ops/{operator_name}/code_summary.md`
+   - 传入场景文件路径、代码文件路径、概要输出路径 `./operators/{operator_name}/code_summary.md`
 5. 等待子 Agent 返回，从结果中提取**侧别识别**（Kernel侧/Tiling侧，供阶段1使用）
 6. 将任务0 标记为 `done`
 
@@ -141,7 +141,7 @@ permission:
 
 1. 将任务4 标记为 `in_progress`
 2. 按置信度分级汇总（HIGH → MEDIUM → LOW）
-3. 生成报告，保存到 `./ops/{operator}/{file}_review_summary.md`
+3. 生成报告，保存到 `./operators/{operator}/{file}_review_summary.md`
 4. 将任务4 标记为 `done`
 
 ---
@@ -163,12 +163,12 @@ permission:
    - Base directory 格式为 URL（如 `file:///path/to/skill/`），转换为本地路径
    - 脚本路径 = `{base_directory}/scripts/get_gitcode_pr_diff.py`
 4. **获取 diff 并保存**：
-   - `mkdir -p ./ops/.pr_diff`
+   - `mkdir -p ./operators/.pr_diff`
    - 执行脚本获取 diff（注意必须传入完整URL,并使用 `--output` 参数保存文件）
 5. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
 6. **派发代码概要子 Agent**（使用"代码概要调用模板" PR 模式）：
    - `subagent_type: "general"`
-   - 传入场景文件路径、diff 文件路径、概要输出路径 `./ops/pr-{pr_number}/code_summary.md`
+   - 传入场景文件路径、diff 文件路径、概要输出路径 `./operators/pr-{pr_number}/code_summary.md`
    - prompt 注明 PR 模式（只分析 diff 中新增/修改的代码）
 7. 等待子 Agent 返回，从结果中提取**侧别识别**（供阶段1使用）
 8. 将任务0 标记为 `done`
@@ -178,7 +178,7 @@ permission:
 1. 将任务1 标记为 `in_progress`
 2. 使用阶段0 已判断的侧别
 3. 提取适用条例
-4. 输出：`代码侧别: xxx | 适用条例: N 条 | diff文件: ./ops/.pr_diff/{pr_number}.diff`
+4. 输出：`代码侧别: xxx | 适用条例: N 条 | diff文件: ./operators/.pr_diff/{pr_number}.diff`
 5. 将任务1 标记为 `done`
 
 **阶段2-4**：流程同场景 A。子 Agent prompt 传 diff 文件路径。
@@ -200,7 +200,7 @@ permission:
 3. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
 4. **派发代码概要子 Agent**（使用"代码概要调用模板" 设计一致模式）：
    - `subagent_type: "general"`
-   - 传入场景文件路径、代码文件路径、概要输出路径 `./ops/{operator_name}/code_summary.md`
+   - 传入场景文件路径、代码文件路径、概要输出路径 `./operators/{operator_name}/code_summary.md`
    - 附加传入 DESIGN.md 路径，要求末尾追加「设计映射」表
 5. 等待子 Agent 返回
 6. 将任务0 标记为 `done`
@@ -227,7 +227,7 @@ permission:
 
 1. 将任务4 标记为 `in_progress`
 2. 报告只有「设计一致性检查」章节
-3. 保存到 `./ops/{operator_name}/{source_file}_design_consistency_review.md`
+3. 保存到 `./operators/{operator_name}/{source_file}_design_consistency_review.md`
 4. 将任务4 标记为 `done`
 
 ---
@@ -295,7 +295,7 @@ Agent({
 ```
 
 **注意**：
-- `{diff_file_path}` 为阶段1写入的本地文件路径（如 `./ops/.pr_diff/3604.diff`）
+- `{diff_file_path}` 为阶段1写入的本地文件路径（如 `./operators/.pr_diff/3604.diff`）
 - 子 Agent 通过 `ascendc-code-review` skill 定位检视文档路径
 
 ### 代码概要调用模板
@@ -360,7 +360,7 @@ Agent({
    - LOW：疑似
 
 4. **生成报告文件**
-   - 路径：`./ops/{operator_name}/{source_file}_review_summary.md`
+   - 路径：`./operators/{operator_name}/{source_file}_review_summary.md`
    - 格式：见下方报告格式模板
 
 ### 报告格式模板
@@ -437,9 +437,9 @@ Agent({
 
 | 报告类型 | 保存路径 |
 |---------|---------|
-| **代码概要** | `./ops/{operator_name}/code_summary.md` |
-| **文件检视报告** | `./ops/{operator_name}/{source_file}_review_summary.md` |
-| **PR 检视报告** | `./ops/pr-{pr_number}/{pr_number}_review_summary.md` |
+| **代码概要** | `./operators/{operator_name}/code_summary.md` |
+| **文件检视报告** | `./operators/{operator_name}/{source_file}_review_summary.md` |
+| **PR 检视报告** | `./operators/pr-{pr_number}/{pr_number}_review_summary.md` |
 
 **路径确定优先级**：
 1. 用户指定路径（最高优先级）
@@ -480,7 +480,7 @@ Agent({
 
 1. **流程待办强制创建**：任务启动后第一件事创建 5 个固定任务
 2. **阶段状态实时更新**：每个阶段开始时标记 `in_progress`，完成后标记 `done`
-3. **阶段0 必须通过子 Agent 输出概要**：派发 general 子 Agent 生成 `./ops/{operator_name}/code_summary.md`，禁止主 Agent 亲自撰写
+3. **阶段0 必须通过子 Agent 输出概要**：派发 general 子 Agent 生成 `./operators/{operator_name}/code_summary.md`，禁止主 Agent 亲自撰写
 4. **代码概要外包**：主 Agent 通过阶段0 子 Agent 掌握代码脉络和侧别，不得亲自读代码做概要
 5. **上下文信息传递**：prompt 中传递侧别识别结果、条例 ID 和条例标题（**禁止传递条例详细内容**）
 6. **条例内容由子 Agent 提取**：子 Agent 自主执行阶段3，从检视文档中读取条例完整内容

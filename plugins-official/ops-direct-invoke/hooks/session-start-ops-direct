@@ -48,7 +48,7 @@ All \`workflows/\` references in this document resolve to absolute paths:
 - \`workflows/templates/\` → \`${PLUGIN_ROOT}/workflows/templates/\`
 - \`asc-devkit/\` → \`${ASC_DEVKIT_DIR}/\`
 
-Paths starting with \`ops/{operator_name}/\` are relative to the user's current working directory."
+Paths starting with \`operators/{operator_name}/\` are relative to the user's current working directory."
 
 # Escape for JSON
 escape_for_json() {

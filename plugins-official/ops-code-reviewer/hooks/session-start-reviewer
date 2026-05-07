@@ -24,7 +24,7 @@ path_guide="## CANNBot Installation Paths (ops-code-reviewer)
 All \`agents/\` references in this document resolve to absolute paths:
 - \`agents/ascendc-ops-reviewer.md\` → \`${PLUGIN_ROOT}/agents/ascendc-ops-reviewer.md\"
 
-Paths starting with \`ops/{operator_name}/\` or \`./ops/\` are relative to the user's current working directory."
+Paths starting with \`operators/{operator_name}/\` or \`./operators/\` are relative to the user's current working directory."
 
 # Escape for JSON
 escape_for_json() {

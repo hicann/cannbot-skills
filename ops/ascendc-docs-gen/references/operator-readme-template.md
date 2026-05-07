@@ -1,7 +1,7 @@
 # {算子名称}
 
 > 本模板用于编写开源算子 README 文档（gitcode 仓）。
-> 文档存放路径：`ops/{operator_name}/README.md`
+> 文档存放路径：`operators/{operator_name}/README.md`
 > 在线参考：https://gitcode.com/cann/ops-math/blob/master/math/add/README.md
 
 ## 产品支持情况

@@ -51,13 +51,13 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 ### 输入边界
 
 - 用户需求（算子数学定义、数据类型、性能要求）
-- 环境信息（`ops/{operator_name}/docs/environment.json`）
+- 环境信息（`operators/{operator_name}/docs/environment.json`）
 - （串讲回应模式）Developer 的设计质疑（`WALKTHROUGH.md ## 质疑清单`）
 
 ### 输出边界
 
-- `ops/{operator_name}/docs/DESIGN.md` — 技术设计文档
-- `ops/{operator_name}/docs/PLAN.md` — 开发计划文档
+- `operators/{operator_name}/docs/DESIGN.md` — 技术设计文档
+- `operators/{operator_name}/docs/PLAN.md` — 开发计划文档
 - （串讲回应模式）`WALKTHROUGH.md ### Architect 回应` — 回应记录
 
 ---
@@ -78,7 +78,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 #### 前置步骤：获取环境信息
 
-读取 `ops/{operator_name}/docs/environment.json`，获取：
+读取 `operators/{operator_name}/docs/environment.json`，获取：
 - `cann_version` → 确定可用 API 集合和版本兼容性
 - `arch_dir` → 确认架构目录路径
 
@@ -130,12 +130,12 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 设计流程完成后，**必须输出两个独立文件**，禁止合并为单文件：
 
-- `ops/{operator_name}/docs/DESIGN.md` — 技术设计文档
-- `ops/{operator_name}/docs/PLAN.md` — 开发计划文档
+- `operators/{operator_name}/docs/DESIGN.md` — 技术设计文档
+- `operators/{operator_name}/docs/PLAN.md` — 开发计划文档
 
 ### 子任务：串讲回应模式
 
-当提示词中标注「串讲回应模式」时，针对`ops/{operator_name}/docs/WALKTHROUGH.md`中设计质疑逐一回应。
+当提示词中标注「串讲回应模式」时，针对`operators/{operator_name}/docs/WALKTHROUGH.md`中设计质疑逐一回应。
 
 ---
 

@@ -141,10 +141,10 @@ matmul算子：`matmul(x1, x2)`
 ```bash
 # 从L0用例派生空tensor用例
 python generate_empty_tensor_cases.py \
-    ops/{operator}/tests/st/testcases/l0_test_cases.csv \
-    ops/{operator}/tests/st/design/05_约束定义.yaml \
-    --output ops/{operator}/tests/st/testcases/l0_test_cases_with_empty.csv \
-    --param-def ops/{operator}/tests/st/design/03_参数定义.yaml \
+    operators/{operator}/tests/st/testcases/l0_test_cases.csv \
+    operators/{operator}/tests/st/design/05_约束定义.yaml \
+    --output operators/{operator}/tests/st/testcases/l0_test_cases_with_empty.csv \
+    --param-def operators/{operator}/tests/st/design/03_参数定义.yaml \
     --num-empty 5 \
     --verbose
 ```

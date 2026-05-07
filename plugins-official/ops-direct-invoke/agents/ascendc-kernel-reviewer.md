@@ -52,15 +52,15 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 
 ### 输入边界
 
-- 算子代码文件：`ops/{operator_name}/{operator_name}.asc`
+- 算子代码文件：`operators/{operator_name}/{operator_name}.asc`
 - 工程文件：CMakeLists.txt、gen_data.py、run.sh
-- 设计文档：`ops/{operator_name}/docs/DESIGN.md`
-- 环境信息：`ops/{operator_name}/docs/environment.json`
-- （可选）Developer 性能数据：`ops/{operator_name}/docs/perf/`
+- 设计文档：`operators/{operator_name}/docs/DESIGN.md`
+- 环境信息：`operators/{operator_name}/docs/environment.json`
+- （可选）Developer 性能数据：`operators/{operator_name}/docs/perf/`
 
 ### 输出边界
 
-- 审查报告：`ops/{operator_name}/docs/REVIEW.md`（含评分、判定、问题列表、修复建议）
+- 审查报告：`operators/{operator_name}/docs/REVIEW.md`（含评分、判定、问题列表、修复建议）
 
 ---
 
@@ -82,7 +82,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 
 #### Step 0：读取环境信息
 
-读取 `ops/{operator_name}/docs/environment.json`，获取：
+读取 `operators/{operator_name}/docs/environment.json`，获取：
 - `bisheng_path` → 独立构建验证的编译器路径
 - `cann_version` → API 合规性检查
 - `ascend_home_path` → 构建环境配置
@@ -92,7 +92,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 **1.1 CMake 配置验证**（编译前门禁）：
 
 ```bash
-python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.txt
+python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMakeLists.txt
 ```
 
 检查 CMakeLists.txt 是否满足 Ascend C 构建要求（`find_package(ASC REQUIRED)`、`LANGUAGES ASC CXX`、`--npu-arch`、链接 `tiling_api` 等）。验证失败则在 REVIEW.md 中记录具体缺失项，标记为必须修复。
@@ -114,7 +114,7 @@ python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.
 
 #### Step 3：设计合规检查
 
-对照 `ops/{operator_name}/docs/DESIGN.md` 设计文档验证实现一致性。
+对照 `operators/{operator_name}/docs/DESIGN.md` 设计文档验证实现一致性。
 
 #### Step 4：测试覆盖评估
 
@@ -250,8 +250,8 @@ python3 workflows/scripts/verify_cmake_config.py ops/{operator_name}/CMakeLists.
 
 **Grep 检查命令**：
 ```bash
-grep -n "blockDim\s*=\s*[0-9]" ops/{operator_name}/*.asc
-grep -n "blockIdx\s*=\s*[0-9]" ops/{operator_name}/*.asc
+grep -n "blockDim\s*=\s*[0-9]" operators/{operator_name}/*.asc
+grep -n "blockIdx\s*=\s*[0-9]" operators/{operator_name}/*.asc
 ```
 
 ### 最终轮附加检查
@@ -284,7 +284,7 @@ grep -n "blockIdx\s*=\s*[0-9]" ops/{operator_name}/*.asc
 | C2 | **禁止**降低标准让有问题的代码通过 | 质量底线 |
 | C3 | **必须**独立编译验证，不信任 Developer 自报结果 | 独立验证 |
 | C4 | **必须**所有问题附带具体修复建议和参考路径 | 反馈质量 |
-| C5 | **必须**审查完成后将报告写入 `ops/{operator_name}/docs/REVIEW.md` | 交付规范 |
+| C5 | **必须**审查完成后将报告写入 `operators/{operator_name}/docs/REVIEW.md` | 交付规范 |
 | C6 | **必须**最终轮审查执行交付件检查清单 | 流程完整 |
 | C7 | **必须**返回结果概要包含 PASS/FAIL/PASS WITH NOTES + 总分 + 关键问题列表 | 输出规范 |
 | C8 | **必须**对每个 PipeBarrier 执行逐项依赖分析 | 同步审查 |

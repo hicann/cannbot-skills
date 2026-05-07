@@ -154,8 +154,8 @@ claude     # Claude Code 用户
 ### 产出物
 
 检视报告路径：
-- 文件检视：`./ops/{operator_name}/{source_file}_review_summary.md`
-- PR 检视：`./ops/pr-{pr_number}/{pr_number}_review_summary.md`
+- 文件检视：`./operators/{operator_name}/{source_file}_review_summary.md`
+- PR 检视：`./operators/pr-{pr_number}/{pr_number}_review_summary.md`
 
 ## 三、检视模式
 
@@ -228,8 +228,8 @@ bash init.sh --help
 
 ### Q: 检视报告保存在哪里？
 
-- 文件检视：`./ops/{operator_name}/{source_file}_review_summary.md`
-- PR 检视：`./ops/pr-{pr_number}/{pr_number}_review_summary.md`
+- 文件检视：`./operators/{operator_name}/{source_file}_review_summary.md`
+- PR 检视：`./operators/pr-{pr_number}/{pr_number}_review_summary.md`
 
 ---
 

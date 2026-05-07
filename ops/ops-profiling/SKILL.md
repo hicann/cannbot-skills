@@ -40,7 +40,7 @@ Step 6: 修改代码 → 回到 Step 2 重新采集（数据自动归档为新�
 
 **直调算子**:
 ```bash
-cd ops/{operator_name} && mkdir -p build && cd build && cmake .. && make -j
+cd operators/{operator_name} && mkdir -p build && cd build && cmake .. && make -j
 ```
 
 **aclnn 算子**:
@@ -81,11 +81,11 @@ msprof op --warm-up=10 --launch-count=5 --output=./msprof_output ./demo
 OPPROF_DIR=$(ls -td <output_dir>/OPPROF_* | head -1)
 
 # 归档 CSV + 生成摘要（自动创建 docs/perf/round_NNN/）
-python3 {skill_path}/scripts/perf_summary.py $OPPROF_DIR ops/{operator_name}
+python3 {skill_path}/scripts/perf_summary.py $OPPROF_DIR operators/{operator_name}
 ```
 
 脚本会自动：
-1. 在 `ops/{operator_name}/docs/perf/round_NNN/` 创建归档目录（轮次自动递增）
+1. 在 `operators/{operator_name}/docs/perf/round_NNN/` 创建归档目录（轮次自动递增）
 2. 复制所有 8 个 CSV 原始文件到归档目录
 3. 生成 `summary.txt` 统计摘要（所有指标的 min/avg/max，**不做判定**）
 
@@ -193,7 +193,7 @@ Atlas A2: float32 Vector 峰值算力约 11.06 TOPS
 **对比方法**：
 ```bash
 # 对比两轮摘要
-diff ops/{operator_name}/docs/perf/round_001/summary.txt ops/{operator_name}/docs/perf/round_002/summary.txt
+diff operators/{operator_name}/docs/perf/round_001/summary.txt operators/{operator_name}/docs/perf/round_002/summary.txt
 
 # 或直接读两个 summary.txt 进行对比分析
 ```
@@ -227,7 +227,7 @@ OPPROF_{timestamp}_XXX/         # msprof op 直接输出（临时目录）
 ### 归档目录（持久）
 
 ```
-ops/{算子名}/docs/perf/
+operators/{算子名}/docs/perf/
 ├── round_001/                  # 第一轮采集（基线）
 │   ├── OpBasicInfo.csv         # 完整原始 CSV（从 OPPROF 复制）
 │   ├── PipeUtilization.csv

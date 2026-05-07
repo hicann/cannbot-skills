@@ -249,7 +249,7 @@ while 存在未完成的条款:
    - **发现问题**（HIGH ≥80%）：明确违规，需立即修复
    - **需关注**（MED 60-80%）：可疑迹象，建议人工确认
    - **疑似**（LOW <60%）：模式相似，供参考
-4. 确定输出路径：用户指定 > `./operators/{operator_name}/{source_file_name}_ai_review.md` > `./ops/{source_file_name}_ai_review.md`
+4. 确定输出路径：用户指定 > `./operators/{operator_name}/{source_file_name}_ai_review.md` > `./operators/{source_file_name}_ai_review.md`
 5. 按照 `style/code_review_summary_style.txt` 格式生成报告
 
 ---
@@ -335,7 +335,7 @@ git diff main...<branch_name>
 【阶段6】自驱动检视循环（5步骤）
   每轮: [进度锚点] → 锁定条款 → (API文档查阅) → 调用skill检视+置信度评定 → 完成确认
   HIGH问题记入"发现问题"，MED记入"需关注"，LOW记入"疑似"
-【阶段7】生成报告 → 写入 ./ops/add/add_kernel_review.md（按置信度分级呈现）
+【阶段7】生成报告 → 写入 ./operators/add/add_kernel_review.md（按置信度分级呈现）
 【阶段8】确认完成 → 向用户返回完成信息
 ```
 

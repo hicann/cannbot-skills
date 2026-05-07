@@ -31,7 +31,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 ### 职责
 
-- 根据 Architect 的设计文档（`ops/{operator_name}/docs/DESIGN.md`）进行代码实现
+- 根据 Architect 的设计文档（`operators/{operator_name}/docs/DESIGN.md`）进行代码实现
 - 构建、测试、问题处理
 - 结果总结、文档编写
 
@@ -54,19 +54,19 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 ### 输入边界
 
-- 技术设计文档：`ops/{operator_name}/docs/DESIGN.md`
-- 开发计划文档：`ops/{operator_name}/docs/PLAN.md`
-- 环境信息：`ops/{operator_name}/docs/environment.json`
-- （修复模式）审查报告：`ops/{operator_name}/docs/REVIEW.md`
+- 技术设计文档：`operators/{operator_name}/docs/DESIGN.md`
+- 开发计划文档：`operators/{operator_name}/docs/PLAN.md`
+- 环境信息：`operators/{operator_name}/docs/environment.json`
+- （修复模式）审查报告：`operators/{operator_name}/docs/REVIEW.md`
 - （串讲模式）设计文档 + 开发计划
 
 ### 输出边界
 
-- 算子代码文件：`ops/{operator_name}/{operator_name}.asc`
+- 算子代码文件：`operators/{operator_name}/{operator_name}.asc`
 - 工程文件：CMakeLists.txt、gen_data.py、run.sh
 - 更新后的 PLAN.md（进度和测试结果）
 - README.md 算子文档
-- （串讲模式）`ops/{operator_name}/docs/WALKTHROUGH.md`
+- （串讲模式）`operators/{operator_name}/docs/WALKTHROUGH.md`
 
 ---
 
@@ -91,11 +91,11 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 #### 阶段 1：读取设计方案
 
-**环境信息**：读取 `ops/{operator_name}/docs/environment.json` 获取编译器路径、架构目录等。
+**环境信息**：读取 `operators/{operator_name}/docs/environment.json` 获取编译器路径、架构目录等。
 
 **目标**：理解设计方案，为实现做准备。
 
-**读取文件**：`ops/{operator_name}/docs/DESIGN.md`，重点：API 映射、Buffer 规划、伪代码
+**读取文件**：`operators/{operator_name}/docs/DESIGN.md`，重点：API 映射、Buffer 规划、伪代码
 
 **阶段 1 检查清单**：
 - [ ] 已读取 DESIGN.md
@@ -164,14 +164,14 @@ Level 2: 极值/零值  -> 边界情况验证
 **检查清单**：
 - [ ] DoubleBuffer已使能（查看`ascendc-best-practice`）
 - [ ] msprof op 采集完成
-- [ ] 性能数据已归档到 `ops/{operator_name}/docs/perf/round_NNN/`
+- [ ] 性能数据已归档到 `operators/{operator_name}/docs/perf/round_NNN/`
 - [ ] summary.txt 已分析，达标判定已记录
 - [ ] 如有优化，优化前后数据已对比记录
 - [ ] 性能结论已写入 PLAN.md
 
 #### 阶段 4：结果总结
 
-**目标**：记录开发结果和经验到`ops/{operator_name}/docs/PLAN.md`。
+**目标**：记录开发结果和经验到`operators/{operator_name}/docs/PLAN.md`。
 
 **记录清单**：
 - [ ] 实现完成情况

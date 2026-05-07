@@ -17,7 +17,7 @@
 | 参数 | 说明 | 来源 |
 |------|------|------|
 | 代码文件路径 | 待检视的算子代码 | 主 Agent 传入 |
-| 输出路径 | 代码概要保存路径 | 主 Agent 传入，如 `./ops/{op_name}/code_summary.md` |
+| 输出路径 | 代码概要保存路径 | 主 Agent 传入，如 `./operators/{op_name}/code_summary.md` |
 | PR diff 路径（可选） | PR 场景的 diff 文件 | 主 Agent 传入，文件检视模式无此参数 |
 
 ---
