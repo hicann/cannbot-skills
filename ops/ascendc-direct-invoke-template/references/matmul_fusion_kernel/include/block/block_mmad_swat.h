@@ -200,8 +200,22 @@ public:
         (void)gmC;   // 融合模式下不直接写 GM，保留参数仅为签名兼容
         auto curM = Get<IDX_M_TILEIDX>(singleShape);
         auto curN = Get<IDX_N_TILEIDX>(singleShape);
+        // [FIX SPLIT_M ODD-M] Fixpipe DUAL_DST_SPLIT_M splits the L0C M-axis evenly
+        // across the two AIVs, which requires the L0C view's M to be even.
+        // For odd `curM` (e.g. M=1 tail tile), round the L0C / UB view up to
+        // `curMPad` so SPLIT_M can dispatch (curMPad/2) rows per AIV.
+        // MMAD still uses `curM` so only those rows hold valid matmul results.
+        // The Epilogue's existing SubBlockIdx logic
+        //   blockShapeM = (curM & 1) ? halfM - SubBlockIdx : halfM
+        //   (with halfM = ceil(curM/2))
+        // assigns AIV0 -> halfM rows (UB[0..halfM)) and AIV1 -> halfM-1 rows
+        // (UB[0..halfM-1)). Since halfMPad = curMPad/2 = halfM, AIV1 reads the
+        // first halfM-1 rows of its UB half, which still map to valid L0C rows
+        // [halfM..curM-1]; the lone garbage padded row at L0C[curM] sits at the
+        // tail of AIV1's UB half and is never copied out to GM.
+        auto curMPad = (curM + 1L) & ~1L;
         uint64_t l0cOffset = (l0cPingPong_ & 1) * HALF_L0C_SIZE;
-        auto layoutL0C = AscendC::Te::MakeL0CLayout(curM, curN);
+        auto layoutL0C = AscendC::Te::MakeL0CLayout(curMPad, curN);
         auto tensorL0C = AscendC::Te::MakeTensor(AscendC::Te::MakeL0CmemPtr<float>(l0cOffset), layoutL0C);
         uint64_t scaleWindowIter = 0;
         for (uint64_t iter0 = 0; iter0 < kL1Iter_; ++iter0) {
@@ -362,7 +376,19 @@ public:
         // [PATTERN] L0C → UB (Fixpipe NZ→ND, SplitM 双 AIV)
         // 融合算子唯一输出路径；CV 同步由 Kernel 层统一管理。
         // gmC 参数仅用于签名兼容，本步骤不使用。
-        auto layoutUB = AscendC::Te::MakeNDLayout<float>(curM, curN);
+        // [FIX SPLIT_M ODD-M] UB 行数使用 curMPad 保证 fixpipe 内部
+        // mSize = min(srcL0C_M, dstUB_M) 为偶数，从而 SPLIT_M 能等分到双 AIV。
+        // [FIX ODD-N / N-ALIGN] UB 列数对齐到 32B（= 8 个 float），与 Epilogue 计算
+        // nAlign = CeilDiv(curN, 32/sizeof(float)) * (32/sizeof(float)) 的 UB 行
+        // stride 假设保持一致；否则 curN 非 8 的倍数（包括 N=1、N=odd、N=15、N=33 等）
+        // 时 fixpipe 写 UB 用的 row stride = curN 与 Epilogue 读 UB 用的 row stride =
+        // nAlign 不匹配，导致从第 1 行起所有数据错位。fixpipe 内部 nSize =
+        // min(srcL0C_N=curN, dstUB_N=curNUbAlign) = curN，每行只填充 curN 列；尾部
+        // (curNUbAlign - curN) 列保持未触碰，Epilogue 通过 DataCopyPad 用
+        // rowBytes = curN * sizeof(float) 仅写出有效列，不会泄漏到 GM。
+        constexpr int64_t UB_N_ALIGN_ELEM = 32L / static_cast<int64_t>(sizeof(float));
+        auto curNUbAlign = ((curN + UB_N_ALIGN_ELEM - 1L) / UB_N_ALIGN_ELEM) * UB_N_ALIGN_ELEM;
+        auto layoutUB = AscendC::Te::MakeNDLayout<float>(curMPad, curNUbAlign);
         auto ubTensor = AscendC::Te::MakeTensor(
             AscendC::Te::MakeUBmemPtr<float>(0), layoutUB);
         AscendC::Te::Fixpipe<FIXPIPE_TRAIT_SPLIT_M>(ubTensor, tensorL0C,

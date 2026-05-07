@@ -14,7 +14,7 @@
 //   4) 调整 Kernel Entry 的 dDivisor 参数语义（名字可保留或重命名）
 //   5) 同步修改 scripts/gen_data.py 的 gen_fusion_inputs + compute_golden
 //
-// 关键架构约束（不可违反，详见 references/matmul_fusion_guide.md“强约束规范（契约 A-H）”）：
+// 关键架构约束（不可违反，详见 references/matmul_fusion_guide.md“机制说明”）：
 //   - 使用 MIX 模式：无 __cube__，AIC/AIV 共享同一 Kernel 入口
 //   - BlockMmad L0C 输出恒定走 Fixpipe→UB（SPLIT_M 双 AIV），单算子路径已移除
 //   - Params 必须包含 6 子字段：

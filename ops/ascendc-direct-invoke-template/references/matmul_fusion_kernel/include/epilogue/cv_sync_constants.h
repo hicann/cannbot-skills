@@ -3,7 +3,7 @@
 // 融合算子中 AIC 和 AIV 之间的 CrossCoreFlag 配对常量。
 // 这些常量经过验证，请勿随意修改数值。
 //
-// 详见 references/matmul_fusion_guide.md“CV 同步与 Hard Event”章节
+// 详见 matmul_fusion_guide.md §3.3 "CV 同步与 Hard Event"
 // ============================================================
 #ifndef EPILOGUE_CV_SYNC_CONSTANTS_H
 #define EPILOGUE_CV_SYNC_CONSTANTS_H

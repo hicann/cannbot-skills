@@ -17,7 +17,7 @@
 //   using FusedKernel = Kernel::MatmulKernelFused<
 //       ProblemShape, BlockMmad, BlockScheduler, MyCustomEpilogue>;
 //
-// Epilogue 合约（必须满足）：详见 references/matmul_fusion_guide.md 的“三接口合约”与“强约束规范（契约 A-H）”章节
+// Epilogue 合约（必须满足）：详见 references/matmul_fusion_guide.md 的“三接口合约”与“机制说明”章节
 //   1) 成员类型 Params
 //   2) Init(const Params&, baseM, baseN, problemShape4)
 //   3) operator()(BlockShape, gmOffset, aivAicFlagId)
@@ -40,9 +40,7 @@
 #include "../block/block_scheduler.h"
 #include "../utils/constants.h"
 #include "../epilogue/cv_sync_constants.h"
-// Note: 具体 Epilogue 类型由调用方（.cpp）通过模板参数注入，并在 .cpp 中 #include 对应头文件。
 // 本模板默认不 include 任何具体 Epilogue，避免产生不必要耦合。
-// 参考骨架：../epilogue/epilogue_skeleton.h
 
 namespace Kernel {
 
@@ -101,15 +99,10 @@ public:
     // ---- 统一入口 (AIC + AIV 共享) ----
     __aicore__ inline void operator()(const Params& params)
     {
-        // ---- 0. blockIdx 调整 (仿 kernel_matmul_mix_without_que.h:149-155) ----
-        int64_t curBlockIdx = AscendC::GetBlockIdx();
-        int64_t blockNum = AscendC::GetBlockNum();
-        if ASCEND_IS_AIV {
-            curBlockIdx /= AscendC::GetTaskRation();
-        }
-
         // ---- 1. 构造 Scheduler (AIC/AIV 共享同一个实例) ----
-        BlockSchedulerOp bs(params.problemShape, curBlockIdx, blockNum, params.schParams);
+        //   BlockScheduler 内部通过 AscendC::GetBlockIdx() / GetBlockNum() 获取索引，
+        //   无需外部传入 curBlockIdx / blockNum。
+        BlockSchedulerOp bs(params.problemShape, params.schParams);
 
         // ---- 2. 初始化 Epilogue (AIV 侧 UB 布局) ----
         Epilogue epilogueOp;

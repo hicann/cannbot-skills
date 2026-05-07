@@ -97,13 +97,14 @@ echo "================================================================"
 echo "[3/4] 生成测试数据"
 echo "================================================================"
 cd build
+rm -rf ./input/ ./output/
 TORCH_DEVICE_BACKEND_AUTOLOAD=0 python3 ../scripts/gen_data.py "$M" "$K" "$N"
 
 echo
 echo "================================================================"
 echo "[4/4] NPU 执行与精度验证"
 echo "================================================================"
-rm -f output/npu_out.bin output/cpu_output.bin
+
 "./${OP_NAME}" "$M" "$K" "$N"
 python3 ../scripts/verify_result.py "$M" "$N"
 

@@ -14,7 +14,7 @@ description: Ascend C 算子 Tiling 设计指南。提供算子分类体系和 T
 | Broadcast 广播类 | 输入Shape不同，需广播对齐 | Add, Mul, Sub | ✅ [场景路由](references/broadcast/patterns.md)（⚠️ 必须先读） |
 | Conversion 数据转换类 | 改变布局/形状，合并/拆分张量 | Transpose, Concat, Split | ⚠️ [场景路由](references/conversion/patterns.md)（当前仅 Transpose 部分支持） |
 | Random 随机类 | 生成随机数，需种子管理 | RandomUniform, Dropout | 📋 规划中 |
-| MatMul 矩阵乘类 | 矩阵乘法，高计算密度，用Cube单元 | MatMul, BatchMatMul | 📋 规划中 |
+| MatMul 矩阵乘类 | 矩阵乘法，高计算密度，用Cube单元 | MatMul, BatchMatMul | ✅ [场景路由](references/matmul/patterns.md)（mxfp8 + eltwise 融合；其它 matmul 形态规划中） |
 | Convolution 卷积类 | 空间卷积，滑动窗口计算 | Conv2D, DepthwiseConv | 📋 规划中 |
 | NN 神经网络类 | 神经网络专用，多种操作组合 | FlashAttention, GroupNorm | 📋 规划中 |
 

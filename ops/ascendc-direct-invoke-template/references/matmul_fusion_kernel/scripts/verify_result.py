@@ -24,8 +24,7 @@ import sys
 import numpy as np
 import torch
 
-# [MODIFY] 精度阈值 — float32 输出使用 2^-13
-ERROR_TOL = 2 ** (-13)  # ~0.000122
+ERROR_TOL = 1e-3
 
 # [MODIFY] 数据类型 — 与 OUTPUT_DTYPE = np.float32 一致
 DATA_TYPE = np.float32

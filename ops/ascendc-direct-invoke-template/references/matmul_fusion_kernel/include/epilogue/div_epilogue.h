@@ -86,7 +86,10 @@ public:
         // [SAMPLE] ALIGN_ELEM 按 float = 8；非 float 输出时必须改为 32/sizeof(OutputType)
         constexpr int64_t ALIGN_ELEM = 32 / sizeof(DataType);
         int64_t l1NAlign = ::CeilDiv(l1N, ALIGN_ELEM) * ALIGN_ELEM;
-        int64_t matmulArea = l1M * l1NAlign;
+        // SplitM 下一个 cube 会拆给两个 vector，每个 vector 的 UB 仅需容纳半个 M 面积。
+        int64_t splitTaskRation = static_cast<int64_t>(AscendC::GetTaskRation());
+        int64_t l1MSplit = ::CeilDiv(l1M, splitTaskRation);
+        int64_t matmulArea = l1MSplit * l1NAlign;
 
         // [USER] stageNum = 业务需要的 UB 分段数
         //   - 1（Relu 等无额外输入）：剩余 UB 全部给 cLocalTmp_
@@ -94,8 +97,9 @@ public:
         //   - 3（Mul+Add 二路第二输入）：dLocal_ × 2 + cLocalTmp_
         constexpr int64_t stageNum = 2;   // [SAMPLE] 当前样例为双输入融合（Matmul 输出 + divisor）
         int64_t lastUBBytes = UB_SIZE - matmulArea * sizeof(DataType);
+        int64_t usableElems = (lastUBBytes > 0) ? (lastUBBytes / stageNum / sizeof(DataType)) : 0;
         stageSize_ = AscendC::Std::min(
-            static_cast<int64_t>(lastUBBytes / stageNum / sizeof(DataType) / l1NAlign * l1NAlign),
+            static_cast<int64_t>(usableElems / l1NAlign * l1NAlign),
             matmulArea);
 
         int64_t ubOffset = matmulArea;
@@ -129,26 +133,46 @@ public:
         int64_t stageSize = AscendC::Std::min(stageSize_, inputSize) / nAlign * nAlign;
         int64_t N = Get<MNK_N>(problemShape_);   // [PATTERN] 全局 N，用于 stride
 
-        int64_t loop = 0;
+        if (stageSize <= 0) {
+            AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_MTE3>(flagId);
+            return;
+        }
+
         int64_t stageOffset = 0;
 
         while (stageOffset < inputSize) {
+            int64_t curStageSize = AscendC::Std::min(stageSize, inputSize - stageOffset);
             // [PATTERN] 按 RowMajor 累加行偏移 + SPLIT_M 偏移
             //           [SAMPLE] dstOffset = mPos * N + nPos 假设**输出为 RowMajor**
-            int64_t offset = dstOffset + loop * stageSize / nAlign * N;
+            int64_t offset = dstOffset + (stageOffset / nAlign) * N;
             offset += AscendC::GetSubBlockIdx() * halfM * N;
-            stageSize = AscendC::Std::min(stageSize, inputSize - stageOffset);
 
             // [PATTERN] Step a: GM → UB 搬第二路输入（MTE2，带 stride）
             // [USER]    若你的算子无第二路输入（如 Relu/GeLU/Cast），删除本 Step
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(ZERO_FLAG);
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(ZERO_FLAG);
 
-            uint16_t nRows = static_cast<uint16_t>(stageSize / nAlign);
+            uint16_t nRows = static_cast<uint16_t>(curStageSize / nAlign);
             // [SAMPLE] sizeof(float) —— 输出/第二路输入 dtype 改变时必须同步修改
             uint32_t rowBytes = static_cast<uint32_t>(blockShapeN * sizeof(DataType));
-            uint32_t srcGap = static_cast<uint32_t>((N - blockShapeN) * sizeof(DataType));
-            AscendC::DataCopyExtParams dCopyParams{nRows, rowBytes, srcGap, 0, 0};
+            uint32_t gmRowGap = static_cast<uint32_t>((N - blockShapeN) * sizeof(DataType));
+            // [FIX ODD-N] DataCopyExtParams 中，UB 侧 stride 单位是 **dataBlock(32B)**
+            // 而不是字节（GM 侧才是字节）。原代码用字节填 ubRowGap，仅当
+            // blockShapeN 为 8 的倍数（ubRowGap 字节 == 0）时巧合可工作；当
+            // blockShapeN=1/4/15/33 等非 8 倍数时硬件按 dataBlock 解释 ubRowGap，
+            // 实际跳过 (ubRowGap 字节值) × 32B，导致 UB 行错位、Div 读取错误的
+            // 数据。这里改用 dataBlock 单位计算正确间隔。
+            //   UB 行 stride 字节 = nAlign * sizeof(DataType)（已 32B 对齐）
+            //   框架对 blockLen<32B 的搬运会自动右补到 32B 的倍数，
+            //   所以一行有效“块”大小 = ceil(rowBytes/32)*32
+            //   ubRowGap_block = (UB 行 stride - 一行有效块大小) / 32
+            constexpr uint32_t UB_DATA_BLOCK_BYTES = 32U;
+            uint32_t ubStrideBytes =
+                static_cast<uint32_t>(nAlign) * static_cast<uint32_t>(sizeof(DataType));
+            uint32_t blockBytes =
+                ::CeilDiv(rowBytes, UB_DATA_BLOCK_BYTES) * UB_DATA_BLOCK_BYTES;
+            uint32_t ubRowGap = (ubStrideBytes - blockBytes) / UB_DATA_BLOCK_BYTES;
+            AscendC::DataCopyExtParams dCopyParams{nRows, rowBytes, gmRowGap, ubRowGap, 0};
             AscendC::DataCopyPadExtParams<DataType> dPadParams{false, 0, 0, 0};
             AscendC::DataCopyPad(dLocal_, divisorGlobal_[offset], dCopyParams, dPadParams);
 
@@ -161,20 +185,18 @@ public:
             //   [SAMPLE-alt: Mul]       AscendC::Mul(cLocalTmp_, cLocal_[stageOffset], dLocal_, stageSize);
             //   [SAMPLE-alt: Add]       AscendC::Add(cLocalTmp_, cLocal_[stageOffset], dLocal_, stageSize);
             //   [SAMPLE-alt: Relu]      AscendC::Relu(cLocalTmp_, cLocal_[stageOffset], stageSize);           // 无第二路输入：删 Step a 与 dLocal_；stageNum=1
-            //   [SAMPLE-alt: Cast->half] AscendC::Cast(castLocal_, cLocal_[stageOffset], CAST_RINT, stageSize); // 输出 dtype 变：同步改 using DataType / sizeof / GlobalTensor 模板；详见 matmul_fusion_guide.md“附录 B：派生算子改动矩阵”
+            //   [SAMPLE-alt: Cast->half] AscendC::Cast(castLocal_, cLocal_[stageOffset], CAST_RINT, stageSize); // 输出 dtype 变：同步改 using DataType / sizeof / GlobalTensor 模板；详见 matmul_fusion_guide.md“§2.5 派生算子改动矩阵”
             //   [SAMPLE-alt: Div+Relu]  先 Div → PipeBarrier<PIPE_V> → Relu(cLocalTmp_, cLocalTmp_, ...)      // UB 布局同 Div
-            AscendC::Div(cLocalTmp_, cLocal_[stageOffset], dLocal_, stageSize);
-            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Div(cLocalTmp_, cLocal_[stageOffset], dLocal_, curStageSize);
 
             // [PATTERN] Step d: V → MTE3 同步 + 写回 GM（带 stride）
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(ZERO_FLAG);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(ZERO_FLAG);
 
-            AscendC::DataCopyExtParams outParams{nRows, rowBytes, 0, srcGap, 0};
+            AscendC::DataCopyExtParams outParams{nRows, rowBytes, ubRowGap, gmRowGap, 0};
             AscendC::DataCopyPad<DataType>(outputGlobal_[offset], cLocalTmp_, outParams);
 
-            stageOffset += stageSize;
-            loop++;
+            stageOffset += curStageSize;
         }
 
         // [PATTERN] CV 同步：通知 AIC 本 tile 的 UB 已释放
