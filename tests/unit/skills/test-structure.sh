@@ -12,6 +12,8 @@
 # - S-STR-06: name format ^[a-z0-9]+(-[a-z0-9]+)*$
 # - S-STR-07: description length 1-1024 characters
 # - S-STR-08: All links point to existing files
+# - S-STR-15: Skill name uniqueness across all skills
+# - S-STR-16: metadata string→string mapping
 #
 # Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================
@@ -106,6 +108,18 @@ done <<< "$(get_all_skills_with_paths)"
 echo ""
 
 # ============================================
+# Test 3: Global Uniqueness
+# ============================================
+print_section_header "Test: Skill Name Uniqueness (S-STR-15)"
+
+uniqueness_fail=0
+if ! validate_global_uniqueness "skill"; then
+    uniqueness_fail=1
+fi
+
+echo ""
+
+# ============================================
 # Summary
 # ============================================
 echo "========================================"
@@ -115,10 +129,11 @@ echo ""
 echo "  Total skills: $total_skills"
 echo -e "  Structure tests: ${GREEN}$structure_pass passed${NC}, ${RED}$structure_fail failed${NC}"
 echo -e "  Link tests:      ${GREEN}$link_pass passed${NC}, ${RED}$link_fail failed${NC}"
+echo -e "  Uniqueness:      ${GREEN}$([ $uniqueness_fail -eq 0 ] && echo "passed" || echo "failed")${NC}"
 [ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}        $skip_count"
 echo ""
 
-if [ $((structure_fail + link_fail)) -gt 0 ]; then
+if [ $((structure_fail + link_fail + uniqueness_fail)) -gt 0 ]; then
     print_status_failed
     echo ""
     echo "Please fix the failed structure checks."

@@ -1268,13 +1268,14 @@ validate_semver() {
     fi
 }
 
-# Compute SHA256 hash of a file (just the first 16 chars for brevity)
+# Compute SHA256 hash of a file (first 16 chars).
+# Used only in local mode — .version-state/ is gitignored, machine-local.
 # Usage: compute_file_hash "/path/to/file"
 # Returns: short hash string
 compute_file_hash() {
     local file="$1"
     if [ -f "$file" ]; then
-        sha256sum "$file" | cut -c1-16
+        sha256sum "$file" 2>/dev/null | cut -c1-16 || echo "MISSING"
     else
         echo "MISSING"
     fi

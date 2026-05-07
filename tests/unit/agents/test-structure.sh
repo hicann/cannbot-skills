@@ -12,6 +12,7 @@
 # - A-STR-06: name format ^[a-z0-9]+(-[a-z0-9]+)*$
 # - A-STR-07: description length 1-1024 characters
 # - A-STR-08: All links point to existing files
+# - A-STR-09: Agent name uniqueness across all agents
 #
 # Supports incremental testing via INCREMENTAL_AGENTS environment variable.
 # =============================================================================
@@ -105,6 +106,18 @@ done <<< "$(get_all_agents_with_paths)"
 echo ""
 
 # ============================================
+# Test 3: Global Uniqueness
+# ============================================
+print_section_header "Test: Agent Name Uniqueness (A-STR-09)"
+
+uniqueness_fail=0
+if ! validate_global_uniqueness "agent"; then
+    uniqueness_fail=1
+fi
+
+echo ""
+
+# ============================================
 # Summary
 # ============================================
 echo "========================================"
@@ -114,10 +127,11 @@ echo ""
 echo "  Total agents: $total_agents"
 echo -e "  Structure tests: ${GREEN}$structure_pass passed${NC}, ${RED}$structure_fail failed${NC}"
 echo -e "  Link tests:      ${GREEN}$link_pass passed${NC}, ${RED}$link_fail failed${NC}"
+echo -e "  Uniqueness:      ${GREEN}$([ $uniqueness_fail -eq 0 ] && echo "passed" || echo "failed")${NC}"
 [ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}        $skip_count"
 echo ""
 
-if [ $((structure_fail + link_fail)) -gt 0 ]; then
+if [ $((structure_fail + link_fail + uniqueness_fail)) -gt 0 ]; then
     print_status_failed
     echo ""
     echo "Please fix the failed structure checks."

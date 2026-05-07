@@ -2,14 +2,16 @@
 # =============================================================================
 # Test: Team Plugin Version Care
 # =============================================================================
-# Validates that plugin.json version is correctly bumped when dependencies change.
+# Validates that plugin.json version is bumped when skill/agent dependencies change.
+# Uses git diff against a base ref (origin/master or HEAD~1) to detect file changes,
+# then compares plugin.json version with the base to verify it was bumped.
 #
 # Rules:
-# - PATCH (3rd digit): Skill dependency changed (content hash or list changed)
-# - MINOR (2nd digit): Agent dependency changed (content hash or list changed)
-# - MAJOR (1st digit): Breaking team interface changes (not auto-detected)
+# - PATCH (3rd digit): Skill or agent files changed → bump required
+# - MINOR / MAJOR: manual upgrade by developer
 #
-# Version state is stored in tests/.version-state/<team-name>.json
+# Environment variables:
+#   CI_MERGE_REQUEST_TARGET_BRANCH_NAME  base ref for CI (default: origin/master)
 #
 # Supports incremental testing via INCREMENTAL_TEAMS environment variable.
 # =============================================================================
@@ -18,6 +20,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
+
+MARKETPLACE_JSON="$SKILLS_DIR/.claude-plugin/marketplace.json"
 
 echo "=== Test: Team Plugin Version Care ==="
 echo ""
@@ -30,8 +34,6 @@ if is_incremental_mode; then
     echo -e "${CYAN}[INCREMENTAL MODE]${NC} Testing only changed teams"
     echo ""
 fi
-
-TEAM_BASE="$SKILLS_DIR/ops/teams"
 
 # Counters
 total_teams=0
@@ -47,137 +49,81 @@ echo "Teams to check: $total_teams"
 echo ""
 
 # ============================================
-# Helper: build hash map as "name:hash" lines
+# Helper: resolve team skill & agent file paths from marketplace.json + plugin.json
+# Returns: relative paths (from SKILLS_DIR), one per line
 # ============================================
-build_skill_hashes() {
-    local plugin_dir="$1"
-    local plugin_json="$2"
-
-    while IFS= read -r skill_rel_path; do
-        [ -z "$skill_rel_path" ] && continue
-        skill_rel_path="${skill_rel_path#./}"
-        local skill_full="$plugin_dir/$skill_rel_path"
-        if [ -L "$skill_full" ]; then
-            skill_full=$(readlink -f "$skill_full")
-        fi
-        local skill_file="$skill_full/SKILL.md"
-        local skill_name
-        skill_name=$(basename "$skill_full")
-        local hash
-        hash=$(compute_file_hash "$skill_file")
-        echo "$skill_name:$hash"
-    done < <(extract_plugin_skills "$plugin_json")
-}
-
-build_agent_hashes() {
-    local plugin_dir="$1"
-    local plugin_json="$2"
-
-    while IFS= read -r agent_rel_path; do
-        [ -z "$agent_rel_path" ] && continue
-        agent_rel_path="${agent_rel_path#./}"
-        local agent_full="$plugin_dir/$agent_rel_path"
-        local agent_name
-        agent_name=$(basename "$agent_full" .md)
-        local hash
-        hash=$(compute_file_hash "$agent_full")
-        echo "$agent_name:$hash"
-    done < <(extract_plugin_agents "$plugin_json")
-}
-
-# ============================================
-# Helper: compare hash maps
-# Returns: lines describing changes
-# ============================================
-compare_hashes() {
-    local current_file="$1"
-    local loaded_lines="$2"
-
-    local changes=""
-
-    # Check for removed or modified entries
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local name="${line%%:*}"
-        local old_hash="${line#*:}"
-        local current_hash
-        current_hash=$(grep "^${name}:" "$current_file" 2>/dev/null | head -1 | cut -d: -f2- || true)
-        if [ -z "$current_hash" ]; then
-            changes="${changes}REMOVED: ${name}\n"
-        elif [ "$current_hash" != "$old_hash" ]; then
-            changes="${changes}MODIFIED: ${name} (${old_hash} -> ${current_hash})\n"
-        fi
-    done <<< "$loaded_lines"
-
-    # Check for added entries
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local name="${line%%:*}"
-        local found
-        found=$(grep "^${name}:" <<< "$loaded_lines" 2>/dev/null || true)
-        if [ -z "$found" ]; then
-            changes="${changes}ADDED: ${name}\n"
-        fi
-    done < "$current_file"
-
-    echo -e "$changes" | sed '/^$/d'
-}
-
-# ============================================
-# Helper: save state using temp files
-# ============================================
-save_team_state() {
+resolve_team_file_paths() {
     local team_name="$1"
-    local version="$2"
-    local skills_file="$3"
-    local agents_file="$4"
 
-    mkdir -p "$VERSION_STATE_DIR"
-    local state_file="$VERSION_STATE_DIR/$team_name.json"
+    python3 <<PYEOF
+import json, os
 
-    # Build skills JSON object
-    local skills_obj="{"
-    local first=true
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local name="${line%%:*}"
-        local hash="${line#*:}"
-        if $first; then first=false; else skills_obj+=","; fi
-        skills_obj+="\"$name\":\"$hash\""
-    done < "$skills_file"
-    skills_obj+="}"
+# Resolve skills from marketplace.json
+try:
+    marketplace = json.load(open("${MARKETPLACE_JSON}"))
+except Exception:
+    marketplace = {"plugins": []}
 
-    # Build agents JSON object
-    local agents_obj="{"
-    first=true
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local name="${line%%:*}"
-        local hash="${line#*:}"
-        if $first; then first=false; else agents_obj+=","; fi
-        agents_obj+="\"$name\":\"$hash\""
-    done < "$agents_file"
-    agents_obj+="}"
+skills_packages = {}
+team_entry = None
+for p in marketplace.get("plugins", []):
+    if p.get("category") == "skills":
+        skills_packages[p["name"]] = p
+    elif p.get("name") == "${team_name}":
+        team_entry = p
 
-    cat > "$state_file" <<EOF
-{
-  "version": "$version",
-  "timestamp": "$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')",
-  "skills": $skills_obj,
-  "agents": $agents_obj
-}
-EOF
+if team_entry:
+    for dep_name in team_entry.get("dependencies", []):
+        sp = skills_packages.get(dep_name)
+        if sp:
+            source = sp.get("source", "./ops").lstrip("./")
+            for skill_rel in sp.get("skills", []):
+                skill_dir = skill_rel.lstrip("./")
+                print(f"{source}/{skill_dir}/SKILL.md")
+
+# Resolve agents from plugin.json
+try:
+    plugin_json_path = os.path.join(
+        "${SKILLS_DIR}", "plugins-official", "${team_name}",
+        ".claude-plugin", "plugin.json")
+    plugin = json.load(open(plugin_json_path))
+    for agent_rel in plugin.get("agents", []):
+        agent_rel = agent_rel.lstrip("./")
+        print(f"plugins-official/${team_name}/{agent_rel}")
+except Exception:
+    pass
+PYEOF
 }
 
 # ============================================
-# Main: Check each team's version
+# Main: Check each team's version via git diff
 # ============================================
+
+# Determine base ref for comparison
+BASE_REF="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-origin/master}"
+
+# Try three-dot diff against base, fallback to parent commit
+CHANGED_FILES=$(git -C "$SKILLS_DIR" diff --name-only "${BASE_REF}...HEAD" 2>/dev/null || true)
+if [ -z "$CHANGED_FILES" ]; then
+    BASE_REF="HEAD~1"
+    CHANGED_FILES=$(git -C "$SKILLS_DIR" diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+fi
+
+# Warn about uncommitted changes (git diff only sees committed state)
+UNCOMMITTED=$(git -C "$SKILLS_DIR" diff --name-only 2>/dev/null || true)
+if [ -n "$UNCOMMITTED" ]; then
+    echo -e "  ${YELLOW}[WARN]${NC} Uncommitted changes detected — only committed changes are checked"
+fi
+
+echo "Comparing against: ${BASE_REF}"
+echo "Changed files: $(echo "$CHANGED_FILES" | grep -c . || echo 0)"
+echo ""
+
 print_section_header "Version Check"
 
 for team in $TEAMS_TO_TEST; do
     [ -z "$team" ] && continue
 
-    # In incremental mode, check if this team should be tested
     if is_incremental_mode && ! should_test_team "$team"; then
         print_skip "$team: Not in changed list"
         ((skip_count++)) || true
@@ -207,151 +153,57 @@ for team in $TEAMS_TO_TEST; do
 
     print_info "Current version: $current_version"
 
-    # Resolve plugin directory
-    plugin_dir="$(dirname "$plugin_json")"
-    # Relative paths in plugin.json (e.g., "./skills/...") are relative to the team root,
-    # not the .claude-plugin directory. Resolve from team root instead.
-    team_dir="$(dirname "$(dirname "$plugin_json")")"
+    # Get base version from the reference
+    base_version=$(git -C "$SKILLS_DIR" show "${BASE_REF}:plugins-official/${team}/.claude-plugin/plugin.json" 2>/dev/null | grep '"version"' | sed 's/.*"version":[[:space:]]*"\([^"]*\)".*/\1/' || true)
 
-    # Build current hashes into temp files
-    current_skills_file=$(mktemp)
-    current_agents_file=$(mktemp)
-    build_skill_hashes "$team_dir" "$plugin_json" > "$current_skills_file"
-    build_agent_hashes "$team_dir" "$plugin_json" > "$current_agents_file"
-
-    skill_changed=false
-    agent_changed=false
-    skill_details=""
-    agent_details=""
-    should_save_state=false
-
-    # Compare with saved state
-    state_file="$VERSION_STATE_DIR/$team.json"
-    if [ -f "$state_file" ]; then
-        # Load previous state
-        loaded_version=$(extract_plugin_version "$state_file")
-
-        # Parse skills from state JSON using python3 or grep fallback
-        if command -v python3 &>/dev/null; then
-            loaded_skills=$(python3 <<PYEOF
-import json
-with open("${state_file}") as f:
-    data = json.load(f)
-for k,v in data.get('skills',{}).items():
-    print(f'{k}:{v}')
-PYEOF
-)
-            loaded_agents=$(python3 <<PYEOF
-import json
-with open("${state_file}") as f:
-    data = json.load(f)
-for k,v in data.get('agents',{}).items():
-    print(f'{k}:{v}')
-PYEOF
-)
-        else
-            loaded_skills=""
-            loaded_agents=""
-        fi
-
-        # Compare skills
-        if [ -n "$loaded_skills" ]; then
-            skill_details=$(compare_hashes "$current_skills_file" "$loaded_skills")
-            if [ -n "$skill_details" ]; then
-                skill_changed=true
-            fi
-        fi
-
-        # Compare agents
-        if [ -n "$loaded_agents" ]; then
-            agent_details=$(compare_hashes "$current_agents_file" "$loaded_agents")
-            if [ -n "$agent_details" ]; then
-                agent_changed=true
-            fi
-        fi
-    else
-        # First run — no state, initialize
-        print_info "First run — initializing version state"
+    if [ -z "$base_version" ]; then
+        print_info "No base version found (new team?), skipping"
+        ((pass_count++)) || true
+        echo ""
+        continue
     fi
 
-    # ============================================
-    # Determine if version bump is needed
-    # ============================================
-    # should_save_state already initialized above
+    # Check which team files changed against BASE_REF
+    team_files=$(resolve_team_file_paths "$team")
+    changed_items=""
+    has_change=false
 
-    if [ "$skill_changed" = "true" ] || [ "$agent_changed" = "true" ]; then
-        # Compare current version against the recorded version in state
-        recorded_version="${loaded_version:-}"
-        if [ -z "$recorded_version" ]; then
-            # No state file — this shouldn't happen if changes detected, but handle gracefully
-            print_warn "No previous state found, initializing"
-            should_save_state=true
+    while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        if echo "$CHANGED_FILES" | grep -qF "$rel"; then
+            has_change=true
+            if echo "$rel" | grep -q '/SKILL.md$'; then
+                changed_items+="  - SKILL: $rel"$'\n'
+            else
+                changed_items+="  - AGENT: $rel"$'\n'
+            fi
+        fi
+    done <<< "$team_files"
+
+    if $has_change; then
+        if [ "$current_version" = "$base_version" ]; then
+            print_fail "Files changed but version not bumped (base: $base_version, current: $current_version)"
+            echo -e "$changed_items" | sed 's/^/    /'
+            ((fail_count++)) || true
         else
-            # Compute recommended version from the RECORDED version, not current
-            recommended=$(recommend_version_bump "$recorded_version" "$skill_changed" "$agent_changed")
-
-            echo ""
-            if [ "$skill_changed" = "true" ]; then
-                print_info "Skill changes detected:"
-                echo -e "$skill_details" | sed 's/^/    - /'
-            fi
-            if [ "$agent_changed" = "true" ]; then
-                print_info "Agent changes detected:"
-                echo -e "$agent_details" | sed 's/^/    - /'
-            fi
-            echo ""
-
-            cmp=$(semver_compare "$current_version" "$recommended")
-            if [ "$cmp" = "-1" ]; then
-                # current < recommended → FAIL
-                version_line=$(grep -n '"version"' "$plugin_json" | head -1)
-                print_fail "Version $current_version should be >= $recommended"
-                echo "    Action: update the version field in $plugin_json"
-                echo "    Location: $plugin_json:$version_line"
+            cmp=$(semver_compare "$current_version" "$base_version")
+            if [ "$cmp" = "1" ] || [ "$cmp" = "0" ]; then
+                print_pass "Version bumped: $base_version → $current_version"
+                echo -e "$changed_items" | sed 's/^/    /'
+                ((pass_count++)) || true
+            else
+                print_fail "Version decreased: $base_version → $current_version"
                 ((fail_count++)) || true
-                # FAIL: do NOT update state — keep old snapshot so next run still catches this
-            else
-                # current >= recommended → PASS
-                print_pass "Version $current_version is up-to-date (was $recorded_version, now >= $recommended)"
-                ((pass_count++)) || true
-                should_save_state=true
             fi
         fi
     else
-        # No changes — verify version matches saved state
-        if [ -f "$state_file" ]; then
-            loaded_version=$(extract_plugin_version "$state_file")
-            if [ "$current_version" != "$loaded_version" ]; then
-                cmp=$(semver_compare "$current_version" "$loaded_version")
-                if [ "$cmp" = "-1" ]; then
-                    print_fail "Version $current_version is lower than recorded $loaded_version"
-                    ((fail_count++)) || true
-                    # FAIL: do NOT update state
-                else
-                    print_pass "Version $current_version (upgraded from $loaded_version)"
-                    ((pass_count++)) || true
-                    should_save_state=true
-                fi
-            else
-                print_pass "Version $current_version is consistent (no changes detected)"
-                ((pass_count++)) || true
-                # Consistent: no need to rewrite same state
-            fi
+        if [ "$current_version" != "$base_version" ]; then
+            print_pass "Version changed: $base_version → $current_version (no file changes in this team)"
         else
-            # First run: initialize state
-            print_info "First run — initializing version state"
-            should_save_state=true
+            print_pass "Version $current_version consistent (no changes detected)"
         fi
+        ((pass_count++)) || true
     fi
-
-    # Only save state when test passes (new state or version upgrade confirmed)
-    if $should_save_state; then
-        save_team_state "$team" "$current_version" "$current_skills_file" "$current_agents_file"
-    fi
-
-    # Cleanup temp files
-    rm -f "$current_skills_file" "$current_agents_file"
-
     echo ""
 done
 
@@ -363,10 +215,8 @@ print_section_header "Marketplace Version Consistency"
 # package.json (OpenCode) and marketplace.json (Claude) are what users see
 # when browsing the marketplace. If these don't match plugin.json, users
 # won't see the updated version and won't know to upgrade.
-PACKAGE_JSON="$SKILLS_DIR/package.json"
-MARKETPLACE_JSON="$SKILLS_DIR/.claude-plugin/marketplace.json"
 
-for manifest_file in "$PACKAGE_JSON" "$MARKETPLACE_JSON"; do
+for manifest_file in "$SKILLS_DIR/package.json" "$MARKETPLACE_JSON"; do
     manifest_name="$(basename "$(dirname "$manifest_file")")/$(basename "$manifest_file")"
     if [ ! -f "$manifest_file" ]; then
         print_skip "$manifest_name: not found"
@@ -379,8 +229,6 @@ for manifest_file in "$PACKAGE_JSON" "$MARKETPLACE_JSON"; do
         print_warn "python3 not found, skipping"
         continue
     fi
-
-    manifest_fail=false
 
     for team in $TEAMS_TO_TEST; do
         [ -z "$team" ] && continue
@@ -413,17 +261,12 @@ PYEOF
 
         if [ "$plugin_version" = "$manifest_version" ]; then
             print_pass "$team: version $plugin_version matches"
+            ((pass_count++)) || true
         else
             print_fail "$team: version mismatch — plugin.json=$plugin_version, $manifest_name=$manifest_version"
-            manifest_fail=true
+            ((fail_count++)) || true
         fi
     done
-
-    if $manifest_fail; then
-        ((fail_count++)) || true
-    else
-        ((pass_count++)) || true
-    fi
 done
 
 # ============================================

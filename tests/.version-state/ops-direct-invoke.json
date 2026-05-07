@@ -1,6 +1,0 @@
-{
-  "version": "1.0.1",
-  "timestamp": "2026-04-20T19:44:23+08:00",
-  "skills": {"ascendc-api-best-practices":"ab9263524e26878e","ascendc-code-review":"3e42899ff3775f7d","ascendc-direct-invoke-template":"47edcd05c91b2eac","ascendc-docs-search":"88a93365ab6a198b","ascendc-env-check":"026fc6948d6a9b78","ascendc-npu-arch":"b16f09834e159b3e","ascendc-precision-debug":"9a8dcfc302bd5d43","ascendc-runtime-debug":"4f46dc124cb20b38","ascendc-tiling-design":"0d99715bd9f7dc18","ops-precision-standard":"e261cdc414e966f4","ops-profiling":"12b1276eb863f355"},
-  "agents": {"ascendc-kernel-architect":"66ebf72d495c9854","ascendc-kernel-developer":"93123abdec554d3e","ascendc-kernel-reviewer":"0d039f4f58815d51"}
-}

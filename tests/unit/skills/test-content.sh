@@ -3,11 +3,19 @@
 # Test: Skill Content
 # =============================================================================
 # Validates content quality for all skills.
-# Rules tested:
-# - S-CON-01: name matches directory name
-# - S-CON-02: description contains trigger keywords
-# - S-CON-03: description contains trigger conditions (recommended)
-# - S-CON-04: naming follows prefix convention
+# Rules tested (all via skill_validator.py validate-skill --subset=content):
+#   error level (blocking):
+#     S-CON-01: name matches directory name
+#     S-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
+#     S-CON-03: description contains trigger conditions
+#   warn level (advisory):
+#     S-CON-04: contains actionable instructions (code blocks, numbered steps)
+#     S-CON-05: contains error handling / troubleshooting section
+#     S-CON-06: contains examples / scenario section
+#     S-CON-07: long files link to references/ (progressive disclosure)
+#     S-CON-08: description follows three-segment structure
+#     S-CON-09: no anti-pattern phrases in description
+#     S-STR-13: body word count under limit
 #
 # Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================
@@ -45,7 +53,7 @@ echo ""
 # ============================================
 # Validate skills content
 # ============================================
-print_section_header "Test: Skill Content (S-CON-01 to S-CON-04)"
+print_section_header "Test: Skill Content (S-CON-01 to S-CON-09, S-STR-13)"
 
 for skill in $SKILLS_TO_TEST; do
     [ -z "$skill" ] && continue

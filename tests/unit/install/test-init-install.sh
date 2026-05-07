@@ -124,53 +124,7 @@ for team_dir in "$TEAMS_DIR"/*; do
 done
 
 # =============================================================================
-# Check 4: Code key-identifier presence (warn-only, L2 behavioral test covers logic)
-# =============================================================================
-print_section_header "Check: init.sh key code identifiers (warn-only)"
-
-for team_dir in "$TEAMS_DIR"/*; do
-    [ -d "$team_dir" ] || continue
-    team_name=$(basename "$team_dir")
-    init_script="$team_dir/init.sh"
-
-    [ -f "$init_script" ] || continue
-
-    # Argument handling keywords
-    if grep -qE '"project"|"global"' "$init_script" && \
-       grep -qE '"opencode"|"claude"' "$init_script"; then
-        print_pass "[$team_name] level/tool keywords present"
-        PASS_COUNT=$((PASS_COUNT + 1))
-    else
-        print_warn "[$team_name] level/tool keywords missing (init.sh may handle args differently)"
-    fi
-
-    # Manifest generation
-    if grep -q 'cannbot-manifest.json' "$init_script"; then
-        print_pass "[$team_name] manifest keyword present"
-        PASS_COUNT=$((PASS_COUNT + 1))
-    else
-        print_warn "[$team_name] manifest keyword missing"
-    fi
-
-    # Global mode path-rewrite
-    if grep -q 'ESCAPED_ROOT' "$init_script" && grep -q 'sed' "$init_script"; then
-        print_pass "[$team_name] global path-rewrite keywords present"
-        PASS_COUNT=$((PASS_COUNT + 1))
-    else
-        print_warn "[$team_name] global path-rewrite keywords missing"
-    fi
-
-    # Health check
-    if grep -q 'health_ok' "$init_script" || grep -q 'health check' "$init_script"; then
-        print_pass "[$team_name] health check keyword present"
-        PASS_COUNT=$((PASS_COUNT + 1))
-    else
-        print_warn "[$team_name] health check keyword missing"
-    fi
-done
-
-# =============================================================================
-# Check 5: ops/skills referenced by init.sh exist
+# Check 4: ops/skills referenced by init.sh exist
 # =============================================================================
 print_section_header "Check: init.sh skill references exist in ops/"
 
@@ -215,7 +169,7 @@ for team_dir in "$TEAMS_DIR"/*; do
 done
 
 # =============================================================================
-# Check 6: INCLUDED_AGENT_PATTERN exists and matches agents/
+# Check 5: INCLUDED_AGENT_PATTERN exists and matches agents/
 # =============================================================================
 print_section_header "Check: INCLUDED_AGENT_PATTERN consistency"
 
@@ -257,7 +211,7 @@ for team_dir in "$TEAMS_DIR"/*; do
 done
 
 # =============================================================================
-# Check 7: SHARED_SKILL_ROOT path computation
+# Check 6: SHARED_SKILL_ROOT path computation
 # =============================================================================
 print_section_header "Check: SHARED_SKILL_ROOT path computation"
 

@@ -1,6 +1,0 @@
-{
-  "version": "1.0.1",
-  "timestamp": "2026-04-20T19:58:23+08:00",
-  "skills": {"pypto-api-explore":"c248a2cc9f498d23","pypto-golden-generate":"edbf4b640d722463","pypto-intent-understand":"b39a25128fe4683e","pypto-op-design":"8531add6d15d2cc9","pypto-op-develop":"7c71053c921d40eb","pypto-op-perf-tune":"f5d7499621ea91c9","pypto-precision-compare":"44740b6602f09305","pypto-precision-debug":"d721dd06264e4604"},
-  "agents": {"pypto-op-analyst":"4867a445c9e45f22","pypto-op-developer":"22b6780729435aee","pypto-op-perf-tuner":"dc6ac52b9cfcf2d8"}
-}

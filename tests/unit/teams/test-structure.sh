@@ -11,6 +11,7 @@
 # - T-STR-05: All skill dependencies exist
 # - T-STR-06: description length 1-1024 characters
 # - T-STR-07: references/ directory not empty (if exists)
+# - T-STR-07: Team name uniqueness across all teams
 # - T-STR-08: All links point to existing files
 #
 # Supports incremental testing via INCREMENTAL_TEAMS environment variable.
@@ -105,6 +106,18 @@ done <<< "$(get_all_teams_with_paths)"
 echo ""
 
 # ============================================
+# Test 3: Global Uniqueness
+# ============================================
+print_section_header "Test: Team Name Uniqueness (T-STR-07)"
+
+uniqueness_fail=0
+if ! validate_global_uniqueness "team"; then
+    uniqueness_fail=1
+fi
+
+echo ""
+
+# ============================================
 # Summary
 # ============================================
 echo "========================================"
@@ -114,10 +127,11 @@ echo ""
 echo "  Total teams: $total_teams"
 echo -e "  Structure tests: ${GREEN}$structure_pass passed${NC}, ${RED}$structure_fail failed${NC}"
 echo -e "  Link tests:      ${GREEN}$link_pass passed${NC}, ${RED}$link_fail failed${NC}"
+echo -e "  Uniqueness:      ${GREEN}$([ $uniqueness_fail -eq 0 ] && echo "passed" || echo "failed")${NC}"
 [ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}        $skip_count"
 echo ""
 
-if [ $((structure_fail + link_fail)) -gt 0 ]; then
+if [ $((structure_fail + link_fail + uniqueness_fail)) -gt 0 ]; then
     print_status_failed
     echo ""
     echo "Please fix the failed structure checks."

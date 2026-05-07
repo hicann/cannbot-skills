@@ -3,12 +3,18 @@
 # Test: Agent Content
 # =============================================================================
 # Validates content quality for all agents.
-# Rules tested:
-# - A-CON-01: name matches directory name
-# - A-CON-02: description contains trigger keywords
-# - A-CON-03: naming follows prefix convention
-# - A-CON-04: has core responsibilities section
-# - A-CON-05: has responsibility boundary (recommended)
+# Rules tested (all via skill_validator.py validate-agent --subset=content):
+#   error level (blocking):
+#     A-CON-01: name matches directory/file name
+#     A-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
+#   warn level (advisory):
+#     A-CON-03: description contains trigger conditions
+#     A-CON-04: contains actionable instructions (code blocks, numbered steps)
+#     A-CON-05: contains error handling / troubleshooting section
+#     A-CON-06: contains examples / scenario section
+#     A-CON-07: long files link to references/ (progressive disclosure)
+#     A-CON-08: description follows three-segment structure
+#     A-CON-09: no anti-pattern phrases in description
 #
 # Supports incremental testing via INCREMENTAL_AGENTS environment variable.
 # =============================================================================
@@ -46,7 +52,7 @@ echo ""
 # ============================================
 # Validate agents content
 # ============================================
-print_section_header "Test: Agent Content (A-CON-01 to A-CON-05)"
+print_section_header "Test: Agent Content (A-CON-01 to A-CON-09)"
 
 for agent in $AGENTS_TO_TEST; do
     [ -z "$agent" ] && continue

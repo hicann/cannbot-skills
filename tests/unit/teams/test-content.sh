@@ -3,12 +3,12 @@
 # Test: Team Content
 # =============================================================================
 # Validates content quality for all teams.
-# Rules tested:
-# - T-CON-01: directory naming format ^[a-z0-9]+(-[a-z0-9]+)*$
-# - T-CON-02: description contains trigger keywords
-# - T-CON-03: has core principles section
-# - T-CON-04: init.sh exists (optional)
-# - T-CON-05: quickstart.md exists (optional)
+# Rules tested (all via skill_validator.py validate-team --subset=content):
+#   error level (blocking):
+#     T-CON-01: directory naming format ^[a-z0-9]+(-[a-z0-9]+)*$
+#     T-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
+#   warn level (advisory):
+#     T-CON-03: description contains trigger conditions
 #
 # Supports incremental testing via INCREMENTAL_TEAMS environment variable.
 # =============================================================================
@@ -46,7 +46,7 @@ echo ""
 # ============================================
 # Validate teams content
 # ============================================
-print_section_header "Test: Team Content (T-CON-01 to T-CON-05)"
+print_section_header "Test: Team Content (T-CON-01 to T-CON-03)"
 
 for team in $TEAMS_TO_TEST; do
     [ -z "$team" ] && continue
