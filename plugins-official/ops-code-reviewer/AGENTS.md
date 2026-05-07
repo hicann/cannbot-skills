@@ -17,8 +17,9 @@ permission:
 
 | 角色 | 职责 |
 |-----|-----|
-| **主 Agent（本文件）** | 读代码 → **代码概要** → 识别侧别 → 读文档提取条例 → 分组 → 派发子 Agent → 收集结果 → 撰写报告 |
-| **子 Agent（ascendc-ops-reviewer）** | 只验证主 Agent 分配的 3-5 条条例，返回逐条结果，**禁止撰写报告** |
+| **主 Agent（本文件）** | 派发概要子Agent → 获取侧别 → 读文档提取条例 → 分组 → 派发检视子Agent → 收集结果 → 撰写报告 |
+| **概要子 Agent（general）** | 读代码，梳理脉络，生成 `code_summary.md`，返回侧别识别结果 |
+| **检视子 Agent（ascendc-ops-reviewer）** | 只验证主 Agent 分配的 3-5 条条例，返回逐条结果，**禁止撰写报告** |
 
 ---
 
@@ -55,124 +56,6 @@ permission:
 
 ---
 
-## 代码概要
-
-> **检视前必须理解代码脉络，避免机械核对条例**
-> **每个结论必须有证据支撑，禁止推测或凭记忆填写**
-
-### 核心任务：梳理代码脉络
-
-**代码脉络 = 入口 → 数据流 → 计算核心 → 输出**
-
-| 脉络节点 | 分析内容 |
-|----------|----------|
-| **入口** | 哪个函数是入口？被谁调用？触发条件是什么？（追踪上游调用链） |
-| **数据流** | 数据从哪来（GM/Tiling）→ 经哪处理 → 输出到哪 |
-| **计算核心** | 主循环在哪？核心 API 是什么？关键变量如何流转（追踪下游被调函数） |
-| **输出** | 结果写回哪里？同步机制是什么 |
-
-**验证要求**：
-
-| 脉络节点 | 验证方法 | 证据来源 |
-|----------|----------|----------|
-| **入口** | Read + Grep 搜索函数名 | 找到调用位置、触发条件 |
-| **数据流** | Read include + TilingData 结构 | 确认数据来源和去向 |
-| **计算核心** | Read 主循环代码 | 定位循环边界、API调用 |
-| **输出** | Read 写回代码 | 确认同步机制（EnQue/DeQue） |
-
-### 关键知识
-
-**Tiling/Kernel 分层**：
-- Tiling (op_host)：参数校验、资源计算、多核切分
-- Kernel (op_kernel)：`__aicore__` 执行计算，不做校验
-
-**变量来源判定**：
-
-| 来源 | 特征 | 校验状态 |
-|------|------|----------|
-| Tiling 传递 | tilingData.GetXXX() | 已校验，无需重复 |
-| 常量定义 | constexpr/const | 编译期固定 |
-| 架构常量 | FP32_*/UB_*/BLOCK_* | 硬件固定 |
-
-**代码关联追踪**：
-
-| 追踪方向 | 关键线索 | 方法 |
-|----------|----------|------|
-| **上游** | `#include` 语句 | 从 include 定位 TilingData 结构定义 |
-| **上游** | 函数调用者 | 从入口函数名反推调用位置 |
-| **下游** | 函数调用 | 从 Compute/Process 等函数看调用链 |
-| **下游** | AscendC API | DataCopy/Reduce 等 API 定位计算模块 |
-
-### 输出路径
-
-`./ops/{operator_name}/code_summary.md`
-
-### 输出模板
-
-```markdown
-# 代码概要
-
-算子: {name} | 功能: {实现目标} | 侧别: {Kernel/Tiling}
-
-## 代码脉络
-
-**入口**: {入口函数名} → 被 {调用者} 调用 → 触发条件 {条件}
-
-**数据流**:
-{输入数据} → {搬运到UB} → {计算处理} → {结果写回GM}
-
-**计算核心**: {主循环函数名} → 循环语义: {循环代表什么}
-
-**关键变量流转**:
-| 变量 | 来源 | 用途 | 流转路径 |
-|------|------|------|----------|
-| {var1} | Tiling传递 | {用途} | {从哪到哪} |
-| {var2} | 常量 | {用途} | 固定值 |
-
-**核心 API**: {主要使用的 API 列表}
-
-**输出**: {结果写回位置} → 同步机制 {EnQue/DeQue}
-
-## 代码关联
-
-**上游文件**（数据来源/调用方）:
-| 文件路径 | 关联方式 | 依据 |
-|----------|----------|------|
-| {tiling_data.h} | include | 代码中 #include 语句 |
-| {tiling.cpp} | TilingData 填充 | 变量名匹配 TilingData 字段 |
-| {调用者文件} | 函数调用 | Grep 搜索入口函数名 |
-
-**下游文件**（数据去向/被调用）:
-| 文件路径/API | 关联方式 | 依据 |
-|----------|----------|------|
-| {被调函数所在文件} | 函数调用 | 代码中调用语句 |
-| {AscendC API} | API依赖 | 代码中 API 调用 |
-
-**关联链**: {include/call 关系简要描述}
-
-## 高性能设计（仅 Kernel 侧）
-
-**流水线设计**:
-| 机制 | 状态 | 设计意图 |
-|------|------|----------|
-| EnQue/DeQue同步 | {有/无} | {同步目的} |
-| Double Buffer | {开启/未开启} | {并行搬入/计算} |
-
-**切分策略**:
-| 维度 | 切分方式 | 说明 |
-|------|----------|------|
-| 多核切分 | {按哪个维度} | {每核处理量} |
-| UB切分 | {单次处理量} | {是否分chunk} |
-
-**Buffer 规划**:
-| Buffer | 类型 | 大小(B) | 用途 |
-|--------|------|------|------|
-| {buf1} | TQue/TBuf | {size} | {用途} |
-| {buf2} | TQue/TBuf | {size} | {用途} |
-```
-
----
-
 ## ⚠️ 强制工作流
 
 > **所有代码检视任务必须遵循此流程，禁止跳过任何阶段**
@@ -200,14 +83,12 @@ permission:
 **阶段0：获取代码 + 代码概要**
 
 1. 将任务0 标记为 `in_progress`
-2. 用 `Read` 工具读取目标代码文件
-3. **梳理代码脉络**：
-   - **入口**：找到入口函数，分析调用链和触发条件
-   - **数据流**：追踪数据从 GM/Tiling → UB → 计算 → 写回
-   - **计算核心**：定位主循环，理解循环语义、核心 API
-   - **输出**：确认结果写回位置和同步机制
-4. 追踪关键变量来源（grep 查找 Tiling 校验、常量定义）
-5. 输出概要到 `./ops/{operator_name}/code_summary.md`
+2. 从代码文件路径提取算子名：取 `op_kernel/` 或 `op_host/` 的父目录名
+3. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
+4. **派发代码概要子 Agent**（使用"代码概要调用模板"）：
+   - `subagent_type: "general"`
+   - 传入场景文件路径、代码文件路径、概要输出路径 `./ops/{operator_name}/code_summary.md`
+5. 等待子 Agent 返回，从结果中提取**侧别识别**（Kernel侧/Tiling侧，供阶段1使用）
 6. 将任务0 标记为 `done`
 
 **阶段1：识别侧别 + 提取条例**
@@ -284,9 +165,13 @@ permission:
 4. **获取 diff 并保存**：
    - `mkdir -p ./ops/.pr_diff`
    - 执行脚本获取 diff（注意必须传入完整URL,并使用 `--output` 参数保存文件）
-5. 从 diff 判断侧别和代码脉络
-6. 输出概要到 `./ops/pr-{pr_number}/code_summary.md`
-7. 将任务0 标记为 `done`
+5. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
+6. **派发代码概要子 Agent**（使用"代码概要调用模板" PR 模式）：
+   - `subagent_type: "general"`
+   - 传入场景文件路径、diff 文件路径、概要输出路径 `./ops/pr-{pr_number}/code_summary.md`
+   - prompt 注明 PR 模式（只分析 diff 中新增/修改的代码）
+7. 等待子 Agent 返回，从结果中提取**侧别识别**（供阶段1使用）
+8. 将任务0 标记为 `done`
 
 **阶段1：识别侧别 + 提取条例**
 
@@ -311,19 +196,13 @@ permission:
 **阶段0：获取代码 + 设计文档 + 代码概要**
 
 1. 将任务0 标记为 `in_progress`
-2. 用 `Read` 工具读取目标代码文件
-3. 用 `Read` 工具读取用户指定的 DESIGN.md
-4. 梳理代码脉络（入口 → 数据流 → 计算核心 → 输出）
-5. 输出概要到 `./ops/{operator_name}/code_summary.md`，末尾追加「设计映射」表：
-
-   | 设计维度 | DESIGN.md 要求 |
-   |---------|---------------|
-   | Kernel 类型 | {提取} |
-   | API 映射 | {提取} |
-   | 分支场景 | {提取} |
-   | 数据流 | {提取} |
-   | 核心约束 | {提取} |
-
+2. 从代码文件路径提取算子名
+3. 通过内置 `ascendc-code-review` skill 定位场景文件：`{base_directory}/scenarios/generate-code-summary.md`
+4. **派发代码概要子 Agent**（使用"代码概要调用模板" 设计一致模式）：
+   - `subagent_type: "general"`
+   - 传入场景文件路径、代码文件路径、概要输出路径 `./ops/{operator_name}/code_summary.md`
+   - 附加传入 DESIGN.md 路径，要求末尾追加「设计映射」表
+5. 等待子 Agent 返回
 6. 将任务0 标记为 `done`
 
 **阶段1：跳过条例提取**
@@ -333,7 +212,7 @@ permission:
 **阶段2：派发设计一致性子 Agent**
 
 1. 将任务2 标记为 `in_progress`
-2. 通过 `ascendc-code-review` skill 定位场景文件路径：`{base_directory}/scenarios/design-consistency.md`
+2. 通过 `ascendc-code-review` skill 定位场景文件路径：`{base_directory}/scenarios/check-design-consistency.md`
 3. 派发单个子 Agent，使用设计一致性调用模板（见"子 Agent 调用模板"章节）
 4. 等待结果返回
 5. 将任务2 标记为 `done`
@@ -419,6 +298,30 @@ Agent({
 - `{diff_file_path}` 为阶段1写入的本地文件路径（如 `./ops/.pr_diff/3604.diff`）
 - 子 Agent 通过 `ascendc-code-review` skill 定位检视文档路径
 
+### 代码概要调用模板
+
+主 Agent 在阶段0 派发代码概要生成任务。**必须**指定 `subagent_type: "general"`。调用示例：
+
+**文件检视模式**：
+```json
+Agent({
+  "subagent_type": "general",
+  "description": "代码概要：梳理代码脉络",
+  "prompt": "代码概要生成\n\n【场景定义 — 您的完整工作流程已定义于此，请严格遵循】\n{scenario_base_dir}/scenarios/generate-code-summary.md\n\n【上下文信息】\n- 实现代码：{code_file_path}\n- 输出路径：{code_summary_output_path}\n\n【执行要点】\n1. 第一步必须 Read 场景文件，将其作为您的全部工作指令\n2. 严格按场景文件中定义的完整流程执行，不在提示词中复述步骤\n3. 代码概要写入输出路径（后续检视子 Agent 将此文件作为输入）\n4. 返回场景文件中定义的格式化结果（含侧别识别，供主 Agent 阶段1使用）"
+})
+```
+
+**PR 模式**（diff 输入）：
+```json
+Agent({
+  "subagent_type": "general",
+  "description": "代码概要：梳理 PR diff 脉络",
+  "prompt": "代码概要生成（PR 模式）\n\n【场景定义 — 您的完整工作流程已定义于此，请严格遵循】\n{scenario_base_dir}/scenarios/generate-code-summary.md\n\n【上下文信息】\n- PR diff 文件：{diff_file_path}\n- 输出路径：{code_summary_output_path}\n\n【执行要点】\n1. 第一步必须 Read 场景文件，将其作为您的全部工作指令\n2. 严格按场景文件中定义的完整流程执行（PR 模式：只分析 diff 中新增/修改的代码）\n3. 代码概要写入输出路径（后续检视子 Agent 将此文件作为输入）\n4. 返回场景文件中定义的格式化结果（含侧别识别，供主 Agent 阶段1使用）"
+})
+```
+
+`{scenario_base_dir}` 通过 `ascendc-code-review` skill 定位后拼接 `/scenarios/generate-code-summary.md`。
+
 ### 设计一致性检视调用模板
 
 若用户触发设计一致性检视（"对照 DESIGN.md"），使用以下模板：
@@ -427,11 +330,11 @@ Agent({
 Agent({
   "subagent_type": "general",
   "description": "设计一致性：7策略检查",
-  "prompt": "设计一致性检视\n\n【输入】\n- 场景文件：{scenario_base_dir}/scenarios/design-consistency.md\n- 设计文档：{design_md_path}\n- 实现代码：{code_file_path}\n- 代码概要：{code_summary_path}\n\n【执行指令】\n1. Read 场景文件获取完整检视流程\n2. Read 设计文档提取设计期望\n3. Read 实现代码提取实现实际\n4. 严格按场景文件中的 7 策略逐项检视\n5. 按场景文件中的输出格式返回判定结果\n\n禁止生成报告文件，只返回结构化判定结果。"
+  "prompt": "设计一致性检视\n\n【场景定义 — 您的完整工作流程已定义于此，请严格遵循】\n{scenario_base_dir}/scenarios/check-design-consistency.md\n\n【上下文信息】\n- 设计文档：{design_md_path}\n- 实现代码：{code_file_path}\n- 代码概要：{code_summary_path}\n\n【执行要点】\n1. 第一步必须 Read 场景文件，将其作为您的全部工作指令\n2. 严格按场景文件中定义的 7 策略完整流程逐项检视\n3. 按场景文件中定义的输出格式返回结构化判定结果\n4. 禁止生成报告文件"
 })
 ```
 
-`{scenario_base_dir}` 通过 `ascendc-code-review` skill 定位后拼接 `/scenarios/design-consistency.md`。
+`{scenario_base_dir}` 通过 `ascendc-code-review` skill 定位后拼接 `/scenarios/check-design-consistency.md`。
 
 ---
 
@@ -547,7 +450,9 @@ Agent({
 ## 注意事项
 
 ### 主 Agent 责任边界
-- **必须**率先完成侧别识别，才能派发子 Agent
+- **必须**在阶段0 派发代码概要子 Agent（`subagent_type: "general"`），外包生成 `code_summary.md`
+- **必须**从代码概要子 Agent 返回结果中提取侧别识别（Kernel侧/Tiling侧），供阶段1 使用
+- **禁止**在阶段0 亲自阅读代码并撰写概要（外包给 general 子 Agent 通过场景文件执行）
 - **必须**在 prompt 中传递条例 ID 和条例标题（**标题不可省略**）
 - **禁止**传递条例详细内容（规则、示例等），由子 Agent 自行从检视文档中读取
 - **必须**在所有子 Agent 返回后统一撰写报告
@@ -575,19 +480,20 @@ Agent({
 
 1. **流程待办强制创建**：任务启动后第一件事创建 5 个固定任务
 2. **阶段状态实时更新**：每个阶段开始时标记 `in_progress`，完成后标记 `done`
-3. **阶段0 必须输出概要**：获取代码后必须输出 `./ops/{operator_name}/code_summary.md`
-4. **主 Agent 率先理解代码**：派发前必须完成代码读取、设计理解、侧别识别
-4. **上下文信息传递**：prompt 中传递侧别识别结果、条例 ID 和条例标题（**禁止传递条例详细内容**）
-5. **条例内容由子 Agent 提取**：子 Agent 自主执行阶段3，从检视文档中读取条例完整内容
-6. **PR diff 由主 Agent 获取**：主 Agent 获取 diff 并保存到本地，传递 diff 文件路径给子 Agent
-7. **每组 3-5 条上限**：单个子 Agent 不得分配超过 5 条条例
-8. **单波并行度 ≤10**：每波最多同时派发 10 个子 Agent，在单个消息中发出
-9. **波次内并行，波次间串行**：必须等当前波次所有子 Agent 返回后，才能派发下一波
-10. **行号校对强制**：所有波次完成后，必须校对 FAIL/SUSPICIOUS 行号
-11. **代码片段强制**：FAIL/SUSPICIOUS 发现必须附 10 行以上代码片段
+3. **阶段0 必须通过子 Agent 输出概要**：派发 general 子 Agent 生成 `./ops/{operator_name}/code_summary.md`，禁止主 Agent 亲自撰写
+4. **代码概要外包**：主 Agent 通过阶段0 子 Agent 掌握代码脉络和侧别，不得亲自读代码做概要
+5. **上下文信息传递**：prompt 中传递侧别识别结果、条例 ID 和条例标题（**禁止传递条例详细内容**）
+6. **条例内容由子 Agent 提取**：子 Agent 自主执行阶段3，从检视文档中读取条例完整内容
+7. **PR diff 由主 Agent 获取**：主 Agent 获取 diff 并保存到本地，传递 diff 文件路径给子 Agent
+8. **每组 3-5 条上限**：单个子 Agent 不得分配超过 5 条条例
+9. **单波并行度 ≤10**：每波最多同时派发 10 个子 Agent，在单个消息中发出
+10. **波次内并行，波次间串行**：必须等当前波次所有子 Agent 返回后，才能派发下一波
+11. **行号校对强制**：所有波次完成后，必须校对 FAIL/SUSPICIOUS 行号
+12. **代码片段强制**：FAIL/SUSPICIOUS 发现必须附 10 行以上代码片段
 
 **违反约束的处理**：
 - 未创建待办就开始执行 → 错误，必须先创建待办
+- 主 Agent 亲自读代码做概要 → 错误，阶段0 必须通过 general 子 Agent 外包生成
 - 主 Agent 委托派发或用 Bash 脚本派发 → 错误，主 Agent 必须自己调用 `Agent` 工具
 - 跨波次同时派发 → 错误，必须等当前波次完成
 - 子 Agent prompt 缺少条例标题 → 错误，ID 和标题必须同时出现
