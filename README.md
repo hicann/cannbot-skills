@@ -14,9 +14,8 @@
 - 使用昇腾 NPU 进行模型推理优化的开发者
 - 希望贡献 Skills / Agents 的社区贡献者
 
-&nbsp;
-
 ## 🔥 最新动态
+- **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持ACLNN和GEIR两种接入方式，覆盖需求分析到代码检视全流程。
 - **2026-04-30** — 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
 - **2026-04-29** — 新增自定义算子注册调用的脚手架工程，支持通过ACLNN和GEIR接入，ascendc-registry-invoke-template的Skill。
 - **2026-04-28** — 新增支持TRAE安装。
@@ -26,125 +25,52 @@
 - **2026-04-21** — 修复测试框架并解决识别到的多项校验问题
 - **2026-04-20** — 新增 regbase 配置最佳实践，修复环境检查设备计数 bug，统一算子目录命名（ops → operators）。
 - **2026-04-18** — 修复 ops-profiling 技能名称不一致的问题。
-- **2026-04-17** — 新增精度模式自动生成、完善 broadcast tiling 设计，新增初始化脚本和快速入门指南
-- **2026-04-16** — 新增 Plugin 化安装体系（Claude Code / OpenCode），新增 NPU 模型推理端到端优化 Skill 体系（含 3 个 SubAgent 和 infer-model-optimize-team）。
-- **2026-04-14** — 新增 Ascend 950 仿真 Skill，增强 UT / ST 测试能力，修复 verify_environment.sh 设备计数的问题。
-- **2026-04-13** — 支持 Team 级代码检视全量覆盖，子 Agent 并行检视提升效果。
-- **2026-04-10** — 新增 PyPTO 算子开发全套体系（8 个 Skills + 3 个 Agents + 1 个 Team）。
 
-&nbsp;
 > 详细变更记录，详见 [CHANGELOG.md](CHANGELOG.md) 文件。
-
-&nbsp;
 
 ## ⚡️快速开始
 
-### 方式一：Plugin 安装（推荐）
+### 方式一：脚本安装
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills
+```
+
+| 场景 | 命令 | 文档 |
+|------|------|------|
+| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
+| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
+| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
+| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | `cd model/teams/infer-model-optimize-team && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](model/teams/infer-model-optimize-team/quickstart.md) |
+
+### 方式二：Plugin 安装
+
+仅支持 Claude Code，且仅部分场景提供 Plugin。
 
 #### Claude Code
 
-```bash
-# 注册 marketplace（首次）
-/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git
-# 安装 Ascend C 算子直调开发
-/plugin install ops-direct-invoke@cannbot
-# 或安装 PyPTO 算子开发
-/plugin install pypto-op-orchestrator@cannbot
-# 激活插件（加载 Skills/Agents/Hooks）
-/reload-plugins
-# 触发初始化：以下任一方式均可（注入 CANNBot 上下文）
-# 方式 a：新开会话（推荐，自然触发 SessionStart）
-# 方式 b：在当前会话中执行 /clear（会清空当前对话历史）
-```
+1. 注册 marketplace（首次）：`/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`
+2. 按场景安装对应插件：
 
-#### OpenCode
+| 场景 | 命令 |
+|------|------|
+| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `/plugin install ops-direct-invoke@cannbot` |
+| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | *暂不支持* |
+| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `/plugin install pypto-op-orchestrator@cannbot` |
+| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | *暂不支持* |
 
-```bash
-# 项目级安装
-opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git
-# 全局安装（所有项目可用）
-opencode plugin cannbot@git+https://gitcode.com/cann/cannbot-skills.git -g
-```
-
-安装后重启 OpenCode。按 Team 精简安装需编辑 `.opencode/opencode.json`：
-```json
-{
-  "plugin": [["cannbot@git+https://gitcode.com/cann/cannbot-skills.git", {"team": "ops-direct-invoke"}]]
-}
-```
-
-| Team | Agents | Skills |
-|------|--------|--------|
-| `all` | 8 | 25 |
-| `ops-direct-invoke`（默认） | 3 | 11 |
-| `pypto-op-orchestrator` | 3 | 8 |
-
-也可以让 OpenCode 自动安装：
-```bash
-Fetch and follow instructions from https://gitcode.com/cann/cannbot-skills/blob/.opencode/INSTALL.md
-```
-
-
-### 方式二：脚本安装
-
-**Ascend C 算子开发**
-
-适用于 Ascend C 算子直调开发场景，自动安装 Skills、配置文件及 asc-devkit 工具包。
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-direct-invoke
-bash init.sh project opencode   # OpenCode 用户（默认）
-bash init.sh project claude     # Claude Code 用户
-```
-
-详细说明见 [plugins-official/ops-direct-invoke/quickstart.md](plugins-official/ops-direct-invoke/quickstart.md)。
-
-**PyPTO 算子开发**
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/pypto-op-orchestrator
-bash init.sh project opencode   # OpenCode 用户（默认）
-bash init.sh project claude     # Claude Code 用户
-```
-
-详细说明见 [plugins-official/pypto-op-orchestrator/quickstart.md](plugins-official/pypto-op-orchestrator/quickstart.md)。
-
-**NPU 模型推理优化**
-
-适用于 PyTorch 模型的昇腾 NPU 推理性能优化场景。
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/model/teams/infer-model-optimize-team
-bash init.sh project opencode   # OpenCode 用户（默认）
-bash init.sh project claude     # Claude Code 用户
-```
-
-详细说明见 [model/teams/infer-model-optimize-team/quickstart.md](model/teams/infer-model-optimize-team/quickstart.md)。
+3. 激活：`/reload-plugins`，然后新开会话 或 `/clear`
 
 ### 方式三：手动安装
 
-仅安装 Skills 和 Agents，适用于自定义配置场景。
+克隆仓库后，按需将 skills/ 或 agents/ 目录下所需的模块软链接或复制到对应工具的配置路径下。目录结构需参考各 Agent 框架的约定，例如 Claude Code 的项目级结构为 `{your-project-path}/.claude/skills/` 和 `{your-project-path}/.claude/agents/`。
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills
-# OpenCode 用户
-mkdir -p .opencode && ln -s ../ops .opencode/skills
-# Claude 用户：将 .opencode 替换为 .claude
+# 示例：将 ascendc-npu-arch skill 拷贝到你的 Claude Code 项目
+cp -r cannbot-skills/ops/ascendc-npu-arch {your-project-path}/.claude/skills/
 ```
-
-> 如需全局安装，OpenCode 用户将 `.opencode` 替换为 `~/.config/opencode`，Claude 用户替换为 `~/.claude`。
-
-### 启动 CLI
-
-```bash
-opencode
-```
-
-&nbsp;
 
 ## 🔍 项目架构设计
 
@@ -284,8 +210,6 @@ skills/
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-&nbsp;
-
 ## 🚀 Skills 技能库
 
 ### Ascend C 算子开发
@@ -325,7 +249,6 @@ skills/
 | **pypto-precision-compare** | 精度中间结果对比分析 |
 | **pypto-op-perf-tune** | 算子性能分析与自动调优 |
 
-&nbsp;
 ### NPU 模型推理优化
 
 | Skill | 功能 |
@@ -342,8 +265,6 @@ skills/
 | **model-infer-multi-stream** | 多流并行优化 |
 | **model-infer-prefetch** | 权重预取适配 |
 | **model-infer-superkernel** | SuperKernel 适配 |
-
-&nbsp;
 
 ## 🚀 Agents 智能代理
 
@@ -365,8 +286,6 @@ skills/
 | **pypto-op-developer** | 算子代码实现与精度调试 |
 | **pypto-op-perf-tuner** | 性能分析与调优 |
 
-&nbsp;
-
 ### NPU 模型推理优化
 
 | Agent | 功能 |
@@ -375,21 +294,15 @@ skills/
 | **model-infer-implementer** | 代码改造、调试修复 |
 | **model-infer-reviewer** | 精度验证、性能对比 |
 
-&nbsp;
-
 ## 🛠️ 测试框架
 
 自动化测试验证 Skills 和 Agents 的正确性，确保技能模块和智能代理的行为符合预期。
 详见 [tests/README.md](tests/README.md)。
 
-&nbsp;
-
 ## 💬相关信息
 - [贡献指南、开发规范](docs/STANDARDS.md)
 - [许可证](LICENSE)
 - [所属SIG](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)
-
-&nbsp;
 
 ## 💖 免责声明
 
@@ -400,8 +313,6 @@ skills/
 1. **关于功能满足度**：由于技术快速更新迭代，部分内容可能无法完全适用于所有场景。 本开源社区的功能和文档正在持续更新和完善、丰富场景中，如果想提出需求、发现问题、贡献想法，非常欢迎提 Issue、讨论来告诉我们，共创共建。
 
 2. **关于自动生成**：自动代码生成工具所产出的内容，其完整性、准确性、合规性，受模型类型、模型版本、Skills 能力、语料质量、输入指令、运行环境等多种因素影响，无法保证完全精准、尽善尽美。所有生成代码作为辅助研发使用，请开发者务必进行测试验证、安全审查后再投入使用。
-
-&nbsp;
 
 ## 🤝 联系我们
 ### 需求、问题、咨询、任务、文档
