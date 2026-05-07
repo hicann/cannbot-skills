@@ -1,10 +1,15 @@
 ## 🔥 更新日志
+### 【2026-05-06】
+#### 新特性 New Features
+- 新增算子注册调用的开发工作流（ops-registry-invoke），支持ACLNN和GEIR两种接入方式，覆盖需求分析到代码检视全流程。
+
 ### 【2026-04-30】
+#### 配置 Configuration
 - 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
 
 ### 【2026-04-29】
 #### 新特性 New Features
-- 【工程模板，registry-invoke-template】新增注册调用自定义算子工程模板 Skill，提供标准工程结构、代码模板、UT/ST 样例和多芯片架构参考
+- 【工程模板，registry-invoke-template】新增注册调用自定义算子工程模板 Skill，提供标准工程结构、代码模板、UT / ST 样例和多芯片架构参考。
 
 ### 【2026-04-28】
 #### 新特性 New Features
@@ -12,7 +17,7 @@
 
 ### 【2026-04-25】
 #### 特性增强 Feature Enhancement
-- 增强 ascendc-precision-debug和ascendc-runtime-debug的调试能力。
+- 增强 ascendc-precision-debug 和ascendc-runtime-debug 的调试能力。
 
 ### 【2026-04-24】 
 #### 新特性 New Features
@@ -28,21 +33,21 @@
 
 ### 【2026-04-20】
 #### 新特性 New Features
-- 【最佳实践，regbase】新增 regbase 配置最佳实践知识
-- 【工程实践】新增 add / div 算子 fp16 / bf16 → fp32 类型转换实践
+- 【最佳实践，regbase】新增 regbase 配置最佳实践知识。
+- 【工程实践】新增 add / div 算子 fp16 / bf16 → fp32 类型转换实践。
 #### 问题修复 Bug Fix
-- 【环境检查，env-check】修复 verify_environment.sh 设备计数返回 bug
-- 【目录重构】统一算子目录命名 (ops → operators)
+- 【环境检查，env-check】修复 verify_environment.sh 设备计数返回的bug。
+- 【目录重构】统一算子目录命名（ops → operators）。
 
 ### 【2026-04-18】
 #### 问题修复 Bug Fix
-- 【性能分析，ops-profiling】修复 ops-profiling 技能名称不一致问题
+- 【性能分析，ops-profiling】修复 ops-profiling 技能名称不一致的问题。
 
 ### 【2026-04-17】
 #### 新特性 New Features
-- 【测试开发，st-design】新增精度模式自动生成
-- 【Tiling 设计，tiling-design】完善 broadcast tiling 设计文档
-- 【代码检视，ops-direct-invoke】新增初始化脚本和快速入门指南，完善 CANNBot 代码检视环境的搭建与使用说明
+- 【测试开发，st-design】新增精度模式自动生成。
+- 【Tiling 设计，tiling-design】完善 broadcast tiling 设计文档。
+- 【代码检视，ops-direct-invoke】新增初始化脚本和快速入门指南，完善 CANNBot 代码检视环境的搭建与使用说明。
 
 ### 【2026-04-16】
 #### 新特性 New Features
@@ -63,21 +68,18 @@
 #### 问题修复 Bug Fix
 - 【Plugin 安装】修复 OpenCode Plugin 安装问题。
 
-
 ### 【2026-04-14】
 #### 新特性 New Features
-- 【仿真，ops-simulator】新增Ascend 950 仿真Skill：支持 Ascend 950 仿真，并且输出性能分析报告和流水线图。
+- 【仿真，ops-simulator】新增Ascend 950 仿真的Skill：支持 Ascend 950 仿真，并且输出性能分析报告和流水线图。
 #### 特性增强 Feature Enhancement
 - 【UT单元测试，ascendc-ut-develop】支持针对 ops-transformer 算子仓的 UT、CSV 代码重构，分离数据与测试代码，提高调试效率。
 - 【aclnn 接口测试用例设计，ascendc-st-design】新增支持aclIntArray / aclFloatArray / aclBoolArray / aclScalarList / aclIntArray类型接口生成ST用例。
 #### 问题修复 Bug Fix
 - 【算子直调，ops-direct-invoke】修改verify_environment.sh脚本，返回environment.json 固定为1的bug，应该按实际设备的npu count返回。
     
-
 ### 【2026-04-13】
 #### 新特性 New Features
 - 【Team调度】支持team级代码条例全量检视，review team 派发条例给代码检视。支持子agent 并行检视、验证，提升检视效果，降低上下文的压力。
-
 
 ### 【2026-04-10】
 #### 新特性 New Features
@@ -94,15 +96,13 @@
 - 【PyPTO】新增 Agent：pypto-op-perf-tuner: 性能调优 Agent。
 - 【PyPTO】新增 Team：pypto-op-orchestrator 算子开发编排 （含初始化脚本和快速入门）。
 
-
 ### 【2026-04-09】
 #### 特性增强 Feature Enhancement
- - 【Ascend C】【代码检视，ascendc-ops-reviewer】优化了 ascendc-ops-reviewer agent 的检视流程，增加了多维度检视表格、代码侧别识别和置信度评定机制。新增 Ascend C 的 API 最佳实践、性能编码规范和 TopK 编码问题清单。
-
+ - 【Ascend C】【代码检视，ascendc-ops-reviewer】优化了 ascendc-ops-reviewer Agent 的检视流程，增加了多维度检视表格、代码侧别识别和置信度评定机制。新增 Ascend C 的 API 最佳实践、性能编码规范和 TopK 编码问题清单。
 
 ### 【2026-04-07】
 #### 新特性 New Features
-- 【Ascend C】【代码检视，ascendc-ops-reviewer】ascendc-ops-reviewer agent支持GitCode PR的代码检视。
+- 【Ascend C】【代码检视，ascendc-ops-reviewer】ascendc-ops-reviewer Agent支持GitCode PR的代码检视。
 - 【Ascend C】【Kernel 架构】新增 Agent：ascendc-kernel-architect，<<<>>>直调支持多agent协同。
 - 【Ascend C】【Kernel 架构】新增 Skill：ascendc-direct-invoke-template。
  
@@ -112,33 +112,29 @@
  #### 配置 Configuration
 - 【Issue模板】新增 Issue 模板。
 
-
 ### 【2026-04-01】
 #### 特性增强 Feature Enhancement
-- 【Ascend C】【代码检视，ascendc-ops-reviewer】ascendc-ops-reviewer agent支持GitCode PR的代码检视。
-
+- 【Ascend C】【代码检视，ascendc-ops-reviewer】ascendc-ops-reviewer Agent 支持GitCode PR的代码检视。
 
 ### 【2026-03-26】
 #### 新特性 New Features
-- 【Ascend C】【白盒测试用例，ascendc-whitebox-design】新建Skill：ascendc-whitebox-design，白盒测试用例。
-
+- 【Ascend C】【白盒测试用例，ascendc-whitebox-design】新建 Skill：ascendc-whitebox-design，白盒测试用例。
 
 ### 【2026-03-25】
 #### 特性增强 Feature Enhancement
-- 【Ascend C】【代码检视，ascendc-ops-reviewer】搭建code reviewer agent基础框架和工作流、支持检视条款的扩充和修改。
-
+- 【Ascend C】【代码检视，ascendc-ops-reviewer】搭建 ascendc-code-reviewer Agent的基础框架和工作流、支持检视条款的扩充和修改。
 
 ### 【2026-03-20】
 #### 新特性 New Features
-- 【Ascend C】新增Skill：ascendc-api-best-practices，Ascend C 的 API 使用最佳实践。
-- 【Ascend C】新增Skill：ascendc-code-review，Ascend C 代码检视。
-- 【Ascend C】新增Skill：ascendc-docs-search，文档搜索。
-- 【Ascend C】新增Skill：ascendc-env-check，NPU 设备查询、CANN 环境验证。
-- 【Ascend C】新增Skill：ascendc-kernel-develop-workflow，七阶段工作流。
-- 【Ascend C】新增Skill：ascendc-npu-arch，NPU 架构知识、芯片型号映射。
-- 【Ascend C】新增Skill：ascendc-precision-debug，算子精度调试。
-- 【Ascend C】新增Skill：ascendc-runtime-debug，算子运行时错误调试。
-- 【Ascend C】新增Skill：ascendc-st-design，接口测试用例设计。
-- 【Ascend C】新增Skill：ascendc-task-focus，任务聚焦，解决长任务“迷失在中间”的问题。
-- 【Ascend C】新增Skill：ascendc-tiling-design，Tiling 设计方法论。
-- 【Ascend C】新增Skill：ascendc-ut-develop。UT单元测试用例开发与覆盖率增强。
+- 【Ascend C】新增 Skill：ascendc-api-best-practices，Ascend C 的 API 使用最佳实践。
+- 【Ascend C】新增 Skill：ascendc-code-review，Ascend C 代码检视。
+- 【Ascend C】新增 Skill：ascendc-docs-search，文档搜索。
+- 【Ascend C】新增 Skill：ascendc-env-check，NPU 设备查询、CANN 环境验证。
+- 【Ascend C】新增 Skill：ascendc-kernel-develop-workflow，七阶段工作流。
+- 【Ascend C】新增 Skill：ascendc-npu-arch，NPU 架构知识、芯片型号映射。
+- 【Ascend C】新增 Skill：ascendc-precision-debug，算子精度调试。
+- 【Ascend C】新增 Skill：ascendc-runtime-debug，算子运行时错误调试。
+- 【Ascend C】新增 Skill：ascendc-st-design，接口测试用例设计。
+- 【Ascend C】新增 Skill：ascendc-task-focus，任务聚焦，解决长任务“迷失在中间”的问题。
+- 【Ascend C】新增 Skill：ascendc-tiling-design，Tiling 设计方法论。
+- 【Ascend C】新增 Skill：ascendc-ut-develop。UT单元测试用例开发与覆盖率增强。

@@ -9,15 +9,15 @@ description: Ascend C 算子精度调试技能，提供精度问题诊断和解�
 
 > **精度调试 = 理解 + 分析 + 定位 + 修复**
 
-1. **理解数据类型限制**：FP16 约 3-4 位有效数字，FP32 约 6-7 位
-2. **识别数值稳定性问题**：大数吃小数、灾难性抵消
-3. **掌握科学调试方法**：从最小复现到根因分析
+1. **理解数据类型限制**：FP16 约 3-4 位有效数字，FP32 约 6-7 位。
+2. **识别数值稳定性问题**：大数吃小数、灾难性抵消。
+3. **掌握科学调试方法**：从最小复现到根因分析。
 
 ## 使用时机
 
-**适用**：精度验证失败（rtol/atol 不达标）、输出全为0或随机值、FP16差于FP32、特定数值范围误差大、流水线同步问题、DataCopy对齐问题
+**适用**：精度验证失败（rtol/atol 不达标）、输出全为0或随机值、FP16差于FP32、特定数值范围误差大、流水线同步问题、DataCopy对齐问题。
 
-**不适用**（功能问题）：编译错误、运行时错误、逻辑异常
+**不适用**（功能问题）：编译错误、运行时错误、逻辑异常。
 
 ---
 
@@ -42,9 +42,9 @@ description: Ascend C 算子精度调试技能，提供精度问题诊断和解�
 > **禁止凭直觉修改代码**
 
 **检索顺序**：
-1. 搜索 `asc-devkit/examples/` 查找类似算子
-2. 查看 `asc-devkit/docs/api/context/` API 文档
-3. 对比官方实现与当前实现
+1. 搜索 `asc-devkit/examples/` 查找类似算子。
+2. 查看 `asc-devkit/docs/api/context/` API 文档。
+3. 对比官方实现与当前实现。
 
 ### 3. 清理缓存和临时文件
 
@@ -74,7 +74,7 @@ mkdir -p build/input build/output
         │
         ├─ [第一步] 排查数据搬运 ⭐⭐⭐
         │   ├─ 输出是否全为 0 或随机错误？
-        │   │   ├─ 是 → 检查流水线同步（EnQue/DeQue）⭐⭐⭐
+        │   │   ├─ 是 → 检查流水线同步（EnQue / DeQue）⭐⭐⭐
         │   │   │       └─ DataCopy 后直接计算？→ 添加 EnQue/DeQue
         │   │   │       └─ 临时验证：加 PipeBarrier，若正确则确认同步问题
         │   │   ├─ 检查 DataCopy 是否 32 字节对齐
@@ -98,16 +98,16 @@ mkdir -p build/input build/output
 
 | 症状 | 可能原因 | 诊断方向 |
 |------|----------|----------|
-| **输出全为 0 或随机错误** | 流水线同步缺失 / DataCopy 非对齐 / GlobalTensor.SetValue | 检查 EnQue/DeQue、数据对齐、改用 LocalTensor.SetValue + DataCopyPad ⭐⭐⭐ |
+| **输出全为 0 或随机错误** | 流水线同步缺失 / DataCopy 非对齐 / GlobalTensor.SetValue | 检查 EnQue / DeQue、数据对齐、改用 LocalTensor.SetValue + DataCopyPad ⭐⭐⭐ |
 | `sum=0, max_err=输入级别` | 输出没写出 | 检查输出队列类型（VECIN vs VECOUT） |
 | `sum=0, max_err≈0` | 输出全0/未初始化 | 检查 UB 溢出、buffer 分配 |
-| `核心超时/挂起` | Buffer 冲突/死锁 | 检查 Alloc/Free 配对 |
+| `核心超时/挂起` | Buffer 冲突/死锁 | 检查 Alloc / Free 配对 |
 | `特定参数范围失败` | 阈值/边界错误 | 验证阈值计算、检查分支条件 |
 | `非对齐数据失败` | DataCopy 对齐问题 | 改用 DataCopyPad |
 | `FP16 差但 FP32 好` | 精度不足 | 中间计算用 FP32 |
-| `Cast 后数据错误` | RoundMode 错误 | half→float用CAST_NONE，float→half用CAST_ROUND |
+| `Cast 后数据错误` | RoundMode 错误 | half → float用CAST_NONE，float → half用CAST_ROUND |
 | **BF16 通过但 FP16/FP32 失败** | (1) 部分 API 不支持 BF16，BF16 走了更简单的 fallback 路径反而正确；(2) BF16 与 FP16/FP32 精度特性不同（BF16 mantissa 7bit vs FP16 10bit），精度阈值或溢出行为差异 | 先排查 API fallback 分支差异，再检查精度阈值（rtol/atol）是否适配各 dtype |
-| **FP32 通过但 FP16/BF16 失败** | 半精度中间计算精度不足 | 升精度：Cast→FP32 计算→Cast 回半精度 |
+| **FP32 通过但 FP16/BF16 失败** | 半精度中间计算精度不足 | 升精度：Cast → FP32 计算 → Cast 回半精度 |
 | **修改代码后输出完全不变** | 二进制未更新 / 编译器缓存 | 清理 build/ 和 $HOME/atc_data/kernel_cache/ 后重试 |
 
 ### 诊断模式："FP32 通过但 FP16/BF16 失败"
@@ -144,7 +144,7 @@ mkdir -p build/input build/output
 
 **原因1：API 不支持导致 fallback 路径差异**。部分 Ascend C 算术/归约 API 不支持 BF16，开发者为 BF16 实现更简单的 fallback 路径。BF16 fallback 通过说明逻辑正确，问题出在 FP16/FP32 路径中调用的复杂 API 上。
 
-**原因2：精度阈值 / 数值范围差异**。BF16 (mantissa 7bit, 指数范围同 FP32) 与 FP16 (mantissa 10bit, 指数范围更小) 精度特性不同：BF16 不易溢出但尾数精度低，FP16 易溢出但尾数精度高。如果验证阈值（rtol/atol）未区分适配，或 FP16 发生溢出而 BF16 没有，就会出现 BF16 通过但 FP16 失败。
+**原因2：精度阈值 / 数值范围差异**。BF16 (mantissa 7bit, 指数范围同 FP32) 与 FP16 (mantissa 10bit, 指数范围更小) 精度特性不同：BF16 不易溢出但尾数精度低，FP16 易溢出但尾数精度高。如果验证阈值（rtol / atol）未区分适配，或 FP16 发生溢出而 BF16 没有，就会出现 BF16 通过但 FP16 失败。
 
 ```
 确认: BF16通过，FP16/FP32失败
@@ -152,7 +152,7 @@ mkdir -p build/input build/output
     ├─ [原因1] API fallback 路径差异
     │   ├─ 搜索代码中 if constexpr (std::is_same_v<T, bfloat16_t>) 分支
     │   ├─ BF16 走的 fallback 路径 vs FP16/FP32 走的主路径，差异在哪里？
-    │   ├─ 列出 FP16/FP32 路径中使用但 BF16 路径未使用的 API
+    │   ├─ 列出 FP16 / FP32 路径中使用但 BF16 路径未使用的 API
     │   ├─ 逐个验证差异 API 的参数（mask、repeatTime、stride）
     │   └─ 临时将 FP16 路径改为与 BF16 相同的 fallback 实现，观察是否通过
     │
@@ -187,7 +187,7 @@ mkdir -p build/input build/output
 
 ### 流水线同步调试
 
-**核心问题**：DataCopy/DataCopyPad 是异步 DMA 操作，直接在搬运后的数据上做 Vector 计算可能读到未完成的数据！
+**核心问题**：DataCopy / DataCopyPad 是异步 DMA 操作，直接在搬运后的数据上做 Vector 计算可能读到未完成的数据！
 
 ```cpp
 // ❌ 错误：AllocTensor 后直接用

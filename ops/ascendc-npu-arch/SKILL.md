@@ -17,13 +17,13 @@ description: Ascend NPU 架构知识查询技能。通过芯片型号映射、�
 
 | NpuArch | __NPU_ARCH__ | SocVersion | 产品系列 | 芯片型号 |
 |---------|-------------|------------|---------|---------|
-| DAV_1001 | 1001 | ASCEND910 | Atlas 训练系列 | Ascend910 |
-| DAV_2002 | 2002 | ASCEND310P | Atlas 推理系列 | Ascend310P1, Ascend310P3 |
-| DAV_2201 | 2201 | ASCEND910B | Atlas A2 训练/推理系列 | Ascend910B1~B4, Ascend910B2C |
-| DAV_2201 | 2201 | ASCEND910B | Atlas A3 训练/推理系列 | Ascend910_93 |
-| DAV_3002 | 3002 | ASCEND310B | Atlas 200I/500 A2 推理产品 | Ascend310B1~B4 |
-| DAV_3510 | 3510 | ASCEND950 | Atlas A5 训练系列 | Ascend950DT (Decode) |
-| DAV_3510 | 3510 | ASCEND950 | Atlas A5 推理系列 | Ascend950PR (Prefill) |
+| DAV_1001 | 1001 | ASCEND 910 | Atlas 训练系列 | Ascend 910 |
+| DAV_2002 | 2002 | ASCEND 310P | Atlas 推理系列 | Ascend 310P1, Ascend 310P3 |
+| DAV_2201 | 2201 | ASCEND 910B | Atlas A2 训练/推理系列 | Ascend 910B1~B4, Ascend 910B2C |
+| DAV_2201 | 2201 | ASCEND 910B | Atlas A3 训练/推理系列 | Ascend 910_93 |
+| DAV_3002 | 3002 | ASCEND 310B | Atlas 200I/500 A2 推理产品 | Ascend 310B1~B4 |
+| DAV_3510 | 3510 | ASCEND 950 | Atlas A5 训练系列 | Ascend 950DT (Decode) |
+| DAV_3510 | 3510 | ASCEND 950 | Atlas A5 推理系列 | Ascend 950PR (Prefill) |
 
 > **注意**：`Ascend910_93` 的 SocVersion 字符串在运行时映射到 `SocVersion::ASCEND910B`（非独立枚举值），NpuArch 同为 DAV_2201。
 
@@ -42,7 +42,7 @@ platform_ascendc::SocVersion socVer = ascendcPlatform.GetSocVersion();
 - `GetCurNpuArch()` 返回 `NpuArch` 枚举，失败时返回 `NpuArch::DAV_RESV`
 - `GetSocVersion()` 返回 `SocVersion` 枚举，失败时返回 `SocVersion::RESERVED_VERSION`
 
-## Ascend950 (DAV_3510) 独有特性
+## Ascend 950 (DAV_3510) 独有特性
 
 | 特性 | 说明 | 典型算子 |
 |-----|------|---------|

@@ -15,14 +15,14 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
-- **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持ACLNN和GEIR两种接入方式，覆盖需求分析到代码检视全流程。
+- **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。
 - **2026-04-30** — 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
-- **2026-04-29** — 新增自定义算子注册调用的脚手架工程，支持通过ACLNN和GEIR接入，ascendc-registry-invoke-template的Skill。
-- **2026-04-28** — 新增支持TRAE安装。
-- **2026-04-25** — 增强 ascendc-precision-debug和ascendc-runtime-debug的调试能力。
+- **2026-04-29** — 新增自定义算子注册调用的脚手架工程（ascendc-registry-invoke-template），支持通过 ACLNN 和 GEIR 接入。
+- **2026-04-28** — 新增支持 TRAE 安装。
+- **2026-04-25** — 增强 ascendc-precision-debug 和 ascendc-runtime-debug 的调试能力。
 - **2026-04-24** — 新增 Ascend C 性能调优知识货架。
-- **2026-04-23** — 在 Readme.md 新增 Skills 的使用样例。
-- **2026-04-21** — 修复测试框架并解决识别到的多项校验问题
+- **2026-04-23** — 在 README.md 新增 Skills 的使用样例。
+- **2026-04-21** — 修复测试框架并解决识别到的多项校验问题。
 - **2026-04-20** — 新增 regbase 配置最佳实践，修复环境检查设备计数 bug，统一算子目录命名（ops → operators）。
 - **2026-04-18** — 修复 ops-profiling 技能名称不一致的问题。
 

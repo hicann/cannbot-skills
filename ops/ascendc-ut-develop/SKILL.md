@@ -1,6 +1,6 @@
 ---
 name: ascendc-ut-develop
-description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op_host/op_api/op_kernel 的测试空白、生成或补充 UT 用例并定位未覆盖代码来提升覆盖率，支持 ops-math/ops-nn/ops-transformer/ops-cv。当用户提及 UT、单元测试、覆盖率、补测、未覆盖代码或需要新增/完善 UT 时使用，ST 测试不适用。
+description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op_host / op_api / op_kernel 的测试空白、生成或补充 UT 用例并定位未覆盖代码来提升覆盖率，支持 ops-math / ops-nn / ops-transformer / ops-cv。当用户提及 UT、单元测试、覆盖率、补测、未覆盖代码或需要新增/完善 UT 时使用，不适用于 ST 测试。
 ---
 
 # AscendC 算子 UT 开发
@@ -30,11 +30,11 @@ description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op
 
 **立即**使用 `question` 工具，向用户确认入口参数是否正确，问卷内容使用 `assets/question.json`，在推断出的选项的 `label` 后加上 "【推荐】"，**除此之外不得有任何修改**
 
-收到用户答复后，根据变量的"含义"理解用户真实需求
+收到用户答复后，根据变量的"含义"理解用户真实需求。
 
 ### 0.2 创建 TODO.md
 
-**立即**使用 `todowrite` 工具创建 Todos，内容使用 `assets/todo.json`，**不允许进行任何修改**
+**立即**使用 `todowrite` 工具创建 Todos，内容使用 `assets/todo.json`，**不允许进行任何修改。**
 
 ### 0.3 创建 tmp 目录
 
@@ -61,7 +61,7 @@ mkdir -p /tmp/cannbot_${op_name}
 2. **禁止提前阅读**：**在执行到某个步骤前，绝对禁止阅读该步骤的文档！**
 3. **即时更新进度**：每完成或跳过一个子步骤，**立即**使用 `todowrite` 工具更新 TODO.md，将其标记为 `[x]`
 
-## 主流程链接
+### 主流程链接
 
 [Step 1](./references/workflow/step1.md)
 [Step 2](./references/workflow/step2.md)

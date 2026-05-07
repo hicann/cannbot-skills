@@ -1,8 +1,8 @@
 # 选择/基数排序类算子性能优化实践
 
-本文档聚焦 AscendC 选择/排序类算子（TopK、KthValue、Sort、ArgSort、Histogram 等）在大规模数据场景下的性能优化实现：算法层重构、流水线并行、指令级技巧、精度保障与跨核同步。
+本文档聚焦 Ascend C 选择 / 排序类算子（TopK、KthValue、Sort、ArgSort、Histogram 等）在大规模数据场景下的性能优化实现：算法层重构、流水线并行、指令级技巧、精度保障与跨核同步。
 
-> **当前覆盖范围**：本文档基于 **A2 大规模数据** 实战验证；A3、A5 等架构的硬件细节差异需另行验证后再套用。覆盖算子族包括选择类（TopK/KthValue/Median/Quantile）、排序类（Sort/ArgSort/ArgMax/Min）、分桶统计类（Histogram/BinCount/Unique）、过滤输出类（Where/NonZero/MaskedSelect）。
+> **当前覆盖范围**：本文档基于 **A2 大规模数据** 实战验证；A3、A5 等架构的硬件细节差异需另行验证后再套用。覆盖算子族包括选择类（TopK / KthValue / Median / Quantile）、排序类（Sort / ArgSort / ArgMax / Min）、分桶统计类（Histogram / BinCount / Unique）、过滤输出类（Where / NonZero / MaskedSelect）。
 
 > **共性特征**：数据量远大于 UB（需多遍扫描）、输出稀疏（合格元素 << 全部元素）、跨核同步开销显著。
 
@@ -204,9 +204,9 @@ element i+1:              [GetValue_{i+1}]──────────[SetVal_
 
 | 数据类型 | 变换规则 | 向量实现 |
 |---------|---------|---------|
-| **BF16** | 正: XOR 0x8000, 负: NOT | 7 ops: ShiftRight+Not+Adds+And+Not+And+Or |
-| **FP16** | 正: XOR 0x8000, 负: NOT | 同 BF16（format 相同 trick） |
-| **FP32** | 正: XOR 0x80000000, 负: NOT(all 32 bits) | 需要 int32 向量操作 |
+| **BF16** | 正：XOR 0x8000，负：NOT | 7 ops: ShiftRight+Not+Adds+And+Not+And+Or |
+| **FP16** | 正：XOR 0x8000，负：NOT | 同 BF16（format 相同 trick） |
+| **FP32** | 正：XOR 0x80000000，负：NOT(all 32 bits) | 需要 int32 向量操作 |
 
 **逆变换**（SortToRaw）：
 - 高半区（bit_sign=1 → 原正数）：清除符号位
@@ -281,7 +281,7 @@ Core 0:    写 cookie 到 GM flags[step][C]
     │   └─ 标量 barrier → 减少同步次数 (§5)
     │
     ├─ Vector 主导
-    │   ├─ CompareScalar 过多 → 减少 bins/level (§1.2)
+    │   ├─ CompareScalar 过多 → 减少 bins / level (§1.2)
     │   ├─ 重复 Transform → 一次性转换 + 复用 (§1.3)
     │   └─ 指令级 → cumGE、2-bin batch、mask trick (§3.1)
     │
@@ -299,7 +299,7 @@ Core 0:    写 cookie 到 GM flags[step][C]
 | 特性 | 行为 | 影响 |
 |------|------|------|
 | Adds(int16) | 饱和（非回绕） | 跨 0x8000 需 cross-half 修正 |
-| ReduceSum | 仅支持 half/float（无整型） | 必须 mask→half→ReduceSum |
+| ReduceSum | 仅支持 half / float（无整型） | 必须 mask → half → ReduceSum |
 | half 精度 | 精确整数 ≤ 2048 | SUBCHUNK ≤ 2048 |
 | `xGm_.GetValue` | 非阻塞流水线读 | 不可替换为同步计算 |
 | `SetValue` | 阻塞写 | 是标量输出的真实瓶颈 |
@@ -353,4 +353,4 @@ Core 0:    写 cookie 到 GM flags[step][C]
 | half ReduceSum subchunk > 2048 | half 尾数 10 bits，累加结果丢精度 | `SUBCHUNK ≤ 2048`，或换 float32 ReduceSum (§4.3) |
 | 最后 chunk 不补齐就 DMA | padding 区域残留数据混入计算 | Host tiling 对齐到 `HIST_SUBCHUNK` (§4.4) |
 | 每步 barrier 传 256-bin 直方图 | 跨核同步数据量大，barrier 开销显著 | 二分搜索每步只传 1 个 count (§5) |
-| 默认套用通用 sort API | 大数据稀疏选择场景下吞吐极差 | 走专门的 radix/二分搜索路径 |
+| 默认套用通用 sort API | 大数据稀疏选择场景下吞吐极差 | 走专门的 radix / 二分搜索路径 |
