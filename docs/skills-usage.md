@@ -33,3 +33,19 @@
 - 明确**平台版本**（如 `dav-2201` / `dav-3510`），影响 cmake 配置与目标仓约定对齐。
 - 没有 torch / 测试脚本时对应行可删，但"精度对齐"需至少保留一份可跑的原始用例作为参考系。
 - 三原则（kernel 零修改 / tiling 数学零修改 / 只改框架胶水）、全量迁移、先确认交付边界等行为已内置在 SKILL.md，prompt 里不必重复。
+
+
+### ascendc-direct-invoke-to-registry-invoke
+
+ `<<<>>>` kernel 直调转注册算子（算子迁移，不是从零开发）。
+
+```
+请使用 ascendc-direct-invoke-to-registry-invoke 技能，完成如下算子迁移：
+
+【任务】将/path/rms_norm.asc <源kernel直掉文件绝对路径> kernel直调工程接入ACLNN/GEIR接口，生成在/path/rms_norm_single_op <迁移后的绝对路径>，目标芯片ascend910b <目标芯片版本，建议和当前运行环境一致，否则无法进行结果验证>
+
+```
+
+**使用建议**：
+
+- 路径写**绝对路径**，skill 不必猜测源码位置。

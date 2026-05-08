@@ -15,6 +15,7 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
+- **2026-05-07** — 新增kernel直调工程接入ACLNN/GEIR接口skill（ascendc-direct-invoke-to-registry-invoke），支持kernel直调形式改造成自定义算子工程。
 - **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。
 - **2026-04-30** — 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
 - **2026-04-29** — 新增自定义算子注册调用的脚手架工程（ascendc-registry-invoke-template），支持通过 ACLNN 和 GEIR 接入。
@@ -228,6 +229,7 @@ skills/
 | **ascendc-whitebox-design** | 白盒测试用例设计与生成 | — |
 | **ascendc-registry-invoke-template** | 完整自定义算子工程模板，提供标准工程结构、代码模板、UT/ST 样例和多芯片架构参考 | — |
 | **ascendc-registry-invoke-to-direct-invoke** | 注册调用算子转 `<<<>>>` kernel 直调 | [查看](docs/skills-usage.md#ascendc-registry-invoke-to-direct-invoke) |
+| **ascendc-direct-invoke-to-registry-invoke** | `<<<>>>` kernel 直调转注册调用算子 | [查看](docs/skills-usage.md#ascendc-direct-invoke-to-registry-invoke) |
 | **ascendc-direct-invoke-template** | Kernel 直调工程模板，提供验证过的样例工程和修改指南 | — |
 | **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
