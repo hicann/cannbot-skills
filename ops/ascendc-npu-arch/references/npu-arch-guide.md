@@ -191,14 +191,13 @@ class QuantizePerChannelRegbase : public QuantizeBase<T, T1, T2, U, ...> {
 ```cpp
 // 仅在 Ascend950 (DAV_3510) 可用
 __simt_vf__ __aicore__ LAUNCH_BOUND(512) inline void SimtCompute(...) {
-    int64_t groupIndex = Simt::GetBlockIdx() * Simt::GetThreadNum() + Simt::GetThreadIdx();
+    int64_t groupIndex = blockIdx.x * blockDim.x + threadIdx.x;
 }
 
-AscendC::Simt::VF_CALL<SimtCompute<Y_T, OFFSET_T>>(
-    AscendC::Simt::Dim3{USED_THREAD}, ...);
+asc_vf_call<SimtCompute<Y_T, OFFSET_T>>(dim3{USED_THREAD}, ...);
 ```
 
-**SIMT API**：`Simt::GetBlockIdx()`, `Simt::GetThreadIdx()`, `Simt::GetThreadNum()`, `Simt::VF_CALL<Func>()`, `Simt::AtomicAdd()`, `Simt::ThreadBarrier()`
+**SIMT API**：`blockIdx.x`, `threadIdx.x`, `blockDim.x`, `asc_vf_call<Func>()`, `asc_atomic_add`, `asc_syncthreads`
 
 ### FP8/FP4 低精度格式
 

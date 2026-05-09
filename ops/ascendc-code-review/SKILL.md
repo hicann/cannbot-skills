@@ -49,6 +49,7 @@ description: Ascend C 代码检视技能。基于假设检验方法论对代码�
 | **Ascend C API 最佳实践** | `references/ascendc-api.md` | API 黑名单、对齐要求、配对检查、限制约束 | Ascend C API 使用检视（仅 Kernel 侧） | 9 条 |
 | **Ascend C 高性能编程** | `references/ascendc-perf.md` | 性能优化、精度标准、Tiling 设计 | Ascend C 高性能编程检视（仅 Kernel 侧） | 12 条 |
 | **TOPK 问题清单** | `references/ascendc-topk.md` | Host侧高频问题、属性获取、特殊值处理、核间同步 | 算子开发重点检视 | 13 条 |
+| **SIMT API C风格化规范** | `references/simt-api-analysis.md` | C++风格API转换为C风格API、变量名冲突、头文件位置 | SIMT kernel代码API检视（仅 Kernel 侧） | 13 条 |
 
 ## API 文档检索
 
@@ -62,6 +63,11 @@ description: Ascend C 代码检视技能。基于假设检验方法论对代码�
 | **内存管理** | `InitBuffer`, `AllocTensor`, `FreeTensor`, `EnQue`, `DeQue` | 配对要求 |
 | **向量计算** | `Add`, `Sub`, `Mul`, `Div`, `Cast` | 参数限制、精度处理 |
 | **归约操作** | `ReduceSum`, `ReduceMax` | 中间精度保护 |
+| **SIMT 线程管理** | `GetThreadNum`, `GetThreadIdx`, `GetBlockIdx`, `GetBlockNum` | C++风格→C风格转换、维度选择 |
+| **SIMT 数学运算** | `UintDiv`, `Min`, `Max`, `Floor`, `Ceil`, `Abs` | C++风格→C风格转换、UintDiv保留 |
+| **SIMT 核函数调用** | `VF_CALL`, `Dim3` | C++风格→C风格转换 |
+| **SIMT 原子操作** | `AtomicAdd`, `AtomicSub` | C++风格→C风格转换 |
+| **SIMT 同步** | `ThreadBarrier` | C++风格→C风格转换 |
 
 **查阅方法**：调用 `/ascendc-docs-search` skill，输入 API 名称即可获取官方文档。
 
@@ -77,9 +83,11 @@ description: Ascend C 代码检视技能。基于假设检验方法论对代码�
    - Python 代码安全性：使用 `python-secure.md`
    - 代码风格质量：使用 `cpp-style.md` 或 `cpp-general.md`
    - 编译配置：使用 `compile-secure.md`
+   - SIMT kernel API：使用 `simt-api-analysis.md`
 5. **Kernel 代码检视前置学习**：
    - 若待检视代码涉及 Kernel 侧（Device 侧），必须使用 `/ascendc-docs-search` skill 查阅 API 文档
    - 常见需查阅的 API：`DataCopy`、`DataCopyPad`、`EnQue`、`DeQue`、`Cast` 等
+   - SIMT kernel 代码需查阅：`GetThreadNum`、`GetThreadIdx`、`UintDiv`、`VF_CALL` 等
    - 禁止凭记忆或推测判断 API 用法正确性
 
 ### 阶段二：假设检验（核心）
@@ -137,12 +145,15 @@ description: Ascend C 代码检视技能。基于假设检验方法论对代码�
 1. 请先完整阅读对应的编码规范文件，并根据这些规范进行代码检视，其他的一概不统计
 2. 检视过程中，存疑代码块存在函数调用行为，必须使用 LSP 或搜索工具进行深层次分析
 3. **Kernel 代码检视前必须使用 `/ascendc-docs-search` skill 学习 Ascend C 基础 API 文档**：获取 DataCopy、EnQue/DeQue、Cast 等核心 API 的官方文档，禁止凭记忆或推测判断
-4. 不确定的编码规范问题，在输出报告中以存疑的形式进行列举，供用户自主判断
-5. 检视报告中列举的问题代码不宜过长，描述清晰问题代码即可
-6. 返回检视结果时，必须仔细检查结果中风险代码行的行数是否正确
-7. 返回检视结果时，所有风险代码块都应该被引用，不能只展示一个行数
+4. **SIMT kernel 代码检视前必须查阅 `references/simt-api-analysis.md`**：了解 C++ 风格 API 到 C 风格 API 的转换规则，特别注意 UintDiv 必须保留
+5. 不确定的编码规范问题，在输出报告中以存疑的形式进行列举，供用户自主判断
+6. 检视报告中列举的问题代码不宜过长，描述清晰问题代码即可
+7. 返回检视结果时，必须仔细检查结果中风险代码行的行数是否正确
+8. 返回检视结果时，所有风险代码块都应该被引用，不能只展示一个行数
 
 ## 红线问题
+
+### Host 侧红线问题
 1. Host侧代码必须对除法、求余操作做除零保护
 2. Host侧代码数组访问，必须进行越界保护
 3. Host侧代码加法、乘法、减法操作，必须进行溢出和减翻保护
@@ -150,7 +161,16 @@ description: Ascend C 代码检视技能。基于假设检验方法论对代码�
 5. 变量使用前，必行进行有效初始化，例如类成员变量需要初始化
 6. 申请资源，使用和释放必须匹配
 
+### Kernel 侧红线问题（SIMT API）
+1. SIMT kernel 代码必须将 C++ 风格 API 转换为 C 风格 API（如 `GetThreadNum` → `blockDim.x`）
+2. `Simt::UintDiv` 必须保留，禁止转换（官方规定，无 C 风格替代）
+3. 变量名不能命名为 `threadIdx`、`blockIdx`、`blockDim`、`gridDim`（与 C 风格 API 冲突）
+4. 头文件 `simt_api/asc_simt.h` 必须在 namespace 外部
+5. 转换后必须通过编译验证，确保无编译错误
+
 > **TOPK 问题清单**详见：`references/ascendc-topk.md`（含 13 条高频检视问题，标注 Host/Kernel 适用范围）
+
+> **SIMT API C风格化规范**详见：`references/simt-api-analysis.md`（含 13 条 API 转换规则，仅 Kernel 侧适用）
 
 ## 输出规范
 
