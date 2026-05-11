@@ -49,6 +49,19 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
+### Cursor
+
+**首选：init.sh 脚本**
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd skills/plugins-official/pypto-op-orchestrator
+bash init.sh project cursor     # 项目级
+bash init.sh global cursor      # 全局级
+```
+
+安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
+
 ### 验证安装
 
 ```bash
@@ -59,6 +72,10 @@ claude plugin list
 # OpenCode
 opencode agent list
 # 应看到 pypto-op-analyst / pypto-op-developer / pypto-op-perf-tuner
+
+# Cursor
+ls .cursor/
+# 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
 ```
 
 ## 二、快速上手
@@ -72,6 +89,8 @@ claude
 # OpenCode
 opencode
 ```
+
+> **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 开发算子示例
 
@@ -178,7 +197,7 @@ cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
 ## 总结
 
 1. PyPTO 算子开发模式通过 7 阶段状态机实现端到端自动化
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode 用户用 `init.sh` 脚本安装
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Cursor 用户用 `init.sh` 脚本安装
 3. `claude` / `opencode` 是核心交互指令
 4. 所有阶段通过门禁驱动，支持断点续跑与失败恢复
 5. 产出物包含完整的参考实现、设计文档、PyPTO 实现和测试入口

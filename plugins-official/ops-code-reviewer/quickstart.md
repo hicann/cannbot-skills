@@ -33,6 +33,7 @@ cd cannbot-skills/plugins-official/ops-code-reviewer
 bash init.sh project opencode   # OpenCode 用户（默认）
 bash init.sh project claude     # Claude Code 用户
 bash init.sh project trae       # Trae 用户
+bash init.sh project cursor     # Cursor 用户
 ```
 
 #### 方式二：全局安装
@@ -49,6 +50,7 @@ cd cannbot-skills/plugins-official/ops-code-reviewer
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
 bash init.sh global claude      # Claude Code 用户
+bash init.sh global cursor      # Cursor 用户
 ```
 
 ### 安装内容
@@ -60,6 +62,14 @@ init.sh 脚本会完成以下操作：
 | Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` |
 | Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` |
 | AGENTS.md | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | `.trae/AGENTS.md` |
+
+#### Cursor 安装路径
+
+| 内容 | Cursor 项目级 | Cursor 全局级 |
+|------|--------------|--------------|
+| Skills 技能模块 | `.cursor/skills/ascendc-code-review/` | `~/.cursor/skills/ascendc-code-review/` |
+| Agents 子代理 | `.cursor/agents/ascendc-ops-reviewer.md` | `~/.cursor/agents/ascendc-ops-reviewer.md` |
+| AGENTS.md | `.cursor/AGENTS.md` | `~/.cursor/AGENTS.md` |
 
 ### 环境校验
 
@@ -115,6 +125,20 @@ skills/plugins-official/ops-code-reviewer/
 └── quickstart.md                  # 本文档
 ```
 
+**项目级安装（Cursor）**：
+```
+skills/plugins-official/ops-code-reviewer/
+├── .cursor/
+│   ├── skills/                    # 技能模块
+│   │   └── ascendc-code-review/   # 代码检视技能
+│   ├── agents/                    # 子代理
+│   │   └── ascendc-ops-reviewer.md
+│   ├── AGENTS.md                  # Team 配置
+│   └── cannbot-manifest.json      # 安装清单
+├── init.sh                        # 初始化脚本
+└── quickstart.md                  # 本文档
+```
+
 ## 二、快速上手
 
 ### 启动
@@ -126,6 +150,8 @@ opencode   # OpenCode 用户
 claude     # Claude Code 用户
 ```
 > **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+>
+> **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 检视示例
 
@@ -237,6 +263,6 @@ bash init.sh --help
 
 1. 代码检视 Team 采用"主 Agent 做大脑、子 Agent 做搜查"架构，实现高效并行检视
 2. 环境搭建核心两步：克隆仓库 → 执行 init.sh
-3. `opencode` / `claude` / `trae` 是核心交互指令
+3. `opencode` / `claude` / `trae` / `cursor` 是核心交互指令
 4. 4 阶段工作流确保全量条例覆盖和报告质量
 5. 自动识别代码侧别，精准过滤适用条例

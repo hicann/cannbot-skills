@@ -40,6 +40,17 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
+### Cursor
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd skills/plugins-official/ops-registry-invoke
+bash init.sh project cursor     # 项目级
+bash init.sh global cursor      # 全局级
+```
+
+安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
+
 ### 验证安装
 
 ```bash
@@ -50,6 +61,10 @@ claude plugin list
 # OpenCode
 opencode agent list
 # 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-reviewer / ascendc-ops-tester
+
+# Cursor
+ls .cursor/
+# 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
 ```
 
 ## 二、快速上手
@@ -63,6 +78,8 @@ claude
 # OpenCode
 opencode
 ```
+
+> **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 开发算子示例
 

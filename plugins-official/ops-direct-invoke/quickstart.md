@@ -60,6 +60,17 @@ bash init.sh project trae
 
 安装后在项目根目录生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
 
+### Cursor
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd skills/plugins-official/ops-direct-invoke
+bash init.sh project cursor     # 项目级
+bash init.sh global cursor      # 全局级
+```
+
+安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
+
 ### 验证安装
 
 ```bash
@@ -73,6 +84,10 @@ opencode agent list
 
 # Trae
 ls .trae/
+# 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
+
+# Cursor
+ls .cursor/
 # 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
 ```
 
@@ -89,6 +104,8 @@ opencode
 ```
 
 > **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+>
+> **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 开发算子示例
 
@@ -171,6 +188,9 @@ cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh
 
 # Trae
 cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project trae
+
+# Cursor
+cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project cursor
 ```
 
 ### Q: 算子直调模式和算子仓模式如何选择？
@@ -189,6 +209,6 @@ cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project tra
 ## 总结
 
 1. 算子直调模式适合快速验证和学习，开发周期短
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae 用户用 `init.sh` 脚本安装
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor 用户用 `init.sh` 脚本安装
 3. 所有算子开发任务会自动加载工作流技能，按阶段执行
 4. 产出物可直接编译运行，快速验证算子功能

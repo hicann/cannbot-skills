@@ -22,6 +22,8 @@ cd cannbot-skills/model/teams/infer-model-optimize-team
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户
 bash init.sh project claude     # Claude Code 用户
+bash init.sh project trae       # Trae 用户
+bash init.sh project cursor     # Cursor 用户
 ```
 
 #### 方式二：全局安装
@@ -38,19 +40,20 @@ cd cannbot-skills/model/teams/infer-model-optimize-team
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户
 bash init.sh global claude      # Claude Code 用户
+bash init.sh global cursor      # Cursor 用户
 ```
 
 ### 安装内容
 
 init.sh 脚本会完成以下操作：
 
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 |
-|------|----------------|---------------|---------------|-------------|
-| Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` |
-| Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` |
-| Hooks 约束脚本 | — | — | `.claude/hooks/` | `~/.claude/hooks/` |
-| 配置文件 | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` + `settings.json` | `~/.claude/CLAUDE.md` + `settings.json` |
-| 参考仓库 | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` |
+| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 | Cursor 项目级 | Cursor 全局 |
+|------|----------------|---------------|---------------|-------------|------------|--------------|-------------|
+| Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` | `.trae/skills/` | `.cursor/skills/` | `~/.cursor/skills/` |
+| Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` | `.trae/agents/` | `.cursor/agents/` | `~/.cursor/agents/` |
+| Hooks 约束脚本 | — | — | `.claude/hooks/` | `~/.claude/hooks/` | — | `.cursor/hooks/` | `~/.cursor/hooks/` |
+| 配置文件 | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` + `settings.json` | `~/.claude/CLAUDE.md` + `settings.json` | `.trae/AGENTS.md` | `.cursor/AGENTS.md` + `settings.json` | `~/.cursor/AGENTS.md` + `settings.json` |
+| 参考仓库 | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` | 当前目录 `cann-recipes-infer/` |
 
 ### 环境校验
 
@@ -91,8 +94,13 @@ skills/model/teams/infer-model-optimize-team/
 在初始化完成的目录下执行：
 
 ```bash
-opencode
+opencode   # OpenCode 用户
+claude     # Claude Code 用户
 ```
+
+> **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+>
+> **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 优化模型示例
 
@@ -185,4 +193,4 @@ bash init.sh --help
 
 ### Q: 可以在 cann-recipes-infer 仓库内直接使用吗？
 
-可以。cann-recipes-infer 仓库内已有 `.claude/skills/` 目录，技能直接可用，无需 init。路径引用直接匹配仓库目录结构。
+可以。cann-recipes-infer 仓库内已有 `.claude/skills/` 或 `.cursor/skills/` 目录，技能直接可用，无需 init。路径引用直接匹配仓库目录结构。

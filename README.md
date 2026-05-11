@@ -15,6 +15,7 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
+- **2026-05-11** — 新增支持 Cursor IDE 安装。
 - **2026-05-07** — 新增kernel直调工程接入ACLNN/GEIR接口skill（ascendc-direct-invoke-to-registry-invoke），支持kernel直调形式改造成自定义算子工程。
 - **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。
 - **2026-04-30** — 【代码仓库更名】https://gitcode.com/cann/skills 更名为 https://gitcode.com/cann/cannbot-skills ，原名称和路径可继续访问，建议使用新名称和路径。
@@ -40,10 +41,10 @@ cd cannbot-skills
 
 | 场景 | 命令 | 文档 |
 |------|------|------|
-| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
-| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
-| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
-| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | `cd model/teams/infer-model-optimize-team && bash init.sh project <opencode\|claude>` | 更多安装方式和使用参考 [quickstart](model/teams/infer-model-optimize-team/quickstart.md) |
+| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
+| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
+| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
+| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | `cd model/teams/infer-model-optimize-team && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](model/teams/infer-model-optimize-team/quickstart.md) |
 
 ### 方式二：Plugin 安装
 

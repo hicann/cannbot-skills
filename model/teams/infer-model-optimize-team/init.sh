@@ -9,18 +9,23 @@ Usage: bash init.sh [level] [tool]
 
 Arguments:
   level   - "project" (default) or "global"
-  tool    - "opencode" (default) or "claude"
+  tool    - "opencode" (default), "claude", "trae", or "cursor"
   --help  - Show this help message
 
 Examples:
   bash init.sh                      # Project-level, OpenCode
   bash init.sh project opencode     # Project-level, OpenCode
   bash init.sh project claude       # Project-level, Claude Code
+  bash init.sh project trae         # Project-level, Trae
+  bash init.sh project cursor       # Project-level, Cursor
   bash init.sh global claude        # Global, Claude Code
+  bash init.sh global cursor        # Global, Cursor
 
 Installation paths:
   OpenCode project: .opencode/skills/ + .opencode/agents/ + .opencode/AGENTS.md
   Claude  project:  .claude/skills/  + .claude/agents/  + .claude/hooks/ + .claude/CLAUDE.md
+  Trae    project:  .trae/skills/    + .trae/agents/    + .trae/AGENTS.md
+  Cursor  project:  .cursor/skills/  + .cursor/agents/  + .cursor/AGENTS.md
 EOF
 }
 
@@ -35,7 +40,7 @@ for arg in "$@"; do
     case "$arg" in
         --help) show_help; exit 0 ;;
         global|project) LEVEL="$arg" ;;
-        opencode|claude) TOOL="$arg" ;;
+        opencode|claude|trae|cursor) TOOL="$arg" ;;
         *) echo "Error: unknown argument '$arg'"; show_help; exit 1 ;;
     esac
 done
@@ -43,12 +48,21 @@ done
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_DIR="$HOME/.config/opencode"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_DIR="$HOME/.cursor"
+    elif [ "$TOOL" = "trae" ]; then
+        echo "Error: Global installation is not supported for Trae. Use project-level instead."
+        exit 1
     else
         CONFIG_DIR="$HOME/.claude"
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_DIR=".opencode"
+    elif [ "$TOOL" = "trae" ]; then
+        CONFIG_DIR=".trae"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_DIR=".cursor"
     else
         CONFIG_DIR=".claude"
     fi
@@ -123,7 +137,7 @@ fi
 # 3. Install config file
 echo ""
 mkdir -p "$CONFIG_DIR"
-if [ "$TOOL" = "opencode" ]; then
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
     ln -sf "$(realpath "$SCRIPT_DIR/AGENTS.md")" "$CONFIG_DIR/AGENTS.md"
     echo "Installed: AGENTS.md"
 else
@@ -133,7 +147,7 @@ fi
 
 # 4. Install hooks (Claude Code only)
 SOURCE_HOOKS_DIR="$SCRIPT_DIR/hooks"
-if [ "$TOOL" = "claude" ] && [ -d "$SOURCE_HOOKS_DIR" ]; then
+if { [ "$TOOL" = "claude" ] || [ "$TOOL" = "cursor" ]; } && [ -d "$SOURCE_HOOKS_DIR" ]; then
     HOOKS_DIR="$CONFIG_DIR/hooks"
     mkdir -p "$HOOKS_DIR"
     echo ""
@@ -218,7 +232,7 @@ for check_dir in "$SKILLS_DIR" "$AGENTS_DIR"; do
         health_ok=false
     fi
 done
-if [ "$TOOL" = "claude" ] && [ -f "$CONFIG_DIR/settings.json" ]; then
+if { [ "$TOOL" = "claude" ] || [ "$TOOL" = "cursor" ]; } && [ -f "$CONFIG_DIR/settings.json" ]; then
     echo "  ✓ hooks + settings.json"
 fi
 
