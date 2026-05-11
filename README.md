@@ -79,7 +79,7 @@ cp -r cannbot-skills/ops/ascendc-npu-arch {your-project-path}/.claude/skills/
 ### 整体架构
 
 ```
-skills/
+cannbot-skills/
 ├── ops/                    # 算子 Skills（正式版：Ascend C + PyPTO）
 ├── ops-lab/               # 算子 Skills（实验 / 非正式版）
 ├── model/                 # 模型推理优化

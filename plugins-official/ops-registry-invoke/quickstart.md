@@ -44,7 +44,7 @@ bash init.sh global opencode    # 全局级
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-registry-invoke
+cd cannbot-skills/plugins-official/ops-registry-invoke
 bash init.sh project cursor     # 项目级
 bash init.sh global cursor      # 全局级
 ```

@@ -77,7 +77,7 @@ init.sh 脚本会完成以下操作：
 
 **项目级安装**：
 ```
-skills/plugins-official/ops-code-reviewer/
+cannbot-skills/plugins-official/ops-code-reviewer/
 ├── .opencode/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
@@ -113,7 +113,7 @@ skills/plugins-official/ops-code-reviewer/
 
 **项目级安装（Trae）**：
 ```
-skills/plugins-official/ops-code-reviewer/
+cannbot-skills/plugins-official/ops-code-reviewer/
 ├── .trae/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
@@ -127,7 +127,7 @@ skills/plugins-official/ops-code-reviewer/
 
 **项目级安装（Cursor）**：
 ```
-skills/plugins-official/ops-code-reviewer/
+cannbot-skills/plugins-official/ops-code-reviewer/
 ├── .cursor/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能

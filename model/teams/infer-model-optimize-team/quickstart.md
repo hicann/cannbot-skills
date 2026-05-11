@@ -61,7 +61,7 @@ init.sh 脚本会完成以下操作：
 
 **项目级安装**：
 ```
-skills/model/teams/infer-model-optimize-team/
+cannbot-skills/model/teams/infer-model-optimize-team/
 ├── .opencode/
 │   ├── skills/
 │   │   ├── model-infer-optimize/

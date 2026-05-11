@@ -64,7 +64,7 @@ bash init.sh project trae
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-direct-invoke
+cd cannbot-skills/plugins-official/ops-direct-invoke
 bash init.sh project cursor     # 项目级
 bash init.sh global cursor      # 全局级
 ```

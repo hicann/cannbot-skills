@@ -66,7 +66,7 @@ init.sh 脚本会完成以下操作：
 
 **项目级安装**：
 ```
-skills/ops-lab/tilelang/teams/tilelang-op-orchestrator/
+cannbot-skills/ops-lab/tilelang/teams/tilelang-op-orchestrator/
 ├── .opencode/
 │   ├── skills/                         # 技能模块
 │   │   ├── tilelang-api-best-practices/
