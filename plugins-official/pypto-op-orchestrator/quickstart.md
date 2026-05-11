@@ -33,7 +33,7 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/pypto-op-orchestrator
+cd cannbot-skills/plugins-official/pypto-op-orchestrator
 bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
@@ -44,7 +44,7 @@ bash init.sh global claude      # 全局级
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/pypto-op-orchestrator
+cd cannbot-skills/plugins-official/pypto-op-orchestrator
 bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
@@ -159,7 +159,7 @@ bash init.sh --help
 /plugin update pypto-op-orchestrator@cannbot
 
 # OpenCode (init.sh 方式)
-cd skills/plugins-official/pypto-op-orchestrator && bash init.sh
+cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
 ```
 
 ### Q: PyPTO 和 Kernel 直调模式如何选择？

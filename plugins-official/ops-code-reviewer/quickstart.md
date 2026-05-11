@@ -27,7 +27,7 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入代码检视 Team 目录
-cd skills/plugins-official/ops-code-reviewer
+cd cannbot-skills/plugins-official/ops-code-reviewer
 
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户（默认）
@@ -44,7 +44,7 @@ bash init.sh project trae       # Trae 用户
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入代码检视 Team 目录
-cd skills/plugins-official/ops-code-reviewer
+cd cannbot-skills/plugins-official/ops-code-reviewer
 
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
@@ -211,7 +211,7 @@ bash init.sh --help
 
 ### Q: 如何增减检视条例？
 
-全局安装和项目安装均采用软链接方式，检视条例定义在 CANNBot 仓库的 `skills/skills/ascendc-code-review/references/` 目录下。
+全局安装和项目安装均采用软链接方式，检视条例定义在 CANNBot 仓库的 `cannbot-skills/skills/ascendc-code-review/references/` 目录下。
 
 修改步骤：
 1. 直接编辑 CANNBot 仓库中的规范文档（如 `cpp-secure.md`、`ascendc-api.md`）

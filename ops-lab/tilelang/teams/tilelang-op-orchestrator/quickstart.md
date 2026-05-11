@@ -17,7 +17,7 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入 TileLang 算子开发目录
-cd skills/ops-lab/tilelang/teams/tilelang-op-orchestrator
+cd cannbot-skills/ops-lab/tilelang/teams/tilelang-op-orchestrator
 
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户（默认）
@@ -38,7 +38,7 @@ cd ..
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入 TileLang 算子开发目录
-cd skills/ops-lab/tilelang/teams/tilelang-op-orchestrator
+cd cannbot-skills/ops-lab/tilelang/teams/tilelang-op-orchestrator
 
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）

@@ -26,7 +26,7 @@ CANNBot 注册调用模式适用于**生产级自定义算子开发**场景，�
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-registry-invoke
+cd cannbot-skills/plugins-official/ops-registry-invoke
 bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
@@ -35,7 +35,7 @@ bash init.sh global claude      # 全局级
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-registry-invoke
+cd cannbot-skills/plugins-official/ops-registry-invoke
 bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
@@ -134,7 +134,7 @@ operators/add_custom/
 重新执行 init.sh 即可，脚本会自动覆盖旧版本：
 
 ```bash
-cd skills/plugins-official/ops-registry-invoke && bash init.sh
+cd cannbot-skills/plugins-official/ops-registry-invoke && bash init.sh
 ```
 
 ### Q: 注册调用模式和直调模式如何选择？

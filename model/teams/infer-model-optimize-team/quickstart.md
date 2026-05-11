@@ -17,7 +17,7 @@
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入推理优化 team 目录
-cd skills/model/teams/infer-model-optimize-team
+cd cannbot-skills/model/teams/infer-model-optimize-team
 
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户
@@ -33,7 +33,7 @@ bash init.sh project claude     # Claude Code 用户
 git clone https://gitcode.com/cann/cannbot-skills.git
 
 # 2. 进入推理优化 team 目录
-cd skills/model/teams/infer-model-optimize-team
+cd cannbot-skills/model/teams/infer-model-optimize-team
 
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户

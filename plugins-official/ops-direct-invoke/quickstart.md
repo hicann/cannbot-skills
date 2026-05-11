@@ -32,7 +32,7 @@ CANNBot 算子直调开发模式适用于**快速验证自定义算子**场景�
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-direct-invoke
+cd cannbot-skills/plugins-official/ops-direct-invoke
 bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
@@ -43,7 +43,7 @@ bash init.sh global claude      # 全局级
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-direct-invoke
+cd cannbot-skills/plugins-official/ops-direct-invoke
 bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
@@ -54,7 +54,7 @@ bash init.sh global opencode    # 全局级
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-official/ops-direct-invoke
+cd cannbot-skills/plugins-official/ops-direct-invoke
 bash init.sh project trae
 ```
 
@@ -167,10 +167,10 @@ bash init.sh --help
 /plugin update ops-direct-invoke@cannbot
 
 # OpenCode (init.sh 方式)
-cd skills/plugins-official/ops-direct-invoke && bash init.sh
+cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh
 
 # Trae
-cd skills/plugins-official/ops-direct-invoke && bash init.sh project trae
+cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project trae
 ```
 
 ### Q: 算子直调模式和算子仓模式如何选择？

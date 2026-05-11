@@ -419,7 +419,7 @@ jobs:
 
       - name: Run Incremental Tests
         run: |
-          cd skills/tests
+          cd cannbot-skills/tests
           ./run-tests.sh --incremental-ci --platform none --output json > results.json
 
       - name: Upload Results
