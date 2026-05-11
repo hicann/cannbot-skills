@@ -118,6 +118,12 @@ list_tests() {
     echo "========================================"
     echo ""
     
+    echo "L1 Unit Tests - Repo Hygiene:"
+    for f in "$SCRIPT_DIR"/unit/test-*.sh; do
+        [ -f "$f" ] && echo "  unit/$(basename "$f")"
+    done
+    echo ""
+
     echo "L1 Unit Tests - Skills:"
     for f in "$SCRIPT_DIR"/unit/skills/test-*.sh; do
         [ -f "$f" ] && echo "  unit/skills/$(basename "$f")"
@@ -529,6 +535,7 @@ get_tests_for_category() {
 
     case "$cat" in
         unit)
+            echo "unit/test-line-endings.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"
             echo "unit/agents/test-structure.sh:fast"

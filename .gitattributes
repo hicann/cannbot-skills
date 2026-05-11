@@ -1,0 +1,52 @@
+# C/C++ sources
+*.c   text eol=lf
+*.cc  text eol=lf
+*.cpp text eol=lf
+*.cxx text eol=lf
+*.h   text eol=lf
+*.hpp text eol=lf
+*.hh  text eol=lf
+
+# Python
+*.py text eol=lf
+
+# Shell scripts
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# Documentation & config
+*.md   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.txt  text eol=lf
+*.cfg  text eol=lf
+*.ini  text eol=lf
+
+# Web
+*.js   text eol=lf
+*.ts   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.svg  text eol=lf
+
+# CMake & Docker
+CMakeLists.txt text eol=lf
+*.cmake text eol=lf
+Dockerfile text eol=lf
+
+# Binary files
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.so   binary
+*.o    binary
+*.a    binary
+*.zip  binary
+*.tar  binary
+*.gz   binary
+*.whl  binary
