@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# SessionStart hook for CANNBot (torch-compile) plugin.
+#
+# On each session start:
+#   1. Locate shared graph skills and local graph-mode agents
+#   2. Inject AGENTS.md content as primary session context
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TORCH_COMPILE_AGENTS_DIR="${PLUGIN_ROOT}/agents"
+
+if [ -d "${PLUGIN_ROOT}/skills" ]; then
+  GRAPH_SKILLS_DIR="${PLUGIN_ROOT}/skills"
+elif [ -d "${PLUGIN_ROOT}/../../graph" ]; then
+  GRAPH_SKILLS_DIR="$(cd "${PLUGIN_ROOT}/../../graph" && pwd)"
+else
+  GRAPH_SKILLS_DIR="${PLUGIN_ROOT}/skills"
+fi
+TORCH_SKILLS_DIR="$GRAPH_SKILLS_DIR"
+
+# Claude Code sources $CLAUDE_ENV_FILE before every Bash command, so this
+# makes the skills directory usable in LLM-issued shell commands.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  printf 'export GRAPH_SKILLS_DIR=%q\n' "$GRAPH_SKILLS_DIR" >> "$CLAUDE_ENV_FILE"
+  printf 'export TORCH_SKILLS_DIR=%q\n' "$TORCH_SKILLS_DIR" >> "$CLAUDE_ENV_FILE"
+  printf 'export TORCH_COMPILE_AGENTS_DIR=%q\n' "$TORCH_COMPILE_AGENTS_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+AGENTS_MD="${PLUGIN_ROOT}/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ]; then
+  exit 0
+fi
+
+# Read AGENTS.md, strip frontmatter.
+agents_content=$(sed -n '/^---$/,/^---$/!p' "$AGENTS_MD" 2>/dev/null || cat "$AGENTS_MD")
+
+path_guide="## CANNBot Installation Paths (torch-compile)
+
+This plugin provides a primary torch.compile graph-mode orchestration entry. It loads orchestration rules from AGENTS.md and routes mode-specific work through agents/.
+
+All relative references in this document resolve to absolute paths:
+- \`graph/\` → \`${GRAPH_SKILLS_DIR}/\`
+- \`agents/\` → \`${TORCH_COMPILE_AGENTS_DIR}/\`
+
+Available graph-mode Subagents:
+- \`@torch-compile:torch-npugraph-ex\` → \`${TORCH_COMPILE_AGENTS_DIR}/torch-npugraph-ex.md\`
+
+Documentation caches referenced by the skills are user-level caches:
+- TorchAir docs → \`~/.cache/torchair-docs/docs/zh/\`
+- PyTorch NPU docs → \`~/.cache/pytorch-npu-docs/docs/zh/\`"
+
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+path_guide_escaped=$(escape_for_json "$path_guide")
+agents_escaped=$(escape_for_json "$agents_content")
+session_context="<CANNBOT_CONTEXT>\nYou are CANNBot - PyTorch torch.compile Graph Mode Orchestrator.\n\n${path_guide_escaped}\n\n${agents_escaped}\n</CANNBOT_CONTEXT>"
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${session_context}"
+  }
+}
+EOF
+else
+  cat <<EOF
+{
+  "additional_context": "${session_context}"
+}
+EOF
+fi
+
+exit 0
