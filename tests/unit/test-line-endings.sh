@@ -35,6 +35,13 @@ EXCLUDE_DIRS=(
     "__pycache__"
     ".version-state"
     "CI"
+    "asc-devkit"
+    "pypto"
+    "operators"
+    ".opencode"
+    ".claude"
+    ".trae"
+    ".cursor"
 )
 
 # Check if a file is binary using the 'file' command
@@ -78,7 +85,20 @@ while IFS= read -r f; do
         echo "$rel_path" >> "$cr_files"
         cr_count=$((cr_count + 1))
     fi
-done < <(find "$SKILLS_DIR" -type f 2>/dev/null)
+done < <(find "$SKILLS_DIR" \( \
+    -name ".git" -o \
+    -name "node_modules" -o \
+    -name "__pycache__" -o \
+    -name ".version-state" -o \
+    -name "CI" -o \
+    -name "asc-devkit" -o \
+    -name "pypto" -o \
+    -name "operators" -o \
+    -name ".opencode" -o \
+    -name ".claude" -o \
+    -name ".trae" -o \
+    -name ".cursor" \
+\) -prune -o -type f -print 2>/dev/null)
 
 print_info "Files scanned: $scanned"
 
