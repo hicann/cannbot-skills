@@ -6,6 +6,7 @@ skills:
   - ascendc-tiling-design
   - ascendc-ut-develop
   - ascendc-runtime-debug
+  - ascendc-crash-debug
   - ascendc-precision-debug
   - ascendc-performance-best-practices
   - ops-profiling
@@ -174,9 +175,20 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 
 **常见问题**：
 - aclnn 返回错误码（161xxx/361xxx/561xxx）
-- 程序卡死、挂起、超时
 - Tiling 错误、Kernel 查找失败
 - 环境变量缺失
+
+</details>
+
+<details>
+<summary>💥 卡死/崩溃</summary>
+
+**启用技能**：`ascendc-crash-debug`
+
+**常见问题**：
+- 程序卡死、挂起、超时
+- Segmentation Fault、Abort
+- Buffer 冲突/死锁
 
 </details>
 
@@ -265,6 +277,7 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 | ST 测试代码 | 协作 | 提供 ST 测试代码 |
 | `ascendc-ut-develop` | 调用 | UT 用例设计与开发 |
 | `ascendc-runtime-debug` | 调用 | 编译和运行时错误调试 |
+| `ascendc-crash-debug` | 调用 | 卡死/崩溃调试 |
 | `ascendc-precision-debug` | 调用 | 精度问题调试 |
 | `ascendc-performance-best-practices` | 调用 | 性能优化最佳实践 |
 | `ops-profiling` | 调用 | NPU 性能采集与分析 |

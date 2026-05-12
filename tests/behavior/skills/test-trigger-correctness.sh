@@ -77,12 +77,17 @@ echo ""
 
 run_behavior_test "ascendc-runtime-debug" \
     "算子运行时报错，我该怎么调试？" \
-    "运行时|runtime|错误|error|调试|print|log|定位|plog" \
+    "运行时|错误|错误码|aclnn|error|调试|排查" \
     "$TIMEOUT"
 
 run_behavior_test "ascendc-precision-debug" \
     "算子精度不达标，应该怎么排查？" \
     "精度|precision|误差|对比|检查|数据" \
+    "$TIMEOUT"
+
+run_behavior_test "ascendc-crash-debug" \
+    "算子执行时卡死崩溃了怎么办？" \
+    "卡死|崩溃|crash|hang|死锁|挂起|调试|定位" \
     "$TIMEOUT"
 
 run_behavior_test "ascendc-perf-analysis" \
@@ -187,9 +192,15 @@ test_precise_trigger "npu-arch-precise" \
     "$TIMEOUT"
 
 test_precise_trigger "runtime-debug-precise" \
-    "Ascend C算子运行时错误排查" \
+    "Ascend C算子运行时错误码排查" \
     "ascendc-runtime-debug" \
-    "运行时|runtime|调试|debug|错误|error" \
+    "错误码|aclnn|调试|debug|错误|排查" \
+    "$TIMEOUT"
+
+test_precise_trigger "crash-debug-precise" \
+    "Ascend C算子卡死崩溃排查" \
+    "ascendc-crash-debug" \
+    "卡死|崩溃|crash|hang|死锁|挂起|调试|定位" \
     "$TIMEOUT"
 
 test_precise_trigger "perf-analysis-precise" \

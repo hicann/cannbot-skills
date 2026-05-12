@@ -11,7 +11,7 @@
 # =============================================================================
 # Skill Test Configuration
 # =============================================================================
-# This file defines custom test cases for ascendc-runtime-debug skill.
+# This file defines custom test cases for ascendc-crash-debug skill.
 # If this file exists, custom tests will be used instead of auto-generated ones.
 #
 # Configuration Structure:
@@ -20,7 +20,7 @@
 #   - expected: Expected response patterns
 # =============================================================================
 
-skill: ascendc-runtime-debug
+skill: ascendc-crash-debug
 
 # -----------------------------------------------------------------------------
 # B-TRIG-01: Precise Trigger Test
@@ -28,22 +28,22 @@ skill: ascendc-runtime-debug
 # -----------------------------------------------------------------------------
 trigger:
   precise:
-    - prompt: "我的算子运行时报错，错误码 161001"
-      expected_keywords: ["错误码", "161", "运行时", "调试", "aclnn"]
-    - prompt: "aclnn 调用返回错误怎么排查"
-      expected_keywords: ["aclnn", "错误", "排查", "调试"]
-    - prompt: "算子执行返回561003错误码怎么解决"
-      expected_keywords: ["561003", "Kernel", "查找", "错误码"]
+    - prompt: "算子执行时卡死了怎么排查"
+      expected_keywords: ["卡死", "plog", "调试", "定位", "超时"]
+    - prompt: "程序崩溃Segmentation Fault怎么定位"
+      expected_keywords: ["崩溃", "coredump", "gdb", "Segmentation", "Fault"]
+    - prompt: "Kernel hang了怎么办"
+      expected_keywords: ["hang", "Kernel", "挂起", "调试"]
 
 # -----------------------------------------------------------------------------
 # B-TRIG-02: Fuzzy Trigger Test
 # Prompts using colloquial or non-standard terms
 # -----------------------------------------------------------------------------
   fuzzy:
-    - prompt: "代码跑不通，报错了"
-      expected_keywords: ["错误", "排查", "调试", "报错"]
-    - prompt: "算子执行出问题了"
-      expected_keywords: ["问题", "排查", "调试", "定位"]
+    - prompt: "程序跑着跑着没反应了"
+      expected_keywords: ["卡死", "超时", "挂起", "排查"]
+    - prompt: "算子崩了，怎么查"
+      expected_keywords: ["崩溃", "coredump", "gdb", "定位"]
 
 # -----------------------------------------------------------------------------
 # B-INTA-01: Missing Parameter Clarification
@@ -51,29 +51,32 @@ trigger:
 # -----------------------------------------------------------------------------
 interaction:
   missing_params:
-    - prompt: "算子报错了"
-      should_ask_about: ["错误码", "算子名称", "调用方式"]
-    - prompt: "运行报错怎么办"
-      should_ask_about: ["错误信息", "场景", "代码"]
+    - prompt: "算子跑不动了"
+      should_ask_about: ["错误信息", "场景", "是否卡死还是崩溃"]
+    - prompt: "程序挂掉了"
+      should_ask_about: ["是否有core文件", "错误信息", "plog日志"]
 
 # -----------------------------------------------------------------------------
 # B-INTA-02: Context Retention
 # Multi-turn conversation context
 # -----------------------------------------------------------------------------
   context:
-    - prompt: "我正在调试 Ascend910B 上的算子，报错 161001。这是 aclnn 调用错误，应该如何定位？"
-      should_reference: ["Ascend910B", "161001", "aclnn"]
-    - prompt: "之前说的那个错误，我已经找到了是参数问题，现在怎么修复？"
-      should_reference: ["参数", "错误", "修复"]
+    - prompt: "程序卡死了，我怀疑是Buffer冲突导致的死锁"
+      should_reference: ["Buffer", "死锁", "AllocTensor", "FreeTensor"]
+    - prompt: "刚才那个卡死问题，我检查了plog发现是Alloc和Free不配对"
+      should_reference: ["plog", "Alloc", "Free", "配对"]
 
 # -----------------------------------------------------------------------------
 # Custom Test Cases (Optional)
 # Additional skill-specific tests
 # -----------------------------------------------------------------------------
 custom:
-  - name: "error_code_recognition"
-    prompt: "错误码 161001 是什么含义？"
-    expected_keywords: ["参数", "无效", "aclnn"]
-  - name: "debug_workflow"
-    prompt: "算子运行时调试的完整流程是什么？"
-    expected_keywords: ["plog", "定位", "分析", "日志"]
+  - name: "crash_detection"
+    prompt: "算子segfault了怎么调试？"
+    expected_keywords: ["coredump", "gdb", "bt", "崩溃", "ulimit"]
+  - name: "hang_detection"
+    prompt: "算子卡死超时了应该怎么排查？"
+    expected_keywords: ["plog", "timeout", "挂起", "定位", "Buffer"]
+  - name: "deadlock"
+    prompt: "算子可能有死锁怎么分析？"
+    expected_keywords: ["死锁", "EnQue", "DeQue", "Alloc", "Free", "配对"]

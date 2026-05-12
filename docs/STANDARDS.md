@@ -68,7 +68,8 @@ Skills 按功能定位分为五大类，每类技能有明确的职责边界和�
 | 技能名称 | 用途 |
 |---------|------|
 | ascendc-precision-debug | 精度调试（数值异常、rtol/atol 不达标） |
-| ascendc-runtime-debug | 运行时调试（aclnn 错误码、Kernel 卡死/挂起） |
+| ascendc-runtime-debug | 运行时错误调试（错误码 161xxx/361xxx/561xxx） |
+| ascendc-crash-debug | 卡死/崩溃调试（程序无法运行完、Kernel 挂起、Coredump） |
 
 #### 测试开发类
 

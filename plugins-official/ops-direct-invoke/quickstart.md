@@ -152,7 +152,8 @@ operators/add_custom/
 | `ascendc-tiling-design` | Tiling 设计 | 多核切分、UB切分、Buffer规划 |
 | `ascendc-npu-arch` | NPU 架构知识 | 查询芯片特性 |
 | `ascendc-precision-debug` | 精度调试 | 算子精度问题 |
-| `ascendc-runtime-debug` | 运行时调试 | aclnn 错误、超时 |
+| `ascendc-runtime-debug` | 运行时错误调试 | 错误码 |
+| `ascendc-crash-debug` | 卡死/崩溃调试 | 挂起、超时、崩溃 |
 | `ascendc-env-check` | 环境检查 | NPU 设备查询 |
 
 ## 四、开发资源

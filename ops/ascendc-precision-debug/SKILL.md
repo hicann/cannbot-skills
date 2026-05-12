@@ -17,8 +17,6 @@ description: Ascend C 算子精度调试技能，提供精度问题诊断和解�
 
 **适用**：精度验证失败（rtol/atol 不达标）、输出全为0或随机值、FP16差于FP32、特定数值范围误差大、流水线同步问题、DataCopy对齐问题。
 
-**不适用**（功能问题）：编译错误、运行时错误、逻辑异常。
-
 ---
 
 ## 调试前置要求 ⭐⭐⭐
@@ -101,7 +99,6 @@ mkdir -p build/input build/output
 | **输出全为 0 或随机错误** | 流水线同步缺失 / DataCopy 非对齐 / GlobalTensor.SetValue | 检查 EnQue / DeQue、数据对齐、改用 LocalTensor.SetValue + DataCopyPad ⭐⭐⭐ |
 | `sum=0, max_err=输入级别` | 输出没写出 | 检查输出队列类型（VECIN vs VECOUT） |
 | `sum=0, max_err≈0` | 输出全0/未初始化 | 检查 UB 溢出、buffer 分配 |
-| `核心超时/挂起` | Buffer 冲突/死锁 | 检查 Alloc / Free 配对 |
 | `特定参数范围失败` | 阈值/边界错误 | 验证阈值计算、检查分支条件 |
 | `非对齐数据失败` | DataCopy 对齐问题 | 改用 DataCopyPad |
 | `FP16 差但 FP32 好` | 精度不足 | 中间计算用 FP32 |
@@ -260,7 +257,6 @@ Compute(x);
 | 问题 | 表现 | 解决方案 |
 |------|------|----------|
 | VECIN 用于输出 | 输出等于输入 | 输出必须用 VECOUT 队列 |
-| Buffer 未释放 | 核心挂起/超时 | 循环内 Alloc 后必须 Free |
 | Double Buffer 漏算 | 阈值错误 | 计算阈值时 ×2 |
 
 详细定位流程见 [references/diagnosis-workflow.md](references/diagnosis-workflow.md)

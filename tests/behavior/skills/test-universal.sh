@@ -116,6 +116,7 @@ ENV_DEPENDENT_SKILLS=(
 # Debug skills (should ask for context)
 DEBUG_SKILLS=(
     "ascendc-runtime-debug"
+    "ascendc-crash-debug"
     "ascendc-precision-debug"
     "ascendc-env-check"
     "ops-profiling"

@@ -1,4 +1,9 @@
 ## 🔥 更新日志
+### 【2026-05-11】
+#### 新特性 New Features
+- 新增 ascendc-crash-debug 技能，剥离 runtime-debug 中卡死/崩溃/挂起内容，与 precision-debug 形成三分类调试体系。
+- 调整技能分类：env-check 归入调试与测试类，ops-profiling 归入工具辅助类。
+
 ### 【2026-05-06】
 #### 新特性 New Features
 - 新增算子注册调用的开发工作流（ops-registry-invoke），支持ACLNN和GEIR两种接入方式，覆盖需求分析到代码检视全流程。

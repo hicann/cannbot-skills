@@ -11,6 +11,7 @@ skills:
   - ascendc-direct-invoke-template
   - torch-ascendc-op-extension
   - ascendc-runtime-debug
+  - ascendc-crash-debug
 permission:
   edit: allow
   bash: allow
