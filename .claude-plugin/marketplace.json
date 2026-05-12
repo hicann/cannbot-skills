@@ -70,6 +70,25 @@
       ]
     },
     {
+      "name": "tilelang-op-orchestrator-skills",
+      "description": "TileLang 算子开发 Skills（5 个）。API 最佳实践、编程模式指南、算子设计、算子开发、代码审查。",
+      "source": "./ops-lab/tilelang/skills",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["tilelang", "skills"],
+      "category": "skills",
+      "skills": [
+        "./tilelang-api-best-practices",
+        "./tilelang-op-design",
+        "./tilelang-op-developer",
+        "./tilelang-programming-model-guide",
+        "./tilelang-review"
+      ]
+    },
+    {
       "name": "ops-direct-invoke",
       "source": "./plugins-official/ops-direct-invoke",
       "description": "Ascend C Kernel 直调算子开发 Team。含完整工作流（设计→实现→审查→性能验收）、3 个专业 Agent 和工程模板。",
@@ -109,6 +128,20 @@
       "category": "development",
       "dependencies": [
         "ops-code-reviewer-skills"
+      ]
+    },
+    {
+      "name": "tilelang-op-orchestrator",
+      "source": "./plugins-community/tilelang-op-orchestrator",
+      "description": "TileLang-Ascend 算子开发 Team。含 5 个专业 Skill，实现算子方案设计、算子代码开发、精度调试和代码检视完整开发流程。",
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["tilelang", "operator", "ascend", "npu"],
+      "category": "development",
+      "dependencies": [
+        "tilelang-op-orchestrator-skills"
       ]
     }
   ]

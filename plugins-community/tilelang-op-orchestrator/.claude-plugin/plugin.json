@@ -1,0 +1,14 @@
+{
+  "name": "tilelang-op-orchestrator",
+  "description": "TileLang-Ascend 算子开发 Team。含 5 个专业 Skill，实现算子方案设计、算子代码开发、精度调试和代码检视完整开发流程。",
+  "version": "1.0.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/skills",
+  "repository": "https://gitcode.com/cann/skills",
+  "license": "MIT",
+  "dependencies": [
+    "tilelang-op-orchestrator-skills"
+  ]
+}

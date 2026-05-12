@@ -1,0 +1,170 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+#!/usr/bin/env bash
+# SessionStart hook for CANNBot (tilelang-op-orchestrator) plugin.
+#
+# 后台异步两步安装：
+#   [1/2] git clone --recursive tilelang-ascend
+#   [2/2] cd tilelang-ascend && bash install_ascend.sh
+#
+# Hook 立即返回，不阻塞会话启动。安装期间通过注入给 LLM 的 context
+# 让其首条回复先告知用户耐心等待。
+#
+# 状态文件（均位于 ${PLUGIN_ROOT}/）：
+#   .tilelang-installing.lock  目录形式 lock，原子 mkdir 防止并发安装
+#   .tilelang-installed         安装成功标记
+#   .tilelang-install.log       安装日志（tail -f 看进度）
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TILELANG_DIR="${PLUGIN_ROOT}/tilelang-ascend"
+LOCK_DIR="${PLUGIN_ROOT}/.tilelang-installing.lock"
+DONE_FILE="${PLUGIN_ROOT}/.tilelang-installed"
+LOG_FILE="${PLUGIN_ROOT}/.tilelang-install.log"
+
+mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
+# --- Step 1: 状态判定（done / installing / not_started）---
+status="not_started"
+if [ -f "$DONE_FILE" ] && [ -d "$TILELANG_DIR/.git" ]; then
+  status="done"
+elif [ -d "$LOCK_DIR" ]; then
+  age=$(( $(date +%s) - $(mtime "$LOCK_DIR") ))
+  # lock 超过 2 小时认为是上一轮残留，清理重试
+  if [ "$age" -gt 7200 ]; then
+    rm -rf "$LOCK_DIR"
+    status="not_started"
+  else
+    status="installing"
+  fi
+fi
+
+# --- Step 2: 未开始且抢到 lock → 启动后台安装 ---
+if [ "$status" = "not_started" ] && mkdir "$LOCK_DIR" 2>/dev/null; then
+  status="installing"
+  export PLUGIN_ROOT TILELANG_DIR LOCK_DIR DONE_FILE LOG_FILE
+
+  nohup bash -c '
+    set -e
+    cleanup() { rm -rf "$LOCK_DIR"; }
+    trap cleanup EXIT
+
+    {
+      echo ""
+      echo "=== $(date "+%F %T") install start ==="
+
+      if [ ! -d "$TILELANG_DIR/.git" ]; then
+        echo "[1/2] git clone --recursive tilelang-ascend"
+        git clone --recursive https://github.com/tile-ai/tilelang-ascend.git "$TILELANG_DIR"
+      else
+        echo "[1/2] repo already cloned, skip"
+      fi
+
+      cd "$TILELANG_DIR"
+
+      if [ -f install_ascend.sh ]; then
+        echo "[2/2] bash install_ascend.sh"
+        bash install_ascend.sh
+      else
+        echo "[2/2] install_ascend.sh not found at $(pwd), abort"
+        exit 1
+      fi
+
+      touch "$DONE_FILE"
+      echo "=== $(date "+%F %T") install done ==="
+    } >> "$LOG_FILE" 2>&1
+  ' >/dev/null 2>&1 < /dev/null &
+  disown
+fi
+
+# --- Step 3: 把 TILELANG_DIR 暴露给 Bash 工具（仓库已 clone 即可，无需等 install）---
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -d "$TILELANG_DIR/.git" ]; then
+  printf 'export TILELANG_DIR=%q\n' "$TILELANG_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+# --- Step 4: 构造 session context ---
+AGENTS_MD="${PLUGIN_ROOT}/AGENTS.md"
+agents_content=""
+if [ -f "$AGENTS_MD" ]; then
+  agents_content=$(sed -n '/^---$/,/^---$/!p' "$AGENTS_MD" 2>/dev/null || cat "$AGENTS_MD")
+fi
+
+case "$status" in
+  done)
+    install_status="## TileLang-Ascend 安装状态：✅ 已就绪
+- 仓库：\`${TILELANG_DIR}\`
+- \`install_ascend.sh\` 已成功执行
+- 可正常执行 \`python examples/<op>.py\` 等命令"
+    ;;
+  installing)
+    install_status="## TileLang-Ascend 安装状态：⏳ 正在后台安装
+
+**强制 instruction**：本次会话开启时，**第一句话必须先告诉用户**：
+
+> ⏳ 正在安装 tilelang-ascend（首次约 5-15 分钟，含子模块拉取与编译），请耐心等待。
+> 查看进度：\`tail -f ${LOG_FILE}\`
+
+在安装完成之前：
+- ❌ 不要 \`cd ${TILELANG_DIR}\`、不要重复运行 \`install_ascend.sh\`（会与后台进程冲突）
+- ❌ 不要尝试运行 examples 下的脚本（依赖未就绪）
+- ✅ 可以与用户讨论算子设计、查阅 skill 文档、规划方案
+- ✅ 用户 \`/clear\` 重新触发 SessionStart 时会重新检查状态；装完后即可正常使用"
+    ;;
+esac
+
+path_guide="## CANNBot Installation Paths (tilelang-op-orchestrator)
+
+All relative references in this document resolve to absolute paths:
+- \`tilelang-ascend/\` → \`${TILELANG_DIR}/\`
+- \`skills/\` → \`${PLUGIN_ROOT}/skills/\`
+- \`agents/\` → \`${PLUGIN_ROOT}/agents/\`
+
+Paths starting with \`tilelang-ascend/examples/{operator}/\` are relative to the user's current working directory.
+
+${install_status}"
+
+# --- Step 5: JSON escape & emit ---
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+path_guide_escaped=$(escape_for_json "$path_guide")
+agents_escaped=$(escape_for_json "$agents_content")
+session_context="<CANNBOT_CONTEXT>\nYou are CANNBot - TileLang Operator Development Team.\n\n${path_guide_escaped}\n\n${agents_escaped}\n</CANNBOT_CONTEXT>"
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${session_context}"
+  }
+}
+EOF
+else
+  cat <<EOF
+{
+  "additional_context": "${session_context}"
+}
+EOF
+fi
+
+exit 0

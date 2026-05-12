@@ -27,9 +27,11 @@ step() { echo -e "${DIM}$*${NC}"; }
 BRAND="cannbot"
 VERSION="1.0.0"
 
-# --- Team-specific filters ---
+# --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
+# Skill whitelist pattern - references shared ops-lab/tilelang/skills
 INCLUDED_SKILL_PATTERN="tilelang-*"
+# Agent whitelist pattern - uses local agents/
 INCLUDED_AGENT_PATTERN="tilelang-op-*"
 
 show_banner() {
@@ -80,8 +82,11 @@ LEVEL="project"
 TOOL="opencode"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
-ASCEND_AGENT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PLUGIN_ROOT="$SCRIPT_DIR"
+# Agents: use local agents/ directory (migrated with plugin)
+LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
+# Skills: reference shared ops-lab/tilelang/skills directory
+SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops-lab/tilelang/skills" && pwd)"
 
 for arg in "$@"; do
     case "$arg" in
@@ -102,9 +107,9 @@ if [ "$LEVEL" = "global" ]; then
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
-        CONFIG_ROOT="$PROJECT_ROOT/.opencode"
+        CONFIG_ROOT="$PLUGIN_ROOT/.opencode"
     else
-        CONFIG_ROOT="$PROJECT_ROOT/.claude"
+        CONFIG_ROOT="$PLUGIN_ROOT/.claude"
     fi
 fi
 
@@ -135,14 +140,14 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: per-item symlinks for skills (whitelist filtered)
     mkdir -p "$CANNBOT_DIR/skills"
     # Pre-clean existing skill symlinks
-    for skill_dir in "$ASCEND_AGENT_ROOT/skills"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         target="$CANNBOT_DIR/skills/$name"
         [ -e "$target" ] || [ -L "$target" ] && rm -rf "$target"
     done
     skill_count=0
-    for skill_dir in "$ASCEND_AGENT_ROOT/skills"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         [[ "$name" != $INCLUDED_SKILL_PATTERN ]] && continue
@@ -155,14 +160,14 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: per-item symlinks for agents (whitelist filtered)
     # Supports both agent directories and standalone .md agent files
     mkdir -p "$CANNBOT_DIR/agents"
-    for agent_entry in "$ASCEND_AGENT_ROOT/agents"/*; do
+    for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
         [ -e "$agent_entry" ] || continue
         name=$(basename "$agent_entry")
         target="$CANNBOT_DIR/agents/$name"
         [ -e "$target" ] || [ -L "$target" ] && rm -rf "$target"
     done
     agent_count=0
-    for agent_entry in "$ASCEND_AGENT_ROOT/agents"/*; do
+    for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
         [ -e "$agent_entry" ] || continue
         name=$(basename "$agent_entry")
         # Match pattern against name (strip .md suffix for file-based agents)
@@ -186,10 +191,10 @@ step "[2/5] Installing configuration..."
 mkdir -p "$CONFIG_ROOT"
 
 if [ "$TOOL" = "opencode" ]; then
-    ln -sf "$PROJECT_ROOT/AGENTS.md" "$CONFIG_ROOT/AGENTS.md"
+    ln -sf "$PLUGIN_ROOT/AGENTS.md" "$CONFIG_ROOT/AGENTS.md"
     ok "AGENTS.md"
 else
-    ln -sf "$PROJECT_ROOT/AGENTS.md" "$CONFIG_ROOT/CLAUDE.md"
+    ln -sf "$PLUGIN_ROOT/AGENTS.md" "$CONFIG_ROOT/CLAUDE.md"
     ok "CLAUDE.md"
 fi
 echo ""
@@ -201,12 +206,11 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: skills/agents already at auto-scan paths, no extra discovery needed
     ok "Auto-scan: skills/, agents/"
 else
-    # Claude: create per-skill discovery symlinks (with filter)
-    SKILLS_SRC="$ASCEND_AGENT_ROOT/skills"
+    # Claude: create per-skill discovery symlinks (with filter, from shared ops-lab/tilelang/skills)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     # Pre-clean existing skills
-    for skill_dir in "$SKILLS_SRC"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         target="$DISCOVERY/$name"
@@ -214,7 +218,7 @@ else
     done
 
     link_count=0
-    for skill_dir in "$SKILLS_SRC"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         [[ "$name" != $INCLUDED_SKILL_PATTERN ]] && continue
@@ -232,11 +236,10 @@ else
 
     ok "Skills: $link_count discovery symlinks"
 
-    # Claude: also create agent discovery symlinks
-    AGENTS_SRC="$ASCEND_AGENT_ROOT/agents"
+    # Claude: also create agent discovery symlinks (from local agents/)
     AGENT_DISCOVERY="$CONFIG_ROOT/agents"
 
-    for agent_entry in "$AGENTS_SRC"/*; do
+    for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
         [ -e "$agent_entry" ] || continue
         name=$(basename "$agent_entry")
         target="$AGENT_DISCOVERY/$name"
@@ -244,7 +247,7 @@ else
     done
 
     agent_link_count=0
-    for agent_entry in "$AGENTS_SRC"/*; do
+    for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
         [ -e "$agent_entry" ] || continue
         name=$(basename "$agent_entry")
         base="${name%.md}"
@@ -266,7 +269,7 @@ echo ""
 # --- Step 4: Clone TileLang-Ascend source repository ---
 step "[4/5] Preparing TileLang-Ascend source repository..."
 
-TILELANG_DIR="$PROJECT_ROOT/tilelang-ascend"
+TILELANG_DIR="$PLUGIN_ROOT/tilelang-ascend"
 if [ -d "$TILELANG_DIR" ] && [ -d "$TILELANG_DIR/.git" ]; then
     ok "TileLang-Ascend already exists: $TILELANG_DIR"
 else
