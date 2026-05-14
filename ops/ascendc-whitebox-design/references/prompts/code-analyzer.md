@@ -140,7 +140,7 @@ Ascend C 算子的 kernel 执行有三类关键分支，每类都可能产生整
 ### Kernel 关键分支
 
 **芯片**：代码上会存在使用芯片名字或者npuarch的芯片分支
-- 严格使用 ascendc-npu-arch skill能力判断代码中npuarch跟芯片名字对应关系
+- 严格使用 npu-arch skill能力判断代码中npuarch跟芯片名字对应关系
 
 **分核**：总工作量如何分配到多个核心
 - 未开满核：totalWork < coreNum

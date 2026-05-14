@@ -21,7 +21,7 @@
 | ascend950 | 64 | 240KB |
 
 step2前获取平台npuarch编号: 
-使用skill /ascendc-npu-arch 获取npuarch, 禁止猜测和推到
+使用skill /npu-arch 获取npuarch, 禁止猜测和推到
 
 确认平台后声明：
 

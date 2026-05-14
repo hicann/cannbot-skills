@@ -4,7 +4,7 @@ description: Ascend C 算子架构设计专家。负责需求分析、架构选�
 mode: subagent
 skills:
   - ascendc-tiling-design
-  - ascendc-npu-arch
+  - npu-arch
   - ascendc-api-best-practices
   - ops-precision-standard
   - ascendc-docs-search

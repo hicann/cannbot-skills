@@ -70,8 +70,8 @@ cd cannbot-skills
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-# 示例：将 ascendc-npu-arch skill 拷贝到你的 Claude Code 项目
-cp -r cannbot-skills/ops/ascendc-npu-arch {your-project-path}/.claude/skills/
+# 示例：将 npu-arch skill 拷贝到你的 Claude Code 项目
+cp -r cannbot-skills/ops/npu-arch {your-project-path}/.claude/skills/
 ```
 
 ## 🔍 项目架构设计
@@ -218,7 +218,7 @@ cannbot-skills/
 | Skill | 功能 | 使用样例 |
 |-------|------|---------|
 | **ascendc-api-best-practices** | API 使用最佳实践、参数限制 | — |
-| **ascendc-npu-arch** | NPU 架构知识、芯片型号映射 | — |
+| **npu-arch** | NPU 架构知识、芯片型号映射 | — |
 | **ascendc-docs-search** | API 文档索引 + 在线搜索 | — |
 | **ascendc-env-check** | NPU 设备查询、CANN 环境验证 | — |
 | **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 | — |

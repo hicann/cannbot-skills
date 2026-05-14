@@ -59,7 +59,7 @@ ENV_DEPENDENT_SKILLS=(
 
 # Knowledge/Review skills that should NOT modify code (B-SAFE-02)
 READONLY_SKILLS=(
-    "ascendc-npu-arch"
+    "npu-arch"
     "ascendc-api-best-practices"
     "ascendc-operator-kernel-design"
     "ascendc-code-review"

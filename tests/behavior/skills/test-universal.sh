@@ -92,7 +92,7 @@ total_skip=0
 
 # Knowledge/Review skills (should NOT modify code)
 READONLY_SKILLS=(
-    "ascendc-npu-arch"
+    "npu-arch"
     "ascendc-api-best-practices"
     "ascendc-code-review"
     "ascendc-docs-search"

@@ -3,7 +3,7 @@ name: ascendc-ops-architect
 description: Ascend C 算子架构师，负责需求分析和方案设计。支持两种场景：1) 需求分析：收集需求信息、架构设计和可行性评估；2) 方案设计：制定算子实现的技术方案和架构设计。
 mode: subagent
 skills:
-  - ascendc-npu-arch
+  - npu-arch
   - ascendc-env-check
   - ascendc-tiling-design
   - ascendc-registry-invoke-template
@@ -75,7 +75,7 @@ Ascend C 算子架构师，负责需求分析和方案设计。
 
 ### 参考文档
 
-查阅 `ascendc-npu-arch` 技能的 **npu-arch-guide.md**，了解 NPU 架构代际特性（如 Ascend950 独有的 Regbase/SIMT/FP8）
+查阅 `npu-arch` 技能的 **npu-arch-guide.md**，了解 NPU 架构代际特性（如 Ascend950 独有的 Regbase/SIMT/FP8）
 
 > **重要**：芯片架构信息需要在需求分析阶段就明确，以便确定目标服务器类型和特殊功能支持。
 
@@ -141,7 +141,7 @@ Ascend C 算子架构师，负责需求分析和方案设计。
 
 **默认行为**：
 - 芯片号：调用 `ascendc-env-check` skill 获取当前环境的 NPU 设备信息
-- 架构对应关系：使用 `ascendc-npu-arch` skill 查询服务器型号、芯片号、编译宏架构的映射关系
+- 架构对应关系：使用 `npu-arch` skill 查询服务器型号、芯片号、编译宏架构的映射关系
 - 用户指定运行环境
 
 #### 3. 调用方式
@@ -399,7 +399,7 @@ aclnnStatus aclnnXxx(
 
 #### API 兼容性验证
 - 确认 API 适用于目标服务器类型
-- 参考 ascendc-npu-arch 知识技能了解芯片架构特性
+- 参考 npu-arch 知识技能了解芯片架构特性
 
 #### NPU 性能优化
 **⚠️ 重要**：禁止写死核数，应使用 `GetBlockDim()` 动态获取

@@ -43,7 +43,7 @@ skip_count=0
 echo -e "${BOLD}=== Part 1: Knowledge Skills ===${NC}"
 echo ""
 
-run_behavior_test "ascendc-npu-arch" \
+run_behavior_test "npu-arch" \
     "Ascend910B 和 Ascend950 分别对应什么架构？" \
     "arch22|arch35|达芬奇|DaVinci|架构" \
     "$TIMEOUT"
@@ -187,7 +187,7 @@ echo ""
 
 test_precise_trigger "npu-arch-precise" \
     "Ascend910B芯片架构信息" \
-    "ascendc-npu-arch" \
+    "npu-arch" \
     "arch22|达芬奇|DaVinci|架构" \
     "$TIMEOUT"
 

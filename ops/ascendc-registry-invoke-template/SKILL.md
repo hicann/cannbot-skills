@@ -163,7 +163,7 @@ ST 测试开发指南，包含：
 | UT测试 | `test_{op}_*.cpp` | `tests/ut/` |
 
 ### 芯片架构映射
-参见skill：`ascendc-npu-arch`
+参见skill：`npu-arch`
 
 ### 核函数参数顺序（固定）
 
@@ -181,4 +181,4 @@ __global__ __aicore__ void {op_name}(
 
 - `ascendc-tiling-design` - Tiling 设计指南
 - `ascendc-api-best-practices` - API使用最佳实践
-- `ascendc-npu-arch` - NPU架构知识
+- `npu-arch` - NPU架构知识

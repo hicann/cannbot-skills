@@ -185,4 +185,4 @@ stageSize_  = min(剩余 UB / stageNum / sizeof(DataType) / baseNAlign × baseNA
 |------|------|------|
 | MatMul 融合设计模板 | `references/matmul/matmul-fusion-design-template.md` | DESIGN.md 编写骨架（API 映射、工程结构、确认清单、[SAMPLE] 重评） |
 | MatMul 融合参考工程 | `/ascendc-direct-invoke-template` → `references/matmul_fusion_kernel/` | 代码级模板（Kernel / Epilogue / BlockMmad / run.sh）— Developer 使用 |
-| NPU 架构配置 | `ascendc-npu-arch` skill | UB_SIZE 等芯片相关常量 |
+| NPU 架构配置 | `npu-arch` skill | UB_SIZE 等芯片相关常量 |

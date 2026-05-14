@@ -150,7 +150,7 @@ operators/add_custom/
 | `ascendc-docs-search` | 文档资源索引 | 查找 API 文档和示例 |
 | `ascendc-api-best-practices` | API 使用最佳实践 | 调用任何 AscendC API 前 |
 | `ascendc-tiling-design` | Tiling 设计 | 多核切分、UB切分、Buffer规划 |
-| `ascendc-npu-arch` | NPU 架构知识 | 查询芯片特性 |
+| `npu-arch` | NPU 架构知识 | 查询芯片特性 |
 | `ascendc-precision-debug` | 精度调试 | 算子精度问题 |
 | `ascendc-runtime-debug` | 运行时错误调试 | 错误码 |
 | `ascendc-crash-debug` | 卡死/崩溃调试 | 挂起、超时、崩溃 |

@@ -172,7 +172,7 @@ workspaceSizes[0] = sysWorkspaceSize + usrWorkspaceSize;
 
 ### 芯片架构映射
 
-**芯片架构映射参考**：`ascendc-npu-arch` 技能
+**芯片架构映射参考**：`npu-arch` 技能
 
 ### 隔离位置
 

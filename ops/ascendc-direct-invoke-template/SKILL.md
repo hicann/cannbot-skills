@@ -157,5 +157,5 @@ y = torch.ops.npu.add_custom(x1, x2)
 ## 参考资源
 
 - [Ascend C 示例代码](https://gitcode.com/cann/asc-devkit/tree/master/examples)
-- NPU 架构配置详见 `ascendc-npu-arch` skill
+- NPU 架构配置详见 `npu-arch` skill
 - PyTorch 对接详见 `torch-ascendc-op-extension` skill

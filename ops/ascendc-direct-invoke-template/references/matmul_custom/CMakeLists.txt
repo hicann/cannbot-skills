@@ -95,7 +95,7 @@ target_include_directories(matmul_tensor_api INTERFACE
 
 # [CONFIG] Ascend C matmul 编译选项
 #  -xasc             : Bisheng ASC 模式
-#  --npu-arch=XXX    : dav-2201 (Atlas A2) / dav-3510 (Atlas A5)；见 ascendc-npu-arch
+#  --npu-arch=XXX    : dav-2201 (Atlas A2) / dav-3510 (Atlas A5)；见 npu-arch
 #  -O3 / -w          : 优化等级 + 抑制 tensor_api 内部 warning
 set(MATMUL_COMPILE_OPTS "-xasc" "--npu-arch=dav-3510" "-w" "-O3")
 

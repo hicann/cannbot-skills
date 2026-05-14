@@ -60,7 +60,7 @@ target_include_directories(add_custom PRIVATE
 # [CONFIG] NPU 架构配置
 # - dav-2201: Atlas A2 系列（默认）
 # - dav-3510: Atlas A5 系列
-# 更多架构详见 ascendc-npu-arch skill
+# 更多架构详见 npu-arch skill
 # [MODIFY] 工程名 - add_custom → <your_op>
 target_compile_options(add_custom PRIVATE
     $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=dav-2201>

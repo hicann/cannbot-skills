@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-05-14】
+#### 重构 Refactor
+- 【Ascend C】Skill `ascendc-npu-arch` 重命名为 `npu-arch`，作为通用 NPU 架构知识技能供各领域共用。同步更新全量引用（ops、plugins、tests、docs）。
+
 ### 【2026-05-11】
 #### 新特性 New Features
 - 新增 ascendc-crash-debug 技能，剥离 runtime-debug 中卡死/崩溃/挂起内容，与 precision-debug 形成三分类调试体系。
@@ -136,7 +140,7 @@
 - 【Ascend C】新增 Skill：ascendc-docs-search，文档搜索。
 - 【Ascend C】新增 Skill：ascendc-env-check，NPU 设备查询、CANN 环境验证。
 - 【Ascend C】新增 Skill：ascendc-kernel-develop-workflow，七阶段工作流。
-- 【Ascend C】新增 Skill：ascendc-npu-arch，NPU 架构知识、芯片型号映射。
+- 【Ascend C】新增 Skill：npu-arch，NPU 架构知识、芯片型号映射。
 - 【Ascend C】新增 Skill：ascendc-precision-debug，算子精度调试。
 - 【Ascend C】新增 Skill：ascendc-runtime-debug，算子运行时错误调试。
 - 【Ascend C】新增 Skill：ascendc-st-design，接口测试用例设计。
