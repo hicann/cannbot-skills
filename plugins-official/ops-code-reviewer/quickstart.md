@@ -61,7 +61,7 @@ init.sh 脚本会完成以下操作：
 |------|----------------|---------------|---------------|-------------|------------|
 | Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` |
 | Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` |
-| AGENTS.md | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | `.trae/AGENTS.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` |
 
 #### Cursor 安装路径
 
@@ -69,7 +69,19 @@ init.sh 脚本会完成以下操作：
 |------|--------------|--------------|
 | Skills 技能模块 | `.cursor/skills/ascendc-code-review/` | `~/.cursor/skills/ascendc-code-review/` |
 | Agents 子代理 | `.cursor/agents/ascendc-ops-reviewer.md` | `~/.cursor/agents/ascendc-ops-reviewer.md` |
-| AGENTS.md | `.cursor/AGENTS.md` | `~/.cursor/AGENTS.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.cursor/AGENTS.md` |
+
+### 在其他目录执行
+
+`init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：
+
+```bash
+# 安装到当前目录
+bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project claude
+
+# 安装到指定项目
+bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project claude /path/to/your_project_path
+```
 
 ### 环境校验
 
@@ -78,12 +90,12 @@ init.sh 脚本会完成以下操作：
 **项目级安装**：
 ```
 cannbot-skills/plugins-official/ops-code-reviewer/
+├── AGENTS.md                       # OpenCode 配置文件
 ├── .opencode/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
 │   ├── agents/                    # 子代理
 │   │   └── ascendc-ops-reviewer.md
-│   ├── AGENTS.md                  # Team 配置
 │   └── cannbot-manifest.json      # 安装清单
 ├── init.sh                        # 初始化脚本
 └── quickstart.md                  # 本文档
@@ -114,12 +126,12 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 **项目级安装（Trae）**：
 ```
 cannbot-skills/plugins-official/ops-code-reviewer/
+├── AGENTS.md                      # Team 配置
 ├── .trae/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
 │   ├── agents/                    # 子代理
 │   │   └── ascendc-ops-reviewer.md
-│   ├── AGENTS.md                  # Team 配置
 │   └── cannbot-manifest.json      # 安装清单
 ├── init.sh                        # 初始化脚本
 └── quickstart.md                  # 本文档
@@ -128,12 +140,12 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 **项目级安装（Cursor）**：
 ```
 cannbot-skills/plugins-official/ops-code-reviewer/
+├── AGENTS.md                      # Team 配置
 ├── .cursor/
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
 │   ├── agents/                    # 子代理
 │   │   └── ascendc-ops-reviewer.md
-│   ├── AGENTS.md                  # Team 配置
 │   └── cannbot-manifest.json      # 安装清单
 ├── init.sh                        # 初始化脚本
 └── quickstart.md                  # 本文档

@@ -78,9 +78,10 @@ cleanup_fake_repos() {
     FAKE_REPOS_CREATED=""
 }
 
-# Remove artifacts created by init.sh inside the team directory
+# Remove artifacts created by init.sh inside the team directory (or given dir)
 cleanup_team_artifacts() {
-    rm -rf "$TEAM_DIR/.opencode" "$TEAM_DIR/.claude"
+    local dir="${1:-$TEAM_DIR}"
+    rm -rf "$dir/.opencode" "$dir/.claude"
 }
 
 get_expected_skill_count() {
@@ -313,6 +314,7 @@ check_common_artifacts() {
 # Verify via opencode CLI that installed agents are recognized
 # =============================================================================
 verify_opencode_cli_agents() {
+    local scan_dir="${1:-$TEAM_DIR}"
     if ! command -v opencode &>/dev/null; then
         print_skip "opencode CLI not available, skipping CLI agent recognition check"
         return 0
@@ -337,7 +339,7 @@ verify_opencode_cli_agents() {
 
     local output
     # opencode agent list scans the current directory's .opencode/ config
-    output=$(cd "$TEAM_DIR" && opencode agent list 2>&1 || true)
+    output=$(cd "$scan_dir" && opencode agent list 2>&1 || true)
 
     for agent in "${expected[@]}"; do
         if echo "$output" | grep -q "^$agent "; then
@@ -378,17 +380,8 @@ verify_opencode_discovery() {
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
-    # OpenCode reads AGENTS.md (only if init.sh places it in CONFIG_ROOT)
-    if grep -q 'AGENTS.md → \.opencode/' "$INIT_SCRIPT" 2>/dev/null; then
-        local agents_md="$config_root/AGENTS.md"
-        if [ -f "$agents_md" ] && [ -s "$agents_md" ]; then
-            print_pass "OpenCode scan: AGENTS.md is present and non-empty"
-            PASS_COUNT=$((PASS_COUNT + 1))
-        else
-            print_fail "OpenCode scan: AGENTS.md missing or empty"
-            FAIL_COUNT=$((FAIL_COUNT + 1))
-        fi
-    fi
+    # OpenCode reads AGENTS.md from project root (upward traversal)
+    # No need to check CONFIG_ROOT/AGENTS.md since opencode does not use rules/
 }
 
 # =============================================================================
@@ -421,7 +414,7 @@ verify_claude_discovery() {
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
-    # Claude reads CLAUDE.md (project→PWD, global→CONFIG_ROOT)
+    # Claude reads CLAUDE.md in project root
     local claude_md
     if [ "$level" = "project" ]; then
         claude_md="$tmp_pwd/CLAUDE.md"
@@ -429,10 +422,10 @@ verify_claude_discovery() {
         claude_md="$config_root/CLAUDE.md"
     fi
     if [ -f "$claude_md" ] && [ -s "$claude_md" ]; then
-        print_pass "Claude scan: CLAUDE.md is present and non-empty"
+        print_pass "Claude scan: CLAUDE.md in project root is present and non-empty"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "Claude scan: CLAUDE.md missing or empty"
+        print_fail "Claude scan: CLAUDE.md in project root missing or empty"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }
@@ -448,10 +441,10 @@ scenario_project_opencode() {
     tmp_pwd=$(mktemp -d)
 
     # Cleanup on exit or error
-    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts" EXIT
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
 
     setup_fake_repos "$TEAM_DIR"
-    cleanup_team_artifacts
+    cleanup_team_artifacts "$tmp_pwd"
 
     local output
     local exit_code=0
@@ -466,26 +459,24 @@ scenario_project_opencode() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$TEAM_DIR/.opencode"
+    local config_root="$tmp_pwd/.opencode"
     check_common_artifacts "$config_root" "opencode"
 
-    # Project OpenCode specific: AGENTS.md in PWD and in .opencode/
-    if [ -L "$tmp_pwd/AGENTS.md" ]; then
-        print_pass "PWD/AGENTS.md is a symlink"
+    # Project OpenCode specific: AGENTS.md in PWD (discovered by upward traversal)
+    # When install_path differs from plugin dir, AGENTS.md is a copy with absolute paths
+    if [ -e "$tmp_pwd/AGENTS.md" ]; then
+        print_pass "PWD/AGENTS.md exists"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "PWD/AGENTS.md is not a symlink (or missing)"
+        print_fail "PWD/AGENTS.md is missing"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
-
-    if grep -q 'AGENTS.md → \.opencode/' "$INIT_SCRIPT" 2>/dev/null; then
-        if [ -L "$config_root/AGENTS.md" ]; then
-            print_pass ".opencode/AGENTS.md is a symlink"
-            PASS_COUNT=$((PASS_COUNT + 1))
-        else
-            print_fail ".opencode/AGENTS.md is not a symlink (or missing)"
-            FAIL_COUNT=$((FAIL_COUNT + 1))
-        fi
+    if [ -f "$tmp_pwd/AGENTS.md" ] && [ ! -L "$tmp_pwd/AGENTS.md" ] && grep -q "$TEAM_DIR" "$tmp_pwd/AGENTS.md" 2>/dev/null; then
+        print_pass "PWD/AGENTS.md contains absolute paths (project mode rewrite)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ -L "$tmp_pwd/AGENTS.md" ]; then
+        print_pass "PWD/AGENTS.md is a symlink (plugin dir = PWD)"
+        PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
     # Repos should NOT be symlinked into CONFIG_ROOT in project mode
@@ -506,10 +497,10 @@ scenario_project_opencode() {
 
     # Verify via opencode CLI (project mode only; global mode agents live in
     # ~/.config/opencode which opencode agent list does not scan from a temp dir)
-    verify_opencode_cli_agents
+    verify_opencode_cli_agents "$tmp_pwd"
 
     rm -rf "$tmp_home" "$tmp_pwd"
-    cleanup_team_artifacts
+    cleanup_team_artifacts "$tmp_pwd"
     trap - EXIT
 }
 
@@ -595,10 +586,10 @@ scenario_project_claude() {
     tmp_home=$(mktemp -d)
     tmp_pwd=$(mktemp -d)
 
-    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts" EXIT
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
 
     setup_fake_repos "$TEAM_DIR"
-    cleanup_team_artifacts
+    cleanup_team_artifacts "$tmp_pwd"
 
     local output
     local exit_code=0
@@ -613,16 +604,24 @@ scenario_project_claude() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$TEAM_DIR/.claude"
+    local config_root="$tmp_pwd/.claude"
     check_common_artifacts "$config_root" "claude"
 
-    # Project Claude specific: CLAUDE.md in PWD
-    if [ -L "$tmp_pwd/CLAUDE.md" ]; then
-        print_pass "PWD/CLAUDE.md is a symlink"
+    # Project Claude specific: CLAUDE.md in project root
+    local claude_md="$tmp_pwd/CLAUDE.md"
+    if [ -e "$claude_md" ]; then
+        print_pass "CLAUDE.md in project root exists"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "PWD/CLAUDE.md is not a symlink (or missing)"
+        print_fail "CLAUDE.md in project root is missing"
         FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    if [ -f "$claude_md" ] && [ ! -L "$claude_md" ] && grep -q "$TEAM_DIR" "$claude_md" 2>/dev/null; then
+        print_pass "CLAUDE.md contains absolute paths (project mode rewrite)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ -L "$claude_md" ]; then
+        print_pass "CLAUDE.md is a symlink (plugin dir = PWD)"
+        PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
     # Repos should NOT be symlinked into CONFIG_ROOT in project mode
@@ -642,7 +641,7 @@ scenario_project_claude() {
     verify_claude_discovery "$config_root" "project" "$tmp_pwd"
 
     rm -rf "$tmp_home" "$tmp_pwd"
-    cleanup_team_artifacts
+    cleanup_team_artifacts "$tmp_pwd"
     trap - EXIT
 }
 
@@ -676,7 +675,7 @@ scenario_global_claude() {
     local config_root="$tmp_home/.claude"
     check_common_artifacts "$config_root" "claude"
 
-    # Global Claude specific: CLAUDE.md is a copy with absolute paths
+    # Global Claude specific: CLAUDE.md in CONFIG_ROOT
     # (only if init.sh performs sed rewrite)
     if grep -q 'ESCAPED_ROOT' "$INIT_SCRIPT" 2>/dev/null; then
         local config_file="$config_root/CLAUDE.md"

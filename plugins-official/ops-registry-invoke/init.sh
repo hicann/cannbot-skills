@@ -45,6 +45,8 @@ PLUGIN_ROOT="$SCRIPT_DIR"
 SHARED_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
 LOCAL_AGENT_ROOT="$SCRIPT_DIR/agents"
 
+
+
 show_banner() {
   echo ""
   echo -e "${CYAN}"
@@ -64,28 +66,31 @@ show_help() {
     cat << EOF
 Team Dependency Installer - Auto-scan and install team dependencies
 
-Usage: init.sh [level] [tool]
+Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
-  level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", "trae", or "cursor"
+  level        - Installation level: "project" (default) or "global"
+  tool         - Target tool: "opencode" (default), "claude", "trae", or "cursor"
+  install_path - Project-level installation directory (default: current working directory)
 
 Options:
   --help  - Show this help message
 
 Examples:
-  init.sh                      # Project-level, OpenCode
-  init.sh project opencode     # Project-level, OpenCode
-  init.sh global claude        # Global-level, Claude Code
-  init.sh project claude       # Project-level, Claude Code
-  init.sh project trae         # Project-level, Trae
-  init.sh project cursor       # Project-level, Cursor
+  init.sh                              # Project-level, OpenCode
+  init.sh project opencode             # Project-level, OpenCode
+  init.sh global claude                # Global-level, Claude Code
+  init.sh project claude               # Project-level, Claude Code
+  init.sh project trae                 # Project-level, Trae
+  init.sh project cursor               # Project-level, Cursor
+  init.sh project opencode /path/to/proj  # Project-level, OpenCode, custom path
+  init.sh project trae /path/to/proj      # Project-level, Trae, custom path
 
 Installation paths:
-  OpenCode: .opencode/{skills,agents}/  (auto-discovered)
-  Claude:   .claude/{skills,agents}/    (per-skill symlinks auto-created)
-  Trae:     .trae/{skills,agents}/      (symlinks, project-level only)
-  Cursor:   .cursor/{skills,agents}/    (auto-discovered)
+  OpenCode: .opencode/{skills,agents}/     + AGENTS.md in project root
+  Claude:   .claude/{skills,agents}/ + CLAUDE.md in project root
+  Trae:     .trae/{skills,agents}/     + AGENTS.md in project root
+  Cursor:   .cursor/{skills,agents}/   + AGENTS.md in project root
 
 After installation, launch directly:
   OpenCode: opencode
@@ -98,16 +103,24 @@ EOF
 # --- Parse arguments ---
 LEVEL="project"
 TOOL="opencode"
+INSTALL_PATH=""
 
 for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
         opencode|claude|trae|cursor)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, --help."
-            exit 1 ;;
     esac
 done
+
+# If last argument is not a known keyword, treat it as install_path
+if [ $# -gt 0 ]; then
+    last_arg="${!#}"
+    case "$last_arg" in
+        --help|global|project|opencode|claude|trae|cursor) ;;
+        *) INSTALL_PATH="$last_arg" ;;
+    esac
+fi
 
 # --- Determine config root ---
 if [ "$LEVEL" = "global" ]; then
@@ -122,14 +135,23 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.claude"
     fi
 else
-    if [ "$TOOL" = "opencode" ]; then
-        CONFIG_ROOT="$SCRIPT_DIR/.opencode"
-    elif [ "$TOOL" = "trae" ]; then
-        CONFIG_ROOT="$SCRIPT_DIR/.trae"
-    elif [ "$TOOL" = "cursor" ]; then
-        CONFIG_ROOT="$SCRIPT_DIR/.cursor"
+    # Project-level: default to current directory, allow override via install_path arg
+    if [ -n "$INSTALL_PATH" ]; then
+        INSTALL_BASE="$(cd "$INSTALL_PATH" && pwd)"
+        CONFIG_ROOT_BASE="$INSTALL_BASE"
     else
-        CONFIG_ROOT="$SCRIPT_DIR/.claude"
+        INSTALL_BASE="$PWD"
+        CONFIG_ROOT_BASE="$INSTALL_BASE"
+    fi
+
+    if [ "$TOOL" = "opencode" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
+    elif [ "$TOOL" = "trae" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
+    else
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
 fi
 
@@ -337,7 +359,7 @@ if [ "$TOOL" = "opencode" ]; then
 else
     # Trae/Claude/Cursor: create directories (per-item symlinks handled in Step 5)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
-    ok "Prepared: skills/, agents/"
+    ok "Prepared: skills/, agents/, rules/"
 fi
 echo ""
 
@@ -353,34 +375,97 @@ link_workflow_skill() {
     fi
 }
 
-if [ "$LEVEL" = "project" ]; then
-    # Project-level: config file should be in current directory (PWD)
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
-        config_target="$PWD/AGENTS.md"
+config_src="$SCRIPT_DIR/AGENTS.md"
+
+if [ "$TOOL" = "opencode" ]; then
+    # OpenCode: AGENTS.md in project root (or CONFIG_ROOT for global)
+    if [ "$LEVEL" = "project" ]; then
+        config_target="$INSTALL_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
-    fi
-else
-    # Global-level: config file in CONFIG_ROOT
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
+    fi
+    if [ "$config_src" = "$config_target" ]; then
+        info "$(basename "$config_target") already at target location"
+    elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
+        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
+        ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        sed \
+          -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
+          -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
+          -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
+          "$config_src" > "$config_target"
+        if [ "$LEVEL" = "global" ]; then
+            ok "AGENTS.md (absolute paths for global mode)"
+        else
+            ok "AGENTS.md (absolute paths for project mode)"
+        fi
+    else
+        ln -sf "$config_src" "$config_target"
+        ok "AGENTS.md"
+    fi
+elif [ "$TOOL" = "claude" ]; then
+    # Claude: CLAUDE.md in project root (or CONFIG_ROOT for global)
+    if [ "$LEVEL" = "project" ]; then
+        config_target="$INSTALL_BASE/CLAUDE.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
     fi
-fi
-config_src="$SCRIPT_DIR/AGENTS.md"
-
-# Skip only when source file is already at target location
-if [ "$config_src" = "$config_target" ]; then
-    info "$(basename "$config_target") already at target location"
+    if [ "$config_src" = "$config_target" ]; then
+        info "$(basename "$config_target") already at target location"
+    elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
+        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
+        ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        sed \
+          -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
+          -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
+          -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
+          "$config_src" > "$config_target"
+        if [ "$LEVEL" = "global" ]; then
+            ok "CLAUDE.md (absolute paths for global mode)"
+        else
+            ok "CLAUDE.md (absolute paths for project mode)"
+        fi
+    else
+        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        ln -sf "$config_src" "$config_target"
+        ok "CLAUDE.md"
+    fi
 else
-    ln -sf "$config_src" "$config_target"
-    ok "$(basename "$config_target")"
-fi
-
-# Also ensure CONFIG_ROOT has the config file (for consistency with other init.sh)
-if [ "$LEVEL" = "project" ] && [ "$config_target" != "$CONFIG_ROOT/$(basename "$config_target")" ]; then
-    ln -sf "$config_src" "$CONFIG_ROOT/$(basename "$config_target")"
+    # Trae/Cursor: AGENTS.md in project root (same as OpenCode)
+    if [ "$LEVEL" = "project" ]; then
+        config_target="$INSTALL_BASE/AGENTS.md"
+    else
+        config_target="$CONFIG_ROOT/AGENTS.md"
+    fi
+    if [ "$config_src" = "$config_target" ]; then
+        info "$(basename "$config_target") already at target location"
+    elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
+        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
+        ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        sed \
+          -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
+          -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
+          -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
+          -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
+          "$config_src" > "$config_target"
+        if [ "$LEVEL" = "global" ]; then
+            ok "AGENTS.md (absolute paths for global mode)"
+        else
+            ok "AGENTS.md (absolute paths for project mode)"
+        fi
+    else
+        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        ln -sf "$config_src" "$config_target"
+        ok "AGENTS.md"
+    fi
 fi
 
 link_workflow_skill
@@ -453,6 +538,15 @@ if [ -d "$ASC_DEVKIT_DIR" ]; then
     fi
 fi
 
+# For project-level with custom target: also symlink asc-devkit into INSTALL_BASE
+# so relative references from agents/workflow work correctly
+if [ "$LEVEL" = "project" ] && [ -d "$ASC_DEVKIT_DIR" ]; then
+    if [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; then
+        ln -sfn "$(realpath "$ASC_DEVKIT_DIR")" "$INSTALL_BASE/asc-devkit"
+        ok "asc-devkit → $INSTALL_BASE/"
+    fi
+fi
+
 # --- Step 7: Generate manifest + Health check ---
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 
@@ -492,11 +586,30 @@ done
 if [ ! -d "$ASC_DEVKIT_DIR" ]; then
   health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit not available"
 fi
+# When installed to a custom directory, also check the symlink there
+if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ] && [ ! -d "$INSTALL_BASE/asc-devkit" ]; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit symlink missing in $INSTALL_BASE"
+fi
 
-if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
-  [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
+# Check config file
+if [ "$TOOL" = "opencode" ]; then
+    if [ "$LEVEL" = "project" ]; then
+        [ -f "$INSTALL_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in project directory"; health_ok=false; }
+    else
+        [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
+    fi
+elif [ "$TOOL" = "claude" ]; then
+    if [ "$LEVEL" = "project" ]; then
+        [ -f "$INSTALL_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in project directory"; health_ok=false; }
+    else
+        [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
+    fi
 else
-  [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
+    if [ "$LEVEL" = "project" ]; then
+        [ -f "$INSTALL_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in project directory"; health_ok=false; }
+    else
+        [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
+    fi
 fi
 
 [ -f "$MANIFEST" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }

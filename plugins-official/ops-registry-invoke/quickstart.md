@@ -51,12 +51,26 @@ bash init.sh global cursor      # 全局级
 
 安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
 
+### 在其他目录执行
+
+`init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：
+
+```bash
+# 安装到当前目录
+bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project claude
+
+# 安装到指定项目
+bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project claude /path/to/your_project_path
+```
+
 ### 验证安装
 
 ```bash
 # Claude Code
 claude plugin list
 # 应看到已安装的 skills 和 agents
+ls .
+# 应看到 CLAUDE.md 位于项目根目录
 
 # OpenCode
 opencode agent list
@@ -64,7 +78,8 @@ opencode agent list
 
 # Cursor
 ls .cursor/
-# 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
+# 应看到 skills/ agents/ cannbot-manifest.json
+# AGENTS.md 位于项目根目录
 ```
 
 ## 二、快速上手
