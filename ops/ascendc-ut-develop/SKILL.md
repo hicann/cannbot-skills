@@ -1,6 +1,6 @@
 ---
 name: ascendc-ut-develop
-description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op_host / op_api / op_kernel 的测试空白、生成或补充 UT 用例并定位未覆盖代码来提升覆盖率，支持 ops-math / ops-nn / ops-transformer / ops-cv。当用户提及 UT、单元测试、覆盖率、补测、未覆盖代码或需要新增/完善 UT 时使用，不适用于 ST 测试。
+description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op_host / op_api / op_kernel 的测试空白、生成或补充 UT 用例并定位未覆盖代码来提升覆盖率并支持生成覆盖率报告。当用户提及 UT、单元测试、覆盖率、补测、未覆盖代码或需要新增/完善 UT 时使用，不适用于 ST 测试。
 ---
 
 # AscendC 算子 UT 开发
@@ -11,8 +11,9 @@ description: Ascend C 算子 UT 开发与覆盖率增强技能。通过分析 op
 |-------|------|---------|---------|
 | op_name | 算子名 | 采用下划线命名法 | 驼峰命名自动转换，无法推断时询问 |
 | repo_type | 仓库类型 | 枚举值["ops-math", "ops-nn", "ops-transformer", "ops-cv", "custom"] | 根据工作目录推断，无法推断时询问 |
-| soc_type | 芯片架构 | 枚举值列表["ascend310p", "ascend910b", "ascend910_93", "ascend910_95"] | 用户没有提及则默认全选 |
+| soc_type | 芯片架构 | 枚举值列表["ascend310p", "ascend910b", "ascend910_93", "ascend950"] | 用户没有提及则默认全选 |
 | test_model | 测试模块 | 枚举值列表["opapi", "ophost", "opkernel"] | 用户没有提及则默认全选 |
+| interactive_mode | 使用模式 | 枚举值["auto", "interactive"]，auto 为自动模式不向用户问询，interactive 为交互模式允许向用户问询 | 默认 "auto" |
 
 **格式约定**：整个 skill 里的所有文档中，入口参数使用 `${参数名}` 标记，需替换为真实值后再理解。
 
@@ -60,6 +61,7 @@ mkdir -p /tmp/cannbot_${op_name}
 1. **严格顺序执行**：必须按照 Step 1 → Step 2 → Step 3 → ... 的顺序执行，不得跳过或乱序
 2. **禁止提前阅读**：**在执行到某个步骤前，绝对禁止阅读该步骤的文档！**
 3. **即时更新进度**：每完成或跳过一个子步骤，**立即**使用 `todowrite` 工具更新 TODO.md，将其标记为 `[x]`
+4. **交互模式强制约束**：当 `${interactive_mode} == "interactive"` 时，**必须**在每个询问点使用 `question` 工具与用户确认，**禁止**绕过用户自行决策。Step 4.4a 的询问步骤是交互模式的核心特征，跳过即违背用户意图。
 
 ### 主流程链接
 

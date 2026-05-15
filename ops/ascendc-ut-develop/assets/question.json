@@ -55,7 +55,7 @@
           "description": "arch32"
         },
         {
-          "label": "ascend910_95",
+          "label": "ascend950",
           "description": "arch35"
         }
       ],
@@ -80,6 +80,21 @@
         }
       ],
       "default": ["{{推测结果，all代表全选}}"]
+    },
+    {
+      "header": "interactive_mode",
+      "question": "请选择使用模式：",
+      "options": [
+        {
+          "label": "auto",
+          "description": "自动模式，后续不向用户问询（默认）"
+        },
+        {
+          "label": "interactive",
+          "description": "交互模式，允许后续向用户问询"
+        }
+      ],
+      "default": "auto"
     }
   ]
 }

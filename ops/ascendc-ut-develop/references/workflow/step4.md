@@ -36,10 +36,64 @@ lcov --list ops.info_filtered | head -50
 
 ### Step 4.4: 分析未覆盖代码
 
+根据 `${interactive_mode}` 选择不同的分析方式：
+
+#### 4.4a 交互模式
+
+当 `${interactive_mode} == "interactive"` 时：
+
+> **⚠️ 强制交互步骤 — 必须向用户询问，禁止跳过**
+>
+> 在交互模式下，**必须**通过 `question` 工具与用户确认目标文件，**不得**自动决定处理范围或直接生成报告。
+>
+> - 本步骤是交互模式的核心特征，跳过此步骤违背了用户选择交互模式的意图
+> - 即使用户dismiss问卷，也必须记录用户的选择（包括"无选择"），不得自行假设处理范围
+
+1. **获取文件覆盖率清单**
+   ```bash
+   # 提取每个文件的覆盖率，按覆盖率升序排列（未覆盖优先）
+   lcov --list ops.info_filtered | grep -E "^\s*.+\.(cpp|h)$" | awk '{print $1, $NF}' | sort -t: -k2 -n
+   ```
+
+2. **存储文件覆盖率清单**
+   ```bash
+   # 存储到临时文件
+   lcov --list ops.info_filtered | grep -E "^\s*.+\.(cpp|h)$" > /tmp/cannbot_${op_name}/coverage_files.txt
+   ```
+
+3. **⚠️ 询问用户选择目标文件（强制步骤，不可跳过）**
+   
+   **立即**使用 `question` 工具询问用户选择要提升覆盖率的文件：
+   - 问卷配置参考 `assets/coverage_files_question.json`
+   - 将不满足覆盖率标准的文件作为选项列出
+   - 每个选项显示文件名和覆盖率
+   - 用户选择的文件存储到 `/tmp/cannbot_${op_name}/target_files.txt`
+   
+   **如果用户 dismiss 问卷或选择"不处理"**：
+   - 明确记录用户的选择状态（如"用户未选择目标文件，结束覆盖率提升流程"）
+   - **不得**自行假设处理全部文件或继续后续步骤
+   - 可询问用户是否只需生成报告或结束流程
+
+4. **获取选中文件的未覆盖代码**
+   ```bash
+   # 针对每个目标文件提取未覆盖行
+   for file in $(cat /tmp/cannbot_${op_name}/target_files.txt); do
+     lcov --list ops.info_filtered | grep "${file}" | grep ":0"
+   done
+   ```
+
+5. **分析分支条件** — 识别进入该分支需要的参数组合
+6. **设计测试用例** — 参考 [test-implementation.md](../coverage-guide/test-implementation.md)
+
+#### 4.4b 自动模式
+
+当 `${interactive_mode} == "auto"` 时：
+
 1. **获取未覆盖代码清单**
    ```bash
    lcov --list ops.info_filtered | grep ":0"
    ```
+   
 2. **分析分支条件** — 识别进入该分支需要的参数组合
 3. **设计测试用例** — 参考 [test-implementation.md](../coverage-guide/test-implementation.md)
 
