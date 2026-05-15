@@ -1,50 +1,46 @@
 ---
 name: ascendc-regbase-best-practice
-description: Use when a task has already been routed into the Ascend C regbase branch, or when the request explicitly mentions regbase 设计、regbase 开发、regbase 融合算子开发, and the work needs regbase-specific API guidance, implementation patterns, pitfalls, development experience, or fusion-operator development support for ascend950.
+description: 当需要为 DAV_3510 RegBase 算子确认 API 约束、实现结构、排查常见陷阱或选择真实参考算子时使用。
 ---
 
-# Ascend C Regbase Development
+# Ascend C RegBase 开发
 
-This skill is the shared knowledge pack for tasks that have already entered the `regbase` branch in the team workflow. It does not decide branch routing by itself. Its job is to provide a reliable regbase-oriented reading path across API constraints, implementation patterns, pitfalls, engineering experience, and lightweight reference-implementation selection.
+该能力解决 RegBase 路线下的四类问题：API 约束确认、实现结构参考、常见陷阱排查、真实参考算子选择。
 
-The `reference-ops` subtree is intentionally lightweight. A name match or a basic-type match in the operator table is only a screening lead for choosing a reference implementation to inspect. It is not evidence that the source implementation can be copied, fused, or reused without a fresh regbase-specific design judgment.
+`reference-ops` 子树是轻量参考资产。算子名称或基础类型匹配只表示“值得查看的候选参考”，不能证明目标任务可以直接复用、融合或复制该实现。是否复用必须重新做 RegBase 专项设计判断。
 
-## When To Use
+## 何时使用
 
-Use this skill when:
+满足以下任一条件时使用该能力：
 
-- the task is already confirmed as `ascend950 / regbase` work
-- the user explicitly asks for regbase design, development, review, or debugging guidance
-- the agent needs regbase-specific API constraints instead of generic default operator-development assumptions
-- the task needs regbase implementation patterns, pitfalls, or development experience before coding or repair
-- the task needs to choose at least one existing regbase operator implementation to inspect before coding
-Do not use this skill as a generic replacement for the default operator-development path. If the task has not been routed into the regbase branch, follow the team workflow first and only load this skill when the regbase branch is actually in scope.
+- Architect 在方案决策中把 RegBase 作为候选路线。
+- 用户、DESIGN.md 或代码明确出现 RegBase / RegTensor / asc_vf_call / __simd_vf__ 等信号。
+- Developer 或 Reviewer 需要确认 RegBase 专属 API、实现结构、陷阱或参考实现。
 
-## Reading Order
+不要把该能力当成默认算子开发路径的通用替代品。技术路线未决时，由 Architect 完成 SIMD/MemBase 与 RegBase 的方案决策。
 
-1. Read `references/index.md` first for global entry points.
-2. Read `references/knowledge/regbase_development_guide.md` when the task needs a practical end-to-end regbase development path instead of only isolated cards.
-3. Read `references/knowledge/index.md` when you need to choose between API, patterns, pitfalls, or development experience.
-4. Inside `api/`, `patterns/`, `pitfalls/`, or `dev-experience/`, read that directory's `index.md` before opening leaf documents.
-5. For one subproblem, use the directory index fields `purpose`, `read_when`, and `keywords` to select the relevant leaf documents, and expand at most 5 of them before you either close the question or split it into smaller subproblems.
-6. Read `references/reference-ops/open_source_operator_table.md` only when you need to choose at least one existing regbase implementation to inspect before coding.
+## 阅读入口
 
-## Asset Map
+- 端到端开发主线：`references/regbase_development_guide.md`
+- API 约束和签名：`references/api/index.md`
+- 陷阱和精度风险：`references/pitfalls/index.md`
+- 工程经验和路线判断：`references/dev-experience/index.md`
+- 真实参考实现：`references/reference-ops/open_source_operator_table.md`
 
-- `references/index.md`: top-level retrieval map for agentic navigation.
-- `references/knowledge/regbase_development_guide.md`: practical main guide for developing a regbase operator end to end.
-- `references/knowledge/api/`: regbase API reference, whitelist, synchronization notes, and API-adjacent best practices.
-- `references/knowledge/patterns/`: regbase operator structure, tiling patterns, reduction patterns, broadcast patterns, kernel dataflow patterns, buffer partitioning, and sync patterns.
-- `references/knowledge/pitfalls/`: common traps, symptom-to-cause lookup, API misuse cases, precision failure modes, and regbase-vs-membase confusion points.
-- `references/knowledge/dev-experience/`: distilled engineering experience, route selection heuristics, build habits, case notes, performance practices, and high-signal implementation notes.
-- `references/reference-ops/open_source_operator_table.md`: lightweight open-source operator table with operator name, basic type, and code path for reference-implementation selection.
+## 按阶段选择
 
-## Guardrails
+- 方案决策：`references/regbase_development_guide.md`、`references/dev-experience/index.md`
+- 设计：`references/regbase_development_guide.md`、`references/api/index.md`
+- 实现：`references/api/index.md`、`references/dev-experience/regbase_programming_notes.md`、`references/reference-ops/open_source_operator_table.md`
+- 审查：`references/pitfalls/index.md`、`references/dev-experience/index.md`
+- 修复和调试：`references/pitfalls/symptom_to_cause.md`、`references/dev-experience/index.md`
 
-- Treat this skill as a regbase-specific supplement, not as the owner of team-level workflow routing.
-- Prefer the indexed reading path. Do not load the entire subtree when one index can route you to the right branch.
-- Inside `api/`, `patterns/`, `pitfalls/`, and `dev-experience/`, always use the directory `index.md` as the routing table before reading leaf notes.
-- For one subproblem, stop at 5 leaf notes and either close the question or split it into narrower subproblems.
-- Before coding a new regbase operator, inspect at least one existing regbase operator implementation located through `open_source_operator_table.md`.
-- Do not treat a candidate from `open_source_operator_table.md` as proof of direct reusability. The table exists to help you choose real regbase code to inspect, not to make automatic reuse decisions.
-- Keep platform reasoning explicit. If a note comes from compatibility experience rather than the primary `ascend950 / regbase` path, say so.
+进入 `api/`、`pitfalls/` 或 `dev-experience/` 后，先读该目录的 `index.md`，再打开叶子文档。针对一个子问题，最多展开 5 篇叶子文档；仍不够时拆分问题，而不是一次加载整个子树。
+
+## 约束
+
+- 引用 API 前必须检查 API 白名单、API reference 或官方文档；不要凭函数名猜测。
+- 设计伪代码不能直接当作可编译实现；写代码时必须回到真实工程模板和 API 签名。
+- 编写新 RegBase 算子前，必须通过 `open_source_operator_table.md` 定位候选目录，并阅读至少一个经确认包含 RegBase 证据的真实实现。
+- 看到 `RegTensor` / `MaskReg` / `asc_vf_call` / `__simd_vf__` 等关键词时，优先检查 API 层和 pitfalls 层。
+- 架构判断必须显式说明。如果某条经验来自兼容路径而不是主路径 `DAV_3510 / RegBase`，需要说清楚。

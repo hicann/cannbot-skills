@@ -4,6 +4,7 @@ description: Ascend C 算子代码审查专家。独立构建验证、代码质�
 mode: subagent
 skills:
   - ascendc-docs-search
+  - ascendc-regbase-best-practice
   - ops-profiling
   - ops-precision-standard
   - ascendc-api-best-practices
@@ -115,6 +116,13 @@ python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMake
 #### Step 3：设计合规检查
 
 对照 `operators/{operator_name}/docs/DESIGN.md` 设计文档验证实现一致性。
+
+如果 DESIGN.md 或代码明确选择 RegBase 路线，加载 `/ascendc-regbase-best-practice` 并增加以下检查：
+
+- 技术路线是否与 DESIGN.md 的方案决策一致，是否把 RegBase 与 MemBase/SIMD 路线混用。
+- API 和调用结构是否来自 RegBase 文档或已验证参考实现。
+- 寄存器级计算边界、mask/tail 处理和数据搬运边界是否清晰。
+- 代码实现是否与已选 RegBase 参考实现的约束一致，不能只照搬设计伪代码。
 
 #### Step 4：测试覆盖评估
 

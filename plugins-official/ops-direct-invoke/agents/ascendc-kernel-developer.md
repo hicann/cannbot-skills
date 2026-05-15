@@ -5,6 +5,7 @@ mode: subagent
 skills:
   - ascendc-env-check
   - ascendc-api-best-practices
+  - ascendc-regbase-best-practice
   - ascendc-docs-search
   - ascendc-precision-debug
   - ops-profiling
