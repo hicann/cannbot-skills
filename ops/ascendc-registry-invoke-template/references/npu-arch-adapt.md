@@ -18,7 +18,7 @@
 | # | 适配点 | 要查什么 | 同架构芯片怎么改 |
 |:-:|--------|----------|-----------------|
 | 1 | `_def.cpp` | `AddConfig` 注册 | 追加一条 `AddConfig`，共用同架构芯片的 config 对象 |
-| 2 | `CMakeLists.txt` / `variables.cmake` | `grep` 基准芯片名，含 `SUPPORT_COMPUTE_UNIT`、`SUPPORT_TILING_DIR`、条件分支 `STREQUAL`、`ASCEND_ALL_COMPUTE_UNIT`、`SHORT_NAME_LIST` / `FULL_NAME_LIST` 等，见下方[编译配置两种模式](#编译配置两种模式) | 列表声明追加芯片号，TILING_DIR 保持 1:1；条件分支用 `OR` 归并 |
+| 2 | `CMakeLists.txt` / `variables.cmake` | `grep` 基准芯片名，含 `SUPPORT_COMPUTE_UNIT`、`SUPPORT_TILING_DIR`、条件分支 `STREQUAL`、`ASCEND_ALL_COMPUTE_UNIT`、`SHORT_NAME_LIST` / `FULL_NAME_LIST` 等，见下方[编译配置两种模式](#编译配置两种模式) | 列表声明追加芯片号，TILING_DIR 保持 1:1 |
 | 3 | `build.sh` | `grep` 基准芯片名所有出现位置 | 同架构芯片与基准芯片合并（`\|\|` 或 case 合并） |
 | 4 | `op_graph` / `op_api` / `op_host` | `grep` 基准芯片名 | `soc == "X"` 追加 `\|\|`，`soc != "X"` 追加 `&&`；NpuArch 分支自动覆盖 |
 | 5 | 辅助脚本 | `grep` 基准芯片名（`build_env.sh`、`SOC_MAP` 等） | 追加新芯片条目 |
@@ -52,15 +52,7 @@ else()
 endif()
 ```
 
-同架构芯片块内容一致时，可用 `OR` 简化：
-
-```cmake
-if(<COND> STREQUAL "<芯片1>" OR <COND> STREQUAL "<芯片2>")
-    # ...
-else()
-    # ...
-endif()
-```
+同架构芯片且块内无芯片相关硬编码（如 `COMPUTE_UNIT` 写死为某个芯片号）时，可用 `OR` 简化；否则新增 `elseif` 块。
 
 ---
 
