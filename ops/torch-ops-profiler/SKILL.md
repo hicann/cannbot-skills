@@ -4,7 +4,7 @@ description: "使用 torch_npu.profiler（warmup/active=5）维护 JSONL 用例�
 argument-hint: "可选：算子名、对比 API、是否与精度用例对齐。"
 ---
 
-# AscendC 算子 torch_npu.profiler 性能评估
+# Ascend C 算子 torch_npu.profiler 性能评估
 
 ## 本技能目录内参考文件
 
@@ -136,7 +136,7 @@ READ csrc/ops/<op>/design.md
 | `warmup` | **5** | 不允许脚本或 CLI 改为其它值 |
 | `active` | **5** | 不允许脚本或 CLI 改为其它值 |
 | `wait` | 默认 `0` | 可保留 CLI 或常量，按需 |
-| `repeat` | 默认 `1` | 简单场景固定为 1；若 `repeat>1`，须在文档中说明 CSV 选取语义 |
+| `repeat` | 默认 `1` | 简单场景固定为 1；若 `repeat>1`，必须在文档中说明 CSV 选取语义 |
 
 每步末尾必须 **`prof.step()`**；循环总步数 = `repeat * (wait + warmup + active)`。
 

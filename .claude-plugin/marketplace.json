@@ -14,7 +14,11 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "skills", "direct-invoke"],
+      "keywords": [
+        "ascendc",
+        "skills",
+        "direct-invoke"
+      ],
       "category": "skills",
       "skills": [
         "./ascendc-api-best-practices",
@@ -42,7 +46,10 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["pypto", "skills"],
+      "keywords": [
+        "pypto",
+        "skills"
+      ],
       "category": "skills",
       "skills": [
         "./pypto-api-explore",
@@ -64,7 +71,11 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "skills", "code-review"],
+      "keywords": [
+        "ascendc",
+        "skills",
+        "code-review"
+      ],
       "category": "skills",
       "skills": [
         "./ascendc-code-review",
@@ -80,7 +91,13 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["torch", "torchair", "npugraph_ex", "npu", "skills"],
+      "keywords": [
+        "torch",
+        "torchair",
+        "npugraph_ex",
+        "npu",
+        "skills"
+      ],
       "category": "skills",
       "skills": [
         "./torch-custom-ops-guide",
@@ -125,7 +142,10 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["tilelang", "skills"],
+      "keywords": [
+        "tilelang",
+        "skills"
+      ],
       "category": "skills",
       "skills": [
         "./tilelang-api-best-practices",
@@ -143,7 +163,12 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "kernel", "direct-invoke", "operator"],
+      "keywords": [
+        "ascendc",
+        "kernel",
+        "direct-invoke",
+        "operator"
+      ],
       "category": "development",
       "dependencies": [
         "ops-direct-invoke-skills"
@@ -153,11 +178,16 @@
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
       "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["pypto", "operator", "orchestrator", "state-machine"],
+      "keywords": [
+        "pypto",
+        "operator",
+        "orchestrator",
+        "state-machine"
+      ],
       "category": "development",
       "dependencies": [
         "pypto-op-orchestrator-skills"
@@ -171,7 +201,10 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "code-review"],
+      "keywords": [
+        "ascendc",
+        "code-review"
+      ],
       "category": "development",
       "dependencies": [
         "ops-code-reviewer-skills"
@@ -181,11 +214,19 @@
       "name": "torch-compile",
       "source": "./plugins-official/torch-compile",
       "description": "PyTorch torch.compile 图模式编排入口。通过 Subagent 组织不同图模式，当前提供 npugraph_ex 配置、迁移、自定义算子入图和问题诊断。",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["torch", "torch.compile", "torchair", "npugraph_ex", "npu", "graph-mode", "subagent"],
+      "keywords": [
+        "torch",
+        "torch.compile",
+        "torchair",
+        "npugraph_ex",
+        "npu",
+        "graph-mode",
+        "subagent"
+      ],
       "category": "development",
       "dependencies": [
         "torch-npugraph-ex-skills"
@@ -213,7 +254,12 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["tilelang", "operator", "ascend", "npu"],
+      "keywords": [
+        "tilelang",
+        "operator",
+        "ascend",
+        "npu"
+      ],
       "category": "development",
       "dependencies": [
         "tilelang-op-orchestrator-skills"

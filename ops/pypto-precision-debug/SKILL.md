@@ -1,7 +1,6 @@
 ---
 name: pypto-precision-debug
 description: PyPTO 算子精度问题排查技能。专注于用户代码层面的语法逻辑检查和规避方法尝试。当算子精度验证失败、输出结果异常、计算错误、数值偏差、或任何与精度相关的问题时使用此技能。
-license: 完整条款见 LICENSE.txt
 ---
 
 # PyPTO 算子精度问题排查技能

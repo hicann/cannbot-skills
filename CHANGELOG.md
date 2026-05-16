@@ -1,16 +1,64 @@
 ## 🔥 更新日志
+### 【2026-05-16】
+#### 新特性 New Features
+- 【官方插件】全面适配 Trae 全局安装，`ops-code-reviewer`、`ops-direct-invoke`、`ops-registry-invoke`、`pypto-op-orchestrator` 4 个插件统一支持 `global trae` 和 `project trae` 两种级别。
+
+#### 重构 Refactor
+- 【模型推理】将 `model-infer-optimize` 从 `model/teams/` 迁移到 `plugins-official/` 主线结构，新增完整 plugin 结构（AGENTS.md、hooks、workflows、init.sh、quickstart.md）。
+
+#### 代码清理
+- 删除旧版 OpenCode 插件安装机制的遗留产物 `package.json`。
+
+### 【2026-05-15】
+#### 特性增强 Feature Enhancement
+- 【算子直调】将 RegBase 最佳实践指导集成到 `ops-direct-invoke` 工作流，Architect 负责 SIMD/MemBase vs RegBase 方案决策，Reviewer 承接 RegBase 路线审查。
+- 【安装部署】init.sh 支持从任意目录执行安装，可通过 `install_path` 参数指定目标项目路径，配置文件统一安装到项目根目录或 `CONFIG_ROOT`。
+
+#### 问题修复 Bug Fix
+- 【UT 开发】修复 UT skill ascend950 SOC 问题，新增交互模式。
+
 ### 【2026-05-14】
 #### 重构 Refactor
 - 【Ascend C】Skill `ascendc-npu-arch` 重命名为 `npu-arch`，作为通用 NPU 架构知识技能供各领域共用。同步更新全量引用（ops、plugins、tests、docs）。
+
+### 【2026-05-12】
+#### 新特性 New Features
+- 【图模式】torch-compile 加入 plugin-official，提供 PyTorch torch.compile 图模式编排入口。
+- 【安装部署】将 TileLang 从 `ops-lab/tilelang` 转移至 `plugins-community/tilelang-op-orchestrator`。
+
+#### 特性增强 Feature Enhancement
+- 【测试框架】优化行尾扫描排除临时目录，PR 模板增加 UT_Test 故障排查指引。
 
 ### 【2026-05-11】
 #### 新特性 New Features
 - 新增 ascendc-crash-debug 技能，剥离 runtime-debug 中卡死/崩溃/挂起内容，与 precision-debug 形成三分类调试体系。
 - 调整技能分类：env-check 归入调试与测试类，ops-profiling 归入工具辅助类。
+- 【安装部署】CANNBot 官方插件新增支持 Cursor IDE 和 Trae IDE 安装，总体已支持 OpenCode / Claude / Trae / Cursor。
+
+#### 文档更新
+- 修正 README、quickstart 中仓库路径（skills/ → cannbot-skills/），清理废弃的 `.opencode/` 目录。
+
+#### 测试
+- 新增 CRLF 行尾检测测试和 `.gitattributes`。
+
+### 【2026-05-09】
+#### 新特性 New Features
+- 新增 Simt C Style Skills。
+
+#### 配置变更
+- 添加 `.gitignore` 文件。
+
+### 【2026-05-07】
+#### 新特性 New Features
+- 新增 kernel 直调工程接入 ACLNN / GEIR 接口的 skill（ascendc-direct-invoke-to-registry-invoke），支持 kernel 直调形式改造成自定义算子工程。
+
+#### 问题修复 Bug Fix
+- 【测试框架】修复 tests 测试框架无效/冗余测试项，补齐 test-version.sh 看护盲区，统一为 git-diff 变更检测模式。
+- 【skill 迁移】配合主仓进行 skill 位置迁移。
 
 ### 【2026-05-06】
 #### 新特性 New Features
-- 新增算子注册调用的开发工作流（ops-registry-invoke），支持ACLNN和GEIR两种接入方式，覆盖需求分析到代码检视全流程。
+- 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。
 
 ### 【2026-04-30】
 #### 配置 Configuration

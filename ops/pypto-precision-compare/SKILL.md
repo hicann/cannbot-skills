@@ -1,7 +1,6 @@
 ---
 name: pypto-precision-compare
 description: PyPTO 算子精度问题调试技能。提供两种精度对比方法：文件保存方法（使用 pypto.pass_verify_save 和 torch.save）和二分对比方法（使用检查点 tensor）。当需要调试 PyPTO 算子精度、定位精度差异来源、进行中间结果对比时使用此技能。
-license: 完整条款见 LICENSE.txt
 ---
 
 # PyPTO 算子精度问题调试技能

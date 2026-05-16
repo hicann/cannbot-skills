@@ -61,7 +61,7 @@ description: "PyTorch 昇腾 NPU npugraph_ex 编译期报错诊断。覆盖 torc
 |------|------|---------|
 | upstream PyTorch | `https://github.com/pytorch/pytorch.git` | `torch.compile` 前半程语义：Dynamo、FX、AOTAutograd、Functorch、graph break |
 | TorchAir | `https://gitcode.com/Ascend/torchair.git` | `npugraph_ex` backend、`npu_fx_compiler`、ACL graph capture、相关 pass |
-| Ascend/pytorch | `https://gitcode.com/Ascend/pytorch.git` | `torch_npu` 桥接、Meta / FakeTensor 注册、自定义算子注册 |
+| Ascend / PyTorch | `https://gitcode.com/Ascend/pytorch.git` | `torch_npu` 桥接、Meta / FakeTensor 注册、自定义算子注册 |
 
 **本地拉取示例**（仅在本地无对应源码时）：
 
@@ -79,7 +79,7 @@ cd ~/.cache/torch-src && git sparse-checkout set torch_npu docs/zh
 4. **按阶段补查，而非按仓库先后**：
    - `torch._dynamo` / `torch.fx` / FakeTensor / AOTAutograd 报错 → 优先 upstream PyTorch
    - `npugraph_ex` pass、`npu_fx_compiler`、ACL graph capture 失败 → 优先 TorchAir
-   - Meta / FakeTensor 注册缺失、`torch_npu` 桥接异常 → 优先 Ascend/pytorch
+   - Meta / FakeTensor 注册缺失、`torch_npu` 桥接异常 → 优先 Ascend / PyTorch
 
 ## 兜底文档
 
