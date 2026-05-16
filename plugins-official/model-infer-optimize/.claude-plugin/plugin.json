@@ -1,0 +1,19 @@
+{
+  "name": "model-infer-optimize",
+  "description": "NPU 模型推理端到端优化 Team。含 workflow、分析/实施/验证 Subagent，覆盖并行、KVCache/FA、融合算子、图模式、多流、预取和 SuperKernel。",
+  "version": "1.0.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "MIT",
+  "dependencies": [
+    "model-infer-skills"
+  ],
+  "agents": [
+    "./agents/model-infer-analyzer.md",
+    "./agents/model-infer-implementer.md",
+    "./agents/model-infer-reviewer.md"
+  ]
+}

@@ -1,13 +1,8 @@
----
-name: model-infer-optimize
-description: 基于 PyTorch 框架的昇腾 NPU 模型推理性能端到端优化技能。编排分析、实施、验证三类 subagent，按阶段执行推理性能优化，每阶段验证达标后再进入下一阶段。触发场景：优化模型的 NPU 推理性能、端到端推理优化、全流程 NPU 推理适配。不适用于训练优化、非 PyTorch 框架、非昇腾平台。
----
-
-# 模型端到端优化技能
+# NPU 模型推理端到端优化工作流
 
 ## 概述
 
-本技能编排三个专业化 subagent（model-infer-analyzer / model-infer-implementer / model-infer-reviewer）对目标模型按阶段执行 NPU 推理优化。
+本工作流编排三个专业化 subagent（model-infer-analyzer / model-infer-implementer / model-infer-reviewer）对目标模型按阶段执行 NPU 推理优化。
 
 ```
 阶段 0: 模型分析与建立基线

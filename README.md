@@ -45,7 +45,7 @@ cd cannbot-skills
 | [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
 | [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
 | [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
-| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | `cd model/teams/infer-model-optimize-team && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](model/teams/infer-model-optimize-team/quickstart.md) |
+| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
 
 ### 方式二：Plugin 安装
 
@@ -61,7 +61,7 @@ cd cannbot-skills
 | [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `/plugin install ops-direct-invoke@cannbot` |
 | [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | *暂不支持* |
 | [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `/plugin install pypto-op-orchestrator@cannbot` |
-| [**NPU 推理优化**](model/teams/infer-model-optimize-team/quickstart.md) | *暂不支持* |
+| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `/plugin install model-infer-optimize@cannbot` |
 
 3. 激活：`/reload-plugins`，然后新开会话 或 `/clear`
 
@@ -83,13 +83,13 @@ cp -r cannbot-skills/ops/npu-arch {your-project-path}/.claude/skills/
 cannbot-skills/
 ├── ops/                    # 算子 Skills（正式版：Ascend C + PyPTO）
 ├── ops-lab/               # 算子 Skills（实验 / 非正式版）
-├── model/                 # 模型推理优化
-│   ├── skills/            # 推理优化技能模块
-│   ├── agents/            # 子 Agent（analyzer / implementer / reviewer）
-│   └── teams/             # 多 Agent 协同
-│       └── infer-model-optimize-team/  # NPU 推理端到端优化流程
-│           ├── model-infer-optimize/   # 工作流入口 Skill
-│           └── hooks/                  # Hook 约束脚本
+├── model/                 # 模型推理优化原子 Skills（11 个 model-infer-*）
+├── plugins-official/      # 官方应用 Plugin
+│   ├── ops-direct-invoke/
+│   ├── ops-registry-invoke/
+│   ├── pypto-op-orchestrator/
+│   ├── torch-compile/
+│   └── model-infer-optimize/  # NPU 推理端到端优化流程
 └── tests/                 # 自动化测试框架
 ```
 
@@ -255,9 +255,10 @@ cannbot-skills/
 
 ### NPU 模型推理优化
 
+端到端优化流程由 `plugins-official/model-infer-optimize/workflows/optimize-workflow.md` 承载（plugin-local 普通 md 文档），由 primary agent 自动加载。下表列出 11 个可独立调用的原子 Skill：
+
 | Skill | 功能 |
 |-------|------|
-| **model-infer-optimize** | 端到端优化编排入口，阶段 0-5 全流程 |
 | **model-infer-migrator** | 框架适配与部署基线建立 |
 | **model-infer-parallel-analysis** | 并行策略分析（TP/EP/DP） |
 | **model-infer-parallel-impl** | 并行切分实施 |
@@ -329,4 +330,3 @@ cannbot-skills/
    
 ### 联系我们
 [【微信交流群】](https://gitcode.com/cann/cannbot-skills/discussions/2)
-

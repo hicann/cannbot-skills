@@ -118,15 +118,17 @@ for team_dir in "$TEAMS_DIR"/*; do
         script_name=$(basename "$script")
         run_check "[$team_name] workflow script $script_name exists" test -f "$script"
     done
-    # Check verify_environment.sh and init_operator_project.sh specifically
-    run_check "[$team_name] verify_environment.sh exists" test -f "$team_dir/workflows/scripts/verify_environment.sh"
-    run_check "[$team_name] init_operator_project.sh exists" test -f "$team_dir/workflows/scripts/init_operator_project.sh"
+    # ops-direct-invoke specific scripts (hardcoded standard for kernel ops plugin)
+    if [ "$team_name" = "ops-direct-invoke" ]; then
+        run_check "[$team_name] verify_environment.sh exists" test -f "$team_dir/workflows/scripts/verify_environment.sh"
+        run_check "[$team_name] init_operator_project.sh exists" test -f "$team_dir/workflows/scripts/init_operator_project.sh"
+    fi
 done
 
 # =============================================================================
-# Check 4: ops/skills referenced by init.sh exist
+# Check 4: skills referenced by init.sh exist
 # =============================================================================
-print_section_header "Check: init.sh skill references exist in ops/"
+print_section_header "Check: init.sh skill references exist"
 
 for team_dir in "$TEAMS_DIR"/*; do
     [ -d "$team_dir" ] || continue
@@ -140,27 +142,30 @@ for team_dir in "$TEAMS_DIR"/*; do
 
     if [ -n "$included_skills" ]; then
         for skill in $included_skills; do
-            skill_dir="$SKILLS_DIR/ops/$skill"
-            if [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ]; then
+            ops_skill_dir="$SKILLS_DIR/ops/$skill"
+            model_skill_dir="$SKILLS_DIR/model/$skill"
+            local_skill_dir="$team_dir/$skill"
+            local_plugin_skill_dir="$team_dir/skills/$skill"
+            workflow_dir="$team_dir/workflow"
+
+            if [ -d "$ops_skill_dir" ] && [ -f "$ops_skill_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists in ops/"
                 PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -d "$model_skill_dir" ] && [ -f "$model_skill_dir/SKILL.md" ]; then
+                print_pass "[$team_name] skill '$skill' exists in model/"
+                PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -d "$local_skill_dir" ] && [ -f "$local_skill_dir/SKILL.md" ]; then
+                print_pass "[$team_name] skill '$skill' exists as local team skill"
+                PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -d "$local_plugin_skill_dir" ] && [ -f "$local_plugin_skill_dir/SKILL.md" ]; then
+                print_pass "[$team_name] skill '$skill' exists as plugin-local skill"
+                PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -d "$workflow_dir" ] && [ -f "$workflow_dir/SKILL.md" ]; then
+                print_pass "[$team_name] skill '$skill' exists as team workflow skill"
+                PASS_COUNT=$((PASS_COUNT + 1))
             else
-                # Fallback: check for team-local skill (e.g. workflow skill)
-                local_skill_dir="$team_dir/$skill"
-                if [ -d "$local_skill_dir" ] && [ -f "$local_skill_dir/SKILL.md" ]; then
-                    print_pass "[$team_name] skill '$skill' exists as local team skill"
-                    PASS_COUNT=$((PASS_COUNT + 1))
-                else
-                    # Some local skills live in a "workflow/" subdirectory with a different name
-                    workflow_dir="$team_dir/workflow"
-                    if [ -d "$workflow_dir" ] && [ -f "$workflow_dir/SKILL.md" ]; then
-                        print_pass "[$team_name] skill '$skill' exists as team workflow skill"
-                        PASS_COUNT=$((PASS_COUNT + 1))
-                    else
-                        print_fail "[$team_name] skill '$skill' NOT found in ops/ or as local skill"
-                        FAIL_COUNT=$((FAIL_COUNT + 1))
-                    fi
-                fi
+                print_fail "[$team_name] skill '$skill' NOT found in shared or local skill roots"
+                FAIL_COUNT=$((FAIL_COUNT + 1))
             fi
         done
     else

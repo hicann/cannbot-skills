@@ -61,7 +61,7 @@ infer.py 内 `model_generate(warm_up=True)` 做预热，`model_generate()` 正�
 框架 `launch` 函数将日志输出到 `${RES_PATH}/log_0.log`（RES_PATH 由框架自动创建，格式为 `res/{date}/{model_name}/`）。
 
 ```bash
-python3 .claude/skills/model-infer-migrator/scripts/collect_baseline.py \
+python3 scripts/collect_baseline.py \
     --log-file {RES_PATH}/log_0.log \
     --output {output_dir}/{model_name}/baseline/baseline_metadata.json \
     --yaml-file {yaml_path}
