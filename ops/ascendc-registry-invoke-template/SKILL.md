@@ -28,6 +28,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
 | atvoss 算子开发（DAV_3510） | `references/atvoss_add_example/` |
+| 多芯片开发 | `references/npu-arch-adapt.md` |
 
 #### ACLNN 接口开发指南
 
@@ -138,6 +139,14 @@ ST 测试开发指南，包含：
 - CPU Golden 实现
 - 精度比对函数
 - 开发流程与完成标准
+
+### references/npu-arch-adapt.md
+
+多芯片开发指南，原则先行 + 适配清单对照：
+- 核心原则（同架构复用、构建系统与代码的分工、适配范围）
+- 适配清单（_def.cpp、CMakeLists、build.sh 等）
+- 编译配置两种模式（列表声明 / 条件分支）
+- 常见陷阱与预防
 
 ## 快速参考
 
