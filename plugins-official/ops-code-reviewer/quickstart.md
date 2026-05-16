@@ -50,6 +50,7 @@ cd cannbot-skills/plugins-official/ops-code-reviewer
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
 bash init.sh global claude      # Claude Code 用户
+bash init.sh global trae        # Trae 用户
 bash init.sh global cursor      # Cursor 用户
 ```
 
@@ -57,11 +58,11 @@ bash init.sh global cursor      # Cursor 用户
 
 init.sh 脚本会完成以下操作：
 
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 |
-|------|----------------|---------------|---------------|-------------|------------|
-| Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` |
-| Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` |
-| 配置文件 | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` |
+| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 | Trae 全局 |
+|------|----------------|---------------|---------------|-------------|------------|----------|
+| Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` | `~/.trae/skills/ascendc-code-review/` |
+| Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` | `~/.trae/agents/ascendc-ops-reviewer.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` | `~/.trae/AGENTS.md` |
 
 #### Cursor 安装路径
 
@@ -120,6 +121,17 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 ├── agents/                        # 子代理
 │   └── ascendc-ops-reviewer.md
 ├── CLAUDE.md                      # Team 配置
+└── cannbot-manifest.json          # 安装清单
+```
+
+**全局安装（Trae）**：
+```
+~/.trae/
+├── skills/                        # 技能模块
+│   └── ascendc-code-review/       # 代码检视技能
+├── agents/                        # 子代理
+│   └── ascendc-ops-reviewer.md
+├── AGENTS.md                      # Team 配置
 └── cannbot-manifest.json          # 安装清单
 ```
 

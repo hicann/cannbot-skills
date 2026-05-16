@@ -15,6 +15,7 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
+- **2026-05-16** — 新增支持 Trae 全局安装，所有官方插件均支持 `global` 和 `project` 两种安装级别。
 - **2026-05-11** — 新增支持 Cursor IDE 安装。
 - **2026-05-07** — 新增kernel直调工程接入ACLNN/GEIR接口skill（ascendc-direct-invoke-to-registry-invoke），支持kernel直调形式改造成自定义算子工程。
 - **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。

@@ -50,15 +50,14 @@ bash init.sh global opencode    # 全局级
 
 ### Trae
 
-仅支持项目级安装。
-
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/ops-direct-invoke
-bash init.sh project trae
+bash init.sh project trae       # 项目级
+bash init.sh global trae        # 全局级
 ```
 
-安装后在项目根目录生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
+安装后在项目根目录（或用户目录）生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
 
 ### Cursor
 

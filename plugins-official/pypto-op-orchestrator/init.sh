@@ -57,7 +57,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", or "cursor"
+  tool         - Target tool: "opencode" (default), "claude", "trae", or "cursor"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -68,18 +68,22 @@ Examples:
   init.sh project opencode             # Project-level, OpenCode
   init.sh global claude                # Global-level, Claude Code
   init.sh project claude               # Project-level, Claude Code
+  init.sh project trae                 # Project-level, Trae
   init.sh project cursor               # Project-level, Cursor
   init.sh project opencode /path/to/proj  # Project-level, OpenCode, custom path
+  init.sh project trae /path/to/proj      # Project-level, Trae, custom path
   init.sh project cursor /path/to/proj    # Project-level, Cursor, custom path
 
 Installation paths (CANNBot brand):
   OpenCode: .opencode/{skills,agents}/     + AGENTS.md in project root
   Claude:   .claude/{skills,agents}/ + CLAUDE.md in project root
+  Trae:     .trae/{skills,agents}/     + AGENTS.md in project root
   Cursor:   .cursor/{skills,agents}/   + AGENTS.md in project root
 
 After installation, launch directly:
   OpenCode: opencode
   Claude:   claude
+  Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
 EOF
 }
@@ -98,7 +102,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|cursor)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor)   TOOL="$arg" ;;
     esac
 done
 
@@ -106,7 +110,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|cursor) ;;
+        --help|global|project|opencode|claude|trae|cursor) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -115,6 +119,8 @@ fi
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
+    elif [ "$TOOL" = "trae" ]; then
+        CONFIG_ROOT="$HOME/.trae"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
     else
@@ -132,6 +138,8 @@ else
 
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
+    elif [ "$TOOL" = "trae" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     else
@@ -313,7 +321,7 @@ if [ "$TOOL" = "opencode" ]; then
     step1_summary="${step1_summary}agents(${agent_count})"
     ok "Linked: $step1_summary"
 else
-    # Claude/Cursor: create directories (per-item symlinks handled in Step 3)
+    # Claude/Trae/Cursor: create directories (per-item symlinks handled in Step 3)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
     ok "Prepared: skills/, agents/, rules/"
 fi
@@ -420,7 +428,7 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: skills/ agents already at auto-scan paths, no extra discovery needed
     ok "Auto-scan: skills/, agents/"
 else
-    # Claude/Cursor: create per-skill discovery symlinks (with filter, from shared ops)
+    # Claude/Trae/Cursor: create per-skill discovery symlinks (with filter, from shared ops)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     # Pre-clean existing skills (only whitelist items)
@@ -453,7 +461,7 @@ else
 
     ok "Skills: $link_count discovery symlinks"
 
-    # Claude/Cursor: also create agent discovery symlinks (from local agents/)
+    # Claude/Trae/Cursor: also create agent discovery symlinks (from local agents/)
     AGENT_DISCOVERY="$CONFIG_ROOT/agents"
 
     # Pre-clean existing agents (only whitelist items)
@@ -624,6 +632,9 @@ echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 softmax 算子，支持 float16 数据类型，shape 主要是 [1,128]、[4,2048]、[32,4096]${NC}"
+elif [ "$TOOL" = "trae" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 softmax 算子，支持 float16 数据类型，shape 主要是 [1,128]、[4,2048]、[32,4096]${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"

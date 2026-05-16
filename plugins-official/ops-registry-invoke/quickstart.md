@@ -40,6 +40,17 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
+### Trae
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/ops-registry-invoke
+bash init.sh project trae       # 项目级
+bash init.sh global trae        # 全局级
+```
+
+安装后在项目根目录（或用户目录）生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
+
 ### Cursor
 
 ```bash
@@ -76,6 +87,11 @@ ls .
 opencode agent list
 # 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-reviewer / ascendc-ops-tester
 
+# Trae
+ls .trae/
+# 应看到 skills/ agents/ cannbot-manifest.json
+# AGENTS.md 位于项目根目录
+
 # Cursor
 ls .cursor/
 # 应看到 skills/ agents/ cannbot-manifest.json
@@ -94,6 +110,8 @@ claude
 opencode
 ```
 
+> **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+>
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
 ### 开发算子示例
