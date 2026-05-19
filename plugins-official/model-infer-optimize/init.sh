@@ -23,6 +23,20 @@ warn() { echo -e "  ${YELLOW}⚠${NC}${DIM} $*${NC}"; }
 err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
+# Detect TRAE variant by scanning global config directories.
+# Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
+detect_trae_variant() {
+    if [ -d "$HOME/.trae-cn" ]; then
+        TRAE_VARIANT="ide"
+    elif [ -d "$HOME/.marscode" ]; then
+        TRAE_VARIANT="plugin"
+    elif [ -d "$HOME/.traecli" ]; then
+        TRAE_VARIANT="cli"
+    else
+        TRAE_VARIANT="unknown"
+    fi
+}
+
 BRAND="cannbot"
 VERSION="1.0.0"
 
@@ -101,7 +115,12 @@ else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then
-        CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
+        resolve_trae_config_root "$HOME"
+        if [ "$TRAE_VARIANT" = "plugin" ]; then
+            CONFIG_ROOT="$CONFIG_ROOT_BASE/.marscode"
+        else
+            CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
+        fi
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     else
@@ -288,6 +307,26 @@ echo "  Tool:      $TOOL"
 echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo ""
+
+if [ "$TOOL" = "trae" ]; then
+    case "$TRAE_VARIANT" in
+        ide)
+            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE IDE (.trae-cn / .trae)${NC}"
+            ;;
+        plugin)
+            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE Plugin (.marscode)${NC}"
+            ;;
+        cli)
+            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE CLI (.traecli)${NC}"
+            ;;
+        unknown)
+            echo -e "  ${YELLOW}⚠${NC}${DIM} TRAE variant not detected; defaulting to IDE path${NC}"
+            echo -e "  ${YELLOW}⚠${NC}${DIM} If you use TRAE Plugin, ensure ~/.marscode exists before re-running${NC}"
+            echo -e "  ${YELLOW}⚠${NC}${DIM} If you use TRAE CLI, ensure ~/.traecli exists before re-running${NC}"
+            ;;
+    esac
+    echo ""
+fi
 
 step "[1/5] Installing skills and agents..."
 mkdir -p "$CANNBOT_DIR"

@@ -81,7 +81,7 @@ cleanup_fake_repos() {
 # Remove artifacts created by init.sh inside the team directory (or given dir)
 cleanup_team_artifacts() {
     local dir="${1:-$TEAM_DIR}"
-    rm -rf "$dir/.opencode" "$dir/.claude"
+    rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli"
 }
 
 get_expected_skill_count() {
@@ -718,6 +718,171 @@ scenario_global_claude() {
 }
 
 # =============================================================================
+# Scenario 5: Project + Trae IDE (auto-detect .trae)
+# =============================================================================
+scenario_project_trae_ide() {
+    print_section_header "Scenario: project + trae (IDE path)"
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    # Pre-create ~/.trae to simulate TRAE IDE environment
+    mkdir -p "$tmp_home/.trae"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_pwd/.trae"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .trae/ (IDE path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".trae/ directory not found after IDE-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE IDE"; then
+        print_pass "Output contains TRAE IDE detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE IDE detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 6: Project + Trae Plugin (auto-detect .marscode)
+# =============================================================================
+scenario_project_trae_plugin() {
+    print_section_header "Scenario: project + trae (Plugin path)"
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    # Pre-create ~/.marscode (but NOT ~/.trae) to simulate TRAE Plugin environment
+    mkdir -p "$tmp_home/.marscode"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_pwd/.marscode"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .marscode/ (Plugin path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".marscode/ directory not found after Plugin-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE Plugin"; then
+        print_pass "Output contains TRAE Plugin detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE Plugin detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 7: Project + Trae CLI (auto-detect .traecli)
+# =============================================================================
+scenario_project_trae_cli() {
+    print_section_header "Scenario: project + trae (CLI path)"
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    # Pre-create ~/.traecli to simulate TRAE CLI environment
+    mkdir -p "$tmp_home/.traecli"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_pwd/.traecli"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .traecli/ (CLI path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".traecli/ directory not found after CLI-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE CLI"; then
+        print_pass "Output contains TRAE CLI detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE CLI detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 main() {
@@ -778,6 +943,13 @@ main() {
         scenario_global_opencode
         scenario_project_claude
         scenario_global_claude
+
+        # model-infer-optimize does not support global trae, skip it for trae scenarios
+        if [ "$TEAM" != "model-infer-optimize" ]; then
+            scenario_project_trae_ide
+            scenario_project_trae_plugin
+            scenario_project_trae_cli
+        fi
 
         # Final cleanup per team
         cleanup_team_artifacts

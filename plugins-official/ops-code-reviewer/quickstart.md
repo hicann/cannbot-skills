@@ -60,9 +60,9 @@ init.sh 脚本会完成以下操作：
 
 | 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 | Trae 全局 |
 |------|----------------|---------------|---------------|-------------|------------|----------|
-| Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` | `~/.trae/skills/ascendc-code-review/` |
-| Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` | `~/.trae/agents/ascendc-ops-reviewer.md` |
-| 配置文件 | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` | `~/.trae/AGENTS.md` |
+| Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` / `.marscode/skills/ascendc-code-review/` / `.traecli/skills/ascendc-code-review/` | `~/.trae-cn/skills/ascendc-code-review/` / `~/.marscode/skills/ascendc-code-review/` / `~/.traecli/skills/ascendc-code-review/` |
+| Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` / `.marscode/agents/ascendc-ops-reviewer.md` / `.traecli/agents/ascendc-ops-reviewer.md` | `~/.trae-cn/agents/ascendc-ops-reviewer.md` / `~/.marscode/agents/ascendc-ops-reviewer.md` / `~/.traecli/agents/ascendc-ops-reviewer.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` | `~/.trae-cn/AGENTS.md` / `~/.marscode/AGENTS.md` / `~/.traecli/AGENTS.md` |
 
 #### Cursor 安装路径
 
@@ -126,7 +126,9 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 
 **全局安装（Trae）**：
 ```
-~/.trae/
+~/.trae-cn/      # TRAE IDE 全局路径
+~/.marscode/     # TRAE Plugin 路径（自动检测）
+~/.traecli/      # TRAE CLI 路径（自动检测）
 ├── skills/                        # 技能模块
 │   └── ascendc-code-review/       # 代码检视技能
 ├── agents/                        # 子代理
@@ -139,7 +141,9 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 ```
 cannbot-skills/plugins-official/ops-code-reviewer/
 ├── AGENTS.md                      # Team 配置
-├── .trae/
+├── .trae/          # TRAE IDE 项目路径
+├── .marscode/      # TRAE Plugin 路径（自动检测）
+├── .traecli/       # TRAE CLI 路径（自动检测）
 │   ├── skills/                    # 技能模块
 │   │   └── ascendc-code-review/   # 代码检视技能
 │   ├── agents/                    # 子代理
@@ -173,7 +177,7 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 opencode   # OpenCode 用户
 claude     # Claude Code 用户
 ```
-> **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 

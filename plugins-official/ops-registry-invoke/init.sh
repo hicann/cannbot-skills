@@ -29,6 +29,20 @@ err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
+# Detect TRAE variant by scanning global config directories.
+# Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
+detect_trae_variant() {
+    if [ -d "$HOME/.trae-cn" ]; then
+        TRAE_VARIANT="ide"
+    elif [ -d "$HOME/.marscode" ]; then
+        TRAE_VARIANT="plugin"
+    elif [ -d "$HOME/.traecli" ]; then
+        TRAE_VARIANT="cli"
+    else
+        TRAE_VARIANT="unknown"
+    fi
+}
+
 BRAND="cannbot"
 VERSION="1.0.0"
 
@@ -89,8 +103,10 @@ Examples:
 Installation paths:
   OpenCode: .opencode/{skills,agents}/     + AGENTS.md in project root
   Claude:   .claude/{skills,agents}/ + CLAUDE.md in project root
-  Trae:     .trae/{skills,agents}/     + AGENTS.md in project root
-  Cursor:   .cursor/{skills,agents}/   + AGENTS.md in project root
+  Trae IDE:     .trae/{skills,agents}/       + AGENTS.md in project root
+  Trae Plugin:  .marscode/{skills,agents}/   + AGENTS.md in project root
+  Trae CLI:     .traecli/{skills,agents}/    + AGENTS.md in project root
+  Cursor:       .cursor/{skills,agents}/     + AGENTS.md in project root
 
 After installation, launch directly:
   OpenCode: opencode
@@ -127,7 +143,12 @@ if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
     elif [ "$TOOL" = "trae" ]; then
-        CONFIG_ROOT="$HOME/.trae"
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$HOME/.marscode" ;;
+            cli)    CONFIG_ROOT="$HOME/.traecli" ;;
+            *)      CONFIG_ROOT="$HOME/.trae-cn" ;;
+        esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
     else
@@ -146,7 +167,12 @@ else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then
-        CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$CONFIG_ROOT_BASE/.marscode" ;;
+            cli)    CONFIG_ROOT="$CONFIG_ROOT_BASE/.traecli" ;;
+            *)      CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae" ;;
+        esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     else
@@ -276,6 +302,26 @@ echo "  Tool:      $TOOL"
 echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo ""
+
+if [ "$TOOL" = "trae" ]; then
+    case "$TRAE_VARIANT" in
+        ide)
+            info "Detected: TRAE IDE (.trae-cn / .trae)"
+            ;;
+        plugin)
+            info "Detected: TRAE Plugin (.marscode)"
+            ;;
+        cli)
+            info "Detected: TRAE CLI (.traecli)"
+            ;;
+        unknown)
+            warn "TRAE variant not detected; defaulting to IDE path"
+            warn "If you use TRAE Plugin, ensure ~/.marscode exists before re-running"
+            warn "If you use TRAE CLI, ensure ~/.traecli exists before re-running"
+            ;;
+    esac
+    echo ""
+fi
 
 # Resolve dependencies
 step "[1/7] Resolving team dependencies..."

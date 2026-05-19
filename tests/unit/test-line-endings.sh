@@ -41,6 +41,8 @@ EXCLUDE_DIRS=(
     ".opencode"
     ".claude"
     ".trae"
+    ".marscode"
+    ".traecli"
     ".cursor"
 )
 
@@ -97,6 +99,8 @@ done < <(find "$SKILLS_DIR" \( \
     -name ".opencode" -o \
     -name ".claude" -o \
     -name ".trae" -o \
+    -name ".marscode" -o \
+    -name ".traecli" -o \
     -name ".cursor" \
 \) -prune -o -type f -print 2>/dev/null)
 

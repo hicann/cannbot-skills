@@ -1,6 +1,8 @@
 .opencode
 .claude
 .trae
+.marscode
+.traecli
 .cursor
 
 asc-devkit

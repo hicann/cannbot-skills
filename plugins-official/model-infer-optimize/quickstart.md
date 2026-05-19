@@ -65,7 +65,7 @@ cd cannbot-skills/plugins-official/model-infer-optimize
 bash init.sh project trae
 ```
 
-安装后在项目根目录生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
+安装后自动检测 TRAE 环境，生成 `.trae/`（TRAE IDE）、`.marscode/`（TRAE Plugin）或 `.traecli/`（TRAE CLI）目录，结构与 Claude/OpenCode 基本一致。
 
 ### Cursor
 
@@ -90,7 +90,9 @@ opencode agent list
 # 应看到 model-infer-analyzer / model-infer-implementer / model-infer-reviewer
 
 # Trae
-ls .trae/
+ls .trae/      # TRAE IDE
+ls .marscode/  # TRAE Plugin（init.sh 自动检测）
+ls .traecli/   # TRAE CLI（init.sh 自动检测）
 # 应看到 skills/ agents/ workflows/ AGENTS.md cannbot-manifest.json
 
 # Cursor
@@ -110,7 +112,7 @@ claude
 opencode
 ```
 
-> **Trae 用户**：Trae 通过 IDE 启动，`.trae/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
