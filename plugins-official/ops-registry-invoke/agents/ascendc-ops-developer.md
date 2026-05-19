@@ -11,6 +11,7 @@ skills:
   - ascendc-performance-best-practices
   - ops-profiling
   - ascendc-registry-invoke-template
+  - ascendc-regbase-best-practice
 permission:
   external_directory: allow
 ---
@@ -61,6 +62,7 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
    - 策略完善：多 TilingKey 实现（使用模板编程 + `ASCENDC_TPL_SEL_PARAM`，**禁止** `TILING_KEY_IS` 宏）
    - 规格完整：全 dtype、边界处理、广播支持
    - 图模式适配：REG_OP 定义，输入输出规格声明
+   - **RegBase 路线**：若设计方案明确选择 RegBase 路线（`DAV_3510` + vector 类），参考 `/ascendc-regbase-best-practice` 获取 API 约束、实现结构和真实参考算子；禁止把设计伪代码直接当作可编译实现，必须回到真实工程模板和 API 签名。
 
 3. **编译验证** - 确保编译通过、Kernel 二进制生成
 

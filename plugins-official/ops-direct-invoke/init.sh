@@ -30,7 +30,7 @@ VERSION="1.0.0"
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review"
+INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ascendc-regbase-best-practice ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-kernel-*"
 

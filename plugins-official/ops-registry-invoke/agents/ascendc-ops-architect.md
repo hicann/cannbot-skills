@@ -11,6 +11,7 @@ skills:
   - ascendc-api-best-practices
   - ascendc-docs-search
   - ops-precision-standard
+  - ascendc-regbase-best-practice
 permission:
   external_directory: allow
 ---
@@ -311,6 +312,20 @@ aclnnStatus aclnnXxx(
 ---
 
 > 框架选择结果**必须**记录到设计文档中
+
+### 路线决策（RegBase vs SIMD/MemBase）
+
+在进入具体设计前，先完成技术路线决策，并在 DESIGN.md 中记录选择理由：
+
+1. 读取需求文档中的芯片号和目标架构（DAV_* 编译宏），确认目标架构约束。
+2. 判断算子类型和主计算形态：Reduction / Elementwise / Broadcast / Conversion / MatMul / 融合链路 / 其他。
+3. 默认加载 `ascendc-tiling-design`，优先复用通用 tiling、Buffer 规划和数据流方法论。
+4. 按架构优先、算子类型其次做路线决策；RegBase 作为 `DAV_3510` 的新架构能力分支：
+   - 目标架构为 `DAV_3510` 且算子类型为 vector 类：默认走 RegBase 路线，并加载 `/ascendc-regbase-best-practice` 辅助判断。
+   - 目标架构不是 `DAV_3510`：默认走通用 SIMD/MemBase 路线。
+   - 目标架构为 `DAV_3510` 但算子类型不是 vector 类：默认走通用 SIMD/MemBase 路线。
+
+> **注意**：技术路线未决时，由 Architect 完成 SIMD/MemBase 与 RegBase 的方案决策；不要把 `ascendc-regbase-best-practice` 当成默认算子开发路径的通用替代品。
 
 ### 调研准备
 

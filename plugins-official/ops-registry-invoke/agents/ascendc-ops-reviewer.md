@@ -6,6 +6,7 @@ permission:
     external_directory: allow
 skills:
     - ascendc-code-review
+    - ascendc-regbase-best-practice
 ---
 
 # Ascend C 算子代码检视 Agent
@@ -125,6 +126,19 @@ skills:
 **输出**：条款清单 + 每条款完整内容（已在上下文中，供阶段6直接使用）
 
 ---
+
+### 阶段3.5：RegBase 路线专项检查（条件触发）
+
+**触发条件**：DESIGN.md 或代码中明确选择 RegBase 路线（出现 `RegTensor` / `MaskReg` / `asc_vf_call` / `__simd_vf__` 等信号，或设计文档标注目标架构 `DAV_3510` + vector 类）。
+
+**若触发，加载 `/ascendc-regbase-best-practice` 并增加以下检查**：
+1. 技术路线是否与 DESIGN.md 的方案决策一致，是否把 RegBase 与 MemBase/SIMD 路线混用。
+2. API 和调用结构是否来自 RegBase 文档或已验证参考实现；引用 API 前必须检查 API 白名单、API reference 或官方文档，不要凭函数名猜测。
+3. 寄存器级计算边界、mask/tail 处理和数据搬运边界是否清晰。
+4. 代码实现是否与已选 RegBase 参考实现的约束一致，不能只照搬设计伪代码；写代码时必须回到真实工程模板和 API 签名。
+5. 架构判断必须显式说明；如果某条经验来自兼容路径而不是主路径 `DAV_3510 / RegBase`，需要说清楚。
+
+**输出**：RegBase 专项检查结论（通过 / 发现问题列表），合并到后续检视报告中。
 
 ### 阶段4：确定检视范围
 
