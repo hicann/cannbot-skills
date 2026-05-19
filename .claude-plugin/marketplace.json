@@ -10,7 +10,7 @@
       "description": "Ascend C Kernel 直调算子开发 Skills（40+ 个）。API 检索、Tiling 设计、精度调试、性能采集、环境检查、代码模板等。",
       "source": "./ops",
       "strict": false,
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": {
         "name": "CANNBot"
       },
@@ -67,7 +67,7 @@
       "description": "Ascend C 代码审查 Skills（2 个）。代码审查规范和 API 文档检索。",
       "source": "./ops",
       "strict": false,
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": {
         "name": "CANNBot"
       },
@@ -197,7 +197,7 @@
       "name": "ops-code-reviewer",
       "source": "./plugins-official/ops-code-reviewer",
       "description": "Ascend C 算子代码审查 Team。含独立审查 Agent，支持 PR diff 审查和代码质量评估。",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "CANNBot"
       },

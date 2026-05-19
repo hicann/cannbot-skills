@@ -1,7 +1,7 @@
 {
   "name": "ops-code-reviewer",
   "description": "Ascend C 算子代码审查 Team。含独立审查 Agent，支持 PR diff 审查和代码质量评估。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "CANNBot"
   },
@@ -12,6 +12,7 @@
     "ops-code-reviewer-skills"
   ],
   "agents": [
-    "./agents/ascendc-ops-reviewer.md"
+    "./agents/ascendc-ops-reviewer.md",
+    "./agents/ascendc-code-summarizer.md"
   ]
 }

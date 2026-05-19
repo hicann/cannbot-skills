@@ -9,6 +9,7 @@
 # ----------------------------------------------------------------------------------------------------------
 
 set -e
+shopt -s extglob
 
 # --- Color & output helpers ---
 if [ -t 1 ]; then
@@ -40,14 +41,14 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.0.0"
+VERSION="1.0.2"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
 INCLUDED_SKILLS="ascendc-code-review ascendc-docs-search ascendc-task-focus ascendc-api-best-practices"
 # Agent whitelist (shell pattern) - uses local agents/
-INCLUDED_AGENT_PATTERN="ascendc-ops-reviewer"
+INCLUDED_AGENT_PATTERN="@(ascendc-ops-reviewer|ascendc-code-summarizer)"
 
 show_banner() {
   echo ""
