@@ -1,5 +1,10 @@
 ## 🔥 更新日志
 ### 【2026-05-19】
+#### 新特性 New Features
+- 新增支持 Triton 算子生成，适用于通过 Triton 开发高性能 Ascend NPU 算子。
+- 采用 6 阶段工作流驱动，覆盖从任务构建到性能优化的完整生成流程，支持迭代修复与自动优化。
+
+### 【2026-05-19】
 #### 特性增强 Feature Enhancement
 - 【环境检查】check_env.sh 新增 CANN 版本自动检测（从 version.info 读取版本号与运行时依赖基线），新增「CANN 版本兼容性」文档章节，补充版本信息来源、官方配套关系查询和常见版本问题 FAQ。
 - 【快速入门】ops-direct-invoke / ops-registry-invoke 前置条件升级至 CANN Toolkit ≥ 9.0.0，ops-direct-invoke 补充芯片支持（Atlas A2/A3、910B/950PR）和 CLI 工具清单。

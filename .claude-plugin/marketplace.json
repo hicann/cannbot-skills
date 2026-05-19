@@ -264,6 +264,40 @@
       "dependencies": [
         "tilelang-op-orchestrator-skills"
       ]
+    },
+    {
+      "name": "triton-op-generator-skills",
+      "description": "Triton-Ascend 算子代码生成与优化 Skills（6 个）。任务提取、算法设计、代码生成、功能验证、性能优化，以及 NPU 架构参考。",
+      "source": "./ops",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["triton", "ascend", "skills", "operator", "generator"],
+      "category": "skills",
+      "skills": [
+        "./triton-task-extractor",
+        "./triton-op-designer",
+        "./triton-op-coding",
+        "./triton-op-verifier",
+        "./triton-latency-optimizer",
+        "./npu-arch"
+      ]
+    },
+    {
+      "name": "triton-op-generator",
+      "source": "./plugins-official/triton-op-generator",
+      "description": "Triton-Ascend 算子代码生成与优化 Team。采用直接执行模式（CLAUDE.md/AGENTS.md），含 6 个专业 Skill（含 NPU 架构参考 npu-arch），支持在当前会话实时显示所有执行阶段。",
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["triton", "ascend", "operator", "generator", "npu"],
+      "category": "development",
+      "dependencies": [
+        "triton-op-generator-skills"
+      ]
     }
   ]
 }

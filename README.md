@@ -15,6 +15,7 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
+- **2026-05-19** — 新增支持 Triton 算子生成，适用于通过 Triton 开发高性能 Ascend NPU 算子。
 - **2026-05-16** — 新增支持 Trae 全局安装，所有官方插件均支持 `global` 和 `project` 两种安装级别。
 - **2026-05-16** — 【模型推理】将 `model-infer-optimize` 从 `model/teams/` 迁移到 `plugins-official/` 主线结构，新增完整 plugin 结构。
 - **2026-05-15** — 【算子直调】将 RegBase 最佳实践指导集成到 `ops-direct-invoke` 工作流。
