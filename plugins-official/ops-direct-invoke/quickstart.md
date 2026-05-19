@@ -16,6 +16,12 @@ CANNBot 算子直调开发模式适用于**快速验证自定义算子**场景�
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Atlas A2/A3 系列、Ascend 910B/950PR 等芯片）
+- 已安装 opencode、Claude Code 等受支持的 AI 编码工具
+
 ### Claude Code
 
 **首选：Plugin Marketplace（一键安装）**

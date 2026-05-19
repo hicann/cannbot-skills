@@ -1,4 +1,9 @@
 ## 🔥 更新日志
+### 【2026-05-19】
+#### 特性增强 Feature Enhancement
+- 【环境检查】check_env.sh 新增 CANN 版本自动检测（从 version.info 读取版本号与运行时依赖基线），新增「CANN 版本兼容性」文档章节，补充版本信息来源、官方配套关系查询和常见版本问题 FAQ。
+- 【快速入门】ops-direct-invoke / ops-registry-invoke 前置条件升级至 CANN Toolkit ≥ 9.0.0，ops-direct-invoke 补充芯片支持（Atlas A2/A3、910B/950PR）和 CLI 工具清单。
+
 ### 【2026-05-16】
 #### 新特性 New Features
 - 【官方插件】全面适配 Trae 全局安装，`ops-code-reviewer`、`ops-direct-invoke`、`ops-registry-invoke`、`pypto-op-orchestrator` 4 个插件统一支持 `global trae` 和 `project trae` 两种级别。

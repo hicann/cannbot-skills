@@ -18,9 +18,9 @@ CANNBot 注册调用模式适用于**生产级自定义算子开发**场景，�
 
 ### 前置条件
 
-- 已安装 Ascend Toolkit（建议 ≥ 8.0.RC3）
+- 已安装 Ascend Toolkit（建议 ≥ 9.0.0）
 - 已配置 NPU 设备（支持 910B/910_93 等 Ascend 芯片）
-- 已安装 opencode 或 claude CLI 工具
+- 已安装 opencode、Claude Code 等受支持的 AI 编码工具
 
 ### Claude Code
 

@@ -52,13 +52,14 @@ bash scripts/check_env.sh
 | 检查项 | 说明 | 必需 |
 |--------|------|------|
 | ASCEND_HOME_PATH | CANN Toolkit 路径 | 是 |
+| CANN 版本 | 检测版本号及运行时依赖基线 | 建议确认 |
 | ASCEND_OPP_PATH | CANN Ops 路径 | 运行时必需 |
 | 自定义算子包 | op_api 库 | 运行自定义算子必需 |
 | CANN 工具 | msprof/cannsim | 可选 |
 
 > ⚠️ **注意**：官方环境变量为 `ASCEND_HOME_PATH`，不是 `ASCEND_HOME`。部分旧文档或示例代码可能使用 `ASCEND_HOME`，这是错误用法。
 
-详细环境配置见 [env_config_guide.md](references/env_config_guide.md)
+详细环境配置见 [env_config_guide.md](references/env_config_guide.md)，版本配套关系见其中「CANN 版本兼容性」章节
 
 ## 诊断脚本
 

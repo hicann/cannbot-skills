@@ -44,7 +44,7 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
