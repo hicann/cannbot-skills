@@ -5,7 +5,7 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理融合算子优化�
 
 # torch_npu 融合算子优化技能
 
-分析 PyTorch 模型代码中的计算模式，匹配 torch_npu 融合算子进行替换优化。基于项目内收录的 torch_npu 官方算子接口文档（`references/torch_npu_API/`）和仓库已有模型的融合算子使用经验，按模块逐一分析、匹配、替换、验证。
+分析 PyTorch 模型代码中的计算模式，匹配 torch_npu 融合算子进行替换优化。基于 torch_npu 本地 docstring 查询脚本（`scripts/torch_npu_query.py`）和仓库已有模型的融合算子使用经验，按模块逐一分析、匹配、替换、验证。
 
 ---
 
@@ -105,10 +105,22 @@ Attention 架构？
 
 ### 第三步：查阅算子接口文档，确认可用性与适配性
 
-对第二步命中的算子或未匹配到模式的模块，查阅 torch_npu 官方算子接口文档：
+对第二步命中的算子或未匹配到模式的模块，按以下优先级查阅 torch_npu 接口文档：
 
-- **算子总表**：`references/torch_npu_API/torch_npu_list.md`（本地索引）
-- **算子详情**：[op-plugin 在线文档](https://gitcode.com/Ascend/op-plugin/tree/7.3.0/docs/context/) — 参数说明、dtype/shape 约束、代码示例
+**优先：本地 docstring**
+
+torch_npu wheel 内置 `_op_plugin_docs.py`，含所有算子的完整中文文档。通过 `scripts/torch_npu_query.py` 查询：
+
+```bash
+# 单 API 详情
+python3 scripts/torch_npu_query.py show <api_name>
+
+# 反向搜索
+python3 scripts/torch_npu_query.py search "<keyword>"
+
+# 枚举所有算子名
+python3 scripts/torch_npu_query.py list [--prefix npu_]
+```
 
 **确认可用性**：
 
@@ -175,8 +187,7 @@ Attention 架构？
 
 | 主题 | 路径 |
 |------|------|
-| torch_npu 算子总表（本地索引） | [`references/torch_npu_API/torch_npu_list.md`](references/torch_npu_API/torch_npu_list.md) |
-| torch_npu 算子详情（在线） | [op-plugin docs](https://gitcode.com/Ascend/op-plugin/tree/7.3.0/docs/context/) |
+| **torch_npu API 文档查询脚本** | [`scripts/torch_npu_query.py`](scripts/torch_npu_query.py) |
 | Attention: GQA 参考链路 | [`references/module-attention-gqa.md`](references/module-attention-gqa.md) |
 | Attention: MLA Absorb 参考链路 | [`references/module-attention-mla-absorb.md`](references/module-attention-mla-absorb.md) |
 | Attention: MLA+Indexer 参考链路 | [`references/module-attention-mla-indexer.md`](references/module-attention-mla-indexer.md) |
