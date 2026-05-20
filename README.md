@@ -4,13 +4,13 @@
 
 ### 项目定位
 
-**CANNBot** 是面向 CANN 开发的用于提升开发效率的系列智能体，本仓库为其提供可复用的 Skills 模块，目前已覆盖 Ascend C / PyPTO / TileLang 算子开发流程和 NPU 模型推理端到端优化。
+**CANNBot** 是面向 CANN 开发的用于提升开发效率的系列智能体，本仓库为其提供可复用的 Skills 模块，目前已覆盖 Ascend C / PyPTO / TileLang / Triton 算子开发流程和 NPU 模型推理端到端优化。
 
 ### 目标用户
 
 - CANN 社区开发者
 - 昇腾 NPU 平台 AI 应用开发者
-- Ascend C / PyPTO / TileLang 算子开发者
+- Ascend C / PyPTO / TileLang / Triton 算子开发者
 - 使用昇腾 NPU 进行模型推理优化的开发者
 - 希望贡献 Skills / Agents 的社区贡献者
 
@@ -43,6 +43,7 @@ cd cannbot-skills
 | [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
 | [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
 | [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
+| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `cd plugins-official/triton-op-generator && bash install.sh project <claude\|opencode\|trae>` | 更多安装方式和使用参考 [quickstart](plugins-official/triton-op-generator/quickstart.md) |
 | [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
 
 ### 方式二：Plugin 安装
@@ -59,6 +60,7 @@ cd cannbot-skills
 | [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `/plugin install ops-direct-invoke@cannbot` |
 | [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | *暂不支持* |
 | [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `/plugin install pypto-op-orchestrator@cannbot` |
+| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `/plugin install triton-op-generator@cannbot` |
 | [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `/plugin install model-infer-optimize@cannbot` |
 
 3. 激活：`/reload-plugins`，然后新开会话 或 `/clear`
@@ -87,7 +89,8 @@ cannbot-skills/
 │   ├── ops-registry-invoke/
 │   ├── pypto-op-orchestrator/
 │   ├── torch-compile/
-│   └── model-infer-optimize/  # NPU 推理端到端优化流程
+│   ├── model-infer-optimize/  # NPU 推理端到端优化流程
+│   └── triton-op-generator/   # Triton 算子代码生成与优化
 ├── infra/                 # 基础设施维护 Skills
 └── tests/                 # 自动化测试框架
 ```
@@ -252,6 +255,16 @@ cannbot-skills/
 | **pypto-precision-compare** | 精度中间结果对比分析 |
 | **pypto-op-perf-tune** | 算子性能分析与自动调优 |
 
+### Triton 算子开发
+
+| Skill | 功能 |
+|-------|------|
+| **triton-task-extractor** | 从用户输入中提取算子，构建任务文件 |
+| **triton-op-designer** | 设计高质量算法，指导代码生成 |
+| **triton-op-coding** | 根据设计生成 Triton 内核代码 |
+| **triton-op-verifier** | 验证算子精度和性能测试 |
+| **triton-latency-optimizer** | 逐步优化 Triton 代码性能 |
+
 ### NPU 模型推理优化
 
 端到端优化流程由 `plugins-official/model-infer-optimize/workflows/optimize-workflow.md` 承载（plugin-local 普通 md 文档），由 primary agent 自动加载。下表列出 11 个可独立调用的原子 Skill：
@@ -300,6 +313,12 @@ cannbot-skills/
 | **pypto-op-analyst** | 需求分析与方案设计 |
 | **pypto-op-developer** | 算子代码实现与精度调试 |
 | **pypto-op-perf-tuner** | 性能分析与调优 |
+
+### Triton 算子开发
+
+| Agent | 功能 |
+|-------|------|
+| **triton-op-generator** | Triton 算子端到端生成与优化 |
 
 ### NPU 模型推理优化
 
