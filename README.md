@@ -88,6 +88,7 @@ cannbot-skills/
 │   ├── pypto-op-orchestrator/
 │   ├── torch-compile/
 │   └── model-infer-optimize/  # NPU 推理端到端优化流程
+├── infra/                 # 基础设施维护 Skills
 └── tests/                 # 自动化测试框架
 ```
 
@@ -268,6 +269,15 @@ cannbot-skills/
 | **model-infer-multi-stream** | 多流并行优化 |
 | **model-infer-prefetch** | 权重预取适配 |
 | **model-infer-superkernel** | SuperKernel 适配 |
+
+### GitCode 协作工具
+
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **gitcode-pr-handler** | 根据 GitCode PR 代码变更重新生成标题（约定式提交）与描述（沿用仓库 PR 模板）并写回 PR | [查看](docs/skills-usage.md#gitcode-pr-handler) |
+| **gitcode-issue-gen** | 根据 GitCode PR 代码变更生成关联 Issue（按变更类型自动选用模板），完成 PR ↔ Issue 双向关联，可选自助 Assign | [查看](docs/skills-usage.md#gitcode-issue-gen) |
+| **gitcode-issue-handler** | GitCode Issue 端到端处置，按内容自动选择 PR 代码变更路径或 Comment 答复路径 | [查看](docs/skills-usage.md#gitcode-issue-handler) |
+| **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | — |
 
 ## 🚀 Agents 智能代理
 

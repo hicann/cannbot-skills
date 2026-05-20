@@ -49,3 +49,82 @@
 **使用建议**：
 
 - 路径写**绝对路径**，让 skill 不必猜测源码位置。
+
+---
+
+## GitCode 协作工具
+
+> **前置条件**：所有 GitCode 协作 skill 都需要 `GITCODE_TOKEN` 环境变量（首次未设会在 Step 0 询问）。
+>
+> ```bash
+> export GITCODE_TOKEN=********************
+> ```
+>
+> 获取方式：登录 GitCode → 右上角头像 → **个人设置** → **访问令牌** → **新建访问令牌** → 勾选 `pull_requests`、`issues` 权限 → 生成并复制。
+
+### gitcode-pr-handler
+
+根据 GitCode PR 的代码变更，重新生成 PR 标题（约定式提交）与描述（沿用仓库 PR 模板），并通过 API 写回 PR。**只**处理 PR 标题与正文，不创建 Issue。
+
+**使用示例：**
+
+```
+/gitcode-pr-handler https://gitcode.com/cann/ops-math/pull/1668
+```
+
+仓库无 PR 模板时降级到默认描述格式；交互节奏为「环境预检 + 终局确认」，中间无打断。
+
+### gitcode-issue-gen
+
+根据 GitCode PR 的代码变更，按变更类型自动选用 Issue 模板（feature-request / bug-report / documentation 等），生成关联 Issue 并完成 PR ↔ Issue 双向关联，**可选**自助 Assign 给当前 token 用户。
+
+**使用示例：**
+
+```
+/gitcode-issue-gen https://gitcode.com/cann/ops-math/pull/1668
+```
+
+PR 描述中已识别到 `#issue_number` 时会询问"是否仍创建新 Issue"；Issue 创建成功后弹一次"是否 assign 给我"。
+
+> **如需同时更新 PR 文案 + 创建 Issue**，顺序调用两个 skill：
+>
+> ```
+> /gitcode-pr-handler   https://gitcode.com/cann/ops-math/pull/1668
+> /gitcode-issue-gen https://gitcode.com/cann/ops-math/pull/1668
+> ```
+
+### gitcode-issue-handler
+
+读取 Issue → **自动判断要不要改代码** → 分两条路径：
+
+- **PR 路径**：克隆 fork → 改代码 → 测试 → 提交 → 上游 PR（覆盖 bug 修复 / 功能增强 / 文档补全等任意代码变更场景）
+- **Comment 路径**：只读克隆主仓 → 分析 → 答复评论（覆盖答疑 / 设计澄清 / 用法说明等不需改代码场景）
+
+模式由 Step 1.5 决定，主要看 Issue 内容是否需要改代码；用户消息有"修复 / 提 PR"或"只回复 / 答疑 / 不改代码"会直接锁定。
+
+**使用示例（PR 路径，典型代码变更）：**
+
+```
+/gitcode-issue-handler
+issue_url=https://gitcode.com/cann/ops-math/issues/1511
+fork_url=https://gitcode.com/your-name/ops-math.git
+```
+
+PR 路径下仅给 Issue 链接时会弹窗询问「自动 fork / 手动粘贴 fork 链接 / 取消」。
+
+**使用示例（Comment 路径，典型答疑）：**
+
+```
+/gitcode-issue-handler
+帮我答复一下 https://gitcode.com/cann/ops-math/issues/456 这个咨询问题
+```
+
+Comment 路径全程只读，不 fork、不 commit、不开 PR；只克隆上游主仓做分析后发评论。
+
+**可选参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `issue_url` | GitCode Issue 链接（必填） |
+| `fork_url` | 你 fork 出来的仓库链接（仅 PR 路径需要；缺省时交互询问） |
+| `base_branch` | 上游目标分支（仅 PR 路径用），默认 `master` |
