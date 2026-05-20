@@ -51,7 +51,7 @@ skills:
 
 ### 原则 1：不要凭记忆猜 API
 
-- ✅ 第一步：查阅 [tilelang-api-best-practices](../../skills/tilelang-api-best-practices/SKILL.md)（API 速查表和详细文档）
+- ✅ 第一步：查阅 [tilelang-api-best-practices](../../ops-lab/tilelang/skills/tilelang-api-best-practices/SKILL.md)（API 速查表和详细文档）
 - ✅ 第二步：查阅 `examples/` 中的同类实现
 - ✅ 第三步：若文档未覆盖，查阅源码 `tilelang/language/ascend_tile.py` · `tilelang/language/ascend.py` · `testing/python/language/`
 - ❌ 禁止：凭直觉编造 API 调用、猜测参数签名
@@ -104,16 +104,16 @@ L0A / L0B（矩阵输入寄存器）→ L0C（矩阵输出寄存器）
 | 同步 | 自动 | 手动 `T.barrier_all/set_flag/wait_flag` |
 | pass_configs | 全部开启 | 全部关闭或不设 |
 
-详细对照、pass_configs 配置与编程模式指南：[tilelang-programming-model-guide](../../skills/tilelang-programming-model-guide/SKILL.md)
+详细对照、pass_configs 配置与编程模式指南：[tilelang-programming-model-guide](../../ops-lab/tilelang/skills/tilelang-programming-model-guide/SKILL.md)
 
 ## API 参考
 
 编写 kernel 时的 API 查阅入口：
 
-- **API 速查与最佳实践**：[tilelang-api-best-practices](../../skills/tilelang-api-best-practices/SKILL.md)
-  - [Kernel 定义、内存分配、数据搬运](../../skills/tilelang-api-best-practices/references/api-kernel-memory.md)
-  - [计算原语：GEMM、归约、Tile 扩展操作](../../skills/tilelang-api-best-practices/references/api-compute.md)
-  - [调度、同步与调试](../../skills/tilelang-api-best-practices/references/api-schedule-sync.md)
+- **API 速查与最佳实践**：[tilelang-api-best-practices](../../ops-lab/tilelang/skills/tilelang-api-best-practices/SKILL.md)
+  - [Kernel 定义、内存分配、数据搬运](../../ops-lab/tilelang/skills/tilelang-api-best-practices/references/api-kernel-memory.md)
+  - [计算原语：GEMM、归约、Tile 扩展操作](../../ops-lab/tilelang/skills/tilelang-api-best-practices/references/api-compute.md)
+  - [调度、同步与调试](../../ops-lab/tilelang/skills/tilelang-api-best-practices/references/api-schedule-sync.md)
 
 若上述文档未覆盖，查阅源码：`tilelang/language/ascend_tile.py` · `tilelang/language/ascend.py` · `testing/python/language/`
 
