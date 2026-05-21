@@ -155,15 +155,29 @@ opencode
 ```
 operators/add_custom/
 ├── CMakeLists.txt           # 编译配置
-├── build.sh                 # 编译脚本
 ├── run.sh                   # 运行脚本
 ├── op_kernel/
-│   └── add_custom.cpp       # Kernel 实现
-├── op_host/
 │   ├── add_custom_tiling.h  # Tiling 数据结构
-│   └── add_custom.cpp       # Host 端代码
-└── gen_data.py              # 测试数据生成脚本
+│   └── add_custom_kernel.asc # Kernel 实现
+├── op_host/
+│   ├── add_custom.asc       # Host 端代码
+│   └── data_utils.h
+├── op_extension/            # PyTorch 直调层（TORCH_LIBRARY 注册）
+├── scripts/
+│   └── test_torch.py        # PyTorch 通路验证
+└── docs/                    # 设计/计划/审查文档（工作流生成）
 ```
+
+### 开发完成后如何调用算子
+
+`op_extension/` 目录即为直调能力的载体——Step 3 开发阶段自动完成 TORCH_LIBRARY 注册，编译后生成 `lib{operator}_ops.so`，无需 aclnn 接口层即可在 Python 中以 `torch.ops.npu.{operator}()` 直接调用：
+
+```python
+torch.ops.load_library("build/lib{operator}_ops.so")
+output = torch.ops.npu.{operator}(input1, input2)
+```
+
+运行 `bash run.sh` 或 `python3 scripts/test_torch.py` 完成 PyTorch 通路验证。
 
 ## 三、可用技能
 
