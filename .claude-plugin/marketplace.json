@@ -38,6 +38,21 @@
       ]
     },
     {
+      "name": "aiss-tiling-solver",
+      "description": "AISS-TilingSolver：Ascend C 算子 Tiling 参数自动求解工具（MatMul / Vector）。下载安装、构造 JSON 输入、运行求解、结果解读与故障排查。",
+      "source": "./ops",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "AISS Group at HIT"
+      },
+      "keywords": ["tiling_solver", "MatMul", "Vector"],
+      "category": "skills",
+      "skills": [
+        "./aiss-tiling-solver"
+      ]
+    },
+    {
       "name": "pypto-op-orchestrator-skills",
       "description": "PyPTO 算子开发 Skills（8 个）。API 探索、Golden 生成、需求理解、算子设计与开发、性能调优、精度调试。",
       "source": "./ops",
