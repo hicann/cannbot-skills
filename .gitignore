@@ -8,3 +8,4 @@ __pycache__/
 tests/.version-state/
 tests/system/logs
 tests/system/results
+tests/system/sandboxes

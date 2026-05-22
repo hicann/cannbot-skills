@@ -18,13 +18,65 @@ from typing import Dict, Any, List, Optional
 import pytest
 
 from conftest import (
-    get_skill_path, get_skills_with_evals, load_evals_json, REPO_ROOT,
-    extract_review_json, get_opencode_text, strip_markdown_fence
+    get_skill_path, get_skills_with_evals, load_evals_md, REPO_ROOT,
+    extract_review_json, get_opencode_text, strip_markdown_fence,
+    FRAMEWORK_DIR, SANDBOX_DIR
 )
 from opencode_runner import OpencodeRunner
+from sandbox_manager import SandboxManager
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
+
+# file_based 模式下注入到用户 prompt 的执行要求
+FILE_BASED_HINT = """
+
+## 输出要求
+1. 完成任务后，列出所有创建/修改的文件路径清单（如 src/main.cpp）
+2. 简要说明每个文件的用途
+3. 不要输出完整的文件内容——评测系统会直接读取生成的文件
+"""
+
+
+def _collect_original_files(original_skill_dir: Path) -> set:
+    """收集原始 skill 中的文件相对路径集合，用于排除已有文件"""
+    original_files: set = set()
+    for entry in original_skill_dir.rglob("*"):
+        if entry.is_file():
+            try:
+                original_files.add(str(entry.relative_to(original_skill_dir)))
+            except ValueError:
+                pass
+    return original_files
+
+
+def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Path] = None) -> List[str]:
+    """收集沙箱中新增的生成文件列表（相对路径）
+
+    排除 logs/ 目录。如果提供 original_skill_dir，则跳过原始 skill 已有的文件，
+    从而将生成在 skill/ 子目录内的新文件也纳入。
+    """
+    original_files = _collect_original_files(original_skill_dir) if (
+        original_skill_dir and original_skill_dir.exists()) else set()
+
+    files = []
+    exclude_dirs = {"logs"}
+    for entry in sandbox_path.rglob("*"):
+        if not entry.is_file():
+            continue
+        if any(d in entry.parts for d in exclude_dirs):
+            continue
+
+        rel = str(entry.relative_to(sandbox_path))
+
+        parts = entry.relative_to(sandbox_path).parts
+        if len(parts) > 1 and parts[0] == "skill":
+            skill_rel = "/".join(parts[1:])
+            if skill_rel in original_files:
+                continue
+
+        files.append(rel)
+    return sorted(files)
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -43,6 +95,10 @@ class ValidationContext:
     eval_id: Optional[str] = None
     ai_text: str = ""
     truncate_len: int = 2000
+    # file_based 模式字段
+    eval_mode: str = "text"
+    sandbox_path: Optional[Path] = None
+    generated_files: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -52,6 +108,7 @@ class ExpectationContext:
     full_output: str
     ai_text: str
     skill_dir: Optional[Path] = None
+    sandbox_path: Optional[Path] = None
     eval_id: Optional[str] = None
     truncate_len: int = 2000
 
@@ -123,31 +180,54 @@ REVIEW_RUBRIC = """
 """
 
 
-def create_review_prompt(
-    original_prompt: str,
-    ai_response: str,
-    reasoning: str,
+@dataclass
+class ReviewPromptContext:
+    """封装 create_review_prompt 的评审参数"""
+    original_prompt: str
+    ai_response: str
+    reasoning: str
     expected_output: str
-) -> str:
+    eval_mode: str = "text"
+    file_list: Optional[List[str]] = None
+    sandbox_path: Optional[Path] = None
+
+
+def create_review_prompt(ctx: ReviewPromptContext) -> str:
     """构造评测 session 的完整 prompt（评分机制 + 动态数据）"""
-    return f"""你是一个技能测试评审员。请对以下 AI 对话进行评分和评审。
+    file_section = ""
+    if ctx.eval_mode == "file_based" and ctx.file_list:
+        file_paths = "\n".join(f"- {f}" for f in ctx.file_list)
+        file_section = f"""
+### 生成的文件清单（路径基于沙箱目录）
+{file_paths}
+
+## 评测流程
+1. 使用 Read 工具逐一读取以上文件清单中的每个文件（文件在沙箱目录中，直接使用相对路径读取即可）
+2. 根据文件实际内容，结合预期输出要点，进行评分
+3. 文件的代码质量、结构完整性、正确性和可读性都应作为评分依据
+"""
+    if ctx.eval_mode == "file_based" and ctx.file_list:
+        header = "你是一个技能测试评审员。请对以下 AI 对话和生成的文件进行评分和评审。"
+    else:
+        header = "你是一个技能测试评审员。请对以下 AI 对话进行评分和评审。"
+    return f"""{header}
 {REVIEW_RUBRIC}
 ## 待评审对话
 
 ### 用户原始问题
-{original_prompt}
+{ctx.original_prompt}
 
 ### AI 的思考过程与工具调用
-{reasoning}
+{ctx.reasoning}
 
 ### AI 的最终回复
-{ai_response}
+{ctx.ai_response}
 
 ### 预期回复应覆盖的要点
-{expected_output}
-
-请以 JSON 格式回复（只输出 JSON，不要其他内容）：
-{{"status": "pass", "score": 85, "reason": "覆盖度(40/40): 完整覆盖预期要点; 准确性(25/30): 命令正确; 质量(12/20): 回复简洁; Token(8/10): 无冗余"}}
+{ctx.expected_output}
+{file_section}
+请以 JSON 格式回复（只输出 JSON，不要其他内容）。重要：JSON 字符串值内如需使用双引号，必须用反斜杠转义（例如 \"示例\"），以免 JSON 解析失败。
+{{"status": "pass", "score": 85, "reason": "覆盖度(40/40): 完整覆盖预期要点; 准确性(25/30): ...; 质量(12/20): 回复简洁; Token(8/10): 无冗余"}}
 或
 {{"status": "fail", "score": 35, "reason": "覆盖度(10/40): 遗漏要点...; 准确性(10/30): ...; 质量(10/20): ...; Token(5/10): ..."}}"""
 
@@ -242,12 +322,43 @@ def _check_not_contains_pattern(
 
 
 def _check_file_exists(
-        skill_dir: Optional[Path], path: str, eval_id: Optional[str]) -> None:
-    """检查文件是否存在"""
-    if skill_dir is None:
-        raise ValueError("skill_dir is required for file_exists expectation")
-    file_path = skill_dir / path
-    assert file_path.exists(), f"Eval {eval_id}: expected file not found: {file_path}"
+        skill_dir: Optional[Path], path: str, eval_id: Optional[str],
+        sandbox_path: Optional[Path] = None) -> None:
+    """检查文件是否存在
+    搜索顺序：sandbox/<path> → sandbox/skill/<path> → skill_dir/<path>
+    """
+    candidates = []
+    if sandbox_path:
+        candidates.append(sandbox_path / path)
+        candidates.append(sandbox_path / "skill" / path)
+    if skill_dir:
+        candidates.append(skill_dir / path)
+    for fp in candidates:
+        if fp.exists():
+            return
+    raise AssertionError(
+        f"Eval {eval_id}: expected file not found: '{path}' "
+        f"(checked: {[str(c) for c in candidates]})"
+    )
+
+
+def _check_file_list(
+        sandbox_path: Optional[Path], pattern: str, eval_id: Optional[str]) -> None:
+    """检查沙箱中是否存在匹配 glob pattern 的文件
+    搜索顺序：sandbox → sandbox/skill/
+    """
+    if not sandbox_path:
+        raise ValueError("sandbox_path is required for file_list expectation")
+    candidates = [sandbox_path, sandbox_path / "skill"]
+    for base in candidates:
+        if base.exists():
+            matches = list(base.glob(pattern))
+            if matches:
+                return
+    raise AssertionError(
+        f"Eval {eval_id}: no files matching pattern '{pattern}' "
+        f"(checked sandbox and skill subdir)"
+    )
 
 
 def _validate_expectation(ctx: ExpectationContext) -> None:
@@ -256,7 +367,9 @@ def _validate_expectation(ctx: ExpectationContext) -> None:
     if exp_type == "contains":
         _check_contains_pattern(ctx.full_output, ctx.ai_text, ctx.exp.get("pattern", ""), ctx.eval_id, ctx.truncate_len)
     elif exp_type == "file_exists":
-        _check_file_exists(ctx.skill_dir, ctx.exp.get("path", ""), ctx.eval_id)
+        _check_file_exists(ctx.skill_dir, ctx.exp.get("path", ""), ctx.eval_id, ctx.sandbox_path)
+    elif exp_type == "file_list":
+        _check_file_list(ctx.sandbox_path, ctx.exp.get("pattern", ""), ctx.eval_id)
     elif exp_type == "not_contains":
         _check_not_contains_pattern(
             ctx.full_output, ctx.ai_text, ctx.exp.get("pattern", ""),
@@ -281,10 +394,52 @@ def validate_output(ctx: ValidationContext) -> None:
                 full_output=ctx.full_output,
                 ai_text=ctx.ai_text,
                 skill_dir=ctx.skill_dir,
+                sandbox_path=ctx.sandbox_path,
                 eval_id=ctx.eval_id,
                 truncate_len=ctx.truncate_len
             )
             _validate_expectation(exp_ctx)
+
+
+def _try_extract_review_result(text: str) -> Optional[Dict[str, Any]]:
+    """尝试从文本中提取评审结果，兼容 opencode 双编码 JSON"""
+    result = extract_review_json(text)
+    if result:
+        return result
+    unescaped = text.replace('\\"', '"')
+    if unescaped != text:
+        return extract_review_json(unescaped)
+    return None
+
+
+def _parse_review_from_export(export_data: dict) -> Dict[str, Any]:
+    """从导出的 review session 数据中解析评审结果"""
+    messages = export_data.get("messages", [])
+    for msg in reversed(messages):
+        for part in msg.get("parts", []):
+            if part.get("type") != "text":
+                continue
+            text = part.get("text", "")
+            if not text or not ("pass" in text.lower() or "fail" in text.lower()):
+                continue
+            result = _try_extract_review_result(text)
+            if result:
+                return result
+
+    all_text = ""
+    for msg in reversed(messages):
+        for part in msg.get("parts", []):
+            if part.get("type") != "text":
+                continue
+            t = part.get("text", "")
+            if t:
+                all_text = t + "\n" + all_text
+    if all_text:
+        result = extract_review_json(all_text)
+        if result:
+            return result
+
+    return {"status": "error", "reason": "无法从导出文件中解析判定结果"}
 
 
 def _validate_expected_output(ctx: ValidationContext) -> None:
@@ -295,12 +450,15 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
     logger.debug(reasoning[:2000] if reasoning else "(无思考过程)")
     logger.debug("--- END AI REASONING ---")
 
-    review_prompt = create_review_prompt(
+    review_prompt = create_review_prompt(ReviewPromptContext(
         original_prompt=ctx.original_prompt,
         ai_response=ctx.ai_text[:ctx.truncate_len],
         reasoning=reasoning[:ctx.truncate_len],
-        expected_output=ctx.expected_output
-    )
+        expected_output=ctx.expected_output,
+        eval_mode=ctx.eval_mode,
+        file_list=ctx.generated_files if ctx.eval_mode == "file_based" else None,
+        sandbox_path=ctx.sandbox_path if ctx.eval_mode == "file_based" else None,
+    ))
 
     logger.debug("--- REVIEW PROMPT ---")
     logger.debug(review_prompt)
@@ -312,28 +470,38 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
 
     assert not review_error, f"Eval {ctx.eval_id}: review session error - {review_error}"
 
-    ctx.opencode_runner.export_session_data(
-        output_file=str(ctx.opencode_runner.session_dir / f"{ctx.session_name}_review_ses.json")
-    )
+    export_file = str(ctx.opencode_runner.session_dir / f"{ctx.session_name}_review_ses.json")
+    export_result = ctx.opencode_runner.export_session_data(output_file=export_file)
 
-    result = parse_check_response(review_lines)
+    # 优先从导出数据解析（更稳定），流式行作为回退
+    review_data = export_result.get("data") if export_result.get("success") else None
+    if review_data:
+        result = _parse_review_from_export(review_data)
+    else:
+        result = {"status": "error", "reason": "export_session_data 失败"}
+
+    if result.get("status") == "error":
+        logger.info("[REVIEW] export parse failed, falling back to streaming parse")
+        result = parse_check_response(review_lines)
+
     logger.info("[REVIEW RESULT] %s", json.dumps(result, ensure_ascii=False))
 
     if not result.get("reason"):
         assert False, (
-            f"Eval {ctx.eval_id}: review result missing reason\n"
+            f"Eval {ctx.eval_id}: review result missing reason | "
             f"Review output: {json.dumps(result, ensure_ascii=False)}"
         )
 
     if result.get("status") != "pass":
         reason = result["reason"]
-        assert False, (
+        msg = (
             f"Eval {ctx.eval_id}: expected_output check failed\n"
             f"Reviewer reason: {reason}\n"
             f"--- AI Response (by execution session) ---\n"
             f"{ctx.ai_text[:ctx.truncate_len]}\n"
             f"--- End AI Response ---"
         )
+        assert False, msg
 
 
 def pytest_generate_tests(metafunc):
@@ -352,7 +520,7 @@ def pytest_generate_tests(metafunc):
         if skill_name and skill != skill_name:
             continue
 
-        evals_data = load_evals_json(skill)
+        evals_data = load_evals_md(skill)
         if not evals_data:
             continue
 
@@ -364,22 +532,13 @@ def pytest_generate_tests(metafunc):
 
             test_cases.append({
                 "skill_name": skill,
+                "eval_mode": eval_item.get("eval_mode", "text"),
                 "eval": eval_item,
-                "skill_dir": skill_dir
+                "skill_dir": skill_dir,
             })
             ids.append(f"{skill}::eval_{eval_item.get('id')}")
 
     metafunc.parametrize("eval_case", test_cases, ids=ids, scope="function")
-
-
-@pytest.fixture
-def opencode_runner():
-    runner = OpencodeRunner(
-        keep_session=False,
-        verbose=True,
-        workdir=str(REPO_ROOT)
-    )
-    yield runner
 
 
 def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
@@ -399,7 +558,7 @@ def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
 
 def _collect_exec_output(
         opencode_runner: OpencodeRunner,
-        prompt: str, skill_dir: Path, session_name: str
+        prompt: str, skill_ref: str, session_name: str
 ) -> tuple:
     """运行 exec session 并收集输出，返回 (full_output, error_output, session_file, success)"""
     output_lines = []
@@ -409,7 +568,7 @@ def _collect_exec_output(
 
     for chunk in opencode_runner.run_stream(
             prompt=prompt,
-            skill=str(skill_dir),
+            skill=skill_ref,
             session_name=session_name
     ):
         chunk_type = chunk.get("type")
@@ -435,10 +594,11 @@ def _collect_exec_output(
     return "\n".join(output_lines), error_output, session_file, success
 
 
-def test_eval_case(eval_case: Dict[str, Any], opencode_runner: OpencodeRunner):
+def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     skill_name = eval_case["skill_name"]
     eval_data = eval_case["eval"]
     skill_dir = eval_case["skill_dir"]
+    eval_mode = eval_case.get("eval_mode", "text")
 
     eval_id = eval_data.get("id")
     prompt = eval_data.get("prompt", "")
@@ -447,12 +607,29 @@ def test_eval_case(eval_case: Dict[str, Any], opencode_runner: OpencodeRunner):
 
     assert prompt, f"Eval {eval_id}: prompt is required"
 
+    # file_based 模式：注入提示，要求输出文件清单而非文件内容
+    if eval_mode == "file_based":
+        prompt = prompt.rstrip() + FILE_BASED_HINT
+
+    # 创建独立沙箱
+    sandbox_path = sandbox_manager.create_sandbox(skill_name, eval_id)
+    sandbox_manager.create_skill_link(sandbox_path, skill_dir)
+    logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
+
+    # 创建专用的 opencode_runner（工作目录设为沙箱路径，AI 输出文件隔离在沙箱中）
+    opencode_runner = OpencodeRunner(
+        keep_session=True,
+        verbose=True,
+        workdir=str(sandbox_path),
+        session_dir=str(logs_dir)
+    )
+
     _log_eval_case_header(skill_name, eval_id, prompt, expected_output)
 
     session_name = f"{skill_name}_case_{eval_id}"
 
     full_output, error_output, session_file, success = _collect_exec_output(
-        opencode_runner, prompt, skill_dir, session_name
+        opencode_runner, prompt, "skill", session_name
     )
 
     assert success, f"Eval {eval_id}: opencode run failed - {error_output}"
@@ -466,6 +643,9 @@ def test_eval_case(eval_case: Dict[str, Any], opencode_runner: OpencodeRunner):
         output_file=str(opencode_runner.session_dir / f"{session_name}_ses.json")
     )
 
+    # 收集生成文件（排除原始 skill 已有的文件）
+    generated_files = collect_generated_files(sandbox_path, original_skill_dir=skill_dir)
+
     ctx = ValidationContext(
         opencode_runner=opencode_runner,
         session_name=session_name,
@@ -475,7 +655,10 @@ def test_eval_case(eval_case: Dict[str, Any], opencode_runner: OpencodeRunner):
         expectations=expectations,
         skill_dir=skill_dir,
         eval_id=eval_id,
-        ai_text=ai_text
+        ai_text=ai_text,
+        eval_mode=eval_mode,
+        sandbox_path=sandbox_path,
+        generated_files=generated_files,
     )
     validate_output(ctx)
     logger.info("Session file: %s", session_file)

@@ -153,8 +153,8 @@ class GateChecker:
                     "--html=" + str(self.results_dir / (skill_name + "_evals_validation.html")),
                     "--self-contained-html"
                 ])
-                if self.parallel != "1":
-                    cmd.extend(["-n", self.parallel])
+                if self._get_parallel_workers() != "1":
+                    cmd.extend(["-n", self._get_parallel_workers()])
                 proc = subprocess.run(
                     cmd,
                     capture_output=True,
@@ -244,13 +244,13 @@ class GateChecker:
         return sorted(list(changed_skills))
 
     def load_evals(self, skill_name: str) -> Optional[Dict[str, Any]]:
-        evals_path = self.evals_cases_dir / f"{skill_name}_evals.json"
+        evals_path = self.evals_cases_dir / f"{skill_name}_evals.md"
         if not evals_path.exists():
             return None
         try:
-            with open(evals_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+            from evals_parser import parse_evals_md
+            return parse_evals_md(evals_path)
+        except Exception as e:
             logger.error("Error loading evals for %s: %s", skill_name, e)
             return None
 
@@ -337,8 +337,8 @@ class GateChecker:
             "--html=" + str(self.results_dir / (ctx.skill_name + "_evals_validation.html")),
             "--self-contained-html",
         ]
-        if self.parallel != "1":
-            cmd.extend(["-n", self.parallel])
+        if self._get_parallel_workers() != "1":
+            cmd.extend(["-n", self._get_parallel_workers()])
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
@@ -354,8 +354,25 @@ class GateChecker:
             return (False, "", str(exc))
 
     def _cleanup_previous_run(self):
-        """清除上次运行的 logs 和 results 目录"""
+        """清除上次运行的 logs、results 目录，清理 sandboxes 目录内容"""
         import shutil
+
+        # sandboxes：先清理沙箱，避免 logs/results 清空后 sandbox 清理失败导致不一致状态
+        sandboxes_dir = self.test_skill_dir / "sandboxes"
+        if sandboxes_dir.exists():
+            for sandbox in sandboxes_dir.iterdir():
+                if not sandbox.is_dir():
+                    continue
+                try:
+                    shutil.rmtree(sandbox)
+                    logger.info("[清理] 沙箱: %s", sandbox.name)
+                except OSError as e:
+                    logger.warning("[清理] 跳过沙箱 %s，删除失败: %s", sandbox.name, e)
+            logger.info("[清理] sandboxes/ 内容已清理，目录保留")
+        else:
+            sandboxes_dir.mkdir(parents=True, exist_ok=True)
+
+        # logs 和 results：清空重建
         for dir_rel in ("logs", "results"):
             target = self.test_skill_dir / dir_rel
             if target.exists():
@@ -375,8 +392,8 @@ class GateChecker:
         if len(parts) < 3 or parts[:3] != ("tests", "system", "cases"):
             return
         filename = parts[-1]
-        if filename.endswith("_evals.json"):
-            skill_name = filename[:-len("_evals.json")]
+        if filename.endswith("_evals.md"):
+            skill_name = filename[:-len("_evals.md")]
             if self.get_skill_dir(skill_name):
                 changed_skills.add(skill_name)
 
@@ -392,6 +409,21 @@ class GateChecker:
             skill_dir = self.repo_root / skill_dir_rel / skill_name
             if skill_dir.exists() and skill_dir.is_dir():
                 changed_skills.add(skill_name)
+
+    def _get_parallel_workers(self) -> str:
+        """
+        解析 parallel 参数，返回实际使用的 worker 数量。
+        - "1": 顺序执行
+        - "auto": CPU 核数 - 1（至少为 1）
+        - 其他数字: 直接使用
+        """
+        if self.parallel == "1":
+            return "1"
+        if self.parallel == "auto":
+            cpu_count = os.cpu_count() or 1
+            workers = max(1, cpu_count - 1)
+            return str(workers)
+        return self.parallel
 
 
 def main():
@@ -417,7 +449,7 @@ def main():
         type=str,
         default="1",
         help="Number of parallel pytest workers via pytest-xdist "
-             "(default: 1 = sequential, 'auto' = all CPUs, "
+             "(default: 1 = sequential, 'auto' = CPU cores - 1, "
              "or specify a number like '4')"
     )
 

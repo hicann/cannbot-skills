@@ -26,8 +26,9 @@ if sys.platform == 'win32':
 FRAMEWORK_DIR = Path(__file__).parent.parent  # skill-test-framework/
 CONFIG_PATH = FRAMEWORK_DIR / "config" / "skill-test.config"
 REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
-EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals.json 存放目录
+EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
+SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
 
 
 def load_config() -> Dict[str, Any]:
@@ -134,7 +135,7 @@ def get_all_skills() -> List[str]:
 
 def get_skills_with_evals() -> List[str]:
     """
-    扫描 cases/ 目录，返回有 *_evals.json 文件的 skill 名称列表。
+    扫描 cases/ 目录，返回有 *_evals.md 文件的 skill 名称列表。
     如果配置了 skill_whitelist，则只返回白名单中的 skill。
     """
     skills = []
@@ -142,24 +143,20 @@ def get_skills_with_evals() -> List[str]:
     if not EVALS_CASES_DIR.exists():
         return skills
     for f in EVALS_CASES_DIR.iterdir():
-        if f.is_file() and f.name.endswith("_evals.json"):
-            skill_name = f.name[:-len("_evals.json")]
+        if f.is_file() and f.name.endswith("_evals.md"):
+            skill_name = f.name[:-len("_evals.md")]
             if skill_whitelist and skill_name not in skill_whitelist:
                 continue
             skills.append(skill_name)
     return sorted(skills)
 
 
-def load_evals_json(skill_name: str) -> Optional[Dict[str, Any]]:
-    """从 cases/<skill_name>_evals.json 加载评测用例"""
-    evals_path = EVALS_CASES_DIR / f"{skill_name}_evals.json"
-    if not evals_path.exists():
-        return None
-    try:
-        with open(evals_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
+def load_evals_md(skill_name: str) -> Optional[Dict[str, Any]]:
+    """从 cases/<skill_name>_evals.md 加载评测用例"""
+    from evals_parser import parse_evals_md
+
+    evals_path = EVALS_CASES_DIR / f"{skill_name}_evals.md"
+    return parse_evals_md(evals_path)
 
 
 @pytest.fixture(scope="session")
@@ -180,9 +177,9 @@ def skills_with_evals() -> List[str]:
 @pytest.fixture
 def evals_data(request, skills_with_evals) -> Dict[str, Any]:
     skill_name = request.param
-    data = load_evals_json(skill_name)
+    data = load_evals_md(skill_name)
     if data is None:
-        pytest.skip(f"No evals.json found for skill: {skill_name}")
+        pytest.skip(f"No evals.md found for skill: {skill_name}")
     return data
 
 
@@ -472,6 +469,8 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .log-review-fail     { border-left-color: #ef4444; background: #fef2f2; }
 .log-review-prompt .log-block-label   { color: #0f766e; }
 .log-review-prompt   { border-left-color: #14b8a6; background: #f0fdfa; }
+.log-file-list .log-block-label      { color: #6d28d9; }
+.log-file-list      { border-left-color: #8b5cf6; background: #f5f3ff; }
 
 /* === Environment toggle === */
 #environment-header h2 { cursor: pointer; }
@@ -504,16 +503,16 @@ def _extract_skill_name(nodeid: str) -> str:
 
 
 TEST_DESCRIPTIONS = {
-    # TestEvalsJsonStructure
-    "test_evals_json_exists": "evals.json 文件存在性",
-    "test_evals_json_valid": "evals.json JSON 格式合法性",
-    "test_evals_json_has_skill_name": "evals.json 包含 skill_name 字段",
-    "test_evals_json_has_evals_list": "evals.json 包含 evals 列表",
+    # TestEvalsMdStructure
+    "test_evals_md_exists": "evals.md 文件存在性",
+    "test_evals_md_valid": "evals.md 格式合法性",
+    "test_evals_md_has_skill_name": "evals.md 包含 skill_name 字段",
+    "test_evals_md_has_evals_list": "evals.md 包含 evals 列表",
     # TestEvalCaseStructure
     "test_eval_cases_have_id": "评测用例具有 id 字段",
+    "test_eval_cases_have_name": "评测用例具有 case_name 字段",
     "test_eval_cases_have_prompt": "评测用例具有 prompt 字段",
     "test_eval_cases_have_expected_output": "评测用例具有 expected_output 字段",
-    "test_eval_cases_have_files": "评测用例具有 files 字段",
     "test_eval_cases_expectations_format": "expectations 字段格式合法",
     # TestEvalCaseLogic
     "test_eval_ids_are_unique": "用例 ID 唯一性",
@@ -526,6 +525,8 @@ TEST_DESCRIPTIONS = {
     "test_skill_md_has_required_fields": "SKILL.md frontmatter 必填字段",
     # Phase 2: test_skill_evals.py
     "test_eval_case": "AI 语义评测",
+    # Phase 1: test_skill_basic.py eval_mode 校验
+    "test_skill_eval_mode_valid": "eval_mode 字段合法性",
 }
 
 
@@ -543,7 +544,7 @@ def _parse_reviewer_reason_block(longrepr: str, eval_id: str) -> Optional[str]:
     if "expected_output check failed" not in longrepr:
         return None
     reason_match = re.search(
-        r'Reviewer reason:\s*(.+?)(?:\n---|\nassert|\Z)',
+        r'Reviewer reason:\s*(.+?)(?:\n--- AI Response|\nassert\s|\nE\s+|\Z)',
         longrepr, re.DOTALL
     )
     reason = html_mod.escape(reason_match.group(1).strip()) if reason_match else "unknown"
@@ -699,33 +700,56 @@ def _build_log_block(label: str, content: str, css_class: str, is_code: bool = F
     )
 
 
+
+def _repair_json(text: str) -> str:
+    """Try to repair AI-generated JSON with unescaped quotes inside string values.
+
+    Two common patterns from AI output:
+    1. Unicode Chinese double quotes (U+201C/U+201D) used for emphasis
+    2. ASCII double quotes (U+0022) placed between CJK characters
+
+    Both break JSON parsing. Fix: replace with guillemets 《》.
+    """
+    text = text.replace('\u201c', '\u300a')
+    text = text.replace('\u201d', '\u300b')
+    text = re.sub(
+        r'(?<=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])"'
+        r'(?=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])',
+        '\u300b', text
+    )
+    return text
+
+
+def _try_parse_review_json(candidate: str) -> Optional[Dict[str, Any]]:
+    """Try to parse a candidate string as a review JSON. Falls back to repair on failure."""
+    for attempt in (candidate, _repair_json(candidate)):
+        try:
+            result = json.loads(attempt)
+            if result.get("status") in ("pass", "fail"):
+                return result
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+    return None
+
+
 def extract_review_json(text: str) -> Optional[Dict[str, Any]]:
     """从文本中提取评测结果 JSON，兼容 markdown 代码块和裸 JSON"""
     # 策略1: ```json ... ```
     for m in re.finditer(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL):
-        try:
-            result = json.loads(m.group(1).strip())
-            if result.get("status") in ("pass", "fail"):
-                return result
-        except (json.JSONDecodeError, KeyError, TypeError):
-            continue
+        result = _try_parse_review_json(m.group(1).strip())
+        if result:
+            return result
     # 策略2: 裸 JSON 对象含 "status": "pass"/"fail"
     for m in re.finditer(r'\{[^{}]*"status"\s*:\s*"(?:pass|fail)"[^{}]*\}', text, re.DOTALL):
-        try:
-            result = json.loads(m.group())
-            if result.get("status") in ("pass", "fail"):
-                return result
-        except (json.JSONDecodeError, KeyError, TypeError):
-            continue
+        result = _try_parse_review_json(m.group())
+        if result:
+            return result
     # 策略3: 去 markdown 围栏后解析全文
     cleaned = strip_markdown_fence(text)
     if cleaned != text:
-        try:
-            result = json.loads(cleaned)
-            if result.get("status") in ("pass", "fail"):
-                return result
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass
+        result = _try_parse_review_json(cleaned)
+        if result:
+            return result
     return None
 
 
@@ -857,13 +881,20 @@ def _extract_session_blocks(ses_messages: List[Dict]) -> List[str]:
 
 
 def _build_phase2_html_from_json(skill_name: str, eval_id):
-    """从 logs 目录下的 JSON 文件解析测试交互信息，生成 HTML 卡片。
+    """从 sandboxes 目录下的 JSON 文件解析测试交互信息，生成 HTML 卡片。
     返回 (html: str, score: int | None) 元组。"""
-    ses_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_ses.json"
-    review_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_review_ses.json"
+    # 新路径：sandboxes/<skill>_eval_<id>/logs/
+    sandbox_logs_dir = SANDBOX_DIR / f"{skill_name}_eval_{eval_id}" / "logs"
 
+    ses_file = sandbox_logs_dir / f"{skill_name}_case_{eval_id}_ses.json"
+    review_file = sandbox_logs_dir / f"{skill_name}_case_{eval_id}_review_ses.json"
+
+    # 回退：尝试从旧的 LOGS_DIR 读取（兼容旧数据）
     if not review_file.exists():
-        return "", None
+        ses_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_ses.json"
+        review_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_review_ses.json"
+        if not review_file.exists():
+            return "", None
 
     review_data = _load_json_file(review_file)
     review_messages = review_data.get("messages", [])
@@ -984,3 +1015,17 @@ def pytest_runtest_logreport(report):
 
     if extra_items:
         report.extras = extra_items
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Sandbox isolation fixtures
+# ═══════════════════════════════════════════════════════════════
+
+@pytest.fixture(scope="function")
+def sandbox_manager() -> 'SandboxManager':
+    """提供沙箱管理器（function 级别，支持并行执行）"""
+    from sandbox_manager import SandboxManager
+    manager = SandboxManager(FRAMEWORK_DIR)
+    manager.ensure_sandbox_root()
+    yield manager
+    # 不在这里清理，由 main.py 统一清理

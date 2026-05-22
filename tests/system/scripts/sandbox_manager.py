@@ -1,0 +1,142 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+"""
+SandboxManager - 管理测试用例的隔离沙箱
+
+为每个测试用例创建独立的执行环境（沙箱），确保用例间文件系统状态不互相干扰。
+"""
+
+import logging
+import shutil
+import sys
+from pathlib import Path
+from typing import Optional
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
+logger = logging.getLogger(__name__)
+
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+
+class SandboxManager:
+    """
+    管理测试用例的隔离沙箱
+
+    沙箱目录结构：
+    tests/system/sandboxes/
+    ├── <skill_name>_eval_<id>/
+    │   ├── skill/          # skill 目录独立副本（文件隔离，不污染源码目录）
+    │   └── logs/           # 该用例的 session 日志
+    """
+
+    SANDBOX_DIR_NAME = "sandboxes"
+
+    def __init__(self, framework_dir: Path):
+        """
+        初始化沙箱管理器
+
+        Args:
+            framework_dir: tests/system 目录路径
+        """
+        self.framework_dir = Path(framework_dir)
+        self.sandbox_root = self.framework_dir / self.SANDBOX_DIR_NAME
+
+    @staticmethod
+    def create_skill_link(sandbox_path: Path, skill_dir: Path) -> Path:
+        """
+        在沙箱中复制 skill 目录（独立副本，确保文件隔离）
+
+        Args:
+            sandbox_path: 沙箱目录路径
+            skill_dir: skill 源目录路径
+
+        Returns:
+            复制后的 skill 目录路径
+        """
+        link_path = sandbox_path / "skill"
+
+        # 如果已存在则删除
+        if link_path.exists() or link_path.is_symlink():
+            if link_path.is_dir() and not link_path.is_symlink():
+                shutil.rmtree(link_path)
+            else:
+                link_path.unlink()
+
+        abs_skill_dir = Path(skill_dir).resolve()
+        shutil.copytree(abs_skill_dir, link_path)
+        logger.debug("[Sandbox] 复制 skill 目录: %s -> %s", abs_skill_dir, link_path)
+
+        return link_path
+
+    @staticmethod
+    def cleanup_sandbox(sandbox_path: Path) -> None:
+        """
+        清理单个沙箱目录
+
+        Args:
+            sandbox_path: 沙箱目录路径
+        """
+        if sandbox_path.exists():
+            shutil.rmtree(sandbox_path)
+            logger.debug("[Sandbox] 清理沙箱: %s", sandbox_path)
+
+    @staticmethod
+    def get_logs_dir(sandbox_path: Path) -> Path:
+        """获取沙箱的 logs 目录路径"""
+        return sandbox_path / "logs"
+
+    def ensure_sandbox_root(self) -> None:
+        """确保沙箱根目录存在"""
+        self.sandbox_root.mkdir(parents=True, exist_ok=True)
+        logger.info("[Sandbox] 沙箱根目录: %s", self.sandbox_root)
+
+    def create_sandbox(self, skill_name: str, eval_id: int) -> Path:
+        """
+        创建用例沙箱目录
+
+        Args:
+            skill_name: skill 名称
+            eval_id: 评测用例 ID
+
+        Returns:
+            沙箱目录路径
+        """
+        sandbox_name = f"{skill_name}_eval_{eval_id}"
+        sandbox_path = self.sandbox_root / sandbox_name
+
+        # 创建沙箱目录（如果已存在则先清理）
+        if sandbox_path.exists():
+            shutil.rmtree(sandbox_path)
+        sandbox_path.mkdir(parents=True, exist_ok=True)
+
+        # 创建 logs 子目录
+        logs_dir = sandbox_path / "logs"
+        logs_dir.mkdir(exist_ok=True)
+
+        logger.debug("[Sandbox] 创建沙箱: %s", sandbox_path)
+        return sandbox_path
+
+    def cleanup_all(self) -> None:
+        """清理所有沙箱目录"""
+        if self.sandbox_root.exists():
+            shutil.rmtree(self.sandbox_root)
+            logger.info("[Sandbox] 清理所有沙箱目录: %s", self.sandbox_root)
+
+    def list_sandboxes(self) -> list:
+        """列出所有沙箱目录"""
+        if not self.sandbox_root.exists():
+            return []
+        return [d for d in self.sandbox_root.iterdir() if d.is_dir()]
+
+    def get_sandbox_path(self, skill_name: str, eval_id: int) -> Path:
+        """获取指定用例的沙箱路径（不创建）"""
+        return self.sandbox_root / f"{skill_name}_eval_{eval_id}"
