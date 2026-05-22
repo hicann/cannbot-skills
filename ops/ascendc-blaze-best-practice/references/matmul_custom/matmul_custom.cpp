@@ -9,17 +9,33 @@
  */
 
 // ============================================================================
-// Matmul Kernel 直调样例 —— BF16 in / BF16 out
+// Matmul Kernel 直调样例 —— BF16 in / BF16 out（dav-3510）
 // ----------------------------------------------------------------------------
-// [MODIFY] 创建新算子时的修改点（搜索 [MODIFY] 标记）：
-//   1. AType/BType/CType  —— 输入/输出数据类型（bf16、fp16、fp8…）
-//   2. layoutA/layoutB    —— 输入矩阵 GM 排布（RowMajor / ColumnMajor）
-//   3. Kernel 函数名       —— matmul_custom → <your_op>_custom
-//   4. DispatchPolicy/Scheduler —— 默认 MatmulMultiBlockPolicy / MatmulSwatScheduler
-//   5. TilingData 字段     —— 如需扩展（bias/scale/多 dtype），同步 matmul_tiling_data.h
-//   6. Host 主流程         —— sizeA/sizeB/sizeC 按 dtype 字节数计算
-//   7. CMakeLists.txt      —— 目标名 matmul_custom → <your_op>_custom
-//   8. scripts/gen_data.py —— 输入分布与 golden 计算替换为真实参考实现
+// 单一模板同时支持 NO_FULL_LOAD_MODE（默认，通用 SWAT）与 A_FULL_LOAD_MODE（A 全载）。
+// 默认走通用模式；切到 A 全载只需替换 3 行（见下方 [MODIFY A1] 精确 diff）。
+//
+// 创建新算子时按下面 [MODIFY] 标记修改。搜索 `[MODIFY]` 即可定位每个改点；
+// 按重要性分三档（必改 / 常改 / 选改）：
+//
+// === 必改（任何新算子都要动）===
+//   [MODIFY] N1  函数名 / CMake 目标名 / run.sh OP_NAME 三处保持一致
+//   [MODIFY] N2  AType / BType / CType（搭配 sizeA/sizeB/sizeC 字节数 +
+//                matmul_tiling_constant.h::DATA_SIZE_FP16）
+//   [MODIFY] N3  scripts/gen_data.py + verify_result.py 的 dtype / golden / 容差
+//                （A 全载场景：默认 trans_b=False；bf16 长 K 用 MERE/MARE 双门替代严格 allclose）
+//
+// === 常改（按算子需求二选一）===
+//   [MODIFY] C1  layoutA / layoutB 与 transA/transB（通用模板默认 transA=false，
+//                A 全载模板锁定 transA=transB=false）
+//   [MODIFY] C2  TilingData 增删字段（bias/scale 等额外输入）—— 见 `matmul_basic.md` §2.2
+//
+// === 选改（高级变种才需要）===
+//   [MODIFY] A1  切到 A 全载（NO_FULL_LOAD_MODE → A_FULL_LOAD_MODE）—— 见下方 launcher 注释；
+//                适用 Align(m,16)*Align(k,16)*sizeof(A) ≤ ~256KB 且 N≫M，详见 `matmul_full_load.md`
+//   [MODIFY] A2  L1_BUFFER_NUM = 4 等更深流水（需同步 dispatch policy）—— 见 `matmul_basic.md` §2.4
+//
+// 进阶细节（含排错、SFINAE、Tiling 算法）请翻 `matmul_pattern.md`（先选 pattern，再读
+// `matmul_basic.md`（通用模板）或 `matmul_full_load.md`（A 全载模板））。
 // ============================================================================
 
 #include <cstdint>
@@ -43,26 +59,41 @@
 #include "tiling/matmul_tiling_data.h"
 
 // ---------------- Kernel 入口 ----------------
-// [MODIFY] 函数名 `matmul_custom` 需与 CMake 目标名、run.sh 中 OP_NAME 保持一致。
-// 模板参数 LayoutB 在 host 侧运行时选择（transB=true => ColumnMajor, false => RowMajor）。
-// 如需支持 transA，把模板签名改为 `template <class LayoutA, class LayoutB>`，
-// 并在 host 侧按 4 种 (transA, transB) 组合实例化（详见 matmul_custom_launch_details.md §6）。
+// [MODIFY N1] 函数名 `matmul_custom` 需与 CMake 目标名、run.sh 中 OP_NAME 保持一致。
+// 模板参数 LayoutB 是 tensor_api 的 layout pattern：
+//   - AscendC::Te::NDExtLayoutPtn  → 行主序（host 落盘 (K, N)）
+//   - AscendC::Te::DNExtLayoutPtn  → 列主序（host 落盘 (N, K)，device 视图 (K, N)）
+// host 侧根据 transB 选择对应 pattern 实例化；transA 路径同理（见下方 [MODIFY C1]）。
+// [MODIFY C1] 如需支持 transA，把模板签名改为 `template <class LayoutA, class LayoutB>`，
+// 并在 host 侧按 4 种 (transA, transB) 组合实例化（详见 launch_details §6 step-by-step）。
 template <class LayoutB>
 __global__ __aicore__ __cube__ void matmul_custom(
     GM_ADDR dA, GM_ADDR dB, GM_ADDR dC,
     const MatmulTilingData tilingData)
 {
-    // [MODIFY] 数据类型：BF16 in / BF16 out。替换为 half / fp8 / int8 等时，
-    // 同步修改 gen_data.py 的 dtype、verify_result.py 的 dtype 与容差。
-    // 注意 int8 输入需在 BlockMmad 中切换 L0CType=int32（详见 launch_details §8.1）。
+    // [MODIFY N2] 输入/输出 dtype。替换原则：
+    //   - bf16/fp16/fp8 → BlockMmad 内部自动用 fp32 累加；
+    //   - int8        → BlockMmad 内部自动用 int32 累加（见 matmul_block_mmad.h:77）；
+    //   - 不支持的组合（如 int8→fp32 L0C）会被 check_data_type_3510.h static_assert 拒掉。
     using AType = bfloat16_t;
     using BType = bfloat16_t;
     using CType = bfloat16_t;
 
-    // [MODIFY] 逻辑 layout：A 行主序 / C 行主序（默认不支持 transA）；B 支持 Row/Col 两种。
-    using layoutA = layout::RowMajor;
-    using layoutC = layout::RowMajor;
+    // [MODIFY C1] A / C 侧 GM layout pattern：
+    //   - NDExtLayoutPtn = 行主序（默认，host 落盘 (M, K) / (M, N)）
+    //   - DNExtLayoutPtn = 列主序（transA / transC 时使用）
+    // 默认锁 transA=false，所以 layoutA 固定 NDExtLayoutPtn；C 侧目前只支持 NDExtLayoutPtn。
+    using layoutA = AscendC::Te::NDExtLayoutPtn;
+    using layoutC = AscendC::Te::NDExtLayoutPtn;
 
+    // [MODIFY A1] 选改：默认 SWAT (non-full-load) 流水。
+    // 切到 A 全载（A 全部装入 L1 + 跨 N-tile 复用），把 mode 改为 A_FULL_LOAD_MODE，
+    // **并按下面 Host 侧 [MODIFY A1] 同步切 tiling 引擎 + 锁 transA=transB=false**：
+    //   - using BlockScheduler = MatmulSwatScheduler<A_FULL_LOAD_MODE>;
+    //   - using DispatchPolicy = MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>;
+    //   - host 端：MatmulTilingAFullLoad tilingEngine; （替换 MatmulTilingSwat）
+    // A 全载仅支持 transA=transB=false；适用判据 / L1 布局见 matmul_full_load.md §1。
+    // 量化 / MX / Attention 等变种另在 matmul_block_mmad.h 加 SFINAE 特化（matmul_basic.md §2.3）。
     using BlockScheduler = MatmulSwatScheduler<NO_FULL_LOAD_MODE>;
     using DispatchPolicy = MatmulMultiBlockPolicy<NO_FULL_LOAD_MODE>;
     using ProblemShape = MatmulShape;
@@ -75,6 +106,10 @@ __global__ __aicore__ __cube__ void matmul_custom(
     using BlockSchedulerParams = typename MatmulKernelImpl::BlockSchedulerParams;
     using MatmulTiling = typename MatmulKernelImpl::MatmulTiling;
 
+    // [PITFALL] Params 是聚合初始化，字段顺序、个数必须与 matmul_kernel.h 中声明一致，
+    // 否则触发 `excess elements in scalar initializer`。8 字段的 schedulerParams 不能省略。
+    // [MODIFY C2] 新增 bias / scale 等额外输入：① TilingData 加字段 ② BlockMmadParams 加地址
+    // ③ 这里把新地址塞进 mmadParams（详见 launch_details §8.2）。
     ProblemShape problemShape{tilingData.m, tilingData.n, tilingData.k, 1L};
     BlockMmadParams mmadParams{dA, dB, dC};
     L1Params l1Params{static_cast<uint64_t>(tilingData.kL1)};
@@ -104,9 +139,10 @@ int main(int argc, char* argv[])
     uint64_t k = 0;
     uint64_t n = 0;
     bool transA = false;
-    bool transB = true;  // [CONFIG] 默认 B 采用 ColumnMajor（host 存 (N, K)）
+    bool transB = true;  // 默认 B 采用列主序（host 文件存 (N, K)，对应 DNExtLayoutPtn）
     try {
         ParseArguments(argc, argv, m, k, n, transA, transB);
+        // [MODIFY C1] 打开 transA 时删掉这条 throw，并让上面的 launcher 模板增加 LayoutA 参数。
         if (transA) {
             throw std::invalid_argument("ERROR: transA=true is not supported by matmul_custom yet");
         }
@@ -119,8 +155,11 @@ int main(int argc, char* argv[])
     constexpr int32_t deviceId = 0;
 
     try {
-        // [MODIFY] Host 侧 tiling：沿用 MatmulTilingSwat（bf16/fp16 通用）。
-        // 切换数据类型需要检查 tiling 内部的 DATA_SIZE_FP16 是否匹配。
+        // Host 侧 tiling：默认 MatmulTilingSwat（通用 bf16/fp16）。
+        // [MODIFY A1] 切到 A 全载：替换为 `MatmulTilingAFullLoad tilingEngine;`，并把上面 launcher
+        // 的 DispatchPolicy / BlockScheduler mode 同步改为 A_FULL_LOAD_MODE（详见 matmul_full_load.md §1.3）。
+        // [MODIFY N2] 切换数据类型时同步检查 matmul_tiling_constant.h::DATA_SIZE_FP16，
+        // 否则 L1 预算会按错误字节数估算导致 OOM 或吃不满 buffer。
         MatmulTilingData tilingData;
         MatmulTilingSwat tilingEngine;
         tilingEngine.GetTilingData(m, n, k, tilingData);
@@ -129,7 +168,8 @@ int main(int argc, char* argv[])
         aclSession.Init();
         aclrtStream stream = aclSession.GetStream();
 
-        // [MODIFY] 按数据类型调整 byte size。bf16 = 2 字节；fp32 = 4；fp8 = 1。
+        // [MODIFY N2] dtype byte size：bf16/fp16=2，fp32=4，fp8/int8=1，fp4×2=0.5（按 packed 元素数计）。
+        // 三处 sizeof 必须用 `sizeof(<对应 host 端 dtype>)` 而不是固定 uint16_t；改 dtype 时一并改 hA/hB/hC 指针类型。
         uint64_t sizeA = m * k * sizeof(uint16_t);
         uint64_t sizeB = k * n * sizeof(uint16_t);
         uint64_t sizeC = m * n * sizeof(uint16_t);
@@ -177,13 +217,16 @@ int main(int argc, char* argv[])
             aclrtMemcpyAsync(dB, sizeB, hB, sizeB, ACL_MEMCPY_HOST_TO_DEVICE, stream) == ACL_SUCCESS,
             "Failed to copy input B from host to device.");
 
-        // [PATTERN] Kernel 直调 <<<usedCoreNum, nullptr, stream>>>。
-        // 运行时根据 transB 选择对应的模板实例化。
+        // Kernel 直调 <<<usedCoreNum, nullptr, stream>>>：
+        //   - 第一参 usedCoreNum：tiling 给出的实际启动核数（纯 Cube 直接用，不乘 GetTaskRation）
+        //   - 第二参 nullptr：tpipe 占位，Matmul 直调不需要
+        //   - 第三参 stream：ACL stream
+        // 运行时根据 transB 选择对应的 layout pattern 实例化（transA 路径见上面的 throw）。
         if (transB) {
-            matmul_custom<layout::ColumnMajor>
+            matmul_custom<AscendC::Te::DNExtLayoutPtn>
                 <<<tilingData.usedCoreNum, nullptr, stream>>>(dA, dB, dC, tilingData);
         } else {
-            matmul_custom<layout::RowMajor>
+            matmul_custom<AscendC::Te::NDExtLayoutPtn>
                 <<<tilingData.usedCoreNum, nullptr, stream>>>(dA, dB, dC, tilingData);
         }
 

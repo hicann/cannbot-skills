@@ -5,6 +5,7 @@ mode: subagent
 skills:
   - ascendc-docs-search
   - ascendc-regbase-best-practice
+  - ascendc-blaze-best-practice
   - ops-profiling
   - ops-precision-standard
   - ascendc-api-best-practices

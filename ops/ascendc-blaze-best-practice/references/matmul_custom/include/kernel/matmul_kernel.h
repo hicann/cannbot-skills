@@ -26,7 +26,7 @@
 #include "kernel_utils/common_utils.h"
 #include "kernel_utils/layout_utils.h"
 #include "kernel_utils/tuple_utils.h"
-#include "include/tensor.h"
+#include "include/tensor_api/tensor.h"
 
 #include "../block/matmul_block_mmad.h"
 #include "../block/matmul_block_scheduler.h"
@@ -79,18 +79,12 @@ public:
     using BlockCoord = AscendC::Coord<int64_t, int64_t, int64_t, int64_t>;
     using BlockSchedulerParams = typename BlockSchedulerOp::Params;
 
-    // LayoutA == ColumnMajor => host 落盘顺序 (K, M)，device 逻辑 (M, K)，用 DNLayoutFormat。
-    // LayoutA == RowMajor    => host 落盘 (M, K)，device 直接按 ND 视图。
-    using MakeLayoutA = AscendC::Std::conditional_t<
-        AscendC::Std::is_same_v<LayoutA, layout::ColumnMajor>,
-        AscendC::Te::DNLayoutFormat<AType>,
-        AscendC::Te::NDLayoutFormat<AType>>;
-    // LayoutB == ColumnMajor => host (N, K)，device 逻辑 (K, N)，用 DNLayoutFormat。
-    // LayoutB == RowMajor    => host (K, N)，device 直接按 ND 视图。
-    using MakeLayoutB = AscendC::Std::conditional_t<
-        AscendC::Std::is_same_v<LayoutB, layout::ColumnMajor>,
-        AscendC::Te::DNLayoutFormat<BType>,
-        AscendC::Te::NDLayoutFormat<BType>>;
+    // LayoutA / LayoutB are pattern types (AscendC::Te::NDExtLayoutPtn for row-major,
+    // DNExtLayoutPtn for column-major). Wrap them in FrameLayoutFormat for GM-side
+    // tensor construction. Picking the pattern at the launcher avoids an extra
+    // conditional layer here and keeps the data-flow direction explicit.
+    using MakeLayoutA = AscendC::Te::FrameLayoutFormat<LayoutA>;
+    using MakeLayoutB = AscendC::Te::FrameLayoutFormat<LayoutB>;
 
     struct MatmulTiling {
         uint32_t baseM;
@@ -156,11 +150,15 @@ __aicore__ inline void MatmulKernel<MATMUL_KERNEL_FUN_TEM_PARAMS>::Process(
 {
     auto layoutA = MakeLayoutA{}(params.problemShape.m, params.problemShape.k);
     auto layoutB = MakeLayoutB{}(params.problemShape.k, params.problemShape.n);
-    auto layoutC = AscendC::Te::MakeNDLayout<CType>(params.problemShape.m, params.problemShape.n);
+    auto layoutC = AscendC::Te::MakeFrameLayout<AscendC::Te::NDExtLayoutPtn>(
+        params.problemShape.m, params.problemShape.n);
 
-    auto gmA = AscendC::Te::MakeTensor(AscendC::Te::MakeGMmemPtr(aGmAddr_), layoutA);
-    auto gmB = AscendC::Te::MakeTensor(AscendC::Te::MakeGMmemPtr(bGmAddr_), layoutB);
-    auto gmC = AscendC::Te::MakeTensor(AscendC::Te::MakeGMmemPtr(cGmAddr_), layoutC);
+    auto gmA = AscendC::Te::MakeTensor(
+        AscendC::Te::MakeMemPtr<AscendC::Te::Location::GM>(aGmAddr_), layoutA);
+    auto gmB = AscendC::Te::MakeTensor(
+        AscendC::Te::MakeMemPtr<AscendC::Te::Location::GM>(bGmAddr_), layoutB);
+    auto gmC = AscendC::Te::MakeTensor(
+        AscendC::Te::MakeMemPtr<AscendC::Te::Location::GM>(cGmAddr_), layoutC);
 
     BlockCoord blockIdx;
     constexpr int64_t kPos = 0L;
@@ -172,15 +170,15 @@ __aicore__ inline void MatmulKernel<MATMUL_KERNEL_FUN_TEM_PARAMS>::Process(
             return;
         }
 
-        auto gmBlockA =
-            gmA(AscendC::Te::MakeCoord(mPos, kPos),
-                AscendC::Te::MakeShape(Get<MNK_M>(singleShape), params.problemShape.k));
-        auto gmBlockB =
-            gmB(AscendC::Te::MakeCoord(kPos, nPos),
-                AscendC::Te::MakeShape(params.problemShape.k, Get<MNK_N>(singleShape)));
-        auto gmBlockC =
-            gmC(AscendC::Te::MakeCoord(mPos, nPos),
-                AscendC::Te::MakeShape(Get<MNK_M>(singleShape), Get<MNK_N>(singleShape)));
+        auto gmBlockA = gmA.Slice(
+            AscendC::Te::MakeCoord(mPos, kPos),
+            AscendC::Te::MakeShape(Get<MNK_M>(singleShape), params.problemShape.k));
+        auto gmBlockB = gmB.Slice(
+            AscendC::Te::MakeCoord(kPos, nPos),
+            AscendC::Te::MakeShape(params.problemShape.k, Get<MNK_N>(singleShape)));
+        auto gmBlockC = gmC.Slice(
+            AscendC::Te::MakeCoord(mPos, nPos),
+            AscendC::Te::MakeShape(Get<MNK_M>(singleShape), Get<MNK_N>(singleShape)));
 
         mmadOp_(gmBlockA, gmBlockB, gmBlockC, singleShape);
     }

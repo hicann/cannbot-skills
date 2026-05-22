@@ -71,6 +71,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(ASCEND_INCLUDE_DIRS
     ${ASCEND_DIR}/include
+    ${ASCEND_DIR}/asc                        # 新版 tensor_api 用 "include/c_api/asc_simd.h" 形式查找
     ${ASCEND_DIR}/asc/include
     ${ASCEND_DIR}/compiler/asc/include
     ${ASCEND_DIR}/compiler/tikcpp/tikcfw

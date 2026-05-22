@@ -18,45 +18,25 @@
 
 // Cube format definitions.
 #include "matmul/matmul_config.h"
+#include "include/tensor_api/tensor.h"
 #include "./integral_constant.h"
 
-namespace layout {
-struct RowMajor {};
-struct ColumnMajor {};
-} // namespace layout
-
-// Map layout tags to CubeFormat values.
-template <typename T>
-struct TagToFormat {
-    static_assert(AscendC::Std::always_false_v<T>, "TagToFormat is not implemented for this layout");
-};
-
-template <>
-struct TagToFormat<layout::RowMajor> {
-    using tag = layout::RowMajor;
-    static constexpr CubeFormat format = CubeFormat::ND;
-};
-
-template <>
-struct TagToFormat<layout::ColumnMajor> {
-    using tag = layout::ColumnMajor;
-    static constexpr CubeFormat format = CubeFormat::ND;
-};
-
-// Map layout tags to transpose flags.
+// Map layout pattern (AscendC::Te::NDExtLayoutPtn / DNExtLayoutPtn) to the
+// transpose flag consumed by BlockMmad / BlockScheduler. The launcher passes
+// the pattern type directly; no legacy RowMajor/ColumnMajor wrapper needed.
 template <typename T>
 struct TagToTrans {
-    static_assert(AscendC::Std::always_false_v<T>, "TagToTrans is not implemented for this layout");
+    static_assert(AscendC::Std::always_false_v<T>, "TagToTrans is not implemented for this layout pattern");
 };
 
 template <>
-struct TagToTrans<layout::RowMajor> {
-    static constexpr bool value = false;
+struct TagToTrans<AscendC::Te::NDExtLayoutPtn> {
+    static constexpr bool value = false;  // ND = row-major, no transpose.
 };
 
 template <>
-struct TagToTrans<layout::ColumnMajor> {
-    static constexpr bool value = true;
+struct TagToTrans<AscendC::Te::DNExtLayoutPtn> {
+    static constexpr bool value = true;   // DN = column-major, transposed.
 };
 
 #endif

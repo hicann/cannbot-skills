@@ -235,6 +235,14 @@ struct BlockSchedulerSelector<ProblemShape_, MatmulSwatScheduler<NO_FULL_LOAD_MO
     using SchedulerOp = MatmulBlockScheduler<ProblemShape_, TransA_, TransB_>;
 };
 
+// A_FULL_LOAD_MODE 复用同一个 serpentine 调度器：tiling 里把 mCnt=1（不切 M），
+// 此时 `rowIdx & 1` 反转分支永不触发，自然退化为 N 顺序遍历；
+// mainRow_ 也安全（mCoreNum=Min(WINDOW_LEN, mCnt)=1 → mainRow_ = 1/1 - 1 = 0）。
+template <class ProblemShape_, bool TransA_, bool TransB_>
+struct BlockSchedulerSelector<ProblemShape_, MatmulSwatScheduler<A_FULL_LOAD_MODE>, TransA_, TransB_> {
+    using SchedulerOp = MatmulBlockScheduler<ProblemShape_, TransA_, TransB_>;
+};
+
 } // namespace Block
 
 #endif // MATMUL_BLOCK_SCHEDULER_H

@@ -36,6 +36,17 @@ static constexpr int32_t BT_SIZE = 4096;
 // Execution modes shared by SWAT schedulers, dispatch tags, and sample
 // launchers. `NO_FULL_LOAD_MODE` streams both A and B, while
 // `A_FULL_LOAD_MODE` keeps the A tile resident and streams B.
+//
+// NOTE: B_FULL_LOAD_MODE (B resident, A streamed) is documented in
+// references/matmul_full_load.md §3.2/§4.2/§4.3 but is NOT implemented
+// in this repository. Before enabling it you must add ALL of:
+//   1. constexpr uint64_t B_FULL_LOAD_MODE = 2UL;  // here
+//   2. MatmulMultiBlockPolicy<B_FULL_LOAD_MODE> SFINAE specialization
+//   3. MatmulSwatScheduler<B_FULL_LOAD_MODE> selector in
+//      include/block/matmul_block_scheduler.h
+//   4. MatmulTilingBFullLoad in include/tiling/matmul_tiling.h
+//   5. include/block/matmul_block_mmad_b_full_load.h (mirror of A variant)
+// Any "3-line switch diff" found in docs assumes these symbols exist.
 constexpr uint64_t NO_FULL_LOAD_MODE = 0UL;
 constexpr uint64_t A_FULL_LOAD_MODE = 1UL;
 

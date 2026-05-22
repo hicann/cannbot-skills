@@ -176,7 +176,9 @@
 然后开始开发。
 
 【第一步：基于模板搭建工程骨架】
-加载 /ascendc-direct-invoke-template，基于验证过的工程模板创建项目文件（CMakeLists.txt、.asc 文件、头文件）。
+根据 DESIGN.md §0.5（方案决策）中 Architect 选定的路线加载对应模板 skill：
+- Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias，dav-3510 + Blaze 路线）→ 加载 /ascendc-blaze-best-practice，复制 references/matmul_custom/ 工程模板
+- 其他算子（Vector/RegBase/mxfp8 融合等）→ 加载 /ascendc-direct-invoke-template，按场景路由复制 references/add_custom/ 或 references/matmul_fusion_kernel/
 禁止从零创建工程文件。搭建骨架后先编译通过（空 Kernel），再逐步添加算子逻辑。
 
 【渐进式开发策略】
@@ -187,7 +189,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 每步必须编译通过后再进入下一步。
 
 注意：DESIGN.md 中的代码模板是伪代码，展示计算逻辑和 API 选择，不能直接编译。
-实际代码结构以 /ascendc-direct-invoke-template 的工程模板为准。
+实际代码结构以所选模板 skill（/ascendc-blaze-best-practice 或 /ascendc-direct-invoke-template）的工程模板为准。
 
 【参考文档】
 - 编码规范与审查清单：workflows/development-guide.md

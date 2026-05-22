@@ -10,7 +10,11 @@
 
 /*!
  * \file matmul_tiling.h
- * \brief Host-side SWAT tiling engine for the matmul non-full-load path.
+ * \brief Host-side tiling engines for matmul kernels.
+ *
+ * 本文件并存两个 tiling 引擎，由 launcher 决定调用哪个（详见 matmul_custom.cpp [MODIFY A1]）：
+ *   - `MatmulTilingSwat`         —— 通用模板（NO_FULL_LOAD_MODE），SWAT 流式，M/N/K 任意大小
+ *   - `MatmulTilingAFullLoad`    —— A 全载模板（A_FULL_LOAD_MODE），M·K 装入 L1 且 N ≫ M 时启用
  */
 
 #ifndef MATMUL_TILING_H
@@ -18,6 +22,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 #include <vector>
 #include "tiling/matmul_tiling_base.h"
@@ -657,6 +663,155 @@ private:
         tilingData.nBaseTailSplitCnt = runInfo_.nBaseTailSplitCnt;
         tilingData.mTailMain = runInfo_.tailInfo.mTailMain;
         tilingData.nTailMain = runInfo_.tailInfo.nTailMain;
+        tilingData.usedCoreNum = static_cast<uint32_t>(runInfo_.usedCoreNum);
+        tilingData.l1BufferNum = static_cast<uint8_t>(runInfo_.l1BufferNum);
+        tilingData.l0cDB = static_cast<uint8_t>(runInfo_.dbL0c);
+    }
+};
+
+// ============================================================================
+// MatmulTilingAFullLoad —— A 全载（A_FULL_LOAD_MODE）专用 Tiling 引擎
+//
+// 与 SWAT 的关键差异：
+//   - 仅切 N，不切 M：baseM = Align(m, 16)，整块 A 常驻每核 L1
+//   - usedCoreNum = min(aicNum, ceil(n / 16))；nPerCore = ceil(n / usedCoreNum)
+//   - baseN = Align(min(nPerCore, 256), 16)
+//   - baseK 受 L0A / L0B 双缓冲共同约束：baseM*baseK*sizeof(A) ≤ L0A/2，
+//     baseN*baseK*sizeof(B) ≤ L0B/2
+//   - kL1 = baseK * stepK，stepK 由 B 在 L1 剩余字节决定（A 占 mAlign*kAlign*sizeof(A) 常驻）
+//   - 启动期断言：aL1Reserve + 2*baseN*kL1*sizeof(B) ≤ L1_SIZE；不满足直接 throw
+//
+// 使用方法：在 launcher 中把 `MatmulTilingSwat` 替换为 `MatmulTilingAFullLoad`（详见
+// matmul_custom.cpp [MODIFY A1]），同时 DispatchPolicy/Scheduler 切到 A_FULL_LOAD_MODE。
+//
+// [MODIFY] 切换数据类型时同步调整 `DATA_SIZE_FP16`（matmul_tiling_constant.h）。
+// bf16/fp16=2, fp8=1, fp32=4, fp4×2 packed=1（2 元素共享 1 字节）。
+// ============================================================================
+
+class MatmulTilingAFullLoad : public MatmulTilingBase {
+public:
+    MatmulTilingAFullLoad() = default;
+    ~MatmulTilingAFullLoad() override = default;
+
+protected:
+    const char* TilingName() const override
+    {
+        return "a_full_load";
+    }
+
+    void DoOpTiling(MatmulTilingData& tilingData) override
+    {
+        // ---- 1. 多核切分（只切 N）----
+        uint64_t mAlign = Align(args_.m, BASIC_BLOCK_SIZE_16);
+        uint64_t nAlign = Align(args_.n, BASIC_BLOCK_SIZE_16);
+        uint64_t kAlign = Align(args_.k, BASIC_BLOCK_SIZE_16);
+        (void)nAlign;  // 当前未参与计算，保留以便后续扩展
+
+        uint64_t maxCoresByN = CeilDiv(args_.n, BASIC_BLOCK_SIZE_16);
+        uint64_t usedCoreNum = std::min(static_cast<uint64_t>(platformInfo_.aicNum), maxCoresByN);
+        if (usedCoreNum == 0UL) {
+            usedCoreNum = 1UL;
+        }
+        uint64_t nPerCore = CeilDiv(args_.n, usedCoreNum);
+
+        // ---- 2. baseM = full M（不切 M，A 常驻）----
+        uint64_t baseM = mAlign;
+
+        // ---- 3. baseN：每核 N 子段对齐到 16；上限 256 保住 mmad 颗粒度 ----
+        constexpr uint64_t BASE_N_CAP = BASIC_BLOCK_SIZE_256;
+        uint64_t baseN = Align(std::min(nPerCore, BASE_N_CAP), BASIC_BLOCK_SIZE_16);
+        if (baseN == 0UL) {
+            baseN = BASIC_BLOCK_SIZE_16;
+        }
+
+        // ---- 4. baseK：受 L0A 双缓冲（baseM*baseK*sizeof(A) ≤ L0A/2）+ L0B 双缓冲约束 ----
+        // [PITFALL] 通用模板 baseM 最大 256，A 全载 baseM 可能直接 = mAlign。复制
+        // 通用模板 baseK 不改这条会触发 L0A 越界，runtime hang。
+        uint64_t l0aBudget = platformInfo_.l0aSize / DB_SIZE / DATA_SIZE_FP16;
+        uint64_t baseKMaxL0A = baseM == 0UL ? kAlign : FloorAlign(l0aBudget / baseM, BASIC_BLOCK_SIZE_16);
+        uint64_t l0bBudget = platformInfo_.l0bSize / DB_SIZE / DATA_SIZE_FP16;
+        uint64_t baseKMaxL0B = baseN == 0UL ? kAlign : FloorAlign(l0bBudget / baseN, BASIC_BLOCK_SIZE_16);
+        uint64_t baseK = std::min({kAlign, baseKMaxL0A, baseKMaxL0B});
+        if (baseK == 0UL) {
+            baseK = BASIC_BLOCK_SIZE_16;
+        }
+
+        // ---- 5. kL1：受 L1 剩余字节约束 ----
+        // A 占 mAlign * kAlign * sizeof(A)（常驻，不参与 ping-pong）
+        // B 占 2 * (baseN * kL1) * sizeof(B)（双缓冲）
+        uint64_t aL1Reserve = mAlign * kAlign * DATA_SIZE_FP16;
+        if (aL1Reserve >= platformInfo_.l1Size) {
+            throw std::runtime_error(
+                std::string("ERROR: A matrix exceeds L1 capacity (") + std::to_string(aL1Reserve) +
+                " bytes > L1=" + std::to_string(platformInfo_.l1Size) +
+                "). Reduce m or k, or fall back to streaming (NO_FULL_LOAD_MODE).");
+        }
+        uint64_t bL1Avail = platformInfo_.l1Size - aL1Reserve;
+        uint64_t bL1OneBuffer = bL1Avail / DB_SIZE;
+        uint64_t kL1Cap = bL1OneBuffer / (baseN * DATA_SIZE_FP16);
+        kL1Cap = FloorAlign(kL1Cap, BASIC_BLOCK_SIZE_16);
+        uint64_t stepK = std::max(static_cast<uint64_t>(1UL), kL1Cap / baseK);
+        uint64_t kL1 = std::min(kAlign, baseK * stepK);
+        kL1 = std::max(kL1, baseK);  // 至少容纳一个 baseK
+
+        // ---- 6. 最终 L1 占用校验（违反就 throw，禁止静默截断）----
+        uint64_t bL1Total = DB_SIZE * baseN * kL1 * DATA_SIZE_FP16;
+        if (aL1Reserve + bL1Total > platformInfo_.l1Size) {
+            throw std::runtime_error(
+                std::string("ERROR: L1 budget exceeded: aReserve=") + std::to_string(aL1Reserve) +
+                " + bL1Total=" + std::to_string(bL1Total) +
+                " > L1=" + std::to_string(platformInfo_.l1Size));
+        }
+
+        // ---- 7. dbL0c：L0C ping-pong（baseM*baseN*fp32*2 ≤ L0C 则启用）----
+        uint64_t dbL0c = (baseM * baseN * DATA_SIZE_FP32 * DB_SIZE <= platformInfo_.l0cSize) ? DB_SIZE : 1UL;
+
+        // ---- 8. 写入 RunInfo + TilingData ----
+        runInfo_.usedCoreNum = usedCoreNum;
+        runInfo_.baseM = baseM;
+        runInfo_.baseN = baseN;
+        runInfo_.baseK = baseK;
+        runInfo_.singleCoreM = baseM;
+        runInfo_.singleCoreN = baseN;
+        runInfo_.singleCoreK = args_.k;
+        runInfo_.dbL0c = dbL0c;
+        runInfo_.stepKa = stepK;
+        runInfo_.stepKb = stepK;
+        runInfo_.depthA1 = stepK * DB_SIZE;
+        runInfo_.depthB1 = stepK * DB_SIZE;
+        runInfo_.stepM = 1UL;
+        runInfo_.stepN = 1UL;
+        runInfo_.iterateOrder = 0UL;
+        runInfo_.mBaseTailSplitCnt = 1U;
+        runInfo_.nBaseTailSplitCnt = 1U;
+        // mCnt=1 让 BlockScheduler 的 serpentine 退化为 N 顺序遍历（mainRow_=0）。
+        runInfo_.tailInfo.mCnt = 1UL;
+        runInfo_.tailInfo.nCnt = 1UL;
+        runInfo_.tailInfo.mTailMain = 0UL;
+        runInfo_.tailInfo.nTailMain = 0UL;
+
+        BuildAFullLoadTilingData(tilingData, kL1);
+    }
+
+private:
+    void BuildAFullLoadTilingData(MatmulTilingData& tilingData, uint64_t kL1) const
+    {
+        tilingData = {};
+        tilingData.m = static_cast<uint32_t>(args_.m);
+        tilingData.n = static_cast<uint32_t>(args_.n);
+        tilingData.k = static_cast<uint32_t>(args_.k);
+        tilingData.baseM = static_cast<uint32_t>(runInfo_.baseM);
+        tilingData.baseN = static_cast<uint32_t>(runInfo_.baseN);
+        tilingData.baseK = static_cast<uint32_t>(runInfo_.baseK);
+        tilingData.mL1 = static_cast<uint32_t>(runInfo_.baseM);
+        tilingData.nL1 = static_cast<uint32_t>(runInfo_.baseN);
+        tilingData.kL1 = static_cast<uint32_t>(kL1);
+        tilingData.mTailCnt = static_cast<uint32_t>(runInfo_.tailInfo.mCnt);
+        tilingData.nTailCnt = static_cast<uint32_t>(runInfo_.tailInfo.nCnt);
+        tilingData.mBaseTailSplitCnt = runInfo_.mBaseTailSplitCnt;
+        tilingData.nBaseTailSplitCnt = runInfo_.nBaseTailSplitCnt;
+        tilingData.mTailMain = static_cast<uint32_t>(runInfo_.tailInfo.mTailMain);
+        tilingData.nTailMain = static_cast<uint32_t>(runInfo_.tailInfo.nTailMain);
         tilingData.usedCoreNum = static_cast<uint32_t>(runInfo_.usedCoreNum);
         tilingData.l1BufferNum = static_cast<uint8_t>(runInfo_.l1BufferNum);
         tilingData.l0cDB = static_cast<uint8_t>(runInfo_.dbL0c);

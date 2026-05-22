@@ -19,7 +19,7 @@
 #include "kernel_utils/common_utils.h"
 #include "kernel_utils/layout_utils.h"
 #include "kernel_utils/tuple_utils.h"
-#include "include/tensor.h"
+#include "include/tensor_api/tensor.h"
 #include "block_mmad.h"
 #include "../policy/dispatch_policy.h"
 #include "../utils/matmul_constant.h"
@@ -27,11 +27,16 @@
 // ============================================================================
 // Matmul BlockMmad —— 单 block (baseM x baseN) 的数据搬运与 MMAD 流水
 //
-// 职责：
+// 本文件提供两个并存的 SFINAE 特化（按 DispatchPolicy::fullLoadMode 派发）：
+//   - NO_FULL_LOAD_MODE（本文件，下方）：A、B 都按 K 切片每轮 GM→L1，双缓冲 ping-pong
+//   - A_FULL_LOAD_MODE （`matmul_block_mmad_a_full_load.h`）：A 一次性载入 L1
+//     并跨 N-tile 复用，B 仍按 K 切片流式搬入；本文件末尾 #include 进来
+//
+// 通用模板（NO_FULL_LOAD_MODE）职责：
 //   - L1 ping-pong 双缓冲（half-L1 = A|B 一组）
 //   - GM -> L1 搬运 A/B（NZ / ZN 格式）
 //   - L1 -> L0A/L0B 加载，按 baseK 切分
-//   - 调用 tensor_api 的 `Mad()`，在 L0C 上累加（fp32 或 int32，由 `L0CType` 决定）
+//   - 调用 tensor_api 的 `Mmad()`，在 L0C 上累加（fp32 或 int32，由 `L0CType` 决定）
 //   - 最后一次累加后 fixpipe 写回 GM（L0C -> CType，CType 决定 quantPre）
 //
 // [MODIFY] 新算子常见改点：
@@ -40,6 +45,8 @@
 //   2. 如需 4-stage L1 流水，改 `L1_BUFFER_NUM = 4`，并在 dispatch policy 里加 STAGES 模板参数。
 //   3. 如需不同 MMAD Trait（量化/MX），可替换 `AscendC::Te::MmadOperation` 为自定义
 //      MmadTrait 特化（见 tensor_api/tile_mmad_*.h 示例）。
+//   4. 切到 A 全载（A_FULL_LOAD_MODE）：DispatchPolicy 模板参数换为 `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>`
+//      即可在编译期分派到下方 #include 的 `matmul_block_mmad_a_full_load.h` 中的特化。
 // ============================================================================
 
 namespace Block {
@@ -76,9 +83,17 @@ public:
     // 硬件 MMAD/Fixpipe 静态检查会拒绝 int8 -> float 组合。
     using L0CType = AscendC::Std::conditional_t<
         AscendC::Std::is_same_v<AType, int8_t>, int32_t, float>;
-    static constexpr uint64_t HALF_L0C_SIZE = L0C_SIZE / DOUBLE_BUFFER_COUNT / sizeof(L0CType);
+    // [PITFALL] MakeMemPtr<Location::L0C, T>(offset) 与 L1 一样吃**字节偏移**，
+    // 不能再除 sizeof(L0CType)，否则 ping-pong 两个半区物理上重叠（fp32 时偏移仅
+    // 为正确值的 1/4），单 tile 不出问题、多 tile per core 时第二片 tile 直接覆写
+    // 第一片的 L0C 数据。
+    static constexpr uint64_t HALF_L0C_SIZE = L0C_SIZE / DOUBLE_BUFFER_COUNT;
     // [CONFIG] C0 cube granularity: bf16/fp16 = 16; int8/fp8 = 32; fp4 = 64。
     static constexpr uint64_t BLOCK_CUBE = 16UL;
+    // [CONFIG] dav-3510 上 L0C cube 边长**恒为 16**，与 L0CType 字节宽度无关——
+    // 不要写成 `32 / sizeof(L0CType)`（会算出 fp32/int32 时 = 8），fixpipe 会按 8
+    // 当 cube 边长沿 N 写出，stride 减半，每个 tile 仅前 16 列正确（baseN ≥ 32 必现）。
+    static constexpr uint64_t BLOCK_CUBE_L0C = 16UL;
 
     uint64_t m_{0UL};
     uint64_t n_{0UL};
@@ -94,8 +109,10 @@ public:
     bool enableL0cPingPong_{false};
 
     // A 按 NZ，B 按 ZN 存进 L1（Cube 的固定输入格式）。
-    using MakeLayoutAL1 = AscendC::Te::NzLayoutFormat<AType>;
-    using MakeLayoutBL1 = AscendC::Te::ZnLayoutFormat<BType>;
+    using MakeLayoutAL1 = AscendC::Te::FrameLayoutFormat<
+        AscendC::Te::NZLayoutPtn, AscendC::Std::Int<BLOCK_CUBE>>;
+    using MakeLayoutBL1 = AscendC::Te::FrameLayoutFormat<
+        AscendC::Te::ZNLayoutPtn, AscendC::Std::Int<BLOCK_CUBE>>;
 
     struct Params {
         GM_ADDR aGmAddr{nullptr};
@@ -143,7 +160,7 @@ public:
         baseN_ = Get<IDX_N_IDX>(l0TileShape);
         baseK_ = Get<IDX_K_IDX>(l0TileShape);
         enableL0cPingPong_ = enableL0cPingPong;
-        // [PITFALL] MakeL1memPtr<T>(offset) 接受的是 **字节偏移**。
+        // [PITFALL] MakeMemPtr<Location::L1, T>(offset) 接受的是 **字节偏移**。
         // aL1OneBuffer_/bL1OneBuffer_ 必须显式乘 sizeof(AType)/sizeof(BType)。
         aL1OneBuffer_ = baseM_ * kL1_ * sizeof(AType);
         bL1OneBuffer_ = baseN_ * kL1_ * sizeof(BType);
@@ -167,8 +184,10 @@ public:
         auto curM = Get<IDX_M_TILEIDX>(singleShape);
         auto curN = Get<IDX_N_TILEIDX>(singleShape);
         uint64_t l0cOffset = (l0cPingPong_ & 1) * HALF_L0C_SIZE;
-        auto layoutL0C = AscendC::Te::MakeL0CLayout(curM, curN);
-        auto tensorL0C = AscendC::Te::MakeTensor(AscendC::Te::MakeL0CmemPtr<L0CType>(l0cOffset), layoutL0C);
+        auto layoutL0C = AscendC::Te::MakeFrameLayout<
+            AscendC::Te::NZLayoutPtn, AscendC::Std::Int<BLOCK_CUBE_L0C>>(curM, curN);
+        auto tensorL0C = AscendC::Te::MakeTensor(
+            AscendC::Te::MakeMemPtr<AscendC::Te::Location::L0C, L0CType>(l0cOffset), layoutL0C);
 
         for (uint64_t iter0 = 0; iter0 < kL1Iter_; ++iter0) {
             uint64_t l1BufId = abL1LoopCnt_ & L1_BUFFER_MASK;
@@ -179,17 +198,19 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::MTE1_MTE2>(l1BufId);
             auto copyGM2L1 = AscendC::Te::MakeCopy(AscendC::Te::CopyGM2L1{});
             auto layoutAL1 = MakeLayoutAL1{}(curM, curKL1);
-            auto tensorAL1 =
-                AscendC::Te::MakeTensor(AscendC::Te::MakeL1memPtr<AType>(l1BufferAOffset_[l1BufId]), layoutAL1);
-            auto gmBlockA = gmA(AscendC::Te::MakeCoord(0, kL1Offset),
-                                AscendC::Te::MakeShape(curM, curKL1));
+            auto tensorAL1 = AscendC::Te::MakeTensor(
+                AscendC::Te::MakeMemPtr<AscendC::Te::Location::L1, AType>(l1BufferAOffset_[l1BufId]),
+                layoutAL1);
+            auto gmBlockA = gmA.Slice(
+                AscendC::Te::MakeCoord(0, kL1Offset), AscendC::Te::MakeShape(curM, curKL1));
             AscendC::Te::Copy(copyGM2L1, tensorAL1, gmBlockA);
 
             auto layoutBL1 = MakeLayoutBL1{}(curKL1, curN);
-            auto tensorBL1 =
-                AscendC::Te::MakeTensor(AscendC::Te::MakeL1memPtr<BType>(l1BufferBOffset_[l1BufId]), layoutBL1);
-            auto gmBlockB = gmB(AscendC::Te::MakeCoord(kL1Offset, 0),
-                                AscendC::Te::MakeShape(curKL1, curN));
+            auto tensorBL1 = AscendC::Te::MakeTensor(
+                AscendC::Te::MakeMemPtr<AscendC::Te::Location::L1, BType>(l1BufferBOffset_[l1BufId]),
+                layoutBL1);
+            auto gmBlockB = gmB.Slice(
+                AscendC::Te::MakeCoord(kL1Offset, 0), AscendC::Te::MakeShape(curKL1, curN));
             AscendC::Te::Copy(copyGM2L1, tensorBL1, gmBlockB);
 
             AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>(l1BufId);
@@ -204,20 +225,23 @@ public:
                 uint64_t l0Offset = HALF_L0_SIZE * l0BufId;
                 AscendC::WaitFlag<AscendC::HardEvent::M_MTE1>(l0BufId);
 
-                auto CopyL12L0 = AscendC::Te::MakeCopy(AscendC::Te::CopyL12L0{});
-                auto layoutAL0 = AscendC::Te::MakeNzLayout<AType>(curM, curKL0);
-                auto tensorAL0 =
-                    AscendC::Te::MakeTensor(AscendC::Te::MakeL0AmemPtr<AType>(l0Offset), layoutAL0);
-                auto tensorBlockAL1 =
-                    tensorAL1(AscendC::Te::MakeCoord(0, kL0Offset), AscendC::Te::MakeShape(curM, curKL0));
-                AscendC::Te::Copy(CopyL12L0, tensorAL0, tensorBlockAL1);
+                auto copyL12L0A = AscendC::Te::MakeCopy(AscendC::Te::CopyL12L0A{});
+                auto copyL12L0B = AscendC::Te::MakeCopy(AscendC::Te::CopyL12L0B{});
+                auto layoutAL0 = AscendC::Te::MakeFrameLayout<
+                    AscendC::Te::NZLayoutPtn, AscendC::Std::Int<BLOCK_CUBE>>(curM, curKL0);
+                auto tensorAL0 = AscendC::Te::MakeTensor(
+                    AscendC::Te::MakeMemPtr<AscendC::Te::Location::L0A, AType>(l0Offset), layoutAL0);
+                auto tensorBlockAL1 = tensorAL1.Slice(
+                    AscendC::Te::MakeCoord(0, kL0Offset), AscendC::Te::MakeShape(curM, curKL0));
+                AscendC::Te::Copy(copyL12L0A, tensorAL0, tensorBlockAL1);
 
-                auto layoutBL0 = AscendC::Te::MakeZnLayout<BType>(curKL0, curN);
-                auto tensorBL0 =
-                    AscendC::Te::MakeTensor(AscendC::Te::MakeL0BmemPtr<BType>(l0Offset), layoutBL0);
-                auto tensorBlockBL1 =
-                    tensorBL1(AscendC::Te::MakeCoord(kL0Offset, 0), AscendC::Te::MakeShape(curKL0, curN));
-                AscendC::Te::Copy(CopyL12L0, tensorBL0, tensorBlockBL1);
+                auto layoutBL0 = AscendC::Te::MakeFrameLayout<
+                    AscendC::Te::ZNLayoutPtn, AscendC::Std::Int<BLOCK_CUBE>>(curKL0, curN);
+                auto tensorBL0 = AscendC::Te::MakeTensor(
+                    AscendC::Te::MakeMemPtr<AscendC::Te::Location::L0B, BType>(l0Offset), layoutBL0);
+                auto tensorBlockBL1 = tensorBL1.Slice(
+                    AscendC::Te::MakeCoord(kL0Offset, 0), AscendC::Te::MakeShape(curKL0, curN));
+                AscendC::Te::Copy(copyL12L0B, tensorBL0, tensorBlockBL1);
 
                 AscendC::SetFlag<AscendC::HardEvent::MTE1_M>(l0BufId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE1_M>(l0BufId);
@@ -232,9 +256,9 @@ public:
                     static_cast<uint16_t>(curKL0),
                     mmadUnitFlag,
                     mmadCmatrixInitVal};
-                AscendC::Te::Mad(
-                    AscendC::Te::MmadAtom<AscendC::Te::MmadTraits<AscendC::Te::MmadOperation>>{},
-                    tensorL0C, tensorAL0, tensorBL0, mmadParams);
+                AscendC::Te::Mmad(
+                    AscendC::Te::MmadAtom<AscendC::Te::MmadTraits<AscendC::Te::MmadOperation>>{}.with(mmadParams),
+                    tensorL0C, tensorAL0, tensorBL0);
                 AscendC::SetFlag<AscendC::HardEvent::M_MTE1>(l0BufId);
                 l0PingPong_++;
             }
@@ -258,5 +282,10 @@ private:
     uint64_t l1BufferBOffset_[L1_BUFFER_NUM] = {0UL};
 };
 } // namespace Block
+
+// A_FULL_LOAD_MODE 的 SFINAE 特化在独立头文件中，
+// 在闭合 namespace 之后 include，使得两份特化都能被实例化。
+// launcher 切换 `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>` 即走 A 全载特化（详见 [MODIFY A1]）。
+#include "./matmul_block_mmad_a_full_load.h"
 
 #endif // MATMUL_BLOCK_MMAD_H
