@@ -944,12 +944,9 @@ main() {
         scenario_project_claude
         scenario_global_claude
 
-        # model-infer-optimize does not support global trae, skip it for trae scenarios
-        if [ "$TEAM" != "model-infer-optimize" ]; then
-            scenario_project_trae_ide
-            scenario_project_trae_plugin
-            scenario_project_trae_cli
-        fi
+        scenario_project_trae_ide
+        scenario_project_trae_plugin
+        scenario_project_trae_cli
 
         # Final cleanup per team
         cleanup_team_artifacts

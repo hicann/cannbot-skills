@@ -21,6 +21,7 @@ fi
 ok()   { echo -e "  ${DIM}${GREEN}✓${NC}${DIM} $*${NC}"; }
 warn() { echo -e "  ${YELLOW}⚠${NC}${DIM} $*${NC}"; }
 err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
+info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
 # Detect TRAE variant by scanning global config directories.
@@ -98,8 +99,12 @@ if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
     elif [ "$TOOL" = "trae" ]; then
-        echo "Error: Global installation is not supported for Trae. Use project-level instead."
-        exit 1
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$HOME/.marscode" ;;
+            cli)    CONFIG_ROOT="$HOME/.traecli" ;;
+            *)      CONFIG_ROOT="$HOME/.trae-cn" ;;
+        esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
     else
@@ -115,12 +120,12 @@ else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then
-        resolve_trae_config_root "$HOME"
-        if [ "$TRAE_VARIANT" = "plugin" ]; then
-            CONFIG_ROOT="$CONFIG_ROOT_BASE/.marscode"
-        else
-            CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae"
-        fi
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$CONFIG_ROOT_BASE/.marscode" ;;
+            cli)    CONFIG_ROOT="$CONFIG_ROOT_BASE/.traecli" ;;
+            *)      CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae" ;;
+        esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     else
@@ -311,18 +316,18 @@ echo ""
 if [ "$TOOL" = "trae" ]; then
     case "$TRAE_VARIANT" in
         ide)
-            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE IDE (.trae-cn / .trae)${NC}"
+            info "Detected: TRAE IDE (.trae-cn / .trae)"
             ;;
         plugin)
-            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE Plugin (.marscode)${NC}"
+            info "Detected: TRAE Plugin (.marscode)"
             ;;
         cli)
-            echo -e "  ${DIM}${CYAN}→${NC}${DIM} Detected: TRAE CLI (.traecli)${NC}"
+            info "Detected: TRAE CLI (.traecli)"
             ;;
         unknown)
-            echo -e "  ${YELLOW}⚠${NC}${DIM} TRAE variant not detected; defaulting to IDE path${NC}"
-            echo -e "  ${YELLOW}⚠${NC}${DIM} If you use TRAE Plugin, ensure ~/.marscode exists before re-running${NC}"
-            echo -e "  ${YELLOW}⚠${NC}${DIM} If you use TRAE CLI, ensure ~/.traecli exists before re-running${NC}"
+            warn "TRAE variant not detected; defaulting to IDE path"
+            warn "If you use TRAE Plugin, ensure ~/.marscode exists before re-running"
+            warn "If you use TRAE CLI, ensure ~/.traecli exists before re-running"
             ;;
     esac
     echo ""
