@@ -110,9 +110,17 @@ lcov --list ops.info_filtered | head -50
 | 缺口类型 | 补充策略 |
 |---------|---------|
 | 异常分支 | 添加 ACLNN_ERR_*/GRAPH_FAILED 用例 |
-| dtype分支 | 确保每个 dtype 都有测试 |
+| dtype分支 | 根据测试模块参考对应 guide 文档 |
 | 边界条件 | 添加空tensor、大shape用例 |
 | 格式分支 | 添加各 format 的测试用例 |
+
+**dtype 分支补充策略（按测试模块）**：
+
+| 测试模块 | 补充方法 | 参考 |
+|---------|---------|------|
+| opapi | 使用脚本提取 def 文件中的 dtype 组合 | 参考 [op-api-ut-guide.md](../ut-guide/op-api-ut-guide.md) 中的 "Dtype 排列组合校验" 章节 |
+| ophost | 分析 tiling 实现中的 dtype 分支逻辑 | [op-host-ut-guide.md](../ut-guide/op-host-ut-guide.md) |
+| opkernel | 分析 kernel 实现中的 dtype 分支逻辑 | [op-kernel-ut-guide.md](../ut-guide/op-kernel-ut-guide.md) |
 
 **完成检查**：
 - [ ] 所有新增测例通过
