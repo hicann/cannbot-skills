@@ -47,8 +47,6 @@ CANN安装完成后，如何验证安装是否成功？
 
 ## Expectations
 
-- [contains] npu-smi
-
 ---
 
 # Case 4: 离线安装顺序

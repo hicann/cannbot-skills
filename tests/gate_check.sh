@@ -27,6 +27,13 @@ echo "Repository root: $REPO_ROOT"
 # Phase 2: 检测变更文件
 # =========================================================================
 echo "=== Phase 2: Detect Changed Files ==="
+# 优先从 pr_filelist.txt 读取（CI 流水线在项目根目录生成）
+PR_FILELIST="$REPO_ROOT/pr_filelist.txt"
+if [ -f "$PR_FILELIST" ]; then
+    CHANGED_FILES=$(grep -v '^\s*$' "$PR_FILELIST" || true)
+    echo "[from pr_filelist.txt]"
+fi
+
 if [ -z "${CHANGED_FILES:-}" ]; then
     git fetch origin "$TARGET_BRANCH" --depth=1 2>/dev/null || true
     CHANGED_FILES=$(git diff --name-only "origin/$TARGET_BRANCH"...HEAD 2>/dev/null || true)
@@ -52,7 +59,7 @@ pip install -r "$FRAMEWORK_DIR/scripts/requirements.txt" --quiet
 # =========================================================================
 echo "=== Phase 4: Run Gate Check ==="
 
-python "$FRAMEWORK_DIR/scripts/main.py" \
+python3 "$FRAMEWORK_DIR/scripts/main.py" \
     --repo-root "$REPO_ROOT" \
     --changed-files "${changed_files_array[@]}"
 
