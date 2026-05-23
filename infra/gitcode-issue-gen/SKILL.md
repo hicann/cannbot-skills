@@ -49,6 +49,7 @@ AskUserQuestion 一次只问一个。
 
 | 变更特征 | 推荐模板 |
 |----------|----------|
+| RFC 提案 / 架构设计 / 重大变更 | request-for-comments |
 | 新增功能 / 新增算子 / 新增接口 | feature-request / requirement |
 | Bug 修复 / 异常处理 / 回退 | bug-report |
 | 文档变更 | documentation |

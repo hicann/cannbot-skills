@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-05-23】
+#### 新特性 New Features
+- 【Issue 模板】新增 `request-for-comments` RFC 提案模板，对齐 Rust/React RFC 格式，`gitcode-issue-gen` 同步支持。
+
 ### 【2026-05-19】
 #### 新特性 New Features
 - 新增支持 Triton 算子生成，适用于通过 Triton 开发高性能 Ascend NPU 算子。
