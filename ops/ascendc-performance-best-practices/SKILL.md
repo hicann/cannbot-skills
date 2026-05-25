@@ -14,6 +14,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 |------|---------|---------|------------|
 | MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16, MatMul_AllReduce | DAV_3510 | ✅ [性能优化指南](reference/matmul/guide.md) |
 | RadixSort 基数排序类 | TopK, KthValue, Sort, ArgSort, ArgMax/Min | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/sort/radix_sort.md) |
+| Scalar 编码与诊断 | 任意 ScalarBound 算子 | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/scalar/guide.md) |
 | Reduction 归约类 | ReduceSum, Softmax, LayerNorm, ArgMax | — | 📋 规划中 |
 | Elementwise 逐元素类 | Sin, Cos, Abs, Exp | — | 📋 规划中 |
 | Broadcast 广播类 | Add, Mul, Sub | — | 📋 规划中 |
