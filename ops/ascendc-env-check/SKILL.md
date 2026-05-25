@@ -72,6 +72,6 @@ bash scripts/check_env.sh
 
 - **NPU 不可见**：检查 `npu-smi list` 是否能识别设备
 - **算子运行失败**：优先运行 `check_env.sh` 检查环境配置
-- **设备被占用**：使用 `npu-smi info` 查看设备状态
+- **确认是否有进程占用 NPU**：使用 `npu-smi info -t usages -i <device_id>` 查看运行中的进程；注意空闲设备仍会有少量 HBM 被驱动占用（正常现象），不应误判为设备被占用
 
 详细排查见 [troubleshooting.md](references/troubleshooting.md)
