@@ -41,7 +41,7 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.0.2"
+VERSION="1.0.3"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
