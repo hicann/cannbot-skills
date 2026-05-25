@@ -1,0 +1,16 @@
+{
+  "name": "catlass-op-generator",
+  "description": "Catlass Kernel 直调算子开发 Team。基于 ops-direct-invoke 工程框架，针对 catlass 模板拼装 Kernel：含完整工作流（设计→实现→审查→性能验收）、3 个 catlass 专属 Agent（Architect / Developer / Reviewer），复用 catlass-op-{design,develop,perf-tune} 与 ascendc 通用 skill。算子工程结构与通用 Ascend C 直调完全一致。",
+  "version": "1.0.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "MIT",
+  "agents": [
+    "./agents/catlass-op-architect.md",
+    "./agents/catlass-op-generator.md",
+    "./agents/catlass-op-reviewer.md"
+  ]
+}

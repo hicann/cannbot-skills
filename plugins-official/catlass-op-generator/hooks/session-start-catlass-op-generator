@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+# SessionStart hook for CANNBot (catlass-op-generator) plugin.
+#
+# On each session start:
+#   1. Ensure asc-devkit exists; clone + clean if missing (shared by all CANNBot plugins)
+#   2. Inject AGENTS.md content as session context (with absolute paths)
+#   3. Hint catlass source readiness check (catlass clone is user's responsibility)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ASC_DEVKIT_DIR="${PLUGIN_ROOT}/asc-devkit"
+CLEAN_SCRIPT="${PLUGIN_ROOT}/skills/ascendc-docs-search/scripts/clean_markdown.py"
+
+# --- Step 1: Ensure asc-devkit is available (shared utility) ---
+if [ ! -d "$ASC_DEVKIT_DIR" ]; then
+  git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null || true
+  if [ -d "$ASC_DEVKIT_DIR" ] && [ -f "$CLEAN_SCRIPT" ]; then
+    python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 || true
+  fi
+fi
+
+# --- Step 1.5: Export ASC_DEVKIT_DIR for Bash tool invocations ---
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -d "$ASC_DEVKIT_DIR" ]; then
+  printf 'export ASC_DEVKIT_DIR=%q\n' "$ASC_DEVKIT_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+# --- Step 2: Build session context ---
+AGENTS_MD="${PLUGIN_ROOT}/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ]; then
+  exit 0
+fi
+
+agents_content=$(sed -n '/^---$/,/^---$/!p' "$AGENTS_MD" 2>/dev/null || cat "$AGENTS_MD")
+
+path_guide="## CANNBot · Catlass Plugin Installation Paths
+
+All \`workflows/\` references in this document resolve to absolute paths:
+- \`workflows/task-prompts.md\` → \`${PLUGIN_ROOT}/workflows/task-prompts.md\`
+- \`workflows/development-guide.md\` → \`${PLUGIN_ROOT}/workflows/development-guide.md\`
+- \`workflows/scripts/init_operator_project.sh\` → \`${PLUGIN_ROOT}/workflows/scripts/init_operator_project.sh\`
+- \`workflows/scripts/verify_environment.sh\` → \`${PLUGIN_ROOT}/workflows/scripts/verify_environment.sh\`
+- \`workflows/scripts/verify_catlass_ready.sh\` → \`${PLUGIN_ROOT}/workflows/scripts/verify_catlass_ready.sh\`
+- \`workflows/scripts/verify_cmake_config.py\` → \`${PLUGIN_ROOT}/workflows/scripts/verify_cmake_config.py\`
+- \`workflows/templates/\` → \`${PLUGIN_ROOT}/workflows/templates/\`
+- \`workflows/references/\` → \`${PLUGIN_ROOT}/workflows/references/\`
+- \`asc-devkit/\` → \`${ASC_DEVKIT_DIR}/\`
+
+Catlass source code (must be at workspace root, sibling of operators/):
+- \`./catlass/include\`, \`./catlass/examples\`, \`./catlass/docs\`
+- If missing, ask user to run: \`git clone https://gitcode.com/cann/catlass.git\` at the workspace root.
+- Forbidden: cloning catlass into \`operators/{operator_name}/\` (violates C2 review item).
+
+Paths starting with \`operators/{operator_name}/\` are relative to the user's current working directory."
+
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+path_guide_escaped=$(escape_for_json "$path_guide")
+agents_escaped=$(escape_for_json "$agents_content")
+session_context="<CANNBOT_CONTEXT>\nYou are CANNBot - Catlass Ascend C Kernel Development Orchestrator.\n\n${path_guide_escaped}\n\n${agents_escaped}\n</CANNBOT_CONTEXT>"
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  cat <<EOH
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${session_context}"
+  }
+}
+EOH
+else
+  cat <<EOH
+{
+  "additional_context": "${session_context}"
+}
+EOH
+fi
+
+exit 0
