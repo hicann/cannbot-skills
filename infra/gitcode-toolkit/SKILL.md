@@ -2,7 +2,7 @@
 name: gitcode-toolkit
 description: GitCode 协作通用基础参考（内部参考，不直接触发）。提供 GitCode API、Token 配置、URL 解析、日志规范、变更展示，Git 克隆/分支/diff/log/remote 通用操作，以及 PR 创建工作流（API/模板/head 格式等）等共享文档。供 gitcode-pr-handler、gitcode-issue-gen、gitcode-issue-handler 等 GitCode 协作类 skill 通过相对路径引用本目录下的 references/ 与本文档章节使用，本 skill 自身不响应用户触发。
 disable-model-invocation: true
-license: MIT
+license: CANN-2.0
 ---
 
 # GitCode Toolkit

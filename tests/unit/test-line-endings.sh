@@ -46,11 +46,21 @@ EXCLUDE_DIRS=(
     ".cursor"
 )
 
-# Check if a file is binary using the 'file' command
+# Check if a file is binary using the 'file' command (with fallback for containers without it)
 is_binary() {
     local f="$1"
     local mime
-    mime=$(file -b --mime-type "$f" 2>/dev/null || echo "unknown")
+    if command -v file &>/dev/null; then
+        mime=$(file -b --mime-type "$f" 2>/dev/null || echo "unknown")
+    else
+        # Fallback: judge by extension when 'file' is unavailable
+        case "$f" in
+            *.md|*.sh|*.py|*.json|*.yaml|*.yml|*.js|*.ts|*.xml|*.txt|*.cfg|*.ini|*.toml)
+                mime="text/plain" ;;
+            *)
+                mime="unknown" ;;
+        esac
+    fi
     case "$mime" in
         text/*|application/json|application/xml|application/javascript|application/x-shellscript|inode/x-empty)
             return 1 ;;

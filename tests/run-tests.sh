@@ -35,8 +35,9 @@ RUN_ALL=false
 RUN_EVAL_RESULTS=false
 PLATFORM="opencode"
 OUTPUT_FORMAT="text"
+HTML_OUTPUT_PATH=""
 VERBOSE=true
-TIMEOUT=300
+TIMEOUT=600
 SPECIFIC_TEST=""
 CATEGORY=""
 TEST_RESULTS=()
@@ -72,8 +73,9 @@ Options:
   --platform PLATFORM  Specify platform: claude, opencode (default: opencode)
   --test TEST          Run specific test file
   --category CAT       Run tests in specific category
-  --output FORMAT      Output format: text, json (default: text)
-  --timeout SECONDS    Test timeout (default: 300)
+  --output FORMAT      Output format: text, json, html (default: text)
+  --output-path PATH   Write html report to path (default: tests/test-ut-report.html)
+  --timeout SECONDS    Test timeout (default: 600)
   --verbose            Enable verbose output
   --list               List available tests
 
@@ -102,6 +104,8 @@ Examples:
   $0 --category behavior          # Run behavior tests
   $0 --test unit/skills/test-structure.sh
   $0 --output json                # JSON output
+  $0 --output html                # HTML report for local debugging
+  $0 --output html --output-path report.html
   $0 --incremental                # Only test changed components (CI/CD)
   $0 --incremental --base-branch develop
   $0 --eval-results               # Check skill evaluation results
@@ -219,6 +223,10 @@ parse_args() {
                 OUTPUT_FORMAT="$2"
                 shift 2
                 ;;
+            --output-path)
+                HTML_OUTPUT_PATH="$2"
+                shift 2
+                ;;
             --timeout)
                 TIMEOUT="$2"
                 shift 2
@@ -249,6 +257,8 @@ parse_args() {
                 ;;
             --incremental)
                 EVAL_INCREMENTAL=true
+                INCREMENTAL_MODE=true
+                has_mode_flag=true
                 shift
                 ;;
             --base-branch)
@@ -257,12 +267,6 @@ parse_args() {
                 shift 2
                 ;;
             --incremental-ci)
-                INCREMENTAL_MODE=true
-                has_mode_flag=true
-                shift
-                ;;
-            --incremental)
-                # Alias for --incremental-ci
                 INCREMENTAL_MODE=true
                 has_mode_flag=true
                 shift
@@ -589,24 +593,21 @@ run_test_file() {
 
     if [[ ! -f "$test_path" ]]; then
         echo "  [SKIP] Test file not found: $test_file"
-        TEST_RESULTS+=("skip:$test_file:0:0")
+        TEST_RESULTS+=("skip:$test_file:0:0:")
         return 0
     fi
 
     print_section "Running: $test_file"
 
-    if $VERBOSE; then
-        if timeout $TIMEOUT bash "$test_path"; then
-            status="pass"
-        else
-            status="fail"
-        fi
-    else
-        if output=$(timeout $TIMEOUT bash "$test_path" 2>&1); then
-            status="pass"
-        else
-            status="fail"
-        fi
+    # Always capture output silently; compact summary printed after.
+    local test_outfile=$(mktemp)
+    local exit_code=0
+    timeout $TIMEOUT bash "$test_path" > "$test_outfile" 2>&1 || exit_code=$?
+    output=$(cat "$test_outfile")
+    rm -f "$test_outfile"
+
+    if [[ $exit_code -ne 0 ]]; then
+        status="fail"
     fi
 
     local end_time=$(date +%s)
@@ -615,37 +616,21 @@ run_test_file() {
     # Count warnings in output
     if [[ -n "$output" ]]; then
         warning_count=$(echo "$output" | grep -cE "\[WARN\]" 2>/dev/null || true)
-        # Ensure it's a valid number
         [[ "$warning_count" =~ ^[0-9]+$ ]] || warning_count=0
     fi
 
-    case "$status" in
-        pass)
-            print_pass "(${duration}s)"
-            # Show warnings if present in output
-            if [[ "$warning_count" -gt 0 ]]; then
-                echo ""
-                echo "$output" | grep -E "\[WARN\]" | sed 's/^/    /'
-                echo ""
-            fi
-            TEST_RESULTS+=("pass:$test_file:$duration:$warning_count")
-            record_test "pass" "$test_file" "$duration"
-            ;;
-        fail)
-            print_fail "(${duration}s)"
-            if [[ -n "$output" ]]; then
-                echo ""
-                echo -e "  ${YELLOW}--- Failure Details ---${NC}"
-                echo "$output" | sed 's/^/    /'
-                echo -e "  ${YELLOW}--- End ---${NC}"
-                echo ""
-            else
-                echo "  (run with --verbose for more details)"
-            fi
-            TEST_RESULTS+=("fail:$test_file:$duration:$warning_count")
-            record_test "fail" "$test_file" "$duration"
-            ;;
-    esac
+    # Base64-encode output for HTML report
+    local output_b64=""
+    if [[ -n "$output" ]]; then
+        output_b64=$(printf '%s' "$output" | base64 -w0)
+    fi
+
+    # Print compact result (verbose mode never dumps full raw output;
+    # failure details are already extracted inline by print_compact_result)
+    print_compact_result "$output" "$status" "$duration" false
+
+    TEST_RESULTS+=("$status:$test_file:$duration:$warning_count:$output_b64")
+    record_test "$status" "$test_file" "$duration"
 
     [ "$status" == "pass" ]
 }
@@ -774,6 +759,7 @@ Repository: $SKILLS_DIR
 "
 
     run_test_file "$test_path" "medium"
+    print_summary 1
 }
 
 print_summary() {
@@ -785,13 +771,13 @@ print_summary() {
     local total_duration=0
 
     for result in "${TEST_RESULTS[@]}"; do
-        IFS=':' read -r status file duration warn_count <<< "$result"
+        IFS=':' read -r status file duration warn_count _rest <<< "$result"
         case "$status" in
             pass) ((passed++)) || true ;;
             fail) ((failed++)) || true ;;
             skip) ((skipped++)) || true ;;
         esac
-        # Add warning count (field 4)
+        # Add warning count (field 4; field 5 is base64 output)
         if [[ -n "$warn_count" ]] && [[ "$warn_count" =~ ^[0-9]+$ ]]; then
             warnings=$((warnings + warn_count))
         fi
@@ -825,9 +811,56 @@ print_summary() {
         fi
     fi
 
+    # Show failure recap when there are failures
+    if [[ $failed -gt 0 ]]; then
+        echo ""
+        echo "----------------------------------------"
+        echo -e " ${RED}${BOLD}Failed Tests Recap${NC}"
+        echo "----------------------------------------"
+        echo ""
+        local idx=0
+        for result in "${TEST_RESULTS[@]}"; do
+            IFS=':' read -r status file duration warn_count output_b64 <<< "$result"
+            if [[ "$status" != "fail" ]]; then
+                continue
+            fi
+            idx=$((idx + 1))
+            echo -e "  ${RED}${idx}.${NC} ${file} (${duration}s)"
+
+            # Decode and extract key failure info
+            if [[ -n "$output_b64" ]]; then
+                local decoded
+                decoded=$(printf '%s' "$output_b64" | base64 -d 2>/dev/null || echo "")
+                if [[ -n "$decoded" ]]; then
+                    # Show FAIL lines first
+                    local fail_lines
+                    fail_lines=$(echo "$decoded" | grep -E '\[FAIL\]' | head -10)
+                    if [[ -n "$fail_lines" ]]; then
+                        echo "$fail_lines" | sed 's/^/      /'
+                    fi
+                    # Show ERROR lines if present
+                    local err_lines
+                    err_lines=$(echo "$decoded" | grep -E '\[ERROR\]' | head -5)
+                    if [[ -n "$err_lines" ]]; then
+                        echo "$err_lines" | sed 's/^/      /'
+                    fi
+                fi
+            fi
+            echo ""
+        done
+    fi
+
+    # Always generate HTML report for local debugging (non-fatal on failure)
+    output_html "$passed" "$failed" "$skipped" "$warnings" "$total_duration" || true
+
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
         output_json "$passed" "$failed" "$skipped" "$warnings" "$total_duration"
     fi
+
+    # Print HTML report path so developer can open it
+    local report_path="${HTML_OUTPUT_PATH:-$SCRIPT_DIR/test-ut-report.html}"
+    echo ""
+    echo -e "  ${BLUE}HTML Report:${NC} file://$report_path"
 
     if [[ $failed -gt 0 ]]; then
         print_status_failed
@@ -871,6 +904,578 @@ output_json() {
   "tests": $test_json
 }
 EOF
+}
+
+# =============================================================================
+# ANSI to HTML conversion (lightweight)
+# =============================================================================
+
+ansi_to_html() {
+    sed \
+        -e 's/\x1b\[0;31m/<span class="a-r">/g' \
+        -e 's/\x1b\[0;32m/<span class="a-g">/g' \
+        -e 's/\x1b\[0;33m/<span class="a-y">/g' \
+        -e 's/\x1b\[0;34m/<span class="a-b">/g' \
+        -e 's/\x1b\[0;36m/<span class="a-c">/g' \
+        -e 's/\x1b\[1m/<span class="a-B">/g' \
+        -e 's/\x1b\[0m/<\/span>/g'
+}
+
+# =============================================================================
+# HTML Report Generator
+# =============================================================================
+
+output_html() {
+    local passed="$1"
+    local failed="$2"
+    local skipped="$3"
+    local warnings="$4"
+    local duration="$5"
+    local report_path="${HTML_OUTPUT_PATH:-$SCRIPT_DIR/test-ut-report.html}"
+
+    # Serialize TEST_RESULTS to a temp file for Python to consume
+    local data_file=$(mktemp)
+    for result in "${TEST_RESULTS[@]}"; do
+        printf '%s\n' "$result" >> "$data_file"
+    done
+
+    python3 - "$passed" "$failed" "$skipped" "$warnings" "$duration" "$report_path" "$PLATFORM" "$data_file" <<'PYEOF'
+import sys, base64, html as html_module, datetime
+
+passed, failed, skipped, warnings, duration, report_path, platform, data_file = sys.argv[1:9]
+
+# ---------------------------------------------------------------------------
+# Parse serialized test results
+# ---------------------------------------------------------------------------
+tests = []
+with open(data_file, "r", encoding="utf-8", errors="replace") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(":", 4)
+        status = parts[0]
+        name = parts[1]
+        dur = parts[2]
+        warn_cnt = parts[3] if len(parts) > 3 else "0"
+        output_b64 = parts[4] if len(parts) > 4 else ""
+        output_text = ""
+        if output_b64:
+            try:
+                output_text = base64.b64decode(output_b64).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+        tests.append({
+            "status": status,
+            "name": name,
+            "duration": dur,
+            "warnings": warn_cnt,
+            "output": output_text,
+        })
+
+# Sort: fail first, then skip, then pass
+order = {"fail": 0, "skip": 1, "pass": 2}
+tests.sort(key=lambda t: (order.get(t["status"], 3), t["name"]))
+
+status_meta = {
+    "pass": ("通过", "pass"),
+    "fail": ("失败", "fail"),
+    "skip": ("跳过", "skip"),
+}
+
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ---------------------------------------------------------------------------
+# ANSI to HTML helper
+# ---------------------------------------------------------------------------
+def ansi_to_html(text):
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    repl = [
+        ("\x1b[0;31m", '<span class="a-r">'),
+        ("\x1b[0;32m", '<span class="a-g">'),
+        ("\x1b[0;33m", '<span class="a-y">'),
+        ("\x1b[0;34m", '<span class="a-b">'),
+        ("\x1b[0;36m", '<span class="a-c">'),
+        ("\x1b[1m", '<span class="a-B">'),
+        ("\x1b[0m", '</span>'),
+    ]
+    for old, new in repl:
+        text = text.replace(old, new)
+    return text
+
+# ---------------------------------------------------------------------------
+# Build HTML
+# ---------------------------------------------------------------------------
+html_body = []
+html_body.append(f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CANN Skills 测试报告</title>
+<style>
+:root {{
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --pass: #3fb950;
+  --fail: #f85149;
+  --skip: #d29922;
+  --warn: #d29922;
+  --info: #58a6ff;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}}
+.dashboard {{
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 1.5rem;
+}}
+.dashboard h1 {{
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+}}
+.stats {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}}
+.stat {{
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  min-width: 90px;
+  text-align: center;
+}}
+.stat .count {{
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+}}
+.stat.pass {{ border-color: var(--pass); }}
+.stat.pass .count {{ color: var(--pass); }}
+.stat.fail {{ border-color: var(--fail); }}
+.stat.fail .count {{ color: var(--fail); }}
+.stat.skip {{ border-color: var(--skip); }}
+.stat.skip .count {{ color: var(--skip); }}
+.stat.warn {{ border-color: var(--warn); }}
+.stat.warn .count {{ color: var(--warn); }}
+.meta {{
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}}
+.toolbar {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 140px;
+  z-index: 9;
+}}
+.toolbar input {{
+  flex: 1;
+  min-width: 200px;
+  padding: 0.4rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}}
+.toolbar button {{
+  padding: 0.4rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}}
+.toolbar button:hover {{
+  border-color: var(--info);
+}}
+#test-list {{
+  padding: 1rem 1.5rem 3rem;
+  max-width: 1200px;
+}}
+.test-card {{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}}
+.test-card summary {{
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}}
+.test-card summary::-webkit-details-marker {{ display: none; }}
+.badge {{
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  min-width: 48px;
+  text-align: center;
+}}
+.badge.pass {{ background: rgba(63,185,80,0.15); color: var(--pass); }}
+.badge.fail {{ background: rgba(248,81,73,0.15); color: var(--fail); }}
+.badge.skip {{ background: rgba(210,153,34,0.15); color: var(--skip); }}
+.test-card .name {{
+  flex: 1;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.9rem;
+}}
+.test-card .duration {{
+  color: var(--muted);
+  font-size: 0.85rem;
+}}
+.test-card .warn-count {{
+  color: var(--warn);
+  font-size: 0.8rem;
+}}
+.log {{
+  margin: 0;
+  padding: 1rem;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 600px;
+  overflow: auto;
+}}
+.a-r {{ color: #f85149; }}
+.a-g {{ color: #3fb950; }}
+.a-y {{ color: #d29922; }}
+.a-b {{ color: #58a6ff; }}
+.a-c {{ color: #39c5cf; }}
+.a-B {{ font-weight: 700; }}
+.empty-tip {{
+  text-align: center;
+  color: var(--muted);
+  padding: 3rem;
+}}
+.fix-guide {{
+  max-width: 1200px;
+  margin: 0 1.5rem 2rem;
+  background: var(--surface);
+  border: 1px solid var(--fail);
+  border-radius: 8px;
+  overflow: hidden;
+}}
+.fix-guide summary {{
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: rgba(248,81,73,0.08);
+}}
+.fix-guide summary::-webkit-details-marker {{ display: none; }}
+.fix-guide .guide-title {{
+  flex: 1;
+  font-weight: 700;
+  color: var(--fail);
+}}
+.fix-guide .guide-body {{
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}}
+.fix-guide .guide-body h3 {{
+  font-size: 0.95rem;
+  color: var(--info);
+  margin: 1rem 0 0.5rem;
+}}
+.fix-guide .guide-body h3:first-child {{ margin-top: 0; }}
+.fix-guide .guide-body code {{
+  background: var(--bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+}}
+.fix-guide .guide-body pre {{
+  background: var(--bg);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}}
+.fix-guide .do-dont {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}}
+.fix-guide .do, .fix-guide .dont {{
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}}
+.fix-guide .do  {{ background: rgba(63,185,80,0.1); border-left: 3px solid var(--pass); }}
+.fix-guide .dont {{ background: rgba(248,81,73,0.1); border-left: 3px solid var(--fail); }}
+.fix-guide .do ul, .fix-guide .dont ul {{
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}}
+.fix-guide .copy-btn {{
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  background: var(--info);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+}}
+.fix-guide .copy-btn:hover {{ opacity: 0.85; }}
+.fix-guide .copy-btn.copied {{ background: var(--pass); }}
+@media (max-width: 640px) {{
+  .stats {{ justify-content: center; }}
+  .toolbar {{ top: 180px; }}
+  .fix-guide .do-dont {{ grid-template-columns: 1fr; }}
+}}
+</style>
+</head>
+<body>
+<header class="dashboard">
+  <h1>CANN Skills 测试报告</h1>
+  <div class="stats">
+    <div class="stat pass"><span class="count">{passed}</span>通过</div>
+    <div class="stat fail"><span class="count">{failed}</span>失败</div>
+    <div class="stat skip"><span class="count">{skipped}</span>跳过</div>
+    <div class="stat warn"><span class="count">{warnings}</span>警告</div>
+    <div class="stat time"><span class="count">{duration}s</span>耗时</div>
+  </div>
+  <div class="meta">Platform: {platform} | {timestamp}</div>
+</header>
+<div class="toolbar">
+  <input type="text" id="search" placeholder="搜索测试名称..." oninput="doSearch()">
+  <button onclick="filter('all')">全部</button>
+  <button onclick="filter('fail')">仅失败</button>
+  <button onclick="filter('pass')">仅通过</button>
+  <button onclick="filter('skip')">仅跳过</button>
+  <button onclick="expandAll()">展开全部</button>
+  <button onclick="collapseAll()">收起全部</button>
+</div>
+<main id="test-list">
+''')
+
+for t in tests:
+    st_label, st_cls = status_meta.get(t["status"], (t["status"], t["status"]))
+    warn_badge = f'<span class="warn-count">⚠ {t["warnings"]} 警告</span>' if t["warnings"] and int(t["warnings"]) > 0 else ''
+    output_html_text = ansi_to_html(t["output"])
+    html_body.append(f'''  <details class="test-card {st_cls}" data-name="{html_module.escape(t["name"])}" data-status="{st_cls}">
+    <summary>
+      <span class="badge {st_cls}">{st_label}</span>
+      <span class="name">{html_module.escape(t["name"])}</span>
+      {warn_badge}
+      <span class="duration">{t["duration"]}s</span>
+    </summary>
+    <pre class="log">{output_html_text}</pre>
+  </details>
+''')
+
+html_body.append(f'''</main>
+''')
+
+# Show fix guide only when there are failures
+if int(failed) > 0:
+    fix_prompt = """\
+# PR 提交前 UT Test 自检修复
+
+你的 PR 需要确保 `./tests/run-tests.sh --fast` 全部通过。
+根据下方失败报告定位根因，修改源文件来消除失败项。
+
+## 执行步骤
+
+### 1. 收集失败项
+```bash
+cd <项目根目录>
+./tests/run-tests.sh --fast
+```
+记录 [FAIL] 项及其错误信息；超时时可单独运行失败的子脚本。
+
+### 2. 定位源文件
+根据组件名找到源文件路径，结合错误描述判断修改内容。
+
+### 3. 修改源文件（最小化修复）
+只改项目业务文件，不做无关重构。
+
+### 4. 验证
+```bash
+./tests/run-tests.sh --fast
+```
+确认 `Failed: 0` 且 `STATUS: PASSED`。
+
+## 约束
+- 允许: 修改 SKILL.md / AGENT.md / AGENTS.md / plugin.json / init.sh / 目录结构 / marketplace.json
+- 禁止: 修改 tests/ 目录下任何文件（测试脚本、lib 库、配置）
+- 禁止: 跳过/绕过/禁用任何测试规则
+
+## 分析框架
+1. 测试要求什么？→ 2. 哪个文件没满足？→ 3. 为什么没满足？→ 4. 怎么最小修复？→ 5. 全量重跑验证\
+"""
+    html_body.append(f'''<details class="fix-guide" open>
+    <summary>
+      <span>&#128736;</span>
+      <span class="guide-title">UT Test 失败修复指南 — 将此提示词粘贴给 AI 自动修复</span>
+      <button class="copy-btn" onclick="copyFixPrompt()" id="copy-btn">复制提示词</button>
+    </summary>
+    <div class="guide-body">
+      <h3>执行流程</h3>
+      <p><strong>Step 1:</strong> 运行 <code>./tests/run-tests.sh --fast</code> 收集所有 <code>[FAIL]</code> 项。</p>
+      <p><strong>Step 2:</strong> 按失败信息反向定位源文件 — 组件名 → 源文件路径 → 判断修改内容。</p>
+      <p><strong>Step 3:</strong> 只修改项目源文件（SKILL.md、AGENT.md、plugin.json、init.sh 等），最小化修复。</p>
+      <p><strong>Step 4:</strong> 重新运行 <code>./tests/run-tests.sh --fast</code>，确认 <code>Failed: 0</code>。</p>
+
+      <div class="do-dont">
+        <div class="do">
+          <strong>&#10004; 允许</strong>
+          <ul>
+            <li>修改 SKILL.md / AGENT.md / AGENTS.md</li>
+            <li>修改 plugin.json / 目录结构</li>
+            <li>修改 init.sh / marketplace.json</li>
+            <li>修复失效链接、补充缺失字段</li>
+          </ul>
+        </div>
+        <div class="dont">
+          <strong>&#10008; 禁止</strong>
+          <ul>
+            <li>修改 tests/ 目录下任何文件</li>
+            <li>修改测试脚本逻辑或阈值</li>
+            <li>修改测试 lib 库或 helper</li>
+            <li>跳过/绕过/禁用测试规则</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>分析框架</h3>
+      <p>测试要求什么 → 哪个文件没满足 → 为什么没满足 → 怎么最小修复 → 全量重跑验证</p>
+
+      <h3>&#128203; 可复制提示词（粘贴给 AI 助手）</h3>
+      <pre id="fix-prompt-text">{html_module.escape(fix_prompt)}</pre>
+    </div>
+  </details>
+''')
+
+html_body.append(f'''<script>
+function filter(status) {{
+  const cards = document.querySelectorAll('.test-card');
+  let visible = 0;
+  cards.forEach(c => {{
+    const show = status === 'all' || c.dataset.status === status;
+    c.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+  const list = document.getElementById('test-list');
+  let tip = list.querySelector('.empty-tip');
+  if (visible === 0) {{
+    if (!tip) {{
+      tip = document.createElement('div');
+      tip.className = 'empty-tip';
+      tip.textContent = '没有匹配的测试';
+      list.appendChild(tip);
+    }}
+    tip.style.display = '';
+  }} else if (tip) {{
+    tip.style.display = 'none';
+  }}
+}}
+function doSearch() {{
+  const q = document.getElementById('search').value.toLowerCase();
+  const cards = document.querySelectorAll('.test-card');
+  let visible = 0;
+  cards.forEach(c => {{
+    const show = !q || c.dataset.name.toLowerCase().includes(q);
+    c.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+  const list = document.getElementById('test-list');
+  let tip = list.querySelector('.empty-tip');
+  if (visible === 0) {{
+    if (!tip) {{
+      tip = document.createElement('div');
+      tip.className = 'empty-tip';
+      tip.textContent = '没有匹配的测试';
+      list.appendChild(tip);
+    }}
+    tip.style.display = '';
+  }} else if (tip) {{
+    tip.style.display = 'none';
+  }}
+}}
+function expandAll() {{
+  document.querySelectorAll('.test-card').forEach(c => c.open = true);
+}}
+function collapseAll() {{
+  document.querySelectorAll('.test-card').forEach(c => c.open = false);
+}}
+// Auto-expand failed tests on load
+document.querySelectorAll('.test-card.fail').forEach(c => c.open = true);
+function copyFixPrompt() {{
+  const el = document.getElementById('fix-prompt-text');
+  const btn = document.getElementById('copy-btn');
+  if (!el || !btn) return;
+  // The pre text is HTML-escaped; decode it before copying
+  const txt = document.createElement('textarea');
+  txt.innerHTML = el.innerHTML;
+  navigator.clipboard.writeText(txt.value).then(() => {{
+    btn.textContent = '已复制!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = '复制提示词'; btn.classList.remove('copied'); }}, 2000);
+  }}).catch(() => {{
+    // Fallback for non-HTTPS contexts
+    txt.style.position = 'fixed'; txt.style.left = '-9999px';
+    document.body.appendChild(txt);
+    txt.select(); document.execCommand('copy');
+    document.body.removeChild(txt);
+    btn.textContent = '已复制!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = '复制提示词'; btn.classList.remove('copied'); }}, 2000);
+  }});
+}}
+</script>
+</body>
+</html>''')
+
+with open(report_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(html_body))
+
+print(f"HTML report written to: {report_path}")
+PYEOF
+
+    rm -f "$data_file"
 }
 
 # =============================================================================
@@ -991,6 +1596,18 @@ master() {
         run_specific_test || exit_code=$?
     else
         run_all_tests || exit_code=$?
+    fi
+
+    # Auto-open HTML report in browser when in desktop environment
+    if [[ "$OUTPUT_FORMAT" == "html" ]]; then
+        local report_path="${HTML_OUTPUT_PATH:-$SCRIPT_DIR/test-ut-report.html}"
+        if [[ -f "$report_path" ]]; then
+            if command -v xdg-open &>/dev/null; then
+                xdg-open "$report_path" &>/dev/null &
+            elif command -v open &>/dev/null; then
+                open "$report_path" &>/dev/null &
+            fi
+        fi
     fi
 
     exit $exit_code

@@ -100,14 +100,46 @@ PYEOF
 # ============================================
 
 # Determine base ref for comparison
-BASE_REF="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-origin/master}"
-
-# Try three-dot diff against base, fallback to parent commit
-CHANGED_FILES=$(git -C "$SKILLS_DIR" diff --name-only "${BASE_REF}...HEAD" 2>/dev/null || true)
-if [ -z "$CHANGED_FILES" ]; then
-    BASE_REF="HEAD~1"
-    CHANGED_FILES=$(git -C "$SKILLS_DIR" diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+# Priority: 1) CI env var  2) origin/master  3) HEAD~1
+BASE_REF="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}"
+if [ -z "$BASE_REF" ]; then
+    if git -C "$SKILLS_DIR" rev-parse --verify "origin/master" &>/dev/null; then
+        BASE_REF="origin/master"
+    else
+        BASE_REF="HEAD~1"
+    fi
 fi
+
+# Verify the ref actually exists locally
+if ! git -C "$SKILLS_DIR" rev-parse --verify "$BASE_REF" &>/dev/null; then
+    echo -e "  ${YELLOW}[WARN]${NC} Base ref '$BASE_REF' not found in local git repository"
+    echo -e "  ${YELLOW}[WARN]${NC} Version comparison skipped (run 'git fetch origin' or set CI_MERGE_REQUEST_TARGET_BRANCH_NAME)"
+    echo ""
+    print_section_header "Version Check"
+    for team in $TEAMS_TO_TEST; do
+        [ -z "$team" ] && continue
+        if is_incremental_mode && ! should_test_team "$team"; then
+            continue
+        fi
+        print_skip "$team: base ref unavailable"
+        ((skip_count++)) || true
+    done
+    echo ""
+    echo "========================================"
+    echo -e " ${BOLD}Version Care Test Summary${NC}"
+    echo "========================================"
+    echo ""
+    echo "  Total teams: $total_teams"
+    echo -e "  ${GREEN}Passed:${NC}   $pass_count"
+    echo -e "  ${RED}Failed:${NC}   $fail_count"
+    [ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}  $skip_count"
+    echo ""
+    print_status_passed
+    exit 0
+fi
+
+# Safe to diff: three-dot diff against base ref
+CHANGED_FILES=$(git -C "$SKILLS_DIR" diff --name-only "${BASE_REF}...HEAD" 2>/dev/null || true)
 
 # Warn about uncommitted changes (git diff only sees committed state)
 UNCOMMITTED=$(git -C "$SKILLS_DIR" diff --name-only 2>/dev/null || true)

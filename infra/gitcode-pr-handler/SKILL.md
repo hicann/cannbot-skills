@@ -1,7 +1,7 @@
 ---
 name: gitcode-pr-handler
 description: 根据 GitCode PR 的代码变更，重新生成符合约定式提交规范的 PR 标题与符合仓库 PR 模板的 PR 描述（body），然后通过 GitCode API 写回 PR。当用户提供 PR 链接、要求"更新 PR / 生成标题 / 生成描述 / 改 PR 文案 / 重写 PR 标题描述"时触发此 skill。
-license: MIT
+license: CANN-2.0
 ---
 
 # GitCode PR 标题 / 描述生成

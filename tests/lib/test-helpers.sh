@@ -100,6 +100,83 @@ print_section_header() {
     echo ""
 }
 
+# Parse captured test output and print a compact summary.
+# Extracts [PASS] / [FAIL] / [SKIP] / [WARN] line counts, shows failure
+# details inline. When show_all is true, also prints the full captured output.
+#
+# Usage: print_compact_result "$output" "$status" "$duration" [show_all]
+print_compact_result() {
+    local output="$1"
+    local status="$2"
+    local duration="$3"
+    local show_all="${4:-false}"
+
+    local n_pass=0 n_fail=0 n_skip=0 n_warn=0
+    if [[ -n "$output" ]]; then
+        n_pass=$(echo "$output" | grep -cE '\[PASS\]' 2>/dev/null || echo 0)
+        n_fail=$(echo "$output" | grep -cE '\[FAIL\]' 2>/dev/null || echo 0)
+        n_skip=$(echo "$output" | grep -cE '\[SKIP\]' 2>/dev/null || echo 0)
+        n_warn=$(echo "$output" | grep -cE '\[WARN\]' 2>/dev/null || echo 0)
+        # Ensure valid numbers
+        [[ "$n_pass" =~ ^[0-9]+$ ]] || n_pass=0
+        [[ "$n_fail" =~ ^[0-9]+$ ]] || n_fail=0
+        [[ "$n_skip" =~ ^[0-9]+$ ]] || n_skip=0
+        [[ "$n_warn" =~ ^[0-9]+$ ]] || n_warn=0
+    fi
+
+    # Build compact counts line
+    local counts=""
+    [[ $n_pass -gt 0 ]] && counts+=" ${GREEN}${n_pass} passed${NC}"
+    [[ $n_fail -gt 0 ]] && counts+=" ${RED}${n_fail} failed${NC}"
+    [[ $n_skip -gt 0 ]] && counts+=" ${YELLOW}${n_skip} skipped${NC}"
+    [[ $n_warn -gt 0 ]] && counts+=" ${YELLOW}${n_warn} warnings${NC}"
+
+    case "$status" in
+        pass)
+            if [[ -z "$counts" ]]; then
+                echo -e "  ${GREEN}[PASS]${NC} (${duration}s)"
+            else
+                echo -e "  ${GREEN}[PASS]${NC} (${counts}, ${duration}s)"
+            fi
+            # Show warnings if any
+            if [[ $n_warn -gt 0 ]]; then
+                echo ""
+                echo "$output" | grep -E '\[WARN\]' | head -20 | sed 's/^/    /'
+                echo ""
+            fi
+            ;;
+        fail)
+            echo -e "  ${RED}[FAIL]${NC} (${counts}, ${duration}s)"
+
+            # Extract and show failure lines
+            if [[ $n_fail -gt 0 ]]; then
+                echo ""
+                echo -e "  ${YELLOW}── Failures ──${NC}"
+                echo "$output" | grep -E '\[FAIL\]' | head -30 | sed 's/^/    /'
+                echo ""
+            fi
+
+            # Also show ERROR lines if any
+            local n_err
+            n_err=$(echo "$output" | grep -cE '\[ERROR\]' 2>/dev/null || echo 0)
+            if [[ $n_err -gt 0 ]]; then
+                echo -e "  ${RED}── Errors ──${NC}"
+                echo "$output" | grep -E '\[ERROR\]' | head -20 | sed 's/^/    /'
+                echo ""
+            fi
+            ;;
+    esac
+
+    # Show full output when verbose
+    if $show_all; then
+        echo ""
+        echo -e "  ${BLUE}── Full Output ──${NC}"
+        echo "$output" | sed 's/^/  /'
+        echo -e "  ${BLUE}── End ──${NC}"
+        echo ""
+    fi
+}
+
 # Print colored summary status
 print_status_passed() {
     echo -e "${GREEN}${BOLD}STATUS: PASSED${NC}"
@@ -1275,7 +1352,13 @@ validate_semver() {
 compute_file_hash() {
     local file="$1"
     if [ -f "$file" ]; then
-        sha256sum "$file" 2>/dev/null | cut -c1-16 || echo "MISSING"
+        if command -v sha256sum &>/dev/null; then
+            sha256sum "$file" 2>/dev/null | cut -c1-16 || echo "MISSING"
+        elif command -v shasum &>/dev/null; then
+            shasum -a 256 "$file" 2>/dev/null | cut -c1-16 || echo "MISSING"
+        else
+            echo "MISSING"
+        fi
     else
         echo "MISSING"
     fi
@@ -1506,6 +1589,7 @@ export -f print_test_banner
 export -f setup_colors
 export -f enable_colors
 export -f disable_colors
+export -f print_compact_result
 export -f print_pass
 export -f print_fail
 export -f print_skip

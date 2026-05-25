@@ -1,7 +1,7 @@
 ---
 name: gitcode-issue-handler
 description: GitCode Issue 端到端处置工具，根据 Issue 内容自动判断走两条路径之一：(PR 路径) 克隆 fork → 代码定位 → 最小改动 → 跑测试 → 提交并推送 → 创建 PR，覆盖 bug 修复 / 功能增强 / 文档补全等任何需要代码变更的诉求；(Comment 路径) 仅克隆上游主仓只读分析 → 起草答复 → 提交评论，覆盖答疑 / 设计澄清 / 用法说明等不需改代码的诉求。当用户提到"处理 Issue / 跟进 Issue / 从 Issue 提 PR / 端到端处理 Issue / 修复 Issue"或仅给出 issue_url 让 Claude 判断要不要改代码时使用此 skill；用户明确说"只回复 / 答疑 / 评论回复 / 不改代码"则直接走 Comment 路径。
-license: MIT
+license: CANN-2.0
 ---
 
 # GitCode Issue 端到端处理

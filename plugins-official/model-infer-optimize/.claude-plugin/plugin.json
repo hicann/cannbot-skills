@@ -7,7 +7,7 @@
   },
   "homepage": "https://gitcode.com/cann/cannbot-skills",
   "repository": "https://gitcode.com/cann/cannbot-skills",
-  "license": "MIT",
+  "license": "CANN-2.0",
   "dependencies": [
     "model-infer-skills"
   ],

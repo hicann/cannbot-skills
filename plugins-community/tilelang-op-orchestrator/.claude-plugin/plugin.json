@@ -7,7 +7,7 @@
   },
   "homepage": "https://gitcode.com/cann/skills",
   "repository": "https://gitcode.com/cann/skills",
-  "license": "MIT",
+  "license": "CANN-2.0",
   "dependencies": [
     "tilelang-op-orchestrator-skills"
   ]
