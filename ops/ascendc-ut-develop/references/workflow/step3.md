@@ -25,7 +25,7 @@ cp ${op_path}/tests/ut/${test_model}/*.cpp ${op_path}/tests/ut/${test_model}/*.h
 **注意，仅迁移一条预期执行成功的旧用例**，用于验证框架是否正常，**迁移所有用例是后续步骤的任务**
 
 如果 `${repo_type}` 为 **"ops-transformer"** 且用户提及 **"CSV"**、**"CSV整改"**、**"CSV格式"**、**"CSV化"**，执行 **CSV 格式重构**:
-1. 让子 Agent 参考 [csv-refactor-workflow.md](../ops-transformer/csv-refactor-workflow.md)
+1. 让子 Agent 参考 [ops-transformer.md](../ops-transformer/ops-transformer.md) 和 [csv-refactor-workflow.md](../ops-transformer/csv-refactor-workflow.md)
 2. 让子 Agent 使用 `assets/csv-refactor/` 下的模板文件
 3. 让子 Agent 查看详细规范 [csv-format-spec.md](../ops-transformer/csv-format-spec.md)
 

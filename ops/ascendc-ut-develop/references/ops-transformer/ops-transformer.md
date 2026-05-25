@@ -10,7 +10,37 @@ transformer 仓在现有 UT 框架的基础上，封装了一层 CSV 导入工�
 
 **对于 transformer 仓的算子，优先使用 CSV 格式创建用例。**
 
-详细指南：[CSV 重构流程详解](./csv-refactor-workflow.md)、[CSV 格式规范](./csv-format-spec.md)
+### 触发条件
+
+- `repo_type` 为 **"ops-transformer"**
+- 用户提及 **"CSV"**、**"CSV整改"**、**"CSV格式"**、**"CSV化"**
+
+### 模板文件
+
+模板文件位于 [assets/csv-refactor/](../../assets/csv-refactor/)：
+
+| 文件 | 用途 |
+|-----|------|
+| `template_param.h` | 参数结构体模板 |
+| `template_tiling.cpp` | Tiling 测试模板 |
+| `template_tiling.csv` | Tiling CSV 示例 |
+| `template_infershape.cpp` | InferShape 测试模板 |
+| `template_infershape.csv` | InferShape CSV 示例 |
+| `template_inferdtype.cpp` | InferDataType 测试模板 |
+| `template_inferdtype.csv` | InferDataType CSV 示例 |
+| `template_cmake.txt` | CMakeLists.txt 模板 |
+
+### 自动化工具
+
+```bash
+python scripts/generate_csv_template.py {op_name}_def.cpp
+```
+
+### 详细文档
+
+- [CSV 重构流程详解](./csv-refactor-workflow.md)
+- [CSV 格式规范](./csv-format-spec.md)
+- [从旧代码提取参数](./legacy-code-extraction.md)
 
 ## 多架构支持
 

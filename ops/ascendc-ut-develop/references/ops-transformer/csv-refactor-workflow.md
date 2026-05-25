@@ -310,7 +310,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 ### 4.2 Tiling 测试实现
 
-参考 [assets/csv-refactor/template_tiling.cpp](../assets/csv-refactor/template_tiling.cpp)
+参考 [assets/csv-refactor/template_tiling.cpp](../../assets/csv-refactor/template_tiling.cpp)
 
 关键点：
 
@@ -336,7 +336,7 @@ find . -name "xxx_compile_info.h" -type f
 
 ### 4.3 InferShape 测试实现
 
-参考 [assets/csv-refactor/template_infershape.cpp](../assets/csv-refactor/template_infershape.cpp)
+参考 [assets/csv-refactor/template_infershape.cpp](../../assets/csv-refactor/template_infershape.cpp)
 
 关键点：
 
@@ -346,7 +346,7 @@ find . -name "xxx_compile_info.h" -type f
 
 ### 4.4 InferDataType 测试实现
 
-参考 [assets/csv-refactor/template_inferdtype.cpp](../assets/csv-refactor/template_inferdtype.cpp)
+参考 [assets/csv-refactor/template_inferdtype.cpp](../../assets/csv-refactor/template_inferdtype.cpp)
 
 关键点：
 
