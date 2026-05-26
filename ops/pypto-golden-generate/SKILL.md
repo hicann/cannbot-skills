@@ -1,6 +1,6 @@
 ---
 name: pypto-golden-generate
-description: "当需要生成 golden 参考实现时使用此 skill。基于算子规格信息，生成纯 PyTorch golden 参考实现 `{op}_golden.py`，导出 `{op}_golden()` 函数，作为精度验证基准。Triggers: 生成 golden、生成参考实现、写 golden 函数、golden script、golden reference、reference implementation、generate golden、torch 参考、验证基准、baseline implementation、写验证代码、'帮我写 golden'、golden.py、参考代码。"
+description: 当需要生成 golden 参考实现时使用此 skill。基于算子规格信息，生成纯 PyTorch golden 参考实现 `{op}_golden.py`，导出 `{op}_golden()` 函数，作为精度验证基准。触发词：生成 golden、生成参考实现、写 golden 函数、golden script、golden reference、reference implementation、generate golden、torch 参考、验证基准、baseline implementation、写验证代码、'帮我写 golden'、golden.py、参考代码。
 ---
 
 # PyPTO Golden 参考实现生成
@@ -143,6 +143,22 @@ def safe_div_golden(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 ---
 
 ## 6. 验证机制
+
+### 验证执行方式
+
+生成文件后，**必须通过直接执行脚本完成验证**：
+
+```bash
+python3 {op}_golden.py
+```
+
+脚本内含 `if __name__ == "__main__": _validate()` 入口，会自动运行全部检查项（典型 case、泛化 case、值域、数值稳定性等）并输出验证报告。
+
+**禁止**使用以下方式替代直接执行：
+- `exec(open(...).read())` — 绕过脚本的独立执行环境
+- 手动构造测试数据单独调用 golden 函数 — 与脚本内置验证逻辑重复且不完整
+
+**门禁判定依据**：以 `python3 {op}_golden.py` 的 exit code（0 = 通过）和验证报告输出为准。
 
 ### 验证 shape 来源
 

@@ -1,7 +1,7 @@
 {
   "name": "pypto-op-orchestrator",
   "description": "PyPTO 算子端到端开发 Team。7 阶段状态机编排，含 3 个 Subagent，支持断点续跑和失败恢复。",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "author": {
     "name": "CANNBot"
   },
