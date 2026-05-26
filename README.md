@@ -15,6 +15,7 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
+- **2026-05-25** — 新增 `cuda2ascend-simt` 技能（实验版），支持将 CUDA 算子迁移到 Ascend C SIMT，仅支持 Ascend 950 PR。
 - **2026-05-19** — 新增支持 Triton 算子生成，适用于通过 Triton 开发高性能 Ascend NPU 算子。
 - **2026-05-16** — 新增支持 Trae 全局安装，所有官方插件均支持 `global` 和 `project` 两种安装级别。
 - **2026-05-16** — 【模型推理】将 `model-infer-optimize` 从 `model/teams/` 迁移到 `plugins-official/` 主线结构，新增完整 plugin 结构。
@@ -241,6 +242,7 @@ cannbot-skills/
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
 | **ascendc-docs-gen** | 算子文档写作参考，支持需求分析、详细设计等多个标准模版 | — |
 | **cann-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
+| **cuda2ascend-simt** | CUDA 算子迁移到 Ascend C SIMT，支持 `standalone sample` / `torch_npu` / `pybind` 三类交付形态，根据原始工程形态自动选择。**仅支持 Ascend 950 PR平台**。当前不支持：native JIT（`nvrtc`、运行时编译、扩展 JIT 加载）、torch 复数 dtype、device 侧 `double`（FP64）、CUDA 生态库（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API | [查看](docs/skills-usage.md#cuda2ascend-simt) |
 
 ### PyPTO 算子开发
 

@@ -1,0 +1,153 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+---
+- rule_id: opengl-gl
+  feature: OpenGL / GL
+  category: graphics
+  status: unsupported
+  action: stop_and_report
+  workaround: ''
+  note: No workaround in the current migration model.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: cooperative-groups
+  feature: Cooperative Groups
+  category: execution-model
+  status: unsupported
+  action: stop_and_report
+  workaround: ''
+  note: No workaround in the current migration model.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: texture
+  feature: Texture
+  category: memory-model
+  status: unsupported
+  action: stop_and_report
+  workaround: ''
+  note: No workaround in the current migration model.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: occupancy
+  feature: Occupancy
+  category: performance-model
+  status: restricted
+  action: manual_implementation
+  workaround: For cudaOccupancyMaxActiveBlocksPerMultiprocessor, do not hard-code the local CANN installation path; include <simt/acl/occupancy/acl_occupancy_query.h> through the project's normal CANN/SIMT include configuration when aclOccupancyMaxActiveBlocksPerVectorCoreFromDevice is available; otherwise record the missing header or replacement and use a documented fixed launch policy, measured tuning table, or conservative launch bound.
+  note: CUDA occupancy semantics are not one-to-one with Ascend vector-core occupancy. Record semantic differences and occupancy header lookup evidence before deciding fallback.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-28'
+
+- rule_id: mmap
+  feature: MMAP
+  category: memory-model
+  status: unsupported
+  action: stop_and_report
+  workaround: ''
+  note: No workaround in the current migration model.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: nvrtc
+  feature: nvrtc
+  category: compilation
+  status: unsupported
+  action: stop_and_report
+  workaround: ''
+  note: No runtime-compilation replacement in the current migration model when nvrtc is required by the selected migration path. Optional nvrtc-backed source subpaths are handled by the jit-paths remove_and_record rule.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: jit-paths
+  feature: native JIT-related compilation or loading paths
+  category: compilation
+  status: unsupported
+  action: remove_and_record
+  workaround: ''
+  note: Unsupported removable subpath. Remove native JIT compilation, runtime compilation, extension JIT loading, or other on-the-fly native-code compilation/loading paths from the migrated result and record the removal in plan.md. Do not classify torch.library.register_fake, FakeTensor/meta kernels, or Python wrapper code kept only for torch.compile compatibility as native JIT unless it compiles or loads native code at runtime.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-20'
+
+- rule_id: complex-dtype
+  feature: complex dtype in migrated results
+  category: data-type
+  status: unsupported
+  action: remove_and_record
+  workaround: ''
+  note: Unsupported removable dtype subpath. For torch migration work, detect complex dtype branches explicitly, do not migrate complex dtype code paths, and record the exclusion in plan.md. If no supported non-complex behavior remains, block the migration.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-20'
+
+- rule_id: double-in-kernel
+  feature: device-side double paths in one-to-one migration
+  category: data-type
+  status: unsupported
+  action: remove_and_record
+  workaround: ''
+  note: Unsupported removable dtype subpath. Detect double dtype dispatch branches, double tensor checks, double kernel overloads, double device helpers, FP64 intrinsics, and double validation cases; exclude those paths from implementation and validation in one-to-one migration. Host-side double scalar parameters may remain only when they are not a device-side double execution path. If no supported non-double behavior remains, block the migration.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-28'
+
+- rule_id: device-std-namespace
+  feature: 'device-side std:: usage'
+  category: data-type
+  status: restricted
+  action: manual_implementation
+  workaround: Use CMake package discovery with find_package(simt_stl CONFIG REQUIRED) and link the target with simt::std before using simt::std replacements; if no matching replacement exists, record the missing symbol and avoid it with a narrow local helper, direct language construct, or host-side precomputation.
+  note: 'Device-side std:: usage must not be silently preserved when unsupported by Ascend SIMT compilation.'
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-28'
+
+- rule_id: cpp-suffix-asc-build
+  feature: .cpp source files compiled as Ascend code
+  category: build
+  status: restricted
+  action: manual_implementation
+  workaround: Set CMake source-file properties so the .cpp file is compiled as ASC language.
+  note: Use source-file language override in CMake when Ascend code is stored in .cpp files.
+  source:
+    - reference/constraints.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: kernel-struct-by-value
+  feature: user-defined struct passed by value to __global__ kernel parameters
+  category: compilation
+  status: restricted
+  action: manual_implementation
+  workaround: Avoid passing multi-field user-defined structs by value to __global__ kernels. Prefer splitting the fields into scalar kernel parameters, or construct the struct locally inside the kernel from scalar inputs.
+  note: Current bisheng SIMT compilation may crash during instruction selection when a __global__ kernel takes a multi-field user-defined struct parameter by value, even when the same fields compile successfully as separate scalar parameters.
+  source:
+    - reference/constraints.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-29'

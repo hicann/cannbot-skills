@@ -50,6 +50,31 @@
 
 - 路径写**绝对路径**，让 skill 不必猜测源码位置。
 
+### cuda2ascend-simt
+
+将CUDA算子迁移到 Ascend C SIMT，根据原始工程形态选择 `standalone sample` / `torch_npu` / `pybind` 三类交付形态。**仅支持 Ascend 950 PR**。产物落在 `ported-ops/<operator_name>/`，附中文迁移说明文档 `plan.md` 与 `README.md`。
+
+```
+请使用 cuda2ascend-simt 技能，完成如下 CUDA → Ascend C SIMT 迁移：
+
+【任务】将 <算子名> 从 CUDA 实现迁移到 Ascend C SIMT 实现。
+
+【源码路径】（二选一）
+- CUDA 源工程根目录：<源工程绝对路径>
+- torch 算子根目录：<源工程绝对路径>
+
+【目标】
+- 输出目录：ported-ops/<算子名>/
+```
+
+**使用建议**：
+
+- 路径写**绝对路径**，避免 skill 猜测源码位置。
+- **不要**主动要求降级到 `standalone sample`：torch 扩展请保留 `torch_npu`，pybind 工程请保留 `pybind`，只有当依赖链或注册路径无法保留时才允许降级，且需在 `plan.md` 记录原因。
+- **当前不支持迁移**的特性：native JIT（`nvrtc`、运行时编译、extension JIT 加载）、torch复数dtype分支、device 侧 `double`执行路径、CUDA 生态库依赖（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API。如源码包含上述特性，会以 `remove_and_record` 排除或上报 `blocked`，不会隐式替换或自实现生态库 / 协作组 / SIMD 等价物。
+- 重大降级（抽象层 flatten、kernel 多分支合并为单一通路、device 路径降级为 host fallback 等）会触发硬停审批门，需用户显式选择后才会动手实现。
+- 仅当在Ascend 950 PR硬件完成精度验证后才会报 `success`，否则按 `incomplete` / `blocked` / `failed` 处理。
+
 ---
 
 ## GitCode 协作工具

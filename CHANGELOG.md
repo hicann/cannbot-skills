@@ -1,4 +1,10 @@
 ## 🔥 更新日志
+### 【2026-05-25】
+#### 新特性 New Features
+- 【Ascend C】新增 `cuda2ascend-simt` 技能（实验版，位于 `ops-lab/`），支持将 CUDA 算子迁移到 Ascend C SIMT。**仅支持 Ascend 950 PR平台**。覆盖 `standalone sample`、`torch_npu`、`pybind` 三类交付形态，按原始工程形态选择对应产物。
+- 产物固定输出在 `ported-ops/<operator_name>/`，附中文 `plan.md` 与 `README.md`，并在 Ascend 950 PR 上做硬件验证后才报 `success`。
+- **当前不支持**：native JIT 路径（`nvrtc`、运行时编译、extension JIT 加载）、torch 复数 dtype 分支、device 侧 `double`（FP64）执行路径、CUDA 生态库依赖（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API。
+
 ### 【2026-05-23】
 #### 新特性 New Features
 - 【Issue 模板】新增 `request-for-comments` RFC 提案模板，对齐 Rust/React RFC 格式，`gitcode-issue-gen` 同步支持。

@@ -1,0 +1,74 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+---
+- rule_id: assert-header
+  pattern: assert
+  category: debug
+  status: required
+  action: include_header
+  cuda_form: assert(...)
+  ascend_form: '#include "utils/debug/asc_assert.h"'
+  note: Add the Ascend SIMT assert header when assert is used.
+  source:
+    - reference/grammar.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: printf-header
+  pattern: printf
+  category: debug
+  status: required
+  action: include_header
+  cuda_form: printf(...)
+  ascend_form: '#include "utils/debug/asc_printf.h"'
+  note: Add the Ascend SIMT printf header when printf is used.
+  source:
+    - reference/grammar.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: shared-memory-fixed
+  pattern: shared-memory-fixed
+  category: memory-space
+  status: rewrite-required
+  action: syntax_replace
+  cuda_form: __shared__ T buffer[N];
+  ascend_form: __ubuf__ T buffer[N];
+  note: Replace fixed-size CUDA shared memory with Ascend UB buffer storage.
+  source:
+    - reference/grammar.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'
+
+- rule_id: device-qualifier-aicore
+  pattern: __device__
+  category: function-qualifier
+  status: rewrite-required
+  action: syntax_replace
+  cuda_form: __device__ ReturnType function(...)
+  ascend_form: __aicore__ ReturnType function(...)
+  note: Replace CUDA device-function qualifiers with Ascend C SIMT aicore qualifiers when migrating device-side helper functions.
+  source:
+    - reference/grammar.md
+  reviewed_by: human
+  reviewed_at: '2026-04-07'
+
+- rule_id: shared-memory-dynamic
+  pattern: shared-memory-dynamic
+  category: memory-space
+  status: rewrite-required
+  action: syntax_replace
+  cuda_form: extern __shared__ T buffer[];
+  ascend_form: extern __ubuf__ T buffer[];
+  note: Replace dynamic CUDA shared memory declarations with Ascend UB buffer declarations.
+  source:
+    - reference/grammar.md
+  reviewed_by: human
+  reviewed_at: '2026-04-06'

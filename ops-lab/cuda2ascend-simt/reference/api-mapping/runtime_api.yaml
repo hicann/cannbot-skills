@@ -1,0 +1,3060 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+---
+- cuda_api: cudaChooseDevice
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceFlushGPUDirectRDMAWrites
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetAttribute
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetByPCIBusId
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetCacheConfig
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetDefaultMemPool
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetHostAtomicCapabilities
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetLimit
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetMemPool
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetNvSciSyncAttributes
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetP2PAtomicCapabilities
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetP2PAttribute
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetPCIBusId
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetStreamPriorityRange
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDeviceGetStreamPriorityRange
+  ascend_signature: aclError aclrtDeviceGetStreamPriorityRange(int32_t *leastPriority, int32_t *greatestPriority)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1868.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceGetTexture1DLinearMaxWidth
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceReset
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtResetDeviceForce
+  ascend_signature: aclError aclrtResetDeviceForce(int32_t deviceId)
+  action: direct_replace
+  note: ''
+  fallback: Destroy explicitly created events, streams, and contexts first, then call aclrtResetDeviceForce(deviceId) as recommended by the ACL runtime documentation.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceSetCacheConfig
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceSetLimit
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceSetMemPool
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceSynchronize
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtSynchronizeDevice
+  ascend_signature: aclError aclrtSynchronizeDevice(void)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0056.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDevice
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtGetDevice
+  ascend_signature: aclError aclrtGetDevice(int32_t *deviceId)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0042.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDeviceCount
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtGetDeviceCount
+  ascend_signature: aclError aclrtGetDeviceCount(uint32_t *count)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0045.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDeviceFlags
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDeviceProperties
+  category: runtime/device-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtGetDeviceInfo
+  ascend_signature: aclError aclrtGetDeviceInfo(uint32_t deviceId, aclrtDevAttr attr, int64_t *value)
+  action: manual_implementation
+  note: ''
+  fallback: Query the required property subset with repeated aclrtGetDeviceInfo calls and rebuild the needed struct fields manually.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1774.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1867.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaInitDevice
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaIpcCloseMemHandle
+  category: runtime/interprocess-communication
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtIpcMemClose
+  ascend_signature: aclError aclrtIpcMemClose(const char *key)
+  action: manual_implementation
+  note: ''
+  fallback: Preserve the IPC key alongside the imported memory object so teardown can call aclrtIpcMemClose(key). If the migrated code uses the physical-memory sharing workflow instead of the key-based IPC runtime API, keep the existing unmap/free/release sequence.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaIpcGetEventHandle
+  category: runtime/interprocess-communication
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtIpcGetEventHandle
+  ascend_signature: aclError aclrtIpcGetEventHandle(aclrtEvent event, aclrtIpcEventHandle *handle)
+  action: direct_replace
+  note: ''
+  fallback: Ensure the ACL event was created with the IPC-related event flag before calling aclrtIpcGetEventHandle.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2092.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaIpcGetMemHandle
+  category: runtime/interprocess-communication
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtIpcMemGetExportKey
+  ascend_signature: aclError aclrtIpcMemGetExportKey(void *devPtr, size_t size, char *key, size_t len, uint64_t flags)
+  action: manual_implementation
+  note: ''
+  fallback: Allocate a key buffer, pass the exported device pointer and size to aclrtIpcMemGetExportKey, and store the resulting key string wherever the CUDA path would have stored cudaIpcMemHandle_t.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaIpcOpenEventHandle
+  category: runtime/interprocess-communication
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtIpcOpenEventHandle
+  ascend_signature: aclError aclrtIpcOpenEventHandle(aclrtIpcEventHandle handle, aclrtEvent *event)
+  action: direct_replace
+  note: ''
+  fallback: Import the event handle with aclrtIpcOpenEventHandle, then use the returned event with aclrtSynchronizeEvent or aclrtStreamWaitEvent.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2093.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaIpcOpenMemHandle
+  category: runtime/interprocess-communication
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtIpcMemImportByKey
+  ascend_signature: aclError aclrtIpcMemImportByKey(void **devPtr, const char *key, uint64_t flags)
+  action: manual_implementation
+  note: ''
+  fallback: Convert the stored CUDA-side IPC handle representation into an ACL key string, then call aclrtIpcMemImportByKey(&devPtr, key, flags). If the migration uses the physical-memory sharing workflow instead, keep the explicit import-plus-map sequence.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSetDevice
+  category: runtime/device-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtSetDevice
+  ascend_signature: aclError aclrtSetDevice(int32_t deviceId)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclpythondevg_01_0062.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSetDeviceFlags
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSetValidDevices
+  category: runtime/other-runtime-apis
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetErrorName
+  category: runtime/error-handling
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetErrorString
+  category: runtime/error-handling
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetLastError
+  category: runtime/error-handling
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtGetLastError
+  ascend_signature: aclError aclrtGetLastError(aclrtLastErrLevel level)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0144.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaPeekAtLastError
+  category: runtime/error-handling
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtPeekAtLastError
+  ascend_signature: aclError aclrtPeekAtLastError(aclrtLastErrLevel level)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0143.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaCtxResetPersistingL2Cache
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamAddCallback
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamAttachMemAsync
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamBeginCapture
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamBeginCaptureToGraph
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamCopyAttributes
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamCreate
+  category: runtime/stream-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtCreateStream
+  ascend_signature: aclError aclrtCreateStream(aclrtStream *stream)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclpythondevg_01_0079.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamCreateWithFlags
+  category: runtime/stream-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtCreateStreamWithConfig
+  ascend_signature: aclError aclrtCreateStreamWithConfig(aclrtStream *stream, uint32_t priority, uint32_t flag)
+  action: manual_implementation
+  note: ''
+  fallback: Translate CUDA flags to ACL stream flags manually; use priority 0 when only flags need to be preserved.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1774.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0069.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamCreateWithPriority
+  category: runtime/stream-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtCreateStreamWithConfig
+  ascend_signature: aclError aclrtCreateStreamWithConfig(aclrtStream *stream, uint32_t priority, uint32_t flag)
+  action: manual_implementation
+  note: ''
+  fallback: Translate the CUDA priority if supported, choose an explicit ACL flag, and fall back to aclrtCreateStream when ACL priority is effectively unused.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1774.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0069.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamDestroy
+  category: runtime/stream-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDestroyStream
+  ascend_signature: aclError aclrtDestroyStream(aclrtStream stream)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclpythondevg_01_0081.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamEndCapture
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetAttribute
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetCaptureInfo
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetCaptureInfo_v3
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetDevice
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetFlags
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetId
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamGetPriority
+  category: runtime/stream-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtStreamGetPriority
+  ascend_signature: aclError aclrtStreamGetPriority(aclrtStream stream, uint32_t *priority)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2120.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamIsCapturing
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamQuery
+  category: runtime/stream-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtStreamQuery
+  ascend_signature: aclError aclrtStreamQuery(aclrtStream stream, aclrtStreamStatus *status)
+  action: manual_implementation
+  note: ''
+  fallback: Call aclrtStreamQuery and translate the returned stream status into the expected CUDA-side success or not-ready handling.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0075.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamSetAttribute
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamSynchronize
+  category: runtime/stream-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtSynchronizeStream
+  ascend_signature: aclError aclrtSynchronizeStream(aclrtStream stream)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0076.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamUpdateCaptureDependencies
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamUpdateCaptureDependencies_v2
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaStreamWaitEvent
+  category: runtime/stream-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtStreamWaitEvent
+  ascend_signature: aclError aclrtStreamWaitEvent(aclrtStream stream, aclrtEvent event)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0091.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaThreadExchangeStreamCaptureMode
+  category: runtime/stream-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventCreate
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtCreateEvent
+  ascend_signature: aclError aclrtCreateEvent(aclrtEvent *event)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0079.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventCreateWithFlags
+  category: runtime/event-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtCreateEventWithFlag
+  ascend_signature: aclError aclrtCreateEventWithFlag(aclrtEvent *event, uint32_t flag)
+  action: manual_implementation
+  note: ''
+  fallback: Translate only matching intent such as timing or cross-stream sync; unsupported CUDA event flags need manual rewrite or a policy decision.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0005.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/81RC1alpha002/apiref/appdevgapi/aclcppdevg_03_0080.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventDestroy
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDestroyEvent
+  ascend_signature: aclError aclrtDestroyEvent(aclrtEvent event)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0082.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventElapsedTime
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtEventElapsedTime
+  ascend_signature: aclError aclrtEventElapsedTime(float *ms, aclrtEvent startEvent, aclrtEvent endEvent)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0090.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventElapsedTime_v2
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtEventElapsedTime
+  ascend_signature: aclError aclrtEventElapsedTime(float *ms, aclrtEvent startEvent, aclrtEvent endEvent)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0090.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventQuery
+  category: runtime/event-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtQueryEventStatus
+  ascend_signature: aclError aclrtQueryEventStatus(aclrtEvent event, aclrtEventRecordedStatus *status)
+  action: manual_implementation
+  note: ''
+  fallback: Call aclrtQueryEventStatus and translate ACL_EVENT_RECORDED_STATUS_COMPLETE/NOT_READY into the expected CUDA-side status handling.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1774.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0086.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventRecord
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtRecordEvent
+  ascend_signature: aclError aclrtRecordEvent(aclrtEvent event, aclrtStream stream)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/API/appdevgapi/aclcppdevg_03_0083.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventRecordWithFlags
+  category: runtime/event-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaEventSynchronize
+  category: runtime/event-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtSynchronizeEvent
+  ascend_signature: aclError aclrtSynchronizeEvent(aclrtEvent event)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0088.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDestroyExternalMemory
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDestroyExternalSemaphore
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaExternalMemoryGetMappedBuffer
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaExternalMemoryGetMappedMipmappedArray
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaImportExternalMemory
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaImportExternalSemaphore
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSignalExternalSemaphoresAsync
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaWaitExternalSemaphoresAsync
+  category: runtime/external-resource-interoperability
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFuncGetAttributes
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFuncGetName
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFuncGetParamInfo
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFuncSetAttribute
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFuncSetCacheConfig
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetParameterBuffer
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetParameterBufferV2
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLaunchCooperativeKernel
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLaunchCooperativeKernelMultiDevice
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLaunchHostFunc
+  category: runtime/execution-control
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtLaunchHostFunc
+  ascend_signature: aclError aclrtLaunchHostFunc(aclrtStream stream, aclrtHostFunc fn, void *args)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1962.html
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_1959.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLaunchKernel
+  category: runtime/execution-control
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtLaunchKernelWithHostArgs
+  ascend_signature: aclError aclrtLaunchKernelWithHostArgs(aclrtFuncHandle funcHandle, uint32_t numBlocks, aclrtStream stream, aclrtLaunchKernelCfg *cfg, void *hostArgs, size_t argsSize, aclrtPlaceHolderInfo *placeHolderArray, size_t placeHolderNum)
+  action: manual_implementation
+  note: ''
+  fallback: Resolve the aclrtFuncHandle, pack the kernel arguments into a host buffer, pass cfg as nullptr when no extra launch attributes are needed, and call aclrtLaunchKernelWithHostArgs.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2074.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLaunchKernelExC
+  category: runtime/execution-control
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtLaunchKernelWithHostArgs
+  ascend_signature: aclError aclrtLaunchKernelWithHostArgs(aclrtFuncHandle funcHandle, uint32_t numBlocks, aclrtStream stream, aclrtLaunchKernelCfg *cfg, void *hostArgs, size_t argsSize, aclrtPlaceHolderInfo *placeHolderArray, size_t placeHolderNum)
+  action: manual_implementation
+  note: ''
+  fallback: Translate supported CUDA launch-config attributes into aclrtLaunchKernelCfg, pack hostArgs, and call aclrtLaunchKernelWithHostArgs. Leave unsupported launch attributes as an explicit migration gap.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - /usr/local/Ascend/cann-9.0.0/x86_64-linux/include/acl/acl_rt.h
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2074.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSetDoubleForDevice
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaSetDoubleForHost
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyAvailableDynamicSMemPerBlock
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxActiveBlocksPerMultiprocessor
+  category: runtime/occupancy
+  status: mapped
+  mapping_type: semantic
+  ascend_api: aclOccupancyMaxActiveBlocksPerVectorCoreFromDevice
+  ascend_signature: aclError aclOccupancyMaxActiveBlocksPerVectorCoreFromDevice(int32_t *numBlocks, int32_t deviceId, int64_t threadsPerBlock, int64_t dynamicUbufBytesPerBlock, aclOccupancyResult *result)
+  action: manual_implementation
+  note: Include <simt/acl/occupancy/acl_occupancy_query.h> through the project's normal CANN/SIMT include configuration; do not hard-code the local CANN installation path. CUDA reports active blocks per multiprocessor; this Ascend helper reports active blocks per vector core, so record semantic differences in plan.md.
+  fallback: If the occupancy header or helper is missing, record the missing replacement and use a documented fixed launch policy, measured tuning table, or conservative launch bound.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - CANN/SIMT include configuration exposing <simt/acl/occupancy/acl_occupancy_query.h>
+  reviewed_by: human
+  reviewed_at: '2026-04-28'
+- cuda_api: cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxActiveClusters
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxPotentialBlockSize
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxPotentialBlockSizeVariableSMem
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxPotentialBlockSizeWithFlags
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaOccupancyMaxPotentialClusterSize
+  category: runtime/occupancy
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaArrayGetInfo
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaArrayGetMemoryRequirements
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaArrayGetPlane
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaArrayGetSparseProperties
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceRegisterAsyncNotification
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceUnregisterAsyncNotification
+  category: runtime/device-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFree
+  category: runtime/memory-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtFree
+  ascend_signature: aclError aclrtFree(void *devPtr)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0100.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFreeArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFreeHost
+  category: runtime/memory-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtFreeHost
+  ascend_signature: aclError aclrtFreeHost(void *hostPtr)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0102.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFreeMipmappedArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetMipmappedArrayLevel
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetSymbolAddress
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetSymbolSize
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaHostAlloc
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMallocHost
+  ascend_signature: aclError aclrtMallocHost(void **hostPtr, size_t size)
+  action: manual_implementation
+  note: ''
+  fallback: Use aclrtMallocHost for the base allocation path; rewrite CUDA flag-dependent behavior such as mapped or write-combined host memory manually.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0101.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaHostGetDevicePointer
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtHostGetDevicePointer
+  ascend_signature: aclError aclrtHostGetDevicePointer(void *pHost, void **pDevice, uint32_t flag)
+  action: manual_implementation
+  note: ''
+  fallback: Ensure the host memory was registered with the required ACL registration path first, then call aclrtHostGetDevicePointer with flag 0.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_2129.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaHostGetFlags
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaHostRegister
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtHostRegister
+  ascend_signature: aclError aclrtHostRegister(void *ptr, uint64_t size, aclrtHostRegisterType type, void **devPtr)
+  action: manual_implementation
+  note: ''
+  fallback: Choose the appropriate aclrtHostRegisterType, capture the returned devPtr, and rewrite any later pointer retrieval logic around that result.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1804.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaHostUnregister
+  category: runtime/memory-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtHostUnregister
+  ascend_signature: aclError aclrtHostUnregister(void *ptr)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1805.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMalloc
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMalloc
+  ascend_signature: aclError aclrtMalloc(void **devPtr, size_t size, aclrtMemMallocPolicy policy)
+  action: manual_implementation
+  note: ''
+  fallback: Select a default ACL allocation policy such as huge-first or normal-only based on the porting policy, then call aclrtMalloc.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/canncommercial/80RC1/apiref/appdevgapi/aclcppdevg_03_0089.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMalloc3D
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMalloc3DArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocHost
+  category: runtime/memory-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtMallocHost
+  ascend_signature: aclError aclrtMallocHost(void **hostPtr, size_t size)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0101.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocManaged
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocMipmappedArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocPitch
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemAdvise
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemAdvise_v2
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemDiscardAndPrefetchBatchAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemDiscardBatchAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemGetInfo
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtGetMemInfo
+  ascend_signature: aclError aclrtGetMemInfo(aclrtMemAttr attr, size_t *free, size_t *total)
+  action: manual_implementation
+  note: ''
+  fallback: Select the closest aclrtMemAttr for the target memory pool and then call aclrtGetMemInfo to populate free and total bytes.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0107.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPrefetchAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPrefetchAsync_v2
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPrefetchBatchAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemRangeGetAttribute
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemRangeGetAttributes
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMemcpy
+  ascend_signature: aclError aclrtMemcpy(void *dst, size_t destMax, const void *src, size_t count, aclrtMemcpyKind kind)
+  action: manual_implementation
+  note: ''
+  fallback: Pass the real destination capacity as destMax and preserve the intended direction through the closest aclrtMemcpyKind.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0105.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2D
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DArrayToArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DFromArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DFromArrayAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DToArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy2DToArrayAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy3D
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy3DAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy3DBatchAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy3DPeer
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpy3DPeerAsync
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyAsync
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMemcpyAsync
+  ascend_signature: aclError aclrtMemcpyAsync(void *dst, size_t destMax, const void *src, size_t count, aclrtMemcpyKind kind, aclrtStream stream)
+  action: manual_implementation
+  note: ''
+  fallback: Pass the real destination capacity as destMax and verify whether the source or destination host memory meets ACL async requirements.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/82RC1/API/appdevgapi/aclcppdevg_03_0106.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyBatchAsync
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMemcpyBatchAsync
+  ascend_signature: aclError aclrtMemcpyBatchAsync(void **dsts, size_t *destMaxs, void **srcs, size_t *sizes, size_t numBatches, aclrtMemcpyBatchAttr *attrs, size_t *attrsIndexes, size_t numAttrs, size_t *failIndex, aclrtStream stream)
+  action: manual_implementation
+  note: ''
+  fallback: Build the ACL batch descriptors explicitly and translate CUDA per-copy attributes into aclrtMemcpyBatchAttr entries before calling aclrtMemcpyBatchAsync.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1957.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyFromSymbol
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyFromSymbolAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyPeer
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyPeerAsync
+  category: runtime/peer-device-memory-access
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyToSymbol
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyToSymbolAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemset
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMemset
+  ascend_signature: aclError aclrtMemset(void *devPtr, size_t maxCount, int32_t value, size_t count)
+  action: manual_implementation
+  note: ''
+  fallback: Pass the true buffer capacity as maxCount when translating cudaMemset calls.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0103.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemset2D
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemset2DAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemset3D
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemset3DAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemsetAsync
+  category: runtime/memory-management
+  status: partial
+  mapping_type: semantic
+  ascend_api: aclrtMemsetAsync
+  ascend_signature: aclError aclrtMemsetAsync(void *devPtr, size_t maxCount, int32_t value, size_t count, aclrtStream stream)
+  action: manual_implementation
+  note: ''
+  fallback: Pass the true buffer capacity as maxCount when translating cudaMemsetAsync calls.
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0104.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: make_cudaExtent
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: make_cudaPitchedPtr
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: make_cudaPos
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyArrayToArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyFromArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyFromArrayAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyToArray
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemcpyToArrayAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaFreeAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMallocFromPoolAsync
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemGetDefaultMemPool
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemGetMemPool
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolCreate
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolDestroy
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolExportPointer
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolExportToShareableHandle
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolGetAccess
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolGetAttribute
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolImportFromShareableHandle
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolImportPointer
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolSetAccess
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolSetAttribute
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemPoolTrimTo
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaMemSetMemPool
+  category: runtime/memory-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaPointerGetAttributes
+  category: runtime/memory-management
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtPointerGetAttributes
+  ascend_signature: aclError aclrtPointerGetAttributes(const void *ptr, aclrtPtrAttributes *attributes)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_1803.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceCanAccessPeer
+  category: runtime/peer-device-memory-access
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDeviceCanAccessPeer
+  ascend_signature: aclError aclrtDeviceCanAccessPeer(int32_t *canAccessPeer, int32_t deviceId, int32_t peerDeviceId)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0051.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceDisablePeerAccess
+  category: runtime/peer-device-memory-access
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDeviceDisablePeerAccess
+  ascend_signature: aclError aclrtDeviceDisablePeerAccess(int32_t peerDeviceId)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta1/API/appdevgapi/aclcppdevg_03_0053.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDeviceEnablePeerAccess
+  category: runtime/peer-device-memory-access
+  status: mapped
+  mapping_type: direct
+  ascend_api: aclrtDeviceEnablePeerAccess
+  ascend_signature: aclError aclrtDeviceEnablePeerAccess(int32_t peerDeviceId, uint32_t flags)
+  action: direct_replace
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  - https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/API/appdevgapi/aclcppdevg_03_0052.html
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaCreateChannelDesc
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaCreateTextureObject
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaCreateTextureObject_v2
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDestroyTextureObject
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetChannelDesc
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetTextureObjectResourceDesc
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetTextureObjectResourceViewDesc
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetTextureObjectTextureDesc
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetTextureObjectTextureDesc_v2
+  category: runtime/texture-reference-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaCreateSurfaceObject
+  category: runtime/surface-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDestroySurfaceObject
+  category: runtime/surface-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetSurfaceObjectResourceDesc
+  category: runtime/surface-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaDriverGetVersion
+  category: runtime/version-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaRuntimeGetVersion
+  category: runtime/version-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLogsCurrent
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLogsDumpToFile
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLogsDumpToMemory
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLogsRegisterCallback
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLogsUnregisterCallback
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDriverEntryPoint
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetDriverEntryPointByVersion
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaKernelSetAttributeForDevice
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryEnumerateKernels
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryGetGlobal
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryGetKernel
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryGetKernelCount
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryGetManaged
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryGetUnifiedFunction
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryLoadData
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryLoadFromFile
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaLibraryUnload
+  category: runtime/driver-entry-point-and-library-management
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetKernel
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaGetFuncBySymbol
+  category: runtime/execution-control
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaProfilerStart
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
+- cuda_api: cudaProfilerStop
+  category: runtime/profiler-and-logging
+  status: unknown
+  mapping_type: none
+  ascend_api: ''
+  ascend_signature: ''
+  action: check_docs
+  note: ''
+  fallback: ''
+  source:
+  - reference/api-mapping/runtime_api.md
+  reviewed_by: agent
+  reviewed_at: '2026-04-16'
