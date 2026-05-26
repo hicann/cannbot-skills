@@ -704,19 +704,22 @@ def _build_log_block(label: str, content: str, css_class: str, is_code: bool = F
 def _repair_json(text: str) -> str:
     """Try to repair AI-generated JSON with unescaped quotes inside string values.
 
-    Two common patterns from AI output:
+    Three common patterns from AI output:
     1. Unicode Chinese double quotes (U+201C/U+201D) used for emphasis
     2. ASCII double quotes (U+0022) placed between CJK characters
+    3. ASCII double quotes at CJK/Latin boundaries (e.g. "先安装Toolkit再安装Ops")
 
-    Both break JSON parsing. Fix: replace with guillemets 《》.
+    All break JSON parsing. Fix: replace with guillemets 《》.
     """
     text = text.replace('\u201c', '\u300a')
     text = text.replace('\u201d', '\u300b')
-    text = re.sub(
-        r'(?<=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])"'
-        r'(?=[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])',
-        '\u300b', text
-    )
+    cjk = r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]'
+    # ASCII " between two CJK chars
+    text = re.sub(rf'(?<={cjk})"(?={cjk})', '\u300b', text)
+    # ASCII " at ASCII->CJK boundary (closing quote: Ops"\u52a0\u7c97)
+    text = re.sub(rf'(?<=[a-zA-Z0-9])"(?={cjk})', '\u300b', text)
+    # ASCII " at CJK->ASCII boundary (opening quote)
+    text = re.sub(rf'(?<={cjk})"(?=[a-zA-Z0-9])', '\u300a', text)
     return text
 
 
@@ -732,6 +735,33 @@ def _try_parse_review_json(candidate: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _find_json_by_depth(text: str) -> Optional[str]:
+    """用括号深度追踪法提取第一个完整 JSON 对象。
+
+    正确处理字符串值内的花括号（如 ${ASCEND_HOME_PATH}），
+    避免 } 在内层被误判为 JSON 结束。
+    """
+    start = text.find('{')
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '"' and (i == 0 or text[i - 1] != '\\'):
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def extract_review_json(text: str) -> Optional[Dict[str, Any]]:
     """从文本中提取评测结果 JSON，兼容 markdown 代码块和裸 JSON"""
     # 策略1: ```json ... ```
@@ -739,12 +769,18 @@ def extract_review_json(text: str) -> Optional[Dict[str, Any]]:
         result = _try_parse_review_json(m.group(1).strip())
         if result:
             return result
-    # 策略2: 裸 JSON 对象含 "status": "pass"/"fail"
+    # 策略2: 括号深度追踪（兼容字符串值内的 { }）
+    json_str = _find_json_by_depth(text)
+    if json_str:
+        result = _try_parse_review_json(json_str)
+        if result:
+            return result
+    # 策略3: 裸 JSON 对象含 "status": "pass"/"fail"（回退，兼容无外围文本的简单 JSON）
     for m in re.finditer(r'\{[^{}]*"status"\s*:\s*"(?:pass|fail)"[^{}]*\}', text, re.DOTALL):
         result = _try_parse_review_json(m.group())
         if result:
             return result
-    # 策略3: 去 markdown 围栏后解析全文
+    # 策略4: 去 markdown 围栏后解析全文
     cleaned = strip_markdown_fence(text)
     if cleaned != text:
         result = _try_parse_review_json(cleaned)
@@ -898,11 +934,26 @@ def _build_phase2_html_from_json(skill_name: str, eval_id):
 
     review_data = _load_json_file(review_file)
     review_messages = review_data.get("messages", [])
+    # 兼容 raw_output 包装格式（opencode export 超时时会包裹为 {"raw_output": stdout}）
+    if not review_messages and "raw_output" in review_data:
+        try:
+            raw = json.loads(review_data["raw_output"])
+            review_messages = raw.get("messages", [])
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     review_blocks, score = _extract_review_blocks(review_messages)
 
     ses_data = _load_json_file(ses_file)
     ses_messages = ses_data.get("messages", [])
+    # 兼容 raw_output 包装格式：opencode export 输出非合法 JSON 时
+    # opencode_runner 会将其包裹为 {"raw_output": stdout} 字符串
+    if not ses_messages and "raw_output" in ses_data:
+        try:
+            raw = json.loads(ses_data["raw_output"])
+            ses_messages = raw.get("messages", [])
+        except (json.JSONDecodeError, TypeError):
+            pass
     session_blocks = _extract_session_blocks(ses_messages)
 
     blocks = session_blocks[:1] + review_blocks + session_blocks[1:]
@@ -1003,7 +1054,6 @@ def pytest_runtest_logreport(report):
             for item in extra_items
         )
         phase2_html, score = _build_phase2_html_from_json(skill_name, eval_id)
-
         if phase2_html and not has_phase2:
             extra_items.append(extras.html(phase2_html))
 

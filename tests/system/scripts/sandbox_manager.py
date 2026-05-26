@@ -14,6 +14,7 @@ SandboxManager - 管理测试用例的隔离沙箱
 为每个测试用例创建独立的执行环境（沙箱），确保用例间文件系统状态不互相干扰。
 """
 
+import json
 import logging
 import shutil
 import sys
@@ -34,8 +35,8 @@ class SandboxManager:
     沙箱目录结构：
     tests/system/sandboxes/
     ├── <skill_name>_eval_<id>/
-    │   ├── skill/          # skill 目录独立副本（文件隔离，不污染源码目录）
-    │   └── logs/           # 该用例的 session 日志
+    │   ├── .opencode/skills/<skill_name>/  # skill 独立副本（opencode 自动加载）
+    │   └── logs/                           # 该用例的 session 日志
     """
 
     SANDBOX_DIR_NAME = "sandboxes"
@@ -53,7 +54,7 @@ class SandboxManager:
     @staticmethod
     def create_skill_link(sandbox_path: Path, skill_dir: Path) -> Path:
         """
-        在沙箱中复制 skill 目录（独立副本，确保文件隔离）
+        在沙箱的 .opencode/skills/ 下复制 skill 目录（独立副本，确保文件隔离）
 
         Args:
             sandbox_path: 沙箱目录路径
@@ -62,7 +63,8 @@ class SandboxManager:
         Returns:
             复制后的 skill 目录路径
         """
-        link_path = sandbox_path / "skill"
+        skill_name = skill_dir.name
+        link_path = sandbox_path / ".opencode" / "skills" / skill_name
 
         # 如果已存在则删除
         if link_path.exists() or link_path.is_symlink():
@@ -72,6 +74,7 @@ class SandboxManager:
                 link_path.unlink()
 
         abs_skill_dir = Path(skill_dir).resolve()
+        link_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(abs_skill_dir, link_path)
         logger.debug("[Sandbox] 复制 skill 目录: %s -> %s", abs_skill_dir, link_path)
 
@@ -99,6 +102,25 @@ class SandboxManager:
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
         logger.info("[Sandbox] 沙箱根目录: %s", self.sandbox_root)
 
+    # opencode 工具权限白名单：仅允许评测必需的 safe 工具，deny 危险工具
+    OPENCODE_SAFE_CONFIG = {
+        "permission": {
+            "bash": "deny",
+            "websearch": "deny",
+            "webfetch": "deny",
+            "repo_clone": "deny",
+            "external_directory": "deny",
+            "question": "deny",
+            "read": "allow",
+            "write": "allow",
+            "edit": "allow",
+            "glob": "allow",
+            "grep": "allow",
+            "list": "allow",
+            "skill": "allow",
+        }
+    }
+
     def create_sandbox(self, skill_name: str, eval_id: int) -> Path:
         """
         创建用例沙箱目录
@@ -121,6 +143,13 @@ class SandboxManager:
         # 创建 logs 子目录
         logs_dir = sandbox_path / "logs"
         logs_dir.mkdir(exist_ok=True)
+
+        # 写入 opencode 安全配置：限制危险工具，防止不可信 prompt 利用
+        opencode_dir = sandbox_path / ".opencode"
+        opencode_dir.mkdir(parents=True, exist_ok=True)
+        config_path = opencode_dir / "opencode.json"
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(self.OPENCODE_SAFE_CONFIG, f, ensure_ascii=False, indent=2)
 
         logger.debug("[Sandbox] 创建沙箱: %s", sandbox_path)
         return sandbox_path

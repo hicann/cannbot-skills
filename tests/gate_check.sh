@@ -61,7 +61,8 @@ echo "=== Phase 4: Run Gate Check ==="
 
 python3 "$FRAMEWORK_DIR/scripts/main.py" \
     --repo-root "$REPO_ROOT" \
-    --changed-files "${changed_files_array[@]}"
+    --changed-files "${changed_files_array[@]}" \
+    --parallel auto
 
 EXIT_CODE=$?
 

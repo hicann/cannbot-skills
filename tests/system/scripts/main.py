@@ -60,11 +60,13 @@ class SkillEvalResult:
 
 
 class GateChecker:
-    def __init__(self, repo_root: str, changed_files: List[str], eval_id: Optional[str] = None, parallel: str = "1"):
+    def __init__(self, repo_root: str, changed_files: List[str], eval_id: Optional[str] = None,
+                 parallel: str = "1", report_only: bool = False):
         self.repo_root = Path(repo_root).resolve()
         self.changed_files = changed_files
         self.eval_id = eval_id
         self.parallel = parallel
+        self.report_only = report_only
         self.test_skill_dir = self.repo_root / "tests" / "system"
         self.results_dir = self.test_skill_dir / "results"
         self.evals_cases_dir = self.test_skill_dir / "cases"
@@ -145,6 +147,8 @@ class GateChecker:
             try:
                 env = os.environ.copy()
                 env["SKILL_DIR"] = str(skill_dir)
+                if self.report_only:
+                    env["REPORT_ONLY"] = "1"
 
                 cmd = [sys.executable, "-m", "pytest", str(skill_test_script), "--skill", skill_name]
                 if self.eval_id:
@@ -258,8 +262,11 @@ class GateChecker:
         t_total = time.time()
         logger.info("Repository root: %s", self.repo_root)
         logger.info("Changed files: %d", len(self.changed_files))
+        if self.report_only:
+            logger.info("模式: --report-only (仅重新生成报告，不执行测试)")
 
-        self._cleanup_previous_run()
+        if not self.report_only:
+            self._cleanup_previous_run()
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         changed_skills = self.identify_changed_skills()
@@ -270,7 +277,21 @@ class GateChecker:
 
         logger.info("受影响的 skill (%d): %s", len(changed_skills), ', '.join(changed_skills))
 
-        # ── AI 语义评测 ──
+        eval_passed, eval_total = self._eval_skills(changed_skills, t_total)
+
+        all_passed = eval_total == 0 or eval_passed == eval_total
+
+        logger.info("=" * 60)
+        if all_passed:
+            logger.info("全部通过 — %d 个 skill 验证完成 (%.1fs)", eval_total, time.time() - t_total)
+        else:
+            logger.info("评测存在失败 — %d 个 skill, %d 通过 (%.1fs)",
+                        eval_total, eval_passed, time.time() - t_total)
+        logger.info("=" * 60)
+
+        return all_passed
+
+    def _eval_skills(self, changed_skills: List[str], t_total: float) -> tuple:
         logger.info("=" * 60)
         logger.info("AI 语义评测")
         logger.info("=" * 60)
@@ -279,11 +300,11 @@ class GateChecker:
         eval_total = 0
 
         for idx, skill_name in enumerate(changed_skills, 1):
-            # 基础验证（前置校验）
-            logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
-            if not self.run_basic_validation(skill_name):
-                logger.info("基础验证失败，终止流程 (%.1fs)", time.time() - t_total)
-                return False
+            if not self.report_only:
+                logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
+                if not self.run_basic_validation(skill_name):
+                    logger.info("基础验证失败，终止流程 (%.1fs)", time.time() - t_total)
+                    return 0, 0
 
             evals_data = self.load_evals(skill_name)
             eval_cases = evals_data.get("evals", []) if evals_data else []
@@ -311,17 +332,7 @@ class GateChecker:
             status = "✓ 通过" if result.passed else "✗ 失败"
             logger.info("  %s (%.1fs)", status, elapsed)
 
-        all_passed = eval_total == 0 or eval_passed == eval_total
-
-        logger.info("=" * 60)
-        if all_passed:
-            logger.info("全部通过 — %d 个 skill 验证完成 (%.1fs)", eval_total, time.time() - t_total)
-        else:
-            logger.info("评测存在失败 — %d 个 skill, %d 通过 (%.1fs)",
-                        eval_total, eval_passed, time.time() - t_total)
-        logger.info("=" * 60)
-
-        return all_passed
+        return eval_passed, eval_total
 
     def _execute_eval_cmd(self, ctx: EvalContext) -> tuple:
         """Execute eval pytest command, return (passed, actual_output, error)."""
@@ -452,10 +463,17 @@ def main():
              "(default: 1 = sequential, 'auto' = CPU cores - 1, "
              "or specify a number like '4')"
     )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        default=False,
+        help="仅重新生成 HTML 报告（从已有沙箱 JSON 文件读取数据，不执行测试）"
+    )
 
     args = parser.parse_args()
 
-    checker = GateChecker(args.repo_root, args.changed_files, args.eval_id, args.parallel)
+    checker = GateChecker(args.repo_root, args.changed_files, args.eval_id,
+                          args.parallel, args.report_only)
     success = checker.run_checks()
     
     archive_logs_and_results(args.repo_root)

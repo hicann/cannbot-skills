@@ -10,6 +10,7 @@
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,30 +38,43 @@ FILE_BASED_HINT = """
 3. 不要输出完整的文件内容——评测系统会直接读取生成的文件
 """
 
+MAX_PROMPT_LENGTH = 10000
 
-def _collect_original_files(original_skill_dir: Path) -> set:
-    """收集原始 skill 中的文件相对路径集合，用于排除已有文件"""
-    original_files: set = set()
-    for entry in original_skill_dir.rglob("*"):
-        if entry.is_file():
-            try:
-                original_files.add(str(entry.relative_to(original_skill_dir)))
-            except ValueError:
-                pass
-    return original_files
+
+def _validate_prompt(prompt: str, eval_id: str) -> None:
+    """校验 prompt 安全性，拒绝可疑输入。
+
+    针对不可信来源的 eval prompt 执行基本安全检查。
+    """
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        raise ValueError(
+            f"Eval {eval_id}: prompt too long ({len(prompt)} chars, max {MAX_PROMPT_LENGTH})"
+        )
+    if prompt.lstrip() != prompt:
+        raise ValueError(
+            f"Eval {eval_id}: prompt has leading whitespace"
+        )
+    # 拒绝包含不可打印控制字符的 prompt（允许换行、制表符）
+    for i, ch in enumerate(prompt):
+        if ord(ch) < 0x20 and ch not in ("\n", "\r", "\t"):
+            raise ValueError(
+                f"Eval {eval_id}: prompt contains control char U+{ord(ch):04X} at position {i}"
+            )
+    # 拒绝以 - 开头的 prompt，防止被解析为 opencode CLI 参数
+    stripped = prompt.lstrip()
+    if stripped.startswith("-"):
+        raise ValueError(
+            f"Eval {eval_id}: prompt starts with '-', potential CLI injection"
+        )
 
 
 def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Path] = None) -> List[str]:
     """收集沙箱中新增的生成文件列表（相对路径）
 
-    排除 logs/ 目录。如果提供 original_skill_dir，则跳过原始 skill 已有的文件，
-    从而将生成在 skill/ 子目录内的新文件也纳入。
+    排除 logs/ 和 .opencode/ 目录。
     """
-    original_files = _collect_original_files(original_skill_dir) if (
-        original_skill_dir and original_skill_dir.exists()) else set()
-
     files = []
-    exclude_dirs = {"logs"}
+    exclude_dirs = {"logs", ".opencode"}
     for entry in sandbox_path.rglob("*"):
         if not entry.is_file():
             continue
@@ -68,13 +82,6 @@ def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Pat
             continue
 
         rel = str(entry.relative_to(sandbox_path))
-
-        parts = entry.relative_to(sandbox_path).parts
-        if len(parts) > 1 and parts[0] == "skill":
-            skill_rel = "/".join(parts[1:])
-            if skill_rel in original_files:
-                continue
-
         files.append(rel)
     return sorted(files)
 
@@ -276,6 +283,7 @@ def _run_review_session(
 
     for chunk in opencode_runner.run_streaming(
             prompt=review_prompt,
+            skill=".",
             session_name=f"{session_name}_review"
     ):
         chunk_type = chunk.get("type")
@@ -330,7 +338,8 @@ def _check_file_exists(
     candidates = []
     if sandbox_path:
         candidates.append(sandbox_path / path)
-        candidates.append(sandbox_path / "skill" / path)
+        if skill_dir:
+            candidates.append(sandbox_path / ".opencode" / "skills" / skill_dir.name / path)
     if skill_dir:
         candidates.append(skill_dir / path)
     for fp in candidates:
@@ -349,7 +358,13 @@ def _check_file_list(
     """
     if not sandbox_path:
         raise ValueError("sandbox_path is required for file_list expectation")
-    candidates = [sandbox_path, sandbox_path / "skill"]
+    candidates = [sandbox_path]
+    # 同时搜索 .opencode/skills/ 下的各 skill 子目录
+    skills_dir = sandbox_path / ".opencode" / "skills"
+    if skills_dir.exists():
+        for skill_subdir in skills_dir.iterdir():
+            if skill_subdir.is_dir():
+                candidates.append(skill_subdir)
     for base in candidates:
         if base.exists():
             matches = list(base.glob(pattern))
@@ -558,7 +573,7 @@ def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
 
 def _collect_exec_output(
         opencode_runner: OpencodeRunner,
-        prompt: str, skill_ref: str, session_name: str
+        prompt: str, skill_ref: Optional[str], session_name: str
 ) -> tuple:
     """运行 exec session 并收集输出，返回 (full_output, error_output, session_file, success)"""
     output_lines = []
@@ -594,6 +609,21 @@ def _collect_exec_output(
     return "\n".join(output_lines), error_output, session_file, success
 
 
+def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
+                       eval_id, skill_dir: Path):
+    """创建沙箱和 opencode runner"""
+    sandbox_path = sandbox_manager.create_sandbox(skill_name, eval_id)
+    sandbox_manager.create_skill_link(sandbox_path, skill_dir)
+    logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
+    opencode_runner = OpencodeRunner(
+        keep_session=True,
+        verbose=True,
+        workdir=str(sandbox_path),
+        session_dir=str(logs_dir)
+    )
+    return opencode_runner, sandbox_path
+
+
 def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     skill_name = eval_case["skill_name"]
     eval_data = eval_case["eval"]
@@ -605,23 +635,18 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     expected_output = eval_data.get("expected_output", "")
     expectations = eval_data.get("expectations", [])
 
-    assert prompt, f"Eval {eval_id}: prompt is required"
+    if os.environ.get("REPORT_ONLY") == "1":
+        logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)", skill_name, eval_id)
+        return
 
-    # file_based 模式：注入提示，要求输出文件清单而非文件内容
+    assert prompt, f"Eval {eval_id}: prompt is required"
+    _validate_prompt(prompt, str(eval_id))
+
     if eval_mode == "file_based":
         prompt = prompt.rstrip() + FILE_BASED_HINT
 
-    # 创建独立沙箱
-    sandbox_path = sandbox_manager.create_sandbox(skill_name, eval_id)
-    sandbox_manager.create_skill_link(sandbox_path, skill_dir)
-    logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
-
-    # 创建专用的 opencode_runner（工作目录设为沙箱路径，AI 输出文件隔离在沙箱中）
-    opencode_runner = OpencodeRunner(
-        keep_session=True,
-        verbose=True,
-        workdir=str(sandbox_path),
-        session_dir=str(logs_dir)
+    opencode_runner, sandbox_path = _setup_eval_sandbox(
+        sandbox_manager, skill_name, eval_id, skill_dir
     )
 
     _log_eval_case_header(skill_name, eval_id, prompt, expected_output)
@@ -629,7 +654,7 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     session_name = f"{skill_name}_case_{eval_id}"
 
     full_output, error_output, session_file, success = _collect_exec_output(
-        opencode_runner, prompt, "skill", session_name
+        opencode_runner, prompt, ".", session_name
     )
 
     assert success, f"Eval {eval_id}: opencode run failed - {error_output}"
@@ -643,7 +668,6 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
         output_file=str(opencode_runner.session_dir / f"{session_name}_ses.json")
     )
 
-    # 收集生成文件（排除原始 skill 已有的文件）
     generated_files = collect_generated_files(sandbox_path, original_skill_dir=skill_dir)
 
     ctx = ValidationContext(

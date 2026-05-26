@@ -182,13 +182,18 @@ class OpencodeRunner:
         try:
             result = self._run_subprocess(cmd, description="Export")
 
-            if result.returncode != 0:
+            if result.returncode not in (0, -1):
                 return {
                     "success": False,
                     "error": result.stderr or f"Export failed with code {result.returncode}",
                     "data": None,
                     "returncode": result.returncode
                 }
+
+            timed_out = (result.returncode == -1)
+            if timed_out:
+                self.logger.warning("Export timed out, attempting to use partial data (%d bytes)",
+                                    len(result.stdout or ""))
 
             try:
                 session_data = json.loads(result.stdout)
@@ -202,7 +207,8 @@ class OpencodeRunner:
 
             return {
                 "success": True,
-                "error": None,
+                "timed_out": timed_out,
+                "error": result.stderr if timed_out else None,
                 "data": session_data,
                 "export_file": export_file,
                 "session_id": self.opencode_session_id
@@ -482,6 +488,22 @@ class OpencodeRunner:
 
     # ---- Private instance helpers ----
 
+    @staticmethod
+    def _safe_env() -> dict:
+        """Build a minimal environment for opencode subprocess execution.
+
+        Strips sensitive variables (API keys, tokens) inherited from the parent process
+        to prevent exposure to untrusted prompts that may execute arbitrary tools.
+        """
+        safe = {}
+        for key in ("PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL",
+                     "TERM", "DISPLAY", "LOGNAME", "PWD"):
+            val = os.environ.get(key)
+            if val is not None:
+                safe[key] = val
+        safe["PYTHONUNBUFFERED"] = "1"
+        return safe
+
     def _save_session_info(self, session_id: str):
         if not self.keep_session:
             return
@@ -529,7 +551,7 @@ class OpencodeRunner:
                 "Windows 用户可能需要使用完整路径，如: "
                 "OpencodeRunner(opencode_path='D:/path/to/opencode.exe')"
             )
-        cmd = [opencode_cmd, "run", "--format", "json"]
+        cmd = [opencode_cmd, "run", "--format", "json", "--dangerously-skip-permissions"]
 
         if self.model:
             cmd.extend(["--model", self.model])
@@ -544,7 +566,7 @@ class OpencodeRunner:
         if additional_args:
             cmd.extend(additional_args)
 
-        cmd.append(prompt)
+        cmd.extend(["--", prompt])
 
         return cmd
 
@@ -581,6 +603,7 @@ class OpencodeRunner:
                 text=True,
                 timeout=self.timeout,
                 cwd=str(self.workdir),
+                env=self._safe_env(),
                 encoding='utf-8',
                 errors='replace'
             )
@@ -641,8 +664,7 @@ class OpencodeRunner:
 
     def _setup_streaming_process(self, cmd):
         """Set up a streaming subprocess with timeout and stderr monitoring."""
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
+        env = self._safe_env()
 
         process = subprocess.Popen(
             cmd,
@@ -834,15 +856,26 @@ class OpencodeRunner:
         """Run an opencode subcommand with common timeout and encoding settings."""
         if self.verbose and description:
             self.logger.debug("%s command: %s", description, cmd)
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=str(self.workdir),
-            encoding='utf-8',
-            errors='replace'
-        )
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=str(self.workdir),
+                env=self._safe_env(),
+                encoding='utf-8',
+                errors='replace'
+            )
+        except subprocess.TimeoutExpired as e:
+            self.logger.warning("%s timed out after 300s, retaining partial output (%d bytes)",
+                                description or cmd, len(e.stdout or ""))
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=-1,
+                stdout=e.stdout or "",
+                stderr=(e.stderr or "") + "\n(Process timed out after 100s)"
+            )
 
     def _get_export_file_path(self, output_file: Optional[str]) -> str:
         """确定导出文件路径"""
