@@ -563,7 +563,7 @@ if [ -d "$ASC_DEVKIT_DIR" ]; then
     cd "$SCRIPT_DIR"
     ok "asc-devkit updated"
 else
-    git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null || warn "git clone failed, skipping asc-devkit"
+    git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null && cd "$ASC_DEVKIT_DIR" && git checkout --quiet 31f3ab38 || warn "git clone failed, skipping asc-devkit"
     [ -d "$ASC_DEVKIT_DIR" ] && ok "asc-devkit cloned"
 fi
 

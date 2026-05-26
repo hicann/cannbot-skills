@@ -272,6 +272,6 @@ compiled = torch.compile(model, backend="npugraph_ex", fullgraph=True)
 ## 参考资源
 
 - 官方 aclgraph + TORCH_LIBRARY 示例：`torchair/examples/_kernel_extension_aclgraph/torch_library/`
-- 官方 TORCH_LIBRARY 示例：`asc-devkit/examples/01_simd_cpp_api/02_features/02_framework/00_pytorch/torch_library/`
+- 官方 TORCH_LIBRARY 示例：`asc-devkit/examples/02_features/01_triple_chevron_notation/torch_library/`
 - PyTorch 框架适配文档：`asc-devkit/docs/guide/编程指南/附录/AI框架算子适配/PyTorch框架.md`
 - PyTorch Custom Operators：https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html

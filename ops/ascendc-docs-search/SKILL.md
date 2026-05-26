@@ -112,7 +112,7 @@ grep -l "关键词" asc-devkit/docs/api/context/APIName*.md
 | 减法算子 | `asc-devkit/examples/00_introduction/07_sub/sub_custom.asc` | 减法实现 |
 | 调试打印 | `asc-devkit/examples/01_utilities/00_printf/printf.asc` | printf 调试 |
 | 断言使用 | `asc-devkit/examples/01_utilities/01_assert/assert.asc` | 断言示例 |
-| 库函数 | `asc-devkit/examples/03_libraries/00_addcdivcustom/addcdiv_custom.asc` | 库函数使用 |
+| 库函数 | `asc-devkit/examples/03_libraries/00_math/addcdiv/addcdiv_custom.asc` | 库函数使用 |
 | 矢量计算 | `asc-devkit/examples/00_introduction/11_vectoradd/vector_add_custom.asc` | 矢量 API |
 
 ## 在线搜索
