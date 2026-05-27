@@ -39,50 +39,78 @@
 
 ```
 tests/
-├── unit/                      # L1 单元测试（无需 CLI，< 30s）
+├── run-tests.sh                # 主测试入口脚本
+├── gate_check.sh               # CI 门禁检查入口（L1 + ST 框架）
+│
+├── unit/                       # L1 单元测试（无需 CLI，< 30s）
+│   ├── test-line-endings.sh    # 全局换行符检查（CRLF 检测）
 │   ├── skills/
-│   │   ├── test-structure.sh  # Skill 结构验证（S-STR-01~16）
-│   │   └── test-content.sh    # Skill 内容验证（S-CON-01~09 + S-STR-13）
+│   │   ├── test-structure.sh   # Skill 结构验证（S-STR-01~16）
+│   │   └── test-content.sh     # Skill 内容验证（S-CON-01~09 + S-STR-13）
 │   ├── agents/
-│   │   ├── test-structure.sh  # Agent 结构验证（A-STR-01~09）
-│   │   └── test-content.sh    # Agent 内容验证（A-CON-01~09）
+│   │   ├── test-structure.sh   # Agent 结构验证（A-STR-01~09）
+│   │   └── test-content.sh     # Agent 内容验证（A-CON-01~09）
 │   ├── teams/
-│   │   ├── test-structure.sh  # Team 结构验证（T-STR-01~08）
-│   │   ├── test-content.sh    # Team 内容验证（T-CON-01~03）
-│   │   └── test-version.sh    # Team 版本看护（git diff 文件变更 + marketplace.json 依赖链）
+│   │   ├── test-structure.sh   # Team 结构验证（T-STR-01~08）
+│   │   ├── test-content.sh     # Team 内容验证（T-CON-01~03）
+│   │   └── test-version.sh     # Team 版本看护（git diff 文件变更 + marketplace.json 依赖链）
 │   └── install/
 │       └── test-init-install.sh  # init.sh 安装产物静态验证
 │
-├── behavior/                  # L2 行为测试（需要 CLI，1-5 min）
+├── behavior/                   # L2 行为测试（需要 CLI，1-5 min）
 │   ├── skills/
-│   │   ├── test-universal.sh        # 通用测试（自动运行全部 9 条规则）
+│   │   ├── test-universal.sh         # 通用测试（自动运行全部 9 条规则）
 │   │   ├── test-trigger-correctness.sh
 │   │   ├── test-premature-action.sh
 │   │   ├── test-interaction-logic.sh
-│   │   └── test-cases/              # 定制测试配置（可选）
-│   │       └── ascendc-runtime-debug.yaml
+│   │   └── test-cases/               # 定制测试配置（可选）
+│   │       ├── ascendc-runtime-debug.yaml
+│   │       └── ascendc-crash-debug.yaml
 │   ├── agents/
 │   │   ├── test-premature-action.sh
 │   │   └── test-trigger-correctness.sh
 │   └── install/
-│       └── test-init-behavior.sh    # init.sh 实际安装行为验证
+│       └── test-init-behavior.sh     # init.sh 实际安装行为验证
 │
-├── integration/               # L3 集成测试（5-15 min）
+├── integration/                # L3 集成测试（5-15 min）
 │   ├── test-simple-op-development.sh
 │   └── test-workflow-execution.sh
 │
+├── system/                     # ST 系统测试 / AI 语义评测（Python/pytest）
+│   ├── README.md               # ST 框架概述
+│   ├── config/
+│   │   └── skill-test.config   # skill 扫描路径与白名单配置
+│   ├── cases/                  # 评测用例（Markdown 格式）
+│   │   ├── ascendc-task-focus_evals.md
+│   │   └── cann-env-setup_evals.md
+│   ├── docs/
+│   │   ├── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # ST 设计规范与开发指南
+│   │   └── USER_GUIDE.md                       # ST 框架使用指南
+│   └── scripts/
+│       ├── main.py              # CI 门禁主入口
+│       ├── conftest.py          # pytest 共享配置与 fixture
+│       ├── test_skill_basic.py  # Phase 1: 静态结构验证
+│       ├── test_skill_evals.py  # Phase 2: AI 语义评测
+│       ├── opencode_runner.py   # OpenCode CLI Python 封装
+│       ├── sandbox_manager.py   # 沙箱隔离管理器
+│       ├── evals_parser.py      # Markdown 评测用例解析器
+│       ├── session_stats.py     # Session 数据统计
+│       ├── run_eval.py          # pytest 评测命令行启动脚本
+│       ├── test_opencode_runner.py  # opencode_runner 单元测试
+│       ├── opencode_runner_examples.py  # opencode_runner 使用示例
+│       ├── pytest.ini           # pytest 渲染配置
+│       └── requirements.txt     # Python 依赖
+│
 ├── lib/
-│   ├── test-helpers.sh        # 测试辅助函数
-│   ├── skill_validator.py     # YAML-aware 结构与内容校验器
-│   └── rules.yaml             # 校验规则配置（关键词、阈值等）
+│   ├── test-helpers.sh          # 测试辅助函数
+│   ├── skill_validator.py       # YAML-aware 结构与内容校验器
+│   └── rules.yaml               # 校验规则配置（关键词、阈值等）
 │
-├── tools/
-│   ├── analyze-session.sh
-│   ├── analyze-tokens.sh          # analyze-session.sh 功能子集
-│   ├── analyze-token-usage.py
-│   └── analyze-workflow.sh        # analyze-session.sh 功能子集
-│
-└── run-tests.sh
+└── tools/
+    ├── analyze-session.sh
+    ├── analyze-tokens.sh          # analyze-session.sh 功能子集
+    ├── analyze-token-usage.py
+    └── analyze-workflow.sh        # analyze-session.sh 功能子集
 ```
 
 ## 测试分层
@@ -92,6 +120,135 @@ tests/
 | L1 | unit/ | 单元测试，验证结构和内容 | `--fast` |
 | L2 | behavior/ | 行为测试，验证触发和响应 | `--category behavior` |
 | L3 | integration/ | 集成测试，验证完整工作流 | `--integration` |
+| ST | system/ | 系统测试，AI 语义评测 + 沙箱隔离 | `gate_check.sh` 或 `pytest` |
+
+---
+
+## 本地开发调试
+
+如果你正在开发一个新的 Skill 或修改现有 Skill，以下是在本地不连接远端服务器的情况下进行调试的方法。
+
+### 快速验证：测试单个 Skill 的结构和内容
+
+**无需 CLI、无需网络**，直接验证 SKILL.md 的格式和内容质量：
+
+```bash
+# 验证单个 Skill 的结构（YAML frontmatter、name/description 格式等）
+./run-tests.sh --test unit/skills/test-structure.sh
+
+# 验证单个 Skill 的内容（触发关键词、可执行指令、示例等）
+./run-tests.sh --test unit/skills/test-content.sh
+```
+
+L1 单元测试会自动扫描所有 skill 目录，无需指定具体 skill 名称。如需限定范围，可通过 `--test` 指定测试文件。
+
+### 行为验证：测试单个 Skill 的触发和响应
+
+**需要 Claude Code 或 OpenCode CLI**，验证 Skill 在真实对话中的表现：
+
+```bash
+# 测试单个 Skill（自动从 description 提取关键词，执行全部 9 条规则）
+./behavior/skills/test-universal.sh <skill-name>
+
+# 例如：
+./behavior/skills/test-universal.sh ascendc-runtime-debug
+```
+
+对于需要精准验证的 Skill，可编写定制测试配置文件 `behavior/skills/test-cases/<skill-name>.yaml`，定义专属的触发词、预期关键词、交互逻辑等测试用例。详见下方"定制测试配置"章节。
+
+### 语义评测：使用 ST 框架进行 AI 语义验证
+
+**需要 Python + OpenCode CLI**，适合验证 Skill 的回复质量和语义正确性。
+
+ST 框架提供了**沙箱隔离**机制 — 每个测试用例在独立副本中运行，不会污染源码目录，适合本地反复调试。
+
+#### Phase 1：静态结构验证（秒级，无需 AI 调用）
+
+```bash
+cd tests/system/scripts
+
+# 安装依赖（首次使用）
+pip install -r requirements.txt
+
+# 测试指定 skill
+python -m pytest test_skill_basic.py -v -k "skill-name"
+
+# 测试所有已注册 skill
+python -m pytest test_skill_basic.py -v
+```
+
+#### Phase 2：AI 语义评测（分钟级，需要 opencode CLI）
+
+```bash
+cd tests/system/scripts
+
+# 测试指定 skill 的全部评测用例
+python -m pytest test_skill_evals.py --skill <skill-name> -v --tb=short
+
+# 测试指定 skill 的单个用例
+python -m pytest test_skill_evals.py --skill <skill-name> --eval-id 3 -v --tb=long
+
+# 通过 run_eval.py 启动（支持 HTML/JSON 报告）
+python run_eval.py --skill <skill-name> --html-report
+```
+
+#### 为一门新 Skill 编写评测用例
+
+1. 在 `tests/system/cases/` 下创建 `<skill-name>_evals.md` 文件：
+
+```markdown
+---
+skill_name: my-new-skill
+eval_mode: text
+---
+
+## Prompt
+用户可能发送的测试问题
+
+## Expected Output
+回复应覆盖的关键要点描述（语义预期，非逐字匹配）
+
+## Expectations
+- `[contains]` 回复中应包含的关键内容
+- `[not_contains]` 回复中不应出现的内容
+```
+
+2. 在 `tests/system/config/skill-test.config` 中将 skill 加入白名单：
+
+```yaml
+skill_whitelist:
+  - "my-new-skill"
+```
+
+3. 确保 `skill_dirs` 中包含该 skill 所在的目录。
+
+更多细节参见 `tests/system/docs/USER_GUIDE.md` 和 `tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md`。
+
+### Mock 数据与环境变量配置
+
+ST 框架通过 **沙箱隔离**（`sandbox_manager.py`）实现本地独立测试，无需连接远端服务器：
+
+- **沙箱机制**：每个评测用例在 `tests/system/sandboxes/<skill>_eval_<id>/` 下创建独立的 skill 副本，用例间文件系统状态互不干扰
+- **OpenCode Runner**（`opencode_runner.py`）：封装了 OpenCode CLI 的本地调用，支持 session 管理、超时控制、流式输出
+- **评测用例即 Mock 数据**：`cases/*_evals.md` 中定义的 prompt 和 expected_output 即为输入/预期输出配置
+
+常用的环境变量配置：
+
+```bash
+# 指定 OpenCode/Claude Code 平台
+export PLATFORM=opencode
+
+# 调整并行测试数量
+export PARALLEL_JOBS=8
+
+# CI 中指定目标分支
+export CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main
+
+# 仓库根目录（gate_check.sh 使用）
+export REPO_ROOT=/path/to/repo
+```
+
+---
 
 ## 测试内容
 
@@ -124,6 +281,10 @@ tests/
 | S-STR-13 | 正文字数不超过上限 | warn | test-content.sh |
 
 > **注意**: error 级别规则会阻断测试（FAIL），warn 级别规则仅输出警告但不阻断（PASS with warnings）。CI 中建议关注 warn 输出以持续提升质量。
+
+#### 换行符检查 (unit/test-line-endings.sh)
+
+全局仓库卫生检查，扫描所有文本文件中的 CRLF（DOS 风格）换行符。CRLF 换行符会导致文件体积膨胀、日志输出中出现多余 `\r` 字符、以及 autocrlf/smudge 行为引发的 CI hash 不匹配。
 
 #### Agents (unit/agents/)
 
@@ -237,29 +398,6 @@ team (ops-direct-invoke)
 > **注意**：`test-universal.sh` 已包含以上全部 9 条规则<br>
 > **并行模式限制**：`test-universal.sh` 的 B-SAFE-02 和 B-SAFE-03 在并行模式下仅做类型判断（不分析 session 文件），完整验证需使用 `test-premature-action.sh` 单独测试。
 
-### 通用测试使用说明
-
-`test-universal.sh` 可以自动测试所有 Skill，无需手动配置测试用例：
-
-```bash
-# 测试所有 Skill（并行执行，默认4个并发）
-./behavior/skills/test-universal.sh
-
-# 指定并行数量
-PARALLEL_JOBS=8 ./behavior/skills/test-universal.sh
-
-# 测试单个 Skill（串行执行）
-./behavior/skills/test-universal.sh ascendc-runtime-debug
-```
-
-**并行执行说明：**
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `PARALLEL_JOBS` | 并行测试数量 | 4 |
-
-测试结果会写入临时文件，最后统一汇总输出。
-
 **通用测试包含的规则：**
 
 | 规则 | 执行方式 | 说明 |
@@ -340,6 +478,69 @@ custom:
 | `test-simple-op-development.sh` | Ascend C 领域知识验证：文件结构、TilingData、Kernel 签名、芯片架构、ACLNN、开发流程、UT 测试 |
 | `test-workflow-execution.sh` | 端到端工作流：在临时项目中创建算子文件并验证内容正确性 |
 
+### ST 系统测试 (system/)
+
+ST（System Test）框架是一个基于 Python/pytest 的 AI 语义评测系统，通过**变更驱动**的方式识别受影响的 skill，执行两阶段评测，输出 HTML + JSON 报告。
+
+#### 核心工作流程
+
+```
+输入：repo_root + changed_files
+    │
+    ├─ 步骤1：识别受影响的 skills
+    │   └─ 从变更文件路径中提取 skill 目录
+    │
+    ├─ 步骤2：加载评测用例
+    │   └─ 读取 tests/system/cases/<skill>_evals.md
+    │
+    ├─ 步骤3：执行评测
+    │   ├─ Phase 1: 静态结构验证（test_skill_basic.py）
+    │   └─ Phase 2: AI 语义评测（test_skill_evals.py）
+    │
+    └─ 步骤4：保存结果到 tests/system/results/
+```
+
+ST 框架的两阶段评测流程（Phase 1 静态验证 + Phase 2 AI 语义评测）和评测用例编写格式，详见上方"本地开发调试"章节。
+
+#### 运行方式
+
+```bash
+# 方式1：gate_check.sh（完整 CI 门禁流程）
+./tests/gate_check.sh
+
+# 方式2：main.py（CI 门禁入口，指定变更文件）
+python tests/system/scripts/main.py \
+    --repo-root /path/to/repo \
+    --changed-files ops/skill-name/SKILL.md
+
+# 方式3：直接运行 pytest（本地开发调试）
+cd tests/system/scripts
+python -m pytest test_skill_basic.py -v -k "skill-name"      # Phase 1
+python -m pytest test_skill_evals.py --skill skill-name -v    # Phase 2
+
+# 方式4：run_eval.py（pytest 封装，支持报告生成）
+python tests/system/scripts/run_eval.py --skill skill-name --html-report
+
+# 并行执行：Phase 2 用例相互独立，可通过 --parallel 加速
+python tests/system/scripts/main.py \
+    --repo-root /path/to/repo \
+    --changed-files ops/foo/SKILL.md \
+    --parallel auto
+```
+
+#### 输出结果
+
+| 文件 | 说明 |
+|------|------|
+| `results/basic_validation.html` | Phase 1 静态结构验证 HTML 报告 |
+| `results/<skill>_evals_validation.html` | Phase 2 语义评测 HTML 报告 |
+| `results/<skill>_<timestamp>.json` | 结构化评测结果 JSON |
+| `logs/<skill>_case_X.json` | 每个用例的执行 session ID |
+| `logs/<skill>_case_X_review_ses.json` | 评测 session 完整对话导出 |
+| `logs/test_results_<timestamp>.zip` | logs + results 打包归档 |
+
+ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测用例编写格式，详见上方"本地开发调试"章节。
+
 ## 运行参数
 
 | 参数 | 说明 |
@@ -350,7 +551,7 @@ custom:
 | `--category`, `-c CAT` | 运行指定类别（unit/behavior/integration/all） |
 | `--platform PLATFORM` | 指定平台（claude/opencode/auto，默认: opencode） |
 | `--test`, `-t NAME` | 运行指定测试 |
-| `--timeout SECONDS` | 设置超时时间（默认: 300） |
+| `--timeout SECONDS` | 设置超时时间（默认: 600） |
 | `--verbose`, `-v` | 显示详细输出 |
 | `--output FORMAT` | 输出格式（text/json） |
 | `--list`, `-l` | 列出所有可用测试 |
@@ -372,6 +573,9 @@ custom:
 | `FORCE_COLOR` | 设置为 `1` 强制启用彩色输出（适用于 CI/非 TTY 环境） |
 | `PARALLEL_JOBS` | 并行测试数量（默认: 4） |
 | `BASE_BRANCH` | 增量测试的基础分支（默认: master） |
+| `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` | CI 流水线目标分支名，用于版本检查对比基准 |
+| `REPO_ROOT` | 仓库根目录路径（gate_check.sh 使用） |
+| `CHANGED_FILES` | 手动指定变更文件列表（gate_check.sh 使用，空格分隔） |
 
 ## CI/CD 集成
 
@@ -400,33 +604,19 @@ custom:
 | 配置文件变更 | `package.json`、`.claude-plugin/` 等 |
 | Git 不可用 | 非 Git 仓库或无法检测变更 |
 
-### GitHub Actions 示例
+### ST 框架门禁 (gate_check.sh)
 
-```yaml
-name: Test Skills
+`gate_check.sh` 是 ST 框架的 CI 门禁入口，自动检测变更文件并执行 Phase 1 + Phase 2 评测：
 
-on:
-  pull_request:
-    branches: [master]
+```bash
+# 自动检测 HEAD 变更（对比 origin/master）
+./tests/gate_check.sh
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 需要完整历史用于增量检测
+# 指定变更文件
+CHANGED_FILES="ops/my-skill/SKILL.md" ./tests/gate_check.sh
 
-      - name: Run Incremental Tests
-        run: |
-          cd cannbot-skills/tests
-          ./run-tests.sh --incremental-ci --platform none --output json > results.json
-
-      - name: Upload Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: skills/tests/results.json
+# 指定目标分支
+CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main ./tests/gate_check.sh
 ```
 
 ### 变更检测示例
@@ -620,12 +810,37 @@ else
 fi
 ```
 
+### ST 系统测试评测用例
+
+在 `tests/system/cases/` 下创建 `<skill-name>_evals.md` 文件：
+
+```markdown
+---
+skill_name: my-new-skill
+eval_mode: text
+---
+
+## Prompt
+测试问题内容
+
+## Expected Output
+回复应覆盖的关键要点（语义描述，非逐字匹配）
+
+## Expectations
+- `[contains]` 必须包含的内容
+- `[not_contains]` 不得包含的内容
+```
+
+然后在 `tests/system/config/skill-test.config` 中将该 skill 加入 `skill_whitelist`，确保 `skill_dirs` 包含该 skill 所在的目录。
+
+评测用例编写指南详见 `tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md`。
+
 ## 故障排查
 
 ### CLI 未找到
 
 ```bash
-npm install -g @anthropic/claude-code
+npm install -g @anthropic-ai/claude-code
 ```
 
 ### 测试超时
@@ -645,3 +860,13 @@ npm install -g @anthropic/claude-code
 ```bash
 ./run-tests.sh --verbose --test unit/skills/test-structure.sh
 ```
+
+### ST 框架依赖缺失
+
+```bash
+pip install -r tests/system/scripts/requirements.txt
+```
+
+### 评测 session 返回"无法解析判定结果"
+
+评测模型可能将 JSON 输出包裹在 markdown 代码块中（已兼容）。如仍有问题，检查 `tests/system/logs/<skill>_case_X_review_ses.json` 中的原始评测输出。

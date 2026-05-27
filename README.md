@@ -15,66 +15,110 @@
 - 希望贡献 Skills / Agents 的社区贡献者
 
 ## 🔥 最新动态
-- **2026-05-25** — 新增 `cuda2ascend-simt` 技能（实验版），支持将 CUDA 算子迁移到 Ascend C SIMT，仅支持 Ascend 950 PR。
-- **2026-05-19** — 新增支持 Triton 算子生成，适用于通过 Triton 开发高性能 Ascend NPU 算子。
-- **2026-05-16** — 新增支持 Trae 全局安装，所有官方插件均支持 `global` 和 `project` 两种安装级别。
-- **2026-05-16** — 【模型推理】将 `model-infer-optimize` 从 `model/teams/` 迁移到 `plugins-official/` 主线结构，新增完整 plugin 结构。
-- **2026-05-15** — 【算子直调】将 RegBase 最佳实践指导集成到 `ops-direct-invoke` 工作流。
-- **2026-05-15** — 【安装部署】init.sh 支持从任意目录执行安装，可通过 `install_path` 参数指定目标项目路径。
-- **2026-05-12** — 【图模式】torch-compile 加入 plugin-official，提供 PyTorch torch.compile 图模式编排入口。
-- **2026-05-12** — 【安装部署】将 TileLang 从 `ops-lab/tilelang` 转移至 `plugins-community/tilelang-op-orchestrator`。
-- **2026-05-11** — 新增 ascendc-crash-debug 技能，剥离 runtime-debug 中卡死/崩溃/挂起内容，与 precision-debug 形成三分类调试体系；调整技能分类。
-- **2026-05-11** — 新增支持 Cursor IDE 安装，官方插件已支持 OpenCode / Claude / Trae / Cursor。
-- **2026-05-07** — 新增kernel直调工程接入ACLNN/GEIR接口skill（ascendc-direct-invoke-to-registry-invoke），支持kernel直调形式改造成自定义算子工程。
-- **2026-05-06** — 新增算子注册调用的开发工作流（ops-registry-invoke），支持 ACLNN 和 GEIR 两种接入方式，覆盖需求分析到代码检视全流程。
+- **2026-05-25** — 新增 `cuda2ascend-simt` 实验技能。
+- **2026-05-23** — 性能调试/代码检视/PyPTO 多模块能力增强；测试框架修复跨平台稳定性并统一 License。
+- **2026-05-22** — 新增 tiling-solver Skill 与社区治理模型；UT 与 CI/ST 测试框架能力增强。
+- **2026-05-20** — 新增 4 个 GitCode 协作 Skills 与 skill 能力看护 CI 入口。
+- **2026-05-19** — 新增 Triton 算子生成功能。
+- **2026-05-16** — model-infer-optimize 迁移至 plugins-official；全场景插件支持 Trae 全局安装。
+- **2026-05-15** — RegBase 最佳实践集成至算子直调工作流；init.sh 支持任意目录安装。
+- **2026-05-14** — Skill `ascendc-npu-arch` 重命名为 `npu-arch`。
+- **2026-05-12** — torch-compile 加入 plugin-official；TileLang 迁移至 plugins-community。
+- **2026-05-11** — 新增 ascendc-crash-debug 技能；官方插件新增支持 Cursor IDE。
 
 > 仅展示最近两周动态，更多历史记录详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## ⚡️快速开始
 
-### 方式一：脚本安装
+### 前置条件
+
+安装以下任意一个 AI 编程工具：
+
+| 工具 | 安装命令 | 适用安装方式 |
+|------|---------|-------------|
+| **Claude Code** | `npm install -g @anthropic-ai/claude-code` → [官方文档](https://code.claude.com/docs/zh-CN/overview) | 脚本安装 / Plugin 安装 |
+| **OpenCode** | `npm install -g opencode-ai` → [官方文档](https://opencode.ai/docs/zh-cn) | 脚本安装 |
+| **Trae** | 下载安装：https://www.trae.cn → [官方文档](https://www.trae.cn) | 脚本安装 |
+| **Cursor** | 下载安装：https://cursor.com → [官方文档](https://cursor.com/cn/docs/get-started/quickstart) | 脚本安装 |
+
+### 步骤一：克隆仓库
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills
 ```
 
-| 场景 | 命令 | 文档 |
-|------|------|------|
-| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
-| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
-| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
-| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `cd plugins-official/triton-op-generator && bash install.sh project <claude\|opencode\|trae>` | 更多安装方式和使用参考 [quickstart](plugins-official/triton-op-generator/quickstart.md) |
-| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <opencode\|claude\|trae\|cursor>` | 更多安装方式和使用参考 [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
+### 步骤二：选择场景并安装
 
-### 方式二：Plugin 安装
+选择对应场景，将 `<tool>` 替换为你的 AI 工具后执行：
 
-仅支持 Claude Code，且仅部分场景提供 Plugin。
+| 场景 | 安装命令 | 详细文档 |
+|------|---------|---------|
+| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <tool>` | [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
+| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <tool>` | [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
+| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <tool>` | [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
+| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `cd plugins-official/triton-op-generator && bash install.sh project <tool>` | [quickstart](plugins-official/triton-op-generator/quickstart.md) |
+| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <tool>` | [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
+| [**Catlass 算子直调开发**](plugins-official/catlass-op-generator/quickstart.md) | `cd plugins-official/catlass-op-generator && bash init.sh project <tool>` | [quickstart](plugins-official/catlass-op-generator/quickstart.md) |
+| [**代码检视**](plugins-official/ops-code-reviewer/quickstart.md) | `cd plugins-official/ops-code-reviewer && bash init.sh project <tool>` | [quickstart](plugins-official/ops-code-reviewer/quickstart.md) |
+| [**torch.compile 图模式**](plugins-official/torch-compile/quickstart.md) | Plugin 市场安装：`/plugin install torch-compile@cannbot` | [quickstart](plugins-official/torch-compile/quickstart.md) |
 
-#### Claude Code
+**示例**：如果你使用 Claude Code，想安装 AscendC Kernel 直调场景：
+```bash
+cd plugins-official/ops-direct-invoke && bash init.sh project claude
+```
 
-1. 注册 marketplace（首次）：`/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`
-2. 按场景安装对应插件：
+安装脚本会自动完成：创建软链接 → 生成配置文件 → 克隆依赖仓库 → 健康检查。看到 `Installation complete!` 即表示安装成功。
 
-| 场景 | 命令 |
-|------|------|
-| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `/plugin install ops-direct-invoke@cannbot` |
-| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | *暂不支持* |
-| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `/plugin install pypto-op-orchestrator@cannbot` |
-| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `/plugin install triton-op-generator@cannbot` |
-| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `/plugin install model-infer-optimize@cannbot` |
+> **Claude Code 用户的备选方案**：如果你使用 Claude Code，也可以用 Plugin 方式安装（`/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`，然后 `/plugin install <插件名>@cannbot`）。
 
-3. 激活：`/reload-plugins`，然后新开会话 或 `/clear`
+### 步骤三：验证安装
 
-### 方式三：手动安装
-
-克隆仓库后，按需将 skills/ 或 agents/ 目录下所需的模块软链接或复制到对应工具的配置路径下。目录结构需参考各 Agent 框架的约定，例如 Claude Code 的项目级结构为 `{your-project-path}/.claude/skills/` 和 `{your-project-path}/.claude/agents/`。
+安装完成后，检查以下内容确认安装成功：
 
 ```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-# 示例：将 npu-arch skill 拷贝到你的 Claude Code 项目
-cp -r cannbot-skills/ops/npu-arch {your-project-path}/.claude/skills/
+# 检查 skills 和 agents 目录是否正确链接
+ls .claude/skills/        # Claude Code 用户
+ls .opencode/skills/      # OpenCode 用户
+ls .trae/skills/          # Trae 用户
+ls .cursor/skills/        # Cursor 用户
+
+# 如果上述目录存在且包含多个子目录（如 npu-arch、ascendc-env-check 等），说明安装成功。
 ```
+
+你也可以启动 AI 编程工具后输入以下内容来快速验证 Skills 是否被正确加载：
+
+> "请列出当前可用的 CANNBot Skills"
+
+如果 AI 能列出 `npu-arch`、`ascendc-env-check` 等技能名称，说明安装完全成功。
+
+### 步骤四：开始使用
+
+启动 AI 工具，直接描述开发需求即可。
+
+以下是一些入门提示词示例：
+
+| 你想做什么 | 可以这样说 |
+|-----------|-----------|
+| 开发一个算子 | "帮我开发一个 Abs 算子，输入 float16，输出 float16" |
+| 调试精度问题 | "我的 Add 算子精度不达标，帮我排查一下" |
+| 查阅 API 文档 | "aclnnAdd 接口的参数和返回值是什么" |
+| 检查开发环境 | "帮我检查一下当前的 CANN 开发环境" |
+| 代码检视 | "帮我检视这段 Kernel 代码是否符合规范" |
+
+更多示例详见 [Skills 使用样例](docs/skills-usage.md)。各场景的完整使用步骤参见对应 quickstart 文档。
+
+### 安装遇到问题？
+
+| 常见问题 | 解决方法 |
+|---------|---------|
+| `git clone` 失败（网络问题） | 尝试配置 GitCode SSH Key，或使用镜像地址 |
+| `init.sh` 提示权限不足 | 执行 `chmod +x plugins-official/*/init.sh` |
+| skills 目录为空 | 确认安装脚本输出中无报错，重新执行安装命令 |
+| AI 工具无法识别 Skills | 重启工具或新开会话（某些工具需重新加载配置） |
+| CANN 环境未配置 | 仅影响代码编译/运行类 Skills，知识检索类不受影响 |
+
+更多安装选项（全局安装、Plugin 市场安装、手动安装）和故障排查详见各场景对应的 quickstart 文档。
 
 ## 🔍 项目架构设计
 
@@ -82,18 +126,22 @@ cp -r cannbot-skills/ops/npu-arch {your-project-path}/.claude/skills/
 
 ```
 cannbot-skills/
-├── ops/                    # 算子 Skills（正式版：Ascend C + PyPTO）
-├── ops-lab/               # 算子 Skills（实验 / 非正式版）
-├── model/                 # 模型推理优化原子 Skills（11 个 model-infer-*）
-├── plugins-official/      # 官方应用 Plugin
-│   ├── ops-direct-invoke/
-│   ├── ops-registry-invoke/
-│   ├── pypto-op-orchestrator/
-│   ├── torch-compile/
-│   ├── model-infer-optimize/  # NPU 推理端到端优化流程
-│   └── triton-op-generator/   # Triton 算子代码生成与优化
-├── infra/                 # 基础设施维护 Skills
-└── tests/                 # 自动化测试框架
+├── ops/                             # 算子 Skills（正式版）
+├── ops-lab/                         # 算子 Skills（实验 / 非正式版）
+├── model/                           # 模型推理优化 Skills
+├── plugins-official/                # 官方应用 Plugin
+│   ├── ops-direct-invoke/           # AscendC Kernel 直调开发
+│   ├── ops-registry-invoke/         # AscendC 算子注册调用开发
+│   ├── pypto-op-orchestrator/       # PyPTO 算子开发
+│   ├── catlass-op-generator/        # Catlass 算子直调开发
+│   ├── ops-code-reviewer/           # 代码检视
+│   ├── torch-compile/               # torch.compile 图模式
+│   ├── model-infer-optimize/        # NPU 推理端到端优化流程
+│   └── triton-op-generator/         # Triton 算子代码生成与优化
+├── plugins-community/               # 社区 Plugin
+│   └── tilelang-op-orchestrator/    # TileLang 算子开发
+├── infra/                           # 基础设施维护 Skills
+└── tests/                           # 自动化测试框架
 ```
 
 ### 逻辑架构视图
@@ -241,8 +289,13 @@ cannbot-skills/
 | **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
 | **ascendc-docs-gen** | 算子文档写作参考，支持需求分析、详细设计等多个标准模版 | — |
-| **cann-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
+| **ops-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
 | **cuda2ascend-simt** | CUDA 算子迁移到 Ascend C SIMT，支持 `standalone sample` / `torch_npu` / `pybind` 三类交付形态，根据原始工程形态自动选择。**仅支持 Ascend 950 PR平台**。当前不支持：native JIT（`nvrtc`、运行时编译、扩展 JIT 加载）、torch 复数 dtype、device 侧 `double`（FP64）、CUDA 生态库（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API | [查看](docs/skills-usage.md#cuda2ascend-simt) |
+| **ascendc-blaze-best-practice** | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 | — |
+| **ascendc-performance-best-practices** | 按算子族组织的性能优化经验与参考代码总结 | — |
+| **ascendc-regbase-best-practice** | DAV_3510 RegBase 算子 API 约束、实现结构、常见陷阱及真实参考算子 | — |
+| **cann-env-setup** | 昇腾 NPU CANN 安装与环境配置指导 | — |
+| **aiss-tiling-solver** | AISS-TilingSolver 工具自动求解最优 Tiling 参数，覆盖安装、输入构造、运行求解、结果解读 | — |
 
 ### PyPTO 算子开发
 
@@ -335,27 +388,23 @@ cannbot-skills/
 自动化测试验证 Skills 和 Agents 的正确性，确保技能模块和智能代理的行为符合预期。
 详见 [tests/README.md](tests/README.md)。
 
-## 💬相关信息
+## 💬 相关信息
 - [贡献指南、开发规范](docs/STANDARDS.md)
 - [许可证](LICENSE)
-- [所属SIG](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)
+- [所属 SIG](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)
 
 ## 💖 免责声明
 
-感谢您关注 CANNBot Skills 项目，我们希望这些技能和知识能帮助您更好地进行 CANN 开发^_^
+感谢您关注 CANNBot Skills 项目，我们希望这些技能和知识能帮助您更好地进行 CANN 开发 ^_^
 
 在使用之前，请您了解：
 
-1. **关于功能满足度**：由于技术快速更新迭代，部分内容可能无法完全适用于所有场景。 本开源社区的功能和文档正在持续更新和完善、丰富场景中，如果想提出需求、发现问题、贡献想法，非常欢迎提 Issue、讨论来告诉我们，共创共建。
+1. **关于功能满足度**：由于技术快速更新迭代，部分内容可能无法完全适用于所有场景。本开源社区的功能和文档正在持续更新和完善中，如果想提出需求、发现问题、贡献想法，欢迎提 Issue 或参与讨论，共创共建。
 
-2. **关于自动生成**：自动代码生成工具所产出的内容，其完整性、准确性、合规性，受模型类型、模型版本、Skills 能力、语料质量、输入指令、运行环境等多种因素影响，无法保证完全精准、尽善尽美。所有生成代码作为辅助研发使用，请开发者务必进行测试验证、安全审查后再投入使用。
+2. **关于自动生成**：自动代码生成工具所产出的内容，其完整性、准确性、合规性受模型、Skills 能力、语料质量、输入指令等多种因素影响，无法保证完全精准。所有生成代码作为辅助研发使用，请开发者务必进行测试验证、安全审查后再投入使用。
 
-## 🤝 联系我们
-### 需求、问题、咨询、任务、文档
-通过GitCode[【Issues】](https://gitcode.com/cann/cannbot-skills/issues)提交。
-   
-### 社区互动
-通过GitCode[【讨论】](https://gitcode.com/cann/cannbot-skills/discussions)参与交流。
-   
-### 联系我们
-[【微信交流群】](https://gitcode.com/cann/cannbot-skills/discussions/2)
+## 🤝 社区交流
+
+- **Issue 反馈**：[提交 Issue](https://gitcode.com/cann/cannbot-skills/issues)
+- **社区讨论**：[参与讨论](https://gitcode.com/cann/cannbot-skills/discussions)
+- **微信交流**：[加入群聊](https://gitcode.com/cann/cannbot-skills/discussions/2)

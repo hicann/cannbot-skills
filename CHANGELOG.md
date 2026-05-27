@@ -1,13 +1,62 @@
 ## 🔥 更新日志
-### 【2026-05-25】
+### 【2026-05-26】
 #### 新特性 New Features
 - 【Ascend C】新增 `cuda2ascend-simt` 技能（实验版，位于 `ops-lab/`），支持将 CUDA 算子迁移到 Ascend C SIMT。**仅支持 Ascend 950 PR平台**。覆盖 `standalone sample`、`torch_npu`、`pybind` 三类交付形态，按原始工程形态选择对应产物。
 - 产物固定输出在 `ported-ops/<operator_name>/`，附中文 `plan.md` 与 `README.md`，并在 Ascend 950 PR 上做硬件验证后才报 `success`。
 - **当前不支持**：native JIT 路径（`nvrtc`、运行时编译、extension JIT 加载）、torch 复数 dtype 分支、device 侧 `double`（FP64）执行路径、CUDA 生态库依赖（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API。
+- 【PyPTO】更新 Golden 生成 Skill（pypto-golden-generate），优化算子精度验证流程。
 
-### 【2026-05-23】
+#### 测试框架 Test Framework
+- 【PR 模板】统一测试报告命名规范，修正 PR 模板指引。
+
+### 【2026-05-25】
 #### 新特性 New Features
-- 【Issue 模板】新增 `request-for-comments` RFC 提案模板，对齐 Rust/React RFC 格式，`gitcode-issue-gen` 同步支持。
+- 【性能调试】新增 Scalar 编码与诊断类目（ascendc-perf），扩展性能分析覆盖场景。
+- 【代码检视】新增 MC²（Micro/Macro/Compute/Communication）领域规则，增强 ascendc-code-review 在通信与计算重叠场景的检视能力。
+- 【PyPTO】更新需求理解 Skill（pypto-intent-understand），优化意图解析与规格生成准确性。
+- 【文档测试】补充 ST 系统测试框架文档与本地开发调试指南，降低社区开发者学习门槛。
+
+#### 测试框架 Test Framework
+- 【跨平台稳定性】修复测试框架跨平台兼容性问题，新增自包含 HTML 报告，优化终端失败摘要与紧凑输出。
+- 【失败修复指南】内嵌 UT 失败修复指南及一键复制提示词，提升测试失败排查效率。
+- 【License 统一】统一全部测试脚本 License 声明为 CANN Open Software License 2.0。
+
+#### 问题修复 Bug Fix
+- 【环境检查】修复 npu-smi 表解析在特定设备布局下误判 NPU-occupied 的问题。
+- 【工作流集成】修复 catlass-op-dev-workflow 错误引用为 fake skill 目录的问题，改为集成到 workflows/references/。
+
+### 【2026-05-22】
+#### 新特性 New Features
+- 【UT 开发】新增 def dtype 二进制匹配能力，支持默认数据类型自动推断。
+- 【Matmul】基于 Blaze 框架新增 matmul 单算子直调支持。
+- 【治理模型】新增 CANNBot Skills 社区治理模型（GOVERNANCE.md），定义贡献者/Committer/SIG 角色与协作规则。
+
+#### 特性增强 Feature Enhancement
+- 【测试框架】优化 CI 门禁看护能力及系统测试（ST）框架，增强增量检测与变更驱动评测。
+
+#### 问题修复 Bug Fix
+- 【CI 门禁】修复 ST 任务检测遗漏及安装脚本路径问题。
+- 【Trae IDE】修复 TRAE 初始化与 UT 测试的兼容性问题。
+
+### 【2026-05-21】
+#### 新特性 New Features
+- 【Tiling】新增 tiling-solver Skill，提供自动化 Tiling 方案求解能力。
+
+#### 特性增强 Feature Enhancement
+- 【示例提示词】补充算子直调工程调用与验证的示例提示词。
+
+### 【2026-05-20】
+#### 新特性 New Features
+- 【GitCode 协作】新增 infra/ 域 4 个协作 Skills：gitcode-pr-handler（PR 标题/描述自动生成）、gitcode-issue-gen（PR→Issue 关联生成）、gitcode-issue-handler（Issue 端到端处置）、gitcode-toolkit（API/Token/日志共享参考）。
+- 【CI 入口】新增 skill 能力看护 CI 入口及脚本（gate_check.sh），支持变更驱动 ST 评测。
+
+#### 特性增强 Feature Enhancement
+- 【Triton】README 补充 triton-op-generator plugin 安装信息。
+- 【diff 工具】升级 diff 工具以支持 cannbot 仓库的 diff 获取。
+
+#### 问题修复 Bug Fix
+- 【模型推理】修复 torch_npu_list 中算子接口链接错误。
+- 【路径链接】修复多处路径引用错误。
 
 ### 【2026-05-19】
 #### 新特性 New Features

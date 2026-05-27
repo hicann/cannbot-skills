@@ -1012,7 +1012,7 @@ html_body.append(f'''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CANN Skills 测试报告</title>
+<title>CANNBot-skills UT 测试报告</title>
 <style>
 :root {{
   --bg: #0d1117;
@@ -1269,7 +1269,7 @@ body {{
 </head>
 <body>
 <header class="dashboard">
-  <h1>CANN Skills 测试报告</h1>
+  <h1>CANNBot-skills UT 测试报告</h1>
   <div class="stats">
     <div class="stat pass"><span class="count">{passed}</span>通过</div>
     <div class="stat fail"><span class="count">{failed}</span>失败</div>
