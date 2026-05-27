@@ -448,19 +448,58 @@ graph TB
 
 ---
 
+# 阶段二与阶段三之间：PyTorch ST 测试开发
+
+## C 任务：PyTorch ST 测试开发
+
+**触发时机**：迭代三验收通过后，最终精度验收前
+
+**Subagent**：`ascendc-ops-tester` - [详细调用参数](resources/task-prompts.md#pytorch-st-测试开发独立任务)
+
+**任务说明**：
+- 独立于 C++ ST 测试（B任务），一次性完成 PyTorch 适配层和 L0+L1 全量测试用例
+- 此时算子功能已完整，可直接开发全量用例，无需分迭代
+
+**验收标准**：
+- [ ] torch/ 目录结构完整
+- [ ] golden.py、compare.py、test.py 开发完成
+- [ ] test.py 包含 L0+L1 全量用例
+- [ ] torch_adapter.cpp 开发完成（含 ACLNN 两段式封装）
+- [ ] 编译通过（生成 libtorch_adapter.so）
+- [ ] CPU Golden 自测通过
+
+**⚠️ 重要**：本任务一次性完成，不分批次。完成后方可执行最终精度验收。
+
+**主 Agent 日志更新**：
+- 更新 LOG.md "开发状态"表格中 C 任务状态
+
+**Git 操作**：`git add operators/{operator_name}/ && git commit -m "test({operator_name}): PyTorch ST测试开发完成"`
+
 ---
 
 # 阶段三：验收阶段
 
----
+## 3.1 最终精度验收
 
-## 3.1 性能达标验收（可选）
+**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过），且 C 任务（PyTorch ST 测试开发）已完成
 
-**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过），且需求文档包含性能指标
+**Subagent**：`ascendc-ops-tester` - [详细调用参数](resources/task-prompts.md#31-最终精度验收)
 
-**Subagent**：`ascendc-ops-developer` - [详细调用参数](resources/task-prompts.md#31-性能达标验收)
+**⚠️ 验收通过判定**：检查报告 `**状态**:` 字段 = `✅通过`，ST通过率 = 100%（报告格式详见 task-prompts.md#31-最终精度验收）。**失败处理**：如状态 = `❌失败`，**禁止进入性能验收（即使用户要求继续）**，汇报用户决策（可能存在任务偏差）
 
-**⚠️ 验收通过判定**：检查报告 `**状态**:` 字段 = `✅通过`（报告格式详见 task-prompts.md#31-性能达标验收）。**失败处理**：如状态 = `❌失败`，**禁止进入上库阶段**，汇报用户决策
+**说明**：最终精度验收使用 **PyTorch 测试**（L0+L1批量全面验证），报告放 `docs/`（最终交付物）
+
+**⚪ CP3 用户确认**：向用户展示验收结果，询问是否继续性能验收
+
+**Git 操作**：`git add operators/{operator_name}/ && git commit -m "feat({operator_name}): 精度验收通过" && git tag operators/{operator_name}/precision-passed`
+
+## 3.2 性能达标验收（可选）
+
+**进入条件**：3.1 精度验收通过（`precision-report.md` 状态 = ✅通过），且需求文档包含性能指标
+
+**Subagent**：`ascendc-ops-developer` - [详细调用参数](resources/task-prompts.md#32-性能达标验收)
+
+**⚠️ 验收通过判定**：检查报告 `**状态**:` 字段 = `✅通过`（报告格式详见 task-prompts.md#32-性能达标验收）。**失败处理**：如状态 = `❌失败`，**禁止进入上库阶段**，汇报用户决策
 
 **说明**：性能验收是阶段三的可选验收，报告放 `docs/`（最终交付物）
 
@@ -528,4 +567,5 @@ graph TB
 | **Task调用参数** | [resources/task-prompts.md](resources/task-prompts.md) | 各阶段Subagent详细调用参数（含环境检查、模板等引用） |
 | **数据流说明** | [resources/data-flow.md](resources/data-flow.md) | 各阶段输入输出文件说明 |
 | **错误处理指南** | [resources/error-handling.md](resources/error-handling.md) | 各阶段错误类型、回退策略 |
+| **Kernel直调Skill** | `ascendc-direct-invoke-template` | Kernel直调工程模板，用于并行穿刺验证 |
 | API 文档 | `asc-devkit/docs/api/context/` | Ascend C API |

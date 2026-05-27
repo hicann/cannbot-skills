@@ -437,7 +437,109 @@ scene: test-execution
 
 ---
 
-## 3.1 性能达标验收
+## PyTorch ST 测试开发（独立任务）
+
+```
+Task 调用参数：
+{
+  "description": "PyTorch ST测试开发",
+  "subagent_type": "ascendc-ops-tester",
+  "prompt": "
+scene: test-development
+
+执行 PyTorch ST 测试工程开发任务。
+
+【任务说明】
+本任务独立于 C++ ST 测试开发（B任务），一次性完成 PyTorch 适配层开发和 L0+L1 全量测试用例实现。
+建议在迭代三验收后、最终精度验收前执行（此时算子功能已完整，可直接开发全量用例）。
+
+【输入】
+- 需求文档（含ACLNN接口定义）：operators/{operator_name}/docs/REQUIREMENTS.md
+- 测试设计文档：operators/{operator_name}/docs/TEST.md
+- C++ ST测试工程：operators/{operator_name}/tests/st/（参考 CPU golden 实现）
+- 算子目录：operators/{operator_name}/
+
+【输出】
+- PyTorch ST测试工程：operators/{operator_name}/tests/st/torch/
+  - CMakeLists.txt          # PyTorch 适配层构建配置
+  - test.py                 # 测试入口（用例定义 + 调度）
+  - golden.py               # CPU golden 计算
+  - compare.py              # 精度比对逻辑
+  - torch_adapter.cpp       # PyTorch 算子注册 + ACLNN 两段式封装
+  - build/libtorch_adapter.so  # 编译产物
+- 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
+
+【技术参考】
+- 完整样例：skills/ascendc-registry-invoke-template/references/add_example/tests/st/torch/
+- 开发指南：skills/ascendc-registry-invoke-template/references/st-test-guide.md → 第4章
+
+【验收标准】
+- [ ] torch/ 目录结构完整
+- [ ] golden.py 实现正确（CPU golden 自测通过）
+- [ ] compare.py 精度比对逻辑正确（使用 MERE/MARE 社区标准）
+- [ ] test.py L0+L1 全量用例已实现（对应 C++ 全量用例覆盖）
+- [ ] torch_adapter.cpp 开发完成（含 ACLNN 两段式封装）
+- [ ] CMakeLists.txt 配置正确
+- [ ] 编译通过（生成 libtorch_adapter.so）
+- [ ] CPU Golden 自测通过（python3 test.py --lib ./build/libtorch_adapter.so）
+- 日志摘要已输出
+
+⚠️ **重要**：本任务在最终精度验收前一次性完成，不分迭代。完成后方可执行最终精度验收。
+  "
+}
+```
+
+---
+
+## 3.1 最终精度验收
+
+```
+Task 调用参数：
+{
+  "description": "最终精度验收",
+  "subagent_type": "ascendc-ops-tester",
+  "prompt": "
+scene: test-execution
+
+执行最终精度验收任务。
+
+【测试方式】使用 **PyTorch 接入测试**（L0+L1批量全面验证）
+- 执行命令：cd operators/{operator_name}/tests/st && bash run.sh --torch
+
+【输入】
+- 算子目录：operators/{operator_name}/
+
+【输出】
+- 最终精度验收报告：operators/{operator_name}/docs/precision-report.md
+- 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
+
+【报告格式】（必须包含以下字段）
+```
+**状态**: ✅通过 / ❌失败
+
+**验收摘要**:
+| 验收项 | 结果 | 详情 |
+|-------|------|------|
+| NPU精度验证 | 通过/失败 | 通过率: X% |
+| dtype覆盖 | 通过/失败 | fp16/fp32/bf16/int/uint |
+
+**关键指标**:
+- 总用例数: X
+- 通过数: Y
+- 失败数: Z
+- 通过率: X%
+```
+
+【验收标准】
+- 使用PyTorch测试执行完整L0+L1用例批量验收
+- PytTorch NPU结果比对通过（真实NPU）
+- 通过率 = 100%
+- 日志摘要已输出
+  "
+}
+```
+
+## 3.2 性能达标验收
 
 ```
 Task 调用参数：

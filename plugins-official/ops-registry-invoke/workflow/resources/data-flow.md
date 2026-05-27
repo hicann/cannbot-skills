@@ -6,7 +6,7 @@
 
 ## 阶段表格
 
-**轨道代号**：A1-Main (主线代码) | A2 (UT开发) | B (C++ ST测试)
+**轨道代号**：A1-Main (主线代码) | A2 (UT开发) | B (C++ ST测试) | C (PyTorch ST测试)
 
 | 大阶段 | 子阶段 | 轨道 | 主要任务 | 输入文件 | 输出文件 | 输出位置 |
 |--------|--------|------|----------|----------|----------|----------|
@@ -22,7 +22,9 @@
 | | Phase 1-3 | **B** | C++ ST测试开发 | TEST.md | C++ ST测试代码 | `operators/{operator_name}/tests/st/` |
 | **第二阶段：开发** | 汇合验证 | - | 开发联调 | UT + ST代码 | iter{N}-integration-report.md | `operators/{operator_name}/tests/reports/` |
 | | 测试工程师验收 | - | 迭代验收 | 汇合验证报告 | iter{N}-acceptance-report.md | `operators/{operator_name}/tests/reports/` |
-| **第三阶段：验收** | 3.1 性能验收 | - | 性能分析（可选） | 算子二进制 | performance-report.md | `operators/{operator_name}/docs/` |
+| **阶段二/三之间** | PyTorch测试开发 | **C** | PyTorch ST测试开发（一次性完成L0+L1全量） | TEST.md + C++ ST | PyTorch ST测试代码 | `operators/{operator_name}/tests/st/torch/` |
+| **第三阶段：验收** | 3.1 精度验收 | - | 执行精度验证 | PyTorch ST + 测试用例 | precision-report.md | `operators/{operator_name}/docs/` |
+| | 3.2 性能验收 | - | 性能分析（可选） | 算子二进制 | performance-report.md | `operators/{operator_name}/docs/` |
 | **第四阶段：上库** | 4.1 文档与示例 | - | 生成文档示例 | 需求+设计+代码 | README.md + examples/ | `operators/{operator_name}/` |
 | | 4.2 代码检视 | - | 代码规范检查 | 算子代码 + 设计文档 | review-report.md | `operators/{operator_name}/docs/` |
 | | 4.3 开发总结 | - | 总结输出文档 | 所有文档 | aclnn{OperatorName}.md（更新）+ LOG.md | `operators/{operator_name}/` |
@@ -58,7 +60,8 @@ TEST.md
 | | UT测试报告 | `operators/{operator_name}/tests/ut/test-report.md` |
 | | 汇合验证报告（迭代N） | `operators/{operator_name}/tests/reports/iter{N}-integration-report.md` |
 | | 迭代验收报告（迭代N） | `operators/{operator_name}/tests/reports/iter{N}-acceptance-report.md` |
-| **第三阶段** | 最终性能验收报告 | `operators/{operator_name}/docs/performance-report.md` |
+| **第三阶段** | 最终精度验收报告 | `operators/{operator_name}/docs/precision-report.md` |
+| | 最终性能验收报告 | `operators/{operator_name}/docs/performance-report.md` |
 | **第四阶段** | 算子 README | `operators/{operator_name}/README.md` |
 | | 调用示例 | `operators/{operator_name}/examples/` |
 | | 代码检视报告 | `operators/{operator_name}/docs/review-report.md` |
@@ -94,8 +97,14 @@ TEST.md
 │   ├── ut/
 │   ├── st/
 │   │   ├── CMakeLists.txt              # C++ 测试构建配置
-│   │   ├── run.sh                      # 测试执行脚本
+│   │   ├── run.sh                      # 测试执行脚本（支持 --torch 选项）
 │   │   ├── test_aclnn_{operator_name}.cpp  # C++ 测试主程序
+│   │   ├── torch/                      # PyTorch 接入测试
+│   │   │   ├── CMakeLists.txt          # PyTorch 适配层构建配置
+│   │   │   ├── test.py                 # 测试入口（用例定义 + 调度）
+│   │   │   ├── golden.py               # CPU golden 计算
+│   │   │   ├── compare.py              # 精度比对逻辑
+│   │   │   └── torch_adapter.cpp       # PyTorch 算子注册 + ACLNN 两段式封装
 │   │   └── testcases/
 │   │       ├── L0_test_cases.csv
 │   │       ├── L1_test_cases.csv
@@ -117,6 +126,7 @@ TEST.md
     ├── DESIGN.md                          # 详细设计
     ├── TEST.md                            # 测试设计
     ├── PLAN.md                            # 迭代计划
+    ├── precision-report.md                # 最终精度验收
     ├── performance-report.md              # 最终性能验收（可选）
     └── review-report.md                   # 代码检视报告
 ```
@@ -146,6 +156,7 @@ TEST.md
 | `operators/{operator_name}/iter1-passed` | 迭代一验收通过 | 回滚锚点 |
 | `operators/{operator_name}/iter2-passed` | 迭代二验收通过 | 回滚锚点 |
 | `operators/{operator_name}/iter3-passed` | 迭代三验收通过 | 回滚锚点 |
+| `operators/{operator_name}/precision-passed` | 精度验收通过 | |
 | `operators/{operator_name}/performance-passed` | 性能验收通过 | 可选 |
 | `operators/{operator_name}/done` | 4.3 上库完成 | 最终交付，合回主线 |
 
@@ -155,5 +166,6 @@ TEST.md
 |------|------|
 | `feat({operator_name}): {描述}` | `feat(abs_ex): 迭代一验收通过` |
 | `fix({operator_name}): {描述}` | `fix(abs_ex): 修复 FP16 精度越界` |
+| `test({operator_name}): {描述}` | `test(abs_ex): PyTorch ST测试开发完成` |
 | `docs({operator_name}): {描述}` | `docs(abs_ex): 补充 README 调用示例` |
 | `revert({operator_name}): 回退到 {tag}` | `revert(abs_ex): 回退到 iter2-passed` |
