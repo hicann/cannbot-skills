@@ -13,13 +13,17 @@
 | **第一阶段：设计** | 1.1 开发准备 | - | 创建开发日志 | 用户描述 | LOG.md | `operators/{operator_name}/docs/` |
 | | 1.2 需求分析 | - | 收集算子需求信息 | 用户描述 | REQUIREMENTS.md | `operators/{operator_name}/docs/` |
 | | | | | | aclnn{OperatorName}.md | `operators/{operator_name}/docs/` |
-| | 1.3 方案设计 | - | 制定技术方案 | REQUIREMENTS.md | DESIGN.md | `operators/{operator_name}/docs/` |
-| | 1.4 测试设计 | - | 设计测试用例（与1.3并行） | REQUIREMENTS.md | TEST.md | `operators/{operator_name}/docs/` |
+| | **1.2.5 spec 生成** | - | 生成机器可校验的 L0 数学契约（9-stage 全 PASS） | REQUIREMENTS.md | spec.yaml | `operators/{operator_name}/docs/` |
+| | 1.3 方案设计 | - | 制定技术方案 | REQUIREMENTS.md + spec.yaml | DESIGN.md | `operators/{operator_name}/docs/` |
+| | 1.3R 方案评审 | - | DESIGN 条款级评审（含 DESIGN-SPEC-1 与 spec.yaml 一致性条款） | REQUIREMENTS.md + spec.yaml + DESIGN.md | DESIGN_REVIEW.md | `operators/{operator_name}/docs/` |
+| | 1.4 测试设计 | - | 设计测试用例（与1.3并行） | REQUIREMENTS.md + spec.yaml | TEST.md | `operators/{operator_name}/docs/` |
 | | | | | | 测试用例.csv + 覆盖度报告 | `operators/{operator_name}/tests/st/testcases/` |
 | **第二阶段：开发** | 2.1 初始化 | - | 创建目录 | - | - | `operators/{operator_name}/` |
-| | Phase 1-3 | **A1-Main** | 主线代码开发 | DESIGN.md | 算子代码 | `operators/{operator_name}/` |
-| | Phase 1-3 | **A2** | UT用例开发 | TEST.md | UT测试代码 | `operators/{operator_name}/tests/ut/` |
-| | Phase 1-3 | **B** | C++ ST测试开发 | TEST.md | C++ ST测试代码 | `operators/{operator_name}/tests/st/` |
+| | Phase 1-3 | **A1-Main** | 主线代码开发 | DESIGN.md + spec.yaml | 算子代码 | `operators/{operator_name}/` |
+| | Phase 1-2 | **A1-P** | 穿刺验证 | DESIGN.md + spec.yaml | 穿刺工程 + RESULT.md | `operators/{operator_name}/probe/` |
+| | Phase 1-2 第二波 | **A1-P-Retry** | 失败穿刺重试 | PROBE_SUMMARY.md + 当前主线代码 | 更新的 RESULT.md + PROBE_SUMMARY.md（含重试次数） | `operators/{operator_name}/probe/` |
+| | Phase 1-3 | **A2** | UT用例开发 | TEST.md + spec.yaml | UT测试代码 | `operators/{operator_name}/tests/ut/` |
+| | Phase 1-3 | **B** | C++ ST测试开发 | TEST.md + spec.yaml | C++ ST测试代码 | `operators/{operator_name}/tests/st/` |
 | **第二阶段：开发** | 汇合验证 | - | 开发联调 | UT + ST代码 | iter{N}-integration-report.md | `operators/{operator_name}/tests/reports/` |
 | | 测试工程师验收 | - | 迭代验收 | 汇合验证报告 | iter{N}-acceptance-report.md | `operators/{operator_name}/tests/reports/` |
 | **阶段二/三之间** | PyTorch测试开发 | **C** | PyTorch ST测试开发（一次性完成L0+L1全量） | TEST.md + C++ ST | PyTorch ST测试代码 | `operators/{operator_name}/tests/st/torch/` |

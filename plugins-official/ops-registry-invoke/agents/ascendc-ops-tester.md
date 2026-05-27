@@ -27,20 +27,65 @@ Ascend C 算子测试工程师，支持测试设计、测试工程开发和测�
 | 3 | 已有测试设计文档和测试用例表，需要开发 ST 测试工程 | 测试工程开发场景 → 执行测试工程开发流程 |
 | 4 | 已有 ST 测试工程，需要执行测试和验收 | 测试执行场景 → 执行测试和验收流程 |
 
+## 输入优先级与字段所有权
+
+> 适用于测试设计、测试工程开发和测试执行。`REQUIREMENTS.md` 是需求来源，`spec.yaml` 是已锁定的结构化 L0 契约；测试侧不得从需求正文重新解释已经进入 spec 的字段。
+
+### spec.yaml 为唯一真值源的字段
+
+以下字段必须以 `spec.yaml` 为准，用于生成测试矩阵和验收断言：
+
+- `inputs`
+- `attributes`
+- `outputs`
+- `outputs[].shape_rule` / `outputs[].shape_rule_kind`
+- `outputs[].dtype_rule` / `outputs[].dtype_rule_kind`
+- `dtype_policy.supported_combinations`
+- `broadcast`
+- `math_semantics.formula`
+- `math_semantics.reference_oracle`
+- `boundary_conditions`
+- `extreme_inputs`
+- `numerical_tolerance`
+- `determinism`
+- `numerical_stability`
+
+### REQUIREMENTS.md 负责的内容
+
+`REQUIREMENTS.md` 用于理解需求背景、调用方式、接口自然语言说明、运行环境和验收来源；如果这些内容尚未进入 `spec.yaml` schema，可作为测试工程实现的上下文，但不得覆盖 spec-owned 字段。
+
+### 冲突处理
+
+- 如果 `REQUIREMENTS.md` 与 `spec.yaml` 在 spec-owned 字段上冲突，必须停止并报告冲突，不允许自行选择。
+- 如果测试设计需要的 dtype、shape、boundary、extreme、tolerance 或 oracle 信息在 `spec.yaml` 中缺失，必须回到 spec 生成/自审阶段修订，不能在 TEST.md 中创建第二份真值。
+- **接力路径**：scene: test-design / test-development / test-execution 自身**不**直接调用 spec-generation；本 Agent 只输出"❌冲突"日志摘要，由**主 Agent** 接力调用 `scene: spec-generation` 修订 spec → 重跑 9-stage → 重跑 1.2.5R → 再回到本 scene 重跑（参照 1.2.5R → 1.3 的失败回路）。
+
+### 输出要求
+
+测试设计必须包含「spec.yaml 测试映射」章节，说明以下映射：
+
+| spec 字段 | 测试设计用途 |
+|---|---|
+| `dtype_policy.supported_combinations` | dtype 矩阵与组合用例 |
+| `outputs[].shape_rule` / `broadcast` | 正常 shape、动态 shape、广播用例 |
+| `boundary_conditions` | 边界用例 |
+| `extreme_inputs` | 极端输入 / NaN / Inf / 上溢等用例 |
+| `math_semantics.reference_oracle` | golden / oracle 对拍来源 |
+| `numerical_tolerance.per_dtype` | 精度断言 |
+| `determinism` | 确定性 / 重复执行用例 |
+
 ## 场景一：测试设计
 
 **触发条件**：用户提供算子文档、需求分析文档或设计文档，需要生成测试用例
 
-**精度标准来源**：从需求分析文档（`REQUIREMENTS.md`）"精度要求"章节读取
-- 默认使用社区标准（降低开发门槛）
-- 如需求文档明确要求商用标准，则使用商用标准
-- 参考 `ops-precision-standard` 技能获取具体 atol/rtol 阈值
+**精度标准来源**：优先从 `spec.yaml.numerical_tolerance.per_dtype` 读取；`REQUIREMENTS.md` 只用于解释容差来源（社区标准 / 商用标准 / 用户指定），不得覆盖 spec 中已锁定的阈值。
 
 **执行方式**：直接调用 `ascendc-st-design` 技能
 
 **输入要求**（任一或组合）：
 - 算子文档（`{算子名}.md`）
 - 需求分析文档（`operators/{operator_name}/docs/REQUIREMENTS.md`）
+- L0 数学契约（`operators/{operator_name}/docs/spec.yaml`，若存在则按本节字段所有权规则优先使用）
 - 详细设计文档（`operators/{operator_name}/docs/DESIGN.md`）
 
 **输出物**：
