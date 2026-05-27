@@ -6,6 +6,7 @@ skill_name: ascendc-task-focus
 
 ## Config
 - Eval Mode: file_based
+- Max Tokens: 150000
 
 ## Prompt
 
@@ -24,6 +25,9 @@ skill_name: ascendc-task-focus
 
 # Case 2: 更新任务进度
 
+## Config
+- Max Tokens: 120000
+
 ## Prompt
 
 我刚才完成了Add算子ST测试的「需求分析」步骤，请更新我的todo.md将需求分析标记为已完成并更新进度，然后在回复中展示更新后的todo.md内容。
@@ -41,6 +45,9 @@ skill_name: ascendc-task-focus
 
 # Case 3: 不应创建任务计划的场景
 
+## Config
+- Max Tokens: 80000
+
 ## Prompt
 
 我只是想快速查一下npu-smi info命令怎么用，不需要创建任务计划。
@@ -55,6 +62,9 @@ skill_name: ascendc-task-focus
 
 # Case 4: 创建精度调试任务计划
 
+## Config
+- Max Tokens: 200000
+
 ## Prompt
 
 Softmax算子FP16精度验证失败了，误差2.3e-2，需要定位并解决精度问题。请帮我创建一个精度调试的todo.md，包含误差记录表格和调试计数，并在回复中展示完整内容。
@@ -68,6 +78,9 @@ Softmax算子FP16精度验证失败了，误差2.3e-2，需要定位并解决精
 ---
 
 # Case 5: 创建分阶段开发任务计划
+
+## Config
+- Max Tokens: 250000
 
 ## Prompt
 

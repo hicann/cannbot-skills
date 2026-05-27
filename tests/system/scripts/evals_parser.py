@@ -131,6 +131,13 @@ def _parse_single_case(block: str, case_id: int, case_name: str,
         case_eval_mode = default_eval_mode
     eval_case["eval_mode"] = case_eval_mode
 
+    max_tokens_str = case_config.get("max tokens", "")
+    if max_tokens_str:
+        try:
+            eval_case["max_tokens"] = int(max_tokens_str)
+        except ValueError:
+            logger.warning("Invalid max_tokens '%s' in case %d, ignoring", max_tokens_str, case_id)
+
     eval_case["prompt"] = sections.get("prompt", "")
     eval_case["expected_output"] = sections.get("expected output", "")
     eval_case["expectations"] = _parse_expectations(sections.get("expectations", ""))

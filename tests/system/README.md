@@ -102,7 +102,22 @@ eval_mode: text        # text（默认）或 file_based
 ---
 ```
 
-每个用例以 `# Case <N>: <标题>` 开头，包含三个章节：
+每个用例以 `# Case <N>: <标题>` 开头，包含以下章节：
+
+### Config（可选）
+
+用例级配置，格式 `- Key: value`：
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|--------|------|------|--------|
+| `Eval Mode` | string | `text`（语义评审）或 `file_based`（文件产出验证） | `text` |
+| `Max Tokens` | int | Token 消耗上限，超过则用例失败 | 无限制 |
+
+```markdown
+## Config
+- Eval Mode: file_based
+- Max Tokens: 50000
+```
 
 ### Prompt
 
@@ -139,13 +154,25 @@ eval_mode: text        # text（默认）或 file_based
 ```
 tests/system/sandboxes/
 ├── <skill>_eval_1/
-│   ├── skill/          # skill 目录的独立副本
-│   └── logs/           # session 导出 JSON
+│   ├── .opencode/
+│   │   ├── opencode.json                    # opencode 工具权限白名单配置
+│   │   └── skills/
+│   │       └── <skill>/                     # skill 目录（默认软链接，指向源目录）
+│   └── logs/                                # session 导出 JSON
 │       ├── <skill>_case_1_ses.json          # 执行 session 数据
 │       └── <skill>_case_1_review_ses.json   # 评审 session 数据
 ├── <skill>_eval_2/
 │   └── ...
 └── ...
+```
+
+Skill 目录默认使用**软链接**指向源目录，避免每个用例重复复制 skill 文件，节省磁盘空间和创建时间。
+若需切回复制模式（Agent 可写源文件），设置环境变量 `SKILL_SANDBOX_COPY=1`：
+
+```bash
+SKILL_SANDBOX_COPY=1 python tests/system/scripts/main.py \
+    --repo-root . \
+    --changed-files ops/foo/SKILL.md
 ```
 
 `logs/` 目录下的 JSON 文件可在测试后用于分析或重新生成报告。

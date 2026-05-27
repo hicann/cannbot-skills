@@ -4,6 +4,9 @@ skill_name: cann-env-setup
 
 # Case 1: 检查NPU驱动安装命令
 
+## Config
+- Max Tokens: 100000
+
 ## Prompt
 
 我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？
@@ -19,6 +22,9 @@ skill_name: cann-env-setup
 ---
 
 # Case 2: 配置环境变量永久生效
+
+## Config
+- Max Tokens: 100000
 
 ## Prompt
 
@@ -37,6 +43,9 @@ skill_name: cann-env-setup
 
 # Case 3: 验证安装是否成功
 
+## Config
+- Max Tokens: 100000
+
 ## Prompt
 
 CANN安装完成后，如何验证安装是否成功？
@@ -50,6 +59,9 @@ CANN安装完成后，如何验证安装是否成功？
 ---
 
 # Case 4: 离线安装顺序
+
+## Config
+- Max Tokens: 100000
 
 ## Prompt
 
@@ -67,6 +79,9 @@ CANN安装完成后，如何验证安装是否成功？
 
 # Case 5: Conda在线安装CANN
 
+## Config
+- Max Tokens: 120000
+
 ## Prompt
 
 我想用conda方式在线安装CANN，需要Python 3.10环境，具体步骤是什么？
@@ -82,6 +97,9 @@ CANN安装完成后，如何验证安装是否成功？
 ---
 
 # Case 6: 安装前依赖检查
+
+## Config
+- Max Tokens: 100000
 
 ## Prompt
 

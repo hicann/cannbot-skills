@@ -41,44 +41,17 @@ class SandboxManager:
 
     SANDBOX_DIR_NAME = "sandboxes"
 
-    def __init__(self, framework_dir: Path):
+    def __init__(self, framework_dir: Path, use_symlink: bool = True):
         """
         初始化沙箱管理器
 
         Args:
             framework_dir: tests/system 目录路径
+            use_symlink: 是否使用软链接代替复制（默认 True，可通过 SKILL_SANDBOX_COPY=1 切回复制模式）
         """
         self.framework_dir = Path(framework_dir)
         self.sandbox_root = self.framework_dir / self.SANDBOX_DIR_NAME
-
-    @staticmethod
-    def create_skill_link(sandbox_path: Path, skill_dir: Path) -> Path:
-        """
-        在沙箱的 .opencode/skills/ 下复制 skill 目录（独立副本，确保文件隔离）
-
-        Args:
-            sandbox_path: 沙箱目录路径
-            skill_dir: skill 源目录路径
-
-        Returns:
-            复制后的 skill 目录路径
-        """
-        skill_name = skill_dir.name
-        link_path = sandbox_path / ".opencode" / "skills" / skill_name
-
-        # 如果已存在则删除
-        if link_path.exists() or link_path.is_symlink():
-            if link_path.is_dir() and not link_path.is_symlink():
-                shutil.rmtree(link_path)
-            else:
-                link_path.unlink()
-
-        abs_skill_dir = Path(skill_dir).resolve()
-        link_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(abs_skill_dir, link_path)
-        logger.debug("[Sandbox] 复制 skill 目录: %s -> %s", abs_skill_dir, link_path)
-
-        return link_path
+        self.use_symlink = use_symlink
 
     @staticmethod
     def cleanup_sandbox(sandbox_path: Path) -> None:
@@ -96,6 +69,41 @@ class SandboxManager:
     def get_logs_dir(sandbox_path: Path) -> Path:
         """获取沙箱的 logs 目录路径"""
         return sandbox_path / "logs"
+
+    def create_skill_link(self, sandbox_path: Path, skill_dir: Path) -> Path:
+        """
+        在沙箱的 .opencode/skills/ 下部署 skill 目录
+
+        默认复制独立副本确保文件隔离；设置 use_symlink=True 后改用软链接指向源目录。
+
+        Args:
+            sandbox_path: 沙箱目录路径
+            skill_dir: skill 源目录路径
+
+        Returns:
+            部署后的 skill 目录路径
+        """
+        skill_name = skill_dir.name
+        link_path = sandbox_path / ".opencode" / "skills" / skill_name
+
+        # 如果已存在则删除
+        if link_path.exists() or link_path.is_symlink():
+            if link_path.is_dir() and not link_path.is_symlink():
+                shutil.rmtree(link_path)
+            else:
+                link_path.unlink()
+
+        abs_skill_dir = Path(skill_dir).resolve()
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.use_symlink:
+            link_path.symlink_to(abs_skill_dir, target_is_directory=True)
+            logger.debug("[Sandbox] 软链接 skill 目录: %s -> %s", abs_skill_dir, link_path)
+        else:
+            shutil.copytree(abs_skill_dir, link_path)
+            logger.debug("[Sandbox] 复制 skill 目录: %s -> %s", abs_skill_dir, link_path)
+
+        return link_path
 
     def ensure_sandbox_root(self) -> None:
         """确保沙箱根目录存在"""

@@ -71,7 +71,7 @@ def _validate_prompt(prompt: str, eval_id: str) -> None:
 def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Path] = None) -> List[str]:
     """收集沙箱中新增的生成文件列表（相对路径）
 
-    排除 logs/ 和 .opencode/ 目录。
+    排除 logs/ 和 .opencode/ 目录。软链接模式下自动排除源 skill 目录中已存在的文件。
     """
     files = []
     exclude_dirs = {"logs", ".opencode"}
@@ -80,6 +80,14 @@ def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Pat
             continue
         if any(d in entry.parts for d in exclude_dirs):
             continue
+
+        # 软链接模式：排除源 skill 目录中已存在的文件（被 rglob 通过软链接追踪到）
+        if original_skill_dir is not None:
+            try:
+                entry.resolve().relative_to(original_skill_dir.resolve())
+                continue
+            except ValueError:
+                pass
 
         rel = str(entry.relative_to(sandbox_path))
         files.append(rel)
@@ -624,6 +632,21 @@ def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
     return opencode_runner, sandbox_path
 
 
+def _check_token_budget(eval_data: Dict[str, Any], eval_id, opencode_runner,
+                        session_name: str) -> None:
+    """检查 token 消耗是否超过硬性阈值"""
+    max_tokens = eval_data.get("max_tokens")
+    if max_tokens is None:
+        return
+    from session_stats import SessionStats
+    ses_file = str(opencode_runner.session_dir / f"{session_name}_ses.json")
+    stats = SessionStats.from_export_file(ses_file)
+    actual_tokens = stats.tokens.total
+    assert actual_tokens <= max_tokens, (
+        f"Eval {eval_id}: token 消耗 ({actual_tokens}) 超过上限 ({max_tokens})"
+    )
+
+
 def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     skill_name = eval_case["skill_name"]
     eval_data = eval_case["eval"]
@@ -667,6 +690,8 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     opencode_runner.export_session_data(
         output_file=str(opencode_runner.session_dir / f"{session_name}_ses.json")
     )
+
+    _check_token_budget(eval_data, eval_id, opencode_runner, session_name)
 
     generated_files = collect_generated_files(sandbox_path, original_skill_dir=skill_dir)
 

@@ -11,6 +11,7 @@
 import html as html_mod
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -585,15 +586,38 @@ def _parse_execution_error_block(longrepr: str, eval_id: str) -> Optional[str]:
     """解析执行错误块"""
     if "opencode run failed" not in longrepr and "review session error" not in longrepr:
         return None
+    # 仅在真正的断言错误行中匹配，排除 traceback 源码上下文中的误匹配
     msg_match = re.search(
-        r'(?:opencode run failed|review session error)\s*[-:]\s*(.+?)(?:\n---|\nassert|\Z)',
+        r'(?:AssertionError|E\s{3,})(?:\s*:\s*)?'
+        r'(?:opencode run failed|review session error)\s*[-:]\s*(.+?)'
+        r'(?:\n---|\nassert|\nE\s|\Z)',
         longrepr, re.DOTALL
     )
-    msg = html_mod.escape(msg_match.group(1).strip()) if msg_match else "unknown error"
+    if not msg_match:
+        return None
+    msg = html_mod.escape(msg_match.group(1).strip())
     return (
         f'<div class="failure-block failure-error">\n'
         f'  <div class="failure-label">✖ 执行错误 — Eval {eval_id}</div>\n'
         f'  <div class="failure-content">{msg}</div>\n'
+        f'</div>'
+    )
+
+
+def _parse_token_exceeded_block(longrepr: str, eval_id: str) -> Optional[str]:
+    """解析 token 超限错误块"""
+    if "token" not in longrepr.lower() or "超过上限" not in longrepr:
+        return None
+    actual_match = re.search(r'token\s*消耗\s*\((\d+)\)', longrepr)
+    max_match = re.search(r'超过上限\s*\((\d+)\)', longrepr)
+    actual = actual_match.group(1) if actual_match else "?"
+    limit = max_match.group(1) if max_match else "?"
+    return (
+        f'<div class="failure-block failure-error">\n'
+        f'  <div class="failure-label">Token 超限 — Eval {eval_id}</div>\n'
+        f'  <div class="failure-content">'
+        f'实际消耗 <strong>{actual}</strong> tokens，'
+        f'超过上限 <strong>{limit}</strong> tokens</div>\n'
         f'</div>'
     )
 
@@ -656,6 +680,7 @@ def _parse_failure_to_html(longrepr: str) -> str:
     for parser in (
         _parse_reviewer_reason_block,
         _parse_pattern_block,
+        _parse_token_exceeded_block,
         _parse_execution_error_block,
     ):
         block = parser(longrepr, eval_id)
@@ -1073,9 +1098,13 @@ def pytest_runtest_logreport(report):
 
 @pytest.fixture(scope="function")
 def sandbox_manager() -> 'SandboxManager':
-    """提供沙箱管理器（function 级别，支持并行执行）"""
+    """提供沙箱管理器（function 级别，支持并行执行）
+
+    默认使用软链接模式；设置 SKILL_SANDBOX_COPY=1 可切回复制模式。
+    """
     from sandbox_manager import SandboxManager
-    manager = SandboxManager(FRAMEWORK_DIR)
+    use_symlink = os.environ.get("SKILL_SANDBOX_COPY", "0") != "1"
+    manager = SandboxManager(FRAMEWORK_DIR, use_symlink=use_symlink)
     manager.ensure_sandbox_root()
     yield manager
     # 不在这里清理，由 main.py 统一清理
