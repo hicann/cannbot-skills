@@ -13,6 +13,7 @@
 | 1.3 方案设计 | `ascendc-ops-architect` (scene: design) | 读取日志继续 |
 | 1.3R 方案评审 | `ascendc-ops-architect` (scene: design-review) | 读取日志继续（失败时重跑前确认 1.3 已按 DESIGN_REVIEW 修复） |
 | 1.4 测试设计 | `ascendc-ops-tester` | 读取日志继续 |
+| 1.4R 测试设计评审 | `ascendc-ops-tester` (scene: test-design-review) | 读取日志继续（失败时重跑前确认 1.4 已按 TEST_REVIEW 修复） |
 | 2-迭代一-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
 | 2-迭代一-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
 | 2-迭代一-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
@@ -326,8 +327,8 @@ scene: design-review
 - 日志摘要：输出到响应末尾（格式见本文档顶部『Subagent 日志摘要输出要求』）
 
 【主 Agent 处理规则】（供调用方参考、非本任务执行项）
-- 状态=✅ → 进入 CP2 用户确认
-- 状态=❌ 且报告中指出 REQUIREMENTS/spec 在 spec-owned 字段冲突 → **优先适用本条**：不要回 1.3 修 DESIGN；主 Agent 自动回调 architect (scene: spec-generation) 修订 spec.yaml → 重跑 9-stage → 重跑 1.2.5R → 重跑 1.3 → 重跑 1.3R
+- 状态=✅ → 若 1.4R 也已通过则进入 CP2 用户确认；否则等待 1.4R 通过后再触发 CP2
+- 状态=❌ 且报告中指出 REQUIREMENTS/spec 在 spec-owned 字段冲突 → **流程终止**，向用户报告冲突详情。spec 已通过校验 + 人工 review，若 REQUIREMENTS 仍与 spec-owned 字段冲突，属于流程异常，禁止自动修复
 - 状态=❌（其他原因，非冲突）→ 主 Agent 自动回调 architect (scene: design) 按 DESIGN_REVIEW.md 修订 DESIGN.md，修订后重跑 1.3R；最多重试 2 次
 - 禁止把 ❌ 报告或冲突日志直接抛给用户
   "
@@ -371,6 +372,43 @@ scene: test-design
 - 状态=✅ → 若 1.3R 也已通过则进入 CP2 用户确认；否则等待 1.3R 通过后再触发 CP2
 - 状态=❌（含日志摘要中报告 REQUIREMENTS/spec 冲突）→ **不要继续执行下一步**；主 Agent 自动回调 architect (scene: spec-generation) 按冲突报告修订 spec.yaml → 重跑 9-stage → 重跑 1.2.5R → 回到 1.4 重跑；最多重试 2 次
 - 禁止把 ❌ 报告或冲突日志直接抛给用户
+  "
+}
+
+【主 Agent 处理规则】（供调用方参考、非本任务执行项）
+- 状态=✅ → 若 1.3R 也已通过则进入 CP2 用户确认；否则等待 1.3R 通过后再触发 CP2
+- 状态=❌（含日志摘要中报告 REQUIREMENTS/spec 冲突）→ **流程终止**，向用户报告冲突详情。spec 已通过校验 + 人工 review，若 REQUIREMENTS 仍与 spec-owned 字段冲突，属于流程异常，禁止自动修复
+- 禁止把 ❌ 报告或冲突日志直接抛给用户
+  "
+}
+```
+
+## 1.4R 测试设计评审
+
+```
+Task 调用参数：
+{
+  "description": "测试设计评审",
+  "subagent_type": "ascendc-ops-tester",
+  "prompt": "
+scene: test-design-review
+
+执行测试设计评审任务（CP2 前置、不触达用户）。
+
+评审方法论、评审维度、报告格式、强制规则详见 `ascendc-ops-tester` Agent 定义中的场景四。
+
+【输入】
+- 需求文档：operators/{operator_name}/docs/REQUIREMENTS.md
+- L0 数学契约：operators/{operator_name}/docs/spec.yaml
+- 测试设计文档：operators/{operator_name}/docs/TEST.md
+- 测试用例：operators/{operator_name}/tests/st/testcases/
+
+【输出】
+- 测试设计评审报告：operators/{operator_name}/docs/TEST_REVIEW.md
+- 日志摘要：输出到响应末尾
+
+> **注**：失败分支规则（spec-owned 冲突直接终止 vs 其他失败回退修复）见 workflow SKILL.md 1.4R「失败处理」。
+
   "
 }
 ```

@@ -18,6 +18,7 @@
 | | 1.3R 方案评审 | - | DESIGN 条款级评审（含 DESIGN-SPEC-1 与 spec.yaml 一致性条款） | REQUIREMENTS.md + spec.yaml + DESIGN.md | DESIGN_REVIEW.md | `operators/{operator_name}/docs/` |
 | | 1.4 测试设计 | - | 设计测试用例（与1.3并行） | REQUIREMENTS.md + spec.yaml | TEST.md | `operators/{operator_name}/docs/` |
 | | | | | | 测试用例.csv + 覆盖度报告 | `operators/{operator_name}/tests/st/testcases/` |
+| | 1.4R 测试设计评审 | - | TEST 条款级评审（含 TEST-SPEC-1 与 spec.yaml 一致性条款） | REQUIREMENTS.md + spec.yaml + TEST.md + 测试用例 | TEST_REVIEW.md | `operators/{operator_name}/docs/` |
 | **第二阶段：开发** | 2.1 初始化 | - | 创建目录 | - | - | `operators/{operator_name}/` |
 | | Phase 1-3 | **A1-Main** | 主线代码开发 | DESIGN.md + spec.yaml | 算子代码 | `operators/{operator_name}/` |
 | | Phase 1-2 | **A1-P** | 穿刺验证 | DESIGN.md + spec.yaml | 穿刺工程 + RESULT.md | `operators/{operator_name}/probe/` |
