@@ -31,7 +31,7 @@ ST 用例在代码合入前执行，由 `gate_check.sh` 在 CI 流水线中自�
 
 | 看护维度 | 测试目标 | 当前能力 | 设计要点 |
 |----------|---------|---------|---------|
-| **正向看护** | 显式 / 隐式提示词 → 调用到目标 skill | 不具备 | 设计自然语言 prompt 验证 skill 是否被正确触发 |
+| **正向看护** | 显式 / 隐式提示词 → 调用到目标 skill | **具备** | 在 Config 中配置 Distractor skills（干扰技能），验证即使存在多个类似 skill，AI 仍能正确选择和触发目标 skill |
 | **负向看护** | 不该调用的提示词 → 不会误调用 skill | 不具备 | 设计边界场景 prompt 验证 skill 不会被错误触发 |
 | **正确性看护** | 黑盒场景验证、确保结果正确 | **具备** | 设计典型用户场景，描述预期输出要点，验证 AI 回复语义覆盖 |
 | **调用流程看护** | 关键工具被调用、交付件完整输出 | **具备** | 验证 skill 执行过程中关键工具是否被调用、关键文件是否生成 |
@@ -62,7 +62,13 @@ tests/system/
     ├── test_skill_evals.py          # Phase 2: AI 语义评测
     ├── evals_parser.py              # MD 格式评测用例解析器
     ├── opencode_runner.py           # opencode CLI 流式封装
-    └── sandbox_manager.py           # 沙箱隔离管理
+    ├── sandbox_manager.py           # 沙箱隔离管理
+    ├── session_stats.py             # Session 数据统计
+    ├── run_eval.py                  # pytest 评测命令行启动脚本
+    ├── test_opencode_runner.py      # opencode_runner 单元测试
+    ├── opencode_runner_examples.py  # opencode_runner 使用示例
+    ├── pytest.ini                   # pytest 渲染配置
+    └── requirements.txt             # Python 依赖
 ```
 
 ### 1.5 测试执行流程
@@ -166,8 +172,16 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 |------|------|------|
 | `## Prompt` | **是** | 发送给 AI 的测试问题，应模拟真实用户场景 |
 | `## Expected Output` | **是** | 对 AI 回复的语义预期。**不要求逐字匹配**，描述应覆盖的关键要点即可 |
-| `## Config` | 否 | 用例级配置，支持覆盖 eval_mode（如 `- Eval Mode: file_based`） |
+| `## Config` | 否 | 用例级配置，支持覆盖 eval_mode（如 `- Eval Mode: file_based`）。可用字段见下方 Config 字段说明 |
 | `## Expectations` | 否 | 模式匹配规则列表，用于精确断言 |
+
+**Config 字段说明：**
+
+| Config Key | 说明 |
+|------------|------|
+| `Eval Mode` | 覆盖用例级评测模式：`text`（默认）/ `file_based` |
+| `Max Tokens` | Token 消耗硬上限，超过则测试失败 |
+| `Distractor skills` | 正向看护：分号分隔的干扰 skill 名称列表。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 同时可用时仍能正确选择目标 skill。示例: `cann-env-setup;ascendc-task-focus;npu-arch` |
 
 ### 2.3 Expectations 类型详解
 
@@ -214,6 +228,18 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 - [file_list] *.md
 - [file_list] src/*.py
 ```
+
+#### 2.3.5 skill_activated — 程序化 skill 激活检查
+
+**程序化**检查 AI 执行过程中是否加载了指定 skill。不依赖 AI 评审模型，直接从 tool_use 事件中精确匹配 skill 名称。用于正向看护场景。
+
+```markdown
+## Expectations
+
+- [skill_activated] cann-env-setup
+```
+
+> **注意**：`skill_activated` 是确定性检查，不受评审模型主观判断影响。即使 AI 回复在技术上是正确的，如果它加载了错误的 skill（或没有加载任何 skill），此断言会直接导致测试失败。
 
 ### 2.4 评测模式
 
@@ -400,6 +426,31 @@ CANN安装完成后，如何验证安装是否成功？
 - [contains] pip
 ```
 
+#### 正向看护示例
+
+当需要验证 AI 在多个类似 skill 存在时仍能正确选择目标 skill 时，使用 `Distractor skills` 配置：
+
+```markdown
+# Case 7: 正向看护-多skill环境下正确触发目标skill
+
+## Config
+- Max Tokens: 100000
+- Distractor skills: ascendc-runtime-debug;ascendc-task-focus;npu-arch;ascendc-docs-search
+
+## Prompt
+
+我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？
+
+## Expected Output
+
+回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装。应成功激活并使用了 cann-env-setup skill。
+
+## Expectations
+
+- [skill_activated] cann-env-setup
+- [contains] npu-smi info
+```
+
 ### 2.8 用例开发工作流
 
 ```
@@ -437,7 +488,7 @@ CANN安装完成后，如何验证安装是否成功？
 skill_dirs:
   - "ops"
   - "graph"
-  - "model/skills"
+  - "model"
   - "ops-lab"              # 新增
 
 skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空表示全部生效）
@@ -471,63 +522,66 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 
 ---
 
-## 3. 全仓 Skill 清单
-
-### 3.1 ops/ — Ascend C 算子开发（22 个）
+### 3.1 ops/ — Ascend C 算子开发（23 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
 | 1 | aiss-tiling-solver | 使用 AISS-TilingSolver 工具自动求解 Ascend C 算子最优 Tiling 参数 | `ops/aiss-tiling-solver` |
 | 2 | ascendc-api-best-practices | Ascend C API 使用最佳实践，提供算术、归约、数据搬运、Buffer 管理等 API 正确用法 | `ops/ascendc-api-best-practices` |
-| 3 | ascendc-code-review | Ascend C 代码检视，基于假设检验方法论进行安全规范检视 | `ops/ascendc-code-review` |
-| 4 | ascendc-crash-debug | Ascend C 算子卡死/崩溃调试，处理 hang/crash/deadlock/plog 解析 | `ops/ascendc-crash-debug` |
-| 5 | ascendc-direct-invoke-template | Kernel 直调工程模板，用于创建 Ascend C Kernel 直调工程项目 | `ops/ascendc-direct-invoke-template` |
-| 6 | ascendc-direct-invoke-to-registry-invoke | Kernel 直调形式改造为自定义算子工程 | `ops/ascendc-direct-invoke-to-registry-invoke` |
-| 7 | ascendc-docs-gen | Ascend C 算子文档写作，提供需求分析、设计、接口文档等标准模板 | `ops/ascendc-docs-gen` |
-| 8 | ascendc-docs-search | Ascend C 开发资源检索，优先查本地索引、缺失时查在线文档 | `ops/ascendc-docs-search` |
-| 9 | ascendc-env-check | Ascend C 算子开发环境检查，查询 NPU 设备信息、CANN 环境配置 | `ops/ascendc-env-check` |
-| 10 | ascendc-performance-best-practices | Ascend C 算子性能优化最佳实践库，按算子族组织优化经验 | `ops/ascendc-performance-best-practices` |
-| 11 | ascendc-precision-debug | Ascend C 算子精度调试，输出异常、精度验证失败、FP16 精度等诊断 | `ops/ascendc-precision-debug` |
-| 12 | ascendc-regbase-best-practice | DAV_3510 RegBase 算子 API 约束确认、实现结构、常见陷阱排查 | `ops/ascendc-regbase-best-practice` |
-| 13 | ascendc-registry-invoke-template | 完整自定义算子工程模板，标准工程结构、UT/ST 样例、多芯片架构参考 | `ops/ascendc-registry-invoke-template` |
-| 14 | ascendc-registry-invoke-to-direct-invoke | 自定义算子工程中的 kernel 模板改造为 `<<<>>>` 直调形式 | `ops/ascendc-registry-invoke-to-direct-invoke` |
-| 15 | ascendc-runtime-debug | Ascend C 算子运行时错误调试，aclnn 错误码、plog 日志解析 | `ops/ascendc-runtime-debug` |
-| 16 | ascendc-st-design | Ascend C 算子系统测试（ST）设计，参数定义、测试因子提取、用例生成 | `ops/ascendc-st-design` |
-| 17 | ascendc-task-focus | 任务聚焦与注意力管理，通过 todo.md 保持长任务焦点 | `ops/ascendc-task-focus` |
-| 18 | ascendc-tiling-design | Ascend C 算子 Tiling 设计指南，多核切分、UB 切分、Buffer 规划 | `ops/ascendc-tiling-design` |
-| 19 | ascendc-ut-develop | Ascend C 算子 UT 开发与覆盖率增强，补充测试用例、生成覆盖率报告 | `ops/ascendc-ut-develop` |
-| 20 | ascendc-whitebox-design | Ascend C 算子白盒测试用例生成，参数枚举、三档覆盖级别 | `ops/ascendc-whitebox-design` |
-| 21 | cann-env-setup | 昇腾 NPU CANN 安装与环境配置指导 | `ops/cann-env-setup` |
-| 22 | npu-arch | Ascend NPU 架构知识查询，芯片型号映射、架构代际、条件编译策略 | `ops/npu-arch` |
+| 3 | ascendc-blaze-best-practice | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 | `ops/ascendc-blaze-best-practice` |
+| 4 | ascendc-code-review | Ascend C 代码检视，基于假设检验方法论进行安全规范检视 | `ops/ascendc-code-review` |
+| 5 | ascendc-crash-debug | Ascend C 算子卡死/崩溃调试，处理 hang/crash/deadlock/plog 解析 | `ops/ascendc-crash-debug` |
+| 6 | ascendc-direct-invoke-template | Kernel 直调工程模板，用于创建 Ascend C Kernel 直调工程项目 | `ops/ascendc-direct-invoke-template` |
+| 7 | ascendc-direct-invoke-to-registry-invoke | Kernel 直调形式改造为自定义算子工程 | `ops/ascendc-direct-invoke-to-registry-invoke` |
+| 8 | ascendc-docs-gen | Ascend C 算子文档写作，提供需求分析、设计、接口文档等标准模板 | `ops/ascendc-docs-gen` |
+| 9 | ascendc-docs-search | Ascend C 开发资源检索，优先查本地索引、缺失时查在线文档 | `ops/ascendc-docs-search` |
+| 10 | ascendc-env-check | Ascend C 算子开发环境检查，查询 NPU 设备信息、CANN 环境配置 | `ops/ascendc-env-check` |
+| 11 | ascendc-performance-best-practices | Ascend C 算子性能优化最佳实践库，按算子族组织优化经验 | `ops/ascendc-performance-best-practices` |
+| 12 | ascendc-precision-debug | Ascend C 算子精度调试，输出异常、精度验证失败、FP16 精度等诊断 | `ops/ascendc-precision-debug` |
+| 13 | ascendc-regbase-best-practice | DAV_3510 RegBase 算子 API 约束确认、实现结构、常见陷阱排查 | `ops/ascendc-regbase-best-practice` |
+| 14 | ascendc-registry-invoke-template | 完整自定义算子工程模板，标准工程结构、UT/ST 样例、多芯片架构参考 | `ops/ascendc-registry-invoke-template` |
+| 15 | ascendc-registry-invoke-to-direct-invoke | 自定义算子工程中的 kernel 模板改造为 `<<<>>>` 直调形式 | `ops/ascendc-registry-invoke-to-direct-invoke` |
+| 16 | ascendc-runtime-debug | Ascend C 算子运行时错误调试，aclnn 错误码、plog 日志解析 | `ops/ascendc-runtime-debug` |
+| 17 | ascendc-st-design | Ascend C 算子系统测试（ST）设计，参数定义、测试因子提取、用例生成 | `ops/ascendc-st-design` |
+| 18 | ascendc-task-focus | 任务聚焦与注意力管理，通过 todo.md 保持长任务焦点 | `ops/ascendc-task-focus` |
+| 19 | ascendc-tiling-design | Ascend C 算子 Tiling 设计指南，多核切分、UB 切分、Buffer 规划 | `ops/ascendc-tiling-design` |
+| 20 | ascendc-ut-develop | Ascend C 算子 UT 开发与覆盖率增强，补充测试用例、生成覆盖率报告 | `ops/ascendc-ut-develop` |
+| 21 | ascendc-whitebox-design | Ascend C 算子白盒测试用例生成，参数枚举、三档覆盖级别 | `ops/ascendc-whitebox-design` |
+| 22 | cann-env-setup | 昇腾 NPU CANN 安装与环境配置指导 | `ops/cann-env-setup` |
+| 23 | npu-arch | Ascend NPU 架构知识查询，芯片型号映射、架构代际、条件编译策略 | `ops/npu-arch` |
 
 ### 3.2 ops/ — 辅助工具（5 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 23 | ops-precision-standard | 算子精度标准，各 dtype 精度比对标准（atol/rtol） | `ops/ops-precision-standard` |
-| 24 | ops-profiling | NPU 性能采集与分析，采集算子性能数据、定位瓶颈 | `ops/ops-profiling` |
-| 25 | ops-simulator | NPU 仿真器使用指导，精度仿真、性能仿真、流水线分析 | `ops/ops-simulator` |
-| 26 | torch-ascendc-op-extension | 通过 TORCH_LIBRARY 将 Ascend C 直调工程对接 PyTorch | `ops/torch-ascendc-op-extension` |
-| 27 | torch-ops-profiler | 使用 torch_npu.profiler 维护 JSONL 用例并输出性能对比报告 | `ops/torch-ops-profiler` |
+| 24 | ops-precision-standard | 算子精度标准，各 dtype 精度比对标准（atol/rtol） | `ops/ops-precision-standard` |
+| 25 | ops-profiling | NPU 性能采集与分析，采集算子性能数据、定位瓶颈 | `ops/ops-profiling` |
+| 26 | ops-simulator | NPU 仿真器使用指导，精度仿真、性能仿真、流水线分析 | `ops/ops-simulator` |
+| 27 | torch-ascendc-op-extension | 通过 TORCH_LIBRARY 将 Ascend C 直调工程对接 PyTorch | `ops/torch-ascendc-op-extension` |
+| 28 | torch-ops-profiler | 使用 torch_npu.profiler 维护 JSONL 用例并输出性能对比报告 | `ops/torch-ops-profiler` |
 
-### 3.3 ops/ — PyPTO 算子开发（11 个）
+### 3.3 ops/ — Catlass 算子开发（3 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 28 | pypto-api-explore | 探索 PyPTO API，提供 API 映射、约束检查和 Tiling 需求分析 | `ops/pypto-api-explore` |
-| 29 | pypto-golden-generate | 生成 PyTorch golden 参考实现作为精度验证基准 | `ops/pypto-golden-generate` |
-| 30 | pypto-intent-understand | PyPTO 算子需求意图理解，将自然语言描述转化为结构化需求文档 | `ops/pypto-intent-understand` |
-| 31 | pypto-op-design | 设计 PyPTO 算子实现方案，生成 DESIGN.md | `ops/pypto-op-design` |
-| 32 | pypto-op-develop | 编写 PyPTO 算子实现，生成完整可运行代码与测试 | `ops/pypto-op-develop` |
-| 33 | pypto-op-perf-tune | PyPTO 算子性能分析和自动调优，用例执行、数据采集、分步骤调优 | `ops/pypto-op-perf-tune` |
-| 34 | perf-analyzer | 分析 PyPTO 算子性能指标，提取关键指标、性能评级、瓶颈分析 | `ops/pypto-op-perf-tune/perf-analyzer` |
-| 35 | tune-frontend | PyPTO 算子开箱性能调优，代码级优化、loop 写法、TileShape 设置 | `ops/pypto-op-perf-tune/tune-frontend` |
-| 36 | tune-incore | PyPTO 算子核内性能调优，指令级优化、核内流水、特殊 Shape 处理 | `ops/pypto-op-perf-tune/tune-incore` |
-| 37 | tune-swimlane | PyPTO 算子深度性能调优，泳道图分析、Stitch 调优、合图优化 | `ops/pypto-op-perf-tune/tune-swimlane` |
+| 29 | catlass-op-design | Catlass 算子方案设计 | `ops/catlass-op-design` |
+| 30 | catlass-op-develop | Catlass 算子代码实现与测试 | `ops/catlass-op-develop` |
+| 31 | catlass-op-perf-tune | Catlass 算子性能调优 | `ops/catlass-op-perf-tune` |
+
+### 3.4 ops/ — PyPTO 算子开发（8 个）
+
+| 序号 | Skill 名称 | 功能描述 | 路径 |
+|------|-----------|---------|------|
+| 32 | pypto-api-explore | 探索 PyPTO API，提供 API 映射、约束检查和 Tiling 需求分析 | `ops/pypto-api-explore` |
+| 33 | pypto-golden-generate | 生成 PyTorch golden 参考实现作为精度验证基准 | `ops/pypto-golden-generate` |
+| 34 | pypto-intent-understand | PyPTO 算子需求意图理解，将自然语言描述转化为结构化需求文档 | `ops/pypto-intent-understand` |
+| 35 | pypto-op-design | 设计 PyPTO 算子实现方案，生成 DESIGN.md | `ops/pypto-op-design` |
+| 36 | pypto-op-develop | 编写 PyPTO 算子实现，生成完整可运行代码与测试 | `ops/pypto-op-develop` |
+| 37 | pypto-op-perf-tune | PyPTO 算子性能分析和自动调优，用例执行、数据采集、分步骤调优（含 4 个子技能：perf-analyzer / tune-frontend / tune-incore / tune-swimlane） | `ops/pypto-op-perf-tune` |
 | 38 | pypto-precision-compare | PyPTO 算子精度对比，文件保存和二分对比两种方法 | `ops/pypto-precision-compare` |
 | 39 | pypto-precision-debug | PyPTO 算子精度调试，用户代码层面语法逻辑检查和规避方法 | `ops/pypto-precision-debug` |
 
-### 3.4 ops/ — Triton 算子开发（5 个）
+### 3.5 ops/ — Triton 算子开发（5 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
@@ -537,7 +591,7 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 43 | triton-op-verifier | Triton-Ascend 算子验证 | `ops/triton-op-verifier` |
 | 44 | triton-task-extractor | Triton-Ascend 任务提取 | `ops/triton-task-extractor` |
 
-### 3.5 graph/ — PyTorch 图模式（6 个）
+### 3.6 graph/ — PyTorch 图模式（6 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
@@ -548,7 +602,7 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 49 | torch-npugraph-ex-runtime-error-diagnosis | npugraph_ex 运行时报错诊断，aclnn/HCCL/stream/OOM 排查 | `graph/torch-npugraph-ex-runtime-error-diagnosis` |
 | 50 | torch-npugraph-ex-template | npugraph_ex 模式 MRE 代码模板，标准编译模板和缓存编译模板 | `graph/torch-npugraph-ex-template` |
 
-### 3.6 model/ — 模型推理优化（11 个）
+### 3.7 model/ — 模型推理优化（11 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
@@ -564,7 +618,7 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 60 | model-infer-runtime-debug | 昇腾 NPU 推理运行时错误诊断，aicore timeout/HCCL/OOM/算子约束 | `model/model-infer-runtime-debug` |
 | 61 | model-infer-superkernel | 昇腾 NPU SuperKernel 算子二进制融合技术，ge_graph 模式/decode 阶段 | `model/model-infer-superkernel` |
 
-### 3.7 infra/ — GitCode 协作工具（4 个）
+### 3.8 infra/ — GitCode 协作工具（4 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
@@ -573,31 +627,30 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 64 | gitcode-pr-handler | 重新生成符合约定式提交规范的 PR 标题与描述 | `infra/gitcode-pr-handler` |
 | 65 | gitcode-toolkit | GitCode 协作通用基础参考（API/Token/URL/工作流等，内部使用） | `infra/gitcode-toolkit` |
 
-### 3.8 ops-lab/ — 实验性 DSL（7 个）
+### 3.9 ops-lab/ — 实验性模块（7 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 66 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `ops-lab/ops-easyasc-dsl/skill` |
-| 67 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
-| 68 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
-| 69 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
-| 70 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
-| 71 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
+| 66 | cuda2ascend-simt | CUDA 算子迁移到 Ascend C SIMT，支持 standalone sample / torch_npu / pybind 三类交付形态 | `ops-lab/cuda2ascend-simt` |
+| 67 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `ops-lab/ops-easyasc-dsl/skill` |
+| 68 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
+| 69 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
+| 70 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
+| 71 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
+| 72 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
 
-### 3.9 plugins-official/ — 插件内置 Skill（3 个）
+### 3.10 plugins-official/ — 插件内置 Skill（2 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 72 | asc-api-ut-gen | Ascend C API 单元测试生成，分支覆盖分析、参数化测试设计 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-api-ut-gen` |
-| 73 | asc-npu-arch | Ascend NPU 架构知识，芯片型号、NpuArch、SocVersion、条件编译 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-npu-arch` |
-| 74 | ops-registry-invoke-workflow | Registry Invoke 工作流配置（默认不触发） | `plugins-official/ops-registry-invoke/workflow` |
+| 73 | asc-api-ut-gen | Ascend C API 单元测试生成，分支覆盖分析、参数化测试设计 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-api-ut-gen` |
+| 74 | asc-npu-arch | Ascend NPU 架构知识，芯片型号、NpuArch、SocVersion、条件编译 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-npu-arch` |
 
 ---
 
-> **统计**：全仓共 **74 个 Skill**，分布在 9 个目录域中。
+> **统计**：全仓共 **74 个 Skill**，分布在 10 个目录域中。
 
 ## 参考文档
 
 - [Skill Test Framework 使用指南](USER_GUIDE.md)
 - [Skill Test Framework README](../README.md)
-- [ST 用例规范 (case_guide)](../../../wangyi_ws/case_guide.md)

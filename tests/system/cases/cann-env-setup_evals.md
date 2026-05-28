@@ -113,3 +113,24 @@ CANN安装完成后，如何验证安装是否成功？
 
 - [contains] Python
 - [contains] pip
+
+---
+
+# Case 7: 正向看护-多skill环境下正确触发目标skill
+
+## Config
+- Max Tokens: 120000
+- Distractor skills: ascendc-task-focus;npu-arch;ascendc-docs-search;ascendc-runtime-debug
+
+## Prompt
+
+我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？
+
+## Expected Output
+
+回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装。即使在多个 skill 同时可用的环境下，也应正确识别并激活 cann-env-setup skill 而不是干扰 skill。
+
+## Expectations
+
+- [skill_activated] cann-env-setup
+- [contains] npu-smi info

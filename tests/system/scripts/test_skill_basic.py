@@ -56,14 +56,14 @@ class TestEvalCaseStructure:
 
     @staticmethod
     def _validate_expectation(exp, exp_index, case_index, skill_name):
-        valid_types = ("contains", "not_contains", "file_exists", "file_list")
+        valid_types = ("contains", "not_contains", "file_exists", "file_list", "skill_activated")
         assert isinstance(exp, dict), \
             f"Expectation {exp_index} should be a dict in eval case {case_index} for skill: {skill_name}"
         assert "type" in exp, \
             f"Expectation {exp_index} missing 'type' in eval case {case_index} for skill: {skill_name}"
         assert exp["type"] in valid_types, \
             f"Expectation {exp_index} type '{exp['type']}' should be one of {valid_types} in skill: {skill_name}"
-        if exp["type"] in ("contains", "not_contains"):
+        if exp["type"] in ("contains", "not_contains", "skill_activated"):
             assert "pattern" in exp, \
                 f"Expectation {exp_index} missing 'pattern' in eval case {case_index} for skill: {skill_name}"
 
@@ -149,6 +149,26 @@ class TestEvalCaseLogic:
             if expected:
                 assert len(expected) >= 5, \
                     f"Expected output too short for eval {eval_case['id']} in skill: {skill_name}"
+
+    @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
+    def test_eval_cases_distractor_skills_valid(self, skill_name):
+        """Distractor skills must reference real skills and not be the target skill."""
+        data = load_evals_md(skill_name)
+        assert data is not None
+        for eval_case in data["evals"]:
+            distractor_skills = eval_case.get("distractor_skills", [])
+            if not distractor_skills:
+                continue
+            for ds_name in distractor_skills:
+                ds_dir = get_skill_path(ds_name)
+                assert ds_dir is not None, (
+                    f"Distractor skill '{ds_name}' in eval case {eval_case['id']} "
+                    f"for skill '{skill_name}' not found in any skill_dirs"
+                )
+                assert ds_name != skill_name, (
+                    f"Distractor skill '{ds_name}' cannot be the same as target skill "
+                    f"'{skill_name}' in eval case {eval_case['id']}"
+                )
 
 
 class TestEvalMode:

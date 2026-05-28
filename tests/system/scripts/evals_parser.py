@@ -138,6 +138,10 @@ def _parse_single_case(block: str, case_id: int, case_name: str,
         except ValueError:
             logger.warning("Invalid max_tokens '%s' in case %d, ignoring", max_tokens_str, case_id)
 
+    distractor_raw = case_config.get("distractor skills", "")
+    distractor_skills = [s.strip() for s in distractor_raw.split(";") if s.strip()]
+    eval_case["distractor_skills"] = distractor_skills if distractor_skills else []
+
     eval_case["prompt"] = sections.get("prompt", "")
     eval_case["expected_output"] = sections.get("expected output", "")
     eval_case["expectations"] = _parse_expectations(sections.get("expectations", ""))

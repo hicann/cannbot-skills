@@ -15,7 +15,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 
 import pytest
 import yaml
@@ -422,6 +422,14 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .failure-error { border-left-color: #ef4444; background: #fef2f2; }
 .failure-error .failure-label { color: #dc2626; }
 
+.failure-forward-verification { border-left-color: #8b5cf6; background: #f5f3ff; }
+.failure-forward-verification .failure-label { color: #6d28d9; }
+.fv-row { margin: 8px 0; display: flex; align-items: baseline; gap: 8px; }
+.fv-label { font-weight: 600; color: #6b7280; min-width: 65px; font-size: 13px; }
+.fv-expected { background: #fef2f2; color: #dc2626; padding: 1px 8px; border-radius: 4px; font-size: 13px; }
+.fv-row code { background: #f1f5f9; color: #334155; padding: 1px 8px; border-radius: 4px; font-size: 13px; }
+.fv-suggestion { margin-top: 10px; padding: 8px 12px; background: #fffbeb; border-radius: 6px; color: #92400e; font-size: 12px; }
+
 /* === Phase 2 structured log blocks === */
 .log-block {
   margin: 10px 0;
@@ -579,7 +587,81 @@ def _parse_pattern_block(longrepr: str, eval_id: str) -> Optional[str]:
             f'输出中<strong>不应包含</strong>: '
             f'<code>{pattern}</code></div>\n</div>'
         )
+    # 新版中文格式: [contains] 期望输出中包含 "xxx"，但未找到
+    if "[contains]" in longrepr or "[not_contains]" in longrepr:
+        pm = re.search(r'\[(?:not_)?contains\]\s*(.+?)(?:\n|---|\Z)', longrepr, re.DOTALL)
+        if pm:
+            msg = html_mod.escape(pm.group(1).strip())
+            return (
+                f'<div class="failure-block failure-pattern">\n'
+                f'  <div class="failure-label">✖ 模式匹配失败 — Eval {eval_id}</div>\n'
+                f'  <div class="failure-content">{msg}</div>\n</div>'
+            )
     return None
+
+
+def _extract_expected_skill_name(clean: str) -> str:
+    m = re.search(r'期望激活 skill "([^"]+)"', clean)
+    return m.group(1) if m else "?"
+
+
+def _extract_actual_skills(clean: str) -> List[str]:
+    """从清理后的失败消息中提取实际加载 skill 列表（去重保持顺序）"""
+    block = re.search(
+        r'(?:实际加载了以下 skill|loaded the following skills)[：:]\s*\n'
+        r'((?:\s*[-*]\s*\S+\s*\n?)+)',
+        clean,
+    )
+    if not block:
+        return []
+    actual: List[str] = []
+    seen: Set[str] = set()
+    for line in block.group(1).strip().split('\n'):
+        skill = re.sub(r'^\s*[-*]\s*', '', line.strip()).strip()
+        if skill and skill not in seen:
+            actual.append(skill)
+            seen.add(skill)
+    return actual
+
+
+def _extract_suggestion(clean: str) -> str:
+    m = re.search(r'(请检查[^。\n]*[。]?)', clean)
+    return m.group(0).rstrip('"\'') if m else ""
+
+
+def _render_actual_skills_row(actual_skills: List[str]) -> str:
+    if not actual_skills:
+        return ('<div class="fv-row"><span class="fv-label">实际加载</span>'
+                '<em>未加载任何 skill</em></div>')
+    skills_html = ', '.join(
+        f'<code>{html_mod.escape(s)}</code>' for s in actual_skills
+    )
+    return (f'<div class="fv-row"><span class="fv-label">实际加载</span>'
+            f'{skills_html}</div>')
+
+
+def _parse_skill_activated_block(longrepr: str, eval_id: str) -> Optional[str]:
+    """解析正向看护 [skill_activated] 失败块"""
+    if "正向看护失败" not in longrepr and "[skill_activated]" not in longrepr:
+        return None
+
+    clean = re.sub(r'^E\s{3,}', '', longrepr, flags=re.MULTILINE)
+    expected = _extract_expected_skill_name(clean)
+    actual_skills = _extract_actual_skills(clean)
+    suggestion = _extract_suggestion(clean)
+
+    parts = [
+        f'<div class="failure-block failure-forward-verification">\n'
+        f'  <div class="failure-label">✖ 正向看护失败 — Eval {eval_id}</div>\n'
+        f'  <div class="failure-content">',
+        f'<div class="fv-row"><span class="fv-label">期望激活</span>'
+        f'<code class="fv-expected">{html_mod.escape(expected)}</code></div>',
+        _render_actual_skills_row(actual_skills),
+    ]
+    if suggestion:
+        parts.append(f'<div class="fv-suggestion">{html_mod.escape(suggestion)}</div>')
+    parts.append('</div>\n</div>')
+    return '\n'.join(parts)
 
 
 def _parse_execution_error_block(longrepr: str, eval_id: str) -> Optional[str]:
@@ -643,9 +725,15 @@ def _parse_fallback_error_block(longrepr: str) -> str:
     """兜底：无结构化标记时展示关键错误行"""
     lines = longrepr.strip().split('\n')
     msg_lines = []
+    skip_patterns = (
+        'assert prompt,', 'assert success,',
+        'raise AssertionError(', 'Failed: ',
+    )
     for line in lines:
         stripped = line.strip()
         if not stripped:
+            continue
+        if any(stripped.startswith(p) for p in skip_patterns):
             continue
         if stripped.startswith('E   '):
             clean = stripped[4:].strip()
@@ -665,19 +753,25 @@ def _parse_fallback_error_block(longrepr: str) -> str:
     )
 
 
-def _parse_failure_to_html(longrepr: str) -> str:
+def _parse_failure_to_html(longrepr: str, eval_id: str = "?") -> str:
     """解析断言失败文本，提取结构化信息生成 HTML"""
     if not longrepr:
         return ""
 
     blocks = []
 
-    eval_id = "?"
-    m = re.search(r'Eval (\d+)[,:]', longrepr)
-    if m:
-        eval_id = m.group(1)
+    # 从消息中提取 eval_id（如 "(Eval 7)" 内嵌格式）
+    if eval_id == "?":
+        m = re.search(r'\(Eval (\d+)\)', longrepr)
+        if m:
+            eval_id = m.group(1)
+        else:
+            m = re.search(r'Eval (\d+)[,:]', longrepr)
+            if m:
+                eval_id = m.group(1)
 
     for parser in (
+        _parse_skill_activated_block,
         _parse_reviewer_reason_block,
         _parse_pattern_block,
         _parse_token_exceeded_block,
@@ -1055,21 +1149,21 @@ def pytest_runtest_logreport(report):
 
     extra_items = list(getattr(report, 'extras', []))
 
+    # 从 nodeid 解析 eval_id（用于 failure_html 和 Phase 2 日志）
+    # nodeid 格式: test_skill_evals.py::test_eval_case[skill::eval_N]
+    bracket_match = re.search(r'\[.*?::eval_(\d+)\]', report.nodeid)
+    eval_id = bracket_match.group(1) if bracket_match else "?"
+
     if report.failed:
         failure_html = _parse_failure_to_html(
-            getattr(report, 'longreprtext', '') or ''
+            getattr(report, 'longreprtext', '') or '',
+            eval_id=eval_id
         )
         if failure_html:
             extra_items.append(extras.html(failure_html))
 
-    # 从 nodeid 解析 skill_name / eval_id，读取 logs/ 目录下的 JSON 文件
+    # 从 nodeid 解析 skill_name，读取 logs/ 目录下的 JSON 文件
     skill_name = _extract_skill_name(report.nodeid)
-    eval_id = None
-    # nodeid 格式: test_skill_evals.py::test_eval_case[skill::eval_N]
-    # 文件名格式: skill_case_N_review_ses.json
-    bracket_match = re.search(r'\[.*?::eval_(\d+)\]', report.nodeid)
-    if bracket_match:
-        eval_id = bracket_match.group(1)
 
     if skill_name and eval_id:
         # 去重：xdist 并行时 worker 和 master 各触发一次此钩子。

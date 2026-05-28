@@ -114,6 +114,8 @@ class ValidationContext:
     eval_mode: str = "text"
     sandbox_path: Optional[Path] = None
     generated_files: List[str] = field(default_factory=list)
+    # 正向看护字段
+    skill_name: str = ""
 
 
 @dataclass
@@ -126,6 +128,8 @@ class ExpectationContext:
     sandbox_path: Optional[Path] = None
     eval_id: Optional[str] = None
     truncate_len: int = 2000
+    skill_name: str = ""
+    session_export_path: Optional[Path] = None
 
 
 def _parse_json_line(line: str) -> Optional[Dict[str, Any]]:
@@ -314,13 +318,12 @@ def _check_contains_pattern(
         eval_id: Optional[str], truncate_len: int) -> None:
     """检查输出是否包含指定模式"""
     if pattern not in full_output:
-        msg = (
-            f"Eval {eval_id}: expected pattern not found: '{pattern}'\n"
-            f"--- AI Response ---\n"
+        pytest.fail(
+            f"[contains] 期望输出中包含 \"{pattern}\"，但未找到。\n"
+            f"--- AI 回复 ---\n"
             f"{ai_text[:truncate_len]}\n"
-            f"--- End AI Response ---"
+            f"--- 结束 ---"
         )
-        assert False, msg
 
 
 def _check_not_contains_pattern(
@@ -328,13 +331,12 @@ def _check_not_contains_pattern(
         eval_id: Optional[str], truncate_len: int) -> None:
     """检查输出不应包含指定模式"""
     if pattern in full_output:
-        msg = (
-            f"Eval {eval_id}: unexpected pattern found: '{pattern}'\n"
-            f"--- AI Response ---\n"
+        pytest.fail(
+            f"[not_contains] 期望输出中不包含 \"{pattern}\"，但实际出现了。\n"
+            f"--- AI 回复 ---\n"
             f"{ai_text[:truncate_len]}\n"
-            f"--- End AI Response ---"
+            f"--- 结束 ---"
         )
-        assert False, msg
 
 
 def _check_file_exists(
@@ -353,9 +355,9 @@ def _check_file_exists(
     for fp in candidates:
         if fp.exists():
             return
-    raise AssertionError(
-        f"Eval {eval_id}: expected file not found: '{path}' "
-        f"(checked: {[str(c) for c in candidates]})"
+    pytest.fail(
+        f"[file_exists] 期望文件 \"{path}\" 未找到。"
+        f"搜索路径: {[str(c) for c in candidates]}"
     )
 
 
@@ -378,9 +380,107 @@ def _check_file_list(
             matches = list(base.glob(pattern))
             if matches:
                 return
-    raise AssertionError(
-        f"Eval {eval_id}: no files matching pattern '{pattern}' "
-        f"(checked sandbox and skill subdir)"
+    pytest.fail(
+        f"[file_list] 未找到匹配 glob \"{pattern}\" 的文件。"
+        f"搜索范围: 沙箱及 skill 子目录"
+    )
+
+
+def _load_ses_data(ses_path: Path) -> Dict[str, Any]:
+    """读取导出的 session JSON；解析失败直接 pytest.fail"""
+    try:
+        with open(ses_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        pytest.fail(
+            f"[skill_activated] 无法读取 session 导出文件 '{ses_path}': {e}"
+        )
+        return {}  # 不可达，仅为满足静态检查（pytest.fail 会 raise）
+
+
+def _extract_skill_name_from_part(part: Dict[str, Any]) -> str:
+    """从单个 message part 中提取 skill 工具调用的 name 字段"""
+    if part.get("type") != "tool" or part.get("tool") != "skill":
+        return ""
+    state = part.get("state", {})
+    return (state.get("input", {}).get("name", "")
+            or state.get("metadata", {}).get("name", ""))
+
+
+def _collect_activated_skills(ses_data: Dict[str, Any]) -> List[str]:
+    """从 session JSON 收集所有实际加载的 skill 名称"""
+    activated: List[str] = []
+    for msg in ses_data.get("messages", []):
+        for part in msg.get("parts", []):
+            name = _extract_skill_name_from_part(part)
+            if name:
+                activated.append(name)
+    return activated
+
+
+def _fail_skill_not_activated(eval_tag: str, expected: str,
+                              activated: List[str]) -> None:
+    """根据是否有加载记录构造清晰的失败消息"""
+    if activated:
+        skill_list = "\n    - ".join(activated)
+        pytest.fail(
+            f"{eval_tag}正向看护失败：期望激活 skill \"{expected}\"，"
+            f"但 AI 实际加载了以下 skill：\n"
+            f"    - {skill_list}\n"
+            f"请检查 prompt 是否与目标 skill 的触发条件匹配，"
+            f"或干扰 skill 列表是否过于相似。"
+        )
+    pytest.fail(
+        f"{eval_tag}正向看护失败：期望激活 skill \"{expected}\"，"
+        f"但 AI 没有加载任何 skill。"
+        f"请检查 prompt 是否能触发目标 skill。"
+    )
+
+
+def _stream_event_matches_skill(data: Dict[str, Any], expected: str) -> bool:
+    """旧流式格式兼容：单个事件是否命中目标 skill"""
+    if data.get("type") == "tool_use" and data.get("part", {}).get("tool", "") == "Skill":
+        state = data.get("part", {}).get("state", {})
+        return any(expected in str(v) for v in state.get("input", {}).values())
+    if data.get("type") == "tool" and data.get("tool") == "skill":
+        return data.get("state", {}).get("input", {}).get("name", "") == expected
+    return False
+
+
+def _scan_stream_fallback(full_output: str, expected: str) -> bool:
+    """从流式输出搜索目标 skill 加载事件（兼容旧格式）"""
+    for line in full_output.split("\n"):
+        data = _parse_json_line(line)
+        if data and _stream_event_matches_skill(data, expected):
+            return True
+    return False
+
+
+def _validate_skill_activated(ctx: ExpectationContext) -> None:
+    """程序化检查目标 skill 是否被 AI 加载（解析导出 session JSON）
+
+    从导出的 session JSON（ses.json）中遍历所有 message parts，
+    查找 type=tool, tool=skill 的事件，然后匹配 state.input.name。
+    不依赖 AI 评审模型，提供确定性判断。
+    """
+    expected = ctx.exp.get("pattern", "")
+    if not expected:
+        pytest.fail("[skill_activated] 缺少 pattern（期望的 skill 名称）")
+
+    ses_path = ctx.session_export_path
+    if ses_path and ses_path.exists():
+        activated = _collect_activated_skills(_load_ses_data(ses_path))
+        if expected in activated:
+            return
+        eval_tag = f"(Eval {ctx.eval_id}) " if ctx.eval_id else ""
+        _fail_skill_not_activated(eval_tag, expected, activated)
+
+    if _scan_stream_fallback(ctx.full_output, expected):
+        return
+
+    pytest.fail(
+        f"正向看护失败：期望激活 skill \"{expected}\"，"
+        f"但在 session 输出中未找到任何 skill 加载事件。"
     )
 
 
@@ -398,6 +498,8 @@ def _validate_expectation(ctx: ExpectationContext) -> None:
             ctx.full_output, ctx.ai_text, ctx.exp.get("pattern", ""),
             ctx.eval_id, ctx.truncate_len
         )
+    elif exp_type == "skill_activated":
+        _validate_skill_activated(ctx)
 
 
 def validate_output(ctx: ValidationContext) -> None:
@@ -411,6 +513,7 @@ def validate_output(ctx: ValidationContext) -> None:
         _validate_expected_output(ctx)
 
     if ctx.expectations:
+        ses_path = ctx.opencode_runner.session_dir / f"{ctx.session_name}_ses.json"
         for exp in ctx.expectations:
             exp_ctx = ExpectationContext(
                 exp=exp,
@@ -419,7 +522,9 @@ def validate_output(ctx: ValidationContext) -> None:
                 skill_dir=ctx.skill_dir,
                 sandbox_path=ctx.sandbox_path,
                 eval_id=ctx.eval_id,
-                truncate_len=ctx.truncate_len
+                truncate_len=ctx.truncate_len,
+                skill_name=ctx.skill_name,
+                session_export_path=ses_path,
             )
             _validate_expectation(exp_ctx)
 
@@ -527,6 +632,38 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
         assert False, msg
 
 
+def _resolve_distractor_dirs(distractor_names: List[str], skill: str,
+                              eval_id: Any) -> List[Path]:
+    """根据干扰 skill 名解析其目录，缺失项打 warning 跳过"""
+    dirs: List[Path] = []
+    for ds_name in distractor_names:
+        ds_dir = get_skill_path(ds_name)
+        if ds_dir:
+            dirs.append(ds_dir)
+        else:
+            logger.warning(
+                "Distractor skill '%s' not found for %s::eval_%s, skipping",
+                ds_name, skill, eval_id,
+            )
+    return dirs
+
+
+def _build_eval_test_case(skill: str, skill_dir: Optional[Path],
+                          eval_item: Dict[str, Any]) -> Dict[str, Any]:
+    """从单条 eval 用例构造 pytest 参数化字典"""
+    distractor_dirs = _resolve_distractor_dirs(
+        eval_item.get("distractor_skills", []) or [],
+        skill, eval_item.get("id"),
+    )
+    return {
+        "skill_name": skill,
+        "eval_mode": eval_item.get("eval_mode", "text"),
+        "eval": eval_item,
+        "skill_dir": skill_dir,
+        "distractor_skill_dirs": distractor_dirs,
+    }
+
+
 def pytest_generate_tests(metafunc):
     if "eval_case" not in metafunc.fixturenames:
         return
@@ -534,41 +671,35 @@ def pytest_generate_tests(metafunc):
     skill_name = metafunc.config.getoption("--skill", None)
     eval_id = metafunc.config.getoption("--eval-id", None)
 
-    test_cases = []
-    ids = []
+    test_cases: List[Dict[str, Any]] = []
+    ids: List[str] = []
 
-    skills = get_skills_with_evals()
-
-    for skill in skills:
+    for skill in get_skills_with_evals():
         if skill_name and skill != skill_name:
             continue
-
         evals_data = load_evals_md(skill)
         if not evals_data:
             continue
-
         skill_dir = get_skill_path(skill)
-
         for eval_item in evals_data.get("evals", []):
             if eval_id and str(eval_item.get("id")) != str(eval_id):
                 continue
-
-            test_cases.append({
-                "skill_name": skill,
-                "eval_mode": eval_item.get("eval_mode", "text"),
-                "eval": eval_item,
-                "skill_dir": skill_dir,
-            })
+            test_cases.append(_build_eval_test_case(skill, skill_dir, eval_item))
             ids.append(f"{skill}::eval_{eval_item.get('id')}")
 
     metafunc.parametrize("eval_case", test_cases, ids=ids, scope="function")
 
 
 def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
-                           expected_output: str) -> None:
+                           expected_output: str,
+                           distractor_skill_dirs: Optional[List[Path]] = None) -> None:
     """打印评测用例执行前的日志头"""
     logger.info("=" * 60)
     logger.info("[%s] 评测用例 %s 开始执行", skill_name, eval_id)
+    if distractor_skill_dirs:
+        logger.info("[%s] 干扰技能 (%d): %s", skill_name,
+                    len(distractor_skill_dirs),
+                    ", ".join(d.name for d in distractor_skill_dirs))
     logger.info("=" * 60)
     logger.debug("--- INPUT PROMPT ---")
     logger.debug(prompt)
@@ -618,10 +749,13 @@ def _collect_exec_output(
 
 
 def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
-                       eval_id, skill_dir: Path):
+                       eval_id, skill_dir: Path,
+                       distractor_skill_dirs: Optional[List[Path]] = None):
     """创建沙箱和 opencode runner"""
     sandbox_path = sandbox_manager.create_sandbox(skill_name, eval_id)
     sandbox_manager.create_skill_link(sandbox_path, skill_dir)
+    for ds_dir in (distractor_skill_dirs or []):
+        sandbox_manager.create_skill_link(sandbox_path, ds_dir)
     logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
     opencode_runner = OpencodeRunner(
         keep_session=True,
@@ -647,67 +781,92 @@ def _check_token_budget(eval_data: Dict[str, Any], eval_id, opencode_runner,
     )
 
 
-def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
-    skill_name = eval_case["skill_name"]
-    eval_data = eval_case["eval"]
-    skill_dir = eval_case["skill_dir"]
-    eval_mode = eval_case.get("eval_mode", "text")
+@dataclass
+class _EvalInputs:
+    """test_eval_case 解构后的输入参数"""
+    skill_name: str
+    eval_id: Any
+    prompt: str
+    expected_output: str
+    expectations: List[Dict[str, Any]]
+    eval_mode: str
+    skill_dir: Optional[Path]
+    distractor_skill_dirs: List[Path]
+    eval_data: Dict[str, Any]
 
+
+def _unpack_eval_inputs(eval_case: Dict[str, Any]) -> _EvalInputs:
+    """从 pytest 参数化字典中抽出测试需要的字段，并完成 prompt 安全校验"""
+    eval_data = eval_case["eval"]
     eval_id = eval_data.get("id")
     prompt = eval_data.get("prompt", "")
-    expected_output = eval_data.get("expected_output", "")
-    expectations = eval_data.get("expectations", [])
-
-    if os.environ.get("REPORT_ONLY") == "1":
-        logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)", skill_name, eval_id)
-        return
-
     assert prompt, f"Eval {eval_id}: prompt is required"
     _validate_prompt(prompt, str(eval_id))
 
+    eval_mode = eval_case.get("eval_mode", "text")
     if eval_mode == "file_based":
         prompt = prompt.rstrip() + FILE_BASED_HINT
 
+    return _EvalInputs(
+        skill_name=eval_case["skill_name"],
+        eval_id=eval_id,
+        prompt=prompt,
+        expected_output=eval_data.get("expected_output", ""),
+        expectations=eval_data.get("expectations", []),
+        eval_mode=eval_mode,
+        skill_dir=eval_case["skill_dir"],
+        distractor_skill_dirs=eval_case.get("distractor_skill_dirs", []),
+        eval_data=eval_data,
+    )
+
+
+def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
+    if os.environ.get("REPORT_ONLY") == "1":
+        logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)",
+                    eval_case["skill_name"], eval_case["eval"].get("id"))
+        return
+
+    inputs = _unpack_eval_inputs(eval_case)
+
     opencode_runner, sandbox_path = _setup_eval_sandbox(
-        sandbox_manager, skill_name, eval_id, skill_dir
+        sandbox_manager, inputs.skill_name, inputs.eval_id, inputs.skill_dir,
+        distractor_skill_dirs=inputs.distractor_skill_dirs,
     )
+    _log_eval_case_header(inputs.skill_name, inputs.eval_id, inputs.prompt,
+                          inputs.expected_output,
+                          distractor_skill_dirs=inputs.distractor_skill_dirs)
 
-    _log_eval_case_header(skill_name, eval_id, prompt, expected_output)
-
-    session_name = f"{skill_name}_case_{eval_id}"
-
+    session_name = f"{inputs.skill_name}_case_{inputs.eval_id}"
     full_output, error_output, session_file, success = _collect_exec_output(
-        opencode_runner, prompt, ".", session_name
+        opencode_runner, inputs.prompt, ".", session_name,
     )
-
-    assert success, f"Eval {eval_id}: opencode run failed - {error_output}"
+    assert success, f"Eval {inputs.eval_id}: opencode run failed - {error_output}"
 
     ai_text = extract_ai_text(full_output)
-    logger.debug("--- AI Response (eval %s) ---", eval_id)
+    logger.debug("--- AI Response (eval %s) ---", inputs.eval_id)
     logger.debug(ai_text[:1000])
     logger.debug("--- End AI Response ---")
 
     opencode_runner.export_session_data(
         output_file=str(opencode_runner.session_dir / f"{session_name}_ses.json")
     )
-
-    _check_token_budget(eval_data, eval_id, opencode_runner, session_name)
-
-    generated_files = collect_generated_files(sandbox_path, original_skill_dir=skill_dir)
+    _check_token_budget(inputs.eval_data, inputs.eval_id, opencode_runner, session_name)
 
     ctx = ValidationContext(
         opencode_runner=opencode_runner,
         session_name=session_name,
         full_output=full_output,
-        original_prompt=prompt,
-        expected_output=expected_output,
-        expectations=expectations,
-        skill_dir=skill_dir,
-        eval_id=eval_id,
+        original_prompt=inputs.prompt,
+        expected_output=inputs.expected_output,
+        expectations=inputs.expectations,
+        skill_dir=inputs.skill_dir,
+        eval_id=inputs.eval_id,
         ai_text=ai_text,
-        eval_mode=eval_mode,
+        eval_mode=inputs.eval_mode,
         sandbox_path=sandbox_path,
-        generated_files=generated_files,
+        generated_files=collect_generated_files(sandbox_path,
+                                                original_skill_dir=inputs.skill_dir),
+        skill_name=inputs.skill_name,
     )
     validate_output(ctx)
     logger.info("Session file: %s", session_file)
