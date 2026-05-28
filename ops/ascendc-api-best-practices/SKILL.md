@@ -13,6 +13,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 |---------|---------|---------|---------|
 | **算术运算** | Add, Sub, Mul, Div, Adds, Muls | [api-arithmetic.md](references/api-arithmetic.md) | Softmax, LayerNorm, 广播优化 |
 | **归约操作** | ReduceMax, ReduceSum | [api-reduce.md](references/api-reduce.md), [api-reduce-pattern.md](references/api-reduce-pattern.md) | Softmax, LayerNorm, ReduceMean |
+| **归并排序** | Sort, Concat, MrgSort, Extract | [api-mrgsort.md](references/api-mrgsort.md) | Sort, ArgSort, TopK |
 | **数据搬运** | DataCopy, DataCopyPad | [api-datacopy.md](references/api-datacopy.md) | 非对齐处理、多维搬运 |
 | **Transpose / 重排** | TransDataTo5HD, Gather | [api-transpose.md](references/api-transpose.md) | 小通道 transpose、permute |
 | **Buffer 管理** | TBuf, TQue | [api-buffer.md](references/api-buffer.md) | Double Buffer、内存规划 |

@@ -10,6 +10,7 @@ description: Ascend C 算子 Tiling 设计指南。提供算子分类体系和 T
 | 类别 | 特征 | 典型算子 | 设计指南 |
 |------|------|---------|---------|
 | **Reduction 归约类** | 沿轴归约（含索引跟踪变体） | ReduceSum, Softmax, LayerNorm, ArgMax | ✅ [场景路由](references/reduction/patterns.md)（⚠️ 必须先读） / [算法](references/reduction/algorithms.md) |
+| **Sort 排序类** | 排序、TopK、外部归并 | Sort, ArgSort, TopK | ✅ [场景路由](references/sort/patterns.md)（⚠️ 必须先读） / [多核两级归并方案](references/sort/alg-two-level-mrgsort.md) |
 | **Elementwise 逐元素类** | 输入输出Shape相同，逐元素独立计算 | Sin, Cos, Abs, Exp | ✅ [场景路由](references/elewise/patterns.md)（⚠️ 必须先读） |
 | Broadcast 广播类 | 输入Shape不同，需广播对齐 | Add, Mul, Sub | ✅ [场景路由](references/broadcast/patterns.md)（⚠️ 必须先读） |
 | Conversion 数据转换类 | 改变布局/形状，合并/拆分张量 | Transpose, Concat, Split | ⚠️ [场景路由](references/conversion/patterns.md)（当前仅 Transpose 部分支持） |
