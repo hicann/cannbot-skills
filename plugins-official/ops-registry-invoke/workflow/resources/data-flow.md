@@ -6,7 +6,7 @@
 
 ## 阶段表格
 
-**轨道代号**：A1-Main (主线代码) | A2 (UT开发) | B (C++ ST测试) | C (PyTorch ST测试)
+**轨道代号**：A1-Main (主线代码) | A1-P (穿刺验证) | A1-P-Retry (失败穿刺重试) | A2 (UT开发) | B (C++ ST测试) | C (PyTorch ST测试)
 
 | 大阶段 | 子阶段 | 轨道 | 主要任务 | 输入文件 | 输出文件 | 输出位置 |
 |--------|--------|------|----------|----------|----------|----------|
@@ -59,6 +59,7 @@ TEST.md
 | | 设计文档 | `operators/{operator_name}/docs/DESIGN.md` |
 | | 测试设计文档 | `operators/{operator_name}/docs/TEST.md` |
 | | 测试用例（L0/L1） | `operators/{operator_name}/tests/st/testcases/` |
+| **第二阶段** | 算子代码 | `operators/{operator_name}/` |
 | | 图模式定义 | `operators/{operator_name}/op_graph/{operator_name}_proto.h` |
 | | 问题记录 | `operators/{operator_name}/issues/issue_{YYYYMMDD}_{关键词}.md` |
 | | UT测试报告 | `operators/{operator_name}/tests/ut/test-report.md` |
@@ -103,7 +104,7 @@ TEST.md
 │   │   ├── CMakeLists.txt              # C++ 测试构建配置
 │   │   ├── run.sh                      # 测试执行脚本（支持 --torch 选项）
 │   │   ├── test_aclnn_{operator_name}.cpp  # C++ 测试主程序
-│   │   ├── torch/                      # PyTorch 接入测试
+│   │   ├── torch/                      # PyTorch 接入测试（可选）
 │   │   │   ├── CMakeLists.txt          # PyTorch 适配层构建配置
 │   │   │   ├── test.py                 # 测试入口（用例定义 + 调度）
 │   │   │   ├── golden.py               # CPU golden 计算

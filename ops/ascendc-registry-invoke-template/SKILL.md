@@ -27,7 +27,6 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | ACLNN 接口开发 | `references/add_example/op_api/`（代码注释自表达，见下方说明） |
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
-| atvoss 算子开发（DAV_3510） | `references/atvoss_add_example/` |
 | 多芯片开发 | `references/npu-arch-adapt.md` |
 
 #### ACLNN 接口开发指南
@@ -75,29 +74,6 @@ add_example/
     │   └── op_api/     # API侧UT
     └── st/             # 系统测试
 ```
-
-### references/atvoss_add_example/
-
-atvoss 框架版 AddExample 算子（Broadcast 模式），仅支持 ascend950：
-
-```
-atvoss_add_example/
-├── README.md                  # 使用说明 + 三模式差异速查表
-├── CMakeLists.txt             # 含 atvoss 编译配置
-├── custom_compile_options.ini # Kernel 编译 include 路径
-├── op_kernel/
-│   ├── add_example_apt.cpp    # Kernel 入口（BroadcastSch）
-│   └── arch35/
-│       ├── add_example_dag.h      # DAG 计算图定义
-│       └── add_example_struct.h   # TilingKey 定义
-├── op_host/arch35/
-│   └── add_example_tiling.cpp # Host Tiling（BroadcastBaseTiling）
-├── op_api/ → add_example      # 软链接（共享）
-├── tests/  → add_example      # 软链接（共享）
-└── examples/ → add_example    # 软链接（共享）
-```
-
-4 个核心文件中标注了 `【atvoss 模式差异】` 注释，说明改为 Elewise 或 Reduction 模式时的修改点。
 
 ### references/basic-guide.md
 

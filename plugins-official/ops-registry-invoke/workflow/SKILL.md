@@ -51,8 +51,9 @@ description: 此技能默认不触发。
 graph LR
     A[阶段一<br/>需求与设计] -->|⛔CP1确认| B[阶段二<br/>开发]
     B -->|⛔CP2确认| C[阶段三<br/>验收]
-    C -->|⚪CP3确认| D[3.1性能验收]
-    C -->|跳过| E[阶段四<br/>上库]
+    C --> C1[3.1精度验收]
+    C1 -->|⚪CP3确认| D[3.2性能验收]
+    C1 -->|跳过| E[阶段四<br/>上库]
     D -->|⚪CP4确认| E
     E -->|⚪CP5确认| F[✅ 完成]
     
@@ -64,7 +65,7 @@ graph LR
 **确认点说明**：
 - CP1：需求分析后确认进入设计
 - CP2：设计完成后确认进入开发
-- CP3：迭代三验收后确认是否继续性能验收
+- CP3：精度验收后确认是否继续性能验收
 - CP4：性能验收后确认进入上库（仅当执行性能验收时）
 - CP5：代码检视后确认
 
@@ -137,8 +138,8 @@ graph TB
 
 ```mermaid
 graph TB
-    C1[阶段三<br/>迭代三验收通过] --> CP3{⚪ CP3<br/>用户确认}
-    CP3 -->|继续| C2[3.1 性能达标验收]
+    C1[3.1 最终精度验收] --> CP3{⚪ CP3<br/>用户确认}
+    CP3 -->|继续| C2[3.2 性能达标验收]
     CP3 -->|跳过| End[进入阶段四]
     C2 --> CP4{⚪ CP4<br/>用户确认}
     CP4 -->|通过| End
@@ -148,10 +149,11 @@ graph TB
 ```
 
 **关键步骤**：
-1. **⚪ CP3 用户确认**：展示迭代三验收结果，询问是否继续性能验收
-2. **3.1 性能达标验收**：性能符合预期或达到对标水平（可选）
+1. **3.1 最终精度验收**：使用完整ST测试用例执行精度验收（真实NPU）
+2. **⚪ CP3 用户确认**：展示验收结果，询问是否继续性能验收
+3. **3.2 性能达标验收**：性能符合预期或达到对标水平（可选）
 
-**说明**：迭代三验收通过后，可选进行性能验收。
+**说明**：性能验收为可选，仅在需求文档包含性能指标时执行。
 
 </details>
 
@@ -316,40 +318,62 @@ graph TB
 
 **进入条件**：CP2 用户确认通过
 
+**A1-P 恢复机制**（迭代一、二通用）：
+- 读取 `PLAN.md` 获取当前迭代的穿刺参数
+- 读取 `probe/PROBE_SUMMARY.md` 判断已完成状态
+- 未完成任务：使用原参数重新启动；已完成：跳过，复用结果
+
+**A1-P 失败穿刺重试机制**（第二波启动时，迭代一/二通用）：
+- **触发条件**：A1-Main 编译通过 + `probe/PROBE_SUMMARY.md` 中存在 `状态=失败 AND 重试次数<2` 的任务
+- **执行方式**：使用更新后的主线代码重新执行失败穿刺，**与 A2 并行启动**
+- **⚠️ 强制要求**：A2 + 所有 A1-P-Retry（如有）必须在同一次响应中同时发起
+- **收敛控制**：每个失败任务最多重试 2 次（通过重试次数字段控制）
+- **结果处理**：
+  - 重试成功 → 状态改为通过，重试次数+1
+  - 重试仍失败 → 保持失败状态，重试次数+1
+
 **轨道代号说明**：
 
 | 代号 | 含义 | Subagent | 进入条件 |
 |------|------|----------|----------|
 | **A1-Main** | 主线代码开发 | `ascendc-ops-developer` | CP2 确认 |
+| **A1-P** | 穿刺验证（Kernel直调） | `ascendc-ops-developer` | CP2 确认 |
+| **A1-P-Retry** | 失败穿刺重试（第二波） | `ascendc-ops-developer` | A1-Main编译通过 + 失败且重试次数<2 |
 | **A2** | UT开发 | `ascendc-ops-developer` | A1-Main 编译通过 |
 | **B** | ST用例开发 | `ascendc-ops-tester` | CP2 确认 |
 
-**执行模式**：每个迭代 = 第一波并行启动 → 等待A1-Main编译通过 → 第二波启动（A2） → 汇合验证 → 测试工程师验收
+**执行模式**：每个迭代 = 第一波并行启动 → 等待A1-Main编译通过 → 第二波并行启动（A2 + 失败穿刺重试） → 汇合验证 → 测试工程师验收
 
 ---
 
 ## 迭代一：骨架搭建
 
-**目标**：单TilingKey骨架
+**目标**：单TilingKey骨架 + 验证其他TilingKey分支
 
 ### 第一波并行启动
 
-**⚠️ 强制要求**：A1-Main + B 必须在同一次响应中同时发起
+**📌 参数来源**：从 `PLAN.md` 的「迭代一穿刺列表」中提取
+
+**⚠️ 强制要求**：A1-Main + A1-P + B 必须在同一次响应中同时发起
 
 **任务列表**：
 
 | 代号 | 任务 | Subagent | 详细调用参数 | 条件 |
 |------|------|----------|--------------|------|
 | **A1-Main** | 单TilingKey骨架开发 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#新算子开发) | 总是执行 |
+| **A1-P** | N个穿刺Task并行验证其他TilingKey | `ascendc-ops-developer` | [链接](resources/task-prompts.md#模板穿刺-迭代一) | 总是执行 |
 | **B** | L0标准用例开发 | `ascendc-ops-tester` | [链接](resources/task-prompts.md#b-st测试工程开发) | 总是执行 |
 
-### 第二波启动
+**🚫 禁止**：先A1-Main后A1-P、逐个启动A1-P、只创建目录不启动Task
 
-**触发条件**：A1-Main 编译通过
+### 第二波并行启动
+
+**触发条件**：A1-Main 编译通过。重试执行规则见上方「A1-P 失败穿刺重试机制」
 
 | 代号 | 任务 | Subagent | 详细调用参数 | 条件 |
 |------|------|----------|--------------|------|
 | **A2** | 核心路径UT | `ascendc-ops-developer` | [链接](resources/task-prompts.md#a2-ut开发) | 总是执行 |
+| **A1-P-Retry** | 重试失败的穿刺任务 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#模板穿刺-失败重试) | ⚪ 失败且重试次数<2 |
 
 **A2 验收标准**：
 - ✅ op_host 核心路径UT通过（P0必须）
@@ -361,6 +385,8 @@ graph TB
 
 - [ ] A1-Main 编译日志存在且无错误
 - [ ] Kernel二进制文件已生成
+- [ ] 穿刺汇总报告 `probe/PROBE_SUMMARY.md` 已更新且穿刺成功率 = 100%
+- [ ] **A1-P 日志摘要"运行环境" ≠ Mock**（禁止用 CPU Mock 冒充 NPU 验证）
 
 ### 主Agent验证项（第二波）
 
@@ -369,10 +395,12 @@ graph TB
 - [ ] B ST测试工程文件已生成
 - [ ] B Mock编译+CPU Golden自测通过
 - [ ] B L0标准用例（基础shape + 单dtype）已实现
+- [ ] ⚪ 重试穿刺结果已更新到 `probe/PROBE_SUMMARY.md`
+- [ ] ⚪ 重试穿刺日志摘要"运行环境" ≠ Mock
 
 ### 汇合验证
 
-**触发条件**：A1-Main编译通过 ✓ + A2 UT通过 ✓ + B用例开发完成 ✓
+**触发条件**：A1-Main编译通过 ✓ + A2 UT通过 ✓ + B用例开发完成 ✓ ⚪ + A1-P-Retry完成 ✓
 
 **Subagent**：`ascendc-ops-developer` - [详细调用参数](resources/task-prompts.md#联调验证)
 
@@ -402,26 +430,36 @@ graph TB
 
 ## 迭代二：策略整合
 
-**目标**：多TilingKey整合
+**目标**：多TilingKey整合 + 验证迭代三难点任务
 
 ### 第一波并行启动
 
-**⚠️ 强制要求**：A1-Main + B 必须在同一次响应中同时发起
+**📌 参数来源**：从 `PLAN.md` 的「迭代三任务」中提取
+
+**⚠️ 强制要求**：A1-Main + A1-P + B 必须在同一次响应中同时发起
 
 **任务列表**：
 
 | 代号 | 任务 | Subagent | 详细调用参数 | 条件 |
 |------|------|----------|--------------|------|
-| **A1-Main** | 多TilingKey实现 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#新算子开发) | 总是执行 |
+| **A1-Main** | 整合迭代一穿刺结果 → 多TilingKey实现 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#算子迭代) | 总是执行 |
+| **A1-P** | M个Task并行验证迭代三任务 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#模板穿刺-迭代二) | 总是执行 |
 | **B** | C++多shape用例开发 | `ascendc-ops-tester` | [链接](resources/task-prompts.md#b-st测试工程开发) | 总是执行 |
 
-### 第二波启动
+**🚫 禁止**：逐个启动A1-P、只创建目录不启动Task
 
-**触发条件**：A1-Main 编译通过
+**⚠️ 测试方式说明**：
+- **B任务（C++测试）**：`bash run.sh`（或 `--mock`），用于迭代验收快速验证
+- **C任务（PyTorch测试）**：独立任务，在最终验收前完成，详见下文"PyTorch ST测试开发"
+
+### 第二波并行启动
+
+**触发条件**：A1-Main 编译通过。重试执行规则见上方「A1-P 失败穿刺重试机制」
 
 | 代号 | 任务 | Subagent | 详细调用参数 | 条件 |
 |------|------|----------|--------------|------|
 | **A2** | Tiling分支UT覆盖 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#a2-ut开发) | 总是执行 |
+| **A1-P-Retry** | 重试失败的穿刺任务 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#模板穿刺-失败重试) | ⚪ 失败且重试次数<2 |
 
 **A2 验收标准**：
 - ✅ op_host Tiling分支UT覆盖达标（P0必须）
@@ -433,6 +471,8 @@ graph TB
 
 - [ ] A1-Main 编译日志存在且无错误
 - [ ] Kernel二进制文件已生成
+- [ ] 穿刺汇总报告 `probe/PROBE_SUMMARY.md` 已更新且穿刺成功率 = 100%（否则阻塞迭代三）
+- [ ] **A1-P 日志摘要"运行环境" ≠ Mock**（禁止用 CPU Mock 冒充 NPU 验证）
 
 ### 主Agent验证项（第二波）
 
@@ -440,10 +480,12 @@ graph TB
 - [ ] A2 UT测试结果为通过
 - [ ] B C++多shape用例已添加
 - [ ] B C++ Mock编译+CPU Golden自测通过
+- [ ] ⚪ 重试穿刺结果已更新到 `probe/PROBE_SUMMARY.md`
+- [ ] ⚪ 重试穿刺日志摘要"运行环境" ≠ Mock
 
 ### 汇合验证
 
-**触发条件**：A1-Main编译通过 ✓ + A2 UT通过 ✓ + B用例开发完成 ✓
+**触发条件**：A1-Main编译通过 ✓ + A2 UT通过 ✓ + B用例开发完成 ✓ ⚪ + A1-P-Retry完成 ✓
 
 **Subagent**：`ascendc-ops-developer` - [详细调用参数](resources/task-prompts.md#联调验证)
 
@@ -473,7 +515,7 @@ graph TB
 
 ## 迭代三：全量覆盖
 
-**目标**：全功能实现
+**目标**：整合迭代二穿刺结果 → 全功能实现
 
 ### 第一波并行启动
 
@@ -483,10 +525,15 @@ graph TB
 
 | 代号 | 任务 | Subagent | 详细调用参数 |
 |------|------|----------|--------------|
-| **A1-Main** | 全功能实现 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#新算子开发) |
+| **A1-Main** | 整合迭代二穿刺结果 → 全功能实现 | `ascendc-ops-developer` | [链接](resources/task-prompts.md#算子迭代) |
+| **A1-P** | - | - | - |
 | **B** | C++全量用例开发 | `ascendc-ops-tester` | [链接](resources/task-prompts.md#b-st测试工程开发) |
 
-### 第二波启动
+**⚠️ 测试方式说明**：
+- **B任务（C++测试）**：迭代验收使用，快速验证
+- **C任务（PyTorch测试）**：独立任务，在最终验收前完成
+
+### 第二波串行启动
 
 **触发条件**：A1-Main 编译通过
 
@@ -575,7 +622,7 @@ graph TB
 
 ## 3.1 最终精度验收
 
-**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过），且 C 任务（PyTorch ST 测试开发）已完成
+**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过）+ C 任务（PyTorch ST 测试开发）已完成
 
 **Subagent**：`ascendc-ops-tester` - [详细调用参数](resources/task-prompts.md#31-最终精度验收)
 

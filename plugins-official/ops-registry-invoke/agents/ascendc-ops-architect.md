@@ -579,7 +579,7 @@ aclnnStatus aclnnXxx(
 
 **迭代执行计划**：
 - 模板：参考 `ascendc-docs-gen` 技能的 **iteration-plan-template.md**
-- 必填：迭代一目标、迭代二整合目标、迭代三全覆盖目标、迭代结果判定
+- 必填：迭代一穿刺列表（单dtype默认fp16）、迭代二整合目标、迭代三全覆盖目标、穿刺结果判定
 
 ### 设计要点
 

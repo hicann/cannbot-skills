@@ -3,6 +3,9 @@
 #### 新特性 New Features
 - 【ACLNN】支持 ACLNN 直接注册 PyTorch 进行自测试，在 ST 测试目录新增 torch/ 标准化测试结构（CMakeLists.txt、test.py、golden.py、compare.py、torch_adapter.cpp），同步更新 st-test-guide 与 ops-tester Agent。
 
+#### 特性增强 Feature Enhancement
+- 【ops-registry-invoke】新增模板穿刺验证与重试机制（v1.2.0），支持 A1-P 并行穿刺、A1-P-Retry 自动重试及算子迭代整合，重构验收阶段为精度/性能两级验收。同步更新 workflow 全部文档与 agents。
+
 ### 【2026-05-26】
 #### 新特性 New Features
 - 【Ascend C】新增 `cuda2ascend-simt` 技能（实验版，位于 `ops-lab/`），支持将 CUDA 算子迁移到 Ascend C SIMT。**仅支持 Ascend 950 PR平台**。覆盖 `standalone sample`、`torch_npu`、`pybind` 三类交付形态，按原始工程形态选择对应产物。

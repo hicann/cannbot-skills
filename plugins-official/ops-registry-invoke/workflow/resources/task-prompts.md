@@ -14,9 +14,13 @@
 | 1.3R 方案评审 | `ascendc-ops-architect` (scene: design-review) | 读取日志继续（失败时重跑前确认 1.3 已按 DESIGN_REVIEW 修复） |
 | 1.4 测试设计 | `ascendc-ops-tester` | 读取日志继续 |
 | 2-迭代一-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
+| 2-迭代一-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
+| 2-迭代一-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
 | 2-迭代一-A2 | `ascendc-ops-developer` | 读取日志继续 |
 | 2-迭代一-B | `ascendc-ops-tester` | 读取日志继续 |
 | 2-迭代二-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
+| 2-迭代二-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
+| 2-迭代二-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
 | 2-迭代二-A2 | `ascendc-ops-developer` | 读取日志继续 |
 | 2-迭代二-B | `ascendc-ops-tester` | 读取日志继续 |
 | 2-迭代三-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
@@ -24,7 +28,8 @@
 | 2-迭代三-B | `ascendc-ops-tester` | 读取日志继续 |
 | 2-汇合验证 | `ascendc-ops-developer` | 读取日志继续 |
 | 2-测试工程师验收 | `ascendc-ops-tester` | 读取日志继续 |
-| 3.1 性能验收 | `ascendc-ops-developer` | 读取日志继续 |
+| 3.1 精度验收 | `ascendc-ops-tester` | 读取日志继续 |
+| 3.2 性能验收 | `ascendc-ops-developer` | 读取日志继续 |
 | 4.1 文档与示例 | `general` | 读取日志继续 |
 | 4.2 代码检视 | `ascendc-ops-reviewer` | 读取日志继续 |
 | 4.3 开发总结 | `general` | 读取日志继续 |
@@ -59,6 +64,12 @@
 - **问题**:
   - 简单问题（1 行可描述）：直接写解决方案
   - 复杂问题：必须已创建 `./issues/issue_{YYYYMMDD}_{关键词}_序号.md`（如 `issue_20260403_opbuild-dt-float16_01.md`），此处只放链接
+```
+
+**⚠️ A1-P 穿刺任务额外字段**：穿刺任务日志摘要必须包含 `**运行环境**` 字段：
+
+```markdown
+- **运行环境**: NPU / Mock  （必须如实标注，主 Agent 将校验此字段）
 ```
 
 **注意**：Subagent 不直接修改 LOG.md，由主 Agent 汇总后按模板结构更新。
@@ -582,7 +593,50 @@ scene: test-development
 - 迭代三：全dtype + 边界 + 广播用例已添加，Mock编译+CPU Golden自测通过（全量）
 - 日志摘要已输出
 
-⚠️ **注意**：本任务只开发 C++ 测试，覆盖 L0+L1 全量用例。
+⚠️ **注意**：本任务只开发 C++ 测试。PyTorch 测试由独立 C 任务一次性完成（L0+L1全量），在最终验收前执行。
+  "
+}
+```
+
+## 算子迭代
+
+```
+Task 调用参数：
+{
+  "description": "迭代二 算子迭代",
+  "subagent_type": "ascendc-ops-developer",
+  "prompt": "
+执行算子迭代任务（基于穿刺结果）。
+
+【输入】
+- 骨架代码：operators/{operator_name}/op_kernel/（迭代一主线）
+- 穿刺目录：operators/{operator_name}/probe/
+- 穿刺汇总：operators/{operator_name}/probe/PROBE_SUMMARY.md
+- 详细设计文档：operators/{operator_name}/docs/DESIGN.md
+
+【整合策略】
+1. ✅ 成功的穿刺任务（状态=成功）：
+   - 复用 .asc 文件中的 Kernel 实现逻辑
+   - 适配主线工程结构（Tiling参数、Kernel类命名）
+   
+2. ⚠️ 部分成功的穿刺任务：
+   - 参考实现逻辑，修正边界处理
+   - 补充缺失的测试case
+
+3. ❌ 失败的穿刺任务：
+   - 基于设计文档重新实现
+   - 记录失败原因作为参考
+
+【输出】
+- 整合后的算子代码：operators/{operator_name}/op_kernel/
+- 整合报告：operators/{operator_name}/docs/INTEGRATION_REPORT.md
+- 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
+
+【验收标准】
+- 自定义算子包编译通过
+- 多TilingKey代码整合完成
+- 无命名冲突
+- 日志摘要已输出
   "
 }
 ```
