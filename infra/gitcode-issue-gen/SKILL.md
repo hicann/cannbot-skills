@@ -1,6 +1,6 @@
 ---
 name: gitcode-issue-gen
-description: 根据 GitCode PR 的代码变更生成关联 Issue（按变更类型自动选用 feature-request / bug-report / documentation 等仓库已有的 Issue 模板），创建 Issue 后回写 PR 描述完成双向关联，并可选地把新 Issue 自助 assign 给当前 token 的 GitCode 用户。当用户提供 PR 链接、要求"创建 Issue / 生成 Issue / 关联 Issue / 给 PR 建 Issue"时触发此 skill。
+description: 根据 GitCode PR 的代码变更生成关联 Issue（按变更类型自动选用 feature-request / bug-report / documentation 等仓库已有的 Issue 模板），通过 GitCode REST API 创建 Issue 后回写 PR 描述完成双向关联，并可选地把新 Issue 自助 assign 给当前 token 的 GitCode 用户。当用户提供 PR 链接、要求"创建 Issue / 生成 Issue / 关联 Issue / 给 PR 建 Issue"时触发此 skill。
 license: CANN-2.0
 ---
 

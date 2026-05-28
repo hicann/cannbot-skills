@@ -159,6 +159,7 @@ print_compact_result() {
             # Also show ERROR lines if any
             local n_err
             n_err=$(echo "$output" | grep -cE '\[ERROR\]' 2>/dev/null || echo 0)
+            [[ "$n_err" =~ ^[0-9]+$ ]] || n_err=0
             if [[ $n_err -gt 0 ]]; then
                 echo -e "  ${RED}── Errors ──${NC}"
                 echo "$output" | grep -E '\[ERROR\]' | head -20 | sed 's/^/    /'

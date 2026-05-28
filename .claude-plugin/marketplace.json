@@ -240,7 +240,7 @@
       "name": "torch-compile",
       "source": "./plugins-official/torch-compile",
       "description": "PyTorch torch.compile 图模式编排入口。通过 Subagent 组织不同图模式，当前提供 npugraph_ex 配置、迁移、自定义算子入图和问题诊断。",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "author": {
         "name": "CANNBot"
       },

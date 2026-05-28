@@ -15,18 +15,6 @@ permission:
     "torch-*": allow
     "*": deny
   question: allow
-tools:
-  write: inherit
-  edit: inherit
-  bash: inherit
-  read: inherit
-  grep: inherit
-  glob: inherit
-  webfetch: inherit
-  question: inherit
-  task: inherit
-  todowrite: inherit
-  skill: inherit
 ---
 
 # npugraph_ex 图模式 Subagent
