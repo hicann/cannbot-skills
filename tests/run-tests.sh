@@ -1561,6 +1561,11 @@ master() {
     parse_args "$@"
     init_test_tracking
 
+    if $RUN_FAST && [[ "$PLATFORM" != "none" ]] && ! is_platform_available "$PLATFORM"; then
+        echo -e "${YELLOW}[WARN]${NC} No AI CLI found - will run fast tests only"
+        PLATFORM="none"
+    fi
+
     case "$PLATFORM" in
         claude)
             if ! is_platform_available "claude"; then

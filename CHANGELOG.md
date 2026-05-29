@@ -1,4 +1,11 @@
 ## 🔥 更新日志
+### 【2026-05-28】
+#### 新特性 New Features
+- 【Skill 治理】新增 `cannbot-skill-reviewer` Skill，用于审查新增或修改的 `SKILL.md` 是否符合 CANNBot 入库要求，输出成文法门禁、判例法九维评分、阻塞项和整改建议。
+
+#### 测试框架 Test Framework
+- 【本地 fast 测试】修复 `tests/run-tests.sh --fast` 在无 AI CLI 环境下仍检查默认 `opencode` 的问题，使 fast 测试可自动降级为 `Platform: none`。
+
 ### 【2026-05-27】
 #### 新特性 New Features
 - 【ACLNN】支持 ACLNN 直接注册 PyTorch 进行自测试，在 ST 测试目录新增 torch/ 标准化测试结构（CMakeLists.txt、test.py、golden.py、compare.py、torch_adapter.cpp），同步更新 st-test-guide 与 ops-tester Agent。

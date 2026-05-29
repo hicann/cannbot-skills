@@ -338,6 +338,12 @@ cannbot-skills/
 | **model-infer-prefetch** | 权重预取适配 |
 | **model-infer-superkernel** | SuperKernel 适配 |
 
+### Skill 治理工具
+
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **cannbot-skill-reviewer** | 审查新增或修改的 `SKILL.md` 是否符合 CANNBot 入库要求，输出自动门禁、九维评分、阻塞项和整改建议 | [查看](docs/skills-usage.md#cannbot-skill-reviewer) |
+
 ### GitCode 协作工具
 
 | Skill | 功能 | 使用样例 |

@@ -77,6 +77,32 @@
 
 ---
 
+## Skill 治理工具
+
+### cannbot-skill-reviewer
+
+审查新增或修改的 `SKILL.md` 是否符合 CANNBot 入库要求，输出结构门禁、九维评分、阻塞问题和整改建议。
+
+**使用示例：**
+
+```
+/cannbot-skill-reviewer 请审查这个新 skill 是否可以提 PR：ops/my-new-skill/SKILL.md
+```
+
+也可以直接运行本地审查脚本：
+
+```bash
+python infra/cannbot-skill-reviewer/scripts/review_skill.py ops/my-new-skill
+```
+
+**使用建议：**
+
+- PR 场景下只审查新增或修改的 `SKILL.md` 及其随附 `references/`、`scripts/`、`assets/`。
+- 自动门禁 `error` 是阻塞项；即使九维总分较高，也必须先修复。
+- 涉及 NPU、CANN、torch_npu、性能或精度结论但无法实测时，报告中必须标记 `dry_run` 或 `partial`。
+
+---
+
 ## GitCode 协作工具
 
 > **前置条件**：所有 GitCode 协作 skill 都需要 `GITCODE_TOKEN` 环境变量（首次未设会在 Step 0 询问）。
