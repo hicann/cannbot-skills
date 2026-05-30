@@ -23,6 +23,14 @@ source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
 MARKETPLACE_JSON="$SKILLS_DIR/.claude-plugin/marketplace.json"
 
+# Parse arguments
+AUTO_FIX=false
+for arg in "$@"; do
+    case "$arg" in
+        --auto-fix) AUTO_FIX=true ;;
+    esac
+done
+
 echo "=== Test: Team Plugin Version Care ==="
 echo ""
 echo "Validates plugin.json version correctness against dependency changes."
@@ -214,9 +222,18 @@ for team in $TEAMS_TO_TEST; do
 
     if $has_change; then
         if [ "$current_version" = "$base_version" ]; then
-            print_fail "Files changed but version not bumped (base: $base_version, current: $current_version)"
-            echo -e "$changed_items" | sed 's/^/    /'
-            ((fail_count++)) || true
+            if $AUTO_FIX; then
+                new_version=$(recommend_version_bump "$current_version" true true)
+                bump_plugin_json "$team" "$new_version"
+                bump_marketplace_json "$team" "$new_version"
+                print_pass "Version auto-bumped: $base_version → $new_version"
+                echo -e "$changed_items" | sed 's/^/    /'
+                ((pass_count++)) || true
+            else
+                print_fail "Files changed but version not bumped (base: $base_version, current: $current_version)"
+                echo -e "$changed_items" | sed 's/^/    /'
+                ((fail_count++)) || true
+            fi
         else
             cmp=$(semver_compare "$current_version" "$base_version")
             if [ "$cmp" = "1" ] || [ "$cmp" = "0" ]; then
@@ -249,11 +266,10 @@ print_section_header "Marketplace Version Consistency"
 # won't see the updated version and won't know to upgrade.
 
 for manifest_file in "$SKILLS_DIR/package.json" "$MARKETPLACE_JSON"; do
-    manifest_name="$(basename "$(dirname "$manifest_file")")/$(basename "$manifest_file")"
     if [ ! -f "$manifest_file" ]; then
-        print_skip "$manifest_name: not found"
         continue
     fi
+    manifest_name="$(basename "$(dirname "$manifest_file")")/$(basename "$manifest_file")"
 
     print_section "Checking: $manifest_name"
 

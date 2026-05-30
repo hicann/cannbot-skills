@@ -25,6 +25,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/test-helpers.sh"
 
+# Parse arguments
+AUTO_FIX=false
+for arg in "$@"; do
+    case "$arg" in
+        --auto-fix) AUTO_FIX=true ;;
+    esac
+done
+
 print_test_banner "Line Endings Check" "Scanning repository for CRLF (DOS-style) line endings..."
 init_test_tracking
 
@@ -125,24 +133,52 @@ if [ "$cr_count" -eq 0 ]; then
 fi
 
 echo ""
-print_fail "Found $cr_count file(s) with CRLF (DOS) line endings:"
-echo ""
 
-while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    echo -e "  ${RED}●${NC} $f"
-done < "$cr_files"
+if $AUTO_FIX; then
+    # Auto-fix: convert CRLF to LF for each affected file
+    fixed_count=0
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        abs_path="$SKILLS_DIR/$f"
+        if [ -f "$abs_path" ]; then
+            # Portable sed in-place edit (macOS uses -i '', Linux uses -i)
+            if sed --version 2>/dev/null | grep -q GNU; then
+                sed -i 's/\r$//' "$abs_path"
+            else
+                sed -i '' 's/\r$//' "$abs_path"
+            fi
+            echo -e "  ${GREEN}●${NC} Fixed: $f"
+            fixed_count=$((fixed_count + 1))
+        fi
+    done < "$cr_files"
 
-echo ""
-print_info "To fix these files, run:"
-echo "  dos2unix <file>"
-echo "  # Or batch-fix text files:"
-echo '  grep -rlP "\r" . --include="*.md" --include="*.py" --include="*.h" --include="*.sh" | xargs dos2unix'
-echo ""
+    rm -f "$cr_files"
+    echo ""
+    print_pass "Auto-fixed $fixed_count file(s) — CRLF converted to LF"
+    echo ""
+    print_test_summary
+    exit 0
+else
+    print_fail "Found $cr_count file(s) with CRLF (DOS) line endings:"
+    echo ""
 
-rm -f "$cr_files"
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo -e "  ${RED}●${NC} $f"
+    done < "$cr_files"
 
-# Record failure and exit (use direct assignment to avoid ((0)) set -e issue)
-TEST_FAILED=$((TEST_FAILED + 1))
-print_test_summary
-exit 1
+    echo ""
+    print_info "To fix these files, run:"
+    echo "  ./tests/run-tests.sh --auto-fix"
+    echo "  # Or manually:"
+    echo "  dos2unix <file>"
+    echo '  grep -rlP "\r" . --include="*.md" --include="*.py" --include="*.h" --include="*.sh" | xargs dos2unix'
+    echo ""
+
+    rm -f "$cr_files"
+
+    # Record failure and exit (use direct assignment to avoid ((0)) set -e issue)
+    TEST_FAILED=$((TEST_FAILED + 1))
+    print_test_summary
+    exit 1
+fi

@@ -22,7 +22,7 @@
 ./run-tests.sh --integration
 
 # 增量测试（仅测试变更的组件，适用于 CI/CD）
-./run-tests.sh --incremental-ci
+./run-tests.sh --incremental
 
 # 查看可用测试
 ./run-tests.sh --list
@@ -30,6 +30,13 @@
 # 运行指定测试
 ./run-tests.sh --test unit/skills/test-structure.sh
 ./run-tests.sh --test behavior/skills/test-universal.sh
+
+# 生成 HTML 报告（浏览器打开查看交互式结果）
+./run-tests.sh --fast --output html
+./run-tests.sh --fast --output html --output-path report.html
+
+# 自动修复支持的问题（CRLF 换行符、版本号未 bump 等）
+./run-tests.sh --fast --auto-fix
 
 # 测试单个 Skill（直接调用）
 ./behavior/skills/test-universal.sh ascendc-runtime-debug
@@ -553,7 +560,9 @@ ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测�
 | `--test`, `-t NAME` | 运行指定测试 |
 | `--timeout SECONDS` | 设置超时时间（默认: 600） |
 | `--verbose`, `-v` | 显示详细输出 |
-| `--output FORMAT` | 输出格式（text/json） |
+| `--output FORMAT` | 输出格式（text/json/**html**） |
+| `--output-path PATH` | HTML 报告输出路径（默认: `tests/test-ut-report.html`） |
+| `--auto-fix` | 自动修复支持的问题（CRLF、版本号 bump 等） |
 | `--list`, `-l` | 列出所有可用测试 |
 | `--help`, `-h` | 显示帮助信息 |
 
@@ -561,9 +570,20 @@ ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测�
 
 | 参数 | 说明 |
 |------|------|
-| `--incremental-ci` | 启用增量测试模式，仅测试变更的 skill/agent/team |
+| `--incremental` | 启用增量测试模式，仅测试变更的 skill/agent/team |
 | `--base-branch BRANCH` | 指定对比的基础分支（默认: master） |
 | `--force-full` | 强制运行全量测试，即使启用了增量模式 |
+| `--auto-fix` | 自动修复支持的问题（CRLF 换行符、版本号未 bump） |
+
+### 评估结果检查参数
+
+| 参数 | 说明 |
+|------|------|
+| `--eval-results` | 运行 Skill 评估结果检查（workspace benchmark 验证） |
+| `--workspace PATH` | 指定评估工作区路径 |
+| `--iteration N` | 指定迭代版本（默认: latest） |
+| `--threshold RATE` | 覆盖通过率阈值（0.0-1.0） |
+| `--detect-regression` | 启用迭代间回归检测 |
 
 ## 环境变量
 
@@ -577,6 +597,48 @@ ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测�
 | `REPO_ROOT` | 仓库根目录路径（gate_check.sh 使用） |
 | `CHANGED_FILES` | 手动指定变更文件列表（gate_check.sh 使用，空格分隔） |
 
+## HTML 报告
+
+运行测试时自动生成交互式 HTML 报告（`tests/test-ut-report.html`），支持：
+
+| 特性 | 说明 |
+|------|------|
+| **测试统计面板** | 通过/失败/跳过/警告数量及耗时汇总 |
+| **失败修复指南** | 存在失败时顶部显示 fix-guide（含失败类型速查表和可复制 AI 提示词） |
+| **搜索过滤** | 按名称搜索、按状态过滤（全部/仅失败/仅通过/仅跳过） |
+| **排序** | 默认排序、按耗时升序/降序 |
+| **日志查看** | 带行号的语法高亮日志，支持折叠/展开 |
+| **导航** | 「上一个失败」/「下一个失败」按钮及键盘快捷键 `j`/`k` |
+| **Sticky Header** | Dashboard + Banner + Toolbar 整体固定，滚动时不丢失 |
+| **响应式布局** | 内容居中显示，适配宽屏和小屏（`@media (max-width: 640px)`） |
+
+```bash
+# 默认自动生成 HTML 报告（无需额外参数）
+./run-tests.sh --fast
+
+# 指定自定义报告路径
+./run-tests.sh --fast --output html --output-path my-report.html
+```
+
+## 自动修复
+
+部分测试失败支持一键自动修复：
+
+| 问题 | 修复方式 |
+|------|---------|
+| CRLF 换行符 | 自动转换为 LF |
+| 版本号未 bump | 自动递增 plugin.json / marketplace.json 版本号 |
+
+```bash
+# 运行测试并尝试自动修复
+./run-tests.sh --fast --auto-fix
+
+# 自动修复后重跑确认
+./run-tests.sh --fast
+```
+
+> **注意**：`--auto-fix` 只修改项目源文件（plugin.json、SKILL.md 等），不会修改 tests/ 目录下的任何文件。
+
 ## CI/CD 集成
 
 ### 增量测试
@@ -585,7 +647,7 @@ ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测�
 
 ```bash
 # 在 CI 中运行增量测试
-./run-tests.sh --incremental-ci --platform none --output json
+./run-tests.sh --incremental --platform none --output json
 ```
 
 **工作原理：**

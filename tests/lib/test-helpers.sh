@@ -1390,6 +1390,164 @@ recommend_version_bump() {
     echo "${major}.${minor}.${patch}"
 }
 
+# =============================================================================
+# Team Version Bump Helpers
+# =============================================================================
+
+# Get list of all teams (names only)
+# Usage: get_teams_list
+# Returns: one team name per line
+get_teams_list() {
+    for plugin_json in "$SKILLS_DIR"/plugins-official/*/.claude-plugin/plugin.json; do
+        [ -f "$plugin_json" ] || continue
+        local team_dir
+        team_dir=$(dirname "$(dirname "$plugin_json")")
+        basename "$team_dir"
+    done
+}
+
+# Resolve team skill & agent file paths from marketplace.json + plugin.json
+# Usage: resolve_team_file_paths "ops-direct-invoke"
+# Returns: relative paths (from SKILLS_DIR), one per line
+resolve_team_file_paths() {
+    local team_name="$1"
+    local marketplace_json="$SKILLS_DIR/.claude-plugin/marketplace.json"
+
+    python3 <<PYEOF
+import json, os
+
+# Resolve skills from marketplace.json
+try:
+    marketplace = json.load(open("${marketplace_json}"))
+except Exception:
+    marketplace = {"plugins": []}
+
+skills_packages = {}
+team_entry = None
+for p in marketplace.get("plugins", []):
+    if p.get("category") == "skills":
+        skills_packages[p["name"]] = p
+    elif p.get("name") == "${team_name}":
+        team_entry = p
+
+if team_entry:
+    for dep_name in team_entry.get("dependencies", []):
+        sp = skills_packages.get(dep_name)
+        if sp:
+            source = sp.get("source", "./ops").lstrip("./")
+            for skill_rel in sp.get("skills", []):
+                skill_dir = skill_rel.lstrip("./")
+                print(f"{source}/{skill_dir}/SKILL.md")
+
+# Resolve agents from plugin.json
+try:
+    plugin_json_path = os.path.join(
+        "${SKILLS_DIR}", "plugins-official", "${team_name}",
+        ".claude-plugin", "plugin.json")
+    plugin = json.load(open(plugin_json_path))
+    for agent_rel in plugin.get("agents", []):
+        agent_rel = agent_rel.lstrip("./")
+        print(f"plugins-official/${team_name}/{agent_rel}")
+except Exception:
+    pass
+PYEOF
+}
+
+# Detect whether a team's dependency files changed against a base ref
+# Usage: detect_team_changes "ops-direct-invoke" "origin/master"
+# Returns: "changed" if any dependency file changed, empty otherwise
+detect_team_changes() {
+    local team_name="$1"
+    local base_ref="$2"
+
+    local changed_files
+    changed_files=$(git -C "$SKILLS_DIR" diff --name-only "${base_ref}...HEAD" 2>/dev/null || true)
+    [ -z "$changed_files" ] && return
+
+    local team_files
+    team_files=$(resolve_team_file_paths "$team_name")
+    [ -z "$team_files" ] && return
+
+    while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        if echo "$changed_files" | grep -qF "$rel"; then
+            echo "changed"
+            return
+        fi
+    done <<< "$team_files"
+}
+
+# Bump version in a team's plugin.json
+# Usage: bump_plugin_json "ops-direct-invoke" "1.1.11"
+# Returns: 0 on success, 1 on failure
+bump_plugin_json() {
+    local team_name="$1"
+    local new_version="$2"
+    local plugin_json
+    plugin_json=$(get_team_plugin_json "$team_name")
+
+    if [ -z "$plugin_json" ] || [ ! -f "$plugin_json" ]; then
+        echo "[WARN] plugin.json not found for $team_name" >&2
+        return 1
+    fi
+
+    python3 <<PYEOF
+import json, sys
+path = "${plugin_json}"
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    old = data.get("version", "")
+    data["version"] = "${new_version}"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    print(f"[BUMP] ${team_name}: plugin.json {old} -> ${new_version}")
+except Exception as e:
+    print(f"[ERROR] Failed to bump plugin.json for ${team_name}: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+# Bump version in marketplace.json for a given team
+# Usage: bump_marketplace_json "ops-direct-invoke" "1.1.11"
+# Returns: 0 on success, 1 on failure
+bump_marketplace_json() {
+    local team_name="$1"
+    local new_version="$2"
+    local marketplace_json="$SKILLS_DIR/.claude-plugin/marketplace.json"
+
+    if [ ! -f "$marketplace_json" ]; then
+        echo "[WARN] marketplace.json not found" >&2
+        return 1
+    fi
+
+    python3 <<PYEOF
+import json, sys
+path = "${marketplace_json}"
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    found = False
+    for p in data.get("plugins", []):
+        if p.get("name") == "${team_name}":
+            old = p.get("version", "")
+            p["version"] = "${new_version}"
+            found = True
+            print(f"[BUMP] ${team_name}: marketplace.json {old} -> ${new_version}")
+            break
+    if not found:
+        print(f"[WARN] ${team_name}: not found in marketplace.json", file=sys.stderr)
+        sys.exit(1)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+except Exception as e:
+    print(f"[ERROR] Failed to bump marketplace.json for ${team_name}: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
 # Compare two SemVer versions
 # Usage: semver_compare "1.0.0" "1.0.1"
 # Returns: -1 if first < second, 0 if equal, 1 if first > second

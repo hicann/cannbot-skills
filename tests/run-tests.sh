@@ -55,6 +55,9 @@ EVAL_DETECT_REGRESSION=false
 EVAL_INCREMENTAL=false
 EVAL_BASE_BRANCH="master"
 
+# Auto-fix option (applies to all tests that support --fix)
+AUTO_FIX=false
+
 # =============================================================================
 # Argument Parsing
 # =============================================================================
@@ -83,6 +86,7 @@ Incremental Testing Options (for CI/CD):
   --incremental        Only test changed skills/agents/teams
   --base-branch BRANCH Base branch for comparison (default: master)
   --force-full         Force full test run even in incremental mode
+  --auto-fix           Auto-fix issues in tests that support it (CRLF, version bump, etc.)
 
 Skill Evaluation Options:
   --eval-results       Run skill evaluation results check (workspace benchmark validation)
@@ -273,6 +277,10 @@ parse_args() {
                 ;;
             --force-full)
                 FORCE_FULL_TEST=true
+                shift
+                ;;
+            --auto-fix)
+                AUTO_FIX=true
                 shift
                 ;;
             *)
@@ -602,7 +610,11 @@ run_test_file() {
     # Always capture output silently; compact summary printed after.
     local test_outfile=$(mktemp)
     local exit_code=0
-    timeout $TIMEOUT bash "$test_path" > "$test_outfile" 2>&1 || exit_code=$?
+    local extra_args=()
+    if $AUTO_FIX; then
+        extra_args+=("--auto-fix")
+    fi
+    timeout $TIMEOUT bash "$test_path" "${extra_args[@]}" > "$test_outfile" 2>&1 || exit_code=$?
     output=$(cat "$test_outfile")
     rm -f "$test_outfile"
 
@@ -1034,30 +1046,51 @@ body {{
   color: var(--text);
   line-height: 1.6;
 }}
-.dashboard {{
+.page-header {{
   position: sticky;
   top: 0;
   z-index: 10;
+  background: var(--bg);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}}
+.dashboard {{
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 1rem 1.5rem;
+  padding: 1rem max(1.5rem, calc((100% - 1200px) / 2));
 }}
 .dashboard h1 {{
   margin: 0 0 0.5rem;
   font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  text-align: center;
 }}
 .stats {{
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   gap: 0.75rem;
+  max-width: 600px;
+  margin: 0 auto;
 }}
 .stat {{
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.5rem 1rem;
-  min-width: 90px;
   text-align: center;
+  transition: all 0.15s ease;
+}}
+.stat.clickable {{
+  cursor: pointer;
+}}
+.stat.clickable:hover {{
+  background: rgba(88,166,255,0.08);
+  border-color: var(--info);
+  transform: translateY(-1px);
+}}
+.stat.clickable.active {{
+  background: rgba(88,166,255,0.15);
+  border-color: var(--info);
+  box-shadow: 0 0 0 2px rgba(88,166,255,0.2);
 }}
 .stat .count {{
   display: block;
@@ -1076,21 +1109,20 @@ body {{
   margin-top: 0.5rem;
   color: var(--muted);
   font-size: 0.85rem;
+  text-align: center;
 }}
 .toolbar {{
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 1rem 1.5rem;
+  padding: 0.75rem max(1.5rem, calc((100% - 1200px) / 2));
   border-bottom: 1px solid var(--border);
   background: var(--bg);
-  position: sticky;
-  top: 140px;
-  z-index: 9;
+  align-items: center;
 }}
 .toolbar input {{
   flex: 1;
-  min-width: 200px;
+  min-width: 180px;
   padding: 0.4rem 0.75rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1104,13 +1136,48 @@ body {{
   border-radius: 6px;
   color: var(--text);
   cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 0.85rem;
 }}
 .toolbar button:hover {{
   border-color: var(--info);
 }}
+.toolbar button.active {{
+  background: var(--info);
+  border-color: var(--info);
+  color: #fff;
+}}
+.toolbar .nav-btn {{
+  background: rgba(248,81,73,0.1);
+  border-color: var(--fail);
+  color: var(--fail);
+}}
+.toolbar .nav-btn:hover {{
+  background: rgba(248,81,73,0.2);
+}}
+.toolbar .nav-btn:disabled {{
+  opacity: 0.4;
+  cursor: not-allowed;
+}}
+.toolbar .sort-select {{
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}}
+.toolbar-sep {{
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  margin: 0 0.25rem;
+}}
 #test-list {{
-  padding: 1rem 1.5rem 3rem;
+  padding: 1.5rem 1.5rem 3rem;
   max-width: 1200px;
+  margin: 0 auto;
 }}
 .test-card {{
   background: var(--surface);
@@ -1118,6 +1185,14 @@ body {{
   border-radius: 8px;
   margin-bottom: 0.75rem;
   overflow: hidden;
+  transition: border-color 0.3s ease;
+}}
+.test-card.highlight {{
+  animation: pulse-border 1.5s ease;
+}}
+@keyframes pulse-border {{
+  0% {{ border-color: var(--info); box-shadow: 0 0 0 3px rgba(88,166,255,0.3); }}
+  100% {{ border-color: var(--border); box-shadow: none; }}
 }}
 .test-card summary {{
   display: flex;
@@ -1139,7 +1214,7 @@ body {{
   text-align: center;
 }}
 .badge.pass {{ background: rgba(63,185,80,0.15); color: var(--pass); }}
-.badge.fail {{ background: rgba(248,81,73,0.15); color: var(--fail); }}
+.badge.fail {{ background: rgba(248,81,73,0.15); color: var(--fail); box-shadow: 0 0 6px rgba(248,81,73,0.25); }}
 .badge.skip {{ background: rgba(210,153,34,0.15); color: var(--skip); }}
 .test-card .name {{
   flex: 1;
@@ -1154,18 +1229,66 @@ body {{
   color: var(--warn);
   font-size: 0.8rem;
 }}
+.test-card .duration-bar {{
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}}
+.test-card .duration-bar-fill {{
+  height: 100%;
+  background: var(--info);
+  border-radius: 2px;
+}}
 .log {{
   margin: 0;
-  padding: 1rem;
+  padding: 0;
   background: var(--bg);
   border-top: 1px solid var(--border);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.82rem;
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
   max-height: 600px;
   overflow: auto;
+}}
+.log-line {{
+  display: flex;
+  padding: 0 1rem;
+}}
+.log-line:hover {{
+  background: rgba(88,166,255,0.05);
+}}
+.log-lineno {{
+  width: 40px;
+  text-align: right;
+  padding-right: 0.75rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  user-select: none;
+  flex-shrink: 0;
+}}
+.log-content {{
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}}
+.log-error {{
+  background: rgba(248,81,73,0.08);
+  border-left: 2px solid var(--fail);
+  padding-left: calc(1rem - 2px);
+}}
+.log-fold {{
+  text-align: center;
+  padding: 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}}
+.log-fold:hover {{
+  color: var(--text);
+  background: rgba(88,166,255,0.05);
 }}
 .a-r {{ color: #f85149; }}
 .a-g {{ color: #3fb950; }}
@@ -1178,23 +1301,72 @@ body {{
   color: var(--muted);
   padding: 3rem;
 }}
+.empty-tip .icon {{ font-size: 2rem; margin-bottom: 0.5rem; }}
 .fix-guide {{
   max-width: 1200px;
-  margin: 0 1.5rem 2rem;
+  margin: 0.75rem auto 1rem;
   background: var(--surface);
   border: 1px solid var(--fail);
   border-radius: 8px;
   overflow: hidden;
+  position: relative;
+}}
+.fix-guide::before {{
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--fail), #ff7b72);
+  box-shadow: 0 0 12px rgba(248,81,73,0.35);
+}}
+.fix-guide.top-placement {{
+  margin-top: 0;
+  margin-bottom: 0;
+  animation: slideDown 0.4s ease;
+}}
+@keyframes slideDown {{
+  from {{ opacity: 0; transform: translateY(-12px); }}
+  to   {{ opacity: 1; transform: translateY(0); }}
 }}
 .fix-guide summary {{
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1rem;
   cursor: pointer;
   list-style: none;
   user-select: none;
   background: rgba(248,81,73,0.08);
+}}
+.fix-guide .fail-count-badge {{
+  background: var(--fail);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  margin-right: 0.3rem;
+}}
+.fix-guide .guide-actions {{
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}}
+.fix-guide .jump-btn {{
+  padding: 0.35rem 0.75rem;
+  background: rgba(248,81,73,0.15);
+  border: 1px solid var(--fail);
+  border-radius: 6px;
+  color: var(--fail);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}}
+.fix-guide .jump-btn:hover {{
+  background: rgba(248,81,73,0.25);
 }}
 .fix-guide summary::-webkit-details-marker {{ display: none; }}
 .fix-guide .guide-title {{
@@ -1260,101 +1432,173 @@ body {{
 }}
 .fix-guide .copy-btn:hover {{ opacity: 0.85; }}
 .fix-guide .copy-btn.copied {{ background: var(--pass); }}
+.all-pass-banner {{
+  max-width: 1200px;
+  margin: 0.75rem auto 1rem;
+  background: var(--surface);
+  border: 1px solid var(--pass);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  animation: slideDown 0.4s ease;
+}}
+.all-pass-banner::before {{
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--pass), #56d364);
+  box-shadow: 0 0 12px rgba(63,185,80,0.35);
+}}
+.all-pass-banner .banner-body {{
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: rgba(63,185,80,0.08);
+}}
+.all-pass-banner .banner-body .icon {{
+  font-size: 1.25rem;
+}}
+.all-pass-banner .banner-body .text {{
+  flex: 1;
+  font-weight: 700;
+  color: var(--pass);
+}}
 @media (max-width: 640px) {{
-  .stats {{ justify-content: center; }}
-  .toolbar {{ top: 180px; }}
+  .stats {{ grid-template-columns: repeat(3, 1fr); max-width: 100%; }}
+  .toolbar {{ position: relative; }}
+  .toolbar input {{ width: 100%; flex: none; }}
+  .toolbar-sep {{ display: none; }}
   .fix-guide .do-dont {{ grid-template-columns: 1fr; }}
 }}
 </style>
 </head>
 <body>
+<div class="page-header">
 <header class="dashboard">
   <h1>CANNBot-skills UT 测试报告</h1>
   <div class="stats">
-    <div class="stat pass"><span class="count">{passed}</span>通过</div>
-    <div class="stat fail"><span class="count">{failed}</span>失败</div>
-    <div class="stat skip"><span class="count">{skipped}</span>跳过</div>
-    <div class="stat warn"><span class="count">{warnings}</span>警告</div>
+    <div class="stat pass clickable" data-filter="pass" onclick="filter('pass')"><span class="count">{passed}</span>通过</div>
+    <div class="stat fail clickable" data-filter="fail" onclick="filter('fail')"><span class="count">{failed}</span>失败</div>
+    <div class="stat skip clickable" data-filter="skip" onclick="filter('skip')"><span class="count">{skipped}</span>跳过</div>
+    <div class="stat warn clickable" data-filter="warn" onclick="filter('warn')"><span class="count">{warnings}</span>警告</div>
     <div class="stat time"><span class="count">{duration}s</span>耗时</div>
   </div>
   <div class="meta">Platform: {platform} | {timestamp}</div>
-</header>
-<div class="toolbar">
-  <input type="text" id="search" placeholder="搜索测试名称..." oninput="doSearch()">
-  <button onclick="filter('all')">全部</button>
-  <button onclick="filter('fail')">仅失败</button>
-  <button onclick="filter('pass')">仅通过</button>
-  <button onclick="filter('skip')">仅跳过</button>
-  <button onclick="expandAll()">展开全部</button>
-  <button onclick="collapseAll()">收起全部</button>
-</div>
-<main id="test-list">
-''')
+</header>''')
 
-for t in tests:
-    st_label, st_cls = status_meta.get(t["status"], (t["status"], t["status"]))
-    warn_badge = f'<span class="warn-count">⚠ {t["warnings"]} 警告</span>' if t["warnings"] and int(t["warnings"]) > 0 else ''
-    output_html_text = ansi_to_html(t["output"])
-    html_body.append(f'''  <details class="test-card {st_cls}" data-name="{html_module.escape(t["name"])}" data-status="{st_cls}">
-    <summary>
-      <span class="badge {st_cls}">{st_label}</span>
-      <span class="name">{html_module.escape(t["name"])}</span>
-      {warn_badge}
-      <span class="duration">{t["duration"]}s</span>
-    </summary>
-    <pre class="log">{output_html_text}</pre>
-  </details>
-''')
-
-html_body.append(f'''</main>
-''')
-
-# Show fix guide only when there are failures
+# Banner container: show fix-guide when failures exist, show pass banner otherwise
 if int(failed) > 0:
-    fix_prompt = """\
-# PR 提交前 UT Test 自检修复
+    fix_prompt = """\\
+# 任务：修复 UT 测试失败
 
-你的 PR 需要确保 `./tests/run-tests.sh --fast` 全部通过。
-根据下方失败报告定位根因，修改源文件来消除失败项。
+`./tests/run-tests.sh --fast` 当前存在失败项，请根据以下指南分析并修复。
 
-## 执行步骤
+## 快速修复流程
 
-### 1. 收集失败项
+### Step 1: 运行测试并尝试自动修复
 ```bash
 cd <项目根目录>
 ./tests/run-tests.sh --fast
 ```
-记录 [FAIL] 项及其错误信息；超时时可单独运行失败的子脚本。
 
-### 2. 定位源文件
-根据组件名找到源文件路径，结合错误描述判断修改内容。
+**部分失败支持一键自动修复：**
+```bash
+./tests/run-tests.sh --fast --auto-fix
+```
+可自动修复：
+- 版本号未 bump（plugin.json / marketplace.json）
+- CRLF 换行符（自动转换为 LF）
 
-### 3. 修改源文件（最小化修复）
-只改项目业务文件，不做无关重构。
+自动修复后请重跑 `./tests/run-tests.sh --fast` 确认通过。
+若仍有失败，进入 Step 2。
 
-### 4. 验证
+### Step 2: 阅读失败日志定位根因
+每个失败测试的输出格式：
+```
+[FAIL] 规则编号: 错误描述
+    - 涉及文件: 路径
+```
+
+**定位方法：**
+1. 找到 `[FAIL]` 或 `[ERROR]` 标记的行
+2. 注意前面的规则编号（如 S-STR-06、A-CON-03）
+3. 根据规则编号查下表确定修复方法
+4. 注意文件名和路径提示
+
+### Step 3: 按失败类型修复
+
+| 测试 | 规则 | 常见失败 | 修复方法 |
+|---|---|---|---|
+| **Line Endings** | - | 文件含 CRLF 换行符 | `--auto-fix` 或 `dos2unix <file>` |
+| **Version Care** | - | 改了文件未 bump 版本号 | `--auto-fix` 自动 bump plugin.json |
+| **Skill Structure** | S-STR-01 | YAML Front Matter 格式错误 | 确保 `---` 包裹 metadata |
+| | S-STR-02/03 | name/description 字段缺失 | 补充对应字段 |
+| | S-STR-05 | name 长度超 64 字符 | 缩短 name |
+| | S-STR-06 | name 格式错误 | 使用小写+连字符，如 `my-skill-name` |
+| | S-STR-07 | description 长度超 1024 | 精简描述或移到 references/ |
+| | S-STR-08 | 链接指向不存在的文件 | 修复链接路径或创建目标文件 |
+| **Skill Content** | S-CON-01 | name 与目录名不匹配 | 统一 name 和目录名 |
+| | S-CON-02/03 | description 缺少触发关键词/条件 | 添加 `Use when...` 或 `当...时` 触发条件 |
+| | S-CON-04 | 缺少可操作指令 | 添加代码块或编号步骤 |
+| | S-CON-08 | description 非三段式 | 按 `概述→触发条件→能力范围` 组织 |
+| **Agent Structure** | A-STR-01~09 | 同 Skill Structure 规则 | 修复 AGENT.md 对应字段 |
+| | A-STR-03 | mode 不是 primary/subagent | 修正 mode 字段 |
+| | A-STR-04 | skill 依赖不存在 | 确认 skill 路径正确或移除无效依赖 |
+| **Agent Content** | A-CON-01~09 | 同 Skill Content 规则 | 修复 AGENT.md 对应内容 |
+| **Team Structure** | T-STR-01~08 | YAML/字段/链接问题 | 修复对应 team 的 SKILL.md |
+| | T-STR-03 | mode 不是 primary | 修正为 `mode: primary` |
+| **Team Content** | T-CON-01 | 目录命名格式错误 | 使用小写+连字符命名目录 |
+| | T-CON-03 | description 缺少触发条件 | 同 S-CON-03 |
+
+**关键修复原则：**
+- name 格式: `^[a-z0-9]+(-[a-z0-9]+)*$`（全小写，连字符分隔）
+- description 必须包含触发条件（如 `Use when...` 或 `当...时`）
+- 修改 skill/agent/team 文件后，**必须**同步 bump 对应 plugin.json 版本号
+- 链接必须指向实际存在的文件
+
+### Step 4: 验证
 ```bash
 ./tests/run-tests.sh --fast
 ```
 确认 `Failed: 0` 且 `STATUS: PASSED`。
 
 ## 约束
-- 允许: 修改 SKILL.md / AGENT.md / AGENTS.md / plugin.json / init.sh / 目录结构 / marketplace.json
-- 禁止: 修改 tests/ 目录下任何文件（测试脚本、lib 库、配置）
-- 禁止: 跳过/绕过/禁用任何测试规则
+- **允许修改**: SKILL.md / AGENT.md / AGENTS.md / plugin.json / init.sh / 目录结构 / marketplace.json
+- **禁止修改**: tests/ 目录下任何文件（测试脚本、lib 库、配置）
+- **禁止**: 跳过/绕过/禁用任何测试规则
 
-## 分析框架
-1. 测试要求什么？→ 2. 哪个文件没满足？→ 3. 为什么没满足？→ 4. 怎么最小修复？→ 5. 全量重跑验证\
+## 修复后检查清单
+修复完成后，在提交前确认：
+- [ ] `./tests/run-tests.sh --fast` 输出 `Failed: 0`
+- [ ] 若修改了 skill/agent/team 内容，plugin.json 版本号已 bump
+- [ ] 若修改了文件路径，所有链接已同步更新
+- [ ] 没有修改 tests/ 目录下的任何文件
+
+## 分析框架（五问法）
+1. **哪个测试失败了？** → 看测试名称和规则编号
+2. **涉及哪个文件？** → 看 `[FAIL]` 后的文件路径提示
+3. **违反了什么规则？** → 对照上表查规则含义
+4. **怎么最小修复？** → 只改必要字段，不重构无关内容
+5. **全量重跑验证了吗？** → 确认 `./tests/run-tests.sh --fast` 全绿\\
 """
-    html_body.append(f'''<details class="fix-guide" open>
+    html_body.append(f'''<div id="banner-container">
+<details class="fix-guide top-placement" id="fix-guide-banner">
     <summary>
       <span>&#128736;</span>
+      <span class="fail-count-badge" id="fail-count-badge">{failed} 个测试失败，需要修复</span>
       <span class="guide-title">UT Test 失败修复指南 — 将此提示词粘贴给 AI 自动修复</span>
-      <button class="copy-btn" onclick="copyFixPrompt()" id="copy-btn">复制提示词</button>
+      <div class="guide-actions">
+        <button class="jump-btn" onclick="scrollToFirstFail()" title="跳转到第一个失败测试">&#9660; 跳转第一个失败</button>
+        <button class="copy-btn" onclick="copyFixPrompt()" id="copy-btn">复制提示词</button>
+      </div>
     </summary>
     <div class="guide-body">
       <h3>执行流程</h3>
-      <p><strong>Step 1:</strong> 运行 <code>./tests/run-tests.sh --fast</code> 收集所有 <code>[FAIL]</code> 项。</p>
+      <p><strong>Step 1:</strong> 运行 <code>./tests/run-tests.sh --fast</code> 收集所有 <code>[FAIL]</code> 项。部分失败可先用 <code>./tests/run-tests.sh --fast --auto-fix</code> 一键自动修复（支持版本号 bump 和 CRLF 转换），修复后重跑确认。</p>
       <p><strong>Step 2:</strong> 按失败信息反向定位源文件 — 组件名 → 源文件路径 → 判断修改内容。</p>
       <p><strong>Step 3:</strong> 只修改项目源文件（SKILL.md、AGENT.md、plugin.json、init.sh 等），最小化修复。</p>
       <p><strong>Step 4:</strong> 重新运行 <code>./tests/run-tests.sh --fast</code>，确认 <code>Failed: 0</code>。</p>
@@ -1387,10 +1631,124 @@ cd <项目根目录>
       <pre id="fix-prompt-text">{html_module.escape(fix_prompt)}</pre>
     </div>
   </details>
+</div>''')
+else:
+    html_body.append('''<div id="banner-container">
+<div class="all-pass-banner" id="all-pass-banner">
+  <div class="banner-body">
+    <span class="icon">&#127881;</span>
+    <span class="text">全部测试通过！无需修复操作。</span>
+  </div>
+</div>
+</div>''')
+
+html_body.append(f'''<div class="toolbar">
+  <input type="text" id="search" placeholder="搜索测试名称..." oninput="doSearch()">
+  <button id="btn-all" onclick="filter('all')">全部</button>
+  <button id="btn-fail" onclick="filter('fail')">仅失败</button>
+  <button id="btn-pass" onclick="filter('pass')">仅通过</button>
+  <button id="btn-skip" onclick="filter('skip')">仅跳过</button>
+  <div class="toolbar-sep"></div>
+  <button onclick="expandAll()">展开全部</button>
+  <button onclick="collapseAll()">收起全部</button>
+  <div class="toolbar-sep"></div>
+  <select class="sort-select" id="sort-select" onchange="sortTests(this.value)">
+    <option value="default">默认排序</option>
+    <option value="duration-desc">耗时最长</option>
+    <option value="duration-asc">耗时最短</option>
+  </select>
+  <div class="toolbar-sep"></div>
+  <button class="nav-btn" id="nav-prev" onclick="navigateFail(-1)" title="上一个失败 (k)">&#9664; 上一个失败</button>
+  <button class="nav-btn" id="nav-next" onclick="navigateFail(1)" title="下一个失败 (j)">下一个失败 &#9654;</button>
+</div>
+</div>
+<main id="test-list">
 ''')
 
+max_dur = max(int(t["duration"]) for t in tests) if tests else 1
+for t in tests:
+    st_label, st_cls = status_meta.get(t["status"], (t["status"], t["status"]))
+    warn_badge = f'<span class="warn-count">&#9888; {t["warnings"]} 警告</span>' if t["warnings"] and int(t["warnings"]) > 0 else ''
+    output_html_text = ansi_to_html(t["output"])
+    dur_pct = min(100, int(int(t["duration"]) / max_dur * 100)) if max_dur > 0 else 0
+    # Build log with line numbers and folding
+    log_lines = output_html_text.split('\n')
+    log_html_parts = []
+    total_lines = len(log_lines)
+    fold_threshold = 30
+    fold_start = 15
+    fold_end = 15
+    for i, line in enumerate(log_lines):
+        lineno = i + 1
+        is_error = '[FAIL]' in line or '[ERROR]' in line
+        error_cls = ' log-error' if is_error else ''
+        if total_lines > fold_threshold and i == fold_start:
+            fold_count = total_lines - fold_start - fold_end
+            log_html_parts.append(f'<div class="log-fold" onclick="toggleFold(this)">... {fold_count} 行已折叠，点击展开 ...</div>')
+            log_html_parts.append(f'<div class="fold-content" style="display:none">')
+        if total_lines > fold_threshold and i == total_lines - fold_end:
+            log_html_parts.append('</div>')
+        log_html_parts.append(f'<div class="log-line{error_cls}"><span class="log-lineno">{lineno}</span><span class="log-content">{line or " "}</span></div>')
+    log_html = '\n'.join(log_html_parts)
+    html_body.append(f'''  <details class="test-card {st_cls}" data-name="{html_module.escape(t["name"])}" data-status="{st_cls}" data-duration="{t["duration"]}">
+    <summary>
+      <span class="badge {st_cls}">{st_label}</span>
+      <span class="name">{html_module.escape(t["name"])}</span>
+      {warn_badge}
+      <span class="duration">{t["duration"]}s<div class="duration-bar"><div class="duration-bar-fill" style="width:{dur_pct}%"></div></div></span>
+    </summary>
+    <div class="log">
+{log_html}
+    </div>
+  </details>
+''')
+
+html_body.append(f'''</main>
+''')
 html_body.append(f'''<script>
+let currentFailIndex = -1;
+let failCards = [];
+let currentFilter = 'all';
+
+function updateEmptyTip(visible, context) {{
+  const list = document.getElementById('test-list');
+  let tip = list.querySelector('.empty-tip');
+  if (visible === 0) {{
+    if (!tip) {{
+      tip = document.createElement('div');
+      tip.className = 'empty-tip';
+      list.appendChild(tip);
+    }}
+    let msg = '没有匹配的测试';
+    let icon = '&#128269;';
+    if (context === 'fail') {{ msg = '&#127881; 恭喜，没有失败的测试！'; icon = ''; }}
+    else if (context === 'pass') {{ msg = '当前没有通过的测试，请先处理失败项'; icon = '&#128679;'; }}
+    else if (context === 'skip') {{ msg = '当前没有跳过的测试'; icon = '&#9989;'; }}
+    else if (context === 'search') {{ msg = '未找到包含该关键词的测试'; icon = '&#128269;'; }}
+    tip.innerHTML = icon ? '<div class="icon">' + icon + '</div><div>' + msg + '</div>' : '<div>' + msg + '</div>';
+    tip.style.display = '';
+  }} else if (tip) {{
+    tip.style.display = 'none';
+  }}
+}}
+
+function setButtonActive(status) {{
+  document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active'));
+  const idMap = {{'all':'btn-all','fail':'btn-fail','pass':'btn-pass','skip':'btn-skip'}};
+  const btn = document.getElementById(idMap[status]);
+  if (btn) btn.classList.add('active');
+}}
+
+function setStatActive(status) {{
+  document.querySelectorAll('.stat.clickable').forEach(s => s.classList.remove('active'));
+  if (status !== 'all' && status !== 'warn') {{
+    const s = document.querySelector('.stat[data-filter="' + status + '"]');
+    if (s) s.classList.add('active');
+  }}
+}}
+
 function filter(status) {{
+  currentFilter = status;
   const cards = document.querySelectorAll('.test-card');
   let visible = 0;
   cards.forEach(c => {{
@@ -1398,20 +1756,12 @@ function filter(status) {{
     c.style.display = show ? '' : 'none';
     if (show) visible++;
   }});
-  const list = document.getElementById('test-list');
-  let tip = list.querySelector('.empty-tip');
-  if (visible === 0) {{
-    if (!tip) {{
-      tip = document.createElement('div');
-      tip.className = 'empty-tip';
-      tip.textContent = '没有匹配的测试';
-      list.appendChild(tip);
-    }}
-    tip.style.display = '';
-  }} else if (tip) {{
-    tip.style.display = 'none';
-  }}
+  setButtonActive(status);
+  setStatActive(status);
+  updateEmptyTip(visible, status);
+  updateNavButtons();
 }}
+
 function doSearch() {{
   const q = document.getElementById('search').value.toLowerCase();
   const cards = document.querySelectorAll('.test-card');
@@ -1421,33 +1771,94 @@ function doSearch() {{
     c.style.display = show ? '' : 'none';
     if (show) visible++;
   }});
-  const list = document.getElementById('test-list');
-  let tip = list.querySelector('.empty-tip');
-  if (visible === 0) {{
-    if (!tip) {{
-      tip = document.createElement('div');
-      tip.className = 'empty-tip';
-      tip.textContent = '没有匹配的测试';
-      list.appendChild(tip);
-    }}
-    tip.style.display = '';
-  }} else if (tip) {{
-    tip.style.display = 'none';
-  }}
+  document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.stat.clickable').forEach(s => s.classList.remove('active'));
+  updateEmptyTip(visible, 'search');
 }}
+
 function expandAll() {{
   document.querySelectorAll('.test-card').forEach(c => c.open = true);
 }}
 function collapseAll() {{
   document.querySelectorAll('.test-card').forEach(c => c.open = false);
 }}
+
+function updateNavButtons() {{
+  failCards = Array.from(document.querySelectorAll('.test-card.fail')).filter(c => c.style.display !== 'none');
+  const prev = document.getElementById('nav-prev');
+  const next = document.getElementById('nav-next');
+  if (prev) prev.disabled = failCards.length === 0;
+  if (next) next.disabled = failCards.length === 0;
+}}
+
+function navigateFail(direction) {{
+  failCards = Array.from(document.querySelectorAll('.test-card.fail')).filter(c => c.style.display !== 'none');
+  if (failCards.length === 0) return;
+  currentFailIndex += direction;
+  if (currentFailIndex < 0) currentFailIndex = failCards.length - 1;
+  if (currentFailIndex >= failCards.length) currentFailIndex = 0;
+  const card = failCards[currentFailIndex];
+  card.open = true;
+  card.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+  card.classList.remove('highlight');
+  void card.offsetWidth; // force reflow
+  card.classList.add('highlight');
+  setTimeout(() => card.classList.remove('highlight'), 1500);
+}}
+
+function sortTests(order) {{
+  const list = document.getElementById('test-list');
+  const cards = Array.from(list.querySelectorAll('.test-card'));
+  if (order === 'duration-desc') {{
+    cards.sort((a, b) => parseInt(b.dataset.duration) - parseInt(a.dataset.duration));
+  }} else if (order === 'duration-asc') {{
+    cards.sort((a, b) => parseInt(a.dataset.duration) - parseInt(b.dataset.duration));
+  }} else {{
+    cards.sort((a, b) => {{
+      const oa = {{'fail':0,'skip':1,'pass':2}}[a.dataset.status] || 3;
+      const ob = {{'fail':0,'skip':1,'pass':2}}[b.dataset.status] || 3;
+      if (oa !== ob) return oa - ob;
+      return a.dataset.name.localeCompare(b.dataset.name);
+    }});
+  }}
+  cards.forEach(c => list.appendChild(c));
+}}
+
+function toggleFold(el) {{
+  const content = el.nextElementSibling;
+  if (content && content.classList.contains('fold-content')) {{
+    const isHidden = content.style.display === 'none';
+    content.style.display = isHidden ? '' : 'none';
+    el.textContent = isHidden ? '... 点击折叠 ...' : '... ' + (content.children.length) + ' 行已折叠，点击展开 ...';
+  }}
+}}
+
 // Auto-expand failed tests on load
 document.querySelectorAll('.test-card.fail').forEach(c => c.open = true);
+
+// Scroll to first fail on load
+setTimeout(() => {{
+  const firstFail = document.querySelector('.test-card.fail');
+  if (firstFail) {{
+    firstFail.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+    firstFail.classList.add('highlight');
+    setTimeout(() => firstFail.classList.remove('highlight'), 1500);
+  }}
+}}, 300);
+
+updateNavButtons();
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {{
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'j' || e.key === 'J') {{ e.preventDefault(); navigateFail(1); }}
+  if (e.key === 'k' || e.key === 'K') {{ e.preventDefault(); navigateFail(-1); }}
+}});
+
 function copyFixPrompt() {{
   const el = document.getElementById('fix-prompt-text');
   const btn = document.getElementById('copy-btn');
   if (!el || !btn) return;
-  // The pre text is HTML-escaped; decode it before copying
   const txt = document.createElement('textarea');
   txt.innerHTML = el.innerHTML;
   navigator.clipboard.writeText(txt.value).then(() => {{
@@ -1455,7 +1866,6 @@ function copyFixPrompt() {{
     btn.classList.add('copied');
     setTimeout(() => {{ btn.textContent = '复制提示词'; btn.classList.remove('copied'); }}, 2000);
   }}).catch(() => {{
-    // Fallback for non-HTTPS contexts
     txt.style.position = 'fixed'; txt.style.left = '-9999px';
     document.body.appendChild(txt);
     txt.select(); document.execCommand('copy');
@@ -1465,6 +1875,18 @@ function copyFixPrompt() {{
     setTimeout(() => {{ btn.textContent = '复制提示词'; btn.classList.remove('copied'); }}, 2000);
   }});
 }}
+
+function scrollToFirstFail() {{
+  const firstFail = document.querySelector('.test-card.fail');
+  if (firstFail) {{
+    firstFail.open = true;
+    firstFail.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+    firstFail.classList.remove('highlight');
+    void firstFail.offsetWidth;
+    firstFail.classList.add('highlight');
+    setTimeout(() => firstFail.classList.remove('highlight'), 1500);
+  }}
+}}
 </script>
 </body>
 </html>''')
@@ -1473,6 +1895,7 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("\n".join(html_body))
 
 print(f"HTML report written to: {report_path}")
+
 PYEOF
 
     rm -f "$data_file"
