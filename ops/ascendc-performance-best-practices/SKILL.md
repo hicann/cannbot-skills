@@ -30,7 +30,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 | 优化类型 | 适用场景 | 文档 |
 |---------|---------|------|
 | **尾块处理（Tail Block）** | 数据量不能被 tile 大小整除的场景 | ✅ [尾块处理指南](reference/common/tail_block.md) |
-
+| **数据搬运（DataCopy）** | 非对齐、小批量多次搬运等的场景 | ✅ [数据搬运](reference/common/datacopy_optimization_design.md) |
 
 ## 查询方式
 
