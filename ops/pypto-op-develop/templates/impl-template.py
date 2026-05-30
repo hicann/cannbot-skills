@@ -13,7 +13,7 @@
 """PyPTO {op} kernel implementation.
 
 模板说明：
-  - 本文件是 {op}_impl.py 的固定模板，由 pypto-op-develop 在 Stage 3 生成。
+  - 本文件是 {op}_impl.py 的固定模板，由 pypto-op-develop 生成。
   - 所有 {op} 占位符需替换为实际算子名称。
   - 导出函数 {op}_wrapper() 供 test_{op}.py 调用。
   - kernel 使用 @pypto.frontend.jit 装饰，内部使用 pypto API。
@@ -30,7 +30,7 @@ import torch
 def {op}_core(x: pypto.Tensor) -> pypto.Tensor:
     """核心计算逻辑，供 kernel 调用。
 
-    根据 DESIGN.md 中的 API 映射实现。
+    根据设计方案中的 API 映射实现。
     使用 pypto 基础 API（如 pypto.exp, pypto.sum, pypto.amax 等）。
 
     Args:
@@ -54,21 +54,32 @@ def {op}_core(x: pypto.Tensor) -> pypto.Tensor:
 
 @pypto.frontend.jit
 def {op}_kernel(
-    input_tensor: pypto.Tensor(),
-    output_tensor: pypto.Tensor(),
+    # Tensor 描述符必须显式给出 shape 与 dtype；动态轴写 `pypto.DYNAMIC`，静态轴写常量整数。
+    # 示例（含动态 batch）: pypto.Tensor([pypto.DYNAMIC, 128], pypto.DT_FP32)
+    # 示例（全静态 shape）: pypto.Tensor([16, 128], pypto.DT_FP32)
+    # 禁止：pypto.Tensor() / pypto.Tensor([], dtype)（OL25 直接 FAIL）。
+    input_tensor: pypto.Tensor([...TODO_SHAPE...], pypto.TODO_DTYPE),
+    output_tensor: pypto.Tensor([...TODO_SHAPE...], pypto.TODO_DTYPE),
 ):
     """PyPTO jit kernel。
 
-    根据 DESIGN.md 实现。
-    - Tensor 描述符使用 pypto.Tensor()（shape 自动推断）或
-      pypto.Tensor([pypto.DYNAMIC, ...], pypto.DT_FP32)（显式指定）。
-    - 必须配置 tiling：pypto.set_vec_tile_shapes(...) 或 pypto.set_cube_tile_shapes(...)。
-    - 输出写回使用 output_tensor[:] = result 或 pypto.assemble(result, offset, output_tensor)。
+    根据 DESIGN.md 实现。关键规范：
+    - shape：动态轴 `pypto.DYNAMIC`、静态轴常量整数；与 DESIGN.md 的 `dynamic_axes` 一致。
+    - tiling：必须 `pypto.set_vec_tile_shapes(...)` 或 `pypto.set_cube_tile_shapes(...)`。
+    - 当 `dynamic_axes` 非空时，kernel 内须用 `pypto.loop(...)` 遍历动态轴；trip count
+      取自 `tensor.shape[i]` / 函数参数 / 其符号表达式。
+    - 输出写回：`output_tensor[:] = result` 或 `pypto.assemble(result, offset, output_tensor)`。
     """
-    # TODO: 根据 DESIGN.md 配置 tiling
-    # 示例: pypto.set_vec_tile_shapes(64, 128)
+    # TODO: 根据设计方案配置 tiling
+    # vec 场景示例: pypto.set_vec_tile_shapes(64, 128)
+    # cube 场景示例（matmul）: pypto.set_cube_tile_shapes([128, 128], [128, 128], [128, 128])
 
-    # TODO: 替换为实际 kernel 逻辑
+    # TODO: 实现 kernel 逻辑。含动态轴时，标准模式参考：
+    #   B = input_tensor.shape[0]
+    #   for b_idx in pypto.loop(B, name="batch_loop", idx_name="b_idx"):
+    #       tile = pypto.view(input_tensor, [TILE, ...], [b_idx, 0])
+    #       result = {op}_core(tile)
+    #       pypto.assemble(result, [b_idx, 0], output_tensor)
     result = {op}_core(input_tensor)
     output_tensor[:] = result
 

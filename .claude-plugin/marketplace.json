@@ -204,7 +204,7 @@
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
       "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",
-      "version": "1.1.4",
+      "version": "1.1.5",
       "author": {
         "name": "CANNBot"
       },

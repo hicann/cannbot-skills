@@ -13,17 +13,19 @@
 """PyPTO {op} operator test.
 
 模板说明：
-  - 本文件是 test_{op}.py 的固定模板，由 pypto-op-develop 在 Stage 3 生成。
+  - 本文件是 test_{op}.py 的固定模板，由 pypto-op-develop 生成。
   - 所有 {op} 占位符需替换为实际算子名称。
-  - test_{op}.py 只做 import + 调用 + 精度对比，不包含 golden 或 kernel 实现代码。
-  - golden 实现来自 {op}_golden.py（Stage 2A 由 pypto-golden-generate 生成）。
-  - kernel 实现来自 {op}_impl.py（Stage 3 由 pypto-op-develop 生成）。
+  - 测试用例信息放在 test_cases.json，遍历读取执行。
+  - test_{op}.py 只做 import + 遍历 + 调用 + 精度对比，不包含 golden 或 kernel 实现代码。
+  - golden 实现来自 {op}_golden.py（由 pypto-golden-generate 生成）。
+  - kernel 实现来自 {op}_impl.py（由 pypto-op-develop 生成）。
   - 精度对比必须使用 numpy.testing.assert_allclose，禁止手写 assert max_diff < tolerance。
   - 模式参照 examples/ 与 models/ 的统一规范。
 """
 
 import os
 import sys
+import json
 import argparse
 
 import torch
@@ -40,100 +42,86 @@ from {op}_impl import {op}_wrapper
 def get_device_id():
     """从环境变量获取 TILE_FWK_DEVICE_ID。"""
     if "TILE_FWK_DEVICE_ID" not in os.environ:
-        print("Please set: export TILE_FWK_DEVICE_ID=0")
-        return None
+        print("Please set: export TILE_FWK_DEVICE_ID={device_id}")
+        return 0
     try:
         return int(os.environ["TILE_FWK_DEVICE_ID"])
     except ValueError:
         print(f"ERROR: TILE_FWK_DEVICE_ID must be int, got: {os.environ['TILE_FWK_DEVICE_ID']}")
-        return None
+        return 0
+
+def load_test_cases(json_path="test_cases.json"):
+    """加载测试用例。"""
+    if not os.path.exists(json_path):
+        print(f"ERROR: {json_path} not found")
+        sys.exit(1)
+    with open(json_path, "r") as f:
+        return json.load(f)
 
 # ─────────────────────────────────────────────
-# 2. 测试函数
+# 2. 测试执行
 # ─────────────────────────────────────────────
 
-def test_{op}_level0(device_id=None, run_mode="npu"):
-    """Level 0: 小数据量基础功能验证（8-16 元素）。"""
+def run_single_case(case_data, device_id=None, run_mode="npu"):
+    """执行单个测试用例。"""
+    case_id = case_data["id"]
+    description = case_data.get("description", "")
+    
     print("=" * 60)
-    print("Test: {op} Level 0 (basic)")
+    print(f"Test: {case_id} — {description}")
     print("=" * 60)
-
+    
     device = f"npu:{device_id}" if (run_mode == "npu" and device_id is not None) else "cpu"
-
-    # 测试数据
-    torch.manual_seed(0)
-    shape = (1, 16)  # Level 0: 小 shape
-    dtype = torch.float32
-    x = torch.randn(shape, dtype=dtype, device=device)
-
+    
+    # 构造输入数据
+    torch.manual_seed(case_data.get("seed", 42))
+    
+    # 根据 test_cases.json 格式构造输入（需根据具体算子适配）
+    # 示例：单输入算子
+    input_shape = case_data["input"]["shape"]
+    input_dtype = case_data["input"]["dtype"]
+    
+    dtype_map = {
+        "float16": torch.float16,
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+    }
+    dtype = dtype_map.get(input_dtype, torch.float32)
+    x = torch.randn(input_shape, dtype=dtype, device=device)
+    
     # 执行 kernel wrapper
     result = {op}_wrapper(x)
-
+    
     # 执行 golden
     golden = {op}_golden(x)
-
-    # 精度对比（必须使用 assert_allclose）
+    
+    # 精度对比
     print(f"  Input shape : {x.shape}")
     print(f"  Output shape: {result.shape}")
     max_diff = np.abs(result.cpu().numpy() - golden.cpu().numpy()).max()
     print(f"  Max diff    : {max_diff:.6e}")
-
+    
     if run_mode == "npu":
-        assert_allclose(
-            result.cpu().numpy(),
-            golden.cpu().numpy(),
-            rtol=1e-3, atol=1e-3,
-        )
-
-    print("  ✓ Passed\n")
-
-
-def test_{op}_level1(device_id=None, run_mode="npu"):
-    """Level 1: 典型场景验证（1K 元素）。"""
-    print("=" * 60)
-    print("Test: {op} Level 1 (typical)")
-    print("=" * 60)
-
-    device = f"npu:{device_id}" if (run_mode == "npu" and device_id is not None) else "cpu"
-
-    torch.manual_seed(42)
-    shape = (4, 1024)  # Level 1: 典型 shape
-    dtype = torch.float32
-    x = torch.randn(shape, dtype=dtype, device=device)
-
-    result = {op}_wrapper(x)
-    golden = {op}_golden(x)
-
-    max_diff = np.abs(result.cpu().numpy() - golden.cpu().numpy()).max()
-    print(f"  Shape: {shape}, Max diff: {max_diff:.6e}")
-
-    if run_mode == "npu":
-        assert_allclose(
-            result.cpu().numpy(),
-            golden.cpu().numpy(),
-            rtol=1e-3, atol=1e-3,
-        )
-
+        try:
+            assert_allclose(
+                result.cpu().numpy(),
+                golden.cpu().numpy(),
+                rtol=case_data.get("rtol", 1e-3),
+                atol=case_data.get("atol", 1e-3),
+            )
+            print("[PRECISION_PASS]")
+        except AssertionError as e:
+            print(f"[PRECISION_FAIL] {e}", file=sys.stderr)
+            raise
+        except Exception as e:
+            print(f"Runtime error: {e}", file=sys.stderr)
+            raise
+    
     print("  ✓ Passed\n")
 
 # ─────────────────────────────────────────────
 # 3. CLI 入口
 # ─────────────────────────────────────────────
-
-# 用例注册表
-EXAMPLES = {
-    "{op}::test_{op}_level0": {
-        "name": "{op} Level 0",
-        "description": "小数据量基础功能验证",
-        "function": test_{op}_level0,
-    },
-    "{op}::test_{op}_level1": {
-        "name": "{op} Level 1",
-        "description": "典型场景验证",
-        "function": test_{op}_level1,
-    },
-}
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -141,36 +129,58 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s {op}::test_{op}_level0    Run Level 0
-  %(prog)s --list                    List all cases
+  %(prog)s                     Run all cases
+  %(prog)s case_001            Run specific case
+  %(prog)s --list              List all cases
         """,
     )
-    parser.add_argument("example_id", type=str, nargs="?", help="Case ID to run")
+    parser.add_argument("case_id", type=str, nargs="?", help="Case ID to run")
     parser.add_argument("--list", action="store_true", help="List available cases")
     parser.add_argument(
         "--run_mode", "--run-mode",
         type=str, default="npu", choices=["npu", "sim"],
         help="Run mode (default: npu)",
     )
+    parser.add_argument(
+        "--json", type=str, default="test_cases.json",
+        help="Test cases JSON file (default: test_cases.json)",
+    )
     args = parser.parse_args()
-
+    
+    # 加载测试用例
+    test_cases = load_test_cases(args.json)
+    cases = test_cases.get("test_cases", [])
+    
+    if not cases:
+        print("ERROR: No test cases found in JSON")
+        sys.exit(1)
+    
     # --list
     if args.list:
-        print("\nAvailable cases:\n")
-        for key, info in sorted(EXAMPLES.items()):
-            print(f"  {key}  — {info['description']}")
+        print(f"\nTest cases from {args.json}:\n")
+        for case in cases:
+            case_id = case["id"]
+            desc = case.get("description", "")
+            shape = case["input"]["shape"]
+            dtype = case["input"]["dtype"]
+            print(f"  {case_id}  — {desc}  [{dtype} {shape}]")
         return
-
+    
     # 选择用例
-    if args.example_id:
-        if args.example_id not in EXAMPLES:
-            print(f"ERROR: unknown case '{args.example_id}'")
-            print(f"Valid: {', '.join(sorted(EXAMPLES))}")
+    if args.case_id:
+        case_data = None
+        for case in cases:
+            if case["id"] == args.case_id:
+                case_data = case
+                break
+        if case_data is None:
+            print(f"ERROR: unknown case '{args.case_id}'")
+            print(f"Valid: {', '.join([c['id'] for c in cases])}")
             sys.exit(1)
-        to_run = [(args.example_id, EXAMPLES[args.example_id])]
+        to_run = [case_data]
     else:
-        to_run = list(sorted(EXAMPLES.items()))
-
+        to_run = cases
+    
     # NPU 设备初始化
     device_id = None
     if args.run_mode == "npu":
@@ -179,14 +189,17 @@ Examples:
             return
         import torch_npu
         torch.npu.set_device(device_id)
-
+    
     # 执行
     try:
-        for key, info in to_run:
-            print(f"\n▸ Running {key}: {info['name']}")
-            info["function"](device_id, args.run_mode)
+        passed = 0
+        for case_data in to_run:
+            print(f"\n▸ Running {case_data['id']}")
+            run_single_case(case_data, device_id, args.run_mode)
+            passed += 1
+        
         print("\n" + "=" * 60)
-        print("All tests passed!")
+        print(f"All tests passed! ({passed}/{len(to_run)} cases)")
         print("=" * 60)
     except Exception as e:
         print(f"\nError: {e}")
