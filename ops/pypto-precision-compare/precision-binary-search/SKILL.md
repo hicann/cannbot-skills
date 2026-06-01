@@ -1,4 +1,9 @@
-# 二分对比方法
+---
+name: precision-binary-search
+description: PyPTO 算子上板二分定位法。通过在 kernel 函数中添加检查点 tensor 作为输入参数进行原地修改，对比中间结果的精度。专注：修改 kernel 签名 → 修改 golden 返回值 → 修改测试函数 → 二分定位首个出错的 op。 当需要在上板场景用二分定位法定位 PyPTO 算子精度首个出错 Op 时使用此技能。
+---
+
+# 上板二分定位法
 
 通过在 kernel 函数中添加检查点 tensor 作为输入参数进行原地修改，对比中间结果的精度，定位导致精度差异的具体 op。
 
@@ -33,7 +38,7 @@
 - 从权重/输入推导：找到相关的权重tensor shape和输入tensor shape，根据matmul/view等操作规则推导
 - 从循环tile推导：循环内变量的第一维 = tile_batch，向上追溯到原始输入的shape
 
-**kernel函数声明（新前端推荐）**：
+**kernel函数声明（前端推荐）**：
 - 直接使用 `@pypto.frontend.jit()` 装饰器
 - 检查点tensor作为输入参数直接在 kernel 函数中声明
 - 输出tensor也作为输入参数，使用 `out.move()` 或 `pypto.assemble` 写入结果
