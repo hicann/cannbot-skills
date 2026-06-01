@@ -1,5 +1,13 @@
 # Ascend C 高性能编程规范
 
+<适用>
+语言: C++
+侧别: All
+领域: true
+触发: AscendC::, pipe.InitBuffer, DataCopy, EnQue, DeQue, PipeBarrier, InitBuffer
+默认启用: true
+</适用>
+
 > **适用场景**：Tillng侧 和 Kernel侧
 
 ---

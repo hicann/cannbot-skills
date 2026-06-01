@@ -87,7 +87,7 @@
       "description": "Ascend C 代码审查 Skills（2 个）。代码审查规范和 API 文档检索。",
       "source": "./ops",
       "strict": false,
-      "version": "1.0.1",
+      "version": "1.1.0",
       "author": {
         "name": "CANNBot"
       },
@@ -223,7 +223,7 @@
       "name": "ops-code-reviewer",
       "source": "./plugins-official/ops-code-reviewer",
       "description": "Ascend C 算子代码审查 Team。含独立审查 Agent，支持 PR diff 审查和代码质量评估。",
-      "version": "1.0.4",
+      "version": "1.1.0",
       "author": {
         "name": "CANNBot"
       },

@@ -1,5 +1,12 @@
 # CANN C++ 安全编码规范
 
+<适用>
+语言: C++
+侧别: All, Tiling
+领域: false
+默认启用: true
+</适用>
+
 > **适用场景**：Tiling 侧（Host 侧）和 Kernel 侧（Device 侧）
 >
 > **说明**：安全编码红线规范，所有代码必须 100% 遵守。条款标注适用范围：`[适用: All]` / `[适用: Tiling]`
@@ -43,8 +50,8 @@
 | 10.1 | 禁止从空指针创建 std::string | 标准库 | 高 |
 | 10.2 | 不要保存 c_str/data 指针 | 标准库 | 中 |
 | 11.1 | LOG API 禁止传入空指针 | LOG API 安全 | 高 |
-| 11.2 | LOG API 参数数量与格式化占位符必须匹配 | LOG API 安全 | 高 |
-| 11.3 | LOG API 参数类型与格式化说明符必须匹配 | LOG API 安全 | 高 |
+| 11.2 | LOG API 参数数量与顺序必须与格式化占位符逐位一致 | LOG API 安全 | 高 |
+| 11.3 | LOG API 参数类型必须与格式化说明符逐位匹配 | LOG API 安全 | 高 |
 | 11.4 | LOG API 禁止传入已释放内存的指针 | LOG API 安全 | 高 |
 
 ---
@@ -105,112 +112,90 @@ C++语言的内存完全由程序员自己控制，所以在操作内存的时�
 
 在精度低于int的整数类型上进行运算时，需要考虑整数提升。程序员还需要掌握整数转换规则，包括隐式转换规则，以便设计安全的算术运算。
 
-**加法示例：**
+**乘法示例（int32_t 乘法溢出）：**
 
 ```cpp
-int num_a = ... // 来自外部数据
-int num_b = ... // 来自外部数据
-int sum = 0;
-if (((num_a > 0) && (num_b > (INT_MAX - num_a))) ||
-    ((num_a < 0) && (num_b < (INT_MIN - num_a)))) {
-    ... // 错误处理
-}
-sum = num_a + num_b;
+// 错误写法 — 两个 int32_t 相乘，结果可能超出 int32_t 范围
+int32_t calcHeightAlign = GetAlignedSize(...);  // 对齐后高度，可达 65536
+int32_t calcWidth = GetWidth(...);              // 宽度，可达 65536
+int32_t size = calcHeightAlign * calcWidth;     // 65536 × 65536 = 4,294,967,296 溢出！
+
+// 正确写法 — 提升为 int64_t 计算
+int64_t size = static_cast<int64_t>(calcHeightAlign) * calcWidth;
 ```
 
-**除法示例：**
+**取反示例（INT64_MIN 取反溢出，红线问题）：**
 
 ```cpp
-int num_a = ... // 来自外部数据
-int num_b = ... // 来自外部数据
-int result = 0;
-// 检查除数为0及除法溢出错误
-if ((num_b == 0) || ((num_a == INT_MIN) && (num_b == -1))) {
-    ... // 错误处理
-}
-result = num_a / num_b;
+// 错误写法 — delta 取 INT64_MIN 时，-delta 溢出
+int64_t delta = input2 - input1;       // 可能为 INT64_MIN = -9223372036854775808
+int64_t absDelta = -delta;             // -(-9223372036854775808) = 9223372036854775808 > INT64_MAX!
+// 有符号整数溢出是未定义行为（C++ 红线）
+
+// 正确写法 — 转换为无符号类型后再求绝对值
+uint64_t absDelta = (delta < 0) ? static_cast<uint64_t>(-delta) : static_cast<uint64_t>(delta);
 ```
 
-**【检视策略】**
+**多维连乘示例（多维 shape 连续累乘溢出）：**
 
-> **强制要求**：必须组合使用三种验证工具进行精确分析，禁止仅凭推测或记忆判断。
+```cpp
+// 错误写法 — 多维 shape 用 int32_t 连乘，极易溢出
+int32_t totalSize = dim0 * dim1 * dim2 * dim3 * dim4;
+// dim0=1024, dim1=1024, dim2=128, dim3=64 时积 ≈ 8.6 × 10^9 > INT32_MAX
 
----
+// 正确写法 — 使用 int64_t 并提前提升
+int64_t totalSize = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3 * dim4;
+```
 
-**阶段1：表达式建模与类型分析**
+**【检视策略 — 工具驱动】**
 
-操作步骤：
-1. 从目标代码精确提取运算表达式，识别所有参与运算的变量
-2. 通过代码上下文确定每个变量的精确类型
-3. 推导运算顺序和隐式类型转换，识别风险点
+核心流程：运行 check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
 
----
+**Step 1 — 提取表达式与类型**
 
-**阶段2：业务约束快速判断（优先执行）**
+扫描代码，提取每个有符号算术表达式。识别操作数的 C++ 类型。
 
-> **目的**：先判断业务约束是否已确保安全，避免不必要的重型验证。
+**Step 2 — 首次工具运行**
 
-快速判断规则（满足任一即可 PASS）：
-- 变量来自 TilingData（已校验）或编译期常量
-- 循环边界内使用（如 `for(i=0; i<N; i++)` 内 `arr[i]`）
-- 变量范围可推导且上限明显低于溢出边界
+为操作数设定初始边界后运行 check_bounds.py：
 
-> **⚠️ 约束**：快速判断通过时，必须在检视输出中给出**具体数值边界**（如 `X∈[0,512], 512×2=1024<INT32_MAX`）。无法给出具体数值的，必须执行阶段3工具验证。禁止仅凭"业务保证不会超限"直接 PASS。
+边界设定规则：
+① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
+② 从赋值链推导 → 使用推导范围
+③ 无代码证据 → 使用合理保守值（禁止用类型全范围——那必定违规，无意义）
 
-若不适用，进入阶段3工具验证。
+禁止行为：
+- 虚构变量关系作为安全证据（如声称 "X ≤ Y" 但找不到对应代码行）
+- 用类型标签代替边界（"int64_t 所以够大不会溢出"——int64_t 的值可以是 1）
 
----
-
-**阶段3：三种工具组合验证**
-
-> **执行方式**：使用 `cat << 'EOF' | g++ -x c++ -std=c++17 -` 形式直接在终端运行，不产生本地文件。
-
-**工具1：GCC builtin 快速检测（优先执行）**
-
-操作方案：
-- 使用 `__builtin_smul_overflow` / `__builtin_umul_overflow` 检测乘法溢出
-- 使用 `__builtin_sadd_overflow` / `__builtin_uadd_overflow` 检测加法溢出
-- 对表达式中的每个同类型运算单元分别检测
-- 输出：是否溢出 + 截断后的错误值
-
-**工具2：C++ 大类型对比验证**
-
-操作方案：
-- 将运算表达式用更大类型（`int64_t` / `uint64_t`）重新计算，获得数学真实值
-- 用原类型计算，获得编译器实际行为（截断值）
-- 对比真实值与截断值是否一致
-- 输出：真实值、截断值、是否溢出
-
-**工具3：Z3 约束求解（复杂表达式或找边界时使用）**
-
-前置命令（一键安装）：
 ```bash
-cd /tmp && python3 -m venv z3_env 2>/dev/null; source z3_env/bin/activate && pip install z3-solver -q && python3 << 'EOF'
-from z3 import *
-# ...建模与分析代码...
-EOF
+python3 {skill_base}/scripts/check_bounds.py \
+  --expr "{表达式}" \
+  --vars "a=int32_t:0:47" "b=int32_t:3:3" "c=int64_t:100:1000000" \
+  --check overflow
 ```
 
-操作方案：
-- 用 BitVec 精确建模每个变量（含位宽）
-- 用 ZeroExt/SignExt 扩展计算真实值
-- 添加溢出约束求解
-- 输出：溢出触发值、安全边界
+表达式中的 C++ 写法（`func()`、`a->b`）直接用作变量名。
 
----
+**Step 3 — 按工具输出行动**
 
-**阶段4：综合判定**
+工具输出包含「边界敏感性分析」逐变量标注安全临界值，以及「行动指引」分步指令。**严格按行动指引执行，不要跳过。**
 
-| 工具验证结果 | 业务约束保护 | 最终判定 |
-|-------------|-------------|---------|
-| 无溢出 | — | ✅ **PASS** |
-| 存在溢出 | 无保护 | ⚠️ **FAIL（需修复）** |
-| 存在溢出 | 有保护 | 🔶 **需关注（标注约束条件）** |
+【输出 SAFE】
+  看「最敏感变量」及余量：找出余量最小的那个变量
+    余量 > 10x 临界值 → 安全余量充足，PASS
+    余量 ≤ 10x → 回代码核实该变量的边界是否来自 A/B 级代码证据
+      有证据 → PASS。无证据 → 向不利方向放宽边界重跑，重跑后判断
 
-**"需关注"标注要求**：
-- 明确记录业务约束的具体内容
-- 记录安全边界值
-- 提示未来扩展风险
+【输出 VIOLATION】
+  看反例中「触及上限/下限」的变量：
+    来自 constexpr/守卫 (A 级) → 边界可靠，确认 FAIL
+    来自推测 (B/C 级) → Grep 找该变量的真实限定值
+      找到 → 修正边界重跑。找不到 → SUSPICIOUS + 标注边界不确定
+
+**Step 4 — 收敛（最多 1 次重跑）**
+
+重跑后按 Step 3 逻辑判断。仍不确定 → SUSPICIOUS + 标注关键变量及缺失的代码证据。
 
 ---
 
@@ -221,124 +206,117 @@ EOF
 **【描述】**
 涉及无符号操作数的计算永远不会溢出，因为超出无符号整数类型表示范围的计算结果会按照（结果类型可表示的最大值 + 1）的数值取模。这种行为更多时候被非正式地称为无符号整数回绕。
 
-**乘法示例：**
+**乘法示例（uint32_t 乘法回绕后再 cast uint64_t——值已经错了）：**
 
 ```cpp
-size_t width = ... // 来自外部数据
-size_t height = ... // 来自外部数据
-if (width == 0 || height == 0) {
-    ... // 错误处理
-}
-if (width > SIZE_MAX / height) {
-    ... // 错误处理
-}
-unsigned char *buf = (unsigned char *)malloc(width * height);
+// 错误写法 — 乘法在 uint32_t 完成，回绕发生后才 cast 到 uint64_t，无法恢复
+uint32_t blockSize = 65536;    // 来自 TilingData
+uint32_t strideKV = 65536;     // 来自 TilingData
+uint64_t result = blockSize * strideKV;
+// blockSize * strideKV 在 uint32_t 空间计算：65536 × 65536 = 4,294,967,296 > UINT32_MAX
+// 实际结果: (65536 × 65536) mod 2^32 = 0 → 回绕后的 0 再 cast 到 uint64_t = 0
+
+// 正确写法 — 乘法前至少一个操作数提升为 uint64_t
+uint64_t result = static_cast<uint64_t>(blockSize) * strideKV;
 ```
 
-**【检视策略】**
+**减法示例（uint32_t 减法回绕——结果用作数组索引）：**
 
-> **强制要求**：必须组合使用三种验证工具进行精确分析，禁止仅凭推测或记忆判断。
+```cpp
+// 错误写法 — aivIdx * singleCoreSize 可能大于 totalOutputSize，减法回绕
+uint32_t tailSize = totalOutputSize - aivIdx * singleCoreSize;
+// totalOutputSize=100, aivIdx=47, singleCoreSize=3:
+//   47 × 3 = 141, 100 - 141 按 uint32_t 计算 = 4294967255（回绕）
+//   tailSize 被误认为合法大小，后续 DataCopy 搬运 4GB 数据 → 越界崩溃
 
----
+// 正确写法 — 先判断大小关系，或使用 int64_t 中间结果
+int64_t tailSizeSigned = static_cast<int64_t>(totalOutputSize) - 
+                         static_cast<int64_t>(aivIdx) * singleCoreSize;
+uint32_t tailSize = (tailSizeSigned > 0) ? static_cast<uint32_t>(tailSizeSigned) : 0;
+```
 
-**阶段1：表达式建模与类型分析**
+**类型混合示例（size_t 与 int64_t 混合运算——负数回绕成极大值）：**
 
-操作步骤：
-1. 从目标代码精确提取运算表达式，识别所有参与运算的变量
-2. 通过代码上下文确定每个变量的精确类型（重点关注 `uint32_t`、`size_t` 等）
-3. 推导运算顺序和隐式类型转换，识别风险点
+```cpp
+// 错误写法 — N_ALIGN 是 size_t 常量（无符号），numIters 是 int64_t
+// 按 C++ 整型提升规则 int64_t → size_t，负数变成极大正数
+constexpr size_t N_ALIGN = 128;
+int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
+// 若 numIters 为 0 或负值，提升为 size_t 后回绕成 2^64-127 级别的极大值
+// 再经 SetDim 传出，得到非预期的 shape，后续所有计算均错
 
----
+// 正确写法 — 统一为有符号类型
+constexpr int64_t N_ALIGN = 128;
+int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
+```
 
-**阶段2：业务约束快速判断（优先执行）**
+**【检视策略 — 工具驱动】**
 
-> **目的**：先判断业务约束是否已确保安全，避免不必要的重型验证。
+核心流程：运行 check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
 
-快速判断规则（满足任一即可 PASS）：
-- 变量来自 TilingData（已校验）或编译期常量
-- 循环边界内使用
-- 变量范围可推导且上限明显低于回绕边界
+**Step 1 — 提取表达式与类型**
 
-> **⚠️ 约束**：快速判断通过时，必须在检视输出中给出**具体数值边界**（如 `X∈[0,1024], 1024×65536=67108864<UINT32_MAX`）。无法给出具体数值的，必须执行阶段3工具验证。禁止仅凭"业务保证不会超限"直接 PASS。
+扫描代码，提取每个无符号算术表达式（减法、乘法、混合运算）。识别操作数的 C++ 类型。
 
-若不适用，进入阶段3工具验证。
+**Step 2 — 首次工具运行**
 
----
+为操作数设定初始边界后运行 check_bounds.py：
 
-**阶段3：三种工具组合验证**
+边界设定规则：
+① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
+② 从赋值链推导 → 使用推导范围
+③ 无代码证据 → 使用合理保守值（禁止用类型全范围——那必定违规，无意义）
 
-> **执行方式**：使用 `cat << 'EOF' | g++ -x c++ -std=c++17 -` 形式直接在终端运行，不产生本地文件。
+禁止行为：
+- 虚构变量关系作为安全证据（如声称 "a ≥ b 恒成立" 但找不到对应代码行）
+- 用类型标签代替边界（"uint64_t 所以够大不会回绕"——uint64_t 的值可以是 0）
 
-**工具1：GCC builtin 快速检测（优先执行）**
-
-操作方案：
-- 使用 `__builtin_umul_overflow` / `__builtin_umull_overflow` 检测无符号乘法回绕
-- 使用 `__builtin_uadd_overflow` 检测无符号加法回绕
-- 对每个同宽度的运算单元分别检测
-- 输出：是否回绕 + 回绕后的错误值
-
-**工具2：C++ 大类型对比验证**
-
-操作方案：
-- 用 `uint64_t` 重新计算表达式，获得数学真实值
-- 用原类型计算，获得回绕后的值
-- 对比：`真实值 > UINT32_MAX` 或 `原生值 != 真实值` 时存在回绕
-- 输出：真实值、回绕值、回绕量
-
-**工具3：Z3 约束求解（复杂表达式或找边界时使用）**
-
-前置命令（一键安装）：
 ```bash
-cd /tmp && python3 -m venv z3_env 2>/dev/null; source z3_env/bin/activate && pip install z3-solver -q && python3 << 'EOF'
-from z3 import *
-# ...建模与分析代码...
-EOF
+python3 {skill_base}/scripts/check_bounds.py \
+  --expr "{表达式}" \
+  --vars "a=uint32_t:0:47" "b=uint32_t:3:3" "c=int64_t:100:1000000" \
+  --check wraparound
 ```
 
-操作方案：
-- 用 BitVec（无符号）建模每个变量
-- 用 ZeroExt 扩展计算真实值
-- 添加回绕约束求解
-- 输出：回绕触发值、安全边界
+表达式中的 C++ 写法（`func()`、`a->b`）直接用作变量名。
 
----
+**Step 3 — 按工具输出行动**
 
-**阶段4：综合判定**
+工具输出包含「边界敏感性分析」逐变量标注安全临界值，以及「行动指引」分步指令。**严格按行动指引执行，不要跳过。**
 
-| 工具验证结果 | 业务约束保护 | 最终判定 |
-|-------------|-------------|---------|
-| 无回绕 | — | ✅ **PASS** |
-| 存在回绕 | 无保护 | ⚠️ **FAIL（需修复）** |
-| 存在回绕 | 有保护 | 🔶 **需关注（标注约束条件）** |
+【输出 SAFE】
+  看「最敏感变量」及余量：找出余量最小的那个变量
+    余量 > 10x 临界值 → 安全余量充足，PASS
+    余量 ≤ 10x → 回代码核实该变量的边界是否来自 A/B 级代码证据
+      有证据 → PASS。无证据 → 向不利方向放宽边界重跑，重跑后判断
 
-**"需关注"标注要求**：
-- 明确记录业务约束
-- 记录安全边界
-- 提示扩展风险
+【输出 VIOLATION】
+  看反例中「触及上限/下限」的变量：
+    来自 constexpr/守卫 (A 级) → 边界可靠，确认 FAIL
+    来自推测 (B/C 级) → Grep 找该变量的真实限定值
+      找到 → 修正边界重跑。找不到 → SUSPICIOUS + 标注边界不确定
+
+**Step 4 — 收敛（最多 1 次重跑）**
+
+重跑后按 Step 3 逻辑判断。仍不确定 → SUSPICIOUS + 标注关键变量及缺失的代码证据。
 
 ---
 
 #### 2.3 确保除法和余数运算不会导致除以零的错误 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 中的除法运算（如 `totalLength / blockDim`）需检查除数是否为零。
+> **Kernel 侧说明**：对每个除法/取余运算，按 SEC-2.1 的 Step 2 方法收集除数边界，按 Step 4 判定表做判定。不采用变量名模式匹配。
 
-**【Kernel 侧排除规则】**
+**【检视策略】**
 
-以下情况在 Kernel 侧自动排除，无需校验：
+与 SEC-2.1/2.2 相同的边界推演方法，将「除数」作为操作数，重点确认除数在所有极端组合下非零。除数的边界收集（Step 2）按以下优先级：
 
-| 排除条件 | 参数模式示例 | 排除原因 |
-|---------|-------------|----------|
-| 除数来自 TilingData | `constInfo.*`, `baseInfo.*`, `tilingData->*` | Tiling 阶段已校验非零（如 `OP_CHECK_IF(headDim == 0, return GRAPH_FAILED)`） |
-| 编译期常量 | `FP32_REPEAT_ELEMENT_NUM`, `BLOCK_SIZE`, `MAX_*` | 常量值固定非零 |
-| __aicore__ 函数参数 | 模板类入参 | 架构约定：尽量减少校验，有效性由调用者保证 |
-
-**判定方法**：
-- 识别除数变量名匹配上述模式时，直接判定为 PASS
-- 识别除数赋值来源为 `tilingData->xxx` 时，直接判定为 PASS
-
-**【Kernel 侧需校验场景】**
-
-以下情况在 Kernel 侧仍需校验：
+1. **代码级守卫** — 紧邻除法的 `if (divisor != 0)` 或 `if (divisor == 0) return`
+2. **编译期常量** — `constexpr` 声明，值固定非零（如 `BLOCK_SIZE=32`）
+3. **硬件固定值** — chip arch 参数，查 `/npu-arch`（如 `aivNum=48`）
+4. **TilingData 值域推演** — Read Tiling 代码中除数的赋值语句，追溯其来源和值域
+   - 来自常量计算且可证明非零 → PASS
+   - 来自 shape / 运行时变量 → 必须考虑零值可能性
+   - 无法确定 → 标记为「边界未知」
 
 | 校验条件 | 参数来源 | 代码模式 |
 |---------|---------|----------|
@@ -802,43 +780,145 @@ OP_LOGE(context->GetNodeName(),
 
 ---
 
-#### 11.2 LOG API 参数数量必须与格式化占位符数量一致 `[适用: Tiling]`
+#### 11.2 LOG API 参数数量与顺序必须与格式化占位符逐位一致 `[适用: Tiling]`
 
 **【问题说明】**
 
 参数数量少于占位符时，LOG 宏会从栈上读取垃圾值填充缺失参数。若垃圾值被解释为非法指针（`%s`/`%p`），将触发非法内存访问。
 
-**错误示例**
+**参数顺序错位是同等严重的问题**：即使参数数量正确，若参数传入顺序与格式符位置不对应，会导致：
+- `%u`(位置1) 收到 `const char*` → 未定义行为（指针值被当作整数打印）
+- `%s`(位置3) 收到整数 → **段错误(SIGSEGV)**（整数被当作地址去读字符串）
+
+> **注意**：计数验证（参数数 == 格式符数）只是必要条件。**数量正确但顺序错误时，本条同样判定为 FAIL**。检视时必须对每个 LOG 调用执行**逐位顺序一致性验证**（见检视方法），并**与 SEC-11.3 联合执行**——本条验证数量+顺序，SEC-11.3 验证逐位类型匹配。两条联合才能完整覆盖所有 LOG 格式符安全问题。
+
+**错误示例 1 — 参数数量不一致**
 
 ```cpp
-// 参考 grouped_matmul_swiglu_quant_tiling.cpp 中的多参数日志场景
 // 2 个占位符，但只传了 1 个参数
 OP_LOGD(context->GetNodeName(),
         "gmmSwigluBaseParams.M: %ld, K: %ld", m);   // 缺少 k，栈数据被错误读取
 ```
 
-**正确示例**
+**错误示例 2 — 参数数量一致但顺序错位**
+
+```cpp
+// 格式符: %u %u %s %u %u（位置1→uint, 位置3→string）
+// 参数:   inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
+//         ↑ const char*       ↑ uint        ↑ uint        ↑ uint  ↑ uint
+//         ❌ 位置1: %u 收到 const char* → 指针值被当作整数打印
+//         ❌ 位置3: %s 收到 uint → 整数被当作地址去读字符串 → 段错误
+OP_CHECK_IF(tempD0 != d0Size,
+    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
+        "the last dim (D0) of kvCache(%u) should be %u; "
+        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+        inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
+    return ge::GRAPH_FAILED);
+```
+
+**正确示例 1**
 
 ```cpp
 OP_LOGD(context->GetNodeName(),
         "gmmSwigluBaseParams.M: %ld, K: %ld", m, k);
 ```
 
+**正确示例 2 — 参数顺序与格式符逐位对应**
+
+```cpp
+// 格式符: %u %u %s %u %u
+// 参数:   tempD0/NUM8, d0Size/NUM8, inputName.c_str(), tempD0, d0Size
+//         ↑ uint        ↑ uint        ↑ const char*     ↑ uint  ↑ uint
+//         ✅ 逐位对应正确
+OP_CHECK_IF(tempD0 != d0Size,
+    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
+        "the last dim (D0) of kvCache(%u) should be %u; "
+        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+        tempD0/NUM8, d0Size/NUM8, inputName.c_str(), tempD0, d0Size),
+    return ge::GRAPH_FAILED);
+```
+
+**【检视方法 — SEC-11.2 专属】**
+
+对每个 LOG 调用，必须执行以下验证：
+
+```
+Step 1 — 提取格式符位置序列
+  从格式字符串中按出现顺序提取所有格式说明符，记录 (位置序号, 格式符)
+  示例: "%u %u %s %u %u" → [(1, %u), (2, %u), (3, %s), (4, %u), (5, %u)]
+
+Step 2 — 提取参数位置序列
+  从参数列表按传入顺序提取所有参数表达式，记录 (位置序号, 参数表达式)
+  示例: inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
+        → [(1, inputName.c_str()), (2, tempD0/NUM8), (3, d0Size/NUM8), (4, tempD0), (5, d0Size)]
+
+Step 3 — 数量验证
+  格式符数量 == 参数数量?
+  不等 → FAIL（参数缺失或多余）
+
+Step 4 — 顺序一致性验证（本条新增核心步骤）
+  对每个位置 i:
+    推断 param[i] 的类型 → 对照 format[i] 期望的类型族:
+      %s  → 期望: string-like（const char*, .c_str(), 字符串字面量）
+      %u  → 期望: unsigned-integer-like（uint32_t, uint8_t, unsigned int...）
+      %d  → 期望: signed-integer-like（int32_t, int, bool...）
+      %ld → 期望: signed-64bit-like（int64_t, long...）
+      %lu → 期望: unsigned-64bit-like（uint64_t, unsigned long...）
+      %lld→ 期望: signed-64bit-like（int64_t, long long）
+      %llu→ 期望: unsigned-64bit-like（uint64_t, unsigned long long）
+      %zu → 期望: size_t-like
+      %p  → 期望: pointer-like
+
+    param[i] 类型不在 format[i] 期望类型族内 → FAIL，记录:
+      位置 i: format[i]=%X 期望 <类型族>，实际 param[i]=<表达式> 类型 <T>
+
+  特判 — 顺序错位的危险模式:
+    若参数列表中存在 string-like 参数（.c_str()、字符串字面量），
+    但它出现在 %u/%d/%ld/%lu 位置 → 高风险 FAIL（%s 收到整数 → 段错误）
+    若参数列表中存在 integer 参数，
+    但它出现在 %s 位置 → 高风险 FAIL（整数被当作地址 → 段错误）
+```
+
 ---
 
-#### 11.3 LOG API 参数类型必须与格式化说明符匹配 `[适用: Tiling]`
+#### 11.3 LOG API 参数类型必须与格式化说明符逐位匹配 `[适用: Tiling]`
 
 **【问题说明】**
 
 类型大小不匹配时，LOG 宏按说明符宽度截断或读取超量字节，导致后续参数全部错位。Tiling 侧最常见：`uint64_t` shape 维度误用 `%d`（4字节），实际类型为 8 字节，造成参数错位。
 
-**错误示例**
+**参数顺序错位同样导致类型不匹配**：即使每个参数类型在参数列表中都能找到对应格式符，但若参数与格式符的位置不对应（如 `%s` 在位置3，但 `const char*` 参数在位置1），则该位置的逐位类型仍然不匹配。此类问题属于 SEC-11.2（顺序）+ SEC-11.3（类型）的交叉违规，两条**必须联合检出**。
+
+> **联合检视要求**：SEC-11.3 的逐位比对（Step 4）同时覆盖了 SEC-11.2 的顺序验证——当位置 i 的参数类型与格式符期望类型不匹配时，可能是"类型本身错误"也可能是"顺序错位导致类型错配"，两条均判定 FAIL。**禁止将 SEC-11.2 和 SEC-11.3 分开独立执行后简单合并结果**——必须通过同一次逐位比对同时产出两条的判定。
+
+**错误示例 1 — 类型大小不匹配（传统场景）**
 
 ```cpp
 // 参考 quant_grouped_matmul_dequant_tiling.cpp：_Params.originM 为 uint64_t
 OP_LOGE(context->GetNodeName(),
         "No valid row found for n = %d, ubSize = %d\n", n, ubSize);
 // 错误：n/ubSize 均为 uint64_t，%d 只读 4 字节，后续参数全部错位
+```
+
+**错误示例 2 — 顺序错位导致逐位类型不匹配（高风险场景）**
+
+```cpp
+// 格式符: %u(1) %u(2) %s(3) %u(4) %u(5)
+// 参数:   inputName.c_str()(1)  tempD0/NUM8(2)  d0Size/NUM8(3)  tempD0(4)  d0Size(5)
+// 逐位比对:
+//   位置1: %u 期望 unsigned-integer，实际 const char* → ❌ FAIL (SEC-11.2 顺序错位 + SEC-11.3 类型不匹配)
+//   位置2: %u 期望 unsigned-integer，实际 uint → ✅ PASS
+//   位置3: %s 期望 string-like，实际 uint → ❌ FAIL (段错误风险)
+//   位置4: %u 期望 unsigned-integer，实际 uint → ✅ PASS
+//   位置5: %u 期望 unsigned-integer，实际 uint → ✅ PASS
+OP_CHECK_IF(tempD0 != d0Size,
+    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
+        "the last dim (D0) of kvCache(%u) should be %u; "
+        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+        inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
+    return ge::GRAPH_FAILED);
+// 注意：参数数量=5 == 格式符数量=5 → 单独看 SEC-11.2 计数验证会 PASS
+//       但逐位比对发现位置1和位置3不匹配 → 两条同时 FAIL
 ```
 
 **正确示例**
@@ -865,6 +945,105 @@ OP_LOGE(context->GetNodeName(),
 // bool 的正确记录方式（业务代码第 248 行）
 OP_LOGD(context->GetNodeName(),
         "isSplitWorkSpace: %s", isSplitWorkSpace ? "true" : "false");
+```
+
+**参数顺序错位示例（SEC-11.2 + SEC-11.3 交叉违规）**
+
+```cpp
+// 格式符: %u(1) %u(2) %s(3) %u(4) %u(5)
+// 参数:   inputName.c_str()(1)  tempD0/NUM8(2)  d0Size/NUM8(3)  tempD0(4)  d0Size(5)
+// 逐位比对结果:
+//   位置1: %u 期望 unsigned-integer → 实际 const char* → ❌ SEC-11.2 顺序错位 + SEC-11.3 类型不匹配
+//   位置3: %s 期望 string-like     → 实际 uint        → ❌ SEC-11.3 类型不匹配（段错误风险）
+OP_CHECK_IF(tempD0 != d0Size,
+    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
+        "the last dim (D0) of kvCache(%u) should be %u; "
+        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+        inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
+    return ge::GRAPH_FAILED);
+// 后果：%s(位置3) 收到整数 → 将整数当地址读字符串 → 段错误(SIGSEGV)
+//       %u(位置1) 收到字符串指针 → 未定义行为
+```
+
+**【联合检视方法 — SEC-11.2 + SEC-11.3 必须同时执行】**
+
+> **强制要求**：SEC-11.2 和 SEC-11.3 **禁止分开独立执行**。必须通过同一次逐位比对流程同时产出两条的判定结果。分开执行会导致：SEC-11.2 计数 PASS + SEC-11.3 独立类型匹配 PASS → 顺序错位漏检。
+
+对每个 LOG/printf 类调用，必须执行**逐位类型交叉验证**：
+
+```
+Step 0 — 发现所有 LOG 调用
+  0.1 grep `OP_LOGE\|OP_LOGD\|OP_LOGW\|OP_LOGI` 定位宏调用行号（不依赖格式符匹配，避免跨行漏检）
+  0.2 对每个命中，向后 Read 至 `);` 获取完整调用（可能跨 3-15 行）
+  0.3 若格式字符串为 C 字面量多行拼接（`"a" "b"`），先合并再解析
+
+Step 1 — 提取格式符位置序列
+  从**已合并**的格式字符串中提取所有格式说明符，按出现顺序记录 (位置序号, 格式符)
+  示例: "%u %u %s %u %u" → [(1, %u), (2, %u), (3, %s), (4, %u), (5, %u)]
+  支持的格式符: %u %d %ld %lld %lu %llu %s %f %lf %p %zu %x %X %c
+
+Step 2 — 提取参数位置序列
+  从 LOG 调用的参数部分提取 N 个参数表达式，按传入顺序记录 (位置序号, 参数表达式)
+  示例: inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
+        → [(1, inputName.c_str()), (2, tempD0/NUM8), (3, d0Size/NUM8), (4, tempD0), (5, d0Size)]
+
+Step 3 — 推断每个参数的类型
+  对每个参数表达式:
+    - 变量名 → Grep 声明位置获取类型
+    - .c_str() → const char*
+    - 表达式(如 a/b) → 推断结果类型（整数除法→整数类型）
+    - 字符串字面量 → const char*
+    - 三目运算符 ?: → 推断两侧公共类型
+    - 解引用指针 *ptr → 推断 ptr 的指向类型（如 `const int64_t*` 解引用 → `int64_t`）
+
+Step 4 — 逐位比对（同时产出 SEC-11.2 和 SEC-11.3 判定）
+
+  4.1 数量验证（SEC-11.2 基础检查）
+    格式符数量 == 参数数量?
+    不等 → SEC-11.2 FAIL（参数缺失或多余）
+
+  4.2 逐位类型交叉验证（SEC-11.2 顺序 + SEC-11.3 类型 联合核心步骤）
+    对每个位置 i (0 to N-1):
+      param[i] 的推断类型 是否兼容 format[i] 的格式符？
+
+      兼容规则:
+        %s   → const char*, char*, std::string(.c_str()), 字符串字面量
+        %u   → uint32_t, uint16_t, uint8_t, unsigned int, unsigned short
+        %d   → int32_t, int16_t, int8_t, int, bool
+        %ld  → int64_t, long, long long (有符号)
+        %lld → int64_t, long long
+        %lu  → uint64_t, unsigned long
+        %llu → uint64_t, unsigned long long
+        %zu  → size_t
+        %p   → 任意指针类型, void*
+        %f   → float, double
+        %lf  → double
+
+      不兼容 → 判定:
+        若 param[i] 的类型在参数列表中能找到某个其他格式符与其兼容
+        → SEC-11.2 FAIL(顺序错位) + SEC-11.3 FAIL(类型不匹配) — 交叉违规
+        若 param[i] 的类型在整个格式符序列中找不到任何兼容的格式符
+        → SEC-11.3 FAIL(类型本身不匹配) — 纯类型违规
+
+  4.3 高风险特判
+    以下位置不匹配模式为**高风险 FAIL**，必须在报告中标注风险等级:
+      - %s 位置收到 integer → 段错误风险（整数被当作地址读字符串）
+      - %u/%d/%ld/%lu 位置收到 string-like（.c_str()、字符串字面量）→ 未定义行为
+      - int64_t 参数配 %d（8字节配4字节）→ 参数截断+后续错位
+      - uint32_t 参数配 %d（无符号配有符号格式符）→ 大值显示为负数
+
+Step 5 — 输出判定表
+  对每个 LOG 调用，输出逐位比对判定表:
+
+  | 位置 | 格式符 | 期望类型族 | 实际参数 | 推断类型 | SEC-11.2 | SEC-11.3 |
+  |------|--------|-----------|---------|---------|----------|----------|
+  | 1    | %u     | unsigned-int | inputName.c_str() | const char* | FAIL(顺序) | FAIL(类型) |
+  | 2    | %u     | unsigned-int | tempD0/NUM8      | uint      | PASS      | PASS      |
+  | 3    | %s     | string-like  | d0Size/NUM8      | uint      | FAIL(顺序) | FAIL(类型) |
+  | ...
+
+  全部 PASS → SEC-11.2 PASS + SEC-11.3 PASS
+  任一位置 FAIL → 标注对应条例的 FAIL 及具体违规类型
 ```
 
 ---

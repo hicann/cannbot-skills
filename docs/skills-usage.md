@@ -75,6 +75,24 @@
 - 重大降级（抽象层 flatten、kernel 多分支合并为单一通路、device 路径降级为 host fallback 等）会触发硬停审批门，需用户显式选择后才会动手实现。
 - 仅当在Ascend 950 PR硬件完成精度验证后才会报 `success`，否则按 `incomplete` / `blocked` / `failed` 处理。
 
+### ascendc-code-review
+
+算子代码检视。支持文件检视、PR 检视、快速定向排查，>10 文件自动切换大型 PR 模式。
+
+**Plugin 模式[推荐]**（先 `cd plugins-official/ops-code-reviewer && bash init.sh project opencode`，详见 [quickstart](../../plugins-official/ops-code-reviewer/quickstart.md)）：
+```
+帮我检视 split_core.cpp
+全量检视 PR https://gitcode.com/cann/ops-transformer/pull/3604
+检查 split_core.cpp 是否有数值溢出问题
+```
+
+**Skill 驱动模式：**
+```
+/ascendc-code-review 帮我检视 split_core.cpp
+/ascendc-code-review 全量检视 PR https://gitcode.com/cann/ops-transformer/pull/3604
+/ascendc-code-review 检查 split_core.cpp 是否有数值溢出问题
+```
+
 ---
 
 ## Skill 治理工具

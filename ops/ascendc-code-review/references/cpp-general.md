@@ -1,5 +1,12 @@
 # CANN C++ 通用编码规范
 
+<适用>
+语言: C++
+侧别: All, Tiling
+领域: false
+默认启用: true
+</适用>
+
 > **适用场景**：Tiling 侧（Host 侧）和 Kernel 侧（Device 侧）
 >
 > **说明**：通用编程规范，条款标注适用范围：`[适用: All]` / `[适用: Tiling]` / `[不适用]`
