@@ -83,6 +83,18 @@ cannsim_output/
     └── ...
 ```
 
+### 4. 性能瓶颈定位（Trace 空泡分析）
+
+cannsim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core 各 pipeline（SCALAR/VECTOR/MTE2/CUBE 等）的指令级周期事件。按 `references/pipeline-bubble-analysis.md` 的判定标准自主分析：
+
+**分析目标**：定位主 pipeline（VECTOR/CUBE）idle 空泡的根因。
+
+**核心方法**：
+1. **空泡分类**：按 7 大类 / ~30 子类型标准判定等待原因（DATA_STALL、SCALAR_OVERHEAD、STRUCTURAL 等）
+2. **因果归因**：检查"主 pipeline idle 时谁在 busy"，追踪具体阻塞源
+3. **周期性模式检测**：判断空泡是系统性（每个 tile 重复）还是偶发
+4. **重叠度判定**：验证双缓冲是否生效（MTE2 与 VECTOR/CUBE 时间重叠比例）
+
 ## 命令参考
 
 ### cannsim record - 执行仿真
@@ -137,5 +149,9 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 
 ## 参考资料
 
-- [references/simulator-advanced.md](references/simulator-advanced.md) - 仿真进阶命令参考
-- [references/troubleshooting.md](references/troubleshooting.md) - 问题排查指南
+| 文件 | 内容 | 何时查阅 |
+|------|------|---------|
+| `references/simulator-advanced.md` | 仿真进阶命令参考 | 需要高级参数或批量仿真时 |
+| `references/troubleshooting.md` | 问题排查指南 | 仿真失败或报告未生成时 |
+| `references/pipeline-bubble-analysis.md` | 指令流水空泡分类、因果归因、周期性模式检测 | 生成 trace 后，定位性能瓶颈根因时 |
+| `scripts/trace_bubble_analyzer.py` | 自动化空泡分析脚本（兼容 msprof/cannsim 双格式） | 批量分析多核 trace 或获取预分析报告时 |
