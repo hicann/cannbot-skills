@@ -6,10 +6,9 @@
 
 ### 目录创建命令
 
-```bash
-# 创建算子目录
-bash build.sh --genop=${op_class}/${op_name}
-```
+参照 `references/add_example/` 的完整模板，按以下目录结构创建算子工程。
+将模板中的 `add_example` 替换为算子的 snake_case 名，`AddExample` 替换为大驼峰类名。
+各文件的实现细节参见本指南后续章节。
 
 ### 标准目录结构
 
