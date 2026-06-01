@@ -627,17 +627,16 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 64 | gitcode-pr-handler | 重新生成符合约定式提交规范的 PR 标题与描述 | `infra/gitcode-pr-handler` |
 | 65 | gitcode-toolkit | GitCode 协作通用基础参考（API/Token/URL/工作流等，内部使用） | `infra/gitcode-toolkit` |
 
-### 3.9 ops-lab/ — 实验性模块（7 个）
+### 3.9 ops-lab/ — 实验性模块（6 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
 | 66 | cuda2ascend-simt | CUDA 算子迁移到 Ascend C SIMT，支持 standalone sample / torch_npu / pybind 三类交付形态 | `ops-lab/cuda2ascend-simt` |
-| 67 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `ops-lab/ops-easyasc-dsl/skill` |
-| 68 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
-| 69 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
-| 70 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
-| 71 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
-| 72 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
+| 67 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
+| 68 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
+| 69 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
+| 70 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
+| 71 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
 
 ### 3.10 plugins-official/ — 插件内置 Skill（2 个）
 
@@ -646,9 +645,16 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 73 | asc-api-ut-gen | Ascend C API 单元测试生成，分支覆盖分析、参数化测试设计 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-api-ut-gen` |
 | 74 | asc-npu-arch | Ascend NPU 架构知识，芯片型号、NpuArch、SocVersion、条件编译 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-npu-arch` |
 
+### 3.10 plugins-community/ — 社区贡献 Skill（2 个）
+
+| 序号 | Skill 名称 | 功能描述 | 路径 |
+|------|-----------|---------|------|
+| 75 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `plugins-community/ops-easyasc-dsl/skill` |
+| 76 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
+
 ---
 
-> **统计**：全仓共 **74 个 Skill**，分布在 10 个目录域中。
+> **统计**：全仓共 **75 个 Skill**，分布在 10 个目录域中。
 
 ## 参考文档
 
