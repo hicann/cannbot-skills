@@ -1,7 +1,7 @@
 {
   "name": "torch-compile",
   "description": "PyTorch torch.compile 图模式编排入口。通过 Subagent 组织不同图模式，当前提供 npugraph_ex 图模式助手。",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": {
     "name": "CANNBot"
   },
