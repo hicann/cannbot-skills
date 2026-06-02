@@ -60,7 +60,7 @@ skills:
 ## 阶段 0：模型分析
 
 ### 运行环境
-- NPU 型号:（通过 `npu-smi info` 确认）
+- NPU 型号:（通过 `npu-smi info -m` 或 `npu-smi info -t health -i <device_id>` 确认，避免解析主表格）
 - 单卡 HBM:
 - 部署卡数:
 - 量化模式:

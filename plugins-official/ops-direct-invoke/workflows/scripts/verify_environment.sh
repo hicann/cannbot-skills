@@ -91,37 +91,67 @@ json_escape() {
 collect_env_info() {
     # --- 自动检测/纠正 ASCEND_HOME_PATH ---
     detect_ascend_home() {
-        # 优先级 1: 环境变量已设置且目录存在 → 直接使用
-        if [ -n "$ASCEND_HOME_PATH" ] && [ -d "$ASCEND_HOME_PATH" ]; then
-            return
-        fi
+        local _resolved=""
+        _resolve_toolkit_path() {
+            local base="$1"
+            if [ -d "$base/compiler" ]; then
+                echo "$base"
+                return
+            fi
+            local toolkit_dir="$base/ascend-toolkit"
+            if [ -d "$toolkit_dir" ]; then
+                for d in $(ls -d "$toolkit_dir"/* 2>/dev/null | sort -r); do
+                    if [ -d "$d/compiler" ]; then
+                        echo "$d"
+                        return
+                    fi
+                done
+                if [ -L "$toolkit_dir/latest" ]; then
+                    local real
+                    real=$(readlink -f "$toolkit_dir/latest")
+                    if [ -d "$real/compiler" ]; then
+                        echo "$real"
+                        return
+                    fi
+                fi
+            fi
+            for d in $(ls -d "$base"/cann-* 2>/dev/null | sort -r); do
+                if [ -d "$d/compiler" ]; then
+                    echo "$d"
+                    return
+                fi
+            done
+            echo ""
+        }
 
-        # 优先级 2: 环境变量已设置但目录不存在 → 尝试纠正
-        if [ -n "$ASCEND_HOME_PATH" ]; then
-            echo "  ⚠ ASCEND_HOME_PATH=$ASCEND_HOME_PATH 目录不存在，尝试自动纠正..."
-            local base_parent
-            base_parent=$(dirname "$ASCEND_HOME_PATH")
-            if [ -d "$base_parent" ]; then
-                local corrected
-                corrected=$(ls -d "${base_parent}"/cann* 2>/dev/null | head -1)
-                if [ -n "$corrected" ]; then
-                    export ASCEND_HOME_PATH="$corrected"
-                    echo "  ✓ 已纠正为: $ASCEND_HOME_PATH"
+        for var in ASCEND_HOME ASCEND_TOOLKIT_HOME ASCEND_HOME_PATH ASCEND_CANN_HOME; do
+            local val
+            eval "val=\$$var"
+            if [ -n "$val" ] && [ -d "$val" ]; then
+                _resolved=$(_resolve_toolkit_path "$val")
+                if [ -n "$_resolved" ]; then
+                    TOOLKIT_PATH="$_resolved"
                     return
                 fi
             fi
+        done
+
+        if [ -d "/usr/local/Ascend" ]; then
+            _resolved=$(_resolve_toolkit_path "/usr/local/Ascend")
+            if [ -n "$_resolved" ]; then
+                TOOLKIT_PATH="$_resolved"
+                echo "  ✓ 自动发现: Toolkit路径=$TOOLKIT_PATH"
+                return
+            fi
         fi
 
-        # 优先级 3: 环境变量为空 → 按优先级自动发现
-        if [ -d "$HOME/Ascend/cann" ]; then
-            export ASCEND_HOME_PATH="$HOME/Ascend/cann"
-            echo "  ✓ 自动发现: ASCEND_HOME_PATH=$ASCEND_HOME_PATH"
-        elif ls -d /usr/local/Ascend/cann-* 1>/dev/null 2>&1; then
-            export ASCEND_HOME_PATH=$(ls -d /usr/local/Ascend/cann-* | head -1)
-            echo "  ✓ 自动发现: ASCEND_HOME_PATH=$ASCEND_HOME_PATH"
-        elif [ -d "/usr/local/Ascend/cann" ]; then
-            export ASCEND_HOME_PATH="/usr/local/Ascend/cann"
-            echo "  ✓ 自动发现: ASCEND_HOME_PATH=$ASCEND_HOME_PATH"
+        if [ -d "$HOME/Ascend" ]; then
+            _resolved=$(_resolve_toolkit_path "$HOME/Ascend")
+            if [ -n "$_resolved" ]; then
+                TOOLKIT_PATH="$_resolved"
+                echo "  ✓ 自动发现: Toolkit路径=$TOOLKIT_PATH"
+                return
+            fi
         fi
     }
 
@@ -132,20 +162,29 @@ collect_env_info() {
     echo "[1/6] 检查环境变量..."
     echo "────────────────────────────────────────────────────────────────"
 
-    if [ -z "$ASCEND_HOME_PATH" ]; then
-        error "ASCEND_HOME_PATH 未设置"
+    if [ -z "$ASCEND_HOME_PATH" ] && [ -z "$TOOLKIT_PATH" ]; then
+        error "ASCEND_HOME_PATH 未设置且无法自动发现 Toolkit"
         ENV_DATA[ascend_home_path]=""
         ENV_DATA[ascend_home_path_valid]="false"
 
         echo ""
         echo "  解决方法："
-        echo "  export ASCEND_HOME_PATH=/home/developer/Ascend/cann"
+        echo "  export ASCEND_HOME_PATH=/usr/local/Ascend"
         echo "  或"
-        echo "  source /home/developer/Ascend/ascend-toolkit/set_env.sh"
+        echo "  source /usr/local/Ascend/ascend-toolkit/set_env.sh"
         echo ""
     else
-        success "ASCEND_HOME_PATH = $ASCEND_HOME_PATH"
-        ENV_DATA[ascend_home_path]="$(json_escape "$ASCEND_HOME_PATH")"
+        if [ -n "$ASCEND_HOME_PATH" ]; then
+            success "ASCEND_HOME_PATH = $ASCEND_HOME_PATH"
+            ENV_DATA[ascend_home_path]="$(json_escape "$ASCEND_HOME_PATH")"
+        else
+            warning "ASCEND_HOME_PATH 未设置"
+            ENV_DATA[ascend_home_path]=""
+        fi
+        if [ -n "$TOOLKIT_PATH" ]; then
+            success "Toolkit 路径 = $TOOLKIT_PATH"
+            ENV_DATA[toolkit_path]="$(json_escape "$TOOLKIT_PATH")"
+        fi
         ENV_DATA[ascend_home_path_valid]="true"
     fi
     
@@ -154,29 +193,38 @@ collect_env_info() {
     echo "[2/6] 检查 CANN 安装..."
     echo "────────────────────────────────────────────────────────────────"
     
-    if [ -d "$ASCEND_HOME_PATH" ]; then
-        success "CANN 目录存在"
+    if [ -d "$TOOLKIT_PATH" ]; then
+        success "CANN Toolkit 目录存在"
         ENV_DATA[cann_dir_exists]="true"
         
-        # 提取版本号
-        CANN_VERSION=$(basename "$ASCEND_HOME_PATH" | sed 's/cann-//' | sed 's/-beta//')
+        CANN_VERSION=""
+        if [ -f "$TOOLKIT_PATH/compiler/version.info" ]; then
+            CANN_VERSION=$(grep '^Version=' "$TOOLKIT_PATH/compiler/version.info" | cut -d'=' -f2)
+        fi
+        if [ -z "$CANN_VERSION" ]; then
+            CANN_VERSION=$(basename "$TOOLKIT_PATH" | sed 's/cann-//' | sed 's/-beta//')
+        fi
         ENV_DATA[cann_version]="$(json_escape "$CANN_VERSION")"
     else
-        error "CANN 目录不存在: $ASCEND_HOME_PATH"
+        error "CANN Toolkit 目录不存在"
         ENV_DATA[cann_dir_exists]="false"
     fi
     
-    if [ -d "$ASCEND_HOME_PATH/aarch64-linux" ]; then
+    if [ -d "$TOOLKIT_PATH/aarch64-linux" ]; then
         success "aarch64-linux 目录存在"
-        ENV_DATA[aarch64_dir_exists]="true"
+        ENV_DATA[arch_dir_exists]="true"
         ENV_DATA[arch_dir]="aarch64-linux"
-    elif [ -d "$ASCEND_HOME_PATH/x86_64-linux" ]; then
+    elif [ -d "$TOOLKIT_PATH/arm64-linux" ]; then
+        success "arm64-linux 目录存在"
+        ENV_DATA[arch_dir_exists]="true"
+        ENV_DATA[arch_dir]="arm64-linux"
+    elif [ -d "$TOOLKIT_PATH/x86_64-linux" ]; then
         success "x86_64-linux 目录存在"
-        ENV_DATA[aarch64_dir_exists]="true"
+        ENV_DATA[arch_dir_exists]="true"
         ENV_DATA[arch_dir]="x86_64-linux"
     else
-        error "架构目录不存在"
-        ENV_DATA[aarch64_dir_exists]="false"
+        error "架构目录不存在 ($TOOLKIT_PATH)"
+        ENV_DATA[arch_dir_exists]="false"
     fi
     
     # 3. 检查编译器
@@ -185,7 +233,7 @@ collect_env_info() {
     echo "────────────────────────────────────────────────────────────────"
     
     ARCH_DIR="${ENV_DATA[arch_dir]:-aarch64-linux}"
-    COMPILER_PATH="$ASCEND_HOME_PATH/$ARCH_DIR/ccec_compiler/bin/bisheng"
+    COMPILER_PATH="$TOOLKIT_PATH/$ARCH_DIR/ccec_compiler/bin/bisheng"
     
     if [ -f "$COMPILER_PATH" ]; then
         success "编译器存在: bisheng"
@@ -211,10 +259,10 @@ collect_env_info() {
     echo "────────────────────────────────────────────────────────────────"
     
     HEADER_PATHS=(
-        "$ASCEND_HOME_PATH/$ARCH_DIR/ascendc/include/basic_api/kernel_operator.h"
-        "$ASCEND_HOME_PATH/$ARCH_DIR/asc/include/kernel_operator.h"
-        "$ASCEND_HOME_PATH/$ARCH_DIR/include/ascendc/basic_api/kernel_operator.h"
-        "$ASCEND_HOME_PATH/include/kernel_operator.h"
+        "$TOOLKIT_PATH/$ARCH_DIR/ascendc/include/basic_api/kernel_operator.h"
+        "$TOOLKIT_PATH/$ARCH_DIR/asc/include/kernel_operator.h"
+        "$TOOLKIT_PATH/$ARCH_DIR/include/ascendc/basic_api/kernel_operator.h"
+        "$TOOLKIT_PATH/include/kernel_operator.h"
     )
     
     HEADER_FOUND=false
@@ -243,8 +291,8 @@ collect_env_info() {
     echo "[5/6] 检查库文件..."
     echo "────────────────────────────────────────────────────────────────"
     
-    LIB_REGISTER="$ASCEND_HOME_PATH/lib64/libregister.so"
-    LIB_ACL="$ASCEND_HOME_PATH/lib64/libascendcl.so"
+    LIB_REGISTER="$TOOLKIT_PATH/lib64/libregister.so"
+    LIB_ACL="$TOOLKIT_PATH/lib64/libascendcl.so"
     LIBS_OK=true
     
     if [ -f "$LIB_REGISTER" ]; then
@@ -381,10 +429,11 @@ generate_json() {
   "environment": {
     "ascend_home_path": "${ENV_DATA[ascend_home_path]}",
     "ascend_home_path_valid": ${ENV_DATA[ascend_home_path_valid]},
+    "toolkit_path": "${ENV_DATA[toolkit_path]}",
     "cann_dir_exists": ${ENV_DATA[cann_dir_exists]},
     "cann_version": "${ENV_DATA[cann_version]}",
     "arch_dir": "${ENV_DATA[arch_dir]}",
-    "aarch64_dir_exists": ${ENV_DATA[aarch64_dir_exists]},
+    "arch_dir_exists": ${ENV_DATA[arch_dir_exists]},
     "bisheng_path": "${ENV_DATA[bisheng_path]}",
     "bisheng_exists": ${ENV_DATA[bisheng_exists]},
     "bisheng_executable": ${ENV_DATA[bisheng_executable]},

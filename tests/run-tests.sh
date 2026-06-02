@@ -1535,6 +1535,10 @@ cd <项目根目录>
 |---|---|---|---|
 | **Line Endings** | - | 文件含 CRLF 换行符 | `--auto-fix` 或 `dos2unix <file>` |
 | **Version Care** | - | 改了文件未 bump 版本号 | `--auto-fix` 自动 bump plugin.json |
+| **Version Care** | fork-sync | 本地 bump 后 CI 仍报未 bump | 远程主线已更新，需 `git fetch upstream && git rebase upstream/master` 后再 bump |
+| **Version Care** | origin-drift | rebase 后本地测试仍失败 | `origin/master` 还是旧 commit，先 `git push --force-with-lease` 再测试 |
+| **Version Care** | mismatch | marketplace.json 版本不一致 | 手动同步 marketplace.json 与 plugin.json 版本 |
+| **Version Care** | decrease | 版本号降低 | 版本只能升高，建议恢复到 base 版本或更高 |
 | **Skill Structure** | S-STR-01 | YAML Front Matter 格式错误 | 确保 `---` 包裹 metadata |
 | | S-STR-02/03 | name/description 字段缺失 | 补充对应字段 |
 | | S-STR-05 | name 长度超 64 字符 | 缩短 name |
@@ -1576,6 +1580,8 @@ cd <项目根目录>
 - [ ] `./tests/run-tests.sh --fast` 输出 `Failed: 0`
 - [ ] 若修改了 skill/agent/team 内容，plugin.json 版本号已 bump
 - [ ] 若修改了文件路径，所有链接已同步更新
+- [ ] 若 CI 失败但本地已通过，检查 `origin/master` 是否与 `upstream/master` 同步
+- [ ] rebase 后先 push 再运行本地测试，避免 origin/master 假阳性
 - [ ] 没有修改 tests/ 目录下的任何文件
 
 ## 分析框架（五问法）

@@ -47,7 +47,7 @@ Phase 6: 会话导出          (session.jsonl + session.md)
 
 ## Phase 0: 参数确认
 
-从用户输入中提取硬件架构 `arch`。若用户未明确指定，通过 `npu-smi info` 自动检测。若检测失败，使用默认值 `ascend910b1`。
+从用户输入中提取硬件架构 `arch`。若用户未明确指定，通过 `npu-smi info -m` 自动检测（解析映射表而非主表格）。若检测失败，使用默认值 `ascend910b1`。
 
 ### GPU Kernel 模式自动检测
 

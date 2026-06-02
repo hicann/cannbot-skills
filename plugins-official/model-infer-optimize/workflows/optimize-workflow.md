@@ -65,7 +65,7 @@
   - 网络结构拆解（Embedding → Transformer Blocks → Output Head）
   - Prefill / Decode 分支差异
   - 关键模块：Attention 类型（GQA/MHA/MLA）、FFN/MoE 结构、特殊模块。架构识别必须基于实际 config 值（config.json / model.config），不能仅从代码类定义推断——注意可配置开关（如 use_mla、n_routed_experts）
-  - 运行环境：通过 `npu-smi info` 确认 NPU 型号和单卡 HBM 容量，记录量化模式、执行模式、部署卡数
+  - 运行环境：通过 `npu-smi info -m` 确认 NPU 型号，通过 `npu-smi info -t memory -i <device_id>` 确认单卡 HBM 容量，记录量化模式、执行模式、部署卡数
   - 模型当前状态：确认代码是否存在且可运行（有 infer.sh 且能跑通）、baseline/baseline_metadata.json 是否存在。报告状态（可运行/不可运行/需多卡），不自行采集基线数据
   - 若模型不可运行，记录具体原因和缺失项
 输出:

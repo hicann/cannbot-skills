@@ -275,7 +275,7 @@ bash install.sh --help
 
 ### Q: 如何指定目标设备？
 
-系统会自动检测 NPU 设备（通过 `npu-smi info`）。如需指定特定设备：
+系统会自动检测 NPU 设备（通过 `npu-smi info -m`，避免解析主表格）。如需指定特定设备：
 ```bash
 export ASCEND_RT_VISIBLE_DEVICES=1
 ```

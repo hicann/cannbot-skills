@@ -9,3 +9,8 @@ tests/.version-state/
 tests/system/logs
 tests/system/results
 tests/system/sandboxes
+tests/test-ut-report.html
+
+# 算子编译输出
+**/output/
+**/.orchestrator_state.json

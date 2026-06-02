@@ -48,6 +48,9 @@ total_teams=0
 pass_count=0
 fail_count=0
 skip_count=0
+fail_unbumped=0
+fail_decreased=0
+fail_mismatch=0
 
 # Get teams to test (filtered if in incremental mode)
 TEAMS_TO_TEST=$(get_teams_to_test)
@@ -159,6 +162,18 @@ echo "Comparing against: ${BASE_REF}"
 echo "Changed files: $(echo "$CHANGED_FILES" | grep -c . || echo 0)"
 echo ""
 
+# Detect fork sync status for helpful diagnostics
+if git -C "$SKILLS_DIR" rev-parse --verify "upstream/master" &>/dev/null; then
+    if [ "$BASE_REF" = "origin/master" ]; then
+        origin_upstream_diff=$(git -C "$SKILLS_DIR" log --oneline "upstream/master..origin/master" 2>/dev/null | wc -l || echo 0)
+        if [ "$origin_upstream_diff" -gt 0 ]; then
+            echo -e "  ${CYAN}[INFO]${NC} upstream/master detected and diverges from origin/master."
+            echo -e "  ${CYAN}[INFO]${NC} If local tests pass but CI fails, ensure you have rebased to upstream."
+            echo ""
+        fi
+    fi
+fi
+
 print_section_header "Version Check"
 
 for team in $TEAMS_TO_TEST; do
@@ -230,9 +245,14 @@ for team in $TEAMS_TO_TEST; do
                 echo -e "$changed_items" | sed 's/^/    /'
                 ((pass_count++)) || true
             else
+                new_version=$(recommend_version_bump "$current_version" true true)
                 print_fail "Files changed but version not bumped (base: $base_version, current: $current_version)"
                 echo -e "$changed_items" | sed 's/^/    /'
+                echo ""
+                echo -e "  ${CYAN}Suggested fix:${NC} bump PATCH to $new_version"
+                echo -e "  ${CYAN}Quick fix:${NC}   tests/run-tests.sh --fast --auto-fix"
                 ((fail_count++)) || true
+                ((fail_unbumped++)) || true
             fi
         else
             cmp=$(semver_compare "$current_version" "$base_version")
@@ -241,8 +261,11 @@ for team in $TEAMS_TO_TEST; do
                 echo -e "$changed_items" | sed 's/^/    /'
                 ((pass_count++)) || true
             else
+                suggested=$(recommend_version_bump "$base_version" true true)
                 print_fail "Version decreased: $base_version → $current_version"
+                echo -e "  ${CYAN}Fix:${NC} Version must be >= base ($base_version). Suggested: $suggested"
                 ((fail_count++)) || true
+                ((fail_decreased++)) || true
             fi
         fi
     else
@@ -312,7 +335,9 @@ PYEOF
             ((pass_count++)) || true
         else
             print_fail "$team: version mismatch — plugin.json=$plugin_version, $manifest_name=$manifest_version"
+            echo -e "  ${CYAN}Fix:${NC} Update $manifest_name to match plugin.json ($plugin_version)"
             ((fail_count++)) || true
+            ((fail_mismatch++)) || true
         fi
     done
 done
@@ -333,7 +358,41 @@ echo ""
 if [ $fail_count -gt 0 ]; then
     print_status_failed
     echo ""
-    echo "Action: Update plugin.json version and re-run to regenerate state."
+    echo "========================================"
+    echo -e " ${BOLD}Recommended Actions${NC}"
+    echo "========================================"
+    echo ""
+
+    if [ "$fail_unbumped" -gt 0 ]; then
+        echo -e "${RED}1. Version not bumped:${NC}"
+        echo "   Run: tests/run-tests.sh --fast --auto-fix"
+        echo "   Or manually bump plugin.json PATCH and sync marketplace.json"
+        echo ""
+    fi
+
+    if [ "$fail_decreased" -gt 0 ]; then
+        echo -e "${RED}2. Version decreased:${NC}"
+        echo "   Version can only increase. Restore or bump higher."
+        echo ""
+    fi
+
+    if [ "$fail_mismatch" -gt 0 ]; then
+        echo -e "${RED}3. Marketplace mismatch:${NC}"
+        echo "   Ensure marketplace.json and package.json match plugin.json."
+        echo ""
+    fi
+
+    # fork sync hint
+    if git -C "$SKILLS_DIR" rev-parse --verify "upstream/master" &>/dev/null; then
+        origin_upstream_diff=$(git -C "$SKILLS_DIR" log --oneline "upstream/master..origin/master" 2>/dev/null | wc -l || echo 0)
+        if [ "$origin_upstream_diff" -gt 0 ]; then
+            echo -e "${YELLOW}[FORK SYNC]${NC} origin/master diverges from upstream/master."
+            echo "            CI may use upstream/master as base. Rebase and push first:"
+            echo "            git fetch upstream && git rebase upstream/master && git push --force-with-lease"
+            echo ""
+        fi
+    fi
+
     exit 1
 else
     print_status_passed
