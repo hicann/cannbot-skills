@@ -349,7 +349,7 @@ cannbot-skills/
 | Skill | 功能 | 使用样例 |
 |-------|------|---------|
 | **gitcode-pr-handler** | 根据 GitCode PR 代码变更重新生成标题（约定式提交）与描述（沿用仓库 PR 模板）并写回 PR | [查看](docs/skills-usage.md#gitcode-pr-handler) |
-| **gitcode-issue-gen** | 根据 GitCode PR 代码变更生成关联 Issue（按变更类型自动选用模板），完成 PR ↔ Issue 双向关联，可选自助 Assign | [查看](docs/skills-usage.md#gitcode-issue-gen) |
+| **gitcode-issue-gen** | 自动判断两条路径：(PR路径) 从 PR diff 生成关联 Issue 并完成双向关联；(手动路径) 交互式收集信息生成 Issue 草稿，经确认后提交 | [查看](docs/skills-usage.md#gitcode-issue-gen) |
 | **gitcode-issue-handler** | GitCode Issue 端到端处置，按内容自动选择 PR 代码变更路径或 Comment 答复路径 | [查看](docs/skills-usage.md#gitcode-issue-handler) |
 | **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | — |
 

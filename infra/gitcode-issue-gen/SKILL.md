@@ -1,30 +1,48 @@
 ---
 name: gitcode-issue-gen
-description: 根据 GitCode PR 的代码变更生成关联 Issue（按变更类型自动选用 feature-request / bug-report / documentation 等仓库已有的 Issue 模板），通过 GitCode REST API 创建 Issue 后回写 PR 描述完成双向关联，并可选地把新 Issue 自助 assign 给当前 token 的 GitCode 用户。当用户提供 PR 链接、要求"创建 Issue / 生成 Issue / 关联 Issue / 给 PR 建 Issue"时触发此 skill。
+description: 根据用户输入自动判断走两条路径之一：(PR路径) 用户提供 GitCode PR 链接时，按变更类型自动选用 Issue 模板，通过 GitCode API 创建 Issue 并完成 PR ↔ Issue 双向关联；(手动路径) 用户直接描述问题或要求"提 Issue / 生成草稿"时，交互式收集信息、生成草稿、查重，经确认后提交。当用户提供 PR 链接、要求"创建 Issue / 关联 Issue / 给 PR 建 Issue"，或用户直接描述问题、要求"提单 / 生成草稿"时触发此 skill。
 license: CANN-2.0
 ---
 
-# GitCode Issue 生成与关联
-
-根据 GitCode PR 的代码变更，按变更类型自动选定 Issue 模板，生成对应的 Issue 并完成 PR ↔ Issue 双向关联。
-
----
+# GitCode Issue 生成与提交
 
 ## 核心原则
 
-### 内容必须来源于代码
+### 内容真实性
 
-- 所有技术信息必须从 PR 代码变更中直接获取，禁止基于经验推断或假设
-- 使能方式、支持框架、数据类型、硬件平台等信息必须能在代码里找到依据
+- **PR 路径**：所有技术信息必须从 PR 代码变更中直接获取，禁止基于经验推断或假设
+- **手动路径**：不要替用户推断未确认事实；可以根据日志做"可能原因"说明，但必须标注为分析或推测
 - 代码中没有明确说明的特性，**不要**写进 Issue body
 
-### 双向关联
+### 双向关联（仅 PR 路径）
 
 创建 Issue 后必须更新 PR 描述添加 Issue 链接，Issue body 中也必须包含 PR 链接，二者相互引用。
 
 ### 禁止创建测试内容
 
 严禁创建测试 Issue 或调试评论到目标仓库。API 调用问题应通过本地构造 JSON 排查，**绝不**通过向目标仓库发请求试错。
+
+### 写操作必须确认
+
+创建 Issue、修改 PR body、Assign 等写操作**必须**经用户确认后才能执行。
+
+---
+
+## 分支判断
+
+收到用户请求后，按以下条件选择路径：
+
+| 条件 | 选择路径 |
+|------|---------|
+| 用户提供了 PR 链接（`https://gitcode.com/.../pull/...`）或明确要求"给 PR 建 Issue / 关联 Issue" | **Path A：PR → Issue** |
+| 用户直接描述问题、要求"提 Issue / 创建 Issue / 生成草稿 / 提单" | **Path B：手动提单** |
+| 同时满足两者 | 优先 **Path A**，文本说明"PR 路径已满足，如需要单独创建不关联 PR 的 Issue 请说明" |
+
+---
+
+## Path A：PR → Issue（自动化）
+
+用户提供 PR 链接时，从代码变更自动生成关联 Issue。
 
 ### 交互节奏：环境预检 + 终局确认 + 可选 Assign，最多三次卡点
 
@@ -56,10 +74,6 @@ AskUserQuestion 一次只问一个。
 | 重构 / 性能优化 | feature-request（无 refactor 模板时退而求其次） |
 
 仓库实际可用的模板与推荐不同时，按"实际存在 ∩ 推荐项"取交集；推荐项不存在则按 `requirement` → `feature-request` → `bug-report` 顺序降级。
-
----
-
-## 工作流程
 
 ### Step 0：环境预检（必经）
 
@@ -151,6 +165,147 @@ curl -X POST -H "Content-Type: application/json" \
 
 ---
 
+## Path B：手动提单（交互式）
+
+用户直接描述问题时，交互式收集信息并生成 Issue 草稿。
+
+### 触发边界
+
+**仅在以下情况触发**：
+- 用户明确说"提 Issue / 创建 Issue / 提单 / 提交到 GitCode"
+- 用户明确要求"生成 Issue 草稿 / 整理 Issue 内容"
+- 上游 agent 明确调用处理 Issue 草稿或提交
+
+**不要在以下情况触发**：
+- 用户只是描述 bug、报错、需求、文档问题或咨询问题
+- 用户要求调试、定位、修代码、解释原因
+- 还没有确认是否要对外提交 Issue
+
+### 工作流程
+
+详见 [references/manual-issue-workflow.md](references/manual-issue-workflow.md)。
+
+**简要流程**：
+
+| 阶段 | 名称 | 完成标准 |
+|------|------|---------|
+| 1 | 目标确认 | 已确定 owner/repo 与处理模式（草稿 / 提交） |
+| 2 | 模板发现 | 已读取本地或远程 Issue 模板，失败时说明回退来源 |
+| 3 | 信息收集 | 已补齐模板必填字段，缺失项明确标记待补充 |
+| 4 | 草稿生成 | 已生成标题和正文，并展示给用户确认 |
+| 5 | 查重检查 | 提交前已查询可能重复的 Issue |
+| 6 | 提交与反馈 | 用户确认后提交，返回 URL 或明确错误原因 |
+
+### Issue 编写质量清单
+
+详见 [references/manual-issue-draft.md](references/manual-issue-draft.md)。
+
+### 约束层
+
+详见 [references/manual-issue-workflow.md](references/manual-issue-workflow.md)「约束层」章节。
+
+---
+
+## 共享能力
+
+### 模板读取策略
+
+#### 本地模板
+
+优先读取目标仓库本地模板：
+
+```bash
+ls <project_root>/.gitcode/ISSUE_TEMPLATE/*.yml
+```
+
+解析字段：
+- `name`
+- `title`
+- `labels`
+- `body[].attributes.label`
+- `body[].attributes.description`
+- `body[].validations.required`
+
+#### 远程模板
+
+当目标仓库不是当前本地仓库，或本地模板不存在时，通过 GitCode Contents API 获取：
+
+```bash
+curl -s "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/contents/.gitcode/ISSUE_TEMPLATE?access_token=$GITCODE_TOKEN"
+```
+
+模板文件响应中的 `content` 字段通常为 base64 编码，需要解码后解析 YAML。
+
+#### 内置备选模板
+
+当本地和远程模板都不可用时，允许使用内置备选模板，但必须在草稿中说明模板来源：
+
+> 模板来自内置备选，可能与目标仓库最新模板不一致。
+
+---
+
+### GitCode OpenAPI 参考
+
+#### 查询 Issue
+
+| 操作 | Method | URL |
+|------|--------|-----|
+| 获取仓库所有 Issue | GET | `https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues` |
+| 获取单个 Issue | GET | `https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues/{number}` |
+
+常用查询参数：
+
+| 参数 | 说明 |
+|------|------|
+| `access_token` | GitCode API Token |
+| `state` | `open` / `closed` / `all` |
+| `labels` | 逗号分隔的标签 |
+| `page` | 页码 |
+| `per_page` | 每页数量 |
+
+#### 创建 Issue
+
+GitCode 创建 Issue 使用：
+
+```text
+POST https://api.gitcode.com/api/v5/repos/{owner}/issues
+```
+
+参数：
+
+| 参数 | 位置 | 必填 | 说明 |
+|------|------|------|------|
+| `access_token` | query | 是 | GitCode API Token |
+| `repo` | formData | 是 | 仓库路径 |
+| `title` | formData | 是 | Issue 标题 |
+| `body` | formData | 否 | Issue 正文 |
+| `labels` | formData | 否 | 逗号分隔的标签 |
+
+示例：
+
+```bash
+curl --location --request POST "https://api.gitcode.com/api/v5/repos/{owner}/issues?access_token=$GITCODE_TOKEN" \
+  --form "repo={repo}" \
+  --form "title={title}" \
+  --form "body={body}" \
+  --form "labels={labels}"
+```
+
+#### 认证方式
+
+通过环境变量提供 token：
+
+```bash
+export GITCODE_TOKEN="your_token_here"
+```
+
+安全要求：
+- 不输出 token 或 token 片段
+- 不把 token 写入草稿、日志或临时文件
+- 创建 Issue 前确认 token 具备对应仓库权限
+
+---
+
 ## API / Token / 错误处理
 
 GitCode API、Token、HTTP 状态码错误处理统一详见：
@@ -167,4 +322,6 @@ GitCode API、Token、HTTP 状态码错误处理统一详见：
 ## 参考文档
 
 - [references/issue-templates.md](references/issue-templates.md) — Feature Request / Bug Report Issue 模板
+- [references/manual-issue-draft.md](references/manual-issue-draft.md) — 手动提单：Issue 编写与信息收集
+- [references/manual-issue-workflow.md](references/manual-issue-workflow.md) — 手动提单：工作流程与约束
 - [gitcode-toolkit/references/gitcode-api.md](../gitcode-toolkit/references/gitcode-api.md) — GitCode PR / Issue API 详细文档
