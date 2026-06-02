@@ -111,6 +111,23 @@
 - 如有失败用例，状态必须标记为 `❌失败`，禁止标记为 `✅通过`
 - 仅编译通过不等于验证通过，必须实际运行测试
 
+## 黑盒/白盒证据通用要求
+
+黑盒和白盒结果必须由机器可对账证据驱动，不能只依赖 Markdown 摘要或 LOG.md 当前阶段文字。
+
+测试证据要求：
+- 黑盒用例必须按 `ascendc-st-design` 的完整流程和默认目标产出；禁止手写少量用例或只生成 smoke 用例替代。
+- 调试、失败复现或临时运行结果不得覆盖主证据。
+- CP3 前必须按仓库内 `ascendc-whitebox-design` skill 启动白盒子任务；禁止经 `ascendc-ops-tester` 间接转派白盒分析。
+- 白盒产出要求以 `ascendc-whitebox-design` skill 为准；workflow 不重复定义其内部文件、阶段或 schema。
+- 白盒检查 high/full case set。
+- 黑盒和白盒关键结果必须进入证据汇总，并与机器统计一致。
+
+主 Agent 校验命令：
+- 开发期黑盒证据：`python3 workflow/resources/validate_workflow_state.py --stage cp2 --operator-dir operators/{operator_name}`
+- 最终黑盒/白盒证据：`python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir operators/{operator_name}`
+- 命令输出不是 `STATUS: PASSED` 时，必须按校验器列出的差距修复并重跑；最多 2 轮，仍失败则创建阻塞 issue 并停止推进。
+
 ---
 
 ## 1.1 开发准备
@@ -364,7 +381,7 @@ scene: test-design
 
 【验收标准】
 - 测试场景覆盖正常/边界（boundary_conditions / extreme_inputs 覆盖 spec.yaml 中各项）
-- 用例分级完成（L0门槛/L1功能）
+- 用例分级完成（L0门槛/L1功能/L2异常），并按 `ascendc-st-design` 默认目标产出黑盒用例
 - 精度标准已定义（从 spec.yaml 的 numerical_tolerance.per_dtype 读取），并包含 spec.yaml 测试映射
 - 日志摘要已输出
 
@@ -588,6 +605,7 @@ UT开发
 
 【输出】
 - UT用例：operators/{operator_name}/tests/ut/
+- UT机器证据
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
 
 【验收标准】
@@ -615,7 +633,7 @@ scene: test-development
 - 需求文档（含ACLNN接口定义）：operators/{operator_name}/docs/REQUIREMENTS.md
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（精度 tolerance / boundary case 真值）
 - 测试设计文档：operators/{operator_name}/docs/TEST.md
-- 测试用例：operators/{operator_name}/tests/st/testcases/（L0_test_cases.csv、L1_test_cases.csv）
+- 测试用例：operators/{operator_name}/tests/st/testcases/（L0/L1/L2 CSV；禁止使用 tests/cases/）
 - 算子目录：operators/{operator_name}/
 
 【输出】
@@ -623,12 +641,16 @@ scene: test-development
   - test_aclnn_${op_name}.cpp
   - CMakeLists.txt
   - run.sh
+  - 黑盒执行清单
+  - 开发期执行结果
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
 
 【验收标准】
-- 迭代一：L0标准用例（基础shape + 单dtype）已实现，Mock编译+CPU Golden自测通过
-- 迭代二：多shape用例已添加，Mock编译+CPU Golden自测通过
-- 迭代三：全dtype + 边界 + 广播用例已添加，Mock编译+CPU Golden自测通过（全量）
+- 迭代一：L0 标准用例已实现，Mock 编译+CPU Golden 自测通过，机器证据覆盖当前必需用例
+- 迭代二：L0+L1 用例已实现，Mock 编译+CPU Golden 自测通过，机器证据覆盖累计必需用例
+- 迭代三：L0/L1/L2 全量用例已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可追溯执行证据
+- 非 `smoke_only` 的 ST 路由必须在测试源码、runner 或执行日志中保留实现调用证据；仅由脚本机械生成结果、但没有对应执行证据的结果必须判为失败
+- 单 case debug、真实 NPU debug 或失败复现结果不得覆盖开发期主证据
 - 日志摘要已输出
 
 ⚠️ **注意**：本任务只开发 C++ 测试。PyTorch 测试由独立 C 任务一次性完成（L0+L1全量），在最终验收前执行。
@@ -705,7 +727,7 @@ Task 调用参数：
 | 验证项 | 结果 | 详情 |
 |-------|------|------|
 | UT验证 | 通过/失败 | 通过率: X% |
-| ST验证 | 通过/失败 | 通过率: X% |
+| ST验证 | 通过/失败 | 通过率: X%，必需用例缺口: N |
 | 前序回归 | 通过/失败/不适用 | - |
 
 **关键指标**:
@@ -718,7 +740,9 @@ Task 调用参数：
 1. UT验证和ST验证通过（NPU结果与golden数据比对）
 2. 当前迭代用例通过（迭代1/2：增量用例；迭代3：全量）
 3. 前序迭代用例无回归（仅迭代2/3需要）
-4. 日志摘要已输出
+4. 迭代三必须保留可追溯执行证据，并覆盖全部必需用例
+5. 联调过程中的单 case debug 或真实 NPU debug 不得覆盖开发期主证据
+6. 日志摘要已输出
 
 ⚠️ **仅编译通过不等于验证通过，必须实际运行测试并确认通过率 = 100%**
   "
@@ -761,6 +785,7 @@ scene: test-execution
 | 用例覆盖 | 通过/失败 | 覆盖率: X% |
 | ST通过率 | 通过/失败 | 通过率: X% (Y/Z) |
 | 回归测试 | 通过/失败/不适用 | 通过率: X% |
+| 黑盒CSV覆盖 | 通过/失败 | 期望: X, 执行: Y, 路由验证: Z, 缺口: N |
 
 **关键指标**:
 - 总用例数: X
@@ -772,11 +797,33 @@ scene: test-execution
 【验收标准】
 - 迭代一：L0用例覆盖完整，ST通过率 = 100%
 - 迭代二：多shape用例通过，TilingKey分支覆盖达标，累计通过率 = 100%
-- 迭代三：全dtype + 边界 + 广播用例通过，累计通过率 = 100%（无回归）
+- 迭代三：全部必需用例均已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可追溯执行证据，累计通过率 = 100%（无回归）
+- 真实 NPU 单 case 调试输出不得覆盖最终主证据
 - 日志摘要已输出
   "
 }
 ```
+
+---
+
+## 白盒测试生成与用例汇合（主 Agent 编排）
+
+本任务由主 Agent 按 `ascendc-whitebox-design` skill 启动白盒子 Agent/子任务完成白盒用例生成，不能通过 `ascendc-ops-tester` 间接转派白盒分析。主 Agent 只负责提供上下文、接收日志摘要和校验结果，白盒生成要求以该 skill 定义的工作流为准。
+
+【输入】
+- 算子目录：operators/{operator_name}/
+- 需求文档、spec.yaml、DESIGN.md、TEST.md
+- 当前实现源码与 UT/ST 证据
+
+【输出】
+- 白盒 skill 定义的交付结果
+- 测试证据汇总
+
+【验收标准】
+- 白盒生成由 `ascendc-whitebox-design` skill 定义的工作流完成
+- 白盒结果已产出并满足该 skill 的交付要求
+- 白盒检查 high/full case set
+- 相关测试证据通过 workflow validator 对账
 
 ---
 

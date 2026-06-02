@@ -23,6 +23,7 @@
 3. **先定位后修复** - 不要盲目修改代码，先定位问题根因
 4. **分层排查** - 按照 Host → Kernel → 环境的顺序排查
 5. **记录问题** - 复杂问题创建 `./issues/issue_{YYYYMMDD}_{关键词}_序号.md`（如 `issue_20260403_opbuild-dt-float16_01.md`，模板见 [issue-template.md](issue-template.md)），LOG.md 只放链接
+6. **黑盒/白盒证据优先** - 黑盒和白盒验收以 workflow validator 的机器证据校验结果为准；Markdown 摘要和 LOG.md 当前阶段不能替代机器证据
 
 ### 重试阈值
 
@@ -396,6 +397,12 @@ Phase 3 验证失败
     └─ UT/ST 回归？
         └─ 检查新增代码 → 修复 → 重新验证
 ```
+
+---
+
+### 黑盒/白盒证据校验
+
+黑盒和白盒证据以 workflow validator 的机器校验结果为准。`validate_workflow_state.py --stage cp2|cp3` 失败时，按脚本列出的差距补齐证据并重跑；最多两轮，仍失败则创建或链接 issue，报告状态写 `❌失败`，停止阶段推进。
 
 ---
 

@@ -27,7 +27,8 @@
 | | Phase 1-3 | **B** | C++ ST测试开发 | TEST.md + spec.yaml | C++ ST测试代码 | `operators/{operator_name}/tests/st/` |
 | **第二阶段：开发** | 汇合验证 | - | 开发联调 | UT + ST代码 | iter{N}-integration-report.md | `operators/{operator_name}/tests/reports/` |
 | | 测试工程师验收 | - | 迭代验收 | 汇合验证报告 | iter{N}-acceptance-report.md | `operators/{operator_name}/tests/reports/` |
-| **阶段二/三之间** | PyTorch测试开发 | **C** | PyTorch ST测试开发（一次性完成L0+L1全量） | TEST.md + C++ ST | PyTorch ST测试代码 | `operators/{operator_name}/tests/st/torch/` |
+| **阶段二/三之间** | 白盒测试生成 | **W** | 按白盒 skill 完成白盒测试生成与执行证据汇合 | 需求+spec+设计+实现+黑盒结果 | 白盒测试产物 + 证据汇总 | `operators/{operator_name}/tests/whitebox/`、`tests/reports/` |
+| **阶段二/三之间** | PyTorch测试开发 | **C** | PyTorch ST测试开发（一次性完成L0+L1全量） | TEST.md + C++ ST + 白盒结果 | PyTorch ST测试代码 | `operators/{operator_name}/tests/st/torch/` |
 | **第三阶段：验收** | 3.1 精度验收 | - | 执行精度验证 | PyTorch ST + 测试用例 | precision-report.md | `operators/{operator_name}/docs/` |
 | | 3.2 性能验收 | - | 性能分析（可选） | 算子二进制 | performance-report.md | `operators/{operator_name}/docs/` |
 | **第四阶段：上库** | 4.1 文档与示例 | - | 生成文档示例 | 需求+设计+代码 | README.md + examples/ | `operators/{operator_name}/` |
@@ -42,8 +43,10 @@
 TEST.md
     │
     ├─→ L0 级别（门槛用例，≤50个）→ ST（核心功能直通）
-    ├─→ L1 级别（功能/精度，500~700个）→ ST（BC组合测试）
-    └─→ L2 级别（异常用例，≤50个）→ UT（异常拦截、Host逻辑验证）
+    ├─→ L1 级别（功能/精度，按 ascendc-st-design 当前默认目标生成）→ ST（BC组合测试）
+    └─→ L2 级别（异常用例，≤50个）→ UT/Host 或 ST 异常验证
+
+测试证据由 workflow validator 对账。用例、执行结果、调试结果和汇总报告之间不一致，或只有自洽摘要但缺少可执行证据时不得进入后续验收。
 ```
 
 ---
@@ -59,13 +62,16 @@ TEST.md
 | | aclnnAPI 接口文档 | `operators/{operator_name}/docs/aclnn{OperatorName}.md` |
 | | 设计文档 | `operators/{operator_name}/docs/DESIGN.md` |
 | | 测试设计文档 | `operators/{operator_name}/docs/TEST.md` |
-| | 测试用例（L0/L1） | `operators/{operator_name}/tests/st/testcases/` |
+| | 测试用例（L0/L1/L2） | `operators/{operator_name}/tests/st/testcases/` |
 | **第二阶段** | 算子代码 | `operators/{operator_name}/` |
 | | 图模式定义 | `operators/{operator_name}/op_graph/{operator_name}_proto.h` |
 | | 问题记录 | `operators/{operator_name}/issues/issue_{YYYYMMDD}_{关键词}.md` |
-| | UT测试报告 | `operators/{operator_name}/tests/ut/test-report.md` |
+| | UT 机器报告 | `operators/{operator_name}/tests/ut/` |
+| | 黑盒测试证据 | `operators/{operator_name}/tests/st/` |
 | | 汇合验证报告（迭代N） | `operators/{operator_name}/tests/reports/iter{N}-integration-report.md` |
 | | 迭代验收报告（迭代N） | `operators/{operator_name}/tests/reports/iter{N}-acceptance-report.md` |
+| **阶段二/三之间** | 白盒测试产物 | `operators/{operator_name}/tests/whitebox/` |
+| | 测试证据汇总 | `operators/{operator_name}/tests/reports/` |
 | **第三阶段** | 最终精度验收报告 | `operators/{operator_name}/docs/precision-report.md` |
 | | 最终性能验收报告 | `operators/{operator_name}/docs/performance-report.md` |
 | **第四阶段** | 算子 README | `operators/{operator_name}/README.md` |
@@ -105,6 +111,7 @@ TEST.md
 │   │   ├── CMakeLists.txt              # C++ 测试构建配置
 │   │   ├── run.sh                      # 测试执行脚本（支持 --torch 选项）
 │   │   ├── test_aclnn_{operator_name}.cpp  # C++ 测试主程序
+│   │   ├── results/                    # 测试执行证据；调试/复现结果不得覆盖主证据
 │   │   ├── torch/                      # PyTorch 接入测试（可选）
 │   │   │   ├── CMakeLists.txt          # PyTorch 适配层构建配置
 │   │   │   ├── test.py                 # 测试入口（用例定义 + 调度）
@@ -114,14 +121,17 @@ TEST.md
 │   │   └── testcases/
 │   │       ├── L0_test_cases.csv
 │   │       ├── L1_test_cases.csv
+│   │       ├── L2_test_cases.csv
 │   │       └── L*_coverage_report.yaml
- │   └── reports/                           # 中间态报告
+│   ├── whitebox/                       # 白盒 skill 产物，内部结构以 ascendc-whitebox-design 为准
+│   └── reports/                           # 中间态报告
 │       ├── iter1-integration-report.md    # 迭代一联调
 │       ├── iter1-acceptance-report.md     # 迭代一验收
 │       ├── iter2-integration-report.md
 │       ├── iter2-acceptance-report.md
-│       └── iter3-integration-report.md
-│       └── iter3-acceptance-report.md
+│       ├── iter3-integration-report.md
+│       ├── iter3-acceptance-report.md
+│       └── ...                         # validator 所需测试证据汇总
 ├── issues/                              # 问题解决记录
 │   ├── issue_{YYYYMMDD}_{关键词}.md    # 单个问题记录
 │   └── ...

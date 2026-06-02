@@ -306,6 +306,8 @@ graph TB
 - [ ] 测试设计文档已生成
 - [ ] 测试用例表已生成
 - [ ] 测试设计文档包含「spec.yaml 测试映射」，并按 `ascendc-ops-tester` 的字段所有权规则处理 REQUIREMENTS/spec 冲突
+- [ ] 黑盒用例按 `ascendc-st-design` 完整流程和默认目标产出
+- [ ] 黑盒机器证据满足 workflow validator 校验要求
 
 **失败处理**：
 - 状态=❌（含日志摘要中报告 REQUIREMENTS/spec 冲突）→ **流程终止**，向用户报告冲突详情。spec 已通过校验 + 人工 review，若 REQUIREMENTS 仍与 spec-owned 字段冲突，表明 REQUIREMENTS 未随 spec 更新，属于流程异常，禁止自动修复
@@ -602,6 +604,16 @@ graph TB
 
 **说明**：迭代验收使用 **C++ 测试**（快速验证），报告放 `tests/reports/`
 
+**开发期黑盒证据校验**：迭代三验收通过后，进入阶段三前必须执行：
+
+校验器仅使用 Python 标准库，无需安装额外依赖。
+
+```bash
+python3 workflow/resources/validate_workflow_state.py --stage cp2 --operator-dir operators/{operator_name}
+```
+
+输出必须包含 `STATUS: PASSED`。该校验以 validator 定义的开发期测试证据为准；Markdown 摘要或 LOG.md 当前阶段文字不能替代机器证据。校验失败时，只围绕校验器列出的具体差距修复并重跑；最多 2 轮，仍失败则创建阻塞 issue 并停止推进。
+
 **主 Agent 日志更新**：
 - 更新 LOG.md "开发状态"表格中对应任务的状态（⬜ → ✅）+ 填写完成时间
 - 更新"交付物清单"中新增文件的路径和状态
@@ -612,11 +624,35 @@ graph TB
 
 ---
 
+# 阶段二与阶段三之间：黑盒/白盒用例汇合
+
+## W 任务：白盒测试生成与用例汇合
+
+**触发时机**：迭代三验收通过、开发期黑盒证据校验通过后，最终精度验收前
+
+**白盒工作流**：[详细调用参数](resources/task-prompts.md#白盒测试生成与用例汇合主-agent-编排)
+
+**生成方式**：主 Agent 按 `ascendc-whitebox-design` skill 启动白盒子 Agent/子任务；白盒生成要求以该 skill 定义的工作流为准，主 Agent 只提供算子目录、平台和源码/文档/UT/ST 上下文。
+
+**执行验收**：使用白盒 skill 输出的结果进行验收，并通过 workflow validator 对账。
+
+**验收标准**：
+- [ ] 白盒子任务明确使用 `ascendc-whitebox-design` skill 定义的工作流
+- [ ] 白盒结果已产出并满足该 skill 的交付要求
+- [ ] 相关测试证据通过 workflow validator 对账
+
+**主 Agent 日志更新**：
+- 更新 LOG.md "开发状态"表格中白盒任务状态
+
+**Git 操作**：`git add operators/{operator_name}/ && git commit -m "test({operator_name}): 白盒测试生成与用例汇合完成"`
+
+---
+
 # 阶段二与阶段三之间：PyTorch ST 测试开发
 
 ## C 任务：PyTorch ST 测试开发
 
-**触发时机**：迭代三验收通过后，最终精度验收前
+**触发时机**：白盒测试生成与用例汇合完成后，最终精度验收前
 
 **Subagent**：`ascendc-ops-tester` - [详细调用参数](resources/task-prompts.md#pytorch-st-测试开发独立任务)
 
@@ -645,13 +681,27 @@ graph TB
 
 ## 3.1 最终精度验收
 
-**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过）+ C 任务（PyTorch ST 测试开发）已完成
+**进入条件**：迭代三验收通过（`iter3-acceptance-report.md` 状态 = ✅通过），且白盒测试生成与用例汇合完成
 
 **Subagent**：`ascendc-ops-tester` - [详细调用参数](resources/task-prompts.md#31-最终精度验收)
 
 **⚠️ 验收通过判定**：检查报告 `**状态**:` 字段 = `✅通过`，ST通过率 = 100%（报告格式详见 task-prompts.md#31-最终精度验收）。**失败处理**：如状态 = `❌失败`，**禁止进入性能验收（即使用户要求继续）**，汇报用户决策（可能存在任务偏差）
 
 **说明**：最终精度验收使用 **PyTorch 测试**（L0+L1批量全面验证），报告放 `docs/`（最终交付物）
+
+**最终黑盒/白盒证据校验**：触发 CP3 前必须执行：
+
+```bash
+python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir operators/{operator_name}
+```
+
+输出必须包含 `STATUS: PASSED`。该校验以 validator 定义的最终测试证据为准；缺失、不一致、执行失败或 Markdown 数字与机器证据不一致时禁止触发 CP3。
+白盒检查 high/full case set。
+
+**CP3 Checklist**：
+- [ ] `docs/precision-report.md` 状态 = ✅通过
+- [ ] 最终测试执行与汇总报告状态 = ✅通过
+- [ ] workflow validator `--stage cp3` 输出 `STATUS: PASSED`
 
 **⚪ CP3 用户确认**：向用户展示验收结果，询问是否继续性能验收
 
