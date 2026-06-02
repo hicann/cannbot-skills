@@ -70,6 +70,7 @@ platform_ascendc::SocVersion socVer = ascendcPlatform.GetSocVersion();
 `references/` 按需加载：
 
 - **`npu-hardware-params.md`** — 硬件参数参考：各架构子型号一致参数、典型SKU示例、基于公开资料与经验值的规格
+- **`simt-arch-guide.md`** — SIMT 架构概念参考：线程层次结构、Warp调度机制、内存空间、UB分区、数据类型、函数调用层级、LAUNCH_BOUND与寄存器数量、SIMT与SIMD核心差异
 - **`npu-arch-guide.md`**：
   - **典型硬件参数与获取方式**：核数 / Buffer 容量典型值，`GetCoreNumA*` / `GetCoreMemSize` / `aclrtGetDeviceInfo` 接口用法（含硬编码反例）
   - **DAV_3510 微架构**：AI Core Buffer 层级、MTE 引擎、CV 数据通路改动、BufferID 同步

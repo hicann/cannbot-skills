@@ -220,6 +220,22 @@ Compute(x);
 
 ---
 
+## SIMT 精度调试
+
+SIMT 算子有独特的精度调试问题：DCache 一致性、核内共享内存同步等。
+
+详细说明见 [references/simt-precision-debug.md](references/simt-precision-debug.md)
+
+### SIMT 特有精度陷阱
+
+| 陷阱 | 症状 | 解决方案 |
+|-----|------|----------|
+| **DCache 一致性** | VF 外通过 Scalar 单点写 GM 后其他核读不到 | 使用 DataCacheCleanAndInvalid 刷新 |
+| **SIMT printf 调试** | 需要在 VF 内打印变量 | VF 内用 AscendC::Simt::printf，VF 外用 PRINTF |
+| **workspace 数据同步** | 多核通过 workspace 交换数据后读取不一致 | 在同步位置加 SyncAll() + SetScheduleMode(1) |
+
+---
+
 ## 调试策略层级
 
 ```

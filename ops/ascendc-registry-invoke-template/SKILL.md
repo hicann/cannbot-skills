@@ -28,6 +28,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
 | 多芯片开发 | `references/npu-arch-adapt.md` |
+| SIMT 算子开发 | `references/simt-engineering-guide.md` |
 
 #### ACLNN 接口开发指南
 

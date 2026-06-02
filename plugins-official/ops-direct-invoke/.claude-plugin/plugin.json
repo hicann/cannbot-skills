@@ -1,7 +1,7 @@
 {
   "name": "ops-direct-invoke",
   "description": "Ascend C Kernel 直调算子开发 Team。含完整工作流（设计→实现→审查→性能验收）、3 个专业 Agent 和工程模板。",
-  "version": "1.1.14",
+  "version": "1.2.0",
   "author": {
     "name": "CANNBot"
   },

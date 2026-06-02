@@ -1,7 +1,7 @@
 {
   "name": "triton-op-generator",
   "description": "Triton-Ascend 算子代码生成与优化 Team。包含 6 个专业 Skill和直接执行模式（CLAUDE.md/AGENTS.md），支持在当前会话中实时显示所有执行阶段。安装后需手动执行: ln -s ~/.claude/plugins/cache/cannbot/triton-op-generator/1.0.0/AGENTS.md ~/.claude/CLAUDE.md",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "CANNBot"
   },

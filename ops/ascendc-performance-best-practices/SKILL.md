@@ -22,6 +22,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 | Convolution 卷积类 | Conv2D, DepthwiseConv | — | 📋 规划中 |
 | NN 神经网络类 | FlashAttention, GroupNorm | — | 📋 规划中 |
 | Random 随机类 | RandomUniform, Dropout | — | 📋 规划中 |
+| SIMT 线程级算子 | 条件分支、离散索引等不规则操作 | DAV_3510 | ✅ [性能优化指南](reference/simt/optimization-guide.md) |
 
 > 未收录的算子族返回「该算子族优化知识暂未收录」。各族详细的优化类型、叠加关系、选型决策见该族 `reference/<family>/` 目录。
 
