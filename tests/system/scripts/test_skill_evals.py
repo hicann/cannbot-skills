@@ -11,6 +11,7 @@
 import json
 import logging
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,8 +21,10 @@ import pytest
 
 from conftest import (
     get_skill_path, get_skills_with_evals, load_evals_md, REPO_ROOT,
-    extract_review_json, get_opencode_text, strip_markdown_fence,
-    FRAMEWORK_DIR, SANDBOX_DIR
+    get_opencode_text, FRAMEWORK_DIR, SANDBOX_DIR,
+    parse_dimension_scores, parse_review_md,
+    validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
+    DIMENSION_ORDER, DIMENSION_MAX_SCORES,
 )
 from opencode_runner import OpencodeRunner
 from sandbox_manager import SandboxManager
@@ -116,6 +119,8 @@ class ValidationContext:
     generated_files: List[str] = field(default_factory=list)
     # 正向看护字段
     skill_name: str = ""
+    # 维度阈值覆盖（可选，None 则使用 conftest 中的默认值）
+    dim_thresholds: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -152,6 +157,27 @@ def extract_ai_text(full_output: str) -> str:
     return "\n".join(texts) if texts else "(no text output extracted)"
 
 
+def _find_assistant_text(messages: List[Dict[str, Any]]) -> Optional[str]:
+    """在会话消息列表中查找 assistant 角色的文本回复"""
+    for msg in reversed(messages):
+        if msg.get("info", {}).get("role") == "assistant":
+            parts = msg.get("parts", [])
+            texts = [p["text"] for p in parts if p.get("type") == "text" and p.get("text")]
+            if texts:
+                return "\n".join(texts)
+    return None
+
+
+def extract_ai_text_from_session(session_file: str) -> Optional[str]:
+    """从 opencode 导出的会话 JSON 中提取 AI 文本回复（流式输出提取失败的 fallback）"""
+    try:
+        with open(session_file, 'r', encoding='utf-8') as f:
+            session = json.load(f)
+        return _find_assistant_text(session.get("messages", []))
+    except Exception:
+        return None
+
+
 def extract_reasoning(full_output: str) -> str:
     """从 full_output 的 JSON 事件中提取 AI 思考过程和工具调用"""
     parts = []
@@ -172,25 +198,30 @@ def extract_reasoning(full_output: str) -> str:
 
 
 REVIEW_RUBRIC = """
-## 评分标准（总分 100，≥ 60 为通过）
+## 评分标准（总分 100，总分 ≥ 60 且各维度均不低于最低阈值方为通过）
 
-### 信息覆盖度（0-40 分）
+### 信息覆盖度（0-40 分）— 最低通过阈值：20 分
 - 是否完整覆盖了预期回复中的所有关键要点
 - 每遗漏一个重要要点扣 10-20 分
 
-### 技术准确性（0-30 分）
+### 技术准确性（0-30 分）— 最低通过阈值：15 分
 - 技术信息是否正确，无错误或误导
 - 命令、参数、版本号等信息是否准确
 
-### 回复质量（0-20 分）
+### 回复质量（0-20 分）— 最低通过阈值：10 分
 - 结构清晰、逻辑连贯
 - 表达简洁、直接回应用户问题
 - 无冗余或无关内容
 
-### Token 消耗（0-10 分）
+### Token 消耗（0-10 分）— 最低通过阈值：3 分
 - 回复长度合理，无冗余啰嗦
 - 思考过程中的工具调用是否必要、高效
 - 过多冗余内容或无效工具调用应扣分
+
+## 通过规则
+1. 总分 ≥ 60
+2. **四个维度均不低于各自的最低阈值**
+3. 任一维度不达标，应判定为不通过（status: "fail"）
 
 ## 评审注意事项
 - 不要求逐字匹配，语义覆盖即可
@@ -209,10 +240,14 @@ class ReviewPromptContext:
     eval_mode: str = "text"
     file_list: Optional[List[str]] = None
     sandbox_path: Optional[Path] = None
+    dim_thresholds: Optional[Dict[str, int]] = None
 
 
 def create_review_prompt(ctx: ReviewPromptContext) -> str:
-    """构造评测 session 的完整 prompt（评分机制 + 动态数据）"""
+    """构造评测 session 的完整 prompt（评分标准 + 动态数据 + 模板填写指引）。
+
+    评审 Agent 不再输出 JSON，而是读取并填写沙箱中的 review-template.md 文件。
+    """
     file_section = ""
     if ctx.eval_mode == "file_based" and ctx.file_list:
         file_paths = "\n".join(f"- {f}" for f in ctx.file_list)
@@ -225,13 +260,24 @@ def create_review_prompt(ctx: ReviewPromptContext) -> str:
 2. 根据文件实际内容，结合预期输出要点，进行评分
 3. 文件的代码质量、结构完整性、正确性和可读性都应作为评分依据
 """
+    # 若有非默认的维度阈值覆盖，注入到 prompt 中告知评审 AI
+    threshold_note = ""
+    if ctx.dim_thresholds:
+        parts = []
+        for dim in DIMENSION_ORDER:
+            if dim in ctx.dim_thresholds:
+                max_ = DIMENSION_MAX_SCORES.get(dim, "?")
+                parts.append(f"- {dim}: >= {ctx.dim_thresholds[dim]}（满分 {max_}）")
+        if parts:
+            threshold_note = "\n### 本用例的维度阈值（覆盖默认值）\n" + "\n".join(parts) + "\n"
+
     if ctx.eval_mode == "file_based" and ctx.file_list:
         header = "你是一个技能测试评审员。请对以下 AI 对话和生成的文件进行评分和评审。"
     else:
         header = "你是一个技能测试评审员。请对以下 AI 对话进行评分和评审。"
     return f"""{header}
 {REVIEW_RUBRIC}
-## 待评审对话
+{threshold_note}## 待评审对话
 
 ### 用户原始问题
 {ctx.original_prompt}
@@ -245,43 +291,16 @@ def create_review_prompt(ctx: ReviewPromptContext) -> str:
 ### 预期回复应覆盖的要点
 {ctx.expected_output}
 {file_section}
-请以 JSON 格式回复（只输出 JSON，不要其他内容）。重要：JSON 字符串值内如需使用双引号，必须用反斜杠转义（例如 \"示例\"），以免 JSON 解析失败。
-{{"status": "pass", "score": 85, "reason": "覆盖度(40/40): 完整覆盖预期要点; 准确性(25/30): ...; 质量(12/20): 回复简洁; Token(8/10): 无冗余"}}
-或
-{{"status": "fail", "score": 35, "reason": "覆盖度(10/40): 遗漏要点...; 准确性(10/30): ...; 质量(10/20): ...; Token(5/10): ..."}}"""
-
-
-def _extract_text_from_line(line: str) -> str:
-    """从单行 JSON 中提取文本"""
-    data = _parse_json_line(line)
-    if not data:
-        return ""
-    return get_opencode_text(data) or ""
-
-
-def parse_check_response(lines: List[str]) -> Dict[str, Any]:
-    """从评测 session 的输出行中提取 status/reason，兼容 markdown 代码块包裹"""
-    # 第一轮：按原有方式逐行解析
-    for line in reversed(lines):
-        text = _extract_text_from_line(line)
-        if text and ("pass" in text or "fail" in text):
-            result = extract_review_json(text)
-            if result:
-                return result
-
-    # 第二轮：汇总所有文本行后整体搜索 JSON
-    all_text = ""
-    for line in reversed(lines):
-        text = _extract_text_from_line(line)
-        if text:
-            all_text = text + "\n" + all_text
-
-    if all_text:
-        result = extract_review_json(all_text)
-        if result:
-            return result
-
-    return {"status": "error", "reason": "无法从评测 session 输出中解析判定结果"}
+## 评审操作步骤
+1. 使用 Read 工具读取当前目录下的 review-template.md 文件
+2. 根据上述评分标准进行全面评审
+3. 使用 Write 工具将评审结果写入 review-template.md，替换所有方括号占位符：
+   - [PASS/FAIL] 替换为实际判定结果（PASS 或 FAIL）
+   - [0-100] 替换为实际总分（0-100 的整数）
+   - 表格中 [0-40]、[0-30]、[0-20]、[0-10] 替换为各维度实际得分（整数）
+   - 表格中 [YES/NO] 替换为各维度是否通过（得分 >= 阈值则为 YES，否则为 NO）
+   - [detailed review text here] 替换为详细评审意见，逐一说明每个维度的得分理由和扣分依据
+4. 只替换方括号占位符及其内容，不要修改模板的其他结构（标题、表格、分隔线、HTML注释）"""
 
 
 def _run_review_session(
@@ -329,10 +348,15 @@ def _check_contains_pattern(
 def _check_not_contains_pattern(
         full_output: str, ai_text: str, pattern: str,
         eval_id: Optional[str], truncate_len: int) -> None:
-    """检查输出不应包含指定模式"""
-    if pattern in full_output:
+    """检查 AI 最终回复不应包含指定模式。
+
+    只检查 ai_text（AI 对用户的最终回复），不检查 full_output。
+    full_output 中包含 skill 加载时的参考文档内容（如 references/quick_ref.md），
+    这些文档中的术语不应被视为 AI 的回复内容。
+    """
+    if pattern in ai_text:
         pytest.fail(
-            f"[not_contains] 期望输出中不包含 \"{pattern}\"，但实际出现了。\n"
+            f"[not_contains] 期望 AI 回复中不包含 \"{pattern}\"，但实际出现了。\n"
             f"--- AI 回复 ---\n"
             f"{ai_text[:truncate_len]}\n"
             f"--- 结束 ---"
@@ -439,7 +463,7 @@ def _fail_skill_not_activated(eval_tag: str, expected: str,
 
 def _stream_event_matches_skill(data: Dict[str, Any], expected: str) -> bool:
     """旧流式格式兼容：单个事件是否命中目标 skill"""
-    if data.get("type") == "tool_use" and data.get("part", {}).get("tool", "") == "Skill":
+    if data.get("type") == "tool_use" and data.get("part", {}).get("tool", "").lower() == "skill":
         state = data.get("part", {}).get("state", {})
         return any(expected in str(v) for v in state.get("input", {}).values())
     if data.get("type") == "tool" and data.get("tool") == "skill":
@@ -468,20 +492,28 @@ def _validate_skill_activated(ctx: ExpectationContext) -> None:
         pytest.fail("[skill_activated] 缺少 pattern（期望的 skill 名称）")
 
     ses_path = ctx.session_export_path
+    activated: List[str] = []
     if ses_path and ses_path.exists():
         activated = _collect_activated_skills(_load_ses_data(ses_path))
         if expected in activated:
             return
-        eval_tag = f"(Eval {ctx.eval_id}) " if ctx.eval_id else ""
-        _fail_skill_not_activated(eval_tag, expected, activated)
+        if activated:
+            # AI 加载了其他 skill 而非目标 skill — 立即失败
+            eval_tag = f"(Eval {ctx.eval_id}) " if ctx.eval_id else ""
+            _fail_skill_not_activated(eval_tag, expected, activated)
 
     if _scan_stream_fallback(ctx.full_output, expected):
         return
 
-    pytest.fail(
-        f"正向看护失败：期望激活 skill \"{expected}\"，"
-        f"但在 session 输出中未找到任何 skill 加载事件。"
-    )
+    eval_tag = f"(Eval {ctx.eval_id}) " if ctx.eval_id else ""
+    if activated:
+        _fail_skill_not_activated(eval_tag, expected, activated)
+    else:
+        pytest.fail(
+            f"{eval_tag}正向看护失败：期望激活 skill \"{expected}\"，"
+            f"但 AI 没有加载任何 skill。"
+            f"请检查 prompt 是否能触发目标 skill。"
+        )
 
 
 def _validate_expectation(ctx: ExpectationContext) -> None:
@@ -529,54 +561,72 @@ def validate_output(ctx: ValidationContext) -> None:
             _validate_expectation(exp_ctx)
 
 
-def _try_extract_review_result(text: str) -> Optional[Dict[str, Any]]:
-    """尝试从文本中提取评审结果，兼容 opencode 双编码 JSON"""
-    result = extract_review_json(text)
-    if result:
-        return result
-    unescaped = text.replace('\\"', '"')
-    if unescaped != text:
-        return extract_review_json(unescaped)
+def _copy_review_template(sandbox_path: Optional[Path]) -> Optional[Path]:
+    """将 review-template.md 复制到沙箱目录，返回目标路径或 None。"""
+    template_src = FRAMEWORK_DIR / "config" / "review-template.md"
+    template_dst = sandbox_path / "review-template.md" if sandbox_path else None
+
+    if template_src.exists() and template_dst:
+        shutil.copy2(template_src, template_dst)
+        logger.debug("[TEMPLATE] Copied review template to %s", template_dst)
+        return template_dst
+    logger.warning("[TEMPLATE] review-template.md not found at %s", template_src)
     return None
 
 
-def _parse_review_from_export(export_data: dict) -> Dict[str, Any]:
-    """从导出的 review session 数据中解析评审结果"""
-    messages = export_data.get("messages", [])
-    for msg in reversed(messages):
-        for part in msg.get("parts", []):
-            if part.get("type") != "text":
-                continue
-            text = part.get("text", "")
-            if not text or not ("pass" in text.lower() or "fail" in text.lower()):
-                continue
-            result = _try_extract_review_result(text)
-            if result:
-                return result
+def _read_review_result(template_dst: Optional[Path]) -> Dict[str, Any]:
+    """从沙箱读取填写后的 review-template.md 并解析评审结果。"""
+    if template_dst and template_dst.exists():
+        try:
+            review_content = template_dst.read_text(encoding="utf-8")
+            return parse_review_md(review_content)
+        except (IOError, OSError) as e:
+            return {"status": "error", "reason": f"读取模板文件失败: {e}"}
+    return {"status": "error", "reason": "评审后沙箱中未找到 review-template.md"}
 
-    all_text = ""
-    for msg in reversed(messages):
-        for part in msg.get("parts", []):
-            if part.get("type") != "text":
-                continue
-            t = part.get("text", "")
-            if t:
-                all_text = t + "\n" + all_text
-    if all_text:
-        result = extract_review_json(all_text)
-        if result:
-            return result
 
-    return {"status": "error", "reason": "无法从导出文件中解析判定结果"}
+def _assert_review_passed(result: Dict[str, Any], ctx: ValidationContext) -> None:
+    """校验评审结果：检查 reason 存在性、维度阈值和 pass/fail 状态。"""
+    if not result.get("reason"):
+        assert False, (
+            f"Eval {ctx.eval_id}: review result missing reason | "
+            f"Review output: {json.dumps(result, ensure_ascii=False)}"
+        )
+
+    dim_thresholds = ctx.dim_thresholds or DEFAULT_DIMENSION_THRESHOLDS
+    dim_scores = parse_dimension_scores(result.get("dimensions"))
+    dim_check_msg = validate_dimension_scores(dim_scores, dim_thresholds, ctx.eval_id or "")
+
+    if result.get("status") == "pass" and dim_check_msg is None:
+        return
+    reasons = [result.get("reason", "unknown")] if result.get("status") != "pass" else []
+    if dim_check_msg:
+        reasons.append(dim_check_msg)
+    full_reason = " | ".join(reasons)
+    msg = (
+        f"Eval {ctx.eval_id}: expected_output check failed\n"
+        f"Reviewer reason: {full_reason}\n"
+        f"--- AI Response (by execution session) ---\n"
+        f"{ctx.ai_text[:ctx.truncate_len]}\n"
+        f"--- End AI Response ---"
+    )
+    assert False, msg
 
 
 def _validate_expected_output(ctx: ValidationContext) -> None:
-    """验证 AI 回复是否符合预期输出"""
-    reasoning = extract_reasoning(ctx.full_output)
+    """验证 AI 回复是否符合预期输出（基于 MD 模板评审）。
 
+    流程:
+    1. 提取 AI 思考过程
+    2. 复制模板到沙箱 → 构建评审 prompt → 运行评审 session
+    3. 读取填写后的 MD 模板 → parse_review_md() → 程序化阈值校验
+    """
+    reasoning = extract_reasoning(ctx.full_output)
     logger.debug("--- AI REASONING ---")
     logger.debug(reasoning[:2000] if reasoning else "(无思考过程)")
     logger.debug("--- END AI REASONING ---")
+
+    template_dst = _copy_review_template(ctx.sandbox_path)
 
     review_prompt = create_review_prompt(ReviewPromptContext(
         original_prompt=ctx.original_prompt,
@@ -586,6 +636,7 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
         eval_mode=ctx.eval_mode,
         file_list=ctx.generated_files if ctx.eval_mode == "file_based" else None,
         sandbox_path=ctx.sandbox_path if ctx.eval_mode == "file_based" else None,
+        dim_thresholds=ctx.dim_thresholds,
     ))
 
     logger.debug("--- REVIEW PROMPT ---")
@@ -595,41 +646,11 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
     review_lines, review_error = _run_review_session(
         ctx.opencode_runner, review_prompt, ctx.session_name
     )
-
     assert not review_error, f"Eval {ctx.eval_id}: review session error - {review_error}"
 
-    export_file = str(ctx.opencode_runner.session_dir / f"{ctx.session_name}_review_ses.json")
-    export_result = ctx.opencode_runner.export_session_data(output_file=export_file)
-
-    # 优先从导出数据解析（更稳定），流式行作为回退
-    review_data = export_result.get("data") if export_result.get("success") else None
-    if review_data:
-        result = _parse_review_from_export(review_data)
-    else:
-        result = {"status": "error", "reason": "export_session_data 失败"}
-
-    if result.get("status") == "error":
-        logger.info("[REVIEW] export parse failed, falling back to streaming parse")
-        result = parse_check_response(review_lines)
-
+    result = _read_review_result(template_dst)
     logger.info("[REVIEW RESULT] %s", json.dumps(result, ensure_ascii=False))
-
-    if not result.get("reason"):
-        assert False, (
-            f"Eval {ctx.eval_id}: review result missing reason | "
-            f"Review output: {json.dumps(result, ensure_ascii=False)}"
-        )
-
-    if result.get("status") != "pass":
-        reason = result["reason"]
-        msg = (
-            f"Eval {ctx.eval_id}: expected_output check failed\n"
-            f"Reviewer reason: {reason}\n"
-            f"--- AI Response (by execution session) ---\n"
-            f"{ctx.ai_text[:ctx.truncate_len]}\n"
-            f"--- End AI Response ---"
-        )
-        assert False, msg
+    _assert_review_passed(result, ctx)
 
 
 def _resolve_distractor_dirs(distractor_names: List[str], skill: str,
@@ -668,14 +689,14 @@ def pytest_generate_tests(metafunc):
     if "eval_case" not in metafunc.fixturenames:
         return
 
-    skill_name = metafunc.config.getoption("--skill", None)
+    skill_names = metafunc.config.getoption("--skill", None)
     eval_id = metafunc.config.getoption("--eval-id", None)
 
     test_cases: List[Dict[str, Any]] = []
     ids: List[str] = []
 
     for skill in get_skills_with_evals():
-        if skill_name and skill != skill_name:
+        if skill_names and skill not in skill_names:
             continue
         evals_data = load_evals_md(skill)
         if not evals_data:
@@ -757,7 +778,9 @@ def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
     for ds_dir in (distractor_skill_dirs or []):
         sandbox_manager.create_skill_link(sandbox_path, ds_dir)
     logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
+    model = os.environ.get("EVAL_MODEL")
     opencode_runner = OpencodeRunner(
+        model=model,
         keep_session=True,
         verbose=True,
         workdir=str(sandbox_path),
@@ -766,10 +789,35 @@ def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
     return opencode_runner, sandbox_path
 
 
+def _detect_model_from_session(ses_file: str) -> Optional[str]:
+    """从导出的 session JSON 中自动检测实际使用的模型名称"""
+    try:
+        with open(ses_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        model_id = data.get("info", {}).get("model", {}).get("id")
+        if model_id:
+            logger.info("[自动检测] 当前 session 使用的模型: %s", model_id)
+        return model_id
+    except (json.JSONDecodeError, IOError, KeyError):
+        return None
+
+
 def _check_token_budget(eval_data: Dict[str, Any], eval_id, opencode_runner,
                         session_name: str) -> None:
     """检查 token 消耗是否超过硬性阈值"""
     max_tokens = eval_data.get("max_tokens")
+
+    # 始终从 session 导出数据自动检测实际使用的模型名称，
+    # 按模型匹配专用的 Max Tokens (<model>)。
+    # 检测到的模型是 opencode 实际使用的模型（如 deepseek-v4-flash-free），
+    # 可能与 --eval-model 传入的名称不同（opencode 可能解析为具体版本）。
+    ses_file = str(opencode_runner.session_dir / f"{session_name}_ses.json")
+    model_name = _detect_model_from_session(ses_file)
+    if model_name:
+        per_model = eval_data.get("max_tokens_by_model", {})
+        if model_name in per_model:
+            max_tokens = per_model[model_name]
+
     if max_tokens is None:
         return
     from session_stats import SessionStats
@@ -820,11 +868,40 @@ def _unpack_eval_inputs(eval_case: Dict[str, Any]) -> _EvalInputs:
     )
 
 
+def _run_and_extract_text(opencode_runner, prompt: str, cwd: str,
+                         skill_name: str, eval_id: str) -> tuple:
+    """执行 opencode 并提取 AI 文本回复（含 fallback 逻辑）"""
+    session_name = f"{skill_name}_case_{eval_id}"
+    full_output, error_output, session_file, success = _collect_exec_output(
+        opencode_runner, prompt, cwd, session_name,
+    )
+    assert success, f"Eval {eval_id}: opencode run failed - {error_output}"
+
+    ai_text = extract_ai_text(full_output)
+
+    session_export_path = str(opencode_runner.session_dir / f"{session_name}_ses.json")
+    opencode_runner.export_session_data(output_file=session_export_path)
+
+    # Fallback: 若从流式输出未能提取到文本，从已导出的会话 JSON 中提取
+    # （不触发 skill 时 opencode 流式事件格式可能不含 type:text，导致 extract_ai_text 返回占位符）
+    if "(no text output extracted)" in ai_text:
+        session_text = extract_ai_text_from_session(session_export_path)
+        if session_text:
+            ai_text = session_text
+            logger.warning("FALLBACK: 从会话导出文件中提取到 AI 文本 (eval %s)", eval_id)
+
+    return full_output, session_name, session_file, ai_text
+
+
 def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     if os.environ.get("REPORT_ONLY") == "1":
         logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)",
                     eval_case["skill_name"], eval_case["eval"].get("id"))
         return
+
+    eval_data = eval_case["eval"]
+    if eval_data.get("disabled"):
+        pytest.skip(f"Eval {eval_data.get('id')} marked as Disabled - skipping")
 
     inputs = _unpack_eval_inputs(eval_case)
 
@@ -836,20 +913,14 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
                           inputs.expected_output,
                           distractor_skill_dirs=inputs.distractor_skill_dirs)
 
-    session_name = f"{inputs.skill_name}_case_{inputs.eval_id}"
-    full_output, error_output, session_file, success = _collect_exec_output(
-        opencode_runner, inputs.prompt, ".", session_name,
+    full_output, session_name, session_file, ai_text = _run_and_extract_text(
+        opencode_runner, inputs.prompt, ".", inputs.skill_name, inputs.eval_id,
     )
-    assert success, f"Eval {inputs.eval_id}: opencode run failed - {error_output}"
 
-    ai_text = extract_ai_text(full_output)
     logger.debug("--- AI Response (eval %s) ---", inputs.eval_id)
     logger.debug(ai_text[:1000])
     logger.debug("--- End AI Response ---")
 
-    opencode_runner.export_session_data(
-        output_file=str(opencode_runner.session_dir / f"{session_name}_ses.json")
-    )
     _check_token_budget(inputs.eval_data, inputs.eval_id, opencode_runner, session_name)
 
     ctx = ValidationContext(
@@ -867,6 +938,7 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
         generated_files=collect_generated_files(sandbox_path,
                                                 original_skill_dir=inputs.skill_dir),
         skill_name=inputs.skill_name,
+        dim_thresholds=inputs.eval_data.get("dim_thresholds"),
     )
     validate_output(ctx)
     logger.info("Session file: %s", session_file)

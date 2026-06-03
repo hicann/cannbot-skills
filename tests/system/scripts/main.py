@@ -9,15 +9,13 @@
 # -----------------------------------------------------------------------------------------------------------
 
 import argparse
-import json
 import logging
 import os
 import subprocess
 import sys
 import time
 import zipfile
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -25,38 +23,6 @@ import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class EvalResult:
-    eval_id: int
-    passed: bool
-    prompt: str
-    expected_output: str
-    actual_output: str = ""
-    error: str = ""
-    expectations: List[str] = field(default_factory=list)
-    expectations_met: List[str] = field(default_factory=list)
-    expectations_failed: List[str] = field(default_factory=list)
-
-
-@dataclass
-class EvalContext:
-    """封装评测执行所需的上下文参数"""
-    skill_name: str
-    eval_id: int
-    prompt: str
-    expected_output: str
-    expectations: List[str]
-    skill_dir: Path
-
-
-@dataclass
-class SkillEvalResult:
-    eval_id: int
-    passed: bool
-    error: str = ""
-    actual_output: str = ""
 
 
 class GateChecker:
@@ -71,7 +37,6 @@ class GateChecker:
         self.results_dir = self.test_skill_dir / "results"
         self.evals_cases_dir = self.test_skill_dir / "cases"
         self.config = self._load_config()
-        self.results: List[EvalResult] = []
 
     def get_skill_dir(self, skill_name: str) -> Optional[Path]:
         for skill_dir_rel in self.config.get("skill_dirs", ["skills"]):
@@ -130,96 +95,51 @@ class GateChecker:
             logger.error("Basic validation error: %s", e)
             return False
 
-    def run_skill_eval(self, skill_name: str) -> EvalResult:
-        """
-        skill 级别的验证，批量验证
-        """
+    def run_skills_eval(self, skill_names: List[str]) -> bool:
+        """一次 pytest 运行所有 skill 的 eval 用例，生成一份统一 HTML 报告"""
+        test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
+        if not test_script.exists():
+            logger.info("  test_skill_evals.py 不存在，跳过")
+            return True
 
-        skill_dir = self.get_skill_dir(skill_name)
-        if not skill_dir:
-            result = EvalResult(eval_id=0, passed=False, prompt="", expected_output="")
-            result.error = f"Skill directory not found: {skill_name}"
-            return result
-        skill_test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
-        # 复用单用例结果
-        result = EvalResult(eval_id=0, passed=False, prompt="", expected_output="")
-        if skill_test_script.exists():
-            try:
-                env = os.environ.copy()
-                env["SKILL_DIR"] = str(skill_dir)
-                if self.report_only:
-                    env["REPORT_ONLY"] = "1"
+        cmd = [sys.executable, "-m", "pytest", str(test_script)]
+        for s in skill_names:
+            cmd.extend(["--skill", s])
+        if self.eval_id:
+            cmd.extend(["--eval-id", self.eval_id])
 
-                cmd = [sys.executable, "-m", "pytest", str(skill_test_script), "--skill", skill_name]
-                if self.eval_id:
-                    cmd.extend(["--eval-id", self.eval_id])
-                cmd.extend([
-                    "--html=" + str(self.results_dir / (skill_name + "_evals_validation.html")),
-                    "--self-contained-html"
-                ])
-                if self._get_parallel_workers() != "1":
-                    cmd.extend(["-n", self._get_parallel_workers()])
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    env=env,
-                    timeout=1200,
-                    cwd=str(skill_dir)
-                )
-                if proc.returncode == 0:
-                    result.passed = True
-                else:
-                    result.error = proc.stderr or f"Exit code: {proc.returncode}"
-            except subprocess.TimeoutExpired:
-                result.error = "Test execution timed out"
-            except Exception as e:
-                result.error = str(e)
-        else:
-            result.passed = True
-            result.actual_output = f"No test script found for {skill_name}, skipping evaluation"
-        return result
+        beijing_tz = timezone(timedelta(hours=8))
+        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
+        report_path = self.results_dir / f"evals_validation_{timestamp}.html"
+        cmd.extend([f"--html={report_path}", "--self-contained-html"])
 
-    def run_single_eval(self, skill_name: str, eval_case: Dict[str, Any]) -> EvalResult:
-        """
-        按用例级别验证
-        """
-        eval_id = eval_case.get("id", 0)
-        prompt = eval_case.get("prompt", "")
-        expected_output = eval_case.get("expected_output", "")
-        expectations = eval_case.get("expectations", [])
-        result = EvalResult(
-            eval_id=eval_id, passed=False, prompt=prompt,
-            expected_output=expected_output, expectations=expectations,
-        )
-        skill_dir = self.get_skill_dir(skill_name)
-        if not skill_dir:
-            result.error = f"Skill directory not found: {skill_name}"
-            return result
-        skill_test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
-        if not skill_test_script.exists():
-            result.passed = True
-            result.actual_output = f"No test script found for {skill_name}, skipping evaluation"
-            return result
-        ctx = EvalContext(
-            skill_name=skill_name,
-            eval_id=eval_id,
-            prompt=prompt,
-            expected_output=expected_output,
-            expectations=expectations,
-            skill_dir=skill_dir,
-        )
-        passed, actual_output, error = self._execute_eval_cmd(ctx)
-        result.passed = passed
-        result.actual_output = actual_output
-        result.error = error
-        if passed:
-            result.expectations_met = expectations
-        else:
-            result.expectations_failed = expectations
-        return result
+        if self._get_parallel_workers() != "1":
+            cmd.extend(["-n", self._get_parallel_workers()])
+
+        env = os.environ.copy()
+        if self.report_only:
+            env["REPORT_ONLY"] = "1"
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env,
+                timeout=1200,
+                cwd=str(self.test_skill_dir / "scripts"),
+            )
+            if proc.returncode == 0:
+                return True
+            logger.error("评测执行失败 (exit code %d)", proc.returncode)
+            if proc.stderr:
+                logger.error(proc.stderr[-2000:])
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("评测执行超时 (1200s)")
+            return False
 
     def identify_changed_skills(self) -> List[str]:
         changed_skills = set()
@@ -296,9 +216,7 @@ class GateChecker:
         logger.info("AI 语义评测")
         logger.info("=" * 60)
 
-        eval_passed = 0
-        eval_total = 0
-
+        # Phase 1: 逐 skill 静态验证（无报告生成，保持逐 skill）
         for idx, skill_name in enumerate(changed_skills, 1):
             if not self.report_only:
                 logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
@@ -306,66 +224,32 @@ class GateChecker:
                     logger.info("基础验证失败，终止流程 (%.1fs)", time.time() - t_total)
                     return 0, 0
 
+        # Phase 2: 合并 AI 语义评测，生成一份报告
+        skills_with_evals = []
+        for skill_name in changed_skills:
             evals_data = self.load_evals(skill_name)
             eval_cases = evals_data.get("evals", []) if evals_data else []
+            if eval_cases:
+                skills_with_evals.append(skill_name)
+                logger.info("  %s — %d 个评测用例", skill_name, len(eval_cases))
 
-            if not eval_cases:
-                logger.info("[%d/%d] %s — 无评测用例，跳过", idx, len(changed_skills), skill_name)
-                continue
+        if not skills_with_evals:
+            logger.info("无评测用例的 skill，跳过 AI 语义评测")
+            return 0, 0
 
-            eval_total += 1
-            logger.info("[%d/%d] %s — %d 个评测用例", idx, len(changed_skills), skill_name, len(eval_cases))
+        eval_total = len(skills_with_evals)
+        logger.info("[合并] %d 个 skill 合并评测", eval_total)
 
-            skill_test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
-            if not skill_test_script.exists():
-                logger.info("  test_skill_evals.py 不存在，跳过")
-                continue
+        passed = self.run_skills_eval(skills_with_evals)
+        if passed:
+            logger.info("[合并] 全部通过 ✓ (%.1fs)", time.time() - t_total)
+        else:
+            logger.info("[合并] 存在失败 ✗ (%.1fs)", time.time() - t_total)
 
-            self.results = []
-            t_skill = time.time()
-            result = self.run_skill_eval(skill_name)
-            self.results.append(result)
-            elapsed = time.time() - t_skill
-
-            if result.passed:
-                eval_passed += 1
-            status = "✓ 通过" if result.passed else "✗ 失败"
-            logger.info("  %s (%.1fs)", status, elapsed)
-
-        return eval_passed, eval_total
-
-    def _execute_eval_cmd(self, ctx: EvalContext) -> tuple:
-        """Execute eval pytest command, return (passed, actual_output, error)."""
-        skill_test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
-        env = os.environ.copy()
-        env["EVAL_PROMPT"] = ctx.prompt
-        env["EVAL_EXPECTED"] = ctx.expected_output
-        env["EVAL_EXPECTATIONS"] = json.dumps(ctx.expectations)
-        env["SKILL_DIR"] = str(ctx.skill_dir)
-        cmd = [
-            sys.executable, "-m", "pytest", str(skill_test_script),
-            "--skill", ctx.skill_name, "--eval-id", str(ctx.eval_id),
-            "--html=" + str(self.results_dir / (ctx.skill_name + "_evals_validation.html")),
-            "--self-contained-html",
-        ]
-        if self._get_parallel_workers() != "1":
-            cmd.extend(["-n", self._get_parallel_workers()])
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True,
-                encoding='utf-8', errors='replace',
-                env=env, timeout=300, cwd=str(ctx.skill_dir),
-            )
-            if proc.returncode == 0:
-                return (True, proc.stdout, "")
-            return (False, proc.stdout, proc.stderr or f"Exit code: {proc.returncode}")
-        except subprocess.TimeoutExpired:
-            return (False, "", "Test execution timed out")
-        except Exception as exc:
-            return (False, "", str(exc))
+        return (eval_total if passed else 0), eval_total
 
     def _cleanup_previous_run(self):
-        """清除上次运行的 logs、results 目录，清理 sandboxes 目录内容"""
+        """清除上次运行的 logs 目录，清理 sandboxes 目录内容"""
         import shutil
 
         # sandboxes：先清理沙箱，避免 logs/results 清空后 sandbox 清理失败导致不一致状态
@@ -383,8 +267,8 @@ class GateChecker:
         else:
             sandboxes_dir.mkdir(parents=True, exist_ok=True)
 
-        # logs 和 results：清空重建
-        for dir_rel in ("logs", "results"):
+        # logs：清空重建；results 保留历史报告不删除
+        for dir_rel in ("logs",):
             target = self.test_skill_dir / dir_rel
             if target.exists():
                 shutil.rmtree(target)
@@ -469,8 +353,18 @@ def main():
         default=False,
         help="仅重新生成 HTML 报告（从已有沙箱 JSON 文件读取数据，不执行测试）"
     )
+    parser.add_argument(
+        "--eval-model",
+        default=None,
+        help="指定评测模型名称（如 claude-sonnet-4-20250514），"
+             "用于按模型匹配 Max Tokens 预算，默认走 Max Tokens 通用值"
+    )
 
     args = parser.parse_args()
+
+    # 将 --eval-model 写入环境变量，透传给 pytest 子进程
+    if args.eval_model:
+        os.environ["EVAL_MODEL"] = args.eval_model
 
     checker = GateChecker(args.repo_root, args.changed_files, args.eval_id,
                           args.parallel, args.report_only)

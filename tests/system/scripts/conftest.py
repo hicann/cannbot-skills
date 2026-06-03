@@ -31,6 +31,159 @@ EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
 SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
 
+# ── 评测维度阈值常量 ──────────────────────────────────────────────
+# AI 评审模型在 dimensions 字段中以结构化格式报告各维度得分
+DEFAULT_DIMENSION_THRESHOLDS: Dict[str, int] = {
+    "覆盖度": 20,   # max 40
+    "准确性": 15,   # max 30
+    "质量": 10,     # max 20
+    "Token": 3,     # max 10
+}
+
+DIMENSION_MAX_SCORES: Dict[str, int] = {
+    "覆盖度": 40,
+    "准确性": 30,
+    "质量": 20,
+    "Token": 10,
+}
+
+DIMENSION_ORDER: List[str] = ["覆盖度", "准确性", "质量", "Token"]
+
+# 维度名归一化映射：AI 可能输出的各种变体，统一映射为标准名
+DIMENSION_NAME_NORMALIZE = {
+    "覆盖度": "覆盖度",
+    "准确性": "准确性",
+    "技术准确性": "准确性",
+    "质量": "质量",
+    "回复质量": "质量",
+    "Token": "Token",
+    "Token消耗": "Token",
+    "Token 消耗": "Token",
+    "token消耗": "Token",
+    "token 消耗": "Token",
+    "token": "Token",
+}
+
+
+def parse_dimension_scores(dimensions: Optional[Dict] = None) -> Dict[str, int]:
+    """从 AI 评审结果 dimensions 字段解析各维度得分。
+
+    Input: {"覆盖度": {"score": 38, "max": 40}, "准确性": {"score": 27, "max": 30}, ...}
+    Output: {"覆盖度": 38, "准确性": 27, "质量": 15, "Token": 8}
+    """
+    if not dimensions:
+        return {}
+    scores: Dict[str, int] = {}
+    for dim_name, dim_data in dimensions.items():
+        normalized = DIMENSION_NAME_NORMALIZE.get(dim_name, dim_name)
+        if isinstance(dim_data, dict) and "score" in dim_data:
+            try:
+                scores[normalized] = int(dim_data["score"])
+            except (ValueError, TypeError):
+                continue
+    return scores
+
+
+def validate_dimension_scores(
+    dim_scores: Dict[str, int],
+    thresholds: Dict[str, int],
+    eval_id: str = "",
+) -> Optional[str]:
+    """校验各维度分数是否达到阈值，返回错误信息或 None。"""
+    failures: List[str] = []
+    for dim, threshold in thresholds.items():
+        score = dim_scores.get(dim)
+        if score is None:
+            failures.append(f"{dim}: score not found in reason field")
+        elif score < threshold:
+            max_score = DIMENSION_MAX_SCORES.get(dim, "?")
+            failures.append(f"{dim} ({score}/{max_score}) 低于阈值 ({threshold})")
+    if failures:
+        tag = f"(Eval {eval_id}) " if eval_id else ""
+        return tag + "维度阈值检查不通过: " + "; ".join(failures)
+    return None
+
+
+def parse_review_md(content: str) -> Dict[str, Any]:
+    """从填写完成的评审模板 MD 文档中提取结构化评审结果。
+
+    解析 review-template.md 被评审 Agent 填写后的内容，
+    提取 Status、Total Score、各维度得分和 Review Comments。
+    返回与旧 JSON 格式兼容的 dict，可直接传给 parse_dimension_scores()
+    和 validate_dimension_scores() 进行程序化阈值校验。
+
+    Args:
+        content: 评审 Agent 填写后的 MD 模板全文。
+
+    Returns:
+        {
+            "status": "pass" | "fail" | "error",
+            "score": 85,
+            "dimensions": {
+                "覆盖度": {"score": 38, "max": 40},
+                "准确性": {"score": 27, "max": 30},
+                "质量": {"score": 15, "max": 20},
+                "Token": {"score": 8, "max": 10},
+            },
+            "reason": "详细评审意见文本...",
+        }
+    """
+    def _find(pattern, text, default=None, flags=0):
+        m = re.search(pattern, text, flags)
+        return m.group(1).strip() if m else default
+
+    # 1. 提取 Status
+    status_raw = _find(r'-\s*Status:\s*(PASS|FAIL)', content, flags=re.IGNORECASE)
+    status = status_raw.lower() if status_raw else "fail"
+
+    # 2. 提取 Total Score
+    score_raw = _find(r'-\s*Total\s*Score:\s*(\d+)', content, flags=re.IGNORECASE)
+    try:
+        score = int(score_raw) if score_raw else 0
+    except (ValueError, TypeError):
+        score = 0
+
+    # 3. 提取维度表格：匹配 | 维度名 | 得分 | 满分 | 阈值 | YES/NO |
+    dimensions = {}
+    _dim_table_re = re.compile(
+        r'\|\s*(覆盖度|准确性|质量|Token)\s*\|'
+        r'\s*(\d+)\s*\|'
+        r'\s*(\d+)\s*\|'
+        r'\s*\d+\s*\|'
+        r'\s*(YES|NO)\s*\|'
+    )
+    for row_match in _dim_table_re.finditer(content):
+        dim_name = row_match.group(1)
+        dim_score = int(row_match.group(2))
+        dim_max = int(row_match.group(3))
+        dimensions[dim_name] = {"score": dim_score, "max": dim_max}
+
+    # 补全缺失维度
+    for dim in DIMENSION_ORDER:
+        if dim not in dimensions:
+            dimensions[dim] = {"score": 0, "max": DIMENSION_MAX_SCORES.get(dim, 0)}
+
+    # 4. 提取 Review Comments（从 "## Review Comments" 到下一个 "## " 或 EOF）
+    reason = _find(r'## Review Comments\s*\n+(.*?)(?=\n## |\Z)', content, "", re.DOTALL)
+    reason = (reason or "").strip()
+    if not reason:
+        # Fallback: 无 lookahead 兼容
+        m = re.search(r'## Review Comments\s*\n+(.*)', content, re.DOTALL)
+        if m:
+            reason = m.group(1).strip()
+
+    # 5. 容错：若占位符完全未被填充，视为解析失败
+    if score == 0 and status == "fail" and not reason:
+        status = "error"
+        reason = "无法从模板文件中解析评审结果（占位符可能未被填充）"
+
+    return {
+        "status": status,
+        "score": score,
+        "dimensions": dimensions,
+        "reason": reason or "(no review comments found)",
+    }
+
 
 def load_config() -> Dict[str, Any]:
     if CONFIG_PATH.exists():
@@ -109,7 +262,7 @@ def pytest_configure(config):
 
 
 def pytest_addoption(parser):
-    parser.addoption("--skill", action="store", default=None, help="Run evals for specific skill")
+    parser.addoption("--skill", action="append", default=None, help="Run evals for specific skill(s)")
     parser.addoption("--eval-id", action="store", default=None, help="Run specific eval by ID")
 
 
@@ -268,6 +421,7 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .score-mid  { background: #fef3c7; color: #92400e; }
 .score-low  { background: #fee2e2; color: #991b1b; }
 .score-na   { color: #94a3b8; }
+.score-badge[title] { cursor: help; border-bottom: 1px dotted currentColor; }
 
 /* === Table === */
 #results-table {
@@ -552,9 +706,11 @@ def _parse_reviewer_reason_block(longrepr: str, eval_id: str) -> Optional[str]:
     """解析 reviewer reason 失败块"""
     if "expected_output check failed" not in longrepr:
         return None
+    # 在 "AssertionError" 之后搜索 "Reviewer reason"（断言报错消息，非源代码）
+    after_assert = longrepr.split("AssertionError", 1)[-1] if "AssertionError" in longrepr else longrepr
     reason_match = re.search(
-        r'Reviewer reason:\s*(.+?)(?:\n--- AI Response|\nassert\s|\nE\s+|\Z)',
-        longrepr, re.DOTALL
+        r'Reviewer reason:\s*(.+?)(?:\n--- AI Response|\n--- End AI Response|\Z)',
+        after_assert, re.DOTALL
     )
     reason = html_mod.escape(reason_match.group(1).strip()) if reason_match else "unknown"
     return (
@@ -792,16 +948,6 @@ def _parse_failure_to_html(longrepr: str, eval_id: str = "?") -> str:
     return '\n'.join(blocks)
 
 
-def strip_markdown_fence(text: str) -> str:
-    """去除 markdown 代码块包裹 ```json ... ```"""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
-    return cleaned
-
-
 def get_opencode_text(data: Dict[str, Any]) -> str:
     """从 opencode JSON 事件中提取文本内容"""
     return data.get("part", {}).get("text", "") or data.get("text", "")
@@ -819,93 +965,52 @@ def _build_log_block(label: str, content: str, css_class: str, is_code: bool = F
     )
 
 
+def _format_dimension_label(dim_scores: Dict[str, int]) -> str:
+    """构建维度分数展示标签字符串。
 
-def _repair_json(text: str) -> str:
-    """Try to repair AI-generated JSON with unescaped quotes inside string values.
-
-    Three common patterns from AI output:
-    1. Unicode Chinese double quotes (U+201C/U+201D) used for emphasis
-    2. ASCII double quotes (U+0022) placed between CJK characters
-    3. ASCII double quotes at CJK/Latin boundaries (e.g. "先安装Toolkit再安装Ops")
-
-    All break JSON parsing. Fix: replace with guillemets 《》.
+    格式: " | 覆盖度: 38/40 ✓ | 准确性: 27/30 ✓ | 质量: 15/20 ✓ | Token: 8/10 ✓"
     """
-    text = text.replace('\u201c', '\u300a')
-    text = text.replace('\u201d', '\u300b')
-    cjk = r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]'
-    # ASCII " between two CJK chars
-    text = re.sub(rf'(?<={cjk})"(?={cjk})', '\u300b', text)
-    # ASCII " at ASCII->CJK boundary (closing quote: Ops"\u52a0\u7c97)
-    text = re.sub(rf'(?<=[a-zA-Z0-9])"(?={cjk})', '\u300b', text)
-    # ASCII " at CJK->ASCII boundary (opening quote)
-    text = re.sub(rf'(?<={cjk})"(?=[a-zA-Z0-9])', '\u300a', text)
-    return text
+    if not dim_scores:
+        return ""
+    dim_parts = []
+    for dim in DIMENSION_ORDER:
+        s = dim_scores.get(dim)
+        max_ = DIMENSION_MAX_SCORES.get(dim, "?")
+        thresh = DEFAULT_DIMENSION_THRESHOLDS.get(dim, 0)
+        if s is not None:
+            mark = "✓" if s >= thresh else "✗"
+            dim_parts.append(f"{dim}: {s}/{max_} {mark}")
+    return " | " + " | ".join(dim_parts) if dim_parts else ""
 
 
-def _try_parse_review_json(candidate: str) -> Optional[Dict[str, Any]]:
-    """Try to parse a candidate string as a review JSON. Falls back to repair on failure."""
-    for attempt in (candidate, _repair_json(candidate)):
-        try:
-            result = json.loads(attempt)
-            if result.get("status") in ("pass", "fail"):
-                return result
-        except (json.JSONDecodeError, KeyError, TypeError):
-            continue
-    return None
+def _build_review_html_from_template(template_path: Path) -> tuple:
+    """读取并解析 review-template.md，构建评审结果 HTML 卡片。
 
-
-def _find_json_by_depth(text: str) -> Optional[str]:
-    """用括号深度追踪法提取第一个完整 JSON 对象。
-
-    正确处理字符串值内的花括号（如 ${ASCEND_HOME_PATH}），
-    避免 } 在内层被误判为 JSON 结束。
+    Returns:
+        (review_html: str, score: int | None, dim_scores: dict) 元组。
     """
-    start = text.find('{')
-    if start < 0:
-        return None
-    depth = 0
-    in_string = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if ch == '"' and (i == 0 or text[i - 1] != '\\'):
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return None
+    if not template_path.exists():
+        return "", None, {}
+    try:
+        review_content = template_path.read_text(encoding="utf-8")
+        result = parse_review_md(review_content)
+    except (IOError, OSError):
+        logger.warning("Failed to read review template from %s", template_path)
+        return "", None, {}
 
+    status = result.get("status", "fail")
+    score = result.get("score")
+    reason = result.get("reason", "")
+    dim_scores = parse_dimension_scores(result.get("dimensions"))
 
-def extract_review_json(text: str) -> Optional[Dict[str, Any]]:
-    """从文本中提取评测结果 JSON，兼容 markdown 代码块和裸 JSON"""
-    # 策略1: ```json ... ```
-    for m in re.finditer(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL):
-        result = _try_parse_review_json(m.group(1).strip())
-        if result:
-            return result
-    # 策略2: 括号深度追踪（兼容字符串值内的 { }）
-    json_str = _find_json_by_depth(text)
-    if json_str:
-        result = _try_parse_review_json(json_str)
-        if result:
-            return result
-    # 策略3: 裸 JSON 对象含 "status": "pass"/"fail"（回退，兼容无外围文本的简单 JSON）
-    for m in re.finditer(r'\{[^{}]*"status"\s*:\s*"(?:pass|fail)"[^{}]*\}', text, re.DOTALL):
-        result = _try_parse_review_json(m.group())
-        if result:
-            return result
-    # 策略4: 去 markdown 围栏后解析全文
-    cleaned = strip_markdown_fence(text)
-    if cleaned != text:
-        result = _try_parse_review_json(cleaned)
-        if result:
-            return result
-    return None
+    cls = "log-review-pass" if status == "pass" else "log-review-fail"
+    label = "评测通过" if status == "pass" else "评测未通过"
+    if score is not None:
+        label += f" ({score}/100)"
+    label += _format_dimension_label(dim_scores)
+
+    review_html = _build_log_block(label, reason if reason else status, cls)
+    return review_html, score, dim_scores
 
 
 def _get_text_from_parts(parts: List[Dict]) -> str:
@@ -926,59 +1031,6 @@ def _load_json_file(file_path: Path) -> Dict[str, Any]:
             return json.load(f)
     except (json.JSONDecodeError, IOError):
         return {}
-
-
-def _extract_expected_points_block(review_messages: List[Dict]) -> Optional[str]:
-    """从评测消息中提取预期要点块"""
-    if not review_messages:
-        return None
-    user_parts = review_messages[0].get("parts", [])
-    review_prompt_text = _get_text_from_parts(user_parts)
-    m = re.search(
-        r'###\s+预期回复应覆盖的要点\s*\n(.*?)(?:\n###|\Z)',
-        review_prompt_text, re.DOTALL
-    )
-    if m and m.group(1).strip():
-        return _build_log_block("预期要点", m.group(1), "log-expected-output")
-    return None
-
-
-def _extract_review_result_block(part: Dict) -> Optional[tuple]:
-    """从单个 part 中提取评测结果，返回 (block, score) 或 None"""
-    if part.get("type") != "text":
-        return None
-    text = get_opencode_text(part)
-    result = extract_review_json(text)
-    if not result:
-        return None
-    status = result.get("status", "fail")
-    score = result.get("score")
-    reason = result.get("reason", "")
-    cls = "log-review-pass" if status == "pass" else "log-review-fail"
-    label = "评测通过" if status == "pass" else "评测未通过"
-    if score is not None:
-        label += f" ({score}/100)"
-    block = _build_log_block(label, reason if reason else status, cls)
-    return block, score
-
-
-def _extract_review_blocks(review_messages: List[Dict]) -> tuple:
-    """从评测 session 消息中提取预期要点和评测结果，返回 (blocks, score)"""
-    blocks = []
-    score = None
-
-    expected_block = _extract_expected_points_block(review_messages)
-    if expected_block:
-        blocks.append(expected_block)
-
-    for msg in review_messages[1:]:
-        for part in msg.get("parts", []):
-            result = _extract_review_result_block(part)
-            if result:
-                blocks.append(result[0])
-                return blocks, result[1]
-
-    return blocks, score
 
 
 def _extract_prompt_block(ses_messages: List[Dict]) -> Optional[str]:
@@ -1035,38 +1087,31 @@ def _extract_session_blocks(ses_messages: List[Dict]) -> List[str]:
     return blocks
 
 
-def _build_phase2_html_from_json(skill_name: str, eval_id):
-    """从 sandboxes 目录下的 JSON 文件解析测试交互信息，生成 HTML 卡片。
-    返回 (html: str, score: int | None) 元组。"""
-    # 新路径：sandboxes/<skill>_eval_<id>/logs/
-    sandbox_logs_dir = SANDBOX_DIR / f"{skill_name}_eval_{eval_id}" / "logs"
+def _build_phase2_html_from_md(skill_name: str, eval_id):
+    """从 sandbox 目录下的 review-template.md 解析评测结果，生成 HTML 卡片。
 
-    ses_file = sandbox_logs_dir / f"{skill_name}_case_{eval_id}_ses.json"
-    review_file = sandbox_logs_dir / f"{skill_name}_case_{eval_id}_review_ses.json"
+    直接读取评审 Agent 填写后的 MD 模板文件解析评审结果。
 
-    # 回退：尝试从旧的 LOGS_DIR 读取（兼容旧数据）
-    if not review_file.exists():
+    Args:
+        skill_name: skill 名称。
+        eval_id: 评测用例 ID。
+
+    Returns:
+        (html: str, score: int | None, dim_scores: dict) 元组。
+    """
+    sandbox_dir = SANDBOX_DIR / f"{skill_name}_eval_{eval_id}"
+
+    # ── 读取填写后的 review-template.md 并构建评审卡片 ──
+    template_path = sandbox_dir / "review-template.md"
+    review_html, score, dim_scores = _build_review_html_from_template(template_path)
+
+    # ── 读取执行 session JSON（用于 Prompt、思考过程、回复展示）──
+    ses_file = sandbox_dir / "logs" / f"{skill_name}_case_{eval_id}_ses.json"
+    if not ses_file.exists():
         ses_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_ses.json"
-        review_file = LOGS_DIR / f"{skill_name}_case_{eval_id}_review_ses.json"
-        if not review_file.exists():
-            return "", None
-
-    review_data = _load_json_file(review_file)
-    review_messages = review_data.get("messages", [])
-    # 兼容 raw_output 包装格式（opencode export 超时时会包裹为 {"raw_output": stdout}）
-    if not review_messages and "raw_output" in review_data:
-        try:
-            raw = json.loads(review_data["raw_output"])
-            review_messages = raw.get("messages", [])
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    review_blocks, score = _extract_review_blocks(review_messages)
 
     ses_data = _load_json_file(ses_file)
     ses_messages = ses_data.get("messages", [])
-    # 兼容 raw_output 包装格式：opencode export 输出非合法 JSON 时
-    # opencode_runner 会将其包裹为 {"raw_output": stdout} 字符串
     if not ses_messages and "raw_output" in ses_data:
         try:
             raw = json.loads(ses_data["raw_output"])
@@ -1075,8 +1120,28 @@ def _build_phase2_html_from_json(skill_name: str, eval_id):
             pass
     session_blocks = _extract_session_blocks(ses_messages)
 
-    blocks = session_blocks[:1] + review_blocks + session_blocks[1:]
-    return '\n'.join(blocks), score
+    # ── 从执行 session 提取预期要点用于展示 ──
+    expected_block = None
+    if ses_messages:
+        user_parts = ses_messages[0].get("parts", [])
+        prompt_text = _get_text_from_parts(user_parts)
+        m = re.search(
+            r'###\s+预期回复应覆盖的要点\s*\n(.*?)(?:\n###|\Z)',
+            prompt_text, re.DOTALL
+        )
+        if m and m.group(1).strip():
+            expected_block = _build_log_block("预期要点", m.group(1), "log-expected-output")
+
+    # ── 组装 HTML 卡片 ──
+    blocks = session_blocks[:1]
+    if expected_block:
+        blocks.append(expected_block)
+    if review_html:
+        blocks.append(review_html)
+    if len(session_blocks) > 1:
+        blocks.extend(session_blocks[1:])
+
+    return '\n'.join(blocks), score, dim_scores
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1084,7 +1149,7 @@ def _build_phase2_html_from_json(skill_name: str, eval_id):
 # ═══════════════════════════════════════════════════════════════
 
 def pytest_html_report_title(report):
-    report.title = "Skill Test Report"
+    report.title = "Skills Test Report"
 
 
 def pytest_html_results_summary(prefix, summary, postfix, session):
@@ -1119,13 +1184,15 @@ def pytest_html_results_table_row(report, cells):
 
     # 评测得分列 — 插入在描述之后、Test 之前
     score = getattr(report, '_eval_score', None)
+    dim_scores = getattr(report, '_eval_dim_scores', None)
     if score is None:
         # Fallback for xdist: _eval_score is a custom attr not serialized
         # between worker and master, but user_properties IS transported.
         for key, val in getattr(report, 'user_properties', []) or []:
             if key == 'eval_score':
                 score = val
-                break
+            elif key == 'eval_dim_scores':
+                dim_scores = json.loads(val)
     if score is not None:
         if score >= 80:
             score_cls = "score-high"
@@ -1133,7 +1200,13 @@ def pytest_html_results_table_row(report, cells):
             score_cls = "score-mid"
         else:
             score_cls = "score-low"
-        score_html = f'<span class="score-badge {score_cls}">{score}</span>'
+        # 构建 tooltip 展示各维度分数详情
+        tooltip = _format_dimension_label(dim_scores).lstrip(" | ")
+        score_html = (
+            f'<span class="score-badge {score_cls}"'
+            f' title="{html_mod.escape(tooltip)}"'
+            f'>{score}</span>'
+        )
     else:
         score_html = f'<span class="score-badge score-na">&mdash;</span>'
     cells.insert(3, f'<td class="col-score">{score_html}</td>')
@@ -1172,15 +1245,18 @@ def pytest_runtest_logreport(report):
             'log-block' in (item.get('content', '') if isinstance(item, dict) else getattr(item, 'content', ''))
             for item in extra_items
         )
-        phase2_html, score = _build_phase2_html_from_json(skill_name, eval_id)
+        phase2_html, score, dim_scores = _build_phase2_html_from_md(skill_name, eval_id)
         if phase2_html and not has_phase2:
             extra_items.append(extras.html(phase2_html))
 
         if score is not None and getattr(report, '_eval_score', None) is None:
             setattr(report, '_eval_score', score)
+            setattr(report, '_eval_dim_scores', dim_scores)
             if not hasattr(report, 'user_properties'):
                 report.user_properties = []
             report.user_properties.append(("eval_score", score))
+            if dim_scores:
+                report.user_properties.append(("eval_dim_scores", json.dumps(dim_scores, ensure_ascii=False)))
 
     if extra_items:
         report.extras = extra_items

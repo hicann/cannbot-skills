@@ -115,14 +115,10 @@ def _parse_expectations(exp_raw: str) -> List[Dict[str, str]]:
     return expectations
 
 
-def _parse_single_case(block: str, case_id: int, case_name: str,
+def _parse_case_config(case_config: Dict[str, str], case_id: int,
                        default_eval_mode: str) -> Dict[str, Any]:
-    """解析单个评测用例块"""
-    eval_case: Dict[str, Any] = {"id": case_id, "case_name": case_name}
-    sections = _parse_sections(block)
-
-    raw_config = sections.get("config", "")
-    case_config = _parse_config_lines(raw_config)
+    """解析 Config 块中的配置项，返回已填充的 eval_case 字典片段。"""
+    eval_case: Dict[str, Any] = {}
 
     case_eval_mode = case_config.get("eval mode", default_eval_mode)
     if case_eval_mode not in ("text", "file_based"):
@@ -138,10 +134,57 @@ def _parse_single_case(block: str, case_id: int, case_name: str,
         except ValueError:
             logger.warning("Invalid max_tokens '%s' in case %d, ignoring", max_tokens_str, case_id)
 
+    max_tokens_by_model = {}
+    for key, value in case_config.items():
+        m = re.match(r'^max tokens \(([^)]+)\)$', key)
+        if m:
+            model_name = m.group(1).strip()
+            try:
+                max_tokens_by_model[model_name] = int(value)
+            except ValueError:
+                logger.warning("Invalid max_tokens for model '%s': %s in case %d, ignoring",
+                               model_name, value, case_id)
+    if max_tokens_by_model:
+        eval_case["max_tokens_by_model"] = max_tokens_by_model
+
+    disabled_raw = case_config.get("disabled", "").strip().lower()
+    if disabled_raw in ("true", "yes", "1"):
+        eval_case["disabled"] = True
+
     distractor_raw = case_config.get("distractor skills", "")
     distractor_skills = [s.strip() for s in distractor_raw.split(";") if s.strip()]
     eval_case["distractor_skills"] = distractor_skills if distractor_skills else []
 
+    dim_thresholds = {}
+    _dim_threshold_config_keys = {
+        "覆盖度阈值": "覆盖度",
+        "准确性阈值": "准确性",
+        "质量阈值": "质量",
+        "token阈值": "Token",
+    }
+    for config_key, dim_name in _dim_threshold_config_keys.items():
+        val = case_config.get(config_key)
+        if val is not None:
+            try:
+                dim_thresholds[dim_name] = int(val)
+            except ValueError:
+                logger.warning("Invalid dimension threshold '%s=%s' in case %d, ignoring",
+                               config_key, val, case_id)
+    if dim_thresholds:
+        eval_case["dim_thresholds"] = dim_thresholds
+
+    return eval_case
+
+
+def _parse_single_case(block: str, case_id: int, case_name: str,
+                       default_eval_mode: str) -> Dict[str, Any]:
+    """解析单个评测用例块"""
+    sections = _parse_sections(block)
+    raw_config = sections.get("config", "")
+    case_config = _parse_config_lines(raw_config)
+
+    eval_case: Dict[str, Any] = {"id": case_id, "case_name": case_name}
+    eval_case.update(_parse_case_config(case_config, case_id, default_eval_mode))
     eval_case["prompt"] = sections.get("prompt", "")
     eval_case["expected_output"] = sections.get("expected output", "")
     eval_case["expectations"] = _parse_expectations(sections.get("expectations", ""))

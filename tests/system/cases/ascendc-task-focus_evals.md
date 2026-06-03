@@ -7,6 +7,8 @@ skill_name: ascendc-task-focus
 ## Config
 - Eval Mode: file_based
 - Max Tokens: 150000
+- Max Tokens (deepseek-v4-flash): 180000
+- Max Tokens (glm-5): 160000
 
 ## Prompt
 
@@ -23,30 +25,13 @@ skill_name: ascendc-task-focus
 
 ---
 
-# Case 2: 更新任务进度
-
-## Config
-- Max Tokens: 120000
-
-## Prompt
-
-我刚才完成了Add算子ST测试的「需求分析」步骤，请更新我的todo.md将需求分析标记为已完成并更新进度，然后在回复中展示更新后的todo.md内容。
-
-## Expected Output
-
-在回复中展示更新后的todo.md：需求分析步骤标记为- [x]（勾选完成），进度从0/N更新为1/N，如有## 已完成区域也一并展示，用户可直接看到更新后的完整状态
-
-## Expectations
-
-- [contains] - [x]
-- [contains] 需求分析
-
----
-
-# Case 3: 不应创建任务计划的场景
+# Case 2: 不应创建任务计划的场景
 
 ## Config
 - Max Tokens: 80000
+- Max Tokens (deepseek-v4-flash): 100000
+- Max Tokens (glm-5): 90000
+- Disabled: true
 
 ## Prompt
 
@@ -60,10 +45,13 @@ skill_name: ascendc-task-focus
 
 ---
 
-# Case 4: 创建精度调试任务计划
+# Case 3: 创建精度调试任务计划
 
 ## Config
 - Max Tokens: 200000
+- Max Tokens (deepseek-v4-flash): 240000
+- Max Tokens (glm-5): 220000
+- Disabled: true
 
 ## Prompt
 
@@ -77,10 +65,14 @@ Softmax算子FP16精度验证失败了，误差2.3e-2，需要定位并解决精
 
 ---
 
-# Case 5: 创建分阶段开发任务计划
+# Case 4: 创建分阶段开发任务计划
 
 ## Config
 - Max Tokens: 250000
+- Max Tokens (deepseek-v4-flash): 300000
+- Max Tokens (glm-5): 275000
+- Eval Mode: file_based
+- Disabled: true
 
 ## Prompt
 
