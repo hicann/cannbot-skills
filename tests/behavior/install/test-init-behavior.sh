@@ -571,6 +571,70 @@ scenario_global_opencode() {
     # Verify OpenCode can discover installed content
     verify_opencode_discovery "$config_root"
 
+    # -------------------------------------------------------------------------
+    # Safe-install assertions (idempotency + backup)
+    # -------------------------------------------------------------------------
+
+    # Idempotency: re-run init.sh with existing config → no backup created
+    local idempotent_output
+    local idempotent_exit=0
+    idempotent_output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global opencode <<< "y" 2>&1) || idempotent_exit=$?
+    if [ "$idempotent_exit" -eq 0 ]; then
+        print_pass "Idempotent re-run exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "Idempotent re-run exited with code $idempotent_exit"
+        echo "$idempotent_output" | tail -10
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local bak_count
+    bak_count=$(find "$config_root" -maxdepth 1 -name 'AGENTS.md.bak.*' 2>/dev/null | wc -l)
+    if [ "$bak_count" -eq 0 ]; then
+        print_pass "Idempotent re-run: no AGENTS.md backup created"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "Idempotent re-run: unexpected AGENTS.md backup found ($bak_count)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Backup trigger: pre-write custom content → backup created on re-run
+    # Only test teams that have safe_install_file (skip legacy init.sh)
+    if [ -f "$config_root/AGENTS.md" ] && grep -q 'safe_install_file()' "$INIT_SCRIPT" 2>/dev/null; then
+        echo "# User custom header" > "$config_root/AGENTS.md"
+        echo "custom user content" >> "$config_root/AGENTS.md"
+
+        local backup_output
+        local backup_exit=0
+        backup_output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global opencode <<< "y" 2>&1) || backup_exit=$?
+        if [ "$backup_exit" -eq 0 ]; then
+            print_pass "Backup-trigger re-run exited with code 0"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "Backup-trigger re-run exited with code $backup_exit"
+            echo "$backup_output" | tail -10
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+
+        bak_count=$(find "$config_root" -maxdepth 1 -name 'AGENTS.md.bak.*' 2>/dev/null | wc -l)
+        if [ "$bak_count" -ge 1 ]; then
+            print_pass "Backup-trigger re-run: AGENTS.md backup created ($bak_count)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "Backup-trigger re-run: AGENTS.md backup NOT created"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+
+        # Verify the new plugin content was written
+        if grep -q "custom user content" "$config_root/AGENTS.md" 2>/dev/null; then
+            print_warn "Backup-trigger: old custom content still present (plugin may not have overwritten)"
+            WARN_COUNT=$((WARN_COUNT + 1))
+        else
+            print_pass "Backup-trigger: plugin content successfully overwritten"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+    fi
+
     rm -rf "$tmp_home"
     cleanup_team_artifacts
     trap - EXIT

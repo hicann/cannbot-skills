@@ -556,6 +556,7 @@ get_tests_for_category() {
             echo "unit/teams/test-content.sh:fast"
             echo "unit/teams/test-version.sh:fast"
             echo "unit/install/test-init-install.sh:fast"
+            echo "unit/install/test-safe-install.sh:fast"
             ;;
         behavior)
             # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)
@@ -929,6 +930,7 @@ ansi_to_html() {
         -e 's/\x1b\[0;33m/<span class="a-y">/g' \
         -e 's/\x1b\[0;34m/<span class="a-b">/g' \
         -e 's/\x1b\[0;36m/<span class="a-c">/g' \
+        -e 's/\x1b\[2m//g' \
         -e 's/\x1b\[1m/<span class="a-B">/g' \
         -e 's/\x1b\[0m/<\/span>/g'
 }
@@ -952,7 +954,7 @@ output_html() {
     done
 
     python3 - "$passed" "$failed" "$skipped" "$warnings" "$duration" "$report_path" "$PLATFORM" "$data_file" <<'PYEOF'
-import sys, base64, html as html_module, datetime
+import sys, base64, html as html_module, datetime, re
 
 passed, failed, skipped, warnings, duration, report_path, platform, data_file = sys.argv[1:9]
 
@@ -1002,18 +1004,57 @@ timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 # ---------------------------------------------------------------------------
 def ansi_to_html(text):
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    repl = [
-        ("\x1b[0;31m", '<span class="a-r">'),
-        ("\x1b[0;32m", '<span class="a-g">'),
-        ("\x1b[0;33m", '<span class="a-y">'),
-        ("\x1b[0;34m", '<span class="a-b">'),
-        ("\x1b[0;36m", '<span class="a-c">'),
-        ("\x1b[1m", '<span class="a-B">'),
-        ("\x1b[0m", '</span>'),
-    ]
-    for old, new in repl:
-        text = text.replace(old, new)
-    return text
+
+    ansi_pattern = re.compile(r"\x1b\[([0-9;]*)m")
+
+    def attrs_to_classes(attrs):
+        classes = []
+        for attr in attrs:
+            if attr in ("31", "0;31"):
+                classes.append("a-r")
+            elif attr in ("32", "0;32"):
+                classes.append("a-g")
+            elif attr in ("33", "0;33"):
+                classes.append("a-y")
+            elif attr in ("34", "0;34"):
+                classes.append("a-b")
+            elif attr in ("36", "0;36"):
+                classes.append("a-c")
+            elif attr == "1":
+                classes.append("a-B")
+            # "2" (DIM) is ignored
+        return classes
+
+    result = []
+    open_spans = []
+    last_end = 0
+
+    for match in ansi_pattern.finditer(text):
+        result.append(text[last_end:match.start()])
+        code = match.group(1)
+        parts = code.split(";") if code else ["0"]
+        has_reset = ("0" in parts) or (code == "")
+        attrs = [p for p in parts if p != "0"]
+        classes = attrs_to_classes(attrs)
+
+        if has_reset:
+            while open_spans:
+                result.append("</span>")
+                open_spans.pop()
+
+        for cls in classes:
+            result.append(f'<span class="{cls}">')
+            open_spans.append(cls)
+
+        last_end = match.end()
+
+    result.append(text[last_end:])
+
+    while open_spans:
+        result.append("</span>")
+        open_spans.pop()
+
+    return "".join(result)
 
 # ---------------------------------------------------------------------------
 # Build HTML

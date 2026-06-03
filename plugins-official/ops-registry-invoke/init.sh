@@ -29,6 +29,72 @@ err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
+# Safe install config file with backup and conflict handling.
+# $1 = generated temp file path
+# $2 = target file path
+# $3 = display name
+# $4 = install level (global/project)
+safe_install_file() {
+    local tmpfile="$1"
+    local target="$2"
+    local name="$3"
+    local level="$4"
+
+    # Idempotency: skip if identical
+    if [ -e "$target" ] && diff -q "$tmpfile" "$target" > /dev/null 2>&1; then
+        info "$name already up to date"
+        rm -f "$tmpfile"
+        return 0
+    fi
+
+    # Backup existing file before overwriting
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        local backup
+        backup="${target}.bak.$(date +%Y%m%d_%H%M%S)"
+        cp -a "$target" "$backup"
+        warn "$name already exists, backed up to $(basename "$backup")"
+
+        # Interactive prompt for global mode
+        if [ "$level" = "global" ] && [ -t 0 ] && [ -t 1 ]; then
+            echo ""
+            echo -e "  ${BOLD}${YELLOW}⚠  $name 存在自定义内容，请选择操作：${NC}"
+            echo -e "    ${BOLD}[O]${NC} 覆盖      - 用插件内容替换（原内容已备份）"
+            echo -e "    ${BOLD}[M]${NC} 合并      - 插件内容置顶，保留原自定义内容"
+            echo -e "    ${BOLD}[S]${NC} 跳过      - 保持现有文件不变"
+            printf "  ${BOLD}${CYAN}→${NC} ${BOLD}请输入选择 [O/M/S]:${NC} "
+            read -r choice < /dev/tty
+            case "$choice" in
+                [Mm]*)
+                    cat "$tmpfile" > "${target}.new"
+                    echo "" >> "${target}.new"
+                    echo "<!-- === User custom content below === -->" >> "${target}.new"
+                    echo "" >> "${target}.new"
+                    cat "$target" >> "${target}.new"
+                    mv "${target}.new" "$target"
+                    ok "$name (merged with backup)"
+                    rm -f "$tmpfile"
+                    return 0
+                    ;;
+                [Ss]*)
+                    info "$name skipped (backup preserved)"
+                    rm -f "$tmpfile"
+                    return 0
+                    ;;
+                *) ;; # default: overwrite
+            esac
+        fi
+    fi
+
+    # Overwrite (default for project mode or non-interactive)
+    mv "$tmpfile" "$target"
+    if [ "$level" = "global" ]; then
+        ok "$name (absolute paths for global mode)"
+    else
+        ok "$name (absolute paths for project mode)"
+    fi
+}
+
+
 # Detect TRAE variant by scanning global config directories.
 # Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
 detect_trae_variant() {
@@ -432,21 +498,17 @@ if [ "$TOOL" = "opencode" ]; then
     if [ "$config_src" = "$config_target" ]; then
         info "$(basename "$config_target") already at target location"
     elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
-        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
         PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
         ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        tmpfile=$(mktemp)
         sed \
           -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
           -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
           -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
           -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
           -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
-          "$config_src" > "$config_target"
-        if [ "$LEVEL" = "global" ]; then
-            ok "AGENTS.md (absolute paths for global mode)"
-        else
-            ok "AGENTS.md (absolute paths for project mode)"
-        fi
+          "$config_src" > "$tmpfile"
+        safe_install_file "$tmpfile" "$config_target" "AGENTS.md" "$LEVEL"
     else
         ln -sf "$config_src" "$config_target"
         ok "AGENTS.md"
@@ -461,23 +523,23 @@ elif [ "$TOOL" = "claude" ]; then
     if [ "$config_src" = "$config_target" ]; then
         info "$(basename "$config_target") already at target location"
     elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
-        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
         PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
         ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        tmpfile=$(mktemp)
         sed \
           -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
           -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
           -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
           -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
           -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
-          "$config_src" > "$config_target"
-        if [ "$LEVEL" = "global" ]; then
-            ok "CLAUDE.md (absolute paths for global mode)"
-        else
-            ok "CLAUDE.md (absolute paths for project mode)"
-        fi
+          "$config_src" > "$tmpfile"
+        safe_install_file "$tmpfile" "$config_target" "CLAUDE.md" "$LEVEL"
     else
-        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        if [ -e "$config_target" ] && [ ! -L "$config_target" ]; then
+            backup="${config_target}.bak.$(date +%Y%m%d_%H%M%S)"
+            cp -a "$config_target" "$backup"
+            warn "CLAUDE.md already exists, backed up to $(basename "$backup")"
+        fi
         ln -sf "$config_src" "$config_target"
         ok "CLAUDE.md"
     fi
@@ -491,23 +553,23 @@ else
     if [ "$config_src" = "$config_target" ]; then
         info "$(basename "$config_target") already at target location"
     elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
-        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
         PLUGIN_ROOT_ABS="$(realpath "$SCRIPT_DIR")"
         ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
+        tmpfile=$(mktemp)
         sed \
           -e "s#bash workflows/scripts/#bash ${ESCAPED_ROOT}/workflows/scripts/#g" \
           -e "s#](workflows/#](${ESCAPED_ROOT}/workflows/#g" \
           -e "s#\`workflows/#\`${ESCAPED_ROOT}/workflows/#g" \
           -e "s#asc-devkit/docs/#${ESCAPED_ROOT}/asc-devkit/docs/#g" \
           -e "s#asc-devkit/examples/#${ESCAPED_ROOT}/asc-devkit/examples/#g" \
-          "$config_src" > "$config_target"
-        if [ "$LEVEL" = "global" ]; then
-            ok "AGENTS.md (absolute paths for global mode)"
-        else
-            ok "AGENTS.md (absolute paths for project mode)"
-        fi
+          "$config_src" > "$tmpfile"
+        safe_install_file "$tmpfile" "$config_target" "AGENTS.md" "$LEVEL"
     else
-        [ -e "$config_target" ] || [ -L "$config_target" ] && rm -f "$config_target"
+        if [ -e "$config_target" ] && [ ! -L "$config_target" ]; then
+            backup="${config_target}.bak.$(date +%Y%m%d_%H%M%S)"
+            cp -a "$config_target" "$backup"
+            warn "AGENTS.md already exists, backed up to $(basename "$backup")"
+        fi
         ln -sf "$config_src" "$config_target"
         ok "AGENTS.md"
     fi
