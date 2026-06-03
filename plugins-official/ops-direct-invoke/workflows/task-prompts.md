@@ -11,7 +11,7 @@
 ```
 {
   "description": "方案设计",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-architect",
+  "subagent_type": "ascendc-kernel-architect",
   "prompt": "
 请为以下算子设计方案：
 - 算子名称：{operator_name}
@@ -38,7 +38,7 @@
 ```
 {
   "description": "设计串讲",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-developer",
+  "subagent_type": "ascendc-kernel-developer",
   "prompt": "
 请以「设计串讲模式」审查以下算子的设计方案：
 - 算子名称：{operator_name}
@@ -108,7 +108,7 @@
 ```
 {
   "description": "串讲回应",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-architect",
+  "subagent_type": "ascendc-kernel-architect",
   "prompt": "
 请以「串讲回应模式」回应 Developer 对设计方案的质疑：
 - 算子名称：{operator_name}
@@ -161,14 +161,14 @@
 
 ---
 
-## Step 3：开发
+50## Step 3：开发
 
 ### Subagent 调用参数
 
 ```
 {
   "description": "算子开发",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-developer",
+  "subagent_type": "ascendc-kernel-developer",
   "prompt": "
 请先阅读以下文件：
 - operators/{operator_name}/docs/DESIGN.md — 技术设计（重点读 §1.2 API 映射、§1.5 Buffer 规划、§2.4 伪代码）
@@ -215,7 +215,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 ```
 {
   "description": "代码审查",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-reviewer",
+  "subagent_type": "ascendc-kernel-reviewer",
   "prompt": "
 请审查以下算子代码：
 - 算子名称：{operator_name}
@@ -252,7 +252,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 ```
 {
   "description": "代码修复",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-developer",
+  "subagent_type": "ascendc-kernel-developer",
   "prompt": "
 请根据审查报告修复代码：
 - 算子名称：{operator_name}
@@ -284,7 +284,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 ```
 {
   "description": "性能验收",
-  "subagent_type": "ops-direct-invoke:ascendc-kernel-developer",
+  "subagent_type": "ascendc-kernel-developer",
   "prompt": "
 请执行性能采集和验收：
 - 算子名称：{operator_name}

@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-06-03】
+#### 配置变更 Configuration Changes
+- 【ops-direct-invoke】统一 subagent_type 引用格式，移除 `ops-direct-invoke:` 插件前缀，改为短名称格式（如 `@ascendc-kernel-architect`），简化配置并与平台调度机制保持一致。
+
 ### 【2026-05-29】
 - 【代码检视】新增大型 PR 检视（>10 文件自动切换，按文件组并行，负载感知波次）和快速检视（零子 Agent，定向问题 inline 输出）两种工作流，配套 7 个 step 文件。方法论增强：负向证据分值降低防 AI 偷懒、SEC-11.3 新增逐位类型交叉验证检视方法。子 Agent 改为 Grep 定位 + Read offset/limit 按需读取条例章节，不再整篇加载。`check_bounds.py` 新增能力边界提示与手动推演指引。四仓历史数值安全数据集（33 例）。
 
