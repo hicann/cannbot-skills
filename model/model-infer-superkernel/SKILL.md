@@ -230,7 +230,7 @@ class YourModel:
 - 修改内容：启用 `enable_superkernel: True`
 
 ### 模型代码修改
-- 文件：`cann-recipes-infer/models/modeling_*.py`
+- 文件：`models/modeling_*.py`
 - 修改内容：添加 SuperKernel scope 标记
 - Scope 范围：{scope_description}
 
@@ -339,8 +339,7 @@ bash infer.sh
 ### 外部文档
 - [官方 SuperKernel 开发文档](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/83RC1alpha002/opdevg/Ascendcopdevg/atlas_ascendc_10_00029.html)
 - [PyTorch 图模式使用指南](https://www.hiascend.com/document/detail/zh/Pytorch/710/modthirdparty/torchairuseguide/torchair_00003.html)
-- [DeepSeek-R1 decode 性能优化](../../docs/models/deepseek_r1/deepseek_r1_decode_optimization.md)
-- [SuperKernel 易用性指南](../../usability_docs/superkernel_usability_guide.md)
+- [DeepSeek-R1 decode 性能优化](cann-recipes-infer/docs/models/deepseek-r1/deepseek_r1_decode_optimization.md)
 
 ---
 

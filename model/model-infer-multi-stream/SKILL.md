@@ -43,8 +43,8 @@ user-invocable: true
 
 开始前先确认当前代码走哪条多流路径：
 
-- `torchair.CompilerConfig()` + `torchair.get_npu_backend()` + GE 图模式：走 Ascend IR 路径。先看 `cann-recipes-infer/docs/zh/ascend_ir/features/advanced/multi_stream.md`，需要控核时再看 `cann-recipes-infer/docs/zh/ascend_ir/features/advanced/limit_cores.md`。
-- `torch.compile(..., backend="npugraph_ex")`：走 npugraph_ex / aclgraph 路径。先看 `cann-recipes-infer/docs/zh/npugraph_ex/advanced/multi_stream.md`，需要控核时再看 `cann-recipes-infer/docs/zh/npugraph_ex/advanced/limit_cores.md`。
+- `torchair.CompilerConfig()` + `torchair.get_npu_backend()` + GE 图模式：走 Ascend IR 路径。先看 [Ascend IR multi_stream](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/ascend_ir/features/advanced/multi_stream.md)，需要控核时再看 [Ascend IR limit_cores](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/ascend_ir/features/advanced/limit_cores.md)。
+- `torch.compile(..., backend="npugraph_ex")`：走 npugraph_ex / aclgraph 路径。先看 [npugraph_ex multi_stream](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/multi_stream.md)，需要控核时再看 [npugraph_ex limit_cores](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/limit_cores.md)。
 - 不要把 Ascend IR 的图内 API 和 aclgraph 的显式 stream API 混写到同一套实现里。
 - GE 图模式通常通过 `CompilerConfig` 和 `get_npu_backend()` 定界，不要把 `torch.compile(mode=...)` 当成当前主入口写法。
 - `npugraph_ex` 路径本质上是显式 stream / event / 生命周期管理；如果代码已经是这套风格，优先顺着现有实现继续，不要强改成 TorchAir 图内表达。
@@ -57,7 +57,7 @@ user-invocable: true
 当profiler agent存在时，可以通过profiler agent获取以下信息：
 - 提出模块拆解方案，向profiler agent获取模块内的算子序列及对应代码片段
 
-1. 先读取 [`references/report-template.md`](references/report-template.md)，在 `cann-recipes-infer/docs/common/multi-stream-analysis/<model_name>` 下创建或更新结果文件。
+1. 先读取 [`references/report-template.md`](references/report-template.md)，在 `docs/common/multi-stream-analysis/<model_name>` 下创建或更新结果文件。
 2. 按 [`references/module-decomposition-spec.md`](references/module-decomposition-spec.md) 完成整网模块拆解：
    - 确定分析阶段是 `prefill` 还是 `decode`
    - 产出整网模块清单、依赖清单、Mermaid 模块 DAG

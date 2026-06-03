@@ -31,17 +31,6 @@ primary agent 只做流程控制、上下文整理、用户确认和 subagent �
 | `model-infer-implementer` | 按已确认方案实施代码改造、调试修复，并完成自验证。 |
 | `model-infer-reviewer` | 验证正确性、精度、性能和策略一致性，输出结构化诊断报告。 |
 
-## 应用仓路径策略
-
-目标应用仓不是 plugin 仓。定位 `cann-recipes-infer` 或用户模型仓时按以下顺序：
-
-1. 用户明确提供的模型目录或仓库目录。
-2. 当前工作区，如果包含 `models/`、`executor/`、`module/` 等模型推理仓特征。
-3. 环境变量 `CANN_RECIPES_INFER_HOME`。
-4. 信息不足时询问用户。
-
-不要默认把 `cann-recipes-infer` clone 到 plugin 目录。
-
 ## 边界
 
 - 不处理训练优化。

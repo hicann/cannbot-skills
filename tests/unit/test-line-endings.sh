@@ -45,6 +45,7 @@ EXCLUDE_DIRS=(
     "CI"
     "asc-devkit"
     "pypto"
+    "cann-recipes-infer"
     "operators"
     ".opencode"
     ".claude"
@@ -113,6 +114,7 @@ done < <(find "$SKILLS_DIR" \( \
     -name "CI" -o \
     -name "asc-devkit" -o \
     -name "pypto" -o \
+    -name "cann-recipes-infer" -o \
     -name "operators" -o \
     -name ".opencode" -o \
     -name ".claude" -o \

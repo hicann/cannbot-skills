@@ -136,16 +136,7 @@ primary agent 会按 AGENTS.md 中的强制规则自动读取 `workflows/optimiz
 | hooks | 角色越界保护、progress.md 读取约束、自验证检查和长任务提醒 |
 | 配置入口 | `AGENTS.md` / `CLAUDE.md`，强制读取 `workflows/optimize-workflow.md` |
 
-## 四、应用仓路径
-
-plugin 不会默认 clone `cann-recipes-infer` 到自身目录。目标应用仓按以下顺序定位：
-
-1. 用户明确提供的模型目录或仓库目录。
-2. 当前工作区，如果包含 `models/`、`executor/`、`module/` 等推理仓特征。
-3. 环境变量 `CANN_RECIPES_INFER_HOME`。
-4. 信息不足时询问用户。
-
-## 五、核心工作流
+## 四、核心工作流
 
 ```text
 阶段 0：模型分析 + 性能基线
@@ -163,7 +154,7 @@ plugin 不会默认 clone `cann-recipes-infer` 到自身目录。目标应用仓
 
 每个阶段遵循：分析 → 方案确认 → 实施 → 验证 → 阶段总结。
 
-## 六、可用技能（原子 skills）
+## 五、可用技能（原子 skills）
 
 | Skill | 用途 |
 | --- | --- |
@@ -181,7 +172,7 @@ plugin 不会默认 clone `cann-recipes-infer` 到自身目录。目标应用仓
 
 端到端优化流程由 `workflows/optimize-workflow.md` 承载，由 primary agent 自动加载，不作为可独立调用的 skill 暴露。
 
-## 七、可用 Agents
+## 六、可用 Agents
 
 | Agent | 职责 |
 | --- | --- |
@@ -189,7 +180,7 @@ plugin 不会默认 clone `cann-recipes-infer` 到自身目录。目标应用仓
 | `model-infer-implementer` | 代码改造、调试修复、自验证 |
 | `model-infer-reviewer` | 精度验证、性能对比、结构化诊断 |
 
-## 八、常见问题
+## 七、常见问题
 
 ### Q: 如何查看帮助信息？
 

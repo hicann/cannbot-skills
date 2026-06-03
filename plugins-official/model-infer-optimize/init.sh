@@ -333,26 +333,56 @@ if [ "$TOOL" = "trae" ]; then
     echo ""
 fi
 
-step "[1/5] Installing skills and agents..."
+step "[1/6] Installing skills and agents..."
 mkdir -p "$CANNBOT_DIR"
 install_skill_links "$CANNBOT_DIR/skills"
 install_agent_links "$CANNBOT_DIR/agents"
 echo ""
 
-step "[2/5] Installing configuration..."
+step "[2/6] Installing configuration..."
 install_config
 install_workflows
 echo ""
 
-step "[3/5] Installing hooks..."
+step "[3/6] Installing hooks..."
 install_hooks
 echo ""
 
-step "[4/5] Writing manifest..."
+step "[4/6] Writing manifest..."
 write_manifest
 echo ""
 
-step "[5/5] Health check..."
+step "[5/6] Setting up cann-recipes-infer reference repo..."
+REFERENCE_DIR="$PLUGIN_ROOT/cann-recipes-infer"
+
+if [ -d "$REFERENCE_DIR/.git" ]; then
+    cd "$REFERENCE_DIR"
+    git pull --quiet 2>/dev/null && ok "cann-recipes-infer updated" || warn "git pull failed, using existing version"
+    cd "$SCRIPT_DIR"
+elif command -v git >/dev/null 2>&1; then
+    git clone --quiet --depth 1 https://gitcode.com/cann/cann-recipes-infer.git "$REFERENCE_DIR" 2>/dev/null \
+        && ok "cann-recipes-infer cloned" \
+        || warn "git clone failed, clone manually: git clone --depth 1 https://gitcode.com/cann/cann-recipes-infer.git $REFERENCE_DIR"
+else
+    warn "git not found, clone manually: git clone --depth 1 https://gitcode.com/cann/cann-recipes-infer.git $REFERENCE_DIR"
+fi
+
+# For global mode: symlink reference repo into CONFIG_ROOT so skill paths
+# like `cann-recipes-infer/...` resolve from CONFIG_ROOT cwd
+if [ "$LEVEL" = "global" ] && [ -d "$REFERENCE_DIR" ]; then
+    ln -sfn "$(realpath "$REFERENCE_DIR")" "$CONFIG_ROOT/cann-recipes-infer"
+    ok "cann-recipes-infer → $CONFIG_ROOT/"
+fi
+
+# For project mode with custom target: symlink into CONFIG_ROOT_BASE (== install target)
+# so relative references from agents/workflows work correctly
+if [ "$LEVEL" = "project" ] && [ -d "$REFERENCE_DIR" ] && [ "$CONFIG_ROOT_BASE" != "$PLUGIN_ROOT" ]; then
+    ln -sfn "$(realpath "$REFERENCE_DIR")" "$CONFIG_ROOT_BASE/cann-recipes-infer"
+    ok "cann-recipes-infer → $CONFIG_ROOT_BASE/"
+fi
+echo ""
+
+step "[6/6] Health check..."
 health_ok=true
 [ -d "$CANNBOT_DIR/skills" ] || { err "skills/ missing"; health_ok=false; }
 [ -d "$CANNBOT_DIR/agents" ] || { err "agents/ missing"; health_ok=false; }
