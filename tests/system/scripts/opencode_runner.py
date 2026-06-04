@@ -503,6 +503,16 @@ class OpencodeRunner:
             val = os.environ.get(key)
             if val is not None:
                 safe[key] = val
+        # Pass through LLM API keys required by opencode for authentication.
+        # opencode may also read keys from its own config file, but
+        # environment variables are the primary mechanism in CI/CD pipelines.
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY",
+                     "GEMINI_API_KEY", "DEEPSEEK_API_KEY",
+                     "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+                     "ANTHROPIC_MODEL", "EVAL_MODEL", "EVAL_MODEL_VARIANT"):
+            val = os.environ.get(key)
+            if val is not None:
+                safe[key] = val
         safe["PYTHONUNBUFFERED"] = "1"
         return safe
 
@@ -878,7 +888,7 @@ class OpencodeRunner:
                 args=cmd,
                 returncode=-1,
                 stdout=e.stdout or "",
-                stderr=(e.stderr or "") + "\n(Process timed out after 100s)"
+                stderr=(e.stderr or "") + "\n(Process timed out after 300s)"
             )
 
     def _get_export_file_path(self, output_file: Optional[str]) -> str:

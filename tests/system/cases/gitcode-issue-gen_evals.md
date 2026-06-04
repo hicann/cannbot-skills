@@ -6,7 +6,6 @@ eval_mode: text
 # Case 1: 文档变更的模板选择
 
 ## Config
-- Disabled: true
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000
@@ -57,7 +56,6 @@ eval_mode: text
 # Case 4: 正向看护-多 Infra Skill 环境下正确选择目标 Skill
 
 ## Config
-- Disabled: true
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
@@ -106,10 +104,9 @@ eval_mode: text
 
 ---
 
-# Case 7: 边界场景-不完整的 PR 信息
+# Case 7: 边界场景-信息不足时主动追问
 
 ## Config
-- Disabled: true
 
 ## Prompt
 
@@ -117,8 +114,8 @@ eval_mode: text
 
 ## Expected Output
 
-回复应询问 PR 链接或说明需要 PR 链接来获取代码变更详情。不应在没有 PR 信息的情况下直接生成 Issue body。
+回复应识别到用户提供了 PR 信息但缺少关键细节（PR 链接或目标仓库等），主动追问缺失信息。不应在缺少必要信息的情况下直接生成 Issue body 或自动执行操作。询问 PR 链接、目标仓库、Issue 类型等任一关键信息均可。
 
 ## Expectations
 
-- [contains] PR
+- [contains] 创建

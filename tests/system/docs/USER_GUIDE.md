@@ -46,15 +46,19 @@ tests/system/
   │   ├─ evals.md 存在性、合法性、结构完整性
   │   ├─ SKILL.md 或 AGENTS.md 存在性、frontmatter 必填字段
   │   │   (Team 额外检查: plugin.json、init.sh)
-  │   └─ 用例 ID 唯一性、顺序正确性
+  │   ├─ 用例 ID 唯一性、顺序正确性
+  │   └─ ⚠️ 失败则跳过该 target 的 Phase 2
   │
   └─ Phase 2: AI 语义评测 (test_skill_evals.py / test_team_evals.py)
+      ├─ 支持重试: EVAL_EXEC_RETRIES 控制（默认 1）
       ├─ 执行 Session: opencode 加载 skill/team 处理 prompt → AI 回复
-      │   (Team: 通过 init.sh 在沙箱中安装完整 team 环境)
+      │   (Skill: symlink skill 目录到沙箱; Team: 通过 init.sh 安装完整环境)
       ├─ 评测 Session: 独立 opencode session 评审回复质量
       │   ├─ 输入: 原始问题 + AI 思考链 + AI 回复 + 预期要点
+      │   ├─ 评审方式: Agent 填写 review-template.md 模板
+      │   ├─ 框架解析: 正则提取 Status + Score + 维度得分
       │   └─ 输出: pass/fail + 判定依据
-      └─ 模式匹配: expectations 中的 contains/not_contains 检查
+      └─ 模式匹配: expectations 中的 contains/not_contains/file_exists/file_list/skill_activated 检查
 ```
 
 ## 配置
@@ -165,22 +169,22 @@ eval_mode: text
 | Config Key | 说明 |
 |------------|------|
 | `Max Tokens` | Token 消耗硬上限，超过则测试失败 |
-| `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000` |
+| `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定模型 |
 | `Eval Mode` | 覆盖用例级评测模式：`text` / `file_based` |
-| `Distractor skills` | 正向看护：分号分隔的干扰 skill 列表，验证 AI 在多个 skill 存在时仍能正确选择目标 skill |
-| `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用 |
+| `Distractor skills` | 正向看护：分号分隔的干扰 skill 列表，如 `skill-a;skill-b`。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 存在时仍能正确选择目标 skill |
+| `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。用于需要更长执行时间的复杂场景 |
-| `覆盖度阈值` / `准确性阈值` / `质量阈值` / `token阈值` | 按维度覆盖默认通过阈值 |
+| `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
 
 **expectations 类型**：
 
 | type | 必填字段 | 说明 |
 |------|---------|------|
 | `contains` | `pattern` | 执行 session 的原始输出中必须包含该字符串 |
-| `not_contains` | `pattern` | AI 最终回复中不得包含该字符串 |
-| `file_exists` | `path` | 指定文件必须存在（`path` 相对于 skill 目录或沙箱） |
+| `not_contains` | `pattern` | AI **最终回复**中不得包含该字符串（不检查工具调用过程中的参考文档内容） |
+| `file_exists` | `path` | 指定文件必须存在（搜索顺序：`sandbox/<path>` → `sandbox/.opencode/skills/<skill>/<path>` → `skill_dir/<path>`） |
 | `file_list` | `pattern` | 沙箱中存在匹配 glob pattern 的文件 |
-| `skill_activated` | `pattern` | 程序化验证 AI 执行过程中加载了指定 skill（用于正向看护） |
+| `skill_activated` | `pattern` | 程序化验证 AI 执行过程中加载了指定 skill（直接从 session 导出 JSON 的 tool_use 事件中精确匹配，不依赖评审模型。用于正向看护场景） |
 
 **编写 expected_output 的建议**：
 
@@ -224,6 +228,9 @@ python -m pytest test_skill_evals.py --skill cann-env-setup -v --tb=short
 
 # 测试指定 skill 的单个用例
 python -m pytest test_skill_evals.py --skill cann-env-setup --eval-id 3 -v --tb=long
+
+# 启用重试（默认 1=不重试），适用于偶发性失败
+EVAL_EXEC_RETRIES=3 python -m pytest test_skill_evals.py --skill cann-env-setup -v
 ```
 
 **Team Phase 1 — 静态结构检查**（秒级，无需 opencode）：
@@ -248,6 +255,9 @@ python -m pytest test_team_evals.py --team ops-direct-invoke -v --tb=short
 
 # 测试指定 team 的单个用例
 python -m pytest test_team_evals.py --team ops-direct-invoke --eval-id 1 -v --tb=long
+
+# 指定评估模型（匹配 Max Tokens (<model>) 预算）
+EVAL_MODEL=claude-sonnet-4-20250514 python -m pytest test_team_evals.py --team ops-direct-invoke -v
 ```
 
 ### 方式二：main.py 一键执行（CI 门禁）
@@ -258,7 +268,9 @@ python tests/system/scripts/main.py \
     --changed-files ops/cann-env-setup/SKILL.md
 ```
 
-`main.py` 自动完成：识别受影响的 skill → Phase 1 → Phase 2 → 保存 JSON 结果 → 归档日志。
+`main.py` 自动完成：识别受影响的 skill/team → 逐个 Phase 1（失败的跳过 Phase 2）→ 合并 Phase 2 → 保存 JSON 结果 → 归档日志。
+
+支持 `--eval-model` 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算。
 
 ### 方式三：gate_check.sh（完整 CI 流程）
 
@@ -358,7 +370,17 @@ pip install pytest-html
 
 ### 评测 session 返回"无法解析判定结果"
 
-评测模型可能将 JSON 输出包裹在 markdown 代码块中（已兼容），如仍有问题，检查 `logs/<skill>_case_X_review_ses.json` 中的原始评测输出。
+该问题已在 2026-06 版本解决：评审机制从易出错的 JSON 解析改为 **review-template.md 模板化方案**。评审 Agent 通过 Write 工具填写沙箱中的 `review-template.md` 模板，框架通过正则从模板中提取结构化评审结果（Status + Score + 各维度得分），不再依赖 JSON 输出格式。
+
+如仍有问题，检查 `logs/<skill>_case_X_review_ses.json` 中的原始评测输出，确认 `review-template.md` 是否被正确填写。
+
+### 用例偶发性失败需要重试
+
+设置环境变量 `EVAL_EXEC_RETRIES` 控制重试次数（默认 1，即不重试）：
+```bash
+EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --skill cann-env-setup -v
+```
+重试会重新执行 opencode session 并重新评审，适用于网络抖动或 AI 服务器偶发错误。
 
 ### 添加新 skill 目录
 

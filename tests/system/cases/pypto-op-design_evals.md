@@ -86,7 +86,6 @@ skill_name: pypto-op-design
 # Case 3: 信息不足时主动追问
 
 ## Config
-- Disabled: true
 
 ## Prompt
 

@@ -283,7 +283,7 @@ class GateChecker:
                 logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
                 if not self.run_basic_validation(skill_name):
                     logger.info("基础验证失败，终止流程 (%.1fs)", time.time() - t_total)
-                    return 0, 0
+                    return 0, len(changed_skills)
 
         # Phase 2: 合并 AI 语义评测，生成一份报告
         skills_with_evals = []
@@ -337,8 +337,10 @@ class GateChecker:
                 logger.info("  %s — %d 个评测用例", team_name, len(eval_cases))
 
         if not teams_with_evals:
+            # 若所有 team 在 Phase 1 均失败，返回失败计数而非 (0,0) 以避免静默吞掉失败
+            total_teams = len(changed_teams)
             logger.info("无评测用例的 team，跳过 Team AI 语义评测")
-            return 0, 0
+            return 0, total_teams if total_teams > 0 else 0
 
         eval_total = len(teams_with_evals)
         logger.info("[合并] %d 个 team 合并评测", eval_total)

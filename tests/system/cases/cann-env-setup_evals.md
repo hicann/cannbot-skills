@@ -26,7 +26,6 @@ skill_name: cann-env-setup
 # Case 2: 配置环境变量永久生效
 
 ## Config
-- Disabled: true
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
@@ -68,7 +67,6 @@ CANN安装完成后，如何验证安装是否成功？
 # Case 4: 离线安装顺序
 
 ## Config
-- Disabled: true
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
@@ -90,7 +88,6 @@ CANN安装完成后，如何验证安装是否成功？
 # Case 5: Conda在线安装CANN
 
 ## Config
-- Disabled: true
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000
@@ -134,7 +131,6 @@ CANN安装完成后，如何验证安装是否成功？
 # Case 7: 正向看护-多skill环境下正确触发目标skill
 
 ## Config
-- Disabled: true
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000

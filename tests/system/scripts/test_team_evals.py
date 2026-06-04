@@ -80,9 +80,15 @@ def _setup_team_eval_sandbox(sandbox_manager: SandboxManager, team_name: str,
     sandbox_path = sandbox_manager.create_team_sandbox(
         team_name, eval_id, REPO_ROOT, team_dir,
     )
-    opencode_runner = create_opencode_runner(
-        sandbox_manager, sandbox_path, timeout=timeout,
-    )
+    try:
+        opencode_runner = create_opencode_runner(
+            sandbox_manager, sandbox_path, timeout=timeout,
+        )
+    except Exception:
+        # create_opencode_runner 失败时清理已创建的沙箱目录
+        import shutil
+        shutil.rmtree(str(sandbox_path), ignore_errors=True)
+        raise
     return opencode_runner, sandbox_path
 
 

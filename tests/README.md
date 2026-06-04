@@ -86,21 +86,28 @@ tests/
 ├── system/                     # ST 系统测试 / AI 语义评测（Python/pytest）
 │   ├── README.md               # ST 框架概述
 │   ├── config/
-│   │   └── st-test.config   # skill 扫描路径与白名单配置
-│   ├── cases/                  # 评测用例（Markdown 格式）
+│   │   ├── st-test.config       # skill/team 扫描路径与白名单配置
+│   │   └── review-template.md   # 评审 Agent 填写的评分模板
+│   ├── cases/                  # 评测用例（Markdown 格式，skill/team 共用）
+│   │   ├── ascendc-env-check_evals.md    # Skill 评测用例
 │   │   ├── ascendc-task-focus_evals.md
-│   │   └── cann-env-setup_evals.md
+│   │   ├── cann-env-setup_evals.md
+│   │   ├── gitcode-issue-gen_evals.md
+│   │   ├── pypto-op-design_evals.md
+│   │   └── ops-direct-invoke_evals.md    # Team 评测用例（team_name 标记）
 │   ├── docs/
 │   │   ├── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # ST 设计规范与开发指南
 │   │   └── USER_GUIDE.md                       # ST 框架使用指南
 │   └── scripts/
-│       ├── main.py              # CI 门禁主入口
-│       ├── conftest.py          # pytest 共享配置与 fixture
-│       ├── test_skill_basic.py  # Phase 1: 静态结构验证
-│       ├── test_skill_evals.py  # Phase 2: AI 语义评测
+│       ├── main.py              # CI 门禁主入口（支持 skill + team）
+│       ├── conftest.py          # pytest 共享配置与 fixture（含 skill/team 发现逻辑）
+│       ├── test_skill_basic.py  # Phase 1: Skill 静态结构验证
+│       ├── test_skill_evals.py  # Phase 2: Skill AI 语义评测（含重试机制）
+│       ├── test_team_basic.py   # Phase 1: Team 静态结构验证（AGENTS.md/plugin.json/init.sh）
+│       ├── test_team_evals.py   # Phase 2: Team AI 语义评测
 │       ├── opencode_runner.py   # OpenCode CLI Python 封装
 │       ├── sandbox_manager.py   # 沙箱隔离管理器
-│       ├── evals_parser.py      # Markdown 评测用例解析器
+│       ├── evals_parser.py      # Markdown 评测用例解析器（支持 skill/team）
 │       ├── session_stats.py     # Session 数据统计
 │       ├── run_eval.py          # pytest 评测命令行启动脚本
 │       ├── test_opencode_runner.py  # opencode_runner 单元测试
@@ -494,17 +501,24 @@ ST（System Test）框架是一个基于 Python/pytest 的 AI 语义评测系统
 ```
 输入：repo_root + changed_files
     │
-    ├─ 步骤1：识别受影响的 skills
-    │   └─ 从变更文件路径中提取 skill 目录
+    ├─ 步骤1：识别受影响的 skills / teams
+    │   └─ 从变更文件路径中提取 skill 或 team 名称
     │
     ├─ 步骤2：加载评测用例
-    │   └─ 读取 tests/system/cases/<skill>_evals.md
+    │   └─ 读取 tests/system/cases/<name>_evals.md
+    │       （Skill 用 skill_name，Team 用 team_name frontmatter）
     │
-    ├─ 步骤3：执行评测
-    │   ├─ Phase 1: 静态结构验证（test_skill_basic.py）
-    │   └─ Phase 2: AI 语义评测（test_skill_evals.py）
+    ├─ 步骤3：执行评测 — 逐个 target 进行（Phase 1 失败则跳过 Phase 2）
+    │   ├─ Phase 1: 静态结构验证
+    │   │   ├─ Skill: test_skill_basic.py（evals.md + SKILL.md 结构校验）
+    │   │   └─ Team: test_team_basic.py（evals.md + AGENTS.md/plugin.json/init.sh 校验）
+    │   └─ Phase 2: AI 语义评测（通过 Phase 1 才进入）
+    │       ├─ Skill: test_skill_evals.py（symlink skill 目录到沙箱）
+    │       └─ Team: test_team_evals.py（init.sh 部署完整 team 环境）
     │
-    └─ 步骤4：保存结果到 tests/system/results/
+    ├─ 步骤4：保存结果（HTML 报告 + JSON 日志归档）
+    │
+    └─ 返回：通过/失败状态
 ```
 
 ST 框架的两阶段评测流程（Phase 1 静态验证 + Phase 2 AI 语义评测）和评测用例编写格式，详见上方"本地开发调试"章节。
@@ -515,15 +529,23 @@ ST 框架的两阶段评测流程（Phase 1 静态验证 + Phase 2 AI 语义评�
 # 方式1：gate_check.sh（完整 CI 门禁流程）
 ./tests/gate_check.sh
 
-# 方式2：main.py（CI 门禁入口，指定变更文件）
+# 方式2：main.py（CI 门禁入口，指定变更文件，支持 skill + team）
 python tests/system/scripts/main.py \
     --repo-root /path/to/repo \
     --changed-files ops/skill-name/SKILL.md
 
 # 方式3：直接运行 pytest（本地开发调试）
+# Phase 1 — 静态结构验证
 cd tests/system/scripts
-python -m pytest test_skill_basic.py -v -k "skill-name"      # Phase 1
-python -m pytest test_skill_evals.py --skill skill-name -v    # Phase 2
+python -m pytest test_skill_basic.py -v -k "skill-name"      # Skill
+python -m pytest test_team_basic.py -v -k "team-name"        # Team
+
+# Phase 2 — AI 语义评测（支持 --eval-model 指定模型，对应 Max Tokens (<model>) 预算）
+python -m pytest test_skill_evals.py --skill skill-name -v    # Skill
+python -m pytest test_team_evals.py --team team-name -v       # Team
+
+# 仅测试单个 eval 用例
+python -m pytest test_skill_evals.py --skill skill-name --eval-id 3 -v --tb=long
 
 # 方式4：run_eval.py（pytest 封装，支持报告生成）
 python tests/system/scripts/run_eval.py --skill skill-name --html-report
@@ -533,14 +555,30 @@ python tests/system/scripts/main.py \
     --repo-root /path/to/repo \
     --changed-files ops/foo/SKILL.md \
     --parallel auto
+
+# 重试机制：设置 EVAL_EXEC_RETRIES 环境变量（默认 1，即不重试）
+EVAL_EXEC_RETRIES=3 python -m pytest test_skill_evals.py --skill skill-name -v
+
+# 按模型指定 Token 预算：--eval-model 匹配 evals.md 中的 Max Tokens (<model>)
+python tests/system/scripts/main.py \
+    --repo-root /path/to/repo \
+    --changed-files ops/foo/SKILL.md \
+    --eval-model claude-sonnet-4-20250514
+
+# 仅重新生成报告（不执行测试）
+python tests/system/scripts/main.py \
+    --report-only --repo-root . \
+    --changed-files ops/cann-env-setup/SKILL.md
 ```
 
 #### 输出结果
 
 | 文件 | 说明 |
 |------|------|
-| `results/basic_validation.html` | Phase 1 静态结构验证 HTML 报告 |
-| `results/<skill>_evals_validation.html` | Phase 2 语义评测 HTML 报告 |
+| `results/basic_validation.html` | Skill Phase 1 静态结构验证 HTML 报告 |
+| `results/team_basic_validation.html` | Team Phase 1 静态结构验证 HTML 报告 |
+| `results/evals_validation_<YYYYMMDD_HHMMSS>.html` | **Skill 统一** Phase 2 语义评测 HTML 报告（含时间戳，所有 skill 合并展示） |
+| `results/team_evals_validation_<YYYYMMDD_HHMMSS>.html` | **Team 统一** Phase 2 语义评测 HTML 报告 |
 | `results/<skill>_<timestamp>.json` | 结构化评测结果 JSON |
 | `logs/<skill>_case_X.json` | 每个用例的执行 session ID |
 | `logs/<skill>_case_X_review_ses.json` | 评测 session 完整对话导出 |
@@ -874,13 +912,24 @@ fi
 
 ### ST 系统测试评测用例
 
-在 `tests/system/cases/` 下创建 `<skill-name>_evals.md` 文件：
+在 `tests/system/cases/` 下创建 `<name>_evals.md` 文件（Skill 用 `skill_name`，Team 用 `team_name`）：
 
 ```markdown
 ---
 skill_name: my-new-skill
-eval_mode: text
+eval_mode: text          # text（默认）或 file_based
 ---
+
+# Case 1: 用例标题
+
+## Config                            # 可选：用例级配置
+- Max Tokens: 100000                  # Token 硬上限
+- Max Tokens (deepseek-v4-flash): 140000  # 按模型指定 Token 上限
+- Eval Mode: file_based               # 覆盖文件级评测模式
+- Distractor skills: skill-a;skill-b  # 正向看护：干扰 skill 列表
+- Disabled: true                      # 跳过该用例（默认不启用）
+- Timeout: 900                        # 用例执行超时（秒，默认 600）
+- 覆盖度阈值: 25                       # 按维度覆盖默认阈值
 
 ## Prompt
 测试问题内容
@@ -889,11 +938,14 @@ eval_mode: text
 回复应覆盖的关键要点（语义描述，非逐字匹配）
 
 ## Expectations
-- `[contains]` 必须包含的内容
-- `[not_contains]` 不得包含的内容
+- [contains] 必须包含的内容
+- [not_contains] 不得包含的内容（只检查 AI 最终回复，不检查工具调用过程中的参考文档）
+- [file_exists] todo.md              # 文件存在性检查
+- [file_list] *.md                    # 匹配 glob 模式的文件列表
+- [skill_activated] cann-env-setup    # 正向看护：程序化检查 skill 是否被加载
 ```
 
-然后在 `tests/system/config/st-test.config` 中将该 skill 加入 `skill_whitelist`，确保 `skill_dirs` 包含该 skill 所在的目录。
+然后在 `tests/system/config/st-test.config` 中将该 skill/team 加入对应的白名单，确保 `skill_dirs` / `team_dirs` 包含其所在目录。
 
 评测用例编写指南详见 `tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md`。
 
@@ -931,4 +983,14 @@ pip install -r tests/system/scripts/requirements.txt
 
 ### 评测 session 返回"无法解析判定结果"
 
-评测模型可能将 JSON 输出包裹在 markdown 代码块中（已兼容）。如仍有问题，检查 `tests/system/logs/<skill>_case_X_review_ses.json` 中的原始评测输出。
+该问题已在 2026-06 版本解决：评审机制从易出错的 JSON 解析改为 **review-template.md 模板化方案**。评审 Agent 通过 Write 工具填写沙箱中的 review-template.md 模板，框架通过正则从模板中提取结构化评审结果，不再依赖 JSON 输出。
+
+如仍有问题，检查 `tests/system/logs/<skill>_case_X_review_ses.json` 中的原始评测输出，确认 review-template.md 是否被正确填写。
+
+### 重试执行失败的评测用例
+
+设置环境变量 `EVAL_EXEC_RETRIES` 控制评测用例的重试次数（默认 1，即不重试）。重试会重新执行 opencode session 并重新评审：
+
+```bash
+EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --skill skill-name -v
+```

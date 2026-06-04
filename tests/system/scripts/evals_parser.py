@@ -63,8 +63,12 @@ def _parse_config_lines(content: str) -> Dict[str, str]:
     return config
 
 
-def _split_cases(content: str) -> List[str]:
-    """按 # Case <id>: <name> 标题拆分内容为单个用例块"""
+def _split_cases(content: str) -> List[Dict[str, Any]]:
+    """按 # Case <id>: <name> 标题拆分内容为单个用例块。
+
+    返回的每个 dict 包含 case_id、case_name 和 raw_block，
+    消除了 parse_evals_md 中 split 与 findall 双路径解析的不一致风险。
+    """
     # 去掉 frontmatter
     body = content
     if content.startswith("---"):
@@ -72,10 +76,28 @@ def _split_cases(content: str) -> List[str]:
         if end != -1:
             body = content[end + 3:].lstrip("\n")
 
-    # 按 # Case 标题拆分
-    case_blocks = re.split(r'^# Case \d+:.*$', body, flags=re.MULTILINE)
-    # 第一个 split 结果在 # Case 之前（无意义），去掉
-    return [b.strip() for b in case_blocks if b.strip()]
+    # 按 # Case 标题拆分（用捕获组保留标题行）
+    raw_parts = re.split(r'^# Case (\d+): (.+)$', body, flags=re.MULTILINE)
+
+    # raw_parts 格式: [before_first_case, id1, name1, block1, id2, name2, block2, ...]
+    # 第一个元素（before_first_case）跳过
+    cases = []
+    i = 1
+    while i + 2 <= len(raw_parts):
+        try:
+            case_id = int(raw_parts[i].strip())
+        except (ValueError, TypeError):
+            case_id = len(cases) + 1
+        case_name = raw_parts[i + 1].strip()
+        block = (raw_parts[i + 2] or "").strip()
+        if block:  # 仅保留有内容的用例块
+            cases.append({
+                "case_id": case_id,
+                "case_name": case_name,
+                "raw_block": block,
+            })
+        i += 3
+    return cases
 
 
 def _parse_case_title(line: str) -> tuple:
@@ -246,14 +268,14 @@ def parse_evals_md(file_path: Path) -> Optional[Dict[str, Any]]:
         logger.warning("Invalid eval_mode '%s', falling back to 'text'", eval_mode)
         eval_mode = "text"
 
-    bullet_titles = re.findall(r'^# Case (\d+): (.+)$', content, re.MULTILINE)
-    case_blocks = _split_cases(content)
+    cases = _split_cases(content)
 
     evals: List[Dict[str, Any]] = []
-    for idx, block in enumerate(case_blocks):
-        case_id = int(bullet_titles[idx][0]) if idx < len(bullet_titles) else (idx + 1)
-        case_name = bullet_titles[idx][1] if idx < len(bullet_titles) else ""
-        evals.append(_parse_single_case(block, case_id, case_name, eval_mode))
+    for case_info in cases:
+        evals.append(_parse_single_case(
+            case_info["raw_block"], case_info["case_id"],
+            case_info["case_name"], eval_mode,
+        ))
 
     result: Dict[str, Any] = {
         "eval_mode": eval_mode,

@@ -22,11 +22,18 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+
+def _rmtree_ignore_errors(path: Path) -> None:
+    """删除目录树，忽略所有错误（用于清理失败的沙箱）。"""
+    try:
+        shutil.rmtree(str(path), ignore_errors=True)
+    except Exception:
+        logger.debug("Failed to remove sandbox: %s", path)
 
 
 class SandboxManager:
@@ -187,6 +194,8 @@ class SandboxManager:
 
         init_sh = team_dir / "init.sh"
         if not init_sh.exists():
+            # 清理已创建的沙箱目录
+            _rmtree_ignore_errors(sandbox_path)
             raise RuntimeError(
                 f"[Sandbox] init.sh not found at {init_sh} for team {team_name}"
             )
@@ -210,12 +219,15 @@ class SandboxManager:
                 )
             logger.info("[Sandbox] Team %s installed successfully in %s", team_name, sandbox_path.name)
         except subprocess.TimeoutExpired:
+            _rmtree_ignore_errors(sandbox_path)
             raise RuntimeError(
                 f"[Sandbox] init.sh timed out (300s) for team {team_name}"
             ) from None
         except RuntimeError:
+            _rmtree_ignore_errors(sandbox_path)
             raise
         except Exception as e:
+            _rmtree_ignore_errors(sandbox_path)
             raise RuntimeError(
                 f"[Sandbox] init.sh failed for team {team_name}: {e}"
             ) from e

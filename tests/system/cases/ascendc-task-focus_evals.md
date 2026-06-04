@@ -31,7 +31,6 @@ skill_name: ascendc-task-focus
 - Max Tokens: 80000
 - Max Tokens (deepseek-v4-flash): 100000
 - Max Tokens (glm-5): 90000
-- Disabled: true
 
 ## Prompt
 
@@ -51,7 +50,6 @@ skill_name: ascendc-task-focus
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
-- Disabled: true
 
 ## Prompt
 
@@ -72,7 +70,6 @@ Softmax算子FP16精度验证失败了，误差2.3e-2，需要定位并解决精
 - Max Tokens (deepseek-v4-flash): 300000
 - Max Tokens (glm-5): 275000
 - Eval Mode: file_based
-- Disabled: true
 
 ## Prompt
 

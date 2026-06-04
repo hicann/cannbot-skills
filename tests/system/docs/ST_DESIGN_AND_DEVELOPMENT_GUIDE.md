@@ -87,7 +87,7 @@ tests/system/
     │   └─ 读取 tests/system/cases/<name>_evals.md
     │       （Skill 用 skill_name，Team 用 team_name frontmatter）
     │
-    ├─ 步骤3：执行评测
+    ├─ 步骤3：执行评测 — 逐个 target 进行
     │   ├─ Phase 1: 静态结构验证
     │   │   ├─ Skill: test_skill_basic.py
     │   │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
@@ -100,8 +100,10 @@ tests/system/
     │   │   │   ├─ plugin.json 存在性与合法性校验
     │   │   │   └─ init.sh 存在性校验
     │   │   耗时：秒级，无需 AI 调用
+    │   │   ⚠️ Phase 1 失败的 target 不进入 Phase 2（需要先修复基础结构问题）
     │   │
-    │   └─ Phase 2: AI 语义评测
+    │   └─ Phase 2: AI 语义评测（仅通过 Phase 1 的 target 进入）
+    │       ├─ 支持重试：EVAL_EXEC_RETRIES 控制重试次数（默认 1）
     │       ├─ Skill: test_skill_evals.py
     │       │   ├─ 沙箱部署: symlink skill 目录到 .opencode/skills/
     │       │   └─ (以下与 team 共享) ...
@@ -113,16 +115,18 @@ tests/system/
     │       │   ├─ 信息覆盖度（40 分，≥20 通过）：是否完整覆盖预期要点
     │       │   ├─ 技术准确性（30 分，≥15 通过）：技术信息是否正确
     │       │   ├─ 回复质量（20 分，≥10 通过）：结构清晰、表达简洁
-    │       │   └─ Token 消耗（10 分，≥5 通过）：回复长度合理、工具调用高效
+    │       │   └─ Token 消耗（10 分，≥3 通过）：回复长度合理、工具调用高效
     │       │   总分 ≥ 60 且各维度均不低于阈值方为通过
-    │       └─ 模式匹配：检查 expectations 中的 contains/not_contains/file_exists
+    │       │   评审方式：Agent 通过 Write 工具填写 review-template.md 模板
+    │       │   框架通过正则解析模板提取结构化的 Status/Score/维度得分
+    │       └─ 模式匹配：检查 expectations 中的 contains/not_contains/file_exists/skill_activated/file_list
     │       耗时：分钟级，需要 opencode CLI
     │
     ├─ 步骤4：保存结果
-    │   ├─ results/<skill>_basic_validation.html      # Skill Phase 1 报告
-    │   ├─ results/<team>_team_basic_validation.html   # Team Phase 1 报告
-    │   ├─ results/evals_validation.html               # Skill Phase 2 统一报告
-    │   ├─ results/team_evals_validation.html          # Team Phase 2 统一报告
+    │   ├─ results/basic_validation.html               # Skill Phase 1 报告
+    │   ├─ results/team_basic_validation.html          # Team Phase 1 报告
+    │   ├─ results/evals_validation_<ts>.html          # Skill Phase 2 统一报告（文件名含北京时间戳）
+    │   ├─ results/team_evals_validation_<ts>.html     # Team Phase 2 统一报告（文件名含北京时间戳）
     │   └─ results/<name>_<timestamp>.json             # 结构化结果
     │
     └─ 返回：0（全部通过）/ 1（存在失败）
@@ -203,7 +207,10 @@ tests/system/
 - **双 Agent 解耦**：执行和评测使用独立的 opencode 会话，避免评审偏差污染执行过程
 - **语义 + 确定性双通道**：Expected Output 走语义评测（灵活），Expectations 走精确匹配（严格），互补验证
 - **正向看护**：`[skill_activated]` 从 session 导出 JSON 中提取工具调用记录，不依赖评审 Agent
-- **沙箱隔离**：每个用例有独立沙箱，skill 通过软链接部署，干扰 skill 同等待遇
+- **沙箱隔离**：每个用例有独立沙箱，skill 通过软链接部署（team 通过 init.sh 部署），干扰 skill 同等待遇
+- **评审模板化**：评审 Agent 通过 Write 工具填写 `review-template.md` 模板，框架正则解析提取状态/评分/各维度得分，不再依赖 JSON 输出格式
+- **重试机制**：通过 `EVAL_EXEC_RETRIES` 环境变量控制评测用例的重试次数（默认 1，即不重试）
+- **模型 Token 预算**：支持 `Max Tokens (<model>)` 语法按模型指定 Token 上限，与 `--eval-model` 参数或 `EVAL_MODEL` 环境变量配合使用
 
 ---
 
@@ -279,11 +286,11 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 |------------|------|
 | `Eval Mode` | 覆盖用例级评测模式：`text`（默认）/ `file_based` |
 | `Max Tokens` | Token 消耗硬上限，超过则测试失败 |
-| `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。Phase 2 执行时根据实际使用的模型自动匹配 |
+| `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。Phase 2 执行时自动从 session 导出数据检测模型名称并匹配对应预算。可通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定模型 |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 名称列表。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 同时可用时仍能正确选择目标 skill。示例: `cann-env-setup;ascendc-task-focus;npu-arch` |
 | `Disabled` | 设为 `true` 则跳过该用例的执行（Phase 2 中显示为 SKIPPED）。适用于用例尚未调试完成的场景，不影响 Phase 1 静态校验。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。适用于需要更长执行时间的复杂场景，如 `Timeout: 900` |
-| `覆盖度阈值` / `准确性阈值` / `质量阈值` / `token阈值` | 按维度覆盖默认通过阈值（如 `覆盖度阈值: 25`） |
+| `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
 
 ### 2.3 Expectations 类型详解
 
@@ -300,7 +307,9 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 
 #### 2.3.2 not_contains — 文本排除检查
 
-检查 AI 执行 session 的**原始输出**中是否**不**包含指定字符串。用于负向看护场景。
+检查 AI **最终回复文本**中是否**不**包含指定字符串。用于负向看护场景。
+
+> **注意**：只检查 AI 对用户的最终回复（`ai_text`），不检查工具调用过程中的参考文档内容和中间输出。`full_output` 中包含 skill 加载时的参考文档内容，这些文档中的术语不应被视为 AI 的回复内容。
 
 ```markdown
 ## Expectations
@@ -355,10 +364,11 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 #### 2.4.2 file_based 模式
 
 适用于验证 AI 生成文件的场景（如生成代码、配置文件等）。评测流程：
-1. 系统自动向 prompt 末尾追加 `FILE_BASED_HINT`，要求 AI 输出文件清单而非文件内容
+1. 系统自动向 prompt 末尾追加 `FILE_BASED_HINT`（要求 AI 列出创建/修改的文件清单并说明用途，不输出完整文件内容）
 2. 执行 session：AI 在沙箱中创建/修改文件
 3. 评测 session：独立 session 读取沙箱中的生成文件，基于文件内容评审质量
 4. 模式匹配：检查 expectations 中的 file_exists/file_list 规则
+5. `collect_generated_files()` 收集沙箱中新增的文件（排除 logs/ .opencode/ 和源 skill 中已存在的文件）
 
 **使用 file_based 模式的用例示例：**
 
@@ -615,7 +625,9 @@ team_whitelist:             # Team 白名单：仅这些 team 触发评测
 
 **Q2: 评测 session 返回"无法解析判定结果"？**
 
-检查 `logs/<skill>_case_X_review_ses.json` 中的原始评测输出，确认评测模型是否正确输出了 JSON 格式的评审结果。
+该问题已在 2026-06 版本解决：评审机制已从易出错的 JSON 解析改为 **review-template.md 模板化方案**。评审 Agent 通过 Write 工具填写沙箱中的 `review-template.md` 模板，框架通过正则提取结构化评审结果。
+
+如仍有问题，检查 `logs/<skill>_case_X_review_ses.json` 中的原始评测输出，确认 `review-template.md` 是否被正确填写。
 
 **Q3: 如何给一个 Skill 新增第一个 ST 用例？**
 
@@ -628,6 +640,22 @@ team_whitelist:             # Team 白名单：仅这些 team 触发评测
 
 - 需要验证 AI 生成的文件内容（代码、配置、文档等）→ 使用 `file_based`
 - 只需要验证 AI 文本回复的正确性 → 使用 `text`（默认）
+
+**Q5: 如何给 Team 新增第一个 ST 用例？**
+
+与 Skill 类似，但注意：
+1. evals.md 的 frontmatter 使用 `team_name` 而非 `skill_name`
+2. Phase 1 额外校验 AGENTS.md、plugin.json、init.sh 的存在性
+3. 沙箱部署方式不同：Team 通过执行 `init.sh project opencode <sandbox>` 部署
+4. 确保 `config/st-test.config` 的 `team_dirs` 和 `team_whitelist` 包含该 team
+
+**Q6: 偶发性评测执行失败如何排查？**
+
+设置环境变量 `EVAL_EXEC_RETRIES` 启用重试（默认 1）：
+```bash
+EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --skill cann-env-setup -v
+```
+重试会重新执行 opencode session 并重新评审，适用于网络抖动或 AI 服务器偶发错误。
 
 ---
 
