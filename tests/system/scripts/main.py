@@ -45,21 +45,26 @@ class GateChecker:
                 return candidate
         return None
 
-    def run_basic_validation(self, skill_name: str) -> bool:
-        """
-        skill基本拦截，用例检查
-        """
-        logger.info("=" * 60)
-        logger.info("基础验证 (evals.json 结构检查)")
-        logger.info("=" * 60)
+    def get_team_dir(self, team_name: str) -> Optional[Path]:
+        for team_dir_rel in self.config.get("team_dirs", []):
+            candidate = self.repo_root / team_dir_rel / team_name
+            if candidate.exists() and candidate.is_dir():
+                plugin_json = candidate / ".claude-plugin" / "plugin.json"
+                agents_md = candidate / "AGENTS.md"
+                if plugin_json.exists() and agents_md.exists():
+                    return candidate
+        return None
 
-        test_basic_script = self.test_skill_dir / "scripts" / "test_skill_basic.py"
+    def _run_basic_validation(self, test_script_name: str, target_name: str,
+                               label: str) -> bool:
+        """通用 Phase 1 静态验证执行器（消除 skill/team 重复代码）。"""
+        test_basic_script = self.test_skill_dir / "scripts" / test_script_name
         if not test_basic_script.exists():
-            logger.warning("test_skill_basic.py not found, skipping basic validation")
+            logger.warning("%s not found, skipping %s basic validation",
+                           test_script_name, label)
             return True
 
         t0 = time.time()
-
         try:
             proc = subprocess.run(
                 [
@@ -67,7 +72,7 @@ class GateChecker:
                     str(test_basic_script),
                     "-v",
                     "--tb=short",
-                    "-k", skill_name,
+                    "-k", target_name,
                 ],
                 capture_output=True,
                 text=True,
@@ -76,41 +81,53 @@ class GateChecker:
                 timeout=120,
                 cwd=str(self.test_skill_dir / "scripts")
             )
-
             logger.info(proc.stdout)
-
             if proc.returncode != 0:
-                logger.error("基础验证失败 ✗ (%.1fs)", time.time() - t0)
+                logger.error("%s 基础验证失败 ✗ (%.1fs)", label, time.time() - t0)
                 if proc.stderr:
                     logger.error(proc.stderr)
                 return False
-
-            logger.info("基础验证通过 ✓ (%.1fs)", time.time() - t0)
+            logger.info("%s 基础验证通过 ✓ (%.1fs)", label, time.time() - t0)
             return True
-
         except subprocess.TimeoutExpired:
-            logger.error("Basic validation timed out")
+            logger.error("%s basic validation timed out", label)
             return False
         except Exception as e:
-            logger.error("Basic validation error: %s", e)
+            logger.error("%s basic validation error: %s", label, e)
             return False
 
-    def run_skills_eval(self, skill_names: List[str]) -> bool:
-        """一次 pytest 运行所有 skill 的 eval 用例，生成一份统一 HTML 报告"""
-        test_script = self.test_skill_dir / "scripts" / "test_skill_evals.py"
+    def run_basic_validation(self, skill_name: str) -> bool:
+        """
+        skill基本拦截，用例检查
+        """
+        logger.info("=" * 60)
+        logger.info("基础验证 (evals.json 结构检查)")
+        logger.info("=" * 60)
+        return self._run_basic_validation("test_skill_basic.py", skill_name, "Skill")
+
+    def run_team_basic_validation(self, team_name: str) -> bool:
+        """Team 静态结构验证（Phase 1）"""
+        logger.info("-" * 40)
+        logger.info("Team 基础验证: %s", team_name)
+        return self._run_basic_validation("test_team_basic.py", team_name, "Team")
+
+    def _run_eval_pytest(self, test_script_name: str, report_prefix: str,
+                          target_flag: str, target_names: List[str]) -> bool:
+        """通用 Phase 2 eval pytest 执行器（消除 skill/team 重复代码）。"""
+        test_script = self.test_skill_dir / "scripts" / test_script_name
         if not test_script.exists():
-            logger.info("  test_skill_evals.py 不存在，跳过")
+            logger.info("  %s 不存在，跳过", test_script_name)
             return True
 
         cmd = [sys.executable, "-m", "pytest", str(test_script)]
-        for s in skill_names:
-            cmd.extend(["--skill", s])
+        for name in target_names:
+            cmd.extend([target_flag, name])
         if self.eval_id:
             cmd.extend(["--eval-id", self.eval_id])
 
         beijing_tz = timezone(timedelta(hours=8))
         timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
-        report_path = self.results_dir / f"evals_validation_{timestamp}.html"
+        report_path = self.results_dir / f"{report_prefix}_{timestamp}.html"
         cmd.extend([f"--html={report_path}", "--self-contained-html"])
 
         if self._get_parallel_workers() != "1":
@@ -133,13 +150,25 @@ class GateChecker:
             )
             if proc.returncode == 0:
                 return True
-            logger.error("评测执行失败 (exit code %d)", proc.returncode)
+            logger.error("%s 评测执行失败 (exit code %d)", report_prefix, proc.returncode)
             if proc.stderr:
                 logger.error(proc.stderr[-2000:])
             return False
         except subprocess.TimeoutExpired:
-            logger.error("评测执行超时 (1200s)")
+            logger.error("%s 评测执行超时 (1200s)", report_prefix)
             return False
+
+    def run_skills_eval(self, skill_names: List[str]) -> bool:
+        """一次 pytest 运行所有 skill 的 eval 用例，生成一份统一 HTML 报告"""
+        return self._run_eval_pytest(
+            "test_skill_evals.py", "evals_validation", "--skill", skill_names,
+        )
+
+    def run_teams_eval(self, team_names: List[str]) -> bool:
+        """一次 pytest 运行所有 team 的 eval 用例，生成独立 HTML 报告"""
+        return self._run_eval_pytest(
+            "test_team_evals.py", "team_evals_validation", "--team", team_names,
+        )
 
     def identify_changed_skills(self) -> List[str]:
         changed_skills = set()
@@ -167,6 +196,32 @@ class GateChecker:
 
         return sorted(list(changed_skills))
 
+    def identify_changed_teams(self) -> List[str]:
+        changed_teams = set()
+
+        for file_path in self.changed_files:
+            try:
+                abs_path = Path(file_path)
+                if not abs_path.is_absolute():
+                    abs_path = self.repo_root / file_path
+                rel_path = abs_path.relative_to(self.repo_root)
+                parts = rel_path.parts
+            except ValueError:
+                continue
+
+            self._check_team_evals_file_change(parts, changed_teams)
+            self._check_team_dir_change(parts, changed_teams)
+
+        # 白名单过滤
+        team_whitelist = self.config.get("team_whitelist", [])
+        if team_whitelist:
+            skipped = sorted(changed_teams - set(team_whitelist))
+            if skipped:
+                logger.info("白名单过滤 — 跳过的 team (不在 team_whitelist 中): %s", ', '.join(skipped))
+            changed_teams = changed_teams & set(team_whitelist)
+
+        return sorted(list(changed_teams))
+
     def load_evals(self, skill_name: str) -> Optional[Dict[str, Any]]:
         evals_path = self.evals_cases_dir / f"{skill_name}_evals.md"
         if not evals_path.exists():
@@ -190,23 +245,29 @@ class GateChecker:
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         changed_skills = self.identify_changed_skills()
+        changed_teams = self.identify_changed_teams()
 
-        if not changed_skills:
-            logger.info("没有受影响的 skill，跳过测试。")
+        if not changed_skills and not changed_teams:
+            logger.info("没有受影响的 skill 或 team，跳过测试。")
             return True
 
         logger.info("受影响的 skill (%d): %s", len(changed_skills), ', '.join(changed_skills))
+        logger.info("受影响的 team (%d): %s", len(changed_teams), ', '.join(changed_teams))
 
-        eval_passed, eval_total = self._eval_skills(changed_skills, t_total)
+        skill_passed, skill_total = self._eval_skills(changed_skills, t_total)
+        team_passed, team_total = self._eval_teams(changed_teams, t_total)
 
-        all_passed = eval_total == 0 or eval_passed == eval_total
+        total_passed = skill_passed + team_passed
+        total_all = skill_total + team_total
+        all_passed = total_all == 0 or total_passed == total_all
 
         logger.info("=" * 60)
         if all_passed:
-            logger.info("全部通过 — %d 个 skill 验证完成 (%.1fs)", eval_total, time.time() - t_total)
+            logger.info("全部通过 — %d skill + %d team, %d 验证完成 (%.1fs)",
+                        skill_total, team_total, total_all, time.time() - t_total)
         else:
-            logger.info("评测存在失败 — %d 个 skill, %d 通过 (%.1fs)",
-                        eval_total, eval_passed, time.time() - t_total)
+            logger.info("评测存在失败 — %d skill + %d team, %d/%d 通过 (%.1fs)",
+                        skill_total, team_total, total_passed, total_all, time.time() - t_total)
         logger.info("=" * 60)
 
         return all_passed
@@ -248,6 +309,48 @@ class GateChecker:
 
         return (eval_total if passed else 0), eval_total
 
+    def _eval_teams(self, changed_teams: List[str], t_total: float) -> tuple:
+        if not changed_teams:
+            return 0, 0
+
+        logger.info("=" * 60)
+        logger.info("Team AI 语义评测")
+        logger.info("=" * 60)
+
+        # Phase 1: 逐 team 静态验证，失败的不进入 Phase 2
+        passed_teams: List[str] = []
+        for idx, team_name in enumerate(changed_teams, 1):
+            if not self.report_only:
+                logger.info("[%d/%d] %s — Team 基础验证", idx, len(changed_teams), team_name)
+                if not self.run_team_basic_validation(team_name):
+                    logger.info("Team 基础验证失败，跳过该 team 的 AI 评测 (%.1fs)", time.time() - t_total)
+                    continue
+            passed_teams.append(team_name)
+
+        # Phase 2: 合并 AI 语义评测，仅对通过 Phase 1 的 team
+        teams_with_evals = []
+        for team_name in passed_teams:
+            evals_data = self.load_evals(team_name)
+            eval_cases = evals_data.get("evals", []) if evals_data else []
+            if eval_cases:
+                teams_with_evals.append(team_name)
+                logger.info("  %s — %d 个评测用例", team_name, len(eval_cases))
+
+        if not teams_with_evals:
+            logger.info("无评测用例的 team，跳过 Team AI 语义评测")
+            return 0, 0
+
+        eval_total = len(teams_with_evals)
+        logger.info("[合并] %d 个 team 合并评测", eval_total)
+
+        passed = self.run_teams_eval(teams_with_evals)
+        if passed:
+            logger.info("[合并] Team 全部通过 ✓ (%.1fs)", time.time() - t_total)
+        else:
+            logger.info("[合并] Team 存在失败 ✗ (%.1fs)", time.time() - t_total)
+
+        return (eval_total if passed else 0), eval_total
+
     def _cleanup_previous_run(self):
         """清除上次运行的 logs 目录，清理 sandboxes 目录内容"""
         import shutil
@@ -276,11 +379,12 @@ class GateChecker:
                 logger.info("[清理] %s/ (%s)", dir_rel, target)
 
     def _load_config(self) -> Dict[str, Any]:
-        config_path = self.test_skill_dir / "config" / "skill-test.config"
+        config_path = self.test_skill_dir / "config" / "st-test.config"
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
-        return {"skill_dirs": ["skills"]}
+        return {"skill_dirs": ["skills"], "skill_whitelist": [],
+                "team_dirs": [], "team_whitelist": []}
 
     def _check_evals_file_change(self, parts: tuple, changed_skills: set) -> None:
         """检测集中式 evals 文件变更"""
@@ -304,6 +408,29 @@ class GateChecker:
             skill_dir = self.repo_root / skill_dir_rel / skill_name
             if skill_dir.exists() and skill_dir.is_dir():
                 changed_skills.add(skill_name)
+
+    def _check_team_evals_file_change(self, parts: tuple, changed_teams: set) -> None:
+        """检测 team evals 文件变更"""
+        if len(parts) < 3 or parts[:3] != ("tests", "system", "cases"):
+            return
+        filename = parts[-1]
+        if filename.endswith("_evals.md"):
+            candidate_name = filename[:-len("_evals.md")]
+            if self.get_team_dir(candidate_name):
+                changed_teams.add(candidate_name)
+
+    def _check_team_dir_change(self, parts: tuple, changed_teams: set) -> None:
+        """检测 team 目录下的文件变更"""
+        for team_dir_rel in self.config.get("team_dirs", []):
+            dir_parts = Path(team_dir_rel).parts
+            if len(parts) <= len(dir_parts):
+                continue
+            if parts[:len(dir_parts)] != dir_parts:
+                continue
+            team_name = parts[len(dir_parts)]
+            team_dir = self.repo_root / team_dir_rel / team_name
+            if team_dir.exists() and team_dir.is_dir():
+                changed_teams.add(team_name)
 
     def _get_parallel_workers(self) -> str:
         """

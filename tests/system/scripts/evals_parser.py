@@ -147,6 +147,18 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     if max_tokens_by_model:
         eval_case["max_tokens_by_model"] = max_tokens_by_model
 
+    timeout_str = case_config.get("timeout", "")
+    if timeout_str:
+        try:
+            timeout_val = int(timeout_str)
+            if timeout_val > 0:
+                eval_case["timeout"] = timeout_val
+            else:
+                logger.warning("Invalid timeout '%s' (must be > 0) in case %d, ignoring",
+                               timeout_str, case_id)
+        except ValueError:
+            logger.warning("Invalid timeout '%s' in case %d, ignoring", timeout_str, case_id)
+
     disabled_raw = case_config.get("disabled", "").strip().lower()
     if disabled_raw in ("true", "yes", "1"):
         eval_case["disabled"] = True
@@ -155,7 +167,16 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     distractor_skills = [s.strip() for s in distractor_raw.split(";") if s.strip()]
     eval_case["distractor_skills"] = distractor_skills if distractor_skills else []
 
-    dim_thresholds = {}
+    dim_thresholds = _parse_dim_thresholds(case_config, case_id)
+    if dim_thresholds:
+        eval_case["dim_thresholds"] = dim_thresholds
+
+    return eval_case
+
+
+def _parse_dim_thresholds(case_config: Dict[str, str], case_id: int) -> Dict[str, int]:
+    """解析维度阈值配置项，返回 {维度名: 阈值} 字典。"""
+    dim_thresholds: Dict[str, int] = {}
     _dim_threshold_config_keys = {
         "覆盖度阈值": "覆盖度",
         "准确性阈值": "准确性",
@@ -170,10 +191,7 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
             except ValueError:
                 logger.warning("Invalid dimension threshold '%s=%s' in case %d, ignoring",
                                config_key, val, case_id)
-    if dim_thresholds:
-        eval_case["dim_thresholds"] = dim_thresholds
-
-    return eval_case
+    return dim_thresholds
 
 
 def _parse_single_case(block: str, case_id: int, case_name: str,
@@ -217,6 +235,11 @@ def parse_evals_md(file_path: Path) -> Optional[Dict[str, Any]]:
 
     frontmatter = _parse_frontmatter(content)
     skill_name = frontmatter.get("skill_name", "")
+    team_name = frontmatter.get("team_name", "")
+
+    if not skill_name and not team_name:
+        logger.warning("No skill_name or team_name in frontmatter of %s", file_path)
+        return None
 
     eval_mode = frontmatter.get("eval_mode", "text").strip().lower()
     if eval_mode not in ("text", "file_based"):
@@ -232,8 +255,16 @@ def parse_evals_md(file_path: Path) -> Optional[Dict[str, Any]]:
         case_name = bullet_titles[idx][1] if idx < len(bullet_titles) else ""
         evals.append(_parse_single_case(block, case_id, case_name, eval_mode))
 
-    return {
-        "skill_name": skill_name,
+    result: Dict[str, Any] = {
         "eval_mode": eval_mode,
         "evals": evals,
     }
+    if team_name:
+        result["team_name"] = team_name
+        result["target_type"] = "team"
+        result["target_name"] = team_name
+    else:
+        result["skill_name"] = skill_name
+        result["target_type"] = "skill"
+        result["target_name"] = skill_name
+    return result

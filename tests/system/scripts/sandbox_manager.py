@@ -17,6 +17,7 @@ SandboxManager - 管理测试用例的隔离沙箱
 import json
 import logging
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -160,6 +161,65 @@ class SandboxManager:
             json.dump(self.OPENCODE_SAFE_CONFIG, f, ensure_ascii=False, indent=2)
 
         logger.debug("[Sandbox] 创建沙箱: %s", sandbox_path)
+        return sandbox_path
+
+    def create_team_sandbox(self, team_name: str, eval_id: int,
+                             repo_root: Path, team_dir: Path) -> Path:
+        """为 Team 创建沙箱并通过 init.sh 安装 Team。
+
+        1. 创建 sandboxes/<team_name>_eval_<id>/ 目录
+        2. 写入 .opencode/opencode.json 安全配置
+        3. 执行 init.sh project opencode <sandbox_path> 安装 team
+
+        Args:
+            team_name: team 名称
+            eval_id: 评测用例 ID
+            repo_root: 仓库根目录路径
+            team_dir: team 源目录路径
+
+        Returns:
+            沙箱目录路径
+
+        Raises:
+            RuntimeError: init.sh 不存在、执行失败、或超时
+        """
+        sandbox_path = self.create_sandbox(team_name, eval_id)
+
+        init_sh = team_dir / "init.sh"
+        if not init_sh.exists():
+            raise RuntimeError(
+                f"[Sandbox] init.sh not found at {init_sh} for team {team_name}"
+            )
+
+        logger.info("[Sandbox] 安装 Team %s 到沙箱 %s ...", team_name, sandbox_path.name)
+        try:
+            proc = subprocess.run(
+                ["bash", str(init_sh), "project", "opencode", str(sandbox_path)],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=300,
+                cwd=str(repo_root),
+            )
+            if proc.returncode != 0:
+                stderr_tail = proc.stderr[-1000:] if proc.stderr else "(no stderr)"
+                raise RuntimeError(
+                    f"[Sandbox] init.sh exited with {proc.returncode} for team {team_name}. "
+                    f"stderr: {stderr_tail}"
+                )
+            logger.info("[Sandbox] Team %s installed successfully in %s", team_name, sandbox_path.name)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"[Sandbox] init.sh timed out (300s) for team {team_name}"
+            ) from None
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(
+                f"[Sandbox] init.sh failed for team {team_name}: {e}"
+            ) from e
+
         return sandbox_path
 
     def cleanup_all(self) -> None:

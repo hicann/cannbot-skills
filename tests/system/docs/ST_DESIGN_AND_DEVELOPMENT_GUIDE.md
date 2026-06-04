@@ -43,26 +43,30 @@ ST 用例在代码合入前执行，由 `gate_check.sh` 在 CI 流水线中自�
 tests/system/
 ├── README.md                        # 框架说明
 ├── config/
-│   └── skill-test.config            # skill 扫描路径与白名单配置
+│   └── st-test.config            # skill 扫描路径与白名单配置
 ├── docs/
 │   ├── USER_GUIDE.md                # 框架使用指南
 │   └── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # 本文档
 ├── cases/                           # 集中式评测用例（MD 格式）
-│   └── <skill_name>_evals.md        # 每个 skill 的评测用例文件
+│   └── <skill_or_team_name>_evals.md # Skill 用 skill_name，Team 用 team_name
 ├── sandboxes/                       # 用例执行隔离沙箱（自动创建）
-│   └── <skill>_eval_<id>/
-│       ├── skill/                   # skill 文件副本
+│   └── <name>_eval_<id>/
+│       ├── .opencode/
+│       │   ├── skills/              # skill 符号链接（skill 测试）
+│       │   └── opencode.json        # 安全权限配置
 │       └── logs/                    # session 日志
 ├── results/                         # 测试报告输出
 ├── logs/                            # 运行日志
 └── scripts/
-    ├── main.py                      # CI 门禁主入口
-    ├── conftest.py                  # pytest 配置、skill 扫描与 HTML 报告渲染
-    ├── test_skill_basic.py          # Phase 1: 静态结构验证
-    ├── test_skill_evals.py          # Phase 2: AI 语义评测
-    ├── evals_parser.py              # MD 格式评测用例解析器
+    ├── main.py                      # CI 门禁主入口（支持 skill + team）
+    ├── conftest.py                  # pytest 配置、skill/team 扫描与 HTML 报告渲染
+    ├── test_skill_basic.py          # Phase 1: Skill 静态结构验证
+    ├── test_team_basic.py           # Phase 1: Team 静态结构验证
+    ├── test_skill_evals.py          # Phase 2: Skill AI 语义评测
+    ├── test_team_evals.py           # Phase 2: Team AI 语义评测（复用 skill 验证逻辑）
+    ├── evals_parser.py              # MD 格式评测用例解析器（支持 skill/team）
     ├── opencode_runner.py           # opencode CLI 流式封装
-    ├── sandbox_manager.py           # 沙箱隔离管理
+    ├── sandbox_manager.py           # 沙箱隔离管理（skill symlink + team init.sh）
     ├── session_stats.py             # Session 数据统计
     ├── run_eval.py                  # pytest 评测命令行启动脚本
     ├── test_opencode_runner.py      # opencode_runner 单元测试
@@ -76,21 +80,35 @@ tests/system/
 ```
 输入：repo_root + changed_files
     │
-    ├─ 步骤1：识别受影响的 skills
-    │   └─ 从变更文件路径中提取 skill 名称
+    ├─ 步骤1：识别受影响的 skills / teams
+    │   └─ 从变更文件路径中提取 skill 或 team 名称
     │
     ├─ 步骤2：加载评测用例
-    │   └─ 读取 tests/system/cases/<skill_name>_evals.md
+    │   └─ 读取 tests/system/cases/<name>_evals.md
+    │       （Skill 用 skill_name，Team 用 team_name frontmatter）
     │
     ├─ 步骤3：执行评测
-    │   ├─ Phase 1: 静态结构验证（test_skill_basic.py）
-    │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
-    │   │   ├─ 用例 ID 唯一性、连续递增校验
-    │   │   └─ SKILL.md 存在性、YAML frontmatter 格式校验
+    │   ├─ Phase 1: 静态结构验证
+    │   │   ├─ Skill: test_skill_basic.py
+    │   │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
+    │   │   │   ├─ 用例 ID 唯一性、连续递增校验
+    │   │   │   └─ SKILL.md 存在性、YAML frontmatter 格式校验
+    │   │   ├─ Team: test_team_basic.py
+    │   │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
+    │   │   │   ├─ 用例 ID 唯一性、连续递增校验
+    │   │   │   ├─ AGENTS.md 存在性、frontmatter 格式校验
+    │   │   │   ├─ plugin.json 存在性与合法性校验
+    │   │   │   └─ init.sh 存在性校验
     │   │   耗时：秒级，无需 AI 调用
     │   │
-    │   └─ Phase 2: AI 语义评测（test_skill_evals.py）
-    │       ├─ 执行 Session：opencode 加载 skill，发送 prompt → 收集 AI 回复
+    │   └─ Phase 2: AI 语义评测
+    │       ├─ Skill: test_skill_evals.py
+    │       │   ├─ 沙箱部署: symlink skill 目录到 .opencode/skills/
+    │       │   └─ (以下与 team 共享) ...
+    │       ├─ Team: test_team_evals.py
+    │       │   ├─ 沙箱部署: 执行 init.sh project opencode <sandbox>
+    │       │   └─ (以下与 skill 共享) ...
+    │       ├─ 执行 Session：opencode 加载 target，发送 prompt → 收集 AI 回复
     │       ├─ 评测 Session：独立 opencode session 评审回复质量
     │       │   ├─ 信息覆盖度（40 分，≥20 通过）：是否完整覆盖预期要点
     │       │   ├─ 技术准确性（30 分，≥15 通过）：技术信息是否正确
@@ -101,9 +119,11 @@ tests/system/
     │       耗时：分钟级，需要 opencode CLI
     │
     ├─ 步骤4：保存结果
-    │   ├─ results/<skill>_basic_validation.html      # Phase 1 报告
-    │   ├─ results/evals_validation.html               # Phase 2 统一报告
-    │   └─ results/<skill>_<timestamp>.json            # 结构化结果
+    │   ├─ results/<skill>_basic_validation.html      # Skill Phase 1 报告
+    │   ├─ results/<team>_team_basic_validation.html   # Team Phase 1 报告
+    │   ├─ results/evals_validation.html               # Skill Phase 2 统一报告
+    │   ├─ results/team_evals_validation.html          # Team Phase 2 统一报告
+    │   └─ results/<name>_<timestamp>.json             # 结构化结果
     │
     └─ 返回：0（全部通过）/ 1（存在失败）
 ```
@@ -236,8 +256,11 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `skill_name` | **是** | 目标 skill 名称，需与 SKILL.md 中的 `name` 字段一致 |
+| `skill_name` | Skill 必填 | 目标 skill 名称，需与 SKILL.md 中的 `name` 字段一致。与 `team_name` 二选一 |
+| `team_name` | Team 必填 | 目标 team 名称，需与 plugin.json 中的 `name` 字段一致。与 `skill_name` 二选一 |
 | `eval_mode` | 否 | 评测模式，默认 `text`。`file_based` 用于需要验证沙箱中生成文件的场景 |
+
+> **注意**：`skill_name` 和 `team_name` 只能设置一个。解析器会根据 frontmatter 中存在的字段自动确定 target 类型（`target_type: "skill"` 或 `"team"`）。
 
 #### 2.2.3 用例字段说明
 
@@ -259,6 +282,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 | `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。Phase 2 执行时根据实际使用的模型自动匹配 |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 名称列表。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 同时可用时仍能正确选择目标 skill。示例: `cann-env-setup;ascendc-task-focus;npu-arch` |
 | `Disabled` | 设为 `true` 则跳过该用例的执行（Phase 2 中显示为 SKIPPED）。适用于用例尚未调试完成的场景，不影响 Phase 1 静态校验。默认不启用。有效值：`true`、`yes`、`1` |
+| `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。适用于需要更长执行时间的复杂场景，如 `Timeout: 900` |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `token阈值` | 按维度覆盖默认通过阈值（如 `覆盖度阈值: 25`） |
 
 ### 2.3 Expectations 类型详解
@@ -558,9 +582,9 @@ CANN安装完成后，如何验证安装是否成功？
 7. CI 自动验证（PR 时 gate_check.sh 自动触发）
 ```
 
-### 2.9 配置新的 Skill 扫描路径
+### 2.9 配置新的 Skill / Team 扫描路径
 
-如需为新 Skill 目录添加 ST 看护，在 `tests/system/config/skill-test.config` 中配置：
+如需为新 Skill 目录添加 ST 看护，在 `tests/system/config/st-test.config` 中配置：
 
 ```yaml
 skill_dirs:
@@ -572,9 +596,16 @@ skill_dirs:
 skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空表示全部生效）
   - "ascendc-task-focus"
   - "cann-env-setup"
+
+team_dirs:                  # Team 扫描目录
+  - "plugins-official"
+  - "plugins-community"
+
+team_whitelist:             # Team 白名单：仅这些 team 触发评测
+  - "ops-direct-invoke"
 ```
 
-> **注意**：`skill_whitelist` 非空时仅列出的 skill 会被评测。如果要新增 skill 的白名单支持，需要同时添加到此列表。
+> **注意**：`skill_whitelist` 非空时仅列出的 skill 会被评测。如果要新增 skill 的白名单支持，需要同时添加到此列表。Team 的白名单机制同理。
 
 ### 2.10 常见问题
 
@@ -589,7 +620,7 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 **Q3: 如何给一个 Skill 新增第一个 ST 用例？**
 
 1. 在 `tests/system/cases/` 下创建 `<skill_name>_evals.md`
-2. 确保 `config/skill-test.config` 中的 `skill_dirs` 包含该 skill 所在目录
+2. 确保 `config/st-test.config` 中的 `skill_dirs` 包含该 skill 所在目录
 3. 如果启用了 `skill_whitelist`，将 skill 名称加入白名单
 4. 运行 Phase 1 静态验证确认格式正确
 
@@ -730,9 +761,27 @@ skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空�
 | 75 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `plugins-community/ops-easyasc-dsl/skill` |
 | 76 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
 
+### 3.11 plugins-official/ — 官方 Team 插件（7 个）
+
+| 序号 | Team 名称 | 功能描述 | 路径 |
+|------|-----------|---------|------|
+| 77 | ops-direct-invoke | Ascend C Kernel 直调算子开发 Team，含完整工作流（设计→实现→审查→性能验收） | `plugins-official/ops-direct-invoke` |
+| 78 | ops-registry-invoke | Ascend C 自定义算子开发（算子仓库模式） | `plugins-official/ops-registry-invoke` |
+| 79 | pypto-op-orchestrator | PyPTO 算子端到端开发编排 Team | `plugins-official/pypto-op-orchestrator` |
+| 80 | triton-op-generator | Triton-Ascend 算子代码生成与优化 Team | `plugins-official/triton-op-generator` |
+| 81 | torch-compile | PyTorch torch.compile 图模式编排 Team | `plugins-official/torch-compile` |
+| 82 | model-infer-optimize | NPU 模型推理端到端优化 Team | `plugins-official/model-infer-optimize` |
+| 83 | ops-code-reviewer | Ascend C 代码审查 Team | `plugins-official/ops-code-reviewer` |
+
+### 3.12 plugins-community/ — 社区 Team 插件（1 个）
+
+| 序号 | Team 名称 | 功能描述 | 路径 |
+|------|-----------|---------|------|
+| 84 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
+
 ---
 
-> **统计**：全仓共 **75 个 Skill**，分布在 10 个目录域中。
+> **统计**：全仓共 **75 个 Skill** + **8 个 Team**，分布在 12 个目录域中。ST 框架支持对 Skill 和 Team 的统一评测看护。
 
 ## 参考文档
 

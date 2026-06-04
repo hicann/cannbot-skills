@@ -25,7 +25,7 @@ if sys.platform == 'win32':
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 FRAMEWORK_DIR = Path(__file__).parent.parent  # skill-test-framework/
-CONFIG_PATH = FRAMEWORK_DIR / "config" / "skill-test.config"
+CONFIG_PATH = FRAMEWORK_DIR / "config" / "st-test.config"
 REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
 EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
@@ -263,6 +263,7 @@ def pytest_configure(config):
 
 def pytest_addoption(parser):
     parser.addoption("--skill", action="append", default=None, help="Run evals for specific skill(s)")
+    parser.addoption("--team", action="append", default=None, help="Run evals for specific team(s)")
     parser.addoption("--eval-id", action="store", default=None, help="Run specific eval by ID")
 
 
@@ -313,6 +314,75 @@ def load_evals_md(skill_name: str) -> Optional[Dict[str, Any]]:
     return parse_evals_md(evals_path)
 
 
+# ── Team 发现函数 ──────────────────────────────────────────────────
+
+def get_team_path(team_name: str) -> Optional[Path]:
+    """根据 team 名称查找实际路径"""
+    for team_dir_rel in CONFIG.get("team_dirs", []):
+        candidate = REPO_ROOT / team_dir_rel / team_name
+        if candidate.exists() and candidate.is_dir():
+            plugin_json = candidate / ".claude-plugin" / "plugin.json"
+            agents_md = candidate / "AGENTS.md"
+            if plugin_json.exists() and agents_md.exists():
+                return candidate
+    return None
+
+
+def get_all_teams() -> List[str]:
+    """扫描所有 team_dirs 配置的目录，返回有 AGENTS.md + plugin.json 的 team 名称列表。"""
+    teams = set()
+    team_whitelist = CONFIG.get("team_whitelist", [])
+    for team_dir_rel in CONFIG.get("team_dirs", []):
+        team_dir = REPO_ROOT / team_dir_rel
+        if not team_dir.exists():
+            continue
+        for item in team_dir.iterdir():
+            if not item.is_dir():
+                continue
+            if team_whitelist and item.name not in team_whitelist:
+                continue
+            plugin_json = item / ".claude-plugin" / "plugin.json"
+            agents_md = item / "AGENTS.md"
+            if plugin_json.exists() and agents_md.exists():
+                teams.add(item.name)
+    return sorted(teams)
+
+
+def get_teams_with_evals() -> List[str]:
+    """扫描 cases/ 目录，返回 team_name 匹配且在白名单中的 team 名列表。"""
+    teams = []
+    team_whitelist = CONFIG.get("team_whitelist", [])
+    if not EVALS_CASES_DIR.exists():
+        return teams
+    from evals_parser import parse_evals_md
+
+    for f in EVALS_CASES_DIR.iterdir():
+        if not f.is_file() or not f.name.endswith("_evals.md"):
+            continue
+        try:
+            data = parse_evals_md(f)
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", f.name, e)
+            continue
+        if not data or data.get("target_type") != "team":
+            continue
+        team_name = data.get("team_name", "")
+        if not team_name:
+            continue
+        if team_whitelist and team_name not in team_whitelist:
+            continue
+        teams.append(team_name)
+    return sorted(teams)
+
+
+def load_team_evals_md(team_name: str) -> Optional[Dict[str, Any]]:
+    """从 cases/<team_name>_evals.md 加载 team 评测用例"""
+    from evals_parser import parse_evals_md
+
+    evals_path = EVALS_CASES_DIR / f"{team_name}_evals.md"
+    return parse_evals_md(evals_path)
+
+
 @pytest.fixture(scope="session")
 def skills_dir() -> Path:
     return REPO_ROOT
@@ -344,6 +414,61 @@ def skill_dir(request, skills_dir) -> Path:
     if not skill_path:
         pytest.skip(f"Skill directory not found: {skill_name}")
     return skill_path
+
+
+# ── Team fixtures ─────────────────────────────────────────────────
+
+@pytest.fixture(scope="session")
+def all_teams() -> List[str]:
+    return get_all_teams()
+
+
+@pytest.fixture(scope="session")
+def teams_with_evals() -> List[str]:
+    return get_teams_with_evals()
+
+
+@pytest.fixture
+def team_evals_data(request, teams_with_evals) -> Dict[str, Any]:
+    team_name = request.param
+    data = load_team_evals_md(team_name)
+    if data is None:
+        pytest.skip(f"No evals.md found for team: {team_name}")
+    return data
+
+
+@pytest.fixture
+def team_dir(request, skills_dir) -> Path:
+    team_name = request.param
+    team_path = get_team_path(team_name)
+    if not team_path:
+        pytest.skip(f"Team directory not found: {team_name}")
+    return team_path
+
+
+# ── Shared helpers ────────────────────────────────────────────────
+
+
+def create_opencode_runner(sandbox_manager, sandbox_path, timeout=None):
+    """创建 OpencodeRunner 实例（skill/team 共用）。
+
+    消除 test_skill_evals.py 与 test_team_evals.py 中重复的
+    OpencodeRunner 构造代码。
+    """
+    from opencode_runner import OpencodeRunner
+
+    logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
+    model = os.environ.get("EVAL_MODEL")
+    variant = os.environ.get("EVAL_MODEL_VARIANT")
+    return OpencodeRunner(
+        model=model,
+        variant=variant,
+        keep_session=True,
+        verbose=True,
+        workdir=str(sandbox_path),
+        session_dir=str(logs_dir),
+        timeout=timeout if timeout is not None else 600,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -423,6 +548,21 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .score-na   { color: #94a3b8; }
 .score-badge[title] { cursor: help; border-bottom: 1px dotted currentColor; }
 
+/* === Rating badges === */
+.rating-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.rating-s { background: #166534; color: #fff; }
+.rating-a { background: #dcfce7; color: #166534; }
+.rating-b { background: #dbeafe; color: #1e40af; }
+.rating-c { background: #fef3c7; color: #92400e; }
+.rating-d { background: #fee2e2; color: #991b1b; }
+.rating-na { color: #94a3b8; }
+
 /* === Table === */
 #results-table {
   border: none;
@@ -461,6 +601,7 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .col-skill  { width: 160px; font-weight: 500; color: #334155; }
 .col-description { width: 220px; color: #475569; font-size: 13px; }
 .col-score { width: 90px; text-align: center; }
+.col-rating { width: 90px; text-align: center; }
 .col-testId { width: auto; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 12px; }
 .col-duration { width: 90px; text-align: right; color: #94a3b8; font-variant-numeric: tabular-nums; }
 .col-links  { width: 40px; text-align: center; }
@@ -690,6 +831,29 @@ TEST_DESCRIPTIONS = {
     "test_eval_case": "AI 语义评测",
     # Phase 1: test_skill_basic.py eval_mode 校验
     "test_skill_eval_mode_valid": "eval_mode 字段合法性",
+    # Team Phase 1: test_team_basic.py
+    "test_team_evals_md_exists": "Team evals.md 文件存在性",
+    "test_team_evals_md_valid": "Team evals.md 格式合法性",
+    "test_team_evals_md_has_team_name": "evals.md 包含 team_name 字段",
+    "test_team_evals_md_has_evals_list": "evals.md 包含 evals 列表",
+    "test_team_eval_cases_have_id": "Team 评测用例具有 id 字段",
+    "test_team_eval_cases_have_name": "Team 评测用例具有 case_name 字段",
+    "test_team_eval_cases_have_prompt": "Team 评测用例具有 prompt 字段",
+    "test_team_eval_cases_have_expected_output": "Team 评测用例具有 expected_output 字段",
+    "test_team_eval_cases_expectations_format": "Team expectations 字段格式合法",
+    "test_team_eval_ids_are_unique": "Team 用例 ID 唯一性",
+    "test_team_eval_ids_are_sequential": "Team 用例 ID 连续递增",
+    "test_team_prompt_is_descriptive": "Team prompt 非空（描述性检查）",
+    "test_team_expected_output_matches_prompt": "Team expected_output 长度检查",
+    "test_team_has_agents_md": "AGENTS.md 文件存在性",
+    "test_team_agents_md_has_frontmatter": "AGENTS.md YAML frontmatter 格式",
+    "test_team_agents_md_has_required_fields": "AGENTS.md frontmatter 必填字段",
+    "test_team_has_plugin_json": "plugin.json 文件存在性",
+    "test_team_plugin_json_valid": "plugin.json 格式合法性",
+    "test_team_has_init_sh": "init.sh 文件存在性",
+    "test_team_eval_mode_valid": "Team eval_mode 字段合法性",
+    # Team Phase 2: test_team_evals.py
+    "test_team_eval_case": "Team AI 语义评测",
 }
 
 
@@ -1144,6 +1308,26 @@ def _build_phase2_html_from_md(skill_name: str, eval_id):
     return '\n'.join(blocks), score, dim_scores
 
 
+def _rating_for_score(score):
+    """根据评测得分返回中文质量评级。
+
+    Returns:
+        (label: str, css_class: str)。label 为空字符串表示无评级。
+    """
+    if score is None:
+        return ("", "rating-na")
+    if score >= 90:
+        return ("卓越", "rating-s")
+    elif score >= 80:
+        return ("优秀", "rating-a")
+    elif score >= 70:
+        return ("良好", "rating-b")
+    elif score >= 60:
+        return ("警告", "rating-c")
+    else:
+        return ("错误", "rating-d")
+
+
 # ═══════════════════════════════════════════════════════════════
 #  pytest-html hooks
 # ═══════════════════════════════════════════════════════════════
@@ -1160,6 +1344,7 @@ def pytest_html_results_table_header(cells):
     cells.insert(1, '<th class="sortable" data-column-type="skill">Skill</th>')
     cells.insert(2, '<th>描述</th>')
     cells.insert(3, '<th>评测得分</th>')
+    cells.insert(4, '<th>质量评级</th>')
 
 
 def pytest_html_results_table_row(report, cells):
@@ -1210,6 +1395,14 @@ def pytest_html_results_table_row(report, cells):
     else:
         score_html = f'<span class="score-badge score-na">&mdash;</span>'
     cells.insert(3, f'<td class="col-score">{score_html}</td>')
+
+    # 质量评级列 — 插入在评测得分之后、Test 之前 (index 4)
+    rating_label, rating_cls = _rating_for_score(score)
+    if rating_label:
+        rating_html = f'<span class="rating-badge {rating_cls}">{rating_label}</span>'
+    else:
+        rating_html = f'<span class="rating-badge rating-na">&mdash;</span>'
+    cells.insert(4, f'<td class="col-rating">{rating_html}</td>')
 
 
 @pytest.hookimpl(tryfirst=True)

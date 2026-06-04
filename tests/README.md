@@ -86,7 +86,7 @@ tests/
 ├── system/                     # ST 系统测试 / AI 语义评测（Python/pytest）
 │   ├── README.md               # ST 框架概述
 │   ├── config/
-│   │   └── skill-test.config   # skill 扫描路径与白名单配置
+│   │   └── st-test.config   # skill 扫描路径与白名单配置
 │   ├── cases/                  # 评测用例（Markdown 格式）
 │   │   ├── ascendc-task-focus_evals.md
 │   │   └── cann-env-setup_evals.md
@@ -220,7 +220,7 @@ eval_mode: text
 - `[not_contains]` 回复中不应出现的内容
 ```
 
-2. 在 `tests/system/config/skill-test.config` 中将 skill 加入白名单：
+2. 在 `tests/system/config/st-test.config` 中将 skill 加入白名单：
 
 ```yaml
 skill_whitelist:
@@ -546,7 +546,7 @@ python tests/system/scripts/main.py \
 | `logs/<skill>_case_X_review_ses.json` | 评测 session 完整对话导出 |
 | `logs/test_results_<timestamp>.zip` | logs + results 打包归档 |
 
-ST 框架的配置（`skill-test.config`）、沙箱隔离机制、以及评测用例编写格式，详见上方"本地开发调试"章节。
+ST 框架的配置（`st-test.config`）、沙箱隔离机制、以及评测用例编写格式，详见上方"本地开发调试"章节。
 
 ## 运行参数
 
@@ -893,7 +893,7 @@ eval_mode: text
 - `[not_contains]` 不得包含的内容
 ```
 
-然后在 `tests/system/config/skill-test.config` 中将该 skill 加入 `skill_whitelist`，确保 `skill_dirs` 包含该 skill 所在的目录。
+然后在 `tests/system/config/st-test.config` 中将该 skill 加入 `skill_whitelist`，确保 `skill_dirs` 包含该 skill 所在的目录。
 
 评测用例编写指南详见 `tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md`。
 

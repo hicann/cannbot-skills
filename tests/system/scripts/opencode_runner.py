@@ -70,6 +70,7 @@ class OpencodeRunner:
     def __init__(
             self,
             model: Optional[str] = None,
+            variant: Optional[str] = None,
             keep_session: bool = False,
             session_dir: Optional[str] = None,
             timeout: int = 600,
@@ -78,6 +79,7 @@ class OpencodeRunner:
             opencode_path: Optional[str] = None,
     ):
         self.model = model
+        self.variant = variant
         self.keep_session = keep_session
         default_session_dir = Path(__file__).parent.parent / "logs"
         self.session_dir = Path(session_dir) if session_dir else default_session_dir
@@ -555,6 +557,8 @@ class OpencodeRunner:
 
         if self.model:
             cmd.extend(["--model", self.model])
+        if self.variant:
+            cmd.extend(["--variant", self.variant])
         if resume_session_id:
             cmd.extend(["--session", resume_session_id])
 

@@ -233,7 +233,7 @@ python tests/system/scripts/main.py \
 
 ## 配置
 
-编辑 `tests/system/config/skill-test.config` 调整扫描路径：
+编辑 `tests/system/config/st-test.config` 调整扫描路径：
 
 ```yaml
 skill_dirs:
@@ -256,7 +256,7 @@ pip install -r tests/system/scripts/requirements.txt
 tests/system/
 ├── README.md                    # 本文档
 ├── config/
-│   └── skill-test.config        # 扫描路径与白名单配置
+│   └── st-test.config        # 扫描路径与白名单配置
 ├── docs/
 │   └── USER_GUIDE.md            # 详细使用指南
 ├── cases/                       # 集中式评测用例定义

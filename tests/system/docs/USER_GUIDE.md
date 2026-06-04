@@ -4,7 +4,7 @@
 
 Skill Test Framework 是 cannbot-skills 的技能质量看护框架，提供以下能力：
 
-- **多目录扫描** — 通过 `config/skill-test.config` 配置跨多个目录发现 skill，不限于单一 `skills/` 目录
+- **多目录扫描** — 通过 `config/st-test.config` 配置跨多个目录发现 skill，不限于单一 `skills/` 目录
 - **变更驱动测试** — 基于 Git 变更文件自动识别受影响的 skill，按需执行评测
 - **双层验证** — Phase 1 静态结构检查 + Phase 2 AI Eval 语义评测
 - **独立评测 Session** — Phase 2 使用独立 opencode session 评审执行结果，避免自我检查偏差
@@ -15,16 +15,18 @@ Skill Test Framework 是 cannbot-skills 的技能质量看护框架，提供以�
 ```
 tests/system/
 ├── config/
-│   ├── skill-test.config       # skill 扫描路径配置
+│   ├── st-test.config       # skill/team 扫描路径配置
 │   └── review-template.md      # 评测 session 模板
 ├── scripts/
 │   ├── main.py                 # CI 门禁入口（一键执行）
-│   ├── conftest.py             # pytest 配置 + skill 扫描逻辑
-│   ├── test_skill_basic.py     # Phase 1: 静态结构验证
-│   ├── test_skill_evals.py     # Phase 2: AI 语义评测
+│   ├── conftest.py             # pytest 配置 + skill/team 扫描逻辑
+│   ├── test_skill_basic.py     # Phase 1: Skill 静态结构验证
+│   ├── test_team_basic.py      # Phase 1: Team 静态结构验证
+│   ├── test_skill_evals.py     # Phase 2: Skill AI 语义评测
+│   ├── test_team_evals.py      # Phase 2: Team AI 语义评测
 │   ├── opencode_runner.py      # opencode CLI 封装
 │   ├── sandbox_manager.py      # 沙箱环境管理
-│   ├── evals_parser.py         # evals.json 解析器
+│   ├── evals_parser.py         # evals.md 解析器（支持 skill/team）
 │   ├── run_eval.py             # 评测执行入口
 │   └── session_stats.py        # Session 统计分析
 ├── evals/                      # 框架自身的评测用例
@@ -40,13 +42,15 @@ tests/system/
 ```
 输入: changed_files
   │
-  ├─ Phase 1: 静态结构检查 (test_skill_basic.py)
-  │   ├─ evals.json 存在性、合法性、结构完整性
-  │   ├─ SKILL.md 存在性、frontmatter 必填字段
+  ├─ Phase 1: 静态结构检查 (test_skill_basic.py / test_team_basic.py)
+  │   ├─ evals.md 存在性、合法性、结构完整性
+  │   ├─ SKILL.md 或 AGENTS.md 存在性、frontmatter 必填字段
+  │   │   (Team 额外检查: plugin.json、init.sh)
   │   └─ 用例 ID 唯一性、顺序正确性
   │
-  └─ Phase 2: AI 语义评测 (test_skill_evals.py)
-      ├─ 执行 Session: opencode 加载 skill 处理 prompt → AI 回复
+  └─ Phase 2: AI 语义评测 (test_skill_evals.py / test_team_evals.py)
+      ├─ 执行 Session: opencode 加载 skill/team 处理 prompt → AI 回复
+      │   (Team: 通过 init.sh 在沙箱中安装完整 team 环境)
       ├─ 评测 Session: 独立 opencode session 评审回复质量
       │   ├─ 输入: 原始问题 + AI 思考链 + AI 回复 + 预期要点
       │   └─ 输出: pass/fail + 判定依据
@@ -55,7 +59,7 @@ tests/system/
 
 ## 配置
 
-### skill-test.config
+### st-test.config
 
 ```yaml
 # 扫描 skill 的目录列表（相对于仓库根目录）
@@ -67,6 +71,15 @@ skill_dirs:
 # 排除的 skill 名称
 exclude_skills:
   - "skill-test-framework"
+
+# 扫描 team 的目录列表（相对于仓库根目录）
+team_dirs:
+  - "plugins-official"
+  - "plugins-community"
+
+# Team 白名单：仅这些 team 触发评测（空数组表示全量）
+team_whitelist:
+  - "ops-direct-invoke"
 ```
 
 ### _evals.md 用例文件格式
@@ -103,8 +116,39 @@ eval_mode: text          # 可选，默认 text
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `skill_name` | 是 | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致 |
+| `skill_name` | 是（Skill） | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致。与 `team_name` 二选一 |
+| `team_name` | 是（Team） | 目标 team 名称，需与 plugin.json 中的 `name` 一致。与 `skill_name` 二选一 |
 | `eval_mode` | 否 | 评测模式，默认 `text`。可选 `file_based`（用于验证生成文件的场景） |
+
+> **注意**：`skill_name` 和 `team_name` 互斥，同一个 evals.md 文件中只能设置一个。解析器会根据 frontmatter 中的字段自动识别 target 类型。
+
+**Team evals.md 示例**：
+
+```markdown
+---
+team_name: ops-direct-invoke
+eval_mode: text
+---
+
+# Case 1: 基本算子开发流程问答
+
+## Config
+- Max Tokens: 200000
+- Timeout: 900
+
+## Prompt
+
+我想开发一个 Ascend C Kernel 直调算子，计算两个向量的逐元素加法。请描述开发这个算子的完整流程。
+
+## Expected Output
+
+回复应覆盖：环境检查、tiling 策略、host/device 代码结构、代码审查、性能验收
+
+## Expectations
+
+- [contains] kernel
+- [contains] tiling
+```
 
 **用例字段说明**：
 
@@ -125,6 +169,7 @@ eval_mode: text          # 可选，默认 text
 | `Eval Mode` | 覆盖用例级评测模式：`text` / `file_based` |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 列表，验证 AI 在多个 skill 存在时仍能正确选择目标 skill |
 | `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用 |
+| `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。用于需要更长执行时间的复杂场景 |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `token阈值` | 按维度覆盖默认通过阈值 |
 
 **expectations 类型**：
@@ -179,6 +224,30 @@ python -m pytest test_skill_evals.py --skill cann-env-setup -v --tb=short
 
 # 测试指定 skill 的单个用例
 python -m pytest test_skill_evals.py --skill cann-env-setup --eval-id 3 -v --tb=long
+```
+
+**Team Phase 1 — 静态结构检查**（秒级，无需 opencode）：
+
+```bash
+cd tests/system/scripts
+
+# 测试指定 team
+python -m pytest test_team_basic.py -v -k "ops-direct-invoke"
+
+# 测试所有有 evals.md 的 team
+python -m pytest test_team_basic.py -v
+```
+
+**Team Phase 2 — AI 语义评测**（分钟级，需要 opencode CLI）：
+
+```bash
+cd tests/system/scripts
+
+# 测试指定 team 的全部 eval 用例
+python -m pytest test_team_evals.py --team ops-direct-invoke -v --tb=short
+
+# 测试指定 team 的单个用例
+python -m pytest test_team_evals.py --team ops-direct-invoke --eval-id 1 -v --tb=long
 ```
 
 ### 方式二：main.py 一键执行（CI 门禁）
@@ -237,8 +306,10 @@ CANN 安装完成后，可通过以下方式验证：
 
 | 文件 | 来源 | 用途 |
 |------|------|------|
-| `basic_validation.html` | Phase 1 pytest-html | **静态结构检查报告**，浏览器打开可看 16 项测试（evals.json 格式、SKILL.md frontmatter 等）的通过/失败详情 |
-| `evals_validation_<YYYYMMDD_HHMMSS>.html` | Phase 2 pytest-html | **统一 AI 语义评测报告**，所有技能合并展示，每行标注 skill 归属。浏览器打开可看每个 eval 用例的通过/失败、AI 回复原文、评测模型判定依据。文件名含北京时间戳，每次运行生成新文件，历史报告保留不覆盖 |
+| `basic_validation.html` | Phase 1 pytest-html | **静态结构检查报告**，浏览器打开可看 16 项测试（evals.md 格式、SKILL.md frontmatter 等）的通过/失败详情 |
+| `team_basic_validation.html` | Team Phase 1 pytest-html | **Team 静态结构检查报告**，包含 AGENTS.md/plugin.json/init.sh 等 20 项测试 |
+| `evals_validation_<YYYYMMDD_HHMMSS>.html` | Phase 2 pytest-html | **Skill 统一 AI 语义评测报告**，所有技能合并展示，每行标注 skill 归属 |
+| `team_evals_validation_<YYYYMMDD_HHMMSS>.html` | Team Phase 2 pytest-html | **Team AI 语义评测报告**，所有 team 合并展示，每行标注 team 归属 |
 | `<skill>_<timestamp>.json` | `main.py` 的 `save_results()` | **结构化结果 JSON**，供脚本/CI 解析，含每个用例的 prompt、expected_output、实际输出、通过状态 |
 
 #### logs/ — 运行时日志（排查问题用）
@@ -291,7 +362,7 @@ pip install pytest-html
 
 ### 添加新 skill 目录
 
-在 `tests/system/config/skill-test.config` 的 `skill_dirs` 中追加新路径即可，例：
+在 `tests/system/config/st-test.config` 的 `skill_dirs` 中追加新路径即可，例：
 ```yaml
 skill_dirs:
   - "ops"
@@ -299,3 +370,21 @@ skill_dirs:
   - "model/skills"
   - "my-new-dir/skills"   # 新增
 ```
+
+### 添加新 team 的 ST 看护
+
+1. 在 `tests/system/cases/` 下创建 `<team_name>_evals.md`（使用 `team_name` frontmatter 字段）
+2. 确保 `config/st-test.config` 中的 `team_dirs` 包含该 team 所在目录
+3. 将 team 名称加入 `team_whitelist`（如已启用白名单）
+4. 运行 Team Phase 1 验证格式正确
+
+### Skill 和 Team 测试的区别
+
+| 维度 | Skill 测试 | Team 测试 |
+|------|-----------|----------|
+| 源码目录 | `ops/`、`graph/`、`model/` 等 | `plugins-official/`、`plugins-community/` |
+| 标识文件 | `SKILL.md` | `AGENTS.md` + `.claude-plugin/plugin.json` |
+| evals.md frontmatter | `skill_name: <name>` | `team_name: <name>` |
+| 沙箱部署方式 | symlink skill 目录到 `.opencode/skills/` | 执行 `init.sh project opencode <sandbox>` |
+| Phase 1 检查项 | SKILL.md 格式、evals.md 结构 | AGENTS.md 格式、plugin.json 合法性、init.sh 存在性 |
+| Phase 2 报告文件名 | `evals_validation_<ts>.html` | `team_evals_validation_<ts>.html` |

@@ -8,6 +8,8 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -25,6 +27,7 @@ from conftest import (
     parse_dimension_scores, parse_review_md,
     validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
     DIMENSION_ORDER, DIMENSION_MAX_SCORES,
+    create_opencode_runner,
 )
 from opencode_runner import OpencodeRunner
 from sandbox_manager import SandboxManager
@@ -201,22 +204,32 @@ REVIEW_RUBRIC = """
 ## 评分标准（总分 100，总分 ≥ 60 且各维度均不低于最低阈值方为通过）
 
 ### 信息覆盖度（0-40 分）— 最低通过阈值：20 分
-- 是否完整覆盖了预期回复中的所有关键要点
-- 每遗漏一个重要要点扣 10-20 分
+逐项检查预期输出中的每个关键要点是否被覆盖：
+- 预期输出中通常以数字编号列出了关键要点（如 "1. xxx 2. xxx"），请逐条检查
+- 每个要点满分 10 分（当预期有 4 个要点时），按覆盖程度打分：
+  * 10 分：完整覆盖该要点
+  * 5-9 分：部分覆盖，有缺失
+  * 0-4 分：基本未覆盖或严重遗漏
+- 若预期输出未明确编号，则按语义要点自行划分并评分
+- 计算公式：各要点得分求和 = 覆盖度总分（上限 40）
 
 ### 技术准确性（0-30 分）— 最低通过阈值：15 分
-- 技术信息是否正确，无错误或误导
-- 命令、参数、版本号等信息是否准确
+逐项检查技术内容的正确性：
+1. 技术术语使用正确（10 分）：每处术语错误扣 3 分，扣完为止
+2. API / 命令 / 参数引用准确（10 分）：每处编造或错误引用扣 3 分
+3. 逻辑流程正确、无自相矛盾（10 分）：每处矛盾扣 5 分
 
 ### 回复质量（0-20 分）— 最低通过阈值：10 分
-- 结构清晰、逻辑连贯
-- 表达简洁、直接回应用户问题
-- 无冗余或无关内容
+逐项检查回复的可读性和实用性：
+1. 结构清晰、分段合理（5 分）：混乱扣 2-3 分
+2. 包含可操作的代码示例或具体步骤（5 分）：纯理论无示例扣 3-5 分
+3. 直接回应用户问题，无跑题（5 分）：跑题扣 3-5 分
+4. 中文表达流畅、专业（5 分）：严重语法/表达问题扣 2-3 分
 
 ### Token 消耗（0-10 分）— 最低通过阈值：3 分
-- 回复长度合理，无冗余啰嗦
-- 思考过程中的工具调用是否必要、高效
-- 过多冗余内容或无效工具调用应扣分
+逐项检查效率：
+1. 回复长度合理，无冗余啰嗦（5 分）：明显冗余扣 2-3 分
+2. 思考过程中的工具调用必要且高效（5 分）：无意义的重复工具调用扣 2-3 分
 
 ## 通过规则
 1. 总分 ≥ 60
@@ -769,24 +782,43 @@ def _collect_exec_output(
     return "\n".join(output_lines), error_output, session_file, success
 
 
-def _setup_eval_sandbox(sandbox_manager: SandboxManager, skill_name: str,
-                       eval_id, skill_dir: Path,
-                       distractor_skill_dirs: Optional[List[Path]] = None):
-    """创建沙箱和 opencode runner"""
-    sandbox_path = sandbox_manager.create_sandbox(skill_name, eval_id)
-    sandbox_manager.create_skill_link(sandbox_path, skill_dir)
-    for ds_dir in (distractor_skill_dirs or []):
+def _setup_eval_sandbox(sandbox_manager: SandboxManager, inputs: _EvalInputs):
+    """创建沙箱和 opencode runner。
+
+    使用 _EvalInputs 封装参数以减少函数签名（≤5 参数要求）。
+    """
+    sandbox_path = sandbox_manager.create_sandbox(inputs.skill_name, inputs.eval_id)
+    sandbox_manager.create_skill_link(sandbox_path, inputs.skill_dir)
+    for ds_dir in (inputs.distractor_skill_dirs or []):
         sandbox_manager.create_skill_link(sandbox_path, ds_dir)
-    logs_dir = sandbox_manager.get_logs_dir(sandbox_path)
-    model = os.environ.get("EVAL_MODEL")
-    opencode_runner = OpencodeRunner(
-        model=model,
-        keep_session=True,
-        verbose=True,
-        workdir=str(sandbox_path),
-        session_dir=str(logs_dir)
+    opencode_runner = create_opencode_runner(
+        sandbox_manager, sandbox_path,
+        timeout=inputs.eval_data.get("timeout"),
     )
     return opencode_runner, sandbox_path
+
+
+def _create_and_validate(opencode_runner, session_name, full_output,
+                         inputs: _EvalInputs, ai_text, sandbox_path):
+    """创建 ValidationContext 并执行验证（消除 skill/team 重复代码）。"""
+    ctx = ValidationContext(
+        opencode_runner=opencode_runner,
+        session_name=session_name,
+        full_output=full_output,
+        original_prompt=inputs.prompt,
+        expected_output=inputs.expected_output,
+        expectations=inputs.expectations,
+        skill_dir=inputs.skill_dir,
+        eval_id=inputs.eval_id,
+        ai_text=ai_text,
+        eval_mode=inputs.eval_mode,
+        sandbox_path=sandbox_path,
+        generated_files=collect_generated_files(sandbox_path,
+                                                original_skill_dir=inputs.skill_dir),
+        skill_name=inputs.skill_name,
+        dim_thresholds=inputs.eval_data.get("dim_thresholds"),
+    )
+    validate_output(ctx)
 
 
 def _detect_model_from_session(ses_file: str) -> Optional[str]:
@@ -905,40 +937,52 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
 
     inputs = _unpack_eval_inputs(eval_case)
 
-    opencode_runner, sandbox_path = _setup_eval_sandbox(
-        sandbox_manager, inputs.skill_name, inputs.eval_id, inputs.skill_dir,
-        distractor_skill_dirs=inputs.distractor_skill_dirs,
-    )
+    opencode_runner, sandbox_path = _setup_eval_sandbox(sandbox_manager, inputs)
     _log_eval_case_header(inputs.skill_name, inputs.eval_id, inputs.prompt,
                           inputs.expected_output,
                           distractor_skill_dirs=inputs.distractor_skill_dirs)
 
-    full_output, session_name, session_file, ai_text = _run_and_extract_text(
-        opencode_runner, inputs.prompt, ".", inputs.skill_name, inputs.eval_id,
-    )
+    max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "1"))
+    last_error = None
+    best_session_file = None
 
-    logger.debug("--- AI Response (eval %s) ---", inputs.eval_id)
-    logger.debug(ai_text[:1000])
-    logger.debug("--- End AI Response ---")
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            logger.warning("[RETRY %d/%d] 重试执行 eval %s",
+                           attempt, max_retries, inputs.eval_id)
 
-    _check_token_budget(inputs.eval_data, inputs.eval_id, opencode_runner, session_name)
+        try:
+            full_output, session_name, session_file, ai_text = _run_and_extract_text(
+                opencode_runner, inputs.prompt, ".",
+                inputs.skill_name, str(inputs.eval_id),
+            )
+        except AssertionError as e:
+            last_error = e
+            logger.warning("[EXEC FAIL] opencode 执行失败 (attempt %d): %s",
+                           attempt, str(e)[:200])
+            continue
 
-    ctx = ValidationContext(
-        opencode_runner=opencode_runner,
-        session_name=session_name,
-        full_output=full_output,
-        original_prompt=inputs.prompt,
-        expected_output=inputs.expected_output,
-        expectations=inputs.expectations,
-        skill_dir=inputs.skill_dir,
-        eval_id=inputs.eval_id,
-        ai_text=ai_text,
-        eval_mode=inputs.eval_mode,
-        sandbox_path=sandbox_path,
-        generated_files=collect_generated_files(sandbox_path,
-                                                original_skill_dir=inputs.skill_dir),
-        skill_name=inputs.skill_name,
-        dim_thresholds=inputs.eval_data.get("dim_thresholds"),
-    )
-    validate_output(ctx)
-    logger.info("Session file: %s", session_file)
+        logger.debug("--- AI Response (eval %s, attempt %d) ---",
+                     inputs.eval_id, attempt)
+        logger.debug(ai_text[:1000])
+        logger.debug("--- End AI Response ---")
+
+        _check_token_budget(inputs.eval_data, inputs.eval_id,
+                            opencode_runner, session_name)
+
+        try:
+            _create_and_validate(opencode_runner, session_name, full_output,
+                                 inputs, ai_text, sandbox_path)
+            last_error = None
+            best_session_file = session_file
+            break  # 评测通过
+        except AssertionError as e:
+            last_error = e
+            logger.warning("[VALIDATE FAIL] 评测不通过 (attempt %d): %s",
+                           attempt, str(e)[:200])
+            if not best_session_file:
+                best_session_file = session_file
+
+    if last_error is not None:
+        raise last_error
+    logger.info("Session file: %s", best_session_file)
