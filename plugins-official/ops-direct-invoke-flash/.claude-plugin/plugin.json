@@ -1,0 +1,12 @@
+{
+  "name": "ops-direct-invoke-flash",
+  "version": "1.2.2",
+  "description": "当需要从 CPU 函数、数学公式、代码片段或文本描述出发构建全新的 Ascend C 或 Ascend950 Reg API 核函数时使用。覆盖从规格定义到验证通过的 NPU 核函数的完整路径。",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "CANN-2.0",
+  "keywords": ["ascend-c", "reg-api", "ascend950", "dav-3510", "npu", "huawei", "kernel", "operator", "port", "porting", "convert", "cann"]
+}

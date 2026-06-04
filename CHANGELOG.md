@@ -1,5 +1,8 @@
 ## 🔥 更新日志
 ### 【2026-06-03】
+#### 新特性 New Features
+- 【ops-direct-invoke-flash】新增 Ascend C Kernel 从零构建 Skill（`/ops-direct-invoke-flash`，位于 `plugins-official/`）：从 CPU 函数 / 数学公式 / 代码片段 / 文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审。支持 Ascend950 / dav-3510 的 AscendC::Reg 原生编程。
+
 #### 配置变更 Configuration Changes
 - 【ops-direct-invoke】统一 subagent_type 引用格式，移除 `ops-direct-invoke:` 插件前缀，改为短名称格式（如 `@ascendc-kernel-architect`），简化配置并与平台调度机制保持一致。
 

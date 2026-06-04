@@ -1,0 +1,121 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+metadata:
+  target: Ascend950 dav-3510
+  policy: 基于 Reg API 的原生算子生成
+  source_evidence:
+    - "regbase-op-author skill: regbase-api-guide.md"
+    - "regbase-op-author skill: regbase-code-shape.md"
+    - "dav-3510 算子范例（如 rms_norm_gated.asc）"
+allowed_patterns:
+  wrappers:
+    - "__simd_vf__"
+    - "asc_vf_call"
+  namespaces:
+    - "AscendC::Reg::"
+  types:
+    - "AscendC::Reg::RegTensor"
+    - "AscendC::Reg::MaskReg"
+    - "AscendC::Reg::CastTrait"
+  masks:
+    - "AscendC::Reg::CreateMask"
+    - "AscendC::Reg::UpdateMask"
+  load_store:
+    - "AscendC::Reg::LoadAlign"
+    - "AscendC::Reg::LoadUnAlignPre"
+    - "AscendC::Reg::LoadUnAlign"
+    - "AscendC::Reg::StoreAlign"
+    - "AscendC::Reg::LoadDist::DIST_NORM"
+    - "AscendC::Reg::LoadDist::DIST_UNPACK_B16"
+    - "AscendC::Reg::StoreDist::DIST_NORM_B32"
+    - "AscendC::Reg::StoreDist::DIST_PACK_B32"
+  compute:
+    - "AscendC::Reg::Duplicate"
+    - "AscendC::Reg::Add"
+    - "AscendC::Reg::Adds"
+    - "AscendC::Reg::Sub"
+    - "AscendC::Reg::Mul"
+    - "AscendC::Reg::Muls"
+    - "AscendC::Reg::Div"
+    - "AscendC::Reg::Max"
+    - "AscendC::Reg::Exp"
+    - "AscendC::Reg::Sqrt"
+    - "AscendC::Reg::Reduce"
+    - "AscendC::Reg::Cast"
+  auxiliary_integration:
+    - "AscendC::TPipe"
+    - "AscendC::TQue"
+    - "AscendC::TBuf"
+    - "AscendC::GlobalTensor"
+    - "AscendC::LocalTensor"
+    - "AscendC::DataCopy"
+    - "AscendC::DataCopyPad"
+    - "AscendC::PipeBarrier"
+forbidden_patterns:
+  hard_ban:
+    - "AscendC::MicroAPI"
+    - "MicroAPI"
+    - "Membase"
+    - "membase"
+    - "Membase::"
+  raw_c_api:
+    - "asc_add"
+    - "asc_mmad"
+    - "asc_sub"
+    - "asc_mul"
+    - "asc_div"
+  classic_compute_in_reg_path:
+    - "AscendC::Mul("
+    - "AscendC::Muls("
+    - "AscendC::Add("
+    - "AscendC::Adds("
+    - "AscendC::Sub("
+    - "AscendC::Div("
+    - "AscendC::Exp("
+    - "AscendC::Sqrt("
+    - "AscendC::Sigmoid("
+    - "AscendC::Cast("
+    - "AscendC::ReduceSum("
+    - "AscendC::Duplicate("
+review_flags:
+  - "向量计算后使用了 LocalTensor::GetValue"
+  - "Reg 存储缺少尾块掩码"
+  - "B16 类型转换缺少 DIST_UNPACK_B16 或 DIST_PACK_B32"
+  - "Reduce 标量存储缺少 32B 槽位"
+  - "Reg wrapper 输出在缺少 PipeBarrier<PIPE_V>() 的情况下被消费"
+  - "__simd_vf__ 函数融合的 VF 计算指令数超过了用户指定的上限"
+fusion_limit:
+  # 用户可配置。null = 无上限（默认）；设为正整数以强制启用。
+  # 传递方式：
+  #   - Skill / 评审子 Agent 从 STATE.md、设计文档或用户请求中读取该上限。
+  #   - post-edit hook 仅当运行该 hook 的 shell 中导出了 VF_FUSION_LIMIT 环境变量时才会强制执行；
+  #     仅在对话中说明的上限不会传递到 hook。
+  max_vf_compute_per_simd_vf: null
+  counted_calls:
+    - "AscendC::Reg::Add"
+    - "AscendC::Reg::Adds"
+    - "AscendC::Reg::Sub"
+    - "AscendC::Reg::Mul"
+    - "AscendC::Reg::Muls"
+    - "AscendC::Reg::Div"
+    - "AscendC::Reg::Max"
+    - "AscendC::Reg::Exp"
+    - "AscendC::Reg::Sqrt"
+    - "AscendC::Reg::Reduce"
+    - "AscendC::Reg::Cast"
+    - "AscendC::Reg::Duplicate"
+  excluded_calls:
+    - "AscendC::Reg::LoadAlign"
+    - "AscendC::Reg::LoadUnAlignPre"
+    - "AscendC::Reg::LoadUnAlign"
+    - "AscendC::Reg::StoreAlign"
+    - "AscendC::Reg::CreateMask"
+    - "AscendC::Reg::UpdateMask"

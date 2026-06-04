@@ -201,6 +201,24 @@
       ]
     },
     {
+      "name": "ops-direct-invoke-flash",
+      "source": "./plugins-official/ops-direct-invoke-flash",
+      "description": "Ascend C / Ascend950 Reg API Kernel 从零构建 Skill。支持从 CPU 函数、数学公式、代码片段或文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审。",
+      "version": "1.2.2",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "ascend-c",
+        "reg-api",
+        "ascend950",
+        "kernel",
+        "operator",
+        "from-scratch"
+      ],
+      "category": "development"
+    },
+    {
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
       "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",
