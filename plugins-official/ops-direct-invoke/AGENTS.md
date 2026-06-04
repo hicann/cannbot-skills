@@ -136,18 +136,15 @@ Step 7: 完成汇报
    ```bash
    bash workflows/scripts/init_operator_project.sh {operator_name}
    ```
-2. 加载 `/ascendc-env-check` skill，按 skill 指引运行环境检查和 NPU 设备检查脚本。
-3. 运行开发环境验证脚本（生成 `environment.json`）：
-   ```bash
-   bash workflows/scripts/verify_environment.sh {operator_name}
-   ```
+2. 加载 `/ascendc-env-check` skill，按 skill 指引完成 CANN 环境检查与 NPU 设备检查。
+3. 读取模板 `workflows/templates/environment-template.md`，按其中的「字段语义」表把上一步采集到的信息填入 `operators/{operator_name}/docs/environment.md`。任一 ❌ 错误项（不含 ⚠ 警告） → 状态行写 `❌ 失败`；否则写 `✅ 通过`。
 
 **失败处理**：
-- Skill 环境检查失败 → 告知用户失败原因，**禁止进入 Step 2**
-- Skill NPU 设备检查失败 → 告知用户「NPU 设备不可用，无法进行算子开发。如需继续请联系 lead 决策是否跳过」，**禁止进入 Step 2**
-- verify_environment.sh 验证失败（`validation.all_passed` 为 false）→ 告知用户失败原因，**禁止进入 Step 2**
+- `/ascendc-env-check` skill 报错或检查不通过 → 在 environment.md 中如实记录，状态行标 `❌ 失败`，告知用户失败原因，**禁止进入 Step 2**
+- NPU 设备不可用 → 告知用户「NPU 设备不可用，无法进行算子开发。如需继续请联系 lead 决策是否跳过」，**禁止进入 Step 2**
 
-**完成判定**：`environment.json` 存在且 `validation.all_passed` 为 true → 继续 Step 2
+**完成判定**：`environment.md` 存在且标题行匹配正则 `^\*\*算子\*\*.*\*\*状态\*\*:\s*✅\s*通过` → 继续 Step 2
+（必须含字面 "通过"；未替换的占位符 `<填写「✅ 通过」或「❌ 失败」...>` 不会匹配。校验命令示例：`rg -n '^\*\*算子\*\*.*\*\*状态\*\*:\s*✅\s*通过' operators/{operator_name}/docs/environment.md`）
 
 #### Step 2：设计
 

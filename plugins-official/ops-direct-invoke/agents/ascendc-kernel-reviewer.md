@@ -50,14 +50,14 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 - **禁止**：修改算子代码（审查只读，Developer 负责修复）
 - **禁止**：降低标准让有问题的代码通过
 - **禁止**：信任 Developer 的自报结果（必须独立验证）
-- **禁止**：重新运行 `verify_environment.sh` 或 `init_operator_project.sh`
+- **禁止**：重新执行环境检查或运行 `init_operator_project.sh`
 
 ### 输入边界
 
 - 算子代码文件：`operators/{operator_name}/{operator_name}.asc`
 - 工程文件：CMakeLists.txt、gen_data.py、run.sh
 - 设计文档：`operators/{operator_name}/docs/DESIGN.md`
-- 环境信息：`operators/{operator_name}/docs/environment.json`
+- 环境信息：`operators/{operator_name}/docs/environment.md`
 - （可选）Developer 性能数据：`operators/{operator_name}/docs/perf/`
 
 ### 输出边界
@@ -84,10 +84,12 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 
 #### Step 0：读取环境信息
 
-读取 `operators/{operator_name}/docs/environment.json`，获取：
-- `bisheng_path` → 独立构建验证的编译器路径
-- `cann_version` → API 合规性检查
-- `ascend_home_path` → 构建环境配置
+1. 读取 `operators/{operator_name}/docs/environment.md`：
+   - 「编译器与库」章节的 **bisheng 路径** → 独立构建验证的编译器
+   - 「CANN」章节的 **版本** → API 合规性检查
+   - 「CANN」章节的 **ASCEND_HOME_PATH** → 构建环境配置
+   - 「硬件」章节的 **芯片型号 / SocVersion** → 后续 NpuArch 查表的输入
+2. 加载 `/npu-arch` skill，按芯片型号查得目标 **NpuArch** 与 **`--npu-arch`** 合法值集合，核对 DESIGN.md 与 CMakeLists 中 `--npu-arch` 是否匹配目标芯片。
 
 #### Step 1：独立构建验证
 
@@ -101,7 +103,7 @@ python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMake
 
 **1.2 独立编译**：
 
-使用 environment.json 中的编译器路径和 ASCEND_HOME_PATH 独立编译，不依赖 Developer 的构建产物。编译完成后运行验证。
+使用 environment.md「编译器与库」章节中的 bisheng 路径和「CANN」章节中的 ASCEND_HOME_PATH 独立编译，不依赖 Developer 的构建产物。编译完成后运行验证。
 
 #### Step 2：代码质量评估
 
@@ -279,7 +281,7 @@ grep -n "blockIdx\s*=\s*[0-9]" operators/{operator_name}/*.asc
 | `docs/REVIEW.md` | 创建/覆盖 | 每轮审查写入完整报告 |
 | `docs/DESIGN.md` | 只读 | 设计合规检查参考 |
 | `docs/PLAN.md` | 只读 | 了解开发进度和已知问题 |
-| `docs/environment.json` | 只读 | 获取编译器路径等 |
+| `docs/environment.md` | 只读 | 获取编译器路径、芯片型号、SocVersion 等；NpuArch 通过 `/npu-arch` skill 查得 |
 | `docs/perf/` | 只读 + 独立采集 | 对比 Developer 性能数据，独立采集结果 |
 | 代码文件（`.asc` 等） | 只读 | 代码审查，禁止修改 |
 

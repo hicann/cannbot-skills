@@ -59,7 +59,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 - 技术设计文档：`operators/{operator_name}/docs/DESIGN.md`
 - 开发计划文档：`operators/{operator_name}/docs/PLAN.md`
-- 环境信息：`operators/{operator_name}/docs/environment.json`
+- 环境信息：`operators/{operator_name}/docs/environment.md`
 - （修复模式）审查报告：`operators/{operator_name}/docs/REVIEW.md`
 - （串讲模式）设计文档 + 开发计划
 
@@ -94,7 +94,9 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 #### 阶段 1：读取设计方案
 
-**环境信息**：读取 `operators/{operator_name}/docs/environment.json` 获取编译器路径、架构目录等。
+**环境信息**：
+- 读取 `operators/{operator_name}/docs/environment.md`：从「编译器与库」章节获取 bisheng 路径、kernel_operator.h 和 lib 路径；从「CANN」章节获取 ASCEND_HOME_PATH 与 CPU 架构目录；从「硬件」章节获取芯片型号 / SocVersion。
+- 从 DESIGN.md 读取 Architect 已选定的 **NpuArch / `--npu-arch`** 编译参数；若 DESIGN.md 未给出（缺漏或修复模式），自行加载 `/npu-arch` skill 按芯片型号查得。
 
 **目标**：理解设计方案，为实现做准备。
 
@@ -198,7 +200,7 @@ Level 2: 极值/零值  -> 边界情况验证
 |------|------|------|
 | `docs/DESIGN.md` | 只读（参考）；阶段 4 可更新 | 技术设计参考，发现优化点可更新 |
 | `docs/PLAN.md` | 持续更新 | 进度跟踪、测试结果、问题记录 |
-| `docs/environment.json` | 只读 | 获取编译器路径、芯片型号等 |
+| `docs/environment.md` | 只读 | 获取编译器路径、芯片型号、SocVersion 等；NpuArch 由 DESIGN.md / `/npu-arch` skill 提供 |
 | `docs/WALKTHROUGH.md` | 创建（串讲模式） | 设计串讲质疑清单 |
 | `docs/REVIEW.md` | 只读（修复模式） | 获取审查反馈 |
 | `docs/perf/round_NNN/` | 创建 | 性能采集数据归档 |

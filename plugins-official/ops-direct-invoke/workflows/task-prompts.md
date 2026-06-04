@@ -16,7 +16,7 @@
 请为以下算子设计方案：
 - 算子名称：{operator_name}
 - 需求描述：{用户需求}
-- 环境信息：operators/{operator_name}/docs/environment.json
+- 环境信息：operators/{operator_name}/docs/environment.md（提供芯片型号 / SocVersion / CANN 版本；NpuArch 与 `--npu-arch` 编译参数请加载 `/npu-arch` skill 按芯片型号查得后写入 DESIGN.md）
 
 【输出】
 - 技术设计：operators/{operator_name}/docs/DESIGN.md，参考`workflows/templates/design-template.md`
@@ -221,7 +221,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 - 算子名称：{operator_name}
 - 代码路径：operators/{operator_name}/
 - 设计文档：operators/{operator_name}/docs/DESIGN.md
-- 环境信息：operators/{operator_name}/docs/environment.json
+- 环境信息：operators/{operator_name}/docs/environment.md（芯片型号 / SocVersion）；NpuArch 与 `--npu-arch` 合法值通过 `/npu-arch` skill 查得，用于核对 CMakeLists 与 DESIGN.md 一致
 - 审查清单：workflows/development-guide.md
 
 【输出】

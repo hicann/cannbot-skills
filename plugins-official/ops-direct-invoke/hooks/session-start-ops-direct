@@ -44,8 +44,8 @@ All \`workflows/\` references in this document resolve to absolute paths:
 - \`workflows/task-prompts.md\` → \`${PLUGIN_ROOT}/workflows/task-prompts.md\`
 - \`workflows/development-guide.md\` → \`${PLUGIN_ROOT}/workflows/development-guide.md\`
 - \`workflows/scripts/init_operator_project.sh\` → \`${PLUGIN_ROOT}/workflows/scripts/init_operator_project.sh\`
-- \`workflows/scripts/verify_environment.sh\` → \`${PLUGIN_ROOT}/workflows/scripts/verify_environment.sh\`
 - \`workflows/templates/\` → \`${PLUGIN_ROOT}/workflows/templates/\`
+- \`workflows/templates/environment-template.md\` → \`${PLUGIN_ROOT}/workflows/templates/environment-template.md\` (Step 1 环境检查填空模板)
 - \`asc-devkit/\` → \`${ASC_DEVKIT_DIR}/\`
 
 Paths starting with \`operators/{operator_name}/\` are relative to the user's current working directory."

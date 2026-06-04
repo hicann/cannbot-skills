@@ -208,7 +208,8 @@ make
 **自动化验证脚本**：
 ```bash
 bash workflows/scripts/init_operator_project.sh {operator_name}
-bash workflows/scripts/verify_environment.sh {operator_name}
+# 环境检查：加载 /ascendc-env-check skill 完成检查，按 workflows/templates/environment-template.md
+# 填写后生成 operators/{operator_name}/docs/environment.md
 python workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMakeLists.txt
 ```
 

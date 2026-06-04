@@ -24,6 +24,10 @@
 - 【ops-registry-invoke】新增模板穿刺验证与重试机制（v1.2.0），支持 A1-P 并行穿刺、A1-P-Retry 自动重试及算子迭代整合，重构验收阶段为精度/性能两级验收。同步更新 workflow 全部文档与 agents。
 
 ### 【2026-05-26】
+#### 重构 Refactor
+- 【算子直调，ops-direct-invoke】Step 1 环境检查从 `verify_environment.sh` + `environment.json` 改为 `/ascendc-env-check` skill 采集 + `workflows/templates/environment-template.md` 填空生成 `environment.md`；删除 `verify_environment.sh`（438 行）。Architect/Developer/Reviewer 同步切到 `environment.md`，`--npu-arch` 编译参数显式收敛到 `/npu-arch` skill。
+- **本次重构未完成项**：目前 Step 2 门禁仅依赖 agent 自填的 Markdown 状态行（正则校验），失去了脚本时代 `validation.all_passed` 的确定性。后续需让 `/ascendc-env-check` 输出机器可读 sidecar（如 `docs/.env-check.json`），由 agent 在生成 `environment.md` 时双写，AGENTS.md 同时校验 sidecar 与 Markdown 一致，以闭环防止幻觉。
+
 #### 新特性 New Features
 - 【Ascend C】新增 `cuda2ascend-simt` 技能（实验版，位于 `ops-lab/`），支持将 CUDA 算子迁移到 Ascend C SIMT。**仅支持 Ascend 950 PR平台**。覆盖 `standalone sample`、`torch_npu`、`pybind` 三类交付形态，按原始工程形态选择对应产物。
 - 产物固定输出在 `ported-ops/<operator_name>/`，附中文 `plan.md` 与 `README.md`，并在 Ascend 950 PR 上做硬件验证后才报 `success`。

@@ -55,7 +55,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 ### 输入边界
 
 - 用户需求（算子数学定义、数据类型、性能要求）
-- 环境信息（`operators/{operator_name}/docs/environment.json`）
+- 环境信息（`operators/{operator_name}/docs/environment.md`）
 - （串讲回应模式）Developer 的设计质疑（`WALKTHROUGH.md ## 质疑清单`）
 
 ### 输出边界
@@ -82,9 +82,14 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 #### 前置步骤：获取环境信息
 
-读取 `operators/{operator_name}/docs/environment.json`，获取：
-- `cann_version` → 确定可用 API 集合和版本兼容性
-- `arch_dir` → 确认架构目录路径
+1. 读取 `operators/{operator_name}/docs/environment.md`：
+   - 「硬件」章节的 **芯片型号**（如 `Ascend 910B3`）、**SocVersion**
+   - 「CANN」章节的 **版本** → 确定可用 API 集合和版本兼容性
+   - 「CANN」章节的 **CPU 架构目录** → 头文件/库的搜索路径
+
+2. 加载 `/npu-arch` skill，按芯片型号 / SocVersion 查得 **NpuArch**（如 `DAV_2201` / `DAV_3510`）、**`__NPU_ARCH__`** 数值、**`--npu-arch`** 候选编译参数（vec/cube 变体在 Step 0.5 按算子类型选定）。查得结果写入 DESIGN.md。
+
+> ⚠️ NpuArch 必须通过 `/npu-arch` skill 查得，禁止凭记忆或猜测。
 
 #### Step 0：确定算子类型
 
@@ -94,7 +99,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 在进入具体设计前，先完成技术路线决策，并在 DESIGN.md 中记录选择理由：
 
-1. 读取 `environment.json` 中的 `arch_dir`、CANN 版本和芯片信息，确认目标架构约束。
+1. 按前置步骤已得到的芯片型号、NpuArch、`--npu-arch` 候选编译参数与 CANN 版本，确认目标架构约束。
 2. 判断算子类型和主计算形态：Reduction / Elementwise / Broadcast / Conversion / MatMul / 融合链路 / 其他。
 3. 默认加载 `/ascendc-tiling-design`，优先复用通用 tiling、Buffer 规划和数据流方法论。
 4. 按算子类型优先、架构其次做路线决策；RegBase 与 Blaze 都是 `DAV_3510` 的新架构能力分支：
@@ -163,7 +168,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 | `docs/DESIGN.md` | 创建/更新 | 技术设计文档，正常设计时创建，串讲/问题处理时更新 |
 | `docs/PLAN.md` | 创建 | 开发计划文档，仅正常设计时创建 |
 | `docs/WALKTHROUGH.md` | 追加 | 串讲回应模式时追加 `### 回应` |
-| `docs/environment.json` | 只读 | 获取环境信息 |
+| `docs/environment.md` | 只读 | 获取环境信息（芯片型号 / SocVersion / CANN 版本） |
 
 ---
 
@@ -177,7 +182,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 | C2 | **禁止**执行编译或运行命令 | 职责边界 |
 | C3 | **必须**先完成方案决策；默认加载 `ascendc-tiling-design` 获取通用设计方法论，路线决策进入 RegBase 分支时加载 `ascendc-regbase-best-practice`，进入 Matmul/Cube（Blaze）分支时加载 `ascendc-blaze-best-practice` | 设计流程 |
 | C4 | **必须**资料获取优先从 `asc-devkit/docs/` 目录，示例代码从 `asc-devkit/examples/` 获取 | 资料来源 |
-| C5 | **必须**确认 API 兼容当前环境（从 environment.json 读取 CANN 版本和芯片型号） | 环境兼容 |
+| C5 | **必须**确认 API 兼容当前环境（芯片型号 / CANN 版本读 environment.md；NpuArch 通过 `/npu-arch` skill 查得） | 环境兼容 |
 | C6 | **必须**每个选用的 API 查阅 `asc-devkit/docs/api/context/{API名称}*.md` 验证参数签名和类型约束 | API 验证 |
 | C7 | **禁止**未验证的 API 禁止写入设计方案 | 幻觉防控 |
 | C8 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
