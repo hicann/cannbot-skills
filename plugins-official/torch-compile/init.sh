@@ -159,7 +159,8 @@ Installation paths (CANNBot brand):
   Trae:     .trae/{skills,agents}/      (symlinks, project-level only)
   Cursor:   .cursor/{skills,agents}/    (auto-discovered)
   Codex:    .codex/{skills,agents}/     (auto-discovered)
-  Copilot:  .copilot/{skills,agents}/   (auto-discovered)
+  Copilot:  .github/{skills,agents}/    (project-level)
+            ~/.copilot/{skills,agents}/  (global)
 
 After installation, launch directly:
   OpenCode: opencode
@@ -224,7 +225,7 @@ else
     elif [ "$TOOL" = "codex" ]; then
         CONFIG_ROOT="$INSTALL_BASE/.codex"
     elif [ "$TOOL" = "copilot" ]; then
-        CONFIG_ROOT="$INSTALL_BASE/.copilot"
+        CONFIG_ROOT="$INSTALL_BASE/.github"
     else
         CONFIG_ROOT="$INSTALL_BASE/.claude"
     fi

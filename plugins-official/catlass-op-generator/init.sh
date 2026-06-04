@@ -139,7 +139,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", or "trae"
+  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
 
 Options:
   --help  - Show this help message
@@ -150,6 +150,9 @@ Examples:
   init.sh global claude        # Global-level, Claude Code
   init.sh project claude       # Project-level, Claude Code
   init.sh project trae         # Project-level, Trae
+  init.sh project cursor       # Project-level, Cursor
+  init.sh project copilot      # Project-level, Copilot
+  init.sh global copilot       # Global-level, Copilot
 
 Installation paths (CANNBot brand):
   OpenCode:     .opencode/{skills,agents}/     (auto-discovered)
@@ -157,11 +160,15 @@ Installation paths (CANNBot brand):
   Trae IDE:     .trae/{skills,agents}/         (symlinks, project-level only)
   Trae Plugin:  .marscode/{skills,agents}/     (symlinks, project-level only)
   Trae CLI:     .traecli/{skills,agents}/      (symlinks, project-level only)
+  Copilot:      .github/{skills,agents}/       (symlinks, project-level)
+                ~/.copilot/{skills,agents}/    (symlinks, global)
 
 After installation, launch directly:
   OpenCode: opencode
   Claude:   claude
   Trae:     通过 CLI 或 IDE 启动
+  Cursor:   通过 Cursor IDE 启动
+  Copilot:  通过 GitHub Copilot CLI / IDE 启动
 EOF
 }
 
@@ -179,8 +186,8 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, --help."
+        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
+        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, --help."
             exit 1 ;;
     esac
 done
@@ -189,9 +196,13 @@ done
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
-    elif [ "$TOOL" = "trae" ]; then
+    elif [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
         echo "Error: Global installation is not supported for Trae. Use project-level instead."
         exit 1
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$HOME/.copilot"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$HOME/.cursor"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -206,6 +217,10 @@ else
             cli)    CONFIG_ROOT="$CONFIG_ROOT_BASE/.traecli" ;;
             *)      CONFIG_ROOT="$CONFIG_ROOT_BASE/.trae" ;;
         esac
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -389,7 +404,7 @@ if [ "$TOOL" = "opencode" ]; then
     step1_summary="${step1_summary}agents(${agent_count})"
     ok "Linked: $step1_summary"
 else
-    # Trae/Claude: create directories (per-item symlinks handled in Step 3)
+    # Trae/Claude/Copilot: create directories (per-item symlinks handled in Step 3)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
     ok "Prepared: skills/, agents/"
 fi
@@ -471,7 +486,7 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: skills/ agents already at auto-scan paths, no extra discovery needed
     ok "Auto-scan: skills/, agents/"
 else
-    # Trae/Claude: create per-skill discovery symlinks (with filter, from shared ops)
+    # Trae/Claude/Copilot: create per-skill discovery symlinks (with filter, from shared ops)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     # Pre-clean existing skills (only whitelist items)
@@ -659,6 +674,14 @@ if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
 elif [ "$TOOL" = "trae" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 在工作区根准备 catlass 源码（与 operators/ 平级）：${GREEN}git clone https://gitcode.com/cann/catlass.git${NC}"
+  echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
+elif [ "$TOOL" = "copilot" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 在工作区根准备 catlass 源码（与 operators/ 平级）：${GREEN}git clone https://gitcode.com/cann/catlass.git${NC}"
+  echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
+elif [ "$TOOL" = "cursor" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 在工作区根准备 catlass 源码（与 operators/ 平级）：${GREEN}git clone https://gitcode.com/cann/catlass.git${NC}"
   echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
 else

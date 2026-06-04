@@ -130,6 +130,66 @@ bash install.sh project trae
 cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project trae
 ```
 
+## Cursor
+
+### 安装
+
+```bash
+# 1. 克隆仓库
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/triton-op-generator
+
+# 2. 运行安装脚本
+bash install.sh project cursor     # 项目级
+bash install.sh global cursor      # 全局级
+```
+
+### 验证
+
+检查项目目录下是否生成：
+- `.cursor/skills/` 目录，包含 6 个 skill 符号链接
+- `AGENTS.md` 符号链接
+
+### 启动
+
+通过 Cursor IDE 启动。
+
+### 更新
+
+```bash
+cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project cursor
+```
+
+## Copilot
+
+### 安装
+
+```bash
+# 1. 克隆仓库
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/triton-op-generator
+
+# 2. 运行安装脚本
+bash install.sh project copilot    # 项目级
+bash install.sh global copilot     # 全局级
+```
+
+### 验证
+
+检查项目目录下是否生成：
+- `.github/skills/` 目录（项目级）或 `~/.copilot/skills/` 目录（全局级），包含 6 个 skill 符号链接
+- `AGENTS.md` 符号链接
+
+### 启动
+
+通过 VS Code Copilot CLI / IDE 启动。
+
+### 更新
+
+```bash
+cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project copilot
+```
+
 ---
 
 ## 安装路径说明
@@ -140,6 +200,8 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh projec
 | Claude | install.sh | `.claude/skills/` + `CLAUDE.md` | 一键完成，skills 和 CLAUDE.md 自动配置 |
 | OpenCode | install.sh | `.opencode/skills/` + `AGENTS.md` | Skills 通过 symlink 安装，AGENTS.md 自动配置 |
 | Trae | install.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
+| Cursor | install.sh | `.cursor/skills/` + `AGENTS.md` | 项目级/全局级 |
+| Copilot | install.sh | `.github/skills/` + `AGENTS.md`（项目级）/ `~/.copilot/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
 
 > **注意**：`claude plugin install` 仅安装技能（skills），不会自动创建 `CLAUDE.md`。因为 Claude Code 插件系统当前不支持安装后钩子（post-install hook），所以需要手动执行 `ln -s` 命令链接 `AGENTS.md`。
 

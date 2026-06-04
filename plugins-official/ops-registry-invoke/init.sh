@@ -150,7 +150,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", or "cursor"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -163,6 +163,8 @@ Examples:
   init.sh project claude               # Project-level, Claude Code
   init.sh project trae                 # Project-level, Trae
   init.sh project cursor               # Project-level, Cursor
+  init.sh project copilot              # Project-level, Copilot
+  init.sh global copilot               # Global-level, Copilot
   init.sh project opencode /path/to/proj  # Project-level, OpenCode, custom path
   init.sh project trae /path/to/proj      # Project-level, Trae, custom path
 
@@ -173,12 +175,15 @@ Installation paths:
   Trae Plugin:  .marscode/{skills,agents}/   + AGENTS.md in project root
   Trae CLI:     .traecli/{skills,agents}/    + AGENTS.md in project root
   Cursor:       .cursor/{skills,agents}/     + AGENTS.md in project root
+  Copilot:      .github/{skills,agents}/      + AGENTS.md in project root (project)
+                ~/.copilot/{skills,agents}/   + AGENTS.md (global)
 
 After installation, launch directly:
   OpenCode: opencode
   Claude:   claude
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
+  Copilot:  通过 GitHub Copilot CLI / IDE 启动
 EOF
 }
 
@@ -191,7 +196,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
     esac
 done
 
@@ -199,7 +204,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor) ;;
+        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -208,7 +213,7 @@ fi
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
-    elif [ "$TOOL" = "trae" ]; then
+    elif [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
         detect_trae_variant
         case "$TRAE_VARIANT" in
             plugin) CONFIG_ROOT="$HOME/.marscode" ;;
@@ -217,6 +222,8 @@ if [ "$LEVEL" = "global" ]; then
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$HOME/.copilot"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -241,6 +248,8 @@ else
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -468,7 +477,7 @@ if [ "$TOOL" = "opencode" ]; then
     done
     ok "Agents: $agent_count linked"
 else
-    # Trae/Claude/Cursor: create directories (per-item symlinks handled in Step 5)
+    # Trae/Claude/Cursor/Copilot: create directories (per-item symlinks handled in Step 5)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
     ok "Prepared: skills/, agents/, rules/"
 fi
@@ -585,7 +594,7 @@ step "[5/7] Configuring tool discovery..."
 if [ "$TOOL" = "opencode" ]; then
     ok "Auto-scan: skills/, agents/"
 else
-    # Trae/Claude/Cursor: create per-skill discovery symlinks
+    # Trae/Claude/Cursor/Copilot: create per-skill discovery symlinks
     DISCOVERY="$CONFIG_ROOT/skills"
     link_count=0
     for skill in $ALL_SKILLS; do

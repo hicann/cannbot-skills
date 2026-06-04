@@ -57,7 +57,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", or "cursor"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -68,6 +68,8 @@ Examples:
   init.sh project claude
   init.sh project trae
   init.sh project cursor
+  init.sh project copilot
+  init.sh global copilot
   init.sh global claude
   init.sh global cursor
   init.sh project opencode /path/to/proj
@@ -82,7 +84,7 @@ for arg in "$@"; do
     case "$arg" in
         --help) show_help; exit 0 ;;
         global|project) LEVEL="$arg" ;;
-        opencode|claude|trae|cursor) TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot) TOOL="$arg" ;;
     esac
 done
 
@@ -90,7 +92,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor) ;;
+        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -107,6 +109,8 @@ if [ "$LEVEL" = "global" ]; then
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$HOME/.copilot"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -128,6 +132,8 @@ else
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -206,20 +212,20 @@ install_config() {
     local config_src="$PLUGIN_ROOT/AGENTS.md"
     local config_target
     if [ "$LEVEL" = "project" ]; then
-        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
             config_target="$PWD/AGENTS.md"
         else
             config_target="$PWD/CLAUDE.md"
         fi
     else
-        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
             config_target="$CONFIG_ROOT/AGENTS.md"
         else
             config_target="$CONFIG_ROOT/CLAUDE.md"
         fi
     fi
 
-    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
         ok "$(basename "$config_target") already in current directory"
     else
         ln -sf "$config_src" "$config_target"
@@ -313,7 +319,7 @@ echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo ""
 
-if [ "$TOOL" = "trae" ]; then
+if [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
     case "$TRAE_VARIANT" in
         ide)
             info "Detected: TRAE IDE (.trae-cn / .trae)"
@@ -398,6 +404,11 @@ echo ""
 echo -e "  ${GREEN}${BOLD}✓ model-infer-optimize installed successfully!${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
-echo -e "  ${CYAN}1.${NC} 在目标 cann-recipes-infer 或模型仓中启动工具"
-echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}帮我优化 <model_name> 模型的 NPU 推理性能${NC}"
+if [ "$TOOL" = "copilot" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动"
+  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}帮我优化 <model_name> 模型的 NPU 推理性能${NC}"
+else
+  echo -e "  ${CYAN}1.${NC} 在目标 cann-recipes-infer 或模型仓中启动工具"
+  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}帮我优化 <model_name> 模型的 NPU 推理性能${NC}"
+fi
 echo ""

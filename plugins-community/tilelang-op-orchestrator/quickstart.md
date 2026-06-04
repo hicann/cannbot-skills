@@ -22,6 +22,9 @@ cd cannbot-skills/plugins-community/tilelang-op-orchestrator
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户（默认）
 bash init.sh project claude     # Claude Code 用户
+bash init.sh project trae       # Trae 用户
+bash init.sh project cursor     # Cursor 用户
+bash init.sh project copilot    # Copilot 用户
 
 # 4. 进入 TileLang-Ascend 源码仓库，安装环境
 cd tilelang-ascend
@@ -43,6 +46,9 @@ cd cannbot-skills/plugins-community/tilelang-op-orchestrator
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
 bash init.sh global claude      # Claude Code 用户
+bash init.sh global trae        # Trae 用户
+bash init.sh global cursor      # Cursor 用户
+bash init.sh global copilot     # Copilot 用户
 
 # 4. 进入 TileLang-Ascend 源码仓库，安装环境
 cd tilelang-ascend
@@ -54,11 +60,27 @@ cd ..
 
 init.sh 脚本会完成以下操作：
 
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 |
-|------|----------------|---------------|---------------|-------------|
-| Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` |
-| Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` |
-| AGENTS.md | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 |
+|------|----------------|---------------|---------------|-------------|------------|
+| Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` | `.trae/skills/` |
+| Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` | `.trae/agents/` |
+| AGENTS.md | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | `.trae/AGENTS.md` |
+
+#### Cursor 安装路径
+
+| 内容 | Cursor 项目级 | Cursor 全局级 |
+|------|--------------|--------------|
+| Skills 技能模块 | `.cursor/skills/` | `~/.cursor/skills/` |
+| Agents 子代理 | `.cursor/agents/` | `~/.cursor/agents/` |
+| AGENTS.md | `.cursor/AGENTS.md` | `~/.cursor/AGENTS.md` |
+
+#### Copilot 安装路径
+
+| 内容 | Copilot 项目级 | Copilot 全局级 |
+|------|---------------|---------------|
+| Skills 技能模块 | `.github/skills/` | `~/.copilot/skills/` |
+| Agents 子代理 | `.github/agents/` | `~/.copilot/agents/` |
+| AGENTS.md | `.github/AGENTS.md` | `~/.copilot/AGENTS.md` |
 
 ### 环境校验
 

@@ -24,6 +24,8 @@ bash init.sh project opencode   # 项目级
 bash init.sh global opencode    # 全局级
 ```
 
+支持工具：`opencode`（默认）、`claude`、`trae`、`cursor`、`copilot`。
+
 ### catlass 源码就绪（自动处理）
 
 工作区根需存在 `./catlass/`（与 `operators/` 平级）。Step 1 会自动检测并在缺失时执行 `git clone https://gitcode.com/cann/catlass.git`。

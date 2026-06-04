@@ -76,6 +76,17 @@ bash init.sh global cursor      # 全局级
 
 安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
 
+### Copilot
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/ops-direct-invoke
+bash init.sh project copilot    # 项目级
+bash init.sh global copilot     # 全局级
+```
+
+安装后在项目根目录生成 `.github/` 目录（项目级）或 `~/.copilot/` 目录（全局级），AGENTS.md 自动注入 VS Code Copilot 上下文。
+
 ### 在其他目录执行
 
 `init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：

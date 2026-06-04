@@ -41,6 +41,7 @@
 | **Trae** | 下载安装：https://www.trae.cn → [官方文档](https://www.trae.cn) | 脚本安装 |
 | **Cursor** | 下载安装：https://cursor.com → [官方文档](https://cursor.com/cn/docs/get-started/quickstart) | 脚本安装 |
 
+
 ### 步骤一：克隆仓库
 
 ```bash
@@ -50,7 +51,7 @@ cd cannbot-skills
 
 ### 步骤二：选择场景并安装
 
-选择对应场景，将 `<tool>` 替换为你的 AI 工具后执行：
+选择对应场景，将 `<tool>` 替换为你的 AI 工具（支持 `opencode` / `claude` / `trae` / `cursor` / `copilot`）后执行：
 
 | 场景 | 安装命令 | 详细文档 |
 |------|---------|---------|
@@ -82,6 +83,7 @@ ls .claude/skills/        # Claude Code 用户
 ls .opencode/skills/      # OpenCode 用户
 ls .trae/skills/          # Trae 用户
 ls .cursor/skills/        # Cursor 用户
+ls .github/skills/        # VS Code Copilot 用户
 
 # 如果上述目录存在且包含多个子目录（如 npu-arch、ascendc-env-check 等），说明安装成功。
 ```

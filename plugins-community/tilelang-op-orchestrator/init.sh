@@ -57,7 +57,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default) or "claude"
+  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
 
 Options:
   --help  - Show this help message
@@ -67,14 +67,23 @@ Examples:
   init.sh project opencode     # Project-level, OpenCode
   init.sh global claude        # Global-level, Claude Code
   init.sh project claude       # Project-level, Claude Code
+  init.sh project trae         # Project-level, Trae
+  init.sh project cursor       # Project-level, Cursor
+  init.sh project copilot      # Project-level, Copilot
+  init.sh global copilot       # Global-level, Copilot
 
 Installation paths (CANNBot brand):
   OpenCode: .opencode/{skills,agents}/  (auto-discovered)
   Claude:   .claude/{skills,agents}/    (per-skill symlinks auto-created)
+  Copilot:  .github/{skills,agents}/    (project-level)
+            ~/.copilot/{skills,agents}/ (global)
 
 After installation, launch directly:
   OpenCode: opencode
   Claude:   claude
+  Trae:     通过 CLI 或 IDE 启动
+  Cursor:   通过 Cursor IDE 启动
+  Copilot:  通过 GitHub Copilot CLI / IDE 启动
 EOF
 }
 
@@ -92,22 +101,51 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, --help."
+        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
+        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, --help."
             exit 1 ;;
     esac
 done
+
+# Detect TRAE variant by scanning global config directories.
+# Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
+detect_trae_variant() {
+    if [ -d "$HOME/.trae" ]; then
+        TRAE_VARIANT="ide"
+    elif [ -d "$HOME/.marscode" ]; then
+        TRAE_VARIANT="plugin"
+    elif [ -d "$HOME/.traecli" ]; then
+        TRAE_VARIANT="cli"
+    else
+        TRAE_VARIANT="unknown"
+    fi
+}
 
 # Determine config root directory
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$HOME/.copilot"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$HOME/.cursor"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$PLUGIN_ROOT/.opencode"
+    elif [ "$TOOL" = "trae" ]; then
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$PLUGIN_ROOT/.marscode" ;;
+            cli)    CONFIG_ROOT="$PLUGIN_ROOT/.traecli" ;;
+            *)      CONFIG_ROOT="$PLUGIN_ROOT/.trae" ;;
+        esac
+    elif [ "$TOOL" = "copilot" ]; then
+        CONFIG_ROOT="$PLUGIN_ROOT/.github"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$PLUGIN_ROOT/.cursor"
     else
         CONFIG_ROOT="$PLUGIN_ROOT/.claude"
     fi
@@ -129,6 +167,26 @@ echo "  Tool:      $TOOL"
 echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo ""
+
+if [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
+    case "$TRAE_VARIANT" in
+        ide)
+            info "Detected: TRAE IDE (.trae)"
+            ;;
+        plugin)
+            info "Detected: TRAE Plugin (.marscode)"
+            ;;
+        cli)
+            info "Detected: TRAE CLI (.traecli)"
+            ;;
+        unknown)
+            warn "TRAE variant not detected; defaulting to IDE path"
+            warn "If you use TRAE Plugin, ensure ~/.marscode exists before re-running"
+            warn "If you use TRAE CLI, ensure ~/.traecli exists before re-running"
+            ;;
+    esac
+    echo ""
+fi
 
 # --- Step 1: Create directory symlinks ---
 step "[1/5] Setting up CANNBot directory..."
@@ -179,7 +237,7 @@ if [ "$TOOL" = "opencode" ]; then
     step1_summary="${step1_summary}agents(${agent_count})"
     ok "Linked: $step1_summary"
 else
-    # Claude: create directories (per-item symlinks handled in Step 3)
+    # Claude/Trae/Cursor/Copilot: create directories (per-item symlinks handled in Step 3)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
     ok "Prepared: skills/, agents/"
 fi
@@ -190,7 +248,7 @@ echo ""
 step "[2/5] Installing configuration..."
 mkdir -p "$CONFIG_ROOT"
 
-if [ "$TOOL" = "opencode" ]; then
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
     ln -sf "$PLUGIN_ROOT/AGENTS.md" "$CONFIG_ROOT/AGENTS.md"
     ok "AGENTS.md"
 else
@@ -206,7 +264,7 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: skills/agents already at auto-scan paths, no extra discovery needed
     ok "Auto-scan: skills/, agents/"
 else
-    # Claude: create per-skill discovery symlinks (with filter, from shared ops-lab/tilelang/skills)
+    # Claude/Trae/Cursor/Copilot: create per-skill discovery symlinks (with filter, from shared ops-lab/tilelang/skills)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     # Pre-clean existing skills
@@ -236,7 +294,7 @@ else
 
     ok "Skills: $link_count discovery symlinks"
 
-    # Claude: also create agent discovery symlinks (from local agents/)
+    # Claude/Trae/Cursor/Copilot: also create agent discovery symlinks (from local agents/)
     AGENT_DISCOVERY="$CONFIG_ROOT/agents"
 
     for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
@@ -365,6 +423,15 @@ echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我写一个 softmax 算子设计文档并开发算子${NC}"
+elif [ "$TOOL" = "copilot" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我写一个 softmax 算子设计文档并开发算子${NC}"
+elif [ "$TOOL" = "trae" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我写一个 softmax 算子设计文档并开发算子${NC}"
+elif [ "$TOOL" = "cursor" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我写一个 softmax 算子设计文档并开发算子${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

@@ -72,6 +72,14 @@ init.sh 脚本会完成以下操作：
 | Agents 子代理 | `.cursor/agents/ascendc-ops-reviewer.md` | `~/.cursor/agents/ascendc-ops-reviewer.md` |
 | 配置文件 | 项目根目录 `AGENTS.md` | `~/.cursor/AGENTS.md` |
 
+#### Copilot 安装路径
+
+| 内容 | Copilot 项目级 | Copilot 全局级 |
+|------|---------------|---------------|
+| Skills 技能模块 | `.github/skills/ascendc-code-review/` | `~/.copilot/skills/ascendc-code-review/` |
+| Agents 子代理 | `.github/agents/ascendc-ops-reviewer.md` | `~/.copilot/agents/ascendc-ops-reviewer.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.copilot/AGENTS.md` |
+
 ### 在其他目录执行
 
 `init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：

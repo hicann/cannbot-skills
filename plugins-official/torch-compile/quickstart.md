@@ -80,7 +80,7 @@ bash "$INIT" project copilot    # 项目级
 bash "$INIT" global copilot     # 全局级
 ```
 
-生成 `.copilot/`（或全局 `~/.copilot/`），结构与 Codex 一致。
+生成 `.github/`（项目级）或 `~/.copilot/`（全局级），结构与 Codex 一致。
 
 > **关于"项目级"的位置说明**：项目级安装的 `.opencode/` `.claude/` 等目录落在执行 `init.sh` 时的**当前工作目录**下，请在希望生效的项目根目录调用脚本；如需全局生效，请使用 `global` 模式。
 
