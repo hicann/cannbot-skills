@@ -244,6 +244,7 @@ SIMT 算子有独特的精度调试问题：DCache 一致性、核内共享内�
     ├─ 快速方法（优先尝试，≤7次）
     │   ├─ 误差分布分析 → 识别误差模式
     │   ├─ Printf 特定位置 → 缩小范围
+    │   ├─ DumpTensor 7步法 → kernel 内插桩 + CPU golden 逐段对比 ⭐
     │   └─ 常见陷阱排查 → 对症下药
     │
     └─ 二分调试（保底手段）
@@ -251,6 +252,12 @@ SIMT 算子有独特的精度调试问题：DCache 一致性、核内共享内�
 ```
 
 > **重要原则**：不要盲目试错超过 7 次
+
+### DumpTensor 7步法
+
+kernel 内插桩调试的标准工具：在 CopyIn / Compute / CopyOut 关键点插入 `DumpTensor`，配合 CPU golden 同 desc 编号 (100/200/300) 逐段对比，快速定位异常出现在数据流哪一阶段。适用：输出错误、NaN/Inf、需要追踪 CopyIn → Compute → CopyOut 各阶段数据。
+
+详细说明见 [references/ascendc-dumptensor.md](references/ascendc-dumptensor.md)
 
 ---
 
@@ -347,6 +354,7 @@ SIMT 算子有独特的精度调试问题：DCache 一致性、核内共享内�
 - [printf-debug.md](references/printf-debug.md) - Printf 调试法
 - [data-comparison.md](references/data-comparison.md) - 数据对比法
 - [tools-reference.md](references/tools-reference.md) - 工具和命令参考
+- [ascendc-dumptensor.md](references/ascendc-dumptensor.md) - DumpTensor 7步法（含 API、错误模式）
 
 ### 实战案例
 - [case-studies.md](references/case-studies.md) - 实战调试案例
