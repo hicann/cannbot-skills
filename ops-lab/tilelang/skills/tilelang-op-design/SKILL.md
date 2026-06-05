@@ -5,8 +5,6 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 
 # TileLang-Ascend 算子设计文档生成
 
----
-
 ## 1. 目标
 
 根据算子需求信息，生成一份完整的 TileLang-Ascend 算子设计文档（`design.md`），涵盖以下核心决策：
@@ -32,15 +30,25 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 | 输入张量规格 | shape、dtype |
 | 输出张量规格 | shape、dtype |
 | 编程模式偏好 | Developer / Expert / 混合 |
+| **迁移算子路径** ⭐ | 原算子文件路径（迁移时必需），用于获取 golden 实现 |
+| **输出形状** ⭐ | 原算子输出 shape（迁移时必需），如 `(N, M)` 或 `(M, N)` |
+
+**迁移算子时必须提供原算子路径和输出形状**，否则无法证明迁移正确性。Golden 实现一致性要求详见 [tilelang-op-develop SKILL.md §8 Checklist #9-#10](../tilelang-op-develop/SKILL.md)。
 
 **提问规则（必须严格遵守）**：
-1. **每次只询问一个字段**：使用 `question` 工具时，`questions` 数组中只包含一个元素
-2. **按表格顺序依次询问**：算子名称 → 数学公式 → 输入张量规格 → 输出张量规格 → 编程模式偏好
-3. **已提供的字段跳过**：如果用户在初始请求中已提供某个字段的值，跳过该字段继续下一个
-4. **示例**：
+1. **优先使用调用方传入的字段**：若调用方（如 `@tilelang-op-orchestrator` 通过 analyst 传入 `op_requirements` 结构）已经提供了字段值，**全部跳过提问**，直接进入技术约束检测和 design 生成
+2. **每次只询问一个字段**：使用 `question` 工具时，`questions` 数组中只包含一个元素
+3. **按表格顺序依次询问**：算子名称 → 数学公式 → 输入张量规格 → 输出张量规格 → 编程模式偏好
+4. **已提供的字段跳过**：如果用户在初始请求中已提供某个字段的值，跳过该字段继续下一个
+5. **示例**：
    - 第 1 次询问：只问"数学公式"
    - 用户回答后，第 2 次询问：只问"输入张量规格"
    - 以此类推
+
+**⚠️ 当被 orchestrator → analyst Subagent 链路调度时**：
+- analyst 会把 orchestrator 在 Primary 上下文预检收集到的 `op_requirements` 完整传入
+- 此时 5 个必需字段应当全部已 provided，跳过整个提问环节
+- 若 skill 仍发现字段歧义或缺漏，**不要**在当前 Subagent 上下文调用 `AskUserQuestion`（透传不到真实用户），而是让 analyst 返回 `partial_input` + 缺失字段名给 orchestrator，由 orchestrator 在 Primary 上下文追问
 
 ### 推荐信息
 
@@ -55,7 +63,17 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 
 ---
 
-## 3. 工作流程
+## 3. 技术约束（必须遵守）
+
+本项目为 TileLang-Ascend（华为昇腾 NPU），与 GPU 版 TileLang 有显著差异。外部参考实现不可直接使用，必须转换为 Ascend 兼容方案。
+
+**生成 design.md 前必须执行强制检测**：三维 Kernel、threads 参数、动态循环边界、GPU 专用 API、GEMM 非整除、L0C 溢出等。
+
+详细已知限制清单、强制检测规则、警告输出模板见 [references/ascend-constraints.md](references/ascend-constraints.md)。
+
+---
+
+## 4. 工作流程
 
 ### Phase 1：输入解析与算子特征分析
 
@@ -64,39 +82,39 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 3. 分析算子特征：
    - **计算类型判定**：
      - 纯 Vector（element-wise / reduction）→ 仅需 UB
-     - 纯 Cube（含 matmul）→ 需要 L1 + L0A/L0B/L0C
-     - 混合（matmul + element-wise 后处理）→ 核间流水线
+     - 纯 Cube（仅 matmul）→ 需要 L1 + L0A/L0B/L0C
+     - 混合（matmul + element-wise 后处理）→ 核间流水线，需要 CV 融合
+     - **Host 预处理**：如 im2col 等 Python 侧预处理步骤，标明在 design 的 §1 和 §4 中
    - **复杂度级别**：
      - 单步（如 element-wise add）→ 无循环、单次搬运
      - 多步（如 softmax = max + sub + exp + sum + div）→ 多次计算、可能需要中间缓冲
      - 融合（如 flash attention = GEMM + softmax + GEMM）→ 核间协作、流水线
    - **动态 shape 判定**：是否存在运行时才确定的维度
+4. **非整除场景预判**：检查输入 shape 是否可能不被 block size 整除。GEMM 类算子的 `M // block_M` 和 `N // block_N` 在 `M < block_M` 或 `N < block_N` 时产生零 block 或不完整 tile，必须在设计中明确处理策略（host 侧 zero-padding + crop，或 Kernel 内动态 block size）
 
 ### Phase 2：信息收集
 
-1. 查阅 `examples/` 中同类算子实现
-2. 查阅 [tilelang-api-best-practices SKILL.md](../tilelang-api-best-practices/SKILL.md) 确认 API 可用性和用法
-3. 查阅 [tilelang-programming-model-guide SKILL.md](../tilelang-programming-model-guide/SKILL.md) 确认编程模式和 pass_configs 配置
-4. 如有参考实现，分析其计算步骤
+**必须执行强制步骤 0：搜索本项目同类实现**。详细工具调用、信息收集步骤、禁止行为见 [references/info-sources.md](references/info-sources.md)。
 
 ### Phase 3：生成 design.md
 
-基于 `templates/design-template.md` 模板，填充所有章节：
+基于 [examples/design-template.md](examples/design-template.md) 模板，填充所有章节：
 
 1. 概述
 2. 编程模式选型
 3. API 映射设计
 4. 数据规格与内存规划
-5. Tiling 策略
+5. Tiling 策略（**必含：非整除时 padding+crop 策略，或 Kernel 内动态 block 方案**）
 6. 循环与调度结构
 7. 同步策略
-8. 验证方案
-9. 风险点与注意事项
-10. 交付清单
+8. CV 融合设计（**按模式分支**：Developer 默认消除 workspace/vid——`threads=2` + 片上直连，不产出 workspace 规格；仅 Expert/混合或复杂场景回退才设计 workspace + `workspace_idx`。详见 design-template.md §8.2）
+9. 验证方案
+10. 风险点与注意事项
+11. 交付清单
 
 ### Phase 4：质量自检
 
-按照 §5 中的自检清单逐项检查，确保文档质量。
+按照 [references/quality-checklist.md](references/quality-checklist.md) 中的自检清单逐项检查，确保文档质量。
 
 ### Phase 5：针对性修订
 
@@ -108,75 +126,15 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 
 ---
 
-## 4. 算子特征分析决策树
+## 5. 算子特征分析决策树
 
-**重要**：`T.reduce_sum/max/min` 和 `T.tile.*` 在 Developer 和 Expert 模式下**都可使用**。模式选择取决于是否需要手动控制内存层级和同步，而非使用了哪个 API。
-
-```
-算子数学公式
-├─ 含 matmul / @ / 矩阵乘
-│   ├─ 仅 matmul → 纯 Cube
-│   │   模式: Expert (手动管理 L0)
-│   │   API: T.gemm_v0 / T.gemm_v1 / T.mma
-│   │   内存: GM→L1→L0A/L0B→L0C→UB→GM
-│   │
-│   └─ matmul + element-wise 后处理 → 混合（融合算子）
-│       模式: Expert + 核间流水线
-│       API: T.gemm + T.tile.* / T.Parallel
-│       内存: Cube 核 L0C→UB 交给 Vector 核处理
-│       同步: T.set_cross_flag / T.wait_cross_flag
-│
-├─ 纯 element-wise（逐元素运算）
-│   ├─ 单步运算 → Developer 模式优先
-│   │   API: T.Parallel + 算术符号
-│   │   内存: GM→UB→GM
-│   │
-│   └─ 多步运算（如 softmax、layer_norm）
-│       ├─ 需要精细控制 buffer 分配和复用 → Expert 模式
-│       │   API: T.reduce_* + T.tile.* + T.alloc_ub
-│       │
-│       └─ 无需精细内存控制 → Developer 模式
-│           API: T.Parallel 内链式运算 + T.reduce_*
-│
-└─ 含归约（reduce_sum / reduce_max / reduce_min）
-    两种模式均可使用 T.reduce_*，选择依据：
-    ├─ 简单归约（如单步 reduce_sum）→ Developer 模式
-    └─ 归约 + 多步后续计算 + 需精细 buffer 管理 → Expert 模式
-    API: T.reduce_sum / T.reduce_max / T.reduce_min
-    内存: GM→UB→GM
-```
-
----
-
-## 5. 质量自检清单
-
-生成 `design.md` 后，逐项检查：
-
-| # | 检查项 | 是否必须通过 |
-|---|--------|-------------|
-| 1 | **编程模式有明确结论和理由**：不是笼统的「视情况而定」 | ✅ 必须 |
-| 2 | **API 映射具体到函数名和参数**：不是「使用相关 API」 | ✅ 必须 |
-| 3 | **内存搬运路径完整**：从 GM 到计算再到 GM 的每一步都有说明 | ✅ 必须 |
-| 4 | **Tiling 策略有约束分析**：解释了为什么选择该 Block/Tile 大小 | ⭕ 推荐 |
-| 5 | **同步策略与编程模式匹配**：Developer 用自动同步、Expert 标明手动同步点 | ⭕ 推荐 |
-| 6 | **验证方案覆盖典型配置**：不是「待补充」 | ⭕ 推荐 |
-| 7 | **无占位符或模糊描述**：无 `{placeholder}`、TODO、「待补充」（已确认的除外） | ✅ 必须 |
-
-**通过条件**：必须项全部通过，推荐项至少通过 2/3。
+详细决策树（Ascend 版）、平台识别、API 映射规则、NPU 硬件约束（分形限制 / 对齐要求 / 存储大小上限）见 [references/decision-tree.md](references/decision-tree.md)。
 
 ---
 
 ## 6. 信息源优先级
 
-| 优先级 | 信息源 | 用途 |
-|--------|--------|------|
-| 1 | `docs/TileLang-Ascend Programming Guide.md` | 权威 API 说明和编程指南 |
-| 2 | [tilelang-api-best-practices SKILL.md](../tilelang-api-best-practices/SKILL.md) | API 用法速查和最佳实践 |
-| 3 | [tilelang-programming-model-guide SKILL.md](../tilelang-programming-model-guide/SKILL.md) | 编程模式选择和 pass_configs 配置 |
-| 4 | `examples/` 示例代码 | 实际 API 用法和编程模式参考 |
-| 5 | `testing/python/language/` | 边界用法和测试模式参考 |
-
-**冲突处理**：当信息源之间矛盾时，以 `docs/` 为准。若 `docs/` 未覆盖，以 `tilelang/language/` 源码实际实现为准。
+信息源优先级表与冲突处理原则见 [references/info-sources.md](references/info-sources.md)。
 
 ---
 
@@ -194,28 +152,21 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 
 ## 8. 完成报告
 
-文档生成完成后，输出以下格式的报告：
+文档生成完成后，按 [examples/completion-report-template.md](examples/completion-report-template.md) 输出报告。
 
-```
-## 设计文档生成报告
-
-- 算子: {算子名称}
-- 编程模式: {Developer / Expert / 混合}
-- 计算类型: {纯 Vector / 纯 Cube / 混合}
-- 输出路径: {文件路径}
-
-### 自检结果
-1. 编程模式选型: ✅ / ❌
-2. API 映射具体性: ✅ / ❌
-3. 内存搬运完整性: ✅ / ❌
-4. Tiling 约束分析: ✅ / ❌
-5. 同步策略匹配: ✅ / ❌
-6. 验证方案覆盖: ✅ / ❌
-7. 无占位符: ✅ / ❌
-
-### 待确认项
-- {列出需要用户进一步确认的内容}
-```
+---
 
 ## 9. 生成算子
-完成报告后，询问用户是否根据此报告生成对应算子代码
+
+完成报告后，询问用户是否根据此报告生成对应算子代码。
+
+---
+
+## 子目录索引
+
+- [references/ascend-constraints.md](references/ascend-constraints.md) — 技术约束清单、强制检测规则、警告输出格式
+- [references/decision-tree.md](references/decision-tree.md) — 算子特征分析决策树、平台识别、NPU 硬件约束、API 映射规则
+- [references/quality-checklist.md](references/quality-checklist.md) — 19 项质量自检清单
+- [references/info-sources.md](references/info-sources.md) — 信息收集步骤、信息源优先级、冲突处理原则
+- [examples/design-template.md](examples/design-template.md) — design.md 完整模板
+- [examples/completion-report-template.md](examples/completion-report-template.md) — 完成报告输出模板

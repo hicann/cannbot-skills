@@ -161,10 +161,10 @@
     },
     {
       "name": "tilelang-op-orchestrator-skills",
-      "description": "TileLang 算子开发 Skills（5 个）。API 最佳实践、编程模式指南、算子设计、算子开发、代码审查。",
+      "description": "TileLang 算子开发 Skills（9 个）。环境检查、子模块拉取、算子设计、算子开发、测试设计、API 最佳实践、编程模式指南、性能优化、代码审查。",
       "source": "./ops-lab/tilelang/skills",
       "strict": false,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "CANNBot"
       },
@@ -175,10 +175,14 @@
       "category": "skills",
       "skills": [
         "./tilelang-api-best-practices",
+        "./tilelang-env-check",
         "./tilelang-op-design",
-        "./tilelang-op-developer",
+        "./tilelang-op-develop",
+        "./tilelang-op-test-design",
+        "./tilelang-perf-optimization",
         "./tilelang-programming-model-guide",
-        "./tilelang-review"
+        "./tilelang-review",
+        "./tilelang-submodule-pull"
       ]
     },
     {

@@ -1,14 +1,19 @@
 {
   "name": "tilelang-op-orchestrator",
-  "description": "TileLang-Ascend 算子开发 Team。含 5 个专业 Skill，实现算子方案设计、算子代码开发、精度调试和代码检视完整开发流程。",
-  "version": "1.0.0",
+  "description": "TileLang-Ascend 算子端到端开发 Team。3 阶段状态机编排，含 3 个 Subagent，支持设计回退、断点续跑和失败恢复。",
+  "version": "1.1.0",
   "author": {
     "name": "CANNBot"
   },
-  "homepage": "https://gitcode.com/cann/skills",
-  "repository": "https://gitcode.com/cann/skills",
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
   "license": "CANN-2.0",
   "dependencies": [
     "tilelang-op-orchestrator-skills"
+  ],
+  "agents": [
+    "./agents/tilelang-op-analyst.md",
+    "./agents/tilelang-op-developer.md",
+    "./agents/tilelang-op-perf-tuner.md"
   ]
 }

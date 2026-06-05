@@ -90,14 +90,18 @@ init.sh 脚本会完成以下操作：
 ```
 cannbot-skills/plugins-community/tilelang-op-orchestrator/
 ├── .opencode/
-│   ├── skills/                         # 技能模块
+│   ├── skills/                         # 技能模块（9 个）
+│   │   ├── tilelang-env-check/
+│   │   ├── tilelang-submodule-pull/
+│   │   ├── tilelang-op-design/
+│   │   ├── tilelang-op-develop/
+│   │   ├── tilelang-op-test-design/
+│   │   ├── tilelang-perf-optimization/
 │   │   ├── tilelang-api-best-practices/
 │   │   ├── tilelang-programming-model-guide/
-│   │   ├── tilelang-op-design/
-│   │   ├── tilelang-op-generate/
 │   │   └── tilelang-review/
-│   ├── agents/                         # 子代理（如有）
-│   ├── AGENTS.md                       # Agent 配置
+│   ├── agents/                         # 3 个子代理（analyst / developer / perf-tuner）
+│   ├── AGENTS.md                       # 编排器（Primary）配置
 │   └── cannbot-manifest.json           # 安装清单
 ├── tilelang-ascend                     # tilelang代码仓
 ├── init.sh                             # 初始化脚本
@@ -124,34 +128,48 @@ opencode    # OpenCode 用户
 
 ### 核心工作流
 
-按照 3 阶段渐进式开发，确保算子开发质量：
+采用 3 阶段状态机编排，由 orchestrator 统一调度，确保算子开发质量：
 
 ```
-阶段一：需求分析与方案设计 → 阶段二：算子实现 → 阶段三：精度验证与调试
+Stage 1 算子设计（含需求理解） → Stage 2 代码实现 + 测试 + 精度调试（一站式） → Stage 3 性能调优（可选）
 ```
 
-每个阶段的详细说明参见 AGENTS.md。
+每阶段通过工件门禁校验后才进入下一阶段；Stage 2 内部完成"生成代码 → 跑测试 → 精度调试"全部循环，精度通过后才询问是否进入 Stage 3。支持断点续跑、失败恢复与设计回退（Subagent 返回 `[DESIGN_ERROR]` 时回退到 Stage 1 重做设计），详见 AGENTS.md。
 
 ### 产出物示例
 
-TileLang 算子开发模式下，CANNBot 会在 `tilelang-ascend/examples/{operator}/` 目录下生成文件：
+TileLang 算子开发模式下，CANNBot 会在 `examples/{operator}/` 目录下生成文件：
 
 ```
-tilelang-ascend/examples/softmax/
-├── softmax.py                  # TileLang kernel 实现
-├── design.md                   # 设计文档
-└── README.md                   # 实现说明（可选）
+examples/softmax/
+├── DESIGN.md                   # Stage 1 设计文档
+├── example_softmax.py          # Stage 2 kernel + 内嵌 golden + test 用例 + main 块
+├── README.md                   # 实现说明（可选）
+├── perf_tuning/                # Stage 3 性能调优产物（可选）
+├── history_version/            # 设计回退 / 精度调试备份
+└── .orchestrator_state.json    # 流程状态（自动维护，支持断点续跑）
 ```
 
-## 三、可用技能
+## 三、可用技能与代理
 
 | Skill | 用途 | 触发时机 |
 |-------|------|---------|
+| `tilelang-env-check` | 环境检查与自动修复（子模块 / 编译 / 环境变量） | Stage 1 启动前环境预检 |
+| `tilelang-submodule-pull` | 拉取代码与子模块 | env-check 发现子模块缺失时 |
+| `tilelang-op-design` | 算子方案设计，生成 DESIGN.md | Stage 1 |
+| `tilelang-op-develop` | 基于 DESIGN.md 生成算子代码与测试 | Stage 2 |
+| `tilelang-op-test-design` | 测试用例与精度标准设计 | Stage 2 辅助 |
+| `tilelang-perf-optimization` | 性能瓶颈分析与优化 | Stage 3 |
 | `tilelang-api-best-practices` | API 速查表与最佳实践 | 编写 kernel 查阅 API 时 |
-| `tilelang-op-design` | 算子方案设计，生成 design.md | 设计算子时 |
-| `tilelang-op-generate` | 基于 design.md 生成算子代码 | 实现算子时 |
 | `tilelang-programming-model-guide` | Developer/Expert 模式对照与转换 | 选择编程模式时 |
 | `tilelang-review` | 代码审查（Python + C++） | 代码 review 时 |
+
+| Agent | 用途 | 负责阶段 |
+|-------|------|---------|
+| `tilelang-op-orchestrator` | 流程编排、状态机、工件门禁、设计回退（Primary） | 全流程 |
+| `tilelang-op-analyst` | 算子设计（含需求理解、设计回退） | Stage 1 |
+| `tilelang-op-developer` | 代码实现 + 测试 + 精度调试（一站式） | Stage 2 |
+| `tilelang-op-perf-tuner` | 性能分析与调优 | Stage 3 |
 
 ## 四、Developer 模式 vs Expert 模式
 
