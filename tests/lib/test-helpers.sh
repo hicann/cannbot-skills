@@ -755,7 +755,8 @@ get_all_agents_with_paths() {
     tmpfile=$(mktemp)
     # Flat layout: agents/<name>.md (exclude AGENTS.md team files)
     find "$SKILLS_DIR" -path "*/agents/*.md" -not -name "AGENTS.md" \
-        -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null >> "$tmpfile" || true
+        -not -path "*/node_modules/*" -not -path "*/.git/*" \
+        -not -path "*/operators/*" 2>/dev/null >> "$tmpfile" || true
 
     while IFS= read -r f; do
         [ -f "$f" ] || continue
@@ -935,12 +936,12 @@ validate_skill_content() {
 
 # Validate agent STRUCTURE + CONTENT (Python-backed).
 # Rules: A-STR-01..07,09,14 + A-CON-01..09
+# Optional $2: pre-computed skill_paths (avoids repeated full-repo scans)
 validate_agent_structure() {
     local agent_file="$1"
     local agent_name
     agent_name=$(basename "$agent_file" .md)
-    local skill_paths
-    skill_paths=$(get_all_skills_with_paths | cut -d: -f2-)
+    local skill_paths="${2:-$(get_all_skills_with_paths | cut -d: -f2-)}"
     # shellcheck disable=SC2086
     _run_validator "$agent_name" validate-agent "$agent_file" --subset=structure $skill_paths
 }
@@ -949,8 +950,7 @@ validate_agent_content() {
     local agent_file="$1"
     local agent_name
     agent_name=$(basename "$agent_file" .md)
-    local skill_paths
-    skill_paths=$(get_all_skills_with_paths | cut -d: -f2-)
+    local skill_paths="${2:-$(get_all_skills_with_paths | cut -d: -f2-)}"
     # shellcheck disable=SC2086
     _run_validator "$agent_name" validate-agent "$agent_file" --subset=content $skill_paths
 }

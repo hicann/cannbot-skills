@@ -46,6 +46,9 @@ skip_count=0
 AGENTS_TO_TEST=$(get_agents_to_test)
 total_agents=$(echo "$AGENTS_TO_TEST" | grep -c . || echo "0")
 
+# Pre-compute skill paths once to avoid repeated full-repo scans
+CACHED_SKILL_PATHS=$(get_all_skills_with_paths | cut -d: -f2-)
+
 echo "Agents to test: $total_agents"
 echo ""
 
@@ -72,7 +75,7 @@ for agent in $AGENTS_TO_TEST; do
         continue
     fi
 
-    if validate_agent_content "$agent_file"; then
+    if validate_agent_content "$agent_file" "$CACHED_SKILL_PATHS"; then
         ((pass_count++)) || true
     else
         ((fail_count++)) || true

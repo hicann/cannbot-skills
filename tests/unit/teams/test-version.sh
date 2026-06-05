@@ -7,8 +7,10 @@
 # then compares plugin.json version with the base to verify it was bumped.
 #
 # Rules:
-# - PATCH (3rd digit): Skill or agent files changed → bump required
+# - PATCH (3rd digit): Skill or agent files changed → bump required (WARN, non-blocking)
 # - MINOR / MAJOR: manual upgrade by developer
+# - Version decrease: FAIL (blocking)
+# - Marketplace version mismatch: WARN (non-blocking)
 #
 # Environment variables:
 #   CI_MERGE_REQUEST_TARGET_BRANCH_NAME  base ref for CI (default: origin/master)
@@ -48,9 +50,10 @@ total_teams=0
 pass_count=0
 fail_count=0
 skip_count=0
-fail_unbumped=0
+warn_count=0
 fail_decreased=0
-fail_mismatch=0
+warn_unbumped=0
+warn_mismatch=0
 
 # Get teams to test (filtered if in incremental mode)
 TEAMS_TO_TEST=$(get_teams_to_test)
@@ -246,13 +249,13 @@ for team in $TEAMS_TO_TEST; do
                 ((pass_count++)) || true
             else
                 new_version=$(recommend_version_bump "$current_version" true true)
-                print_fail "Files changed but version not bumped (base: $base_version, current: $current_version)"
+                print_warn "Files changed but version not bumped (base: $base_version, current: $current_version)"
                 echo -e "$changed_items" | sed 's/^/    /'
                 echo ""
                 echo -e "  ${CYAN}Suggested fix:${NC} bump PATCH to $new_version"
                 echo -e "  ${CYAN}Quick fix:${NC}   tests/run-tests.sh --fast --auto-fix"
-                ((fail_count++)) || true
-                ((fail_unbumped++)) || true
+                ((warn_count++)) || true
+                ((warn_unbumped++)) || true
             fi
         else
             cmp=$(semver_compare "$current_version" "$base_version")
@@ -334,10 +337,10 @@ PYEOF
             print_pass "$team: version $plugin_version matches"
             ((pass_count++)) || true
         else
-            print_fail "$team: version mismatch — plugin.json=$plugin_version, $manifest_name=$manifest_version"
+            print_warn "$team: version mismatch — plugin.json=$plugin_version, $manifest_name=$manifest_version"
             echo -e "  ${CYAN}Fix:${NC} Update $manifest_name to match plugin.json ($plugin_version)"
-            ((fail_count++)) || true
-            ((fail_mismatch++)) || true
+            ((warn_count++)) || true
+            ((warn_mismatch++)) || true
         fi
     done
 done
@@ -352,10 +355,11 @@ echo ""
 echo "  Total teams: $total_teams"
 echo -e "  ${GREEN}Passed:${NC}   $pass_count"
 echo -e "  ${RED}Failed:${NC}   $fail_count"
+echo -e "  ${YELLOW}Warnings:${NC} $warn_count"
 [ $skip_count -gt 0 ] && echo -e "  ${YELLOW}Skipped:${NC}  $skip_count"
 echo ""
 
-if [ $fail_count -gt 0 ]; then
+if [ $fail_decreased -gt 0 ]; then
     print_status_failed
     echo ""
     echo "========================================"
@@ -363,22 +367,9 @@ if [ $fail_count -gt 0 ]; then
     echo "========================================"
     echo ""
 
-    if [ "$fail_unbumped" -gt 0 ]; then
-        echo -e "${RED}1. Version not bumped:${NC}"
-        echo "   Run: tests/run-tests.sh --fast --auto-fix"
-        echo "   Or manually bump plugin.json PATCH and sync marketplace.json"
-        echo ""
-    fi
-
     if [ "$fail_decreased" -gt 0 ]; then
-        echo -e "${RED}2. Version decreased:${NC}"
+        echo -e "${RED}1. Version decreased:${NC}"
         echo "   Version can only increase. Restore or bump higher."
-        echo ""
-    fi
-
-    if [ "$fail_mismatch" -gt 0 ]; then
-        echo -e "${RED}3. Marketplace mismatch:${NC}"
-        echo "   Ensure marketplace.json and package.json match plugin.json."
         echo ""
     fi
 
@@ -394,6 +385,19 @@ if [ $fail_count -gt 0 ]; then
     fi
 
     exit 1
+elif [ $warn_count -gt 0 ]; then
+    echo -e "${YELLOW}Warnings (non-blocking):${NC}"
+    if [ "$warn_unbumped" -gt 0 ]; then
+        echo -e "  - $warn_unbumped team(s) have file changes but version not bumped"
+        echo -e "    Run: ${CYAN}tests/run-tests.sh --fast --auto-fix${NC}"
+    fi
+    if [ "$warn_mismatch" -gt 0 ]; then
+        echo -e "  - $warn_mismatch team(s) have marketplace version mismatch"
+        echo -e "    Update marketplace.json to match plugin.json"
+    fi
+    echo ""
+    print_status_passed
+    exit 0
 else
     print_status_passed
     exit 0

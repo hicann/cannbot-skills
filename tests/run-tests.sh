@@ -377,7 +377,7 @@ analyze_changes() {
     local framework_patterns=(
         "^tests/"
         "^tests/lib/"
-        "\.sh$"
+        "^tests/.*\.sh$"
         "package\.json$"
         "\.claude-plugin/"
         "\.opencode/"
@@ -433,9 +433,8 @@ analyze_changes() {
         fi
 
         # Detect agent changes
-        # Patterns: agents/<name>/, ops/agents/<name>/, ops-lab/*/agent/
-        if [[ "$file" =~ /agents/([^/]+)/AGENT\.md$ ]] || \
-           [[ "$file" =~ /agents/([^/]+)/ ]]; then
+        # Patterns: agents/<name>.md (flat layout)
+        if [[ "$file" =~ /agents/([^/.]+)\.md$ ]] && [[ ! "$file" =~ /AGENTS\.md$ ]]; then
             local agent_name="${BASH_REMATCH[1]}"
             if [ -n "$agent_name" ]; then
                 CHANGED_AGENTS["$agent_name"]=1
@@ -548,6 +547,7 @@ get_tests_for_category() {
     case "$cat" in
         unit)
             echo "unit/test-line-endings.sh:fast"
+            echo "unit/test-dependency-graph.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"
             echo "unit/agents/test-structure.sh:fast"
