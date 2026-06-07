@@ -131,7 +131,7 @@ tools:
 | 文件存在 | `DESIGN.md` 存在于算子目录 | 返回 fail，报告文件未生成 |
 | 算子目标 | 包含算子功能描述和适用场景 | 返回 fail + `missing_section: 算子目标` |
 | API 映射 | 至少包含 1 条 PyPTO API 到计算逻辑的映射条目 | 返回 fail + `missing_section: API 映射` |
-| 数据切分/tiling | 包含切分策略，或明确说明不需要切分的理由 | 返回 fail + `missing_section: 数据切分` |
+| 数据切分策略 | 包含切分策略，或明确说明不需要切分的理由 | 返回 fail + `missing_section: Tiling` |
 | Loop/执行结构 | 包含循环结构或执行流程描述 | 返回 fail + `missing_section: Loop 结构` |
 | 风险点 | 包含已知约束或特殊处理说明 | 返回 fail + `missing_section: 风险点` |
 

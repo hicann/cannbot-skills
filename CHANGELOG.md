@@ -1,4 +1,9 @@
 ## 🔥 更新日志
+### 【2026-06-06】
+#### 特性增强 Feature Enhancement
+- 【PyPTO 算子】更新算子设计 Skill（pypto-op-design），重构设计方案生成与模板。
+- 【PyPTO 编排】优化算子开发 Subagent（analyst / developer）。
+
 ### 【2026-06-03】
 #### 新特性 New Features
 - 【ops-direct-invoke-flash】新增 Ascend C Kernel 从零构建 Skill（`/ops-direct-invoke-flash`，位于 `plugins-official/`）：从 CPU 函数 / 数学公式 / 代码片段 / 文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审。支持 Ascend950 / dav-3510 的 AscendC::Reg 原生编程。

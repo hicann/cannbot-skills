@@ -62,7 +62,7 @@
       "description": "PyPTO 算子开发 Skills（8 个）。API 探索、Golden 生成、需求理解、算子设计与开发、性能调优、精度调试。",
       "source": "./ops",
       "strict": false,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "CANNBot"
       },
@@ -226,7 +226,7 @@
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
       "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",
-      "version": "1.1.8",
+      "version": "1.1.9",
       "author": {
         "name": "CANNBot"
       },

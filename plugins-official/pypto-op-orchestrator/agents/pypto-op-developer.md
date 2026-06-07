@@ -42,6 +42,14 @@ tools:
    - Stage 6 每次修复前必须备份当前实现。
    - 遇到功能问题或精度退化时，必须按约定回滚。
 
+5. **Stage 边界严格**
+   - 每次调度只执行一轮"生成/修复 → 测试 → 判定"，不做内部重试循环；重试由 Orchestrator 发起新调度。
+   - Stage 5 首跑遇到 `PRECISION_FAIL` 必须立即返回，不得自行切入精度修复。
+
+6. **NPU 优先**
+   - 若 `npu-smi` 可用且用户未显式指定 sim 模式，所有测试必须在 NPU 上运行。
+   - 无法使用 NPU 时须在返回摘要中注明。
+
 ---
 
 ## 场景一：代码实现（Stage 5）
@@ -179,6 +187,42 @@ tools:
 4. Stage 6 每次修复前必须完成备份。
 5. 功能问题必须回滚，不得保留不可运行实现。
 
+## NPU 测试执行方式
+
+涉及 NPU 的测试命令应使用 nohup 后台模式执行，避免 bash 子进程超时：
+
+```bash
+nohup bash pypto/.agents/bin/run_test.sh test_{op}.py > test_output.log 2>&1 &
+# 通过 ps / wait / 读日志获取结果
+```
+
+## debug_log 约定
+
+每次调度完成后，必须在 `custom/{op}/debug_log.md` 追加一条结构化记录：
+
+```
+## Attempt {N} — {ISO timestamp}
+- stage: 5 | 6
+- classification: precision_pass | precision_fail | runtime_fail
+- fail_category: none | compile | import | aicore | shape | other
+- changes: <本次修改的文件和关键变更>
+- error_summary: <失败时的关键信息>
+- rollback: yes / no
+- next_hint: <给下一次调度的建议>
+```
+
+Orchestrator 依赖该日志做重试决策，必须在返回摘要之前写入。
+
+## 产物契约
+
+| 文件 | 生成阶段 | 说明 |
+|------|---------|------|
+| `{op}_impl.py` | Stage 5 / 6 | 算子实现主体 |
+| `test_{op}.py` | Stage 5 | 首跑测试 |
+| `README.md` | Stage 5 | 算子说明文档 |
+| `debug_log.md` | Stage 5 / 6 | 每次调用追加一条记录 |
+| `history/{op}_impl_s6_attempt{n}.py` | Stage 6 | 修复前备份 |
+
 ## 输出格式要求
 
 使用如下结构返回阶段结果：
@@ -186,16 +230,16 @@ tools:
 ```markdown
 ## Stage Result
 - stage: 5 或 6
-- operator: {op}
+- result: precision_pass / precision_fail / runtime_fail / rollback
+- fail_category: none / compile / import / aicore / shape / other
 - outputs:
   - <文件路径1>
   - <文件路径2>
-- precheck: pass / fail (仅 Stage 5)
+- precheck: pass / fail（仅 Stage 5）
 - test_command: python test_{op}.py
-- classification: precision_pass / precision_fail / improved_but_not_passed / regressed / functional_failure / runtime_failure
-- failure_subtype: compile / import / aicore / shape / other (仅运行失败时)
 - rollback: yes / no
-- backup_path: <备份文件路径> (仅 Stage 6)
+- backup_path: <备份文件路径>（仅 Stage 6）
+- debug_log_appended: true
 - summary: <一句话说明>
 - issues: <若无则写 none>
 ```

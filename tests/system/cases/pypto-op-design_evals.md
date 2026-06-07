@@ -23,15 +23,13 @@ skill_name: pypto-op-design
 
 ## Expected Output
 
-生成的 DESIGN.md 应覆盖以下要点：
-- §1 概述：算子名称 Add、数学公式 z=x+y、简单逐元素加法
-- §2 API 映射：使用 PyPTO 的逐元素加法 API，映射表每步有明确的 API 名称
-- §3 数据规格设计：Input/Output dataclass，包含 x_fp16、y_fp16、z_fp16，shape 均为 [1024, 4096]
-- §4 Tiling 策略：应判断为 Vector 类型（不含 matmul 操作），使用 set_vec_tile_shapes，尾轴 32B 对齐
-- §5 Loop 结构：应判断不需要 Loop（简单逐元素算子，单次 Tile 可处理），使用场景 A 模板
-- §6 验证方案：Golden 函数为简单的 torch 加法，覆盖典型 shape 配置
-- §7 性能指标：包含 TileShape 配置和 pass_options
-- §8 风险点：包含 Vector TileShape 尾轴对齐等注意事项
+生成的 DESIGN.md 应覆盖以下要点（§1-§6 共 6 个章节）：
+- §1 计算图与精度路由：算子名称 Add、逐元素加法、API 调用序列（PyPTO 逐元素加法 API）、dtype 流转（fp16，无需 cast）
+- §2 数据规格：kernel 签名含 x/y/z（fp16，[1024, 4096]），值类型分析
+- §3 Tiling 策略：判断为 Vector 类型（不含 matmul），使用 set_vec_tile_shapes，含 tile 参数推导、UB 容量估算与展开检查
+- §4 Loop 与数据流：完整伪代码，简单逐元素算子无动态轴、无需动态 pypto.loop，由 Tiling 按 tile 切分处理，含数据搬运与尾块处理
+- §5 约束自检清单：约束检查表（API dtype、广播/Shape、值类型、Tiling 时序）与开放问题
+- §6 验证方案：Golden 函数为简单的 torch 加法，覆盖典型 shape 配置，含精度容差
 - 无残留 {placeholder} 占位符
 
 ## Expectations
@@ -66,15 +64,13 @@ skill_name: pypto-op-design
 
 ## Expected Output
 
-生成的 DESIGN.md 应覆盖以下要点：
-- §1 概述：算子名称 Matmul，数学公式 C=A×B+bias，矩阵乘加偏置
-- §2 API 映射：应包含 matmul 相关 API（mm_dequant 或对应的 PyPTO Cube API）和加法 API，映射表完整无空白
-- §3 数据规格设计：Input/Output dataclass，包含 A/B/bias/C 四个 tensor，数据格式 fp16
-- §4 Tiling 策略：应判断为 Cube 类型（含 matmul），使用 set_cube_tile_shapes，说明 TileShape 设置依据
-- §5 Loop 结构：应根据具体 shape 分析是否需要 Loop，说明 Loop 类型选择理由
-- §6 验证方案：Golden 函数使用 torch.matmul + bias 加法，覆盖典型配置
-- §7 性能指标：Cube TileShape、pass_options、runtime_options
-- §8 风险点：包含 Cube tile shape 约束、L1 容量等注意事项
+生成的 DESIGN.md 应覆盖以下要点（§1-§6 共 6 个章节）：
+- §1 计算图与精度路由：算子名称 Matmul、C=A×B+bias、API 调用序列（matmul 相关 Cube API 与加法 API）、dtype 流转
+- §2 数据规格：kernel 签名含 A/B/bias/C 四个 tensor，数据格式 fp16
+- §3 Tiling 策略：判断为含 matmul 的 cube+vec 混合类型，matmul 阶段使用 set_cube_tile_shapes、bias 加法阶段按需使用 set_vec_tile_shapes，说明 tile 参数推导依据、UB 容量估算与展开检查
+- §4 Loop 与数据流：完整伪代码，根据具体 shape 分析 Loop 结构与跨迭代依赖，数据搬运与尾块处理
+- §5 约束自检清单：约束检查表（API dtype、广播/Shape、值类型、Tiling 时序）与开放问题
+- §6 验证方案：Golden 函数使用 torch.matmul + bias 加法，覆盖典型配置，含精度容差
 - 无残留 {placeholder} 占位符
 
 ## Expectations
@@ -97,8 +93,8 @@ skill_name: pypto-op-design
 
 ## Expectations
 
-- [not_contains] §1 概述
-- [not_contains] set_vec_tile_shapes
+- [not_contains] pypto.set_vec_tile_shapes(
+- [not_contains] pypto.set_cube_tile_shapes(
 
 ---
 
@@ -123,7 +119,7 @@ skill_name: pypto-op-design
 
 ## Expected Output
 
-回复应调用 pypto-op-design skill 并执行算子设计工作流，生成 Softmax 算子的 DESIGN.md。内容应包含：算子概述、API 映射（exp、reduce_sum、除法等操作的 PyPTO API）、数据规格、Tiling 策略（Vector 类型）、Loop 结构分析、验证方案等。应覆盖 DESIGN.md 的 9 个章节，且最终输出 DESIGN.md 文件到当前目录。
+回复应调用 pypto-op-design skill 并执行算子设计工作流，生成 Softmax 算子的 DESIGN.md。内容应包含：§1 计算图与精度路由（exp、pypto.sum、除法 div 等操作的 PyPTO API 序列与 dtype 流转）、§2 数据规格、§3 Tiling 策略（Vector 类型）、§4 Loop 与数据流（含完整伪代码）、§5 约束自检清单、§6 验证方案。应覆盖 DESIGN.md 的 6 个章节，且最终输出 DESIGN.md 文件到当前目录。
 
 ## Expectations
 
@@ -139,17 +135,17 @@ pypto-op-design 算子设计工作流包含哪些阶段？请详细介绍每个�
 
 ## Expected Output
 
-回复应覆盖 pypto-op-design 的核心工作流阶段，至少包括：
-- 输入验证与特征分析阶段：读取算子规格、验证必须字段、判断算子类型（Cube/Vector）
-- 信息收集阶段：知识库查询、API 规格验证
-- 生成 DESIGN.md 阶段：基于模板生成 9 个章节
-- 质量自检阶段：5 项检查表（API 映射、Tiling/Loop 理由、验证覆盖、风险点、占位符）
-- 定向回修和输出阶段
+回复应覆盖 pypto-op-design 的核心工作流。该工作流是问题驱动的迭代设计，核心为 4 轮迭代，每轮聚焦一个核心问题，发现矛盾时回溯修正前序决策：
+- 第 1 轮 计算图与精度路由：输入算子规格（API 探索报告 / Golden 参考可选），输出 API 调用序列、dtype 流转与 cast 点、排除的备选方案（DESIGN.md §1）
+- 第 2 轮 Tiling 推导：输入第 1 轮确定的 API 序列与 tensor 清单，输出 tile 参数、UB 容量估算与展开检查结果（DESIGN.md §3）
+- 第 3 轮 Loop、数据流与 SymbolicScalar 分析：输入第 1 轮 API 序列与第 2 轮 tile 配置，输出动态轴标注、完整伪代码、伪代码可行性验证（DESIGN.md §4）
+- 第 4 轮 约束交叉验证：输入前 3 轮全部产出，对 API / Tiling / Loop / SymbolicScalar 逐项检查，不通过则回溯到对应轮次修正（DESIGN.md §5）
+回复还应说明 DESIGN.md 的输出结构（§1-§6 共 6 个章节）与最终的完成报告。
 
 ## Expectations
 
-- [contains] 输入验证
-- [contains] API 映射
+- [contains] 计算图与精度路由
 - [contains] Tiling
 - [contains] Loop
-- [contains] 质量自检
+- [contains] SymbolicScalar
+- [contains] 约束交叉验证
