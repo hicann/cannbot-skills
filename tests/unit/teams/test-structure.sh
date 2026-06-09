@@ -54,10 +54,11 @@ echo ""
 # ============================================
 print_section_header "Test: Team Structure (T-STR-01 to T-STR-07)"
 
+# Collect files for batch validation
+batch_files=()
 for team in $TEAMS_TO_TEST; do
     [ -z "$team" ] && continue
 
-    # In incremental mode, check if this team should be tested
     if is_incremental_mode && ! should_test_team "$team"; then
         print_skip "$team: Not in changed list"
         ((skip_count++)) || true
@@ -72,12 +73,25 @@ for team in $TEAMS_TO_TEST; do
         continue
     fi
 
-    if validate_team_structure "$team_file"; then
-        ((structure_pass++)) || true
-    else
-        ((structure_fail++)) || true
-    fi
+    batch_files+=("$team_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    skill_paths_csv=$(get_all_skills_with_paths | cut -d: -f2- | tr '\n' ',')
+    # Include local team skills (e.g. workflow/SKILL.md) for T-STR-04 validation
+    for team_file in "${batch_files[@]}"; do
+        local_skills=$(find "$(dirname "$team_file")" -name "SKILL.md" 2>/dev/null || true)
+        for ls in $local_skills; do
+            skill_paths_csv+="$ls,"
+        done
+    done
+    batch_output=$(validate_teams_structure_batch "$skill_paths_csv" "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    structure_pass=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    structure_fail=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$structure_pass" =~ ^[0-9]+$ ]] || structure_pass=0
+    [[ "$structure_fail" =~ ^[0-9]+$ ]] || structure_fail=0
+fi
 
 echo ""
 

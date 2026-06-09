@@ -30,6 +30,7 @@
 #   DG-07: Orphaned skills detection (warn)
 #   DG-08: Orphaned agents detection (warn)
 #   DG-09: Circular dependency detection
+#   DG-10: init.sh INCLUDED_SKILLS covers all marketplace-declared skills
 # =============================================================================
 
 from __future__ import annotations
@@ -135,7 +136,7 @@ class DependencyValidator:
         Skips nested SKILL.md files inside team directories or sub-skills.
         Also discovers skills that are renamed at install time via init.sh.
         """
-        skill_root_dirs = {"ops", "graph", "model"}
+        skill_root_dirs = {"ops", "graph", "model", "infra"}
 
         for root, dirs, files in os.walk(self.repo_root):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS and d != "operators"]
@@ -143,7 +144,8 @@ class DependencyValidator:
             if _is_inside_nested_git_repo(root_path, self.repo_root):
                 dirs.clear()
                 continue
-            if "SKILL.md" not in files:
+            skill_md_files = [f for f in files if f.lower() == "skill.md"]
+            if not skill_md_files:
                 continue
 
             skill_dir = root_path
@@ -155,7 +157,7 @@ class DependencyValidator:
 
             top_dir = parts[0]
 
-            if top_dir in ("plugins-official", "plugins-community", "infra"):
+            if top_dir in ("plugins-official", "plugins-community"):
                 continue
 
             if top_dir in skill_root_dirs:
@@ -340,6 +342,48 @@ class DependencyValidator:
                 str(self.marketplace_path.relative_to(self.repo_root)),
             )
 
+    def validate_init_sh_skills(self) -> None:
+        """DG-10: Validate init.sh INCLUDED_SKILLS covers all marketplace-declared skills."""
+        for team_name, team in self.development_teams.items():
+            source = team.get("source", "")
+            if not source:
+                continue
+            team_dir = self.repo_root / source.lstrip("./")
+            if not team_dir.is_dir():
+                continue
+
+            # Collect all skills from dependency packages
+            marketplace_skills: set[str] = set()
+            for dep_name in team.get("dependencies", []):
+                pkg = self.skill_packages.get(dep_name)
+                if not pkg:
+                    continue
+                for skill_rel in pkg.get("skills", []):
+                    skill_name = skill_rel.lstrip("./").split("/")[-1]
+                    marketplace_skills.add(skill_name)
+
+            if not marketplace_skills:
+                continue
+
+            # Extract init.sh skills
+            init_vars = self._extract_init_sh_vars(team_dir)
+            if init_vars is None:
+                continue  # No installer script, skip
+
+            init_skills = init_vars["skills"]
+            if not init_skills:
+                continue  # No INCLUDED_SKILLS defined, skip
+
+            # Check for missing skills
+            missing = marketplace_skills - init_skills
+            for skill_name in sorted(missing):
+                self._emit(
+                    "error", "DG-10",
+                    f"Skill '{skill_name}' declared in marketplace.json but missing from "
+                    f"{init_vars['script_name']} INCLUDED_SKILLS (team '{team_name}')",
+                    str((team_dir / init_vars["script_name"]).relative_to(self.repo_root)),
+                )
+
     def run_all_validations(self) -> int:
         """Run all dependency graph validations and output results."""
         if not self.load_marketplace():
@@ -358,6 +402,7 @@ class DependencyValidator:
         self.detect_orphaned_skills()
         self.detect_orphaned_agents()
         self.detect_circular_dependencies()
+        self.validate_init_sh_skills()
 
         self._output_findings()
         error_count = sum(1 for f in self.findings if f["level"] == "error")
@@ -393,6 +438,38 @@ class DependencyValidator:
             }
         }, ensure_ascii=False)
         sys.stdout.write(summary + "\n")
+
+    @staticmethod
+    def _extract_init_sh_vars(team_dir: Path) -> dict | None:
+        """Extract INCLUDED_SKILLS and VERSION from init.sh or install.sh.
+
+        Returns dict with keys: 'skills' (set[str]), 'version' (str), 'script_name' (str).
+        Returns None if no installer script found.
+        """
+        for script_name in ("init.sh", "install.sh"):
+            script = team_dir / script_name
+            if script.exists():
+                try:
+                    content = script.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+
+                skills: set[str] = set()
+                m = re.search(r'INCLUDED_SKILLS="([^"]*)"', content)
+                if m:
+                    skills = set(m.group(1).split())
+
+                version = ""
+                m = re.search(r'VERSION="([^"]*)"', content)
+                if m:
+                    version = m.group(1)
+
+                return {
+                    "skills": skills,
+                    "version": version,
+                    "script_name": script_name,
+                }
+        return None
 
     def _discover_init_sh_renames(self) -> dict[str, str]:
         """Scan init.sh files for symlink rename mappings.

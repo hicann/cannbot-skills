@@ -58,6 +58,9 @@ EVAL_BASE_BRANCH="master"
 # Auto-fix option (applies to all tests that support --fix)
 AUTO_FIX=false
 
+# Parallel execution
+PARALLEL_JOBS=1
+
 # =============================================================================
 # Argument Parsing
 # =============================================================================
@@ -282,6 +285,10 @@ parse_args() {
             --auto-fix)
                 AUTO_FIX=true
                 shift
+                ;;
+            --parallel)
+                PARALLEL_JOBS="$2"
+                shift 2
                 ;;
             *)
                 echo "Unknown option: $1"
@@ -610,6 +617,7 @@ run_test_file() {
 
     # Always capture output silently; compact summary printed after.
     local test_outfile=$(mktemp)
+    trap 'rm -f "$test_outfile"' RETURN
     local exit_code=0
     local extra_args=()
     if $AUTO_FIX; then
@@ -618,6 +626,7 @@ run_test_file() {
     timeout $TIMEOUT bash "$test_path" "${extra_args[@]}" > "$test_outfile" 2>&1 || exit_code=$?
     output=$(cat "$test_outfile")
     rm -f "$test_outfile"
+    trap - RETURN
 
     if [[ $exit_code -ne 0 ]]; then
         status="fail"
@@ -720,24 +729,131 @@ Mode: INCREMENTAL (changed components only)"
         [[ -n "$test_file" ]] && test_array+=("$test_file:$speed")
     done <<< "$tests"
 
-    for test_entry in "${test_array[@]}"; do
-        IFS=':' read -r test_file speed <<< "$test_entry"
+    if [[ "$PARALLEL_JOBS" -gt 1 ]]; then
+        # Parallel execution mode
+        local eligible_tests=()
+        for test_entry in "${test_array[@]}"; do
+            IFS=':' read -r test_file speed <<< "$test_entry"
 
-        if [[ "$speed" == "slow" ]] && ! $RUN_INTEGRATION && ! $RUN_ALL; then
-            print_skip "$test_file (slow test, use --integration)"
-            continue
-        fi
+            if [[ "$speed" == "slow" ]] && ! $RUN_INTEGRATION && ! $RUN_ALL; then
+                print_skip "$test_file (slow test, use --integration)"
+                continue
+            fi
 
-        if [[ "$speed" != "fast" ]] && ($RUN_FAST || [[ "$PLATFORM" == "none" ]]); then
-            print_skip "$test_file (requires CLI)"
-            continue
-        fi
+            if [[ "$speed" != "fast" ]] && ($RUN_FAST || [[ "$PLATFORM" == "none" ]]); then
+                print_skip "$test_file (requires CLI)"
+                continue
+            fi
 
-        tests_run=$((tests_run + 1))
-        if ! run_test_file "$test_file" "$speed"; then
-            total_failed=$((total_failed + 1))
-        fi
-    done
+            eligible_tests+=("$test_file:$speed")
+        done
+
+        tests_run=${#eligible_tests[@]}
+        local parallel_dir=$(mktemp -d)
+        local all_test_files=()
+        local running_pids=()
+        local job_idx=0
+
+        for test_entry in "${eligible_tests[@]}"; do
+            IFS=':' read -r test_file speed <<< "$test_entry"
+
+            # Wait if we've reached the parallel limit
+            while [[ ${#running_pids[@]} -ge $PARALLEL_JOBS ]]; do
+                local new_pids=()
+                for i in "${!running_pids[@]}"; do
+                    if ! kill -0 "${running_pids[$i]}" 2>/dev/null; then
+                        wait "${running_pids[$i]}" 2>/dev/null || true
+                        unset 'running_pids[$i]'
+                    fi
+                done
+                running_pids=("${running_pids[@]}")
+                [[ ${#running_pids[@]} -ge $PARALLEL_JOBS ]] && sleep 0.5
+            done
+
+            # Launch test in background
+            local result_file="$parallel_dir/result_${job_idx}"
+            all_test_files+=("$test_file")
+            (
+                local test_path="$SCRIPT_DIR/$test_file"
+                local start_time=$(date +%s)
+                local exit_code=0
+                local extra_args=()
+                if $AUTO_FIX; then extra_args+=("--auto-fix"); fi
+                timeout $TIMEOUT bash "$test_path" "${extra_args[@]}" > "$result_file.out" 2>&1 || exit_code=$?
+                local end_time=$(date +%s)
+                local duration=$((end_time - start_time))
+                echo "$exit_code:$duration" > "$result_file.meta"
+            ) &
+            running_pids+=($!)
+            job_idx=$((job_idx + 1))
+        done
+
+        # Wait for all remaining jobs
+        for pid in "${running_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+        done
+
+        # Collect results
+        for i in $(seq 0 $((job_idx - 1))); do
+            local test_file="${all_test_files[$i]}"
+            local result_file="$parallel_dir/result_${i}"
+            local exit_code=0
+            local duration=0
+
+            if [ -f "$result_file.meta" ]; then
+                IFS=':' read -r exit_code duration < "$result_file.meta"
+            fi
+
+            local output=""
+            if [ -f "$result_file.out" ]; then
+                output=$(cat "$result_file.out")
+            fi
+
+            local status="pass"
+            [[ $exit_code -ne 0 ]] && status="fail"
+
+            local warning_count=0
+            if [[ -n "$output" ]]; then
+                warning_count=$(echo "$output" | grep -cE "\[WARN\]" 2>/dev/null || true)
+                [[ "$warning_count" =~ ^[0-9]+$ ]] || warning_count=0
+            fi
+
+            local output_b64=""
+            if [[ -n "$output" ]]; then
+                output_b64=$(printf '%s' "$output" | base64 -w0)
+            fi
+
+            print_compact_result "$output" "$status" "$duration" false
+            TEST_RESULTS+=("$status:$test_file:$duration:$warning_count:$output_b64")
+            record_test "$status" "$test_file" "$duration"
+
+            if [[ "$status" == "fail" ]]; then
+                total_failed=$((total_failed + 1))
+            fi
+        done
+
+        rm -rf "$parallel_dir"
+    else
+        # Serial execution mode (default)
+        for test_entry in "${test_array[@]}"; do
+            IFS=':' read -r test_file speed <<< "$test_entry"
+
+            if [[ "$speed" == "slow" ]] && ! $RUN_INTEGRATION && ! $RUN_ALL; then
+                print_skip "$test_file (slow test, use --integration)"
+                continue
+            fi
+
+            if [[ "$speed" != "fast" ]] && ($RUN_FAST || [[ "$PLATFORM" == "none" ]]); then
+                print_skip "$test_file (requires CLI)"
+                continue
+            fi
+
+            tests_run=$((tests_run + 1))
+            if ! run_test_file "$test_file" "$speed"; then
+                total_failed=$((total_failed + 1))
+            fi
+        done
+    fi
 
     print_summary $tests_run
     return $total_failed
@@ -863,14 +979,14 @@ print_summary() {
         done
     fi
 
-    # Always generate HTML report for local debugging (non-fatal on failure)
+    # Always generate HTML report for CI pipeline consumption (non-fatal on failure)
     output_html "$passed" "$failed" "$skipped" "$warnings" "$total_duration" || true
 
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
         output_json "$passed" "$failed" "$skipped" "$warnings" "$total_duration"
     fi
 
-    # Print HTML report path so developer can open it
+    # Print HTML report path so developer/CI can locate it
     local report_path="${HTML_OUTPUT_PATH:-$SCRIPT_DIR/test-ut-report.html}"
     echo ""
     echo -e "  ${BLUE}HTML Report:${NC} file://$report_path"
@@ -894,7 +1010,7 @@ output_json() {
     local test_json="["
     local first=true
     for result in "${TEST_RESULTS[@]}"; do
-        IFS=':' read -r status file dur warn_cnt <<< "$result"
+        IFS=':' read -r status file dur warn_cnt _rest <<< "$result"
         if $first; then
             first=false
         else
@@ -1964,31 +2080,31 @@ run_eval_results() {
 Repository: $SKILLS_DIR
 Test time: $(date '+%Y-%m-%d %H:%M:%S')"
 
-    # Build command with optional parameters
-    local cmd="bash \"$eval_test\""
+    # Build command with optional parameters (array-based to avoid eval injection)
+    local cmd=(bash "$eval_test")
 
     if [ -n "$EVAL_WORKSPACE" ]; then
-        cmd="$cmd --workspace \"$EVAL_WORKSPACE\""
+        cmd+=(--workspace "$EVAL_WORKSPACE")
     fi
 
     if [ -n "$EVAL_ITERATION" ]; then
-        cmd="$cmd --iteration $EVAL_ITERATION"
+        cmd+=(--iteration "$EVAL_ITERATION")
     fi
 
     if [ -n "$EVAL_THRESHOLD" ]; then
-        cmd="$cmd --threshold $EVAL_THRESHOLD"
+        cmd+=(--threshold "$EVAL_THRESHOLD")
     fi
 
     if $EVAL_DETECT_REGRESSION; then
-        cmd="$cmd --detect-regression"
+        cmd+=(--detect-regression)
     fi
 
     if $EVAL_INCREMENTAL; then
-        cmd="$cmd --incremental --base-branch $EVAL_BASE_BRANCH"
+        cmd+=(--incremental --base-branch "$EVAL_BASE_BRANCH")
     fi
 
     if $VERBOSE; then
-        cmd="$cmd --verbose"
+        cmd+=(--verbose)
     fi
 
     local start_time=$(date +%s)
@@ -1997,7 +2113,7 @@ Test time: $(date '+%Y-%m-%d %H:%M:%S')"
 
     print_section "Running: test-skill-eval-results.sh"
 
-    if output=$(eval "$cmd" 2>&1); then
+    if output=$("${cmd[@]}" 2>&1); then
         status="pass"
     else
         status="fail"
@@ -2030,6 +2146,7 @@ Test time: $(date '+%Y-%m-%d %H:%M:%S')"
 master() {
     parse_args "$@"
     init_test_tracking
+    init_test_cache
 
     if $RUN_FAST && [[ "$PLATFORM" != "none" ]] && ! is_platform_available "$PLATFORM"; then
         echo -e "${YELLOW}[WARN]${NC} No AI CLI found - will run fast tests only"
@@ -2085,6 +2202,7 @@ master() {
         fi
     fi
 
+    cleanup_test_cache
     exit $exit_code
 }
 

@@ -51,9 +51,10 @@ tests/
 │
 ├── unit/                       # L1 单元测试（无需 CLI，< 30s）
 │   ├── test-line-endings.sh    # 全局换行符检查（CRLF 检测）
+│   ├── test-dependency-graph.sh # 依赖图完整性验证（DG-01~10）
 │   ├── skills/
-│   │   ├── test-structure.sh   # Skill 结构验证（S-STR-01~16）
-│   │   └── test-content.sh     # Skill 内容验证（S-CON-01~09 + S-STR-13）
+│   │   ├── test-structure.sh   # Skill 结构验证（S-STR-01~18）
+│   │   └── test-content.sh     # Skill 内容验证（S-CON-01~06）
 │   ├── agents/
 │   │   ├── test-structure.sh   # Agent 结构验证（A-STR-01~09）
 │   │   └── test-content.sh     # Agent 内容验证（A-CON-01~09）
@@ -273,26 +274,28 @@ export REPO_ROOT=/path/to/repo
 | 规则ID | 测试项 | 级别 | 文件 |
 |--------|-------|------|------|
 | S-STR-01 | YAML frontmatter 格式正确 | error | test-structure.sh |
-| S-STR-02 | name 字段存在 / 长度 / 格式 | error | test-structure.sh |
+| S-STR-02 | name 字段存在 | error | test-structure.sh |
 | S-STR-03 | description 字段存在 / 长度 | error | test-structure.sh |
 | S-STR-04 | references/ 目录非空（如存在） | error | test-structure.sh |
+| S-STR-05 | name 长度 1-64 字符 | error | test-structure.sh |
+| S-STR-06 | name 格式 kebab-case | error | test-structure.sh |
+| S-STR-07 | description 长度 1-1024 字符 | error | test-structure.sh |
 | S-STR-08 | 文档内链有效性 | error | test-structure.sh |
 | S-STR-09 | 文件名必须为 SKILL.md | error | test-structure.sh |
 | S-STR-10 | 目录名 kebab-case | error | test-structure.sh |
-| S-STR-11 | 不允许 README.md 在 skill 目录 | error | test-structure.sh |
+| S-STR-11 | 不允许 README.md 在 skill 目录 | warn | test-structure.sh |
 | S-STR-12 | frontmatter 不含 XML 标签 | error | test-structure.sh |
-| S-STR-14 | name 不使用保留前缀（claude/anthropic） | error | test-structure.sh |
+| S-STR-14 | name 不使用保留前缀（claude/anthropic） | warn | test-structure.sh |
+| S-STR-15 | name 跨 skill 唯一性 | error | test-structure.sh |
 | S-STR-16 | metadata 必须是 string→string 映射 | error | test-structure.sh |
+| S-STR-17 | description + when_to_use ≤ 1536 字符 | warn | test-structure.sh |
+| S-STR-18 | disable-model-invocation 必须为 boolean | error | test-structure.sh |
 | S-CON-01 | name 与目录名一致 | error | test-content.sh |
 | S-CON-02 | description 包含触发关键词（手动 skill 跳过） | error | test-content.sh |
-| S-CON-03 | description 包含触发条件 | error | test-content.sh |
-| S-CON-04 | 含可执行指令（代码块、步骤） | warn | test-content.sh |
-| S-CON-05 | 含错误处理 / 故障排查章节 | warn | test-content.sh |
-| S-CON-06 | 含示例 / 场景章节 | warn | test-content.sh |
-| S-CON-07 | 长文件链接到 references/（渐进式披露） | warn | test-content.sh |
-| S-CON-08 | description 遵循三段式结构 | warn | test-content.sh |
-| S-CON-09 | description 不含反模式词汇 | warn | test-content.sh |
-| S-STR-13 | 正文字数不超过上限 | warn | test-content.sh |
+| S-CON-03 | description 包含触发条件 | warn | test-content.sh |
+| S-CON-04 | 长文件链接到支持文件（渐进式披露，≤500 行） | warn | test-content.sh |
+| S-CON-05 | description 不含反模式词汇 | warn | test-content.sh |
+| S-CON-06 | 文件引用保持一级深度 | warn | test-content.sh |
 
 > **注意**: error 级别规则会阻断测试（FAIL），warn 级别规则仅输出警告但不阻断（PASS with warnings）。CI 中建议关注 warn 输出以持续提升质量。
 
@@ -300,12 +303,29 @@ export REPO_ROOT=/path/to/repo
 
 全局仓库卫生检查，扫描所有文本文件中的 CRLF（DOS 风格）换行符。CRLF 换行符会导致文件体积膨胀、日志输出中出现多余 `\r` 字符、以及 autocrlf/smudge 行为引发的 CI hash 不匹配。
 
+#### 依赖图检查 (unit/test-dependency-graph.sh)
+
+验证 marketplace.json、plugin.json、AGENTS.md、agent .md 和 init.sh 之间的交叉引用完整性。
+
+| 规则ID | 测试项 | 级别 |
+|--------|-------|------|
+| DG-01 | marketplace.json skills 路径存在 | error |
+| DG-02 | marketplace.json 依赖有效 | error |
+| DG-03 | plugin.json agents 路径存在 | error |
+| DG-04 | plugin.json 依赖有效 | error |
+| DG-05 | AGENTS.md skills 引用存在 | error |
+| DG-06 | Agent .md skills 引用存在 | error |
+| DG-07 | 孤立 skills 检测 | warn |
+| DG-08 | 孤立 agents 检测 | warn |
+| DG-09 | 循环依赖检测 | error |
+| DG-10 | init.sh INCLUDED_SKILLS 覆盖 marketplace 声明的所有 skills | error |
+
 #### Agents (unit/agents/)
 
 | 测试文件 | 验证项 |
 |---------|--------|
 | `test-structure.sh` | YAML格式、name/description/mode字段、skills依赖存在性、name/description格式、链接有效性 |
-| `test-content.sh` | name一致性、description关键词与触发条件、内容质量（可执行指令、错误处理、示例、渐进式披露等） |
+| `test-content.sh` | name一致性、description关键词与触发条件、渐进式披露、反模式词汇 |
 
 #### Agents 测试规则详情
 
@@ -322,13 +342,9 @@ export REPO_ROOT=/path/to/repo
 | A-STR-09 | name 跨 agent 唯一性 | error | test-structure.sh |
 | A-CON-01 | name 与目录/文件名一致 | error | test-content.sh |
 | A-CON-02 | description 包含触发关键词（手动 agent 跳过） | error | test-content.sh |
-| A-CON-03 | description 包含触发条件 | warn | test-content.sh |
-| A-CON-04 | 含可执行指令（代码块、步骤） | warn | test-content.sh |
-| A-CON-05 | 含错误处理 / 故障排查章节 | warn | test-content.sh |
-| A-CON-06 | 含示例 / 场景章节 | warn | test-content.sh |
-| A-CON-07 | 长文件链接到 references/（渐进式披露） | warn | test-content.sh |
-| A-CON-08 | description 遵循三段式结构 | warn | test-content.sh |
-| A-CON-09 | description 不含反模式词汇 | warn | test-content.sh |
+| A-CON-03 | description 包含触发条件（subagent 跳过） | warn | test-content.sh |
+| A-CON-04 | 长文件链接到支持文件（渐进式披露） | warn | test-content.sh |
+| A-CON-05 | description 不含反模式词汇 | warn | test-content.sh |
 
 #### Teams (unit/teams/)
 
@@ -775,10 +791,10 @@ get_agents_to_test                            # 获取需要测试的 agent 列�
 get_teams_to_test                             # 获取需要测试的 team 列表
 
 # 结构验证函数
-validate_skill_structure "/path/to/SKILL.md"    # S-STR-01 ~ S-STR-16
-validate_skill_content "/path/to/SKILL.md"      # S-CON-01 ~ S-CON-09 + S-STR-13
+validate_skill_structure "/path/to/SKILL.md"    # S-STR-01 ~ S-STR-18
+validate_skill_content "/path/to/SKILL.md"      # S-CON-01 ~ S-CON-06
 validate_agent_structure "/path/to/AGENT.md"    # A-STR-01 ~ A-STR-09
-validate_agent_content "/path/to/AGENT.md"      # A-CON-01 ~ A-CON-09
+validate_agent_content "/path/to/AGENT.md"      # A-CON-01 ~ A-CON-05
 validate_team_structure "/path/to/AGENTS.md"    # T-STR-01 ~ T-STR-08
 validate_team_content "/path/to/AGENTS.md"      # T-CON-01 ~ T-CON-03
 validate_global_uniqueness "skill|agent|team"   # 跨文件名称唯一性检查

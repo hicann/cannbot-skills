@@ -4,18 +4,15 @@
 # =============================================================================
 # Validates content quality for all skills.
 # Rules tested (all via skill_validator.py validate-skill --subset=content):
+#   Aligned with Agent Skills / OpenCode / Claude Code specifications.
 #   error level (blocking):
 #     S-CON-01: name matches directory name
 #     S-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
-#     S-CON-03: description contains trigger conditions
 #   warn level (advisory):
-#     S-CON-04: contains actionable instructions (code blocks, numbered steps)
-#     S-CON-05: contains error handling / troubleshooting section
-#     S-CON-06: contains examples / scenario section
-#     S-CON-07: long files link to references/ (progressive disclosure)
-#     S-CON-08: description follows three-segment structure
-#     S-CON-09: no anti-pattern phrases in description
-#     S-STR-13: body word count under limit
+#     S-CON-03: description contains trigger conditions
+#     S-CON-04: long files link to supporting files (progressive disclosure, ≤500 lines)
+#     S-CON-05: no anti-pattern phrases in description
+#     S-CON-06: file references kept one level deep (Agent Skills spec)
 #
 # Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================
@@ -55,10 +52,11 @@ echo ""
 # ============================================
 print_section_header "Test: Skill Content (S-CON-01 to S-CON-09, S-STR-13)"
 
+# Collect files for batch validation
+batch_files=()
 for skill in $SKILLS_TO_TEST; do
     [ -z "$skill" ] && continue
 
-    # In incremental mode, check if this skill should be tested
     if is_incremental_mode && ! should_test_skill "$skill"; then
         print_skip "$skill: Not in changed list"
         ((skip_count++)) || true
@@ -73,12 +71,17 @@ for skill in $SKILLS_TO_TEST; do
         continue
     fi
 
-    if validate_skill_content "$skill_file"; then
-        ((pass_count++)) || true
-    else
-        ((fail_count++)) || true
-    fi
+    batch_files+=("$skill_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    batch_output=$(validate_skills_content_batch "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    pass_count=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    fail_count=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$pass_count" =~ ^[0-9]+$ ]] || pass_count=0
+    [[ "$fail_count" =~ ^[0-9]+$ ]] || fail_count=0
+fi
 
 echo ""
 

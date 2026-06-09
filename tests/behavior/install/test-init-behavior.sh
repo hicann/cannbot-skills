@@ -337,16 +337,59 @@ verify_opencode_cli_agents() {
         return 0
     fi
 
+    # Pre-check: verify agent symlinks exist and resolve
+    local agent_dir="$scan_dir/.opencode/agents"
+    if [ ! -d "$agent_dir" ]; then
+        print_fail "Agent directory not found: $agent_dir"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+    for agent in "${expected[@]}"; do
+        local link="$agent_dir/$agent.md"
+        if [ ! -e "$link" ]; then
+            print_fail "Agent symlink missing: $agent.md"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        elif [ ! -f "$link" ]; then
+            print_fail "Agent symlink broken (target not found): $agent.md → $(readlink "$link")"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done
+
     local output
     # opencode agent list scans the current directory's .opencode/ config
     output=$(cd "$scan_dir" && opencode agent list 2>&1 || true)
 
+    # If not all agents recognized on first try, wait and retry once
+    local all_recognized=true
     for agent in "${expected[@]}"; do
-        if echo "$output" | grep -q "^$agent "; then
+        if ! echo "$output" | grep -q "^$agent "; then
+            all_recognized=false
+            break
+        fi
+    done
+    if ! $all_recognized; then
+        sleep 2
+        output=$(cd "$scan_dir" && opencode agent list 2>&1 || true)
+    fi
+
+    for agent in "${expected[@]}"; do
+        local match_count
+        match_count=$(echo "$output" | grep -cE "^[[:space:]]*${agent} " || echo 0)
+        if [ "$match_count" -gt 0 ]; then
             print_pass "opencode CLI recognizes agent: $agent"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
             print_fail "opencode CLI does NOT recognize agent: $agent"
+            echo "    Diagnostic: searching for '$agent' in opencode agent list output:"
+            echo "    Total output lines: $(echo "$output" | wc -l)"
+            echo "    Lines containing '$agent':"
+            echo "$output" | grep "$agent" | head -5 | sed 's/^/      /' || echo "      (none found)"
+            echo "    Hex dump of matching lines:"
+            echo "$output" | grep "$agent" | head -2 | od -c | head -10 | sed 's/^/      /' || true
+            echo "    Grep test (count=$match_count):"
+            echo "$output" | grep -E "^[[:space:]]*${agent} " | head -2 | sed 's/^/      /' || echo "      (no match with pattern)"
+            echo "    Symlink status:"
+            ls -la "$agent_dir/$agent.md" 2>&1 | sed 's/^/      /' || true
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
     done

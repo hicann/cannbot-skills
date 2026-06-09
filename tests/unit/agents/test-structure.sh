@@ -57,10 +57,11 @@ echo ""
 # ============================================
 print_section_header "Test: Agent Structure (A-STR-01 to A-STR-07)"
 
+# Collect files for batch validation
+batch_files=()
 for agent in $AGENTS_TO_TEST; do
     [ -z "$agent" ] && continue
 
-    # In incremental mode, check if this agent should be tested
     if is_incremental_mode && ! should_test_agent "$agent"; then
         print_skip "$agent: Not in changed list"
         ((skip_count++)) || true
@@ -75,12 +76,18 @@ for agent in $AGENTS_TO_TEST; do
         continue
     fi
 
-    if validate_agent_structure "$agent_file" "$CACHED_SKILL_PATHS"; then
-        ((structure_pass++)) || true
-    else
-        ((structure_fail++)) || true
-    fi
+    batch_files+=("$agent_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    skill_paths_csv=$(echo "$CACHED_SKILL_PATHS" | tr '\n' ',')
+    batch_output=$(validate_agents_structure_batch "$skill_paths_csv" "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    structure_pass=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    structure_fail=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$structure_pass" =~ ^[0-9]+$ ]] || structure_pass=0
+    [[ "$structure_fail" =~ ^[0-9]+$ ]] || structure_fail=0
+fi
 
 echo ""
 

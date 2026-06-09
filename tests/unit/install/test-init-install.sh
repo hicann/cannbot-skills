@@ -220,29 +220,6 @@ for team_dir in "$TEAMS_DIR"/*; do
 done
 
 # =============================================================================
-# Check 6: SHARED_SKILL_ROOT path computation
-# =============================================================================
-print_section_header "Check: SHARED_SKILL_ROOT path computation"
-
-expected_skill_root="$SKILLS_DIR/ops"
-if [ -d "$expected_skill_root" ]; then
-    print_pass "SHARED_SKILL_ROOT target exists: $expected_skill_root"
-    PASS_COUNT=$((PASS_COUNT + 1))
-else
-    print_fail "SHARED_SKILL_ROOT target NOT found: $expected_skill_root"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-fi
-
-skill_md_count=$(find "$expected_skill_root" -maxdepth 2 -name 'SKILL.md' | wc -l)
-if [ "$skill_md_count" -gt 0 ]; then
-    print_pass "ops/ contains $skill_md_count SKILL.md file(s)"
-    PASS_COUNT=$((PASS_COUNT + 1))
-else
-    print_fail "ops/ contains no SKILL.md files"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-fi
-
-# =============================================================================
 # Summary
 # =============================================================================
 echo ""

@@ -588,6 +588,12 @@ _is_inside_nested_git_repo() {
 }
 
 get_all_skills_with_paths() {
+    local cache_file="${_TEST_CACHE_DIR:-}/skills_cache"
+    if [ -n "${_TEST_CACHE_DIR:-}" ] && [ -f "$cache_file" ]; then
+        cat "$cache_file"
+        return
+    fi
+
     local tmpfile
     tmpfile=$(mktemp)
     # Prune teams/ so nested team SKILL.md files (e.g.
@@ -595,19 +601,26 @@ get_all_skills_with_paths() {
     # discovered as top-level skills.
     find "$SKILLS_DIR" \
         \( -name "node_modules" -o -name ".git" -o -name "teams" \) -prune -o \
-        \( -path "*/skills/*/SKILL.md" -o -path "*/ops/*/SKILL.md" -o -path "*/graph/*/SKILL.md" -o -path "*/model/*/SKILL.md" \) \
+        \( -path "*/skills/*" -o -path "*/ops/*" -o -path "*/graph/*" -o -path "*/model/*" -o -path "*/infra/*" \) \
+        -iname "skill.md" \
         -print 2>/dev/null > "$tmpfile" || true
 
+    local result=""
     while IFS= read -r f; do
         [ -f "$f" ] || continue
         # Skip skills inside nested external git repos (e.g. pypto, asc-devkit)
         if _is_inside_nested_git_repo "$f"; then
             continue
         fi
-        echo "$(basename "$(dirname "$f")"):$f"
-    done < "$tmpfile" | sort -u -t: -k1,1
-
+        result+="$(basename "$(dirname "$f")"):$f"$'\n'
+    done < "$tmpfile"
     rm -f "$tmpfile"
+
+    result=$(printf '%s' "$result" | sort -u -t: -k1,1)
+    if [ -n "${_TEST_CACHE_DIR:-}" ]; then
+        printf '%s\n' "$result" > "$cache_file"
+    fi
+    printf '%s\n' "$result"
 }
 
 # Get list of all skills
@@ -751,6 +764,12 @@ find_skill_file() {
 # Layout: agents/<name>.md (flat). Directory-based agents/<name>/AGENT.md is
 # NOT a valid layout and will be ignored by discovery.
 get_all_agents_with_paths() {
+    local cache_file="${_TEST_CACHE_DIR:-}/agents_cache"
+    if [ -n "${_TEST_CACHE_DIR:-}" ] && [ -f "$cache_file" ]; then
+        cat "$cache_file"
+        return
+    fi
+
     local tmpfile
     tmpfile=$(mktemp)
     # Flat layout: agents/<name>.md (exclude AGENTS.md team files)
@@ -758,6 +777,7 @@ get_all_agents_with_paths() {
         -not -path "*/node_modules/*" -not -path "*/.git/*" \
         -not -path "*/operators/*" 2>/dev/null >> "$tmpfile" || true
 
+    local result=""
     while IFS= read -r f; do
         [ -f "$f" ] || continue
         # Skip agents inside nested external git repos (e.g. pypto, asc-devkit)
@@ -766,10 +786,15 @@ get_all_agents_with_paths() {
         fi
         local name
         name=$(basename "$f" .md)
-        echo "${name}:${f}"
-    done < "$tmpfile" | sort -u -t: -k1,1
-
+        result+="${name}:${f}"$'\n'
+    done < "$tmpfile"
     rm -f "$tmpfile"
+
+    result=$(printf '%s' "$result" | sort -u -t: -k1,1)
+    if [ -n "${_TEST_CACHE_DIR:-}" ]; then
+        printf '%s\n' "$result" > "$cache_file"
+    fi
+    printf '%s\n' "$result"
 }
 
 # Get list of all agents
@@ -794,6 +819,12 @@ find_agent_file() {
 # Get list of all teams with their full paths
 # Returns: team_name:full_path per line
 get_all_teams_with_paths() {
+    local cache_file="${_TEST_CACHE_DIR:-}/teams_cache"
+    if [ -n "${_TEST_CACHE_DIR:-}" ] && [ -f "$cache_file" ]; then
+        cat "$cache_file"
+        return
+    fi
+
     local tmpfile
     tmpfile=$(mktemp)
     # Prune .opencode / .claude* / node_modules / .git so OpenCode/Claude
@@ -811,11 +842,17 @@ get_all_teams_with_paths() {
             -not -path "*/.claude-plugin/*" 2>/dev/null >> "$tmpfile" || true
     fi
 
+    local result=""
     while IFS= read -r f; do
-        [ -f "$f" ] && echo "$(basename "$(dirname "$f")"):$f"
-    done < "$tmpfile" | sort -u -t: -k1,1
-
+        [ -f "$f" ] && result+="$(basename "$(dirname "$f")"):$f"$'\n'
+    done < "$tmpfile"
     rm -f "$tmpfile"
+
+    result=$(printf '%s' "$result" | sort -u -t: -k1,1)
+    if [ -n "${_TEST_CACHE_DIR:-}" ]; then
+        printf '%s\n' "$result" > "$cache_file"
+    fi
+    printf '%s\n' "$result"
 }
 
 # Get list of all teams
@@ -899,7 +936,7 @@ _run_validator() {
                 echo -e "    ${YELLOW}[WARN]${NC} ${item_name}: ${rule}: ${msg}"
                 ;;
             *)
-                echo "  ${line}"
+                echo "  ${level}: ${rule}: ${msg}"
                 ;;
         esac
     done <<< "$parsed"
@@ -915,6 +952,113 @@ _run_validator() {
         print_pass "${item_name}: valid"
     fi
     return 0
+}
+
+# Run the Python validator in batch mode for multiple files.
+# Usage: _run_validator_batch <subcmd> <subset> [skill_paths_csv] <file1> <file2> ...
+# Returns: 0 if no error-level findings across all files, 1 otherwise.
+_run_validator_batch() {
+    local subcmd="$1"
+    local subset="$2"
+    local skill_paths_csv="$3"
+    shift 3
+    local files=("$@")
+
+    if [ ${#files[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    local batch_args=(--batch "--subset=$subset")
+    if [ -n "$skill_paths_csv" ]; then
+        batch_args+=("--skill-paths=$skill_paths_csv")
+    fi
+
+    if ! python3 "$SKILL_VALIDATOR" "$subcmd" "${batch_args[@]}" "${files[@]}" >"$tmp" 2>&1; then
+        print_fail "batch validator invocation failed"
+        cat "$tmp" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+
+    # Convert JSONL + FILE: markers to TSV in a single Python pass
+    local parsed
+    parsed=$(python3 - <<'PYEOF' "$tmp"
+import json, sys
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if line.startswith("FILE:"):
+            print(f"FILE\t-\t{line[5:]}")
+            continue
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+            print(f"{obj.get('level','')}\t{obj.get('rule','')}\t{obj.get('msg','')}")
+        except json.JSONDecodeError:
+            pass
+PYEOF
+)
+
+    local had_error=0
+    local current_file=""
+    local file_errors=0
+    local file_warns=0
+    local item_name=""
+
+    while IFS=$'\t' read -r level rule msg; do
+        [ -z "$level" ] && continue
+
+        if [ "$level" = "FILE" ]; then
+            # Flush previous file results
+            if [ -n "$current_file" ]; then
+                if [ $file_errors -gt 0 ]; then
+                    print_fail "${item_name}: ${file_errors} error(s), ${file_warns} warning(s)"
+                elif [ $file_warns -gt 0 ]; then
+                    print_pass "${item_name}: valid (${file_warns} warning(s))"
+                else
+                    print_pass "${item_name}: valid"
+                fi
+            fi
+            current_file="$msg"
+            file_errors=0
+            file_warns=0
+            case "$subcmd" in
+                validate-skill) item_name=$(basename "$(dirname "$current_file")") ;;
+                validate-agent) item_name=$(basename "$current_file" .md) ;;
+                validate-team)  item_name=$(basename "$(dirname "$current_file")") ;;
+            esac
+            continue
+        fi
+
+        case "$level" in
+            error)
+                had_error=1
+                file_errors=$((file_errors + 1))
+                print_error "${rule}: ${msg}"
+                ;;
+            warn)
+                file_warns=$((file_warns + 1))
+                echo -e "    ${YELLOW}[WARN]${NC} ${item_name}: ${rule}: ${msg}"
+                ;;
+        esac
+    done <<< "$parsed"
+
+    # Flush last file
+    if [ -n "$current_file" ]; then
+        if [ $file_errors -gt 0 ]; then
+            print_fail "${item_name}: ${file_errors} error(s), ${file_warns} warning(s)"
+        elif [ $file_warns -gt 0 ]; then
+            print_pass "${item_name}: valid (${file_warns} warning(s))"
+        else
+            print_pass "${item_name}: valid"
+        fi
+    fi
+
+    rm -f "$tmp"
+    [ $had_error -eq 0 ]
 }
 
 # Validate skill STRUCTURE + CONTENT in one pass (Python-backed).
@@ -934,6 +1078,17 @@ validate_skill_content() {
     _run_validator "$skill_name" validate-skill "$skill_file" --subset=content
 }
 
+# Batch validate multiple skill files in a single Python invocation.
+# Usage: validate_skills_structure_batch file1 file2 ...
+# Returns: 0 if no errors, 1 if any errors found.
+validate_skills_structure_batch() {
+    _run_validator_batch validate-skill structure "" "$@"
+}
+
+validate_skills_content_batch() {
+    _run_validator_batch validate-skill content "" "$@"
+}
+
 # Validate agent STRUCTURE + CONTENT (Python-backed).
 # Rules: A-STR-01..07,09,14 + A-CON-01..09
 # Optional $2: pre-computed skill_paths (avoids repeated full-repo scans)
@@ -942,8 +1097,9 @@ validate_agent_structure() {
     local agent_name
     agent_name=$(basename "$agent_file" .md)
     local skill_paths="${2:-$(get_all_skills_with_paths | cut -d: -f2-)}"
-    # shellcheck disable=SC2086
-    _run_validator "$agent_name" validate-agent "$agent_file" --subset=structure $skill_paths
+    local -a skill_arr
+    read -ra skill_arr <<< "$skill_paths"
+    _run_validator "$agent_name" validate-agent "$agent_file" --subset=structure "${skill_arr[@]}"
 }
 
 validate_agent_content() {
@@ -951,8 +1107,24 @@ validate_agent_content() {
     local agent_name
     agent_name=$(basename "$agent_file" .md)
     local skill_paths="${2:-$(get_all_skills_with_paths | cut -d: -f2-)}"
-    # shellcheck disable=SC2086
-    _run_validator "$agent_name" validate-agent "$agent_file" --subset=content $skill_paths
+    local -a skill_arr
+    read -ra skill_arr <<< "$skill_paths"
+    _run_validator "$agent_name" validate-agent "$agent_file" --subset=content "${skill_arr[@]}"
+}
+
+# Batch validate multiple agent files in a single Python invocation.
+# Usage: validate_agents_structure_batch skill_paths_csv file1 file2 ...
+# Returns: 0 if no errors, 1 if any errors found.
+validate_agents_structure_batch() {
+    local skill_paths_csv="$1"
+    shift
+    _run_validator_batch validate-agent structure "$skill_paths_csv" "$@"
+}
+
+validate_agents_content_batch() {
+    local skill_paths_csv="$1"
+    shift
+    _run_validator_batch validate-agent content "$skill_paths_csv" "$@"
 }
 
 # Validate team STRUCTURE + CONTENT (Python-backed).
@@ -968,8 +1140,9 @@ validate_team_structure() {
     # Optimization: Support local skills bundled in team directory
     local local_skills
     local_skills=$(find "$team_dir" -name "SKILL.md" 2>/dev/null || true)
-    # shellcheck disable=SC2086
-    _run_validator "$team_name" validate-team "$team_file" --subset=structure $skill_paths $local_skills
+    local -a all_paths
+    read -ra all_paths <<< "$skill_paths $local_skills"
+    _run_validator "$team_name" validate-team "$team_file" --subset=structure "${all_paths[@]}"
 }
 
 validate_team_content() {
@@ -982,8 +1155,24 @@ validate_team_content() {
     skill_paths=$(get_all_skills_with_paths | cut -d: -f2-)
     local local_skills
     local_skills=$(find "$team_dir" -name "SKILL.md" 2>/dev/null || true)
-    # shellcheck disable=SC2086
-    _run_validator "$team_name" validate-team "$team_file" --subset=content $skill_paths $local_skills
+    local -a all_paths
+    read -ra all_paths <<< "$skill_paths $local_skills"
+    _run_validator "$team_name" validate-team "$team_file" --subset=content "${all_paths[@]}"
+}
+
+# Batch validate multiple team files in a single Python invocation.
+# Usage: validate_teams_structure_batch skill_paths_csv file1 file2 ...
+# Returns: 0 if no errors, 1 if any errors found.
+validate_teams_structure_batch() {
+    local skill_paths_csv="$1"
+    shift
+    _run_validator_batch validate-team structure "$skill_paths_csv" "$@"
+}
+
+validate_teams_content_batch() {
+    local skill_paths_csv="$1"
+    shift
+    _run_validator_batch validate-team content "$skill_paths_csv" "$@"
 }
 
 # Cross-file uniqueness check.
@@ -1005,8 +1194,9 @@ validate_global_uniqueness() {
 
     local tmp
     tmp=$(mktemp)
-    # shellcheck disable=SC2086
-    python3 "$SKILL_VALIDATOR" check-uniqueness "$kind" $paths >"$tmp"
+    local -a path_arr
+    read -ra path_arr <<< "$paths"
+    python3 "$SKILL_VALIDATOR" check-uniqueness "$kind" "${path_arr[@]}" >"$tmp"
 
     local had_error=0
     # Batch-parse all JSONL lines in a single python3 invocation
@@ -1598,6 +1788,23 @@ extract_token_usage() {
 # functions or implement their own tracking as needed.
 # =============================================================================
 
+# Initialize shared test cache (avoids repeated find/python3 calls across test scripts)
+# Usage: init_test_cache
+init_test_cache() {
+    if [ -z "${_TEST_CACHE_DIR:-}" ]; then
+        export _TEST_CACHE_DIR=$(mktemp -d -t cann-test-cache.XXXXXX)
+    fi
+}
+
+# Cleanup shared test cache
+# Usage: cleanup_test_cache
+cleanup_test_cache() {
+    if [ -n "${_TEST_CACHE_DIR:-}" ] && [ -d "${_TEST_CACHE_DIR}" ]; then
+        rm -rf "$_TEST_CACHE_DIR"
+        unset _TEST_CACHE_DIR
+    fi
+}
+
 # Initialize test tracking
 # Usage: init_test_tracking
 init_test_tracking() {
@@ -1615,9 +1822,9 @@ record_test() {
     local duration="${3:-0}"
 
     case "$result" in
-        pass|PASS)  ((TEST_PASSED++)) ;;
-        fail|FAIL)  ((TEST_FAILED++)) ;;
-        skip|SKIP)  ((TEST_SKIPPED++)) ;;
+        pass|PASS)  ((TEST_PASSED++)) || true ;;
+        fail|FAIL)  ((TEST_FAILED++)) || true ;;
+        skip|SKIP)  ((TEST_SKIPPED++)) || true ;;
     esac
 }
 
@@ -1730,6 +1937,12 @@ export -f validate_agent_content
 export -f validate_team_structure
 export -f validate_team_content
 export -f validate_global_uniqueness
+export -f validate_skills_structure_batch
+export -f validate_skills_content_batch
+export -f validate_agents_structure_batch
+export -f validate_agents_content_batch
+export -f validate_teams_structure_batch
+export -f validate_teams_content_batch
 export -f find_recent_session
 export -f verify_skill_invoked
 export -f verify_agent_dispatched
@@ -1739,6 +1952,8 @@ export -f get_triggered_skills
 export -f analyze_tool_chain
 export -f analyze_cost_breakdown
 export -f extract_token_usage
+export -f init_test_cache
+export -f cleanup_test_cache
 export -f init_test_tracking
 export -f record_test
 export -f print_test_summary

@@ -63,50 +63,98 @@ echo "Teams to check: $total_teams"
 echo ""
 
 # ============================================
-# Helper: resolve team skill & agent file paths from marketplace.json + plugin.json
-# Returns: relative paths (from SKILLS_DIR), one per line
+# Helper: resolve ALL teams' skill & agent file paths in a single Python call
+# Output: TEAM:<team_name> followed by relative paths, one per line
 # ============================================
-resolve_team_file_paths() {
-    local team_name="$1"
+declare -gA TEAM_FILE_PATHS_CACHE=()
+_resolve_all_team_file_paths() {
+    if [ ${#TEAM_FILE_PATHS_CACHE[@]} -gt 0 ]; then
+        return
+    fi
 
-    python3 <<PYEOF
+    local teams_csv=""
+    for team in $TEAMS_TO_TEST; do
+        [ -z "$team" ] && continue
+        teams_csv+="$team,"
+    done
+    teams_csv="${teams_csv%,}"
+
+    [ -z "$teams_csv" ] && return
+
+    local result
+    result=$(python3 <<PYEOF
 import json, os
 
-# Resolve skills from marketplace.json
+marketplace_json = "${MARKETPLACE_JSON}"
+skills_dir = "${SKILLS_DIR}"
+teams = "${teams_csv}".split(",")
+
 try:
-    marketplace = json.load(open("${MARKETPLACE_JSON}"))
+    marketplace = json.load(open(marketplace_json))
 except Exception:
     marketplace = {"plugins": []}
 
 skills_packages = {}
-team_entry = None
 for p in marketplace.get("plugins", []):
     if p.get("category") == "skills":
         skills_packages[p["name"]] = p
-    elif p.get("name") == "${team_name}":
-        team_entry = p
 
-if team_entry:
-    for dep_name in team_entry.get("dependencies", []):
-        sp = skills_packages.get(dep_name)
-        if sp:
-            source = sp.get("source", "./ops").lstrip("./")
-            for skill_rel in sp.get("skills", []):
-                skill_dir = skill_rel.lstrip("./")
-                print(f"{source}/{skill_dir}/SKILL.md")
+for team_name in teams:
+    if not team_name:
+        continue
+    print(f"TEAM:{team_name}")
 
-# Resolve agents from plugin.json
-try:
-    plugin_json_path = os.path.join(
-        "${SKILLS_DIR}", "plugins-official", "${team_name}",
-        ".claude-plugin", "plugin.json")
-    plugin = json.load(open(plugin_json_path))
-    for agent_rel in plugin.get("agents", []):
-        agent_rel = agent_rel.lstrip("./")
-        print(f"plugins-official/${team_name}/{agent_rel}")
-except Exception:
-    pass
+    team_entry = None
+    for p in marketplace.get("plugins", []):
+        if p.get("name") == team_name:
+            team_entry = p
+            break
+
+    if team_entry:
+        for dep_name in team_entry.get("dependencies", []):
+            sp = skills_packages.get(dep_name)
+            if sp:
+                source = sp.get("source", "./ops").lstrip("./")
+                for skill_rel in sp.get("skills", []):
+                    skill_dir = skill_rel.lstrip("./")
+                    print(f"{source}/{skill_dir}/SKILL.md")
+
+    try:
+        plugin_json_path = os.path.join(
+            skills_dir, "plugins-official", team_name,
+            ".claude-plugin", "plugin.json")
+        plugin = json.load(open(plugin_json_path))
+        for agent_rel in plugin.get("agents", []):
+            agent_rel = agent_rel.lstrip("./")
+            print(f"plugins-official/{team_name}/{agent_rel}")
+    except Exception:
+        pass
 PYEOF
+)
+
+    local current_team=""
+    local current_paths=""
+    while IFS= read -r line; do
+        if [[ "$line" == TEAM:* ]]; then
+            if [ -n "$current_team" ]; then
+                TEAM_FILE_PATHS_CACHE["$current_team"]="$current_paths"
+            fi
+            current_team="${line#TEAM:}"
+            current_paths=""
+        else
+            [ -n "$line" ] && current_paths+="$line"$'\n'
+        fi
+    done <<< "$result"
+    if [ -n "$current_team" ]; then
+        TEAM_FILE_PATHS_CACHE["$current_team"]="$current_paths"
+    fi
+}
+
+# Get cached file paths for a team
+resolve_team_file_paths() {
+    local team_name="$1"
+    _resolve_all_team_file_paths
+    printf '%s' "${TEAM_FILE_PATHS_CACHE[$team_name]:-}"
 }
 
 # ============================================
@@ -367,11 +415,9 @@ if [ $fail_decreased -gt 0 ]; then
     echo "========================================"
     echo ""
 
-    if [ "$fail_decreased" -gt 0 ]; then
-        echo -e "${RED}1. Version decreased:${NC}"
-        echo "   Version can only increase. Restore or bump higher."
-        echo ""
-    fi
+    echo -e "${RED}1. Version decreased:${NC}"
+    echo "   Version can only increase. Restore or bump higher."
+    echo ""
 
     # fork sync hint
     if git -C "$SKILLS_DIR" rev-parse --verify "upstream/master" &>/dev/null; then

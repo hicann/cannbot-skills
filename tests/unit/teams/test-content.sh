@@ -48,10 +48,11 @@ echo ""
 # ============================================
 print_section_header "Test: Team Content (T-CON-01 to T-CON-03)"
 
+# Collect files for batch validation
+batch_files=()
 for team in $TEAMS_TO_TEST; do
     [ -z "$team" ] && continue
 
-    # In incremental mode, check if this team should be tested
     if is_incremental_mode && ! should_test_team "$team"; then
         print_skip "$team: Not in changed list"
         ((skip_count++)) || true
@@ -66,12 +67,18 @@ for team in $TEAMS_TO_TEST; do
         continue
     fi
 
-    if validate_team_content "$team_file"; then
-        ((pass_count++)) || true
-    else
-        ((fail_count++)) || true
-    fi
+    batch_files+=("$team_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    skill_paths_csv=$(get_all_skills_with_paths | cut -d: -f2- | tr '\n' ',')
+    batch_output=$(validate_teams_content_batch "$skill_paths_csv" "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    pass_count=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    fail_count=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$pass_count" =~ ^[0-9]+$ ]] || pass_count=0
+    [[ "$fail_count" =~ ^[0-9]+$ ]] || fail_count=0
+fi
 
 echo ""
 

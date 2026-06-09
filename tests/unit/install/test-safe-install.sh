@@ -68,8 +68,19 @@ err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 HELPER
 
-# Extract safe_install_file function (from definition to closing brace)
-sed -n '/^safe_install_file/,/^}$/p' "$INIT_FILE" >> "$SAFE_FUNC_TMP"
+# Extract safe_install_file function using awk with brace-depth tracking
+awk '
+/^safe_install_file/ { found=1; depth=0 }
+found {
+    print
+    for (i=1; i<=length($0); i++) {
+        c = substr($0, i, 1)
+        if (c == "{") depth++
+        if (c == "}") depth--
+    }
+    if (depth <= 0 && found) exit
+}
+' "$INIT_FILE" >> "$SAFE_FUNC_TMP"
 
 source "$SAFE_FUNC_TMP"
 

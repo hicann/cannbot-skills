@@ -3,17 +3,22 @@
 # Test: Skill Structure
 # =============================================================================
 # Validates structure correctness for all skills.
-# Rules tested:
+# Rules tested (aligned with Agent Skills / OpenCode / Claude Code specs):
 # - S-STR-01: YAML Front Matter format (---包裹)
-# - S-STR-02: name field exists
-# - S-STR-03: description field exists
+# - S-STR-02: name field exists (required by Agent Skills / OpenCode)
+# - S-STR-03: description field exists (required by Agent Skills / OpenCode)
 # - S-STR-04: references/ directory not empty (if exists)
 # - S-STR-05: name length 1-64 characters
 # - S-STR-06: name format ^[a-z0-9]+(-[a-z0-9]+)*$
 # - S-STR-07: description length 1-1024 characters
 # - S-STR-08: All links point to existing files
+# - S-STR-11: no README.md inside skill dir (warn)
+# - S-STR-12: XML tag injection in frontmatter
+# - S-STR-14: reserved name prefixes (warn)
 # - S-STR-15: Skill name uniqueness across all skills
 # - S-STR-16: metadata string→string mapping
+# - S-STR-17: description + when_to_use combined ≤ 1536 chars (warn)
+# - S-STR-18: disable-model-invocation must be boolean
 #
 # Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================
@@ -55,10 +60,11 @@ echo ""
 # ============================================
 print_section_header "Test: Skill Structure (S-STR-01 to S-STR-07)"
 
+# Collect files for batch validation
+batch_files=()
 for skill in $SKILLS_TO_TEST; do
     [ -z "$skill" ] && continue
 
-    # In incremental mode, check if this skill should be tested
     if is_incremental_mode && ! should_test_skill "$skill"; then
         print_skip "$skill: Not in changed list"
         ((skip_count++)) || true
@@ -73,12 +79,17 @@ for skill in $SKILLS_TO_TEST; do
         continue
     fi
 
-    if validate_skill_structure "$skill_file"; then
-        ((structure_pass++)) || true
-    else
-        ((structure_fail++)) || true
-    fi
+    batch_files+=("$skill_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    batch_output=$(validate_skills_structure_batch "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    structure_pass=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    structure_fail=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$structure_pass" =~ ^[0-9]+$ ]] || structure_pass=0
+    [[ "$structure_fail" =~ ^[0-9]+$ ]] || structure_fail=0
+fi
 
 echo ""
 

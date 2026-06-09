@@ -94,6 +94,7 @@ anti_pattern_phrases:
 skill_max_words: 5000          # S-STR-13
 skill_long_line_threshold: 500 # S-CON-07 — files beyond this must link to references/
 skill_description_max: 1024    # S-STR-07
+skill_description_combined_max: 1536  # S-STR-17 (description + when_to_use, Claude Code truncation limit)
 skill_name_max: 64             # S-STR-05
 skill_compatibility_max: 500   # S-STR-07 extension
 

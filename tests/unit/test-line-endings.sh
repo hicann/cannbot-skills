@@ -81,48 +81,36 @@ is_binary() {
 print_info "Scanning repository at: $SKILLS_DIR"
 echo ""
 
-# Scan for CRLF: use grep to find files with CR bytes,
-# then filter out binary files and excluded directories.
+# Build exclude-dir arguments for grep
+grep_excludes=()
+for ex in "${EXCLUDE_DIRS[@]}"; do
+    grep_excludes+=("--exclude-dir=$ex")
+done
+
+# Scan for CRLF in a single grep pass across common text file types
 cr_files=$(mktemp)
 cr_count=0
 scanned=0
 
-while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    scanned=$((scanned + 1))
+# Use grep -rlP for a single-pass scan across text file extensions
+grep -rlP '\r' "$SKILLS_DIR" \
+    --include='*.md' --include='*.sh' --include='*.py' \
+    --include='*.json' --include='*.yaml' --include='*.yml' \
+    --include='*.js' --include='*.ts' --include='*.xml' \
+    --include='*.txt' --include='*.cfg' --include='*.ini' \
+    --include='*.toml' --include='*.h' --include='*.c' \
+    --include='*.cpp' --include='*.hpp' --include='*.html' \
+    "${grep_excludes[@]}" 2>/dev/null > "$cr_files" || true
 
-    # Skip excluded directories
-    skip=false
-    for ex in "${EXCLUDE_DIRS[@]}"; do
-        case "$f" in
-            *"/$ex/"*|*"/$ex") skip=true; break ;;
-        esac
-    done
-    $skip && continue
-
-    # Check: does this text file contain CR bytes?
-    if ! is_binary "$f" && grep -ql $'\r' "$f" 2>/dev/null; then
-        rel_path="${f#$SKILLS_DIR/}"
-        echo "$rel_path" >> "$cr_files"
-        cr_count=$((cr_count + 1))
-    fi
-done < <(find "$SKILLS_DIR" \( \
-    -name ".git" -o \
-    -name "node_modules" -o \
-    -name "__pycache__" -o \
-    -name ".version-state" -o \
-    -name "CI" -o \
-    -name "asc-devkit" -o \
-    -name "pypto" -o \
-    -name "cann-recipes-infer" -o \
-    -name "operators" -o \
-    -name ".opencode" -o \
-    -name ".claude" -o \
-    -name ".trae" -o \
-    -name ".marscode" -o \
-    -name ".traecli" -o \
-    -name ".cursor" \
-\) -prune -o -type f -print 2>/dev/null)
+cr_count=$(wc -l < "$cr_files" | tr -d ' ')
+# Count total files scanned (approximate: all text files in repo)
+scanned=$(find "$SKILLS_DIR" \( \
+    -name ".git" -o -name "node_modules" -o -name "__pycache__" -o \
+    -name ".version-state" -o -name "CI" -o -name "asc-devkit" -o \
+    -name "pypto" -o -name "cann-recipes-infer" -o -name "operators" -o \
+    -name ".opencode" -o -name ".claude" -o -name ".trae" -o \
+    -name ".marscode" -o -name ".traecli" -o -name ".cursor" \
+\) -prune -o -type f -print 2>/dev/null | wc -l | tr -d ' ')
 
 print_info "Files scanned: $scanned"
 
@@ -139,17 +127,16 @@ echo ""
 if $AUTO_FIX; then
     # Auto-fix: convert CRLF to LF for each affected file
     fixed_count=0
-    while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        abs_path="$SKILLS_DIR/$f"
+    while IFS= read -r abs_path; do
+        [ -z "$abs_path" ] && continue
         if [ -f "$abs_path" ]; then
-            # Portable sed in-place edit (macOS uses -i '', Linux uses -i)
+            rel_path="${abs_path#$SKILLS_DIR/}"
             if sed --version 2>/dev/null | grep -q GNU; then
                 sed -i 's/\r$//' "$abs_path"
             else
                 sed -i '' 's/\r$//' "$abs_path"
             fi
-            echo -e "  ${GREEN}●${NC} Fixed: $f"
+            echo -e "  ${GREEN}●${NC} Fixed: $rel_path"
             fixed_count=$((fixed_count + 1))
         fi
     done < "$cr_files"
@@ -164,9 +151,10 @@ else
     print_fail "Found $cr_count file(s) with CRLF (DOS) line endings:"
     echo ""
 
-    while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        echo -e "  ${RED}●${NC} $f"
+    while IFS= read -r abs_path; do
+        [ -z "$abs_path" ] && continue
+        rel_path="${abs_path#$SKILLS_DIR/}"
+        echo -e "  ${RED}●${NC} $rel_path"
     done < "$cr_files"
 
     echo ""

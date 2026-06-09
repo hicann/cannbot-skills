@@ -8,13 +8,9 @@
 #     A-CON-01: name matches directory/file name
 #     A-CON-02: description contains trigger keywords (skipped if disable-model-invocation)
 #   warn level (advisory):
-#     A-CON-03: description contains trigger conditions
-#     A-CON-04: contains actionable instructions (code blocks, numbered steps)
-#     A-CON-05: contains error handling / troubleshooting section
-#     A-CON-06: contains examples / scenario section
-#     A-CON-07: long files link to references/ (progressive disclosure)
-#     A-CON-08: description follows three-segment structure
-#     A-CON-09: no anti-pattern phrases in description
+#     A-CON-03: description contains trigger conditions (skipped for mode: subagent)
+#     A-CON-04: long files link to supporting files (progressive disclosure)
+#     A-CON-05: no anti-pattern phrases in description
 #
 # Supports incremental testing via INCREMENTAL_AGENTS environment variable.
 # =============================================================================
@@ -57,10 +53,11 @@ echo ""
 # ============================================
 print_section_header "Test: Agent Content (A-CON-01 to A-CON-09)"
 
+# Collect files for batch validation
+batch_files=()
 for agent in $AGENTS_TO_TEST; do
     [ -z "$agent" ] && continue
 
-    # In incremental mode, check if this agent should be tested
     if is_incremental_mode && ! should_test_agent "$agent"; then
         print_skip "$agent: Not in changed list"
         ((skip_count++)) || true
@@ -75,12 +72,18 @@ for agent in $AGENTS_TO_TEST; do
         continue
     fi
 
-    if validate_agent_content "$agent_file" "$CACHED_SKILL_PATHS"; then
-        ((pass_count++)) || true
-    else
-        ((fail_count++)) || true
-    fi
+    batch_files+=("$agent_file")
 done
+
+if [ ${#batch_files[@]} -gt 0 ]; then
+    skill_paths_csv=$(echo "$CACHED_SKILL_PATHS" | tr '\n' ',')
+    batch_output=$(validate_agents_content_batch "$skill_paths_csv" "${batch_files[@]}" 2>&1) || true
+    echo "$batch_output"
+    pass_count=$(echo "$batch_output" | grep -c '\[PASS\]' || echo 0)
+    fail_count=$(echo "$batch_output" | grep -c '\[FAIL\]' || echo 0)
+    [[ "$pass_count" =~ ^[0-9]+$ ]] || pass_count=0
+    [[ "$fail_count" =~ ^[0-9]+$ ]] || fail_count=0
+fi
 
 echo ""
 

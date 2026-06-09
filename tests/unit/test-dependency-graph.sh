@@ -24,6 +24,7 @@
 # - DG-07: Orphaned skills detection (warn)
 # - DG-08: Orphaned agents detection (warn)
 # - DG-09: Circular dependency detection
+# - DG-10: init.sh INCLUDED_SKILLS covers all marketplace-declared skills
 # =============================================================================
 
 set -euo pipefail

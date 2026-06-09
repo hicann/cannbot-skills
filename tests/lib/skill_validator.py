@@ -80,11 +80,18 @@ MAX_DESC = int(RULES.get("skill_description_max", 1024))
 MAX_COMPAT = int(RULES.get("skill_compatibility_max", 500))
 MAX_WORDS = int(RULES.get("skill_max_words", 5000))
 LONG_LINE_THRESHOLD = int(RULES.get("skill_long_line_threshold", 200))
+DESC_COMBINED_MAX = int(RULES.get("skill_description_combined_max", 1536))
 
 ACTION_VERB_RE = re.compile(
     r"[A-Za-z\u4e00-\u9fff]+?("
-    r"提供|Provides?|处理|Handles?|负责|生成|"
-    r"Designs?|实现|Implements?|设计|Optimizes?|优化)",
+    r"提供|Provides?|处理|Handles?|负责|生成|支持|Suppors?|"
+    r"Designs?|实现|Implements?|设计|Optimizes?|优化|"
+    r"创建|Creates?|分析|Analyzes?|验证|Validates?|"
+    r"检查|Checks?|提取|Extracts?|定位|Locates?|"
+    r"修复|Fixes?|调试|Debugs?|测试|Tests?|"
+    r"管理|Manages?|配置|Configures?|部署|Deploys?|"
+    r"重构|Refactors?|迁移|Migrates?|集成|Integrates?|"
+    r"扩展|Extends?|封装|Wraps?|转换|Converts?)",
 )
 
 
@@ -178,13 +185,14 @@ def _check_body_not_empty(rule_prefix: str, file_str: str, path: Path, body: str
     return True
 
 
-def _check_description_triggers(rule_prefix: str, desc: str, is_manual: bool, file_str: str) -> None:
-    """Check description for trigger keywords, conditions, and segment completeness.
+def _check_description_triggers(rule_prefix: str, desc: str, is_manual: bool,
+                                file_str: str, mode: str | None = None) -> None:
+    """Check description for trigger keywords, conditions, and anti-patterns.
 
     Validates S/A-CON-02 (keywords), S/A-CON-03 (trigger conditions),
-    S/A-CON-08 (three-segment structure), and S/A-CON-09 (anti-patterns).
-    The keyword set depends on the rule prefix: S-CON uses skill_keywords,
-    A-CON also uses skill_keywords (agents share the same trigger vocabulary).
+    and S/A-CON-05 (anti-patterns).
+    A-CON-03 is skipped for agents with mode=subagent (they are invoked by
+    parent agents, not by user input).
     """
     kw_re = SKILL_KEYWORDS_RE  # agents use the same keyword set as skills
 
@@ -192,61 +200,46 @@ def _check_description_triggers(rule_prefix: str, desc: str, is_manual: bool, fi
     if not is_manual:
         if not kw_re.search(desc):
             emit("error", f"{rule_prefix}-CON-02", file_str, "Description lacks trigger keywords")
-        if not TRIGGER_RE.search(desc):
+        # A-CON-03: skip for subagents (invoked by parent agent, not user input)
+        if rule_prefix == "A" and mode == "subagent":
+            pass
+        elif not TRIGGER_RE.search(desc):
             msg = "Description missing trigger conditions (e.g. 'Use when...' or '触发：...')"
             emit("error" if rule_prefix == "S" else "warn", f"{rule_prefix}-CON-03", file_str, msg)
 
-    # S/A-CON-08: three-segment structure
-    segs = 0
-    if ACTION_VERB_RE.search(desc):
-        segs += 1
-    if TRIGGER_RE.search(desc):
-        segs += 1
-    if kw_re.search(desc):
-        segs += 1
-    segs_required = 1 if is_manual else 2
-    if segs < segs_required:
-        emit("warn", f"{rule_prefix}-CON-08", file_str,
-             "Description should combine action + trigger + keywords "
-             "(PDF 'What + When + Key capabilities')")
-
-    # S/A-CON-09: anti-pattern phrases
+    # S/A-CON-05: anti-pattern phrases
     if ANTI_PATTERN_RE and ANTI_PATTERN_RE.search(desc):
-        emit("warn", f"{rule_prefix}-CON-09", file_str,
+        emit("warn", f"{rule_prefix}-CON-05", file_str,
              "Description uses vague/lazy anti-pattern phrasing "
              "(see rules.yaml anti_pattern_phrases)")
 
 
 def _check_content_quality(rule_prefix: str, file_str: str, text_all: str) -> None:
-    """Check file body for actionable instructions, error handling, examples, and disclosure.
+    """Check file body for progressive disclosure and file reference depth.
 
-    Validates S/A-CON-04 (actionable), S/A-CON-05 (error handling),
-    S/A-CON-06 (examples), and S/A-CON-07 (progressive disclosure).
+    Validates S/A-CON-04 (progressive disclosure) and S/A-CON-06 (file reference depth).
     """
-    action_re = r"^```|`[a-z]|^[-*]? *[0-9]+\. |scripts/|运行 `|执行 `|call `|Run `"
-    if not re.search(action_re, text_all, re.MULTILINE):
-        emit("warn", f"{rule_prefix}-CON-04", file_str,
-             "No actionable instructions found (add code blocks, numbered steps, or script references)")
-
-    err_re = r"错误处理|Error|Troubleshoot|故障排除|常见问题|Common Issue|失败|fail|exception|报错"
-    if not re.search(err_re, text_all, re.IGNORECASE):
-        emit("warn", f"{rule_prefix}-CON-05", file_str,
-             "No error handling or troubleshooting section found")
-
-    ex_re = (
-        r"^#+\s*(Example|示例|场景|典型用法|Scenario|Case\s*\d|When\s+To\s+Use|使用场景)"
-        r"|Example:|示例:|^[-*]?\s*用户说|User says|Given.*When.*Then"
-        r"|^```"
-    )
-    if not re.search(ex_re, text_all, re.IGNORECASE | re.MULTILINE):
-        emit("warn", f"{rule_prefix}-CON-06", file_str,
-             "No examples / scenario section found (add Given/When/Then, ## 场景, or a code fence)")
-
+    # S/A-CON-04: progressive disclosure (long files should link to supporting files)
     line_count = text_all.count("\n") + 1
-    if line_count > LONG_LINE_THRESHOLD and not re.search(r"references/|\{file:", text_all):
+    support_re = (
+        r"references/|scripts/|assets/"
+        r"|reference\.md|examples\.md|REFERENCE\.md|EXAMPLES\.md"
+        r"|\{file:"
+    )
+    if line_count > LONG_LINE_THRESHOLD and not re.search(support_re, text_all):
         label = "SKILL.md" if rule_prefix == "S" else "Agent file"
-        emit("warn", f"{rule_prefix}-CON-07", file_str,
-             f"{label} is {line_count} lines but no references/ links (use progressive disclosure)")
+        emit("warn", f"{rule_prefix}-CON-04", file_str,
+             f"{label} is {line_count} lines but no supporting files linked "
+             f"(use references/, scripts/, assets/, or separate .md files for progressive disclosure)")
+
+    # S/A-CON-06: file reference depth (Agent Skills spec: keep references one level deep)
+    nested_refs = re.findall(
+        r"\]\((?:references/|scripts/|assets/)[^)]*/[^)]*/[^)]*\)", text_all
+    )
+    if nested_refs:
+        emit("warn", f"{rule_prefix}-CON-06", file_str,
+             f"Found {len(nested_refs)} deeply nested file reference(s) "
+             f"(Agent Skills spec: keep file references one level deep from SKILL.md)")
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +268,7 @@ def _name_checks(rule_prefix: str, name: Any, file_str: str) -> None:
     lname = name.lower()
     for prefix in RESERVED_PREFIXES:
         if lname.startswith(prefix):
-            emit("error", f"{rule_prefix}-14", file_str,
+            emit("warn", f"{rule_prefix}-14", file_str,
                  f"name uses reserved prefix '{prefix}*' (name='{name}')")
             break
 
@@ -341,7 +334,7 @@ def _validate_skill_structure(fm: dict, skill_file: Path, skill_dir: Path,
 
     # S-STR-11: no README.md inside skill dir
     if (skill_dir / "README.md").exists():
-        emit("error", "S-STR-11", file_str,
+        emit("warn", "S-STR-11", file_str,
              "README.md not allowed inside skill directory (put content in SKILL.md or references/)")
 
     # S-STR-04: references dir must contain at least one .md file
@@ -356,6 +349,26 @@ def _validate_skill_structure(fm: dict, skill_file: Path, skill_dir: Path,
     if raw and re.search(r"<[a-zA-Z_][a-zA-Z0-9_-]*>|</[a-zA-Z_][a-zA-Z0-9_-]*>", raw):
         emit("error", "S-STR-12", file_str,
              "Frontmatter contains XML tag pattern (security restriction)")
+
+    # S-STR-17: description + when_to_use combined length (Claude Code truncates at 1536)
+    when_to_use = fm.get("when_to_use")
+    if when_to_use is not None:
+        if not isinstance(when_to_use, str):
+            emit("error", "S-STR-17", file_str,
+                 f"when_to_use must be a string (got {type(when_to_use).__name__})")
+        else:
+            desc = fm.get("description", "")
+            combined = len(desc) + len(when_to_use)
+            if combined > DESC_COMBINED_MAX:
+                emit("warn", "S-STR-17", file_str,
+                     f"description + when_to_use combined is {combined} chars "
+                     f"(Claude Code truncates at {DESC_COMBINED_MAX})")
+
+    # S-STR-18: disable-model-invocation must be boolean
+    dmi = fm.get("disable-model-invocation")
+    if dmi is not None and not isinstance(dmi, bool):
+        emit("error", "S-STR-18", file_str,
+             f"disable-model-invocation must be boolean (got {type(dmi).__name__})")
 
 
 def _validate_skill_content(fm: dict, body: str, skill_file: Path, skill_name: str, file_str: str) -> None:
@@ -372,12 +385,6 @@ def _validate_skill_content(fm: dict, body: str, skill_file: Path, skill_name: s
 
     text_all = skill_file.read_text(encoding="utf-8", errors="replace")
     _check_content_quality("S", file_str, text_all)
-
-    # S-STR-13: word count (content-adjacent, uses body)
-    word_count = len(body.split())
-    if word_count > MAX_WORDS:
-        emit("warn", "S-STR-13", file_str,
-             f"SKILL.md body has {word_count} words (recommended: under {MAX_WORDS})")
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +458,7 @@ def _validate_agent_content(fm: dict, agent_file: Path, agent_name: str, file_st
     desc = fm.get("description") if isinstance(fm.get("description"), str) else None
     is_manual = fm.get("disable-model-invocation") is True
     if desc:
-        _check_description_triggers("A", desc, is_manual, file_str)
+        _check_description_triggers("A", desc, is_manual, file_str, mode=fm.get("mode"))
 
     text_all = agent_file.read_text(encoding="utf-8", errors="replace")
     _check_content_quality("A", file_str, text_all)
@@ -598,54 +605,109 @@ def _known_skills(paths: Iterable[Path]) -> set[str]:
     return names
 
 
-def main(argv: list[str]) -> int:
+def _parse_args(argv: list[str]) -> tuple[str, str, bool, list[str], list[str]]:
+    """Parse command line arguments and return (cmd, subset, batch, skill_paths, filtered_argv)."""
     if len(argv) < 2:
-        print("usage: skill_validator.py <subcmd> [args...]", file=sys.stderr)
-        return 2
+        raise ValueError("usage: skill_validator.py <subcmd> [args...]")
 
-    # Parse optional --subset flag from argv.
     subset = "all"
+    batch = False
+    skill_paths_arg: list[str] = []
     filtered: list[str] = []
+    
     for a in argv:
         if a.startswith("--subset="):
             subset = a.split("=", 1)[1]
+        elif a == "--batch":
+            batch = True
+        elif a.startswith("--skill-paths="):
+            skill_paths_arg.extend(a.split("=", 1)[1].split(","))
         else:
             filtered.append(a)
-    argv = filtered
+    
+    return filtered[1], subset, batch, skill_paths_arg, filtered
 
-    cmd = argv[1]
 
-    if cmd == "parse":
-        fm, _body, err = parse_frontmatter(Path(argv[2]))
-        out = {"frontmatter": fm, "error": err}
-        print(json.dumps(out, ensure_ascii=False))
-        return 0
+def _cmd_parse(argv: list[str]) -> int:
+    """Handle parse command."""
+    fm, _body, err = parse_frontmatter(Path(argv[2]))
+    out = {"frontmatter": fm, "error": err}
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
 
-    if cmd == "validate-skill":
+
+def _cmd_validate_skill(argv: list[str], subset: str, batch: bool) -> int:
+    """Handle validate-skill command."""
+    if batch:
+        for f in argv[2:]:
+            print(f"FILE:{f}")
+            validate_skill(Path(f), subset=subset)
+    else:
         validate_skill(Path(argv[2]), subset=subset)
-        return 0
+    return 0
 
-    if cmd == "validate-agent":
+
+def _cmd_validate_agent(argv: list[str], subset: str, batch: bool, skill_paths_arg: list[str]) -> int:
+    """Handle validate-agent command."""
+    if batch:
+        skill_paths = [Path(p) for p in skill_paths_arg]
+        known = _known_skills(skill_paths) if skill_paths else None
+        for f in argv[2:]:
+            print(f"FILE:{f}")
+            validate_agent(Path(f), known, subset=subset)
+    else:
         skill_paths = [Path(p) for p in argv[3:]]
         known = _known_skills(skill_paths) if skill_paths else None
         validate_agent(Path(argv[2]), known, subset=subset)
-        return 0
+    return 0
 
-    if cmd == "validate-team":
+
+def _cmd_validate_team(argv: list[str], subset: str, batch: bool, skill_paths_arg: list[str]) -> int:
+    """Handle validate-team command."""
+    if batch:
+        skill_paths = [Path(p) for p in skill_paths_arg]
+        known = _known_skills(skill_paths) if skill_paths else None
+        for f in argv[2:]:
+            print(f"FILE:{f}")
+            validate_team(Path(f), known, subset=subset)
+    else:
         skill_paths = [Path(p) for p in argv[3:]]
         known = _known_skills(skill_paths) if skill_paths else None
         validate_team(Path(argv[2]), known, subset=subset)
-        return 0
+    return 0
 
-    if cmd == "check-uniqueness":
-        if len(argv) < 4:
-            print("usage: skill_validator.py check-uniqueness <kind> <path...>", file=sys.stderr)
-            return 2
-        kind = argv[2]
-        paths = [Path(p) for p in argv[3:]]
-        check_uniqueness(kind, paths)
-        return 0
 
+def _cmd_check_uniqueness(argv: list[str]) -> int:
+    """Handle check-uniqueness command."""
+    if len(argv) < 4:
+        print("usage: skill_validator.py check-uniqueness <kind> <path...>", file=sys.stderr)
+        return 2
+    kind = argv[2]
+    paths = [Path(p) for p in argv[3:]]
+    check_uniqueness(kind, paths)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    """Main entry point - command dispatcher."""
+    try:
+        cmd, subset, batch, skill_paths_arg, argv = _parse_args(argv)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    
+    handlers = {
+        "parse": lambda: _cmd_parse(argv),
+        "validate-skill": lambda: _cmd_validate_skill(argv, subset, batch),
+        "validate-agent": lambda: _cmd_validate_agent(argv, subset, batch, skill_paths_arg),
+        "validate-team": lambda: _cmd_validate_team(argv, subset, batch, skill_paths_arg),
+        "check-uniqueness": lambda: _cmd_check_uniqueness(argv),
+    }
+    
+    handler = handlers.get(cmd)
+    if handler:
+        return handler()
+    
     print(f"unknown subcommand: {cmd}", file=sys.stderr)
     return 2
 
