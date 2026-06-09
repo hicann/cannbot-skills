@@ -1,6 +1,6 @@
 ---
 name: cuda2ascend-simt
-description: Use when migrating CUDA operators, kernels, or related CUDA implementations to Ascend C SIMT. Suitable for CUDA-to-Ascend migration, CUDA kernel porting, CUDA runtime or device API translation, or delivering a migrated result as a standalone sample, a torch_npu extension project, or a pybind extension project. This skill produces Chinese migration execution documents.
+description: "将 CUDA 算子/Kernel 迁移到 Ascend C SIMT。触发：CUDA 转 Ascend、CUDA 迁移昇腾、cuda kernel porting to Ascend、CUDA to Ascend SIMT、CUDA 代码移植 NPU、GPU 算子转 NPU、.cu 转 .asc、CUDA 转 NPU。Use when migrating CUDA operators, kernels, or related CUDA implementations to Ascend C SIMT. Suitable for CUDA-to-Ascend migration, CUDA kernel porting, CUDA runtime or device API translation, or delivering a migrated result as a standalone sample, a torch_npu extension project, or a pybind extension project. This skill produces Chinese migration execution documents."
 ---
 
 # cuda2ascend-simt
