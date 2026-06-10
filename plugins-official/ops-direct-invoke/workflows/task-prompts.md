@@ -193,6 +193,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 
 【参考文档】
 - 编码规范与审查清单：workflows/development-guide.md
+- 算子族特定方法论：*必须在ascendc-tiling-design中查找对应算子类的开发指南
 
 【输出】
 - 算子代码：operators/{operator_name}/
@@ -223,6 +224,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 - 设计文档：operators/{operator_name}/docs/DESIGN.md
 - 环境信息：operators/{operator_name}/docs/environment.md（芯片型号 / SocVersion）；NpuArch 与 `--npu-arch` 合法值通过 `/npu-arch` skill 查得，用于核对 CMakeLists 与 DESIGN.md 一致
 - 审查清单：workflows/development-guide.md
+- 算子族方法论：见 /ascendc-tiling-design 路由表
 
 【输出】
 - 审查报告：operators/{operator_name}/docs/REVIEW.md

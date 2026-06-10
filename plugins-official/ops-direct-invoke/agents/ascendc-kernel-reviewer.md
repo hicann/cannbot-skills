@@ -4,6 +4,7 @@ description: Ascend C 算子代码审查专家。独立构建验证、代码质�
 mode: subagent
 skills:
   - ascendc-docs-search
+  - ascendc-tiling-design
   - ascendc-regbase-best-practice
   - ascendc-blaze-best-practice
   - ops-profiling

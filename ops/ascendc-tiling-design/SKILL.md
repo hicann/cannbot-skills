@@ -17,7 +17,8 @@ description: Ascend C 算子 Tiling 设计指南。提供算子分类体系和 T
 | Random 随机类 | 生成随机数，需种子管理 | RandomUniform, Dropout | 📋 规划中 |
 | MatMul 矩阵乘类 | 矩阵乘法，高计算密度，用Cube单元 | MatMul, BatchMatMul | ✅ [场景路由](references/matmul/patterns.md)（mxfp8 + eltwise 融合；其它 matmul 形态规划中） |
 | Convolution 卷积类 | 空间卷积，滑动窗口计算 | Conv2D, DepthwiseConv | 📋 规划中 |
-| NN 神经网络类 | 神经网络专用，多种操作组合 | FlashAttention, GroupNorm | 📋 规划中 |
+| FlashAttention 类 | 注意力计算 | FlashAttention, GQA, MHA, MLA | ✅ [分析](references/flashattention/overview.md)(⚠️ 必须先读) / [设计](references/flashattention/design.md) / [子族契约](references/flashattention/subfamilies.md) |
+| NN 神经网络类(其它)| 神经网络专用，多种操作组合 | GroupNorm 等非 attention | 📋 规划中 |
 
 ## 通用设计要素（所有类别必须）
 

@@ -4,6 +4,7 @@ description: Ascend C 算子开发实现专家。根据设计方案实现算子�
 mode: subagent
 skills:
   - ascendc-env-check
+  - ascendc-tiling-design
   - ascendc-api-best-practices
   - ascendc-regbase-best-practice
   - ascendc-blaze-best-practice
@@ -54,6 +55,8 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 猜测 API 用法，必须查阅文档和示例
 - 写死硬件参数（blockDim/blockIdx/UB 大小）
 - 随意降低精度标准
+- **擅自改变 DESIGN.md 中确定的设计框架**（架构选型、关键设计决策）。如发现 DESIGN.md 设计框架需要变更，须在报告中标注设计问题（design_issue）阻塞，不可自行修改设计、不可绕过设计框架继续开发
+- **跳过 DESIGN.md 中规定的前置验证步骤直接写代码**。必须严格按 DESIGN.md 中规定的开发流程执行
 
 ### 输入边界
 
@@ -183,6 +186,18 @@ Level 2: 极值/零值  -> 边界情况验证
 **记录清单**：
 - [ ] 实现完成情况
 - [ ] 测试结果摘要
+
+#### 阶段 5：自我检查（开发完成后必须执行）
+
+**目标**：对照 DESIGN.md 逐项核对实现是否按设计执行，作为提交 Reviewer 前的最后门禁。
+
+**核对清单**：
+- [ ] DESIGN.md 中确定的所有关键设计决策已在代码中实现
+- [ ] 设计框架（架构选型、关键设计决策）未偏离 DESIGN.md 规定
+- [ ] DESIGN.md 中规定的前置验证步骤已按设计执行
+- [ ] 任何偏离 DESIGN.md 的地方已在 PLAN.md 中明确说明并附理由
+
+如有任一项未通过，**禁止**提交 Reviewer，须先回到对应阶段补齐；如确认 DESIGN.md 本身有问题需变更，须在报告中标注设计问题（design_issue）阻塞，由上层决定是否调度 Architect 重新评估。
 
 ### 子任务：设计串讲模式
 

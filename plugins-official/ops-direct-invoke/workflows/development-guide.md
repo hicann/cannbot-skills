@@ -294,3 +294,4 @@ python workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMakeL
 | 调试示例 | `find "$ASC_DEVKIT_DIR"/examples/ -name "printf.asc"` | printf 调试方法 |
 | 设计模板 | `workflows/templates/design-template.md` | 设计文档模板（Architect 用） |
 | 工程模板 | `/ascendc-direct-invoke-template` skill | Kernel 直调工程模板（Developer 用） |
+| 算子族方法论 | `/ascendc-tiling-design` 路由表 | 各算子族 methodology(Tiling 策略、特定 API 用法等),算子开发前必读对应族 |
