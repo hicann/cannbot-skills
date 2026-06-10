@@ -15,6 +15,12 @@ Agent({
 
 【执行步骤】
 
+0. 清理旧缓存（同一 PR 重复检视时，防止读取陈旧代码）：
+   - 从 PR URL 中提取 PR 编号
+   - 若 `./operators/.pr_diff/{pr_number}.diff` 存在 → 删除该文件
+   - 若 `./operators/.pr_repo/{pr_number}/` 存在 → 删除整个目录（`rm -rf`）
+   - 若 `./operators/pr-{pr_number}/code_summary.md` 存在 → 删除该文件
+   确保 diff、源码、概要全部来自本次获取，不混用不同次检视的数据。
 1. 识别 PR 托管平台（URL 含 `gitcode.com` → GitCode）
 2. 获取 diff：
    - 脚本路径 = `{skill_base}/scripts/get_gitcode_pr_diff.py`

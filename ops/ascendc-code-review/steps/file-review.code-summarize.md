@@ -14,7 +14,7 @@ Agent({
   prompt: "代码概要生成（文件检视模式）
 
 【输入】
-- 代码文件路径：{code_file_path}
+- 代码文件：{file_input}
 - 概要输出路径：{code_summary_output_path}
 
 【执行要求】
@@ -119,6 +119,9 @@ Step 8: 返回结果     — 结构化返回侧别和脉络摘要
   - 若有已知的 UB/L1 大小等硬件规格，一并记录
 - 写入「芯片架构参数」表
 - 若代码含 TilingData 字段但无法从本地文件确定硬件参数值，使用 `/npu-arch` skill 查询对应芯片代际的核数、UB/L1 大小、对齐要求等
+- **跨文件关系分析**（file_input 含多文件时执行）：
+  追踪文件间的 include 链、数据流（如 TilingData Host→Kernel）、
+  共享常量/宏/类型定义、函数调用链，写入输出「跨文件关系」表
 
 ### Step 5: 变量溯源
 
@@ -290,6 +293,17 @@ Grep 代码中的所有编译期常量，填入输出「常量清单」表：
 | Buffer | 类型 | 大小(B) | 用途 |
 |--------|------|------|------|
 | {buf1} | TQue/TBuf | {具体数值} | {用途} |
+
+## 跨文件关系（多文件时填充）
+
+> 追踪 file_input 中各文件之间的依赖关系，供检视子 Agent 理解跨文件上下文。
+
+| 关系类型 | 源文件 | 目标文件 | 内容 | 位置 |
+|---------|--------|---------|------|------|
+| include | {file_a} | {file_b} | {TilingData 结构定义等} | {file_b:行号} |
+| 数据流 | {tiling.cpp} | {kernel.cpp} | {tilingData.field 赋值→使用} | {tiling.cpp:行→kernel.cpp:行} |
+| 共享常量 | {header.h} | {file_a}, {file_b} | {常量名/宏/类型} | {header.h:行} |
+| 函数调用 | {file_a} | {file_b} | {函数名} | {file_a:行→file_b:行} |
 ```
 
 ---

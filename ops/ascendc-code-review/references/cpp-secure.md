@@ -50,9 +50,9 @@
 | 10.1 | 禁止从空指针创建 std::string | 标准库 | 高 |
 | 10.2 | 不要保存 c_str/data 指针 | 标准库 | 中 |
 | 11.1 | LOG API 禁止传入空指针 | LOG API 安全 | 高 |
-| 11.2 | LOG API 参数数量与顺序必须与格式化占位符逐位一致 | LOG API 安全 | 高 |
-| 11.3 | LOG API 参数类型必须与格式化说明符逐位匹配 | LOG API 安全 | 高 |
-| 11.4 | LOG API 禁止传入已释放内存的指针 | LOG API 安全 | 高 |
+| 11.2 | LOG API 参数必须与格式化占位符逐位一致（数量、类型、顺序） | LOG API 安全 | 高 |
+| 11.3 | LOG API 禁止传入已释放内存的指针 | LOG API 安全 | 高 |
+| 11.4 | LOG 消息英语行文语法正确、表意清晰 | LOG API 规范 | 低 |
 
 ---
 
@@ -304,40 +304,147 @@ python3 {skill_base}/scripts/check_bounds.py \
 
 #### 2.3 确保除法和余数运算不会导致除以零的错误 `[适用: All]`
 
-> **Kernel 侧说明**：对每个除法/取余运算，按 SEC-2.1 的 Step 2 方法收集除数边界，按 Step 4 判定表做判定。不采用变量名模式匹配。
+> **Kernel 侧说明**：
+> - Kernel 中的除法/取余运算，按除数来源分类判定（见下方 Step 2）。
+> - **硬件 API 返回值**（`GetBlockNum()`、`GetTaskRation()` 等）和 **TilingData 字段**（`tilingData->*`）作除数时，适用 Kernel 侧排除规则，无需零值守卫。
+> - 仅对 Kernel 内部独立计算的运行时变量（非白名单 API、非 TilingData）要求零值守卫。
 
 **【检视策略】**
 
-与 SEC-2.1/2.2 相同的边界推演方法，将「除数」作为操作数，重点确认除数在所有极端组合下非零。除数的边界收集（Step 2）按以下优先级：
+**Step 1 — 识别除法/取余运算**
 
-1. **代码级守卫** — 紧邻除法的 `if (divisor != 0)` 或 `if (divisor == 0) return`
-2. **编译期常量** — `constexpr` 声明，值固定非零（如 `BLOCK_SIZE=32`）
-3. **硬件固定值** — chip arch 参数，查 `/npu-arch`（如 `aivNum=48`）
-4. **TilingData 值域推演** — Read Tiling 代码中除数的赋值语句，追溯其来源和值域
-   - 来自常量计算且可证明非零 → PASS
-   - 来自 shape / 运行时变量 → 必须考虑零值可能性
-   - 无法确定 → 标记为「边界未知」
+扫描代码中所有 `/` 和 `%` 运算符（含 `CeilDiv`/`CeilDivide` 工具函数调用），提取除数表达式。
+
+**Step 2 — 除数来源分类**
+
+| 优先级 | 除数来源 | 识别方法 | 信任等级 |
+|--------|---------|---------|---------|
+| P0 | 编译期常量 | `constexpr` 声明、字面量、`AscendC::BLOCK_CUBE` 等框架常量 | 自动 PASS |
+| P1 | 硬件 API 返回值 | 白名单 API 直接调用或赋值链可追溯 | Kernel 侧自动 PASS |
+| P2 | TilingData 字段 | `tilingData->xxx` / `tilingData_.xxx` | Kernel 侧自动 PASS |
+| P3 | 外部输入 | `shape->GetDim()`、`context->GetAttr()`、`GetActualSeqLen()` | 严格：必须有守卫 |
+| P4 | 设计过程参数 | Tiling/Kernel 内部多步计算的中间值 | 严格：必须有守卫 |
+
+**硬件 API 白名单（P1）**：
+
+| 侧别 | 白名单 API | 典型变量名 |
+|------|-----------|-----------|
+| Kernel | `AscendC::GetBlockNum()` | `coreNum`, `blockNum_` |
+| Kernel | `AscendC::GetTaskRation()` | `taskRation`, `coreRation` |
+| Kernel | `AscendC::GetSubBlockNum()` | `bn`, `subBlockNum` |
+| Tiling | `ascendcPlatform.GetCoreNumAic()` | `aicNum` |
+| Tiling | `ascendcPlatform.GetCoreNumAiv()` | `aivNum` |
+| Tiling | `ascendcPlatform.GetCoreNum()` | `coreNum` |
+| Tiling | `ascendcPlatform.GetCoreMemSize(...)` | `ubSize`, `l1Size` 等 |
+
+> **适用条件**：除数直接来自上述 API 返回值，或赋值链可追溯到上述 API 的变量。若除数经过算术运算（如 `GetBlockNum() - 1`），需另行分析运算结果是否可能为零。
+
+**Step 3 — 按来源判定**
+
+- **P0（编译期常量）**：值非零 → PASS。值为零 → FAIL。
+- **P1（硬件 API）**：Kernel 侧自动 PASS（见排除规则）。Tiling 侧必须有零值守卫（见严格模式）。
+- **P2（TilingData）**：Kernel 侧自动 PASS。Tiling 侧作为中间值按 P3/P4 处理。
+- **P3（外部输入）**：必须有有效守卫模式之一 → 无守卫则 FAIL。
+- **P4（设计过程参数）**：必须有有效守卫，或可追溯到 P0/P1 的非零值 → 否则 FAIL。
+
+**边界收集**（P3/P4 需要时）：按 SEC-2.1 的 Step 2 方法收集除数边界，按 Step 4 判定表做判定。
+
+**【Kernel 侧排除规则】**
+
+以下情况在 Kernel 侧自动排除，无需零值守卫：
+
+| 排除条件 | 参数模式示例 | 排除原因 |
+|---------|-------------|----------|
+| 除数来自硬件 API 白名单 | `GetBlockNum()`, `GetTaskRation()` | 芯片出厂固定非零，异常场景由 Tiling 侧兜底 |
+| 除数来自 TilingData | `tilingData->tileSize`, `tilingData->coreNum` | Tiling 阶段已校验非零 |
+| 编译期常量 | `constexpr uint32_t BLOCK = 32` | 编译期固定非零 |
+
+**判定方法**：
+- 除数表达式直接匹配白名单 API 调用 → 直接判定 PASS
+- 除数变量赋值链可追溯到白名单 API 或 `tilingData->xxx` → 直接判定 PASS
+- 除数为 `constexpr` 且值非零 → 直接判定 PASS
+
+**【Kernel 侧需校验场景】**
+
+以下情况在 Kernel 侧仍需零值守卫：
 
 | 校验条件 | 参数来源 | 代码模式 |
 |---------|---------|----------|
-| actS1Size / actS2Size | `GetActualSeqLen()` 运行时获取 | `if (actS1Size == 0) { return; }` |
-| usedCoreNum 可能为零 | 空任务场景 | `if (usedCoreNum == 0) { return; }` |
-| curActualSeqLen 动态值 | TND 布局累积差值 | `if (curActualSeqLen == 0) { return; }` |
+| Kernel 内部计算的中间值 | 非 TilingData、非硬件 API | `if (computedDivisor == 0) { return; }` |
+| 动态序列长度 | `GetActualSeqLen()` 运行时获取 | `if (actS1Size == 0) { return; }` |
+| 条件分支中的计算值 | 依赖运行时条件的派生值 | `if (curMode == X && div != 0) { ... }` |
+
+**【有效守卫模式】**
+
+以下 6 种模式视为有效的零值守卫（任一存在 → PASS）：
+
+| 模式 | 名称 | 代码形式 | 适用侧别 |
+|------|------|---------|---------|
+| A | OP_CHECK_IF | `OP_CHECK_IF(div == 0, LOG, return FAIL)` | Tiling |
+| B | if-guard+return | `if (div == 0) return;` | 两侧 |
+| C | std::max 保底 | `safeDiv = std::max(div, 1U)` | 两侧 |
+| D | 三元运算符 | `safe = (div > 0) ? div : 1` | 两侧 |
+| E | zero-flag+skip | `if (div==0) flag=true; if(!flag) { a/b }` | 两侧 |
+| F | ASSERT | `ASSERT(div != 0)` | Kernel（仅 moe/ 族） |
+
+> **ASSERT 注意**：ASSERT 在 Release 编译中可能被移除，仅在 moe/ 算子族的 Kernel 代码中视为有效守卫。其他场景的 ASSERT 降级为 SUSPICIOUS。
+
+**【CeilDiv/CeilDivide 特殊说明】**
+
+`CeilDiv(a, b)` / `CeilDivide(a, b)` 是算子仓最广泛使用的除法工具函数（3,000+ 处），但其标准实现 `(a + b - 1) / b` **本身不提供零值保护**。
+
+- **禁止**将 `CeilDiv` 调用视为守卫模式
+- `CeilDiv` 的除数参数（第二个参数）仍需按 P0-P4 分类判定：
+  - 来自 P0/P1/P2 → PASS
+  - 来自 P3/P4 且有守卫 → PASS
+  - 来自 P3/P4 无守卫 → FAIL
+
+**【Tiling 侧硬件参数校验 — 严格模式】**
+
+Tiling 侧负责所有硬件参数的校验（业务约定）。当硬件 API 返回值（P1）用作除数时，**必须**在 Tiling 代码中有显式零值守卫，否则判定为 FAIL。
+
+| 除数来源 | 校验方式 | 示例 |
+|---------|---------|------|
+| `GetCoreNumAic/Aiv()` | `OP_CHECK_IF(aicNum == 0, return GRAPH_FAILED)` | 核数获取后立即校验 |
+| `GetCoreMemSize()` | `OP_CHECK_IF(ubSize == 0, return GRAPH_FAILED)` | 内存大小获取后立即校验 |
+| `context->GetBlockDim()` | `if (blockDim == 0) return GRAPH_FAILED` | 使用前校验 |
 
 **【Tiling 侧校验示例】**
 
 ```cpp
-// Tiling 阶段校验静态参数非零
+// Tiling 阶段校验外部输入非零（P3）
 OP_CHECK_IF(keyShape->GetStorageShape().GetDim(DIM_2) == 0,
            OP_LOGE(context_, "dim N2 is 0."), return ge::GRAPH_FAILED);
-fBaseParams.g = queryShape->GetStorageShape().GetDim(DIM_2) / keyShape->GetStorageShape().GetDim(DIM_2);
+fBaseParams.g = queryShape->GetStorageShape().GetDim(DIM_2) /
+                keyShape->GetStorageShape().GetDim(DIM_2);
 OP_CHECK_IF(fBaseParams.g == 0, OP_LOGE(context_, "g is 0"), return ge::GRAPH_FAILED);
+
+// Tiling 阶段校验硬件参数非零（P1 严格模式）
+totalCoreNum_ = static_cast<uint64_t>(ascendcPlatform.GetCoreNumAiv());
+if (totalCoreNum_ == 0UL) {
+    OP_LOGE(context_->GetNodeName(), "coreNum is 0");
+    return ge::GRAPH_FAILED;
+}
+
+// Tiling 阶段校验设计过程参数非零（P4）
+uint32_t tileSize = ComputeTileSize(totalSize, coreNum);
+OP_CHECK_IF(tileSize == 0, OP_LOGE(context_, "tileSize is 0"), return ge::GRAPH_FAILED);
+uint32_t loopTimes = totalSize / tileSize;
 ```
 
 **【Kernel 侧校验示例】**
 
 ```cpp
-// Kernel 阶段校验动态值零值分支
+// ✅ Kernel 侧排除规则 — 硬件 API 除数，自动 PASS（P1）
+uint32_t coreIdx = GetBlockIdx();
+uint32_t coreNum = GetBlockNum();     // P1 白名单
+uint32_t taskIdx = coreIdx / coreNum; // 无需守卫
+
+// ✅ Kernel 侧排除规则 — TilingData 除数，自动 PASS（P2）
+uint32_t tileSize = tilingData->tileSize;  // P2 TilingData
+uint32_t loops = totalSize / tileSize;     // 无需守卫
+
+// ✅ Kernel 侧需校验 — 运行时动态值（P3）
 GetS1S2ActualSeqLen(bIdx, actS1Size, actS2Size);
 if ((actS1Size == 0) || (actS2Size == 0)) {
     curActSeqLenIsZero = true;
@@ -734,11 +841,11 @@ struct tm *make_tm(int year, int mon, int day, int hour, int min, int sec)
 
 ---
 
-### 11. LOG API 安全使用
+### 11. LOG 规范
 
 > **适用范围**：仅 Tiling 侧（Host 侧）。Kernel 侧使用 `AscendC::PRINTF`，无下列风险。
 
-Tiling 侧使用 `OP_LOGE` / `OP_LOGD` / `OP_LOGW` 等格式化 LOG 宏时，若参数使用不当，轻则输出乱码，重则引发段错误（SIGSEGV）。以下 4 条为强制要求。
+Tiling 侧使用 `OP_LOGE` / `OP_LOGD` / `OP_LOGW` 等格式化 LOG 宏。11.1–11.3 为安全强制要求（防段错误/未定义行为），11.4 为质量建议。
 
 LOG 宏签名（业务代码标准调用形式）：
 
@@ -780,275 +887,66 @@ OP_LOGE(context->GetNodeName(),
 
 ---
 
-#### 11.2 LOG API 参数数量与顺序必须与格式化占位符逐位一致 `[适用: Tiling]`
+#### 11.2 LOG API 参数必须与格式化占位符逐位一致（数量、类型、顺序） `[适用: Tiling]`
 
 **【问题说明】**
 
-参数数量少于占位符时，LOG 宏会从栈上读取垃圾值填充缺失参数。若垃圾值被解释为非法指针（`%s`/`%p`），将触发非法内存访问。
+LOG 宏的格式化占位符与实际参数之间必须满足三个维度的一致性：
 
-**参数顺序错位是同等严重的问题**：即使参数数量正确，若参数传入顺序与格式符位置不对应，会导致：
-- `%u`(位置1) 收到 `const char*` → 未定义行为（指针值被当作整数打印）
-- `%s`(位置3) 收到整数 → **段错误(SIGSEGV)**（整数被当作地址去读字符串）
+1. **数量一致**：参数少于占位符时，从栈上读取垃圾值，若被解释为 `%s` 将触发段错误
+2. **类型匹配**：类型大小不匹配时（如 `uint64_t` 误用 `%d`），按说明符宽度截断，后续参数全部错位
+3. **顺序对应**：参数顺序与格式符位置不对应时（如 `%s` 位置收到整数），整数被当作地址读字符串 → **段错误(SIGSEGV)**
 
-> **注意**：计数验证（参数数 == 格式符数）只是必要条件。**数量正确但顺序错误时，本条同样判定为 FAIL**。检视时必须对每个 LOG 调用执行**逐位顺序一致性验证**（见检视方法），并**与 SEC-11.3 联合执行**——本条验证数量+顺序，SEC-11.3 验证逐位类型匹配。两条联合才能完整覆盖所有 LOG 格式符安全问题。
+> **⚠️ 禁止仅凭 grep 单行分析 LOG 调用。** 算子仓中大量 LOG 语句跨越多行（2-35 行），且常嵌套在 `OP_CHECK_IF` 等外层宏内。grep 命中后**必须 Read 前后至少 10 行**获取完整的格式字符串和全部参数，否则分析的是截断的不完整调用，结论无效。多行字符串拼接（`"a" "b"`）需先合并再解析。
 
-**错误示例 1 — 参数数量不一致**
-
-```cpp
-// 2 个占位符，但只传了 1 个参数
-OP_LOGD(context->GetNodeName(),
-        "gmmSwigluBaseParams.M: %ld, K: %ld", m);   // 缺少 k，栈数据被错误读取
-```
-
-**错误示例 2 — 参数数量一致但顺序错位**
+**错误与正确示例**
 
 ```cpp
-// 格式符: %u %u %s %u %u（位置1→uint, 位置3→string）
-// 参数:   inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
-//         ↑ const char*       ↑ uint        ↑ uint        ↑ uint  ↑ uint
-//         ❌ 位置1: %u 收到 const char* → 指针值被当作整数打印
-//         ❌ 位置3: %s 收到 uint → 整数被当作地址去读字符串 → 段错误
+// ❌ 数量不一致：2 个占位符，1 个参数
+OP_LOGD(ctx, "M: %ld, K: %ld", m);           // 缺少 k
+// ✅
+OP_LOGD(ctx, "M: %ld, K: %ld", m, k);
+
+// ❌ 类型不匹配：uint64_t 用了 %d
+OP_LOGE(ctx, "n = %d, ubSize = %d\n", n, ubSize); // n/ubSize 均为 uint64_t
+// ✅
+OP_LOGE(ctx, "n = %llu, ubSize = %llu\n", n, ubSize);
+
+// ❌ 顺序错位：数量=5 格式符=5，但位置1和3的参数放反了
+//   格式符: %u(1) %u(2) %s(3) %u(4) %u(5)
+//   参数:   inputName.c_str()(1) ... d0Size/NUM8(3) ...
+//   → 位置1: %u 收到 const char*，位置3: %s 收到 uint → 段错误
 OP_CHECK_IF(tempD0 != d0Size,
-    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
-        "the last dim (D0) of kvCache(%u) should be %u; "
-        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+    OP_LOGE(opName, "...kvCache(%u)...%s(%u)...",
         inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
     return ge::GRAPH_FAILED);
-```
-
-**正确示例 1**
-
-```cpp
-OP_LOGD(context->GetNodeName(),
-        "gmmSwigluBaseParams.M: %ld, K: %ld", m, k);
-```
-
-**正确示例 2 — 参数顺序与格式符逐位对应**
-
-```cpp
-// 格式符: %u %u %s %u %u
-// 参数:   tempD0/NUM8, d0Size/NUM8, inputName.c_str(), tempD0, d0Size
-//         ↑ uint        ↑ uint        ↑ const char*     ↑ uint  ↑ uint
-//         ✅ 逐位对应正确
+// ✅ 参数顺序与格式符逐位对应
 OP_CHECK_IF(tempD0 != d0Size,
-    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
-        "the last dim (D0) of kvCache(%u) should be %u; "
-        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
+    OP_LOGE(opName, "...kvCache(%u)...%s(%u)...",
         tempD0/NUM8, d0Size/NUM8, inputName.c_str(), tempD0, d0Size),
     return ge::GRAPH_FAILED);
 ```
 
-**【检视方法 — SEC-11.2 专属】**
+**类型与说明符速查**
 
-对每个 LOG 调用，必须执行以下验证：
+| 类型 | 正确 | 常见错误 | 后果 |
+|------|------|---------|------|
+| `uint64_t` | `%llu` | `%u`, `%lu`, `%d` | 截断为 32 位，后续参数错位 |
+| `int64_t` | `%lld` | `%d`, `%ld` | 同上 |
+| `uint32_t` | `%u` | `%d` | 大值显示为负数 |
+| `size_t` | `%zu` | `%d`, `%u` | 64 位系统上截断 |
+| `bool` | `%d` 或 `? "true":"false"` + `%s` | `%s` 直传 | 未定义行为 |
+| `void*` | `%p` | `%x` | 不可移植 |
 
-```
-Step 1 — 提取格式符位置序列
-  从格式字符串中按出现顺序提取所有格式说明符，记录 (位置序号, 格式符)
-  示例: "%u %u %s %u %u" → [(1, %u), (2, %u), (3, %s), (4, %u), (5, %u)]
+**【检视方法】**
 
-Step 2 — 提取参数位置序列
-  从参数列表按传入顺序提取所有参数表达式，记录 (位置序号, 参数表达式)
-  示例: inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
-        → [(1, inputName.c_str()), (2, tempD0/NUM8), (3, d0Size/NUM8), (4, tempD0), (5, d0Size)]
-
-Step 3 — 数量验证
-  格式符数量 == 参数数量?
-  不等 → FAIL（参数缺失或多余）
-
-Step 4 — 顺序一致性验证（本条新增核心步骤）
-  对每个位置 i:
-    推断 param[i] 的类型 → 对照 format[i] 期望的类型族:
-      %s  → 期望: string-like（const char*, .c_str(), 字符串字面量）
-      %u  → 期望: unsigned-integer-like（uint32_t, uint8_t, unsigned int...）
-      %d  → 期望: signed-integer-like（int32_t, int, bool...）
-      %ld → 期望: signed-64bit-like（int64_t, long...）
-      %lu → 期望: unsigned-64bit-like（uint64_t, unsigned long...）
-      %lld→ 期望: signed-64bit-like（int64_t, long long）
-      %llu→ 期望: unsigned-64bit-like（uint64_t, unsigned long long）
-      %zu → 期望: size_t-like
-      %p  → 期望: pointer-like
-
-    param[i] 类型不在 format[i] 期望类型族内 → FAIL，记录:
-      位置 i: format[i]=%X 期望 <类型族>，实际 param[i]=<表达式> 类型 <T>
-
-  特判 — 顺序错位的危险模式:
-    若参数列表中存在 string-like 参数（.c_str()、字符串字面量），
-    但它出现在 %u/%d/%ld/%lu 位置 → 高风险 FAIL（%s 收到整数 → 段错误）
-    若参数列表中存在 integer 参数，
-    但它出现在 %s 位置 → 高风险 FAIL（整数被当作地址 → 段错误）
-```
+1. grep `OP_LOGE\|OP_LOGD\|OP_LOGW\|OP_LOGI` 找到所有 LOG 调用
+2. Read 完整调用后，提取格式符序列和参数序列，逐位比对：数量是否一致 → 每个位置的参数类型是否兼容格式符
+3. 高风险标记：`%s` 收到整数（段错误）、`uint64_t`/`int64_t` 配 `%d`（截断错位）
 
 ---
 
-#### 11.3 LOG API 参数类型必须与格式化说明符逐位匹配 `[适用: Tiling]`
-
-**【问题说明】**
-
-类型大小不匹配时，LOG 宏按说明符宽度截断或读取超量字节，导致后续参数全部错位。Tiling 侧最常见：`uint64_t` shape 维度误用 `%d`（4字节），实际类型为 8 字节，造成参数错位。
-
-**参数顺序错位同样导致类型不匹配**：即使每个参数类型在参数列表中都能找到对应格式符，但若参数与格式符的位置不对应（如 `%s` 在位置3，但 `const char*` 参数在位置1），则该位置的逐位类型仍然不匹配。此类问题属于 SEC-11.2（顺序）+ SEC-11.3（类型）的交叉违规，两条**必须联合检出**。
-
-> **联合检视要求**：SEC-11.3 的逐位比对（Step 4）同时覆盖了 SEC-11.2 的顺序验证——当位置 i 的参数类型与格式符期望类型不匹配时，可能是"类型本身错误"也可能是"顺序错位导致类型错配"，两条均判定 FAIL。**禁止将 SEC-11.2 和 SEC-11.3 分开独立执行后简单合并结果**——必须通过同一次逐位比对同时产出两条的判定。
-
-**错误示例 1 — 类型大小不匹配（传统场景）**
-
-```cpp
-// 参考 quant_grouped_matmul_dequant_tiling.cpp：_Params.originM 为 uint64_t
-OP_LOGE(context->GetNodeName(),
-        "No valid row found for n = %d, ubSize = %d\n", n, ubSize);
-// 错误：n/ubSize 均为 uint64_t，%d 只读 4 字节，后续参数全部错位
-```
-
-**错误示例 2 — 顺序错位导致逐位类型不匹配（高风险场景）**
-
-```cpp
-// 格式符: %u(1) %u(2) %s(3) %u(4) %u(5)
-// 参数:   inputName.c_str()(1)  tempD0/NUM8(2)  d0Size/NUM8(3)  tempD0(4)  d0Size(5)
-// 逐位比对:
-//   位置1: %u 期望 unsigned-integer，实际 const char* → ❌ FAIL (SEC-11.2 顺序错位 + SEC-11.3 类型不匹配)
-//   位置2: %u 期望 unsigned-integer，实际 uint → ✅ PASS
-//   位置3: %s 期望 string-like，实际 uint → ❌ FAIL (段错误风险)
-//   位置4: %u 期望 unsigned-integer，实际 uint → ✅ PASS
-//   位置5: %u 期望 unsigned-integer，实际 uint → ✅ PASS
-OP_CHECK_IF(tempD0 != d0Size,
-    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
-        "the last dim (D0) of kvCache(%u) should be %u; "
-        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
-        inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
-    return ge::GRAPH_FAILED);
-// 注意：参数数量=5 == 格式符数量=5 → 单独看 SEC-11.2 计数验证会 PASS
-//       但逐位比对发现位置1和位置3不匹配 → 两条同时 FAIL
-```
-
-**正确示例**
-
-```cpp
-// 业务代码正确写法（grouped_matmul_swiglu_quant_tiling.cpp 第 75 行）
-OP_LOGE(context->GetNodeName(),
-        "GMM_SWIGLU_QUANT TILING: No valid row found for n = %lu, ubSize = %lu\n", n, ubSize);
-```
-
-**Tiling 侧常见类型与说明符对照**
-
-| 类型 | 推荐说明符 (通用) | 常见错误 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `int64_t` | `%lld` | `%d`, `%ld` | `%ld` 在 Windows/32位系统上会截断数据。`%lld` 是标准且通用的写法。 |
-| `uint64_t` | `%llu` | `%u`, `%lu` | 同上，`%lu` 在 Windows 上仅读取 32 位。 |
-| `uint32_t` | `%u` | `%d` | `%d` 会导致大于 2^31 的数值显示为负数。 |
-| `int32_t` | `%d` | `%u` | 标准整型，直接对应。 |
-| `bool` | `%d` | `%s` | 除非手动转字符串，否则 `%d` (0/1) 最安全且无需额外逻辑。 |
-| `size_t` | `%zu` | `%d`, `%u` | `size_t` 在 64 位系统上是 64 位，用 `%u` 会截断。 |
-| `void*` | `%p` | `%x` | 永远用 `%p` 打印指针地址。 |
-
-```cpp
-// bool 的正确记录方式（业务代码第 248 行）
-OP_LOGD(context->GetNodeName(),
-        "isSplitWorkSpace: %s", isSplitWorkSpace ? "true" : "false");
-```
-
-**参数顺序错位示例（SEC-11.2 + SEC-11.3 交叉违规）**
-
-```cpp
-// 格式符: %u(1) %u(2) %s(3) %u(4) %u(5)
-// 参数:   inputName.c_str()(1)  tempD0/NUM8(2)  d0Size/NUM8(3)  tempD0(4)  d0Size(5)
-// 逐位比对结果:
-//   位置1: %u 期望 unsigned-integer → 实际 const char* → ❌ SEC-11.2 顺序错位 + SEC-11.3 类型不匹配
-//   位置3: %s 期望 string-like     → 实际 uint        → ❌ SEC-11.3 类型不匹配（段错误风险）
-OP_CHECK_IF(tempD0 != d0Size,
-    OP_LOGE(fiaInfo.opName, "When PA_NZ enable, if input kv dataType is INT32, "
-        "the last dim (D0) of kvCache(%u) should be %u; "
-        "if input kv dataType is INT4, the last dim (D0) of %s(%u) should be %u",
-        inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size),
-    return ge::GRAPH_FAILED);
-// 后果：%s(位置3) 收到整数 → 将整数当地址读字符串 → 段错误(SIGSEGV)
-//       %u(位置1) 收到字符串指针 → 未定义行为
-```
-
-**【联合检视方法 — SEC-11.2 + SEC-11.3 必须同时执行】**
-
-> **强制要求**：SEC-11.2 和 SEC-11.3 **禁止分开独立执行**。必须通过同一次逐位比对流程同时产出两条的判定结果。分开执行会导致：SEC-11.2 计数 PASS + SEC-11.3 独立类型匹配 PASS → 顺序错位漏检。
-
-对每个 LOG/printf 类调用，必须执行**逐位类型交叉验证**：
-
-```
-Step 0 — 发现所有 LOG 调用
-  0.1 grep `OP_LOGE\|OP_LOGD\|OP_LOGW\|OP_LOGI` 定位宏调用行号（不依赖格式符匹配，避免跨行漏检）
-  0.2 对每个命中，向后 Read 至 `);` 获取完整调用（可能跨 3-15 行）
-  0.3 若格式字符串为 C 字面量多行拼接（`"a" "b"`），先合并再解析
-
-Step 1 — 提取格式符位置序列
-  从**已合并**的格式字符串中提取所有格式说明符，按出现顺序记录 (位置序号, 格式符)
-  示例: "%u %u %s %u %u" → [(1, %u), (2, %u), (3, %s), (4, %u), (5, %u)]
-  支持的格式符: %u %d %ld %lld %lu %llu %s %f %lf %p %zu %x %X %c
-
-Step 2 — 提取参数位置序列
-  从 LOG 调用的参数部分提取 N 个参数表达式，按传入顺序记录 (位置序号, 参数表达式)
-  示例: inputName.c_str(), tempD0/NUM8, d0Size/NUM8, tempD0, d0Size
-        → [(1, inputName.c_str()), (2, tempD0/NUM8), (3, d0Size/NUM8), (4, tempD0), (5, d0Size)]
-
-Step 3 — 推断每个参数的类型
-  对每个参数表达式:
-    - 变量名 → Grep 声明位置获取类型
-    - .c_str() → const char*
-    - 表达式(如 a/b) → 推断结果类型（整数除法→整数类型）
-    - 字符串字面量 → const char*
-    - 三目运算符 ?: → 推断两侧公共类型
-    - 解引用指针 *ptr → 推断 ptr 的指向类型（如 `const int64_t*` 解引用 → `int64_t`）
-
-Step 4 — 逐位比对（同时产出 SEC-11.2 和 SEC-11.3 判定）
-
-  4.1 数量验证（SEC-11.2 基础检查）
-    格式符数量 == 参数数量?
-    不等 → SEC-11.2 FAIL（参数缺失或多余）
-
-  4.2 逐位类型交叉验证（SEC-11.2 顺序 + SEC-11.3 类型 联合核心步骤）
-    对每个位置 i (0 to N-1):
-      param[i] 的推断类型 是否兼容 format[i] 的格式符？
-
-      兼容规则:
-        %s   → const char*, char*, std::string(.c_str()), 字符串字面量
-        %u   → uint32_t, uint16_t, uint8_t, unsigned int, unsigned short
-        %d   → int32_t, int16_t, int8_t, int, bool
-        %ld  → int64_t, long, long long (有符号)
-        %lld → int64_t, long long
-        %lu  → uint64_t, unsigned long
-        %llu → uint64_t, unsigned long long
-        %zu  → size_t
-        %p   → 任意指针类型, void*
-        %f   → float, double
-        %lf  → double
-
-      不兼容 → 判定:
-        若 param[i] 的类型在参数列表中能找到某个其他格式符与其兼容
-        → SEC-11.2 FAIL(顺序错位) + SEC-11.3 FAIL(类型不匹配) — 交叉违规
-        若 param[i] 的类型在整个格式符序列中找不到任何兼容的格式符
-        → SEC-11.3 FAIL(类型本身不匹配) — 纯类型违规
-
-  4.3 高风险特判
-    以下位置不匹配模式为**高风险 FAIL**，必须在报告中标注风险等级:
-      - %s 位置收到 integer → 段错误风险（整数被当作地址读字符串）
-      - %u/%d/%ld/%lu 位置收到 string-like（.c_str()、字符串字面量）→ 未定义行为
-      - int64_t 参数配 %d（8字节配4字节）→ 参数截断+后续错位
-      - uint32_t 参数配 %d（无符号配有符号格式符）→ 大值显示为负数
-
-Step 5 — 输出判定表
-  对每个 LOG 调用，输出逐位比对判定表:
-
-  | 位置 | 格式符 | 期望类型族 | 实际参数 | 推断类型 | SEC-11.2 | SEC-11.3 |
-  |------|--------|-----------|---------|---------|----------|----------|
-  | 1    | %u     | unsigned-int | inputName.c_str() | const char* | FAIL(顺序) | FAIL(类型) |
-  | 2    | %u     | unsigned-int | tempD0/NUM8      | uint      | PASS      | PASS      |
-  | 3    | %s     | string-like  | d0Size/NUM8      | uint      | FAIL(顺序) | FAIL(类型) |
-  | ...
-
-  全部 PASS → SEC-11.2 PASS + SEC-11.3 PASS
-  任一位置 FAIL → 标注对应条例的 FAIL 及具体违规类型
-```
-
----
-
-#### 11.4 LOG API 禁止传入已释放内存的指针 `[适用: Tiling]`
+#### 11.3 LOG API 禁止传入已释放内存的指针 `[适用: Tiling]`
 
 **【问题说明】**
 
@@ -1072,3 +970,37 @@ OP_LOGE(context->GetNodeName(), "error: %s", errMsg);   // 先记录
 delete[] errMsg;
 errMsg = nullptr;
 ```
+
+---
+
+#### 建议 11.4 LOG 消息的英语行文应语法正确、表意清晰 `[适用: Tiling]`
+
+**【问题说明】**
+
+LOG 消息是排障的第一手线索。语法错误或含义模糊的日志会显著增加定位问题的时间成本。
+
+**检视要点**：
+- 主谓一致、时态统一（LOG 消息惯用一般现在时或过去时）
+- 避免中英文混杂（变量名除外）
+- 避免无意义占位（如 "error error"、"fail to fail"）
+- 关键数值应包含在消息中，而非仅靠格式符
+
+**提醒示例**
+
+```cpp
+// "is not support" → "is not supported"（仓内高频错误模式，5+ 文件）
+OP_LOGE(op_name, "scale shape is not support");          // → is not supported
+OP_LOGE(opName_, "...layout BNSD/BNSD_NBSD is not support"); // → is not supported
+OP_LOGE(ACLNN_ERR_PARAM_INVALID, "...the soc verison is not support"); // → version; is not supported
+
+// "do not support" → "does not support"（主谓不一致）
+OP_LOGE(opName_, "...key layout do not support PA_BSND."); // → does not support
+
+// 拼写错误
+OP_LOGE(opName_, "...cu_seqlens_q's dtype msut be DT_INT32."); // msut → must
+
+// 缺少主语
+OP_LOGD("GetBlockInfoOfBNS4TND", " Not support BN2S2."); // → BN2S2 is not supported
+```
+
+> **检视级别**：仅标记 SUSPICIOUS，不标记 FAIL。

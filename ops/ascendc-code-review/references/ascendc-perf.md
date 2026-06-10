@@ -39,7 +39,7 @@
 | PERF-1 | 循环内禁止逐元素操作 | 高 |
 | PERF-2 | 禁止写死硬件参数 | 高 |
 | PERF-3 | Double Buffer 使用 | 中 |
-| PERF-4 | PipeBarrier 优化 | 中 |
+| PERF-4 | PipeBarrier 使用 | 低 |
 | PERF-5 | 单次搬运量优化 | 中 |
 | PERF-6 | 避免 GM 重复读取 | 中 |
 | PERF-7 | 尾块处理正确性 | 高 |
@@ -177,13 +177,17 @@ pipe.InitBuffer(outQueue, BUFFER_NUM, tileLength * sizeof(T));
 
 ---
 
-### PERF-4: PipeBarrier 优化
+### PERF-4: PipeBarrier 使用
 
-**严重级别**：中
+**严重级别**：低
 
 ### 问题描述
 
-PipeBarrier 用于跨 Pipe 数据依赖同步，但过度使用会导致性能下降。应该只在必要时添加。
+PipeBarrier 用于跨 Pipe 数据依赖同步。同一 Pipe 内的操作由硬件保序，额外的 PipeBarrier 虽然冗余但不会影响正确性，属于防御性编程风格，检视时不应标记为错误。
+
+真正需要关注的是 **Barrier 粒度过粗** 的问题：例如在同一 Pipe 内本只需 `PipeBarrier<PIPE_V>()` 却使用了 `PipeBarrier<PIPE_ALL>()`，这会不必要地阻塞其他 Pipe 的执行。
+
+> **说明**：业务代码中倾向冗余使用 PipeBarrier 以确保安全性，这是可接受的工程实践。
 
 ### 需要 Barrier 的场景
 
@@ -191,17 +195,26 @@ PipeBarrier 用于跨 Pipe 数据依赖同步，但过度使用会导致性能�
 |------|---------|-----------------|
 | DataCopy(GM→UB) 后 Vector 计算 | MTE2 → V | ✅ 需要（通过 EnQue/DeQue） |
 | Vector 计算后 DataCopy(UB→GM) | V → MTE3 | ✅ 需要（通过 EnQue/DeQue） |
-| 连续 Vector 操作 | V → V | ❌ 不需要（硬件保序） |
+| 连续 Vector 操作 | V → V | ⚠️ 硬件保序，冗余但无害（防御性编程） |
 | Reduce 后读标量 | V → Scalar | ✅ 需要 |
 
-### 错误示例
+### 需关注的场景（粒度过粗）
 
 ```cpp
-// ❌ 错误：Vector 操作之间不需要 Barrier
+// ⚠️ 粒度过粗：同一 PIPE_V 内操作只需 PIPE_V，不需要 PIPE_ALL
 AscendC::Adds<T>(xLocal, xLocal, 1.0f, count);
-AscendC::PipeBarrier<PIPE_ALL>();  // 冗余！
+AscendC::PipeBarrier<PIPE_ALL>();  // 可用 PIPE_V 替代，PIPE_ALL 会阻塞所有 Pipe
 AscendC::Mul<T>(yLocal, xLocal, val, count);
-AscendC::PipeBarrier<PIPE_ALL>();  // 冗余！
+```
+
+### 可接受的防御性写法
+
+```cpp
+// ✅ 可接受：冗余 PipeBarrier 不影响正确性
+AscendC::Adds<T>(xLocal, xLocal, 1.0f, count);
+AscendC::PipeBarrier<PIPE_V>();  // 同 Pipe 内冗余，但无害
+AscendC::Mul<T>(yLocal, xLocal, val, count);
+AscendC::PipeBarrier<PIPE_V>();  // 同上
 AscendC::Exp<T>(yLocal, yLocal, count);
 ```
 
@@ -222,7 +235,7 @@ outQueueY.EnQue(yLocal);
 
 ### 检视方法
 
-分析每个 PipeBarrier 是否真的存在跨 Pipe 数据依赖。
+仅关注 Barrier 粒度过粗的问题（如 PIPE_ALL 替代 PIPE_V）。冗余的同 Pipe Barrier 属于防御性编程，不标记为 FAIL 或 SUSPICIOUS。
 
 ---
 
@@ -647,7 +660,7 @@ pipe.InitBuffer(reduceQueue, 1, 32 * sizeof(float));     // Reduce 临时
 - [ ] **PERF-1**: 循环内是否有逐元素 API 调用？
 - [ ] **PERF-2**: 是否写死了核数或 UB 大小？
 - [ ] **PERF-3**: 大数据量是否使用 Double Buffer？
-- [ ] **PERF-4**: PipeBarrier 是否过多或过少？
+- [ ] **PERF-4**: PipeBarrier 粒度过粗？（PIPE_ALL 替代 PIPE_V）冗余 Barrier 属于防御性编程，不标记
 - [ ] **PERF-5**: 单次搬运量是否 >= 16KB？（示例代码注意 Kernel 侧禁用 std::）
 - [ ] **PERF-6**: 是否有 GM 重复读取？
 - [ ] **PERF-7**: 循环处理块时，尾块的搬运长度是否单独计算？

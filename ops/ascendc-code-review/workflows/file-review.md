@@ -18,22 +18,26 @@
 | 任务2 | 行号校对 | steps/common.line-verify.md |
 | 任务3 | 撰写报告 | steps/common.report-write.md |
 
+### 输入解析
+
+从用户输入提取代码文件（支持：单文件路径、多文件路径、目录路径 find 枚举），统一为 `file_input`（可以是单个路径，也可以是多个路径）。
+
 ### 阶段0：代码概要 + 条例分组（并行）
 
 1. 将任务0 标记为 in_progress
-2. 从代码文件路径提取算子名，确认文件存在
+2. 从 file_input 提取算子名，确认文件存在
 3. **在单个消息中并行派发两个子 Agent**：
 
 **子 Agent A — 代码概要**：
 ```
 Read + 执行 steps/file-review.code-summarize.md 的派发指令
-传入：代码文件路径 + 概要输出路径 ./operators/{operator_name}/code_summary.md
+传入：file_input + 概要输出路径 ./operators/{operator_name}/code_summary.md
 ```
 
 **子 Agent B — 条例分组**：
 ```
 Read + 执行 steps/common.clause-routing.md 的派发指令
-传入：代码文件路径 + 用户意图范围（如用户指定了检视范围，如"只检查数值安全"，传入对应的类别名；否则传空表示全量）
+传入：file_input + 用户意图范围（如用户指定了检视范围，如"只检查数值安全"，传入对应的类别名；否则传空表示全量）
 ```
 
 4. 等待两者返回，收集：
@@ -48,7 +52,7 @@ Read + 执行 steps/common.clause-routing.md 的派发指令
 3. 按阶段0 的分组规划表，逐波派发：
    - 每波在单个消息中并行调用 ≤10 个 `Agent` 工具
    - `subagent_type` 优先 `"ascendc-ops-reviewer"`，不可用则 `"general"`
-   - 每组用 prompt 模板填入：侧别 + 条例ID和标题 + 代码文件路径 + 代码概要路径
+   - 每组用 prompt 模板填入：侧别 + 条例ID和标题 + file_input + 代码概要路径
    - 波次内并行，波次间串行
 4. 每波完成后输出进度，所有波次完成后汇总
 5. 将任务1 标记为 done
@@ -71,9 +75,9 @@ Read + 执行 steps/common.clause-routing.md 的派发指令
 ## 上下文传递链
 
 ```
-                 ┌─ code-summarize → 侧别 + 概要路径
+                 ┌─ code-summarize → 侧别 + 概要路径 + 跨文件关系
 阶段0（并行） ───┤
-                 └─ clause-routing → 分组规划表
+                 └─ clause-routing → 分组规划表（含文件范围）
                          ↓
 阶段1 → 逐条结果 (PASS/FAIL/SUSPICIOUS)
          ↓
