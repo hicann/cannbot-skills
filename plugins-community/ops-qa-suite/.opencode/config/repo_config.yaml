@@ -1,0 +1,179 @@
+# Repository Scan Configuration
+# CANN 算子仓库扫描配置中心
+# 
+# 用途：
+# - 集中管理仓库匹配模式
+# - 统一 GitCode URL/API 配置
+# - 定义标准目录结构约定
+# - 配置文档路径和格式
+#
+# 修改此文件可支持新的仓库或调整 URL 模板，无需修改脚本代码
+
+# =====================
+# 仓库识别配置
+# =====================
+repository:
+  # 仓库名匹配模式（支持任意 ops-* 仓库）
+  pattern: "ops-"
+  
+  # 仓库特征标记（用于验证是否是有效的 ops-* 仓库）
+  # 至少需要匹配 min_markers_required 个标记
+  markers:
+    - CMakeLists.txt
+    - docs
+    - op_host
+    - op_kernel
+    - common
+    - cmake
+    - examples
+  
+  # 最小特征匹配数
+  min_markers_required: 2
+  
+  # 排除目录（不作为分类目录）
+  excluded_dirs:
+    - tests
+    - docs
+    - common
+    - cmake
+    - examples
+    - op_host
+    - op_kernel
+    - op_api
+    - op_graph
+    - .git
+    - .github
+    - .opencode
+    - build
+    - framework
+
+# =====================
+# GitCode 平台配置
+# =====================
+gitcode:
+  # 克隆 URL 模板
+  clone_template: "https://gitcode.com/cann/{repo}.git"
+  
+  # Issue 页面 URL 模板
+  issue_template: "https://gitcode.com/cann/{repo}/issues/new"
+  
+  # REST API 基础 URL（统一使用 v5）
+  api_base: "https://api.gitcode.com/api/v5"
+  
+  # Web URL 基础路径
+  web_base: "https://gitcode.com/cann"
+
+# =====================
+# 标准目录结构约定
+# =====================
+structure:
+  # 算子核心目录
+  directories:
+    host: "op_host"
+    kernel: "op_kernel"
+    kernel_aicpu: "op_kernel_aicpu"
+    api: "op_api"
+    graph: "op_graph"
+    docs: "docs"
+  
+  # UT 测试目录结构
+  ut_structure:
+    host_ut: "tests/ut/op_host"
+    kernel_ut: "tests/ut/op_kernel"
+    api_ut: "tests/ut/op_api"
+    aicpu_ut: "tests/ut/aicpu_op_kernel"
+  
+  # 架构子目录（用于架构特定实现）
+  architecture_dirs:
+    - arch20
+    - arch32
+    - arch35
+
+# =====================
+# 文档路径约定
+# =====================
+docs:
+  # 文档根目录（中文文档）
+  zh_root: "docs/zh"
+  
+  # 仓库级文档
+  repo_docs:
+    op_list: "docs/zh/op_list.md"
+    op_api_list: "docs/zh/op_api_list.md"
+    readme: "README.md"
+  
+  # 算子级文档
+  operator_docs:
+    readme: "README.md"
+    aclnn_pattern: "aclnn*.md"
+
+# =====================
+# 链接路径模式
+# =====================
+link_patterns:
+  # op_list.md 中的算子链接格式
+  # 示例: <a href="../{category}/{operator}/README.md">{operator}</a>
+  op_list_link: "../{category}/{operator}/README.md"
+  
+  # op_api_list.md 中的接口链接格式
+  # 示例: [aclnn{OpName}](../{category}/{operator}/docs/aclnn{OpName}.md)
+  op_api_list_link: "../{category}/{operator}/docs/{interface}.md"
+
+# =====================
+# 示例仓库（仅供参考，不限制实际使用）
+# =====================
+examples:
+  known_repos:
+    - name: ops-math
+      description: 数学运算算子仓库
+      categories: [math, experimental]
+    
+    - name: ops-nn
+      description: 神经网络算子仓库
+      categories: [activation, matmul, norm, pooling]
+    
+    - name: ops-transformer
+      description: Transformer 算子仓库
+      categories: [attention, moe, transformer]
+    
+    - name: ops-cv
+      description: 计算机视觉算子仓库
+      categories: [conv, detection, image, sampling]
+
+# =====================
+# 报告输出配置
+# =====================
+reports:
+  # 报告输出目录名称
+  output_dir: "reports"
+  
+  # 报告文件命名格式
+  # 支持变量: {date}, {time}, {repo}, {scan_type}
+  filename_format: "{scan_type}_report_{time}.md"
+  
+  # JSON 数据文件命名格式
+  json_format: "{scan_type}_data.json"
+
+# =====================
+# 文件命名约定
+# =====================
+naming:
+  # 实现文件命名模式
+  implementation:
+    tiling: "*_tiling.cpp"
+    infershape: "*_infershape.cpp"
+    kernel: "*.cpp"
+    aclnn_api: "aclnn_*.cpp"
+    proto: "*_proto.h"
+  
+  # UT 测试文件命名模式
+  ut_test:
+    tiling_ut: "test_*_tiling.cpp"
+    infershape_ut: "test_*_infershape.cpp"
+    api_ut: "test_aclnn_*.cpp"
+    kernel_ut: "test_*.cpp"
+  
+  # Examples 测试文件命名模式
+  examples:
+    eager: "test_aclnn_*.cpp"
+    graph: "test_geir_*.cpp"

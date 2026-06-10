@@ -1,0 +1,33 @@
+# 算子仓（从外部仓库克隆）
+ops-math/
+ops-cv/
+ops-nn/
+ops-transformer/
+ops-*
+cann-samples/
+samples/
+opbase/
+atvoss/
+asc-devkit/
+
+# report
+reports/
+
+# 临时文件
+tmp*
+.arts/
+
+# 非本项目skills
+.opencode/skills/tool-skill-creator
+
+# cmake 第三方依赖下载目录（CANN_3RD_LIB_PATH 配置错误时产生）
+gtest/
+json/
+pkg/
+makeself/
+third_party/
+eigen/
+download/
+abseil-cpp/
+ascend_protobuf/
+npuchk/
