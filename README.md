@@ -59,6 +59,7 @@ cd cannbot-skills
 | [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <tool>` | [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
 | [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <tool>` | [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
 | [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `cd plugins-official/triton-op-generator && bash install.sh project <tool>` | [quickstart](plugins-official/triton-op-generator/quickstart.md) |
+| [**TileLang 算子**](plugins-official/tilelang-op-orchestrator/quickstart.md) | `cd plugins-official/tilelang-op-orchestrator && bash init.sh project <tool>` | [quickstart](plugins-official/tilelang-op-orchestrator/quickstart.md) |
 | [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <tool>` | [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
 | [**Catlass 算子直调开发**](plugins-official/catlass-op-generator/quickstart.md) | `cd plugins-official/catlass-op-generator && bash init.sh project <tool>` | [quickstart](plugins-official/catlass-op-generator/quickstart.md) |
 | [**代码检视**](plugins-official/ops-code-reviewer/quickstart.md) | `cd plugins-official/ops-code-reviewer && bash init.sh project <tool>` | [quickstart](plugins-official/ops-code-reviewer/quickstart.md) |
@@ -139,9 +140,10 @@ cannbot-skills/
 │   ├── ops-code-reviewer/           # 代码检视
 │   ├── torch-compile/               # torch.compile 图模式
 │   ├── model-infer-optimize/        # NPU 推理端到端优化流程
-│   └── triton-op-generator/         # Triton 算子代码生成与优化
-├── plugins-community/               # 社区 Plugin
+│   ├── triton-op-generator/         # Triton 算子代码生成与优化
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
+├── plugins-community/               # 社区 Plugin
+│   └── ops-easyasc-dsl/             # EasyASC DSL 算子开发
 ├── infra/                           # 基础设施维护 Skills
 └── tests/                           # 自动化测试框架
 ```
@@ -265,6 +267,61 @@ cannbot-skills/
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 ```
 
+#### TileLang 算子开发
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                              TEAMS（应用编排层）                              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║                    ┌─────────────────────────────────┐                       ║
+║                    │    tilelang-op-orchestrator     │                       ║
+║                    │      TileLang 算子开发流程       │                       ║
+║                    └──────┬──────────┬──────────┬────┘                       ║
+║                           │          │          │                            ║
+╚═══════════════════════════╪══════════╪══════════╪════════════════════════════╝
+                            │          │          │
+                            ▼          ▼          ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                             AGENTS（角色执行层）                              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║             ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             ║
+║             │  analyst     │  │  developer   │  │  perf-tuner  │             ║
+║             │  需求与设计   │  │  实现与精度   │  │  性能调优     │             ║
+║             └──────────────┘  └──────────────┘  └──────────────┘             ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+                     │ │ │           │ │ │           │ │ │
+                     ▼ ▼ ▼           ▼ ▼ ▼           ▼ ▼ ▼
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                             SKILLS（知识能力层）                               ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  ┌─ 环境与准备 ───────────────────────────────────────────────────────────┐   ║
+║  │  env-check               环境检查与配置验证                            │   ║
+║  │  submodule-pull          三方库与子模块拉取                            │   ║
+║  └────────────────────────────────────────────────────────────────────────┘   ║
+║                                                                               ║
+║  ┌─ 需求与设计 ───────────────────────────────────────────────────────────┐   ║
+║  │  op-design               算子设计文档生成                              │   ║
+║  │  programming-model-guide 模式选型与配置                                │   ║
+║  │  api-best-practices      API 使用最佳实践                              │   ║
+║  └────────────────────────────────────────────────────────────────────────┘   ║
+║                                                                               ║
+║  ┌─ 实现与验证 ───────────────────────────────────────────────────────────┐   ║
+║  │  op-develop              算子代码实现与测试                            │   ║
+║  │  op-test-design          测试设计与覆盖率分析                          │   ║
+║  │  review                  代码格式检查与修复                            │   ║
+║  └────────────────────────────────────────────────────────────────────────┘   ║
+║                                                                               ║
+║  ┌─ 性能调优 ─────────────────────────────────────────────────────────────┐   ║
+║  │  perf-optimization       性能调优与劣化模式检查                        │   ║
+║  └────────────────────────────────────────────────────────────────────────┘   ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+```
+
 ## 🚀 Skills 技能库
 
 ### Ascend C 算子开发
@@ -311,6 +368,20 @@ cannbot-skills/
 | **pypto-precision-debug** | 精度问题代码层排查 |
 | **pypto-precision-compare** | 精度中间结果对比分析 |
 | **pypto-op-perf-tune** | 算子性能分析与自动调优 |
+
+### TileLang 算子开发
+
+| Skill | 功能 |
+|-------|------|
+| **tilelang-env-check** | TileLang-Ascend 环境检查与配置验证 |
+| **tilelang-submodule-pull** | 自动拉取 tilelang 仓库及其三方子模块代码 |
+| **tilelang-op-design** | 算子设计文档生成 |
+| **tilelang-op-develop** | 基于设计文档生成算子实现代码与测试 |
+| **tilelang-op-test-design** | 算子测试设计与测试覆盖率分析 |
+| **tilelang-api-best-practices** | TileLang Ascend API 使用最佳实践 |
+| **tilelang-programming-model-guide** | Developer/Expert 模式选择与 pass_configs 配置指南 |
+| **tilelang-perf-optimization** | 性能调优与性能劣化模式检查 |
+| **tilelang-review** | 代码格式检查与自动修复 |
 
 ### Triton 算子开发
 
@@ -376,6 +447,14 @@ cannbot-skills/
 | **pypto-op-analyst** | 需求分析与方案设计 |
 | **pypto-op-developer** | 算子代码实现与精度调试 |
 | **pypto-op-perf-tuner** | 性能分析与调优 |
+
+### TileLang 算子开发
+
+| Agent | 功能 |
+|-------|------|
+| **tilelang-op-analyst** | 需求理解与算子设计 |
+| **tilelang-op-developer** | 代码生成、测试与精度调试 |
+| **tilelang-op-perf-tuner** | 性能分析、瓶颈定位与调优 |
 
 ### Triton 算子开发
 

@@ -162,7 +162,7 @@
     {
       "name": "tilelang-op-orchestrator-skills",
       "description": "TileLang 算子开发 Skills（9 个）。环境检查、子模块拉取、算子设计、算子开发、测试设计、API 最佳实践、编程模式指南、性能优化、代码审查。",
-      "source": "./ops-lab/tilelang/skills",
+      "source": "./ops",
       "strict": false,
       "version": "1.1.0",
       "author": {
@@ -302,17 +302,17 @@
     },
     {
       "name": "tilelang-op-orchestrator",
-      "source": "./plugins-community/tilelang-op-orchestrator",
-      "description": "TileLang-Ascend 算子开发 Team。含 5 个专业 Skill，实现算子方案设计、算子代码开发、精度调试和代码检视完整开发流程。",
-      "version": "1.0.0",
+      "source": "./plugins-official/tilelang-op-orchestrator",
+      "description": "TileLang-Ascend 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），3 阶段状态机编排，支持设计回退、断点续跑和失败恢复。",
+      "version": "1.1.0",
       "author": {
         "name": "CANNBot"
       },
       "keywords": [
         "tilelang",
         "operator",
-        "ascend",
-        "npu"
+        "orchestrator",
+        "state-machine"
       ],
       "category": "development",
       "dependencies": [
