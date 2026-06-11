@@ -18,8 +18,8 @@ skill_name: cann-env-setup
 回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装
 
 ## Expectations
-
 - [contains] npu-smi info
+
 
 ---
 
@@ -39,9 +39,9 @@ skill_name: cann-env-setup
 回复应说明如何配置环境变量实现永久生效：通过 source set_env.sh 命令并将其写入 ~/.bashrc 文件
 
 ## Expectations
-
 - [contains] source
 - [contains] set_env.sh
+
 
 ---
 
@@ -80,8 +80,8 @@ CANN安装完成后，如何验证安装是否成功？
 回复应明确说明安装顺序：先安装 Toolkit 包，再安装 Ops 包
 
 ## Expectations
-
 - [contains] toolkit
+
 
 ---
 
@@ -101,8 +101,8 @@ CANN安装完成后，如何验证安装是否成功？
 回复应说明 conda 安装 CANN 的完整步骤：创建 conda 环境、添加昇腾 conda 源、使用 conda install 安装 cann-toolkit 和 ops 包
 
 ## Expectations
-
 - [contains] conda
+
 
 ---
 
@@ -122,9 +122,9 @@ CANN安装完成后，如何验证安装是否成功？
 回复应说明安装 CANN 前需要检查的依赖项，至少包括 Python 和 pip 是否已安装
 
 ## Expectations
-
 - [contains] Python
 - [contains] pip
+
 
 ---
 
@@ -138,13 +138,13 @@ CANN安装完成后，如何验证安装是否成功？
 
 ## Prompt
 
-我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？
+我有一台昇腾服务器，需要做一遍CANN环境配置检查，确认驱动是否已安装、环境是否就绪，标准的排查流程是怎样的？
 
 ## Expected Output
 
-回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装。即使在多个 skill 同时可用的环境下，也应正确识别并激活 cann-env-setup skill 而不是干扰 skill。
+回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装，给出完整的排查流程。即使在多个 skill 同时可用的环境下，也应正确识别并激活 cann-env-setup skill 而不是干扰 skill。
 
 ## Expectations
+- [contains] npu-smi info
 
 - [skill_activated] cann-env-setup
-- [contains] npu-smi info

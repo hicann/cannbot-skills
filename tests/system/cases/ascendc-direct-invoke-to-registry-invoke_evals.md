@@ -27,11 +27,11 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 应说明任一阶段产物缺失即交付失败，不得跳步或合并阶段
 
 ## Expectations
-
 - [contains] 七阶段
 - [contains] OpDef
 - [contains] msopgen
 - [contains] custom_opp
+
 
 ---
 
@@ -55,12 +55,12 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - `<op>_infershape.cpp`：实现 InferShape/InferDataType 并 IMPL_OP_INFERSHAPE 注册。注意使用 gert::InferShapeContext 专用 API，不得混用 TilingContext 的 GetStorageShape
 
 ## Expectations
-
 - [contains] tiling.h
 - [contains] def.cpp
 - [contains] infershape.cpp
 - [contains] TilingData
 - [contains] OpDef
+
 
 ---
 
@@ -90,12 +90,12 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - 禁止：不得新增辅助函数/lambda、不得改算术表达式（如把 1.0f/sqrt(x) 换成 rsqrt(x)）、不得保留 main/ReadConfig/KernelCall
 
 ## Expectations
-
 - [contains] 只搬不改
 - [contains] GET_TILING_DATA
 - [contains] TILING_KEY_IS
 - [contains] AscendC::
 - [contains] bfloat16_t
+
 
 ---
 
@@ -119,11 +119,11 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - 后续操作：删除 msopgen 生成的合并 host 文件 <VerifyProjectDir>/op_host/<op>.cpp，再把 UserOutputDir 的 op_host/ 和 op_kernel/ 同步覆盖到验证工程
 
 ## Expectations
-
 - [contains] -lan cpp
 - [contains] msopgen gen
 - [contains] TBE
 - [contains] op_host
+
 
 ---
 
@@ -147,11 +147,11 @@ OpDef 契约表包含哪些字段？_def.cpp 文件应该怎么写？有哪些�
 - SOC 用系列名（如 ascend910b），不带尾部型号数字（如 ascend910b4）
 
 ## Expectations
-
 - [contains] OpDef
 - [contains] OP_ADD
 - [contains] DataType
 - [contains] schMode
+
 
 ---
 
@@ -177,11 +177,11 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 环境不可用降级：Windows 或未安装 CANN/msopgen 时，按 build-verify.md § D 输出人工验证手册，明确说明本次未完成编译、安装和二进制一致性验证，禁止伪装执行
 
 ## Expectations
-
 - [contains] UserOutputDir
 - [contains] VerifyProjectDir
 - [contains] rm -rf
 - [contains] 降级
+
 
 ---
 
@@ -207,11 +207,11 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 禁止使用 rtol/atol 容差放行，必须 byte-level identical，任一字节不同即验证失败
 
 ## Expectations
-
 - [contains] aclnn
 - [contains] byte-level
 - [contains] cmp
 - [contains] example
+
 
 ---
 
@@ -235,10 +235,10 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 即使在 ascendc-registry-invoke-template、ascendc-direct-invoke-template 等相似 skill 共存的环境下，也应正确选择 ascendc-direct-invoke-to-registry-invoke。
 
 ## Expectations
-
-- [skill_activated] ascendc-direct-invoke-to-registry-invoke
 - [contains] msopgen
 - [contains] ACLNN
+
+- [skill_activated] ascendc-direct-invoke-to-registry-invoke
 
 ---
 
@@ -265,11 +265,11 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - msopgen 生成 tbe/impl/ 而非 op_host/op_kernel/：msopgen gen 未带 -lan cpp（R-053）
 
 ## Expectations
-
 - [contains] adv_api
 - [contains] double free
 - [contains] TILING_KEY_IS
 - [contains] bfloat16_t
+
 
 ---
 
@@ -293,7 +293,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 不应在没有可参考的直调代码时直接生成算子代码
 
 ## Expectations
-
 - [contains] 不用于
 - [contains] 直调
+
 - [not_contains] BEGIN_TILING_DATA_DEF

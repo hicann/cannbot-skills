@@ -119,7 +119,7 @@ tests/system/
     │       │   总分 ≥ 60 且各维度均不低于阈值方为通过
     │       │   评审方式：Agent 通过 Write 工具填写 review-template.md 模板
     │       │   框架通过正则解析模板提取结构化的 Status/Score/维度得分
-    │       └─ 模式匹配：检查 expectations 中的 contains/not_contains/file_exists/skill_activated/file_list
+    │       └─ 模式匹配：检查 expectations 中的 contains/not_contains/file_exists/file_list/file_contains/skill_activated
     │       耗时：分钟级，需要 opencode CLI
     │
     ├─ 步骤4：保存结果
@@ -175,6 +175,7 @@ tests/system/
  │  读取 Expected Output│  │  ├─ [not_contains]│  │  计算总 token 消耗    │
  │  读取 AI 回复 + 推理  │  │  ├─ [file_exists]│  │  对比 Max Tokens 上限 │
  │  读取生成的文件(如有)  │  │  ├─ [file_list]  │  │                      │
+ │  ├─ [file_contains]│  │                      │
  │                     │  │  └─ [skill_acti- │  │                      │
  │  按评分标准打分:      │  │     vated]       │  │                      │
  │  ├─ 信息覆盖度 (40分) │  └────────┬─────────┘  └──────────┬───────────┘
@@ -251,6 +252,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 - [contains] <期望包含的内容>
 - [not_contains] <不应包含的内容>
 - [file_exists] <期望生成的文件路径>
+- [file_contains] <文件路径或glob> : "<文本1>";"<文本2>"
 
 ---
 
@@ -290,13 +292,14 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 名称列表。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 同时可用时仍能正确选择目标 skill。示例: `cann-env-setup;ascendc-task-focus;npu-arch` |
 | `Disabled` | 设为 `true` 则跳过该用例的执行（Phase 2 中显示为 SKIPPED）。适用于用例尚未调试完成的场景，不影响 Phase 1 静态校验。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。适用于需要更长执行时间的复杂场景，如 `Timeout: 900` |
+| `Truncate Length` | AI 回复传递给评审 Agent 时截断长度（字符数）。默认 30000。当 AI 回复较长时（如包含大段代码），评审 Agent 可能因回复截断看不到完整内容而误判。可按需增大，如 `Truncate Length: 60000` |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
 
 ### 2.3 Expectations 类型详解
 
 #### 2.3.1 contains — 文本包含检查
 
-检查 AI 执行 session 的**原始输出**中是否包含指定字符串。
+检查 AI **最终回复**（`ai_text`）中是否包含指定字符串。
 
 ```markdown
 ## Expectations
@@ -352,6 +355,25 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 
 > **注意**：`skill_activated` 是确定性检查，不受评审模型主观判断影响。即使 AI 回复在技术上是正确的，如果它加载了错误的 skill（或没有加载任何 skill），此断言会直接导致测试失败。
 
+
+#### 2.3.6 file_contains — 文件内容包含检查
+
+检查沙箱中匹配 glob 路径的文件是否包含所有指定文本。支持 glob 通配符（`*`、`?`、`[]`），
+匹配到多个文件时，只要有一个文件包含所有 pattern 即判定通过。
+
+```markdown
+## Expectations
+
+- [file_contains] src/kernel/*.asc : "__global__";"LocalTensor";"DataCopy"
+- [file_contains] docs/DESIGN.md : "数据流";"Buffer 规划"
+```
+
+**格式说明**：
+- 路径部分：文件路径或 glob 模式（相对于沙箱根目录）
+- 分隔符：` : `（空格-冒号-空格）
+- 文本模式：双引号包裹，多个用英文分号 `;` 分隔
+- 验证逻辑：所有列出的文本模式必须在同一个文件中全部出现才判定通过
+
 ### 2.4 评测模式
 
 #### 2.4.1 text 模式（默认）
@@ -359,7 +381,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 适用于大多数场景，AI 回复以文本方式输出。评测流程：
 1. 执行 session：向 skill 发送 prompt，收集 AI 文本回复
 2. 评测 session：独立 session 基于 Expected Output 评审回复质量
-3. 模式匹配：检查 expectations 中的 contains/not_contains 规则
+3. 模式匹配：检查 expectations 中的 contains/not_contains/file_contains 规则
 
 #### 2.4.2 file_based 模式
 
@@ -367,7 +389,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 1. 系统自动向 prompt 末尾追加 `FILE_BASED_HINT`（要求 AI 列出创建/修改的文件清单并说明用途，不输出完整文件内容）
 2. 执行 session：AI 在沙箱中创建/修改文件
 3. 评测 session：独立 session 读取沙箱中的生成文件，基于文件内容评审质量
-4. 模式匹配：检查 expectations 中的 file_exists/file_list 规则
+4. 模式匹配：检查 expectations 中的 file_exists/file_list/file_contains 规则
 5. `collect_generated_files()` 收集沙箱中新增的文件（排除 logs/ .opencode/ 和源 skill 中已存在的文件）
 
 **使用 file_based 模式的用例示例：**

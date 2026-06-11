@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **5 个 Skill + 1 个 Team**，共 34 个评测用例（23 启用 / 11 禁用，截止 2026-06-04）。
+当前 ST 框架覆盖 **5 个 Skill + 1 个 Team**，共 35 个评测用例（24 启用 / 11 禁用，截止 2026-06-06）。
 
 ## 1. 五维看护说明
 
@@ -9,7 +9,7 @@
 | **正向看护** | 在多个类似 skill/team 同时存在时，AI 能正确选择目标 skill | `## Config` 中配置 `Distractor skills` + Expectations 中有 `[skill_activated]` |
 | **负向看护** | 在边界/无关场景下，AI 不会被误触发 | Expectations 中有 `[not_contains]` |
 | **正确性看护** | 黑盒场景验证：AI 回复语义覆盖关键要点 | `## Expected Output` 定义了预期要点 |
-| **调用流程看护** | 验证关键工具被调用、关键文件被生成 | Expectations 中有 `[file_exists]`、`[file_list]` 或 `[skill_activated]` |
+| **调用流程看护** | 验证关键工具被调用、关键文件被生成 | Expectations 中有 `[file_exists]`、`[file_list]`、`[file_contains]` 或 `[skill_activated]` |
 | **资源消耗看护** | Token 消耗监控，防止资源浪费 | `## Config` 中配置 `Max Tokens` |
 
 > 仅统计**已启用**的用例。仅在已禁用用例中配置的维度视同无覆盖。
@@ -28,7 +28,7 @@
 
 | Team | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |------|:-------:|:-------:|:--------:|:----------:|:----------:|
-| ops-direct-invoke | | | √ | | √ |
+| ops-direct-invoke | | | √ | √ | √ |
 
 ## 4. 更新指南
 

@@ -56,14 +56,14 @@ class TestTeamEvalCaseStructure:
 
     @staticmethod
     def _validate_expectation(exp, exp_index, case_index, team_name):
-        valid_types = ("contains", "not_contains", "file_exists", "file_list", "skill_activated")
+        valid_types = ("contains", "not_contains", "file_exists", "file_list", "file_contains", "skill_activated")
         assert isinstance(exp, dict), \
             f"Expectation {exp_index} should be a dict in eval case {case_index} for team: {team_name}"
         assert "type" in exp, \
             f"Expectation {exp_index} missing 'type' in eval case {case_index} for team: {team_name}"
         assert exp["type"] in valid_types, \
             f"Expectation {exp_index} type '{exp['type']}' should be one of {valid_types} in team: {team_name}"
-        if exp["type"] in ("contains", "not_contains", "skill_activated"):
+        if exp["type"] in ("contains", "not_contains", "file_contains", "skill_activated"):
             assert "pattern" in exp, \
                 f"Expectation {exp_index} missing 'pattern' in eval case {case_index} for team: {team_name}"
 

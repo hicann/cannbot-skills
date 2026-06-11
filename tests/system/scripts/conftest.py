@@ -231,6 +231,26 @@ def _patch_hydrate_data():
     setattr(BaseReport, '_hydrate_data', patched_hydrate)
 
 
+def _patch_write_report():
+    """Monkey-patch BaseReport._write_report 以注入文档指引 footer。
+
+    同时修复 Windows 上编码问题（原补丁针对不存在的 HTMLReport._save_report 无效）。
+    """
+    try:
+        from pytest_html.basereport import BaseReport
+    except ImportError:
+        return
+
+    original_write_report = getattr(BaseReport, '_write_report')
+
+    def patched_write_report(self, rendered_report):
+        footer_html = _build_footer_html()
+        rendered_report = rendered_report.replace("</body>", footer_html + "\n</body>", 1)
+        original_write_report(self, rendered_report)
+
+    setattr(BaseReport, '_write_report', patched_write_report)
+
+
 def pytest_configure(config):
     # 强制 root logger 输出 DEBUG+ 级别的日志到 stderr。
     # pytest 的 LoggingPlugin 默认将 root logger 设为 WARNING 并添加 handler，
@@ -244,17 +264,10 @@ def pytest_configure(config):
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     root.addHandler(handler)
 
-    if sys.platform == 'win32':
-        try:
-            from pytest_html.html_report import HTMLReport
-            original_save_report = getattr(HTMLReport, '_save_report', None)
-
-            def patched_save_report(self, report_content):
-                self.logfile.write_text(report_content, encoding='utf-8')
-
-            setattr(HTMLReport, '_save_report', patched_save_report)
-        except ImportError:
-            pass
+    # Monkey-patch BaseReport._write_report：
+    # 1. 在报告底部注入 ST 用例开发指引 footer
+    # 2. 修复 Windows 编码问题（原 HTMLReport._save_report 在 pytest-html 4.2.0 中不存在）
+    _patch_write_report()
 
     # Monkey-patch _hydrate_data: 从单元格 HTML 中提取纯文本内容，
     # 兼容我们注入的 <span class="result-badge"> 标签。
@@ -788,6 +801,54 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
   #results-table th, #results-table td { padding: 6px 8px; }
   .col-skill { width: 100px; }
 }
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Footer CSS and builder for HTML report docs hint
+# ═══════════════════════════════════════════════════════════════
+
+FOOTER_CSS = """
+/* === Docs hint footer === */
+.docs-hint {
+  margin: 24px 0 12px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border-left: 4px solid #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.docs-hint-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 8px;
+}
+.docs-hint-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1e293b;
+}
+.docs-hint-body a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+.docs-hint-body a:hover { color: #1d4ed8; }
+"""
+
+
+def _build_footer_html() -> str:
+    """生成文档指引提示 footer HTML，统一添加在所有报告底部"""
+    return f"""
+<style>{FOOTER_CSS}</style>
+<div class="docs-hint">
+  <div class="docs-hint-title">📖 ST 测试用例开发指引</div>
+  <div class="docs-hint-body">
+    请查阅 <strong>ST 用例设计与开发规范</strong> 文档了解用例编写与调测方法：<br>
+    · 文档路径：<code>tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md</code><br>
+    · GitCode 链接：<a href="https://gitcode.com/cann/cannbot-skills/blob/master/tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md" target="_blank">https://gitcode.com/cann/cannbot-skills/blob/master/tests/system/docs/ST_DESIGN_AND_DEVELOPMENT_GUIDE.md</a>
+  </div>
+</div>
 """
 
 

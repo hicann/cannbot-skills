@@ -137,18 +137,9 @@ def _parse_expectations(exp_raw: str) -> List[Dict[str, str]]:
     return expectations
 
 
-def _parse_case_config(case_config: Dict[str, str], case_id: int,
-                       default_eval_mode: str) -> Dict[str, Any]:
-    """解析 Config 块中的配置项，返回已填充的 eval_case 字典片段。"""
-    eval_case: Dict[str, Any] = {}
-
-    case_eval_mode = case_config.get("eval mode", default_eval_mode)
-    if case_eval_mode not in ("text", "file_based"):
-        logger.warning("Invalid case eval_mode '%s' in case %d, falling back to '%s'",
-                       case_eval_mode, case_id, default_eval_mode)
-        case_eval_mode = default_eval_mode
-    eval_case["eval_mode"] = case_eval_mode
-
+def _parse_max_tokens_config(case_config: Dict[str, str], eval_case: Dict[str, Any],
+                               case_id: int) -> None:
+    """解析 max_tokens 和 max_tokens_by_model 配置（从 case_config 读取）。"""
     max_tokens_str = case_config.get("max tokens", "")
     if max_tokens_str:
         try:
@@ -169,6 +160,21 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     if max_tokens_by_model:
         eval_case["max_tokens_by_model"] = max_tokens_by_model
 
+
+def _parse_case_config(case_config: Dict[str, str], case_id: int,
+                       default_eval_mode: str) -> Dict[str, Any]:
+    """解析 Config 块中的配置项，返回已填充的 eval_case 字典片段。"""
+    eval_case: Dict[str, Any] = {}
+
+    case_eval_mode = case_config.get("eval mode", default_eval_mode)
+    if case_eval_mode not in ("text", "file_based"):
+        logger.warning("Invalid case eval_mode '%s' in case %d, falling back to '%s'",
+                       case_eval_mode, case_id, default_eval_mode)
+        case_eval_mode = default_eval_mode
+    eval_case["eval_mode"] = case_eval_mode
+
+    _parse_max_tokens_config(case_config, eval_case, case_id)
+
     timeout_str = case_config.get("timeout", "")
     if timeout_str:
         try:
@@ -184,6 +190,19 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     disabled_raw = case_config.get("disabled", "").strip().lower()
     if disabled_raw in ("true", "yes", "1"):
         eval_case["disabled"] = True
+
+    truncate_len_str = case_config.get("truncate length", "")
+    if truncate_len_str:
+        try:
+            truncate_len_val = int(truncate_len_str)
+            if truncate_len_val > 0:
+                eval_case["truncate_len"] = truncate_len_val
+            else:
+                logger.warning("Invalid truncate_len '%s' (must be > 0) in case %d, ignoring",
+                               truncate_len_str, case_id)
+        except ValueError:
+            logger.warning("Invalid truncate_len '%s' in case %d, ignoring",
+                           truncate_len_str, case_id)
 
     distractor_raw = case_config.get("distractor skills", "")
     distractor_skills = [s.strip() for s in distractor_raw.split(";") if s.strip()]

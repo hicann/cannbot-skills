@@ -47,6 +47,8 @@ from test_skill_evals import (
     _check_not_contains_pattern,
     _check_file_exists,
     _check_file_list,
+    _check_file_contains,
+    _parse_file_contains_pattern,
     _validate_expected_output,
     _validate_expectation,
     _validate_skill_activated,

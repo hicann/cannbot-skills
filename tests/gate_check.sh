@@ -23,6 +23,14 @@ TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-${BASE_BRANCH:-master}}"
 echo "=== Phase 1: Environment Setup ==="
 echo "Repository root: $REPO_ROOT"
 
+# 预检 opencode CLI（Phase 2 AI 语义评测的前置依赖）
+if ! command -v opencode &> /dev/null; then
+    echo "ERROR: opencode CLI not found in PATH."
+    echo "Phase 2 (AI 语义评测) 需要 opencode，请安装后再运行 gate_check。"
+    exit 1
+fi
+echo "  opencode: $(opencode --version 2>&1 | head -1)"
+
 # =========================================================================
 # Phase 2: 检测变更文件
 # =========================================================================
@@ -52,12 +60,26 @@ readarray -t changed_files_array <<< "$CHANGED_FILES"
 # Phase 3: 安装依赖
 # =========================================================================
 echo "=== Phase 3: Install Dependencies ==="
-pip install -r "$FRAMEWORK_DIR/scripts/requirements.txt" --quiet
+pip install -r "$FRAMEWORK_DIR/scripts/requirements.txt" --quiet --break-system-packages
 
 # =========================================================================
 # Phase 4: 执行门禁检查
 # =========================================================================
 echo "=== Phase 4: Run Gate Check ==="
+
+# 后台心跳进程：每 60 秒输出一次时间戳，保持 SSH 连接（CI 执行机通过 SSH
+# 连接测试执行机，长时间无 stdout 输出会导致会话中断）
+heartbeat_pid=""
+if [ -z "${GATE_CHECK_NO_HEARTBEAT:-}" ]; then
+    (
+        while true; do
+            echo "[HEARTBEAT $(date '+%Y-%m-%d %H:%M:%S')] gate_check running..."
+            sleep 60
+        done
+    ) &
+    heartbeat_pid=$!
+    trap 'kill "$heartbeat_pid" 2>/dev/null' EXIT
+fi
 
 python3 "$FRAMEWORK_DIR/scripts/main.py" \
     --repo-root "$REPO_ROOT" \
@@ -65,6 +87,11 @@ python3 "$FRAMEWORK_DIR/scripts/main.py" \
     --parallel auto
 
 EXIT_CODE=$?
+
+# 停止心跳
+if [ -n "$heartbeat_pid" ]; then
+    kill "$heartbeat_pid" 2>/dev/null || true
+fi
 
 if [ $EXIT_CODE -eq 0 ]; then
     echo "Gate check PASSED"

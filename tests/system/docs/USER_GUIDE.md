@@ -58,7 +58,7 @@ tests/system/
       │   ├─ 评审方式: Agent 填写 review-template.md 模板
       │   ├─ 框架解析: 正则提取 Status + Score + 维度得分
       │   └─ 输出: pass/fail + 判定依据
-      └─ 模式匹配: expectations 中的 contains/not_contains/file_exists/file_list/skill_activated 检查
+      └─ 模式匹配: expectations 中的 contains/not_contains/file_exists/file_list/file_contains/skill_activated 检查
 ```
 
 ## 配置
@@ -175,15 +175,17 @@ eval_mode: text
 | `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。用于需要更长执行时间的复杂场景 |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
+| `Truncate Length` | AI 回复传递给评审 Agent 时截断长度（字符数）。默认 30000。当 AI 回复较长时（如包含大段代码），评审 Agent 可能因回复截断看不到完整内容而误判。可按需增大，如 `Truncate Length: 60000` |
 
 **expectations 类型**：
 
 | type | 必填字段 | 说明 |
 |------|---------|------|
-| `contains` | `pattern` | 执行 session 的原始输出中必须包含该字符串 |
+| `contains` | `pattern` | AI **最终回复**（`ai_text`）中必须包含该字符串。不检查工具调用过程的中间输出 |
 | `not_contains` | `pattern` | AI **最终回复**中不得包含该字符串（不检查工具调用过程中的参考文档内容） |
 | `file_exists` | `path` | 指定文件必须存在（搜索顺序：`sandbox/<path>` → `sandbox/.opencode/skills/<skill>/<path>` → `skill_dir/<path>`） |
 | `file_list` | `pattern` | 沙箱中存在匹配 glob pattern 的文件 |
+| `file_contains` | `pattern` | 沙箱中匹配 glob 的文件至少有一个包含所有指定文本。格式：`path : "p1";"p2"`，路径支持 glob 通配符 |
 | `skill_activated` | `pattern` | 程序化验证 AI 执行过程中加载了指定 skill（直接从 session 导出 JSON 的 tool_use 事件中精确匹配，不依赖评审模型。用于正向看护场景） |
 
 **编写 expected_output 的建议**：

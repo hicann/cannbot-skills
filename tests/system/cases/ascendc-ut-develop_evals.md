@@ -32,11 +32,11 @@ eval_mode: text
 - 说明覆盖率目标：行覆盖率 ≥ 80%、函数覆盖率 ≥ 80%
 
 ## Expectations
-
 - [contains] op_api
 - [contains] 覆盖率
 - [contains] build.sh
 - [contains] 80%
+
 
 ---
 
@@ -66,11 +66,11 @@ eval_mode: text
 - 完成检查标准：行覆盖率 ≥ 80%、函数覆盖率 ≥ 80%
 
 ## Expectations
-
 - [contains] lcov
 - [contains] 覆盖率
 - [contains] 80%
 - [contains] 补充
+
 
 ---
 
@@ -99,10 +99,10 @@ eval_mode: text
 - 判定标准：5 步全部通过则 dtype 校验完整
 
 ## Expectations
-
 - [contains] extract_dtype_combinations
 - [contains] ACLNN_ERR_PARAM_INVALID
 - [contains] dtype
+
 
 ---
 
@@ -132,12 +132,12 @@ eval_mode: text
 3. 创建 /tmp/cannbot_mul/ 临时目录，存储 params.json 和中间文件
 
 ## Expectations
-
 - [contains] op_name
 - [contains] repo_type
 - [contains] soc_type
 - [contains] test_model
 - [contains] interactive_mode
+
 
 ---
 
@@ -162,11 +162,11 @@ eval_mode: text
 - 子 Agent 完成后必须检查：编译通过 + 运行测试全部 PASS + 用例数量与重构前一致
 
 ## Expectations
-
 - [contains] 备份
 - [contains] CSV
 - [contains] 子 Agent
 - [contains] 5 条
+
 
 ---
 
@@ -196,11 +196,11 @@ eval_mode: text
 - 如何确定需要哪些属性：查看 INFER_SHAPE_FUNC/TILING_FUNC 宏、搜索 GetAttr()/GetAttrValue() 调用
 
 ## Expectations
-
 - [contains] NodeAttrs
 - [contains] GRAPH_FAILED
 - [contains] CompileInfo
 - [contains] GetAttr
+
 
 ---
 
@@ -231,10 +231,10 @@ eval_mode: text
 即使在 ascendc-st-design、ascendc-code-review 等相似 skill 共存的环境下，也应正确选择 ascendc-ut-develop。
 
 ## Expectations
-
-- [skill_activated] ascendc-ut-develop
 - [contains] 覆盖率
 - [contains] 80%
+
+- [skill_activated] ascendc-ut-develop
 
 ---
 
@@ -262,11 +262,11 @@ ascendc-ut-develop 的 UT 开发总结报告（Step 5）包含哪些章节？每
 - 最终状态检查清单：编译通过、测试通过、覆盖率类型判断、覆盖率达标、TDD 流程遵循、报告生成
 
 ## Expectations
-
 - [contains] 基本信息
 - [contains] 用例统计
 - [contains] 覆盖率
 - [contains] 编译命令
+
 
 ---
 
@@ -315,7 +315,7 @@ ascendc-ut-develop 的 UT 开发总结报告（Step 5）包含哪些章节？每
 - 按模块编译：`--opapi`、`--ophost`、`--opkernel`
 
 ## Expectations
-
 - [contains] --noexec
 - [contains] --cov
 - [contains] build.sh
+

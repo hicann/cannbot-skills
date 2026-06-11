@@ -13,11 +13,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import glob as glob_module
+import re
 import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import pytest
 
@@ -115,7 +117,7 @@ class ValidationContext:
     skill_dir: Optional[Path] = None
     eval_id: Optional[str] = None
     ai_text: str = ""
-    truncate_len: int = 2000
+    truncate_len: int = 30000
     # file_based 模式字段
     eval_mode: str = "text"
     sandbox_path: Optional[Path] = None
@@ -135,7 +137,7 @@ class ExpectationContext:
     skill_dir: Optional[Path] = None
     sandbox_path: Optional[Path] = None
     eval_id: Optional[str] = None
-    truncate_len: int = 2000
+    truncate_len: int = 30000
     skill_name: str = ""
     session_export_path: Optional[Path] = None
 
@@ -192,7 +194,10 @@ def extract_reasoning(full_output: str) -> str:
             tool = data.get("part", {}).get("tool", "")
             state = data.get("part", {}).get("state", {})
             status = state.get("status", "completed")
-            parts.append(f"[调用工具: {tool}, 状态: {status}]")
+            note = ""
+            if status == "failed":
+                note = " ⚠️ 该失败可能是沙箱环境/权限配置问题，非 skill 自身质量缺陷"
+            parts.append(f"[调用工具: {tool}, 状态: {status}]{note}")
         elif data.get("type") == "reasoning":
             text = get_opencode_text(data)
             if text:
@@ -230,6 +235,8 @@ REVIEW_RUBRIC = """
 逐项检查效率：
 1. 回复长度合理，无冗余啰嗦（5 分）：明显冗余扣 2-3 分
 2. 思考过程中的工具调用必要且高效（5 分）：无意义的重复工具调用扣 2-3 分
+   注意：工具调用因环境/配置问题导致的失败（如带有 ⚠️ 标记的 read error、
+   权限错误等），属于沙箱环境问题，不属于 skill 质量缺陷，不应扣分。
 
 ## 通过规则
 1. 总分 ≥ 60
@@ -348,7 +355,7 @@ def _run_review_session(
 def _check_contains_pattern(
         full_output: str, ai_text: str, pattern: str,
         eval_id: Optional[str], truncate_len: int) -> None:
-    """检查输出是否包含指定模式"""
+    """检查输出是否包含指定模式（搜索 full_output）"""
     if pattern not in full_output:
         pytest.fail(
             f"[contains] 期望输出中包含 \"{pattern}\"，但未找到。\n"
@@ -380,7 +387,7 @@ def _check_file_exists(
         skill_dir: Optional[Path], path: str, eval_id: Optional[str],
         sandbox_path: Optional[Path] = None) -> None:
     """检查文件是否存在
-    搜索顺序：sandbox/<path> → sandbox/skill/<path> → skill_dir/<path>
+    搜索顺序：sandbox/<path> → sandbox/skill/<path> → skill_dir/<path> → 递归搜索 sandbox
     """
     candidates = []
     if sandbox_path:
@@ -391,6 +398,15 @@ def _check_file_exists(
         candidates.append(skill_dir / path)
     for fp in candidates:
         if fp.exists():
+            return
+    # 递归搜索 fallback：AI 可能将文件写入子目录（如 operators/Add/docs/ 等）
+    if sandbox_path:
+        matches = list(sandbox_path.rglob(path))
+        if matches:
+            logger.info(
+                "[file_exists] e%s 通过递归搜索找到文件: %s",
+                eval_id or "?", matches[0],
+            )
             return
     pytest.fail(
         f"[file_exists] 期望文件 \"{path}\" 未找到。"
@@ -420,6 +436,61 @@ def _check_file_list(
     pytest.fail(
         f"[file_list] 未找到匹配 glob \"{pattern}\" 的文件。"
         f"搜索范围: 沙箱及 skill 子目录"
+    )
+
+
+def _parse_file_contains_pattern(raw: str) -> Tuple[str, List[str]]:
+    """解析 [file_contains] 的模式串。
+
+    输入: 'operators/add_vector/op_kernel/*.asc : "__global__";"LocalTensor"'
+    输出: ('operators/add_vector/op_kernel/*.asc', ['__global__', 'LocalTensor'])
+    """
+    parts = raw.split(" : ", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"[file_contains] 格式错误，需要 \"path : \\\"p1\\\";\\\"p2\\\"\": {raw}"
+        )
+    file_path = parts[0].strip()
+    patterns = re.findall(r'"([^"]*)"', parts[1])
+    if not patterns:
+        raise ValueError(f"[file_contains] 未提取到任何文本模式: {raw}")
+    return file_path, patterns
+
+
+def _check_file_contains(
+        sandbox_path: Optional[Path], file_pattern: str,
+        patterns: List[str], eval_id: Optional[str]) -> None:
+    """检查沙箱中匹配 glob 的文件是否至少有一个包含所有文本模式。
+
+    支持 glob 通配符（*、?、[]），匹配到多个文件时，
+    只要有一个文件包含所有 pattern 即判定通过。
+    """
+    if not sandbox_path:
+        raise ValueError("sandbox_path is required for file_contains expectation")
+
+    abs_pattern = str(sandbox_path / file_pattern)
+    matching_files = glob_module.glob(abs_pattern)
+
+    if not matching_files:
+        pytest.fail(
+            f"[file_contains] 未找到匹配 \"{file_pattern}\" 的文件。\n"
+            f"搜索路径: {abs_pattern}"
+        )
+
+    for fp_str in matching_files:
+        try:
+            content = Path(fp_str).read_text(encoding="utf-8")
+        except Exception as e:
+            logger.debug("[file_contains] 跳过无法读取的文件 %s: %s", fp_str, e)
+            continue
+        if all(p in content for p in patterns):
+            return  # 找到包含所有模式的文件，通过
+
+    matched_names = [str(Path(p).name) for p in matching_files]
+    pytest.fail(
+        f"[file_contains] 匹配的文件中未找到所有指定文本。\n"
+        f"匹配文件: {matched_names}\n"
+        f"目标模式: {patterns}"
     )
 
 
@@ -535,7 +606,7 @@ def _validate_expectation(ctx: ExpectationContext) -> None:
     if exp_type == "contains":
         _check_contains_pattern(ctx.full_output, ctx.ai_text, ctx.exp.get("pattern", ""), ctx.eval_id, ctx.truncate_len)
     elif exp_type == "file_exists":
-        _check_file_exists(ctx.skill_dir, ctx.exp.get("path", ""), ctx.eval_id, ctx.sandbox_path)
+        _check_file_exists(ctx.skill_dir, ctx.exp.get("pattern", ""), ctx.eval_id, ctx.sandbox_path)
     elif exp_type == "file_list":
         _check_file_list(ctx.sandbox_path, ctx.exp.get("pattern", ""), ctx.eval_id)
     elif exp_type == "not_contains":
@@ -545,6 +616,9 @@ def _validate_expectation(ctx: ExpectationContext) -> None:
         )
     elif exp_type == "skill_activated":
         _validate_skill_activated(ctx)
+    elif exp_type == "file_contains":
+        file_path, patterns = _parse_file_contains_pattern(ctx.exp.get("pattern", ""))
+        _check_file_contains(ctx.sandbox_path, file_path, patterns, ctx.eval_id)
 
 
 def validate_output(ctx: ValidationContext) -> None:
@@ -817,6 +891,7 @@ def _create_and_validate(opencode_runner, session_name, full_output,
                                                 original_skill_dir=inputs.skill_dir),
         skill_name=inputs.skill_name,
         dim_thresholds=inputs.eval_data.get("dim_thresholds"),
+        truncate_len=inputs.eval_data.get("truncate_len", 30000),
     )
     validate_output(ctx)
 

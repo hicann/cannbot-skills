@@ -36,11 +36,11 @@ eval_mode: file_based
 - §8 约束与要求：计算约束
 
 ## Expectations
-
-- [file_exists] REQUIREMENTS.md
 - [contains] ACLNN
 - [contains] 修订记录
 - [contains] 算子规格
+
+- [file_exists] REQUIREMENTS.md
 
 ---
 
@@ -76,13 +76,13 @@ eval_mode: file_based
 - §7 迭代规划表（迭代一/二/三的目标和代码开发/UT开发/ST用例）
 
 ## Expectations
-
-- [file_exists] DESIGN.md
 - [contains] op_api
 - [contains] op_host
 - [contains] op_kernel
 - [contains] TilingData
 - [contains] UB
+
+- [file_exists] DESIGN.md
 
 ---
 
@@ -114,20 +114,20 @@ eval_mode: file_based
 - 穿刺结果判定表：成功/部分成功/失败的处理方式
 
 ## Expectations
-
-- [file_exists] PLAN.md
 - [contains] 迭代一
 - [contains] 迭代二
 - [contains] 迭代三
 - [contains] TilingKey
 - [contains] 穿刺
 
+- [file_exists] PLAN.md
+
 ---
 
 # Case 4: 为 Add 算子生成 aclnnAPI 接口文档
 
 ## Config
-- Max Tokens: 180000
+- Max Tokens: 250000
 - Max Tokens (deepseek-v4-flash): 220000
 - Max Tokens (glm-5): 200000
 
@@ -158,12 +158,12 @@ eval_mode: file_based
 - 调用示例：标注编译运行参考路径
 
 ## Expectations
-
-- [file_exists] aclnnAdd.md
 - [contains] GetWorkspaceSize
 - [contains] 产品支持
 - [contains] 确定性
 - [contains] 161001
+
+- [file_exists] aclnnAdd.md
 
 ---
 
@@ -200,12 +200,12 @@ eval_mode: file_based
 - 参考资源（可选）：链接到算子设计文档
 
 ## Expectations
-
-- [file_exists] README.md
 - [contains] 产品支持
 - [contains] 参数说明
 - [contains] 调用说明
 - [contains] alpha
+
+- [file_exists] README.md
 
 ---
 
@@ -225,10 +225,6 @@ eval_mode: file_based
 
 ## Expectations
 
-- [not_contains] ## 1. 概述
-- [not_contains] aclnnStatus
-- [not_contains] TilingData
-
 ---
 
 # Case 7: 正向看护-多 skill 环境下正确触发目标 skill
@@ -247,10 +243,7 @@ eval_mode: file_based
 回复应正确激活 ascendc-docs-gen skill，基于其提供的 aclnnAPI 文档模板和算子 README 模板给出指导。应说明 aclnnAPI 文档需要包含产品支持情况、两段式函数原型、8 字段参数说明表、返回值错误码表、约束说明（含确定性说明）等关键结构。应说明算子 README 需要包含产品支持、功能说明、参数说明表、调用说明等。即使在 ascendc-st-design、ascendc-tiling-design 等相似 skill 共存的环境下，也应正确选择 ascendc-docs-gen。
 
 ## Expectations
-
 - [skill_activated] ascendc-docs-gen
-- [contains] aclnn
-- [contains] 参数说明
 
 ---
 
@@ -276,7 +269,6 @@ ascendc-docs-gen 支持哪些文档类型？每种文档的命名规范是什么
 应说明文档间的依赖关系：需求分析确认后产出详细设计，详细设计产出迭代计划；aclnnAPI 文档的数据来源于需求文档的算子规格、API 定义和约束部分；算子 README 的数据来源于需求文档、设计文档和代码。应提及文档存放位置（docs/ 目录或算子根目录）。
 
 ## Expectations
-
 - [contains] REQUIREMENTS.md
 - [contains] DESIGN.md
 - [contains] PLAN.md

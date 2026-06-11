@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from subprocess_streamer import run_subprocess_streaming
+
 import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
@@ -38,6 +40,35 @@ class GateChecker:
         self.evals_cases_dir = self.test_skill_dir / "cases"
         self.config = self._load_config()
 
+    @staticmethod
+    def _parse_eval_timeout(evals_path: Path, eval_id: str) -> Optional[int]:
+        """从 evals.md 文件中解析指定 eval_id 的 timeout 值。"""
+        from evals_parser import parse_evals_md
+        try:
+            data = parse_evals_md(evals_path)
+        except Exception as e:
+            logger.debug("解析 evals.md 失败 %s: %s", evals_path, e)
+            return None
+        if not data:
+            return None
+        for e in data.get("evals", []):
+            if str(e.get("id")) == str(eval_id):
+                t = e.get("timeout")
+                if t and isinstance(t, (int, float)):
+                    return int(t)
+        return None
+
+    @staticmethod
+    def _check_opencode_available() -> bool:
+        """预检 opencode CLI 是否可用，避免全部 Phase 2 测试因环境问题失败。"""
+        import shutil
+        opencode_path = shutil.which("opencode")
+        if opencode_path:
+            logger.info("opencode 可用: %s", opencode_path)
+            return True
+        logger.error("opencode CLI 未找到，请确保已安装并添加到 PATH")
+        return False
+
     def get_skill_dir(self, skill_name: str) -> Optional[Path]:
         for skill_dir_rel in self.config.get("skill_dirs", ["skills"]):
             candidate = self.repo_root / skill_dir_rel / skill_name
@@ -55,47 +86,6 @@ class GateChecker:
                     return candidate
         return None
 
-    def _run_basic_validation(self, test_script_name: str, target_name: str,
-                               label: str) -> bool:
-        """通用 Phase 1 静态验证执行器（消除 skill/team 重复代码）。"""
-        test_basic_script = self.test_skill_dir / "scripts" / test_script_name
-        if not test_basic_script.exists():
-            logger.warning("%s not found, skipping %s basic validation",
-                           test_script_name, label)
-            return True
-
-        t0 = time.time()
-        try:
-            proc = subprocess.run(
-                [
-                    sys.executable, "-m", "pytest",
-                    str(test_basic_script),
-                    "-v",
-                    "--tb=short",
-                    "-k", target_name,
-                ],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=120,
-                cwd=str(self.test_skill_dir / "scripts")
-            )
-            logger.info(proc.stdout)
-            if proc.returncode != 0:
-                logger.error("%s 基础验证失败 ✗ (%.1fs)", label, time.time() - t0)
-                if proc.stderr:
-                    logger.error(proc.stderr)
-                return False
-            logger.info("%s 基础验证通过 ✓ (%.1fs)", label, time.time() - t0)
-            return True
-        except subprocess.TimeoutExpired:
-            logger.error("%s basic validation timed out", label)
-            return False
-        except Exception as e:
-            logger.error("%s basic validation error: %s", label, e)
-            return False
-
     def run_basic_validation(self, skill_name: str) -> bool:
         """
         skill基本拦截，用例检查
@@ -110,53 +100,6 @@ class GateChecker:
         logger.info("-" * 40)
         logger.info("Team 基础验证: %s", team_name)
         return self._run_basic_validation("test_team_basic.py", team_name, "Team")
-
-    def _run_eval_pytest(self, test_script_name: str, report_prefix: str,
-                          target_flag: str, target_names: List[str]) -> bool:
-        """通用 Phase 2 eval pytest 执行器（消除 skill/team 重复代码）。"""
-        test_script = self.test_skill_dir / "scripts" / test_script_name
-        if not test_script.exists():
-            logger.info("  %s 不存在，跳过", test_script_name)
-            return True
-
-        cmd = [sys.executable, "-m", "pytest", str(test_script)]
-        for name in target_names:
-            cmd.extend([target_flag, name])
-        if self.eval_id:
-            cmd.extend(["--eval-id", self.eval_id])
-
-        beijing_tz = timezone(timedelta(hours=8))
-        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
-        report_path = self.results_dir / f"{report_prefix}_{timestamp}.html"
-        cmd.extend([f"--html={report_path}", "--self-contained-html"])
-
-        if self._get_parallel_workers() != "1":
-            cmd.extend(["-n", self._get_parallel_workers()])
-
-        env = os.environ.copy()
-        if self.report_only:
-            env["REPORT_ONLY"] = "1"
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                env=env,
-                timeout=1200,
-                cwd=str(self.test_skill_dir / "scripts"),
-            )
-            if proc.returncode == 0:
-                return True
-            logger.error("%s 评测执行失败 (exit code %d)", report_prefix, proc.returncode)
-            if proc.stderr:
-                logger.error(proc.stderr[-2000:])
-            return False
-        except subprocess.TimeoutExpired:
-            logger.error("%s 评测执行超时 (1200s)", report_prefix)
-            return False
 
     def run_skills_eval(self, skill_names: List[str]) -> bool:
         """一次 pytest 运行所有 skill 的 eval 用例，生成一份统一 HTML 报告"""
@@ -254,6 +197,11 @@ class GateChecker:
         logger.info("受影响的 skill (%d): %s", len(changed_skills), ', '.join(changed_skills))
         logger.info("受影响的 team (%d): %s", len(changed_teams), ', '.join(changed_teams))
 
+        if not self._check_opencode_available():
+            logger.error("opencode 不可用，无法执行 Phase 2 AI 语义评测。")
+            logger.error("请确保 opencode 已安装并添加到系统 PATH。")
+            return False
+
         skill_passed, skill_total = self._eval_skills(changed_skills, t_total)
         team_passed, team_total = self._eval_teams(changed_teams, t_total)
 
@@ -271,6 +219,104 @@ class GateChecker:
         logger.info("=" * 60)
 
         return all_passed
+
+    def _run_basic_validation(self, test_script_name: str, target_name: str,
+                               label: str) -> bool:
+        """通用 Phase 1 静态验证执行器（消除 skill/team 重复代码）。"""
+        test_basic_script = self.test_skill_dir / "scripts" / test_script_name
+        if not test_basic_script.exists():
+            logger.warning("%s not found, skipping %s basic validation",
+                           test_script_name, label)
+            return True
+
+        t0 = time.time()
+        try:
+            returncode, captured_stdout, captured_stderr, timed_out = run_subprocess_streaming(
+                [
+                    sys.executable, "-m", "pytest",
+                    str(test_basic_script),
+                    "-v",
+                    "--tb=short",
+                    "-k", target_name,
+                ],
+                timeout=120,
+                cwd=str(self.test_skill_dir / "scripts"),
+                label=f"{label} basic",
+            )
+            if timed_out:
+                logger.error("%s 基础验证超时 (120s)", label)
+                return False
+            if returncode != 0:
+                logger.error("%s 基础验证失败 ✗ (%.1fs)", label, time.time() - t0)
+                if captured_stderr.strip():
+                    logger.error(captured_stderr)
+                return False
+            logger.info("%s 基础验证通过 ✓ (%.1fs)", label, time.time() - t0)
+            return True
+        except Exception as e:
+            logger.error("%s basic validation error: %s", label, e)
+            return False
+
+    def _run_eval_pytest(self, test_script_name: str, report_prefix: str,
+                          target_flag: str, target_names: List[str]) -> bool:
+        """通用 Phase 2 eval pytest 执行器（消除 skill/team 重复代码）。"""
+        test_script = self.test_skill_dir / "scripts" / test_script_name
+        if not test_script.exists():
+            logger.info("  %s 不存在，跳过", test_script_name)
+            return True
+
+        cmd = [sys.executable, "-m", "pytest", str(test_script)]
+        for name in target_names:
+            cmd.extend([target_flag, name])
+        if self.eval_id:
+            cmd.extend(["--eval-id", self.eval_id])
+
+        beijing_tz = timezone(timedelta(hours=8))
+        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
+        report_path = self.results_dir / f"{report_prefix}_{timestamp}.html"
+        cmd.extend([f"--html={report_path}", "--self-contained-html"])
+
+        if self._get_parallel_workers() != "1":
+            cmd.extend(["-n", self._get_parallel_workers()])
+
+        env = os.environ.copy()
+        if self.report_only:
+            env["REPORT_ONLY"] = "1"
+
+        eval_timeout = self._resolve_eval_timeout(target_names, target_flag)
+        try:
+            returncode, captured_stdout, captured_stderr, timed_out = run_subprocess_streaming(
+                cmd,
+                timeout=eval_timeout,
+                env=env,
+                cwd=str(self.test_skill_dir / "scripts"),
+                label=f"{report_prefix} eval",
+            )
+            if timed_out:
+                logger.error("%s 评测执行超时 (%ds)", report_prefix, eval_timeout)
+                return False
+            if returncode != 0:
+                logger.error("%s 评测执行失败 (exit code %d)", report_prefix, returncode)
+                if captured_stderr.strip():
+                    logger.error(captured_stderr[-2000:])
+                return False
+            return True
+        except Exception as e:
+            logger.error("%s 评测执行异常: %s", report_prefix, e)
+            return False
+
+    def _resolve_eval_timeout(self, target_names: List[str], target_flag: str) -> int:
+        """从 evals.md 中读取指定 eval_id 的 Timeout 配置，若无配置则默认 1200s。"""
+        if not self.eval_id or not target_names:
+            return 1200
+        for name in target_names:
+            evals_path = self.evals_cases_dir / f"{name}_evals.md"
+            if not evals_path.exists():
+                continue
+            timeout = self._parse_eval_timeout(evals_path, self.eval_id)
+            if timeout is not None:
+                return timeout
+        return 1200
 
     def _eval_skills(self, changed_skills: List[str], t_total: float) -> tuple:
         logger.info("=" * 60)
@@ -498,9 +544,9 @@ def main():
     checker = GateChecker(args.repo_root, args.changed_files, args.eval_id,
                           args.parallel, args.report_only)
     success = checker.run_checks()
-    
+
     archive_logs_and_results(args.repo_root)
-    
+
     sys.exit(0 if success else 1)
 
 

@@ -143,9 +143,9 @@ pypto-op-design 算子设计工作流包含哪些阶段？请详细介绍每个�
 回复还应说明 DESIGN.md 的输出结构（§1-§6 共 6 个章节）与最终的完成报告。
 
 ## Expectations
-
 - [contains] 计算图与精度路由
 - [contains] Tiling
 - [contains] Loop
 - [contains] SymbolicScalar
 - [contains] 约束交叉验证
+

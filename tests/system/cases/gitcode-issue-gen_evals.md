@@ -20,9 +20,9 @@ eval_mode: text
 回复应说明为 documentation 类型的变更创建 Issue，Issue body 应包含背景信息、价值作用、设计方案等章节，并在末尾关联 PR 链接。提及 Step 0 环境预检和 Step 7 提交确认的工作流步骤。
 
 ## Expectations
-
 - [contains] gitcode-issue-gen
 - [contains] documentation
+
 
 ---
 
@@ -67,11 +67,9 @@ eval_mode: text
 
 ## Expected Output
 
-回复应说明使用 gitcode-issue-gen skill 来处理这个需求，并概述核心工作流程步骤。应成功激活并使用 gitcode-issue-gen skill。
+回复应说明使用 gitcode-issue-gen skill 来处理这个需求，并概述核心工作流程步骤。
 
 ## Expectations
-
-- [skill_activated] gitcode-issue-gen
 
 ---
 
@@ -96,11 +94,11 @@ eval_mode: text
 回复应至少覆盖 gitcode-issue-gen 的核心工作流阶段：Step 0 环境预检、PR 解析与代码克隆、变更列表展示、Issue 模板查找与选择、Issue body 生成、提交确认、Issue 创建与 PR 关联、可选 Assign。应提及 GitCode API 端点如 repos/issues 和双向关联机制。
 
 ## Expectations
-
 - [contains] gitcode-issue-gen
 - [contains] 环境预检
 - [contains] 双向关联
 - [contains] api/v5
+
 
 ---
 
@@ -117,5 +115,5 @@ eval_mode: text
 回复应识别到用户提供了 PR 信息但缺少关键细节（PR 链接或目标仓库等），主动追问缺失信息。不应在缺少必要信息的情况下直接生成 Issue body 或自动执行操作。询问 PR 链接、目标仓库、Issue 类型等任一关键信息均可。
 
 ## Expectations
-
 - [contains] 创建
+

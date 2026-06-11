@@ -613,6 +613,7 @@ class OpencodeRunner:
         try:
             return subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -682,6 +683,7 @@ class OpencodeRunner:
 
         process = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(self.workdir),
