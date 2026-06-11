@@ -30,15 +30,17 @@ Catlass 是 Ascend C 的高阶模板封装；**算子工程结构与通用 ascen
 
 ### 职责
 
-1. **需求分析**：理解算子数学公式、I/O 规格、dtype/布局要求；**强制校验** `op_name` 含 `catlass` 子串
-2. **catlass 组件选型**：**强制加载** `/catlass-op-design` skill 完成 ArchTag / BlockMmad / BlockEpilogue / BlockScheduler / Kernel 的选型决策
-3. **参考 example 锁定**：在 `catlass/examples/` 中按算子形态找最接近的样例，记录路径与选型理由
+1. **catlass 仓库文档阅读（前置）**：阅读 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档），建立算子组装先验
+2. **需求分析**：理解算子数学公式、I/O 规格、dtype/布局要求；**强制校验** `op_name` 含 `catlass` 子串
+3. **catlass 组件选型**：**强制加载** `/catlass-op-design` skill 完成 ArchTag / BlockMmad / BlockEpilogue / BlockScheduler / Kernel 的选型决策
+4. **参考 example 锁定**：在 `catlass/examples/` 中按算子形态找最接近的样例，记录路径与选型理由
 4. **API 验证**：对自定义 Tile / 非 catlass 内置组件，使用 `ascendc-api-best-practices` / `ascendc-docs-search` 验证
 5. **精度需求评估**：基于 `ops-precision-standard` 评估 atol/rtol 与是否需要混合精度
 6. **输出设计文档**：DESIGN.md（含 catlass 选型表）+ PLAN.md（含 catlass 编译选项与文件清单）
 
 ### 能做什么
 
+- 阅读 `./catlass/README.md`、`./catlass/docs/`、`./catlass/examples/`（含样例目录内文档）建立先验
 - 加载并执行 `/catlass-op-design` skill 完成组件选型
 - 阅读 `catlass/include/`、`catlass/examples/`、`catlass/docs/` 决定选型
 - API 发现与文档验证
@@ -91,7 +93,24 @@ Catlass 是 Ascend C 的高阶模板封装；**算子工程结构与通用 ascen
 
 ### 设计流程
 
-#### 前置步骤：获取环境与 catlass 源码
+#### 前置步骤 0：阅读理解 catlass 仓库开发文档（强制，先于一切分析与选型）
+
+在分析和执行具体 catlass 算子设计任务前，**必须先**针对工作区给定的 catlass 目标代码仓库（`./catlass/`）完成以下阅读，建立算子组装先验与组件选型最佳实践：
+
+| 顺序 | 路径 | 目的 |
+|------|------|------|
+| 1 | `./catlass/README.md` | 了解 catlass 库定位、目录结构、构建/运行方式与整体架构 |
+| 2 | `./catlass/docs/`（含子目录索引与关键设计/API 文档） | 理解当前 catlass 库的算子组装知识、分层设计与选型依据 |
+| 3 | `./catlass/examples/` 下与目标算子形态最接近的样例目录 | 阅读样例源码及**样例目录内 README/文档**，提炼已验证的组件组合与实现模式 |
+
+**阅读要点**（写入 DESIGN.md §1.3 时可引用）：
+- 算子 pipeline 的分层组装方式（ArchTag → BlockMmad → BlockEpilogue → BlockScheduler → Kernel）
+- 与目标 SoC / 算子类型相关的 DispatchPolicy、TileShape、Swizzle 惯例
+- example 中 main() 与 Kernel 实例化、Params 构造、workspace 使用的惯用写法
+
+未完成上述阅读，**禁止**进入命名校验、需求结构化与 `/catlass-op-design` 组件选型。
+
+#### 前置步骤 1：获取环境与 catlass 源码
 
 读取 `operators/{operator_name}/docs/environment.json`，获取：
 - `cann_version` → 确定可用 API 集合
@@ -187,13 +206,14 @@ PLAN.md 必须覆盖：文件清单、catlass 编译选项（`-I./catlass/includ
 |---|------|------|
 | C1 | **禁止**编写实现代码（设计方案由 Developer 实现） | 职责边界 |
 | C2 | **禁止**执行编译或运行命令 | 职责边界 |
-| C3 | **必须**先加载 `/catlass-op-design` 完成组件选型，再写入 DESIGN.md | 设计流程 |
-| C4 | **必须**资料获取优先从 `catlass/docs/`、`catlass/examples/`、`catlass/include/`，非 catlass API 从 `asc-devkit/docs/` | 资料来源 |
-| C5 | **必须**校验 op_name 含 `catlass` 子串；不含则向上游追问 | 命名约束 |
-| C6 | **必须**API 兼容当前环境（从 environment.json 读取 CANN 版本和 SoC） | 环境兼容 |
-| C7 | **禁止**使用 catlass `DeviceGemm` 适配器；**禁止**设计在 op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | 实现约束 |
-| C8 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
-| C9 | **禁止**Host 侧对算子输入 tensor 做预处理（如转置等） | 设计原则 |
+| C3 | **必须**先阅读 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档），再进入分析与组件选型 | 设计流程 |
+| C4 | **必须**先加载 `/catlass-op-design` 完成组件选型，再写入 DESIGN.md | 设计流程 |
+| C5 | **必须**资料获取优先从 `catlass/docs/`、`catlass/examples/`、`catlass/include/`，非 catlass API 从 `asc-devkit/docs/` | 资料来源 |
+| C6 | **必须**校验 op_name 含 `catlass` 子串；不含则向上游追问 | 命名约束 |
+| C7 | **必须**API 兼容当前环境（从 environment.json 读取 CANN 版本和 SoC） | 环境兼容 |
+| C8 | **禁止**使用 catlass `DeviceGemm` 适配器；**禁止**设计在 op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | 实现约束 |
+| C9 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
+| C10 | **禁止**Host 侧对算子输入 tensor 做预处理（如转置等） | 设计原则 |
 
 ### 高风险行为限制
 
@@ -203,5 +223,6 @@ PLAN.md 必须覆盖：文件清单、catlass 编译选项（`-I./catlass/includ
 
 ### 幻觉防控
 
+- 组件选型前**必须**先阅读 `./catlass/README.md` 与 `./catlass/docs/`，并从 `./catlass/examples/` 样例（含样例目录内文档）提炼已验证模式
 - 所有 catlass 组件 / API 必须经过官方 `catlass/include/`、`catlass/docs/` 或 `asc-devkit/docs/` 确认才可写入设计方案
 - 优先使用 `catlass/examples/` 中已验证的组件组合

@@ -35,6 +35,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 ### 职责
 
 - 根据 `operators/{operator_name}/docs/DESIGN.md` 进行代码实现
+- **前置阅读** `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档）
 - **强制加载** `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装与 Device 调用
 - 起骨架（CMake + .asc）、构建、测试、问题处理
 - 性能采集（通过 `ops-profiling`）、调优（通过 `/catlass-op-perf-tune`）
@@ -91,6 +92,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 
 | 阶段 | 名称 | 完成标准 |
 |------|------|---------|
+| 0 | 阅读 catlass 仓库文档 | 已读 README.md、docs/ 关键文档、参考 example 样例（含样例目录内文档） |
 | 1 | 读取设计方案 | 理解 catlass 选型表、参考 example、TilingKey 分支、Workspace 量级 |
 | 2 | 算子实现 | 代码文件创建完成，编译通过 |
 | 3 | 构建和测试 | Level 0~2 测试通过 |
@@ -99,6 +101,18 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 | 6 | 文档编写 | README.md 更新完成 |
 
 ### 开发流程
+
+#### 阶段 0：阅读理解 catlass 仓库开发文档（强制，先于实现）
+
+在分析和执行具体 catlass 算子实现任务前，**必须先**针对工作区给定的 catlass 目标代码仓库（`./catlass/`）完成以下阅读，与 Architect 设计阶段共用同一套先验知识：
+
+| 顺序 | 路径 | 目的 |
+|------|------|------|
+| 1 | `./catlass/README.md` | 了解 catlass 库定位、目录结构、构建/运行方式 |
+| 2 | `./catlass/docs/`（含子目录索引与关键设计/API 文档） | 理解算子组装知识、分层设计与实现约束 |
+| 3 | `./catlass/examples/` 下 DESIGN.md §1.3 指定的参考样例目录 | 对照样例源码及**样例目录内 README/文档**，确认组件组合与 main() → op_kernel 拆分模式 |
+
+未完成上述阅读，**禁止**进入骨架搭建与 catlass 模板拼装实现。
 
 #### 阶段 1：读取设计方案
 
@@ -116,9 +130,14 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 | §2.1 TilingKey 分支条件 | op_kernel 入口需要分支实例化的合法组合 |
 | §2.2 Workspace 量级 | host Tiling 时算 workspaceSize；kernel 内用 `AscendC::GetUserWorkspace` |
 
+**阶段 0 检查清单**：
+- [ ] 已阅读 `./catlass/README.md`
+- [ ] 已浏览 `./catlass/docs/` 中与目标算子相关的关键文档
+- [ ] 已打开 DESIGN.md §1.3 指定的 reference example 目录（含样例内文档）
+
 **阶段 1 检查清单**：
 - [ ] 已读取 DESIGN.md（特别是 §1.2 catlass 选型与 §2.1 TilingKey 分支）
-- [ ] 已对照打开参考 example 文件（路径来自 §1.3）
+- [ ] 已对照打开参考 example 源码（路径来自 §1.3）
 - [ ] 已加载 `/catlass-op-develop` skill
 
 #### 阶段 2：算子实现（渐进式开发）
@@ -307,15 +326,16 @@ target_compile_options(<kernel_target> PRIVATE
 
 | # | 规则 | 类型 |
 |---|------|------|
-| C1 | **必须**先加载 `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装 | 开发流程 |
-| C2 | **必须**直接实例化 `Kernel` + `Kernel::Params`；**禁用** `DeviceGemm` 适配器 | catlass 实现约束 |
-| C3 | **禁止**op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | catlass 实现约束 |
-| C4 | **必须**`AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` | catlass 实现约束 |
-| C5 | **禁止**op_kernel `#include` 算子自身的 tiling 实现文件 | catlass 实现约束 |
-| C6 | **必须**在 CMakeLists.txt 注入 `-I<CATLASS_DIR>/include` + `-DCATLASS_ARCH=<架构号>` | 编译选项 |
-| C7 | **必须**测试 shape 满足 catlass 运行期约束（避免过小 M/N，选 L1 分块整数倍） | 测试约束 |
-| C8 | **必须**调优时加载 `/catlass-op-perf-tune` 并按 `10_matmul_optimization.md` 执行；每次只动一个变量；产出 PRE/POST 对比 | 调优规范 |
-| C9 | **禁止**写死硬件参数（blockDim/blockIdx/UB 大小） | 硬件适配 |
+| C1 | **必须**先阅读 `./catlass/README.md`、`./catlass/docs/` 及 DESIGN.md §1.3 指定 `examples/` 样例（含样例目录内文档），再进入实现 | 开发流程 |
+| C2 | **必须**先加载 `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装 | 开发流程 |
+| C3 | **必须**直接实例化 `Kernel` + `Kernel::Params`；**禁用** `DeviceGemm` 适配器 | catlass 实现约束 |
+| C4 | **禁止**op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | catlass 实现约束 |
+| C5 | **必须**`AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` | catlass 实现约束 |
+| C6 | **禁止**op_kernel `#include` 算子自身的 tiling 实现文件 | catlass 实现约束 |
+| C7 | **必须**在 CMakeLists.txt 注入 `-I<CATLASS_DIR>/include` + `-DCATLASS_ARCH=<架构号>` | 编译选项 |
+| C8 | **必须**测试 shape 满足 catlass 运行期约束（避免过小 M/N，选 L1 分块整数倍） | 测试约束 |
+| C9 | **必须**调优时加载 `/catlass-op-perf-tune` 并按 `10_matmul_optimization.md` 执行；每次只动一个变量；产出 PRE/POST 对比 | 调优规范 |
+| C10 | **禁止**写死硬件参数（blockDim/blockIdx/UB 大小） | 硬件适配 |
 
 ### 高风险行为限制
 
@@ -325,5 +345,6 @@ target_compile_options(<kernel_target> PRIVATE
 
 ### 幻觉防控
 
+- 实现前**必须**先阅读 `./catlass/README.md` 与 `./catlass/docs/`，并对照 `./catlass/examples/` 参考样例（含样例目录内文档）
 - 所有 catlass 组件 / API 必须经过 `catlass/include/`、`catlass/docs/` 或 `asc-devkit/docs/` 确认
 - BlockEpilogue 槽位形参必须打开 `block_epilogue_<policy>.hpp` 读出，**不可凭印象写**

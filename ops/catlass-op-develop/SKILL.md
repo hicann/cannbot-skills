@@ -5,6 +5,18 @@ description: "Generate CATLASS kernel code from design selections. Produce: usin
 
 # CATLASS Kernel Code Generation
 
+## Prerequisite: Read Catlass Repository Documentation（强制，先于实现）
+
+在分析和执行具体 catlass 算子实现任务前，**必须先**针对工作区给定的 catlass 目标代码仓库（`./catlass/`）完成以下阅读，与 design skill 共用同一套先验知识：
+
+| 顺序 | 路径 | 目的 |
+|------|------|------|
+| 1 | `./catlass/README.md` | 了解 catlass 库定位、目录结构、构建/运行方式 |
+| 2 | `./catlass/docs/`（含子目录索引与关键设计/API 文档） | 理解算子组装知识、分层设计与实现约束 |
+| 3 | `./catlass/examples/` 下设计文档指定的参考样例目录 | 对照样例源码及**样例目录内 README/文档**，确认组件组合与 main() → op_kernel 拆分模式 |
+
+未完成上述阅读，**禁止**进入 using 链拼装与 Device 调用实现。
+
 ## Source Code Locations
 
 ```
@@ -60,6 +72,8 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - 自定义 Tile 签名 → 查 `catlass/include/catlass/epilogue/tile/` 中现成 Tile 作参考
 - Params 字段 → `rg "struct Params" catlass/include/catlass/gemm/kernel/` 直接读源码
 - Workspace 取法 → `AscendC::GetUserWorkspace(workspace)`, 见 [architecture/02-device-calling.md](references/architecture/02-device-calling.md)
+- **精度脚本（golden/verify）编写 → [precision-verification.md](references/precision-verification.md)**（先经 `ops-precision-standard` 选标准）
+- **最优 mmad/epilogue 选型理由 → [catlass-op-design/references/mmad-epilogue-selection.md](../catlass-op-design/references/mmad-epilogue-selection.md)**（实现时据此核对 DESIGN 选型）
 
 ---
 
@@ -77,23 +91,29 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 | [patterns/with-epilogue.md](references/patterns/with-epilogue.md) | + 激活、+ Bias、+ Bias+激活 |
 | [patterns/quant-matmul.md](references/patterns/quant-matmul.md) | 量化 Matmul AIC/AIV 协同 |
 | [patterns/branch-instantiation.md](references/patterns/branch-instantiation.md) | 多分支 if constexpr 实例化 |
-| [rules.md](references/rules.md) | 强制性规则 Δ1–Δ8 |
+| [rules.md](references/rules.md) | 强制性规则 Δ1–Δ10 |
 | [custom-epilogue.md](references/custom-epilogue.md) | 自定义 Tile Epilogue 实现骨架 |
+| [precision-verification.md](references/precision-verification.md) | **精度验证脚本（gen_data/golden/verify）编写规则**：对齐官方标准、禁止零容忍小值域门限、golden 镜像内核、int8 用 fp32 BLAS、覆盖实网 shape |
 | [shape-constraints.md](references/shape-constraints.md) | 测试 shape 运行期约束 |
 | [troubleshooting.md](references/troubleshooting.md) | 常见问题排查 |
 
 ## Never / Always
 
 **NEVER**:
+- 跳过 `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档）直接写代码
 - 在 op_kernel 中使用 `DeviceGemm` 适配器
 - 手写矩阵乘 / 逐元素 / 拷贝循环
 - 调用 `SetSysWorkspaceForce`
 - `#include` 算子自身的 tiling 实现文件
 - 规定算子目录名、文件名、CMake 语法、构建命令
+- 把 golden 生成注释掉 / 跳过；让 verify 只覆盖基础 shape 不覆盖实网 shape
+- 在 verify 里自创零容忍小值域门限或用全体元素 MARE-max 作硬门限（过零激活会误判）
 
 **ALWAYS**:
+- 先阅读 `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档），再按设计选型写代码
 - op_kernel 只用 catlass `Kernel` / `Block*` / `Tile*`
 - Device 调用: `Kernel{}(params)`
 - Workspace: `AscendC::GetUserWorkspace(workspace)`
 - 严格按设计选型实例化每个分支
 - 自定义 Tile 对齐目标槽位签名
+- verify 判据 = `ops-precision-standard` 选出的官方标准；golden 镜像内核数值路径（fp32 累加→末尾 cast）；int8 GEMM golden 用 fp32 BLAS（`|Cint|<2²⁴` 精确）；gen_data/verify 覆盖基础 + 实网 shape（见 [precision-verification.md](references/precision-verification.md)）

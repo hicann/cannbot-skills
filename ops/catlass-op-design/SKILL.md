@@ -5,6 +5,23 @@ description: "Analyze operator requirements and select CATLASS components (ArchT
 
 # CATLASS Kernel Design
 
+## Prerequisite: Read Catlass Repository Documentation（强制，先于选型）
+
+在分析和执行具体 catlass 算子设计/选型任务前，**必须先**针对工作区给定的 catlass 目标代码仓库（`./catlass/`）完成以下阅读，建立算子组装先验与组件选型最佳实践：
+
+| 顺序 | 路径 | 目的 |
+|------|------|------|
+| 1 | `./catlass/README.md` | 了解 catlass 库定位、目录结构、构建/运行方式与整体架构 |
+| 2 | `./catlass/docs/`（含子目录索引与关键设计/API 文档） | 理解当前 catlass 库的算子组装知识、分层设计与选型依据 |
+| 3 | `./catlass/examples/` 下与目标算子形态最接近的样例目录 | 阅读样例源码及**样例目录内 README/文档**，提炼已验证的组件组合与实现模式 |
+
+**阅读要点**：
+- 算子 pipeline 的分层组装方式（ArchTag → BlockMmad → BlockEpilogue → BlockScheduler → Kernel）
+- 与目标 SoC / 算子类型相关的 DispatchPolicy、TileShape、Swizzle 惯例
+- example 中 Kernel 实例化、Params 构造、workspace 使用的惯用写法
+
+未完成上述阅读，**禁止**进入下方「Component Selection Methodology」。
+
 ## Source Code Locations
 
 CATLASS 源码位于工作区根目录 `./catlass/`。
@@ -61,6 +78,7 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 
 ## When to Use Each Source
 
+- **mmad + epilogue 最优选型（性能/精度决策）→ [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md)**
 - 理解分层架构 → `catlass/docs/zh/3_API/gemm_api.md`
 - DispatchPolicy 选型 → `catlass/docs/zh/2_Design/01_kernel_design/03_dispatch_policies.md`
 - matmul 模板总览 → `catlass/docs/zh/2_Design/01_kernel_design/04_matmul_summary.md`
@@ -70,6 +88,8 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 - BlockEpilogue 特化 → `catlass/include/catlass/epilogue/block/block_epilogue_*.hpp`
 
 ## Component Selection Methodology
+
+> **前置条件**：已完成上文「Prerequisite: Read Catlass Repository Documentation」。
 
 ### Step 1: Identify Operator Type
 
@@ -104,19 +124,24 @@ DispatchPolicy 选型：
     └── 参考 43_ascend950_* 到 57_ascend950_* 的 DispatchPolicy
 ```
 
+> **性能要点（不止量化）**：`MmadAtlasA2PreloadAsyncWithCallback` 是**所有「融合 matmul+epilogue 流水」算子的性能最优 DispatchPolicy**（预取+异步+回调，AIC/AIV 细粒度重叠），与多级轮转 workspace Kernel 搭配使用，不限于量化。`Pingpong` 仅为基线/一次性验证。详见 [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) §2。
+
 ### Step 3: Select Kernel Type
 
 | 条件 | Kernel | 参考 example |
 |------|--------|-------------|
 | 纯 matmul，无 Epilogue | `BasicMatmul` | 00_basic_matmul |
-| matmul + 激活（GELU/SILU/RELU） | `MatmulActivation` | 27_matmul_gelu |
+| matmul + 激活（GELU/SILU/RELU），**性能优先 / 大 N** | **多级轮转 workspace**（量化用 `QuantMatmulMultiStageWorkspace`；fp16 在 op_kernel/ 下建 fp16 类比） | 12_quant_matmul |
+| matmul + 激活（小 shape / 一次性验证） | `MatmulActivation` | 27_matmul_gelu |
 | matmul + Bias + 激活 | `MatmulActivation` | 20_matmul_bias, 27 |
 | 小 shape（taskBlocks < AIC） | `SmallMatmul` | 31_small_matmul |
 | 大 K，需切 K | `SplitkMatmul` | 09_splitk_matmul |
 | 单核切 K | `SingleCoreSlicekMatmul` | 34_single_core_splitk |
 | A 全量 L1 常驻 | `MatmulFullLoadA` | 25_matmul_full_loadA |
 | Preload 优化 | `OptimizedMatmul` | 06_optimized_matmul |
-| 量化 | `QuantMatmulMultiStageWorkspace` | 12_quant_matmul |
+| 量化 / 反量化(+激活) | `QuantMatmulMultiStageWorkspace` | 12_quant_matmul |
+
+> **⚠ 性能分水岭（必读）**：`MatmulActivation` / `MatmulEpilogue` 会把整块 `[M,N]` fp32 C 写回 HBM 再整块读回（脱离 L2），大 N 时成为瓶颈——它们是「示例级正确实现」，**不是性能最优**。性能交付应优先「**小型轮转 workspace（L2 驻留）+ `MmadAtlasA2PreloadAsyncWithCallback`**」的多级轮转 Kernel。判定规则、workspace 公式、fp16 类比做法见 [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) §1。
 
 ### Step 4: Select BlockScheduler
 
@@ -133,6 +158,22 @@ M < N  → GemmIdentityBlockSwizzle<3, 1>
 2. 读出模板形参列表（每个 = 一个 Tile 槽）
 3. 逐槽标记 ✅（现成）/ 🔧（自定义）/ ❌（槽不够）
 4. 输出槽位清单表格
+
+并核算自定义 epilogue 的 **UB 预算** 与 **硬件事件 ID 上限（同类型 ≤ 8）** 以定 `UB_STAGES`——超限会运行期挂死。详见 [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) §4.3。
+
+### Step 5b: 操作数拓扑判定（跨 N-half 门控，如 SwiGLU）★
+
+epilogue 计算的操作数若**跨 N-block**，per-block 独立 workspace 会算错。设计阶段必须显式判定：
+
+```
+epilogue 操作数是否跨 N？
+├── 否（单输入逐元素 / Bias / 同列反量化） → 常规多级轮转 workspace 即可
+└── 是（SwiGLU=silu(C[:,:H])·C[:,H:]，GeGLU/ReGLU 等门控，两操作数相距 H=N/2）
+      → ❌ 默认每 slot 单 tile 的 workspace 仅在 N≤L1TileShape::N 时正确，大 N 整片错
+      → ✅ 按输出形状 [M, H] 调度；每个输出块产出左/右两个 N-tile（列 c 与 c+H），epilogue 取双 C 门控
+```
+
+凡 gate/门控类激活，**必须**在 DESIGN 中记录「按输出形状调度 + 双 tile」方案。详见 [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) §4.2。
 
 ### Step 6: Branch Conditions
 
@@ -162,6 +203,7 @@ M < N  → GemmIdentityBlockSwizzle<3, 1>
 
 | 文档 | 内容 |
 |------|------|
+| [mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) | **最优 mmad/epilogue 选型决策**：轮转 workspace vs 整块 HBM 往返、PreloadAsyncWithCallback、TileShape 容量约束、SwiGLU 跨 N-half 门控、UB/事件预算 |
 | [architecture/00-hardware-arch.md](references/architecture/00-hardware-arch.md) | ArchTag 映射、资源约束、内存层级 |
 | [architecture/01-tile-layer.md](references/architecture/01-tile-layer.md) | Tile 原语（自动推导） |
 | [architecture/02-block-layer.md](references/architecture/02-block-layer.md) | DispatchPolicy 详解、Swizzle、Epilogue |
@@ -170,14 +212,20 @@ M < N  → GemmIdentityBlockSwizzle<3, 1>
 ## Never / Always
 
 **NEVER**:
+- 跳过 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档）直接选型
 - 臆测 DispatchPolicy 参数或 TileShape 值
 - 跳过 Epilogue 头文件的槽位确认
 - 输出 op_kernel 文件名、CMake、构建命令
 - 把 catlass example 整份照抄
+- 把 `MatmulActivation`/`MatmulEpilogue`（整块 `[M,N]` HBM 往返）当作大 N 的**性能**交付方案
+- 用「每 slot 单 tile」的 per-block workspace 实现 SwiGLU 等**跨 N-half 门控** epilogue（大 N 会算错）
+- 臆定 TileShape 而不核算 L1/L0 容量；臆定 `UB_STAGES` 而不核算 UB 预算与事件 ID 上限
 
 **ALWAYS**:
-- 先查 catlass 官方文档再选型
+- 先阅读 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档），再查 catlass 官方文档选型
 - 选型用表格呈现
 - BlockEpilogue ≠ void 时先列槽位清单
 - 枚举每个分支条件的取值和合法组合
 - 引用 catlass 仓库内具体路径
+- 性能优先/大 N：优先「轮转 workspace + `MmadAtlasA2PreloadAsyncWithCallback`」，避免整块 C 的 HBM 往返
+- 门控类 epilogue（SwiGLU/GeGLU/ReGLU）先做 Step 5b 操作数拓扑判定，按输出形状 `[M,H]` 调度产出双 tile

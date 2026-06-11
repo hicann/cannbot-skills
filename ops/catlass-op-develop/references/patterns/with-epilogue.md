@@ -25,10 +25,12 @@ using TileCopy = Catlass::Epilogue::Tile::TileCopy<ArchTag, CType, DType>;
 using BlockEpilogue = Catlass::Epilogue::Block::BlockEpilogue<
     EpiloguePolicy, CType, DType, TileGelu, TileCopy>;
 
-// ★ Kernel 用 MatmulActivation
+// ★ Kernel 用 MatmulActivation（示例级；性能优先见下方提示）
 using MatmulKernel = Catlass::Gemm::Kernel::MatmulActivation<
     BlockMmad, BlockEpilogue, BlockScheduler>;
 ```
+
+> **⚠ 性能提示**：`MatmulActivation` 把整块 `[M,N]` fp32 C 走 HBM 往返，大 N 时是瓶颈。**性能优先 / 大 N** 应改用「多级轮转 workspace + `MmadAtlasA2PreloadAsyncWithCallback`」：量化用 `QuantMatmulMultiStageWorkspace`；非量化 fp16 可在 op_kernel/ 下建其 fp16 类比（去 scale、epilogue 换逐元素激活）。详见 [mmad-epilogue 选型](../../../catlass-op-design/references/mmad-epilogue-selection.md) §1。
 
 **可用激活 Tile**：
 

@@ -85,6 +85,7 @@ target_compile_options(my_op_kernel PRIVATE
 
 | 规则 | 说明 |
 |------|------|
-| Δ7 | 必须用 `QuantMatmulMultiStageWorkspace` |
-| Δ9 | 含 scale 和 perTokenScale 输入 |
+| Δ7 | 必须用 `QuantMatmulMultiStageWorkspace`；含 scale 和 perTokenScale 输入 |
 | Δ1 | BlockEpilogue 在 AIV 侧执行，不可与 AIC 侧混淆 |
+
+> 量化 + **SwiGLU 等跨 N-half 门控**时，注意 Δ10：stock `QuantMatmulMultiStageWorkspace` 每 slot 单 tile 无法跨 N-block 取 `+H` 配对列，必须按输出形状 `[M, H]` 调度、每输出块产出左右两路 C tile。见 [rules.md](../rules.md) Δ10 与 [mmad-epilogue 选型](../../../catlass-op-design/references/mmad-epilogue-selection.md) §4.2。

@@ -1,4 +1,4 @@
-# Catlass Kernel 强制规则 Δ1–Δ8
+# Catlass Kernel 强制规则 Δ1–Δ10
 
 > **导航**：本文档集中所有强制性规则。每条 Δ 对应一个独立约束，标注违规后果和正确做法。
 
@@ -133,3 +133,30 @@ using Kernel = Gemm::Kernel::QuantMatmulMultiStageWorkspace<
 - 测试 shape 宜选 L1 分块 M/N 的整数倍
 
 详见 [shape-constraints.md](./shape-constraints.md)。
+
+---
+
+## Δ9：精度验证脚本对齐官方标准（影响精度判定）
+
+**要求**：`gen_data.py` / `golden.py` / `verify_result.py` 三件套必须满足：
+
+1. **verify 判据 = `ops-precision-standard` 选出的官方标准**（fp16/bf16 → 社区浮点标准 MERE/MARE Threshold，实践等价形式 `atol=1e-3, rtol=1e-3, error_ratio≤1e-3`）。
+2. **golden 必须真生成**（不得注释 / 跳过写入）；verify 必须覆盖**基础 + 实网 shape**。
+3. **golden 镜像内核数值路径**：fp32 累加、epilogue fp32 计算末尾才 cast、激活公式/常量一致、量化反量化顺序一致、输出 dtype 与形状一致。
+4. **int8 GEMM golden 用 fp32 BLAS**（`|Cint|<2²⁴` 时精确），不用慢的 numpy 整数矩阵乘。
+
+**禁止**：
+- 自创**零容忍小值域门限**（如「`|golden|<2⁻¹¹ 且 abs>2⁻¹⁶` 的元素数必须为 0」）——比官方严，过零激活必误判。
+- 用**全体元素 MARE-max** 作硬门限（近零 golden 让相对误差爆表）。
+
+**自检**：内核 MERE 很小却 verify FAIL → 先查 verify 门限，而非改内核。详见 [precision-verification.md](./precision-verification.md)。
+
+---
+
+## Δ10：跨 N-half 门控 epilogue 的调度（影响精度，大 N 才暴露）
+
+**要求**：epilogue 操作数**跨 N-block**时（SwiGLU=`silu(C[:, :H])·C[:, H:]`、GeGLU、ReGLU，两操作数相距 `H=N/2`），**必须**按输出形状 `[M, H]` 调度，每个输出块产出左/右两个 N-tile（列 `c` 与 `c+H`）供 epilogue 门控。
+
+**禁止**：用「每 slot 单 `[L1.M, L1.N]` tile」的 per-block 轮转 workspace 直接做门控——`+H` 配对列落在另一 N-block，**仅 `N ≤ L1TileShape::N` 时碰巧正确，大 N 整片输出错误**（曾现 N=18432 时 ~44% 元素错、最大绝对误差 171.5，且基础 512³ 用例照过）。
+
+**自检**：门控类算子必须在 N>L1TileShape::N 的实网 shape 上验精度。设计依据见 [catlass-op-design/references/mmad-epilogue-selection.md](../../catlass-op-design/references/mmad-epilogue-selection.md) §4.2。
