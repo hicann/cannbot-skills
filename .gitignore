@@ -14,3 +14,9 @@ tests/test-ut-report.html
 # 算子编译输出
 **/output/
 **/.orchestrator_state.json
+
+# Benchmark 框架
+tests/benchmark/results/
+tests/benchmark/cann-bench/
+# OpenCode 配置
+.opencode/

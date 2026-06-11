@@ -1,0 +1,109 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+# 评测配置 (Mini子集)
+# 快速评测验证数据集，覆盖 L1-L4 各层级核心范式算子
+#
+# Level1 (2个):
+#   - swi_glu                  Elementwise 门控激活 (LLaMA/DeepSeek FFN)
+#   - foreach_addcdiv_scalar   FusedComposite TensorList 批量调度 (优化器基元)
+#
+# Level2 (6个):
+#   - rms_norm                 Normalization 简单归约→归一化 (LLM pre-norm)
+#   - softmax                  Normalization 复杂归约→归一化 (Transformer attention)
+#   - apply_rotary_pos_emb     FusedComposite 旋转位置编码 (RoPE)
+#   - cummin                   Reduction 前缀扫描归约 (顺序依赖链)
+#   - scatter                  ScatterUpdate 随机索引写 (写端随机访存)
+#   - gather                   IndexGather 随机索引读 (读端随机访存)
+#
+# Level3 (6个):
+#   - grouped_matmul           Contraction 批量 float Cube 核调度 (MoE dispatch)
+#   - quant_matmul             Contraction INT8 Cube 核+输出反量化 (量化推理核心)
+#   - dequant_swiglu_quant     FusedComposite 反量化→激活→量化融合 (MoE 量化推理出口)
+#   - add_rms_norm_dynamic_quant FusedComposite Add+Norm+Quant 三域融合 (DeepSeek-V3 decode)
+#   - top_k                    SortSelect 排序+TopK 选择 (MoE gating + sampling)
+#   - transpose                LayoutTransform 跨步数据搬运 (访存重排基线)
+#
+# Level4 (2个):
+#   - mla_prolog               FusedComposite 9-input 多步前处理编排 (DeepSeek-V3 decode 前处理)
+#   - mla                      FusedComposite KV 低秩解压+注意力计算 (DeepSeek-V2/V3 核心注意力)
+
+prompt_template: prompts/op_dev_prompt.txt
+cann_bench_root: cann-bench
+output_dir: results
+
+ops:
+  # ===== Level1 =====
+  - op_name: cann-bench/tasks/level1/swi_glu
+    category: Elementwise
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level1/foreach_addcdiv_scalar
+    category: FusedComposite
+    example_path: cann-bench/examples/direct_launch_example
+
+  # ===== Level2 =====
+  - op_name: cann-bench/tasks/level2/rms_norm
+    category: Normalization
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level2/softmax
+    category: Normalization
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level2/apply_rotary_pos_emb
+    category: FusedComposite
+    example_path: cann-bench/examples/direct_launch_example
+
+  - op_name: cann-bench/tasks/level2/cummin
+    category: Reduction
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level2/scatter
+    category: ScatterUpdate
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level2/gather
+    category: IndexGather
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  # ===== Level3 =====
+  - op_name: cann-bench/tasks/level3/grouped_matmul
+    category: Contraction
+    example_path: cann-bench/examples/direct_launch_example
+
+  - op_name: cann-bench/tasks/level3/quant_matmul
+    category: Contraction
+    example_path: cann-bench/examples/direct_launch_example
+
+  - op_name: cann-bench/tasks/level3/dequant_swiglu_quant
+    category: FusedComposite
+    example_path: cann-bench/examples/direct_launch_example
+
+  - op_name: cann-bench/tasks/level3/add_rms_norm_dynamic_quant
+    category: FusedComposite
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level3/top_k
+    category: SortSelect
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level3/transpose
+    category: LayoutTransform
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  # ===== Level4 =====
+  - op_name: cann-bench/tasks/level4/mla_prolog
+    category: FusedComposite
+    example_path: cann-bench/examples/aclnn_launch_example
+
+  - op_name: cann-bench/tasks/level4/mla
+    category: FusedComposite
+    example_path: cann-bench/examples/aclnn_launch_example

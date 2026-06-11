@@ -1,0 +1,6 @@
+results/
+cann-bench/
+*.whl
+*.run
+__pycache__/
+*.pyc
