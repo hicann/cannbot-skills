@@ -64,8 +64,16 @@ def kernel(A, B, C, M, N,
 ```
 
 **判断逻辑**：
-- 如果代码中存在运行时不变化的固定参数（如 stride、固定数值、BLOCK_SIZE等）未声明为 `tl.constexpr` → 涉及
-- 如果所有固定参数都已正确声明为 `tl.constexpr` → 不涉及，跳过
+1. 遍历 kernel 参数列表，排除明确属于运行时变量的参数：
+  - 张量数据指针（如 input_ptr, output_ptr）
+  - 动态维度（如 batch size M/N/K、序列长度 seq_len）
+  - 标量动态值（如缩放因子 scale，若每轮调用不同）
+2. 对剩余参数逐一检查是否满足"单次 kernel 启动后不变"：
+  - stride 参数（stride_am, stride_bn 等）→ 涉及 
+  - 固定索引（如 lse_idx, head_idx_offset）→ 涉及
+  - BLOCK_SIZE / HEAD_DIM / N_ROUNDED 等配置参数 → 涉及
+3. 若第2步中任一参数未声明 `tl.constexpr` → 命中，进入参考文档
+4. 若第2步中无参数或已全部声明 `tl.constexpr` → 不涉及，跳过
 
 **命中条件**：代码特征满足上述典型代码特征之一，且适用条件成立
 
@@ -191,6 +199,10 @@ else:
 is_invalid = tok < 0  # int 类型比较，退化为标量
 c = a // b  # int 类型除法，退化为标量
 d = a % b   # int 类型取余，退化为标量
+
+# 特征 5：atomic_* 标量操作
+for idx in range(0, BLOCK_SIZE):
+    tl.atomic_add(output_ptr + idx, block_sum)  # 标量的原子加
 ```
 
 **判断逻辑**：
@@ -198,6 +210,7 @@ d = a % b   # int 类型取余，退化为标量
 - 检查是否存在标量累加器（如 `sum_val = 0.0`）
 - 检查是否存在 `if-else` 控制流处理向量数据
 - 检查是否存在 `int32/int64` 类型的比较、除法、取余操作
+- 检查是否存在 `atomic_add` 这一类的 `atomic_*` 标量操作
 - 如果存在以上任一情况 → 涉及
 - 如果所有操作都已使用向量形式 → 不涉及，跳过
 
@@ -429,9 +442,42 @@ kernel[grid](..., BLOCK_M=128, BLOCK_N=128)
 
 ---
 
+### 优化点 13：消除冗余的边界运算
+
+**适用条件**：代码中存在 `tl.load(..., mask=m, other=d)` 加载数据后，后续纯算术运算链上又出现 `tl.where(m, ..., d)`、`* mask`、`+ 0`、`* 1` 等冗余边界保护运算
+
+**典型代码特征**：
+```python
+# 特征 1：tl.where 二次归零
+x = tl.load(ptr + idx, mask=m, other=0.0)
+x_sq = x * x
+x_sq = tl.where(m, x_sq, 0.0)  # 冗余：load 已保证边界为 0
+
+# 特征 2：乘法模拟 mask
+a = tl.load(ptr_a + idx, mask=m, other=0.0)
+b = tl.load(ptr_b + idx, mask=m, other=0.0)
+x = (a + b) * m.to(tl.float32)  # 冗余：边界处 a+b 已是 0
+```
+
+**判断逻辑**：
+- 检查是否存在 `tl.load(..., mask=m, other=d)` 或 `tl.full(d)` 作为数据源
+- 检查后续运算链是否为纯算术运算（`+ - * ** .to() exp abs max min sum` 等），不包括 `/ //`、store、控制流
+- 检查是否存在以下冗余运算：
+  - `tl.where(m, expr, d)`，且 `expr` 在 `m=False` 处的 KVR（已知值区域）可推导为 `d`
+  - `expr + 0.0`、`expr - 0.0`、`expr * 1.0`、`expr ** 1`、`-(-expr)` 等代数恒等式
+  - `tl.maximum(expr, d)` / `tl.minimum(expr, d)` / `tl.abs(expr)`，且 `expr` 已满足相应边界条件
+- 如果存在以上任一情况 → 涉及
+- 如果所有边界保护都是必要的（如运算链含除法、不同 mask、未受保护的 load） → 不涉及，跳过
+
+**命中条件**：代码中存在由 KVR（Known-Value Region）数据流分析可证的冗余边界保护运算
+
+**参考文档**：`references/redundant_boundary_operation.md`
+
+---
+
 ## 优化流程
 ```
-1. 按顺序检查优化点 1 → 2 → 3 → ... → 12
+1. 按顺序检查优化点 1 → 2 → 3 → ... → 13
 2. 对于当前优化点，先判断是否命中（代码特征满足 + 适用条件成立）：
    - 未命中 → 跳过，检查下一优化点
    - 命中 → 参考对应文档，应用优化策略
@@ -480,6 +526,7 @@ kernel[grid](..., BLOCK_M=128, BLOCK_N=128)
 | 循环不变量外提 | `references/loop-invariant-hoisting.md` |
 | Load 指令重排序 | `references/load-order.md` |
 | Autotune 自动调优 | `references/autotune.md` |
+| 消除冗余的边界运算 | `references/redundant_boundary_operation.md` |
 | 代码规范检查 | `references/checklist.md` |
 
 ### 最终步骤：Block Size Scaling
