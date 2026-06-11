@@ -77,10 +77,13 @@ git push -u origin ${branch}
 2. 获取模板   → 从目标仓库获取 PR 模板
 3. 分析填充   → 分析 commit 内容，自动填充模板
 4. 用户确认   → 展示填充后的模板，等待用户确认/修改
-5. 推送分支   → 确保分支已推送到 origin
-6. 创建 PR    → 调用 GitCode API 创建 PR
-7. 记录日志   → 保存操作日志
+5. 校验身份   → 校验 git user.name / user.email 已配置
+6. 推送分支   → 确保分支已推送到 origin
+7. 创建 PR    → 调用 GitCode API 创建 PR
+8. 记录日志   → 保存操作日志
 ```
+
+> **前置校验**：进入 Step 5 推送之前，**必须**确认 git 提交身份（`user.name` / `user.email`）已配置——这是 PR 提交流程的硬性前置条件。缺失时立刻停下来问用户，不要带着空身份往下走。详见下方 Step 5 与 [references/env-check.md](references/env-check.md) 的「Git 提交用户信息」。
 
 ### Step 1: 获取信息
 
@@ -200,14 +203,87 @@ first_commit=$(git log master..HEAD --pretty=format:"%s" --no-merges | head -1)
 
 确认时展示：PR 标题、源分支 → 目标分支、填充后的模板内容。
 
-### Step 5: 推送分支
+### Step 5: 校验 git 提交身份
+
+推送前对 git 提交身份做两层校验：**5.1 是否已配置**（硬性，缺失即阻断）和 **5.2 email 是否与 GitCode 账号绑定一致**（建议，不一致仅告警）。`git push` 本身不会因身份缺失或 email 不匹配而失败，但 commit author 是公开字段：缺失/配错人，或 email 没对上账号绑定邮箱，会导致 commit 挂错身份、或在 GitCode 上显示为「未关联用户」，事后难补救。
+
+#### 5.1 校验是否已配置（硬性，缺失即阻断）
+
+```bash
+NAME=$(git config user.name 2>/dev/null)
+EMAIL=$(git config user.email 2>/dev/null)
+if [ -z "$NAME" ] || [ -z "$EMAIL" ]; then
+  echo "MISSING: git author identity (user.name / user.email)"
+fi
+```
+
+- 两项都已配置 → 展示读到的 `Name <email>` 让用户一眼确认是不是本次想用的身份，确认无误后进入 5.2。
+- 任一缺失 → **立即停下来用 AskUserQuestion 询问**，不要继续 push：
+
+```
+问题: 未检测到 git 提交身份（user.name / user.email），无法安全提交 PR，请提供：
+选项:
+  - 用我下面提供的 name 和 email（在下一条消息中给出）
+  - 已在别处配置好，让我重新读取一次
+  - 取消本次操作
+```
+
+拿到用户提供的值后**只在当前工作目录写 local 配置**，禁止改全局 `~/.gitconfig`（理由同 env-check.md：用户全局身份可能服务于多个项目，skill 不应擅自覆盖）：
+
+```bash
+git -C "$WORK_DIR" config user.name  "$NAME"
+git -C "$WORK_DIR" config user.email "$EMAIL"
+```
+
+> 完整规则（global 继承、反模式、禁止用 `--author=` / `-c user.name=` inline 绕过）详见 [references/env-check.md](references/env-check.md) 的「5. Git 提交用户信息」。
+
+#### 5.2 校验 email 是否与 GitCode 账号绑定一致（建议，不一致仅告警）
+
+git 里配的 `user.email` 只是本地字符串，只有当它**等于 token 对应 GitCode 账号的某个已绑定邮箱**时，commit 才会关联到该用户主页；否则 PR 仍能提，但 commit 显示为「未关联用户」。用已有的 token 调账号绑定邮箱接口做一次比对：
+
+```bash
+# 拉取当前 token 账号的全部绑定邮箱（小写化，去除 state 未确认项可按需保留）
+BOUND=$(curl -s "https://api.gitcode.com/api/v5/emails?access_token=${token}" \
+  --connect-timeout 20 --max-time 40 \
+  | python3 -c "import sys,json; 
+try:
+  print('\n'.join(e['email'].lower() for e in json.load(sys.stdin)))
+except Exception:
+  pass")
+
+if [ -z "$BOUND" ]; then
+  echo "SKIP: 无法获取账号绑定邮箱（token 缺 user/email scope 或接口不可用），跳过一致性校验"
+elif printf '%s\n' "$BOUND" | grep -qxF "$(echo "$EMAIL" | tr 'A-Z' 'a-z')"; then
+  echo "OK: git user.email 与 GitCode 账号绑定邮箱一致"
+else
+  echo "WARN: git user.email ($EMAIL) 不在账号绑定邮箱中，commit 将不会关联到 GitCode 主页"
+fi
+```
+
+> 备用端点：若只需账号主邮箱，可用 `GET /api/v5/user` 取单个 `email` 字段比对（详见 [references/gitcode-api.md](references/gitcode-api.md#7-用户账号-api)）。
+
+处理策略（**这是建议性校验，绝不硬阻断**）：
+
+- `OK` → 一行通过提示，进入 Step 6。
+- `SKIP`（接口不可用 / token 无 scope）→ 打印一行「已跳过 email 绑定校验」，**直接继续**，不打扰用户。
+- `WARN`（不一致）→ 用 AskUserQuestion 提示风险，让用户决定，**默认不阻断**：
+
+```
+问题: git user.email 与 GitCode 账号绑定邮箱不一致，commit 将显示为「未关联用户」。如何处理？
+选项:
+  - 继续提交（接受 commit 不关联到我的主页）
+  - 我改用账号绑定的邮箱（在下一条消息给出，仅写工作目录 local 配置）
+  - 取消本次操作
+```
+
+### Step 6: 推送分支
 
 ```bash
 git push -u origin ${branch_name}
 git ls-remote --heads origin ${branch_name}
 ```
 
-### Step 6: 创建 PR
+### Step 7: 创建 PR
 
 **API**
 
@@ -252,7 +328,7 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/${upstream_owner}/${upstream_
 
 > 错误码处理详见 [references/gitcode-api.md](references/gitcode-api.md)。
 
-### Step 7: 记录日志
+### Step 8: 记录日志
 
 日志文件命名：`logs/pr-create_{YYYYMMDD}_{HHMMSS}.log`。日志格式详见 [references/logging-conventions.md](references/logging-conventions.md)。
 
@@ -643,5 +719,5 @@ curl "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues?state=opened&
 | [references/remote-and-branch.md](references/remote-and-branch.md) | remote 管理、分支查询、push、ls-remote | PR 创建流程 |
 | [references/pitfalls.md](references/pitfalls.md) | Git 操作易错点对照表 | 所有使用 git 的 skill |
 | **本文档章节** | | |
-| PR 创建工作流（Step 1-7） | 分支→模板→填充→确认→推送→API创建→日志 | gitcode-issue-handler, fixer-broken-link |
+| PR 创建工作流（Step 1-8） | 分支→模板→填充→确认→校验身份→推送→API创建→日志 | gitcode-issue-handler, fixer-broken-link |
 | Issue 创建工作流（Step 1-7） | 仓库→模板→选择→填充→确认→API创建→日志 | tool-reports-to-issue, gitcode-issue-gen |

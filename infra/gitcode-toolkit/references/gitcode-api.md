@@ -12,6 +12,7 @@
 4. [错误处理](#4-错误处理)
 5. [最佳实践](#5-最佳实践)
 6. [命令速查](#6-命令速查)
+7. [用户账号 API](#7-用户账号-api)
 
 ---
 
@@ -478,4 +479,54 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/issues/$ISSUE/co
 
 # 获取仓库内容/模板
 curl "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/contents/{path}?access_token=$TOKEN"
+
+# 获取当前 token 对应账号
+curl "https://api.gitcode.com/api/v5/user?access_token=$TOKEN"
+
+# 获取账号绑定的全部邮箱
+curl "https://api.gitcode.com/api/v5/emails?access_token=$TOKEN"
 ```
+
+---
+
+## 7. 用户账号 API
+
+用于校验 token 对应账号的身份信息（如 PR 提交前比对 git `user.email` 是否与账号绑定邮箱一致）。
+
+### 获取当前 token 对应的账号
+
+```bash
+GET /user
+
+curl "https://api.gitcode.com/api/v5/user?access_token=${token}"
+```
+
+**关键返回字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `login` | string | 账号用户名 |
+| `name` | string | 显示名 |
+| `email` | string | 账号主邮箱（**仅一个**，公开邮箱） |
+
+### 获取账号绑定的全部邮箱
+
+```bash
+GET /emails
+
+curl "https://api.gitcode.com/api/v5/emails?access_token=${token}"
+```
+
+**返回示例**：
+
+```json
+[{"email": "user@example.com", "state": "confirmed"}]
+```
+
+| 字段 | 说明 |
+|------|------|
+| `email` | 绑定邮箱 |
+| `state` | `confirmed`（已验证）/ 未确认 |
+
+> **用途**：commit 关联到 GitCode 主页的依据是「commit email ∈ 账号绑定邮箱」。比对时建议大小写不敏感。
+> **注意**：此端点可能依赖 token 的 user/email scope，部分 token 会返回 401/403——拿不到时应**降级跳过**（视为「无法校验」），不要阻断主流程。

@@ -52,9 +52,11 @@ test -w /tmp || echo "MISSING: /tmp not writable"
 
 确认目标输出目录（如 `./docs/`、用户指定路径）的父目录存在且可写。不存在则 `mkdir -p` 创建，无权限则 AskUserQuestion 询问替代路径。
 
-### 5. Git 提交用户信息（仅创建 commit 的 skill：gitcode-issue-handler）
+### 5. Git 提交用户信息（创建 commit 或提交 PR 的 skill）
 
-会调用 `git commit` 的 skill 必须在 Step 0 阶段确认 `user.name` 和 `user.email` 已配置，否则 `git commit` 会在 Step 5 才报错（`Author identity unknown`），白白浪费一轮 clone+改代码+跑测试的工作量——越早暴露越好。
+适用范围：① 会调用 `git commit` 的 skill（如 `gitcode-issue-handler`）；② 走「PR 创建工作流」提交 PR 的流程（见 SKILL.md「PR 创建工作流」Step 5）。这两类都依赖正确的 git 提交身份（`user.name` / `user.email`）。
+
+会调用 `git commit` 的 skill 必须在 Step 0 阶段确认 `user.name` 和 `user.email` 已配置，否则 `git commit` 会在后续步骤才报错（`Author identity unknown`），白白浪费一轮 clone+改代码+跑测试的工作量——越早暴露越好。提交 PR 的流程虽然 `git push` 不会因身份缺失而失败，但 commit author 是公开字段，配错人后难以补救，因此同样需要在推送前校验。
 
 ```bash
 NAME=$(git config --global user.name 2>/dev/null)
