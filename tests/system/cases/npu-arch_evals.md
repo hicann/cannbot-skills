@@ -2,13 +2,13 @@
 skill_name: npu-arch
 eval_mode: text
 ---
-
 # Case 1: 架构代际概述与核心概念
 
 ## Config
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -38,6 +38,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -65,6 +66,7 @@ Ascend910B 和 Ascend950PR 分别对应什么 NpuArch 和 SocVersion？Ascend910
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -92,6 +94,7 @@ Ascend910B 和 Ascend950PR 分别对应什么 NpuArch 和 SocVersion？Ascend910
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -121,6 +124,7 @@ DAV_3510 相比 DAV_2201 在 Buffer 容量、指令集和数据通路方面有�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -151,6 +155,7 @@ Ascend C 中 SIMT 和 SIMD 两种编程模型有什么区别？分别适用于�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -182,6 +187,7 @@ DAV_3510 新增了哪些数据格式？SIMD-Regbase 架构有什么优势？
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -211,6 +217,7 @@ Ascend950PR Server 的 Cube BF16 算力和 FP8 算力分别是多少？怎么推
 ## Config
 - Max Tokens: 150000
 - Distractor skills: ascendc-env-check;ascendc-api-best-practices;ascendc-docs-search
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -238,6 +245,7 @@ Ascend910B 和 Ascend950 的架构有什么区别？DAV_2201 和 DAV_3510 的 UB
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -263,6 +271,7 @@ Ascend910B 和 Ascend950 的架构有什么区别？DAV_2201 和 DAV_3510 的 UB
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 

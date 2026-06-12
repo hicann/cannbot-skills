@@ -1,11 +1,11 @@
 ---
 skill_name: ascendc-env-check
 ---
-
 # Case 1: NPU设备信息查询
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -25,6 +25,7 @@ skill_name: ascendc-env-check
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -45,6 +46,7 @@ skill_name: ascendc-env-check
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -66,6 +68,7 @@ skill_name: ascendc-env-check
 ## Config
 - Max Tokens: 100000
 - Disabled: true
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -86,6 +89,7 @@ skill_name: ascendc-env-check
 ## Config
 - Max Tokens: 100000
 - Disabled: true
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -106,6 +110,7 @@ skill_name: ascendc-env-check
 ## Config
 - Max Tokens: 120000
 - Distractor skills: cann-env-setup;npu-arch;ascendc-runtime-debug;ascendc-docs-search
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -126,6 +131,7 @@ skill_name: ascendc-env-check
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -145,6 +151,7 @@ skill_name: ascendc-env-check
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -165,6 +172,7 @@ skill_name: ascendc-env-check
 
 ## Config
 - Max Tokens: 100000
+- Ascend Platform: A2
 
 ## Prompt
 

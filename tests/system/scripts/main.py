@@ -29,12 +29,14 @@ logger = logging.getLogger(__name__)
 
 class GateChecker:
     def __init__(self, repo_root: str, changed_files: List[str], eval_id: Optional[str] = None,
-                 parallel: str = "1", report_only: bool = False):
+                 parallel: str = "1", report_only: bool = False,
+                 ascend_platforms: Optional[List[str]] = None):
         self.repo_root = Path(repo_root).resolve()
         self.changed_files = changed_files
         self.eval_id = eval_id
         self.parallel = parallel
         self.report_only = report_only
+        self.ascend_platforms = ascend_platforms or []
         self.test_skill_dir = self.repo_root / "tests" / "system"
         self.results_dir = self.test_skill_dir / "results"
         self.evals_cases_dir = self.test_skill_dir / "cases"
@@ -100,18 +102,6 @@ class GateChecker:
         logger.info("-" * 40)
         logger.info("Team 基础验证: %s", team_name)
         return self._run_basic_validation("test_team_basic.py", team_name, "Team")
-
-    def run_skills_eval(self, skill_names: List[str]) -> bool:
-        """一次 pytest 运行所有 skill 的 eval 用例，生成一份统一 HTML 报告"""
-        return self._run_eval_pytest(
-            "test_skill_evals.py", "evals_validation", "--skill", skill_names,
-        )
-
-    def run_teams_eval(self, team_names: List[str]) -> bool:
-        """一次 pytest 运行所有 team 的 eval 用例，生成独立 HTML 报告"""
-        return self._run_eval_pytest(
-            "test_team_evals.py", "team_evals_validation", "--team", team_names,
-        )
 
     def identify_changed_skills(self) -> List[str]:
         changed_skills = set()
@@ -202,20 +192,23 @@ class GateChecker:
             logger.error("请确保 opencode 已安装并添加到系统 PATH。")
             return False
 
-        skill_passed, skill_total = self._eval_skills(changed_skills, t_total)
-        team_passed, team_total = self._eval_teams(changed_teams, t_total)
+        # Phase 1: 逐 target 基础验证
+        skill_candidates = self._collect_skills_for_eval(changed_skills, t_total)
+        team_candidates = self._collect_teams_for_eval(changed_teams, t_total)
 
-        total_passed = skill_passed + team_passed
-        total_all = skill_total + team_total
-        all_passed = total_all == 0 or total_passed == total_all
+        # Phase 2: 统一的 AI 语义评测，生成一份汇总报告
+        all_passed = self._run_unified_eval_pytest(skill_candidates, team_candidates, t_total)
+
+        eval_count = len(skill_candidates) + len(team_candidates)
+        total_candidates = len(changed_skills) + len(changed_teams)
 
         logger.info("=" * 60)
         if all_passed:
             logger.info("全部通过 — %d skill + %d team, %d 验证完成 (%.1fs)",
-                        skill_total, team_total, total_all, time.time() - t_total)
+                        len(changed_skills), len(changed_teams), eval_count, time.time() - t_total)
         else:
-            logger.info("评测存在失败 — %d skill + %d team, %d/%d 通过 (%.1fs)",
-                        skill_total, team_total, total_passed, total_all, time.time() - t_total)
+            logger.info("评测存在失败 — %d skill + %d team, %d 验证项 (%.1fs)",
+                        len(changed_skills), len(changed_teams), eval_count, time.time() - t_total)
         logger.info("=" * 60)
 
         return all_passed
@@ -318,86 +311,125 @@ class GateChecker:
                 return timeout
         return 1200
 
-    def _eval_skills(self, changed_skills: List[str], t_total: float) -> tuple:
+    def _collect_skills_for_eval(self, changed_skills: List[str], t_total: float) -> List[str]:
+        """Phase 1: 逐 skill 基础验证，返回通过验证且有 eval 用例的 skill 列表"""
+        if not changed_skills:
+            return []
+
         logger.info("=" * 60)
-        logger.info("AI 语义评测")
+        logger.info("基础验证 (Skill)")
         logger.info("=" * 60)
 
-        # Phase 1: 逐 skill 静态验证（无报告生成，保持逐 skill）
+        skills_with_evals: List[str] = []
         for idx, skill_name in enumerate(changed_skills, 1):
-            if not self.report_only:
-                logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
-                if not self.run_basic_validation(skill_name):
-                    logger.info("基础验证失败，终止流程 (%.1fs)", time.time() - t_total)
-                    return 0, len(changed_skills)
+            if self.report_only:
+                # --report-only 模式下跳过 Phase 1，直接收集有 eval 用例的 skill
+                evals_data = self.load_evals(skill_name)
+                if evals_data and evals_data.get("evals", []):
+                    skills_with_evals.append(skill_name)
+                continue
 
-        # Phase 2: 合并 AI 语义评测，生成一份报告
-        skills_with_evals = []
-        for skill_name in changed_skills:
+            logger.info("[%d/%d] %s — 基础验证", idx, len(changed_skills), skill_name)
+            if not self.run_basic_validation(skill_name):
+                logger.info("  %s 基础验证失败，跳过", skill_name)
+                continue
             evals_data = self.load_evals(skill_name)
             eval_cases = evals_data.get("evals", []) if evals_data else []
             if eval_cases:
                 skills_with_evals.append(skill_name)
                 logger.info("  %s — %d 个评测用例", skill_name, len(eval_cases))
 
-        if not skills_with_evals:
-            logger.info("无评测用例的 skill，跳过 AI 语义评测")
-            return 0, 0
+        return skills_with_evals
 
-        eval_total = len(skills_with_evals)
-        logger.info("[合并] %d 个 skill 合并评测", eval_total)
-
-        passed = self.run_skills_eval(skills_with_evals)
-        if passed:
-            logger.info("[合并] 全部通过 ✓ (%.1fs)", time.time() - t_total)
-        else:
-            logger.info("[合并] 存在失败 ✗ (%.1fs)", time.time() - t_total)
-
-        return (eval_total if passed else 0), eval_total
-
-    def _eval_teams(self, changed_teams: List[str], t_total: float) -> tuple:
+    def _collect_teams_for_eval(self, changed_teams: List[str], t_total: float) -> List[str]:
+        """Phase 1: 逐 team 基础验证，返回通过验证且有 eval 用例的 team 列表"""
         if not changed_teams:
-            return 0, 0
+            return []
 
         logger.info("=" * 60)
-        logger.info("Team AI 语义评测")
+        logger.info("基础验证 (Team)")
         logger.info("=" * 60)
 
-        # Phase 1: 逐 team 静态验证，失败的不进入 Phase 2
-        passed_teams: List[str] = []
+        teams_with_evals: List[str] = []
         for idx, team_name in enumerate(changed_teams, 1):
-            if not self.report_only:
-                logger.info("[%d/%d] %s — Team 基础验证", idx, len(changed_teams), team_name)
-                if not self.run_team_basic_validation(team_name):
-                    logger.info("Team 基础验证失败，跳过该 team 的 AI 评测 (%.1fs)", time.time() - t_total)
-                    continue
-            passed_teams.append(team_name)
+            if self.report_only:
+                # --report-only 模式下跳过 Phase 1
+                evals_data = self.load_evals(team_name)
+                if evals_data and evals_data.get("evals", []):
+                    teams_with_evals.append(team_name)
+                continue
 
-        # Phase 2: 合并 AI 语义评测，仅对通过 Phase 1 的 team
-        teams_with_evals = []
-        for team_name in passed_teams:
+            logger.info("[%d/%d] %s — Team 基础验证", idx, len(changed_teams), team_name)
+            if not self.run_team_basic_validation(team_name):
+                logger.info("  %s 基础验证失败，跳过", team_name)
+                continue
             evals_data = self.load_evals(team_name)
             eval_cases = evals_data.get("evals", []) if evals_data else []
             if eval_cases:
                 teams_with_evals.append(team_name)
                 logger.info("  %s — %d 个评测用例", team_name, len(eval_cases))
 
-        if not teams_with_evals:
-            # 若所有 team 在 Phase 1 均失败，返回失败计数而非 (0,0) 以避免静默吞掉失败
-            total_teams = len(changed_teams)
-            logger.info("无评测用例的 team，跳过 Team AI 语义评测")
-            return 0, total_teams if total_teams > 0 else 0
+        return teams_with_evals
 
-        eval_total = len(teams_with_evals)
-        logger.info("[合并] %d 个 team 合并评测", eval_total)
+    def _run_unified_eval_pytest(
+        self, skill_names: List[str], team_names: List[str], t_total: float
+    ) -> bool:
+        """一次 pytest 运行所有 skill + team 的 eval 用例，生成一份统一 HTML 报告"""
+        if not skill_names and not team_names:
+            logger.info("无评测用例，跳过 AI 语义评测")
+            return True
 
-        passed = self.run_teams_eval(teams_with_evals)
-        if passed:
-            logger.info("[合并] Team 全部通过 ✓ (%.1fs)", time.time() - t_total)
-        else:
-            logger.info("[合并] Team 存在失败 ✗ (%.1fs)", time.time() - t_total)
+        cmd = [sys.executable, "-m", "pytest"]
+        if skill_names:
+            cmd.append("test_skill_evals.py")
+        if team_names:
+            cmd.append("test_team_evals.py")
+        for name in skill_names:
+            cmd.extend(["--skill", name])
+        for name in team_names:
+            cmd.extend(["--team", name])
+        if self.eval_id:
+            cmd.extend(["--eval-id", self.eval_id])
+        if self.ascend_platforms:
+            for p in self.ascend_platforms:
+                cmd.extend(["--ascend-platform", p])
 
-        return (eval_total if passed else 0), eval_total
+        beijing_tz = timezone(timedelta(hours=8))
+        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
+        platform_prefix = "_".join(self.ascend_platforms) + "_" if self.ascend_platforms else ""
+        report_path = self.results_dir / f"{platform_prefix}ST_validation_report_{timestamp}.html"
+        cmd.extend([f"--html={report_path}", "--self-contained-html"])
+
+        if self._get_parallel_workers() != "1":
+            cmd.extend(["-n", self._get_parallel_workers()])
+
+        env = os.environ.copy()
+        if self.report_only:
+            env["REPORT_ONLY"] = "1"
+
+        all_targets = skill_names + team_names
+        eval_timeout = self._resolve_eval_timeout(all_targets, "--skill")
+        try:
+            returncode, captured_stdout, captured_stderr, timed_out = run_subprocess_streaming(
+                cmd,
+                timeout=eval_timeout,
+                env=env,
+                cwd=str(self.test_skill_dir / "scripts"),
+                label="unified eval",
+            )
+            if timed_out:
+                logger.error("统一评测执行超时 (%ds)", eval_timeout)
+                return False
+            if returncode != 0:
+                logger.error("统一评测执行失败 (exit code %d)", returncode)
+                if captured_stderr.strip():
+                    logger.error(captured_stderr[-2000:])
+                return False
+            logger.info("统一评测全部通过 ✓ (%.1fs)", time.time() - t_total)
+            return True
+        except Exception as e:
+            logger.error("统一评测执行异常: %s", e)
+            return False
 
     def _cleanup_previous_run(self):
         """清除上次运行的 logs 目录，清理 sandboxes 目录内容"""
@@ -484,19 +516,20 @@ class GateChecker:
         """
         解析 parallel 参数，返回实际使用的 worker 数量。
         - "1": 顺序执行
-        - "auto": CPU 核数 - 1（至少为 1）
+        - "auto": CPU 核数 - 1（至少为 1，最大不超过 32）
         - 其他数字: 直接使用
         """
         if self.parallel == "1":
             return "1"
         if self.parallel == "auto":
             cpu_count = os.cpu_count() or 1
-            workers = max(1, cpu_count - 1)
+            workers = max(1, min(cpu_count - 1, 32))
             return str(workers)
         return self.parallel
 
 
-def main():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(description="Gate check for skill testing framework")
     parser.add_argument(
         "--repo-root",
@@ -519,7 +552,7 @@ def main():
         type=str,
         default="1",
         help="Number of parallel pytest workers via pytest-xdist "
-             "(default: 1 = sequential, 'auto' = CPU cores - 1, "
+             "(default: 1 = sequential, 'auto' = min(CPU cores - 1, 32), "
              "or specify a number like '4')"
     )
     parser.add_argument(
@@ -534,15 +567,24 @@ def main():
         help="指定评测模型名称（如 claude-sonnet-4-20250514），"
              "用于按模型匹配 Max Tokens 预算，默认走 Max Tokens 通用值"
     )
+    parser.add_argument(
+        "--ascend-platform", action="append",
+        default=None,
+        help="Filter eval cases by Ascend platform (A2/A3/A5). Repeatable."
+    )
+    return parser
 
-    args = parser.parse_args()
+
+def main():
+    args = _build_arg_parser().parse_args()
 
     # 将 --eval-model 写入环境变量，透传给 pytest 子进程
     if args.eval_model:
         os.environ["EVAL_MODEL"] = args.eval_model
 
     checker = GateChecker(args.repo_root, args.changed_files, args.eval_id,
-                          args.parallel, args.report_only)
+                          args.parallel, args.report_only,
+                          ascend_platforms=args.ascend_platform)
     success = checker.run_checks()
 
     archive_logs_and_results(args.repo_root)

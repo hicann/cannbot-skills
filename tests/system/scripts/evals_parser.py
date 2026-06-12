@@ -208,6 +208,10 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     distractor_skills = [s.strip() for s in distractor_raw.split(";") if s.strip()]
     eval_case["distractor_skills"] = distractor_skills if distractor_skills else []
 
+    ascend_platform_raw = case_config.get("ascend platform", "")
+    ascend_platforms = [p.strip().upper() for p in ascend_platform_raw.split(";") if p.strip()]
+    eval_case["ascend_platforms"] = ascend_platforms
+
     dim_thresholds = _parse_dim_thresholds(case_config, case_id)
     if dim_thresholds:
         eval_case["dim_thresholds"] = dim_thresholds

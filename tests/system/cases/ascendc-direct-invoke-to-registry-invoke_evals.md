@@ -2,13 +2,13 @@
 skill_name: ascendc-direct-invoke-to-registry-invoke
 eval_mode: text
 ---
-
 # Case 1: 七阶段工作流知识验证
 
 ## Config
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -41,6 +41,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -70,6 +71,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -105,6 +107,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 150000
 - Max Tokens (glm-5): 135000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -133,6 +136,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -161,6 +165,7 @@ OpDef 契约表包含哪些字段？_def.cpp 文件应该怎么写？有哪些�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -191,6 +196,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 150000
 - Max Tokens (glm-5): 135000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -220,6 +226,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 ## Config
 - Max Tokens: 150000
 - Distractor skills: ascendc-registry-invoke-template;ascendc-direct-invoke-template;ascendc-registry-invoke-to-direct-invoke;ascendc-api-best-practices
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -248,6 +255,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -279,6 +287,7 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 

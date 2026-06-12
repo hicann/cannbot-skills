@@ -172,6 +172,7 @@ eval_mode: text
 | `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定模型 |
 | `Eval Mode` | 覆盖用例级评测模式：`text` / `file_based` |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 列表，如 `skill-a;skill-b`。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 存在时仍能正确选择目标 skill |
+| `Ascend Platform` | 用例适用的昇腾平台，分号分隔可多选，如 `A2;A5`。配合 `--ascend-platform` 参数在对应服务器上执行。**未配置此字段的用例在任何平台下均不执行** |
 | `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。用于需要更长执行时间的复杂场景 |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
@@ -231,6 +232,12 @@ python -m pytest test_skill_evals.py --skill cann-env-setup -v --tb=short
 # 测试指定 skill 的单个用例
 python -m pytest test_skill_evals.py --skill cann-env-setup --eval-id 3 -v --tb=long
 
+# 按平台过滤（仅执行 Ascend Platform 配置为 A2 的用例）
+python -m pytest test_skill_evals.py --skill cann-env-setup --ascend-platform A2 -v --tb=short
+
+# 多平台过滤（执行 A2 和 A5 的用例）
+python -m pytest test_skill_evals.py --skill cann-env-setup --ascend-platform A2 --ascend-platform A5 -v
+
 # 启用重试（默认 1=不重试），适用于偶发性失败
 EVAL_EXEC_RETRIES=3 python -m pytest test_skill_evals.py --skill cann-env-setup -v
 ```
@@ -258,6 +265,9 @@ python -m pytest test_team_evals.py --team ops-direct-invoke -v --tb=short
 # 测试指定 team 的单个用例
 python -m pytest test_team_evals.py --team ops-direct-invoke --eval-id 1 -v --tb=long
 
+# 按平台过滤
+python -m pytest test_team_evals.py --team ops-direct-invoke --ascend-platform A2 -v
+
 # 指定评估模型（匹配 Max Tokens (<model>) 预算）
 EVAL_MODEL=claude-sonnet-4-20250514 python -m pytest test_team_evals.py --team ops-direct-invoke -v
 ```
@@ -270,19 +280,32 @@ python tests/system/scripts/main.py \
     --changed-files ops/cann-env-setup/SKILL.md
 ```
 
-`main.py` 自动完成：识别受影响的 skill/team → 逐个 Phase 1（失败的跳过 Phase 2）→ 合并 Phase 2 → 保存 JSON 结果 → 归档日志。
+`main.py` 自动完成：识别受影响的 skill/team → 逐个 Phase 1（失败的跳过 Phase 2）→ 合并 Phase 2 → 生成统一 HTML 报告 → 归档日志。
 
-支持 `--eval-model` 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算。
+支持的参数：
+
+| 参数 | 说明 |
+|------|------|
+| `--eval-model <model>` | 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算 |
+| `--parallel` / `-p` | 并发数，`1` 顺序执行（默认），`auto` 自动取核数，最大 32 |
+| `--ascend-platform A2 A3` | 按平台过滤，仅执行 `Ascend Platform` 匹配的用例。不指定则跳过评测 |
+| `--report-only` | 仅重新生成 HTML 报告，不执行测试（从已有沙箱 JSON 文件读取数据） |
+| `--eval-id <id>` | 仅执行指定 ID 的单个用例 |
 
 ### 方式三：gate_check.sh（完整 CI 流程）
 
 ```bash
-# 自动检测 HEAD 变更
+# 自动检测变更文件，执行评测
 ./tests/gate_check.sh
 
-# 指定变更文件
-CHANGED_FILES="ops/cann-env-setup/SKILL.md" ./tests/gate_check.sh
+# 指定平台（仅执行 A2 用例），多平台可重复
+./tests/gate_check.sh --ascend-platform A2 --ascend-platform A5
+
+# 通过环境变量指定平台（逗号或空格分隔）
+ASCEND_PLATFORM="A2,A5" ./tests/gate_check.sh
 ```
+
+> **注意**：`gate_check.sh` 要求必须指定平台（`--ascend-platform` 或 `ASCEND_PLATFORM` 环境变量），否则直接 exit 0 跳过评测。平台值仅支持 `A2`、`A3`、`A5`。
 
 ## 结果解读
 
@@ -322,8 +345,7 @@ CANN 安装完成后，可通过以下方式验证：
 |------|------|------|
 | `basic_validation.html` | Phase 1 pytest-html | **静态结构检查报告**，浏览器打开可看 16 项测试（evals.md 格式、SKILL.md frontmatter 等）的通过/失败详情 |
 | `team_basic_validation.html` | Team Phase 1 pytest-html | **Team 静态结构检查报告**，包含 AGENTS.md/plugin.json/init.sh 等 20 项测试 |
-| `evals_validation_<YYYYMMDD_HHMMSS>.html` | Phase 2 pytest-html | **Skill 统一 AI 语义评测报告**，所有技能合并展示，每行标注 skill 归属 |
-| `team_evals_validation_<YYYYMMDD_HHMMSS>.html` | Team Phase 2 pytest-html | **Team AI 语义评测报告**，所有 team 合并展示，每行标注 team 归属 |
+| `ST_validation_report_<YYYYMMDD_HHMMSS>.html` | Phase 2 统一 pytest-html | **Skill + Team 统一 AI 语义评测报告**，所有 target 合并展示，表中"类型"列区分 Skill/Team |
 | `<skill>_<timestamp>.json` | `main.py` 的 `save_results()` | **结构化结果 JSON**，供脚本/CI 解析，含每个用例的 prompt、expected_output、实际输出、通过状态 |
 
 #### logs/ — 运行时日志（排查问题用）
@@ -339,16 +361,16 @@ CANN 安装完成后，可通过以下方式验证：
 ```
 一次完整执行
   │
-  ├─ Phase 1 ──→ results/basic_validation.html
+  ├─ Phase 1 ──→ results/basic_validation.html (Skill)
+  │               results/team_basic_validation.html (Team)
   │
   ├─ Phase 2 ──→ 每个用例生成:
-  │                logs/<skill>_case_X.json              (执行 session ID)
-  │                logs/<skill>_case_X_review_ses.json   (评测 session 完整对话)
+  │                logs/<target>_case_X.json              (执行 session ID)
+  │                logs/<target>_case_X_review_ses.json   (评测 session 完整对话)
   │              ↓
-  │              results/evals_validation.html   (统一报告)
+  │              results/ST_validation_report_<ts>.html   (统一报告，含 Skill+Team)
   │
   └─ 归档 ────→ logs/test_results_<timestamp>.zip    (以上全部打包)
-                results/<skill>_<timestamp>.json      (结构化摘要)
 ```
 
 **日常使用建议**：看结果打开 `results/` 下的 HTML 报告，排查问题查 `logs/` 下对应的 `review_ses.json`。
@@ -411,4 +433,4 @@ skill_dirs:
 | evals.md frontmatter | `skill_name: <name>` | `team_name: <name>` |
 | 沙箱部署方式 | symlink skill 目录到 `.opencode/skills/` | 执行 `init.sh project opencode <sandbox>` |
 | Phase 1 检查项 | SKILL.md 格式、evals.md 结构 | AGENTS.md 格式、plugin.json 合法性、init.sh 存在性 |
-| Phase 2 报告文件名 | `evals_validation_<ts>.html` | `team_evals_validation_<ts>.html` |
+| Phase 2 统一报告 | `ST_validation_report_<ts>.html`（表中"类型"列区分 Skill/Team） |

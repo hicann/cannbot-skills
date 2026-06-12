@@ -29,7 +29,7 @@ from conftest import (
     parse_dimension_scores, parse_review_md,
     validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
     DIMENSION_ORDER, DIMENSION_MAX_SCORES,
-    create_opencode_runner,
+    create_opencode_runner, _platform_matches,
 )
 from opencode_runner import OpencodeRunner
 from sandbox_manager import SandboxManager
@@ -778,6 +778,7 @@ def pytest_generate_tests(metafunc):
 
     skill_names = metafunc.config.getoption("--skill", None)
     eval_id = metafunc.config.getoption("--eval-id", None)
+    ascend_platforms = metafunc.config.getoption("--ascend-platform", None)
 
     test_cases: List[Dict[str, Any]] = []
     ids: List[str] = []
@@ -792,10 +793,17 @@ def pytest_generate_tests(metafunc):
         for eval_item in evals_data.get("evals", []):
             if eval_id and str(eval_item.get("id")) != str(eval_id):
                 continue
+            if not _platform_matches(ascend_platforms, eval_item):
+                continue
             test_cases.append(_build_eval_test_case(skill, skill_dir, eval_item))
             ids.append(f"{skill}::eval_{eval_item.get('id')}")
 
-    metafunc.parametrize("eval_case", test_cases, ids=ids, scope="function")
+    if test_cases:
+        metafunc.parametrize("eval_case", test_cases, ids=ids, scope="function")
+    else:
+        # 无匹配用例时，生成一个占位用例并立即跳过，避免 fixture 未定义的 ERROR
+        dummy = {"_skip": True}
+        metafunc.parametrize("eval_case", [dummy], ids=["no-matching-cases"], scope="function")
 
 
 def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
@@ -1000,23 +1008,10 @@ def _run_and_extract_text(opencode_runner, prompt: str, cwd: str,
     return full_output, session_name, session_file, ai_text
 
 
-def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
-    if os.environ.get("REPORT_ONLY") == "1":
-        logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)",
-                    eval_case["skill_name"], eval_case["eval"].get("id"))
-        return
-
-    eval_data = eval_case["eval"]
-    if eval_data.get("disabled"):
-        pytest.skip(f"Eval {eval_data.get('id')} marked as Disabled - skipping")
-
-    inputs = _unpack_eval_inputs(eval_case)
-
-    opencode_runner, sandbox_path = _setup_eval_sandbox(sandbox_manager, inputs)
-    _log_eval_case_header(inputs.skill_name, inputs.eval_id, inputs.prompt,
-                          inputs.expected_output,
-                          distractor_skill_dirs=inputs.distractor_skill_dirs)
-
+def _run_eval_with_retry(
+    opencode_runner, sandbox_path: str, inputs: EvalInputs,
+) -> None:
+    """执行评测并支持重试，验证不通过时抛出异常。"""
     max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "1"))
     last_error = None
     best_session_file = None
@@ -1061,3 +1056,27 @@ def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
     if last_error is not None:
         raise last_error
     logger.info("Session file: %s", best_session_file)
+
+
+def test_eval_case(eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
+    # 占位用例过滤：无匹配 case 时跳过
+    if eval_case.get("_skip"):
+        pytest.skip("No matching eval cases for the current filter")
+
+    if os.environ.get("REPORT_ONLY") == "1":
+        logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)",
+                    eval_case["skill_name"], eval_case["eval"].get("id"))
+        return
+
+    eval_data = eval_case["eval"]
+    if eval_data.get("disabled"):
+        pytest.skip(f"Eval {eval_data.get('id')} marked as Disabled - skipping")
+
+    inputs = _unpack_eval_inputs(eval_case)
+
+    opencode_runner, sandbox_path = _setup_eval_sandbox(sandbox_manager, inputs)
+    _log_eval_case_header(inputs.skill_name, inputs.eval_id, inputs.prompt,
+                          inputs.expected_output,
+                          distractor_skill_dirs=inputs.distractor_skill_dirs)
+
+    _run_eval_with_retry(opencode_runner, sandbox_path, inputs)

@@ -1,7 +1,6 @@
 ---
 skill_name: pypto-op-design
 ---
-
 # Case 1: 简单 Vector 算子（Add）设计
 
 ## Config
@@ -9,6 +8,7 @@ skill_name: pypto-op-design
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -45,6 +45,7 @@ skill_name: pypto-op-design
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -82,6 +83,7 @@ skill_name: pypto-op-design
 # Case 3: 信息不足时主动追问
 
 ## Config
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -105,6 +107,7 @@ skill_name: pypto-op-design
 - Max Tokens (deepseek-v4-flash): 350000
 - Max Tokens (glm-5): 320000
 - Distractor skills: pypto-op-develop;pypto-api-explore;ascendc-st-design;ascendc-tiling-design
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -128,6 +131,9 @@ skill_name: pypto-op-design
 ---
 
 # Case 5: 工作流知识验证
+
+## Config
+- Ascend Platform: A2
 
 ## Prompt
 

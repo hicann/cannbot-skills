@@ -18,6 +18,54 @@ FRAMEWORK_DIR="$REPO_ROOT/tests/system"
 TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-${BASE_BRANCH:-master}}"
 
 # =========================================================================
+# Phase 0: 平台参数解析
+# =========================================================================
+# 读取 --ascend-platform 和 ASCEND_PLATFORM 环境变量
+
+ASCEND_PLATFORMS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ascend-platform)
+            if [[ -z "$2" || "$2" == --* ]]; then
+                echo "ERROR: --ascend-platform requires a value (A2/A3/A5)"
+                exit 1
+            fi
+            ASCEND_PLATFORMS+=("$2")
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# 若未通过 CLI 指定，fallback 到环境变量
+if [ ${#ASCEND_PLATFORMS[@]} -eq 0 ] && [ -n "${ASCEND_PLATFORM:-}" ]; then
+    IFS=', ' read -ra ASCEND_PLATFORMS <<< "$ASCEND_PLATFORM"
+fi
+
+# 若均未配置平台参数，默认使用 A2（兼容未配置 CI 环境的场景）
+if [ ${#ASCEND_PLATFORMS[@]} -eq 0 ]; then
+    echo "未指定 --ascend-platform 且 ASCEND_PLATFORM 环境变量未设置，默认使用 A2。"
+    ASCEND_PLATFORMS=("A2")
+fi
+
+# 校验每个平台值为 A2/A3/A5
+for p in "${ASCEND_PLATFORMS[@]}"; do
+    case "$p" in
+        A2|A3|A5) ;;
+        *)
+            echo "ERROR: 无效的平台值 '$p'，请使用 A2/A3/A5"
+            exit 1
+            ;;
+    esac
+done
+
+echo "目标平台: ${ASCEND_PLATFORMS[*]}"
+
+# =========================================================================
 # Phase 1: 环境初始化
 # =========================================================================
 echo "=== Phase 1: Environment Setup ==="
@@ -84,7 +132,8 @@ fi
 python3 "$FRAMEWORK_DIR/scripts/main.py" \
     --repo-root "$REPO_ROOT" \
     --changed-files "${changed_files_array[@]}" \
-    --parallel auto
+    --parallel auto \
+    --ascend-platform "${ASCEND_PLATFORMS[@]}"
 
 EXIT_CODE=$?
 

@@ -27,7 +27,7 @@ import pytest
 from conftest import (
     get_team_path, get_teams_with_evals, load_team_evals_md, REPO_ROOT,
     FRAMEWORK_DIR, SANDBOX_DIR,
-    create_opencode_runner,
+    create_opencode_runner, _platform_matches,
 )
 from opencode_runner import OpencodeRunner
 from sandbox_manager import SandboxManager
@@ -111,6 +111,7 @@ def pytest_generate_tests(metafunc):
 
     team_names = metafunc.config.getoption("--team", None)
     eval_id = metafunc.config.getoption("--eval-id", None)
+    ascend_platforms = metafunc.config.getoption("--ascend-platform", None)
 
     test_cases: List[Dict[str, Any]] = []
     ids: List[str] = []
@@ -128,10 +129,17 @@ def pytest_generate_tests(metafunc):
         for eval_item in evals_data.get("evals", []):
             if eval_id and str(eval_item.get("id")) != str(eval_id):
                 continue
+            if not _platform_matches(ascend_platforms, eval_item):
+                continue
             test_cases.append(_build_team_eval_test_case(team_name, team_dir, eval_item))
             ids.append(f"{team_name}::eval_{eval_item.get('id')}")
 
-    metafunc.parametrize("team_eval_case", test_cases, ids=ids, scope="function")
+    if test_cases:
+        metafunc.parametrize("team_eval_case", test_cases, ids=ids, scope="function")
+    else:
+        # 无匹配用例时，生成一个占位用例并立即跳过，避免 fixture 未定义的 ERROR
+        dummy = {"_skip": True}
+        metafunc.parametrize("team_eval_case", [dummy], ids=["no-matching-cases"], scope="function")
 
 
 def test_team_eval_case(team_eval_case: Dict[str, Any], sandbox_manager: SandboxManager):
@@ -140,6 +148,10 @@ def test_team_eval_case(team_eval_case: Dict[str, Any], sandbox_manager: Sandbox
     流程与 skill eval 一致：沙箱创建 → opencode 执行 → 输出验证 → token 检查。
     差异在于沙箱创建使用 create_team_sandbox()（通过 init.sh 安装 team）。
     """
+    # 占位用例过滤：无匹配 case 时跳过
+    if team_eval_case.get("_skip"):
+        pytest.skip("No matching eval cases for the current filter")
+
     if os.environ.get("REPORT_ONLY") == "1":
         logger.info("[%s] REPORT_ONLY 模式，跳过测试执行 (eval %s)",
                     team_eval_case["team_name"], team_eval_case["eval"].get("id"))

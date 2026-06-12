@@ -2,13 +2,13 @@
 skill_name: ascendc-ut-develop
 eval_mode: text
 ---
-
 # Case 1: 为 Add 算子开发 op_api 层 UT
 
 ## Config
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -46,6 +46,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -80,6 +81,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -112,6 +114,7 @@ eval_mode: text
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -147,6 +150,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -176,6 +180,7 @@ eval_mode: text
 - Max Tokens: 250000
 - Max Tokens (deepseek-v4-flash): 300000
 - Max Tokens (glm-5): 275000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -209,6 +214,7 @@ eval_mode: text
 ## Config
 - Max Tokens: 200000
 - Distractor skills: ascendc-st-design;ascendc-code-review;ascendc-whitebox-design;ascendc-api-best-practices
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -244,6 +250,7 @@ eval_mode: text
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -276,6 +283,7 @@ ascendc-ut-develop 的 UT 开发总结报告（Step 5）包含哪些章节？每
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -299,6 +307,7 @@ ascendc-ut-develop 的 UT 开发总结报告（Step 5）包含哪些章节？每
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 

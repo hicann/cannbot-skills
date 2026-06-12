@@ -2,13 +2,13 @@
 skill_name: gitcode-issue-gen
 eval_mode: text
 ---
-
 # Case 1: 文档变更的模板选择
 
 ## Config
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -28,6 +28,9 @@ eval_mode: text
 
 # Case 2: Bug Fix 变更的模板选择
 
+## Config
+- Ascend Platform: A2
+
 ## Prompt
 
 我修复了一个 bug,问题是算子在高版本驱动下计算结果错误，原因是某个 API 参数类型不匹配。请告诉我 gitcode-issue-gen 对这个 PR 应该用什么模板？
@@ -41,6 +44,9 @@ eval_mode: text
 ---
 
 # Case 3: 文档变更的模板选择
+
+## Config
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -60,6 +66,7 @@ eval_mode: text
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
 - Distractor skills: gitcode-issue-handler;gitcode-pr-handler;gitcode-toolkit
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -75,6 +82,9 @@ eval_mode: text
 
 # Case 5: 负向看护-不相关的查询不应触发 Issue 工作流
 
+## Config
+- Ascend Platform: A2
+
 ## Prompt
 
 请问 GitCode 上怎么创建一个新的仓库？初始化和推送代码的步骤是什么？
@@ -84,6 +94,9 @@ eval_mode: text
 回复应说明 GitCode 上创建仓库和推送代码的通用 Git 操作步骤（git init, git remote add, git push 等），不应涉及 Issue 创建或 PR 关联的工作流。
 
 # Case 6: 工作流知识验证
+
+## Config
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -105,6 +118,7 @@ eval_mode: text
 # Case 7: 边界场景-信息不足时主动追问
 
 ## Config
+- Ascend Platform: A2
 
 ## Prompt
 

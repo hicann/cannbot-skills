@@ -2,13 +2,13 @@
 skill_name: ascendc-docs-gen
 eval_mode: file_based
 ---
-
 # Case 1: 为 Add 算子生成需求分析文档
 
 ## Config
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -50,6 +50,7 @@ eval_mode: file_based
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -92,6 +93,7 @@ eval_mode: file_based
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 150000
 - Max Tokens (glm-5): 135000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -130,6 +132,7 @@ eval_mode: file_based
 - Max Tokens: 250000
 - Max Tokens (deepseek-v4-flash): 220000
 - Max Tokens (glm-5): 200000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -173,6 +176,7 @@ eval_mode: file_based
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -214,6 +218,7 @@ eval_mode: file_based
 ## Config
 - Eval Mode: text
 - Max Tokens: 80000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -233,6 +238,7 @@ eval_mode: file_based
 - Eval Mode: text
 - Max Tokens: 120000
 - Distractor skills: ascendc-st-design;ascendc-tiling-design;ascendc-direct-invoke-template;ascendc-api-best-practices
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -252,6 +258,7 @@ eval_mode: file_based
 ## Config
 - Eval Mode: text
 - Max Tokens: 80000
+- Ascend Platform: A2
 
 ## Prompt
 

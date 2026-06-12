@@ -278,6 +278,8 @@ def pytest_addoption(parser):
     parser.addoption("--skill", action="append", default=None, help="Run evals for specific skill(s)")
     parser.addoption("--team", action="append", default=None, help="Run evals for specific team(s)")
     parser.addoption("--eval-id", action="store", default=None, help="Run specific eval by ID")
+    parser.addoption("--ascend-platform", action="append", default=None,
+                     help="Filter eval cases by Ascend platform (A2/A3/A5). Repeatable.")
 
 
 def get_all_skills() -> List[str]:
@@ -611,6 +613,7 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 #results-table tbody tr:nth-child(even) { background: #fafbfc; }
 #results-table tbody tr:nth-child(even):hover { background: #f1f5f9; }
 .col-result { width: 120px; text-align: center; }
+.col-type  { width: 80px; text-align: center; font-weight: 600; color: #475569; }
 .col-skill  { width: 160px; font-weight: 500; color: #334155; }
 .col-description { width: 220px; color: #475569; font-size: 13px; }
 .col-score { width: 90px; text-align: center; }
@@ -799,6 +802,7 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
   body { padding: 10px; font-size: 13px; }
   #results-table { font-size: 12px; }
   #results-table th, #results-table td { padding: 6px 8px; }
+  .col-type { width: 60px; }
   .col-skill { width: 100px; }
 }
 """
@@ -1393,8 +1397,45 @@ def _rating_for_score(score):
 #  pytest-html hooks
 # ═══════════════════════════════════════════════════════════════
 
+def _format_eval_score_cell(report):
+    """从 report 中提取评测分数，返回 (score, score_html)。"""
+    score = getattr(report, '_eval_score', None)
+    dim_scores = getattr(report, '_eval_dim_scores', None)
+    if score is None:
+        # Fallback for xdist: _eval_score not serialized between workers
+        for key, val in getattr(report, 'user_properties', []) or []:
+            if key == 'eval_score':
+                score = val
+            elif key == 'eval_dim_scores':
+                dim_scores = json.loads(val)
+    if score is not None:
+        if score >= 80:
+            score_cls = "score-high"
+        elif score >= 60:
+            score_cls = "score-mid"
+        else:
+            score_cls = "score-low"
+        tooltip = _format_dimension_label(dim_scores).lstrip(" | ")
+        score_html = (
+            f'<span class="score-badge {score_cls}"'
+            f' title="{html_mod.escape(tooltip)}"'
+            f'>{score}</span>'
+        )
+    else:
+        score_html = f'<span class="score-badge score-na">&mdash;</span>'
+    return score, score_html
+
+
+def _format_rating_cell(score):
+    """根据分数生成质量评级 HTML。"""
+    rating_label, rating_cls = _rating_for_score(score)
+    if rating_label:
+        return f'<span class="rating-badge {rating_cls}">{rating_label}</span>'
+    return f'<span class="rating-badge rating-na">&mdash;</span>'
+
+
 def pytest_html_report_title(report):
-    report.title = "Skills Test Report"
+    report.title = "Skills & Teams Test Report"
 
 
 def pytest_html_results_summary(prefix, summary, postfix, session):
@@ -1402,10 +1443,11 @@ def pytest_html_results_summary(prefix, summary, postfix, session):
 
 
 def pytest_html_results_table_header(cells):
-    cells.insert(1, '<th class="sortable" data-column-type="skill">Skill</th>')
-    cells.insert(2, '<th>描述</th>')
-    cells.insert(3, '<th>评测得分</th>')
-    cells.insert(4, '<th>质量评级</th>')
+    cells.insert(1, '<th>类型</th>')
+    cells.insert(2, '<th class="sortable" data-column-type="skill">名称</th>')
+    cells.insert(3, '<th>描述</th>')
+    cells.insert(4, '<th>评测得分</th>')
+    cells.insert(5, '<th>质量评级</th>')
 
 
 def pytest_html_results_table_row(report, cells):
@@ -1420,50 +1462,38 @@ def pytest_html_results_table_row(report, cells):
             f'{html_mod.escape(result_text)}</span></td>'
         )
 
-    # Skill 列 — 插入在 Result 之后、Test 之前
+    # 类型列 — 根据 nodeid 判断是 Skill 还是 Team
+    if 'test_team_evals' in report.nodeid:
+        target_type = 'Team'
+    elif 'test_skill_evals' in report.nodeid:
+        target_type = 'Skill'
+    else:
+        target_type = '—'
+    cells.insert(1, f'<td class="col-type">{target_type}</td>')
+
+    # 名称列 — 插入在类型之后、Test 之前
     skill_name = _extract_skill_name(report.nodeid)
-    cells.insert(1, f'<td class="col-skill">{html_mod.escape(skill_name)}</td>')
+    cells.insert(2, f'<td class="col-skill">{html_mod.escape(skill_name)}</td>')
 
-    # 描述列 — 插入在 Skill 之后、Test 之前
+    # 描述列 — 插入在名称之后、Test 之前
     desc = _get_test_description(report.nodeid)
-    cells.insert(2, f'<td class="col-description">{html_mod.escape(desc)}</td>')
+    cells.insert(3, f'<td class="col-description">{html_mod.escape(desc)}</td>')
 
-    # 评测得分列 — 插入在描述之后、Test 之前
-    score = getattr(report, '_eval_score', None)
-    dim_scores = getattr(report, '_eval_dim_scores', None)
-    if score is None:
-        # Fallback for xdist: _eval_score is a custom attr not serialized
-        # between worker and master, but user_properties IS transported.
-        for key, val in getattr(report, 'user_properties', []) or []:
-            if key == 'eval_score':
-                score = val
-            elif key == 'eval_dim_scores':
-                dim_scores = json.loads(val)
-    if score is not None:
-        if score >= 80:
-            score_cls = "score-high"
-        elif score >= 60:
-            score_cls = "score-mid"
-        else:
-            score_cls = "score-low"
-        # 构建 tooltip 展示各维度分数详情
-        tooltip = _format_dimension_label(dim_scores).lstrip(" | ")
-        score_html = (
-            f'<span class="score-badge {score_cls}"'
-            f' title="{html_mod.escape(tooltip)}"'
-            f'>{score}</span>'
+    # 评测得分列 + 质量评级列
+    score, score_html = _format_eval_score_cell(report)
+    rating_html = _format_rating_cell(score)
+    cells.insert(4, f'<td class="col-score">{score_html}</td>')
+    cells.insert(5, f'<td class="col-rating">{rating_html}</td>')
+
+    # Test 列简化 — 提取 nodeid 中的参数部分，去掉文件名和函数名前缀
+    # 原格式: test_skill_evals.py::test_eval_case[ascendc-env-check::eval_5]
+    # 简化后: ascendc-env-check::eval_5
+    if len(cells) > 6:
+        cells[6] = re.sub(
+            r'>[^<]+\[([^\]]+)\]<',
+            r'>\1<',
+            cells[6]
         )
-    else:
-        score_html = f'<span class="score-badge score-na">&mdash;</span>'
-    cells.insert(3, f'<td class="col-score">{score_html}</td>')
-
-    # 质量评级列 — 插入在评测得分之后、Test 之前 (index 4)
-    rating_label, rating_cls = _rating_for_score(score)
-    if rating_label:
-        rating_html = f'<span class="rating-badge {rating_cls}">{rating_label}</span>'
-    else:
-        rating_html = f'<span class="rating-badge rating-na">&mdash;</span>'
-    cells.insert(4, f'<td class="col-rating">{rating_html}</td>')
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -1519,6 +1549,21 @@ def pytest_runtest_logreport(report):
 # ═══════════════════════════════════════════════════════════════
 #  Sandbox isolation fixtures
 # ═══════════════════════════════════════════════════════════════
+
+def _platform_matches(ascend_platforms, eval_item):
+    """检查 eval 用例是否匹配指定的 Ascend 平台。
+
+    与 evals_parser 中 case 侧的 .upper() 一致做大小写归一化。
+    返回 True 表示匹配（应保留用例），False 表示不匹配（应跳过）。
+    """
+    if not ascend_platforms:
+        return True  # 未指定平台过滤 → 保留所有用例
+    requested = [p.upper() for p in ascend_platforms]
+    case_platforms = eval_item.get("ascend_platforms", [])
+    if not case_platforms:
+        return False  # 未配置平台 → 跳过（不匹配任何平台）
+    return any(p in requested for p in case_platforms)
+
 
 @pytest.fixture(scope="function")
 def sandbox_manager() -> 'SandboxManager':

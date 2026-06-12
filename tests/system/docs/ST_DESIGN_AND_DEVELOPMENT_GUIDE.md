@@ -125,8 +125,7 @@ tests/system/
     ├─ 步骤4：保存结果
     │   ├─ results/basic_validation.html               # Skill Phase 1 报告
     │   ├─ results/team_basic_validation.html          # Team Phase 1 报告
-    │   ├─ results/evals_validation_<ts>.html          # Skill Phase 2 统一报告（文件名含北京时间戳）
-    │   ├─ results/team_evals_validation_<ts>.html     # Team Phase 2 统一报告（文件名含北京时间戳）
+    ├─ results/ST_validation_report_<ts>.html     # Skill+Team 统一报告（文件名含北京时间戳，类型列区分）
     │   └─ results/<name>_<timestamp>.json             # 结构化结果
     │
     └─ 返回：0（全部通过）/ 1（存在失败）
@@ -290,7 +289,8 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 | `Max Tokens` | Token 消耗硬上限，超过则测试失败 |
 | `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。Phase 2 执行时自动从 session 导出数据检测模型名称并匹配对应预算。可通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定模型 |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 名称列表。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 同时可用时仍能正确选择目标 skill。示例: `cann-env-setup;ascendc-task-focus;npu-arch` |
-| `Disabled` | 设为 `true` 则跳过该用例的执行（Phase 2 中显示为 SKIPPED）。适用于用例尚未调试完成的场景，不影响 Phase 1 静态校验。默认不启用。有效值：`true`、`yes`、`1` |
+| `Ascend Platform` | 用例适用的昇腾平台，分号分隔可多选，如 `A2;A5`。配合 `--ascend-platform` 参数按平台过滤。**未配置此字段的用例在任何平台下均不执行** |
+| `Disabled` | 设为 `true` 则跳过该用例的执行（Phase 2 中显示为 SKIPPED）|
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。适用于需要更长执行时间的复杂场景，如 `Timeout: 900` |
 | `Truncate Length` | AI 回复传递给评审 Agent 时截断长度（字符数）。默认 30000。当 AI 回复较长时（如包含大段代码），评审 Agent 可能因回复截断看不到完整内容而误判。可按需增大，如 `Truncate Length: 60000` |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |

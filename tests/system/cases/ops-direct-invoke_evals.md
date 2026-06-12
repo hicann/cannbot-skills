@@ -2,13 +2,13 @@
 team_name: ops-direct-invoke
 eval_mode: text
 ---
-
 # Case 1: 基本算子开发流程问答
 
 ## Config
 - Max Tokens: 200000
 - Timeout: 900
 - Truncate Length: 50000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -36,6 +36,7 @@ eval_mode: text
 - Max Tokens: 300000
 - Timeout: 2400
 - Disabled: true
+- Ascend Platform: A2
 
 ## Prompt
 

@@ -1,13 +1,13 @@
 ---
 skill_name: cann-env-setup
 ---
-
 # Case 1: 检查NPU驱动安装命令
 
 ## Config
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -29,6 +29,7 @@ skill_name: cann-env-setup
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -51,6 +52,7 @@ skill_name: cann-env-setup
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -70,6 +72,7 @@ CANN安装完成后，如何验证安装是否成功？
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -91,6 +94,7 @@ CANN安装完成后，如何验证安装是否成功？
 - Max Tokens: 120000
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -112,6 +116,7 @@ CANN安装完成后，如何验证安装是否成功？
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -135,6 +140,7 @@ CANN安装完成后，如何验证安装是否成功？
 - Max Tokens (deepseek-v4-flash): 140000
 - Max Tokens (glm-5): 130000
 - Distractor skills: ascendc-task-focus;npu-arch;ascendc-docs-search;ascendc-runtime-debug
+- Ascend Platform: A2
 
 ## Prompt
 

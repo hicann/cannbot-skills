@@ -2,13 +2,13 @@
 skill_name: ascendc-whitebox-design
 eval_mode: text
 ---
-
 # Case 1: 六步工作流概述
 
 ## Config
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -48,6 +48,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -83,6 +84,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -118,6 +120,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -151,6 +154,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -186,6 +190,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -218,6 +223,7 @@ eval_mode: text
 ## Config
 - Max Tokens: 200000
 - Distractor skills: ascendc-ut-develop;ascendc-st-design;ascendc-code-review;ascendc-api-best-practices
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -245,6 +251,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -268,6 +275,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -294,6 +302,7 @@ eval_mode: text
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
 - Max Tokens (glm-5): 220000
+- Ascend Platform: A2
 
 ## Prompt
 

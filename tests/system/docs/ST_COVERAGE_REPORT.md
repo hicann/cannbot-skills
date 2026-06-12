@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **5 个 Skill + 1 个 Team**，共 35 个评测用例（24 启用 / 11 禁用，截止 2026-06-06）。
+当前 ST 框架覆盖 **11 个 Skill + 1 个 Team**，共 **92 个评测用例**（89 启用 / 3 禁用，截止 2026-06-12）。
 
 ## 1. 五维看护说明
 
@@ -18,21 +18,31 @@
 
 | Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |-------|:-------:|:-------:|:--------:|:----------:|:----------:|
+| ascendc-direct-invoke-to-registry-invoke | √ | √ | √ | √ | √ |
+| ascendc-docs-gen | √ | √ | √ | √ | √ |
 | ascendc-env-check | √ | | √ | √ | √ |
+| ascendc-registry-invoke-template | √ | √ | √ | | √ |
 | ascendc-task-focus | | | √ | √ | √ |
-| cann-env-setup | | | √ | | √ |
-| gitcode-issue-gen | | | √ | | |
-| pypto-op-design | √ | | √ | √ | √ |
+| ascendc-ut-develop | √ | √ | √ | | √ |
+| ascendc-whitebox-design | √ | | √ | √ | √ |
+| cann-env-setup | √ | | √ | | √ |
+| gitcode-issue-gen | | | √ | | √ |
+| npu-arch | √ | | √ | | √ |
+| pypto-op-design | √ | √ | √ | √ | √ |
 
 ## 3. Team 覆盖率
 
 | Team | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |------|:-------:|:-------:|:--------:|:----------:|:----------:|
-| ops-direct-invoke | | | √ | √ | √ |
+| ops-direct-invoke | | | | | √ |
 
-## 4. 更新指南
+## 4. 平台覆盖
+
+所有 92 个用例已配置 `Ascend Platform: A2`，支持 `--ascend-platform A2` 在 A2 服务器上执行。
+
+## 5. 更新指南
 
 新增 skill 或 team 的 ST 用例后，同步更新本文档：
 
 1. 在 §2/§3 的表格中追加新行（或更新已有行的维度标记）
-2. 更新 §1 开头的统计数据（用例数、日期）
+2. 更新 §1 开头的统计数据（用例数、日期、平台信息）

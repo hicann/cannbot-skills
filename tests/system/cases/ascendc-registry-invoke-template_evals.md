@@ -2,13 +2,13 @@
 skill_name: ascendc-registry-invoke-template
 eval_mode: text
 ---
-
 # Case 1: 标准工程目录结构与开发流程
 
 ## Config
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -39,6 +39,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -68,6 +69,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -96,6 +98,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -125,6 +128,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -154,6 +158,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -183,6 +188,7 @@ eval_mode: text
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
 - Max Tokens (glm-5): 160000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -209,6 +215,7 @@ eval_mode: text
 ## Config
 - Max Tokens: 150000
 - Distractor skills: ascendc-direct-invoke-template;ascendc-direct-invoke-to-registry-invoke;ascendc-tiling-design;ascendc-api-best-practices
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -237,6 +244,7 @@ eval_mode: text
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
@@ -259,6 +267,7 @@ eval_mode: text
 - Max Tokens: 100000
 - Max Tokens (deepseek-v4-flash): 120000
 - Max Tokens (glm-5): 110000
+- Ascend Platform: A2
 
 ## Prompt
 
