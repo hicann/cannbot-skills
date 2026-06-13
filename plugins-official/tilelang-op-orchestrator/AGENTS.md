@@ -184,7 +184,7 @@ Subagent 默认假设环境已通过预检，不重复 env-check。若 Subagent 
 |------|-------------|-----------------|
 | 算子名称 | 用户消息中含明确算子名（如 softmax、layer_norm）；或可从功能描述无歧义推断 | "请告诉我算子名称（用作目录名和函数名，如 `softmax`）" |
 | 数学公式 / 计算语义 | 用户给出公式 / 标准 API 名（如"参考 PyTorch 的 F.softmax"）；标准算子可由你查知识库 | "请给出算子的数学公式或参考实现（如 `softmax(x)=exp(x)/sum(exp(x))`，或 `参考 torch.nn.functional.softmax`）" |
-| 输入张量规格 | **shape + dtype 都明确**（shape 可含动态维度 `B`、`N` 等符号，但需明确哪些动态） | "请告诉我输入张量的 shape 和 dtype（如 `[B, N] float16`，其中 B 是动态、N 是静态）" |
+| 输入张量规格 | **shape + dtype 都明确**（shape 可含动态维度 `B`、`N` 等符号，但需明确哪些动态）。该 shape 作为 L0 代表性规则 shape；更全面的不规则/异常/边界覆盖由 Stage 1 的 `tilelang-op-test-design`（L0 计划）与 Stage 2 的扩展（L1/L2/Boundary）自动产生，无需用户穷举 | "请告诉我输入张量的 shape 和 dtype（如 `[B, N] float16`，其中 B 是动态、N 是静态）" |
 | 输出张量规格 | shape + dtype 都明确；若与输入一致可允许"同输入"作为回答 | "请告诉我输出张量的 shape 和 dtype（与输入相同时回答`同输入`即可）" |
 | **编程模式偏好** ⭐ | 用户明确写 `Developer` / `Expert` / `混合` 三者之一 | "请选择编程模式：Developer（自动化）/ Expert（手动控制 L1/UB/L0）/ 混合（关键路径用 Expert）。**这条不能默认填，必须由你选择**" |
 
@@ -234,7 +234,7 @@ op_requirements:
 ```text
 custom/{op}/
 ├── DESIGN.md                     # Stage 1 产物
-├── example_{op}.py               # Stage 2 产物（kernel + 内嵌 golden + 用户指定 shape 的 test + main 块）
+├── example_{op}.py               # Stage 2 产物（kernel + 内嵌 golden + 分层测试套件 L0/L1/L2/Boundary + main 块）
 ├── README.md                     # Stage 2 产物（可选）
 ├── perf_tuning/                  # Stage 3 产物目录
 ├── history_version/              # Stage 2 精度调试备份 + Stage 1 设计回退备份
@@ -245,8 +245,8 @@ custom/{op}/
 
 | 工件 | Owner | 主要消费者 | 消费者需要的信息 |
 |------|-------|------------|-----------------|
-| `DESIGN.md` | Stage 1 | Stage 2（含精度调试） | 算子名、计算语义、I/O 规格、编程模式、API 映射、tiling 策略、loop 结构、内存层级、技术约束检测结论、精度容忍度 |
-| `example_{op}.py` | Stage 2/3 | Stage 2/3 | `@tilelang.jit` kernel + 内嵌 PyTorch golden + **用户在 DESIGN.md 指定的 shape** 的 test 用例 + main 入口（含三态标记输出） |
+| `DESIGN.md` | Stage 1 | Stage 2（含精度调试） | 算子名、计算语义、I/O 规格、编程模式、API 映射、tiling 策略、loop 结构、内存层级、技术约束检测结论、精度容忍度、**L0 门槛测试计划** |
+| `example_{op}.py` | Stage 2/3 | Stage 2/3 | `@tilelang.jit` kernel + 内嵌 PyTorch golden + **分层测试套件**（L0 按 DESIGN.md 的 L0 计划落地；L1/L2/Boundary 在 L0 通过后由 `tilelang-op-test-design` 场景 B 扩展）+ main 入口（含分层标记输出） |
 | `README.md` | Stage 2 | 用户 | 实现说明 |
 | `perf_tuning/` | Stage 3 | 用户 | 性能优化日志、对比数据、最终版本 |
 | `history_version/` | Stage 1/2 | Orchestrator | 设计回退前 design 备份、精度调试前 impl 备份 |
@@ -277,17 +277,21 @@ Golden 函数直接写在 `example_{op}.py` 内（PyTorch 参考实现），与 
 
 由 `@tilelang-op-analyst` 调度 `tilelang-op-design` skill 完成需求理解 + 设计方案：skill 内部执行技术约束检测（三维 Kernel、threads、动态边界、L0C 容量、GEMM 非整除等）+ 搜索 `examples/` 同类实现。最终产物：完整的 `DESIGN.md`（10+ 章节，参考 `tilelang-op-design` 模板）。
 
+此外 analyst 调用 `tilelang-op-test-design`（场景 A）为算子生成 **L0 门槛测试计划**（具体规则 shape / dtype / golden 草案 / 按算子类别的精度标准），写入 DESIGN.md 验证方案章节。**Stage 1 只生成 L0**；L1（功能，含不规则 shape）/ L2（异常）/ Boundary（特殊值）留待 Stage 2 在 L0 通过后调 `tilelang-op-test-design`（场景 B）扩展。
+
 ### Stage 2 调度模型与三态路由
 
 每次调用 `@tilelang-op-developer` = 1 次 attempt；Developer 不在单次调度内自循环。调度的 mode 与 Developer 返回的三态对应路由：
 
 | Developer 返回 | mode（下次调度时） | 路由 |
 |---------------|------------------|------|
-| `[PRECISION_PASS]` | — | `complete_stage(2)` → **二次校验精度**（重新跑精度测试确认真实性）→ 询问用户是否需要性能调优（见「Stage 3 用户确认」） |
-| `[PRECISION_FAIL]` | `precision_fix` | Stage 2 内重试。把失败信息（max_diff、失败用例 shape）作为 `last_failure_summary` 传入。**强制要求 Developer 先备份当前 impl 到 `history_version/{op}_impl_s2_attempt{N}.py` 再做修改** |
+| `[PRECISION_PASS]` | — | `complete_stage(2)` → **二次校验精度**（重新跑全量 `--level all` 确认真实性）→ 询问用户是否需要性能调优（见「Stage 3 用户确认」）。此时 Developer 已在 L0 通过后扩展并跑过 L1/L2/Boundary 全量；L2/Boundary 告警仅记录不阻塞 |
+| `[PRECISION_FAIL]` | `precision_fix` | Stage 2 内重试（L0 或 L1 未达标）。把失败信息（max_diff、失败用例 shape、层级）作为 `last_failure_summary` 传入。**强制要求 Developer 先备份当前 impl 到 `history_version/{op}_impl_s2_attempt{N}.py` 再做修改** |
 | `[DESIGN_ERROR]` | — | 触发设计回退流程（不计入 retry_count） |
 | 无标记且 exit code ≠ 0 | `retry_impl` | Stage 2 内重试，将 stderr 摘要作为 `last_failure_summary` 传入 |
-| 首次进入 Stage 2 | `first_impl` | 调 `tilelang-op-develop` 从零生成代码，跑首跑测试 |
+| 首次进入 Stage 2 | `first_impl` | 调 `tilelang-op-develop` 从零生成 kernel + L0 用例，先跑 L0 |
+
+> **分层测试**：Stage 2 每次 attempt 先只跑 L0 做精度收敛；L0 通过后 Developer 调用 `tilelang-op-test-design`（场景 B）扩展 L1/L2/Boundary 并跑全量。**L0/L1 失败**才算精度未达标（走 `precision_fix`）；**L2（异常）/ Boundary（特殊值）失败仅记录到 `debug_log.md` 与覆盖率报告，不阻塞 `[PRECISION_PASS]`**（可能是该算子本就不支持的输入）。
 
 调度规则：
 - 累计 attempt 上限 **5 次**：因运行失败超限 → `BLOCKED_IMPL`；因精度失败超限 → `BLOCKED_ACCURACY`。
@@ -355,8 +359,8 @@ Subagent 在 Stage 2 输出中明确返回 `[DESIGN_ERROR]` 标记，并附原�
 
 | Stage | 必需工件 | 门禁校验标准 | 执行失败类型 | 失败路由 |
 |-------|---------|-------------|---------|---------|
-| 1 | 用户需求 | `DESIGN.md` 含算子名、I/O 规格、编程模式、API 映射、tiling 策略、内存层级、同步策略、验证方案、技术约束检测结论 | 必须字段缺失 / 用户中途取消 | 重试 Stage 1 |
-| 2 | `DESIGN.md` | 真实首跑完成三态判定（PRECISION_PASS 才视为门禁通过）| 编译/运行/精度失败 / 设计错误 | 分类路由（见上「Stage 2 运行失败子类型路由」） |
+| 1 | 用户需求 | `DESIGN.md` 含算子名、I/O 规格、编程模式、API 映射、tiling 策略、内存层级、同步策略、验证方案（含 **L0 门槛测试计划**）、技术约束检测结论 | 必须字段缺失 / 用户中途取消 | 重试 Stage 1 |
+| 2 | `DESIGN.md`（含 L0 计划）| 真实跑测完成三态判定，且 **L0/L1 全过**（PRECISION_PASS）才视为门禁通过；L2/Boundary 告警不影响门禁 | 编译/运行/精度失败 / 设计错误 | 分类路由（见上「Stage 2 运行失败子类型路由」） |
 | 3 | `example_{op}.py`（精度通过） + 用户调优信息 | 单轮性能迭代完成 | 精度退化 / 性能下降 | 回滚 |
 
 ### 门禁失败处理流程（适用于所有 Stage）
@@ -503,10 +507,14 @@ Stage 2 返回 `[PRECISION_PASS]` 后，你**必须**先向用户说明当前状
 ## 开发结果
 - 算子: {op}    state: SUCCESS / BLOCKED_*    design_revisions: N
 - design: custom/{op}/DESIGN.md
-- kernel: custom/{op}/example_{op}.py（含 kernel + golden + test 用例）
+- kernel: custom/{op}/example_{op}.py（含 kernel + golden + 分层测试套件 L0/L1/L2/Boundary）
 
 ## 精度结果
 - status: PASS / FAIL / UNKNOWN    accuracy_fix_count: N
+
+## 测试覆盖
+- L0/L1: <用例数；全部 PASS 才精度通过>
+- L2/Boundary: <用例数 + 告警数（[BOUNDARY_WARN]，仅记录不阻塞）>
 
 ## 性能结果
 - perf_tuning_requested: yes / no
