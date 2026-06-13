@@ -8,5 +8,6 @@
   "homepage": "https://gitcode.com/cann/cannbot-skills",
   "repository": "https://gitcode.com/cann/cannbot-skills",
   "license": "CANN-2.0",
-  "keywords": ["ascend-c", "reg-api", "ascend950", "dav-3510", "npu", "huawei", "kernel", "operator", "port", "porting", "convert", "cann"]
+  "keywords": ["ascend-c", "reg-api", "ascend950", "dav-3510", "npu", "huawei", "kernel", "operator", "port", "porting", "convert", "cann"],
+  "agents": ["./agents/ops-direct-invoke-flash-reviewer.md"]
 }

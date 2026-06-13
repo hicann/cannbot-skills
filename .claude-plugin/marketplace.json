@@ -207,7 +207,7 @@
     {
       "name": "ops-direct-invoke-flash",
       "source": "./plugins-official/ops-direct-invoke-flash",
-      "description": "Ascend C / Ascend950 Reg API Kernel 从零构建 Skill。支持从 CPU 函数、数学公式、代码片段或文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审。",
+      "description": "Ascend C / Ascend950 Reg API Kernel 从零构建 Skill。支持从 CPU 函数、数学公式、代码片段或文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审；首装拉取 asc-devkit / cann-samples 参考仓库（离线可降级）。",
       "version": "1.2.2",
       "author": {
         "name": "CANNBot"
