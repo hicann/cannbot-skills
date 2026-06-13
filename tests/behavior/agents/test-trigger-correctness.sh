@@ -57,6 +57,21 @@ run_behavior_test "ascendc-ops-reviewer" \
     "检视|review|规范|安全|质量|代码|内存|性能|并行|优化" \
     "$TIMEOUT"
 
+run_behavior_test "model-infer-analyzer" \
+    "你是 NPU 推理优化分析专家。给定模型代码和 profiling 数据，你怎么分析架构和并行策略，是否会改模型代码？" \
+    "架构|并行|策略|profiling|只读|不改|不修改" \
+    "$TIMEOUT"
+
+run_behavior_test "model-infer-implementer" \
+    "你是 NPU 推理优化实施专家。方案已确认，你应该怎么推进？" \
+    "实施|改造|实现|调试|修复|验证|代码" \
+    "$TIMEOUT"
+
+run_behavior_test "model-infer-reviewer" \
+    "你是 NPU 推理优化验证专家。改造完成后你怎么验证是否达标，输出什么交给实施工程师？" \
+    "验证|精度|性能|诊断|报告|基线" \
+    "$TIMEOUT"
+
 # =============================================================================
 # Part 2: Negative Tests (Non-Agent Prompts)
 # =============================================================================
