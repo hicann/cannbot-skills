@@ -59,6 +59,7 @@ bash scripts/check_env.sh
 | ASCEND_OPP_PATH | CANN Ops 路径 | 运行时必需 |
 | 自定义算子包 | op_api 库 | 运行自定义算子必需 |
 | CANN 工具 | msprof/cannsim | 可选 |
+| Simulator状态 | 检查必要的模拟器状态 | KirinX90、Kirin9030 等 Kirin 平台开发必需 |
 
 > ⚠️ **注意**：官方环境变量为 `ASCEND_HOME_PATH`，不是 `ASCEND_HOME`。部分旧文档或示例代码可能使用 `ASCEND_HOME`，这是错误用法。
 
@@ -89,6 +90,14 @@ python3 scripts/get_npu_arch.py --raw
 | `scripts/get_npu_arch.py` | 运行时检测当前设备 NPU 架构 |
 
 也可直接调用 `_npu_info.py` Python 脚本获取结构化数据，支持 `--json`（完整 JSON 输出）、`--list`（设备 ID 列表）、`--health`（健康状态）等参数。
+
+## Kirin 平台开发
+
+Kirin 系列芯片（KirinX90、Kirin9030等以 Kirin 开头的平台）是端侧 AI 处理器，当前主要支持使用模拟器 Simulator 的开发方式，需要注意环境检查结果中的 Simulator 支持情况，**如不支持则环境检查结论是不支持 Kirin 平台开发，需要强调并告知用户。**
+
+当前 Kirin 开发使用的 CANN 版本和服务器有差异，Kirin 系列芯片开发，需要安装对应的 mobile-station 版本的 CANN 才有 Kirin 的 Simulator。
+
+详细内容（mobile-station CANN 的安装方法、常见问题）见 [kirin_platform_guide.md](references/kirin_platform_guide.md)
 
 ## 常见问题
 

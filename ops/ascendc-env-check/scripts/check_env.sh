@@ -109,7 +109,7 @@ _find_set_env_sh() {
 _resolve_toolkit_from_env
 
 # 1. 检查 CANN Toolkit 环境
-echo -e "${YELLOW}[1/7] 检查 CANN Toolkit 环境...${NC}"
+echo -e "${YELLOW}[1/8] 检查 CANN Toolkit 环境...${NC}"
 if [ -z "$CANN_TOOLKIT_PATH" ]; then
     echo -e "${RED}✗ 无法定位 CANN Toolkit 目录${NC}"
     echo "  官方配置方法："
@@ -148,7 +148,7 @@ _get_cann_version() {
     fi
 }
 
-echo -e "${YELLOW}[2/7] 检查 CANN 版本...${NC}"
+echo -e "${YELLOW}[2/8] 检查 CANN 版本...${NC}"
 _get_cann_version
 
 if [ -z "$CANN_VERSION" ]; then
@@ -166,7 +166,7 @@ fi
 echo ""
 
 # 3. 检查 CANN Ops 环境（运行态依赖）
-echo -e "${YELLOW}[3/7] 检查 CANN Ops 环境（运行态依赖）...${NC}"
+echo -e "${YELLOW}[3/8] 检查 CANN Ops 环境（运行态依赖）...${NC}"
 if [ -z "$ASCEND_OPP_PATH" ]; then
     echo -e "${YELLOW}⚠ ASCEND_OPP_PATH 未设置${NC}"
     echo "  说明："
@@ -194,7 +194,7 @@ fi
 echo ""
 
 # 4. 检查自定义算子包（可选）
-echo -e "${YELLOW}[4/7] 检查自定义算子包...${NC}"
+echo -e "${YELLOW}[4/8] 检查自定义算子包...${NC}"
 VENDOR_BASE="${ASCEND_OPP_PATH:-$CANN_TOOLKIT_PATH/opp}"
 if [ -z "$CANN_TOOLKIT_PATH" ] && [ -z "$ASCEND_OPP_PATH" ]; then
     echo -e "${YELLOW}⚠ 跳过检查（Toolkit 和 OPP 路径均未设置）${NC}"
@@ -236,8 +236,35 @@ fi
 
 echo ""
 
-# 5. 检查 CANN 工具
-echo -e "${YELLOW}[5/7] 检查 CANN 工具...${NC}"
+# 5. 检查 Simulator 可运行性
+echo -e "${YELLOW}[5/8] 检查 Simulator 可运行性...${NC}"
+KIRIN_PLATFORMS=(Kirin9030 KirinX90)
+
+if [ -d "$ASCEND_HOME_PATH/x86_64-linux/simulator" ]; then
+    _sim_root="$ASCEND_HOME_PATH/x86_64-linux/simulator"
+elif [ -d "$ASCEND_HOME_PATH/aarch64-linux/simulator" ]; then
+    _sim_root="$ASCEND_HOME_PATH/aarch64-linux/simulator"
+else
+    _sim_root=""
+fi
+
+if [ -n "$_sim_root" ]; then
+    for plat in "${KIRIN_PLATFORMS[@]}"; do
+        if [ -f "$_sim_root/$plat/lib/libruntime_camodel.so" ]; then
+            echo -e "${GREEN}✓ $plat: 可运行${NC}"
+        elif [ -d "$_sim_root/$plat" ]; then
+            echo -e "${YELLOW}⚠ $plat: 不可运行（目录存在但缺 libruntime_camodel.so）${NC}"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    done
+else
+    echo -e "${YELLOW}⚠ 未发现 simulator 目录${NC}"
+fi
+
+echo ""
+
+# 6. 检查 CANN 工具
+echo -e "${YELLOW}[6/8] 检查 CANN 工具...${NC}"
 if command -v msprof &> /dev/null; then
     echo -e "${GREEN}✓ msprof 可用${NC}"
 else
@@ -253,8 +280,8 @@ fi
 
 echo ""
 
-# 6. 检查日志目录
-echo -e "${YELLOW}[6/7] 检查日志目录...${NC}"
+# 7. 检查日志目录
+echo -e "${YELLOW}[7/8] 检查日志目录...${NC}"
 LOG_DIR="$HOME/ascend/log/debug/plog"
 if [ -d "$LOG_DIR" ]; then
     log_count=$(ls "$LOG_DIR"/*.log 2>/dev/null | wc -l)
@@ -266,8 +293,8 @@ fi
 
 echo ""
 
-# 7. 检查环境变量配置
-echo -e "${YELLOW}[7/7] 检查调试配置...${NC}"
+# 8. 检查环境变量配置
+echo -e "${YELLOW}[8/8] 检查调试配置...${NC}"
 if [ "$ASCEND_SLOG_PRINT_TO_STDOUT" = "1" ]; then
     echo -e "${GREEN}✓ 日志打屏已开启 (ASCEND_SLOG_PRINT_TO_STDOUT=1)${NC}"
 else

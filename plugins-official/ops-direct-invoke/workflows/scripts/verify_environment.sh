@@ -159,7 +159,7 @@ collect_env_info() {
     echo ""
 
     # 1. 检查环境变量
-    echo "[1/6] 检查环境变量..."
+    echo "[1/7] 检查环境变量..."
     echo "────────────────────────────────────────────────────────────────"
 
     if [ -z "$ASCEND_HOME_PATH" ] && [ -z "$TOOLKIT_PATH" ]; then
@@ -190,13 +190,13 @@ collect_env_info() {
     
     # 2. 检查 CANN 安装
     echo ""
-    echo "[2/6] 检查 CANN 安装..."
+    echo "[2/7] 检查 CANN 安装..."
     echo "────────────────────────────────────────────────────────────────"
     
     if [ -d "$TOOLKIT_PATH" ]; then
         success "CANN Toolkit 目录存在"
         ENV_DATA[cann_dir_exists]="true"
-        
+
         CANN_VERSION=""
         if [ -f "$TOOLKIT_PATH/compiler/version.info" ]; then
             CANN_VERSION=$(grep '^Version=' "$TOOLKIT_PATH/compiler/version.info" | cut -d'=' -f2)
@@ -229,7 +229,7 @@ collect_env_info() {
     
     # 3. 检查编译器
     echo ""
-    echo "[3/6] 检查 Ascend C 编译器..."
+    echo "[3/7] 检查 Ascend C 编译器..."
     echo "────────────────────────────────────────────────────────────────"
     
     ARCH_DIR="${ENV_DATA[arch_dir]:-aarch64-linux}"
@@ -255,7 +255,7 @@ collect_env_info() {
     
     # 4. 检查头文件
     echo ""
-    echo "[4/6] 检查头文件..."
+    echo "[4/7] 检查头文件..."
     echo "────────────────────────────────────────────────────────────────"
     
     HEADER_PATHS=(
@@ -288,7 +288,7 @@ collect_env_info() {
     
     # 5. 检查库文件
     echo ""
-    echo "[5/6] 检查库文件..."
+    echo "[5/7] 检查库文件..."
     echo "────────────────────────────────────────────────────────────────"
     
     LIB_REGISTER="$TOOLKIT_PATH/lib64/libregister.so"
@@ -315,9 +315,43 @@ collect_env_info() {
     
     ENV_DATA[all_libs_exist]="$LIBS_OK"
     
-    # 6. 检查 asc-devkit
+    # 6. 检查 Simulator 可运行性
     echo ""
-    echo "[6/6] 检查 asc-devkit..."
+    echo "[6/7] 检查 Simulator 支持情况..."
+    echo "────────────────────────────────────────────────────────────────"
+
+    KIRIN_PLATFORMS=(Kirin9030 KirinX90)
+    SIM_PLATFORMS_JSON="{}"
+
+    if [ -d "$ASCEND_HOME_PATH/x86_64-linux/simulator" ]; then
+        _sim_root="$ASCEND_HOME_PATH/x86_64-linux/simulator"
+    elif [ -d "$ASCEND_HOME_PATH/aarch64-linux/simulator" ]; then
+        _sim_root="$ASCEND_HOME_PATH/aarch64-linux/simulator"
+    else
+        _sim_root=""
+    fi
+
+    if [ -n "$_sim_root" ]; then
+        _entries=""
+        for plat in "${KIRIN_PLATFORMS[@]}"; do
+            if [ -f "$_sim_root/$plat/lib/libruntime_camodel.so" ]; then
+                success "$plat: 可运行"
+                _entries+="\"$plat\": true,"
+            elif [ -d "$_sim_root/$plat" ]; then
+                warning "$plat: 不可运行（目录存在但缺 libruntime_camodel.so）"
+                _entries+="\"$plat\": false,"
+            fi
+        done
+        SIM_PLATFORMS_JSON="{${_entries%,}}"
+    else
+        warning "未发现 simulator 目录"
+    fi
+
+    ENV_DATA[simulator_platforms]="$SIM_PLATFORMS_JSON"
+    
+    # 8. 检查 asc-devkit
+    echo ""
+    echo "[7/7] 检查 asc-devkit..."
     echo "────────────────────────────────────────────────────────────────"
     
     # 自动检测 asc-devkit 路径
@@ -432,6 +466,7 @@ generate_json() {
     "toolkit_path": "${ENV_DATA[toolkit_path]}",
     "cann_dir_exists": ${ENV_DATA[cann_dir_exists]},
     "cann_version": "${ENV_DATA[cann_version]}",
+    "simulator_platforms": ${ENV_DATA[simulator_platforms]},
     "arch_dir": "${ENV_DATA[arch_dir]}",
     "arch_dir_exists": ${ENV_DATA[arch_dir_exists]},
     "bisheng_path": "${ENV_DATA[bisheng_path]}",

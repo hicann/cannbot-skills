@@ -13,6 +13,8 @@ description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工�
 |---|---|---|
 | **Vector**（A 分支） | `references/add_custom/` | add、mul、relu、softmax、layernorm 等逐元素/归约算子 |
 | **mxfp8 matmul + eltwise 融合** | `references/matmul_fusion_kernel/` + `references/matmul_fusion_guide.md` | Cube+Vector 融合专用变种；该指南独立自洽，进入后不必再回本页 |
+| **Kirin Vector** (端侧开发) | `references/kirin_add_template/` + `references/kirin_vector_guide.md`  | Kirin SoC（KirinX90/Kirin9030）专用add、mul、relu、softmax、layernorm 等逐元素/归约算子；该指南独立自洽，进入后不必再回本页 |
+
 
 **不支持的场景**：纯 Matmul/Cube（非融合）、其他 Cube+Vector 混合（如 matmul+softmax）不在此覆盖范围。
 
@@ -47,6 +49,10 @@ description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工�
 ### B. mxfp8 matmul + eltwise 融合
 
 见 `references/matmul_fusion_guide.md`（独立自洽）：复制 `references/matmul_fusion_kernel/` 工程后按指南改 Epilogue。
+
+### C. Kirin Vector 算子（Add 分支）
+
+见 `references/kirin_vector_guide.md`（独立自洽）：复制 `references/kirin_add_template/` 工程后按 guide 进行修改。
 
 ## 文件结构（Add 分支）
 
