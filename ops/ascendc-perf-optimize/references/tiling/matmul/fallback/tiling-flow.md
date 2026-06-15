@@ -42,55 +42,80 @@ SWAT 是默认基线，也是 FullLoad 和 StreamK 的推导基础。
 
 ```
 DoOpTiling():
-  ├── _calc_basic_block()              # §3.1 初始分块 + 核利用率调整
-  ├── _optimize_edge_basic_block()     # §3.2 M 方向边缘合并 (SWAT 机制 B)
+  ├── _init_basic_block()              # §3.1 确认基本快解集
+  ├── _choose_basic_block()            # §3.2 筛选基本快解集
   ├── _calc_tail_basic_block()         # §3.3 尾块拆分
   ├── _init_l0c_buffer_mode()          # §3.4 L0C 双缓冲判定
-  ├── _calc_path_specific_l1()         # §3.5 L1 深度 + stepK
+  ├── _calc_path_specific_l1()         # §3.5 确认L1切分
   ├── _calculate_n_buffer_num()        # §3.6 L1 缓冲数 (4 or 2)
   └── _build_tiling_data()             # §3.7 组装 TilingData
 ```
 
-### 3.1 初始分块
+### 3.1 确认基本快解集
 
-确定 Cube 单元一次计算多大的块（baseM × baseN × baseK）。
-
-```
-1. 候选值:
-   baseM = min(Align(M, 16), 256)
-   baseN = min(Align(N, 16), 256)
-   baseK = min(Align(K, 16), L0A容量 / (DB_SIZE × sizeof(dtype) × max(baseM, baseN)))
-```
-
-**核利用率检查**：用 baseM/baseN 算出总块数（mBlockCnt × nBlockCnt）。若总块数 < aicNum，说明分块太粗、核用不满，需要调小 baseM 或 baseN。
+确定 Cube 单元一次计算的解集空间（baseM，baseN，baseK）。
 
 ```
-2. 核利用率检查:
-   mBlockCnt = CeilDiv(M, baseM)
-   nBlockCnt = CeilDiv(N, baseN)
-   totalBlockCnt = mBlockCnt × nBlockCnt
-   若 totalBlockCnt < aicNum → _adjust_basic_block() 重平衡
+1. 候选值范围:
+   baseM = [16, Align(M, 16)]
+   baseN = [16, Align(N, 16)]
+   baseK = [16, Align(K, 16)]
 ```
 
-**_adjust_basic_block()**：优先调 tile 数较少的方向（更需要拆分），保持 baseM/baseN ≤ 2:1。调整后重算 baseK。
-
-### 3.2 边缘合并（SWAT 机制 B）
-
-M 不能被 baseM 整除时，末尾有不完整的"尾块"。边缘合并把最后几个完整块与尾块合并，重新划分为大小均匀的块，避免超小尾块导致 Cube 利用率骤降。
+```
+2. 基本快约束:
+   baseM、baseN要求16对齐
+   baseK要求16对齐（MXFP8/MXFP4 场景要求 MXFP_DIVISOR_SIZE(=64) 对齐）
+   baseM * baseN * sizeof(float) <= L0cSize
+   baseK >= min(32, Align(K, 16))
+   max(baseM, baseN) * baseK * sizeof(dtype) * DB_SIZE(2) <= L0aSize
+   baseN * DB_SIZE(2) * sizeof(float) <= biasTableSize // 输入带bias的时候触发
 
 ```
-当 M % baseM > 0 且 K 内轴满足 cacheline 对齐时:
 
-滑动窗口 (WINDOW_LEN=4) 搜索最优合并方案
-若干 baseM 块与尾块合并为统一大小 mTailMain
-目标: 最小化窗口总计算量
-
-输出: mBaseTailSplitCnt, mTailMain, nBaseTailSplitCnt, nTailMain
 ```
+3. 亲和约束:
+   左矩阵转置时，要求baseM * sizeof(dtype)是128Bit对齐
+   右矩阵不转置时，要求baseN * sizeof(dtype)是128Bit对齐
+```
+
+### 3.2 基本快筛选解集
+
+**核心 tradeoff**：baseM/baseN 越大 → 计算访存系数越小（搬运少），但 tile 总数减少 → 负载均衡率可能下降。大 base 块利于算力发挥，小 base 块利于多核负载均衡，需量化取舍。
+
+用两个指标描述基本块能力：
+
+```
+计算访存系数：(1 / baseM) + (1 / baseN)
+效果：系数越小，搬运量越小，越容易发挥算力；
+```
+
+```
+负载均衡率：单核平均计算量 / 单核计算最大量
+单核平均计算量 = m * k * n / aicNum
+单核最大计算量 = Ceil(totalBlockCnt / aicNum) * baseM * baseN
+totalBlockCnt = Ceil(m / baseM) * Ceil(n / baseN)
+效果：结果越接近1，多核负载均衡越好，反之则越差
+```
+
+上述指标综合考虑获取最优的baseM，baseN，并在用满L0A/L0B的情况下确认baseK；
+
+```
+筛选策略：
+   将两个指标归一为 综合评分 = 计算访存系数 / 负载均衡率
+   综合评分越小 → 越优（计算访存比好 且 负载均衡）
+
+   枚举范围：
+   baseM ∈ [16, Align(M, 16)]，步长16
+   baseN ∈ [16, Align(N, 16)]，步长16
+   满足 §3.1 的 L0A/L0B/L0C 容量约束
+```
+
+> **输入下游**：本节筛选结果作为 §3.3-§3.6 的**唯一输入**。不可跳过本节直接进入尾块拆分或 L1 切分。
 
 ### 3.3 尾块拆分
 
-边缘合并后仍可能存在尾块。将大尾块切成多个小块，分给不同核并行处理。交替增长 mTailTile 和 nTailTile，优先拆尾块更大的方向。
+最后一轮仍可能存在尾块。将大尾块切成多个小块，分给不同核并行处理。交替增长 mTailTile 和 nTailTile，优先拆尾块更大的方向。
 
 ```
 当 tailBlockCnt > 0:
@@ -107,35 +132,49 @@ L0C 是 Cube 累加器输出缓冲区。双缓冲（=2）允许一份被 Cube �
 dbL0c = (baseM × baseN × sizeof(FP32) × DB_SIZE ≤ l0cSize) ? 2 : 1
 ```
 
-### 3.5 L1 深度 + stepK
+### 3.5 确认L1切分
 
 决定 K 轴方向分段策略。A 和 B 的容量分配决定每次能载入多长的 K 段。
 
 ```
-1. 每块占用:
-   base_a_size = baseM × baseK × sizeof(dtype)
-   base_b_size = baseN × baseK × sizeof(dtype)
+1. 每块占用计算:
+   kl1 = stepK * baseK
+   ml1 = baseM
+   nl1 = baseN
+   al1Size = ml1 * kl1 * sizeof(dtype);
+   bl1Size = nl1 * kl1 * sizeof(dtype);
+   biasSize = baseN * sizeof(dtype); // 输入带bias的时候触发，否则为0
+   // MXFP8/MXFP4 场景额外计算 scale 缓冲区:
+   scaleElemPerK = Align(CeilDiv(baseK, 32), 16);  // 每行 scale 元素数，对齐到 16
+   scaleASize = scaleElemPerK * baseM;             // A 侧 scale 缓冲区 (fp8_e8m0)
+   scaleBSize = scaleElemPerK * baseN;             // B 侧 scale 缓冲区 (fp8_e8m0)
 
-2. 对称深度搜索（倍增搜索）:
-   depth_init = _get_depth_a1b1(l1Size, base_l1_size)
-   从 depth=1 逐次翻倍，直到 A+B 超过 L1 容量
+2. buffer约束:
+   标准场景: (al1Size + bl1Size + biasSize) * DB_SIZE <= l1Size
+   MXFP8/MXFP4: (al1Size + bl1Size + scaleASize + scaleBSize + biasSize) * DB_SIZE <= l1Size
 
-3. stepK:
-   stepKa = depthA1 / DB_SIZE
-   stepKb = depthB1 / DB_SIZE
-   互为倍数对齐; 上限 4; 不超过 K/baseK
-   stepK ∈ {1, 2, 4}（2 的幂约束）
+3. 亲和约束:
+   当左矩阵不转置或者右矩阵转置时，要求kl1*sizeof(dtype)是256B对齐
+   (al1Size + bl1Size)*sizeof(dtype)要超过48KB
+   stepK的最大值为8
 ```
 
-> **2 的幂约束**：`_get_depth_a1b1()` 倍增搜索使 depth 只能为 2 的幂，stepK = depth / 2。
+通过上述约束确认stepK，且在满足上述约束情况下，尽量选择小的stepK，令MMAD提前启动。
+Tiling调优时可给出多组候选stepK。
 
 ### 3.6 L1 缓冲数
 
 nBufferNum 控制 L1 中 pingpong 缓冲数量。4 缓冲比 2 缓冲能更好地隐藏 MTE2 搬移延迟。
 
 ```
-kl1 = min(stepKa, stepKb) × baseK
-used_4buf = baseN × kl1 × 4 + baseM × kl1 × 4
+used_4buf = baseN × kl1 × 4 + baseM × kl1 × 4 + biasSize
+nBufferNum = (used_4buf < l1Size) ? 4 : 2
+```
+
+MXFP8/MXFP4 场景 scale 使用独立 2-buffer pingpong，需计入：
+
+```
+used_4buf = baseN × kl1 × 4 + baseM × kl1 × 4 + scaleASize × 2 + scaleBSize × 2 + biasSize
 nBufferNum = (used_4buf < l1Size) ? 4 : 2
 ```
 
@@ -146,19 +185,7 @@ nBufferNum = (used_4buf < l1Size) ? 4 : 2
 ```
 usedCoreNum = (totalBlockCnt > 1 || tailBlockCnt == 0) ? aicNum
             : tailBlockCnt × mTailTile × nTailTile
-kL1 = baseK × min(stepKa, stepKb)
-```
-
-### 3.8 SWAT 机制 A: BLOCK_TABLE 负载均衡（a16w16 专属）
-
-当默认 baseM/baseN 导致各核任务量不均衡时（均衡度 < 0.88），触发查表重选：
-
-```
-触发条件:
-  singleBlockNum = mBlockCnt × nBlockCnt / aicNum ∈ [1.0, 10.0]
-  defaultBalance = CalcMultiCoreBalance(M, N, aicNum, baseM, baseN) < 0.88
-
-若触发 → 在 BLOCK_TABLE 中查找预制评分更高的 (baseM, baseN) 组合
+kL1 = baseK × stepK
 ```
 
 ---
