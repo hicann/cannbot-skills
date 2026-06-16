@@ -32,7 +32,7 @@
 | 3.1 精度验收 | `ascendc-ops-tester` | 读取日志继续 |
 | 3.2 性能验收 | `ascendc-ops-developer` | 读取日志继续 |
 | 4.1 文档与示例 | `general` | 读取日志继续 |
-| 4.2 代码检视 | `ascendc-ops-reviewer` | 读取日志继续 |
+| 4.2 代码检视 | 主 Agent 加载 skill | 使用 skill 工具加载 /ascendc-code-review，由 skill 接管检视流程 |
 | 4.3 开发总结 | `general` | 读取日志继续 |
 
 ## 开发日志记录原则
@@ -1004,27 +1004,36 @@ Task 调用参数：
 
 ## 4.2 代码检视
 
+> ⚠️ 本步骤由 `/ascendc-code-review` skill 接管，主 Agent 加载 skill 后按其工作流执行。子 Agent 的派发由 skill 内部编排自行管理。
+> 检视流程的内部编排由 skill 自行管理，详见 SKILL.md 4.2 节。
+
+### 4.2 输入参数
+
 ```
-Task 调用参数：
-{
-  "description": "代码检视",
-  "subagent_type": "ascendc-ops-reviewer",
-  "prompt": "
-执行代码检视任务。
+4.2a 全量代码检视：
+  - 检视文件: operators/{operator_name}/op_kernel/ + op_host/ 下所有 .cpp/.h/.hpp
+  - 报告路径: operators/{operator_name}/docs/{source_file}_review_summary.md
 
-【输入】
-- 算子目录：operators/{operator_name}/
-- 设计文档：operators/{operator_name}/docs/
+4.2b 设计实现一致性检查：
+  - 代码文件: 同 4.2a
+  - 设计文档: operators/{operator_name}/docs/DESIGN.md
+  - 报告路径: operators/{operator_name}/docs/{source_file}_design_consistency_review.md
+```
 
-【输出】
-- 代码检视报告：operators/{operator_name}/docs/review-report.md
-- 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
+### 4.2 验收标准
 
-【验收标准】
-- 检查代码规范、与设计文档一致性、潜在问题和风险点
-- 日志摘要已输出
-  "
-}
+```
+4.2a：全量检视报告已生成，无 HIGH 级别"发现问题"
+4.2b：设计一致性报告已生成，S1-S7 判定无 ❌ 项
+```
+
+### 4.2 检视结果处理规则
+
+```
+├─ 4.2a 无 HIGH + 4.2b 无 ❌ → 进入 CP5
+├─ 4.2a 有 HIGH（仅规范）→ 修复 → 重跑 4.2a + 4.2b
+├─ 4.2a 有 HIGH（逻辑）→ 修复 → 重跑 4.2a + 4.2b → 重跑阶段三
+└─ 4.2b 有 ❌ → 修复 → 重跑 4.2a + 4.2b → 重跑阶段三
 ```
 
 ## 4.3 开发总结

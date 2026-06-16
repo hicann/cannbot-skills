@@ -172,11 +172,12 @@ graph TB
 
 **关键步骤**：
 1. **4.1 文档与示例**：生成算子 README 和调用示例代码
-2. **4.2 代码检视**：检查代码规范、与设计文档一致性、潜在问题和风险点
-3. **⚪ CP5 用户确认**：展示检视报告，如有修改项需确认修改方案
-4. **4.3 开发总结**：更新开发日志，补充完善 aclnnAPI 接口文档
+2. **4.2a 全量代码检视**：加载 `/ascendc-code-review` skill，进入 file-review 工作流
+3. **4.2b 设计实现一致性检查**：加载 `/ascendc-code-review` skill，进入 design-consistency 工作流
+4. **⚪ CP5 用户确认**：展示全量检视报告 + 设计一致性报告，如有修改项需确认修改方案
+5. **4.3 开发总结**：更新开发日志，补充完善 aclnnAPI 接口文档
 
-**说明**：4.1 → 4.2 → 4.3 严格串行，代码检视的输入包含 4.1 生成的文档与示例。
+**说明**：4.1 → 4.2a → 4.2b → CP5 → 4.3 严格串行，代码检视的输入包含 4.1 生成的文档与示例。
 
 </details>
 
@@ -749,11 +750,42 @@ python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir
 
 **进入条件**：4.1 文档与示例完成
 
-**Subagent**：`ascendc-ops-reviewer` - [详细调用参数](resources/task-prompts.md#42-代码检视)
+**执行方式**：主 Agent 使用 `skill` 工具加载 `/ascendc-code-review`，由 skill 接管代码检视流程。skill 的内部编排（包括子 Agent 派发）由 skill 自行管理。
 
-**说明**：代码检视报告放 `docs/`（最终交付物）
+**🚫 禁止**：禁止调度 `ascendc-ops-reviewer` subagent。代码检视流程完全由 `/ascendc-code-review` skill 接管。
 
-**⚪ CP5 用户确认**：向用户展示检视报告，如有修改项需确认修改方案
+### 4.2a 全量代码检视
+
+1. 使用 `skill` 工具加载 `/ascendc-code-review`，传入提示词：**全量检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 路径下的代码**
+2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
+3. 报告输出到 `operators/{operator_name}/docs/{source_file}_review_summary.md`
+
+### 4.2b 设计实现一致性检查
+
+1. 使用 `skill` 工具加载 `/ascendc-code-review`，传入提示词：**参照 `operators/{operator_name}/docs/` 路径下的所有设计文档，检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 代码的设计实现一致性问题**
+2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
+3. 报告输出到 `operators/{operator_name}/docs/{source_file}_design_consistency_review.md`
+
+---
+
+**检视完成后回到主流程**：
+
+4.2a 和 4.2b 的 skill 工作流各自完成后，主 Agent 收回控制权，执行结果判定：
+
+1. Read 全量检视报告，统计 HIGH / MED / LOW 数量
+2. Read 设计一致性报告，检查 S1-S7 判定结果
+3. 按以下规则处理：
+
+```
+├─ 4.2a 无 HIGH + 4.2b 无 ❌ → 进入 ⚪ CP5 用户确认
+├─ 4.2a 有 HIGH（仅代码规范）→ 修复代码 → 重跑 4.2a + 4.2b
+├─ 4.2a 有 HIGH（逻辑问题）→ 修复代码 → 重跑 4.2a + 4.2b → 重跑阶段三精度测试
+└─ 4.2b 有 ❌ → 修复代码 → 重跑 4.2a + 4.2b → 重跑阶段三精度测试
+```
+
+**说明**：检视报告和一致性报告统一放 `docs/`（最终交付物目录）
+
+**⚪ CP5 用户确认**：向用户展示全量检视报告 + 设计一致性报告，如有修改项需确认修改方案
 
 ## 4.3 开发总结
 

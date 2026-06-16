@@ -57,7 +57,7 @@
 - 遇到函数调用，必须查看函数内部逻辑并综合判断
 - 遇到存在风险的结构体或成员变量，必须查看定义和运算过程
 - 利用 code-summarize 的变量溯源结果定位声明位置，但**不能将「来源类型=TilingData」等同于「已校验」**——必须进一步 Grep Tiling 代码确认校验语句是否存在
-- Kernel 代码涉及 API 用法时，必须使用 `/ascendc-docs-search` skill 查阅官方文档，禁止凭记忆或推测
+- Kernel 代码检视时，API 约束以 API 预研报告（若提供）为主要来源；未覆盖的 API 使用 `/ascendc-docs-search` skill 补充查阅。禁止凭记忆或推测
 - 若条例包含专属检视方法或强制要求，必须严格按该条例指引执行
 
 **步骤4 — 证据有效性校验**：
@@ -136,7 +136,7 @@ FAIL/SUSPICIOUS 结果必须附代码片段：
 
 1. 先完整阅读对应的编码规范文件，根据规范检视，其他不统计
 2. 存疑代码块有函数调用行为，必须使用 LSP 或搜索工具深层次分析
-3. Kernel 代码检视前使用 `/ascendc-docs-search` skill 学习核心 API 文档，禁止凭记忆或推测
+3. Kernel 代码检视时，若已提供 API 预研报告，以其为 API 约束的主要来源；若未提供预研报告、或预研报告未覆盖当前涉及的 API，必须使用 `/ascendc-docs-search` skill 查阅官方文档。禁止凭记忆或推测
 4. SIMT kernel 代码检视前查阅 `references/simt-api-analysis.md`
 5. 返回检视结果时，仔细检查风险代码行的行数是否正确
 6. 返回检视结果时，所有风险代码块都应该被引用，不能只展示行数

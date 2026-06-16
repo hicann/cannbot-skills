@@ -11,6 +11,7 @@ workflow 按全局波次规划逐波派发子 Agent。每组使用以下 prompt 
 - 代码侧别：{Kernel侧/Tiling侧/混合}
 - 条款过滤：已按侧别过滤
 - 代码概要：{code_summary_path}
+- API 预研报告：{api_prestudy_path}（仅 Kernel 侧，若存在）
 
 检视 PR diff：{diff_file_path}
 检视文件列表（仅读取以下文件）：{group_file_list}
@@ -21,8 +22,9 @@ workflow 按全局波次规划逐波派发子 Agent。每组使用以下 prompt 
 【执行要求】
 - 第一步加载 ascendc-code-review skill，然后 Read skill 目录下的 `core/methodology.md` 掌握假设检验方法、置信度标准、红线问题和 PR 交叉验证规则
 - 若提供了代码概要，Read 获取本文件组的函数清单和 API 调用索引
+- API 约束信息：若已提供 API 预研报告，以其为主要来源。若预研报告未覆盖当前条款涉及的 API，使用 `/ascendc-docs-search` 补充查阅
 - 对每条分配的条例：若检视条款中已附带行号（references/{file}.md:{line}），从该行号起 Read 到下一个 `^####` 标题为止；否则 Grep `^{条例ID}` 定位起始行号 + 下一标题定位结束行号，Read offset={start} limit={end-start}。**只读该条例章节，禁止 Read 整个规则文档**
-- 若检视条款来自 ascendc-api / ascendc-perf / simt-api-analysis / mc2-specific，必须先使用 `/ascendc-docs-search` skill 查阅对应 API 的最新官方文档
+- 若检视条款来自 ascendc-api / ascendc-perf / simt-api-analysis / mc2-specific 且预研报告未覆盖，使用 `/ascendc-docs-search` 查阅对应 API 的最新官方文档
 - **严格约束**：只读取「检视文件列表」中的文件，不越界读取其他文件组的文件
 - 先 Read diff 中本组文件的变更部分，再按需 Read 完整源码追溯变量来源
 - 大 PR 模式下深度分析（变量溯源、TilingData 值域）需自行按需 grep，summary 不提供

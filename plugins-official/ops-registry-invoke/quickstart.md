@@ -96,7 +96,7 @@ ls .
 
 # OpenCode
 opencode agent list
-# 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-reviewer / ascendc-ops-tester
+# 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-tester
 
 # Trae
 ls .trae/      # TRAE IDE
@@ -178,7 +178,7 @@ operators/add_custom/
 | `ascendc-ops-architect` | 需求分析、方案设计 | 阶段一 |
 | `ascendc-ops-developer` | 算子代码开发、UT 开发 | 阶段二 |
 | `ascendc-ops-tester` | ST 用例开发、测试验收 | 阶段二、阶段三 |
-| `ascendc-ops-reviewer` | 代码检视 | 阶段四 |
+| `ascendc-code-review`（skill） | 全量代码检视 + 设计一致性检查 | 阶段四 |
 | `ascendc-docs-search` | 文档资源索引 | 查找 API 文档和示例 |
 | `ascendc-env-check` | 环境检查 | NPU 设备查询 |
 

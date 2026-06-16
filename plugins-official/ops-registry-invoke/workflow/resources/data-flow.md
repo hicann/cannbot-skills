@@ -32,7 +32,7 @@
 | **第三阶段：验收** | 3.1 精度验收 | - | 执行精度验证 | PyTorch ST + 测试用例 | precision-report.md | `operators/{operator_name}/docs/` |
 | | 3.2 性能验收 | - | 性能分析（可选） | 算子二进制 | performance-report.md | `operators/{operator_name}/docs/` |
 | **第四阶段：上库** | 4.1 文档与示例 | - | 生成文档示例 | 需求+设计+代码 | README.md + examples/ | `operators/{operator_name}/` |
-| | 4.2 代码检视 | - | 代码规范检查 | 算子代码 + 设计文档 | review-report.md | `operators/{operator_name}/docs/` |
+| | 4.2 代码检视 | - | 主 Agent 直接调用 ascendc-code-review skill（file-review + design-consistency） | 算子代码 + 设计文档 | {source_file}_review_summary.md + {source_file}_design_consistency_review.md | `operators/{operator_name}/docs/` |
 | | 4.3 开发总结 | - | 总结输出文档 | 所有文档 | aclnn{OperatorName}.md（更新）+ LOG.md | `operators/{operator_name}/` |
 
 ---
@@ -76,7 +76,8 @@ TEST.md
 | | 最终性能验收报告 | `operators/{operator_name}/docs/performance-report.md` |
 | **第四阶段** | 算子 README | `operators/{operator_name}/README.md` |
 | | 调用示例 | `operators/{operator_name}/examples/` |
-| | 代码检视报告 | `operators/{operator_name}/docs/review-report.md` |
+| | 全量代码检视报告 | `operators/{operator_name}/docs/{source_file}_review_summary.md` |
+| | 设计实现一致性报告 | `operators/{operator_name}/docs/{source_file}_design_consistency_review.md` |
 
 **报告命名规则**：
 - `*-report.md` (小写+连字符) = 最终交付报告，放 `docs/`
@@ -144,7 +145,8 @@ TEST.md
     ├── PLAN.md                            # 迭代计划
     ├── precision-report.md                # 最终精度验收
     ├── performance-report.md              # 最终性能验收（可选）
-    └── review-report.md                   # 代码检视报告
+    ├── {source_file}_review_summary.md     # 全量代码检视报告
+    └── {source_file}_design_consistency_review.md  # 设计实现一致性报告
 ```
 
 ---

@@ -12,7 +12,7 @@
 | 任务 | 阶段 | 执行者 |
 |------|------|--------|
 | 任务0 | 文件分组 + 预扫描 | file-split（子Agent）→ global-pre-scan（子Agent × N 并行） |
-| 任务1 | 摘要 + 分组 | summarize（子Agent × N）∥ clause-grouping（子Agent × 1） |
+| 任务1 | 摘要 + 分组 + API 预研 | summarize（子Agent × N）∥ clause-grouping（子Agent × 1）∥ api-prestudy（子Agent × 1，仅 Kernel 侧） |
 | 任务2 | 负载感知波次检视 | 逐波派发检视子 Agent |
 | 任务3 | 共享文件检视 + 综合研判 | shared 检视（子Agent）→ synthesize（主Agent） |
 | 任务4 | 合并结果 | merge（主Agent） |
@@ -30,13 +30,14 @@
    - 每波 ≤10 Agent，超过 10 组分批
 6. 收集 per-group matched_rules，将任务0 标记为 done
 
-### 阶段1：摘要 + 分组（并行派发）
+### 阶段1：摘要 + 分组 + API 预研（并行派发）
 
 1. 将任务1 标记为 in_progress
-2. 在单个消息中并行派发两类子 Agent：
+2. 在单个消息中并行派发子 Agent：
    - **summarize × N**：对每个 file_group 派发，Read `steps/pr-large-review.code-summarize.md`，每波 ≤10 Agent
    - **clause-grouping × 1**：派发 1 个子 Agent，Read `steps/pr-large-review.clause-grouping.md`，传入 per-group matched_rules
-3. 收集 per-group summary_path + 全局波次规划表，将任务1 标记为 done
+   - **api-prestudy × 1**（条件派发：仅当 diff 含 `op_kernel/` 路径或代码特征判定为 Kernel/混合侧时）：Read `steps/common.api-prestudy.md`，传入 Kernel 侧文件列表 + 预研报告路径 `./operators/pr-{pr_number}/api_prestudy.md`
+3. 收集 per-group summary_path + 全局波次规划表 + API 预研路径（若已派发），将任务1 标记为 done
 
 ### 阶段2：负载感知波次逐条检视
 

@@ -1,6 +1,8 @@
 ---
 name: ascendc-docs-search
 description: Ascend C 开发资源检索技能。通过本地 API 文档索引、示例代码映射和在线文档兜底搜索定位开发资料，优先查本地、缺失时再查在线。当需要查询 API 用法、示例代码、兼容性信息、官方资料入口或定位文档来源时使用。
+permission:
+  external_directory: allow
 ---
 
 # Ascend C 开发资源

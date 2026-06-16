@@ -219,7 +219,7 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
 
 ### 2.4 子Agent派发
 
-工作流负责子Agent的派发编排。step 文件提供 prompt 模板，不包含 `Agent()` 调用逻辑。子Agent类型降级：`ascendc-ops-reviewer` → `general`；`ascendc-code-summarizer` → `general`。
+工作流负责子Agent的派发编排。step 文件提供 prompt 模板，不包含 `Agent()` 调用逻辑。子Agent类型统一使用 `"general"`。
 
 每波 ≤10 个子Agent，波次内并行，波次间串行。
 

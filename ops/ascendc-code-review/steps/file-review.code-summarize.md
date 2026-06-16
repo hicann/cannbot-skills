@@ -77,6 +77,7 @@ Read 本文件（steps/file-review.code-summarize.md）的「子 Agent 执行指
 Step 1: 读取代码     — Read 源码全部内容
 Step 2: 识别侧别     — 按 Tiling/Kernel 分层特征判定侧别
 Step 3: 梳理脉络     — 追踪入口 → 数据流 → 计算核心 → 输出（含分支覆盖）
+Step 3.5: 业务语义   — Kernel侧: 数学运算+计算模式+同步契约; Tiling侧: 切分策略+校验语义+Buffer规划
 Step 4: 追踪关联     — Read include 头文件 + Grep 跨文件调用链
 Step 5: 变量溯源     — 对类成员/全局变量 grep 声明→初始化→校验链
 Step 6: 分析设计     — Kernel侧：流水线模式/切分/Buffer管理（需量化）
@@ -102,6 +103,82 @@ Step 8: 返回结果     — 结构化返回侧别和脉络摘要
 | **数据流** | 数据从哪来（GM/Tiling）→ 经哪处理 → 输出到哪 | Read include + TilingData 结构 |
 | **计算核心** | 主循环在哪？核心 API 是什么？关键变量如何流转 | Read 主循环代码，定位循环边界和 API 调用 |
 | **输出** | 结果写回哪里？同步机制是什么？ | Read 写回代码，确认 EnQue/DeQue |
+
+### Step 3.5: 业务语义分析
+
+基于 Step 3 已梳理的代码脉络，按侧别执行对应的业务语义分析。
+
+#### 3.5K: Kernel 侧业务语义（仅 Kernel/混合侧执行）
+
+**a. 算子数学运算推断**
+- 从函数名、变量名、API 调用模式推断数学公式（如 `Z = X + Y`、`Softmax = exp(x-max)/sum(exp(x-max))`）
+- 识别输入输出拓扑（几输入几输出、各 tensor 在业务中的语义角色）
+- 识别数学不变量（如 elementwise 算子输入输出 shape 一致、softmax 输出和为 1）
+
+**b. 计算模式识别**
+
+从以下 7 种已知模式中匹配（按优先级逐条 Grep，命中即停）：
+
+| # | 模式 | 识别信号 |
+|---|------|---------|
+| 1 | Simple Vector Pipeline | 默认（逐块 load→compute→store，无特殊信号） |
+| 2 | Double Buffer Vector Pipeline | `BUFFER_NUM = 2`、`loopCount = tileNum * BUFFER_NUM` |
+| 3 | Multi-Step Vector Decomposition | `TBuf<VECCALC>` + 多步 chained API（Maxs→Mins→Muls→Add） |
+| 4 | Compile-Time Branch Dispatch | `if constexpr` + 模板 int 参数 |
+| 5 | AIC-AIV MIX Cooperative | `ASCEND_IS_AIC` / `ASCEND_IS_AIV` + `CrossCoreSetFlag`/`WaitFlag` |
+| 6 | 5-Stage Cube Pipeline | `block_mmad` / `Mad` + `CopyGM2L1` + `Fixpipe` + L1/L0 嵌套循环 |
+| 7 | DAG Declarative (atvoss) | `DAGSch` + `Bind` + `Placeholder` |
+
+**c. 分支业务含义**
+对 Step 3 识别的每个分支条件，补充业务层面解释：
+- 尾部处理分支 → "最后一个不完整块的对齐处理"
+- dtype 分支 → "不同精度的计算路径"
+- TilingKey 分支 → "编译时模板分发（不同 buffer 策略/算法变体的 kernel）"
+
+**d. 模板参数语义**
+对代码中的模板参数，标注业务含义：
+- `BUFFER_MODE` → "缓冲策略：0=单缓冲（小数据延迟优先），1=双缓冲（大数据吞吐优先）"
+- `IS_SPLIT` → "处理模式：0=单遍（小数据），1=多块循环（大数据）"
+
+**e. 同步契约分层**
+识别同步机制并标注所属层次：
+- `EnQue`/`DeQue` → MTE↔Vector 阶段交接
+- `CrossCoreSetFlag`/`WaitFlag` → AIC↔AIV 跨核协作
+- `PipeBarrier` → 同核内流水线屏障
+- `SetFlag`/`WaitFlag`（HardEvent）→ 手动流水线重叠
+
+#### 3.5T: Tiling 侧业务语义（仅 Tiling/混合侧执行）
+
+**a. 校验策略分析**
+对每个 `OP_CHECK_IF` / `ASCENDC_HOST_ASSERT`，标注校验的数学不变量：
+- shape 一致性 → "elementwise 算子要求所有输入输出元素数相同"
+- dtype 支持 → "当前仅支持 FP32/INT32"
+- 维度限制 → "仅支持 2D tensor"
+- 模式限制 → "仅支持 AR（沿内轴归约）和 RA（沿外轴归约）"
+
+**b. 多核切分策略分析**
+识别切分策略的业务类型：
+- 按元素均分 → "elementwise 算子，任意轴可切"
+- 按 M×N 网格分 → "矩阵乘法，2D tile 分配到核"
+- 按 reduce 轴分 → "归约算子，沿归约轴切分+局部归约+全局归约"
+
+标注每个切分变量的业务含义（totalNum=总工作量、blockFactor=每核工作量、usedCoreNum=实际使用核数等）
+
+**c. Buffer 规划策略分析**
+- 单/双缓冲决策依据（阈值是什么、为什么）
+- UB 分配公式（几个 tensor、每个多大）
+- L1 深度搜索（多流竞争时的背包优化，如有）
+
+**d. TilingKey 语义分析**
+对每个 TilingKey 轴，标注业务含义：
+- dtype 轴 → "编译时 dtype 路由"
+- buffer 模式轴 → "单/双缓冲选择，运行时按数据量决策"
+- 算法变体轴 → "不同算法路径"
+
+**e. Workspace 数学来源**
+若代码计算了 tmpLocalSize / workspace，标注数学来源：
+- "归约树的中间部分结果存储空间"
+- "排序算法的 scratch buffer"
 
 ### Step 4: 追踪关联 + 跨文件防御分析
 
@@ -198,6 +275,41 @@ Grep 代码中的所有编译期常量，填入输出「常量清单」表：
 **核心 API**: {主要使用的 API 列表}
 
 **输出**: {结果写回位置} → 同步机制 {EnQue/DeQue}
+
+## 算子业务语义（Kernel 侧）
+
+**数学运算**: {公式} | **输入输出**: {N输入→M输出, 各tensor语义角色}
+**计算模式**: {7 种模式之一} | **同步契约**: {各层同步机制及意图}
+
+### 分支业务含义
+| 分支条件 | 位置(文件:行) | 业务含义 | 处理逻辑 |
+|---------|-------------|---------|---------|
+| {条件} | {行} | {业务上代表什么} | {逻辑} |
+
+### 模板参数语义
+| 参数 | 取值 | 业务含义 |
+|------|------|---------|
+| {param} | {values} | {业务含义} |
+
+## Tiling 业务语义（Tiling 侧）
+
+**切分策略**: {按元素均分/按M×N网格/按reduce轴} | **Buffer策略**: {单/双缓冲, 决策依据}
+**TilingKey 轴**: {各轴及业务含义}
+
+### 校验策略
+| 校验条件 | 位置(文件:行) | 数学不变量 |
+|---------|-------------|-----------|
+| {OP_CHECK_IF 条件} | {行} | {校验的数学约束} |
+
+### 切分变量语义
+| 变量 | 公式 | 业务含义 |
+|------|------|---------|
+| {var} | {formula} | {在业务上代表什么} |
+
+### TilingKey 语义
+| 轴 | 取值 | 业务含义 |
+|----|------|---------|
+| {axis} | {values} | {业务含义} |
 
 ## 变量溯源
 

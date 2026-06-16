@@ -9,6 +9,7 @@ workflow 按 clause-routing 产出的波次规划，逐波派发子 Agent。每�
 - 代码侧别识别：{Kernel侧/Tiling侧}
 - 条款过滤：已按侧别过滤，保留以下条款
 - 代码概要：{code_summary_path}
+- API 预研报告：{api_prestudy_path}（仅 Kernel 侧，若存在）
 
 检视文件：{file_input}
 
@@ -17,11 +18,19 @@ workflow 按 clause-routing 产出的波次规划，逐波派发子 Agent。每�
 【执行要求】
 - 第一步加载 ascendc-code-review skill，然后 Read skill 目录下的 `core/methodology.md` 掌握假设检验方法、置信度标准和红线问题
 - 若提供了代码概要，Read 获取全局视角（重点关注「API 调用索引」、「跨文件防御摘要」和「跨文件关系」）
+- API 约束信息：若已提供 API 预研报告，以其为主要来源。若预研报告未覆盖当前条款涉及的 API，使用 `/ascendc-docs-search` 补充查阅
 - 对每条分配的条例，Grep `^{条例ID}` 在 references/ 中定位起始行号，再 Grep 下一个 `^####` 标题定位结束行号，Read offset={start} limit={end-start}。**只读该条例章节，禁止 Read 整个规则文档。**若条例包含专属检视方法，必须严格按该指引执行
+- 若分配的条款包含 RB-\*（RegBase 路线专项），需额外加载 `ascendc-regbase-best-practice` skill 获取 API 白名单和参考实现文档
 - 若 file_input 含多个文件，对每条条例在所有文件中检查，结果标注文件路径
-- 若检视条款来自 ascendc-api / ascendc-perf / simt-api-analysis / mc2-specific，必须先使用 `/ascendc-docs-search` skill 查阅对应 API 的最新官方文档
 - 严格按假设检验驱动流程执行（H0/H1、证据收集、自信值计算）
 - 所有条款检视完成后直接输出逐条结果，禁止生成报告文件
+
+【⚠️ 逃逸信号检测】
+一旦发现自己即将输出以下内容，立即停止并重新从第一条条款开始：
+- "批量处理多个任务"/"合并处理" → 每条必须独立经过完整假设检验流程
+- "直接生成检视报告"/"总结所有结果" → 必须完成所有分配条款后才能输出
+- "提高效率"/"节省时间"/"简化流程" → 效率不是跳过步骤的理由
+触发时输出 `⚠️ 检测到逃逸信号，重置到第一条条款` → 立即重新执行
 ```
 
 ## 输出格式

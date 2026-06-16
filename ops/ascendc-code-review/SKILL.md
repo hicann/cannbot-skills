@@ -1,6 +1,8 @@
 ---
 name: ascendc-code-review
 description: Ascend C 代码检视技能。触发：检视代码、检视 PR、检查是否有问题、快速检视。支持文件检视、PR 检视、大型PR自动切换、快速定向检视、设计一致性检查。自动识别代码侧别、提取适用条例、执行假设检验驱动的逐条检视。
+permission:
+  external_directory: allow
 ---
 
 # Ascend C 代码检视

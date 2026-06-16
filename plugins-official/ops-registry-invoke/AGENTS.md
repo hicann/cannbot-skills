@@ -3,10 +3,10 @@ description: Ascend C 算子开发工具CANNBot，管理自定义算子的完整
 mode: primary
 skills:
   - ops-registry-invoke-workflow
+  - ascendc-code-review
 agents:
   - ascendc-ops-architect
   - ascendc-ops-developer
-  - ascendc-ops-reviewer
   - ascendc-ops-tester
 
 permission:
