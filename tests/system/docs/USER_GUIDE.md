@@ -303,9 +303,20 @@ python tests/system/scripts/main.py \
 
 # 通过环境变量指定平台（逗号或空格分隔）
 ASCEND_PLATFORM="A2,A5" ./tests/gate_check.sh
+
+# 重复执行多次（稳定性测试）
+./tests/gate_check.sh --repeat 3
+./tests/gate_check.sh --ascend-platform A2 --repeat 5
 ```
 
 > **注意**：`gate_check.sh` 要求必须指定平台（`--ascend-platform` 或 `ASCEND_PLATFORM` 环境变量），否则直接 exit 0 跳过评测。平台值仅支持 `A2`、`A3`、`A5`。
+
+`gate_check.sh` 支持以下参数：
+
+| 参数 | 说明 |
+|------|------|
+| `--ascend-platform <A2\|A3\|A5>` | 指定目标昇腾平台，可多次指定多平台 |
+| `--repeat <N>` | 重复执行 N 次门禁检查（默认 1），用于稳定性测试 |
 
 ## 结果解读
 

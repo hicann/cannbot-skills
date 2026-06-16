@@ -17,7 +17,7 @@ import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from subprocess_streamer import run_subprocess_streaming
 
@@ -371,14 +371,10 @@ class GateChecker:
 
         return teams_with_evals
 
-    def _run_unified_eval_pytest(
-        self, skill_names: List[str], team_names: List[str], t_total: float
-    ) -> bool:
-        """一次 pytest 运行所有 skill + team 的 eval 用例，生成一份统一 HTML 报告"""
-        if not skill_names and not team_names:
-            logger.info("无评测用例，跳过 AI 语义评测")
-            return True
-
+    def _build_eval_pytest_cmd(
+        self, skill_names: List[str], team_names: List[str]
+    ) -> Tuple[List[str], Path]:
+        """构建 pytest 命令和报告路径"""
         cmd = [sys.executable, "-m", "pytest"]
         if skill_names:
             cmd.append("test_skill_evals.py")
@@ -399,9 +395,33 @@ class GateChecker:
         platform_prefix = "_".join(self.ascend_platforms) + "_" if self.ascend_platforms else ""
         report_path = self.results_dir / f"{platform_prefix}ST_validation_report_{timestamp}.html"
         cmd.extend([f"--html={report_path}", "--self-contained-html"])
+        return cmd, report_path
 
-        if self._get_parallel_workers() != "1":
-            cmd.extend(["-n", self._get_parallel_workers()])
+    def _resolve_actual_workers(self, skill_names: List[str], team_names: List[str]) -> int:
+        """根据实际 eval 用例数 cap worker 数，避免创建过多空闲进程"""
+        total_cases = 0
+        for name in skill_names + team_names:
+            evals_data = self.load_evals(name)
+            if evals_data:
+                total_cases += len(evals_data.get("evals", []))
+        raw_workers = int(self._get_parallel_workers())
+        if total_cases > 0 and raw_workers > total_cases:
+            return total_cases
+        return raw_workers
+
+    def _run_unified_eval_pytest(
+        self, skill_names: List[str], team_names: List[str], t_total: float
+    ) -> bool:
+        """一次 pytest 运行所有 skill + team 的 eval 用例，生成一份统一 HTML 报告"""
+        if not skill_names and not team_names:
+            logger.info("无评测用例，跳过 AI 语义评测")
+            return True
+
+        cmd, _ = self._build_eval_pytest_cmd(skill_names, team_names)
+
+        actual_workers = self._resolve_actual_workers(skill_names, team_names)
+        if actual_workers > 1:
+            cmd.extend(["-n", str(actual_workers)])
 
         env = os.environ.copy()
         if self.report_only:

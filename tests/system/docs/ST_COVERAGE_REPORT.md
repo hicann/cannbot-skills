@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **11 个 Skill + 1 个 Team**，共 **92 个评测用例**（89 启用 / 3 禁用，截止 2026-06-12）。
+当前 ST 框架覆盖 **70 个 Skill + 1 个 Team**，共 **255 个评测用例**（244 启用 / 11 禁用，截止 2026-06-15）。
 
 ## 1. 五维看护说明
 
@@ -16,6 +16,10 @@
 
 ## 2. Skill 覆盖率
 
+按域分组统计：
+
+### ops/（57 Skills）
+
 | Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |-------|:-------:|:-------:|:--------:|:----------:|:----------:|
 | ascendc-direct-invoke-to-registry-invoke | √ | √ | √ | √ | √ |
@@ -26,21 +30,90 @@
 | ascendc-ut-develop | √ | √ | √ | | √ |
 | ascendc-whitebox-design | √ | | √ | √ | √ |
 | cann-env-setup | √ | | √ | | √ |
-| gitcode-issue-gen | | | √ | | √ |
 | npu-arch | √ | | √ | | √ |
 | pypto-op-design | √ | √ | √ | √ | √ |
+| aiss-tiling-solver | | | √ | | √ |
+| ascendc-api-best-practices | | | √ | | √ |
+| ascendc-blaze-best-practice | | | √ | | √ |
+| ascendc-code-review | | | √ | | √ |
+| ascendc-crash-debug | | | √ | | √ |
+| ascendc-direct-invoke-template | | | √ | | √ |
+| ascendc-docs-search | | | √ | | √ |
+| ascendc-perf-optimize | | | √ | | √ |
+| ascendc-performance-best-practices | | | √ | | √ |
+| ascendc-precision-debug | | | √ | | √ |
+| ascendc-regbase-best-practice | | | √ | | √ |
+| ascendc-registry-invoke-to-direct-invoke | | | √ | | √ |
+| ascendc-runtime-debug | | | √ | | √ |
+| ascendc-simt-best-practices | | | √ | | √ |
+| ascendc-simt-tiling-design | | | √ | | √ |
+| ascendc-st-design | | | √ | | √ |
+| ascendc-tiling-design | | | √ | | √ |
+| catlass-op-design | | | √ | | √ |
+| catlass-op-develop | | | √ | | √ |
+| catlass-op-perf-tune | | | √ | | √ |
+| ops-precision-standard | | | √ | | √ |
+| ops-profiling | | | √ | | √ |
+| ops-simulator | | | √ | | √ |
+| ops-spec-gen | | | √ | | √ |
+| pypto-api-explore | √ | √ | √ | √ | √ |
+| pypto-golden-generate | | | √ | √ | √ |
+| pypto-intent-understand | √ | √ | √ | | √ |
+| pypto-op-develop | | | √ | | √ |
+| pypto-op-perf-tune | | | √ | | √ |
+| pypto-precision-compare | | | √ | | √ |
+| pypto-precision-debug | | | √ | | √ |
+| tilelang-api-best-practices | | | √ | | √ |
+| tilelang-env-check | | | √ | √ | √ |
+| tilelang-op-design | | | √ | | √ |
+| tilelang-op-develop | | | √ | √ | √ |
+| tilelang-op-test-design | | | √ | | √ |
+| tilelang-perf-optimization | | | √ | √ | √ |
+| tilelang-programming-model-guide | | | √ | | √ |
+| tilelang-review | | | √ | | √ |
+| tilelang-submodule-pull | | | √ | √ | √ |
+| torch-ascendc-op-extension | | | √ | | √ |
+| torch-ops-profiler | | | √ | | √ |
+| triton-latency-optimizer | | | √ | | √ |
+| triton-op-coding | | | √ | √ | √ |
+| triton-op-designer | | | √ | | √ |
+| triton-op-verifier | | | √ | √ | √ |
+| triton-task-extractor | | | √ | √ | √ |
 
-## 3. Team 覆盖率
+### model/（11 Skills）
+
+| Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
+|-------|:-------:|:-------:|:--------:|:----------:|:----------:|
+| model-infer-fusion | | | √ | | √ |
+| model-infer-graph-mode | | | √ | | √ |
+| model-infer-kvcache | | | √ | | √ |
+| model-infer-migrator | | | √ | | √ |
+| model-infer-multi-stream | | | √ | | √ |
+| model-infer-optimize | | | √ | | √ |
+| model-infer-parallel-analysis | | | √ | | √ |
+| model-infer-parallel-impl | | | √ | | √ |
+| model-infer-precision-debug | | | √ | | √ |
+| model-infer-prefetch | | | √ | | √ |
+| model-infer-runtime-debug | | | √ | | √ |
+| model-infer-superkernel | | | √ | | √ |
+
+### infra/（1 Skill）
+
+| Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
+|-------|:-------:|:-------:|:--------:|:----------:|:----------:|
+| gitcode-issue-gen | | | √ | | √ |
+
+### ops-direct-invoke Team
 
 | Team | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |------|:-------:|:-------:|:--------:|:----------:|:----------:|
 | ops-direct-invoke | | | | | √ |
 
-## 4. 平台覆盖
+## 3. 平台覆盖
 
-所有 92 个用例已配置 `Ascend Platform: A2`，支持 `--ascend-platform A2` 在 A2 服务器上执行。
+所有用例已配置 `Ascend Platform`，支持 `--ascend-platform` 参数在对应平台上执行。
 
-## 5. 更新指南
+## 4. 更新指南
 
 新增 skill 或 team 的 ST 用例后，同步更新本文档：
 
