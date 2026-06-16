@@ -1,0 +1,17 @@
+{
+  "name": "ascendc-ops-lab-developer",
+  "description": "Ascend C 算子自动生成 Team。通过双路径（design.md / TileLang）设计表达和 AscendC 转译优化，端到端完成算子开发（7 Phase 工作流），含 1 个专业 Agent 和 9 个配套 Skill。",
+  "version": "1.1.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "MIT",
+  "dependencies": [
+    "ops-direct-invoke-skills"
+  ],
+  "agents": [
+    "./agents/ascend-kernel-developer.md"
+  ]
+}

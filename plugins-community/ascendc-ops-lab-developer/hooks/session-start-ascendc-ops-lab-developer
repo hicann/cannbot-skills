@@ -1,0 +1,35 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+echo "[ascendc-ops-lab-developer] Session started."
+
+# Precision Gate 中断恢复检查
+GATE_FILE="${CLAUDE_PLUGIN_ROOT}/.claude/hooks/state/precision_gate.json"
+if [ -f "$GATE_FILE" ]; then
+    D_CLASS_ACTIVE=$(python3 -c "import json; d=json.load(open('$GATE_FILE')); print(d.get('d_class_active', False))" 2>/dev/null)
+    if [ "$D_CLASS_ACTIVE" = "True" ]; then
+        OUTPUT_DIR=$(python3 -c "import json; d=json.load(open('$GATE_FILE')); print(d.get('output_dir', 'unknown'))" 2>/dev/null)
+        STAGE=$(python3 -c "import json; d=json.load(open('$GATE_FILE')); print(d.get('stage', 'D1'))" 2>/dev/null)
+        DEBUG_COUNT=$(python3 -c "import json; d=json.load(open('$GATE_FILE')); print(d.get('debug_call_count', 0))" 2>/dev/null)
+        TUNE_COUNT=$(python3 -c "import json; d=json.load(open('$GATE_FILE')); print(d.get('tune_call_count', 0))" 2>/dev/null)
+        TOTAL=$((DEBUG_COUNT + TUNE_COUNT))
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║  [Precision Gate] D 类精度失败待处理                          ║"
+        echo "╠══════════════════════════════════════════════════════════════╣"
+        echo "║  output_dir : $OUTPUT_DIR"
+        echo "║  stage      : $STAGE (debug=$DEBUG_COUNT, tune=$TUNE_COUNT, total=$TOTAL/12)"
+        echo "║  状态       : 上一轮 Subagent 返回 D 类精度不匹配              ║"
+        echo "║  Orchestrator 必须: 立即重新调用 ascend-kernel-developer     ║"
+        echo "║                  Subagent 进入 D 类精度修复流程                ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+    fi
+fi
