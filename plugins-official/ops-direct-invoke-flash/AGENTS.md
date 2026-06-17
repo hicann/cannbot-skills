@@ -3,6 +3,10 @@ description: Ascend C 算子开发工具 CANNBot（Flash 版），当需要从 C
 mode: primary
 skills:
   - ops-direct-invoke-flash
+  - gitcode-toolkit
+  - gitcode-pr-handler
+  - gitcode-issue-gen
+  - gitcode-issue-handler
 permission:
   external_directory: allow
 harness:

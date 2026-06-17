@@ -186,6 +186,29 @@
       ]
     },
     {
+      "name": "infra-skills",
+      "description": "基础设施 Skills（4 个）。GitCode 协作工具包：PR 创建、Issue 生成与处理、GitCode API 工具集。",
+      "source": "./infra",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "infra",
+        "gitcode",
+        "skills",
+        "collaboration"
+      ],
+      "category": "skills",
+      "skills": [
+        "./gitcode-toolkit",
+        "./gitcode-pr-handler",
+        "./gitcode-issue-gen",
+        "./gitcode-issue-handler"
+      ]
+    },
+    {
       "name": "ops-direct-invoke",
       "source": "./plugins-official/ops-direct-invoke",
       "description": "Ascend C Kernel 直调算子开发 Team。含完整工作流（设计→实现→审查→性能验收）、3 个专业 Agent 和工程模板。",
@@ -201,7 +224,8 @@
       ],
       "category": "development",
       "dependencies": [
-        "ops-direct-invoke-skills"
+        "ops-direct-invoke-skills",
+        "infra-skills"
       ]
     },
     {
@@ -220,7 +244,10 @@
         "operator",
         "from-scratch"
       ],
-      "category": "development"
+      "category": "development",
+      "dependencies": [
+        "infra-skills"
+      ]
     },
     {
       "name": "pypto-op-orchestrator",

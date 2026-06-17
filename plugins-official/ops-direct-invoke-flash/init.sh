@@ -36,13 +36,14 @@ detect_trae_variant() {
 BRAND="cannbot"
 VERSION="1.2.2"
 
-INCLUDED_SKILLS="ops-direct-invoke-flash"
+INCLUDED_SKILLS="ops-direct-invoke-flash gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 INCLUDED_AGENT_PATTERN="ops-direct-invoke-flash-*"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
+INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
 
 show_help() {
     cat << EOF
@@ -139,6 +140,9 @@ install_skill_links() {
     local count=0
     for skill in $INCLUDED_SKILLS; do
         local src="$LOCAL_SKILL_ROOT/$skill"
+        if [ ! -d "$src" ]; then
+            src="$INFRA_SKILL_ROOT/$skill"
+        fi
         if [ -d "$src" ]; then
             rm -rf "$target_root/$skill"
             ln -sfn "$(realpath "$src")" "$target_root/$skill"

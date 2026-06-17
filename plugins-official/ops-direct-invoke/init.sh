@@ -111,7 +111,7 @@ VERSION="1.0.0"
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ascendc-regbase-best-practice ascendc-blaze-best-practice ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review"
+INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ascendc-regbase-best-practice ascendc-blaze-best-practice ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-kernel-*"
 
@@ -184,6 +184,34 @@ PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 # Skills: reference shared ops directory
 SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
+# Infra skills: reference infra directory
+INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
+
+# --- Infra skill helpers ---
+# Populate INFRA_SKILL_NAMES array with whitelist-matched infra skill names
+collect_infra_skills() {
+    INFRA_SKILL_NAMES=()
+    for skill_dir in "$INFRA_SKILL_ROOT"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local name
+        name=$(basename "$skill_dir")
+        echo "$INCLUDED_SKILLS" | grep -qw "$name" || continue
+        INFRA_SKILL_NAMES+=("$name")
+    done
+}
+
+# Install infra skills as symlinks into $1, sets INFRA_INSTALLED_COUNT
+install_infra_skills() {
+    local target_dir="$1"
+    INFRA_INSTALLED_COUNT=0
+    for name in "${INFRA_SKILL_NAMES[@]}"; do
+        local infra_target="$target_dir/$name"
+        [ -e "$infra_target" ] || [ -L "$infra_target" ] && rm -rf "$infra_target"
+        ln -sfn "$(realpath "$INFRA_SKILL_ROOT/$name")" "$infra_target"
+        ok "infra: $name → $infra_target"
+        INFRA_INSTALLED_COUNT=$((INFRA_INSTALLED_COUNT + 1))
+    done
+}
 
 for arg in "$@"; do
     case "$arg" in
@@ -300,6 +328,11 @@ for skill_dir in "$SHARED_SKILL_ROOT"/*/; do
     SKILL_COUNT=$((SKILL_COUNT + 1))
 done
 
+# Collect infra skills to install (from infra/)
+collect_infra_skills
+INFRA_SKILLS_TO_INSTALL="${INFRA_SKILL_NAMES[*]}"
+INFRA_SKILL_COUNT=${#INFRA_SKILL_NAMES[@]}
+
 # Collect agents to install (from local agents/)
 AGENTS_TO_INSTALL=""
 AGENT_COUNT=0
@@ -320,6 +353,19 @@ echo ""
 if [ "$SKILL_COUNT" -gt 0 ]; then
     echo -e "${CYAN}Skills (${SKILL_COUNT} 项)：${NC}"
     for name in $SKILLS_TO_INSTALL; do
+        target="$CANNBOT_DIR/skills/$name"
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            echo -e "  ${YELLOW}$name${NC}"
+        else
+            echo -e "  ${GREEN}$name${NC}"
+        fi
+    done
+    echo ""
+fi
+
+if [ "$INFRA_SKILL_COUNT" -gt 0 ]; then
+    echo -e "${CYAN}Infra Skills (${INFRA_SKILL_COUNT} 项)：${NC}"
+    for name in $INFRA_SKILLS_TO_INSTALL; do
         target="$CANNBOT_DIR/skills/$name"
         if [ -e "$target" ] || [ -L "$target" ]; then
             echo -e "  ${YELLOW}$name${NC}"
@@ -423,6 +469,10 @@ if [ "$TOOL" = "opencode" ]; then
         skill_count=$((skill_count + 1))
     done
     step1_summary="skills(${skill_count}) "
+
+    # OpenCode: per-item symlinks for infra skills (from infra/, whitelist filtered)
+    install_infra_skills "$CANNBOT_DIR/skills"
+    step1_summary="${step1_summary}infra(${INFRA_INSTALLED_COUNT}) "
 
     # OpenCode: per-item symlinks for agents (from local agents/, whitelist filtered)
     mkdir -p "$CANNBOT_DIR/agents"
@@ -598,6 +648,10 @@ else
     done
 
     ok "Skills: $link_count discovery symlinks"
+
+    # Infra skills discovery symlinks (for Claude/Trae/Cursor/Copilot)
+    install_infra_skills "$DISCOVERY"
+    ok "Infra Skills: $INFRA_INSTALLED_COUNT discovery symlinks"
 
     # Claude/Cursor: also create agent discovery symlinks (from local agents/)
     AGENT_DISCOVERY="$CONFIG_ROOT/agents"

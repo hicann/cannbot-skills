@@ -145,6 +145,7 @@ for team_dir in "$TEAMS_DIR"/*; do
             ops_skill_dir="$SKILLS_DIR/ops/$skill"
             model_skill_dir="$SKILLS_DIR/model/$skill"
             graph_skill_dir="$SKILLS_DIR/graph/$skill"
+            infra_skill_dir="$SKILLS_DIR/infra/$skill"
             local_skill_dir="$team_dir/$skill"
             local_plugin_skill_dir="$team_dir/skills/$skill"
             workflow_dir="$team_dir/workflow"
@@ -157,6 +158,9 @@ for team_dir in "$TEAMS_DIR"/*; do
                 PASS_COUNT=$((PASS_COUNT + 1))
             elif [ -d "$graph_skill_dir" ] && [ -f "$graph_skill_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists in graph/"
+                PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -d "$infra_skill_dir" ] && [ -f "$infra_skill_dir/SKILL.md" ]; then
+                print_pass "[$team_name] skill '$skill' exists in infra/"
                 PASS_COUNT=$((PASS_COUNT + 1))
             elif [ -d "$local_skill_dir" ] && [ -f "$local_skill_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists as local team skill"
