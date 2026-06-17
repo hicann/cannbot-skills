@@ -220,6 +220,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
   "prompt": "
 请审查以下算子代码：
 - 算子名称：{operator_name}
+- 审查轮次：Round 0（Step 4 初审）
 - 代码路径：operators/{operator_name}/
 - 设计文档：operators/{operator_name}/docs/DESIGN.md
 - 环境信息：operators/{operator_name}/docs/environment.md（芯片型号 / SocVersion）；NpuArch 与 `--npu-arch` 合法值通过 `/npu-arch` skill 查得，用于核对 CMakeLists 与 DESIGN.md 一致
@@ -227,7 +228,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 - 算子族方法论：见 /ascendc-tiling-design 路由表
 
 【输出】
-- 审查报告：operators/{operator_name}/docs/REVIEW.md
+- 审查报告：operators/{operator_name}/docs/REVIEW.md（创建新文件，报告头部标注 `## Round 0 审查报告（Step 4 初审）`）
 
 【推荐 Skill】
 - /ascendc-docs-search — 验证 API 约束、查找官方示例对照
@@ -249,7 +250,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 
 > ⚠️ **CANNBot 禁止自行修改代码，即使修复看起来只有一行。必须调用 Developer Subagent。**
 
-### Subagent 调用参数
+### Step 5a — Developer 修复
 
 ```
 {
@@ -258,7 +259,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
   "prompt": "
 请根据审查报告修复代码：
 - 算子名称：{operator_name}
-- 审查报告：operators/{operator_name}/docs/REVIEW.md
+- 审查报告：operators/{operator_name}/docs/REVIEW.md（请阅读最新一轮审查报告）
 - 设计文档：operators/{operator_name}/docs/DESIGN.md
 
 【输出】
@@ -277,6 +278,41 @@ Step D: 添加测试用例和精度验证 → 运行通过
   "
 }
 ```
+
+### Step 5b — Reviewer 复审
+
+```
+{
+  "description": "代码复审",
+  "subagent_type": "ascendc-kernel-reviewer",
+  "prompt": "
+请复审以下算子代码（Developer 已根据上轮审查报告修复）：
+- 算子名称：{operator_name}
+- 审查轮次：Round {review_round}（Step 5 复审）
+- 代码路径：operators/{operator_name}/
+- 设计文档：operators/{operator_name}/docs/DESIGN.md
+- 环境信息：operators/{operator_name}/docs/environment.md（芯片型号 / SocVersion）；NpuArch 与 `--npu-arch` 合法值通过 `/npu-arch` skill 查得，用于核对 CMakeLists 与 DESIGN.md 一致
+- 审查清单：workflows/development-guide.md
+- 历史审查报告：operators/{operator_name}/docs/REVIEW.md（已有 Round 0 ~ Round {prev_round} 的报告，请勿覆盖）
+
+【输出】
+- 审查报告：operators/{operator_name}/docs/REVIEW.md（在文件末尾追加，报告头部标注 `## Round {review_round} 审查报告（Step 5 复审）`）
+
+【推荐 Skill】
+- /ascendc-docs-search — 验证 API 约束、查找官方示例对照
+- /ops-profiling — 独立采集性能数据验证
+- /ops-precision-standard — 精度验证阶段确认 atol/rtol 标准
+
+【验收标准】
+- 独立编译验证
+- 100 分制评分
+- PASS/FAIL/PASS WITH NOTES 判定
+- 具体修复要求（如 FAIL）
+- 报告已追加到 REVIEW.md 末尾，未覆盖历史报告
+  "
+}
+```
+
 ---
 
 ## Step 6：性能验收

@@ -187,15 +187,15 @@ Step 7: 完成汇报
 
 **触发条件**：Developer 完成开发
 **调用模板**：[Step 4](workflows/task-prompts.md#step-4审查) — 读取此链接的完整内容作为 prompt
-**完成判定**：`operators/{operator_name}/docs/REVIEW.md` 文件存在且有审查结果（PASS/FAIL/PASS WITH NOTES）
+**完成判定**：`operators/{operator_name}/docs/REVIEW.md` 文件存在且有审查结果（PASS/FAIL/PASS WITH NOTES）。多轮审查时读取文件末尾最后一轮报告
 
 #### Step 5：修复循环
 
 > CANNBot 禁止自行修改代码，即使修复看起来只有一行。必须调用 Developer Subagent。
 
-**触发条件**：REVIEW.md 判定为 FAIL
+**触发条件**：REVIEW.md 最后一轮报告判定为 FAIL
 **调用模板**：[Step 5](workflows/task-prompts.md#step-5修复循环) — 读取此链接的完整内容作为 prompt
-**完成判定**：re-review 结果为 PASS 或 PASS WITH NOTES
+**完成判定**：re-review 结果为 PASS 或 PASS WITH NOTES（读取 REVIEW.md 最后一轮报告）
 **收敛控制**：最多 3 轮修复循环；仍未 PASS → 暂停，上报用户
 
 #### Step 6：性能验收
@@ -218,9 +218,9 @@ Step 7: 完成汇报
 当 Developer 对 Reviewer 的审查结果有异议时，CANNBot 直接仲裁。
 
 **处理流程**：
-1. 读取 REVIEW.md 中的争议内容
+1. 读取 REVIEW.md 最后一轮报告中的争议内容
 2. 查阅官方文档和示例
-3. 做出裁决，写入 `REVIEW.md ## 仲裁记录`
+3. 做出裁决，追加写入 `REVIEW.md` 末尾 `## 仲裁记录`
 4. 根据裁决决定是否需要修复或重新审查
 
 **裁决原则（优先级从高到低）**：

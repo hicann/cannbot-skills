@@ -63,7 +63,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 
 ### 输出边界
 
-- 审查报告：`operators/{operator_name}/docs/REVIEW.md`（含评分、判定、问题列表、修复建议）
+- 审查报告：`operators/{operator_name}/docs/REVIEW.md`（含评分、判定、问题列表、修复建议；多轮审查追加写入，保留完整审计记录）
 
 ---
 
@@ -279,12 +279,42 @@ grep -n "blockIdx\s*=\s*[0-9]" operators/{operator_name}/*.asc
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `docs/REVIEW.md` | 创建/覆盖 | 每轮审查写入完整报告 |
+| `docs/REVIEW.md` | 创建/追加 | 首轮创建；后续轮次在文件末尾追加，保留全部历史报告 |
 | `docs/DESIGN.md` | 只读 | 设计合规检查参考 |
 | `docs/PLAN.md` | 只读 | 了解开发进度和已知问题 |
 | `docs/environment.md` | 只读 | 获取编译器路径、芯片型号、SocVersion 等；NpuArch 通过 `/npu-arch` skill 查得 |
 | `docs/perf/` | 只读 + 独立采集 | 对比 Developer 性能数据，独立采集结果 |
 | 代码文件（`.asc` 等） | 只读 | 代码审查，禁止修改 |
+
+### 审查轮次编号与报告追加协议
+
+**全局轮次编号**（从审查视角计数，非修复循环视角）：
+
+| 轮次 | 来源 | 标题格式 |
+|------|------|---------|
+| Round 0 | Step 4 初审 | `## Round 0 审查报告（Step 4 初审）` |
+| Round 1 | Step 5 第 1 轮复审 | `## Round 1 审查报告（Step 5 复审）` |
+| Round 2 | Step 5 第 2 轮复审 | `## Round 2 审查报告（Step 5 复审）` |
+| Round N | Step 5 第 N 轮复审 | `## Round N 审查报告（Step 5 复审）` |
+
+**写入规则**：
+- **Round 0（首次审查）**：创建 REVIEW.md，写入完整报告
+- **Round 1+（复审）**：在 REVIEW.md 文件末尾追加分隔线和新一轮完整报告，**禁止覆盖**已有内容
+- 每轮报告头部必须标注轮次编号、审查阶段（初审/复审）、日期、判定结果
+- 追加格式：
+
+```markdown
+
+---
+
+## Round N 审查报告（Step 5 复审）
+
+- **审查日期**：YYYY-MM-DD
+- **判定**：PASS / FAIL / PASS WITH NOTES
+- **总分**：XX / 100
+
+（后续为完整审查报告内容）
+```
 
 ## 约束层
 
@@ -296,10 +326,11 @@ grep -n "blockIdx\s*=\s*[0-9]" operators/{operator_name}/*.asc
 | C2 | **禁止**降低标准让有问题的代码通过 | 质量底线 |
 | C3 | **必须**独立编译验证，不信任 Developer 自报结果 | 独立验证 |
 | C4 | **必须**所有问题附带具体修复建议和参考路径 | 反馈质量 |
-| C5 | **必须**审查完成后将报告写入 `operators/{operator_name}/docs/REVIEW.md` | 交付规范 |
+| C5 | **必须**审查完成后将报告写入 `operators/{operator_name}/docs/REVIEW.md`（首轮创建，后续轮次追加） | 交付规范 |
 | C6 | **必须**最终轮审查执行交付件检查清单 | 流程完整 |
 | C7 | **必须**返回结果概要包含 PASS/FAIL/PASS WITH NOTES + 总分 + 关键问题列表 | 输出规范 |
 | C8 | **必须**对每个 PipeBarrier 执行逐项依赖分析 | 同步审查 |
+| C9 | **必须**在报告头部标注全局轮次编号（Round N）和审查阶段（初审/复审），复审时**禁止覆盖**已有报告，只允许追加 | 审计完整性 |
 
 ### 高风险行为限制
 
