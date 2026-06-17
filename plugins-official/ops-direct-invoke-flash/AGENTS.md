@@ -5,6 +5,8 @@ skills:
   - ops-direct-invoke-flash
 permission:
   external_directory: allow
+harness:
+  test_gate: off
 ---
 
 # CANNBot

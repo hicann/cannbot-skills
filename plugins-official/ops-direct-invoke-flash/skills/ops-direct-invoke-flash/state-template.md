@@ -71,6 +71,21 @@
 - [ ] 若构建产物疑似过期，删除 `build/` 后干净重建
 - [ ] 若有需要则迭代
 
+## 阶段 7.5：黑/白盒测试门禁
+Harness 配置：`harness.test_gate = {on|off}`
+
+如果 `harness.test_gate` 为 `off`：
+- [ ] 记录按配置跳过测试门禁
+- [ ] 提交跳过记录
+
+如果 `harness.test_gate` 为 `on`：
+- [ ] 按照 `ascendc-st-design` skill 执行黑盒用例生成与执行
+- [ ] 按照 `ascendc-whitebox-design` skill 执行白盒用例生成与执行
+- [ ] 在 `test-harness/` 下记录真实测试产物、结果和日志
+- [ ] 运行 `validate_test_gate.py` 并确认 `STATUS: PASSED`
+- [ ] 若有精度失败，回到阶段 6 修复后重新验证
+- [ ] 提交
+
 ## 阶段 8：最终文档
 - [ ] 更新 `docs/index.md`
 - [ ] 更新 `AGENTS.md`

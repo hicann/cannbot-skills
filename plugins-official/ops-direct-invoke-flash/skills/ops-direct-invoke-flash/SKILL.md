@@ -55,7 +55,7 @@ hooks:
 1. 分析算子来源，提取语义，并在算子工程根目录中选择一个已完成的算子作为结构参考。
 2. 创建 `docs/{OP}/STATE.md`，然后在编写核函数代码之前先完成定义文档和设计文档。
 3. 用子 Agent 评审文档，打磨完善，再以小步增量的方式实现。
-4. 运行本地构建/测试，随后在真实 NPU 硬件上进行验证。
+4. 运行本地构建/测试，随后在真实 NPU 硬件上进行验证；若 `harness.test_gate` 为 `on`，再执行黑/白盒测试门禁。
 5. 在 `docs/{OP}/plans/troubleshooting.md` 中记录非平凡问题，并将预防措施反馈回工作流。
 
 ## 主路径
@@ -82,7 +82,8 @@ hooks:
 
 依据 [state-template.md](state-template.md) 创建 `docs/{OP}/STATE.md`。这是受 git 跟踪的持久化进度记录。STATE.md 是持久化进度的唯一可信来源。
 
-使用 `TaskCreate` 为每个阶段（阶段 2 到阶段 8）创建会话内任务。开始每个阶段时使用 `TaskUpdate(status="in_progress")`，完成时使用 `TaskUpdate(status="completed")`。在提交节点更新 STATE.md 的勾选框。
+使用 `TaskCreate` 为每个阶段（阶段 2 到阶段 8，`harness.test_gate` 为 `on` 时包含阶段 7.5）创建会话内任务。
+开始每个阶段时使用 `TaskUpdate(status="in_progress")`，完成时使用 `TaskUpdate(status="completed")`。在提交节点更新 STATE.md 的勾选框。
 
 **恢复之前的会话：** 如果 `docs/{OP}/STATE.md` 已存在，阅读它以确定哪些阶段已完成。仅为未完成的阶段重新创建 `TaskCreate` 条目。
 
@@ -209,6 +210,19 @@ hooks:
 在提交前，确认核函数源码包含完整实现（而非阶段 2 的骨架）。陈旧构建产物的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 构建新鲜度。
 
 **退出条件：** NPU 上构建通过，测试套件全部通过。
+
+### 阶段 7.5：黑/白盒测试门禁
+
+从 Team `AGENTS.md` frontmatter 读取 `harness.test_gate`，取值为 `on` 或 `off`，默认 `off`。
+
+- 若为 `off`：在 `docs/{OP}/STATE.md` 记录按配置跳过，并继续阶段 8。
+- 若为 `on`：按照 `ascendc-st-design` skill 执行黑盒用例生成与执行；
+  按照 `ascendc-whitebox-design` skill 执行白盒用例生成与执行；保留真实生成用例、执行结果、日志和 provenance。
+- 将黑盒与白盒产物路径写入 `docs/{OP}/test-harness/results/test_gate.json`，路径均相对于 `docs/{OP}`。
+- 运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/validate_test_gate.py --operator-doc-dir docs/{OP}`，确认输出 `STATUS: PASSED`。
+- 若有精度用例失败，回到阶段 6 修复实现，重新完成阶段 7 和阶段 7.5，并在 `docs/{OP}/plans/troubleshooting.md` 记录非平凡问题。
+
+**退出条件：** `harness.test_gate` 为 `off` 且已记录跳过；或黑/白盒测试门禁通过；已提交。
 
 ### 阶段 8：收尾文档
 
