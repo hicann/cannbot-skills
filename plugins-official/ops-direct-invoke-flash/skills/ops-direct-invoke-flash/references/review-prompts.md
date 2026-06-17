@@ -133,7 +133,7 @@ Agent(
   prompt="""
     你正处于该算子工程中。正在构建的算子是 `{OP}`。
     读取 `docs/{OP}/{OP}_design.md`、`references/reg-api-guide.md` 和 `references/reg-api-patterns.yaml`。
-    如果实现已存在，还需读取 `src/{OP}.cpp`。
+    如果实现已存在，还需读取 `{OP}.asc`。
     校验：
     1. 设计在向量计算、类型转换和规约中使用了 `AscendC::Reg`。
     2. 没有计划或实现 `AscendC::MicroAPI`、Membase、除 `asc_vf_call` 之外的裸 `asc_*` 调用，或经典 AscendC 的计算/类型转换/规约调用。

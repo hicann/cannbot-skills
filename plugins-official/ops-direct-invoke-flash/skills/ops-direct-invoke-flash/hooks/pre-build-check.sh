@@ -19,8 +19,9 @@
 
 KERNEL_DIRS=""
 # 待扫描的核函数源码目录候选。可通过 KERNEL_SRC_DIRS 环境变量覆盖（空格分隔），
-# 以适配不同工程布局；默认尝试常见的源码目录名。
-CANDIDATE_DIRS="${KERNEL_SRC_DIRS:-src csrc kernel kernels ops}"
+# 以适配不同工程布局。新布局中算子为扁平的 `operators/{OP}/{OP}.asc`，hook 在算子
+# 工程根目录触发，故默认扫描当前目录（递归，排除 build/）。
+CANDIDATE_DIRS="${KERNEL_SRC_DIRS:-.}"
 for dir in $CANDIDATE_DIRS; do
   if [ -d "$dir" ]; then
     KERNEL_DIRS="$KERNEL_DIRS $dir"
@@ -35,7 +36,7 @@ fi
 # 发现新的违规项时，请扩展此列表。
 HOST_ONLY_PATTERN='ceil_div|align_down|align_up'
 
-MATCHES=$(grep -rn -E "\b($HOST_ONLY_PATTERN)\b" --include='*.cpp' --include='*.asc' $KERNEL_DIRS 2>/dev/null || true)
+MATCHES=$(grep -rn -E "\b($HOST_ONLY_PATTERN)\b" --include='*.cpp' --include='*.asc' --exclude-dir=build --exclude-dir=.git $KERNEL_DIRS 2>/dev/null || true)
 
 if [ -n "$MATCHES" ]; then
   echo "【已阻断】：核函数代码中发现仅 host 侧可用的辅助函数（将在 __aicore__ 编译时失败）：" >&2
@@ -48,7 +49,7 @@ fi
 # Ascend950 Reg API 防护栏。这些检查刻意采用词法层面匹配：在缓慢的构建
 # 进入 device 侧编译之前，提前捕获常见的禁用 API。
 FORBIDDEN_PATTERN='AscendC::MicroAPI|MicroAPI|Membase::|Membase|membase'
-FORBIDDEN_MATCHES=$(grep -rn -E "$FORBIDDEN_PATTERN" --include='*.cpp' --include='*.asc' $KERNEL_DIRS 2>/dev/null || true)
+FORBIDDEN_MATCHES=$(grep -rn -E "$FORBIDDEN_PATTERN" --include='*.cpp' --include='*.asc' --exclude-dir=build --exclude-dir=.git $KERNEL_DIRS 2>/dev/null || true)
 
 if [ -n "$FORBIDDEN_MATCHES" ]; then
   echo "【已阻断】：核函数代码中发现禁用的 Ascend950/Reg API 系列：" >&2
@@ -58,7 +59,7 @@ if [ -n "$FORBIDDEN_MATCHES" ]; then
   exit 2
 fi
 
-RAW_ASC_MATCHES=$(grep -rn -E '\basc_[A-Za-z0-9_]+\s*\(' --include='*.cpp' --include='*.asc' $KERNEL_DIRS 2>/dev/null | grep -v 'asc_vf_call' || true)
+RAW_ASC_MATCHES=$(grep -rn -E '\basc_[A-Za-z0-9_]+\s*\(' --include='*.cpp' --include='*.asc' --exclude-dir=build --exclude-dir=.git $KERNEL_DIRS 2>/dev/null | grep -v 'asc_vf_call' || true)
 
 if [ -n "$RAW_ASC_MATCHES" ]; then
   echo "【已阻断】：核函数代码中发现原始的 asc_* C API 调用：" >&2
@@ -71,8 +72,8 @@ fi
 CLASSIC_COMPUTE_PATTERN='AscendC::(Mul|Muls|Add|Adds|Sub|Div|Exp|Sqrt|Sigmoid|Cast|ReduceSum|Duplicate)\s*\('
 REG_MODE_FILES=$(
   {
-    grep -rl -E 'AscendC::Reg::|__simd_vf__|asc_vf_call' --include='*.cpp' --include='*.asc' $KERNEL_DIRS 2>/dev/null
-    find $KERNEL_DIRS -type f \( -name '*.cpp' -o -name '*.asc' \) -path '*dav-3510*' 2>/dev/null
+    grep -rl -E 'AscendC::Reg::|__simd_vf__|asc_vf_call' --include='*.cpp' --include='*.asc' --exclude-dir=build --exclude-dir=.git $KERNEL_DIRS 2>/dev/null
+    find $KERNEL_DIRS -type f \( -name '*.cpp' -o -name '*.asc' \) -path '*dav-3510*' -not -path '*/build/*' 2>/dev/null
   } | sort -u
 )
 CLASSIC_COMPUTE_MATCHES=""

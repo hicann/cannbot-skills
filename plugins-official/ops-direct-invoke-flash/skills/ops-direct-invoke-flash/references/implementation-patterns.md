@@ -2,22 +2,21 @@
 
 ## 参考算子
 
-在算子工程根目录中选取一个已完成的算子作为结构参考，参考其：
+在 `operators/` 中选取一个已完成的算子作为结构参考，参考其：
 
-- public 头文件形态
-- 源文件布局
-- 测试组织方式
-- case 矩阵结构
-- 核函数入口结构
+- 单文件 `.asc` 的分区方式（device kernel / tiling / host 入口 + `TORCH_LIBRARY` 注册）
+- `CMakeLists.txt` 形态（`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）
+- `test_{OP}.py` 的组织方式
+- `SHAPES` / `DTYPES` 用例矩阵结构
+- 核函数入口与 host 分发结构
 
 不要照搬某个具体算子的数学逻辑。复用的是结构，而非语义。
 
-## 构建与桩阶段
+## 可编译骨架阶段
 
-- 创建 `include/{OP}.h`，其签名与算子的参数个数（arity）相匹配。
-- 创建一个桩 `src/{OP}.cpp`，返回 `Status::Ok()`。
-- 为库和测试添加 CMake 目标。
-- 从桩阶段起就保留 `-xasc` 编译标志；不要推迟到核函数实现时才加上。
+- 创建单文件 `{OP}.asc`：device kernel + tiling + host 入口（参数个数与算子 arity 匹配）+ `TORCH_LIBRARY` 注册的骨架；kernel 留空，host 入口返回空输出张量。
+- 创建 `CMakeLists.txt`：`find_package(ASC)`、`project(op_{OP} LANGUAGES ASC CXX)`、链接 torch_npu，产出 `libop_{OP}.so`。
+- 从骨架阶段起就配置好 ASC 语言与 `--npu-arch` 编译选项；不要推迟到核函数实现时才加上。
 
 ## 定义文档要求
 
@@ -55,20 +54,19 @@
 
 ## 测试套件要求
 
-- 从一个可编译的占位测试开始。
-- 在核函数实现之前先加入 CPU 参考逻辑。
-- 加入 host 侧辅助函数测试与参数化的 NPU 测试。
+- 从一个接口存在性占位测试开始（断言算子注册到 `torch.ops.op_{OP}`）。
+- 以 torch 作为 CPU 参考；在核函数实现之前先写好参考比对逻辑。
+- 加入以 `@pytest.mark.parametrize` 对 `(shape, dtype)` 参数化的 NPU 测试，并用 `@pytest.mark.skipif(not torch.npu.is_available())` 守卫。
 - 除非某个 case 明确针对边界或失败行为，否则生成的输入应保持在算子的有效定义域内。
 
 ## 核函数实现
 
 按以下顺序实现：
 
-1. `CalcTiling<T>()`
-2. tile 处理例程
-3. 核函数入口
-4. host 分发
-5. public API 接线
+1. device kernel `{OP}_kernel<T>()`（按 tile 处理）
+2. tiling 函数 `calc_{OP}_tiling_params()`
+3. `namespace op_{OP}` 中的 host 入口（按 dtype 分发并 launch 核函数）
+4. `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL(op_{OP}, PrivateUse1, m)` 注册
 
 每完成一个有意义的步骤后：
 
@@ -132,8 +130,8 @@ B16 类型转换（Cast）应使用 `AscendC::Reg::CastTrait`，B16 输入用 `L
 - `PipeBarrier<PIPE_V>()` 应遵循真依赖与冒险顺序；在每个向量操作后都加一个虽然安全，但偏保守。
 - UB 到 UB 的 `DataCopy` 并不是任意长度的 `memcpy`。
 - 在计算 DMA 块大小或传输元素数时，对每一种受支持的 dtype 评估 `count * sizeof(T)`。某个元素数对 `float` 满足 32B DMA 最小值（8 个元素），但对 `half` 可能低于最小值（需要 16 个元素）。以 `32 / sizeof(T)` 作为最小元素数。
-- 在 `CMakeLists.txt` 中，`ascend.cmake` 必须在 `project()` 之前 include。
-- 对 `std::uint16_t` 和 `float` 都需要显式的模板实例化。
+- 在 `CMakeLists.txt` 中，`find_package(ASC REQUIRED)` 必须在 `project(op_{OP} LANGUAGES ASC CXX)` 之前调用。
+- device kernel 模板在 host 入口处按 dtype 实例化（如 `{OP}_kernel<float>` / `<half>` / `<int32_t>`），由 dtype 分发驱动，无需单独的显式实例化声明。
 - 在 host 分发代码中使用 RAII 管理 device 侧内存。
 - 在 Ascend950 Reg 路径中，`asc_vf_call` 是唯一允许的原始 `asc_*` 调用。
 - 在 Ascend950 Reg 路径中，经典 AscendC 的计算/类型转换/规约调用应替换为 `AscendC::Reg` wrapper。

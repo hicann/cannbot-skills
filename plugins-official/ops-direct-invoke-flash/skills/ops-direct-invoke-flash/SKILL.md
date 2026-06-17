@@ -19,7 +19,7 @@ hooks:
       hooks:
         - type: command
           command: "${CLAUDE_SKILL_DIR}/hooks/post-edit-reminder.sh"
-          if: "Edit(*/src/*.cpp)|Write(*/src/*.cpp)|Edit(*.asc)|Write(*.asc)"
+          if: "Edit(*.asc)|Write(*.asc)"
           timeout: 5
           statusMessage: "Verifying kernel code conventions..."
 ---
@@ -55,14 +55,14 @@ hooks:
 1. 分析算子来源，提取语义，并在算子工程根目录中选择一个已完成的算子作为结构参考。
 2. 创建 `docs/{OP}/STATE.md`，然后在编写核函数代码之前先完成定义文档和设计文档。
 3. 用子 Agent 评审文档，打磨完善，再以小步增量的方式实现。
-4. 运行本地构建/测试，随后在真实 NPU 硬件上进行远端验证。
+4. 运行本地构建/测试，随后在真实 NPU 硬件上进行验证。
 5. 在 `docs/{OP}/plans/troubleshooting.md` 中记录非平凡问题，并将预防措施反馈回工作流。
 
 ## 主路径
 
 ### 阶段 0：准备
 
-> 注：本工作流中所有相对路径均相对于**算子工程根目录**（即包含 `build.sh` / `CMakeLists.txt` 的目录）。如果该目录不是当前工作目录，请先进入它。
+> 注：本工作流中所有相对路径均相对于**算子工程根目录**（即包含 `CMakeLists.txt` 的目录，例如 `operators/{OP}/`）。如果该目录不是当前工作目录，请先进入它。
 
 1. 对输入进行分类，并据此读取/解析 `$ARGUMENTS`：
    - **文件路径**（磁盘上存在）：读取该文件。分类为 PyTorch/Numpy 片段（`torch.*` / `numpy.*`）、CPU 参考实现（其他 `.py`/`.cpp`/`.c`/`.cu`），或规格说明文档（`.md`/`.txt`/`.rst`）。
@@ -70,12 +70,13 @@ hooks:
 2. 提取或推导算子名 `{OP}`：
    - 如果 `$ARGUMENTS` 是文件，从文件名推导。
    - 如果 `$ARGUMENTS` 是公式或描述，向用户询问一个简短的算子名，或从语义中推导一个。
-3. 确认 `src/{OP}.cpp` 尚不存在。
+3. 确认 `{OP}.asc` 尚不存在。
 4. 创建 `docs/{OP}/plans/`。
 5. 阅读算子工程根目录中一个已完成的算子以了解结构，并阅读 `docs/development_guide.md`。如果不存在已完成的算子，则仅依赖 [references/implementation-patterns.md](references/implementation-patterns.md)。
-6. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
+6. 探测目标芯片：运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/detect_soc.py`，从输出中读取 `SocVersion` 与 `NpuArch`（形如 `dav-3510`）。据此判定后续路径——`NpuArch` 为 `dav-3510`（Ascend950）时走 `AscendC::Reg` 路径。若脚本因无 NPU 或环境缺失而失败，向用户询问目标芯片。这两个值会在阶段 1 记入 STATE.md。
+7. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
 
-**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子。
+**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子，已探测到目标芯片（`SocVersion` / `NpuArch`）。
 
 ### 阶段 1：状态跟踪
 
@@ -91,20 +92,19 @@ hooks:
 
 **退出条件：** STATE.md 已存在并已提交，已创建会话内任务。
 
-### 阶段 2：桩构建
+### 阶段 2：可编译骨架
 
-目标：得到一个可编译的桩，以便开始 TDD。
+目标：得到一个可编译的骨架，以便开始 TDD。
 
-1. 创建 `include/{OP}.h`。
-2. 创建带桩 `Run<T>()` 的 `src/{OP}.cpp`。
-3. 更新 `CMakeLists.txt`。
-4. 创建带占位测试的 `tests/{OP}_test.cpp`。
-5. 在算子工程根目录运行 `bash build.sh && bash run.sh`。
-6. 提交。
+1. 创建单文件 `{OP}.asc`：device kernel + tiling + host 入口 + `TORCH_LIBRARY` 注册的骨架（kernel 可留空，host 入口直接返回空输出张量）。
+2. 创建 `CMakeLists.txt`（参照已完成算子：`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）。
+3. 创建带占位用例的 `test_{OP}.py`（先放一个接口存在性测试）。
+4. 在算子工程根目录构建并运行：`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后回到算子目录运行 `pytest test_{OP}.py -v`。
+5. 提交。
 
 实现细节与代码模式：见 [references/implementation-patterns.md](references/implementation-patterns.md)。
 
-**退出条件：** `build.sh && run.sh` 以 0 退出，占位测试出现在输出中，已提交。
+**退出条件：** cmake/make 构建成功，`pytest` 可运行且占位测试出现在输出中，已提交。
 
 ### 阶段 3：定义文档
 
@@ -151,34 +151,32 @@ hooks:
 
 **退出条件：** 设计文档已存在，两份评审结论均已吸收，已提交。
 
-### 阶段 5：CPU 参考实现与测试套件
+### 阶段 5：测试套件
 
-构建 CPU 参考实现以及完整的 NPU 测试套件：
+在 `test_{OP}.py` 中构建完整的 pytest 测试套件，以 torch 作为 CPU 参考：
 
-- 位于 `tests/{OP}_test.cpp` 的 CPU 参考实现
-- `tests/{OP}_cases.h` 用例矩阵（最少：每个受支持 dtype 一个用例、一个小 shape、一个非 tile 对齐 shape、一个大 shape，以及按定义文档每个边界场景各一个边界值用例）
-- host 侧辅助函数测试
-- 参数化 NPU 测试
+- 模块级 `SHAPES` 用例矩阵（最少：一个小 shape、一个非 tile 对齐 shape、一个大 shape，以及按定义文档每个边界场景各一个边界值用例）与 `DTYPES`（每个受支持 dtype 一项）
+- 接口存在性测试：断言算子已注册到 `torch.ops.op_{OP}` 命名空间
+- 用 `@pytest.mark.parametrize` 对 `(shape, dtype)` 参数化的 NPU 测试：在 NPU 上执行算子，与 torch CPU 参考用 `torch.allclose`（整型用 `torch.equal`）比对；以 `@pytest.mark.skipif(not torch.npu.is_available())` 守卫
 
-检查测试命名：如果 `{OP}` 与标准库数学符号冲突（例如 `erf`、`sinh`、`exp`），避免使用顶层 `namespace {OP}` —— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 测试命名冲突。
+检查命名：算子 host 入口应放在 `namespace op_{OP}` 内（而非顶层 `namespace {OP}`），以避免与标准库数学符号冲突（例如 `erf`、`sinh`、`exp`）—— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 测试命名冲突。
 
-构建并运行：
-- host 侧辅助函数测试应当通过
-- 桩化的 NPU 测试应当失败
+构建并运行 `pytest test_{OP}.py -v`：
+- 接口存在性测试应当通过
+- 骨架的 NPU 测试应当失败（或在无 NPU 时被 skip）
 
 提交。
 
-**退出条件：** 测试可编译，host 侧测试通过，针对桩的 NPU 测试失败，已提交。
+**退出条件：** 测试套件就绪，接口测试通过，针对骨架的 NPU 测试失败，已提交。
 
 ### 阶段 6：核函数实现
 
-在 `src/{OP}.cpp` 中增量实现：
+在 `{OP}.asc` 中增量实现：
 
-1. `CalcTiling<T>()`
-2. `{OP}_process_tile<T>()`
-3. `{OP}_kernel<T>()`
-4. `RunOnDevice<T>()`
-5. 公开的 `Run<T>()`
+1. device kernel `{OP}_kernel<T>()`（`__global__ __aicore__`，按 tile 处理 UB 数据）
+2. tiling 函数 `calc_{OP}_tiling_params()`（返回 numBlocks / blockLength / tileSize）
+3. `namespace op_{OP}` 中的 host 入口：按 dtype 分发，以 `{OP}_kernel<dtype><<<numBlocks, nullptr, aclStream>>>(...)` 启动核函数并返回输出张量
+4. `TORCH_LIBRARY(op_{OP}, m)` 的 schema 定义与 `TORCH_LIBRARY_IMPL(op_{OP}, PrivateUse1, m)` 的实现绑定
 
 对于 Ascend950 / `dav-3510`，按 [references/reg-api-guide.md](references/reg-api-guide.md) 中的 Reg 形态实现向量计算、cast 和规约：
 
@@ -200,24 +198,22 @@ hooks:
 
 **退出条件：** 所有本地测试通过，已提交。
 
-### 阶段 7：远端验证
+### 阶段 7：验证
 
-使用仓库由提交触发的远端验证流程：
+在目标 NPU 硬件上做最终验证：
 
 1. 本地提交
-2. 检视远端的构建/测试日志
-3. 迭代直到远端验证通过
+2. 在 NPU 上完整构建并运行测试套件：`cmake/make` 后 `pytest test_{OP}.py -v`
+3. 检视构建/测试日志，迭代直到全部用例通过
 
-将 `{OP}` 添加到 `run.sh` 时，将其测试二进制放在靠前的位置 —— 排在已知存在偶发失败的算子之前。
+在提交前，确认核函数源码包含完整实现（而非阶段 2 的骨架）。陈旧构建产物的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 构建新鲜度。
 
-在提交前，确认核函数源码包含完整实现（而非阶段 2 的桩）。陈旧输出的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 远端构建新鲜度。
-
-**退出条件：** 远端构建通过，远端测试通过。
+**退出条件：** NPU 上构建通过，测试套件全部通过。
 
 ### 阶段 8：收尾文档
 
 1. 在 `docs/index.md` 中加入新算子。
-2. 更新 `CLAUDE.md`。
+2. 更新 `AGENTS.md`。
 3. 确认 STATE.md 所有勾选框均已勾选。
 4. 将所有剩余任务标记为已完成。
 5. 做最后一次文档提交。
@@ -240,7 +236,7 @@ hooks:
 - 等待完成通知；在继续之前确认结论文件存在且包含判定
 
 **隔离探查** —— 使用 `subagent_type="Explore"` 进行只读研究：
-- 在 `src/` 范围内查找参考算子模式
+- 在 `operators/` 范围内查找参考算子模式
 - 搜索 AscendC 文档以获取 API 细节
 
 **worktree 隔离** —— 当 Agent 编辑共享文件时使用 `isolation="worktree"`：
@@ -273,5 +269,6 @@ hooks:
 - [references/review-prompts.md](references/review-prompts.md)：子 Agent 评审提示词模板
 - [references/common-failure-modes.md](references/common-failure-modes.md)：故障排查模板及反复出现的陷阱
 - [references/agent-team-patterns.md](references/agent-team-patterns.md)：多算子移植的 Agent Team 协同
+- [scripts/detect_soc.py](scripts/detect_soc.py)：探测当前 NPU 的 `SocVersion` 与 `NpuArch`（dav-*），用于阶段 0 判定目标芯片
 - [hooks/pre-build-check.sh](hooks/pre-build-check.sh)：自动化的构建前校验（检测 host-only 辅助函数）
 - [hooks/post-edit-reminder.sh](hooks/post-edit-reminder.sh)：编辑后的核函数规范检查

@@ -9,7 +9,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-# 核函数 .cpp 文件的编辑后钩子：检查常见陷阱。
+# 核函数 .asc 文件的编辑后钩子：检查常见陷阱。
 #
 # 该钩子只给出警告（exit 0），而非阻断（exit 2），
 # 因为编辑可能是增量进行的，相关问题会在后续步骤中修复。
@@ -50,10 +50,11 @@ if grep -q 'DataCopyPad' "$FILE_PATH" 2>/dev/null; then
   fi
 fi
 
-# 检查 4：缺少模板显式实例化
-if grep -q 'template.*Run\|RunOnDevice\|process_tile' "$FILE_PATH" 2>/dev/null; then
-  if ! grep -q 'uint16_t\|std::uint16_t' "$FILE_PATH" 2>/dev/null; then
-    WARNINGS="${WARNINGS}【提醒】可能缺少针对 uint16_t（fp16）的模板显式实例化。\n"
+# 检查 4：host 分发是否覆盖 fp16/half 路径
+# 核函数模板 {OP}_kernel<T> 由 host 入口按 dtype 实例化（如 at::kHalf -> <half>）。
+if grep -qE '_kernel\s*<|__global__ __aicore__' "$FILE_PATH" 2>/dev/null; then
+  if ! grep -qE 'kHalf|<half>|\bhalf\b' "$FILE_PATH" 2>/dev/null; then
+    WARNINGS="${WARNINGS}【提醒】host 分发可能缺少 fp16/half（at::kHalf -> {OP}_kernel<half>）路径。\n"
   fi
 fi
 

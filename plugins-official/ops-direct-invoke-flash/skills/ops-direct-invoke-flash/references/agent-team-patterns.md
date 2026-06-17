@@ -47,13 +47,12 @@ Agent(name="{OP2}-porter", subagent_type="general-purpose",
 
 | 文件 | 冲突风险 | 缓解措施 |
 |------|---------------|------------|
-| `CMakeLists.txt` | 高——两个 Agent 都会添加构建目标 | 使用 worktree 隔离；最后合并 |
-| `run.sh` | 高——两个 Agent 都会添加测试二进制 | 使用 worktree 隔离；最后合并 |
-| `src/{OP}.cpp` | 无——每个算子对应不同文件 | 可安全并行工作 |
-| `include/{OP}.h` | 无——每个算子对应不同文件 | 可安全并行工作 |
-| `tests/{OP}_test.cpp` | 无——每个算子对应不同文件 | 可安全并行工作 |
+| `docs/index.md` / `AGENTS.md` | 高——多个 Agent 都要登记各自的算子 | 使用 worktree 隔离；最后合并 |
+| `operators/{OP}/{OP}.asc` | 无——每个算子独立目录 | 可安全并行工作 |
+| `operators/{OP}/CMakeLists.txt` | 无——每个算子独立目录 | 可安全并行工作 |
+| `operators/{OP}/test_{OP}.py` | 无——每个算子独立目录 | 可安全并行工作 |
 
-当 Agent 需要修改 `CMakeLists.txt` 或 `run.sh` 等共享文件时，务必使用 `isolation="worktree"`。
+当 Agent 需要修改 `docs/index.md`、`AGENTS.md` 等共享的仓库级文件时，务必使用 `isolation="worktree"`。
 
 ## 合并策略
 
@@ -61,8 +60,8 @@ Agent(name="{OP2}-porter", subagent_type="general-purpose",
 
 1. 指定一个 Agent（或主控 Agent）作为合并协调者。
 2. 将各 worktree 分支依次合并到主分支。
-3. 通过合并各分支的构建目标列表来解决 `CMakeLists.txt` 冲突。
-4. 通过合并各测试二进制条目来解决 `run.sh` 冲突。
+3. 通过合并各算子的登记条目来解决 `docs/index.md` 冲突。
+4. 通过合并各算子的条目来解决 `AGENTS.md` 冲突。
 5. 在最终合并后执行完整的构建与测试，以验证集成结果。
 
 ## 通信模式
