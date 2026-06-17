@@ -518,7 +518,11 @@ Copy(MakeCopy(CopyL0C2GM{}), gmC, tensorL0C, FixpipeParams{/*unitFlag=*/FINAL_AC
 | 编译报 `cannot bind non-const lvalue reference to ... rvalue` | `MakeMemPtr<L1, T>(offset)` 的 offset 未乘 `sizeof(T)` | offset **必须是字节偏移** |
 | 每个 tile 前 16 列对、后续错 | `BLOCK_CUBE_L0C` 错写成 `32/sizeof(L0CType)` | dav-3510 上**恒硬编码 = 16** |
 | 单 tile PASS、多 tile FAIL | L0C ping-pong 半区重叠：`HALF_L0C_SIZE` 多除了 `sizeof` | `HALF_L0C_SIZE = L0C_SIZE / 2`，**不要**再除 `sizeof(L0CType)` |
-| Layout/NZ 相关问题（mismatch、路径全错、stride 不匹配、C0 错误等） | launcher layout 未跟 trans 同步、gen_data 未按规则转换、Slice 顺序错误、FrameLayoutFormat C0 错误等 | 详见 [`matmul_layout_guide.md`](matmul_layout_guide.md) §8 排障速查 |
+| ≈100% mismatch，仅 transA/B 某方向触发 | launcher 里 LayoutA/B 硬编码未跟 trans 标志同步 | 用 `conditional_t<trans, ZN, NZ>`，不要硬编码 |
+| B-NZ 路径全错 | gen_data 未对物理 ND 数据做 NZ 转换（transB=true 时应 `to_nz_format([N,K])`，transB=false 时应 `to_nz_format([K,N])`）；或 baseN 未 C0 对齐；或缺 `TagToTrans<NZLayoutPtn>` / `TagToTrans<ZNLayoutPtn>` 特化；或 `to_nz_format` 的 c0 参数未按 dtype 传入 | 五步预防：①对物理 ND 数据调用 `to_nz_format` ②baseN%C0==0 ③加 NZ+ZN 两个 TagToTrans 特化 ④c0 按 dtype 显式传入 ⑤Slice 顺序：kernel N/M-slice + block K-slice |
+| NZ 路径全错 | gen_data NZ 排列顺序错误（应为 `permute(2,0,1,3)` 而非 `(0,2,1,3)`）；或 Host size 按逻辑维度计算；或缺 `TagToTrans<NZ/ZN>` 特化 | 四步预防：①`permute(2,0,1,3)` ②`CalcNzSize` 按物理维度 ③加 NZ+ZN 两个特化 ④Slice 顺序：kernel N/M-slice + block K-slice |
+| NZ K≤16 PASS，K>16 多 tile FAIL | Slice 顺序错误：block 层同时切 K+N 导致 NZ stride 不匹配 | kernel 层先 N/M-slice（保留 fullK），block 层只 K-slice |
+| NZ 多 tile FAIL，单 tile PASS | GM 端 `FrameLayoutFormat<NZLayoutPtn>` 使用默认 C0=16（基于 uint16_t），但 int8/fp8 需要 C0=32 | 修复：`FrameLayoutFormat<NZLayoutPtn, Std::Int<32/sizeof(Type)>>`；L1 端 `L1LayoutHelper` 已正确处理，此问题仅影响 GM 端 |
 | FP4/FP8 stride 错位 | 自定义 stride 未考虑 B4/B8 底层差异 | 用 `LayoutTraitFP4` / `LayoutTraitDefault<fp8_*>`，库内部已处理 |
 | dav-2201 上 routing 静默不搬运 | 当前 routing 表仅 V3510 有特化，其他架构落到 `*Ignore` | 编译期校验 `CURRENT_ARCH_VERSION == ArchVersion::V3510`，否则 `static_assert` |
 

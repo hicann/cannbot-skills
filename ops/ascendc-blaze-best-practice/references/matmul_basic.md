@@ -84,6 +84,11 @@ dtype 速查：
 2. `matmul_block_mmad.h` 复制一份 SFINAE 特化，`enable_if_t` base 类换成新 tag
 3. launcher 切换 `using DispatchPolicy = ...`
 
+> 该方法只用于 MMAD trait / A-B 数据路径确实不同的计算变体。direct vs fusion 的
+> L0C 终端输出差异由传入 `BlockMmad` 的输出 Tensor location 覆盖：direct kernel
+> 传 GM Tensor，fused kernel 传 UB Tensor。不要为 fusion 复制
+> `matmul_block_mmad*.h`、增加 `BlockMmad` 模板参数或扩展 `DispatchPolicy`。
+
 ### 2.4 调大 L1 stage 数（2 → 4）
 
 1. `dispatch_policy.h` 加 `STAGES_` 模板参数

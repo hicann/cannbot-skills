@@ -2,15 +2,16 @@
 
 > **适用架构**：DAV_3510（CANN 9.0.0-beta.2）
 >
-> **统一模板 + 多份文档**：一份代码 `matmul_custom/` 同时承载**纯AIC**（`matmul_custom.cpp`；NO_FULL_LOAD / A_FULL_LOAD 两种 mode，切换 3 行 diff）和 **FixpOpti**（`matmul_fixpopti.cpp` + `include/kernel/matmul_kernel_fused.h` + `include/epilogue/`）两条模板路径。B_FULL_LOAD 与 StreamK 仍为设计草案。
+> **统一模板 + 多份文档**：一份代码 `matmul_custom/` 同时承载**纯AIC**（`matmul_custom.cpp`；NO_FULL_LOAD / A_FULL_LOAD 两种 mode，切换 3 行 diff）和 **FixpOpti**（`matmul_fixpopti.cpp` + `include/kernel/matmul_kernel_fused.h` + `include/epilogue/`）两条模板路径。direct/fusion 的 L0C 终端输出差异由传入 `BlockMmad` 的 tensor_api 输出 Tensor location 表达：GM Tensor 触发 CopyL0C2GM，UB Tensor 触发 CopyL0C2UB；不通过复制 `BlockMmad`、增加 `BlockMmad` 模板参数或扩展 `DispatchPolicy` 表达。B_FULL_LOAD 与 StreamK 仍为设计草案。
 > - `matmul_pattern.md`（本文）— 入口、模式总览、模板复制、共享基础：四层抽象 / Cube 内存 / 流水 / Layout / Launcher / 排错 / 三模板体系
 > - [`matmul_basic.md`](matmul_basic.md) — NO_FULL_LOAD_MODE 深度（SWAT Tiling + dtype/Bias/量化/stage 改造）
 > - [`matmul_full_load.md`](matmul_full_load.md) — A_FULL_LOAD_MODE 深度（A 常驻 L1 跨 N-tile 复用）；B_FULL_LOAD 对称设计
 > - [`matmul_fixpopti.md`](matmul_fixpopti.md) — FixpOpti 改造食谱（启用 launcher + `[MODIFY] N/C/A/E` 标记）
+> - [`group_matmul.md`](group_matmul.md) — GroupMatmul 分组矩阵乘：M/K 轴 `groupList` 契约、scheduler/kernel 边界、epilogue hook 边界
 >
-> **模板覆盖范围**：`matmul_custom/` 同时承载纯 AIC 模板（`__aicore__ __cube__`，AIV 直接返回）与 FixpOpti 模板（`__mix__(1, 2)`，AIC+AIV 混合 + CV 同步）。StreamK（AIC+AIV 混合 K 切分）仍为设计文档，选择决策见 §10。
+> **模板覆盖范围**：`matmul_custom/` 同时承载纯 AIC 模板（`__aicore__ __cube__`，AIV 直接返回）与 FixpOpti 模板（`__mix__(1, 2)`，AIC+AIV 混合 + CV 同步）。GroupMatmul 在 Matmul 基底上提供 M 轴分组参考，并说明 K 轴分组接入边界；它不是独立全量 Matmul fork。StreamK（AIC+AIV 混合 K 切分）仍为设计文档，选择决策见 §10。
 >
-> 阅读顺序：先看一遍 `tensor_api_user_guide.md` 了解 API → §10 选模板（三模板体系）→ 选定纯AIC 后 §0 选 mode → §0.5 复制+改造；选 FixpOpti 跳到 [`matmul_fixpopti.md`](matmul_fixpopti.md) §3 改造 → 共享基础 §1–§9 按需查阅。
+> 阅读顺序：先看一遍 `tensor_api_user_guide.md` 了解 API → §10 选模板（三模板体系）→ 选定纯AIC 后 §0 选 mode → §0.5 复制+改造；选 FixpOpti 跳到 [`matmul_fixpopti.md`](matmul_fixpopti.md) §3 改造；选 GroupMatmul 跳到 [`group_matmul.md`](group_matmul.md) → 共享基础 §1–§9 按需查阅。
 
 ### Quickstart（5 分钟最快上手）
 
@@ -30,7 +31,7 @@ bash run.sh
 
 ## 0. 模式总览
 
-`matmul_custom/` 模板当前**已交付两种** dispatch mode（NO_FULL_LOAD / A_FULL_LOAD），通过 `MatmulMultiBlockPolicy<MODE>` 区分。B_FULL_LOAD 见表后 NOTE，仅有设计草案，工程代码未交付：
+`matmul_custom/` 模板当前**已交付两种** dispatch mode（NO_FULL_LOAD / A_FULL_LOAD），通过 `MatmulMultiBlockPolicy<MODE>` 区分；L0C 输出目的地由 kernel 传入 `BlockMmad` 的输出 Tensor location 区分，direct kernel 传 GM Tensor，fused kernel 传 UB Tensor。B_FULL_LOAD 见表后 NOTE，仅有设计草案，工程代码未交付：
 
 | 维度 | NO_FULL_LOAD_MODE（默认） | A_FULL_LOAD_MODE |
 |---|---|---|
@@ -98,7 +99,7 @@ cp -r references/matmul_custom <your_project_name> && cd <your_project_name>
 | `include/block/matmul_block_mmad_a_full_load.h` | A_FULL_LOAD_MODE 特化（A 单缓冲 + abL1LoopCnt_） |
 | `include/block/matmul_block_scheduler.h` | Serpentine 调度器，注册 NO_FULL_LOAD / A_FULL_LOAD 两个 mode（B_FULL_LOAD 未注册） |
 | `include/tiling/matmul_tiling.h` | `MatmulTilingSwat` + `MatmulTilingAFullLoad`（`MatmulTilingBFullLoad` 未实现） |
-| `include/policy/dispatch_policy.h` | `MatmulMultiBlockPolicy<MODE>` dispatch tag（`common_utils.h` 仅定义 NO_FULL_LOAD=0 / A_FULL_LOAD=1） |
+| `include/policy/dispatch_policy.h` | `MatmulMultiBlockPolicy<MODE>` dispatch tag（`common_utils.h` 仅定义 NO_FULL_LOAD=0 / A_FULL_LOAD=1）。L0C 写 GM/UB 由传给 `BlockMmad` 的输出 Tensor location 决定 |
 | `run.sh` | 一键编译+生成数据+运行+校验；`--skip-build` 跳过编译 |
 
 ### 0.5.3 mode 切换：3 行 diff
@@ -123,6 +124,7 @@ cp -r references/matmul_custom <your_project_name> && cd <your_project_name>
 - 锁 `transA=transB=false`
 - `run.sh` 改为 `M=128 K=256 N=4096 TRANS_B=false`，锁 `mTailTile=1`（Tiling 引擎自动设 `tilingData.mTailCnt=1`）
 - 不满足 L1 容量时 Tiling 直接 throw，提示退回 NO_FULL_LOAD_MODE
+- 如果当前是 FixpOpti/fusion launcher，A 全载时仍只切 `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>`；融合输出由 `MatmulKernelFused` 传 UB Tensor 触发，不要手改 `BlockMmad`。
 
 ## 1. 四层抽象
 
@@ -133,13 +135,13 @@ MatmulKernel<..., BlockMmad, BlockScheduler>  ← 构造 GM Tensor，驱动循�
         │
 BlockMmad<DispatchPolicy, AType, LayoutA, BType, LayoutB, CType, LayoutC>
         │                            ← L1 双缓冲 + L0 ping-pong + MMAD 流水
-tensor_api (Mmad/CopyGM2L1/CopyL12L0A/CopyL12L0B/CopyL0C2GM)
+tensor_api (Mmad/CopyGM2L1/CopyL12L0A/CopyL12L0B/CopyL0C2GM/CopyL0C2UB)
                                      ← 硬件指令
 ```
 
 | 层 | 典型改点 |
 |---|---|
-| Launcher | dtype/byte size、输入输出个数 |
+| Launcher | dtype/byte size、输入输出个数、full-load policy |
 | MatmulKernel | 新增 bias/scale 时追加 GM 视图 |
 | BlockMmad | Buffer 容量、stage 数、MMAD Trait |
 | tensor_api | 一般不动；切换架构改 `--npu-arch` |
@@ -150,6 +152,7 @@ dav-3510 容量：**L1=512KB / L0A=L0B=64KB / L0C=256KB / BT=4KB**。
 
 ```
 GM ─CopyGM2L1─▶ L1 ─CopyL12L0A/B─▶ L0A/L0B ─Mmad─▶ L0C ─CopyL0C2GM(fixpipe)─▶ GM
+                                                      └─CopyL0C2UB(fusion)─▶ UB ─Epilogue─▶ GM
                                            └── L1 ─CopyL12BT─▶ BIAS (可选)
 ```
 
@@ -256,11 +259,16 @@ struct Params {
 | 现象 | 根因 |
 |---|---|
 | fixpipe 写回全 0 | `cmatrixInitVal` 第二次 K 迭代仍为 true；或 unitFlag 未设 `FINAL_ACCUMULATION` |
+| ≈100% mismatch，仅 transA/B 某方向触发 | launcher 里 layout 硬编码未跟 trans 标志同步 |
 | 精度偏大（rtol 略超 1e-3） | `kL1` 非 `baseK` 整数倍；或首次 `cmatrixInitVal=false` |
 | 大 K（>2K）退化 | baseK 过小，bf16 累加误差累积；可 `dbL0c=2` |
 | 每个 tile 前 16 列对，后续错 | `BLOCK_CUBE_L0C` 错写成 `32/sizeof(L0CType)` |
 | 单 tile PASS，多 tile FAIL | L0C ping-pong 半区重叠（`HALF_L0C_SIZE` 多除了 `sizeof`） |
-| Layout/NZ 相关问题 | 详见 [`matmul_layout_guide.md`](matmul_layout_guide.md) §8 排障速查 |
+| B-NZ 路径全错 | gen_data 未对物理 ND 数据做 NZ 转换（transB=true 时应 `to_nz_format([N,K])`，transB=false 时应 `to_nz_format([K,N])`）；或 baseN 未 C0 对齐；或 `TagToTrans<NZ/ZN>` 漏特化；或 `to_nz_format` 的 c0 参数未按 dtype 传入 |
+| NZ 输入 K≤16 PASS，K>16 + 多 N/M-tile FAIL | Slice 顺序错误——block 层同时切 K+N（或 K+M）导致 NZ column stride 不匹配。kernel 层必须先做 N/M-slice（保留 fullK stride），block 层只做 K-slice |
+| NZ 输入全 FAIL（所有 shape） | gen_data NZ 排列顺序错误——应为 `permute(2,0,1,3)` 产出 `(dim1/C0, dim0/16, 16, C0)`，而非 `permute(0,2,1,3)` |
+| NZ 输入多 tile FAIL，单 tile PASS | GM 端 `FrameLayoutFormat<NZLayoutPtn>` 使用默认 C0=16，但 int8/fp8 需要 C0=32。修复：`FrameLayoutFormat<NZLayoutPtn, Std::Int<32/sizeof(Type)>>` |
+| NZ 输入文件大小不匹配 | Host 侧 sizeA/sizeB 按逻辑维度计算，应按 NZ 物理维度 `CalcNzSize(dim0, dim1, c0)` 计算 |
 
 定位流程：先单 tile（32×32×32）验证计算逻辑，再多 tile（256×256×256）暴露同步/半区/fixpipe 问题。
 
@@ -286,7 +294,9 @@ bash run.sh --skip-build 256 256 256     # 跳过编译，复用 build/ 产物
 
 ## 10. 三模板体系与选择
 
-`matmul_custom/` 是本 skill 的**纯 AIC 模板**。Matmul 单算子生成共有 3 种模板，分别对应不同的 AIC/AIV 执行模式：
+`matmul_custom/` 是**纯 AIC 模板**基底。Matmul 单算子生成共有 3 种模板，分别对应不同的 AIC/AIV 执行模式。
+
+GroupMatmul 是 Matmul 基底上的分组矩阵乘路径：M 轴分组 GroupMatmul 使用 group-aware scheduler 和读取 runtime `groupList` 的 group loop kernel，复用调用方提供的 `BlockMmad`/tiling/policy/epilogue hook；K 轴分组 GroupMatmul 当前只说明契约和接入边界，不新增 K 维 scheduler，若后续实现则仍复用 M/N tile scheduler，由 kernel 侧刷新 `k_e`、维护 prefix-K，并先确认输出分片或归约语义。运行时契约和边界见 [`group_matmul.md`](group_matmul.md)。
 
 ### 10.1 三模板总览
 

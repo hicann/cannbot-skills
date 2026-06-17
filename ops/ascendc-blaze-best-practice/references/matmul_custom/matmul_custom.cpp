@@ -214,10 +214,10 @@ int main(int argc, char* argv[])
         MatmulTilingData tilingData;
         if (mode == "a_full") {
             MatmulTilingAFullLoad tilingEngine;
-            tilingEngine.GetTilingData(m, n, k, tilingData);
+            tilingEngine.GetTilingData(m, n, k, tilingData, transA, transB, aLayout == "nz", bLayout == "nz");
         } else {
             MatmulTilingSwat tilingEngine;
-            tilingEngine.GetTilingData(m, n, k, tilingData);
+            tilingEngine.GetTilingData(m, n, k, tilingData, transA, transB, aLayout == "nz", bLayout == "nz");
         }
 
         AclRtSession aclSession(deviceId);

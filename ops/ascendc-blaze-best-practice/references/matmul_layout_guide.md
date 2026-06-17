@@ -267,17 +267,18 @@ NZ 格式的物理排列为 `(dim1/C0, dim0/16, 16, C0)`，其中：
 
 | 轴 | 外轴场景（→16） | 内轴场景（→C0） | 约束 |
 |----|---------------|----------------|------|
-| baseM | transA=false | transA=true | `Align(baseM, transA ? C0 : 16)` |
-| baseN | transB=true | transB=false | `Align(baseN, transB ? 16 : C0)` |
-| baseK | — | — | `Align(baseK, C0)`（始终 C0 对齐） |
+| baseM | A-NZ && transA=false | A-NZ && transA=true | `Align(baseM, isANz && transA ? C0 : 16)` |
+| baseN | B-NZ && transB=true | B-NZ && transB=false | `Align(baseN, isBNz && !transB ? C0 : 16)` |
+| baseK | A-NZ && transA=true；B-NZ && transB=false | A-NZ && transA=false；B-NZ && transB=true | `Align(baseK, ((isANz && !transA) || (isBNz && transB)) ? C0 : 16)` |
 
 **Tiling 引擎代码**：
 
 ```cpp
 constexpr uint64_t C0 = 32 / sizeof(AType);
-runInfo_.baseM = Align(runInfo_.baseM, args_.isATrans ? C0 : static_cast<uint64_t>(16));
-runInfo_.baseN = Align(runInfo_.baseN, args_.isBTrans ? static_cast<uint64_t>(16) : C0);
-runInfo_.baseK = Align(runInfo_.baseK, C0);
+runInfo_.baseM = Align(runInfo_.baseM, args_.isANz && args_.isATrans ? C0 : static_cast<uint64_t>(16));
+runInfo_.baseN = Align(runInfo_.baseN, args_.isBNz && !args_.isBTrans ? C0 : static_cast<uint64_t>(16));
+runInfo_.baseK = Align(runInfo_.baseK,
+    (args_.isANz && !args_.isATrans) || (args_.isBNz && args_.isBTrans) ? C0 : static_cast<uint64_t>(16));
 ```
 
 **常见错误**：用条件表达式（如 `if (isBTrans || !isATrans)`）控制 baseN 的 C0 对齐，在 transA=true+transB=false 时条件为 false，baseN 未对齐。此时 B 为 NZ of (K,N)，N 是内轴需要 C0 对齐，未对齐导致 `CopyGmToCbufAlignV2NZ` block copy 失败。对齐 shape（如 N=256）不受影响因为 N 本身已是 C0 的倍数。
