@@ -13,6 +13,7 @@ skills:
   - ascendc-registry-invoke-template
   - ascendc-direct-invoke-template
   - ascendc-regbase-best-practice
+  - ascendc-blaze-best-practice
 permission:
   external_directory: allow
 ---

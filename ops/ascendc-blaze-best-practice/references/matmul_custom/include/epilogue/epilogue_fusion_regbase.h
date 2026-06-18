@@ -147,6 +147,10 @@ public:
         outputGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ OutputType*>(params.outputGmAddr));
         // [USER T2] 绑定额外输入的 GM 地址
         extraInputGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ ComputeType*>(params.extraInputAddr));
+    
+        // 多轮搬入UB时，MTE2需要反向等待Vec消费，在Init中设置首轮SetFlag
+        // 非多轮GM->UB时可删除 V_MTE2 的反向同步等待(包括operator()和析构函数中的同步)
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
     }
 
     __aicore__ inline auto GetTensor() { return cLocal_; }
@@ -178,6 +182,9 @@ public:
         // 示例：加载 1 行 scale 数据
         //   int64_t nPos = dstOffset % N;
         //   DataCopyPad(extraBuf_, extraInputGlobal_[nPos], ...);
+
+        // MTE2反向等待上一轮Vec消费，非多轮搬运时可删除
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
         {
             int64_t nPos = dstOffset % N;
             uint16_t nRows = 1;
@@ -288,9 +295,18 @@ public:
 
             stageOffset += rowsThisStage;
         }
+        // 通知下一轮MTE2可以开始搬运，非多轮搬运时可删除
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
     }
 
     __host_aicore__ static Params InitParams(Params const& args) { return args; }
+
+    __aicore__ ~EpilogueFusionRegBase()
+    {
+        // 析构函数中设置最后一轮反向等待的WaitFlag
+        // 非多轮GM->UB搬运时可删除
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+    }
 };
 
 #endif // __CCE_AICORE__

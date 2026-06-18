@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-06-17】
+#### 特性增强 Feature Enhancement
+- 【ops-registry-invoke】支持调用ascendc-blaze-best-practice生成matmul类算子，并补充CV融合算子样例工程。
+
 ### 【2026-06-10】
 #### 特性增强 Feature Enhancement
 - 【算子直调，ops-direct-invoke】支持 Kirin 系列芯片开发，当前支持 Simulator 开发方式：**ascendc-direct-invoke-template** 直调模板新增 Kirin Vector 算子样例工程；**ascendc-env-check** 新增 Simulator 可运行性检查步骤；**npu-arch** 新增 Kirin 端侧硬件参数；**ops-direct-invoke workflow** 的 verify_environment.sh 新增 Simulator 支持情况检查；

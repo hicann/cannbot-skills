@@ -76,6 +76,34 @@ add_example/
     └── st/             # 系统测试
 ```
 
+### references/matmul_blaze_example/
+
+完整的 基于blaze的matmul类 算子实现，包含：
+
+```
+matmul_blaze_example/
+├── build.sh            # 构建脚本
+├── CMakeLists.txt      # CMake配置
+├── op_host/            # Host侧实现
+│   ├── quant_matmul_gelu_example_def.cpp        # 算子定义
+│   ├── quant_matmul_gelu_example_infershape.cpp # Shape推导
+│   └── arch35/                                  # Ascend950 Tiling
+├── op_kernel/          # Kernel侧实现
+│   ├── quant_matmul_gelu_example_arch35.cpp   # Ascend950 Kernel
+│   └── arch35/                                # Ascend950 实现头文件
+├── op_api/             # ACLNN接口
+│   ├── quant_matmul_gelu_example.cpp/h   # L2 API（对外接口）
+│   └── quant_matmul_gelu_example.cpp/h   # L0 API（内部实现）
+├── op_graph/           # 图模式适配
+├── examples/           # 用户调用示例
+│   ├── test_aclnn_quant_matmul_gelu_example.cpp  # aclnn两段式调用示例
+└── tests/              # UT/ST测试
+    ├── ut/             # 单元测试
+    │   ├── op_host/    # Host侧UT
+    │   └── op_api/     # API侧UT
+    └── st/             # 系统测试
+```
+
 ### references/basic-guide.md
 
 基础开发指南精要：

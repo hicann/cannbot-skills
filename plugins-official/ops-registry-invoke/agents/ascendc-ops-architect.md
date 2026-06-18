@@ -12,6 +12,7 @@ skills:
   - ascendc-docs-search
   - ops-precision-standard
   - ascendc-regbase-best-practice
+  - ascendc-blaze-best-practice
   - ops-spec-gen
 permission:
   external_directory: allow

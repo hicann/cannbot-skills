@@ -158,7 +158,7 @@ GM ─CopyGM2L1─▶ L1 ─CopyL12L0A/B─▶ L0A/L0B ─Mmad─▶ L0C ─Copy
 
 关键约束：
 - **L0C 累加 dtype**：bf16/fp16/fp8 → fp32 L0C；**int8 → int32 L0C**。模板用 `L0CType = conditional_t<is_same_v<AType, int8_t>, int32_t, float>` 派生
-- **BLOCK_CUBE**（C0 维度）：bf16/fp16 = 16，int8/fp8 = 32，fp4 = 64
+- **BLOCK_CUBE**（C0 维度）：fp32 = 8, bf16/fp16 = 16，int8/fp8 = 32，fp4 = 64
 - **BLOCK_CUBE_L0C**：dav-3510 上**恒为 16**，不要用 `32/sizeof(L0CType)` 推导（fp32 时 = 8，导致 fixpipe stride 减半）
 
 ## 3. BlockScheduler：Serpentine 遍历
@@ -238,8 +238,12 @@ struct Params {
 | M / N | baseM/baseN 是 16 倍数（tiling 自动兜底） |
 | K | `kL1` 是 `baseK` 整数倍；`baseK` ≤ 256（L0A 限制） |
 | fp8 BLOCK_CUBE | C0 = **32**（与 bf16/fp16=16 不同） |
-| NZ 输入 | dim0 对齐到 16，dim1 对齐到 C0（fp16/bf16: C0=16, fp8/int8: C0=32） |
+| fp32 BLOCK_CUBE | C0 = **8**（与 bf16/fp16=16 不同） |
+| NZ输入 | dim0 对齐到 16, dim1 对齐到 C0 (fp16/bf16: C0=16, fp8/int8: C0=32) |
 | GM 地址 | 1B 对齐即可 |
+| L1 地址 | 必须 32B 对齐 |
+| UB 地址 | 必须 32B 对齐 |
+
 
 ## 8. 排障速查
 

@@ -96,7 +96,7 @@ public:
     static constexpr uint64_t L1_BUFFER_MASK = L1_BUFFER_NUM - 1UL;
     static constexpr uint64_t L1_BUFFER_GROUP_NUM = L1_BUFFER_NUM >> 1;
     static constexpr uint64_t HALF_L0_SIZE = L0A_SIZE / DOUBLE_BUFFER_COUNT;
-    // [CONFIG] L0C 累加 dtype。bf16/fp16/fp8 输入用 fp32 累加；int8 输入用 int32 累加。
+    // [CONFIG] L0C 累加 dtype。fp32/bf16/fp16/fp8 输入用 fp32 累加；int8 输入用 int32 累加。
     // 硬件 MMAD/Fixpipe 静态检查会拒绝 int8 -> float 组合。
     using L0CType = AscendC::Std::conditional_t<
         AscendC::Std::is_same_v<AType, int8_t>, int32_t, float>;
@@ -105,7 +105,7 @@ public:
     // 为正确值的 1/4），单 tile 不出问题、多 tile per core 时第二片 tile 直接覆写
     // 第一片的 L0C 数据。
     static constexpr uint64_t HALF_L0C_SIZE = L0C_SIZE / DOUBLE_BUFFER_COUNT;
-    // [CONFIG] C0 cube granularity: bf16/fp16 = 16; int8/fp8 = 32; fp4 = 64。
+    // [CONFIG] C0 cube granularity: fp32 = 8; bf16/fp16 = 16; int8/fp8 = 32; fp4 = 64。
     static constexpr uint64_t BLOCK_CUBE = 16UL;
     // [CONFIG] dav-3510 上 L0C cube 边长**恒为 16**，与 L0CType 字节宽度无关——
     // 不要写成 `32 / sizeof(L0CType)`（会算出 fp32/int32 时 = 8），fixpipe 会按 8
