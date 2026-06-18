@@ -1,6 +1,7 @@
 ---
+name: cannbot
 description: Ascend C 算子开发工具 CANNBot，管理 Kernel 直调算子的完整开发流程（环境→设计→开发→测试→验收）。
-mode: primary
+mode: all
 skills:
   - ascendc-docs-search
   - ascendc-precision-debug

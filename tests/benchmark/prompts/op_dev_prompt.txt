@@ -1,15 +1,30 @@
-请完成{op_name}的算子开发，不需要询问我，请自动运行下一步，直到完成所有开发任务，并且提供最终交付件。开发完成后你当前所在机器的评测框架会验证编译正确性、测试用例的精度和性能。
+请完成 {op_short_name} 算子的开发，不需要询问我，自动执行下一步直到完成所有开发任务并提供最终交付件。
 
-{op_name} 是 cann-bench/tasks/level_N/ 下的算子目录（如 cann-bench/tasks/level1/exp）。
-该算子属于 {category} 类别。
-{example_path} 是 cann-bench/examples/ 下的参考工程（如 cann-bench/examples/direct_launch_example）。
+## 评测目录
 
-算子信息位于 {op_name}/ 目录下，包含以下文件（请仔细阅读）：
-- cases.csv / cases.yaml：算子用例信息，包含 input_shape、dtype、attrs、value_range、baseline_perf_us
-- desc.md：算子描述信息，包含数学公式、输入输出信息、精度标准等
-- golden.py：算子对标竞品的标杆实现（torch/tensorflow）
-- proto.yaml：算子原型信息，包含算子分类、支持的数据类型、难度分类等
+cann-bench 评测仓库位于 {cann_bench_root}。
 
-最终交付件为"cann_bench-xxx.whl"文件，通过{example_path}的参考工程生成。参考工程为算子直调工程，通过适配csrc/ops下的算子相关文件与cann_bench/__init__.py增加接口的方式，运行build.sh脚本文件编译出whl包。
+## 算子信息
 
-全部过程完成后，请将最终交付件"cann_bench-xxx.whl"放置到{op_name}/dist文件夹中。
+算子类别：{category}
+
+算子定义位于 operators/{op_short_name}/ 目录，包含：
+- desc.md：算子数学定义、输入输出、精度标准
+- cases.csv / cases.yaml：测试用例
+- golden.py：对标竞品实现
+- proto.yaml：原型信息
+
+## 参考工程
+
+example/ 目录是 cann-bench 参考工程，结构如下：
+- csrc/ops/：算子源码目录（kernel + plugin + api）
+- cann_bench/__init__.py：算子接口注册
+- build.sh：编译脚本
+
+## 交付件
+
+最终交付件为 cann_bench-xxx.whl，通过编写 csrc/ops/ 下算子代码 + 注册接口 + 运行 build.sh 编译生成。
+完成后将 whl 放置到 {op_name}/dist/ 目录。
+
+开发完成后，使用以下命令提交 cann-bench 评测，确认精度和性能达标：
+bash {cann_bench_root}/scripts/run_evaluation.sh --source-dir {example_path} --task-dir {op_name}

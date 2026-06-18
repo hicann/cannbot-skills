@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 
-BENCHMARK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BASELINE_OPS = {
     "aclnn_launch_example": {"add", "sqrt", "mish", "_common"},

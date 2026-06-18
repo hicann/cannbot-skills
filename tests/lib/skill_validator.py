@@ -438,9 +438,9 @@ def _validate_agent_structure(fm: dict, agent_file: Path, file_str: str, known_s
     mode = fm.get("mode")
     if mode is None:
         emit("error", "A-STR-02", file_str, "Missing 'mode' field")
-    elif mode not in ("primary", "subagent"):
+    elif mode not in ("primary", "subagent", "all"):
         emit("error", "A-STR-03", file_str,
-             f"Invalid mode '{mode}' (must be: primary or subagent)")
+             f"Invalid mode '{mode}' (must be: primary, subagent, or all)")
 
     # A-STR-04: skills deps exist
     if known_skill_names is not None:
@@ -514,8 +514,8 @@ def _validate_team_structure(fm: dict, team_file: Path, file_str: str,
     mode = fm.get("mode")
     if mode is None:
         emit("error", "T-STR-02", file_str, "Missing 'mode' field")
-    elif mode != "primary":
-        emit("error", "T-STR-02", file_str, f"Invalid mode '{mode}' (must be: primary)")
+    elif mode not in ("primary", "all"):
+        emit("error", "T-STR-02", file_str, f"Invalid mode '{mode}' (must be: primary or all)")
 
     if "skills" not in fm:
         emit("error", "T-STR-03", file_str, "Missing 'skills' field")

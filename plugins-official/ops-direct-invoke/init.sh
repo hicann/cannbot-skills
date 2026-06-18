@@ -495,6 +495,7 @@ if [ "$TOOL" = "opencode" ]; then
         ln -sfn "$(realpath "$agent_entry")" "$CANNBOT_DIR/agents/$name"
         agent_count=$((agent_count + 1))
     done
+
     step1_summary="${step1_summary}agents(${agent_count})"
     ok "Linked: $step1_summary"
 else

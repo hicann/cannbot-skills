@@ -43,7 +43,7 @@ ops:
   # ===== Level1 =====
   - op_name: cann-bench/tasks/level1/swi_glu
     category: Elementwise
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level1/foreach_addcdiv_scalar
     category: FusedComposite
@@ -52,11 +52,11 @@ ops:
   # ===== Level2 =====
   - op_name: cann-bench/tasks/level2/rms_norm
     category: Normalization
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level2/softmax
     category: Normalization
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level2/apply_rotary_pos_emb
     category: FusedComposite
@@ -64,15 +64,15 @@ ops:
 
   - op_name: cann-bench/tasks/level2/cummin
     category: Reduction
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level2/scatter
     category: ScatterUpdate
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level2/gather
     category: IndexGather
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   # ===== Level3 =====
   - op_name: cann-bench/tasks/level3/grouped_matmul
@@ -89,21 +89,21 @@ ops:
 
   - op_name: cann-bench/tasks/level3/add_rms_norm_dynamic_quant
     category: FusedComposite
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level3/top_k
     category: SortSelect
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level3/transpose
     category: LayoutTransform
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   # ===== Level4 =====
   - op_name: cann-bench/tasks/level4/mla_prolog
     category: FusedComposite
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
 
   - op_name: cann-bench/tasks/level4/mla
     category: FusedComposite
-    example_path: cann-bench/examples/aclnn_launch_example
+    example_path: cann-bench/examples/direct_launch_example
