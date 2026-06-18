@@ -64,7 +64,7 @@ Step C-6  日志 + 报告评论链接
 3. **/tmp 可写**
 4. **Git 提交用户信息**：**仅 PR 路径必检**。先做 1~3 项基础预检，git author 留到 Step 1.5 判定为 PR 后再补——Comment 答疑场景下不会无端问用户的 git 身份。读 `git config --global user.name` / `user.email`；两者都非空 → 标 `GIT_AUTHOR_SOURCE=global`；任一缺失 → AskUserQuestion 让用户提供，拿到后**只**在 work_dir 上 `git config`，**禁止改 `~/.gitconfig` 全局**。详见 env-check.md「5. Git 提交用户信息」。
 
-> 为什么 git author 不留到 Step 5 commit 前才查：`git commit` 没有 author 时会以 `Author identity unknown` 失败，此时已经完成 clone+改代码+跑测试一整轮，回头补配置浪费时间和上下文。早查早暴露——但也别比"知道需要 commit"更早。
+> 为什么早查 git author：缺 author 时 `git commit` 会以 `Author identity unknown` 失败，而那时已走完 clone+改代码+跑测试一整轮，回头补配置浪费上下文。早查早暴露——但别早于"已确定要 commit"。
 
 预检通过后输出一段简短报告（格式参考 env-check.md「预检报告格式」），无需用户确认，直接进入 Step 1。
 

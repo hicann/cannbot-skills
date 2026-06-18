@@ -186,16 +186,14 @@ Issue #${issue_number} 根因初判
 `<type>` 取值参考 [gitcode-toolkit](../../gitcode-toolkit/SKILL.md) 「PR 创建工作流 / Step 3」的类型标签推断规则：`fix` / `feat` / `perf` / `docs` / `refactor` / `test` / `chore`。按 Issue 性质选——bug 类 `fix`、新特性 `feat`、文档 `docs`，与 Step 2.4 切出的工作分支前缀保持一致。
 
 > **硬性要求**：
-> - commit message 里**不能**包含 `Co-Authored-By`（CLAUDE.md 要求）。
-> - commit message **只写代码改了什么、为什么这么改**，不要写 `Fixes #N` / `Closes #N` / `相关 Issue: ...` 之类的 Issue 关联，也不要复述 Issue 背景或问题现象。
->   - **Why**：用户反馈，commit 是给"看 git log 的人"看的代码变更说明，Issue 关联属于 PR/MR 元数据，写在 PR body 的"关联的Issue"章节即可，不该和代码变更说明混在一起；混在一起会让 commit body 被 Issue 背景叙述淹没，看不清这次提交到底改了什么。
->   - **How to apply**：subject 描述改动；body 用一两段写"现在的实现做了什么、为什么这么改"，避免出现 Issue 编号、Issue 标题原文、"该 Issue 报告..." 这类引导语。Issue 关联在 Step 6 写进 PR body 的"关联的Issue"章节。
+> - commit message **不能包含** `Co-Authored-By`（CLAUDE.md 要求）。
+> - commit body **只写代码改了什么、为什么这么改**：不写 `Fixes #N` / `Closes #N` / `相关 Issue: ...` 等 Issue 关联，也不复述 Issue 背景或现象——commit 是给看 git log 的人的代码变更说明，Issue 关联属 PR 元数据，写进 Step 6 的 PR body「关联的Issue」章节即可，混在一起会让 commit body 被背景叙述淹没。subject 描述改动，body 写"现在的实现做了什么、为什么这么改"，避免出现 Issue 编号 / 标题原文 / "该 Issue 报告…" 这类引导语。
 
 ### 5.2 用户确认 commit
 
-**关键：commit message 必须以普通文本形式打印在对话主流，再用 AskUserQuestion 做简单的"确认/修改/取消"。**
+**关键：commit message 必须以普通文本打印在对话主流，再用 AskUserQuestion 做"确认/修改/取消"。**
 
-不要把多行 commit message 塞进 `AskUserQuestion` 的 option `preview` 字段——preview 只在用户聚焦该选项时才显示在侧栏，多数情况下用户实际看不到内容；而且 commit message 是关键审查对象，必须在主区域可见、可滚动、可复制。
+不要把多行 commit message 塞进 `AskUserQuestion` 的 option `preview` 字段——preview 仅在用户聚焦该选项时显示在侧栏，多数情况看不到，而 commit message 是关键审查对象，必须在主区域可见、可滚动、可复制。
 
 操作模板：
 
@@ -248,7 +246,7 @@ push 前**再问一次用户确认**（这是对外可见操作）。失败常�
 
 不要自创章节名。从上游仓库取 PR 模板原文，**只把模板中的 `<!-- 占位提示 -->` 注释替换为实际内容，标题与结构保持原样不动**。
 
-为什么这条规矩很重要：仓库维护者按模板审查 PR，看习惯了「描述 / 关联的Issue / 测试 / 文档更新 / 类型标签」这些固定章节；如果你换成「Description / Related Issue / Tests / ...」之类的英文重命名版，维护者第一眼会觉得这是个不熟悉仓库规范的提交，复核成本变高、被打回的概率上升。模板的每一章是个契约。
+为什么重要：维护者按「描述 / 关联的Issue / 测试 / 文档更新 / 类型标签」这些固定章节审查 PR；换成「Description / Related Issue / Tests / ...」的英文重命名版，会让人第一眼觉得不熟悉仓库规范，复核成本与被打回概率都上升。模板的每一章都是契约。
 
 #### 6.1.1 取模板（按优先级）
 
