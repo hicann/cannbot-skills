@@ -321,7 +321,7 @@ GitCode API、Token、HTTP 状态码错误处理统一详见：
 
 ## 参考文档
 
-- [references/issue-templates.md](references/issue-templates.md) — Feature Request / Bug Report Issue 模板
+- [references/issue-templates.md](references/issue-templates.md) — Feature Request / Bug Report / Request for Comments Issue 模板
 - [references/manual-issue-draft.md](references/manual-issue-draft.md) — 手动提单：Issue 编写与信息收集
 - [references/manual-issue-workflow.md](references/manual-issue-workflow.md) — 手动提单：工作流程与约束
 - [gitcode-toolkit/references/gitcode-api.md](../gitcode-toolkit/references/gitcode-api.md) — GitCode PR / Issue API 详细文档
