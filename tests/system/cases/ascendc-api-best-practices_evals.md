@@ -2,47 +2,107 @@
 skill_name: ascendc-api-best-practices
 eval_mode: text
 ---
-# Case 1: DataCopy API 非对齐数据处理
+
+# Case 1: 非对齐数据搬运 API 选择（关键能力）
 
 ## Config
 - Max Tokens: 100000
-- Max Tokens (deepseek-v4-flash): 120000
-- Max Tokens (glm-5): 110000
-- Ascend Platform: A2
 
 ## Prompt
 
-在 Ascend C 算子开发中，DataCopy API 用于 GM 到 UB 之间的数据搬运。请问当搬运数据不满足 32 字节对齐要求时应该如何处理？DataCopy 和 DataCopyPad 分别适用于什么场景？请介绍对齐要求和填充策略。不需要执行任何工具调用。
+我在写 Ascend C 算子，GM 到 UB 的数据搬运每行 13 个 float 元素，用 DataCopy 结果不对，应该用什么 API？
 
 ## Expected Output
 
-回复应说明 Ascend C DataCopy API 的对齐要求和处理策略：
-- DataCopy 仅适用于搬运数据严格 32 字节对齐的场景
-- 非对齐场景必须使用 DataCopyPad 进行填充处理
-- DataCopyPad 通过自动填充非对齐部分来满足对齐要求
-- 黑名单提示：GlobalTensor::SetValue() 和 GetValue() 因效率极低被禁止，替代方案是 DataCopyPad
+回复应指出 DataCopy 要求数据量严格 32 字节对齐，而 13 个 float（52 字节）不满足 32 字节对齐（需 8 个 float = 32 字节对齐），因此必须使用 DataCopyPad。应说明 DataCopyPad 能自动处理非对齐场景，CopyIn 和 CopyOut 都应使用 DataCopyPad。应强调 GlobalTensor::SetValue/GetValue 是黑名单 API，禁止在生产代码中使用，仅限调试时单点验证。
 
 ## Expectations
+
+- [contains] DataCopyPad
+- [contains] 32 字节
+- [contains] SetValue
 
 ---
 
-# Case 2: repeatTimes ≤ 255 限制及分批处理策略
+# Case 2: repeatTimes 参数溢出问题（关键能力）
 
 ## Config
 - Max Tokens: 100000
-- Max Tokens (deepseek-v4-flash): 120000
-- Max Tokens (glm-5): 110000
-- Ascend Platform: A2
 
 ## Prompt
 
-在 Ascend C API 使用中，repeatTimes 参数存在不超过 255 的限制。请问这个限制的出处和原因是什么？当需要处理的循环次数超过 255 时应该如何处理？有哪些推荐的解决方案？可以加载技能，不需要执行其他外部工具调用。
+我的 Ascend C 算子里用 Sub API 做广播减法，当行数设为 256 时结果全变成 0 了，255 行就正常，怎么回事？
 
 ## Expected Output
 
-回复应说明 Ascend C 中 repeatTimes 的限制和处理方法：
-- repeatTimes 上限为 255，原因是硬件指令编码中只分配了 8 bit
-- 超过 255 时推荐使用外层循环嵌套内层 repeatTimes ≤ 255 的方案
-- 也可通过多核并行（SetBlockSplitNum）或 NewPass 分段来处理
+回复应指出 Sub 等 Vector API 的 repeatTime 参数类型为 uint8_t，最大值为 255。当传入 256 时会发生静默截断（溢出为 0），导致 API 不执行任何计算。应提供两种解决方案：1）Host 侧限制 R_max 不超过 255（推荐），在 Tiling 计算时用 std::min 限制；2）Kernel 侧分批处理，用循环每次处理不超过 255 行。应提及受影响的 API 包括 Sub、Add、Mul、Div、Exp、Log、Sqrt 等所有 Vector API。
 
 ## Expectations
+
+- [contains] 255
+- [contains] uint8_t
+- [contains] 分批
+
+---
+
+# Case 3: 混合精度 Cast RoundMode 选择（关键能力）
+
+## Config
+- Max Tokens: 100000
+
+## Prompt
+
+我在用 Ascend C 开发 FP16 输入的 Softmax 算子，中间计算需要升到 FP32 保证精度，Cast API 的 RoundMode 参数怎么选？
+
+## Expected Output
+
+回复应说明 Cast RoundMode 的选择规则：half → float（低精度到高精度）使用 CAST_NONE，因为无精度损失；float → half（高精度到低精度）使用 CAST_ROUND，因为存在精度损失。应说明完整的混合精度计算流程：half 输入 → Cast(FP32, CAST_NONE) → 中间计算(FP32) → Cast(half, CAST_ROUND) → half 输出。应解释为什么需要 FP32 中间计算：ReduceMax/Exp/ReduceSum 在 FP32 上精度更稳定、避免 FP16 数值溢出、累积误差更小。
+
+## Expectations
+
+- [contains] CAST_NONE
+- [contains] CAST_ROUND
+- [contains] FP32
+
+---
+
+# Case 4: 正向看护-多 skill 环境下正确触发目标 skill
+
+## Config
+- Max Tokens: 120000
+- Distractor skills: ascendc-docs-search;ascendc-docs-gen;ascendc-perf-optimize;ascendc-code-review
+
+## Prompt
+
+Ascend C 的 Compare API 对 count 参数有什么对齐要求？不满足会怎样？
+
+## Expected Output
+
+回复应正确激活 ascendc-api-best-practices skill，说明 Compare API 要求 count 个元素所占空间必须 256 字节对齐（float 类型下为 64 的倍数）。应说明不满足对齐会导致 API 行为异常，并给出 Padding 处理策略：计算对齐大小、用极值（如 -FLT_MAX）填充 padding 区域、API 调用使用对齐大小、CopyOut 只输出有效数据。即使在 ascendc-docs-search、ascendc-docs-gen 等相似 skill 共存的环境下，也应正确选择 ascendc-api-best-practices。
+
+## Expectations
+
+- [skill_activated] ascendc-api-best-practices
+- [contains] 256
+- [contains] padding
+
+---
+
+# Case 5: 流水线同步 API 使用（关键能力）
+
+## Config
+- Max Tokens: 100000
+
+## Prompt
+
+我在 Ascend C 算子里用 DataCopyPad 把数据从 GM 搬到 UB 后立刻开始计算，结果数据经常不对，是不是需要同步？怎么同步？
+
+## Expected Output
+
+回复应指出 DataCopyPad 是异步 DMA 操作，搬运完成后不能立刻使用数据，必须通过同步机制确保数据就绪。应推荐使用 EnQue/DeQue 队列同步方式（推荐），说明完整的流水线模式：CopyIn 阶段用 DataCopyPad 搬运数据后 EnQue 入队，Compute 阶段用 DeQue 出队获取数据后再计算。应说明 Double Buffer（InitBuffer 的 num 参数设为 2）可以实现 MTE 搬运和 Vector 计算的并行，提升性能。应提醒不要使用 PipeBarrier 等手动同步方式。
+
+## Expectations
+
+- [contains] EnQue
+- [contains] DeQue
+- [contains] 异步
