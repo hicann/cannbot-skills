@@ -6,7 +6,7 @@ description: >
   触发：当用户需要为 Triton Ascend 算子设计算法草图或在已有 sketch 基础上迭代时使用。
 argument-hint: >
   输入：op_name、task_desc（任务文件内容）、arch。
-  可选：user_requirements、previous_sketch、history_context、inspirations。
+  可选：user_requirements、gpu_kernel_ref（GPU Triton kernel 参考源码）、previous_sketch、history_context、inspirations。
   输出：UnifiedSketch DSL 格式的算法草图。
   固定参数：backend=ascend、framework=torch、dsl=triton_ascend。
 ---
@@ -31,8 +31,17 @@ argument-hint: >
 你将获得以下信息：
 
 1. **任务描述和规格说明** — 算子任务格式的算子需求（包含 `Model` 类）
-2. **相关的知识和示例** — UnifiedSketch DSL 规范和设计模式（见下方知识加载规则）
-3. **执行历史** — 之前的设计反馈和优化建议（迭代设计时）
+2. **GPU Triton kernel 参考实现**（`gpu_kernel_ref`，可选）— 来自 GPU 的已有 Triton kernel 实现，可作为算法结构和 tiling 策略的参考
+3. **相关的知识和示例** — UnifiedSketch DSL 规范和设计模式（见下方知识加载规则）
+4. **执行历史** — 之前的设计反馈和优化建议（迭代设计时）
+
+### GPU kernel 参考使用规则
+
+当传入了 `gpu_kernel_ref` 时：
+- **理解算法结构**：参考 GPU kernel 的 grid 划分、数据流和并行策略，但**不要照搬** GPU 特有的优化（如 CUDA shared memory）
+- **参考 tiling 策略**：BLOCK_SIZE 选择、维度切分方式可作参考起点，但需适配 Ascend UB 容量和对齐要求
+- **注意 API 差异**：GPU Triton 的部分 API（如 `tl.dot` 的参数、atomics 行为）可能与 Ascend 不同，草图设计应以 Ascend 文档为准
+- **剔除 GPU 特有参数**：GPU kernel 中的 `num_warps`、`num_stages`、`num_ctas` 等参数在 NPU 上不生效，草图设计时直接忽略，使用 Ascend 的配置方式（如 `num_cores`）
 
 ## 知识加载规则
 

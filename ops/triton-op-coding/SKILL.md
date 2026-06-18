@@ -6,7 +6,7 @@ description: >
   触发：当用户需要根据任务描述生成或迭代修复 Triton Ascend 内核代码时使用。
 argument-hint: >
   输入：op_name、task_desc（任务文件内容）、arch。
-  可选：sketch（算法草图）、previous_code、verifier_error、conductor_suggestion、user_requirements。
+  可选：sketch（算法草图）、gpu_kernel_ref（GPU Triton kernel 参考源码）、previous_code、verifier_error、conductor_suggestion、user_requirements。
   输出：包含 ModelNew 类的完整内核代码。
   固定参数：backend=ascend、framework=torch、dsl=triton_ascend。
 ---
@@ -99,8 +99,18 @@ class ModelNew(nn.Module):
 
 1. **任务描述和规格说明** — 算子任务格式的算子需求（包含 `Model` 类）
 2. **算法设计草图**（`sketch`） — kernel-designer 生成的算法草图（首次生成时由 workflow 传入）
-3. **相关的知识和示例** — Triton Ascend 编程知识（见下方知识加载规则）
-4. **执行历史** — 之前的错误信息和修复建议（迭代生成时）
+3. **GPU Triton kernel 参考实现**（`gpu_kernel_ref`，可选）— 来自 GPU 的已有 Triton kernel 实现，可作为代码结构和 API 用法的参考
+4. **相关的知识和示例** — Triton Ascend 编程知识（见下方知识加载规则）
+5. **执行历史** — 之前的错误信息和修复建议（迭代生成时）
+
+### GPU kernel 参考使用规则
+
+当传入了 `gpu_kernel_ref` 时：
+- **参考代码结构**：kernel 函数签名、grid 启动方式、数据指针传递等骨架可借鉴，但必须适配 Ascend 后端
+- **参考 tiling 参数**：BLOCK_SIZE、num_warps 等可作参考起点，但需根据 Ascend UB 容量调整
+- **注意 API 差异**：GPU Triton 中可用的某些 API 或参数在 Ascend 上可能不支持（如特定 atomic 操作、`tl.dot` 的转置参数等），以 Ascend 参考文档为准
+- **剔除 GPU 特有参数**：`num_warps`、`num_stages`、`num_ctas` 等 GPU 独有参数在 NPU 上不生效，生成代码时必须删除，改用 Ascend 的配置方式（如 `num_cores`）
+- **禁止直接移植**：不能简单复制 GPU kernel 并替换 import，必须基于 sketch 和 Ascend 最佳实践重新实现
 
 ## 知识加载规则
 
