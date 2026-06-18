@@ -132,8 +132,6 @@ def _parse_expectations(exp_raw: str) -> List[Dict[str, str]]:
         parsed = _parse_expectation_line(line)
         if parsed:
             expectations.append(parsed)
-        elif line.strip():
-            logger.debug("Unparseable expectation line: %s", line.strip())
     return expectations
 
 

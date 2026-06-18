@@ -480,8 +480,8 @@ def _check_file_contains(
     for fp_str in matching_files:
         try:
             content = Path(fp_str).read_text(encoding="utf-8")
-        except Exception as e:
-            logger.debug("[file_contains] 跳过无法读取的文件 %s: %s", fp_str, e)
+        except Exception:
+            logger.warning("无法读取文件 %s，跳过", fp_str)
             continue
         if all(p in content for p in patterns):
             return  # 找到包含所有模式的文件，通过
@@ -655,7 +655,6 @@ def _copy_review_template(sandbox_path: Optional[Path]) -> Optional[Path]:
 
     if template_src.exists() and template_dst:
         shutil.copy2(template_src, template_dst)
-        logger.debug("[TEMPLATE] Copied review template to %s", template_dst)
         return template_dst
     logger.warning("[TEMPLATE] review-template.md not found at %s", template_src)
     return None
@@ -690,13 +689,7 @@ def _assert_review_passed(result: Dict[str, Any], ctx: ValidationContext) -> Non
     if dim_check_msg:
         reasons.append(dim_check_msg)
     full_reason = " | ".join(reasons)
-    msg = (
-        f"Eval {ctx.eval_id}: expected_output check failed\n"
-        f"Reviewer reason: {full_reason}\n"
-        f"--- AI Response (by execution session) ---\n"
-        f"{ctx.ai_text[:ctx.truncate_len]}\n"
-        f"--- End AI Response ---"
-    )
+    msg = f"Eval {ctx.eval_id}: expected_output check failed - {full_reason[:200]}"
     assert False, msg
 
 
@@ -709,9 +702,6 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
     3. 读取填写后的 MD 模板 → parse_review_md() → 程序化阈值校验
     """
     reasoning = extract_reasoning(ctx.full_output)
-    logger.debug("--- AI REASONING ---")
-    logger.debug(reasoning[:2000] if reasoning else "(无思考过程)")
-    logger.debug("--- END AI REASONING ---")
 
     template_dst = _copy_review_template(ctx.sandbox_path)
 
@@ -726,17 +716,14 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
         dim_thresholds=ctx.dim_thresholds,
     ))
 
-    logger.debug("--- REVIEW PROMPT ---")
-    logger.debug(review_prompt)
-    logger.debug("--- END REVIEW PROMPT ---")
-
     review_lines, review_error = _run_review_session(
         ctx.opencode_runner, review_prompt, ctx.session_name
     )
     assert not review_error, f"Eval {ctx.eval_id}: review session error - {review_error}"
 
     result = _read_review_result(template_dst)
-    logger.info("[REVIEW RESULT] %s", json.dumps(result, ensure_ascii=False))
+    brief = {k: v for k, v in result.items() if k != "reason"}
+    logger.info("[REVIEW RESULT] %s", json.dumps(brief, ensure_ascii=False))
     _assert_review_passed(result, ctx)
 
 
@@ -817,13 +804,6 @@ def _log_eval_case_header(skill_name: str, eval_id: Any, prompt: str,
                     len(distractor_skill_dirs),
                     ", ".join(d.name for d in distractor_skill_dirs))
     logger.info("=" * 60)
-    logger.debug("--- INPUT PROMPT ---")
-    logger.debug(prompt)
-    logger.debug("--- END INPUT PROMPT ---")
-    if expected_output:
-        logger.debug("--- EXPECTED OUTPUT ---")
-        logger.debug(expected_output)
-        logger.debug("--- END EXPECTED OUTPUT ---")
 
 
 def _collect_exec_output(
@@ -1031,11 +1011,6 @@ def _run_eval_with_retry(
             logger.warning("[EXEC FAIL] opencode 执行失败 (attempt %d): %s",
                            attempt, str(e)[:200])
             continue
-
-        logger.debug("--- AI Response (eval %s, attempt %d) ---",
-                     inputs.eval_id, attempt)
-        logger.debug(ai_text[:1000])
-        logger.debug("--- End AI Response ---")
 
         _check_token_budget(inputs.eval_data, inputs.eval_id,
                             opencode_runner, session_name)

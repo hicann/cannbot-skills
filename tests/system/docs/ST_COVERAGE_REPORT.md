@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **70 个 Skill + 1 个 Team**，共 **255 个评测用例**（244 启用 / 11 禁用，截止 2026-06-15）。
+当前 ST 框架覆盖 **81 个 Skill + 1 个 Team**，共 **298 个评测用例**（截止 2026-06-17）。
 
 ## 1. 五维看护说明
 
@@ -80,7 +80,19 @@
 | triton-op-verifier | | | √ | √ | √ |
 | triton-task-extractor | | | √ | √ | √ |
 
-### model/（11 Skills）
+### graph/（7 Skills）
+
+| Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
+|-------|:-------:|:-------:|:--------:|:----------:|:----------:|
+| torch-custom-ops-guide | √ | | √ | √ | √ |
+| torch-npugraph-ex-compile-error-diagnosis | √ | | √ | √ | √ |
+| torch-npugraph-ex-dfx-triage | √ | | √ | √ | √ |
+| torch-npugraph-ex-knowledge | √ | | √ | √ | √ |
+| torch-npugraph-ex-performance-diagnosis | √ | | √ | √ | √ |
+| torch-npugraph-ex-runtime-error-diagnosis | √ | | √ | √ | √ |
+| torch-npugraph-ex-template | | | √ | √ | √ |
+
+### model/（12 Skills）
 
 | Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |-------|:-------:|:-------:|:--------:|:----------:|:----------:|
@@ -97,11 +109,14 @@
 | model-infer-runtime-debug | | | √ | | √ |
 | model-infer-superkernel | | | √ | | √ |
 
-### infra/（1 Skill）
+### infra/（4 Skills）
 
 | Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |-------|:-------:|:-------:|:--------:|:----------:|:----------:|
 | gitcode-issue-gen | | | √ | | √ |
+| gitcode-issue-handler | √ | √ | √ | √ | √ |
+| gitcode-pr-handler | √ | | √ | √ | √ |
+| gitcode-toolkit | √ | | √ | √ | √ |
 
 ### ops-direct-invoke Team
 

@@ -48,8 +48,7 @@ class GateChecker:
         from evals_parser import parse_evals_md
         try:
             data = parse_evals_md(evals_path)
-        except Exception as e:
-            logger.debug("解析 evals.md 失败 %s: %s", evals_path, e)
+        except Exception:
             return None
         if not data:
             return None
@@ -394,7 +393,7 @@ class GateChecker:
         timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
         platform_prefix = "_".join(self.ascend_platforms) + "_" if self.ascend_platforms else ""
         report_path = self.results_dir / f"{platform_prefix}ST_validation_report_{timestamp}.html"
-        cmd.extend([f"--html={report_path}", "--self-contained-html"])
+        cmd.extend([f"--html={report_path}", "--self-contained-html", "--tb=short"])
         return cmd, report_path
 
     def _resolve_actual_workers(self, skill_names: List[str], team_names: List[str]) -> int:

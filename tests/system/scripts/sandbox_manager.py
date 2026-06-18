@@ -30,10 +30,7 @@ if sys.platform == 'win32':
 
 def _rmtree_ignore_errors(path: Path) -> None:
     """删除目录树，忽略所有错误（用于清理失败的沙箱）。"""
-    try:
-        shutil.rmtree(str(path), ignore_errors=True)
-    except Exception:
-        logger.debug("Failed to remove sandbox: %s", path)
+    shutil.rmtree(str(path), ignore_errors=True)
 
 
 class SandboxManager:
@@ -71,7 +68,6 @@ class SandboxManager:
         """
         if sandbox_path.exists():
             shutil.rmtree(sandbox_path)
-            logger.debug("[Sandbox] 清理沙箱: %s", sandbox_path)
 
     @staticmethod
     def get_logs_dir(sandbox_path: Path) -> Path:
@@ -106,10 +102,8 @@ class SandboxManager:
 
         if self.use_symlink:
             link_path.symlink_to(abs_skill_dir, target_is_directory=True)
-            logger.debug("[Sandbox] 软链接 skill 目录: %s -> %s", abs_skill_dir, link_path)
         else:
             shutil.copytree(abs_skill_dir, link_path)
-            logger.debug("[Sandbox] 复制 skill 目录: %s -> %s", abs_skill_dir, link_path)
 
         return link_path
 
@@ -169,7 +163,6 @@ class SandboxManager:
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(self.OPENCODE_SAFE_CONFIG, f, ensure_ascii=False, indent=2)
 
-        logger.debug("[Sandbox] 创建沙箱: %s", sandbox_path)
         return sandbox_path
 
     def create_team_sandbox(self, team_name: str, eval_id: int,

@@ -149,14 +149,6 @@ class OpencodeRunner:
             }
             return
 
-        if self.verbose:
-            self.logger.debug(
-                "Running command (streaming): %s", cmd
-            )
-            self.logger.debug(
-                "Working directory: %s", self.workdir
-            )
-
         yield from self._execute_streaming(cmd)
 
     def export_session_data(self, output_file: Optional[str] = None) -> Dict[str, Any]:
@@ -177,9 +169,6 @@ class OpencodeRunner:
 
         export_file = self._get_export_file_path(output_file)
         cmd = [opencode_cmd, "export", self.opencode_session_id]
-
-        if self.verbose:
-            self.logger.debug("Exporting session: %s", self.opencode_session_id)
 
         try:
             result = self._run_subprocess(cmd, description="Export")
@@ -203,9 +192,6 @@ class OpencodeRunner:
                 session_data = {"raw_output": result.stdout}
 
             self._write_session_data(session_data, export_file)
-
-            if self.verbose:
-                self.logger.debug("Session data exported to: %s", export_file)
 
             return {
                 "success": True,
@@ -247,9 +233,6 @@ class OpencodeRunner:
 
         cmd = [opencode_cmd, "import", file_path]
 
-        if self.verbose:
-            self.logger.debug("Importing session from: %s", file_path)
-
         try:
             result = self._run_subprocess(cmd, description="Import")
 
@@ -266,11 +249,6 @@ class OpencodeRunner:
             if import_result.get("sessionID"):
                 self.opencode_session_id = import_result.get("sessionID")
                 self._save_session_info(self.opencode_session_id)
-
-            if self.verbose:
-                self.logger.debug("Session imported successfully")
-                if self.opencode_session_id:
-                    self.logger.debug("New session ID: %s", self.opencode_session_id)
 
             return {
                 "success": True,
@@ -357,8 +335,6 @@ class OpencodeRunner:
 
         if target_file and Path(target_file).exists():
             Path(target_file).unlink()
-            if self.verbose:
-                self.logger.debug("Cleaned up session file: %s", target_file)
             self._current_session_file = None
 
     def cleanup_all_sessions(self):
@@ -366,8 +342,6 @@ class OpencodeRunner:
             if session_file.name.endswith("ses.json"):
                 continue
             session_file.unlink()
-            if self.verbose:
-                self.logger.debug("Cleaned up session file: %s", session_file)
 
     def list_sessions(self) -> List[str]:
         return [
@@ -541,12 +515,6 @@ class OpencodeRunner:
 
         self._current_session_file = str(session_path)
 
-        if self.verbose:
-            self.logger.debug(
-                "Saved session info: %s (session_id: %s)",
-                session_path, session_id
-            )
-
     def _build_command(
             self,
             prompt: str,
@@ -598,10 +566,6 @@ class OpencodeRunner:
             cmd = self._build_command(prompt, skill, additional_args, resume_session_id)
         except OpencodeNotFoundError as e:
             return self._make_error_result(str(e), error_type="opencode_not_found")
-
-        if self.verbose:
-            self.logger.debug("Running command: %s", cmd)
-            self.logger.debug("Working directory: %s", self.workdir)
 
         result = self._execute_command(cmd)
         if isinstance(result, OpencodeResult):
@@ -699,8 +663,8 @@ class OpencodeRunner:
             _timed_out = True
             try:
                 process.kill()
-            except Exception as e:
-                self.logger.debug("Error killing process: %s", e)
+            except Exception:
+                self.logger.debug("终止超时进程时出现异常（进程可能已结束）")
 
         timer = threading.Timer(self.timeout, _kill_on_timeout)
         timer.daemon = True
@@ -712,8 +676,8 @@ class OpencodeRunner:
                 stderr_output = process.stderr.read().decode(
                     'utf-8', errors='replace'
                 )
-            except (UnicodeDecodeError, AttributeError) as e:
-                self.logger.debug("Error reading stderr: %s", e)
+            except (UnicodeDecodeError, AttributeError):
+                pass
 
         stderr_thread = threading.Thread(target=read_stderr, daemon=True)
         stderr_thread.start()
@@ -831,20 +795,13 @@ class OpencodeRunner:
             if self._try_command(cmd):
                 return True
 
-        if self.verbose:
-            self.logger.debug("opencode command not found in system PATH")
-
         return False
 
     def _check_specified_path(self) -> bool:
         """检查用户指定的 opencode 路径"""
         if Path(self.opencode_path).exists():
             self._detected_opencode_path = self.opencode_path
-            if self.verbose:
-                self.logger.debug("Using specified opencode path: %s", self.opencode_path)
             return True
-        if self.verbose:
-            self.logger.debug("Specified opencode path not found: %s", self.opencode_path)
         return False
 
     def _try_command(self, cmd: str) -> bool:
@@ -858,20 +815,13 @@ class OpencodeRunner:
             )
             if result.returncode in (0, 1):
                 self._detected_opencode_path = cmd
-                if self.verbose:
-                    self.logger.debug("Detected opencode command: %s", cmd)
                 return True
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
-        except Exception as e:
-            if self.verbose:
-                self.logger.debug("Error checking for opencode at %s: %s", cmd, e)
         return False
 
     def _run_subprocess(self, cmd: list, description: str = "") -> subprocess.CompletedProcess:
         """Run an opencode subcommand with common timeout and encoding settings."""
-        if self.verbose and description:
-            self.logger.debug("%s command: %s", description, cmd)
         try:
             return subprocess.run(
                 cmd,
