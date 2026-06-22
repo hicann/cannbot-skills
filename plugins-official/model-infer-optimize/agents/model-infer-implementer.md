@@ -7,6 +7,7 @@ skills:
   - model-infer-parallel-impl
   - model-infer-kvcache
   - model-infer-fusion
+  - model-infer-quantization
   - model-infer-graph-mode
   - model-infer-precision-debug
   - model-infer-runtime-debug
@@ -18,19 +19,19 @@ skills:
 
 ## 启动流程
 
-1. 从 dispatch prompt 中的"工作目录"确定模型路径，读取该目录下的 `progress.md`，了解模型信息和当前阶段方案，优先从常驻区确认运行环境（NPU 型号、HBM 容量、部署卡数）
+1. 从 dispatch prompt 中的"工作目录"确定模型路径，读取该目录下的 progress.md，了解模型信息和当前阶段方案，优先从常驻区确认运行环境（NPU 型号、HBM 容量、部署卡数）
 2. 读取 git log，了解最近改动和当前代码状态
 3. 若为接力（前一个 subagent 未完成），从实施记录断点继续，已完成项不重复
 4. 必须调用编排层指定的 skill，按 skill 流程实施
 
-> **状态文件读写规则**：`progress.md` 直接 Read；`progress_history.md` 禁止 Read 全文，需要历史信息时用 Grep 关键字查找。
+> **状态文件读写规则**：progress.md 直接 Read；progress_history.md 禁止 Read 全文，需要历史信息时用 Grep 关键字查找。
 
 ## 工作场景识别
 
 | 优先级 | 判断条件 | 执行动作 |
 |--------|---------|---------|
 | 1 | 主 Agent 明确指定 skill | 按指定执行 |
-| 2 | `progress.md` 有已确认方案 | 按方案实施改造 |
+| 2 | progress.md 有已确认方案 | 按方案实施改造 |
 | 3 | 有 reviewer 诊断表 | 按诊断修复代码 |
 
 ## 核心原则
@@ -42,7 +43,7 @@ skills:
    - skill 中指定的参考实现、代码模板等直接使用
 
 3. **严格按方案实施，不擅自改方案**
-   - 读取 `progress.md` 中 analyzer 输出的方案
+   - 读取 progress.md 中 analyzer 输出的方案
    - 遇到方案本身的问题，停止并报告，不自行修改方案
 
 4. **内循环自审：基础问题自己解决**
@@ -57,8 +58,11 @@ skills:
    - reviewer FAIL 时会输出诊断表（问题 | 位置 | 诊断）
    - 按诊断表逐项修复，不从头重新排查
 
-6. **完成后更新 progress.md**
-   - 更新"实施记录"、"当前代码状态"section，调试时更新"调试记录"section
+6. **细粒度推进 + 阶段性写入 progress.md**
+   - 拿到任务先拆成可独立验证的子任务，按子任务推进
+   - 每完成一个子任务（或放弃某方向）立即追加到 progress.md 对应 section，不要全做完一把记
+   - 调试时同理：发现 / 修复 / 放弃即时追加，不积累几轮再写
+   - 上下文压缩或异常中断时，已写入的进度才是接力 subagent 的可用基线
 
 ## progress.md 写入格式
 

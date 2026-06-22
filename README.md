@@ -395,8 +395,6 @@ cannbot-skills/
 
 ### NPU 模型推理优化
 
-端到端优化流程由 `plugins-official/model-infer-optimize/workflows/optimize-workflow.md` 承载（plugin-local 普通 md 文档），由 primary agent 自动加载。下表列出 11 个可独立调用的原子 Skill：
-
 | Skill | 功能 |
 |-------|------|
 | **model-infer-migrator** | 框架适配与部署基线建立 |
@@ -404,6 +402,7 @@ cannbot-skills/
 | **model-infer-parallel-impl** | 并行切分实施 |
 | **model-infer-kvcache** | KVCache 优化 + FA 替换 |
 | **model-infer-fusion** | torch_npu 融合算子分析与替换 |
+| **model-infer-quantization** | compressed-tensors 量化适配改造 |
 | **model-infer-graph-mode** | torch.compile 图模式适配 |
 | **model-infer-precision-debug** | NPU 推理精度诊断 |
 | **model-infer-runtime-debug** | NPU 运行时错误诊断 |

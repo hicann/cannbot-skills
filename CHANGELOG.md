@@ -2,6 +2,8 @@
 ### 【2026-06-17】
 #### 特性增强 Feature Enhancement
 - 【ops-registry-invoke】支持调用ascendc-blaze-best-practice生成matmul类算子，并补充CV融合算子样例工程。
+- 【模型推理】新增 Skill：model-infer-quantization，接入 compressed-tensors 量化方案，覆盖权重/激活/KVCache 量化适配，并编排进 model-infer-optimize 量化阶段。
+- 【模型推理】migrator / kvcache / parallel-impl 等主链 Skill 按 cann-recipes-infer 仓库框架重写，参考资料拆分框架部署与独立部署两种形态。
 
 ### 【2026-06-10】
 #### 特性增强 Feature Enhancement

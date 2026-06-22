@@ -2,7 +2,7 @@
 
 ## 概述
 
-`model-infer-optimize` 是 NPU 模型推理端到端优化 plugin。它通过 `workflows/optimize-workflow.md` 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三类 Subagent，覆盖并行策略、KVCache/FA、融合算子、图模式、多流并行、预取和 SuperKernel 等优化路径。
+`model-infer-optimize` 是 NPU 模型推理端到端优化 plugin。它通过 `workflows/optimize-workflow.md` 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三类 Subagent，覆盖并行策略、KVCache/FA、融合算子、量化适配、图模式、多流并行、预取和 SuperKernel 等优化路径。
 
 ## 一、环境搭建
 
@@ -141,7 +141,7 @@ primary agent 会按 AGENTS.md 中的强制规则自动读取 `workflows/optimiz
 
 | 内容 | 说明 |
 | --- | --- |
-| 原子 skills（11 个） | 来自 `model/model-infer-*`，覆盖推理优化各专项能力 |
+| 原子 skills（12 个） | 来自 `model/model-infer-*`，覆盖推理优化各专项能力 |
 | workflow 文档 | `plugins-official/model-infer-optimize/workflows/optimize-workflow.md` |
 | Subagents | `plugins-official/model-infer-optimize/agents/model-infer-*.md` |
 | hooks | 角色越界保护、progress.md 读取约束、自验证检查和长任务提醒 |
@@ -158,9 +158,11 @@ primary agent 会按 AGENTS.md 中的强制规则自动读取 `workflows/optimiz
     ↓
 阶段 3：融合算子优化
     ↓
-阶段 4：图模式适配
+阶段 4：量化适配（可选，用户提供 compressed-tensors 量化产物或明确要求量化时）
     ↓
-阶段 5：优化总结
+阶段 5：图模式适配
+    ↓
+阶段 6：优化总结
 ```
 
 每个阶段遵循：分析 → 方案确认 → 实施 → 验证 → 阶段总结。
@@ -174,6 +176,7 @@ primary agent 会按 AGENTS.md 中的强制规则自动读取 `workflows/optimiz
 | `model-infer-parallel-impl` | 并行切分实施 |
 | `model-infer-kvcache` | KVCache + FA 优化 |
 | `model-infer-fusion` | 融合算子分析与替换 |
+| `model-infer-quantization` | compressed-tensors 量化适配、验证和收益评估 |
 | `model-infer-graph-mode` | 图模式适配 |
 | `model-infer-precision-debug` | NPU 推理精度诊断 |
 | `model-infer-runtime-debug` | NPU 运行时错误诊断 |
@@ -228,6 +231,7 @@ cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh project 
 | 已部署模型，仅需做 KVCache / FA 替换 | 直接调用 `model-infer-kvcache` skill |
 | 已部署模型，仅需做并行策略分析或实施 | 调用 `model-infer-parallel-analysis` / `model-infer-parallel-impl` skill |
 | 已部署模型，仅需做融合算子替换 | 直接调用 `model-infer-fusion` skill |
+| 已部署模型，仅需接入 compressed-tensors 量化产物 | 直接调用 `model-infer-quantization` skill |
 | 已部署模型，仅需做图模式适配 | 直接调用 `model-infer-graph-mode` skill |
 | 已部署模型，仅需诊断精度或运行时错误 | 直接调用 `model-infer-precision-debug` / `model-infer-runtime-debug` skill |
 
@@ -237,8 +241,8 @@ cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh project 
 
 ## 总结
 
-1. 端到端优化通过 `workflows/optimize-workflow.md` 编排 6 阶段流程
+1. 端到端优化通过 `workflows/optimize-workflow.md` 编排 6 阶段流程，并在需要时插入可选量化阶段
 2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor 用户用 `init.sh` 脚本安装
 3. `claude` / `opencode` 是核心交互指令；IDE 类工具（Trae / Cursor）打开项目即自动加载
-4. 单点优化（KVCache、并行、融合算子等）由 11 个原子 skill 自动激活，不进入端到端流程
+4. 单点优化（KVCache、并行、融合算子、量化等）由 12 个原子 skill 自动激活，不进入端到端流程
 5. 所有阶段通过门禁驱动，支持断点续跑与失败恢复

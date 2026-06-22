@@ -41,7 +41,7 @@ detect_trae_variant() {
 BRAND="cannbot"
 VERSION="1.0.0"
 
-INCLUDED_SKILLS="model-infer-migrator model-infer-parallel-analysis model-infer-parallel-impl model-infer-kvcache model-infer-fusion model-infer-graph-mode model-infer-precision-debug model-infer-runtime-debug model-infer-multi-stream model-infer-prefetch model-infer-superkernel"
+INCLUDED_SKILLS="model-infer-migrator model-infer-parallel-analysis model-infer-parallel-impl model-infer-kvcache model-infer-fusion model-infer-quantization model-infer-graph-mode model-infer-precision-debug model-infer-runtime-debug model-infer-multi-stream model-infer-prefetch model-infer-superkernel"
 INCLUDED_AGENT_PATTERN="model-infer-*"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
