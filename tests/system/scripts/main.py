@@ -17,7 +17,8 @@ import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from string import Template
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 from subprocess_streamer import run_subprocess_streaming
 
@@ -30,17 +31,20 @@ logger = logging.getLogger(__name__)
 class GateChecker:
     def __init__(self, repo_root: str, changed_files: List[str], eval_id: Optional[str] = None,
                  parallel: str = "1", report_only: bool = False,
-                 ascend_platforms: Optional[List[str]] = None):
+                 ascend_platforms: Optional[List[str]] = None,
+                 all_mode: bool = False):
         self.repo_root = Path(repo_root).resolve()
         self.changed_files = changed_files
         self.eval_id = eval_id
         self.parallel = parallel
         self.report_only = report_only
         self.ascend_platforms = ascend_platforms or []
+        self.all_mode = all_mode
         self.test_skill_dir = self.repo_root / "tests" / "system"
         self.results_dir = self.test_skill_dir / "results"
         self.evals_cases_dir = self.test_skill_dir / "cases"
         self.config = self._load_config()
+        self._skip_report_template = self._load_skip_report_template()
 
     @staticmethod
     def _parse_eval_timeout(evals_path: Path, eval_id: str) -> Optional[int]:
@@ -58,6 +62,31 @@ class GateChecker:
                 if t and isinstance(t, (int, float)):
                     return int(t)
         return None
+
+    @staticmethod
+    def _resolve_max_eval_timeout(target_names: List[str], evals_cases_dir: Path) -> int:
+        """扫描所有目标的 evals 文件，取所有用例的最大 timeout。
+        当未指定 eval_id 时使用，确保外层 pytest 子进程超时不小于最慢的单个用例。
+        若无任何 timeout 配置，返回 1200。
+        """
+        from evals_parser import parse_evals_md
+        max_timeout = 0
+        for name in target_names:
+            evals_path = evals_cases_dir / f"{name}_evals.md"
+            if not evals_path.exists():
+                continue
+            try:
+                data = parse_evals_md(evals_path)
+            except Exception as e:
+                logger.warning("解析 %s 的 evals 文件失败: %s", evals_path, e)
+                continue
+            if not data:
+                continue
+            for e in data.get("evals", []):
+                t = e.get("timeout")
+                if t and isinstance(t, (int, float)):
+                    max_timeout = max(max_timeout, int(t))
+        return max(max_timeout, 1200)
 
     @staticmethod
     def _check_opencode_available() -> bool:
@@ -103,6 +132,9 @@ class GateChecker:
         return self._run_basic_validation("test_team_basic.py", team_name, "Team")
 
     def identify_changed_skills(self) -> List[str]:
+        if self.all_mode:
+            return self._discover_all()[0]
+
         changed_skills = set()
 
         for file_path in self.changed_files:
@@ -118,17 +150,12 @@ class GateChecker:
             self._check_evals_file_change(parts, changed_skills)
             self._check_skill_dir_change(parts, changed_skills)
 
-        # 白名单过滤：仅在白名单中的 skill 才会触发评测
-        skill_whitelist = self.config.get("skill_whitelist", [])
-        if skill_whitelist:
-            skipped = sorted(changed_skills - set(skill_whitelist))
-            if skipped:
-                logger.info("白名单过滤 — 跳过的 skill (不在 skill_whitelist 中): %s", ', '.join(skipped))
-            changed_skills = changed_skills & set(skill_whitelist)
-
-        return sorted(list(changed_skills))
+        return sorted(self._filter_by_whitelist(changed_skills, "skill_whitelist", "skill"))
 
     def identify_changed_teams(self) -> List[str]:
+        if self.all_mode:
+            return self._discover_all()[1]
+
         changed_teams = set()
 
         for file_path in self.changed_files:
@@ -144,15 +171,7 @@ class GateChecker:
             self._check_team_evals_file_change(parts, changed_teams)
             self._check_team_dir_change(parts, changed_teams)
 
-        # 白名单过滤
-        team_whitelist = self.config.get("team_whitelist", [])
-        if team_whitelist:
-            skipped = sorted(changed_teams - set(team_whitelist))
-            if skipped:
-                logger.info("白名单过滤 — 跳过的 team (不在 team_whitelist 中): %s", ', '.join(skipped))
-            changed_teams = changed_teams & set(team_whitelist)
-
-        return sorted(list(changed_teams))
+        return sorted(self._filter_by_whitelist(changed_teams, "team_whitelist", "team"))
 
     def load_evals(self, skill_name: str) -> Optional[Dict[str, Any]]:
         evals_path = self.evals_cases_dir / f"{skill_name}_evals.md"
@@ -168,7 +187,10 @@ class GateChecker:
     def run_checks(self) -> bool:
         t_total = time.time()
         logger.info("Repository root: %s", self.repo_root)
-        logger.info("Changed files: %d", len(self.changed_files))
+        if self.all_mode:
+            logger.info("模式: --all（自动发现所有 skill/team evals）")
+        else:
+            logger.info("Changed files: %d", len(self.changed_files))
         if self.report_only:
             logger.info("模式: --report-only (仅重新生成报告，不执行测试)")
 
@@ -176,11 +198,17 @@ class GateChecker:
             self._cleanup_previous_run()
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        changed_skills = self.identify_changed_skills()
-        changed_teams = self.identify_changed_teams()
+        changed_skills: List[str]
+        changed_teams: List[str]
+        if self.all_mode:
+            changed_skills, changed_teams = self._discover_all()
+        else:
+            changed_skills = self.identify_changed_skills()
+            changed_teams = self.identify_changed_teams()
 
         if not changed_skills and not changed_teams:
-            logger.info("没有受影响的 skill 或 team，跳过测试。")
+            logger.info("没有受影响的 skill 或 team，生成跳过报告。")
+            self._generate_skip_report()
             return True
 
         logger.info("受影响的 skill (%d): %s", len(changed_skills), ', '.join(changed_skills))
@@ -211,6 +239,49 @@ class GateChecker:
         logger.info("=" * 60)
 
         return all_passed
+
+    def _generate_skip_report(self) -> None:
+        """生成跳过报告（无 skill/team 变更时）。"""
+        report_path = self._build_report_path()
+        beijing_tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz=beijing_tz)
+        changed_files_html = "\n".join(
+            f"      <li>{file}</li>" for file in self.changed_files
+        )
+        if self._skip_report_template is None:
+            logger.warning("跳过报告模板未加载，跳过报告生成。")
+            return
+        html = self._skip_report_template.safe_substitute(
+            generated_at=now.strftime("%d-%b-%Y at %H:%M:%S"),
+            changed_files_html=changed_files_html,
+        )
+        report_path.write_text(html, encoding='utf-8')
+        logger.info("跳过报告已生成: %s", report_path)
+
+    def _filter_by_whitelist(self, items: Set[str], whitelist_key: str, label: str) -> Set[str]:
+        """白名单过滤：仅保留在 whitelist 中的 item，记录被跳过的 item。"""
+        whitelist = self.config.get(whitelist_key, [])
+        if not whitelist:
+            return items
+        skipped = sorted(items - set(whitelist))
+        if skipped:
+            logger.info("白名单过滤 — 跳过的 %s (不在 %s 中): %s", label, whitelist_key, ', '.join(skipped))
+        return items & set(whitelist)
+
+    def _discover_all(self) -> Tuple[List[str], List[str]]:
+        """单次扫描 cases 目录，返回 (skills, teams) 全量列表（受 whitelist 过滤）。"""
+        skills: Set[str] = set()
+        teams: Set[str] = set()
+        for evals_file in self.evals_cases_dir.glob("*_evals.md"):
+            name = evals_file.name[:-len("_evals.md")]
+            if self.get_skill_dir(name):
+                skills.add(name)
+            if self.get_team_dir(name):
+                teams.add(name)
+
+        skills = self._filter_by_whitelist(skills, "skill_whitelist", "skill")
+        teams = self._filter_by_whitelist(teams, "team_whitelist", "team")
+        return sorted(skills), sorted(teams)
 
     def _run_basic_validation(self, test_script_name: str, target_name: str,
                                label: str) -> bool:
@@ -298,9 +369,17 @@ class GateChecker:
             return False
 
     def _resolve_eval_timeout(self, target_names: List[str], target_flag: str) -> int:
-        """从 evals.md 中读取指定 eval_id 的 Timeout 配置，若无配置则默认 1200s。"""
-        if not self.eval_id or not target_names:
+        """从 evals.md 中读取超时配置。
+
+        当指定了 eval_id → 读取该用例的 Timeout 配置。
+        当未指定 eval_id   → 扫描所有目标 evals 文件，取各用例最大 Timeout。
+        兜底默认值：1200s。
+        """
+        if not target_names:
             return 1200
+        if not self.eval_id:
+            # 未指定 eval_id → 取所有目标用例的最大 timeout
+            return self._resolve_max_eval_timeout(target_names, self.evals_cases_dir)
         for name in target_names:
             evals_path = self.evals_cases_dir / f"{name}_evals.md"
             if not evals_path.exists():
@@ -370,6 +449,13 @@ class GateChecker:
 
         return teams_with_evals
 
+    def _build_report_path(self) -> Path:
+        """构建统一 ST 验证报告路径。"""
+        beijing_tz = timezone(timedelta(hours=8))
+        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
+        platform_prefix = "_".join(self.ascend_platforms) + "_" if self.ascend_platforms else ""
+        return self.results_dir / f"{platform_prefix}ST_validation_report_{timestamp}.html"
+
     def _build_eval_pytest_cmd(
         self, skill_names: List[str], team_names: List[str]
     ) -> Tuple[List[str], Path]:
@@ -389,10 +475,7 @@ class GateChecker:
             for p in self.ascend_platforms:
                 cmd.extend(["--ascend-platform", p])
 
-        beijing_tz = timezone(timedelta(hours=8))
-        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
-        platform_prefix = "_".join(self.ascend_platforms) + "_" if self.ascend_platforms else ""
-        report_path = self.results_dir / f"{platform_prefix}ST_validation_report_{timestamp}.html"
+        report_path = self._build_report_path()
         cmd.extend([f"--html={report_path}", "--self-contained-html", "--tb=short"])
         return cmd, report_path
 
@@ -485,6 +568,14 @@ class GateChecker:
         return {"skill_dirs": ["skills"], "skill_whitelist": [],
                 "team_dirs": [], "team_whitelist": []}
 
+    def _load_skip_report_template(self) -> Optional[Template]:
+        """加载跳过报告 HTML 模板，文件不存在时返回 None。"""
+        template_path = self.test_skill_dir / "config" / "skip-report-template.html"
+        if template_path.exists():
+            return Template(template_path.read_text(encoding='utf-8'))
+        logger.warning("跳过报告模板不存在: %s", template_path)
+        return None
+
     def _check_evals_file_change(self, parts: tuple, changed_skills: set) -> None:
         """检测集中式 evals 文件变更"""
         if len(parts) < 3 or parts[:3] != ("tests", "system", "cases"):
@@ -558,8 +649,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--changed-files",
         nargs="+",
-        required=True,
+        default=[],
         help="List of changed files (relative or absolute paths)"
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Run all available eval cases (auto-discover from tests/system/cases/)"
     )
     parser.add_argument(
         "--eval-id",
@@ -595,7 +692,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main():
-    args = _build_arg_parser().parse_args()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    if not args.all and not args.changed_files:
+        parser.error("--changed-files is required unless --all is specified")
 
     # 将 --eval-model 写入环境变量，透传给 pytest 子进程
     if args.eval_model:
@@ -603,7 +704,8 @@ def main():
 
     checker = GateChecker(args.repo_root, args.changed_files, args.eval_id,
                           args.parallel, args.report_only,
-                          ascend_platforms=args.ascend_platform)
+                          ascend_platforms=args.ascend_platform,
+                          all_mode=args.all)
     success = checker.run_checks()
 
     archive_logs_and_results(args.repo_root)

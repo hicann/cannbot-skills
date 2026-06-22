@@ -24,6 +24,7 @@ TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-${BASE_BRANCH:-master}}"
 
 ASCEND_PLATFORMS=()
 REPEAT_COUNT=1
+ALL_MODE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -42,6 +43,10 @@ while [[ $# -gt 0 ]]; do
             fi
             REPEAT_COUNT="$2"
             shift 2
+            ;;
+        --all)
+            ALL_MODE=1
+            shift
             ;;
         *)
             echo "Unknown option: $1"
@@ -89,29 +94,33 @@ fi
 echo "  opencode: $(opencode --version 2>&1 | head -1)"
 
 # =========================================================================
-# Phase 2: 检测变更文件
+# Phase 2: 检测变更文件（--all 模式下跳过）
 # =========================================================================
-echo "=== Phase 2: Detect Changed Files ==="
-# 优先从 pr_filelist.txt 读取（CI 流水线在项目根目录生成）
-PR_FILELIST="$REPO_ROOT/pr_filelist.txt"
-if [ -f "$PR_FILELIST" ]; then
-    CHANGED_FILES=$(grep -v '^\s*$' "$PR_FILELIST" || true)
-    echo "[from pr_filelist.txt]"
-fi
+if [ "$ALL_MODE" -eq 1 ]; then
+    echo "=== Phase 2: --all mode, skip change detection ==="
+else
+    echo "=== Phase 2: Detect Changed Files ==="
+    # 优先从 pr_filelist.txt 读取（CI 流水线在项目根目录生成）
+    PR_FILELIST="$REPO_ROOT/pr_filelist.txt"
+    if [ -f "$PR_FILELIST" ]; then
+        CHANGED_FILES=$(grep -v '^\s*$' "$PR_FILELIST" || true)
+        echo "[from pr_filelist.txt]"
+    fi
 
-if [ -z "${CHANGED_FILES:-}" ]; then
-    git fetch origin "$TARGET_BRANCH" --depth=1 2>/dev/null || true
-    CHANGED_FILES=$(git diff --name-only "origin/$TARGET_BRANCH"...HEAD 2>/dev/null || true)
-fi
+    if [ -z "${CHANGED_FILES:-}" ]; then
+        git fetch origin "$TARGET_BRANCH" --depth=1 2>/dev/null || true
+        CHANGED_FILES=$(git diff --name-only "origin/$TARGET_BRANCH"...HEAD 2>/dev/null || true)
+    fi
 
-if [ -z "$CHANGED_FILES" ]; then
-    echo "No changed files detected. Exiting."
-    exit 0
-fi
-echo "Changed files:"
-echo "$CHANGED_FILES"
+    if [ -z "$CHANGED_FILES" ]; then
+        echo "No changed files detected. Exiting."
+        exit 0
+    fi
+    echo "Changed files:"
+    echo "$CHANGED_FILES"
 
-readarray -t changed_files_array <<< "$CHANGED_FILES"
+    readarray -t changed_files_array <<< "$CHANGED_FILES"
+fi
 
 # =========================================================================
 # Phase 3: 安装依赖
@@ -146,11 +155,16 @@ for ((iter=1; iter<=REPEAT_COUNT; iter++)); do
     echo "--- Iteration ${iter}/${REPEAT_COUNT} ---"
 
     ITER_EXIT_CODE=0
-    python3 "$FRAMEWORK_DIR/scripts/main.py" \
-        --repo-root "$REPO_ROOT" \
-        --changed-files "${changed_files_array[@]}" \
-        --parallel auto \
-        --ascend-platform "${ASCEND_PLATFORMS[@]}" \
+    MAIN_ARGS=("--repo-root" "$REPO_ROOT" "--parallel" "auto")
+    if [ "$ALL_MODE" -eq 1 ]; then
+        MAIN_ARGS+=("--all")
+    else
+        MAIN_ARGS+=("--changed-files" "${changed_files_array[@]}")
+    fi
+    for p in "${ASCEND_PLATFORMS[@]}"; do
+        MAIN_ARGS+=("--ascend-platform" "$p")
+    done
+    python3 "$FRAMEWORK_DIR/scripts/main.py" "${MAIN_ARGS[@]}" \
         || ITER_EXIT_CODE=$?
 
     if [ $ITER_EXIT_CODE -eq 0 ]; then

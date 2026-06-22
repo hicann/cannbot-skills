@@ -33,10 +33,10 @@ eval_mode: text
 
 ## Config
 - Eval Mode: file_based
-- Max Tokens: 300000
-- Timeout: 2400
+- Max Tokens: 5000000
+- Timeout: 18000
 - Disabled: true
-- Ascend Platform: A2
+- Ascend Platform: A5
 
 ## Prompt
 
@@ -47,8 +47,10 @@ eval_mode: text
 - 数学公式：z[i] = x[i] + y[i]（逐元素加法）
 - 输入：x fp16[256], y fp16[256]
 - 输出：z fp16[256]
-- 目标芯片：Ascend910B
+- 目标芯片：Ascend950PR（DAV_3510）
+- 编译架构：dav-3510（CMakeLists.txt 中配置 --npu-arch=dav-3510）
 - 数据搬运：GM→UB→计算→UB→GM
+- 核函数入口：纯向量算子使用 `__global__ __vector__`
 
 请输出完整的算子文件到沙箱中。
 
@@ -56,9 +58,9 @@ eval_mode: text
 
 生成的算子工程应包含以下完整内容：
 
-1. **kernel 实现文件**（.asc 或 .cpp）：包含完整的 Ascend C 算子逻辑，使用正确的 API（DataCopy、Add、LocalTensor、GlobalTensor 等），有正确的核函数入口（`__global__ __aicore__`），包含 tiling 参数获取（GetBlockNum、GetBlockIdx）
+1. **kernel 实现文件**（.asc）：包含完整的 Ascend C 算子逻辑，使用正确的 API（DataCopyPad、Add、LocalTensor、GlobalTensor 等），有正确的核函数入口（纯向量算子使用 `__global__ __vector__`），包含 tiling 参数获取（GetBlockNum、GetBlockIdx），CMakeLists.txt 中 `--npu-arch` 配置为 dav-3510（Ascend950PR）
 
-2. **CMakeLists.txt**：正确配置 Ascend C 算子编译选项，包括正确的 CANN 路径引用和编译目标
+2. **CMakeLists.txt**：正确配置 Ascend C 算子编译选项，包括正确的 CANN 路径引用和编译目标（--npu-arch=dav-3510）
 
 3. **数据生成脚本**（gen_data.py 或类似）：生成测试用的 float16 输入数据
 
@@ -73,4 +75,6 @@ eval_mode: text
 - [file_exists] operators/add_vector/op_host/add_vector.asc
 - [file_list] operators/add_vector/*.sh
 - [file_list] operators/add_vector/CMakeLists.txt
-- [file_contains] operators/add_vector/op_kernel/*.asc : "__global__";"add_vector_kernel";"LocalTensor";"DataCopy"
+- [file_contains] operators/add_vector/CMakeLists.txt : "dav-3510"
+- [not-contain] "dav-2201"
+- [file_contains] operators/add_vector/op_host/add_vector.asc : "__global__";"add_vector_kernel";"LocalTensor";"DataCopyPad"
