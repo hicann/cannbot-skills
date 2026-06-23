@@ -115,7 +115,7 @@ WaitFlag<Event>(eventID)    ← 阻塞等待"生产者完成"
 
 ### 3.2 构造预发 / 析构排空（Init-Drain 模式）
 
-双缓冲流水中，第一轮迭代的 Wait 没有"上一轮"可等。解决方案：**构造函数预发所有 slot 的 SetFlag，析构函数排空所有 slot 的 WaitFlag**。
+双缓冲流水或单缓冲但多轮生产/消费中，第一轮迭代的 Wait 没有"上一轮"可等。解决方案：**构造函数预发所有 slot 的 SetFlag，析构函数排空所有 slot 的 WaitFlag**。
 
 ```cpp
 class BlockMmad {
@@ -187,20 +187,17 @@ for (uint64_t iter = 0; iter < totalIter; ++iter) {
 | 场景 | 现象 | 原因 |
 |------|------|------|
 | 小 shape（单轮） | PASS | buffer 不复用，无冲突 |
-| 大 shape（多轮） | crash 或数据错乱 | 上一轮 MTE3 未写完，本轮 MTE2 覆盖同一 buffer |
-| 确定性测试 | 两次运行结果不同 | 时序竞争：MTE3 完成时间随调度波动 |
+| 大 shape（多轮） | crash 或数据错乱 | 上一轮 V 未计算完，本轮 MTE2 覆盖同一 buffer |
+| 确定性测试 | 两次运行结果不同 | 时序竞争：V 完成时间随调度波动 |
 
 ### 4.4 epilogue 循环中的正确 barrier 位置
 
 ```cpp
-// 循环外：加载 (1,N) 额外输入（所有 stage 共享）
-DataCopyPad(x3Buf, x3GM[nPos], ...);
-
 for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
-    // ── 反向 barrier：等上一轮 MTE3 写回完成 ──
-    SetFlag<HardEvent::MTE3_MTE2>(ZERO_FLAG);
-    WaitFlag<HardEvent::MTE3_MTE2>(ZERO_FLAG);
-
+    // ── 反向 barrier：等上一轮 V 计算完成,
+    // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
+    WaitFlag<HardEvent::V_MTE2>(ZERO_FLAG);
+    
     // ── 加载 (M,1)/(M,N) 额外输入（每 stage 不同行）──
     DataCopyPad(pertokenBuf, pertokenGM[start + mOff], ...);
 
@@ -208,8 +205,16 @@ for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
     SetFlag<HardEvent::MTE2_V>(ZERO_FLAG);
     WaitFlag<HardEvent::MTE2_V>(ZERO_FLAG);
 
+    // ── 反向 barrier：V等上一轮 MTE3 完成后才能开始计算,
+    // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
+    WaitFlag<HardEvent::MTE3_V>(ZERO_FLAG);
+
     // ── V 计算 ──
     __VEC_SCOPE__ { ... }
+
+    // ── 反向 barrier：通知下一轮 MTE2 可以开始 ──
+    // 注意：尾轮WaitFlag需要在析构函数中完成，此处伪代码虽不作展示，但不能遗漏！
+    SetFlag<HardEvent::V_MTE2>(ZERO_FLAG);
 
     // ── 正向 barrier：等 V 计算完成 ──
     SetFlag<HardEvent::V_MTE3>(ZERO_FLAG);
@@ -217,10 +222,14 @@ for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
 
     // ── MTE3 写回 GM ──
     DataCopyPad(outputGM[offset], bf16Out, ...);
+
+    // ── 反向 barrier：通知下一轮 V 可以开始 ──
+    // 注意：尾轮WaitFlag需要在析构函数中完成，此处伪代码虽不作展示，但不能遗漏！
+    SetFlag<HardEvent::MTE3_V>(ZERO_FLAG);
 }
 ```
 
-> **关键**：`MTE3_MTE2` barrier 放在循环内、MTE2 操作之前。第一轮迭代时 MTE3 无未完成操作，barrier 直接通过，无副作用。
+> **关键**：`V_MTE2` barrier 放在循环内、MTE2 操作之前WaitFlag, V 完成后SetFlag，注意首轮尾轮和中间轮次的区别。
 
 ---
 
@@ -343,7 +352,6 @@ GetTPipePtr()->ReleaseEventID<HardEvent::MTE3_MTE2>(eventId);        // 释放
 | 场景 | 推荐 | 原因 |
 |------|------|------|
 | 调试同步问题 | `PipeBarrier<PIPE_ALL>()` | 快速验证是否为同步问题 |
-| 核间同步前排空 | `PipeBarrier<PIPE_ALL>()` | 确保所有 pipe 操作完成后再通知对端 |
 | 高性能流水 | **不用** PipeBarrier | 用 SetFlag/WaitFlag 精确同步 |
 
 ### 6.5 与 SetFlag/WaitFlag 的选择
@@ -447,27 +455,7 @@ class KernelMatmulMixFixpipeOpti {
 };
 ```
 
-### 7.7 PipeBarrier 在 CrossCoreSetFlag 前的必要性
-
-**问题**：AIV 对 UB 的读取在 PIPE_V，但 CrossCoreSetFlag 挂在 PIPE_MTE3。`V_MTE3` 栅栏只保证 stage 内 V→MTE3 顺序，**不保证 PIPE_V 读在跨核 flag 发出前排空**。
-
-**后果**：多轮 tile 时 AIC 收到"早发"的 done flag，提前覆盖 UB，AIV 的 PIPE_V 读取读到新旧混合数据 → WAR 竞争。
-
-**修复**：
-
-```cpp
-if ASCEND_IS_AIV {
-    CrossCoreWaitFlag<MODE4, PIPE_V>(AIC_SYNC_AIV_FLAG + countId);
-    epilogueOp(...);
-    // 排空所有 pipe，确保 V 对 UB 的读取真正完成
-    AscendC::PipeBarrier<PIPE_ALL>();
-    CrossCoreSetFlag<MODE4, PIPE_MTE3>(AIV_SYNC_AIC_FLAG + countId);
-}
-```
-
-> **实验验证**：去掉 `PipeBarrier<PIPE_ALL>()` 后，1536³/2048³ 等大 shape 全部 FAIL（错误元素数十万级），加回后全部 PASS。
-
-### 7.8 空闲核处理
+### 7.7 空闲核处理
 
 空闲核必须在 return 前发送 flag，否则对端永久等待：
 
@@ -494,7 +482,7 @@ if ASCEND_IS_AIC {
 | D2 | AIV hang | 空闲 AIC 未发 flag 就 return | return 前补 CrossCoreSetFlag |
 | D3 | 大 shape crash，小 shape PASS | 缺少 MTE3_MTE2 反向 barrier | 循环内 MTE2 操作前加 MTE3_MTE2 |
 | D4 | 全 shape hang | SetFlag/WaitFlag eventID 不匹配 | 检查两侧 flagId 计算一致 |
-| D5 | 大 shape 数据错乱（非确定性） | CrossCoreSetFlag 前缺 PipeBarrier | 加 `PipeBarrier<PIPE_ALL>()` |
+| D5 | 大 shape 数据错乱（非确定性） | 反向同步设置错误 | 检查 V_MTE2 ， MTE3_V 等反向同步是否设置正确 |
 | D6 | L1 双缓冲 hang | 构造时未预发 MTE1_MTE2 | 构造函数 SetFlag 所有 slot |
 | D7 | L0C ping-pong deadlock | l0cDB==1 和 l0cDB==2 同步模式混用 | 统一 L0C 同步模式 |
 | D8 | EnQue/DeQue hang | 队列空等或满等 | 检查 Alloc/Free/EnQue/DeQue 配对 |
@@ -527,6 +515,7 @@ if ASCEND_IS_AIC {
 ---
 
 ## 9. 速查表
+
 
 ### 9.1 Matmul 双缓冲同步模板
 
@@ -562,26 +551,38 @@ WaitFlag<M_MTE1>(OFFSET + 0); WaitFlag<M_MTE1>(OFFSET + 1);
 
 ```cpp
 for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
-    // 反向 barrier（保护 UB 不被提前覆盖）
-    SetFlag<HardEvent::MTE3_MTE2>(ZERO_FLAG);
-    WaitFlag<HardEvent::MTE3_MTE2>(ZERO_FLAG);
+    // ── 反向 barrier：等上一轮 V 计算完成,
+    // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
+    WaitFlag<HardEvent::V_MTE2>(ZERO_FLAG);
+    
+    // ── 加载 (M,1)/(M,N) 额外输入（每 stage 不同行）──
+    DataCopyPad(pertokenBuf, pertokenGM[start + mOff], ...);
 
-    // 加载额外输入（MTE2）
-    DataCopyPad(extraBuf, extraGM[...], ...);
-
-    // 正向 barrier（MTE2→V）
+    // ── 正向 barrier：等 MTE2 加载完成 ──
     SetFlag<HardEvent::MTE2_V>(ZERO_FLAG);
     WaitFlag<HardEvent::MTE2_V>(ZERO_FLAG);
 
-    // V 计算
+    // ── 反向 barrier：V等上一轮 MTE3 完成后才能开始计算,
+    // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
+    WaitFlag<HardEvent::MTE3_V>(ZERO_FLAG);
+
+    // ── V 计算 ──
     __VEC_SCOPE__ { ... }
 
-    // 正向 barrier（V→MTE3）
+    // ── 反向 barrier：通知下一轮 MTE2 可以开始 ──
+    // 注意：尾轮WaitFlag需要在析构函数中完成，此处伪代码虽不作展示，但不能遗漏！
+    SetFlag<HardEvent::V_MTE2>(ZERO_FLAG);
+
+    // ── 正向 barrier：等 V 计算完成 ──
     SetFlag<HardEvent::V_MTE3>(ZERO_FLAG);
     WaitFlag<HardEvent::V_MTE3>(ZERO_FLAG);
 
-    // MTE3 写回 GM
-    DataCopyPad(outputGM[...], outputBuf, ...);
+    // ── MTE3 写回 GM ──
+    DataCopyPad(outputGM[offset], bf16Out, ...);
+
+    // ── 反向 barrier：通知下一轮 V 可以开始 ──
+    // 注意：尾轮WaitFlag需要在析构函数中完成，此处伪代码虽不作展示，但不能遗漏！
+    SetFlag<HardEvent::MTE3_V>(ZERO_FLAG);
 }
 ```
 
@@ -605,7 +606,6 @@ count++;
 countId = count / COUNT_ID_MAX % COUNT_FLAG;
 CrossCoreWaitFlag<MODE4, PIPE_V>(AIC_FLAG + countId);                // 等 AIC
 epilogueOp(...);
-PipeBarrier<PIPE_ALL>();                                              // 排空 V
 CrossCoreSetFlag<MODE4, PIPE_MTE3>(AIV_FLAG + countId);              // 通知 AIC
 
 // ── AIC drain（循环后）──
@@ -615,3 +615,53 @@ if (enableCVSync) {
     CrossCoreWaitFlag<MODE4, PIPE_FIX>(AIV_FLAG + countId + 16);
 }
 ```
+
+### 9.4 核内生产-消费流水同步的基本原则：
+任何流水，如果产出的数据被其他流水使用，**必须**同时设置正向同步和反向流水，正向流水设置在于"生产流水"和"反向流水"之间；反向同步的WaitFlag在生产流水之前，SetFlag在消费流水之后。反向同步设置时，首轮SetFlag在Init中预发射，尾轮WaitFlag在析构函数中完成。伪代码如下：
+
+```cpp
+class SomeClass {
+    __aicore__ void Init () {
+        // ... 其他Init函数逻辑
+
+        SetFlag<HardEvent::消费流水_生产流水>(id); // 预发射首轮SetFlag
+    }
+
+    __aicore__ void operator() ()
+    {
+        // ... 其他逻辑代码
+
+        // 反向等待消费流水完成,必须设置, 否则会导致多tile轮次计算间有读写竞争
+        WaitFlag<HardEvent::消费流水_生产流水>(id);
+
+        {
+            // ... 生产流水代码
+        }
+
+        // 正向同步
+        SetFlag<HardEvent::生产流水_消费流水>(id);
+        WaitFlag<HardEvent::生产流水_消费流水>(id);
+
+        {
+            // ... 消费流水代码
+        }
+        
+        // 反向通知下一轮生产流水可以开始,必须设置，不设置会导致多tile轮次计算间有读写竞争
+        SetFlag<HardEvent::消费流水_生产流水>(id);
+
+        // ... 其他逻辑代码
+    }
+
+    __aicore__ ~SomeClass()
+    {
+        // ... 其他析构函数逻辑代码
+
+        // 析构函数中设置最后一轮反向等待的WaitFlag
+        WaitFlag<HardEvent::消费流水_生产流水>(id);
+    }
+};
+```
+
+**重要：**
+1. 同步代码和流水代码的位置必须绑定，**不允许**同步代码在循环外，但流水代码在循环内。当修改流水代码位置时，必须将对应的同步代码位置一起修改.
+2. SetFlag和WaitFlag的数量必须匹配，先Set后Wait。尤其是涉及循环的情况，需要仔细验证SetFlag和WaitFlag的数量是否匹配。

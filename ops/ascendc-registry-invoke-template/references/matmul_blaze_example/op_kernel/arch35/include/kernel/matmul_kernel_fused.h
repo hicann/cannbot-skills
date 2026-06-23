@@ -166,6 +166,7 @@ public:
                 AscendC::CrossCoreWaitFlag<AIC_SYNC_AIV_MODE_4, PIPE_V>(
                     AIC_SYNC_AIV_FLAG + countId);
                 epilogueOp({curM, curN, 1, 1}, offsetC, (AIV_SYNC_AIC_FLAG + countId));
+                AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_MTE3>(AIV_SYNC_AIC_FLAG + countId);
             }
         }
 

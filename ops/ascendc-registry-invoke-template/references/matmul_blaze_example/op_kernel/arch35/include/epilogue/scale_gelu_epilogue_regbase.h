@@ -135,6 +135,9 @@ public:
         x3AsFloatGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ ComputeType*>(params.x3GmAddr));
         pertokenGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ ComputeType*>(params.pertokenScaleGmAddr));
         biasGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ ComputeType*>(params.biasGmAddr));
+
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }
 
     __aicore__ inline auto GetTensor() { return cLocal_; }
@@ -165,6 +168,9 @@ public:
 
         int64_t nPos = dstOffset % N;
         int64_t mPos = dstOffset / N;
+
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+
         {
             uint16_t nRows = 1;
             uint32_t rowBytes = static_cast<uint32_t>(blockShapeN * sizeof(ComputeType));
@@ -210,6 +216,8 @@ public:
 
         while (stageOffset < totalRows) {
             int64_t rowsThisStage = AscendC::Std::min(curStageRows, totalRows - stageOffset);
+            
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
 
             __VEC_SCOPE__
             {
@@ -281,17 +289,23 @@ public:
                 AscendC::DataCopyExtParams outParams{nRows, rowBytes, ubRowGapBytes, gmRowGap, 0};
                 AscendC::DataCopyPad<OutputType>(outputGlobal_[gmRowOffset], bf16Out_, outParams);
             }
+            
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
 
             stageOffset += rowsThisStage;
         }
 
-        // [实验A] 在通知 AIC“本 tile 已消费完 UB”之前，排空所有 AIV 流水，
-        // 确保对 cLocal_(int32 matmul 结果) 的 V 读取真正完成，避免 AIC 提前覆盖 UB。
-        AscendC::PipeBarrier<PIPE_ALL>();
-        AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_MTE3>(flagId);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
     }
 
     __host_aicore__ static Params InitParams(Params const& args) { return args; }
+
+    __aicore__ ~ScaleGeluEpilogueRegBase()
+    {
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
+    }
+
 };
 
 #endif // __CCE_AICORE__

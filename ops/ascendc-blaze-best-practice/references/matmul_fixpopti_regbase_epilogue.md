@@ -309,34 +309,42 @@ blockShapeM = ((static_cast<uint64_t>(blockShapeM) & 1UL) > 0UL)
 
 ```
 operator()(blockShape, dstOffset, flagId):
-    // ① SPLIT_M
+    // (1) SPLIT_M
     halfM = ceil(curM / 2)
     if (curM 奇数) halfM -= GetSubBlockIdx()
     if (halfM <= 0) { return; }
 
-    // ② [USER T3] DataCopyPad 额外输入 (GM→UB)
+    // (2) V_MTE2 反向 barrier（等上一轮的V计算 完成）
+    // 需要在Init中预发射首轮的SetFlag
+    // [MODIFY] 这里MTE2在Stage循环外（即步骤(3)在stage循环外），所以V_MTE2的同步也在循环外。然而有些场景下MTE2在stage循环内，此时需要将WaitFlag<V_MTE2>和SetFlag<V_MTE2>都放在stage循环内，因为同步必须和实际流水代码位置绑定
+    WaitFlag<V_MTE2>; 
+
+    // (3) [USER T3] DataCopyPad 额外输入 (GM→UB)
     nPos = dstOffset % N
     DataCopyPad(extraBuf, extraInputGM[nPos], {1行, blockShapeN×sizeof})
 
-    // ③ MTE2_V barrier（等 DataCopyPad 完成）
+    // (4) MTE2_V barrier（等 DataCopyPad 完成）
     SetFlag<MTE2_V>; WaitFlag<MTE2_V>
 
-    // ④ 获取 UB 地址
+    // (5) 获取 UB 地址
     srcAddr = cLocal_.GetPhyAddr()       // __ubuf__ L0CType*
     extraAddr = extraBuf.GetPhyAddr()    // __ubuf__ ComputeType*
     dstAddr = bf16Out_.GetPhyAddr()      // __ubuf__ OutputType*
 
-    // ⑤ per-call nAlign
+    // (6) per-call nAlign
     nAlign = CeilDiv(blockShapeN, 32/sizeof(L0CType)) × (32/sizeof(L0CType))
     VL = VECTOR_REG_WIDTH / sizeof(ComputeType)   // = 64
     vfLoopNum = ceil(nAlign / VL)
 
-    // ⑥ Stage 循环
+    // (7) Stage 循环
     stageOffset = 0
     while stageOffset < halfM:
         rowsThisStage = min(stageRows, halfM - stageOffset)
 
-        // ⑦ __VEC_SCOPE__
+        // (8) V 反向等待上一轮 MTE3 搬运完成, 需要在Init中预发射首轮 SetFlag
+        WaitFlag<MTE3_V>;
+
+        // (9) __VEC_SCOPE__
         __VEC_SCOPE__ {
             声明 RegTensor + MaskReg
             for row in [0, rowsThisStage):          // uint16_t!
@@ -356,20 +364,27 @@ operator()(blockShape, dstOffset, flagId):
                     StoreAlign<Output, DIST_PACK_B32>(rowDst + i×VL, vregOut, mask)  // 打包写回
         }
 
-        // ⑧ V_MTE3 barrier（等 VF store 完成）
+        // (10) V_MTE3 barrier（等 VF store 完成）
         SetFlag<V_MTE3>; WaitFlag<V_MTE3>
 
-        // ⑨ DataCopyPad 写出 (UB→GM)
+        // (11) DataCopyPad 写出 (UB→GM)
         gmRowOffset = dstOffset + stageOffset × N + SubBlockIdx × halfM × N
         ubRowGap = (nAlign - blockShapeN) × sizeof(OutputType)
         DataCopyPad<Output>(outputGM[gmRowOffset], bf16Out_,
             {rowsThisStage, blockShapeN×sizeof, ubRowGap, gmRowGap})
 
+        // (12) MT3通知下一轮V可以开始计算, 需要在析构函数中设置尾轮WaitFlag
+        SetFlag<MTE3_V>;
+
         stageOffset += rowsThisStage
 
-    // ⑩ CV 同步已外提到 kernel 层（matmul_kernel_fused.h）
+    // (13) V_MTE2 反向 barrier（通知下一轮的MTE2可以开始搬运）
+    // 需要在析构函数中设置尾轮的WaitFlag
+    // [MODIFY] 这里MTE2在Stage循环外（即步骤(3)在stage循环外），所以V_MTE2的同步也在循环外。然而有些场景下MTE2在stage循环内，此时需要将WaitFlag<V_MTE2>和SetFlag<V_MTE2>都放在stage循环内，因为同步必须和实际流水代码位置绑定
+    SetFlag<V_MTE2>; 
+
+    // (14) CV 同步已外提到 kernel 层（matmul_kernel_fused.h）
     // kernel 在 epilogueOp() 返回后执行：
-    //   PipeBarrier<PIPE_ALL>()  — 排空 PIPE_V，确保 UB 读取完成
     //   CrossCoreSetFlag<MODE, PIPE_MTE3>(flagId)  — 通知 AIC 释放 UB
 ```
 
@@ -377,9 +392,11 @@ operator()(blockShape, dstOffset, flagId):
 
 | 同步点 | 类型 | 原因 |
 |--------|------|------|
-| DataCopyPad 后 | `MTE2_V` | MTE2 写完 UB，VEC 才能读取 extraBuf |
+| DataCopyPad(搬入) 前/Stage 循环后 | `V_MTE2` | 上一轮的V计算完成后，下一轮的MTE2才能开始。注意，尽管伪代码中没有显示写多轮MTE2循环，但shape较大时单核需计算多tile，天然存在多轮循环。除非固定小shape，否则不能省略反向同步！ |
+| DataCopyPad(搬入) 后 | `MTE2_V` | MTE2 写完 UB，VEC 才能读取 extraBuf |
+| `__VEC_SCOPE__` 嵌套/DataCopyPad(搬出)后 | `MTE3_V` | 上一轮的MTE3搬出完成后，下一轮的V才能开始计算 |
 | `__VEC_SCOPE__` 后 | `V_MTE3` | VEC store 写完 bf16Out_，MTE3 才能读取 |
-| kernel 层（epilogueOp 返回后） | `PipeBarrier<PIPE_ALL>` + `CrossCoreSetFlag` | 排空 PIPE_V 确保 UB 读取完成，再通知 AIC 本 tile UB 已释放 |
+| kernel 层（epilogueOp 返回后） | `CrossCoreSetFlag` | 通知 AIC 本 tile UB 已释放 |
 
 ## 8. 开发步骤
 
@@ -449,7 +466,7 @@ class MyVectorKernel {
 | per-call nAlign | 从 `blockShapeN` 计算，不用 Init 时的 `l1N` |
 | MTE2_V barrier | DataCopyPad 额外输入后必须等待 |
 | V_MTE3 barrier | `__VEC_SCOPE__` 结束后必须等待 |
-| CV 同步外提 | CV 同步（PipeBarrier + CrossCoreSetFlag）已外提到 kernel 层，epilogue 内不包含核间同步指令 |
+| CV 同步外提 | CV 同步（CrossCoreSetFlag）已外提到 kernel 层，epilogue 内不包含核间同步指令 |
 | ubRowGap 单位 | DataCopyExtParams 中 srcStride 是**字节**（dav-3510） |
 | 统一使用 LoadAlign/StoreAlign | 禁止 `Reg::DataCopy`；所有 UB↔Reg 搬运必须用新接口（§4.2.1） |
 | LoadDist 选择 | 每个 `LoadAlign` 调用必须按 §4.2.2 决策流程选择正确的 LoadDist 模式 |
@@ -474,5 +491,6 @@ class MyVectorKernel {
 | P13 | kernel crash（Failed to synchronize） | DataCopyExtParams ubRowGap 单位错误 | dav-3510 上 srcStride 是字节，不是 32B 块 |
 | P14 | 额外输入数据全零或乱码 | DataCopyPad 后未加 MTE2_V barrier | 加 `SetFlag<MTE2_V>; WaitFlag<MTE2_V>` |
 | P15 | 输出全零 | `__VEC_SCOPE__` 后未加 V_MTE3 barrier | 加 `SetFlag<V_MTE3>; WaitFlag<V_MTE3>` |
-| P16 | AIC hang | kernel 层未正确发送 CrossCoreSetFlag | 检查 `matmul_kernel_fused.h` 中 epilogueOp() 后是否有 `PipeBarrier<PIPE_ALL>()` + `CrossCoreSetFlag<MODE, PIPE_MTE3>(flagId)` |
+| P16 | AIC hang | kernel 层未正确发送 CrossCoreSetFlag | 检查 `matmul_kernel_fused.h` 中 epilogueOp() 后是否有 `CrossCoreSetFlag<MODE, PIPE_MTE3>(flagId)` |
 | P17 | 公式常量值错误 | 常量名与值不匹配（如 SCALAR_ONE=2.0f） | 仔细核对每个常量值 |
+| P18 | shape较小时pass，shape较大时fail | 可能原因：shape较大时单核需计算多个tile，MTE2前没有正确设置反向同步导致读写竞争| 检查各个流水是否正确设置反向同步|

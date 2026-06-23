@@ -148,9 +148,9 @@ public:
         // [USER T2] 绑定额外输入的 GM 地址
         extraInputGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ ComputeType*>(params.extraInputAddr));
     
-        // 多轮搬入UB时，MTE2需要反向等待Vec消费，在Init中设置首轮SetFlag
-        // 非多轮GM->UB时可删除 V_MTE2 的反向同步等待(包括operator()和析构函数中的同步)
+        // 在Init中预发射首轮所有反向同步的SetFlag
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }
 
     __aicore__ inline auto GetTensor() { return cLocal_; }
@@ -183,7 +183,7 @@ public:
         //   int64_t nPos = dstOffset % N;
         //   DataCopyPad(extraBuf_, extraInputGlobal_[nPos], ...);
 
-        // MTE2反向等待上一轮Vec消费，非多轮搬运时可删除
+        // MTE2反向等待上一轮Vec消费
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
         {
             int64_t nPos = dstOffset % N;
@@ -216,7 +216,9 @@ public:
 
         while (stageOffset < totalRows) {
             int64_t rowsThisStage = AscendC::Std::min(curStageRows, totalRows - stageOffset);
-
+            
+            // V反向等待上一轮MTE3搬运结束才能开始
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
             // ---- VF 计算（__VEC_SCOPE__）----
             __VEC_SCOPE__
             {
@@ -292,6 +294,8 @@ public:
                 AscendC::DataCopyExtParams outParams{nRows, rowBytes, ubRowGapBytes, gmRowGap, 0};
                 AscendC::DataCopyPad<OutputType>(outputGlobal_[gmRowOffset], bf16Out_, outParams);
             }
+            // MTE3搬运完成，通知下一轮V可以开始计算
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
 
             stageOffset += rowsThisStage;
         }
@@ -303,9 +307,9 @@ public:
 
     __aicore__ ~EpilogueFusionRegBase()
     {
-        // 析构函数中设置最后一轮反向等待的WaitFlag
-        // 非多轮GM->UB搬运时可删除
+        // 析构函数中设置尾所有反向等待的WaitFlag
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }
 };
 
