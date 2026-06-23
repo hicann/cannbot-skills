@@ -40,7 +40,7 @@ extern "C" __global__ __aicore__ void kernel_custom(GM_ADDR ...inputs..., GM_ADD
 
 ## 第四章：主 Kernel 类（C/V 融合）
 
-参考 [`archive_tasks/matmul_leakyrelu/kernel/matmul_leakyrelu.h`](/Users/wzz/Desktop/Research/AscendOpGenAgent/archive_tasks/matmul_leakyrelu/kernel/matmul_leakyrelu.h:1)，C/V 融合主 `Kernel` 类建议按 `Init()` 和 `Process()` 两个大阶段组织。
+参考 `archive_tasks/matmul_leakyrelu/kernel/matmul_leakyrelu.h`，C/V 融合主 `Kernel` 类建议按 `Init()` 和 `Process()` 两个大阶段组织。
 
 ### 1. `Init()`：接收 tiling 字段并初始化 GM / workspace / 子模块
 

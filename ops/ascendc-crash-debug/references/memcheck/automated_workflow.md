@@ -319,7 +319,7 @@ A: 在配置文件中设置 `installation.load_environment` 为 `false`：
 3. **根因分析**：分析错误原因
 4. **生成报告**：创建详细的内存检测报告
 
-详细步骤请参考主文档 [`SKILL.md`](./SKILL.md)。
+详细步骤请参考主文档 [`SKILL.md`](../../SKILL.md)。
 
 ## 技巧和建议
 
