@@ -63,7 +63,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", or "trae"
+  tool    - Target tool: "opencode" (default), "claude", "trae", or "cursor"
 
 Options:
   --help  - Show this help message
@@ -74,16 +74,20 @@ Examples:
   init.sh global claude        # Global-level, Claude Code
   init.sh project claude       # Project-level, Claude Code
   init.sh project trae         # Project-level, Trae
+  init.sh project cursor       # Project-level, Cursor
+  init.sh global cursor        # Global-level, Cursor
 
 Installation paths (CANNBot brand):
   OpenCode: .opencode/{skills,agents}/  (auto-discovered)
   Claude:   .claude/{skills,agents}/    (per-skill symlinks auto-created)
   Trae:     .trae/{skills,agents}/      (symlinks, project-level only)
+  Cursor:   .cursor/{skills,agents}/    (per-skill symlinks auto-created)
 
 After installation, launch directly:
   OpenCode: opencode
   Claude:   claude
   Trae:     通过 CLI 或 IDE 启动
+  Cursor:   通过 Cursor IDE 启动
 EOF
 }
 
@@ -126,8 +130,8 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, --help."
+        opencode|claude|trae|cursor)   TOOL="$arg" ;;
+        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, --help."
             exit 1 ;;
     esac
 done
@@ -139,6 +143,8 @@ if [ "$LEVEL" = "global" ]; then
     elif [ "$TOOL" = "trae" ]; then
         echo "Error: Global installation is not supported for Trae. Use project-level instead."
         exit 1
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$HOME/.cursor"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -147,6 +153,8 @@ else
         CONFIG_ROOT="$PLUGIN_ROOT/.opencode"
     elif [ "$TOOL" = "trae" ]; then
         CONFIG_ROOT="$PLUGIN_ROOT/.trae"
+    elif [ "$TOOL" = "cursor" ]; then
+        CONFIG_ROOT="$PLUGIN_ROOT/.cursor"
     else
         CONFIG_ROOT="$PLUGIN_ROOT/.claude"
     fi
@@ -229,20 +237,20 @@ fi
 
 echo -e "${CYAN}配置文件：${NC}"
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         config_target="$PWD/AGENTS.md"
     else
         config_target="$PWD/CLAUDE.md"
     fi
 else
-    if [ "$TOOL" = "opencode" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
     fi
 fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
-if [ "$TOOL" = "opencode" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
     echo -e "  ${GREEN}$(basename "$config_target")${NC} (已存在，无需操作)"
 elif [ -e "$config_target" ] || [ -L "$config_target" ]; then
     echo -e "  ${YELLOW}$(basename "$config_target")${NC} (将被替换)"
@@ -323,7 +331,7 @@ if [ "$TOOL" = "opencode" ]; then
     step1_summary="${step1_summary}hooks(${hook_count})"
     ok "Linked: $step1_summary"
 else
-    # Trae/Claude: create directories
+    # Trae/Claude/Cursor: create directories
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents" "$CONFIG_ROOT/hooks"
     ok "Prepared: skills/, agents/, hooks/"
 fi
@@ -347,14 +355,14 @@ echo ""
 step "[2/5] Installing configuration..."
 
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         config_target="$PWD/AGENTS.md"
     else
         config_target="$PWD/CLAUDE.md"
     fi
 else
     mkdir -p "$CONFIG_ROOT"
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
@@ -363,7 +371,7 @@ fi
 
 config_src="$PLUGIN_ROOT/AGENTS.md"
 
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -382,7 +390,7 @@ else
     fi
 fi
 
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; } && [ "$LEVEL" = "project" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ]; then
     if [ "$CONFIG_ROOT/AGENTS.md" != "$config_target" ]; then
         mkdir -p "$CONFIG_ROOT"
         ln -sf "$config_src" "$CONFIG_ROOT/AGENTS.md"
@@ -406,7 +414,7 @@ step "[3/5] Configuring tool discovery..."
 if [ "$TOOL" = "opencode" ]; then
     ok "Auto-scan: skills/, agents/"
 else
-    # Trae/Claude: create per-skill discovery symlinks (with filter, from shared ops)
+    # Trae/Claude/Cursor: create per-skill discovery symlinks (with filter, from shared ops)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/; do
@@ -463,7 +471,7 @@ else
 
     ok "Agents: $agent_link_count discovery symlinks"
 
-    # Trae/Claude: create per-hook discovery symlinks (from local hooks/)
+    # Trae/Claude/Cursor: create per-hook discovery symlinks (from local hooks/)
     HOOK_DISCOVERY="$CONFIG_ROOT/hooks"
 
     for hook_entry in "$PLUGIN_ROOT/hooks"/*; do
@@ -559,13 +567,13 @@ if [ "$LEVEL" = "global" ] && [ ! -d "$CONFIG_ROOT/asc-devkit" ]; then
 fi
 
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         [ -f "$PWD/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in current directory"; health_ok=false; }
     else
         [ -f "$PWD/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in current directory"; health_ok=false; }
     fi
 else
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
         [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
@@ -630,6 +638,9 @@ if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}生成ascendC算子，npu=0，算子描述文件为 /path/to/op.py，输出到 /path/to/output/${NC}"
 elif [ "$TOOL" = "trae" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}生成ascendC算子，npu=0，算子描述文件为 /path/to/op.py，输出到 /path/to/output/${NC}"
+elif [ "$TOOL" = "cursor" ]; then
+  echo -e "  ${CYAN}1.${NC} 启动 Cursor IDE"
   echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}生成ascendC算子，npu=0，算子描述文件为 /path/to/op.py，输出到 /path/to/output/${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

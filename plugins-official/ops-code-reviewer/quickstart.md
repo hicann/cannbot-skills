@@ -16,6 +16,10 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### 操作步骤
 
 #### 方式一：项目级安装（推荐）
@@ -32,7 +36,7 @@ cd cannbot-skills/plugins-official/ops-code-reviewer
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户（默认）
 bash init.sh project claude     # Claude Code 用户
-bash init.sh project trae       # Trae 用户
+bash init.sh project trae       # TRAE 用户
 bash init.sh project cursor     # Cursor 用户
 ```
 
@@ -50,7 +54,7 @@ cd cannbot-skills/plugins-official/ops-code-reviewer
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
 bash init.sh global claude      # Claude Code 用户
-bash init.sh global trae        # Trae 用户
+bash init.sh global trae        # TRAE 用户
 bash init.sh global cursor      # Cursor 用户
 ```
 
@@ -58,7 +62,7 @@ bash init.sh global cursor      # Cursor 用户
 
 init.sh 脚本会完成以下操作：
 
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 | Trae 全局 |
+| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | TRAE 项目级 | TRAE 全局 |
 |------|----------------|---------------|---------------|-------------|------------|----------|
 | Skills 技能模块 | `.opencode/skills/ascendc-code-review/` | `~/.config/opencode/skills/ascendc-code-review/` | `.claude/skills/ascendc-code-review/` | `~/.claude/skills/ascendc-code-review/` | `.trae/skills/ascendc-code-review/` / `.marscode/skills/ascendc-code-review/` / `.traecli/skills/ascendc-code-review/` | `~/.trae-cn/skills/ascendc-code-review/` / `~/.marscode/skills/ascendc-code-review/` / `~/.traecli/skills/ascendc-code-review/` |
 | Agents 子代理 | `.opencode/agents/ascendc-ops-reviewer.md` | `~/.config/opencode/agents/ascendc-ops-reviewer.md` | `.claude/agents/ascendc-ops-reviewer.md` | `~/.claude/agents/ascendc-ops-reviewer.md` | `.trae/agents/ascendc-ops-reviewer.md` / `.marscode/agents/ascendc-ops-reviewer.md` / `.traecli/agents/ascendc-ops-reviewer.md` | `~/.trae-cn/agents/ascendc-ops-reviewer.md` / `~/.marscode/agents/ascendc-ops-reviewer.md` / `~/.traecli/agents/ascendc-ops-reviewer.md` |
@@ -132,7 +136,7 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 └── cannbot-manifest.json          # 安装清单
 ```
 
-**全局安装（Trae）**：
+**全局安装（TRAE）**：
 ```
 ~/.trae-cn/      # TRAE IDE 全局路径
 ~/.marscode/     # TRAE Plugin 路径（自动检测）
@@ -145,7 +149,7 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 └── cannbot-manifest.json          # 安装清单
 ```
 
-**项目级安装（Trae）**：
+**项目级安装（TRAE）**：
 ```
 cannbot-skills/plugins-official/ops-code-reviewer/
 ├── AGENTS.md                      # Team 配置
@@ -185,7 +189,7 @@ cannbot-skills/plugins-official/ops-code-reviewer/
 opencode   # OpenCode 用户
 claude     # Claude Code 用户
 ```
-> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
+> **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
@@ -277,7 +281,7 @@ bash init.sh --help
 
 修改步骤：
 1. 直接编辑 CANNBot 仓库中的规范文档（如 `cpp-secure.md`、`ascendc-api.md`）
-2. 重启 opencode 或 claude，修改即刻生效
+2. 重启 OpenCode 或 Claude Code，修改即刻生效
 
 ### Q: Team 检视和单独调用 reviewer Agent 如何选择？
 

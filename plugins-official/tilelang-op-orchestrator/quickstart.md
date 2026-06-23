@@ -6,6 +6,13 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（≥ 8.3），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已安装 PyTorch（≥ 2.6.0）和 torch_npu（≥ 2.6.0）
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### 操作步骤
 
 #### 方式一：项目级安装（推荐）
@@ -22,7 +29,7 @@ cd cannbot-skills/plugins-official/tilelang-op-orchestrator
 # 3. 执行初始化脚本（项目级）
 bash init.sh project opencode   # OpenCode 用户（默认）
 bash init.sh project claude     # Claude Code 用户
-bash init.sh project trae       # Trae 用户
+bash init.sh project trae       # TRAE 用户
 bash init.sh project cursor     # Cursor 用户
 bash init.sh project copilot    # Copilot 用户
 
@@ -46,7 +53,7 @@ cd cannbot-skills/plugins-official/tilelang-op-orchestrator
 # 3. 执行初始化脚本（全局）
 bash init.sh global opencode    # OpenCode 用户（默认）
 bash init.sh global claude      # Claude Code 用户
-bash init.sh global trae        # Trae 用户
+bash init.sh global trae        # TRAE 用户
 bash init.sh global cursor      # Cursor 用户
 bash init.sh global copilot     # Copilot 用户
 
@@ -60,7 +67,7 @@ cd ..
 
 init.sh 脚本会完成以下操作：
 
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | Trae 项目级 |
+| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | TRAE 项目级 |
 |------|----------------|---------------|---------------|-------------|------------|
 | Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` | `.trae/skills/` |
 | Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` | `.trae/agents/` |

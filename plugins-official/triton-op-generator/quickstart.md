@@ -6,6 +6,14 @@ CANNBot Triton-Ascend 算子生成模式适用于通过 Triton DSL 开发高性�
 
 ---
 
+## 一、环境搭建
+
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ## Claude Code
 
 ### 安装
@@ -101,7 +109,7 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh
 
 ---
 
-## Trae
+## TRAE
 
 ### 安装
 
@@ -110,7 +118,7 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
 
-# 2. 运行安装脚本（Trae 仅支持项目级安装）
+# 2. 运行安装脚本（TRAE 仅支持项目级安装）
 bash install.sh project trae
 ```
 
@@ -122,7 +130,7 @@ bash install.sh project trae
 
 ### 启动
 
-通过 Trae CLI 或 IDE 启动。
+通过 TRAE CLI 或 IDE 启动。
 
 ### 更新
 
@@ -199,7 +207,7 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh projec
 | Claude | Plugin Marketplace | `~/.claude/skills/` + 手动 `~/.claude/CLAUDE.md` | 技能自动安装，需手动链接 AGENTS.md |
 | Claude | install.sh | `.claude/skills/` + `CLAUDE.md` | 一键完成，skills 和 CLAUDE.md 自动配置 |
 | OpenCode | install.sh | `.opencode/skills/` + `AGENTS.md` | Skills 通过 symlink 安装，AGENTS.md 自动配置 |
-| Trae | install.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
+| TRAE | install.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
 | Cursor | install.sh | `.cursor/skills/` + `AGENTS.md` | 项目级/全局级 |
 | Copilot | install.sh | `.github/skills/` + `AGENTS.md`（项目级）/ `~/.copilot/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
 

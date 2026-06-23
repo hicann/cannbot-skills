@@ -6,6 +6,12 @@
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### Claude Code
 
 **首选：Plugin Marketplace（一键安装）**
@@ -55,7 +61,7 @@ opencode agent list
 # 应看到 model-infer-analyzer / model-infer-implementer / model-infer-reviewer
 ```
 
-### Trae
+### TRAE
 
 仅支持项目级安装。
 
@@ -100,7 +106,7 @@ claude plugin list
 opencode agent list
 # 应看到 model-infer-analyzer / model-infer-implementer / model-infer-reviewer
 
-# Trae
+# TRAE
 ls .trae/      # TRAE IDE
 ls .marscode/  # TRAE Plugin（init.sh 自动检测）
 ls .traecli/   # TRAE CLI（init.sh 自动检测）
@@ -123,7 +129,7 @@ claude
 opencode
 ```
 
-> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
+> **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
@@ -216,7 +222,7 @@ bash init.sh --help
 # OpenCode (init.sh 方式)
 cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh
 
-# Trae
+# TRAE
 cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh project trae
 
 # Cursor
@@ -242,7 +248,7 @@ cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh project 
 ## 总结
 
 1. 端到端优化通过 `workflows/optimize-workflow.md` 编排 6 阶段流程，并在需要时插入可选量化阶段
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor 用户用 `init.sh` 脚本安装
-3. `claude` / `opencode` 是核心交互指令；IDE 类工具（Trae / Cursor）打开项目即自动加载
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE/Cursor 用户用 `init.sh` 脚本安装
+3. `claude` / `opencode` 是核心交互指令；IDE 类工具（TRAE / Cursor）打开项目即自动加载
 4. 单点优化（KVCache、并行、融合算子、量化等）由 12 个原子 skill 自动激活，不进入端到端流程
 5. 所有阶段通过门禁驱动，支持断点续跑与失败恢复

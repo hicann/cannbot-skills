@@ -15,6 +15,12 @@
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### 安装
 
 ```bash
@@ -40,7 +46,7 @@ bash init.sh global opencode    # 全局级
 帮我开发一个 catlass_matmul_gelu 算子：
 - A/B 为 FP16 行主序，输出 FP16
 - GELU 激活
-- 目标 SoC Atlas A2
+- 目标 SoC Ascend 910
 - 主要 shape M=N=K=512
 ```
 
@@ -99,7 +105,7 @@ operators/catlass_matmul_gelu/
 | 选项 | 值 |
 |------|-----|
 | `-I` | `<catlass>/include` |
-| `-DCATLASS_ARCH` | 2201（910b）/ 3510（950） |
+| `-DCATLASS_ARCH` | 2201（910）/ 3510（950 PR） |
 
 **不使用 catlass 仓库自身的 CMake 函数**。算子工程使用标准 Ascend C CMake 构建方式。
 

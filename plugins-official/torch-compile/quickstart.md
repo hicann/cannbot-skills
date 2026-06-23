@@ -6,6 +6,12 @@
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 > `init.sh` 通过脚本自身路径定位插件根，**从任意目录调用均可**，下文统一用 `INIT=...` 变量指代脚本路径，无需 cd 进 `torch-compile/`。
 >
 > ```bash
@@ -45,7 +51,7 @@ bash "$INIT" global opencode    # 全局级
 
 项目级会在**当前工作目录**生成 `.opencode/`，全局级落在 `~/.config/opencode/`，其中以软链方式注入 `skills/` 与 `agents/`，重启 OpenCode 后即可看到 `torch-npugraph-ex` Subagent。
 
-### Trae
+### TRAE
 
 仅支持项目级安装。
 
@@ -95,7 +101,7 @@ claude plugin list
 opencode agent list
 # 应看到 torch-npugraph-ex
 
-# Trae / Cursor / Codex / Copilot
+# TRAE / Cursor / Codex / Copilot
 ls .trae/ .cursor/ .codex/ .copilot/ 2>/dev/null
 # 应看到 skills/ agents/ AGENTS.md cannbot-manifest.json
 ```

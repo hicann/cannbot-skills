@@ -30,6 +30,12 @@ Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### Claude Code
 
 **首选：Plugin Marketplace（一键安装）**
@@ -60,7 +66,7 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
-### Trae
+### TRAE
 
 仅支持项目级安装。
 
@@ -177,6 +183,6 @@ TileLang 当前主要用于设计表达，不是 correctness gate。若 TileLang
 ## 总结
 
 1. 从 PyTorch Model 出发，支持双路径（简单/复杂）端到端完成算子开发
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae 用户用 `init.sh` 脚本安装
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE 用户用 `init.sh` 脚本安装
 3. 7 Phase 工作流，自动算子分类路由，退化检测，迭代修复
 4. 产出物包含设计文档/设计表达、kernel 代码、性能报告和 trace 记录

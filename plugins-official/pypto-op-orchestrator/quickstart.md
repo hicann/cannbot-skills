@@ -17,6 +17,13 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 
 ## 一、环境搭建
 
+### 前置条件
+
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已安装 PyPTO，版本需与 CANN 配套。通过 PyPI 安装时，CANN 与 PyPTO 版本对应关系查阅 [PyPI 安装](https://pypto.gitcode.com/install/build_and_install.html#pypi)；CANN 9.1.0 版本推荐使用源码编译安装，参阅 [源码编译安装](https://pypto.gitcode.com/install/build_and_install.html)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+
 ### Claude Code
 
 **首选：Plugin Marketplace（一键安装）**
@@ -49,7 +56,7 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
-### Trae
+### TRAE
 
 **首选：init.sh 脚本**
 
@@ -113,7 +120,7 @@ ls .
 opencode agent list
 # 应看到 pypto-op-analyst / pypto-op-developer / pypto-op-perf-tuner
 
-# Trae
+# TRAE
 ls .trae/      # TRAE IDE
 ls .marscode/  # TRAE Plugin（init.sh 自动检测）
 ls .traecli/   # TRAE CLI（init.sh 自动检测）
@@ -138,7 +145,7 @@ claude
 opencode
 ```
 
-> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
+> **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
@@ -247,7 +254,7 @@ cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
 ## 总结
 
 1. PyPTO 算子开发模式通过 7 阶段状态机实现端到端自动化
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor 用户用 `init.sh` 脚本安装
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE/Cursor 用户用 `init.sh` 脚本安装
 3. `claude` / `opencode` 是核心交互指令
 4. 所有阶段通过门禁驱动，支持断点续跑与失败恢复
 5. 产出物包含完整的参考实现、设计文档、PyPTO 实现和测试入口

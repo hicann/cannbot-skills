@@ -19,8 +19,8 @@ CANNBot 算子直调开发模式适用于**快速验证自定义算子**场景�
 ### 前置条件
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
-- 已配置 NPU 设备（支持 Atlas A2/A3 系列、Ascend 910B/950PR 等芯片）
-- 已安装 opencode、Claude Code 等受支持的 AI 编码工具
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
 ### Claude Code
 
@@ -54,7 +54,7 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
-### Trae
+### TRAE
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -112,7 +112,7 @@ ls .
 opencode agent list
 # 应看到 ascendc-kernel-architect / ascendc-kernel-developer / ascendc-kernel-reviewer
 
-# Trae
+# TRAE
 ls .trae/      # TRAE IDE
 ls .marscode/  # TRAE Plugin（init.sh 自动检测）
 ls .traecli/   # TRAE CLI（init.sh 自动检测）
@@ -137,7 +137,7 @@ claude
 opencode
 ```
 
-> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
+> **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
@@ -235,7 +235,7 @@ bash init.sh --help
 # OpenCode (init.sh 方式)
 cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh
 
-# Trae
+# TRAE
 cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project trae
 
 # Cursor
@@ -258,6 +258,6 @@ cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project cur
 ## 总结
 
 1. 算子直调模式适合快速验证和学习，开发周期短
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor 用户用 `init.sh` 脚本安装
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE/Cursor 用户用 `init.sh` 脚本安装
 3. 所有算子开发任务会自动加载工作流技能，按阶段执行
 4. 产出物可直接编译运行，快速验证算子功能

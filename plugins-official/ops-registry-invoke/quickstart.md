@@ -18,9 +18,9 @@ CANNBot 注册调用模式适用于**生产级自定义算子开发**场景，�
 
 ### 前置条件
 
-- 已安装 Ascend Toolkit（建议 ≥ 9.0.0）
-- 已配置 NPU 设备（支持 910B/910_93 等 Ascend 芯片）
-- 已安装 opencode、Claude Code 等受支持的 AI 编码工具
+- 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
+- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
+- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
 ### Claude Code
 
@@ -40,7 +40,7 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
-### Trae
+### TRAE
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -98,7 +98,7 @@ ls .
 opencode agent list
 # 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-tester
 
-# Trae
+# TRAE
 ls .trae/      # TRAE IDE
 ls .marscode/  # TRAE Plugin（init.sh 自动检测）
 ls .traecli/   # TRAE CLI（init.sh 自动检测）
@@ -123,7 +123,7 @@ claude
 opencode
 ```
 
-> **Trae 用户**：Trae 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
+> **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
 
@@ -132,7 +132,7 @@ opencode
 在交互界面中输入算子开发需求，CANNBot 会自动加载工作流技能并指导开发：
 
 ```
-帮我生成一个AddCustom算子，适配 Ascend 910B 芯片架构，支持 float16/bfloat16/float32 数据类型
+帮我生成一个AddCustom算子，适配 Ascend 910 芯片架构，支持 float16/bfloat16/float32 数据类型
 ```
 
 ### 核心工作流
@@ -161,10 +161,10 @@ operators/add_custom/
 ├── op_host/                    # Host 代码层
 │   ├── add_custom_def.cpp      # 算子定义
 │   ├── add_custom_infershape.cpp # Shape推导
-│   └── arch22/                 # 芯片架构适配 (Ascend910B)
+│   └── arch22/                 # 芯片架构适配 (Ascend 910)
 ├── op_kernel/                  # Kernel 实现层
 │   ├── add_custom.h
-│   ├── add_custom_arch22.cpp   # Ascend910B Kernel实现
+│   ├── add_custom_arch22.cpp   # Ascend 910 Kernel实现
 │   └── arch22/                 # 芯片架构适配
 └── tests/                      # 测试目录
     ├── ut/                     # 单元测试
