@@ -251,6 +251,64 @@
       ]
     },
     {
+      "name": "ops-registry-invoke-skills",
+      "description": "Ascend C 注册调用算子开发 Skills（20 个）。API 检索、Tiling 设计、精度调试、性能采集、环境检查、代码模板、测试设计、UT 开发等。",
+      "source": "./ops",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "ascendc",
+        "skills",
+        "registry-invoke"
+      ],
+      "category": "skills",
+      "skills": [
+        "./ascendc-api-best-practices",
+        "./ascendc-blaze-best-practice",
+        "./ascendc-code-review",
+        "./ascendc-crash-debug",
+        "./ascendc-direct-invoke-template",
+        "./ascendc-docs-gen",
+        "./ascendc-docs-search",
+        "./ascendc-env-check",
+        "./ascendc-performance-best-practices",
+        "./ascendc-precision-debug",
+        "./ascendc-regbase-best-practice",
+        "./ascendc-registry-invoke-template",
+        "./ascendc-runtime-debug",
+        "./ascendc-st-design",
+        "./ascendc-tiling-design",
+        "./ascendc-ut-develop",
+        "./npu-arch",
+        "./ops-precision-standard",
+        "./ops-profiling",
+        "./ops-spec-gen"
+      ]
+    },
+    {
+      "name": "ops-registry-invoke",
+      "source": "./plugins-official/ops-registry-invoke",
+      "description": "Ascend C 算子开发工具CANNBot，管理自定义算子的完整开发流程（设计→开发→验证→上库）。含工作流、3 个专业 Agent 和配套 Skills。",
+      "version": "1.2.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "ascendc",
+        "kernel",
+        "registry-invoke",
+        "operator"
+      ],
+      "category": "development",
+      "dependencies": [
+        "ops-registry-invoke-skills",
+        "infra-skills"
+      ]
+    },
+    {
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
       "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",

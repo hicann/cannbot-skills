@@ -114,7 +114,7 @@ VERSION="1.2.0"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
-INCLUDED_SKILLS="ascendc-blaze-best-practice ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-regbase-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ops-precision-standard ops-profiling ops-registry-invoke-workflow ops-spec-gen"
+INCLUDED_SKILLS="ascendc-blaze-best-practice ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-regbase-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ops-precision-standard ops-profiling ops-registry-invoke-workflow ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-ops-*"
 
@@ -123,8 +123,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_NAME="$(basename "$SCRIPT_DIR")"
 PLUGIN_ROOT="$SCRIPT_DIR"
 SHARED_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
+INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
 LOCAL_AGENT_ROOT="$SCRIPT_DIR/agents"
 
+# --- Infra skill helpers ---
+collect_infra_skills() {
+    INFRA_SKILL_NAMES=()
+    for skill_dir in "$INFRA_SKILL_ROOT"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local name
+        name=$(basename "$skill_dir")
+        echo "$INCLUDED_SKILLS" | grep -qw "$name" || continue
+        INFRA_SKILL_NAMES+=("$name")
+    done
+}
 
 
 show_banner() {
@@ -292,12 +304,16 @@ resolve_agent_src() {
     fi
 }
 
-# Resolve skill source path (shared skills/ first, then team-local)
+# Resolve skill source path (shared ops/ first, then infra/, then team-local)
 # For team-local skills, searches subdirectories for a SKILL.md with matching `name:`.
 resolve_skill_src() {
     local skill="$1"
     if [ -d "$SHARED_SKILL_ROOT/$skill" ]; then
         echo "$SHARED_SKILL_ROOT/$skill"
+        return
+    fi
+    if [ -d "$INFRA_SKILL_ROOT/$skill" ]; then
+        echo "$INFRA_SKILL_ROOT/$skill"
         return
     fi
     # Search team-local subdirectories for SKILL.md with matching name
@@ -417,6 +433,24 @@ fi
 
 echo -e "  ${BOLD}Total skills to install: $ALL_SKILL_COUNT${NC}"
 echo ""
+
+# Collect infra skills to install (from infra/)
+collect_infra_skills
+INFRA_SKILLS_TO_INSTALL="${INFRA_SKILL_NAMES[*]}"
+INFRA_SKILL_COUNT=${#INFRA_SKILL_NAMES[@]}
+
+if [ "$INFRA_SKILL_COUNT" -gt 0 ]; then
+    echo -e "${CYAN}Infra Skills (${INFRA_SKILL_COUNT} 项)：${NC}"
+    for name in $INFRA_SKILLS_TO_INSTALL; do
+        target="$CANNBOT_DIR/skills/$name"
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            echo -e "  ${YELLOW}$name${NC}"
+        else
+            echo -e "  ${GREEN}$name${NC}"
+        fi
+    done
+    echo ""
+fi
 
 # --- Step 2: Verify dependencies ---
 step "[2/7] Verifying dependencies..."

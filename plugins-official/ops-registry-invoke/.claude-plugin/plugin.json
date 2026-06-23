@@ -1,0 +1,20 @@
+{
+  "name": "ops-registry-invoke",
+  "description": "Ascend C 算子开发工具CANNBot，管理自定义算子的完整开发流程（设计→开发→验证→上库）。",
+  "version": "1.2.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "CANN-2.0",
+  "dependencies": [
+    "ops-registry-invoke-skills",
+    "infra-skills"
+  ],
+  "agents": [
+    "./agents/ascendc-ops-architect.md",
+    "./agents/ascendc-ops-developer.md",
+    "./agents/ascendc-ops-tester.md"
+  ]
+}
