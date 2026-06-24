@@ -41,7 +41,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 - 技术路线决策
 - 精度需求评估（通过 `ops-precision-standard`）
 - 输出 DESIGN.md + PLAN.md 双文件
-- 回应 Developer 的设计串讲质疑
+- 回应 Design Reviewer 的设计串讲质疑
 
 ### 不能做什么
 
@@ -56,7 +56,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 - 用户需求（算子数学定义、数据类型、性能要求）
 - 环境信息（`operators/{operator_name}/docs/environment.md`）
-- （串讲回应模式）Developer 的设计质疑（`WALKTHROUGH.md ## 质疑清单`）
+- （串讲回应模式）Design Reviewer 的设计质疑（`WALKTHROUGH.md ## 质疑清单`）
 
 ### 输出边界
 

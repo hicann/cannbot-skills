@@ -34,13 +34,13 @@
 
 ## Step 2.5：设计串讲
 
-### 2.5a — Developer 串讲审查
+### 2.5a — Design Reviewer 串讲审查
 ```
 {
   "description": "设计串讲",
-  "subagent_type": "ascendc-kernel-developer",
+  "subagent_type": "ascendc-kernel-design-reviewer",
   "prompt": "
-请以「设计串讲模式」审查以下算子的设计方案：
+请审查以下算子的设计方案：
 - 算子名称：{operator_name}
 - 技术设计：operators/{operator_name}/docs/DESIGN.md
 - 开发计划：operators/{operator_name}/docs/PLAN.md
@@ -90,11 +90,11 @@
 - **严重程度**：阻塞 / 需讨论 / 建议
 - **设计文档位置**：DESIGN.md 第 X 节
 - **问题描述**：...
-- **Developer 视角**：为什么从开发者角度认为这是问题
+- **审查者视角**：为什么从审查者角度认为这是问题
 - **建议方案**：（如有）
 
-【串讲模式约束】
-- 禁止：在串讲模式下编写开发代码
+【约束】
+- 禁止：编写开发代码
 - 禁止：直接修改 DESIGN.md（修改由 Architect 在回应模式中完成）
 - 必须：每个问题标注严重程度
 - 必须：API 可行性问题需附上实际查阅的文档依据
@@ -110,7 +110,7 @@
   "description": "串讲回应",
   "subagent_type": "ascendc-kernel-architect",
   "prompt": "
-请以「串讲回应模式」回应 Developer 对设计方案的质疑：
+请以「串讲回应模式」回应 Design Reviewer 对设计方案的质疑：
 - 算子名称：{operator_name}
 - 技术设计：operators/{operator_name}/docs/DESIGN.md
 - 串讲质疑：operators/{operator_name}/docs/WALKTHROUGH.md
@@ -129,7 +129,7 @@
 
 | 回应类别 | 含义 | 操作 |
 |---------|------|------|
-| 接受 | Developer 的质疑合理 | 更新 DESIGN.md 对应章节 |
+| 接受 | Design Reviewer 的质疑合理 | 更新 DESIGN.md 对应章节 |
 | 保留原设计 | 原设计正确，给出理由 | 不修改 DESIGN.md，给出文档依据 |
 | 部分修改 | 部分采纳 | 更新 DESIGN.md 中受影响的部分 |
 
@@ -161,7 +161,7 @@
 
 ---
 
-50## Step 3：开发
+## Step 3：开发
 
 ### Subagent 调用参数
 

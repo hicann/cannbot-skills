@@ -30,7 +30,7 @@
 
 <!--
   CANNBot 固化用户原始需求时，逐条记录，不加工、不裁剪。
-  下游 Developer / Reviewer 设计和审查时必须对照此节。
+  下游 Design Reviewer / Developer / Reviewer 设计和审查时必须对照此节。
   需求中指定的用例文件、精度标准、Golden 计算路径等强制要求，
   在开发和测试阶段必须逐条覆盖。
 -->

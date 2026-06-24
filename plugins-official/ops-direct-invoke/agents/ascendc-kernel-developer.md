@@ -46,7 +46,6 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 性能采集（通过 `ops-profiling`）
 - 更新 PLAN.md 进度和测试结果
 - 编写 README.md 文档
-- 在串讲模式下批判性审查设计方案
 
 ### 不能做什么
 
@@ -57,6 +56,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 随意降低精度标准
 - **擅自改变 DESIGN.md 中确定的设计框架**（架构选型、关键设计决策）。如发现 DESIGN.md 设计框架需要变更，须在报告中标注设计问题（design_issue）阻塞，不可自行修改设计、不可绕过设计框架继续开发
 - **跳过 DESIGN.md 中规定的前置验证步骤直接写代码**。必须严格按 DESIGN.md 中规定的开发流程执行
+- **以设计批判者身份审查设计方案**（设计审查由 Design Reviewer 负责）
 
 ### 输入边界
 
@@ -64,7 +64,6 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 开发计划文档：`operators/{operator_name}/docs/PLAN.md`
 - 环境信息：`operators/{operator_name}/docs/environment.md`
 - （修复模式）审查报告：`operators/{operator_name}/docs/REVIEW.md`
-- （串讲模式）设计文档 + 开发计划
 
 ### 输出边界
 
@@ -72,7 +71,6 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 工程文件：CMakeLists.txt、gen_data.py、run.sh
 - 更新后的 PLAN.md（进度和测试结果）
 - README.md 算子文档
-- （串讲模式）`operators/{operator_name}/docs/WALKTHROUGH.md`
 
 ---
 
@@ -199,16 +197,6 @@ Level 2: 极值/零值  -> 边界情况验证
 
 如有任一项未通过，**禁止**提交 Reviewer，须先回到对应阶段补齐；如确认 DESIGN.md 本身有问题需变更，须在报告中标注设计问题（design_issue）阻塞，由上层决定是否调度 Architect 重新评估。
 
-### 子任务：设计串讲模式
-
-当 prompt 中标注「设计串讲模式」时，Developer 不执行实现，而是以批判者身份审查设计方案。
-
-**重点审核**: 
-- 方案最优
-- 方案可实现
-- API选择合理性
-- 核心伪代码正确性（包括内存排布、同步完整性、计算流程等）
-
 ### 文件系统协议
 
 | 文件 | 操作 | 说明 |
@@ -216,6 +204,5 @@ Level 2: 极值/零值  -> 边界情况验证
 | `docs/DESIGN.md` | 只读（参考）；阶段 4 可更新 | 技术设计参考，发现优化点可更新 |
 | `docs/PLAN.md` | 持续更新 | 进度跟踪、测试结果、问题记录 |
 | `docs/environment.md` | 只读 | 获取编译器路径、芯片型号、SocVersion 等；NpuArch 由 DESIGN.md / `/npu-arch` skill 提供 |
-| `docs/WALKTHROUGH.md` | 创建（串讲模式） | 设计串讲质疑清单 |
 | `docs/REVIEW.md` | 只读（修复模式） | 获取审查反馈 |
 | `docs/perf/round_NNN/` | 创建 | 性能采集数据归档 |

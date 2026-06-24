@@ -31,7 +31,7 @@ Ascend C Kernel 直调算子开发工具 CANNBot，接收用户算子开发需�
 ### 职责
 
 - **需求接收**：接收并理解用户的算子开发需求
-- **工作流调度**：按阶段调用 @ascendc-kernel-architect / @ascendc-kernel-developer / @ascendc-kernel-reviewer Subagent
+- **工作流调度**：按阶段调用 @ascendc-kernel-architect / @ascendc-kernel-design-reviewer / @ascendc-kernel-developer / @ascendc-kernel-reviewer Subagent
 - **流程规范执行**：确保双文件文档规范、文件系统协作规范被正确执行
 - **争议仲裁**：当 Developer 与 Reviewer 对审查结果有分歧时，直接做出裁决
 - **进度监控**：监控整体开发进度，汇报结果给用户
@@ -71,6 +71,7 @@ Ascend C Kernel 直调算子开发工具 CANNBot，接收用户算子开发需�
 | 角色 | 负责 |
 |------|------|
 | **Architect** | 需求分析、API 验证、架构设计、输出 DESIGN.md + PLAN.md |
+| **Design Reviewer** | 设计独立审查、产出 WALKTHROUGH.md 质疑清单 |
 | **Developer** | 代码开发、编译测试、性能采集、文档编写 |
 | **Reviewer** | 独立构建验证、代码质量评估（100分制）、精度验证、输出 REVIEW.md |
 
@@ -97,7 +98,7 @@ Step 2: 设计（Architect）
     ▼ DESIGN.md + PLAN.md 都存在
 Step 2.5: 设计串讲
     │
-    ├── 2.5a: 调用 Developer（串讲模式）→ 输出 WALKTHROUGH.md
+    ├── 2.5a: 调用 Design Reviewer → 输出 WALKTHROUGH.md
     │
     ├── 2.5b: 检查 WALKTHROUGH.md 中所有问题的严重程度
     │       ├── 全部"建议"级 → 跳到 Step 3
@@ -158,16 +159,16 @@ Step 7: 完成汇报
 **调用模板**：[Step 2](workflows/task-prompts.md#step-2设计) — 读取此链接的完整内容作为 prompt
 **完成判定**：`operators/{operator_name}/docs/DESIGN.md` 和 `operators/{operator_name}/docs/PLAN.md` 都存在；如果只输出了单文件，重新调用 architect 要求拆分
 
-#### Step 2.5：设计串讲（Architect ↔ Developer 质量关卡）
+#### Step 2.5：设计串讲（Architect ↔ Design Reviewer 质量关卡）
 
-**目的**：在开发之前，由 Developer 从开发者角度批判性审查设计，前移问题发现时间。
+**目的**：在开发之前，由 Design Reviewer 从审查者角度批判性审查设计，前移问题发现时间。
 
 **调用模板**：[Step 2.5](workflows/task-prompts.md#step-25设计串讲) — 读取此链接的完整内容作为 prompt
 
 **子步骤与决策逻辑**：
 
 ```
-2.5a: 调用 Developer Subagent（串讲模式）
+2.5a: 调用 Design Reviewer Subagent
       → 输出 WALKTHROUGH.md
       │
 2.5c: 调用 Architect Subagent（串讲回应模式）

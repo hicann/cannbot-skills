@@ -110,7 +110,7 @@ ls .
 
 # OpenCode
 opencode agent list
-# 应看到 ascendc-kernel-architect / ascendc-kernel-developer / ascendc-kernel-reviewer
+# 应看到 ascendc-kernel-architect / ascendc-kernel-design-reviewer / ascendc-kernel-developer / ascendc-kernel-reviewer
 
 # TRAE
 ls .trae/      # TRAE IDE
