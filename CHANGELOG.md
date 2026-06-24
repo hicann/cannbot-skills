@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-06-22】
+#### 特性增强 Feature Enhancement
+- 【仿真 ops-simulator】新增基于 `summary.json` 的性能瓶颈分析能力：Quick Diagnosis 决策流程（核数 → 负载均衡 → 利用率 → Bound 类型 → 带宽交叉检查），新增 5 个 reference（指标阈值参考、general / AIC / AIV issue 手册、issue 模板）；支持 `cache` / `bandwidth` 缺失时的 fallback 信号。
+
 ### 【2026-06-17】
 #### 特性增强 Feature Enhancement
 - 【ops-registry-invoke】支持调用ascendc-blaze-best-practice生成matmul类算子，并补充CV融合算子样例工程。
