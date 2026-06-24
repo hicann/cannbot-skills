@@ -25,7 +25,7 @@ $$
     <col style="width:12.5%;"/>
     <col style="width:12.5%;"/>
   </colgroup>
-  <thread>
+  <thead>
     <tr>
       <th style="text-align: center;border: 1px solid #ddd; padding: 8px;"> 数据类型 </th>
       <th style="text-align: center;border: 1px solid #ddd; padding: 8px;"><strong> FLOAT16 </strong></th>
@@ -35,7 +35,7 @@ $$
       <th style="text-align: center;border: 1px solid #ddd; padding: 8px;"><strong> FLOAT8 E4M3 </strong></th>
       <th style="text-align: center;border: 1px solid #ddd; padding: 8px;"><strong> FLOAT8 E5M2 </strong></th>
     </tr>
-  </thread>
+  </thead>
   <tbody>
     <tr>
       <td style="text-align: center;border: 1px solid #ddd; padding: 8px;"><strong> 通过阈值<br>(Threshold) </strong></td>
