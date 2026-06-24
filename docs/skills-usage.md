@@ -79,7 +79,7 @@
 
 算子代码检视。支持文件检视、PR 检视、快速定向排查，>10 文件自动切换大型 PR 模式。
 
-**Plugin 模式[推荐]**（先 `cd plugins-official/ops-code-reviewer && bash init.sh project opencode`，详见 [quickstart](../../plugins-official/ops-code-reviewer/quickstart.md)）：
+**Plugin 模式[推荐]**（先 `cd plugins-official/ops-code-reviewer && bash init.sh project opencode`，详见 [quickstart](../plugins-official/ops-code-reviewer/quickstart.md)）：
 ```
 帮我检视 split_core.cpp
 全量检视 PR https://gitcode.com/cann/ops-transformer/pull/3604

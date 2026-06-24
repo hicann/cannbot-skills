@@ -701,5 +701,5 @@ Phase 3 验证失败
 
 - [ascendc-precision-debug](../../skills/ascendc-precision-debug/SKILL.md) - 精度调试技能
 - [perf-tuning](../../skills/perf-tuning/SKILL.md) - 性能调优技能
-- [cannsim](../../skills/cannsim/SKILL.md) - 仿真工具
+- [ops-simulator](../../skills/ops-simulator/SKILL.md) - 仿真工具
 - [SKILL.md](../SKILL.md) - 算子开发工作流程主文档
