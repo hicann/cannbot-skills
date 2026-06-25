@@ -118,7 +118,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 根据 DESIGN.md §0.5（方案决策）中 Architect 选定的路线加载对应模板 skill：
   - Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias，dav-3510 + Blaze 路线）：加载 `/ascendc-blaze-best-practice`，复制 `references/matmul_custom/` 工程模板
   - 其他算子（Vector/RegBase/mxfp8 融合等）：加载 `/ascendc-direct-invoke-template`，按场景路由选择 `references/add_custom/` 或 `references/matmul_fusion_kernel/`
-- 准出条件：确保空 Kernel 骨架编译通过（`cmake .. && make`）
+- 准出条件：确保空 Kernel 骨架编译通过
 
 ##### Step B：添加 Tiling 结构体和 Host 侧 Tiling 计算 → 编译通过
 

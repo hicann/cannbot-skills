@@ -189,7 +189,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 每步必须编译通过后再进入下一步。
 
 注意：DESIGN.md 中的代码模板是伪代码，展示计算逻辑和 API 选择，不能直接编译。
-实际代码结构以所选模板 skill（/ascendc-blaze-best-practice 或 /ascendc-direct-invoke-template）的工程模板为准。
+实际代码结构以所选模板 skill 的工程模板为准。
 
 【参考文档】
 - 编码规范与审查清单：workflows/development-guide.md
