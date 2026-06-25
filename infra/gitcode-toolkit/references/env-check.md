@@ -4,6 +4,8 @@ GitCode 相关 skill 在执行任何业务步骤之前，必须先完成环境�
 
 预检遵循一个原则：**能本地解决的不打扰用户，缺了用户才知道的关键输入立刻问**。
 
+> **脚本支持**：可通过 `bash scripts/preflight.sh [--skip-git-author]` 一键执行预检，输出结构化 JSON 报告。详见 [SKILL.md 脚本工具](../SKILL.md#脚本工具)。
+
 ---
 
 ## 预检项

@@ -52,5 +52,4 @@ git diff --name-status $MERGE_BASE pr_{pr_number}
 
 各 skill 可以在此基础上自行定制展示格式，例如：
 - gitcode-pr-handler、gitcode-issue-gen 使用带有边框的 ASCII 表格
-- pr-to-design-doc 增加了序号列
-- code-review 根据文件数量动态切换展示策略
+- 消费者可根据业务需要增加序号列、按文件数量动态切换展示策略等

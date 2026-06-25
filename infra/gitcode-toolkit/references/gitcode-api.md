@@ -127,6 +127,16 @@ curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}
 }'
 ```
 
+**触发 PR CI 流水线**：提交内容为 `compile` 的整体评论可触发 GitCode PR 的 CI 编译流水线：
+
+```bash
+curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}/comments?access_token={token}' \
+-H 'Content-Type: application/json' \
+-d '{"body": "compile"}'
+```
+
+> 脚本封装：`bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>`
+
 ### 更新 PR
 
 ```bash

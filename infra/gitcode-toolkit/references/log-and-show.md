@@ -23,14 +23,14 @@ PR_AUTHOR=$(git log -1 --pretty=format:"%an")
 git log --oneline "origin/${BASE_BRANCH}..HEAD"
 ```
 
-### commit 标题列表（gitcode-toolkit PR 创建流程）
+### commit 标题列表（PR 创建流程）
 
 ```bash
 # 相对于 master 的 commit 标题列表（不含 merge commit）
 git log master..HEAD --pretty=format:"%s" --no-merges
 ```
 
-### commit 标题+正文（gitcode-toolkit PR 创建流程）
+### commit 标题+正文（PR 创建流程）
 
 ```bash
 # 相对于 master 的 commit 标题和正文（不含 merge commit）

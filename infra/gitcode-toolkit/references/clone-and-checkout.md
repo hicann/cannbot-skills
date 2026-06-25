@@ -2,6 +2,8 @@
 
 仓库克隆、PR 分支检出、base 分支确定、merge-base 计算的操作指南。
 
+> **脚本替代**：大部分操作可通过 `python scripts/fetch_pr_context.py --repo <owner/repo> --pr <N>` 一键完成。本文档提供手动操作的详细步骤，供需要定制时参考。
+
 ---
 
 ## 1. 仓库克隆
@@ -37,10 +39,8 @@ git clone https://gitcode.com/{owner}/{repo}.git /tmp/{task_prefix}_{owner}_{rep
 
 | Skill | 目录名格式 | 示例 |
 |-------|-----------|------|
-| code-review | `/tmp/review_{owner}_{repo}_{timestamp}` | `/tmp/review_cann_ops-math_20260323_200609` |
 | gitcode-pr-handler | `/tmp/gitcode-pr-handler_{owner}_{repo}_{timestamp}` | `/tmp/gitcode-pr-handler_cann_ops-math_20260323_200609` |
 | gitcode-issue-gen | `/tmp/gitcode-issue-gen_{owner}_{repo}_{timestamp}` | `/tmp/gitcode-issue-gen_cann_ops-math_20260323_200609` |
-| pr-to-design-doc | `/tmp/pr_doc_{owner}_{repo}_{timestamp}` | `/tmp/pr_doc_cann_ops-math_20260323_200609` |
 | gitcode-issue-handler | `/tmp/gitcode-issue-handler_{owner}_{repo}_{timestamp}` | `/tmp/gitcode-issue-handler_cann_ops-math_20260323_200609` |
 
 ---

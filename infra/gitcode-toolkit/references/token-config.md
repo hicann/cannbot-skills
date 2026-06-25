@@ -16,7 +16,15 @@ GitCode API Token 的获取优先级和使用方式。
 
 ## 使用方式
 
-Token 通过 `access_token` 查询参数传递给 API：
+Token 支持以下两种传递方式：
+
+### 方式一：`PRIVATE-TOKEN` Header（推荐）
+
+```bash
+curl -H "PRIVATE-TOKEN: {token}" "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}"
+```
+
+### 方式二：`access_token` 查询参数
 
 ```bash
 curl "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}?access_token={token}"

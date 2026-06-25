@@ -162,6 +162,31 @@ PR 描述中已识别到 `#issue_number` 时会询问"是否仍创建新 Issue"�
 > /gitcode-issue-gen https://gitcode.com/cann/ops-math/pull/1668
 > ```
 
+### gitcode-toolkit（内部共享库）
+
+GitCode 协作类 skill 的共享基础库，**不直接响应用户触发**。为 `gitcode-pr-handler`、`gitcode-issue-gen`、`gitcode-issue-handler` 提供：
+
+- **references/** — API 文档、环境预检、URL 解析、Git 操作等共享知识
+- **scripts/** — 确定性操作脚本（无需 LLM 手工拼装命令）
+
+**开发者使用脚本**：
+
+```bash
+# 解析 GitCode URL
+python infra/gitcode-toolkit/scripts/parse_gitcode_url.py "https://gitcode.com/cann/ops-math/pulls/123"
+# → {"owner":"cann","repo":"ops-math","type":"pr","number":123}
+
+# 环境预检
+bash infra/gitcode-toolkit/scripts/preflight.sh
+# → JSON 结构化报告（token/git/curl/python3/tmp/git-author）
+
+# PR 上下文一键获取
+python infra/gitcode-toolkit/scripts/fetch_pr_context.py --repo cann/ops-math --pr 123
+# → JSON: work_dir, base_branch, merge_base, changed_files, commits
+```
+
+**Skill 开发者引用**：其他 GitCode skill 通过相对路径引用 toolkit 的 references 和本文档章节，无需在自己的 SKILL.md 中重复实现。
+
 ### gitcode-issue-handler
 
 读取 Issue → **自动判断要不要改代码** → 分两条路径：

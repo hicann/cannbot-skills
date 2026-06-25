@@ -14,13 +14,9 @@ logs/{task_type}_{YYYYMMDD}_{HHMMSS}.log
 
 | Skill | task_type | 示例文件名 |
 |-------|-----------|-----------|
-| code-review | `code-review` | `logs/code-review_20260319_143000.log` |
 | gitcode-pr-handler | `gitcode-pr-handler` | `logs/gitcode-pr-handler_20260319_143000.log` |
 | gitcode-issue-gen | `gitcode-issue-gen` | `logs/gitcode-issue-gen_20260319_143000.log` |
-| pr-to-design-doc | `pr-to-design-doc` | `logs/pr-to-design-doc_20260319_143000.log` |
-| pr-compile | `pr-compile` | `logs/pr-compile_20260319_143000.log` |
 | gitcode-issue-handler | `gitcode-issue-handler` | `logs/gitcode-issue-handler_20260319_143000.log` |
-| pr-create | `pr-create` | `logs/pr-create_20260319_143000.log` |
 
 ---
 

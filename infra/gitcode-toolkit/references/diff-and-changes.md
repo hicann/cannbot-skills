@@ -6,7 +6,7 @@
 
 ## 1. merge-base 模式
 
-**适用 skill**：code-review、gitcode-pr-handler、gitcode-issue-gen
+**适用 skill**：gitcode-pr-handler、gitcode-issue-gen
 
 先通过 merge-base 计算出基准 commit，再与 PR 分支比较。
 
@@ -52,7 +52,7 @@ git diff $MERGE_BASE pr_{pr_number} -- {file_path}
 
 ## 2. triple-dot 模式
 
-**适用 skill**：pr-to-design-doc、gitcode-toolkit (PR 创建流程)
+**适用 skill**：PR 创建流程（见 [pr-creation-workflow.md](pr-creation-workflow.md)）
 
 使用 triple-dot 语法 `origin/${BASE_BRANCH}...HEAD` 比较分支差异。
 
