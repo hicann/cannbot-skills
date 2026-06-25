@@ -114,7 +114,7 @@ y = f(x)
 
 ##### 验证步骤
 
-1. **查阅官方文档**：`asc-devkit/docs/api/context/{API_NAME}*.md`
+1. **查阅官方文档**：通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/{API_NAME}*.md`
 2. **确认数据布局**：内存排列、对齐状态、维度信息
 3. **验证匹配性**：数据布局与 API 能力匹配、限制条件满足
 4. **确认选择**：无更好的 API 选择

@@ -250,8 +250,8 @@ __global__ __aicore__ void ${op_name}_template(
 
 #### 3.3.5 API 验证记录
 
-> ⚠️ **以下每个 API 必须已查阅 `asc-devkit/docs/api/context/{API名称}*.md` 验证。**
-> 验证方法: 使用通配符搜索 `ls asc-devkit/docs/api/context/ | grep -i "^{APIName}"`
+> ⚠️ **以下每个 API 必须已通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/{API名称}*.md` 验证。**
+> 验证方法: 使用 `/ascendc-docs-search` skill 搜索 API 名称，或在 `$ASC_DEVKIT_DIR` 下使用通配符搜索 `ls $ASC_DEVKIT_DIR/docs/api/context/ | grep -i "^{APIName}"`
 
 | API 名称 | 官方文档路径 | 通配符搜索结果 | 验证状态 | 备注 |
 |---------|-------------|---------------|---------|------|

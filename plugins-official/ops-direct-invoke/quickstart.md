@@ -208,10 +208,10 @@ output = torch.ops.npu.{operator}(input1, input2)
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | `asc-devkit/docs/api/context/` | 约 1022 个 API 文档 |
-| 高性能模板 | `asc-devkit/examples/00_introduction/01_add/basic_api_memory_allocator_add/` | 双缓冲+流水线 |
-| 各类示例 | `asc-devkit/examples/00_introduction/` | 加法、减法、多输入等 |
-| 调试示例 | `asc-devkit/examples/01_utilities/00_printf/printf.asc` | printf 调试方法 |
+| API 文档 | `$ASC_DEVKIT_DIR/docs/api/context/` | 约 1022 个 API 文档 |
+| 高性能模板 | `$ASC_DEVKIT_DIR/examples/00_introduction/01_add/basic_api_memory_allocator_add/` | 双缓冲+流水线 |
+| 各类示例 | `$ASC_DEVKIT_DIR/examples/00_introduction/` | 加法、减法、多输入等 |
+| 调试示例 | `$ASC_DEVKIT_DIR/examples/01_utilities/00_printf/printf.asc` | printf 调试方法 |
 
 ## 五、常见问题
 

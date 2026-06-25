@@ -5,13 +5,13 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 
 # AscendC SIMT 最佳实践
 
-> 本 skill 提供基于实际算子开发经验提炼的 SIMT 编程范式总结，以及 SIMT 专有 API 的分类索引和速查。SIMT 基础概念（核函数、线程架构、内存层级）请参考 `asc-devkit/docs/guide/编程指南/编程模型/AI-Core-SIMT编程/`，通过 `ascendc-docs-search` skill 查阅。
+> 本 skill 提供基于实际算子开发经验提炼的 SIMT 编程范式总结，以及 SIMT 专有 API 的分类索引和速查。SIMT 基础概念（核函数、线程架构、内存层级）请通过 `ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/guide/编程指南/编程模型/AI-Core-SIMT编程/`。
 
 ---
 
 ## API 分类索引表
 
-| 类别 | asc-devkit 目录 | 功能概述 | 头文件 |
+| 类别 | $ASC_DEVKIT_DIR 目录 | 功能概述 | 头文件 |
 |------|-----------------|----------|--------|
 | 总览与核函数 | `SIMT-API/概述.md` | VF启动机制、头文件、混合编程辅助函数 | common_functions.h |
 | 同步与内存栅栏 | `SIMT-API/同步与内存栅栏/` | asc_syncthreads/asc_threadfence/asc_threadfence_block | device_sync_functions.h |
@@ -25,7 +25,7 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 | SIMT编程简介 | `SIMT-API/SIMT编程简介/` | SIMT编程概念和入门 | asc_simt.h |
 | 混合编程简介 | `SIMT-API/SIMD与SIMT混合编程简介/` | SIMD/SIMT混合编程指导 | asc_simt.h |
 
-> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill，输入 API 名称即可获取 `asc-devkit/docs/api/SIMT-API/` 下的官方文档。
+> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill，输入 API 名称即可获取 `$ASC_DEVKIT_DIR/docs/api/SIMT-API/` 下的官方文档。
 
 ---
 
@@ -103,4 +103,4 @@ for (uint64_t i = AscendC::Simt::GetBlockIdx() * AscendC::Simt::GetThreadNum() +
 
 **完整 API 文档：**
 
-- **asc-devkit** -- 通过 `ascendc-docs-search` skill 查阅 `asc-devkit/docs/api/SIMT-API/`
+- **$ASC_DEVKIT_DIR** -- 通过 `ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/SIMT-API/`

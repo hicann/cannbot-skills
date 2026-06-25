@@ -35,13 +35,13 @@ description: Ascend C 算子精度调试技能，提供精度问题诊断和解�
 
 **💡 推荐实践**：调试时建议在至少两个 dtype（如 FP16 和 FP32）上用**同一 shape + 同一数据**验证。如果一种 dtype 通过另一种失败，可按下方对应的诊断模式快速缩小范围。
 
-### 2. 检索 asc-devkit ⭐
+### 2. 检索官方文档 ⭐
 
 > **禁止凭直觉修改代码**
 
 **检索顺序**：
-1. 搜索 `asc-devkit/examples/` 查找类似算子。
-2. 查看 `asc-devkit/docs/api/context/` API 文档。
+1. 使用 `/ascendc-docs-search` skill 搜索示例代码，查找类似算子。
+2. 使用 `/ascendc-docs-search` skill 查阅 API 文档。
 3. 对比官方实现与当前实现。
 
 ### 3. 清理缓存和临时文件
@@ -161,7 +161,7 @@ mkdir -p build/input build/output
     │   └─ 检查中间计算是否因 FP16 的更高精度要求暴露了算法缺陷
     │
     └─ 交叉验证
-        ├─ 检查 asc-devkit 文档确认相关 API 是否支持 BF16
+        ├─ 使用 `/ascendc-docs-search` skill 查阅文档确认相关 API 是否支持 BF16
         ├─ 如果 API 不支持 BF16 → 优先按原因1排查
         └─ 如果 API 支持 BF16（BF16/FP16 走相同路径）→ 优先按原因2排查
 ```
@@ -330,7 +330,7 @@ kernel 内插桩调试的标准工具：在 CopyIn / Compute / CopyOut 关键点
 
 **调试阶段**：
 - [ ] 已固定最小可复现用例
-- [ ] 已检索 asc-devkit 确认 API 用法 ⭐
+- [ ] 已通过 `/ascendc-docs-search` skill 确认 API 用法 ⭐
 - [ ] 已清理缓存和临时文件
 - [ ] **已排查流水线同步问题**（DataCopy 后是否 EnQue/DeQue）⭐⭐⭐
 - [ ] **已排查输出全为 0 问题**（DataCopy 对齐 / GlobalTensor.SetValue → LocalTensor.SetValue + DataCopyPad）⭐⭐⭐

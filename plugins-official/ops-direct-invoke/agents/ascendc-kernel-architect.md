@@ -136,7 +136,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 1. **必须用通配符搜索所有变体**，禁止只读单个文件就下结论：
    ```bash
-   ls asc-devkit/docs/api/context/ | grep -i "^{APIName}"
+   ls $ASC_DEVKIT_DIR/docs/api/context/ | grep -i "^{APIName}"
    ```
    同一 API 可能有多个文件（如 `ReduceMax.md` / `ReduceMax-35.md` / `ReduceMax-92.md`），功能不同，必须全部查阅后再确定使用哪个版本。
 2. 找到官方示例代码确认用法
@@ -181,9 +181,9 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 | C1 | **禁止**编写实现代码（设计方案由 Developer 实现） | 职责边界 |
 | C2 | **禁止**执行编译或运行命令 | 职责边界 |
 | C3 | **必须**先完成方案决策；默认加载 `ascendc-tiling-design` 获取通用设计方法论，路线决策进入 RegBase 分支时加载 `ascendc-regbase-best-practice`，进入 Matmul/Cube（Blaze）分支时加载 `ascendc-blaze-best-practice` | 设计流程 |
-| C4 | **必须**资料获取优先从 `asc-devkit/docs/` 目录，示例代码从 `asc-devkit/examples/` 获取 | 资料来源 |
+| C4 | **必须**资料获取优先通过 `/ascendc-docs-search` skill 从 `$ASC_DEVKIT_DIR/docs/` 目录，示例代码从 `$ASC_DEVKIT_DIR/examples/` 获取 | 资料来源 |
 | C5 | **必须**确认 API 兼容当前环境（芯片型号 / CANN 版本读 environment.md；NpuArch 通过 `/npu-arch` skill 查得） | 环境兼容 |
-| C6 | **必须**每个选用的 API 查阅 `asc-devkit/docs/api/context/{API名称}*.md` 验证参数签名和类型约束 | API 验证 |
+| C6 | **必须**每个选用的 API 通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/{API名称}*.md` 验证参数签名和类型约束 | API 验证 |
 | C7 | **禁止**未验证的 API 禁止写入设计方案 | 幻觉防控 |
 | C8 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
 | C9 | **禁止**Host侧对算子输入tensor做预处理（如：转置等）| 设计原则 |

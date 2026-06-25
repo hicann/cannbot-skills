@@ -509,7 +509,7 @@ aclnnStatus aclnnXxx(
 
 - `ascendc-registry-invoke-template` 技能 - 工程脚手架和完整示例
 - `ascendc-api-best-practices` 技能 - API 最佳实践和约束说明
-- `ascendc-docs-search` 技能 - 在 `asc-devkit/docs/api/context/` 目录下搜索 API 官方文档
+- `ascendc-docs-search` 技能 - 在 `$ASC_DEVKIT_DIR/docs/api/context/` 目录下搜索 API 官方文档
 
 ---
 
@@ -630,7 +630,7 @@ aclnnStatus aclnnXxx(
    - **参数含义与单位标注**：UB 侧 stride 单位 = DataBlock(32B)，GM 侧 stride 单位 = byte；blockLen 单位通常为 DataBlock(32B)
    - **取值范围核查**：例 `blockCount ≤ 4095`；`srcStride 负值仅 Ascend950PR/DT 支持，A2/A3 禁用`
    - **UB 占用手工推导**：非对齐 blockLen 场景按 `ceil(blockLen, 32B)` 计算实际 UB 占用，对比 DESIGN 中 UB 预算表
-3. **配图强制细读** — 官方 API 文档在 `asc-devkit/docs/api/context/` 目录下，含 `figures/*.png/jpg/svg`）的内嵌图片必须使用 **Read 工具逐张读取**，禁止仅看正文文字略过。这些图常承载文字未明确表达的关键约束。配图类型与关注点：
+3. **配图强制细读** — 官方 API 文档在 `$ASC_DEVKIT_DIR/docs/api/context/` 目录下，含 `figures/*.png/jpg/svg`）的内嵌图片必须使用 **Read 工具逐张读取**，禁止仅看正文文字略过。这些图常承载文字未明确表达的关键约束。配图类型与关注点：
    - **公式图**：确认数学语义与 DESIGN 中描述一致
    - **流水时序图**：理解 MTE2/V/MTE3 的依赖与并行关系
    - **内存布局图**：UB 槽位摆放规则、对齐边界
