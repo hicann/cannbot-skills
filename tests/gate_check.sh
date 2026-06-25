@@ -133,20 +133,6 @@ pip install -r "$FRAMEWORK_DIR/scripts/requirements.txt" --quiet --break-system-
 # =========================================================================
 echo "=== Phase 4: Run Gate Check (${REPEAT_COUNT} iteration(s)) ==="
 
-# 后台心跳进程：每 60 秒输出一次时间戳，保持 SSH 连接（CI 执行机通过 SSH
-# 连接测试执行机，长时间无 stdout 输出会导致会话中断）
-heartbeat_pid=""
-if [ -z "${GATE_CHECK_NO_HEARTBEAT:-}" ]; then
-    (
-        while true; do
-            echo "[HEARTBEAT $(date '+%Y-%m-%d %H:%M:%S')] gate_check running..."
-            sleep 60
-        done
-    ) &
-    heartbeat_pid=$!
-    trap 'kill "$heartbeat_pid" 2>/dev/null' EXIT
-fi
-
 OVERALL_PASS=0
 OVERALL_FAIL=0
 
@@ -175,11 +161,6 @@ for ((iter=1; iter<=REPEAT_COUNT; iter++)); do
         OVERALL_FAIL=$((OVERALL_FAIL + 1))
     fi
 done
-
-# 停止心跳
-if [ -n "$heartbeat_pid" ]; then
-    kill "$heartbeat_pid" 2>/dev/null || true
-fi
 
 # 输出汇总
 echo ""
