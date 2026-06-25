@@ -129,6 +129,7 @@ AscendC::ReduceMax<T>(dst, src, tmp, rLength, false);
 
 // ✅ 方案2：用 DataCopyPad 填充到对齐
 uint32_t alignedCols = ((rLength * sizeof(T) + 31) / 32) * 32 / sizeof(T);
+AscendC::DataCopyExtParams copyParams{1, rLength * sizeof(T), 0, 0, 0};
 AscendC::DataCopyPadExtParams<T> padParams;
 padParams.isPad = true;
 padParams.rightPadding = alignedCols - rLength;

@@ -441,6 +441,7 @@ ep.blockLen = actualColumnCount * sizeof(half);          // 字节
 ep.blockCount = dealRowCount;
 ep.srcStride = (totalColumns - actualColumnCount) / (32 / sizeof(half));  // 单位32字节块（src在VECIN）
 ep.dstStride = 0;
+ep.rsv = 0;
 DataCopyPad(dst, src, ep);
 
 // ✅ DataCopy + DataCopyParams：blockLen 单位是 32 字节块

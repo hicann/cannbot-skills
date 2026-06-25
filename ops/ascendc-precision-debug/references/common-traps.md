@@ -383,7 +383,7 @@ PipeBarrier<PIPE_ALL>();  // 若结果正确则确认是同步问题
 DataCopy(indicesGm, indicesLocal, 2);  // 2 * 4 = 8B
 
 // ✅ 正确：使用 DataCopyPad
-DataCopyExtParams p{1, rowsThisCore * sizeof(int32_t), 0, 0};
+DataCopyExtParams p{1, rowsThisCore * sizeof(int32_t), 0, 0, 0};
 DataCopyPad(indicesGm, indicesLocal, p);
 ```
 
@@ -398,7 +398,7 @@ outGm.SetValue(0, 10);
 // ✅ 推荐
 LocalTensor<T> tmp = buf.Get<T>();
 tmp.SetValue(0, value);
-DataCopyPad(dstGm, tmp, {1, sizeof(T), 0, 0});
+DataCopyPad(dstGm, tmp, {1, sizeof(T), 0, 0, 0});
 ```
 
 ### 诊断流程

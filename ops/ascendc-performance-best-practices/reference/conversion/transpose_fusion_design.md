@@ -267,7 +267,7 @@ __aicore__ inline void Process() {
 
 ## 6. 注意事项 / 约束
 
-1. **DataCopyParams stride 为 uint16_t**：最大 65535（单位：32B）。若 stride 超过此限制，需切换到 `DataCopyExtParams`（字节为单位）。
+1. **DataCopyParams stride 为 uint16_t**：最大 65535（单位：32B）。若 stride 超过此限制，需切换到 `DataCopyExtParams`（uint32_t，范围更大）。
 
 2. **blockLen 单位为 32B**：`DataCopyParams.blockLen` 的单位是 32B，计算时需 `sizeof(T) * elementCount / 32U`。使用 `DataCopyExtParams` 时单位为字节。
 
@@ -293,9 +293,9 @@ DataCopyParams params;
 params.dstStride = (batchSize * qSeqSize - s1Size) * headDim * sizeof(OUT_T) / 32U;
 // 若上述值 > 65535，则必须使用 DataCopyExtParams
 
-// DataCopyExtParams：stride 为 uint32_t（单位：字节），适合大 stride 场景
+// DataCopyExtParams：stride 为 uint32_t（单位：32B），适合大 stride 场景
 DataCopyExtParams extParams;
-extParams.dstStride = (batchSize * qSeqSize - s1Size) * headDim * sizeof(OUT_T);  // 字节
+extParams.dstStride = (batchSize * qSeqSize - s1Size) * headDim * sizeof(OUT_T) / 32U;  // 32B
 ```
 
 ### Q2: 如何计算 BNSD → NBSD 的 dstStride？

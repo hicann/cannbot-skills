@@ -108,7 +108,7 @@ AscendC::TQue<AscendC::TPosition::VECIN, 1> inQueueX;
 pipe->InitBuffer(inQueueX, 2, bufferSize);  // num=2 开启 Double Buffer
 
 AscendC::LocalTensor<half> x = inQueueX.AllocTensor<half>();
-AscendC::DataCopyPad(x, xGm, {1, size * sizeof(half), 0, 0}, {false, 0, 0, 0});
+AscendC::DataCopyPad(x, xGm, {1, (uint32_t)(size * sizeof(half)), 0, 0, 0}, {false, 0, 0, static_cast<half>(0)});
 inQueueX.EnQue(x);
 // ...
 AscendC::LocalTensor<half> xLocal = inQueueX.DeQue<half>();
@@ -195,7 +195,7 @@ for (int i = 0; i < totalTiles; i++) {
 // 3. CopyIn
 void CopyIn(int i) {
     LocalTensor<T> x = inQueueX.AllocTensor<T>();
-    DataCopyPad(x, xGm[i * tileSize], {1, (uint32_t)(tileSize * sizeof(T)), 0, 0}, {false, 0, 0, 0});
+    DataCopyPad(x, xGm[i * tileSize], {1, (uint32_t)(tileSize * sizeof(T)), 0, 0, 0}, {false, 0, 0, static_cast<T>(0)});
     inQueueX.EnQue(x);
 }
 
@@ -211,7 +211,7 @@ void Compute(int i) {
 // 5. CopyOut
 void CopyOut(int i) {
     LocalTensor<T> y = outQueueY.DeQue<T>();
-    DataCopyPad(yGm[i * tileSize], y, {1, (uint32_t)(tileSize * sizeof(T)), 0, 0});
+    DataCopyPad(yGm[i * tileSize], y, {1, (uint32_t)(tileSize * sizeof(T)), 0, 0, 0});
     outQueueY.FreeTensor(y);
 }
 ```

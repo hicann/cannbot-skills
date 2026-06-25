@@ -83,13 +83,14 @@ __aicore__ inline void AddExample<T, BUFFER_MODE>::CopyIn(int64_t progress, int6
 {
     AscendC::LocalTensor<T> xLocal = inputQueueX.template AllocTensor<T>();
     AscendC::LocalTensor<T> yLocal = inputQueueY.template AllocTensor<T>();
-    AscendC::DataCopyParams copyParams;
+    AscendC::DataCopyExtParams copyParams;
     copyParams.blockCount = 1;
     copyParams.blockLen = currentNum * sizeof(T);
     copyParams.srcStride = 0;
     copyParams.dstStride = 0;
-    AscendC::DataCopyPad(xLocal, inputGMX[progress * ubLength_], copyParams, {false, 0, 0, 0});
-    AscendC::DataCopyPad(yLocal, inputGMY[progress * ubLength_], copyParams, {false, 0, 0, 0});
+    copyParams.rsv = 0;
+    AscendC::DataCopyPad(xLocal, inputGMX[progress * ubLength_], copyParams, {false, 0, 0, static_cast<T>(0)});
+    AscendC::DataCopyPad(yLocal, inputGMY[progress * ubLength_], copyParams, {false, 0, 0, static_cast<T>(0)});
     inputQueueX.EnQue(xLocal);
     inputQueueY.EnQue(yLocal);
 }
@@ -98,11 +99,12 @@ template <typename T, int BUFFER_MODE>
 __aicore__ inline void AddExample<T, BUFFER_MODE>::CopyOut(int64_t progress, int64_t currentNum)
 {
     AscendC::LocalTensor<T> zLocal = outputQueueZ.template DeQue<T>();
-    AscendC::DataCopyParams copyParams;
+    AscendC::DataCopyExtParams copyParams;
     copyParams.blockCount = 1;
     copyParams.blockLen = currentNum * sizeof(T);
     copyParams.srcStride = 0;
     copyParams.dstStride = 0;
+    copyParams.rsv = 0;
     AscendC::DataCopyPad(outputGMZ[progress * ubLength_], zLocal, copyParams);
     outputQueueZ.FreeTensor(zLocal);
 }

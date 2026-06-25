@@ -125,9 +125,10 @@ UB_C(int32) → Cast(fp32)
 LocalTensor<int32_t> ubC = ubBuf.Get<int32_t>(offsetC);
 LocalTensor<int32_t> gmC;
 gmC.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t*>(workspacePtr));
-DataCopyParams copyParam;
+DataCopyExtParams copyParam;
 copyParam.blockCount = 1;
 copyParam.blockLen   = tileRows * tileCols * sizeof(int32_t);  // 32B 对齐
+copyParam.rsv = 0;
 DataCopyPad(ubC, gmC[gmOffsetC], copyParam);
 
 // === 2. 搬运 Scale 到 UB ===

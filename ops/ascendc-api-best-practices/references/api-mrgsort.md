@@ -418,11 +418,12 @@ __aicore__ inline void UpdateSortInfo()
 __aicore__ inline void CopyOutMultiCore()
 {
     LocalTensor<float> sortBuffer = sortedQueue_.DeQue<float>();
-    DataCopyParams copyParams;
+    DataCopyExtParams copyParams;
     copyParams.blockCount = 1;
     copyParams.blockLen = GetSortLen<float>(curLoopSortedNum_) * sizeof(float);
     copyParams.srcStride = 0;
     copyParams.dstStride = 0;
+    copyParams.rsv = 0;
     DataCopyPad(workspaceOutput_[wsOutOffset_], sortBuffer, copyParams);
     wsOutOffset_ += GetSortLen<float>(curLoopSortedNum_);
     sortedQueue_.FreeTensor(sortBuffer);
