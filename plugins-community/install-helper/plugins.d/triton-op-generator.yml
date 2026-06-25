@@ -1,0 +1,8 @@
+id: triton-op-generator
+dir: plugins-official/triton-op-generator
+displayName: Triton 算子生成
+script: install.sh
+aliases: [triton]
+skills: 6
+agents: 0
+description: Triton-Ascend 算子代码生成与优化

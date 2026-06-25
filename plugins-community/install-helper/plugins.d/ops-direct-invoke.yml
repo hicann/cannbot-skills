@@ -1,0 +1,7 @@
+id: ops-direct-invoke
+dir: plugins-official/ops-direct-invoke
+displayName: AscendC Kernel 直调
+aliases: [ops-direct, ascendc-direct, direct, kernel]
+skills: 16
+agents: 3
+description: Ascend C Kernel <<<>>> 直调算子开发全流程

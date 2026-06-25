@@ -1,29 +1,202 @@
 ## 🔥 更新日志
+
+### 【2026-06-25】
+#### 新特性 New Features
+- 【install-helper】新增交互式安装助手 CLI 工具（`@cannbot-ai/install-helper@1.0.3`），支持插件/Skill 安装、更新、卸载、健康检查等完整生命周期管理。发布到 npm，支持 `curl | bash`、`npx`、`npm install -g` 三种安装方式。
+- 【安装部署】新增顶层 `install.sh` 一键安装脚本。
+
+#### 文档 Documentation
+- 【README】全面优化安装描述：双轨制安装（完整插件安装 + Agent Skills 标准 `npx skills add`）、安装方式表格化、手动安装脚本增加具体示例。
+
+### 【2026-06-24】
+#### 新特性 New Features
+- 【仿真 ops-simulator】新增基于 `summary.json` 的性能瓶颈分析能力（瓶颈定位 + 优化建议），新增 5 个 reference 文档（性能指标参考、AIC/AIV/通用 issue 手册、issue 模板）。
+
+#### 重构 Refactor
+- 【算子直调，ops-direct-invoke】拆分 Developer 串讲模式为独立 Design Reviewer Agent（`ascendc-kernel-design-reviewer`）。
+
+#### 问题修复 Bug Fix
+- 【ops】`ops-precision-standard` 精度标准文档修复。
+
+### 【2026-06-23】
+#### 特性增强 Feature Enhancement
+- 【ops-registry-invoke】集成 infra Skills 依赖，统一环境检查与基础设施能力。
+- 【ops】补充 CV 融合算子流水间同步的知识。
+
 ### 【2026-06-22】
+#### 新特性 New Features
+- 【模型推理】新增 Skill：model-infer-quantization，接入 compressed-tensors 量化方案，覆盖权重/激活/KVCache 量化适配，并编排进 model-infer-optimize 量化阶段。
+- 【模型推理】migrator / kvcache / parallel-impl 等主链 Skill 按 cann-recipes-infer 仓库框架重写，参考资料拆分框架部署与独立部署两种形态。
+
 #### 特性增强 Feature Enhancement
 - 【仿真 ops-simulator】新增基于 `summary.json` 的性能瓶颈分析能力：Quick Diagnosis 决策流程（核数 → 负载均衡 → 利用率 → Bound 类型 → 带宽交叉检查），新增 5 个 reference（指标阈值参考、general / AIC / AIV issue 手册、issue 模板）；支持 `cache` / `bandwidth` 缺失时的 fallback 信号。
 
-### 【2026-06-17】
+#### 测试框架 Test Framework
+- 【ST】增强门禁检查 — 添加 `--all` 参数、跳过报告生成、报告路径重构。
+
+### 【2026-06-18】
 #### 特性增强 Feature Enhancement
+- 【triton】改进 GPU kernel 迁移策略。
+- 【ops-registry-invoke-template】补充 matmul_blaze_example 样例。
+
+#### 测试框架 Test Framework
+- 【ST】为 `graph/` 和 `infra/` 共 10 个 Skill 添加 ST 测试用例，优化脚本日志打印。
+- 【ST】新增 `ascendc-docs-search` 和 `ascendc-api-best-practices` 的 ST 评测用例（10 Cases）。
+- 【benchmark】修复 opencode headless 模式下不 dispatch subagent 的问题。
+
+### 【2026-06-17】
+#### 新特性 New Features
+- 【cuda-direct-invoke】新增 test gate harness。
+- 【Matmul】新增 MM/GMM Skill。
+
+#### 特性增强 Feature Enhancement
+- 【ops-direct-invoke / ops-direct-invoke-flash】集成 infra Skills，统一环境检查与基础设施能力。
+- 【ops-direct-invoke-flash】补充算子脚手架工程并简化用户界面。
+- 【ops】新增 Blaze GroupMatMul delta 文档。
 - 【ops-registry-invoke】支持调用ascendc-blaze-best-practice生成matmul类算子，并补充CV融合算子样例工程。
 - 【模型推理】新增 Skill：model-infer-quantization，接入 compressed-tensors 量化方案，覆盖权重/激活/KVCache 量化适配，并编排进 model-infer-optimize 量化阶段。
 - 【模型推理】migrator / kvcache / parallel-impl 等主链 Skill 按 cann-recipes-infer 仓库框架重写，参考资料拆分框架部署与独立部署两种形态。
 
-### 【2026-06-10】
+#### 问题修复 Bug Fix
+- 【code-review】REVIEW.md 多轮审查保留完整审计记录。
+
+### 【2026-06-16】
+#### 新特性 New Features
+- 【TileLang】新增 TileLang 插件，支持通过 TileLang 表达完成 ASC 算子自动生成。
+- 【aclnn 算子开发】更新代码检视流程为大规模并行检视流程。
+
+#### 测试框架 Test Framework
+- 【ST】为 24 个 ops Skill 添加 ST 测试用例，新增 `gate_check --repeat` 参数。
+
+### 【2026-06-15】
 #### 特性增强 Feature Enhancement
-- 【算子直调，ops-direct-invoke】支持 Kirin 系列芯片开发，当前支持 Simulator 开发方式：**ascendc-direct-invoke-template** 直调模板新增 Kirin Vector 算子样例工程；**ascendc-env-check** 新增 Simulator 可运行性检查步骤；**npu-arch** 新增 Kirin 端侧硬件参数；**ops-direct-invoke workflow** 的 verify_environment.sh 新增 Simulator 支持情况检查；
+- 【Matmul】SWAT 算法更新策略并适配量化，新增参数分析能力。
+- 【Kirin】补充端侧环境检查文档。
+
+#### 测试框架 Test Framework
+- 【ST】为 ops/ 下 Skill 添加 ST 测试用例。
+
+### 【2026-06-13】
+#### 文档 Documentation
+- 【ops-direct-invoke-flash】新增 init.sh 安装脚本与 README 文档。
+
+#### 测试框架 Test Framework
+- 【TileLang】更新 ST 测试用例。
+- 【model-infer-optimize】新增 CI evals 评测。
+
+### 【2026-06-12】
+#### 特性增强 Feature Enhancement
+- 【ops】blaze Skill 支持后融合能力。
+- 【st-test】统一 skill/team 报告，新增 Ascend Platform 平台过滤。
+
+### 【2026-06-11】
+#### 新特性 New Features
+- 【benchmark】新增算子评测框架到 tests/benchmark。
+- 【triton-op-generator】插件算子生成性能优化。
+
+#### 特性增强 Feature Enhancement
+- 【catlass-op-generator】改进 skills 和 agents。
+- 【gitcode-toolkit】PR 创建流程新增 git 提交身份校验步骤。
+
+#### 测试框架 Test Framework
+- 【tests】新增 [file_contains] 检查类型，修复 CI 连接中断问题，修复 opencode 会话导出截断问题。
+
+#### 问题修复 Bug Fix
+- 【npu-arch】补全 Scalar 执行单元，修正 SIMD/SIMT VF 描述 (#263)。
+
+### 【2026-06-10】
+#### 新特性 New Features
+- 【FA 算子】新增 FA 算子开发基础能力。
+- 【TileLang】将 TileLang 移入 plugins-official。
+- 【ops-qa-suite】创建 ops-qa-suite 能力。
+
+#### 特性增强 Feature Enhancement
+- 【算子直调，ops-direct-invoke】支持 Kirin 系列芯片开发，当前支持 Simulator 开发方式：**ascendc-direct-invoke-template** 直调模板新增 Kirin Vector 算子样例工程；**ascendc-env-check** 新增 Simulator 可运行性检查步骤；**npu-arch** 新增 Kirin 端侧硬件参数；**ops-direct-invoke workflow** 的 verify_environment.sh 新增 Simulator 支持情况检查。
+- 【代码检视】代码检视能力迭代增强。
+
+#### 测试框架 Test Framework
+- 【ST】新增 npu-arch / ascendc-registry-invoke-template / ascendc-whitebox-design 三个 Skill 的 ST 评测用例。
+
+### 【2026-06-09】
+#### 特性增强 Feature Enhancement
+- 【ascendc-docs-search】搜索接口迁移至 intelligent/search POST 接口。
+- 【cuda2ascend-simt】改进触发描述。
+
+#### 测试框架 Test Framework
+- 【tests】修复多个 Bug、对齐三方规范并优化规则体系、UT 测试运行性能优化。
+
+### 【2026-06-07】
+#### 特性增强 Feature Enhancement
+- 【PyPTO】完善算子开发编排能力并登记发布。
 
 ### 【2026-06-06】
 #### 特性增强 Feature Enhancement
 - 【PyPTO 算子】更新算子设计 Skill（pypto-op-design），重构设计方案生成与模板。
 - 【PyPTO 编排】优化算子开发 Subagent（analyst / developer）。
 
+### 【2026-06-05】
+#### 新特性 New Features
+- 【TileLang】整理 agent 结构，更新已有 skill 内容，新增环境检查和性能调优特性。
+
+#### 特性增强 Feature Enhancement
+- 【ascendc-precision-debug】以 reference 形式合入 ascendc-dumptensor Skill，补齐 kernel 内插桩调试能力，保持原子性、可独立增删。
+- 【pypto-op-perf-tune】更新性能调优 Skill。
+
+#### 测试框架 Test Framework
+- 【ST】新增 ascendc-docs-gen / ascendc-ut-develop / ascendc-direct-invoke-to-registry-invoke 三个 Skill 的 ST 评测用例（28 Cases）。
+- 【tests】version check 从 FAIL 降级为 WARN。
+
+### 【2026-06-04】
+#### 新特性 New Features
+- 【ops-direct-invoke-flash】新增 Ascend C Kernel 从零构建插件。
+- 【安装部署】支持 VS Code Copilot 一键安装。
+
+#### 重构 Refactor
+- 【ST】ST 框架稳定性修复、文档同步与评测用例全面启用。
+- 【ops-direct-invoke】工作流中环境检查从 shell 改为 env-check 和 npu-arch skill。
+
+#### 测试框架 Test Framework
+- 【ST】评测稳定性优化与 Team 测试能力支持。
+
+#### 问题修复 Bug Fix
+- 【model-infer】恢复 reference repo 配置并修复 skill 链接。
+
 ### 【2026-06-03】
 #### 新特性 New Features
 - 【ops-direct-invoke-flash】新增 Ascend C Kernel 从零构建 Skill（`/ops-direct-invoke-flash`，位于 `plugins-official/`）：从 CPU 函数 / 数学公式 / 代码片段 / 文本描述出发，文档先行设计、分阶段实现、本地 + 远程 NPU 验证，并由子 Agent 评审。支持 Ascend950 / dav-3510 的 AscendC::Reg 原生编程。
+- 【ops-profiling】新增 msprof 性能采集方法。
+- 【性能优化】构建性能优化策略 Skill。
 
-#### 配置变更 Configuration Changes
+#### 重构 Refactor
 - 【ops-direct-invoke】统一 subagent_type 引用格式，移除 `ops-direct-invoke:` 插件前缀，改为短名称格式（如 `@ascendc-kernel-architect`），简化配置并与平台调度机制保持一致。
+- 【system-test】评审 MD 模板化、正向看护、按模型 token 预算、not_contains 修复。
+
+#### 问题修复 Bug Fix
+- 【init.sh】修复 global 模式安装时静默覆盖用户 `AGENTS.md/CLAUDE.md` 的问题。
+
+### 【2026-06-02】
+#### 新特性 New Features
+- 【ops】合入 Ascend C SIMT 算子知识层。
+- 【elementwise】添加 UB 常驻复用与 Bank 冲突规避优化设计文档。
+- 【dfx】新增 dfx triage runner 和 performance diagnosis。
+
+#### 特性增强 Feature Enhancement
+- 【gitcode-issue-gen】通过分支路由集成 gitcode-issue-report。
+
+#### 问题修复 Bug Fix
+- 【ops-registry】增加 blackbox / whitebox / cp3 gates。
+- 【ascendc-env-check】重构 npu-smi 解析方案，废弃主表格解析，采用结构化子命令 + 分层降级策略，增强测试与 eval 用例。
+
+### 【2026-06-01】
+#### 新特性 New Features
+- 【ops-simulator】添加算子仿真的流水线空泡分析。
+- 【plugins-community】将 EasyASC DSL 移至 plugins-community。
+
+#### 特性增强 Feature Enhancement
+- 【pypto-precision-compare】更新精度对比 Skill。
+- 【pypto-precision-debug】更新精度调试 Skill。
+- 【code-reviewer】Code Reviewer Agent 大版本更新。
+- 【registry-invoke-template】修复文档幻觉。
 
 ### 【2026-05-29】
 - 【代码检视】新增大型 PR 检视（>10 文件自动切换，按文件组并行，负载感知波次）和快速检视（零子 Agent，定向问题 inline 输出）两种工作流，配套 7 个 step 文件。方法论增强：负向证据分值降低防 AI 偷懒、SEC-11.3 新增逐位类型交叉验证检视方法。子 Agent 改为 Grep 定位 + Read offset/limit 按需读取条例章节，不再整篇加载。`check_bounds.py` 新增能力边界提示与手动推演指引。四仓历史数值安全数据集（33 例）。

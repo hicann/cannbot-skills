@@ -14,114 +14,134 @@
 - 使用昇腾 NPU 进行模型推理优化的开发者
 - 希望贡献 Skills / Agents 的社区贡献者
 
-## 🔥 最新动态
-- **2026-05-25** — 新增 `cuda2ascend-simt` 实验技能。
-- **2026-05-23** — 性能调试/代码检视/PyPTO 多模块能力增强；测试框架修复跨平台稳定性并统一 License。
-- **2026-05-22** — 新增 tiling-solver Skill 与社区治理模型；UT 与 CI/ST 测试框架能力增强。
-- **2026-05-20** — 新增 4 个 GitCode 协作 Skills 与 skill 能力看护 CI 入口。
-- **2026-05-19** — 新增 Triton 算子生成功能。
-- **2026-05-16** — model-infer-optimize 迁移至 plugins-official；全场景插件支持 Trae 全局安装。
-- **2026-05-15** — RegBase 最佳实践集成至算子直调工作流；init.sh 支持任意目录安装。
-- **2026-05-14** — Skill `ascendc-npu-arch` 重命名为 `npu-arch`。
-- **2026-05-12** — torch-compile 加入 plugin-official；TileLang 迁移至 plugins-community。
-- **2026-05-11** — 新增 ascendc-crash-debug 技能；官方插件新增支持 Cursor IDE。
-
-> 仅展示最近两周动态，更多历史记录详见 [CHANGELOG.md](CHANGELOG.md)。
-
-## ⚡️快速开始
+## 🚀 快速开始
 
 ### 前置条件
 
-安装以下任意一个 AI 编程工具：
+- [Node.js 18+](https://nodejs.org)（终端运行 `node --version` 检查，未安装请前往官网下载）
+- 以下任一 AI 编程工具：[OpenCode](https://opencode.ai/docs/zh-cn) / [Claude Code](https://code.claude.com/docs/zh-CN/overview) / [Trae](https://www.trae.cn) / [Cursor](https://cursor.com)
+- CANN 开发环境（仅算子编译/运行类 Skills 需要，知识检索类不受影响）
 
-| 工具 | 安装命令 | 适用安装方式 |
-|------|---------|-------------|
-| **Claude Code** | `npm install -g @anthropic-ai/claude-code` → [官方文档](https://code.claude.com/docs/zh-CN/overview) | 脚本安装 / Plugin 安装 |
-| **OpenCode** | `npm install -g opencode-ai` → [官方文档](https://opencode.ai/docs/zh-cn) | 脚本安装 |
-| **Trae** | 下载安装：https://www.trae.cn → [官方文档](https://www.trae.cn) | 脚本安装 |
-| **Cursor** | 下载安装：https://cursor.com → [官方文档](https://cursor.com/cn/docs/get-started/quickstart) | 脚本安装 |
+### 安装
 
+#### 完整安装（推荐）
 
-### 步骤一：克隆仓库
+通过 `install-helper` 安装完整插件内容（Skills + Agents + Workflows + 工具链）：
 
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills
-```
+| 方式 | 命令 | 说明 |
+|------|------|------|
+| **curl** | `curl -fsSL https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.sh \| bash` | 一键安装（推荐） |
+| **npx** | `npx @cannbot-ai/install-helper` | 免安装运行 |
+| **npm** | `npm install -g @cannbot-ai/install-helper` | 全局安装 |
 
-### 步骤二：选择场景并安装
+安装后在项目目录运行 `install-helper` 启动交互式向导：
 
-选择对应场景，将 `<tool>` 替换为你的 AI 工具（支持 `opencode` / `claude` / `trae` / `cursor` / `copilot`）后执行：
+1. 自动检测已安装的 AI 编程工具
+2. 选择安装类型（完整插件 或 Skill）
+3. 选择要安装的插件或Skill（空格选择，回车确认）
+4. 确认并自动安装
 
-| 场景 | 安装命令 | 详细文档 |
-|------|---------|---------|
-| [**AscendC Kernel<<<>>>直调**](plugins-official/ops-direct-invoke/quickstart.md) | `cd plugins-official/ops-direct-invoke && bash init.sh project <tool>` | [quickstart](plugins-official/ops-direct-invoke/quickstart.md) |
-| [**AscendC 算子注册调用**](plugins-official/ops-registry-invoke/quickstart.md) | `cd plugins-official/ops-registry-invoke && bash init.sh project <tool>` | [quickstart](plugins-official/ops-registry-invoke/quickstart.md) |
-| [**PyPTO 算子**](plugins-official/pypto-op-orchestrator/quickstart.md) | `cd plugins-official/pypto-op-orchestrator && bash init.sh project <tool>` | [quickstart](plugins-official/pypto-op-orchestrator/quickstart.md) |
-| [**Triton 算子生成**](plugins-official/triton-op-generator/quickstart.md) | `cd plugins-official/triton-op-generator && bash install.sh project <tool>` | [quickstart](plugins-official/triton-op-generator/quickstart.md) |
-| [**TileLang 算子**](plugins-official/tilelang-op-orchestrator/quickstart.md) | `cd plugins-official/tilelang-op-orchestrator && bash init.sh project <tool>` | [quickstart](plugins-official/tilelang-op-orchestrator/quickstart.md) |
-| [**NPU 推理优化**](plugins-official/model-infer-optimize/quickstart.md) | `cd plugins-official/model-infer-optimize && bash init.sh project <tool>` | [quickstart](plugins-official/model-infer-optimize/quickstart.md) |
-| [**Catlass 算子直调开发**](plugins-official/catlass-op-generator/quickstart.md) | `cd plugins-official/catlass-op-generator && bash init.sh project <tool>` | [quickstart](plugins-official/catlass-op-generator/quickstart.md) |
-| [**代码检视**](plugins-official/ops-code-reviewer/quickstart.md) | `cd plugins-official/ops-code-reviewer && bash init.sh project <tool>` | [quickstart](plugins-official/ops-code-reviewer/quickstart.md) |
-| [**torch.compile 图模式**](plugins-official/torch-compile/quickstart.md) | Plugin 市场安装：`/plugin install torch-compile@cannbot` | [quickstart](plugins-official/torch-compile/quickstart.md) |
+#### 独立 Skill 安装
 
-**示例**：如果你使用 Claude Code，想安装 AscendC Kernel 直调场景：
-```bash
-cd plugins-official/ops-direct-invoke && bash init.sh project claude
-```
-
-安装脚本会自动完成：创建软链接 → 生成配置文件 → 克隆依赖仓库 → 健康检查。看到 `Installation complete!` 即表示安装成功。
-
-> **Claude Code 用户的备选方案**：如果你使用 Claude Code，也可以用 Plugin 方式安装（`/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`，然后 `/plugin install <插件名>@cannbot`）。
-
-### 步骤三：验证安装
-
-安装完成后，检查以下内容确认安装成功：
+通过 [Agent Skills](https://agentskills.io) 标准安装单个 Skill：
 
 ```bash
-# 检查 skills 和 agents 目录是否正确链接
-ls .claude/skills/        # Claude Code 用户
-ls .opencode/skills/      # OpenCode 用户
-ls .trae/skills/          # Trae 用户
-ls .cursor/skills/        # Cursor 用户
-ls .github/skills/        # VS Code Copilot 用户
+# 浏览可用 Skills
+npx skills add https://gitcode.com/cann/cannbot-skills.git --list
 
-# 如果上述目录存在且包含多个子目录（如 npu-arch、ascendc-env-check 等），说明安装成功。
+# 安装单个 Skill
+npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-tiling-design
 ```
 
-你也可以启动 AI 编程工具后输入以下内容来快速验证 Skills 是否被正确加载：
+安装后直接在 AI 工具中即可使用，无需额外配置。
 
-> "请列出当前可用的 CANNBot Skills"
+> 独立 Skill 不含 Agents/Workflows/工具链，如需完整插件内容请使用上方完整安装。
 
-如果 AI 能列出 `npu-arch`、`ascendc-env-check` 等技能名称，说明安装完全成功。
+### 安装后使用
 
-### 步骤四：开始使用
+安装完成后，在项目目录中启动你的 AI 编程工具，直接用自然语言描述需求即可：
 
-启动 AI 工具，直接描述开发需求即可。
+| 你想做什么 | 可以这样说 | 用到的能力 |
+|-----------|-----------|-----------|
+| 开发一个算子 | "帮我开发一个 Abs 算子，输入 float16，输出 float16" | Plugin: `ops-direct-invoke` |
+| 调试精度问题 | "我的 Add 算子精度不达标，帮我排查一下" | Skill: `ascendc-precision-debug` |
+| 查阅 API 文档 | "aclnnAdd 接口的参数和返回值是什么" | Skill: `ascendc-docs-search` |
+| 检查开发环境 | "帮我检查一下当前的 CANN 开发环境" | Skill: `ascendc-env-check` |
+| 代码检视 | "帮我检视这段 Kernel 代码是否符合规范" | Plugin: `ops-code-reviewer` |
 
-以下是一些入门提示词示例：
+更多示例详见 [Skills 使用样例](docs/skills-usage.md)。
 
-| 你想做什么 | 可以这样说 |
-|-----------|-----------|
-| 开发一个算子 | "帮我开发一个 Abs 算子，输入 float16，输出 float16" |
-| 调试精度问题 | "我的 Add 算子精度不达标，帮我排查一下" |
-| 查阅 API 文档 | "aclnnAdd 接口的参数和返回值是什么" |
-| 检查开发环境 | "帮我检查一下当前的 CANN 开发环境" |
-| 代码检视 | "帮我检视这段 Kernel 代码是否符合规范" |
+> 遇到问题？运行 `install-helper doctor --fix` 自动检测并修复常见问题。
 
-更多示例详见 [Skills 使用样例](docs/skills-usage.md)。各场景的完整使用步骤参见对应 quickstart 文档。
+## 📦 安装指南
+
+### 完整安装
+
+#### install-helper 命令参考
+
+| 命令 | 说明 |
+|------|------|
+| `install-helper` | 交互式安装向导 |
+| `install-helper install <name>` | 安装指定插件或 Skill（自动识别） |
+| `install-helper install --list` | 按类别列出所有可用 Skills |
+| `install-helper update [plugin]` | 更新已安装的插件 |
+| `install-helper uninstall <plugin>` | 卸载指定插件 |
+| `install-helper list` | 查看可用场景及安装状态 |
+| `install-helper doctor --fix` | 健康检查 + 自动修复 |
+| `install-helper lang set en_US` | 切换语言 |
+
+> 完整命令参考和详细文档：[install-helper README](plugins-community/install-helper/README.md)
+
+#### 手动执行安装脚本
+
+如果不使用 install-helper，也可以进入对应插件目录手动执行 `init.sh` 安装脚本。以安装 AscendC Kernel 直调插件到 OpenCode 为例：
+
+```bash
+cd plugins-official/ops-direct-invoke
+bash init.sh project opencode
+```
+
+`<tool>` 支持 `opencode` / `claude` / `trae` / `cursor` / `copilot`，各插件的详细安装步骤参见对应插件目录下的 `quickstart.md` 文档。
+
+### 独立 Skill 安装
+
+本仓库的 Skills 遵循 [Agent Skills](https://agentskills.io) 开放标准，可通过开源 [skills CLI](https://github.com/vercel-labs/skills) 安装到 70+ 种 AI 编程工具（OpenCode、Claude Code、Cursor、Codex、Trae 等）。
+
+```bash
+# 浏览可用 Skills
+npx skills add https://gitcode.com/cann/cannbot-skills.git --list
+
+# 安装单个 Skill（交互式选择目标工具）
+npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-tiling-design
+
+# 安装 Skill 到指定工具（支持 opencode / claude-code / trae / cursor 等）
+npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-check --skill npu-arch --agent opencode
+
+# 安装全部 Skill 到所有已检测到的工具（非交互式）
+npx skills add https://gitcode.com/cann/cannbot-skills.git --skill '*' --agent '*' -y
+
+# 查看已安装的 Skills
+npx skills list
+
+# 卸载
+npx skills remove ascendc-tiling-design
+```
+
+> **此方式仅安装独立 Skills**。如需完整插件内容（Skills + Agents + Workflows + 工具链），请使用 `install-helper` 或 `init.sh` 脚本。
 
 ### 安装遇到问题？
 
-| 常见问题 | 解决方法 |
-|---------|---------|
-| `git clone` 失败（网络问题） | 尝试配置 GitCode SSH Key，或使用镜像地址 |
-| `init.sh` 提示权限不足 | 执行 `chmod +x plugins-official/*/init.sh` |
-| skills 目录为空 | 确认安装脚本输出中无报错，重新执行安装命令 |
-| AI 工具无法识别 Skills | 重启工具或新开会话（某些工具需重新加载配置） |
+运行 `install-helper doctor --fix` 自动检测并修复常见问题。
+
+| 问题 | 解决方法 |
+|------|---------|
+| `install-helper` 报错 | 确认 Node.js >= 18：`node --version` |
+| AI 工具无法识别 Skills | 重启工具或新开会话 |
+| 软链接失效 | `install-helper doctor --fix` |
+| 网络问题 | 配置 GitCode SSH Key 或设置代理 |
 | CANN 环境未配置 | 仅影响代码编译/运行类 Skills，知识检索类不受影响 |
 
-更多安装选项（全局安装、Plugin 市场安装、手动安装）和故障排查详见各场景对应的 quickstart 文档。
+更多故障排查详见各场景对应的 quickstart 文档。
 
 ## 🔍 项目架构设计
 
@@ -143,7 +163,9 @@ cannbot-skills/
 │   ├── triton-op-generator/         # Triton 算子代码生成与优化
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
 ├── plugins-community/               # 社区 Plugin
-│   └── ops-easyasc-dsl/             # EasyASC DSL 算子开发
+│   ├── install-helper/              # CANNBot Install Helper 工具
+│   ├── ops-easyasc-dsl/             # EasyASC DSL 算子开发
+│   └── ops-qa-suite/                # 算子测试套件
 ├── infra/                           # 基础设施维护 Skills
 └── tests/                           # 自动化测试框架
 ```
@@ -488,6 +510,22 @@ cannbot-skills/
 1. **关于功能满足度**：由于技术快速更新迭代，部分内容可能无法完全适用于所有场景。本开源社区的功能和文档正在持续更新和完善中，如果想提出需求、发现问题、贡献想法，欢迎提 Issue 或参与讨论，共创共建。
 
 2. **关于自动生成**：自动代码生成工具所产出的内容，其完整性、准确性、合规性受模型、Skills 能力、语料质量、输入指令等多种因素影响，无法保证完全精准。所有生成代码作为辅助研发使用，请开发者务必进行测试验证、安全审查后再投入使用。
+
+## 🔥 最新动态
+
+- **2026-06-25** — 新增 `install-helper` 交互式安装助手 CLI 工具；README 安装文档全面优化，支持双轨制安装。
+- **2026-06-24** — `ops-simulator` 新增基于 summary.json 的性能瓶颈分析能力；`ops-direct-invoke` 拆分 Design Reviewer Agent。
+- **2026-06-23** — `ops-registry-invoke` 集成 infra Skills；补充 CV 融合算子流水间同步知识。
+- **2026-06-22** — 新增 `model-infer-quantization` 量化 Skill，主链 Skill 按 cann-recipes-infer 框架重写。
+- **2026-06-18** — 为 graph/ 和 infra/ 共 10 个 Skill 添加 ST 测试用例；改进 triton GPU kernel 迁移策略。
+- **2026-06-17** — 集成 infra Skills 到 `ops-direct-invoke` 和 `ops-direct-invoke-flash`；新增 MM/GMM Skill。
+- **2026-06-16** — 新增 TileLang 插件，为 24 个 ops Skill 添加 ST 测试用例。
+- **2026-06-15** — SWAT 算法更新策略并适配量化，新增参数分析能力。
+- **2026-06-13** — `ops-direct-invoke-flash` 补充 init.sh 安装脚本与 README 文档。
+- **2026-06-12** — `blaze` Skill 支持后融合能力。
+- **2026-06-11** — 新增算子评测框架到 `tests/benchmark`。
+
+更多历史记录详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 🤝 社区交流
 

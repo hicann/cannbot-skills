@@ -1,0 +1,7 @@
+id: torch-compile
+dir: plugins-official/torch-compile
+displayName: torch.compile 图模式
+aliases: [torch, compile, graph]
+skills: 6
+agents: 1
+description: PyTorch torch.compile 图模式适配

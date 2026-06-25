@@ -1,0 +1,4 @@
+# Default values for all plugins
+script: "init.sh"
+skills: 0
+agents: 0

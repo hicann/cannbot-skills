@@ -1,0 +1,7 @@
+id: tilelang-op-orchestrator
+dir: plugins-official/tilelang-op-orchestrator
+displayName: TileLang 算子
+aliases: [tilelang]
+skills: 9
+agents: 3
+description: TileLang 算子开发流程

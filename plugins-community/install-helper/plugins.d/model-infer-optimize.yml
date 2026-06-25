@@ -1,0 +1,7 @@
+id: model-infer-optimize
+dir: plugins-official/model-infer-optimize
+displayName: NPU 推理优化
+aliases: [model-infer, infer, inference]
+skills: 11
+agents: 3
+description: NPU 模型推理端到端优化

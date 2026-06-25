@@ -72,6 +72,8 @@ skills/
 │   ├── skills/           # 推理优化技能
 │   ├── agents/           # 推理优化 Agent
 │   └── teams/            # 推理优化 Teams（含工作流 Skill 和 Hook）
+├── plugins-community/    # 社区 Plugin
+│   └── install-helper/   # CANNBot Install Helper 工具
 └── docs/                 # 项目规范文档
     └── STANDARDS.md      # 开发规范总集
 ```

@@ -1,0 +1,7 @@
+id: pypto-op-orchestrator
+dir: plugins-official/pypto-op-orchestrator
+displayName: PyPTO 算子
+aliases: [pypto, pytorch]
+skills: 8
+agents: 3
+description: PyPTO 算子端到端开发编排

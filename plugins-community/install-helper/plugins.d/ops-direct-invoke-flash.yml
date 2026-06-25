@@ -1,0 +1,7 @@
+id: ops-direct-invoke-flash
+dir: plugins-official/ops-direct-invoke-flash
+displayName: AscendC Kernel 从零构建
+aliases: [flash, kernel-flash]
+skills: 1
+agents: 1
+description: Ascend C / Ascend950 Reg API 核函数从零构建

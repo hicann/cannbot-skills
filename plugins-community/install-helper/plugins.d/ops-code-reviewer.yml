@@ -1,0 +1,7 @@
+id: ops-code-reviewer
+dir: plugins-official/ops-code-reviewer
+displayName: 代码检视
+aliases: [code-review, reviewer, review]
+skills: 5
+agents: 1
+description: 代码检视与规范检查

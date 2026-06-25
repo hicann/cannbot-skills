@@ -1,0 +1,7 @@
+id: catlass-op-generator
+dir: plugins-official/catlass-op-generator
+displayName: Catlass 算子直调
+aliases: [catlass]
+skills: 10
+agents: 3
+description: Catlass 算子直调开发

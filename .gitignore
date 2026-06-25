@@ -38,3 +38,14 @@ tests/benchmark/results/
 tests/benchmark/cann-bench/
 # OpenCode 配置
 .opencode/
+
+# Node.js
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+# 外部克隆仓库（安装时动态拉取，不纳入版本管理）
+plugins-official/ops-direct-invoke-flash/asc-devkit/
+plugins-official/ops-direct-invoke-flash/cann-samples/
+plugins-official/tilelang-op-orchestrator/tilelang-ascend/
+plugins-official/pypto-op-orchestrator/pypto/

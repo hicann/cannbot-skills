@@ -1,0 +1,7 @@
+id: ops-registry-invoke
+dir: plugins-official/ops-registry-invoke
+displayName: AscendC 算子注册调用
+aliases: [ops-registry, ascendc-registry, registry]
+skills: 12
+agents: 4
+description: Ascend C 算子注册调用开发流程
