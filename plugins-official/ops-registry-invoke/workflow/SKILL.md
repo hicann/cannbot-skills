@@ -750,19 +750,19 @@ python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir
 
 **进入条件**：4.1 文档与示例完成
 
-**执行方式**：主 Agent 使用 `skill` 工具加载 `/ascendc-code-review`，由 skill 接管代码检视流程。skill 的内部编排（包括子 Agent 派发）由 skill 自行管理。
+**执行方式**：主 Agent 调用 `/ascendc-code-review`，由该 skill 接管代码检视流程。skill 的内部编排（包括子 Agent 派发）由 skill 自行管理。
 
 **🚫 禁止**：禁止调度 `ascendc-ops-reviewer` subagent。代码检视流程完全由 `/ascendc-code-review` skill 接管。
 
 ### 4.2a 全量代码检视
 
-1. 使用 `skill` 工具加载 `/ascendc-code-review`，传入提示词：**全量检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 路径下的代码**
+1. 调用 `/ascendc-code-review`，传入提示词：**全量检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 路径下的代码**
 2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
 3. 报告输出到 `operators/{operator_name}/docs/{source_file}_review_summary.md`
 
 ### 4.2b 设计实现一致性检查
 
-1. 使用 `skill` 工具加载 `/ascendc-code-review`，传入提示词：**参照 `operators/{operator_name}/docs/` 路径下的所有设计文档，检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 代码的设计实现一致性问题**
+1. 调用 `/ascendc-code-review`，传入提示词：**参照 `operators/{operator_name}/docs/` 路径下的所有设计文档，检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 代码的设计实现一致性问题**
 2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
 3. 报告输出到 `operators/{operator_name}/docs/{source_file}_design_consistency_review.md`
 

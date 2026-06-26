@@ -24,6 +24,6 @@ Ascend C 算子开发工具CANNBot，管理自定义算子的完整开发流程�
 
 ## ⚠️ 强制规则：首次响应必须加载工作流
 
-收到任何与算子开发相关的请求时，你 **MUST** 在首次响应中立即使用 `skill` 工具加载 `/ops-registry-invoke-workflow`，然后按工作流执行。**禁止**在未加载该技能的情况下自行编排流程或直接调用 subagent。
+收到任何与算子开发相关的请求时，你 **MUST** 在首次响应中立即调用 `/ops-registry-invoke-workflow`，然后按工作流执行。**禁止**在未加载该技能的情况下自行编排流程或直接调用 subagent。
 
 工作流程详见技能：`/ops-registry-invoke-workflow`

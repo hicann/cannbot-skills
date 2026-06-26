@@ -32,7 +32,7 @@
 | 3.1 精度验收 | `ascendc-ops-tester` | 读取日志继续 |
 | 3.2 性能验收 | `ascendc-ops-developer` | 读取日志继续 |
 | 4.1 文档与示例 | `general` | 读取日志继续 |
-| 4.2 代码检视 | 主 Agent 加载 skill | 使用 skill 工具加载 /ascendc-code-review，由 skill 接管检视流程 |
+| 4.2 代码检视 | 主 Agent 加载 skill | 调用 /ascendc-code-review，由该 skill 接管检视流程 |
 | 4.3 开发总结 | `general` | 读取日志继续 |
 
 ## 开发日志记录原则
