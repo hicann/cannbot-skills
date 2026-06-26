@@ -315,16 +315,43 @@ Step D: 添加测试用例和精度验证 → 运行通过
 
 ---
 
-## Step 6：性能验收
+## Step 6：精度与性能验收
 
-### Subagent 调用参数
+### Step 6a — Reviewer 精度验收
 
 ```
 {
-  "description": "性能验收",
+  "description": "精度验收",
+  "subagent_type": "ascendc-kernel-reviewer",
+  "prompt": "
+请执行精度验收：
+- 算子名称：{operator_name}
+- 算子目录：operators/{operator_name}/
+- 设计文档：operators/{operator_name}/docs/DESIGN.md
+
+【输出】
+- 精度报告：operators/{operator_name}/docs/precision/summary.txt
+
+【推荐 Skill】
+- /ops-precision-standard — 确定各 dtype 的 atol/rtol 精度标准
+- /ascendc-precision-debug — 精度不达标时诊断根因
+
+【验收标准】
+- 精度测试覆盖所有声明的 dtype
+- 精度报告已归档，每个 (dtype, shape) 组合的达标判定已记录
+- 如有精度不达标，已记录问题类型和诊断结论
+  "
+}
+```
+
+### Step 6b — Developer 性能采集
+
+```
+{
+  "description": "性能采集",
   "subagent_type": "ascendc-kernel-developer",
   "prompt": "
-请执行性能采集和验收：
+请执行性能采集：
 - 算子名称：{operator_name}
 - 算子目录：operators/{operator_name}/
 
@@ -361,6 +388,11 @@ Step D: 添加测试用例和精度验证 → 运行通过
 - 通过数: Y
 - 失败数: Z
 - 通过率: X%
+
+**精度概要**
+| dtype | rtol | atol | 达标状态 |
+|-------|------|------|---------|
+| ... | ... | ... | ✅/❌ |
 
 **性能概要**
 - Task Duration

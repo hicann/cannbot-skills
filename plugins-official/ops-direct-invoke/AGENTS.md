@@ -64,7 +64,7 @@ Ascend C Kernel 直调算子开发工具 CANNBot，接收用户算子开发需�
 - 环境检查结果（Step 1）
 - 工作流各阶段的调度指令（Subagent prompt）
 - 争议仲裁结果（写入 REVIEW.md）
-- 最终开发汇报（判定、总分、代码路径、性能概要、问题列表）
+- 最终开发汇报（判定、总分、代码路径、精度概要、性能概要、问题列表）
 
 ### Subagent 职责划分
 
@@ -127,9 +127,13 @@ Step 5: 修复循环（最多 3 轮）
     │       ├── FAIL + 轮次 < 3 → 重复 5a
     │       └── FAIL + 轮次 >= 3 → 暂停，上报用户
     ▼
-Step 6: 性能验收（Developer 采集性能数据）
+Step 6: 精度与性能验收
      │
-     ▼
+     ├── 6a: Reviewer 运行精度验收
+     │       ├── 精度不达标 → 回到 Step 5 修复循环
+     │       └── 精度达标 → 继续
+     ├── 6b: Developer 采集性能数据
+     ▼ 精度达标 + 性能已归档
 Step 7: 完成汇报
 ```
 
@@ -205,18 +209,25 @@ Step 7: 完成汇报
 **完成判定**：re-review 结果为 PASS 或 PASS WITH NOTES（读取 REVIEW.md 最后一轮报告）
 **收敛控制**：最多 3 轮修复循环；仍未 PASS → 暂停，上报用户
 
-#### Step 6：性能验收
+#### Step 6：精度与性能验收
 
 **触发条件**：审查通过（PASS 或 PASS WITH NOTES）
-**调用模板**：[Step 6](workflows/task-prompts.md#step-6性能验收) — 读取此链接的完整内容作为 prompt
-**完成判定**：Developer 返回完成（性能数据已归档）
+**调用模板**：[Step 6](workflows/task-prompts.md#step-6精度与性能验收) — 读取此链接的完整内容作为 prompt
+
+**子步骤**：
+- **6a 精度验收**：调用 Reviewer，独立运行精度测试并输出精度验收报告
+- **6b 性能采集**：调用 Developer，采集性能数据并归档
+
+**完成判定**：精度验收报告 `docs/precision/summary.txt` 已归档且全部达标 + 性能数据已归档
+**失败处理**：精度不达标 → 回到 Step 5 修复循环（收敛计数器重置为 0，额外允许最多 3 轮；REVIEW.md 全局轮次编号从末尾最后一轮递增继续），由 Developer 修复后重新走 Step 5b → Step 6
 
 #### Step 7：完成
 
-审查通过且性能验收完成后，汇报结果给用户：
+审查通过且精度与性能验收完成后，汇报结果给用户：
 - 最终判定（PASS / PASS WITH NOTES）
 - 总分
 - 代码路径
+- 精度概要（各 dtype 达标状态，读取 `docs/precision/summary.txt`）
 - 性能概要（Task Duration、主导流水、达标状态）
 - 关键问题列表（如有）
 

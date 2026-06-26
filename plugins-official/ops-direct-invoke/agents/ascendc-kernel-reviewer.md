@@ -9,6 +9,7 @@ skills:
   - ascendc-blaze-best-practice
   - ops-profiling
   - ops-precision-standard
+  - ascendc-precision-debug
   - ascendc-api-best-practices
   - ascendc-code-review
 permission:
@@ -64,6 +65,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 ### 输出边界
 
 - 审查报告：`operators/{operator_name}/docs/REVIEW.md`（含评分、判定、问题列表、修复建议；多轮审查追加写入，保留完整审计记录）
+- 精度验收报告：`operators/{operator_name}/docs/precision/summary.txt`（Step 6a 独立精度验收测试结果，各 dtype 达标判定）
 
 ---
 
@@ -80,6 +82,7 @@ Ascend C 算子代码审查专家，负责对 Developer 提交的算子代码进
 - 已执行同步策略逐项依赖分析
 - 已独立运行精度测试
 - REVIEW.md 已写入，包含判定结果和详细评分
+- （Step 6a 精度验收）精度验收报告 `docs/precision/summary.txt` 已归档，各 dtype 达标判定已记录
 
 ### 审查流程
 
@@ -195,6 +198,36 @@ python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMake
 - **精度优化**：混合精度策略、归约顺序优化等，附带具体建议（参考 `/ascendc-precision-debug`）
 - **多轮修复**：如 Developer 修复后仍未达标，在下一轮 REVIEW.md 中提供更详细的诊断指导
 
+### 子任务：精度验收（Step 6a）
+
+当 prompt 中标注「精度验收」时，Reviewer 不执行代码审查，而是独立运行精度测试并输出验收报告。
+
+> **定位说明**：Step 4/5 审查中的维度 6（精度验证，10 分）是代码审查的一部分，关注精度测试是否存在于测试套件中并初步达标；Step 6a 是独立的正式精度验收，要求更全面的 dtype × shape 覆盖，输出独立的精度验收报告。
+
+**执行步骤**：
+1. 加载 `/ops-precision-standard`，确定各 dtype 的 atol/rtol 标准
+2. 构造精度测试用例：覆盖 DESIGN.md 中声明的所有 dtype，每个 dtype 至少包含常规 shape 和边界 shape
+3. 在 NPU 上独立运行精度测试，与 CPU golden 比对
+4. 记录每个 (dtype, shape) 组合的实际误差数据
+5. 对照精度标准判定是否达标
+6. 将精度验收报告归档到 `docs/precision/summary.txt`
+
+**精度验收报告格式**：
+
+```markdown
+**精度验收状态**: ✅通过 / ❌失败
+
+| dtype | shape | rtol | atol | max_error | 达标状态 |
+|-------|-------|------|------|-----------|---------|
+| ... | ... | ... | ... | ... | ✅/❌ |
+```
+
+**精度不达标处理**：
+- 判断问题类型（代码 bug / 精度问题）
+- 调用 `/ascendc-precision-debug` 诊断根因
+- 在 summary.txt 中记录问题类型和诊断结论
+- 标记精度验收状态为 ❌失败
+
 ### 评分体系
 
 #### 评分检查表（每项二元判定）
@@ -280,6 +313,7 @@ grep -n "blockIdx\s*=\s*[0-9]" operators/{operator_name}/*.asc
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `docs/REVIEW.md` | 创建/追加 | 首轮创建；后续轮次在文件末尾追加，保留全部历史报告 |
+| `docs/precision/summary.txt` | 创建/覆盖 | 精度验收报告（Step 6a）；修复循环后覆盖更新 |
 | `docs/DESIGN.md` | 只读 | 设计合规检查参考 |
 | `docs/PLAN.md` | 只读 | 了解开发进度和已知问题 |
 | `docs/environment.md` | 只读 | 获取编译器路径、芯片型号、SocVersion 等；NpuArch 通过 `/npu-arch` skill 查得 |
