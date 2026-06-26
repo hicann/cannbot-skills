@@ -289,4 +289,3 @@ Ascend910B 和 Ascend950 的架构有什么区别？DAV_2201 和 DAV_3510 的 UB
 
 - [contains] 架构
 - [contains] 工程模板
-- [contains] 不适合

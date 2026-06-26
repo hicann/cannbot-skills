@@ -85,6 +85,33 @@ echo "目标平台: ${ASCEND_PLATFORMS[*]}"
 echo "=== Phase 1: Environment Setup ==="
 echo "Repository root: $REPO_ROOT"
 
+# ---------- 加载 ASCEND 环境 ----------
+# CI 通过 sshpass/SSH 非交互式执行时，~/.bashrc 不会被加载，
+# 需要主动 source ASCEND 工具链环境变量。
+ASCEND_ENV_LOADED=0
+for env_script in \
+    "$HOME/Ascend/ascend-toolkit/set_env.sh" \
+    "/usr/local/Ascend/ascend-toolkit/set_env.sh" \
+    "$HOME/Ascend/cann/set_env.sh" \
+    "/usr/local/Ascend/cann/set_env.sh" \
+    "/home/developer/Ascend/ascend-toolkit/set_env.sh"; do
+    if [ -f "$env_script" ]; then
+        echo "  Sourcing ASCEND env: $env_script"
+        # shellcheck disable=SC1090
+        # set_env.sh 内部引用 LD_LIBRARY_PATH 等可能未定义的变量，
+        # 临时关闭 nounset 避免 -u 模式下报 unbound variable 错误。
+        set +u
+        source "$env_script"
+        set -u
+        ASCEND_ENV_LOADED=1
+        break
+    fi
+done
+if [ "$ASCEND_ENV_LOADED" -eq 0 ]; then
+    echo "  WARNING: No ASCEND set_env.sh found. ST evals requiring ASCEND may fail."
+    echo "  Searched: ~/Ascend/ascend-toolkit/, /usr/local/Ascend/ascend-toolkit/, ~/Ascend/cann/, /usr/local/Ascend/cann/, /home/developer/Ascend/ascend-toolkit/"
+fi
+
 # 预检 opencode CLI（Phase 2 AI 语义评测的前置依赖）
 if ! command -v opencode &> /dev/null; then
     echo "ERROR: opencode CLI not found in PATH."

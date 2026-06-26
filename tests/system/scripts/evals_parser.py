@@ -165,7 +165,7 @@ def _parse_case_config(case_config: Dict[str, str], case_id: int,
     eval_case: Dict[str, Any] = {}
 
     case_eval_mode = case_config.get("eval mode", default_eval_mode)
-    if case_eval_mode not in ("text", "file_based"):
+    if case_eval_mode not in ("text", "file_based", "code_gen"):
         logger.warning("Invalid case eval_mode '%s' in case %d, falling back to '%s'",
                        case_eval_mode, case_id, default_eval_mode)
         case_eval_mode = default_eval_mode
@@ -285,7 +285,7 @@ def parse_evals_md(file_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
     eval_mode = frontmatter.get("eval_mode", "text").strip().lower()
-    if eval_mode not in ("text", "file_based"):
+    if eval_mode not in ("text", "file_based", "code_gen"):
         logger.warning("Invalid eval_mode '%s', falling back to 'text'", eval_mode)
         eval_mode = "text"
 

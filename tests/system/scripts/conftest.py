@@ -40,6 +40,12 @@ DEFAULT_DIMENSION_THRESHOLDS: Dict[str, int] = {
     "Token": 3,     # max 10
 }
 
+CODE_GEN_DIMENSION_THRESHOLDS: Dict[str, int] = {
+    "算子项目工程完整度": 20,  # max 40
+    "可编译性": 15,           # max 30
+    "可运行性": 15,           # max 30
+}
+
 DIMENSION_MAX_SCORES: Dict[str, int] = {
     "覆盖度": 40,
     "准确性": 30,
@@ -47,7 +53,17 @@ DIMENSION_MAX_SCORES: Dict[str, int] = {
     "Token": 10,
 }
 
+CODE_GEN_DIMENSION_MAX_SCORES: Dict[str, int] = {
+    "算子项目工程完整度": 40,
+    "可编译性": 30,
+    "可运行性": 30,
+}
+
 DIMENSION_ORDER: List[str] = ["覆盖度", "准确性", "质量", "Token"]
+
+CODE_GEN_DIMENSION_ORDER: List[str] = [
+    "算子项目工程完整度", "可编译性", "可运行性",
+]
 
 # 维度名归一化映射：AI 可能输出的各种变体，统一映射为标准名
 DIMENSION_NAME_NORMALIZE = {
@@ -62,6 +78,22 @@ DIMENSION_NAME_NORMALIZE = {
     "token消耗": "Token",
     "token 消耗": "Token",
     "token": "Token",
+    "可编译性": "可编译性",
+    "可运行性": "可运行性",
+}
+
+# code_gen 维度名归一化映射（将模板/AI 可能的变体统一映射为规范名）
+CODE_GEN_DIMENSION_NAME_NORMALIZE = {
+    "算子项目工程完整度": "算子项目工程完整度",
+    "工程完整度": "算子项目工程完整度",
+    "项目完整度": "算子项目工程完整度",
+    "可编译性": "可编译性",
+    "编译正确性": "可编译性",
+    "编译正确": "可编译性",
+    "可运行性": "可运行性",
+    "功能正确性": "可运行性",
+    "功能正确": "可运行性",
+    "计算结果精度": "可运行性",
 }
 
 
@@ -104,7 +136,11 @@ def validate_dimension_scores(
     return None
 
 
-def parse_review_md(content: str) -> Dict[str, Any]:
+def parse_review_md(
+    content: str,
+    dim_order: Optional[List[str]] = None,
+    dim_max_scores: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     """从填写完成的评审模板 MD 文档中提取结构化评审结果。
 
     解析 review-template.md 被评审 Agent 填写后的内容，
@@ -114,6 +150,8 @@ def parse_review_md(content: str) -> Dict[str, Any]:
 
     Args:
         content: 评审 Agent 填写后的 MD 模板全文。
+        dim_order: 补全缺失维度时使用的维度顺序列表，默认 DIMENSION_ORDER。
+        dim_max_scores: 补全缺失维度时使用的维度满分字典，默认 DIMENSION_MAX_SCORES。
 
     Returns:
         {
@@ -122,12 +160,16 @@ def parse_review_md(content: str) -> Dict[str, Any]:
             "dimensions": {
                 "覆盖度": {"score": 38, "max": 40},
                 "准确性": {"score": 27, "max": 30},
-                "质量": {"score": 15, "max": 20},
-                "Token": {"score": 8, "max": 10},
+                ...
             },
             "reason": "详细评审意见文本...",
         }
     """
+    if dim_order is None:
+        dim_order = DIMENSION_ORDER
+    if dim_max_scores is None:
+        dim_max_scores = DIMENSION_MAX_SCORES
+
     def _find(pattern, text, default=None, flags=0):
         m = re.search(pattern, text, flags)
         return m.group(1).strip() if m else default
@@ -146,7 +188,7 @@ def parse_review_md(content: str) -> Dict[str, Any]:
     # 3. 提取维度表格：匹配 | 维度名 | 得分 | 满分 | 阈值 | YES/NO |
     dimensions = {}
     _dim_table_re = re.compile(
-        r'\|\s*(覆盖度|准确性|质量|Token)\s*\|'
+        r'\|\s*([^|]+?)\s*\|'
         r'\s*(\d+)\s*\|'
         r'\s*(\d+)\s*\|'
         r'\s*\d+\s*\|'
@@ -158,10 +200,10 @@ def parse_review_md(content: str) -> Dict[str, Any]:
         dim_max = int(row_match.group(3))
         dimensions[dim_name] = {"score": dim_score, "max": dim_max}
 
-    # 补全缺失维度
-    for dim in DIMENSION_ORDER:
+    # 补全缺失维度（使用传入的 dim_order / dim_max_scores）
+    for dim in dim_order:
         if dim not in dimensions:
-            dimensions[dim] = {"score": 0, "max": DIMENSION_MAX_SCORES.get(dim, 0)}
+            dimensions[dim] = {"score": 0, "max": dim_max_scores.get(dim, 0)}
 
     # 4. 提取 Review Comments（从 "## Review Comments" 到下一个 "## " 或 EOF）
     reason = _find(r'## Review Comments\s*\n+(.*?)(?=\n## |\Z)', content, "", re.DOTALL)
@@ -1202,13 +1244,12 @@ def _format_dimension_label(dim_scores: Dict[str, int]) -> str:
     if not dim_scores:
         return ""
     dim_parts = []
-    for dim in DIMENSION_ORDER:
-        s = dim_scores.get(dim)
-        max_ = DIMENSION_MAX_SCORES.get(dim, "?")
-        thresh = DEFAULT_DIMENSION_THRESHOLDS.get(dim, 0)
-        if s is not None:
-            mark = "✓" if s >= thresh else "✗"
-            dim_parts.append(f"{dim}: {s}/{max_} {mark}")
+    # 使用 dim_scores 中实际存在的维度键展示，兼容旧四维和 code_gen 三维
+    for dim, s in dim_scores.items():
+        max_ = DIMENSION_MAX_SCORES.get(dim) or CODE_GEN_DIMENSION_MAX_SCORES.get(dim) or "?"
+        thresh = DEFAULT_DIMENSION_THRESHOLDS.get(dim) or CODE_GEN_DIMENSION_THRESHOLDS.get(dim) or 0
+        mark = "✓" if s >= thresh else "✗"
+        dim_parts.append(f"{dim}: {s}/{max_} {mark}")
     return " | " + " | ".join(dim_parts) if dim_parts else ""
 
 
@@ -1222,7 +1263,11 @@ def _build_review_html_from_template(template_path: Path) -> tuple:
         return "", None, {}
     try:
         review_content = template_path.read_text(encoding="utf-8")
-        result = parse_review_md(review_content)
+        # 通过维度表格中的维度名自动检测是否为 code_gen 模板
+        is_code_gen = "可编译性" in review_content or "可运行性" in review_content
+        dim_order = CODE_GEN_DIMENSION_ORDER if is_code_gen else DIMENSION_ORDER
+        dim_max_scores = CODE_GEN_DIMENSION_MAX_SCORES if is_code_gen else DIMENSION_MAX_SCORES
+        result = parse_review_md(review_content, dim_order=dim_order, dim_max_scores=dim_max_scores)
     except (IOError, OSError):
         logger.warning("Failed to read review template from %s", template_path)
         return "", None, {}
@@ -1355,7 +1400,7 @@ def _build_phase2_html_from_md(skill_name: str, eval_id):
         user_parts = ses_messages[0].get("parts", [])
         prompt_text = _get_text_from_parts(user_parts)
         m = re.search(
-            r'###\s+预期回复应覆盖的要点\s*\n(.*?)(?:\n###|\Z)',
+            r'###\s+(?:预期回复应覆盖的要点|预期项目结构（应覆盖的要点）)\s*\n(.*?)(?:\n###|\Z)',
             prompt_text, re.DOTALL
         )
         if m and m.group(1).strip():

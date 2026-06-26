@@ -32,10 +32,10 @@ eval_mode: text
 # Case 2: 生成一个简单的 Add 向量逐元素加法算子
 
 ## Config
-- Eval Mode: file_based
+- Eval Mode: code_gen
 - Max Tokens: 5000000
-- Timeout: 18000
 - Disabled: true
+- Timeout: 10800
 - Ascend Platform: A5
 
 ## Prompt
@@ -72,9 +72,46 @@ eval_mode: text
 
 ## Expectations
 
-- [file_exists] operators/add_vector/op_host/add_vector.asc
-- [file_list] operators/add_vector/*.sh
-- [file_list] operators/add_vector/CMakeLists.txt
-- [file_contains] operators/add_vector/CMakeLists.txt : "dav-3510"
-- [not-contain] "dav-2201"
-- [file_contains] operators/add_vector/op_host/add_vector.asc : "__global__";"add_vector_kernel";"LocalTensor";"DataCopyPad"
+---
+
+# Case 3: 生成 Sigmoid 算子（基于 cann-bench 规格）
+
+## Config
+- Eval Mode: code_gen
+- Max Tokens: 5000000
+- Timeout: 10800
+- Ascend Platform: A5
+
+## Prompt
+
+请使用 ops-direct-invoke 团队的工作流，根据以下算子规格生成一个名为 sigmoid_custom 的 Ascend C Kernel 直调算子。
+
+算子规格（来源于 cann-bench Sigmoid 任务 @tasks/level1/sigmoid）：
+- 算子名称：sigmoid_custom
+- 数学公式：y = 1 / (1 + e^(-x))（逐元素 Sigmoid 运算）
+- 输入：x fp16[N]（ND 格式，支持 1~8 维）
+- 输出：y fp16[N]（与输入 shape 完全一致）
+- 目标芯片：Ascend950PR（DAV_3510）
+- 编译架构：dav-3510（CMakeLists.txt 中配置 --npu-arch=dav-3510）
+- 数据搬运：GM→UB→计算→UB→GM
+- Golden 参考实现：torch.sigmoid(x)
+
+请输出完整的算子文件到沙箱中。
+
+## Expected Output
+
+生成的算子工程应包含以下完整内容：
+
+1. **kernel 实现文件**（.asc）：包含完整的 Ascend C 算子逻辑，使用正确的 API（Sigmoid 或 Exp/Add/Reciprocal 组合实现 Sigmoid 计算），有正确的核函数入口（纯向量算子使用 `__global__ __vector__`），包含 tiling 参数获取（GetBlockNum、GetBlockIdx），CMakeLists.txt 中 `--npu-arch` 配置为 dav-3510（Ascend950PR）
+
+2. **CMakeLists.txt**：正确配置 Ascend C 算子编译选项，包括正确的 CANN 路径引用和编译目标（--npu-arch=dav-3510）
+
+3. **数据生成脚本**（gen_data.py 或类似）：生成测试用的 float16 输入数据，值域覆盖正负区间以验证 Sigmoid 激活函数特性
+
+4. **运行/编译脚本**（run.sh 或类似）：包含编译和运行命令，正确引用核函数
+
+5. **编译与运行验证**：agent 须在沙箱中执行编译和运行操作（通过 bash 工具调用 run.sh 或手动编译运行），确保生成的算子工程可以正常编译链接、在 NPU 上正确执行，且精度验证结果为 PASS
+
+整体实现应结构清晰，代码符合 Ascend C 编程规范，API 使用正确（不能编造不存在的 API）。
+
+## Expectations
