@@ -35,6 +35,7 @@ usage() {
   echo "  --soc=soc_version       Compile for specified Ascend SoC (ascend910b, ascend910_93, ascend950)"
   echo "  --make_clean            Clean build artifacts"
   echo "  -u, --ut                Run UT (Unit Tests)"
+  echo "      --cov               Enable code coverage for UT"
   echo "  -s, --st                Run ST (System Tests)"
   echo "  -e, --example           Run examples (requires NPU)"
   echo "      --eager             Run aclnn example (default for -e)"
@@ -79,6 +80,7 @@ clean_build_out() {
 THREAD_NUM=${CORE_NUMS}
 COMPUTE_UNIT=""
 ENABLE_CLEAN=FALSE
+ENABLE_COV=FALSE
 RUN_UT=FALSE
 RUN_ST=FALSE
 RUN_EXAMPLE=FALSE
@@ -107,6 +109,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -u|--ut)
       RUN_UT=true
+      shift
+      ;;
+    --cov)
+      ENABLE_COV=TRUE
       shift
       ;;
     -s|--st)
@@ -225,7 +231,7 @@ if [ "$RUN_UT" = true ]; then
   echo "----------------------------------------------------------------"
   echo "[INFO] Running UT tests..."
   cd "${BASE_PATH}/tests/ut"
-  ./run.sh
+  ENABLE_COV=${ENABLE_COV} ./run.sh
   UT_RESULT=$?
   cd - > /dev/null
   if [ $UT_RESULT -ne 0 ]; then

@@ -141,9 +141,9 @@ target_link_directories(${UT_EXE} PRIVATE
 # 关键：链接 libplatform.so，不再使用 stub
 # =============================================================================
 target_link_libraries(${UT_EXE} PRIVATE
-    # 使用我们自定义编译的 Google Test（旧 ABI）
     gtest
     gtest_main
+    nlohmann_json
     
     -Wl,--no-as-needed
     

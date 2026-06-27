@@ -7,8 +7,10 @@
 ### Step 4.1: 获取当前覆盖率
 
 ```bash
-# 编译并生成覆盖率
+# 标准仓
 cd ${repo_path} && bash build.sh -u --ops=${op_name} --soc=${soc_type} --cov
+# custom 工程
+cd ${repo_path} && bash build.sh -u --soc=${soc_type} --cov
 ```
 
 ### Step 4.2: 阅读算子文档

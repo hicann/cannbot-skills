@@ -120,6 +120,7 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
   - `references/ut-guide/op-host-ut-guide.md` - op_host UT 指南
   - `references/ut-guide/op-api-ut-guide.md` - op_api UT 指南
   - `references/workflow/step1-5.md` - UT 生成工作流
+  - **调用方式**：必须以 `repo_type=custom` 模式调用本技能（跳过问卷，走 0.1.2 自定义工程快速通道）
 - `ascendc-registry-invoke-template`：
   - `references/add_example/tests/ut/` - 完整 UT 示例
 

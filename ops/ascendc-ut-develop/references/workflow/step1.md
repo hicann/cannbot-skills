@@ -7,7 +7,10 @@
 ### Step 1.2 提取支持的 SoC 列表
 
 ```bash
-grep "SUPPORT_COMPUTE_UNIT_SHORT" ${repo_path}/build.sh | sed 's/.*(\(.*\)).*/\1/' | tr -d '"' | tr ',' '\n'
+# 优先使用 --list-socs（custom 工程）
+bash ${repo_path}/build.sh --list-socs 2>/dev/null | grep '^ *- ' | sed 's/^ *- //'
+# 若不支持 --list-socs，从变量提取（标准仓）
+grep -oE 'SUPPORT_COMPUTE_UNIT[A-Z_]*=\([^)]+\)' ${repo_path}/build.sh | grep -o '"[^"]*"' | tr -d '"'
 ```
 
 soc 和 arch 对应关系

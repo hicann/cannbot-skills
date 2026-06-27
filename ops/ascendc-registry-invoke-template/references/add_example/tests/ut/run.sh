@@ -20,6 +20,7 @@ CLEAN_BUILD=true
 VERBOSE=""
 RUN_OP_HOST=true
 RUN_OP_API=true
+ENABLE_COV="${ENABLE_COV:-FALSE}"
 
 # ============================================================================
 # 帮助信息
@@ -165,7 +166,7 @@ echo ""
 echo "CMake 配置..."
 cd "${BUILD_DIR}"
 
-cmake .. ${VERBOSE}
+cmake .. ${VERBOSE} $( [ "$ENABLE_COV" = "TRUE" ] && echo "-DENABLE_GCOV=ON" )
 
 if [ $? -ne 0 ]; then
     echo "错误: CMake 配置失败"
@@ -236,6 +237,28 @@ if [ "$RUN_OP_API" = true ]; then
             FAILED_TESTS+=("op_api")
             echo "[FAIL] op_api 测试失败"
         fi
+    fi
+fi
+
+# ============================================================================
+# 覆盖率报告（仅 ENABLE_COV=TRUE 时）
+# ============================================================================
+if [ "$ENABLE_COV" = "TRUE" ] && [ ${#FAILED_TESTS[@]} -eq 0 ]; then
+    echo ""
+    echo "========================================"
+    echo "生成覆盖率报告"
+    echo "========================================"
+    cd "${BUILD_DIR}"
+    REPO_ROOT="${SCRIPT_DIR}/../.."
+    INFO_FILE="${REPO_ROOT}/ops.info_filtered"
+    if command -v lcov &> /dev/null; then
+        lcov --capture --directory . --output-file coverage.info 2>/dev/null
+        lcov --remove coverage.info '/usr/*' '*/common/*' '*/cmake/*' '*/test_*' '*/3rd_party/*' \
+            --output-file "${INFO_FILE}" --ignore-errors unused 2>/dev/null
+        echo "[INFO] Coverage report: ${INFO_FILE}"
+        lcov --list "${INFO_FILE}" --ignore-errors unused 2>/dev/null || true
+    else
+        echo "警告: lcov 未安装，跳过覆盖率报告"
     fi
 fi
 
