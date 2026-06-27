@@ -50,7 +50,11 @@ for team_dir in "$TEAMS_DIR"/*; do
 
     if [ -f "$init_script" ]; then
         run_check "[$team_name] init.sh exists" test -f "$init_script"
-        run_check "[$team_name] init.sh is executable" test -x "$init_script"
+        if [ -d "$team_dir/agents" ]; then
+            run_check "[$team_name] init.sh is executable" test -x "$init_script"
+        else
+            print_warn "[$team_name] init.sh is not executable (agentless plugin; use 'bash init.sh' to run)"
+        fi
 
         # Check shebang (may be after copyright header) — warn only, not fail
         shebang=$(grep -m1 '^#!' "$init_script" || true)
@@ -86,17 +90,23 @@ for team_dir in "$TEAMS_DIR"/*; do
         run_check "[$team_name] workflows/ exists" test -d "$team_dir/workflows"
     fi
 
-    # agents/ must exist for every team with init.sh
-    run_check "[$team_name] agents/ exists" test -d "$team_dir/agents"
+    # agents/ is optional — only check when the directory actually exists.
+    # Agentless plugins (e.g. triton-op-generator) install only skills and may
+    # legitimately have no agents/ directory.
+    if [ -d "$team_dir/agents" ]; then
+        run_check "[$team_name] agents/ exists" test -d "$team_dir/agents"
 
-    # Check that agents/ has .md files
-    agent_count=$(find "$team_dir/agents" -maxdepth 1 -name '*.md' | wc -l)
-    if [ "$agent_count" -gt 0 ]; then
-        print_pass "[$team_name] agents/ has $agent_count agent file(s)"
-        PASS_COUNT=$((PASS_COUNT + 1))
+        # Check that agents/ has .md files
+        agent_count=$(find "$team_dir/agents" -maxdepth 1 -name '*.md' | wc -l)
+        if [ "$agent_count" -gt 0 ]; then
+            print_pass "[$team_name] agents/ has $agent_count agent file(s)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "[$team_name] agents/ has no .md files"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
     else
-        print_fail "[$team_name] agents/ has no .md files"
-        FAIL_COUNT=$((FAIL_COUNT + 1))
+        print_info "[$team_name] no agents/ directory (agentless plugin, skipping agent checks)"
     fi
 done
 
@@ -192,6 +202,13 @@ for team_dir in "$TEAMS_DIR"/*; do
     init_script="$team_dir/init.sh"
 
     [ -f "$init_script" ] || continue
+
+    # INCLUDED_AGENT_PATTERN is only meaningful for teams that ship an agents/
+    # directory. Agentless plugins install only skills and have no agent pattern.
+    if [ ! -d "$team_dir/agents" ]; then
+        print_info "[$team_name] no agents/ directory, skipping INCLUDED_AGENT_PATTERN check"
+        continue
+    fi
 
     agent_pattern=$(grep -oE 'INCLUDED_AGENT_PATTERN="[^"]+"' "$init_script" 2>/dev/null | sed 's/INCLUDED_AGENT_PATTERN="//;s/"$//' || true)
 

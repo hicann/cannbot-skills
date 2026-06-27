@@ -78,9 +78,12 @@ cleanup_fake_repos() {
     FAKE_REPOS_CREATED=""
 }
 
-# Remove artifacts created by init.sh inside the team directory (or given dir)
+# Remove artifacts created by init.sh inside the given temp dir; never touch $TEAM_DIR (committed config).
 cleanup_team_artifacts() {
-    local dir="${1:-$TEAM_DIR}"
+    local dir="${1:-}"
+    if [ -z "$dir" ] || [ "$dir" = "$TEAM_DIR" ]; then
+        return 0
+    fi
     rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli"
 }
 
