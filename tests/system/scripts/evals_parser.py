@@ -27,8 +27,6 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_SECTIONS = {"prompt", "expected output", "expectations"}
-
 
 def _parse_frontmatter(content: str) -> dict:
     """从 MD 内容中提取 YAML frontmatter"""
@@ -66,8 +64,8 @@ def _parse_config_lines(content: str) -> Dict[str, str]:
 def _split_cases(content: str) -> List[Dict[str, Any]]:
     """按 # Case <id>: <name> 标题拆分内容为单个用例块。
 
-    返回的每个 dict 包含 case_id、case_name 和 raw_block，
-    消除了 parse_evals_md 中 split 与 findall 双路径解析的不一致风险。
+    使用逐行状态机解析，避免 re.split 捕获组索引依赖的脆弱性。
+    返回每个 dict 包含 case_id、case_name 和 raw_block。
     """
     # 去掉 frontmatter
     body = content
@@ -76,36 +74,39 @@ def _split_cases(content: str) -> List[Dict[str, Any]]:
         if end != -1:
             body = content[end + 3:].lstrip("\n")
 
-    # 按 # Case 标题拆分（用捕获组保留标题行）
-    raw_parts = re.split(r'^# Case (\d+): (.+)$', body, flags=re.MULTILINE)
-
-    # raw_parts 格式: [before_first_case, id1, name1, block1, id2, name2, block2, ...]
-    # 第一个元素（before_first_case）跳过
+    case_pattern = re.compile(r'^# Case (\d+): (.+)$')
     cases = []
-    i = 1
-    while i + 2 <= len(raw_parts):
-        try:
-            case_id = int(raw_parts[i].strip())
-        except (ValueError, TypeError):
-            case_id = len(cases) + 1
-        case_name = raw_parts[i + 1].strip()
-        block = (raw_parts[i + 2] or "").strip()
-        if block:  # 仅保留有内容的用例块
-            cases.append({
-                "case_id": case_id,
-                "case_name": case_name,
-                "raw_block": block,
-            })
-        i += 3
+    current_id = None
+    current_name = None
+    current_lines = []
+
+    for line in body.split("\n"):
+        m = case_pattern.match(line)
+        if m:
+            # 保存上一个 case
+            if current_id is not None:
+                raw_block = "\n".join(current_lines).strip()
+                cases.append({
+                    "case_id": current_id,
+                    "case_name": current_name,
+                    "raw_block": raw_block,
+                })
+            current_id = int(m.group(1))
+            current_name = m.group(2).strip()
+            current_lines = []
+        elif current_id is not None:
+            current_lines.append(line)
+
+    # 保存最后一个 case
+    if current_id is not None:
+        raw_block = "\n".join(current_lines).strip()
+        cases.append({
+            "case_id": current_id,
+            "case_name": current_name,
+            "raw_block": raw_block,
+        })
+
     return cases
-
-
-def _parse_case_title(line: str) -> tuple:
-    """从 '# Case 1: 用例名称' 中提取 (id, name)"""
-    m = re.match(r'^# Case (\d+): (.+)$', line.strip())
-    if not m:
-        return (0, "")
-    return (int(m.group(1)), m.group(2).strip())
 
 
 def _parse_sections(block: str) -> Dict[str, str]:

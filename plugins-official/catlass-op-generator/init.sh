@@ -187,10 +187,17 @@ for arg in "$@"; do
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
         opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, --help."
-            exit 1 ;;
     esac
 done
+
+# If last argument is not a known keyword, treat it as install_path (used by ST sandbox)
+if [ $# -gt 0 ]; then
+    last_arg="${!#}"
+    case "$last_arg" in
+        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
+        *) INSTALL_PATH="$last_arg" ;;
+    esac
+fi
 
 # Determine config root directory
 if [ "$LEVEL" = "global" ]; then

@@ -60,10 +60,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `results/basic_validation.html` | Skill Phase 1 静态结构验证 HTML 报告 |
-| `results/team_basic_validation.html` | Team Phase 1 静态结构验证 HTML 报告 |
-| `results/evals_validation_<YYYYMMDD_HHMMSS>.html` | **Skill 统一** Phase 2 语义评测 HTML 报告（所有 skill 合并为一份，含评分和交互详情，文件名含北京时间戳） |
-| `results/team_evals_validation_<YYYYMMDD_HHMMSS>.html` | **Team 统一** Phase 2 语义评测 HTML 报告 |
+| `results/ST_validation_report_<YYYYMMDD_HHMMSS>.html` | **Skill + Team 统一** Phase 2 语义评测 HTML 报告（所有 target 合并展示，表中"类型"列区分 Skill/Team） |
 | `logs/test_results_<timestamp>.zip` | logs/ 与 results/ 目录的归档压缩包，供流水线下载 |
 
 ### HTML 报告结构
@@ -124,7 +121,7 @@
 ---
 skill_name: skill-name       # Skill 用例：与 skill_name 二选一
 team_name: team-name         # Team 用例：与 team_name 二选一
-eval_mode: text              # text（默认）或 file_based
+eval_mode: text              # text（默认）/ file_based / code_gen
 ---
 ```
 
@@ -136,7 +133,7 @@ eval_mode: text              # text（默认）或 file_based
 
 | 配置项 | 类型 | 说明 | 默认值 |
 |--------|------|------|--------|
-| `Eval Mode` | string | `text`（语义评审）或 `file_based`（文件产出验证） | 同 frontmatter |
+| `Eval Mode` | string | `text`（语义评审）/ `file_based`（文件产出验证）/ `code_gen`（算子项目编译运行验证） | 同 frontmatter |
 | `Max Tokens` | int | Token 消耗硬上限，超过则用例失败 | 无限制 |
 | `Max Tokens (<model>)` | int | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`，Phase 2 自动匹配 | `Max Tokens` 值 |
 | `Distractor skills` | string | 正向看护：分号分隔的干扰 skill 列表，验证 AI 在多个 skill 存在时的正确选择能力 | 无 |
@@ -314,9 +311,11 @@ python tests/system/scripts/main.py \
 skill_dirs:
   - "ops"
   - "graph"
-  - "model/skills"
-exclude_skills:
-  - "skill-test-framework"
+  - "model"
+
+# Skill 白名单：仅这些 skill 触发评测（为空表示全部生效）
+skill_whitelist:
+  - "cann-env-setup"
 ```
 
 ## 依赖安装
@@ -331,8 +330,10 @@ pip install -r tests/system/scripts/requirements.txt
 tests/system/
 ├── README.md                    # 本文档
 ├── config/
-│   ├── st-test.config           # skill/team 扫描路径与白名单配置
-│   └── review-template.md       # 评审 Agent 填写的评分模板
+│   ├── st-test.config            # skill/team 扫描路径与白名单配置
+│   ├── review-template.md        # text/file_based 模式评审 Agent 模板
+│   ├── review-template-code-gen.md # code_gen 模式评审 Agent 模板
+│   └── skip-report-template.html # 无变更时的跳过报告模板
 ├── docs/
 │   ├── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # ST 设计规范与开发指南
 │   ├── USER_GUIDE.md            # 详细使用指南
@@ -348,6 +349,7 @@ tests/system/
     ├── evals_parser.py          # evals.md Markdown 解析器（支持 skill/team）
     ├── opencode_runner.py       # opencode CLI 封装（流式输出、Session 导出）
     ├── sandbox_manager.py       # 沙箱创建与管理
+    ├── subprocess_streamer.py   # 子进程流式输出封装（心跳防超时）
     ├── test_skill_basic.py      # Phase 1: Skill 静态结构验证
     ├── test_skill_evals.py      # Phase 2: Skill AI 语义评测（含重试机制）
     ├── test_team_basic.py       # Phase 1: Team 静态结构验证

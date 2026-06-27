@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
 import pytest
-import yaml
+from common import (
+    find_entity_path,
+    discover_all_entities,
+    discover_entities_with_evals,
+    load_entity_evals_md,
+    load_common_config,
+)
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -228,10 +236,7 @@ def parse_review_md(
 
 
 def load_config() -> Dict[str, Any]:
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    return {"skill_dirs": ["skills"], "skill_whitelist": []}
+    return load_common_config()
 
 
 CONFIG = load_config()
@@ -239,11 +244,7 @@ CONFIG = load_config()
 
 def get_skill_path(skill_name: str) -> Optional[Path]:
     """根据 skill 名称查找实际路径"""
-    for skill_dir_rel in CONFIG.get("skill_dirs", ["skills"]):
-        candidate = REPO_ROOT / skill_dir_rel / skill_name
-        if candidate.exists() and candidate.is_dir():
-            return candidate
-    return None
+    return find_entity_path(skill_name, "skill_dirs", ("SKILL.md",))
 
 
 def _patch_hydrate_data():
@@ -325,119 +326,42 @@ def pytest_addoption(parser):
 
 
 def get_all_skills() -> List[str]:
-    """
-    扫描所有 skill_dirs 配置的目录，返回包含 SKILL.md 的 skill 名称列表。
-    如果配置了 skill_whitelist，则只返回白名单中的 skill。
-    """
-    skills = set()
-    skill_whitelist = CONFIG.get("skill_whitelist", [])
-    for skill_dir_rel in CONFIG.get("skill_dirs", ["skills"]):
-        skill_dir = REPO_ROOT / skill_dir_rel
-        if not skill_dir.exists():
-            continue
-        for item in skill_dir.iterdir():
-            if not item.is_dir():
-                continue
-            if skill_whitelist and item.name not in skill_whitelist:
-                continue
-            if (item / "SKILL.md").exists():
-                skills.add(item.name)
-    return sorted(skills)
+    """扫描所有 skill_dirs 目录，返回包含 SKILL.md 的 skill 名称列表。"""
+    return discover_all_entities("skill_dirs", "skill_whitelist", ("SKILL.md",))
 
 
 def get_skills_with_evals() -> List[str]:
-    """
-    扫描 cases/ 目录，返回有 *_evals.md 文件的 skill 名称列表。
-    如果配置了 skill_whitelist，则只返回白名单中的 skill。
-    """
-    skills = []
-    skill_whitelist = CONFIG.get("skill_whitelist", [])
-    if not EVALS_CASES_DIR.exists():
-        return skills
-    for f in EVALS_CASES_DIR.iterdir():
-        if f.is_file() and f.name.endswith("_evals.md"):
-            skill_name = f.name[:-len("_evals.md")]
-            if skill_whitelist and skill_name not in skill_whitelist:
-                continue
-            skills.append(skill_name)
-    return sorted(skills)
+    """扫描 cases/ 目录，返回有 *_evals.md 文件的 skill 名称列表。"""
+    return discover_entities_with_evals("skill_whitelist", target_type="skill")
 
 
 def load_evals_md(skill_name: str) -> Optional[Dict[str, Any]]:
     """从 cases/<skill_name>_evals.md 加载评测用例"""
-    from evals_parser import parse_evals_md
-
-    evals_path = EVALS_CASES_DIR / f"{skill_name}_evals.md"
-    return parse_evals_md(evals_path)
+    return load_entity_evals_md(skill_name)
 
 
 # ── Team 发现函数 ──────────────────────────────────────────────────
 
 def get_team_path(team_name: str) -> Optional[Path]:
     """根据 team 名称查找实际路径"""
-    for team_dir_rel in CONFIG.get("team_dirs", []):
-        candidate = REPO_ROOT / team_dir_rel / team_name
-        if candidate.exists() and candidate.is_dir():
-            plugin_json = candidate / ".claude-plugin" / "plugin.json"
-            agents_md = candidate / "AGENTS.md"
-            if plugin_json.exists() and agents_md.exists():
-                return candidate
-    return None
+    return find_entity_path(team_name, "team_dirs",
+                            ("AGENTS.md", ".claude-plugin/plugin.json"))
 
 
 def get_all_teams() -> List[str]:
-    """扫描所有 team_dirs 配置的目录，返回有 AGENTS.md + plugin.json 的 team 名称列表。"""
-    teams = set()
-    team_whitelist = CONFIG.get("team_whitelist", [])
-    for team_dir_rel in CONFIG.get("team_dirs", []):
-        team_dir = REPO_ROOT / team_dir_rel
-        if not team_dir.exists():
-            continue
-        for item in team_dir.iterdir():
-            if not item.is_dir():
-                continue
-            if team_whitelist and item.name not in team_whitelist:
-                continue
-            plugin_json = item / ".claude-plugin" / "plugin.json"
-            agents_md = item / "AGENTS.md"
-            if plugin_json.exists() and agents_md.exists():
-                teams.add(item.name)
-    return sorted(teams)
+    """扫描所有 team_dirs 目录，返回有 AGENTS.md + plugin.json 的 team 名称列表。"""
+    return discover_all_entities("team_dirs", "team_whitelist",
+                                 ("AGENTS.md", ".claude-plugin/plugin.json"))
 
 
 def get_teams_with_evals() -> List[str]:
-    """扫描 cases/ 目录，返回 team_name 匹配且在白名单中的 team 名列表。"""
-    teams = []
-    team_whitelist = CONFIG.get("team_whitelist", [])
-    if not EVALS_CASES_DIR.exists():
-        return teams
-    from evals_parser import parse_evals_md
-
-    for f in EVALS_CASES_DIR.iterdir():
-        if not f.is_file() or not f.name.endswith("_evals.md"):
-            continue
-        try:
-            data = parse_evals_md(f)
-        except Exception as e:
-            logger.warning("Failed to parse %s: %s", f.name, e)
-            continue
-        if not data or data.get("target_type") != "team":
-            continue
-        team_name = data.get("team_name", "")
-        if not team_name:
-            continue
-        if team_whitelist and team_name not in team_whitelist:
-            continue
-        teams.append(team_name)
-    return sorted(teams)
+    """扫描 cases/ 目录，返回 team_name 匹配的 team 名列表。"""
+    return discover_entities_with_evals("team_whitelist", target_type="team")
 
 
 def load_team_evals_md(team_name: str) -> Optional[Dict[str, Any]]:
     """从 cases/<team_name>_evals.md 加载 team 评测用例"""
-    from evals_parser import parse_evals_md
-
-    evals_path = EVALS_CASES_DIR / f"{team_name}_evals.md"
-    return parse_evals_md(evals_path)
+    return load_entity_evals_md(team_name)
 
 
 @pytest.fixture(scope="session")

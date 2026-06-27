@@ -236,7 +236,7 @@ class OpencodeRunner:
         try:
             result = self._run_subprocess(cmd, description="Import")
 
-            if result.returncode != 0:
+            if result.returncode not in (0, -1):
                 return {
                     "success": False,
                     "error": result.stderr or f"Import failed with code {result.returncode}",
@@ -490,6 +490,14 @@ class OpencodeRunner:
         safe["PYTHONUNBUFFERED"] = "1"
         return safe
 
+    @staticmethod
+    def _safe_json_load(line: str) -> Optional[dict]:
+        """安全解析单行 JSON，解析失败返回 None 而非抛异常。"""
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
     def _save_session_info(self, session_id: str):
         if not self.keep_session:
             return
@@ -607,39 +615,46 @@ class OpencodeRunner:
                 cmd=cmd, output=result.stdout, returncode=result.returncode
             )
 
-        try:
-            output_lines = [json.loads(line) for line in result.stdout.strip().split('\n') if line.strip()]
-            for item in output_lines:
-                if item.get("type") == "step_start" and item.get("sessionID"):
-                    self.opencode_session_id = item.get("sessionID")
-                    self._save_session_info(self.opencode_session_id)
-                    break
+        output_lines = []
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                parsed = self._safe_json_load(line)
+                if parsed is not None:
+                    output_lines.append(parsed)
+
+        if not output_lines:
             return OpencodeResult(
                 success=True,
                 output=result.stdout,
                 error="",
                 session_file=self._current_session_file if self.keep_session else None,
                 metadata={
-                    "parsed_output": output_lines,
-                    "session_id": self.opencode_session_id,
+                    "json_parse_error": "No valid JSON lines in output",
                     "returncode": result.returncode,
                     "command": cmd,
                     "timestamp": datetime.now(tz=timezone.utc).isoformat()
                 }
             )
-        except json.JSONDecodeError:
-            return OpencodeResult(
-                success=True,
-                output=result.stdout,
-                error="",
-                session_file=self._current_session_file if self.keep_session else None,
-                metadata={
-                    "json_parse_error": "Output is not valid JSON",
-                    "returncode": result.returncode,
-                    "command": cmd,
-                    "timestamp": datetime.now(tz=timezone.utc).isoformat()
-                }
-            )
+
+        for item in output_lines:
+            if item.get("type") == "step_start" and item.get("sessionID"):
+                self.opencode_session_id = item.get("sessionID")
+                self._save_session_info(self.opencode_session_id)
+                break
+
+        return OpencodeResult(
+            success=True,
+            output=result.stdout,
+            error="",
+            session_file=self._current_session_file if self.keep_session else None,
+            metadata={
+                "parsed_output": output_lines,
+                "session_id": self.opencode_session_id,
+                "returncode": result.returncode,
+                "command": cmd,
+                "timestamp": datetime.now(tz=timezone.utc).isoformat()
+            }
+        )
 
     def _setup_streaming_process(self, cmd):
         """Set up a streaming subprocess with timeout and stderr monitoring."""

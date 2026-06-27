@@ -621,7 +621,7 @@ else
     mkdir -p "$(dirname "$TILELANG_DIR")"
     if command -v git &> /dev/null; then
         info "Cloning TileLang-Ascend source repository..."
-        if git clone --recursive https://github.com/tile-ai/tilelang-ascend.git "$TILELANG_DIR" 2>/dev/null; then
+        if timeout 60 git clone --recursive --depth=1 https://github.com/tile-ai/tilelang-ascend.git "$TILELANG_DIR" 2>/dev/null; then
             ok "Cloned tilelang-ascend to $TILELANG_DIR"
         else
             warn "Clone failed — clone manually: git clone --recursive https://github.com/tile-ai/tilelang-ascend.git $TILELANG_DIR"

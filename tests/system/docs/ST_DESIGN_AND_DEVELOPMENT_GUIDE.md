@@ -43,7 +43,10 @@ ST 用例在代码合入前执行，由 `gate_check.sh` 在 CI 流水线中自�
 tests/system/
 ├── README.md                        # 框架说明
 ├── config/
-│   └── st-test.config            # skill 扫描路径与白名单配置
+│   ├── st-test.config            # skill 扫描路径与白名单配置
+│   ├── review-template.md        # text/file_based 模式评测 session 模板
+│   ├── review-template-code-gen.md # code_gen 模式评测 session 模板
+│   └── skip-report-template.html # 无变更时的跳过报告 HTML 模板
 ├── docs/
 │   ├── USER_GUIDE.md                # 框架使用指南
 │   └── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # 本文档
@@ -67,6 +70,7 @@ tests/system/
     ├── evals_parser.py              # MD 格式评测用例解析器（支持 skill/team）
     ├── opencode_runner.py           # opencode CLI 流式封装
     ├── sandbox_manager.py           # 沙箱隔离管理（skill symlink + team init.sh）
+    ├── subprocess_streamer.py       # 子进程流式输出封装（含心跳机制，防止 CI 超时）
     ├── session_stats.py             # Session 数据统计
     ├── run_eval.py                  # pytest 评测命令行启动脚本
     ├── test_opencode_runner.py      # opencode_runner 单元测试
@@ -208,9 +212,39 @@ tests/system/
 - **语义 + 确定性双通道**：Expected Output 走语义评测（灵活），Expectations 走精确匹配（严格），互补验证
 - **正向看护**：`[skill_activated]` 从 session 导出 JSON 中提取工具调用记录，不依赖评审 Agent
 - **沙箱隔离**：每个用例有独立沙箱，skill 通过软链接部署（team 通过 init.sh 部署），干扰 skill 同等待遇
-- **评审模板化**：评审 Agent 通过 Write 工具填写 `review-template.md` 模板，框架正则解析提取状态/评分/各维度得分，不再依赖 JSON 输出格式
+- **评审模板化**：评审 Agent 通过 Write 工具填写 `review-template.md` 模板（code_gen 模式使用 `review-template-code-gen.md`），框架正则解析提取状态/评分/各维度得分，不再依赖 JSON 输出格式
 - **重试机制**：通过 `EVAL_EXEC_RETRIES` 环境变量控制评测用例的重试次数（默认 1，即不重试）
 - **模型 Token 预算**：支持 `Max Tokens (<model>)` 语法按模型指定 Token 上限，与 `--eval-model` 参数或 `EVAL_MODEL` 环境变量配合使用
+- **安全环境隔离**：opencode 子进程仅传递最小环境变量（PATH、HOME 及 LLM API 密钥），剥离继承的敏感信息，防止不可信 prompt 泄露令牌
+
+### 1.7 评分维度与阈值
+
+ST 评测支持两种评分体系，根据 `eval_mode` 自动选择：
+
+#### 标准四维评分（text / file_based 模式）
+
+| 维度 | 满分 | 最低阈值 | 说明 |
+|------|:----:|:--------:|------|
+| 信息覆盖度 | 40 | 20 | 是否完整覆盖预期回复中的关键要点 |
+| 技术准确性 | 30 | 15 | 技术信息是否正确，无错误或误导 |
+| 回复质量 | 20 | 10 | 结构清晰、逻辑连贯、简洁直接 |
+| Token 消耗 | 10 | 3 | 回复长度合理，思考过程工具调用高效 |
+| **总分** | **100** | **60** | 总分 ≥ 60 **且**各维度均不低于阈值方为通过 |
+
+**维度名称归一化**：AI 评审输出中可能出现同义变体，框架自动映射为标准名。例如 `技术准确性` → `准确性`、`回复质量` → `质量`、`Token 消耗`/`token` → `Token`。
+
+各维度阈值可在用例的 `## Config` 中单独覆盖，如 `覆盖度阈值: 25`。
+
+#### 三维评分（code_gen 模式）
+
+| 维度 | 满分 | 最低阈值 | 说明 |
+|------|:----:|:--------:|------|
+| 算子项目工程完整度 | 40 | 20 | 预期生成的项目文件是否齐全、代码体是否完整覆盖要求 |
+| 可编译性 | 30 | 15 | 编译是否成功、是否生成可执行文件 |
+| 可运行性 | 30 | 15 | 运行结果是否正确、精度验证是否通过 |
+| **总分** | **100** | **60** | 总分 ≥ 60 **且**各维度均不低于阈值方为通过 |
+
+code_gen 模式的评审使用专用模板 `review-template-code-gen.md`（见 `tests/system/config/`），包含逐文件的评分标准和编译/运行验证方法。维度归一化同理：`编译正确性` → `可编译性`、`功能正确性`/`计算结果精度` → `可运行性`。
 
 ---
 
@@ -233,7 +267,7 @@ tests/system/cases/<skill_name>_evals.md
 ```markdown
 ---
 skill_name: <skill名称>
-eval_mode: text          # 评测模式，可选值：text（默认）/ file_based
+eval_mode: text          # 评测模式，可选值：text（默认）/ file_based / code_gen
 ---
 
 # Case 1: <用例名称>
@@ -266,7 +300,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 |------|------|------|
 | `skill_name` | Skill 必填 | 目标 skill 名称，需与 SKILL.md 中的 `name` 字段一致。与 `team_name` 二选一 |
 | `team_name` | Team 必填 | 目标 team 名称，需与 plugin.json 中的 `name` 字段一致。与 `skill_name` 二选一 |
-| `eval_mode` | 否 | 评测模式，默认 `text`。`file_based` 用于需要验证沙箱中生成文件的场景 |
+| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`code_gen`（验证算子项目编译/运行）。详见 2.4 节 |
 
 > **注意**：`skill_name` 和 `team_name` 只能设置一个。解析器会根据 frontmatter 中存在的字段自动确定 target 类型（`target_type: "skill"` 或 `"team"`）。
 
@@ -391,6 +425,49 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 3. 评测 session：独立 session 读取沙箱中的生成文件，基于文件内容评审质量
 4. 模式匹配：检查 expectations 中的 file_exists/file_list/file_contains 规则
 5. `collect_generated_files()` 收集沙箱中新增的文件（排除 logs/ .opencode/ 和源 skill 中已存在的文件）
+
+#### 2.4.3 code_gen 模式
+
+适用于验证 AI 生成算子代码项目并可编译/运行的场景（如使用工程模板创建完整 Ascend C 算子项目）。评测流程：
+
+1. 系统自动向 prompt 末尾追加 `FILE_BASED_HINT`（与 file_based 相同的提示机制）
+2. 执行 session：AI 在沙箱中生成完整的算子项目（含 CMakeLists.txt、kernel 实现、host/device 代码等）
+3. 编译验证：在沙箱中执行编译命令，检查编译是否成功、是否生成可执行文件
+4. 运行验证：执行编译后的可执行文件，检查运行结果和精度验证是否通过
+5. 评测 session：独立 session 读取沙箱中的生成项目，使用专用评审模板 `review-template-code-gen.md` 按三维评分标准评审
+6. 模式匹配：检查 expectations 中的 file_exists/file_list/file_contains 规则
+
+**评分维度区别**：code_gen 模式使用三维评分（算子项目工程完整度 / 可编译性 / 可运行性），而非标准四维评分。详见 1.7 节的评分维度与阈值。
+
+**使用 code_gen 模式的用例示例：**
+
+```markdown
+# Case 1: 生成 Add 算子直调工程
+
+## Config
+- Eval Mode: code_gen
+- Max Tokens: 200000
+- Timeout: 900
+
+## Prompt
+
+请生成一个 Ascend C Add 算子的直调工程，包含完整的 kernel 实现、host 侧代码、CMakeLists.txt 构建文件和 run.sh 编译运行脚本。
+
+## Expected Output
+
+生成的算子项目应包含以下文件：
+- CMakeLists.txt 构建文件
+- kernel 实现（如 add_custom.cpp）
+- host 侧调用代码（如 main.cpp）
+- run.sh 编译运行脚本
+编译应成功，运行结果精度验证应通过
+
+## Expectations
+
+- [file_exists] CMakeLists.txt
+- [file_list] *.cpp
+- [file_contains] src/*.cpp : "Add";"LocalTensor"
+```
 
 **使用 file_based 模式的用例示例：**
 

@@ -15,26 +15,32 @@ Skill Test Framework 是 cannbot-skills 的技能质量看护框架，提供以�
 ```
 tests/system/
 ├── config/
-│   ├── st-test.config       # skill/team 扫描路径配置
-│   └── review-template.md      # 评测 session 模板
+│   ├── st-test.config            # skill/team 扫描路径配置
+│   ├── review-template.md        # text/file_based 模式评测 session 模板
+│   ├── review-template-code-gen.md # code_gen 模式评测 session 模板
+│   └── skip-report-template.html # 无变更时的跳过报告 HTML 模板
 ├── scripts/
-│   ├── main.py                 # CI 门禁入口（一键执行）
-│   ├── conftest.py             # pytest 配置 + skill/team 扫描逻辑
-│   ├── test_skill_basic.py     # Phase 1: Skill 静态结构验证
-│   ├── test_team_basic.py      # Phase 1: Team 静态结构验证
-│   ├── test_skill_evals.py     # Phase 2: Skill AI 语义评测
-│   ├── test_team_evals.py      # Phase 2: Team AI 语义评测
-│   ├── opencode_runner.py      # opencode CLI 封装
-│   ├── sandbox_manager.py      # 沙箱环境管理
-│   ├── evals_parser.py         # evals.md 解析器（支持 skill/team）
-│   ├── run_eval.py             # 评测执行入口
-│   └── session_stats.py        # Session 统计分析
-├── evals/                      # 框架自身的评测用例
-├── results/                    # 测试报告输出
-├── logs/                       # opencode session 日志 + 归档
-├── sandboxes/                  # 隔离测试环境
-├── cases/                      # 评测用例 _evals.md 文件
-└── docs/                       # 文档
+│   ├── main.py                   # CI 门禁入口（一键执行）
+│   ├── conftest.py               # pytest 配置 + skill/team 扫描逻辑
+│   ├── test_skill_basic.py       # Phase 1: Skill 静态结构验证
+│   ├── test_team_basic.py        # Phase 1: Team 静态结构验证
+│   ├── test_skill_evals.py       # Phase 2: Skill AI 语义评测
+│   ├── test_team_evals.py        # Phase 2: Team AI 语义评测
+│   ├── opencode_runner.py        # opencode CLI 封装（流式输出、Session 导出）
+│   ├── sandbox_manager.py        # 沙箱环境管理
+│   ├── subprocess_streamer.py    # 子进程流式输出封装（心跳防超时）
+│   ├── evals_parser.py           # evals.md 解析器（支持 skill/team）
+│   ├── run_eval.py               # 评测执行入口
+│   ├── session_stats.py          # Session 统计分析
+│   ├── test_opencode_runner.py   # opencode_runner 单元测试
+│   ├── opencode_runner_examples.py # opencode_runner 使用示例
+│   ├── pytest.ini                # pytest 渲染配置
+│   └── requirements.txt          # Python 依赖
+├── results/                      # 测试报告输出
+├── logs/                         # opencode session 日志 + 归档
+├── sandboxes/                    # 隔离测试环境
+├── cases/                        # 评测用例 _evals.md 文件
+└── docs/                         # 文档
 ```
 
 ### 两阶段测试
@@ -70,11 +76,11 @@ tests/system/
 skill_dirs:
   - "ops"
   - "graph"
-  - "model/skills"
+  - "model"
 
-# 排除的 skill 名称
-exclude_skills:
-  - "skill-test-framework"
+# Skill 白名单：仅这些 skill 触发评测（为空表示全部生效）
+skill_whitelist:
+  - "cann-env-setup"
 
 # 扫描 team 的目录列表（相对于仓库根目录）
 team_dirs:
@@ -93,7 +99,7 @@ team_whitelist:
 ```markdown
 ---
 skill_name: cann-env-setup
-eval_mode: text          # 可选，默认 text
+eval_mode: text          # 可选，默认 text。可选 file_based / code_gen
 ---
 
 # Case 1: 检查NPU驱动安装命令
@@ -122,7 +128,7 @@ eval_mode: text          # 可选，默认 text
 |------|------|------|
 | `skill_name` | 是（Skill） | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致。与 `team_name` 二选一 |
 | `team_name` | 是（Team） | 目标 team 名称，需与 plugin.json 中的 `name` 一致。与 `skill_name` 二选一 |
-| `eval_mode` | 否 | 评测模式，默认 `text`。可选 `file_based`（用于验证生成文件的场景） |
+| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`code_gen`（验证算子项目编译/运行） |
 
 > **注意**：`skill_name` 和 `team_name` 互斥，同一个 evals.md 文件中只能设置一个。解析器会根据 frontmatter 中的字段自动识别 target 类型。
 
@@ -217,7 +223,7 @@ cd tests/system/scripts
 # 测试指定 skill
 python -m pytest test_skill_basic.py -v -k "cann-env-setup"
 
-# 测试所有含 evals.json 的 skill
+# 测试所有有 _evals.md 的 skill
 python -m pytest test_skill_basic.py -v
 ```
 
@@ -288,8 +294,9 @@ python tests/system/scripts/main.py \
 |------|------|
 | `--eval-model <model>` | 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算 |
 | `--parallel` / `-p` | 并发数，`1` 顺序执行（默认），`auto` 自动取核数，最大 32 |
-| `--ascend-platform A2 A3` | 按平台过滤，仅执行 `Ascend Platform` 匹配的用例。不指定则跳过评测 |
-| `--report-only` | 仅重新生成 HTML 报告，不执行测试（从已有沙箱 JSON 文件读取数据） |
+| `--ascend-platform A2 A3` | 按平台过滤，仅执行 `Ascend Platform` 匹配的用例。不指定则不过滤（所有用例均保留），但未配置 `Ascend Platform` 的用例仍被跳过 |
+| `--all` | 全量模式：自动发现 `cases/` 下所有 evals.md 并执行评测，跳过变更检测 |
+| `--report-only` | 仅从已有沙箱 JSON 文件重新生成 HTML 报告（跳过 Phase 1 执行，跳过 opencode 调用）。前提：沙箱目录中须有前次完整运行的 JSON 文件 |
 | `--eval-id <id>` | 仅执行指定 ID 的单个用例 |
 
 ### 方式三：gate_check.sh（完整 CI 流程）
@@ -309,7 +316,7 @@ ASCEND_PLATFORM="A2,A5" ./tests/gate_check.sh
 ./tests/gate_check.sh --ascend-platform A2 --repeat 5
 ```
 
-> **注意**：`gate_check.sh` 要求必须指定平台（`--ascend-platform` 或 `ASCEND_PLATFORM` 环境变量），否则直接 exit 0 跳过评测。平台值仅支持 `A2`、`A3`、`A5`。
+> **注意**：`gate_check.sh` 未指定平台时默认使用 A2（可通过 `--ascend-platform` 或 `ASCEND_PLATFORM` 环境变量覆盖）。平台值仅支持 `A2`、`A3`、`A5`。
 
 `gate_check.sh` 支持以下参数：
 
@@ -317,6 +324,7 @@ ASCEND_PLATFORM="A2,A5" ./tests/gate_check.sh
 |------|------|
 | `--ascend-platform <A2\|A3\|A5>` | 指定目标昇腾平台，可多次指定多平台 |
 | `--repeat <N>` | 重复执行 N 次门禁检查（默认 1），用于稳定性测试 |
+| `--all` | 全量模式：跳过变更检测，执行所有可用用例的评测 |
 
 ## 结果解读
 
@@ -354,10 +362,9 @@ CANN 安装完成后，可通过以下方式验证：
 
 | 文件 | 来源 | 用途 |
 |------|------|------|
-| `basic_validation.html` | Phase 1 pytest-html | **静态结构检查报告**，浏览器打开可看 16 项测试（evals.md 格式、SKILL.md frontmatter 等）的通过/失败详情 |
-| `team_basic_validation.html` | Team Phase 1 pytest-html | **Team 静态结构检查报告**，包含 AGENTS.md/plugin.json/init.sh 等 20 项测试 |
+| `basic_validation.html` | 直接运行 pytest 时生成（main.py 入口不生成） | **静态结构检查报告**，浏览器打开可看 evals.md 格式、SKILL.md frontmatter 等测试的通过/失败详情 |
+| `team_basic_validation.html` | 直接运行 pytest 时生成（main.py 入口不生成） | **Team 静态结构检查报告**，包含 AGENTS.md/plugin.json/init.sh 等测试 |
 | `ST_validation_report_<YYYYMMDD_HHMMSS>.html` | Phase 2 统一 pytest-html | **Skill + Team 统一 AI 语义评测报告**，所有 target 合并展示，表中"类型"列区分 Skill/Team |
-| `<skill>_<timestamp>.json` | `main.py` 的 `save_results()` | **结构化结果 JSON**，供脚本/CI 解析，含每个用例的 prompt、expected_output、实际输出、通过状态 |
 
 #### logs/ — 运行时日志（排查问题用）
 
@@ -372,8 +379,9 @@ CANN 安装完成后，可通过以下方式验证：
 ```
 一次完整执行
   │
-  ├─ Phase 1 ──→ results/basic_validation.html (Skill)
-  │               results/team_basic_validation.html (Team)
+  ├─ Phase 1 ──→ 仅直接运行 pytest 时生成: results/basic_validation.html (Skill)
+  │                                   results/team_basic_validation.html (Team)
+  │               main.py 入口不生成 Phase 1 独立报告
   │
   ├─ Phase 2 ──→ 每个用例生成:
   │                logs/<target>_case_X.json              (执行 session ID)
@@ -394,10 +402,6 @@ CANN 安装完成后，可通过以下方式验证：
 ```bash
 pip install pytest-html
 ```
-
-### 测试全部 ERROR（NameError: SKILLS_DIR）
-
-框架版本过旧，`SKILLS_DIR` 变量已移除。确保使用最新版本的 `test_skill_evals.py`。
 
 ### expected_output 检查持续失败
 
@@ -424,8 +428,8 @@ EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --
 skill_dirs:
   - "ops"
   - "graph"
-  - "model/skills"
-  - "my-new-dir/skills"   # 新增
+  - "model"
+  - "my-new-dir"   # 新增
 ```
 
 ### 添加新 team 的 ST 看护

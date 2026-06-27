@@ -74,7 +74,7 @@ class SandboxManager:
         """获取沙箱的 logs 目录路径"""
         return sandbox_path / "logs"
 
-    def create_skill_link(self, sandbox_path: Path, skill_dir: Path) -> Path:
+    def deploy_skill_to_sandbox(self, sandbox_path: Path, skill_dir: Path) -> Path:
         """
         在沙箱的 .opencode/skills/ 下部署 skill 目录
 
@@ -106,6 +106,9 @@ class SandboxManager:
             shutil.copytree(abs_skill_dir, link_path)
 
         return link_path
+
+    # 后向兼容别名
+    create_skill_link = deploy_skill_to_sandbox
 
     def ensure_sandbox_root(self) -> None:
         """确保沙箱根目录存在"""

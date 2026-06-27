@@ -12,10 +12,17 @@ import argparse
 import logging
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "run_eval.py 已弃用，建议使用 main.py 或直接 pytest 命令代替。",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 SCRIPTS_DIR = Path(__file__).parent
 SKILLS_DIR = SCRIPTS_DIR.parent.parent

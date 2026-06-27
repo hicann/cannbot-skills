@@ -128,8 +128,10 @@ class TestTeamEvalCaseLogic:
         assert data is not None
         ids = sorted([eval_case["id"] for eval_case in data["evals"]])
         expected_ids = list(range(ids[0], ids[0] + len(ids)))
-        assert ids == expected_ids, \
-            f"Eval IDs should be sequential starting from {ids[0]} in team: {team_name}. Got: {ids}"
+        assert ids == expected_ids, (
+            f"Eval IDs should be sequential starting from {ids[0]} in team: {team_name}. "
+            f"Got: {ids}, expected: {expected_ids}"
+        )
 
     @pytest.mark.parametrize("team_name", get_teams_with_evals(), indirect=False)
     def test_team_prompt_is_descriptive(self, team_name):

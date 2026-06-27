@@ -386,9 +386,14 @@ fi
 echo ""
 echo -e "${BOLD}${YELLOW}注意：仅替换上述白名单内的内容，不影响其他已存在的 skills/agents${NC}"
 echo ""
-echo -e "${BOLD}是否继续安装？ [y/N]${NC}"
-read -r response
-case "$response" in
+echo -e "${BOLD}是否继续安装？ [Y/n]${NC}"
+# 在非交互式环境（CI/沙箱）中自动默认继续
+if [ -t 0 ]; then
+    read -r response
+else
+    response="y"
+fi
+case "${response:-y}" in
     [yY][eE][sS]|[yY])
         ok "用户确认，开始安装..."
         ;;
