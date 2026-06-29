@@ -1,1 +1,0 @@
-../../../add_example/tests/ut/run.sh

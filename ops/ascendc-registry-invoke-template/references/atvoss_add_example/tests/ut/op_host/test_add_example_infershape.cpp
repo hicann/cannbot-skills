@@ -1,1 +1,0 @@
-../../../../add_example/tests/ut/op_host/test_add_example_infershape.cpp
