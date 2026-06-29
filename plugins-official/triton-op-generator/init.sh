@@ -37,6 +37,20 @@ INCLUDED_SKILLS="triton-task-extractor triton-op-designer triton-op-coding trito
 # Source agent file (used as CLAUDE.md / AGENTS.md source)
 SOURCE_AGENT_FILE="AGENTS.md"
 
+# Detect TRAE variant by scanning global config directories.
+# Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
+detect_trae_variant() {
+    if [ -d "$HOME/.trae" ]; then
+        TRAE_VARIANT="ide"
+    elif [ -d "$HOME/.marscode" ]; then
+        TRAE_VARIANT="plugin"
+    elif [ -d "$HOME/.traecli" ]; then
+        TRAE_VARIANT="cli"
+    else
+        TRAE_VARIANT="unknown"
+    fi
+}
+
 show_banner() {
   echo ""
   echo -e "${CYAN}"
@@ -56,25 +70,27 @@ show_help() {
     cat << EOF
 Triton-Op-Generator - Plugin Installer
 
-Usage: install.sh [level] [tool]
+Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
-  level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  level        - Installation level: "project" (default) or "global"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  install_path - Project-level installation directory (default: current working directory)
 
 Options:
   --help  - Show this help message
 
 Examples:
-  install.sh                       # Project-level, OpenCode
-  install.sh project opencode      # Project-level, OpenCode
-  install.sh global  opencode      # Global-level, OpenCode
-  install.sh project claude        # Project-level, Claude Code
-  install.sh global  claude        # Global-level, Claude Code
-  install.sh project trae          # Project-level, Trae
-  install.sh project cursor        # Project-level, Cursor
-  install.sh project copilot       # Project-level, Copilot
-  install.sh global  copilot       # Global-level, Copilot
+  init.sh                              # Project-level, OpenCode
+  init.sh project opencode             # Project-level, OpenCode
+  init.sh global  opencode             # Global-level, OpenCode
+  init.sh project claude               # Project-level, Claude Code
+  init.sh global  claude               # Global-level, Claude Code
+  init.sh project trae                 # Project-level, Trae
+  init.sh project cursor               # Project-level, Cursor
+  init.sh project copilot              # Project-level, Copilot
+  init.sh global  copilot              # Global-level, Copilot
+  init.sh project claude /path/to/proj # Project-level, Claude Code, custom path
 
 Installation paths:
   OpenCode: .opencode/skills/ + AGENTS.md  (auto-discovered)
@@ -98,6 +114,7 @@ EOF
 
 LEVEL="project"
 TOOL="opencode"
+INSTALL_PATH=""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
@@ -138,7 +155,7 @@ else
 fi
 
 if [ -z "$LOCAL_SKILL_ROOT" ] || [ ! -d "$LOCAL_SKILL_ROOT" ]; then
-    err "Cannot find shared ops/ directory. Please run install.sh from the source tree."
+    err "Cannot find shared ops/ directory. Please run init.sh from the source tree."
     exit 1
 fi
 
@@ -147,10 +164,28 @@ for arg in "$@"; do
         --help)                 show_help; exit 0 ;;
         global|project)         LEVEL="$arg" ;;
         opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, --help."
-            exit 1 ;;
+        *)
+            # First non-keyword argument is treated as the project install path.
+            if [ -n "$INSTALL_PATH" ]; then
+                echo "Error: Unexpected argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, [install_path], --help."
+                exit 1
+            fi
+            INSTALL_PATH="$arg"
+            ;;
     esac
 done
+
+# Resolve project-level install base (default: current dir; override via install_path arg).
+# Global level installs under $HOME and ignores install_path.
+if [ -n "$INSTALL_PATH" ]; then
+    if [ ! -d "$INSTALL_PATH" ]; then
+        echo "Error: install_path '$INSTALL_PATH' is not an existing directory."
+        exit 1
+    fi
+    INSTALL_BASE="$(cd "$INSTALL_PATH" && pwd)"
+else
+    INSTALL_BASE="$PWD"
+fi
 
 # Determine config root directory and target md filename
 if [ "$LEVEL" = "global" ]; then
@@ -168,15 +203,20 @@ if [ "$LEVEL" = "global" ]; then
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
-        CONFIG_ROOT="$PLUGIN_ROOT/.opencode"
+        CONFIG_ROOT="$INSTALL_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then
-        CONFIG_ROOT="$PLUGIN_ROOT/.trae"
+        detect_trae_variant
+        case "$TRAE_VARIANT" in
+            plugin) CONFIG_ROOT="$INSTALL_BASE/.marscode" ;;
+            cli)    CONFIG_ROOT="$INSTALL_BASE/.traecli" ;;
+            *)      CONFIG_ROOT="$INSTALL_BASE/.trae" ;;
+        esac
     elif [ "$TOOL" = "copilot" ]; then
-        CONFIG_ROOT="$PLUGIN_ROOT/.github"
+        CONFIG_ROOT="$INSTALL_BASE/.github"
     elif [ "$TOOL" = "cursor" ]; then
-        CONFIG_ROOT="$PLUGIN_ROOT/.cursor"
+        CONFIG_ROOT="$INSTALL_BASE/.cursor"
     else
-        CONFIG_ROOT="$PLUGIN_ROOT/.claude"
+        CONFIG_ROOT="$INSTALL_BASE/.claude"
     fi
 fi
 
@@ -195,6 +235,26 @@ echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo "  MD File:   $TARGET_MD_NAME"
 echo ""
+
+if [ "$TOOL" = "trae" ]; then
+    case "$TRAE_VARIANT" in
+        ide)
+            info "Detected: TRAE IDE (.trae)"
+            ;;
+        plugin)
+            info "Detected: TRAE Plugin (.marscode)"
+            ;;
+        cli)
+            info "Detected: TRAE CLI (.traecli)"
+            ;;
+        unknown)
+            warn "TRAE variant not detected; defaulting to IDE path"
+            warn "If you use TRAE Plugin, ensure ~/.marscode exists before re-running"
+            warn "If you use TRAE CLI, ensure ~/.traecli exists before re-running"
+            ;;
+    esac
+    echo ""
+fi
 
 # --- Step 0: Confirmation before installation ---
 step "[0/4] Checking items to be installed..."
@@ -287,13 +347,13 @@ echo ""
 step "[2/3] Installing configuration..."
 
 # Determine target path for config file
-# Project-level: install in current directory (PWD) so Claude Code can discover it
+# Project-level: install in the project directory (INSTALL_BASE) so Claude Code can discover it
 # Global-level: install in CONFIG_ROOT
 if [ "$LEVEL" = "project" ]; then
     if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
-        config_target="$PWD/AGENTS.md"
+        config_target="$INSTALL_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
+        config_target="$INSTALL_BASE/CLAUDE.md"
     fi
 else
     if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
@@ -306,9 +366,9 @@ fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
 
 # Skip only when source file is already at target location (same filename and same directory)
-# This only happens for OpenCode project-level when PLUGIN_ROOT = PWD (AGENTS.md → AGENTS.md)
+# This only happens for OpenCode project-level when PLUGIN_ROOT = INSTALL_BASE (AGENTS.md → AGENTS.md)
 # For Claude, source is AGENTS.md but target is CLAUDE.md, so always need symlink
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -348,11 +408,11 @@ done
 
 # Check config file (AGENTS.md / CLAUDE.md)
 if [ "$LEVEL" = "project" ]; then
-    # Project-level: config file is in current directory (PWD)
+    # Project-level: config file is in the project directory (INSTALL_BASE)
     if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
-        [ -f "$PWD/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in current directory"; health_ok=false; }
+        [ -f "$INSTALL_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in project directory"; health_ok=false; }
     else
-        [ -f "$PWD/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in current directory"; health_ok=false; }
+        [ -f "$INSTALL_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in project directory"; health_ok=false; }
     fi
 else
     # Global-level: config file in CONFIG_ROOT
@@ -364,7 +424,7 @@ else
 fi
 
 # Generate brand manifest
-MANIFEST="$CONFIG_ROOT/triton-op-generator-manifest.json"
+MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 
 SKILLS_JSON="[]"
 if [ -d "$BRAND_DIR/skills" ]; then

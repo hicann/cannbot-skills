@@ -18,13 +18,13 @@ CANNBot Triton-Ascend 算子生成模式适用于通过 Triton DSL 开发高性�
 
 ### 安装
 
-**方式一：install.sh 脚本（推荐，一键完成，含 CLAUDE.md 自动配置）**
+**方式一：init.sh 脚本（推荐，一键完成，含 CLAUDE.md 自动配置）**
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
-bash install.sh project claude     # 项目级
-bash install.sh global claude      # 全局级
+bash init.sh project claude     # 项目级
+bash init.sh global claude      # 全局级
 ```
 
 **方式二：Plugin Marketplace（技能自动管理）**
@@ -62,8 +62,8 @@ claude
 ### 更新
 
 ```bash
-# install.sh 方式
-cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh
+# init.sh 方式
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh
 
 # Plugin Marketplace 方式
 claude plugin update triton-op-generator@cannbot
@@ -84,8 +84,8 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
 
 # 2. 运行安装脚本
-bash install.sh project opencode   # 项目级（默认）
-bash install.sh global opencode    # 全局级
+bash init.sh project opencode   # 项目级（默认）
+bash init.sh global opencode    # 全局级
 ```
 
 ### 验证
@@ -104,7 +104,7 @@ opencode
 ### 更新
 
 ```bash
-cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh
 ```
 
 ---
@@ -119,7 +119,7 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
 
 # 2. 运行安装脚本（TRAE 仅支持项目级安装）
-bash install.sh project trae
+bash init.sh project trae
 ```
 
 ### 验证
@@ -135,7 +135,7 @@ bash install.sh project trae
 ### 更新
 
 ```bash
-cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project trae
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project trae
 ```
 
 ## Cursor
@@ -148,8 +148,8 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
 
 # 2. 运行安装脚本
-bash install.sh project cursor     # 项目级
-bash install.sh global cursor      # 全局级
+bash init.sh project cursor     # 项目级
+bash init.sh global cursor      # 全局级
 ```
 
 ### 验证
@@ -165,7 +165,7 @@ bash install.sh global cursor      # 全局级
 ### 更新
 
 ```bash
-cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project cursor
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project cursor
 ```
 
 ## Copilot
@@ -178,8 +178,8 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
 
 # 2. 运行安装脚本
-bash install.sh project copilot    # 项目级
-bash install.sh global copilot     # 全局级
+bash init.sh project copilot    # 项目级
+bash init.sh global copilot     # 全局级
 ```
 
 ### 验证
@@ -195,7 +195,7 @@ bash install.sh global copilot     # 全局级
 ### 更新
 
 ```bash
-cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh project copilot
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project copilot
 ```
 
 ---
@@ -205,11 +205,11 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash install.sh projec
 | 工具 | 安装方式 | 安装路径 | 说明 |
 |------|---------|---------|------|
 | Claude | Plugin Marketplace | `~/.claude/skills/` + 手动 `~/.claude/CLAUDE.md` | 技能自动安装，需手动链接 AGENTS.md |
-| Claude | install.sh | `.claude/skills/` + `CLAUDE.md` | 一键完成，skills 和 CLAUDE.md 自动配置 |
-| OpenCode | install.sh | `.opencode/skills/` + `AGENTS.md` | Skills 通过 symlink 安装，AGENTS.md 自动配置 |
-| TRAE | install.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
-| Cursor | install.sh | `.cursor/skills/` + `AGENTS.md` | 项目级/全局级 |
-| Copilot | install.sh | `.github/skills/` + `AGENTS.md`（项目级）/ `~/.copilot/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
+| Claude | init.sh | `.claude/skills/` + `CLAUDE.md` | 一键完成，skills 和 CLAUDE.md 自动配置 |
+| OpenCode | init.sh | `.opencode/skills/` + `AGENTS.md` | Skills 通过 symlink 安装，AGENTS.md 自动配置 |
+| TRAE | init.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
+| Cursor | init.sh | `.cursor/skills/` + `AGENTS.md` | 项目级/全局级 |
+| Copilot | init.sh | `.github/skills/` + `AGENTS.md`（项目级）/ `~/.copilot/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
 
 > **注意**：`claude plugin install` 仅安装技能（skills），不会自动创建 `CLAUDE.md`。因为 Claude Code 插件系统当前不支持安装后钩子（post-install hook），所以需要手动执行 `ln -s` 命令链接 `AGENTS.md`。
 
@@ -328,7 +328,7 @@ op_{op_name}_{timestamp}_{rid}/
 ### Q: 如何查看帮助信息？
 
 ```bash
-bash install.sh --help
+bash init.sh --help
 ```
 
 ### Q: 项目级和全局安装如何选择？

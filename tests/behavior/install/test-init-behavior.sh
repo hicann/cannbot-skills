@@ -268,7 +268,10 @@ check_common_artifacts() {
 
     # 3. agents/ directory exists with expected count
     local agent_dir="$config_root/agents"
-    if [ -d "$agent_dir" ]; then
+    if [ "$EXPECTED_AGENT_COUNT" -eq 0 ]; then
+        print_pass "agents/ not installed (agentless plugin, expected 0)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ -d "$agent_dir" ]; then
         local actual_agents
         actual_agents=$(find "$agent_dir" -maxdepth 1 -type l | wc -l)
         if [ "$actual_agents" -eq "$EXPECTED_AGENT_COUNT" ]; then
@@ -324,7 +327,7 @@ verify_opencode_cli_agents() {
     fi
 
     local pattern
-    pattern=$(grep 'INCLUDED_AGENT_PATTERN=' "$INIT_SCRIPT" | head -1 | sed 's/.*="//;s/"$//')
+    pattern=$(grep 'INCLUDED_AGENT_PATTERN=' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*="//;s/"$//' || true)
     local expected=()
     for f in "$TEAM_DIR/agents/"*.md; do
         [ -f "$f" ] || continue
