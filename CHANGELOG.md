@@ -1,5 +1,15 @@
 ## 🔥 更新日志
 
+### 【2026-06-26】
+#### 新特性 New Features
+- 【模型推理】新增 Skill：`model-infer-harmony`，覆盖麒麟 NPU 端侧（Kirin9030 / HarmonyOS）ASR 模型 4bit W4A16 量化、omg 离线模型转换与 CANNPAK 打包全流程。
+- 【算子直调，ops-direct-invoke】Step 6 增加精度验收（Reviewer 独立执行）。
+- 【ST测试】新增 ops-direct-invoke Sigmoid 算子生成 ST 用例，配套引入 code_gen 评测模板与评分体系。
+
+#### 问题修复 Bug Fix
+- 【ops-registry-invoke】修复 Trae CN 环境下 skill 加载失败告警，移除 skill 工具硬编码，改用 `/skill-name` 通用调用方式。
+- 【docs】移除 opbase 仓库已失效的外部文档链接。
+
 ### 【2026-06-25】
 #### 新特性 New Features
 - 【install-helper】新增交互式安装助手 CLI 工具（`@cannbot-ai/install-helper@1.0.3`），支持插件/Skill 安装、更新、卸载、健康检查等完整生命周期管理。发布到 npm，支持 `curl | bash`、`npx`、`npm install -g` 三种安装方式。

@@ -42,7 +42,7 @@
 ```
 请使用 ascendc-direct-invoke-to-registry-invoke 技能，完成如下算子迁移：
 
-【任务】将/path/rms_norm.asc <源kernel直掉文件绝对路径> kernel直调工程接入ACLNN/GEIR接口，生成在/path/rms_norm_single_op <迁移后的绝对路径>，目标芯片ascend910b <目标芯片版本，建议和当前运行环境一致，否则无法进行结果验证>
+【任务】将/path/rms_norm.asc <源kernel直调文件绝对路径> kernel直调工程接入ACLNN/GEIR接口，生成在/path/rms_norm_single_op <迁移后的绝对路径>，目标芯片ascend910b <目标芯片版本，建议和当前运行环境一致，否则无法进行结果验证>
 
 ```
 
@@ -162,9 +162,9 @@ PR 描述中已识别到 `#issue_number` 时会询问"是否仍创建新 Issue"�
 > /gitcode-issue-gen https://gitcode.com/cann/ops-math/pull/1668
 > ```
 
-### gitcode-toolkit（内部共享库）
+### gitcode-toolkit
 
-GitCode 协作类 skill 的共享基础库，**不直接响应用户触发**。为 `gitcode-pr-handler`、`gitcode-issue-gen`、`gitcode-issue-handler` 提供：
+GitCode 协作类 skill 的共享基础库（内部共享库，**不直接响应用户触发**）。为 `gitcode-pr-handler`、`gitcode-issue-gen`、`gitcode-issue-handler` 提供：
 
 - **references/** — API 文档、环境预检、URL 解析、Git 操作等共享知识
 - **scripts/** — 确定性操作脚本（无需 LLM 手工拼装命令）
