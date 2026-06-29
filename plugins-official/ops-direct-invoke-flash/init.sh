@@ -36,7 +36,7 @@ detect_trae_variant() {
 BRAND="cannbot"
 VERSION="1.2.2"
 
-INCLUDED_SKILLS="ops-direct-invoke-flash gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
+INCLUDED_SKILLS="ops-direct-invoke-flash ascendc-st-design ascendc-whitebox-design gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 INCLUDED_AGENT_PATTERN="ops-direct-invoke-flash-*"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
