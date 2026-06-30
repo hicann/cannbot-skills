@@ -207,7 +207,7 @@ fi
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
-    elif [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
+    elif [ "$TOOL" = "trae" ]; then
         detect_trae_variant
         case "$TRAE_VARIANT" in
             plugin) CONFIG_ROOT="$HOME/.marscode" ;;

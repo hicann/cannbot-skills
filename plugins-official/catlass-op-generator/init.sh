@@ -203,7 +203,7 @@ fi
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
-    elif [ "$TOOL" = "trae" ] && [ "$LEVEL" = "project" ]; then
+    elif [ "$TOOL" = "trae" ]; then
         echo "Error: Global installation is not supported for Trae. Use project-level instead."
         exit 1
     elif [ "$TOOL" = "copilot" ]; then

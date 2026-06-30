@@ -108,6 +108,30 @@ get_expected_agent_count() {
     echo "$count"
 }
 
+# Detect whether init.sh explicitly rejects global + trae (design choice,
+# not a bug). Such teams exit 1 instead of installing; the issue #355
+# regression guard for them is "must not silently fall through to ~/.claude".
+trae_global_unsupported() {
+    grep -q 'Global installation is not supported for Trae' "$INIT_SCRIPT" 2>/dev/null
+}
+
+# Verify repos (asc-devkit, etc.) are symlinked into CONFIG_ROOT in global mode.
+# Mirrors the inline repo-symlink assertions in scenario_global_opencode/claude.
+verify_global_repo_symlinks() {
+    local config_root="$1"
+    local repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        if [ -L "$config_root/$repo" ]; then
+            print_pass "$repo symlinked into CONFIG_ROOT (global mode, correct)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "$repo NOT symlinked into CONFIG_ROOT (global mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(get_git_repo_names "$INIT_SCRIPT")
+}
+
 run_check() {
     local name="$1"
     shift
@@ -996,6 +1020,448 @@ scenario_project_trae_cli() {
 }
 
 # =============================================================================
+# Scenario 8: Global + Trae IDE (auto-detect ~/.trae-cn)
+# =============================================================================
+# Regression guard for issue #355: global + trae must enter
+# detect_trae_variant branch (previously dead code due to
+# `&& [ "$LEVEL" = "project" ]`), installing to ~/.trae-cn, NOT ~/.claude.
+scenario_global_trae_ide() {
+    print_section_header "Scenario: global + trae (IDE path)"
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    # Pre-create ~/.trae-cn to simulate TRAE IDE environment (global detect target)
+    mkdir -p "$tmp_home/.trae-cn"
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+
+    # Teams that explicitly reject global + trae (design choice): assert exit 1
+    # and no silent fall-through to ~/.claude, then skip install assertions.
+    if trae_global_unsupported; then
+        if [ "$exit_code" -ne 0 ]; then
+            print_pass "init.sh rejected global + trae as designed (exit $exit_code)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "init.sh should reject global + trae but exited 0"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        if [ -d "$tmp_home/.claude" ]; then
+            print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+        rm -rf "$tmp_home"
+        cleanup_team_artifacts
+        trap - EXIT
+        return 0
+    fi
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.trae-cn"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .trae-cn/ (IDE path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".trae-cn/ directory not found after IDE-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Regression core: must NOT fall through to ~/.claude (the bug from issue #355)
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE IDE"; then
+        print_pass "Output contains TRAE IDE detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE IDE detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    verify_global_repo_symlinks "$config_root"
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 9: Global + Trae Plugin (auto-detect ~/.marscode)
+# =============================================================================
+scenario_global_trae_plugin() {
+    print_section_header "Scenario: global + trae (Plugin path)"
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    # Pre-create ~/.marscode (but NOT ~/.trae-cn) to simulate TRAE Plugin environment
+    mkdir -p "$tmp_home/.marscode"
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+
+    # Teams that explicitly reject global + trae (design choice): assert exit 1
+    # and no silent fall-through to ~/.claude, then skip install assertions.
+    if trae_global_unsupported; then
+        if [ "$exit_code" -ne 0 ]; then
+            print_pass "init.sh rejected global + trae as designed (exit $exit_code)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "init.sh should reject global + trae but exited 0"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        if [ -d "$tmp_home/.claude" ]; then
+            print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+        rm -rf "$tmp_home"
+        cleanup_team_artifacts
+        trap - EXIT
+        return 0
+    fi
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.marscode"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .marscode/ (Plugin path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".marscode/ directory not found after Plugin-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Regression core: must NOT fall through to ~/.claude (issue #355)
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE Plugin"; then
+        print_pass "Output contains TRAE Plugin detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE Plugin detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    verify_global_repo_symlinks "$config_root"
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 10: Global + Trae CLI (auto-detect ~/.traecli)
+# =============================================================================
+scenario_global_trae_cli() {
+    print_section_header "Scenario: global + trae (CLI path)"
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    # Pre-create ~/.traecli (but NOT ~/.trae-cn / ~/.marscode) to simulate TRAE CLI environment
+    mkdir -p "$tmp_home/.traecli"
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+
+    # Teams that explicitly reject global + trae (design choice): assert exit 1
+    # and no silent fall-through to ~/.claude, then skip install assertions.
+    if trae_global_unsupported; then
+        if [ "$exit_code" -ne 0 ]; then
+            print_pass "init.sh rejected global + trae as designed (exit $exit_code)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "init.sh should reject global + trae but exited 0"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        if [ -d "$tmp_home/.claude" ]; then
+            print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+        rm -rf "$tmp_home"
+        cleanup_team_artifacts
+        trap - EXIT
+        return 0
+    fi
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.traecli"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .traecli/ (CLI path detected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".traecli/ directory not found after CLI-path installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Regression core: must NOT fall through to ~/.claude (issue #355)
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    if echo "$output" | grep -q "Detected: TRAE CLI"; then
+        print_pass "Output contains TRAE CLI detection message"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_warn "Output missing TRAE CLI detection message"
+        WARN_COUNT=$((WARN_COUNT + 1))
+    fi
+
+    verify_global_repo_symlinks "$config_root"
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 11: Global + Trae unknown (no ~/.trae-cn|~/.marscode|~/.traecli)
+# =============================================================================
+# Covers the unknown fallback branch of detect_trae_variant. Before the
+# issue #355 fix this path was unreachable (dead code) and silently fell
+# through to ~/.claude; after the fix it correctly lands on ~/.trae-cn with
+# a warning. This is the 4th detect_trae_variant exit path (ide/plugin/cli
+# covered by scenarios 8/9/10).
+scenario_global_trae_unknown() {
+    print_section_header "Scenario: global + trae (unknown fallback)"
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    # Intentionally do NOT pre-create any TRAE directory → TRAE_VARIANT=unknown
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+
+    # Teams that explicitly reject global + trae (design choice): assert exit 1
+    # and no silent fall-through to ~/.claude, then skip install assertions.
+    if trae_global_unsupported; then
+        if [ "$exit_code" -ne 0 ]; then
+            print_pass "init.sh rejected global + trae as designed (exit $exit_code)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "init.sh should reject global + trae but exited 0"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        if [ -d "$tmp_home/.claude" ]; then
+            print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+        rm -rf "$tmp_home"
+        cleanup_team_artifacts
+        trap - EXIT
+        return 0
+    fi
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Unknown fallback must land on ~/.trae-cn (NOT ~/.claude)
+    local config_root="$tmp_home/.trae-cn"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .trae-cn/ (unknown fallback path)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".trae-cn/ directory not found after unknown-fallback installation"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Regression core: must NOT fall through to ~/.claude (issue #355)
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    verify_global_repo_symlinks "$config_root"
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 12: Global + Trae detection priority (.trae-cn beats .marscode)
+# =============================================================================
+# detect_trae_variant checks ~/.trae-cn → ~/.marscode → ~/.traecli in order,
+# first match wins. When multiple dirs coexist, IDE (.trae-cn) must take
+# precedence over Plugin (.marscode). This branch of detect_trae_variant
+# (the priority chain) was unreachable before the issue #355 fix and is not
+# covered by single-dir scenarios 8-11.
+scenario_global_trae_priority() {
+    print_section_header "Scenario: global + trae (detection priority: .trae-cn > .marscode)"
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    # Pre-create BOTH ~/.trae-cn and ~/.marscode → IDE must win (first match)
+    mkdir -p "$tmp_home/.trae-cn" "$tmp_home/.marscode"
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+
+    # Teams that explicitly reject global + trae (design choice): assert exit 1
+    # and no silent fall-through to ~/.claude, then skip install assertions.
+    if trae_global_unsupported; then
+        if [ "$exit_code" -ne 0 ]; then
+            print_pass "init.sh rejected global + trae as designed (exit $exit_code)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "init.sh should reject global + trae but exited 0"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        if [ -d "$tmp_home/.claude" ]; then
+            print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+        rm -rf "$tmp_home"
+        cleanup_team_artifacts
+        trap - EXIT
+        return 0
+    fi
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Priority core: must install to ~/.trae-cn (IDE wins over Plugin)
+    local config_root="$tmp_home/.trae-cn"
+    if [ -d "$config_root" ]; then
+        print_pass "Artifacts installed to .trae-cn/ (IDE priority over Plugin)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".trae-cn/ not found (priority broken: Plugin may have won)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # And must NOT have installed to ~/.marscode
+    if [ -d "$tmp_home/.marscode/skills" ] || [ -d "$tmp_home/.marscode/agents" ]; then
+        print_fail "Artifacts leaked into .marscode/ (priority broken)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "No artifacts in .marscode/ (IDE priority correct)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Regression core: must NOT fall through to ~/.claude (issue #355)
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (regression: trae branch not reached, issue #355)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (trae branch reached, issue #355 fixed)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    verify_global_repo_symlinks "$config_root"
+    check_common_artifacts "$config_root" "trae"
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 main() {
@@ -1060,6 +1526,12 @@ main() {
         scenario_project_trae_ide
         scenario_project_trae_plugin
         scenario_project_trae_cli
+
+        scenario_global_trae_ide
+        scenario_global_trae_plugin
+        scenario_global_trae_cli
+        scenario_global_trae_unknown
+        scenario_global_trae_priority
 
         # Final cleanup per team
         cleanup_team_artifacts
