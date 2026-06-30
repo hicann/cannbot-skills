@@ -76,6 +76,6 @@ def detect_soc():
 if __name__ == "__main__":
     try:
         detect_soc()
-    except RuntimeError as e:
+    except (RuntimeError, OSError, AttributeError) as e:
         logger.error("%s", e)
         sys.exit(1)

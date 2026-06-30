@@ -31,8 +31,8 @@ WARNINGS=""
 # 检查 1：TBuf::Get() 缺少 if constexpr 守卫
 # 启发式判断：可能误报。仍需人工核对。
 if grep -q 'TBuf.*Get\|\.Get<' "$FILE_PATH" 2>/dev/null; then
-  GET_COUNT=$(grep -c 'TBuf.*Get\|\.Get<' "$FILE_PATH" 2>/dev/null || echo "0")
-  GUARD_COUNT=$(grep -c 'if constexpr' "$FILE_PATH" 2>/dev/null || echo "0")
+  GET_COUNT=$(grep -c 'TBuf.*Get\|\.Get<' "$FILE_PATH" 2>/dev/null); GET_COUNT=${GET_COUNT:-0}
+  GUARD_COUNT=$(grep -c 'if constexpr' "$FILE_PATH" 2>/dev/null); GUARD_COUNT=${GUARD_COUNT:-0}
   if [ "$GET_COUNT" -gt "$GUARD_COUNT" ]; then
     WARNINGS="${WARNINGS}【警告】发现 $GET_COUNT 处 TBuf::Get() 调用，但只有 $GUARD_COUNT 处 if-constexpr 守卫。每个 Get() 都必须由与其 InitBuffer() 相同的条件守卫。\n"
   fi
