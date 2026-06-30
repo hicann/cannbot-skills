@@ -36,7 +36,19 @@ Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
-### Claude Code
+### OpenCode（推荐）
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-community/ascendc-ops-lab-developer
+bash init.sh project opencode   # 项目级（默认）
+bash init.sh global opencode    # 全局级
+```
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
 
 **首选：Plugin Marketplace（一键安装）**
 
@@ -52,29 +64,25 @@ Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-community/ascendc-ops-lab-developer
+cd cannbot-skills/plugins-community/ascendc-ops-lab-developer
 bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
 
-### OpenCode
+</details>
 
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-community/ascendc-ops-lab-developer
-bash init.sh project opencode   # 项目级（默认）
-bash init.sh global opencode    # 全局级
-```
-
-### TRAE
+<details>
+<summary>TRAE</summary>
 
 仅支持项目级安装。
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd skills/plugins-community/ascendc-ops-lab-developer
+cd cannbot-skills/plugins-community/ascendc-ops-lab-developer
 bash init.sh project trae
 ```
+
+</details>
 
 ## 二、快速上手
 
@@ -183,6 +191,6 @@ TileLang 当前主要用于设计表达，不是 correctness gate。若 TileLang
 ## 总结
 
 1. 从 PyTorch Model 出发，支持双路径（简单/复杂）端到端完成算子开发
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE 用户用 `init.sh` 脚本安装
+2. 使用 `init.sh` 脚本一键安装（OpenCode 推荐），Claude Code 用户也可用 `/plugin install` 一键安装
 3. 7 Phase 工作流，自动算子分类路由，退化检测，迭代修复
 4. 产出物包含设计文档/设计表达、kernel 代码、性能报告和 trace 记录

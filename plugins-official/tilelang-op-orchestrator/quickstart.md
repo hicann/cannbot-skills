@@ -15,9 +15,9 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 
 ### 操作步骤
 
-#### 方式一：项目级安装（推荐）
+### OpenCode（推荐）
 
-在项目目录下安装，配置仅对当前项目生效。
+#### 项目级安装
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
@@ -27,11 +27,7 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/tilelang-op-orchestrator
 
 # 3. 执行初始化脚本（项目级）
-bash init.sh project opencode   # OpenCode 用户（默认）
-bash init.sh project claude     # Claude Code 用户
-bash init.sh project trae       # TRAE 用户
-bash init.sh project cursor     # Cursor 用户
-bash init.sh project copilot    # Copilot 用户
+bash init.sh project opencode
 
 # 4. 进入 TileLang-Ascend 源码仓库，安装环境
 cd tilelang-ascend
@@ -39,9 +35,7 @@ bash install_ascend.sh
 cd ..
 ```
 
-#### 方式二：全局安装
-
-在用户目录下安装，配置全局生效。
+#### 全局安装
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
@@ -51,17 +45,91 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/tilelang-op-orchestrator
 
 # 3. 执行初始化脚本（全局）
-bash init.sh global opencode    # OpenCode 用户（默认）
-bash init.sh global claude      # Claude Code 用户
-bash init.sh global trae        # TRAE 用户
-bash init.sh global cursor      # Cursor 用户
-bash init.sh global copilot     # Copilot 用户
+bash init.sh global opencode
 
 # 4. 进入 TileLang-Ascend 源码仓库，安装环境
 cd tilelang-ascend
 bash install_ascend.sh
 cd ..
 ```
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
+
+#### 项目级安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project claude
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+#### 全局安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh global claude
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
+
+<details>
+<summary>TRAE</summary>
+
+仅支持项目级安装。
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project trae
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+#### 项目级安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project cursor
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+#### 全局安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh global cursor
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
+
+<details>
+<summary>Copilot</summary>
+
+#### 项目级安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project copilot
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+#### 全局安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh global copilot
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
 
 ### 安装内容
 
@@ -197,7 +265,7 @@ TileLang-Ascend 支持两种编程范式，开发前需先确认使用哪种模�
 ### Q: 如何查看帮助信息？
 
 ```bash
-bash init.sh --help
+bash ~/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh --help
 ```
 
 ### Q: 项目级和全局安装如何选择？
@@ -224,6 +292,6 @@ bash init.sh --help
 ## 总结
 
 1. TileLang 算子开发模式通过 Python DSL 实现昇腾 NPU 算子的快速开发
-2. 环境搭建核心两步：克隆仓库 → 执行 init.sh
-3. `opencode` / `claude` 是核心交互指令
+2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
+3. `opencode` 是核心交互指令（也支持 `claude` / `trae` / `cursor`）
 4. 开发前必须确认使用 Developer / Expert / 混合模式

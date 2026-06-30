@@ -14,9 +14,43 @@ CANNBot Triton-Ascend 算子生成模式适用于通过 Triton DSL 开发高性�
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
-## Claude Code
+### OpenCode（推荐）
 
-### 安装
+#### 安装
+
+```bash
+# 1. 克隆仓库
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/triton-op-generator
+
+# 2. 运行安装脚本
+bash init.sh project opencode   # 项目级（默认）
+bash init.sh global opencode    # 全局级
+```
+
+#### 验证
+
+```bash
+opencode agent list
+# 应看到 triton-op-generator
+```
+
+#### 启动
+
+```bash
+opencode
+```
+
+#### 更新
+
+```bash
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh
+```
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
 
 **方式一：init.sh 脚本（推荐，一键完成，含 CLAUDE.md 自动配置）**
 
@@ -41,7 +75,7 @@ PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/cannbot/triton-op-generator/*/ 2>/dev
 ln -sf "${PLUGIN_DIR%/}/AGENTS.md" ~/.claude/CLAUDE.md
 ```
 
-### 验证
+验证：
 
 ```bash
 # 查看已安装插件
@@ -53,13 +87,13 @@ ls -la ~/.claude/CLAUDE.md
 # 应显示为符号链接，指向插件缓存目录下的 AGENTS.md
 ```
 
-### 启动
+启动：
 
 ```bash
 claude
 ```
 
-### 更新
+更新：
 
 ```bash
 # init.sh 方式
@@ -72,131 +106,78 @@ PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/cannbot/triton-op-generator/*/ 2>/dev
 ln -sf "${PLUGIN_DIR%/}/AGENTS.md" ~/.claude/CLAUDE.md
 ```
 
----
+</details>
 
-## OpenCode
+<details>
+<summary>TRAE</summary>
 
-### 安装
+安装（仅支持项目级）：
 
 ```bash
-# 1. 克隆仓库
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
-
-# 2. 运行安装脚本
-bash init.sh project opencode   # 项目级（默认）
-bash init.sh global opencode    # 全局级
-```
-
-### 验证
-
-```bash
-opencode agent list
-# 应看到 triton-op-generator
-```
-
-### 启动
-
-```bash
-opencode
-```
-
-### 更新
-
-```bash
-cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh
-```
-
----
-
-## TRAE
-
-### 安装
-
-```bash
-# 1. 克隆仓库
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-official/triton-op-generator
-
-# 2. 运行安装脚本（TRAE 仅支持项目级安装）
 bash init.sh project trae
 ```
 
-### 验证
+验证：检查项目目录下是否生成 `.trae/skills/` 目录（包含 6 个 skill 符号链接）和 `CLAUDE.md` 符号链接。
 
-检查项目目录下是否生成：
-- `.trae/skills/` 目录，包含 6 个 skill 符号链接
-- `CLAUDE.md` 符号链接
+启动：通过 TRAE CLI 或 IDE 启动。
 
-### 启动
-
-通过 TRAE CLI 或 IDE 启动。
-
-### 更新
+更新：
 
 ```bash
 cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project trae
 ```
 
-## Cursor
+</details>
 
-### 安装
+<details>
+<summary>Cursor</summary>
+
+安装：
 
 ```bash
-# 1. 克隆仓库
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
-
-# 2. 运行安装脚本
 bash init.sh project cursor     # 项目级
 bash init.sh global cursor      # 全局级
 ```
 
-### 验证
+验证：检查项目目录下是否生成 `.cursor/skills/` 目录（包含 6 个 skill 符号链接）和 `AGENTS.md` 符号链接。
 
-检查项目目录下是否生成：
-- `.cursor/skills/` 目录，包含 6 个 skill 符号链接
-- `AGENTS.md` 符号链接
+启动：通过 Cursor IDE 启动。
 
-### 启动
-
-通过 Cursor IDE 启动。
-
-### 更新
+更新：
 
 ```bash
 cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project cursor
 ```
 
-## Copilot
+</details>
 
-### 安装
+<details>
+<summary>Copilot</summary>
+
+安装：
 
 ```bash
-# 1. 克隆仓库
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/triton-op-generator
-
-# 2. 运行安装脚本
 bash init.sh project copilot    # 项目级
 bash init.sh global copilot     # 全局级
 ```
 
-### 验证
+验证：检查项目目录下是否生成 `.github/skills/` 目录（项目级）或 `~/.copilot/skills/` 目录（全局级），包含 6 个 skill 符号链接和 `AGENTS.md` 符号链接。
 
-检查项目目录下是否生成：
-- `.github/skills/` 目录（项目级）或 `~/.copilot/skills/` 目录（全局级），包含 6 个 skill 符号链接
-- `AGENTS.md` 符号链接
+启动：通过 VS Code Copilot CLI / IDE 启动。
 
-### 启动
-
-通过 VS Code Copilot CLI / IDE 启动。
-
-### 更新
+更新：
 
 ```bash
 cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project copilot
 ```
+
+</details>
 
 ---
 

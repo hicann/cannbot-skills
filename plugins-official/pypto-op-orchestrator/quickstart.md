@@ -24,7 +24,19 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
-### Claude Code
+### OpenCode（推荐）
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/pypto-op-orchestrator
+bash init.sh project opencode   # 项目级（默认）
+bash init.sh global opencode    # 全局级
+```
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
 
 **首选：Plugin Marketplace（一键安装）**
 
@@ -45,20 +57,10 @@ bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
 
-### OpenCode
+</details>
 
-**首选：init.sh 脚本**
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-official/pypto-op-orchestrator
-bash init.sh project opencode   # 项目级（默认）
-bash init.sh global opencode    # 全局级
-```
-
-### TRAE
-
-**首选：init.sh 脚本**
+<details>
+<summary>TRAE</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -69,9 +71,10 @@ bash init.sh global trae        # 全局级
 
 安装后自动检测 TRAE 环境，生成 `.trae/`（TRAE IDE）、`.marscode/`（TRAE Plugin）或 `.traecli/`（TRAE CLI）目录，结构与 Claude/OpenCode 基本一致。
 
-### Cursor
+</details>
 
-**首选：init.sh 脚本**
+<details>
+<summary>Cursor</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -82,9 +85,10 @@ bash init.sh global cursor      # 全局级
 
 安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
 
-### Copilot
+</details>
 
-**首选：init.sh 脚本**
+<details>
+<summary>Copilot</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -95,30 +99,32 @@ bash init.sh global copilot     # 全局级
 
 安装后在项目根目录生成 `.github/` 目录（项目级）或 `~/.copilot/` 目录（全局级），AGENTS.md 自动注入 VS Code Copilot 上下文。
 
+</details>
+
 ### 在其他目录执行
 
 `init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：
 
 ```bash
 # 安装到当前目录
-bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project claude
+bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project opencode
 
 # 安装到指定项目
-bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project claude /path/to/your_project_path
+bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project opencode /path/to/your_project_path
 ```
 
 ### 验证安装
 
 ```bash
+# OpenCode
+opencode agent list
+# 应看到 pypto-op-analyst / pypto-op-developer / pypto-op-perf-tuner
+
 # Claude Code
 claude plugin list
 # 应看到 pypto-op-orchestrator@cannbot ✔ enabled
 ls .
 # 应看到 CLAUDE.md 位于项目根目录
-
-# OpenCode
-opencode agent list
-# 应看到 pypto-op-analyst / pypto-op-developer / pypto-op-perf-tuner
 
 # TRAE
 ls .trae/      # TRAE IDE
@@ -138,11 +144,11 @@ ls .cursor/
 ### 启动
 
 ```bash
-# Claude Code
-claude
-
 # OpenCode
 opencode
+
+# Claude Code
+claude
 ```
 
 > **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
@@ -231,11 +237,11 @@ bash init.sh --help
 ### Q: 如何更新？
 
 ```bash
-# Claude Code
-/plugin update pypto-op-orchestrator@cannbot
-
 # OpenCode (init.sh 方式)
 cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
+
+# Claude Code
+/plugin update pypto-op-orchestrator@cannbot
 ```
 
 ### Q: PyPTO 和 Kernel 直调模式如何选择？
@@ -254,7 +260,7 @@ cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
 ## 总结
 
 1. PyPTO 算子开发模式通过 7 阶段状态机实现端到端自动化
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/TRAE/Cursor 用户用 `init.sh` 脚本安装
-3. `claude` / `opencode` 是核心交互指令
+2. 使用 `init.sh` 脚本一键安装（OpenCode 推荐），Claude Code 用户也可用 `/plugin install` 一键安装
+3. `opencode` / `claude` 是核心交互指令
 4. 所有阶段通过门禁驱动，支持断点续跑与失败恢复
 5. 产出物包含完整的参考实现、设计文档、PyPTO 实现和测试入口

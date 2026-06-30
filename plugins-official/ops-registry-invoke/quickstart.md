@@ -22,16 +22,7 @@ CANNBot 注册调用模式适用于**生产级自定义算子开发**场景，�
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
-### Claude Code
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-official/ops-registry-invoke
-bash init.sh project claude     # 项目级
-bash init.sh global claude      # 全局级
-```
-
-### OpenCode
+### OpenCode（推荐）
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -40,7 +31,22 @@ bash init.sh project opencode   # 项目级（默认）
 bash init.sh global opencode    # 全局级
 ```
 
-### TRAE
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/ops-registry-invoke
+bash init.sh project claude     # 项目级
+bash init.sh global claude      # 全局级
+```
+
+</details>
+
+<details>
+<summary>TRAE</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -51,7 +57,10 @@ bash init.sh global trae        # 全局级
 
 安装后自动检测 TRAE 环境，生成 `.trae/`（TRAE IDE）、`.marscode/`（TRAE Plugin）或 `.traecli/`（TRAE CLI）目录，结构与 Claude/OpenCode 基本一致。
 
-### Cursor
+</details>
+
+<details>
+<summary>Cursor</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -62,7 +71,10 @@ bash init.sh global cursor      # 全局级
 
 安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
 
-### Copilot
+</details>
+
+<details>
+<summary>Copilot</summary>
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
@@ -73,30 +85,32 @@ bash init.sh global copilot     # 全局级
 
 安装后在项目根目录生成 `.github/` 目录（项目级）或 `~/.copilot/` 目录（全局级），AGENTS.md 自动注入 VS Code Copilot 上下文。
 
+</details>
+
 ### 在其他目录执行
 
 `init.sh` 支持通过完整路径调用，无需先 `cd` 到插件目录。第三个参数指定目标项目路径，省略则安装到当前目录：
 
 ```bash
 # 安装到当前目录
-bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project claude
+bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project opencode
 
 # 安装到指定项目
-bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project claude /path/to/your_project_path
+bash /path/to/cannbot-skills/plugins-official/ops-registry-invoke/init.sh project opencode /path/to/your_project_path
 ```
 
 ### 验证安装
 
 ```bash
+# OpenCode
+opencode agent list
+# 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-tester
+
 # Claude Code
 claude plugin list
 # 应看到已安装的 skills 和 agents
 ls .
 # 应看到 CLAUDE.md 位于项目根目录
-
-# OpenCode
-opencode agent list
-# 应看到 ascendc-ops-architect / ascendc-ops-developer / ascendc-ops-tester
 
 # TRAE
 ls .trae/      # TRAE IDE
@@ -116,11 +130,11 @@ ls .cursor/
 ### 启动
 
 ```bash
-# Claude Code
-claude
-
 # OpenCode
 opencode
+
+# Claude Code
+claude
 ```
 
 > **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
@@ -191,6 +205,17 @@ operators/add_custom/
 | 错误处理指南 | `workflow/resources/error-handling.md` | 各阶段错误类型、回退策略 |
 
 ## 五、常见问题
+
+### Q: 如何查看帮助信息？
+
+```bash
+bash init.sh --help
+```
+
+### Q: 项目级和全局安装如何选择？
+
+- **项目级**：适合多项目开发，每个项目可以有不同配置
+- **全局**：适合单一项目，全局生效
 
 ### Q: 如何更新技能模块？
 

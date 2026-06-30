@@ -20,11 +20,9 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 
 - 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
 
-### 操作步骤
+### OpenCode（推荐）
 
-#### 方式一：项目级安装（推荐）
-
-在项目目录下安装，配置仅对当前项目生效。
+#### 项目级安装
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
@@ -34,15 +32,10 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/ops-code-reviewer
 
 # 3. 执行初始化脚本（项目级）
-bash init.sh project opencode   # OpenCode 用户（默认）
-bash init.sh project claude     # Claude Code 用户
-bash init.sh project trae       # TRAE 用户
-bash init.sh project cursor     # Cursor 用户
+bash init.sh project opencode
 ```
 
-#### 方式二：全局安装
-
-在用户目录下安装，配置全局生效。
+#### 全局安装
 
 ```bash
 # 1. 克隆 CANN Skills 仓库
@@ -52,11 +45,55 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/ops-code-reviewer
 
 # 3. 执行初始化脚本（全局）
-bash init.sh global opencode    # OpenCode 用户（默认）
-bash init.sh global claude      # Claude Code 用户
-bash init.sh global trae        # TRAE 用户
-bash init.sh global cursor      # Cursor 用户
+bash init.sh global opencode
 ```
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
+
+#### 项目级安装
+
+```bash
+bash init.sh project claude
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global claude
+```
+
+</details>
+
+<details>
+<summary>TRAE</summary>
+
+仅支持项目级安装。
+
+```bash
+bash init.sh project trae
+```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+#### 项目级安装
+
+```bash
+bash init.sh project cursor
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global cursor
+```
+
+</details>
 
 ### 安装内容
 
@@ -90,10 +127,10 @@ init.sh 脚本会完成以下操作：
 
 ```bash
 # 安装到当前目录
-bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project claude
+bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project opencode
 
 # 安装到指定项目
-bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project claude /path/to/your_project_path
+bash /path/to/cannbot-skills/plugins-official/ops-code-reviewer/init.sh project opencode /path/to/your_project_path
 ```
 
 ### 环境校验
@@ -302,7 +339,7 @@ bash init.sh --help
 ## 总结
 
 1. 代码检视 Team 采用"主 Agent 做大脑、子 Agent 做搜查"架构，实现高效并行检视
-2. 环境搭建核心两步：克隆仓库 → 执行 init.sh
+2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
 3. `opencode` / `claude` / `trae` / `cursor` 是核心交互指令
 4. 4 阶段工作流确保全量条例覆盖和报告质量
 5. 自动识别代码侧别，精准过滤适用条例

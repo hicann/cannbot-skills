@@ -20,7 +20,21 @@
 > INIT=$(pwd)/cannbot-skills/plugins-official/torch-compile/init.sh
 > ```
 
-### Claude Code
+### OpenCode（推荐）
+
+```bash
+bash "$INIT" project opencode   # 项目级（默认）
+bash "$INIT" global opencode    # 全局级
+```
+
+项目级会在**当前工作目录**生成 `.opencode/`，全局级落在 `~/.config/opencode/`，其中以软链方式注入 `skills/` 与 `agents/`，重启 OpenCode 后即可看到 `torch-npugraph-ex` Subagent。
+
+> **关于"项目级"的位置说明**：项目级安装的 `.opencode/` `.claude/` 等目录落在执行 `init.sh` 时的**当前工作目录**下，请在希望生效的项目根目录调用脚本；如需全局生效，请使用 `global` 模式。
+
+### 其他工具
+
+<details>
+<summary>Claude Code</summary>
 
 **首选：Plugin Marketplace（一键安装）**
 
@@ -42,16 +56,10 @@ bash "$INIT" project claude     # 项目级
 bash "$INIT" global claude      # 全局级
 ```
 
-### OpenCode
+</details>
 
-```bash
-bash "$INIT" project opencode   # 项目级（默认）
-bash "$INIT" global opencode    # 全局级
-```
-
-项目级会在**当前工作目录**生成 `.opencode/`，全局级落在 `~/.config/opencode/`，其中以软链方式注入 `skills/` 与 `agents/`，重启 OpenCode 后即可看到 `torch-npugraph-ex` Subagent。
-
-### TRAE
+<details>
+<summary>TRAE</summary>
 
 仅支持项目级安装。
 
@@ -61,7 +69,10 @@ bash "$INIT" project trae
 
 生成 `.trae/` 目录，结构与 Claude/OpenCode 基本一致。
 
-### Cursor
+</details>
+
+<details>
+<summary>Cursor</summary>
 
 ```bash
 bash "$INIT" project cursor     # 项目级
@@ -70,7 +81,10 @@ bash "$INIT" global cursor      # 全局级
 
 生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
 
-### Codex
+</details>
+
+<details>
+<summary>Codex</summary>
 
 ```bash
 bash "$INIT" project codex      # 项目级
@@ -79,7 +93,10 @@ bash "$INIT" global codex       # 全局级
 
 生成 `.codex/`（或全局 `~/.codex/`），结构：`skills/ agents/ AGENTS.md cannbot-manifest.json`。
 
-### Copilot
+</details>
+
+<details>
+<summary>Copilot</summary>
 
 ```bash
 bash "$INIT" project copilot    # 项目级
@@ -88,18 +105,18 @@ bash "$INIT" global copilot     # 全局级
 
 生成 `.github/`（项目级）或 `~/.copilot/`（全局级），结构与 Codex 一致。
 
-> **关于"项目级"的位置说明**：项目级安装的 `.opencode/` `.claude/` 等目录落在执行 `init.sh` 时的**当前工作目录**下，请在希望生效的项目根目录调用脚本；如需全局生效，请使用 `global` 模式。
+</details>
 
 ### 验证安装
 
 ```bash
-# Claude Code
-claude plugin list
-# 应看到 torch-compile@cannbot ✔ enabled
-
 # OpenCode
 opencode agent list
 # 应看到 torch-npugraph-ex
+
+# Claude Code
+claude plugin list
+# 应看到 torch-compile@cannbot ✔ enabled
 
 # TRAE / Cursor / Codex / Copilot
 ls .trae/ .cursor/ .codex/ .copilot/ 2>/dev/null
@@ -154,10 +171,14 @@ bash init.sh --help
 ### Q: 如何更新？
 
 ```bash
+# OpenCode（init.sh 方式，从 cannbot-skills clone 拉最新代码后复用 $INIT 重跑即可）
+cd cannbot-skills && git pull
+bash cannbot-skills/plugins-official/torch-compile/init.sh project opencode
+
 # Claude Code（marketplace 方式）
 /plugin update torch-compile@cannbot
 
-# 其它工具（init.sh 方式，从 cannbot-skills clone 拉最新代码后复用 $INIT 重跑即可）
+# 其它工具（init.sh 方式）
 cd cannbot-skills && git pull
 bash cannbot-skills/plugins-official/torch-compile/init.sh project <tool>
 ```
