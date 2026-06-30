@@ -22,12 +22,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ASC_DEVKIT_DIR="${PLUGIN_ROOT}/asc-devkit"
 CLEAN_SCRIPT="${PLUGIN_ROOT}/skills/ascendc-docs-search/scripts/clean_markdown.py"
+ASC_DEVKIT_REF="master"
 
 # --- Step 1: Ensure asc-devkit is available (shared utility) ---
 if [ ! -d "$ASC_DEVKIT_DIR" ]; then
-  git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null && cd "$ASC_DEVKIT_DIR" && git checkout --quiet 31f3ab38 || true
-  if [ -d "$ASC_DEVKIT_DIR" ] && [ -f "$CLEAN_SCRIPT" ]; then
-    python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 || true
+  git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null || true
+  if [ -d "$ASC_DEVKIT_DIR" ]; then
+    cd "$ASC_DEVKIT_DIR" && git checkout --quiet "$ASC_DEVKIT_REF" 2>/dev/null || true
+    cd "$PLUGIN_ROOT"
+    if [ -f "$CLEAN_SCRIPT" ]; then
+      python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 || true
+    fi
   fi
 fi
 

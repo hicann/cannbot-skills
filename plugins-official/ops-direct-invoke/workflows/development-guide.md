@@ -113,7 +113,7 @@ Host 侧代码仅包含：Tiling 参数计算、内存分配/释放、Kernel 启
 | Host 侧任何对 tensor 的计算型循环 | 部署时输入/输出在 Device 上，无法搬回 Host |
 
 **API 使用验证要求**：
-- 使用任何 API 前，必须通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/{API_NAME}.md`
+- 使用任何 API 前，必须通过 `/ascendc-docs-search` skill 查阅 `{API_NAME}` API 文档
 - 禁止猜测 API 用法，必须查阅文档和示例
 - 优先通过 `/ascendc-docs-search` skill 参考 `$ASC_DEVKIT_DIR/docs/` 和 `$ASC_DEVKIT_DIR/examples/` 中的官方资料
 
@@ -267,7 +267,7 @@ python workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMakeL
 
 ### 验证步骤
 
-1. **查阅官方文档**：通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/{API_NAME}.md`
+1. **查阅官方文档**：通过 `/ascendc-docs-search` skill 查阅 `{API_NAME}` API 文档
 2. **确认数据布局**：内存排列、对齐状态、维度信息
 3. **验证匹配性**：数据布局与 API 能力匹配、限制条件满足
 4. **确认选择**：无更好的 API 选择
@@ -288,7 +288,7 @@ python workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMakeL
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | `$ASC_DEVKIT_DIR/docs/api/context/` | 约 1022 个 API 文档 |
+| API 文档 | `$ASC_DEVKIT_DIR/docs/api/` | Ascend C API |
 | 高性能模板 | `find "$ASC_DEVKIT_DIR"/examples/ -path "*/01_add/basic_api_memory_allocator_add"` | 双缓冲+流水线 |
 | 各类示例 | `find "$ASC_DEVKIT_DIR"/examples/ -type d -name "00_introduction"` | 加法、减法、多输入等 |
 | 调试示例 | `find "$ASC_DEVKIT_DIR"/examples/ -name "printf.asc"` | printf 调试方法 |

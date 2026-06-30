@@ -7,7 +7,7 @@ eval_mode: file_based
 ## Config
 - Max Tokens: 150000
 - Max Tokens (deepseek-v4-flash): 180000
-- Max Tokens (glm-5): 160000
+- Max Tokens (glm-5): 200000
 - Ascend Platform: A2
 
 ## Prompt
@@ -49,7 +49,7 @@ eval_mode: file_based
 ## Config
 - Max Tokens: 200000
 - Max Tokens (deepseek-v4-flash): 240000
-- Max Tokens (glm-5): 220000
+- Max Tokens (glm-5): 300000
 - Ascend Platform: A2
 
 ## Prompt

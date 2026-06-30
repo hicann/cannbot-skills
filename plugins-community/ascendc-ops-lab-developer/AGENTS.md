@@ -235,7 +235,7 @@ Subagent 返回
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | `asc-devkit/docs/api/context/` | 仲裁 API 争议时查阅 |
+| API 文档 | `asc-devkit/docs/api/` | 仲裁 API 争议时查阅 |
 | 官方示例 | `asc-devkit/examples/` | 仲裁开发争议时参考 |
 | 精度调试 Skill | `/tilelang2ascend-precision-tuning` | 仲裁精度争议时参考 |
 | 性能采集 Skill | `/ops-profiling` | 仲裁性能争议时参考 |

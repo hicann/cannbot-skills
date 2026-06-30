@@ -814,4 +814,4 @@ python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir
 | **数据流说明** | [resources/data-flow.md](resources/data-flow.md) | 各阶段输入输出文件说明 |
 | **错误处理指南** | [resources/error-handling.md](resources/error-handling.md) | 各阶段错误类型、回退策略 |
 | **Kernel直调Skill** | `ascendc-direct-invoke-template` | Kernel直调工程模板，用于并行穿刺验证 |
-| API 文档 | `$ASC_DEVKIT_DIR/docs/api/context/` | Ascend C API |
+| API 文档 | `$ASC_DEVKIT_DIR/docs/api/` | Ascend C API |

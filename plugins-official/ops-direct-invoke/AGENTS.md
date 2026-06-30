@@ -274,7 +274,7 @@ Step 7: 完成汇报
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | `$ASC_DEVKIT_DIR/docs/api/context/` | 仲裁 API 争议时查阅 |
+| API 文档 | `$ASC_DEVKIT_DIR/docs/api/` | 仲裁 API 争议时查阅 |
 | 官方示例 | `$ASC_DEVKIT_DIR/examples/` | 仲裁开发争议时参考 |
 | 精度调试 Skill | `/ascendc-precision-debug` | 仲裁精度争议时参考 |
 | 性能采集 Skill | `/ops-profiling` | 仲裁性能争议时参考 |

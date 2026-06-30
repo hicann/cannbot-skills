@@ -156,7 +156,7 @@
 #### 问题 1：[简述]
 - **回应**：已修改 / 保留原设计 / 部分修改
 - **理由**：...
-- **文档依据**：（catlass header / example 路径，或 asc-devkit/docs/api/context/ 路径）
+- **文档依据**：（catlass header / example 路径，或 asc-devkit/docs/api/ 路径）
 - **DESIGN.md 变更**：（描述修改内容，或"无变更"）
 
 ### 回应统计

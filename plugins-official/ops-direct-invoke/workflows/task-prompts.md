@@ -57,7 +57,7 @@
 【API 验证规则】
 验证 API 是否存在时，禁止只读单个文件（如 ReduceMax.md）就下结论。
 必须用通配符搜索所有变体：
-  ls "$ASC_DEVKIT_DIR"/docs/api/context/ | grep -i "^{APIName}"
+  find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md" -type f
 同一 API 可能有多个文件（如 ReduceMax.md / ReduceMax-35.md / ReduceMax-92.md），功能不同。
 
 【验收标准】
@@ -67,7 +67,7 @@
 【审查重点（5 项）】
 | 序号 | 审查维度 | 审查方法 |
 |------|---------|---------|
-| 1 | API 可行性 | 设计中的 API 是否存在？参数签名是否正确？通过 `/ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/context/` 验证 |
+| 1 | API 可行性 | 设计中的 API 是否存在？参数签名是否正确？通过 `/ascendc-docs-search` skill 验证 API 文档 |
 | 2 | 内存规划合理性 | UB 空间分配是否够用？Buffer 数量是否合理？双缓冲开销是否计入？ |
 | 3 | 多核策略可行性 | 切分方式是否会导致数据依赖？是否需要跨核同步？边界 case 是否处理？ |
 | 4 | 伪代码可实现性 | 设计中的计算流程能否直接翻译为 Ascend C 代码？是否有遗漏步骤？ |

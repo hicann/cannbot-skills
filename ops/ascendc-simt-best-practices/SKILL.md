@@ -25,7 +25,7 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 | SIMT编程简介 | `SIMT-API/SIMT编程简介/` | SIMT编程概念和入门 | asc_simt.h |
 | 混合编程简介 | `SIMT-API/SIMD与SIMT混合编程简介/` | SIMD/SIMT混合编程指导 | asc_simt.h |
 
-> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill，输入 API 名称即可获取 `$ASC_DEVKIT_DIR/docs/api/SIMT-API/` 下的官方文档。
+> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill 查阅 SIMT API 官方文档（`find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md"`）。
 
 ---
 
@@ -103,4 +103,4 @@ for (uint64_t i = AscendC::Simt::GetBlockIdx() * AscendC::Simt::GetThreadNum() +
 
 **完整 API 文档：**
 
-- **$ASC_DEVKIT_DIR** -- 通过 `ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/api/SIMT-API/`
+- **$ASC_DEVKIT_DIR** -- 通过 `ascendc-docs-search` skill 查阅 SIMT API 文档

@@ -227,7 +227,7 @@ Step 7: 完成汇报
 
 **裁决原则（优先级从高到低）**：
 1. catlass 官方文档与 example（`catlass/docs/`、`catlass/examples/`）
-2. Ascend C 官方 API 文档（`asc-devkit/docs/api/context/`）
+2. Ascend C 官方 API 文档（`asc-devkit/docs/api/`）
 3. 精度问题参考 `/ascendc-precision-debug`
 4. 性能争议参考 `/ops-profiling`（独立采集数据为准）
 5. 实际可行性
@@ -270,6 +270,6 @@ Step 7: 完成汇报
 | Catlass 示例 | `./catlass/examples/` | 选型对照基准 |
 | Catlass 文档 | `./catlass/docs/` | 调优指南 |
 | Catlass skill | `/catlass-op-design`、`/catlass-op-develop`、`/catlass-op-perf-tune` | 选型 / 拼装 / 调优规则 |
-| API 文档 | `asc-devkit/docs/api/context/` | 底层 Ascend C API |
+| API 文档 | `asc-devkit/docs/api/` | 底层 Ascend C API |
 | 精度调试 | `/ascendc-precision-debug` | 精度争议仲裁 |
 | 性能采集 | `/ops-profiling` | 性能争议仲裁 |

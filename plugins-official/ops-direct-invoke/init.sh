@@ -107,6 +107,8 @@ detect_trae_variant() {
 
 BRAND="cannbot"
 VERSION="1.0.0"
+ASC_DEVKIT_REPO="https://gitcode.com/cann/asc-devkit.git"
+ASC_DEVKIT_REF="master"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
@@ -695,12 +697,19 @@ ASC_DEVKIT_DIR="$SCRIPT_DIR/asc-devkit"
 if [ -d "$ASC_DEVKIT_DIR" ]; then
     cd "$ASC_DEVKIT_DIR"
     git checkout . 2>/dev/null || true
-    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
+    git fetch --quiet origin 2>/dev/null || warn "git fetch failed"
+    git checkout --quiet "$ASC_DEVKIT_REF" 2>/dev/null || true
+    git merge --quiet "origin/$ASC_DEVKIT_REF" 2>/dev/null || warn "git merge failed, using existing version"
     cd "$SCRIPT_DIR"
-    ok "asc-devkit updated"
+    ok "asc-devkit updated ($ASC_DEVKIT_REF)"
 else
-    git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null && cd "$ASC_DEVKIT_DIR" && git checkout --quiet 31f3ab38 || warn "git clone failed, skipping asc-devkit"
-    [ -d "$ASC_DEVKIT_DIR" ] && ok "asc-devkit cloned"
+    git clone --quiet "$ASC_DEVKIT_REPO" "$ASC_DEVKIT_DIR" 2>/dev/null || warn "git clone failed, skipping asc-devkit"
+    if [ -d "$ASC_DEVKIT_DIR" ]; then
+        cd "$ASC_DEVKIT_DIR"
+        git checkout --quiet "$ASC_DEVKIT_REF" 2>/dev/null || true
+        cd "$SCRIPT_DIR"
+        ok "asc-devkit cloned ($ASC_DEVKIT_REF)"
+    fi
 fi
 
 if [ -d "$ASC_DEVKIT_DIR" ]; then
@@ -752,6 +761,18 @@ fi
 # When installed to a custom directory, also check the symlink there
 if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ] && [ ! -d "$INSTALL_BASE/asc-devkit" ]; then
   health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit symlink missing in $INSTALL_BASE"
+fi
+
+# Check asc-devkit API docs are searchable
+if [ -d "$ASC_DEVKIT_DIR" ]; then
+  FIND_API_DOC="$SHARED_SKILL_ROOT/ascendc-docs-search/scripts/find_api_doc.sh"
+  if [ -f "$FIND_API_DOC" ]; then
+    if ASC_DEVKIT_DIR="$ASC_DEVKIT_DIR" bash "$FIND_API_DOC" Add > /dev/null 2>&1; then
+      ok "asc-devkit API docs searchable"
+    else
+      health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit API docs not searchable (find returned no results for 'Add')"
+    fi
+  fi
 fi
 
 # Check config file

@@ -22,7 +22,7 @@ L1 → L0 数据加载的 API 字段、对齐约束、NZ Layout 与 dtype 相关
 | `LoadData2DMx` | L1 → L0 加载 MX 块量化格式数据（配套 scale 同步加载） | mxfp8 / mxfp4 等 |
 | `LoadData3D` | L1 → L0 加载，卷积 im2col 模式 | 卷积场景 |
 
-> 同一 API 在不同平台 / CANN 版本可能有 `LoadData2DMx.md` / `LoadData2DMx-35.md` 等多个变体，功能略有差异。使用前用通配符搜 `asc-devkit/docs/api/context/LoadData*.md` 列出全部变体。
+> 同一 API 在不同平台 / CANN 版本可能有 `LoadData2DMx.md` / `LoadData2DMx-35.md` 等多个变体，功能略有差异。使用前用通配符搜 `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData*.md"` 列出全部变体。
 
 ---
 
@@ -176,9 +176,9 @@ head_offset_scale = head_idx * mEff * scaleK_b16;      // scaleK_b16 = (K 维元
 
 | 资源 | 路径 |
 |------|------|
-| API 文档（用通配符列出所有变体） | `asc-devkit/docs/api/context/LoadData*.md` |
-| LoadData2DParamsV2 字段对照 | `asc-devkit/docs/api/context/LoadData2DParamsV2.md` |
-| Mmad 配套 API 文档 | `asc-devkit/docs/api/context/Mmad*.md` |
+| API 文档（用通配符列出所有变体） | `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData*.md"` |
+| LoadData2DParamsV2 字段对照 | `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData2DParamsV2*.md"` |
+| Mmad 配套 API 文档 | `find "$ASC_DEVKIT_DIR/docs/api/" -name "Mmad*.md"` |
 | MX 路径 end-to-end 示例 | `asc-devkit/examples/.../load_data_2dmx_l12l0/` |
 | 平台同步基座示例 | `asc-devkit/examples/.../matmul_s4/`（A5 平台 mode=4 同步） |
 
