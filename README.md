@@ -95,7 +95,7 @@ npx skills list
 | **TileLang** | DSL + `@tilelang.jit`，Developer/Expert 双模式 | tilelang-op-orchestrator | tilelang-op-develop · tilelang-perf-optimization |
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | triton-op-generator | triton-op-coding · triton-latency-optimizer |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | torch-compile | torch-npugraph-ex-knowledge · torch-npugraph-ex-dfx-triage · torch-custom-ops-guide |
-| **模型推理优化** | NPU 推理端到端优化 | model-infer-optimize | model-infer-kvcache · model-infer-quantization · model-infer-fusion |
+| **模型推理优化** | NPU 推理端到端优化 | model-infer-optimize | model-infer-migrator · model-infer-fusion · model-infer-graph-mode · model-infer-quantization |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | — | cannbot-skill-reviewer · gitcode-pr-handler · gitcode-issue-handler |
 
 ## 🔍 项目架构

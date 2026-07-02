@@ -161,6 +161,27 @@
       ]
     },
     {
+      "name": "model-infer-harmony-skills",
+      "description": "端侧鸿蒙 ASR 量化转换与打包 Skill（1 个）。麒麟 Kirin9030 / HarmonyOS 上 ASR 模型 4bit W4A16 量化、omg 离线转换与 CANNPAK 打包全流程。",
+      "source": "./model",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "model-infer",
+        "harmony",
+        "kirin9030",
+        "asr",
+        "quantization"
+      ],
+      "category": "skills",
+      "skills": [
+        "./model-infer-harmony"
+      ]
+    },
+    {
       "name": "tilelang-op-orchestrator-skills",
       "description": "TileLang 算子开发 Skills（9 个）。环境检查、子模块拉取、算子设计、算子开发、测试设计、API 最佳实践、编程模式指南、性能优化、代码审查。",
       "source": "./ops",

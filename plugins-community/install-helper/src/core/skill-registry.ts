@@ -185,6 +185,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "model-infer-superkernel", description: "SuperKernel 适配", source: "model" },
       { id: "model-infer-precision-debug", description: "NPU 推理精度诊断", source: "model" },
       { id: "model-infer-runtime-debug", description: "NPU 推理运行时错误诊断", source: "model" },
+      { id: "model-infer-harmony", description: "端侧鸿蒙 ASR 量化转换与打包", source: "model" },
     ],
   },
   {
