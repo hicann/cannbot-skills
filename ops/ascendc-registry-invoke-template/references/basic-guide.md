@@ -153,6 +153,9 @@ ASCENDC_TPL_SEL(
                              ELEMENTWISE_TPL_SCH_MODE_0, ELEMENTWISE_TPL_SCH_MODE_1)));
 ```
 
+> **注意**：dtype 维度有两种处理方式 — def 驱动（DTYPE_X 编译宏）或 tiling_key 驱动（DATATYPE_DECL 模板参数），本 skill 的 `add_example` 采用后者。
+> 两种模式对比详见 `references/advanced-guide.md` → "def 文件与 TilingKey 的协作关系"。
+
 ---
 
 ## Kernel实现

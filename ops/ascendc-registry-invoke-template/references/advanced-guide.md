@@ -105,6 +105,60 @@ if constexpr (schMode == static_cast<uint32_t>(AddExampleTilingKey::TILING_KEY_E
 
 ---
 
+## def 文件与 TilingKey 的协作关系
+
+### 核心认知：两者都驱动编译模板展开，但覆盖不同维度
+
+def 文件和 tiling_key.h 共同决定最终编译的 kernel 变体数量。在 **def 驱动 dtype** 模式下两者正交：
+
+编译变体总数 = def dtype/format 组合数 × tiling_key 模板组合数
+
+> 注：若 tiling_key 通过 `DATATYPE_DECL` 也编码 dtype（tiling_key 驱动模式），dtype 维度由 tiling_key 承担，def 的 DataType 列表仅起约束作用，变体数等于 tiling_key 组合数。详见下方"两种 TilingKey 设计模式对比"。
+
+| 维度 | 由谁驱动 | 展开机制 | Kernel 中使用方式 |
+|------|---------|---------|-----------------|
+| dtype/format | `_def.cpp` DataType/Format 列表 | 构建系统生成 `-DDTYPE_X=float` 等编译宏 | `DTYPE_X`、`ORIG_DTYPE_X`、`FORMAT_X` |
+| 算法变体/调度模式 | `_tiling_key.h` ASCENDC_TPL_* 声明 | 编译器模板实例化 + tiling key 编码 | C++ 模板参数（`schMode`、`D_T_X` 等） |
+
+### def 驱动模式下 TilingKey 无需编码 dtype
+
+def 驱动模式下，def 文件通过 DTYPE_X 宏覆盖了 dtype 维度的展开，tiling_key **只需编码 def 没覆盖的维度**（如算法分支、缓冲模式、排序方向等）。
+
+> 注：本 skill 的 `add_example` 实际采用 tiling_key 驱动模式（`tiling_key.h` 中含 `ASCENDC_TPL_DATATYPE_DECL`），dtype 由模板参数 `D_T_X` 承载。两种模式等价，详见下方对比。
+
+**def 驱动 dtype 典型模式**：
+
+```
+def 文件:    N 种 dtype（由 DataTypeList 声明）
+tiling_key:  只有 UINT_DECL（如 schMode、direction）— 无 DATATYPE_DECL
+kernel 入口: template <uint32_t schMode>
+             直接使用 DTYPE_X 宏获取实际类型
+```
+
+编译展开：N 种 dtype × M 种 tiling_key 组合 = N×M 个 kernel 变体。
+
+### 两种 TilingKey 设计模式对比
+
+| 模式 | tiling_key 声明 | kernel 模板参数 | dtype 获取方式 |
+|------|----------------|---------------|--------------|
+| **def 驱动 dtype** | 只有 UINT/BOOL | `<uint32_t schMode>` | `DTYPE_X` 宏 |
+| **tiling_key 驱动 dtype** | DATATYPE_DECL + UINT | `<typename D_T_X, int MODE>` | 模板类型参数 `D_T_X` |
+
+两种模式等价，选择取决于编码风格偏好。def 驱动模式下 tiling_key 更简洁（少一个维度），适合 dtype 种类多的算子。
+
+> **社区仓实际案例**：`cann/ops-math` 的 Sort 算子（def 驱动，tiling_key 仅编码 schId/isInt32/isDescend）和 Add 算子（def 驱动 + broadcast 公共组件托管 tiling_key）。
+
+### ASCENDC_TPL_INPUT 的作用
+
+当 tiling_key 使用 `DATATYPE_DECL(D_T_X, ..., ASCENDC_TPL_INPUT(0))` 时：
+- 将模板参数 `D_T_X` 绑定到 kernel 第 0 个输入的实际 dtype
+- tiling 函数读取输入 dtype 后，框架据此选择对应的 tiling key 变体
+- 等价于在 tiling 函数中手动读取 dtype 并编码为 UINT 值
+
+不使用 `ASCENDC_TPL_INPUT` 时（def 驱动模式），dtype 由构建系统通过 `-DDTYPE_X` 宏注入，tiling 函数无需关心 dtype 到 tiling key 的映射。
+
+---
+
 ## Tiling结构体定义
 
 ### 标准C++语法（推荐）

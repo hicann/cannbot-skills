@@ -21,6 +21,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | 实现复杂算子 | `references/advanced-guide.md` |
 | 多架构适配 | `references/advanced-guide.md` → 代际隔离章节 |
 | Tiling模板编程 | `references/advanced-guide.md` → Tiling模板编程章节 |
+| 理解 def/TilingKey/编译宏关系 | `references/advanced-guide.md` → def 文件与 TilingKey 的协作关系 |
 | 编译部署 | `references/build-deploy-guide.md` |
 | 编写UT测试 | `references/basic-guide.md` → UT验证章节 |
 | 编写ST测试 | `references/st-test-guide.md` + `references/add_example/tests/st/` |
@@ -120,6 +121,7 @@ matmul_blaze_example/
 - 核心概念与术语表
 - 算子原型高级配置
 - Tiling模板编程
+- def 文件与 TilingKey 的协作关系
 - 多硬件平台差异化注册
 - 代际隔离（arch22/arch35）
 - 图模式适配

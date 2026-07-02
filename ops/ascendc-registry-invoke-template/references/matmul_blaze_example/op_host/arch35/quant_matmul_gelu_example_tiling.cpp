@@ -125,6 +125,7 @@ static ge::graphStatus GetShapeFromContext(gert::TilingContext* context,
 constexpr size_t WORKSPACE_NUM = 1;
 constexpr size_t WS_SYS_SIZE = 0;
 
+// 即使 workspace 大小为 0，也必须调用 GetWorkspaceSizes 声明 workspace slot，否则运行时不会为 kernel 分配 workspace 指针
 static ge::graphStatus GetWorkspaceSize(gert::TilingContext* context)
 {
     size_t* currentWorkspace = context->GetWorkspaceSizes(WORKSPACE_NUM);
