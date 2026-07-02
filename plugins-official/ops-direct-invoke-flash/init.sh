@@ -43,6 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
+SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
 INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
 
 show_help() {
@@ -140,6 +141,9 @@ install_skill_links() {
     local count=0
     for skill in $INCLUDED_SKILLS; do
         local src="$LOCAL_SKILL_ROOT/$skill"
+        if [ ! -d "$src" ]; then
+            src="$SHARED_SKILL_ROOT/$skill"
+        fi
         if [ ! -d "$src" ]; then
             src="$INFRA_SKILL_ROOT/$skill"
         fi

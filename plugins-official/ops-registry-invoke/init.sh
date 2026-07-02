@@ -116,7 +116,7 @@ ASC_DEVKIT_REF="master"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
-INCLUDED_SKILLS="ascendc-blaze-best-practice ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-regbase-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ops-precision-standard ops-profiling ops-registry-invoke-workflow ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
+INCLUDED_SKILLS="ascendc-blaze-best-practice ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-regbase-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ascendc-whitebox-design ops-precision-standard ops-profiling ops-registry-invoke-workflow ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-ops-*"
 

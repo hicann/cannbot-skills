@@ -31,6 +31,7 @@
 #   DG-08: Orphaned agents detection (warn)
 #   DG-09: Circular dependency detection
 #   DG-10: init.sh INCLUDED_SKILLS covers all marketplace-declared skills
+#   DG-11: Workflow/runtime skill references covered by install whitelist
 # =============================================================================
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import dataclasses
 import re
 import sys
 from pathlib import Path
@@ -91,6 +93,15 @@ def _parse_frontmatter(path: Path) -> tuple[dict[str, Any], str | None]:
     if not isinstance(data, dict):
         return {}, "frontmatter is not a mapping"
     return data, None
+
+
+@dataclasses.dataclass
+class _SkillRefsCtx:
+    team_dir: Path
+    team_name: str
+    declared: set[str]
+    script_name: str
+    patterns: tuple
 
 
 class DependencyValidator:
@@ -403,41 +414,15 @@ class DependencyValidator:
         self.detect_orphaned_agents()
         self.detect_circular_dependencies()
         self.validate_init_sh_skills()
+        self.validate_workflow_skill_refs()
 
         self._output_findings()
         error_count = sum(1 for f in self.findings if f["level"] == "error")
         return 1 if error_count > 0 else 0
 
-    def _collect_agent_files(self, agents_dir: Path, files: list[str]) -> None:
-        """Extract agent .md files from an agents directory."""
-        for f in files:
-            if f.endswith(".md") and f != "AGENTS.md":
-                agent_name = f[:-3]
-                agent_path = agents_dir / f
-                self.all_agent_files[agent_name] = agent_path
-
-    def _emit(self, level: str, rule: str, msg: str, file: str = "") -> None:
-        """Append a finding to the findings list."""
-        self.findings.append({"level": level, "rule": rule, "msg": msg, "file": file})
-
-    def _output_findings(self) -> None:
-        """Output all findings as JSONL to stdout, followed by a summary."""
-        for f in self.findings:
-            sys.stdout.write(json.dumps(f, ensure_ascii=False) + "\n")
-
-        error_count = sum(1 for f in self.findings if f["level"] == "error")
-        warn_count = sum(1 for f in self.findings if f["level"] == "warn")
-        summary = json.dumps({
-            "summary": {
-                "errors": error_count,
-                "warnings": warn_count,
-                "total_skills": len(self.all_skill_names),
-                "total_agents": len(self.all_agent_files),
-                "skill_packages": len(self.skill_packages),
-                "development_teams": len(self.development_teams),
-            }
-        }, ensure_ascii=False)
-        sys.stdout.write(summary + "\n")
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_init_sh_vars(team_dir: Path) -> dict | None:
@@ -470,6 +455,134 @@ class DependencyValidator:
                     "script_name": script_name,
                 }
         return None
+
+    @staticmethod
+    def _compile_skill_ref_patterns() -> tuple:
+        backtick_re = re.compile(r"(?<![`a-z0-9-])`([a-z][a-z0-9]+(?:-[a-z0-9]+)+)`")
+        skill_call_re = re.compile(r"Skill\(([a-z][a-z0-9-]*)\)")
+        provenance_re = re.compile(r'"skill":\s*"([a-z][a-z0-9-]*)"')
+        return backtick_re, skill_call_re, provenance_re
+
+    @staticmethod
+    def _extract_skill_refs(text: str, fname: str, patterns: tuple) -> set[str]:
+        backtick_re, skill_call_re, provenance_re = patterns
+        refs: set[str] = set()
+        for m in backtick_re.finditer(text):
+            refs.add(m.group(1))
+        for m in skill_call_re.finditer(text):
+            refs.add(m.group(1))
+        if fname.endswith(".py"):
+            for m in provenance_re.finditer(text):
+                refs.add(m.group(1))
+        return refs
+
+    @staticmethod
+    def _resolve_skills_from_agents_md(team_dir: Path) -> set[str]:
+        agents_md = team_dir / "AGENTS.md"
+        if not agents_md.exists():
+            return set()
+        fm, err = _parse_frontmatter(agents_md)
+        if err:
+            return set()
+        skills_list = fm.get("skills", [])
+        if not isinstance(skills_list, list):
+            return set()
+        return {s for s in skills_list if isinstance(s, str)}
+
+    def validate_workflow_skill_refs(self) -> None:
+        """DG-11: Skill references in workflow files must be in install whitelist.
+
+        Scans all .md and .py files within each plugin directory for runtime
+        skill references (backtick-quoted names, Skill() calls, provenance
+        JSON).  Verifies every referenced known skill appears in the plugin's
+        init.sh INCLUDED_SKILLS (or AGENTS.md frontmatter as fallback).
+
+        This catches the blind spot where a skill is used by the workflow but
+        never declared in the install whitelist, causing 'Unknown skill'
+        errors at runtime (issue #350).
+        """
+        patterns = self._compile_skill_ref_patterns()
+        for team_name, team in self.development_teams.items():
+            source = team.get("source", "")
+            if not source:
+                continue
+            team_dir = self.repo_root / source.lstrip("./")
+            if not team_dir.is_dir():
+                continue
+            declared, script_name = self._resolve_declared_skills(team_dir)
+            if not declared:
+                continue
+            ctx = _SkillRefsCtx(team_dir, team_name, declared, script_name, patterns)
+            for fpath in self._iter_team_files(team_dir):
+                self._check_file_skill_refs(fpath, ctx)
+
+    def _resolve_declared_skills(self, team_dir: Path) -> tuple[set[str], str]:
+        init_vars = self._extract_init_sh_vars(team_dir)
+        if init_vars is not None and init_vars["skills"]:
+            return init_vars["skills"], init_vars["script_name"]
+        declared = self._resolve_skills_from_agents_md(team_dir)
+        return declared, ""
+
+    def _iter_team_files(self, team_dir: Path) -> list[Path]:
+        result: list[Path] = []
+        for root, dirs, files in os.walk(team_dir):
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+            if _is_inside_nested_git_repo(Path(root), self.repo_root):
+                dirs.clear()
+                continue
+            for fname in files:
+                if fname.endswith((".md", ".py")):
+                    result.append(Path(root) / fname)
+        return result
+
+    def _check_file_skill_refs(self, fpath: Path, ctx: _SkillRefsCtx) -> None:
+        try:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        refs = self._extract_skill_refs(text, fpath.name, ctx.patterns)
+        for skill_name in sorted(refs):
+            if skill_name not in self.all_skill_names:
+                continue
+            if skill_name in ctx.declared:
+                continue
+            self._emit(
+                "error", "DG-11",
+                f"Skill '{skill_name}' referenced in workflow but missing from "
+                f"{ctx.script_name or 'init.sh'} INCLUDED_SKILLS (team '{ctx.team_name}')",
+                str(fpath.relative_to(self.repo_root)),
+            )
+
+    def _collect_agent_files(self, agents_dir: Path, files: list[str]) -> None:
+        """Extract agent .md files from an agents directory."""
+        for f in files:
+            if f.endswith(".md") and f != "AGENTS.md":
+                agent_name = f[:-3]
+                agent_path = agents_dir / f
+                self.all_agent_files[agent_name] = agent_path
+
+    def _emit(self, level: str, rule: str, msg: str, file: str = "") -> None:
+        """Append a finding to the findings list."""
+        self.findings.append({"level": level, "rule": rule, "msg": msg, "file": file})
+
+    def _output_findings(self) -> None:
+        """Output all findings as JSONL to stdout, followed by a summary."""
+        for f in self.findings:
+            sys.stdout.write(json.dumps(f, ensure_ascii=False) + "\n")
+
+        error_count = sum(1 for f in self.findings if f["level"] == "error")
+        warn_count = sum(1 for f in self.findings if f["level"] == "warn")
+        summary = json.dumps({
+            "summary": {
+                "errors": error_count,
+                "warnings": warn_count,
+                "total_skills": len(self.all_skill_names),
+                "total_agents": len(self.all_agent_files),
+                "skill_packages": len(self.skill_packages),
+                "development_teams": len(self.development_teams),
+            }
+        }, ensure_ascii=False)
+        sys.stdout.write(summary + "\n")
 
     def _discover_init_sh_renames(self) -> dict[str, str]:
         """Scan init.sh files for symlink rename mappings.

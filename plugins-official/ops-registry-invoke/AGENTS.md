@@ -4,6 +4,7 @@ mode: primary
 skills:
   - ops-registry-invoke-workflow
   - ascendc-code-review
+  - ascendc-whitebox-design
   # infra skills 版本随 init.sh INCLUDED_SKILLS 白名单同步，升级时重跑 init.sh 即可
   - gitcode-toolkit
   - gitcode-pr-handler
