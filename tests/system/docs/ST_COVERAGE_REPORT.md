@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **81 个 Skill + 1 个 Team**，共 **306 个评测用例**（截止 2026-06-22）。
+当前 ST 框架覆盖 **82 个 Skill + 1 个 Team**，共 **312 个评测用例**（截止 2026-06-22）。
 
 ## 1. 五维看护说明
 
@@ -92,12 +92,13 @@
 | torch-npugraph-ex-runtime-error-diagnosis | √ |  | √ | √ | √ |
 | torch-npugraph-ex-template |  |  | √ | √ | √ |
 
-### model/（13 Skills，共 75 个用例）
+### model/（14 Skills，共 81 个用例）
 
 | Skill | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 |-------|:-------:|:-------:|:--------:|:----------:|:----------:|
 | model-infer-fusion | √ |  | √ | √ | √ |
 | model-infer-graph-mode | √ |  | √ | √ | √ |
+| model-infer-harmony | √ |  | √ | √ | √ |
 | model-infer-kvcache | √ |  | √ | √ | √ |
 | model-infer-migrator | √ |  | √ | √ | √ |
 | model-infer-multi-stream | √ |  | √ | √ | √ |
