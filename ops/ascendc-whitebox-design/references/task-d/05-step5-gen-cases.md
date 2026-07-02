@@ -1,304 +1,156 @@
 # Step 5：生成 S2P2_gen_cases.py
 
 > **前置条件**：Step 4 已完成，S2P2_param_def.json 已就绪
+>
+> **职责边界**：本文档为规范文档，仅定义规则、约束和校验标准。完整脚本模板在 `{skill_base}/scripts/gen_cases_template.py` 中，直接复制使用。
 
-## S2P2_gen_cases.py 脚本生成规范
+## 输入
 
-### S2P2_gen_cases.py 脚本模板
+脚本运行时从 `S2P2_param_def.json` 读取所有数据。LLM **不硬编码**任何维度取值，仅生成提取逻辑。
 
-```python
-#!/usr/bin/env python3
-"""{op_name} S2P2 -> S2P2_cases.json（统一 dict 解包，无通用引擎依赖）
+| param_def 字段 | 运行时提取方式 |
+|---|---|
+| `dtype_tensors[0].param` | `DTYPE_PARAM` 变量 |
+| `groups[].per_dtype[{dtype}][*].path` / `key` | 直接读取 entry 的 `path`/`key` 字段 |
+| `groups[].per_dtype[{dtype}][*].{其他字段}` | `extract_entry_dims(entry)` 自动识别并构建 dim_dicts |
+| `groups[].group_dims.{dim}` 数组（group 级维度） | `extract_group_dims(group)` 自动识别并构建 dim_dicts |
 
-Usage: python3 S2P2_gen_cases.py
-Output: S2P2_cases.json
-"""
+## 输出
 
-import json, os, random
+| 产出 | 文件 | 说明 |
+|------|------|------|
+| 生成脚本 | S2P2_gen_cases.py | JSON 驱动的可执行 Python 脚本 |
+| 测试用例 | S2P2_cases.json | 脚本执行后自动产出的 JSON 文件 |
 
-random.seed(42)
-K = 2   # 每个 per_dtype pair 搭配的 group 级维度值数
-OUT = os.path.join(os.path.dirname(__file__), "S2P2_cases.json")
+## 硬性规则
 
-# ── per_dtype 维度定义（每维独立 list）─────────────────────────────
-# 格式：[{"{dim}": {v}}, ...]，每维 5 个值
-# 多维度通过 compress_per_dtype() 压缩为单 list；单维度直接使用
-_DIM_{group}_{dtype_suffix}_{dim_a} = [{"{dim_a}": {v1}}, {"{dim_a}": {v2}}, ..., {"{dim_a}": {v5}}]
-_DIM_{group}_{dtype_suffix}_{dim_b} = [{"{dim_b}": {v1}}, {"{dim_b}": {v2}}, ..., {"{dim_b}": {v5}}]
-
-# ── group 级维度定义（每维独立 list）─────────────────────────────
-# 格式：[{"{dim}": {v}}, ...]，每维 10 个值
-# 多维度通过 compress_group_pool() 压缩为单 POOL；单维度直接赋值给 POOL_
-_POOL_dim_{dim_a} = [{"{dim_a}": {v1}}, {"{dim_a}": {v2}}, ..., {"{dim_a}": {v10}}]
-_POOL_dim_{dim_b} = [{"{dim_b}": {v1}}, {"{dim_b}": {v2}}, ..., {"{dim_b}": {v10}}]
-
-
-def compress_per_dtype(dim_dicts):
-    """多 per_dtype 维度 → 单 dict 列表。每个维度轮流做主遍历全部值，其余维随机配对（固定 seed 可复现）。单维度直接返回。"""
-    if len(dim_dicts) == 1:
-        return list(dim_dicts.values())[0]
-    results, seen = [], set()
-    dim_names = list(dim_dicts.keys())
-    rng = random.Random()
-    for i, primary_name in enumerate(dim_names):
-        rng.seed(hash(primary_name) % 100000 + i * 31)
-        for pv in dim_dicts[primary_name]:
-            combo = dict(pv)
-            for other_name in dim_names:
-                if other_name == primary_name:
-                    continue
-                combo.update(rng.choice(dim_dicts[other_name]))
-            key = tuple(sorted(combo.items()))
-            if key not in seen:
-                seen.add(key)
-                results.append(combo)
-    return results
-
-
-def compress_group_pool(dim_dicts):
-    """多 group 级维度 → 单 POOL。各维度独立 shuffle（不同 seed），同位配对。单维度直接返回。"""
-    if len(dim_dicts) == 1:
-        return list(dim_dicts.values())[0]
-    rng = random.Random()
-    shuffled = {}
-    min_len = min(len(v) for v in dim_dicts.values())
-    for name, values in dim_dicts.items():
-        rng.seed(hash(name) % 100000)
-        s = values[:]
-        rng.shuffle(s)
-        shuffled[name] = s[:min_len]
-    results = []
-    for i in range(min_len):
-        combo = {}
-        for name in shuffled:
-            combo.update(shuffled[name][i])
-        results.append(combo)
-    return results
-
-
-def shuffled_pool(base, seed):
-    """返回打乱后的池和位置指针。每个 group 独立 seed。"""
-    rng = random.Random(seed)
-    p = base[:]
-    rng.shuffle(p)
-    return p, 0
-
-
-# ── per_dtype：压缩单 list ──────────────────────────────────────
-# 多维度调 compress_per_dtype，单维度直接赋值
-{group}_{dtype_suffix_a} = compress_per_dtype({"{dim_a}": _DIM_{group}_{dtype_suffix}_{dim_a}, "{dim_b}": _DIM_{group}_{dtype_suffix}_{dim_b}})
-{group}_{dtype_suffix_b} = _DIM_{group}_{dtype_suffix}_{dim_a}  # 单维度直接赋值
-
-# ── group 级 POOL：压缩单 POOL ──────────────────────────────────
-POOL_{group} = compress_group_pool({"{dim_a}": _POOL_dim_{dim_a}, "{dim_b}": _POOL_dim_{dim_b}})
-
-# ── group: 多 dtype group（含 pool 抽样）────────────────────────
-g_{group_id} = []
-pool, pos = shuffled_pool(POOL_{group}, {seed})
-for dtype_entries in [
-    ("{dtype_a}", {group}_{dtype_suffix_a}),
-    ("{dtype_b}", {group}_{dtype_suffix_b}),
-]:
-    dtype_name, pairs = dtype_entries
-    for p in pairs:                          # **p 解包 per_dtype 维度
-        for _ in range(K):
-            if pos >= len(pool):
-                pool, pos = shuffled_pool(POOL_{group}, {seed})
-            gp = pool[pos]; pos += 1
-            g_{group_id}.append({"_group": "{group_id}", "{dtype}": dtype_name, **p, **gp})
-
-# ── group: 单 dtype group（含 pool 抽样）────────────────────────
-g_{group_id} = []
-pool, pos = shuffled_pool(POOL_{group}, {seed})
-for p in {group}_{dtype_suffix}:              # dtype 写死，仅循环 per_dtype
-    for _ in range(K):
-        if pos >= len(pool):
-            pool, pos = shuffled_pool(POOL_{group}, {seed})
-        gp = pool[pos]; pos += 1
-        g_{group_id}.append({"_group": "{group_id}", "{dtype}": dtype_name, **p, **gp})
-
-# ── merge & dedup ────────────────────────────────────────────────
-all_cases = g_group1 + g_group2 + ... + g_groupN
-
-ROUTING_KEYS = ["{dim_key_a}", "{dim_key_b}"]   # 所有路由维度名
-
-seen = set()
-unique = []
-for c in all_cases:
-    k = tuple([c["_group"], c["{dtype}"]] + [c[key] for key in ROUTING_KEYS])
-    if k not in seen:
-        seen.add(k)
-        unique.append(c)
-
-# 非路由维度默认值（所有 case 统一）
-for c in unique:
-    c["{attr_name}"] = {default_val}
-
-with open(OUT, "w", encoding="utf-8") as f:
-    json.dump(unique, f, indent=2, ensure_ascii=False)
-
-# ── summary ──────────────────────────────────────────────────────
-from collections import Counter
-cnt = Counter(c["_group"] for c in unique)
-print(f"Generated {len(unique)} cases -> {OUT}")
-for g in sorted(cnt.keys()):
-    print(f"  {g}: {cnt[g]}")
-```
-
-### 硬性规则
-
-1. **取值硬编码**。每个 group 的每个维度取值以 Python `list` 形式写在脚本中，不从 JSON 读取。取值来源：`S2P2_param_def.json` 的 `per_dtype` 和 group 级维度字段，在 Task D 阶段转换为硬编码的 dict list。
+1. **JSON 驱动**。脚本运行时从 `S2P2_param_def.json` 读取所有数据。LLM 仅生成提取逻辑（`extract_entry_dims`、`extract_group_dims` 函数调用）和通用循环，不硬编码任何维度取值。
 
 2. **约束隐含在取值中**。所有路由约束（dtype 依赖、对齐要求、范围互斥）在 **Task D Step 3 选值** 时已消化完毕。脚本中不含 `if` 约束过滤逻辑。
 
-3. **维度分别定义，运行时压缩**。per_dtype 和 group 级维度均以 `[{dim: val}, ...]` 格式分别定义，然后通过 `compress_per_dtype()` / `compress_group_pool()` 压缩为等价单 list / 单 POOL。下游 Mode A/B/C 始终消费单 list + 单 POOL，不感知原始维度数。
+3. **运行时提取，运行时采样**。`extract_entry_dims()` 从 per_dtype entry 自动识别字段类型并构建 dim_dicts；`extract_group_dims()` 从 group 对象自动提取 group 级维度。提取结果传入 `compress_per_dtype()` 和 `compress_group_pool()` 进行采样。
 
-4. **去重**。硬编码去重元组（或声明 `ROUTING_KEYS` 列表动态构造），格式为 `(_group, {dtype}, routing_dim1, routing_dim2, ...)`。去重键必须包含所有路由维度，不得遗漏。
+4. **去重**。全字段去重：对完整 case dict 排序后构造元组作为去重键，防止完全重复的 case。去重仅作为安全网捕获极端边界情况。
 
-5. **零外部依赖**。仅使用 Python 标准库（`json`、`os`、`random`、`collections`）。不 import 第三方包。
+5. **零外部依赖**。仅使用 Python 标准库（`json`、`os`、`random`、`argparse`、`collections`、`zlib`）。不 import 第三方包。
 
 6. **自执行**。`python3 S2P2_gen_cases.py` 即可产出 `S2P2_cases.json`，无需命令行参数。
 
-7. **非路由维度默认值**。不出现在 group `per_dtype` 中的变量（如其值为常量的标量属性），在 S2P2_gen_cases.py 中统一设默认值并写入每一条 case：
-   ```python
-   for c in unique:
-       c["{attr_name}"] = {default_val}
-   ```
-   默认值来自 `S2P1_operator_model.json` 中对应 attribute 的 `default` 字段。
+## 压缩函数接口
 
-### 压缩函数设计
+以下函数由 `gen_cases_template.py` 提供完整实现，此处仅声明接口契约。生成脚本时不得修改函数签名或违反约束条件。
 
-#### `compress_per_dtype(dim_dicts)` — 轮转主维度
+| 函数 | 输入 | 输出 | 约束 |
+|------|------|------|------|
+| `compress_per_dtype(dim_dicts, cap)` | `dict[str, list[dict]]`：维度名 → 取值列表；`int`：每个 per_dtype 路径生成的组合数 | `list[dict]`：生成的 dict 列表（≤ cap 条） | 循环生成 cap 个组合，每维度独立随机选值，固定 seed 保证可复现；可选值空间不足 cap 时以实际唯一组合数为准 |
+| `compress_group_pool(dim_dicts)` | `dict[str, list[dict]]`：维度名 → 取值列表 | `list[dict]`：合并后的 POOL | 单维度直接返回原 list；多维度池大小 = 各维度最小长度 |
+| `shuffled_pool(base, seed)` | `list[dict]`（base POOL）+ `int`（seed） | `(list[dict], int)`：(打乱后的池, 位置指针 0) | 每个 group 独立 seed；池耗尽时用相同 seed 重新打乱 |
 
-多 per_dtype 维度合并为单 dict 列表。单维度直接返回原 list。
+## 提取函数规则
 
-- 每个维度轮流作为主维度：遍历其全部值。
-- 主维度遍历期间，其余维度各从中随机选一个值配对（`seed = hash(维度名) % 100000 + i * 31`，i 为当前维度索引）。
-- 合并后去重。结果与原始笛卡尔积无路径差异，但规模从 O(v^N) 降至 O(N×v)。
+### extract_entry_dims(entry)
 
-#### `compress_group_pool(dim_dicts)` — 洗牌同位配对
+从 per_dtype entry 中提取维度字段，构建 `dim_dicts` 供 `compress_per_dtype` 使用。
 
-多 group 级维度合并为单 POOL。单维度直接返回原 list。
+**字段识别规则**：
+- `path`、`key` → 跳过（不作为维度）
+- 值为 dict list（如 compound `{compound_dim}`）→ 直接作为 dim_dicts 的一个 key
+- 值为 flat array（如 `["NHWC"]`、`[1]`）→ 转为 `[{field: v} for v in values]`
 
-- 各维度独立 shuffle（不同 seed = `hash(维度名) % 100000`）。
-- 取各维度打乱后的同位元素组装 dict。
-- 结果池大小 = 各维度中最小长度。合并后结果与原始 cartesian 无路径差异。
+### extract_group_dims(group)
 
-### dict 列表定义
+从 `group["group_dims"]` 提取 group 级维度。
 
-所有维度取值统一为 `[{key: val}, ...]` 格式，无论单维还是多维：
+**提取规则**：遍历 `group["group_dims"]` 的所有字段，值为 list 的 → 转为 `[{field: v} for v in values]`
 
-**per_dtype 维度定义**（每维独立，5 个值）：
-```python
-_DIM_{group}_{dtype_suffix}_{dim} = [{"{dim}": {v1}}, {"{dim}": {v2}}, {"{dim}": {v3}}, {"{dim}": {v4}}, {"{dim}": {v5}}]
-```
+## 生成逻辑
 
-**group 级维度定义**（每维独立，10 个值）：
-```python
-_POOL_dim_{dim} = [{"{dim}": {v1}}, ..., {"{dim}": {v10}}]
-```
+所有 group 统一使用通用循环模式，无需为每个 group 单独编写代码。
 
-**per_dtype 压缩后**（消费方看到的单 list）：
-```python
-{group}_{dtype_suffix} = compress_per_dtype({"{dim_a}": _DIM_{group}_{dtype_suffix}_{dim_a}})
-# 多维度：
-{group}_{dtype_suffix} = compress_per_dtype({"{dim_a}": _DIM_{group}_{dtype_suffix}_{dim_a}, "{dim_b}": _DIM_{group}_{dtype_suffix}_{dim_b}})
-```
+### 生成步骤
 
-**group 级 POOL 压缩后**（消费方看到的单 POOL）：
-```python
-POOL_{group} = compress_group_pool({"{dim_a}": _POOL_dim_{dim_a}})
-# 多维度：
-POOL_{group} = compress_group_pool({"{dim_a}": _POOL_dim_{dim_a}, "{dim_b}": _POOL_dim_{dim_b}})
-```
+1. 遍历 `param_def["groups"]`
+2. 对每个 group：`extract_group_dims(group)` → `compress_group_pool()` → `shuffled_pool()`
+3. 遍历 group 的 `per_dtype` 每个 dtype 的每个 entry：`extract_entry_dims(entry)` → `compress_per_dtype()` → 对每个组合从 pool 抽取 1 项 → 组装 case
+4. 池耗尽时用相同 seed 重新打乱
 
-### 生成逻辑：统一模式
+### case dict 结构
 
-#### 模式 A：多 dtype group（含 pool 抽样）
+每条 case 必须包含以下字段：
 
-```python
-g_{group_id} = []
-pool, pos = shuffled_pool(POOL_{group}, {seed})
-for dtype_entries in [
-    ("{dtype_a}", {group}_{dtype_suffix_a}),
-    ("{dtype_b}", {group}_{dtype_suffix_b}),
-]:
-    dtype_name, pairs = dtype_entries
-    for p in pairs:                          # **p 解包 per_dtype 维度
-        for _ in range(K):
-            if pos >= len(pool):
-                pool, pos = shuffled_pool(POOL_{group}, {seed})
-            gp = pool[pos]; pos += 1
-            g_{group_id}.append({"_group": "{group_id}", "{dtype}": dtype_name, **p, **gp})
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| `_group` | group.id | 当前 group 标识 |
+| `{dtype_param}` | dtype 名称 | 主 dtype 的取值（如 `"float16"`） |
+| `path` | entry.path | 字符串 |
+| `key` | entry.key | 整数 |
+| per_dtype 维度 | `**p` 解包 | 当前 per_dtype 组合的所有维度 |
+| group 级维度 | `**gp` 解包 | 当前 pool 项的所有维度 |
 
-#### 模式 B：单 dtype group（含 pool 抽样）
+完整代码模板见 `{skill_base}/scripts/gen_cases_template.py`。
 
-```python
-g_{group_id} = []
-pool, pos = shuffled_pool(POOL_{group}, {seed})
-for p in {group}_{dtype_suffix}:              # dtype 写死，仅循环 per_dtype
-    for _ in range(K):
-        if pos >= len(pool):
-            pool, pos = shuffled_pool(POOL_{group}, {seed})
-        gp = pool[pos]; pos += 1
-        g_{group_id}.append({"_group": "{group_id}", "{dtype}": dtype_name, **p, **gp})
-```
-
-#### 实验性模式 C：无 group 级维度
-
-> **实验性路径**：Mode C 描述的场景（无任何 group 级维度）尚未在实际算子中触发。当前已验证的实现全部使用 Mode A 或 Mode B。只有当 `S2P2_param_def.json` 中该 group 明确无 group 级维度时才允许进入 Mode C，否则必须回到 Mode A/B。
-
-当 group 无任何 group 级维度时，K 倍数循环和 pool 均不适用。直接枚举 per_dtype：
-
-```python
-g_{group_id} = []
-for dtype_entries in [("{dtype_a}", {group}_{dtype_suffix_a}), ("{dtype_b}", {group}_{dtype_suffix_b})]:
-    dtype_name, pairs = dtype_entries
-    for p in pairs:
-        g_{group_id}.append({"_group": "{group_id}", "{dtype}": dtype_name, **p})
-```
-
-Mode C 生成后必须增加自检断言：
-
-```python
-assert not POOL_KEYS_{group_id}, "Mode C requires no group-level dimensions"
-assert len(g_{group_id}) == sum(len(pairs) for _, pairs in dtype_entries_all)
-```
-
-### 池化抽样规则
+## 池化抽样规则
 
 - `shuffled_pool(base, seed)` 函数：返回 `(pool, 0)`，其中 pool 是 base 打乱后的副本
-- 每个 group 使用独立 `seed`，不同 group 错开切片实现互补覆盖
-- `K` 控制规模：有 pool 时 `总 case 数 ≈ per_dtype 条目总数 × K`（各 dtype 的 per_dtype dict 数量之和 × K）；无 pool 时 K 不参与，case 数 = per_dtype dict 总数
-- 池耗尽时调用 `shuffled_pool` 用 **相同 seed** 重新打乱（结果与上一轮完全一致），从头消费。效果等价于对打乱后的池做无限循环采样
+- 每个 group 使用独立 `seed`（`(group_idx + 1) * 100`），不同 group 错开切片实现互补覆盖
+- `_a` 由脚本运行时从 JSON 累加计算（遍历所有 group × 所有 dtype 的 per_dtype entry 总数）
+- `_default_cap = max(min(10, 100 // _a), 1)`
+- cap 通过 `--cap` 命令行参数传入；无参数运行时使用 default_cap
 
-### 输出格式
+  | a 范围 | cap | 效果 |
+  |--------|-----|------|
+  | ≤ 10 | 10 | 小算子，每 entry 可组合 10 种代表配置 |
+  | 11 | 9 | cap 随 a 增长逐步收敛 |
+  | 12 | 8 | |
+  | 13–14 | 7 | |
+  | 15–16 | 6 | |
+  | 17–20 | 5 | 中等 |
+  | 21–25 | 4 | |
+  | 26–33 | 3 | 多 dispatch |
+  | 34–50 | 2 | 高度分支 |
+  | ≥ 51 | 1 | 密集算子，每 entry 仅 1 种代表配置，依赖 group POOL 提供多样性 |
+
+- 池耗尽时调用 `shuffled_pool` 用 **相同 seed** 重新打乱（结果与上一轮完全一致），从头消费
+
+## 输出格式
 
 `S2P2_cases.json`：
 
 ```json
 [
-  {"_group": "{group_a}", "{dtype}": "{dtype_val}", "{dim1}": {v1}, "{dim2}": {v2}, "{attr_name}": {default_val}},
-  {"_group": "{group_b}", "{dtype}": "{dtype_val}", "{dim1}": {v1}, "{attr_name}": {default_val}}
+  {"_group": "{group_a}", "{dtype_param}": "{dtype_val}", "{dim1}": {v1}, "{dim2}": {v2}},
+  {"_group": "{group_b}", "{dtype_param}": "{dtype_val}", "{dim1}": {v1}}
 ]
 ```
 
 - 每条 case 必含 `_group`（对应 `S2P2_param_def.json` 的 group `id`）
-- 每条 case 必含 `{dtype}`（数据类型）
-- 每条 case 必含所有路由维度（通过 `**` 解包写入）
-- 每条 case 必含所有非路由维度的默认值
+- 每条 case 必含 dtype key（key 名为 `S2P2_param_def.json` 的 `dtype_tensors[0].param`）
+- 每条 case 必含 `path`（字符串）和 `key`（整数）
+- 每条 case 必含所有路由维度（通过 `**` 解包写入；复合维度展开为各子维度的独立字段）
 
-### 生成后自检
+## 脚本模板
+
+使用 Bash 复制模板到产出目录：
+
+```bash
+cp {skill_base}/scripts/gen_cases_template.py S2P2_gen_cases.py
+```
+
+模板为通用 JSON 驱动脚本，无需任何修改。
+
+## 生成后自检
 
 `S2P2_gen_cases.py` 写完后，主 Agent 执行以下自检：
 
-**阶段 1：执行**。`python3 S2P2_gen_cases.py` 返回码为 0。
+**阶段 1：执行**。`python3 S2P2_gen_cases.py` 返回码为 0，并检查输出中的 `a=N, default_cap=M, cap=M` 信息（无参数运行时 cap==default_cap；若需覆盖，用 `python3 S2P2_gen_cases.py --cap X` 运行，此时 cap==X；default_cap 由公式 `max(min(10, 100//a), 1)` 计算，可人工复核）。
 
 **阶段 2：完整性**。S2P2_cases.json 中：
 - 每个 group 的每类 dtype 至少有一条 case
-- 所有 case 的去重键元组无重复
+- 所有 case 无完全重复（全字段去重，first-win）
 - JSON 语法有效
+- 所有 case 均包含 `path`（string）和 `key`（int）字段，无缺失
+- 所有 case 的顶层 key 均为标量字段（string/int/float/bool），不存在 dict 或 array 类型的值（复合维度必须已展开为独立字段）
 
 **阶段 3：一致性**：
-- S2P2_gen_cases.py 中的取值列表与 S2P2_param_def.json 的 `per_dtype` 完全一致
+- 脚本正确从 `S2P2_param_def.json` 读取数据（验证 `extract_entry_dims` 和 `extract_group_dims` 函数逻辑）
 - `constraint_note` 描述的约束在取值中全部体现（人工核对——constraint_note 为自由文本，不要求自动化校验）

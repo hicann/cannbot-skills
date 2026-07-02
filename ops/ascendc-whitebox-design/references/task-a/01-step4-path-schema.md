@@ -10,10 +10,10 @@
 
 ```json
 {
-  "id": "P1",
+  "id": "T1K1",
   "name": "描述性名称（涉及输入/输出/属性信息时须在属性值前写明参数名）",
   "conditions": [
-    {"var": "参数名_属性", "op": "运算符", "value": "值"}
+    {"var": "tiling源码变量名", "op": "运算符", "value": "值"}
   ],
   "input_variables": ["对应算子输入参数/属性的变量"],
   "caller_options": ["调用者通过 API 调用方式控制的选项"],
@@ -44,11 +44,46 @@ Task A 不指定 group 归属。Group 划分由 Task D 在 Phase 2 完成。
 
 区分规则：比较常量用 `value`，比较另一个变量用 `ref`，多变量运算用 `expr`。
 
+### 条件来源约束
+
+每条路径的 `conditions` 只包含该路径**自身分支**的条件，来源限定为以下两类：
+
+1. **当前 IsMatch 函数的正向条件**：该路径对应的策略匹配函数（如 `IsMatchX()`）内部使函数 return true 的所有条件
+2. **当前 DoTiling / kernel dispatch 块内部的条件判断**：DoTiling 函数或 kernel dispatch 块中的 if-else 分支条件。同一 tiling key 内可能存在多条 kernel dispatch 分支（如不同模板参数、不同 submode），每条分支构成独立路径，其 conditions 需包含 kernel 侧的区分条件
+
+**禁止**将同一 if-else 链中**前置兄弟分支**的内部条件（或其否定形式）加入当前路径的 conditions。原因：前置 IsMatch 函数 return false 只需其内部**任一条件**不满足（各条件间为 OR 关系），将所有条件取反后 AND 到当前路径会引入不存在的约束，导致路径被误判为 dead。
+
+示例：
+- **if-else 策略链**：对于 `if (IsMatchA()) { ... } else if (IsMatchB()) { ... }` 形式的策略链，IsMatchB 路径的 conditions 只提取 `IsMatchB()` 内部的 return true 条件，不提取 `IsMatchA()` 内部任何条件的否定
+- **同一 tiling key 多 kernel 分支**：同一 IsMatch 函数命中后，kernel 侧按属性值、尺寸比较等条件 dispatch 到不同模板实例，每条 dispatch 分支作为独立路径，conditions = IsMatch 正向条件 + kernel dispatch 区分条件
+
+### 路径 ID 命名规则（T*K*）
+
+路径 `id` 采用 `T{t}K{k}` 格式，编码 tiling/kernel 两级分支结构：
+
+| 路径类型 | ID 格式 | 说明 |
+|----------|---------|------|
+| 常规路径 | `T{t}K{k}` | t = tiling 分支序号（按 IsMatch 函数在策略链中的出现顺序从 1 递增），k = kernel dispatch 分支序号（同一 tiling 分支内从 1 递增） |
+| 降级路径 | `T{t}K{k}d{d}` | 继承父路径的 T{t}K{k}，d = 降级序号（从 1 递增） |
+| 孤儿 Dispatch | `D{N}` | 无对应 tiling 分支，N 从 1 递增 |
+
+**命名约束**：
+- 同一 tiling 分支（同一 IsMatch 函数命中）下的所有路径共享相同 `T{t}` 前缀
+- 同一 tiling 分支内的不同 kernel dispatch 分支通过 `K{k}` 区分
+- T 序号按 tiling 策略选择函数中分支的出现顺序分配
+- K 序号按 kernel dispatch 块中分支的出现顺序分配
+
+**分组含义**：共享相同 `T{t}` 前缀的 reachable 路径自动归入同一 group（详见 `02-step2-group.md`）。
+
 ---
 
 ## 命名规则
 
-**变量命名：`{参数名}_{属性}`**。凡涉及输入/输出 tensor 或属性的属性字段，必须标注来源参数名（如 `x1_dtype`）。即使只有一个来源也必须标注前缀，禁止裸属性名。
+**路径 ID**：见上方 §路径 ID 命名规则（T*K*）。
+
+**变量命名：tiling 源码变量名**。conditions 中 `var`/`ref`/`expr` 字段的变量名必须使用 tiling 源码中的原始变量名（如 `srcDim_`、`dtypeX_`），禁止自行发明语义化名称。
+**例外**：当 dispatch 变量通过框架 API 管理（如 `SetTilingKey()` + `TILING_KEY_IS()`），不存在对应的源码局部变量名时，允许使用描述性名称（如 `tilingKey`），但须在 `S2P1_tiling_glossary.md` 中记录其框架 API 来源（`source` 列标注为 `framework_api`）。
+变量含义表的格式和规则 → 步骤 4 时 Read `{skill_base}/references/task-a/05-step4-glossary.md`。
 
 **path name**：涉及输入/输出/属性信息时，必须在属性值前写明参数名。格式如 `{mode}_{参数名}_{dtype}`。
 
@@ -100,7 +135,7 @@ Task A 不指定 group 归属。Group 划分由 Task D 在 Phase 2 完成。
       2. 内部变量边界检查导致实际执行的 kernel 指令与该分支主路径不同（不同的 `key_instructions`）
 
       执行规则：
-      1. 降级路径 `id` 在主路径之后递增分配（如 P5 → P5d1）
+      1. 降级路径 `id` 在父路径 ID 后追加 `d{d}` 后缀（如 T5K1 → T5K1d1）
       2. conditions 包含：降级前的入口条件 + 降级触发条件
       3. key_instructions 填写降级后实际执行的 kernel（不是降级前的）
       4. input_variables 和 caller_options 与主路径相同
@@ -119,3 +154,4 @@ Task A 不指定 group 归属。Group 划分由 Task D 在 Phase 2 完成。
 2. `caller_options` 中的变量名必须是调用者 API 层面的抽象选项名，不能是 tiling 内部编码变量
 3. 每条路径的 `conditions` 不为空
 4. 每条路径有 `source` 行号引用
+5. `S2P1_tiling_glossary.md` 已生成，且三分类列表中所有变量均有对应记录

@@ -32,16 +32,13 @@
 - `{算子路径}/tests/whitebox/S2P0_scout_t.md`（Scout-T 报告）
 - `{算子路径}/tests/whitebox/S2P0_scout_k.md`（Scout-K 报告）
 
-若 Scout-T 或 Scout-K 报告包含 `status: file_not_found`，不得按普通 P0/P1 表格强行解析缺失侧。`S2P0_file_manifest.json` 的 `verification.status` 必须写为 `partial`，`notes` 中记录缺失侧、`searched_paths` 和 `recovery`。主 Agent 根据 partial 结果决定补充路径、继续降级分析或终止。
+## 平台映射（供判断参考）
 
-## 平台信息来源
-
-本文件不维护 NpuArch / SocVersion / `__NPU_ARCH__` / `archXX` / 芯片型号 / 平台能力映射。所有平台判断必须使用主 Agent 从 `npu-arch` 获取并传入的 `platform` 字段。
-
-- `#if __NPU_ARCH__` 条件求值使用 `platform.npu_arch_macro`
-- `archXX` 目录或文件名匹配使用 `platform.arch_dir`
-- Regbase / `_apt` 等能力相关判断使用 `platform.capabilities` 或源码中的平台判断函数实现
-- 缺少必要字段时停止并返回缺参说明，禁止在本 prompt 内按芯片名或 DAV 编号猜测
+| NpuArch | __NPU_ARCH__ | Regbase 支持 | 代表芯片 |
+|---------|-------------|-------------|---------|
+| DAV_3510 | 3510 | 是 | Ascend950 |
+| DAV_2201 | 2201 | 否 | Ascend910B |
+| DAV_2002 | 2002 | 否 | Ascend310P |
 
 ## 输出
 
@@ -54,11 +51,11 @@
     "npu_arch": "{NpuArch}",
     "soc_version": "{SocVersion}",
     "chip_model": "{ChipModel}",
-    "core_count": 0,
-    "ub_size": 0
+    "core_count": "{CoreCount}",
+    "ub_size": "{UbSize}"
   },
   "verification": {
-    "status": "pass|pass_with_fixes|partial|fail",
+    "status": "pass|pass_with_fixes|fail",
     "auto_fixes": [],
     "gaps_found": 0,
     "gaps_resolved": 0
@@ -124,11 +121,10 @@
 4. Grep -rn "#if __NPU_ARCH__|ASCEND_VERSION|__CCE_AICORE__" op_kernel/
    → 标记 arch 条件编译文件，代入目标 npu_arch 求值：
      目标在 #if 保护范围内 → 正常 / 目标被 #if 排除 → 标记 platform_inactive
-5. 命名约定预标记（不维护平台映射，必须消费 platform 字段）:
-   a) 路径中的 `archXX` 与 `platform.arch_dir` 不一致 → 标记 platform_inactive
-   b) `_apt` / `regbase` / `RegBase` 等能力专用文件仅在 `platform.capabilities` 明确不支持对应能力时标记 platform_inactive
-   c) 无法由 platform 字段明确判定的文件不直接排除，留给 Phase C 读取确认
-6. Grep -E "#include.*arch[0-9][0-9]|arch[0-9][0-9]/|RegBase|regbase" op_kernel/ op_host/
+5. 命名约定双向排除:
+   a) 目标 ≠ Ascend950 → 标记 arch35/_apt/regbase 文件为 platform_inactive
+   b) 目标 = Ascend950 → 标记 op_kernel/ 根层级非 arch35 文件为 platform_inactive
+6. Grep "#include.*arch35|arch35/|RegBase|regbase" op_kernel/ op_host/
    → 标记 include 链引用上述文件的非专用文件（信息性记录，不排除）
 ```
 
@@ -174,6 +170,7 @@ gap_N: {类型, 文件路径, 基准线结果, Scout 报告结果}
 Read P0 前 80 行（include 区 + 入口函数签名）→ 确认入口函数 + 注册宏正确。
 发现 REGISTER_OPS_TILING_TEMPLATE → 提取模板类名 → Grep 定位 → 追加为 P1。
 发现委托调用 XxxTilingDefault(ctx) → Grep 定位被委托函数文件 → 追加为 P1。
+发现 #include 引用的同目录同名 .h 文件（companion header）→ 排除规则检查（不在 excluded 中）→ Grep 验证文件存在且包含结构体定义（TilingData|CompileInfo 等）→ 追加为 P1（read_strategy: full, symbols: [结构体名]）。
 ```
 
 **验证 tiling P1：**
@@ -195,7 +192,7 @@ Read 前 50 行 → 判断是否纳入。应纳入 → 追加，标记 auto_fixe
 **确认平台排除：**
 ```
 对 Phase B 的 excluded 文件：Read 前 30-50 行。
-排除判定遵循与 Phase A 5 相同的 platform 字段消费规则。
+排除判定遵循与 Phase A 5 相同的双向规则。
 确认合理 → 保留 excluded。确认不当 → 移回 file_list。
 ```
 
@@ -204,6 +201,7 @@ Read 前 50 行 → 判断是否纳入。应纳入 → 追加，标记 auto_fixe
 按 Phase C 结果填入 file_list（平台可达）和 excluded（平台不可达），path 使用 Phase C 中 Read 的绝对路径。
 
 ```
+0. 将输入的平台参数（npu_arch、soc_version、chip_model、core_count、ub_size）填入 platform 对象
 1. kernel.total_key_count = sum(file_list 的 key_count)
 2. 填写 verification：全部 PASS → "pass" / 有 gap 已修复 → "pass_with_fixes" / 有 gap 未修复 → "fail"
 3. 填写 notes（异常模式提示 + 平台过滤说明）
@@ -229,7 +227,7 @@ Read 前 50 行 → 判断是否纳入。应纳入 → 追加，标记 auto_fixe
 
 ## 约束
 
-- 默认读取量不超过 300 行源码。若 gap 无法在 300 行内闭环，允许在 `verification.auto_fixes` 或 `notes` 中记录 `request_incremental_read`，说明目标文件、符号、当前证据和新增行数需求；主 Agent 批准后再增量读取
+- 总读取量不超过 300 行源码
 - JSON 中所有描述性字段使用中文
 - 只输出元数据，禁止包含源码内容
-- FAIL 或 partial 时在 verification 中记录具体原因
+- FAIL 时在 verification 中记录具体原因

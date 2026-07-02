@@ -2,78 +2,105 @@
 
 > **前置条件**：Step 1-3 全部完成
 
-写入主 Agent 指定目录。
+本步骤负责运行 builder 转换 Step 3 增量写入的产出、校验一致性、更新路径列表，并生成可追溯性报告。
 
-## 4.1 S2P2_param_def.json
+## 输入
+
+| 数据项 | 来源 | 说明 |
+|--------|------|------|
+| groups 推导数据 | S2P2_param_def_groups.json | Step 3 由 pick_dims.py 生成 |
+| reachability + dead_reason | Step 1 内存 | 每条路径的可达性判定及不可达原因 |
+| group 字段 | Step 2 内存 | 每条 reachable 路径的 group 分配 |
+| groups 列表 | Step 2 内存 | 所有 group id |
+| dtype 路由声明 | S2P1_operator_model.json inputs | tensor 名与 dtype_param 名的映射 |
+| S2P1_path_list.json | 文件 | 原始路径数据（含 conditions、source_constraints） |
+
+## 输出
+
+| 产出 | 目标文件 | 对应子步骤 |
+|------|---------|-----------|
+| 参数定义文件 | S2P2_param_def.json（由 builder 生成） | 4.1 |
+| 路径列表更新 | S2P1_path_list.json（原位覆写） | 4.2 |
+| 可追溯性报告 | S2P2_traceability.md | 4.3（校验性产出） |
+
+执行顺序：4.1 → 4.2 → 4.3，严格顺序。4.2 校验失败修正 reachability_data.json 后重跑；4.3 constraint_note 校验不一致回到 Step 3。
+
+## 4.1 运行 builder 生成 S2P2_param_def.json
+
+使用 Bash 执行 builder 脚本，将 groups 数据展开为完整的参数定义文件：
+
+```bash
+python3 {skill_base}/scripts/build_param_def.py \
+  --groups S2P2_param_def_groups.json \
+  --output S2P2_param_def.json
+```
+
+builder 脚本职责：
+- 读取 S2P2_param_def_groups.json
+- 保留每个 group 的 `group_dims` 嵌套结构（不展平）
+- 按固定字段顺序（id → mode → group_dims → per_dtype → constraint_note）输出
+- 使用紧凑 JSON 格式（简单数组单行、compound dict 单行）。此格式仅适用于 S2P2_param_def.json，与 S2P2_param_def_groups.json 的格式约束独立
+
+**完成标志**：S2P2_param_def.json 已生成，python3 可正常 `json.load()` 读取。
+
+## 4.2 更新 S2P1_path_list.json
+
+### 执行步骤
+
+1. 将 Step 1（可达性标注）和 Step 2（路径分组）的内存数据序列化为 S2P2_reachability_data.json：
 
 ```json
 {
-  "platform": "{platform}",
-  "platform_cores": NN,
-  "tiling_keys": [K1, K2, K3, ...],
-  "groups": [
-    {
-      "id": "{group_id}",
-      "mode": "{一句话模式触发描述}",
-      "{shared_dim}": [{v1}, ..., {v10}],
-      "per_dtype": {
-        "{dtype_a}": {"path": "P_a", "key": K_a, "{dim}": [{v1}, {v2}, {v3}, {v4}, {v5}]},
-        "{dtype_b}": {"path": "P_b", "key": K_b, "{dim}": [{v1}, {v2}, {v3}, {v4}, {v5}]}
-      },
-      "constraint_note": "{中文自然语言约束说明}"
-    }
+  "groups": ["G1", "G2", ...],
+  "paths": [
+    {"id": "P1", "reachability": "reachable", "group": "G1"},
+    {"id": "P2", "reachability": "dead", "dead_reason": "..."}
   ]
 }
 ```
 
-**顶层字段**：
+- `groups`：所有 group id 的有序列表
+- `paths`：每条路径的 id + reachability + group（reachable 时）+ dead_reason（dead/api_dead/api_warn 时）
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `platform` | string | 是 | 目标平台标识 |
-| `platform_cores` | int | 是 | 目标平台核数 |
-| `tiling_keys` | array[int] | 是 | 所有 reachable 路径对应的 tiling key（去重） |
-| `groups` | array | 是 | 按 tiling mode 分组的参数定义 |
+2. 运行更新脚本：
 
-**group 字段**：
+```bash
+python3 {skill_base}/scripts/update_path_list.py \
+  --path-list S2P1_path_list.json \
+  --param-def S2P2_param_def.json \
+  --reach-data S2P2_reachability_data.json \
+  --op-name {op_name} \
+  --platform "{platform}"
+```
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `id` | string | 是 | group 标识 |
-| `mode` | string | 是 | 触发模式一句话描述 |
-| `per_dtype` | dict | 是 | 按 dtype 绑定 path/key/取值。key 为 dtype 字符串，value 含 `path`/`key`/及各维度取值列表 |
-| `{dim}` | array/null | 否 | 影响 tensor shape 的非路由维度取值列表。条件必填：若维度属于 `input_variables`、映射到 tensor 元素但并非该 group 的路由维度，必须写入 group 级字段，每 group 10 值（Po2/Composite/Prime 平衡）。同一维度名可出现在多个 group 中。无此类维度时为 null |
-| `constraint_note` | string | 是 | 约束说明。只能引用 param 维度名和具体数值，禁止引用内部变量名。内部变量→param 的等价关系必须写入 traceability |
+3. 检查 exit code：
+   - 0 → 6 项校验通过，继续 4.3
+   - 1 → 根据输出修正 S2P2_reachability_data.json 后重跑（最多 3 轮）
 
-**per_dtype 内字段**：
+**完成标志**：S2P1_path_list.json 已更新，6 项校验全部通过。
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `path` | string | 是 | S2P1 path ID |
-| `key` | int | 是 | tiling key 值 |
-| `{dim_name}` | array | 条件必填 | 该 dtype 下某维度的取值列表。维度名与 tiling 源码中的 params 名一致 |
+## 4.3 生成 S2P2_traceability.md
 
-**禁止字段**：`t`、`coverage`、`thresholds`、`anchor_dim`、`per_value`、`alignment`、`constraints`(JSON 格式)、`low_configs`、`desc_rules`。
+本节为校验性产出——数据在 Step 3 已准备好，此处格式化并核验一致性。
 
-## 4.2 S2P1_path_list.json 更新
+### 执行规则
 
-在原始文件基础上添加/更新：顶层 `op_name`/`platform`/`groups`（列表）；每条路径 `group`/`reachability`。
+- **触发条件表**：tiling 源码中该 group 对应模式的分支判断条件
+- **等价推导表**：Step 3 中所有内部变量条件的回溯过程。每行一条内部变量条件；若一个条件同时影响取值列表和约束文字，拆为两行分别记录「写入位置」
+- 若 group 无内部变量回溯，等价推导表注明此情况
+- **constraint_note 校验**：生成此表后，逐行核验 Step 3 写入的 constraint_note 中所有数值和条件都能在本表「写入位置 = constraint_note」的行中找到对应，确保无中间变量残留
 
-写回格式：conditions 每个元素一行；纯字符串数组每个元素一行；其他 indent=2。必须先 Read 原文件再修改，保留原始路径数据和 source_constraints。
+### 复合维度映射
 
-**强制校验（Bash，必须全部通过才能继续 Step 5）**：
+| path | 复合维度名 | 耦合类型 | 子维度 | 耦合关系 | 基准维 |
+|------|-----------|---------|--------|---------|--------|
+| `{path_id}` | `{compound_name}` | 确定性 | `{dim_a}`, `{dim_b}` | `{关系描述}` | `{基准维名}` |
+| `{path_id}` | `{compound_name}` | 约束 | `{dim_a}`, `{dim_b}` | `{约束表达式}` | `{基准维名}` |
 
-用 Bash + python3 读 S2P1_path_list.json 和 S2P2_param_def.json，检查以下 5 项，任一失败则回到 4.2 修正：
+- 同一 group 内不同 path 可能有不同的耦合关系，按 path 分行记录
+- 若该 group 无耦合维度，此表注明"本 group 无耦合维度，所有路由维度独立取值"
 
-1. **reachability 全覆盖** — 每条 path 的 `reachability` 字段非 null，值属于 `reachable`/`api_dead`/`api_warn`/`dead`/`disputed` 之一
-2. **数量等式** — `reachable + api_dead + api_warn + dead + disputed` 数量之和 == paths 总数（含 dead_paths）
-3. **reachable 必有 group** — 所有 `reachability == "reachable"` 的 path 的 `group` 字段非 null
-4. **groups 列表一致** — S2P1 顶层 `groups` 列表与 S2P2 每个 group 的 `id` 完全一致（顺序无关）
-5. **无空 group** — 每个 S2P2 group 的 `id` 在 S2P1 中至少被一条 reachable path 的 `group` 字段引用
-
-校验通过后打印各状态数量和 groups 列表。校验不通过则 exit 1，禁止继续。
-
-## 4.3 S2P2_traceability.md
+### 格式参考
 
 ```markdown
 # 参数推导可追溯性报告：{op_name} ({platform})
@@ -93,8 +120,3 @@
 | `{internal_var} op {V}` | L行号: `计算表达式` | `{param} op {V′}` | per_dtype.{dtype}.{param}（取值边界） |
 | `{internal_var} op {V}` | L行号: `计算表达式` | `{param} op {V′}` | constraint_note（约束文字） |
 ```
-
-- **触发条件表**：tiling 源码中该 group 对应模式的分支判断条件
-- **等价推导表**：Step 3 中所有内部变量条件的回溯过程。每行一条内部变量条件；若一个条件同时影响取值列表和约束文字，拆为两行分别记录「写入位置」
-- 若 group 无内部变量回溯，等价推导表注明此情况
-- **constraint_note 校验**：生成此表后，逐行核验 Step 3 写入的 constraint_note 中所有数值和条件都能在本表「写入位置 = constraint_note」的行中找到对应，确保无中间变量残留

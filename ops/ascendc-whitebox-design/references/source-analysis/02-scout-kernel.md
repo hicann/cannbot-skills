@@ -4,18 +4,18 @@
 > 严格按照以下步骤编号顺序执行。前置条件未满足禁止启动该步骤。
 > 详细规则见本文件后续章节，执行顺序节未覆盖的细节以各章节为准。
 
-1. 全量扫描（Glob op_kernel/ + Grep TILING_KEY_IS） → P0 文件 + grep 计数基准
-   前置：无
-2. 平台预过滤（命名约定排除 + #if 求值） → P0_active + P0_excluded
-   前置：Step 1 完成
-3. 逐文件读 dispatch 块（判定模式 → 提取条目 → 检查编译约束 → 交叉验证计数）
-   前置：Step 2 完成
-4. 处理语义常量 key（非数字 key 时） → P1
-   前置：Step 3 完成
-5. Pattern F 处理（Step 1 结果=0 时）
-   前置：Step 1 结果=0
-6. 写入 S2P0_scout_k.md
-   前置：Step 3-5 完成
+1.  全量扫描（Glob op_kernel/ + Grep TILING_KEY_IS） → P0 文件 + grep 计数基准
+    前置：无
+1b. 平台预过滤（命名约定排除 + #if 求值） → P0_active + P0_excluded
+    前置：Step 1 完成
+2.  逐文件读 dispatch 块（判定模式 → 提取条目 → 检查编译约束 → 交叉验证计数）
+    前置：Step 1b 完成
+3.  处理语义常量 key（非数字 key 时） → P1
+    前置：Step 2 完成
+4.  Pattern F 处理（Step 1 结果=0 时）
+    前置：Step 1 结果=0
+5.  写入 S2P0_scout_k.md
+    前置：Step 2-4 完成
 
 **完成标志**：S2P0_scout_k.md 已写入，含 dispatch 模式 + key 计数 + 逐条映射 + 排除文件
 
@@ -29,16 +29,8 @@
 
 - 算子名称
 - 算子路径（包含 op_host/ 和 op_kernel/ 的目录）
-- 平台参数（主 Agent 通过 `npu-arch` 解析后的 `platform` 对象，至少包含 `npu_arch`、`soc_version`、`chip_model`、`npu_arch_macro`、`arch_dir`，按需包含 `capabilities`）
-
-## 平台信息来源
-
-本文件不维护 NpuArch / SocVersion / `__NPU_ARCH__` / `archXX` / 芯片型号 / 平台能力映射。所有平台判断必须使用主 Agent 从 `npu-arch` 获取并传入的 `platform` 字段。
-
-- `#if __NPU_ARCH__` 条件求值使用 `platform.npu_arch_macro`
-- `archXX` 目录或文件名匹配使用 `platform.arch_dir`
-- Regbase / `_apt` 等能力相关判断使用 `platform.capabilities` 或源码中的平台判断函数实现
-- 缺少必要字段时停止并返回缺参说明，禁止在本 prompt 内按芯片名或 DAV 编号猜测
+- 平台参数（npu_arch、chip_model）
+- **npu_arch_num**：从 `npu_arch` 名称提取数字后缀（如 `DAV_3510` → `3510`），用于 `#if __NPU_ARCH__` 条件编译求值
 
 ## 输出
 
@@ -49,14 +41,14 @@
 ```
 === KERNEL SCOUT REPORT ===
 
-目标平台: {platform.npu_arch} ({platform.chip_model})
+目标平台: {NpuArch} ({ChipModel})
 
 扫描基准线 (Step 1):
   op_kernel/{算子}_kernel.cpp: {N} 个 TILING_KEY_IS
-  op_kernel/{算子}_{other_arch}_kernel.cpp: {M} 个 TILING_KEY_IS
-  全量总计: 34 个
-  有效（目标平台可达）: 22 个
-  排除（目标平台不可达）: 12 个
+  op_kernel/{算子}_arch35_kernel.cpp: {M} 个 TILING_KEY_IS
+  全量总计: {Total} 个
+  有效（目标平台可达）: {Active} 个
+  排除（目标平台不可达）: {Excluded} 个
 
 Dispatch 模式: A（if/else-if 链）
 
@@ -70,8 +62,8 @@ P0（目标平台可达）:
       ...
 
 排除（目标平台不可达）:
-  - op_kernel/{算子}_{other_arch}_kernel.cpp
-    排除原因: 文件被 #if __NPU_ARCH__ >= {macro_threshold} 保护，目标 {platform.npu_arch} (__NPU_ARCH__={platform.npu_arch_macro}) 不满足条件
+  - op_kernel/{算子}_arch35_kernel.cpp
+    排除原因: 文件被 #if __NPU_ARCH__ >= 350 保护，目标 {NpuArch} (__NPU_ARCH__={N}) 不满足条件
     排除 key 数量: {M}
     逐条映射（来自 Grep，未经 Read 验证）:
       key={K} → (行 {L})
@@ -110,42 +102,31 @@ IF 结果 = 0 → 跳到 Step 4（Pattern F）
 IF 结果 > 0 → 进入 Step 1b
 ```
 
-若 op_kernel 目录或 kernel 文件未找到，不得输出自由格式失败文本。必须写入 `{算子路径}/tests/whitebox/S2P0_scout_k.md`，并包含：
-
-```yaml
-status: file_not_found
-searched_paths:
-  - op_kernel/**/*.cpp
-  - op_kernel/**/*.h
-recovery: main_agent_decision_required
-```
-
-此状态表示目录结构或算子路径异常。Scout-Verify 只能做 partial 校验，主 Agent 决定补充路径、继续降级分析或终止。
-
 ### Step 1b：平台预过滤（消费 Step 1 的 P0 列表）
 
 对 Step 1 发现的每个 P0 文件，判断目标平台可达性。**#if 条件编译是唯一的排除判据，文件名只是缩小检查范围的线索。**
 
 ```
-1. 命名约定预过滤（不维护平台映射，必须消费 platform 字段）：
+1. 命名约定确定性排除（不需要 #if 确认）：
 
-   a) `archXX` 专用文件或目录：
-      - 路径中的 `archXX` 与 `platform.arch_dir` 一致 → 保留为候选
-      - 路径中的 `archXX` 与 `platform.arch_dir` 不一致 → 标记 platform_inactive
-      - 路径不含 `archXX` → 视为共享实现，继续通过 #if / dispatch / 注册关系确认
+   a) 目标 ≠ Ascend950 → 排除 Ascend950 专用文件：
+      - 文件名以 _apt.cpp 结尾
+      - 文件名含 arch35（含 arch35/ 子目录）
+      - 文件名含 regbase 或 RegBase
+      排除原因："Ascend950 专用（{特征}），目标 {npu_arch} 不可达"
 
-   b) `_apt` / `regbase` / `RegBase` 等能力专用文件：
-      - `platform.capabilities` 明确支持对应能力 → 保留为候选
-      - `platform.capabilities` 明确不支持对应能力 → 标记 platform_inactive
-      - 能力字段缺失或语义不确定 → 不直接排除，进入 #if / Read 确认
+   b) 目标 = Ascend950 → 排除 op_kernel/ 根层级非 arch35 文件：
+      op_kernel/ 根层级下无上述三类特征的文件为 Ascend910B 实现，
+      目标 Ascend950 时应排除，仅保留 arch35/ 下的 Ascend950 实现。
+      排除原因："Ascend910B 实现（非 arch35），目标 Ascend950 不可达"
 
 2. 其余文件 → Grep "#if __NPU_ARCH__|ASCEND_VERSION|__CCE_AICORE__" → 命中的加入候选
 
 3. 对启发式候选列表中的文件，执行确定性检查:
    Grep -n "#if __NPU_ARCH__|ASCEND_VERSION|__CCE_AICORE__" 每个文件
-   对命中的文件，读取 #if 条件并代入 `platform.npu_arch_macro` 求值:
-   - 条件不满足 → 确认排除
-   - 条件满足 → 不排除
+   对命中的文件，读取 #if 条件并代入目标 npu_arch 求值:
+    - 如 #if __NPU_ARCH__ >= 350，目标 {NpuArch} (__NPU_ARCH__={arch}) → 不满足 → 确认排除
+    - 如 #if __NPU_ARCH__ == {arch}，目标 {NpuArch} → 满足 → 不排除
 
 4. 排除文件用 Grep -n "TILING_KEY_IS" 获取逐条映射（不做 Read）
 5. 产出：P0_active（进入 Step 2）+ P0_excluded（附原因和映射）
@@ -153,7 +134,7 @@ recovery: main_agent_decision_required
 
 **排除判据优先级：**
 
-- 命名约定（`archXX` / `_apt` / `regbase` / `RegBase`）仅基于 `platform` 字段和明确能力信息排除
+- 命名约定（_apt / arch35 / regbase/RegBase）双向排除 → 确定性排除
 - #if __NPU_ARCH__ 或 ASCEND_VERSION 不满足目标 → 确定性排除
 - 其他 → 不排除
 
@@ -200,7 +181,8 @@ Step 2b 条目数 vs Step 1 grep 计数。不一致 → 标注差异原因（gre
 ```
 对 Step 2 中发现的语义常量 key：
   1. Grep "#define.*常量名" 定位 → Read 定义行 → 记录常量和数值
-  2. 定义文件追加为 P1
+  2. 定义与 P0 同文件 → 在 P0 逐条映射中标注常量名和行号，不单独追加 P1
+     定义于外部文件 → 该文件追加为 P1
 无语义常量 → 跳过。
 ```
 
@@ -212,19 +194,9 @@ Grep "__global__.*void|ASCENDC_TPL_SEL|if constexpr" 定位入口 → Read 前 3
   - 发现隐藏 dispatch → 提升为 P0，回 Step 2
 ```
 
-Pattern F 必须在报告中显式写入：
-
-```yaml
-Dispatch 模式: F
-dispatch_mode: none
-key_count: 0
-```
-
-`dispatch_mode: none` 与 `status: file_not_found` 不同：前者表示已找到 kernel 入口但无 tiling key dispatch，后者表示 kernel 文件本身未定位。
-
 ## 约束
 
-- 遵循 Step 1 → 1b → 2 → 3 → 4 顺序，不得跳步（含 Step 1b 平台预过滤）
+- 遵循 Step 1 → 1b → 2 → 3 → 4 → 5 顺序，不得跳步
 - Step 2b 条目数必须与 Step 1 grep 计数交叉验证，不一致标注原因
 - Pattern 判定必须 Read 代码确认（Step 2a），不可仅 grep 特征词
 - 只输出元数据，禁止包含源码内容

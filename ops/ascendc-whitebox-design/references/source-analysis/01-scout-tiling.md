@@ -29,30 +29,22 @@
 
 - 算子名称
 - 算子路径（包含 op_host/ 和 op_kernel/ 的目录）
-- 平台参数（主 Agent 通过 `npu-arch` 解析后的 `platform` 对象，至少包含 `npu_arch`、`soc_version`、`chip_model`、`npu_arch_macro`、`arch_dir`、`core_count`、`ub_size`，按需包含 `capabilities`）
-
-## 平台信息来源
-
-本文件不维护 NpuArch / SocVersion / `__NPU_ARCH__` / `archXX` / 芯片型号 / 平台能力映射。所有平台判断必须使用主 Agent 从 `npu-arch` 获取并传入的 `platform` 字段。
-
-- `#if __NPU_ARCH__` 条件求值使用 `platform.npu_arch_macro`
-- `archXX` 目录或文件名匹配使用 `platform.arch_dir`
-- Regbase / `_apt` 等能力相关判断使用 `platform.capabilities` 或源码中的平台判断函数实现
-- 缺少必要字段时停止并返回缺参说明，禁止在本 prompt 内按芯片名或 DAV 编号猜测
+- 平台参数（NpuArch、核数、UB 大小）
 
 ## 排除规则（强制）
 
-**a) `archXX` 专用文件或目录**：
-   - 路径中的 `archXX` 与 `platform.arch_dir` 一致 → 保留为候选
-   - 路径中的 `archXX` 与 `platform.arch_dir` 不一致 → 标记 platform_inactive
-   - 路径不含 `archXX` → 视为共享实现，继续通过源码分支、#if 或注册关系确认
+**a) 目标 ≠ Ascend950 → 排除 Ascend950 专用文件**：
+   - 文件名以 `_apt.cpp` 结尾
+   - 文件名含 `arch35`（含 `arch35/` 子目录）
+   - 文件名含 `regbase` 或 `RegBase`
+   排除原因："Ascend950 专用（{特征}），目标 {NpuArch} 不可达"
 
-**b) `_apt` / `regbase` / `RegBase` 等能力专用文件**：
-   - `platform.capabilities` 明确支持对应能力 → 保留为候选
-   - `platform.capabilities` 明确不支持对应能力 → 标记 platform_inactive
-   - 能力字段缺失或语义不确定 → 不直接排除，继续追踪源码中的平台判断函数或 #if 条件
+**b) 目标 = Ascend950 → 排除非 arch35 文件**：
+   op_host/ 根层级下无上述三类特征的文件为 Ascend910B 实现，
+   目标 Ascend950 时应排除，仅使用 arch35/ 下的 Ascend950 实现。
+   排除原因："Ascend910B 实现（非 arch35），目标 Ascend950 不可达"
 
-此规则在 Step 3/4 中生效：追踪到外部文件时，先按上述 a)/b) 检查。只有平台字段或源码条件能明确判定不可达时才排除，否则继续读取确认。
+此规则在 Step 3/4 中生效：追踪到外部文件时，先按上述 a)/b) 检查，命中即排除不读取。
 
 ## 输出
 
@@ -88,9 +80,9 @@ P1（P0 引用的外部定义）:
     定义的符号: {常量}(={值})
     参与分支判断: {是/否}（{简述用途}）
   - {平台判断实现文件}
-    定义的符号: IsRegbaseSocVersion()
-    函数逻辑概要: 检查 SoC 版本是否在源码实现的 Regbase 白名单中
-    对目标平台的返回值: {bool}（由源码实现 + platform 字段求值）
+    定义的符号: {平台判断函数名}()
+    函数逻辑概要: 检查 SoC 版本是否在平台列表中
+    对目标平台的返回值: {bool}（{目标} {在/不在} 平台列表）
 
 P2（已排除）:
   - {数据搬运工具文件}
@@ -99,11 +91,10 @@ P2（已排除）:
 平台过滤结论:
   目标平台: {NpuArch} ({ChipModel})
   平台判断函数求值:
-    - IsRegbaseSocVersion() → {bool}（{目标} {在/不在} Regbase 列表）
+    - {平台判断函数名}() → {bool}（{目标} {在/不在} 平台列表）
   分支可达性:
-    - [可达] dataType 分支 → {N} 个 dtype 路径
-    - [可达] 计算阈值分支 → {切分} 路径
-    - [不可达] Regbase 路径 → 被 IsRegbaseSocVersion() 排除
+    - [可达] {条件描述} → {N} 个路径
+    - [不可达] {条件描述} → 被 {平台判断函数名}() 排除
   被排除的文件:
     - {文件路径} — {排除原因}
     或 无（如排除仅体现在分支层面无独立文件）
@@ -117,28 +108,20 @@ P2（已排除）:
 ### Step 1：定位 P0（tiling 入口文件）
 
 ```
-Glob op_host/*tiling*.cpp → Grep "GET_TILING_FUNC|REG_TILING|REGISTER_TILING" op_host/ → 确认唯一 P0。
+Glob op_host/**/*tiling*.cpp → Grep "GET_TILING_FUNC|REG_TILING|REGISTER_TILING|IMPL_OP_OPTILING" op_host/ → 确认唯一 P0。
 多候选时：优先 GET_TILING_FUNC，其次文件名匹配算子名，记录到"间接引用"。
 ```
-
-若 Step 1 未找到 tiling 入口文件，不得输出自由格式失败文本。必须写入 `{算子路径}/tests/whitebox/S2P0_scout_t.md`，并包含：
-
-```yaml
-status: file_not_found
-searched_paths:
-  - op_host/*tiling*.cpp
-  - op_host/**/*
-recovery: main_agent_decision_required
-```
-
-此状态表示目录结构或算子路径异常。后续 Scout-Verify 只能做 partial 校验，主 Agent 决定补充路径、继续降级分析或终止。
 
 ### Step 2：读入口函数，识别顶层分支骨架
 
 ```
-1. Read P0 全文 → 定位入口函数体（通过注册宏关联的函数）
+1. 定位入口函数体（通过注册宏关联的函数名）
+   IF P0 行数 > 500：
+     Grep P0 文件中入口函数名 → 获取定义行号 → Read 该行起 80-120 行（覆盖函数体）
+     后续沿分支链追踪时，按 §P0 文件过大时的处理 逐步扩展
+   ELSE → Read P0 全文
 2. 分析顶层结构：有哪些 if/switch/条件判断？每个分支条件？调用了什么函数？设置了什么 tiling key？
-3. 对涉及平台判断的分支（IsRegbaseSocVersion、IsSocVersionXxx 等）：
+3. 对涉及平台判断的分支（IsRegbaseSocVersion、IsSocVersion310P 等）：
    → 溯源函数实现（见 Step 3 追踪规则）→ 代入目标平台参数求值 → 标注 [可达] / [不可达]
    → 不可达分支的下游调用链不再追踪
 4. 产出：顶层分支骨架（条件 → 函数调用 → 平台可达性标注）
@@ -182,13 +165,13 @@ recovery: main_agent_decision_required
       │   → 函数体: return CeilDiv(ubAvailable, elemPerBlock) → 无子分支 → 停止
       ├── IsRegbaseSocVersion(context) → 返回值直接用于 if → 追踪！
       │   → Grep 定位在 {平台判断实现文件} → Read 函数定义
-      │   → 函数体: 检查 SoC 版本是否在源码实现的 Regbase 白名单中
-      │   → 代入目标 {platform.npu_arch}/{platform.soc_version} → 得到确定返回值
+      │   → 函数体: 检查 SoC 版本是否在 {ASCEND950, ...} 列表中
+      │   → 代入目标 {NpuArch}/{SocVersion} → 不在列表 → 返回 false
       │   → if (IsRegbaseSocVersion()) 分支 → [不可达] → 停止追踪下游
       │   → if (!IsRegbaseSocVersion()) 分支 → [可达] → 继续追踪
       ├── {算子}Regbase(context) → 在不可达分支内被调用 → 不追踪
-      ├── {算子}_tiling_{other_arch}.cpp 中的函数 → 文件名含与 platform.arch_dir 不一致的 archXX
-      │   → 命中排除规则 a)，标记为 excluded
+      ├── {算子}_tiling_arch35.cpp 中的函数 → 文件名含 arch35，目标 ≠ Ascend950
+      │   → 命中排除规则 a)，不读取 → 标记为 excluded
       ├── SetBlockDim(coreNum) → 返回值不参与任何 if → 不追踪
       └── SaveTilingData(context) → 无返回值 → 不追踪
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -----------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -7,7 +7,7 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------
 """Compute tiling key coverage from plog and S2P2_param_def.json.
 
 Usage:
@@ -25,14 +25,8 @@ import logging
 import os
 import re
 import sys
-from pathlib import Path
 
-
-LOGGER = logging.getLogger("compute_tilingkey_coverage")
-
-
-def configure_logging() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+_logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -43,24 +37,36 @@ def parse_args():
     return parser.parse_args()
 
 
-def parse_tiling_key(line):
-    match = re.search(r"Tiling Key:\s*(\d+)", line)
-    return int(match.group(1)) if match else None
+_TILING_KEY_PATTERNS = [
+    re.compile(r"Tiling Key:\s*(\d+)"),
+    re.compile(r"tilingKey:\s*(\d+)"),
+]
+
+
+def _match_tiling_key(line):
+    for pattern in _TILING_KEY_PATTERNS:
+        m = pattern.search(line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _read_keys_from_file(log_path):
+    keys = []
+    with open(log_path, errors="ignore") as f:
+        for line in f:
+            key = _match_tiling_key(line)
+            if key is not None:
+                keys.append(key)
+    return keys
 
 
 def extract_keys_from_plog(log_path):
     """Extract all tiling key values from plog file, in execution order."""
-    path = Path(log_path)
-    if not path.is_file():
+    try:
+        return _read_keys_from_file(log_path)
+    except FileNotFoundError:
         return []
-
-    keys = []
-    with path.open(errors="ignore") as f:
-        for line in f:
-            key = parse_tiling_key(line)
-            if key is not None:
-                keys.append(key)
-    return keys
 
 
 def compute_coverage(expected_keys, actual_keys):
@@ -112,15 +118,15 @@ def compute_per_group_coverage(groups, actual_set):
 
 
 def main():
-    configure_logging()
+    logging.basicConfig(format="%(message)s")
     args = parse_args()
 
     if not os.path.exists(args.log_path):
-        LOGGER.info("SKIPPED: no plog found at %s", args.log_path)
+        _logger.info("SKIPPED: no plog found at %s", args.log_path)
         sys.exit(0)
 
     if not os.path.exists(args.param_def):
-        LOGGER.info("ERROR: param-def not found at %s", args.param_def)
+        _logger.error("ERROR: param-def not found at %s", args.param_def)
         sys.exit(1)
 
     with open(args.param_def) as f:
@@ -128,7 +134,7 @@ def main():
 
     expected_keys = param_def.get("tiling_keys", [])
     if not expected_keys:
-        LOGGER.info("WARNING: no tiling_keys field in param-def, coverage cannot be computed")
+        _logger.warning("WARNING: no tiling_keys field in param-def, coverage cannot be computed")
         sys.exit(0)
 
     actual_keys = extract_keys_from_plog(args.log_path)
@@ -146,14 +152,14 @@ def main():
         json.dump(report, f, indent=2)
 
     uncovered = report["uncovered_keys"]
-    LOGGER.info(
-        "TilingKey coverage: %.1f%% (%s/%s)",
-        report["coverage_rate"] * 100,
-        len(report["covered_keys"]),
-        report["total_keys"],
+    _logger.info(
+        "TilingKey coverage: %.1f%% (%d/%d)",
+        report['coverage_rate'] * 100,
+        len(report['covered_keys']),
+        report['total_keys']
     )
     if uncovered:
-        LOGGER.info("Uncovered keys: %s", uncovered)
+        _logger.info("Uncovered keys: %s", uncovered)
 
 
 if __name__ == "__main__":

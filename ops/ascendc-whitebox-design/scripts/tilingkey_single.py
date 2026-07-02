@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -----------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -7,7 +7,7 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-# -----------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------
 """Run a single pytest case and extract its tiling key from plog.
 
 Usage:
@@ -22,19 +22,17 @@ Output:
 """
 import argparse
 import glob
+import json
 import logging
 import os
 import re
 import subprocess
 import sys
 
+_logger = logging.getLogger(__name__)
+
 
 PLOG_DIR = os.path.expanduser("~/ascend/log/debug/plog")
-LOGGER = logging.getLogger("tilingkey_single")
-
-
-def configure_logging() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 
 
 def parse_args():
@@ -72,19 +70,17 @@ def clear_plog():
 
 def check_npu():
     """Check if NPU is available."""
-    torch_npu_check = "import torch_npu; raise SystemExit(0 if torch_npu.npu.is_available() else 1)"
     result = subprocess.run(
-        [sys.executable, "-c", torch_npu_check],
+        [sys.executable, "-c", "import torch_npu; print(torch_npu.npu.is_available())"],
         capture_output=True, text=True, timeout=30,
     )
-    if result.returncode == 0:
+    if "True" in result.stdout:
         return True
-    torch_check = "import torch; raise SystemExit(0 if torch.npu.is_available() else 1)"
     result = subprocess.run(
-        [sys.executable, "-c", torch_check],
+        [sys.executable, "-c", "import torch; print(torch.npu.is_available())"],
         capture_output=True, text=True, timeout=30,
     )
-    return result.returncode == 0
+    return "True" in result.stdout
 
 
 def run_single_case(test_file, case_id, op_path):
@@ -92,7 +88,7 @@ def run_single_case(test_file, case_id, op_path):
     env = os.environ.copy()
     env["ASCEND_GLOBAL_LOG_LEVEL"] = "1"
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", test_file, "-q", "--tb=short", "-k", case_id],
+        [sys.executable, "-m", "pytest", test_file, "-q", "--tb=short", "--case-id", case_id],
         cwd=op_path,
         env=env,
         capture_output=True,
@@ -102,6 +98,25 @@ def run_single_case(test_file, case_id, op_path):
     return result
 
 
+_TILING_KEY_RE = re.compile(r"Tiling Key:\s*(\d+)")
+
+
+def _read_lines(fpath):
+    try:
+        with open(fpath, errors="ignore") as f:
+            return f.readlines()
+    except OSError:
+        return []
+
+
+def _search_key_in_file(fpath):
+    for line in _read_lines(fpath):
+        m = _TILING_KEY_RE.search(line)
+        if m:
+            return m.group(1)
+    return None
+
+
 def extract_key_from_plog():
     """Extract first 'Tiling Key: N' from the latest plog file."""
     files = sorted(
@@ -109,28 +124,11 @@ def extract_key_from_plog():
         key=os.path.getmtime,
         reverse=True,
     )
-    pattern = re.compile(r"Tiling Key:\s*(\d+)")
     for fpath in files:
-        key = extract_key_from_file(fpath, pattern)
-        if key:
+        key = _search_key_in_file(fpath)
+        if key is not None:
             return key, fpath
     return "NOT_FOUND", None
-
-
-def extract_key_from_file(fpath, pattern):
-    for line in iter_file_lines(fpath):
-        match = pattern.search(line)
-        if match:
-            return match.group(1)
-    return None
-
-
-def iter_file_lines(fpath):
-    try:
-        with open(fpath, errors="ignore") as f:
-            yield from f
-    except OSError:
-        return
 
 
 def save_log(log_dir, op_name, case_id, plog_path):
@@ -145,19 +143,19 @@ def save_log(log_dir, op_name, case_id, plog_path):
 
 
 def main():
-    configure_logging()
+    logging.basicConfig(format="%(message)s")
     args = parse_args()
     op_name = deduce_op_name(args.op_path)
     log_dir = args.log_dir or os.path.join(args.op_path, "tests", "whitebox", "tilingkey_logs")
 
     if not check_npu():
-        LOGGER.info("SKIPPED: NPU unavailable")
+        _logger.info("SKIPPED: NPU unavailable")
         sys.exit(0)
 
     try:
         test_file = find_test_file(args.op_path)
-    except FileNotFoundError as exc:
-        LOGGER.info("ERROR: %s", exc)
+    except FileNotFoundError as e:
+        _logger.error("ERROR: %s", e)
         sys.exit(1)
     clear_plog()
 
@@ -165,8 +163,8 @@ def main():
     key, plog_path = extract_key_from_plog()
     log_path = save_log(log_dir, op_name, args.case_id, plog_path)
 
-    LOGGER.info("%s | tiling_key=%s", args.case_id, key)
-    LOGGER.info("Log saved: %s", log_path)
+    _logger.info("%s | tiling_key=%s", args.case_id, key)
+    _logger.info("Log saved: %s", log_path)
 
     if key == "NOT_FOUND":
         sys.exit(1)

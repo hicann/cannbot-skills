@@ -54,7 +54,7 @@
 
 **约束**：
 - group 列表必须与 S2P2_param_def.json groups 数组完全一致（数量、id、顺序）
-- 每个 group 中的维度值（dtype、epsilon、ndim 等）必须与 S2P2_param_def.json 中对应 group 的 params 一致
+- 每个 group 中的维度值必须与 S2P2_param_def.json 中对应 group 的 per_dtype 取值列表及 group 级维度字段一致，标量属性默认值必须与 S2P1_operator_model.json 的 attributes 默认值一致
 - 禁止在 S2P3_test_design.md 中引入 S2P2_param_def.json 中不存在的维度值
 - 每个 group 的 constraints 描述必须与 S2P2_param_def.json 中对应 group 的 constraints 语义一致
 
@@ -132,6 +132,8 @@ Step 2 完成后，将此表展示给用户，等用户逐条确认或补充后�
 | with_nan | 正常数据中混入 nan | nan 传播处理 |
 
 不需要全部包含——根据算子语义选择有意义的。量化算子至少需要 normal/zero/extreme/negative。
+
+**定义域约束**：当 `S2P1_operator_model.json` 中某输入的 `value_domain` 非 null 时，Step 5c 的 `expand_high()` 会自动过滤不兼容的 data_range 标签，`make_data("normal")` 会约束生成范围。设计阶段无需手动裁剪 data_range 列表，但需在 S2P3_test_design.md 中标注哪些输入有 value_domain 约束。
 
 ### ndim
 
