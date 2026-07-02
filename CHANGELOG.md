@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-06-29】
+#### 新特性 New Features
+- 【模型推理】新增 Skill：`science-model-npu-migration`，提供昇腾 NPU 框架级代码迁移全流程：环境门禁、脚本适配、精度/性能对比与 `mig_docs` 交付归档；覆盖 `torch_npu` / MindSpore Ascend，不含 ATC/OM 离线模型转换。
+
 
 ### 【2026-06-26】
 #### 新特性 New Features

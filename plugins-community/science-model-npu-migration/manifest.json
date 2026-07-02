@@ -1,0 +1,29 @@
+{
+  "name": "science-model-npu-migration",
+  "scope": "Framework-native code migration (torch_npu / MindSpore Ascend)",
+  "required_files": [
+    "SKILL.md",
+    "manifest.json",
+    "references/overview.md",
+    "references/workflow.md",
+    "references/docs-index.md",
+    "references/environment-setup-objectives.md",
+    "references/part-01-scope-and-baseline.md",
+    "references/part-02-feasibility.md",
+    "references/part-03-environment.md",
+    "references/part-04-code-migration.md",
+    "references/part-05-performance-accuracy.md",
+    "references/part-06-risk-rollback.md",
+    "references/part-07-commands.md",
+    "references/part-08-checklist-deliverables-output.md",
+    "references/part-09-examples-troubleshooting.md",
+    "references/reference-code-patterns.md",
+    "references/deliverables-index.md",
+    "references/mig_docs/.gitignore",
+    "references/mig_docs/Summary.md",
+    "references/mig_docs/working/environment.md",
+    "references/mig_docs/working/Mig_report.md",
+    "references/mig_docs/working/Mig_Readme.md",
+    "references/mig_docs/working/Compare.md"
+  ]
+}
