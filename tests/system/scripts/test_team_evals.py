@@ -26,7 +26,7 @@ import pytest
 
 from conftest import (
     get_team_path, get_teams_with_evals, load_team_evals_md, REPO_ROOT,
-    FRAMEWORK_DIR, SANDBOX_DIR,
+    FRAMEWORK_DIR, SANDBOX_DIR, CANN_BENCH_PATH,
     create_opencode_runner, _platform_matches,
 )
 from opencode_runner import OpencodeRunner
@@ -71,20 +71,44 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 
-def _setup_team_eval_sandbox(sandbox_manager: SandboxManager, team_name: str,
-                              eval_id, team_dir: Path,
-                              timeout: Optional[int] = None):
+@dataclass
+class _TeamSandboxConfig:
+    """team 沙箱创建参数封装，减少函数参数数量（G.FNM.03）。"""
+    team_name: str
+    eval_id: str
+    team_dir: Path
+    timeout: Optional[int] = None
+    eval_mode: str = "text"
+    eval_data: Optional[Dict[str, Any]] = None
+
+
+def _setup_team_eval_sandbox(sandbox_manager: SandboxManager, cfg: _TeamSandboxConfig):
     """为 team 创建沙箱并初始化 opencode runner。
 
     与 skill 不同：team 沙箱通过 init.sh 完整安装 team 环境，
     包括 AGENTS.md、skills/agents symlink、workflows、asc-devkit 等。
     """
     sandbox_path = sandbox_manager.create_team_sandbox(
-        team_name, eval_id, REPO_ROOT, team_dir,
+        cfg.team_name, cfg.eval_id, REPO_ROOT, cfg.team_dir,
     )
+
+    # cann_bench 模式：部署 cann-bench 仓库和任务定义文件
+    if cfg.eval_mode == "cann_bench" and cfg.eval_data:
+        assert CANN_BENCH_PATH.exists(), (
+            f"Eval {cfg.eval_id}: cann-bench repo not found at {CANN_BENCH_PATH}. "
+            f"Set CANN_BENCH_PATH env var to the correct path."
+        )
+        sandbox_manager.deploy_cann_bench(sandbox_path, CANN_BENCH_PATH)
+        operator = cfg.eval_data.get("cann_bench_operator", "")
+        level = cfg.eval_data.get("cann_bench_level", "level1")
+        if operator:
+            sandbox_manager.copy_cann_bench_task(
+                sandbox_path, operator, level, CANN_BENCH_PATH,
+            )
+
     try:
         opencode_runner = create_opencode_runner(
-            sandbox_manager, sandbox_path, timeout=timeout,
+            sandbox_manager, sandbox_path, timeout=cfg.timeout,
         )
     except Exception:
         # create_opencode_runner 失败时清理已创建的沙箱目录
@@ -173,9 +197,16 @@ def test_team_eval_case(team_eval_case: Dict[str, Any], sandbox_manager: Sandbox
     inputs.skill_name = team_eval_case["team_name"]
 
     team_dir = team_eval_case["team_dir"]
-    opencode_runner, sandbox_path = _setup_team_eval_sandbox(
-        sandbox_manager, inputs.skill_name, inputs.eval_id, team_dir,
+    sandbox_cfg = _TeamSandboxConfig(
+        team_name=inputs.skill_name,
+        eval_id=str(inputs.eval_id),
+        team_dir=team_dir,
         timeout=inputs.eval_data.get("timeout"),
+        eval_mode=inputs.eval_mode,
+        eval_data=inputs.eval_data,
+    )
+    opencode_runner, sandbox_path = _setup_team_eval_sandbox(
+        sandbox_manager, sandbox_cfg,
     )
 
     _log_eval_case_header(inputs.skill_name, inputs.eval_id, inputs.prompt,

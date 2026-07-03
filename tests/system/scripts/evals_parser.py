@@ -160,17 +160,44 @@ def _parse_max_tokens_config(case_config: Dict[str, str], eval_case: Dict[str, A
         eval_case["max_tokens_by_model"] = max_tokens_by_model
 
 
+def _parse_cann_bench_config(case_config: Dict[str, str], eval_case: Dict[str, Any],
+                              case_id: int) -> None:
+    """解析 cann_bench 模式专属配置项（仅当 eval_mode == 'cann_bench' 时调用）。"""
+    eval_case["cann_bench_operator"] = case_config.get("cann bench operator", "").strip()
+    eval_case["cann_bench_level"] = case_config.get("cann bench level", "level1").strip()
+    eval_case["cann_bench_device"] = case_config.get("cann bench device", "0").strip()
+    eval_case["cann_bench_no_perf"] = case_config.get(
+        "cann bench no perf", "false").strip().lower() in ("true", "yes", "1")
+
+    warmup_str = case_config.get("cann bench warmup", "").strip()
+    if warmup_str:
+        try:
+            eval_case["cann_bench_warmup"] = int(warmup_str)
+        except ValueError:
+            logger.warning("Invalid cann_bench_warmup '%s' in case %d, ignoring", warmup_str, case_id)
+
+    repeat_str = case_config.get("cann bench repeat", "").strip()
+    if repeat_str:
+        try:
+            eval_case["cann_bench_repeat"] = int(repeat_str)
+        except ValueError:
+            logger.warning("Invalid cann_bench_repeat '%s' in case %d, ignoring", repeat_str, case_id)
+
+
 def _parse_case_config(case_config: Dict[str, str], case_id: int,
                        default_eval_mode: str) -> Dict[str, Any]:
     """解析 Config 块中的配置项，返回已填充的 eval_case 字典片段。"""
     eval_case: Dict[str, Any] = {}
 
     case_eval_mode = case_config.get("eval mode", default_eval_mode)
-    if case_eval_mode not in ("text", "file_based", "code_gen"):
+    if case_eval_mode not in ("text", "file_based", "code_gen", "cann_bench"):
         logger.warning("Invalid case eval_mode '%s' in case %d, falling back to '%s'",
                        case_eval_mode, case_id, default_eval_mode)
         case_eval_mode = default_eval_mode
     eval_case["eval_mode"] = case_eval_mode
+
+    if case_eval_mode == "cann_bench":
+        _parse_cann_bench_config(case_config, eval_case, case_id)
 
     _parse_max_tokens_config(case_config, eval_case, case_id)
 
@@ -286,7 +313,7 @@ def parse_evals_md(file_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
     eval_mode = frontmatter.get("eval_mode", "text").strip().lower()
-    if eval_mode not in ("text", "file_based", "code_gen"):
+    if eval_mode not in ("text", "file_based", "code_gen", "cann_bench"):
         logger.warning("Invalid eval_mode '%s', falling back to 'text'", eval_mode)
         eval_mode = "text"
 

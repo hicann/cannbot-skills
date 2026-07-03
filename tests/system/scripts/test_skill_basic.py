@@ -183,8 +183,11 @@ class TestEvalMode:
         data = load_evals_md(skill_name)
         assert data is not None, f"Could not load evals.md for skill: {skill_name}"
         eval_mode = data.get("eval_mode", "text")
-        assert eval_mode in ("text", "file_based", "code_gen"), \
-            f"eval_mode '{eval_mode}' should be 'text', 'file_based', or 'code_gen' in skill: {skill_name}"
+        valid_modes = ("text", "file_based", "code_gen", "cann_bench")
+        assert eval_mode in valid_modes, (
+            f"eval_mode '{eval_mode}' should be one of {valid_modes} "
+            f"in skill: {skill_name}"
+        )
 
 
 class TestSkillDirectory:

@@ -68,4 +68,3 @@ ops-direct-invoke 和 ops-direct-invoke-flash 有什么区别？我该在什么�
 回复应主动确认必要信息：待实现的数学公式或算法描述、输入输出数据类型和格式、目标芯片型号等规格信息，而不是在缺少这些关键信息的情况下直接开始开发
 
 ## Expectations
-

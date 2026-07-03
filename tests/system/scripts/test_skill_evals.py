@@ -16,6 +16,7 @@ import os
 import glob as glob_module
 import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,8 @@ from conftest import (
     validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
     CODE_GEN_DIMENSION_THRESHOLDS, CODE_GEN_DIMENSION_ORDER,
     CODE_GEN_DIMENSION_MAX_SCORES,
+    CANN_BENCH_PATH,
+    parse_cann_bench_evaluation,
     DIMENSION_ORDER, DIMENSION_MAX_SCORES,
     create_opencode_runner, _platform_matches,
 )
@@ -46,6 +49,23 @@ FILE_BASED_HINT = """
 1. 完成任务后，列出所有创建/修改的文件路径清单（如 src/main.cpp）
 2. 简要说明每个文件的用途
 3. 不要输出完整的文件内容——评测系统会直接读取生成的文件
+"""
+
+# cann_bench 模式下注入到用户 prompt 的执行要求
+CANN_BENCH_HINT = """
+
+## 输出要求
+1. 将生成的算子工程文件输出到 ./output/ 目录中
+2. output/ 目录中只需要包含以下文件（这些是你需要生成的）：
+   - csrc/ops/{op_name}/ — 算子 kernel 实现（含 CMakeLists.txt、op_kernel/、op_plugin/）
+   - cann_bench/__init__.py — 算子 Python 接口
+3. 禁止在 output/ 中生成以下基础设施文件，它们在 ./direct_launch_example/ 中已经正确配置：
+   - csrc/extension.cpp（使用纯 Python C API，不要用 pybind11 重写）
+   - 顶层 CMakeLists.txt、setup.py、build.sh、requirements.txt
+   - cmake/ 目录下的 .cmake 文件
+4. 参考 ./direct_launch_example/ 的工程结构完成开发
+5. 任务定义文件在 ./cann-bench-task/ 目录下，请仔细阅读 proto.yaml、cases.yaml、desc.md 等
+6. 所有生成的文件必须写入当前沙箱目录
 """
 
 MAX_PROMPT_LENGTH = 10000
@@ -84,7 +104,7 @@ def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Pat
     排除 logs/ 和 .opencode/ 目录。软链接模式下自动排除源 skill 目录中已存在的文件。
     """
     files = []
-    exclude_dirs = {"logs", ".opencode"}
+    exclude_dirs = {"logs", ".opencode", "cann-bench", "cann-bench-task", "direct_launch_example"}
     for entry in sandbox_path.rglob("*"):
         if not entry.is_file():
             continue
@@ -101,7 +121,11 @@ def collect_generated_files(sandbox_path: Path, original_skill_dir: Optional[Pat
 
         rel = str(entry.relative_to(sandbox_path))
         files.append(rel)
-    return sorted(files)
+    result = sorted(files)
+    total_size = sum(len(f) for f in result)
+    logger.info("[DIAG] collect_generated_files: %d files, total paths size: %d bytes",
+                len(result), total_size)
+    return result
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -457,6 +481,10 @@ def _run_review_session(
     """运行评测 session 并返回 (review_lines, review_error)"""
     review_lines = []
     review_error = ""
+
+    prompt_bytes = len(review_prompt.encode("utf-8"))
+    logger.info("[DIAG] _run_review_session: review_prompt %d chars / %d bytes",
+                len(review_prompt), prompt_bytes)
 
     for chunk in opencode_runner.run_streaming(
             prompt=review_prompt,
@@ -850,7 +878,22 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
     2. 复制模板到沙箱 → 构建评审 prompt → 运行评审 session
     3. 读取填写后的 MD 模板 → parse_review_md() → 程序化阈值校验
     """
+    # cann_bench 模式使用确定性评测，不走 AI 评审流程
+    if ctx.eval_mode == "cann_bench":
+        return
+
     reasoning = extract_reasoning(ctx.full_output)
+
+    # DIAG: log context sizes before building review prompt
+    env_size = sum(len(k) + len(v) + 2 for k, v in OpencodeRunner.safe_env().items())
+    logger.info("[DIAG] _validate_expected_output: "
+                "original_prompt=%d, ai_text(truncated)=%d, reasoning(truncated)=%d, "
+                "expected_output=%d, generated_files=%d, safe_env=%d bytes",
+                len(ctx.original_prompt), min(len(ctx.ai_text), ctx.truncate_len),
+                min(len(reasoning), ctx.truncate_len),
+                len(ctx.expected_output or ""),
+                len(ctx.generated_files) if ctx.generated_files else 0,
+                env_size)
 
     template_dst = _copy_review_template(ctx.sandbox_path, ctx.eval_mode)
 
@@ -1009,6 +1052,19 @@ def _setup_eval_sandbox(sandbox_manager: SandboxManager, inputs: _EvalInputs):
     sandbox_manager.create_skill_link(sandbox_path, inputs.skill_dir)
     for ds_dir in (inputs.distractor_skill_dirs or []):
         sandbox_manager.create_skill_link(sandbox_path, ds_dir)
+
+    # cann_bench 模式：部署 cann-bench 仓库和任务定义文件
+    if inputs.eval_mode == "cann_bench":
+        assert CANN_BENCH_PATH.exists(), (
+            f"Eval {inputs.eval_id}: cann-bench repo not found at {CANN_BENCH_PATH}. "
+            f"Set CANN_BENCH_PATH env var to the correct path."
+        )
+        sandbox_manager.deploy_cann_bench(sandbox_path, CANN_BENCH_PATH)
+        operator = inputs.eval_data.get("cann_bench_operator", "")
+        level = inputs.eval_data.get("cann_bench_level", "level1")
+        assert operator, f"Eval {inputs.eval_id}: cann_bench_operator is required for cann_bench mode"
+        sandbox_manager.copy_cann_bench_task(sandbox_path, operator, level, CANN_BENCH_PATH)
+
     opencode_runner = create_opencode_runner(
         sandbox_manager, sandbox_path,
         timeout=inputs.eval_data.get("timeout"),
@@ -1016,9 +1072,149 @@ def _setup_eval_sandbox(sandbox_manager: SandboxManager, inputs: _EvalInputs):
     return opencode_runner, sandbox_path
 
 
+def _merge_copy_tree(src: Path, dst: Path) -> None:
+    """合并式目录复制：将 src 中的文件递归合并到 dst，不删除 dst 中已有的文件。
+
+    与 shutil.rmtree + shutil.copytree 不同，此函数：
+    - 对于子目录：递归合并，而非整目录替换
+    - 对于文件：覆盖 dst 中的同名文件
+    - dst 中不在 src 里的文件保持不变
+
+    典型场景：AI 只在 output/csrc/ops/mish/ 下生成了文件，
+    合并复制后 direct_launch_example/csrc/extension.cpp 等模板文件不受影响。
+    """
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        target = dst / item.name
+        if item.is_dir():
+            _merge_copy_tree(item, target)
+        else:
+            shutil.copy2(item, target)
+
+
+def _find_latest_file(directory: Path, pattern: str) -> Optional[Path]:
+    """在目录中按修改时间找到匹配 glob 模式的最新文件。"""
+    matches = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0] if matches else None
+
+
+def _build_cann_bench_cmd(template_dir: Path, reports_dir: Path,
+                          inputs: _EvalInputs) -> List[str]:
+    """构造 cann-bench run_evaluation.sh 命令。"""
+    eval_script = CANN_BENCH_PATH / "scripts" / "run_evaluation.sh"
+    assert eval_script.exists(), (
+        f"Eval {inputs.eval_id}: run_evaluation.sh not found at {eval_script}"
+    )
+    operator = inputs.eval_data.get("cann_bench_operator", "")
+    device = str(inputs.eval_data.get("cann_bench_device", "0"))
+    no_perf = inputs.eval_data.get("cann_bench_no_perf", False)
+    warmup = inputs.eval_data.get("cann_bench_warmup", 0)
+    repeat = inputs.eval_data.get("cann_bench_repeat", 0)
+
+    cmd = [
+        "bash", str(eval_script),
+        "--source-dir", str(template_dir),
+        "--reports-dir", str(reports_dir),
+        "--operator", operator,
+        "--device-id", device,
+    ]
+    if no_perf:
+        cmd.append("--no-perf")
+    if warmup:
+        cmd.extend(["--warmup", str(warmup)])
+    if repeat:
+        cmd.extend(["--repeat", str(repeat)])
+    return cmd
+
+
+def _save_cann_bench_report_artifacts(
+    sandbox_path: Path, reports_dir: Path, result: Dict, eval_id: str,
+) -> None:
+    """将 HTML 报告和元数据保存到沙箱目录。"""
+    latest_html = _find_latest_file(reports_dir, "cann_final_eval_*.html")
+    if latest_html:
+        html_dest = sandbox_path / "cann_bench_report.html"
+        html_dest.write_text(
+            latest_html.read_text(encoding="utf-8"), encoding="utf-8",
+        )
+        result["html_report_path"] = str(html_dest)
+        logger.info("[CANN_BENCH %s] HTML 报告已复制到 %s", eval_id, html_dest)
+    else:
+        logger.warning("[CANN_BENCH %s] 未找到 cann_final_eval_*.html", eval_id)
+
+    meta = {"score": result.get("score", 0), "eval_mode": "cann_bench"}
+    meta_path = sandbox_path / "_cann_bench_meta.json"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _run_cann_bench_evaluation(sandbox_path: Path, inputs: _EvalInputs) -> Dict[str, Any]:
+    """运行 cann-bench 的确定性评测流程。
+
+    1. 将 AI 生成的 output/ 内容合并复制到 direct_launch_example/ 目录
+    2. 执行 cann-bench/scripts/run_evaluation.sh
+    3. 解析 JSON 报告并返回结构化结果
+    4. 将 HTML 报告复制到沙箱，写入元数据供报告钩子使用
+    """
+    operator = inputs.eval_data.get("cann_bench_operator", "")
+
+    # 步骤 1：合并复制 output/ 到 direct_launch_example/
+    output_dir = sandbox_path / "output"
+    template_dir = sandbox_path / "direct_launch_example"
+    if output_dir.exists() and template_dir.exists():
+        _merge_copy_tree(output_dir, template_dir)
+        logger.info("[CANN_BENCH %s] output/ 已合并复制", inputs.eval_id)
+    else:
+        logger.warning("[CANN_BENCH %s] output/ or template not found", inputs.eval_id)
+
+    # 步骤 2：构造并执行评测命令（使用沙箱隔离的报告目录，避免 xdist 并发竞态）
+    reports_dir = sandbox_path / "cann_bench_reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    cmd = _build_cann_bench_cmd(template_dir, reports_dir, inputs)
+    logger.info("[CANN_BENCH %s] Running: %s", inputs.eval_id, " ".join(cmd))
+
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            timeout=600, cwd=str(CANN_BENCH_PATH),
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "fail", "score": 0, "dimensions": {},
+                "reason": "cann-bench evaluation timed out (600s)"}
+
+    if proc.returncode != 0:
+        stderr_tail = proc.stderr[-2000:] if proc.stderr else "(no stderr)"
+        logger.warning("[CANN_BENCH %s] exited %d: %s",
+                       inputs.eval_id, proc.returncode, stderr_tail)
+
+    # 步骤 3：解析 JSON 报告（从沙箱隔离目录读取）
+    result = parse_cann_bench_evaluation(reports_dir, operator=operator)
+    result["raw_stdout"] = proc.stdout[-2000:] if proc.stdout else ""
+    result["raw_stderr"] = proc.stderr[-2000:] if proc.stderr else ""
+
+    # 步骤 4：保存 HTML 报告和元数据
+    _save_cann_bench_report_artifacts(
+        sandbox_path, reports_dir, result, str(inputs.eval_id),
+    )
+
+    return result
+
+
 def _create_and_validate(opencode_runner, session_name, full_output,
                          inputs: _EvalInputs, ai_text, sandbox_path):
     """创建 ValidationContext 并执行验证（消除 skill/team 重复代码）。"""
+    # cann_bench 模式：运行确定性评测，跳过 AI 评审
+    # 通过/失败判定：综合得分 > 50 则通过
+    if inputs.eval_mode == "cann_bench":
+        eval_result = _run_cann_bench_evaluation(sandbox_path, inputs)
+        score = eval_result.get("score", 0)
+        logger.info("[CANN_BENCH %s] score=%.2f, threshold=40", inputs.eval_id, score)
+        assert score > 40, (
+            f"Eval {inputs.eval_id}: cann_bench score {score:.2f} <= 40. "
+            f"Reason: {eval_result.get('reason', 'unknown')}"
+        )
+        return
+
     ctx = ValidationContext(
         opencode_runner=opencode_runner,
         session_name=session_name,
@@ -1105,6 +1301,8 @@ def _unpack_eval_inputs(eval_case: Dict[str, Any]) -> _EvalInputs:
     eval_mode = eval_case.get("eval_mode", "text")
     if eval_mode in ("file_based", "code_gen"):
         prompt = prompt.rstrip() + FILE_BASED_HINT
+    elif eval_mode == "cann_bench":
+        prompt = prompt.rstrip() + CANN_BENCH_HINT
 
     return _EvalInputs(
         skill_name=eval_case["skill_name"],

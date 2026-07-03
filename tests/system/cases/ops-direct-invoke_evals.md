@@ -7,6 +7,7 @@ eval_mode: text
 ## Config
 - Max Tokens: 200000
 - Timeout: 900
+- Disabled: false
 - Truncate Length: 50000
 - Ascend Platform: A2
 
@@ -29,89 +30,125 @@ eval_mode: text
 
 ---
 
-# Case 2: 生成一个简单的 Add 向量逐元素加法算子
+# Case 2: 生成 mish 算子（cann-bench 评测模式）
 
 ## Config
-- Eval Mode: code_gen
-- Max Tokens: 5000000
+- Eval Mode: cann_bench
+- Cann Bench Operator: mish
+- Cann Bench Level: level1
+- Cann Bench Device: 0
+- Max Tokens: 10000000
 - Disabled: true
 - Timeout: 10800
-- Ascend Platform: A5
+- Ascend Platform: A2
 
 ## Prompt
 
-请使用 ops-direct-invoke 团队的工作流，生成一个名为 add_vector 的 Ascend C Kernel 直调算子，实现两个 float16 向量的逐元素加法（z = x + y）。请先生成算子工程目录结构，然后实现 kernel 代码和辅助脚本。
+请使用 ops-direct-invoke 团队的工作流，根据 cann-bench 的 mish 算子任务定义生成一个完整的 Ascend C Kernel 直调算子，芯片信息为Ascend910B3。
 
-算子规格：
-- 算子名称：add_vector
-- 数学公式：z[i] = x[i] + y[i]（逐元素加法）
-- 输入：x fp16[256], y fp16[256]
-- 输出：z fp16[256]
-- 目标芯片：Ascend950PR（DAV_3510）
-- 编译架构：dav-3510（CMakeLists.txt 中配置 --npu-arch=dav-3510）
-- 数据搬运：GM→UB→计算→UB→GM
-- 核函数入口：纯向量算子使用 `__global__ __vector__`
+任务定义文件在 ./cann-bench-task/ 目录下，请仔细阅读以下文件了解算子规格：
+- cases.csv / cases.yaml：算子用例信息，包含 input_shape、dtype、attrs、value_range、baseline_perf_us
+- desc.md：算子描述信息，包含数学公式、输入输出信息、精度标准等
+- golden.py：算子对标竞品的标杆实现（torch/tensorflow）
+- proto.yaml：算子原型信息，包含算子分类、支持的数据类型、难度分类等
 
-请输出完整的算子文件到沙箱中。
+输入知识：关于昇腾算子开发的接口、芯片等相关知识可以参考./asc-devkit
+
+输出及交付件：请参考./direct_launch_example/，完成算子开发后，通过适配./direct_launch_example/csrc/ops下的算子相关文件与./direct_launch_example/cann_bench/__init__.py增加接口的方式，运行build.sh，可以判断是否存在编译问题。
+
+【重要约束 — 必须严格遵守】
+1. output/ 目录中只需要包含以下文件（这些是你需要生成的）：
+   - csrc/ops/mish/ — 算子 kernel 实现（含 CMakeLists.txt、op_kernel/、op_plugin/）
+   - cann_bench/__init__.py — 算子 Python 接口
+2. 禁止在 output/ 中生成以下基础设施文件，它们在 ./direct_launch_example/ 中已经正确配置，评测框架会自动使用模板中的版本：
+   - csrc/extension.cpp（使用纯 Python C API，不要用 pybind11 重写）
+   - 顶层 CMakeLists.txt、setup.py、build.sh、requirements.txt
+   - cmake/ 目录下的所有 .cmake 文件
+   - csrc/CMakeLists.txt、csrc/ops/CMakeLists.txt
+3. 数值稳定性要求：mish(x) = x * tanh(softplus(x))，当 x 较大时 exp(x) 会溢出，请使用数值稳定的实现方式（如分段计算：x > 20 时 mish(x) ≈ x）
+
+【dtype 完整性要求 — 评测通过率的关键】
+cases.yaml 中包含 float16、float32、bfloat16 三种 dtype 的测试用例，kernel 和 Host 侧必须全部正确支持：
+- Kernel 层：为每种 dtype 提供正确的模板特化（fp16 和 bf16 需要 Cast→FP32 混合精度计算以保证精度达标）
+- Host 分发层：bfloat16 和 float16 都是 2 字节，**不能仅按 dtypeBytes 区分**。必须在 TilingData 中增加 dtypeId 字段（如 0=fp32, 1=fp16, 2=bf16），Host 按 dtypeId 分发到对应的 launch 函数
+- 常见错误：Host 只判断 dtypeBytes==2 就统一调用 half kernel，导致 bfloat16 数据被当作 fp16 处理，输出完全错误（MERE=1.0）
+
+【自验证要求 — 提交前必须执行】
+完成开发后，请使用 golden.py 生成测试数据，分别对 float16、float32、bfloat16 三种 dtype 运行算子并验证输出精度。如果发现某种 dtype 结果异常（如全零、MERE=1.0），请排查 Host 分发逻辑和 kernel 模板特化后再提交。
+
+请你完成整套开发任务，中间过程自己运行，不要询问我进行下一步。
 
 ## Expected Output
 
-生成的算子工程应包含以下完整内容：
+output/ 目录应只包含以下文件：
+1. csrc/ops/mish/op_kernel/mish_kernel.cpp — Ascend C Kernel，使用数值稳定的 mish 实现
+2. csrc/ops/mish/op_kernel/mish_launch.h — launch 函数声明
+3. csrc/ops/mish/op_plugin/mish_plugin.cpp — PyTorch TORCH_LIBRARY 绑定
+4. csrc/ops/mish/CMakeLists.txt — 算子编译配置
+5. cann_bench/__init__.py — 暴露 cann_bench.mish(x) 接口
 
-1. **kernel 实现文件**（.asc）：包含完整的 Ascend C 算子逻辑，使用正确的 API（DataCopyPad、Add、LocalTensor、GlobalTensor 等），有正确的核函数入口（纯向量算子使用 `__global__ __vector__`），包含 tiling 参数获取（GetBlockNum、GetBlockIdx），CMakeLists.txt 中 `--npu-arch` 配置为 dav-3510（Ascend950PR）
-
-2. **CMakeLists.txt**：正确配置 Ascend C 算子编译选项，包括正确的 CANN 路径引用和编译目标（--npu-arch=dav-3510）
-
-3. **数据生成脚本**（gen_data.py 或类似）：生成测试用的 float16 输入数据
-
-4. **运行/编译脚本**（run.sh 或类似）：包含编译和运行命令，正确引用核函数
-
-5. **编译与运行验证**：agent 须在沙箱中执行编译和运行操作（通过 bash 工具调用 run.sh 或手动编译运行），确保生成的算子工程可以正常编译链接、在 NPU 上正确执行，且精度验证（verify_result.py）结果为 PASS
-
-整体实现应结构清晰，代码符合 Ascend C 编程规范，API 使用正确（不能编造不存在的 API）。
+不应包含 extension.cpp、顶层 CMakeLists.txt、setup.py、cmake/ 等基础设施文件。
 
 ## Expectations
 
 ---
 
-# Case 3: 生成 Sigmoid 算子（基于 cann-bench 规格）
+# Case 3: 生成 mish 算子（cann-bench 评测模式，A5 平台）
 
 ## Config
-- Eval Mode: code_gen
-- Max Tokens: 5000000
+- Eval Mode: cann_bench
+- Cann Bench Operator: mish
+- Cann Bench Level: level1
+- Cann Bench Device: 0
+- Max Tokens: 10000000
 - Timeout: 10800
 - Ascend Platform: A5
 
 ## Prompt
 
-请使用 ops-direct-invoke 团队的工作流，根据以下算子规格生成一个名为 sigmoid_custom 的 Ascend C Kernel 直调算子。
+请使用 ops-direct-invoke 团队的工作流，根据 cann-bench 的 mish 算子任务定义生成一个完整的 Ascend C Kernel 直调算子，芯片信息为Ascend950。
 
-算子规格（来源于 cann-bench Sigmoid 任务 @tasks/level1/sigmoid）：
-- 算子名称：sigmoid_custom
-- 数学公式：y = 1 / (1 + e^(-x))（逐元素 Sigmoid 运算）
-- 输入：x fp16[N]（ND 格式，支持 1~8 维）
-- 输出：y fp16[N]（与输入 shape 完全一致）
-- 目标芯片：Ascend950PR（DAV_3510）
-- 编译架构：dav-3510（CMakeLists.txt 中配置 --npu-arch=dav-3510）
-- 数据搬运：GM→UB→计算→UB→GM
-- Golden 参考实现：torch.sigmoid(x)
+任务定义文件在 ./cann-bench-task/ 目录下，请仔细阅读以下文件了解算子规格：
+- cases.csv / cases.yaml：算子用例信息，包含 input_shape、dtype、attrs、value_range、baseline_perf_us
+- desc.md：算子描述信息，包含数学公式、输入输出信息、精度标准等
+- golden.py：算子对标竞品的标杆实现（torch/tensorflow）
+- proto.yaml：算子原型信息，包含算子分类、支持的数据类型、难度分类等
 
-请输出完整的算子文件到沙箱中。
+输入知识：关于昇腾算子开发的接口、芯片等相关知识可以参考./asc-devkit
+
+输出及交付件：请参考./direct_launch_example/，完成算子开发后，通过适配./direct_launch_example/csrc/ops下的算子相关文件与./direct_launch_example/cann_bench/__init__.py增加接口的方式，运行build.sh，可以判断是否存在编译问题。
+
+【重要约束 — 必须严格遵守】
+1. output/ 目录中只需要包含以下文件（这些是你需要生成的）：
+   - csrc/ops/mish/ — 算子 kernel 实现（含 CMakeLists.txt、op_kernel/、op_plugin/）
+   - cann_bench/__init__.py — 算子 Python 接口
+2. 禁止在 output/ 中生成以下基础设施文件，它们在 ./direct_launch_example/ 中已经正确配置，评测框架会自动使用模板中的版本：
+   - csrc/extension.cpp（使用纯 Python C API，不要用 pybind11 重写）
+   - 顶层 CMakeLists.txt、setup.py、build.sh、requirements.txt
+   - cmake/ 目录下的所有 .cmake 文件
+   - csrc/CMakeLists.txt、csrc/ops/CMakeLists.txt
+3. 数值稳定性要求：mish(x) = x * tanh(softplus(x))，当 x 较大时 exp(x) 会溢出，请使用数值稳定的实现方式（如分段计算：x > 20 时 mish(x) ≈ x）
+
+【dtype 完整性要求 — 评测通过率的关键】
+cases.yaml 中包含 float16、float32、bfloat16 三种 dtype 的测试用例，kernel 和 Host 侧必须全部正确支持：
+- Kernel 层：为每种 dtype 提供正确的模板特化（fp16 和 bf16 需要 Cast→FP32 混合精度计算以保证精度达标）
+- Host 分发层：bfloat16 和 float16 都是 2 字节，**不能仅按 dtypeBytes 区分**。必须在 TilingData 中增加 dtypeId 字段（如 0=fp32, 1=fp16, 2=bf16），Host 按 dtypeId 分发到对应的 launch 函数
+- 常见错误：Host 只判断 dtypeBytes==2 就统一调用 half kernel，导致 bfloat16 数据被当作 fp16 处理，输出完全错误（MERE=1.0）
+
+【自验证要求 — 提交前必须执行】
+完成开发后，请使用 golden.py 生成测试数据，分别对 float16、float32、bfloat16 三种 dtype 运行算子并验证输出精度。如果发现某种 dtype 结果异常（如全零、MERE=1.0），请排查 Host 分发逻辑和 kernel 模板特化后再提交。
+
+请你完成整套开发任务，中间过程自己运行，不要询问我进行下一步。
 
 ## Expected Output
 
-生成的算子工程应包含以下完整内容：
+output/ 目录应只包含以下文件：
+1. csrc/ops/mish/op_kernel/mish_kernel.cpp — Ascend C Kernel，使用数值稳定的 mish 实现
+2. csrc/ops/mish/op_kernel/mish_launch.h — launch 函数声明
+3. csrc/ops/mish/op_plugin/mish_plugin.cpp — PyTorch TORCH_LIBRARY 绑定
+4. csrc/ops/mish/CMakeLists.txt — 算子编译配置
+5. cann_bench/__init__.py — 暴露 cann_bench.mish(x) 接口
 
-1. **kernel 实现文件**（.asc）：包含完整的 Ascend C 算子逻辑，使用正确的 API（Sigmoid 或 Exp/Add/Reciprocal 组合实现 Sigmoid 计算），有正确的核函数入口（纯向量算子使用 `__global__ __vector__`），包含 tiling 参数获取（GetBlockNum、GetBlockIdx），CMakeLists.txt 中 `--npu-arch` 配置为 dav-3510（Ascend950PR）
-
-2. **CMakeLists.txt**：正确配置 Ascend C 算子编译选项，包括正确的 CANN 路径引用和编译目标（--npu-arch=dav-3510）
-
-3. **数据生成脚本**（gen_data.py 或类似）：生成测试用的 float16 输入数据，值域覆盖正负区间以验证 Sigmoid 激活函数特性
-
-4. **运行/编译脚本**（run.sh 或类似）：包含编译和运行命令，正确引用核函数
-
-5. **编译与运行验证**：agent 须在沙箱中执行编译和运行操作（通过 bash 工具调用 run.sh 或手动编译运行），确保生成的算子工程可以正常编译链接、在 NPU 上正确执行，且精度验证结果为 PASS
-
-整体实现应结构清晰，代码符合 Ascend C 编程规范，API 使用正确（不能编造不存在的 API）。
+不应包含 extension.cpp、顶层 CMakeLists.txt、setup.py、cmake/ 等基础设施文件。
 
 ## Expectations

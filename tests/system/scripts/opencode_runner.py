@@ -446,26 +446,7 @@ class OpencodeRunner:
     # ---- Private static helpers ----
 
     @staticmethod
-    def _make_error_result(error, cmd=None, output="", **metadata_extra):
-        """Create an OpencodeResult for error cases."""
-        metadata = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat()
-        }
-        if cmd:
-            metadata["command"] = cmd
-        metadata.update(metadata_extra)
-        return OpencodeResult(
-            success=False,
-            output=output,
-            error=error,
-            session_file=None,
-            metadata=metadata
-        )
-
-    # ---- Private instance helpers ----
-
-    @staticmethod
-    def _safe_env() -> dict:
+    def safe_env() -> dict:
         """Build a minimal environment for opencode subprocess execution.
 
         Strips sensitive variables (API keys, tokens) inherited from the parent process
@@ -488,6 +469,12 @@ class OpencodeRunner:
             if val is not None:
                 safe[key] = val
         safe["PYTHONUNBUFFERED"] = "1"
+        # DIAG: log env size
+        total_env = sum(len(k) + len(v) + 2 for k, v in safe.items())
+        for k, v in sorted(safe.items()):
+            logger.debug("[DIAG_ENV] %s = %d bytes", k, len(v))
+        logger.info("[DIAG_ENV] safe_env total: %d vars, %d bytes",
+                    len(safe), total_env)
         return safe
 
     @staticmethod
@@ -497,6 +484,25 @@ class OpencodeRunner:
             return json.loads(line)
         except json.JSONDecodeError:
             return None
+
+    @staticmethod
+    def _make_error_result(error, cmd=None, output="", **metadata_extra):
+        """Create an OpencodeResult for error cases."""
+        metadata = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat()
+        }
+        if cmd:
+            metadata["command"] = cmd
+        metadata.update(metadata_extra)
+        return OpencodeResult(
+            success=False,
+            output=output,
+            error=error,
+            session_file=None,
+            metadata=metadata
+        )
+
+    # ---- Private instance helpers ----
 
     def _save_session_info(self, session_id: str):
         if not self.keep_session:
@@ -590,7 +596,7 @@ class OpencodeRunner:
                 text=True,
                 timeout=self.timeout,
                 cwd=str(self.workdir),
-                env=self._safe_env(),
+                env=self.safe_env(),
                 encoding='utf-8',
                 errors='replace'
             )
@@ -658,7 +664,13 @@ class OpencodeRunner:
 
     def _setup_streaming_process(self, cmd):
         """Set up a streaming subprocess with timeout and stderr monitoring."""
-        env = self._safe_env()
+        env = self.safe_env()
+
+        # DIAG: log total argument list size before launching
+        args_total = sum(len(str(a)) + 1 for a in cmd)
+        env_total = sum(len(k) + len(v) + 2 for k, v in env.items())
+        logger.info("[DIAG_SPAWN] cmd=%s, args_total=%d bytes, env_total=%d bytes, combined=%d bytes",
+                    cmd[:4], args_total, env_total, args_total + env_total)
 
         process = subprocess.Popen(
             cmd,
@@ -733,9 +745,15 @@ class OpencodeRunner:
                 "session_file": self._current_session_file
             }
         except Exception as e:
+            prompt_preview = ""
+            if cmd and len(cmd) > 1:
+                last_arg = cmd[-1]
+                prompt_preview = f", last_arg_len={len(str(last_arg))} bytes"
+            diag = f"[Errno {getattr(e, 'errno', '?')}] {str(e)}{prompt_preview}"
+            logger.error("[DIAG_SPAWN] subprocess.Popen 失败: %s", diag)
             yield {
                 "type": "exception",
-                "data": str(e),
+                "data": diag,
                 "session_file": self._current_session_file
             }
 
@@ -844,7 +862,7 @@ class OpencodeRunner:
                 text=True,
                 timeout=300,
                 cwd=str(self.workdir),
-                env=self._safe_env(),
+                env=self.safe_env(),
                 encoding='utf-8',
                 errors='replace'
             )

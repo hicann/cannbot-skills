@@ -74,6 +74,81 @@ class SandboxManager:
         """获取沙箱的 logs 目录路径"""
         return sandbox_path / "logs"
 
+    @staticmethod
+    def deploy_cann_bench(sandbox_path: Path, cann_bench_path: Path) -> Path:
+        """在沙箱中部署 cann-bench 仓库（始终使用复制模式）。
+
+        使用复制而非软链接，因为 cann-bench 评测会在自身 reports/ 目录下
+        生成报告文件，若使用软链接会污染源仓库目录。
+
+        Args:
+            sandbox_path: 沙箱目录路径
+            cann_bench_path: cann-bench 仓库源路径
+
+        Returns:
+            部署后的 cann-bench 目录路径
+        """
+        dest_path = sandbox_path / "cann-bench"
+
+        if dest_path.exists() or dest_path.is_symlink():
+            if dest_path.is_dir() and not dest_path.is_symlink():
+                shutil.rmtree(dest_path)
+            else:
+                dest_path.unlink()
+
+        abs_path = Path(cann_bench_path).resolve()
+        shutil.copytree(abs_path, dest_path)
+
+        logger.info("[Sandbox] cann-bench 已复制到 %s", dest_path)
+        return dest_path
+
+    @staticmethod
+    def copy_cann_bench_task(sandbox_path: Path, operator: str,
+                             level: str, cann_bench_path: Path) -> Path:
+        """将 cann-bench 任务定义文件和模板复制到沙箱。
+
+        复制内容：
+        1. tasks/{level}/{operator}/ → 沙箱 cann-bench-task/ 目录
+        2. examples/direct_launch_example/ → 沙箱 direct_launch_example/ 目录
+
+        Args:
+            sandbox_path: 沙箱目录路径
+            operator: 算子名称（如 mish）
+            level: 难度等级（如 level1）
+            cann_bench_path: cann-bench 仓库源路径
+
+        Returns:
+            任务定义目录路径
+        """
+        cb_path = Path(cann_bench_path).resolve()
+
+        # 复制任务定义文件
+        task_source = cb_path / "tasks" / level / operator
+        task_target = sandbox_path / "cann-bench-task"
+        task_target.mkdir(parents=True, exist_ok=True)
+
+        if task_source.exists():
+            for f in task_source.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, task_target / f.name)
+            logger.info("[Sandbox] 任务定义已复制到 %s", task_target)
+        else:
+            logger.warning("[Sandbox] 任务目录不存在: %s", task_source)
+
+        # 复制 direct_launch_example 模板
+        template_source = cb_path / "examples" / "direct_launch_example"
+        template_target = sandbox_path / "direct_launch_example"
+
+        if template_source.exists():
+            if template_target.exists():
+                shutil.rmtree(template_target)
+            shutil.copytree(template_source, template_target)
+            logger.info("[Sandbox] 模板已复制到 %s", template_target)
+        else:
+            logger.warning("[Sandbox] 模板目录不存在: %s", template_source)
+
+        return task_target
+
     def deploy_skill_to_sandbox(self, sandbox_path: Path, skill_dir: Path) -> Path:
         """
         在沙箱的 .opencode/skills/ 下部署 skill 目录

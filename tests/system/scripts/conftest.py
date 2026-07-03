@@ -38,6 +38,10 @@ REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
 EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
 SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
+CANN_BENCH_PATH = Path(os.environ.get(
+    "CANN_BENCH_PATH",
+    str(REPO_ROOT.parent.parent / "cann-bench")
+))
 
 # ── 评测维度阈值常量 ──────────────────────────────────────────────
 # AI 评审模型在 dimensions 字段中以结构化格式报告各维度得分
@@ -71,6 +75,23 @@ DIMENSION_ORDER: List[str] = ["覆盖度", "准确性", "质量", "Token"]
 
 CODE_GEN_DIMENSION_ORDER: List[str] = [
     "算子项目工程完整度", "可编译性", "可运行性",
+]
+
+# ── cann_bench 评测维度常量 ────────────────────────────────────────
+# cann_bench 模式使用确定性评测（非 AI 评审），维度来自 cann-bench 评测管道
+CANN_BENCH_DIMENSION_THRESHOLDS: Dict[str, int] = {
+    "编译通过": 1,    # max 1 — binary pass/fail
+    "精度达标": 1,    # max 1 — binary pass/fail
+}
+
+CANN_BENCH_DIMENSION_MAX_SCORES: Dict[str, int] = {
+    "编译通过": 1,
+    "精度达标": 1,
+    "综合得分": 100,
+}
+
+CANN_BENCH_DIMENSION_ORDER: List[str] = [
+    "编译通过", "精度达标", "综合得分",
 ]
 
 # 维度名归一化映射：AI 可能输出的各种变体，统一映射为标准名
@@ -136,7 +157,10 @@ def validate_dimension_scores(
         if score is None:
             failures.append(f"{dim}: score not found in reason field")
         elif score < threshold:
-            max_score = DIMENSION_MAX_SCORES.get(dim, "?")
+            max_score = (DIMENSION_MAX_SCORES.get(dim)
+                         or CODE_GEN_DIMENSION_MAX_SCORES.get(dim)
+                         or CANN_BENCH_DIMENSION_MAX_SCORES.get(dim)
+                         or "?")
             failures.append(f"{dim} ({score}/{max_score}) 低于阈值 ({threshold})")
     if failures:
         tag = f"(Eval {eval_id}) " if eval_id else ""
@@ -232,6 +256,114 @@ def parse_review_md(
         "score": score,
         "dimensions": dimensions,
         "reason": reason or "(no review comments found)",
+    }
+
+
+def _find_latest_json_report(reports_dir: Path) -> Optional[Dict]:
+    """从目录中找到最新的 JSON 报告并加载。
+
+    Returns:
+        解析后的 JSON dict，失败时返回 None。
+    """
+    if not reports_dir.exists():
+        return None
+    json_files = sorted(
+        reports_dir.glob("*.json"),
+        key=lambda p: p.stat().st_mtime, reverse=True,
+    )
+    if not json_files:
+        return None
+    return _load_json_file(json_files[0]) or None
+
+
+def _extract_cann_bench_scores(report_data: Dict, operator: str) -> tuple:
+    """从 cann-bench JSON 报告中提取编译/精度通过状态。
+
+    Returns:
+        (overall_score, pass_rate, compile_passed, accuracy_passed,
+         result_stage) 五元组。
+    """
+    overall_score = report_data.get("overall_score") or 0
+    summary = report_data.get("summary") or {}
+    pass_rate = summary.get("pass_rate") or 0
+    result_stage = report_data.get("result_stage") or ""
+    operators = report_data.get("operators") or []
+
+    compile_passed = 0
+    accuracy_passed = 0
+
+    if not operators:
+        return overall_score, pass_rate, 0, 0, result_stage
+
+    target_ops = [
+        op for op in operators
+        if not operator or op.get("operator", "").lower() == operator.lower()
+    ]
+    if target_ops:
+        compile_passed = 1 if any(
+            op.get("compile_runtime_score", 0) > 0 for op in target_ops
+        ) else 0
+        accuracy_passed = 1 if any(
+            op.get("function_score", 0) > 0 or op.get("pass_rate", 0) > 0
+            for op in target_ops
+        ) else 0
+
+    return overall_score, pass_rate, compile_passed, accuracy_passed, result_stage
+
+
+def _build_cann_bench_reason(overall_score, pass_rate, compile_passed,
+                            accuracy_passed, result_stage) -> str:
+    """构建 cann-bench 评测原因描述。"""
+    if result_stage == "compile_failed":
+        return "cann-bench 评测结果: 编译失败（算子工程未能通过编译阶段）"
+    return (
+        f"cann-bench 评测结果: 综合得分={overall_score:.2f}, "
+        f"通过率={pass_rate:.2%}, "
+        f"编译={'通过' if compile_passed else '失败'}, "
+        f"精度={'达标' if accuracy_passed else '未达标'}"
+    )
+
+
+def parse_cann_bench_evaluation(reports_dir: Path, operator: str = "") -> Dict[str, Any]:
+    """解析 cann-bench 评测管道生成的 JSON 报告。
+
+    从 reports_dir 目录中读取最新的 JSON 报告文件，提取编译/精度/性能评分，
+    返回与 parse_review_md() 兼容的字典格式。
+
+    Args:
+        reports_dir: cann-bench 的 reports/ 目录路径。
+        operator: 目标算子名称（用于从多算子报告中筛选）。
+
+    Returns:
+        {"status": "pass"|"fail", "score": int, "dimensions": {...}, "reason": str}
+    """
+    def _fail_result(reason):
+        return {"status": "fail", "score": 0, "dimensions": {}, "reason": reason}
+
+    report_data = _find_latest_json_report(reports_dir)
+    if report_data is None:
+        if not reports_dir.exists():
+            return _fail_result(f"cann-bench reports directory not found: {reports_dir}")
+        return _fail_result(f"No JSON report found in {reports_dir}")
+
+    scores = _extract_cann_bench_scores(report_data, operator)
+    overall_score, pass_rate, compile_passed, accuracy_passed, result_stage = scores
+
+    status = "pass" if (compile_passed and accuracy_passed) else "fail"
+    dimensions = {
+        "编译通过": {"score": compile_passed, "max": 1},
+        "精度达标": {"score": accuracy_passed, "max": 1},
+        "综合得分": {"score": int(overall_score), "max": 100},
+    }
+    reason = _build_cann_bench_reason(
+        overall_score, pass_rate, compile_passed, accuracy_passed, result_stage,
+    )
+
+    return {
+        "status": status,
+        "score": int(overall_score),
+        "dimensions": dimensions,
+        "reason": reason,
     }
 
 
@@ -1170,8 +1302,18 @@ def _format_dimension_label(dim_scores: Dict[str, int]) -> str:
     dim_parts = []
     # 使用 dim_scores 中实际存在的维度键展示，兼容旧四维和 code_gen 三维
     for dim, s in dim_scores.items():
-        max_ = DIMENSION_MAX_SCORES.get(dim) or CODE_GEN_DIMENSION_MAX_SCORES.get(dim) or "?"
-        thresh = DEFAULT_DIMENSION_THRESHOLDS.get(dim) or CODE_GEN_DIMENSION_THRESHOLDS.get(dim) or 0
+        max_ = (
+            DIMENSION_MAX_SCORES.get(dim)
+            or CODE_GEN_DIMENSION_MAX_SCORES.get(dim)
+            or CANN_BENCH_DIMENSION_MAX_SCORES.get(dim)
+            or "?"
+        )
+        thresh = (
+            DEFAULT_DIMENSION_THRESHOLDS.get(dim)
+            or CODE_GEN_DIMENSION_THRESHOLDS.get(dim)
+            or CANN_BENCH_DIMENSION_THRESHOLDS.get(dim)
+            or 0
+        )
         mark = "✓" if s >= thresh else "✗"
         dim_parts.append(f"{dim}: {s}/{max_} {mark}")
     return " | " + " | ".join(dim_parts) if dim_parts else ""
@@ -1283,6 +1425,63 @@ def _extract_session_blocks(ses_messages: List[Dict]) -> List[str]:
         ))
 
     return blocks
+
+
+def _build_cann_bench_html_from_sandbox(skill_name: str, eval_id: str):
+    """从 sandbox 目录读取 cann-bench HTML 报告和元数据，构建嵌入内容。
+
+    通过检查 _cann_bench_meta.json 是否存在来判断是否为 cann_bench 用例。
+    若存在，读取 cann_bench_report.html 并用 iframe srcdoc 嵌入。
+
+    Args:
+        skill_name: skill 或 team 名称。
+        eval_id: 评测用例 ID。
+
+    Returns:
+        (html: str | None, score: float | None) 元组。
+        html 为 None 表示不是 cann_bench 用例（应走原有逻辑）。
+    """
+    sandbox_dir = SANDBOX_DIR / f"{skill_name}_eval_{eval_id}"
+
+    # 检查是否为 cann_bench 用例（通过元数据文件判断）
+    meta_path = sandbox_dir / "_cann_bench_meta.json"
+    if not meta_path.exists():
+        return None, None
+
+    meta = _load_json_file(meta_path)
+    if meta.get("eval_mode") != "cann_bench":
+        return None, None
+
+    score = meta.get("score", 0)
+
+    # 读取 cann-bench HTML 报告
+    html_path = sandbox_dir / "cann_bench_report.html"
+    if not html_path.exists():
+        # 无 HTML 报告，仅返回分数
+        label = f"cann-bench 评测报告 (得分: {score:.1f}) — HTML 报告未生成"
+        status_cls = "log-review-pass" if score > 50 else "log-review-fail"
+        fallback_html = _build_log_block(label, "cann-bench HTML 报告文件不存在", status_cls)
+        return fallback_html, score
+
+    html_content = html_path.read_text(encoding="utf-8")
+
+    # 用 iframe + srcdoc 嵌入，隔离 CSS
+    escaped = html_mod.escape(html_content, quote=True)
+    label = f"cann-bench 评测报告 (得分: {score:.1f})"
+    status_cls = "log-review-pass" if score > 50 else "log-review-fail"
+
+    embed_html = (
+        f'<div class="log-block {status_cls}">\n'
+        f'  <div class="log-block-label">{label}</div>\n'
+        f'  <div class="log-block-content" style="padding:0;">\n'
+        f'    <iframe srcdoc="{escaped}" '
+        f'style="width:100%;height:800px;border:none;" '
+        f'sandbox="allow-same-origin"></iframe>\n'
+        f'  </div>\n'
+        f'</div>'
+    )
+
+    return embed_html, score
 
 
 def _build_phase2_html_from_md(skill_name: str, eval_id):
@@ -1465,6 +1664,151 @@ def pytest_html_results_table_row(report, cells):
         )
 
 
+def _set_eval_score_on_report(report, score, dim_scores=None,
+                              cann_bench_html=None):
+    """将评测分数写入 pytest report 对象（含 xdist 兼容的 user_properties）。
+
+    Args:
+        cann_bench_html: cann-bench HTML 报告内容。若提供，存入
+            user_properties 以便跨 xdist 序列化后在 controller 侧恢复。
+    """
+    if score is None or getattr(report, '_eval_score', None) is not None:
+        return
+    setattr(report, '_eval_score', score)
+    setattr(report, '_eval_dim_scores', dim_scores or {})
+    if not hasattr(report, 'user_properties'):
+        report.user_properties = []
+    report.user_properties.append(("eval_score", score))
+    if dim_scores:
+        report.user_properties.append(
+            ("eval_dim_scores", json.dumps(dim_scores, ensure_ascii=False))
+        )
+    if cann_bench_html:
+        report.user_properties.append(("cann_bench_html", cann_bench_html))
+
+
+def _inject_phase2_details(report, extra_items, skill_name, eval_id, extras):
+    """向 pytest-html 报告注入 Phase 2 详情（cann_bench 或 AI 评审）。"""
+    # cann_bench 报告嵌入
+    cann_html, cann_score = _build_cann_bench_html_from_sandbox(skill_name, eval_id)
+    if cann_html is not None:
+        has_cann = any(
+            'cann-bench' in (
+                item.get('content', '') if isinstance(item, dict)
+                else getattr(item, 'content', '')
+            )
+            for item in extra_items
+        )
+        if not has_cann:
+            extra_items.append(extras.html(cann_html))
+        _set_eval_score_on_report(
+            report, cann_score, cann_bench_html=cann_html,
+        )
+        return
+
+    # 原有逻辑：text / file_based / code_gen
+    has_phase2 = any(
+        'log-block' in (
+            item.get('content', '') if isinstance(item, dict)
+            else getattr(item, 'content', '')
+        )
+        for item in extra_items
+    )
+    phase2_html, score, dim_scores = _build_phase2_html_from_md(skill_name, eval_id)
+    if phase2_html and not has_phase2:
+        extra_items.append(extras.html(phase2_html))
+    _set_eval_score_on_report(report, score, dim_scores)
+
+
+def _get_extra_content(extra):
+    """从 extras 条目中提取 content 字符串。"""
+    if isinstance(extra, dict):
+        return extra.get('content', '')
+    return getattr(extra, 'content', '')
+
+
+def _remove_assertion_extras(report):
+    """移除 report.extras 中包含 AssertionError 的条目。"""
+    filtered = []
+    for e in report.extras:
+        if 'AssertionError' not in _get_extra_content(e):
+            filtered.append(e)
+    report.extras = filtered
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """在 makereport 阶段注入 cann-bench HTML 到 report.extras。
+
+    pytest-html 在 makereport hookwrapper 中读取 report.extras（早于
+    logreport 阶段）。必须在 makereport 阶段设置 extras，否则 xdist 序列化
+    时 extras 已被 pytest-html 读取过，logreport 阶段的修改无效。
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call":
+        return
+
+    # 提取 eval_id 和 skill_name
+    raw_id = _parse_eval_id(report.nodeid)
+    eval_id = raw_id if raw_id != "?" else None
+    skill_name = _extract_skill_name(report.nodeid) if eval_id else None
+    if not (skill_name and eval_id):
+        return
+
+    # 尝试从沙箱直接读取（worker 侧）
+    cann_html, _ = _build_cann_bench_html_from_sandbox(skill_name, eval_id)
+
+    # xdist fallback: 从 user_properties 恢复（controller 侧）
+    if cann_html is None:
+        cann_html = _get_user_property(report, "cann_bench_html")
+
+    if cann_html is None:
+        return
+
+    # 确保 extras 列表存在
+    if not hasattr(report, 'extras'):
+        report.extras = []
+
+    # 去重检查
+    has_cann = any('cann-bench' in _get_extra_content(e) for e in report.extras)
+    if not has_cann:
+        report.extras.append({
+            "name": None, "format_type": "html", "content": cann_html,
+            "mime_type": None, "extension": None,
+        })
+
+    # cann_bench 用例失败时，移除断言错误详情，只保留 cann-bench 报告
+    if report.failed:
+        _remove_assertion_extras(report)
+
+
+def _parse_eval_id(nodeid):
+    """从 nodeid 解析 eval_id，格式: test_skill_evals.py::test_eval_case[skill::eval_N]"""
+    match = re.search(r'\[.*?::eval_(\d+)\]', nodeid)
+    return match.group(1) if match else "?"
+
+
+def _get_user_property(report, key):
+    """从 report.user_properties 中查找指定 key 的值。"""
+    for k, val in getattr(report, 'user_properties', []) or []:
+        if k == key:
+            return val
+    return None
+
+
+def _resolve_cann_bench(report, skill_name, eval_id):
+    """解析 cann_bench 用例的 HTML 和分数，支持 xdist user_properties 回退。"""
+    if not (skill_name and eval_id):
+        return None, None
+    cann_html, cann_score = _build_cann_bench_html_from_sandbox(skill_name, eval_id)
+    if cann_html is None:
+        cann_html = _get_user_property(report, "cann_bench_html")
+    if cann_html is not None and cann_score is None:
+        cann_score = _get_user_property(report, "eval_score")
+    return cann_html, cann_score
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_logreport(report):
     """注入结构化的 extra HTML：失败用例解析断言信息，Phase 2 用例从 logs/ JSON 文件解析"""
@@ -1475,41 +1819,26 @@ def pytest_runtest_logreport(report):
 
     extra_items = list(getattr(report, 'extras', []))
 
-    # 从 nodeid 解析 eval_id（用于 failure_html 和 Phase 2 日志）
-    # nodeid 格式: test_skill_evals.py::test_eval_case[skill::eval_N]
-    bracket_match = re.search(r'\[.*?::eval_(\d+)\]', report.nodeid)
-    eval_id = bracket_match.group(1) if bracket_match else "?"
+    eval_id = _parse_eval_id(report.nodeid)
+    skill_name = _extract_skill_name(report.nodeid)
+    cann_html, cann_score = _resolve_cann_bench(report, skill_name, eval_id)
 
-    if report.failed:
+    if report.failed and cann_html is None:
         failure_html = _parse_failure_to_html(
-            getattr(report, 'longreprtext', '') or '',
-            eval_id=eval_id
+            getattr(report, 'longreprtext', '') or '', eval_id=eval_id,
         )
         if failure_html:
             extra_items.append(extras.html(failure_html))
 
-    # 从 nodeid 解析 skill_name，读取 logs/ 目录下的 JSON 文件
-    skill_name = _extract_skill_name(report.nodeid)
-
     if skill_name and eval_id:
-        # 去重：xdist 并行时 worker 和 master 各触发一次此钩子。
-        # master 侧 extras 已反序列化为 dict，需同时兼容 dict 和 Extra 对象。
-        has_phase2 = any(
-            'log-block' in (item.get('content', '') if isinstance(item, dict) else getattr(item, 'content', ''))
-            for item in extra_items
-        )
-        phase2_html, score, dim_scores = _build_phase2_html_from_md(skill_name, eval_id)
-        if phase2_html and not has_phase2:
-            extra_items.append(extras.html(phase2_html))
-
-        if score is not None and getattr(report, '_eval_score', None) is None:
-            setattr(report, '_eval_score', score)
-            setattr(report, '_eval_dim_scores', dim_scores)
-            if not hasattr(report, 'user_properties'):
-                report.user_properties = []
-            report.user_properties.append(("eval_score", score))
-            if dim_scores:
-                report.user_properties.append(("eval_dim_scores", json.dumps(dim_scores, ensure_ascii=False)))
+        if cann_html is not None:
+            _set_eval_score_on_report(
+                report, cann_score, cann_bench_html=cann_html,
+            )
+        else:
+            _inject_phase2_details(
+                report, extra_items, skill_name, eval_id, extras,
+            )
 
     if extra_items:
         report.extras = extra_items
