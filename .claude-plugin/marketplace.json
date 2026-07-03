@@ -182,6 +182,27 @@
       ]
     },
     {
+      "name": "model-train-skills",
+      "description": "NPU 大模型训练优化原子 Skills。覆盖训练 OOM 内存诊断、精度异常定界、训练日志可视化等。方法论适用于 torchtitan-npu 等 PyTorch on NPU 训练框架。",
+      "source": "./model",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "model-train",
+        "npu",
+        "pytorch",
+        "training",
+        "skills"
+      ],
+      "category": "skills",
+      "skills": [
+        "./model-train-oom-analysis"
+      ]
+    },
+    {
       "name": "tilelang-op-orchestrator-skills",
       "description": "TileLang 算子开发 Skills（9 个）。环境检查、子模块拉取、算子设计、算子开发、测试设计、API 最佳实践、编程模式指南、性能优化、代码审查。",
       "source": "./ops",
