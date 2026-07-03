@@ -1,0 +1,1551 @@
+{
+  "sessionSummary": "基于 ops-registry-invoke-workflow 开发 SoftplusV2Grad 算子，L3 全自动，仅完成 阶段一（需求与设计）后按用户指令停止。3 个评审/组装驱动的重试周期（spec/分段/test），CP1/CP1.5/CP2 全 L3 自动放行，无硬失败。G/S 8 维均有设计层/执行层证据。",
+  "sessionMeta": {
+    "sessionId": "ffced1a3-d947-4cb9-8e75-6bffb7856cf3",
+    "operator": "SoftplusV2Grad",
+    "model": "deepseek-v4-pro",
+    "duration": "59.2min",
+    "tokens": "36.9M",
+    "autonomy": "L3 全自动",
+    "reachedPhase": "阶段一（已完成，按指令停止）",
+    "cpsExecuted": [
+      "CP1",
+      "CP1.5",
+      "CP2"
+    ],
+    "cpsMissing": [
+      "CP3",
+      "CP4",
+      "CP5"
+    ],
+    "phasesNotReached": [
+      "阶段二 开发",
+      "阶段三 验收",
+      "阶段四 上库"
+    ]
+  },
+  "flow": [
+    {
+      "id": "n1",
+      "skill": "ops-registry-invoke-workflow",
+      "step": "1.1 加载workflow",
+      "type": "invoke",
+      "turn": 1,
+      "parallel": "p1",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n2",
+      "skill": "ops-registry-invoke-workflow",
+      "step": "1.1 加载workflow",
+      "type": "invoke",
+      "turn": 2,
+      "parallel": "p1",
+      "retryOf": "n1",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "redundant",
+          "dimension": "S2",
+          "severity": "low",
+          "evidence": "turn 2 (line 1601) 再次 invoke 同一 workflow",
+          "diagnosis": "session 内重复加载 workflow skill，疑似上下文丢失或误触发",
+          "suggestion": "ops-registry-invoke-workflow 增加已加载标记，避免同 session 重复加载"
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "skill": "ascendc-env-check",
+      "step": "1.1 开发准备",
+      "type": "invoke",
+      "turn": 3,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n4",
+      "skill": "CP1",
+      "step": "⛔CP1 需求确认",
+      "type": "gate",
+      "turn": 4,
+      "parallel": null,
+      "retryOf": null,
+      "status": "auto-passed",
+      "problems": [
+        {
+          "type": "gate-autopassed",
+          "dimension": "process",
+          "severity": "low",
+          "evidence": "[AUTO_L3] CP1 PREVIEW structure check → auto-passed (line 4495)",
+          "diagnosis": "L3 自动放行，仅做结构检查",
+          "suggestion": "CP1 本就可机器判，自动放行合理"
+        }
+      ]
+    },
+    {
+      "id": "n5",
+      "skill": "ascendc-ops-architect",
+      "step": "1.2.5 spec生成",
+      "type": "dispatch",
+      "turn": 5,
+      "parallel": "p2",
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "review-reject",
+          "dimension": "G1",
+          "severity": "medium",
+          "evidence": "其产出的 spec 被 1.2.5R 评审退回 (turn 7→8 重跑)",
+          "diagnosis": "首轮 spec 存在 设计逻辑错误/一致性违规，未过 13 条 SPEC-* 评审",
+          "suggestion": "ascendc-ops-architect 生成 spec.yaml 前内置 13 条 SPEC-* 条款自检"
+        }
+      ]
+    },
+    {
+      "id": "n6",
+      "skill": "ops-spec-gen",
+      "step": "1.2.5 spec生成",
+      "type": "invoke",
+      "turn": 6,
+      "parallel": "p2",
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G1",
+          "severity": "medium",
+          "evidence": "spec-gen 在 1.2.5R 评审后于 turn 8 重跑 (line 7816)",
+          "diagnosis": "首轮 spec 未通过 9-stage/SPEC 评审，被退回重做",
+          "suggestion": "ops-spec-gen 生成时内置 13 条 SPEC-* + 9-stage 自检，降低退回率"
+        }
+      ]
+    },
+    {
+      "id": "n7",
+      "skill": "ascendc-ops-design-reviewer",
+      "step": "1.2.5R spec评审",
+      "type": "dispatch",
+      "turn": 7,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "review-reject",
+          "dimension": "G1",
+          "severity": "medium",
+          "evidence": "评审 ❌ 退回 spec-gen 重跑 (turn 8)",
+          "diagnosis": "评审 subagent 正确拦截了 spec 的实质性缺陷（设计逻辑错误/一致性违规）——评审本身工作正常，问题在被评审的 spec",
+          "suggestion": "评审 subagent 行为合规；改进点在被评审方（architect/spec-gen）"
+        }
+      ]
+    },
+    {
+      "id": "n8",
+      "skill": "ops-spec-gen",
+      "step": "1.2.5 spec生成",
+      "type": "invoke",
+      "turn": 8,
+      "parallel": null,
+      "retryOf": "n6",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G1",
+          "severity": "medium",
+          "evidence": "retryOf n6 (turn 8)",
+          "diagnosis": "1.2.5 评审失败后重做",
+          "suggestion": "提升首轮 spec 质量"
+        }
+      ]
+    },
+    {
+      "id": "n9",
+      "skill": "npu-arch",
+      "step": "1.3a 设计准备(支撑)",
+      "type": "invoke",
+      "turn": 9,
+      "parallel": "p3",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n10",
+      "skill": "ascendc-env-check",
+      "step": "1.3a 设计准备(支撑)",
+      "type": "invoke",
+      "turn": 10,
+      "parallel": "p3",
+      "retryOf": "n3",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "redundant",
+          "dimension": "S2",
+          "severity": "low",
+          "evidence": "env-check 第 2 次 (turn 10, line 8054)",
+          "diagnosis": "环境信息不会变化，重复调用属冗余",
+          "suggestion": "ascendc-env-check 结果在 session 内缓存，避免重复执行"
+        }
+      ]
+    },
+    {
+      "id": "n11",
+      "skill": "ascendc-docs-gen",
+      "step": "1.3a 设计准备(支撑)",
+      "type": "invoke",
+      "turn": 11,
+      "parallel": "p3",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n12",
+      "skill": "ascendc-docs-search",
+      "step": "1.3a 设计准备(支撑)",
+      "type": "invoke",
+      "turn": 12,
+      "parallel": "p3",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n13",
+      "skill": "CP1.5",
+      "step": "⛔CP1.5 spec语义确认",
+      "type": "gate",
+      "turn": 13,
+      "parallel": null,
+      "retryOf": null,
+      "status": "auto-passed",
+      "problems": [
+        {
+          "type": "gate-autopassed",
+          "dimension": "process",
+          "severity": "medium",
+          "evidence": "[AUTO_L3] CP1.5 PREVIEW (line 9451)",
+          "diagnosis": "SKILL.md 明确 CP1.5 必须人工确认（公式意图/tolerance/boundary 业务覆盖），但 L3 下被自动放行",
+          "suggestion": "CP1.5 即便 L3 也应保留人工语义 review，或补充机器可判的语义检查项；否则语义层缺陷会漏到设计阶段"
+        }
+      ]
+    },
+    {
+      "id": "n14",
+      "skill": "ascendc-ops-designer",
+      "step": "1.3a 设计准备",
+      "type": "dispatch",
+      "turn": 14,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n15",
+      "skill": "npu-arch",
+      "step": "1.3a 设计参考",
+      "type": "invoke",
+      "turn": 15,
+      "parallel": null,
+      "retryOf": "n9",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "redundant",
+          "dimension": "S2",
+          "severity": "low",
+          "evidence": "npu-arch 第 2 次 (turn 15, line 9983)",
+          "diagnosis": "同 session 内重复架构查询，结果可复用",
+          "suggestion": "npu-arch 结果 session 内缓存"
+        }
+      ]
+    },
+    {
+      "id": "n16",
+      "skill": "ascendc-regbase-best-practice",
+      "step": "1.3a 设计参考",
+      "type": "invoke",
+      "turn": 16,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n17",
+      "skill": "ascendc-ops-design-overview",
+      "step": "1.3c 并行分段(5×)",
+      "type": "dispatch",
+      "turn": 17,
+      "parallel": "p4",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n18",
+      "skill": "ascendc-ops-design-architecture",
+      "step": "1.3c 并行分段(5×)",
+      "type": "dispatch",
+      "turn": 17,
+      "parallel": "p4",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n19",
+      "skill": "ascendc-ops-design-implementation",
+      "step": "1.3c 并行分段(5×)",
+      "type": "dispatch",
+      "turn": 17,
+      "parallel": "p4",
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G2",
+          "severity": "medium",
+          "evidence": "1.3d 组装校验失败，implementation 分段重炉 (turn 22, line 23248)",
+          "diagnosis": "分段输出未通过 1.3d 组装校验（分段边界/接口不一致），指令遵循不达标",
+          "suggestion": "ascendc-ops-design-implementation 输出前内置组装自检（按 section-map.md 边界 + sibling 接口一致性），降低重炉率"
+        }
+      ]
+    },
+    {
+      "id": "n20",
+      "skill": "ascendc-ops-design-quality",
+      "step": "1.3c 并行分段(5×)",
+      "type": "dispatch",
+      "turn": 17,
+      "parallel": "p4",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n21",
+      "skill": "ascendc-ops-design-plan",
+      "step": "1.3c 并行分段(5×)",
+      "type": "dispatch",
+      "turn": 17,
+      "parallel": "p4",
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G2",
+          "severity": "medium",
+          "evidence": "1.3d 组装校验失败，plan 分段重炉 (turn 23, line 23249)",
+          "diagnosis": "分段输出未通过 1.3d 组装校验，指令遵循不达标",
+          "suggestion": "ascendc-ops-design-plan 内置组装自检"
+        }
+      ]
+    },
+    {
+      "id": "n22",
+      "skill": "ascendc-ops-design-implementation",
+      "step": "1.3d 失败分段重炉",
+      "type": "dispatch",
+      "turn": 22,
+      "parallel": "p5",
+      "retryOf": "n19",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G2",
+          "severity": "medium",
+          "evidence": "retryOf n19，5 段中 2 段(40%)重炉",
+          "diagnosis": "1.3c 并行分段组装失败率 40%",
+          "suggestion": "优化分段输入包质量 + 分段 skill 组装自检"
+        }
+      ]
+    },
+    {
+      "id": "n23",
+      "skill": "ascendc-ops-design-plan",
+      "step": "1.3d 失败分段重炉",
+      "type": "dispatch",
+      "turn": 23,
+      "parallel": "p5",
+      "retryOf": "n21",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G2",
+          "severity": "medium",
+          "evidence": "retryOf n21",
+          "diagnosis": "同上",
+          "suggestion": "同上"
+        }
+      ]
+    },
+    {
+      "id": "n24",
+      "skill": "ascendc-ops-designer",
+      "step": "1.3R 方案评审",
+      "type": "dispatch",
+      "turn": 24,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n25",
+      "skill": "ascendc-ops-tester",
+      "step": "1.4 测试设计",
+      "type": "dispatch",
+      "turn": 25,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "review-reject",
+          "dimension": "G4",
+          "severity": "medium",
+          "evidence": "1.4R 评审退回重做 (turn 29)",
+          "diagnosis": "首轮测试设计存在 覆盖缺口/关键用例缺失/spec 一致性违规，完整性不达标",
+          "suggestion": "ascendc-ops-tester 输出 TEST.md 前内置评审条款自检（覆盖缺口/spec 一致性/关键用例）"
+        }
+      ]
+    },
+    {
+      "id": "n26",
+      "skill": "ascendc-ops-design-reviewer",
+      "step": "1.4R 测试设计评审",
+      "type": "dispatch",
+      "turn": 26,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "review-reject",
+          "dimension": "G4",
+          "severity": "medium",
+          "evidence": "评审 ❌ 退回 tester 重做 (turn 29)",
+          "diagnosis": "评审正确拦截测试设计完整性缺陷——评审本身正常，问题在被评审的 TEST",
+          "suggestion": "改进点在被评审方（tester）"
+        }
+      ]
+    },
+    {
+      "id": "n27",
+      "skill": "ascendc-st-design",
+      "step": "1.4 ST测试用例",
+      "type": "invoke",
+      "turn": 27,
+      "parallel": "p6",
+      "retryOf": null,
+      "status": "ok",
+      "problems": [
+        {
+          "type": "out-of-order",
+          "dimension": "process",
+          "severity": "low",
+          "evidence": "st-design 在 阶段一 1.4 内运行 (line 35001)，但 SKILL.md 把 ST开发放在阶段二/三之间",
+          "diagnosis": "st-design 阶段归属定义模糊：1.4 测试设计是否含 ST？",
+          "suggestion": "workflow SKILL.md 明确 st-design 归属 1.4（测试设计含 ST 用例）还是 阶段三，消除歧义"
+        }
+      ]
+    },
+    {
+      "id": "n28",
+      "skill": "ascendc-registry-invoke-template",
+      "step": "1.4 模板",
+      "type": "invoke",
+      "turn": 28,
+      "parallel": "p6",
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n29",
+      "skill": "ascendc-ops-tester",
+      "step": "1.4 测试设计(重做)",
+      "type": "dispatch",
+      "turn": 29,
+      "parallel": null,
+      "retryOf": "n25",
+      "status": "ok",
+      "problems": [
+        {
+          "type": "retry",
+          "dimension": "G4",
+          "severity": "medium",
+          "evidence": "retryOf n25 (line 37190)",
+          "diagnosis": "1.4 评审失败后重做",
+          "suggestion": "提升首轮测试设计完整性"
+        }
+      ]
+    },
+    {
+      "id": "n30",
+      "skill": "ascendc-ops-design-reviewer",
+      "step": "1.4R 测试设计评审(重做)",
+      "type": "dispatch",
+      "turn": 30,
+      "parallel": null,
+      "retryOf": "n26",
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n31",
+      "skill": "ascendc-st-design",
+      "step": "1.4 ST测试用例(重做)",
+      "type": "invoke",
+      "turn": 31,
+      "parallel": "p7",
+      "retryOf": "n27",
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n32",
+      "skill": "ascendc-registry-invoke-template",
+      "step": "1.4 模板(重做)",
+      "type": "invoke",
+      "turn": 32,
+      "parallel": "p7",
+      "retryOf": "n28",
+      "status": "ok",
+      "problems": []
+    },
+    {
+      "id": "n33",
+      "skill": "CP2",
+      "step": "⛔CP2 设计完成确认",
+      "type": "gate",
+      "turn": 33,
+      "parallel": null,
+      "retryOf": null,
+      "status": "auto-passed",
+      "problems": [
+        {
+          "type": "gate-autopassed",
+          "dimension": "process",
+          "severity": "low",
+          "evidence": "[AUTO_L3] CP2 PREVIEW (line 42653)，1.3R+1.4R 均 ✅",
+          "diagnosis": "L3 自动放行，前置评审已通过",
+          "suggestion": "CP2 前置有双重评审，自动放行合理"
+        }
+      ]
+    },
+    {
+      "id": "n34",
+      "skill": "阶段一完成",
+      "step": "◆ 阶段一完成（按指令停止）",
+      "type": "terminal",
+      "turn": 34,
+      "parallel": null,
+      "retryOf": null,
+      "status": "ok",
+      "problems": []
+    }
+  ],
+  "skillQuality": [
+    {
+      "skill": "ops-registry-invoke-workflow",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "workflow 编排正确，阶段一全流程走通"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "CP 门控/校验脚本均按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含数值稳定性/资源约束"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖 1.1-1.4 全步骤"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "工作流编排不直接产出边界用例"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "SKILL.md 结构清晰，mermaid+步骤+详情，子代理执行到位"
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "session 内被重复加载 2 次",
+          "evidence": "§2 line 29 主 Agent 启动加载 workflow SKILL.md；§14.1 line 1601 dev-prep 子代理冷启动再次加载同一 skill（line 1599 'I MUST first load the ops-registry-invoke-workflow skill'），编排原则/门控文本被重复 dump",
+          "diagnosis": "每个 dispatch 子代理冷启动无共享上下文，按 CLAUDE.md 规则重新加载 workflow skill，静态编排知识重复 fetch",
+          "suggestion": "ops-registry-invoke-workflow 增加会话级已加载标记/缓存，或由主 Agent 加载后把编排要点下传给子代理，避免冷启动重复加载"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "分层(核心原则/门控/主Agent职责/阶段详情)清晰"
+        }
+      },
+      "summary": "编排质量高，但缺已加载去重机制"
+    },
+    {
+      "skill": "ascendc-env-check",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "环境检查结果正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A 域外"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需环境项"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界用例类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "指令清晰"
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "被重复调用 2 次，结果本可缓存",
+          "evidence": "§14.1 line 3056 dev-prep 首检，结论 line 3951 '环境检查通过(Ascend950PR/CANN 9.0.0/NPU OK)' 已记 LOG.md；§33.1.5 line 8054 spec-review 子代理冷启动再次加载 env-check 重复检查静态环境",
+          "diagnosis": "NPU/CANN 环境静态且已记 LOG.md，spec-review 子代理冷启动无共享上下文，重复加载 SKILL.md+重复检查无新信息",
+          "suggestion": "env-check 结果写入会话级 LOG.md 后，后续子代理直接读 LOG.md 而非重载 skill+重检；或工作流层把环境结论下传"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "功能正常但缺 session 内缓存"
+    },
+    {
+      "skill": "ascendc-ops-architect",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "weak",
+          "note": "首轮 spec 被评审退回（设计逻辑/一致性违规）",
+          "evidence": "§28 line 4741 dispatch→§28.1 subagent(32turn 2.5Mt)；9-stage §28.1.20 line 6486 首轮 overall FAIL(line 6578)，stage1/2/9 ✗FAIL",
+          "diagnosis": "首轮 spec.yaml 不达标，依赖重跑校验兜底而非一次成型",
+          "suggestion": "architect 生成 spec 前先对照 registries 白名单自检 enum/kind，提升首轮通过率"
+        },
+        "G2": {
+          "rating": "weak",
+          "note": "spec 未过 9-stage/SPEC 首轮校验",
+          "evidence": "stage1 line 6505 schema_static FAIL：attributes 缺 type/semantics、invariants 缺 name、kind 非法(value_identity_right/value_monotonic_increasing/produces_inf_or_nan 不在白名单)；stage2 line 6534 FAIL：unknown invariant kinds/machine_check.kind/synthesize patterns",
+          "diagnosis": "生成的 enum/kind 值不在 registries 白名单内，spec 契约不合规",
+          "suggestion": "architect SKILL.md 补 MUST：生成前读 registries/*.yaml 校验 enum 成员，未在白名单的值不得 emit"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "spec 含数值稳定性处理（beta*x>threshold 退化）"
+        },
+        "G4": {
+          "rating": "weak",
+          "note": "13 SPEC-* 条款首轮未全覆盖",
+          "evidence": "stage2 line 6537-6558 拒绝 value_identity_right/value_monotonic_increasing/inject_inf_one_element/all_zeros——emit 的 token 未覆盖自身 registry 集合",
+          "diagnosis": "spec 覆盖缺口：生成的 invariant/machine_check/synthesize 项与 registry 不一致",
+          "suggestion": "同 G2，生成前 registry 自检"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非测试类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "agent 定义清晰（spec-generation scene）",
+          "staticChecks": [
+            {
+              "category": "asymmetry",
+              "severity": "high",
+              "issue": "有输入约束(手填4 TODO from registries: math_semantics.formula/reference_oracle/dtype_policy.supported_combinations/numerical_tolerance.per_dtype, line 4777-4781)但失败处理 line 4807-4809 只说'按 finding 修订后重跑'，未 MUST 重跑前先查 registries——正是 stage2 重 fail 根因",
+              "snippet": "9-stage 任一 stage FAIL → 按 finding 修订 spec.yaml 后重跑校验",
+              "suggestion": "失败处理补 MUST：修订前先对照 registries/*.yaml 校验 enum"
+            },
+            {
+              "category": "structure",
+              "severity": "medium",
+              "issue": "缺 MUST/SHOULD 分级，registry 查找步骤无强制等级",
+              "suggestion": "把 registry 查找标为 MUST 步骤"
+            },
+            {
+              "category": "reference",
+              "severity": "low",
+              "issue": "有效 kind 枚举在 registries/*.yaml(line 6538 引用 invariant_kind_registry.yaml)，SKILL.md 未内嵌白名单",
+              "suggestion": "SKILL.md 内嵌 registry 关键 enum 摘要"
+            }
+          ]
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "首轮退回导致重跑，额外 token",
+          "evidence": "§28.1.2 line 4812 系统上下文 dump npu-arch SKILL.md，§33.1.4/§38.1.3 又各加载一次，npu-arch 共 dump 7 次(line 4853-4866 DAV_3510 表每次相同)",
+          "diagnosis": "静态架构知识在多个子代理冷启动重复 fetch",
+          "suggestion": "架构映射结论会话级缓存，子代理读缓存而非重载 skill"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "spec 首轮质量不足，需内置 SPEC 自检"
+    },
+    {
+      "skill": "ops-spec-gen",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "weak",
+          "note": "首轮 spec 被退回，重跑后才过",
+          "evidence": "§28.1.3 line 5200 首次 invoke(architect 驱动)，9-stage overall FAIL(line 6578)；§33.1.3 line 7816 二次 invoke(reviewer spec-review)",
+          "diagnosis": "生成器首轮产出未通过自身 9-stage 校验",
+          "suggestion": "生成器 emit 前自检 enum 成员"
+        },
+        "G2": {
+          "rating": "weak",
+          "note": "未过 9-stage 首轮",
+          "evidence": "stage2 line 6534 拒绝 inject_inf_one_element/all_zeros/value_identity_right 等 synthesize pattern 与 invariant kind，契约不合规",
+          "diagnosis": "生成器 emit 的 token 不在自身 registry 白名单",
+          "suggestion": "emit 前 registry 自检"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "含数值稳定性阈值"
+        },
+        "G4": {
+          "rating": "weak",
+          "note": "13 条款首轮未全 ✅",
+          "evidence": "line 6537-6558 覆盖缺口：emit 的 invariant/machine_check/synthesize 项与 registry 集合不一致",
+          "diagnosis": "生成器未自验证 enum 成员即 emit",
+          "suggestion": "同 G2"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非测试类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "SKILL.md 全文嵌入，步骤清晰",
+          "staticChecks": [
+            {
+              "category": "io-unclear",
+              "severity": "medium",
+              "issue": "SKILL.md 描述每 stage 检查什么，但未声明 emit 前的自检契约——生成器与校验器共享 enum 经外部 registry，未规定生成侧 MUST 自检",
+              "snippet": "9-stage 列表(stage1 schema_static … stage9 oracle_reachable)",
+              "suggestion": "补生成侧 MUST：emit 前对照 registries 自检 enum 成员"
+            },
+            {
+              "category": "reference",
+              "severity": "low",
+              "issue": "有效 enum 在 registries/*.yaml(line 6538)，SKILL.md(line 5215-5228)未内嵌白名单，模型须读 registry 才知合法值",
+              "suggestion": "内嵌 registry 关键 enum 摘要"
+            }
+          ]
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "重跑 1 次，冗余 token",
+          "evidence": "§28.1.3 line 5200 与 §33.1.3 line 7816 两次 invoke，9-stage 列表(line 5215-5226/7831-7842)相同重复 dump；line 7949 reviewer 自述 'already loaded ops-spec-gen' 但冷启动仍重 fetch",
+          "diagnosis": "跨子代理边界重复加载相同 SKILL.md",
+          "suggestion": "spec-gen 9-stage 列表会话级缓存"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "需内置 SPEC+9-stage 自检降低退回"
+    },
+    {
+      "skill": "ascendc-ops-design-reviewer",
+      "occurrences": 3,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "3 次评审均正确拦截实质缺陷（spec/1.4R），评审行为合规"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按 13 SPEC-*/TEST 评审条款执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "评审含数值/tolerance 判断项"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖完整性正是其职责，正确判 ❌"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "test-design-review 含边界覆盖判断"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "区分 ❌阻塞/⚠建议 的约束清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "评审输出聚焦条款，无冗余"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "scene 分明（spec-review/test-design-review）"
+        }
+      },
+      "summary": "评审质量高，是流程的正面力量"
+    },
+    {
+      "skill": "npu-arch",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "架构信息正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需架构代际"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "SKILL.md 嵌入，结构清晰"
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "重复调用 2 次，结果可缓存",
+          "evidence": "显式 invoke 2次(§33.1.4 line 7951, §38.1.3 line 9983)；系统上下文 dump 5次(4814/9662/20672/26489/29216)，共 7 次 dump 同一 npu-arch SKILL.md，DAV_3510 buffer/freq/core 表(line 4853-4866)每次相同",
+          "diagnosis": "静态架构映射(Ascend950PR→dav-3510)在每个子代理冷启动重复 fetch",
+          "suggestion": "架构映射结论会话级缓存下传，子代理读缓存而非重载 skill"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "功能正常但缺缓存"
+    },
+    {
+      "skill": "ascendc-docs-gen",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "文档生成正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需文档"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "指令清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "单次调用"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-docs-search",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "检索正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "指令清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "单次"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-ops-designer",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "1.3a 设计准备 + 1.3R 方案评审均通过，无退回"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义执行"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "DESIGN 含数值稳定性/内存"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "设计覆盖完整，1.3R 通过"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "设计考虑边界退化"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "agent 定义清晰（design-prepare/design-review scene）"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "无冗余"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "质量高"
+    },
+    {
+      "skill": "ascendc-regbase-best-practice",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "参考正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "指令清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "单次"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-ops-design-overview",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "分段通过组装"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "通过 1.3d 组装校验"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含安全考虑"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "分段完整"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界处理章节"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "agent 定义清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "无重炉"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-ops-design-architecture",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "分段通过组装"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "通过 1.3d"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含安全"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "分段完整"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界处理"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "无重炉"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-ops-design-implementation",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "weak",
+          "note": "首轮分段未过 1.3d 组装，重炉后才过",
+          "evidence": "n19 turn 17 首轮输出被 1.3d 组装校验拒；n22 turn 22 重炉后通过（line 23248 重炉日志）",
+          "diagnosis": "首轮产出质量不达标，依赖重炉兜底而非一次成型",
+          "suggestion": "design-implementation 输出前自检 section-map 边界 + sibling 接口，提升首轮通过率"
+        },
+        "G2": {
+          "rating": "fail",
+          "note": "1.3d 组装校验失败——分段边界/接口不一致，指令遵循不达标",
+          "evidence": "n19 (turn 17) 首轮 5×并行分段中 implementation 分段未通过 1.3d 组装校验：相邻分段 section 边界重叠/留白、sibling 接口签名（输入 tensor 形状/数据类型）与 plan 段不一致（line ~23000 校验 FAIL 输出）",
+          "diagnosis": "SKILL.md/agent 定义要求\"按 section-map 切片\"但未强制输出前做 sibling 接口一致性自检；各并行分段独立生成、无共享接口契约，导致边界拼不上",
+          "suggestion": "ascendc-ops-design-implementation 的 agent 定义新增输出前自检步骤：①对照 section-map.md 确认本段起止边界与相邻段无重叠/留白 ②核对 sibling 接口签名（tensor 形状/dtype/axis）一致 ③自检不过则就地修正后再返回，避免上抛给 1.3d 兜底"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含数值稳定性"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "分段内容完整"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界处理章节"
+        },
+        "S1": {
+          "rating": "weak",
+          "note": "agent 定义未强制 sibling 接口自检，导致组装失败",
+          "evidence": "dispatch 该 skill 的子代理 turn (turn 17) 行为：直接产出分段未做接口自检即返回，1.3d 才发现不一致",
+          "diagnosis": "agent 定义里\"按 section-map 切片\"指令偏粗，缺少\"输出前校验 sibling 接口\"的强制步骤，可执行性不足",
+          "suggestion": "agent 定义补一条 MUST 步骤：返回前对照 sibling 段接口表自检，未过则修正；把\"接口一致性\"从隐式期望写成显式 checklist",
+          "staticChecks": [
+            {
+              "category": "ambiguity",
+              "severity": "high",
+              "issue": "\"按 section-map 切片\"表述模糊：未定义边界重叠/留白的判定规则，子代理可自行解释",
+              "snippet": "按 section-map.md 对应区段生成本段实现",
+              "suggestion": "显式定义边界判定：本段 section 区间 [start,end] 必须与相邻段无交集且无间隙"
+            },
+            {
+              "category": "io-unclear",
+              "severity": "high",
+              "issue": "输出契约未声明：未规定返回分段必须含起止 section id + sibling 接口签名表（tensor 形状/dtype/axis）",
+              "snippet": "（agent 定义未出现 output 契约字段）",
+              "suggestion": "补 Output Contract：每段返回 {sectionRange, inputs[], outputs[], siblingInterface}"
+            },
+            {
+              "category": "asymmetry",
+              "severity": "medium",
+              "issue": "输入侧有约束（按 section-map 切片）但输出侧无对称校验——要求怎么切，却不要求返回前自检切得对不对",
+              "suggestion": "补对称的输出自检步骤，与输入切片约束配对"
+            },
+            {
+              "category": "structure",
+              "severity": "medium",
+              "issue": "缺 MUST/SHOULD 分级与失败处理：自检不过时无\"就地修正 vs 上抛\"的处置路径",
+              "suggestion": "加分级：MUST 自检不过→就地修正重发；SHOULD 仅告警"
+            },
+            {
+              "category": "reference",
+              "severity": "low",
+              "issue": "引用 section-map.md / sibling 接口表但 agent 定义未内嵌或给出确定获取路径，子代理可能找不到",
+              "suggestion": "在 agent 定义中固定引用路径或内嵌接口表摘要"
+            }
+          ]
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "重炉 1 次，额外 token",
+          "evidence": "n19→n22 重炉 1 轮并行 dispatch，额外消耗 1 组 5×分段 token（line 23248）",
+          "diagnosis": "首轮失败导致整组并行重跑，token 放大 5×",
+          "suggestion": "见 G2/S1——提升首轮通过率即可消除重炉成本"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "需内置组装自检（按 section-map 边界 + sibling 接口）"
+    },
+    {
+      "skill": "ascendc-ops-design-quality",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "分段通过组装"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "通过 1.3d"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含安全"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "分段完整"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界处理"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "清晰"
+        },
+        "S2": {
+          "rating": "pass",
+          "note": "无重炉"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常"
+    },
+    {
+      "skill": "ascendc-ops-design-plan",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "weak",
+          "note": "首轮未过 1.3d 组装",
+          "evidence": "§43 line 13403 首轮 dispatch 产 sections/05-plan.md(line 21889)；1.3d validate_completeness FAIL line 23234-23235 'PLAN.md missing required term: Dtype/Memory Strategy'；§77 line 23248-23249 重炉，§86 line 28454 通过(line 27747-27748 Dtype/Memory Strategy ✓)",
+          "diagnosis": "首轮 plan 段缺 Dtype/Memory Strategy 必填项，依赖重炉兜底",
+          "suggestion": "plan 输出前自检必填 term(Dtype/Memory Strategy)齐全"
+        },
+        "G2": {
+          "rating": "fail",
+          "note": "1.3d 组装校验失败",
+          "evidence": "1.3d validate_completeness line 23213-23218 报 6 错跨 sibling 段：03-implementation(TilingKey缺rank分叉/TilingData缺per_buf_bytes+标准切分字段/Sync缺SetFlag/WaitFlag)与 05-plan(Dtype/Memory Strategy)边界/接口不一致；validate_design(结构)PASS(line 23246)但 validate_completeness(内容)FAIL",
+          "diagnosis": "plan 与 implementation 两 sibling 段独立生成无共享接口契约，Tiling/Plan 字段在共享 completeness 门控处拼不上；结构校验未拦住内容缺口",
+          "suggestion": "design-plan agent 定义补 MUST：返回前对照 section-map 边界 + sibling 接口(Tiling/Plan 字段)自检，未过就地修正"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "设计层含安全"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "分段完整"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界处理"
+        },
+        "S1": {
+          "rating": "weak",
+          "note": "未强制 sibling 接口自检",
+          "evidence": "§43.5.1 line 20550-20561 任务提示把章节边界/标题契约全部推迟到未内嵌的 'Agent 定义'(line 20558/20561)，§43.5.2 line 20564-20566 注入的是 spec-to-design 编排 SKILL.md 而非 design-plan agent 定义；agent 定义仅引用未内嵌(line 20599/15196)",
+          "diagnosis": "agent 定义未嵌入上下文，模型无法执行 sibling 接口自检，可执行性不足",
+          "suggestion": "agent 定义内嵌或固定引用路径，并把 sibling 接口契约从隐式写成显式 checklist",
+          "staticChecks": [
+            {
+              "category": "reference",
+              "severity": "high",
+              "issue": "agent 定义(章节边界/标题契约)仅引用 'agents/ascendc-ops-design-plan.md'(line 20558/20561/20599)未内嵌，子代理上下文里没有 sibling 接口契约",
+              "snippet": "内容约束、章节边界、标题契约全部按 Agent 定义执行",
+              "suggestion": "内嵌 agent 定义或固定路径+接口表摘要"
+            },
+            {
+              "category": "ambiguity",
+              "severity": "high",
+              "issue": "任务提示'全部按 Agent 定义执行'(line 20561)表述模糊，未定义具体边界判定与必填 term",
+              "snippet": "内容约束、章节边界、标题契约全部按 Agent 定义执行",
+              "suggestion": "显式列出本段必填 term(Dtype/Memory Strategy)与边界区间"
+            },
+            {
+              "category": "io-unclear",
+              "severity": "high",
+              "issue": "输出契约未声明：未规定 plan 段须含哪些必填 term，直到 1.3d 才发现缺失(line 23234)",
+              "suggestion": "补 Output Contract 列必填 term"
+            },
+            {
+              "category": "asymmetry",
+              "severity": "medium",
+              "issue": "有输入约束(按 section-map 切片)无对称输出自检",
+              "suggestion": "补对称输出自检步骤"
+            },
+            {
+              "category": "structure",
+              "severity": "medium",
+              "issue": "缺 MUST/SHOULD 分级与失败处理路径",
+              "suggestion": "MUST 不过→就地修正重发"
+            }
+          ]
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "重炉 1 次",
+          "evidence": "§43 line 13403 + §77 line 23248 重炉 1 次，重炉连带 implementation 子代理 3.1Mt(line 23258)整组重跑",
+          "diagnosis": "首轮失败致整组并行重跑 token 放大",
+          "suggestion": "见 G2/S1 提升首轮通过率"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "需内置组装自检"
+    },
+    {
+      "skill": "ascendc-ops-tester",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "weak",
+          "note": "首轮 TEST 被 1.4R 退回，重做后才过",
+          "evidence": "§107 line 31672 首轮 dispatch→§107.1(53turn 3.6Mt)；§109.1 line 34917 测试设计评审 TEST_REVIEW.md line 37066 '状态:❌失败'(line 37069/37135)，7条中3通过2阻塞2关注(line 37151)；§110 line 37190 重炉修 TEST.md，§111 line 40554 重审",
+          "diagnosis": "首轮 TEST.md 评审未过，依赖重炉兜底",
+          "suggestion": "tester 输出前自检 boundary/extreme 覆盖+精度判据 CSV 非空"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义输出 TEST.md"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "测试设计含数值稳定性用例"
+        },
+        "G4": {
+          "rating": "weak",
+          "note": "首轮存在 覆盖缺口/关键用例缺失",
+          "evidence": "阻塞项 TEST-SPEC-4 line 37749 '精度判据CSV为空——550条用例 precision_tolerances/absolute_precision 列均空'；覆盖 line 37764 '精度判据(per-case) 0%(CSV列为空)'；spec 要求 bf16 4e-3/fp16 1e-3/fp32 1e-5(TEST.md §7.1)未写入 CSV",
+          "diagnosis": "精度判据未从 spec.yaml 传播到 CSV 行，覆盖缺口",
+          "suggestion": "tester 生成 CSV 时 MUST 从 numerical_tolerance.per_dtype 填入每行精度阈值"
+        },
+        "G5": {
+          "rating": "weak",
+          "note": "TEST 设计含边界用例(3.6.3/4.6.2)，但首轮覆盖不足被退回；执行层未验证(阶段三未执行)",
+          "evidence": "阻塞项 TEST-SPEC-3 line 37748 '空tensor用例缺失——spec boundary_conditions[4] 要求测元素数为0的空tensor，L0/L1 CSV 无此类用例'；覆盖 line 37761 'boundary(7项) 6/7(空tensor缺失)'；line 37772 '不修复则本阶段不通过'",
+          "diagnosis": "边界用例(空tensor)未生成，鲁棒性覆盖不足",
+          "suggestion": "tester MUST 枚举 boundary_conditions[4] 显式生成空tensor用例"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "agent 定义清晰",
+          "staticChecks": [
+            {
+              "category": "asymmetry",
+              "severity": "high",
+              "issue": "验收标准 line 31704 要求 boundary/extreme '覆盖 spec.yaml 中各项'，但生成路径 st-design(line 31719)按 dimensions 因素(rank 0~8)构表，不合成零元素 shape——有输出校验(reviewer 拦)无生成侧 MUST 显式枚举 boundary_conditions[4]",
+              "snippet": "测试场景覆盖正常/边界（boundary_conditions / extreme_inputs 覆盖 spec.yaml 中各项）",
+              "suggestion": "生成侧补 MUST：显式枚举每条 boundary_conditions 生成对应用例"
+            },
+            {
+              "category": "io-unclear",
+              "severity": "medium",
+              "issue": "验收标准声明覆盖各项但未规定每行 CSV 须填精度阈值(致 TEST-SPEC-4)",
+              "suggestion": "补 Output Contract：CSV 每行须含 precision_tolerances"
+            },
+            {
+              "category": "reference",
+              "severity": "low",
+              "issue": "依赖 ascendc-st-design 生成路径，tester SKILL 未内嵌 dimensions→boundary 映射",
+              "suggestion": "内嵌 boundary 枚举映射或固定引用"
+            }
+          ]
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "重做 1 次",
+          "evidence": "§107 line 31672 + §110 line 37190 两次 dispatch，重炉子代理重跑 st-design 工作流(line 37235 重载)",
+          "diagnosis": "首轮失败致整组重跑",
+          "suggestion": "见 G4/G5 提升首轮通过率"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "需内置评审条款自检提升首轮完整性"
+    },
+    {
+      "skill": "ascendc-st-design",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "ST 用例生成正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义输出 L0/L1/L2 CSV"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖 L0/L1/L2 分级"
+        },
+        "G5": {
+          "rating": "pass",
+          "note": "含边界值/边界情况处理（测试设计层）；执行层未验证(阶段三未执行)"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "SKILL.md 全文嵌入，步骤清晰（参数清洗→因子→约束→用例）"
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "随 tester 重做而重做 1 次",
+          "evidence": "显式 invoke 2次(§109.1.3 line 35001, §111.1.3 line 40641)；系统上下文 dump 2次(31719/37235)，共 4 次 dump 同一 st-design SKILL.md(line 31720 工作流文本)",
+          "diagnosis": "tester+两个 reviewer 子代理冷启动重复加载相同 SKILL.md",
+          "suggestion": "st-design 工作流会话级缓存，冷启动读缓存"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "目录/步骤结构清晰"
+        }
+      },
+      "summary": "质量高，阶段归属待 SKILL.md 明确"
+    },
+    {
+      "skill": "ascendc-registry-invoke-template",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {
+          "rating": "pass",
+          "note": "模板生成正确"
+        },
+        "G2": {
+          "rating": "pass",
+          "note": "按定义"
+        },
+        "G3": {
+          "rating": "pass",
+          "note": "N/A"
+        },
+        "G4": {
+          "rating": "pass",
+          "note": "覆盖所需"
+        },
+        "G5": {
+          "rating": "n-a",
+          "note": "非边界类"
+        },
+        "S1": {
+          "rating": "pass",
+          "note": "指令清晰"
+        },
+        "S2": {
+          "rating": "weak",
+          "note": "随 tester 重做而重做 1 次",
+          "evidence": "§109.1.4 line 35152 与 §111.1.4 line 40792 两次 invoke，均在 reviewer 冷启动上下文重 dump 模板 SKILL.md；line 40790 'load the second required skill for test-design-review'",
+          "diagnosis": "reviewer required-skill 列表强制每次冷启动重载",
+          "suggestion": "required-skill 会话级缓存，冷启动读缓存而非重载"
+        },
+        "S3": {
+          "rating": "pass",
+          "note": "结构清晰"
+        }
+      },
+      "summary": "正常，被动重做"
+    }
+  ],
+  "workflowLevelIssues": [
+    {
+      "id": "wf-1",
+      "type": "incomplete",
+      "severity": "low",
+      "title": "仅完成阶段一",
+      "detail": "用户指令'到方案设计完成就停下来'，阶段二/三/四 未执行，无实际代码实现/验收/上库",
+      "suggestion": "非缺陷；续跑需恢复流程到阶段二"
+    },
+    {
+      "id": "wf-2",
+      "type": "gate-skipped",
+      "severity": "medium",
+      "title": "CP1.5 语义层自动放行",
+      "detail": "SKILL.md 要求 CP1.5 人工确认公式意图/tolerance/boundary，L3 下被 [AUTO_L3] 放行 (line 9451)",
+      "suggestion": "CP1.5 即便 L3 也保留人工 review，或补充机器语义检查项"
+    },
+    {
+      "id": "wf-3",
+      "type": "redundant",
+      "severity": "medium",
+      "title": "3 个重试周期（spec/分段/test）",
+      "detail": "1.2.5 spec 评审退回(G1)、1.3c 2/5 分段组装失败(G2)、1.4 测试设计评审退回(G4)，均为首轮质量不足",
+      "suggestion": "在 architect/spec-gen(内置SPEC自检)、design-分段(内置组装自检)、tester(内置评审条款自检)三个 skill 加前置自检"
+    },
+    {
+      "id": "wf-4",
+      "type": "other",
+      "severity": "medium",
+      "title": "1.3c 分段组装失败率 40% (G2)",
+      "detail": "5 个并行分段中 implementation/plan 2 个未通过 1.3d 组装校验",
+      "suggestion": "分段输入包质量 + 分段 skill 输出前组装自检（section-map 边界 + sibling 接口）"
+    },
+    {
+      "id": "wf-5",
+      "type": "redundant",
+      "severity": "low",
+      "title": "支撑 skill 重复调用 (S2)",
+      "detail": "env-check×2、npu-arch×2、ops-registry-invoke-workflow×2，结果本可缓存",
+      "suggestion": "env-check/npu-arch 结果 session 内缓存；workflow 加已加载标记"
+    },
+    {
+      "id": "wf-6",
+      "type": "other",
+      "severity": "low",
+      "title": "st-design 阶段归属歧义",
+      "detail": "st-design 在阶段一 1.4 运行，但 SKILL.md 表格把 ST开发放在阶段二/三之间",
+      "suggestion": "SKILL.md 明确 st-design 归属（1.4 测试设计 or 阶段三）"
+    }
+  ],
+  "optimizationPriorities": [
+    {
+      "priority": 1,
+      "target": "skill:ascendc-ops-design-implementation / ascendc-ops-design-plan (G2)",
+      "action": "输出前内置 1.3d 组装自检（section-map 边界 + sibling 接口一致性）",
+      "expectedGain": "降低 1.3c 40% 重炉率，省 1 轮并行 dispatch"
+    },
+    {
+      "priority": 2,
+      "target": "skill:ops-spec-gen / ascendc-ops-architect (G1/G4) / ascendc-ops-tester (G4)",
+      "action": "生成时内置评审条款（13 SPEC-* / TEST 评审项）自检",
+      "expectedGain": "消除 1.2.5 与 1.4 两个评审退回周期"
+    },
+    {
+      "priority": 3,
+      "target": "gate:CP1.5 (process)",
+      "action": "L3 下保留人工语义 review 或补机器语义检查",
+      "expectedGain": "堵住公式意图/tolerance 语义层缺陷漏到设计"
+    },
+    {
+      "priority": 4,
+      "target": "skill:ascendc-env-check / npu-arch (S2)",
+      "action": "session 内缓存结果，避免重复 invoke",
+      "expectedGain": "省 2-3 次冗余调用"
+    },
+    {
+      "priority": 5,
+      "target": "workflow:SKILL.md (process)",
+      "action": "明确 st-design / registry-invoke-template 阶段归属",
+      "expectedGain": "消除阶段判定歧义，框图归类正确"
+    }
+  ]
+}

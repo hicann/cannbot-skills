@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"Hello, can you help me refactor the authentication module?"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Sure! Let me analyze the current authentication module and suggest improvements."},{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"src/auth/module.ts"}}],"model":"claude-sonnet-4-20250514","usage":{"input_tokens":150,"output_tokens":80,"cache_read_input_tokens":50,"cache_creation_input_tokens":30}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"// auth module content\nexport function authenticate() { ... }"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I've read the file. Here's my refactoring plan..."}],"model":"claude-sonnet-4-20250514","usage":{"input_tokens":200,"output_tokens":120,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"duration_ms":5000}
+{"type":"result","subtype":"success","result":"Refactoring plan provided","cost_usd":0.01,"duration_ms":15000}

@@ -1,0 +1,13 @@
+{
+  "orchestratorPatterns": ["workflow", "invoke-workflow"],
+  "orchestratorLabel": "启动",
+  "familySegmentCount": 2,
+  "phaseGapTurns": 40,
+  "familyLabels": {},
+  "phases": {
+    "一": { "label": "阶段一：需求与设计", "order": 1 },
+    "二": { "label": "阶段二：开发", "order": 2 },
+    "三": { "label": "阶段三：验收", "order": 3 },
+    "四": { "label": "阶段四：上库", "order": 4 }
+  }
+}
