@@ -1,6 +1,26 @@
 # 安装指南
 
-本文档提供 CANNBot Skills 的完整安装命令参考与故障排查。快速上手见 [README 快速开始](../README.md)。
+本文档提供 CANNBot Skills 的完整安装命令参考、使用入门与故障排查。快速上手见 [README 快速开始](../README.md)。
+
+📖 [功能清单](feature-list.md) · [使用样例](skills-usage.md) · [架构设计](architecture-design.md) · [README](../README.md)
+
+---
+
+## 安装方式对比
+
+本项目提供两种安装方式，按需选择：
+
+| 维度 | 完整安装（推荐） | 独立 Skill 安装 |
+|---|---|---|
+| **包含内容** | Skills + Agents + Workflows + 外部依赖 | 仅 Skills |
+| **安装工具** | install-helper / init.sh | install-helper / npx skills |
+| **适用场景** | 需要完整开发流程编排 | 只需单个能力 |
+| **支持工具** | OpenCode/Claude/Trae/Cursor/Copilot | 70+ 种 AI 编程工具 |
+
+> [!NOTE]
+> **外部依赖**指安装时由安装脚本动态克隆的外部仓库（如 `asc-devkit`、`pypto`、`tilelang-ascend`、`cann-samples` 等）。
+>
+> **Plugin** = Skills + Agents + Workflows 的组合包，提供端到端开发流程编排；**Skill** 是独立能力模块。标注 Plugin 的能力需通过完整安装获取，标注 Skill 的能力两种安装方式均可使用。
 
 ---
 
@@ -38,13 +58,46 @@ cd plugins-official/ops-direct-invoke
 bash init.sh project opencode
 ```
 
-`<tool>` 支持 `opencode` / `claude` / `trae` / `cursor` / `copilot`，各插件的详细安装步骤参见对应插件目录下的 `quickstart.md` 文档。
+命令中的 `opencode` 可替换为 `claude` / `trae` / `cursor` / `copilot`。各插件的详细安装步骤见对应目录下的 `quickstart.md`，例如 [ops-direct-invoke 快速上手](../plugins-official/ops-direct-invoke/quickstart.md)。
 
 ---
 
-## 独立 Skill 安装命令
+## 验证安装
 
-本仓库的 Skills 遵循 [Agent Skills](https://agentskills.io) 开放标准，可通过开源 [skills CLI](https://github.com/vercel-labs/skills) 安装到 70+ 种 AI 编程工具（OpenCode、Claude Code、Cursor、Codex、Trae 等）。
+安装完成后，运行以下命令确认安装成功：
+
+```bash
+# 完整安装验证
+install-helper list          # 查看已安装插件，应显示已安装的 Plugin
+
+# 独立 Skill 安装验证
+npx skills list              # 查看已安装 Skills，应显示已安装的 Skill
+```
+
+若命令未找到或列表为空，运行 `install-helper doctor --fix` 自动诊断修复。
+
+---
+
+## 更新与卸载
+
+```bash
+# 更新单个插件
+install-helper update <plugin>
+
+# 更新全部
+install-helper update
+
+# 卸载
+install-helper uninstall <plugin>
+```
+
+独立 Skill 安装的更新与卸载使用 `npx skills` 命令，详见 [skills CLI 文档](https://github.com/vercel-labs/skills)。
+
+---
+
+## 独立 Skill 安装
+
+本仓库 Skills 遵循 [Agent Skills](https://agentskills.io) 开放标准，可通过开源 [skills CLI](https://github.com/vercel-labs/skills) 安装到 70+ 种 AI 编程工具（OpenCode、Claude Code、Cursor、Codex、Trae 等）。
 
 ```bash
 # 浏览可用 Skills
@@ -66,7 +119,27 @@ npx skills list
 npx skills remove ascendc-tiling-design
 ```
 
+> [!IMPORTANT]
 > **此方式仅安装独立 Skills**。如需完整插件内容（Skills + Agents + Workflows + 外部依赖），请使用 `install-helper` 或 `init.sh` 脚本。
+
+---
+
+## 安装后使用
+
+安装完成后，在你的工作目录中启动 AI 编程工具，直接用自然语言描述需求即可：
+
+| 你想做什么 | 可以这样说 | 用到的能力 |
+|-----------|-----------|-----------|
+| 开发一个算子 | "帮我开发一个 Abs 算子，输入 float16，输出 float16" | Plugin: `ops-direct-invoke` |
+| 调试精度问题 | "我的 Add 算子精度不达标，帮我排查一下" | Skill: `ascendc-precision-debug` |
+| 查阅 API 文档 | "aclnnAdd 接口的参数和返回值是什么" | Skill: `ascendc-docs-search` |
+| 检查开发环境 | "帮我检查一下当前的 CANN 开发环境" | Skill: `ascendc-env-check` |
+| 代码检视 | "帮我检视这段 Kernel 代码是否符合规范" | Plugin: `ops-code-reviewer` |
+
+> [!TIP]
+> 完整安装可运行 `install-helper status` 查看已安装插件，独立 Skill 安装可运行 `npx skills list` 查看已安装 Skills。
+
+> 更多使用样例详见 [Skills 使用样例](skills-usage.md)。
 
 ---
 
@@ -82,4 +155,4 @@ npx skills remove ascendc-tiling-design
 | 网络问题 | 配置 GitCode SSH Key 或设置代理 |
 | CANN 环境未配置 | 仅影响代码编译/运行类 Skills，知识检索类不受影响 |
 
-更多故障排查详见各场景对应的 quickstart 文档。
+更多故障排查详见各插件的 `quickstart.md`（如 [ops-direct-invoke/quickstart.md](../plugins-official/ops-direct-invoke/quickstart.md)）。

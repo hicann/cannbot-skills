@@ -2,6 +2,8 @@
 
 本文档定义 CANNBot Skills 生态的治理模型、角色职责与决策流程。
 
+📖 [贡献指南](CONTRIBUTING.md) · [开发规范](STANDARDS.md) · [README](../README.md)
+
 ---
 
 ## 一、治理原则:成文法 + 判例法
@@ -97,7 +99,7 @@
 
 ## 二、准入裁决
 
-合入规则的详细 checklist 见 [CONTRIBUTING.md](./CONTRIBUTING.md#质量与准入门槛)。裁决机制与治理原则一致:
+合入规则的详细 checklist 见 [CONTRIBUTING.md](CONTRIBUTING.md#质量与准入门槛)。裁决机制与治理原则一致:
 
 - **成文法事项**(格式、命名、结构合规，已有功能回归)→ CI 自动裁决，不通过则阻断
 - **判例法事项**(设计评估、价值判断、定位分析)→ Committer 人工裁决

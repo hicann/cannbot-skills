@@ -2,6 +2,17 @@
 
 本文档汇总各 Skill 的典型使用样例。每个 Skill 给一段可直接复制、按需替换占位符的 prompt。
 
+📖 [安装指南](installation-guide.md) · [功能清单](feature-list.md) · [架构设计](architecture-design.md) · [README](../README.md)
+
+## 前置条件速查
+
+| Skill 类别 | 前置条件 | 说明 |
+|-----------|---------|------|
+| 代码编译/运行类 | CANN 开发环境 | 仅影响编译运行，知识检索不受影响 |
+| GitCode 协作类 | `GITCODE_TOKEN` 环境变量 | 见下方 [!IMPORTANT] 提示 |
+| 性能采集类 | NPU 设备 + CANN 环境 | 需真实设备 |
+| 其他知识类 | 无 | 开箱即用 |
+
 ---
 
 ## Ascend C 算子开发
@@ -34,6 +45,8 @@
 - 没有 torch / 测试脚本时对应行可删，但"精度对齐"需至少保留一份可跑的原始用例作为参考系。
 - 三原则（kernel 零修改 / tiling 数学零修改 / 只改框架胶水）、全量迁移、先确认交付边界等行为已内置在 SKILL.md，prompt 里不必重复。
 
+**预期输出**：Agent 调用 `ascendc-registry-invoke-to-direct-invoke` skill，产出 kernel + tiling + host 独立可编译工程，附迁移说明与精度对齐报告。
+
 
 ### ascendc-direct-invoke-to-registry-invoke
 
@@ -49,6 +62,8 @@
 **使用建议**：
 
 - 路径写**绝对路径**，让 skill 不必猜测源码位置。
+
+**预期输出**：Agent 调用 `ascendc-direct-invoke-to-registry-invoke` skill，生成 ACLNN/GEIR 接口注册算子工程，含 tiling + host + kernel 完整结构。
 
 ### cuda2ascend-simt
 
@@ -74,6 +89,8 @@
 - **当前不支持迁移**的特性：native JIT（`nvrtc`、运行时编译、extension JIT 加载）、torch复数dtype分支、device 侧 `double`执行路径、CUDA 生态库依赖（cuBLAS / cuDNN / cuFFT / cuSPARSE / Thrust / CUB / NCCL 等）、协作组、Ascend C SIMD API、矢量编程 API。如源码包含上述特性，会以 `remove_and_record` 排除或上报 `blocked`，不会隐式替换或自实现生态库 / 协作组 / SIMD 等价物。
 - 重大降级（抽象层 flatten、kernel 多分支合并为单一通路、device 路径降级为 host fallback 等）会触发硬停审批门，需用户显式选择后才会动手实现。
 - 仅当在Ascend 950 PR硬件完成精度验证后才会报 `success`，否则按 `incomplete` / `blocked` / `failed` 处理。
+
+**预期输出**：Agent 调用 `cuda2ascend-simt` skill，在 `ported-ops/<算子名>/` 下产出 Ascend C SIMT 实现，附 `plan.md` 迁移说明与 `README.md`。
 
 ### ascendc-code-review
 
@@ -123,6 +140,7 @@ python infra/cannbot-skill-reviewer/scripts/review_skill.py ops/my-new-skill
 
 ## GitCode 协作工具
 
+> [!IMPORTANT]
 > **前置条件**：所有 GitCode 协作 skill 都需要 `GITCODE_TOKEN` 环境变量（首次未设会在 Step 0 询问）。
 >
 > ```bash
@@ -155,6 +173,7 @@ python infra/cannbot-skill-reviewer/scripts/review_skill.py ops/my-new-skill
 
 PR 描述中已识别到 `#issue_number` 时会询问"是否仍创建新 Issue"；Issue 创建成功后弹一次"是否 assign 给我"。
 
+> [!TIP]
 > **如需同时更新 PR 文案 + 创建 Issue**，顺序调用两个 skill：
 >
 > ```

@@ -1,10 +1,8 @@
-# Contributing to CANNBot Skills
+# 贡献指南
 
 欢迎参与 CANNBot Skills 生态建设。本文档说明如何贡献 Skill、Agent、Plugin(Team)以及如何参与社区治理。
 
-> **相关文档**:
-> - [GOVERNANCE.md](./GOVERNANCE.md) — 治理模型、合入规则、角色职责、修订流程
-> - [STANDARDS.md](./STANDARDS.md) — 命名规范、结构规范、分类体系、代码规范
+📖 [治理规范](GOVERNANCE.md) · [开发规范](STANDARDS.md) · [架构设计](architecture-design.md) · [README](../README.md)
 
 ---
 
@@ -14,15 +12,15 @@
 
 1. 阅读[社区行为准则](https://gitcode.com/cann/community)
 2. 签署 [CLA 协议](https://gitcode.com/cann/community)
-3. 了解本项目的[治理模型](./GOVERNANCE.md)和[开发规范](./STANDARDS.md)
+3. 了解本项目的[治理模型](GOVERNANCE.md)和[开发规范](STANDARDS.md)
 
 ### 我能贡献什么
 
 | 贡献类型 | 说明 | 对应文档 |
 |---------|------|---------|
-| 新增 Skill | 添加新的技能模块 | [STANDARDS.md §Skills 开发规范](./STANDARDS.md#skills-开发规范) |
-| 新增 Agent | 添加新的子代理角色 | [STANDARDS.md §Agents 开发规范](./STANDARDS.md#agents-开发规范) |
-| 新增 Plugin (Team) | 添加完整的应用插件 | [STANDARDS.md §Teams 配置](./STANDARDS.md#teams-配置) |
+| 新增 Skill | 添加新的技能模块 | [STANDARDS.md §Skills 开发规范](STANDARDS.md#skills-开发规范) |
+| 新增 Agent | 添加新的子代理角色 | [STANDARDS.md §Agents 开发规范](STANDARDS.md#agents-开发规范) |
+| 新增 Plugin (Team) | 添加完整的应用插件 | [STANDARDS.md §Teams 配置](STANDARDS.md#teams-配置) |
 | 优化已有内容 | 改进已有 Skill/Agent/Plugin 的效果、准确性或性能 | 直接提交 PR，建议附优化效果说明 |
 | Bug 修复 | 修复已有 Skill/Agent 的问题 | 直接提交 PR |
 | 文档改进 | 修正文档错误、补充说明 | 直接提交 PR |
@@ -81,9 +79,13 @@ PR 需包含:
 
 为方便 Committer 了解贡献效果，鼓励在 [Discussions](https://gitcode.com/cann/cannbot-skills/discussions) 中简述 PR 的实际使用效果，例如:解决了什么用户的什么问题、与现有方案的实际对比等。
 
+**示例**：PR !388 新增 install-helper，解决了"新手不知道装哪些插件"的痛点，上线一周内 88 个 Skill 被成功安装，`install-helper doctor` 修复了 12 例环境问题。
+
 ---
 
 ## 质量与准入门槛
+
+> "成文法""判例法"等裁决方式的概念见 [治理规范 §一](GOVERNANCE.md#一治理原则成文法--判例法)。
 
 ### 禁止合入的情况
 
@@ -91,7 +93,7 @@ PR 需包含:
 |--------|---------|------|
 | 单元测试不通过 | 成文法(CI 自动) | 任何 error 级别规则失败 |
 | 破坏已有功能 | 成文法(CI 自动) | 导致已有 Skill 的 L2 行为测试或 Plugin 的 L3 集成测试回归 |
-| 事实溯源缺失 | 判例法(Committer) | 技术内容无对应的可信来源(见 [GOVERNANCE §1.3](./GOVERNANCE.md#13-事实来源与设计论证原则)) |
+| 事实溯源缺失 | 判例法(Committer) | 技术内容无对应的可信来源(见 [GOVERNANCE §1.3](GOVERNANCE.md#13-事实来源与设计论证原则)) |
 | 设计无论证 | 判例法(Committer) | 设计决策缺少案例对比、代价权衡等论证过程 |
 | 编造 API/参数 | 判例法(Committer) | 包含未验证的 API 名称、参数、行为描述 |
 | 与已有内容功能重叠但无差异化价值 | 判例法(Committer) | 新 Skill 与现有 Skill 解决同一问题且无显著改进 |
@@ -116,7 +118,8 @@ PR 需包含:
 | 测试覆盖 | 成文法 | 全部 L1 + L2 测试通过 |
 | 稳定性 | 成文法 + 判例法 | CI 全绿 + 已在 `plugins-community` 或本地环境经历充分验证 |
 
-### plugins-community 准入标准
+<details>
+<summary><b>plugins-community 准入标准</b></summary>
 
 | 标准 | 裁决方式 | 要求 |
 |------|---------|------|
@@ -125,12 +128,17 @@ PR 需包含:
 | 有使用价值 | 判例法 | 对至少一部分用户有实际帮助 |
 | 非破坏性 | 成文法 + 判例法 | CI 通过 + 不影响已有 official plugin 的正常运行 |
 
-### Community → Official 升级路径
+</details>
+
+<details>
+<summary><b>Community → Official 升级路径</b></summary>
 
 1. 已在 community 阶段积累**至少 1 个月**的实际使用数据
 2. 提供生产价值的**量化佐证**(如用户反馈、使用量统计、效率提升数据)
 3. 有明确的**长期维护计划**和**指定看护人**
 4. 通过 Committer 评审
+
+</details>
 
 ---
 
@@ -139,7 +147,7 @@ PR 需包含:
 - 命名:`{domain}-{name}`，kebab-case
 - 设计:单一职责、渐进式披露、信息来源可信、知识依赖单向性
 
-完整规范见 [STANDARDS.md](./STANDARDS.md)。
+完整规范见 [STANDARDS.md](STANDARDS.md)。
 
 ---
 
@@ -169,13 +177,13 @@ PR 提交后 CI 自动执行:
 | **Committer** | PR 合入审批，判例法决策，Official plugin 准入评估 |
 | **SIG** | 受理 Committer 层面无法达成共识的争议，修订治理规范 |
 
-> Committer 清单和 SIG 信息见 [SIG CANNBot 社区页面](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)。
+> 详细职责定义见 [治理规范 §三 角色与职责](GOVERNANCE.md#三角色与职责)。Committer 清单和 SIG 信息见 [SIG CANNBot 社区页面](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)。
 
 ---
 
 ## 更多资源
 
-- [治理规范 (GOVERNANCE.md)](./GOVERNANCE.md) — 成文法+判例法模型、判例记录、规范修订
-- [开发规范 (STANDARDS.md)](./STANDARDS.md) — 完整的技术标准和代码规范
+- [治理规范 (GOVERNANCE.md)](GOVERNANCE.md) — 成文法+判例法模型、判例记录、规范修订
+- [开发规范 (STANDARDS.md)](STANDARDS.md) — 完整的技术标准和代码规范
 - [SIG 会议纪要](https://etherpad-cann.meeting.osinfra.cn/p/sig-cannbot) — 判例决策和设计讨论记录
 - [CANN 社区代码仓](https://gitcode.com/cann) — 官方文档和社区代码

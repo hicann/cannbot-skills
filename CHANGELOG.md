@@ -1,6 +1,10 @@
 ## 🔥 更新日志
-### 【2026-06-29】
+### 【2026-07-01】
 #### 新特性 New Features
+- 【Runtime】新增 Skill：`runtime_migration`，面向 Runtime 接口迁移，提供兼容层与直接迁移两种方式，含设备/内存/流/事件/IPC/库管理/VMM 适配实现与错误码映射；明确仅用于用户合法拥有或已获授权代码。
+
+### 【2026-06-29】
+#### 社区贡献 Community
 - 【模型推理】新增 Skill：`science-model-npu-migration`，提供昇腾 NPU 框架级代码迁移全流程：环境门禁、脚本适配、精度/性能对比与 `mig_docs` 交付归档；覆盖 `torch_npu` / MindSpore Ascend，不含 ATC/OM 离线模型转换。
 
 

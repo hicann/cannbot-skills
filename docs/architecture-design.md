@@ -1,5 +1,11 @@
 # 项目架构设计
 
+> 三层架构（Plugin→Agent→Skill）与各开发路径的逻辑视图。
+
+📖 [功能清单](feature-list.md) · [开发规范](STANDARDS.md) · [贡献指南](CONTRIBUTING.md) · [README](../README.md)
+
+---
+
 ## 整体架构
 
 ```
@@ -7,8 +13,9 @@ cannbot-skills/
 ├── ops/                             # 算子 Skills（正式版）
 ├── ops-lab/                         # 算子 Skills（实验 / 非正式版）
 ├── model/                           # 模型推理优化 Skills
-├── graph/                           # torch.compile 图模式 Skills
-├── plugins-official/                # 官方应用 Plugin
+├── graph/                           # 图模式 Skills
+├── runtime/                         # Runtime Skills
+├── plugins-official/                # 官方应用 Plugins
 │   ├── ops-direct-invoke/           # AscendC Kernel 直调开发
 │   ├── ops-direct-invoke-flash/     # AscendC Kernel 直调开发（Flash 版）
 │   ├── ops-registry-invoke/         # AscendC 算子注册调用开发
@@ -19,11 +26,12 @@ cannbot-skills/
 │   ├── model-infer-optimize/        # NPU 推理端到端优化流程
 │   ├── triton-op-generator/         # Triton 算子代码生成与优化
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
-├── plugins-community/               # 社区 Plugin
+├── plugins-community/               # 社区 Plugins
 │   ├── install-helper/              # CANNBot Install Helper 工具
 │   ├── ops-easyasc-dsl/             # EasyASC DSL 算子开发
 │   ├── ops-qa-suite/                # 算子测试套件
-│   └── ascendc-ops-lab-developer/   # AscendC 算子自动生成 Team（实验性）
+│   ├── ascendc-ops-lab-developer/   # AscendC 算子自动生成 Team（实验性）
+│   └── science-model-npu-migration/ # 科学计算模型 NPU 迁移
 ├── infra/                           # 基础设施维护 Skills
 ├── docs/                            # 项目文档
 └── tests/                           # 自动化测试框架
@@ -31,13 +39,13 @@ cannbot-skills/
 
 ## 逻辑架构视图
 
-项目遵循三层架构：Teams 编排 Agents，Agents 绑定 Skills。以下视图展示各层组件及其关联关系。
+项目遵循三层架构：Plugin 编排 Agents，Agents 绑定 Skills。以下视图展示各层组件及其关联关系。
 
 ### Ascend C 算子开发
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                              TEAMS（应用编排层）                               ║
+║                             PLUGINS（应用编排层）                             ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                               ║
 ║  ┌─────────────────────────────┐        ┌─────────────────────────────┐       ║
@@ -99,13 +107,13 @@ cannbot-skills/
 
 ### Catlass 算子开发
 
-`catlass-op-generator` 插件编排 Catlass 算子开发流程。Teams 编排 `catlass-op-architect`、`catlass-op-generator`、`catlass-op-reviewer` 三个 Agent，分别负责需求分析与组件选型、模板拼装与框架代码生成、构建验证与 C1-C11 检视。Skills（`catlass-op-design`、`catlass-op-develop`、`catlass-op-perf-tune`）位于 `ops/` 目录，提供高阶模板拼装能力。详见插件目录下的 `AGENTS.md`。
+`catlass-op-generator` 插件编排 Catlass 算子开发流程。Plugin 编排 `catlass-op-architect`、`catlass-op-generator`、`catlass-op-reviewer` 三个 Agent，分别负责需求分析与组件选型、模板拼装与框架代码生成、构建验证与 C1-C11 检视。Skills（`catlass-op-design`、`catlass-op-develop`、`catlass-op-perf-tune`）位于 `ops/` 目录，提供高阶模板拼装能力。详见插件目录下的 `AGENTS.md`。
 
 ### PyPTO 算子开发
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                              TEAMS（应用编排层）                               ║
+║                             PLUGINS（应用编排层）                             ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                               ║
 ║                    ┌─────────────────────────────────┐                        ║
@@ -156,7 +164,7 @@ cannbot-skills/
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                              TEAMS（应用编排层）                               ║
+║                             PLUGINS（应用编排层）                             ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                               ║
 ║                    ┌─────────────────────────────────┐                        ║
@@ -209,7 +217,7 @@ cannbot-skills/
 
 ### Triton 算子开发
 
-`triton-op-generator` 插件编排 Triton 算子端到端生成与优化流程。逻辑架构与上述类似（Team 编排 → Agent 执行 → Skill 能力），详见插件目录下的 `AGENTS.md`。
+`triton-op-generator` 插件编排 Triton 算子端到端生成与优化流程。逻辑架构与上述类似（Plugin 编排 → Agent 执行 → Skill 能力），详见插件目录下的 `AGENTS.md`。
 
 ### torch.compile 图模式
 
@@ -217,4 +225,12 @@ cannbot-skills/
 
 ### NPU 模型推理优化
 
-`model-infer-optimize` 插件编排 NPU 推理端到端优化流程。Teams 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三个 Agent，分别负责模型分析与方案设计、代码改造与调试修复、精度验证与性能对比。详见插件目录下的 `AGENTS.md`。
+`model-infer-optimize` 插件编排 NPU 推理端到端优化流程。Plugin 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三个 Agent，分别负责模型分析与方案设计、代码改造与调试修复、精度验证与性能对比。详见插件目录下的 `AGENTS.md`。
+
+### Runtime
+
+`runtime_migration` 是独立 Skill（无 Plugin/Agent 编排），位于 `runtime/` 目录，提供 Runtime 接口迁移的兼容层实现与迁移参考，覆盖设备管理、内存管理、流、事件、IPC、库管理、VMM 等接口及错误码映射。仅用于用户自身合法拥有或已获授权代码的处理。
+
+### 科学计算模型迁移
+
+`science-model-npu-migration` 是社区 Plugin（位于 `plugins-community/`），提供框架级代码 NPU 迁移全流程：环境门禁、脚本适配、精度/性能对比与 `mig_docs` 交付归档，覆盖 `torch_npu` / MindSpore Ascend。无 Plugin/Agent 编排，以 Skill 形式直接提供服务。

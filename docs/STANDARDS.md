@@ -1,5 +1,22 @@
 # CANNBot Skills 开发规范
 
+> 命名规范、结构规范、分类体系、代码规范。
+
+📖 [架构设计](architecture-design.md) · [贡献指南](CONTRIBUTING.md) · [治理规范](GOVERNANCE.md) · [README](../README.md)
+
+---
+
+## 规范速查
+
+| 规范类别 | 核心规则 | 详细章节 |
+|---------|---------|---------|
+| 命名 | `{domain}-{name}`，kebab-case | [通用命名规范](#通用命名规范) |
+| 结构 | SKILL.md + references/ 渐进式披露 | [Skills 开发规范](#skills-开发规范) |
+| 分类 | 知识库/工程模板/调试与测试/测试开发/工具辅助 | [Skills 分类体系](#skills-分类体系) |
+| 信息来源 | 必须来自可信源，禁止编造 | [信息来源规范](#信息来源规范) |
+
+---
+
 ## 通用命名规范
 
 Skills、Agents 统一采用 **domain 前缀**命名方式：`{domain}-{name}`

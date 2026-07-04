@@ -2,40 +2,44 @@
 
 全量 Skills 与 Agents 清单，按开发领域汇总。各 Skill 的典型使用样例见 [Skills 使用样例](skills-usage.md)。
 
+📖 [安装指南](installation-guide.md) · [使用样例](skills-usage.md) · [架构设计](architecture-design.md) · [README](../README.md)
+
 ---
 
 ## Ascend C 算子开发
 
 ### Skills
 
+<!-- skills-table-start -->
 | Skill | 功能 | 使用样例 |
 |-------|------|---------|
-| **ascendc-api-best-practices** | API 使用最佳实践、参数限制 |  |
-| **npu-arch** | NPU 架构知识、芯片型号映射 |  |
-| **ascendc-docs-search** | API 文档索引 + 在线搜索 |  |
-| **ascendc-env-check** | NPU 设备查询、CANN 环境验证 |  |
-| **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 |  |
-| **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 |  |
-| **ascendc-runtime-debug** | 运行时错误调试，错误码解析（161xxx/361xxx/561xxx） |  |
-| **ascendc-crash-debug** | 卡死/崩溃调试，Kernel 挂起、Coredump 分析 |  |
-| **ascendc-ut-develop** | UT 单元测试用例开发与覆盖率增强 |  |
-| **ascendc-st-design** | aclnn 接口测试用例设计、L0 / L1 测试用例生成 |  |
+| **ascendc-api-best-practices** | API 使用最佳实践、参数限制 | — |
+| **npu-arch** | NPU 架构知识、芯片型号映射 | — |
+| **ascendc-docs-search** | API 文档索引 + 在线搜索 | — |
+| **ascendc-env-check** | NPU 设备查询、CANN 环境验证 | — |
+| **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 | — |
+| **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 | — |
+| **ascendc-runtime-debug** | 运行时错误调试，错误码解析（161xxx/361xxx/561xxx） | — |
+| **ascendc-crash-debug** | 卡死/崩溃调试，Kernel 挂起、Coredump 分析 | — |
+| **ascendc-ut-develop** | UT 单元测试用例开发与覆盖率增强 | — |
+| **ascendc-st-design** | aclnn 接口测试用例设计、L0 / L1 测试用例生成 | — |
 | **ascendc-code-review** | 代码检视方法论、5 大类别规范 | [查看](skills-usage.md#ascendc-code-review) |
-| **ascendc-task-focus** | 任务聚焦，解决长任务"迷失在中间"的问题 |  |
-| **ascendc-whitebox-design** | 白盒测试用例设计与生成 |  |
-| **ascendc-registry-invoke-template** | 完整自定义算子工程模板，提供标准工程结构、代码模板、UT/ST 样例和多芯片架构参考 |  |
+| **ascendc-task-focus** | 任务聚焦，解决长任务"迷失在中间"的问题 | — |
+| **ascendc-whitebox-design** | 白盒测试用例设计与生成 | — |
+| **ascendc-registry-invoke-template** | 完整自定义算子工程模板，提供标准工程结构、代码模板、UT/ST 样例和多芯片架构参考 | — |
 | **ascendc-registry-invoke-to-direct-invoke** | 注册调用算子转 `<<<>>>` kernel 直调 | [查看](skills-usage.md#ascendc-registry-invoke-to-direct-invoke) |
 | **ascendc-direct-invoke-to-registry-invoke** | `<<<>>>` kernel 直调转注册调用算子 | [查看](skills-usage.md#ascendc-direct-invoke-to-registry-invoke) |
-| **ascendc-direct-invoke-template** | Kernel 直调工程模板，提供验证过的样例工程和修改指南 |  |
-| **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 |  |
-| **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 |  |
-| **ascendc-docs-gen** | 算子文档写作参考，支持需求分析、详细设计等多个标准模版 |  |
-| **ops-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 |  |
-| **ascendc-blaze-best-practice** | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 |  |
-| **ascendc-performance-best-practices** | 按算子族组织的性能优化经验与参考代码总结 |  |
-| **ascendc-regbase-best-practice** | DAV_3510 RegBase 算子 API 约束、实现结构、常见陷阱及真实参考算子 |  |
-| **cann-env-setup** | 昇腾 NPU CANN 安装与环境配置指导 |  |
-| **aiss-tiling-solver** | AISS-TilingSolver 工具自动求解最优 Tiling 参数，覆盖安装、输入构造、运行求解、结果解读 |  |
+| **ascendc-direct-invoke-template** | Kernel 直调工程模板，提供验证过的样例工程和修改指南 | — |
+| **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
+| **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
+| **ascendc-docs-gen** | 算子文档写作参考，支持需求分析、详细设计等多个标准模版 | — |
+| **ops-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
+| **ascendc-blaze-best-practice** | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 | — |
+| **ascendc-performance-best-practices** | 按算子族组织的性能优化经验与参考代码总结 | — |
+| **ascendc-regbase-best-practice** | DAV_3510 RegBase 算子 API 约束、实现结构、常见陷阱及真实参考算子 | — |
+| **cann-env-setup** | 昇腾 NPU CANN 安装与环境配置指导 | — |
+| **aiss-tiling-solver** | AISS-TilingSolver 工具自动求解最优 Tiling 参数，覆盖安装、输入构造、运行求解、结果解读 | — |
+<!-- skills-table-end -->
 
 ### Agents
 
@@ -142,6 +146,20 @@
 |-------|------|
 | **triton-op-generator** | Triton 算子端到端生成与优化 |
 
+## Runtime
+
+### Skills
+
+<!-- skills-table-start -->
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **runtime_migration** | Runtime 接口迁移，提供兼容层与直接迁移两种方式，含设备/内存/流/事件/IPC/库管理/VMM 适配与错误码映射 | — |
+<!-- skills-table-end -->
+
+> 仅用于用户自身合法拥有或已获授权代码的处理，不用于未授权第三方代码的复制、翻译或转换。
+
+---
+
 ## torch.compile 图模式
 
 ### Skills
@@ -202,3 +220,11 @@
 | **gitcode-issue-gen** | 自动判断两条路径：(PR路径) 从 PR diff 生成关联 Issue 并完成双向关联；(手动路径) 交互式收集信息生成 Issue 草稿，经确认后提交 | [查看](skills-usage.md#gitcode-issue-gen) |
 | **gitcode-issue-handler** | GitCode Issue 端到端处置，按内容自动选择 PR 代码变更路径或 Comment 答复路径 | [查看](skills-usage.md#gitcode-issue-handler) |
 | **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | [查看](skills-usage.md#gitcode-toolkit) |
+
+## 社区 Plugins
+
+> 以下 Plugin 位于 `plugins-community/` 目录，属社区维护，可能存在平台或能力限制。
+
+| Plugin | 功能 | 使用样例 |
+|--------|------|---------|
+| **science-model-npu-migration** | 框架级代码 NPU 迁移全流程：环境门禁、脚本适配、精度/性能对比与 mig_docs 交付归档；覆盖 torch_npu / MindSpore Ascend | — |
