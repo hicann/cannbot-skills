@@ -15,8 +15,9 @@
 | `S2P2_param_def.json` | 是 | dtype 参数名（`dtype_tensors[0].param`）、shape 参数 key 名与 groups 结构 |
 | `S2P1_low_configs.json` | 是 | 网络用例的语义参数值，网络映射阶段读取 |
 | `S5_mapping_spec.md` | 是 | 5b 读算子侧规格（§dtype ~ §验证规则）+ `（DYNAMIC）` 标注识别 DYNAMIC 输入；5b 生成 §网络用例映射 并写回 |
-| `S2P0_file_manifest.json` | 是 | tiling 源码文件路径清单，5a-pre 据此读取源码提取参数与维度的对应关系 |
+| `S2P0_source_scope.md` | 是 | tiling 源码文件路径清单，5a-pre 据此读取源码提取参数与维度的对应关系 |
 | `infershape.cpp` 等源码 | 辅助 | 理解输出 shape 推导表达式（derived.expr） |
+| `06-dynamic-tensorlist.md` | 按需 | DYNAMIC param_type 时读取，用于 TensorList 约束处理 |
 
 ### S2P2_cases.json 读取限制
 
@@ -53,7 +54,7 @@
 
 ### Step 5a-pre：映射规格生成
 - **指导文件**：`{skill_base}/references/case-mapper/01-mapping-spec.md`
-- **前置条件**：S2P2_cases.json + S2P1_operator_model.json + S2P2_param_def.json + S2P0_file_manifest.json 已就绪
+- **前置条件**：S2P2_cases.json + S2P1_operator_model.json + S2P2_param_def.json + S2P0_source_scope.md 已就绪
 - **职责**：分析 operator_model 中各 input/output 的 param_type，生成 S5_mapping_spec.md（§dtype ~ §验证规则，不含 §网络用例映射）
 - **完成标志**：S5_mapping_spec.md 已写入
 

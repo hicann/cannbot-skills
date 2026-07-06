@@ -47,7 +47,7 @@ Step 3 是 Step 2 的反向校验（质检员）。Step 2 产出文件声称的�
 2. **严禁提前读取后续步骤的文件** — 执行步骤 N 时，禁止 Read 仅属于步骤 N+1 及之后才需要的文件。
 3. **步骤 1→2→3→4 严格顺序执行**，不得跳步或并行。每完成一个步骤的状态判断后，才开始下一步骤。
 4. **步骤 4（输出）必须最后** — 不读新文件，汇总步骤 1-3 结论写入报告。
-5. `_def.cpp` 和 `_infershape.cpp` 不在 S2P0_file_manifest.json 的 **file_list** 中（需单独搜索：`_def.cpp` 从算子根目录下的 `op_host/` 子目录中搜索；`_infershape.cpp` 首先搜索 `op_host/*_infershape.cpp`，若不存在则沿 `_def.cpp` 的 `#include` 路径在共享目录中搜索，最后兜底 Glob `../**/*_infershape.cpp`）。`_def.cpp` 是 inputs/outputs/attributes 的唯一权威来源；`_infershape.cpp` 仅作为 shape 推导和辅助验证的补充，两者冲突时以 `_def.cpp` 为准（详见 `02-verify-task-b.md` §源码优先级规则）。
+5. `_def.cpp` 和 `_infershape.cpp` 不在 S2P0_source_scope.md 的文件列表中（需单独搜索：`_def.cpp` 从算子根目录下的 `op_host/` 子目录中搜索；`_infershape.cpp` 首先搜索 `op_host/*_infershape.cpp`，若不存在则沿 `_def.cpp` 的 `#include` 路径在共享目录中搜索，最后兜底 Glob `../**/*_infershape.cpp`）。`_def.cpp` 是 inputs/outputs/attributes 的唯一权威来源；`_infershape.cpp` 仅作为 shape 推导和辅助验证的补充，两者冲突时以 `_def.cpp` 为准（详见 `02-verify-task-b.md` §源码优先级规则）。
 6. **上下文兜底**：如果执行某步骤时发现上下文中某个复用文件的内容不可用（被截断或丢失），允许重新 Read 该文件，不视为违反规则 2。
 
 ## 检查项总览
@@ -72,9 +72,9 @@ Step 3 是 Step 2 的反向校验（质检员）。Step 2 产出文件声称的�
 
 | Step | 文件 | 类型 | 本步骤读取文件 | 前置条件 | 状态判断 |
 |:----:|------|------|:------------:|---------|---------|
-| 1 | `01-verify-task-a.md` | 真实性 | `S2P0_file_manifest.json` · `S2P1_path_list.json` · tiling 源码 · kernel 源码 | 无 | A1 四个子项（A1.1-A1.4）各有 pass/fail/warn |
+| 1 | `01-verify-task-a.md` | 真实性 | `S2P0_source_scope.md` · `S2P0_file_manifest.json` · `S2P1_path_list.json` · tiling 源码 · kernel 源码 | 无 | A1 四个子项（A1.1-A1.4）各有 pass/fail/warn |
 | 2 | `02-verify-task-b.md` | 真实性 + 结构性 | `S2P1_operator_model.json` · `{op_path}/op_host/*_def.cpp` · `{op_path}/op_host/*_infershape.cpp` | 步骤 1 完成 | B1 七个子项（B1.1-B1.7）各有 pass/fail/warn |
-| 3 | `03-verify-task-d.md` | 真实性 + 结构性 | `S2P0_file_manifest.json` · `S2P1_path_list.json` · `S2P2_param_def.json` · `S2P2_gen_cases.py` · `S2P2_traceability.md` · tiling 源码 · `{skill_base}/scripts/gen_cases_template.py` | 步骤 2 完成 | D1 有 verified_count/total_count；D2 + D3 各有 pass/fail |
+| 3 | `03-verify-task-d.md` | 真实性 + 结构性 | `S2P0_source_scope.md` · `S2P0_file_manifest.json` · `S2P1_path_list.json` · `S2P2_param_def.json` · `S2P2_gen_cases.py` · `S2P2_traceability.md` · tiling 源码 · `{skill_base}/scripts/gen_cases_template.py` | 步骤 2 完成 | D1 有 verified_count/total_count；D2 + D3 各有 pass/fail |
 | 4 | `05-output-schema.md` | 输出 | 不读新文件，汇总步骤 1-3 结论 | 步骤 1-3 全部完成 | S3_verification_report.md 已写入 |
 
 **执行顺序规则**：

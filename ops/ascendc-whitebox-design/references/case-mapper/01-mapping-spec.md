@@ -4,7 +4,7 @@
 
 ## 1. 执行流程
 
-1. Read `S2P0_file_manifest.json` 获取 tiling 源码文件路径
+1. Read `S2P0_source_scope.md` 获取 tiling 源码文件路径
 2. Read tiling 入口文件（P0 优先级），提取各 shape 参数的实际赋值表达式（如 `{param} = {expr}`），确定参数与维度的对应关系
 3. Read `S2P1_operator_model.json` + `S2P2_param_def.json` + `S2P2_cases.json`（采样前 10 条确认字段名）
 4. 按 §2 推导来源表确定映射关系
@@ -22,9 +22,9 @@
 | 各 shape 参数的默认值 | 算子行为推断（合理默认值） |
 | ndim 范围 | `S2P1_operator_model.json` → 所有 `inputs[*].rank.min/max` 的交集 |
 | per-tensor ndim 约束 | `S2P1_operator_model.json` → `inputs[*].shape.constraints` |
-| 各输入 tensor 的 shape 规则（decompose / sync_with / fixed / optional） | `S2P1_operator_model.json` → `inputs[*]` + tiling 源码（参数赋值表达式，通过 `S2P0_file_manifest.json` 定位） |
+| 各输入 tensor 的 shape 规则（decompose / sync_with / fixed / optional） | `S2P1_operator_model.json` → `inputs[*]` + tiling 源码（参数赋值表达式，通过 `S2P0_source_scope.md` 定位） |
 | 各输出 tensor 的 shape 规则（same_as / derived / fixed） | `S2P1_operator_model.json` → `outputs[*]` + infershape.cpp（derived.expr 表达式） |
-| 各 shape 参数控制哪些 tensor 的哪些维度 | tiling 源码参数赋值表达式（通过 `S2P0_file_manifest.json` 定位） |
+| 各 shape 参数控制哪些 tensor 的哪些维度 | tiling 源码参数赋值表达式（通过 `S2P0_source_scope.md` 定位） |
 | 属性的注入策略（直接取 / 采样） | `S2P1_operator_model.json` → `attributes[*]` |
 | DYNAMIC TensorList 的 tensor count | `S2P1_operator_model.json` → `inputs[*].tensor_count`（`{param, min, max}` 或 `{derived_from}`） |
 | DYNAMIC 子 tensor 的 dtype/rank | `S2P1_operator_model.json` → `inputs[*].dtype.values` + `inputs[*].rank.min/max` |
@@ -204,7 +204,7 @@ tensor count：{derived_from: 与输入 {target} count 相同}。
 **判定方法**：对 `S2P1_operator_model.json` 的每个属性，通过 `S2P1_tiling_glossary.md` 找到对应的 tiling 变量名，然后检查以下三个来源：
 
 1. `S2P1_path_list.json` 各 path 的 `conditions` 字段
-2. tiling 源码（`S2P0_file_manifest.json` P0 文件）的分支条件（`if`/`switch`/三元表达式）
+2. tiling 源码（`S2P0_source_scope.md` P0 文件）的分支条件（`if`/`switch`/三元表达式）
 3. kernel dispatch 文件（`*_apt.cpp`）的 `TILING_KEY_IS` 块内条件
 
 **任一来源出现该变量 → 参与**（按 group/路径分支中已有的值取用，生成 §属性.{name} 段落）；**全部未出现 → 不参与**（忽略，不生成段落，不在 `params` 中出现）。

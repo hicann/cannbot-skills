@@ -12,7 +12,7 @@ kernel dispatch 中可能存在 tiling 无法触发的条目（如 tiling 某分
 
 ## 输入
 
-- `S2P0_file_manifest.json` 的 `kernel.total_key_count`
+- `S2P0_source_scope.md` 的 kernel 总计 key 数
 - `S2P0_scout_k.md` P0 的逐条 dispatch 映射
 - 已提取的 paths 数组（步骤 4 产出）
 
@@ -26,7 +26,7 @@ kernel dispatch 中可能存在 tiling 无法触发的条目（如 tiling 某分
 
 3. **计算差集**：`orphan_keys = 全部有效 key - 已覆盖 key`。为空则记录所有 dispatch 已覆盖（步骤 7 将 dispatch_coverage 判为 covered），跳过后续步骤
 
-4. **创建 dead 路径**：对每个 orphan key，从 `S2P0_scout_k.md` 提取 kernel 类名和行号，分析 tiling 源码中无法触达的原因，追加 dead 路径。
+4. **创建 dead 路径**：对每个 orphan key，从 kernel P0 源码提取 kernel 类名和行号，分析 tiling 源码中无法触达的原因，追加 dead 路径。
 
 ---
 
@@ -44,7 +44,7 @@ kernel dispatch 中可能存在 tiling 无法触发的条目（如 tiling 某分
   "input_variables": [],
   "caller_options": [],
   "internal_variables": [],
-  "key_instructions": ["从 S2P0_scout_k.md 提取的 kernel 类名"],
+  "key_instructions": ["从 kernel P0 源码提取的 kernel 类名"],
   "source": "kernel_dispatch:{行号} (无 tiling 源码对应)"
 }
 ```
@@ -64,7 +64,7 @@ kernel dispatch 中可能存在 tiling 无法触发的条目（如 tiling 某分
 
 ## 约束
 
-- 只使用 `S2P0_scout_k.md`、`S2P0_file_manifest.json` 和已读取的 tiling 源码中的已有信息，不新增读取
+- 只使用 `S2P0_scout_k.md`、`S2P0_source_scope.md` 和已读取的 tiling 源码中的已有信息，不新增读取
 - `dead_detail` 必须包含具体源码行号
 - 禁止将孤儿 dispatch 标记为 reachable 或 disputed
 - `conditions` 字段不确定时留空

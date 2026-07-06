@@ -42,9 +42,12 @@
 
 | 文件 | 说明 |
 |------|------|
-| `S2P0_scout_t.md` | tiling 侦察报告（分支可达性 + 平台标注） |
-| `S2P0_scout_k.md` | kernel 侦察报告（dispatch 模式 + key 数量） |
+| `S2P0_scout_t.md` | tiling 侦察报告（入口函数 + P0/P1/P2 文件清单） |
+| `S2P0_scout_t.json` | tiling 侦察结构化数据（供 verify 消费） |
+| `S2P0_scout_k.md` | kernel 侦察报告（dispatch 类型 + key 列表） |
+| `S2P0_scout_k.json` | kernel 侦察结构化数据（供 verify 消费） |
 | `S2P0_file_manifest.json` | 源码文件清单（tiling/kernel 优先级 + 排除列表） |
+| `S2P0_source_scope.md` | 源码读取范围（供 Task A/D 直接读取） |
 | `S2P1_path_list.json` | 代码路径清单 + 分支树 |
 | `S2P1_tiling_glossary.md` | tiling 变量含义表（tiling 源码变量名 → 语义名映射） |
 | `S2P1_operator_model.json` | 算子接口模型（inputs/outputs/attributes） |
@@ -187,8 +190,11 @@ Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
 ```
 {算子源码路径}/tests/whitebox/
 ├── S2P0_scout_t.md
+├── S2P0_scout_t.json
 ├── S2P0_scout_k.md
+├── S2P0_scout_k.json
 ├── S2P0_file_manifest.json
+├── S2P0_source_scope.md
 ├── S2P1_path_list.json
 ├── S2P1_tiling_glossary.md
 ├── S2P1_low_configs.json

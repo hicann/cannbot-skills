@@ -1,6 +1,6 @@
 # Task A 产出验证
 
-校验 `S2P1_path_list.json` 中对源码的声明是否真实。辅助文件 `S2P0_file_manifest.json` 仅用于路径映射。仅校验 `reachability == "reachable"` 的 path。
+校验 `S2P1_path_list.json` 中对源码的声明是否真实。辅助文件 `S2P0_source_scope.md` 仅用于路径映射。仅校验 `reachability == "reachable"` 的 path。
 
 ---
 

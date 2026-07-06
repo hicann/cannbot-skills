@@ -1,6 +1,6 @@
 # Task A 源码读取与溯源规则
 
-本文件对应入口 `04-code-analyzer.md` 的步骤 1-3，包含以下环节：
+本文件对应入口 `01-code-analyzer.md` 的步骤 1-3，包含以下环节：
 
 | 环节 | 对应入口步骤 | 说明 |
 |------|------------|------|
@@ -16,7 +16,7 @@
 
 Scout 报告已经过 Scout-Verify 校验（Phase 0），可直接信任其分支拓扑、行号和 key 计数。
 
-Scout 报告提供：分支追踪路径及行号、tiling_key 值、平台判断函数返回值、kernel 逐条 dispatch 映射和总 key 计数、架构守卫求值结果。
+Scout 报告提供：入口函数名及定义位置、平台分支关键词及行号、key 设置方式、P0/P1/P2 文件清单、kernel dispatch 文件列表及 dispatch 类型（A/B/C/hybrid）、key 值列表、arch 守卫状态。
 
 仍需从源码提取（Scout 不提供）：结构化 conditions JSON（逐字抄录源码表达式）、input_variables / caller_options / internal_variables 分类。
 
@@ -41,7 +41,7 @@ Scout 报告提供：分支追踪路径及行号、tiling_key 值、平台判断
 
 ## 文件读取策略
 
-严格按主 Agent 传入的"源码读取范围"文本块执行，未列出的文件禁止读取、排除列表中的文件禁止读取、不需自行读取 `S2P0_file_manifest.json`。`kernel.total_key_count` 是完整性校验基准。
+严格按 `S2P0_source_scope.md` 列出的文件范围执行，未列出的文件禁止读取、排除列表中的文件禁止读取。`kernel.total_key_count` 是完整性校验基准。
 
 文件内读取粒度：按「首要步骤」节的读取策略执行。
 
@@ -92,4 +92,4 @@ Scout 报告提供：分支追踪路径及行号、tiling_key 值、平台判断
 
 ## Kernel 覆盖策略
 
-kernel 侧分析范围：读取 manifest 列出的 kernel P0 文件（dispatch 入口），提取每个 dispatch 条目的 key 值、模板参数、行号。将这些条目映射为对应 tiling 路径的 `key_instructions`。`source` 字段格式为 `tiling:line → kernel_dispatch:line`。tiling 无法映射的 kernel dispatch 条目由后续「孤儿 Dispatch 回收」步骤处理。
+kernel 侧分析范围：读取 `S2P0_source_scope.md` 列出的 kernel P0 文件（dispatch 入口），提取每个 dispatch 条目的 key 值、模板参数、行号。将这些条目映射为对应 tiling 路径的 `key_instructions`。`source` 字段格式为 `tiling:line → kernel_dispatch:line`。tiling 无法映射的 kernel dispatch 条目由后续「孤儿 Dispatch 回收」步骤处理。
