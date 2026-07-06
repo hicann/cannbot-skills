@@ -9,7 +9,9 @@ skills:
   - ascendc-crash-debug
   - ascendc-precision-debug
   - ascendc-performance-best-practices
+  - ascendc-perf-optimize
   - ops-profiling
+  - ops-simulator
   - ascendc-registry-invoke-template
   - ascendc-direct-invoke-template
   - ascendc-regbase-best-practice

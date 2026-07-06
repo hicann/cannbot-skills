@@ -477,24 +477,24 @@ Phase 3 验证失败
 
 | 错误类型 | 典型表现 | 严重程度 | 触发技能 |
 |---------|---------|---------|---------|
-| **性能不达标** | 未达到性能基线 | 高 | perf-tuning |
+| **性能不达标** | 未达到性能基线 | 高 | ascendc-perf-optimize |
 | **精度回归** | 性能优化后精度下降 | 高 | ascendc-precision-debug |
 
 #### 回退策略
 
 | 错误类型 | 回退策略 | 技能支持 |
 |---------|---------|---------|
-| 性能不达标 | 分析瓶颈 → 调整优化策略 → 重新验证（最多5轮） | perf-tuning |
+| 性能不达标 | 分析瓶颈 → 调整优化策略 → 重新验证（最多5轮） | ascendc-perf-optimize |
 | 精度回归 | 检查优化代码 → 可能回退第二阶段迭代三 | ascendc-precision-debug |
 
-#### cannsim 与 perf-tuning 调用关系
+#### cannsim 与 ascendc-perf-optimize 调用关系
 
 ```
 性能测试阶段
     │
-    └─ 直接调用 perf-tuning 技能
+    └─ 直接调用 ascendc-perf-optimize 技能
         │
-        ├─ perf-tuning 内部调用 cannsim（ascend950 仿真）
+        ├─ ascendc-perf-optimize 内部调用 cannsim（ascend950 仿真）
         │   └─ 生成性能 trace
         │
         └─ 分析性能瓶颈
@@ -503,7 +503,7 @@ Phase 3 验证失败
             └─ 指令级分析
 ```
 
-> **重要**：性能测试阶段直接调用 `perf-tuning`，`cannsim` 作为底层工具由 `perf-tuning` 内部调用。仅在需要单独仿真（非性能分析）时直接调用 `cannsim`。
+> **重要**：性能测试阶段直接调用 `ascendc-perf-optimize`，`cannsim` 作为底层工具由 `ascendc-perf-optimize` 内部调用。仅在需要单独仿真（非性能分析）时直接调用 `cannsim`。
 
 #### 问题定位流程
 
@@ -699,7 +699,7 @@ Phase 3 验证失败
 
 ## 参考资料
 
-- [ascendc-precision-debug](../../skills/ascendc-precision-debug/SKILL.md) - 精度调试技能
-- [perf-tuning](../../skills/perf-tuning/SKILL.md) - 性能调优技能
-- [ops-simulator](../../skills/ops-simulator/SKILL.md) - 仿真工具
+- `ascendc-precision-debug` - 精度调试技能
+- `ascendc-perf-optimize` - 性能调优技能
+- `ops-simulator` - 仿真工具
 - [SKILL.md](../SKILL.md) - 算子开发工作流程主文档
