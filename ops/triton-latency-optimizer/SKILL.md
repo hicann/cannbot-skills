@@ -42,462 +42,116 @@ argument-hint: >
 - 仍需产出 `output_path`（内容与输入相同或微调）
 - 在返回信息中明确说明"无更多优化点"
 
-## 优化点执行顺序
+## 优化点索引
 
-Agent 必须严格按照以下顺序逐一检查优化点，**每次只能尝试一个优化点，命中后参考对应文档**。
+以下仅列出优化点索引，包含适用条件、命中条件及参考文档路径。**每个优化点的详细说明（典型代码特征、判断逻辑、优化方法、代码示例）请见对应参考文档。**
 
-⚠️ **前置要求**：必须先命中某个优化点的「命中条件」（代码特征满足典型代码特征之一且适用条件成立），才能加载对应的参考文档。未命中则跳过，禁止加载参考文档。
+| 序号 | 优化点 | 适用条件 | 命中条件 | 参考文档 |
+|------|--------|----------|----------|----------|
+| 1 | 入参静态化优化 | 存在可声明为 `tl.constexpr` 的固定参数 | 单次 kernel 启动后不变的参数未声明 `tl.constexpr` | `references/constexpr_parameters.md` |
+| 2 | Tiling 优化 | 多维张量规约/归一化算子，规约轴非最连续轴 | 分块策略导致跨步访存 | `references/tiling_optimization.md` |
+| 3 | 分核优化 | Grid 设置不合理或未充分利用 NPU 资源 | Grid 与物理核数严重偏离，或每个 program 处理数据量过小 | `references/vector_core_partition.md` |
+| 4 | 离散访存优化 | 通过随机/不可预测索引访问全局内存 | 索引来源于 `tl.load` 加载值或 kernel 入参 | `references/discrete_memory_access.md` |
+| 5 | Scalar 转 Vector 优化 | 存在可转换为向量操作的标量操作 | 存在标量广播、标量规约、标量控制流、`int` 比较/除法/取余、`atomic_*` 标量操作 | `references/scalar_to_vector.md` |
+| 6 | 避免向量 API 标量降级 | 向量操作可能被编译器降级为标量循环 | 算术/比较/扩展乘法/cumsum/cumprod/reduce 满足降级条件 | `references/avoid_scalar_lowering.md` |
+| 7 | Pass 消除合并优化 | 多次遍历相同数据计算不同统计量 | 可通过自适应 `BLOCK_SIZE` 消除循环，或可合并多次遍历 | `references/pass-merge.md` |
+| 8 | 维度合并优化 | 多层嵌套循环处理连续维度且维度间无依赖 | 存在 3 层及以上连续维度嵌套循环可合并 | `references/dimension-merge.md` |
+| 9 | Libdevice 函数使用 | 手动实现数学函数而 libdevice 已有优化版本 | 存在手动实现的 math 函数且 libdevice 有对应版本 | `references/libdevice-usage.md` |
+| 10 | 循环不变量外提 | 嵌套循环内层有只依赖外层变量的 `tl.load` | 内层循环重复加载相同值 | `references/loop-invariant-hoisting.md` |
+| 11 | Load 指令重排序 | 循环内多个 `tl.load`/`tl.store` 因数据依赖阻塞 | 存在可提前发射的 load 指令 | `references/load-order.md` |
+| 12 | Grid 形状与多路径特化 | 单一 kernel 无法同时覆盖大小 grid 场景 | Host 侧可在运行时根据 workload 选择不同 kernel 路径 | `references/grid-dispatch-specialization.md` |
+| 13 | Autotune 自动调优 | 存在一个或多个未充分调优的可调参数 | 存在可调 `tl.constexpr` 参数且未使用 `@triton.autotune` | `references/autotune.md` |
+| 14 | 混合策略自动选择 | 不同 shape 或数据类型需要不同优化策略 | 存在 shape/dtype 相关的条件分支选择不同 kernel/策略 | `references/mixed_strategy.md` |
+| 15 | 维度合并与大 BLOCK 累加 | 归一化算子中存在嵌套循环/低 mask 覆盖率/标量累加过多 | stats kernel 中连续维度处理低效 | `references/operators/dimension-merge-large-block.md` |
+| 16 | 连续拷贝聚合优化 | 纯内存拷贝型算子，多个输出块在输入侧连续 | 满足连续性且当前按 chunk 细粒度分核 | `references/operators/continuous-copy-aggregation.md` |
+| 17 | 消除冗余的边界运算 | `tl.load(..., mask=m, other=d)` 后运算链出现冗余边界保护 | KVR 分析可证存在冗余 `tl.where`、`* mask`、`+ 0` 等 | `references/redundant_boundary_operation.md` |
+| 18 | Kernel 分裂优化 | 多 Case 场景下泛用 Kernel 性能未达标 | `total_cases > 1` 且 `speedup_vs_torch < 0.8`，存在可特化分组 | `references/kernel_splitting.md` |
+| 19 | Cube/MTE3 分阶段批量解耦优化 | 多输出 kernel 中 Cube 累加输出与 atomic scatter 输出在同一循环体交替（MTE3 阻塞 Cube），且某归约维靠多 program atomic 竞争归约 | Cube/MTE3 交替阻塞 + 归约维 atomic 爆炸，该维可单 program UB 累加，重算成本可接受 | `references/cube-mte3-decoupling.md` |
+| 20 | Host 侧张量维度拼接优化 | 算子内存在复合点积 `a·c + b·d`（多次 `tl.dot` + 中间累加），各分段为同一对象连续维度 | 各分段独立存储、内存连续可 `concat`，且拼接后不溢出 UB | `references/host-tensor-concat.md` |
+| 21 | Workspace 物化解耦优化 | 多输出 kernel 输出间循环遍历顺序冲突（UB 放不下常驻累加器且 atomic 太贵），存在可物化复用的共享中间量 | 多 pass 重复 gather + 重算共享中间量，且 pass 间循环顺序 genuine 冲突无法合并 | `references/workspace-decoupling.md` |
+| 22 | Latency-Bound 循环维度 Tile 合并 | kernel 处于 latency-bound（算力利用率极低，dot 固定 issue/同步开销主导），存在外层循环每迭代发起一组 dot，且 dot 某维（常 M）小于 cube 微块可放大 | profiling 算力利用率 <5% 且带宽未饱和但 dot 调用频繁，外层循环放大 dot 维度可减迭代数，放大后连续单 tile 在 UB/CC 内 | `references/latency-bound-tile-merge.md` |
+| 23 | Ascend Interpolate 专用优化 | 算子类型为 interpolate/upsample_* | 代码为 Interpolate 类算子，存在坐标/权重运行时计算或离散访存 | `references/ascend-interpolate-optimization.md` |
+| 24 | Ascend Pooling 专用优化 | 算子类型为 MaxPool/AvgPool | 代码为 Pooling 类算子，存在 1D 扁平索引或布局/边界优化空间 | `references/ascend-pooling-optimization.md` |
 
----
+**检查规则**：Agent 必须严格按照上述顺序逐一检查优化点，**每次只能尝试一个优化点，命中后才能加载对应参考文档；未命中则跳过，禁止加载参考文档。**
 
-### 优化点 1：入参静态化优化
+## 算子类别与高频优化点
 
-**适用条件**：代码中存在可声明为 `tl.constexpr` 的固定参数
+不同类别算子的性能瓶颈分布不同，以下列出常见类别及其**必须检查**的优化点。
+当算子属于对应类别且性能不达标时，这些点不得被跳过。
 
-**典型代码特征**：
-```python
-@triton.jit
-def kernel(A, B, C, M, N,
-            stride_am, stride_an,  # 运行时不变化的固定值，但未声明为 constexpr
-            BLOCK_SIZE_M: tl.constexpr,
-            BLOCK_SIZE_K: tl.constexpr):
-```
+| 算子类别 | 识别特征 | 高频命中点 | 说明 |
+|---------|---------|-----------|------|
+| **Tiled Reduction** | 存在 `for t in range(0, N, BLOCK)` 内对 `tl.load` 结果做 `tl.sum` 归约 | 5, 7, 8, 15 | 标量累加器、嵌套循环、mask 覆盖率是核心瓶颈 |
+| **Multi-kernel** | stats + apply 双 kernel（BatchNorm/LayerNorm/GroupNorm/InstanceNorm/RMSNorm 等归一化算子） | 5, 7, 8, 15, 18 | 继承 Tiled Reduction 全部瓶颈 + kernel 分裂 |
+| **Broadcast EW** | `add/sub/mul/div` 逐元素操作，存在 shape 不等需广播 | 1, 2, 8, 12 | 入参静态化、tiling、多路径调度是关键 |
+| **Scatter/Gather** | 通过随机/不可预测索引访问全局内存 | 4, 5 | 离散访存和 scatter-add 并行轴选择 |
+| **MatMul** | 矩阵乘法 | 2, 13 | tiling 和 autotune 自动调优 |
+| **Memory-bound Copy** | Split/Concat/Pad/Chunk 等纯访存算子 | 16 | 连续拷贝聚合 |
+| **Pooling** | MaxPool/AvgPool | 20 | 1D 扁平索引或布局/边界优化 |
+| **Interpolate** | interpolate/upsample | 19 | 坐标/权重运行时计算或离散访存 |
+| **Permute/Layout-transform** | permute/transpose/reshape-as-copy | 1, 2, 8, 12, 13, 14, 16 | 模式特化、连续维度合并、view 短路；专用 kernel 内部必须是 tile-based 连续访存，禁止 element-wise gather 冒充特化，详见 `references/operators/permute-layout-transform.md` |
 
-**判断逻辑**：
-1. 遍历 kernel 参数列表，排除明确属于运行时变量的参数：
-  - 张量数据指针（如 input_ptr, output_ptr）
-  - 动态维度（如 batch size M/N/K、序列长度 seq_len）
-  - 标量动态值（如缩放因子 scale，若每轮调用不同）
-2. 对剩余参数逐一检查是否满足"单次 kernel 启动后不变"：
-  - stride 参数（stride_am, stride_bn 等）→ 涉及 
-  - 固定索引（如 lse_idx, head_idx_offset）→ 涉及
-  - BLOCK_SIZE / HEAD_DIM / N_ROUNDED 等配置参数 → 涉及
-3. 若第2步中任一参数未声明 `tl.constexpr` → 命中，进入参考文档
-4. 若第2步中无参数或已全部声明 `tl.constexpr` → 不涉及，跳过
+> **Permute/Layout-transform 补充**：若常见模式专用 kernel 内部仍使用逐元素 `div`/`mod` 或 `tl.where` 链进行 gather/scatter，或未通过 `view` 合并连续维度，则优化点 2（Tiling）和 8（维度合并）**必须检查**，不得跳过。
 
-**命中条件**：代码特征满足上述典型代码特征之一，且适用条件成立
+> **通用规则**：多 case（`total_cases > 1`）且 `speedup_vs_torch < 0.8` 时，
+> 无论属于哪个类别，优化点 18（Kernel 分裂）**必须检查**，不得跳过。
 
-**参考文档**：`references/constexpr_parameters.md`
+## 主流程（必须严格执行）
 
----
+Agent 必须始终处于以下主流程中。进入任一子流程（参考文档、checklist 修复、验证）后，**完成后必须回到主流程继续执行**，禁止在中途跳出或跳过主流程步骤。
 
-### 优化点 2：Tiling 优化（连续轴向量化）
+### 主流程步骤
 
-**适用条件**：处理多维张量（3D 及以上）的规约类或归一化算子，且规约轴并非内存布局中的最连续轴
+1. **按顺序检查优化点**：`1 → 2 → 3 → ... `。
+2. **对当前优化点判断是否命中**：
+   - **未命中**（代码特征不满足 或 适用条件不成立）→ 跳过，检查下一优化点。
+   - **命中**（代码特征满足 且 适用条件成立）→ 加载对应参考文档，进入子流程应用优化策略；**应用完成后必须回到本步骤继续后续流程**。
+3. **代码规范检查**：应用优化后，**必须加载 `references/checklist.md`**，逐项检查代码规范。
+4. **规范修复循环**：
+   - 如果代码规范不满足 → 修改代码直到满足所有规范要求，然后重新执行步骤 3。
+   - 如果代码规范满足 → 继续步骤 5。
+5. **返回主循环**：以当前优化后的代码为新的检查对象，**回到步骤 1**，继续按顺序检查下一个优化点。
 
-**典型代码特征**：
-```python
-@triton.jit
-def kernel(input_ptr, output_ptr, dim1, dim2, ...):
-    # 特征 1：向量化偏移 tl.arange 作用在非连续轴（如 dim1/M 轴）
-    m_offsets = tl.arange(0, BLOCK_SIZE_M)
-    # 特征 2：访存偏移计算中，向量化部分乘上了较大的 stride
-    input_offset = m_offsets * stride_m + n_idx * stride_n
-    # 特征 3：循环内部频繁进行还原操作（如 tl.sum）将向量压缩为标量
-    acc = tl.zeros((BLOCK_SIZE_M,), dtype=tl.float32)
-    ...
-    total_sum = tl.sum(acc, axis=0)
-```
-
-**判断逻辑**：
-- 检查 `tl.load` 的偏移量计算：如果 `tl.arange` 产生的向量偏移量作用于 `stride > 1` 的轴，而存在 `stride = 1` 的轴仅被当作标量索引处理 → 涉及
-- 检查循环累加器：如果累加器在还原轴上分块，但访存模式导致了非连续内存读取 → 涉及
-- 如果 `tl.arange` 已经作用于内存最连续的轴（通常是最后一张量的最后一维），且实现了合并访存 → 不涉及，跳过
-
-**命中条件**：代码逻辑旨在对某维度进行还原，但其分块策略导致硬件执行了跨步访存
-
-**参考文档**：`references/tiling_optimization.md`
-
----
-
-### 优化点 3：分核优化
-
-**适用条件**：代码中 Grid 大小设置不合理，或未充分利用 NPU 硬件资源
-
-**典型代码特征**：
-```python
-# 特征 1：Grid 远大于物理核数
-grid = (batch_size,)  # 如果 batch_size=128，远超 48 核
-
-# 特征 2：Grid 远小于物理核数
-grid = (batch_size // 64,)  # 如果 batch_size=128，只有 2 核
-
-# 特征 3：每个 program 只处理 1 行数据
-row_idx = tl.program_id(0)
-x = tl.load(ptr + row_idx * stride + cols, mask=mask)
-
-# 特征 4：未使用编译优化选项（multibuffer、unit_flag）
-kernel[grid](...)  # 未传入 multibuffer、unit_flag
+### 主流程示意图
 
 ```
-
-**判断逻辑**：
-- 检查 Grid 大小是否接近物理核数（40-48）
-  - 如果 Grid >> 48 或 Grid << 48 或者 Grid值无从判断 → 涉及
-- 检查每个 program 处理的数据量
-  - 如果每个 program 只处理少量数据（如 1 行）→ 涉及
-- 检查是否使用了编译优化选项
-  - 如果未使用 multibuffer 且是内存密集型算子 → 涉及
-- 如果 Grid 合理且已使用优化选项 → 不涉及，跳过
-
-**命中条件**：代码中 Grid 大小设置不合理，或未充分利用 NPU 硬件资源
-
-**参考文档**：`references/vector_core_partition.md`
-
----
-
-### 优化点 4：离散访存优化
-
-**适用条件**：代码中存在通过随机/不可预测索引访问全局内存
-
-**典型代码特征**：
-```python
-# 索引来源于 tl.load 加载的值（随机性）
-idx = tl.load(indices_ptr + offset)  # idx 是运行时确定的随机值
-val = tl.load(data_ptr + idx)        # 通过随机索引访问
-
-# 或者索引来源于 kernel 入参（可能是随机值）
-val = tl.load(ptr + random_index)
+┌─────────────────────────────────────┐
+│ 1. 按顺序检查优化点 1→2→...→25       │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ 2. 当前优化点是否命中？              │
+│    未命中 ──→ 检查下一优化点 ──→ 回到 1 │
+│    命中   ──→ 加载参考文档并应用优化   │
+│               （子流程，完成后必须回来） │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ 3. 加载 checklist.md 检查代码规范    │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ 4. 规范是否满足？                    │
+│    不满足 ──→ 修改代码 ──→ 回到 3   │
+│    满足   ──→ 回到 1 继续检查下一个点 │
+└─────────────────────────────────────┘
 ```
 
-**判断逻辑**：
-- 检查 `tl.load` 的索引来源：
-  - 如果索引是 `tl.program_id` 线性变换 → 确定性连续，不涉及
-  - 如果索引是循环变量线性变换 → 确定性步长，不涉及
-  - 如果索引来源于 `tl.load` 加载的值或 kernel 入参 → 潜在随机，涉及
-- 如果所有访存索引都是确定性连续/步长模式 → 不涉及，跳过
-
-**命中条件**：代码中存在通过随机/不可预测索引访问全局内存
-
-**参考文档**：`references/discrete_memory_access.md`
-
----
-
-### 优化点 5：Scalar 转 Vector 优化
-
-**适用条件**：代码中存在标量操作，可转换为向量操作以充分利用 NPU Vector 计算单元
-
-**典型代码特征**：
-```python
-# 特征 1：标量广播操作
-scalar_val = 0.5  # Python 标量
-result = x * scalar_val  # scalar 广播，无法启用 vector 加速
-
-# 特征 2：标量规约操作
-sum_val = 0.0  # 标量累加器
-for n in range(N):
-    val = tl.load(x_ptr + n)
-    sum_val += val  # 标量加法
-
-# 特征 3：标量控制流
-if x > 0:  # 标量条件，导致 SIMD 分支分化
-    result = tl.exp(x)
-else:
-    result = tl.cos(x)
-
-# 特征 4：int 类型比较/除法/取余
-is_invalid = tok < 0  # int 类型比较，退化为标量
-c = a // b  # int 类型除法，退化为标量
-d = a % b   # int 类型取余，退化为标量
-
-# 特征 5：atomic_* 标量操作
-for idx in range(0, BLOCK_SIZE):
-    tl.atomic_add(output_ptr + idx, block_sum)  # 标量的原子加
-```
-
-**判断逻辑**：
-- 检查是否存在 Python 标量与向量数据的计算（标量广播）
-- 检查是否存在标量累加器（如 `sum_val = 0.0`）
-- 检查是否存在 `if-else` 控制流处理向量数据
-- 检查是否存在 `int32/int64` 类型的比较、除法、取余操作
-- 检查是否存在 `atomic_add` 这一类的 `atomic_*` 标量操作
-- 如果存在以上任一情况 → 涉及
-- 如果所有操作都已使用向量形式 → 不涉及，跳过
-
-**命中条件**：代码中存在标量操作，可转换为向量操作
-
-**参考文档**：`references/scalar_to_vector.md`
-
----
-
-### 优化点 6：避免向量API标量降级
-
-**适用条件**：代码中存在可能被编译器降级为标量循环的向量操作，包括通用算术操作、比较操作、扩展乘法、累积操作（cumsum/cumprod）或归约操作（reduce）
-
-**典型代码特征**：
-```python
-# 特征 1：通用算术操作使用 i64，或者满足降级条件
-z = x + y  # x/y 为 i64
-z = x % y  # x/y 为 i32且执行取余计算
-
-# 特征 2：整数比较操作（非 i32 EQ/NE，或非浮点比较）
-mask = x < y  # i8/i16/i32/i64 的 LT/GT/LE/GE 比较
-
-# 特征 3：扩展乘法
-z = x * y  # 触发 vmulext，始终降级
-
-# 特征 4：cumsum/cumprod 在最后一个维度上操作
-x_cumsum = tl.cumsum(x_1d, axis=0)  # 一维张量，或 cumDim 是 lastDim
-
-# 特征 5：reduce 操作在特定条件下
-# i64 类型的 sum/prod/max/min
-# 整数类型的 argmax/argmin
-# 浮点类型 argmax/argmin 且 flatten 后维度 > 2
-```
-
-**判断逻辑**：
-- 检查通用算术操作（add/sub/mul/min/max/abs/shl/shr/interleave/deinterleave）：如果数据类型为 i64
-- 检查比较操作：如果数据类型为 i8/i16/i64（所有比较），或 i32 的 LT/GT/LE/GE → 涉及
-- 检查取余操作：如果数据类型是任何int类型 → 涉及
-- 检查扩展乘法（vmulext）：任何扩展乘法 → 涉及
-- 检查 cumsum/cumprod：如果累积维度是输入张量的最后一个维度（一维时 axis=0 即最后维度），或数据类型为 i64 → 涉及
-- 检查 reduce 操作：如果是 i64 类型的 sum/prod/max/min；整数类型的 argmax/argmin；浮点类型 argmax/argmin 且 flatten 后维度 > 2 → 涉及
-- 如果以上情况均不存在 → 不涉及，跳过
-
-**命中条件**：代码中存在上述任一向量操作，且满足对应的标量降级条件
-
-**参考文档**：`references/avoid_scalar_lowering.md`
-
----
-
-### 优化点 7：Pass 合并优化
-
-**适用条件**：代码中存在多次遍历相同数据计算不同统计量
-
-**典型代码特征**：
-```python
-# Pass 1: 计算 mean
-for ...:
-    data = tl.load(...)
-    mean += tl.sum(data)
-
-# Pass 2: 计算 variance（再次遍历！）
-for ...:
-    data = tl.load(...)  # 重复加载
-    var += tl.sum((data - mean) ** 2)
-
-# Pass 3: 归一化（第三次遍历！）
-for ...:
-    data = tl.load(...)  # 第三次加载
-    tl.store(...)
-```
-
-**判断逻辑**：
-- 检查是否存在多个独立的循环遍历相同数据
-- 检查是否可以同时计算多个统计量（如 sum + sum_sq 可同时计算 mean + var）
-- 如果存在多次遍历且可合并 → 涉及
-- 如果只有单次遍历，或统计量之间有依赖无法合并 → 不涉及，跳过
-
-**命中条件**：代码中存在多次遍历相同数据，且可以合并计算
-
-**参考文档**：`references/pass-merge.md`
-
----
-
-### 优化点 8：维度合并优化
-
-**适用条件**：代码中存在多层嵌套循环处理连续维度，且维度间无依赖关系
-
-**典型代码特征**：
-```python
-# 问题代码：3层循环处理 NCHW 布局
-for n in range(N):           # 64 次
-    for h in range(H):       # 512 次
-        for w_start in range(0, W, BLOCK_SIZE):  # 循环层数过多
-            base_offset = n * stride_n + c * stride_c + h * stride_h
-            data = tl.load(input_ptr + base_offset + ...)
-```
-
-**判断逻辑**：
-- 检查是否存在多层嵌套循环（3层及以上）
-- 检查循环维度是否为连续内存布局（如 NCHW 的 H×W）
-- 检查维度间是否有依赖关系
-- 如果存在多层循环且维度连续、无依赖 → 涉及
-- 如果循环层数较少，或维度间有依赖 → 不涉及，跳过
-
-**命中条件**：代码中存在多层嵌套循环处理连续维度，且可合并
-
-**参考文档**：`references/dimension-merge.md`
-
----
-
-### 优化点 9：Libdevice 函数使用
-
-**适用条件**：代码中存在手动实现的数学函数，而 `tl.extra.cann.libdevice` 中已有优化版本
-
-**典型代码特征**：
-```python
-# 手动实现 round
-return (x + 0.5).to(tl.int8)
-
-# 手动实现 relu
-out = tl.maximum(x, 0.0)
-
-# 手动实现 tanh、sinh、pow 等数学函数
-```
-
-**判断逻辑**：
-- 检查代码中是否手动实现了以下函数：round、trunc、relu、tanh、sinh、cosh、pow、atan、acos、asin、expm1、log1p、hypot 等
-- 如果存在手动实现且 `tl.extra.cann.libdevice` 中有对应函数 → 涉及
-- 如果代码中没有数学函数实现，或已使用 libdevice 版本 → 不涉及，跳过
-
-**命中条件**：代码中存在手动实现的数学函数，且 libdevice 中有优化版本
-
-**参考文档**：`references/libdevice-usage.md`
-
----
-
-### 优化点 10：循环不变量外提
-
-**适用条件**：代码中存在嵌套循环，且内层循环中有只依赖外层变量的 `tl.load`
-
-**典型代码特征**：
-```python
-# 问题代码：内层循环重复加载相同值
-for outer_idx in range(outer_size):
-    for inner_idx in range(inner_size):
-        param_idx = outer_idx  # 只依赖外层变量
-        val = tl.load(param_ptr + param_idx)  # 重复加载相同值
-        ...
-
-# 或者通过整除映射到更粗粒度
-for block in range(num_blocks):
-    offsets = block * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    channel = offsets // spatial_size
-    w = tl.load(weight_ptr + channel)  # 相同 channel 重复加载
-```
-
-**判断逻辑**：
-- 检查是否存在嵌套循环结构
-- 检查内层循环中是否有 `tl.load(param_ptr + index_expr)`
-- 检查 `index_expr` 是否只依赖外层循环变量，不依赖内层循环变量
-- 如果存在且内层循环次数 >> 外层循环次数 → 涉及
-- 如果没有嵌套循环，或所有 load 都依赖内层变量 → 不涉及，跳过
-
-**命中条件**：代码中存在嵌套循环，且内层循环中有只依赖外层变量的 `tl.load`
-
-**参考文档**：`references/loop-invariant-hoisting.md`
-
----
-
-### 优化点 11：Load 指令重排序
-
-**适用条件**：代码中存在循环，且循环内有多个 `tl.load` 和 `tl.store`，存在数据依赖导致的阻塞
-
-**典型代码特征**：
-```python
-for i in range(HEAD_NUM):
-    # load B 在前，会等待上一次循环的 store B
-    idx_B = tl.load(p_B_index)
-    b_B = tl.load(p_B)
-    
-    # load A 在后，必须等 load B 完成
-    b_A = tl.load(p_A)
-    
-    # calculation
-    b_O = b_A * b_B
-    
-    # store
-    tl.store(p_O, b_O)
-    tl.store(p_B, b_B)  # store B 会阻塞下一次循环的 load B
-```
-
-**判断逻辑**：
-- 检查是否存在循环结构
-- 检查循环内是否有多个 `tl.load` 和 `tl.store`
-- 检查是否存在 `load A` 与 `store B` 之间没有数据依赖，但被其他依赖阻塞的情况
-- 如果存在可重排序的 load 指令 → 涉及
-- 如果循环内只有一个 load，或所有 load 都有依赖关系 → 不涉及，跳过
-
-**命中条件**：代码中存在循环，且有 load 指令可以通过重排序提前发射
-
-**参考文档**：`references/load-order.md`
-
----
-
-### 优化点 12：Autotune 自动调优
-
-**适用条件**：代码中存在一个或者多个可调参数（例如BLOCK_SIZE、BLOCK_M等），且这些参数未经过充分调优，考虑到其他优化点可能引入可调超参数，最后再优化该优化点
-
-**典型代码特征**：
-```python
-# 未使用 autotune，手动指定固定参数
-@triton.jit
-def kernel(..., BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    ...
-
-# 调用时固定参数
-kernel[grid](..., BLOCK_M=128, BLOCK_N=128)
-```
-
-**判断逻辑**：
-- 检查是否已使用 `@triton.autotune` 装饰器
-- 检查是否存在多个可调的 `tl.constexpr` 参数
-- 如果未使用 autotune 且存在可调参数 → 涉及
-- 如果已使用 autotune → 不涉及，跳过
-
-**命中条件**：代码中存在多个可调参数，且未使用 autotune
-
-**参考文档**：`references/autotune.md`
-
----
-
-### 优化点 13：消除冗余的边界运算
-
-**适用条件**：代码中存在 `tl.load(..., mask=m, other=d)` 加载数据后，后续纯算术运算链上又出现 `tl.where(m, ..., d)`、`* mask`、`+ 0`、`* 1` 等冗余边界保护运算
-
-**典型代码特征**：
-```python
-# 特征 1：tl.where 二次归零
-x = tl.load(ptr + idx, mask=m, other=0.0)
-x_sq = x * x
-x_sq = tl.where(m, x_sq, 0.0)  # 冗余：load 已保证边界为 0
-
-# 特征 2：乘法模拟 mask
-a = tl.load(ptr_a + idx, mask=m, other=0.0)
-b = tl.load(ptr_b + idx, mask=m, other=0.0)
-x = (a + b) * m.to(tl.float32)  # 冗余：边界处 a+b 已是 0
-```
-
-**判断逻辑**：
-- 检查是否存在 `tl.load(..., mask=m, other=d)` 或 `tl.full(d)` 作为数据源
-- 检查后续运算链是否为纯算术运算（`+ - * ** .to() exp abs max min sum` 等），不包括 `/ //`、store、控制流
-- 检查是否存在以下冗余运算：
-  - `tl.where(m, expr, d)`，且 `expr` 在 `m=False` 处的 KVR（已知值区域）可推导为 `d`
-  - `expr + 0.0`、`expr - 0.0`、`expr * 1.0`、`expr ** 1`、`-(-expr)` 等代数恒等式
-  - `tl.maximum(expr, d)` / `tl.minimum(expr, d)` / `tl.abs(expr)`，且 `expr` 已满足相应边界条件
-- 如果存在以上任一情况 → 涉及
-- 如果所有边界保护都是必要的（如运算链含除法、不同 mask、未受保护的 load） → 不涉及，跳过
-
-**命中条件**：代码中存在由 KVR（Known-Value Region）数据流分析可证的冗余边界保护运算
-
-**参考文档**：`references/redundant_boundary_operation.md`
-
----
-
-## 优化流程
-```
-1. 按顺序检查优化点 1 → 2 → 3 → ... → 13
-2. 对于当前优化点，先判断是否命中（代码特征满足 + 适用条件成立）：
-   - 未命中 → 跳过，检查下一优化点
-   - 命中 → 参考对应文档，应用优化策略
-3. 应用优化后，必须加载 references/checklist.md 检查代码规范
-4. 如果代码规范不满足 → 修改代码直到满足规范
-5. 代码规范满足后 → 返回优化后的代码，回到1继续检查优化点
-```
-
-**重要约束**：
-- ⚠️ **只能使用本 skill 规定的优化方式，禁止使用任何超出本 skill 之外的优化方式**
-- ⚠️ **必须先命中优化点的「命中条件」，才能加载参考文档；未命中则跳过**
-- 一次优化迭代只能使用一个优化点，可以有多轮优化，示例：
-```
-  第一轮：检查 1→2→3→...，命中优化点 X，应用后验证
-  第二轮：检查 1→2→...，命中优化点 Y，应用后验证
-  第三轮：检查 1→2→...，命中优化点 Z，应用后验证
-  ...
-  直到所有优化点都不命中
-```
-- 一次只能参考一个文档
+### 关键约束
+
+- ⚠️ **只能使用本 skill 规定的优化方式，禁止使用任何超出本 skill 之外的优化方式**。
+- ⚠️ **必须先命中优化点的「命中条件」，才能加载参考文档；未命中则跳过**。
+- ⚠️ **一次优化迭代只能使用一个优化点**。可以有多个迭代轮次：
+  - 第一轮：检查 `1→2→3→...`，命中优化点 X，应用并回到 1 继续
+  - 第二轮：检查 `1→2→...`，命中优化点 Y，应用并回到 1 继续
+  - 第三轮：检查 `1→2→...`，命中优化点 Z，应用并回到 1 继续
+  - ...
+  - 直到所有优化点都不命中，本轮主流程结束。
+- ⚠️ **一次只能参考一个文档**；参考文档仅用于当前命中优化点的子流程，完成后立即返回主流程。
 
 ## 优化验证规则
 
@@ -512,26 +166,50 @@ x = (a + b) * m.to(tl.float32)  # 冗余：边界处 a+b 已是 0
 
 ## 参考资料索引
 
-| 文档类型 | 文档路径 |
-|----------|----------|
-| 入参静态化优化 | `references/constexpr_parameters.md` |
-| Tiling 优化 | `references/tiling_optimization.md` |
-| 分核优化 | `references/vector_core_partition.md` |
-| 离散访存优化 | `references/discrete_memory_access.md` |
-| Scalar 转 Vector 优化 | `references/scalar_to_vector.md` |
-| 避免向量API标量降级 | `references/avoid_scalar_lowering.md` |
-| Pass 合并优化 | `references/pass-merge.md` |
-| 维度合并优化 | `references/dimension-merge.md` |
-| Libdevice 函数使用 | `references/libdevice-usage.md` |
-| 循环不变量外提 | `references/loop-invariant-hoisting.md` |
-| Load 指令重排序 | `references/load-order.md` |
-| Autotune 自动调优 | `references/autotune.md` |
-| 消除冗余的边界运算 | `references/redundant_boundary_operation.md` |
-| 代码规范检查 | `references/checklist.md` |
+| 分类 | 文档路径 | 说明 |
+|------|----------|------|
+| 入参静态化优化 | `references/constexpr_parameters.md` | 将固定参数声明为 `tl.constexpr` |
+| Tiling 优化 | `references/tiling_optimization.md` | 连续轴向量化 |
+| 分核优化 | `references/vector_core_partition.md` | Grid 与核数匹配、多核分区 |
+| 离散访存优化 | `references/discrete_memory_access.md` | gather/scatter 与随机索引访存 |
+| Scalar 转 Vector 优化 | `references/scalar_to_vector.md` | 标量操作向量化 |
+| 避免向量 API 标量降级 | `references/avoid_scalar_lowering.md` | i64、比较、扩展乘法等降级规避 |
+| Pass 消除合并优化 | `references/pass-merge.md` | 减少遍历、循环消除 |
+| 维度合并优化 | `references/dimension-merge.md` | 连续维度合并 |
+| Libdevice 函数使用 | `references/libdevice-usage.md` | 使用 libdevice 替代手写数学函数 |
+| 循环不变量外提 | `references/loop-invariant-hoisting.md` | 嵌套循环内层 load 外提 |
+| Load 指令重排序 | `references/load-order.md` | 循环内 load/store 重排 |
+| Grid 形状与多路径特化 | `references/grid-dispatch-specialization.md` | 动态 dispatch 选择 kernel 路径 |
+| Autotune 自动调优 | `references/autotune.md` | 自动调参 |
+| 混合策略自动选择 | `references/mixed_strategy.md` | 按 shape/dtype 选择策略 |
+| 维度合并与大 BLOCK 累加 | `references/operators/dimension-merge-large-block.md` | 归一化算子专用 |
+| 连续拷贝聚合优化 | `references/operators/continuous-copy-aggregation.md` | Split/Chunk/Slice/Pad 等拷贝型算子 |
+| 消除冗余的边界运算 | `references/redundant_boundary_operation.md` | KVR 分析去冗余 |
+| Kernel 分裂优化 | `references/kernel_splitting.md` | 多 Case 性能不达标时分裂 |
+| Cube/MTE3 分阶段批量解耦优化 | `references/cube-mte3-decoupling.md` | Cube 计算与 MTE3 写回分阶段，归约维 UB 累加批量 atomic |
+| Host 侧张量维度拼接优化 | `references/host-tensor-concat.md` | 复合点积连续维度分段拼接为单 dot |
+| Workspace 物化解耦优化 | `references/workspace-decoupling.md` | 物化共享中间量解耦冲突循环顺序 |
+| Latency-Bound 循环维度 Tile 合并 | `references/latency-bound-tile-merge.md` | latency-bound 下外层循环维度并入 dot M 维减调用数 |
+| Ascend Interpolate 优化 | `references/ascend-interpolate-optimization.md` | Interpolate/upsample 算子专用 |
+| Ascend Pooling 优化 | `references/ascend-pooling-optimization.md` | Pooling 算子专用 |
+| 代码规范检查 | `references/checklist.md` | 优化后必须通过的规范 |
+| Block Size Scaling | `references/block_size_scaling.md` | 最终 block size 调优 |
+| 算子特定经验 | `references/operators/adain.md` | AdaIN Backward 优化经验 |
+| 算子特定经验 | `references/operators/swiglu-quant.md` | SwiGLU 量化算子经验 |
+| 算子特定经验 | `references/operators/permute-layout-transform.md` | Permute/Transpose/reshape-as-copy 布局变换算子优化 |
+| 通用辅助 | `references/operators/general-insights.md` | Triton-Ascend 通用优化洞察 |
+| 通用辅助 | `references/operators/workflow-and-debugging.md` | 验证与调试工作流 |
 
-### 最终步骤：Block Size Scaling
 
-在所有上述指令级优化策略全部应用完毕后，**必须加载** `references/block_size_scaling.md`，执行 Block Size Scaling 作为最终优化步骤。
+## 最终步骤
+
+### Block Size Scaling
+
+在所有指令级优化策略应用完毕后，**必须加载** `references/block_size_scaling.md`，执行 Block Size Scaling 作为最终优化步骤。
+
+### Kernel 分裂优化
+
+完成 Block Size Scaling 后，若任务满足多 Case 且泛用 Kernel 性能仍未达标（`total_cases > 1` 且 `speedup_vs_torch < 0.8`），**必须加载** `references/kernel_splitting.md`，执行 Kernel 分裂优化。
 
 ## 执行流程
 

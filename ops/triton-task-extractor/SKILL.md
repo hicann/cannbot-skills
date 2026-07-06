@@ -162,7 +162,7 @@ python3 <skill-path>/scripts/validate_task.py /abs/path/{op_name}.py --json
 | 自包含 | 单 case：所有依赖函数必须内联；多 case：仅允许依赖同名 `.json` |
 | 可执行 | 单 case：`Model(*get_init_inputs())(*get_inputs())` 必须直接运行；多 case：对所有 groups 都必须可运行 |
 | 确定性 | 给定相同输入，输出必须一致 |
-| 无 NaN/Inf | forward 输出不能包含 NaN 或 Inf |
+| 无 NaN/+Inf | forward 输出不能包含 NaN 或 +Inf；-Inf 允许（top-k/top-p 掩码取值） |
 | 禁止重写 | 原始函数可运行就直接复用，一行都不改；多 case 模式下源 `.py` 整体原样透传 |
 | 返回一致 | 返回类型/形状必须与原始实现一致 |
 | 合理输入 | get_inputs 应提供合理大小的输入（不能过小或过大） |

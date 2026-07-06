@@ -55,6 +55,7 @@ Phase 6: 会话导出          (session.jsonl + session.md)
 
 **优先级 1：标准算子任务（Mode A）**
 当用户**同时提供** PyTorch 标杆实现和 GPU Triton kernel 代码时，**必须走 Mode A**：
+
 - PyTorch 标杆作为 `Model` 进行精度验证（更可靠）
 - GPU Triton kernel 作为**参考实现**，附加传入 Phase 2（sketch 设计）和 Phase 3（代码生成），辅助理解已有算法结构和 Triton API 用法，加速 Ascend 适配
 - 若同时提供了 `gpu_perf.csv`，在报告中额外输出 Ascend/GPU 延迟对比
@@ -63,6 +64,7 @@ Phase 6: 会话导出          (session.jsonl + session.md)
 
 **优先级 2：GPU Kernel 输入模式（Mode B）**
 当用户仅提供 GPU Triton kernel（无 PyTorch 标杆）且满足以下任一条件时进入：
+
 1. 文件路径含 `GPU Kernel`等类似关键词
 2. 文件内容包含 `@triton.jit`（即这是一个 GPU Triton kernel，而非 PyTorch Model）
 3. 用户显式提供了 `gpu_perf_csv` 或 GPU 的`pt_file` 路径
@@ -71,6 +73,7 @@ Phase 6: 会话导出          (session.jsonl + session.md)
 普通 PyTorch 实现文件，无 GPU kernel 相关特征时，走标准 Mode A 流程。
 
 **路径推导规则**（必须通过 bash 工具探测确认）：
+
 - `op_name` = 描述文件名去掉 `.py` 后缀
 - `pt_file` 推导：
   - 若用户显式提供，直接使用
@@ -88,6 +91,7 @@ ${pwd}/triton_ascend_output/op_{op_index}_{op_name}_{YYYYMMDD_HHMM}_{4位随机�
 ```
 
 ⚠️ 时间戳和随机数**必须**通过 bash 工具获取：
+
 ```bash
 python3 -c "import datetime,random; ts=datetime.datetime.now().strftime('%Y%m%d_%H%M'); rid=random.randint(1000,9999); print(f'{ts}_{rid}')"
 ```
@@ -115,6 +119,7 @@ python3 -c "import datetime,random; ts=datetime.datetime.now().strftime('%Y%m%d_
 - **严禁**将多 case 源裁剪为单 case 任务文件（会丢失 N-1 个 shape 的评测结果）
 
 **通用要求**：
+
 - 所有任务文件必须通过 `validate_task.py` 检查（多 case 模式下需遍历全部 groups 通过）
 - 下游 `verify.py` / `benchmark.py` 已内建分支判断（优先 `get_input_groups`、回落 `get_inputs`），无需在任务文件追加兼容层
 
@@ -149,19 +154,40 @@ python3 -c "import datetime,random; ts=datetime.datetime.now().strftime('%Y%m%d_
 
 ## Phase 2: 算法设计
 
-调用 `triton-op-designer` skill，设计算法草图。
+本阶段按 `Step 1` → `Step 2`→ `Step 3` 顺序执行，**严禁跳过 Step 1 直接进入 Step 2**。
 
-**传入**：`op_name`、`task_desc`（任务文件完整内容）、`arch`、`user_requirements`（如有）、`gpu_kernel_ref`（优先级 1 场景下用户提供的 GPU Triton kernel 源码，如有）。
+### Step 1：前置检查（先执行，产出 precheck.json）
+
+1. 检查 `.claude/template/{category}.md` 是否存在当前算子的 template 文档。**无论是否存在**，都必须产出 `{工作目录}/precheck.json`，记录 `category`、`template_path`、`template_exists`、`layer1_constraints_loaded`（存在时逐条原文摘录，不得为空）、`loaded_via`（只允许 `explicit_path`，**禁止自动发现**）。
+2. 若该文件存在，`precheck.json` 中记录的 Layer 1 约束视为本次草图设计的**硬性边界**；若不存在，标记 `new_category` 并在草图通过后新建该文件回填约束。
+
+**门禁**：`precheck.json` 未产出或 `loaded_via≠explicit_path` 时，**禁止进入 Step 2**。
+
+### Step 2：调用 designer skill 设计草图（后执行）
+
+确认 Step 1 门禁通过后，调用 `triton-op-designer` skill 设计算法草图。
+
+**传入**：`op_name`、`task_desc`（任务文件完整内容）、`arch`、`user_requirements`（如有）、`gpu_kernel_ref`（优先级 1 场景下用户提供的 GPU Triton kernel 源码，如有）、`template_path`（显式路径，必传）。
 
 **产出**：`{工作目录}/sketch.txt`。
 
+### Step 3：Layer 1 合规检查门（强制）
+
+- sketch 产出后，Agent **必须**读取 `precheck.json` 中已锁定的 Layer 1 约束，逐条核对 `sketch.txt` 是否兼容（`new_category` 时跳过核对）。
+- 若发现冲突（如 Layer 1 禁止单 kernel 展平但草图设计为 flat-kernel；Layer 1 要求逐维度处理但草图无维度循环等），**视为 A 类错误**，必须：
+  1. 不进入 Phase 3
+  2. 将冲突点作为 `conductor_suggestion` 反馈给 `triton-op-designer`
+  3. 重新执行 Step 1 与 Step 2，直到草图与 Layer 1 兼容
+- 该检查门最多重试 2 次，若仍无法通过，终止任务并报告"草图架构与历史 Layer 1 约束持续冲突"。
+
 仅执行一次，后续 Phase 3 迭代不再重新设计草图。
+
 
 ---
 
 ## Phase 3: 代码生成与验证（迭代循环）
 
-当前会话自身维护迭代状态，编排 "生成 → 验证 → Conductor 分析" 的循环。
+当前会话自身维护迭代状态，编排 **生成 → 验证 → Conductor 分析** 的循环。
 
 ### 状态变量
 
@@ -178,159 +204,211 @@ conductor_suggestion = ""
 
 ```
 while iteration < max_iterations:
-
-    ── 3.1 代码生成 ──────────────────────────────────
-    调用 triton-op-coding skill
-
-    首次 (iteration == 0):
-      传入: op_name, task_desc, arch, sketch, user_requirements, gpu_kernel_ref（如有）
-    重试 (iteration > 0):
-      传入: 上述 + previous_code + verifier_error + conductor_suggestion
-
-    产物 → {工作目录}/output/iter_{iteration}/generated_code.py
-
-    ── 3.2 AST 预检查 ────────────────────────────────
-    执行 validate_triton_impl.py 检测 PyTorch 退化
-
-    退化 (exit code != 0):
-      verifier_error = "A-PyTorchFallback-Type{N}: ..."
-      → 跳到 3.4 Conductor
-
-    通过 (exit code == 0):
-      → 继续 3.3
-
-    ── 3.3 功能验证 ──────────────────────────────────
-    调用 triton-op-verifier skill (verify.py)
-
-    在 {工作目录}/output/iter_{iteration}/verify/ 下创建:
-      - {op_name}_torch.py               (来自任务文件)
-      - {op_name}_triton_ascend_impl.py   (来自生成代码)
-
-    **多 shape 全量执行**：verify.py 会为每个 shape 独立 try/except，
-    全部跑完后落盘 verify_result.json（位于 verify_dir 下），包含：
-      - total_cases / passed_cases / failed_cases
-      - failures: 只列失败用例 [{case_idx, input_desc, error_type, error_msg(截断2000)}]
-    退出码：passed_cases == total_cases → 0；否则 → 1（策略 A：严格）。
-
-    **判定来源（强制）**：当前会话必须打开 verify_result.json 读取数值字段
-    `passed_cases` 和 `total_cases` 做相等比较，**禁止**仅依赖 console 输出
-    文字、退出码或日志片段自行推断。多 shape 场景下"大部分通过"不等于通过。
-
-    验证通过 (verify_result.json 中 passed_cases == total_cases 且 total_cases > 0):
-      复制 iter_{iteration}/generated_code.py → {工作目录}/output/generated_code.py
-      记录 phase3_last_iter = iteration  # 供 Phase 4 复用基线结果
-      → 跳到 3.5 性能测试
-
-    验证失败 (passed_cases < total_cases 或 total_cases == 0 或 exit 非 0):
-      删除 {工作目录}/output/generated_code.py（如存在）
-      从 verify_result.json 读取 **全部 failures**，汇总为 verifier_error
-      → 跳到 3.4 Conductor（Conductor 收到所有失败 shape 的错误清单，不只是第一个）
-
-    **GPU Kernel 模式下的特殊处理**：
-    - 若 `Model` 为首选方案（直接返回 `gpu_output`），`verify.py` 的精度比对天然通过，但 `framework` 延迟不具备实际意义，应在报告中明确标注。
-    - 若 `Model` 为兜底方案（手写的 PyTorch 参考实现），正常走 `verify.py` 的精度比对流程。
-
-    ── 3.4 Conductor 分析与决策 ──────────────────────
-    (当前会话自身推理，非 Skill 调用)
-
-    错误分类:
-      A 类 — 代码逻辑/算法错误 (可修复)
-        含 A-PyTorchFallback-Type1/2/3 子类型
-      B 类 — 环境/基础设施错误 (不可修复)
-      C 类 — 重复失败: 同一 A 类子类型连续 ≥ 3 次
-
-    决策:
-      B 类 → 终止，任务失败
-      C 类 → 终止，任务失败
-      A 类 且 iteration < max_iterations:
-        → 生成 conductor_suggestion
-        → history_attempts.append(本轮记录)
-        → 保存日志到 iter_{iteration}/log.md
-        → iteration++
-        → continue
-
-    ── 3.5 性能测试 ──────────────────────────────────
-    **前置断言（强制）**：进入本步骤前重新读取 verify_result.json，再次确认
-    `passed_cases == total_cases > 0`。任何不符立即返回 3.4，不得调用 benchmark.py。
-
-    **L1 兜底**：benchmark.py 默认开启 verify 闸门，若当前会话误判越过前置断言，
-    benchmark.py 会以 **exit 2** 拒绝运行（stderr 打印 verify_json 路径 + passed/total
-    + failures 摘要）。处理方式：
-      - 视为等价于 3.3 verify 失败
-      - 重新读 iter_{iteration}/verify/verify_result.json 取 failures 汇总成 verifier_error
-      - 在 iter_{iteration}/log.md 标注 "L1 兜底触发：当前会话越过 3.3 闸门"
-      - 删除 {工作目录}/output/generated_code.py（如存在）
-      - → 跳到 3.4 Conductor
-
-    调用 triton-op-verifier skill (benchmark.py)
-
-    **GPU Kernel 模式**：需附加 `--skip_framework --framework_latency_ms <gpu_reference_ms>`，其中 `gpu_reference_ms` 由 `gpu_perf.csv` 中的 `Duration(us)` 转换而来（除以 1000）。避免对无意义的预存 GPU 输出 Model 进行 profiling。
-
-    产物 → {工作目录}/output/iter_{iteration}/perf_result.json
-    复制 → {工作目录}/output/perf_result.json
-
-    **多 shape 全量执行 + 几何平均聚合**：
-    - benchmark.py 为每个 shape 独立 try/except，全部跑完后写 JSON；exit 恒为 0（除非脚本崩溃）。
-    - 顶层汇总字段：
-      - `total_cases` / `passed_cases` / `failed_cases`
-      - `nan_indices` / `inf_indices` / `zero_indices` / `negative_indices` / `none_indices`：异常 `s_i` 的 case_idx 列表（异常 shape 仍计入 `passed_cases`，但不进入几何平均）
-      - `framework.avg_latency_ms` / `implementation.avg_latency_ms`（各 shape 延时的算术平均，保留兼容语义）
-      - `speedup_vs_torch` = **几何平均** = `(∏ s_i)^(1/n)`（仅对 status=="pass" 且 `s_i` 为有限正数的 shape）；全部异常时为 `null`
-    - 明细字段 `per_shape_results[]` 保留全量（含失败用例），每项带 `status: "pass"|"fail"`、
-      通过时 `framework/implementation/speedup_vs_torch`（异常时为 null），失败时 `error_type/error_msg`。
-    - 报告输出时显示：顶部汇总（含通过率+几何平均加速比+异常索引）+ 每个 shape 明细表格（含 status 列）。
-    - 策略 A 下 Phase 3.5 由于前置条件保证 passed_cases == total_cases，因此 benchmark 不会混入失败 shape。
-
-    记录 perf_data（包含汇总指标和 shape 明细），break
-
-⚠️ Phase 3 验证通过后，**必须**进入 Phase 4 执行性能优化，**严禁**跳过。
-
-达到 max_iterations → 任务失败，输出失败报告，结束
+    3.1 代码生成
+    3.2 AST 预检查
+    3.3 功能验证
+    3.4 Conductor 分析与决策
+    3.5 性能测试（基线）
 ```
+
+---
+
+### 3.1 代码生成
+
+**调用 Skill**：`triton-op-coding`
+
+**输入参数**：
+
+- 首次 (`iteration == 0`)：`op_name`, `task_desc`, `arch`, `sketch`, `user_requirements`, gpu_kernel_ref（如有）
+- 重试 (`iteration > 0`)：上述 + `previous_code` + `verifier_error` + `conductor_suggestion`
+
+**产物**：
+
+- `{工作目录}/output/iter_{iteration}/generated_code.py`
+
+**后续动作**：
+
+- 无论生成是否成功，都进入 **3.2 AST 预检查**。
+
+---
+
+### 3.2 AST 预检查
+
+**执行工具**：`validate_triton_impl.py`
+
+**目的**：检测生成代码是否存在 PyTorch 退化（forward 中未调用 Triton kernel 或仍用 PyTorch 计算）。
+
+**分支**：
+
+- **退化** (`exit code != 0`):
+  - 设置 `verifier_error = "A-PyTorchFallback-Type{N}: ..."`
+  - → 跳到 **3.4 Conductor**
+- **通过** (`exit code == 0`):
+  - → 继续 **3.3 功能验证**
+
+---
+
+### 3.3 功能验证
+
+**调用 Skill**：`triton-op-verifier` (`verify.py`)
+
+**产物目录**：`{工作目录}/output/iter_{iteration}/verify/`
+
+- `{op_name}_torch.py`（来自任务文件）
+- `{op_name}_triton_ascend_impl.py`（来自生成代码）
+- `verify_result.json`
+
+**多 shape 全量执行**：
+
+- `verify.py` 为每个 shape 独立 `try/except`。
+- 全部跑完后落盘 `verify_result.json`，包含：
+  - `total_cases` / `passed_cases` / `failed_cases`
+  - `failures`: 失败用例清单 `[{case_idx, input_desc, error_type, error_msg(截断2000)}]`
+- 退出码：`passed_cases == total_cases` → 0；否则 → 1（策略 A：严格）。
+
+**判定来源（强制）**：
+
+- 当前会话必须打开 `verify_result.json`，读取数值字段 `passed_cases` 和 `total_cases` 做相等比较。
+- **禁止**仅依赖 console 输出文字、退出码或日志片段推断。多 shape 场景下"大部分通过"不等于通过。
+
+**分支**：
+
+- **验证通过** (`passed_cases == total_cases > 0`):
+  - 复制 `iter_{iteration}/generated_code.py` → `{工作目录}/output/generated_code.py`
+  - 记录 `phase3_last_iter = iteration`（供 Phase 4 复用基线结果）
+  - → 跳到 **3.5 性能测试**
+- **验证失败** (`passed_cases < total_cases` 或 `total_cases == 0` 或 `exit != 0`):
+  - 删除 `{工作目录}/output/generated_code.py`（如存在）
+  - 从 `verify_result.json` 读取 **全部 failures**，汇总为 `verifier_error`
+  - → 跳到 **3.4 Conductor**（Conductor 收到所有失败 shape 的错误清单，不只是第一个）
+
+**GPU Kernel 模式特殊处理**：
+
+- 若 `Model` 为首选方案（直接返回 `gpu_output`），`verify.py` 精度比对天然通过，但 `framework` 延迟不具备实际意义，应在报告中明确标注。
+- 若 `Model` 为兜底方案（手写 PyTorch 参考实现），正常走 `verify.py` 精度比对流程。
+
+---
+
+### 3.4 Conductor 分析与决策
+
+**执行者**：当前会话自身推理（非 Skill 调用）
+
+**错误分类**：
+
+- **A 类**：代码逻辑/算法错误（可修复）
+  - 含 A-PyTorchFallback-Type1/2/3 子类型
+- **B 类**：环境/基础设施错误（不可修复）
+- **C 类**：重复失败，同一 A 类子类型连续 ≥ 3 次
+
+**决策**：
+
+- **B 类** → 终止，任务失败
+- **C 类** → 终止，任务失败
+- **A 类 且 `iteration < max_iterations`**:
+  - 生成 `conductor_suggestion`
+  - `history_attempts.append(本轮记录)`
+  - 保存日志到 `iter_{iteration}/log.md`
+  - `iteration++`
+  - → 回到 **3.1 代码生成**
+
+---
+
+### 3.5 性能测试（基线）
+
+**前置断言（强制）**：
+
+- 进入本步骤前重新读取 `verify_result.json`，再次确认 `passed_cases == total_cases > 0`。
+- 任何不符立即返回 **3.4**，不得调用 `benchmark.py`。
+
+**L1 兜底**：
+
+- `benchmark.py` 默认开启 verify 闸门。若当前会话误判越过前置断言，`benchmark.py` 会以 **exit 2** 拒绝运行（stderr 打印 verify_json 路径 + passed/total + failures 摘要）。
+- **处理方式**：
+  - 视为等价于 3.3 verify 失败
+  - 重新读 `iter_{iteration}/verify/verify_result.json` 取 failures 汇总成 `verifier_error`
+  - 在 `iter_{iteration}/log.md` 标注 "L1 兜底触发：当前会话越过 3.3 闸门"
+  - 删除 `{工作目录}/output/generated_code.py`（如存在）
+  - → 跳到 **3.4 Conductor**
+
+**调用 Skill**：`triton-op-verifier` (`benchmark.py`)
+
+**GPU Kernel 模式**：
+
+- 需附加 `--skip_framework --framework_latency_ms <gpu_reference_ms>`，其中 `gpu_reference_ms` 由 `gpu_perf.csv` 中的 `Duration(us)` 转换而来（除以 1000）。避免对无意义的预存 GPU 输出 Model 进行 profiling。
+
+**产物**：
+
+- `{工作目录}/output/iter_{iteration}/perf_result.json`
+- 复制 → `{工作目录}/output/perf_result.json`
+
+**多 shape 全量执行 + 几何平均聚合**：
+
+- `benchmark.py` 为每个 shape 独立 `try/except`，全部跑完后写 JSON；exit 恒为 0（除非脚本崩溃）。
+- 顶层汇总字段：
+  - `total_cases` / `passed_cases` / `failed_cases`
+  - `nan_indices` / `inf_indices` / `zero_indices` / `negative_indices` / `none_indices`：异常 `s_i` 的 case_idx 列表（异常 shape 仍计入 `passed_cases`，但不进入几何平均）
+  - `framework.avg_latency_ms` / `implementation.avg_latency_ms`（各 shape 延时的算术平均）
+  - `speedup_vs_torch` = **几何平均** = `(∏ s_i)^(1/n)`（仅对 `status=="pass"` 且 `s_i` 为有限正数的 shape）；全部异常时为 `null`
+- 明细字段 `per_shape_results[]` 保留全量（含失败用例），每项带 `status: "pass"|"fail"`、通过时 `framework/implementation/speedup_vs_torch`、失败时 `error_type/error_msg`。
+- 报告输出时显示：顶部汇总（通过率+几何平均加速比+异常索引）+ 每个 shape 明细表格（含 status 列）。
+- 策略 A 下 3.5 由于前置条件保证 `passed_cases == total_cases`，benchmark 不会混入失败 shape。
+
+**记录**：
+
+- 记录 `perf_data`（包含汇总指标和 shape 明细），然后 `break`。
+
+⚠️ **Phase 3 验证通过后，必须进入 Phase 4 执行性能优化，严禁跳过。**
+
+达到 `max_iterations` → 任务失败，输出失败报告，结束。
 
 ### Conductor 修复建议格式
 
 ```
+
 错误分析：
+
 - 类型：{A/B/C}（{子类型描述}）
 - 位置：{错误代码位置}
 - 具体错误：{错误详情}
 
 修复建议：
+
 1. {具体修改方向}
 2. {具体修改方向}
 
 历史提醒：
+
 - 第 N 轮曾因 {问题} 失败，避免重复
+
 ```
 
 ### PyTorch 退化子类型
 
-| 子类型 | 含义 | 修复建议 |
-|--------|------|---------|
-| Type1 | 完全无 @triton.jit kernel | 必须创建 @triton.jit kernel，使用 tl.load/tl.store 实现核心计算 |
-| Type2 | 有 kernel 定义但 forward() 未调用 | 在 forward() 中通过 kernel[grid](...) 启动 kernel |
-| Type3 | forward() 调用了 kernel 但部分计算仍用 PyTorch | 将禁止的 PyTorch 计算移入 kernel |
+| 子类型 | 含义                                           | 修复建议                                                        |
+| ------ | ---------------------------------------------- | --------------------------------------------------------------- |
+| Type1  | 完全无 @triton.jit kernel                      | 必须创建 @triton.jit kernel，使用 tl.load/tl.store 实现核心计算 |
+| Type2  | 有 kernel 定义但 forward() 未调用              | 在 forward() 中通过 kernel[grid](...) 启动 kernel               |
+| Type3  | forward() 调用了 kernel 但部分计算仍用 PyTorch | 将禁止的 PyTorch 计算移入 kernel                                |
 
 ### A 类错误详细分类
 
-| 特征 | 示例 |
-|------|------|
-| 输出不一致 | 数值精度差异、算法实现与参考不同 |
-| 语法/类型错误 | SyntaxError、TypeError、IndentationError |
-| 形状不匹配 | Tensor shape mismatch、维度错误 |
-| Kernel 参数错误 | BLOCK_SIZE 不合理、grid 配置错误 |
-| DSL API 使用错误 | Triton API 参数错误、不支持的操作 |
-| 退化成 PyTorch | 无 @triton.jit kernel，直接调用 PyTorch 算子 |
+| 特征             | 示例                                         |
+| ---------------- | -------------------------------------------- |
+| 输出不一致       | 数值精度差异、算法实现与参考不同             |
+| 语法/类型错误    | SyntaxError、TypeError、IndentationError     |
+| 形状不匹配       | Tensor shape mismatch、维度错误              |
+| Kernel 参数错误  | BLOCK_SIZE 不合理、grid 配置错误             |
+| DSL API 使用错误 | Triton API 参数错误、不支持的操作            |
+| 退化成 PyTorch   | 无 @triton.jit kernel，直接调用 PyTorch 算子 |
 
 ### B 类错误详细分类
 
-| 特征 | 示例 |
-|------|------|
-| 文件路径错误 | FileNotFoundError |
-| 设备不可用 | NPU out of memory、device not found |
-| 依赖缺失 | ModuleNotFoundError（非代码导致） |
-| 超时 | Timeout、进程被杀死 |
+| 特征         | 示例                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| 文件路径错误 | FileNotFoundError                                                                               |
+| 设备不可用   | NPU out of memory、device not found                                                             |
+| 依赖缺失     | ModuleNotFoundError（非代码导致）                                                               |
+| 超时         | Timeout、进程被杀死 → **必须降低 --repeats 重试（50→20→10→5），不可不经调整直接放弃或编造数据** |
 
 ---
 
@@ -341,15 +419,33 @@ while iteration < max_iterations:
 ### 状态变量
 
 ```
+
 opt_iteration = 0
+
+# max_opt_iterations 动态计算指令：
+
+# Agent 必须在 Phase 4 开始时执行以下步骤：
+
+# 1. 使用 Read 工具读取 .claude/skills/triton-latency-optimizer/SKILL.md
+
+# 2. 统计文本中 "### 优化点" 出现的次数（即为优化点个数）
+
+# 3. 计算 max_opt_iterations = 优化点个数 + 1
+
+# 4. 若读取失败、文件不存在或统计失败，使用默认值 max_opt_iterations = 20
+
+max_opt_iterations = <由 Agent 按上述指令运行时计算>
+target_speedup = 0.8 # 目标几何平均加速比⚠️重要指标
 best_code = ""
 best_speedup = 0.0
 baseline_code = Phase 3 产出的 generated_code.py
-phase3_last_iter = Phase 3 最后一次验证通过的 iter 编号  # 见 3.3 的记录
+phase3_last_iter = Phase 3 最后一次验证通过的 iter 编号 # 见 3.3 的记录
 improvement_made = false
+target_reached = false # 是否达到目标加速比
+
 ```
 
-### Phase 4 入口硬断言（强制）
+### 4.0 Phase 4 入口硬断言（强制）
 
 在执行 4.1 之前，必须打开 `{工作目录}/output/iter_{phase3_last_iter}/verify/verify_result.json`
 读取数值字段，确认 `passed_cases == total_cases > 0`。
@@ -358,149 +454,191 @@ improvement_made = false
 - 断言失败 → **C 类终止整个任务**。此时意味着 Phase 3 的闸门被违反但流程仍走到了
   Phase 4，这是流程级 bug，禁止继续优化也禁止退回 Phase 3（退回只会再次误判）。
   写 summary.json：
-    ```json
-    {
-      "success": false,
-      "gen_iterations": <...>,
-      "failure_phase": "phase3_gate_violation",
-      "failure_reason": "Phase 3 verify_result.json passed_cases(<x>) < total_cases(<y>)，但流程已进入 Phase 4",
-      "last_error": "<failures 列表摘要>"
-    }
-    ```
+  ```json
+  {
+    "success": false,
+    "gen_iterations": <...>,
+    "failure_phase": "phase3_gate_violation",
+    "failure_reason": "Phase 3 verify_result.json passed_cases(<x>) < total_cases(<y>)，但流程已进入 Phase 4",
+    "last_error": "<failures 列表摘要>"
+  }
+  ```
 
 ### 迭代循环
 
 ```
-while True:
 
-    ── 4.1 代码分析 + 优化策略 + 代码重写 ────────────
-    调用 triton-latency-optimizer skill
+while opt_iteration < max_opt_iterations:
+4.1 代码分析 + 优化策略 + 代码重写
+4.2 精度验证（基线复用 + 优化侧单次执行）
+4.3 性能测试（基线复用 + 优化侧单次执行）
+4.4 结果判定
+4.5 分析决策（验证失败时）
+4.6 终局判定 target_speedup = 0.8 # 目标几何平均加速比⚠️重要指标
 
-    triton-latency-optimizer 报告无更多优化点:
-      → 终止优化，进入 4.6 终局判定
-
-    根据优化点进行代码优化重写
-    产物 → {工作目录}/output/opt_iter_{opt_iteration}/optimized_code.py
-
-    checklist 检查:
-      读取triton-latency-optimizer skill 中的references\checklist.md，获取代码规范 checklist
-      验证 optimized_code.py 是否满足所有代码规范
-      不满足 → 修改代码直至满足规范 → 重新检查
-      满足 → 进入 4.2 双重验证
-    
-    复制 → {工作目录}/output/optimized_code.py
-
-    ── 4.2 精度验证（基线复用 + 优化侧单次执行）──────
-    调用 triton-op-verifier skill 执行一次精度比对
-
-    在 {工作目录}/output/opt_iter_{opt_iteration}/verify/ 下创建:
-      - {op_name}_torch.py              (PyTorch 参考)
-      - {op_name}_triton_baseline.py    (Phase 3 基线，保留以便复盘)
-      - {op_name}_triton_optimized.py   (优化后)
-
-    基线侧：直接复制 Phase 3 iter_{phase3_last_iter} 的校验结果，不再重跑
-      cp {工作目录}/output/iter_{phase3_last_iter}/verify/verify_result.json \
-         {工作目录}/output/opt_iter_{opt_iteration}/verify/verify_result_baseline.json
-
-      ⚠️ 基线代码等于 Phase 3 产出的 generated_code.py，Phase 3.3 已经严格校验
-      过 passed == total，无需在 Phase 4 重复执行 verify.py。
-      verify_result_baseline.json 内容中不含 triton 实现模块名字段，原样复制即可。
-
-    优化侧：verify.py --triton_impl_name triton_optimized → verify_result_optimized.json
-
-    **策略 A 判定**：
-      baseline 视为已通过（来自 Phase 3，已确认 passed == total）
-      optimized 要求 `passed_cases == total_cases`
-      optimized 全过 → 继续 4.3
-      optimized 未全过 → 跳到 4.5（A 类，读取 verify_result_optimized.json 的 failures 供优化器分析）
-
-    ── 4.3 性能测试（基线复用 + 优化侧单次执行）──────
-    **前置断言（强制）**：进入本步骤前重新读取 verify_result_optimized.json，
-    确认 `passed_cases == total_cases > 0`。任何不符立即跳到 4.5（A 类），不得调用 benchmark.py。
-    （baseline 侧不需要校验：verify_result_baseline.json 是从 Phase 3 复制而来，
-    Phase 4 入口硬断言已确保其全过；且 baseline 的 benchmark 也不再执行。）
-
-    **L1 兜底**：benchmark.py 默认开启 verify 闸门。若当前会话误判越过断言，
-    optimized benchmark 会以 **exit 2** 拒绝（按 impl_name 查 verify_result_optimized.json）。
-    处理方式：
-      - 视为等价于 4.2 optimized verify 失败
-      - 重新读 verify_result_optimized.json 取 failures 汇总成错误信息
-      - 在 opt_iter_{opt_iteration}/log.md 标注 "L1 兜底触发：当前会话越过 4.3 断言"
-      - → 跳到 4.5（A 类）
-
-    调用 triton-op-verifier skill (benchmark.py) 一次，仅测试优化侧
-
-    基线侧：直接复制 Phase 3 iter_{phase3_last_iter} 的性能结果，不再重跑
-      cp {工作目录}/output/iter_{phase3_last_iter}/perf_result.json \
-         {工作目录}/output/opt_iter_{opt_iteration}/baseline_perf_result.json
-
-      ⚠️ 基线代码等于 Phase 3 产出的 generated_code.py，Phase 3.5 已完成过完整
-      benchmark，再跑一次只会得到等价结果并消耗时间。perf_result.json 内容中不含
-      `triton_impl_name` 字段，原样复制即可；下游判定仅依赖 `speedup_vs_torch`
-      （几何平均加速比），不关心文件名前缀。
-
-    **GPU Kernel 模式**：优化侧 benchmark 仍需附加 `--skip_framework --framework_latency_ms <gpu_reference_ms>`，其中 `gpu_reference_ms` 从 `gpu_perf.csv` 读取并转换为毫秒。非 GPU 模式保持原样。基线侧因为是复制 Phase 3 结果，天然继承 Phase 3 时的参数配置，无需额外处理。
-
-    优化侧: benchmark.py --triton_impl_name triton_optimized [--skip_framework ...]
-      → optimized_perf_result.json
-
-    **几何平均加速比判定（geomean ratio）**：
-    从 perf_result.json 读取 `speedup_vs_torch`，即各通过 shape 加速比的几何平均
-    （异常 shape 不计入）。直接对比 Phase 3 与 Phase 4 的几何平均加速比：
-
-    ```
-    baseline_speedup  = baseline_data["speedup_vs_torch"]   # Phase 3 几何平均
-    optimized_speedup = optimized_data["speedup_vs_torch"]  # Phase 4 几何平均
-    ```
-
-    策略 A 下 4.2 已保证 optimized 侧 passed == total，baseline 来自 Phase 3 同样 passed == total，
-    集合相同，可直接对比。若出现集合不一致（兼容路径），应直接判优化失败，不写入比较数值。
-    
-    ── 4.4 结果判定 ──────────────────────────────────
-    **前置检查**：
-    - 若 `opt_iter_{opt_iteration}/optimized_perf_result.json` 不存在或读取失败
-      （通常意味着 4.3 被 L1 拒绝、benchmark 未实际产出 JSON），跳过本步骤直接
-      进入 4.5（A 类分析），不得写入任何 speedup 数值。
-    - 若 `baseline_speedup` 或 `optimized_speedup` 任一为 `null`（全部 shape 异常，
-      无几何平均可算），直接判定为优化失败（拒绝优化），跳到 4.5 A 类分析。
-
-    optimized_speedup > baseline_speedup:
-      → 优化成功（几何平均加速比有提升）
-      → 更新 best_code / best_speedup
-      → improvement_made = true
-      → opt_iteration++，continue
-
-    否则（含相等）:
-      → 视为无提升，opt_iteration++，continue
-
-    ── 4.5 分析决策 (验证失败时) ─────────────────────
-    A 类 (优化引入逻辑错误) → 回退，调整策略，continue
-    B 类 (环境错误) → 终止
-    C 类 (无法继续) → 终止
-
-    opt_iteration++
-    continue
-
-    ── 4.6 终局判定 ──────────────────────────────────
-    无优化点时退出判定：
-
-    优先级 1（GPU kernel + torch 标杆同时提供）场景：
-      → 不以 speedup 是否提升为退出条件，持续迭代直到 triton-latency-optimizer 报告无更多优化点
-      → improvement_made == true → 优化成功，break，进入 Phase 5
-      → improvement_made == false → 以 Phase 3 的 generated_code.py 为最终结果，break，进入 Phase 5
-
-    其他场景：
-      improvement_made == true:
-        → 优化成功，break，进入 Phase 5
-
-      improvement_made == false:
-        → 优化失败（做完所有尝试后没有效果），break，进入 Phase 5
 ```
+
+---
+
+### 4.1 代码分析 + 优化策略 + 代码重写
+
+**调用 Skill**：`triton-latency-optimizer`
+
+**输入参数**：
+
+- `baseline_code`（或上一轮优化后的代码）
+- `opt_iteration`
+- `task_desc` / `arch` / `user_requirements`（按需传入）
+
+**产物**：
+
+- `{工作目录}/output/opt_iter_{opt_iteration}/optimized_code.py`
+
+**分支**：
+
+- **triton-latency-optimizer 报告无更多优化点**：
+  - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点：
+    - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 18）
+    - `speedup_vs_torch < target_speedup` 且 `opt_iteration < 3`：
+      要求重新扫描，重点检查当前算子类别对应的高频命中点
+      （见 `triton-latency-optimizer/SKILL.md` 的"算子类别与高频优化点"表）
+  - 上述条件均不满足 → 终止优化，进入 **4.6 终局判定**
+- **存在可尝试的优化点** → 根据优化点重写代码
+
+**Checklist 检查（强制）**：
+
+- 读取 `.claude/skills/triton-latency-optimizer/references/checklist.md`，获取代码规范
+- 验证 `optimized_code.py` 是否满足所有规范
+- 不满足 → 修改代码直至满足，然后重新检查
+- 满足 → 复制 `optimized_code.py` → `{工作目录}/output/optimized_code.py`，进入 **4.2**
+
+---
+
+### 4.2 精度验证（基线复用 + 优化侧单次执行）
+
+**调用 Skill**：`triton-op-verifier` (`verify.py`)
+
+**产物目录**：`{工作目录}/output/opt_iter_{opt_iteration}/verify/`
+
+- `{op_name}_torch.py`（PyTorch 参考）
+- `{op_name}_triton_baseline.py`（Phase 3 基线，保留以便复盘）
+- `{op_name}_triton_optimized.py`（优化后）
+
+**基线侧**：
+
+- 直接复制 Phase 3 的校验结果，不再重跑：
+  ```bash
+  cp {工作目录}/output/iter_{phase3_last_iter}/verify/verify_result.json \
+     {工作目录}/output/opt_iter_{opt_iteration}/verify/verify_result_baseline.json
+  ```
+
+````
+
+- ⚠️ 基线代码等于 Phase 3 产出的 `generated_code.py`，Phase 3.3 已严格校验 `passed == total`。
+  `verify_result_baseline.json` 原样复制即可。
+
+**优化侧**：
+
+- 运行 `verify.py --triton_impl_name triton_optimized`
+- 产物：`verify_result_optimized.json`
+
+**判定**：
+
+- **optimized 全过**（`passed_cases == total_cases > 0`）→ 进入 **4.3 性能测试**
+- **optimized 未全过** → 跳到 **4.5（A 类）**，读取 `verify_result_optimized.json` 的 `failures` 供优化器分析
+
+---
+
+### 4.3 性能测试（基线复用 + 优化侧单次执行）
+
+**前置断言（强制）**：
+
+- 进入本步骤前重新读取 `verify_result_optimized.json`，确认 `passed_cases == total_cases > 0`。
+- 任何不符立即跳到 **4.5（A 类）**，不得调用 `benchmark.py`。
+- baseline 侧无需校验：`verify_result_baseline.json` 来自 Phase 3，已在 4.0 断言中确保全过。
+
+**L1 兜底**：
+
+- `benchmark.py` 默认开启 verify 闸门。若当前会话误判越过断言，`benchmark.py` 会以 **exit 2** 拒绝。
+- **处理方式**：
+  - 视为等价于 4.2 optimized verify 失败
+  - 重新读 `verify_result_optimized.json` 取 `failures` 汇总成错误信息
+  - 在 `opt_iter_{opt_iteration}/log.md` 标注 "L1 兜底触发：当前会话越过 4.3 断言"
+  - → 跳到 **4.5（A 类）**
+
+**调用 Skill**：`triton-op-verifier` (`benchmark.py`)，仅测试优化侧
+
+**基线侧**：
+
+- 直接复制 Phase 3 的性能结果，不再重跑：
+  ```bash
+  cp {工作目录}/output/iter_{phase3_last_iter}/perf_result.json \
+     {工作目录}/output/opt_iter_{opt_iteration}/baseline_perf_result.json
+  ```
+- ⚠️ 基线代码与 Phase 3 `generated_code.py` 完全一致，已在 Phase 3.5 完成 benchmark。
+  `perf_result.json` 原样复制即可；下游判定仅依赖 `speedup_vs_torch`。
+
+  **GPU Kernel 模式**：优化侧 benchmark 仍需附加 `--skip_framework --framework_latency_ms <gpu_reference_ms>`，其中 `gpu_reference_ms` 从 `vllm_gpu_perf.csv` 读取并转换为毫秒。非 GPU 模式保持原样。基线侧因为是复制 Phase 3 结果，天然继承 Phase 3 时的参数配置，无需额外处理。
+
+**优化侧**：
+
+- 运行 `benchmark.py --triton_impl_name triton_optimized [--skip_framework ...]`
+- 产物：`optimized_perf_result.json`
+
+**几何平均加速比判定**：
+
+- 从 `perf_result.json` 读取 `speedup_vs_torch`（各通过 shape 加速比的几何平均，异常 shape 不计入）。
+- 直接对比 Phase 3 与 Phase 4 的几何平均：
+  ```
+  baseline_speedup  = baseline_data["speedup_vs_torch"]   # Phase 3 几何平均
+  optimized_speedup = optimized_data["speedup_vs_torch"]  # Phase 4 几何平均
+  ```
+- 策略 A 下 4.2 已保证 optimized 侧 `passed == total`，baseline 同样 `passed == total`，集合相同可直接对比。
+- 若出现集合不一致（兼容路径），直接判优化失败，不写入比较数值。
+
+  策略 A 下 4.2 已保证 optimized 侧 passed == total，baseline 来自 Phase 3 同样 passed == total，
+  集合相同，可直接对比。若出现集合不一致（兼容路径），应直接判优化失败，不写入比较数值。
+
+  ── 4.4 结果判定 ──────────────────────────────────
+  **前置检查**：
+  - 若 `opt_iter_{opt_iteration}/optimized_perf_result.json` 不存在或读取失败
+    （通常意味着 4.3 被 L1 拒绝、benchmark 未实际产出 JSON），跳过本步骤直接
+    进入 4.5（A 类分析），不得写入任何 speedup 数值。
+  - 若 `baseline_speedup` 或 `optimized_speedup` 任一为 `null`（全部 shape 异常，
+    无几何平均可算），直接判定为优化失败（拒绝优化），跳到 4.5 A 类分析。
+
+  optimized_speedup > baseline_speedup:
+  → 优化成功（几何平均加速比有提升）
+  → 更新 best_code / best_speedup
+  → improvement_made = true
+  → opt_iteration++，continue
+
+  否则（含相等）:
+  → 视为无提升，opt_iteration++，continue
+
+  ── 4.5 分析决策 (验证失败时) ─────────────────────
+  A 类 (优化引入逻辑错误) → 回退，调整策略，continue
+  B 类 (环境错误) → 终止
+  C 类 (无法继续) → 终止
+
+  opt_iteration++
+  continue
+
+  ── 4.6 终局判定 ──────────────────────────────────
+  无优化点时退出判定：
+
+  improvement_made == true:
+  → 优化成功，break，进入 Phase 5
+
+  improvement_made == false:
+  → 优化失败（做完所有尝试后没有效果），break，进入 Phase 5
+
+````
 
 ### Phase 4 终局处理
 
-- Phase 4 优化成功（improvement_made == true）→ 以 `optimized_code.py` 为最终结果
-- Phase 4 优化失败（improvement_made == false，做完所有尝试后没有效果）→ 以 Phase 3 的 `generated_code.py` 为最终结果
+- Phase 4 优化成功（`improvement_made == true`）→ 以 `optimized_code.py` 为最终结果
+- Phase 4 优化失败（`improvement_made == false`，做完所有尝试后没有效果）→ 以 Phase 3 的 `generated_code.py` 为最终结果
 - 两种情况都进入 Phase 5
 
 ---
@@ -515,8 +653,11 @@ while True:
 复制最终代码到 `{工作目录}/{op_name}_generated.py`。
 
 **写入 `{工作目录}/report.md`**：
+
 - 基本信息：arch、工作目录
 - 生成结果：迭代次数、最终版本来源
+- **目标加速比**：target_speedup = 0.8，是否达到（target_reached）
+- **实际最佳加速比**：best_speedup（保留 4 位小数）
 - **Shape 通过率（以 verify 为准）**：`passed_cases / total_cases` 必须从
   `output/iter_{phase3_last_iter}/verify/verify_result.json` 读取。
   ⚠️ **禁止**从 `perf_result.json` 取 passed_cases —— 后者是"benchmark exec 成功数"
@@ -537,6 +678,7 @@ while True:
 **注意**：多 Shape 场景下，`summary.json` 的 `perf_data` 应为 **汇总的平均指标**，包含 `total_cases` 和 `per_shape_results`。批量评测脚本（如 `run_benchmark_triton.sh`）会通过读取 `summary.json` 来生成 `batch_report.md`，因此必须确保多 Shape 数据正确写入，且**原有字段完整保留**。
 
 **字段取值口径（强制）**：
+
 - `perf_data.passed_cases` / `failed_cases` / `total_cases` 必须从
   **`output/iter_{phase3_last_iter}/verify/verify_result.json`** 读取（精度通过数）
 - 延时类字段（`avg_latency_ms` / `speedup_vs_torch` / `speedup_vs_baseline`）
@@ -547,12 +689,16 @@ while True:
 - ⚠️ **禁止**直接把 perf_result.json 顶层 passed_cases 复制到 summary —— perf 的 pass 仅代表 benchmark 进程未崩溃，与精度无关
 
 成功时标准格式：
+
 ```json
 {
   "success": true,
   "gen_iterations": 2,
   "opt_iterations": 1,
   "optimized": true,
+  "target_speedup": 0.8,
+  "target_reached": true,
+  "best_speedup": 0.85,
   "perf_method": "profiler",
   "skill_path": ".claude/skills/triton-op-verifier",
   "perf_data": {
@@ -568,21 +714,41 @@ while True:
     "negative_indices": [],
     "none_indices": [],
     "per_shape_results": [
-      {"case_idx": 1, "status": "pass", "shape_desc": "...", "speedup_vs_torch": 1.8200},
-      {"case_idx": 2, "status": "pass", "shape_desc": "...", "speedup_vs_torch": 2.1500},
-      {"case_idx": 3, "status": "pass", "shape_desc": "...", "speedup_vs_torch": 2.3100}
+      {
+        "case_idx": 1,
+        "status": "pass",
+        "shape_desc": "...",
+        "speedup_vs_torch": 1.82
+      },
+      {
+        "case_idx": 2,
+        "status": "pass",
+        "shape_desc": "...",
+        "speedup_vs_torch": 2.15
+      },
+      {
+        "case_idx": 3,
+        "status": "pass",
+        "shape_desc": "...",
+        "speedup_vs_torch": 2.31
+      }
     ]
   }
 }
 ```
 
 **字段说明**：
+
+- `target_speedup`: 目标几何平均加速比，固定为 0.8
+- `target_reached`: 是否达到目标加速比（optimized_speedup >= target_speedup）
+- `best_speedup`: Phase 4 历史最佳几何平均加速比
 - `speedup_vs_torch`: **几何平均**聚合 = `(∏ s_i)^(1/n)`（仅对通过且 `s_i` 为有限正数的 shape）；全部异常时为 `null`
 - `speedup_vs_baseline`: Phase 4 时 = `optimized.speedup_vs_torch / baseline.speedup_vs_torch`（两个几何平均之比）
 - `passed_cases` / `failed_cases`: 多 shape 时的通过 / 失败计数（策略 A 成功时应为 total / 0）
 - `*_indices`: 五类异常 `s_i` 的 case_idx 列表，无异常时为 `[]`
 
 **GPU Kernel 模式扩展格式**（向后兼容）：
+
 ```json
 {
   "success": true,
@@ -593,15 +759,15 @@ while True:
   "skill_path": ".claude/skills/triton-op-verifier",
   "gpu_mode": true,
   "perf_data": {
-    "avg_latency_ms": 0.4200,
-        "speedup_vs_torch": 0.3700,
+    "avg_latency_ms": 0.42,
+    "speedup_vs_torch": 0.37,
     "gpu_reference_ms": 0.002072,
     "ascend_vs_gpu_ratio": 202.7,
     "total_cases": 1,
     "per_shape_results": [
       {
         "shape": [128, 16, 128],
-    "speedup_vs_torch": 0.3700,
+        "speedup_vs_torch": 0.37,
         "gpu_reference_ms": 0.002072,
         "ascend_vs_gpu_ratio": 202.7
       }
@@ -611,6 +777,7 @@ while True:
 ```
 
 **字段说明**：
+
 - `gpu_mode`: `true` 表示本次任务源自 GPU Kernel 输入模式
 - `perf_data.gpu_reference_ms`: 从 `gpu_perf.csv` 读取的 GPU 参考延迟（毫秒）
 - `perf_data.ascend_vs_gpu_ratio`: Ascend Triton 延迟 / GPU 延迟 的倍数
@@ -618,6 +785,7 @@ while True:
 - **所有原有字段必须完整保留**，确保批量评测脚本不受破坏
 
 Phase 3 失败时：
+
 ```json
 {
   "success": false,
@@ -629,6 +797,7 @@ Phase 3 失败时：
 ```
 
 Phase 4 入口断言失败（Phase 3 闸门被违反）：
+
 ```json
 {
   "success": false,
@@ -639,16 +808,40 @@ Phase 4 入口断言失败（Phase 3 闸门被违反）：
 }
 ```
 
-Phase 4 失败时（Phase 3 成功，优化未成功）：
+Phase 4 有提升但未达目标时：
+
 ```json
 {
   "success": true,
   "gen_iterations": 2,
-  "opt_iterations": 3,
-  "optimized": false,
+  "opt_iterations": 10,
+  "optimized": true,
+  "target_speedup": 0.8,
+  "target_reached": false,
+  "best_speedup": 0.65,
+  "perf_method": "profiler",
+  "skill_path": ".claude/skills/triton-op-verifier",
   "perf_data": {
-    "avg_latency_ms": 0.8000,
-    "speedup_vs_torch": 1.5000
+    "avg_latency_ms": 0.8,
+    "speedup_vs_torch": 1.5
+  }
+}
+```
+
+Phase 4 失败时（Phase 3 成功，优化无提升）：
+
+```json
+{
+  "success": true,
+  "gen_iterations": 2,
+  "opt_iterations": 10,
+  "optimized": false,
+  "target_speedup": 0.8,
+  "target_reached": false,
+  "best_speedup": 0.0,
+  "perf_data": {
+    "avg_latency_ms": 0.8,
+    "speedup_vs_torch": 1.5
   }
 }
 ```
@@ -721,16 +914,17 @@ ${pwd}/triton_ascend_output/op_{op_name}_{timestamp}_{rid}/
 
 ## 错误处理
 
-| 阶段 | 错误 | 处理 |
-|------|------|------|
-| Phase 1 (模式 A) | 任务文件验证失败 | 修复重试（最多 2 次）；多 case 模式下禁止"降级为单 case"绕过 |
-| Phase 1 (模式 B) | `.pt` 文件不存在 | 报错终止，提示用户上传同名 `.pt` |
-| Phase 1 (模式 B) | `Model` 翻译验证失败 | 修复重试（最多 2 次） |
-| Phase 3 | 达到 max_iterations | 输出失败报告，任务结束 |
-| Phase 3 | B 类环境错误 | 立即终止，任务失败 |
-| Phase 3 | C 类重复错误 | 立即终止，任务失败 |
-| Phase 4 | 无更多优化点 + 无效果 | 以 Phase 3 结果继续 |
-| Phase 4 | B 类环境错误 | 终止优化，以 Phase 3 结果继续 |
+| 阶段             | 错误                      | 处理                                                                                                     |
+| ---------------- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Phase 1 (模式 A) | 任务文件验证失败          | 修复重试（最多 2 次）；多 case 模式下禁止"降级为单 case"绕过                                             |
+| Phase 1 (模式 B) | `.pt` 文件不存在          | 报错终止，提示用户上传同名 `.pt`                                                                         |
+| Phase 1 (模式 B) | `Model` 翻译验证失败      | 修复重试（最多 2 次）                                                                                    |
+| Phase 3          | 达到 max_iterations       | 输出失败报告，任务结束                                                                                   |
+| Phase 3          | B 类环境错误              | 立即终止，任务失败                                                                                       |
+| Phase 3          | C 类重复错误              | 立即终止，任务失败                                                                                       |
+| Phase 3/Phase 4  | benchmark.py 超时/被 kill | **严禁编造数据**。降低 --repeats 重试（50→20→10→5），任意值成功即采纳该结果。所有值均超时则标记 B 类错误 |
+| Phase 4          | 无更多优化点 + 无效果     | 以 Phase 3 结果继续                                                                                      |
+| Phase 4          | B 类环境错误              | 终止优化，以 Phase 3 结果继续                                                                            |
 
 ### L1 闸门触发的失败映射
 
@@ -738,30 +932,31 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 当前会话收到 exit 2 时，必须按下表把它**等价映射**到对应 verify 失败的现有处理路径，
 不得视为脚本崩溃也不得视为成功。
 
-| 触发位置 | 信号 | 等价处理 | 备注 |
-|---------|------|---------|------|
-| Phase 3.5 benchmark exit 2 | stderr 含 `[L1 闸门]` | 等价 3.3 verify 失败 → 读 verify_result.json failures → 3.4 Conductor → iteration++ | log.md 标注 "L1 兜底触发：当前会话越过 3.3 闸门" |
-| Phase 4.3 optimized benchmark exit 2 | 同上 | 等价 4.2 optimized 失败 → 读 verify_result_optimized.json failures → 4.5 A 类 → opt_iteration++ | log.md 标注 "L1 兜底触发：当前会话越过 4.3 断言" |
-| Phase 4 入口断言失败 | 当前会话自检 verify_result.json passed<total | **C 类终止任务**，写 `summary.json.failure_phase = "phase3_gate_violation"` | 不允许退回 Phase 3（会无限循环） |
+| 触发位置                             | 信号                                         | 等价处理                                                                                        | 备注                                             |
+| ------------------------------------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Phase 3.5 benchmark exit 2           | stderr 含 `[L1 闸门]`                        | 等价 3.3 verify 失败 → 读 verify_result.json failures → 3.4 Conductor → iteration++             | log.md 标注 "L1 兜底触发：当前会话越过 3.3 闸门" |
+| Phase 4.3 optimized benchmark exit 2 | 同上                                         | 等价 4.2 optimized 失败 → 读 verify_result_optimized.json failures → 4.5 A 类 → opt_iteration++ | log.md 标注 "L1 兜底触发：当前会话越过 4.3 断言" |
+| Phase 4 入口断言失败                 | 当前会话自检 verify_result.json passed<total | **C 类终止任务**，写 `summary.json.failure_phase = "phase3_gate_violation"`                     | 不允许退回 Phase 3（会无限循环）                 |
 
 ---
 
 ## 约束
 
-| 约束 | 说明 |
-|------|------|
-| GPU Kernel 模式 | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级 |
-| Phase 3 最大迭代 | 5 次，禁止超出 |
-| Phase 4 迭代策略 | 不做最大迭代次数限制，直到 triton-latency-optimizer 报告无更多优化点则退出 |
-| Phase 4 成功底线 | 性能不劣化（speedup_vs_baseline ≥ 1.0） |
-| Phase 4 退出判定 | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；优先级 1 场景持续迭代直到 triton-latency-optimizer 报告无更多优化点才退出 |
-| Phase 4 基线复用 | 4.2/4.3 的基线侧 verify_result_baseline.json 和 baseline_perf_result.json 必须从 Phase 3 iter_{phase3_last_iter} 复制，禁止对基线代码重跑 verify.py 或 benchmark.py（基线代码与 Phase 3 generated_code.py 完全一致，重复执行只浪费时间） |
-| A 类连续上限 | 同一子类型连续 ≥ 3 次 → 自动终止 |
-| 禁止 PyTorch 退化 | forward() 中禁止 torch.*/F.* 计算操作 |
-| 文件操作范围 | 限制在工作目录内 |
-| 验证方式 | 必须调用 triton-op-verifier skill 的脚本，禁止自创测试 |
-| 语言 | 思考、分析、日志使用中文；代码、路径使用英文 |
-| 时间戳/随机数 | 必须通过 bash 获取，禁止 LLM 模拟 |
+| 约束               | 说明                                                                                                                                                                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GPU Kernel 模式    | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级                                                                                                                                                                          |
+| Phase 3 最大迭代   | 5 次，禁止超出                                                                                                                                                                                                                           |
+| Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 triton-latency-optimizer 报告无更多优化点则退出                                                                                                       |
+| Phase 4 成功底线   | 性能不劣化（speedup_vs_baseline ≥ 1.0）                                                                                                                                                                                                  |
+| Phase 4 退出判定   | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；优先级 1 场景持续迭代直到 triton-latency-optimizer 报告无更多优化点才退出                                                                                         |
+| Phase 4 基线复用   | 4.2/4.3 的基线侧 verify*result_baseline.json 和 baseline_perf_result.json 必须从 Phase 3 iter*{phase3_last_iter} 复制，禁止对基线代码重跑 verify.py 或 benchmark.py（基线代码与 Phase 3 generated_code.py 完全一致，重复执行只浪费时间） |
+| A 类连续上限       | 同一子类型连续 ≥ 3 次 → 自动终止                                                                                                                                                                                                         |
+| 禁止 PyTorch 退化  | forward() 中禁止 torch._/F._ 计算操作                                                                                                                                                                                                    |
+| 文件操作范围       | 限制在工作目录内                                                                                                                                                                                                                         |
+| 验证方式           | 必须调用 triton-op-verifier skill 的脚本，禁止自创测试                                                                                                                                                                                   |
+| 时间戳/随机数      | 必须通过 bash 获取，禁止 LLM 模拟                                                                                                                                                                                                        |
+| 性能数据真实性     | **严禁编造、估算、模拟 benchmark 性能数据**。所有性能数据必须从 benchmark.py 实际输出的 perf_result.json 文件中读取，任何未经验证的数值不得写入 summary.json / report.md                                                                 |
+| Benchmark 超时降级 | benchmark.py 超时或被 kill 时，**必须**自动降低 --repeats 值重试（50 → 20 → 10 → 5），不可不经参数调整直接重试。所有降级值均超时则标记 B 类错误，任务失败                                                                                |
 
 ---
 
@@ -770,3 +965,64 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 - 专业、技术、简洁
 - 每完成一个 Phase 提供一行状态更新
 - 错误时清晰描述 + 建议操作
+
+---
+
+## Phase 7: 经验提炼与归档（算子探索成功后强制执行）
+
+⚠️ **本阶段为跨会话复用保障的关键闭环**。算子任务完成后，必须将验证过的设计决策和性能数据沉淀到项目级 template，供后续同类算子复用。
+
+### 触发条件
+
+必须同时满足：
+
+1. `summary.json` 中 `"success": true`
+2. `passed_cases == total_cases > 0`
+3. `speedup_vs_torch` 为有限正数（几何平均有效）
+
+### 执行步骤
+
+**Step 1: 人工提炼 Layer 1-3（Agent 必须完成）**
+
+从本次探索中提取可复用经验，按**四层隔离模型**写入对应类别文件：
+
+- **Layer 1（设计约束）**：硬性必须遵守的规则（如 "constant 模式必须拆分为 fill + copy"）
+- **Layer 2（算法骨架）**：核心并行策略的抽象描述（如 grid 分配模式、分支决策树）
+- **Layer 3（关键技巧）**：5-15 行已验证有效的代码片段，标注"可替代方向"
+
+目标文件：`.claude/template/{category}.md`
+
+若该算子类别**首次归档**，Agent 手动创建对应 template 文件（参考已有类别的文件结构，如 `tensor-transform.md`）。
+
+**Step 2: 物理归档 Layer 4（可选，人工操作）**
+
+Layer 4（完整历史代码/报告/summary）的物理归档为可选项，由人工按需将 `{op_name}_generated.py`、`report.md`、`summary.json` 复制到本地归档目录（不入仓库，仅供复盘）。本步骤无自动化脚本，不影响 Phase 1-6 的算子生成与验证闭环。
+
+**Step 3: 规范验证**
+
+Agent 自检 template 文件写入是否完整：确认 Layer 1-3 章节齐全、性能基准数字已记录、陷阱表已补充。要求产出可在后续同类算子生成时被 Phase 2 正确读取并约束草图设计。
+
+
+
+### 四层隔离复用规则（跨会话）
+
+| 层级    | 内容               | 受众                                            | 访问规则                                      |
+| ------- | ------------------ | ----------------------------------------------- | --------------------------------------------- |
+| Layer 1 | 设计约束、禁止事项 | `triton-op-designer`                            | 必须作为 negative_prompt 遵守                 |
+| Layer 2 | 算法骨架、并行策略 | `triton-op-designer`                            | 仅作参考方向，输出必须是全新草图              |
+| Layer 3 | 关键代码片段       | `triton-op-coding` / `triton-latency-optimizer` | 技巧可参考但不可复制，变量名/结构必须重新设计 |
+| Layer 4 | 完整历史代码路径   | **默认对 Agent 不可见**                         | 仅在用户明确指令对比时才可读取                |
+
+### 关键保障机制
+
+1. **统一存储**：所有经验文件位于项目根目录 `.claude/template/` 下，**所有会话共享同一套 template**
+2. **自动发现**：`triton-op-designer` skill 在 Phase 2 必须查询并读取对应类别的 `template/{category}.md`（仅 Layer 1-3）
+3. **防复制**：Prompt 中必须包含"历史经验仅供启发，禁止直接复制代码结构"
+4. **多样性保护**：若新实现采用与历史完全不同的思路且通过验证，将该思路**并列记录**到经验文件，而非覆盖旧经验
+
+### 失败处理
+
+| 场景                        | 处理                                                                   |
+| --------------------------- | ---------------------------------------------------------------------- |
+| summary.json 不满足归档条件 | 禁止归档，在 report.md 中标注"未达归档标准"                            |
+| 经验文件已存在              | 仅追加 Layer 1-3 到已有 template 文件；Layer 4 归档由 Agent 手动追加到已有经验文件 |

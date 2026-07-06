@@ -32,7 +32,7 @@ VERSION="1.0.0"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - all skills bundled with this plugin
-INCLUDED_SKILLS="triton-task-extractor triton-op-designer triton-op-coding triton-op-verifier triton-latency-optimizer npu-arch"
+INCLUDED_SKILLS="triton-task-extractor triton-op-designer triton-op-coding triton-op-verifier triton-latency-optimizer triton-precision-debug npu-arch"
 
 # Source agent file (used as CLAUDE.md / AGENTS.md source)
 SOURCE_AGENT_FILE="AGENTS.md"
@@ -341,6 +341,20 @@ ok "Skills: $skill_link_count linked"
 for link in "$BRAND_DIR/skills"/*; do
     [ -L "$link" ] && [ ! -e "$link" ] && rm "$link"
 done
+echo ""
+
+# Template: whole-directory symlink ($BRAND_DIR/template -> $PLUGIN_ROOT/template)
+# Template 目录存放在 plugin 源码根（随仓库走），install 时 symlink 到 .claude/template
+if [ -d "$PLUGIN_ROOT/template" ]; then
+    if [ -e "$BRAND_DIR/template" ] || [ -L "$BRAND_DIR/template" ]; then
+        rm -rf "$BRAND_DIR/template"
+    fi
+    ln -sfn "$PLUGIN_ROOT/template" "$BRAND_DIR/template"
+    tpl_count=$(ls "$PLUGIN_ROOT/template"/*.md 2>/dev/null | wc -l)
+    ok "Template: $tpl_count files linked ($BRAND_DIR/template -> $PLUGIN_ROOT/template)"
+else
+    warn "Template dir not found at $PLUGIN_ROOT/template, skip"
+fi
 echo ""
 
 # --- Step 2: Install config file (AGENTS.md / CLAUDE.md) ---
