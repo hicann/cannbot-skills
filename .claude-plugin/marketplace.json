@@ -200,6 +200,7 @@
       "category": "skills",
       "skills": [
         "./model-train-accuracy-debug",
+        "./model-train-log-visualization",
         "./model-train-oom-analysis"
       ]
     },
