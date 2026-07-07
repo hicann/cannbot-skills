@@ -498,7 +498,7 @@
     {
       "name": "tilelang2ascend-ops-developer-skills",
       "description": "TileLang2AscendC 算子自动生成 Skills（7 个）。TileLang 设计、AscendC 转译、Case 精简、性能分析、精度调优、Trace 记录。",
-      "source": "./ops-lab/tilelang-to-ascendc/skills",
+      "source": "./plugins-community/tilelang2ascendc-ops-generator/skills",
       "strict": false,
       "version": "1.0.0",
       "author": {
@@ -516,8 +516,8 @@
       ]
     },
     {
-      "name": "ascendc-ops-developer",
-      "source": "./plugins-community/ascendc-ops-lab-developer",
+      "name": "tilelang2ascendc-ops-generator",
+      "source": "./plugins-community/tilelang2ascendc-ops-generator",
       "description": "Ascend C 算子自动生成 Team。通过 TileLang 设计表达和 AscendC 转译优化，端到端完成算子开发（7 Phase 工作流），含 1 个专业 Agent 和 5 个配套 Skill。",
       "version": "1.0.0",
       "author": {

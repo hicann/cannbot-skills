@@ -22,6 +22,9 @@
 # Usage (--compare 模式):
 #   bash msprof_profile_run.sh --compare --output-dir=/path/to/op_dir [--warm-up=N] [--device=N]
 #
+# Usage (--quick 模式):
+#   bash msprof_profile_run.sh --quick --output-dir=/path/to/op_dir [--warm-up=N] [--device=N]
+#
 # Usage (--batch 模式):
 #   bash msprof_profile_run.sh --batch --base-dir=/path/to/output_dir [--max-jobs=N] [--device-start=N]
 #
@@ -32,18 +35,50 @@
 # Example (对比):
 #   bash msprof_profile_run.sh --compare --output-dir=./output/GELU --warm-up=3 --device=0
 #
+# Example (快速):
+#   bash msprof_profile_run.sh --quick --output-dir=./output/GELU --warm-up=3 --device=0
+#
 # Example (批量):
 #   bash msprof_profile_run.sh --batch --base-dir=./output_performance --max-jobs=7 --device-start=1
 #
 # 产出:
 #   标准模式: <output_dir>/PROF_GROUP_<timestamp>/PROF_<Metric>/ (7 个子目录 + 1 个 Sample)
 #   对比模式: <output_dir>/performance.json + performance.log + perf_report.md
+#   快速模式: <output_dir>/performance.json + performance.log + perf_report.md
 #   批量模式: <base_dir>/batch_performance.log + 各子目录 performance.json
 # ----------------------------------------------------------------------------------------------------------
 
 set -euo pipefail
 
+SCRIPT_START_TIME=$(date +%s%N)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 格式化耗时输出（纳秒精度入参）
+format_elapsed() {
+    local ns=$1
+    local ms=$(( ns / 1000000 ))
+    local s=$(( ms / 1000 ))
+    local remain_ms=$(( ms % 1000 ))
+    if [[ $s -gt 0 ]]; then
+        printf "%d.%03ds" $s $remain_ms
+    else
+        printf "%dms" $ms
+    fi
+}
+
+print_elapsed() {
+    local now_ns
+    now_ns=$(date +%s%N)
+    local elapsed_ns=$(( now_ns - SCRIPT_START_TIME ))
+    local msg="[INFO] Total elapsed time: $(format_elapsed $elapsed_ns)"
+    echo ""
+    echo "$msg"
+    # 如果指定了输出目录，同时写入 performance.log
+    if [[ -n "${1:-}" ]]; then
+        echo "" >> "$1/performance.log"
+        echo "$msg" >> "$1/performance.log"
+    fi
+}
 
 # 默认参数
 WARM_UP=3
@@ -51,7 +86,7 @@ OUTPUT_DIR="./msprof_output"
 APP_CMD=()
 
 # 模式开关
-MODE="standard"   # standard | compare | batch
+MODE="standard"   # standard | compare | batch | quick
 OUTPUT_DIR_ARG=""  # --compare 模式用的算子目录
 DEVICE_ID=""
 BASE_DIR=""
@@ -62,6 +97,7 @@ usage() {
     cat <<'EOF'
 Usage: bash msprof_profile_run.sh [OPTIONS] -- <executable> [args...]
        bash msprof_profile_run.sh --compare --output-dir=<dir> [OPTIONS]
+       bash msprof_profile_run.sh --quick --output-dir=<dir> [OPTIONS]
        bash msprof_profile_run.sh --batch --base-dir=<dir> [OPTIONS]
 
 通用选项:
@@ -80,6 +116,13 @@ Usage: bash msprof_profile_run.sh [OPTIONS] -- <executable> [args...]
   --retry=N              单 case 解析失败重试次数（默认 2）
   --keep-prof            保留 msprof 原始 PROF 目录（用于深度分析）
 
+快速模式 (--quick):
+  --quick                启用快速模式：只采集 1 轮（只获取 kernel 时间，不采集 7 个 aic-metrics）
+  --output-dir=<dir>     算子输出目录（包含 model.py, model_new_ascendc.py, .jsonl）
+  --device=N             指定 NPU 设备 ID；未指定时自动选择空闲卡
+  --repeats=N            重复采集次数（默认 1）
+  --retry=N              单 case 解析失败重试次数（默认 2）
+
 批量模式 (--batch):
   --batch                启用批量模式：扫描 base-dir 下所有子目录并行测试
   --base-dir=<dir>       包含多个算子输出子目录的根目录
@@ -90,6 +133,8 @@ Usage: bash msprof_profile_run.sh [OPTIONS] -- <executable> [args...]
   PipeUtilization, ArithmeticUtilization, Memory, MemoryL0, MemoryUB,
   L2Cache, ResourceConflictRatio
 所有 PROF 目录放在同一个 PROF_GROUP_<timestamp>/ 下，便于 msprof_perf_summary.py 汇总。
+
+快速模式 (--quick) 只采集 1 轮，不采集 7 个 aic-metrics，只获取 kernel 时间。
 EOF
 }
 
@@ -104,6 +149,7 @@ while [[ $# -gt 0 ]]; do
         --retry=*)   RETRY="${1#*=}"; shift ;;
         --keep-prof) KEEP_PROF=1; shift ;;
         --compare)   MODE="compare"; shift ;;
+        --quick)     MODE="quick"; shift ;;
         --batch)     MODE="batch"; shift ;;
         --base-dir=*) BASE_DIR="${1#*=}"; shift ;;
         --max-jobs=*) MAX_JOBS="${1#*=}"; shift ;;
@@ -184,6 +230,7 @@ run_standard() {
         tail -20 "${SAMPLE_SUB}/msprof.log" >&2 || true
     }
 
+    print_elapsed
     echo ""
     echo "=== Done. PROF group = ${GROUP_DIR} ==="
     echo "Next:"
@@ -213,6 +260,34 @@ run_compare() {
         --output-dir "$OUT_DIR" \
         --warmup "$WARM_UP" \
         "${extra_args[@]}"
+
+    print_elapsed "$OUT_DIR"
+}
+
+# ============================================================================
+# 快速模式：只采集 1 轮（只获取 kernel 时间，不采集 7 个 aic-metrics）
+# ============================================================================
+run_quick() {
+    if [[ -z "$OUTPUT_DIR_ARG" ]]; then
+        echo "ERROR: --quick 模式必须指定 --output-dir=<dir>" >&2
+        usage
+        exit 1
+    fi
+
+    OUT_DIR="$(cd "$OUTPUT_DIR_ARG" && pwd)"
+
+    # 调用 msprof_perf_summary.py --quick（只测时间，不采集 7 个 metrics）
+    local extra_args=()
+    [[ -n "$DEVICE_ID" ]] && extra_args+=("--device" "$DEVICE_ID")
+    [[ -n "${REPEATS:-}" ]] && extra_args+=("--repeats" "$REPEATS")
+    [[ -n "${RETRY:-}" ]] && extra_args+=("--retry" "$RETRY")
+
+    python3 "${SCRIPT_DIR}/msprof_perf_summary.py" --quick \
+        --output-dir "$OUT_DIR" \
+        --warmup "$WARM_UP" \
+        "${extra_args[@]}"
+
+    print_elapsed "$OUT_DIR"
 }
 
 # ============================================================================
@@ -286,6 +361,8 @@ run_batch() {
     python3 "${SCRIPT_DIR}/msprof_perf_summary.py" --batch "$BASE_DIR" \
         --output-md "${BASE_DIR}/batch_report.md" \
         --output-json "${BASE_DIR}/batch_summary.json"
+
+    print_elapsed "$BASE_DIR"
 }
 
 # ============================================================================
@@ -298,8 +375,8 @@ case "$MODE" in
     compare)
         run_compare
         ;;
-    batch)
-        run_batch
+    quick)
+        run_quick
         ;;
     *)
         echo "ERROR: 未知模式: $MODE" >&2

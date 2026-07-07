@@ -30,7 +30,7 @@ cannbot-skills/
 │   ├── install-helper/              # CANNBot Install Helper 工具
 │   ├── ops-easyasc-dsl/             # EasyASC DSL 算子开发
 │   ├── ops-qa-suite/                # 算子测试套件
-│   ├── ascendc-ops-lab-developer/   # AscendC 算子自动生成 Team（实验性）
+│   ├── tilelang2ascendc-ops-generator/   # AscendC 算子自动生成 Team（实验性）
 │   └── science-model-npu-migration/ # 科学计算模型 NPU 迁移
 ├── infra/                           # 基础设施维护 Skills
 ├── docs/                            # 项目文档

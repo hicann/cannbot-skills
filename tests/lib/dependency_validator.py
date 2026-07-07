@@ -169,6 +169,11 @@ class DependencyValidator:
             top_dir = parts[0]
 
             if top_dir in ("plugins-official", "plugins-community"):
+                # Plugin-local skills: plugins-<type>/<plugin>/skills/<skill>/SKILL.md
+                if len(parts) == 4 and parts[2] == "skills":
+                    skill_name = skill_dir.name
+                    self.all_skill_names.add(skill_name)
+                    self.all_skill_dirs[skill_name] = skill_dir
                 continue
 
             if top_dir in skill_root_dirs:

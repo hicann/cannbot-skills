@@ -53,15 +53,27 @@
 | **ascendc-kernel-developer** | Kernel直调开发者，支持代码实现、编译测试、性能采集、文档编写 |
 | **ascendc-kernel-reviewer** | Kernel直调审查者，支持独立构建验证、7维度评分、精度验证 |
 
-## Ascend C 算子开发（实验区，ops-lab）
+## TileLang2AscendC 算子开发
 
-> 以下 Skill 位于 `ops-lab/` 目录，属实验/非正式版本，可能存在平台或能力限制。
+> 以下 Skill 位于 `plugins-community/tilelang2ascendc-ops-generator/skills/` 目录，属实验/非正式版本，可能存在平台或能力限制。
 
 ### Skills
 
 | Skill | 功能 | 限制 | 使用样例 |
 |-------|------|------|---------|
+| **tilelang2ascend-tilelang-designer** | TileLang 算子设计表达，支持 Attention/Matmul/Norm/Sort 等复杂算子 |  |  |
+| **tilelang2ascend-translator** | 将 TileLang 设计转译为 AscendC kernel |  |  |
+| **tilelang2ascend-operator-project-init** | AscendC kernel 工程初始化与算子注册 |  |  |
+| **tilelang2ascend-case-simplifier** | 算子测试用例精简 |  |  |
+| **tilelang2ascend-precision-tuning** | AscendC 算子精度调试与修复 |  |  |
+| **tilelang2ascend-trace-recorder** | 算子任务执行 trace 记录 |  |  |
 | **cuda2ascend-simt** | CUDA 算子迁移到 Ascend C SIMT，支持 standalone sample / torch_npu / pybind 三类交付形态 | 仅支持 Ascend 950 PR；不支持 native JIT、torch 复数 dtype、device 侧 FP64、CUDA 生态库、协作组等 | [查看](skills-usage.md#cuda2ascend-simt) |
+
+### Agents
+
+| Agent | 功能 |
+|-------|------|
+| **tilelang2ascendc-kernel-generator** | 从 PyTorch Model 出发，端到端完成算子设计表达和 AscendC kernel 落地（简单算子 ops-direct-invoke / 复杂算子 TileLang） |
 
 ## Catlass 算子开发
 

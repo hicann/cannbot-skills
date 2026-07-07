@@ -43,7 +43,17 @@ bash scripts/msprof_profile_run.sh --compare --output-dir=./output/GELU --warm-u
 
 输出：`performance.json` + `performance.log` + `perf_report.md`
 
-### 3. 批量并行模式（多 NPU）
+### 3. 快速模式（1 轮采集，只获取 kernel 时间）
+
+对算子目录做快速对比测试，只跑 1 轮 msprof，不采集 7 个 aic-metrics：
+
+```bash
+bash scripts/msprof_profile_run.sh --quick --output-dir=./output/GELU --warm-up=3 --device=0
+```
+
+输出：`performance.json` + `performance.log` + `perf_report.md`
+
+### 4. 批量并行模式（多 NPU）
 
 扫描目录下所有算子子目录，多 NPU 并行执行对比测试：
 
@@ -133,6 +143,8 @@ Markdown 报告包含：
 | 算子开发完成后的性能验收 | `msprof_profile_run.sh --compare` | 快速对比自定义算子 vs 标杆 |
 | 性能问题定位 | `msprof_profile_run.sh` + `msprof_perf_summary.py` | 深度瓶颈分析 |
 | 优化效果验证 | `msprof_profile_run.sh` + `msprof_perf_summary.py` | 对比优化前后的归档数据 |
-| Agent team 测试阶段 | `--compare` + 标准采集 | 先快速对比，不达标再深度分析 |
-| 端到端自动开发 Phase 5 | `msprof_profile_run.sh --compare` | 集成到 ascendc-ops-lab-developer 流程 |
+| 算子生成阶段快速测试 | `msprof_profile_run.sh --quick` | 快速对比测试（1 轮采集，只获取时间） |
+| Agent team 测试阶段 | `--quick` / `--compare` + 标准采集 | 先快速对比，不达标再深度分析 |
+| 端到端自动开发 Phase 5 | `msprof_profile_run.sh --quick` | 集成到 tilelang2ascendc-ops-generator 流程（只获取加速比） |
+| 进化优化前基线测试 | `msprof_profile_run.sh --quick` | 快速获取基线加速比 |
 | 批量性能测试 | `msprof_profile_run.sh --batch` | 多 NPU 并行批量测试 |

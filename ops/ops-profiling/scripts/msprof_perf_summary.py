@@ -666,19 +666,75 @@ def _extract_shape_dtype_from_jsonl(case):
     return str(inputs[0].get("shape", "?")), inputs[0].get("dtype", "?")
 
 
-def _tensor_ctor(shape, dtype_str):
-    """Generate a torch tensor constructor expression for the given dtype.
+def _case_has_empty_tensor(case):
+    """判断 case 中是否包含 0 元素张量（空 tensor）。"""
+    if not case:
+        return False
+    for inp in case.get("inputs", []):
+        if inp.get("type") == "tensor":
+            shape = inp.get("shape", [])
+            if not shape or any(s == 0 for s in shape):
+                return True
+    return False
 
-    Integer types (int32/int64/int8/...) and bool use ``torch.randint``,
-    while floating-point types use ``torch.randn``.
-    """
-    _int_like = {"torch.int32", "torch.int64", "torch.int", "torch.long",
-                 "torch.int8", "torch.int16", "torch.short", "torch.uint8"}
-    if dtype_str in _int_like:
-        return f"torch.randint(0, 100, {shape}, dtype={dtype_str})"
-    if dtype_str == "torch.bool":
-        return f"torch.randint(0, 2, {shape}, dtype=torch.int32).to(torch.bool)"
-    return f"torch.randn({shape}, dtype={dtype_str})"
+
+def _jsonl_scalar_value(inp):
+    """从 JSONL/KernelBench 标量描述中提取一个 Python 标量值。"""
+    val = inp.get("value")
+    if val is None:
+        rv = inp.get("range_values")
+        if isinstance(rv, (int, float, bool, complex)):
+            val = rv
+        elif isinstance(rv, list) and len(rv) > 0:
+            val = rv[0]
+        elif isinstance(rv, dict):
+            mean = rv.get("mean")
+            if isinstance(mean, list) and len(mean) > 0:
+                val = mean[0]
+    if val is None:
+        dtype_str = inp.get("dtype", "")
+        if dtype_str == "bool":
+            val = True
+        elif dtype_str.startswith("int") or dtype_str.startswith("uint"):
+            val = 1
+        else:
+            val = 1.0
+
+    dtype_str = inp.get("dtype", "")
+    if dtype_str == "bool":
+        return bool(val)
+    if dtype_str.startswith("complex"):
+        return complex(val)
+    if dtype_str.startswith("int") or dtype_str.startswith("uint"):
+        return int(val)
+    return float(val)
+
+
+def _jsonl_tensor_code(shape, dtype_str: str) -> str:
+    """根据 KernelBench 的 dtype/shape 生成构造 tensor 的代码。"""
+    dtype_map = {
+        "fp16": "torch.float16", "float16": "torch.float16", "half": "torch.float16",
+        "fp32": "torch.float32", "float32": "torch.float32", "float": "torch.float32",
+        "fp64": "torch.float64", "float64": "torch.float64",
+        "bf16": "torch.bfloat16", "bfloat16": "torch.bfloat16",
+        "int8": "torch.int8", "int16": "torch.int16", "int32": "torch.int32",
+        "int": "torch.int32", "int64": "torch.int64", "long": "torch.int64",
+        "uint8": "torch.uint8", "uint16": "torch.uint16", "uint32": "torch.uint32", "uint64": "torch.uint64",
+        "bool": "torch.bool",
+        "complex64": "torch.complex64", "complex128": "torch.complex128",
+    }
+    dtype = dtype_map.get(dtype_str, "torch.float32")
+    shape_expr = str(shape)
+
+    if dtype_str == "bool":
+        return f"inputs.append(torch.randint(0, 2, {shape_expr}, dtype={dtype}))"
+    if dtype_str.startswith("int") or dtype_str.startswith("uint"):
+        # 先以 int64 生成再转换到目标类型，避免 torch.randint 不支持 uint/低精度 int
+        return f"inputs.append(torch.randint(-100, 100, {shape_expr}, dtype=torch.int64).to({dtype}))"
+    if dtype_str.startswith("complex"):
+        return f"inputs.append(torch.randn({shape_expr}, dtype={dtype}))"
+    # float/half/bf16
+    return f"inputs.append(torch.randn({shape_expr}, dtype={dtype}))"
 
 
 def _serialize_jsonl_inputs(case):
@@ -689,37 +745,23 @@ def _serialize_jsonl_inputs(case):
         if typ == "tensor":
             shape = inp.get("shape", [])
             dtype_str = inp.get("dtype", "float16")
-            dtype_map = {
-                "float16": "torch.float16", "half": "torch.float16",
-                "float32": "torch.float32", "float": "torch.float32",
-                "bfloat16": "torch.bfloat16",
-                "int32": "torch.int32", "int": "torch.int32",
-                "int64": "torch.int64", "long": "torch.int64",
-                "bool": "torch.bool",
-            }
-            dtype = dtype_map.get(dtype_str, "torch.float32")
-            lines.append(f"inputs.append({_tensor_ctor(shape, dtype)})")
-        elif typ == "attr":
-            val = inp.get("value")
+            lines.append(_jsonl_tensor_code(shape, dtype_str))
+        elif typ in ("attr", "scalar"):
+            val = _jsonl_scalar_value(inp)
             if isinstance(val, str):
                 lines.append(f"inputs.append({repr(val)})")
             else:
-                lines.append(f"inputs.append({val})")
+                lines.append(f"inputs.append({repr(val)})")
         elif typ == "tensor_list":
             lines.append("_tensors = []")
             for tinfo in inp.get("value", []):
                 shape = tinfo.get("shape", [])
                 dtype_str = tinfo.get("dtype", "float16")
-                dtype_map = {
-                    "float16": "torch.float16", "float32": "torch.float32",
-                    "bfloat16": "torch.bfloat16", "int32": "torch.int32",
-                    "int64": "torch.int64", "bool": "torch.bool",
-                }
-                dtype = dtype_map.get(dtype_str, "torch.float32")
-                lines.append(f"_tensors.append({_tensor_ctor(shape, dtype)})")
+                lines.append(f"_tensors.append({_jsonl_tensor_code(shape, dtype_str)
+                                                .split('inputs.append(')[1].rstrip(')')})")
             lines.append("inputs.append(_tensors)")
         else:
-            val = inp.get("value")
+            val = _jsonl_scalar_value(inp)
             lines.append(f"inputs.append({repr(val)})")
     return "\n".join(lines)
 
@@ -881,6 +923,41 @@ def _run_msprof_standard(wrapper_script: str, output_dir: str, warmup: int = 3):
     return str(prof_dirs[-1]), None
 
 
+def _run_msprof_quick(wrapper_script: str, output_dir: str, warmup: int = 3):
+    """快速模式：只采集 1 轮（不采集 7 个 aic-metrics，只获取 kernel 时间）。
+
+    直接调用 msprof 命令（不通过 msprof_profile_run.sh，避免循环调用）。
+    使用 msprof --task-time=on --ascendcl=on，不设置 --aic-metrics。
+    """
+    wrapper_path = os.path.join(output_dir, "_wrapper.py")
+    os.makedirs(output_dir, exist_ok=True)
+    with open(wrapper_path, "w", encoding="utf-8") as f:
+        f.write(wrapper_script)
+
+    cmd = [
+        "msprof",
+        f"--output={output_dir}",
+        "--task-time=on",
+        "--ascendcl=on",
+        sys.executable, wrapper_path
+    ]
+    env = os.environ.copy()
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    try:
+        os.remove(wrapper_path)
+    except OSError:
+        pass
+
+    if result.returncode != 0:
+        return None, f"msprof failed: {result.stderr[-500:]}"
+
+    prof_dirs = sorted(Path(output_dir).glob("PROF_*"))
+    if not prof_dirs:
+        return None, "no PROF directory found"
+    return str(prof_dirs[-1]), None
+
+
 def _parse_msprof_duration(prof_group_dir: str):
     csv_pattern = os.path.join(prof_group_dir, "PROF_*/PROF_*/mindstudio_profiler_output/op_summary_*.csv")
     csv_files = sorted(glob.glob(csv_pattern))
@@ -909,6 +986,78 @@ def _parse_msprof_duration(prof_group_dir: str):
     duration = float(target.get("Task Duration(us)", 0) or 0)
     op_name = target.get("Op Name", "unknown")
     return duration, op_name, None
+
+
+def _parse_msprof_duration_quick(prof_group_dir: str):
+    """快速模式解析：从 PROF 目录中查找 task_time.csv 或 api_statistic.csv 并提取时间。
+
+    快速模式只跑 1 轮，不设置 --aic-metrics，因此没有 op_summary_*.csv。
+    对单次采集中同名 kernel 的多次下发做聚合，返回主要 kernel 的平均/中位时间。
+    """
+    # 1. 尝试从 task_time.csv 提取
+    task_time_pattern = os.path.join(prof_group_dir, "mindstudio_profiler_output/task_time_*.csv")
+    task_time_files = sorted(glob.glob(task_time_pattern))
+    if task_time_files:
+        try:
+            with open(task_time_files[0], "r", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            # 收集所有非元事件的 kernel 行，按 kernel_name 分组
+            kernel_times: Dict[str, List[float]] = {}
+            for r in rows:
+                kernel_type = r.get("kernel_type", "")
+                task_time = r.get("task_time(us)", "")
+                if kernel_type not in ("PROFILING_ENABLE", "TASK_TIMEOUT_SET", "") and task_time:
+                    try:
+                        duration = float(task_time)
+                        if duration > 0:
+                            kernel_name = r.get("kernel_name", "unknown")
+                            kernel_times.setdefault(kernel_name, []).append(duration)
+                    except ValueError:
+                        continue
+
+            if kernel_times:
+                # 选择主要 kernel：优先总耗时最长、其次下发次数最多
+                main_kernel = max(
+                    kernel_times.items(),
+                    key=lambda kv: (sum(kv[1]), len(kv[1]))
+                )[0]
+                times = kernel_times[main_kernel]
+                if len(times) >= 3:
+                    sorted_t = sorted(times)
+                    filtered = sorted_t[1:-1]
+                    agg_duration = statistics.mean(filtered)
+                else:
+                    agg_duration = statistics.median(times)
+                return agg_duration, main_kernel, None
+        except Exception:
+            return None, None, "no task_time or api_statistic csv found"
+
+    # 2. 尝试从 api_statistic.csv 提取（launch 行）
+    api_pattern = os.path.join(prof_group_dir, "mindstudio_profiler_output/api_statistic_*.csv")
+    api_files = sorted(glob.glob(api_pattern))
+    if api_files:
+        try:
+            with open(api_files[0], "r", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            # 查找 Level=node, API Name=launch 的行
+            for r in rows:
+                level = r.get("Level", "")
+                api_name = r.get("API Name", "")
+                if level == "node" and api_name == "launch":
+                    time_us = r.get("Time(us)", "")
+                    if time_us:
+                        try:
+                            duration = float(time_us)
+                            if duration > 0:
+                                return duration, "launch", None
+                        except ValueError:
+                            continue
+        except Exception:
+            return None, None, "no task_time or api_statistic csv found"
+
+    return None, None, "no task_time or api_statistic csv found"
 
 
 def pick_idle_npu(default=0):
@@ -1088,6 +1237,17 @@ def _report_compare_to_text(report: Dict[str, Any]) -> str:
         lines.append(f"  Median  : {report['median_speedup']:.2f}x")
         lines.append(f"  Min/Max : {report['min_speedup']:.2f}x / {report['max_speedup']:.2f}x")
         lines.append(f"  Valid   : {report['n_cases_valid']}/{report['n_cases_total']}")
+    if report.get("mean_ref_us") is not None:
+        lines.append("--- Task Duration (us) ---")
+        lines.append(
+            f"  Ref  mean/median/total : {report['mean_ref_us']:.2f} / "
+            f"{report['median_ref_us']:.2f} / {report['total_ref_us']:.2f}"
+        )
+        lines.append(
+            f"  Asc  mean/median/total : {report['mean_asc_us']:.2f} / "
+            f"{report['median_asc_us']:.2f} / {report['total_asc_us']:.2f}"
+        )
+        lines.append(f"  Total speedup (Σref/Σasc) : {report['total_speedup']:.2f}x")
     lines.append("=" * 100)
 
     return "\n".join(lines)
@@ -1140,6 +1300,57 @@ def _measure_one_impl(mi: _MeasureInput):
             if duration is not None:
                 return duration, None, prof_dir
             err = parse_err
+        time.sleep(0.5)
+    return None, err, prof_dir
+
+
+def _measure_one_impl_quick(mi: _MeasureInput):
+    """快速模式：Measure one implementation with retries and repeats.
+
+    --retry 用于解析失败重试；--repeats 用于成功后的重复采集取平均。
+    当 repeats >= 3 时，去掉最大/最小值后取平均；否则取中位数。
+
+    Returns (duration_us, error, prof_dir).
+    """
+    prof_dir = None
+    impl_abbr = "ref" if mi.impl == "reference" else "asc"
+    repeats = max(1, getattr(mi.args, "repeats", 1))
+
+    for _ in range(1 + mi.args.retry):
+        durations = []
+        prof_dirs = []
+
+        for r in range(repeats):
+            wrapper = _generate_wrapper_script(_WrapperConfig(
+                mi.out_dir, mi.case_idx, mi.impl, mi.args.seed, mi.device_id,
+                mi.args.warmup, mi.jsonl_case))
+            tmpdir = f"/tmp/msprof_quick_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}_r{r}"
+            _cleanup_prof_dirs(tmpdir)
+            prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.args.warmup)
+            if not prof_dir:
+                break
+
+            duration, _op_name, parse_err = _parse_msprof_duration_quick(prof_dir)
+            if duration is None:
+                err = parse_err
+                break
+
+            durations.append(duration)
+            prof_dirs.append(prof_dir)
+
+        if durations:
+            if len(durations) >= 3:
+                sorted_d = sorted(durations)
+                filtered = sorted_d[1:-1]
+                avg_duration = statistics.mean(filtered)
+            else:
+                avg_duration = statistics.median(durations)
+
+            # 只保留第一个 prof_dir 给调用方，清理其余重复采集目录
+            for pd in prof_dirs[1:]:
+                _cleanup_prof_dirs(pd)
+            return avg_duration, None, prof_dirs[0]
+
         time.sleep(0.5)
     return None, err, prof_dir
 
@@ -1322,10 +1533,78 @@ def _run_compare_loop(out_dir, cases, n_cases, args, device_id):
         shape, dtype = _extract_shape_dtype_from_jsonl(cases[idx]) if cases else ("?", "?")
         jsonl_case = cases[idx] if cases else None
 
+        if _case_has_empty_tensor(jsonl_case):
+            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
+                  f"{'--':>12} {'--':>12} "
+                  f"{'skip':>10}  (empty tensor)")
+            rows.append({
+                "case": idx, "shape": shape, "dtype": dtype,
+                "ref_us": None, "asc_us": None, "speedup": None,
+                "ref_error": None, "asc_error": None,
+                "skipped": "empty_tensor",
+            })
+            continue
+
         ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
         asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
         ref_us, ref_err, ref_prof_dir = _measure_one_impl(ref_mi)
         asc_us, asc_err, asc_prof_dir = _measure_one_impl(asc_mi)
+
+        if ref_us is not None and asc_us is not None and asc_us > 0:
+            sp = ref_us / asc_us
+            speedups.append(sp)
+            ref_times.append(ref_us)
+            asc_times.append(asc_us)
+            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} {ref_us:>12.2f} {asc_us:>12.2f} {sp:>9.3f}x")
+        else:
+            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
+                  f"{'N/A' if ref_us is None else f'{ref_us:.2f}':>12} "
+                  f"{'N/A' if asc_us is None else f'{asc_us:.2f}':>12} "
+                  f"{'N/A':>10}  (ref_err={ref_err}, asc_err={asc_err})")
+
+        rows.append({
+            "case": idx, "shape": shape, "dtype": dtype,
+            "ref_us": ref_us, "asc_us": asc_us,
+            "speedup": (ref_us / asc_us) if (ref_us and asc_us and asc_us > 0) else None,
+            "ref_error": ref_err,
+            "asc_error": asc_err,
+            "ref_prof_dir": ref_prof_dir,
+            "asc_prof_dir": asc_prof_dir,
+        })
+
+        if not args.keep_prof:
+            _cleanup_prof_dirs(ref_prof_dir, asc_prof_dir)
+
+    return rows, speedups, ref_times, asc_times
+
+
+def _run_quick_loop(out_dir, cases, n_cases, args, device_id):
+    """快速模式：Run the measurement loop over all cases (只跑 1 轮 msprof).
+
+    Returns rows and stats.
+    """
+    rows, speedups, ref_times, asc_times = [], [], [], []
+
+    for idx in range(n_cases):
+        shape, dtype = _extract_shape_dtype_from_jsonl(cases[idx]) if cases else ("?", "?")
+        jsonl_case = cases[idx] if cases else None
+
+        if _case_has_empty_tensor(jsonl_case):
+            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
+                  f"{'--':>12} {'--':>12} "
+                  f"{'skip':>10}  (empty tensor)")
+            rows.append({
+                "case": idx, "shape": shape, "dtype": dtype,
+                "ref_us": None, "asc_us": None, "speedup": None,
+                "ref_error": None, "asc_error": None,
+                "skipped": "empty_tensor",
+            })
+            continue
+
+        ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
+        asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
+        ref_us, ref_err, ref_prof_dir = _measure_one_impl_quick(ref_mi)
+        asc_us, asc_err, asc_prof_dir = _measure_one_impl_quick(asc_mi)
 
         if ref_us is not None and asc_us is not None and asc_us > 0:
             sp = ref_us / asc_us
@@ -1374,6 +1653,31 @@ def run_compare_mode(args):
     csi = _CompareSummaryInput(
         out_dir, rows, speedups, ref_times, asc_times, n_cases, args, device_id, device_src)
     summary = _compute_compare_summary(csi)
+    _log_and_save_compare_reports(summary, out_dir, speedups, n_cases)
+
+
+def run_quick_mode(args):
+    """执行快速模式：model.py vs model_new_ascendc.py（只跑 1 轮 msprof，不采集 7 个 metrics）"""
+    out_dir = Path(args.output_dir).resolve()
+
+    device_id, device_src = _select_device_id(args)
+    LOGGER.info(f"[INFO] Using NPU device {device_id} (source={device_src})")
+    LOGGER.info("[INFO] Quick mode: 1-round profiling (no aic-metrics)")
+
+    cases, case_source = _load_compare_cases(out_dir)
+    n_cases = len(cases)
+    if case_source:
+        LOGGER.info(f"[INFO] Loaded {n_cases} cases from {case_source}")
+
+    _log_compare_header(out_dir, args)
+    rows, speedups, ref_times, asc_times = _run_quick_loop(
+        out_dir, cases, n_cases, args, device_id)
+
+    csi = _CompareSummaryInput(
+        out_dir, rows, speedups, ref_times, asc_times, n_cases, args, device_id, device_src)
+    summary = _compute_compare_summary(csi)
+    summary["timing_method"] = "msprof.quick.Task_Duration"
+    summary["profiling_mode"] = "quick"
     _log_and_save_compare_reports(summary, out_dir, speedups, n_cases)
 
 
@@ -1617,8 +1921,9 @@ def main():
     parser.add_argument("--round-name", default=None, help="Override round directory name")
 
     # 对比模式参数
-    parser.add_argument("--compare", action="store_true", help="启用对比模式")
-    parser.add_argument("--output-dir", dest="output_dir", help="算子输出目录（对比模式）")
+    parser.add_argument("--compare", action="store_true", help="启用对比模式（8 轮采集：7 metrics + sample）")
+    parser.add_argument("--quick", action="store_true", help="启用快速模式（1 轮采集：只获取 kernel 时间，不采集 7 个 aic-metrics）")
+    parser.add_argument("--output-dir", dest="output_dir", help="算子输出目录（对比模式/快速模式）")
     parser.add_argument("--warmup", type=int, default=3, help="msprof warmup 次数")
     parser.add_argument("--repeats", type=int, default=1, help="重复采集次数")
     parser.add_argument("--seed", type=int, default=0, help="随机种子")
@@ -1638,6 +1943,10 @@ def main():
         if not args.output_dir:
             parser.error("--compare 模式必须指定 --output-dir")
         run_compare_mode(args)
+    elif args.quick:
+        if not args.output_dir:
+            parser.error("--quick 模式必须指定 --output-dir")
+        run_quick_mode(args)
     elif args.batch:
         try:
             run_batch_mode(args)
