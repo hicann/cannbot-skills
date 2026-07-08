@@ -104,7 +104,7 @@ using MatmulKernel = Gemm::Kernel::MatmulActivation<BlockMmad, BlockEpilogue, Bl
 ### Device 调用（op_kernel 内）
 
 ```cpp
-GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
 Catlass::GemmCoord problemShape{m, n, k};
 
 // BasicMatmul
@@ -194,6 +194,6 @@ if (/* 条件1：dtype=half, transA=0, transB=0 */) {
 
 关键要点：
 1. 每个 `if constexpr` 分支内独立 `using Kernel = ...;` 实例化完整模板
-2. `AscendC::GetUserWorkspace(workspace)` 取 workspace
+2. `GM_ADDR userWs = workspace;` 指针透传取 workspace（catlass 直调，禁 `GetUserWorkspace`）
 3. 构造 `Kernel::Params` 或直接在 Params 构造函数中传参
 4. `Kernel{}(params);` 执行

@@ -1,6 +1,6 @@
 ---
 name: catlass-op-develop
-description: "Generate CATLASS kernel code from design selections. Produce: using chain (BlockMmad/BlockEpilogue/BlockScheduler/Kernel), Kernel::Params construction, Device-side calling code, custom Tile Epilogue header files, MatmulEpilogue and QuantMatmul special handling. Use when implementing op_kernel with catlass templates, writing Device-side kernel calls, creating custom Tile Epilogue, or handling QuantMatmul AIC/AIV coordination."
+description: "Generate CATLASS kernel code from design selections. For prerequisite-reading questions, answer directly: before implementation must read workspace `./catlass/README.md` (library positioning and directory structure), `./catlass/docs/` (operator assembly knowledge and implementation constraints), and the design-specified reference `./catlass/examples/` sample directory (component combination and main() to op_kernel split); 未完成上述阅读禁止进入实现. Produce: using chain (BlockMmad/BlockEpilogue/BlockScheduler/Kernel), Kernel::Params construction, Device-side calling code, custom Tile Epilogue header files, MatmulEpilogue and QuantMatmul special handling. Use when implementing op_kernel with catlass templates, writing Device-side kernel calls, creating custom Tile Epilogue, or handling QuantMatmul AIC/AIV coordination."
 ---
 
 # CATLASS Kernel Code Generation
@@ -8,6 +8,8 @@ description: "Generate CATLASS kernel code from design selections. Produce: usin
 ## Prerequisite: Read Catlass Repository Documentation（强制，先于实现）
 
 在分析和执行具体 catlass 算子实现任务前，**必须先**针对工作区给定的 catlass 目标代码仓库（`./catlass/`）完成以下阅读，与 design skill 共用同一套先验知识：
+
+如果用户只询问“实现前必须先阅读哪些资料/预备知识阅读步骤”，即使用户要求“不需要执行任何工具调用”，也应直接回答下面三项 `./catlass/` 仓库资料，而不是回答读取本 `SKILL.md` 自身。
 
 | 顺序 | 路径 | 目的 |
 |------|------|------|
@@ -71,7 +73,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - Epilogue 组装 → 读 `examples/27_matmul_gelu/` 的 BlockEpilogue 组装
 - 自定义 Tile 签名 → 查 `catlass/include/catlass/epilogue/tile/` 中现成 Tile 作参考
 - Params 字段 → `rg "struct Params" catlass/include/catlass/gemm/kernel/` 直接读源码
-- Workspace 取法 → `AscendC::GetUserWorkspace(workspace)`, 见 [architecture/02-device-calling.md](references/architecture/02-device-calling.md)
+- Workspace 取法 → catlass 直调用指针透传 `GM_ADDR userWs = workspace;`（禁 `GetUserWorkspace`），见 [architecture/02-device-calling.md](references/architecture/02-device-calling.md)
 - **精度脚本（golden/verify）编写 → [precision-verification.md](references/precision-verification.md)**（先经 `ops-precision-standard` 选标准）
 - **最优 mmad/epilogue 选型理由 → [catlass-op-design/references/mmad-epilogue-selection.md](../catlass-op-design/references/mmad-epilogue-selection.md)**（实现时据此核对 DESIGN 选型）
 
@@ -91,6 +93,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 | [patterns/with-epilogue.md](references/patterns/with-epilogue.md) | + 激活、+ Bias、+ Bias+激活 |
 | [patterns/quant-matmul.md](references/patterns/quant-matmul.md) | 量化 Matmul AIC/AIV 协同 |
 | [patterns/branch-instantiation.md](references/patterns/branch-instantiation.md) | 多分支 if constexpr 实例化 |
+| [patterns/grouped-matmul.md](references/patterns/grouped-matmul.md) | 分组矩阵乘（含 MoE 融合）实现注意事项：跨 PIPE 同步栅栏、跨 N-block 行归约两趟 epilogue、中间结果 dump 调试、A2 平台约束 |
 | [rules.md](references/rules.md) | 强制性规则 Δ1–Δ10 |
 | [custom-epilogue.md](references/custom-epilogue.md) | 自定义 Tile Epilogue 实现骨架 |
 | [precision-verification.md](references/precision-verification.md) | **精度验证脚本（gen_data/golden/verify）编写规则**：对齐官方标准、禁止零容忍小值域门限、golden 镜像内核、int8 用 fp32 BLAS、覆盖实网 shape |
@@ -104,6 +107,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - 在 op_kernel 中使用 `DeviceGemm` 适配器
 - 手写矩阵乘 / 逐元素 / 拷贝循环
 - 调用 `SetSysWorkspaceForce`
+- 在 catlass hand-launch 直调路径调用 `AscendC::GetUserWorkspace`（丢入参返回 kfc 地址致 MTE 越界，仅 aclnn/框架路径适用）
 - `#include` 算子自身的 tiling 实现文件
 - 规定算子目录名、文件名、CMake 语法、构建命令
 - 把 golden 生成注释掉 / 跳过；让 verify 只覆盖基础 shape 不覆盖实网 shape
@@ -113,7 +117,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - 先阅读 `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档），再按设计选型写代码
 - op_kernel 只用 catlass `Kernel` / `Block*` / `Tile*`
 - Device 调用: `Kernel{}(params)`
-- Workspace: `AscendC::GetUserWorkspace(workspace)`
+- Workspace: catlass 直调用指针透传 `GM_ADDR userWs = workspace;`（禁 `GetUserWorkspace`/`SetSysWorkspaceForce`）
 - 严格按设计选型实例化每个分支
 - 自定义 Tile 对齐目标槽位签名
 - verify 判据 = `ops-precision-standard` 选出的官方标准；golden 镜像内核数值路径（fp32 累加→末尾 cast）；int8 GEMM golden 用 fp32 BLAS（`|Cint|<2²⁴` 精确）；gen_data/verify 覆盖基础 + 实网 shape（见 [precision-verification.md](references/precision-verification.md)）

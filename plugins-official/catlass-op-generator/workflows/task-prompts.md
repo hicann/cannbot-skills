@@ -37,7 +37,7 @@
   - §1.5 BlockEpilogue 槽位清单（如有）
   - §1.6 自定义 Tile 契约（如有，按 `/catlass-op-design` references/custom-epilogue.md 写头文件骨架）
   - §2.1 TilingKey 分支条件与合法组合
-  - §2.2 Workspace 量级来源（`AscendC::GetUserWorkspace`）
+  - §2.2 Workspace 量级来源（catlass 直调路径指针透传 `GM_ADDR userWs = workspace;`）
   - §2.3 实现约束（C3/C4/C6 等 catlass 禁项）
 - PLAN.md 包含：文件清单、catlass 编译选项（`-I./catlass/include` + `-DCATLASS_ARCH=<arch>`）、catlass kernel 运行期 shape 约束（避免过小 M/N，选 L1 分块整数倍）
 
@@ -83,7 +83,7 @@
 | 2 | BlockEpilogue 槽位匹配 | §1.5 列出的槽位与 `catlass/include/catlass/epilogue/block/block_epilogue_<policy>.hpp` 是否一致？ |
 | 3 | 自定义 Tile 契约 | §1.6 头文件骨架的 DispatchPolicy 类别 / `operator()` 签名是否与槽位期望严格对齐？ |
 | 4 | TilingKey 分支覆盖 | §2.1 是否覆盖所有 dtype / 转置 / Swizzle 组合？是否漏掉 host Tiling 分支落点？ |
-| 5 | Workspace 计算 | §2.2 Workspace 量级是否清晰？kernel 内是否明确 `AscendC::GetUserWorkspace`？ |
+| 5 | Workspace 计算 | §2.2 Workspace 量级是否清晰？kernel 内是否按起动经路正确取 workspace（catlass hand-launch 直调用指针透传 `GM_ADDR userWs = workspace;`，**禁** `GetUserWorkspace`）？ |
 | 6 | 精度策略 | catlass GEMM 精度阈值是否对齐 `ops-precision-standard`？无 catlass 专属放宽规则 |
 
 【WALKTHROUGH.md 输出格式】
@@ -201,7 +201,7 @@ Step E：补 gen_data.py / verify_result.py / run.sh，跑通 Level 0~2 测试
 【catlass 实现强制项】
 - 直接实例化 `Kernel` + `Kernel::Params`，`Kernel{}(params)`；**禁用** `DeviceGemm` 适配器
 - op_kernel 内**禁止**自实现矩阵乘 / 逐元素 / 拷贝循环（只能用 catlass `Kernel`/`Block*`/`Tile*`）
-- Workspace 必须用 `AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce`
+- Workspace 按起动经路取：catlass **hand-launch 直调**（本工作流主流）用指针透传 `GM_ADDR userWs = workspace;`（host `<<<>>>` 传入的 devWorkspace 直接用）；**禁用** `AscendC::GetUserWorkspace`（arch 2201 直调路径下丢入参返回 kfc 地址致 MTE DDR 越界）；**禁用** `SetSysWorkspaceForce`
 - op_kernel **禁止** `#include` 算子自身的 tiling 实现文件（仅可 include 共享 POD `*_tiling.h`）
 - CMakeLists.txt 必须用标准 Ascend C CMake 构建，仅追加 catlass 编译选项：`-I${CMAKE_SOURCE_DIR}/../../catlass/include` + `-DCATLASS_ARCH=<架构号>`。**禁止**使用 catlass 仓库自身的 CMake 函数（它们是 example 构建辅助，不适用于算子工程）。
 
@@ -255,7 +255,7 @@ Step E：补 gen_data.py / verify_result.py / run.sh，跑通 Level 0~2 测试
 - C3 CMakeLists.txt 注入 `-I<catlass>/include` + `-DCATLASS_ARCH=<arch>`
 - C4 op_kernel 直接 `Kernel` + `Kernel::Params` + `Kernel{}(params)`；禁用 `DeviceGemm` 适配器
 - C5 op_kernel 不自实现矩阵乘 / 逐元素 / 拷贝循环
-- C6 Workspace 用 `AscendC::GetUserWorkspace(workspace)`；禁用 `SetSysWorkspaceForce`
+- C6 Workspace 按起动经路取：catlass hand-launch 直调用指针透传 `GM_ADDR userWs = workspace;`，**禁用** `GetUserWorkspace`（直调路径丢入参返回 kfc 地址）与 `SetSysWorkspaceForce`
 - C7 op_kernel 不 include 算子自身的 tiling 实现文件（仅可 include 共享 POD `*_tiling.h`）
 - C8 TilingKey 分支与 DESIGN.md §2.1 合法组合一致
 - C9 测试 shape 满足 catlass 运行期约束（避免过小 M/N，选 L1 分块整数倍）

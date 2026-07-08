@@ -135,7 +135,7 @@ struct {TileName} {
 
 | 项目 | 内容 |
 |-----|------|
-| 来源 API | `AscendC::GetUserWorkspace(workspace)` |
+| 来源 API | catlass hand-launch 直调指针透传 `GM_ADDR userWs = workspace;`（**禁** `AscendC::GetUserWorkspace`，仅 aclnn/框架路径适用） |
 | 计算依据 | catlass `Kernel::GetWorkspaceSize(...)` 或 example 推导公式 |
 | 量级 | 约 N KB / MB |
 | host 端处理 | host Tiling 时累加 workspaceSize 返回给框架 |
@@ -147,7 +147,7 @@ struct {TileName} {
 | C3 编译选项 | CMakeLists.txt 必须注入 `-I<catlass>/include` + `-DCATLASS_ARCH={arch}` |
 | C4 Device 调用 | 直接 `Kernel{}(params)`；**禁用** `DeviceGemm` |
 | C5 自实现禁项 | op_kernel 不得自实现矩阵乘 / 逐元素 / 拷贝循环 |
-| C6 Workspace | 必须 `AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` |
+| C6 Workspace | catlass 直调指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` |
 | C7 头文件边界 | op_kernel **禁** include 算子自身的 tiling 实现文件 |
 
 ---

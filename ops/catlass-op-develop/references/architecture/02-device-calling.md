@@ -15,7 +15,7 @@ catlass example 中存在两种调用模式，op_kernel **只能**使用 Device 
 
 ```cpp
 // op_kernel 入口分支内
-GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
 Catlass::GemmCoord problemShape{m, n, k};
 
 typename Kernel::Params params{
@@ -30,13 +30,19 @@ Kernel{}(params);
 
 **为什么禁用 Host 调用**：`DeviceGemm` 包装 host 侧 workspace 分配 / stream 调度，在算子工程中由 op_host tiling 与 CANN 框架管理，不应出现在 device 侧代码中。
 
-## Workspace 获取
+## Workspace 获取（按起动经路，详见 [rules.md](../rules.md) Δ4）
+
+catlass 是 **hand-launch 直调**（`Kernel{}(params)`），workspace 由 host 经 kernel 形参**指针透传**：
 
 ```cpp
-// ✅ 正确
+// ✅ catlass 直调：指针透传
+GM_ADDR userWs = workspace;
+
+// ❌ catlass 直调下错误：GetUserWorkspace 丢弃入参返回 kfc 地址 → MTE DDR 越界(507057)
+//    （它只适用于 aclnn/op-framework 发起路径——运行时已设 kfc base）
 GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
 
-// ❌ 禁止
+// ❌ 始终禁止
 SetSysWorkspaceForce(workspace);
 ```
 
@@ -87,7 +93,7 @@ auto key = GET_TILING_KEY();  // 从 tiling 获取
 
 if /* 分支条件1 */ {
     using Kernel = NsMyOp::KernelVariant1;
-    GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+    GM_ADDR userWs = workspace;   // 指针透传，不调 GetUserWorkspace
     Catlass::GemmCoord problemShape{m, n, k};
     typename Kernel::Params params{problemShape, gmA, layoutA, gmB, layoutB,
                                    gmC, layoutC, userWs};
@@ -99,7 +105,7 @@ if /* 分支条件1 */ {
 ```
 
 **注意**：
-- 每个 `if` 块内独立 `AscendC::GetUserWorkspace` —— 不能提到块外
+- 每个 `if` 块内独立 `GM_ADDR userWs = workspace;` 指针透传 —— 不能提到块外；catlass 直调**禁** `GetUserWorkspace`
 - `GemmCoord` 是 int 类型，直接传 m/n/k
 - 分支条件怎么写由调用方决定，本 skill 只要求每个分支内正确实例化
 
@@ -108,7 +114,7 @@ if /* 分支条件1 */ {
 | 规则 | 说明 |
 |------|------|
 | Δ2 | op_kernel 只能用 Device 调用 `Kernel{}(params)` |
-| Δ4 | 必须用 `AscendC::GetUserWorkspace(workspace)` |
+| Δ4 | catlass 直调指针透传 `GM_ADDR userWs = workspace;`；禁 `GetUserWorkspace`（仅 aclnn 路径）/`SetSysWorkspaceForce` |
 | Δ6 | MatmulEpilogue 需独立 X/D 时手写 Params |
 | Δ7 | Quant Matmul 走 `QuantMatmulMultiStageWorkspace` |
 

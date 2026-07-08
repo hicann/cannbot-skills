@@ -42,7 +42,7 @@ op_kernel 内 using 链
       ▼
 op_kernel 入口分支内 Device 调用
       │
-      ├── 9. AscendC::GetUserWorkspace(workspace) → userWs
+      ├── 9. GM_ADDR userWs = workspace 指针透传（禁 GetUserWorkspace）
       ├── 10. GemmCoord{m, n, k} → problemShape
       ├── 11. Kernel::Params params{...} → 构造参数
       └── 12. Kernel{}(params) → 执行
@@ -92,4 +92,4 @@ ArchTag → DispatchPolicy → L1/L0TileShape → AType/BType/CType
 | Δ1 | 仅用 catlass Kernel / Block* / Tile*，禁手写矩阵乘/逐元素/拷贝循环 |
 | Δ2 | 必须用 Device 调用 `Kernel{}(params)`，禁用 `DeviceGemm` |
 | Δ3 | 每个分支正确实例化 `using Kernel = ...` + `Kernel::Params` |
-| Δ4 | `AscendC::GetUserWorkspace(workspace)`，禁 `SetSysWorkspaceForce` |
+| Δ4 | catlass 直调指针透传 `GM_ADDR userWs = workspace;`，禁 `GetUserWorkspace`（仅 aclnn 路径）/`SetSysWorkspaceForce` |

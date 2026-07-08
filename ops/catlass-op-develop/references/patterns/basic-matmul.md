@@ -62,7 +62,7 @@ CATLASS_DEVICE void CatlassBasicMatmulTemplate(GemmCoord problemShape,
 调用方（工程模板）在 op_kernel 入口对应分支内取 user workspace、构造 problemShape，转发到模板函数：
 
 ```cpp
-GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
 Catlass::GemmCoord problemShape{m, n, k};
 Catlass::CatlassBasicMatmulTemplate<half, float>(problemShape, gmA, gmB, gmC, userWs);
 ```

@@ -57,21 +57,32 @@ if /* dtype=half, transA=0, transB=0 */ {
 
 ---
 
-## Δ4：Workspace 必须用 GetUserWorkspace
+## Δ4：Workspace 取法按「起动经路」分条件（catlass 直调用指针透传）
 
-**要求**：`AscendC::GetUserWorkspace(workspace)` 取 user workspace。
+**核心**：`GetUserWorkspace` 不是「随便哪条路径都对」的 API，它有一个**前提条件**——起动经路事先把 kfc workspace base 设成了 host 分配的 workspace。**按起动经路二选一**：
 
-**禁止**：`SetSysWorkspaceForce(workspace)`。
+| 起动经路 | Workspace 取法 |
+|---------|---------------|
+| **catlass hand-launch 直调**（`Kernel{}(params)`，本 skill 的本流） | host 经 kernel 形参**指针透传** → `Params.ptrWorkspace` → `SetGlobalBuffer`；**禁用** `GetUserWorkspace` |
+| aclnn / op-framework 发起 | `AscendC::GetUserWorkspace(workspace)`（运行时已设 kfc base） |
+
+**始终禁止**：`SetSysWorkspaceForce(workspace)`。
 
 ```cpp
-// ✅ 正确
+// ✅ catlass hand-launch 直调（本 skill 主流）：指针透传，不调 GetUserWorkspace
+GM_ADDR userWs = workspace;   // host <<<>>> 传入的 devWorkspace，直接用
+
+// ❌ catlass 直调路径下错误：会拿到 kfc 地址而非 host workspace → MTE DDR 越界
 GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
 
-// ❌ 禁止
+// ❌ 始终禁止
 SetSysWorkspaceForce(workspace);
 ```
 
-**注意**：必须使用带命名空间的 `AscendC::GetUserWorkspace`。
+**为什么 catlass 直调不能用 GetUserWorkspace（已读 CANN 9.1.0-beta.1 源码核实）**：
+- `GetUserWorkspace` 在 NPU 构建下 `(void)(workspace)` **显式丢弃入参**，返回 `__get_kfc_workspace_addr() + RESERVED_WORKSPACE`（arch 2201 = 16MB）。源码：`dav_c220/kernel_operator_common_impl.h:56`、`utils/kernel_utils_constants.h:274`。
+- `__get_kfc_workspace_addr()` 的值只由 `SetSysWorkspaceForce`/框架运行时写入（同文件 `:49`）。aclnn/框架路径会在拉起 kernel 前设好；**catlass hand-launch（host 仅 `aclrtMalloc`→`Initialize`→`Params.ptrWorkspace`→`SetGlobalBuffer`，不设 kfc）不会设**。
+- 于是 catlass 直调下 `GetUserWorkspace` 返回未初始化地址 +16MB → 不合法 HBM → **MTE DDR 越界(507057)**。
 
 ---
 

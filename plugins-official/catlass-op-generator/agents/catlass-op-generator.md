@@ -55,7 +55,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - **禁止**：跳过 `/catlass-op-develop` skill 自行编排 catlass 拼装写法
 - **禁止**：op_kernel 中使用 catlass `DeviceGemm` 适配器（仅 example 用，必须直接实例化 `Kernel` + `Kernel::Params`）
 - **禁止**：op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环（只能用 catlass `Kernel` / `Block*` / `Tile*` 组件）
-- **禁止**：使用 `SetSysWorkspaceForce`，必须用 `AscendC::GetUserWorkspace(workspace)`
+- **禁止**：使用 `SetSysWorkspaceForce`；catlass hand-launch 直调 Workspace 用指针透传 `GM_ADDR userWs = workspace;`，**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界，仅 aclnn/框架路径适用）
 - **禁止**：op_kernel `#include` 算子自身的 tiling 实现文件
 - **禁止**：遇到问题时简化/删除/重写代码
 - **禁止**：因"能跑"就降低优化标准
@@ -128,7 +128,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 | §1.5 BlockEpilogue 槽位清单（如有） | 每个槽用现成 Tile 还是自定义 |
 | §1.6 自定义 Tile 契约（如有） | 头文件骨架 / DispatchPolicy 类别 / `operator()` 签名 |
 | §2.1 TilingKey 分支条件 | op_kernel 入口需要分支实例化的合法组合 |
-| §2.2 Workspace 量级 | host Tiling 时算 workspaceSize；kernel 内用 `AscendC::GetUserWorkspace` |
+| §2.2 Workspace 量级 | host Tiling 时算 workspaceSize；kernel 内 catlass 直调指针透传 `GM_ADDR userWs = workspace;`（禁 `GetUserWorkspace`） |
 
 **阶段 0 检查清单**：
 - [ ] 已阅读 `./catlass/README.md`
@@ -213,7 +213,7 @@ target_compile_options(<kernel_target> PRIVATE
    ```cpp
    if constexpr (/* DESIGN.md §2.1 列出的分支条件 */) {
        using Kernel = NsCatlass{OpName}::BasicMatmulKernel</* 分支模板实参 */>;
-       GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+       GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
        typename Kernel::Params params{ /* problemShape, gmA, layoutA, gmB, layoutB, gmC, layoutC, userWs */ };
        Kernel{}(params);
    }
@@ -224,7 +224,7 @@ target_compile_options(<kernel_target> PRIVATE
 **禁项**（违反 = 审查不通过）：
 - 不得使用 catlass `DeviceGemm` 适配器
 - 不得自实现矩阵乘 / 逐元素 / 拷贝循环
-- 不得调用 `SetSysWorkspaceForce`，必须 `AscendC::GetUserWorkspace(workspace)`
+- 不得调用 `SetSysWorkspaceForce`，catlass hand-launch 直调用指针透传 `GM_ADDR userWs = workspace;`，**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界）
 - 不得在 op_kernel `#include` 算子自身的 tiling 实现文件
 
 准出条件：编译通过。
@@ -330,7 +330,7 @@ target_compile_options(<kernel_target> PRIVATE
 | C2 | **必须**先加载 `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装 | 开发流程 |
 | C3 | **必须**直接实例化 `Kernel` + `Kernel::Params`；**禁用** `DeviceGemm` 适配器 | catlass 实现约束 |
 | C4 | **禁止**op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | catlass 实现约束 |
-| C5 | **必须**`AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` | catlass 实现约束 |
+| C5 | **必须**指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` | catlass 实现约束 |
 | C6 | **禁止**op_kernel `#include` 算子自身的 tiling 实现文件 | catlass 实现约束 |
 | C7 | **必须**在 CMakeLists.txt 注入 `-I<CATLASS_DIR>/include` + `-DCATLASS_ARCH=<架构号>` | 编译选项 |
 | C8 | **必须**测试 shape 满足 catlass 运行期约束（避免过小 M/N，选 L1 分块整数倍） | 测试约束 |

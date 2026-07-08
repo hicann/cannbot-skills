@@ -13,7 +13,7 @@
 | C3 | CMakeLists.txt 注入 `-I<catlass>/include` + `-DCATLASS_ARCH=<arch>` | `verify_cmake_config.py` | 阻塞 |
 | C4 | op_kernel **禁用** `DeviceGemm` 适配器；必须直接 `Kernel` + `Kernel::Params` + `Kernel{}(params)` | `grep -n DeviceGemm op_kernel/*.asc` 应不命中；`grep -n 'Kernel{}'` 应命中 | 阻塞 |
 | C5 | op_kernel **禁止**自实现矩阵乘 / 逐元素 / 拷贝循环 | 目视 + grep 标量循环模式 | 阻塞 |
-| C6 | 必须 `AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` | `grep -n 'GetUserWorkspace\|SetSysWorkspaceForce' op_kernel/*.asc` | 阻塞 |
+| C6 | catlass hand-launch 直调 Workspace 指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` | `grep -n 'GetUserWorkspace\|SetSysWorkspaceForce' op_kernel/*.asc` 应**不命中**；`grep -n 'userWs = workspace'` 应命中 | 阻塞 |
 | C7 | op_kernel **禁止** `#include` 算子自身的 tiling 实现文件（仅可 include 共享 POD `*_tiling.h`） | `grep -n '#include.*tiling' op_kernel/*.asc` | 阻塞 |
 | C8 | TilingKey 分支实例化与 DESIGN.md §2.1 列出的合法组合一致 | 对照 DESIGN.md | 高 |
 | C9 | 测试 shape 满足 catlass 运行期约束（避免过小 M/N，选 L1 分块整数倍） | 阅读 `scripts/gen_data.py` / Level 0–2 用例 | 高 |
@@ -38,9 +38,10 @@ grep -n "Kernel{}(params)\|Kernel{}\s*(" operators/{operator_name}/op_kernel/*.a
 # C5：禁用自实现循环
 grep -n "for\s*(" operators/{operator_name}/op_kernel/*.asc | head -20
 
-# C6：Workspace
+# C6：Workspace（catlass 直调应指针透传；GetUserWorkspace/SetSysWorkspaceForce 均应不命中）
 grep -n "GetUserWorkspace" operators/{operator_name}/op_kernel/*.asc
 grep -n "SetSysWorkspaceForce" operators/{operator_name}/
+grep -n "userWs = workspace" operators/{operator_name}/op_kernel/*.asc
 
 # C7：include 边界
 grep -n "#include" operators/{operator_name}/op_kernel/*.asc | grep -i tiling

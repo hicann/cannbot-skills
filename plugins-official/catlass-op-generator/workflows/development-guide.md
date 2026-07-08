@@ -111,7 +111,7 @@ extern "C" __global__ __aicore__ void catlass_xxx_op(
             NsCatlassXxx::BlockEpilogue,
             NsCatlassXxx::BlockScheduler>;
 
-        GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+        GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
         typename Kernel::Params params{
             /* problemShape */ {tilingData.M, tilingData.N, tilingData.K},
             /* gmA */ a, /* layoutA */ {tilingData.M, tilingData.K},
@@ -131,7 +131,7 @@ extern "C" __global__ __aicore__ void catlass_xxx_op(
 |---|--------|---------|
 | C4 | 直接 `Kernel{}(params)`，**禁用** `DeviceGemm` 适配器 | `Catlass::DeviceGemm<...> dg(...)` |
 | C5 | 不得自实现矩阵乘 / 逐元素 / 拷贝循环 | `for (k = 0; k < K; ++k) c += a*b;` |
-| C6 | Workspace 必须 `AscendC::GetUserWorkspace(workspace)` | `SetSysWorkspaceForce(...)` |
+| C6 | catlass 直调 Workspace 指针透传 `GM_ADDR userWs = workspace;` | `AscendC::GetUserWorkspace(...)`（直调路径丢入参返回 kfc 地址）/ `SetSysWorkspaceForce(...)` |
 | C7 | 不得 `#include` 算子自身的 tiling 实现文件 | `#include "catlass_xxx.tiling.cpp"` |
 
 ---
@@ -221,7 +221,8 @@ REGISTER_TILING_DATA_CLASS(CatlassXxxOp, CatlassXxxTilingData)
 |------|---------|
 | 用 `Catlass::DeviceGemm<...>` 适配器 | 直接 `Kernel{}(params)` |
 | 在 op_kernel 写 `for(k=0;k<K;++k) c += a*b` | 用 catlass `BlockMmad` |
-| `SetSysWorkspaceForce(...)` | `AscendC::GetUserWorkspace(workspace)` |
+| `SetSysWorkspaceForce(...)` | 指针透传 `GM_ADDR userWs = workspace;` |
+| catlass 直调用 `AscendC::GetUserWorkspace(workspace)`（丢入参返回 kfc 地址致 MTE 越界） | 指针透传 `GM_ADDR userWs = workspace;`（GetUserWorkspace 仅 aclnn/框架路径适用） |
 | op_kernel `#include "catlass_xxx_tiling.cpp"` | 仅 include `*_tiling.h` POD |
 | 算子名 `matmul_add`（无 catlass） | `catlass_matmul_add` |
 | `git clone catlass.git operators/catlass_xxx/catlass` | 在工作区根 `git clone catlass.git` |

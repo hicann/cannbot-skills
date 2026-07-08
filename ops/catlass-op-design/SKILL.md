@@ -95,8 +95,8 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 
 ```
 量化（有 scale/dequant）？ → QuantMatmul 路径
-分组（多组独立 A×B）？     → Grouped Matmul 路径
-纯 matmul / matmul+激活？   → 标准 Matmul 路径
+分组（多组独立 A×B）？     → Grouped Matmul 路径（详见 [kernels/grouped-matmul.md](references/kernels/grouped-matmul.md)）
+纯 matmul / matmul+激活？   → 标准 Matmul 路径（详见 [kernels/matmul.md](references/kernels/matmul.md)）
 ├── 纯 matmul  → 场景 A
 ├── + 激活     → 场景 B
 ├── + Bias+激活 → 场景 C
@@ -208,6 +208,8 @@ epilogue 操作数是否跨 N？
 | [architecture/01-tile-layer.md](references/architecture/01-tile-layer.md) | Tile 原语（自动推导） |
 | [architecture/02-block-layer.md](references/architecture/02-block-layer.md) | DispatchPolicy 详解、Swizzle、Epilogue |
 | [architecture/03-kernel-layer.md](references/architecture/03-kernel-layer.md) | Kernel 类型、组装、Params |
+| [kernels/matmul.md](references/kernels/matmul.md) | **Matmul 类算子设计路由**：场景 A–F、组件选型、分支实例化 |
+| [kernels/grouped-matmul.md](references/kernels/grouped-matmul.md) | **Grouped Matmul（含 MoE 融合）设计路由**：分组 tiling、Async DispatchPolicy、★融合 epilogue 跨 N-block 风险评估、A2/950 平台能力核对 |
 
 ## Never / Always
 

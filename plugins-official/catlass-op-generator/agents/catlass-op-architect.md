@@ -142,7 +142,7 @@ snake_case → CamelCase 类名一致映射（如 `catlass_matmul_add` → `Catl
 3. **BlockEpilogue 槽位清单**（仅当 BlockEpilogue ≠ void）：打开 `catlass/include/catlass/epilogue/block/block_epilogue_<policy>.hpp`，列出每个 Tile 槽的模板形参与签名，标记「现成 / 粒度 A 自定义 / 粒度 B 新特化」
 4. **自定义 Tile 契约**（如有）：按 `/catlass-op-design` references/custom-epilogue.md 写出头文件骨架与契约
 5. **TilingKey 分支条件**：列出需要分支实例化的条件（dtype / 转置 / Swizzle 等）与合法组合
-6. **Workspace 量级**：来源（`AscendC::GetUserWorkspace`）与计算依据
+6. **Workspace 量级**：来源（catlass hand-launch 直调指针透传 `GM_ADDR userWs = workspace;`，**禁** `AscendC::GetUserWorkspace`）与计算依据
 
 #### Step 3：API 与精度验证
 

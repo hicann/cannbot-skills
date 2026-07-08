@@ -35,7 +35,7 @@ using MatmulKernel = Catlass::Gemm::Kernel::QuantMatmulMultiStageWorkspace<
 ## Device 调用
 
 ```cpp
-GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
 Catlass::GemmCoord problemShape{m, n, k};
 
 typename MatmulKernel::Params params{

@@ -119,7 +119,7 @@ python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMake
 | C3 | CMakeLists.txt 注入 `-I<catlass>/include` + `-DCATLASS_ARCH=<arch>` | grep `target_compile_options` | 阻塞 |
 | C4 | op_kernel **禁用** catlass `DeviceGemm` 适配器；必须直接实例化 `Kernel` + `Kernel::Params`，并 `Kernel{}(params)` | grep `DeviceGemm` 应不存在；grep `Kernel{}` 应存在 | 阻塞 |
 | C5 | op_kernel **禁止**自实现矩阵乘 / 逐元素 / 拷贝循环（必须委托 catlass `Kernel`/`Block*`/`Tile*`） | 目视 + grep `for.*matmul`、`for.*Add` | 阻塞 |
-| C6 | 必须 `AscendC::GetUserWorkspace(workspace)`；**禁用** `SetSysWorkspaceForce` | grep | 阻塞 |
+| C6 | catlass hand-launch 直调 Workspace 指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` | grep `GetUserWorkspace`/`SetSysWorkspaceForce` 应不命中 | 阻塞 |
 | C7 | op_kernel **禁止** `#include` 算子自身的 tiling 实现文件（仅可 include 共享 POD `*_tiling.h`） | grep `#include "*tiling*"` | 阻塞 |
 | C8 | TilingKey 分支实例化与 DESIGN.md §2.1 列出的合法组合一致 | 对照 DESIGN.md | 高 |
 | C9 | 运行期测试 shape 满足 catlass 约束（避免过小 M/N，选 L1 分块 M/N 整数倍） | 阅读 `scripts/gen_data.py` / Level 0–2 用例 | 高 |
@@ -183,7 +183,7 @@ C1–C7 任一不通过 → REVIEW.md 标记必须修复项；C8–C11 不通过
 - 2.1 op_kernel 直接实例化 `Kernel` + `Kernel::Params`（C4）（4 分）
 - 2.2 入口属性 `__global__ __aicore__`（3 分）
 - 2.3 命名 / 源码位置（C1+C2）（3 分）
-- 2.4 Workspace 使用 `GetUserWorkspace`（C6）（3 分）
+- 2.4 Workspace 取法正确（catlass 直调指针透传 `userWs = workspace`，禁 `GetUserWorkspace`/`SetSysWorkspaceForce`）（C6）（3 分）
 - 2.5 数据流完整（host Tiling → kernel 启动 → 结果搬回）（2 分）
 
 **维度 3：编码规范（15 分）**

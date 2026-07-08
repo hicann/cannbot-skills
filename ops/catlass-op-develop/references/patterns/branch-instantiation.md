@@ -26,7 +26,7 @@ auto tilingKey = /* 从 tiling 获取字段 */;
 if /* 条件 */ {
     using Kernel = NsMyOp::CatlassMatmul<half, false, false>;
 
-    GM_ADDR userWs = const_cast<GM_ADDR>(AscendC::GetUserWorkspace(workspace));
+    GM_ADDR userWs = workspace;   // 指针透传（hand-launch 直调），不调 GetUserWorkspace
     Catlass::GemmCoord problemShape{m, n, k};
     Catlass::layout::RowMajor layoutA{m, k};
     Catlass::layout::RowMajor layoutB{k, n};
