@@ -60,21 +60,30 @@ test -w /tmp || echo "MISSING: /tmp not writable"
 
 会调用 `git commit` 的 skill 必须在 Step 0 阶段确认 `user.name` 和 `user.email` 已配置，否则 `git commit` 会在后续步骤才报错（`Author identity unknown`），白白浪费一轮 clone+改代码+跑测试的工作量——越早暴露越好。提交 PR 的流程虽然 `git push` 不会因身份缺失而失败，但 commit author 是公开字段，配错人后难以补救，因此同样需要在推送前校验。
 
+读取顺序：**local（项目级）→ global → 询问用户**。服务器多人共用时，global 配置往往不是当前项目期望的身份；更常见的做法是在项目级别设置 `user.name` / `user.email`。
+
 ```bash
-NAME=$(git config --global user.name 2>/dev/null)
-EMAIL=$(git config --global user.email 2>/dev/null)
+NAME=$(git config --local user.name 2>/dev/null)
+EMAIL=$(git config --local user.email 2>/dev/null)
 if [ -n "$NAME" ] && [ -n "$EMAIL" ]; then
-  GIT_AUTHOR_SOURCE="global"
+  GIT_AUTHOR_SOURCE="local"
+else
+  NAME=$(git config --global user.name 2>/dev/null)
+  EMAIL=$(git config --global user.email 2>/dev/null)
+  if [ -n "$NAME" ] && [ -n "$EMAIL" ]; then
+    GIT_AUTHOR_SOURCE="global"
+  fi
 fi
 ```
 
-- 上述两项都已配置 → 标 `GIT_AUTHOR_SOURCE=global`；后续克隆出的工作目录会**自动继承** global 配置，**无需**再 `git config` 写到 local
-- 任一缺失 → AskUserQuestion 询问用户
+- local 两项都已配置 → 标 `GIT_AUTHOR_SOURCE=local`；后续在工作目录上直接使用（若工作目录就是当前目录则已生效；若 clone 到新目录则需写入 local）
+- local 缺失但 global 两项都已配置 → 标 `GIT_AUTHOR_SOURCE=global`；后续克隆出的工作目录会**自动继承** global 配置，**无需**再 `git config` 写到 local
+- 两者都缺失 → AskUserQuestion 询问用户
 
-询问示例（仅 global 缺失时触发）：
+询问示例（仅 local 和 global 都缺失时触发）：
 
 ```
-问题: 未检测到 git 提交用户信息（global user.name / user.email），请提供：
+问题: 未检测到 git 提交用户信息（local / global user.name / user.email 均未配置），请提供：
 选项:
   - 用我下面提供的 name 和 email（在下一条消息中给出）
   - 用 fork_owner 拼出一个占位（不推荐，作者归属会失真）
@@ -84,15 +93,23 @@ fi
 拿到用户提供的值后**只在工作目录上写**，**禁止改 `~/.gitconfig` 全局**：
 
 ```bash
-# 仅当 Step 0 走"用户提供"分支时执行；走 global 分支跳过
+# 仅当 Step 0 走"用户提供"分支时执行；走 local / global 分支跳过
 git -C "$WORK_DIR" config user.name  "$NAME"
 git -C "$WORK_DIR" config user.email "$EMAIL"
 GIT_AUTHOR_SOURCE="user"
 ```
 
+当 `GIT_AUTHOR_SOURCE=local` 且工作目录是新 clone 的目录（非当前目录）时，需要将 local 值写入新目录：
+
+```bash
+# 仅当 GIT_AUTHOR_SOURCE=local 且 WORK_DIR ≠ 当前目录时执行
+git -C "$WORK_DIR" config user.name  "$NAME"
+git -C "$WORK_DIR" config user.email "$EMAIL"
+```
+
 理由：用户的全局 git 配置可能服务于多个项目和身份，skill 不应擅自覆盖；用户主动提供的值是一次性使用，只配 local 不污染全局。
 
-预检报告里展示读到的 `Name <email>`，方便用户一眼确认是否是本次想用的身份（commit author 本就是公开字段，预检阶段透明展示反而避免事后才发现写错了人）。
+预检报告里展示读到的 `Name <email>` 及来源（local / global / user），方便用户一眼确认是否是本次想用的身份（commit author 本就是公开字段，预检阶段透明展示反而避免事后才发现写错了人）。
 
 ---
 
@@ -107,7 +124,7 @@ GIT_AUTHOR_SOURCE="user"
   ✅ Curl: 可用
   ✅ Python: python3 3.10.12
   ✅ /tmp: 可写
-  ✅ Git author: pingchuantang <pingchuantang@gitcode.com>（来源：global，仅 gitcode-issue-handler 等创建 commit 的 skill 才检）
+  ✅ Git author: pingchuantang <pingchuantang@gitcode.com>（来源：local / global / user，仅 gitcode-issue-handler 等创建 commit 的 skill 才检）
 预检通过，开始执行 ...
 ```
 
@@ -131,5 +148,6 @@ GIT_AUTHOR_SOURCE="user"
 - ❌ 自动写入 token 到 `~/.bashrc` 或任何持久化文件
 - ❌ 创建 commit 类 skill 跳过 git author 预检，等到 `git commit` 才报 `Author identity unknown`——clone+改代码+跑测试的工作量已经废了
 - ❌ 修改全局 `~/.gitconfig` 的 user.name / user.email——会污染用户的其他项目身份；只在工作目录用 `git -C <work_dir> config` 设置
-- ❌ **从 fork_url / 用户名等地方"脑补"一个身份**塞进 commit（典型反例：`git -c user.name='pingchuantang' -c user.email='pingchuantang@gitcode.com' commit ...`）。即便看起来能跑通，最终 PR 上的 commit author 是错的——可能挂错人头、与用户实际身份不符。身份只能来自两个来源：global 配置 或 用户在 AskUserQuestion 里提供，没有第三条路。
+- ❌ **从 fork_url / 用户名等地方"脑补"一个身份**塞进 commit（典型反例：`git -c user.name='pingchuantang' -c user.email='pingchuantang@gitcode.com' commit ...`）。即便看起来能跑通，最终 PR 上的 commit author 是错的——可能挂错人头、与用户实际身份不符。身份只能来自三个来源：local 配置、global 配置 或 用户在 AskUserQuestion 里提供，没有第四条路。
+- ❌ **只读 global 跳过 local**——服务器多人共用时 global 往往不是当前项目身份，必须先查 local 再 fallback 到 global。
 - ❌ 用 `git commit -c user.name=...` / `--author="..."` 这类 inline 覆盖来绕过 Step 0 预检——任何时候 `git commit` 命令都不应带身份相关的 flag，让它读 work_dir / global 配置即可。

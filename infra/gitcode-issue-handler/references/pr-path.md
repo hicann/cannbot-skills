@@ -49,46 +49,113 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/${upstream_owner}/${upstream_
 
 ---
 
-## Step 2: 克隆 fork、设置 upstream、同步
+## Step 2: 工作目录准备（检测当前目录 / 克隆 fork）
 
 详细 git 命令见 [gitcode-toolkit](../../gitcode-toolkit/SKILL.md) 的速查表与 `references/clone-and-checkout.md`、`references/remote-and-branch.md`。
 
-### 2.1 工作目录
+### 2.1 检测当前目录是否已是目标 fork
+
+大多数情况下用户已经在 fork 仓库的本地目录中工作，无需重新 clone。先检测当前目录的 remote URL 是否指向目标 fork：
+
+```bash
+CURRENT_DIR=$(pwd)
+# 检查所有 remote，匹配 fork_url 的 owner/repo
+MATCHED_REMOTE=""
+for remote in $(git remote 2>/dev/null); do
+  remote_url=$(git remote get-url "$remote" 2>/dev/null)
+  # 标准化 URL 比较：去掉 .git 后缀和协议前缀
+  normalized_remote=$(echo "$remote_url" | sed -E 's#(https?://|git@[^:]+:)##; s#\.git$##')
+  normalized_fork=$(echo "${fork_url}" | sed -E 's#(https?://|git@[^:]+:)##; s#\.git$##')
+  if [ "$normalized_remote" = "$normalized_fork" ]; then
+    MATCHED_REMOTE="$remote"
+    break
+  fi
+done
+```
+
+**两种情况**：
+
+| `MATCHED_REMOTE` | 处理 |
+|---|---|
+| 非空 | 当前目录就是 fork → 复用当前目录，跳到 Step 2.3 |
+| 空 | 当前目录不是 fork → 走 Step 2.2 clone 流程 |
+
+### 2.2 克隆 fork（仅当前目录不是 fork 时）
 
 ```bash
 timestamp=$(date +%Y%m%d_%H%M%S)
 WORK_DIR="/tmp/gitcode-issue-handler_${upstream_repo}_${issue_number}_${timestamp}"
-```
-
-### 2.2 克隆 fork 并设置 upstream
-
-```bash
 git clone --depth=200 "${fork_url}" "$WORK_DIR"
 cd "$WORK_DIR"
-
-# Step 0 走 GIT_AUTHOR_SOURCE=user 分支时（即询问用户拿到的 name/email），
-# 才在本仓库 local 写一次；走 global 分支则跳过——work_dir 会自动继承全局配置。
-if [ "$GIT_AUTHOR_SOURCE" = "user" ]; then
-  git config user.name  "$NAME_FROM_USER"
-  git config user.email "$EMAIL_FROM_USER"
-fi
 
 # 添加上游
 git remote add upstream "https://gitcode.com/${upstream_owner}/${upstream_repo}.git"
 git fetch upstream --depth=200
 ```
 
-### 2.3 同步 base 分支
+### 2.3 设置 git author（按来源处理）
+
+```bash
+# 复用当前目录时 WORK_DIR 就是 CURRENT_DIR
+WORK_DIR="${WORK_DIR:-$CURRENT_DIR}"
+
+# 按 GIT_AUTHOR_SOURCE 处理 git author
+if [ "$GIT_AUTHOR_SOURCE" = "user" ]; then
+  # 用户提供 → 写入工作目录 local
+  git -C "$WORK_DIR" config user.name  "$NAME"
+  git -C "$WORK_DIR" config user.email "$EMAIL"
+elif [ "$GIT_AUTHOR_SOURCE" = "local" ] && [ "$WORK_DIR" != "$CURRENT_DIR" ]; then
+  # local 来源且是新 clone 目录 → 将 local 值写入新目录
+  git -C "$WORK_DIR" config user.name  "$NAME"
+  git -C "$WORK_DIR" config user.email "$EMAIL"
+fi
+# GIT_AUTHOR_SOURCE=global 且 clone 新目录 → 自动继承，无需操作
+# GIT_AUTHOR_SOURCE=local 且复用当前目录 → 已生效，无需操作
+```
+
+### 2.4 确保 upstream remote 存在（复用当前目录时）
+
+复用当前目录时，upstream remote 可能不存在或名称不同，需要检查并设置：
+
+```bash
+# 检查是否已有指向上游的 remote
+UPSTREAM_REMOTE=""
+for remote in $(git remote 2>/dev/null); do
+  remote_url=$(git remote get-url "$remote" 2>/dev/null)
+  normalized_remote=$(echo "$remote_url" | sed -E 's#(https?://|git@[^:]+:)##; s#\.git$##')
+  normalized_upstream="gitcode.com/${upstream_owner}/${upstream_repo}"
+  if [ "$normalized_remote" = "$normalized_upstream" ]; then
+    UPSTREAM_REMOTE="$remote"
+    break
+  fi
+done
+
+if [ -z "$UPSTREAM_REMOTE" ]; then
+  UPSTREAM_URL="https://gitcode.com/${upstream_owner}/${upstream_repo}.git"
+  if git remote get-url upstream >/dev/null 2>&1; then
+    # "upstream" 名称已被占用且指向不同仓库 → 使用备选名称，不覆盖用户已有配置
+    UPSTREAM_REMOTE="upstream_issue"
+  else
+    UPSTREAM_REMOTE="upstream"
+  fi
+  git remote add "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
+fi
+git fetch "$UPSTREAM_REMOTE" --depth=200
+```
+
+### 2.5 同步 base 分支
 
 ```bash
 # 推断 base 分支：优先用户参数 → Issue 中提及 → upstream HEAD（通常 master）
-git checkout -B "${base_branch}" "upstream/${base_branch}"
-git push origin "${base_branch}"   # 同步到 fork（可选；失败不致命，记日志即可）
+# $MATCHED_REMOTE 非空时用 fork 对应的 remote 名，否则用 origin
+FORK_REMOTE="${MATCHED_REMOTE:-origin}"
+git checkout -B "${base_branch}" "${UPSTREAM_REMOTE:-upstream}/${base_branch}"
+git push "$FORK_REMOTE" "${base_branch}"   # 同步到 fork（可选；失败不致命，记日志即可）
 ```
 
 如果 fork 上 `base_branch` 落后较多，仅同步到本地工作树，不强制推 fork（避免污染用户其他在飞的工作）。
 
-### 2.4 切出工作分支
+### 2.6 切出工作分支
 
 分支命名（英文）：`<type>/issue-${issue_number}-<slug>`，`<type>` 按 Issue 性质选用 Conventional Commits 类型——bug 类用 `fix`、新特性用 `feat`、文档用 `docs`、性能用 `perf`、重构用 `refactor`、测试用 `test`、其余用 `chore`；slug 来自 Issue 标题的英文化简写（如 Issue 中已有英文关键词则直接用）。例：
 
@@ -220,7 +287,8 @@ Issue #${issue_number} 根因初判
 确认后：
 
 ```bash
-git push -u origin "${type}/issue-${issue_number}-${slug}"
+FORK_REMOTE="${MATCHED_REMOTE:-origin}"
+git push -u "$FORK_REMOTE" "${type}/issue-${issue_number}-${slug}"
 ```
 
 push 前**再问一次用户确认**（这是对外可见操作）。失败常见原因：

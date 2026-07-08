@@ -62,7 +62,7 @@ Step C-6  日志 + 报告评论链接
 1. **GitCode Token**：用户消息 → 环境变量 `GITCODE_TOKEN` → 都没有则询问
 2. **git / curl / python3**：缺失则询问是否继续
 3. **/tmp 可写**
-4. **Git 提交用户信息**：**仅 PR 路径必检**。先做 1~3 项基础预检，git author 留到 Step 1.5 判定为 PR 后再补——Comment 答疑场景下不会无端问用户的 git 身份。读 `git config --global user.name` / `user.email`；两者都非空 → 标 `GIT_AUTHOR_SOURCE=global`；任一缺失 → AskUserQuestion 让用户提供，拿到后**只**在 work_dir 上 `git config`，**禁止改 `~/.gitconfig` 全局**。详见 env-check.md「5. Git 提交用户信息」。
+4. **Git 提交用户信息**：**仅 PR 路径必检**。先做 1~3 项基础预检，git author 留到 Step 1.5 判定为 PR 后再补——Comment 答疑场景下不会无端问用户的 git 身份。按 **local → global → 询问用户** 三级 fallback 读取 `user.name` / `user.email`：先读 `git config --local`，缺失再读 `git config --global`，都缺失则 AskUserQuestion 让用户提供。拿到后**只**在 work_dir 上 `git config`，**禁止改 `~/.gitconfig` 全局**。详见 env-check.md「5. Git 提交用户信息」。
 
 > 为什么早查 git author：缺 author 时 `git commit` 会以 `Author identity unknown` 失败，而那时已走完 clone+改代码+跑测试一整轮，回头补配置浪费上下文。早查早暴露——但别早于"已确定要 commit"。
 
@@ -132,7 +132,7 @@ curl -s "https://api.gitcode.com/api/v5/repos/${upstream_owner}/${upstream_repo}
 骨架：
 
 - **Step 1.6**：fork_url 缺失时 AskUserQuestion 三选一（提供链接 / 自动 fork / 取消）；自动 fork 调 GitCode Fork API，注意 409/422 已存在、403 无权限、异步未就绪三种异常处理
-- **Step 2**：`/tmp/gitcode-issue-handler_${upstream_repo}_${issue_number}_${ts}` → clone fork → 必要时写 work_dir local 的 user.name/email（仅 `GIT_AUTHOR_SOURCE=user` 时）→ 配 upstream → fetch upstream → `checkout -B base upstream/base` → 切 `${type}/issue-${issue_number}-<slug>`（`<type>` 按 Issue 性质选 `fix` / `feat` / `docs` 等，与 commit type 一致）
+- **Step 2**：先检测当前目录是否已是目标 fork（比对 remote URL），是则复用当前目录、仅新建 branch；否则 clone 到 `/tmp/gitcode-issue-handler_${upstream_repo}_${issue_number}_${ts}` → 按 `GIT_AUTHOR_SOURCE`（local / global / user）处理 git author → 配 upstream → fetch upstream → `checkout -B base upstream/base` → 切 `${type}/issue-${issue_number}-<slug>`（`<type>` 按 Issue 性质选 `fix` / `feat` / `docs` 等，与 commit type 一致）
 - **Step 3**：读代码定位相关位置（不脑补、bug 类先稳定复现并追根因、feature/docs 类直接对照诉求圈定改动面、写下假设并验证）→ 输出现象/结论/涉及文件/策略/风险，AskUserQuestion 让用户确认方案后再动手
 - **Step 4**：最小改动（注释/变量名/log 文本全英文、遵循文件内既有风格、不顺手重构、不新增依赖）→ 跑相关测试 → 失败回到 Step 4.1 迭代（**不改测试断言来"过测"**）→ 提交前自检 checklist
 - **Step 5**：Conventional Commits 风格英文 message（`<type>(<scope>): <subject>` + body；body 只写"这次提交改了什么、为什么这么改"，**不要写 `Fixes #N` / Issue 背景叙述**——Issue 关联放到 PR body 的"关联的Issue"章节；**禁止 Co-Authored-By**）→ 主流打印 commit 全文 + `git diff --stat` → 确认 → push 前再确认一次
