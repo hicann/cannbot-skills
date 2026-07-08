@@ -44,6 +44,21 @@
 - OpAICoreConfig未配置的继承OpDef定义
 - OpAICoreConfig定义的会覆盖OpDef定义
 
+### binary.json dtype 组合推导
+
+> **适用范围**：ops-math / ops-nn / ops-cv / ops-transformer 仓库（使用 OPC 编译流程）
+
+每个 SoC 的 `op_host/config/{soc}/{op}_binary.json` dtype 组合，必须与 `_def.cpp` 中该 SoC 的 DataType 列表按索引位置一一对应。
+
+**推导方法**：
+1. 有 per-SoC config → 用该 config 的 DataType 列表（如 config950）
+2. 无 per-SoC config → 用默认 DataType 列表
+3. 按索引 i 取所有 Input/Output 的第 i 个 dtype，构成一个 binary.json 条目
+
+**常见错误**：重复条目、遗漏混合 dtype、不同 SoC JSON 内容完全相同。
+
+**详细指南**：`references/binary-json-dtype-guide.md`
+
 ---
 
 ## Tiling模板编程

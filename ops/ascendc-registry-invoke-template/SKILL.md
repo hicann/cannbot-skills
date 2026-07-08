@@ -23,6 +23,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | Tiling模板编程 | `references/advanced-guide.md` → Tiling模板编程章节 |
 | 理解 def/TilingKey/编译宏关系 | `references/advanced-guide.md` → def 文件与 TilingKey 的协作关系 |
 | 编译部署 | `references/build-deploy-guide.md` |
+| binary.json dtype 配置（ops-* 仓库） | `references/binary-json-dtype-guide.md` |
 | 编写UT测试 | `references/basic-guide.md` → UT验证章节 |
 | 编写ST测试 | `references/st-test-guide.md` + `references/add_example/tests/st/` |
 | ACLNN 接口开发 | `references/add_example/op_api/`（代码注释自表达，见下方说明） |
