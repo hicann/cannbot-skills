@@ -177,61 +177,85 @@ def _np_broadcast_shapes(*shapes) -> _ShapeTuple:
     return _ShapeTuple.from_symbolic(out_sh)
 
 
+def _np_reduce_shape(shape, *, axis=-1, keepdims=False) -> _ShapeTuple:
+    """Return the output shape of a numpy-style reduction.
+
+    Folded-prefix shapes have unknown leading rank. For those shapes we can
+    safely reduce axes in the explicit suffix via negative axis indexes, which is
+    exactly what generated Reduction specs use: ["...x", "R"] with axis=-1.
+    """
+    if isinstance(shape, _ShapeTuple):
+        shape_tuple = shape
+    elif isinstance(shape, (tuple, list)):
+        shape_tuple = _ShapeTuple([_coerce_to_dim(x) for x in shape])
+    else:
+        raise DslError("dsl_eval_error", f"np.reduce_shape 参数必须是 shape，得到 {type(shape).__name__}")
+    if not isinstance(keepdims, bool):
+        raise DslError("dsl_eval_error", f"keepdims 必须是 bool，得到 {type(keepdims).__name__}")
+
+    axes = _normalize_reduce_axes(axis, len(shape_tuple._dims), shape_tuple._folded is not None)
+    one = Dim(kind="const", value=1)
+    dims: list[Dim] = []
+    for index, dim in enumerate(shape_tuple._dims):
+        if index in axes:
+            if keepdims:
+                dims.append(one)
+            continue
+        dims.append(dim)
+    return _ShapeTuple(dims, shape_tuple._folded)
+
+
+def _normalize_reduce_axes(axis, explicit_rank: int, has_folded_prefix: bool) -> set[int]:
+    if axis is None:
+        if has_folded_prefix:
+            raise DslError(
+                "dsl_eval_error",
+                "folded rank 未知时不支持 axis=None；请用显式后缀维和负 axis",
+            )
+        raw_axes = list(range(explicit_rank))
+    elif isinstance(axis, bool):
+        raise DslError("dsl_eval_error", f"axis 必须是 int/list/tuple/None，得到 bool {axis!r}")
+    elif isinstance(axis, int):
+        raw_axes = [axis]
+    elif isinstance(axis, (tuple, list)):
+        raw_axes = list(axis)
+    else:
+        raise DslError("dsl_eval_error", f"axis 必须是 int/list/tuple/None，得到 {type(axis).__name__}")
+
+    normalized: set[int] = set()
+    for raw_axis in raw_axes:
+        if isinstance(raw_axis, bool) or not isinstance(raw_axis, int):
+            raise DslError("dsl_eval_error", f"axis 必须是 int，得到 {raw_axis!r}")
+        if has_folded_prefix:
+            if raw_axis >= 0:
+                raise DslError(
+                    "dsl_eval_error",
+                    "folded rank 未知时只支持指向显式后缀维的负 axis",
+                )
+            axis_index = explicit_rank + raw_axis
+        else:
+            axis_index = raw_axis + explicit_rank if raw_axis < 0 else raw_axis
+        if axis_index < 0 or axis_index >= explicit_rank:
+            raise DslError(
+                "dsl_eval_error",
+                f"reduce axis 越界: axis={raw_axis}，显式 rank={explicit_rank}",
+            )
+        if axis_index in normalized:
+            raise DslError("dsl_eval_error", f"reduce axis 重复: axis={raw_axis}")
+        normalized.add(axis_index)
+    return normalized
+
+
 class _NpNamespace:
     """numpy_expr 中 `np` 标识符背后的极小命名空间。"""
     broadcast_shapes = staticmethod(_np_broadcast_shapes)
+    reduce_shape = staticmethod(_np_reduce_shape)
 
 
 _NP_NAMESPACE = _NpNamespace()
 
 
 # ---------- evaluator main entry -------------------------------------------
-
-
-def _compile_shape_rule(rule, field_path):
-    if not isinstance(rule, str) or not rule.strip():
-        raise DslError("dsl_parse_error", "shape_rule 必须是非空字符串", field_path)
-    try:
-        tree = ast.parse(rule, mode="exec")
-    except SyntaxError as e:
-        raise DslError(
-            "dsl_parse_error",
-            f"shape_rule 语法错: {e.msg} (行 {e.lineno})",
-            field_path,
-        ) from None
-    try:
-        _ast_sandbox.validate_ast(tree)
-    except SandboxError as e:
-        raise DslError(_map_sandbox_code(e.code), e.message, field_path) from None
-    return compile(tree, "<shape_rule>", "exec")
-
-
-def _build_shape_eval_globals(output_name, inputs, attr_values):
-    extra: dict[str, Any] = {"np": _NP_NAMESPACE}
-    for name, sh in inputs.items():
-        extra[name] = _ShapeProxy(name, sh)
-    extra.update(attr_values)
-    output_slot = pytypes.SimpleNamespace(shape=None)
-    extra[output_name] = output_slot
-    return _ast_sandbox.make_globals(extra), output_slot
-
-
-def _exec_shape_rule(compiled, g, locals_dict, field_path):
-    try:
-        with _ast_sandbox.timeout(_TIMEOUT_S, on_timeout_code="shape_eval_timeout"):
-            exec(compiled, g, locals_dict)
-    except SandboxError as e:
-        raise DslError(_map_sandbox_code(e.code), e.message, field_path) from None
-    except DslError:
-        raise
-    except NameError as e:
-        raise DslError(
-            "unresolved_symbol",
-            f"shape_rule 引用了未声明的标识符: {e.args[0] if e.args else str(e)}",
-            field_path,
-        ) from None
-    except (TypeError, AttributeError) as e:
-        raise DslError("dsl_eval_error", f"shape_rule 求值失败: {e}", field_path) from None
 
 
 def evaluate_shape_rule(
@@ -246,14 +270,68 @@ def evaluate_shape_rule(
 
     Raises DslError on parse / sandbox / runtime issues. The caller (stage 3)
     converts these to findings.
-    """
-    compiled = _compile_shape_rule(rule, field_path)
-    g, output_slot = _build_shape_eval_globals(output_name, inputs, attr_values)
-    locals_dict: dict[str, Any] = {}
-    _exec_shape_rule(compiled, g, locals_dict, field_path)
 
+    rule 形如：
+        c.shape = np.broadcast_shapes(a.shape, b.shape)
+    或多行：
+        c.shape = (
+            np.broadcast_shapes(a.shape[:-2], b.shape[:-2])
+            + (a.shape[-2],)
+            + (b.shape[-1],)
+        )
+    output_name（取自 outputs[].name）预先以 SimpleNamespace 注入 globals，
+    使 `c.shape = ...` 语义可成立。
+    """
+    if not isinstance(rule, str) or not rule.strip():
+        raise DslError("dsl_parse_error", "shape_rule 必须是非空字符串", field_path)
+
+    # AST parse + sandbox validate
+    try:
+        tree = ast.parse(rule, mode="exec")
+    except SyntaxError as e:
+        raise DslError(
+            "dsl_parse_error",
+            f"shape_rule 语法错: {e.msg} (行 {e.lineno})",
+            field_path,
+        ) from None
+    try:
+        _ast_sandbox.validate_ast(tree)
+    except SandboxError as e:
+        raise DslError(_map_sandbox_code(e.code), e.message, field_path) from None
+    compiled = compile(tree, "<shape_rule>", "exec")
+
+    # Build globals: np namespace + each input as _ShapeProxy + attribute defaults
+    # + 预创建一个 SimpleNamespace 接收 output_name.shape = ... 赋值
+    extra: dict[str, Any] = {"np": _NP_NAMESPACE}
+    for name, sh in inputs.items():
+        extra[name] = _ShapeProxy(name, sh)
+    extra.update(attr_values)
+    output_slot = pytypes.SimpleNamespace(shape=None)
+    extra[output_name] = output_slot
+    g = _ast_sandbox.make_globals(extra)
+    locals_dict: dict[str, Any] = {}
+
+    try:
+        with _ast_sandbox.timeout(_TIMEOUT_S, on_timeout_code="shape_eval_timeout"):
+            exec(compiled, g, locals_dict)
+    except SandboxError as e:
+        raise DslError(_map_sandbox_code(e.code), e.message, field_path) from None
+    except DslError:
+        raise
+    except NameError as e:
+        # 引用了 spec.inputs 之外的标识符 / 未声明 attribute
+        raise DslError(
+            "unresolved_symbol",
+            f"shape_rule 引用了未声明的标识符: {e.args[0] if e.args else str(e)}",
+            field_path,
+        ) from None
+    except (TypeError, AttributeError) as e:
+        raise DslError("dsl_eval_error", f"shape_rule 求值失败: {e}", field_path) from None
+
+    # 取出 c.shape；也允许作者把表达式结果直接赋给 output_name（不带 .shape）
     if output_slot.shape is not None:
         return _coerce_eval_result(output_slot.shape, output_name, field_path)
+    # fallback：作者写 `c = ...` 而不是 `c.shape = ...`
     if output_name in locals_dict and not isinstance(locals_dict[output_name], pytypes.SimpleNamespace):
         return _coerce_eval_result(locals_dict[output_name], output_name, field_path)
     raise DslError(

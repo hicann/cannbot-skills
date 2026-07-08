@@ -18,7 +18,7 @@ op:
   name: nonzero
   version: "1.0"
   description: "返回输入张量中所有非零元素的索引；输出 shape = (K, rank(x))，K 由输入值决定"
-  category: variable_output
+  category: VariableOutput
   paradigms: [IndexGather, VariableOutput]
   lifecycle: stable
   error_codes:

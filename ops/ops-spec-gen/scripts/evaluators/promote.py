@@ -38,51 +38,51 @@ _FLOAT_FP_RANK = {
     # 窄浮点（rank 0）：FP4 / FP8 系列。numpy 都没有原生类型，stage 8 走 fp16 stand-in。
     # 排名上比 fp16/bf16 窄一档；任意 narrow + 非 narrow → 至少升 fp16；
     # narrow1 + narrow2（不同名）→ fp16（混合窄浮点不安全，统一升 fp16）。
-    "float4_e2m1": 0,    # 4-bit float (1 符号 + 2 指数 + 1 尾数)；Atlas 950 极致量化
-    "float4_e1m2": 0,    # 4-bit float (1 符号 + 1 指数 + 2 尾数)；动态范围更小但精度略高
-    "float8_e4m3fn": 0,    # 8-bit float (1 符号 + 4 指数 + 3 尾数，无 Inf)；Atlas A3 训练 / 推理
-    "float8_e5m2": 0,    # 8-bit float (1 符号 + 5 指数 + 2 尾数)；动态范围更大
-    "float8_e8m0": 0,    # 8-bit float (全指数，0 尾数)；OCP MXFP8 缩放因子专用
-    "hifloat8": 0,    # Huawei Float 8 自研变体；Atlas 950
-    "float16": 1,
-    "bfloat16": 1,
-    "float32": 2,
-    "float64": 3,
+    "float4_e2m1":    0,    # 4-bit float (1 符号 + 2 指数 + 1 尾数)；Atlas 950 极致量化
+    "float4_e1m2":    0,    # 4-bit float (1 符号 + 1 指数 + 2 尾数)；动态范围更小但精度略高
+    "float8_e4m3fn":  0,    # 8-bit float (1 符号 + 4 指数 + 3 尾数，无 Inf)；Atlas A3 训练 / 推理
+    "float8_e5m2":    0,    # 8-bit float (1 符号 + 5 指数 + 2 尾数)；动态范围更大
+    "float8_e8m0":    0,    # 8-bit float (全指数，0 尾数)；OCP MXFP8 缩放因子专用
+    "hifloat8":       0,    # Huawei Float 8 自研变体；Atlas 950
+    "float16":        1,
+    "bfloat16":       1,
+    "float32":        2,
+    "float64":        3,
 }
 _COMPLEX_RANK = {
-    "complex32": 1,   # 位宽类似 fp16+fp16；PyTorch 实验性，ascend 暂未广泛部署
-    "complex64": 2,   # 位宽类似 fp32+fp32
+    "complex32":  1,   # 位宽类似 fp16+fp16；PyTorch 实验性，ascend 暂未广泛部署
+    "complex64":  2,   # 位宽类似 fp32+fp32
     "complex128": 3,   # 位宽类似 fp64+fp64
 }
 _INT_RANK = {
-    "bool": 0,
-    "uint1": 0,                      # 1-bit unsigned int (0/1)；与 bool 同 rank（值域同最窄）
-    "int4": 0, "uint4": 0,         # int4 与 bool 同 rank（值域最窄；[-8,7] / [0,15]）
-    "int8": 1, "uint8": 1,
-    "int16": 2, "uint16": 2,
-    "int32": 3, "uint32": 3,
-    "int64": 4, "uint64": 4,
+    "bool":   0,
+    "uint1":  0,                      # 1-bit unsigned int (0/1)；与 bool 同 rank（值域同最窄）
+    "int4":   0, "uint4":  0,         # int4 与 bool 同 rank（值域最窄；[-8,7] / [0,15]）
+    "int8":   1, "uint8":  1,
+    "int16":  2, "uint16": 2,
+    "int32":  3, "uint32": 3,
+    "int64":  4, "uint64": 4,
 }
 # Minimum float rank that can hold the magnitude of an int dtype without precision loss.
 _INT_REQUIRED_FP_RANK = {
-    "bool": 1,
-    "uint1": 1,                      # uint1 ⊆ {0,1}，fp16 mantissa=10 远超
-    "int4": 1, "uint4": 1,         # int4 在 fp16 mantissa=10 内
-    "int8": 1, "uint8": 1,
-    "int16": 2, "uint16": 2,
-    "int32": 3, "uint32": 3,
-    "int64": 3, "uint64": 3,
+    "bool":   1,
+    "uint1":  1,                      # uint1 ⊆ {0,1}，fp16 mantissa=10 远超
+    "int4":   1, "uint4":  1,         # int4 在 fp16 mantissa=10 内
+    "int8":   1, "uint8":  1,
+    "int16":  2, "uint16": 2,
+    "int32":  3, "uint32": 3,
+    "int64":  3, "uint64": 3,
 }
 # Same-rank signed/unsigned integer pair → next wider signed int. 显式表，避免依赖 dict 顺序。
 # bool / uint1 / int4 / uint4 均在 rank 0；理论上不会在 spec 里混用，但补全防止 fall-through。
 _INT_SIGNED_PAIR_PROMOTE = {
-    frozenset(("bool", "uint1")): "uint1",
-    frozenset(("bool", "int4")): "int4",
-    frozenset(("bool", "uint4")): "uint4",
-    frozenset(("uint1", "int4")): "int4",
-    frozenset(("uint1", "uint4")): "uint4",
-    frozenset(("int4", "uint4")): "int8",
-    frozenset(("int8", "uint8")): "int16",
+    frozenset(("bool",  "uint1")):  "uint1",
+    frozenset(("bool",  "int4")):   "int4",
+    frozenset(("bool",  "uint4")):  "uint4",
+    frozenset(("uint1", "int4")):   "int4",
+    frozenset(("uint1", "uint4")):  "uint4",
+    frozenset(("int4",  "uint4")):  "int8",
+    frozenset(("int8",  "uint8")):  "int16",
     frozenset(("int16", "uint16")): "int32",
     frozenset(("int32", "uint32")): "int64",
     frozenset(("int64", "uint64")): "int64",   # 没有更宽的；numpy 行为
@@ -114,43 +114,6 @@ def _fp_or_complex_rank(d: str) -> int:
     return 0
 
 
-def _promote_complex(a, b):
-    rank = max(_fp_or_complex_rank(a), _fp_or_complex_rank(b))
-    return "complex128" if rank >= 3 else "complex64"
-
-
-def _promote_with_float(a, b):
-    fa = _FLOAT_FP_RANK.get(a, 0)
-    fb = _FLOAT_FP_RANK.get(b, 0)
-    if _is_int(a):
-        fa = max(fa, _INT_REQUIRED_FP_RANK[a])
-    if _is_int(b):
-        fb = max(fb, _INT_REQUIRED_FP_RANK[b])
-    if a in _NARROW_FLOATS or b in _NARROW_FLOATS:
-        fa = max(fa, 1)
-        fb = max(fb, 1)
-    target_rank = max(fa, fb)
-    if target_rank <= 1:
-        if "bfloat16" in (a, b) and "float16" not in (a, b):
-            return "bfloat16"
-        return "float16"
-    if target_rank == 2:
-        return "float32"
-    return "float64"
-
-
-def _promote_int_pair(a, b):
-    ra, rb = _INT_RANK[a], _INT_RANK[b]
-    if ra > rb:
-        return a
-    if rb > ra:
-        return b
-    pair = frozenset((a, b))
-    if pair in _INT_SIGNED_PAIR_PROMOTE:
-        return _INT_SIGNED_PAIR_PROMOTE[pair]
-    return "int64"
-
-
 def promote_pair(a: str, b: str) -> str:
     """Promote two dtypes to a single dtype per numpy-ish rules."""
     if a not in _ALL_DTYPES:
@@ -159,15 +122,54 @@ def promote_pair(a: str, b: str) -> str:
         raise DslError("dsl_eval_error", f"未知 dtype: {b!r}")
     if a == b:
         return a
+
+    # Complex absorbs everything (只要一侧是 complex 输出必是 complex)
     if _is_complex(a) or _is_complex(b):
-        return _promote_complex(a, b)
+        rank = max(_fp_or_complex_rank(a), _fp_or_complex_rank(b))
+        return "complex128" if rank >= 3 else "complex64"
+
+    # Mixed bf16 and fp16 → fp32 (avoid silent precision loss)
     if {a, b} == {"float16", "bfloat16"}:
         return "float32"
+
+    # 异型窄浮点 → fp16（fp8_e4m3fn + fp8_e5m2 / fp4 + fp8 / hf8 + fp8 等）
     if a in _NARROW_FLOATS and b in _NARROW_FLOATS:
         return "float16"
+
+    # Float + anything → float wide enough to hold both magnitudes.
+    # 关键：int 侧需要按 _INT_REQUIRED_FP_RANK 抬到对应 fp rank（int32+fp16 必升 fp64）。
     if _is_float(a) or _is_float(b):
-        return _promote_with_float(a, b)
-    return _promote_int_pair(a, b)
+        fa = _FLOAT_FP_RANK.get(a, 0)
+        fb = _FLOAT_FP_RANK.get(b, 0)
+        if _is_int(a):
+            fa = max(fa, _INT_REQUIRED_FP_RANK[a])
+        if _is_int(b):
+            fb = max(fb, _INT_REQUIRED_FP_RANK[b])
+        # narrow + 非 narrow 一律抬到 fp16 起步（narrow 与 fp16/bf16/fp32/int 混用都不安全）
+        if a in _NARROW_FLOATS or b in _NARROW_FLOATS:
+            fa = max(fa, 1)
+            fb = max(fb, 1)
+        target_rank = max(fa, fb)
+        # rank ≤ 1 落 fp16/bf16 行；保留具体 dtype 不漂
+        if target_rank <= 1:
+            if "bfloat16" in (a, b) and "float16" not in (a, b):
+                return "bfloat16"
+            return "float16"
+        if target_rank == 2:
+            return "float32"
+        return "float64"
+
+    # Both integer types (incl. bool / int4)
+    ra, rb = _INT_RANK[a], _INT_RANK[b]
+    if ra > rb:
+        return a
+    if rb > ra:
+        return b
+    # Same rank — bool/bool 已被开头 a==b 兜走；剩下是 signed/unsigned 同宽组合
+    pair = frozenset((a, b))
+    if pair in _INT_SIGNED_PAIR_PROMOTE:
+        return _INT_SIGNED_PAIR_PROMOTE[pair]
+    return "int64"
 
 
 def promote_many(dtypes: list[str]) -> str:

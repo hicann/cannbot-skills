@@ -11,7 +11,7 @@
 
 | 职责层级 | 字段 | 说明 |
 |----------|------|------|
-| **L0 语义** | `op` / `inputs` / `attributes` / `outputs` / `shape_constraints` / `dtype_policy` / `broadcast` / `math_semantics` | 数学约束，下游不可覆盖 |
+| **L0 语义** | `op` / `inputs` / `attributes` / `outputs` / `shape_constraints` / `dtype_policy` / `broadcast`（计算是否需要数据广播） / `math_semantics` | 数学约束，下游不可覆盖 |
 | **L0 语义** | `boundary_conditions`（合法但退化的输入 case）/ `extreme_inputs`（NaN / Inf / 全零等异常输入 case） | 下游不可覆盖 |
 | **L0 语义** | `numerical_tolerance` / `numerical_stability` / `determinism` | 精度语义，下游不可覆盖 |
 | **已移出** | `test_matrix` | 测试生成参数由 `ascendc-st-design` skill 独立管理 |
@@ -20,13 +20,13 @@
 
 ```yaml
 schema_version: 1          # 固定值
-op:                        # 元信息：name / version / description / category（单选 25 类） / paradigms（多选 27 项）
+op:                        # 元信息：name / version / description / category（单选 26 类） / paradigms（多选 27 项） / paradigm_groups（范式分组）
 inputs: []                 # 张量/标量/state，按位置排列
 attributes: []             # 非张量参数，含 machine_constraint
 outputs: []                # 用 numpy 子集表达式描述 shape/dtype 推导规则
 shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 9-stage 机器校验，见 §D.8）+ notes
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
-broadcast: {}              # kind: numpy | none | explicit (+rules)
+broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
 math_semantics: {}         # formula + reference_oracle + invariants + composition (FusedComposite 必填)
 numerical_stability: {}    # required + techniques (含 anti_pattern_id)
 numerical_tolerance: {}    # per_dtype: {rtol, atol, metric}
@@ -40,14 +40,14 @@ determinism: {}            # accumulation_order + bitwise_reproducible
 
 ## B. 关键枚举与白名单
 
-### B1. 25 类 category（单选）
+### B1. 26 类 category（单选）
 
 ```
 elementwise · reduction · reduction_composite · contraction · layout_transform
 index_gather · scatter_update · mask_predicate · sort_select · fused_composite
 random_sampling · sliding_window · collective · control_flow · recurrence
 interpolation · quantization · stateful · arg_reduce · sparse · padding
-variable_output · spectral · histogram · atomic_update
+variable_output · spectral · histogram · atomic_update · broadcast
 ```
 
 ### B2. 27 项 paradigm（PascalCase，多选）
@@ -74,27 +74,41 @@ variable_output · spectral · histogram · atomic_update
 | category | 必含 |
 |---|---|
 | reduction_composite | Reduction + FusedComposite |
-| fused_composite | FusedComposite + ≥ 2 基础 paradigm |
+| fused_composite | FusedComposite + ≥ 2 基础 paradigm（Elementwise 被其他范式吸收，不计入） |
 | sliding_window | SlidingWindow（通常再带 Contraction 或 Reduction） |
 | arg_reduce | ArgReduce（输出 dtype_rule 必须求值为 `np.int32` 或 `np.int64`） |
 | atomic_update | AtomicUpdate（与 ScatterUpdate 互斥） |
 
+#### 分类决策（从 REQUIREMENTS.md 推导）
+
+> **⚠️ 分类权威来源是 `registries/category_enum.yaml`**（26 类定义 + 示例算子）。以下启发式仅作快速参考，不可替代读注册表。
+
+分析算子的输入数量、计算模式、shape 推导规则，对照 `category_enum.yaml` 中的定义和示例选择 category：
+
+- 不涉及计算，仅重组织数据（shape 变换/轴重排/拼接拆分/广播扩展/切片）→ 读 category_enum.yaml 中 `LayoutTransform` 的定义和示例列表
+- 2+ tensor 输入，**计算本身需要**广播对齐 shape（如 add/mul/where）→ 读 category_enum.yaml 中 `Broadcast` 的定义和示例列表
+- 仅 1 tensor 输入且逐元素计算 → 读 category_enum.yaml 中 `Elementwise` 的定义和示例列表
+- 涉及归约 → 读 category_enum.yaml 中 `Reduction` / `ReductionComposite` 的定义和示例列表
+- 涉及矩阵运算 → 读 category_enum.yaml 中 `Contraction` 的定义和示例列表
+- 按整数索引采集元素 → 读 category_enum.yaml 中 `IndexGather` 的定义和示例列表
+
+**易混淆场景**：
+- **tile/repeat/expand** → LayoutTransform（数据重组织是目的，不是计算手段）
+- **add/mul 的 shape 对齐** → Broadcast（广播是计算的前置步骤）
+- **slice/gather 的区别** → slice 是 LayoutTransform/IndexGather（确定性裁剪），gather 是 IndexGather（自由索引采集）
+
+记录决策理由（输入数量 → category_enum.yaml 匹配项 → category → paradigms 推导链）。
+
 ### B4. shape_rule (numpy_expr)
 
-`outputs[].shape_rule` 现在是受限 numpy 子集表达式（不再是 DSL 函数）。`shape_rule_kind` 取值：
+`outputs[].shape_rule` 是受限 numpy 子集表达式（不再是 DSL 函数）。完整语义、子规则和失败码见
+[SKILL.md §4.3](../SKILL.md#43-stage-3--shape_closurenumpy_expr-求值)。
 
 | kind | 适用 | shape_rule 内容 |
 |---|---|---|
-| `numpy_expr` | 输出形状可静态从输入 shape + attribute 推出（绝大多数算子） | numpy 表达式（见下） |
-| `data_dependent` | 输出形状由输入**值**决定（nonzero / unique / masked_select 等 VariableOutput） | 不写表达式，写 `shape_rule_description` + `shape_bounds` |
-
-numpy_expr 中可用：
-- `x.shape` / `x.shape[-1]` / `x.shape[:-2]`（属性 + 切片 + 负索引）
-- `tuple` 拼接 `+`：`(a.shape[-1],) + (b.shape[-1],)`
-- `np.broadcast_shapes(*shapes)`：numpy 广播标准 API
-- `IfExp`：`a if cond else b`（attribute 默认值作为 cond）
-
-未实现（需扩展 `scripts/evaluators/shape_eval.py`）：`reshape` / `transpose` / `permute` / `concat` / `stack` / `slice` / `tile` / `repeat`，及 `np.fft.*` / `np.linalg.*` 等。
+| `numpy_expr` | 输出形状可静态从输入 shape + attribute 推出（绝大多数算子） | numpy 表达式 |
+| `data_dependent` | 输出形状由输入**值**决定（nonzero / unique / masked_select 等 VariableOutput） | 仅允许 `op.paradigms` 含 `VariableOutput`；不写表达式，写 `shape_rule_description` + `shape_bounds` |
+| `textual_only` | 输出形状因数据排布**格式**而异（如 NCHW vs NHWC 的 Channel 轴位置不同） | 仅允许 `math_semantics.format_variants` 存在；可含 `${format_variants[].channel_axis}` 占位符；必须配 `shape_rule_description` |
 
 `inputs[].shape.symbolic` 列表元素三类：显式维（`"M"` 大写） / 折叠维（`"...d"` 小写，仅可作首元素） / 常量维（整数）。
 
@@ -154,8 +168,10 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 | layout | 含义 | 典型用途 |
 |---|---|---|
 | `ND` | n-dim 任意排布（不约束物理顺序） | 默认；elementwise / reduction 等大多数算子 |
-| `NCHW` | (Batch, Channel, Height, Width) | 卷积 / 池化（PyTorch 默认） |
-| `NHWC` | (Batch, Height, Width, Channel) | 卷积（TensorFlow 默认） |
+| `NCHW` | (Batch, Channel, Height, Width) | 4D 卷积 / 池化（PyTorch 默认） |
+| `NHWC` | (Batch, Height, Width, Channel) | 4D 卷积（TensorFlow 默认） |
+| `NCDHW` | (Batch, Channel, Depth, Height, Width) | 5D 体积卷积（PyTorch 默认） |
+| `NDHWC` | (Batch, Depth, Height, Width, Channel) | 5D 体积卷积（TensorFlow 默认） |
 | `NZ` | 小 Z 排布（昇腾 16×16 tile 内列优先） | 历史名，等同 `FRACTAL_NZ` 的简写；新算子建议用全名 |
 | `FRACTAL_NZ` | 大 Z 小 z 折叠（NZ 的全名） | Cube / matmul 高速路径 |
 | `FRACTAL_Z` | 大 Z 小 Z 折叠 | Conv weights NPU 专用排布 |
@@ -163,7 +179,64 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 | `COO` | Coordinate List（坐标列表稀疏） | 稀疏矩阵；indices 二维 + values |
 | `BSR` | Block Sparse Row（分块行压缩稀疏） | 块稀疏；常用于结构化剪枝 |
 
-跨字段占位符（用于 oracle.kwargs 等）：`${attr.<name>}` / `${input.<name>.shape[i]}` / `${output.<name>.dtype}`。
+跨字段占位符（用于 oracle.kwargs / formula 等）：`${attr.<name>}` / `${input.<name>.shape[i]}` / `${output.<name>.dtype}` / `${format_variants[].<field>}`。
+
+### B5c. format_variants（数据排布格式变体）
+
+当算子支持多种数据排布（如 NCHW/NHWC/NCDHW）且**归约轴或计算逻辑因格式而异**时，
+在 `math_semantics.format_variants` 中声明每种格式的具体参数：
+
+```yaml
+outputs:
+  - name: sum
+    shape_rule_kind: numpy_expr
+    # 规范格式 NCHW；NHWC/NCDHW 见 format_variants[].shape_rule
+    shape_rule: "sum.shape = (x.shape[1],)"
+    shape_rule_description: |
+      输出 shape = (C,)。Channel 轴位置因格式而异，见 format_variants。
+
+math_semantics:
+  formula_kind: textual_only
+  formula: |
+    # 归约轴由 format_variants 查表取值
+    x_f32 = x.astype(np.float32)
+    sum = np.sum(x_f32, axis=${format_variants[].reduction_axes})
+  format_variants:
+    - format: NCHW
+      rank: [4]
+      channel_axis: 1
+      reduction_axes: [0, 2, 3]
+      shape_rule: "sum.shape = (x.shape[1],)"
+      oracle_kwargs: {dim: [0, 2, 3]}
+    - format: NHWC
+      rank: [4]
+      channel_axis: 3
+      reduction_axes: [0, 1, 2]
+      shape_rule: "sum.shape = (x.shape[3],)"
+      oracle_kwargs: {dim: [0, 1, 2]}
+    - format: NCDHW
+      rank: [5]
+      channel_axis: 1
+      reduction_axes: [0, 2, 3, 4]
+      shape_rule: "sum.shape = (x.shape[1],)"
+      oracle_kwargs: {dim: [0, 2, 3, 4]}
+```
+
+- **format**：必填，值来自 `$defs/layout` 枚举（同 `inputs[].layout`）
+- **rank**：必填，该格式适用的 rank 值列表（如 4D、5D）
+- **reduction_axes**：必填，该格式下的归约轴列表
+- **channel_axis**：可选，Channel 轴在该 format 中的位置（如 NCHW=1, NHWC=3）；供 shape_rule 引用
+- **shape_rule**：可选，该 format 下输出 shape 的 numpy 子集表达式；覆盖 canonical shape_rule
+- **oracle_kwargs**：可选，该格式对应的 oracle kwargs（与 `reference_oracle.kwargs` 同结构）
+
+**formula 与 format_variants 的引用约定**：
+
+当计算因格式而异时，`formula_kind` 应为 `textual_only`（stage 8 SKIP）。formula 中用
+`${format_variants[].<field>}` 占位符引用 format_variants 中的字段值（如
+`${format_variants[].reduction_axes}`），并在 formula 注释中列出每种格式的查表结果。
+这与 `${attr.dim}` / `${input.axis}` 等跨字段占位符语法一致。
+
+与 `inputs[].layout` 的关系：`layout` 声明输入支持的格式（metadata），`format_variants` 细化每种格式的具体计算参数。
 
 ### B6. 范式必含 boundary / extreme case（与 `registries/boundary_min_cases.yaml` 同步）
 
@@ -215,7 +288,7 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 | 2 | category_paradigm_consistency | category↔paradigm + 白名单 + 内部约束 |
 | 3 | shape_closure | numpy_expr 求值 outputs[].shape_rule（含 data_dependent 分流） |
 | 4 | dtype_closure | numpy_expr 求值 outputs[].dtype_rule，与 supported_combinations 交叉验证 |
-| 5 | broadcast_legality | numpy / none / explicit 广播模拟（2 输入 + matmul 形式 explicit rules） |
+| 5 | broadcast_legality | 算子计算的 broadcast 语义校验（numpy / none / explicit；2 输入 + matmul 形式 explicit rules） |
 | 6 | boundary_min_set | 范式 → 最低 case 集（关键词子串匹配版） |
 | 7 | tolerance_coverage | 容差 dtype 覆盖 + 紧度启发式 |
 | 8 | formula_smoke_eval | 小 shape `[2,3]` 沙箱 numpy eval（缺 numpy ⇒ SKIP） |
@@ -228,10 +301,10 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 ## D. 常见陷阱
 
 1. **paradigms 字段**：必须 `paradigms: [Reduction, ...]`（PascalCase 受控集合）。
-2. **fused_composite 与 FusedComposite 不等价**：前者是 category（结构主分类），后者是 paradigm（"复合形态"标签）。category=fused_composite 必须含 paradigm FusedComposite + ≥ 2 条基础 paradigm。
+2. **fused_composite 与 FusedComposite 不等价**：前者是 category（结构主分类），后者是 paradigm（"复合形态"标签）。category=FusedComposite 必须含 paradigm FusedComposite + ≥ 2 条基础 paradigm。
 3. **折叠维登记**：`"...d"` 折叠维**不应**登记到 `shape_constraints.symbols`；只有显式大写维（`M` / `K` / `N`）才登记。
 4. **supported_combinations 必须显式枚举**：numpy_expr 推导（`np.promote_types(...)`）已能算，但显式表是"锁定意图"的真值，避免 promote 表升级时静默改语义。
-5. **accumulator_dtype 必填触发**：category=contraction / reduction_composite / paradigms 含 `NumericalStable+Reduction` 时必填，且必须 ≥ 输入侧最高精度。
+5. **accumulator_dtype 必填触发**：category=Contraction / reduction_composite / paradigms 含 `NumericalStable+Reduction` 时必填，且必须 ≥ 输入侧最高精度。
 6. **invariants 至少 1 条**：reduction_composite / NumericalStable 范式强制要求；structural 组的 kind 不允许 `tolerance_inherit: true`。
 7. **boundary 与 extreme 不要混淆**：boundary 是合法但退化的 case（rank=0 / 空 Tensor / 参数越界 raise）；extreme 是异常输入（NaN / Inf / 上溢）。
 8. **`global_constraints` 是咨询性字段**：当前 evaluator 不解析；与 `notes` 同语义，仅供下游设计/测试人工阅读。机器可断言的 shape 关系（如 matmul `K of x == K of w`）请改写在 `outputs.shape_rule` 的 numpy_expr 中——它会真正被 stage 5 跑出来。

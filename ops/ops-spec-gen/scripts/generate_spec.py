@@ -9,7 +9,7 @@
 
 """Interactive algorithm-spec.yaml generator.
 
-Reads registries/*.yaml to get controlled enums (25 categories, 27 paradigms,
+Reads registries/*.yaml to get controlled enums (26 categories, 27 paradigms,
 category->required-paradigms map), prompts the user for the minimum information
 needed, and writes ops/<op>/spec.yaml using templates/spec.yaml.tmpl.
 
@@ -47,11 +47,14 @@ def _load(name: str) -> dict:
 
 
 def load_registries() -> dict:
+    import json as _json
+    schema = _json.loads((SKILL_DIR / "schemas" / "op-spec.json").read_text(encoding="utf-8"))
     return {
         "categories": _load("category_enum.yaml")["categories"],
         "paradigms": [p["name"] for p in _load("paradigm_enum.yaml")["paradigms"]],
         "category_map": _load("category_paradigm_map.yaml"),
         "chips": _load("chip_registry.yaml")["chips"],
+        "layouts": schema.get("$defs", {}).get("layout", {}).get("enum", []),
     }
 
 
@@ -97,10 +100,106 @@ class GenInput:
     accumulation_order: str = "none"
     numerical_stability_required: bool = False
     supported_chips: list[str] = None  # type: ignore[assignment]
+    axis_source: str = "attribute"
+    paradigm_groups_mode: str = ""  # "" | "combination" | "fusion"
+    format_variants: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         if self.supported_chips is None:
             self.supported_chips = []
+
+
+def _filter_elementwise(paradigms: list[str]) -> list[str]:
+    """Elementwise 与其他范式组合时，只保留非 Elementwise 的。
+
+    [Elementwise, Reduction] → [Reduction]
+    [Elementwise] → [Elementwise]（仅 Elementwise 时保留）
+    """
+    if "Elementwise" in paradigms and len(paradigms) > 1:
+        return [p for p in paradigms if p != "Elementwise"]
+    return paradigms
+
+
+_PARADIGM_TO_CATEGORY: dict[str, str] = {
+    "Broadcast": "Broadcast",
+    "Reduction": "Reduction",
+    "Contraction": "Contraction",
+    "ArgReduce": "ArgReduce",
+    "LayoutTransform": "LayoutTransform",
+    "Padding": "Padding",
+    "IndexGather": "IndexGather",
+    "ScatterUpdate": "ScatterUpdate",
+    "AtomicUpdate": "AtomicUpdate",
+    "Interpolation": "Interpolation",
+    "MaskPredicate": "MaskPredicate",
+    "SortSelect": "SortSelect",
+    "Histogram": "Histogram",
+    "SlidingWindow": "SlidingWindow",
+    "ControlFlow": "ControlFlow",
+    "Recurrence": "Recurrence",
+    "Spectral": "Spectral",
+    "VariableOutput": "VariableOutput",
+    "RandomSampling": "RandomSampling",
+    "Stateful": "Stateful",
+    "Sparse": "Sparse",
+}
+
+
+def _resolve_category(category: str, paradigms: list[str]) -> str:
+    """当 category=Elementwise 但存在其他 paradigm 时，用主 paradigm 替换 category。
+
+    [Elementwise, Reduction] → category=Reduction
+    [Elementwise]             → category=Elementwise（保持不变）
+    """
+    if category == "Elementwise" and paradigms:
+        main = paradigms[0]
+        return _PARADIGM_TO_CATEGORY.get(main, category)
+    return category
+
+
+def _is_pure_reduction(category: str, paradigms: list[str]) -> bool:
+    return category == "Reduction" and "Reduction" in paradigms and "Recurrence" not in paradigms
+
+
+def parse_format_variants(raw: str, valid_layouts: list[str] | None = None) -> list[dict]:
+    """Parse 'FORMAT:RANK:AXES;...' into list of variant dicts.
+
+    Example: 'NCHW:4:0,2,3;NHWC:4:0,1,2;NCDHW:5:0,2,3,4'
+    → [{"format": "NCHW", "rank": [4], "reduction_axes": [0,2,3]}, ...]
+
+    If valid_layouts is provided, format names are validated against it.
+    """
+    if not raw.strip():
+        return []
+    variants = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        tokens = part.split(":")
+        if len(tokens) != 3:
+            raise SystemExit(
+                f"--format-variants 格式错误：'{part}'，"
+                "期望 FORMAT:RANK:AXES (如 NCHW:4:0,2,3)")
+        fmt, rank_str, axes_str = tokens
+        fmt = fmt.strip()
+        if valid_layouts and fmt not in valid_layouts:
+            raise SystemExit(
+                f"--format-variants 格式错误：'{fmt}' 不是有效的 layout 值，"
+                f"有效值: {valid_layouts}")
+        try:
+            ranks = [int(r.strip()) for r in rank_str.split(",") if r.strip()]
+            axes = [int(a.strip()) for a in axes_str.split(",") if a.strip()]
+        except ValueError:
+            raise SystemExit(
+                f"--format-variants 格式错误：'{part}'，"
+                "RANK 和 AXES 必须是逗号分隔的整数")
+        variants.append({
+            "format": fmt.strip(),
+            "rank": ranks,
+            "reduction_axes": axes,
+        })
+    return variants
 
 
 def parse_tensor_arg(s: str) -> TensorSpec:
@@ -207,17 +306,15 @@ def prompt_multi_choice(msg: str, choices: list[str], defaults: list[str] | None
         return picked
 
 
-def _collect_op_basic(reg):
+def interactive_collect(reg: dict) -> GenInput:
+    print("\n=== algorithm-spec.yaml interactive generator ===\n")
     op_name = prompt("Operator name (lowercase, e.g. softmax)")
     if not re.match(r"^[a-z][a-z0-9_]*$", op_name):
         raise SystemExit(f"Invalid op name: {op_name}")
     description = prompt("One-line description")
-    category = prompt_choice("Pick category (single-select, 25 controlled values):",
+
+    category = prompt_choice("Pick category (single-select, 26 controlled values):",
                              reg["categories"])
-    return op_name, description, category
-
-
-def _collect_paradigms(reg, category):
     required = reg["category_map"]["category_requires_paradigms"].get(category, [])
     print(f"\n  category={category} requires paradigm(s): {required}")
     extra = prompt(
@@ -230,12 +327,67 @@ def _collect_paradigms(reg, category):
                 raise SystemExit(f"Unknown paradigm: {p}. Allowed: {reg['paradigms']}")
             if p not in paradigms:
                 paradigms.append(p)
-    return paradigms
+    paradigm_groups_mode = ""
+    if len(paradigms) >= 2:
+        paradigm_groups_mode = prompt_choice(
+            "paradigm_groups (范式之间的关系)",
+            ["none", "combination", "fusion"],
+            default="none")
+        if paradigm_groups_mode == "none":
+            paradigm_groups_mode = ""
 
+    # combination 模式下不过滤 Elementwise（Elementwise 是独立的范式分支）
+    if paradigm_groups_mode != "combination":
+        paradigms = _filter_elementwise(paradigms)
+    category = _resolve_category(category, paradigms)
 
-def _collect_inputs():
-    inputs: list[TensorSpec] = []
+    axis_source = "attribute"
+    if "Reduction" in paradigms and "Recurrence" not in paradigms:
+        axis_source = prompt_choice(
+            "axis_source (how the reduction axis is specified)",
+            ["attribute", "input_tensor", "fixed", "implicit_all"],
+            default="attribute")
+
+    # format_variants: 多数据排布格式
+    format_variants: list[dict] = []
+    if "Reduction" in paradigms and "Recurrence" not in paradigms:
+        fv_answer = prompt_choice(
+            "是否声明 format_variants（归约轴因数据排布格式而异）",
+            ["no", "yes"],
+            default="no")
+        if fv_answer == "yes":
+            valid_layouts = reg.get("layouts", [])
+            print(f"  有效 layout 值: {valid_layouts}")
+            while True:
+                fmt = prompt(
+                    f"  format #{len(format_variants)+1} name (blank to finish)",
+                    default="", allow_empty=True).strip()
+                if not fmt:
+                    if not format_variants:
+                        print("  至少需要 1 个 format variant 或选 no")
+                        continue
+                    break
+                if valid_layouts and fmt not in valid_layouts:
+                    print(f"  ✗ '{fmt}' 不是有效 layout 值；有效值: {valid_layouts}")
+                    continue
+                rank_str = prompt(f"    rank (comma-separated, e.g. 4 or 4,5)",
+                                  default="4")
+                axes_str = prompt(f"    reduction_axes (comma-separated, e.g. 0,2,3)",
+                                  default="0")
+                try:
+                    ranks = [int(r.strip()) for r in rank_str.split(",")]
+                    axes = [int(a.strip()) for a in axes_str.split(",")]
+                except ValueError:
+                    print("  ✗ rank 和 axes 必须是逗号分隔的整数")
+                    continue
+                format_variants.append({
+                    "format": fmt,
+                    "rank": ranks,
+                    "reduction_axes": axes,
+                })
+
     print("\n--- Inputs ---")
+    inputs: list[TensorSpec] = []
     while True:
         name = prompt(f"Input #{len(inputs)+1} name (blank to finish)", default="", allow_empty=True)
         if not name:
@@ -245,12 +397,9 @@ def _collect_inputs():
             break
         dtypes = prompt("  dtype_set (comma-separated)", default="float16,float32,bfloat16")
         inputs.append(TensorSpec(name=name, dtype_set=[d.strip() for d in dtypes.split(",")]))
-    return inputs
 
-
-def _collect_outputs():
-    outputs: list[str] = []
     print("\n--- Outputs ---")
+    outputs: list[str] = []
     while True:
         name = prompt(f"Output #{len(outputs)+1} name (blank to finish)", default="", allow_empty=True)
         if not name:
@@ -259,31 +408,6 @@ def _collect_outputs():
                 continue
             break
         outputs.append(name)
-    return outputs
-
-
-def _collect_supported_chips(reg, inputs):
-    declared_dtypes: set[str] = set()
-    for t in inputs:
-        declared_dtypes.update(t.dtype_set)
-    candidates = narrow_chips_by_dtypes(reg["chips"], declared_dtypes)
-    if not candidates:
-        print(f"\n  ⚠ 没有芯片同时支持所有 dtype {sorted(declared_dtypes)}；")
-        print(f"    请手动从全集挑选并在生成后修正 dtype_set / supported_combinations")
-        candidates = [c["id"] for c in reg["chips"]]
-    return prompt_multi_choice(
-        f"\nsupported_chips（按 dtype_set {sorted(declared_dtypes)} 自动收窄；多选）",
-        candidates,
-        defaults=candidates,
-    )
-
-
-def interactive_collect(reg: dict) -> GenInput:
-    print("\n=== algorithm-spec.yaml interactive generator ===\n")
-    op_name, description, category = _collect_op_basic(reg)
-    paradigms = _collect_paradigms(reg, category)
-    inputs = _collect_inputs()
-    outputs = _collect_outputs()
 
     promotion = prompt_choice(
         "dtype_policy.promotion",
@@ -298,7 +422,21 @@ def interactive_collect(reg: dict) -> GenInput:
         ["none", "stable_in_axis", "tree", "sequential"],
         default="none")
 
-    supported_chips = _collect_supported_chips(reg, inputs)
+    # supported_chips: 按 inputs.dtype_set 收窄候选
+    declared_dtypes: set[str] = set()
+    for t in inputs:
+        declared_dtypes.update(t.dtype_set)
+    candidates = narrow_chips_by_dtypes(reg["chips"], declared_dtypes)
+    if not candidates:
+        # 没有任一芯片覆盖全部 dtype（典型：dtype_set 横跨 fp4 + 老芯片）
+        print(f"\n  ⚠ 没有芯片同时支持所有 dtype {sorted(declared_dtypes)}；")
+        print(f"    请手动从全集挑选并在生成后修正 dtype_set / supported_combinations")
+        candidates = [c["id"] for c in reg["chips"]]
+    supported_chips = prompt_multi_choice(
+        f"\nsupported_chips（按 dtype_set {sorted(declared_dtypes)} 自动收窄；多选）",
+        candidates,
+        defaults=candidates,
+    )
 
     return GenInput(
         op_name=op_name,
@@ -312,30 +450,53 @@ def interactive_collect(reg: dict) -> GenInput:
         accumulation_order=accumulation_order,
         numerical_stability_required=("NumericalStable" in paradigms),
         supported_chips=supported_chips,
+        axis_source=axis_source,
+        paradigm_groups_mode=paradigm_groups_mode,
+        format_variants=format_variants,
     )
 
 
-def build_attributes_block(paradigms: list[str], inputs: list[TensorSpec]) -> str:
+def build_attributes_block(category: str, paradigms: list[str], inputs: list[TensorSpec],
+                           axis_source: str = "attribute") -> str:
     """Inject minimum required attrs per paradigm injection table.
 
     Multiple injectors may apply (e.g. Quantization + RandomSampling). Order
     matters only cosmetically — collected lines are joined.
+
+    axis_source controls how the reduction axis is specified:
+      - attribute:      dim attribute (default)
+      - input_tensor:   axis is a tensor input (already in inputs)
+      - fixed:          axis is hardcoded (no dim attribute)
+      - implicit_all:   no axis parameter, reduces all axes
     """
     blocks: list[str] = []
 
     if "Reduction" in paradigms and "Recurrence" not in paradigms:
-        target = inputs[0].name
-        blocks.append(
-            "  - name: dim\n"
-            "    type: int64\n"
-            "    default: -1\n"
-            '    semantics: "归约轴；负值按 Python 风格折算"\n'
-            "    machine_constraint:\n"
-            "      kind: int_in_range_relative_to_rank\n"
-            f"      target: {target}\n"
-            f'      lower_inclusive: "-rank({target})"\n'
-            f'      upper_exclusive: "rank({target})"'
-        )
+        if axis_source == "attribute":
+            _axis_input_names = {inp.name for inp in inputs
+                                 if inp.name in ("axes", "axis", "dim")
+                                 and any(d in ("int32", "int64") for d in inp.dtype_set)}
+            if not _axis_input_names:
+                target = inputs[0].name
+                blocks.append(
+                    "  - name: dim\n"
+                    "    type: list[int64]\n"
+                    "    default: []\n"
+                    '    semantics: "归约轴列表；为空时的语义由算子定义"\n'
+                    "    machine_constraint:\n"
+                    "      kind: list_of_int_in_range_relative_to_rank\n"
+                    f"      target: {target}\n"
+                    f'      lower_inclusive: "-rank({target})"\n'
+                    f'      upper_exclusive: "rank({target})"'
+                )
+        if _is_pure_reduction(category, paradigms) and axis_source != "implicit_all":
+            blocks.append(
+                "  - name: keep_dims\n"
+                "    type: bool\n"
+                "    default: false\n"
+                '    semantics: "是否保留归约轴；保留时归约轴长度为 1"\n'
+                "    machine_constraint: {kind: bool}"
+            )
 
     if "Quantization" in paradigms:
         blocks.append(
@@ -390,9 +551,10 @@ def build_op_block(op_name: str, description: str, category: str,
     return "\n".join(parts)
 
 
-def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str]) -> str:
+def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category: str) -> str:
     lines = []
     has_stateful = "Stateful" in paradigms
+    is_pure_reduction = _is_pure_reduction(category, paradigms)
     for i, inp in enumerate(inputs):
         # 折叠维名直接用 input 全名，避免多 input 同首字母冲突（e.g. xa/xb 都生成 "...x"）
         folded_name = inp.name.lower()
@@ -401,21 +563,40 @@ def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str]) -> str:
         lines.append(f"  - name: {inp.name}")
         lines.append(f"    role: {role}")
         lines.append(f"    dtype_set: [{', '.join(inp.dtype_set)}]")
-        lines.append(f"    rank_range: [{inp.rank_range[0]}, {inp.rank_range[1]}]")
+        rank_min = max(inp.rank_range[0], 1) if is_pure_reduction and i == 0 else inp.rank_range[0]
+        lines.append(f"    rank_range: [{rank_min}, {inp.rank_range[1]}]")
         lines.append(f"    layout: ND")
         lines.append(f"    shape:")
-        lines.append(f'      symbolic: ["...{folded_name}"]')
+        if is_pure_reduction and i == 0:
+            lines.append(f'      symbolic: ["...{folded_name}", "R"]')
+        else:
+            lines.append(f'      symbolic: ["...{folded_name}"]')
     return "\n".join(lines)
 
 
-def build_outputs_block(outputs: list[str], first_input: str, category: str) -> str:
-    """生成 outputs 段。VariableOutput 范畴（如 nonzero / unique）走 data_dependent 模板。"""
+def build_outputs_block(outputs: list[str], first_input: str, category: str, paradigms: list[str],
+                        inputs: list[TensorSpec], axis_source: str = "attribute") -> str:
+    """生成 outputs 段。
+
+    - VariableOutput（nonzero / unique）→ data_dependent
+    - Reduction / ReductionComposite / ArgReduce：
+      - axis_source=input_tensor → data_dependent（运行时值决定输出 shape）
+      - axis_source=attribute → numpy_expr + np.reduce_shape（attribute 值可静态求值）
+      - axis_source=fixed → numpy_expr + np.reduce_shape（固定 axis 值）
+      - axis_source=implicit_all → numpy_expr + scalar output（reduce 所有轴）
+    - 其他 → numpy_expr（占位，TODO 手填）
+    """
     lines = []
-    is_variable_output = category == "variable_output"
+    is_variable_output = category == "VariableOutput"
+    is_reduction_like = category in ("Reduction", "ReductionComposite", "ArgReduce")
+    has_axis_input = any(
+        inp.name in ("axes", "axis", "dim")
+        and any(d in ("int32", "int64") for d in inp.dtype_set)
+        for inp in inputs
+    )
     for out in outputs:
         lines.append(f"  - name: {out}")
         if is_variable_output:
-            # data_dependent 模板 — 形状由运行时输入值决定，仅给出语义描述与上界
             lines.append(f"    shape_rule_kind: data_dependent")
             lines.append(f"    data_dependent_shape: true")
             lines.append(f"    shape_rule_description: |")
@@ -427,10 +608,44 @@ def build_outputs_block(outputs: list[str], first_input: str, category: str) -> 
             lines.append(f"    dtype_rule_kind: numpy_expr")
             lines.append(f"    dtype_rule: |")
             lines.append(f"      {out}.dtype = np.int64  # TODO: VariableOutput 通常输出索引")
+        elif is_reduction_like and (axis_source == "input_tensor"
+                                    or (axis_source == "attribute" and has_axis_input)):
+            lines.append(f"    shape_rule_kind: data_dependent")
+            lines.append(f"    data_dependent_shape: true")
+            lines.append(f"    shape_rule_description: |")
+            lines.append(f"      # keep_dims=true:  {out}.shape = {first_input}.shape 归约轴置 1")
+            lines.append(f"      # keep_dims=false: {out}.shape = {first_input}.shape 去除归约轴")
+            lines.append(f"    shape_bounds:")
+            lines.append(f"      max_elements: \"prod({first_input}.shape)\"")
+            lines.append(f"      output_rank: 8  # TODO: 替换为实际最大 rank")
+            lines.append(f"    dtype_rule_kind: numpy_expr")
+            lines.append(f"    dtype_rule: |")
+            lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
+        elif _is_pure_reduction(category, paradigms) and axis_source == "fixed":
+            lines.append(f"    shape_rule_kind: numpy_expr")
+            lines.append(f"    shape_rule: |")
+            lines.append(
+                f"      {out}.shape = np.reduce_shape({first_input}.shape, axis=-1, keepdims=keep_dims)"
+            )
+            lines.append(f"    dtype_rule_kind: numpy_expr")
+            lines.append(f"    dtype_rule: |")
+            lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
+        elif _is_pure_reduction(category, paradigms) and axis_source == "implicit_all":
+            lines.append(f"    shape_rule_kind: numpy_expr")
+            lines.append(f"    shape_rule: |")
+            lines.append(f"      {out}.shape = ()  # reduce all axes → scalar")
+            lines.append(f"    dtype_rule_kind: numpy_expr")
+            lines.append(f"    dtype_rule: |")
+            lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
         else:
             lines.append(f"    shape_rule_kind: numpy_expr")
             lines.append(f"    shape_rule: |")
-            lines.append(f"      {out}.shape = {first_input}.shape  # TODO: numpy 表达式")
+            if _is_pure_reduction(category, paradigms):
+                lines.append(
+                    f"      {out}.shape = np.reduce_shape({first_input}.shape, axis=tuple(dim), keepdims=keep_dims)"
+                )
+            else:
+                lines.append(f"      {out}.shape = {first_input}.shape  # TODO: numpy 表达式")
             lines.append(f"    dtype_rule_kind: numpy_expr")
             lines.append(f"    dtype_rule: |")
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
@@ -439,44 +654,88 @@ def build_outputs_block(outputs: list[str], first_input: str, category: str) -> 
     return "\n".join(lines)
 
 
+def build_shape_symbols_block(category: str, paradigms: list[str]) -> str:
+    if _is_pure_reduction(category, paradigms):
+        return "{R: {kind: dim, range: [0, 9223372036854775807]}}"
+    return "{}"
+
+
+def build_reduction_block(axis_source: str) -> str:
+    """Generate the top-level `reduction:` block for non-attribute axis sources.
+
+    Only emitted when axis_source is fixed or implicit_all.
+    For attribute/input_tensor modes, returns empty string.
+    """
+    if axis_source == "fixed":
+        return (
+            "reduction:\n"
+            "  axis_source: fixed\n"
+            "  fixed_value: -1  # 替换为实际固定归约轴；同步修改 shape_rule 中的 axis 值"
+        )
+    if axis_source == "implicit_all":
+        return (
+            "reduction:\n"
+            "  axis_source: implicit_all"
+        )
+    return ""
+
+
 def build_supported_combinations_block(inputs: list[TensorSpec],
                                         outputs: list[str],
-                                        promotion: str) -> str:
+                                        promotion: str,
+                                        axis_source: str = "attribute") -> str:
     """生成 dtype_policy.supported_combinations。
 
     策略：
       * 同 dtype 直传 — 取所有输入 dtype_set 交集（每个 dtype 一行）
       * promotion=numpy_promote：在交集行外加几行 promote 组合（取 fp16+fp32 / bf16+fp32 这种典型对）
       * 其他 promotion：仅同 dtype 直传，开发者后续补充
+      * axis_source=input_tensor：axis 输入不参与 dtype 交集计算，单独用其 dtype
     """
     if not inputs or not outputs:
         return "    # TODO: supported_combinations 至少 1 行\n    - {inputs: {x: float32}, outputs: {y: float32}}"
 
-    dtype_intersection = set(inputs[0].dtype_set)
-    for inp in inputs[1:]:
+    axis_input_names = set()
+    if axis_source == "input_tensor":
+        axis_input_names = {inp.name for inp in inputs
+                           if inp.name in ("axes", "axis", "dim")
+                           and any(d in ("int32", "int64") for d in inp.dtype_set)}
+
+    data_inputs = [inp for inp in inputs if inp.name not in axis_input_names]
+    if not data_inputs:
+        data_inputs = inputs
+
+    dtype_intersection = set(data_inputs[0].dtype_set)
+    for inp in data_inputs[1:]:
         dtype_intersection &= set(inp.dtype_set)
     if not dtype_intersection:
-        # 无交集：保守只生成第一个 dtype 一行
-        dtype_intersection = {inputs[0].dtype_set[0]}
+        dtype_intersection = {data_inputs[0].dtype_set[0]}
 
     lines = []
     for dtype in sorted(dtype_intersection):
-        in_part = ", ".join(f"{inp.name}: {dtype}" for inp in inputs)
+        in_parts = []
+        for inp in inputs:
+            if inp.name in axis_input_names:
+                in_parts.append(f"{inp.name}: {inp.dtype_set[0]}")
+            else:
+                in_parts.append(f"{inp.name}: {dtype}")
+        in_part = ", ".join(in_parts)
         out_part = ", ".join(f"{out}: {dtype}" for out in outputs)
         lines.append(f"    - {{inputs: {{{in_part}}}, outputs: {{{out_part}}}}}")
 
-    if promotion == "numpy_promote" and len(inputs) >= 2:
-        # 加 fp16 + fp32 / bf16 + fp32 这种典型混合行
-        # 为 ≥ 3 input 算子（如 where(cond, x, y)）也生成：把 narrow 给"第一半"
-        # input、wide 给"第二半"，简单但能覆盖；用户可手动微调
-        mid = len(inputs) // 2 or 1
+    if promotion == "numpy_promote" and len(data_inputs) >= 2:
+        mid = len(data_inputs) // 2 or 1
         for narrow, wide in (("float16", "float32"), ("bfloat16", "float32")):
-            # 检查所有 input 都允许其分配的 dtype
-            assigned = [narrow if i < mid else wide for i in range(len(inputs))]
-            if all(d in inp.dtype_set for d, inp in zip(assigned, inputs)) and narrow != wide:
-                in_part = ", ".join(
-                    f"{inp.name}: {d}" for d, inp in zip(assigned, inputs)
-                )
+            assigned = [narrow if i < mid else wide for i in range(len(data_inputs))]
+            if all(d in inp.dtype_set for d, inp in zip(assigned, data_inputs)) and narrow != wide:
+                in_parts = []
+                for inp in inputs:
+                    if inp.name in axis_input_names:
+                        in_parts.append(f"{inp.name}: {inp.dtype_set[0]}")
+                    else:
+                        idx = data_inputs.index(inp)
+                        in_parts.append(f"{inp.name}: {assigned[idx]}")
+                in_part = ", ".join(in_parts)
                 out_part = ", ".join(f"{out}: {wide}" for out in outputs)
                 lines.append(f"    - {{inputs: {{{in_part}}}, outputs: {{{out_part}}}}}")
 
@@ -497,22 +756,32 @@ def _format_tol_value(v) -> str:
 
 
 def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str],
-                                     promotion: str) -> str:
+                                     promotion: str,
+                                     axis_source: str = "attribute") -> str:
     """生成 numerical_tolerance.per_dtype，覆盖 supported_combinations 中所有出现的 output dtype。"""
     defaults = _load_tolerance_defaults()
-    # 与 supported_combinations 一致：先收集会出现的 output dtype
-    dtype_intersection = set(inputs[0].dtype_set) if inputs else {"float32"}
-    for inp in (inputs[1:] if inputs else []):
+    
+    axis_input_names = set()
+    if axis_source == "input_tensor":
+        axis_input_names = {inp.name for inp in inputs
+                           if inp.name in ("axes", "axis", "dim")
+                           and any(d in ("int32", "int64") for d in inp.dtype_set)}
+
+    data_inputs = [inp for inp in inputs if inp.name not in axis_input_names]
+    if not data_inputs:
+        data_inputs = inputs
+    
+    dtype_intersection = set(data_inputs[0].dtype_set) if data_inputs else {"float32"}
+    for inp in (data_inputs[1:] if data_inputs else []):
         dtype_intersection &= set(inp.dtype_set)
     if not dtype_intersection:
-        dtype_intersection = {inputs[0].dtype_set[0]} if inputs else {"float32"}
+        dtype_intersection = {data_inputs[0].dtype_set[0]} if data_inputs else {"float32"}
     out_dtypes = set(dtype_intersection)
-    # numpy_promote 时混合 dtype 行的 output dtype 也会出现
-    if promotion == "numpy_promote" and len(inputs) >= 2:
+    if promotion == "numpy_promote" and len(data_inputs) >= 2:
         for narrow, wide in (("float16", "float32"), ("bfloat16", "float32")):
-            mid = len(inputs) // 2 or 1
-            assigned = [narrow if i < mid else wide for i in range(len(inputs))]
-            if all(d in inp.dtype_set for d, inp in zip(assigned, inputs)):
+            mid = len(data_inputs) // 2 or 1
+            assigned = [narrow if i < mid else wide for i in range(len(data_inputs))]
+            if all(d in inp.dtype_set for d, inp in zip(assigned, data_inputs)):
                 out_dtypes.add(wide)
 
     lines = []
@@ -526,7 +795,7 @@ def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str]
 
 
 def build_accumulator_block(category: str, paradigms: list[str]) -> str:
-    triggers = {"contraction", "reduction_composite"}
+    triggers = {"Contraction", "ReductionComposite"}
     if category in triggers or (
         "NumericalStable" in paradigms and "Reduction" in paradigms
     ):
@@ -599,7 +868,22 @@ _PARADIGM_BOUNDARY_TEMPLATES = {
     "Stateful": [
         '  - case: "跨调用状态保持（first call vs second call）"\n    synthesize: { __FIRST_INPUT__.shape: "[8]" }\n    machine_check: {kind: matches_oracle}',
     ],
+    "Broadcast": [
+        '  - case: "含 size-1 维的广播"\n    synthesize: { __FIRST_INPUT__.shape: "[1, 4]" }\n    machine_check: {kind: matches_oracle}',
+        '  - case: "广播不兼容 → 报错"\n    synthesize: { __FIRST_INPUT__.shape: "[2, 3]" }\n    machine_check: {kind: raises_error, error_type: shape_mismatch}',
+    ],
 }
+
+
+_PURE_REDUCTION_BOUNDARY_TEMPLATES = [
+    '  - case: "reduce 轴长度为 1"\n'
+    '    synthesize: { __FIRST_INPUT__.shape: "[1]", attr.dim: [-1], attr.keep_dims: false }\n'
+    '    machine_check: {kind: matches_oracle}',
+    '  - case: "空 Tensor"\n'
+    '    synthesize: { __FIRST_INPUT__.shape: "[0, 4]", attr.dim: [-1], attr.keep_dims: false }\n'
+    '    machine_check: {kind: returns_empty}',
+]
+
 
 _PARADIGM_EXTREME_TEMPLATES = {
     "NumericalStable": [
@@ -627,11 +911,54 @@ _PARADIGM_EXTREME_TEMPLATES = {
 }
 
 
-def build_extra_boundary_cases(paradigms: list[str], first_input: str) -> str:
+def build_default_boundary_case(category: str, paradigms: list[str], first_input: str,
+                                axis_source: str = "attribute") -> str:
+    if _is_pure_reduction(category, paradigms):
+        if axis_source == "fixed":
+            return (
+                '  - case: "rank=0 标量输入 → 归约轴越界"\n'
+                f'    synthesize: {{ {first_input}.shape: "[]", attr.keep_dims: false }}\n'
+                "    machine_check: {kind: raises_error, error_type: attribute_value_out_of_range}"
+            )
+        if axis_source == "implicit_all":
+            return ""
+        if axis_source == "input_tensor":
+            return (
+                '  - case: "rank=0 标量输入"\n'
+                f'    synthesize: {{ {first_input}.shape: "[]", attr.keep_dims: false }}\n'
+                "    machine_check: {kind: matches_oracle}"
+            )
+        return (
+            '  - case: "rank=0 标量输入 → 归约轴越界"\n'
+            f'    synthesize: {{ {first_input}.shape: "[]", attr.dim: [-1], attr.keep_dims: false }}\n'
+            "    machine_check: {kind: raises_error, error_type: attribute_value_out_of_range}"
+        )
+
+    return (
+        '  - case: "rank=0 标量输入"\n'
+        f'    synthesize: {{ {first_input}.shape: "[]" }}\n'
+        "    machine_check: {kind: matches_oracle}"
+    )
+
+
+def build_extra_boundary_cases(category: str, paradigms: list[str], first_input: str,
+                               axis_source: str = "attribute") -> str:
     """生成 paradigm 必含的 boundary case 占位，避免 stage 6 FAIL。"""
     lines: list[str] = []
     for p in paradigms:
-        for tmpl in _PARADIGM_BOUNDARY_TEMPLATES.get(p, []):
+        if p == "Reduction" and _is_pure_reduction(category, paradigms):
+            if axis_source == "implicit_all":
+                templates = _PARADIGM_BOUNDARY_TEMPLATES.get(p, [])
+            elif axis_source in ("fixed", "input_tensor"):
+                templates = [
+                    t.replace("attr.dim: [-1], ", "").replace(", attr.dim: [-1]", "")
+                    for t in _PURE_REDUCTION_BOUNDARY_TEMPLATES
+                ]
+            else:
+                templates = _PURE_REDUCTION_BOUNDARY_TEMPLATES
+        else:
+            templates = _PARADIGM_BOUNDARY_TEMPLATES.get(p, [])
+        for tmpl in templates:
             lines.append(tmpl.replace("__FIRST_INPUT__", first_input))
     return "\n".join(lines)
 
@@ -690,32 +1017,86 @@ def build_raises_error_boundary_case(error_codes: list[str], first_input: str) -
     )
 
 
-def _build_techniques_text(numerical_stability_required):
-    if not numerical_stability_required:
-        return "[]"
-    return (
-        "\n    - name: max_subtraction\n"
-        '      applies_to: "TODO"\n'
-        '      rationale: "TODO"\n'
-        "      anti_pattern_id: AP-004"
-    )
+def build_paradigm_groups_block(paradigms: list[str], mode: str) -> str:
+    """生成 paradigm_groups 段（横向组合 / 纵向融合）。
+
+    mode:
+      * "combination" — 多范式择一，由属性值决定激活哪个。
+        为每个 paradigm 生成一条 combination 组（TODO 待填 switch / when）。
+      * "fusion" — 多范式串联执行。
+        生成一条 fusion 组包含所有基础范式。
+      * "" — 不生成 paradigm_groups。
+    """
+    if not mode or not paradigms:
+        return ""
+    if mode == "combination":
+        lines = ["  paradigm_groups:"]
+        for p in paradigms:
+            lines.append(f"    - kind: combination")
+            lines.append(f"      paradigms: [{p}]")
+            lines.append(f"      switch: TODO  # 属性名（如 reduction）")
+            lines.append(f"      when: TODO    # 属性值（如 none），最后一个组用 \"*\" 表示兜底")
+        return "\n".join(lines)
+    if mode == "fusion":
+        return (
+            "  paradigm_groups:\n"
+            f"    - kind: fusion\n"
+            f"      paradigms: [{', '.join(paradigms)}]"
+        )
+    return ""
 
 
-def _build_boundary_extreme_cases(gi, first_input, attributes_block):
-    extra_boundary_cases = build_extra_boundary_cases(gi.paradigms, first_input)
+def build_format_variants_block(variants: list[dict]) -> str:
+    """生成 format_variants 段。
+
+    每个 variant 包含 format / rank / reduction_axes / oracle_kwargs（可选）。
+    渲染为 YAML 缩进文本，插入 math_semantics 末尾。
+    """
+    if not variants:
+        return ""
+    lines = ["  format_variants:"]
+    for v in variants:
+        fmt = v.get("format", "NCHW")
+        rank = v.get("rank", [])
+        axes = v.get("reduction_axes", [])
+        lines.append(f"    - format: {fmt}")
+        lines.append(f"      rank: {rank}")
+        lines.append(f"      reduction_axes: {axes}")
+        kw = v.get("oracle_kwargs")
+        if kw:
+            lines.append(f"      oracle_kwargs: {kw}")
+    return "\n".join(lines)
+
+
+def render(gi: GenInput) -> str:
+    text = TEMPLATE.read_text(encoding="utf-8")
+    first_input = gi.inputs[0].name
+    first_output = gi.outputs[0]
+
+    techniques = "[]"
+    if gi.numerical_stability_required:
+        techniques = (
+            "\n    - name: max_subtraction\n"
+            '      applies_to: "TODO"\n'
+            '      rationale: "TODO"\n'
+            "      anti_pattern_id: AP-004"
+        )
+
+    # 范式驱动的 boundary/extreme 占位 case
+    # 让生成器产出的骨架自身就过 stage 6（不需要用户额外想关键词）
+    default_boundary_case = build_default_boundary_case(gi.category, gi.paradigms, first_input, gi.axis_source)
+    extra_boundary_cases = build_extra_boundary_cases(gi.category, gi.paradigms, first_input, gi.axis_source)
     extra_extreme_cases = build_extra_extreme_cases(gi.paradigms, first_input)
+
+    # 推断错误码集合并补一条 raises_error 占位 case，让 stage 2 J 规则有可校验对象
+    attributes_block = build_attributes_block(gi.category, gi.paradigms, gi.inputs, gi.axis_source)
     error_codes = infer_error_codes(gi.paradigms, attributes_block)
     raises_error_case = build_raises_error_boundary_case(error_codes, first_input)
     extra_boundary_cases = (extra_boundary_cases + "\n" + raises_error_case
                             if extra_boundary_cases.strip()
                             else raises_error_case)
-    return extra_boundary_cases, extra_extreme_cases, error_codes
 
-
-def _build_replacements(gi, first_input, first_output, attributes_block,
-                        extra_boundary_cases, extra_extreme_cases, error_codes,
-                        techniques):
-    return {
+    replacements = {
         "{{op_name}}": gi.op_name,
         "{{description}}": gi.description,
         "{{category}}": gi.category,
@@ -724,46 +1105,37 @@ def _build_replacements(gi, first_input, first_output, attributes_block,
                                         gi.category, gi.paradigms,
                                         supported_chips=gi.supported_chips,
                                         error_codes=error_codes),
-        "{{inputs_block}}": build_inputs_block(gi.inputs, gi.paradigms),
+        "{{paradigm_groups_block}}": build_paradigm_groups_block(
+            gi.paradigms, gi.paradigm_groups_mode),
+        "{{inputs_block}}": build_inputs_block(gi.inputs, gi.paradigms, gi.category),
         "{{attributes_block}}": attributes_block,
-        "{{outputs_block}}": build_outputs_block(gi.outputs, first_input, gi.category),
+        "{{outputs_block}}": build_outputs_block(gi.outputs, first_input, gi.category, gi.paradigms, gi.inputs, gi.axis_source),
+        "{{reduction_block}}": build_reduction_block(gi.axis_source),
+        "{{shape_symbols}}": build_shape_symbols_block(gi.category, gi.paradigms),
         "{{first_input}}": first_input,
         "{{first_output}}": first_output,
         "{{promotion}}": gi.promotion,
         "{{broadcast_kind}}": gi.broadcast_kind,
+        "{{default_boundary_case}}": default_boundary_case,
         "{{accumulation_order}}": gi.accumulation_order,
         "{{numerical_stability_required}}": str(gi.numerical_stability_required).lower(),
         "{{numerical_stability_techniques}}": techniques,
         "{{accumulator_block}}": build_accumulator_block(gi.category, gi.paradigms),
         "{{composition_block}}": build_composition_block(gi.paradigms, gi.inputs, gi.outputs),
+        "{{format_variants_block}}": build_format_variants_block(gi.format_variants),
         "{{supported_combinations_block}}": build_supported_combinations_block(
-            gi.inputs, gi.outputs, gi.promotion),
+            gi.inputs, gi.outputs, gi.promotion, gi.axis_source),
         "{{per_dtype_tolerance_block}}": build_per_dtype_tolerance_block(
-            gi.inputs, gi.outputs, gi.promotion),
+            gi.inputs, gi.outputs, gi.promotion, gi.axis_source),
         "{{extra_boundary_cases}}": extra_boundary_cases,
         "{{extra_extreme_cases}}": extra_extreme_cases,
     }
-
-
-def render(gi: GenInput) -> str:
-    text = TEMPLATE.read_text(encoding="utf-8")
-    first_input = gi.inputs[0].name
-    first_output = gi.outputs[0]
-
-    techniques = _build_techniques_text(gi.numerical_stability_required)
-    attributes_block = build_attributes_block(gi.paradigms, gi.inputs)
-    extra_boundary_cases, extra_extreme_cases, error_codes = _build_boundary_extreme_cases(
-        gi, first_input, attributes_block)
-
-    replacements = _build_replacements(
-        gi, first_input, first_output, attributes_block,
-        extra_boundary_cases, extra_extreme_cases, error_codes, techniques)
     for k, v in replacements.items():
         text = text.replace(k, v)
     return text
 
 
-def _build_argparser():
+def main() -> int:
     ap = argparse.ArgumentParser(description="Generate spec.yaml skeleton.")
     ap.add_argument("--op-name")
     ap.add_argument("--category")
@@ -778,72 +1150,89 @@ def _build_argparser():
     ap.add_argument("--chips", default="",
                     help="Comma-separated chip ids（如 Ascend910B,Ascend950PR）；"
                          "省略时按 inputs.dtype_set 自动收窄到全部兼容芯片")
+    ap.add_argument("--axis-source", dest="axis_source", default="attribute",
+                    choices=["attribute", "input_tensor", "fixed", "implicit_all"],
+                    help="How the reduction axis is specified (only for Reduction paradigms): "
+                         "attribute (dim attr), input_tensor (axis as tensor input), "
+                         "fixed (hardcoded axis), implicit_all (reduce all axes)")
+    ap.add_argument("--paradigm-groups", dest="paradigm_groups", default="",
+                    choices=["", "combination", "fusion"],
+                    help="范式组合模式: combination（横向组合，属性切换范式）"
+                         "或 fusion（纵向融合，范式串联执行）。"
+                         "combination 模式下 Elementwise 不会被过滤。")
+    ap.add_argument("--format-variants", dest="format_variants", default="",
+                    help="数据排布格式变体，格式: 'FORMAT:RANK:AXES;...' "
+                         "(如 'NCHW:4:0,2,3;NHWC:4:0,1,2;NCDHW:5:0,2,3,4')")
     ap.add_argument("--output-dir", required=True,
                     help="Directory to write spec.yaml into (created if absent)")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite existing spec.yaml")
-    return ap
+    args = ap.parse_args()
 
-
-def _resolve_chips(args, inputs, reg):
-    declared_dtypes: set[str] = set()
-    for t in inputs:
-        declared_dtypes.update(t.dtype_set)
-    all_chip_ids = [c["id"] for c in reg["chips"]]
-    if args.chips:
-        supported_chips = [c.strip() for c in args.chips.split(",") if c.strip()]
-        unknown = [c for c in supported_chips if c not in all_chip_ids]
-        if unknown:
-            raise SystemExit(
-                f"Unknown chip id(s): {unknown}. Allowed: {all_chip_ids}"
-            )
-        return supported_chips
-    supported_chips = narrow_chips_by_dtypes(reg["chips"], declared_dtypes)
-    if not supported_chips:
-        raise SystemExit(
-            f"No chip in registry supports all of dtype_set "
-            f"{sorted(declared_dtypes)}; pass --chips explicitly."
-        )
-    return supported_chips
-
-
-def _build_geninput_from_args(args, reg):
-    paradigms = [p.strip() for p in args.paradigms.split(",") if p.strip()]
-    if args.inputs:
-        inputs = [parse_tensor_arg(s) for s in args.inputs.split(";") if s.strip()]
-    else:
-        inputs = [TensorSpec(name="x", dtype_set=["float32"])]
-    outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
-    supported_chips = _resolve_chips(args, inputs, reg)
-
-    gi = GenInput(
-        op_name=args.op_name,
-        description=args.description or f"TODO: describe {args.op_name} operator",
-        category=args.category,
-        paradigms=paradigms,
-        inputs=inputs,
-        outputs=outputs,
-        promotion=args.promotion,
-        broadcast_kind=args.broadcast_kind,
-        accumulation_order=args.accumulation_order,
-        numerical_stability_required=("NumericalStable" in paradigms),
-        supported_chips=supported_chips,
-    )
-    if gi.category not in reg["categories"]:
-        raise SystemExit(f"Unknown category: {gi.category}")
-    for p in gi.paradigms:
-        if p not in reg["paradigms"]:
-            raise SystemExit(f"Unknown paradigm: {p}")
-    return gi
-
-
-def main() -> int:
-    args = _build_argparser().parse_args()
     reg = load_registries()
     non_interactive = args.op_name and args.category and args.paradigms
 
     if non_interactive:
-        gi = _build_geninput_from_args(args, reg)
+        paradigms = [p.strip() for p in args.paradigms.split(",") if p.strip()]
+        pg_mode = args.paradigm_groups or ""
+        # combination 模式下不过滤 Elementwise（Elementwise 是独立的范式分支）
+        if pg_mode != "combination":
+            paradigms = _filter_elementwise(paradigms)
+        category = _resolve_category(args.category, paradigms)
+        if args.inputs:
+            inputs = [parse_tensor_arg(s) for s in args.inputs.split(";") if s.strip()]
+        else:
+            inputs = [TensorSpec(name="x", dtype_set=["float32"])]
+        outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
+
+        # supported_chips: CLI 显式给 → 直接用；否则按 dtype_set 自动收窄
+        declared_dtypes: set[str] = set()
+        for t in inputs:
+            declared_dtypes.update(t.dtype_set)
+        all_chip_ids = [c["id"] for c in reg["chips"]]
+        if args.chips:
+            supported_chips = [c.strip() for c in args.chips.split(",") if c.strip()]
+            unknown = [c for c in supported_chips if c not in all_chip_ids]
+            if unknown:
+                raise SystemExit(
+                    f"Unknown chip id(s): {unknown}. Allowed: {all_chip_ids}"
+                )
+        else:
+            supported_chips = narrow_chips_by_dtypes(reg["chips"], declared_dtypes)
+            if not supported_chips:
+                raise SystemExit(
+                    f"No chip in registry supports all of dtype_set "
+                    f"{sorted(declared_dtypes)}; pass --chips explicitly."
+                )
+
+        gi = GenInput(
+            op_name=args.op_name,
+            description=args.description or f"TODO: describe {args.op_name} operator",
+            category=category,
+            paradigms=paradigms,
+            inputs=inputs,
+            outputs=outputs,
+            promotion=args.promotion,
+            broadcast_kind=args.broadcast_kind,
+            accumulation_order=args.accumulation_order,
+            numerical_stability_required=("NumericalStable" in paradigms),
+            supported_chips=supported_chips,
+            axis_source=args.axis_source,
+            paradigm_groups_mode=pg_mode,
+            format_variants=parse_format_variants(args.format_variants, reg.get("layouts")),
+        )
+        if args.axis_source == "attribute" and "Reduction" in paradigms:
+            print(
+                "⚠ WARNING: axis_source=attribute 将注入 dim/keep_dims attribute。"
+                "如果 REQUIREMENTS.md 中算子接口描述无归约轴相关参数，"
+                "请使用 --axis-source fixed 或 --axis-source implicit_all",
+                file=sys.stderr,
+            )
+        if gi.category not in reg["categories"]:
+            raise SystemExit(f"Unknown category: {gi.category}")
+        for p in gi.paradigms:
+            if p not in reg["paradigms"]:
+                raise SystemExit(f"Unknown paradigm: {p}")
     else:
         gi = interactive_collect(reg)
 

@@ -115,14 +115,14 @@ def _schema_error_codes(s: dict) -> set:
 
 
 CHECKS = [
-    ("category", "category_enum.yaml", _from_categories, _schema_category),
-    ("paradigm", "paradigm_enum.yaml", _from_paradigms, _schema_paradigm),
-    ("primitive_op", "primitive_whitelist.yaml", _from_primitives, _schema_primitive),
-    ("invariant_kind", "invariant_kind_registry.yaml", _from_invariant_kinds, _schema_invariant_kind),
-    ("machine_check", "machine_check_kind_registry.yaml", _from_machine_check, _schema_machine_check),
-    ("framework", "framework_oracle_registry.yaml", _from_frameworks, _schema_framework),
-    ("chip", "chip_registry.yaml", _from_chips, _schema_chips),
-    ("error_code", "error_code_enum.yaml", _from_error_codes, _schema_error_codes),
+    ("category",          "category_enum.yaml",                 _from_categories,        _schema_category),
+    ("paradigm",          "paradigm_enum.yaml",                  _from_paradigms,         _schema_paradigm),
+    ("primitive_op",      "primitive_whitelist.yaml",            _from_primitives,        _schema_primitive),
+    ("invariant_kind",    "invariant_kind_registry.yaml",        _from_invariant_kinds,   _schema_invariant_kind),
+    ("machine_check",     "machine_check_kind_registry.yaml",    _from_machine_check,     _schema_machine_check),
+    ("framework",         "framework_oracle_registry.yaml",      _from_frameworks,        _schema_framework),
+    ("chip",              "chip_registry.yaml",                  _from_chips,             _schema_chips),
+    ("error_code",        "error_code_enum.yaml",                _from_error_codes,       _schema_error_codes),
 ]
 
 

@@ -108,9 +108,20 @@ _NP_NAMESPACE = _NpDtypeNamespace()
 # ---------- main entry -----------------------------------------------------
 
 
-def _compile_dtype_rule(rule, field_path):
+def evaluate_dtype_rule(
+    rule: str,
+    *,
+    output_name: str,
+    input_dtypes: dict[str, str],
+    field_path: str = "",
+) -> str:
+    """Run a numpy_expr dtype_rule. Return the resolved dtype string.
+
+    input_dtypes 是当前被校验的 supported_combinations 这一行的 {input_name: dtype_str}。
+    """
     if not isinstance(rule, str) or not rule.strip():
         raise DslError("dsl_parse_error", "dtype_rule 必须是非空字符串", field_path)
+
     try:
         tree = ast.parse(rule, mode="exec")
     except SyntaxError as e:
@@ -123,10 +134,16 @@ def _compile_dtype_rule(rule, field_path):
         _ast_sandbox.validate_ast(tree)
     except SandboxError as e:
         raise DslError("dsl_eval_error", e.message, field_path) from None
-    return compile(tree, "<dtype_rule>", "exec")
+    compiled = compile(tree, "<dtype_rule>", "exec")
 
+    extra: dict[str, Any] = {"np": _NP_NAMESPACE}
+    for name, dt in input_dtypes.items():
+        extra[name] = _DtypeProxy(name, dt)
+    output_slot = pytypes.SimpleNamespace(dtype=None)
+    extra[output_name] = output_slot
+    g = _ast_sandbox.make_globals(extra)
+    locals_dict: dict[str, Any] = {}
 
-def _exec_dtype_rule(compiled, g, locals_dict, field_path):
     try:
         with _ast_sandbox.timeout(_TIMEOUT_S, on_timeout_code="dtype_eval_timeout"):
             exec(compiled, g, locals_dict)
@@ -143,30 +160,9 @@ def _exec_dtype_rule(compiled, g, locals_dict, field_path):
     except (TypeError, AttributeError) as e:
         raise DslError("dsl_eval_error", f"dtype_rule 求值失败: {e}", field_path) from None
 
-
-def evaluate_dtype_rule(
-    rule: str,
-    *,
-    output_name: str,
-    input_dtypes: dict[str, str],
-    field_path: str = "",
-) -> str:
-    """Run a numpy_expr dtype_rule. Return the resolved dtype string.
-
-    input_dtypes 是当前被校验的 supported_combinations 这一行的 {input_name: dtype_str}。
-    """
-    compiled = _compile_dtype_rule(rule, field_path)
-    extra: dict[str, Any] = {"np": _NP_NAMESPACE}
-    for name, dt in input_dtypes.items():
-        extra[name] = _DtypeProxy(name, dt)
-    output_slot = pytypes.SimpleNamespace(dtype=None)
-    extra[output_name] = output_slot
-    g = _ast_sandbox.make_globals(extra)
-    locals_dict: dict[str, Any] = {}
-    _exec_dtype_rule(compiled, g, locals_dict, field_path)
-
     if output_slot.dtype is not None:
         return _coerce_result_dtype(output_slot.dtype, output_name, field_path)
+    # fallback：作者可能写 `c = np.promote_types(...)`
     if output_name in locals_dict and not isinstance(locals_dict[output_name], pytypes.SimpleNamespace):
         return _coerce_result_dtype(locals_dict[output_name], output_name, field_path)
     raise DslError(

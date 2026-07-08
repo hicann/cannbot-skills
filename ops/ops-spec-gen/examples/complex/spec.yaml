@@ -19,8 +19,8 @@ op:
   name: complex
   version: "1.0"
   description: "Construct complex tensor from real and imag parts (with numpy broadcast)"
-  category: layout_transform
-  paradigms: [Elementwise, Broadcast, LayoutTransform]
+  category: LayoutTransform
+  paradigms: [Broadcast, LayoutTransform]
   lifecycle: stable
   error_codes: [null_input, shape_mismatch]
   platform_constraints:

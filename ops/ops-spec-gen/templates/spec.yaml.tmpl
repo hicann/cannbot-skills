@@ -15,6 +15,7 @@ schema_version: 1
 
 op:
 {{op_block}}
+{{paradigm_groups_block}}
 
 inputs:
 {{inputs_block}}
@@ -25,8 +26,10 @@ attributes:
 outputs:
 {{outputs_block}}
 
+{{reduction_block}}
+
 shape_constraints:
-  symbols: {}
+  symbols: {{shape_symbols}}
   global_constraints:
     - "rank({{first_input}}) <= 8"
   notes: []
@@ -57,6 +60,7 @@ math_semantics:
     # TODO: 至少 1 条 invariant；kind 必须在白名单（registries/invariant_kind_registry.yaml）
     []
 {{composition_block}}
+{{format_variants_block}}
 
 numerical_stability:
   required: {{numerical_stability_required}}
@@ -70,9 +74,7 @@ numerical_tolerance:
 
 boundary_conditions:
   # TODO: 至少补充: shape 完全相同 / 空 Tensor / rank=0 / 参数越界 (raises_error)
-  - case: "rank=0 标量输入"
-    synthesize: { {{first_input}}.shape: "[]" }
-    machine_check: {kind: matches_oracle}
+{{default_boundary_case}}
 {{extra_boundary_cases}}
 
 extreme_inputs:

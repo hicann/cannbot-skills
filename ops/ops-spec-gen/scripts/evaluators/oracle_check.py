@@ -106,24 +106,6 @@ def _check_placeholders(spec: dict, findings: list[dict]) -> None:
                 })
 
 
-def _resolve_api_target(mod, framework, api_path, api_rest, field_path, findings):
-    if not api_rest:
-        return mod
-    try:
-        return _resolve_attribute_chain(mod, api_rest[0])
-    except AttributeError as e:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.api_not_found",
-            "field_path": field_path,
-            "message": f"无法解析 {api_path!r}：{e}",
-            "suggested_fix": (
-                f"确认 {framework} 中是否真有 {api_rest[0]!r}（拼写 / 版本差异）"
-            ),
-        })
-        return None
-
-
 def _resolve_api_callable(framework: str, api_path: str, field_path: str,
                           findings: list[dict]):
     """真 import framework 并 getattr 到 api。返回 (ok, callable_or_none)。
@@ -155,9 +137,22 @@ def _resolve_api_callable(framework: str, api_path: str, field_path: str,
         })
         return False, None
 
-    target = _resolve_api_target(mod, framework, api_path, api_rest, field_path, findings)
-    if target is None:
-        return False, None
+    if api_rest:
+        try:
+            target = _resolve_attribute_chain(mod, api_rest[0])
+        except AttributeError as e:
+            findings.append({
+                "severity": "error",
+                "rule_id": "oracle_reachable.api_not_found",
+                "field_path": field_path,
+                "message": f"无法解析 {api_path!r}：{e}",
+                "suggested_fix": (
+                    f"确认 {framework} 中是否真有 {api_rest[0]!r}（拼写 / 版本差异）"
+                ),
+            })
+            return False, None
+    else:
+        target = mod
 
     if not callable(target):
         findings.append({
@@ -172,54 +167,54 @@ def _resolve_api_callable(framework: str, api_path: str, field_path: str,
     return True, target
 
 
-def _check_arg_placeholder(m, attr_names, input_names, node_id, arg_index, findings):
-    ns = m.group("ns")
-    path = m.group("path")
-    head = path.split(".")[0]
-    field = f"math_semantics.reference_oracle.composition[{node_id}].args[{arg_index}]"
-    if ns == "output":
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.placeholder_unresolved",
-            "field_path": field,
-            "message": (
-                "composition.args 不允许 ${output.X}（output 是 spec 输出名空间，"
-                "与 oracle 节点拓扑无关）；如需引用前序节点请用裸 id"
-            ),
-            "suggested_fix": "把 ${output.X} 替换为前序节点 id 或 ${input.X}",
-        })
-        return
-    valid = {"attr": attr_names, "input": input_names}[ns]
-    if head not in valid:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.placeholder_unresolved",
-            "field_path": field,
-            "message": (
-                f"占位符 ${{{ns}.{path}}} 引用不存在的 {ns}={head!r}；"
-                f"已知 {ns}s={sorted(valid)}"
-            ),
-            "suggested_fix": f"修正占位符或在 spec 中添加 {head!r}",
-        })
-
-
 def _check_arg_reference(arg, attr_names: set, input_names: set,
                          seen_node_ids: set, node_id: str,
                          arg_index: int, findings: list[dict]) -> None:
     """校验 composition 节点的单个 arg 引用合法。
 
-    合法 arg 形式：裸标识符（input 名 / 已出现的前序节点 id）/ `${attr.X}` / `${input.X}` /
-    字面量。禁止 `${output.X}`。
+    合法 arg 形式：
+      * 字符串裸标识符（input 名 或 已出现的前序节点 id）
+      * `${attr.X}` / `${input.X}` 占位符
+      * 字面量数字 / bool / null
+
+    禁止：`${output.X}`（output 是 spec 输出名空间，与 oracle 节点拓扑无关）
     """
     if not isinstance(arg, str):
-        return
+        return  # 字面量直接放行
 
     placeholders = list(_PLACEHOLDER_RE.finditer(arg))
     if placeholders:
         for m in placeholders:
-            _check_arg_placeholder(m, attr_names, input_names, node_id, arg_index, findings)
+            ns = m.group("ns")
+            path = m.group("path")
+            head = path.split(".")[0]
+            if ns == "output":
+                findings.append({
+                    "severity": "error",
+                    "rule_id": "oracle_reachable.placeholder_unresolved",
+                    "field_path": f"math_semantics.reference_oracle.composition[{node_id}].args[{arg_index}]",
+                    "message": (
+                        "composition.args 不允许 ${output.X}（output 是 spec 输出名空间，"
+                        "与 oracle 节点拓扑无关）；如需引用前序节点请用裸 id"
+                    ),
+                    "suggested_fix": "把 ${output.X} 替换为前序节点 id 或 ${input.X}",
+                })
+                continue
+            valid = {"attr": attr_names, "input": input_names}[ns]
+            if head not in valid:
+                findings.append({
+                    "severity": "error",
+                    "rule_id": "oracle_reachable.placeholder_unresolved",
+                    "field_path": f"math_semantics.reference_oracle.composition[{node_id}].args[{arg_index}]",
+                    "message": (
+                        f"占位符 ${{{ns}.{path}}} 引用不存在的 {ns}={head!r}；"
+                        f"已知 {ns}s={sorted(valid)}"
+                    ),
+                    "suggested_fix": f"修正占位符或在 spec 中添加 {head!r}",
+                })
         return
 
+    # 裸字符串 → 必须是 input 名 或前序节点 id
     if arg in input_names or arg in seen_node_ids:
         return
 
@@ -237,91 +232,88 @@ def _check_arg_reference(arg, attr_names: set, input_names: set,
     })
 
 
-def _validate_node_id(node_id, idx, seen_ids, input_names, findings):
-    """Validate a single composition node's id. Returns True if valid (worth processing)."""
-    if not isinstance(node_id, str) or not node_id:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.composition_node_invalid",
-            "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
-            "message": "composition 节点缺 id 或 id 非字符串",
-            "suggested_fix": "每个节点必须有非空字符串 id",
-        })
-        return False
-    if node_id in seen_ids:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.composition_id_collision",
-            "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
-            "message": f"composition 节点 id={node_id!r} 重复",
-            "suggested_fix": "节点 id 必须唯一",
-        })
-        return False
-    if node_id in input_names:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.composition_id_shadows_input",
-            "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
-            "message": (
-                f"composition 节点 id={node_id!r} 与 input 同名，会让 args 引用歧义"
-            ),
-            "suggested_fix": "重命名节点 id（如加 _node 后缀）",
-        })
-    return True
-
-
-def _check_kwargs_placeholders(node_id, kwargs, attr_names, input_names, findings):
-    """Validate ${...} placeholders in composition node kwargs."""
-    for kw_name, kw_val in (kwargs or {}).items():
-        if not isinstance(kw_val, str):
-            continue
-        for m in _PLACEHOLDER_RE.finditer(kw_val):
-            ns = m.group("ns")
-            path = m.group("path")
-            head = path.split(".")[0]
-            field = f"math_semantics.reference_oracle.composition[{node_id}].kwargs.{kw_name}"
-            if ns == "output":
-                findings.append({
-                    "severity": "error",
-                    "rule_id": "oracle_reachable.placeholder_unresolved",
-                    "field_path": field,
-                    "message": (
-                        "composition.kwargs 不允许 ${output.X}（output 是 spec 输出名空间，"
-                        "与 oracle 节点拓扑无关）"
-                    ),
-                    "suggested_fix": "把 ${output.X} 替换为 ${attr.X} 或字面量",
-                })
-                continue
-            valid = {"attr": attr_names, "input": input_names}[ns]
-            if head not in valid:
-                findings.append({
-                    "severity": "error",
-                    "rule_id": "oracle_reachable.placeholder_unresolved",
-                    "field_path": field,
-                    "message": (
-                        f"占位符 ${{{ns}.{path}}} 引用不存在的 {ns}={head!r}；"
-                        f"已知 {ns}s={sorted(valid)}"
-                    ),
-                    "suggested_fix": f"修正占位符或在 spec 中添加 {head!r}",
-                })
-
-
 def _validate_composition_topology(composition: list, output_id: str,
                                    spec: dict, findings: list[dict]) -> bool:
     """节点 id 唯一 / output 存在 / args 引用合法（隐含禁循环）。"""
     attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
     input_names = {i.get("name") for i in (spec.get("inputs") or [])}
+
     seen_ids: set = set()
+    ok = True
 
     for idx, node in enumerate(composition):
         node_id = node.get("id")
-        if not _validate_node_id(node_id, idx, seen_ids, input_names, findings):
+        if not isinstance(node_id, str) or not node_id:
+            findings.append({
+                "severity": "error",
+                "rule_id": "oracle_reachable.composition_node_invalid",
+                "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
+                "message": "composition 节点缺 id 或 id 非字符串",
+                "suggested_fix": "每个节点必须有非空字符串 id",
+            })
+            ok = False
             continue
+
+        if node_id in seen_ids:
+            findings.append({
+                "severity": "error",
+                "rule_id": "oracle_reachable.composition_id_collision",
+                "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
+                "message": f"composition 节点 id={node_id!r} 重复",
+                "suggested_fix": "节点 id 必须唯一",
+            })
+            ok = False
+            continue
+
+        if node_id in input_names:
+            findings.append({
+                "severity": "error",
+                "rule_id": "oracle_reachable.composition_id_shadows_input",
+                "field_path": f"math_semantics.reference_oracle.composition[{idx}].id",
+                "message": (
+                    f"composition 节点 id={node_id!r} 与 input 同名，会让 args 引用歧义"
+                ),
+                "suggested_fix": "重命名节点 id（如加 _node 后缀）",
+            })
+            ok = False
+
         for ai, arg in enumerate(node.get("args") or []):
             _check_arg_reference(arg, attr_names, input_names, seen_ids,
                                  node_id, ai, findings)
-        _check_kwargs_placeholders(node_id, node.get("kwargs"),
-                                   attr_names, input_names, findings)
+
+        # kwargs 占位符校验（与 args 对称）
+        for kw_name, kw_val in (node.get("kwargs") or {}).items():
+            if not isinstance(kw_val, str):
+                continue
+            for m in _PLACEHOLDER_RE.finditer(kw_val):
+                ns = m.group("ns")
+                path = m.group("path")
+                head = path.split(".")[0]
+                if ns == "output":
+                    findings.append({
+                        "severity": "error",
+                        "rule_id": "oracle_reachable.placeholder_unresolved",
+                        "field_path": f"math_semantics.reference_oracle.composition[{node_id}].kwargs.{kw_name}",
+                        "message": (
+                            "composition.kwargs 不允许 ${output.X}（output 是 spec 输出名空间，"
+                            "与 oracle 节点拓扑无关）"
+                        ),
+                        "suggested_fix": "把 ${output.X} 替换为 ${attr.X} 或字面量",
+                    })
+                    continue
+                valid = {"attr": attr_names, "input": input_names}[ns]
+                if head not in valid:
+                    findings.append({
+                        "severity": "error",
+                        "rule_id": "oracle_reachable.placeholder_unresolved",
+                        "field_path": f"math_semantics.reference_oracle.composition[{node_id}].kwargs.{kw_name}",
+                        "message": (
+                            f"占位符 ${{{ns}.{path}}} 引用不存在的 {ns}={head!r}；"
+                            f"已知 {ns}s={sorted(valid)}"
+                        ),
+                        "suggested_fix": f"修正占位符或在 spec 中添加 {head!r}",
+                    })
+
         seen_ids.add(node_id)
 
     if output_id not in seen_ids:
@@ -334,8 +326,11 @@ def _validate_composition_topology(composition: list, output_id: str,
             ),
             "suggested_fix": "把 output 改为某个已声明节点的 id",
         })
+        ok = False
 
-    return not any(f["severity"] == "error" for f in findings)
+    if any(f["severity"] == "error" for f in findings):
+        ok = False
+    return ok
 
 
 def _check_available_dtype(spec: dict, oracle: dict, findings: list[dict]) -> None:
@@ -359,88 +354,6 @@ def _check_available_dtype(spec: dict, oracle: dict, findings: list[dict]) -> No
         })
 
 
-def _stage9_validate_oracle_fields(framework, api_path, composition, findings):
-    """Validate top-level oracle fields. Returns True if ok to proceed."""
-    if not framework:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.incomplete",
-            "field_path": "math_semantics.reference_oracle",
-            "message": "framework 字段缺失（且 absent=false）",
-            "suggested_fix": "补 framework，或把 absent 设为 true",
-        })
-        return False
-    if not api_path and not composition:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.incomplete",
-            "field_path": "math_semantics.reference_oracle",
-            "message": "api 或 composition 必须二选一（且 absent=false）",
-            "suggested_fix": "选择单 callable 模式（api）或 DAG 模式（composition + output）",
-        })
-        return False
-    if framework not in _known_frameworks():
-        findings.append({
-            "severity": "warning",
-            "rule_id": "oracle_reachable.unknown_framework",
-            "field_path": "math_semantics.reference_oracle.framework",
-            "message": f"framework={framework!r} 不在已知列表 {_known_frameworks()}",
-            "suggested_fix": "确认拼写；若为新框架请在 registries/framework_oracle_registry.yaml 中加一行",
-        })
-    return True
-
-
-def _stage9_run_composition(spec, oracle, framework, composition, output_id, findings):
-    """DAG composition mode. Returns status string."""
-    if not output_id:
-        findings.append({
-            "severity": "error",
-            "rule_id": "oracle_reachable.incomplete",
-            "field_path": "math_semantics.reference_oracle.output",
-            "message": "composition 模式必须声明 output 字段（指向某节点 id）",
-            "suggested_fix": "补 output: <node_id>",
-        })
-        return "FAIL"
-
-    if not _validate_composition_topology(composition, output_id, spec, findings):
-        return "FAIL"
-
-    any_skip = False
-    for node in composition:
-        nid = node["id"]
-        n_api = node["api"]
-        field = f"math_semantics.reference_oracle.composition[{nid}].api"
-        n_ok, _ = _resolve_api_callable(framework, n_api, field, findings)
-        if not n_ok:
-            if any(f["rule_id"] == "oracle_reachable.framework_not_installed"
-                   for f in findings):
-                any_skip = True
-                break
-
-    if any_skip:
-        status = "FAIL" if any(f["severity"] == "error" for f in findings) else "SKIP"
-    else:
-        status = "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
-
-    _check_available_dtype(spec, oracle, findings)
-    if status == "PASS" and any(f["severity"] == "error" for f in findings):
-        status = "FAIL"
-    return status
-
-
-def _stage9_run_single_api(spec, oracle, framework, api_path, findings):
-    """Single-api (legacy) mode. Returns status string."""
-    _resolve_api_callable(
-        framework, api_path,
-        "math_semantics.reference_oracle.api",
-        findings,
-    )
-    if any(f["rule_id"] == "oracle_reachable.framework_not_installed" for f in findings):
-        return "FAIL" if any(f["severity"] == "error" for f in findings) else "SKIP"
-    _check_available_dtype(spec, oracle, findings)
-    return "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
-
-
 def stage_9(spec: dict) -> tuple[str, list[dict]]:
     """Resolve the oracle by real import. Skip if framework not installed.
 
@@ -448,9 +361,11 @@ def stage_9(spec: dict) -> tuple[str, list[dict]]:
     absent=true 时直接 SKIP（spec 作者显式声明无 oracle，由 invariants + boundary 覆盖）。
     """
     findings: list[dict] = []
-    oracle = (spec.get("math_semantics") or {}).get("reference_oracle") or {}
 
-    if bool(oracle.get("absent", False)):
+    oracle = (spec.get("math_semantics") or {}).get("reference_oracle") or {}
+    absent = bool(oracle.get("absent", False))
+
+    if absent:
         return "SKIP", [{
             "severity": "info",
             "rule_id": "oracle_reachable.absent",
@@ -459,6 +374,7 @@ def stage_9(spec: dict) -> tuple[str, list[dict]]:
             "suggested_fix": None,
         }]
 
+    # Always check single-api kwargs placeholders even if framework missing
     _check_placeholders(spec, findings)
 
     framework = oracle.get("framework")
@@ -466,11 +382,84 @@ def stage_9(spec: dict) -> tuple[str, list[dict]]:
     composition = oracle.get("composition")
     output_id = oracle.get("output")
 
-    if not _stage9_validate_oracle_fields(framework, api_path, composition, findings):
+    if not framework:
+        findings.append({
+            "severity": "error",
+            "rule_id": "oracle_reachable.incomplete",
+            "field_path": "math_semantics.reference_oracle",
+            "message": "framework 字段缺失（且 absent=false）",
+            "suggested_fix": "补 framework，或把 absent 设为 true",
+        })
         return "FAIL", findings
 
+    if not api_path and not composition:
+        findings.append({
+            "severity": "error",
+            "rule_id": "oracle_reachable.incomplete",
+            "field_path": "math_semantics.reference_oracle",
+            "message": "api 或 composition 必须二选一（且 absent=false）",
+            "suggested_fix": "选择单 callable 模式（api）或 DAG 模式（composition + output）",
+        })
+        return "FAIL", findings
+
+    if framework not in _known_frameworks():
+        findings.append({
+            "severity": "warning",
+            "rule_id": "oracle_reachable.unknown_framework",
+            "field_path": "math_semantics.reference_oracle.framework",
+            "message": f"framework={framework!r} 不在已知列表 {_known_frameworks()}",
+            "suggested_fix": "确认拼写；若为新框架请在 registries/framework_oracle_registry.yaml 中加一行",
+        })
+
+    # ---------- DAG composition 模式 ----------
     if composition:
-        status = _stage9_run_composition(spec, oracle, framework, composition, output_id, findings)
-    else:
-        status = _stage9_run_single_api(spec, oracle, framework, api_path, findings)
+        if not output_id:
+            findings.append({
+                "severity": "error",
+                "rule_id": "oracle_reachable.incomplete",
+                "field_path": "math_semantics.reference_oracle.output",
+                "message": "composition 模式必须声明 output 字段（指向某节点 id）",
+                "suggested_fix": "补 output: <node_id>",
+            })
+            return "FAIL", findings
+
+        topo_ok = _validate_composition_topology(composition, output_id, spec, findings)
+        if not topo_ok:
+            return "FAIL", findings
+
+        any_skip = False
+        for node in composition:
+            nid = node["id"]
+            n_api = node["api"]
+            field = f"math_semantics.reference_oracle.composition[{nid}].api"
+            n_ok, _ = _resolve_api_callable(framework, n_api, field, findings)
+            if not n_ok:
+                if any(f["rule_id"] == "oracle_reachable.framework_not_installed"
+                       for f in findings):
+                    any_skip = True
+                    break  # framework_not_installed 整个 stage SKIP
+        if any_skip:
+            status = "FAIL" if any(f["severity"] == "error" for f in findings) else "SKIP"
+        else:
+            status = "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
+
+        _check_available_dtype(spec, oracle, findings)
+        if status == "PASS" and any(f["severity"] == "error" for f in findings):
+            status = "FAIL"
+        return status, findings
+
+    # ---------- 单 api 模式（向后兼容）----------
+    api_ok, _ = _resolve_api_callable(
+        framework, api_path,
+        "math_semantics.reference_oracle.api",
+        findings,
+    )
+
+    if any(f["rule_id"] == "oracle_reachable.framework_not_installed" for f in findings):
+        status = "FAIL" if any(f["severity"] == "error" for f in findings) else "SKIP"
+        return status, findings
+
+    _check_available_dtype(spec, oracle, findings)
+
+    status = "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
     return status, findings

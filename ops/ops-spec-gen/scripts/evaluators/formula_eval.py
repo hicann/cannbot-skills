@@ -10,15 +10,15 @@
 
 Run the spec.math_semantics.formula on tiny tensors (default [2,3]) under a
 restricted-AST sandbox. Catches:
-  * formula syntax errors (ParseError)
-  * misspelled numpy ops (e.g. `x.maks(...)` → AttributeError)
-  * shape/axis bugs (broadcast errors, wrong dim)
+  * formula syntax errors  (ParseError)
+  * misspelled numpy ops   (e.g. `x.maks(...)` → AttributeError)
+  * shape/axis bugs        (broadcast errors, wrong dim)
   * formula vs dtype_rule mismatch (output dtype runtime ≠ DSL推导)
   * unintentional all-NaN outputs (e.g. div-by-zero with neutral inputs)
 
 Skips when:
-  * formula_kind != 'numpy_expr' (python_block / textual_only)
-  * numpy is not installed (lazy import; report SKIP, not FAIL)
+  * formula_kind != 'numpy_expr'  (python_block / textual_only)
+  * numpy is not installed       (lazy import; report SKIP, not FAIL)
 
 Sandbox policy (defense in depth — assume formula authors are trusted, but block
 accidental imports / file IO / infinite loops):
@@ -83,8 +83,8 @@ def _resolve_shape(symbolic: list, default_dim: int = 3) -> tuple:
     Strategy:
       * folded prefix `...x` → 替换为 1 个 default_dim（保证不退化为 0-D，
         让 stage 8 上 `np.nonzero` / `np.fft` 等不接受 scalar 的 API 也能跑）
-      * explicit symbol → default_dim (e.g. M, K, N → 3)
-      * integer literal → use as-is
+      * explicit symbol     → default_dim (e.g. M, K, N → 3)
+      * integer literal     → use as-is
     Yields a small shape (rank ≤ original rank + 0..1, all dims ≤ default_dim).
     """
     out: list[int] = []
@@ -149,17 +149,17 @@ def _gen_tensor(np, shape: tuple, dtype: str, seed: int):
 
 # 哪些 stand-in 对在 dtype 比对时算"等价"
 _DTYPE_STANDIN_PAIRS = frozenset({
-    ("bfloat16", "float32"),  # bf16 模拟为 fp32
-    ("float8_e4m3fn", "float16"),
-    ("float8_e5m2", "float16"),
-    ("float8_e8m0", "float16"),
-    ("hifloat8", "float16"),
-    ("float4_e2m1", "float16"),
-    ("float4_e1m2", "float16"),
-    ("complex32", "complex64"),
-    ("int4", "int8"),
-    ("uint4", "uint8"),
-    ("uint1", "uint8"),
+    ("bfloat16",     "float32"),    # bf16 模拟为 fp32
+    ("float8_e4m3fn",  "float16"),
+    ("float8_e5m2",  "float16"),
+    ("float8_e8m0",  "float16"),
+    ("hifloat8",     "float16"),
+    ("float4_e2m1",  "float16"),
+    ("float4_e1m2",  "float16"),
+    ("complex32",    "complex64"),
+    ("int4",         "int8"),
+    ("uint4",        "uint8"),
+    ("uint1",        "uint8"),
 })
 
 
@@ -171,24 +171,24 @@ def _is_dtype_standin_match(spec_dtype: str, runtime_dtype: str) -> bool:
 # ---------- main entry -----------------------------------------------------
 
 
-def _stage8_skip_for_kind(formula_kind):
-    if formula_kind == "numpy_expr":
-        return None
-    return [{
-        "severity": "info",
-        "rule_id": "formula_smoke_eval.skipped_non_numpy",
-        "field_path": "math_semantics.formula_kind",
-        "message": f"formula_kind={formula_kind!r}，stage 8 仅在 numpy_expr 下运行",
-        "suggested_fix": None,
-    }]
+def stage_8(spec: dict) -> tuple[str, list[dict]]:
+    """Run formula on tiny inputs; report runtime / dtype / NaN issues."""
+    findings: list[dict] = []
 
+    formula_kind = (spec.get("math_semantics") or {}).get("formula_kind")
+    if formula_kind != "numpy_expr":
+        return "SKIP", [{
+            "severity": "info",
+            "rule_id": "formula_smoke_eval.skipped_non_numpy",
+            "field_path": "math_semantics.formula_kind",
+            "message": f"formula_kind={formula_kind!r}，stage 8 仅在 numpy_expr 下运行",
+            "suggested_fix": None,
+        }]
 
-def _stage8_import_numpy():
     try:
         import numpy as np
-        return np, None
     except ImportError:
-        return None, [{
+        return "SKIP", [{
             "severity": "info",
             "rule_id": "formula_smoke_eval.numpy_not_installed",
             "field_path": "<env>",
@@ -196,43 +196,57 @@ def _stage8_import_numpy():
             "suggested_fix": "pip install numpy",
         }]
 
-
-def _stage8_compile(formula):
-    """Parse + AST whitelist + compile. Returns (compiled, findings)."""
+    formula = (spec.get("math_semantics") or {}).get("formula", "")
     if not formula.strip():
-        return None, [{
+        findings.append({
             "severity": "error",
             "rule_id": "formula_smoke_eval.empty_formula",
             "field_path": "math_semantics.formula",
             "message": "formula 为空但 formula_kind=numpy_expr",
             "suggested_fix": "填写 numpy 可 eval 的表达式或把 formula_kind 改为 textual_only",
-        }]
+        })
+        return "FAIL", findings
+
+    # Parse + AST whitelist
     try:
         tree = ast.parse(formula, mode="exec")
         _validate_ast(tree)
-        return compile(tree, "<formula>", "exec"), []
+        compiled = compile(tree, "<formula>", "exec")
     except SyntaxError as e:
-        return None, [{
+        findings.append({
             "severity": "error",
             "rule_id": "formula_smoke_eval.syntax_error",
             "field_path": "math_semantics.formula",
             "message": f"formula 语法错: {e.msg} (行 {e.lineno})",
             "suggested_fix": "检查表达式语法",
-        }]
+        })
+        return "FAIL", findings
     except FormulaError as e:
-        return None, [{
+        findings.append({
             "severity": "error",
             "rule_id": f"formula_smoke_eval.{e.code}",
             "field_path": "math_semantics.formula",
             "message": e.message,
             "suggested_fix": "把不允许的语法用 numpy 向量化操作替代",
-        }]
+        })
+        return "FAIL", findings
 
+    # Pick a representative input dtype combination — first row of supported_combinations
+    combos = (spec.get("dtype_policy") or {}).get("supported_combinations") or []
+    if not combos:
+        findings.append({
+            "severity": "error",
+            "rule_id": "formula_smoke_eval.no_combination",
+            "field_path": "dtype_policy.supported_combinations",
+            "message": "缺 supported_combinations，stage 8 无法选择 dtype 跑 formula",
+            "suggested_fix": "至少声明一条 supported_combinations",
+        })
+        return "FAIL", findings
+    in_dtypes = combos[0].get("inputs") or {}
+    expected_outs = combos[0].get("outputs") or {}
 
-def _stage8_build_inputs(spec, np, in_dtypes):
-    """Build input tensors per spec.inputs. Returns (tensors, findings)."""
+    # Build input tensors per spec.inputs
     input_tensors: dict[str, Any] = {}
-    findings: list[dict] = []
     seed = (spec.get("test_matrix") or {}).get("random", {}).get("seed", 42)
     for inp in spec.get("inputs") or []:
         name = inp.get("name")
@@ -249,134 +263,101 @@ def _stage8_build_inputs(spec, np, in_dtypes):
                 "message": e.message,
                 "suggested_fix": "确认 dtype 在 stage 8 支持范围",
             })
-    return input_tensors, findings
 
+    # Build attribute defaults
+    attr_values: dict[str, Any] = {}
+    for a in spec.get("attributes") or []:
+        if "default" in a:
+            attr_values[a["name"]] = a["default"]
 
-def _stage8_exec(compiled, input_tensors, attr_values, np):
-    """Exec compiled formula under timeout. Returns (locals_dict, findings)."""
+    # Restricted globals — np + math + safe builtins; nothing else
     g: dict[str, Any] = _ast_sandbox.make_globals({"np": np, "math": math})
     g.update(input_tensors)
     g.update(attr_values)
+
+    # Execute under timeout
     locals_dict: dict[str, Any] = {}
     try:
         with _timeout(5):
             exec(compiled, g, locals_dict)
-        return locals_dict, []
     except FormulaError as e:
-        return None, [{
+        findings.append({
             "severity": "error",
             "rule_id": f"formula_smoke_eval.{e.code}",
             "field_path": "math_semantics.formula",
             "message": e.message,
             "suggested_fix": "拆短 formula；避免大循环",
-        }]
-    except Exception as e:
+        })
+        return "FAIL", findings
+    except Exception as e:  # numpy errors (AttributeError, ValueError, ...)
         msg = re.sub(r"\s+", " ", str(e)).strip()
-        return None, [{
+        findings.append({
             "severity": "error",
             "rule_id": "formula_smoke_eval.numpy_eval_error",
             "field_path": "math_semantics.formula",
             "message": f"{type(e).__name__}: {msg[:300]}",
             "suggested_fix": "检查 numpy API 名 / 参数 / shape 是否对",
-        }]
-
-
-def _stage8_validate_output(name, locals_dict, expected, np):
-    """Validate single output: presence, dtype match, NaN sanity."""
-    findings: list[dict] = []
-    if name not in locals_dict:
-        findings.append({
-            "severity": "error",
-            "rule_id": "formula_smoke_eval.missing_output",
-            "field_path": f"outputs[{name}]",
-            "message": f"formula 未给变量 {name!r} 赋值",
-            "suggested_fix": f"在 formula 中产出 {name}",
         })
-        return findings
-    val = locals_dict[name]
-    if not isinstance(val, np.ndarray):
-        try:
-            val = np.asarray(val)
-        except Exception:
-            findings.append({
-                "severity": "warning",
-                "rule_id": "formula_smoke_eval.output_not_array",
-                "field_path": f"outputs[{name}]",
-                "message": f"output {name!r} 不是 ndarray (得到 {type(val).__name__})",
-                "suggested_fix": "在 formula 末尾用 np.asarray(...) 包一下",
-            })
-            return findings
-
-    runtime_dtype = str(val.dtype)
-    if expected and not _is_dtype_standin_match(expected, runtime_dtype) and runtime_dtype != expected:
-        findings.append({
-            "severity": "warning",
-            "rule_id": "formula_smoke_eval.dtype_mismatch_at_runtime",
-            "field_path": f"outputs[{name}]",
-            "message": (
-                f"运行时 dtype={runtime_dtype} 与 supported_combinations[0] "
-                f"声明的 {expected} 不一致（stage 4 是逻辑校验，stage 8 是运行验证）"
-            ),
-            "suggested_fix": "检查 formula 是否漏了 dtype cast，或修正 supported_combinations",
-        })
-
-    if val.size > 0 and np.issubdtype(val.dtype, np.floating):
-        nan_ratio = float(np.isnan(val).sum()) / val.size
-        if nan_ratio == 1.0:
-            findings.append({
-                "severity": "warning",
-                "rule_id": "formula_smoke_eval.produces_unexpected_nan",
-                "field_path": f"outputs[{name}]",
-                "message": (
-                    f"formula 在中性输入下产出全 NaN（{name}）；"
-                    "可能 div-by-zero 或 max-shift 反向"
-                ),
-                "suggested_fix": "检查公式是否有未设防的除零 / log(0) 等",
-            })
-    return findings
-
-
-def stage_8(spec: dict) -> tuple[str, list[dict]]:
-    """Run formula on tiny inputs; report runtime / dtype / NaN issues."""
-    formula_kind = (spec.get("math_semantics") or {}).get("formula_kind")
-    skip_findings = _stage8_skip_for_kind(formula_kind)
-    if skip_findings is not None:
-        return "SKIP", skip_findings
-
-    np, np_skip = _stage8_import_numpy()
-    if np is None:
-        return "SKIP", np_skip
-
-    formula = (spec.get("math_semantics") or {}).get("formula", "")
-    compiled, findings = _stage8_compile(formula)
-    if compiled is None:
         return "FAIL", findings
 
-    combos = (spec.get("dtype_policy") or {}).get("supported_combinations") or []
-    if not combos:
-        return "FAIL", [{
-            "severity": "error",
-            "rule_id": "formula_smoke_eval.no_combination",
-            "field_path": "dtype_policy.supported_combinations",
-            "message": "缺 supported_combinations，stage 8 无法选择 dtype 跑 formula",
-            "suggested_fix": "至少声明一条 supported_combinations",
-        }]
-    in_dtypes = combos[0].get("inputs") or {}
-    expected_outs = combos[0].get("outputs") or {}
-
-    input_tensors, input_findings = _stage8_build_inputs(spec, np, in_dtypes)
-    findings.extend(input_findings)
-
-    attr_values = {a["name"]: a["default"] for a in (spec.get("attributes") or []) if "default" in a}
-
-    locals_dict, exec_findings = _stage8_exec(compiled, input_tensors, attr_values, np)
-    if locals_dict is None:
-        findings.extend(exec_findings)
-        return "FAIL", findings
-
+    # Validate each declared output
     for out in spec.get("outputs") or []:
         name = out.get("name")
-        findings.extend(_stage8_validate_output(name, locals_dict, expected_outs.get(name), np))
+        if name not in locals_dict:
+            findings.append({
+                "severity": "error",
+                "rule_id": "formula_smoke_eval.missing_output",
+                "field_path": f"outputs[{name}]",
+                "message": f"formula 未给变量 {name!r} 赋值",
+                "suggested_fix": f"在 formula 中产出 {name}",
+            })
+            continue
+        val = locals_dict[name]
+        if not isinstance(val, np.ndarray):
+            # tolerate numpy scalars (np.float32(...)) — also valid output
+            try:
+                val = np.asarray(val)
+            except Exception:
+                findings.append({
+                    "severity": "warning",
+                    "rule_id": "formula_smoke_eval.output_not_array",
+                    "field_path": f"outputs[{name}]",
+                    "message": f"output {name!r} 不是 ndarray (得到 {type(val).__name__})",
+                    "suggested_fix": "在 formula 末尾用 np.asarray(...) 包一下",
+                })
+                continue
+
+        runtime_dtype = str(val.dtype)
+        # spec 声明 vs runtime stand-in（bf16↔fp32 / fp4↔fp16 / int4↔int8 等）自动放过
+        expected = expected_outs.get(name)
+        if expected and _is_dtype_standin_match(expected, runtime_dtype):
+            pass
+        elif expected and runtime_dtype != expected:
+            findings.append({
+                "severity": "warning",
+                "rule_id": "formula_smoke_eval.dtype_mismatch_at_runtime",
+                "field_path": f"outputs[{name}]",
+                "message": (
+                    f"运行时 dtype={runtime_dtype} 与 supported_combinations[0] "
+                    f"声明的 {expected} 不一致（stage 4 是逻辑校验，stage 8 是运行验证）"
+                ),
+                "suggested_fix": "检查 formula 是否漏了 dtype cast，或修正 supported_combinations",
+            })
+
+        # NaN sanity — informational only; some formulas legitimately produce NaN
+        if val.size > 0 and np.issubdtype(val.dtype, np.floating):
+            nan_ratio = float(np.isnan(val).sum()) / val.size
+            if nan_ratio == 1.0:
+                findings.append({
+                    "severity": "warning",
+                    "rule_id": "formula_smoke_eval.produces_unexpected_nan",
+                    "field_path": f"outputs[{name}]",
+                    "message": (
+                        f"formula 在中性输入下产出全 NaN（{name}）；"
+                        "可能 div-by-zero 或 max-shift 反向"
+                    ),
+                    "suggested_fix": "检查公式是否有未设防的除零 / log(0) 等",
+                })
 
     status = "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
     return status, findings

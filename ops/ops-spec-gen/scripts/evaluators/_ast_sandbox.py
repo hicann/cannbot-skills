@@ -46,7 +46,7 @@ _ALLOWED_AST_NODES = frozenset([
     "Add", "Sub", "Mult", "Div", "FloorDiv", "Mod", "Pow",
     "USub", "UAdd",
     "And", "Or", "Not",
-    "Eq", "NotEq", "Lt", "LtE", "Gt", "GtE", "Is", "IsNot",
+    "Eq", "NotEq", "Lt", "LtE", "Gt", "GtE", "Is", "IsNot", "In", "NotIn",
     "Index",  # py<3.9 兼容
 ])
 
@@ -63,6 +63,7 @@ _BANNED_NAMES = frozenset([
 _ALLOWED_BUILTINS = {
     "abs": abs, "min": min, "max": max, "range": range,
     "len": len, "int": int, "float": float, "bool": bool,
+    "tuple": tuple, "list": list,
     "True": True, "False": False, "None": None,
     "__import__": __import__,
 }

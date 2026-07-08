@@ -64,17 +64,17 @@ def _group_by_stage(ids: set[str]) -> dict[str, list[str]]:
 
 
 _STAGE_LABEL = {
-    "schema_static": "Stage 1 schema_static",
-    "category_paradigm_consistency": "Stage 2 category_paradigm_consistency",
-    "paradigm_constraint": "Stage 2 paradigm_constraint",
-    "invariant_kind_resolved": "Stage 2 invariant_kind_resolved",
-    "shape_closure": "Stage 3 shape_closure",
-    "dtype_closure": "Stage 4 dtype_closure",
-    "broadcast_legality": "Stage 5 broadcast_legality",
-    "boundary_min_set": "Stage 6 boundary_min_set",
-    "tolerance_coverage": "Stage 7 tolerance_coverage",
-    "formula_smoke_eval": "Stage 8 formula_smoke_eval",
-    "oracle_reachable": "Stage 9 oracle_reachable",
+    "schema_static":                       "Stage 1 schema_static",
+    "category_paradigm_consistency":       "Stage 2 category_paradigm_consistency",
+    "paradigm_constraint":                 "Stage 2 paradigm_constraint",
+    "invariant_kind_resolved":             "Stage 2 invariant_kind_resolved",
+    "shape_closure":                       "Stage 3 shape_closure",
+    "dtype_closure":                       "Stage 4 dtype_closure",
+    "broadcast_legality":                  "Stage 5 broadcast_legality",
+    "boundary_min_set":                    "Stage 6 boundary_min_set",
+    "tolerance_coverage":                  "Stage 7 tolerance_coverage",
+    "formula_smoke_eval":                  "Stage 8 formula_smoke_eval",
+    "oracle_reachable":                    "Stage 9 oracle_reachable",
 }
 
 

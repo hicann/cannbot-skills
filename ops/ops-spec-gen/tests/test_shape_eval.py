@@ -62,6 +62,36 @@ class TestBroadcastShape:
         assert [d.name for d in out.explicit] == ["M", "K"]
 
 
+class TestReduceShape:
+    def test_reduce_folded_last_axis_without_keepdims(self):
+        out = evaluate_shape_rule(
+            "y.shape = np.reduce_shape(x.shape, axis=dim, keepdims=keep_dims)",
+            output_name="y",
+            inputs={"x": _sh(["...batch", "R"])},
+            attr_values={"dim": -1, "keep_dims": False},
+        )
+        assert out.folded_name == "batch"
+        assert out.explicit == []
+
+    def test_reduce_folded_last_axis_with_keepdims(self):
+        out = evaluate_shape_rule(
+            "y.shape = np.reduce_shape(x.shape, axis=dim, keepdims=keep_dims)",
+            output_name="y",
+            inputs={"x": _sh(["...batch", "R"])},
+            attr_values={"dim": -1, "keep_dims": True},
+        )
+        assert str(out) == "[...batch, 1]"
+
+    def test_reduce_explicit_middle_axis_without_keepdims(self):
+        out = evaluate_shape_rule(
+            "y.shape = np.reduce_shape(x.shape, axis=dim, keepdims=keep_dims)",
+            output_name="y",
+            inputs={"x": _sh(["N", "R", "C"])},
+            attr_values={"dim": 1, "keep_dims": False},
+        )
+        assert [d.name for d in out.explicit] == ["N", "C"]
+
+
 class TestMatmulShape:
     def test_matmul_no_transpose(self):
         rule = """

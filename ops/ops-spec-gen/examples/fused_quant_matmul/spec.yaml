@@ -10,7 +10,7 @@
 # fused_quant_matmul — L0 数学约束 spec
 # 来源参考：https://gitcode.com/cann/ops-nn/tree/master/matmul/fused_quant_mat_mul
 #
-# 教学点：fused_composite + Contraction + Quantization + Elementwise 四范式叠加
+# 教学点：fused_composite + Contraction + Quantization 三范式叠加
 #         FusedComposite 必填的 composition.primitives 五原语链：
 #             gemm → mul(x2Scale) → mul(x1Scale) → add(bias) → elementwise_unary(gelu)
 #         reference_oracle 用 composition DAG 模式（5 节点链 + GeLU 用 kwargs 传 approximate）
@@ -32,8 +32,11 @@ op:
   name: fused_quant_matmul
   version: "1.0"
   description: "Quantized matmul fused with GeLU activation; INT8 x INT8 → FP16 with FP bias"
-  category: fused_composite
-  paradigms: [Contraction, Quantization, Elementwise, FusedComposite]
+  category: FusedComposite
+  paradigms: [Contraction, Broadcast, Quantization, FusedComposite]
+  paradigm_groups:
+    - kind: fusion
+      paradigms: [Contraction, Broadcast]
   lifecycle: stable
   error_codes: [null_input, shape_mismatch, attribute_value_out_of_range]
   platform_constraints:
@@ -250,6 +253,10 @@ boundary_conditions:
     machine_check: {kind: matches_oracle}
   - case: "rank=6（CANN 上界）"
     synthesize: {x1.shape: "[2, 2, 2, 2, 4, 8]", x2.shape: "[2, 2, 2, 2, 8, 4]"}
+    machine_check: {kind: matches_oracle}
+  - case: "batch 维广播（size-1 维）"
+    tags: [broadcast_with_size_one]
+    synthesize: {x1.shape: "[1, 3, 4]", x2.shape: "[5, 4, 6]"}
     machine_check: {kind: matches_oracle}
 
   # 错误路径

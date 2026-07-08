@@ -18,8 +18,11 @@ op:
   name: softmax
   version: "1.0"
   description: "Softmax along reduce_axis with max-shift stabilization"
-  category: reduction_composite
-  paradigms: [Reduction, NumericalStable, FusedComposite]
+  category: ReductionComposite
+  paradigms: [Reduction, Broadcast, NumericalStable, FusedComposite]
+  paradigm_groups:
+    - kind: fusion
+      paradigms: [Reduction, Broadcast]
   lifecycle: stable
   error_codes:
     - null_input

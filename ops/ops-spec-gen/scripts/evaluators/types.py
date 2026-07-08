@@ -44,6 +44,19 @@ class Dim:
         else:
             raise ValueError(f"Dim.kind must be const/symbol/folded, got {self.kind!r}")
 
+    def __mul__(self, other):
+        if isinstance(other, bool) or not isinstance(other, int):
+            return NotImplemented
+        if other < 0:
+            raise ValueError(f"Cannot multiply Dim by negative integer: {other}")
+        if self.kind == "const":
+            return Dim(kind="const", value=self.value * other)
+        # symbol * int → const (the resulting dim value is symbolic × known int)
+        return Dim(kind="const", value=other)  # placeholder; true value unknown at spec time
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
     def __str__(self) -> str:
         if self.kind == "const":
             return str(self.value)

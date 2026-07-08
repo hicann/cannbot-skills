@@ -15,7 +15,7 @@ Stage 2: category ↔ paradigm consistency, mutual exclusion,
          primitives.op / invariants.kind / machine_check.kind / synthesize.patterns / error_type.
 Stage 3: shape_closure — solve outputs[].shape_rule via shape DSL.
 Stage 4: dtype_closure — cross-check dtype_rule with supported_combinations.
-Stage 5: broadcast_legality — simulate broadcast.kind/rules against input shapes.
+Stage 5: broadcast_legality — validate broadcast semantics of operator computation.
 Stage 6: boundary_min_set — per-paradigm minimum case set.
 Stage 7: tolerance_coverage — per-dtype tolerance covers output dtypes + tightness.
 Stage 8: formula_smoke_eval — run formula on tiny tensors via numpy sandbox.
@@ -128,6 +128,7 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
     _check_category_paradigm_consistency(cat, paradigms, registries, res.findings)
     _check_mutually_exclusive_paradigms(paradigms, registries, res.findings)
     _check_paradigm_internal_constraints(spec, paradigms, registries, res.findings)
+    _check_paradigm_groups(spec, paradigms, res.findings)
     _check_invariants(spec, registries, res.findings)
     _check_machine_check(spec, registries, res.findings)
     _check_synthesize_patterns(spec, registries, res.findings)
@@ -135,6 +136,8 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
     _check_anti_pattern_ids(spec, registries, res.findings)
     _check_op_error_codes(spec, registries, res.findings)
     _check_composition_hint(spec, paradigms, res.findings)
+    _check_broadcast_paradigm_hint(spec, paradigms, res.findings)
+    _check_format_variants(spec, res.findings)
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -158,17 +161,50 @@ def _check_category_paradigm_consistency(cat, paradigms, registries, findings):
             suggested_fix=f"在 op.paradigms 中加入 {sorted(missing)}",
         ))
 
-    if cat == "fused_composite":
-        basic = {"Elementwise", "Broadcast", "Reduction", "Contraction",
+    if cat == "FusedComposite":
+        basic = {"Broadcast", "Reduction", "Contraction",
                  "ArgReduce", "LayoutTransform"}
         if len(paradigms & basic) < 2:
             findings.append(Finding(
                 severity="error",
                 rule_id="category_paradigm_consistency.fused_composite_basics",
                 field_path="op.paradigms",
-                message="category=fused_composite 必须含 ≥ 2 条基础 paradigm",
+                message="category=fused_composite 必须含 ≥ 2 条基础 paradigm（Elementwise 被其他范式吸收，不计入）",
                 suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入 paradigms",
             ))
+
+
+def _check_broadcast_paradigm_hint(spec, paradigms, findings):
+    """G. broadcast.kind=numpy 时 paradigms 应含 Broadcast（交叉校验：shape_rule 含 broadcast_shapes）。"""
+    broadcast_kind = (spec.get("broadcast") or {}).get("kind", "none")
+    has_broadcast_shape_rule = any(
+        "broadcast_shapes" in (out.get("shape_rule") or "")
+        for out in (spec.get("outputs") or [])
+    )
+
+    if broadcast_kind == "numpy" and "Broadcast" not in paradigms:
+        findings.append(Finding(
+            severity="error",
+            rule_id="category_paradigm_consistency.broadcast_kind_requires_paradigm",
+            field_path="op.paradigms",
+            message=(
+                f"broadcast.kind=numpy 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
+                "当算子计算需要 broadcast 数据时，paradigms 必须包含 Broadcast"
+            ),
+            suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
+        ))
+
+    if has_broadcast_shape_rule and "Broadcast" not in paradigms:
+        findings.append(Finding(
+            severity="error",
+            rule_id="category_paradigm_consistency.shape_rule_broadcast_requires_paradigm",
+            field_path="op.paradigms",
+            message=(
+                f"outputs[].shape_rule 使用了 np.broadcast_shapes 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
+                "输出 shape 由 broadcast 推导的算子应使用 Broadcast paradigm"
+            ),
+            suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
+        ))
 
 
 def _check_mutually_exclusive_paradigms(paradigms, registries, findings):
@@ -185,140 +221,6 @@ def _check_mutually_exclusive_paradigms(paradigms, registries, findings):
             ))
 
 
-def _check_paradigm_numerical_stable(spec, findings):
-    if not _get(spec, "numerical_stability", "required"):
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.numerical_stable",
-            field_path="numerical_stability.required",
-            message="paradigms 含 NumericalStable ⇒ numerical_stability.required 必须为 true",
-            suggested_fix="把 numerical_stability.required 改为 true 并补 techniques",
-        ))
-
-
-def _check_paradigm_reduction(spec, findings):
-    attrs = spec.get("attributes") or []
-    axis_names = {a.get("name") for a in attrs}
-    if not (axis_names & {"axis", "dim", "axes"}):
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.reduction_axis_missing",
-            field_path="attributes",
-            message="paradigms 含 Reduction（且不含 Recurrence）⇒ 必须有 axis/dim/axes 属性",
-            suggested_fix="在 attributes 中添加 axis/dim/axes 之一",
-        ))
-
-
-def _check_paradigm_argreduce(spec, findings):
-    try:
-        sys.path.insert(0, str(Path(__file__).parent))
-        from evaluators import dtype_eval as _de
-        from evaluators.types import DslError as _DslError
-    except ImportError:
-        _de = None  # type: ignore
-    for i, out in enumerate(spec.get("outputs", [])):
-        rule = (out.get("dtype_rule") or "").strip()
-        kind = out.get("dtype_rule_kind", "numpy_expr")
-        derived: str | None = None
-        if _de is not None and kind == "numpy_expr" and rule:
-            combos = ((spec.get("dtype_policy") or {})
-                      .get("supported_combinations") or [])
-            in_dt = combos[0].get("inputs", {}) if combos else {}
-            try:
-                derived = _de.evaluate_dtype_rule(
-                    rule, output_name=out.get("name"),
-                    input_dtypes=in_dt,
-                )
-            except _DslError:
-                derived = None
-        if derived not in ("int32", "int64"):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.argreduce_dtype",
-                field_path=f"outputs[{i}].dtype_rule",
-                message=f"ArgReduce 输出 dtype 必须为 int32 / int64，当前 dtype_rule={rule!r} 推得 {derived!r}",
-                suggested_fix="把 dtype_rule 改为 `<output>.dtype = np.int32` 或 `np.int64`",
-            ))
-
-
-def _check_paradigm_stateful(spec, findings):
-    has_state_input = any(inp.get("role") == "state" for inp in spec.get("inputs", []))
-    has_inplace_output = any(
-        re.match(r"^inplace_with\(", out.get("aliasing") or "")
-        for out in spec.get("outputs", [])
-    )
-    if not (has_state_input or has_inplace_output):
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.stateful_state_or_inplace",
-            field_path="inputs[*].role | outputs[*].aliasing",
-            message="Stateful 必须有 inputs.role=state 或 outputs.aliasing=inplace_with(<state_input>)",
-            suggested_fix="添加 role: state 的 input，或在某 output 加 aliasing: inplace_with(<state_input>)",
-        ))
-
-
-_QUANT_CANONICAL_FORMS = [
-    {"scale", "zero_point"},
-    {"scale"},
-    {"x1Scale", "x2Scale"},
-    {"dequant_scale"},
-    {"deqScale"},
-]
-
-
-def _check_paradigm_quantization(spec, findings):
-    attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
-    input_names = {i.get("name") for i in (spec.get("inputs") or [])}
-    all_names = attr_names | input_names
-    if not any(form <= all_names for form in _QUANT_CANONICAL_FORMS):
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.quantization_attrs",
-            field_path="attributes",
-            message=(
-                "Quantization 必须含以下任一组量化参数（attribute 或 input 均可）："
-                "{scale, zero_point} / {scale} / {x1Scale, x2Scale} / "
-                "{dequant_scale} / {deqScale}"
-            ),
-            suggested_fix="按算子语义选择对应形式；对称量化只需 scale；双输入分别量化用 x1Scale + x2Scale",
-        ))
-
-
-def _check_paradigm_variable_output(spec, findings):
-    for i, out in enumerate(spec.get("outputs", [])):
-        if not out.get("data_dependent_shape"):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.variable_output_flag",
-                field_path=f"outputs[{i}].data_dependent_shape",
-                message="VariableOutput 输出必须配 data_dependent_shape: true",
-                suggested_fix="在该 output 加 data_dependent_shape: true",
-            ))
-
-
-def _check_paradigm_random_sampling(spec, findings):
-    attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
-    if "seed" not in attr_names:
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.random_sampling_seed",
-            field_path="attributes",
-            message="RandomSampling 必须含 seed 属性",
-            suggested_fix="在 attributes 中添加 seed (int64)",
-        ))
-
-
-def _check_paradigm_collective(spec, findings):
-    if not _get(spec, "op", "platform_constraints", "requires_hccl"):
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.collective_hccl",
-            field_path="op.platform_constraints.requires_hccl",
-            message="CollectiveCommunication 必须声明 op.platform_constraints.requires_hccl: true",
-            suggested_fix="在 op 下添加 platform_constraints: {requires_hccl: true}",
-        ))
-
-
 def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
     """C. 每个 paradigm 的内部结构性要求。
 
@@ -328,26 +230,323 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
     primitives_wl = set(registries["primitives"])
 
     if "NumericalStable" in paradigms:
-        _check_paradigm_numerical_stable(spec, findings)
+        if not _get(spec, "numerical_stability", "required"):
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.numerical_stable",
+                field_path="numerical_stability.required",
+                message="paradigms 含 NumericalStable ⇒ numerical_stability.required 必须为 true",
+                suggested_fix="把 numerical_stability.required 改为 true 并补 techniques",
+            ))
+
     if "FusedComposite" in paradigms:
         _check_fused_composite(spec, primitives_wl, findings)
+
     if "Reduction" in paradigms and "Recurrence" not in paradigms:
-        _check_paradigm_reduction(spec, findings)
+        inputs = spec.get("inputs") or []
+        has_input_axis = any(
+            inp.get("name") in ("axes", "axis", "dim")
+            and set(inp.get("dtype_set") or []).issubset({"int32", "int64"})
+            for inp in inputs
+        )
+
+        attrs = spec.get("attributes") or []
+        axis_names_attr = {a.get("name") for a in attrs}
+        has_attr_axis = bool(axis_names_attr & {"axis", "dim", "axes"})
+
+        reduction = spec.get("reduction") or {}
+        has_fixed_axis = reduction.get("axis_source") == "fixed"
+        has_implicit_all = reduction.get("axis_source") == "implicit_all"
+
+        if not (has_input_axis or has_attr_axis or has_fixed_axis or has_implicit_all):
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.reduction_axis_missing",
+                field_path="inputs | attributes | reduction",
+                message=(
+                    "paradigms 含 Reduction（且不含 Recurrence）⇒ 必须通过以下方式之一指定规约轴："
+                    "(A) 名为 axes/axis/dim 且 dtype∈{int32,int64} 的输入张量；"
+                    "(B) 名为 axis/dim/axes 的属性；"
+                    "(C) reduction.axis_source: fixed 声明固定轴；"
+                    "(D) reduction.axis_source: implicit_all 声明隐式全轴归约"
+                ),
+                suggested_fix=(
+                    "添加 axes/axis/dim 输入、添加 axis/dim/axes 属性、"
+                    "声明 reduction: {axis_source: fixed, fixed_value: <N>}、"
+                    "或声明 reduction: {axis_source: implicit_all}"
+                ),
+            ))
+
     if "ArgReduce" in paradigms:
-        _check_paradigm_argreduce(spec, findings)
+        # ArgReduce 输出必须是 int32 / int64；用 dtype_eval 求值后检查
+        try:
+            sys.path.insert(0, str(Path(__file__).parent))
+            from evaluators import dtype_eval as _de
+            from evaluators.types import DslError as _DslError
+        except ImportError:
+            _de = None  # type: ignore
+        for i, out in enumerate(spec.get("outputs", [])):
+            rule = (out.get("dtype_rule") or "").strip()
+            kind = out.get("dtype_rule_kind", "numpy_expr")
+            derived: str | None = None
+            if _de is not None and kind == "numpy_expr" and rule:
+                # 用 dtype_policy.supported_combinations[0] 作为试探输入；
+                # ArgReduce 通常 dtype_rule 是 `y.dtype = np.int32 / int64` 不依赖输入
+                combos = ((spec.get("dtype_policy") or {})
+                          .get("supported_combinations") or [])
+                in_dt = combos[0].get("inputs", {}) if combos else {}
+                try:
+                    derived = _de.evaluate_dtype_rule(
+                        rule, output_name=out.get("name"),
+                        input_dtypes=in_dt,
+                    )
+                except _DslError:
+                    derived = None
+            if derived not in ("int32", "int64"):
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.argreduce_dtype",
+                    field_path=f"outputs[{i}].dtype_rule",
+                    message=f"ArgReduce 输出 dtype 必须为 int32 / int64，当前 dtype_rule={rule!r} 推得 {derived!r}",
+                    suggested_fix="把 dtype_rule 改为 `<output>.dtype = np.int32` 或 `np.int64`",
+                ))
+
     if "Stateful" in paradigms:
-        _check_paradigm_stateful(spec, findings)
+        has_state_input = any(inp.get("role") == "state" for inp in spec.get("inputs", []))
+        has_inplace_output = any(
+            re.match(r"^inplace_with\(", out.get("aliasing") or "")
+            for out in spec.get("outputs", [])
+        )
+        if not (has_state_input or has_inplace_output):
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.stateful_state_or_inplace",
+                field_path="inputs[*].role | outputs[*].aliasing",
+                message="Stateful 必须有 inputs.role=state 或 outputs.aliasing=inplace_with(<state_input>)",
+                suggested_fix="添加 role: state 的 input，或在某 output 加 aliasing: inplace_with(<state_input>)",
+            ))
+
     if "Quantization" in paradigms:
-        _check_paradigm_quantization(spec, findings)
+        attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
+        input_names = {i.get("name") for i in (spec.get("inputs") or [])}
+        # 量化算子的 scale/zero_point 可以是 attribute 或 tensor input；接受 5 种合法形式：
+        #   1. {scale, zero_point}     —— 经典非对称量化（W8A16 标准 quantize）
+        #   2. {scale}                 —— 对称量化（CANN QuantMatmul: deqScale 无 zp）
+        #   3. {x1Scale, x2Scale}      —— 双输入分别量化（CANN FusedQuantMatmul）
+        #   4. {dequant_scale}         —— 反量化算子专用
+        #   5. {deqScale}              —— CANN 驼峰别名
+        #   6. 算子名含 "quant"         —— 兜底：名称明确标识为量化算子
+        all_names = attr_names | input_names
+        canonical_forms = [
+            {"scale", "zero_point"},
+            {"scale"},
+            {"x1Scale", "x2Scale"},
+            {"dequant_scale"},
+            {"deqScale"},
+        ]
+        op_name = (_get(spec, "op", "name") or "").lower()
+        name_match = "quant" in op_name
+        if not name_match and not any(form <= all_names for form in canonical_forms):
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.quantization_attrs",
+                field_path="attributes",
+                message=(
+                    "Quantization 必须含以下任一组量化参数（attribute 或 input 均可）："
+                    "{scale, zero_point} / {scale} / {x1Scale, x2Scale} / "
+                    "{dequant_scale} / {deqScale}，或算子名含 'quant'"
+                ),
+                suggested_fix="按算子语义选择对应形式；对称量化只需 scale；双输入分别量化用 x1Scale + x2Scale",
+            ))
+
     if "VariableOutput" in paradigms:
-        _check_paradigm_variable_output(spec, findings)
+        for i, out in enumerate(spec.get("outputs", [])):
+            if not out.get("data_dependent_shape"):
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.variable_output_flag",
+                    field_path=f"outputs[{i}].data_dependent_shape",
+                    message="VariableOutput 输出必须配 data_dependent_shape: true",
+                    suggested_fix="在该 output 加 data_dependent_shape: true",
+                ))
+
     if "RandomSampling" in paradigms:
-        _check_paradigm_random_sampling(spec, findings)
+        attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
+        if "seed" not in attr_names:
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.random_sampling_seed",
+                field_path="attributes",
+                message="RandomSampling 必须含 seed 属性",
+                suggested_fix="在 attributes 中添加 seed (int64)",
+            ))
+
     if "CollectiveCommunication" in paradigms:
-        _check_paradigm_collective(spec, findings)
+        if not _get(spec, "op", "platform_constraints", "requires_hccl"):
+            findings.append(Finding(
+                severity="error",
+                rule_id="paradigm_constraint.collective_hccl",
+                field_path="op.platform_constraints.requires_hccl",
+                message="CollectiveCommunication 必须声明 op.platform_constraints.requires_hccl: true",
+                suggested_fix="在 op 下添加 platform_constraints: {requires_hccl: true}",
+            ))
 
 
-def _check_fused_primitives(prims, primitives_wl, findings):
+def _check_paradigm_groups(spec, paradigms, findings):
+    """paradigm_groups 校验：
+    - 所有组的 paradigms 并集必须是 op.paradigms 的子集（未分组的视为修饰符）
+    - fusion 组内 ≥ 2 基础范式（Elementwise 不计入）
+    - combination 组必须有 switch + when
+    - 当有 ≥ 2 个基础范式且 paradigm_groups 缺失时，提示应声明组合关系
+    - 当存在模式切换属性（string_in/enum_in）但 paradigm_groups 缺失时，提示检查
+    """
+    groups = _get(spec, "op", "paradigm_groups", default=[]) or []
+
+    # ── 通用信号检测：模式切换属性 ────────────────────────────────────────
+    # string_in 和 enum_in 语义等价，都表示属性在多个离散值之间切换。
+    # int_in_range 且 lower_inclusive=0 也视为模式切换信号（0 值通常对应
+    # none/identity/passthrough，如 reduction=0→none, mode=0→eval 等）。
+    _MODE_SWITCH_KINDS = {"string_in", "enum_in"}
+    attrs = spec.get("attributes") or []
+    mode_switch_attr = next(
+        (a for a in attrs
+         if (a.get("machine_constraint") or {}).get("kind") in _MODE_SWITCH_KINDS),
+        None,
+    )
+    # 扩展检测：int_in_range + lower=0 也暗示模式切换
+    if mode_switch_attr is None:
+        mode_switch_attr = next(
+            (a for a in attrs
+             if (a.get("machine_constraint") or {}).get("kind") == "int_in_range"
+             and (a.get("machine_constraint") or {}).get("lower_inclusive", 1) == 0),
+            None,
+        )
+
+    # ── combination_should_exist ──────────────────────────────────────────
+    # 修饰符范式（不参与计算主路径，不强制要求分组）
+    _MODIFIER_PARADIGMS = {
+        "NumericalStable", "FusedComposite", "Quantization",
+        "RandomSampling", "DynamicShape", "VariableOutput",
+        "Stateful", "Sparse", "CollectiveCommunication",
+    }
+    base_paradigms = paradigms - _MODIFIER_PARADIGMS
+
+    if not groups:
+        if len(base_paradigms) >= 2:
+            # 情况 A：≥2 基础范式 + 无 groups → 明确需要 paradigm_groups
+            findings.append(Finding(
+                severity="warning",
+                rule_id="paradigm_groups.combination_should_exist",
+                field_path="op.paradigm_groups",
+                message=(
+                    f"op.paradigms 包含 ≥ 2 个基础范式 {sorted(base_paradigms)} "
+                    f"但未声明 paradigm_groups。"
+                    + (f"属性 {mode_switch_attr.get('name')!r} 是模式切换属性"
+                       f"（{mode_switch_attr.get('machine_constraint', {}).get('kind')}），"
+                       f"强烈暗示横向组合（combination）。"
+                       if mode_switch_attr else "")
+                    + " 建议声明 paradigm_groups 明确范式之间的关系"
+                      "（combination=横向组合 / fusion=纵向融合）"
+                ),
+                suggested_fix=(
+                    "添加 paradigm_groups，参考 stage-rules.md 中的 mse_loss 横向组合示例"
+                ),
+            ))
+        elif mode_switch_attr and "Elementwise" not in paradigms:
+            # 情况 B：只有 1 个基础范式，但有模式切换属性，且 Elementwise 未在 paradigms 中
+            # 典型场景：mse_loss 的 reduction=none 使算子退化为 Elementwise，
+            # 但 spec 作者只看到了 Reduction 范式
+            mc = mode_switch_attr.get("machine_constraint") or {}
+            mc_kind = mc.get("kind", "")
+            values = mc.get("values") or []
+            none_like = [v for v in values if str(v).lower() in ("none", "identity", "passthrough")]
+            # int_in_range + lower=0：值 0 通常对应 none/identity 模式
+            if mc_kind == "int_in_range" and mc.get("lower_inclusive", 1) == 0:
+                none_like = [0]
+            if none_like:
+                findings.append(Finding(
+                    severity="warning",
+                    rule_id="paradigm_groups.mode_switch_may_need_combination",
+                    field_path="op.paradigm_groups",
+                    message=(
+                        f"属性 {mode_switch_attr.get('name')!r} 存在模式切换值 "
+                        f"{none_like}（kind={mc.get('kind')}），"
+                        f"该值可能使算子退化为 Elementwise 等非归约行为，"
+                        f"但 paradigms 中未包含对应范式且无 paradigm_groups。"
+                        f" 建议检查该属性值下的计算模式，必要时添加 Elementwise 范式"
+                        f"并声明 paradigm_groups combination"
+                    ),
+                    suggested_fix=(
+                        f"分析 {mode_switch_attr.get('name')}={none_like[0]} 时的计算行为；"
+                        f"若为逐元素输出，添加 Elementwise 到 paradigms 并声明 "
+                        f"paradigm_groups combination（参考 stage-rules.md mse_loss 示例）"
+                    ),
+                ))
+
+    if not groups:
+        return
+
+    basic = {"Broadcast", "Reduction", "Contraction", "ArgReduce", "LayoutTransform"}
+    all_grouped = set()
+
+    for i, group in enumerate(groups):
+        kind = group.get("kind")
+        group_paradigms = set(group.get("paradigms") or [])
+        all_grouped.update(group_paradigms)
+
+        if kind == "fusion":
+            basic_count = len(group_paradigms & basic)
+            if basic_count < 2:
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="paradigm_groups.fusion_min_basic",
+                    field_path=f"op.paradigm_groups[{i}].paradigms",
+                    message=f"fusion 组必须含 ≥ 2 条基础范式（Elementwise 不计入），当前 {basic_count} 条",
+                    suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入该组 paradigms",
+                ))
+        elif kind == "combination":
+            if not group.get("switch"):
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="paradigm_groups.combination_missing_switch",
+                    field_path=f"op.paradigm_groups[{i}].switch",
+                    message="combination 组必须有 switch 字段",
+                    suggested_fix="添加 switch: <属性名>",
+                ))
+            if "when" not in group:
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="paradigm_groups.combination_missing_when",
+                    field_path=f"op.paradigm_groups[{i}].when",
+                    message="combination 组必须有 when 字段",
+                    suggested_fix="添加 when: <属性值>",
+                ))
+
+    extra = all_grouped - paradigms
+    if extra:
+        findings.append(Finding(
+            severity="error",
+            rule_id="paradigm_groups.mismatch",
+            field_path="op.paradigm_groups",
+            message=f"paradigm_groups 包含 op.paradigms 中没有的 {sorted(extra)}",
+            suggested_fix="确保 paradigm_groups 中的 paradigms 都在 op.paradigms 中",
+        ))
+
+
+def _check_fused_composite(spec, primitives_wl, findings):
+    """FusedComposite 子项：composition 必填、primitives ≥ 2、白名单、不泄漏、闭合。"""
+    comp = _get(spec, "math_semantics", "composition")
+    if comp is None:
+        findings.append(Finding(
+            severity="error",
+            rule_id="paradigm_constraint.fused_composite_composition_missing",
+            field_path="math_semantics.composition",
+            message="paradigms 含 FusedComposite ⇒ math_semantics.composition 必填",
+            suggested_fix="添加 composition.primitives (≥2 条) 与 dataflow",
+        ))
+        return
+
+    prims = comp.get("primitives", []) or []
     if len(prims) < 2:
         findings.append(Finding(
             severity="error",
@@ -366,8 +565,6 @@ def _check_fused_primitives(prims, primitives_wl, findings):
                 suggested_fix=f"改为白名单内之一: {sorted(primitives_wl)}",
             ))
 
-
-def _check_fused_dataflow(spec, comp, prims, findings):
     df = comp.get("dataflow") or {}
     if df.get("no_leak"):
         output_names = {o["name"] for o in spec.get("outputs", [])}
@@ -381,6 +578,7 @@ def _check_fused_dataflow(spec, comp, prims, findings):
                 suggested_fix="把这些名字从 intermediates 移除或重命名 outputs",
             ))
 
+    # dataflow 闭合：每个 prim.input 要么是 spec.inputs，要么是先前 prim.outputs
     produced = {inp["name"] for inp in spec.get("inputs", [])}
     for i, prim in enumerate(prims):
         for x in (prim.get("inputs") or []):
@@ -393,24 +591,6 @@ def _check_fused_dataflow(spec, comp, prims, findings):
                     suggested_fix=f"先在前序 primitive 的 outputs 中产出 {x}",
                 ))
         produced.update(prim.get("outputs") or [])
-
-
-def _check_fused_composite(spec, primitives_wl, findings):
-    """FusedComposite 子项：composition 必填、primitives ≥ 2、白名单、不泄漏、闭合。"""
-    comp = _get(spec, "math_semantics", "composition")
-    if comp is None:
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.fused_composite_composition_missing",
-            field_path="math_semantics.composition",
-            message="paradigms 含 FusedComposite ⇒ math_semantics.composition 必填",
-            suggested_fix="添加 composition.primitives (≥2 条) 与 dataflow",
-        ))
-        return
-
-    prims = comp.get("primitives", []) or []
-    _check_fused_primitives(prims, primitives_wl, findings)
-    _check_fused_dataflow(spec, comp, prims, findings)
 
 
 def _check_invariants(spec, registries, findings):
@@ -670,49 +850,136 @@ def _check_composition_hint(spec, paradigms, findings):
         ))
 
 
-def _stage6_check_paradigm_req(req, paradigm, boundary_cases, extreme_cases, res):
-    req_id = req.get("id")
-    summary = req.get("summary", req_id)
-    if "special_check" in req:
+def _check_format_variants(spec, findings):
+    """format_variants 合法性：rank 范围、reduction_axes 合法、oracle_kwargs 与 axes 对齐。"""
+    variants = _get(spec, "math_semantics", "format_variants")
+    if not variants:
         return
-    section = req.get("section", "boundary_conditions")
-    cases = boundary_cases if section == "boundary_conditions" else extreme_cases
-    text = " | ".join(str(c.get("case", "")) for c in cases)
-    tags: set = set()
-    for c in cases:
-        for t in (c.get("tags") or []):
-            tags.add(str(t))
-    keywords = req.get("match_any", []) or []
-    if req_id in tags:
-        return
-    if any(kw in text for kw in keywords):
-        return
-    res.findings.append(Finding(
-        severity="error",
-        rule_id="boundary_min_set.missing_required_case",
-        field_path=f"{section}",
-        message=f"paradigm={paradigm} 缺必含 case: {summary} (id={req_id})",
-        suggested_fix=(
-            f"在 {section} 中添加一条 case，加 `tags: [{req_id}]` "
-            f"或描述包含以下任一关键词：{keywords}"
-        ),
-    ))
+
+    # 从 shape_constraints.symbols 推算最大 rank
+    symbols = _get(spec, "shape_constraints", "symbols", default={}) or {}
+    # inputs 的 rank_range 是更准确的来源
+    inputs = _get(spec, "inputs", default=[]) or []
+    max_rank = 0
+    for inp in inputs:
+        if isinstance(inp, dict):
+            rr = inp.get("rank_range")
+            if rr and isinstance(rr, list) and len(rr) == 2:
+                max_rank = max(max_rank, rr[1])
+    # 回退：按 symbols 数量推算
+    if max_rank == 0 and symbols:
+        max_rank = len(symbols)
+
+    for i, v in enumerate(variants):
+        if not isinstance(v, dict):
+            continue
+        prefix = f"math_semantics.format_variants[{i}]"
+
+        # 1. reduction_axes 合法性：非负且 < min(ranks)
+        #    同一 variant 的 reduction_axes 必须对所有适用 rank 都合法
+        axes = v.get("reduction_axes", [])
+        ranks = v.get("rank", [])
+        variant_max_rank = min(ranks) if ranks else max_rank
+
+        for ax in axes:
+            if not isinstance(ax, int):
+                continue
+            if ax < 0:
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="format_variants.reduction_axes_negative",
+                    field_path=f"{prefix}.reduction_axes",
+                    message=f"reduction_axes 含负值 {ax}（{v.get('format', '?')} 格式）",
+                    suggested_fix="使用非负轴索引",
+                ))
+            elif variant_max_rank > 0 and ax >= variant_max_rank:
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="format_variants.reduction_axes_out_of_rank",
+                    field_path=f"{prefix}.reduction_axes",
+                    message=(f"reduction_axes 含 {ax}，超出 {v.get('format', '?')} "
+                             f"格式的 rank={variant_max_rank}"),
+                    suggested_fix=f"确保所有 reduction_axes < {variant_max_rank}",
+                ))
+
+        # 2. oracle_kwargs.dim 与 reduction_axes 对齐
+        oracle_kw = v.get("oracle_kwargs")
+        if oracle_kw and isinstance(oracle_kw, dict):
+            dim_val = oracle_kw.get("dim")
+            if dim_val is not None and isinstance(dim_val, list):
+                if sorted(dim_val) != sorted(axes):
+                    findings.append(Finding(
+                        severity="warning",
+                        rule_id="format_variants.oracle_kwargs_dim_mismatch",
+                        field_path=f"{prefix}.oracle_kwargs",
+                        message=(f"{v.get('format', '?')} 格式：oracle_kwargs.dim={dim_val} "
+                                 f"与 reduction_axes={axes} 不一致"),
+                        suggested_fix=f"将 oracle_kwargs.dim 改为 {axes}",
+                    ))
 
 
 def stage_6(spec: dict, registries: dict) -> StageResult:
     """boundary_min_set — 按 paradigms 检查 spec 是否覆盖各范式必含的最低 case 集。
 
-    数据源：registries/boundary_min_cases.yaml；显式 tag 命中或关键词子串兜底命中即算覆盖。
+    数据源：registries/boundary_min_cases.yaml
+    匹配方式（双轨）：
+      1. 显式 tag 优先：spec 的 case 可声明 `tags: [<requirement.id>, ...]`，命中
+         即覆盖。新写 spec 推荐做法，避免子串歧义。
+      2. 关键词子串兜底：req.match_any 任一关键词出现在 case 描述里也算覆盖。保留兼容。
+    结构性约束（如 DynamicShape 的 shape_set ≥ 3）走 special_check。
     """
     res = StageResult(stage_id=6, status="PASS")
     paradigms = set(_get(spec, "op", "paradigms", default=[]) or [])
     requirements = (registries.get("boundary_min_cases") or {}).get("paradigm_requirements", {})
+
     boundary_cases = spec.get("boundary_conditions") or []
     extreme_cases = spec.get("extreme_inputs") or []
 
+    def _section_data(section: str) -> tuple[str, set]:
+        cases = boundary_cases if section == "boundary_conditions" else extreme_cases
+        text = " | ".join(str(c.get("case", "")) for c in cases)
+        tags: set = set()
+        for c in cases:
+            for t in (c.get("tags") or []):
+                tags.add(str(t))
+        return text, tags
+
+    broadcast_kind = (spec.get("broadcast") or {}).get("kind", "none")
+
     for paradigm in sorted(paradigms):
+        # Broadcast paradigm 的 boundary cases 仅适用于输入间广播（kind != none）；
+        # 单输入或内部计算广播（kind=none）不需要这些 case。
+        if paradigm == "Broadcast" and broadcast_kind == "none":
+            continue
+
         for req in requirements.get(paradigm, []) or []:
-            _stage6_check_paradigm_req(req, paradigm, boundary_cases, extreme_cases, res)
+            req_id = req.get("id")
+            summary = req.get("summary", req_id)
+
+            if "special_check" in req:
+                # 历史遗留特殊校验已随弃用字段（test_matrix 等）移除；
+                # registry 里若还残留 special_check，直接跳过，不再产生 finding。
+                continue
+
+            section = req.get("section", "boundary_conditions")
+            text, tags = _section_data(section)
+            keywords = req.get("match_any", []) or []
+
+            if req_id in tags:
+                continue   # 显式 tag 命中
+            if any(kw in text for kw in keywords):
+                continue   # 子串兜底命中
+
+            res.findings.append(Finding(
+                severity="error",
+                rule_id="boundary_min_set.missing_required_case",
+                field_path=f"{section}",
+                message=f"paradigm={paradigm} 缺必含 case: {summary} (id={req_id})",
+                suggested_fix=(
+                    f"在 {section} 中添加一条 case，加 `tags: [{req_id}]` "
+                    f"或描述包含以下任一关键词：{keywords}"
+                ),
+            ))
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -928,7 +1195,7 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
     return "\n".join(lines)
 
 
-def _validate_argparser():
+def main() -> int:
     ap = argparse.ArgumentParser(description="Validate spec.yaml (full 9-stage).")
     ap.add_argument("spec_path")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of text")
@@ -939,32 +1206,32 @@ def _validate_argparser():
                     help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 9 个")
     ap.add_argument("--quiet", action="store_true",
                     help="只打 FAIL 的 stage（仍输出 overall 行）")
-    return ap
+    args = ap.parse_args()
 
-
-def _load_spec_or_exit(spec_path):
-    path = Path(spec_path)
-    if not path.exists():
-        print(f"ERROR: spec file not found: {path}", file=sys.stderr)
-        return None, 2
+    spec_path = Path(args.spec_path)
+    if not spec_path.exists():
+        print(f"ERROR: spec file not found: {spec_path}", file=sys.stderr)
+        return 2
     try:
-        spec = _load_yaml(path)
+        spec = _load_yaml(spec_path)
     except yaml.YAMLError as e:
-        print(f"ERROR: YAML 解析失败 {path}", file=sys.stderr)
+        print(f"ERROR: YAML 解析失败 {spec_path}", file=sys.stderr)
         print(f"  {e}", file=sys.stderr)
-        return None, 2
+        return 2
     if not isinstance(spec, dict):
-        print(f"ERROR: {spec_path} did not parse as a YAML mapping", file=sys.stderr)
-        return None, 2
-    return spec, 0
+        print(f"ERROR: {args.spec_path} did not parse as a YAML mapping", file=sys.stderr)
+        return 2
 
+    selected = set(args.stage) if args.stage else None
+    registries = load_registries()
 
-def _run_selected_stages(spec, selected, registries):
+    # 按需跑 stage —— 跳过的 stage 不出现在 stages 列表中
     stages: list[StageResult] = []
     if selected is None or 1 in selected:
         stages.append(stage_1(spec))
     if selected is None or 2 in selected:
         stages.append(stage_2(spec, registries))
+    # stage 3/4/5/8/9 共享 DSL 子包 lazy import；选中其一即触发
     dsl_needed = selected is None or selected & {3, 4, 5, 8, 9}
     if dsl_needed:
         s3, s4, s5, s8, s9 = _run_eval_stages(spec)
@@ -975,19 +1242,9 @@ def _run_selected_stages(spec, selected, registries):
         stages.append(stage_6(spec, registries))
     if selected is None or 7 in selected:
         stages.append(stage_7(spec))
+
+    # 按 stage_id 排序，确保打印顺序与 1..9 一致
     stages.sort(key=lambda s: s.stage_id)
-    return stages
-
-
-def main() -> int:
-    args = _validate_argparser().parse_args()
-    spec, err = _load_spec_or_exit(args.spec_path)
-    if spec is None:
-        return err
-
-    selected = set(args.stage) if args.stage else None
-    registries = load_registries()
-    stages = _run_selected_stages(spec, selected, registries)
 
     if args.json:
         print(json.dumps({

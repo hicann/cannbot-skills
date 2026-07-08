@@ -18,7 +18,7 @@ op:
   name: cumsum
   version: "1.0"
   description: "Cumulative sum along an axis; y[i] = sum(x[0..i])"
-  category: recurrence
+  category: Recurrence
   paradigms: [Recurrence]
   lifecycle: stable
   error_codes: [null_input, attribute_value_out_of_range]

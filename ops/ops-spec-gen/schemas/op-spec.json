@@ -56,13 +56,13 @@
         "category": {
           "type": "string",
           "enum": [
-            "elementwise", "reduction", "reduction_composite", "contraction",
-            "layout_transform", "index_gather", "scatter_update",
-            "mask_predicate", "sort_select", "fused_composite", "random_sampling",
-            "sliding_window", "collective", "control_flow", "recurrence",
-            "interpolation", "quantization", "stateful", "arg_reduce",
-            "sparse", "padding", "variable_output", "spectral", "histogram",
-            "atomic_update"
+            "Elementwise", "Reduction", "ReductionComposite", "Contraction",
+            "LayoutTransform", "IndexGather", "ScatterUpdate",
+            "MaskPredicate", "SortSelect", "FusedComposite", "RandomSampling",
+            "SlidingWindow", "Collective", "ControlFlow", "Recurrence",
+            "Interpolation", "Quantization", "Stateful", "ArgReduce",
+            "Sparse", "Padding", "VariableOutput", "Spectral", "Histogram",
+            "AtomicUpdate", "Broadcast"
           ]
         },
         "paradigms": {
@@ -80,6 +80,33 @@
               "CollectiveCommunication", "FusedComposite"
             ]
           }
+        },
+        "paradigm_groups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "paradigms"],
+            "properties": {
+              "kind": {
+                "enum": ["fusion", "combination"],
+                "description": "fusion=纵向融合（多范式串联执行），combination=横向组合（多范式择一，由属性值决定）"
+              },
+              "paradigms": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"}
+              },
+              "switch": {
+                "type": "string",
+                "description": "combination 必填；由哪个属性决定激活哪组范式"
+              },
+              "when": {
+                "description": "combination 必填；该属性取此值时激活本组范式"
+              }
+            }
+          },
+          "description": "范式分组：声明 paradigms 之间的纵向融合或横向组合关系。所有组的 paradigms 并集必须等于 op.paradigms"
         },
         "platform_constraints": {
           "type": "object",
@@ -191,7 +218,7 @@
         "properties": {
           "name": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"},
           "description": {"type": "string", "description": "自然语言说明（4.1 文档生成消费）"},
-          "shape_rule_kind": {"enum": ["numpy_expr", "data_dependent"]},
+          "shape_rule_kind": {"enum": ["numpy_expr", "data_dependent", "textual_only"]},
           "shape_rule": {"type": "string", "minLength": 1},
           "shape_rule_description": {"type": "string", "description": "可选，自然语言形状描述；data_dependent 强烈建议，numpy_expr 可由校验器回灌"},
           "shape_bounds": {
@@ -280,6 +307,7 @@
     },
     "broadcast": {
       "type": "object",
+      "description": "算子计算是否需要对数据进行 broadcast（数据复制/扩展），而非仅描述 shape 变换",
       "required": ["kind"],
       "additionalProperties": true,
       "properties": {
@@ -298,6 +326,26 @@
           }
         }
       }
+    },
+    "reduction": {
+      "type": "object",
+      "required": ["axis_source"],
+      "additionalProperties": false,
+      "properties": {
+        "axis_source": {
+          "enum": ["attribute", "input_tensor", "fixed", "implicit_all"]
+        },
+        "fixed_value": {
+          "type": "integer",
+          "description": "Fixed axis index (required when axis_source=fixed)"
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"axis_source": {"const": "fixed"}}},
+          "then": {"required": ["fixed_value"]}
+        }
+      ]
     },
     "math_semantics": {
       "type": "object",
@@ -439,6 +487,38 @@
               }
             }
           }
+        },
+        "format_variants": {
+          "type": "array",
+          "description": "每种数据排布格式的具体参数（归约轴、oracle kwargs 等）；canonical formula 以其中一种格式为规范",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["format", "rank", "reduction_axes"],
+            "additionalProperties": false,
+            "properties": {
+              "format": {"$ref": "#/$defs/layout"},
+              "rank": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 1},
+                "minItems": 1
+              },
+              "reduction_axes": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 1
+              },
+              "channel_axis": {
+                "type": "integer",
+                "description": "Channel 轴在该 format 中的位置（如 NCHW=1, NHWC=-1 或 3）"
+              },
+              "shape_rule": {
+                "type": "string",
+                "description": "该 format 下输出的 shape 推导规则（numpy 子集表达式）；覆盖 canonical shape_rule"
+              },
+              "oracle_kwargs": {"type": "object"}
+            }
+          }
         }
       }
     },
@@ -516,7 +596,7 @@
       ]
     },
     "layout": {
-      "enum": ["ND", "NCHW", "NHWC", "NZ", "FRACTAL_NZ", "FRACTAL_Z", "CSR", "COO", "BSR"]
+      "enum": ["ND", "NCHW", "NHWC", "NCDHW", "NDHWC", "NZ", "FRACTAL_NZ", "FRACTAL_Z", "CSR", "COO", "BSR"]
     },
     "tolerance_metric": {
       "enum": ["max_relative", "max_absolute", "mean_relative", "cosine_similarity", "bitwise_equal"]

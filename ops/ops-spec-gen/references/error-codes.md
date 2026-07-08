@@ -9,9 +9,11 @@
 
 ## Stage 2 category_paradigm_consistency
 
+- `category_paradigm_consistency.broadcast_kind_requires_paradigm`
 - `category_paradigm_consistency.fused_composite_basics`
 - `category_paradigm_consistency.mutually_exclusive`
 - `category_paradigm_consistency.required_paradigm_missing`
+- `category_paradigm_consistency.shape_rule_broadcast_requires_paradigm`
 
 ## Stage 2 paradigm_constraint
 
@@ -46,9 +48,17 @@
 - `shape_closure.data_dependent_flag_missing`
 - `shape_closure.data_dependent_missing_bounds`
 - `shape_closure.data_dependent_missing_description`
+- `shape_closure.data_dependent_requires_variable_output`
+- `shape_closure.numpy_expr_formula_eval_error`
+- `shape_closure.numpy_expr_shape_mismatch`
 - `shape_closure.rank_overflow`
+- `shape_closure.reduction_shape_identity_suspicious`
 - `shape_closure.shape_rule_kind_missing`
 - `shape_closure.shape_rule_kind_unknown`
+- `shape_closure.shape_rule_placeholder`
+- `shape_closure.synthesize_parse_error`
+- `shape_closure.textual_only_requires_description`
+- `shape_closure.textual_only_requires_format_variants`
 - `shape_closure.unregistered_symbol`
 
 ## Stage 4 dtype_closure
@@ -106,6 +116,15 @@
 - `stage_skipped`
 - `synthesize_legacy_format`
 - `synthesize_pattern_unknown`
+- `format_variants.oracle_kwargs_dim_mismatch`
+- `format_variants.reduction_axes_negative`
+- `format_variants.reduction_axes_out_of_rank`
+- `paradigm_groups.combination_missing_switch`
+- `paradigm_groups.combination_missing_when`
+- `paradigm_groups.combination_should_exist`
+- `paradigm_groups.fusion_min_basic`
+- `paradigm_groups.mismatch`
+- `paradigm_groups.mode_switch_may_need_combination`
 
 ## Evaluator 错误码（`DslError(code, ...)`）
 

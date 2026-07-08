@@ -18,7 +18,7 @@ op:
   name: matmul
   version: "1.0"
   description: "Batch matrix multiplication; contracts last dim of a with second-to-last of b"
-  category: contraction
+  category: Contraction
   paradigms: [Contraction, Broadcast]
   lifecycle: stable
   error_codes:

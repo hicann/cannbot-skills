@@ -15,9 +15,9 @@ schema_version: 1
 op:
   name: add
   version: "1.0"
-  description: "Element-wise addition with numpy broadcast"
-  category: elementwise
-  paradigms: [Elementwise, Broadcast]
+  description: "Broadcast element-wise addition with numpy broadcasting rules"
+  category: Broadcast
+  paradigms: [Broadcast]
   lifecycle: stable
   error_codes:
     - null_input

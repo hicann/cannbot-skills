@@ -94,6 +94,13 @@ Ascend C 算子测试工程师，支持测试设计、测试设计评审、测�
 **输出物**：
 - 测试设计文档（`operators/{operator_name}/docs/TEST.md`）和测试用例
 
+**Checklist**：
+- [ ] 测试设计文档已生成
+- [ ] 测试用例表已生成
+- [ ] 测试设计文档包含「spec.yaml 测试映射」，并按本 Agent 的字段所有权规则处理 REQUIREMENTS/spec 冲突
+- [ ] 黑盒用例按 `ascendc-st-design` 完整流程和默认目标产出
+- [ ] 黑盒机器证据满足 workflow validator 校验要求
+
 **详细流程**：查阅 `ascendc-st-design` 技能文档
 
 ---

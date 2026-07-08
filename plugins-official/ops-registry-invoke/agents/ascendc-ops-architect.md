@@ -373,36 +373,15 @@ aclnnStatus aclnnXxx(
    | **§8 资源约束（workspace 上限 / 对齐）** | _v1 暂缓_：`performance_budget` 尚未纳入 schema |
    | **§7 性能指标（利用率 / 带宽 / 延迟）** | _v1 暂缓_：`performance_baseline` 尚未纳入 schema |
 
-2. **调用生成器**（非交互式，CI 友好）：
+2. **调用生成器**：加载 `ops-spec-gen` skill，按 **「应用场景 → 场景二：从 REQUIREMENTS.md 生成 spec.yaml」**（`references/usage-scenarios.md`）执行完整流程：
+   - 读取 REQUIREMENTS.md，按字段映射表提取信息
+   - 调用 `generate_spec.py` 生成骨架（禁止手写 spec.yaml）
+   - 手填 TODO 字段（formula / oracle / supported_combinations / tolerance / supported_chips）
+   - 校核生成器按 paradigm 自动注入的字段（dim / keep_dims / accumulator_dtype / reduction / paradigm_groups / format_variants 等）
+   - 跑 `validate_spec.py` 9-stage 校验至全 PASS（stage 9 SKIP 视为通过）
+   - 任一 FAIL 必须修复后重跑，禁止跳过
 
-   ```bash
-   python3 ops/ops-spec-gen/scripts/generate_spec.py \
-       --op-name {operator_name} \
-       --category {category} \
-       --paradigms {Paradigm1},{Paradigm2},... \
-       --inputs "{name1}:{dtype1},{dtype2};{name2}:{dtype1},..." \
-       --outputs {name} \
-       --description "{REQUIREMENTS 中的一句描述}" \
-       --output-dir operators/{operator_name}/docs
-   ```
-
-3. **手填 4 个 TODO + 4 项 ABCD 字段**（生成器只给骨架，详见 ops-spec-gen SKILL.md §3.4）：
-   - `math_semantics.formula` — numpy 可 eval 的表达式
-   - `math_semantics.reference_oracle` — 单 callable api，或填 absent=true + governance 签字
-   - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
-   - `numerical_tolerance.per_dtype` — 覆盖输出 dtype（默认值见 `ops-spec-gen/registries/tolerance_defaults.yaml`）
-   - **`op.platform_constraints.supported_chips`** — 来自 REQUIREMENTS §2，与 `registries/chip_registry.yaml` 对齐
-   - _v1 暂缓_：`interface_binding` / `performance_budget` / `performance_baseline` 尚未纳入 schema（顶层 `additionalProperties: false`），不要写入；待 schema 扩展后启用
-
-4. **跑 9-stage 校验**：
-
-   ```bash
-   python3 ops/ops-spec-gen/scripts/validate_spec.py operators/{operator_name}/docs/spec.yaml
-   ```
-
-   预期 stage 1-8 全 PASS。stage 9 在测试机未装 torch 时走 SKIP（不算失败）。任一 FAIL 必须修复后重跑，**禁止跳过**。
-
-5. **锁 spec_hash**（暂缓）：`compute_spec_hash.py` 工具链 v1 未交付；不要求执行，待工具就绪后再纳入流程。
+> 强制规则（S1-S9）、完整 CLI 参数（`--paradigm-groups` / `--axis-source` / `--format-variants` 等）和手填字段清单详见 `ops-spec-gen` skill `references/usage-scenarios.md`「场景二」章节。
 
 ### 输出交付物
 
@@ -428,7 +407,7 @@ aclnnStatus aclnnXxx(
 | Stage | 名称 | 状态 |
 |-------|------|------|
 | 1 | schema_static | ✓ PASS / ✗ FAIL |
-| 2 | category_paradigm_consistency | ... |
+| 2 | category_paradigm_consistency + paradigm_groups + paradigm 内部约束 | ... |
 | ... | ... | ... |
 
 **REQUIREMENTS 字段映射核对**:
@@ -582,6 +561,12 @@ aclnnStatus aclnnXxx(
 - 模板：参考 `ascendc-docs-gen` 技能的 **iteration-plan-template.md**
 - 必填：迭代一穿刺列表（单dtype默认fp16）、迭代二整合目标、迭代三全覆盖目标、穿刺结果判定
 
+**Checklist**：
+- [ ] 详细设计文档包含：Tiling策略规划、Kernel模板选择、数据类型支持方案、API映射方案、数据流设计、内存管理策略
+- [ ] 设计中 dtype 矩阵 / shape 约束 / invariant / boundary case / tolerance 字段值与 spec.yaml 一一对应，并包含 spec.yaml 一致性映射
+- [ ] 迭代执行计划包含：迭代一穿刺列表、迭代二整合目标、迭代三全覆盖目标、穿刺结果判定规则
+- [ ] 日志摘要已输出
+
 ### 设计要点
 
 #### 参考样例
@@ -727,7 +712,7 @@ aclnnStatus aclnnXxx(
 | **SPEC-PERF-1** | _v1 暂缓_ — `performance_baseline` 尚未纳入 schema，待扩展后启用 | — |
 | **SPEC-RES-1** | _v1 暂缓_ — `performance_budget` 尚未纳入 schema，待扩展后启用 | — |
 | **SPEC-FORMULA-1** | spec.math_semantics.formula 至少引用所有 input name | 字符串包含 |
-| **SPEC-PARADIGM-1** | spec.op.paradigms 与 category 隐含范式 + REQUIREMENTS 暗示的修饰范式对齐 | 集合差 |
+| **SPEC-PARADIGM-1** | spec.op.paradigms 与 category 隐含范式 + REQUIREMENTS 暗示的修饰范式对齐；若存在 paradigm_groups，其并集 ⊆ op.paradigms 且 switch/when 与 attribute 值域一致 | 集合差 + 分组一致性 |
 | **SPEC-LIFECYCLE-1** | spec.op.lifecycle 与 REQUIREMENTS 描述匹配（experimental vs stable）| 字符串匹配 |
 | **SPEC-INTERFACE-1** | _v1 暂缓_ — `interface_binding.*` 尚未纳入 schema，待扩展后启用 | — |
 

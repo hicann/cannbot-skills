@@ -148,12 +148,6 @@ Task 调用参数：
 【输出】
 - 开发日志：operators/{operator_name}/docs/LOG.md
 - 问题目录：operators/{operator_name}/issues/
-
-【验收标准】
-- 开发日志文件已创建
-- 问题目录已创建
-- 用户原始需求已完整记录
-- 环境检查已执行（使用 ascendc-env-check skill，芯片号、CANN包版本、路径、NPU设备信息等已记录）
   "
 }
 ```
@@ -178,11 +172,6 @@ scene: requirement-analysis
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - aclnnAPI 接口文档：operators/{operator_name}/docs/aclnn{OperatorName}.md
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
-
-【验收标准】
-- 需求文档包含：算子功能描述、数学公式、输入输出规格、支持数据类型、精度要求、芯片类型、可行性评估
-- aclnnAPI 接口文档包含：产品支持情况、功能说明、函数原型、参数说明、返回值、约束说明（调用示例占位）
-- 日志摘要已输出
   "
 }
 ```
@@ -203,38 +192,10 @@ scene: spec-generation
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - 算子名称：{operator_name}
 
-【执行】
-1. 读取 REQUIREMENTS.md，把 dtype / shape / 平台约束 / 精度要求 / 边界 case 字段映射到 spec.yaml 字段
-2. 调用 ops-spec-gen skill 的生成器（非交互式）：
-   python3 ops/ops-spec-gen/scripts/generate_spec.py \\
-       --op-name {operator_name} \\
-       --category {category} \\
-       --paradigms {Paradigm1},{Paradigm2},... \\
-       --inputs \"{name1}:{dtype1},{dtype2};...\" \\
-       --outputs {name} \\
-       --description \"{REQUIREMENTS 中的一句描述}\" \\
-       --output-dir operators/{operator_name}/docs
-3. 手填 4 个 TODO（详见 ops-spec-gen SKILL.md §3.4）：
-   - math_semantics.formula：numpy 可 eval 的表达式
-   - math_semantics.reference_oracle：单 callable api 或 absent=true + governance 签字
-   - dtype_policy.supported_combinations：显式枚举
-   - numerical_tolerance.per_dtype：覆盖输出 dtype
-4. 跑 9-stage 校验：
-   python3 ops/ops-spec-gen/scripts/validate_spec.py operators/{operator_name}/docs/spec.yaml
-
 【输出】
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（9-stage 全 PASS）
-- 报告（精确格式见 ascendc-ops-architect 场景二）：包含状态字段、9-stage 结果表、REQUIREMENTS 字段映射核对、问题清单（仅失败时）
+- 报告（格式见 ascendc-ops-architect 场景二报告模板）
 - 日志摘要：输出到响应末尾
-
-【验收标准】
-- spec.yaml 9-stage 全 PASS（stage 9 SKIP 视为通过）
-- 字段值与 REQUIREMENTS.md 内容一致（dtype 矩阵 / 平台 / 容差均可追溯）
-- 报告 **状态** 字段 = ✅通过
-
-【失败处理】
-- 9-stage 任一 stage FAIL → 按 finding 修订 spec.yaml 后重跑校验
-- 主 Agent 自动重试，最多 2 次；超过后归档 issue
   "
 }
 ```
@@ -263,12 +224,6 @@ Agent 定义中的场景五。
   - 13 条 SPEC-* 条款逐项 ✓/⚠/❌ + 证据
   - 状态字段 = ✅通过 / ❌失败
 - 日志摘要：输出到响应末尾
-
-【主 Agent 处理规则】（供调用方参考、非本任务执行项）
-- 状态=✅ → 自动进入 1.3 ‖ 1.4（同一次响应发起），无需用户确认
-- 状态=❌ → 主 Agent 自动回调 architect (scene: spec-generation) 按 SPEC_REVIEW.md 修订 spec.yaml，
-            修订后**重跑 9-stage + 重跑 1.2.5R**；最多重试 2 次
-- 禁止把 ❌ 报告直接抛给用户
   "
 }
 ```
@@ -290,26 +245,10 @@ scene: design
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary/tolerance 真值源；详细设计字段必须与之一致）
 - 算子目录：operators/{operator_name}/
 
-【字段优先级】
-- REQUIREMENTS.md 与 spec.yaml 的字段所有权、冲突处理和设计输出要求按 `ascendc-ops-architect` Agent 定义中的「输入优先级与字段所有权」执行
-- **最易误用 5 字段**（必须直接从 spec.yaml 取值，禁止从 REQUIREMENTS 重新解释）：`dtype_policy.supported_combinations` / `outputs[].shape_rule` / `numerical_tolerance.per_dtype` / `boundary_conditions[]` / `extreme_inputs[]`
-- DESIGN.md 必须包含「spec.yaml 一致性映射」章节，说明 spec-owned 字段在设计中的承接位置
-
 【输出】
 - 详细设计文档：operators/{operator_name}/docs/DESIGN.md
 - 迭代执行计划：operators/{operator_name}/docs/PLAN.md
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
-
-【验收标准】
-1. 详细设计文档包含：Tiling策略规划、Kernel模板选择、数据类型支持方案、API映射方案、数据流设计、内存管理策略
-2. **设计中 dtype 矩阵 / shape 约束 / invariant / boundary case / tolerance 字段值与 spec.yaml 一一对应，并包含 spec.yaml 一致性映射**
-3. 迭代执行计划包含：迭代一穿刺列表、迭代二整合目标、迭代三全覆盖目标、穿刺结果判定规则
-4. 日志摘要已输出
-
-【主 Agent 处理规则】（供调用方参考、非本任务执行项）
-- 状态=✅ → 进入 1.3R 方案评审
-- 状态=❌（含日志摘要中报告 REQUIREMENTS/spec 冲突）→ **不要继续执行 1.3R**；主 Agent 自动回调 architect (scene: spec-generation) 按冲突报告修订 spec.yaml → 重跑 9-stage → 重跑 1.2.5R → 回到 1.3 重跑；最多重试 2 次
-- 禁止把 ❌ 报告或冲突日志直接抛给用户
   "
 }
 ```
@@ -334,20 +273,9 @@ scene: design-review
 - 详细设计文档：operators/{operator_name}/docs/DESIGN.md
 - 迭代执行计划：operators/{operator_name}/docs/PLAN.md
 
-【字段优先级】
-- REQUIREMENTS.md 与 spec.yaml 的字段所有权、冲突处理和评审要求按 `ascendc-ops-architect` Agent 定义中的「输入优先级与字段所有权」执行
-- **最易误用 5 字段**（评审时重点核对）：`dtype_policy.supported_combinations` / `outputs[].shape_rule` / `numerical_tolerance.per_dtype` / `boundary_conditions[]` / `extreme_inputs[]`
-- 必须检查 DESIGN.md 是否包含「spec.yaml 一致性映射」章节
-
 【输出】
 - 方案评审报告：operators/{operator_name}/docs/DESIGN_REVIEW.md
 - 日志摘要：输出到响应末尾（格式见本文档顶部『Subagent 日志摘要输出要求』）
-
-【主 Agent 处理规则】（供调用方参考、非本任务执行项）
-- 状态=✅ → 若 1.4R 也已通过则进入 CP2 用户确认；否则等待 1.4R 通过后再触发 CP2
-- 状态=❌ 且报告中指出 REQUIREMENTS/spec 在 spec-owned 字段冲突 → **流程终止**，向用户报告冲突详情。spec 已通过校验 + 人工 review，若 REQUIREMENTS 仍与 spec-owned 字段冲突，属于流程异常，禁止自动修复
-- 状态=❌（其他原因，非冲突）→ 主 Agent 自动回调 architect (scene: design) 按 DESIGN_REVIEW.md 修订 DESIGN.md，修订后重跑 1.3R；最多重试 2 次
-- 禁止把 ❌ 报告或冲突日志直接抛给用户
   "
 }
 ```
@@ -369,26 +297,10 @@ scene: test-design
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/boundary/extreme/tolerance 真值源；测试设计的 dtype 矩阵 / 边界场景 / 精度标准必须与之一致）
 - 算子文档：{operator_name}.md
 
-【字段优先级】
-- REQUIREMENTS.md 与 spec.yaml 的字段所有权、冲突处理和测试输出要求按 `ascendc-ops-tester` Agent 定义中的「输入优先级与字段所有权」执行
-- **最易误用 5 字段**（测试必须直接从 spec.yaml 取值）：`dtype_policy.supported_combinations` / `outputs[].shape_rule` / `numerical_tolerance.per_dtype` / `boundary_conditions[]` / `extreme_inputs[]`
-- TEST.md 必须包含「spec.yaml 测试映射」章节，说明 dtype、shape、boundary、extreme、oracle、tolerance、determinism 的测试来源
-
 【输出】
 - 测试设计文档：operators/{operator_name}/docs/TEST.md
 - 测试用例：operators/{operator_name}/tests/st/testcases/
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求")
-
-【验收标准】
-- 测试场景覆盖正常/边界（boundary_conditions / extreme_inputs 覆盖 spec.yaml 中各项）
-- 用例分级完成（L0门槛/L1功能/L2异常），并按 `ascendc-st-design` 默认目标产出黑盒用例
-- 精度标准已定义（从 spec.yaml 的 numerical_tolerance.per_dtype 读取），并包含 spec.yaml 测试映射
-- 日志摘要已输出
-
-【主 Agent 处理规则】（供调用方参考、非本任务执行项）
-- 状态=✅ → 若 1.3R 也已通过则进入 CP2 用户确认；否则等待 1.3R 通过后再触发 CP2
-- 状态=❌（含日志摘要中报告 REQUIREMENTS/spec 冲突）→ **不要继续执行下一步**；主 Agent 自动回调 architect (scene: spec-generation) 按冲突报告修订 spec.yaml → 重跑 9-stage → 重跑 1.2.5R → 回到 1.4 重跑；最多重试 2 次
-- 禁止把 ❌ 报告或冲突日志直接抛给用户
   "
 }
 ```
@@ -416,9 +328,6 @@ scene: test-design-review
 【输出】
 - 测试设计评审报告：operators/{operator_name}/docs/TEST_REVIEW.md
 - 日志摘要：输出到响应末尾
-
-> **注**：失败分支规则（spec-owned 冲突直接终止 vs 其他失败回退修复）见 workflow SKILL.md 1.4R「失败处理」。
-
   "
 }
 ```

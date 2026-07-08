@@ -6,14 +6,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Broadcast simulator — given two SymbolicShape, attempt to align them per
-the rules declared in spec.yaml's `broadcast.kind`.
+"""Broadcast simulator — 校验算子计算中的 broadcast 语义。
+
+broadcast 描述的是算子计算是否需要对数据进行 broadcast（数据复制/扩展），
+而非仅描述 shape 变换。给定 SymbolicShape，按 spec.yaml `broadcast.kind` 模拟。
 
 Three modes:
-  * 'numpy'    — full numpy ellipsis broadcast (right-align, dims either equal or
-                 one of them is 1 or missing)
-  * 'none'     — shapes must be identical
-  * 'explicit' — apply per-axis policy from broadcast.rules (trailing/leading scope)
+  * 'numpy'    — 计算涉及数据广播（full numpy ellipsis broadcast；right-align,
+                 dims either equal or one of them is 1 or missing）
+  * 'none'     — 计算不涉及任何 broadcast（输入 shape 严格一致，无需数据扩展）
+  * 'explicit' — 部分维度 broadcast + 部分维度不 broadcast
+                 （apply per-axis policy from broadcast.rules, trailing/leading scope）
 
 Only the 2-input case is fully simulated (sufficient for our examples).  N-input
 broadcasts can be handled by chaining numpy_broadcast_two pairwise.
@@ -123,72 +126,6 @@ def numpy_broadcast_n(shapes: list[SymbolicShape]) -> SymbolicShape:
 # ---------- explicit-rules broadcast (used by matmul) ----------------------
 
 
-def _split_lead_trail(a, b, rules):
-    """Validate trailing+leading rules exist and split shapes. Returns (lead_a, lead_b, trail_a, trail_b, t_rule, l_rule)."""
-    trailing_rule = next((r for r in rules if r.get("scope") == "trailing"), None)
-    leading_rule = next((r for r in rules if r.get("scope") == "leading"), None)
-    if trailing_rule is None or leading_rule is None:
-        raise DslError(
-            "explicit_rules_uncovered",
-            "explicit broadcast 至少需要 'trailing' 与 'leading' 各一条规则",
-        )
-    t_count = int(trailing_rule.get("count", 0))
-    if t_count <= 0 or t_count > a.rank_min or t_count > b.rank_min:
-        raise DslError(
-            "explicit_rules_uncovered",
-            f"trailing.count={t_count} 与输入 rank ({a.rank_min}/{b.rank_min}) 不匹配",
-        )
-    a_trail = a.explicit[-t_count:]
-    b_trail = b.explicit[-t_count:]
-    a_lead = SymbolicShape(folded_name=a.folded_name, explicit=a.explicit[:-t_count])
-    b_lead = SymbolicShape(folded_name=b.folded_name, explicit=b.explicit[:-t_count])
-    return a_lead, b_lead, a_trail, b_trail, trailing_rule, leading_rule
-
-
-def _apply_trailing_policy(a_trail, b_trail, policy):
-    if policy == "no_broadcast":
-        if len(a_trail) != len(b_trail):
-            raise DslError("incompatible_dims",
-                           f"trailing 维数不一致: {a_trail} vs {b_trail}")
-        return list(a_trail)
-    if policy == "numpy":
-        return numpy_broadcast_two(
-            SymbolicShape(folded_name=None, explicit=a_trail),
-            SymbolicShape(folded_name=None, explicit=b_trail),
-        ).explicit
-    raise DslError("explicit_rules_uncovered",
-                   f"trailing.policy 未支持: {policy!r}")
-
-
-def _apply_leading_no_broadcast(a_lead, b_lead):
-    if len(a_lead.explicit) != len(b_lead.explicit):
-        raise DslError("incompatible_dims",
-                       f"leading 显式维 rank 不一致: {a_lead} vs {b_lead}")
-    for i, (da, db) in enumerate(zip(a_lead.explicit, b_lead.explicit)):
-        if da.kind == "const" and db.kind == "const" and da.value != db.value:
-            raise DslError("incompatible_dims",
-                           f"leading 第 {i} 维 const 不等: {da} vs {db}")
-    a_has_folded = a_lead.folded_name is not None
-    b_has_folded = b_lead.folded_name is not None
-    if a_has_folded != b_has_folded:
-        raise DslError("incompatible_dims",
-                       f"leading 一侧有折叠维另一侧没有: {a_lead} vs {b_lead}")
-    if a_has_folded and b_has_folded and a_lead.folded_name != b_lead.folded_name:
-        out_folded = f"bcast_{a_lead.folded_name}_{b_lead.folded_name}"
-    else:
-        out_folded = a_lead.folded_name
-    return SymbolicShape(folded_name=out_folded, explicit=list(a_lead.explicit))
-
-
-def _apply_leading_policy(a_lead, b_lead, policy):
-    if policy == "numpy":
-        return numpy_broadcast_two(a_lead, b_lead)
-    if policy == "no_broadcast":
-        return _apply_leading_no_broadcast(a_lead, b_lead)
-    raise DslError("explicit_rules_uncovered",
-                   f"leading.policy 未支持: {policy!r}")
-
-
 def _explicit_check_two(
     a: SymbolicShape,
     b: SymbolicShape,
@@ -200,10 +137,78 @@ def _explicit_check_two(
     For matmul-style rules:
         - {scope: trailing, count: 2, policy: no_broadcast} → end 2 dims must equal
         - {scope: leading,  count: -1, policy: numpy}      → leading dims numpy bcast
+
+    Output shape: result of the rules; for the matmul case, leading numpy +
+    trailing no_broadcast yields broadcast(batch_a, batch_b) ++ [M, N].
     """
-    a_lead, b_lead, a_trail, b_trail, trailing_rule, leading_rule = _split_lead_trail(a, b, rules)
-    out_trail = _apply_trailing_policy(a_trail, b_trail, trailing_rule.get("policy"))
-    out_lead = _apply_leading_policy(a_lead, b_lead, leading_rule.get("policy"))
+    # Validate trailing rule covers correct count then split a/b/output similarly
+    trailing_rule = next((r for r in rules if r.get("scope") == "trailing"), None)
+    leading_rule = next((r for r in rules if r.get("scope") == "leading"), None)
+
+    if trailing_rule is None or leading_rule is None:
+        raise DslError(
+            "explicit_rules_uncovered",
+            "explicit broadcast 至少需要 'trailing' 与 'leading' 各一条规则",
+        )
+
+    t_count = int(trailing_rule.get("count", 0))
+    if t_count <= 0 or t_count > a.rank_min or t_count > b.rank_min:
+        raise DslError(
+            "explicit_rules_uncovered",
+            f"trailing.count={t_count} 与输入 rank ({a.rank_min}/{b.rank_min}) 不匹配",
+        )
+
+    a_trail = a.explicit[-t_count:]
+    b_trail = b.explicit[-t_count:]
+    a_lead = SymbolicShape(folded_name=a.folded_name, explicit=a.explicit[:-t_count])
+    b_lead = SymbolicShape(folded_name=b.folded_name, explicit=b.explicit[:-t_count])
+
+    # trailing policy
+    t_policy = trailing_rule.get("policy")
+    if t_policy == "no_broadcast":
+        if len(a_trail) != len(b_trail):
+            raise DslError("incompatible_dims",
+                           f"trailing 维数不一致: {a_trail} vs {b_trail}")
+        out_trail = list(a_trail)  # both must equal at runtime; symbolically use a's
+    elif t_policy == "numpy":
+        out_trail = numpy_broadcast_two(
+            SymbolicShape(folded_name=None, explicit=a_trail),
+            SymbolicShape(folded_name=None, explicit=b_trail),
+        ).explicit
+    else:
+        raise DslError("explicit_rules_uncovered",
+                       f"trailing.policy 未支持: {t_policy!r}")
+
+    # leading policy
+    l_policy = leading_rule.get("policy")
+    if l_policy == "numpy":
+        out_lead = numpy_broadcast_two(a_lead, b_lead)
+    elif l_policy == "no_broadcast":
+        # B 路线：symbolic symbol 名（如 matmul 的 K）仅为 owner 命名，不再用于跨 input
+        # 判等；leading no_broadcast 只静态校核 rank 一致与 const 维相等，symbol 名是否
+        # 配对放过到 stage 8 / 运行时（numpy 跑公式时不一致会抛错）。
+        if len(a_lead.explicit) != len(b_lead.explicit):
+            raise DslError("incompatible_dims",
+                           f"leading 显式维 rank 不一致: {a_lead} vs {b_lead}")
+        for i, (da, db) in enumerate(zip(a_lead.explicit, b_lead.explicit)):
+            if da.kind == "const" and db.kind == "const" and da.value != db.value:
+                raise DslError("incompatible_dims",
+                               f"leading 第 {i} 维 const 不等: {da} vs {db}")
+        # 折叠维只要"都是折叠 / 都不是折叠"即可
+        a_has_folded = a_lead.folded_name is not None
+        b_has_folded = b_lead.folded_name is not None
+        if a_has_folded != b_has_folded:
+            raise DslError("incompatible_dims",
+                           f"leading 一侧有折叠维另一侧没有: {a_lead} vs {b_lead}")
+        if a_has_folded and b_has_folded and a_lead.folded_name != b_lead.folded_name:
+            out_folded = f"bcast_{a_lead.folded_name}_{b_lead.folded_name}"
+        else:
+            out_folded = a_lead.folded_name
+        out_lead = SymbolicShape(folded_name=out_folded, explicit=list(a_lead.explicit))
+    else:
+        raise DslError("explicit_rules_uncovered",
+                       f"leading.policy 未支持: {l_policy!r}")
+
     return SymbolicShape(
         folded_name=out_lead.folded_name,
         explicit=list(out_lead.explicit) + list(out_trail),
