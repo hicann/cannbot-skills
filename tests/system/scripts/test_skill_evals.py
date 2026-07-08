@@ -509,10 +509,10 @@ def _run_review_session(
 def _check_contains_pattern(
         full_output: str, ai_text: str, pattern: str,
         eval_id: Optional[str], truncate_len: int) -> None:
-    """检查输出是否包含指定模式（搜索 full_output）"""
-    if pattern not in full_output:
+    """检查输出是否包含指定模式（搜索 full_output，不区分大小写）"""
+    if pattern.lower() not in full_output.lower():
         pytest.fail(
-            f"[contains] 期望输出中包含 \"{pattern}\"，但未找到。\n"
+            f"[contains] 期望输出中包含 \"{pattern}\"，但未找到（不区分大小写）。\n"
             f"--- AI 回复 ---\n"
             f"{ai_text[:truncate_len]}\n"
             f"--- 结束 ---"

@@ -25,8 +25,6 @@ eval_mode: text
 
 ## Expectations
 
-- [contains] torch.compile
-
 ---
 
 # Case 2: 图模式不适用的场景

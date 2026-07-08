@@ -333,7 +333,7 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 
 #### 2.3.1 contains — 文本包含检查
 
-检查 AI **最终回复**（`ai_text`）中是否包含指定字符串。
+检查 AI **最终回复**（`ai_text`）中是否包含指定字符串（**不区分大小写**）。
 
 ```markdown
 ## Expectations
@@ -341,6 +341,8 @@ eval_mode: text          # 评测模式，可选值：text（默认）/ file_bas
 - [contains] npu-smi info
 - [contains] set_env.sh
 ```
+
+> **注意**：`[contains]` 校验不区分大小写。例如 `[contains] npu-smi info` 可匹配 "npu-smi info"、"Npu-Smi Info" 或 "NPU-SMI INFO" 等方式。
 
 #### 2.3.2 not_contains — 文本排除检查
 
