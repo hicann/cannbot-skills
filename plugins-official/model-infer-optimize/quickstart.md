@@ -159,7 +159,7 @@ primary agent 会按 AGENTS.md 中的强制规则自动读取 `workflows/optimiz
 
 | 内容 | 说明 |
 | --- | --- |
-| 原子 skills（12 个） | 来自 `model/model-infer-*`，覆盖推理优化各专项能力 |
+| 原子 skills（14 个） | 来自 `model/model-infer-*`，覆盖推理优化各专项能力 |
 | workflow 文档 | `plugins-official/model-infer-optimize/workflows/optimize-workflow.md` |
 | Subagents | `plugins-official/model-infer-optimize/agents/model-infer-*.md` |
 | hooks | 角色越界保护、progress.md 读取约束、自验证检查和长任务提醒 |
@@ -262,5 +262,5 @@ cd cannbot-skills/plugins-official/model-infer-optimize && bash init.sh project 
 1. 端到端优化通过 `workflows/optimize-workflow.md` 编排 6 阶段流程，并在需要时插入可选量化阶段
 2. 使用 `init.sh` 脚本一键安装（OpenCode 推荐），Claude Code 用户也可用 `/plugin install` 一键安装
 3. `opencode` / `claude` 是核心交互指令；IDE 类工具（TRAE / Cursor）打开项目即自动加载
-4. 单点优化（KVCache、并行、融合算子、量化等）由 12 个原子 skill 自动激活，不进入端到端流程
+4. 单点优化（KVCache、并行、融合算子、量化等）由 14 个原子 skill 自动激活，不进入端到端流程
 5. 所有阶段通过门禁驱动，支持断点续跑与失败恢复

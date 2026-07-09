@@ -125,6 +125,15 @@
 #### 问题修复 Bug Fix
 - 【npu-arch】补全 Scalar 执行单元，修正 SIMD/SIMT VF 描述 (#263)。
 
+### 【2026-06-12】
+#### 新特性 New Features
+- 【模型推理】新增 Skill：`model-infer-profiling`，用 `torch_npu.profiler` 正确采集 PyTorch 推理性能数据（强约束 `ExperimentalConfig(Level1 + PipeUtilization)`，否则 `kernel_details.csv` 缺列）。
+- 【模型推理】新增 Skill：`model-infer-perf-breakdown`，把 `kernel_details.csv` + `trace_view.json` 按模型结构切成 component 实例并分桶，输出 wall/bubble 中位数与异常 layer 的单页 HTML。
+- 【模型推理】新增编排插件 `model-infer-sota-approach`（`plugins-official/`）：baseline 之上由 profiling 驱动的多方向探索式优化编排 Team，与 `model-infer-optimize` 前后衔接、互补不替代。
+
+#### 特性增强 Feature Enhancement
+- 【模型推理，model-infer-multi-stream】从「自带 Plan 编排」改造为「多流技术知识包」，聚焦多流的分析 / 实现 / 验证规则，Plan / round 编排交由 `model-infer-sota-approach`。
+
 ### 【2026-06-10】
 #### 新特性 New Features
 - 【FA 算子】新增 FA 算子开发基础能力。

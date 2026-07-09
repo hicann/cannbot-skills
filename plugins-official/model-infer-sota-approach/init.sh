@@ -159,7 +159,7 @@ show_banner() {
   \____/_/   \_\_| \_|_| \_|____/ \___/ \__|
 BANNER
   echo -e "${NC}"
-  echo -e "  ${BOLD}NPU Model Inference Optimization${NC}"
+  echo -e "  ${BOLD}NPU Inference SOTA Approach${NC}"
   echo ""
 }
 
@@ -301,7 +301,7 @@ write_manifest() {
 {
   "brand": "CANNBot",
   "version": "$VERSION",
-  "team": "model-infer-optimize",
+  "team": "model-infer-sota-approach",
   "level": "$LEVEL",
   "tool": "$TOOL",
   "installed_skills": $skills_json,
@@ -401,14 +401,14 @@ else
 fi
 
 echo ""
-echo -e "  ${GREEN}${BOLD}✓ model-infer-optimize installed successfully!${NC}"
+echo -e "  ${GREEN}${BOLD}✓ model-infer-sota-approach installed successfully!${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
 if [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动"
-  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}帮我优化 <model_name> 模型的 NPU 推理性能${NC}"
+  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}在已有 baseline 上继续优化 <model_name> 模型的 NPU 推理性能${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 在目标 cann-recipes-infer 或模型仓中启动工具"
-  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}帮我优化 <model_name> 模型的 NPU 推理性能${NC}"
+  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}在已有 baseline 上继续优化 <model_name> 模型的 NPU 推理性能${NC}"
 fi
 echo ""
