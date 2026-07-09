@@ -42,6 +42,13 @@ argument-hint: >
 - 仍需产出 `output_path`（内容与输入相同或微调）
 - 在返回信息中明确说明"无更多优化点"
 
+**返回字段约定（供 Phase 4 调用方判断 IR 多轮迭代）**：
+
+latency-optimizer 在返回信息中**必须包含**以下字段：
+
+- `hit_optimization_point: int | None` —— 本轮命中的优化点编号（1-25）；无命中时为 `None`
+- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 25（IR 分析）时该字段有意义；其他轮次（命中 1-24 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
+
 ## 优化点索引
 
 以下仅列出优化点索引，包含适用条件、命中条件及参考文档路径。**每个优化点的详细说明（典型代码特征、判断逻辑、优化方法、代码示例）请见对应参考文档。**
@@ -72,6 +79,7 @@ argument-hint: >
 | 22 | Latency-Bound 循环维度 Tile 合并 | kernel 处于 latency-bound（算力利用率极低，dot 固定 issue/同步开销主导），存在外层循环每迭代发起一组 dot，且 dot 某维（常 M）小于 cube 微块可放大 | profiling 算力利用率 <5% 且带宽未饱和但 dot 调用频繁，外层循环放大 dot 维度可减迭代数，放大后连续单 tile 在 UB/CC 内 | `references/latency-bound-tile-merge.md` |
 | 23 | Ascend Interpolate 专用优化 | 算子类型为 interpolate/upsample_* | 代码为 Interpolate 类算子，存在坐标/权重运行时计算或离散访存 | `references/ascend-interpolate-optimization.md` |
 | 24 | Ascend Pooling 专用优化 | 算子类型为 MaxPool/AvgPool | 代码为 Pooling 类算子，存在 1D 扁平索引或布局/边界优化空间 | `references/ascend-pooling-optimization.md` |
+| 25 | IR分析优化 | 所有算子类型 | 每轮作为最后一个优化点必须执行 | `references/IR_triton.md` |
 
 **检查规则**：Agent 必须严格按照上述顺序逐一检查优化点，**每次只能尝试一个优化点，命中后才能加载对应参考文档；未命中则跳过，禁止加载参考文档。**
 
@@ -151,6 +159,7 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
   - 第三轮：检查 `1→2→...`，命中优化点 Z，应用并回到 1 继续
   - ...
   - 直到所有优化点都不命中，本轮主流程结束。
+- ⚠️ **优化点 25（IR 分析）支持多轮重复命中**：在 Phase 4 调用方（triton-op-generator AGENTS.md）开启的 "IR 多轮迭代模式" 下，IR 优化点可在多个 Phase 4 轮次中重复进入，每轮重新提取 `last_pass.mlir` 并分析；其他优化点（1-24）单轮即过，命中后本轮不再重复。每次调用 latency-optimizer 仍只应用一个优化点。
 - ⚠️ **一次只能参考一个文档**；参考文档仅用于当前命中优化点的子流程，完成后立即返回主流程。
 
 ## 优化验证规则
@@ -199,6 +208,7 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 | 算子特定经验 | `references/operators/permute-layout-transform.md` | Permute/Transpose/reshape-as-copy 布局变换算子优化 |
 | 通用辅助 | `references/operators/general-insights.md` | Triton-Ascend 通用优化洞察 |
 | 通用辅助 | `references/operators/workflow-and-debugging.md` | 验证与调试工作流 |
+| IR分析优化 | `references/IR_triton.md` | IR分析优化 |
 
 
 ## 最终步骤

@@ -443,6 +443,15 @@ phase3_last_iter = Phase 3 最后一次验证通过的 iter 编号 # 见 3.3 的
 improvement_made = false
 target_reached = false # 是否达到目标加速比
 
+# IR 多轮迭代相关变量
+# 优化点 25（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-24）单轮即过。
+# ir_max_iterations 与 max_opt_iterations 独立计数，互不扣减。
+ir_iteration = 0
+ir_max_iterations = 20                              # IR 专属迭代上限
+last_optimization_point = None                      # 上一轮命中的优化点编号
+ir_has_more_suggestions = true                      # latency-optimizer 返回：IR 分析是否还能给出新建议
+current_iter_dir = ""                               # 本轮产物目录（普通轮 opt_iter_{n} / IR 轮 opt_iter_{n}_ir_{k}）
+
 ```
 
 ### 4.0 Phase 4 入口硬断言（强制）
@@ -492,18 +501,26 @@ while opt_iteration < max_opt_iterations:
 
 **产物**：
 
-- `{工作目录}/output/opt_iter_{opt_iteration}/optimized_code.py`
+- `{工作目录}/output/{current_iter_dir}/optimized_code.py`
 
 **分支**：
 
-- **triton-latency-optimizer 报告无更多优化点**：
-  - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点：
+> latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 25 时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
+
+- **存在普通优化点（1-24）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
+- **triton-latency-optimizer 报告无更多普通优化点**：
+  - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点（这些仍属普通轮）：
     - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 18）
     - `speedup_vs_torch < target_speedup` 且 `opt_iteration < 3`：
       要求重新扫描，重点检查当前算子类别对应的高频命中点
       （见 `triton-latency-optimizer/SKILL.md` 的"算子类别与高频优化点"表）
-  - 上述条件均不满足 → 终止优化，进入 **4.6 终局判定**
-- **存在可尝试的优化点** → 根据优化点重写代码
+  - **IR 多轮迭代分支**（普通优化点耗尽时）：
+    - 若 `ir_has_more_suggestions == true` 且 `ir_iteration < ir_max_iterations`：
+      - **不终止**，强制走 IR 子流程（优化点 25），重新提取 `last_pass.mlir` 并分析
+      - `ir_iteration++`，`last_optimization_point = 25`
+      - 本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}_ir_{ir_iteration}`（避免与普通轮目录冲突）
+    - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`）→ 终止优化，进入 **4.6 终局判定**
+  - 上述都不满足 → 终止优化，进入 **4.6 终局判定**
 
 **Checklist 检查（强制）**：
 
@@ -518,7 +535,9 @@ while opt_iteration < max_opt_iterations:
 
 **调用 Skill**：`triton-op-verifier` (`verify.py`)
 
-**产物目录**：`{工作目录}/output/opt_iter_{opt_iteration}/verify/`
+**产物目录**：`{工作目录}/output/{current_iter_dir}/verify/`
+
+> `current_iter_dir` 由 4.1 决定：普通轮为 `opt_iter_{opt_iteration}`，IR 轮为 `opt_iter_{opt_iteration}_ir_{ir_iteration}`。下文 4.2/4.3/4.4/4.5 中所有 `opt_iter_{opt_iteration}` 路径均以 `{current_iter_dir}` 为准。
 
 - `{op_name}_torch.py`（PyTorch 参考）
 - `{op_name}_triton_baseline.py`（Phase 3 基线，保留以便复盘）
@@ -529,7 +548,7 @@ while opt_iteration < max_opt_iterations:
 - 直接复制 Phase 3 的校验结果，不再重跑：
   ```bash
   cp {工作目录}/output/iter_{phase3_last_iter}/verify/verify_result.json \
-     {工作目录}/output/opt_iter_{opt_iteration}/verify/verify_result_baseline.json
+     {工作目录}/output/{current_iter_dir}/verify/verify_result_baseline.json
   ```
 
 ````
@@ -563,7 +582,7 @@ while opt_iteration < max_opt_iterations:
 - **处理方式**：
   - 视为等价于 4.2 optimized verify 失败
   - 重新读 `verify_result_optimized.json` 取 `failures` 汇总成错误信息
-  - 在 `opt_iter_{opt_iteration}/log.md` 标注 "L1 兜底触发：当前会话越过 4.3 断言"
+  - 在 `{current_iter_dir}/log.md` 标注 "L1 兜底触发：当前会话越过 4.3 断言"
   - → 跳到 **4.5（A 类）**
 
 **调用 Skill**：`triton-op-verifier` (`benchmark.py`)，仅测试优化侧
@@ -573,7 +592,7 @@ while opt_iteration < max_opt_iterations:
 - 直接复制 Phase 3 的性能结果，不再重跑：
   ```bash
   cp {工作目录}/output/iter_{phase3_last_iter}/perf_result.json \
-     {工作目录}/output/opt_iter_{opt_iteration}/baseline_perf_result.json
+     {工作目录}/output/{current_iter_dir}/baseline_perf_result.json
   ```
 - ⚠️ 基线代码与 Phase 3 `generated_code.py` 完全一致，已在 Phase 3.5 完成 benchmark。
   `perf_result.json` 原样复制即可；下游判定仅依赖 `speedup_vs_torch`。
@@ -601,7 +620,7 @@ while opt_iteration < max_opt_iterations:
 
   ── 4.4 结果判定 ──────────────────────────────────
   **前置检查**：
-  - 若 `opt_iter_{opt_iteration}/optimized_perf_result.json` 不存在或读取失败
+  - 若 `{current_iter_dir}/optimized_perf_result.json` 不存在或读取失败
     （通常意味着 4.3 被 L1 拒绝、benchmark 未实际产出 JSON），跳过本步骤直接
     进入 4.5（A 类分析），不得写入任何 speedup 数值。
   - 若 `baseline_speedup` 或 `optimized_speedup` 任一为 `null`（全部 shape 异常，
@@ -611,27 +630,38 @@ while opt_iteration < max_opt_iterations:
   → 优化成功（几何平均加速比有提升）
   → 更新 best_code / best_speedup
   → improvement_made = true
-  → opt_iteration++，continue
+  → 普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
+  → continue
 
   否则（含相等）:
-  → 视为无提升，opt_iteration++，continue
+  → 视为无提升
+  → 普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
+  → **IR 轮不因 improvement_made == false break**：仍 continue，让下一轮 4.1 重新评估 IR 是否还能继续
+  → 普通轮：continue
 
   ── 4.5 分析决策 (验证失败时) ─────────────────────
-  A 类 (优化引入逻辑错误) → 回退，调整策略，continue
+  A 类 (优化引入逻辑错误) → 回退，调整策略，普通轮 opt_iteration++（IR 轮 ir_iteration 已在 4.1 自增），continue
   B 类 (环境错误) → 终止
   C 类 (无法继续) → 终止
 
-  opt_iteration++
+  普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增
   continue
 
   ── 4.6 终局判定 ──────────────────────────────────
-  无优化点时退出判定：
+  退出判定（仅以下任一条件成立才 break）：
 
+  - `opt_iteration >= max_opt_iterations`（全局兜底）
+  - 普通优化点耗尽 且 `ir_has_more_suggestions == false`（IR 分析明确无新建议）
+  - 普通优化点耗尽 且 `ir_iteration >= ir_max_iterations`（IR 上限达到）
+
+  否则（IR 仍可继续）→ continue，回到 4.1 强制走 IR 多轮迭代分支
+
+  break 后的最终判定：
   improvement_made == true:
-  → 优化成功，break，进入 Phase 5
+  → 优化成功，进入 Phase 5
 
   improvement_made == false:
-  → 优化失败（做完所有尝试后没有效果），break，进入 Phase 5
+  → 优化失败（做完所有尝试后没有效果），进入 Phase 5
 
 ````
 
