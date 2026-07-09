@@ -11,7 +11,8 @@ hooks:
       hooks:
         - type: command
           command: "${CLAUDE_SKILL_DIR}/hooks/pre-build-check.sh"
-          if: "Bash(*build*)"
+          # 仅在真正触发编译的 make/cmake 命令上运行；避免 `mkdir build`、`rm -rf build` 等误触发。
+          if: "Bash(*make*)"
           timeout: 10
           statusMessage: "Checking for host-only helpers in kernel code..."
   PostToolUse:
@@ -58,6 +59,41 @@ hooks:
 4. 运行本地构建/测试，随后在真实 NPU 硬件上进行验证；若 `harness.test_gate` 为 `on`，再执行黑/白盒测试门禁。
 5. 在 `docs/{OP}/plans/troubleshooting.md` 中记录非平凡问题，并将预防措施反馈回工作流。
 
+## 算子复杂度分档（贯穿全流程）
+
+在阶段 0 判定算子复杂度档位，记入 STATE.md，用于缩放阶段 3/4 的评审强度与阶段 5 的用例规模。评审强度应随复杂度缩放——对简单算子启动全套多 Agent 评审只会增加时延与 token 而抓不到问题。
+
+| 档位 | 判据 | 阶段 3 评审 | 阶段 4 评审 |
+|---|---|---|---|
+| **simple** | 纯逐元素、无 Cast 链、无规约、无 UB-to-UB 拷贝（如 add、mul、逐元素多输入融合） | 1 个合并 Agent（数学+语义 checklist） | 1 个合并 Agent（UB+指令+Reg checklist） |
+| **complex** | 含规约 / Cast 链 / 迭代累加 / UB-to-UB 拷贝 / 多 pass / Matmul 融合 | 2 个 Agent（math + semantics） | 2~3 个 Agent（ub + instr，dav-3510 加 reg-api） |
+
+判据存疑时按 **complex** 处理。合并评审的提示词模板见 [references/review-prompts.md](references/review-prompts.md)。
+
+## 并行起草（缩短评审空等）
+
+评审 Agent 是 barrier，起草下一份**独立产物**不是。在等待某阶段后台评审时，可并行起草下一阶段中不依赖该评审结论的产物，评审返回后再对照吸收：
+
+- 等阶段 3 定义评审时 → 起草阶段 4 设计文档草稿。
+- 等阶段 4 设计评审时 → 起草阶段 5 测试套件。
+
+若评审给出 FAIL 导致上游产物实质变更，则相应回改已起草的下游草稿。
+
+## simple 档快速路径（编译一次 / 真机测一次）
+
+**仅适用于 simple 档，且 CMake/结构照抄自已验证的参考算子（如 `mul`）。** complex 档、或对 `.asc` 结构/构建配置有任何自定义时，不走本快速路径，回退到默认三段式构建。
+
+ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，「增量」省不了多少。默认流程会编译 **3 次**（阶段 2 骨架、阶段 6 实现、阶段 7 干净重建）、真机全量测试 **2 次**（阶段 6、阶段 7）。本快速路径把它压到**编译 1 次、真机全量测试 1 次**，做法是推迟构建/测试并取消阶段 7 的二次重建：
+
+- **阶段 2（骨架）**：创建 `{OP}.asc` 骨架 + `CMakeLists.txt` + 接口测试文件后，只跑 `cmake` **配置**（`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} ..`）验证工具链/CMake，**不执行 `make`**。骨架的 ASC 编译推迟到阶段 6。提交。
+- **阶段 5（测试套件）**：写完整套件后**只做静态检查**（`python3 -m py_compile test_{OP}.py`，目视核对 `SHAPES`/`DTYPES` 与边界用例），**不 build、不 collect、不跑用例**——collection 需加载 `.so`，而此时尚未编译。提交。
+- **阶段 6（实现）**：实现完整核函数后，复用阶段 2 的配置做**首次也是唯一一次**构建（`cd build && make -j`；这是全流程唯一的 ASC 编译），随后**一次性**跑接口测试 + `--collect-only` + 完整 NPU 参数化用例。失败则修复后仅重编该文件。提交。
+- **阶段 7（验证）**：simple 档**跳过独立的干净重建**——阶段 6 的 `make` 是在阶段 2 全新配置的 build/ 上的首次编译，本就干净。仅确认 `{OP}.asc` 为完整实现（非骨架）、阶段 6 日志显示全部用例通过。**唯有**怀疑陈旧产物时才触发一次 `rm -rf build` 干净重建。
+
+并行化：阶段 3/4 的后台评审可与实现草稿重叠——simple 档在评审进行时并行起草阶段 6 实现，评审 FAIL 再回改。
+
+风险：本路径牺牲了「骨架早编暴露编译错误」与「阶段 7 独立新鲜度重建」两道安全网，换取 ~2/3 的编译墙钟。仅在低风险（照抄参考算子）时使用。
+
 ## 主路径
 
 ### 阶段 0：准备
@@ -74,9 +110,10 @@ hooks:
 4. 创建 `docs/{OP}/plans/`。
 5. 阅读算子工程根目录中一个已完成的算子以了解结构，并阅读 `docs/development_guide.md`。如果不存在已完成的算子，则仅依赖 [references/implementation-patterns.md](references/implementation-patterns.md)。
 6. 探测目标芯片：运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/detect_soc.py`，从输出中读取 `SocVersion` 与 `NpuArch`（形如 `dav-3510`）。据此判定后续路径——`NpuArch` 为 `dav-3510`（Ascend950）时走 `AscendC::Reg` 路径。若脚本因无 NPU 或环境缺失而失败，向用户询问目标芯片。这两个值会在阶段 1 记入 STATE.md。
-7. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
+7. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)，并把 `operators/mul`（dav-3510 Reg 路径的最小参考算子）作为 Reg 计算形态的结构参考。`add`/`sqrt` 用的是经典 AscendC 计算 API，仅供 harness/CMake/test 结构参考。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
+8. 判定算子复杂度档位（simple / complex，见上文「算子复杂度分档」），据此缩放后续评审强度。这将在阶段 1 记入 STATE.md。
 
-**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子，已探测到目标芯片（`SocVersion` / `NpuArch`）。
+**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子，已探测到目标芯片（`SocVersion` / `NpuArch`），已判定复杂度档位。
 
 ### 阶段 1：状态跟踪
 
@@ -97,10 +134,12 @@ hooks:
 
 目标：得到一个可编译的骨架，以便开始 TDD。
 
+> **simple 档：** 改走「simple 档快速路径」——阶段 2 只做 `cmake` 配置、不 `make`，把唯一一次 ASC 编译推迟到阶段 6。以下步骤 4 的 `make` 属默认（complex）路径。
+
 1. 创建单文件 `{OP}.asc`：device kernel + tiling + host 入口 + `TORCH_LIBRARY` 注册的骨架（kernel 可留空，host 入口直接返回空输出张量）。
 2. 创建 `CMakeLists.txt`（参照已完成算子：`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）。
 3. 创建带占位用例的 `test_{OP}.py`（先放一个接口存在性测试）。
-4. 在算子工程根目录构建并运行：`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后回到算子目录运行 `pytest test_{OP}.py -v`。
+4. 在算子工程根目录构建并运行：`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后回到算子目录运行 `pytest test_{OP}.py -v`。这是**唯一**需要跑 `cmake` 配置的地方；后续阶段（3~6）改源码后只需 `cd build && make -j` 增量编译，不要 `rm -rf build`。干净重建仅留到阶段 7 做新鲜度验证（或结果可疑时）。
 5. 提交。
 
 实现细节与代码模式：见 [references/implementation-patterns.md](references/implementation-patterns.md)。
@@ -119,9 +158,13 @@ hooks:
 
 在编写 CPU 参考伪代码之前，检查来源（如果提供了代码）是否存在迭代累加模式 —— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 迭代累加精度。如果输入是公式或描述，验证推导是否严谨，并与用户一起补全缺失的 I/O 细节。
 
-使用 `run_in_background=true` 并行启动 `math-review` 和 `semantics-review` Agent。两者都会阅读定义文档与算子来源（如果存在来源文件）。准确的提示词、验证清单以及结构化判定格式见 [references/review-prompts.md](references/review-prompts.md)。
+按复杂度档位缩放评审（见「算子复杂度分档」）：
+- **simple 档**：`run_in_background=true` 启动 **1 个** `definition-review` 合并 Agent（数学+语义 checklist 合并）。
+- **complex 档**：`run_in_background=true` 并行启动 `math-review` 和 `semantics-review` 两个 Agent。
 
-等待两个 Agent 都完成，然后在提交前吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
+Agent 都会阅读定义文档与算子来源（如果存在来源文件）。准确的提示词（含合并版）、验证清单以及结构化判定格式见 [references/review-prompts.md](references/review-prompts.md)。
+
+在等待评审时，可并行起草阶段 4 设计文档草稿（见「并行起草」）。等待所有 Agent 完成，然后在提交前吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
 
 提交。
 
@@ -138,11 +181,11 @@ hooks:
 - Cast 链（如果输出 dtype 与计算 dtype 不同）
 - 对于 Ascend950 / `dav-3510`：Reg 包装器清单、掩码/尾块策略、`CastTrait` 细节、规约标量槽布局，以及禁止 API 的规避
 
-使用 `run_in_background=true` 并行启动 `ub-review` 和 `instr-review` Agent。准确的提示词与验证清单见 [references/review-prompts.md](references/review-prompts.md)。
+按复杂度档位缩放评审（见「算子复杂度分档」）：
+- **simple 档**：`run_in_background=true` 启动 **1 个** `design-review` 合并 Agent（UB 预算 + 指令序列 checklist 合并；dav-3510 时该 checklist 额外含 Reg API 合规项）。
+- **complex 档**：`run_in_background=true` 并行启动 `ub-review` 和 `instr-review`；对 Ascend950 / `dav-3510` 再加 `reg-api-review`。
 
-等待两个 Agent 都完成，然后吸收其结论。
-
-对于 Ascend950 / `dav-3510`，还需启动 [references/review-prompts.md](references/review-prompts.md) 中的 `reg-api-review`。在仍存在未解决的 Reg API FAIL 结论时，不要提交设计。
+准确的提示词（含合并版）与验证清单见 [references/review-prompts.md](references/review-prompts.md)。在等待评审时，可并行起草阶段 5 测试套件（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。在仍存在未解决的 Reg API FAIL 结论时，不要提交设计。
 
 在最终确定设计文档之前，对照 [references/common-failure-modes.md](references/common-failure-modes.md) 中的陷阱进行验证 —— 尤其是 UB 拷贝路径、32B DMA 最小值以及 Cast 支持矩阵。
 
@@ -154,6 +197,8 @@ hooks:
 
 ### 阶段 5：测试套件
 
+> **simple 档：** 见「simple 档快速路径」——写完套件只做静态检查（`py_compile`），不 build/collect/跑用例；接口测试与用例收集推迟到阶段 6 唯一一次构建后。
+
 在 `test_{OP}.py` 中构建完整的 pytest 测试套件，以 torch 作为 CPU 参考：
 
 - 模块级 `SHAPES` 用例矩阵（最少：一个小 shape、一个非 tile 对齐 shape、一个大 shape，以及按定义文档每个边界场景各一个边界值用例）与 `DTYPES`（每个受支持 dtype 一项）
@@ -162,15 +207,18 @@ hooks:
 
 检查命名：算子 host 入口应放在 `namespace op_{OP}` 内（而非顶层 `namespace {OP}`），以避免与标准库数学符号冲突（例如 `erf`、`sinh`、`exp`）—— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 测试命名冲突。
 
-构建并运行 `pytest test_{OP}.py -v`：
-- 接口存在性测试应当通过
-- 骨架的 NPU 测试应当失败（或在无 NPU 时被 skip）
+增量构建（`cd build && make -j`）后验证测试套件就绪：
+- 运行接口存在性测试并确认通过：`pytest test_{OP}.py -v -k interface`。
+- 确认参数化 NPU 用例能被正常收集：`pytest test_{OP}.py --collect-only -q`（应列出全部 `(shape, dtype)` 组合）。
+- **不要**在此对骨架执行整套 NPU 用例——它们注定失败、只是消耗真机时间而不带来新信息；核函数正确性在阶段 6 验证。
 
 提交。
 
-**退出条件：** 测试套件就绪，接口测试通过，针对骨架的 NPU 测试失败，已提交。
+**退出条件：** 测试套件就绪，接口测试通过，参数化用例可被收集，已提交。
 
 ### 阶段 6：核函数实现
+
+> **simple 档：** 见「simple 档快速路径」——本阶段的 `make` 是全流程唯一一次 ASC 编译；构建后一次性跑接口测试 + `--collect-only` + 完整 NPU 用例。
 
 在 `{OP}.asc` 中增量实现：
 
@@ -187,7 +235,7 @@ hooks:
 - 将 DMA、入队、UB 分配与同步保留在常规 AscendC 集成代码中。
 - 在 Reg 路径中不要使用 `AscendC::MicroAPI`、Membase、除 `asc_vf_call` 外的裸 `asc_*` API，或经典 `AscendC::Mul/Cast/ReduceSum/Sigmoid/Sqrt/Duplicate/Adds/Muls` 风格的计算调用。
 
-每完成一个有意义的步骤后：构建、运行测试、与定义文档和设计文档比对。如果测试失败，先修复再继续。
+每完成一个有意义的步骤后：增量构建（`cd build && make -j`，复用阶段 2 的 cmake 配置，勿 `rm -rf build`）、运行测试、与定义文档和设计文档比对。如果测试失败，先修复再继续。
 
 在最终确定之前，对照 [references/common-failure-modes.md](references/common-failure-modes.md) 验证 —— 尤其是 device 侧辅助函数调用、TBuf 生命周期 和 AscendC Cast 支持矩阵。代码模式见 [references/implementation-patterns.md](references/implementation-patterns.md)。
 
@@ -201,10 +249,12 @@ hooks:
 
 ### 阶段 7：验证
 
+> **simple 档：** 见「simple 档快速路径」——跳过独立的干净重建（阶段 6 已是全新配置上的首次编译）；仅在怀疑陈旧产物时才 `rm -rf build` 重建一次。
+
 在目标 NPU 硬件上做最终验证：
 
 1. 本地提交
-2. 在 NPU 上完整构建并运行测试套件：`cmake/make` 后 `pytest test_{OP}.py -v`
+2. 在 NPU 上做一次**干净重建**（这是全流程唯一的干净重建，用于排除增量编译的陈旧产物）：`rm -rf build && mkdir build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后 `pytest test_{OP}.py -v`
 3. 检视构建/测试日志，迭代直到全部用例通过
 
 在提交前，确认核函数源码包含完整实现（而非阶段 2 的骨架）。陈旧构建产物的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 构建新鲜度。

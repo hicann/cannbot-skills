@@ -20,7 +20,75 @@
 
 在结论文件顶部写入：`**Overall: PASS** | **Overall: NEEDS_REVISION**`（只要有任一项检查为 FAIL，即为 NEEDS_REVISION）。
 
-## 阶段 3：定义文档
+## 按复杂度档位选择评审模板
+
+评审强度随算子复杂度缩放（见 SKILL.md「算子复杂度分档」）：
+
+- **simple 档**（纯逐元素、无 Cast/规约/UB-to-UB 拷贝）：阶段 3、阶段 4 各用**一个合并 Agent**（下方「合并评审」模板），把多份 checklist 并入单次 Agent 调用，省去重复读文档与多次 Agent 启动。
+- **complex 档**：用下方分项的多 Agent 模板（math/semantics，ub/instr/reg-api）。
+
+## 合并评审（simple 档）
+
+### 阶段 3 合并：`definition-review`
+
+一次 Agent 调用同时覆盖数学与语义 checklist：
+
+```
+Agent(
+  subagent_type="general-purpose",
+  run_in_background=true,
+  name="definition-review",
+  description="合并评审定义文档（数学+语义）",
+  prompt="""
+    你正处于该算子工程中。正在构建的算子是 `{OP}`。
+    读取 `docs/{OP}/{OP}_definition.md` 以及位于 `{SOURCE_PATH}` 的算子源文件（如果存在）。
+    数学检查：
+    1. 数学公式正确表达了预期计算（如有源文件请交叉核对）。
+    2. 公式推导/求值顺序在数学上严谨。
+    3. CPU 参考伪代码结果与公式一致。
+    4. 任何迭代累加模式都已标注并附精度分析。
+    语义检查：
+    5. 输入/输出语义清晰定义，并与源文件一致（如提供源代码）。
+    6. 边界场景已识别（NaN、Inf、零值、负值、除零、空张量、边界值）。
+    7. 数据类型策略有充分依据。
+    对每一项检查（1~7）给出 PASS/FAIL/CONCERN 并说明理由，顶部写 Overall。
+    将结论写入 `docs/{OP}/plans/review_definition.md`。
+  """
+)
+```
+
+### 阶段 4 合并：`design-review`
+
+一次 Agent 调用覆盖 UB 预算、指令序列，以及（dav-3510 时）Reg API 合规：
+
+```
+Agent(
+  subagent_type="general-purpose",
+  run_in_background=true,
+  name="design-review",
+  description="合并评审设计文档（UB+指令+Reg）",
+  prompt="""
+    你正处于该算子工程中。正在构建的算子是 `{OP}`。
+    读取 `docs/{OP}/{OP}_design.md` 和 `docs/{OP}/{OP}_definition.md`。
+    若目标为 dav-3510，还需读取 `references/reg-api-guide.md` 和 `references/reg-api-patterns.yaml`。
+    UB 预算检查：
+    1. 所有存活缓冲区都计入 liveBytesPerElem；切分公式正确、涵盖所有缓冲区；不超 UB。
+    2. 每个块大小/传输计数常量对所有支持 dtype 满足 count*sizeof(T)>=32。
+    3. 任何 UB-to-UB 拷贝路径都记录了字节数/32B 对齐/尾块/按位要求（本档通常无）。
+    指令序列检查：
+    4. 指令序列计算出定义文档的正确公式；无写前读；缓冲/寄存器复用无 RAW/WAR/WAW 冒险。
+    5. 依赖顺序处均有 PipeBarrier<PIPE_V>()；Cast 链符合支持矩阵（本档通常无 Cast）。
+    6. 定义文档所有边界场景都已处理或明确延后。
+    Reg API 检查（仅 dav-3510，否则标记 N/A）：
+    7. 向量计算/Cast/规约用 AscendC::Reg；无 MicroAPI/Membase/裸 asc_*（asc_vf_call 除外）/经典 AscendC 计算。
+    8. 遵循 __simd_vf__ + __aicore__ + asc_vf_call；尾块掩码为元素数并用于 store；Store/Load dist 模式正确。
+    对每一项检查给出 PASS/FAIL/CONCERN/N/A 并说明理由，顶部写 Overall。
+    将结论写入 `docs/{OP}/plans/review_design.md`。
+  """
+)
+```
+
+## 阶段 3：定义文档（complex 档：分项多 Agent）
 
 在一条消息中同时启动两个 Agent：
 
@@ -67,7 +135,7 @@ Agent(
 )
 ```
 
-## 阶段 4：设计文档
+## 阶段 4：设计文档（complex 档：分项多 Agent）
 
 在一条消息中同时启动两个 Agent：
 

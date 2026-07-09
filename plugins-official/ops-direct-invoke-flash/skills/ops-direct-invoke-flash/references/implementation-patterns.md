@@ -2,6 +2,11 @@
 
 ## 参考算子
 
+选取原则（按目标芯片）：
+
+- **dav-3510 / Ascend950（Reg 路径）**：以 `operators/mul` 为**计算形态**参考——它是最小的单指令 `AscendC::Reg` 逐元素算子，直接照抄其 `__simd_vf__` + `__aicore__` + `asc_vf_call` 三层结构；以 `operators/add`/`sqrt` 为 harness/CMake/test **结构**参考。注意 `add`/`sqrt` 用的是经典 AscendC 计算 API（`AscendC::Add`/`Sqrt`），**不要**把它们的计算路径拷进 Reg 代码。
+- **非 Reg 架构**：`operators/add`/`sqrt` 可直接作为完整参考。
+
 在 `operators/` 中选取一个已完成的算子作为结构参考，参考其：
 
 - 单文件 `.asc` 的分区方式（device kernel / tiling / host 入口 + `TORCH_LIBRARY` 注册）
@@ -17,6 +22,12 @@
 - 创建单文件 `{OP}.asc`：device kernel + tiling + host 入口（参数个数与算子 arity 匹配）+ `TORCH_LIBRARY` 注册的骨架；kernel 留空，host 入口返回空输出张量。
 - 创建 `CMakeLists.txt`：`find_package(ASC)`、`project(op_{OP} LANGUAGES ASC CXX)`、链接 torch_npu，产出 `libop_{OP}.so`。
 - 从骨架阶段起就配置好 ASC 语言与 `--npu-arch` 编译选项；不要推迟到核函数实现时才加上。
+
+## 增量编译
+
+- 骨架阶段（阶段 2）跑一次 `cmake` 配置即可；此后阶段 3~6 改源码只需 `cd build && make -j` 增量编译，复用已有配置。
+- 不要每次 `rm -rf build` 全清重建——ASC 编译较慢，全清会把编译成本乘以构建次数。
+- 干净重建仅在两处：阶段 7 的新鲜度验证一次；以及「改了源码但结果没变」怀疑陈旧产物时（见 common-failure-modes.md § 构建新鲜度）。
 
 ## 定义文档要求
 

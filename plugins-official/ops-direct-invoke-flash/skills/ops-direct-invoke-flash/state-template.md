@@ -11,12 +11,14 @@
 来源类型：{SOURCE_TYPE}
 创建时间：{DATE}
 目标芯片：SocVersion={SOC_VERSION} / NpuArch={NPU_ARCH}（阶段 0 由 scripts/detect_soc.py 探测）
+复杂度档位：{simple|complex}（阶段 0 判定，决定阶段 3/4 评审是合并单 Agent 还是分项多 Agent）
 
 ## 阶段 2：可编译骨架
+<!-- simple 档快速路径：本阶段只跑 cmake 配置、不 make；唯一一次 ASC 编译与真机测试推迟到阶段 6。 -->
 - [ ] 创建单文件 `{OP}.asc`：device kernel + tiling + host 入口 + `TORCH_LIBRARY` 注册的骨架（kernel 留空，host 入口返回空输出张量）
 - [ ] 创建 `CMakeLists.txt`（`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）
 - [ ] 创建 `test_{OP}.py`，包含接口存在性占位测试
-- [ ] 验证 `cmake/make` 构建成功且 `pytest test_{OP}.py -v` 可运行
+- [ ] 验证构建配置成功（simple：`cmake` 配置即可；complex：`cmake/make` 全量构建且 `pytest test_{OP}.py -v` 可运行）
 - [ ] 提交
 
 ## 阶段 3：算子定义文档
@@ -24,8 +26,7 @@
 - [ ] 若提供了源代码：检查是否存在迭代累加模式——评估精度风险
 - [ ] 若为公式/描述：与用户确认公式并补全缺失的 I/O 细节
 - [ ] 编写 `docs/{OP}/{OP}_definition.md`
-- [ ] 子 Agent 评审：数学正确性（判定：PASS/FAIL/CONCERN）
-- [ ] 子 Agent 评审：语义与边界场景（判定：PASS/FAIL/CONCERN）
+- [ ] 子 Agent 评审（simple 档：1 个合并 `definition-review`；complex 档：`math-review` + `semantics-review`），判定 PASS/FAIL/CONCERN
 - [ ] 润色并提交
 
 ## 阶段 4：算子设计文档
@@ -34,9 +35,7 @@
 - [ ] 对每个块大小或传输计数常量，验证对所有支持的 dtype（fp16、fp32）满足 `count * sizeof(T) >= 32`
 - [ ] 若输出 dtype 与计算 dtype 不同，依据 implementation-patterns.md § 类型转换（Cast）支持矩阵 设计 Cast 链
 - [ ] 若面向 Ascend950 / `dav-3510`：记录 Reg 包装函数、掩码/尾块处理、32B 规约标量槽位、`CastTrait`/dist 模式以及禁用 API 的规避
-- [ ] 子 Agent 评审：UB 预算与切分数学（判定：PASS/FAIL/CONCERN）
-- [ ] 子 Agent 评审：指令序列与依赖顺序（判定：PASS/FAIL/CONCERN）
-- [ ] 若面向 Ascend950 / `dav-3510`：子 Agent 评审 Reg API 合规性（判定：PASS/FAIL/CONCERN）
+- [ ] 子 Agent 评审（simple 档：1 个合并 `design-review`；complex 档：`ub-review` + `instr-review`，dav-3510 再加 `reg-api-review`），判定 PASS/FAIL/CONCERN
 - [ ] 润色并提交
 
 ## 阶段 5：测试套件
@@ -44,7 +43,7 @@
 - [ ] 编写接口存在性测试（断言算子注册到 `torch.ops.op_{OP}`）
 - [ ] 检查 host 入口命名是否与 C/C++ 标准库符号冲突（使用 `namespace op_{OP}`）
 - [ ] 编写以 `@pytest.mark.parametrize` 参数化、torch 作 CPU 参考的 NPU 测试（`@pytest.mark.skipif(not torch.npu.is_available())` 守卫）
-- [ ] 验证 `pytest` 可运行；骨架应导致 NPU 测试失败
+- [ ] 验证接口测试通过（`-k interface`）且参数化用例可被收集（`--collect-only`）；不对骨架执行整套 NPU 用例
 - [ ] 提交
 
 ## 阶段 6：核函数实现
