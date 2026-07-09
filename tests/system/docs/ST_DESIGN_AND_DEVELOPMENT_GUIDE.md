@@ -865,48 +865,48 @@ EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --
 | 64 | gitcode-pr-handler | 重新生成符合约定式提交规范的 PR 标题与描述 | `infra/gitcode-pr-handler` |
 | 65 | gitcode-toolkit | GitCode 协作通用基础参考（API/Token/URL/工作流等，内部使用） | `infra/gitcode-toolkit` |
 
-### 3.9 ops-lab/ — 实验性模块（6 个）
+### 3.9 ops-lab/ — 实验性模块（5 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 66 | cuda2ascend-simt | CUDA 算子迁移到 Ascend C SIMT，支持 standalone sample / torch_npu / pybind 三类交付形态 | `ops-lab/cuda2ascend-simt` |
-| 67 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
-| 68 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
-| 69 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
-| 70 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
-| 71 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
+| 66 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
+| 67 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
+| 68 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
+| 69 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
+| 70 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
 
 ### 3.10 plugins-official/ — 插件内置 Skill（2 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 73 | asc-api-ut-gen | Ascend C API 单元测试生成，分支覆盖分析、参数化测试设计 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-api-ut-gen` |
-| 74 | asc-npu-arch | Ascend NPU 架构知识，芯片型号、NpuArch、SocVersion、条件编译 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-npu-arch` |
+| 71 | asc-api-ut-gen | Ascend C API 单元测试生成，分支覆盖分析、参数化测试设计 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-api-ut-gen` |
+| 72 | asc-npu-arch | Ascend NPU 架构知识，芯片型号、NpuArch、SocVersion、条件编译 | `plugins-official/ops-registry-invoke/asc-devkit/.agent/skills/asc-npu-arch` |
 
-### 3.10 plugins-community/ — 社区贡献 Skill（2 个）
+### 3.10 plugins-community/ — 社区贡献 Skill（3 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 75 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `plugins-community/ops-easyasc-dsl/skill` |
-| 76 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
+| 73 | cuda2ascend-simt | CUDA 算子迁移到 Ascend C SIMT，支持 standalone sample / torch_npu / pybind 三类交付形态 | `plugins-community/cuda2ascend/cuda2ascend-simt` |
+| 74 | ops-easyasc-dsl | EasyAsc DSL 到 AscendC 的工作流，编写/调试/验证 Ascend NPU kernel | `plugins-community/ops-easyasc-dsl/skill` |
+| 75 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
 
 ### 3.11 plugins-official/ — 官方 Team 插件（7 个）
 
 | 序号 | Team 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 77 | ops-direct-invoke | Ascend C Kernel 直调算子开发 Team，含完整工作流（设计→实现→审查→性能验收） | `plugins-official/ops-direct-invoke` |
-| 78 | ops-registry-invoke | Ascend C 自定义算子开发（算子仓库模式） | `plugins-official/ops-registry-invoke` |
-| 79 | pypto-op-orchestrator | PyPTO 算子端到端开发编排 Team | `plugins-official/pypto-op-orchestrator` |
-| 80 | triton-op-generator | Triton-Ascend 算子代码生成与优化 Team | `plugins-official/triton-op-generator` |
-| 81 | torch-compile | PyTorch torch.compile 图模式编排 Team | `plugins-official/torch-compile` |
-| 82 | model-infer-optimize | NPU 模型推理端到端优化 Team | `plugins-official/model-infer-optimize` |
-| 83 | ops-code-reviewer | Ascend C 代码审查 Team | `plugins-official/ops-code-reviewer` |
+| 76 | ops-direct-invoke | Ascend C Kernel 直调算子开发 Team，含完整工作流（设计→实现→审查→性能验收） | `plugins-official/ops-direct-invoke` |
+| 77 | ops-registry-invoke | Ascend C 自定义算子开发（算子仓库模式） | `plugins-official/ops-registry-invoke` |
+| 78 | pypto-op-orchestrator | PyPTO 算子端到端开发编排 Team | `plugins-official/pypto-op-orchestrator` |
+| 79 | triton-op-generator | Triton-Ascend 算子代码生成与优化 Team | `plugins-official/triton-op-generator` |
+| 80 | torch-compile | PyTorch torch.compile 图模式编排 Team | `plugins-official/torch-compile` |
+| 81 | model-infer-optimize | NPU 模型推理端到端优化 Team | `plugins-official/model-infer-optimize` |
+| 82 | ops-code-reviewer | Ascend C 代码审查 Team | `plugins-official/ops-code-reviewer` |
 
 ### 3.12 plugins-community/ — 社区 Team 插件（1 个）
 
 | 序号 | Team 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 84 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
+| 83 | tilelang-op-orchestrator | TileLang-Ascend 算子开发编排器，集成设计/开发/Review 全流程 | `plugins-community/tilelang-op-orchestrator` |
 
 ---
 
