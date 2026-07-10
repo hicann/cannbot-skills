@@ -74,7 +74,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -90,6 +90,7 @@ Examples:
   init.sh project cursor               # Project-level, Cursor
   init.sh project copilot              # Project-level, Copilot
   init.sh global  copilot              # Global-level, Copilot
+  init.sh project codearts             # Project-level, CodeArts
   init.sh project claude /path/to/proj # Project-level, Claude Code, custom path
 
 Installation paths:
@@ -99,6 +100,8 @@ Installation paths:
   Cursor:   .cursor/skills/ + AGENTS.md    (auto-discovered)
   Copilot:  .github/skills/ + AGENTS.md    (project-level)
             ~/.copilot/skills/ + AGENTS.md (global)
+  CodeArts: .codeartsdoer/skills/ + AGENTS.md    (project-level)
+            ~/.codeartsdoer/skills/ + AGENTS.md   (global)
 
 After installation, launch directly:
   OpenCode: opencode
@@ -106,6 +109,7 @@ After installation, launch directly:
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
+  CodeArts: 通过 CodeArts CLI / IDE 启动
 
 Note: This plugin uses CLAUDE.md/AGENTS.md for direct in-session execution.
       All phases will be visible in real-time during execution.
@@ -163,11 +167,11 @@ for arg in "$@"; do
     case "$arg" in
         --help)                 show_help; exit 0 ;;
         global|project)         LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot|codearts) TOOL="$arg" ;;
         *)
             # First non-keyword argument is treated as the project install path.
             if [ -n "$INSTALL_PATH" ]; then
-                echo "Error: Unexpected argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, [install_path], --help."
+                echo "Error: Unexpected argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, codearts, [install_path], --help."
                 exit 1
             fi
             INSTALL_PATH="$arg"
@@ -198,6 +202,8 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.copilot"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -215,13 +221,15 @@ else
         CONFIG_ROOT="$INSTALL_BASE/.github"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$INSTALL_BASE/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$INSTALL_BASE/.codeartsdoer"
     else
         CONFIG_ROOT="$INSTALL_BASE/.claude"
     fi
 fi
 
 # Determine target md filename based on tool
-if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
     TARGET_MD_NAME="AGENTS.md"
 else
     TARGET_MD_NAME="CLAUDE.md"
@@ -364,13 +372,13 @@ step "[2/3] Installing configuration..."
 # Project-level: install in the project directory (INSTALL_BASE) so Claude Code can discover it
 # Global-level: install in CONFIG_ROOT
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$INSTALL_BASE/AGENTS.md"
     else
         config_target="$INSTALL_BASE/CLAUDE.md"
     fi
 else
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
@@ -382,7 +390,7 @@ config_src="$PLUGIN_ROOT/AGENTS.md"
 # Skip only when source file is already at target location (same filename and same directory)
 # This only happens for OpenCode project-level when PLUGIN_ROOT = INSTALL_BASE (AGENTS.md → AGENTS.md)
 # For Claude, source is AGENTS.md but target is CLAUDE.md, so always need symlink
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -423,14 +431,14 @@ done
 # Check config file (AGENTS.md / CLAUDE.md)
 if [ "$LEVEL" = "project" ]; then
     # Project-level: config file is in the project directory (INSTALL_BASE)
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$INSTALL_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in project directory"; health_ok=false; }
     else
         [ -f "$INSTALL_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in project directory"; health_ok=false; }
     fi
 else
     # Global-level: config file in CONFIG_ROOT
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
@@ -488,6 +496,9 @@ elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

@@ -18,7 +18,7 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 
 ### 前置条件
 
-- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -120,6 +120,14 @@ init.sh 脚本会完成以下操作：
 | Skills 技能模块 | `.github/skills/ascendc-code-review/` | `~/.copilot/skills/ascendc-code-review/` |
 | Agents 子代理 | `.github/agents/ascendc-ops-reviewer.md` | `~/.copilot/agents/ascendc-ops-reviewer.md` |
 | 配置文件 | 项目根目录 `AGENTS.md` | `~/.copilot/AGENTS.md` |
+
+#### CodeArts 安装路径
+
+| 内容 | CodeArts 项目级 | CodeArts 全局级 |
+|------|----------------|----------------|
+| Skills 技能模块 | `.codeartsdoer/skills/ascendc-code-review/` | `~/.codeartsdoer/skills/ascendc-code-review/` |
+| Agents 子代理 | `.codeartsdoer/agents/ascendc-ops-reviewer.md` | `~/.codeartsdoer/agents/ascendc-ops-reviewer.md` |
+| 配置文件 | 项目根目录 `AGENTS.md` | `~/.codeartsdoer/AGENTS.md` |
 
 ### 在其他目录执行
 
@@ -340,6 +348,6 @@ bash init.sh --help
 
 1. 代码检视 Team 采用"主 Agent 做大脑、子 Agent 做搜查"架构，实现高效并行检视
 2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
-3. `opencode` / `claude` / `trae` / `cursor` 是核心交互指令
+3. `opencode` / `claude` / `trae` / `cursor` / `copilot` / `codearts` 是核心交互指令
 4. 4 阶段工作流确保全量条例覆盖和报告质量
 5. 自动识别代码侧别，精准过滤适用条例

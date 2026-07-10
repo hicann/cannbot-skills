@@ -138,7 +138,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", "codex", or "copilot"
+  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", "codex", "copilot", or "codearts"
 
 Options:
   --help  - Show this help message
@@ -152,6 +152,7 @@ Examples:
   init.sh project cursor       # Project-level, Cursor
   init.sh project codex        # Project-level, Codex
   init.sh project copilot      # Project-level, Copilot
+  init.sh project codearts     # Project-level, CodeArts
 
 Installation paths (CANNBot brand):
   OpenCode: .opencode/{skills,agents}/  (auto-discovered)
@@ -161,6 +162,8 @@ Installation paths (CANNBot brand):
   Codex:    .codex/{skills,agents}/     (auto-discovered)
   Copilot:  .github/{skills,agents}/    (project-level)
             ~/.copilot/{skills,agents}/  (global)
+  CodeArts: .codeartsdoer/{skills,agents}/ (project-level)
+            ~/.codeartsdoer/{skills,agents}/ (global)
 
 After installation, launch directly:
   OpenCode: opencode
@@ -169,6 +172,7 @@ After installation, launch directly:
   Cursor:   通过 Cursor IDE 启动
   Codex:    通过 codex CLI 启动
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
+  CodeArts: 通过 CodeArts CLI / IDE 启动
 EOF
 }
 
@@ -186,7 +190,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|codex|copilot)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|codex|copilot|codearts)   TOOL="$arg" ;;
     esac
 done
 
@@ -194,7 +198,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor|codex|copilot) ;;
+        --help|global|project|opencode|claude|trae|cursor|codex|copilot|codearts) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -212,6 +216,8 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$HOME/.copilot"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -237,6 +243,8 @@ else
         CONFIG_ROOT="$INSTALL_BASE/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$INSTALL_BASE/.github"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$INSTALL_BASE/.codeartsdoer"
     else
         CONFIG_ROOT="$INSTALL_BASE/.claude"
     fi
@@ -645,6 +653,9 @@ elif [ "$TOOL" = "codex" ]; then
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${EXAMPLE_PROMPT}${NC}"
 elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${EXAMPLE_PROMPT}${NC}"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${EXAMPLE_PROMPT}${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

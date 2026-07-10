@@ -19,7 +19,7 @@
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### 安装
 
@@ -30,7 +30,7 @@ bash init.sh project opencode   # 项目级
 bash init.sh global opencode    # 全局级
 ```
 
-支持工具：`opencode`（默认）、`claude`、`trae`、`cursor`、`copilot`。
+支持工具：`opencode`（默认）、`claude`、`trae`、`cursor`、`copilot`、`codearts`。
 
 ### catlass 源码就绪（自动处理）
 

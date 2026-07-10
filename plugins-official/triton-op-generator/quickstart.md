@@ -12,7 +12,7 @@ CANNBot Triton-Ascend 算子生成模式适用于通过 Triton DSL 开发高性�
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -179,6 +179,30 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project c
 
 </details>
 
+<details>
+<summary>CodeArts</summary>
+
+安装：
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/triton-op-generator
+bash init.sh project codearts     # 项目级
+bash init.sh global codearts      # 全局级
+```
+
+验证：检查项目目录下是否生成 `.codeartsdoer/skills/` 目录（项目级）或 `~/.codeartsdoer/skills/` 目录（全局级），包含 6 个 skill 符号链接和 `AGENTS.md` 符号链接。
+
+启动：通过 CodeArts CLI / IDE 启动。
+
+更新：
+
+```bash
+cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project codearts
+```
+
+</details>
+
 ---
 
 ## 安装路径说明
@@ -191,6 +215,7 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project c
 | TRAE | init.sh | `.trae/skills/` + `CLAUDE.md` | 仅支持项目级安装 |
 | Cursor | init.sh | `.cursor/skills/` + `AGENTS.md` | 项目级/全局级 |
 | Copilot | init.sh | `.github/skills/` + `AGENTS.md`（项目级）/ `~/.copilot/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
+| CodeArts | init.sh | `.codeartsdoer/skills/` + `AGENTS.md`（项目级）/ `~/.codeartsdoer/skills/` + `AGENTS.md`（全局级） | 项目级/全局级 |
 
 > **注意**：`claude plugin install` 仅安装技能（skills），不会自动创建 `CLAUDE.md`。因为 Claude Code 插件系统当前不支持安装后钩子（post-install hook），所以需要手动执行 `ln -s` 命令链接 `AGENTS.md`。
 

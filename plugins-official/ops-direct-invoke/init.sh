@@ -140,7 +140,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -155,6 +155,7 @@ Examples:
   init.sh project cursor               # Project-level, Cursor
   init.sh project copilot              # Project-level, Copilot
   init.sh global copilot               # Global-level, Copilot
+  init.sh project codearts             # Project-level, CodeArts
   init.sh project opencode /path/to/proj  # Project-level, OpenCode, custom path
   init.sh project trae /path/to/proj      # Project-level, Trae, custom path
 
@@ -167,6 +168,8 @@ Installation paths (CANNBot brand):
   Cursor:       .cursor/{skills,agents}/     + AGENTS.md in project root
   Copilot:      .github/{skills,agents}/      + AGENTS.md in project root (project)
                 ~/.copilot/{skills,agents}/   + AGENTS.md (global)
+  CodeArts:     .codeartsdoer/{skills,agents}/ + AGENTS.md in project root (project)
+                ~/.codeartsdoer/{skills,agents}/ + AGENTS.md (global)
 
 After installation, launch directly:
   OpenCode: opencode
@@ -174,6 +177,7 @@ After installation, launch directly:
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
+  CodeArts: 通过 CodeArts CLI / IDE 启动
 EOF
 }
 
@@ -219,7 +223,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot|codearts)   TOOL="$arg" ;;
     esac
 done
 
@@ -227,7 +231,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
+        --help|global|project|opencode|claude|trae|cursor|copilot|codearts) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -247,6 +251,8 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.cursor"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$HOME/.copilot"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -273,6 +279,8 @@ else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.codeartsdoer"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -852,6 +860,9 @@ elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型，shape 主要是 [1,128]、[4,2048]、[32,4096]${NC}"
 elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型，shape 主要是 [1,128]、[4,2048]、[32,4096]${NC}"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型，shape 主要是 [1,128]、[4,2048]、[32,4096]${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

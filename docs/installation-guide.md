@@ -15,7 +15,7 @@
 | **包含内容** | Skills + Agents + Workflows + 外部依赖 | 仅 Skills |
 | **安装工具** | install-helper / init.sh | install-helper / npx skills |
 | **适用场景** | 需要完整开发流程编排 | 只需单个能力 |
-| **支持工具** | OpenCode/Claude/Trae/Cursor/Copilot | 70+ 种 AI 编程工具 |
+| **支持工具** | OpenCode/Claude/Trae/Cursor/Copilot/CodeArts | 70+ 种 AI 编程工具 |
 
 > [!NOTE]
 > **外部依赖**指安装时由安装脚本动态克隆的外部仓库（如 `asc-devkit`、`pypto`、`tilelang-ascend`、`cann-samples` 等）。
@@ -58,7 +58,7 @@ cd plugins-official/ops-direct-invoke
 bash init.sh project opencode
 ```
 
-命令中的 `opencode` 可替换为 `claude` / `trae` / `cursor` / `copilot`。各插件的详细安装步骤见对应目录下的 `quickstart.md`，例如 [ops-direct-invoke 快速上手](../plugins-official/ops-direct-invoke/quickstart.md)。
+命令中的 `opencode` 可替换为 `claude` / `trae` / `cursor` / `copilot` / `codearts`。各插件的详细安装步骤见对应目录下的 `quickstart.md`，例如 [ops-direct-invoke 快速上手](../plugins-official/ops-direct-invoke/quickstart.md)。
 
 ---
 
@@ -97,7 +97,7 @@ install-helper uninstall <plugin>
 
 ## 独立 Skill 安装
 
-本仓库 Skills 遵循 [Agent Skills](https://agentskills.io) 开放标准，可通过开源 [skills CLI](https://github.com/vercel-labs/skills) 安装到 70+ 种 AI 编程工具（OpenCode、Claude Code、Cursor、Codex、Trae 等）。
+本仓库 Skills 遵循 [Agent Skills](https://agentskills.io) 开放标准，可通过开源 [skills CLI](https://github.com/vercel-labs/skills) 安装到 70+ 种 AI 编程工具（OpenCode、Claude Code、Cursor、Codex、Copilot、Trae、CodeArts 等）。
 
 ```bash
 # 浏览可用 Skills
@@ -106,7 +106,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --list
 # 安装单个 Skill（交互式选择目标工具）
 npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-tiling-design
 
-# 安装 Skill 到指定工具（支持 opencode / claude-code / trae / cursor 等）
+# 安装 Skill 到指定工具（支持 opencode / claude-code / trae / cursor / copilot / codearts 等）
 npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-check --skill npu-arch --agent opencode
 
 # 安装全部 Skill 到所有已检测到的工具（非交互式）

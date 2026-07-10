@@ -19,7 +19,7 @@
 
 ### 前置条件
 
-- 任选一种 AI 编程工具：[OpenCode](https://opencode.ai/docs) / [Claude Code](https://code.claude.com/docs/en/setup) / [Trae](https://www.trae.ai) / [Cursor](https://www.cursor.com) / [GitHub Copilot](https://docs.github.com/en/copilot)
+- 任选一种 AI 编程工具：[OpenCode](https://opencode.ai/docs) / [Claude Code](https://code.claude.com/docs/en/setup) / [Trae](https://www.trae.ai) / [Cursor](https://www.cursor.com) / [GitHub Copilot](https://docs.github.com/en/copilot) / [CodeArts](https://codearts.huaweicloud.com/)
 
 ### 安装
 

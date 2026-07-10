@@ -11,7 +11,7 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 - 已安装 CANN Toolkit（≥ 8.3），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已安装 PyTorch（≥ 2.6.0）和 torch_npu（≥ 2.6.0）
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### 操作步骤
 
@@ -131,6 +131,27 @@ cd tilelang-ascend && bash install_ascend.sh && cd ..
 
 </details>
 
+<details>
+<summary>CodeArts</summary>
+
+#### 项目级安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project codearts
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+#### 全局安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh global codearts
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
+
 ### 安装内容
 
 init.sh 脚本会完成以下操作：
@@ -156,6 +177,14 @@ init.sh 脚本会完成以下操作：
 | Skills 技能模块 | `.github/skills/` | `~/.copilot/skills/` |
 | Agents 子代理 | `.github/agents/` | `~/.copilot/agents/` |
 | AGENTS.md | `.github/AGENTS.md` | `~/.copilot/AGENTS.md` |
+
+#### CodeArts 安装路径
+
+| 内容 | CodeArts 项目级 | CodeArts 全局级 |
+|------|----------------|----------------|
+| Skills 技能模块 | `.codeartsdoer/skills/` | `~/.codeartsdoer/skills/` |
+| Agents 子代理 | `.codeartsdoer/agents/` | `~/.codeartsdoer/agents/` |
+| AGENTS.md | `.codeartsdoer/AGENTS.md` | `~/.codeartsdoer/AGENTS.md` |
 
 ### 环境校验
 
@@ -293,5 +322,5 @@ bash ~/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh --help
 
 1. TileLang 算子开发模式通过 Python DSL 实现昇腾 NPU 算子的快速开发
 2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
-3. `opencode` 是核心交互指令（也支持 `claude` / `trae` / `cursor`）
+3. `opencode` 是核心交互指令（也支持 `claude` / `trae` / `cursor` / `copilot` / `codearts`）
 4. 开发前必须确认使用 Developer / Expert / 混合模式

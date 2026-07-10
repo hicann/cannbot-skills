@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-07-06】
+#### 特性增强 Feature Enhancement
+- 【安装部署】全部 11 个插件（官方 + 社区）适配 CodeArts（华为云码道）工具，`init.sh` 安装脚本与 `quickstart.md` 文档新增 `codearts` 参数支持，总体已支持 OpenCode / Claude / Trae / Cursor / Copilot / CodeArts。
+
 ### 【2026-07-02】
 #### 新特性 New Features
 - 【模型训练】新增 3 个训练调测 Skill：model-train-accuracy-debug（精度异常定界）、model-train-log-visualization（训练日志可视化）、model-train-oom-analysis（OOM 内存诊断）。方法论适用于 torchtitan-npu 等 PyTorch on NPU 训练框架。

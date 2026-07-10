@@ -39,6 +39,9 @@ tests/benchmark/cann-bench/
 # OpenCode 配置
 .opencode/
 
+# CodeArts 配置
+.codeartsdoer/
+
 # Node.js
 **/node_modules/
 **/dist/

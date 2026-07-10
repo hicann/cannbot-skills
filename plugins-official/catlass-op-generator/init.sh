@@ -141,7 +141,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
 
 Options:
   --help  - Show this help message
@@ -155,6 +155,7 @@ Examples:
   init.sh project cursor       # Project-level, Cursor
   init.sh project copilot      # Project-level, Copilot
   init.sh global copilot       # Global-level, Copilot
+  init.sh project codearts     # Project-level, CodeArts
 
 Installation paths (CANNBot brand):
   OpenCode:     .opencode/{skills,agents}/     (auto-discovered)
@@ -164,6 +165,8 @@ Installation paths (CANNBot brand):
   Trae CLI:     .traecli/{skills,agents}/      (symlinks, project-level only)
   Copilot:      .github/{skills,agents}/       (symlinks, project-level)
                 ~/.copilot/{skills,agents}/    (symlinks, global)
+  CodeArts:     .codeartsdoer/{skills,agents}/  (symlinks, project-level)
+                ~/.codeartsdoer/{skills,agents}/ (symlinks, global)
 
 After installation, launch directly:
   OpenCode: opencode
@@ -171,6 +174,7 @@ After installation, launch directly:
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
+  CodeArts: 通过 CodeArts CLI / IDE 启动
 EOF
 }
 
@@ -188,7 +192,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot|codearts)   TOOL="$arg" ;;
     esac
 done
 
@@ -196,7 +200,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
+        --help|global|project|opencode|claude|trae|cursor|copilot|codearts) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -212,6 +216,8 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.copilot"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -234,6 +240,8 @@ else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.codeartsdoer"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -430,7 +438,7 @@ step "[2/5] Installing configuration..."
 # Determine target path for config file
 if [ "$LEVEL" = "project" ]; then
     # Project-level: config file should be in install base directory
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT_BASE/AGENTS.md"
     else
         config_target="$CONFIG_ROOT_BASE/CLAUDE.md"
@@ -438,7 +446,7 @@ if [ "$LEVEL" = "project" ]; then
 else
     # Global-level: config file in CONFIG_ROOT
     mkdir -p "$CONFIG_ROOT"
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
@@ -448,7 +456,7 @@ fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
 
 # Primary config symlink / copy
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -474,7 +482,7 @@ else
 fi
 
 # Also create config symlink in CONFIG_ROOT (for OpenCode/Trae discovery in .opencode/ / .trae/)
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; } && [ "$LEVEL" = "project" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ]; then
     if [ "$CONFIG_ROOT/AGENTS.md" != "$config_target" ]; then
         mkdir -p "$CONFIG_ROOT"
         ln -sf "$config_src" "$CONFIG_ROOT/AGENTS.md"
@@ -641,14 +649,14 @@ fi
 # Check config file
 if [ "$LEVEL" = "project" ]; then
     # Project-level: config file is in install base directory
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$CONFIG_ROOT_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in install base directory"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in install base directory"; health_ok=false; }
     fi
 else
     # Global-level: config file in CONFIG_ROOT
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
@@ -714,6 +722,10 @@ elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
+  echo -e "  ${CYAN}2.${NC} 在工作区根准备 catlass 源码（与 operators/ 平级）：${GREEN}git clone https://gitcode.com/cann/catlass.git${NC}"
+  echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 在工作区根准备 catlass 源码（与 operators/ 平级）：${GREEN}git clone https://gitcode.com/cann/catlass.git${NC}"
   echo -e "  ${CYAN}3.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 catlass_matmul_add 算子，A/B 为 fp16，C 为 fp32，目标 SoC Atlas A2，shape 主要是 M=N=K=512${NC}"
 else
