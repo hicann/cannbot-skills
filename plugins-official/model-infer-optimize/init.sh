@@ -218,9 +218,9 @@ install_config() {
     local config_target
     if [ "$LEVEL" = "project" ]; then
         if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
-            config_target="$PWD/AGENTS.md"
+            config_target="$CONFIG_ROOT_BASE/AGENTS.md"
         else
-            config_target="$PWD/CLAUDE.md"
+            config_target="$CONFIG_ROOT_BASE/CLAUDE.md"
         fi
     else
         if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
@@ -230,7 +230,7 @@ install_config() {
         fi
     fi
 
-    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$CONFIG_ROOT_BASE" ]; then
         ok "$(basename "$config_target") already in current directory"
     else
         ln -sf "$config_src" "$config_target"

@@ -19,9 +19,7 @@ eval_mode: text
 
 回复应覆盖以下要点：
 1. ops-registry-invoke 管理自定义算子的完整开发生命周期：设计 → 开发 → 验证 → 上库
-2. 开发流程包含加载 ops-registry-invoke-workflow 技能并按工作流执行
-3. 团队包含三个 subagent：架构师、开发者和测试者，分别负责不同阶段
-4. 最终产出可注册到算子库的自定义算子工程
+2.  最终产出可注册到算子库的自定义算子工程
 
 ## Expectations
 

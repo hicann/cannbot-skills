@@ -348,9 +348,9 @@ fi
 echo -e "${CYAN}配置文件：${NC}"
 if [ "$LEVEL" = "project" ]; then
     if [ "$TOOL" != "claude" ]; then
-        config_target="$PWD/AGENTS.md"
+        config_target="$INSTALL_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
+        config_target="$INSTALL_BASE/CLAUDE.md"
     fi
 else
     if [ "$TOOL" != "claude" ]; then
@@ -360,7 +360,7 @@ else
     fi
 fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
-if [ "$TOOL" != "claude" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if [ "$TOOL" != "claude" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
     echo -e "  ${GREEN}$(basename "$config_target")${NC} (已存在，无需操作)"
 elif [ -e "$config_target" ] || [ -L "$config_target" ]; then
     echo -e "  ${YELLOW}$(basename "$config_target")${NC} (将被替换)"
@@ -440,11 +440,11 @@ step "[2/4] Installing configuration..."
 
 # Determine target path for config file
 if [ "$LEVEL" = "project" ]; then
-    # Project-level: config file should be in current directory (PWD)
+    # Project-level: config file should be in install base directory
     if [ "$TOOL" != "claude" ]; then
-        config_target="$PWD/AGENTS.md"
+        config_target="$INSTALL_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
+        config_target="$INSTALL_BASE/CLAUDE.md"
     fi
 else
     # Global-level: config file in CONFIG_ROOT
@@ -459,7 +459,7 @@ fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
 
 # Primary config symlink / copy
-if [ "$TOOL" != "claude" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if [ "$TOOL" != "claude" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then

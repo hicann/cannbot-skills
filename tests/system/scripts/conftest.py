@@ -819,9 +819,6 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
   border: 1px solid #e2e8f0;
 }
 
-.failure-reviewer-reason { border-left-color: #f97316; background: #fff7ed; }
-.failure-reviewer-reason .failure-label { color: #c2410c; }
-
 .failure-ai-response { border-left-color: #6366f1; background: #eef2ff; }
 .failure-ai-response .failure-label { color: #4338ca; }
 
@@ -1027,25 +1024,6 @@ def _get_test_description(nodeid: str) -> str:
         func_name = m.group(1)
         return TEST_DESCRIPTIONS.get(func_name, func_name.replace("_", " "))
     return nodeid
-
-
-def _parse_reviewer_reason_block(longrepr: str, eval_id: str) -> Optional[str]:
-    """解析 reviewer reason 失败块"""
-    if "expected_output check failed" not in longrepr:
-        return None
-    # 在 "AssertionError" 之后搜索 "Reviewer reason"（断言报错消息，非源代码）
-    after_assert = longrepr.split("AssertionError", 1)[-1] if "AssertionError" in longrepr else longrepr
-    reason_match = re.search(
-        r'Reviewer reason:\s*(.+?)(?:\n--- AI Response|\n--- End AI Response|\Z)',
-        after_assert, re.DOTALL
-    )
-    reason = html_mod.escape(reason_match.group(1).strip()) if reason_match else "unknown"
-    return (
-        f'<div class="failure-block failure-reviewer-reason">\n'
-        f'  <div class="failure-label">✔ 评测判定 — Eval {eval_id}</div>\n'
-        f'  <div class="failure-content">{reason}</div>\n'
-        f'</div>'
-    )
 
 
 def _parse_pattern_block(longrepr: str, eval_id: str) -> Optional[str]:
@@ -1255,7 +1233,6 @@ def _parse_failure_to_html(longrepr: str, eval_id: str = "?") -> str:
 
     for parser in (
         _parse_skill_activated_block,
-        _parse_reviewer_reason_block,
         _parse_pattern_block,
         _parse_token_exceeded_block,
         _parse_execution_error_block,

@@ -29,30 +29,7 @@ eval_mode: text
 
 ---
 
-# Case 2: Flash 版与标准直调版的区别
-
-## Config
-- Max Tokens: 500000
-- Timeout: 900
-- Ascend Platform: A2
-
-## Prompt
-
-ops-direct-invoke 和 ops-direct-invoke-flash 有什么区别？我该在什么场景下选择哪个版本？
-
-## Expected Output
-
-回复应说明：
-1. ops-direct-invoke-flash 侧重于从规格说明快速构建 NPU 核函数的场景，适合从公式、代码片段、文本描述出发的开发
-2. 标准 ops-direct-invoke 适用于完整的算子开发流程
-3. Flash 版覆盖从规格到验证的完整路径，两者的工程模板和底层框架一致
-4. 用户应根据输入形态（是否有完整规格 vs 有公式/代码片段）选择合适的版本
-
-## Expectations
-
----
-
-# Case 3: 信息不足时主动确认
+# Case 2: 信息不足时主动确认
 
 ## Config
 - Max Tokens: 500000
