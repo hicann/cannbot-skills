@@ -389,7 +389,7 @@ private:
     WorkspaceQueue<QType, RING_SLOTS> pQueue_;
     WorkspaceQueue<float, RING_SLOTS> oQueue_;
 
-    TQue<TPosition::VECIN, 2> inputQue1_;
+    TQue<TPosition::VECIN, 1> inputQue1_;
     TQue<TPosition::VECOUT, 1> outputQue1_;
 
     TBuf<TPosition::VECCALC> tmpBuf_;

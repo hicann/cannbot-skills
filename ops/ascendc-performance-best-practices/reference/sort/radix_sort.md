@@ -96,7 +96,8 @@ Pass 0:  for each chunk: DMA(GM→UB) → Transform(UB) → DMA(UB→GM)
 - **TQue 模型**：`AllocTensor/EnQue/DeQue/FreeTensor` 自动同步，支持真正的流水线并行
 
 ```cpp
-TQue<QuePosition::VECIN, 2> dataQue_;  // BUFFER_NUM=2
+TQue<QuePosition::VECIN, 1> dataQue_;  // depth=1 (standard)
+pipe.InitBuffer(dataQue_, 2, tileBytes);  // num=2 enables Double Buffer
 
 // CopyIn:  AllocTensor → DataCopy → EnQue    (MTE2 管道)
 // Compute: DeQue → VectorOps → FreeTensor    (Vector 管道)
@@ -105,12 +106,9 @@ TQue<QuePosition::VECIN, 2> dataQue_;  // BUFFER_NUM=2
 **标准模式**：
 
 ```
-Prolog:   CopyIn(0), CopyIn(1)
-Steady:   for i = 0..N-1:
-              data = DeQue()
-              Compute(data)
-              FreeTensor(data)
-              if (i+2 < N): CopyIn(i+2)     // 与当前 Compute 并行
+for i = 0..N-1:
+    CopyIn(i)      // MTE2: AllocTensor → DataCopy → EnQue
+    Compute(i)     // Vector: DeQue → VectorOps → FreeTensor
 ```
 
 **关键注意**：
@@ -305,7 +303,7 @@ Core 0:    写 cookie 到 GM flags[step][C]
 | `SetValue` | 阻塞写 | 是标量输出的真实瓶颈 |
 | scalar → UB → DMA | cache 不一致 | batch DMA 写出不可行 |
 | TBuf + PipeBarrier | 不支持 MTE2/Vec overlap | 必须用 TQue |
-| `TQue<VECIN, 2>` | 支持真正并行 | double buffer 唯一正确方式 |
+| `TQue<VECIN, 1>` + `InitBuffer(que, 2, size)` | 支持真正并行 | double buffer 由 InitBuffer num=2 控制，depth=1 即可 |
 | UB 容量 | 192KB per AIV | TQue×2 + 3×TBuf = 172KB 可行 |
 | Cross-core sync | 无硬件 barrier | GM 轮询实现 |
 
@@ -345,8 +343,8 @@ Core 0:    写 cookie 到 GM flags[step][C]
 |------|------|---------|
 | 多级直方图低位标量扫描 | 低位元素匹配率 <2%，向量化退化为标量，scalar 主导 | 向量化二分搜索 (§1.1) |
 | 重复执行浮点→sortable 变换 | N 次扫描每次都做 Transform，重复指令成本 | 一次性 Transform 写回 GM，后续直接读 (§1.3) |
-| TBuf + PipeBarrier 手动 double buffer | `PipeBarrier<PIPE_ALL>` 全停，无法 MTE2/Vector overlap | 用 `TQue<VECIN, 2>` (§2.1) |
-| 预先 Alloc 所有 chunk 的 Tensor | `AllocTensor` 在 queue 满时阻塞 → 流水线死锁 | Steady 阶段按需 Alloc/Free (§2.1) |
+| TBuf + PipeBarrier 手动 double buffer | `PipeBarrier<PIPE_ALL>` 全停，无法 MTE2/Vector overlap | 用 `TQue<VECIN, 1>` + `InitBuffer(que, 2, size)` (§2.1) |
+| 预先 Alloc 所有 chunk 的 Tensor | `AllocTensor` 在 queue 满时阻塞 → 流水线死锁 | 循环内按需 Alloc/Free (§2.1) |
 | 同步 scalar 计算替代非阻塞 GetValue | 破坏 GM 读流水线，scalar 反而变慢 | 保留 `xGm_.GetValue` 非阻塞读 (§3.3) |
 | 减少 SetValue 输出量来 "省时" | 标量流水线出现空洞，反而更慢 | 接受输出成本，或用无关 GetValue 填洞 (§3.3) |
 | `Adds(int16)` 跨 0x8000 直接比较 | 饱和而非回绕，符号位结果错误 | 分高/低半区做 cross-half 修正 (§4.2) |

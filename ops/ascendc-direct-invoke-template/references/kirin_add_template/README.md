@@ -211,4 +211,4 @@ error_tol = 1e-5
 - **核函数**：`extern "C" __global__ __aicore__` 修饰的函数，是NPU上的执行入口
 - **`_do` 桥接函数**：在核函数实现文件中用 `<<<>>>` 调用符包装核函数，供 `main.cpp` 的Host侧调用
 - **`ASCENDC_CPU_DEBUG` 宏**：区分CPU调测分支和NPU/仿真分支，Kirin SoC目前仅支持NPU/仿真分支
-- **双缓冲（BUFFER_NUM=2）**：通过队列深度为2实现流水线，一个buffer搬运时另一个buffer计算
+- **双缓冲（BUFFER_NUM=2）**：通过 `InitBuffer(que, 2, size)` 开启双缓冲实现流水线，一个buffer搬运时另一个buffer计算

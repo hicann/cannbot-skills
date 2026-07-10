@@ -114,7 +114,7 @@ To distinguish: grep the compute body for tensor names. If the same tensor flows
 
 Double buffer is not working or not enabled. MTE2 and SIMD execute serially.
 
-> **Precondition check — grep the source first**: if `BUF_NUM ≥ 2` (or `TQue<…, 2>` with `pipe.InitBuffer(que, 2, …)`) is **already** in the kernel, the issue is not buffer count. The two common reasons overlap stays `< 0.05` with double buffer already enabled:
+> **Precondition check — grep the source first**: if `BUF_NUM ≥ 2` (or `pipe.InitBuffer(que, 2, …)` with `TQue<…, 1>`) is **already** in the kernel, the issue is not buffer count. The two common reasons overlap stays `< 0.05` with double buffer already enabled:
 > - **Too few iterations per worker** (typically `< 3`) — pipeline can't reach steady state because warmup/drain dominates. Symptom: `dominant_pipeline_util` low (`< 0.50`) across all pipes, `kernel_instructions_executed` low relative to shape. Often a side-effect of an over-aggressive `ubFactor` (see §2.2) on a small problem shape. Fix is shape-side, not buffer-side: either reduce `ubFactor` so more iterations survive, or run on a representative production shape.
 > - **EnQue/DeQue misordered** — buffer count is right but the queue protocol breaks pipelining. Verify each `AllocTensor → DataCopy → EnQue → DeQue → … → FreeTensor` chain is properly paired with no premature `FreeTensor` calls.
 > - **Buffer too shallow** — `bufNum == 2` works but isn't deep enough to saturate the transfer pipeline, and UB has spare room. This is common on compute-light kernels where the `< 0.05` overlap reading is an artifact (no VF compute — SIMD/SIMT ≈ 0), not evidence the buffer count is fine. Go to **§2.4** to grow buffer depth.
@@ -126,8 +126,8 @@ Double buffer is not working or not enabled. MTE2 and SIMD execute serially.
 ```cpp
 // ✅ Double buffer: load next tile while computing current tile
 AscendC::TPipe pipe;
-AscendC::TQue<AscendC::TPosition::VECIN, 2> xQue;   // bufNum = 2
-AscendC::TQue<AscendC::TPosition::VECOUT, 2> yQue;
+AscendC::TQue<AscendC::TPosition::VECIN, 1> xQue;   // depth=1, double buffer via InitBuffer num=2
+AscendC::TQue<AscendC::TPosition::VECOUT, 1> yQue;
 pipe.InitBuffer(xQue, 2, tileBytes);
 pipe.InitBuffer(yQue, 2, tileBytes);
 

@@ -437,9 +437,9 @@ private:
     AscendC::GlobalTensor<dataType> invRmsGM_;
 
     AscendC::TBuf<AscendC::TPosition::VECCALC> gammaBuf_;
-    AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> xInQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> yOutQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> invRmsOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECIN, 1> xInQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> yOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> invRmsOutQueue_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> scaleBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> gammaTileBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> gammaBroadcastTmpBuf_;
@@ -607,9 +607,9 @@ private:
 
 private:
     // Reordered to break text-level duplicate with MergeNKernel
-    AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> xInQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> yOutQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> invRmsOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECIN, 1> xInQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> yOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> invRmsOutQueue_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> gammaBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> xCastBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> gammaCastBuf_;
@@ -793,10 +793,10 @@ private:
     }
 
 private:
-    AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> xInQueue_;
-    AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> gammaInQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> yOutQueue_;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> invRmsOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECIN, 1> xInQueue_;
+    AscendC::TQue<AscendC::TPosition::VECIN, 1> gammaInQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> yOutQueue_;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> invRmsOutQueue_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> reduceBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> sumBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> tempBuf_;

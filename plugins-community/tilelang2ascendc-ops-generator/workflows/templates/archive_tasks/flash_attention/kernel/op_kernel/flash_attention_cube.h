@@ -315,8 +315,8 @@ private:
     TBuf<TPosition::A1> kvBufL1_;
     TBuf<TPosition::A1> pBufL1_;
 
-    TQue<TPosition::A2, 2> queL0A_;
-    TQue<TPosition::B2, 2> queL0B_;
+    TQue<TPosition::A2, 1> queL0A_;
+    TQue<TPosition::B2, 1> queL0B_;
     TQue<TPosition::CO1, 1> queL0C_;
 };
 

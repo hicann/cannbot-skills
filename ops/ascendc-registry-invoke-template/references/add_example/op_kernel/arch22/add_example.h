@@ -50,9 +50,9 @@ private:
 
 private:
     TPipe pipe;
-    TQue<QuePosition::VECIN, BUFFER_NUM> inputQueueX;
-    TQue<QuePosition::VECIN, BUFFER_NUM> inputQueueY;
-    TQue<QuePosition::VECOUT, BUFFER_NUM> outputQueueZ;
+    TQue<QuePosition::VECIN, 1> inputQueueX;
+    TQue<QuePosition::VECIN, 1> inputQueueY;
+    TQue<QuePosition::VECOUT, 1> outputQueueZ;
 
     GlobalTensor<T> inputGMX;
     GlobalTensor<T> inputGMY;

@@ -74,8 +74,8 @@ private:
 
 private:
     AscendC::TPipe pipe;
-    AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueueX, inQueueY;
-    AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> outQueueZ;
+    AscendC::TQue<AscendC::TPosition::VECIN, 1> inQueueX, inQueueY;
+    AscendC::TQue<AscendC::TPosition::VECOUT, 1> outQueueZ;
     AscendC::GlobalTensor<half> xGm;
     AscendC::GlobalTensor<half> yGm;
     AscendC::GlobalTensor<half> zGm;

@@ -42,7 +42,7 @@ s# Ascend C Kernel 直调开发指南
 |------|------|
 | 入口属性 | 矩阵类/矩阵向量融合类：`__global__ __aicore__`；纯向量类：`__global__ __vector__` |
 | 内存管理 | `TPipe` + `TQue<VECIN/VECOUT>` |
-| 双缓冲 | `BUFFER_NUM = 2` |
+| 双缓冲 | `TQue<VECIN/VECOUT, 1>`（depth=1），Double Buffer 由 `InitBuffer(que, 2, size)` 的 num 参数控制 |
 | 前向声明 | **禁止**，Kernel 函数必须定义在调用之前 |
 
 ### 1.3 硬件适配
