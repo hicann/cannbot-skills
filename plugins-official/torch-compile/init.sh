@@ -217,7 +217,11 @@ if [ "$LEVEL" = "global" ]; then
     fi
 else
     # Project-level: install under current working directory (aligned with other teams)
-    INSTALL_BASE="$PWD"
+    if [ -n "$INSTALL_PATH" ]; then
+        INSTALL_BASE="$(cd "$INSTALL_PATH" && pwd)"
+    else
+        INSTALL_BASE="$PWD"
+    fi
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$INSTALL_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then

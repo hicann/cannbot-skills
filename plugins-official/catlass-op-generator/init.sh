@@ -216,7 +216,11 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.claude"
     fi
 else
-    CONFIG_ROOT_BASE="$PWD"
+    if [ -n "$INSTALL_PATH" ]; then
+        CONFIG_ROOT_BASE="$(cd "$INSTALL_PATH" && pwd)"
+    else
+        CONFIG_ROOT_BASE="$PWD"
+    fi
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.opencode"
     elif [ "$TOOL" = "trae" ]; then
@@ -333,9 +337,9 @@ fi
 echo -e "${CYAN}配置文件：${NC}"
 if [ "$LEVEL" = "project" ]; then
     if [ "$TOOL" = "opencode" ]; then
-        config_target="$PWD/AGENTS.md"
+        config_target="$CONFIG_ROOT_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
+        config_target="$CONFIG_ROOT_BASE/CLAUDE.md"
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
@@ -345,7 +349,7 @@ else
     fi
 fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
-if [ "$TOOL" = "opencode" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if [ "$TOOL" = "opencode" ] && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$CONFIG_ROOT_BASE" ]; then
     echo -e "  ${GREEN}$(basename "$config_target")${NC} (已存在，无需操作)"
 elif [ -e "$config_target" ] || [ -L "$config_target" ]; then
     echo -e "  ${YELLOW}$(basename "$config_target")${NC} (将被替换)"
@@ -425,11 +429,11 @@ step "[2/5] Installing configuration..."
 
 # Determine target path for config file
 if [ "$LEVEL" = "project" ]; then
-    # Project-level: config file should be in current directory (PWD)
+    # Project-level: config file should be in install base directory
     if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
-        config_target="$PWD/AGENTS.md"
+        config_target="$CONFIG_ROOT_BASE/AGENTS.md"
     else
-        config_target="$PWD/CLAUDE.md"
+        config_target="$CONFIG_ROOT_BASE/CLAUDE.md"
     fi
 else
     # Global-level: config file in CONFIG_ROOT
@@ -636,11 +640,11 @@ fi
 
 # Check config file
 if [ "$LEVEL" = "project" ]; then
-    # Project-level: config file is in current directory (PWD)
+    # Project-level: config file is in install base directory
     if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ]; then
-        [ -f "$PWD/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in current directory"; health_ok=false; }
+        [ -f "$CONFIG_ROOT_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in install base directory"; health_ok=false; }
     else
-        [ -f "$PWD/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in current directory"; health_ok=false; }
+        [ -f "$CONFIG_ROOT_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in install base directory"; health_ok=false; }
     fi
 else
     # Global-level: config file in CONFIG_ROOT
