@@ -1,3 +1,0 @@
-torch
-torch_npu
-numpy

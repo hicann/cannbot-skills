@@ -1,0 +1,97 @@
+---
+name: ops-direct-invoke-workflow
+description: 直调算子开发工作流编排。承载从需求分析到上库的完整流程：阶段划分、各环节角色/输入/输出/交付件、CP 验收与回退、状态机。触发：用户要求开发新算子、实现某算子接口，或推进算子开发流程时。
+---
+
+# 直调算子开发工作流
+
+> 本 skill 承载**整个工作流编排**（属 final，所有接入仓共享）。PM 加载本 skill 后，按下方**统一流程表**逐步调度子 Agent 完成算子开发。各 CP 点由 QA 加载对应的 `workflow-cp*` Skill 验收；流程只通过**逻辑名**引用可覆写 Skill（`repo-*` 领域知识、`workflow-*` 模板与验收标准），不感知底层实现被哪个仓 override。
+>
+> 每步的详细调用契约、数据流、回退策略见文末[参考资源](#参考资源)；交付件模板一律引用 `workflow-doc-templates`（按逻辑名，勿内联）。
+
+## 角色总览
+
+| 角色 | 类型 | 职责 |
+|------|------|------|
+| **PM**（主 Agent） | 调度（final） | 用户交互、流程编排、问题裁定；只调度不执行，中间文件写 `.cannbot` |
+| **architect** | 执行（final） | Spec 形式化、开发方案与测试方案设计 |
+| **developer** | 执行（final） | 跨代码/测试/文档的综合任务（开发准备、codecheck/检视修复） |
+| **developer-code** | 执行（final） | 算子代码开发、问题定位 |
+| **developer-test** | 执行（final） | golden、功能/性能用例、白盒测试补全 |
+| **developer-doc** | 执行（final） | 算子文档、开发报告、经验总结 |
+| **QA** | 验收（final） | 各 CP 点验收，加载对应 `workflow-cp*` Skill 完成判定，产出验收报告与用户确认问卷 |
+| CI（外部） | 外部流水线 | 编译 + UT + ST，非调度子 Agent |
+
+## CP 标记说明
+
+- 各 CP 点由 QA 加载对应的 `workflow-cp*` Skill（验收标准，可被子仓 override）完成验收。
+- ⛔ 标记的 CP 为**固定必需确认**（如 CP0 固定由用户确认环境）：QA 生成结构化问卷 json，由 PM 发送给用户。
+- 每个 CP 有明确交付件与可判定通过指标；不通过返回**结构化修改意见**，按「备注」列指定的目标回退。回退循环受「过程有界」约束（最大轮次见 [error-handling.md](references/error-handling.md)）。
+
+## 统一流程表
+
+> 阶段以粗体行分组。方案线与测试线在阶段 2、3 并行推进；CP3/CP4/CP5 构成验收状态机，任一不通过均回退到算子开发（3.1）后依次重走。各步详细调用契约见 [task-prompts.md](references/task-prompts.md)。
+
+| 编号 | 流程 | 角色 | 输入 | 输出 | 说明 | 备注 |
+|------|------|------|------|------|------|------|
+| **阶段0：开发准备** | | | | | | |
+| 0 | 开发准备 | developer | - | 环境信息文档 | 检查 NPU 设备、CANN 环境、编译环境，写入 `.cannbot` | 交付件可复用，支持独立触发 |
+| ⛔ CP0 | 环境确认 | QA | 环境信息文档 | 用户问卷 json | QA 加载 `workflow-cp0` 生成环境确认问卷，PM 发送给用户 | 固定用户确认；失败由用户决定修复或停止 |
+| **阶段1：需求分析** | | | | | | |
+| 1.1 | 需求分析 | PM | 对话上下文、仓库设计约束 | 需求文档 | 数学定义、算子原型、目标芯片、精度/性能要求；缺项发问卷补齐 | |
+| CP1 | 需求确认 | QA | 需求文档 | 验收结论 | QA 加载 `workflow-cp1` 核对需求；需用户确认时生成问卷 json 交 PM 发送 | 不通过打回 1.1 |
+| 1.2 | Spec 生成 | architect | 需求文档 | Spec（spec.yaml，机器可校验） | 需求形式化为 L0 数学契约，作为后续方案与测试设计的统一真值源；规范见 ops-spec-gen | |
+| CP1' | Spec 确认 | QA | spec.yaml | 验收结论 | QA 加载 `workflow-cp1-prime` 核对 Spec（9-stage 校验通过）；需用户确认时生成问卷 json 交 PM 发送 | 不通过打回 1.2 |
+| **阶段2：方案设计**（方案线 / 测试线并行） | | | | | | |
+| 2.1 | 黑盒测试设计 | architect | spec.yaml | 测试方案文档 | golden 实现方案、L0/L1/L2 分级用例设计 | 测试线 |
+| CP2.1 | 测试检查 | QA | 测试方案文档 | 验收结论 | QA 加载 `workflow-cp2-1` 完成黑盒测试评审 | 不通过打回 2.1 |
+| 2.2 | 开发方案设计 | architect | spec.yaml | 开发方案文档 | 代码架构、Buffer 规划、Tiling、多核切分、Ascend C 接口验证 | 方案线 |
+| CP2.2 | 方案检查 | QA | 开发方案文档 | 验收结论 | QA 加载 `workflow-cp2-2` 完成开发方案评审 | 不通过打回 2.2 |
+| CP2' | 方案确认 | QA | 开发方案 + 测试方案 | 验收结论 | QA 加载 `workflow-cp2-prime`，CP2.1、CP2.2 均通过后合并确认 | 不通过打回对应步骤 |
+| **阶段3：代码开发**（开发线 / 测试线并行） | | | | | | |
+| 3.1 | 算子开发 | developer-code | 开发方案文档、修改要求 | 算子代码 | 按方案实现、编译验证通过；被打回时按修改要求调整 | 开发线 |
+| 3.2 | 测试工程开发 | developer-test | 测试方案文档 | golden 代码 + 用例表 + 性能采集框架 | 实现 golden、功能用例、性能采集框架 | 测试线 |
+| 3.3 | 白盒测试补全 | developer-test | 算子代码、测试代码 | 白盒测试用例 | 覆盖黑盒未涉及的分支 | 3.1/3.2 汇合后 |
+| CP3 | 功能验收 | QA | 算子代码 + 测试代码 | 功能验收报告 | QA 加载 `workflow-cp3` 执行全量功能测试（含精度比对） | 不通过回退 3.1 |
+| **阶段4：性能验收** | | | | | | |
+| 4.1 | 性能采集执行 | developer-test | 算子代码（CP3 通过后） | 性能数据 | 用 3.2 搭的性能采集框架跑出性能数据 | 基于 CP3 通过后的最终代码 |
+| CP4 | 性能验收 | QA | 算子代码 + 性能数据 | 性能验收报告 | QA 加载 `workflow-cp4` 评估性能是否达标 | 不通过回退 3.1（重走 3.3→CP3→4.1→CP4） |
+| **阶段5：代码检视** | | | | | | |
+| CP5 | 代码检视 | QA | 全部变更文件 | 检视结论 | QA 加载 `workflow-cp5` 完成多维度代码检视 | 不通过回退 3.1（重走至 CP5） |
+| **阶段6：上库准备** | | | | | | |
+| 6.1 | 文档补全 | developer-doc | 算子代码 + 设计文档 | 算子文档 | 补全算子使用文档 | |
+| 6.2 | 提交 PR | developer-doc | 全部代码 + 文档 | PR | 提交 PR | |
+| 6.3 | CI 流水线 | CI（外部） | PR | CI 报告 | 触发 CI：编译 + UT + ST | 非调度子 Agent |
+| 6.4 | codecheck 修复 | developer | CI 报告 | 修复后代码 | 修复 codecheck 问题 | |
+| 6.5 | 检视意见修复 | developer | PR 检视意见 | 修复后代码 | 修复 PR 检视意见 | |
+| CP6 | CI 通过确认 | QA | CI 报告 + PR 状态 | 上库确认 | QA 加载 `workflow-cp6` 确认 CI 通过、检视意见闭环 | 未通过回退 6.4/6.5 后重触发 CI |
+| **阶段7：开发总结** | | | | | | |
+| 7.1 | 开发报告 | developer-doc | 全部交付物 | 开发报告 | 整理开发过程与交付物清单，写入 `.cannbot` | |
+| 7.2 | 经验总结 | developer-doc | 开发过程记录 | 经验总结文档 | 沉淀开发经验与踩坑记录，写入 `.cannbot` | |
+
+## 通用约定
+
+- **状态与恢复**：每阶段（步骤或 CP）完成后将进度持久化到 `.cannbot/state.json`（结构见 [state-schema.md](references/state-schema.md)）；任何暂停/失败落盘到可恢复状态点，恢复时从该点续跑，不重跑已通过阶段。
+- **中间文件**：所有过程产物（需求/Spec/方案/报告/状态）统一放 `.cannbot`，与代码/test/doc 最终交付物区分。`.cannbot` 所有角色均可写，写入路径与命名在任务下发时约定。
+- **最小信息/最小权限**：调度子 Agent 只传当前任务所需输入、只授所需写权限（由 hook 按角色限权）。
+
+## 参考资源
+
+| 资源 | 路径 | 说明 |
+|------|------|------|
+| Task 调用契约 | [references/task-prompts.md](references/task-prompts.md) | 各步子 Agent 的调用参数、输入/输出、验收标准 |
+| 数据流 | [references/data-flow.md](references/data-flow.md) | 各阶段文件 I/O 与 `.cannbot` 产物清单 |
+| 错误处理 | [references/error-handling.md](references/error-handling.md) | 回退策略、最大轮次、恢复规则 |
+| 状态结构 | [references/state-schema.md](references/state-schema.md) | `.cannbot/state.json` 字段约定 |
+| 交付件模板 | `workflow-doc-templates`（逻辑名） | 需求/方案/验收报告/README/LOG/Issue 等模板 |
+| 验收标准 | `workflow-cp*`（逻辑名） | 各 CP 点的验收对象、通过指标、判定方式；QA 在对应 CP 点加载 |
+
+### 依赖的共享 skill（逻辑名，init 从共享 ops/ 绑定）
+
+| 逻辑名 | 用途 | 引用步骤 |
+|--------|------|----------|
+| `ops-spec-gen` | spec.yaml 生成与 9-stage 校验规范 | 1.2 Spec 生成 |
+| `ops-precision-standard` | 精度容差标准 | CP3 精度比对、Spec 容差字段 |
+| `ascendc-st-design` | 测试配置（test_matrix）管理 | 2.1 测试设计、3.2 测试开发 |
+
+> 领域 skill（`repo-*`）由子仓 override；上述 `ops-*` 为跨仓共享 skill，由基类 init 从共享 `ops/` 目录按逻辑名绑定，子仓一般不覆写。
