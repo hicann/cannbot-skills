@@ -100,7 +100,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute_community.md"
+  source: "ops-precision-standard/float_compute.md"
   per_dtype:
     float32:    {rtol: 1.0e-6,  atol: 1.0e-6,  metric: max_relative}
     float64:    {rtol: 1.0e-12, atol: 1.0e-12, metric: max_relative}

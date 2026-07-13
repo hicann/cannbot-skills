@@ -81,7 +81,7 @@ Ascend C 算子测试工程师，支持测试设计、测试设计评审、测�
 
 **触发条件**：用户提供算子文档、需求分析文档或设计文档，需要生成测试用例
 
-**精度标准来源**：优先从 `spec.yaml.numerical_tolerance.per_dtype` 读取；`REQUIREMENTS.md` 只用于解释容差来源（社区标准 / 商用标准 / 用户指定），不得覆盖 spec 中已锁定的阈值。
+**精度标准来源**：优先从 `spec.yaml.numerical_tolerance.per_dtype` 读取；`REQUIREMENTS.md` 只用于解释容差来源（精度标准 / 用户指定），不得覆盖 spec 中已锁定的阈值。
 
 **执行方式**：直接调用 `ascendc-st-design` 技能
 
@@ -140,7 +140,7 @@ Ascend C 算子测试工程师，支持测试设计、测试设计评审、测�
 #### 精度标准获取
 
 **来源**：测试设计文档（`operators/{operator_name}/docs/TEST.md`）的"精度验收标准"章节。
-默认使用社区标准，如需求文档明确要求商用标准则使用商用标准，具体阈值参考 `ops-precision-standard` 技能。
+具体阈值参考 `ops-precision-standard` 技能。
 
 #### 完成标准
 

@@ -19,9 +19,8 @@
 
 | 算子输出 | 标准文件 | 通过判据 |
 |---------|---------|---------|
-| 纯浮点计算（fp16/bf16/fp32），无商用要求 | `float_compute_community.md` | MERE < Threshold 且 MARE < 10·Threshold（FLOAT16 Threshold=2⁻¹⁰≈9.766e-4） |
-| 整型↔浮点（量化 dequant 输出 fp16/bf16），无商用要求 | `quantization_community.md` | 同上的 MERE/MARE Threshold（按输出 dtype 取） |
-| 含小值域（golden 存在 \|x\|<SV 阈值的元素） | `special_cases.md` §1 | 小值域子集单独按 **ErrorCount 比值 ≤ 2**（对三方标杆），**与正常域 MERE/MARE 并行**，不是替换 |
+| 纯浮点计算（fp16/bf16/fp32） | `float_compute.md` | MERE < Threshold 且 MARE < 10·Threshold（FLOAT16 Threshold=2⁻¹⁰≈9.766e-4） |
+| 整型↔浮点（量化 dequant 输出 fp16/bf16） | `quantization.md` | 同上的 MERE/MARE Threshold（按输出 dtype 取） |
 
 **实践等价形式（推荐，且与本仓已通过的 `catlass_quant_matmul_gelu` 一致）**：fp16/bf16 输出可用 aclnn 风格的
 `atol=1e-3, rtol=1e-3, error_ratio ≤ 1e-3`（允许 ≤0.1% 元素越界）。它对正常域等价于 MERE/MARE 门限，对小值域用绝对容差 `atol` 自然兜底，避免相对误差在近零处不稳定。
@@ -39,11 +38,9 @@ is_pass = error_ratio <= 1e-3             # ERROR_RATIO_THRESHOLD
 
 过零的激活（**SwiGLU**、tanh-GELU 等）输出会大量穿过 0。fp16 在零交叉处存在抵消噪声：golden≈0 的元素，内核与 golden 的**绝对误差可达 1e-5~1e-4**，但这只是 fp16 量化噪声，不是内核 bug。
 
-- ❌ **错误做法**：要求「`|golden|<2⁻¹¹` 且 `|actual-golden|>2⁻¹⁶(≈1.5e-5)` 的元素个数为 0」。这是零容忍绝对门限，比官方标准严得多——官方小值域判据是**与三方标杆的 ErrorCount 比值 ≤ 2**，不是「必须为 0」。
+- ❌ **错误做法**：要求「`|golden|<2⁻¹¹` 且 `|actual-golden|>2⁻¹⁶(≈1.5e-5)` 的元素个数为 0」。这是零容忍绝对门限，比标准严得多，会把 fp16 量化噪声误判为 bug。
 - ❌ **错误做法**：把 `MARE = max(相对误差)` over **全体元素**作为硬门限。近零 golden 会让单点相对误差爆到 1e+1~1e+2，必然 FAIL，但毫无意义。
-- ✅ **正确做法**：
-  - 用 §1 的 `atol/rtol + error_ratio` 形式（小值域被 `atol` 兜底）；**或**
-  - 正常域（`|golden| ≥ SV阈值`）算 MERE/MARE 门限，小值域按 `special_cases.md` 的比值判据（无三方标杆时退化为绝对容差 `2⁻¹⁶` 的 **ErrorCount 比例**报告，而非零容忍）。
+- ✅ **正确做法**：用 §1 的 `atol/rtol + error_ratio` 形式（小值域被 `atol` 兜底），对正常域等价于 MERE/MARE 门限，对小值域用绝对容差自然兜底。
 
 **自检**：若内核 MERE 很小（如 1e-5 量级）却 verify FAIL，几乎一定是 verify 的小值域/相对误差门限写错了，先核对标准，再怀疑内核。
 
@@ -91,7 +88,7 @@ cdq  = cint * scale[None, :] * per_token[:, None]       # fp32 反量化
 ```python
 import sys, numpy as np
 ATOL, RTOL, ERROR_RATIO_THRESHOLD = 1e-3, 1e-3, 1e-3  # 社区 fp16 标准的实践等价形式
-# 依据: ops-precision-standard/reference/float_compute_community.md + special_cases.md
+# 依据: ops-precision-standard/reference/float_compute.md
 m, n = int(sys.argv[1]), int(sys.argv[2]); data = sys.argv[3]
 out  = np.fromfile(f"{data}/out.bin",    dtype=np.float16).astype(np.float32).reshape(m, n)
 gold = np.fromfile(f"{data}/golden.bin", dtype=np.float16).astype(np.float32).reshape(m, n)
@@ -102,7 +99,7 @@ print(f"[verify] error_ratio={error_ratio:.3e} (thr={ERROR_RATIO_THRESHOLD:.0e},
 sys.exit(0 if error_ratio <= ERROR_RATIO_THRESHOLD else 1)
 ```
 
-> 对量化输出（int↔fp16），同样适用；若用户明确要求商用标准，改走 `float_compute.md` / `quantization.md` 的门限。
+> 对量化输出（int↔fp16），同样适用；具体门限见 `float_compute.md` / `quantization.md`。
 
 ---
 

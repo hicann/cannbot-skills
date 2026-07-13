@@ -117,7 +117,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute_community.md"
+  source: "ops-precision-standard/float_compute.md"
   per_dtype:
     # 索引张量是整数 + bitwise；容差形式上不适用，但 stage 7 要求覆盖所有输出 dtype
     int64:    {rtol: 0, atol: 0, metric: bitwise_equal}

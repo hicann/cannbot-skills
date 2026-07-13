@@ -221,7 +221,7 @@ Ascend C 算子架构师，负责需求分析、L0 数学契约（spec.yaml）�
 | 输入规格 | shape、dtype | `[batch, seq, hidden], float16` |
 | 输出规格 | shape、dtype | `[batch, seq, hidden], float16` |
 | 支持数据类型 | fp16/fp32/bf16/int8 | float16, float32 |
-| 精度要求 | 误差容忍度 | 默认使用社区标准（降低开发门槛），商用标准为可选项。从 `ops-precision-standard` 获取，根据数据类型匹配对应标准 |
+| 精度要求 | 误差容忍度 | 从 `ops-precision-standard` 获取，根据数据类型匹配对应标准 |
 
 #### 5. ACLNN API 接口定义
 

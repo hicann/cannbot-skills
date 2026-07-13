@@ -111,7 +111,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute_community.md"
+  source: "ops-precision-standard/float_compute.md"
   per_dtype:
     float16:  {rtol: 2.0e-2, atol: 2.0e-2, metric: max_relative}    # 累加误差放宽
     bfloat16: {rtol: 3.0e-2, atol: 3.0e-2, metric: max_relative}
