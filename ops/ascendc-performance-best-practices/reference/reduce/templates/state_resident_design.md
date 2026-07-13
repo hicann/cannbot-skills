@@ -1,12 +1,14 @@
-# Softmax 状态 Buffer 跨循环常驻优化设计
+# 融合算子 UB 状态 Buffer 跨循环常驻优化设计
+
+> **定位说明**：本文档是融合算子（如 FlashAttention）中 UB 状态管理和流水设计的**建议性参考**。`SoftmaxFlashV2`、`preLoadNum` 等接口和概念**不是**当前 `templates/` 目录下七个 Kernel 已实现的统一接口。各模板有各自的局部 max/sum cache 机制（如 AR-Recompute 的 `UpdateCache` 二分树、ARA-Recompute 的 `cacheBuffer`），但并非完整的状态驻留方案。
 
 ## 1. 优化目标
 
-在 Flash Attention / Sparse Flash Attention 等场景中，online softmax 需要在 S2 方向多次循环中累积 `softmaxMax`、`softmaxSum`、`softmaxExp` 三个状态。naive 实现每次 S2 循环都重新分配/释放这些 UB buffer，引入不必要的 `PipeBarrier` 和 `InitBuffer` 开销。
+在 Flash Attention / Sparse Flash Attention 等融合算子场景中，online softmax 需要在 S2 方向多次循环中累积 `softmaxMax`、`softmaxSum`、`softmaxExp` 三个状态。naive 实现每次 S2 循环都重新分配/释放这些 UB buffer，引入不必要的 `PipeBarrier` 和 `InitBuffer` 开销。
 
-本优化将三个状态 buffer **一次性分配后常驻 UB**，通过 `loop % preLoadNum` 索引实现双缓冲复用，避免每轮 S2 循环的重复分配开销，同时支持读写并行流水。
+本设计将三个状态 buffer **一次性分配后常驻 UB**，通过 `loop % preLoadNum` 索引实现双缓冲复用，避免每轮 S2 循环的重复分配开销，同时支持读写并行流水。
 
-**Source operators**: `ai_infra_sparse_flash_attention_gqa`, `ai_infra_fused_infer_attention_sink`
+> **注意**：`SoftmaxFlashV2` 和 `preLoadNum` 是融合 Attention 算子中的概念，当前 dav310 目录下的七个 Softmax Kernel 未实现此完整方案。各模板的局部 max/sum cache（如 [AR Recompute](softmax_v2_ar_recompute.md) 的 `cachebuffer` 和 [ARA Recompute](softmax_v2_ara_recompute.md) 的 `cacheBuffer_`）是 UB 内部的临时状态管理，与本文档的跨循环常驻设计不同。
 
 | 指标 | naive | optimized | 收益 |
 |------|-------|-----------|------|
@@ -15,7 +17,7 @@
 | UB 空间利用率 | 低（频繁分配释放产生碎片） | 高（预分配连续布局） | 更可控的内存预算 |
 | 流水重叠度 | 低（单份 buffer，必须等 MTE3 写完才能开始下一轮） | 高（双缓冲支持读写并行） | 支持 pingpong 流水 |
 
-> 适用算子族：`softmax`（含 `softmax`、`log_softmax`、`softmax_cross_entropy` 等变体）以及内嵌 online softmax 的 `flash_attention`、`sparse_flash_attention`。
+> 适用场景：FlashAttention / Sparse FlashAttention 等融合 Attention 算子中内嵌的 online softmax 状态管理。
 
 ## 2. 架构概览
 
@@ -299,7 +301,7 @@ for (uint32_t s2Loop = 0; s2Loop < s2LoopNum; s2Loop++) {
 ### 8.2 选型决策
 
 ```
-if (算子包含 online softmax && S2 循环次数 > 1):
+if (融合算子包含 online softmax && S2 循环次数 > 1):
     → 启用 state_resident 优化
     → preLoadNum = 2（默认，UB 充裕时可试 3）
 else:
@@ -315,3 +317,21 @@ else:
 - [ ] 双缓冲索引与事件同步（SetFlag/WaitFlag）配套使用，实现真正流水
 - [ ] 精度校验通过（与 naive 版本对比，误差在 1e-5 以内）
 - [ ] cycle 数对比：optimized / naive < 0.9（至少 10% 提升，通常 15-25%）
+
+## 9. 与当前 dav310 模板的联系与区别
+
+当前 `templates/dav310/` 下的七个 Kernel 各有局部 max/sum cache 机制，但它们与本文档的跨循环常驻方案有本质区别：
+
+| 特性 | 本文 state_resident 方案 | dav310 模板的局部 cache |
+|------|------------------------|----------------------|
+| 适用场景 | 融合 Attention 跨 S2 循环 | 独立 Softmax 单 pass 内的跨 chunk |
+| 状态生命周期 | 跨 S2 循环常驻 UB | 单 tile 内临时使用 |
+| 双缓冲索引 | `loop % preLoadNum` | 无（直接使用 `cacheID` 索引） |
+| 事件同步 | SetFlag/WaitFlag 流水 | 无（同步计算） |
+| 涉及模板 | 融合 Attention（本目录未提供） | [AR Recompute](softmax_v2_ar_recompute.md)、[ARA Recompute](softmax_v2_ara_recompute.md) |
+
+- **AR Recompute** 的 `cachebuffer`（2048B）用于 UB 间二分累加树的 `UpdateCache`，是单行 R 方向的局部 sum 合并，非跨 S2 循环状态。
+- **ARA Recompute** 的 `cacheBuffer_` 用于跨 bin 的 `UpdateCache` 二分树，同样是单 tile 内的局部 sum 合并。
+- **ARA Online** 的 `xMaxBuf_`/`xSumBuf_` 维护 running max/sum，是单 tile 内跨 R chunk 的在线状态，非跨 S2 循环。
+
+> 本文档不宣称当前 dav310 Softmax 已实现完整的融合状态驻留方案。

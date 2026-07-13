@@ -119,6 +119,32 @@ Cast（类型转换）是 VEC bound 中最常见的隐性开销。典型模式�
 
 ---
 
+## 策略 6：减少计算量（VEC BOUND 核心策略）
+
+深度 VEC BOUND（>80%）时，微架构调整（DoubleBuffer、融合指令、Bank Align）收益有限。瓶颈在计算量本身，须从**算法层面**减少向量指令数。
+
+### 适用场景
+
+所有使用硬件超越函数（Exp、Log、Tanh、Sigmoid、GELU、Softmax）的 elementwise / activation 算子。这些函数内部使用 Taylor 级数展开，每个元素需数十条 FMA 指令，是计算量的主要来源。
+
+### 优化手段
+
+| 手段 | 说明 | 适用条件 |
+|------|------|---------|
+| **LUT + 插值** | 用查表+插值替代 Taylor 展开，减少计算量 | 从 asc-devkit 查对应 API（如 `Exp<T, expandLevel, isReuseSrc>` 设 `expandLevel=0` 即为查表模式）；`Log`、`Tanh` 等超越函数同理 |
+
+### 案例分析：Exp 算子
+
+`AscendC::Exp<T, expandLevel, isReuseSrc>` 的 `expandLevel = 0` 即内部走查表（LUT）+ 插值，无需手写查表逻辑。优先用此模式，减少 Taylor 项数（12→8）有精度风险，不推荐。
+
+### 检查方法
+
+在 profiling 数据中检查 `aiv_vec_ratio`：
+- >90% 且算子是 elementwise/activation 类 → 优先考虑减少计算量
+- 从 Chrome Trace 识别 `vec_exp`/`vec_log`/`vec_tanh` 等超越函数指令占比
+
+---
+
 ## DoubleBuffer 检查
 
 在 Chrome Trace 中观察 MTE2 和 VECTOR 行的时间重叠：

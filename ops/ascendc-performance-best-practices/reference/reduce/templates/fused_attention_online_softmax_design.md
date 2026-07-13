@@ -1,10 +1,12 @@
-# Online Softmax / Tiled Softmax 优化设计
+# 融合 Attention Online Softmax 设计
+
+> **定位说明**：本文档描述的是 **FlashAttention 融合场景** 中的 Online Softmax 设计，涉及 `QK^T`、running max/sum、`P×V`、`O_acc`、causal mask 和 workspace。当前 `templates/` 目录下的七个 Kernel **未提供**与此设计完全对应的融合 Attention Kernel。如需独立的 Online Softmax 实现（不含 `QK^T`/`P×V`），参见 [softmax_v2_ara_online.md](softmax_v2_ara_online.md)——两者只共享在线 max/sum 数学基础，不是同一个实现。
 
 ## 1. 优化目标
 
-在 Attention 等长序列场景中，Softmax 的输入是完整的 $QK^T$ 矩阵（规模为 $S \times S$）。Naive 实现先计算完整矩阵再逐行做 Softmax，需要 $O(S^2)$ 内存，长序列下 SRAM 放不下。
+在 FlashAttention 等长序列场景中，Softmax 的输入是逐 tile 生成的 $QK^T$ score（规模为 $S \times S$）。Naive 实现先计算完整矩阵再逐行做 Softmax，需要 $O(S^2)$ 内存，长序列下 SRAM 放不下。
 
-本优化将 Softmax 从"全量计算后归一化"改为"逐 Tile 计算，维护 running max/sum"的增量算法。核心思想：在 S2 方向分 Tile 计算 $Q_i K_j^T$，跨 Tile 维护当前见过的最大值 $m$ 和累积和 $l$，输出 $O$ 增量更新。**内存复杂度从 $O(S^2)$ 降至 $O(S)$。**
+本设计将 Softmax 从"全量计算后归一化"改为"逐 Tile 计算，维护 running max/sum"的增量算法。核心思想：在 S2 方向分 Tile 计算 $Q_i K_j^T$，跨 Tile 维护当前见过的最大值 $m$ 和累积和 $l$，输出 $O$ 增量更新。**内存复杂度从 $O(S^2)$ 降至 $O(S)$。**
 
 | 指标 | naive | optimized | 收益 |
 |------|-------|-----------|------|
@@ -12,7 +14,7 @@
 | max/sum 计算 | 双 pass（先 max 再 sum） | **单 pass**，tile 内即时更新 | 天然 Safe Softmax |
 | 输出更新 | 最后一次性 prob × V | 每 tile 增量加权累加 | 无需显式分配 prob 矩阵 |
 
-> 适用算子族：`softmax`（含 `softmax`、`log_softmax` 等变体）以及内嵌 Softmax 的 `flash_attention`、`sparse_flash_attention`。
+> 适用场景：FlashAttention / Sparse FlashAttention 等融合 Attention 算子中内嵌的 Online Softmax。
 
 ## 2. 架构概览
 
@@ -294,8 +296,8 @@ void OnlineSoftmaxUpdate(LocalTensor<COMPUTE_T> sUb,   // [B, B] score tile S_ij
 ### 7.1 选型决策
 
 ```
-if (算子包含 softmax && 输入序列长度 S > 512):
-    → 启用 online_softmax（ tiled 实现）
+if (融合 Attention 算子 && 输入序列长度 S > 512):
+    → 启用 online_softmax（tiled 实现）
     → B = 64 或 128（对齐 Cube 粒度）
     → running 状态用 FP32
 else:
@@ -408,3 +410,19 @@ UB 容量 192 KB，两种配置均安全。K/V float buffer 时间复用节省 3
 - [ ] AscendC kernel 使用 Vector API 替代标量循环（`GetValue`/`SetValue` 仅在必要处使用）
 - [ ] Multi-block 并行正确分配 Q rows，无重复/遗漏
 - [ ] UB 内存总量 < 192 KB（Ascend 910B）
+
+## 9. 与独立 ARA Online Softmax 的关系
+
+本文档描述的融合 Attention Online Softmax 与 [softmax_v2_ara_online.md](softmax_v2_ara_online.md) 中的独立 ARA Online Softmax **共享相同的在线 max/sum 数学基础**，但不是同一个实现：
+
+| 特性 | 融合 Attention Online Softmax（本文档） | 独立 ARA Online Softmax |
+|------|---------------------------------------|------------------------|
+| 输入来源 | Attention 内部逐 tile 生成 `QK^T` | GM 中已存在的完整数据 |
+| score 消费 | 单次 score tile 消费（生成即消费） | 两次读取输入（在线 max+sum 一遍，输出一遍） |
+| P×V 融合 | 是，`P×V` 融合到循环中 | 否 |
+| O_acc | 是，增量加权累加 | 否，输出完整 Softmax 概率 |
+| 完整概率矩阵 | 通常不生成 | 生成完整 Softmax 概率 |
+| causal mask | 支持 block-level skip | 不涉及 |
+| workspace | 需要（跨 tile 状态传递） | 不需要 |
+
+> 两者不得合并成同一个 Kernel 实现说明。本文档是融合 Attention 的设计参考，当前目录未提供与之完全对应的融合 Attention Kernel。

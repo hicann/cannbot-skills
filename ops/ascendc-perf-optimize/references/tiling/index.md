@@ -55,7 +55,7 @@ Step 0 — 算子分类：
 |--------|---------|---------|---------|---------|
 | MatMul | [matmul/](matmul/) | [fallback/](matmul/fallback/)（SWAT / FullLoad / StreamK） | — | — |
 | Convolution | [convolution/](convolution/) | [fallback/](convolution/fallback/)（FORMULAS: Mmode + HWmode） | — | — |
-| Reduction | [reduction/](reduction/) | [fallback/](reduction/fallback/)（占位） | — | — |
+| Reduction | [reduction/](reduction/) | [fallback/](reduction/fallback/)（五模板通用算法） | — | — |
 | Elementwise | [elewise/](elewise/) | [fallback/](elewise/fallback/)（占位） | — | — |
 | Broadcast | [broadcast/](broadcast/) | [fallback/](broadcast/fallback/)（占位） | — | — |
 | Conversion | [conversion/](conversion/) | [fallback/](conversion/fallback/)（占位） | — | — |

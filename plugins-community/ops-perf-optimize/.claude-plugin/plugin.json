@@ -1,0 +1,16 @@
+{
+  "name": "ops-perf-optimize",
+  "description": "AscendC 算子性能调优 Team。用户提供可运行的 demo 代码，自动采集性能数据、分析并输出《性能调优方案》（可含多个方案），再按方案分别实施优化并生成《性能调优报告》。",
+  "version": "2.0.0",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/skills",
+  "repository": "https://gitcode.com/cann/skills",
+  "license": "MIT",
+  "dependencies": ["ops-perf-optimize-skills"],
+  "agents": [
+    "./agents/ascendc-perf-analysis-expert.md",
+    "./agents/ascendc-perf-impl-expert.md"
+  ]
+}
