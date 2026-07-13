@@ -19,7 +19,10 @@ scanDirs:
   - graph
   - infra
   - ops-lab
+  - runtime
 
 pluginDirs:
   - plugins-official
   - plugins-community
+
+scanCacheTtlHours: 24

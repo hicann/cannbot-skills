@@ -16,7 +16,7 @@ import type {
   AITool,
   InstallLevel,
 } from "../types/index.js";
-import { getConfigRoot, getManifestPath } from "../utils/paths.js";
+import { getConfigRoot, getManifestPath, getAgentsFileName, VALID_TOOLS } from "../utils/paths.js";
 import { getAllPlugins } from "./registry.js";
 
 export function readManifest(configRoot: string): CannbotManifest | null {
@@ -64,7 +64,7 @@ export function readAllManifests(configRoot: string): CannbotManifest[] {
 export function scanInstalled(): InstalledPlugin[] {
   const plugins = getAllPlugins();
   const installed: InstalledPlugin[] = [];
-  const tools: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot"];
+  const tools: AITool[] = VALID_TOOLS;
   const levels: InstallLevel[] = ["project", "global"];
 
   for (const tool of tools) {
@@ -125,44 +125,12 @@ function verifyPluginFilesExist(configRoot: string, manifest: CannbotManifest, t
     if (!hasAnyAgent) return false;
   }
   
-  // 验证 AGENTS.md
-  // For opencode project level, AGENTS.md is in project root, not in configRoot
-  let agentsMdPath: string;
-  if (tool === "opencode" && level === "project") {
-    // For opencode project level, AGENTS.md is in project root
-    agentsMdPath = join(configRoot, "..", "AGENTS.md");
-  } else {
-    agentsMdPath = join(configRoot, "AGENTS.md");
-  }
-  if (!existsSync(agentsMdPath)) return false;
+  // 验证配置文件（AGENTS.md / CLAUDE.md）
+  const agentsFileName = getAgentsFileName(tool);
+  const configFilePath = level === "project"
+    ? join(configRoot, "..", agentsFileName)
+    : join(configRoot, agentsFileName);
+  if (!existsSync(configFilePath)) return false;
   
   return true;
-}
-
-export function isPluginInstalled(
-  pluginId: string,
-  tool?: AITool,
-  level?: InstallLevel
-): boolean {
-  const installed = scanInstalled();
-  return installed.some(
-    (p) =>
-      p.id === pluginId &&
-      (!tool || p.tool === tool) &&
-      (!level || p.level === level)
-  );
-}
-
-export function getInstalledPlugin(
-  pluginId: string,
-  tool?: AITool,
-  level?: InstallLevel
-): InstalledPlugin | undefined {
-  const installed = scanInstalled();
-  return installed.find(
-    (p) =>
-      p.id === pluginId &&
-      (!tool || p.tool === tool) &&
-      (!level || p.level === level)
-  );
 }

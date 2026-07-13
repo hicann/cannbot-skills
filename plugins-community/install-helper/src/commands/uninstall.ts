@@ -8,17 +8,19 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, unlinkSync, rmdirSync, readdirSync, lstatSync } from "fs";
+import { existsSync, unlinkSync, rmdirSync, readdirSync } from "fs";
+import { resolve, basename, sep } from "path";
 import chalk from "chalk";
 import { findPlugin } from "../core/registry.js";
 import { findSkill } from "../core/skill-registry.js";
 import { uninstallSkills } from "../core/skill-installer.js";
 import { readRecord, deleteRecord } from "../core/record.js";
 import { removeInstalledPlugin } from "../utils/config.js";
+import { isSymlink } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import type { AITool, InstallLevel } from "../types/index.js";
-import { findBackups, restoreBackup, deleteBackup, getAgentsFileName } from "../core/backup.js";
+import { findBackups, restoreBackup, deleteBackup } from "../core/backup.js";
 import { showRestorePrompt } from "../ui/backup-prompts.js";
 import { getConfigRoot, validateTool, validateLevel } from "../utils/paths.js";
 
@@ -61,14 +63,22 @@ export async function uninstallCommand(
 
     logger.info(`${t("uninstall_in_progress")} ${plugin.displayName}...`);
 
+    const configRoot = getConfigRoot(record.tool, record.level);
+    const allowedBases = [resolve(configRoot), resolve(record.installPath)];
+    const isSafePath = (p: string): boolean => {
+      const resolved = resolve(p);
+      return allowedBases.some(base => resolved === base || resolved.startsWith(base + sep));
+    };
+
     let removedFiles = 0;
     let removedDirs = 0;
 
     for (const filePath of record.files) {
+      if (!isSafePath(filePath)) continue;
       try {
         if (existsSync(filePath) || isSymlink(filePath)) {
           unlinkSync(filePath);
-          const name = filePath.split("/").pop() || filePath;
+          const name = basename(filePath);
           logger.step(`  ${t("uninstall_remove_label")}: ${name}`);
           removedFiles++;
         }
@@ -77,19 +87,18 @@ export async function uninstallCommand(
       }
     }
 
-    const configRoot = getConfigRoot(record.tool, record.level);
-    const sortedDirs = [...record.directories].sort((a, b) => b.length - a.length);
+    const sortedDirs = [...record.directories].filter(isSafePath).sort((a, b) => b.length - a.length);
     for (const dirPath of sortedDirs) {
       try {
         // Skip configRoot - it's the AI tool's config directory, not created by us
-        if (dirPath === configRoot) {
+        if (resolve(dirPath) === resolve(configRoot)) {
           continue;
         }
         if (existsSync(dirPath)) {
           const entries = readdirSync(dirPath);
           if (entries.length === 0) {
             rmdirSync(dirPath);
-            const name = dirPath.split("/").pop() || dirPath;
+            const name = basename(dirPath);
             logger.step(`  ${t("uninstall_clean_empty_dir")}: ${name}/`);
             removedDirs++;
           }
@@ -124,7 +133,7 @@ export async function uninstallCommand(
 
     const totalRemoved = removedFiles + removedDirs;
     if (totalRemoved > 0) {
-      logger.success(`${t("uninstall_removed")} ${plugin.displayName}（${t("uninstall_remove_file_format").replace("{count}", String(removedFiles))}，${t("uninstall_remove_dir_format").replace("{count}", String(removedDirs))}）`);
+      logger.success(t("uninstall_summary_format").replace("{name}", plugin.displayName).replace("{files}", String(removedFiles)).replace("{dirs}", String(removedDirs)));
     } else {
       logger.warn(`${plugin.displayName}${t("uninstall_files_gone")}`);
     }
@@ -150,13 +159,5 @@ export async function uninstallCommand(
     logger.blank();
     logger.success(`${t("skill_uninstall_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
     logger.blank();
-  }
-}
-
-function isSymlink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink();
-  } catch {
-    return false;
   }
 }

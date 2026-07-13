@@ -2,6 +2,19 @@ id: ops-direct-invoke
 dir: plugins-official/ops-direct-invoke
 displayName: AscendC Kernel 直调
 aliases: [ops-direct, ascendc-direct, direct, kernel]
-skills: 16
-agents: 3
-description: Ascend C Kernel <<<>>> 直调算子开发全流程
+skills: 19
+agents: 4
+description: Ascend C 直调全流程：环境→设计→开发→审查→性能验收
+version: "1.2.2"
+configFile: AGENTS.md
+configRootConfigLink: false
+installSkills:
+  - dir: ops
+    skills: [ascendc-tiling-design, npu-arch, ascendc-api-best-practices, ascendc-regbase-best-practice, ascendc-blaze-best-practice, ops-precision-standard, ascendc-docs-search, ascendc-env-check, ascendc-precision-debug, ops-profiling, ascendc-direct-invoke-template, torch-ascendc-op-extension, ascendc-runtime-debug, ascendc-crash-debug, ascendc-code-review]
+  - dir: infra
+    skills: [gitcode-toolkit, gitcode-pr-handler, gitcode-issue-gen, gitcode-issue-handler]
+installAgents: [ascendc-kernel-architect, ascendc-kernel-design-reviewer, ascendc-kernel-developer, ascendc-kernel-reviewer]
+externalRepos:
+  - url: https://gitcode.com/cann/asc-devkit.git
+    dir: plugins-official/ops-direct-invoke/asc-devkit
+    configRootLink: false

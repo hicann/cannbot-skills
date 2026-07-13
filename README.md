@@ -25,9 +25,18 @@
 
 **完整安装**（推荐，含 Skills + Agents + Workflows，适合端到端开发流程编排）：
 
+#### Linux / macOS
+
 ```bash
 curl -fsSL https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.sh | bash
 ```
+
+#### Windows
+
+```powershell
+iwr -useb https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.ps1 | iex
+```
+
 安装后运行 `install-helper` 启动交互式向导，或 `npx @cannbot-ai/install-helper` 免安装运行。
 
 **独立 Skill 安装**（仅需单个能力，遵循 [Agent Skills](https://agentskills.io) 开放标准）：

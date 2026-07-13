@@ -24,9 +24,7 @@ import { addInstalledPlugin } from "../utils/config.js";
 import { getConfigRoot } from "../utils/paths.js";
 import type { AITool, InstallLevel } from "../types/index.js";
 import { selectTheme } from "../ui/theme.js";
-
-const BACK = "__back__";
-const CANCEL = "__cancel__";
+import { BACK, CANCEL } from "../utils/constants.js";
 
 export async function initCommand(): Promise<void> {
   const cwd = process.cwd();
@@ -87,7 +85,6 @@ export async function initCommand(): Promise<void> {
 async function selectMode(): Promise<"plugin" | "skill" | null> {
   printBoxTitle(t("wizard_select_mode_title"));
 
-  const CANCEL = "__cancel__";
   const choices: Array<{ name: string; value: string } | Separator> = [
     {
       name: `> ${t("wizard_mode_plugin")} — ${t("wizard_mode_plugin_desc")}`,
@@ -252,7 +249,7 @@ async function skillInstallFlow(): Promise<"done" | "back"> {
         logger.blank();
         logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
         logger.blank();
-        logger.info(`${t("install_to")}: ${chalk.cyan(configRoot + "/skills/")}`);
+        logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
         logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
         logger.blank();
         return "done";

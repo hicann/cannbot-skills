@@ -24,7 +24,8 @@ export async function infoCommand(pluginName: string): Promise<void> {
   }
 
   const installed = scanInstalled();
-  const isInstalled = installed.some((p) => p.id === plugin.id);
+  const inst = installed.find((p) => p.id === plugin.id);
+  const isInstalled = !!inst;
   const statusText = isInstalled
     ? chalk.green(`✓ ${t("status_installed")}`)
     : chalk.dim(`— ${t("status_not_installed")}`);
@@ -36,8 +37,8 @@ export async function infoCommand(pluginName: string): Promise<void> {
   console.log(`  ${chalk.dim(t("info_description") + ":")} ${plugin.description}`);
   console.log(`  ${chalk.dim("ID:")} ${plugin.id}`);
   console.log(`  ${chalk.dim(t("info_status") + ":")} ${statusText}`);
-  console.log(`  ${chalk.dim(t("info_skills") + ":")} ${plugin.skills}`);
-  console.log(`  ${chalk.dim(t("info_agents") + ":")} ${plugin.agents}`);
+  console.log(`  ${chalk.dim(t("info_skills") + ":")} ${inst ? inst.skillsCount : plugin.skills}`);
+  console.log(`  ${chalk.dim(t("info_agents") + ":")} ${inst ? inst.agentsCount : plugin.agents}`);
   console.log(`  ${chalk.dim(t("info_aliases") + ":")} ${plugin.aliases.join(", ")}`);
   console.log();
 

@@ -35,7 +35,7 @@ export async function showOverwriteWarning(
     ],
   });
 
-  return choice;
+  return choice as "overwrite" | "cancel";
 }
 
 export async function showRestorePrompt(

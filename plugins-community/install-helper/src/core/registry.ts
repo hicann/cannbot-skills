@@ -8,17 +8,33 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseYaml } from "yaml";
 import type { PluginEntry } from "../types/index.js";
+import { logger } from "../utils/logger.js";
+import { t } from "../utils/i18n.js";
+import { isDirectory } from "../utils/fs-helpers.js";
+import embeddedPlugins from "../embedded-plugins.json" with { type: "json" };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function findPluginsDir(): string {
+  const candidates = [
+    join(__dirname, "plugins.d"),
+    join(__dirname, "..", "plugins.d"),
+    join(__dirname, "..", "..", "plugins.d"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(dir)) return dir;
+  }
+  return candidates[0];
+}
+
 function loadPluginsFromYaml(): PluginEntry[] {
-  const pluginsDir = join(__dirname, "plugins.d");
+  const pluginsDir = findPluginsDir();
   const defaultsPath = join(pluginsDir, "_defaults.yml");
 
   let defaults: Record<string, unknown> = {};
@@ -43,16 +59,82 @@ function loadPluginsFromYaml(): PluginEntry[] {
           skills: content.skills ?? defaults.skills ?? 0,
           agents: content.agents ?? defaults.agents ?? 0,
           description: content.description || "",
+          version: content.version,
+          configFile: content.configFile,
+          configRootConfigLink: content.configRootConfigLink,
+          installSkills: content.installSkills,
+          installAgents: content.installAgents,
+          externalRepos: content.externalRepos,
         });
       } catch {
+        logger.warn(t("plugin_yaml_error").replace("{file}", file));
       }
     }
   } catch {
   }
+
+  if (plugins.length === 0) {
+    return [...embeddedPlugins] as PluginEntry[];
+  }
+
+  plugins.sort((a, b) =>
+    a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0
+  );
   return plugins;
 }
 
-export const PLUGIN_REGISTRY: PluginEntry[] = loadPluginsFromYaml();
+export let PLUGIN_REGISTRY: PluginEntry[] = loadPluginsFromYaml();
+
+const PLUGIN_DIRS = ["plugins-official", "plugins-community"];
+
+export function mergeDynamicPlugins(repoPath: string): void {
+  if (!existsSync(repoPath)) return;
+
+  const existingIds = new Set(PLUGIN_REGISTRY.map((p) => p.id));
+  const dynamic: PluginEntry[] = [];
+
+  for (const pluginDir of PLUGIN_DIRS) {
+    const parent = join(repoPath, pluginDir);
+    if (!existsSync(parent)) continue;
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(parent);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const pluginPath = join(parent, entry);
+      if (!isDirectory(pluginPath)) continue;
+      if (entry === "install-helper") continue;
+
+      const initSh = join(pluginPath, "init.sh");
+      if (!existsSync(initSh)) continue;
+
+      const pluginId = entry;
+      if (existingIds.has(pluginId)) continue;
+
+      dynamic.push({
+        id: pluginId,
+        dir: `${pluginDir}/${entry}`,
+        displayName: entry,
+        script: "init.sh",
+        aliases: [],
+        skills: 0,
+        agents: 0,
+        description: "",
+      });
+      existingIds.add(pluginId);
+    }
+  }
+
+  if (dynamic.length > 0) {
+    PLUGIN_REGISTRY = [...PLUGIN_REGISTRY, ...dynamic].sort((a, b) =>
+      a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0
+    );
+  }
+}
 
 export function findPlugin(query: string): PluginEntry | undefined {
   const normalized = query.toLowerCase().trim();

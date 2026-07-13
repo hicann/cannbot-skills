@@ -24,7 +24,6 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
   console.log(chalk.bold(`  ${t("doctor_title")}`));
   console.log(chalk.dim("  " + "─".repeat(46)));
 
-  let errors = 0;
   let warnings = 0;
   let fixes = 0;
 
@@ -132,11 +131,11 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
   console.log(chalk.dim("  " + "─".repeat(46)));
   if (options.fix && fixes > 0) {
     console.log(
-      `  ${t("doctor_result")}: ${t("doctor_result_with_fix").replace("{warnings}", String(warnings)).replace("{errors}", String(errors)).replace("{fixes}", String(fixes))}`
+      `  ${t("doctor_result")}: ${t("doctor_result_with_fix").replace("{warnings}", String(warnings)).replace("{fixes}", String(fixes))}`
     );
   } else {
     console.log(
-      `  ${t("doctor_result")}: ${t("doctor_result_without_fix").replace("{warnings}", String(warnings)).replace("{errors}", String(errors))}`
+      `  ${t("doctor_result")}: ${t("doctor_result_without_fix").replace("{warnings}", String(warnings))}`
     );
   }
   console.log();

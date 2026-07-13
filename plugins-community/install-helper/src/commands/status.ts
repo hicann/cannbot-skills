@@ -9,12 +9,10 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import chalk from "chalk";
-import { getAllPlugins } from "../core/registry.js";
 import { scanInstalled } from "../core/manifest.js";
 import { t } from "../utils/i18n.js";
 
 export async function statusCommand(): Promise<void> {
-  const plugins = getAllPlugins();
   const installed = scanInstalled();
   const installedMap = new Map(installed.map((p) => [p.id, p]));
 

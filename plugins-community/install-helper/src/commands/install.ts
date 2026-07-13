@@ -11,13 +11,14 @@
 import { createRepositoryManager } from "../core/repository.js";
 import { installPlugin } from "../core/installer.js";
 import { findPlugin, getAllPlugins } from "../core/registry.js";
-import { findSkill } from "../core/skill-registry.js";
+import { findSkill, getAllSkills } from "../core/skill-registry.js";
 import { installSkills, interactiveSkillSelect, listAllSkills } from "../core/skill-installer.js";
 import { selectToolWithDetection } from "../ui/wizard.js";
 import { readAllManifests } from "../core/manifest.js";
 import { printInstallSummary, printEnhancedSummary } from "../ui/display.js";
 import { logger, createSpinner } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
+import { join } from "path";
 import { addInstalledPlugin } from "../utils/config.js";
 import { getConfigRoot, validateTool, validateLevel } from "../utils/paths.js";
 import { confirm } from "@inquirer/prompts";
@@ -26,7 +27,7 @@ import type { AITool, InstallLevel } from "../types/index.js";
 
 export async function installCommand(
   names: string[],
-  options: { tool?: string; level?: string; yes?: boolean; list?: boolean }
+  options: { tool?: string; level?: string; yes?: boolean; all?: boolean; list?: boolean }
 ): Promise<void> {
   // Handle --list flag
   if (options.list) {
@@ -36,6 +37,70 @@ export async function installCommand(
     } catch {
     }
     listAllSkills();
+    return;
+  }
+
+  // Handle --all flag: install all available skills
+  if (options.all) {
+    const scanSpinner = createSpinner(t("loading_skills_list"));
+    scanSpinner.start();
+    try {
+      const scanRepoManager = createRepositoryManager();
+      await scanRepoManager.ensureRepoAndScan();
+      scanSpinner.succeed(t("loading_skills_list_complete"));
+    } catch {
+      scanSpinner.warn(t("loading_skills_list_failed"));
+    }
+
+    const allSkills = getAllSkills();
+    const skillIds = allSkills.map((s) => s.id);
+
+    if (skillIds.length === 0) {
+      logger.error(t("install_no_skill_selected"));
+      return;
+    }
+
+    let tool: AITool;
+    if (options.tool) {
+      tool = validateTool(options.tool);
+    } else {
+      const detected = await selectToolWithDetection();
+      if (detected === "back" || detected === "cancel") {
+        logger.info(t("init_cancelled"));
+        return;
+      }
+      tool = detected;
+    }
+
+    const level: InstallLevel = options.level ? validateLevel(options.level) : "project";
+
+    const repoManager = createRepositoryManager();
+    const spinner = createSpinner(t("loading_plugin_data"));
+    spinner.start();
+    const repoPath = await repoManager.ensureRepo();
+    spinner.succeed(t("loading_plugin_data_complete"));
+
+    logger.info(`${t("skill_all_install_progress").replace("{count}", chalk.bold(String(skillIds.length)))}`);
+
+    const results = await installSkills(skillIds, tool, level, repoPath);
+
+    let successCount = 0;
+    let failCount = 0;
+    const total = results.length;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const progress = `[${i + 1}/${total}]`;
+      if (result.success) { logger.success(`${progress} ${result.skillId}`); successCount++; }
+      else { logger.error(`${progress} ${result.skillId}: ${result.error}`); failCount++; }
+    }
+
+    const configRoot = getConfigRoot(tool, level);
+    logger.blank();
+    logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
+    logger.blank();
+    logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
+    logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
+    logger.blank();
     return;
   }
 
@@ -57,7 +122,10 @@ export async function installCommand(
       tool = validateTool(options.tool);
     } else {
       const detected = await selectToolWithDetection();
-      if (detected === "back" || detected === "cancel") return;
+      if (detected === "back" || detected === "cancel") {
+        logger.info(t("init_cancelled"));
+        return;
+      }
       tool = detected;
     }
 
@@ -70,11 +138,17 @@ export async function installCommand(
           const selectedSkills = await interactiveSkillSelect(tool, level);
           if (selectedSkills === "back") {
             const redetected = await selectToolWithDetection();
-            if (redetected === "back" || redetected === "cancel") return;
+            if (redetected === "back" || redetected === "cancel") {
+              logger.info(t("init_cancelled"));
+              return;
+            }
             tool = redetected;
             break;
           }
-          if (selectedSkills === "cancel") return;
+          if (selectedSkills === "cancel") {
+            logger.info(t("init_cancelled"));
+            return;
+          }
           if (selectedSkills.length === 0) {
             logger.info(t("install_no_skill_selected"));
             return;
@@ -104,7 +178,7 @@ export async function installCommand(
           logger.blank();
           logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
           logger.blank();
-          logger.info(`${t("install_to")}: ${chalk.cyan(configRoot + "/skills/")}`);
+          logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
           logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
           logger.blank();
           return;
@@ -155,7 +229,10 @@ export async function installCommand(
     tool = validateTool(options.tool);
   } else {
     const detected = await selectToolWithDetection();
-    if (detected === "back" || detected === "cancel") return;
+    if (detected === "back" || detected === "cancel") {
+      logger.info(t("init_cancelled"));
+      return;
+    }
     tool = detected;
   }
 
@@ -255,7 +332,7 @@ export async function installCommand(
     logger.blank();
     logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
     logger.blank();
-    logger.info(`${t("install_to")}: ${chalk.cyan(getConfigRoot(tool, level) + "/skills/")}`);
+    logger.info(`${t("install_to")}: ${chalk.cyan(join(getConfigRoot(tool, level), "skills"))}`);
     logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
     logger.blank();
   }
@@ -265,7 +342,9 @@ async function installPlugins(
   pluginIds: string[],
   tool: AITool,
   level: InstallLevel,
-  repoPath: string
+  repoPath: string,
+  installPath?: string,
+  yes?: boolean
 ) {
   const results = [];
   const total = pluginIds.length;
@@ -281,6 +360,8 @@ async function installPlugins(
       tool,
       level,
       repoPath,
+      installPath,
+      yes,
     });
 
     if (result.success) {

@@ -24,10 +24,11 @@ export function printPluginList(
       chalk.cyan(t("list_id")),
       chalk.cyan(t("list_name")),
       chalk.cyan(t("list_status")),
-      chalk.cyan(t("list_skills")),
-      chalk.cyan(t("list_agents")),
+      chalk.cyan(t("list_description")),
     ],
     style: { head: [], border: [] },
+    colWidths: [6, 32, 8, 50],
+    wordWrap: true,
   });
 
   plugins.forEach((plugin, index) => {
@@ -40,8 +41,7 @@ export function printPluginList(
       String(index + 1),
       plugin.displayName,
       status,
-      String(plugin.skills),
-      String(plugin.agents),
+      plugin.description || chalk.dim("—"),
     ]);
   });
 
@@ -132,11 +132,5 @@ export function printEnhancedSummary(
   for (const line of lines) {
     console.log(line);
   }
-  console.log();
-}
-
-export function printQuickStart(tool: string): void {
-  console.log(chalk.bold(`  ${t("quick_start")}: ${tool}`));
-  console.log(chalk.dim(`  ${t("quick_start_hint")}`));
   console.log();
 }

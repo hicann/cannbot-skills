@@ -11,12 +11,36 @@
 import { createCLI } from "./cli.js";
 import { t } from "./utils/i18n.js";
 
-process.on("uncaughtException", (error: any) => {
-  if (error.name === "ExitPromptError") {
+function isExitError(error: any): boolean {
+  if (!error) return false;
+  return (
+    error.name === "ExitPromptError" ||
+    error.message?.includes("force closed") ||
+    error.message?.includes("SIGINT") ||
+    error.constructor?.name === "ExitPromptError"
+  );
+}
+
+function handleExit(error: any): void {
+  if (isExitError(error)) {
     console.log("\n" + t("init_cancelled"));
     process.exit(0);
   }
+}
+
+process.on("SIGINT", () => {
+  console.log("\n" + t("init_cancelled"));
+  process.exit(130);
+});
+
+process.on("uncaughtException", (error: any) => {
+  handleExit(error);
   throw error;
+});
+
+process.on("unhandledRejection", (error: any) => {
+  handleExit(error);
+  process.exit(1);
 });
 
 const program = createCLI();

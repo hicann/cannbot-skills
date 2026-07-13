@@ -1,8 +1,14 @@
 id: triton-op-generator
 dir: plugins-official/triton-op-generator
-displayName: Triton 算子生成
-script: install.sh
+displayName: Triton 算子开发
 aliases: [triton]
 skills: 6
 agents: 0
-description: Triton-Ascend 算子代码生成与优化
+description: Triton-Ascend 算子 6 阶段自动生成与优化（描述→代码→验证→优化）
+version: "1.2.2"
+configFile: AGENTS.md
+configRootConfigLink: false
+installSkills:
+  - dir: ops
+    skills: [triton-task-extractor, triton-op-designer, triton-op-coding, triton-op-verifier, triton-latency-optimizer, npu-arch]
+installAgents: []

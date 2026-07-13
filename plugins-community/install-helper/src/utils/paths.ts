@@ -14,7 +14,7 @@ import { existsSync } from "fs";
 import type { AITool, InstallLevel, TraeVariant } from "../types/index.js";
 import { t } from "./i18n.js";
 
-const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot"];
+export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot"];
 const VALID_LEVELS: InstallLevel[] = ["project", "global"];
 
 export function validateTool(tool: string): AITool {
@@ -116,6 +116,10 @@ export function getConfigRoot(
 
 export function getConfigFileName(tool: AITool): string {
   return tool === "claude" ? "CLAUDE.md" : "AGENTS.md";
+}
+
+export function getAgentsFileName(tool: AITool): string {
+  return getConfigFileName(tool);
 }
 
 export function getSkillsDir(configRoot: string): string {

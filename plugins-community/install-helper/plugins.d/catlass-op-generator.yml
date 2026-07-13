@@ -2,6 +2,17 @@ id: catlass-op-generator
 dir: plugins-official/catlass-op-generator
 displayName: Catlass 算子直调
 aliases: [catlass]
-skills: 10
+skills: 14
 agents: 3
-description: Catlass 算子直调开发
+description: Catlass 模板拼装 GEMM/Matmul/Epilogue 算子开发
+version: "1.2.2"
+configFile: AGENTS.md
+configRootConfigLink: true
+installSkills:
+  - dir: ops
+    skills: [catlass-op-design, catlass-op-develop, catlass-op-perf-tune, ascendc-tiling-design, npu-arch, ascendc-api-best-practices, ops-precision-standard, ascendc-docs-search, ascendc-env-check, ascendc-precision-debug, ops-profiling, ascendc-runtime-debug, ascendc-code-review, torch-ascendc-op-extension]
+installAgents: [catlass-op-architect, catlass-op-generator, catlass-op-reviewer]
+externalRepos:
+  - url: https://gitcode.com/cann/asc-devkit.git
+    dir: plugins-official/catlass-op-generator/asc-devkit
+    configRootLink: false

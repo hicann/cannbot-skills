@@ -11,6 +11,7 @@
 import chalk from "chalk";
 import ora, { type Ora } from "ora";
 import { t } from "./i18n.js";
+import { getDisplayWidth } from "../ui/theme.js";
 
 export const logger = {
   success: (msg: string) => console.log(chalk.green("✓") + " " + msg),
@@ -39,29 +40,6 @@ export function printBanner(subtitle?: string): void {
   }
 }
 
-function getDisplayWidth(str: string): number {
-  let width = 0;
-  for (const ch of str) {
-    const code = ch.codePointAt(0)!;
-    if (
-      (code >= 0x2E80 && code <= 0x9FFF) ||
-      (code >= 0xF900 && code <= 0xFAFF) ||
-      (code >= 0xFE30 && code <= 0xFE4F) ||
-      (code >= 0xFF00 && code <= 0xFFEF) ||
-      (code >= 0x3400 && code <= 0x4DBF) ||
-      (code >= 0x20000 && code <= 0x2A6DF) ||
-      (code >= 0x2A700 && code <= 0x2B73F) ||
-      (code >= 0x2B740 && code <= 0x2B81F) ||
-      (code >= 0x2B820 && code <= 0x2CEAF)
-    ) {
-      width += 2;
-    } else {
-      width += 1;
-    }
-  }
-  return width;
-}
-
 export function printBoxTitle(title: string, width: number = 65): void {
   const border = "═".repeat(width);
   const displayWidth = getDisplayWidth(title);
@@ -82,14 +60,4 @@ export function showOperationHints(isCheckbox: boolean = false): void {
   } else {
     console.log(`  💡 \x1b[36m↑↓\x1b[0m ${t("hint_select_move")} | \x1b[36m⏎\x1b[0m ${t("hint_select_confirm")}\n`);
   }
-}
-
-export function printBox(content: string[]): void {
-  const maxLen = Math.max(...content.map((line) => line.length));
-  const border = "─".repeat(maxLen + 2);
-  console.log(chalk.cyan(`  ┌${border}┐`));
-  for (const line of content) {
-    console.log(chalk.cyan("  │ ") + line.padEnd(maxLen) + chalk.cyan(" │"));
-  }
-  console.log(chalk.cyan(`  └${border}┘`));
 }

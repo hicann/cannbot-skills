@@ -27,5 +27,6 @@ export default defineConfig({
     cpSync("src/config", "dist/config", { recursive: true });
     cpSync("plugins.d", "dist/plugins.d", { recursive: true });
     cpSync("src/locales", "dist/locales", { recursive: true });
+    cpSync("../../install.ps1", "dist/install.ps1");
   },
 });

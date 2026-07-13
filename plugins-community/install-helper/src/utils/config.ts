@@ -8,14 +8,17 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { parse, stringify } from "yaml";
 import type { AppConfig } from "../types/index.js";
+import { atomicWriteFileSync } from "./fs.js";
+import { logger } from "./logger.js";
+import { t } from "./i18n.js";
+import { getCannbotConfigDir } from "./paths.js";
 
 export function getConfigDir(): string {
-  return join(homedir(), ".cannbot");
+  return getCannbotConfigDir();
 }
 
 export function getConfigPath(): string {
@@ -42,6 +45,7 @@ export function readConfig(): AppConfig {
       installedPlugins: parsed.installedPlugins || [],
     };
   } catch {
+    logger.warn(t("config_corrupted"));
     return {
       language: "zh_CN",
       installedPlugins: [],
@@ -57,7 +61,7 @@ export function writeConfig(config: AppConfig): void {
 
   const configPath = getConfigPath();
   const content = stringify(config);
-  writeFileSync(configPath, content, "utf-8");
+  atomicWriteFileSync(configPath, content);
 }
 
 export function updateConfig(updates: Partial<AppConfig>): AppConfig {

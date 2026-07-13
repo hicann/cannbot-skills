@@ -8,11 +8,13 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseYaml } from "yaml";
 import { getCannbotConfigDir } from "../utils/paths.js";
+import { atomicWriteFileSync } from "../utils/fs.js";
+import { isDirectory } from "../utils/fs-helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,18 +53,21 @@ const EXCLUDE_DIRS = new Set([
   "scripts",
 ]);
 
-function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[] } {
+function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[]; cacheTtlMs: number } {
   const configPath = join(__dirname, "config", "repository.yaml");
   try {
     const config = parseYaml(readFileSync(configPath, "utf-8"));
+    const ttlHours = config.scanCacheTtlHours || 24;
     return {
-      skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "ops-lab"],
+      skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "ops-lab", "runtime"],
       pluginDirs: config.pluginDirs || ["plugins-official", "plugins-community"],
+      cacheTtlMs: ttlHours * 60 * 60 * 1000,
     };
   } catch {
     return {
-      skillDirs: ["ops", "model", "graph", "infra", "ops-lab"],
+      skillDirs: ["ops", "model", "graph", "infra", "ops-lab", "runtime"],
       pluginDirs: ["plugins-official", "plugins-community"],
+      cacheTtlMs: 24 * 60 * 60 * 1000,
     };
   }
 }
@@ -98,13 +103,28 @@ export function scanSkills(repoPath: string): ScannedSkill[] {
       if (existsSync(skillDir)) {
         scanDirectory(skillDir, repoPath, `${pluginDir}/${plugin}/skill`, skills, seen);
       }
+
+      const rootSkillMd = join(pluginPath, "SKILL.md");
+      const initSh = join(pluginPath, "init.sh");
+      if (existsSync(rootSkillMd) && !existsSync(initSh)) {
+        const frontmatter = parseFrontmatter(rootSkillMd);
+        if (frontmatter && !seen.has(frontmatter.name)) {
+          seen.add(frontmatter.name);
+          skills.push({
+            id: frontmatter.name,
+            description: frontmatter.description,
+            source: `${pluginDir}/${plugin}`,
+            filePath: rootSkillMd,
+          });
+        }
+      }
     }
   }
 
   return skills;
 }
 
-export function parseFrontmatter(filePath: string): { name: string; description: string } | null {
+function parseFrontmatter(filePath: string): { name: string; description: string } | null {
   try {
     const content = readFileSync(filePath, "utf-8");
     const lines = content.split("\n");
@@ -128,8 +148,13 @@ export function parseFrontmatter(filePath: string): { name: string; description:
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.name || typeof parsed.name !== "string") return null;
 
+    const trimmedName = parsed.name.trim();
+    if (!trimmedName || /[\/\\]|\.\./.test(trimmedName) || !/^[a-zA-Z0-9._-]+$/.test(trimmedName)) {
+      return null;
+    }
+
     return {
-      name: parsed.name.trim(),
+      name: trimmedName,
       description: (parsed.description || "").trim(),
     };
   } catch {
@@ -178,7 +203,7 @@ export function readScanCache(): ScanCache | null {
     if (!cache.skills || !cache.timestamp) return null;
     
     const age = Date.now() - cache.timestamp;
-    if (age > 24 * 60 * 60 * 1000) return null;
+    if (age > scanConfig.cacheTtlMs) return null;
     
     return cache;
   } catch {
@@ -193,7 +218,7 @@ export function writeScanCache(cache: ScanCache): void {
     if (!existsSync(cacheDir)) {
       mkdirSync(cacheDir, { recursive: true });
     }
-    writeFileSync(cachePath, JSON.stringify(cache, null, 2));
+    atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2));
   } catch {
   }
 }
@@ -209,22 +234,6 @@ function scanDirectory(
   skills: ScannedSkill[],
   seen: Set<string>
 ): void {
-  // Check if dirPath itself contains SKILL.md (for skill/ directories)
-  const selfSkillMd = join(dirPath, "SKILL.md");
-  if (existsSync(selfSkillMd)) {
-    const frontmatter = parseFrontmatter(selfSkillMd);
-    if (frontmatter && !seen.has(frontmatter.name)) {
-      seen.add(frontmatter.name);
-      skills.push({
-        id: frontmatter.name,
-        description: frontmatter.description,
-        source: sourcePrefix,
-        filePath: selfSkillMd,
-      });
-    }
-    return; // Don't recurse into subdirectories
-  }
-
   for (const entry of safeReaddir(dirPath)) {
     const fullPath = join(dirPath, entry);
     
@@ -247,7 +256,7 @@ function scanDirectory(
       continue;
     }
 
-    scanDirectory(fullPath, repoPath, sourcePrefix, skills, seen);
+    scanDirectory(fullPath, repoPath, sourcePrefix + "/" + entry, skills, seen);
   }
 }
 
@@ -256,13 +265,5 @@ function safeReaddir(dir: string): string[] {
     return readdirSync(dir);
   } catch {
     return [];
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
   }
 }

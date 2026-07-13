@@ -13,7 +13,7 @@ import { existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { AITool, DetectedTool } from "../types/index.js";
-import { detectTraeVariant } from "../utils/paths.js";
+import { detectTraeVariant, VALID_TOOLS } from "../utils/paths.js";
 
 async function getCommandVersion(
   cmd: string,
@@ -31,8 +31,9 @@ async function getCommandVersion(
 
 async function getCommandPath(cmd: string): Promise<string | undefined> {
   try {
-    const result = await execa("which", [cmd], { timeout: 5000 });
-    return result.stdout.trim();
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const result = await execa(whichCmd, [cmd], { timeout: 5000 });
+    return result.stdout.trim().split("\n")[0];
   } catch {
     return undefined;
   }
@@ -122,11 +123,6 @@ export async function detectTools(): Promise<DetectedTool[]> {
   return tools;
 }
 
-export async function detectSingleTool(): Promise<DetectedTool | undefined> {
-  const tools = await detectTools();
-  return tools[0];
-}
-
 export function getToolDisplayName(tool: AITool): string {
   const names: Record<AITool, string> = {
     opencode: "OpenCode",
@@ -139,5 +135,5 @@ export function getToolDisplayName(tool: AITool): string {
 }
 
 export function getAllTools(): AITool[] {
-  return ["opencode", "claude", "trae", "cursor", "copilot"];
+  return VALID_TOOLS;
 }

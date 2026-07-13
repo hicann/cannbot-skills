@@ -20,6 +20,24 @@ export interface DetectedTool {
   path: string;
 }
 
+export interface PluginManifestSkillEntry {
+  name: string;
+  as?: string;
+}
+
+export interface PluginManifestSkillSource {
+  dir: string;
+  skills: (string | PluginManifestSkillEntry)[];
+}
+
+export interface PluginManifestExternalRepo {
+  url: string;
+  dir: string;
+  depth?: number;
+  recursive?: boolean;
+  configRootLink?: boolean;
+}
+
 export interface PluginEntry {
   id: string;
   dir: string;
@@ -29,6 +47,12 @@ export interface PluginEntry {
   skills: number;
   agents: number;
   description: string;
+  version?: string;
+  configFile?: string;
+  configRootConfigLink?: boolean;
+  installSkills?: PluginManifestSkillSource[];
+  installAgents?: string[];
+  externalRepos?: PluginManifestExternalRepo[];
 }
 
 export interface InstallOptions {
@@ -77,43 +101,6 @@ export interface InstalledPlugin {
   agentsCount: number;
   installTime: string;
   configRoot: string;
-}
-
-export interface DoctorResult {
-  tools: ToolCheck[];
-  plugins: PluginCheck[];
-  links: LinkCheck[];
-  config: ConfigCheck[];
-  errors: number;
-  warnings: number;
-}
-
-export interface ToolCheck {
-  name: string;
-  status: "ok" | "error" | "warning";
-  version?: string;
-  message?: string;
-}
-
-export interface PluginCheck {
-  id: string;
-  displayName: string;
-  status: "ok" | "error" | "not-installed";
-  skillsCount?: number;
-  agentsCount?: number;
-  message?: string;
-}
-
-export interface LinkCheck {
-  path: string;
-  status: "ok" | "error" | "warning";
-  message?: string;
-}
-
-export interface ConfigCheck {
-  file: string;
-  status: "ok" | "error" | "warning";
-  message?: string;
 }
 
 export interface WizardAnswers {

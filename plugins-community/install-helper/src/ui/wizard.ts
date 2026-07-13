@@ -8,20 +8,18 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { select, checkbox, Separator } from "@inquirer/prompts";
+import { select, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
 import type { AITool, InstallLevel, WizardAnswers } from "../types/index.js";
 import { getAllPlugins } from "../core/registry.js";
 import { detectTools, getToolDisplayName } from "../core/detector.js";
 import { readAllManifests } from "../core/manifest.js";
-import { getConfigRoot } from "../utils/paths.js";
+import { getConfigRoot, VALID_TOOLS } from "../utils/paths.js";
 import { t } from "../utils/i18n.js";
 import { logger, createSpinner, printBoxTitle, showOperationHints } from "../utils/logger.js";
 import { readConfig, updateConfig } from "../utils/config.js";
-import { selectTheme, checkboxTheme } from "./theme.js";
-
-const BACK = "__back__";
-const CANCEL = "__cancel__";
+import { selectTheme } from "./theme.js";
+import { BACK, CANCEL } from "../utils/constants.js";
 
 export async function selectToolWithDetection(): Promise<AITool | "back" | "cancel"> {
   const config = readConfig();
@@ -90,7 +88,7 @@ export async function runWizard(): Promise<WizardAnswers> {
       case 3: {
         const result = await stepConfirm(selectedTool!, level, plugins);
         if (result === BACK) { step = 2; break; }
-        if (result === CANCEL || result === false) {
+        if (result === CANCEL) {
           return { language: config.language || "zh_CN", tool: selectedTool!, level, plugins: [], confirmed: false };
         }
         updateConfig({ lastTool: selectedTool, lastLevel: level });
@@ -106,7 +104,7 @@ async function stepTool(detectedTools: Awaited<ReturnType<typeof detectTools>>, 
   if (detectedTools.length === 0) {
     logger.error(t("error_tool_not_found"));
     const choices: Array<{ name: string; value: string } | Separator> = [
-      ...["opencode", "claude", "trae", "cursor", "copilot"].map((tool) => ({
+      ...VALID_TOOLS.map((tool) => ({
         name: `> ${getToolDisplayName(tool as AITool)}`,
         value: tool,
       })),
@@ -212,44 +210,31 @@ async function stepPlugins(tool: AITool, level: InstallLevel): Promise<string[] 
   const manifests = readAllManifests(configRoot);
   const installedSet = new Set(manifests.map((m) => m.team));
 
-  const choices: Array<{ name: string; value: string; checked: boolean } | Separator> = plugins.map((p) => {
+  const choices: Array<{ name: string; value: string; description?: string } | Separator> = plugins.map((p) => {
     const isInstalled = installedSet.has(p.id);
     const suffix  = isInstalled ? ` [${t("wizard_already_installed")}]` : "";
     return {
-      name: `${p.displayName}${suffix} — ${p.description}`,
+      name: `> ${chalk.cyan(p.displayName)}${suffix}`,
       value: p.id,
-      checked: false,
+      description: p.description,
     };
   });
-  showOperationHints(true);
-  const selected = await checkbox({
-    message: t("wizard_select_plugins"),
+  choices.push(new Separator("──────────────"));
+  choices.push({ name: "<- " + t("wizard_back"), value: BACK });
+  choices.push({ name: "x  " + t("wizard_cancel"), value: CANCEL });
+
+  showOperationHints();
+  const selected = await select({
+    message: t("wizard_select_plugin"),
     choices,
     loop: false,
-    instructions: false,
-    theme: checkboxTheme,
+    theme: selectTheme,
     pageSize: 15,
   });
 
-  const pluginIds = selected;
-
-  // 如果什么都没勾选，显示操作菜单
-  if (pluginIds.length === 0) {
-    const action = await select({
-      message: t("wizard_no_selection"),
-      choices: [
-        new Separator("──────────────"),
-        { name: "<- " + t("wizard_back_to_reselect"), value: "back" },
-        { name: "x  " + t("wizard_cancel"), value: "cancel" },
-      ],
-      loop: false,
-      theme: selectTheme,
-    });
-    if (action === "back") return BACK;
-    return CANCEL;
-  }
-
-  return pluginIds;
+  if (selected === BACK) return BACK;
+  if (selected === CANCEL) return CANCEL;
+  return [selected];
 }
 
 async function stepConfirm(

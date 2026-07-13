@@ -13,11 +13,10 @@ import { join } from "path";
 import type { AITool, BackupInfo } from "../types/index.js";
 import { readManifest } from "./manifest.js";
 import { readRecord } from "./record.js";
-import { findPlugin } from "./registry.js";
+import { findPlugin, getAllPlugins } from "./registry.js";
+import { getAgentsFileName } from "../utils/paths.js";
 
-export function getAgentsFileName(tool: AITool): string {
-  return tool === "claude" ? "CLAUDE.md" : "AGENTS.md";
-}
+export { getAgentsFileName };
 
 export function detectCurrentPlugin(
   configRoot: string,
@@ -154,21 +153,10 @@ function formatTimestamp(date: Date): string {
 
 function readAllRecords(): any[] {
   const records: any[] = [];
-  const plugins = [
-    "ops-direct-invoke",
-    "ops-direct-invoke-flash",
-    "ops-registry-invoke",
-    "pypto-op-orchestrator",
-    "triton-op-generator",
-    "tilelang-op-orchestrator",
-    "model-infer-optimize",
-    "catlass-op-generator",
-    "ops-code-reviewer",
-    "torch-compile",
-  ];
+  const plugins = getAllPlugins();
 
-  for (const pluginId of plugins) {
-    const record = readRecord(pluginId);
+  for (const plugin of plugins) {
+    const record = readRecord(plugin.id);
     if (record) {
       records.push(record);
     }

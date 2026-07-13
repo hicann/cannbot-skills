@@ -28,11 +28,25 @@
 
 通过 `install-helper` 安装完整插件内容（Skills + Agents + Workflows + 外部依赖）：
 
-| 方式 | 命令 | 说明 |
-|------|------|------|
-| **curl** | `curl -fsSL https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.sh \| bash` | 一键安装（推荐） |
-| **npx** | `npx @cannbot-ai/install-helper` | 免安装运行 |
-| **npm** | `npm install -g @cannbot-ai/install-helper` | 全局安装 |
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.sh | bash
+```
+
+### Windows
+
+```powershell
+iwr -useb https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.ps1 | iex
+```
+
+### npm（全平台，需要 [Node.js 18+](https://nodejs.org/zh-cn/download)）
+
+```bash
+npm install -g @cannbot-ai/install-helper
+```
+
+> 也可以免安装直接运行：`npx @cannbot-ai/install-helper`
 
 ### install-helper 命令参考
 
@@ -118,9 +132,6 @@ npx skills list
 # 卸载
 npx skills remove ascendc-tiling-design
 ```
-
-> [!IMPORTANT]
-> **此方式仅安装独立 Skills**。如需完整插件内容（Skills + Agents + Workflows + 外部依赖），请使用 `install-helper` 或 `init.sh` 脚本。
 
 ---
 

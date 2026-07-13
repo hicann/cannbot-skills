@@ -2,6 +2,18 @@ id: model-infer-optimize
 dir: plugins-official/model-infer-optimize
 displayName: NPU 推理优化
 aliases: [model-infer, infer, inference]
-skills: 11
+skills: 12
 agents: 3
-description: NPU 模型推理端到端优化
+description: NPU 模型推理端到端优化（并行/KVCache/融合/量化/图模式/多流/SuperKernel）
+version: "1.2.2"
+configFile: AGENTS.md
+configRootConfigLink: true
+installSkills:
+  - dir: model
+    skills: [model-infer-migrator, model-infer-parallel-analysis, model-infer-parallel-impl, model-infer-kvcache, model-infer-fusion, model-infer-quantization, model-infer-graph-mode, model-infer-precision-debug, model-infer-runtime-debug, model-infer-multi-stream, model-infer-prefetch, model-infer-superkernel]
+installAgents: [model-infer-analyzer, model-infer-implementer, model-infer-reviewer]
+externalRepos:
+  - url: https://gitcode.com/cann/cann-recipes-infer.git
+    dir: plugins-official/model-infer-optimize/cann-recipes-infer
+    depth: 1
+    configRootLink: true

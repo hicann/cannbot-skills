@@ -29,7 +29,10 @@ export async function updateCommand(
     tool = validateTool(options.tool);
   } else {
     const detected = await selectToolWithDetection();
-    if (detected === "back" || detected === "cancel") return;
+    if (detected === "back" || detected === "cancel") {
+      logger.info(t("init_cancelled"));
+      return;
+    }
     tool = detected;
   }
 
@@ -61,9 +64,7 @@ export async function updateCommand(
   const updateSpinner = createSpinner(t("update_updating") + "...");
   updateSpinner.start();
 
-  await repoManager.updateRepo();
-  const repoPath = repoManager.getRepoPath();
-  await repoManager.ensureRepoAndScan();
+  const repoPath = await repoManager.ensureRepoAndScan();
   updateSpinner.succeed(t("install_repo_ready"));
 
   const allPlugins = getAllPlugins();

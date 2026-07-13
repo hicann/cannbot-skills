@@ -1,7 +1,20 @@
 id: tilelang-op-orchestrator
 dir: plugins-official/tilelang-op-orchestrator
-displayName: TileLang 算子
+displayName: TileLang 算子开发
 aliases: [tilelang]
 skills: 9
 agents: 3
-description: TileLang 算子开发流程
+description: TileLang Python DSL + @tilelang.jit 算子开发（支持 Developer/Expert 双模式）
+version: "1.2.2"
+configFile: AGENTS.md
+configRootConfigLink: false
+installSkills:
+  - dir: ops
+    skills: [tilelang-api-best-practices, tilelang-env-check, tilelang-op-design, tilelang-op-develop, tilelang-op-test-design, tilelang-perf-optimization, tilelang-programming-model-guide, tilelang-review, tilelang-submodule-pull]
+installAgents: [tilelang-op-analyst, tilelang-op-developer, tilelang-op-perf-tuner]
+externalRepos:
+  - url: https://github.com/tile-ai/tilelang-ascend.git
+    dir: plugins-official/tilelang-op-orchestrator/tilelang-ascend
+    depth: 1
+    recursive: true
+    configRootLink: false

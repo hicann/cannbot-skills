@@ -8,9 +8,13 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, lstatSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { getCannbotConfigDir, getConfigRoot } from "../utils/paths.js";
+import { atomicWriteFileSync } from "../utils/fs.js";
+import { isSymlink } from "../utils/fs-helpers.js";
+import { logger } from "../utils/logger.js";
+import { t } from "../utils/i18n.js";
 import type { AITool, InstallLevel, CannbotManifest } from "../types/index.js";
 
 export interface InstallRecord {
@@ -49,6 +53,7 @@ export function readRecord(pluginId: string): InstallRecord | null {
     const content = readFileSync(recordPath, "utf-8");
     return JSON.parse(content) as InstallRecord;
   } catch {
+    logger.warn(t("record_corrupted").replace("{file}", recordPath));
     return null;
   }
 }
@@ -60,7 +65,7 @@ export function writeRecord(record: InstallRecord): void {
   }
 
   const recordPath = getRecordPath(record.pluginId);
-  writeFileSync(recordPath, JSON.stringify(record, null, 2), "utf-8");
+  atomicWriteFileSync(recordPath, JSON.stringify(record, null, 2));
 }
 
 export function deleteRecord(pluginId: string): void {
@@ -77,7 +82,8 @@ export function scanInstalledFiles(
   level: InstallLevel,
   installPath: string,
   configRoot: string,
-  manifest: CannbotManifest | null
+  manifest: CannbotManifest | null,
+  externalRepoNames?: string[]
 ): InstallRecord {
   const files: string[] = [];
   const directories: string[] = [];
@@ -132,7 +138,9 @@ export function scanInstalledFiles(
     files.push(configFilePath);
   }
 
-  const repoLinks = ["asc-devkit", "pypto", "tilelang-ascend", "cann-recipes-infer", "cann-samples"];
+  const repoLinks = externalRepoNames && externalRepoNames.length > 0
+    ? externalRepoNames
+    : ["asc-devkit", "pypto", "tilelang-ascend", "cann-recipes-infer", "cann-samples"];
   for (const repoName of repoLinks) {
     const repoLinkPath = join(installPath, repoName);
     if (isSymlink(repoLinkPath)) {
@@ -155,14 +163,6 @@ export function scanInstalledFiles(
     files,
     directories,
   };
-}
-
-function isSymlink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink();
-  } catch {
-    return false;
-  }
 }
 
 // === Skill-level install records ===
@@ -193,6 +193,7 @@ export function readSkillRecord(): SkillInstallRecord {
     const content = readFileSync(recordPath, "utf-8");
     return JSON.parse(content) as SkillInstallRecord;
   } catch {
+    logger.warn(t("skill_record_corrupted"));
     return {};
   }
 }
@@ -203,7 +204,7 @@ export function writeSkillRecord(record: SkillInstallRecord): void {
     mkdirSync(installsDir, { recursive: true });
   }
   const recordPath = getSkillRecordPath();
-  writeFileSync(recordPath, JSON.stringify(record, null, 2), "utf-8");
+  atomicWriteFileSync(recordPath, JSON.stringify(record, null, 2));
 }
 
 export function addSkillsToRecord(

@@ -9,11 +9,13 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import type { ScannedSkill } from "./scanner.js";
+import { t } from "../utils/i18n.js";
 
 export interface SkillEntry {
   id: string;
   description: string;
   source: string;
+  filePath?: string;
 }
 
 export interface SkillCategory {
@@ -22,19 +24,20 @@ export interface SkillCategory {
   skills: SkillEntry[];
 }
 
-const CATEGORY_DEFS: { id: string; name: string }[] = [
-  { id: "knowledge", name: "知识与参考" },
-  { id: "env-tools", name: "环境与工具" },
-  { id: "debug", name: "调试与诊断" },
-  { id: "testing", name: "测试与质量" },
-  { id: "ascendc", name: "AscendC 开发" },
-  { id: "pypto", name: "PyPTO 开发" },
-  { id: "tilelang", name: "TileLang 开发" },
-  { id: "triton", name: "Triton 开发" },
-  { id: "model", name: "模型推理优化" },
-  { id: "graph", name: "图模式" },
-  { id: "platform", name: "平台工具" },
-  { id: "other", name: "其他 Skills" },
+const CATEGORY_DEFS: { id: string; name: string; nameEn: string }[] = [
+  { id: "knowledge", name: "知识与参考", nameEn: "Knowledge & Reference" },
+  { id: "env-tools", name: "环境与工具", nameEn: "Environment & Tools" },
+  { id: "debug", name: "调试与诊断", nameEn: "Debug & Diagnostics" },
+  { id: "testing", name: "测试与质量", nameEn: "Testing & Quality" },
+  { id: "ascendc", name: "AscendC 开发", nameEn: "AscendC Development" },
+  { id: "pypto", name: "PyPTO 开发", nameEn: "PyPTO Development" },
+  { id: "tilelang", name: "TileLang 开发", nameEn: "TileLang Development" },
+  { id: "triton", name: "Triton 开发", nameEn: "Triton Development" },
+  { id: "model", name: "模型推理优化", nameEn: "Model Inference Optimization" },
+  { id: "runtime", name: "Runtime 迁移", nameEn: "Runtime Migration" },
+  { id: "graph", name: "图模式", nameEn: "Graph Mode" },
+  { id: "platform", name: "平台工具", nameEn: "Platform Tools" },
+  { id: "other", name: "其他 Skills", nameEn: "Other Skills" },
 ];
 
 let dynamicSkills: SkillEntry[] = [];
@@ -45,12 +48,9 @@ export function initFromScan(scanned: ScannedSkill[]): void {
     id: s.id,
     description: s.description,
     source: s.source,
+    filePath: s.filePath,
   }));
   initialized = true;
-}
-
-export function isScanInitialized(): boolean {
-  return initialized;
 }
 
 const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
@@ -126,8 +126,6 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "catlass-op-perf-tune", description: "Catlass 性能调优", source: "ops" },
       { id: "cuda2ascend-simt", description: "CUDA 迁移到 Ascend C SIMT", source: "ops-lab" },
       { id: "ops-direct-invoke-flash", description: "从零构建 Ascend C 核函数", source: "plugins-official/ops-direct-invoke-flash/skills" },
-      { id: "ops-registry-invoke-workflow", description: "注册调用工作流", source: "plugins-official/ops-registry-invoke" },
-      { id: "ops-easyasc-dsl", description: "EasyASC DSL 算子开发", source: "plugins-community/ops-easyasc-dsl/skill" },
     ],
   },
   {
@@ -186,6 +184,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "model-infer-precision-debug", description: "NPU 推理精度诊断", source: "model" },
       { id: "model-infer-runtime-debug", description: "NPU 推理运行时错误诊断", source: "model" },
       { id: "model-infer-harmony", description: "端侧鸿蒙 ASR 量化转换与打包", source: "model" },
+      { id: "science-model-npu-migration", description: "NPU 代码级迁移（环境门禁/脚本适配/精度性能对比）", source: "plugins-community/science-model-npu-migration", filePath: "plugins-community/science-model-npu-migration/SKILL.md" },
     ],
   },
   {
@@ -199,6 +198,13 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "torch-npugraph-ex-runtime-error-diagnosis", description: "运行时报错诊断", source: "graph" },
       { id: "torch-npugraph-ex-performance-diagnosis", description: "性能诊断", source: "graph" },
       { id: "torch-custom-ops-guide", description: "自定义算子入图指南", source: "graph" },
+    ],
+  },
+  {
+    id: "runtime",
+    name: "Runtime 迁移",
+    skills: [
+      { id: "runtime_migration", description: "CUDA 应用迁移到 CANN 平台指南", source: "runtime" },
     ],
   },
   {
@@ -248,15 +254,12 @@ export function getAllSkills(): SkillEntry[] {
   return getActiveSkills();
 }
 
-export function getSkillsByCategory(categoryId: string): SkillEntry[] {
-  return getAllCategories().find((c) => c.id === categoryId)?.skills ?? [];
-}
-
 export function getAllCategories(): SkillCategory[] {
   const skills = getActiveSkills();
+  const isEn = t("list_name") === "Name";
   return CATEGORY_DEFS.map((def) => ({
     id: def.id,
-    name: def.name,
+    name: isEn ? def.nameEn : def.name,
     skills: skills.filter((s) => {
       const catId = CATEGORY_MAP[s.id];
       if (catId) return catId === def.id;

@@ -8,12 +8,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
 import { getCannbotConfigDir, getCannbotRepoPath } from "../utils/paths.js";
+import { logger } from "../utils/logger.js";
+import { t } from "../utils/i18n.js";
 import {
   scanSkills,
   getCurrentCommit,
@@ -21,6 +23,7 @@ import {
   writeScanCache,
 } from "./scanner.js";
 import { initFromScan } from "./skill-registry.js";
+import { mergeDynamicPlugins } from "./registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,9 +45,11 @@ const REPO_URL = loadRepoUrl();
 
 export class RepositoryManager {
   private repoPath: string | undefined;
+  private customPath?: string;
 
   constructor(customPath?: string) {
     this.repoPath = customPath;
+    this.customPath = customPath;
   }
 
   async ensureRepo(): Promise<string> {
@@ -70,11 +75,18 @@ export class RepositoryManager {
       return cachedPath;
     }
 
-    return await this.cloneRepo();
+    const clonedPath = await this.cloneRepo();
+    return clonedPath;
   }
 
   async ensureRepoAndScan(): Promise<string> {
     const repoPath = await this.ensureRepo();
+
+    const isUserProvided = !!this.customPath || !!process.env.CANNBOT_REPO_PATH;
+    if (!isUserProvided) {
+      await this.updateRepo();
+    }
+    mergeDynamicPlugins(repoPath);
 
     const cache = readScanCache();
     if (cache && cache.repoCommit === getCurrentCommit(repoPath)) {
@@ -99,8 +111,9 @@ export class RepositoryManager {
     try {
       await execa("git", ["pull", "--quiet"], { cwd: repoPath, timeout: 30000 });
     } catch {
-      // Ignore update failures
+      logger.warn(t("repo_pull_failed"));
     }
+    mergeDynamicPlugins(repoPath);
   }
 
   getRepoPath(): string {
@@ -132,6 +145,7 @@ export class RepositoryManager {
     }
 
     try {
+      logger.info(t("repo_cloning"));
       await execa(
         "git",
         ["clone", "--depth", "1", REPO_URL, targetPath],
@@ -141,7 +155,7 @@ export class RepositoryManager {
       return targetPath;
     } catch (error) {
       throw new Error(
-        `Failed to clone repository: ${error instanceof Error ? error.message : "Unknown error"}`
+        `Failed to clone repository: ${error instanceof Error ? error.message : t("error_unknown")}`
       );
     }
   }

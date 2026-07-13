@@ -8,30 +8,45 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import zhCN from "../locales/zh_CN.json" with { type: "json" };
+import enUS from "../locales/en_US.json" with { type: "json" };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 type Messages = Record<string, string>;
 
+const EMBEDDED_LOCALES: Record<string, Messages> = {
+  zh_CN: zhCN as Messages,
+  en_US: enUS as Messages,
+};
+
 function loadLocale(locale: string): Messages {
+  const embedded = EMBEDDED_LOCALES[locale];
+  if (embedded) return embedded;
+
   const localePath = join(__dirname, "locales", `${locale}.json`);
-  try {
-    const content = readFileSync(localePath, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    // Fallback to zh_CN if locale file not found
-    const fallbackPath = join(__dirname, "locales", "zh_CN.json");
+  if (existsSync(localePath)) {
+    try {
+      const content = readFileSync(localePath, "utf-8");
+      return JSON.parse(content);
+    } catch {
+    }
+  }
+
+  const fallbackPath = join(__dirname, "locales", "zh_CN.json");
+  if (existsSync(fallbackPath)) {
     try {
       const content = readFileSync(fallbackPath, "utf-8");
       return JSON.parse(content);
     } catch {
-      return {};
     }
   }
+
+  return EMBEDDED_LOCALES.zh_CN || {};
 }
 
 let currentLang: "zh_CN" | "en_US" = "zh_CN";
@@ -42,16 +57,6 @@ export function setLanguage(lang: "zh_CN" | "en_US"): void {
   messages = loadLocale(lang);
 }
 
-export function getLanguage(): "zh_CN" | "en_US" {
-  return currentLang;
-}
-
 export function t(key: string): string {
   return messages[key] !== undefined ? messages[key] : key;
 }
-
-export const i18n = {
-  setLanguage,
-  getLanguage,
-  t,
-};
