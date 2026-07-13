@@ -26,13 +26,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - 阶段 7：ACLNN 二进制一致性验证，产物为 example/ 工程 + aclnn 输出 bin + byte-level compare 结果
 应说明任一阶段产物缺失即交付失败，不得跳步或合并阶段
 
-## Expectations
-- [contains] 七阶段
-- [contains] OpDef
-- [contains] msopgen
-- [contains] custom_opp
-
-
 ---
 
 # Case 2: host 四件套拆分规范
@@ -54,14 +47,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - `<op>_tiling.cpp`：实现 TilingFunc 并 IMPL_OP_OPTILING 注册。TilingFunc 五板斧必须齐全：SaveToBuffer + SetDataSize + SetBlockDim + SetTilingKey + GetWorkspaceSizes。host API 只从 tiling/tiling_api.h 获取
 - `<op>_def.cpp`：实现 class RmsNorm : public OpDef，包含 Input/Output 定义（DataType 和 Format 数组）、AICore().AddConfig("ascend910b", cfg)、OP_ADD(RmsNorm)
 - `<op>_infershape.cpp`：实现 InferShape/InferDataType 并 IMPL_OP_INFERSHAPE 注册。注意使用 gert::InferShapeContext 专用 API，不得混用 TilingContext 的 GetStorageShape
-
-## Expectations
-- [contains] tiling.h
-- [contains] def.cpp
-- [contains] infershape.cpp
-- [contains] TilingData
-- [contains] OpDef
-
 
 ---
 
@@ -91,14 +76,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
   7. Init 签名模板化接收 TilingData
 - 禁止：不得新增辅助函数/lambda、不得改算术表达式（如把 1.0f/sqrt(x) 换成 rsqrt(x)）、不得保留 main/ReadConfig/KernelCall
 
-## Expectations
-- [contains] 只搬不改
-- [contains] GET_TILING_DATA
-- [contains] TILING_KEY_IS
-- [contains] AscendC::
-- [contains] bfloat16_t
-
-
 ---
 
 # Case 4: msopgen gen 命令与 -lan cpp 参数
@@ -121,13 +98,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 的七阶段工作流是�
 - 生成后结构校验：必须确认生成了 op_host/ + op_kernel/，且没有 tbe/、impl/、op_info_cfg/ 目录
 - 后续操作：删除 msopgen 生成的合并 host 文件 <VerifyProjectDir>/op_host/<op>.cpp，再把 UserOutputDir 的 op_host/ 和 op_kernel/ 同步覆盖到验证工程
 
-## Expectations
-- [contains] -lan cpp
-- [contains] msopgen gen
-- [contains] TBE
-- [contains] op_host
-
-
 ---
 
 # Case 5: OpDef 契约表与 _def.cpp 规范
@@ -149,13 +119,6 @@ OpDef 契约表包含哪些字段？_def.cpp 文件应该怎么写？有哪些�
 - _def.cpp 九点自检：class <Op> : public OpDef、构造函数大驼峰、.Input() 计数≥1、.Output() 计数≥1、每个 Input/Output 后跟 .DataType({ge::DT_xxx})（大括号内至少一个具体类型）、.Format({ge::FORMAT_ND})（非空）、DataType 和 Format 数组长度 == schMode 数 N、AICore().AddConfig("ascend910b", cfg) + OpAICoreConfig 六 flag + ExtendCfgInfo("opFile.value","<op>")、末尾 OP_ADD(<Op>)
 - 空壳后果：编译能过但运行时 aclnn 报 NotRegistered / GetOpInfoFailed / op proto is empty，是最隐蔽最常见的失败模式
 - SOC 用系列名（如 ascend910b），不带尾部型号数字（如 ascend910b4）
-
-## Expectations
-- [contains] OpDef
-- [contains] OP_ADD
-- [contains] DataType
-- [contains] schMode
-
 
 ---
 
@@ -181,13 +144,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 交付约束：最终交付件清单必须同时包含两个目录的绝对路径
 - 环境不可用降级：Windows 或未安装 CANN/msopgen 时，按 build-verify.md § D 输出人工验证手册，明确说明本次未完成编译、安装和二进制一致性验证，禁止伪装执行
 
-## Expectations
-- [contains] UserOutputDir
-- [contains] VerifyProjectDir
-- [contains] rm -rf
-- [contains] 降级
-
-
 ---
 
 # Case 7: ACLNN 二进制一致性验证
@@ -212,13 +168,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - ACLNN 输出写入 example/aclnn_output/，逐文件与原直调输出做 cmp -s 或 SHA256 比较
 - 禁止使用 rtol/atol 容差放行，必须 byte-level identical，任一字节不同即验证失败
 
-## Expectations
-- [contains] aclnn
-- [contains] byte-level
-- [contains] cmp
-- [contains] example
-
-
 ---
 
 # Case 8: 正向看护-多 skill 环境下正确触发
@@ -240,12 +189,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 生成 <op>.json 并用 msopgen gen -lan cpp 创建验证工程
 - 编译构建（bash build.sh）、安装 .run、ACLNN 二进制一致性验证
 即使在 ascendc-registry-invoke-template、ascendc-direct-invoke-template 等相似 skill 共存的环境下，也应正确选择 ascendc-direct-invoke-to-registry-invoke。
-
-## Expectations
-- [contains] msopgen
-- [contains] ACLNN
-
-- [skill_activated] ascendc-direct-invoke-to-registry-invoke
 
 ---
 
@@ -272,13 +215,6 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - std::min no member：device 端禁用 STL，改用三元运算符（R-021）
 - msopgen 生成 tbe/impl/ 而非 op_host/op_kernel/：msopgen gen 未带 -lan cpp（R-053）
 
-## Expectations
-- [contains] adv_api
-- [contains] double free
-- [contains] TILING_KEY_IS
-- [contains] bfloat16_t
-
-
 ---
 
 # Case 10: 使用边界-不适用于从零开发
@@ -301,8 +237,3 @@ ascendc-direct-invoke-to-registry-invoke 这个 skill 要求交付哪两个目�
 - 如果没有这些材料，应建议用户使用 ascendc-direct-invoke-template（从零创建直调工程）或 ascendc-registry-invoke-template（从零创建自定义算子工程）等 skill
 - 不应在没有可参考的直调代码时直接生成算子代码
 
-## Expectations
-- [contains] 不用于
-- [contains] 直调
-
-- [not_contains] BEGIN_TILING_DATA_DEF

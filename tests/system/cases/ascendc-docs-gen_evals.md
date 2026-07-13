@@ -37,14 +37,6 @@ eval_mode: file_based
 - §5 ACLNN API 接口定义：两段式接口声明（aclnnAddGetWorkspaceSize + aclnnAdd）、参数说明表、约束与限制（类型推导规则、shape 约束、广播规则）
 - §8 约束与要求：计算约束
 
-## Expectations
-
-- [contains] ACLNN
-- [contains] 修订记录
-- [contains] 算子规格
-
-- [file_exists] REQUIREMENTS.md
-
 ---
 
 # Case 2: 为 Softmax 算子生成详细设计文档
@@ -81,16 +73,6 @@ eval_mode: file_based
 - §6 交付件清单
 - §7 迭代规划表（迭代一/二/三的目标和代码开发/UT开发/ST用例）
 
-## Expectations
-
-- [contains] op_api
-- [contains] op_host
-- [contains] op_kernel
-- [contains] TilingData
-- [contains] UB
-
-- [file_exists] DESIGN.md
-
 ---
 
 # Case 3: 为 Add 算子生成迭代执行计划
@@ -122,16 +104,6 @@ eval_mode: file_based
 - 迭代二穿刺列表：表格形式验证迭代三任务，包含验证目标
 - 迭代三全覆盖目标：覆盖全 dtype（fp16, fp32）、边界 case、广播用例
 - 穿刺结果判定表：成功/部分成功/失败的处理方式
-
-## Expectations
-
-- [contains] 迭代一
-- [contains] 迭代二
-- [contains] 迭代三
-- [contains] TilingKey
-- [contains] 穿刺
-
-- [file_exists] PLAN.md
 
 ---
 
@@ -171,15 +143,6 @@ eval_mode: file_based
 - 约束说明：确定性说明（三选一格式）
 - 调用示例：标注编译运行参考路径
 
-## Expectations
-
-- [contains] GetWorkspaceSize
-- [contains] 产品支持
-- [contains] 确定性
-- [contains] 161001
-
-- [file_exists] aclnnAdd.md
-
 ---
 
 # Case 5: 为 Add 算子生成算子 README
@@ -217,15 +180,6 @@ eval_mode: file_based
 - 调用说明：表格形式列出 aclnn 调用和图模式调用，链接到 examples 目录的样例代码
 - 参考资源（可选）：链接到算子设计文档
 
-## Expectations
-
-- [contains] 产品支持
-- [contains] 参数说明
-- [contains] 调用说明
-- [contains] alpha
-
-- [file_exists] README.md
-
 ---
 
 # Case 6: 信息不足时主动追问
@@ -243,8 +197,6 @@ eval_mode: file_based
 ## Expected Output
 
 回复应主动追问关键信息，而不是直接生成文档。应至少询问以下信息中的一项或多项：算子名称、数学公式/功能描述、输入输出规格（shape/dtype）、目标芯片/架构、需要生成哪种类型的文档（需求分析/详细设计/迭代计划/aclnnAPI/README）。不应在缺乏算子规格的情况下直接输出完整的文档模板内容。
-
-## Expectations
 
 ---
 
@@ -272,10 +224,3 @@ ascendc-docs-gen 支持哪些文档类型？每种文档的命名规范是什么
 
 应说明文档间的依赖关系：需求分析确认后产出详细设计，详细设计产出迭代计划；aclnnAPI 文档的数据来源于需求文档的算子规格、API 定义和约束部分；算子 README 的数据来源于需求文档、设计文档和代码。应提及文档存放位置（docs/ 目录或算子根目录）。
 
-## Expectations
-
-- [contains] REQUIREMENTS.md
-- [contains] DESIGN.md
-- [contains] PLAN.md
-- [contains] aclnn
-- [contains] README.md

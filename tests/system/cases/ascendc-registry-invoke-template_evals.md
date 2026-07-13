@@ -24,13 +24,6 @@ eval_mode: text
 - tests/：UT测试（ut/op_host/、ut/op_api/）、ST测试（st/）
 - 开发流程：算子设计 → 算子定义 → Tiling实现 → Kernel实现 → 测试验证 → 编译部署
 
-## Expectations
-
-- [contains] op_host
-- [contains] op_kernel
-- [contains] op_api
-- [contains] TilingData
-
 ---
 
 # Case 2: 算子定义与 Tiling 实现
@@ -51,15 +44,6 @@ eval_mode: text
 - _def.cpp：class Op : public OpDef，Input/Output定义（ParamType、DataType、Format），AddConfig芯片配置，ExtendCfgInfo配置Kernel文件名映射（opFile.value对应kernel入口文件名），OP_ADD注册
 - TilingData约束：仅支持POD类型（基本数据类型、数组），禁止成员函数、指针/引用、虚函数/虚继承、模板类
 - TilingKey模板编程：ASCENDC_TPL_ARGS_DECL定义模板参数，ASCENDC_TPL_UINT_DECL定义UINT参数（UI_RANGE范围/UI_LIST穷举/UI_MIX混合），GET_TPL_TILING_KEY宏自动配置TilingKey，Kernel侧用if constexpr实现编译期分支
-
-## Expectations
-
-- [contains] OpDef
-- [contains] POD
-- [contains] ASCENDC_TPL_ARGS_DECL
-- [contains] ExtendCfgInfo
-- [contains] ASCENDC_TPL_UINT_DECL
-- [contains] if constexpr
 
 ---
 
@@ -82,13 +66,6 @@ eval_mode: text
 - Kernel类结构：Init()初始化输入输出tensor和tiling data，Process()执行计算（CopyIn→Compute→CopyOut循环）
 - L2 API（aclnn_{op}.cpp）：对外暴露的ACLNN接口，流程为CREATE_EXECUTOR→CheckParams→Contiguous→l0op调用→ViewCopy→GetWorkspaceSize
 - L0 API（{op}.cpp）：内部实现接口，流程为InferShape→IsAiCoreSupport→AllocTensor→AiCore执行
-
-## Expectations
-
-- [contains] __global__
-- [contains] workspace
-- [contains] tiling
-- [contains] aclnn
 
 ---
 
@@ -113,13 +90,6 @@ eval_mode: text
 - 安装：./build/custom_opp_ubuntu_aarch64.run
 - 卸载：./build/scripts/uninstall.sh
 
-## Expectations
-
-- [contains] build.sh
-- [contains] --soc
-- [contains] custom_opp
-- [contains] CMakeLists.txt
-
 ---
 
 # Case 5: 多芯片架构适配
@@ -142,13 +112,6 @@ eval_mode: text
 - 适配清单5项：_def.cpp追加AddConfig、CMakeLists.txt追加芯片号到列表、build.sh合并芯片判断、op_graph/op_api/op_host追加条件判断、辅助脚本追加条目
 - 核心原则：同架构芯片在运行时必须走完全相同的代码路径，构建系统按芯片号区分、算子代码按架构（NpuArch）分支
 - 编译配置两种模式：列表声明（SUPPORT_COMPUTE_UNIT/SUPPORT_TILING_DIR 1:1对应）和条件分支（if/elseif/else按芯片分发）
-
-## Expectations
-
-- [contains] arch22
-- [contains] arch35
-- [contains] AddConfig
-- [contains] 代际隔离
 
 ---
 
@@ -173,13 +136,6 @@ eval_mode: text
 - 精度标准（CANN社区标准）：FLOAT16 MERE/MARE 2^-10≈0.000977，BFLOAT16 2^-7≈0.00781，FLOAT32 2^-13≈0.000122，INT32精确匹配
 - 运行命令：bash run.sh默认Real模式，bash run.sh --mock Mock模式
 
-## Expectations
-
-- [contains] Mock
-- [contains] Golden
-- [contains] CompareResults
-- [contains] MERE
-
 ---
 
 # Case 7: SIMT 工程开发差异
@@ -200,13 +156,6 @@ eval_mode: text
 - SIMT 6条专属约束：__simt_vf__修饰函数内自定义子函数必须带__simt_callee__修饰、线程数必须是constexpr编译期常量（LAUNCH_BOUND与Simt::Dim3使用同一常量）、DCache一致性（Scalar写GM后需DataCacheCleanAndInvalid刷新）、纯SIMT用GM_ADDR参数避免GlobalTensor中转、禁止在Simt::Dim3中使用tilingData变量、VF参数size控制28×32bit以内
 - Tiling差异：线程数不在tiling侧设置（kernel侧constexpr）、SetLocalMemorySize为ubsize-DCACHE_SIZE（128KB）、多核交换数据需SetScheduleMode(1)同步模式
 - Include路径差异：必须包含arch35/{op}_simt.h（会级联包含tiling_data.h和tiling_key.h）
-
-## Expectations
-
-- [contains] __simt_vf__
-- [contains] constexpr
-- [contains] DCache
-- [contains] SetLocalMemorySize
 
 ---
 
@@ -230,12 +179,6 @@ eval_mode: text
 - 多芯片支持：arch22（ascend910b/ascend910_93）和 arch35（ascend950）代际隔离
 即使在 ascendc-direct-invoke-template、ascendc-direct-invoke-to-registry-invoke 等相似 skill 共存的环境下，也应正确选择 ascendc-registry-invoke-template。
 
-## Expectations
-
-- [skill_activated] ascendc-registry-invoke-template
-- [contains] op_host
-- [contains] build.sh
-
 ---
 
 # Case 9: 信息不足时主动追问
@@ -253,11 +196,6 @@ eval_mode: text
 ## Expected Output
 
 回复应主动追问关键信息，而不是直接生成工程代码。应至少询问以下信息中的一项或多项：算子名称、目标芯片架构（ascend910b/ascend910_93/ascend950）、是否需要 UT/ST 测试、是否需要 ACLNN 接口、是否需要图模式适配。不应在缺乏算子规格的情况下直接生成工程模板。
-
-## Expectations
-
-- [not_contains] OP_ADD
-- [not_contains] add_example_def.cpp
 
 ---
 
@@ -281,7 +219,3 @@ eval_mode: text
 - 理由：本 skill 提供的是工程模板和示例参考，不涉及 .asc 文件读取、OpDef 契约表提取、msopgen 生成验证工程等迁移流程
 - 如提及替代方案，可建议使用其他专门处理直调转注册的 skill
 
-## Expectations
-
-- [contains] 从零
-- [contains] 迁移

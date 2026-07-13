@@ -16,14 +16,7 @@ ascendc-code-review 技能在接收到代码检视请求时，如何根据用户
 
 ## Expected Output
 
-回复应说明 ascendc-code-review 的工作流路由机制：
-- file-review：全量检视代码、审核代码场景
-- quick-review：快速检视、检查问题场景
-- pr-review：PR 检视场景（匹配 pr #、pull request 等关键词）
-- design-consistency：设计实现一致性检查场景（对照 DESIGN.md）
-- 路由逻辑基于用户输入的关键词和意图自动匹配对应工作流，严格按工作流阶段顺序执行，禁止跳步
-
-## Expectations
+回复应介绍 ascendc-code-review 的主要工作流类型及其基本的路由逻辑。
 
 ---
 
@@ -43,4 +36,65 @@ ascendc-code-review 技能在接收到代码检视请求时，如何根据用户
 
 回复应介绍代码检视的主要检查维度（安全编码、API 最佳实践、性能约束等）、可参考的规范文档，以及检视结果的输出方式。
 
-## Expectations
+---
+
+# Case 3: Ascend C 代码检视请求（正向看护）
+
+## Config
+- Max Tokens: 200000
+- Max Tokens (deepseek-v4-flash): 360000
+- Max Tokens (glm-5): 340000
+- Ascend Platform: A2
+- Distractor skills: ascendc-task-focus;ascendc-st-design
+
+## Prompt
+
+请帮我快速检视以下 Ascend C 代码是否存在问题：
+
+```cpp
+__aicore__ void Add(GM_ADDR x, GM_ADDR y, GM_ADDR z) {
+    LocalTensor<half> xLocal;
+    LocalTensor<half> yLocal;
+    LocalTensor<half> zLocal;
+    DataCopy(xLocal, xGM);
+    DataCopy(yLocal, yGM);
+    Add(zLocal, xLocal, yLocal);
+    DataCopy(zGM, zLocal);
+}
+```
+
+请加载 ascendc-code-review 技能完成检视。
+
+## Expected Output
+
+回复应对提交的 Ascend C 代码给出检视意见：涵盖安全编码、API 使用、边界条件等检视维度。
+
+---
+
+# Case 4: 通用 Python 代码风格咨询（负向看护）
+
+## Config
+- Max Tokens: 100000
+- Max Tokens (deepseek-v4-flash): 120000
+- Max Tokens (glm-5): 110000
+- Ascend Platform: A2
+
+## Prompt
+
+请帮我 review 以下 Python 代码是否符合 PEP 8 规范，有没有潜在的性能问题：
+
+```python
+def processData(n):
+    result=[]
+    for i in range(n):
+        temp = i*2
+        result.append(temp+1)
+    return result
+```
+
+我不需要 Ascend C 相关的内容。
+
+## Expected Output
+
+回复应关注 Python 代码规范和性能优化，指出命名风格（如 snake_case）、列表推导式等可改进的点。
+

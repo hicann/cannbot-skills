@@ -17,5 +17,3 @@ eval_mode: text
 ## Expected Output
 
 回复应说明 AISS-TilingSolver 的完整使用流程：下载 CLI 工具（tiling_solver 和 platform_info 两个二进制文件）；运行 platform_info 采集硬件平台参数；构造输入 JSON 文件（填入算子类型、形状、数据类型及采集到的硬件参数）；运行 tiling_solver input.json 求解；解读输出 JSON 中的最优 tiling 参数（如 base_m、base_n、base_k 等）。
-
-## Expectations

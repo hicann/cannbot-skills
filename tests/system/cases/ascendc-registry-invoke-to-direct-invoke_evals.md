@@ -18,8 +18,6 @@ eval_mode: text
 
 回复应说明转换的核心原则是保持 kernel 实现代码不变、只改造调用方式。算子计算逻辑完全不需要修改，只需移除注册框架代码并将调用方式改为直调语法。
 
-## Expectations
-
 ---
 
 # Case 2: 允许的修改内容
@@ -38,4 +36,21 @@ eval_mode: text
 
 回复应说明转换过程中允许 include 替换、命名空间包裹和移除注册框架代码等修改。绝对禁止修改 kernel 计算逻辑。
 
-## Expectations
+---
+
+# Case 4: 算子性能分析咨询（负向看护）
+
+## Config
+- Max Tokens: 100000
+- Max Tokens (deepseek-v4-flash): 120000
+- Max Tokens (glm-5): 110000
+- Ascend Platform: A2
+
+## Prompt
+
+我的 Ascend C 算子性能不足，如何分析 profiling 数据找到瓶颈？
+
+## Expected Output
+
+回复应聚焦于 profiling 数据分析的通用方法和性能瓶颈定位的一般思路（如分析算子耗时分布、定位热点函数等），不涉及算子调用模式转换。
+

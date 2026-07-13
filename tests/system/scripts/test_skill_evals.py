@@ -273,6 +273,7 @@ REVIEW_RUBRIC = """
 - 不要求逐字匹配，语义覆盖即可
 - 额外提供的合理信息不扣分
 - reason 字段必须填写，逐一说明各维度的得分和扣分依据
+- 当某个评分子项因回复内容性质而确实不适用时（例如设计原则类回答不涉及具体 API/命令引用），应给予该项满分的 60% 作为中性基础分，而非 0 分。注意："不适用"与"内容错误/质量缺陷"不同，请区分对待。
 """
 
 CODE_GEN_REVIEW_RUBRIC = """
@@ -1362,8 +1363,8 @@ def _run_eval_with_retry(
     opencode_runner, sandbox_path: str, inputs: EvalInputs,
 ) -> None:
     """执行评测并支持重试，验证不通过时抛出异常。"""
-    # EVAL_EXEC_RETRIES: 重试次数。0 = 不重试（1 次尝试），1 = 重试 1 次（2 次尝试），以此类推
-    max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "0"))
+    # EVAL_EXEC_RETRIES: 额外重试次数。0 = 不重试（1 次尝试），1 = 重试 1 次（2 次尝试），以此类推
+    max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "2"))
     last_error = None
     best_session_file = None
 

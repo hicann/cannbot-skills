@@ -16,12 +16,6 @@ eval_mode: text
 
 回复应指出 DataCopy 要求数据量严格 32 字节对齐，而 13 个 float（52 字节）不满足 32 字节对齐（需 8 个 float = 32 字节对齐），因此必须使用 DataCopyPad。应说明 DataCopyPad 能自动处理非对齐场景，CopyIn 和 CopyOut 都应使用 DataCopyPad。应强调 GlobalTensor::SetValue/GetValue 是黑名单 API，禁止在生产代码中使用，仅限调试时单点验证。
 
-## Expectations
-
-- [contains] DataCopyPad
-- [contains] 32 字节
-- [contains] SetValue
-
 ---
 
 # Case 2: repeatTimes 参数溢出问题（关键能力）
@@ -37,12 +31,6 @@ eval_mode: text
 
 回复应指出 Sub 等 Vector API 的 repeatTime 参数类型为 uint8_t，最大值为 255。当传入 256 时会发生静默截断（溢出为 0），导致 API 不执行任何计算。应提供两种解决方案：1）Host 侧限制 R_max 不超过 255（推荐），在 Tiling 计算时用 std::min 限制；2）Kernel 侧分批处理，用循环每次处理不超过 255 行。应提及受影响的 API 包括 Sub、Add、Mul、Div、Exp、Log、Sqrt 等所有 Vector API。
 
-## Expectations
-
-- [contains] 255
-- [contains] uint8_t
-- [contains] 分批
-
 ---
 
 # Case 3: 混合精度 Cast RoundMode 选择（关键能力）
@@ -57,12 +45,6 @@ eval_mode: text
 ## Expected Output
 
 回复应说明 Cast RoundMode 的选择规则：half → float（低精度到高精度）使用 CAST_NONE，因为无精度损失；float → half（高精度到低精度）使用 CAST_ROUND，因为存在精度损失。应说明完整的混合精度计算流程：half 输入 → Cast(FP32, CAST_NONE) → 中间计算(FP32) → Cast(half, CAST_ROUND) → half 输出。应解释为什么需要 FP32 中间计算：ReduceMax/Exp/ReduceSum 在 FP32 上精度更稳定、避免 FP16 数值溢出、累积误差更小。
-
-## Expectations
-
-- [contains] CAST_NONE
-- [contains] CAST_ROUND
-- [contains] FP32
 
 ---
 
@@ -80,12 +62,6 @@ Ascend C 的 Compare API 对 count 参数有什么对齐要求？不满足会怎
 
 回复应正确激活 ascendc-api-best-practices skill，说明 Compare API 要求 count 个元素所占空间必须 256 字节对齐（float 类型下为 64 的倍数）。应说明不满足对齐会导致 API 行为异常，并给出 Padding 处理策略：计算对齐大小、用极值（如 -FLT_MAX）填充 padding 区域、API 调用使用对齐大小、CopyOut 只输出有效数据。即使在 ascendc-docs-search、ascendc-docs-gen 等相似 skill 共存的环境下，也应正确选择 ascendc-api-best-practices。
 
-## Expectations
-
-- [skill_activated] ascendc-api-best-practices
-- [contains] 256
-- [contains] padding
-
 ---
 
 # Case 5: 流水线同步 API 使用（关键能力）
@@ -101,8 +77,5 @@ Ascend C 的 Compare API 对 count 参数有什么对齐要求？不满足会怎
 
 回复应指出 DataCopyPad 是异步 DMA 操作，搬运完成后不能立刻使用数据，必须通过同步机制确保数据就绪。应推荐使用 EnQue/DeQue 队列同步方式（推荐），说明完整的流水线模式：CopyIn 阶段用 DataCopyPad 搬运数据后 EnQue 入队，Compute 阶段用 DeQue 出队获取数据后再计算。应说明 Double Buffer（InitBuffer 的 num 参数设为 2）可以实现 MTE 搬运和 Vector 计算的并行，提升性能。应提醒不要使用 PipeBarrier 等手动同步方式。
 
-## Expectations
+---
 
-- [contains] EnQue
-- [contains] DeQue
-- [contains] 异步

@@ -18,8 +18,6 @@ eval_mode: text
 
 回复应说明 Ascend C 精度调试的核心方法论是"逐层缩小、分阶段验证、定位首个异常点"。四个主要步骤为数据比对导出、分阶段验证、流水线同步检查和精度损失修复。还应解释 FP16 Catastrophic Cancellation 的原因。
 
-## Expectations
-
 ---
 
 # Case 2: 精度调试的前置条件
@@ -38,4 +36,40 @@ eval_mode: text
 
 回复应说明精度调试的前置条件：环境就绪、算子工程可编译运行、精度比对工具可用、准备标杆数据（Golden Data）和最小用例。还应说明最小用例和黄金数据的重要性。
 
-## Expectations
+---
+
+# Case 3: 算子精度比对调试请求（正向看护）
+
+## Config
+- Max Tokens: 100000
+- Max Tokens (deepseek-v4-flash): 180000
+- Max Tokens (glm-5): 170000
+- Ascend Platform: A2
+- Distractor skills: ascendc-runtime-debug;ascendc-crash-debug
+
+## Prompt
+
+我的 Ascend C FP16 算子的计算结果和 Golden 数据有偏差，误差约 5%。我已经用数据比对工具确认了异常输出的位置。我怀疑是 FP16 累加时的 Catastrophic Cancellation 导致的精度损失。请加载 ascendc-precision-debug 技能帮我确认并给出修复建议。
+
+## Expected Output
+
+回复应针对 FP16 精度偏差问题进行分析，给出精度修复的一般建议。
+
+---
+
+# Case 4: 算子性能调优咨询（负向看护）
+
+## Config
+- Max Tokens: 100000
+- Max Tokens (deepseek-v4-flash): 120000
+- Max Tokens (glm-5): 110000
+- Ascend Platform: A2
+
+## Prompt
+
+我的 Ascend C 算子运行速度偏低，AIC 利用率只有 20%，如何分析流水瓶颈并进行优化？
+
+## Expected Output
+
+回复应聚焦于性能分析和流水优化方法，不涉及精度调试相关内容。
+

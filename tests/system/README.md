@@ -35,9 +35,13 @@
     │       └─ (skill/team 后续流程共享) ...
     │           ├─ 执行 Session：opencode 加载 target，发送 prompt → 收集 AI 回复
     │           ├─ 评测 Session：独立 opencode session 评审回复质量
-    │           │   └─ 评审方式：Agent 通过 Write 工具填写 review-template.md 模板
-    │           │   └─ 框架解析：从模板中提取结构化评分（Status + Score + 各维度）
-    │           │   └─ 评分标准：信息覆盖度(40) + 技术准确性(30) + 回复质量(20) + Token(10)
+    │           │   ├─ AI 评审模式（text/file_based/code_gen）：
+    │           │   │   └─ 评审方式：Agent 通过 Write 工具填写 review-template.md 模板
+    │           │   │   └─ 框架解析：从模板中提取结构化评分（Status + Score + 各维度）
+    │           │   │   └─ 评分标准：信息覆盖度(40) + 技术准确性(30) + 回复质量(20) + Token(10)
+    │           │   └─ cann_bench 模式：
+    │           │       └─ 确定性评测：执行 cann-bench 评测管道（编译/精度/性能）
+    │           │       └─ 通过判定：综合得分 > 50 且编译+精度均通过
     │           └─ 模式匹配/Token检查：contains/not_contains/file_exists/skill_activated
     │
     ├─ 步骤4：保存结果（HTML 报告 + JSON 日志归档）
@@ -113,6 +117,18 @@
 
 > 各维度阈值可在每个用例的 `Config` 中单独覆盖（见下方配置说明），如 `覆盖度阈值: 25`。
 
+#### cann_bench 模式评分标准
+
+cann_bench 模式使用确定性评测（非 AI 评审），通过 cann-bench 评测管道进行编译检查、精度验证和性能评分：
+
+| 维度 | 满分 | 说明 |
+|------|:----:|------|
+| 编译通过 | 1 | 二元判定：算子工程能否成功编译 |
+| 精度达标 | 1 | 二元判定：算子输出精度是否满足要求 |
+| 综合得分 | 100 | cann-bench 管道输出的综合性能评分 |
+
+**通过条件**：编译通过 = 1 且 精度达标 = 1 且 综合得分 > 50
+
 ## 评测用例格式（evals.md）
 
 评测用例文件存放在 `tests/system/cases/<name>_evals.md`，使用 Markdown + YAML frontmatter 格式：
@@ -121,7 +137,7 @@
 ---
 skill_name: skill-name       # Skill 用例：与 skill_name 二选一
 team_name: team-name         # Team 用例：与 team_name 二选一
-eval_mode: text              # text（默认）/ file_based / code_gen
+eval_mode: text              # text（默认）/ file_based / code_gen / cann_bench
 ---
 ```
 
@@ -133,7 +149,7 @@ eval_mode: text              # text（默认）/ file_based / code_gen
 
 | 配置项 | 类型 | 说明 | 默认值 |
 |--------|------|------|--------|
-| `Eval Mode` | string | `text`（语义评审）/ `file_based`（文件产出验证）/ `code_gen`（算子项目编译运行验证） | 同 frontmatter |
+| `Eval Mode` | string | `text`（语义评审）/ `file_based`（文件产出验证）/ `code_gen`（算子项目编译运行验证）/ `cann_bench`（cann-bench 确定性评测） | 同 frontmatter |
 | `Max Tokens` | int | Token 消耗硬上限，超过则用例失败 | 无限制 |
 | `Max Tokens (<model>)` | int | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`，Phase 2 自动匹配 | `Max Tokens` 值 |
 | `Distractor skills` | string | 正向看护：分号分隔的干扰 skill 列表，验证 AI 在多个 skill 存在时的正确选择能力 | 无 |
@@ -143,12 +159,30 @@ eval_mode: text              # text（默认）/ file_based / code_gen
 | `准确性阈值` | int | 技术准确性维度的最低通过分数（0-30） | `15` |
 | `质量阈值` | int | 回复质量维度的最低通过分数（0-20） | `10` |
 | `Token阈值` | int | Token 消耗维度的最低通过分数（0-10） | `3` |
+| `Cann Bench Operator` | string | cann_bench 模式必填：目标算子名称（如 `mish`） | - |
+| `Cann Bench Level` | string | cann_bench 模式：任务难度等级（`level1`/`level2`/`level3`） | `level1` |
+| `Cann Bench Device` | string | cann_bench 模式：NPU 设备 ID | `0` |
+| `Cann Bench No Perf` | bool | cann_bench 模式：跳过性能评测，仅验证编译和精度 | `false` |
+| `Cann Bench Warmup` | int | cann_bench 模式：性能评测预热次数 | 默认值 |
+| `Cann Bench Repeat` | int | cann_bench 模式：性能评测重复次数 | 默认值 |
 
 ```markdown
 ## Config
 - Eval Mode: file_based
 - Max Tokens: 50000
 - Distractor skills: ascendc-runtime-debug;ascendc-task-focus;npu-arch
+```
+
+**cann_bench 模式配置示例：**
+
+```markdown
+## Config
+- Eval Mode: cann_bench
+- Cann Bench Operator: mish
+- Cann Bench Level: level1
+- Cann Bench Device: 0
+- Max Tokens: 10000000
+- Timeout: 10800
 ```
 
 ### Prompt
@@ -208,6 +242,7 @@ eval_mode: text
 |------|-------------|
 | **Skill 测试** | 将 skill 目录通过软链接部署到沙箱的 `.opencode/skills/` 下 |
 | **Team 测试** | 在沙箱中执行 `init.sh project opencode <sandbox>` 安装完整 team 环境 |
+| **cann_bench 模式** | 额外部署 cann-bench 仓库（复制模式）、任务定义文件和工程模板 |
 
 ```
 tests/system/sandboxes/
@@ -216,9 +251,21 @@ tests/system/sandboxes/
 │   │   ├── opencode.json                    # opencode 工具权限白名单配置
 │   │   └── skills/
 │   │       └── <skill>/                     # skill 目录（默认软链接，指向源目录）
-│   └── logs/                                # session 导出 JSON
-│       ├── <skill>_case_1_ses.json          # 执行 session 数据
-│       └── <skill>_case_1_review_ses.json   # 评审 session 数据
+│   ├── logs/                                # session 导出 JSON
+│   │   ├── <skill>_case_1_ses.json          # 执行 session 数据
+│   │   └── <skill>_case_1_review_ses.json   # 评审 session 数据
+│   ├── cann-bench/                          # cann_bench 模式：cann-bench 仓库副本（只读）
+│   ├── cann-bench-task/                     # cann_bench 模式：任务定义文件
+│   │   ├── proto.yaml                       #   算子原型信息
+│   │   ├── cases.yaml                       #   测试用例定义
+│   │   ├── desc.md                          #   算子描述
+│   │   └── golden.py                        #   标杆参考实现
+│   ├── direct_launch_example/               # cann_bench 模式：算子工程模板
+│   │   ├── csrc/                            #   扩展代码模板
+│   │   ├── cann_bench/                      #   Python 接口模板
+│   │   └── build.sh                         #   编译脚本
+│   ├── output/                              # cann_bench 模式：AI 生成的算子代码
+│   └── _cann_bench_meta.json                # cann_bench 模式：评测元数据（自动生成）
 ├── <skill>_eval_2/
 │   └── ...
 └── ...
@@ -234,6 +281,16 @@ SKILL_SANDBOX_COPY=1 python tests/system/scripts/main.py \
 ```
 
 `logs/` 目录下的 JSON 文件可在测试后用于分析或重新生成报告。
+
+### cann_bench 模式沙箱部署
+
+当 `eval_mode` 为 `cann_bench` 时，框架会自动完成以下部署：
+
+1. **cann-bench 仓库**：复制到 `<sandbox>/cann-bench/`（使用复制模式，避免污染源仓库）
+2. **任务定义文件**：从 `cann-bench/tasks/<level>/<operator>/` 复制到 `<sandbox>/cann-bench-task/`
+3. **工程模板**：从 `cann-bench/examples/direct_launch_example/` 复制到 `<sandbox>/direct_launch_example/`
+
+AI Agent 在沙箱中根据任务定义生成算子代码到 `output/` 目录，框架自动执行 cann-bench 评测管道进行验证。
 
 ## 使用方式
 
@@ -343,15 +400,20 @@ tests/system/
 ├── results/                     # HTML 报告输出目录
 ├── logs/                        # 运行日志与归档压缩包
 ├── sandboxes/                   # 沙箱隔离目录（用例级别）
+│   └── <skill>_eval_<id>/
+│       ├── cann-bench/          # cann_bench 模式：cann-bench 仓库副本（只读）
+│       ├── cann-bench-task/     # cann_bench 模式：任务定义文件（proto.yaml, cases.yaml 等）
+│       ├── direct_launch_example/ # cann_bench 模式：算子工程模板
+│       └── output/              # cann_bench 模式：AI 生成的算子代码输出目录
 └── scripts/
     ├── main.py                  # CI 门禁主入口（支持 skill + team）
     ├── conftest.py              # pytest 共享配置、钩子、工具函数（含 skill/team 发现逻辑）
-    ├── evals_parser.py          # evals.md Markdown 解析器（支持 skill/team）
+    ├── evals_parser.py          # evals.md Markdown 解析器（支持 skill/team/cann_bench）
     ├── opencode_runner.py       # opencode CLI 封装（流式输出、Session 导出）
-    ├── sandbox_manager.py       # 沙箱创建与管理
+    ├── sandbox_manager.py       # 沙箱创建与管理（含 cann-bench 部署）
     ├── subprocess_streamer.py   # 子进程流式输出封装（心跳防超时）
     ├── test_skill_basic.py      # Phase 1: Skill 静态结构验证
-    ├── test_skill_evals.py      # Phase 2: Skill AI 语义评测（含重试机制）
+    ├── test_skill_evals.py      # Phase 2: Skill AI 语义评测（含重试机制、cann_bench 模式）
     ├── test_team_basic.py       # Phase 1: Team 静态结构验证
     ├── test_team_evals.py       # Phase 2: Team AI 语义评测
     ├── run_eval.py              # 命令行评测启动脚本
@@ -374,3 +436,8 @@ tests/system/
 8. **重试机制**：通过 `EVAL_EXEC_RETRIES=N` 环境变量控制评测用例的重试次数（默认 1，即不重试），适用于偶发性执行失败。
 9. **模型 Token 预算**：支持按模型名称匹配 `Max Tokens (<model>)` 配置，通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定。未指定时自动从 session 导出数据检测。
 10. **正向看护**：`Distractor skills` 配置 + `[skill_activated]` 断言，程序化验证 AI 在多个相似 skill 存在时正确选择目标 skill。
+11. **cann_bench 模式**：
+    - 需要 cann-bench 仓库存在，默认路径为 `<repo_root>/../cann-bench`，可通过 `CANN_BENCH_PATH` 环境变量覆盖
+    - 需要 NPU 硬件环境支持（Ascend 910B/950 等）
+    - 通过条件：编译通过 + 精度达标 + 综合得分 > 50
+    - cann-bench 生成的 HTML 报告会通过 iframe 嵌入 pytest-html 报告的 Details 展开区

@@ -128,7 +128,7 @@ eval_mode: text          # 可选，默认 text。可选 file_based / code_gen
 |------|------|------|
 | `skill_name` | 是（Skill） | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致。与 `team_name` 二选一 |
 | `team_name` | 是（Team） | 目标 team 名称，需与 plugin.json 中的 `name` 一致。与 `skill_name` 二选一 |
-| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`code_gen`（验证算子项目编译/运行） |
+| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`code_gen`（验证算子项目编译/运行）、`cann_bench`（cann-bench 确定性评测） |
 
 > **注意**：`skill_name` 和 `team_name` 互斥，同一个 evals.md 文件中只能设置一个。解析器会根据 frontmatter 中的字段自动识别 target 类型。
 
@@ -176,13 +176,19 @@ eval_mode: text
 |------------|------|
 | `Max Tokens` | Token 消耗硬上限，超过则测试失败 |
 | `Max Tokens (<model>)` | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`。通过 `--eval-model` 或 `EVAL_MODEL` 环境变量指定模型 |
-| `Eval Mode` | 覆盖用例级评测模式：`text` / `file_based` |
+| `Eval Mode` | 覆盖用例级评测模式：`text` / `file_based` / `code_gen` / `cann_bench` |
 | `Distractor skills` | 正向看护：分号分隔的干扰 skill 列表，如 `skill-a;skill-b`。这些 skill 会被部署到沙箱中，验证 AI 在多个 skill 存在时仍能正确选择目标 skill |
 | `Ascend Platform` | 用例适用的昇腾平台，分号分隔可多选，如 `A2;A5`。配合 `--ascend-platform` 参数在对应服务器上执行。**未配置此字段的用例在任何平台下均不执行** |
 | `Disabled` | 设为 `true` 则跳过该用例（Phase 2 执行时显示为 SKIPPED）。适用于尚未调试完成的用例。默认不启用。有效值：`true`、`yes`、`1` |
 | `Timeout` | 用例执行超时时间（秒）。正整数，未配置时默认 600s。用于需要更长执行时间的复杂场景 |
 | `覆盖度阈值` / `准确性阈值` / `质量阈值` / `Token阈值` | 按维度覆盖默认通过阈值。覆盖度默认 20/40，准确性 15/30，质量 10/20，Token 3/10。如 `覆盖度阈值: 25` |
 | `Truncate Length` | AI 回复传递给评审 Agent 时截断长度（字符数）。默认 30000。当 AI 回复较长时（如包含大段代码），评审 Agent 可能因回复截断看不到完整内容而误判。可按需增大，如 `Truncate Length: 60000` |
+| `Cann Bench Operator` | cann_bench 模式必填：目标算子名称（如 `mish`） |
+| `Cann Bench Level` | cann_bench 模式：任务难度等级（`level1`/`level2`/`level3`），默认 `level1` |
+| `Cann Bench Device` | cann_bench 模式：NPU 设备 ID，默认 `0` |
+| `Cann Bench No Perf` | cann_bench 模式：跳过性能评测，仅验证编译和精度，默认 `false` |
+| `Cann Bench Warmup` | cann_bench 模式：性能评测预热次数 |
+| `Cann Bench Repeat` | cann_bench 模式：性能评测重复次数 |
 
 **expectations 类型**：
 
@@ -298,6 +304,27 @@ python tests/system/scripts/main.py \
 | `--all` | 全量模式：自动发现 `cases/` 下所有 evals.md 并执行评测，跳过变更检测 |
 | `--report-only` | 仅从已有沙箱 JSON 文件重新生成 HTML 报告（跳过 Phase 1 执行，跳过 opencode 调用）。前提：沙箱目录中须有前次完整运行的 JSON 文件 |
 | `--eval-id <id>` | 仅执行指定 ID 的单个用例 |
+
+### cann_bench 模式执行
+
+cann_bench 模式需要 cann-bench 仓库和 NPU 硬件环境支持：
+
+```bash
+# 设置 cann-bench 仓库路径（可选，默认为 <repo_root>/../cann-bench）
+export CANN_BENCH_PATH=/path/to/cann-bench
+
+# 执行 cann_bench 模式评测
+python tests/system/scripts/main.py \
+    --repo-root /mnt/workspace/gitCode/cann/cannbot-skills \
+    --changed-files plugins-official/ops-direct-invoke/AGENTS.md \
+    --ascend-platform A2
+```
+
+cann_bench 模式评测流程：
+1. AI Agent 在沙箱中根据 cann-bench 任务定义生成算子代码
+2. 框架自动执行 cann-bench 评测管道（编译/精度/性能）
+3. 解析评测结果，生成 HTML 报告
+4. cann-bench 生成的详细报告通过 iframe 嵌入 pytest-html 报告
 
 ### 方式三：gate_check.sh（完整 CI 流程）
 
@@ -449,3 +476,23 @@ skill_dirs:
 | 沙箱部署方式 | symlink skill 目录到 `.opencode/skills/` | 执行 `init.sh project opencode <sandbox>` |
 | Phase 1 检查项 | SKILL.md 格式、evals.md 结构 | AGENTS.md 格式、plugin.json 合法性、init.sh 存在性 |
 | Phase 2 统一报告 | `ST_validation_report_<ts>.html`（表中"类型"列区分 Skill/Team） |
+
+### cann_bench 模式评测失败如何排查？
+
+1. **cann-bench 仓库不存在**：检查 `CANN_BENCH_PATH` 环境变量或默认路径 `<repo_root>/../cann-bench`
+2. **编译失败**：检查 AI 生成的算子代码是否完整，特别是 CMakeLists.txt 配置
+3. **精度不达标**：检查 kernel 实现的数值稳定性，特别是 fp16/bf16 的混合精度计算
+4. **任务定义文件缺失**：检查 `cann-bench-task/` 目录下的 proto.yaml、cases.yaml 是否存在
+5. **NPU 环境问题**：确保 Ascend NPU 驱动和 CANN 环境正确安装
+
+查看 cann-bench 生成的 HTML 报告（在沙箱目录的 `cann_bench_report.html`）获取详细评测结果。
+
+### cann_bench 模式与 code_gen 模式的区别？
+
+| 维度 | code_gen 模式 | cann_bench 模式 |
+|------|--------------|-----------------|
+| 评测方式 | AI 评审打分 | 确定性评测管道 |
+| 评分维度 | 工程完整度/可编译性/可运行性 | 编译通过/精度达标/综合得分 |
+| 通过条件 | 总分 ≥ 60 且各维度 ≥ 阈值 | 编译+精度通过 且 综合得分 > 50 |
+| 报告格式 | 文本评审结果 | HTML 嵌入 iframe |
+| 硬件要求 | 无特殊要求 | 需要 NPU 环境 |
