@@ -34,13 +34,19 @@ metadata:
 
 以下约束在两个量化算子中均适用，各算子章节不再重复。
 
-### Q1 动态读取 Vector Core 数量，禁止硬编码
-- **必须**动态读取实际 Vector Core 数量，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
-- **正确做法**：
+### Q1 动态读取 Vector/Cube Core 数量，禁止硬编码
+- **必须**动态读取实际核数，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
+- **正确做法**（一次拿 vector + cube，权威值，无需设备 init）：
   ```python
-  VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+  import torch_npu
+  import triton.runtime.driver as driver
+
+  device = torch_npu.npu.current_device()
+  properties = driver.active.utils.get_device_properties(device)
+  vectorcore_num = properties["num_vectorcore"]   # elementwise / reduction 用它做 grid 钳制
+  aicore_num = properties["num_aicore"]           # cube / matmul 用它
   ```
-  或通过 `triton.runtime.driver.active.utils.get_device_properties(device)` 读取 `num_vectorcore` / `num_aicore`。
+- **已弃用**：旧式 `npu_config` 取值方式（仅 vector、硬编码 40 不准、设备未 init 会抛 `RuntimeError`）。
 - **Why:** 硬编码仅利用部分 Vector Core，导致加速比显著下降。
 
 ### Q2 1D Grid + 核内循环（负载均衡通用模式）
@@ -441,7 +447,10 @@ else:
 - static kernel 内部按 `rows_per_prog` 循环处理多行；dynamic kernel 内部按 `tiles_per_prog` 循环处理多个 tile
 - **正确骨架**：
   ```python
-  VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
+  import torch_npu
+  import triton.runtime.driver as driver
+
+  VEC_CORE_NUM = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
   grid = (min(M, VEC_CORE_NUM),)
   kernel[grid](..., num_cores=VEC_CORE_NUM, ...)
   # kernel 内：
@@ -834,7 +843,7 @@ scale_block = tl.where(mask, scale_block, 1.0)
 | 对 int32 使用 `tl.clamp` | 报 `Only floating point clamp is supported` | 用 `tl.maximum/tl.minimum` 在 int32 阶段做 clip (L1.7) |
 | INT4 打包顺序错误 | `quint4x2` 期望低位为 even、高位为 odd，顺序错误会导致量化结果整体错位 | 严格按 `((q_odd & 0x0F) << 4) \| (q_even & 0x0F)` 打包 (L1.5 / L3.4) |
 | 2D smooth/offset 的边界合并导致 UB overflow | 将 `mask & in_bounds` 合并到 `tl.load` 可减少一次 `tl.where`，但会增大 fp32 张量 live range，在大 shape 上 UB overflow | 2D 路径保持 `tl.where(in_bounds, swiglu * scale_block, swiglu)`；仅标量路径可合并 (L3.2) |
-| 硬编码 `num_cores` | 不同 NPU 核数不同 | 动态读取 `torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)` (Q1) |
+| 硬编码 `num_cores` | 不同 NPU 核数不同 | 动态读取 `driver.active.utils.get_device_properties(device)["num_vectorcore"]` (Q1) |
 | offsets 在 dynamic 模式下误启用 | dynamic 模式没有 offsets 语义，启用会导致参考实现不一致 | host 侧强制 `has_offsets = offsets is not None and quant_mode == 0` (L1.11) |
 | 把 int32 clip 改为 fp32 clip | 增大 fp32 中间结果 live range，触发 UB overflow (case 27) | 保持 int32 阶段 `tl.maximum/tl.minimum` clip，避免 fp32 中间结果长期保留 |
 | 把 dynamic `BLOCK_ROWS` 从 4 降到 2 | 劣化，0.2434 ms > 0.2382 ms | `BLOCK_ROWS=4` 已接近最优，autotune `{2,4,6}` 收益有限 |

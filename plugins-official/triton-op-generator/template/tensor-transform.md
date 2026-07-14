@@ -34,13 +34,19 @@ metadata:
 
 以下 8 条约束在三个算子中均适用，各算子章节不再重复。
 
-### G1 动态读取 Vector Core 数量，禁止硬编码
-- **必须**动态读取实际 Vector Core 数量，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
-- **正确做法**：
+### G1 动态读取 Vector/Cube Core 数量，禁止硬编码
+- **必须**动态读取实际核数，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
+- **正确做法**（一次拿 vector + cube，权威值，无需设备 init）：
   ```python
-  VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+  import torch_npu
+  import triton.runtime.driver as driver
+
+  device = torch_npu.npu.current_device()
+  properties = driver.active.utils.get_device_properties(device)
+  vectorcore_num = properties["num_vectorcore"]   # elementwise / reduction 用它做 grid 钳制
+  aicore_num = properties["num_aicore"]           # cube / matmul 用它
   ```
-  或通过 `triton.runtime.driver.active.utils.get_device_properties(device)` 读取 `num_vectorcore` / `num_aicore`。
+- **已弃用**：旧式 `npu_config` 取值方式（仅 vector、硬编码 40 不准、设备未 init 会抛 `RuntimeError`）。
 - **Why:** 硬编码仅利用 20% Vector Core，导致加速比从 ~1.3x 跌至 0.67x（慢于 PyTorch）。
 
 ### G2 BLOCK 向上取 2 的幂（NPU 向量化友好）
@@ -1736,7 +1742,10 @@ def _get_block_size(inner_size: int) -> int:
 #### L3.2 Grid 选择阈值
 
 ```python
-VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
+import torch_npu
+import triton.runtime.driver as driver
+
+VEC_CORE_NUM = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
 
 if total_blocks <= VEC_CORE_NUM:
     grid = (outer_size, num_inner_blocks)   # 2D grid，每个 block 处理一个 outer × inner_block

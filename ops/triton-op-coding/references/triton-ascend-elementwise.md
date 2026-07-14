@@ -59,15 +59,14 @@ Element-wise 算子使用 **VEC核心数**（向量计算核心）。
 
 ```python
 import torch_npu
+import triton.runtime.driver as driver
 
 class ModelNew(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        # 在__init__中获取核心数，只执行一次
-        try:
-            self.VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
-        except:
-            self.VEC_CORE_NUM = 40  # Ascend 910B4 默认
+        # 在__init__中获取核心数，只执行一次（新 API，无需设备 init）
+        properties = driver.active.utils.get_device_properties(torch_npu.npu.current_device())
+        self.VEC_CORE_NUM = properties["num_vectorcore"]
 ```
 
 ### 3. BLOCK_SIZE 选择

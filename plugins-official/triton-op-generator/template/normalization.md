@@ -242,13 +242,15 @@ def group_norm_swish_kernel(
 #### L2.1 Host 侧代码骨架
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 class ModelNew(nn.Module):
     def __init__(self):
         super().__init__()
-        try:
-            self.VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
-        except Exception:
-            self.VEC_CORE_NUM = 40
+        properties = driver.active.utils.get_device_properties(torch_npu.npu.current_device())
+        self.VEC_CORE_NUM = properties["num_vectorcore"]
+        self.AI_CORE_NUM = properties["num_aicore"]
 
     def forward(self, input, num_groups, weight, bias, eps=1e-5, swish_scale=1.0):
         N = input.shape[0]

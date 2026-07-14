@@ -24,14 +24,18 @@
 - [ ] 在任务数量超过核数时，确保获取了正确的核数，且所有核都被用上了
 - [ ] 禁止使用多维 grid，仅允许使用一维 grid
 
-获取核心数量的方法：
+获取核心数量的方法（一次拿 vector + cube，权威值，无需设备 init）：
 ```python
 import torch_npu
+import triton.runtime.driver as driver
 
-num_cores = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+device = torch_npu.npu.current_device()
+properties = driver.active.utils.get_device_properties(device)
+vectorcore_num = properties["num_vectorcore"]
+aicore_num = properties["num_aicore"]
 ```
 
-**注意**：禁止硬编码核数（如 `num_cores=8`），必须动态读取实际 Vector Core 数量。不同 NPU 型号核数不同（如 40核、48核等），硬编码会导致并行度不足或调度异常。
+**注意**：禁止硬编码核数（如 `num_cores=8`），必须动态读取实际核数（vector/cube）。不同 NPU 型号核数不同（如 40核、48核等），硬编码会导致并行度不足或调度异常。
 
 ### 6. Task 任务划分规范
 - [ ] task 任务划分禁止使用交织划分，每个 grid 任务处理的数据尽可能连续

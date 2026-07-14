@@ -51,6 +51,9 @@ def split_by_chunk(
 ### 优化后代码（连续拷贝聚合）
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 @triton.jit
 def copy_aggregated(
     in_ptr, out_ptr,
@@ -75,7 +78,7 @@ def forward(self, x, chunks):
     ):
         # 连续聚合路径：一次拷贝所有数据
         output = x.clone()  # 或 torch.empty_like(x)
-        num_cores = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+        num_cores = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
         grid = ((total_size + BLOCK_SIZE - 1) // BLOCK_SIZE,)
         copy_aggregated[grid](x, output, total_size, BLOCK_SIZE=1024)
         

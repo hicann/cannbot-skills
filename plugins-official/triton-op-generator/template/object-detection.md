@@ -33,13 +33,19 @@ metadata:
 
 以下 6 条约束在两个算子中均适用，各算子章节不再重复。
 
-### D1 动态读取 Vector Core 数量，禁止硬编码
-- **必须**动态读取实际 Vector Core 数量，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
-- **正确做法**：
+### D1 动态读取 Vector/Cube Core 数量，禁止硬编码
+- **必须**动态读取实际核数，禁止硬编码 `num_cores=8` 或 `num_cores=48`。
+- **正确做法**（一次拿 vector + cube，权威值，无需设备 init）：
   ```python
-  VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+  import torch_npu
+  import triton.runtime.driver as driver
+
+  device = torch_npu.npu.current_device()
+  properties = driver.active.utils.get_device_properties(device)
+  vectorcore_num = properties["num_vectorcore"]   # elementwise / reduction 用它做 grid 钳制
+  aicore_num = properties["num_aicore"]           # cube / matmul 用它
   ```
-  或通过 `triton.runtime.driver.active.utils.get_device_properties(device)` 读取 `num_vectorcore` / `num_aicore`。
+- **已弃用**：旧式 `npu_config` 取值方式（仅 vector、硬编码 40 不准、设备未 init 会抛 `RuntimeError`）。
 - **Why:** 硬编码会浪费多核并行能力；不同 NPU 型号核数不同（ascend910b1 = 40）。
 
 ### D2 禁止在 kernel 内使用 triton.cdiv，必须用 tl.cdiv
@@ -172,10 +178,15 @@ NMS 是一个**顺序算法**——每轮的候选范围 `[i+1, N)` 依赖上一
 #### L2.1 Host 侧 chunked loop 骨架（v2）
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 class ModelNew(nn.Module):
     def __init__(self):
         super().__init__()
-        self.VEC_CORE_NUM = 40   # 从 torch_npu.npu.npu_config.get_device_limit 读取
+        properties = driver.active.utils.get_device_properties(torch_npu.npu.current_device())
+        self.VEC_CORE_NUM = properties["num_vectorcore"]
+        self.AI_CORE_NUM = properties["num_aicore"]
 
     def forward(self, boxes, scores, max_output_size, iou_threshold,
                 scores_threshold, pad_to_max_output_size=False):
@@ -458,7 +469,7 @@ forward(bboxes, gtboxes, mode):
     
     num_blocks_n = triton.cdiv(n, BLOCK_N)
     num_blocks_m = triton.cdiv(m, BLOCK_M)
-    grid_size = min(num_blocks_n * num_blocks_m, vector_core_num)
+    grid_size = min(num_blocks_n * num_blocks_m, vectorcore_num)
     grid = (grid_size,)
     
     iou_kernel[grid](bboxes, gtboxes, output, n, m, mode, 
@@ -583,12 +594,11 @@ union = tl.maximum(union, 1e-10)
 #### L3.4 Grid 大小动态限制 + multibuffer
 
 ```python
-# 获取实际 vector core 数量
-try:
-    import torch_npu
-    num_cores = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
-except Exception:
-    num_cores = 40
+import torch_npu
+import triton.runtime.driver as driver
+
+# 获取实际 vector core 数量（新 API，无需设备 init）
+num_cores = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
 
 # 限制 grid 为实际核数
 grid_size = min(num_blocks_n * num_blocks_m, num_cores)
@@ -652,4 +662,4 @@ iou_kernel[(grid_size,)](..., multibuffer=True)
 | triton.cdiv 在 kernel 中使用 | 在 `@triton.jit` kernel 中使用 `triton.cdiv` 导致编译错误 | kernel 内使用 `tl.cdiv`，host 侧使用 `triton.cdiv` (L1.3 / D2) |
 | 离散逐元素访存模式 | 每个线程计算一个输出元素，离散加载 8 个标量，无法利用 NPU 向量单元 | 采用 2D Tiling + Broadcast 模式，向量加载块数据后通过 broadcast 并行计算 (L1.5 / L3.1) |
 | 2D Tiling 的 broadcast 兼容性 | 尝试 2D tiling 时可能遇到 `Cannot make_shape_compatible` 错误 | 确保 broadcast 维度匹配（`[None, :]` 和 `[:, None]` 的组合），并正确计算 mask |
-| Grid 过大导致调度开销 | grid_size 超过实际核数时，核间调度开销显著 | 限制 grid_size 为 `min(num_blocks, vector_core_num)`，并启用 `multibuffer=True` (L1.6 / D4) |
+| Grid 过大导致调度开销 | grid_size 超过实际核数时，核间调度开销显著 | 限制 grid_size 为 `min(num_blocks, vectorcore_num)`，并启用 `multibuffer=True` (L1.6 / D4) |

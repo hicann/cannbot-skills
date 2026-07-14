@@ -399,13 +399,15 @@ sum_kernel_reduce_non_last[grid](
 ## A.5 调度器实现
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 class ModelNew(nn.Module):
     def __init__(self):
         super(ModelNew, self).__init__()
-        try:
-            self.VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
-        except Exception:
-            self.VEC_CORE_NUM = 40
+        properties = driver.active.utils.get_device_properties(torch_npu.npu.current_device())
+        self.VEC_CORE_NUM = properties["num_vectorcore"]
+        self.AI_CORE_NUM = properties["num_aicore"]
 
     def forward(self, x: torch.Tensor, dim=None, keepdim: bool = False) -> torch.Tensor:
         return self._route(x, dim, keepdim)
@@ -676,13 +678,15 @@ def _get_broadcast_info(self, x_shape, y_shape):
 ## B.7 调度器实现
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 class ModelNew(nn.Module):
     def __init__(self):
         super().__init__()
-        try:
-            self.VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 40)
-        except Exception:
-            self.VEC_CORE_NUM = 40
+        properties = driver.active.utils.get_device_properties(torch_npu.npu.current_device())
+        self.VEC_CORE_NUM = properties["num_vectorcore"]
+        self.AI_CORE_NUM = properties["num_aicore"]
 
     def _get_broadcast_info(self, x_shape, y_shape):
         # ... 同上 ...

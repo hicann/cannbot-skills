@@ -688,9 +688,9 @@ ROW_TILE 自适应选择:
   otherwise       → ROW_TILE = 1
   + UB guard: ROW_TILE * BLOCK_N * 4 <= 48KB（循环场景，L1.5）
     ↓
-num_cores = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)  # G1
+vectorcore_num = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]  # G1
 natural_blocks = ceil(num_rows / ROW_TILE)
-grid_size = min(natural_blocks, num_cores)                   # T1，分核优化关键
+grid_size = min(natural_blocks, vectorcore_num)                   # T1，分核优化关键
 grid = (grid_size,)
     ↓
 逐 kernel 启动（每个 kernel 内部循环处理多块）
@@ -724,10 +724,13 @@ def kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 #### L3.1 分核优化的 grid 钳制 + 循环模式
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 # Host 侧
-num_cores = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+vectorcore_num = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
 natural_blocks = (num_rows + ROW_TILE - 1) // ROW_TILE
-grid_size = natural_blocks if natural_blocks < num_cores else num_cores
+grid_size = natural_blocks if natural_blocks < vectorcore_num else vectorcore_num
 grid = (grid_size,)
 
 # Kernel 内

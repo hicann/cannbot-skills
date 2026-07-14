@@ -45,6 +45,9 @@ def kernel_generic(
 ### 优化后代码（多路径特化）
 
 ```python
+import torch_npu
+import triton.runtime.driver as driver
+
 # 路径 A：小 grid，每个 program 处理 1 个 block，无循环
 @triton.jit
 def kernel_small_grid(
@@ -80,7 +83,7 @@ def kernel_large_grid(
 # Host 侧动态 dispatch
 def forward(self, x):
     total_elements = x.numel()
-    num_cores = torch_npu.npu.npu_config.get_device_limit(0).get('vector_core_num', 40)
+    num_cores = driver.active.utils.get_device_properties(torch_npu.npu.current_device())["num_vectorcore"]
     
     # 阈值判断：当 total_blocks <= num_cores 时走小 grid 路径
     BLOCK_SIZE = 1024
