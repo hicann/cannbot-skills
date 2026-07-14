@@ -19,7 +19,7 @@
 - 环境信息：operators/{operator_name}/docs/environment.md（提供芯片型号 / SocVersion / CANN 版本；NpuArch 与 `--npu-arch` 编译参数请加载 `/npu-arch` skill 按芯片型号查得后写入 DESIGN.md）
 
 【输出】
-- 技术设计：operators/{operator_name}/docs/DESIGN.md，参考`workflows/templates/design-template.md`
+- 技术设计：operators/{operator_name}/docs/DESIGN.md
 - 开发计划：operators/{operator_name}/docs/PLAN.md，参考`workflows/templates/plan-template.md`
 
 【验收标准】
@@ -51,14 +51,17 @@
 - 请将质疑清单输出到 operators/{operator_name}/docs/WALKTHROUGH.md。
 
 【推荐 Skill】
+- /ascendc-blaze-best-practice — Blaze 路线时查阅组件选择、API 签名、组装代码
 - /ascendc-api-best-practices — 质疑 API 选择时查阅确认可行性
 - /ascendc-docs-search — 需要官方文档支撑质疑时使用
 
 【API 验证规则】
-验证 API 是否存在时，禁止只读单个文件（如 ReduceMax.md）就下结论。
-必须用通配符搜索所有变体：
-  find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md" -type f
-同一 API 可能有多个文件（如 ReduceMax.md / ReduceMax-35.md / ReduceMax-92.md），功能不同。
+验证 API 是否存在时，按开发路径选择验证源：
+
+| 开发路径 | 验证源 | 验证方法 |
+|---------|--------|---------|
+| Blaze 路线 | `/ascendc-blaze-best-practice` skill | 在 skill 文档和 assets/ 中验证 API 签名和模板参数 |
+| 其他路线 | `$ASC_DEVKIT_DIR/docs/api/` | 禁止只读单个文件（如 `ReduceMax.md`）就下结论。必须用通配符搜索所有变体：`find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md" -type f`。同一 API 可能有多个文件（如 `ReduceMax.md` / `ReduceMax-35.md` / `ReduceMax-92.md`），功能不同。 |
 
 【验收标准】
 - 质疑清单按严重性分级（🔴 阻塞 / 🟡 需讨论 / 🟢 建议）
@@ -176,9 +179,7 @@
 然后开始开发。
 
 【第一步：基于模板搭建工程骨架】
-根据 DESIGN.md §0.5（方案决策）中 Architect 选定的路线加载对应模板 skill：
-- Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias，dav-3510 + Blaze 路线）→ 加载 /ascendc-blaze-best-practice，复制 references/matmul_custom/ 工程模板
-- 其他算子（Vector/RegBase/mxfp8 融合等）→ 加载 /ascendc-direct-invoke-template，按场景路由复制 references/add_custom/ 或 references/matmul_fusion_kernel/
+加载 /ascendc-direct-invoke-template，基于验证过的工程模板创建项目文件（CMakeLists.txt、.asc 文件、头文件）。
 禁止从零创建工程文件。搭建骨架后先编译通过（空 Kernel），再逐步添加算子逻辑。
 
 【渐进式开发策略】
@@ -189,7 +190,7 @@ Step D: 添加测试用例和精度验证 → 运行通过
 每步必须编译通过后再进入下一步。
 
 注意：DESIGN.md 中的代码模板是伪代码，展示计算逻辑和 API 选择，不能直接编译。
-实际代码结构以所选模板 skill 的工程模板为准。
+实际代码结构以所选模板的工程模板为准。
 
 【参考文档】
 - 编码规范与审查清单：workflows/development-guide.md

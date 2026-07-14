@@ -1,6 +1,6 @@
 ---
 name: ascendc-direct-invoke-template
-description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工程项目。提供经过验证的 Vector 样例工程（add_custom）和 mxfp8 matmul+eltwise 融合工程，含清晰的修改指南。触发：当用户需要创建 Kernel 直调工程、学习 Ascend C 编程、快速原型验证、或提及"Kernel直调"、"<<<>>>内核调用"、"mxfp8 融合"时使用本 skill。
+description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工程项目。提供经过验证的 Vector 样例工程（add_custom）、Blaze Matmul 工程模板（纯 Matmul / 融合 / MX 量化 / GroupMatmul）和 Kirin Vector 模板。触发：当用户需要创建 Kernel 直调工程、学习 Ascend C 编程、快速原型验证、或提及"Kernel直调"、"<<<>>>内核调用"、"Blaze Matmul"、"matmul 模板"时使用本 skill。
 ---
 # Ascend C Kernel 直调工程
 
@@ -11,12 +11,9 @@ description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工�
 
 | 算子类型 | 入口 | 典型算子 |
 |---|---|---|
-| **Vector**（A 分支） | `references/add_custom/` | add、mul、relu、softmax、layernorm 等逐元素/归约算子 |
-| **mxfp8 matmul + eltwise 融合** | `references/matmul_fusion_kernel/` + `references/matmul_fusion_guide.md` | Cube+Vector 融合专用变种；该指南独立自洽，进入后不必再回本页 |
-| **Kirin Vector** (端侧开发) | `references/kirin_add_template/` + `references/kirin_vector_guide.md`  | Kirin SoC（KirinX90/Kirin9030）专用add、mul、relu、softmax、layernorm 等逐元素/归约算子；该指南独立自洽，进入后不必再回本页 |
-
-
-**不支持的场景**：纯 Matmul/Cube（非融合）、其他 Cube+Vector 混合（如 matmul+softmax）不在此覆盖范围。
+| **Vector** | `references/add_custom/` | add、mul、relu、softmax、layernorm 等逐元素/归约算子 |
+| **Blaze Matmul**（A5/DAV_3510） | `references/matmul_blaze_template/` + `references/matmul_blaze_guide.md` | MatMul、BatchMatMul、matmul+bias、mxfp8 matmul、matmul+vector 融合、GroupMatmul |
+| **Kirin Vector**（端侧开发） | `references/kirin_add_template/` + `references/kirin_vector_guide.md` | Kirin SoC（KirinX90/Kirin9030）专用逐元素/归约算子 |
 
 ## 使用方法
 
@@ -46,9 +43,9 @@ description: Kernel直调工程模板，用于创建 Ascend C Kernel 直调工�
    ```
    > `run.sh` 在运行 kernel 前会自动删除旧的 `output/output.bin`，确保精度验证读取的是本次运行的新鲜输出。
 
-### B. mxfp8 matmul + eltwise 融合
+### B. Blaze Matmul
 
-见 `references/matmul_fusion_guide.md`（独立自洽）：复制 `references/matmul_fusion_kernel/` 工程后按指南改 Epilogue。
+见 `references/matmul_blaze_guide.md`（独立自洽）：按场景路由选择模板，复制 `matmul_blaze_template/` 工程后按指南改造。
 
 ### C. Kirin Vector 算子（Add 分支）
 
@@ -100,7 +97,7 @@ y = torch.ops.npu.add_custom(x1, x2)
 
 | 文件 | 说明 |
 |---|---|
-| `references/matmul_fusion_guide.md` | mxfp8 matmul + eltwise 融合 Epilogue 规范 |
+| `references/matmul_blaze_guide.md` | Blaze Matmul 工程模板指南（架构 + 场景路由 + 使用指南） |
 | `references/kernel_launch_details.md` | 进阶（通用）：内存层次/Double Buffer/同步机制/多 I/O |
 
 - [Ascend C 示例代码](https://gitcode.com/cann/asc-devkit/tree/master/examples)

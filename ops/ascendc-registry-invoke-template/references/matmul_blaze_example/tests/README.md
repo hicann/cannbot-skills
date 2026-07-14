@@ -1,23 +1,17 @@
-# tests 说明
+# tests
 
-## 描述
-quant_matmul_gelu_example算子测试，包括单元测试ut和系统测试st，具体可参考references/add_example/tests/
+matmul_blaze_example 算子测试，包括单元测试 ut 和系统测试 st，具体可参考 references/add_example/tests/
 
-## 实现说明
-本目录留空，可参考references/add_example/tests/实现.
+## 文件结构
 
-## 目录结构
-tests/                               # 测试
+```
+tests/
 ├── st/                              # 系统测试（ST，上板精度验证）
 │   ├── CMakeLists.txt
 │   ├── run.sh
-│   ├── README.md
-│   └── test_aclnn_quant_matmul_gelu_example.cpp
+│   ├── gen_golden.py
+│   └── test_aclnn_matmul_blaze_example.cpp
 └── ut/                              # 单元测试（UT）
-    ├── CMakeLists.txt
-    ├── run.sh
-    ├── README.md
-    ├── cmake/                      # GoogleTest 构建脚本
-    ├── common/                     # tiling/infershape 测试框架（faker/executor）
-    ├── op_api/                     # ACLNN 接口 UT
-    └── op_host/                    # tiling/infershape UT
+    ├── op_host/                     # Host侧UT
+    └── op_api/                      # API侧UT
+```

@@ -80,25 +80,34 @@ add_example/
 
 ### references/matmul_blaze_example/
 
-完整的 基于blaze的matmul类 算子实现，包含：
+基于 blaze library 的普通 MatMul 单算子样例，包含：
 
 ```
 matmul_blaze_example/
 ├── build.sh            # 构建脚本
 ├── CMakeLists.txt      # CMake配置
-├── op_host/            # Host侧实现
-│   ├── quant_matmul_gelu_example_def.cpp        # 算子定义
-│   ├── quant_matmul_gelu_example_infershape.cpp # Shape推导
-│   └── arch35/                                  # Ascend950 Tiling
+├── op_host/            # Host侧实现（自包含，TilingData 定义在此）
+│   ├── matmul_blaze_example_def.cpp              # 算子定义
+│   ├── matmul_blaze_example_infershape.cpp       # Shape推导
+│   └── arch35/                                    # Ascend950 Tiling
+│       ├── matmul_blaze_example_tiling.cpp        # Tiling 实现（mock stub）
+│       ├── matmul_blaze_example_tiling_data.h     # TilingData 结构体（Host/Kernel 共享）
+│       └── matmul_blaze_example_tiling_key.h      # TilingKey 定义
 ├── op_kernel/          # Kernel侧实现
-│   ├── quant_matmul_gelu_example_arch35.cpp   # Ascend950 Kernel
-│   └── arch35/                                # Ascend950 实现头文件
+│   ├── matmul_blaze_example_arch35.cpp           # Ascend950 Kernel（blaze library GemmUniversal）
+│   └── include/                                   # Blaze 库依赖（由 blaze skill 拉取）
+│       ├── blaze/                                 # [拉取] Blaze 库
+│       └── tensor_api/                            # [拉取] tensor_api 库
 ├── op_api/             # ACLNN接口
-│   ├── quant_matmul_gelu_example.cpp/h   # L2 API（对外接口）
-│   └── quant_matmul_gelu_example.cpp/h   # L0 API（内部实现）
+│   ├── aclnn_matmul_blaze_example.cpp/h           # L2 API（对外接口）
+│   └── matmul_blaze_example.cpp/h                 # L0 API（内部实现）
 ├── op_graph/           # 图模式适配
 ├── examples/           # 用户调用示例
-│   ├── test_aclnn_quant_matmul_gelu_example.cpp  # aclnn两段式调用示例
+└── tests/              # UT/ST测试
+    ├── ut/             # 单元测试
+    └── st/             # 系统测试
+```
+│   └── test_aclnn_quant_matmul_gelu_example.cpp  # aclnn两段式调用示例
 └── tests/              # UT/ST测试
     ├── ut/             # 单元测试
     │   ├── op_host/    # Host侧UT
@@ -170,8 +179,8 @@ ST 测试开发指南，包含：
 |------|--------|------|
 | 算子定义 | `{op}_def.cpp` | `op_host/` |
 | Tiling | `{op}_tiling.cpp` | `op_host/arch{32,35}/` |
-| TilingData | `{op}_tiling_data.h` | `op_kernel/arch{32,35}/` |
-| TilingKey | `{op}_tiling_key.h` | `op_kernel/arch{32,35}/` |
+| TilingData | `{op}_tiling_data.h` | `op_host/arch{32,35}/` |
+| TilingKey | `{op}_tiling_key.h` | `op_host/arch{32,35}/` |
 | Kernel | `{op}.cpp` / `{op}_apt.cpp` | `op_kernel/` |
 | L0 API | `{op}.cpp` / `{op}.h` | `op_api/` |
 | L2 API | `aclnn_{op}.cpp` / `aclnn_{op}.h` | `op_api/` |

@@ -739,6 +739,20 @@ if [ "$LEVEL" = "project" ] && [ -d "$ASC_DEVKIT_DIR" ]; then
         ok "asc-devkit → $INSTALL_BASE/"
     fi
 fi
+
+# --- Setup ops-tensor (for blaze skill) ---
+OPS_TENSOR_DIR="$SCRIPT_DIR/ops-tensor"
+if [ -d "$OPS_TENSOR_DIR" ]; then
+    cd "$OPS_TENSOR_DIR"
+    git checkout . 2>/dev/null || true
+    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
+    cd "$SCRIPT_DIR"
+    ok "ops-tensor updated"
+else
+    git clone --quiet --depth 1 https://gitcode.com/cann/ops-tensor.git "$OPS_TENSOR_DIR" 2>/dev/null \
+        && ok "ops-tensor cloned" \
+        || warn "git clone failed, skipping ops-tensor"
+fi
 echo ""
 
 # --- Step 5: Health check ---

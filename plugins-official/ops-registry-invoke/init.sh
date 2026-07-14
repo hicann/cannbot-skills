@@ -113,6 +113,8 @@ BRAND="cannbot"
 VERSION="1.2.0"
 ASC_DEVKIT_REPO="https://gitcode.com/cann/asc-devkit.git"
 ASC_DEVKIT_REF="master"
+OPS_TENSOR_REPO="https://gitcode.com/cann/ops-tensor.git"
+OPS_TENSOR_REF="master"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
@@ -668,7 +670,7 @@ fi
 echo ""
 
 # --- Step 6: Setup asc-devkit ---
-step "[6/7] Setting up asc-devkit..."
+step "[6/7] Setting up asc-devkit & ops-tensor..."
 ASC_DEVKIT_DIR="$SCRIPT_DIR/asc-devkit"
 
 if [ -d "$ASC_DEVKIT_DIR" ]; then
@@ -714,6 +716,34 @@ if [ "$LEVEL" = "project" ] && [ -d "$ASC_DEVKIT_DIR" ]; then
     fi
 fi
 
+# --- ops-tensor (blaze/tensor_api library source) ---
+OPS_TENSOR_DIR="$SCRIPT_DIR/ops-tensor"
+
+if [ -d "$OPS_TENSOR_DIR" ]; then
+    cd "$OPS_TENSOR_DIR"
+    git checkout . 2>/dev/null || true
+    git fetch --quiet origin 2>/dev/null || warn "git fetch failed for ops-tensor"
+    git checkout --quiet "$OPS_TENSOR_REF" 2>/dev/null || true
+    git merge --quiet "origin/$OPS_TENSOR_REF" 2>/dev/null || warn "git merge failed for ops-tensor, using existing version"
+    cd "$SCRIPT_DIR"
+    ok "ops-tensor updated ($OPS_TENSOR_REF)"
+else
+    git clone --quiet "$OPS_TENSOR_REPO" "$OPS_TENSOR_DIR" 2>/dev/null || warn "git clone failed, skipping ops-tensor"
+    if [ -d "$OPS_TENSOR_DIR" ]; then
+        cd "$OPS_TENSOR_DIR"
+        git checkout --quiet "$OPS_TENSOR_REF" 2>/dev/null || true
+        cd "$SCRIPT_DIR"
+        ok "ops-tensor cloned ($OPS_TENSOR_REF)"
+    fi
+fi
+
+if [ "$LEVEL" = "project" ] && [ -d "$OPS_TENSOR_DIR" ]; then
+    if [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; then
+        ln -sfn "$(realpath "$OPS_TENSOR_DIR")" "$INSTALL_BASE/ops-tensor"
+        ok "ops-tensor → $INSTALL_BASE/"
+    fi
+fi
+
 # --- Step 7: Generate manifest + Health check ---
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 
@@ -756,6 +786,13 @@ fi
 # When installed to a custom directory, also check the symlink there
 if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ] && [ ! -d "$INSTALL_BASE/asc-devkit" ]; then
   health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit symlink missing in $INSTALL_BASE"
+fi
+
+if [ ! -d "$OPS_TENSOR_DIR" ]; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor not available"
+fi
+if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ] && [ ! -d "$INSTALL_BASE/ops-tensor" ]; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor symlink missing in $INSTALL_BASE"
 fi
 
 # Check asc-devkit API docs are searchable

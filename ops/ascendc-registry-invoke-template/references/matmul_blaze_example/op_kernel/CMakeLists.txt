@@ -8,39 +8,27 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-# =============================================================================
-# Kernel sources - Arch35 only (Ascend950 / DAV_3510)
-# [MODIFY] 如需支持更多架构，添加对应的 npu_op_kernel_sources 块
-# =============================================================================
 npu_op_kernel_sources(ascendc_kernels
-    OP_TYPE QuantMatmulGeluExample
+    OP_TYPE MatmulBlazeExample
     KERNEL_DIR .
-    KERNEL_FILE quant_matmul_gelu_example_arch35.cpp
+    KERNEL_FILE matmul_blaze_example_arch35.cpp
 )
 
-# =============================================================================
-# Add Blaze/tensor_api include paths via kernel compile options
-# =============================================================================
-npu_op_kernel_options(ascendc_kernels QuantMatmulGeluExample
+npu_op_kernel_options(ascendc_kernels MatmulBlazeExample
     OPTIONS
-        -I${CMAKE_CURRENT_SOURCE_DIR}/arch35/include
-        -I${CMAKE_CURRENT_SOURCE_DIR}/arch35/common
-        -I${CMAKE_CURRENT_SOURCE_DIR}/../third_party/tensor_api
-        -I${CMAKE_CURRENT_SOURCE_DIR}/../third_party/tensor_api/include
-        -I${CMAKE_CURRENT_SOURCE_DIR}/../third_party/tensor_api/impl
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include/blaze
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include/tensor_api
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include/tensor_api/include
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include/tensor_api/impl
+        -I${CMAKE_CURRENT_SOURCE_DIR}/../op_host/arch35
 )
 
-# =============================================================================
-# Build kernel library
-# =============================================================================
 npu_op_kernel_library(ascendc_kernels
     SRC_BASE ${CMAKE_CURRENT_SOURCE_DIR}
     TILING_LIBRARY cust_optiling
 )
 
-# =============================================================================
-# Add to package
-# =============================================================================
 npu_op_package_add(${package_name}
     LIBRARY
         ascendc_kernels

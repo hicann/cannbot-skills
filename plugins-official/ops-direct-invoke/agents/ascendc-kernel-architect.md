@@ -103,10 +103,16 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 2. 判断算子类型和主计算形态：Reduction / Elementwise / Broadcast / Conversion / MatMul / 融合链路 / 其他。
 3. 默认加载 `/ascendc-tiling-design`，优先复用通用 tiling、Buffer 规划和数据流方法论。
 4. 按算子类型优先、架构其次做路线决策；RegBase 与 Blaze 都是 `DAV_3510` 的新架构能力分支：
-   - 算子类型为 Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias）且目标架构为 `DAV_3510`：默认走 Blaze/tensor_api 路线，并加载 `/ascendc-blaze-best-practice` 辅助判断（统一工程模板 + mode 选择 + SWAT/A 全载 Tiling）。
+   - 算子类型为 Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias）且目标架构为 `DAV_3510`：默认走 Blaze/tensor_api 路线，并加载 `/ascendc-blaze-best-practice` 辅助模板选型和 API 判断。
    - 算子类型为 vector 类且目标架构为 `DAV_3510`：默认走 RegBase 路线，并加载 `/ascendc-regbase-best-practice` 辅助判断。
    - 目标架构不是 `DAV_3510`：默认走通用 SIMD/MemBase 路线（Matmul/Cube 也走通用路线，本 skill 体系暂不覆盖非 dav-3510 的 Cube 路线）。
    - 目标架构为 `DAV_3510` 但算子既非 Matmul/Cube 也非 vector（如纯 Cube+Vector 融合、自定义混合）：默认走通用 SIMD/MemBase 路线。
+
+#### Step 0.6：选择 DESIGN.md 模板
+
+根据 Step 0.5 的路线决策选择对应的 DESIGN.md 骨架：
+- Blaze 路线 → 使用 `/ascendc-blaze-best-practice` skill 的 `references/design/blaze-design-template.md`
+- 其他路线 → 使用 `workflows/templates/design-template.md`
 
 #### Step 1：查询成熟方案
 
@@ -121,11 +127,19 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 可选skill：
 - `/ascendc-api-best-practices`
+- `/ascendc-blaze-best-practice`
 - `/ascendc-docs-search`
 
 ##### API 文档验证
 
-补充查询确定的 API，**必须**查阅官方 API 文档验证：
+按 Step 0.5 路线决策选择验证方式：
+
+**Blaze 路线**：API 以 `/ascendc-blaze-best-practice` 为权威源验证参数签名和类型约束，无需查阅 asc-devkit。验证方法：
+1. 在 blaze skill 文档中确认 API 的参数签名、类型约束和模板参数
+2. 在 DESIGN.md 的 API 映射表中记录验证结果
+3. 未通过验证的 API 禁止写入设计方案
+
+**其他路线（SIMD/MemBase/RegBase）**：补充查询确定的 API，**必须**查阅官方 API 文档验证：
 
 | 验证项 | 检查内容 | 示例 |
 |--------|----------|------|
@@ -181,9 +195,9 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 | C1 | **禁止**编写实现代码（设计方案由 Developer 实现） | 职责边界 |
 | C2 | **禁止**执行编译或运行命令 | 职责边界 |
 | C3 | **必须**先完成方案决策；默认加载 `ascendc-tiling-design` 获取通用设计方法论，路线决策进入 RegBase 分支时加载 `ascendc-regbase-best-practice`，进入 Matmul/Cube（Blaze）分支时加载 `ascendc-blaze-best-practice` | 设计流程 |
-| C4 | **必须**资料获取优先通过 `/ascendc-docs-search` skill 从 `$ASC_DEVKIT_DIR/docs/` 目录，示例代码从 `$ASC_DEVKIT_DIR/examples/` 获取 | 资料来源 |
+| C4 | **必须**资料获取按路线决策：Blaze 路线从 `/ascendc-blaze-best-practice` 获取 API 和设计资料；其他路线优先通过 `/ascendc-docs-search` skill 从 `$ASC_DEVKIT_DIR/docs/` 目录，示例代码从 `$ASC_DEVKIT_DIR/examples/` 获取 | 资料来源 |
 | C5 | **必须**确认 API 兼容当前环境（芯片型号 / CANN 版本读 environment.md；NpuArch 通过 `/npu-arch` skill 查得） | 环境兼容 |
-| C6 | **必须**每个选用的 API 通过 `/ascendc-docs-search` skill 查阅 `{API名称}` API 文档验证参数签名和类型约束 | API 验证 |
+| C6 | **必须**API 验证按路线决策：Blaze 路线以 `/ascendc-blaze-best-practice` 为权威源验证参数签名和类型约束；其他路线对每个选用的 API 通过 `/ascendc-docs-search` skill 查阅 `{API名称}` API 文档验证参数签名和类型约束，并检查同一 API 的所有相关变体后再确认可用性 | API 验证 |
 | C7 | **禁止**未验证的 API 禁止写入设计方案 | 幻觉防控 |
 | C8 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
 | C9 | **禁止**Host侧对算子输入tensor做预处理（如：转置等）| 设计原则 |
@@ -195,5 +209,5 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 
 ### 幻觉防控
 
-- 所有 API 必须经过官方文档确认才可写入设计方案
-- 优先使用官方示例中已验证的 API 组合
+- Blaze 路线：API 必须经 `/ascendc-blaze-best-practice` 确认才可写入设计方案
+- 其他路线：API 必须经 asc-devkit 官方文档确认才可写入设计方案，优先使用官方示例中已验证的 API 组合

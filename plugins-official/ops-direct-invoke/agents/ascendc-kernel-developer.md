@@ -115,10 +115,8 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 
 ##### Step A：基于模板创建工程骨架 → 编译通过（空 Kernel）
 
-- 根据 DESIGN.md §0.5（方案决策）中 Architect 选定的路线加载对应模板 skill：
-  - Matmul/Cube（GEMM/BMM/量化 matmul/matmul+bias，dav-3510 + Blaze 路线）：加载 `/ascendc-blaze-best-practice`，复制 `references/matmul_custom/` 工程模板
-  - 其他算子（Vector/RegBase/mxfp8 融合等）：加载 `/ascendc-direct-invoke-template`，按场景路由选择 `references/add_custom/` 或 `references/matmul_fusion_kernel/`
-- 准出条件：确保空 Kernel 骨架编译通过
+- 根据 DESIGN.md 中 Architect 选定的路线，从 `/ascendc-direct-invoke-template` 选择对应工程模板创建项目文件
+- 准出条件：确保空 Kernel 骨架编译通过（`cmake .. && make`）
 
 ##### Step B：添加 Tiling 结构体和 Host 侧 Tiling 计算 → 编译通过
 
@@ -133,7 +131,7 @@ Ascend C 算子开发专家，负责根据 Architect 的设计方案（或直接
 - 准出条件：编译通过
 
 **阶段 2 检查清单**：
-- [ ] Step A: 已根据 DESIGN.md §0.5 路线加载对应模板 skill（`/ascendc-blaze-best-practice` 或 `/ascendc-direct-invoke-template`）并创建工程骨架
+- [ ] Step A: 已加载 `/ascendc-direct-invoke-template` 模板创建工程骨架
 - [ ] Step A: 空 Kernel 编译通过
 - [ ] Step B: Tiling 结构体和 Host 侧 Tiling 计算已添加，编译通过
 - [ ] Step C: Kernel 核心计算逻辑已添加，编译通过
