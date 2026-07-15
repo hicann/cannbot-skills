@@ -35,6 +35,17 @@ err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
+# Validate that a path exists (directory), exit with unified error if not.
+# $1 = path to check  $2 = parameter name for error message
+validate_path() {
+    local path="$1"
+    local param_name="$2"
+    if [ ! -d "$path" ]; then
+        err "$param_name path not found: $path"
+        exit 1
+    fi
+}
+
 # Safe install config file with backup and conflict handling.
 # $1 = generated temp file path  $2 = target  $3 = display name  $4 = level
 safe_install_file() {
@@ -128,12 +139,13 @@ show_help() {
     cat << EOF
 cuda2ascend - 基类工作流安装器
 
-Usage: init.sh [level] [install_path] [options]
+Usage: init.sh [level] [tool] [install_path] [options]
 
 目标工具仅支持 OpenCode。
 
 Arguments:
   level        - 安装级别: "project" (默认) 或 "global"
+  tool         - (保留兼容) 仅支持 "opencode"，传入其他值会报错
   install_path - project 级安装目录 (默认: 当前工作目录)
 
 Options:
@@ -157,6 +169,7 @@ Installation paths:
   .cannbot/              流程中间文件、状态文件
   .cannbot/asc-devkit    asc-devkit 仓
   .cannbot/cann-samples  cann-samples 仓
+  .cannbot/ops-tensor    ops-tensor 仓
 EOF
 }
 
@@ -182,7 +195,11 @@ while [ $# -gt 0 ]; do
         --cann-samples)  CANN_SAMPLES_LOCAL="$2"; shift 2; continue ;;
         --cann-samples=*) CANN_SAMPLES_LOCAL="${1#*=}"; shift; continue ;;
         global|project)  LEVEL="$1"; shift; continue ;;
-        opencode)        shift; continue ;;   # 兼容旧用法，仅支持 opencode
+        opencode)        # 兼容旧用法，仅支持 opencode
+                        shift; continue ;;
+        claude|trae|cursor|copilot|codearts)
+                        err "暂不支持 $1，当前仅支持 opencode"
+                        exit 1 ;;
         *) POSITIONAL+=("$1"); shift; continue ;;
     esac
 done
@@ -195,21 +212,21 @@ fi
 # --override <dir> is shorthand for --override-skills <dir>/skills.
 # Explicit --override-skills takes precedence if both given.
 if [ -n "$OVERRIDE_ROOT" ]; then
-    if [ ! -d "$OVERRIDE_ROOT" ]; then
-        err "--override path not found: $OVERRIDE_ROOT"
-        exit 1
+    validate_path "$OVERRIDE_ROOT" "--override"
+    if [ -z "$OVERRIDE_SKILL_DIR" ]; then
+        if [ -d "$OVERRIDE_ROOT/skills" ]; then
+            OVERRIDE_SKILL_DIR="$OVERRIDE_ROOT/skills"
+        else
+            err "--override path has no skills/ subdirectory: $OVERRIDE_ROOT"
+            exit 1
+        fi
     fi
-    [ -z "$OVERRIDE_SKILL_DIR" ] && [ -d "$OVERRIDE_ROOT/skills" ] && OVERRIDE_SKILL_DIR="$OVERRIDE_ROOT/skills"
 fi
 
 # Normalize & validate override dir (absolute path for stable symlinks)
 if [ -n "$OVERRIDE_SKILL_DIR" ]; then
-    if [ -d "$OVERRIDE_SKILL_DIR" ]; then
-        OVERRIDE_SKILL_DIR="$(cd "$OVERRIDE_SKILL_DIR" && pwd)"
-    else
-        err "override skills dir not found: $OVERRIDE_SKILL_DIR"
-        exit 1
-    fi
+    validate_path "$OVERRIDE_SKILL_DIR" "--override-skills"
+    OVERRIDE_SKILL_DIR="$(cd "$OVERRIDE_SKILL_DIR" && pwd)"
 fi
 
 # --- Determine config root (OpenCode) ---
@@ -218,6 +235,7 @@ if [ "$LEVEL" = "global" ]; then
     INSTALL_BASE="$HOME"
 else
     if [ -n "$INSTALL_PATH" ]; then
+        validate_path "$INSTALL_PATH" "install_path"
         INSTALL_BASE="$(cd "$INSTALL_PATH" && pwd)"
     else
         INSTALL_BASE="$PWD"
@@ -323,13 +341,13 @@ collect_agents
 collect_skills
 
 # --- Step 1: Create .cannbot directory ---
-step "[1/6] Creating .cannbot directory..."
+step "[1/8] Creating .cannbot directory..."
 mkdir -p "$CANNBOT_MID_DIR"
 ok ".cannbot → $CANNBOT_MID_DIR"
 echo ""
 
 # --- Step 2: Install config file (AGENTS.md) ---
-step "[2/6] Installing configuration..."
+step "[2/8] Installing configuration..."
 mkdir -p "$CONFIG_ROOT"
 
 config_src="$PLUGIN_ROOT/AGENTS.md"
@@ -351,7 +369,7 @@ fi
 echo ""
 
 # --- Step 3: Link agents (flattened; architect / developer / qa) ---
-step "[3/6] Linking agents..."
+step "[3/8] Linking agents..."
 AGENTS_LINK_DIR="$CANNBOT_DIR/agents"
 rm -rf "$AGENTS_LINK_DIR"
 mkdir -p "$AGENTS_LINK_DIR"
@@ -369,7 +387,7 @@ ok "Agents: $agent_count linked (flattened)"
 echo ""
 
 # --- Step 4: Link skills registered by agents ---
-step "[4/6] Linking skills..."
+step "[4/8] Linking skills..."
 SKILLS_LINK_DIR="$CANNBOT_DIR/skills"
 rm -rf "$SKILLS_LINK_DIR"
 mkdir -p "$SKILLS_LINK_DIR"
@@ -430,16 +448,13 @@ fi
 echo ""
 
 # --- Step 5: Setup asc-devkit (into .cannbot/) ---
-step "[5/6] Setting up asc-devkit..."
+step "[5/8] Setting up asc-devkit..."
 ASC_DEVKIT_DIR="$CANNBOT_MID_DIR/asc-devkit"
 if [ -n "$ASC_DEVKIT_LOCAL" ]; then
-    if [ -d "$ASC_DEVKIT_LOCAL" ]; then
-        rm -rf "$ASC_DEVKIT_DIR"
-        ln -sfn "$(realpath "$ASC_DEVKIT_LOCAL")" "$ASC_DEVKIT_DIR"
-        ok "asc-devkit → $(realpath "$ASC_DEVKIT_LOCAL") (local, linked)"
-    else
-        err "--asc-devkit path not found: $ASC_DEVKIT_LOCAL"
-    fi
+    validate_path "$ASC_DEVKIT_LOCAL" "--asc-devkit"
+    rm -rf "$ASC_DEVKIT_DIR"
+    ln -sfn "$(realpath "$ASC_DEVKIT_LOCAL")" "$ASC_DEVKIT_DIR"
+    ok "asc-devkit → $(realpath "$ASC_DEVKIT_LOCAL") (local, linked)"
 elif [ -d "$ASC_DEVKIT_DIR/.git" ]; then
     cd "$ASC_DEVKIT_DIR"
     git checkout . 2>/dev/null || true
@@ -456,19 +471,27 @@ else
         warn "git clone failed, skipping asc-devkit"
     fi
 fi
+
+# Clean markdown for docs search
+if [ -d "$ASC_DEVKIT_DIR" ]; then
+    CLEAN_SCRIPT="$SHARED_SKILL_ROOT/ascendc-docs-search/scripts/clean_markdown.py"
+    if [ -f "$CLEAN_SCRIPT" ]; then
+        python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 \
+            || warn "markdown cleanup failed"
+    else
+        warn "clean_markdown.py not found, skipping"
+    fi
+fi
 echo ""
 
 # --- Step 6: Setup cann-samples (into .cannbot/) ---
-step "[6/6] Setting up cann-samples..."
+step "[6/8] Setting up cann-samples..."
 CANN_SAMPLES_DIR="$CANNBOT_MID_DIR/cann-samples"
 if [ -n "$CANN_SAMPLES_LOCAL" ]; then
-    if [ -d "$CANN_SAMPLES_LOCAL" ]; then
-        rm -rf "$CANN_SAMPLES_DIR"
-        ln -sfn "$(realpath "$CANN_SAMPLES_LOCAL")" "$CANN_SAMPLES_DIR"
-        ok "cann-samples → $(realpath "$CANN_SAMPLES_LOCAL") (local, linked)"
-    else
-        err "--cann-samples path not found: $CANN_SAMPLES_LOCAL"
-    fi
+    validate_path "$CANN_SAMPLES_LOCAL" "--cann-samples"
+    rm -rf "$CANN_SAMPLES_DIR"
+    ln -sfn "$(realpath "$CANN_SAMPLES_LOCAL")" "$CANN_SAMPLES_DIR"
+    ok "cann-samples → $(realpath "$CANN_SAMPLES_LOCAL") (local, linked)"
 elif [ -d "$CANN_SAMPLES_DIR/.git" ]; then
     cd "$CANN_SAMPLES_DIR"
     git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
@@ -483,7 +506,27 @@ else
 fi
 echo ""
 
-# --- Generate manifest + health check ---
+# --- Step 7: Setup ops-tensor (into .cannbot/) ---
+step "[7/8] Setting up ops-tensor..."
+OPS_TENSOR_DIR="$CANNBOT_MID_DIR/ops-tensor"
+
+if [ -d "$OPS_TENSOR_DIR/.git" ]; then
+    cd "$OPS_TENSOR_DIR"
+    git checkout . 2>/dev/null || true
+    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
+    cd "$SCRIPT_DIR"
+    ok "ops-tensor updated"
+else
+    if git clone --quiet --depth 1 https://gitcode.com/cann/ops-tensor.git "$OPS_TENSOR_DIR" 2>/dev/null; then
+        ok "ops-tensor cloned"
+    else
+        warn "git clone failed, skipping ops-tensor"
+    fi
+fi
+echo ""
+
+# --- Step 8: Generate manifest + health check ---
+step "[8/8] Generating manifest and running health check..."
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON=$(echo "$ALL_SKILLS" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 AGENTS_JSON=$(printf '%s\n' "${AGENT_FILES[@]}" | while read -r f; do [ -n "$f" ] && basename "$f" .md; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
@@ -499,11 +542,13 @@ cat > "$MANIFEST" << MANIFEST_EOF
   "installed_agents": $AGENTS_JSON,
   "brand_dir": "$CONFIG_ROOT",
   "mid_dir": "$CANNBOT_MID_DIR",
+  "asc_devkit_dir": "$ASC_DEVKIT_DIR",
+  "cann_samples_dir": "$CANN_SAMPLES_DIR",
+  "ops_tensor_dir": "$OPS_TENSOR_DIR",
   "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MANIFEST_EOF
 
-step "Running health check..."
 health_ok=true
 health_errors=""
 
@@ -521,6 +566,7 @@ done
 [ -d "$CANNBOT_MID_DIR" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .cannbot/ missing"; health_ok=false; }
 [ -d "$ASC_DEVKIT_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit not available"
 [ -d "$CANN_SAMPLES_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} cann-samples not available"
+[ -d "$OPS_TENSOR_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor not available"
 [ -f "$config_target" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} $config_name missing"; health_ok=false; }
 [ -f "$MANIFEST" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }
 
