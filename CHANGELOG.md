@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-07-13】
+#### 问题修复 Bug Fix
+- 【cannbot-insight】加固 `start.sh -c` 的 CLI 参数边界，命令与附加参数逐项传递，避免词分割和路径名展开。
+
 ### 【2026-07-06】
 #### 特性增强 Feature Enhancement
 - 【安装部署】全部 11 个插件（官方 + 社区）适配 CodeArts（华为云码道）工具，`init.sh` 安装脚本与 `quickstart.md` 文档新增 `codearts` 参数支持，总体已支持 OpenCode / Claude / Trae / Cursor / Copilot / CodeArts。

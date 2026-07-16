@@ -30,7 +30,11 @@ Log file locations:
 ./start.sh          # Auto install + migrate + start Web UI on port 21025
 ./start.sh -u       # Update dependencies + migrate + start Web UI
 ./start.sh -f       # Fresh build (clear .next cache, rebuild from scratch)
+./start.sh -c tui   # Start the backend, then launch the interactive CLI
+./start.sh -c sessions -- --limit 5  # Run a CLI command with explicit CLI arguments
 ```
+
+For `-c` mode, pass the CLI subcommand as the `-c` value. If the subcommand needs additional arguments, put them after `--`; they are forwarded as individual CLI arguments.
 
 Open `http://localhost:21025`. After importing a log file, click a session to explore 9 analysis tabs.
 

@@ -30,7 +30,11 @@ LLM 编码 Agent 的 Session 级可观测工具。辅助长上下文分析、模
 ./start.sh              # 自动安装 + 迁移 + 启动 Web UI，端口 21025
 ./start.sh -u           # 更新依赖 + 迁移 + 启动 Web UI
 ./start.sh -f           # 清除 .next 缓存，重新编译
+./start.sh -c tui       # 启动后端后进入交互式 CLI
+./start.sh -c sessions -- --limit 5  # 显式传递 CLI 子命令参数
 ```
+
+使用 `-c` 模式时，将 CLI 子命令作为 `-c` 的值传入；子命令需要额外参数时，将参数写在 `--` 之后，脚本会逐项转发给 CLI。
 
 浏览器打开 `http://localhost:21025`。导入日志文件后，点击 session 进入 9 个分析 Tab。
 

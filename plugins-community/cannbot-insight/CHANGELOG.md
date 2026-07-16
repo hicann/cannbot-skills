@@ -2,6 +2,11 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v1.03] - 2026-07-13
+
+### Fixed
+- `start.sh -c` 将 CLI 子命令和附加参数逐项传递，避免未引用展开带来的词分割和路径名展开；附加 CLI 参数使用 `-- <cli-args...>` 显式传入
+
 ## [v0.96] - 2026-06-29
 
 ### Changed

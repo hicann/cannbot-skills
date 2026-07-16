@@ -50,9 +50,15 @@ export DATABASE_URL="${DATABASE_URL:-file:$SCRIPT_DIR/prisma/dev.db}"
 UPDATE=false
 CLI=false
 CLI_CMD=""
+CLI_ARGS=()
 KILL_EXISTING=false
 FRESH=false
 ADVANCED=false
+
+usage() {
+  echo "Usage: $0 [-u] [-k] [-f] [-a] [-c <command> [-- <cli-args...>]]  (-u: update; -k: kill port; -f: fresh build; -a: show advanced tabs; -c: run CLI command)" >&2
+}
+
 while getopts "uc:kfa" opt; do
   case $opt in
     u) UPDATE=true ;;
@@ -60,9 +66,14 @@ while getopts "uc:kfa" opt; do
     k) KILL_EXISTING=true ;;
     f) FRESH=true ;;
     a) ADVANCED=true ;;
-    *) echo "Usage: $0 [-u] [-k] [-f] [-a] [-c <command|tui>]  (-u: update; -k: kill port; -f: fresh build; -a: show advanced tabs; -c: CLI mode)" >&2; exit 1 ;;
+    *) usage; exit 1 ;;
   esac
 done
+
+shift $((OPTIND - 1))
+if [ "$CLI" = true ] && [ "$#" -gt 0 ]; then
+  CLI_ARGS=("$@")
+fi
 
 if [ "$UPDATE" = true ] || [ ! -d "node_modules" ]; then
   echo "[setup] Installing dependencies..."
@@ -152,7 +163,7 @@ if [ "$CLI" = true ]; then
   done
 
   echo "[start] Launching CLI: $CLI_CMD"
-  npx tsx src/cli/index.ts $CLI_CMD --server $SERVER_URL
+  npx tsx src/cli/index.ts "$CLI_CMD" "${CLI_ARGS[@]}" --server "$SERVER_URL"
   kill $BACKEND_PID 2>/dev/null || true
   echo "[start] CLI exited, backend stopped"
 else
