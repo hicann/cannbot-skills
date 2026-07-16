@@ -247,7 +247,8 @@ TileLang 算子开发模式下，CANNBot 会在 `examples/{operator}/` 目录下
 ```
 examples/softmax/
 ├── DESIGN.md                   # Stage 1 设计文档
-├── example_softmax.py          # Stage 2 kernel + 内嵌 golden + test 用例 + main 块
+├── softmax.py                  # Stage 2 纯 kernel（@tilelang.jit，可 import）
+├── test_softmax.py             # Stage 2 from softmax import kernel + golden + 分层测试 + main 块
 ├── README.md                   # 实现说明（可选）
 ├── perf_tuning/                # Stage 3 性能调优产物（可选）
 ├── history_version/            # 设计回退 / 精度调试备份
