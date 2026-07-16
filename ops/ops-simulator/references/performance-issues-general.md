@@ -113,10 +113,10 @@ int myTile = (blockIdx < bigCoreCount) ? bigTile : smallTile;
 ```
 total_tiles  = CeilDiv(m, baseM) * CeilDiv(n, baseN)
 rounds       = CeilDiv(total_tiles, blockDim)
-tail_tiles   = total_tiles - (rounds - 1) * blockDim
+tail_tiles   = total_tiles % blockDim
 ```
 
-Apply this fix when `tail_tiles < blockDim / 2` **AND** `rounds ≥ 2`. (If `rounds == 1`, route to §2 Kernel Underutilization instead — the whole kernel is one tail round.)
+Apply this fix when `0 < tail_tiles < blockDim / 2` **AND** `rounds ≥ 2`. (If `rounds == 1`, route to §2 Kernel Underutilization instead — the whole kernel is one tail round.)
 
 **Fix**: in the `BlockScheduler`, detect the tail-round case and emit smaller tile shapes for those specific tiles so the count of tail tiles ≥ `blockDim`. Earlier rounds keep the full `baseM × baseN` shape unchanged.
 

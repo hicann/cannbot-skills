@@ -24,7 +24,7 @@ AIC-side pipeline bound diagnosis and fix solutions. All metric paths refer to f
 | Cube→Vector GM round-trip | `AIC_FIXPIPE_L0C_TO_OUT` AND `AIVx_MTE2_OUT_TO_UB` carry same payload | tile streams through GM twice | Fixpipe L0C→UB direct | §5 |
 | SCALAR Bound — register spill | `scalar_instructions.AIC.load_store_ratio` | `≥ 0.30` | Local vars, drop multi-level deref | §6.1 |
 | SCALAR Bound — icache miss | `cache.icache_refill_ticks` | `> 0` | Icache prefetch, reduce code size | §6.2 |
-| SCALAR Bound — backpressure from CUBE | `pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | high AND `load_store_ratio < 0.30` | Treat as CUBE Bound | §6.3 |
+| SCALAR Bound — backpressure from CUBE | `pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | low (`< 0.20`) AND `load_store_ratio < 0.30` | Treat as CUBE Bound | §6.3 |
 
 > **Missing-section note**: if your `summary.json` lacks `bandwidth` / `cache` sections, the table rows keyed on those will not trigger by themselves. §2, §5 and §6.2 each include a fallback signal that uses only `pipe_utilization` + `pipeline_overlap`. The other rows already use only always-present sections.
 

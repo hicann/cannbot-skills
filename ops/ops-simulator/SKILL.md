@@ -158,7 +158,7 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 | `references/pipeline-bubble-analysis.md` | 指令流水空泡分类、因果归因、周期性模式检测 | 生成 trace 后，定位性能瓶颈根因时 |
 | `scripts/trace_bubble_analyzer.py` | 自动化空泡分析脚本（兼容 msprof/cannsim 双格式） | 批量分析多核 trace 或获取预分析报告时 |
 | `references/performance-metrics-reference.md` | summary.json 字段、阈值、Analysis Priority | 分析 summary.json 时 |
-| `references/performance-issues-general.md` | 多核负载不均衡 | 分析 summary.json 时 |
+| `references/performance-issues-general.md` | 多核负载不均衡 + Kernel 利用率不足 | 分析 summary.json 时 |
 | `references/performance-issues-aic.md` | AIC: CUBE/MTE2/MTE1/FIXPIPE/SCALAR + L0C→UB | 分析 summary.json 时 |
 | `references/performance-issues-aiv.md` | AIV: VECTOR/MTE2/MTE3/SCALAR + SIMT | 分析 summary.json 时 |
 | `references/performance-issues-template.md` | 新增 issue 条目的规范 | 维护 |
@@ -186,7 +186,7 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 
 ### 快速诊断（Quick Diagnosis）
 
-**Step 0 — 核数检查**：检查 `kernel_info.ai_core_active`。如果在多核芯片上 `== 1`，说明 kernel 是单核运行的 — 让所有核都参与计算是最优先的修复，优先级高于下方所有瓶颈类型规则。此时 `imbalance_ratio` 会是 `1.0`（只追踪了一个核），**不应**被理解为"负载均衡"；所有接近零的 overlap 都是单核运行的假象，不是双缓冲问题。请跳转到 [通用问题 §1.1](references/performance-issues-general.md)，在 kernel 变为多核运行之前不要继续执行下方瓶颈类型表。
+**Step 0 — 核数检查**：检查 `kernel_info.ai_core_active`。如果在多核芯片上 `== 1`，先确认确实是单核运行：用 `blockDim` 或 `per_core` 数组长度核对——若 `blockDim > 1` 但仅采到一个核的数据，则属于 profiler 采样假象（kernel 实为多核，`imbalance_ratio` 仍为 1.0、`per_core` 缺失，真实不均衡仍可能存在），此时不要给出"开满核"的结论，应按多核不均衡走结构化检查。确认确为单核后 — 让所有核都参与计算是最优先的修复，优先级高于下方所有瓶颈类型规则。此时 `imbalance_ratio` 会是 `1.0`（只追踪了一个核），**不应**被理解为"负载均衡"；所有接近零的 overlap 都是单核运行的假象，不是双缓冲问题。请跳转到 [通用问题 §1.1](references/performance-issues-general.md)，在 kernel 变为多核运行之前不要继续执行下方瓶颈类型表。
 
 **Step 1 — 多核负载均衡**：检查 `top_level_diagnosis.imbalance_ratio`
 - `> 1.3` → 需要做负载均衡 tiling
@@ -204,7 +204,7 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 | `AIC_MTE2` / `AIVx_MTE2` | MTE2 瓶颈 | `bandwidth.*.avg_transaction_gbps` | 开启双缓冲；若 DMA 粒度较小，使用 UB 批量搬运 |
 | `AIC_MTE1` | MTE1 瓶颈 | `pipeline_overlap.AIC_MTE1_vs_AIC_CUBE` | 对 L0A/L0B 开启双缓冲 |
 | `AIC_FIXP` | FIXPIPE 瓶颈 | `pipeline_overlap.AIC_FIXP_vs_AIC_CUBE` | 若 < 0.30：CUBE 因排空 L0C 而阻塞 → 增大 N 轴 tile 尺寸 |
-| `AIC_SCALAR` / `AIVx_SCALAR` | SCALAR 瓶颈 | `scalar_instructions.*.load_store_ratio`、`pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | 若 ratio ≥ 0.30 则存在溢出；若 SCALAR_vs_CUBE overlap 偏高则为反压 |
+| `AIC_SCALAR` / `AIVx_SCALAR` | SCALAR 瓶颈 | `scalar_instructions.*.load_store_ratio`、`pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | 若 ratio ≥ 0.30 则存在溢出；若 SCALAR_vs_CUBE overlap 偏低（< 0.20）则为反压（按 CUBE Bound 处理）|
 
 **Step 3 — 带宽/搬运交叉验证**（独立于 `dominant_pipeline`）：
 - 若 `bandwidth` 存在：扫描是否存在*冗余搬运* — 最常见的是 `AIC_FIXPIPE_L0C_TO_OUT` + `AIVx_MTE2_OUT_TO_UB` 搬运相同数据。此特征说明 matmul tile 经由 GM 绕了一圈，可通过 L0C→UB 直连 Fixpipe 消除。
