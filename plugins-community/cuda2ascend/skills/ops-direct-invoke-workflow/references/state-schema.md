@@ -22,11 +22,11 @@
     "loop": "acceptance"
   },
   "deliverables": {
-    "requirement": ".cannbot/requirement.md",
+    "requirement": ".cannbot/1.1-需求分析.md",
     "spec": ".cannbot/spec.yaml",
-    "test_plan": ".cannbot/design/test-plan.md",
-    "dev_plan": ".cannbot/design/dev-plan.md",
-    "cp3_report": ".cannbot/reports/cp3-functional.md"
+    "test_plan": ".cannbot/2.1-测试方案设计.md",
+    "dev_plan": ".cannbot/2.2-开发方案设计.md",
+    "cp3_report": ".cannbot/CP3-功能验收报告.md"
   },
   "updated_at": "2026-07-09T00:00:00Z"
 }
