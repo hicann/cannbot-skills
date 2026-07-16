@@ -65,7 +65,7 @@ Step 2 — 声明式匹配
      - Step 1.3 命中该文件的任一触发关键词 → 通过
      - 未命中 → 跳过
      - 若文件的 <适用> 头含 排除场景: 字段，由该文件自行定义排除逻辑
-       （如 MC2：有 hccl_ 但无 Matmul/GroupedMatmul/quant → 跳过）
+       （如 MC2：有 hccl_ 但无 expert/dispatch/combine 路由逻辑且无 Matmul/GroupedMatmul/quant → 跳过）
 
 Step 3 — 条例级侧别过滤
 
