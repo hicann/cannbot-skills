@@ -1,7 +1,33 @@
-# FlashAttention 类算子分析层
+# FlashAttention 类算子 — 基础理论层
 
-> 本文档定义 FA 类的数学模型、不变量、子族归类与分析阶段产出。
-> **设计阶段**进入 → [`design.md`](./design.md);**子族扩展契约** → [`subfamilies.md`](./subfamilies.md)。
+> 本文档定义 FA 类的**通用数学模型、不变量与分析阶段产出**。所有 FA 变体(GQA / MLA / 量化 / 稀疏)共享本节内容。
+> **选型入口** → [`patterns.md`](../patterns.md);**设计流程** → [`design/`](../design/_governance.md)(节点 G→N12)。
+
+---
+
+## §0 抽象名与公开 API 对照
+
+> 本目录方法论用**抽象名**表达设计概念(如 `mEff`、`K_BASE`),便于跨平台复用。下表把这些抽象名映射到 **asc-devkit 公开 API**(有文档/头文件),供实现时定位。
+> **纪律**:本 skill 只引用公开资料(asc-devkit 开源社区、CANN 官方文档)。抽象名承载"该决策什么 / 该满足什么不变量";**其具体变量命名由实现自行决定**,方法论不绑定任何一份实现的私有符号名。
+
+**抽象概念 → 公开 API**:
+
+| 方法论抽象名 | 含义 | 对应的公开 Ascend C API / 概念 |
+|---|---|---|
+| `mEff` = Bq × curG | Mmad 有效 m 维 | Mmad 的 `m` 维参数(`MmadParams.m`);数值由 Tiling 决定,变量名自定 |
+| `curG` / `gMaxPerTask` | 合并到一个 task 的 qHead 数 / 其上限 | Tiling 派生量,无固定 API 名;由 Host Tiling 决定 |
+| `K_BASE` / `M_BASE` / `S2_BASE` | L0/L1 分块基础块 | Mmad `k`/`m`/`n` 维分块步长(`MmadParams`)+ LoadData 分块参数;数值 Tiling 决定,变量名自定 |
+| `CACHE_SIZE` / `PRELOAD_N` | 流水 ring buffer 深度 / task 环形缓冲区大小 | 算子自定义常量(非 API);由流水编排设计决定,见 `design/execution.md §3`(N10 流水/同步)|
+| V1 softmax | online softmax V1 阶段 | **`SoftmaxFlashV2<float>`**(asc-devkit `include/adv_api/activation/softmaxflashv2.h`,有文档与示例);`T` 仅支持 half/float,bf16 走 `<float>`+Cast |
+| bf16 Mmad | fm/filter=bf16, acc=fp32 | `Mmad<float, bfloat16_t, bfloat16_t>`(公开 Mmad 模板;见 `Mmad.md`)|
+| V 转置加载 | L1→L0B 转置 | `LoadDataWithTranspose`(公开 `LoadDataWithTranspose.md`;950PR 仅支持 L1→L0B 通路)|
+| V2 归一化 1/sum | 求倒数 | `Reciprocal<float, config>`(950PR 仅提供带 config 的重载;config 有默认值 `DEFAULT_RECIPROCAL_CONFIG`,无需显式传参;`Reciprocal.md`),或 `Div` 替代 |
+| 跨核同步 | AIC↔AIV 握手 | `CrossCoreSetFlag<modeId,pipe>` / `CrossCoreWaitFlag<modeId,pipe>`(公开 ISASI;modeId 语义见 implementation_ref.md §1)|
+| L0C→UB 搬运 | Fixpipe | `Fixpipe` + `FixpipeParamsArch3510`(950PR)/ `FixpipeParamsM300`;见 implementation_ref.md §4 |
+
+**跨核同步 modeId(公开文档)**:950PR/950DT 支持 modeId 0/1/2/4;A2/A3 等上一代仅支持 0/1/2。FA 混合 kernel 的 AIC↔AIV 握手在 950PR 用 modeId 2 或 4,详见 [`implementation_ref.md` §1](../implementation_ref.md)。
+
+> **重要**:某些 FA 参考实现内部有私有融合函数(如把 V1 softmax 融合成单函数)或私有的跨核同步封装类。这些**不是** Ascend C 公开 API,走 asc-devkit 公开 API 的开发路径**无法直接调用**。本 skill 不推荐、不依赖任何私有符号——默认路径一律用上表的公开 API。
 
 ---
 
@@ -16,21 +42,9 @@ FA(FlashAttention)类算子是分块化、不显式实例化 attention score 矩
 - **K, V**:key / value,含 batch / Sk / kvHead / D 维(典型 BSND layout `[B, Sk, Hkv, D]`)
 - **O**:输出 attention,维度与 Q 同
 
-D 为 head dim,Hq / Hkv 为 query / kv head 数。FA 类内不同子族在 Hq 与 Hkv 的关系、KV 是否经压缩、Sq 是否退化为 1 等维度上特化。其他 layout(BNSD / SBHD 等)需要在设计阶段额外声明 stride 计算。
+D 为 head dim,Hq / Hkv 为 query / kv head 数。FA 类内不同变体在 Hq 与 Hkv 的关系、KV 是否经压缩、Sq 是否退化为 1 等维度上特化。其他 layout(BNSD / SBHD 等)需要在设计阶段额外声明 stride 计算。
 
-### §1.2 子族总览(选型入口)
-
-FA 类按数学差异与计算流的扩展点划分为若干子族。选型入口与各子族扩展契约见 [`subfamilies.md`](./subfamilies.md):
-
-- **FA / GQA**(默认):`Hq = G × Hkv`,G ≥ 1 个 query head 共享一个 KV head
-- **MHA**:G = 1 的退化(Hq = Hkv)
-- **MLA**:KV 经 latent compression,`kvHeadNum=1`,需 latent absorption 计算链
-- **稀疏 FA**:KV 维度有 sparse pattern(扩展点占位)
-- **量化路径**:int8 / FP8 / FP4 / MX 类格式(mxfp8 / mxfp4 等)。**关键设计点**:MX 类格式 scale 轴对齐受 §3.5 I5 不变量约束。完整契约见 [`subfamilies.md §3.5 + §4.3`](./subfamilies.md)
-
-分析阶段必须在用户需求中识别子族;子族确定后后续 Tiling 决策、Workspace 公式、Service 类划分按其扩展契约走,禁止混用。
-
-### §1.3 与其他算子族的边界
+### §1.2 与其他算子族的边界
 
 FA 类与其他算子族的关键区分:
 
@@ -64,16 +78,16 @@ O_j   = exp(m_{j-1} - m_j) * O_{j-1} + exp(S_j - m_j) · V_j  # [Bq, D]
 **关键性质**:
 - `S_j`(Q·K^T 结果)仅 `[Bq, Bk]` 大小,与 Sk 无关 —— FA 的"不实例化全矩阵"由此实现
 - 跨 KV 分块累积时需要 **rescale 旧状态**(`exp(m_{j-1} - m_j)`),这是 online softmax 的本质
-- 末块归一化(除以 `sum_last`)只做一次,中间步骤的 P 已经在 SoftmaxFlashV2 内部归一化或推迟到末块
+- 末块归一化(除以 `sum_last`)只做一次;**中间步骤的 P 不做归一化**——V1 阶段输出的是 `exp(S_j - m_j)`(未归一化指数),归一化推迟到 V2 末块(见 §2.2 与 `design/execution.md §1` N4 softmax)
 
 ### §2.2 数据流四阶段语义
 
-FA 类把每个 KV 分块的计算切成 4 个 stage,跨 AIC / AIV 协同执行。每个 stage 产出一个中间矩阵,通过 GM workspace 段在 AIC / AIV 之间传递:
+FA 类把每个 KV 分块的计算切成 4 个 stage,跨 AIC / AIV 协同执行:
 
 | 阶段 | 核 | 操作 | 输入 → 输出中间矩阵 | 跨核同步语义 |
 |---|---|---|---|---|
 | **C1** | AIC | Q·K^T GEMM(Nd2Nz Q/K → L1 → L0 → Mmad → Fixpipe)| → `[Bq, Bk]` 中间矩阵到 GM | 完成后通知 AIV |
-| **V1** | AIV | scale + softmax + cast | `[Bq, Bk]` → 归一化后的 P 到 GM | 等 C1 完成 / 完成后通知 AIC |
+| **V1** | AIV | scale + softmax + cast | `[Bq, Bk]` → 未归一化的 P(`exp(S-m)`)到 GM | 等 C1 完成 / 完成后通知 AIC |
 | **C2** | AIC | P·V GEMM(Nd2Nz P/V → L1 → L0 → Mmad → Fixpipe)| P + V → `[Bq, D]` 中间矩阵到 GM | 等 V1 完成 / 完成后通知 AIV |
 | **V2** | AIV | 跨 KV 分块累积(默认 task 级模式下做 online rescale + Add;末块归一化)| `[Bq, D]` → 写回 attentionOut(末块)/ GM 自读自写段(非末块,在线累积)| 等 C2 完成 |
 
@@ -82,7 +96,7 @@ C1 → V1 → C2 → V2 是同一 KV 分块内的严格数据流方向(见 §3.1
 > **注**:V2 阶段的"跨 KV 分块累积"语义因并行策略而异:
 > - **默认 task 级**(s2 在 task 内顺序):V2 跨 s2 块在线累积 max / sum / O_acc(stateful)
 > - **Split-KV reduce**(s2 跨核切分):V2 只算自己切片的 partial 值,最终的 max / sum / O 在跨核 combine 阶段产生
-> 详见 [`design.md §2.5 并行策略选择`](./design.md)。
+> 详见 [`design/shape.md §2`(N2 并行策略选择)](../design/shape.md)。
 
 ### §2.3 跨 KV 分块状态
 
@@ -96,14 +110,14 @@ C1 → V1 → C2 → V2 是同一 KV 分块内的严格数据流方向(见 §3.1
 
 | 并行策略 | max / sum 持有方式 | O_acc 持有方式 |
 |---|---|---|
-| **默认 task 级**(详见 design.md §2.5)| task 内跨 s2 在线更新(stateful);通常 UB 常驻(尺寸 `[Bq]` 小)| 设计核心决策点(见 design.md §2.2 UB 模式决策):大 D 场景 ∝ m × D 常驻 UB 无法承受,必须改存 GM workspace 每 chunk 流式 rescale/accumulate |
+| **默认 task 级**(详见 `design/shape.md §2` N2)| task 内跨 s2 在线更新(stateful);通常 UB 常驻(尺寸 `[Bq]` 小)| 设计核心决策点(见 `design/shape.md §1.2` N1 UB 模式决策):大 D 场景 ∝ m × D 常驻 UB 无法承受,必须改存 GM workspace 每 chunk 流式 rescale/accumulate |
 | **Split-KV reduce** | 每核计算 partial(无 stateful 累积);最终 max / sum 在 cross-core combine 阶段产出 | 每核计算 partial O,落 partial reduce workspace 段;最终 O 在 combine 阶段加权归并 |
 
 ---
 
-## §3 不变量 I1-I4
+## §3 不变量 I1-I5
 
-任何 FA 类实现都必须满足以下四个不变量。**违反必崩**(silent zero / 精度漂移 / 多核死锁)。
+任何 FA 类实现都必须满足以下五个不变量。**违反必崩**(silent zero / 精度漂移 / 多核死锁)。
 
 ### §3.1 I1 — 数据流方向不变量
 
@@ -113,18 +127,18 @@ C1 → V1 → C2 → V2 是同一 KV 分块内的严格数据流方向(见 §3.1
 - 把 stage 重排成 C1 → C2 → V1 → V2(让 AIC / AIV 角色分段)
 - 在 stage 之间用错跨核同步方向(如 V1 完成只设置 AIC 等待但不设置 V1→C2 通知)
 
-三级流水的 loop body 执行顺序(C1 本轮 → V2 上两轮 → V1+C2 上一轮)与本不变量不冲突 —— 它讲的是不同 KV 分块如何交错,同一分块内的依赖方向仍是 C1→V1→C2→V2。
+流水的 loop body 执行顺序(无论是 2 级还是 3 级)与本不变量不冲突 —— 它讲的是不同 KV 分块如何交错,同一分块内的依赖方向仍是 C1→V1→C2→V2。
 
 **违反后果**:Mm2 Fixpipe ADDR_MISALIGN / 跨核数据未就绪 → 输出全零或乱值。
 
 ### §3.2 I2 — GQA 同 kvHead 同任务不变量
 
-GQA 子族中,同一 kvHead 下的 G 个 qHead **必须在同一个任务内合并处理**(`mEff = curBq × curG`,合并到 Mmad m 维度)。
+GQA 形态中,同一 kvHead 下的 G 个 qHead **必须在同一个任务内合并处理**(`mEff = curBq × curG`,合并到 Mmad m 维度)。
 
 禁止:
 - 把 G 个 qHead 拆到 G 个独立任务,每个任务各自搬运同一份 KV
 
-**违反后果**:KV 重复搬运 G 次,Mte2 / L1 利用率塌陷;性能远低于合并方案。
+**违反后果**:KV 重复搬运 G 次,Mte2 / L1 利用率塌陷。
 
 ### §3.3 I3 — 跨 task 状态隔离不变量
 
@@ -133,23 +147,22 @@ GQA 子族中,同一 kvHead 下的 G 个 qHead **必须在同一个任务内合�
 禁止:
 - 用单一 buffer 跨任务共用 stateful 状态(默认 task 级模式)
 - 用单一段跨核共用 partial 输出(split-KV reduce 模式)
-- 在任务级 PRELOAD 下,用同一 task slot 公式覆盖跨 stage handshake buffer(混淆 task-level 与 loop-level slot 语义,见 [`design.md §7.4`](./design.md))
+- 在任务级 PRELOAD 下,用同一 task slot 公式覆盖跨 stage handshake buffer(混淆 task-level 与 loop-level slot 语义,见 [`design/execution.md §3.3`](../design/execution.md))
 
 **违反后果**:被上一任务的尾状态污染 → 输出乱值。
 
 ### §3.4 I4 — s2 状态累积正确性不变量
 
-跨 KV 分块的 online softmax 状态(`max` / `sum` / `O_acc`)必须被**完整、正确地累积**,这是 FA 数学正确性的硬要求。任何 s2 切分方案都必须保证这一点。
+跨 KV 分块的 online softmax 状态(`max` / `sum` / `O_acc`)必须被**完整、正确地累积**,这是 FA 数学正确性的硬要求。
 
 满足此不变量的两种合法切分方案:
 
-1. **默认 task 级切分(主流场景)**:s2 loop 在 task 内部顺序执行,`s2` 索引**不进入** taskIdx 任务分发维度。该方案天然满足正确性——同一 task 内顺序累积 online softmax 状态,跨 task 之间没有 s2 状态共享需求。
-
-2. **Split-KV reduce(适用 Sq=1 + 大 Sk + 核数富余场景,详见 [`design.md §2.5`](./design.md))**:s2 沿 KV 维拆给多核并行,每核计算自己切片的局部状态(`max_partial` / `sum_partial` / `O_partial`),完成后通过专门的 cross-core combine 阶段把所有切片归并出最终 `max` / `sum` / `O`。
+1. **默认 task 级切分(主流场景)**:s2 loop 在 task 内部顺序执行,`s2` 索引**不进入** taskIdx 任务分发维度。
+2. **Split-KV reduce(适用 Sq=1 + 大 Sk + 核数富余场景,详见 [`design/shape.md §2`](../design/shape.md) N2)**:s2 沿 KV 维拆给多核并行,每核计算自己切片的局部状态,完成后通过专门的 cross-core combine 阶段归并出最终结果。
 
 **禁止**:
-- 在默认 task 级模式下把 `s2` 放入 taskIdx —— 跨 task 间共享 online softmax 状态无法保证;且默认场景 `totalTasks ≥ usedCoreNum`,跨核 fence 成本 >> 顺序 s2 累积成本
-- 启用 split-KV reduce 但**不补**partial reduce + cross-core combine —— 多核间无法同步在线 softmax 状态 → 多核死锁或精度崩塌
+- 在默认 task 级模式下把 `s2` 放入 taskIdx
+- 启用 split-KV reduce 但**不补**partial reduce + cross-core combine
 - 在同一算子内混用两种切分方案
 
 **违反后果**:输出乱值 / 多核死锁 / 精度崩塌
@@ -158,7 +171,7 @@ GQA 子族中,同一 kvHead 下的 G 个 qHead **必须在同一个任务内合�
 
 MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 matmul 的 reduction (K-mmad) 轴量化**。
 
-**根源**:硬件 Tensor Core 对 MX 类格式的硬约束—— "data must be consecutive over the reduction dimension"。块量化的 scale 描述 reduction 沿线的 32 元素一组,必须与 Mmad 的 K-mmad 方向严格对齐。业界标准(Blackwell Tensor Core / NVIDIA cuDNN MXFP8 attention)一致遵守此约束。
+**根源**:硬件 Tensor Core 对 MX 类格式的硬约束—— "data must be consecutive over the reduction dimension"。
 
 **attention 中的推论**:
 
@@ -173,9 +186,7 @@ MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 m
 
 **违反后果**:Mmad ScaleB 轴错位 → 输出 NaN / inf(Mmad 直接产出非数,不是数值漂移)。
 
-> 本不变量根源在 Mmad 硬件约束,所有用 MX 类格式做 MatMul 的算子(不限 attention)都受其约束。当前暂放本文件,理想归属是独立的 MatMul methodology(暂未建)。
->
-> 量化子族的完整契约见 [`subfamilies.md §3.5 + §4.3`](./subfamilies.md)。
+> 量化 trait 的完整契约见 [`quantization_design.md`](../subfamilies/quantization_design.md)。
 
 ---
 
@@ -183,17 +194,15 @@ MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 m
 
 设计阶段开始之前,必须先回答以下问题。产出落到 DESIGN 文档(或同等阶段产物)。
 
-### §4.1 子族选型结论
+### §4.1 选型结论
 
-回答:**这个 attention 算子属于哪个子族?**
+回答:**这个 attention 算子的选型结论是什么(基础 FA 形态 + 正交 trait)?**
 
 判定依据:
 - Sq、Hq、Hkv、是否有 KV 压缩、是否纯 decode、是否稀疏
-- 选型决策表见 [`subfamilies.md` §1](./subfamilies.md)
+- 选型决策表见 [`patterns.md` §2](../patterns.md)
 
-**产出**:子族名称(FA / GQA / MHA / MLA / 稀疏 / 量化)+ 选定理由。
-
-子族选定后,后续 design.md 各章节按对应子族扩展契约展开。
+**产出**:选型结论(基础 FA 形态: GQA / MHA / MLA;正交 trait: 量化 / 稀疏)+ 选定理由。
 
 ### §4.2 输入 shape 边界与合法性约束
 
@@ -201,7 +210,7 @@ MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 m
 
 必须区分:
 - **合法性约束**(必须校验并拒绝):如 `Hkv ≠ 0`、`Hq % Hkv == 0`、`D` 落在支持档位
-- **数值上限**(**不应硬性拒绝**):如 B、Sq、Sk、Hq 的实际上限应由内部基本块设计承担,泛化不限上限
+- **数值上限**(**不应硬性拒绝**):如 B、Sq、Sk、Hq 的实际上限应由内部基本块设计承担
 
 通用约束(适用于所有 Ascend C 算子)见 `development-guide §1`。本节只标注 **FA 类特有**的合法性条件:
 - `Hq % Hkv == 0`(GQA group 整除)
@@ -219,10 +228,11 @@ MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 m
 - **causal mask**:on / off / 子模式(下三角 / sliding window / sink)
 - **sparse pattern**:on / off
 - **alibi / RoPE 等位置编码**:是否在算子内集成
+- **feature flags**:PSE / PostQuant / Prefix / ChunkedPrefill 等(详见 [`feature_flags.md`](../specialization/feature_flags.md))
 
 **产出**:特性维度笛卡尔积清单 + 必须支持的组合 / 可延后的组合。
 
-此清单决定 design.md §6 编译宏分类(哪些必须编译宏分离独立 target)与 §1.6 校验门禁规划(每个组合需要的 atol)。
+此清单决定 `design/execution.md §2`(N8 编译期特化)编译宏分类(哪些必须编译宏分离独立 target)与精度门禁规划(每个组合需要的 atol)。
 
 ### §4.4 性能与精度目标声明
 
@@ -230,20 +240,6 @@ MX 类(mxfp8 / mxfp4 / mxfp6 等)块量化格式的 scale **必须沿被消费 m
 
 - **精度门禁**:各 dtype × 各模式组合的 atol / rtol;来源指向 `/ops-precision-standard`,FA 类暂无独立条目,按 attention / softmax 通用区间取
 - **性能预算**:典型场景的 Task Duration 目标(若已知);若有对标实现,声明对标方与差距 acceptance(如不超过 X%)
+- **基本块 Roofline 目标**:声明目标性能区制(compute-bound / HBM-bound / cross-core-bound);若对标实现已知,声明基本块尺寸与算术强度的对标值。[`roofline.md`](./roofline.md)(经 `design/shape.md §3` N3 进入)将据此通过三通道 Roofline 分析确定最优 Bq/Bk
 
 **产出**:精度目标表 + 性能目标声明(可为开放型,无具体数字)。
-
----
-
-## §5 阶段间衔接
-
-| 阶段 | 进入位置 |
-|---|---|
-| 设计 | [`design.md`](./design.md):各阶段必须回答的 WHAT 问题清单 + 决策依据 + 自检 |
-| 子族扩展契约 | [`subfamilies.md`](./subfamilies.md):每个子族的扩展点 capability-map |
-| 通用调试方法 | `/ascendc-precision-debug`(诊断 workflow / printf-debug / binary-search-debug / common-traps / case-studies)|
-| 运行时错误 | `/ascendc-runtime-debug` |
-| 精度门禁 | `/ops-precision-standard` |
-| 平台差异 / 架构基础 | `/npu-arch` |
-| Ascend C API 用法 | `/ascendc-api-best-practices` |
-| 通用编码规范 / 工程配置 / 修复循环纪律 | `ops-direct-invoke` plugin 的 `workflows/development-guide.md` |
