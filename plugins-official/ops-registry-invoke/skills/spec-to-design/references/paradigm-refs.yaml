@@ -1,0 +1,13 @@
+# paradigm-refs.yaml
+# 范式 skill 归属表：指定范式知识的默认归属 skill。
+#
+# 路由配置（routes）随插件内置于本目录 routes.yaml（slicer 优先读取本地 routes.yaml，
+# 其次回退到 <skill_home>/references/paradigms/routes.yaml）。
+# 本仓范式 patterns 归属 ascendc-tiling-design（references/<paradigm>/patterns.md）。
+#
+# 路径解析顺序（逐级 fallback）：
+#   1. skill_dir.parent/<skill_home>/<ref_path>                   — 同级 skills/ 目录
+#   2. skill_dir.parent.parent/.opencode/skills/<skill_home>/<ref_path> — .opencode skills
+#   3. repo_root/ops/<skill_home>/<ref_path>                      — 仓库 ops/ 目录
+skill_homes:
+  default: ascendc-tiling-design

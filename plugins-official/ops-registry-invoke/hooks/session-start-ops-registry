@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+# SessionStart hook for CANNBot (ops-registry-invoke) plugin.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ASC_DEVKIT_DIR="${PLUGIN_ROOT}/asc-devkit"
+SPEC_TO_DESIGN_SKILL_DIR="${PLUGIN_ROOT}/skills/spec-to-design"
+CLEAN_SCRIPT="${PLUGIN_ROOT}/../../ops/ascendc-docs-search/scripts/clean_markdown.py"
+
+if [ ! -d "$ASC_DEVKIT_DIR" ]; then
+  git clone --quiet https://gitcode.com/cann/asc-devkit.git "$ASC_DEVKIT_DIR" 2>/dev/null || true
+  if [ -d "$ASC_DEVKIT_DIR" ] && [ -f "$CLEAN_SCRIPT" ]; then
+    python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 || true
+  fi
+fi
+
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  [ -d "$ASC_DEVKIT_DIR" ] && printf 'export ASC_DEVKIT_DIR=%q\n' "$ASC_DEVKIT_DIR" >> "$CLAUDE_ENV_FILE"
+  [ -d "$SPEC_TO_DESIGN_SKILL_DIR" ] && printf 'export SPEC_TO_DESIGN_SKILL_DIR=%q\n' "$SPEC_TO_DESIGN_SKILL_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+AGENTS_MD="${PLUGIN_ROOT}/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ]; then
+  exit 0
+fi
+
+# 只注入 body（标题 + 强制规则），跳过 frontmatter YAML（前两个 --- 之间的字段），
+# 避免与平台已解析的 frontmatter（skills/agents 列表）在 context 中重复。
+agents_content=$(awk 'body{print} /^---[[:space:]]*$/{if(++dash==2) body=1}' "$AGENTS_MD" 2>/dev/null)
+[ -z "$agents_content" ] && agents_content=$(sed -n '/^---$/,/^---$/!p' "$AGENTS_MD" 2>/dev/null)
+
+path_guide="## CANNBot Installation Paths (ops-registry-invoke)
+
+All relative references in this document resolve to absolute paths:
+- \`workflow/\` → \`${PLUGIN_ROOT}/workflow/\`
+- \`workflow/resources/task-prompts.md\` → \`${PLUGIN_ROOT}/workflow/resources/task-prompts.md\`
+- \`workflow/resources/data-flow.md\` → \`${PLUGIN_ROOT}/workflow/resources/data-flow.md\`
+- \`skills/spec-to-design/\` → \`${SPEC_TO_DESIGN_SKILL_DIR}/\`
+- \`asc-devkit/\` → \`${ASC_DEVKIT_DIR}/\`
+
+Environment variables available to Bash:
+- \`ASC_DEVKIT_DIR=${ASC_DEVKIT_DIR}\`
+- \`SPEC_TO_DESIGN_SKILL_DIR=${SPEC_TO_DESIGN_SKILL_DIR}\`
+
+Paths starting with \`operators/{operator_name}/\` are relative to the user's current working directory."
+
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+path_guide_escaped=$(escape_for_json "$path_guide")
+agents_escaped=$(escape_for_json "$agents_content")
+session_context="<CANNBOT_CONTEXT>\nYou are CANNBot - Ascend C Registry Operator Development Orchestrator.\n\n${path_guide_escaped}\n\n${agents_escaped}\n</CANNBOT_CONTEXT>"
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${session_context}"
+  }
+}
+EOF
+else
+  cat <<EOF
+{
+  "additional_context": "${session_context}"
+}
+EOF
+fi
+
+exit 0

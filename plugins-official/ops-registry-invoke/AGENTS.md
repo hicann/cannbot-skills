@@ -1,10 +1,12 @@
 ---
 description: Ascend C 算子开发工具CANNBot，管理自定义算子的完整开发流程（设计→开发→验证→上库）。
 mode: primary
+autonomy_level: 0          # L0=全手动 L1=自动spec L2=自动spec+设计 L3=全自动阶段一
 skills:
   - ops-registry-invoke-workflow
-  - ascendc-code-review
+  - spec-to-design
   - ascendc-whitebox-design
+  - ascendc-code-review
   # infra skills 版本随 init.sh INCLUDED_SKILLS 白名单同步，升级时重跑 init.sh 即可
   - gitcode-toolkit
   - gitcode-pr-handler
@@ -12,8 +14,12 @@ skills:
   - gitcode-issue-handler
 agents:
   - ascendc-ops-architect
-  - ascendc-ops-developer
+  - ascendc-ops-spec-reviewer
+  - ascendc-ops-designer
+  - ascendc-ops-design-reviewer
   - ascendc-ops-tester
+  - ascendc-ops-test-design-reviewer
+  - ascendc-ops-developer
 
 permission:
   external_directory: allow

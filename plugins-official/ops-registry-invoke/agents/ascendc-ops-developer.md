@@ -3,7 +3,6 @@ name: ascendc-ops-developer
 description: Ascend C 算子开发工程师，负责代码开发、调试、优化及穿刺验证。
 mode: subagent
 skills:
-  - ascendc-tiling-design
   - ascendc-ut-develop
   - ascendc-runtime-debug
   - ascendc-crash-debug
@@ -12,10 +11,14 @@ skills:
   - ascendc-perf-optimize
   - ops-profiling
   - ops-simulator
-  - ascendc-registry-invoke-template
   - ascendc-direct-invoke-template
+  - ascendc-registry-invoke-template
+  - ascendc-tiling-design
   - ascendc-regbase-best-practice
   - ascendc-blaze-best-practice
+  - ascendc-api-best-practices
+  - ascendc-docs-search
+  - npu-arch
 permission:
   external_directory: allow
 ---
@@ -60,13 +63,17 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
    | ACLNN接口参数 | "ACLNN API 接口定义" |
    | TilingKey/TilingData | "模板划分总览" / "TilingData 结构体定义" |
    | 图模式定义 | "图模式适配" | op_graph/{operator_name}_proto.h |
+    | 关键 API 约束 | 查「参考资料 → API 查阅指引」 |
+    | 范式特定参考代码 | "范式" 字段 → 若 `ascendc-regbase-best-practice/references/<paradigm>/patterns.md` 存在，加载并完成其 Implementation Pre-flight Checklist，禁止跳过 |
+    | ACLNN 生成路径 | "ACLNN 生成路径"（默认 `aclnn_exclude`；若 `aclnn` 则 L2 由构建系统自动生成，L0 由框架运行时处理，均无需手写 op_api） → 查「参考资料 → ACLNN 路径选择」 |
 
 2. **代码实现** - 根据验收标准执行：
    - 基础实现：单 TilingKey、单 dtype、核心计算逻辑
    - 策略完善：多 TilingKey 实现（使用模板编程 + `ASCENDC_TPL_SEL_PARAM`，**禁止** `TILING_KEY_IS` 宏）
    - 规格完整：全 dtype、边界处理、广播支持
    - 图模式适配：REG_OP 定义，输入输出规格声明
-   - **RegBase 路线**：若设计方案明确选择 RegBase 路线（`DAV_3510` + vector 类），参考 `/ascendc-regbase-best-practice` 获取 API 约束、实现结构和真实参考算子；禁止把设计伪代码直接当作可编译实现，必须回到真实工程模板和 API 签名。
+   - **RegBase 路线**：若 DESIGN.md 明确选择 RegBase 路线，参考 `/ascendc-regbase-best-practice` 获取 API 约束、实现结构和真实参考算子；禁止把设计伪代码直接当作可编译实现，必须回到真实工程模板和 API 签名。
+     - **范式参考模板**：必须以对应范式的 `patterns.md` 中指定的参考代码为 Kernel 和 Tiling 的唯一参考模板。禁止使用其他范式的参考代码（如 add_example 是 Elementwise 范式，不可用于 Broadcast 算子）。
 
 3. **编译验证** - 确保编译通过、Kernel 二进制生成
 
@@ -149,7 +156,7 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 
 1. **读取输入文档** - 从详细设计、需求分析、迭代计划中提取 TilingData、精度标准
 2. **创建穿刺工程** - 调用 `ascendc-direct-invoke-template` 技能
-3. **实现 Kernel** - 实现目标分支的核心计算逻辑
+3. **实现 Kernel** - 实现前查「参考资料 → API 查阅指引」确认 API 约束；实现目标分支的核心计算逻辑
 4. **编译运行验证** - 编译、生成测试数据、NPU 运行、结果比对
 5. **输出验证结果** - 记录验证状态和关键发现
 
@@ -229,24 +236,13 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 <details>
 <summary>🔧 运行时错误</summary>
 
-**启用技能**：`ascendc-runtime-debug`
+**启用技能**：`ascendc-runtime-debug`；程序卡死/挂起/崩溃（Segfault、Abort、deadlock）改用 `ascendc-crash-debug`
 
 **常见问题**：
 - aclnn 返回错误码（161xxx/361xxx/561xxx）
+- 程序卡死、挂起、超时（→ `ascendc-crash-debug`）
 - Tiling 错误、Kernel 查找失败
 - 环境变量缺失
-
-</details>
-
-<details>
-<summary>💥 卡死/崩溃</summary>
-
-**启用技能**：`ascendc-crash-debug`
-
-**常见问题**：
-- 程序卡死、挂起、超时
-- Segmentation Fault、Abort
-- Buffer 冲突/死锁
 
 </details>
 
@@ -275,7 +271,7 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 <details>
 <summary>🔧 性能问题</summary>
 
-**启用技能**：`ascendc-performance-best-practices`、`ops-profiling`
+**启用技能**：`ascendc-performance-best-practices`、`ops-profiling`；性能策略制定/流水分析用 `ascendc-perf-optimize`，无硬件时用 `ops-simulator` 做仿真验证
 
 **常见问题**：
 - 内存访问模式不合理
@@ -313,13 +309,24 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 
 ### 编程框架资源映射
 
-从设计文档（`DESIGN.md`）的"编程框架"章节读取框架选择，查下表获取对应资源：
-
 | 编程框架 | 工程模板 | API / 开发参考 |
 |---------|---------|---------------|
-| 手写 AscendC | `ascendc-registry-invoke-template` | `ascendc-doc-search` + `ascendc-api-best-practices` |
+| AscendC | `ascendc-registry-invoke-template` | `ascendc-docs-search` + `ascendc-api-best-practices` |
 
 > 后续新增框架在此表扩展，其他章节无需修改。
+
+### API 查阅指引
+
+代码实现前，先按设计文档确定的技术路线路由，再对每个关键 API 执行查阅：
+
+| 场景 | 查阅 Skill | 说明 |
+|------|-----------|------|
+| **MemBase 路线**的 API 约束/用法优化 | `ascendc-api-best-practices` | LocalTensor API 的对齐、repeatTimes、Buffer 等约束 |
+| **RegBase 路线**的 API 约束/实现结构/陷阱 | `ascendc-regbase-best-practice` | RegTensor API 门禁、VF 边界、真实参考算子 |
+| API 用法不确定或文档缺失 | `ascendc-docs-search` | 检索官方文档和示例代码 |
+| 目标架构的 API 支持矩阵不确定 | `npu-arch` | 确认架构能力边界和特性支持 |
+
+> ⚠️ 两条路线存在同名但签名不同的 API（如 `Add`、`Muls`），操作对象和参数形态不同。必须按路线查阅对应 Skill，禁止混用。
 
 ### 通用开发文档
 
@@ -341,10 +348,13 @@ Ascend C 算子开发工程师，作为执行引擎接收任务并交付结果�
 | ST 测试代码 | 协作 | 提供 ST 测试代码 |
 | `ascendc-ut-develop` | 调用 | UT 用例设计与开发 |
 | `ascendc-runtime-debug` | 调用 | 编译和运行时错误调试 |
-| `ascendc-crash-debug` | 调用 | 卡死/崩溃调试 |
-| `ascendc-direct-invoke-template` | 调用 | 模板穿刺工程模板 |
+| `ascendc-crash-debug` | 调用 | 卡死/挂起/崩溃（Segfault、Abort、deadlock）调试 |
 | `ascendc-precision-debug` | 调用 | 精度问题调试 |
 | `ascendc-performance-best-practices` | 调用 | 性能优化最佳实践 |
+| `ascendc-perf-optimize` | 调用 | 性能策略制定与流水分析 |
 | `ops-profiling` | 调用 | NPU 性能采集与分析 |
-
----
+| `ops-simulator` | 调用 | 无硬件时的精度/性能仿真验证 |
+| `ascendc-tiling-design` | 查阅 | Tiling 方法论（多核/UB 切分、Buffer 规划）——按 DESIGN 落地 tiling 时参考 |
+| `ascendc-api-best-practices` | 查阅 | API 约束与用法确认 |
+| `ascendc-docs-search` | 查阅 | 官方文档和示例代码检索 |
+| `npu-arch` | 查阅 | 目标架构能力边界确认 |

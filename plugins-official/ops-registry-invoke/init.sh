@@ -111,14 +111,12 @@ detect_trae_variant() {
 
 BRAND="cannbot"
 VERSION="1.2.0"
-ASC_DEVKIT_REPO="https://gitcode.com/cann/asc-devkit.git"
-ASC_DEVKIT_REF="master"
 OPS_TENSOR_REPO="https://gitcode.com/cann/ops-tensor.git"
 OPS_TENSOR_REF="master"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
-INCLUDED_SKILLS="ascendc-blaze-best-practice ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-perf-optimize ascendc-precision-debug ascendc-regbase-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ascendc-whitebox-design ops-precision-standard ops-profiling ops-registry-invoke-workflow ops-simulator ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
+INCLUDED_SKILLS="ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-perf-optimize ascendc-regbase-best-practice ascendc-blaze-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ascendc-whitebox-design ops-precision-standard ops-profiling ops-simulator ops-registry-invoke-workflow spec-to-design ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-ops-*"
 
@@ -127,21 +125,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_NAME="$(basename "$SCRIPT_DIR")"
 PLUGIN_ROOT="$SCRIPT_DIR"
 SHARED_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
-INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
+INFRA_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../infra" && pwd)"
 LOCAL_AGENT_ROOT="$SCRIPT_DIR/agents"
-
-# --- Infra skill helpers ---
-collect_infra_skills() {
-    INFRA_SKILL_NAMES=()
-    for skill_dir in "$INFRA_SKILL_ROOT"/*/; do
-        [ -d "$skill_dir" ] || continue
-        local name
-        name=$(basename "$skill_dir")
-        echo "$INCLUDED_SKILLS" | grep -qw "$name" || continue
-        INFRA_SKILL_NAMES+=("$name")
-    done
-}
-
 
 show_banner() {
   echo ""
@@ -316,7 +301,7 @@ resolve_agent_src() {
     fi
 }
 
-# Resolve skill source path (shared ops/ first, then infra/, then team-local)
+# Resolve skill source path (shared skills/ first, then team-local)
 # For team-local skills, searches subdirectories for a SKILL.md with matching `name:`.
 resolve_skill_src() {
     local skill="$1"
@@ -326,6 +311,10 @@ resolve_skill_src() {
     fi
     if [ -d "$INFRA_SKILL_ROOT/$skill" ]; then
         echo "$INFRA_SKILL_ROOT/$skill"
+        return
+    fi
+    if [ -d "$SCRIPT_DIR/skills/$skill" ] && [ -f "$SCRIPT_DIR/skills/$skill/SKILL.md" ]; then
+        echo "$SCRIPT_DIR/skills/$skill"
         return
     fi
     # Search team-local subdirectories for SKILL.md with matching name
@@ -340,6 +329,14 @@ resolve_skill_src() {
             fi
         fi
     done
+    while IFS= read -r skill_file; do
+        local name
+        name=$(awk '/^name:/{print $2; exit}' "$skill_file" 2>/dev/null)
+        if [ "$name" = "$skill" ]; then
+            dirname "$skill_file"
+            return
+        fi
+    done < <(find "$SCRIPT_DIR/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null || true)
     echo ""
 }
 
@@ -355,8 +352,9 @@ resolve_dependencies() {
     local direct_skills=$(parse_yaml_list "$agents_file" "skills")
     local direct_agents=$(parse_yaml_list "$agents_file" "agents")
 
-    # Collect all skills (direct + transitive from agents)
-    local all_skills="$direct_skills"
+    # Collect all skills (direct + transitive from agents + INCLUDED_SKILLS whitelist)
+    local all_skills="$direct_skills
+$INCLUDED_SKILLS"
     local agent_skills_map=""
 
     for agent in $direct_agents; do
@@ -386,7 +384,7 @@ $skills"
     # Deduplicate
     DIRECT_SKILLS=$(echo "$direct_skills" | sort -u | grep -v '^$' || true)
     DIRECT_AGENTS=$(echo "$direct_agents" | sort -u | grep -v '^$' || true)
-    ALL_SKILLS=$(echo "$all_skills" | sort -u | grep -v '^$' || true)
+    ALL_SKILLS=$(echo "$all_skills" | tr ' ' '\n' | sort -u | grep -v '^$' || true)
     AGENT_SKILLS_MAP="$agent_skills_map"
 
     # Counts
@@ -445,24 +443,6 @@ fi
 
 echo -e "  ${BOLD}Total skills to install: $ALL_SKILL_COUNT${NC}"
 echo ""
-
-# Collect infra skills to install (from infra/)
-collect_infra_skills
-INFRA_SKILLS_TO_INSTALL="${INFRA_SKILL_NAMES[*]}"
-INFRA_SKILL_COUNT=${#INFRA_SKILL_NAMES[@]}
-
-if [ "$INFRA_SKILL_COUNT" -gt 0 ]; then
-    echo -e "${CYAN}Infra Skills (${INFRA_SKILL_COUNT} 项)：${NC}"
-    for name in $INFRA_SKILLS_TO_INSTALL; do
-        target="$CANNBOT_DIR/skills/$name"
-        if [ -e "$target" ] || [ -L "$target" ]; then
-            echo -e "  ${YELLOW}$name${NC}"
-        else
-            echo -e "  ${GREEN}$name${NC}"
-        fi
-    done
-    echo ""
-fi
 
 # --- Step 2: Verify dependencies ---
 step "[2/7] Verifying dependencies..."
@@ -523,7 +503,7 @@ if [ "$TOOL" = "opencode" ]; then
     done
     ok "Agents: $agent_count linked"
 else
-    # Trae/Claude/Cursor/Copilot: create directories (per-item symlinks handled in Step 5)
+    # Trae/Claude/Cursor: create directories (per-item symlinks handled in Step 5)
     mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
     ok "Prepared: skills/, agents/, rules/"
 fi
@@ -640,7 +620,7 @@ step "[5/7] Configuring tool discovery..."
 if [ "$TOOL" = "opencode" ]; then
     ok "Auto-scan: skills/, agents/"
 else
-    # Trae/Claude/Cursor/Copilot: create per-skill discovery symlinks
+    # Trae/Claude/Cursor: create per-skill discovery symlinks
     DISCOVERY="$CONFIG_ROOT/skills"
     link_count=0
     for skill in $ALL_SKILLS; do
@@ -669,30 +649,79 @@ else
 fi
 echo ""
 
-# --- Step 6: Setup asc-devkit ---
-step "[6/7] Setting up asc-devkit & ops-tensor..."
-ASC_DEVKIT_DIR="$SCRIPT_DIR/asc-devkit"
+# --- Step 6: Setup reference code repos ---
+step "[6/7] Setting up reference code repos & ops-tensor..."
+REFERENCE_DIR="$SCRIPT_DIR/reference"
+mkdir -p "$REFERENCE_DIR/cann"
 
-if [ -d "$ASC_DEVKIT_DIR" ]; then
-    cd "$ASC_DEVKIT_DIR"
-    git checkout . 2>/dev/null || true
-    git fetch --quiet origin 2>/dev/null || warn "git fetch failed"
-    git checkout --quiet "$ASC_DEVKIT_REF" 2>/dev/null || true
-    git merge --quiet "origin/$ASC_DEVKIT_REF" 2>/dev/null || warn "git merge failed, using existing version"
-    cd "$SCRIPT_DIR"
-    ok "asc-devkit updated ($ASC_DEVKIT_REF)"
-else
-    git clone --quiet "$ASC_DEVKIT_REPO" "$ASC_DEVKIT_DIR" 2>/dev/null || warn "git clone failed, skipping asc-devkit"
-    if [ -d "$ASC_DEVKIT_DIR" ]; then
-        cd "$ASC_DEVKIT_DIR"
-        git checkout --quiet "$ASC_DEVKIT_REF" 2>/dev/null || true
+# --- Repo registry (url subdir commit) ---
+# commit: "latest" = shallow clone + pull; a hash = full clone + pin to that commit
+# 仅保留 asc-devkit（设计阶段 API 文档，唯一被工作流引用的参考库）；
+# op-plugin/torchair/competitor 随 ops-req-analy-* 需求分析流水线一并移除。
+REPOS=(
+    # CANN
+    "https://gitcode.com/cann/asc-devkit.git        cann/asc-devkit        latest"
+)
+
+REPO_TOTAL=${#REPOS[@]}
+COUNTER_FILE=$(mktemp)
+echo 0 > "$COUNTER_FILE"
+LOCK_DIR=$(mktemp -d)
+MAX_JOBS=16
+
+clone_or_pull() {
+    local url="$1"
+    local subdir="$2"
+    local commit="$3"
+    local dir="$REFERENCE_DIR/$subdir"
+    SECONDS=0
+    if [ -d "$dir/.git" ]; then
+        cd "$dir"
+        git checkout . 2>/dev/null || true
+        if [ "$commit" = "latest" ]; then
+            git pull --quiet 2>/dev/null || warn "git pull failed for $subdir, using existing version"
+        else
+            git fetch --quiet 2>/dev/null || warn "git fetch failed for $subdir, using existing version"
+            git checkout --quiet "$commit" 2>/dev/null || warn "git checkout $commit failed for $subdir, using existing version"
+        fi
         cd "$SCRIPT_DIR"
-        ok "asc-devkit cloned ($ASC_DEVKIT_REF)"
+    else
+        if [ "$commit" = "latest" ]; then
+            git clone --quiet --depth 1 "$url" "$dir" 2>/dev/null || { warn "git clone failed for $subdir ($url)"; return 1; }
+        else
+            git clone --quiet "$url" "$dir" 2>/dev/null && cd "$dir" && git checkout --quiet "$commit" 2>/dev/null || { warn "git clone failed for $subdir ($url)"; return 1; }
+            cd "$SCRIPT_DIR"
+        fi
     fi
-fi
+    # Atomic counter at output time: reflects display order
+    while ! mkdir "$LOCK_DIR/lock" 2>/dev/null; do sleep 0.1; done
+    local n=$(cat "$COUNTER_FILE")
+    n=$((n + 1))
+    echo "$n" > "$COUNTER_FILE"
+    rmdir "$LOCK_DIR/lock"
+    local tag=""
+    [ "$commit" != "latest" ] && tag=" @${commit:0:8}"
+    if [ -d "$dir" ]; then
+        ok "$subdir${tag} ${SECONDS}s [${n}/${REPO_TOTAL}]"
+    fi
+}
 
+SECONDS=0
+for repo in "${REPOS[@]}"; do
+    read -r url subdir commit <<< "$repo"
+    clone_or_pull "$url" "$subdir" "$commit" &
+    while [ $(jobs -r | wc -l) -ge $MAX_JOBS ]; do
+        wait -n 2>/dev/null || true
+    done
+done
+wait
+ok "All repos done, total ${SECONDS}s"
+rm -f "$COUNTER_FILE"
+rm -rf "$LOCK_DIR"
+
+# --- Post-processing for asc-devkit ---
+ASC_DEVKIT_DIR="$REFERENCE_DIR/cann/asc-devkit"
 if [ -d "$ASC_DEVKIT_DIR" ]; then
-    # Try shared skills location for clean_markdown.py, with fallback
     CLEAN_SCRIPT=""
     for base in "$SHARED_SKILL_ROOT" "$SCRIPT_DIR/../../skills"; do
         if [ -f "$(cd "$base" 2>/dev/null && pwd)/ascendc-docs-search/scripts/clean_markdown.py" ]; then

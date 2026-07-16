@@ -9,24 +9,19 @@
 | 1.1 开发准备 | `general` | 读取日志继续 |
 | 1.2 需求分析 | `ascendc-ops-architect` | 读取日志继续 |
 | 1.2.5 spec 生成 | `ascendc-ops-architect` (scene: spec-generation) | 读取日志继续 |
-| 1.2.5R spec 自审 | `ascendc-ops-architect` (scene: spec-review) | 读取日志继续（失败时重跑前确认 1.2.5 已按 SPEC_REVIEW 修复） |
-| 1.3 方案设计 | `ascendc-ops-architect` (scene: design) | 读取日志继续 |
-| 1.3R 方案评审 | `ascendc-ops-architect` (scene: design-review) | 读取日志继续（失败时重跑前确认 1.3 已按 DESIGN_REVIEW 修复） |
+| 1.2.5R spec 评审 | `ascendc-ops-spec-reviewer` | 读取日志继续（失败时重跑前确认 1.2.5 已按 operators/{operator_name}/tmp/checks/SPEC_REVIEW.md 修复） |
+| 1.3a 设计准备 | `ascendc-ops-designer` (scene: design-prepare) | 读取日志继续；DESIGN_PREP.md 已存在且完整则跳过 |
+| 1.3b 分段切片 | 主 Agent（Bash） | 重跑 slice_design_inputs.py（--force 幂等） |
+| 1.3c 分段生成 | `ascendc-ops-designer` (scene: generate-section-*) | **独立恢复**：检查 `operators/{op}/.spec-to-design/sections/`，缺失分段重启对应 scene；.spec-to-design 丢失先重跑 1.3b |
+| 1.3d 组装校验 | 主 Agent（Bash） | 重跑 assemble + validate |
+| 1.3R 方案评审 | `ascendc-ops-design-reviewer` (scene: design-review) | 读取日志继续（失败时重跑前确认已按 operators/{operator_name}/tmp/checks/DESIGN_REVIEW.md 完成分段重生成或 design-fix） |
 | 1.4 测试设计 | `ascendc-ops-tester` | 读取日志继续 |
-| 1.4R 测试设计评审 | `ascendc-ops-tester` (scene: test-design-review) | 读取日志继续（失败时重跑前确认 1.4 已按 TEST_REVIEW 修复） |
-| 2-迭代一-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代一-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
-| 2-迭代一-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
-| 2-迭代一-A2 | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代一-B | `ascendc-ops-tester` | 读取日志继续 |
-| 2-迭代二-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代二-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
-| 2-迭代二-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
-| 2-迭代二-A2 | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代二-B | `ascendc-ops-tester` | 读取日志继续 |
-| 2-迭代三-A1-Main | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代三-A2 | `ascendc-ops-developer` | 读取日志继续 |
-| 2-迭代三-B | `ascendc-ops-tester` | 读取日志继续 |
+| 1.4R 测试设计评审 | `ascendc-ops-test-design-reviewer` | 读取日志继续（失败时重跑前确认 1.4 已按 operators/{operator_name}/tmp/checks/TEST_REVIEW.md 修复） |
+| 2-迭代{N}-A1-Main | `ascendc-ops-developer` | 读取日志继续（N 从 PLAN.md frontmatter 的 iteration_count 确定） |
+| 2-迭代{N}-A1-P | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启（仅当 iterations[N].wave1.a1_p 非空时） |
+| 2-迭代{N}-A1-P-Retry | `ascendc-ops-developer` | **独立恢复**：读取 `probe/PROBE_SUMMARY.md`，未完成的重启 |
+| 2-迭代{N}-A2 | `ascendc-ops-developer` | 读取日志继续 |
+| 2-迭代{N}-B | `ascendc-ops-tester` | 读取日志继续 |
 | 2-汇合验证 | `ascendc-ops-developer` | 读取日志继续 |
 | 2-测试工程师验收 | `ascendc-ops-tester` | 读取日志继续 |
 | 3.1 精度验收 | `ascendc-ops-tester` | 读取日志继续 |
@@ -111,22 +106,22 @@
 - 如有失败用例，状态必须标记为 `❌失败`，禁止标记为 `✅通过`
 - 仅编译通过不等于验证通过，必须实际运行测试
 
-## 黑盒/白盒证据通用要求
+## 固定门禁脚本通用要求
 
-黑盒和白盒结果必须由机器可对账证据驱动，不能只依赖 Markdown 摘要或 LOG.md 当前阶段文字。
+阶段门禁以固定脚本输出为准，不能用 Markdown 摘要或 LOG.md 当前阶段文字替代。
 
-测试证据要求：
+黑盒生成要求：
 - 黑盒用例必须按 `ascendc-st-design` 的完整流程和默认目标产出；禁止手写少量用例或只生成 smoke 用例替代。
-- 调试、失败复现或临时运行结果不得覆盖主证据。
-- CP3 前必须按仓库内 `ascendc-whitebox-design` skill 启动白盒子任务；禁止经 `ascendc-ops-tester` 间接转派白盒分析。
-- 白盒产出要求以 `ascendc-whitebox-design` skill 为准；workflow 不重复定义其内部文件、阶段或 schema。
-- 白盒检查 high/full case set。
-- 黑盒和白盒关键结果必须进入证据汇总，并与机器统计一致。
 
-主 Agent 校验命令：
-- 开发期黑盒证据：`python3 workflow/resources/validate_workflow_state.py --stage cp2 --operator-dir operators/{operator_name}`
-- 最终黑盒/白盒证据：`python3 workflow/resources/validate_workflow_state.py --stage cp3 --operator-dir operators/{operator_name}`
-- 命令输出不是 `STATUS: PASSED` 时，必须按校验器列出的差距修复并重跑；最多 2 轮，仍失败则创建阻塞 issue 并停止推进。
+白盒生成要求：
+- CP3 前必须按仓库内 `ascendc-whitebox-design` skill 启动白盒子任务；禁止经 `ascendc-ops-tester` 间接转派白盒分析。
+- 白盒检查 high/full case set（覆盖 `ascendc-whitebox-design` 的 high 档全量用例集）。
+
+固定门禁脚本：
+- CP2：`python3 workflow/resources/validate-workflow-state.py --stage cp2 --operator-dir operators/{operator_name}`
+- CP3：`python3 workflow/resources/validate-workflow-state.py --stage cp3 --operator-dir operators/{operator_name}`
+- 主 Agent 只执行固定门禁脚本并根据 `STATUS` 推进或阻塞。
+- 命令输出不是 `STATUS: PASSED` 时，主 Agent 必须按校验器列出的差距调度对应 Subagent/任务修复，然后重跑门禁脚本；最多 2 轮，仍失败则创建阻塞 issue 并停止推进。
 
 ---
 
@@ -148,6 +143,12 @@ Task 调用参数：
 【输出】
 - 开发日志：operators/{operator_name}/docs/LOG.md
 - 问题目录：operators/{operator_name}/issues/
+
+【验收标准】
+- 开发日志文件已创建
+- 问题目录已创建
+- 用户原始需求已完整记录
+- 环境检查已执行（使用 ascendc-env-check skill，芯片号、CANN包版本、路径、NPU设备信息等已记录）
   "
 }
 ```
@@ -172,6 +173,11 @@ scene: requirement-analysis
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - aclnnAPI 接口文档：operators/{operator_name}/docs/aclnn{OperatorName}.md
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
+
+【验收标准】
+- 需求文档包含：算子功能描述、数学公式、输入输出规格、支持数据类型、精度要求、芯片类型、可行性评估
+- aclnnAPI 接口文档包含：产品支持情况、功能说明、函数原型、参数说明、返回值、约束说明（调用示例占位）
+- 日志摘要已输出
   "
 }
 ```
@@ -200,58 +206,221 @@ scene: spec-generation
 }
 ```
 
-## 1.2.5R spec 自审
+## 1.2.5R spec 评审
 
 ```
 Task 调用参数：
 {
-  "description": "spec.yaml 自审（13 条 SPEC-* 条款）",
-  "subagent_type": "ascendc-ops-architect",
+  "description": "spec.yaml 评审（13 条 SPEC-* 条款）",
+  "subagent_type": "ascendc-ops-spec-reviewer",
   "prompt": "
-scene: spec-review
+执行 spec.yaml 评审任务（CP1.5 前置、不触达用户）。
 
-执行 spec.yaml 自审任务（自动执行、不触达用户）。
-
-评审方法论、13 条 SPEC-* 条款定义、报告格式、强制规则详见 `ascendc-ops-architect`
-Agent 定义中的场景五。
+评审方法论、13 条 SPEC-* 条款定义、报告格式、强制规则详见 `ascendc-ops-spec-reviewer`
+Agent 定义。
 
 【输入】
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（9-stage 已 PASS）
 
 【输出】
-- 自审报告：operators/{operator_name}/docs/SPEC_REVIEW.md
+- 评审报告：operators/{operator_name}/tmp/checks/SPEC_REVIEW.md
   - 13 条 SPEC-* 条款逐项 ✓/⚠/❌ + 证据
+  - 必看清单（CP1.5 展示用）：公式数学意图 / tolerance 合理性 / boundary 业务覆盖 / composition 拆分 / oracle 选择
   - 状态字段 = ✅通过 / ❌失败
 - 日志摘要：输出到响应末尾
+
   "
 }
 ```
 
-## 1.3 方案设计
+**CP1.5 用户响应处理**（主 Agent 流程，非 task 本身）：
+
+| 用户响应 | 主 Agent 动作 |
+|---------|-------------|
+| `yes` | 进入 1.3a |
+| `modify: <字段路径>=<新值>` | 调 (scene: spec-generation) 按用户指令改 spec → 重跑 9-stage → 重跑 1.2.5R → 重提 CP1.5 |
+| `abort` | 退回 1.2 修需求 |
+
+## 1.3 方案设计（主 Agent 编排）
+
+> 1.3 分四步：1.3a 设计准备（designer）→ 1.3b 分段切片（主 Agent）→ 1.3c 并行分段生成（5 个分段 Agent 同响应发起）→ 1.3d 组装+校验（主 Agent）。1.4 在 1.3R 通过后执行。
+
+## 1.3a 设计准备
 
 ```
 Task 调用参数：
 {
-  "description": "方案设计",
-  "subagent_type": "ascendc-ops-architect",
+  "description": "设计准备",
+  "subagent_type": "ascendc-ops-designer",
   "prompt": "
-scene: design
+scene: design-prepare
 
-执行方案设计任务。
+执行设计准备任务（路线决策 + Kernel 模板选型 + API 验证）。
 
 【输入】
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
-- L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary/tolerance 真值源；详细设计字段必须与之一致）
+- L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary/tolerance 真值源）
 - 算子目录：operators/{operator_name}/
 
 【输出】
-- 详细设计文档：operators/{operator_name}/docs/DESIGN.md
-- 迭代执行计划：operators/{operator_name}/docs/PLAN.md
+- 设计准备结论：operators/{operator_name}/docs/DESIGN_PREP.md（必填章节见 Agent 定义场景一）
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
   "
 }
 ```
+
+## 1.3b 分段切片（主 Agent）
+
+主 Agent 直接用 Bash 执行（非 Task）：
+
+```bash
+SPEC_TO_DESIGN_SKILL_DIR="${SPEC_TO_DESIGN_SKILL_DIR:-}"
+if [ -z "$SPEC_TO_DESIGN_SKILL_DIR" ]; then
+    for p in .opencode/skills/spec-to-design .claude/skills/spec-to-design; do
+        [ -d "$p" ] && SPEC_TO_DESIGN_SKILL_DIR="$p" && break
+    done
+fi
+python3 "$SPEC_TO_DESIGN_SKILL_DIR/scripts/slice_design_inputs.py" \
+    operators/{operator_name}/docs/spec.yaml \
+    "$SPEC_TO_DESIGN_SKILL_DIR/templates/DESIGN.md.templ" \
+    operators/{operator_name}/.spec-to-design \
+    --requirements operators/{operator_name}/docs/REQUIREMENTS.md \
+    --plan-template "$SPEC_TO_DESIGN_SKILL_DIR/templates/PLAN.md.templ" \
+    --force
+```
+
+执行后主 Agent 把输出中的 `Paradigm trace:`（命中的 paradigm 及其 patterns.md / 未命中 / 是否走通用方法论 fallback）摘录到 LOG.md 的 1.3 记录。
+
+## 1.3c 并行分段生成
+
+**⚠️ 强制要求**：以下 5 个 Task 必须在同一次响应中同时发起，禁止逐个串行。
+
+| 分段 | subagent_type | bundle |
+|------|---------------|--------|
+| 概述+契约 | `ascendc-ops-designer` | `01-overview-contract.md` |
+| 架构设计 | `ascendc-ops-designer` | `02-architecture.md` |
+| 实现方案 | `ascendc-ops-designer` | `03-implementation.md` |
+| 质量+规划 | `ascendc-ops-designer` | `04-quality-plan.md` |
+| 迭代计划 | `ascendc-ops-designer` | `05-plan.md` |
+
+每个 Task 调用参数模板（5 个 Task 仅 description / {bundle} 不同，subagent_type 统一为 `ascendc-ops-designer`）：
+
+```
+Task 调用参数：
+{
+  "description": "设计分段 {bundle}",
+  "subagent_type": "ascendc-ops-designer",
+  "prompt": "
+生成 {bundle} 对应分段。
+
+【输入】
+- 分段输入包：operators/{operator_name}/.spec-to-design/bundles/{bundle}
+- 设计准备结论：operators/{operator_name}/docs/DESIGN_PREP.md
+
+【输出】
+- operators/{operator_name}/.spec-to-design/sections/{bundle}
+- 完成报告（格式见 Agent 定义）
+
+【约束】
+- 内容约束、章节边界、标题契约全部按 Agent 定义执行；只使用 bundle 内切片 + DESIGN_PREP.md，禁止补外部事实
+  "
+}
+```
+
+**失败分段重炉**：1.3d 校验 FAIL 时，仅重发失败分段的 Task，prompt 末尾追加：
+
+```
+【修复】上轮校验失败信息如下，仅修复本分段问题后重写输出文件：
+{validate 报错摘要}
+```
+
+每个分段最多重炉 2 次。
+
+## 1.3d 组装+校验（主 Agent）
+
+先范式设计方案审查修正 03-implementation.md，再组装+校验。
+
+### 范式设计方案审查
+
+| 分段 | subagent_type | 输入 | 输出 |
+|------|---------------|------|------|
+| 审查 | `ascendc-ops-design-reviewer` (scene: impl-inspect) | patterns.md + 03-implementation.md | MDE_REVIEW.md |
+| 修正 | `ascendc-ops-designer` | bundle + DESIGN_PREP.md + MDE_REVIEW.md | operators/{operator_name}/.spec-to-design/sections/03-implementation.md |
+
+**步骤**（串行，前一步不完成禁止进入下一步）：
+
+1. 派审查 Agent，等待返回：`MDE_REVIEW.md` 落盘（Agent 内部已按自然章节切 3 区间串行深审并合并）；成功进入步骤 2，失败则重发。终止条件：审查失败次数 > 2，终止流程，报告用户
+2. 派修正 Agent
+
+**审查**:
+
+```
+{
+  "description": "范式设计方案审查 — impl-inspect",
+  "subagent_type": "ascendc-ops-design-reviewer",
+  "prompt": "
+scene: impl-inspect
+
+审查 03-implementation.md：内部按自然章节切为 3 个互不重叠区间，逐区间串行深审，找出偏离 pattern 的结构性差距，合并输出单份差距清单。
+
+【输入】
+- 审查文件：operators/{operator_name}/.spec-to-design/sections/03-implementation.md
+- 参考资料：{paradigm_skill}/references/paradigms/{paradigm}/patterns.md
+
+【输出】
+- operators/{operator_name}/tmp/checks/MDE_REVIEW.md
+  "
+}
+```
+
+**修正**:
+
+```
+{
+  "description": "范式设计方案审查 — 修正 implementation",
+  "subagent_type": "ascendc-ops-designer",
+  "prompt": "
+根据审查报告修正 03-implementation.md。
+
+【输入】
+- 分段输入包：operators/{operator_name}/.spec-to-design/bundles/03-implementation.md
+- 设计准备结论：operators/{operator_name}/docs/DESIGN_PREP.md
+- 审查报告：operators/{operator_name}/tmp/checks/MDE_REVIEW.md
+
+【输出】
+- operators/{operator_name}/.spec-to-design/sections/03-implementation.md
+  "
+}
+```
+
+### 组装+校验
+
+```bash
+python3 "$SPEC_TO_DESIGN_SKILL_DIR/scripts/assemble_design.py" \
+    --spec operators/{operator_name}/docs/spec.yaml \
+    --template "$SPEC_TO_DESIGN_SKILL_DIR/templates/DESIGN.md.templ" \
+    --sections operators/{operator_name}/.spec-to-design/sections \
+    --output operators/{operator_name}/docs/DESIGN.md \
+    --plan-output operators/{operator_name}/docs/PLAN.md \
+    --plan-template "$SPEC_TO_DESIGN_SKILL_DIR/templates/PLAN.md.templ"
+
+python3 "$SPEC_TO_DESIGN_SKILL_DIR/scripts/validate_design.py" \
+    --spec operators/{operator_name}/docs/spec.yaml \
+    --template "$SPEC_TO_DESIGN_SKILL_DIR/templates/DESIGN.md.templ" \
+    --design operators/{operator_name}/docs/DESIGN.md \
+    --plan operators/{operator_name}/docs/PLAN.md
+
+python3 "$SPEC_TO_DESIGN_SKILL_DIR/scripts/validate_completeness.py" \
+    --spec operators/{operator_name}/docs/spec.yaml \
+    --template "$SPEC_TO_DESIGN_SKILL_DIR/templates/DESIGN.md.templ" \
+    --design operators/{operator_name}/docs/DESIGN.md \
+    --plan operators/{operator_name}/docs/PLAN.md
+```
+
+组装前主 Agent 检查跨章节一致性：dtype、shape、TilingKey、API 验证状态、UB 容量、迭代计划必须一致（合并契约见 spec-to-design `references/section-map.md`）。
+
+
 
 ## 1.3R 方案评审
 
@@ -259,13 +428,13 @@ scene: design
 Task 调用参数：
 {
   "description": "方案设计评审",
-  "subagent_type": "ascendc-ops-architect",
+  "subagent_type": "ascendc-ops-design-reviewer",
   "prompt": "
 scene: design-review
 
 执行方案设计评审任务（CP2 前置、不触达用户）。
 
-评审方法论、评审维度、报告格式、强制规则详见 `ascendc-ops-architect` Agent 定义中的场景四。
+评审方法论、评审维度、报告格式、强制规则详见 `ascendc-ops-design-reviewer` Agent 定义中的场景二（design-review）。
 
 【输入】
 - 需求文档：operators/{operator_name}/docs/REQUIREMENTS.md
@@ -273,9 +442,13 @@ scene: design-review
 - 详细设计文档：operators/{operator_name}/docs/DESIGN.md
 - 迭代执行计划：operators/{operator_name}/docs/PLAN.md
 
+【字段优先级】
+- 按 `ascendc-ops-design-reviewer` Agent 定义中场景二的「输入与优先级」执行
+
 【输出】
-- 方案评审报告：operators/{operator_name}/docs/DESIGN_REVIEW.md
+- 方案评审报告：operators/{operator_name}/tmp/checks/DESIGN_REVIEW.md
 - 日志摘要：输出到响应末尾（格式见本文档顶部『Subagent 日志摘要输出要求』）
+
   "
 }
 ```
@@ -296,11 +469,23 @@ scene: test-design
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/boundary/extreme/tolerance 真值源；测试设计的 dtype 矩阵 / 边界场景 / 精度标准必须与之一致）
 - 算子文档：{operator_name}.md
+- 测试设计评审报告（重新设计时）：operators/{operator_name}/tmp/checks/TEST_REVIEW.md（如果存在）
+
+【字段优先级】
+- spec.yaml 是测试设计的真值源
+- TEST.md 必须包含「spec.yaml 测试映射」章节，说明测试来源与边界
 
 【输出】
 - 测试设计文档：operators/{operator_name}/docs/TEST.md
 - 测试用例：operators/{operator_name}/tests/st/testcases/
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求")
+
+【验收标准】
+- 测试场景覆盖正常/边界（boundary_conditions / extreme_inputs 覆盖 spec.yaml 中各项）
+- 用例分级完成（L0门槛/L1功能/L2异常），并按 `ascendc-st-design` 默认目标产出黑盒用例
+- 精度标准已定义（从 spec.yaml 的 numerical_tolerance.per_dtype 读取），并包含 spec.yaml 测试映射
+- 日志摘要已输出
+
   "
 }
 ```
@@ -311,13 +496,11 @@ scene: test-design
 Task 调用参数：
 {
   "description": "测试设计评审",
-  "subagent_type": "ascendc-ops-tester",
+  "subagent_type": "ascendc-ops-test-design-reviewer",
   "prompt": "
-scene: test-design-review
-
 执行测试设计评审任务（CP2 前置、不触达用户）。
 
-评审方法论、评审维度、报告格式、强制规则详见 `ascendc-ops-tester` Agent 定义中的场景四。
+评审方法论、评审维度、报告格式、强制规则详见 `ascendc-ops-test-design-reviewer` Agent 定义。
 
 【输入】
 - 需求文档：operators/{operator_name}/docs/REQUIREMENTS.md
@@ -326,8 +509,9 @@ scene: test-design-review
 - 测试用例：operators/{operator_name}/tests/st/testcases/
 
 【输出】
-- 测试设计评审报告：operators/{operator_name}/docs/TEST_REVIEW.md
+- 测试设计评审报告：operators/{operator_name}/tmp/checks/TEST_REVIEW.md
 - 日志摘要：输出到响应末尾
+
   "
 }
 ```
@@ -344,7 +528,7 @@ Task 调用参数：
 
 【输入】
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary 真值源）
-- 详细设计文档：operators/{operator_name}/docs/DESIGN.md
+- 详细设计文档：operators/{operator_name}/docs/DESIGN.md（其中 "Design Contract" 章节为强制约束）
 - 算子目录：operators/{operator_name}/
 
 【输出】
@@ -354,25 +538,26 @@ Task 调用参数：
 【验收标准】
 - 自定义算子包编译通过
 - Kernel二进制成功生成
+- 实现符合 Design Contract 标记的全部章节约束
 - 日志摘要已输出
   "
 }
 ```
 
-## 模板穿刺-迭代一
+## 模板穿刺
 
 > ⚠️ **强制并行** - 所有穿刺Task + 主线Task 必须在同一次响应中同时发起
 
-**📌 参数来源**：直接从 `PLAN.md` 的「迭代一穿刺列表」复制，主Agent无需自行判断或修改
+**📌 参数来源**：从 `PLAN.md` frontmatter 的 `iterations[{i}].wave1.a1_p` 列表中提取
 
 ```
 Task 调用参数（⚠️ 单次响应必须同时发起所有Task）：
 
 {
-  "description": "模板穿刺 {TilingKey}",
+  "description": "模板穿刺 {task_name}",
   "subagent_type": "ascendc-ops-developer",
   "prompt": "
-执行模板穿刺任务。
+执行模板穿刺任务（迭代 {N}）。
 
 【任务信息】
 - Task Name: {task_name}
@@ -380,12 +565,14 @@ Task 调用参数（⚠️ 单次响应必须同时发起所有Task）：
 - Dtype: {dtype}
 - Memory Strategy: {memory_strategy}
 - 算子名称: {operator_name}
+- 迭代编号: {N}
 
 【输入】
 - L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary 真值源）
-- 详细设计文档：operators/{operator_name}/docs/DESIGN.md
+- 详细设计文档：operators/{operator_name}/docs/DESIGN.md（其中 "Design Contract" 章节为强制约束）
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
 - 迭代执行计划：operators/{operator_name}/docs/PLAN.md
+- ⚪ 前序迭代主线代码：operators/{operator_name}/op_kernel/（仅当 N > 1 时存在，已编译通过）
 
 【输出】
 - 输出目录：operators/{operator_name}/probe/{task_name}/
@@ -396,52 +583,8 @@ Task 调用参数（⚠️ 单次响应必须同时发起所有Task）：
 1. 编译通过
 2. NPU 运行结果比对通过（精度要求从需求分析文档获取）
 3. RESULT.md 已生成，包含状态和验证摘要
-4. 日志摘要已输出
-
-⚠️ **仅完成编译不算通过，必须在 NPU 上实际运行并验证**
-  "
-}
-```
-
-## 模板穿刺-迭代二
-
-> ⚠️ **强制并行** - 迭代二主线Task + 所有穿刺Task 必须在同一次响应中同时发起
-
-**📌 参数来源**：从 `PLAN.md` 的「迭代三任务」中提取相关任务
-
-```
-Task 调用参数（⚠️ 单次响应必须同时发起所有Task）：
-
-{
-  "description": "模板穿刺 {任务名称}",
-  "subagent_type": "ascendc-ops-developer",
-  "prompt": "
-执行模板穿刺任务（验证迭代三任务）。
-
-【任务信息】
-- Task Name: {task_name}
-- TilingKey: {tiling_key}
-- Dtype: {dtype}
-- Memory Strategy: {memory_strategy}
-- 算子名称: {operator_name}
-
-【输入】
-- L0 数学契约：operators/{operator_name}/docs/spec.yaml（dtype/shape/invariant/boundary 真值源）
-- 详细设计文档：operators/{operator_name}/docs/DESIGN.md
-- 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
-- 迭代二主线代码：operators/{operator_name}/op_kernel/（已编译通过）
-- 迭代执行计划：operators/{operator_name}/docs/PLAN.md
-
-【输出】
-- 输出目录：operators/{operator_name}/probe/{task_name}/
-- 验证结果：operators/{operator_name}/probe/{task_name}/RESULT.md
-- 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
-
-【验收标准】
-1. 编译通过
-2. NPU 运行结果比对通过（精度要求从需求分析文档获取）
-3. RESULT.md 已生成，包含状态和验证摘要
-4. 日志摘要已输出
+4. 实现符合 Design Contract 标记的全部章节约束
+5. 日志摘要已输出
 
 ⚠️ **仅完成编译不算通过，必须在 NPU 上实际运行并验证**
   "
@@ -452,7 +595,7 @@ Task 调用参数（⚠️ 单次响应必须同时发起所有Task）：
 
 > 与 A2 UT 开发**强制并行**启动
 
-**📌 基础模板**：复用「模板穿刺-迭代一」，仅替换/新增以下内容
+**📌 基础模板**：复用「模板穿刺」，仅替换/新增以下内容
 
 **替换项**：
 - `description` → `"失败穿刺重试 {task_name}"`
@@ -550,8 +693,8 @@ scene: test-development
 【验收标准】
 - 迭代一：L0 标准用例已实现，Mock 编译+CPU Golden 自测通过，机器证据覆盖当前必需用例
 - 迭代二：L0+L1 用例已实现，Mock 编译+CPU Golden 自测通过，机器证据覆盖累计必需用例
-- 迭代三：L0/L1/L2 全量用例已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可追溯执行证据
-- 非 `smoke_only` 的 ST 路由必须在测试源码、runner 或执行日志中保留实现调用证据；仅由脚本机械生成结果、但没有对应执行证据的结果必须判为失败
+- 迭代三：L0/L1/L2 全量用例已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可执行 case_id 证据
+- 非 `smoke_only` 的 ST 路由必须在测试源码、runner 或执行日志中保留实现调用证据；仅由脚本按 CSV 机械生成 result JSON、但没有对应 `case_id` 执行证据的结果必须判为失败
 - 单 case debug、真实 NPU debug 或失败复现结果不得覆盖开发期主证据
 - 日志摘要已输出
 
@@ -629,7 +772,7 @@ Task 调用参数：
 | 验证项 | 结果 | 详情 |
 |-------|------|------|
 | UT验证 | 通过/失败 | 通过率: X% |
-| ST验证 | 通过/失败 | 通过率: X%，必需用例缺口: N |
+| ST验证 | 通过/失败 | 通过率: X%，required case_id 缺口: N |
 | 前序回归 | 通过/失败/不适用 | - |
 
 **关键指标**:
@@ -640,9 +783,9 @@ Task 调用参数：
 
 【验收标准】
 1. UT验证和ST验证通过（NPU结果与golden数据比对）
-2. 当前迭代用例通过（迭代1/2：增量用例；迭代3：全量）
-3. 前序迭代用例无回归（仅迭代2/3需要）
-4. 迭代三必须保留可追溯执行证据，并覆盖全部必需用例
+2. 当前迭代用例通过（验收标准从 PLAN.md frontmatter 的 iterations[{N}].acceptance 读取）
+3. 前序迭代用例无回归（仅当 N > 1 时需要）
+4. 最后一个迭代（N = iteration_count）必须保留可执行 case_id 证据，并覆盖全部必需用例
 5. 联调过程中的单 case debug 或真实 NPU debug 不得覆盖开发期主证据
 6. 日志摘要已输出
 
@@ -697,9 +840,9 @@ scene: test-execution
 ```
 
 【验收标准】
-- 迭代一：L0用例覆盖完整，ST通过率 = 100%
-- 迭代二：多shape用例通过，TilingKey分支覆盖达标，累计通过率 = 100%
-- 迭代三：全部必需用例均已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可追溯执行证据，累计通过率 = 100%（无回归）
+- 验收标准从 PLAN.md frontmatter 的 iterations[{N}].acceptance 读取
+- 最后一个迭代（N = iteration_count）：全部必需用例均已执行或路由验证，ST/UT 源码、runner 脚本或执行日志保留可执行 case_id 证据，累计通过率 = 100%（无回归）
+- 非最后迭代：当前迭代用例覆盖完整，ST通过率 = 100%
 - 真实 NPU 单 case 调试输出不得覆盖最终主证据
 - 日志摘要已输出
   "
@@ -710,7 +853,7 @@ scene: test-execution
 
 ## 白盒测试生成与用例汇合（主 Agent 编排）
 
-本任务由主 Agent 按 `ascendc-whitebox-design` skill 启动白盒子 Agent/子任务完成白盒用例生成，不能通过 `ascendc-ops-tester` 间接转派白盒分析。主 Agent 只负责提供上下文、接收日志摘要和校验结果，白盒生成要求以该 skill 定义的工作流为准。
+本任务由主 Agent 按 `ascendc-whitebox-design` skill 启动白盒子 Agent/子任务完成白盒用例生成，不能通过 `ascendc-ops-tester` 间接转派白盒分析。主 Agent 只负责提供上下文和接收日志摘要，白盒生成要求以该 skill 定义的工作流为准。
 
 【输入】
 - 算子目录：operators/{operator_name}/
@@ -718,14 +861,11 @@ scene: test-execution
 - 当前实现源码与 UT/ST 证据
 
 【输出】
-- 白盒 skill 定义的交付结果
-- 测试证据汇总
+- 白盒 skill 定义的用例与执行结果
 
 【验收标准】
 - 白盒生成由 `ascendc-whitebox-design` skill 定义的工作流完成
-- 白盒结果已产出并满足该 skill 的交付要求
-- 白盒检查 high/full case set
-- 相关测试证据通过 workflow validator 对账
+- 白盒用例、执行结果和证据汇总已产出
 
 ---
 
@@ -747,6 +887,7 @@ scene: test-development
 
 【输入】
 - 需求文档（含ACLNN接口定义）：operators/{operator_name}/docs/REQUIREMENTS.md
+- L0 数学契约：operators/{operator_name}/docs/spec.yaml（精度 tolerance / boundary case 真值）
 - 测试设计文档：operators/{operator_name}/docs/TEST.md
 - C++ ST测试工程：operators/{operator_name}/tests/st/（参考 CPU golden 实现）
 - 算子目录：operators/{operator_name}/
@@ -794,9 +935,6 @@ Task 调用参数：
 scene: test-execution
 
 执行最终精度验收任务。
-
-【测试方式】使用 **PyTorch 接入测试**（L0+L1批量全面验证）
-- 执行命令：cd operators/{operator_name}/tests/st && bash run.sh --torch
 
 【输入】
 - 算子目录：operators/{operator_name}/
@@ -893,6 +1031,7 @@ Task 调用参数：
 - 调用示例代码：operators/{operator_name}/examples/test_geir_{operator_name}.cpp
 - 构建脚本：operators/{operator_name}/examples/CMakeLists.txt
 - 运行脚本：operators/{operator_name}/examples/run.sh
+- 运行日志：operators/{operator_name}/examples/run.log（运行 examples/run.sh 将输出重定向到此文件）
 - 日志摘要：输出到响应末尾（格式见"Subagent 日志摘要输出要求"）
 
 【验收标准】
@@ -914,13 +1053,15 @@ Task 调用参数：
 ```
 4.2a 全量代码检视：
   - 检视文件: operators/{operator_name}/op_kernel/ + op_host/ 下所有 .cpp/.h/.hpp
-  - 报告路径: operators/{operator_name}/docs/{source_file}_review_summary.md
+  - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
+  - API 预研报告（如有）：`operators/{operator_name}/tmp/checks/api_prestudy.md`
+  - 报告路径: operators/{operator_name}/tmp/checks/{source_file}_review_summary.md
 
 4.2b 设计实现一致性检查：
   - 代码文件: 同 4.2a
   - 设计文档: operators/{operator_name}/docs/DESIGN.md
-  - 报告路径: operators/{operator_name}/docs/{source_file}_design_consistency_review.md
-```
+  - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
+  - 报告路径: operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md
 
 ### 4.2 验收标准
 

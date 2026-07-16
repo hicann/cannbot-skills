@@ -1,0 +1,26 @@
+# routes.yaml — 范式 → patterns.md 路由表（插件内置）
+#
+# ref_path 相对于 skill_home（paradigm-refs.yaml 的 skill_homes.default = ascendc-tiling-design）解析，
+# slicer 依次在 skills/<home>/、.opencode/skills/<home>/、ops/<home>/ 下查找。
+# 本仓 patterns 落于 ascendc-tiling-design/references/<paradigm>/patterns.md。
+# 加载粒度：每条路由仅加载对应范式的 patterns.md（入口索引），细节文件在 patterns.md 中按需引用。
+routes:
+  paradigms:
+    Elementwise:
+      - references/elewise/patterns.md
+    Broadcast:
+      - references/broadcast/patterns.md
+    Reduction:
+      - references/reduction/patterns.md
+    ReductionComposite:
+      - references/reduction/patterns.md
+    ArgReduce:
+      - references/reduction/patterns.md
+    Conversion:
+      - references/conversion/patterns.md
+    MatMul:
+      - references/matmul/patterns.md
+    Contraction:
+      - references/matmul/patterns.md
+    Sort:
+      - references/sort/patterns.md

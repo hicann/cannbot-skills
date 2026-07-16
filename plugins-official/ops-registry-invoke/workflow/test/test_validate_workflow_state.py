@@ -8,7 +8,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-"""Focused tests for validate_workflow_state.py."""
+"""Focused tests for validate-workflow-state.py."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "resources" / "validate_workflow_state.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "resources" / "validate-workflow-state.py"
 SPEC = importlib.util.spec_from_file_location("validate_workflow_state", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -36,327 +36,65 @@ def write_json(path: Path, data: object) -> None:
     write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def write_st_design_default_target(repo_dir: Path, default: int = 300) -> None:
+    write_text(
+        repo_dir / "ops/ascendc-st-design/scripts/generate_test_cases.py",
+        "\nimport argparse\n\n"
+        "parser = argparse.ArgumentParser()\n"
+        f'parser.add_argument("--target-count", type=int, default={default})\n',
+    )
+
+
+def write_blackbox_targets_test_md(test_md: Path, l0: int, l1: int, l2: int) -> None:
+    write_text(
+        test_md,
+        "\n# TEST\n\nblackbox_case_targets:\n"
+        f"  L0: {l0}\n  L1: {l1}\n  L2: {l2}\n",
+    )
+
+
+def write_low_coverage_waiver_scenario(tmpdir: str, reason: str, scope: str) -> Path:
+    """Set up a repo with a below-default L1 target and a LOW_COVERAGE_WAIVER.json.
+
+    Shared by the low-coverage-waiver tests, which differ only in the waiver's
+    ``reason``/``scope``. Returns the operator directory.
+    """
+    repo_dir = Path(tmpdir) / "repo"
+    operator_dir = repo_dir / "operators" / "demo"
+    write_st_design_default_target(repo_dir)
+    write_blackbox_targets_test_md(operator_dir / "docs/TEST.md", 1, 6, 1)
+    write_json(
+        operator_dir / "tests/st/LOW_COVERAGE_WAIVER.json",
+        {
+            "approved": True,
+            "approved_by": "user",
+            "reason": reason,
+            "scope": scope,
+        },
+    )
+    return operator_dir
+
+
+def blackbox_execution_evidence_inputs() -> tuple[dict, dict]:
+    """Return the shared (manifest, results) inputs for execution-evidence tests."""
+    manifest = {
+        "BB_L1_001": {
+            "case_id": "BB_L1_001",
+            "accepted_routes": ["st_cpp"],
+        }
+    }
+    results = {"BB_L1_001": {"case_id": "BB_L1_001", "status": "passed", "route": "st_cpp"}}
+    return manifest, results
+
+
 class WorkflowValidatorTest(unittest.TestCase):
-    @staticmethod
-    def _whitebox_case_fixtures(
-        *,
-        include_data_range: bool,
-        include_optional_absent_input: bool,
-        high_expanded: bool,
-    ) -> tuple[dict[str, object], list[dict[str, object]], list[str], list[str]]:
-        input_spec = {"shape": [2, 8], "dtype": "float32"}
-        if include_data_range:
-            input_spec["_data_range"] = "normal"
-        case = {
-            "id": "case00001",
-            "case_id": "case00001",
-            "params": {"_group": "normal", "last_dim": 8},
-            "tensors": {
-                "inputs": {
-                    "x": dict(input_spec),
-                    "residual": dict(input_spec),
-                    "gamma": dict(input_spec),
-                },
-                "outputs": {"y": {"shape": [2, 8], "dtype": "float32"}},
-            },
-        }
-        if include_optional_absent_input:
-            case["tensors"]["inputs"]["optional_bias"] = None
-        high_case = json.loads(json.dumps(case))
-        high_case["id"] = "case00001_x_zero"
-        high_case["case_id"] = "case00001_x_zero"
-        if include_data_range:
-            high_case["tensors"]["inputs"]["x"]["_data_range"] = "zero"
-        high_cases = [case, high_case] if high_expanded else [case]
-        low_case_ids = [case["case_id"]]
-        high_case_ids = [item["case_id"] for item in high_cases]
-        return case, high_cases, low_case_ids, high_case_ids
-
-    @staticmethod
-    def _write_internal_whitebox_artifacts(
-        whitebox_dir: Path,
-        case: dict[str, object],
-        include_auxiliary_whitebox_artifacts: bool,
-    ) -> None:
-        if include_auxiliary_whitebox_artifacts:
-            write_text(whitebox_dir / "S2P0_scout_t.md", "# Scout tiling\n")
-            write_text(whitebox_dir / "S2P0_scout_k.md", "# Scout kernel\n")
-        write_json(
-            whitebox_dir / "S2P0_file_manifest.json",
-            {
-                "verification": {"status": "pass"},
-                "tiling": {"file_list": ["op_host/demo.cpp"]},
-                "kernel": {"file_list": ["op_kernel/demo.h"], "total_key_count": 1},
-            },
-        )
-        write_text(whitebox_dir / "S5_case_mapper.py", "def load_mapped_configs():\n    return []\n")
-        if include_auxiliary_whitebox_artifacts:
-            write_text(whitebox_dir / "S5_verify_mapper.py", "def main():\n    return 0\n")
-        write_json(whitebox_dir / "S5_mapped_cases_path.json", {"cases": [case]})
-        write_json(whitebox_dir / "S5_mapped_cases_network.json", {"cases": [case]})
-
-    @staticmethod
-    def _write_whitebox_contract_files(
-        whitebox_dir: Path,
-        case: dict[str, object],
-        high_cases: list[dict[str, object]],
-        include_internal_whitebox_artifacts: bool,
-    ) -> None:
-        write_json(
-            whitebox_dir / "S2P2_param_def.json",
-            {
-                "tiling_keys": [101],
-                "groups": [
-                    {
-                        "id": "group0",
-                        "per_dtype": [{"dtype": "float32", "key": 101}],
-                    }
-                ],
-            },
-        )
-        if include_internal_whitebox_artifacts:
-            write_json(whitebox_dir / "S2P1_path_list.json", {"paths": []})
-            write_json(whitebox_dir / "S2P1_operator_model.json", {"operator_model": {}})
-            write_text(whitebox_dir / "S2P3_test_design.md", "# Whitebox design\n")
-            write_json(whitebox_dir / "S3_verification_report.json", {"status": "pass", "checks": [], "issues": []})
-        write_json(whitebox_dir / "S5_mapped_cases_low.json", {"cases": [case]})
-        write_json(whitebox_dir / "S5_mapped_cases_high.json", {"cases": high_cases})
-        write_json(
-            whitebox_dir / "S6_tilingkey_coverage.json",
-            {"total_keys": 1, "covered_keys": [101], "uncovered_keys": [], "coverage_rate": 1.0},
-        )
-
-    @staticmethod
-    def _write_whitebox_result_files(
-        results_dir: Path,
-        include_st_result: bool,
-        st_status: str,
-        st_route: str,
-        evidence_case_ids: list[str],
-    ) -> None:
-        if include_st_result:
-            write_json(
-                results_dir / "st_result.json",
-                {
-                    "results": [
-                        {
-                            "case_id": case_id,
-                            "status": st_status,
-                            "route": st_route,
-                        }
-                        for case_id in evidence_case_ids
-                    ]
-                },
-            )
-        write_json(results_dir / "pytest_collect.json", {"collected_case_ids": evidence_case_ids})
-        write_json(
-            results_dir / "pytest_result.json",
-            {"results": [{"case_id": case_id, "status": "passed"} for case_id in evidence_case_ids]},
-        )
-
-    @staticmethod
-    def _write_whitebox_execution_evidence(
-        operator_dir: Path,
-        st_evidence_mode: str,
-        evidence_case_set: str,
-        evidence_case_ids: list[str],
-    ) -> None:
-        evidence_ids = " ".join(evidence_case_ids)
-        cases_file = "S5_mapped_cases_low.json" if evidence_case_set == "low" else "S5_mapped_cases_high.json"
-        if st_evidence_mode == "id_marker_only":
-            evidence_text = (
-                f"IMPLEMENTATION_UNDER_TEST {cases_file} "
-                "aclnnDemoGetWorkspaceSize op_host op_kernel\n"
-                f"{evidence_ids}\n"
-            )
-        else:
-            evidence_text = (
-                "int main() {\n"
-                f"  // IMPLEMENTATION_UNDER_TEST {cases_file} "
-                f"aclnnDemoGetWorkspaceSize op_host op_kernel {evidence_ids}\n"
-                f"  return RunCase(\"{evidence_case_ids[0]}\") ? 0 : 1;\n"
-                "}\n"
-            )
-        write_text(operator_dir / "tests/st/test_whitebox_demo.cpp", evidence_text)
-
-    @staticmethod
-    def _write_report(operator_dir: Path, rel_path: str) -> None:
-        write_text(operator_dir / rel_path, "# Report\n\n**状态**: ✅通过\n")
-
-    @staticmethod
-    def _write_ut_fixture(operator_dir: Path) -> None:
-        write_json(
-            operator_dir / "tests/ut/test-report.json",
-            {
-                "status": "passed",
-                "summary": {"total": 1, "passed": 1, "failed": 0},
-                "results": [{"case_id": "ut_demo", "status": "passed"}],
-            },
-        )
-        write_text(operator_dir / "tests/ut/test_demo.cpp", "aclnnDemo x residual gamma y\n")
-
-    @staticmethod
-    def _blackbox_passed_results() -> list[dict[str, object]]:
-        return [
-            {"case_id": "BB_L0_001", "level": "L0", "status": "passed", "route": "st_cpp"},
-            {"case_id": "BB_L0_002", "level": "L0", "status": "passed", "route": "st_cpp"},
-            {"case_id": "BB_L1_001", "level": "L1", "status": "passed", "route": "st_cpp"},
-            {"case_id": "BB_L2_001", "level": "L2", "status": "passed", "route": "st_cpp"},
-        ]
-
-    @staticmethod
-    def _write_evidence_index_fixture(operator_dir: Path) -> None:
-        write_json(
-            operator_dir / "tests/reports/evidence_index.json",
-            {
-                "status": "passed",
-                "evidence_paths": [
-                    "tests/st/case_manifest.json",
-                    "tests/st/results/st_real_result.json",
-                    "tests/whitebox/WORKFLOW_PROVENANCE.json",
-                    "tests/whitebox/S2P2_param_def.json",
-                    "tests/whitebox/S5_mapped_cases_low.json",
-                    "tests/whitebox/S5_mapped_cases_high.json",
-                    "tests/whitebox/S6_tilingkey_coverage.json",
-                    "tests/whitebox/results/pytest_collect.json",
-                    "tests/whitebox/results/pytest_result.json",
-                    "tests/whitebox/results/st_result.json",
-                ],
-                "summary": {
-                    "blackbox": {},
-                    "whitebox": {},
-                },
-            },
-        )
-
-    @staticmethod
-    def _write_blackbox_design_files(operator_dir: Path) -> None:
-        write_text(
-            operator_dir / "docs/TEST.md",
-            """
-# TEST
-
-blackbox_case_targets:
-  L0: 2
-  L1: 1
-  L2: 1
-""",
-        )
-        write_json(
-            operator_dir / "tests/st/LOW_COVERAGE_WAIVER.json",
-            {
-                "approved": True,
-                "approved_by": "user",
-                "reason": "Unit test fixture uses a small blackbox case set.",
-                "scope": "blackbox_l1_minimum",
-            },
-        )
-        write_text(
-            operator_dir / "tests/st/testcases/blackbox_l0.csv",
-            "case_id,level\nBB_L0_001,L0\nBB_L0_002,L0\n",
-        )
-        write_text(operator_dir / "tests/st/testcases/blackbox_l1.csv", "case_id,level\nBB_L1_001,L1\n")
-        write_text(operator_dir / "tests/st/testcases/blackbox_l2.csv", "case_id,level\nBB_L2_001,L2\n")
-
-    @staticmethod
-    def _blackbox_manifest_cases() -> list[dict[str, object]]:
-        return [
-            {
-                "case_id": "BB_L0_001",
-                "level": "L0",
-                "required": True,
-                "accepted_routes": ["st_cpp"],
-            },
-            {
-                "case_id": "BB_L0_002",
-                "level": "L0",
-                "required": True,
-                "accepted_routes": ["st_cpp"],
-            },
-            {
-                "case_id": "BB_L1_001",
-                "level": "L1",
-                "required": True,
-                "accepted_routes": ["st_cpp"],
-            },
-            {
-                "case_id": "BB_L2_001",
-                "level": "L2",
-                "required": True,
-                "accepted_routes": ["st_cpp"],
-            },
-        ]
-
-    @staticmethod
-    def _write_st_target_count_generator(repo_dir: Path, default: int = 300) -> None:
-        write_text(
-            repo_dir / "ops/ascendc-st-design/scripts/generate_test_cases.py",
-            f"""
-import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--target-count", type=int, default={default})
-""",
-        )
-
-    @staticmethod
-    def _write_blackbox_target_document(operator_dir: Path, target_lines: str) -> Path:
-        test_md = operator_dir / "docs/TEST.md"
-        write_text(
-            test_md,
-            f"""
-# TEST
-
-blackbox_case_targets:
-{target_lines}
-""",
-        )
-        return test_md
-
-    @staticmethod
-    def _single_blackbox_execution_fixture(
-        operator_dir: Path,
-        source_text: str = "",
-    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-        if source_text:
-            write_text(operator_dir / "tests/st/test_demo.cpp", source_text)
-        manifest = {
-            "BB_L1_001": {
-                "case_id": "BB_L1_001",
-                "accepted_routes": ["st_cpp"],
-            }
-        }
-        results = {"BB_L1_001": {"case_id": "BB_L1_001", "status": "passed", "route": "st_cpp"}}
-        return manifest, results
-
-    @staticmethod
-    def _validate_l1_below_default_fixture(
-        waiver: dict[str, object] | None = None,
-        markdown_note: str = "",
-    ) -> list[str]:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_dir = Path(tmpdir) / "repo"
-            operator_dir = repo_dir / "operators" / "demo"
-            WorkflowValidatorTest._write_st_target_count_generator(repo_dir)
-            test_md = WorkflowValidatorTest._write_blackbox_target_document(
-                operator_dir,
-                "  L0: 1\n  L1: 6\n  L2: 1",
-            )
-            if markdown_note:
-                write_text(operator_dir / "tests/st/LOW_COVERAGE_JUSTIFICATION.md", markdown_note)
-            if waiver is not None:
-                write_json(operator_dir / "tests/st/LOW_COVERAGE_WAIVER.json", waiver)
-
-            validator = WorkflowValidator(operator_dir)
-            validator.blackbox_case_target_counts(test_md)
-            return list(validator.errors)
-
     def test_blackbox_case_targets_use_ascendc_st_design_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_dir = Path(tmpdir) / "repo"
             operator_dir = repo_dir / "operators" / "demo"
-            self._write_st_target_count_generator(repo_dir)
-            test_md = self._write_blackbox_target_document(operator_dir, "  L0: 1\n  L1: 299\n  L2: 1")
+            write_st_design_default_target(repo_dir)
+            test_md = operator_dir / "docs/TEST.md"
+            write_blackbox_targets_test_md(test_md, 1, 299, 1)
 
             validator = WorkflowValidator(operator_dir)
             targets = validator.blackbox_case_target_counts(test_md)
@@ -371,8 +109,9 @@ blackbox_case_targets:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_dir = Path(tmpdir) / "repo"
             operator_dir = repo_dir / "operators" / "demo"
-            self._write_st_target_count_generator(repo_dir)
-            test_md = self._write_blackbox_target_document(operator_dir, "  L0: 1\n  L1: 300\n  L2: 1")
+            write_st_design_default_target(repo_dir)
+            test_md = operator_dir / "docs/TEST.md"
+            write_blackbox_targets_test_md(test_md, 1, 300, 1)
 
             validator = WorkflowValidator(operator_dir)
             targets = validator.blackbox_case_target_counts(test_md)
@@ -384,10 +123,15 @@ blackbox_case_targets:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_dir = Path(tmpdir) / "repo"
             operator_dir = repo_dir / "operators" / "demo"
-            self._write_st_target_count_generator(repo_dir)
-            test_md = self._write_blackbox_target_document(
-                operator_dir,
-                """  L0:
+            write_st_design_default_target(repo_dir)
+            test_md = operator_dir / "docs/TEST.md"
+            write_text(
+                test_md,
+                """
+# TEST
+
+blackbox_case_targets:
+  L0:
     target_count: 20
     file: operators/demo/tests/st/testcases/demo_L0_test_cases.csv
   L1:
@@ -395,7 +139,8 @@ blackbox_case_targets:
     file: operators/demo/tests/st/testcases/demo_L1_test_cases.csv
   L2:
     target_count: 16
-    file: operators/demo/tests/st/testcases/demo_L2_test_cases.csv""",
+    file: operators/demo/tests/st/testcases/demo_L2_test_cases.csv
+""",
             )
 
             validator = WorkflowValidator(operator_dir)
@@ -421,48 +166,202 @@ blackbox_case_targets:
             self.assertEqual("aclnnDemo_L1_001", rows[0]["_case_id"])
             self.assertEqual("L1", rows[0]["_level"])
 
-    def test_markdown_low_coverage_note_does_not_waive_l1_minimum(self) -> None:
-        errors = self._validate_l1_below_default_fixture(
-            markdown_note="# Low coverage\n\nDevelopment-only run with six L1 cases.\n",
-        )
+    def test_blackbox_csv_shape_validation_rejects_nan_output_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),nan,)\","
+                    "\"('float16','float16',)\",\"(1,)\"\n"
+                ),
+            )
 
-        self.assertTrue(any("minimum=300" in error for error in errors), errors)
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any(
+                    "invalid tensor_view_shapes" in error and "aclnnDemo_L0_001" in error
+                    for error in validator.errors
+                ),
+                validator.errors,
+            )
+
+    def test_blackbox_csv_shape_validation_rejects_negative_dimension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),(-1,),)\","
+                    "\"('float16','float16',)\",\"(1,)\"\n"
+                ),
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any("negative dimension" in error and "aclnnDemo_L0_001" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_blackbox_csv_shape_validation_rejects_bool_dimension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),(True,),)\","
+                    "\"('float16','float16',)\",\"(1,)\"\n"
+                ),
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any("contains bool" in error and "aclnnDemo_L0_001" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_blackbox_csv_shape_validation_rejects_non_int_dimension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),(1.5,),)\","
+                    "\"('float16','float16',)\",\"(1,)\"\n"
+                ),
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any("non-integer dimension" in error and "aclnnDemo_L0_001" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_blackbox_csv_shape_validation_rejects_output_index_out_of_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),)\","
+                    "\"('float16',)\",\"(1,)\"\n"
+                ),
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any("output_tensor_indexes out of range" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_blackbox_csv_shape_validation_rejects_non_int_output_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            write_text(
+                operator_dir / "tests/st/testcases/aclnnDemo_l0_test_cases.csv",
+                (
+                    "testcase_name,api_name,tensor_view_shapes,tensor_dtypes,"
+                    "output_tensor_indexes\n"
+                    "aclnnDemo_L0_001,aclnnDemo,\"((142,),)\","
+                    "\"('float16',)\",\"(True,)\"\n"
+                ),
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            csv_rows = validator.csv_case_rows()
+            validator.validate_blackbox_csv_shapes(csv_rows)
+
+            self.assertTrue(
+                any("non-int index" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_markdown_low_coverage_note_does_not_waive_l1_minimum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir) / "repo"
+            operator_dir = repo_dir / "operators" / "demo"
+            write_st_design_default_target(repo_dir)
+            test_md = operator_dir / "docs/TEST.md"
+            write_blackbox_targets_test_md(test_md, 1, 6, 1)
+            write_text(
+                operator_dir / "tests/st/LOW_COVERAGE_JUSTIFICATION.md",
+                "# Low coverage\n\nDevelopment-only run with six L1 cases.\n",
+            )
+
+            validator = WorkflowValidator(operator_dir)
+            validator.blackbox_case_target_counts(test_md)
+
+            self.assertTrue(
+                any("minimum=300" in error for error in validator.errors),
+                validator.errors,
+            )
 
     def test_user_approved_low_coverage_waiver_allows_l1_below_default(self) -> None:
-        errors = self._validate_l1_below_default_fixture(
-            {
-                "approved": True,
-                "approved_by": "user",
-                "reason": "User explicitly requested a development-only low coverage run.",
-                "scope": "blackbox_l1_minimum",
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = write_low_coverage_waiver_scenario(
+                tmpdir,
+                reason="User explicitly requested a development-only low coverage run.",
+                scope="blackbox_l1_minimum",
+            )
 
-        self.assertFalse(any("minimum=300" in error for error in errors), errors)
+            validator = WorkflowValidator(operator_dir)
+            validator.blackbox_case_target_counts(operator_dir / "docs/TEST.md")
+
+            self.assertFalse(
+                any("minimum=300" in error for error in validator.errors),
+                validator.errors,
+            )
 
     def test_unresolved_low_coverage_waiver_does_not_waive_l1_minimum(self) -> None:
-        errors = self._validate_l1_below_default_fixture(
-            {
-                "approved": True,
-                "approved_by": "user",
-                "reason": "TODO",
-                "scope": "blackbox_l1_minimum",
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = write_low_coverage_waiver_scenario(
+                tmpdir,
+                reason="TODO",
+                scope="blackbox_l1_minimum",
+            )
 
-        self.assertTrue(any("minimum=300" in error for error in errors), errors)
+            validator = WorkflowValidator(operator_dir)
+            validator.blackbox_case_target_counts(operator_dir / "docs/TEST.md")
+
+            self.assertTrue(any("minimum=300" in error for error in validator.errors), validator.errors)
 
     def test_invalid_low_coverage_waiver_scope_does_not_waive_l1_minimum(self) -> None:
-        errors = self._validate_l1_below_default_fixture(
-            {
-                "approved": True,
-                "approved_by": "user",
-                "reason": "User approved a small case set.",
-                "scope": "wrong_scope",
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = write_low_coverage_waiver_scenario(
+                tmpdir,
+                reason="User approved a small case set.",
+                scope="wrong_scope",
+            )
 
-        self.assertTrue(any("minimum=300" in error for error in errors), errors)
+            validator = WorkflowValidator(operator_dir)
+            validator.blackbox_case_target_counts(operator_dir / "docs/TEST.md")
+
+            self.assertTrue(any("minimum=300" in error for error in validator.errors), validator.errors)
 
     def test_blackbox_target_consistency_checks_csv_manifest_and_passed_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -567,7 +466,7 @@ constraints:
     def test_blackbox_execution_evidence_requires_st_case_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
-            manifest, results = self._single_blackbox_execution_fixture(operator_dir)
+            manifest, results = blackbox_execution_evidence_inputs()
 
             validator = WorkflowValidator(operator_dir)
             validator.validate_blackbox_execution_evidence(set(manifest), manifest, results)
@@ -580,10 +479,8 @@ constraints:
     def test_blackbox_execution_evidence_requires_implementation_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
-            manifest, results = self._single_blackbox_execution_fixture(
-                operator_dir,
-                "int main() { /* BB_L1_001 */ return 0; }\n",
-            )
+            write_text(operator_dir / "tests/st/test_demo.cpp", "int main() { /* BB_L1_001 */ return 0; }\n")
+            manifest, results = blackbox_execution_evidence_inputs()
 
             validator = WorkflowValidator(operator_dir)
             validator.validate_blackbox_execution_evidence(set(manifest), manifest, results)
@@ -596,14 +493,21 @@ constraints:
     def test_cp2_accepts_full_positive_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
-            self._write_blackbox_fixture(operator_dir, results=self._blackbox_passed_results())
-            self._write_ut_fixture(operator_dir)
-            self._write_report(operator_dir, "tests/reports/iter3-integration-report.md")
+            self._write_cp2_positive_fixture(operator_dir)
 
             validator = WorkflowValidator(operator_dir)
             validator.validate_cp2()
 
             self.assertEqual([], validator.errors)
+
+    def test_cp2_cli_gate_accepts_full_positive_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            self._write_cp2_positive_fixture(operator_dir)
+
+            exit_code = MODULE.main(["--stage", "cp2", "--operator-dir", str(operator_dir)])
+
+            self.assertEqual(0, exit_code)
 
     def test_cp3_accepts_full_positive_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -614,6 +518,15 @@ constraints:
             validator.validate_cp3()
 
             self.assertEqual([], validator.errors)
+
+    def test_cp3_cli_gate_accepts_full_positive_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            self._write_cp3_positive_fixture(operator_dir)
+
+            exit_code = MODULE.main(["--stage", "cp3", "--operator-dir", str(operator_dir)])
+
+            self.assertEqual(0, exit_code)
 
     def test_whitebox_accepts_new_skill_outputs_with_st_primary_and_pytest_auxiliary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -739,6 +652,45 @@ constraints:
                 validator.errors,
             )
 
+    def test_whitebox_rejects_low_only_evidence_when_high_contains_data_range_expansions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            self._write_new_whitebox_outputs(operator_dir, evidence_case_set="low")
+
+            validator = WorkflowValidator(operator_dir)
+            validator.validate_whitebox()
+
+            self.assertTrue(
+                any(
+                    "pytest_collect.json case ids do not match enabled whitebox cases" in error
+                    for error in validator.errors
+                ),
+                validator.errors,
+            )
+            self.assertTrue(
+                any("st_result.json missing enabled case ids" in error for error in validator.errors),
+                validator.errors,
+            )
+
+    def test_whitebox_cli_gate_rejects_low_only_evidence_without_status_passed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            operator_dir = Path(tmpdir)
+            self._write_cp3_positive_fixture(operator_dir)
+            self._write_new_whitebox_outputs(operator_dir, evidence_case_set="low")
+
+            import contextlib
+            import io
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = MODULE.main(["--stage", "cp3", "--operator-dir", str(operator_dir)])
+
+            output = stdout.getvalue()
+            self.assertNotEqual(0, exit_code)
+            self.assertNotIn("STATUS: PASSED", output)
+            self.assertIn("pytest_collect.json case ids do not match enabled whitebox cases", output)
+            self.assertIn("st_result.json missing enabled case ids", output)
+
     def test_whitebox_rejects_helper_script_that_writes_passed_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
@@ -849,79 +801,15 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
                 validator.errors,
             )
 
-    def test_whitebox_enabled_ids_come_from_high_cases(self) -> None:
+    def test_whitebox_enabled_ids_do_not_fallback_to_low_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
             self._write_new_whitebox_outputs(operator_dir)
+            (operator_dir / "tests/whitebox/S5_mapped_cases_high.json").unlink()
 
             validator = WorkflowValidator(operator_dir)
 
-            self.assertEqual({"case00001", "case00001_x_zero"}, validator.enabled_whitebox_ids())
-
-    def test_whitebox_gate_uses_high_cases_when_high_contains_data_range_expansions(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            operator_dir = Path(tmpdir)
-            self._write_new_whitebox_outputs(operator_dir)
-
-            validator = WorkflowValidator(operator_dir)
-            validator.validate_whitebox()
-
-            self.assertEqual([], validator.errors)
-            self.assertEqual(2, validator.whitebox_summary["enabled"])
-            self.assertEqual(2, validator.whitebox_summary["st_passed"])
-            self.assertEqual(2, validator.whitebox_summary["pytest_passed"])
-
-    def test_whitebox_rejects_low_only_evidence_when_high_contains_data_range_expansions(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            operator_dir = Path(tmpdir)
-            self._write_new_whitebox_outputs(operator_dir, evidence_case_set="low")
-
-            validator = WorkflowValidator(operator_dir)
-            validator.validate_whitebox()
-
-            self.assertTrue(
-                any(
-                    "pytest_collect.json case ids do not match enabled whitebox cases" in error
-                    for error in validator.errors
-                ),
-                validator.errors,
-            )
-            self.assertTrue(
-                any("st_result.json missing enabled case ids" in error for error in validator.errors),
-                validator.errors,
-            )
-            self.assertTrue(
-                any(
-                    "whitebox ST execution evidence lacks executable case mappings" in error
-                    for error in validator.errors
-                ),
-                validator.errors,
-            )
-
-    def test_whitebox_param_def_accepts_per_dtype_mapping(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            operator_dir = Path(tmpdir)
-            self._write_new_whitebox_outputs(operator_dir)
-            write_json(
-                operator_dir / "tests/whitebox/S2P2_param_def.json",
-                {
-                    "tiling_keys": [101],
-                    "groups": [
-                        {
-                            "id": "group0",
-                            "per_dtype": {
-                                "float16": {"path": "tiling.cpp:42", "key": 101},
-                                "float32": {"path": "tiling.cpp:43", "key": 101},
-                            },
-                        }
-                    ],
-                },
-            )
-
-            validator = WorkflowValidator(operator_dir)
-            validator.validate_whitebox()
-
-            self.assertEqual([], validator.errors)
+            self.assertEqual(set(), validator.enabled_whitebox_ids())
 
     def test_whitebox_requires_every_st_result_row_to_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -938,7 +826,7 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
             self.assertEqual(0, validator.whitebox_summary["st_passed"])
             self.assertEqual(2, validator.whitebox_summary["st_failed"])
 
-    def test_whitebox_coverage_profile_can_lower_expected_gate_cases(self) -> None:
+    def test_whitebox_coverage_profile_can_lower_expected_low_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
             self._write_new_whitebox_outputs(operator_dir, high_expanded=False)
@@ -947,17 +835,17 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
             provenance.pop("case_reduction_reason", None)
             provenance["coverage_profile"] = {
                 "name": "simple_operator",
-                "minimum_gate_cases": 1,
+                "minimum_low_cases": 1,
                 "reason": "One tiling key and two reachable interface modes.",
             }
             write_json(provenance_path, provenance)
 
             validator = WorkflowValidator(operator_dir)
-            validator.validate_whitebox_provenance(2)
+            validator.validate_whitebox_provenance(1)
 
             self.assertEqual([], validator.errors)
 
-    def test_whitebox_coverage_profile_rejects_invalid_gate_case_minimum(self) -> None:
+    def test_whitebox_coverage_profile_rejects_invalid_low_case_minimum(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             operator_dir = Path(tmpdir)
             self._write_new_whitebox_outputs(operator_dir, high_expanded=False)
@@ -965,7 +853,7 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
             provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
             provenance["coverage_profile"] = {
                 "name": "simple_operator",
-                "minimum_gate_cases": 0,
+                "minimum_low_cases": 0,
                 "reason": "One tiling key and two reachable interface modes.",
             }
             write_json(provenance_path, provenance)
@@ -974,7 +862,7 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
             validator.validate_whitebox_provenance(1)
 
             self.assertTrue(
-                any("coverage_profile.minimum_gate_cases" in error for error in validator.errors),
+                any("coverage_profile.minimum_low_cases" in error for error in validator.errors),
                 validator.errors,
             )
 
@@ -997,56 +885,99 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
     ) -> None:
         whitebox_dir = operator_dir / "tests/whitebox"
         results_dir = whitebox_dir / "results"
-        case, high_cases, low_case_ids, high_case_ids = self._whitebox_case_fixtures(
+        case, high_cases = self._build_whitebox_cases(
             include_data_range=include_data_range,
             include_optional_absent_input=include_optional_absent_input,
             high_expanded=high_expanded,
         )
+        high_case_ids = [item["case_id"] for item in high_cases]
+        low_case_ids = [case["case_id"]]
         evidence_case_ids = low_case_ids if evidence_case_set == "low" else high_case_ids
 
-        self._write_whitebox_workflow_files(
+        if include_full_skill_workflow:
+            self._write_whitebox_skill_workflow(
+                whitebox_dir,
+                case=case,
+                high_cases=high_cases,
+                include_internal_whitebox_artifacts=include_internal_whitebox_artifacts,
+                include_auxiliary_whitebox_artifacts=include_auxiliary_whitebox_artifacts,
+            )
+        self._write_whitebox_step_artifacts(
             whitebox_dir,
-            case,
-            low_case_ids,
-            high_case_ids,
-            high_cases,
-            include_full_skill_workflow=include_full_skill_workflow,
-            include_auxiliary_whitebox_artifacts=include_auxiliary_whitebox_artifacts,
+            case=case,
+            high_cases=high_cases,
             include_internal_whitebox_artifacts=include_internal_whitebox_artifacts,
         )
-        self._write_whitebox_contract_files(
-            whitebox_dir,
-            case,
-            high_cases,
-            include_internal_whitebox_artifacts,
+        self._write_whitebox_results(
+            operator_dir,
+            results_dir,
+            evidence_case_ids=evidence_case_ids,
+            include_st_result=include_st_result,
+            st_status=st_status,
+            st_route=st_route,
+            include_st_execution_evidence=include_st_execution_evidence,
+            st_evidence_mode=st_evidence_mode,
         )
-        write_text(whitebox_dir / "S6_test_demo.py", "def test_placeholder():\n    pass\n")
-        self._write_whitebox_result_files(results_dir, include_st_result, st_status, st_route, evidence_case_ids)
-        if include_st_execution_evidence:
-            self._write_whitebox_execution_evidence(
-                operator_dir, st_evidence_mode, evidence_case_set, evidence_case_ids
-            )
 
-    def _write_whitebox_workflow_files(
+    def _build_whitebox_cases(
+        self,
+        *,
+        include_data_range: bool,
+        include_optional_absent_input: bool,
+        high_expanded: bool,
+    ) -> tuple[dict, list[dict]]:
+        input_spec = {"shape": [2, 8], "dtype": "float32"}
+        if include_data_range:
+            input_spec["_data_range"] = "normal"
+        case = {
+            "id": "case00001",
+            "case_id": "case00001",
+            "params": {"_group": "normal", "last_dim": 8},
+            "tensors": {
+                "inputs": {
+                    "x": dict(input_spec),
+                    "residual": dict(input_spec),
+                    "gamma": dict(input_spec),
+                },
+                "outputs": {"y": {"shape": [2, 8], "dtype": "float32"}},
+            },
+        }
+        if include_optional_absent_input:
+            case["tensors"]["inputs"]["optional_bias"] = None
+        high_case = json.loads(json.dumps(case))
+        high_case["id"] = "case00001_x_zero"
+        high_case["case_id"] = "case00001_x_zero"
+        if include_data_range:
+            high_case["tensors"]["inputs"]["x"]["_data_range"] = "zero"
+        high_cases = [case, high_case] if high_expanded else [case]
+        return case, high_cases
+
+    def _write_whitebox_skill_workflow(
         self,
         whitebox_dir: Path,
-        case: dict[str, object],
-        low_case_ids: list[str],
-        high_case_ids: list[str],
-        high_cases: list[dict[str, object]],
         *,
-        include_full_skill_workflow: bool,
-        include_auxiliary_whitebox_artifacts: bool,
+        case: dict,
+        high_cases: list[dict],
         include_internal_whitebox_artifacts: bool,
+        include_auxiliary_whitebox_artifacts: bool,
     ) -> None:
-        if not include_full_skill_workflow:
-            return
         if include_internal_whitebox_artifacts:
-            self._write_internal_whitebox_artifacts(
-                whitebox_dir,
-                case,
-                include_auxiliary_whitebox_artifacts,
+            if include_auxiliary_whitebox_artifacts:
+                write_text(whitebox_dir / "S2P0_scout_t.md", "# Scout tiling\n")
+                write_text(whitebox_dir / "S2P0_scout_k.md", "# Scout kernel\n")
+            write_json(
+                whitebox_dir / "S2P0_file_manifest.json",
+                {
+                    "verification": {"status": "pass"},
+                    "tiling": {"file_list": ["op_host/demo.cpp"]},
+                    "kernel": {"file_list": ["op_kernel/demo.h"], "total_key_count": 1},
+                },
             )
+            write_text(whitebox_dir / "S5_case_mapper.py", "def load_mapped_configs():\n    return []\n")
+            if include_auxiliary_whitebox_artifacts:
+                write_text(whitebox_dir / "S5_verify_mapper.py", "def main():\n    return 0\n")
+            write_json(whitebox_dir / "S5_mapped_cases_path.json", {"cases": [case]})
+            write_json(whitebox_dir / "S5_mapped_cases_network.json", {"cases": [case]})
         write_json(
             whitebox_dir / "WORKFLOW_PROVENANCE.json",
             {
@@ -1060,14 +991,147 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
                 },
                 "case_reduction_reason": {
                     "reason": "Unit test fixture intentionally contains one whitebox case.",
-                    "path_case_count": len(low_case_ids),
-                    "network_case_count": len(low_case_ids),
-                    "enabled_case_count": len(high_case_ids),
+                    "path_case_count": 1,
+                    "network_case_count": 1,
+                    "enabled_case_count": len(high_cases),
                     "low_case_count": 1,
                     "high_case_count": len(high_cases),
                 },
             },
         )
+
+    def _write_whitebox_step_artifacts(
+        self,
+        whitebox_dir: Path,
+        *,
+        case: dict,
+        high_cases: list[dict],
+        include_internal_whitebox_artifacts: bool,
+    ) -> None:
+        write_json(
+            whitebox_dir / "S2P2_param_def.json",
+            {
+                "tiling_keys": [101],
+                "groups": [
+                    {
+                        "id": "group0",
+                        "per_dtype": [{"dtype": "float32", "key": 101}],
+                    }
+                ],
+            },
+        )
+        if include_internal_whitebox_artifacts:
+            write_json(whitebox_dir / "S2P1_path_list.json", {"paths": []})
+            write_json(whitebox_dir / "S2P1_operator_model.json", {"operator_model": {}})
+            write_text(whitebox_dir / "S2P3_test_design.md", "# Whitebox design\n")
+            write_json(whitebox_dir / "S3_verification_report.json", {"status": "pass", "checks": [], "issues": []})
+        write_json(whitebox_dir / "S5_mapped_cases_low.json", {"cases": [case]})
+        write_json(whitebox_dir / "S5_mapped_cases_high.json", {"cases": high_cases})
+        write_json(
+            whitebox_dir / "S6_tilingkey_coverage.json",
+            {"total_keys": 1, "covered_keys": [101], "uncovered_keys": [], "coverage_rate": 1.0},
+        )
+        write_text(whitebox_dir / "S6_test_demo.py", "def test_placeholder():\n    pass\n")
+
+    def _write_whitebox_results(
+        self,
+        operator_dir: Path,
+        results_dir: Path,
+        *,
+        evidence_case_ids: list[str],
+        include_st_result: bool,
+        st_status: str,
+        st_route: str,
+        include_st_execution_evidence: bool,
+        st_evidence_mode: str,
+    ) -> None:
+        if include_st_result:
+            write_json(
+                results_dir / "st_result.json",
+                {
+                    "results": [
+                        {
+                            "case_id": case_id,
+                            "status": st_status,
+                            "route": st_route,
+                        }
+                        for case_id in evidence_case_ids
+                    ]
+                },
+            )
+        if include_st_execution_evidence:
+            evidence_ids = " ".join(evidence_case_ids)
+            if st_evidence_mode == "id_marker_only":
+                evidence_text = (
+                    "IMPLEMENTATION_UNDER_TEST S5_mapped_cases_high.json "
+                    "aclnnDemoGetWorkspaceSize op_host op_kernel\n"
+                    f"{evidence_ids}\n"
+                )
+            else:
+                evidence_text = (
+                    "int main() {\n"
+                    "  // IMPLEMENTATION_UNDER_TEST S5_mapped_cases_high.json "
+                    f"aclnnDemoGetWorkspaceSize op_host op_kernel {evidence_ids}\n"
+                    f"  return RunCase(\"{evidence_case_ids[0]}\") ? 0 : 1;\n"
+                    "}\n"
+                )
+            write_text(operator_dir / "tests/st/test_whitebox_demo.cpp", evidence_text)
+        write_json(results_dir / "pytest_collect.json", {"collected_case_ids": evidence_case_ids})
+        write_json(
+            results_dir / "pytest_result.json",
+            {"results": [{"case_id": case_id, "status": "passed"} for case_id in evidence_case_ids]},
+        )
+
+    def _write_report(self, operator_dir: Path, rel_path: str) -> None:
+        write_text(operator_dir / rel_path, "# Report\n\n**状态**: ✅通过\n")
+
+    def _write_ut_fixture(self, operator_dir: Path) -> None:
+        write_json(
+            operator_dir / "tests/ut/test-report.json",
+            {
+                "status": "passed",
+                "summary": {"total": 1, "passed": 1, "failed": 0},
+                "results": [{"case_id": "ut_demo", "status": "passed"}],
+            },
+        )
+        write_text(operator_dir / "tests/ut/test_demo.cpp", "aclnnDemo x residual gamma y\n")
+
+    def _blackbox_passed_results(self) -> list[dict[str, object]]:
+        return [
+            {"case_id": "BB_L0_001", "level": "L0", "status": "passed", "route": "st_cpp"},
+            {"case_id": "BB_L0_002", "level": "L0", "status": "passed", "route": "st_cpp"},
+            {"case_id": "BB_L1_001", "level": "L1", "status": "passed", "route": "st_cpp"},
+            {"case_id": "BB_L2_001", "level": "L2", "status": "passed", "route": "st_cpp"},
+        ]
+
+    def _write_evidence_index_fixture(self, operator_dir: Path) -> None:
+        write_json(
+            operator_dir / "tests/reports/evidence_index.json",
+            {
+                "status": "passed",
+                "evidence_paths": [
+                    "tests/st/case_manifest.json",
+                    "tests/st/results/st_real_result.json",
+                    "tests/whitebox/WORKFLOW_PROVENANCE.json",
+                    "tests/whitebox/S2P2_param_def.json",
+                    "tests/whitebox/S5_mapped_cases_low.json",
+                    "tests/whitebox/S5_mapped_cases_high.json",
+                    "tests/whitebox/S6_tilingkey_coverage.json",
+                    "tests/whitebox/results/pytest_collect.json",
+                    "tests/whitebox/results/pytest_result.json",
+                    "tests/whitebox/results/st_result.json",
+                ],
+                "summary": {
+                    "blackbox": {},
+                    "whitebox": {},
+                },
+            },
+        )
+
+    def _write_cp2_positive_fixture(self, operator_dir: Path) -> None:
+        self._write_blackbox_fixture(operator_dir, results=self._blackbox_passed_results())
+        self._write_ut_fixture(operator_dir)
+        self._write_report(operator_dir, "tests/reports/iter3-integration-report.md")
 
     def _write_cp3_positive_fixture(self, operator_dir: Path) -> None:
         self._write_blackbox_fixture(
@@ -1077,6 +1141,7 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
         )
         self._write_ut_fixture(operator_dir)
         self._write_new_whitebox_outputs(operator_dir)
+        self._write_report(operator_dir, "docs/precision-report.md")
         self._write_report(operator_dir, "tests/reports/iter3-acceptance-report.md")
         self._write_report(operator_dir, "tests/reports/test-branches-merge-exec-report.md")
         self._write_evidence_index_fixture(operator_dir)
@@ -1088,7 +1153,17 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
         results: list[dict[str, object]],
         result_name: str = "st_dev_result.json",
     ) -> None:
-        self._write_blackbox_design_files(operator_dir)
+        write_blackbox_targets_test_md(operator_dir / "docs/TEST.md", 2, 1, 1)
+        write_json(
+            operator_dir / "tests/st/LOW_COVERAGE_WAIVER.json",
+            {
+                "approved": True,
+                "approved_by": "user",
+                "reason": "Unit test fixture uses a small blackbox case set.",
+                "scope": "blackbox_l1_minimum",
+            },
+        )
+        self._write_blackbox_testcases(operator_dir)
         write_json(operator_dir / "tests/st/case_manifest.json", {"cases": self._blackbox_manifest_cases()})
         write_json(operator_dir / f"tests/st/results/{result_name}", {"results": results})
         write_text(
@@ -1099,6 +1174,28 @@ write_json("tests/reports/evidence_index.json", {"status": "passed"})
             "  return RunCase(\"BB_L1_001\") ? 0 : 1;\n"
             "}\n",
         )
+
+    def _write_blackbox_testcases(self, operator_dir: Path) -> None:
+        write_text(
+            operator_dir / "tests/st/testcases/blackbox_l0.csv",
+            "case_id,level\nBB_L0_001,L0\nBB_L0_002,L0\n",
+        )
+        write_text(operator_dir / "tests/st/testcases/blackbox_l1.csv", "case_id,level\nBB_L1_001,L1\n")
+        write_text(operator_dir / "tests/st/testcases/blackbox_l2.csv", "case_id,level\nBB_L2_001,L2\n")
+
+    def _blackbox_manifest_cases(self) -> list[dict[str, object]]:
+        cases: list[dict[str, object]] = []
+        for case_id, level in (
+            ("BB_L0_001", "L0"),
+            ("BB_L0_002", "L0"),
+            ("BB_L1_001", "L1"),
+            ("BB_L2_001", "L2"),
+        ):
+            cases.append(
+                {"case_id": case_id, "level": level, "required": True, "accepted_routes": ["st_cpp"]}
+            )
+        return cases
+
 
 if __name__ == "__main__":
     unittest.main()

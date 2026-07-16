@@ -14,7 +14,11 @@
   ],
   "agents": [
     "./agents/ascendc-ops-architect.md",
-    "./agents/ascendc-ops-developer.md",
-    "./agents/ascendc-ops-tester.md"
+    "./agents/ascendc-ops-spec-reviewer.md",
+    "./agents/ascendc-ops-designer.md",
+    "./agents/ascendc-ops-design-reviewer.md",
+    "./agents/ascendc-ops-tester.md",
+    "./agents/ascendc-ops-test-design-reviewer.md",
+    "./agents/ascendc-ops-developer.md"
   ]
 }
