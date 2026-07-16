@@ -107,9 +107,109 @@ safe_install_file() {
 BRAND="cannbot"
 VERSION="1.0.0"
 
-ASC_DEVKIT_COMMIT="31f3ab38"
-ASC_DEVKIT_URL="https://gitcode.com/cann/asc-devkit.git"
-CANN_SAMPLES_URL="https://gitcode.com/cann/cann-samples.git"
+# ============================================================
+# Third-party Repository Registry
+# ============================================================
+# Format: "name|url|ref|update_strategy|post_hook"
+#   name: repo name (used in --{name} option and DIR variable)
+#   url: git clone URL
+#   ref: branch/tag/commit to checkout (empty = no checkout)
+#   update_strategy: "fetch_merge" | "pull" | "pull_rebase"
+#   post_hook: function to call after setup (empty = none)
+REPO_REGISTRY=(
+    "asc-devkit|https://gitcode.com/cann/asc-devkit.git|31f3ab38|fetch_merge|post_setup_asc_devkit"
+    "cann-samples|https://gitcode.com/cann/cann-samples.git||pull|"
+    "ops-tensor|https://gitcode.com/cann/ops-tensor.git||pull|"
+)
+
+# Post-setup hook for asc-devkit: clean markdown files
+post_setup_asc_devkit() {
+    local repo_dir="$1"
+    CLEAN_SCRIPT="$SHARED_SKILL_ROOT/ascendc-docs-search/scripts/clean_markdown.py"
+    if [ -f "$CLEAN_SCRIPT" ]; then
+        python3 "$CLEAN_SCRIPT" --dir "$repo_dir" --no-backup --quiet > /dev/null 2>&1 \
+            || warn "markdown cleanup failed"
+    else
+        warn "clean_markdown.py not found, skipping"
+    fi
+}
+
+# Setup a third-party repository
+# $1 = repo name  $2 = url  $3 = ref  $4 = update_strategy  $5 = post_hook  $6 = local_path (optional)
+setup_repo() {
+    local name="$1"
+    local url="$2"
+    local ref="$3"
+    local strategy="$4"
+    local post_hook="$5"
+    local local_path="$6"
+    
+    local repo_dir="$CANNBOT_MID_DIR/$name"
+    
+    # Use local path if provided
+    if [ -n "$local_path" ]; then
+        validate_path "$local_path" "--$name"
+        rm -rf "$repo_dir"
+        ln -sfn "$(realpath "$local_path")" "$repo_dir"
+        ok "$name → $(realpath "$local_path") (local, linked)"
+        
+        # Run post-hook if specified
+        if [ -n "$post_hook" ] && type "$post_hook" >/dev/null 2>&1; then
+            "$post_hook" "$repo_dir"
+        fi
+        return 0
+    fi
+    
+    # Update existing repo
+    if [ -d "$repo_dir/.git" ]; then
+        cd "$repo_dir"
+        git checkout . 2>/dev/null || true
+        
+        case "$strategy" in
+            fetch_merge)
+                git fetch --quiet 2>/dev/null || true
+                if [ -n "$ref" ]; then
+                    git checkout --quiet "$ref" 2>/dev/null || warn "checkout $ref failed, using existing"
+                fi
+                ;;
+            pull)
+                git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
+                ;;
+            pull_rebase)
+                git pull --quiet --rebase 2>/dev/null || warn "git pull --rebase failed, using existing version"
+                ;;
+        esac
+        
+        cd "$SCRIPT_DIR"
+        if [ -n "$ref" ]; then
+            ok "$name updated (@$ref)"
+        else
+            ok "$name updated"
+        fi
+    else
+        # Clone new repo
+        local clone_opts=""
+        [ "$strategy" = "pull" ] && clone_opts="--depth 1"
+        
+        if git clone --quiet $clone_opts "$url" "$repo_dir" 2>/dev/null; then
+            if [ -n "$ref" ]; then
+                cd "$repo_dir" && git checkout --quiet "$ref" 2>/dev/null || warn "checkout $ref failed"
+                cd "$SCRIPT_DIR"
+                ok "$name cloned (@$ref)"
+            else
+                ok "$name cloned"
+            fi
+        else
+            warn "git clone failed, skipping $name"
+            return 0
+        fi
+    fi
+    
+    # Run post-hook if specified
+    if [ -n "$post_hook" ] && type "$post_hook" >/dev/null 2>&1; then
+        "$post_hook" "$repo_dir"
+    fi
+}
 
 # --- Paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -145,21 +245,22 @@ Usage: init.sh [level] [tool] [install_path] [options]
 
 Arguments:
   level        - 安装级别: "project" (默认) 或 "global"
-  tool         - (保留兼容) 仅支持 "opencode"，传入其他值会报错
+  tool         - 目标工具 (目前仅支持 "opencode")
   install_path - project 级安装目录 (默认: 当前工作目录)
 
 Options:
   --override <dir>        - 子仓覆写根目录：等价于 --override-skills <dir>/skills
   --override-skills <dir> - 用 <dir> 下的 skill 覆盖已链接的同名 skill（基类没有的则新增）
-  --asc-devkit <path>    - 使用本地已 clone 的 asc-devkit 仓（直接链接，不再 clone）
-  --cann-samples <path>  - 使用本地已 clone 的 cann-samples 仓（直接链接，不再 clone）
-  --help                 - 显示本帮助
+  --repo <name>:<path>    - 使用本地已 clone 的第三方仓（直接链接，不再 clone）
+                            可多次指定，如：--repo asc-devkit:... --repo cann-samples:...
+                            支持的仓库名：asc-devkit / cann-samples / ops-tensor
+  --help                  - 显示本帮助
 
 Examples:
   init.sh                                  # project 级
   init.sh global                           # global 级
   init.sh project /path/to/proj            # 指定安装目录
-  init.sh --asc-devkit ~/repos/asc-devkit --cann-samples ~/repos/cann-samples
+  init.sh --repo asc-devkit:~/repos/asc-devkit --repo cann-samples:~/repos/cann-samples
   init.sh project /path/to/repo --override /path/to/repo/agent
 
 Installation paths:
@@ -177,10 +278,21 @@ EOF
 LEVEL="project"
 TOOL="opencode"   # 仅支持 opencode
 INSTALL_PATH=""
-ASC_DEVKIT_LOCAL=""
-CANN_SAMPLES_LOCAL=""
 OVERRIDE_SKILL_DIR=""
 OVERRIDE_ROOT=""
+
+# Local path overrides for registered repos, keyed by repo name.
+declare -A REPO_LOCAL
+
+# Check whether a name is a registered repo (returns 0 if yes)
+is_registered_repo() {
+    local target="$1"
+    local entry
+    for entry in "${REPO_REGISTRY[@]}"; do
+        [ "${entry%%|*}" = "$target" ] && return 0
+    done
+    return 1
+}
 
 POSITIONAL=()
 while [ $# -gt 0 ]; do
@@ -190,10 +302,37 @@ while [ $# -gt 0 ]; do
         --override=*)       OVERRIDE_ROOT="${1#*=}"; shift; continue ;;
         --override-skills)   OVERRIDE_SKILL_DIR="$2"; shift 2; continue ;;
         --override-skills=*) OVERRIDE_SKILL_DIR="${1#*=}"; shift; continue ;;
-        --asc-devkit)    ASC_DEVKIT_LOCAL="$2"; shift 2; continue ;;
-        --asc-devkit=*)  ASC_DEVKIT_LOCAL="${1#*=}"; shift; continue ;;
-        --cann-samples)  CANN_SAMPLES_LOCAL="$2"; shift 2; continue ;;
-        --cann-samples=*) CANN_SAMPLES_LOCAL="${1#*=}"; shift; continue ;;
+        --repo)
+            local_arg="$2"; shift 2
+            if [[ "$local_arg" != *:* ]]; then
+                err "--repo format invalid: must be name:/path, got: $local_arg"
+                exit 1
+            fi
+            local_name="${local_arg%%:*}"
+            local_path="${local_arg#*:}"
+            if ! is_registered_repo "$local_name"; then
+                err "--repo unknown name: $local_name (valid: ${REPO_REGISTRY[*]%%|*})"
+                exit 1
+            fi
+            REPO_LOCAL["$local_name"]="$local_path"
+            continue ;;
+        --repo=*)
+            local_arg="${1#*=}"; shift
+            if [[ "$local_arg" != *:* ]]; then
+                err "--repo format invalid: must be name:/path, got: $local_arg"
+                exit 1
+            fi
+            local_name="${local_arg%%:*}"
+            local_path="${local_arg#*:}"
+            if ! is_registered_repo "$local_name"; then
+                err "--repo unknown name: $local_name (valid: ${REPO_REGISTRY[*]%%|*})"
+                exit 1
+            fi
+            REPO_LOCAL["$local_name"]="$local_path"
+            continue ;;
+        --*)
+            err "unknown option: $1"
+            exit 1 ;;
         global|project)  LEVEL="$1"; shift; continue ;;
         opencode)        # 兼容旧用法，仅支持 opencode
                         shift; continue ;;
@@ -341,13 +480,13 @@ collect_agents
 collect_skills
 
 # --- Step 1: Create .cannbot directory ---
-step "[1/8] Creating .cannbot directory..."
+step "[1/6] Creating .cannbot directory..."
 mkdir -p "$CANNBOT_MID_DIR"
 ok ".cannbot → $CANNBOT_MID_DIR"
 echo ""
 
 # --- Step 2: Install config file (AGENTS.md) ---
-step "[2/8] Installing configuration..."
+step "[2/6] Installing configuration..."
 mkdir -p "$CONFIG_ROOT"
 
 config_src="$PLUGIN_ROOT/AGENTS.md"
@@ -369,7 +508,7 @@ fi
 echo ""
 
 # --- Step 3: Link agents (flattened; architect / developer / qa) ---
-step "[3/8] Linking agents..."
+step "[3/6] Linking agents..."
 AGENTS_LINK_DIR="$CANNBOT_DIR/agents"
 rm -rf "$AGENTS_LINK_DIR"
 mkdir -p "$AGENTS_LINK_DIR"
@@ -387,7 +526,7 @@ ok "Agents: $agent_count linked (flattened)"
 echo ""
 
 # --- Step 4: Link skills registered by agents ---
-step "[4/8] Linking skills..."
+step "[4/6] Linking skills..."
 SKILLS_LINK_DIR="$CANNBOT_DIR/skills"
 rm -rf "$SKILLS_LINK_DIR"
 mkdir -p "$SKILLS_LINK_DIR"
@@ -447,89 +586,44 @@ else
 fi
 echo ""
 
-# --- Step 5: Setup asc-devkit (into .cannbot/) ---
-step "[5/8] Setting up asc-devkit..."
-ASC_DEVKIT_DIR="$CANNBOT_MID_DIR/asc-devkit"
-if [ -n "$ASC_DEVKIT_LOCAL" ]; then
-    validate_path "$ASC_DEVKIT_LOCAL" "--asc-devkit"
-    rm -rf "$ASC_DEVKIT_DIR"
-    ln -sfn "$(realpath "$ASC_DEVKIT_LOCAL")" "$ASC_DEVKIT_DIR"
-    ok "asc-devkit → $(realpath "$ASC_DEVKIT_LOCAL") (local, linked)"
-elif [ -d "$ASC_DEVKIT_DIR/.git" ]; then
-    cd "$ASC_DEVKIT_DIR"
-    git checkout . 2>/dev/null || true
-    git fetch --quiet 2>/dev/null || true
-    git checkout --quiet "$ASC_DEVKIT_COMMIT" 2>/dev/null || warn "checkout $ASC_DEVKIT_COMMIT failed, using existing"
-    cd "$SCRIPT_DIR"
-    ok "asc-devkit updated (@$ASC_DEVKIT_COMMIT)"
-else
-    if git clone --quiet "$ASC_DEVKIT_URL" "$ASC_DEVKIT_DIR" 2>/dev/null; then
-        cd "$ASC_DEVKIT_DIR" && git checkout --quiet "$ASC_DEVKIT_COMMIT" 2>/dev/null || warn "checkout $ASC_DEVKIT_COMMIT failed"
-        cd "$SCRIPT_DIR"
-        ok "asc-devkit cloned (@$ASC_DEVKIT_COMMIT)"
-    else
-        warn "git clone failed, skipping asc-devkit"
-    fi
-fi
-
-# Clean markdown for docs search
-if [ -d "$ASC_DEVKIT_DIR" ]; then
-    CLEAN_SCRIPT="$SHARED_SKILL_ROOT/ascendc-docs-search/scripts/clean_markdown.py"
-    if [ -f "$CLEAN_SCRIPT" ]; then
-        python3 "$CLEAN_SCRIPT" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 \
-            || warn "markdown cleanup failed"
-    else
-        warn "clean_markdown.py not found, skipping"
-    fi
-fi
+# --- Step 5: Setup third-party repositories ---
+step "[5/6] Setting up third-party repositories..."
+repo_total=${#REPO_REGISTRY[@]}
+repo_idx=1
+for entry in "${REPO_REGISTRY[@]}"; do
+    IFS='|' read -r name url ref strategy post_hook <<< "$entry"
+    
+    info "($repo_idx/$repo_total) $name"
+    
+    # Get local path override if provided
+    local_path="${REPO_LOCAL[$name]:-}"
+    
+    # Setup the repo
+    setup_repo "$name" "$url" "$ref" "$strategy" "$post_hook" "$local_path"
+    
+    # Export {NAME}_DIR variable for downstream use
+    repo_dir="$CANNBOT_MID_DIR/$name"
+    name_upper=$(echo "$name" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+    eval "${name_upper}_DIR=\"$repo_dir\""
+    
+    repo_idx=$((repo_idx + 1))
+done
 echo ""
 
-# --- Step 6: Setup cann-samples (into .cannbot/) ---
-step "[6/8] Setting up cann-samples..."
-CANN_SAMPLES_DIR="$CANNBOT_MID_DIR/cann-samples"
-if [ -n "$CANN_SAMPLES_LOCAL" ]; then
-    validate_path "$CANN_SAMPLES_LOCAL" "--cann-samples"
-    rm -rf "$CANN_SAMPLES_DIR"
-    ln -sfn "$(realpath "$CANN_SAMPLES_LOCAL")" "$CANN_SAMPLES_DIR"
-    ok "cann-samples → $(realpath "$CANN_SAMPLES_LOCAL") (local, linked)"
-elif [ -d "$CANN_SAMPLES_DIR/.git" ]; then
-    cd "$CANN_SAMPLES_DIR"
-    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
-    cd "$SCRIPT_DIR"
-    ok "cann-samples updated"
-else
-    if git clone --quiet "$CANN_SAMPLES_URL" "$CANN_SAMPLES_DIR" 2>/dev/null; then
-        ok "cann-samples cloned"
-    else
-        warn "git clone failed, skipping cann-samples"
-    fi
-fi
-echo ""
-
-# --- Step 7: Setup ops-tensor (into .cannbot/) ---
-step "[7/8] Setting up ops-tensor..."
-OPS_TENSOR_DIR="$CANNBOT_MID_DIR/ops-tensor"
-
-if [ -d "$OPS_TENSOR_DIR/.git" ]; then
-    cd "$OPS_TENSOR_DIR"
-    git checkout . 2>/dev/null || true
-    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
-    cd "$SCRIPT_DIR"
-    ok "ops-tensor updated"
-else
-    if git clone --quiet --depth 1 https://gitcode.com/cann/ops-tensor.git "$OPS_TENSOR_DIR" 2>/dev/null; then
-        ok "ops-tensor cloned"
-    else
-        warn "git clone failed, skipping ops-tensor"
-    fi
-fi
-echo ""
-
-# --- Step 8: Generate manifest + health check ---
-step "[8/8] Generating manifest and running health check..."
+# --- Step 6: Generate manifest + health check ---
+step "[6/6] Generating manifest and running health check..."
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON=$(echo "$ALL_SKILLS" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 AGENTS_JSON=$(printf '%s\n' "${AGENT_FILES[@]}" | while read -r f; do [ -n "$f" ] && basename "$f" .md; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+
+# Build repo paths JSON from registry (key = {name}_dir with dashes → underscores)
+REPO_DIRS_JSON=""
+for entry in "${REPO_REGISTRY[@]}"; do
+    name="${entry%%|*}"
+    key="$(echo "$name" | tr '-' '_')_dir"
+    REPO_DIRS_JSON="${REPO_DIRS_JSON}  \"$key\": \"$CANNBOT_MID_DIR/$name\",
+"
+done
 
 cat > "$MANIFEST" << MANIFEST_EOF
 {
@@ -542,10 +636,7 @@ cat > "$MANIFEST" << MANIFEST_EOF
   "installed_agents": $AGENTS_JSON,
   "brand_dir": "$CONFIG_ROOT",
   "mid_dir": "$CANNBOT_MID_DIR",
-  "asc_devkit_dir": "$ASC_DEVKIT_DIR",
-  "cann_samples_dir": "$CANN_SAMPLES_DIR",
-  "ops_tensor_dir": "$OPS_TENSOR_DIR",
-  "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+${REPO_DIRS_JSON}  "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MANIFEST_EOF
 
@@ -564,9 +655,14 @@ for sub in skills agents; do
 done
 
 [ -d "$CANNBOT_MID_DIR" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .cannbot/ missing"; health_ok=false; }
-[ -d "$ASC_DEVKIT_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit not available"
-[ -d "$CANN_SAMPLES_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} cann-samples not available"
-[ -d "$OPS_TENSOR_DIR" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor not available"
+
+# Check all registered repos
+for entry in "${REPO_REGISTRY[@]}"; do
+    name="${entry%%|*}"
+    repo_dir="$CANNBOT_MID_DIR/$name"
+    [ -d "$repo_dir" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} $name not available"
+done
+
 [ -f "$config_target" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} $config_name missing"; health_ok=false; }
 [ -f "$MANIFEST" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }
 
