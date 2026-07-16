@@ -36,7 +36,7 @@
 | 0 | — | 环境信息文档 | `.cannbot/`（developer 写入） | CP0 |
 | CP0 | 环境信息文档 | 问卷 json + 确认结论 | `.cannbot/questionnaires/` + state.json | 1.1 |
 | 1.1 | 对话上下文、设计约束 | requirement.md | `.cannbot/` | CP1 → 1.2 |
-| CP1 | requirement.md | 确认/修改意见 | state.json | 1.2 或回退 1.1 |
+| CP1 | requirement.md | 确认/修改意见（需用户确认时附问卷 json） | state.json（问卷 json 落 questionnaires/） | 1.2 或回退 1.1 |
 | 1.2 | requirement.md | spec.yaml | `.cannbot/` | CP1' → 2.1/2.2 |
 | CP1' | spec.yaml | 确认/修改意见 | state.json | 2.1/2.2 或回退 1.2 |
 | 2.1 | spec.yaml | design/test-plan.md | `.cannbot/design/` | CP2.1 → 3.2 |
