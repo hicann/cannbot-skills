@@ -22,6 +22,7 @@ description: CUDA 应用迁移到 CANN 平台指南，仅用于用户自身合�
     - **缺失能力补兼容层，不堆到样例里**：遇到 `cann_runtime_compat.h` 没覆盖的能力，优先在 `assets/src` 下补兼容 API/适配函数，再让业务代码调用该 compat 接口。
     - **明确区分 Runtime 与算子**：`cudaMalloc/cudaMemcpy/cudaFree` 是 Runtime API，可由兼容层映射；`kernel<<<...>>>` 是 CUDA 编译器语法，代表设备侧算子/Kernel 执行，必须按用户目标选择处理方式。
     - **算子迁移选择权交给用户**：当源代码包含 `kernel<<<...>>>` 时，先确认用户是否希望把具体算子迁移为 Ascend C/SIMT 设备侧实现。用户选择“要转 / 需要真实 NPU 计算 / 需要性能验证”时，调用并遵循 `ops-lab/cuda2ascend-simt/SKILL.md`；用户选择“不转 / 只验证 Runtime API / 快速跑通”时，使用 `cudaCompatLaunchHostKernel()` 做 Host fallback，并明确记录这不是 NPU kernel 执行。
+    - **SIMT 编译模式硬约束**：当迁移后的 `.asc` 文件包含 `simt_api/asc_simt.h`，或使用 SIMT 内建变量（`blockIdx` / `threadIdx` / `blockDim`），或使用 CUDA 风格的 kernel launch 语法时，ASC 编译选项必须包含 `--enable-simt`。不要仅仅为了满足未开启 `--enable-simt` 时产生的编译器诊断，就给 SIMT kernel 添加 `__aicore__` 或 `__gm__`。
     - **每次迁移都要编译并运行最小验证**：不能只改代码不验证；如机器有坏卡或需指定设备，用环境变量如 `ASCEND_RT_VISIBLE_DEVICES` 限制可见设备。
 
 2. **直接迁移方式**：将 CUDA API 调用改写为 CANN Runtime API, 
@@ -240,6 +241,7 @@ kernel<<<grid, block, shared_mem, stream>>>(args);
 - 立即读取并遵循 `ops-lab/cuda2ascend-simt/SKILL.md`
 - 由 `cuda2ascend-simt` 负责 CUDA kernel body、device helper、launch policy、dtype/shape 分支、验证计划和降级门
 - 本技能只负责 host 侧 CUDA Runtime 到 CANN/兼容层的迁移边界，以及与算子工程的调用衔接
+- 若产物使用 Ascend C SIMT 单源 `.asc` 形态，生成 CMake/构建配置时必须为 ASC 编译添加 `--enable-simt`；如果缺少该选项，`__global__`、`blockIdx`、`threadIdx`、`blockDim` 等 SIMT 语法可能被编译器误按非 SIMT 语境诊断，不能据此盲目添加 `__aicore__` 或 `__gm__`
 - 不要用 `cudaCompatLaunchHostKernel()` 替代核心设备计算，除非用户在 `cuda2ascend-simt` 的降级门后明确接受该降级
 - README/报告必须说明算子是否真正运行在 Ascend 设备侧，以及验证硬件、构建命令、运行命令和结果
 
@@ -446,6 +448,7 @@ cmake .. -DCUDA_COMPAT_DEBUG=ON && make
 | API 返回 cudaErrorNotSupported | 使用了不支持 API   | 查阅支持表，使用替代方案        |
 | IPC 传递失败                   | 使用 UNIX socket   | 改用共享内存传递 opaque handle  |
 | Kernel 无法运行                | CUDA Kernel 未迁移 | 编写 Ascend C Kernel            |
+| SIMT `.asc` 编译报 `__global__`、`blockIdx`、`threadIdx`、`blockDim`、`__aicore__` 或 `__gm__` 相关错误 | ASC 编译未开启 SIMT 模式或未对齐可运行 SIMT reference | 先检查 CMake/编译命令是否包含 `--enable-simt`，再对齐 `ops-lab/cuda2ascend-simt` 中可运行 reference；不要先给 SIMT kernel 添加 `__aicore__` 或 `__gm__` |
 
 ---
 

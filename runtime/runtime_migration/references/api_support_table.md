@@ -60,16 +60,14 @@
 | `cudaMemPoolDestroy()`          | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolSetAttribute()`     | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolGetAttribute()`     | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolMalloc()`           | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolFree()`             | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolTrimTo()`           | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolSetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolGetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaDeviceGetDefaultMemPool()` | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaDeviceSetMemPool()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaDeviceGetMemPool()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMallocAsync()`             | ⚠️ Mock | CANN 不支持异步内存分配    |
-| `cudaFreeAsync()`               | ⚠️ Mock | CANN 不支持异步内存释放    |
+| `cudaMallocAsync()`             | ⚠️ Mock | CANN 不支持异步内存分配，返回 cudaErrorNotSupported    |
+| `cudaFreeAsync()`               | ⚠️ Mock | CANN 不支持异步内存释放，返回 cudaErrorNotSupported    |
 | `cudaMemPrefetchAsync()`        | ⚠️ Mock | CANN 自动处理数据迁移      |
 
 ## 四、流管理 API
@@ -152,7 +150,7 @@
 | `cudaGetLastError()`    | `aclrtGetLastError()`    |    ✅    | 获取最后的错误 |
 | `cudaPeekAtLastError()` | `aclrtPeekAtLastError()` |    ✅    | 查看最后的错误 |
 | `cudaGetErrorName()`    | 内部实现                 |    ✅    | 获取错误名称   |
-| `cudaGetErrorString()`  | 内部实现                 |    ✅    | 获取错误描述   |
+| `cudaGetErrorString()`  | `aclGetRecentErrMsg()`  |    ✅    | 获取最近一次 ACL 错误描述；必要时结合本地错误文本包装完成 CUDA 错误字符串映射 |
 
 ## 十一、CUDA Driver VMM API
 

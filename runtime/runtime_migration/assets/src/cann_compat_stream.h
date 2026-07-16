@@ -69,6 +69,7 @@ static inline cudaError_t cudaStreamQuery(cudaStream_t stream) {
     }else if(status == ACL_STREAM_STATUS_NOT_READY){
         return cudaErrorNotReady;
     }
+    return cudaErrorUnknown;
 }
 
 
