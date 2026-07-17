@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -1173,15 +1174,23 @@ def _run_cann_bench_evaluation(sandbox_path: Path, inputs: _EvalInputs) -> Dict[
     cmd = _build_cann_bench_cmd(template_dir, reports_dir, inputs)
     logger.info("[CANN_BENCH %s] Running: %s", inputs.eval_id, " ".join(cmd))
 
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            timeout=600, cwd=str(CANN_BENCH_PATH),
-        )
-    except subprocess.TimeoutExpired:
-        return {"status": "fail", "score": 0, "dimensions": {},
-                "reason": "cann-bench evaluation timed out (600s)"}
+    # 跨进程文件锁：串行化 pip install + import cann_bench，避免 xdist 并行竞态
+    # 所有 cann_bench eval 共享同一锁文件，确保同时只有一个 worker 操作全局 Python 环境
+    cann_bench_install_lock = "/tmp/cann_bench_install.lock"
+    proc = None
+    with open(cann_bench_install_lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True,
+                encoding='utf-8', errors='replace',
+                timeout=600, cwd=str(CANN_BENCH_PATH),
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "fail", "score": 0, "dimensions": {},
+                    "reason": "cann-bench evaluation timed out (600s)"}
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
     if proc.returncode != 0:
         stderr_tail = proc.stderr[-2000:] if proc.stderr else "(no stderr)"
