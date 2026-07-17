@@ -124,8 +124,16 @@ INCLUDED_AGENT_PATTERN="ascendc-ops-*"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_NAME="$(basename "$SCRIPT_DIR")"
 PLUGIN_ROOT="$SCRIPT_DIR"
-SHARED_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
-INFRA_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../infra" && pwd)"
+if [ -d "$SCRIPT_DIR/../../ops" ]; then
+    SHARED_SKILL_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
+else
+    SHARED_SKILL_ROOT=""
+fi
+if [ -d "$PLUGIN_ROOT/../../infra" ]; then
+    INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
+else
+    INFRA_SKILL_ROOT=""
+fi
 LOCAL_AGENT_ROOT="$SCRIPT_DIR/agents"
 
 show_banner() {

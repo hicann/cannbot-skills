@@ -96,7 +96,7 @@ Examples:
 Installation paths:
   OpenCode: .opencode/skills/ + AGENTS.md  (auto-discovered)
   Claude:   .claude/skills/ + CLAUDE.md    (per-item symlinks auto-created)
-  Trae:     .trae/skills/ + CLAUDE.md      (project-level only)
+  Trae:     .trae/skills/ + AGENTS.md      (project-level only)
   Cursor:   .cursor/skills/ + AGENTS.md    (auto-discovered)
   Copilot:  .github/skills/ + AGENTS.md    (project-level)
             ~/.copilot/skills/ + AGENTS.md (global)
@@ -229,7 +229,7 @@ else
 fi
 
 # Determine target md filename based on tool
-if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
     TARGET_MD_NAME="AGENTS.md"
 else
     TARGET_MD_NAME="CLAUDE.md"
@@ -451,7 +451,7 @@ MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON="[]"
 if [ -d "$BRAND_DIR/skills" ]; then
   SKILLS_JSON=$(ls -d "$BRAND_DIR/skills"/* 2>/dev/null | while read d; do
-    basename "$d"
+    echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 

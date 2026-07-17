@@ -47,7 +47,11 @@ INCLUDED_AGENT_PATTERN="model-infer-*"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
-MODEL_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../model" && pwd)"
+if [ -d "$PLUGIN_ROOT/../../model" ]; then
+    MODEL_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../model" && pwd)"
+else
+    MODEL_SKILL_ROOT=""
+fi
 
 show_help() {
     cat << EOF
@@ -57,7 +61,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -69,6 +73,7 @@ Examples:
   init.sh project trae
   init.sh project cursor
   init.sh project copilot
+  init.sh project codearts
   init.sh global copilot
   init.sh global claude
   init.sh global cursor
@@ -84,7 +89,7 @@ for arg in "$@"; do
     case "$arg" in
         --help) show_help; exit 0 ;;
         global|project) LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot) TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot|codearts) TOOL="$arg" ;;
     esac
 done
 
@@ -92,7 +97,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor|copilot) ;;
+        --help|global|project|opencode|claude|trae|cursor|copilot|codearts) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -111,6 +116,8 @@ if [ "$LEVEL" = "global" ]; then
         CONFIG_ROOT="$HOME/.cursor"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$HOME/.copilot"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -134,6 +141,8 @@ else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.codeartsdoer"
     else
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.claude"
     fi
@@ -212,20 +221,20 @@ install_config() {
     local config_src="$PLUGIN_ROOT/AGENTS.md"
     local config_target
     if [ "$LEVEL" = "project" ]; then
-        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
             config_target="$CONFIG_ROOT_BASE/AGENTS.md"
         else
             config_target="$CONFIG_ROOT_BASE/CLAUDE.md"
         fi
     else
-        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; then
+        if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
             config_target="$CONFIG_ROOT/AGENTS.md"
         else
             config_target="$CONFIG_ROOT/CLAUDE.md"
         fi
     fi
 
-    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$CONFIG_ROOT_BASE" ]; then
+    if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$CONFIG_ROOT_BASE" ]; then
         ok "$(basename "$config_target") already in current directory"
     else
         ln -sf "$config_src" "$config_target"
@@ -296,7 +305,7 @@ write_manifest() {
     local manifest="$CONFIG_ROOT/cannbot-manifest.json"
     local skills_json agents_json
     skills_json=$(printf '%s\n' $INCLUDED_SKILLS | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
-    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'model-infer-*.md' -exec basename {} \; | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'model-infer-*.md' -printf '%f\n' | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
     cat > "$manifest" << EOF
 {
   "brand": "CANNBot",
@@ -404,7 +413,10 @@ echo ""
 echo -e "  ${GREEN}${BOLD}✓ model-infer-sota-approach installed successfully!${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
-if [ "$TOOL" = "copilot" ]; then
+if [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动"
+  echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}在已有 baseline 上继续优化 <model_name> 模型的 NPU 推理性能${NC}"
+elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动"
   echo -e "  ${CYAN}2.${NC} 输入：${GREEN}${BOLD}在已有 baseline 上继续优化 <model_name> 模型的 NPU 推理性能${NC}"
 else

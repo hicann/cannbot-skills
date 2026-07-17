@@ -43,8 +43,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
-SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
-INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
+if [ -d "$PLUGIN_ROOT/../../ops" ]; then
+    SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
+else
+    SHARED_SKILL_ROOT=""
+fi
+if [ -d "$PLUGIN_ROOT/../../infra" ]; then
+    INFRA_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../infra" && pwd)"
+else
+    INFRA_SKILL_ROOT=""
+fi
 
 show_help() {
     cat << EOF
@@ -217,7 +225,7 @@ write_manifest() {
     local manifest="$CONFIG_ROOT/cannbot-manifest.json"
     local skills_json agents_json
     skills_json=$(printf '%s\n' $INCLUDED_SKILLS | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
-    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'ops-direct-invoke-flash-*.md' -exec basename {} \; | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'ops-direct-invoke-flash-*.md' -printf '%f\n' | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
     cat > "$manifest" << EOF
 {
   "brand": "CANNBot",

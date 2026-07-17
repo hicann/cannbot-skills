@@ -32,12 +32,12 @@ bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
 
-### OpenCode / Trae / Cursor / Copilot
+### OpenCode / Trae / Cursor / Copilot / CodeArts
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/model-infer-sota-approach
-bash init.sh project opencode   # 或 trae / cursor / copilot；global 同理
+bash init.sh project opencode   # 或 trae / cursor / copilot / codearts；global 同理
 ```
 
 `init.sh` 会安装 skills/workflows、写 manifest，并把 `cann-recipes-infer` 参考仓 clone 到插件目录，使工作流里 `cann-recipes-infer/...` 前缀的路径可解析。
@@ -122,6 +122,6 @@ cd cannbot-skills/plugins-official/model-infer-sota-approach && bash init.sh
 ## 总结
 
 1. 本 plugin 在 baseline 之上做 profiling 驱动的探索式优化，通过 `workflows/sota-approach-workflow.md` 编排 8 步流程
-2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor/Copilot 用户用 `init.sh`
+2. Claude Code 用户用 `/plugin install` 一键安装，OpenCode/Trae/Cursor/Copilot/CodeArts 用户用 `init.sh`
 3. 没有 baseline 先用 `model-infer-optimize`，两者前后衔接、互补不替代
 4. 一切性能判断以 perf-breakdown 报告为准，Plan 状态机驱动收敛，支持跨上下文接力

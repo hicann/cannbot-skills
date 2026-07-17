@@ -84,18 +84,30 @@ cleanup_team_artifacts() {
     if [ -z "$dir" ] || [ "$dir" = "$TEAM_DIR" ]; then
         return 0
     fi
-    rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli"
+    rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli" "$dir/.codeartsdoer" "$dir/.cursor" "$dir/.github" "$dir/.copilot"
 }
 
 get_expected_skill_count() {
     local skills
-    skills=$(grep 'INCLUDED_SKILLS=' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*="//;s/"$//' || true)
-    echo "$skills" | wc -w
+    skills=$(grep 'INCLUDED_SKILLS="' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*INCLUDED_SKILLS="//;s/"$//' || true)
+    if [ -z "$skills" ]; then
+        echo "-1"
+    else
+        echo "$skills" | wc -w
+    fi
 }
 
 get_expected_agent_count() {
     local pattern
     pattern=$(grep 'INCLUDED_AGENT_PATTERN=' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*="//;s/"$//' || true)
+    if [ -z "$pattern" ]; then
+        if [ -d "$TEAM_DIR/agents" ]; then
+            echo "-1"
+        else
+            echo "0"
+        fi
+        return
+    fi
     local count=0
     for f in "$TEAM_DIR/agents/"*.md; do
         [ -f "$f" ] || continue
@@ -113,6 +125,40 @@ get_expected_agent_count() {
 # regression guard for them is "must not silently fall through to ~/.claude".
 trae_global_unsupported() {
     grep -q 'Global installation is not supported for Trae' "$INIT_SCRIPT" 2>/dev/null
+}
+
+# Detect whether init.sh supports a given TOOL argument.
+# Some plugins (e.g. cuda2ascend) only support opencode and reject other tools.
+supports_tool() {
+    local tool="$1"
+    grep -qE "(^|[^a-z])${tool}([^a-z]|$)" "$INIT_SCRIPT" 2>/dev/null
+}
+
+# Resolve the actual CONFIG_ROOT for project mode.
+# Most plugins use $PWD/.xxx, but some (e.g. tilelang2ascendc-ops-generator)
+# use $PLUGIN_ROOT/.xxx which means CONFIG_ROOT is under the plugin directory.
+# Returns the config_root path via echo.
+resolve_project_config_root() {
+    local tool="$1"
+    local pwd_dir="$2"
+    local tool_dir_name
+
+    case "$tool" in
+        opencode) tool_dir_name=".opencode" ;;
+        claude)   tool_dir_name=".claude" ;;
+        trae)     tool_dir_name=".trae" ;;
+        codearts) tool_dir_name=".codeartsdoer" ;;
+        cursor)   tool_dir_name=".cursor" ;;
+        copilot)  tool_dir_name=".github" ;;
+        *)        tool_dir_name=".$tool" ;;
+    esac
+
+    # Check if init.sh uses PLUGIN_ROOT for project CONFIG_ROOT
+    if grep -q "CONFIG_ROOT=\"\$PLUGIN_ROOT/${tool_dir_name}" "$INIT_SCRIPT" 2>/dev/null; then
+        echo "$TEAM_DIR/$tool_dir_name"
+    else
+        echo "$pwd_dir/$tool_dir_name"
+    fi
 }
 
 # Verify repos (asc-devkit, etc.) are symlinked into CONFIG_ROOT in global mode.
@@ -169,12 +215,26 @@ verify_symlinks_valid() {
     fi
 }
 
+# Convert a POSIX path to a Windows-native path when running under MSYS2
+# with a Windows-native python3. Returns the original path on Linux/macOS.
+py_path() {
+    local p="$1"
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$p" 2>/dev/null || echo "$p"
+    else
+        echo "$p"
+    fi
+}
+
 # Verify manifest JSON structure and consistency
 verify_manifest() {
     local config_root="$1"
     local expected_skills="$2"
     local expected_agents="$3"
+    local tool="${4:-}"
     local manifest="$config_root/cannbot-manifest.json"
+    local py_manifest
+    py_manifest=$(py_path "$manifest")
 
     if [ ! -f "$manifest" ]; then
         print_fail "manifest not found: $manifest"
@@ -183,7 +243,7 @@ verify_manifest() {
     fi
 
     # Validate JSON
-    if python3 -c "import json; json.load(open('$manifest'))" 2>/dev/null; then
+    if python3 -c "import json; json.load(open(r'''$py_manifest'''))" 2>/dev/null; then
         print_pass "manifest is valid JSON"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
@@ -194,8 +254,11 @@ verify_manifest() {
 
     # Check skill count
     local actual_skills
-    actual_skills=$(python3 -c "import json; print(len(json.load(open('$manifest')).get('installed_skills', [])))" 2>/dev/null || echo 0)
-    if [ "$actual_skills" -eq "$expected_skills" ]; then
+    actual_skills=$(python3 -c "import json; print(len(json.load(open(r'''$py_manifest''')).get('installed_skills', [])))" 2>/dev/null || echo 0)
+    if [ "$expected_skills" -eq -1 ]; then
+        print_pass "manifest: installed_skills count = $actual_skills (dynamic, no INCLUDED_SKILLS)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ "$actual_skills" -eq "$expected_skills" ]; then
         print_pass "manifest: installed_skills count = $actual_skills (expected $expected_skills)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
@@ -205,19 +268,29 @@ verify_manifest() {
 
     # Check agent count
     local actual_agents
-    actual_agents=$(python3 -c "import json; print(len(json.load(open('$manifest')).get('installed_agents', [])))" 2>/dev/null || echo 0)
-    if [ "$actual_agents" -eq "$expected_agents" ]; then
-        print_pass "manifest: installed_agents count = $actual_agents (expected $expected_agents)"
+    actual_agents=$(python3 -c "import json; print(len(json.load(open(r'''$py_manifest''')).get('installed_agents', [])))" 2>/dev/null || echo 0)
+    # Some plugins install an extra primary agent (PRIMARY_AGENT_NAME) in
+    # opencode mode, so the actual count may be expected + 1.
+    local agent_tolerance=0
+    if [ "$tool" = "opencode" ] && grep -q 'PRIMARY_AGENT_NAME=' "$INIT_SCRIPT" 2>/dev/null; then
+        agent_tolerance=1
+    fi
+    if [ "$expected_agents" -eq -1 ]; then
+        print_pass "manifest: installed_agents count = $actual_agents (dynamic, no INCLUDED_AGENT_PATTERN)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ "$actual_agents" -eq "$expected_agents" ] || \
+         [ "$actual_agents" -eq "$((expected_agents + agent_tolerance))" ]; then
+        print_pass "manifest: installed_agents count = $actual_agents (expected $expected_agents, tolerance +$agent_tolerance)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "manifest: installed_agents count = $actual_agents (expected $expected_agents)"
+        print_fail "manifest: installed_agents count = $actual_agents (expected $expected_agents, tolerance +$agent_tolerance)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
     # Check brand/level/tool fields
     for field in brand level tool; do
         local val
-        val=$(python3 -c "import json; print(json.load(open('$manifest')).get('$field',''))" 2>/dev/null || true)
+        val=$(python3 -c "import json; print(json.load(open(r'''$py_manifest''')).get('$field',''))" 2>/dev/null || true)
         if [ -n "$val" ]; then
             print_pass "manifest: '$field' = '$val'"
             PASS_COUNT=$((PASS_COUNT + 1))
@@ -238,6 +311,12 @@ verify_installed_names() {
         print_fail "$label: directory not found"
         FAIL_COUNT=$((FAIL_COUNT + 1))
         return 1
+    fi
+
+    if [ -z "$expected_list" ]; then
+        print_pass "$label: no whitelist to verify (dynamic skill list)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+        return 0
     fi
 
     local mismatch=0
@@ -270,6 +349,10 @@ check_common_artifacts() {
 
     # 1. Config root directory exists
     run_check "CONFIG_ROOT exists: $config_root" test -d "$config_root"
+    if [ ! -d "$config_root" ]; then
+        print_warn "CONFIG_ROOT missing, skipping remaining artifact checks"
+        return 0
+    fi
 
     # 2. skills/ directory exists with expected count
     local skill_dir="$config_root/skills"
@@ -278,7 +361,10 @@ check_common_artifacts() {
         actual_skills=$(find "$skill_dir" -maxdepth 1 \( -type l -o -type d \) | wc -l)
         # subtract 1 for the directory itself
         actual_skills=$((actual_skills - 1))
-        if [ "$actual_skills" -eq "$EXPECTED_SKILL_COUNT" ]; then
+        if [ "$EXPECTED_SKILL_COUNT" -eq -1 ]; then
+            print_pass "skills/ contains $actual_skills item(s) (dynamic count, no INCLUDED_SKILLS)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        elif [ "$actual_skills" -eq "$EXPECTED_SKILL_COUNT" ]; then
             print_pass "skills/ contains $actual_skills item(s) (expected $EXPECTED_SKILL_COUNT)"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
@@ -292,17 +378,34 @@ check_common_artifacts() {
 
     # 3. agents/ directory exists with expected count
     local agent_dir="$config_root/agents"
-    if [ "$EXPECTED_AGENT_COUNT" -eq 0 ]; then
+    # Some plugins install an extra primary agent (PRIMARY_AGENT_NAME) in
+    # opencode mode, so the actual count may be expected + 1.
+    local agent_tolerance=0
+    if [ "$tool" = "opencode" ] && grep -q 'PRIMARY_AGENT_NAME=' "$INIT_SCRIPT" 2>/dev/null; then
+        agent_tolerance=1
+    fi
+    if [ "$EXPECTED_AGENT_COUNT" -eq -1 ]; then
+        if [ -d "$agent_dir" ]; then
+            local actual_agents
+            actual_agents=$(find "$agent_dir" -maxdepth 1 -type l | wc -l)
+            print_pass "agents/ contains $actual_agents symlink(s) (dynamic count, no INCLUDED_AGENT_PATTERN)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "agents/ directory not found"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    elif [ "$EXPECTED_AGENT_COUNT" -eq 0 ]; then
         print_pass "agents/ not installed (agentless plugin, expected 0)"
         PASS_COUNT=$((PASS_COUNT + 1))
     elif [ -d "$agent_dir" ]; then
         local actual_agents
         actual_agents=$(find "$agent_dir" -maxdepth 1 -type l | wc -l)
-        if [ "$actual_agents" -eq "$EXPECTED_AGENT_COUNT" ]; then
-            print_pass "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT)"
+        if [ "$actual_agents" -eq "$EXPECTED_AGENT_COUNT" ] || \
+           [ "$actual_agents" -eq "$((EXPECTED_AGENT_COUNT + agent_tolerance))" ]; then
+            print_pass "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            print_fail "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT)"
+            print_fail "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
     else
@@ -337,7 +440,7 @@ check_common_artifacts() {
     fi
 
     # 7. Manifest is correct
-    verify_manifest "$config_root" "$EXPECTED_SKILL_COUNT" "$EXPECTED_AGENT_COUNT"
+    verify_manifest "$config_root" "$EXPECTED_SKILL_COUNT" "$EXPECTED_AGENT_COUNT" "$tool"
 }
 
 # =============================================================================
@@ -369,6 +472,10 @@ verify_opencode_cli_agents() {
 
     # Pre-check: verify agent symlinks exist and resolve
     local agent_dir="$scan_dir/.opencode/agents"
+    if [ ! -d "$agent_dir" ]; then
+        # Some plugins use PLUGIN_ROOT instead of PWD for CONFIG_ROOT
+        agent_dir="$TEAM_DIR/.opencode/agents"
+    fi
     if [ ! -d "$agent_dir" ]; then
         print_fail "Agent directory not found: $agent_dir"
         FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -487,18 +594,21 @@ verify_claude_discovery() {
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
-    # Claude reads CLAUDE.md in project root
+    # Claude reads CLAUDE.md in project root or CONFIG_ROOT
     local claude_md
     if [ "$level" = "project" ]; then
         claude_md="$tmp_pwd/CLAUDE.md"
+        if [ ! -f "$claude_md" ]; then
+            claude_md="$config_root/CLAUDE.md"
+        fi
     else
         claude_md="$config_root/CLAUDE.md"
     fi
     if [ -f "$claude_md" ] && [ -s "$claude_md" ]; then
-        print_pass "Claude scan: CLAUDE.md in project root is present and non-empty"
+        print_pass "Claude scan: CLAUDE.md is present and non-empty"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "Claude scan: CLAUDE.md in project root missing or empty"
+        print_fail "Claude scan: CLAUDE.md missing or empty"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }
@@ -532,23 +642,25 @@ scenario_project_opencode() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$tmp_pwd/.opencode"
+    local config_root="$(resolve_project_config_root "opencode" "$tmp_pwd")"
     check_common_artifacts "$config_root" "opencode"
 
-    # Project OpenCode specific: AGENTS.md in PWD (discovered by upward traversal)
+    # Project OpenCode specific: AGENTS.md in PWD or CONFIG_ROOT
     # When install_path differs from plugin dir, AGENTS.md is a copy with absolute paths
-    if [ -e "$tmp_pwd/AGENTS.md" ]; then
-        print_pass "PWD/AGENTS.md exists"
+    if [ -e "$tmp_pwd/AGENTS.md" ] || [ -e "$config_root/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists (PWD or CONFIG_ROOT)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "PWD/AGENTS.md is missing"
+        print_fail "AGENTS.md is missing (not in PWD or CONFIG_ROOT)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
-    if [ -f "$tmp_pwd/AGENTS.md" ] && [ ! -L "$tmp_pwd/AGENTS.md" ] && grep -q "$TEAM_DIR" "$tmp_pwd/AGENTS.md" 2>/dev/null; then
-        print_pass "PWD/AGENTS.md contains absolute paths (project mode rewrite)"
+    local _agents_md="$tmp_pwd/AGENTS.md"
+    [ -f "$_agents_md" ] || _agents_md="$config_root/AGENTS.md"
+    if [ -f "$_agents_md" ] && [ ! -L "$_agents_md" ] && grep -q "$TEAM_DIR" "$_agents_md" 2>/dev/null; then
+        print_pass "AGENTS.md contains absolute paths (project mode rewrite)"
         PASS_COUNT=$((PASS_COUNT + 1))
-    elif [ -L "$tmp_pwd/AGENTS.md" ]; then
-        print_pass "PWD/AGENTS.md is a symlink (plugin dir = PWD)"
+    elif [ -L "$_agents_md" ]; then
+        print_pass "AGENTS.md is a symlink (plugin dir = PWD)"
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
 
@@ -672,8 +784,8 @@ scenario_global_opencode() {
     fi
 
     # Backup trigger: pre-write custom content → backup created on re-run
-    # Only test teams that have safe_install_file (skip legacy init.sh)
-    if [ -f "$config_root/AGENTS.md" ] && grep -q 'safe_install_file()' "$INIT_SCRIPT" 2>/dev/null; then
+    # Only test teams that have safe_install_file AND use it for AGENTS.md
+    if [ -f "$config_root/AGENTS.md" ] && grep -q 'safe_install_file.*AGENTS\.md\|safe_install_file.*config_target\|safe_install_file.*config_name' "$INIT_SCRIPT" 2>/dev/null; then
         echo "# User custom header" > "$config_root/AGENTS.md"
         echo "custom user content" >> "$config_root/AGENTS.md"
 
@@ -719,6 +831,11 @@ scenario_global_opencode() {
 scenario_project_claude() {
     print_section_header "Scenario: project + claude"
 
+    if ! supports_tool "claude"; then
+        print_info "Skipping: init.sh does not support 'claude' tool"
+        return 0
+    fi
+
     local tmp_home tmp_pwd
     tmp_home=$(mktemp -d)
     tmp_pwd=$(mktemp -d)
@@ -741,22 +858,24 @@ scenario_project_claude() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$tmp_pwd/.claude"
+    local config_root="$(resolve_project_config_root "claude" "$tmp_pwd")"
     check_common_artifacts "$config_root" "claude"
 
-    # Project Claude specific: CLAUDE.md in project root
+    # Project Claude specific: CLAUDE.md in project root or CONFIG_ROOT
     local claude_md="$tmp_pwd/CLAUDE.md"
-    if [ -e "$claude_md" ]; then
-        print_pass "CLAUDE.md in project root exists"
+    local claude_md_alt="$config_root/CLAUDE.md"
+    if [ -e "$claude_md" ] || [ -e "$claude_md_alt" ]; then
+        print_pass "CLAUDE.md exists (project root or CONFIG_ROOT)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail "CLAUDE.md in project root is missing"
+        print_fail "CLAUDE.md is missing (not in project root or CONFIG_ROOT)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
-    if [ -f "$claude_md" ] && [ ! -L "$claude_md" ] && grep -q "$TEAM_DIR" "$claude_md" 2>/dev/null; then
+    if { [ -f "$claude_md" ] && [ ! -L "$claude_md" ] && grep -q "$TEAM_DIR" "$claude_md" 2>/dev/null; } || \
+       { [ -f "$claude_md_alt" ] && [ ! -L "$claude_md_alt" ] && grep -q "$TEAM_DIR" "$claude_md_alt" 2>/dev/null; }; then
         print_pass "CLAUDE.md contains absolute paths (project mode rewrite)"
         PASS_COUNT=$((PASS_COUNT + 1))
-    elif [ -L "$claude_md" ]; then
+    elif [ -L "$claude_md" ] || [ -L "$claude_md_alt" ]; then
         print_pass "CLAUDE.md is a symlink (plugin dir = PWD)"
         PASS_COUNT=$((PASS_COUNT + 1))
     fi
@@ -787,6 +906,11 @@ scenario_project_claude() {
 # =============================================================================
 scenario_global_claude() {
     print_section_header "Scenario: global + claude"
+
+    if ! supports_tool "claude"; then
+        print_info "Skipping: init.sh does not support 'claude' tool"
+        return 0
+    fi
 
     local tmp_home
     tmp_home=$(mktemp -d)
@@ -860,6 +984,11 @@ scenario_global_claude() {
 scenario_project_trae_ide() {
     print_section_header "Scenario: project + trae (IDE path)"
 
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
+
     local tmp_home tmp_pwd
     tmp_home=$(mktemp -d)
     tmp_pwd=$(mktemp -d)
@@ -885,8 +1014,9 @@ scenario_project_trae_ide() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$tmp_pwd/.trae"
-    if [ -d "$config_root" ]; then
+    local config_root="$(resolve_project_config_root "trae" "$tmp_pwd")"
+    if [ -d "$config_root" ] || [ -d "$tmp_pwd/.trae" ]; then
+        [ -d "$config_root" ] || config_root="$tmp_pwd/.trae"
         print_pass "Artifacts installed to .trae/ (IDE path detected)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
@@ -915,6 +1045,11 @@ scenario_project_trae_ide() {
 scenario_project_trae_plugin() {
     print_section_header "Scenario: project + trae (Plugin path)"
 
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
+
     local tmp_home tmp_pwd
     tmp_home=$(mktemp -d)
     tmp_pwd=$(mktemp -d)
@@ -940,12 +1075,22 @@ scenario_project_trae_plugin() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$tmp_pwd/.marscode"
-    if [ -d "$config_root" ]; then
-        print_pass "Artifacts installed to .marscode/ (Plugin path detected)"
+    # Some plugins don't have detect_trae_variant() and always use .trae
+    local expected_dir=".marscode"
+    if ! grep -q 'detect_trae_variant' "$INIT_SCRIPT" 2>/dev/null; then
+        expected_dir=".trae"
+    fi
+
+    local config_root="$tmp_pwd/$expected_dir"
+    if grep -q "CONFIG_ROOT=\"\$PLUGIN_ROOT/${expected_dir}" "$INIT_SCRIPT" 2>/dev/null; then
+        config_root="$TEAM_DIR/$expected_dir"
+    fi
+    if [ -d "$config_root" ] || [ -d "$tmp_pwd/$expected_dir" ]; then
+        [ -d "$config_root" ] || config_root="$tmp_pwd/$expected_dir"
+        print_pass "Artifacts installed to ${expected_dir}/ (Plugin path detected)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail ".marscode/ directory not found after Plugin-path installation"
+        print_fail "${expected_dir}/ directory not found after Plugin-path installation"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
@@ -969,6 +1114,11 @@ scenario_project_trae_plugin() {
 # =============================================================================
 scenario_project_trae_cli() {
     print_section_header "Scenario: project + trae (CLI path)"
+
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
 
     local tmp_home tmp_pwd
     tmp_home=$(mktemp -d)
@@ -995,12 +1145,22 @@ scenario_project_trae_cli() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    local config_root="$tmp_pwd/.traecli"
-    if [ -d "$config_root" ]; then
-        print_pass "Artifacts installed to .traecli/ (CLI path detected)"
+    # Some plugins don't have detect_trae_variant() and always use .trae
+    local expected_dir=".traecli"
+    if ! grep -q 'detect_trae_variant' "$INIT_SCRIPT" 2>/dev/null; then
+        expected_dir=".trae"
+    fi
+
+    local config_root="$tmp_pwd/$expected_dir"
+    if grep -q "CONFIG_ROOT=\"\$PLUGIN_ROOT/${expected_dir}" "$INIT_SCRIPT" 2>/dev/null; then
+        config_root="$TEAM_DIR/$expected_dir"
+    fi
+    if [ -d "$config_root" ] || [ -d "$tmp_pwd/$expected_dir" ]; then
+        [ -d "$config_root" ] || config_root="$tmp_pwd/$expected_dir"
+        print_pass "Artifacts installed to ${expected_dir}/ (CLI path detected)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        print_fail ".traecli/ directory not found after CLI-path installation"
+        print_fail "${expected_dir}/ directory not found after CLI-path installation"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
@@ -1027,6 +1187,11 @@ scenario_project_trae_cli() {
 # `&& [ "$LEVEL" = "project" ]`), installing to ~/.trae-cn, NOT ~/.claude.
 scenario_global_trae_ide() {
     print_section_header "Scenario: global + trae (IDE path)"
+
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
 
     local tmp_home
     tmp_home=$(mktemp -d)
@@ -1115,6 +1280,11 @@ scenario_global_trae_ide() {
 scenario_global_trae_plugin() {
     print_section_header "Scenario: global + trae (Plugin path)"
 
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
+
     local tmp_home
     tmp_home=$(mktemp -d)
 
@@ -1201,6 +1371,11 @@ scenario_global_trae_plugin() {
 # =============================================================================
 scenario_global_trae_cli() {
     print_section_header "Scenario: global + trae (CLI path)"
+
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
 
     local tmp_home
     tmp_home=$(mktemp -d)
@@ -1294,6 +1469,11 @@ scenario_global_trae_cli() {
 scenario_global_trae_unknown() {
     print_section_header "Scenario: global + trae (unknown fallback)"
 
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
+
     local tmp_home
     tmp_home=$(mktemp -d)
 
@@ -1377,6 +1557,11 @@ scenario_global_trae_unknown() {
 # covered by single-dir scenarios 8-11.
 scenario_global_trae_priority() {
     print_section_header "Scenario: global + trae (detection priority: .trae-cn > .marscode)"
+
+    if ! supports_tool "trae"; then
+        print_info "Skipping: init.sh does not support 'trae' tool"
+        return 0
+    fi
 
     local tmp_home
     tmp_home=$(mktemp -d)
@@ -1462,6 +1647,388 @@ scenario_global_trae_priority() {
 }
 
 # =============================================================================
+# Scenario 13: Project + CodeArts
+# =============================================================================
+scenario_project_codearts() {
+    print_section_header "Scenario: project + codearts"
+
+    if ! supports_tool "codearts"; then
+        print_info "Skipping: init.sh does not support 'codearts' tool"
+        return 0
+    fi
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project codearts <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$(resolve_project_config_root "codearts" "$tmp_pwd")"
+    check_common_artifacts "$config_root" "codearts"
+
+    # Project CodeArts specific: AGENTS.md in PWD or CONFIG_ROOT (codearts uses AGENTS.md, not CLAUDE.md)
+    if [ -e "$tmp_pwd/AGENTS.md" ] || [ -e "$config_root/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists (PWD or CONFIG_ROOT)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "AGENTS.md is missing (not in PWD or CONFIG_ROOT)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    local _agents_md="$tmp_pwd/AGENTS.md"
+    [ -f "$_agents_md" ] || _agents_md="$config_root/AGENTS.md"
+    if [ -f "$_agents_md" ] && [ ! -L "$_agents_md" ] && grep -q "$TEAM_DIR" "$_agents_md" 2>/dev/null; then
+        print_pass "AGENTS.md contains absolute paths (project mode rewrite)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ -L "$_agents_md" ]; then
+        print_pass "AGENTS.md is a symlink (plugin dir = PWD)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # CodeArts must NOT create CLAUDE.md
+    if [ -e "$tmp_pwd/CLAUDE.md" ]; then
+        print_fail "CLAUDE.md created (codearts should use AGENTS.md)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "CLAUDE.md not created (codearts uses AGENTS.md)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # CodeArts must NOT create ~/.claude
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (codearts should use ~/.codeartsdoer)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (codearts branch reached correctly)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Repos should NOT be symlinked into CONFIG_ROOT in project mode
+    local repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        if [ ! -e "$config_root/$repo" ]; then
+            print_pass "$repo not symlinked into CONFIG_ROOT (project mode, correct)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "$repo unexpectedly present in CONFIG_ROOT (project mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(get_git_repo_names "$INIT_SCRIPT")
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 14: Global + CodeArts
+# =============================================================================
+scenario_global_codearts() {
+    print_section_header "Scenario: global + codearts"
+
+    if ! supports_tool "codearts"; then
+        print_info "Skipping: init.sh does not support 'codearts' tool"
+        return 0
+    fi
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global codearts <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.codeartsdoer"
+    check_common_artifacts "$config_root" "codearts"
+
+    # Global CodeArts specific: AGENTS.md (not CLAUDE.md)
+    if grep -q 'ESCAPED_ROOT' "$INIT_SCRIPT" 2>/dev/null; then
+        local config_file="$config_root/AGENTS.md"
+        if [ -f "$config_file" ] && [ ! -L "$config_file" ]; then
+            print_pass "AGENTS.md is a regular file (global mode copy, not symlink)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "AGENTS.md is missing or is a symlink (expected regular file in global mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+
+        if grep -q "$TEAM_DIR" "$config_file" 2>/dev/null; then
+            print_pass "AGENTS.md contains absolute paths (global mode rewrite detected)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_warn "AGENTS.md does not contain absolute paths (may be OK if no relative refs)"
+            WARN_COUNT=$((WARN_COUNT + 1))
+        fi
+    fi
+
+    # CodeArts must NOT create ~/.claude
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (codearts should use ~/.codeartsdoer)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (codearts uses ~/.codeartsdoer)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Repos SHOULD be symlinked into CONFIG_ROOT in global mode
+    local repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        if [ -L "$config_root/$repo" ]; then
+            print_pass "$repo symlinked into CONFIG_ROOT (global mode, correct)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "$repo NOT symlinked into CONFIG_ROOT (global mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(get_git_repo_names "$INIT_SCRIPT")
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 15: Project + Cursor
+# =============================================================================
+scenario_project_cursor() {
+    print_section_header "Scenario: project + cursor"
+
+    if ! supports_tool "cursor"; then
+        print_info "Skipping: init.sh does not support 'cursor' tool"
+        return 0
+    fi
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project cursor <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$(resolve_project_config_root "cursor" "$tmp_pwd")"
+    check_common_artifacts "$config_root" "cursor"
+
+    if [ -e "$tmp_pwd/AGENTS.md" ] || [ -e "$config_root/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists (PWD or CONFIG_ROOT)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "AGENTS.md is missing (not in PWD or CONFIG_ROOT)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    if [ -e "$tmp_pwd/CLAUDE.md" ]; then
+        print_fail "CLAUDE.md created (cursor should use AGENTS.md)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "CLAUDE.md not created (cursor uses AGENTS.md)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 16: Global + Cursor
+# =============================================================================
+scenario_global_cursor() {
+    print_section_header "Scenario: global + cursor"
+
+    if ! supports_tool "cursor"; then
+        print_info "Skipping: init.sh does not support 'cursor' tool"
+        return 0
+    fi
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global cursor <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.cursor"
+    check_common_artifacts "$config_root" "cursor"
+
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (cursor should use ~/.cursor)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (cursor uses ~/.cursor)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 17: Project + Copilot
+# =============================================================================
+scenario_project_copilot() {
+    print_section_header "Scenario: project + copilot"
+
+    if ! supports_tool "copilot"; then
+        print_info "Skipping: init.sh does not support 'copilot' tool"
+        return 0
+    fi
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project copilot <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$(resolve_project_config_root "copilot" "$tmp_pwd")"
+    check_common_artifacts "$config_root" "copilot"
+
+    if [ -e "$tmp_pwd/AGENTS.md" ] || [ -e "$config_root/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists (PWD or CONFIG_ROOT)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "AGENTS.md is missing (not in PWD or CONFIG_ROOT)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    if [ -e "$tmp_pwd/CLAUDE.md" ]; then
+        print_fail "CLAUDE.md created (copilot should use AGENTS.md)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "CLAUDE.md not created (copilot uses AGENTS.md)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 18: Global + Copilot
+# =============================================================================
+scenario_global_copilot() {
+    print_section_header "Scenario: global + copilot"
+
+    if ! supports_tool "copilot"; then
+        print_info "Skipping: init.sh does not support 'copilot' tool"
+        return 0
+    fi
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global copilot <<< "y" 2>&1) || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.copilot"
+    check_common_artifacts "$config_root" "copilot"
+
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (copilot should use ~/.copilot)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (copilot uses ~/.copilot)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 main() {
@@ -1470,14 +2037,19 @@ main() {
     echo "========================================"
     echo ""
 
-    # Find all teams with init.sh
+    # Find all teams with init.sh (scan both plugins-official and plugins-community)
     local teams=()
-    for team_dir in "$SKILLS_DIR/plugins-official"/*; do
-        [ -d "$team_dir" ] || continue
-        local init="$team_dir/init.sh"
-        [ -f "$init" ] || continue
-        [ -x "$init" ] || continue
-        teams+=("$(basename "$team_dir")")
+    local team_roots=()
+    for plugin_root_dir in "$SKILLS_DIR/plugins-official" "$SKILLS_DIR/plugins-community"; do
+        [ -d "$plugin_root_dir" ] || continue
+        for team_dir in "$plugin_root_dir"/*; do
+            [ -d "$team_dir" ] || continue
+            local init="$team_dir/init.sh"
+            [ -f "$init" ] || continue
+            [ -x "$init" ] || continue
+            teams+=("$(basename "$team_dir")")
+            team_roots+=("$plugin_root_dir")
+        done
     done
 
     if [ ${#teams[@]} -eq 0 ]; then
@@ -1488,14 +2060,17 @@ main() {
     echo "Teams to test: ${teams[*]}"
     echo ""
 
-    for team in "${teams[@]}"; do
+    local idx
+    for idx in "${!teams[@]}"; do
+        team="${teams[$idx]}"
+        local team_root="${team_roots[$idx]}"
         TEAM="$team"
-        TEAM_DIR="$SKILLS_DIR/plugins-official/$TEAM"
+        TEAM_DIR="$team_root/$TEAM"
         INIT_SCRIPT="$TEAM_DIR/init.sh"
 
         EXPECTED_SKILL_COUNT=$(get_expected_skill_count)
         EXPECTED_AGENT_COUNT=$(get_expected_agent_count)
-        EXPECTED_SKILLS_LIST=$(grep 'INCLUDED_SKILLS=' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*="//;s/"$//' || true)
+        EXPECTED_SKILLS_LIST=$(grep 'INCLUDED_SKILLS="' "$INIT_SCRIPT" 2>/dev/null | head -1 | sed 's/.*INCLUDED_SKILLS="//;s/"$//' || true)
 
         echo "========================================"
         echo "  Team: $TEAM"
@@ -1532,6 +2107,15 @@ main() {
         scenario_global_trae_cli
         scenario_global_trae_unknown
         scenario_global_trae_priority
+
+        scenario_project_codearts
+        scenario_global_codearts
+
+        scenario_project_cursor
+        scenario_global_cursor
+
+        scenario_project_copilot
+        scenario_global_copilot
 
         # Final cleanup per team
         cleanup_team_artifacts

@@ -59,7 +59,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default) or "claude"
+  tool    - Target tool: "opencode" (default), "claude", or "codearts"
 
 Options:
   --help  - Show this help message
@@ -69,6 +69,7 @@ Examples:
   bash /path/to/ops-perf-optimize/init.sh                    # Project-level, OpenCode
   bash /path/to/ops-perf-optimize/init.sh project claude     # Project-level, Claude Code
   bash /path/to/ops-perf-optimize/init.sh global claude      # Global-level, Claude Code
+  bash /path/to/ops-perf-optimize/init.sh project codearts   # Project-level, CodeArts
 
 Installation paths (CANNBot brand):
   Project-level: $PWD/.claude/ or $PWD/.opencode/
@@ -86,14 +87,18 @@ TOOL="opencode"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$PWD"
 PLUGIN_SRC="$SCRIPT_DIR"
-ASCEND_AGENT_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
+if [ -d "$SCRIPT_DIR/../../ops" ]; then
+    ASCEND_AGENT_ROOT="$(cd "$SCRIPT_DIR/../../ops" && pwd)"
+else
+    ASCEND_AGENT_ROOT=""
+fi
 
 for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, --help."
+        opencode|claude|codearts)   TOOL="$arg" ;;
+        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, codearts, --help."
             exit 1 ;;
     esac
 done
@@ -102,12 +107,16 @@ done
 if [ "$LEVEL" = "global" ]; then
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$HOME/.config/opencode"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
 else
     if [ "$TOOL" = "opencode" ]; then
         CONFIG_ROOT="$PROJECT_ROOT/.opencode"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$PROJECT_ROOT/.codeartsdoer"
     else
         CONFIG_ROOT="$PROJECT_ROOT/.claude"
     fi
@@ -155,7 +164,7 @@ except: pass
     done
 
     # Remove config symlinks (only if they are symlinks, never real files)
-    if [ "$TOOL" = "opencode" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "codearts" ]; then
         [ -L "$CONFIG_ROOT/AGENTS.md" ] && rm -f "$CONFIG_ROOT/AGENTS.md"
     else
         [ -L "$CONFIG_ROOT/CLAUDE.md" ] && rm -f "$CONFIG_ROOT/CLAUDE.md"
@@ -250,6 +259,8 @@ if [ "$TOOL" = "opencode" ]; then
     # under agents/ as perf-optimize.md so it can be dispatched as a subagent.
     mkdir -p "$CANNBOT_DIR/agents"
     config_target="$CANNBOT_DIR/agents/$PRIMARY_AGENT_NAME.md"
+elif [ "$TOOL" = "codearts" ]; then
+    config_target="$CONFIG_ROOT/AGENTS.md"
 else
     config_target="$CONFIG_ROOT/CLAUDE.md"
 fi
@@ -383,7 +394,7 @@ else
     [ -d "$CANN_SAMPLES_DIR" ] && ok "cann-samples cloned"
 fi
 
-if [ -d "$ASC_DEVKIT_DIR" ] && [ -f "$ASCEND_AGENT_ROOT/ascendc-docs-search/scripts/clean_markdown.py" ]; then
+if [ -n "$ASCEND_AGENT_ROOT" ] && [ -d "$ASC_DEVKIT_DIR" ] && [ -f "$ASCEND_AGENT_ROOT/ascendc-docs-search/scripts/clean_markdown.py" ]; then
     python3 "$ASCEND_AGENT_ROOT/ascendc-docs-search/scripts/clean_markdown.py" --dir "$ASC_DEVKIT_DIR" --no-backup --quiet > /dev/null 2>&1 || warn "markdown cleanup failed"
 fi
 
@@ -394,7 +405,7 @@ MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON="[]"
 if [ -d "$CANNBOT_DIR/skills" ]; then
   SKILLS_JSON=$(ls -d "$CANNBOT_DIR/skills"/*/ 2>/dev/null | while read d; do
-    basename "$d"
+    d="${d%/}"; echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 
@@ -402,7 +413,7 @@ fi
 AGENTS_JSON="[]"
 if [ -d "$CANNBOT_DIR/agents" ]; then
   AGENTS_JSON=$(ls "$CANNBOT_DIR/agents"/*.md 2>/dev/null | while read f; do
-    basename "$f"
+    echo "${f##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 
@@ -475,6 +486,8 @@ if [ "$TOOL" = "opencode" ]; then
   if [ "$LEVEL" = "project" ]; then
     [ -f "$PROJECT_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${YELLOW}⚠${NC} Project AGENTS.md trigger not installed"; }
   fi
+elif [ "$TOOL" = "codearts" ]; then
+  [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
 else
   [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
 fi
@@ -494,7 +507,10 @@ echo ""
 echo -e "  ${GREEN}${BOLD}✓ CANNBot installed successfully!${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
-if [ "$TOOL" = "opencode" ]; then
+if [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}请帮我优化 matmul 算子的性能，Shape M=1024 K=4096 N=2048，数据类型 fp4x2_e2m1_t${NC}"
+elif [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
   echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}请帮我优化 matmul 算子的性能，Shape M=1024 K=4096 N=2048，数据类型 fp4x2_e2m1_t${NC}"
 else

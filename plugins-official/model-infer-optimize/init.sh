@@ -47,7 +47,11 @@ INCLUDED_AGENT_PATTERN="model-infer-*"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
-MODEL_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../model" && pwd)"
+if [ -d "$PLUGIN_ROOT/../../model" ]; then
+    MODEL_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../model" && pwd)"
+else
+    MODEL_SKILL_ROOT=""
+fi
 
 show_help() {
     cat << EOF
@@ -301,7 +305,7 @@ write_manifest() {
     local manifest="$CONFIG_ROOT/cannbot-manifest.json"
     local skills_json agents_json
     skills_json=$(printf '%s\n' $INCLUDED_SKILLS | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
-    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'model-infer-*.md' -exec basename {} \; | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+    agents_json=$(find "$LOCAL_AGENT_ROOT" -maxdepth 1 -name 'model-infer-*.md' -printf '%f\n' | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
     cat > "$manifest" << EOF
 {
   "brand": "CANNBot",

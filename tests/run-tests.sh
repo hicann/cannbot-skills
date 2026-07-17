@@ -563,6 +563,12 @@ get_tests_for_category() {
             echo "unit/teams/test-content.sh:fast"
             echo "unit/teams/test-version.sh:fast"
             echo "unit/install/test-init-install.sh:fast"
+            echo "unit/install/test-init-tool.sh --tool opencode:fast"
+            echo "unit/install/test-init-tool.sh --tool claude:fast"
+            echo "unit/install/test-init-tool.sh --tool trae:fast"
+            echo "unit/install/test-init-tool.sh --tool cursor:fast"
+            echo "unit/install/test-init-tool.sh --tool copilot:fast"
+            echo "unit/install/test-init-tool.sh --tool codearts:fast"
             echo "unit/install/test-safe-install.sh:fast"
             ;;
         behavior)
@@ -601,7 +607,15 @@ get_tests_for_category() {
 run_test_file() {
     local test_file="$1"
     local speed="$2"
-    local test_path="$SCRIPT_DIR/$test_file"
+    # Support optional args in test_file (e.g. "unit/install/test-init-tool.sh --tool opencode")
+    local test_path
+    local test_args=()
+    if [[ "$test_file" == *' '* ]]; then
+        test_path="$SCRIPT_DIR/${test_file%% *}"
+        read -r -a test_args <<< "${test_file#* }"
+    else
+        test_path="$SCRIPT_DIR/$test_file"
+    fi
     local start_time=$(date +%s)
     local status="pass"
     local output=""
@@ -623,7 +637,7 @@ run_test_file() {
     if $AUTO_FIX; then
         extra_args+=("--auto-fix")
     fi
-    timeout $TIMEOUT bash "$test_path" "${extra_args[@]}" > "$test_outfile" 2>&1 || exit_code=$?
+    timeout $TIMEOUT bash "$test_path" "${test_args[@]}" "${extra_args[@]}" > "$test_outfile" 2>&1 || exit_code=$?
     output=$(cat "$test_outfile")
     rm -f "$test_outfile"
     trap - RETURN

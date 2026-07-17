@@ -106,8 +106,16 @@ PLUGIN_ROOT="$SCRIPT_DIR"
 # Agents: use local agents/ directory (migrated with plugin)
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 # Skills: reference shared ops, ops-lab, and local plugin skills directories
-SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
-SHARED_SKILL_ROOT_OPS_LAB="$(cd "$PLUGIN_ROOT/../../ops-lab" && pwd)"
+if [ -d "$PLUGIN_ROOT/../../ops" ]; then
+    SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
+else
+    SHARED_SKILL_ROOT=""
+fi
+if [ -d "$PLUGIN_ROOT/../../ops-lab" ]; then
+    SHARED_SKILL_ROOT_OPS_LAB="$(cd "$PLUGIN_ROOT/../../ops-lab" && pwd)"
+else
+    SHARED_SKILL_ROOT_OPS_LAB="/nonexistent-ops-lab"
+fi
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
 
 # Parse skill dependencies from AGENTS.md frontmatter
@@ -602,21 +610,21 @@ MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON="[]"
 if [ -d "$CANNBOT_DIR/skills" ]; then
   SKILLS_JSON=$(ls -d "$CANNBOT_DIR/skills"/*/ 2>/dev/null | while read d; do
-    basename "$d"
+    d="${d%/}"; echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 
 AGENTS_JSON="[]"
 if [ -d "$CANNBOT_DIR/agents" ]; then
   AGENTS_JSON=$(ls -d "$CANNBOT_DIR/agents"/* 2>/dev/null | while read d; do
-    basename "$d"
+    echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 
 HOOKS_JSON="[]"
 if [ -d "$CANNBOT_DIR/hooks" ]; then
   HOOKS_JSON=$(ls -d "$CANNBOT_DIR/hooks"/* 2>/dev/null | while read d; do
-    basename "$d"
+    echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
 

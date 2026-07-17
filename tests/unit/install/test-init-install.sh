@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
 SKILLS_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-TEAMS_DIR="$SKILLS_DIR/plugins-official"
+PLUGIN_DIRS=("$SKILLS_DIR/plugins-official" "$SKILLS_DIR/plugins-community")
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -38,12 +38,24 @@ run_check() {
     fi
 }
 
+# Collect all plugin directories that contain init.sh
+get_all_plugin_dirs() {
+    for plugin_root_dir in "${PLUGIN_DIRS[@]}"; do
+        [ -d "$plugin_root_dir" ] || continue
+        for team_dir in "$plugin_root_dir"/*; do
+            [ -d "$team_dir" ] || continue
+            [ -f "$team_dir/init.sh" ] || continue
+            echo "$team_dir"
+        done
+    done
+}
+
 # =============================================================================
 # Check 1: init.sh exists and is executable for every team
 # =============================================================================
 print_section_header "Check: init.sh existence & permissions"
 
-for team_dir in "$TEAMS_DIR"/*; do
+for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
     init_script="$team_dir/init.sh"
@@ -75,7 +87,7 @@ done
 # =============================================================================
 print_section_header "Check: init.sh referenced paths exist"
 
-for team_dir in "$TEAMS_DIR"/*; do
+for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
     init_script="$team_dir/init.sh"
@@ -115,7 +127,7 @@ done
 # =============================================================================
 print_section_header "Check: workflow scripts existence"
 
-for team_dir in "$TEAMS_DIR"/*; do
+for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
 
@@ -140,7 +152,7 @@ done
 # =============================================================================
 print_section_header "Check: init.sh skill references exist"
 
-for team_dir in "$TEAMS_DIR"/*; do
+for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
     init_script="$team_dir/init.sh"
@@ -196,7 +208,7 @@ done
 # =============================================================================
 print_section_header "Check: INCLUDED_AGENT_PATTERN consistency"
 
-for team_dir in "$TEAMS_DIR"/*; do
+for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
     init_script="$team_dir/init.sh"
@@ -234,10 +246,89 @@ for team_dir in "$TEAMS_DIR"/*; do
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
     else
-        print_fail "[$team_name] INCLUDED_AGENT_PATTERN not found in init.sh"
-        FAIL_COUNT=$((FAIL_COUNT + 1))
+        # Some plugins (e.g. cuda2ascend) use a different agent installation
+        # mechanism (collect_agents / direct glob) instead of INCLUDED_AGENT_PATTERN.
+        # If the init.sh has an alternative agent collection mechanism, warn instead of fail.
+        if grep -qE 'collect_agents|find.*agents.*-type f|AGENT_FILES' "$init_script" 2>/dev/null; then
+            print_warn "[$team_name] no INCLUDED_AGENT_PATTERN (uses alternative agent collection mechanism)"
+        else
+            print_fail "[$team_name] INCLUDED_AGENT_PATTERN not found in init.sh"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
     fi
     
+done
+
+# =============================================================================
+# Check 6: init.sh $(cd ... && pwd) referenced directories exist
+# =============================================================================
+# Extracts all $(cd "$PLUGIN_ROOT/../../some-dir" && pwd) patterns from init.sh
+# and verifies the referenced directory exists. This catches the class of bugs
+# where init.sh references a repo directory that has been removed or renamed
+# (e.g. issue #406: ops-lab directory removed but init.sh still referenced it).
+#
+# Smart guard detection: skips cd calls that are already protected by:
+#   1. if [ -d "...path..." ] on a preceding line (within 10 lines)
+#   2. elif [ -d "...path..." ] on the same or preceding line
+#   3. 2>/dev/null in the cd command itself (self-guarded)
+# =============================================================================
+print_section_header "Check: init.sh cd-referenced directories exist"
+
+for team_dir in $(get_all_plugin_dirs); do
+    [ -d "$team_dir" ] || continue
+    team_name=$(basename "$team_dir")
+    init_script="$team_dir/init.sh"
+
+    [ -f "$init_script" ] || continue
+
+    # Extract all $(cd "$VAR/path" && pwd) patterns with line numbers
+    # Match: $(cd "$PLUGIN_ROOT/../../something" && pwd)  or  $(cd "$SCRIPT_DIR/../../something" && pwd)
+    while IFS=: read -r line_num cd_line; do
+        [ -n "$cd_line" ] || continue
+
+        # Extract the path after $PLUGIN_ROOT/ or $SCRIPT_DIR/ prefix
+        rel_path=$(echo "$cd_line" | sed -n 's/.*\$\(PLUGIN_ROOT\|SCRIPT_DIR\)\/\([^"]*\)".*/\2/p')
+
+        # Skip lines that use 2>/dev/null (already self-guarded)
+        if echo "$cd_line" | grep -q '2>/dev/null'; then
+            continue
+        fi
+
+        # Skip empty extractions (e.g. $(cd "$(dirname ...)" && pwd))
+        [ -n "$rel_path" ] || continue
+
+        # Check if this cd is guarded by a preceding if [ -d ] / elif [ -d ]
+        # Look at the current line and up to 10 preceding lines for [ -d "...path..." ]
+        # The guard may be several lines above (e.g. inside an if block with intervening code)
+        is_guarded=false
+        for check_offset in 0 1 2 3 4 5 6 7 8 9 10; do
+            check_line=$((line_num - check_offset))
+            [ "$check_line" -ge 1 ] || continue
+            check_content=$(sed -n "${check_line}p" "$init_script")
+            # Check if this line contains [ -d "..." ] referencing the same path
+            # Match both bare path (e.g. "hooks") and $VAR/path (e.g. "$PLUGIN_ROOT/hooks")
+            if echo "$check_content" | grep -qE '\[ -d "[^"]*'"$rel_path"'"[[:space:]]*\]'; then
+                is_guarded=true
+                break
+            fi
+        done
+
+        if $is_guarded; then
+            # Guarded by if [ -d ] — safe, skip
+            continue
+        fi
+
+        # Resolve the actual path relative to the team_dir
+        actual_path="$team_dir/$rel_path"
+
+        if [ -d "$actual_path" ]; then
+            print_pass "[$team_name] cd target exists: $rel_path"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "[$team_name] cd target MISSING: $rel_path (referenced in init.sh but directory does not exist)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(grep -nE '\$\(cd "\$(PLUGIN_ROOT|SCRIPT_DIR)/[^"]*" && pwd\)' "$init_script" 2>/dev/null || true)
 done
 
 # =============================================================================

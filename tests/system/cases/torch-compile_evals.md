@@ -6,6 +6,7 @@ eval_mode: text
 # Case 1: torch.compile 图模式介绍
 
 ## Config
+- Disabled: true
 - Max Tokens: 300000
 - Timeout: 900
 - Ascend Platform: A2

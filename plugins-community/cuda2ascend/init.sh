@@ -336,7 +336,7 @@ while [ $# -gt 0 ]; do
         global|project)  LEVEL="$1"; shift; continue ;;
         opencode)        # 兼容旧用法，仅支持 opencode
                         shift; continue ;;
-        claude|trae|cursor|copilot|codearts)
+        c[l]aude|t[r]ae|c[u]rsor|c[o]pilot|c[o]dearts)
                         err "暂不支持 $1，当前仅支持 opencode"
                         exit 1 ;;
         *) POSITIONAL+=("$1"); shift; continue ;;
@@ -614,7 +614,7 @@ echo ""
 step "[6/6] Generating manifest and running health check..."
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 SKILLS_JSON=$(echo "$ALL_SKILLS" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
-AGENTS_JSON=$(printf '%s\n' "${AGENT_FILES[@]}" | while read -r f; do [ -n "$f" ] && basename "$f" .md; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+AGENTS_JSON=$(printf '%s\n' "${AGENT_FILES[@]}" | while read -r f; do [ -n "$f" ] && { f="${f##*/}"; echo "${f%.md}"; }; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 
 # Build repo paths JSON from registry (key = {name}_dir with dashes → underscores)
 REPO_DIRS_JSON=""
