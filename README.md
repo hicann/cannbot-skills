@@ -69,7 +69,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **Ascend C 直调** | `<<<>>>` 直接调用核函数 | [ops-direct-invoke](plugins-official/ops-direct-invoke/AGENTS.md) / [ops-direct-invoke-flash](plugins-official/ops-direct-invoke-flash/AGENTS.md) |
 | **Ascend C 注册调用** | ACLNN/GEIR 接入框架的标准算子 | [ops-registry-invoke](plugins-official/ops-registry-invoke/AGENTS.md) |
 | **Catlass** | Cube/Matmul 高阶模板拼装 pipeline | [catlass-op-generator](plugins-official/catlass-op-generator/AGENTS.md) |
-| **PyPTO** | Python API 快速验证与原型开发 | [pypto-op-orchestrator](plugins-official/pypto-op-orchestrator/AGENTS.md) |
+| **PyPTO** | 昇腾原生 Python Tile 算子编程 | [pypto-op-orchestrator](plugins-official/pypto-op-orchestrator/AGENTS.md) |
 | **TileLang** | DSL + `@tilelang.jit`，Developer/Expert 双模式 | [tilelang-op-orchestrator](plugins-official/tilelang-op-orchestrator/AGENTS.md) |
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | [triton-op-generator](plugins-official/triton-op-generator/AGENTS.md) |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile](plugins-official/torch-compile/AGENTS.md) |
