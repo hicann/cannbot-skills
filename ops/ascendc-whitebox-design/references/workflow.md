@@ -64,15 +64,20 @@
 
 ---
 
-## Step 3：交叉验证
+## Step 3：Task D Contract Gate
 
 > **前置条件**：Step 2 全部 Phase（0/1/2/3）已完成；`S2P3_test_design.md` 已生成；Phase 3a 的 disputed 路径已由用户确认（无 disputed 则自动满足）。
 
-派 1 个独立子 agent（不复用 Step 2 agent，确保独立视角）。主 Agent prompt：指示 Read `{skill_base}/references/design-verifier/00-execution-order.md`，按执行顺序约束表逐步执行。上下文参数：`op_name` / `op_path` / `skill_base` / `output_path`（写入路径 `{op_path}/tests/whitebox/S3_verification_report.md`）。
+主 Agent 直接运行 Task D Contract Gate 脚本；Step 3 只做最终用例 JSON 的覆盖率校验，不设置第二层 LLM soft review，不再复验 Task A/B/C 的源码事实。执行规则见 `{skill_base}/references/design-verifier/00-execution-order.md`。
+
+```bash
+python3 {skill_base}/scripts/s3_task_d_gate.py \
+  --output-dir {op_path}/tests/whitebox
+```
 
 **输入文件**：每个步骤按需读取所需文件（详见 `design-verifier/00-execution-order.md` 执行顺序约束表），不提前读取后续步骤的文件。
 
-输出：`S3_verification_report.md`。fail 项 → **主 Agent 独立核实**：对每个 fail 项 Read 验证报告中引用的源码位置，获取源码原文，与验证报告的「S2 声称」和「源码实际」比对，确认 fail 判定正确后才修改 S2 产物。若发现验证报告引用的源码与实际源码不一致（验证器误判），保留 S2 产物不修改，在报告中注明验证器误判。核实后 → 回 Step 2 Phase 1 重分析（Phase 0 不需重跑，最多 3 轮），仍 fail → 触发轮次耗尽协议。warn 项 → Step 3 子 agent 返回后，主 Agent 在 Step 4 用户确认前逐条判断是否修正，结论写入 S2P3_test_design.md 验证结论节；pass 项 → 无需处理。
+输出：`S3_verification_report.md` 和 `S3_verification_report.json`。fail 项 → 回 Step 2 Task D 修正参数定义或重新生成 case 文件（Phase 0/1 不需重跑，最多 3 轮），仍 fail → 触发轮次耗尽协议；pass 项 → 无需处理。
 
 ---
 
@@ -80,7 +85,7 @@
 
 > **前置条件**：Step 3 已完成，`S3_verification_report.md` 已生成；验证结论已更新到 `S2P3_test_design.md`。
 
-将验证结论更新到 S2P3_test_design.md 后停下来等待用户确认。提示语："源码分析和交叉验证已完成：{N} 个测试 group，S2P2 参数组合 ~{M} 条（最终用例数含网络和空 tensor 变体可能更多），验证状态 {status}。"
+将验证结论更新到 S2P3_test_design.md `## 8. Step 3 验证结论（原 §9 验证结论）` 后停下来等待用户确认。提示语："源码分析和 Task D 契约门禁已完成：{N} 个测试 group，S2P2 参数组合 ~{M} 条（最终用例数含网络和空 tensor 变体可能更多），验证状态 {status}。"
 
 | 选项 | 说明 |
 |------|------|
@@ -171,7 +176,23 @@ Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
 
 ### 执行
 
-派 1 个独立子 agent。主 Agent prompt：指示 Read `{skill_base}/references/ttk-converter/00-execution-order.md`（优先执行入口顶部的执行顺序约束节），传入上下文参数：`S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` / `S2P1_operator_model.json` / `S5_mapping_spec.md` 路径、`op_name`、算子源码路径（`*_def.cpp` / `*_infershape.cpp`，infershape 可能位于共享目录，需按 3 级回退定位实际路径后传入）、产出写入路径。
+#### TTK 工具目录定位（主 Agent 执行）
+
+由于 TTK 模块由子 agent 执行，且子 agent 不负责与用户交互选择工具目录，主 Agent 必须在派发 TTK 子 agent 前先确定 `{ops_test_kit_path}`。
+
+主 Agent 在当前仓库根目录下执行：
+
+```bash
+find "{repo_root}" -type d -name "ops-test-kit"
+```
+
+处理规则：
+
+- 找到 1 个目录：将该目录作为 `{ops_test_kit_path}`。
+- 找到多个目录：主 Agent 必须在派发子 agent 前询问用户选择。
+- 找不到目录：不派发 TTK 子 agent；跳过 TTK CSV 生成与 6a/6b/6c 验收，并报告缺少 `ops-test-kit/` 工具目录。
+
+派 1 个独立子 agent。主 Agent prompt：指示 Read `{skill_base}/references/ttk-converter/00-execution-order.md`（优先执行入口顶部的执行顺序约束节），传入上下文参数：`S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` / `S2P1_operator_model.json` / `S5_mapping_spec.md` 路径、`op_name`、算子源码路径（`*_def.cpp` / `*_infershape.cpp`，infershape 可能位于共享目录，需按 3 级回退定位实际路径后传入）、产出写入路径、`ops_test_kit_path`。`ops_test_kit_path` 已由主 Agent 在派发前定位完成，子 agent 禁止重新查找或询问用户选择。
 
 子 agent 在 ttk-converter/00-execution-order.md 的任务 1-5 完成后返回。
 
@@ -195,6 +216,7 @@ Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
 ├── S2P0_scout_k.json
 ├── S2P0_file_manifest.json
 ├── S2P0_source_scope.md
+├── S2P1_path_config.json          ← Task A 中间文件（build_path_list.py 输入）
 ├── S2P1_path_list.json
 ├── S2P1_tiling_glossary.md
 ├── S2P1_low_configs.json
@@ -238,7 +260,7 @@ Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
 |------|-----------|--------|-----------|
 | 1 | `S1-input-collection.md` | 主 Agent | — |
 | 2 | `source-analysis/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 10 行 |
-| 3 | `design-verifier/00-execution-order.md` + `design-verifier/05-output-schema.md` | 子 agent | `执行顺序约束（强制）` — 4 步（Task A→B→D 严格顺序 + 输出汇总） |
+| 3 | `design-verifier/00-execution-order.md` + `scripts/s3_task_d_gate.py` | 主 Agent | Task D Contract Gate（D1 cases coverage + 输出汇总） |
 | 5 | `case-mapper/00-execution-order.md` + `case-mapper/05-constraints.md` | 子 agent | `执行顺序约束（强制）` — 4 步（5a-pre→5a→5b→5c 逐步按需读取） |
 | 6 | `pytest-gen/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 3 步 |
 | 6c | `scripts/compute_tilingkey_coverage.py` | 主 Agent | — |

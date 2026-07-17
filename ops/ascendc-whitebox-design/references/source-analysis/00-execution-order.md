@@ -46,23 +46,68 @@
 
 以下 Phase 必须按编号顺序逐步执行，禁止跳步或抢跑。
 
+### Phase 0 固定脚本执行规则（强制）
+
+Phase 0 只执行固定脚本，不分析脚本源码。主 Agent 按顺序执行：
+
+1. 并行执行 `scripts/scout_t.py` 和 `scripts/scout_k.py`
+2. 等待两个脚本结束
+3. 执行 `scripts/s2p0_verify.py`
+4. 检查退出码、预期产物、JSON 可解析性和 S2P0 verify pass 状态
+
+禁止读取或分析 `scout_t.py`、`scout_k.py`、`s2p0_verify.py` 源码；禁止派发子 agent 分析 Phase 0。后续源码范围以 `S2P0_source_scope.md` 为准。
+
 | Phase | 任务 | 执行方 | 参考文档 | 输入 | 前置条件 | 状态判断 |
 |-------|------|--------|---------|------|---------|---------|
-| Phase 0 | Scout-T：tiling 侦察 | 脚本 `scripts/scout_t.py` | `scout_t.py --help` | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | 算子路径 + 平台参数已就绪 | `S2P0_scout_t.md` + `S2P0_scout_t.json` 已生成 |
-| Phase 0 | Scout-K：kernel 侦察 | 脚本 `scripts/scout_k.py` | `scout_k.py --help` | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | 同上 | `S2P0_scout_k.md` + `S2P0_scout_k.json` 已生成 |
-| Phase 0 | Scout-Verify：校验 + 清单 | 脚本 `scripts/verify.py` | `verify.py --help` | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | Scout-T + Scout-K 均完成 | `S2P0_file_manifest.json` + `S2P0_source_scope.md` 已生成，`verification.status` = `pass` |
-| Phase 1 | Task A：代码路径分析 | 子 agent | `01-code-analyzer.md`，prompt 模板见本文件 §子 Agent Prompt 模板 → Task A | 算子路径、平台参数、`S2P0_source_scope.md` 路径、`S2P0_scout_t.md`、`S2P0_scout_k.md` 路径、产出写入路径 | Phase 0 全部完成 | `S2P1_path_list.json` + `S2P1_tiling_glossary.md` 已生成 |
+| Phase 0 | Scout-T：tiling 侦察 | 脚本 `scripts/scout_t.py` | 固定命令模板；不读脚本源码 | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | 算子路径 + 平台参数已就绪 | `S2P0_scout_t.md` + `S2P0_scout_t.json` 已生成 |
+| Phase 0 | Scout-K：kernel 侦察 | 脚本 `scripts/scout_k.py` | 固定命令模板；不读脚本源码 | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | 同上 | `S2P0_scout_k.md` + `S2P0_scout_k.json` 已生成 |
+| Phase 0 | Scout-Verify：校验 + 清单 | 脚本 `scripts/s2p0_verify.py` | 固定命令模板；不读脚本源码 | `--op-name`、`--op-path`、`--npu-arch`、`--soc-version` | Scout-T + Scout-K 均完成 | `S2P0_file_manifest.json` + `S2P0_source_scope.md` 已生成，`verification.status` = `pass` |
+| Phase 1 | Task A：代码路径分析 | 子 agent | `01-code-analyzer.md`，prompt 模板见本文件 §子 Agent Prompt 模板 → Task A | 算子路径、平台参数、`S2P0_source_scope.md` 路径、`S2P0_scout_t.md`、`S2P0_scout_k.md` 路径、`S2P0_scout_k.json` 路径、产出写入路径 | Phase 0 全部完成 | `S2P1_path_config.json` 已生成，`build_path_list.py` 已运行且 Validation PASSED，`S2P1_path_list.json` + `S2P1_tiling_glossary.md` 已由脚本产出 |
 | Phase 1 | Task B：接口分析 | 子 agent | `02-interface-analyzer.md`，prompt 模板见本文件 §子 Agent Prompt 模板 → Task B | 算子路径、平台参数、产出写入路径 | 同上 | `S2P1_operator_model.json` 已生成 |
 | Phase 1 | Task C：网络搜索 | 子 agent | `05-network-search.md`，prompt 模板见本文件 §子 Agent Prompt 模板 → Task C | 算子名称、算子路径、平台参数、产出写入路径 | 同上 | `S2P1_low_configs.json` 已生成 |
 | Phase 2 | Task D：参数推导 | 子 agent | `03-param-derivation.md`，prompt 模板见本文件 §子 Agent Prompt 模板 → Task D | 算子路径、平台参数、`S2P0_source_scope.md` 路径、`S2P1_path_list.json`、`S2P1_operator_model.json`、`S2P1_low_configs.json` 路径、产出写入路径 | Phase 1 全部完成 | `S2P2_analysis_data.json` 已写入，assemble_dim_spec.py 已运行生成 `S2P2_dim_spec.json`，pick_dims.py 已生成 `S2P2_param_def_groups.json` 并格式化，build_param_def.py 已运行产出 `S2P2_param_def.json`，`S2P2_gen_cases.py` + `S2P2_cases.json` + `S2P2_traceability.md` 已生成 |
 | Phase 3a | 处理 disputed 路径 | 主 Agent | — | Task D 返回的 disputed 列表 | Phase 2 完成 | `S2P1_path_list.json` 已更新（reachability + group） |
-| Phase 3b | 生成测试设计文档 | 主 Agent | `04-test-design-template.md` | `S2P2_param_def.json`、`S2P1_low_configs.json`、Phase 3a 确认结果 | Phase 3a 完成 | `S2P3_test_design.md` 已生成 |
+| Phase 3b | 生成测试设计文档 | 主 Agent + 脚本 `scripts/generate_test_design.py` | `04-test-design-template.md` | `S2P1_path_list.json`、`S2P1_operator_model.json`、`S2P1_low_configs.json`、`S2P2_param_def.json`、`S2P2_cases.json`、`S2P2_traceability.md`、Phase 3a 确认结果 | Phase 3a 完成 | `S2P3_test_design.md` 已生成，脚本区/LLM区/verifier区 marker 均存在 |
 
 **并行规则**：
 - Phase 0：scout_t.py + scout_k.py 脚本并行执行，两者完成后派 Scout-Verify
 - Phase 1：Task A、B、C **并行**派发（无依赖）
 - Phase 2：Task D **串行**（依赖 Phase 1 全部完成）
 - Phase 3：3a 和 3b **串行**（3b 依赖 3a 完成）
+
+### Phase 0 命令模板
+
+Scout-T：
+
+```bash
+python3 {skill_base}/scripts/scout_t.py \
+  --op-name {op_name} \
+  --op-path {op_path} \
+  --npu-arch {npu_arch} \
+  --soc-version {soc_version}
+```
+
+Scout-K：
+
+```bash
+python3 {skill_base}/scripts/scout_k.py \
+  --op-name {op_name} \
+  --op-path {op_path} \
+  --npu-arch {npu_arch} \
+  --soc-version {soc_version}
+```
+
+Scout-Verify：
+
+```bash
+python3 {skill_base}/scripts/s2p0_verify.py \
+  --op-name {op_name} \
+  --op-path {op_path} \
+  --npu-arch {npu_arch} \
+  --soc-version {soc_version}
+```
+
+如需记录耗时，可在命令前加 `/usr/bin/time -p`。耗时记录只用于观察，不参与流程判定。
 
 **校验失败处理**：
 
@@ -91,6 +136,7 @@
 | `{source_scope_path}` | S2P0_source_scope.md 路径 | Phase 0 产出 |
 | `{scout_t_path}` | S2P0_scout_t.md 路径 | Phase 0 产出 |
 | `{scout_k_path}` | S2P0_scout_k.md 路径 | Phase 0 产出 |
+| `{scout_k_json_path}` | S2P0_scout_k.json 路径 | Phase 0 产出 |
 | `{path_list_path}` | S2P1_path_list.json 路径 | Phase 1 产出 |
 | `{operator_model_path}` | S2P1_operator_model.json 路径 | Phase 1 产出 |
 | `{low_configs_path}` | S2P1_low_configs.json 路径 | Phase 1 产出 |
@@ -114,11 +160,20 @@
 - 产出写入路径：{output_dir}
 - S2P0_scout_t.md 路径：{scout_t_path}
 - S2P0_scout_k.md 路径：{scout_k_path}
+- S2P0_scout_k.json 路径：{scout_k_json_path}
 - S2P0_source_scope.md 路径：{source_scope_path}
 
 源码读取范围：Read `{source_scope_path}` 获取文件清单，严格按该文件列出的范围读取，不得自行添加。
 
-请生成 `S2P1_path_list.json` 和 `S2P1_tiling_glossary.md` 到产出路径。完成后返回产出的文件路径和关键发现摘要（路径总数、分组数、disputed 路径列表）。
+请先生成 `S2P1_path_config.json` 到产出路径（路径主体见 `{skill_base}/references/task-a/04-path-config-schema.md` §路径主体，完整性配置见 `{skill_base}/references/task-a/04-path-config-schema.md` §完整性配置），然后运行以下脚本自动产出最终文件：
+
+python3 {skill_base}/scripts/build_path_list.py \
+  --config {output_dir}/S2P1_path_config.json \
+  --scout-k {scout_k_json_path} \
+  --output-dir {output_dir}
+
+
+脚本将自动产出 `S2P1_path_list.json` 和 `S2P1_tiling_glossary.md`。完成后返回产出的文件路径和关键发现摘要（路径总数、分组数、disputed 路径列表）。
 ```
 
 ---
@@ -202,6 +257,28 @@ Task D 返回的 disputed 列表（路径可达性不确定的条目）由主 Ag
    - accepted → reachable
    - excluded → dead 并记录原因
 4. 无 disputed 则跳过此步骤
+
+## Phase 3b：测试设计文档生成规则
+
+主 Agent 必须先 Read `04-test-design-template.md`，然后按该文档执行两段式生成：
+
+1. 运行脚本生成脚本区：
+
+```bash
+python3 {skill_base}/scripts/generate_test_design.py \
+  --op-name {op_name} \
+  --op-path {op_path} \
+  --output-dir {output_dir}
+```
+
+2. 脚本通过后，主 Agent 只填写 `<!-- BEGIN LLM ANALYSIS SECTION -->` 与 `<!-- END LLM ANALYSIS SECTION -->` 之间的 LLM 分析区。禁止修改脚本生成区事实。
+
+3. 生成后确认 `S2P3_test_design.md` 包含脚本区、LLM 分析区、verifier 区 marker，并包含以下兼容锚点：
+   - `### 3.1 代码路径全景`
+   - `### 3.2 测试关注点（groups）`
+   - `### 6.2 关键派生变量`
+   - `### 6.3 执行模式分析`
+   - `## 8. Step 3 验证结论（原 §9 验证结论）`
 
 ## 文件索引
 

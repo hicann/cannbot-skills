@@ -40,6 +40,8 @@ def parse_args():
 _TILING_KEY_PATTERNS = [
     re.compile(r"Tiling Key:\s*(\d+)"),
     re.compile(r"tilingKey:\s*(\d+)"),
+    re.compile(r"tilingKey=\s*(\d+)"),
+    re.compile(r"tiling key \[(\d+)\]"),
 ]
 
 

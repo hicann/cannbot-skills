@@ -33,7 +33,7 @@ Step 1 输入收集 — 检测平台 + 收集参数
   ↓
 Step 2 源码分析 — tiling/kernel 路径提取（Phase 0→1→2→3）
   ↓
-Step 3 交叉验证 — 独立视角校验测试设计
+Step 3 Task D Contract Gate — 校验最终用例 JSON 覆盖契约
   ↓
 Step 4 用户确认 ⏸ — 确认后继续（可跳过）
   ↓
@@ -77,6 +77,7 @@ Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
 ### 主 Agent / 子 Agent 职责分工
 
 - **执行分工**：每个任务有明确的执行主体（见 workflow.md「参考提示词索引」表的「执行方」列），执行主体负责 Read 对应的参考文档并完成任务。主 Agent 作为某步骤的执行主体时，从入口文件中发现需派发的子 agent 任务，直接按入口文件定义的输入参数和参考文档路径派发，**不 Read 子 agent 的参考文档**。
+- **Phase 0 例外**：Step 2 Phase 0 只按固定命令模板执行脚本并检查产物，禁止读取或分析脚本源码。
 
 ### 子 agent 派发规则
 
@@ -122,9 +123,9 @@ Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
 | `references/workflow.md` | 主流程（Step 1-6 + TTK 模块） |
 | `references/S1-input-collection.md` | Step 1 输入收集规则 |
 | `references/source-analysis/` | Step 2 源码分析（执行总纲 + 7 个子文档） |
-|   ├── `task-a/` | Phase 1 Task A 代码路径分析（reading rules + 4 个子文档） |
+|   ├── `task-a/` | Phase 1 Task A 代码路径分析（overview + step1-tiling + step2-trace + step3-kernel + path-config-schema） |
 |   └── `task-d/` | Phase 2 Task D 参数推导（6 个子文档） |
-| `references/design-verifier/` | Step 3 交叉验证（执行总纲 + 4 个子文档） |
+| `references/design-verifier/` | Step 3 Task D Contract Gate（单文件入口） |
 | `references/case-mapper/` | Step 5 case mapper（执行总纲 + 5 个子文档） |
 |   └── `01-mapping-spec.md` | Step 5a-pre 映射规格生成 |
 | `references/pytest-gen/` | Step 6 pytest 规则与模板 |

@@ -2,112 +2,205 @@
 
 ## 用途
 
-源码分析完成后，根据此模板生成 S2P3_test_design.md。
-输入来源：参数推导结果（`S2P2_param_def.json`）+ 常见网络 shape（`low_configs`）+ 用户确认结果。
+源码分析完成后，Phase 3b 生成 `S2P3_test_design.md`。该文件用于固化 Step 2 的路径、group、参数维度与 case 设计，并作为 Step 3 后验证结论写回和 Step 4 用户确认的依据。
 
-## 必填章节
+Phase 3b 分为两段：
+
+1. 脚本生成区：由 `{skill_base}/scripts/generate_test_design.py` 从标准产物确定性生成。
+2. LLM 分析区：由主 Agent 基于脚本生成区和 Step 2 产物补充分析，不得修改脚本生成区事实。
+
+最终输出文件路径保持不变：`{output_dir}/S2P3_test_design.md`。
+
+## 输入文件
+
+脚本默认读取 `{output_dir}` 下的以下文件：
+
+| 文件 | 用途 |
+|------|------|
+| `S2P1_path_list.json` | 路径、conditions、kernel、reachability、group |
+| `S2P1_operator_model.json` | inputs / outputs / attributes / API 暴露差异 |
+| `S2P1_low_configs.json` | 常见网络配置数量统计 |
+| `S2P2_param_def.json` | group 顺序、per_dtype 参数维度、tiling_keys |
+| `S2P2_cases.json` | case 总数、按 group/key/dtype 分布 |
+| `S2P2_traceability.md` | LLM 分析区的推导链依据 |
+
+## 生成命令
+
+```bash
+python3 {skill_base}/scripts/generate_test_design.py \
+  --op-name {op_name} \
+  --op-path {op_path} \
+  --output-dir {output_dir}
+```
+
+默认行为：
+
+- 文件不存在：生成脚本区、LLM 分析区占位、verifier 区。
+- 文件存在：只替换脚本区，保留 LLM 分析区和 verifier 区。
+- `--force`：重写整个文件。
+- `--overwrite-llm-section`：重置 LLM 分析区。
+
+## 分区标记
+
+`S2P3_test_design.md` 必须包含以下 marker，用于脚本重跑和 Step 3 写回定位：
+
+```markdown
+<!-- BEGIN SCRIPT GENERATED SECTION -->
+...
+<!-- END SCRIPT GENERATED SECTION -->
+
+<!-- BEGIN LLM ANALYSIS SECTION -->
+...
+<!-- END LLM ANALYSIS SECTION -->
+
+<!-- BEGIN VERIFIER SECTION -->
+...
+<!-- END VERIFIER SECTION -->
+```
+
+## 章节结构（强制）
 
 ```markdown
 # {OpName} 白盒测试设计
 
-## 1. 输入概览
-| 输入类别 | 是否提供 | 说明 |
-|----------|----------|------|
-| torch 接口 | 是/否 | |
-| tiling 代码 | 是/否（框架代理） | |
-| kernel 代码 | 是/否 | |
-| 资料描述 | 是/否 | |
+<!-- BEGIN SCRIPT GENERATED SECTION -->
+## 1. 生成与输入摘要
+## 2. 接口与参数模型
+## 3. 路径与 Group 覆盖
+### 3.1 代码路径全景
+### 3.2 测试关注点（groups）
+## 4. Case 枚举与一致性校验
+## 5. 自动发现的未确认项
+<!-- END SCRIPT GENERATED SECTION -->
 
-## 2. 事实摘要
-| 项目 | 结论 | 来源类别 | 类型 |
-|------|------|----------|------|
+<!-- BEGIN LLM ANALYSIS SECTION -->
+## 6. 测试设计分析
+### 6.1 事实摘要与设计结论
+### 6.2 关键派生变量
+### 6.3 执行模式分析
+## 7. 风险与补充建议
+<!-- END LLM ANALYSIS SECTION -->
 
-## 3. 代码路径全景
-
-从 tiling 入口到 kernel 叶子节点的完整分支树（主 Agent 根据 S2P1_path_list.json 的 paths 数组和 source_constraints 重建）：
-
----```
-{op_name} ({平台}路径)
-├── 条件 ...
-│   └── [路径名] ...
-│       ├── 子条件 ... → 函数/指令
-│       └── 子条件 ... → 函数/指令
-└── 条件 ...
-    └── ...
----```
-
-共 {N} 条路径（N 必须等于 S2P1_path_list.json paths 数组长度），分为 {M} 个 group（M 必须等于 S2P2_param_def.json groups 数组长度）。
-
-**约束**：
-- 每条路径必须单独列出，禁止折叠（如"内部复用各 tiling mode"的概述写法不允许）
-- 路径 ID 必须与 S2P1_path_list.json 中的 id 一一对应
-- 路径总数 N = S2P1_path_list.json paths 数组长度（不含 disputed）
-- group 总数 M = S2P2_param_def.json groups 数组长度
-
-## 4. 关键派生变量
-| 变量 | 公式 | 依赖项 | 是否参与分支 | 来源 |
-|------|------|--------|--------------|------|
-
-## 5. 测试关注点（groups）
-
-每个 group 自包含：路由条件 + 约束 + 维度表 + 预估组合数。
-
-**约束**：
-- group 列表必须与 S2P2_param_def.json groups 数组完全一致（数量、id、顺序）
-- 每个 group 中的维度值必须与 S2P2_param_def.json 中对应 group 的 per_dtype 取值列表及 group 级维度字段一致，标量属性默认值必须与 S2P1_operator_model.json 的 attributes 默认值一致
-- 禁止在 S2P3_test_design.md 中引入 S2P2_param_def.json 中不存在的维度值
-- 每个 group 的 constraints 描述必须与 S2P2_param_def.json 中对应 group 的 constraints 语义一致
-
-### 5.N {group_id}
-**路由条件**：{什么条件进入此路径}
-**约束**：{此路径下的参数限制}
-
-| 维度 | 值或边界 | 轴角色 | 来源 |
-|------|---------|--------|------|
-| {dim_name} | {values or thresholds} | {core_split / ub_tile / instruction_align / attr} | {source:line} |
-
-**预估组合数**：估算 ~{N}
-
-（重复 5.1, 5.2, ... 每个 group）
-
-## 6. 执行模式分析
-
-### 轴映射
-| 执行层级 | 映射轴 | 控制变量 | 来源 |
-|---------|--------|---------|------|
-| 分核 | {axis_name} | {CeilDiv(dim, coreNum)} | {source} |
-| UB 切分 | {axis_name} | {UbFactor 公式} | {source} |
-| 指令对齐 | {axis_name} | {BLOCK_ELEM / VL 常量} | {source} |
-
-### 三层覆盖策略
-| 层级 | 模式 | 触发条件 | 对应维度取值 |
-|------|------|---------|-------------|
-| 分核 | 未开满核 | dim < coreNum | {dim}=1 |
-| 分核 | 开满核无尾核（单倍） | dim == coreNum | {dim}={coreNum} |
-| 分核 | 开满核无尾核（多倍） | dim == k*coreNum | {dim}=2*coreNum, 4*coreNum |
-| 分核 | 开满核有尾核 | dim % coreNum != 0 | {dim}={coreNum+1} |
-| UB | 单 pass | 数据量 <= UbFactor | {dim} 取小值 |
-| UB | 多 pass + 尾块 | 数据量 > UbFactor 且不整除 | {dim} 取大值 |
-| 指令 | 对齐 | dim % vectorWidth == 0 | {dim}={aligned_value} |
-| 指令 | 非对齐 | dim % vectorWidth != 0 | {dim}={k*v-1 展开值} |
-
-## 7. 未确认项
-
-以下内容无法从当前输入中确认，**需要用户决定**：
-
-| # | 问题 | 原因 | 建议处理 |
-|---|------|------|---------|
-| 1 | {问题} | {为什么不确定} | 忽略 / 需要补充信息 / 需要额外测试 |
-
-Step 2 完成后，将此表展示给用户，等用户逐条确认或补充后再继续。
-
-## 8. 设计估算
-| 项目 | 值 | 说明 |
-|------|----|------|
-
-## 9. 验证结论
+<!-- BEGIN VERIFIER SECTION -->
+## 8. Step 3 验证结论（原 §9 验证结论）
 （Step 3 完成后由 verifier 填写）
+<!-- END VERIFIER SECTION -->
 ```
+
+## 脚本生成区要求
+
+### 1. 生成与输入摘要
+
+由脚本生成，包含：
+
+- 算子名、平台、输出目录。
+- 输入文件解析状态。
+- path 数、group 数、case 数、low config 数。
+- reachability 分布。
+
+### 2. 接口与参数模型
+
+由脚本从 `S2P1_operator_model.json` 生成：
+
+- inputs / outputs / attributes 表。
+- dtype / rank / shape / value_domain 摘要。
+- 若存在 API 暴露差异（如 `torch_npu_api_exposure.param_gaps`），必须展示。
+
+### 3. 路径与 Group 覆盖
+
+本章是 Phase 3 的事实核心，必须由脚本确定性生成。
+
+#### 3.1 代码路径全景
+
+脚本必须逐条列出 `S2P1_path_list.json` 中每个 path：
+
+| 字段 | 来源 |
+|------|------|
+| path id | `paths[*].id` |
+| tiling key | `paths[*].tiling_key` |
+| reachability | `paths[*].reachability` |
+| group | `paths[*].group` |
+| conditions | `paths[*].conditions` |
+| kernel | `paths[*].key_instructions` |
+| source | `paths[*].source` |
+
+禁止折叠或只写概要。path 数必须等于 `len(S2P1_path_list.json.paths)`。
+
+#### 3.2 测试关注点（groups）
+
+脚本必须按 `S2P2_param_def.json.groups` 顺序列出每个 group：
+
+- `id`
+- `mode`
+- `constraint_note`
+- `per_dtype`
+- `path`
+- `key`
+- entry 中除 `path` / `key` 外的所有维度字段
+
+维度字段必须通用遍历，禁止 hardcode `numCol`、`numRow`、`M/N/K` 等具体变量名。禁止引入 `S2P2_param_def.json` 中不存在的维度值。
+
+### 4. Case 枚举与一致性校验
+
+脚本生成：
+
+- `S2P2_cases.json` case 总数。
+- 按 `_group` / `key` 分布。
+- 若 `S2P2_param_def.json.dtype_tensors[*].param` 存在，按对应 dtype 参数统计。
+- 自动一致性校验表。
+
+脚本必须执行以下硬校验，失败则不得进入 LLM 分析或 Step 3：
+
+1. 必需输入文件存在且 JSON 可解析。
+2. path ID 唯一且非空。
+3. group ID 和顺序可读取。
+4. reachable path 必须有 group。
+5. `param_def.groups[*].per_dtype[*].path` 必须存在于 path list。
+6. `S2P2_cases.json[*].path` 必须存在于 path list。
+
+### 5. 自动发现的未确认项
+
+脚本根据结构化字段自动生成：
+
+- `reachability == disputed` 的 path。
+- `reachability == api_warn` / `api_dead` / `dead` 的 path。
+- `S2P1_operator_model.json` 中的 `param_gaps`。
+- `S2P1_path_list.json.completeness_checklist.unresolved_items`。
+
+无未确认项时写“无”。
+
+## LLM 分析区要求
+
+LLM 只能填写 `<!-- BEGIN LLM ANALYSIS SECTION -->` 与 `<!-- END LLM ANALYSIS SECTION -->` 之间的内容，禁止修改脚本生成区和 verifier 区。
+
+LLM 必须遵守：
+
+- 只基于脚本生成区、`S2P2_traceability.md`、`S2P1_path_list.json.source_constraints`、`S2P1_operator_model.json` 分析。
+- 不得新增 `S2P2_param_def.json` 中不存在的维度值。
+- 不得改写 path/group/reachability/key 等脚本区事实。
+- 信息不足时明确写“未从结构化产物中得到稳定结论”，不得猜测。
+
+### 6. 测试设计分析
+
+包含三个小节：
+
+1. `6.1 事实摘要与设计结论`：概述可覆盖路径、group 设计、主要不可达或 API 警告情况。
+2. `6.2 关键派生变量`：优先基于 `S2P2_traceability.md` 的推导链；无稳定信息时引用 `source_constraints`。
+3. `6.3 执行模式分析`：分析分核、UB、对齐、尾块、特殊路径等；无稳定信息时明确说明。
+
+### 7. 风险与补充建议
+
+汇总：
+
+- API 暴露限制。
+- dead/orphan 路径是否需要专项验证。
+- disputed/api_warn 的处理建议。
+- 是否需要额外 case。
+- 是否可进入 Step 3。
+
+## Verifier 区要求
+
+`## 8. Step 3 验证结论（原 §9 验证结论）` 保留给 Step 3 后写回。Step 3 / Step 4 流程引用“验证结论节”时，统一指该章节。
 
 ## 通用维度指引
 
@@ -131,16 +224,8 @@ Step 2 完成后，将此表展示给用户，等用户逐条确认或补充后�
 | with_inf | 正常数据中混入 inf | inf 传播处理 |
 | with_nan | 正常数据中混入 nan | nan 传播处理 |
 
-不需要全部包含——根据算子语义选择有意义的。量化算子至少需要 normal/zero/extreme/negative。
-
-**定义域约束**：当 `S2P1_operator_model.json` 中某输入的 `value_domain` 非 null 时，Step 5c 的 `expand_high()` 会自动过滤不兼容的 data_range 标签，`make_data("normal")` 会约束生成范围。设计阶段无需手动裁剪 data_range 列表，但需在 S2P3_test_design.md 中标注哪些输入有 value_domain 约束。
+定义域约束：当 `S2P1_operator_model.json` 中某输入的 `value_domain` 非 null 时，Step 5c 的 `expand_high()` 会自动过滤不兼容的 data_range 标签。
 
 ### ndim
 
-如果算子支持多种 rank（如 ndim 2~8），加为维度：
-
-```json
-"ndim": [2, 3, 4]
-```
-
-pytest 代码根据 ndim 构造不同 rank 的 tensor（如 ndim=2 → `[batch, D]`，ndim=4 → `[B, N, S, D]`）。如果算子固定 ndim（如必须 4D），不加此维度。
+如果算子支持多种 rank（如 ndim 2~8），可在参数定义中加入 ndim 维度。脚本只展示 `S2P2_param_def.json` 中已有维度，不自行推导 ndim。

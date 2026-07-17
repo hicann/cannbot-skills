@@ -14,7 +14,7 @@ Reads S2P0_scout_t.json and S2P0_scout_k.json, verifies all files exist,
 and outputs S2P0_file_manifest.json for downstream consumption.
 
 Usage:
-    python verify.py \
+    python s2p0_verify.py \
         --op-name AddRmsNorm \
         --op-path /path/to/operator \
         --npu-arch DAV_2201 \
@@ -40,7 +40,7 @@ PLATFORM_MAP = {
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Verify: Aggregate scout outputs")
+    parser = argparse.ArgumentParser(description="S2P0 Verify: Aggregate scout outputs")
     parser.add_argument("--op-name", required=True, help="Operator name")
     parser.add_argument("--op-path", required=True,
                         help="Operator source directory")
