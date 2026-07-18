@@ -1,4 +1,10 @@
 ## 🔥 更新日志
+### 【2026-07-18】
+#### 架构重构 Architecture Refactoring
+- 【ST测试框架】重构评测用例组织架构：将集中式 `tests/system/cases/` 目录下的 95 个评测用例迁移到对应 Skill/Team 目录下的 `evals/evals.md`，实现测试用例与 Skill 代码内聚，便于维护和版本控制。
+- 【测试框架】修改 `common.py`、`conftest.py`、`main.py`，替换为分布式发现逻辑，从 Skill/Team 本地目录扫描和加载评测用例。
+- 【测试框架】新增 `migrate_evals.sh` 迁移脚本，支持一键迁移评测用例。
+
 ### 【2026-07-13】
 #### 问题修复 Bug Fix
 - 【cannbot-insight】加固 `start.sh -c` 的 CLI 参数边界，命令与附加参数逐项传递，避免词分割和路径名展开。

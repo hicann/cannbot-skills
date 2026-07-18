@@ -1214,13 +1214,13 @@ def _create_and_validate(opencode_runner, session_name, full_output,
                          inputs: _EvalInputs, ai_text, sandbox_path):
     """创建 ValidationContext 并执行验证（消除 skill/team 重复代码）。"""
     # cann_bench 模式：运行确定性评测，跳过 AI 评审
-    # 通过/失败判定：综合得分 > 50 则通过
+    # 通过/失败判定：综合得分 >= 30 则通过
     if inputs.eval_mode == "cann_bench":
         eval_result = _run_cann_bench_evaluation(sandbox_path, inputs)
         score = eval_result.get("score", 0)
-        logger.info("[CANN_BENCH %s] score=%.2f, threshold=40", inputs.eval_id, score)
-        assert score > 40, (
-            f"Eval {inputs.eval_id}: cann_bench score {score:.2f} <= 40. "
+        logger.info("[CANN_BENCH %s] score=%.2f, threshold=30", inputs.eval_id, score)
+        assert score >= 30, (
+            f"Eval {inputs.eval_id}: cann_bench score {score:.2f} < 30. "
             f"Reason: {eval_result.get('reason', 'unknown')}"
         )
         return

@@ -50,8 +50,6 @@ tests/system/
 ├── docs/
 │   ├── USER_GUIDE.md                # 框架使用指南
 │   └── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # 本文档
-├── cases/                           # 集中式评测用例（MD 格式）
-│   └── <skill_or_team_name>_evals.md # Skill 用 skill_name，Team 用 team_name
 ├── sandboxes/                       # 用例执行隔离沙箱（自动创建）
 │   └── <name>_eval_<id>/
 │       ├── .opencode/
@@ -92,8 +90,9 @@ tests/system/
     │   └─ 从变更文件路径中提取 skill 或 team 名称
     │
     ├─ 步骤2：加载评测用例
-    │   └─ 读取 tests/system/cases/<name>_evals.md
-    │       （Skill 用 skill_name，Team 用 team_name frontmatter）
+    │   └─ 从 Skill/Team 本地目录读取 evals/evals.md
+    │       （Skill: {skill_dir}/{skill_name}/evals/evals.md）
+    │       （Team: {team_dir}/{team_name}/evals/evals.md）
     │
     ├─ 步骤3：执行评测 — 逐个 target 进行
     │   ├─ Phase 1: 静态结构验证
@@ -294,13 +293,22 @@ cann_bench 模式使用 cann-bench 项目的确定性评测管道，替代 AI �
 
 ### 2.1 用例文件组织
 
-ST 用例以 **MD 文件** 的形式存放在 `tests/system/cases/` 目录下，命名规则为：
+ST 用例以 **MD 文件** 的形式存放在每个 Skill/Team 目录下的 `evals/` 子目录中：
 
 ```
-tests/system/cases/<skill_name>_evals.md
+{skill_dir}/{skill_name}/evals/evals.md    # Skill 评测用例
+{team_dir}/{team_name}/evals/evals.md      # Team 评测用例
 ```
 
-> **注意**：用例文件不再放在各 skill 目录下的 `evals/evals.json`，而是集中管理在 `cases/` 目录，以便统一维护和 CI 检测。
+支持的目录（由 `st-test.config` 配置）：
+- `ops/`
+- `graph/`
+- `model/`
+- `infra/`
+- `plugins-official/`
+- `plugins-community/`
+
+> **注意**：评测用例与 Skill/Team 代码同目录存放，便于维护和版本控制。测试框架会自动扫描配置的目录，发现包含 `evals/evals.md` 的实体。
 
 ### 2.2 用例文件格式
 
@@ -656,7 +664,7 @@ output/ 目录应只包含以下文件：
 
 ### 2.7 完整用例示例
 
-以下是一个 Skill 的完整用例文件示例（`tests/system/cases/cann-env-setup_evals.md`）：
+以下是一个 Skill 的完整用例文件示例（`ops/cann-env-setup/evals/evals.md`）：
 
 ```markdown
 ---
@@ -809,7 +817,7 @@ CANN安装完成后，如何验证安装是否成功？
    ├─ Phase 1: python -m pytest tests/system/scripts/test_skill_basic.py -v -k "<skill>"
    └─ Phase 2: python -m pytest tests/system/scripts/test_skill_evals.py --skill <skill> -v
        │
-6. 提交到 tests/system/cases/ 目录
+6. 提交到 {skill_dir}/{skill_name}/evals/ 目录
        │
 7. CI 自动验证（PR 时 gate_check.sh 自动触发）
 ```
@@ -853,7 +861,7 @@ team_whitelist:             # Team 白名单：仅这些 team 触发评测
 
 **Q3: 如何给一个 Skill 新增第一个 ST 用例？**
 
-1. 在 `tests/system/cases/` 下创建 `<skill_name>_evals.md`
+1. 在 `{skill_dir}/{skill_name}/evals/` 下创建 `evals.md`
 2. 确保 `config/st-test.config` 中的 `skill_dirs` 包含该 skill 所在目录
 3. 如果启用了 `skill_whitelist`，将 skill 名称加入白名单
 4. 运行 Phase 1 静态验证确认格式正确

@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 FRAMEWORK_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = FRAMEWORK_DIR / "config" / "st-test.config"
 REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
-EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
 SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
 
@@ -113,11 +112,64 @@ def discover_all_entities(
     return sorted(entities)
 
 
+def _match_target_type(evals_file: Path, target_type: str) -> bool:
+    """验证 evals 文件的 target_type 是否匹配。"""
+    from evals_parser import parse_evals_md
+
+    try:
+        data = parse_evals_md(evals_file)
+    except Exception as e:
+        logger.warning("Failed to parse evals file %s: %s", evals_file, e)
+        return False
+    return bool(data and data.get("target_type") == target_type)
+
+
+def _is_valid_evals_entity(item: Path, whitelist_set: Optional[Set[str]], target_type: Optional[str]) -> bool:
+    """判断目录项是否为含 evals/evals.md 的有效实体。"""
+    if not item.is_dir():
+        return False
+    if whitelist_set and item.name not in whitelist_set:
+        return False
+    evals_file = item / "evals" / "evals.md"
+    if not evals_file.exists():
+        return False
+    if target_type is not None and not _match_target_type(evals_file, target_type):
+        return False
+    return True
+
+
+def _scan_dir_for_evals(dir_rel: str, whitelist_set: Optional[Set[str]], target_type: Optional[str]) -> List[str]:
+    """扫描单个目录，返回含 evals/evals.md 的实体名称列表。"""
+    entity_dir = REPO_ROOT / dir_rel
+    if not entity_dir.exists():
+        return []
+    return [
+        item.name for item in entity_dir.iterdir()
+        if _is_valid_evals_entity(item, whitelist_set, target_type)
+    ]
+
+
+def _collect_entity_with_evals(
+    dir_keys: List[str],
+    whitelist: List[str],
+    target_type: Optional[str],
+) -> List[str]:
+    """遍历多个目录键搜索包含 evals/evals.md 的实体。"""
+    entities: List[str] = []
+    whitelist_set = set(whitelist) if whitelist else None
+    for dir_key in dir_keys:
+        for dir_rel in load_common_config().get(dir_key, []):
+            entities.extend(_scan_dir_for_evals(dir_rel, whitelist_set, target_type))
+    return entities
+
+
 def discover_entities_with_evals(
     whitelist_key: str,
     target_type: Optional[str] = None,
 ) -> List[str]:
-    """发现 cases/ 目录下有 evals.md 文件的实体。
+    """从 Skill/Team 目录下的 evals/evals.md 发现评测用例。
+
+    扫描 skill_dirs/team_dirs 配置的目录，查找包含 evals/evals.md 的实体。
 
     Args:
         whitelist_key: 白名单配置键名
@@ -126,34 +178,50 @@ def discover_entities_with_evals(
     Returns:
         排序后的实体名称列表
     """
+    config = load_common_config()
+    whitelist = config.get(whitelist_key, [])
+
+    dir_keys = []
+    if target_type == "skill":
+        dir_keys = ["skill_dirs"]
+    elif target_type == "team":
+        dir_keys = ["team_dirs"]
+    else:
+        dir_keys = ["skill_dirs", "team_dirs"]
+
+    return sorted(_collect_entity_with_evals(dir_keys, whitelist, target_type))
+
+
+def load_entity_evals_md(entity_name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """从 {skill_dir}/{entity_name}/evals/evals.md 加载评测用例。
+
+    Args:
+        entity_name: 实体名称
+        entity_type: 限定范围，'skill' 只扫描 skill_dirs，'team' 只扫描 team_dirs，
+                     None 则扫描全部（默认）
+
+    Returns:
+        解析后的评测用例数据，未找到则返回 None
+    """
     from evals_parser import parse_evals_md
 
     config = load_common_config()
-    entities: List[str] = []
-    whitelist = config.get(whitelist_key, [])
-    if not EVALS_CASES_DIR.exists():
-        return entities
-    for f in EVALS_CASES_DIR.iterdir():
-        if not f.is_file() or not f.name.endswith("_evals.md"):
-            continue
-        candidate = f.name[: -len("_evals.md")]
-        if whitelist and candidate not in whitelist:
-            continue
-        if target_type is not None:
+    dir_keys = []
+    if entity_type == "skill":
+        dir_keys = ["skill_dirs"]
+    elif entity_type == "team":
+        dir_keys = ["team_dirs"]
+    else:
+        dir_keys = ["skill_dirs", "team_dirs"]
+
+    for dir_key in dir_keys:
+        for dir_rel in config.get(dir_key, []):
+            evals_file = REPO_ROOT / dir_rel / entity_name / "evals" / "evals.md"
+            if not evals_file.exists():
+                continue
             try:
-                data = parse_evals_md(f)
+                return parse_evals_md(evals_file)
             except Exception as e:
-                logger.warning("Failed to parse evals file %s: %s", f, e)
-                continue
-            if not data or data.get("target_type") != target_type:
-                continue
-        entities.append(candidate)
-    return sorted(entities)
-
-
-def load_entity_evals_md(entity_name: str) -> Optional[Dict[str, Any]]:
-    """从 cases/<entity_name>_evals.md 加载评测用例。"""
-    from evals_parser import parse_evals_md
-
-    evals_path = EVALS_CASES_DIR / f"{entity_name}_evals.md"
-    return parse_evals_md(evals_path)
+                logger.warning("Failed to parse evals file %s: %s", evals_file, e)
+                return None
+    return None

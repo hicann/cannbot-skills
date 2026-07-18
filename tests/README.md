@@ -89,13 +89,6 @@ tests/
 │   ├── config/
 │   │   ├── st-test.config       # skill/team 扫描路径与白名单配置
 │   │   └── review-template.md   # 评审 Agent 填写的评分模板
-│   ├── cases/                  # 评测用例（Markdown 格式，skill/team 共用）
-│   │   ├── ascendc-env-check_evals.md    # Skill 评测用例
-│   │   ├── ascendc-task-focus_evals.md
-│   │   ├── cann-env-setup_evals.md
-│   │   ├── gitcode-issue-gen_evals.md
-│   │   ├── pypto-op-design_evals.md
-│   │   └── ops-direct-invoke_evals.md    # Team 评测用例（team_name 标记）
 │   ├── docs/
 │   │   ├── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # ST 设计规范与开发指南
 │   │   └── USER_GUIDE.md                       # ST 框架使用指南
@@ -114,7 +107,8 @@ tests/
 │       ├── test_opencode_runner.py  # opencode_runner 单元测试
 │       ├── opencode_runner_examples.py  # opencode_runner 使用示例
 │       ├── pytest.ini           # pytest 渲染配置
-│       └── requirements.txt     # Python 依赖
+│       ├── requirements.txt     # Python 依赖
+│       └── migrate_evals.sh     # 评测用例迁移脚本
 │
 ├── lib/
 │   ├── test-helpers.sh          # 测试辅助函数
@@ -209,7 +203,7 @@ python run_eval.py --skill <skill-name> --html-report
 
 #### 为一门新 Skill 编写评测用例
 
-1. 在 `tests/system/cases/` 下创建 `<skill-name>_evals.md` 文件：
+1. 在 `{skill_dir}/{skill_name}/evals/` 下创建 `evals.md` 文件：
 
 ```markdown
 ---
@@ -521,7 +515,7 @@ ST（System Test）框架是一个基于 Python/pytest 的 AI 语义评测系统
     │   └─ 从变更文件路径中提取 skill 或 team 名称
     │
     ├─ 步骤2：加载评测用例
-    │   └─ 读取 tests/system/cases/<name>_evals.md
+    │   └─ 读取 {skill_dir}/{skill_name}/evals/evals.md
     │       （Skill 用 skill_name，Team 用 team_name frontmatter）
     │
     ├─ 步骤3：执行评测 — 逐个 target 进行（Phase 1 失败则跳过 Phase 2）
@@ -928,7 +922,7 @@ fi
 
 ### ST 系统测试评测用例
 
-在 `tests/system/cases/` 下创建 `<name>_evals.md` 文件（Skill 用 `skill_name`，Team 用 `team_name`）：
+在 `{skill_dir}/{skill_name}/evals/` 下创建 `evals.md` 文件（Skill 用 `skill_name`，Team 用 `team_name`）：
 
 ```markdown
 ---

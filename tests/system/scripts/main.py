@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from common import (
     load_common_config,
     find_entity_path,
-    EVALS_CASES_DIR,
+    load_entity_evals_md,
 )
 from subprocess_streamer import run_subprocess_streaming
 
@@ -44,6 +44,28 @@ class _EntityParams:
     dir_check_fn: Callable
 
 
+def _find_matching_timeout(evals_data: Dict[str, Any], eval_id: str) -> Optional[int]:
+    """在 evals 数据中搜索指定 eval_id 的 timeout。"""
+    for e in evals_data.get("evals", []):
+        if str(e.get("id")) == str(eval_id):
+            t = e.get("timeout")
+            if t and isinstance(t, (int, float)):
+                return int(t)
+    return None
+
+
+def _search_eval_timeout(target_names: List[str], eval_id: str) -> int:
+    """在指定 target 中搜索 eval_id 对应的 timeout。"""
+    for name in target_names:
+        evals_data = load_entity_evals_md(name)
+        if not evals_data:
+            continue
+        timeout = _find_matching_timeout(evals_data, eval_id)
+        if timeout is not None:
+            return timeout
+    return 1200
+
+
 class GateChecker:
     def __init__(self, repo_root: str, changed_files: List[str], eval_id: Optional[str] = None,
                  parallel: str = "1", report_only: bool = False,
@@ -58,7 +80,6 @@ class GateChecker:
         self.all_mode = all_mode
         self.test_skill_dir = self.repo_root / "tests" / "system"
         self.results_dir = self.test_skill_dir / "results"
-        self.evals_cases_dir = EVALS_CASES_DIR
         self.config = load_common_config()
         self._skip_report_template = self._load_skip_report_template()
 
@@ -77,15 +98,29 @@ class GateChecker:
                                 ("AGENTS.md", ".claude-plugin/plugin.json"))
 
     @staticmethod
+    def load_evals(skill_name: str) -> Optional[Dict[str, Any]]:
+        """从 Skill 本地目录加载评测用例。"""
+        return load_entity_evals_md(skill_name, entity_type="skill")
+
+    @staticmethod
+    def _discover_all() -> Tuple[List[str], List[str]]:
+        """扫描 Skill/Team 目录，返回 (skills, teams) 全量列表（受 whitelist 过滤）。"""
+        from common import discover_entities_with_evals
+        skills = set(discover_entities_with_evals("skill_whitelist", target_type="skill"))
+        teams = set(discover_entities_with_evals("team_whitelist", target_type="team"))
+        return sorted(skills), sorted(teams)
+
+    @staticmethod
     def _check_evals_file_change(parts: tuple, changed_set: set, entity_getter) -> None:
-        """检测集中式 evals 文件变更"""
-        if len(parts) < 3 or parts[:3] != ("tests", "system", "cases"):
+        """检测 evals 文件变更（新架构：{dir}/{entity}/evals/evals.md）。"""
+        if len(parts) < 4:
             return
-        filename = parts[-1]
-        if filename.endswith("_evals.md"):
-            candidate = filename[:-len("_evals.md")]
-            if entity_getter(candidate):
-                changed_set.add(candidate)
+
+        # 新架构：{dir}/{skill-name}/evals/evals.md
+        if parts[-2] == "evals" and parts[-1] == "evals.md":
+            entity_name = parts[-3]  # 提取 skill-name
+            if entity_getter(entity_name):
+                changed_set.add(entity_name)
 
     @staticmethod
     def _check_opencode_available() -> bool:
@@ -99,42 +134,17 @@ class GateChecker:
         return False
 
     @staticmethod
-    def _parse_eval_timeout(evals_path: Path, eval_id: str) -> Optional[int]:
-        """从 evals.md 文件中解析指定 eval_id 的 timeout 值。"""
-        from evals_parser import parse_evals_md
-        try:
-            data = parse_evals_md(evals_path)
-        except Exception:
-            return None
-        if not data:
-            return None
-        for e in data.get("evals", []):
-            if str(e.get("id")) == str(eval_id):
-                t = e.get("timeout")
-                if t and isinstance(t, (int, float)):
-                    return int(t)
-        return None
-
-    @staticmethod
-    def _resolve_max_eval_timeout(target_names: List[str], evals_cases_dir: Path) -> int:
+    def _resolve_max_eval_timeout(target_names: List[str]) -> int:
         """扫描所有目标的 evals 文件，取所有用例的最大 timeout。
         当未指定 eval_id 时使用，确保外层 pytest 子进程超时不小于最慢的单个用例。
         若无任何 timeout 配置，返回 1200。
         """
-        from evals_parser import parse_evals_md
         max_timeout = 0
         for name in target_names:
-            evals_path = evals_cases_dir / f"{name}_evals.md"
-            if not evals_path.exists():
+            evals_data = load_entity_evals_md(name)
+            if not evals_data:
                 continue
-            try:
-                data = parse_evals_md(evals_path)
-            except Exception as e:
-                logger.warning("解析 %s 的 evals 文件失败: %s", evals_path, e)
-                continue
-            if not data:
-                continue
-            for e in data.get("evals", []):
+            for e in evals_data.get("evals", []):
                 t = e.get("timeout")
                 if t and isinstance(t, (int, float)):
                     max_timeout = max(max_timeout, int(t))
@@ -157,17 +167,6 @@ class GateChecker:
             self._check_evals_file_change,
             self._check_entity_dir_change,
         ))
-
-    def load_evals(self, skill_name: str) -> Optional[Dict[str, Any]]:
-        evals_path = self.evals_cases_dir / f"{skill_name}_evals.md"
-        if not evals_path.exists():
-            return None
-        try:
-            from evals_parser import parse_evals_md
-            return parse_evals_md(evals_path)
-        except Exception as e:
-            logger.error("Error loading evals for %s: %s", skill_name, e)
-            return None
 
     def run_basic_validation(self, skill_name: str) -> bool:
         """
@@ -348,21 +347,6 @@ class GateChecker:
 
         return entities_with_evals
 
-    def _discover_all(self) -> Tuple[List[str], List[str]]:
-        """单次扫描 cases 目录，返回 (skills, teams) 全量列表（受 whitelist 过滤）。"""
-        skills: Set[str] = set()
-        teams: Set[str] = set()
-        for evals_file in self.evals_cases_dir.glob("*_evals.md"):
-            name = evals_file.name[:-len("_evals.md")]
-            if self.get_skill_dir(name):
-                skills.add(name)
-            if self.get_team_dir(name):
-                teams.add(name)
-
-        skills = self._filter_by_whitelist(skills, "skill_whitelist", "skill")
-        teams = self._filter_by_whitelist(teams, "team_whitelist", "team")
-        return sorted(skills), sorted(teams)
-
     def _filter_by_whitelist(self, items: Set[str], whitelist_key: str, label: str) -> Set[str]:
         """白名单过滤：仅保留在 whitelist 中的 item，记录被跳过的 item。"""
         whitelist = self.config.get(whitelist_key, [])
@@ -457,16 +441,8 @@ class GateChecker:
         if not target_names:
             return 1200
         if not self.eval_id:
-            # 未指定 eval_id → 取所有目标用例的最大 timeout
-            return self._resolve_max_eval_timeout(target_names, self.evals_cases_dir)
-        for name in target_names:
-            evals_path = self.evals_cases_dir / f"{name}_evals.md"
-            if not evals_path.exists():
-                continue
-            timeout = self._parse_eval_timeout(evals_path, self.eval_id)
-            if timeout is not None:
-                return timeout
-        return 1200
+            return self._resolve_max_eval_timeout(target_names)
+        return _search_eval_timeout(target_names, self.eval_id)
 
     def _run_basic_validation(self, test_script_name: str, target_name: str,
                                label: str) -> bool:

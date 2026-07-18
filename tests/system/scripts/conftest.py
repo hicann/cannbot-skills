@@ -35,7 +35,6 @@ if sys.platform == 'win32':
 FRAMEWORK_DIR = Path(__file__).parent.parent  # skill-test-framework/
 CONFIG_PATH = FRAMEWORK_DIR / "config" / "st-test.config"
 REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
-EVALS_CASES_DIR = FRAMEWORK_DIR / "cases"  # 集中式 evals 存放目录
 LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
 SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
 CANN_BENCH_PATH = Path(os.environ.get(
@@ -463,13 +462,13 @@ def get_all_skills() -> List[str]:
 
 
 def get_skills_with_evals() -> List[str]:
-    """扫描 cases/ 目录，返回有 *_evals.md 文件的 skill 名称列表。"""
+    """发现有评测用例的 Skill（从 Skill 本地目录）。"""
     return discover_entities_with_evals("skill_whitelist", target_type="skill")
 
 
 def load_evals_md(skill_name: str) -> Optional[Dict[str, Any]]:
-    """从 cases/<skill_name>_evals.md 加载评测用例"""
-    return load_entity_evals_md(skill_name)
+    """从 Skill 本地目录加载评测用例"""
+    return load_entity_evals_md(skill_name, entity_type="skill")
 
 
 # ── Team 发现函数 ──────────────────────────────────────────────────
@@ -487,13 +486,13 @@ def get_all_teams() -> List[str]:
 
 
 def get_teams_with_evals() -> List[str]:
-    """扫描 cases/ 目录，返回 team_name 匹配的 team 名列表。"""
+    """发现有评测用例的 Team（从 Team 本地目录）。"""
     return discover_entities_with_evals("team_whitelist", target_type="team")
 
 
 def load_team_evals_md(team_name: str) -> Optional[Dict[str, Any]]:
-    """从 cases/<team_name>_evals.md 加载 team 评测用例"""
-    return load_entity_evals_md(team_name)
+    """从 Team 本地目录加载评测用例"""
+    return load_entity_evals_md(team_name, entity_type="team")
 
 
 @pytest.fixture(scope="session")
@@ -672,7 +671,7 @@ h2 { font-size: 16px; color: #334155; font-weight: 600; }
 .rating-s { background: #166534; color: #fff; }
 .rating-a { background: #dcfce7; color: #166534; }
 .rating-b { background: #dbeafe; color: #1e40af; }
-.rating-c { background: #fef3c7; color: #92400e; }
+.rating-c { background: #fef3c7; color: #92400e; }  /* 警告/及格 */
 .rating-d { background: #fee2e2; color: #991b1b; }
 .rating-na { color: #94a3b8; }
 
@@ -1436,7 +1435,7 @@ def _build_cann_bench_html_from_sandbox(skill_name: str, eval_id: str):
     if not html_path.exists():
         # 无 HTML 报告，仅返回分数
         label = f"cann-bench 评测报告 (得分: {score:.1f}) — HTML 报告未生成"
-        status_cls = "log-review-pass" if score > 50 else "log-review-fail"
+        status_cls = "log-review-pass" if score >= 30 else "log-review-fail"
         fallback_html = _build_log_block(label, "cann-bench HTML 报告文件不存在", status_cls)
         return fallback_html, score
 
@@ -1445,7 +1444,7 @@ def _build_cann_bench_html_from_sandbox(skill_name: str, eval_id: str):
     # 用 iframe + srcdoc 嵌入，隔离 CSS
     escaped = html_mod.escape(html_content, quote=True)
     label = f"cann-bench 评测报告 (得分: {score:.1f})"
-    status_cls = "log-review-pass" if score > 50 else "log-review-fail"
+    status_cls = "log-review-pass" if score >= 30 else "log-review-fail"
 
     embed_html = (
         f'<div class="log-block {status_cls}">\n'
@@ -1518,24 +1517,47 @@ def _build_phase2_html_from_md(skill_name: str, eval_id):
     return '\n'.join(blocks), score, dim_scores
 
 
-def _rating_for_score(score):
-    """根据评测得分返回中文质量评级。
+def _rating_for_score(score, eval_mode="text"):
+    """根据评测得分和模式返回中文质量评级。
+
+    Args:
+        score: 评测得分 (0-100)
+        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
 
     Returns:
         (label: str, css_class: str)。label 为空字符串表示无评级。
+
+    阈值设计：
+        - cann_bench: 功能正确性优先，30分通过，30-59分为"及格"
+        - 非 cann_bench: 内容质量优先，60分以下为"错误"
     """
     if score is None:
         return ("", "rating-na")
-    if score >= 90:
-        return ("卓越", "rating-s")
-    elif score >= 80:
-        return ("优秀", "rating-a")
-    elif score >= 70:
-        return ("良好", "rating-b")
-    elif score >= 60:
-        return ("警告", "rating-c")
+
+    if eval_mode == "cann_bench":
+        # cann_bench 模式：功能正确性优先
+        if score >= 90:
+            return ("卓越", "rating-s")
+        elif score >= 75:
+            return ("优秀", "rating-a")
+        elif score >= 60:
+            return ("良好", "rating-b")
+        elif score >= 30:
+            return ("及格", "rating-c")
+        else:
+            return ("错误", "rating-d")
     else:
-        return ("错误", "rating-d")
+        # 非 cann_bench 模式：内容质量优先
+        if score >= 90:
+            return ("卓越", "rating-s")
+        elif score >= 80:
+            return ("优秀", "rating-a")
+        elif score >= 70:
+            return ("良好", "rating-b")
+        elif score >= 60:
+            return ("警告", "rating-c")
+        else:
+            return ("错误", "rating-d")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1571,9 +1593,14 @@ def _format_eval_score_cell(report):
     return score, score_html
 
 
-def _format_rating_cell(score):
-    """根据分数生成质量评级 HTML。"""
-    rating_label, rating_cls = _rating_for_score(score)
+def _format_rating_cell(score, eval_mode="text"):
+    """根据分数和评测模式生成质量评级 HTML。
+
+    Args:
+        score: 评测得分 (0-100)
+        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
+    """
+    rating_label, rating_cls = _rating_for_score(score, eval_mode)
     if rating_label:
         return f'<span class="rating-badge {rating_cls}">{rating_label}</span>'
     return f'<span class="rating-badge rating-na">&mdash;</span>'
@@ -1626,7 +1653,14 @@ def pytest_html_results_table_row(report, cells):
 
     # 评测得分列 + 质量评级列
     score, score_html = _format_eval_score_cell(report)
-    rating_html = _format_rating_cell(score)
+    eval_mode = getattr(report, '_eval_mode', None)
+    # Fallback: 从 user_properties 中读取 eval_mode（xdist 兼容）
+    if eval_mode is None:
+        for prop_name, prop_value in getattr(report, 'user_properties', []):
+            if prop_name == "eval_mode":
+                eval_mode = prop_value
+                break
+    rating_html = _format_rating_cell(score, eval_mode or "text")
     cells.insert(4, f'<td class="col-score">{score_html}</td>')
     cells.insert(5, f'<td class="col-rating">{rating_html}</td>')
 
@@ -1642,20 +1676,23 @@ def pytest_html_results_table_row(report, cells):
 
 
 def _set_eval_score_on_report(report, score, dim_scores=None,
-                              cann_bench_html=None):
+                              cann_bench_html=None, eval_mode="text"):
     """将评测分数写入 pytest report 对象（含 xdist 兼容的 user_properties）。
 
     Args:
         cann_bench_html: cann-bench HTML 报告内容。若提供，存入
             user_properties 以便跨 xdist 序列化后在 controller 侧恢复。
+        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
     """
     if score is None or getattr(report, '_eval_score', None) is not None:
         return
     setattr(report, '_eval_score', score)
     setattr(report, '_eval_dim_scores', dim_scores or {})
+    setattr(report, '_eval_mode', eval_mode)
     if not hasattr(report, 'user_properties'):
         report.user_properties = []
     report.user_properties.append(("eval_score", score))
+    report.user_properties.append(("eval_mode", eval_mode))
     if dim_scores:
         report.user_properties.append(
             ("eval_dim_scores", json.dumps(dim_scores, ensure_ascii=False))
@@ -1679,7 +1716,7 @@ def _inject_phase2_details(report, extra_items, skill_name, eval_id, extras):
         if not has_cann:
             extra_items.append(extras.html(cann_html))
         _set_eval_score_on_report(
-            report, cann_score, cann_bench_html=cann_html,
+            report, cann_score, cann_bench_html=cann_html, eval_mode="cann_bench",
         )
         return
 
@@ -1694,7 +1731,7 @@ def _inject_phase2_details(report, extra_items, skill_name, eval_id, extras):
     phase2_html, score, dim_scores = _build_phase2_html_from_md(skill_name, eval_id)
     if phase2_html and not has_phase2:
         extra_items.append(extras.html(phase2_html))
-    _set_eval_score_on_report(report, score, dim_scores)
+    _set_eval_score_on_report(report, score, dim_scores, eval_mode="text")
 
 
 def _get_extra_content(extra):
@@ -1810,7 +1847,7 @@ def pytest_runtest_logreport(report):
     if skill_name and eval_id:
         if cann_html is not None:
             _set_eval_score_on_report(
-                report, cann_score, cann_bench_html=cann_html,
+                report, cann_score, cann_bench_html=cann_html, eval_mode="cann_bench",
             )
         else:
             _inject_phase2_details(

@@ -39,7 +39,6 @@ tests/system/
 ├── results/                      # 测试报告输出
 ├── logs/                         # opencode session 日志 + 归档
 ├── sandboxes/                    # 隔离测试环境
-├── cases/                        # 评测用例 _evals.md 文件
 └── docs/                         # 文档
 ```
 
@@ -92,9 +91,9 @@ team_whitelist:
   - "ops-direct-invoke"
 ```
 
-### _evals.md 用例文件格式
+### evals.md 用例文件格式
 
-每个 skill 的评测用例定义在 `tests/system/cases/<skill_name>_evals.md`，由 **YAML frontmatter** 和多个 **Markdown 用例块** 组成：
+每个 skill 的评测用例定义在 `{skill_dir}/{skill_name}/evals/evals.md`，由 **YAML frontmatter** 和多个 **Markdown 用例块** 组成：
 
 ```markdown
 ---
@@ -301,7 +300,7 @@ python tests/system/scripts/main.py \
 | `--eval-model <model>` | 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算 |
 | `--parallel` / `-p` | 并发数，`1` 顺序执行（默认），`auto` 自动取核数，最大 32 |
 | `--ascend-platform A2 A3` | 按平台过滤，仅执行 `Ascend Platform` 匹配的用例。不指定则不过滤（所有用例均保留），但未配置 `Ascend Platform` 的用例仍被跳过 |
-| `--all` | 全量模式：自动发现 `cases/` 下所有 evals.md 并执行评测，跳过变更检测 |
+| `--all` | 全量模式：自动发现所有 Skill/Team 目录下的 evals.md 并执行评测，跳过变更检测 |
 | `--report-only` | 仅从已有沙箱 JSON 文件重新生成 HTML 报告（跳过 Phase 1 执行，跳过 opencode 调用）。前提：沙箱目录中须有前次完整运行的 JSON 文件 |
 | `--eval-id <id>` | 仅执行指定 ID 的单个用例 |
 
@@ -461,7 +460,7 @@ skill_dirs:
 
 ### 添加新 team 的 ST 看护
 
-1. 在 `tests/system/cases/` 下创建 `<team_name>_evals.md`（使用 `team_name` frontmatter 字段）
+1. 在 `{team_dir}/{team_name}/evals/` 下创建 `evals.md`（使用 `team_name` frontmatter 字段）
 2. 确保 `config/st-test.config` 中的 `team_dirs` 包含该 team 所在目录
 3. 将 team 名称加入 `team_whitelist`（如已启用白名单）
 4. 运行 Team Phase 1 验证格式正确
