@@ -228,9 +228,9 @@ grep -rn "Hccl::" operators/{op}/
 
 参考工程的 `cmake/shmem.cmake` 自动处理 SHMEM 的拉取和构建。关键步骤：
 
-1. `third_party/shmem` 是 symlink 到外部 shmem 仓库；
+1. `third_party/shmem` 由 cmake 首次配置时自动 `git clone --branch v1.5.0 --depth 1`（gitcode.com/cann/shmem），无需 git submodule；
 2. CMake 首次配置时触发 `add_custom_target(cann_samples_shmem_dependencies)`：
-   - 如果 submodule 未初始化，运行 `git submodule update --init --recursive`；
+   - 若 `third_party/shmem/CMakeLists.txt` 不存在，执行 `git clone`；
    - 用 `cmake -S ... -B .../build -DSOC_TYPE=Ascend950` 构建 shmem 静态库；
    - `cmake --build ... --target install` 安装到 `third_party/shmem/install/shmem/`；
 3. 生成两个 IMPORTED 共享库：
@@ -240,9 +240,9 @@ grep -rn "Hccl::" operators/{op}/
 
 ### Agent 开发注意
 
-- **不要**手动修改 `third_party/shmem/` 内部；它会被外部 symlink 覆盖；
+- **不要**手动修改 `third_party/shmem/` 内部；它是 clone 来的外部依赖，改动不会被保留；
 - 新算子的 CMakeLists 应直接 `include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shmem.cmake REQUIRED)`，与参考工程一致；
-- 若 shmem 构建失败，常见原因：`ASCEND_HOME_PATH` 未设、`SOC_TYPE` 不是 `Ascend950`。
+- 若 shmem 构建失败，常见原因：`ASCEND_HOME_PATH` 未设、`SOC_TYPE` 不是 `Ascend950`、网络无法访问 gitcode.com。
 
 ---
 

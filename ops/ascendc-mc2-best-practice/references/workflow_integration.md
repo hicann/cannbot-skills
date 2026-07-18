@@ -20,8 +20,8 @@
 | 校验项 | 命令 / 方法 | 失败处理 |
 |--------|------------|---------|
 | **NPU 架构必须为 dav-3510** | `npu-smi info` 读 `Chip Name` 应为 `Ascend 950` 系列；CMake 阶段再次校验 `NPU_ARCH=dav-3510` | 非 3510 直接终止，告知用户"本 skill 仅支持 Ascend 950 (dav-3510)" |
-| **SHMEM 第三方库可解析** | 检查 `references/all_to_all_matmul/third_party/shmem/` symlink 是否指向有效路径；若不存在，`cmake/shmem.cmake` 会触发 `git submodule update --init` | 提示用户初始化 submodule |
-| **tensor_api（Blaze 头）可解析** | 同上，检查 `third_party/tensor_api/` | 提示用户初始化 submodule |
+| **SHMEM 第三方库可解析** | 检查 `references/all_to_all_matmul/third_party/shmem/CMakeLists.txt` 是否存在；若不存在，`cmake/shmem.cmake` 会自动 `git clone --branch v1.5.0`（gitcode.com/cann/shmem） | 提示用户检查网络访问 gitcode.com |
+| **tensor_api（Blaze 头）可解析** | 检查 `third_party/tensor_api/include/tensor_api/tensor.h` 是否存在；若不存在，`cmake/tensor_api.cmake` 会自动 `git clone` asc-devkit（与 ascendc-blaze-best-practice skill 共享来源） | 提示用户检查网络访问 gitcode.com |
 | **多卡环境可用** | `npu-smi info` 至少能看到 `rankNum` 张卡（默认 4 卡） | 提示用户准备多卡环境；单卡只能跑精度模式，性能模式需多卡 |
 
 ### 门禁

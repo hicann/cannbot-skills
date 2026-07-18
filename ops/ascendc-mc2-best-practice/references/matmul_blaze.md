@@ -2,7 +2,7 @@
 
 本文档承载 MC2 skill 的"计算子能力"。涵盖：Blaze 模板选型、BlockMmad 接入、Tiling 数据流、与通信层的 buffer 协议。
 
-> Blaze 是 Ascend C 的 CUTLASS 风格模板库，由 `tensor_api/` 提供。本 skill 与 `ascendc-blaze-best-practice` 共享 Blaze 基底，但聚焦 MC2 场景下的差异点。**禁止使用 asc-devkit 的 matmul API（`AscendC::Matmul` 等）**。
+> Blaze 是 Ascend C 的 CUTLASS 风格模板库，由 `tensor_api/` 提供。本 skill 与 `ascendc-blaze-best-practice` 共享 Blaze 基底（tensor_api 均来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支），但聚焦 MC2 场景下的差异点。**禁止使用 asc-devkit 的 matmul API（`AscendC::Matmul` 等）**。
 
 ---
 
@@ -17,7 +17,7 @@
 | **Block Scheduler** | `Blaze::Gemm::Block::Block_schedulerQuantBatchMatmulV3` | `include/block/quant_matmul_mx_block_scheduler_swat.h` | 多 Block 间任务切分 |
 | **Dispatch Policy** | `Blaze::Gemm::MatmulWithScaleMx` | `blaze/gemm/policy/dispatch_policy.h`（toolkit 内） | 流水策略（含 scale 处理） |
 | **Tile** | `Blaze::Gemm::Tile::*` | `include/tile/*.h` | L1→L0 搬运、Scale pad |
-| **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/` | Tensor / Layout 抽象 |
+| **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/`（asc-devkit clone） | Tensor / Layout 抽象 |
 
 **Agent 开发原则**：`include/block/`、`include/tile/`、`include/policy/` 下的文件 **`[REUSE]`**，常规 MC2 算子不需要改。需要改的是：
 - `include/kernel/qbmm_mx_kernel.h`：Scale 处理、A/B 来源切换；

@@ -17,8 +17,8 @@ references/all_to_all_matmul/
 ├── run.sh                      # [REUSE]   一键脚本：cmake + gen_data + 跑算子 + verify
 ├── cmake/
 │   ├── ascend.cmake            # [REUSE]   定位 ASCEND_HOME_PATH、设 BISHENG 编译器
-│   ├── shmem.cmake             # [REUSE]   拉 third_party/shmem 并构建
-│   └── tensor_api.cmake        # [REUSE]   拉 third_party/tensor_api（Blaze 头）
+│   ├── shmem.cmake             # [REUSE]   clone third_party/shmem（v1.5.0）并构建
+│   └── tensor_api.cmake        # [REUSE]   clone third_party/tensor_api（asc-devkit）
 ├── scripts/
 │   ├── gen_data.py             # [MODIFY]  按 dtype/shape 改
 │   └── verify_result.py        # [MODIFY]  按 dtype/容差改
@@ -45,9 +45,9 @@ references/all_to_all_matmul/
 │   ├── tile/                   # [REUSE]   Blaze tile 级
 │   ├── policy/dispatch_policy.h # [REUSE]  Blaze dispatch policy
 │   └── utils/constant.h        # [REUSE]   公共常量
-└── third_party/                # symlink（首次构建自动解析）
-    ├── shmem -> ...
-    └── tensor_api -> ...
+└── third_party/                # 首次 cmake 配置时自动 git clone（不入版本控制）
+    ├── shmem                   # gitcode.com/cann/shmem v1.5.0（cmake/shmem.cmake 拉取）
+    └── tensor_api              # gitcode.com/cann/asc-devkit（cmake/tensor_api.cmake 拉取，与 blaze skill 共享来源）
 ```
 
 **原则**：`[REUSE]` 文件常规不动；`[MODIFY]` 文件按需动。改动量越大，编译/精度风险越高。
@@ -255,7 +255,7 @@ add_executable({op_name} src/{op_name}.cpp)
 **不要动**：
 - `NPU_ARCH` 校验逻辑（dav-3510 限定）；
 - `include()` 的 shmem.cmake / tensor_api.cmake；
-- `target_include_directories` 的路径列表；
+- `target_include_directories` 的路径列表（tensor_api 由 `cann_samples::tensor_api` 提供，来自 asc-devkit clone）；
 - `target_compile_options` 的 `-xasc --npu-arch=dav-3510`；
 - `target_link_libraries` 的 `cann_samples::tensor_api` / `cann_samples::shmem`。
 
