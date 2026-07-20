@@ -46,6 +46,7 @@ Blaze 库模块文档查阅：`ops-tensor/docs/API/` → [blaze-modules-index.md
 | 场景 | 文档 |
 |------|------|
 | 基础 MatMul | [基础 MatMul 开发](references/scenarios/basic-matmul-development.md) |
+| A8W8 量化 MatMul | [A8W8 量化 MatMul 开发](references/scenarios/a8w8-quant-matmul-development.md) |
 | MX 量化 MatMul | [MX 量化 MatMul 开发](references/scenarios/mx-matmul-development.md) |
 | Grouped MatMul | [Grouped MatMul 开发](references/scenarios/group-matmul-development.md) |
 | CV 融合（matmul + epilogue） | [CV 融合 MatMul 开发](references/scenarios/fusion-matmul-development.md) |

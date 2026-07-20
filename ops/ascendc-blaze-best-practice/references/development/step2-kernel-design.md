@@ -12,6 +12,7 @@
 |------|--------|------|
 | 纯 matmul（无 vector 后处理） | `__cube__` | AIC 独占 Cube Core |
 | matmul + epilogue 融合 | `__mix__(aicCount, aivCount)` | AIC + AIV 混合执行 |
+| A8W8 量化 matmul（MIX 路径） | `__mix__(1, 2)` | AIC 做 Cube Mmad，AIV 做反量化；必须用 `__mix__`，不能用 `__cube__` |
 
 ### GM_ADDR 参数约定
 
@@ -108,6 +109,8 @@ Params（参数结构体）
 | 场景 | 路径 | Kernel | BlockMmad | Scheduler | Policy | 详见 |
 |------|------|--------|-----------|-----------|--------|------|
 | 基础 MatMul 单算子 | blaze 库 | `GemmUniversal` | `Blaze::Gemm::Block::BlockMmad` (Basic) | `BlockSchedulerMatmulBasic` | `MatmulMultiBlockBasic` | `references/scenarios/basic-matmul-development.md` |
+| A8W8 量化（per-tensor x1Scale） | blaze 库 | `GemmUniversal` | `Blaze::Gemm::Block::BlockMmad` (FixpipeQuant) | `BlockSchedulerQuantBatchMatmulV3` | `MatmulWithScaleFixpipeQuant` | `references/scenarios/a8w8-quant-matmul-development.md` |
+| A8W8 量化（全部量化模式） | blaze 库 | `QbmmMixWithoutBatch` | `Blaze::Gemm::Block::BlockMmad` (Mix) | `BlockSchedulerQuantBatchMatmulV3` | `MatmulWithScaleMix` | `references/scenarios/a8w8-quant-matmul-development.md` |
 | MX 量化单算子 | blaze 库 | `GemmUniversal` | `Blaze::Gemm::Block::BlockMmad` (ScaleMx) | `BlockSchedulerQuantBatchMatmulV3` | `MatmulWithScaleMx` | `references/scenarios/mx-matmul-development.md` |
 | Group MatMul | blaze_custom | `GroupMatmulKernel` | `Block::BlockMmad` | `GroupMatmulBlockSchedulerSplitM` | `MatmulMultiBlockPolicy` | `references/scenarios/group-matmul-development.md` |
 | 普通 MatMul + Vector | blaze_custom | `MatmulKernelFused` | `Block::BlockMmad` | `MatmulSwatScheduler` | `MatmulMultiBlockPolicy` | `references/scenarios/fusion-matmul-development.md` |
