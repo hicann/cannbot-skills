@@ -149,6 +149,22 @@ class ErrorCaseConfig:
     shape_values: dict = None
 
 
+@dataclass
+class TensorListOutputContainer:
+    input_shapes: List
+    input_dtypes: List
+    input_ranges: List
+    tensor_list_lengths: List
+
+
+@dataclass
+class OutputTensorListContainer:
+    output_shapes: List
+    output_dtypes: List
+    tensor_list_lengths: List
+    output_indexes: List
+
+
 # 全局常量：各 dtype 边界值定义
 DTYPE_BOUNDARIES = {
     'float32': {'min': -3.4028235e+38, 'max': 3.4028235e+38, 'special': ['inf', '-inf', 'nan']},
@@ -164,6 +180,13 @@ DTYPE_BOUNDARIES = {
     'complex64': {'min': None, 'max': None, 'special': ['nan']},
     'complex128': {'min': None, 'max': None, 'special': ['nan']},
 }
+
+_TTK_DATAFRAME_COLUMNS = [
+    'testcase_name', 'api_name', 'tensor_view_shapes', 'tensor_dtypes',
+    'scalar_dtypes', 'attributes', 'output_tensor_indexes',
+    'precision_tolerances', 'absolute_precision', 'input_data_ranges',
+    'scalar_data_ranges', 'tensor_list_distribution'
+]
 
 # ============ 全量数据类型和格式定义（用于异常用例生成）============
 
@@ -1509,29 +1532,20 @@ def _process_single_ttk_case(ctx: TtkProcessContext):
         if exist_col in ctx.row and not ctx.row[exist_col]:
             continue
         
-        # 封装成对象
         data = TensorProcessData(
             input_shapes=input_shapes,
             input_dtypes=input_dtypes,
             input_ranges=input_ranges,
             output_shapes=output_shapes,
             output_dtypes=output_dtypes,
-            output_indexes=output_indexes
+            output_indexes=output_indexes,
+            tensor_list_lengths=tensor_list_lengths
         )
 
         if param_type == 'aclTensor':
             _process_acl_tensor(ctx.row, param_name, io_type, data, ctx.param_names)
         elif param_type == 'aclTensorList':
-            data = TensorProcessData(
-                input_shapes=input_shapes,
-                input_dtypes=input_dtypes,
-                input_ranges=input_ranges,
-                output_shapes=output_shapes,
-                output_dtypes=output_dtypes,
-                output_indexes=output_indexes,
-                tensor_list_lengths=tensor_list_lengths  # 加上这行
-            )
-            _process_acl_tensor_list(row, param_name, io_type, data, param_names)
+            _process_acl_tensor_list(ctx.row, param_name, io_type, data, ctx.param_names)
         else:
             _process_scalar_and_attrs(ctx.row, param_name, param_type, scalar_dtypes_list, attrs_dict)
 
@@ -1547,7 +1561,7 @@ def _process_single_ttk_case(ctx: TtkProcessContext):
         attrs_dict=attrs_dict,
         tensor_list_lengths=tensor_list_lengths
     )
-    _build_ttk_case(case, data)
+    _build_ttk_case_data(case, data)
     return case
 
 
@@ -1575,12 +1589,13 @@ def _process_acl_tensor_list(row, param_name, io_type, data: TensorProcessData, 
 
     if io_type == 'input':
         value_range = parse_list_value(row.get(f"{param_name}.value_range", '[]'))
+        single_range = value_range if value_range else [-2, 2]
         data.input_shapes.append(shape_list)
-        data.input_dtypes.extend([dtype] * length)
-        data.input_ranges.extend([value_range if value_range else [-2, 2]] * length)
+        data.input_dtypes.append(tuple([dtype] * length))
+        data.input_ranges.append(tuple([single_range] * length))
     else:
         data.output_shapes.append(shape_list)
-        data.output_dtypes.extend([dtype] * length)
+        data.output_dtypes.append(tuple([dtype] * length))
         data.output_indexes.append(param_names.index(param_name))
 
     data.tensor_list_lengths.append(length)
@@ -1615,8 +1630,8 @@ def _process_scalar_and_attrs(row, param_name, param_type, scalar_dtypes_list, a
             attrs_dict[param_name] = format_ttk_attr_value(value, param_type)
 
 
-def _build_ttk_case(case, data: TtkCaseData):
-    """构建最终的 TTK 用例字段"""
+def _build_ttk_case_data(case, data: TtkCaseData):
+    """填充 TTK 用例字段（L0/L1 和 L2 共用）"""
     all_tensor_shapes = data.input_shapes + data.output_shapes
     all_tensor_dtypes = data.input_dtypes + data.output_dtypes
 
@@ -1637,29 +1652,61 @@ def _build_ttk_case(case, data: TtkCaseData):
         case['tensor_list_distribution'] = format_ttk_tuple(data.tensor_list_lengths)
 
 
+def _format_number(x):
+    """格式化数值，处理特殊浮点值"""
+    if isinstance(x, float):
+        if x == float('inf'):
+            return 'inf'
+        elif x == float('-inf'):
+            return '-inf'
+        elif x != x:
+            return 'nan'
+    elif isinstance(x, str):
+        if x == 'inf':
+            return 'inf'
+        elif x == '-inf':
+            return '-inf'
+        elif x == 'nan':
+            return 'nan'
+        elif x == '+0':
+            return '+0'
+        elif x == '-0':
+            return '-0'
+    return str(x)
+
+
 def format_ttk_tuple(items):
-    """格式化TTK元组格式：每个子项转为元组字面量，外层包装为嵌套元组"""
+    """格式化TTK元组格式（递归，支持嵌套子元组、特殊浮点值）
+
+    - aclTensor shape [4,2,2] → (4,2,2,)
+    - aclTensorList shape [[1,4],[1,4]] → ((1,4,),(1,4,),)
+    """
     if not items:
         return "()"
     formatted = []
     for item in items:
         if isinstance(item, (list, tuple)):
-            if len(item) == 0:
-                formatted.append("((),)")
-            else:
-                inner = ",".join(str(x) for x in item)
-                formatted.append(f"({inner},)")
+            formatted.append(format_ttk_tuple(item))
         else:
-            formatted.append(str(item))
-    result = ",".join(formatted)
-    return f"({result},)"
+            formatted.append(_format_number(item))
+    return f"({','.join(formatted)},)"
 
 
 def format_ttk_tuple_str(items):
-    """格式化字符串元组（添加引号），单元素带尾逗号"""
+    """格式化字符串元组（支持嵌套子元组）
+
+    - aclTensor dtype 'float32' → ('float32',)
+    - aclTensorList dtype ('float32','float32') → (('float32','float32',),)
+    """
     if not items:
         return ""
-    formatted = [f"'{item}'" for item in items]
+    formatted = []
+    for item in items:
+        if isinstance(item, (list, tuple)):
+            inner = ",".join(f"'{x}'" for x in item)
+            formatted.append(f"({inner},)")
+        else:
+            formatted.append(f"'{item}'")
     return f"({','.join(formatted)},)"
 
 
@@ -1740,9 +1787,9 @@ def generate_error_cases(param_def: Dict, factors: Dict, constraints_def: Dict,
         param_def, supported_info['dtypes'], constraint_info, aclnn_name, verbose
     )
     dim_error_cases = generate_dimension_error_cases(param_def, max_dimensions, aclnn_name, verbose)
-    format_error_cases, config = generate_format_error_cases(param_def, unsupported_formats, aclnn_name, verbose)
+    format_error_cases, _ = generate_format_error_cases(param_def, unsupported_formats, aclnn_name, verbose)
     shape_error_cases = generate_shape_mismatch_cases(param_def, constraint_info, aclnn_name, verbose)
-    empty_tensor_cases = generate_empty_tensor_cases(param_def, aclnn_name, verbose, config)
+    empty_tensor_cases = generate_empty_tensor_cases(param_def, aclnn_name, verbose)
     attr_error_cases = generate_attr_error_cases(param_def, supported_info['dtypes'], aclnn_name, verbose)
 
     error_cases.extend(dtype_error_cases)
@@ -1808,63 +1855,71 @@ def _print_final_error_summary(verbose: bool, summary: ErrorCaseSummary):
     logging.info(f"[INFO]   attr属性异常: {len(summary.attr_error_cases)}条")
 
 
+def _flatten_format_values(format_values: List) -> List:
+    """扁平化format嵌套列表"""
+    flat_formats = []
+    for fv in format_values:
+        if isinstance(fv, list):
+            flat_formats.extend(fv)
+        else:
+            flat_formats.append(fv)
+    return flat_formats
+
+
+def _collect_factor_items(factor_dict: Dict, param_name: str, target_key: str, target_set: Set):
+    """统一提取因子列表并写入集合"""
+    full_key = f"{param_name}.{target_key}"
+    if full_key not in factor_dict:
+        return
+    values = factor_dict[full_key]
+    if isinstance(values, list):
+        if target_key == "format":
+            flat_items = _flatten_format_values(values)
+            target_set.update(flat_items)
+        else:
+            target_set.update(values)
+
+
 def extract_supported_info_from_factors(factors: Dict) -> Dict:
     """
     从04_测试因子.yaml提取支持的因子值（主要入口）
-    
+
     Args:
         factors: 测试因子（04_测试因子.yaml）
-    
+
     Returns:
         Dict: {'dtypes': [...], 'formats': [...], 'dimensions': [...], 'tensor_params': [...], 'scalar_params': [...]}
     """
-    dtypes = set()
-    formats = set()
-    dimensions = set()
-    tensor_params = []
-    scalar_params = []
-    
-    # 遍历每个参数的因子
+    dtypes: Set = set()
+    formats: Set = set()
+    dimensions: Set = set()
+    tensor_params: List[str] = []
+    scalar_params: List[str] = []
+
+    # 遍历每个参数的因子，最大嵌套深度仅3层
     for param_name, param_factors in factors.items():
         if not isinstance(param_factors, dict):
             continue
-        
-        param_type = param_factors.get('type', '')
-        factor_dict = param_factors.get('factors', {})
-        
-        # 提取dtype因子值
-        dtype_key = f"{param_name}.dtype"
-        if dtype_key in factor_dict:
-            dtype_values = factor_dict[dtype_key]
-            if isinstance(dtype_values, list):
-                dtypes.update(dtype_values)
-        
-        # 提取format因子值
-        format_key = f"{param_name}.format"
-        if format_key in factor_dict:
-            format_values = factor_dict[format_key]
-            if isinstance(format_values, list):
-                formats.update(format_values)
-        
-        # 提取dimensions因子值
-        dim_key = f"{param_name}.dimensions"
-        if dim_key in factor_dict:
-            dim_values = factor_dict[dim_key]
-            if isinstance(dim_values, list):
-                dimensions.update(dim_values)
-        
-        # 记录参数类型
-        if param_type == 'aclTensor':
+        param_type = param_factors.get("type", "")
+        factor_dict = param_factors.get("factors", {})
+
+        # 统一抽取三类因子数据，消除多层if嵌套
+        _collect_factor_items(factor_dict, param_name, "dtype", dtypes)
+        _collect_factor_items(factor_dict, param_name, "format", formats)
+        _collect_factor_items(factor_dict, param_name, "dimensions", dimensions)
+
+        # 分类记录参数
+        if param_type in ("aclTensor", "aclTensorList"):
             tensor_params.append(param_name)
-        elif param_type == 'aclScalar':
+        elif param_type == "aclScalar":
             scalar_params.append(param_name)
-    
+
     return {
-        'dtypes': sorted(list(dtypes)),
-        'formats': sorted(list(formats)),
-        'dimensions': sorted(list(dimensions)),
-        'tensor_params': tensor_params,
-        'scalar_params': scalar_params
+        "dtypes": sorted(list(dtypes)),
+        "formats": sorted(list(formats)),
+        "dimensions": sorted(list(dimensions)),
+        "tensor_params": tensor_params,
+        "scalar_params": scalar_params
     }
 
 
@@ -2093,21 +2148,23 @@ def generate_dtype_combo_error_cases(param_def: Dict, supported_dtypes: List[str
     cases = []
     
     # 【替换重复代码】调用通用函数
-    tensor_params = _get_input_tensor_params(param_def)
+    tensor_params = _get_tensor_input_params(param_def)
     
     if len(tensor_params) < 2:
         return cases
     
+    p0, p1 = tensor_params[0], tensor_params[1]
+
     # 只生成一条不兼容组合用例（选第一个不兼容组合）
     for dtype1, dtype2 in INCOMPATIBLE_DTYPE_COMBOS:
         if dtype1 in supported_dtypes or dtype2 in supported_dtypes:
             case = create_error_case_template(param_def, aclnn_name)
-            case[f"{tensor_params[0]}.dtype"] = dtype1
-            case[f"{tensor_params[0]}.shape"] = generate_random_shape(3)
-            case[f"{tensor_params[1]}.dtype"] = dtype2
-            case[f"{tensor_params[1]}.shape"] = generate_random_shape(3)
+            case[f"{p0['name']}.dtype"] = dtype1
+            _set_param_shape(case, p0['name'], p0['type'], generate_random_shape(3))
+            case[f"{p1['name']}.dtype"] = dtype2
+            _set_param_shape(case, p1['name'], p1['type'], generate_random_shape(3))
             case['error_type'] = 'dtype_combo_mismatch'
-            case['error_param'] = f"{tensor_params[0]},{tensor_params[1]}"
+            case['error_param'] = f"{p0['name']},{p1['name']}"
             case['case_name'] = f"{aclnn_name}_{dtype1}_{dtype2}_random_dtype_combo_exception"
             cases.append(case)
             break  # 只生成一条
@@ -2141,14 +2198,14 @@ def generate_dimension_error_cases(param_def: Dict, max_dimensions: int,
     
     # 生成用例
     dim = overflow_dims[0]
-    param_name = tensor_params[0]
+    p0 = tensor_params[0]
     case = create_error_case_template(param_def, aclnn_name)
-    case[f"{param_name}.dtype"] = supported_dtype
-    case[f"{param_name}.shape"] = generate_overflow_shape(dim)
-    case[f"{param_name}.dimensions"] = dim
+    case[f"{p0['name']}.dtype"] = supported_dtype
+    _set_param_shape(case, p0['name'], p0['type'], generate_overflow_shape(dim))
+    case[f"{p0['name']}.dimensions"] = dim
     case['error_type'] = 'dimension_overflow'
-    case['error_param'] = param_name
-    case['case_name'] = f"{aclnn_name}_{supported_dtype}_random_{param_name}_dim_exception"
+    case['error_param'] = p0['name']
+    case['case_name'] = f"{aclnn_name}_{supported_dtype}_random_{p0['name']}_dim_exception"
     cases.append(case)
     
     if verbose and cases:
@@ -2158,21 +2215,23 @@ def generate_dimension_error_cases(param_def: Dict, max_dimensions: int,
 
 
 def generate_format_error_cases(param_def: Dict, unsupported_formats: List[str],
-                                 aclnn_name: str, verbose: bool) -> List[Dict]:
+                                 aclnn_name: str, verbose: bool) -> Tuple[List[Dict], ErrorCaseConfig]:
     """
     生成格式不支持异常用例（只生成一条）
     """
     cases = []
     if not unsupported_formats:
-        return cases
+        return cases, None
 
     tensor_params = _get_tensor_input_params(param_def)
     if not tensor_params:
-        return cases
+        return cases, None
 
     supported_dtype = _get_supported_tensor_dtype(param_def)
     format_name = unsupported_formats[0]
-    param_name = tensor_params[0]
+    p0 = tensor_params[0]
+    param_name = p0['name']
+    case_name_str = f"{aclnn_name}_{supported_dtype}_random_{param_name}_format_exception"
 
     # 通用函数创建用例
     config = ErrorCaseConfig(
@@ -2198,21 +2257,45 @@ def generate_format_error_cases(param_def: Dict, unsupported_formats: List[str],
 
 
 def _get_tensor_input_params(param_def: Dict) -> list:
-    """获取所有输入 Tensor 参数名（抽取重复代码）"""
+    """获取所有输入 Tensor 参数名及类型（含 aclTensor / aclTensorList）
+
+    Returns:
+        list[dict]: 每项为 {'name': str, 'type': str}，type 为 'aclTensor' 或 'aclTensorList'
+    """
     tensor_params = []
     params = param_def.get('parameters', [])
     if isinstance(params, list):
         for param in params:
-            if param.get('io_type') == 'input' and param.get('type') == 'aclTensor':
-                tensor_params.append(param.get('name', ''))
+            if param.get('io_type') == 'input' and param.get('type') in ('aclTensor', 'aclTensorList'):
+                tensor_params.append({
+                    'name': param.get('name', ''),
+                    'type': param.get('type', '')
+                })
     return tensor_params
+
+
+def _set_param_shape(case: Dict, param_name: str, param_type: str, shape, list_length: int = 2):
+    """根据参数类型设置 shape (aclTensor) 或 shape_list (aclTensorList)
+
+    对于 aclTensorList，将单个 shape 复制为 list_length 份组成 shape_list；
+    若 shape 本身已是列表的列表（如 [[2,3],[2,3]]）则直接使用。
+    """
+    if param_type == 'aclTensorList':
+        if isinstance(shape, list) and shape and isinstance(shape[0], list):
+            shape_list = shape
+        else:
+            shape_list = [list(shape) for _ in range(list_length)]
+        case[f"{param_name}.shape_list"] = shape_list
+        case[f"{param_name}.length"] = len(shape_list)
+    else:
+        case[f"{param_name}.shape"] = shape
 
 
 def _get_supported_tensor_dtype(param_def: Dict) -> str:
     """获取 Tensor 支持的第一个 dtype（抽取重复代码）"""
     params = param_def.get('parameters', [])
     for param in params:
-        if param.get('type') == 'aclTensor':
+        if param.get('type') in ('aclTensor', 'aclTensorList'):
             dtype_ranges = param.get('dtype_with_ranges', [])
             if dtype_ranges:
                 return dtype_ranges[0].get('dtype', 'float32')
@@ -2236,15 +2319,16 @@ def generate_shape_mismatch_cases(param_def: Dict, constraint_info: Dict,
 
     # 公共方法获取 dtype
     supported_dtype = _get_supported_tensor_dtype(param_def)
+    p0, p1 = tensor_params[0], tensor_params[1]
 
     # 生成用例
     case = create_error_case_template(param_def, aclnn_name)
-    case[f"{tensor_params[0]}.dtype"] = supported_dtype
-    case[f"{tensor_params[0]}.shape"] = [2, 3]
-    case[f"{tensor_params[1]}.dtype"] = supported_dtype
-    case[f"{tensor_params[1]}.shape"] = [2, 3, 4]
+    case[f"{p0['name']}.dtype"] = supported_dtype
+    _set_param_shape(case, p0['name'], p0['type'], [2, 3])
+    case[f"{p1['name']}.dtype"] = supported_dtype
+    _set_param_shape(case, p1['name'], p1['type'], [2, 3, 4])
     case['error_type'] = 'shape_dimension_mismatch'
-    case['error_param'] = f"{tensor_params[0]},{tensor_params[1]}"
+    case['error_param'] = f"{p0['name']},{p1['name']}"
     case['case_name'] = f"{aclnn_name}_{supported_dtype}_ND_ND_ND_exception_shape_dim_error"
     cases.append(case)
 
@@ -2254,20 +2338,31 @@ def generate_shape_mismatch_cases(param_def: Dict, constraint_info: Dict,
     return cases
 
 
-def generate_empty_tensor_cases(param_def: Dict, aclnn_name: str, 
-                                 verbose: bool, config: Dict) -> List[Dict]:
+def generate_empty_tensor_cases(param_def: Dict, aclnn_name: str,
+                                 verbose: bool) -> List[Dict]:
     """
     生成空张量异常用例（只生成一条）
     """
     cases = []
-    # 【替换重复代码】复用通用函数，重复代码彻底消除
-    tensor_params = _get_input_tensor_params(param_def)
+    tensor_params = _get_tensor_input_params(param_def)
 
     if len(tensor_params) < 2:
         return cases
 
     supported_dtype = _get_supported_tensor_dtype(param_def)
     p0, p1 = tensor_params[0], tensor_params[1]
+    case_name_str = f"{aclnn_name}_{supported_dtype}_ND_empty_tensor_exception"
+
+    config = ErrorCaseConfig(
+        param_def=param_def,
+        aclnn_name=aclnn_name,
+        param_name=p0['name'],
+        supported_dtype=supported_dtype,
+        error_type="empty_tensor",
+        error_param=p0['name'],
+        case_name=case_name_str,
+        shape_values={p0['name']: [0, 3], p1['name']: [2, 3]},
+    )
 
     # 通用函数创建用例
     case = _create_and_fill_error_case(config)
@@ -2280,42 +2375,22 @@ def generate_empty_tensor_cases(param_def: Dict, aclnn_name: str,
     return cases
 
 
-def _get_input_tensor_params(param_def: Dict) -> List[str]:
-    """抽取重复代码：获取所有输入aclTensor参数名"""
-    tensor_params = []
-    params = param_def.get('parameters', [])
-    if isinstance(params, list):
-        for param in params:
-            if param.get('io_type') == 'input' and param.get('type') == 'aclTensor':
-                tensor_params.append(param.get('name', ''))
-    return tensor_params
-
-
 def _create_and_fill_error_case(config: ErrorCaseConfig):
     """通用：创建并填充异常用例（抽取所有重复代码）"""
     case = create_error_case_template(config.param_def, config.aclnn_name)
     case[f"{config.param_name}.dtype"] = config.supported_dtype
 
-    # 如果传了 shape 字典，批量设置 shape
+    # 如果传了 shape 字典，批量设置 shape（按参数类型选择 .shape / .shape_list）
     if config.shape_values:
+        param_def_dict = _build_param_def_dict(config.param_def)
         for pname, shape_val in config.shape_values.items():
-            case[f"{pname}.shape"] = shape_val
+            param_type = param_def_dict.get(pname, {}).get('type', 'aclTensor')
+            _set_param_shape(case, pname, param_type, shape_val)
 
     case["error_type"] = config.error_type
     case["error_param"] = config.error_param
     case["case_name"] = config.case_name
     return case
-
-
-def _get_supported_tensor_dtype(param_def: Dict) -> str:
-    """获取第一个支持的 Tensor dtype（公共方法）"""
-    params = param_def.get('parameters', [])
-    for param in params:
-        if param.get('type') == 'aclTensor':
-            dtype_ranges = param.get('dtype_with_ranges', [])
-            if dtype_ranges:
-                return dtype_ranges[0].get('dtype', 'float32')
-    return 'float32'
 
 
 def _set_tensor_default(case, param_name, param):
@@ -2364,6 +2439,15 @@ def _set_output_tensor_default(case, param_name, param):
     case[f"{param_name}.shape"] = [2, 3]
 
 
+def _set_output_tensor_list_default(case, param_name, param):
+    """设置输出 TensorList 默认值"""
+    dtype_ranges = param.get('dtype_with_ranges', [])
+    if dtype_ranges:
+        case[f"{param_name}.dtype"] = dtype_ranges[0].get('dtype', 'float32')
+    case[f"{param_name}.length"] = 2
+    case[f"{param_name}.shape_list"] = [[2, 3], [2, 3]]
+
+
 def create_error_case_template(param_def: Dict, aclnn_name: str) -> Dict:
     """
     创建异常用例模板
@@ -2406,6 +2490,8 @@ def create_error_case_template(param_def: Dict, aclnn_name: str) -> Dict:
         # 输出参数
         elif io_type == 'output' and param_type == 'aclTensor':
             _set_output_tensor_default(case, param_name, param)
+        elif io_type == 'output' and param_type == 'aclTensorList':
+            _set_output_tensor_list_default(case, param_name, param)
 
     return case
 
@@ -2502,6 +2588,88 @@ def generate_attr_error_cases(param_def: Dict, supported_dtypes: List[str],
     return cases
 
 
+def _build_param_def_dict(param_def: Dict) -> Dict:
+    """构建参数名映射字典，抽取前置解析逻辑"""
+    params = param_def.get('parameters', [])
+    if isinstance(params, list):
+        return {p.get('name'): p for p in params if p.get('name')}
+    return param_def
+
+
+def _process_single_param(
+    param_name: str,
+    param_info: Dict,
+    error_case: Dict,
+    param_def_dict: Dict,
+    containers: TtkCaseData
+):
+    """统一处理单个参数分支，消除主函数大量if-elif"""
+    io_type = param_info.get('io_type', 'input')
+    param_type = param_info.get('type', '')
+
+    if param_type == 'aclTensor' and io_type == 'input':
+        data = InputTensorData(
+            input_shapes=containers.input_shapes,
+            input_dtypes=containers.input_dtypes,
+            input_ranges=containers.input_ranges
+        )
+        _process_input_tensor(param_name, error_case, data)
+    elif param_type == 'aclTensorList' and io_type == 'input':
+        container = TensorListOutputContainer(
+            input_shapes=containers.input_shapes,
+            input_dtypes=containers.input_dtypes,
+            input_ranges=containers.input_ranges,
+            tensor_list_lengths=containers.tensor_list_lengths
+        )
+        _process_input_tensor_list(param_name, error_case, container)
+    elif param_type == 'aclTensor' and io_type == 'output':
+        _process_output_tensor(param_name, error_case, containers, param_def_dict)
+    elif param_type == 'aclTensorList' and io_type == 'output':
+        out_container = OutputTensorListContainer(
+            output_shapes=containers.output_shapes,
+            output_dtypes=containers.output_dtypes,
+            tensor_list_lengths=containers.tensor_list_lengths,
+            output_indexes=containers.output_indexes
+        )
+        _process_output_tensor_list(
+            param_name, error_case, param_def_dict, out_container
+        )
+    else:
+        _process_scalar_types(param_name, param_info, error_case,
+                              containers.scalar_dtypes_list, containers.attrs_dict)
+
+
+def _build_single_ttk_case(
+    idx: int,
+    error_case: Dict,
+    param_def_dict: Dict
+):
+    """构建单条TTK用例，提取循环内部核心逻辑"""
+    testcase_name = error_case.get('case_name', f"error_case_{idx:03d}")
+    api_name = error_case.get('aclnn_name', '')
+    case = _init_ttk_case_base(testcase_name, api_name)
+
+    # 初始化容器（复用 TtkCaseData，__post_init__ 自动填充默认值）
+    containers = TtkCaseData(
+        input_shapes=[], input_dtypes=[], input_ranges=[],
+        output_shapes=[], output_dtypes=[]
+    )
+
+    # 遍历所有参数并处理
+    for param_name, param_info in param_def_dict.items():
+        _process_single_param(
+            param_name=param_name,
+            param_info=param_info,
+            error_case=error_case,
+            param_def_dict=param_def_dict,
+            containers=containers
+        )
+
+    # containers 本身就是 TtkCaseData，直接填充
+    _build_ttk_case_data(case, containers)
+    return case
+
+
 def create_error_ttk_dataframe(error_cases: List[Dict], param_def: Dict) -> pd.DataFrame:
     """
     创建TTK格式的异常用例DataFrame
@@ -2514,67 +2682,17 @@ def create_error_ttk_dataframe(error_cases: List[Dict], param_def: Dict) -> pd.D
         pd.DataFrame: TTK格式用例DataFrame
     """
     cases = []
+    param_def_dict = _build_param_def_dict(param_def)
 
-    # 构建参数字典
-    params = param_def.get('parameters', [])
-    if isinstance(params, list):
-        param_def_dict = {p.get('name'): p for p in params if p.get('name')}
-    else:
-        param_def_dict = param_def
-
+    # 循环生成每条用例
     for idx, error_case in enumerate(error_cases):
-        testcase_name = error_case.get('case_name', f"error_case_{idx:03d}")
-        api_name = error_case.get('aclnn_name', '')
-        case = _init_ttk_case_base(testcase_name, api_name)
+        single_case = _build_single_ttk_case(idx, error_case, param_def_dict)
+        cases.append(single_case)
 
-        # 初始化容器
-        input_shapes, input_dtypes, input_ranges = [], [], []
-        output_shapes, output_dtypes = [], []
-        scalar_dtypes_list, attrs_dict = [], {}
-
-        # 遍历参数
-        for param_name, param_info in param_def_dict.items():
-            io_type = param_info.get('io_type', 'input')
-            param_type = param_info.get('type', '')
-
-            if param_type == 'aclTensor' and io_type == 'input':
-                data = InputTensorData(
-                    input_shapes=input_shapes,
-                    input_dtypes=input_dtypes,
-                    input_ranges=input_ranges
-                )
-                _process_input_tensor(param_name, param_info, error_case, data)
-
-            elif param_type == 'aclTensor' and io_type == 'output':
-                _process_output_tensor(param_name, param_info, error_case,
-                                      output_shapes, output_dtypes)
-
-            else:
-                _process_scalar_types(param_name, param_info, error_case,
-                                      scalar_dtypes_list, attrs_dict)
-
-        # 填充 TTK 格式
-        data = TtkCaseData(
-            input_shapes=input_shapes,
-            input_dtypes=input_dtypes,
-            input_ranges=input_ranges,
-            output_shapes=output_shapes,
-            output_dtypes=output_dtypes,
-            scalar_dtypes_list=scalar_dtypes_list,
-            attrs_dict=attrs_dict
-        )
-        _fill_ttk_case_fields(case, data)
-        
-        cases.append(case)
-
-    columns = [
-        'testcase_name', 'api_name', 'tensor_view_shapes', 'tensor_dtypes',
-        'scalar_dtypes', 'attributes', 'output_tensor_indexes',
-        'precision_tolerances', 'absolute_precision', 'input_data_ranges',
-        'scalar_data_ranges', 'tensor_list_distribution'
-    ]
-
-    return pd.DataFrame(cases)[columns] if cases else pd.DataFrame(columns=columns)
+    # 生成DataFrame
+    if cases:
+        return pd.DataFrame(cases)[_TTK_DATAFRAME_COLUMNS]
+    return pd.DataFrame(columns=_TTK_DATAFRAME_COLUMNS)
 
 
 def _init_ttk_case_base(testcase_name, api_name):
@@ -2595,7 +2713,7 @@ def _init_ttk_case_base(testcase_name, api_name):
     }
 
 
-def _process_input_tensor(param_name, param_info, error_case, data: InputTensorData):
+def _process_input_tensor(param_name, error_case, data: InputTensorData):
     """处理输入 Tensor"""
     shape = error_case.get(f"{param_name}.shape", [])
     dtype = error_case.get(f"{param_name}.dtype", 'float32')
@@ -2608,13 +2726,57 @@ def _process_input_tensor(param_name, param_info, error_case, data: InputTensorD
     data.input_ranges.append(list(value_range) if value_range else [-2, 2])
 
 
-def _process_output_tensor(param_name, param_info, error_case, output_shapes, output_dtypes):
+def _process_output_tensor(param_name, error_case, containers: TtkCaseData, param_def_dict):
     """处理输出 Tensor"""
     shape = error_case.get(f"{param_name}.shape", [])
     dtype = error_case.get(f"{param_name}.dtype", 'float32')
     if shape:
-        output_shapes.append(list(shape) if isinstance(shape, (list, tuple)) else shape)
-    output_dtypes.append(dtype)
+        containers.output_shapes.append(list(shape) if isinstance(shape, (list, tuple)) else shape)
+    containers.output_dtypes.append(dtype)
+    param_names = list(param_def_dict.keys())
+    if param_name in param_names:
+        containers.output_indexes.append(param_names.index(param_name))
+
+
+def _process_input_tensor_list(
+    param_name: str,
+    error_case: Dict,
+    output_container: TensorListOutputContainer
+):
+    """处理输入 TensorList"""
+    shape_list = error_case.get(f"{param_name}.shape_list", [[2, 3], [2, 3]])
+    if not isinstance(shape_list, list):
+        shape_list = [[2, 3], [2, 3]]
+    dtype = error_case.get(f"{param_name}.dtype", 'float32')
+    length = len(shape_list) if shape_list else 1
+    value_range = error_case.get(f"{param_name}.value_range", [-2, 2])
+    single_range = list(value_range) if value_range else [-2, 2]
+
+    output_container.input_shapes.append(shape_list)
+    output_container.input_dtypes.append(tuple([dtype] * length))
+    output_container.input_ranges.append(tuple([single_range] * length))
+    output_container.tensor_list_lengths.append(length)
+
+
+def _process_output_tensor_list(
+    param_name: str,
+    error_case: Dict,
+    param_def_dict: Dict,
+    output_container: OutputTensorListContainer
+):
+    """处理输出 TensorList"""
+    shape_list = error_case.get(f"{param_name}.shape_list", [[2, 3], [2, 3]])
+    if not isinstance(shape_list, list):
+        shape_list = [[2, 3], [2, 3]]
+    dtype = error_case.get(f"{param_name}.dtype", 'float32')
+    length = len(shape_list) if shape_list else 1
+
+    output_container.output_shapes.append(shape_list)
+    output_container.output_dtypes.append(tuple([dtype] * length))
+    param_names = list(param_def_dict.keys())
+    if param_name in param_names:
+        output_container.output_indexes.append(param_names.index(param_name))
+    output_container.tensor_list_lengths.append(length)
 
 
 def _process_scalar_types(param_name, param_info, error_case, scalar_dtypes_list, attrs_dict):
@@ -2632,22 +2794,6 @@ def _process_scalar_types(param_name, param_info, error_case, scalar_dtypes_list
         value = error_case.get(f"{param_name}.value", '')
         if pd.notna(value) and value != '':
             attrs_dict[param_name] = format_ttk_attr_value(value, param_type)
-
-
-def _fill_ttk_case_fields(case, data: TtkCaseData):
-    """填充 TTK 格式最终字段"""
-    all_tensor_shapes = data.input_shapes + data.output_shapes
-    all_tensor_dtypes = data.input_dtypes + data.output_dtypes
-
-    case['tensor_view_shapes'] = format_ttk_tuple(all_tensor_shapes)
-    case['tensor_dtypes'] = format_ttk_tuple_str(all_tensor_dtypes)
-
-    if data.scalar_dtypes_list:
-        case['scalar_dtypes'] = format_ttk_tuple_str(data.scalar_dtypes_list)
-    if data.attrs_dict:
-        case['attributes'] = format_ttk_dict(data.attrs_dict)
-    if data.input_ranges:
-        case['input_data_ranges'] = format_ttk_tuple(data.input_ranges)
 
 
 if __name__ == '__main__':
