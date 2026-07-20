@@ -48,7 +48,7 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 ```
 skills/ops-direct-invoke-workflow/
 ├── SKILL.md                      # 角色总览 + CP 标记说明 + 【统一流程表】+ 通用约定 + 参考资源
-│                                 #   统一流程表内联于此（8 阶段粗体分组、24 步、CP 标记、回退备注），
+│                                 #   统一流程表内联于此（8 阶段粗体分组、15 步骤 + 8 CP 点、回退备注），
 │                                 #   一眼见全貌；列：编号|流程|角色|输入|输出|说明|备注
 └── references/                   # 明细按【关注点】切分（非按阶段）
     ├── task-prompts.md           # 各步 Task 调用契约：角色/输入/输出/验收标准/引用的逻辑名
@@ -60,7 +60,7 @@ skills/ops-direct-invoke-workflow/
 维护要点：
 - **改流程 = 改 workflow skill，不是改 AGENTS.md**。阶段/步骤/CP 的增删改在此。
 - SKILL.md 守 F1：只放统一流程表（编排总览）与路由；每步明细在 references，按关注点组织——改回退阈值只动 error-handling，改调用契约只动 task-prompts。
-- 交付件模板一律引用 `workflow-doc-templates` 逻辑名，Spec 引用 `ops-spec-gen`（spec.yaml 机器契约），**不在 workflow skill 内联模板/schema**。
+- 交付件模板一律引用 `workflow-doc-templates` 逻辑名，**不在 workflow skill 内联模板**。
 - 四个 references 相互引用（task-prompts↔data-flow↔error-handling↔state-schema）；改动其一时检查交叉引用一致性。
 
 ### 子类仓（算子仓，如 ops-blas）

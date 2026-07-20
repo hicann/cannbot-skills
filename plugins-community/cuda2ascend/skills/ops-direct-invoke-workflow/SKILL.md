@@ -14,7 +14,7 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 | 角色 | 类型 | 职责 |
 |------|------|------|
 | **PM**（主 Agent） | 调度（final） | 用户交互、流程编排、问题裁定；只调度不执行，中间文件写 `.cannbot` |
-| **architect** | 执行（final） | Spec 形式化、开发方案与测试方案设计 |
+| **architect** | 执行（final） | 开发方案与测试方案设计 |
 | **developer** | 执行（final） | 跨代码/测试/文档的综合任务（开发准备、codecheck/检视修复） |
 | **developer-code** | 执行（final） | 算子代码开发、问题定位 |
 | **developer-test** | 执行（final） | golden、功能/性能用例、白盒测试补全 |
@@ -40,14 +40,11 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 | **阶段1：需求分析** | | | | | | |
 | 1.1 | 需求分析 | PM | 对话上下文、仓库设计约束 | 需求文档 | 数学定义、算子原型、目标芯片、精度/性能要求；缺项发问卷补齐 | |
 | CP1 | 需求确认 | QA | 需求文档 | 验收结论 | QA 加载 `workflow-cp1` 核对需求；需用户确认时生成问卷 json 交 PM 发送 | 不通过打回 1.1 |
-| 1.2 | Spec 生成 | architect | 需求文档 | Spec（spec.yaml，机器可校验） | 需求形式化为 L0 数学契约，作为后续方案与测试设计的统一真值源；规范见 ops-spec-gen | |
-| CP1' | Spec 确认 | QA | spec.yaml | 验收结论 | QA 加载 `workflow-cp1-prime` 核对 Spec（9-stage 校验通过）；需用户确认时生成问卷 json 交 PM 发送 | 不通过打回 1.2 |
 | **阶段2：方案设计**（方案线 / 测试线并行） | | | | | | |
-| 2.1 | 黑盒测试设计 | architect | spec.yaml | 测试方案文档 | golden 实现方案、L0/L1/L2 分级用例设计 | 测试线 |
+| 2.1 | 黑盒测试设计 | architect | 需求文档 | 测试方案文档 | golden 实现方案、L0/L1/L2 分级用例设计 | 测试线 |
 | CP2.1 | 测试检查 | QA | 测试方案文档 | 验收结论 | QA 加载 `workflow-cp2-1` 完成黑盒测试评审 | 不通过打回 2.1 |
-| 2.2 | 开发方案设计 | architect | spec.yaml | 开发方案文档 | 代码架构、Buffer 规划、Tiling、多核切分、Ascend C 接口验证 | 方案线 |
+| 2.2 | 开发方案设计 | architect | 需求文档 | 开发方案文档 | 代码架构、Buffer 规划、Tiling、多核切分、Ascend C 接口验证 | 方案线 |
 | CP2.2 | 方案检查 | QA | 开发方案文档 | 验收结论 | QA 加载 `workflow-cp2-2` 完成开发方案评审 | 不通过打回 2.2 |
-| CP2' | 方案确认 | QA | 开发方案 + 测试方案 | 验收结论 | QA 加载 `workflow-cp2-prime`，CP2.1、CP2.2 均通过后合并确认 | 不通过打回对应步骤 |
 | **阶段3：代码开发**（开发线 / 测试线并行） | | | | | | |
 | 3.1 | 算子开发 | developer-code | 开发方案文档、修改要求 | 算子代码 | 按方案实现、编译验证通过；被打回时按修改要求调整 | 开发线 |
 | 3.2 | 测试工程开发 | developer-test | 测试方案文档 | golden 代码 + 用例表 + 性能采集框架 | 实现 golden、功能用例、性能采集框架 | 测试线 |
@@ -72,7 +69,7 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 ## 通用约定
 
 - **状态与恢复**：每阶段（步骤或 CP）完成后将进度持久化到 `.cannbot/state.json`（结构见 [state-schema.md](references/state-schema.md)）；任何暂停/失败落盘到可恢复状态点，恢复时从该点续跑，不重跑已通过阶段。
-- **中间文件**：所有过程产物（需求/Spec/方案/报告/状态）统一放 `.cannbot`，与代码/test/doc 最终交付物区分。`.cannbot` 所有角色均可写，写入路径与命名在任务下发时约定。
+- **中间文件**：所有过程产物（需求/方案/报告/状态）统一放 `.cannbot`，与代码/test/doc 最终交付物区分。`.cannbot` 所有角色均可写，写入路径与命名在任务下发时约定。
 - **最小信息/最小权限**：调度子 Agent 只传当前任务所需输入、只授所需写权限（由 hook 按角色限权）。
 
 ## 参考资源
@@ -90,8 +87,7 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 
 | 逻辑名 | 用途 | 引用步骤 |
 |--------|------|----------|
-| `ops-spec-gen` | spec.yaml 生成与 9-stage 校验规范 | 1.2 Spec 生成 |
-| `ops-precision-standard` | 精度容差标准 | CP3 精度比对、Spec 容差字段 |
+| `ops-precision-standard` | 精度容差标准 | CP3 精度比对 |
 | `ascendc-st-design` | 测试配置（test_matrix）管理 | 2.1 测试设计、3.2 测试开发 |
 
 > 领域 skill（`repo-*`）由子仓 override；上述 `ops-*` 为跨仓共享 skill，由基类 init 从共享 `ops/` 目录按逻辑名绑定，子仓一般不覆写。

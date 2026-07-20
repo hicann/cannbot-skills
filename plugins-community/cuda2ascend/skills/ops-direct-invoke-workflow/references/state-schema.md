@@ -14,7 +14,7 @@
   "operator": "算子名",
   "chip": "目标芯片/架构",
   "current_stage": "流程表编号，如 3.1 / CP3",
-  "completed_stages": ["0", "CP0", "1.1", "CP1", "1.2", "CP1'"],
+  "completed_stages": ["0", "CP0", "1.1", "CP1"],
   "blocked": {
     "at": "CP3",
     "reason": "结构化问题摘要（详见对应 report 或 issue）",
@@ -23,7 +23,6 @@
   },
   "deliverables": {
     "requirement": ".cannbot/1.1-需求分析.md",
-    "spec": ".cannbot/spec.yaml",
     "test_plan": ".cannbot/2.1-测试方案设计.md",
     "dev_plan": ".cannbot/2.2-开发方案设计.md",
     "cp3_report": ".cannbot/CP3-功能验收报告.md"

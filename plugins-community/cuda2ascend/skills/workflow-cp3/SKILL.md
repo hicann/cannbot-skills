@@ -18,7 +18,7 @@ disable-model-invocation: true
 
 - **编译通过**：算子代码按 `repo-build-guide` 完成编译验证，无错误。
 - **用例全通过**：L0/L1/L2 全量功能用例执行，指定必过用例集全部通过（通过率达绑定实现设定的阈值，默认要求核心用例 100% 通过）。
-- **精度达标**：与 golden 的比对结果，最大相对 / 绝对误差落在容差内（容差引用 `ops-precision-standard` 或 Spec 字段）。
+- **精度达标**：与 golden 的比对结果，最大相对 / 绝对误差落在容差内（容差引用 `ops-precision-standard` 或需求文档字段）。
 - **通过条件**：编译通过 + 必过用例集全过 + 精度误差在容差内三者同时满足。具体用例集与容差由绑定实现给定，判定形式为"执行结果对照阈值，客观数据裁定"。
 
 ## 验收步骤
@@ -27,7 +27,7 @@ disable-model-invocation: true
 
 1. 按 `repo-build-guide` 完成编译验证。
 2. 执行 L0/L1/L2 全量功能用例，采集通过率与失败用例清单。
-3. 与 golden 比对，采集最大相对 / 绝对误差，对照 `ops-precision-standard` 或 Spec 容差。
+3. 与 golden 比对，采集最大相对 / 绝对误差，对照 `ops-precision-standard` 或需求文档容差。
 4. 汇总三项结果对照阈值，产出功能验收报告。
 
 ## 输出

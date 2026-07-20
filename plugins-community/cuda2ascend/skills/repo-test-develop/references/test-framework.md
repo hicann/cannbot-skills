@@ -1,6 +1,6 @@
 # 测试框架与测试开发方法
 
-> 测试工程的搭建与测试代码开发方法。测试配置（dtype/shape/容差/oracle）以上游测试方案与 Spec 为真值源；test_matrix 管理见 `ascendc-st-design`。精度标准与性能采集见 [precision-and-perf.md](precision-and-perf.md)。
+> 测试工程的搭建与测试代码开发方法。测试配置（dtype/shape/容差/oracle）以上游测试方案与需求文档为真值源；test_matrix 管理见 `ascendc-st-design`。精度标准与性能采集见 [precision-and-perf.md](precision-and-perf.md)。
 
 ## 测试工程组成
 
@@ -20,7 +20,7 @@
 | L1 | 功能用例 | 典型 shape、竞品 shape | 验证常用功能覆盖完全（1K 元素典型场景） |
 | L2 | 异常用例 | 超大 shape、空指针、极值/零值等异常输入 | 边界与异常输入验证 |
 
-分级用例的 shape/dtype 组织通过 `ascendc-st-design` 的 test_matrix 管理，与 Spec 保持一致。
+分级用例的 shape/dtype 组织通过 `ascendc-st-design` 的 test_matrix 管理，与需求文档保持一致。
 
 ## 白盒测试补全
 

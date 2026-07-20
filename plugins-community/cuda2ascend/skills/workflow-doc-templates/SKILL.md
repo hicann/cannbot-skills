@@ -1,6 +1,6 @@
 ---
 name: workflow-doc-templates
-description: 交付件模板，提供设计文档、验收报告等中间交付件的格式模板。触发：产出需求/Spec/方案/验收报告/算子文档/开发日志/Issue 等交付件时，先加载对应模板作为格式基准。
+description: 交付件模板，提供设计文档、验收报告等中间交付件的格式模板。触发：产出需求/方案/验收报告/算子文档/开发日志/Issue 等交付件时，先加载对应模板作为格式基准。
 ---
 
 # 交付件模板索引
@@ -16,7 +16,6 @@ description: 交付件模板，提供设计文档、验收报告等中间交付�
 |--------|----------|------|
 | 环境信息文档 | 0 | [references/0-环境信息.md](references/0-环境信息.md) |
 | 需求文档 | 1.1 | [references/1.1-需求分析.md](references/1.1-需求分析.md) |
-| Spec 文档 | 1.2 | [references/1.2-Spec.md](references/1.2-Spec.md) |
 | 测试方案文档 | 2.1 | [references/2.1-测试方案设计.md](references/2.1-测试方案设计.md) |
 | 开发方案文档 | 2.2 | [references/2.2-开发方案设计.md](references/2.2-开发方案设计.md) |
 | 功能验收报告 | CP3 | [references/CP3-功能验收报告.md](references/CP3-功能验收报告.md) |
@@ -35,5 +34,4 @@ description: 交付件模板，提供设计文档、验收报告等中间交付�
 
 ## 说明
 
-- **Spec（1.2）不是自由格式**：它是机器可校验的 `spec.yaml`，格式规范由共享 skill `ops-spec-gen` 权威定义（schema + 9-stage 校验 + registries + 示例）。`1.2-Spec.md` 只做引导，不复制 schema。
 - 交付件模板与流程表编号一一对应；子仓 override 本目录时保持编号与逻辑名不变。

@@ -7,7 +7,7 @@
 
 Agent 团队为三类固定角色，全部属 **final**，承载角色身份、行为边界、工具与写权限声明，子仓不覆写：
 
-- **architect**：方案设计（Spec 形式化、开发方案、测试方案）。
+- **architect**：方案设计（开发方案、测试方案）。
 - **developer**（大类，按操作权限分 `developer-code` / `developer-test` / `developer-doc`）：代码、测试、文档的开发与修复。
 - **qa**：验收。在各 CP 点加载对应的 `workflow-cp*` Skill 完成判定，产出验收报告与用户确认问卷。
 
