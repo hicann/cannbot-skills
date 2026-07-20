@@ -309,5 +309,39 @@ describe("plugin-installer", () => {
         process.chdir(origCwd);
       }
     });
+
+    it("updates existing external repo with git pull instead of clone", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+
+      const pluginDir = join(testDir, "my-plugin");
+      const extRepoDir = join(pluginDir, "ext-repo");
+      mkdirSync(join(extRepoDir, ".git"), { recursive: true });
+      writeFileSync(join(extRepoDir, "README.md"), "ext-repo content");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+
+      const plugin = {
+        id: "my-plugin",
+        dir: "my-plugin",
+        displayName: "My Plugin",
+        script: "init.sh",
+        aliases: [],
+        skills: 0,
+        agents: 0,
+        description: "",
+        configFile: "AGENTS.md",
+        installSkills: [],
+        installAgents: [],
+        externalRepos: [{ url: "https://example.com/ext.git", dir: "my-plugin/ext-repo" }],
+      };
+
+      const configRoot = join(testDir, ".opencode");
+      mkdirSync(join(configRoot, "skills"), { recursive: true });
+      mkdirSync(join(configRoot, "agents"), { recursive: true });
+
+      await installViaManifest(plugin as any, testDir, "opencode", "project", testDir);
+
+      // git pull fails (not a real repo), so link is skipped but ext-repo content is preserved
+      expect(existsSync(join(extRepoDir, "README.md"))).toBe(true);
+    });
   });
 });

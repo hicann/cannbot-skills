@@ -7,12 +7,12 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
-import { existsSync, mkdirSync, symlinkSync, unlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, symlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync } from "fs";
 import { join, basename } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, PluginEntry, PluginManifestExternalRepo, CannbotManifest } from "../types/index.js";
 import { getConfigRoot, getAgentsFileName } from "../utils/paths.js";
-import { isSymlink } from "../utils/fs-helpers.js";
+import { isSymlink, removePath } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 
@@ -42,7 +42,7 @@ function installLink(source: string, target: string): "symlink" | "copy" | "skip
     }
 
     if (existsSync(target) || isSymlink(target)) {
-      unlinkSync(target);
+      removePath(target);
     }
     try {
       symlinkSync(resolved, target);
@@ -85,7 +85,7 @@ function installConfigFile(
     const resolvedSource = realpathSync(sourcePath);
 
     if (existsSync(primaryTarget) || isSymlink(primaryTarget)) {
-      unlinkSync(primaryTarget);
+      removePath(primaryTarget);
     }
 
     try {
@@ -105,7 +105,7 @@ function installConfigFile(
     if (configRootConfigLink === false) return;
     const configRootTarget = join(configRoot, agentsFileName);
     if (existsSync(configRootTarget) || isSymlink(configRootTarget)) {
-      unlinkSync(configRootTarget);
+      removePath(configRootTarget);
     }
     try {
       symlinkSync(realpathSync(sourcePath), configRootTarget);
@@ -128,7 +128,16 @@ async function installExternalRepos(
 
   for (const repo of repos) {
     const targetDir = join(repoPath, repo.dir);
-    if (!existsSync(targetDir)) {
+    const gitDir = join(targetDir, ".git");
+
+    if (existsSync(gitDir)) {
+      try {
+        await execa("git", ["pull", "--quiet"], { cwd: targetDir, timeout: 120000 });
+      } catch {
+        logger.warn(t("external_repo_update_failed").replace("{dir}", repo.dir));
+        continue;
+      }
+    } else if (!existsSync(targetDir)) {
       const args = ["clone"];
       if (repo.depth) {
         args.push("--depth", String(repo.depth));
@@ -155,7 +164,7 @@ async function installExternalRepos(
       const configRootLink = join(configRoot, linkName);
       try {
         if (existsSync(configRootLink) || isSymlink(configRootLink)) {
-          unlinkSync(configRootLink);
+          removePath(configRootLink);
         }
         try {
           symlinkSync(resolved, configRootLink);
@@ -173,7 +182,7 @@ async function installExternalRepos(
       const projectLink = join(installPath, linkName);
       try {
         if (existsSync(projectLink) || isSymlink(projectLink)) {
-          unlinkSync(projectLink);
+          removePath(projectLink);
         }
         try {
           symlinkSync(resolved, projectLink);
@@ -197,7 +206,7 @@ function installWorkflows(pluginDir: string, configRoot: string): void {
   try {
     const resolved = realpathSync(workflowsDir);
     if (existsSync(targetPath) || isSymlink(targetPath)) {
-      unlinkSync(targetPath);
+      removePath(targetPath);
     }
     try {
       symlinkSync(resolved, targetPath);

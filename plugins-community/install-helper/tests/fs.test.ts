@@ -10,8 +10,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { tmpdir } from "os";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 let testDir: string;
 
@@ -92,5 +96,46 @@ describe("fs-helpers", () => {
   it("isDirectory returns false for non-existent path", async () => {
     const { isDirectory } = await import("../src/utils/fs-helpers.js");
     expect(isDirectory(join(testDir, "nonexistent"))).toBe(false);
+  });
+
+  it("removePath removes a regular file", async () => {
+    const { removePath } = await import("../src/utils/fs-helpers.js");
+    const filePath = join(testDir, "to-remove.txt");
+    writeFileSync(filePath, "data");
+    expect(existsSync(filePath)).toBe(true);
+    removePath(filePath);
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it("removePath removes a directory recursively", async () => {
+    const { removePath } = await import("../src/utils/fs-helpers.js");
+    const dirPath = join(testDir, "to-remove-dir");
+    mkdirSync(join(dirPath, "sub"), { recursive: true });
+    writeFileSync(join(dirPath, "file.txt"), "data");
+    removePath(dirPath);
+    expect(existsSync(dirPath)).toBe(false);
+  });
+
+  it("removePath does not throw for non-existent path", async () => {
+    const { removePath } = await import("../src/utils/fs-helpers.js");
+    expect(() => removePath(join(testDir, "nonexistent"))).not.toThrow();
+  });
+
+  it("atomicWriteFileSync overwrites existing file without unlink (POSIX rename)", async () => {
+    const { atomicWriteFileSync } = await import("../src/utils/fs.js");
+    const filePath = join(testDir, "atomic.txt");
+    writeFileSync(filePath, "original");
+    expect(existsSync(filePath)).toBe(true);
+
+    atomicWriteFileSync(filePath, "updated");
+    const content = readFileSync(filePath, "utf-8");
+    expect(content).toBe("updated");
+    expect(existsSync(`${filePath}.tmp`)).toBe(false);
+  });
+
+  it("atomicWriteFileSync uses rename directly with tmp cleanup on failure", async () => {
+    const src = readFileSync(join(__dirname, "..", "src", "utils", "fs.ts"), "utf-8");
+    expect(src).toContain("renameSync(tmpPath, filePath)");
+    expect(src).toContain("unlinkSync(tmpPath)");
   });
 });

@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execa } from "execa";
@@ -24,6 +24,7 @@ import {
 } from "./scanner.js";
 import { initFromScan } from "./skill-registry.js";
 import { mergeDynamicPlugins } from "./registry.js";
+import { enrichPluginMetadata } from "./metadata-sync.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -87,6 +88,7 @@ export class RepositoryManager {
       await this.updateRepo();
     }
     mergeDynamicPlugins(repoPath);
+    enrichPluginMetadata(repoPath);
 
     const cache = readScanCache();
     if (cache && cache.repoCommit === getCurrentCommit(repoPath)) {
@@ -114,6 +116,7 @@ export class RepositoryManager {
       logger.warn(t("repo_pull_failed"));
     }
     mergeDynamicPlugins(repoPath);
+    enrichPluginMetadata(repoPath);
   }
 
   getRepoPath(): string {
@@ -142,6 +145,7 @@ export class RepositoryManager {
         this.repoPath = targetPath;
         return targetPath;
       }
+      rmSync(targetPath, { recursive: true, force: true });
     }
 
     try {
@@ -155,7 +159,10 @@ export class RepositoryManager {
       return targetPath;
     } catch (error) {
       throw new Error(
-        `Failed to clone repository: ${error instanceof Error ? error.message : t("error_unknown")}`
+        t("repo_clone_failed")
+          .replace("{error}", error instanceof Error ? error.message : t("error_unknown"))
+          .replace("{url}", REPO_URL)
+          .replace("{dir}", targetPath)
       );
     }
   }

@@ -76,6 +76,10 @@ const scanConfig = loadScanConfig();
 const SKILL_SCAN_DIRS = scanConfig.skillDirs;
 const PLUGIN_SCAN_DIRS = scanConfig.pluginDirs;
 
+export function getScanDirs(): string[] {
+  return [...SKILL_SCAN_DIRS];
+}
+
 export function scanSkills(repoPath: string): ScannedSkill[] {
   const skills: ScannedSkill[] = [];
   const seen = new Set<string>();

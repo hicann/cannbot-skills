@@ -14,7 +14,7 @@ import { existsSync } from "fs";
 import type { AITool, InstallLevel, TraeVariant } from "../types/index.js";
 import { t } from "./i18n.js";
 
-export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot"];
+export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot", "codearts"];
 const VALID_LEVELS: InstallLevel[] = ["project", "global"];
 
 export function validateTool(tool: string): AITool {
@@ -75,6 +75,8 @@ export function getConfigRoot(
         return join(home, ".cursor");
       case "copilot":
         return join(home, ".copilot");
+      case "codearts":
+        return join(home, ".codeartsdoer");
       default:
         throw new Error(
           t("error_invalid_tool")
@@ -105,6 +107,8 @@ export function getConfigRoot(
       return join(baseDir, ".cursor");
     case "copilot":
       return join(baseDir, ".github");
+    case "codearts":
+      return join(baseDir, ".codeartsdoer");
     default:
       throw new Error(
         t("error_invalid_tool")

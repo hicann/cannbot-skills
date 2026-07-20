@@ -102,6 +102,15 @@ async function detectCopilot(): Promise<DetectedTool | undefined> {
   }
 }
 
+async function detectCodeArts(): Promise<DetectedTool | undefined> {
+  const home = homedir();
+  const configDir = join(home, ".codeartsdoer");
+  if (existsSync(configDir)) {
+    return { name: "codearts", path: configDir };
+  }
+  return undefined;
+}
+
 export async function detectTools(): Promise<DetectedTool[]> {
   const detectors = [
     detectOpenCode,
@@ -109,6 +118,7 @@ export async function detectTools(): Promise<DetectedTool[]> {
     detectTrae,
     detectCursor,
     detectCopilot,
+    detectCodeArts,
   ];
 
   const results = await Promise.allSettled(detectors.map((d) => d()));
@@ -130,6 +140,7 @@ export function getToolDisplayName(tool: AITool): string {
     trae: "Trae",
     cursor: "Cursor",
     copilot: "GitHub Copilot",
+    codearts: "CodeArts",
   };
   return names[tool];
 }

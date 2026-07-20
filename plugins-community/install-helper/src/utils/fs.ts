@@ -19,13 +19,10 @@ export function atomicWriteFileSync(filePath: string, data: string, encoding: Bu
 
   const tmpPath = `${filePath}.tmp`;
   writeFileSync(tmpPath, data, encoding);
-
-  if (existsSync(filePath)) {
-    try {
-      unlinkSync(filePath);
-    } catch {
-    }
+  try {
+    renameSync(tmpPath, filePath);
+  } catch (e) {
+    try { unlinkSync(tmpPath); } catch {}
+    throw e;
   }
-
-  renameSync(tmpPath, filePath);
 }

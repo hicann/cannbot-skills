@@ -108,6 +108,107 @@ describe("backup", () => {
       expect(existsSync(backupFile)).toBe(false);
     });
   });
+
+  describe("detectCurrentPlugin", () => {
+    it("reads per-plugin manifest (not just legacy cannbot-manifest.json)", async () => {
+      await import("../src/core/registry.js");
+      const { detectCurrentPlugin } = await import("../src/core/backup.js");
+      const configRoot = join(testDir, ".opencode");
+      mkdirSync(configRoot, { recursive: true });
+
+      writeFileSync(
+        join(configRoot, "ops-direct-invoke-manifest.json"),
+        JSON.stringify({
+          brand: "CANNBot",
+          version: "1.0.0",
+          team: "ops-direct-invoke",
+          level: "project",
+          tool: "opencode",
+          installed_skills: [],
+          installed_agents: [],
+          brand_dir: configRoot,
+          install_time: "2026-01-01T00:00:00Z",
+        })
+      );
+
+      const result = detectCurrentPlugin(configRoot, "opencode");
+      expect(result).not.toBeNull();
+      expect(result!.pluginId).toBe("ops-direct-invoke");
+    });
+
+    it("checks installPath for agents file when configRootConfigLink is false", async () => {
+      await import("../src/core/registry.js");
+      const { detectCurrentPlugin } = await import("../src/core/backup.js");
+      const { writeRecord } = await import("../src/core/record.js");
+      const installPath = join(testDir, "project-dir");
+      const configRoot = join(installPath, ".opencode");
+      mkdirSync(configRoot, { recursive: true });
+
+      writeFileSync(join(installPath, "AGENTS.md"), "# Agents content");
+
+      writeRecord({
+        pluginId: "ops-direct-invoke",
+        displayName: "AscendC Kernel 直调",
+        tool: "opencode",
+        level: "project",
+        installPath,
+        configRoot,
+        files: [],
+        skills: [],
+        agents: [],
+      } as any);
+
+      const result = detectCurrentPlugin(configRoot, "opencode", installPath);
+      expect(result).not.toBeNull();
+    });
+
+    it("returns null when no manifest and no agents file in configRoot or installPath", async () => {
+      const { detectCurrentPlugin } = await import("../src/core/backup.js");
+      const configRoot = join(testDir, ".opencode");
+      mkdirSync(configRoot, { recursive: true });
+
+      const result = detectCurrentPlugin(configRoot, "opencode");
+      expect(result).toBeNull();
+    });
+
+    it("returns plugin with latest install_time when multiple manifests exist", async () => {
+      await import("../src/core/registry.js");
+      const { detectCurrentPlugin } = await import("../src/core/backup.js");
+      const configRoot = join(testDir, ".opencode-multi");
+      mkdirSync(configRoot, { recursive: true });
+
+      const manifestA = {
+        brand: "CANNBot",
+        version: "1.0.0",
+        team: "ops-direct-invoke",
+        level: "project",
+        tool: "opencode",
+        installed_skills: [],
+        installed_agents: [],
+        brand_dir: configRoot,
+        install_time: "2026-01-01T00:00:00Z",
+      };
+      const manifestB = {
+        brand: "CANNBot",
+        version: "1.0.0",
+        team: "torch-compile",
+        level: "project",
+        tool: "opencode",
+        installed_skills: [],
+        installed_agents: [],
+        brand_dir: configRoot,
+        install_time: "2026-07-17T12:00:00Z",
+      };
+
+      const { writeFileSync: wf } = require("fs");
+      wf(join(configRoot, "ops-direct-invoke-manifest.json"), JSON.stringify(manifestA));
+      wf(join(configRoot, "torch-compile-manifest.json"), JSON.stringify(manifestB));
+
+      const result = detectCurrentPlugin(configRoot, "opencode");
+      expect(result).not.toBeNull();
+      expect(result!.pluginId).toBe("torch-compile");
+    });
+  });
 });
 
 function readFileSync(path: string, encoding: string): string {

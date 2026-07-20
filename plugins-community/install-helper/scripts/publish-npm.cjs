@@ -43,8 +43,9 @@ function run() {
     fs.readFileSync(path.join(ROOT, "package.json"), "utf-8")
   );
   const version = pkg.version;
+  const tag = version.includes("-") ? "beta" : "latest";
   console.log(`\n==========================================`);
-  console.log(`  Publishing install-helper v${version}`);
+  console.log(`  Publishing install-helper v${version} (tag: ${tag})`);
   console.log(`==========================================\n`);
 
   console.log("[1/2] Publishing sub-packages...\n");
@@ -54,13 +55,13 @@ function run() {
       console.error(`  ✗ ${subPkg} not found. Run: node scripts/build-npm-packages.cjs`);
       process.exit(1);
     }
-    publish(pkgDir);
+    publish(pkgDir, tag);
     console.log(`  ✓ ${subPkg}\n`);
     sleep(SLEEP_MS);
   }
 
   console.log("[2/2] Publishing main package...\n");
-  execSync(`npm publish --access public --tag latest --registry ${REGISTRY}`, {
+  execSync(`npm publish --access public --tag ${tag} --registry ${REGISTRY}`, {
     cwd: ROOT,
     stdio: "inherit",
   });
@@ -68,8 +69,8 @@ function run() {
 
   console.log(`\n==========================================`);
   console.log(`  Done! Verify:`);
-  console.log(`  npm view @cannbot-ai/install-helper-linux-x64@beta --registry ${REGISTRY}`);
-  console.log(`  npm view @cannbot-ai/install-helper@beta --registry ${REGISTRY}`);
+  console.log(`  npm view @cannbot-ai/install-helper-linux-x64@${tag} --registry ${REGISTRY}`);
+  console.log(`  npm view @cannbot-ai/install-helper@${tag} --registry ${REGISTRY}`);
   console.log(`==========================================\n`);
 }
 

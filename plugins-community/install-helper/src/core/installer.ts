@@ -56,7 +56,7 @@ export async function installPlugin(
   let backupInfo: BackupInfo | null = null;
 
   if (existsSync(agentsFile)) {
-    const currentPlugin = detectCurrentPlugin(configRoot, opts.tool);
+    const currentPlugin = detectCurrentPlugin(configRoot, opts.tool, opts.installPath);
 
     if (currentPlugin && currentPlugin.pluginId !== opts.pluginId) {
       let choice: "overwrite" | "cancel" = "overwrite";

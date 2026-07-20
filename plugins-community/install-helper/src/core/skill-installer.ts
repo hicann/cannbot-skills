@@ -8,14 +8,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, symlinkSync, unlinkSync, readdirSync, rmSync, realpathSync, readlinkSync } from "fs";
+import { existsSync, mkdirSync, symlinkSync, readdirSync, rmSync, realpathSync, readlinkSync, cpSync } from "fs";
 import { join, dirname, isAbsolute } from "path";
 import { select, checkbox, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
 import Table from "cli-table3";
 import type { AITool, InstallLevel } from "../types/index.js";
 import { getConfigRoot } from "../utils/paths.js";
-import { isSymlink } from "../utils/fs-helpers.js";
+import { isSymlink, removePath } from "../utils/fs-helpers.js";
 import { BACK, CANCEL } from "../utils/constants.js";
 import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
@@ -88,9 +88,17 @@ export async function installSkills(
       }
 
       if (existsSync(targetPath) || isSymlink(targetPath)) {
-        unlinkSync(targetPath);
+        removePath(targetPath);
       }
-      symlinkSync(resolvedSource, targetPath);
+      try {
+        symlinkSync(resolvedSource, targetPath);
+      } catch (e: any) {
+        if (e.code === "EPERM") {
+          cpSync(resolvedSource, targetPath, { recursive: true });
+        } else {
+          throw e;
+        }
+      }
       results.push({ skillId, success: true });
       installedIds.push(skillId);
     } catch (error) {
@@ -126,7 +134,7 @@ export async function uninstallSkills(
 
     try {
       if (existsSync(targetPath) || isSymlink(targetPath)) {
-        unlinkSync(targetPath);
+        removePath(targetPath);
         results.push({ skillId, success: true });
         removedIds.push(skillId);
         logger.step(`  ${t("uninstall_remove_label")}: ${skillId}`);

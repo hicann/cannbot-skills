@@ -288,4 +288,14 @@ describe("skill-installer", () => {
       }
     });
   });
+
+  describe("EPERM copy fallback", () => {
+    it("source code includes cpSync EPERM fallback for Windows compatibility", async () => {
+      const { readFileSync } = await import("fs");
+      const src = readFileSync(join(__dirname, "..", "src", "core", "skill-installer.ts"), "utf-8");
+      expect(src).toContain("cpSync");
+      expect(src).toContain("EPERM");
+      expect(src).toContain("cpSync(resolvedSource, targetPath, { recursive: true })");
+    });
+  });
 });

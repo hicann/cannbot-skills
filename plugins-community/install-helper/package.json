@@ -1,6 +1,6 @@
 {
   "name": "@cannbot-ai/install-helper",
-  "version": "1.1.3",
+  "version": "1.1.5",
   "description": "Install Helper - Interactive installer for CANN operator development skills",
   "type": "module",
   "bin": {
@@ -11,17 +11,18 @@
     "build:bin": "node scripts/gen-embedded.cjs && bash scripts/build-binaries.sh",
     "build:npm": "node scripts/build-npm-packages.cjs",
     "publish:npm": "node scripts/publish-npm.cjs",
-    "dev": "tsup --watch",
+    "dev": "node scripts/gen-embedded.cjs && tsup --watch",
     "test": "vitest run",
     "pretest": "node scripts/gen-embedded.cjs",
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "files": [
     "dist/",
-    "bin/"
+    "bin/install-helper.js",
+    "bin/package.json"
   ],
   "keywords": [
     "cann",
@@ -42,11 +43,11 @@
     "yaml": "^2.6.0"
   },
   "optionalDependencies": {
-    "@cannbot-ai/install-helper-linux-x64": "1.1.3",
-    "@cannbot-ai/install-helper-linux-arm64": "1.1.3",
-    "@cannbot-ai/install-helper-darwin-x64": "1.1.3",
-    "@cannbot-ai/install-helper-darwin-arm64": "1.1.3",
-    "@cannbot-ai/install-helper-windows-x64": "1.1.3"
+    "@cannbot-ai/install-helper-linux-x64": "1.1.5",
+    "@cannbot-ai/install-helper-linux-arm64": "1.1.5",
+    "@cannbot-ai/install-helper-darwin-x64": "1.1.5",
+    "@cannbot-ai/install-helper-darwin-arm64": "1.1.5",
+    "@cannbot-ai/install-helper-windows-x64": "1.1.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

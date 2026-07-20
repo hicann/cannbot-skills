@@ -11,80 +11,110 @@
 import { createRepositoryManager } from "../core/repository.js";
 import { installPlugin } from "../core/installer.js";
 import { findPlugin, getAllPlugins } from "../core/registry.js";
-import { selectToolWithDetection } from "../ui/wizard.js";
-import { readAllManifests } from "../core/manifest.js";
+import { scanInstalled } from "../core/manifest.js";
 import { printInstallSummary } from "../ui/display.js";
 import { logger, createSpinner } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
-import { getConfigRoot, validateTool, validateLevel } from "../utils/paths.js";
+import { validateTool, validateLevel } from "../utils/paths.js";
 import chalk from "chalk";
 import type { AITool, InstallLevel } from "../types/index.js";
 
+interface UpdateTarget {
+  pluginId: string;
+  tool: AITool;
+  level: InstallLevel;
+}
+
 export async function updateCommand(
   pluginNames: string[],
-  options: { tool?: string; level?: string }
+  options: { tool?: string; level?: string; yes?: boolean }
 ): Promise<void> {
-  let tool: AITool;
-  if (options.tool) {
-    tool = validateTool(options.tool);
-  } else {
-    const detected = await selectToolWithDetection();
-    if (detected === "back" || detected === "cancel") {
-      logger.info(t("init_cancelled"));
-      return;
-    }
-    tool = detected;
-  }
-
-  const level: InstallLevel = options.level ? validateLevel(options.level) : "project";
-
-  let pluginsToUpdate: string[] = [];
-
-  if (pluginNames.length === 0) {
-    const configRoot = getConfigRoot(tool, level);
-    const manifests = readAllManifests(configRoot);
-    pluginsToUpdate = manifests.map((m) => m.team);
-    if (pluginsToUpdate.length === 0) {
-      logger.info(t("update_no_plugins"));
-      logger.info(t("update_install_hint").replace("{cmd}", chalk.cyan("install-helper install <plugin>")));
-      return;
-    }
-  } else {
-    for (const name of pluginNames) {
-      const plugin = findPlugin(name);
-      if (!plugin) {
-        logger.error(`${t("error_plugin_not_found")}: ${name}`);
-        return;
-      }
-      pluginsToUpdate.push(plugin.id);
-    }
-  }
-
+  // Phase 1: ensureRepoAndScan (discover dynamic plugins + enrich metadata)
   const repoManager = createRepositoryManager();
   const updateSpinner = createSpinner(t("update_updating") + "...");
   updateSpinner.start();
 
-  const repoPath = await repoManager.ensureRepoAndScan();
-  updateSpinner.succeed(t("install_repo_ready"));
+  let repoPath: string;
+  try {
+    repoPath = await repoManager.ensureRepoAndScan();
+    updateSpinner.succeed(t("install_repo_ready"));
+  } catch (error) {
+    updateSpinner.fail(t("repo_clone_failed")
+      .replace("{error}", error instanceof Error ? error.message : t("error_unknown"))
+      .replace("{url}", "")
+      .replace("{dir}", ""));
+    return;
+  }
 
+  // Phase 2: scanInstalled (now includes dynamically discovered plugins)
+  const installed = scanInstalled();
+
+  let targets: UpdateTarget[] = [];
+
+  if (pluginNames.length === 0) {
+    if (installed.length === 0) {
+      logger.info(t("update_no_plugins"));
+      logger.info(t("update_install_hint").replace("{cmd}", chalk.cyan("install-helper install <plugin>")));
+      return;
+    }
+    targets = installed.map((p) => ({ pluginId: p.id, tool: p.tool, level: p.level }));
+  } else {
+    let defaultTool: AITool | undefined;
+    let defaultLevel: InstallLevel | undefined;
+
+    if (options.tool) {
+      defaultTool = validateTool(options.tool);
+    }
+    if (options.level) {
+      defaultLevel = validateLevel(options.level);
+    }
+
+    for (const name of pluginNames) {
+      const plugin = findPlugin(name);
+      if (!plugin) {
+        logger.error(`${t("error_plugin_not_found")}: ${name}`);
+        continue;
+      }
+
+      const installedForPlugin = installed.filter((p) => p.id === plugin.id);
+
+      if (installedForPlugin.length > 0) {
+        for (const inst of installedForPlugin) {
+          if (defaultTool && inst.tool !== defaultTool) continue;
+          if (defaultLevel && inst.level !== defaultLevel) continue;
+          targets.push({ pluginId: plugin.id, tool: inst.tool, level: inst.level });
+        }
+      } else {
+        logger.warn(`${plugin.displayName} ${t("error_not_installed")}, ${t("update_skipped")}`);
+      }
+    }
+  }
+
+  if (targets.length === 0) {
+    logger.info(t("update_no_plugins"));
+    return;
+  }
+
+  // Phase 3: reinstall each target
   const allPlugins = getAllPlugins();
   const results = [];
-  const total = pluginsToUpdate.length;
+  const total = targets.length;
 
-  for (let i = 0; i < pluginsToUpdate.length; i++) {
-    const pluginId = pluginsToUpdate[i];
-    const plugin = allPlugins.find((p) => p.id === pluginId);
-    const displayName = plugin?.displayName || pluginId;
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    const plugin = allPlugins.find((p) => p.id === target.pluginId);
+    const displayName = plugin?.displayName || target.pluginId;
     const progress = `[${i + 1}/${total}]`;
 
     const pluginSpinner = createSpinner(`${progress} ${t("update_updating")} ${displayName}...`);
     pluginSpinner.start();
 
     const result = await installPlugin({
-      pluginId,
-      tool,
-      level,
+      pluginId: target.pluginId,
+      tool: target.tool,
+      level: target.level,
       repoPath,
+      yes: options.yes,
     });
 
     if (result.success) {

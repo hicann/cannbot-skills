@@ -121,8 +121,17 @@ async function pluginInstallFlow(): Promise<"done" | "back"> {
   const spinner = createSpinner(t("loading_plugin_data"));
   spinner.start();
 
-  const repoPath = await repoManager.ensureRepo();
-  spinner.succeed(t("loading_plugin_data_complete"));
+  let repoPath: string;
+  try {
+    repoPath = await repoManager.ensureRepo();
+    spinner.succeed(t("loading_plugin_data_complete"));
+  } catch (error) {
+    spinner.fail(t("repo_clone_failed")
+      .replace("{error}", error instanceof Error ? error.message : t("error_unknown"))
+      .replace("{url}", "")
+      .replace("{dir}", ""));
+    return "done";
+  }
 
   const allPlugins = getAllPlugins();
   const selectedPlugins = answers.plugins.map((id) =>
@@ -222,8 +231,17 @@ async function skillInstallFlow(): Promise<"done" | "back"> {
         const spinner = createSpinner(t("loading_plugin_data"));
         spinner.start();
 
-        const repoPath = await repoManager.ensureRepo();
-        spinner.succeed(t("loading_plugin_data_complete"));
+        let repoPath: string;
+        try {
+          repoPath = await repoManager.ensureRepo();
+          spinner.succeed(t("loading_plugin_data_complete"));
+        } catch (error) {
+          spinner.fail(t("repo_clone_failed")
+            .replace("{error}", error instanceof Error ? error.message : t("error_unknown"))
+            .replace("{url}", "")
+            .replace("{dir}", ""));
+          return "done";
+        }
 
         logger.info(`${t("skill_install_progress")} ${t("skill_count_format").replace("{count}", chalk.bold(String(selectedSkills.length)))}...`);
 

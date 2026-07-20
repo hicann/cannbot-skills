@@ -164,7 +164,7 @@ async function stepTool(detectedTools: Awaited<ReturnType<typeof detectTools>>, 
 
 async function stepToolManual(lastTool?: AITool): Promise<AITool | typeof BACK | typeof CANCEL> {
   const choices: Array<{ name: string; value: string } | Separator> = [
-    ...["opencode", "claude", "trae", "cursor", "copilot"].map((tool) => ({
+    ...VALID_TOOLS.map((tool) => ({
       name: `> ${getToolDisplayName(tool as AITool)}`,
       value: tool,
     })),

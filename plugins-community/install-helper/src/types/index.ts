@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-export type AITool = "opencode" | "claude" | "trae" | "cursor" | "copilot";
+export type AITool = "opencode" | "claude" | "trae" | "cursor" | "copilot" | "codearts";
 
 export type InstallLevel = "project" | "global";
 

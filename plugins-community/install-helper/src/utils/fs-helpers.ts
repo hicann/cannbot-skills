@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { lstatSync, statSync } from "fs";
+import { lstatSync, statSync, unlinkSync, rmSync } from "fs";
 
 export function isSymlink(path: string): boolean {
   try {
@@ -23,5 +23,18 @@ export function isDirectory(path: string): boolean {
     return statSync(path).isDirectory();
   } catch {
     return false;
+  }
+}
+
+export function removePath(p: string): void {
+  try {
+    const stat = lstatSync(p);
+    if (stat.isDirectory()) {
+      rmSync(p, { recursive: true, force: true });
+    } else {
+      unlinkSync(p);
+    }
+  } catch {
+    // path doesn't exist, nothing to remove
   }
 }

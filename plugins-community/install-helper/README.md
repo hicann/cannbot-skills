@@ -96,9 +96,10 @@ install-helper install --list                            # 查看所有可用 Sk
 
 | 选项 | 说明 |
 |------|------|
-| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, copilot） |
+| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, copilot, codearts） |
 | `--level <level>` | 安装级别（project, global），默认 project |
 | `--all` `-a` | 安装全部 Skills |
+| `--list` | 按类别列出所有可用 Skills |
 | `--yes` `-y` | 跳过所有确认提示 |
 
 ### 更新
@@ -144,10 +145,11 @@ install-helper lang set en_US      # 切换为英文
 | 8 | Triton 算子开发 | triton-op-generator | triton |
 | 9 | torch.compile 图模式 | torch-compile | torch, compile, graph |
 | 10 | 代码检视 | ops-code-reviewer | code-review, reviewer, review |
+| 11 | NPU 推理 SOTA 优化 | model-infer-sota-approach | sota, sota-approach, model-infer-sota |
 
 ## 前置条件
 
-- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / GitHub Copilot）
+- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / GitHub Copilot / CodeArts）
 - Git（用于克隆 Skills 仓库）
 
 ## 开发

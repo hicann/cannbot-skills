@@ -11,7 +11,7 @@
 import { existsSync, copyFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import type { AITool, BackupInfo } from "../types/index.js";
-import { readManifest } from "./manifest.js";
+import { readAllManifests } from "./manifest.js";
 import { readRecord } from "./record.js";
 import { findPlugin, getAllPlugins } from "./registry.js";
 import { getAgentsFileName } from "../utils/paths.js";
@@ -20,21 +20,31 @@ export { getAgentsFileName };
 
 export function detectCurrentPlugin(
   configRoot: string,
-  tool: AITool
+  tool: AITool,
+  installPath?: string
 ): { pluginId: string; pluginName: string } | null {
-  const manifest = readManifest(configRoot);
-  if (manifest?.team) {
-    const plugin = findPlugin(manifest.team);
-    if (plugin) {
-      return {
-        pluginId: plugin.id,
-        pluginName: plugin.displayName,
-      };
+  const manifests = readAllManifests(configRoot);
+  if (manifests.length > 0) {
+    const sorted = [...manifests].sort((a, b) =>
+      (b.install_time || "").localeCompare(a.install_time || "")
+    );
+    const manifest = sorted[0];
+    if (manifest.team) {
+      const plugin = findPlugin(manifest.team);
+      if (plugin) {
+        return {
+          pluginId: plugin.id,
+          pluginName: plugin.displayName,
+        };
+      }
     }
   }
 
-  const agentsFile = join(configRoot, getAgentsFileName(tool));
-  if (!existsSync(agentsFile)) {
+  const agentsFileName = getAgentsFileName(tool);
+  const configRootAgentsFile = join(configRoot, agentsFileName);
+  const installPathAgentsFile = installPath ? join(installPath, agentsFileName) : null;
+
+  if (!existsSync(configRootAgentsFile) && !(installPathAgentsFile && existsSync(installPathAgentsFile))) {
     return null;
   }
 

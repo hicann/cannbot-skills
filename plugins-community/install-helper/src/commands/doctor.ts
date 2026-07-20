@@ -65,66 +65,85 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
   console.log();
   console.log(chalk.bold(`  ${t("doctor_links")}`));
 
-  const primaryTool = detectedTools[0]?.name || "opencode";
-  const configRoot = getConfigRoot(primaryTool, "project");
+  const checkedRoots = new Set<string>();
+  const configRootsToCheck: { configRoot: string; tool: AITool; level: "project" | "global" }[] = [];
 
-  const skillsDir = getSkillsDir(configRoot);
-  const agentsDir = getAgentsDir(configRoot);
-
-  if (existsSync(skillsDir)) {
-    const brokenLinks = checkBrokenLinks(skillsDir);
-    if (brokenLinks === 0) {
-      const count = readdirSync(skillsDir).length;
-      console.log(chalk.green("  ✓") + ` ${skillsDir} — ${t("doctor_links_valid").replace("{count}", String(count))}`);
-    } else {
-      console.log(chalk.yellow("  ⚠") + ` ${skillsDir} — ${t("doctor_broken_links").replace("{count}", String(brokenLinks))}`);
-      warnings++;
-      if (options.fix) {
-        const fixed = fixBrokenLinks(skillsDir);
-        fixes += fixed;
-        console.log(chalk.green("  ✓") + ` ${t("doctor_fix_cleaning")}: ${t("doctor_fixed").replace("{count}", String(fixed))}`);
+  if (installed.length > 0) {
+    for (const inst of installed) {
+      if (!checkedRoots.has(inst.configRoot)) {
+        checkedRoots.add(inst.configRoot);
+        configRootsToCheck.push({ configRoot: inst.configRoot, tool: inst.tool, level: inst.level });
       }
     }
   } else {
-    console.log(chalk.dim("  —") + ` ${skillsDir} — ${t("doctor_not_exist")}`);
-    if (options.fix) {
-      mkdirSync(skillsDir, { recursive: true });
-      fixes++;
-      console.log(chalk.green("  ✓") + ` ${t("doctor_fix_rebuilding")}: ${t("doctor_created").replace("{path}", skillsDir)}`);
-    }
+    const primaryTool = detectedTools[0]?.name || "opencode";
+    const configRoot = getConfigRoot(primaryTool, "project");
+    configRootsToCheck.push({ configRoot, tool: primaryTool, level: "project" });
   }
 
-  if (existsSync(agentsDir)) {
-    const brokenLinks = checkBrokenLinks(agentsDir);
-    if (brokenLinks === 0) {
-      const count = readdirSync(agentsDir).length;
-      console.log(chalk.green("  ✓") + ` ${agentsDir} — ${t("doctor_links_valid").replace("{count}", String(count))}`);
+  for (const { configRoot } of configRootsToCheck) {
+    const skillsDir = getSkillsDir(configRoot);
+    const agentsDir = getAgentsDir(configRoot);
+
+    if (existsSync(skillsDir)) {
+      const brokenLinks = checkBrokenLinks(skillsDir);
+      if (brokenLinks === 0) {
+        const count = readdirSync(skillsDir).length;
+        console.log(chalk.green("  ✓") + ` ${skillsDir} — ${t("doctor_links_valid").replace("{count}", String(count))}`);
+      } else {
+        console.log(chalk.yellow("  ⚠") + ` ${skillsDir} — ${t("doctor_broken_links").replace("{count}", String(brokenLinks))}`);
+        warnings++;
+        if (options.fix) {
+          const fixed = fixBrokenLinks(skillsDir);
+          fixes += fixed;
+          console.log(chalk.green("  ✓") + ` ${t("doctor_fix_cleaning")}: ${t("doctor_fixed").replace("{count}", String(fixed))}`);
+        }
+      }
     } else {
-      console.log(chalk.yellow("  ⚠") + ` ${agentsDir} — ${t("doctor_broken_links").replace("{count}", String(brokenLinks))}`);
-      warnings++;
+      console.log(chalk.dim("  —") + ` ${skillsDir} — ${t("doctor_not_exist")}`);
       if (options.fix) {
-        const fixed = fixBrokenLinks(agentsDir);
-        fixes += fixed;
-        console.log(chalk.green("  ✓") + ` ${t("doctor_fix_cleaning")}: ${t("doctor_fixed").replace("{count}", String(fixed))}`);
+        mkdirSync(skillsDir, { recursive: true });
+        fixes++;
+        console.log(chalk.green("  ✓") + ` ${t("doctor_fix_rebuilding")}: ${t("doctor_created").replace("{path}", skillsDir)}`);
       }
     }
-  } else {
-    console.log(chalk.dim("  —") + ` ${agentsDir} — ${t("doctor_not_exist")}`);
-    if (options.fix) {
-      mkdirSync(agentsDir, { recursive: true });
-      fixes++;
-      console.log(chalk.green("  ✓") + ` ${t("doctor_fix_rebuilding")}: ${t("doctor_created").replace("{path}", agentsDir)}`);
+
+    if (existsSync(agentsDir)) {
+      const brokenLinks = checkBrokenLinks(agentsDir);
+      if (brokenLinks === 0) {
+        const count = readdirSync(agentsDir).length;
+        console.log(chalk.green("  ✓") + ` ${agentsDir} — ${t("doctor_links_valid").replace("{count}", String(count))}`);
+      } else {
+        console.log(chalk.yellow("  ⚠") + ` ${agentsDir} — ${t("doctor_broken_links").replace("{count}", String(brokenLinks))}`);
+        warnings++;
+        if (options.fix) {
+          const fixed = fixBrokenLinks(agentsDir);
+          fixes += fixed;
+          console.log(chalk.green("  ✓") + ` ${t("doctor_fix_cleaning")}: ${t("doctor_fixed").replace("{count}", String(fixed))}`);
+        }
+      }
+    } else {
+      console.log(chalk.dim("  —") + ` ${agentsDir} — ${t("doctor_not_exist")}`);
+      if (options.fix) {
+        mkdirSync(agentsDir, { recursive: true });
+        fixes++;
+        console.log(chalk.green("  ✓") + ` ${t("doctor_fix_rebuilding")}: ${t("doctor_created").replace("{path}", agentsDir)}`);
+      }
     }
   }
 
   console.log();
   console.log(chalk.bold(`  ${t("doctor_config")}`));
-  const configFile = getConfigFileName(primaryTool);
-  const configPath = join(process.cwd(), configFile);
-  if (existsSync(configPath)) {
-    console.log(chalk.green("  ✓") + ` ${configFile} ${t("doctor_config_exists")}`);
-  } else {
-    console.log(chalk.dim("  —") + ` ${configFile} ${t("doctor_config_not_exist")}`);
+  for (const { configRoot, tool, level } of configRootsToCheck) {
+    const configFile = getConfigFileName(tool);
+    const configPath = level === "project"
+      ? join(configRoot, "..", configFile)
+      : join(configRoot, configFile);
+    if (existsSync(configPath)) {
+      console.log(chalk.green("  ✓") + ` ${configPath} ${t("doctor_config_exists")}`);
+    } else {
+      console.log(chalk.dim("  —") + ` ${configPath} ${t("doctor_config_not_exist")}`);
+    }
   }
 
   console.log();
