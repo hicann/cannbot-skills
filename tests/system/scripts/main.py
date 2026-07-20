@@ -98,9 +98,9 @@ class GateChecker:
                                 ("AGENTS.md", ".claude-plugin/plugin.json"))
 
     @staticmethod
-    def load_evals(skill_name: str) -> Optional[Dict[str, Any]]:
-        """从 Skill 本地目录加载评测用例。"""
-        return load_entity_evals_md(skill_name, entity_type="skill")
+    def load_evals(skill_name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """加载评测用例，entity_type 为 None 时自动搜索所有目录。"""
+        return load_entity_evals_md(skill_name, entity_type=entity_type)
 
     @staticmethod
     def _discover_all() -> Tuple[List[str], List[str]]:
@@ -149,6 +149,24 @@ class GateChecker:
                 if t and isinstance(t, (int, float)):
                     max_timeout = max(max_timeout, int(t))
         return max(max_timeout, 1200)
+
+    @staticmethod
+    def _log_result_summary(
+        changed_skill_count: int,
+        changed_team_count: int,
+        candidate_count: int,
+        all_passed: bool,
+        t_total: float,
+    ) -> None:
+        """输出评测结果汇总日志。"""
+        logger.info("=" * 60)
+        if all_passed:
+            logger.info("全部通过 — %d skill + %d team, %d 验证完成 (%.1fs)",
+                        changed_skill_count, changed_team_count, candidate_count, time.time() - t_total)
+        else:
+            logger.info("评测存在失败 — %d skill + %d team, %d 验证项 (%.1fs)",
+                        changed_skill_count, changed_team_count, candidate_count, time.time() - t_total)
+        logger.info("=" * 60)
 
     # ── 公有实例方法 ──────────────────────────────────────────────────
 
@@ -215,26 +233,26 @@ class GateChecker:
         # Phase 1: 逐 target 基础验证
         skill_candidates = self._collect_entities_for_eval(
             changed_skills, "Skill", self.run_basic_validation,
+            entity_type="skill",
         )
         team_candidates = self._collect_entities_for_eval(
             changed_teams, "Team", self.run_team_basic_validation,
+            entity_type="team",
         )
+
+        if not skill_candidates and not team_candidates:
+            logger.info("所有受影响的实体均无评测用例，生成跳过报告。")
+            self._generate_skip_report()
+            return True
 
         # Phase 2: 统一的 AI 语义评测，生成一份汇总报告
         all_passed = self._run_unified_eval_pytest(skill_candidates, team_candidates, t_total)
 
-        eval_count = len(skill_candidates) + len(team_candidates)
-        total_candidates = len(changed_skills) + len(changed_teams)
-
-        logger.info("=" * 60)
-        if all_passed:
-            logger.info("全部通过 — %d skill + %d team, %d 验证完成 (%.1fs)",
-                        len(changed_skills), len(changed_teams), eval_count, time.time() - t_total)
-        else:
-            logger.info("评测存在失败 — %d skill + %d team, %d 验证项 (%.1fs)",
-                        len(changed_skills), len(changed_teams), eval_count, time.time() - t_total)
-        logger.info("=" * 60)
-
+        self._log_result_summary(
+            len(changed_skills), len(changed_teams),
+            len(skill_candidates) + len(team_candidates),
+            all_passed, t_total,
+        )
         return all_passed
 
     def run_team_basic_validation(self, team_name: str) -> bool:
@@ -318,6 +336,7 @@ class GateChecker:
     def _collect_entities_for_eval(
         self, changed_entities: List[str], entity_label: str,
         run_basic_validation_fn,
+        entity_type: Optional[str] = None,
     ) -> List[str]:
         """Phase 1: 逐实体基础验证，返回通过验证且有 eval 用例的实体列表"""
         if not changed_entities:
@@ -330,7 +349,7 @@ class GateChecker:
         entities_with_evals: List[str] = []
         for idx, entity_name in enumerate(changed_entities, 1):
             if self.report_only:
-                evals_data = self.load_evals(entity_name)
+                evals_data = self.load_evals(entity_name, entity_type=entity_type)
                 if evals_data and evals_data.get("evals", []):
                     entities_with_evals.append(entity_name)
                 continue
@@ -339,7 +358,7 @@ class GateChecker:
             if not run_basic_validation_fn(entity_name):
                 logger.info("  %s 基础验证失败，跳过", entity_name)
                 continue
-            evals_data = self.load_evals(entity_name)
+            evals_data = self.load_evals(entity_name, entity_type=entity_type)
             eval_cases = evals_data.get("evals", []) if evals_data else []
             if eval_cases:
                 entities_with_evals.append(entity_name)

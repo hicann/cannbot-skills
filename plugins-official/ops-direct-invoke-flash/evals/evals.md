@@ -57,7 +57,7 @@ eval_mode: text
 - Cann Bench Device: 0
 - Max Tokens: 10000000
 - Timeout: 10800
-- Disabled: true
+- Disabled: false
 - Ascend Platform: A5
 
 ## Prompt
@@ -154,7 +154,7 @@ output/ 目录应只包含以下文件：
 - Cann Bench Device: 0
 - Max Tokens: 10000000
 - Timeout: 10800
-- Disabled: true
+- Disabled: false
 - Ascend Platform: A5
 
 ## Prompt
@@ -246,7 +246,7 @@ output/ 目录应只包含以下文件：
 - Cann Bench Device: 0
 - Max Tokens: 10000000
 - Timeout: 10800
-- Disabled: true
+- Disabled: false
 - Ascend Platform: A5
 
 ## Prompt
