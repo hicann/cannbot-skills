@@ -139,10 +139,10 @@ fi
 ### Python 检查
 ```bash
 # 仅修改文件
-bash ./scritps/check-python.sh
+bash ./scripts/check-python.sh
 
 # 全部文件
-bash ./scritps/check-python.sh --all
+bash ./scripts/check-python.sh --all
 ```
 
 **输出**: JSON 格式
@@ -157,10 +157,10 @@ bash ./scritps/check-python.sh --all
 ### C++ 检查
 ```bash
 # 仅修改文件
-bash ./scritps/check-cpp.sh
+bash ./scripts/check-cpp.sh
 
 # 全部文件
-bash ./scritps/check-cpp.sh --all
+bash ./scripts/check-cpp.sh --all
 ```
 
 **输出**: JSON 格式
@@ -306,10 +306,10 @@ bash ./scritps/check-cpp.sh --all
 用户可以在选择 "否" 后，手动执行修复命令：
 ```bash
 # 仅修复 Python
-bash ./scritps/fix-python.sh --all
+bash ./scripts/fix-python.sh --all
 
 # 仅修复 C++
-bash ./scritps/fix-cpp.sh --all
+bash ./scripts/fix-cpp.sh --all
 ```
 
 ## 步骤 5: 执行修复
@@ -323,10 +323,10 @@ bash ./scritps/fix-cpp.sh --all
 ### Python 修复
 ```bash
 # 仅修改文件
-bash ./scritps/fix-python.sh
+bash ./scripts/fix-python.sh
 
 # 全部文件
-bash ./scritps/fix-python.sh --all
+bash ./scripts/fix-python.sh --all
 ```
 
 **执行命令**:
@@ -336,10 +336,10 @@ bash ./scritps/fix-python.sh --all
 ### C++ 修复
 ```bash
 # 仅修改文件
-bash ./scritps/fix-cpp.sh
+bash ./scripts/fix-cpp.sh
 
 # 全部文件
-bash ./scritps/fix-cpp.sh --all
+bash ./scripts/fix-cpp.sh --all
 ```
 
 **执行命令**:
