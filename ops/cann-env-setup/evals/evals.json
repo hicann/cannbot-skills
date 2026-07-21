@@ -1,0 +1,196 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "检查NPU驱动安装命令",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？",
+      "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "npu-smi info",
+          "description": "回复中提到了 npu-smi info"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "配置环境变量永久生效",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我已经用离线安装包安装完CANN Toolkit和Ops，现在需要配置环境变量使其永久生效，应该怎么做？",
+      "expected_output": "回复应说明如何配置环境变量实现永久生效：通过 source set_env.sh 命令并将其写入 ~/.bashrc 文件",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "source",
+          "description": "回复中提到了 source"
+        },
+        {
+          "type": "contains",
+          "pattern": "set_env.sh",
+          "description": "回复中提到了 set_env.sh"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "验证安装是否成功",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "CANN安装完成后，如何验证安装是否成功？",
+      "expected_output": "回复应提供至少一种验证 CANN 安装是否成功的方法",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "离线安装顺序",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我需要安装CANN，但服务器没有网络，只有离线安装包Ascend-cann-toolkit_8.0.RC1_linux-aarch64.run和Ascend-cann-910b-ops_8.0.RC1_linux-aarch64.run。请问安装顺序是什么？",
+      "expected_output": "回复应明确说明安装顺序：先安装 Toolkit 包，再安装 Ops 包",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "toolkit",
+          "description": "回复中提到了 toolkit"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Conda在线安装CANN",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我想用conda方式在线安装CANN，需要Python 3.10环境，具体步骤是什么？",
+      "expected_output": "回复应说明 conda 安装 CANN 的完整步骤：创建 conda 环境、添加昇腾 conda 源、使用 conda install 安装 cann-toolkit 和 ops 包",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "conda",
+          "description": "回复中提到了 conda"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "安装前依赖检查",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "安装CANN之前需要检查哪些依赖？",
+      "expected_output": "回复应说明安装 CANN 前需要检查的依赖项，至少包括 Python 和 pip 是否已安装",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "Python",
+          "description": "回复中提到了 Python"
+        },
+        {
+          "type": "contains",
+          "pattern": "pip",
+          "description": "回复中提到了 pip"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "正向看护-多skill环境下正确触发目标skill",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "distractor_skills": [
+          "ascendc-task-focus",
+          "npu-arch",
+          "ascendc-docs-search",
+          "ascendc-runtime-debug"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一台昇腾服务器，需要做一遍CANN环境配置检查，确认驱动是否已安装、环境是否就绪，标准的排查流程是怎样的？",
+      "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装，给出完整的排查流程。即使在多个 skill 同时可用的环境下，也应正确识别并激活 cann-env-setup skill 而不是干扰 skill。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "npu-smi info",
+          "description": "回复中提到了 npu-smi info"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "cann-env-setup",
+          "description": "技能 cann-env-setup 被激活"
+        }
+      ]
+    }
+  ],
+  "skill_name": "cann-env-setup"
+}

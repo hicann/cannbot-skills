@@ -25,7 +25,7 @@ from typing import Dict, Any, List, Optional
 import pytest
 
 from conftest import (
-    get_team_path, get_teams_with_evals, load_team_evals_md, REPO_ROOT,
+    get_team_path, get_teams_with_evals, load_team_evals, REPO_ROOT,
     FRAMEWORK_DIR, SANDBOX_DIR, CANN_BENCH_PATH,
     create_opencode_runner, _platform_matches,
 )
@@ -143,7 +143,7 @@ def pytest_generate_tests(metafunc):
     for team_name in get_teams_with_evals():
         if team_names and team_name not in team_names:
             continue
-        evals_data = load_team_evals_md(team_name)
+        evals_data = load_team_evals(team_name)
         if not evals_data:
             continue
         team_dir = get_team_path(team_name)

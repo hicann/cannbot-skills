@@ -114,10 +114,10 @@ def discover_all_entities(
 
 def _match_target_type(evals_file: Path, target_type: str) -> bool:
     """验证 evals 文件的 target_type 是否匹配。"""
-    from evals_parser import parse_evals_md
+    from evals_json_parser import parse_evals_json
 
     try:
-        data = parse_evals_md(evals_file)
+        data = parse_evals_json(evals_file)
     except Exception as e:
         logger.warning("Failed to parse evals file %s: %s", evals_file, e)
         return False
@@ -125,12 +125,12 @@ def _match_target_type(evals_file: Path, target_type: str) -> bool:
 
 
 def _is_valid_evals_entity(item: Path, whitelist_set: Optional[Set[str]], target_type: Optional[str]) -> bool:
-    """判断目录项是否为含 evals/evals.md 的有效实体。"""
+    """判断目录项是否为含 evals/evals.json 的有效实体。"""
     if not item.is_dir():
         return False
     if whitelist_set and item.name not in whitelist_set:
         return False
-    evals_file = item / "evals" / "evals.md"
+    evals_file = item / "evals" / "evals.json"
     if not evals_file.exists():
         return False
     if target_type is not None and not _match_target_type(evals_file, target_type):
@@ -139,7 +139,7 @@ def _is_valid_evals_entity(item: Path, whitelist_set: Optional[Set[str]], target
 
 
 def _scan_dir_for_evals(dir_rel: str, whitelist_set: Optional[Set[str]], target_type: Optional[str]) -> List[str]:
-    """扫描单个目录，返回含 evals/evals.md 的实体名称列表。"""
+    """扫描单个目录，返回含 evals/evals.json 的实体名称列表。"""
     entity_dir = REPO_ROOT / dir_rel
     if not entity_dir.exists():
         return []
@@ -154,7 +154,7 @@ def _collect_entity_with_evals(
     whitelist: List[str],
     target_type: Optional[str],
 ) -> List[str]:
-    """遍历多个目录键搜索包含 evals/evals.md 的实体。"""
+    """遍历多个目录键搜索包含 evals/evals.json 的实体。"""
     entities: List[str] = []
     whitelist_set = set(whitelist) if whitelist else None
     for dir_key in dir_keys:
@@ -167,9 +167,9 @@ def discover_entities_with_evals(
     whitelist_key: str,
     target_type: Optional[str] = None,
 ) -> List[str]:
-    """从 Skill/Team 目录下的 evals/evals.md 发现评测用例。
+    """从 Skill/Team 目录下的 evals/evals.json 发现评测用例。
 
-    扫描 skill_dirs/team_dirs 配置的目录，查找包含 evals/evals.md 的实体。
+    扫描 skill_dirs/team_dirs 配置的目录，查找包含 evals/evals.json 的实体。
 
     Args:
         whitelist_key: 白名单配置键名
@@ -192,8 +192,8 @@ def discover_entities_with_evals(
     return sorted(_collect_entity_with_evals(dir_keys, whitelist, target_type))
 
 
-def load_entity_evals_md(entity_name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """从 {skill_dir}/{entity_name}/evals/evals.md 加载评测用例。
+def load_entity_evals(entity_name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """从 {skill_dir}/{entity_name}/evals/evals.json 加载评测用例。
 
     Args:
         entity_name: 实体名称
@@ -203,7 +203,7 @@ def load_entity_evals_md(entity_name: str, entity_type: Optional[str] = None) ->
     Returns:
         解析后的评测用例数据，未找到则返回 None
     """
-    from evals_parser import parse_evals_md
+    from evals_json_parser import parse_evals_json
 
     config = load_common_config()
     dir_keys = []
@@ -216,12 +216,37 @@ def load_entity_evals_md(entity_name: str, entity_type: Optional[str] = None) ->
 
     for dir_key in dir_keys:
         for dir_rel in config.get(dir_key, []):
-            evals_file = REPO_ROOT / dir_rel / entity_name / "evals" / "evals.md"
+            evals_file = REPO_ROOT / dir_rel / entity_name / "evals" / "evals.json"
             if not evals_file.exists():
                 continue
             try:
-                return parse_evals_md(evals_file)
+                return parse_evals_json(evals_file)
             except Exception as e:
                 logger.warning("Failed to parse evals file %s: %s", evals_file, e)
                 return None
     return None
+
+
+# ── 共享验证工具 ──────────────────────────────────────────────────
+
+VALID_EVAL_TYPES = ("contains", "not_contains", "file_exists",
+                     "file_list", "file_contains", "skill_activated")
+
+
+def validate_expectation(exp, exp_index, case_index, entity_type, entity_name):
+    """验证单个 expectation 的结构合法性。被 test_skill_basic 和 test_team_basic 共用。"""
+    valid_types = VALID_EVAL_TYPES
+    if not isinstance(exp, dict):
+        raise AssertionError(
+            f"Expectation {exp_index} should be a dict in eval case {case_index} for {entity_type}: {entity_name}")
+    if "type" not in exp:
+        raise AssertionError(
+            f"Expectation {exp_index} missing 'type' in eval case {case_index} for {entity_type}: {entity_name}")
+    if exp["type"] not in valid_types:
+        raise AssertionError(
+            f"Expectation {exp_index} type '{exp['type']}' should be "
+            f"one of {valid_types} in {entity_type}: {entity_name}")
+    type_needs_pattern = ("contains", "not_contains", "file_contains", "skill_activated")
+    if exp["type"] in type_needs_pattern and "pattern" not in exp:
+        raise AssertionError(
+            f"Expectation {exp_index} missing 'pattern' in eval case {case_index} for {entity_type}: {entity_name}")

@@ -16,60 +16,48 @@ from conftest import (
     get_all_skills,
     get_skill_path,
     get_skills_with_evals,
-    load_evals_md
+    load_evals
 )
+from common import validate_expectation
 
 
-class TestEvalsMdStructure:
-    """Test evals.md file structure and completeness"""
-
-    @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
-    def test_evals_md_exists(self, skill_name):
-        data = load_evals_md(skill_name)
-        assert data is not None, f"evals.md not found for skill: {skill_name}"
+class TestEvalsJsonStructure:
+    """Test evals.json file structure and completeness"""
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
-    def test_evals_md_valid(self, skill_name):
-        data = load_evals_md(skill_name)
+    def test_evals_json_exists(self, skill_name):
+        data = load_evals(skill_name)
+        assert data is not None, f"evals.json not found for skill: {skill_name}"
+
+    @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
+    def test_evals_json_valid(self, skill_name):
+        data = load_evals(skill_name)
         if data is None:
-            pytest.skip(f"evals.md not found for skill: {skill_name}")
-        assert isinstance(data, dict), f"evals.md should parse to a dict for skill: {skill_name}"
+            pytest.skip(f"evals.json not found for skill: {skill_name}")
+        assert isinstance(data, dict), f"evals.json should parse to a dict for skill: {skill_name}"
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
-    def test_evals_md_has_skill_name(self, skill_name):
-        data = load_evals_md(skill_name)
-        assert data is not None, f"Could not load evals.md for skill: {skill_name}"
-        assert "skill_name" in data, f"Missing 'skill_name' field in evals.md for skill: {skill_name}"
-        assert data["skill_name"], f"'skill_name' field is empty for skill: {skill_name}"
+    def test_evals_json_has_skill_name(self, skill_name):
+        data = load_evals(skill_name)
+        assert data is not None, f"Could not load evals.json for skill: {skill_name}"
+        assert "skill_name" in data, f"Missing .skill_name. field in evals.json for skill: {skill_name}"
+        assert data["skill_name"], f".skill_name. field is empty for skill: {skill_name}"
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
-    def test_evals_md_has_evals_list(self, skill_name):
-        data = load_evals_md(skill_name)
-        assert data is not None, f"Could not load evals.md for skill: {skill_name}"
-        assert "evals" in data, f"Missing 'evals' field in evals.md for skill: {skill_name}"
-        assert isinstance(data["evals"], list), f"'evals' should be a list for skill: {skill_name}"
+    def test_evals_json_has_evals_list(self, skill_name):
+        data = load_evals(skill_name)
+        assert data is not None, f"Could not load evals.json for skill: {skill_name}"
+        assert "evals" in data, f"Missing .evals. field in evals.json for skill: {skill_name}"
+        assert isinstance(data["evals"], list), f".evals. should be a list for skill: {skill_name}"
         assert len(data["evals"]) > 0, f"'evals' list is empty for skill: {skill_name}"
 
 
 class TestEvalCaseStructure:
     """Test individual eval case structure"""
 
-    @staticmethod
-    def _validate_expectation(exp, exp_index, case_index, skill_name):
-        valid_types = ("contains", "not_contains", "file_exists", "file_list", "file_contains", "skill_activated")
-        assert isinstance(exp, dict), \
-            f"Expectation {exp_index} should be a dict in eval case {case_index} for skill: {skill_name}"
-        assert "type" in exp, \
-            f"Expectation {exp_index} missing 'type' in eval case {case_index} for skill: {skill_name}"
-        assert exp["type"] in valid_types, \
-            f"Expectation {exp_index} type '{exp['type']}' should be one of {valid_types} in skill: {skill_name}"
-        if exp["type"] in ("contains", "not_contains", "file_contains", "skill_activated"):
-            assert "pattern" in exp, \
-                f"Expectation {exp_index} missing 'pattern' in eval case {case_index} for skill: {skill_name}"
-
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_have_id(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for i, eval_case in enumerate(data["evals"]):
             assert "id" in eval_case, f"Eval case {i} missing 'id' in skill: {skill_name}"
@@ -77,7 +65,7 @@ class TestEvalCaseStructure:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_have_name(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for i, eval_case in enumerate(data["evals"]):
             assert "case_name" in eval_case, f"Eval case {i} missing 'case_name' in skill: {skill_name}"
@@ -85,7 +73,7 @@ class TestEvalCaseStructure:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_have_prompt(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for i, eval_case in enumerate(data["evals"]):
             assert "prompt" in eval_case, f"Eval case {i} missing 'prompt' in skill: {skill_name}"
@@ -93,14 +81,14 @@ class TestEvalCaseStructure:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_have_expected_output(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for i, eval_case in enumerate(data["evals"]):
             assert "expected_output" in eval_case, f"Eval case {i} missing 'expected_output' in skill: {skill_name}"
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_expectations_format(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for i, eval_case in enumerate(data["evals"]):
             if "expectations" not in eval_case:
@@ -108,7 +96,7 @@ class TestEvalCaseStructure:
             assert isinstance(eval_case["expectations"], list), \
                 f"Eval case 'expectations' should be a list in skill: {skill_name}"
             for j, exp in enumerate(eval_case["expectations"]):
-                self._validate_expectation(exp, j, i, skill_name)
+                validate_expectation(exp, j, i, 'skill', skill_name)
 
 
 class TestEvalCaseLogic:
@@ -116,14 +104,14 @@ class TestEvalCaseLogic:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_ids_are_unique(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         ids = [eval_case["id"] for eval_case in data["evals"]]
         assert len(ids) == len(set(ids)), f"Duplicate eval IDs found in skill: {skill_name}"
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_ids_are_sequential(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         ids = sorted([eval_case["id"] for eval_case in data["evals"]])
         expected_ids = list(range(ids[0], ids[0] + len(ids)))
@@ -136,7 +124,7 @@ class TestEvalCaseLogic:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_prompt_is_descriptive(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for eval_case in data["evals"]:
             prompt = eval_case.get("prompt", "")
@@ -145,7 +133,7 @@ class TestEvalCaseLogic:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_expected_output_matches_prompt(self, skill_name):
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for eval_case in data["evals"]:
             prompt = eval_case.get("prompt", "")
@@ -157,7 +145,7 @@ class TestEvalCaseLogic:
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_eval_cases_distractor_skills_valid(self, skill_name):
         """Distractor skills must reference real skills and not be the target skill."""
-        data = load_evals_md(skill_name)
+        data = load_evals(skill_name)
         assert data is not None
         for eval_case in data["evals"]:
             distractor_skills = eval_case.get("distractor_skills", [])
@@ -180,8 +168,8 @@ class TestEvalMode:
 
     @pytest.mark.parametrize("skill_name", get_skills_with_evals(), indirect=False)
     def test_skill_eval_mode_valid(self, skill_name):
-        data = load_evals_md(skill_name)
-        assert data is not None, f"Could not load evals.md for skill: {skill_name}"
+        data = load_evals(skill_name)
+        assert data is not None, f"Could not load evals.json for skill: {skill_name}"
         eval_mode = data.get("eval_mode", "text")
         valid_modes = ("text", "file_based", "code_gen", "cann_bench")
         assert eval_mode in valid_modes, (

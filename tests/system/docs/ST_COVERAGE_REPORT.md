@@ -165,3 +165,7 @@
 1. 在 §2/§3 的表格中追加新行（或更新已有行的维度标记）
 2. 更新 §1 开头的统计数据（用例数、日期、平台信息）
 3. 在 §5 变更记录中简要记录本次变化
+
+## 7. 格式变更
+
+2026-07-20：评测用例格式由 Markdown（`evals.md`）迁移为 JSON（`evals.json`）。所有 95 个用例文件已完成转换，ST 框架改为读取 JSON 格式。详见 `scripts/convert_evals.py` 和 `tests/system/scripts/evals_json_parser.py`。

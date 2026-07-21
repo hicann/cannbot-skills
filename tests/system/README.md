@@ -11,16 +11,16 @@
     │   └─ 从变更文件路径中提取 skill 或 team 名称
     │
     ├─ 步骤2：加载评测用例
-    │   └─ 读取 tests/system/cases/<name>_evals.md
+    │   └─ 读取 {skill_dir}/{skill_name}/evals/evals.json
     │       （Skill 用 skill_name，Team 用 team_name frontmatter）
     │
     ├─ 步骤3：执行评测 — 逐个 target 进行（Phase 1 失败则跳过 Phase 2）
     │   ├─ Phase 1: 静态结构验证（秒级，无需 AI 调用）
     │   │   ├─ Skill: test_skill_basic.py
-    │   │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
+    │   │   │   ├─ evals.json 文件存在性、格式合法性、必填字段检查
     │   │   │   └─ SKILL.md 存在性、YAML frontmatter 格式校验
     │   │   ├─ Team: test_team_basic.py
-    │   │   │   ├─ evals.md 存在性、格式合法性、必填字段检查
+    │   │   │   ├─ evals.json 文件存在性、格式合法性、必填字段检查
     │   │   │   ├─ AGENTS.md 存在性、frontmatter 校验
     │   │   │   ├─ plugin.json 存在性与合法性
     │   │   │   └─ init.sh 存在性校验
@@ -92,7 +92,7 @@
 
 无需 AI 调用，快速验证 skill 的结构完整性：
 
-- `_evals.md` 文件存在性、格式合法性、必填字段检查
+- `evals.json` 文件存在性、格式合法性、必填字段检查
 - 每个 eval case 的 id、prompt、expected_output 格式校验
 - SKILL.md 存在性、YAML frontmatter 格式校验
 
@@ -129,109 +129,134 @@ cann_bench 模式使用确定性评测（非 AI 评审），通过 cann-bench �
 
 **通过条件**：编译通过 = 1 且 精度达标 = 1 且 综合得分 > 50
 
-## 评测用例格式（evals.md）
+## 评测用例格式（evals.json）
 
-评测用例文件存放在 `tests/system/cases/<name>_evals.md`，使用 Markdown + YAML frontmatter 格式：
+评测用例文件统一使用 JSON 格式，存放在每个 Skill/Team 目录下的 `evals/evals.json`：
 
-```yaml
----
-skill_name: skill-name       # Skill 用例：与 skill_name 二选一
-team_name: team-name         # Team 用例：与 team_name 二选一
-eval_mode: text              # text（默认）/ file_based / code_gen / cann_bench
----
+```
+ops/{skill-name}/evals/evals.json               # Skill 评测用例
+plugins-official/{team-name}/evals/evals.json    # Team 评测用例
 ```
 
-每个用例以 `# Case <N>: <标题>` 开头，包含以下章节：
+文件由 `scripts/convert_evals.py` 从原有的 `evals.md` 转换生成，亦可直接编写。由 `evals_json_parser.py` 解析为 ST 框架内部 dict 结构（`evals_parser.py` 保留为遗留 MD 解析器参考）。
 
-### Config（可选）
+### 顶层结构
 
-用例级配置，格式 `- Key: value`：
-
-| 配置项 | 类型 | 说明 | 默认值 |
-|--------|------|------|--------|
-| `Eval Mode` | string | `text`（语义评审）/ `file_based`（文件产出验证）/ `code_gen`（算子项目编译运行验证）/ `cann_bench`（cann-bench 确定性评测） | 同 frontmatter |
-| `Max Tokens` | int | Token 消耗硬上限，超过则用例失败 | 无限制 |
-| `Max Tokens (<model>)` | int | 按模型指定 Token 上限，如 `Max Tokens (deepseek-v4-flash): 140000`，Phase 2 自动匹配 | `Max Tokens` 值 |
-| `Distractor skills` | string | 正向看护：分号分隔的干扰 skill 列表，验证 AI 在多个 skill 存在时的正确选择能力 | 无 |
-| `Disabled` | bool | 设为 `true` 跳过该用例（Phase 2 显示 SKIPPED，Phase 1 仍校验结构） | 否 |
-| `Timeout` | int | 用例执行超时时间（秒） | `600` |
-| `覆盖度阈值` | int | 信息覆盖度维度的最低通过分数（0-40） | `20` |
-| `准确性阈值` | int | 技术准确性维度的最低通过分数（0-30） | `15` |
-| `质量阈值` | int | 回复质量维度的最低通过分数（0-20） | `10` |
-| `Token阈值` | int | Token 消耗维度的最低通过分数（0-10） | `3` |
-| `Cann Bench Operator` | string | cann_bench 模式必填：目标算子名称（如 `mish`） | - |
-| `Cann Bench Level` | string | cann_bench 模式：任务难度等级（`level1`/`level2`/`level3`） | `level1` |
-| `Cann Bench Device` | string | cann_bench 模式：NPU 设备 ID | `0` |
-| `Cann Bench No Perf` | bool | cann_bench 模式：跳过性能评测，仅验证编译和精度 | `false` |
-| `Cann Bench Warmup` | int | cann_bench 模式：性能评测预热次数 | 默认值 |
-| `Cann Bench Repeat` | int | cann_bench 模式：性能评测重复次数 | 默认值 |
-
-```markdown
-## Config
-- Eval Mode: file_based
-- Max Tokens: 50000
-- Distractor skills: ascendc-runtime-debug;ascendc-task-focus;npu-arch
+```json
+{
+  "skill_name": "cann-env-setup",
+  "eval_mode": "text",
+  "evals": [...]
+}
 ```
 
-**cann_bench 模式配置示例：**
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `skill_name` | Skill 必填 | 目标 skill 名称，与 SKILL.md 中 `name` 一致。与 `team_name` 二选一 |
+| `team_name` | Team 必填 | 目标 team 名称，与 plugin.json 中 `name` 一致。与 `skill_name` 二选一 |
+| `eval_mode` | 否 | 评测模式，默认 `text`。可选：`text`（语义评审）、`file_based`（文件验证）、`code_gen`（算子项目编译运行）、`cann_bench`（cann-bench 确定性评测） |
 
-```markdown
-## Config
-- Eval Mode: cann_bench
-- Cann Bench Operator: mish
-- Cann Bench Level: level1
-- Cann Bench Device: 0
-- Max Tokens: 10000000
-- Timeout: 10800
+### 用例结构（evals[]）
+
+```json
+{
+  "id": 1,
+  "title": "检查NPU驱动安装命令",
+  "config": {
+    "max_tokens": 200000,
+    "ascend_platforms": ["A2"],
+    "eval_mode": "text"
+  },
+  "prompt": "我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？",
+  "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据输出判断驱动是否已安装",
+  "files": [],
+  "expectations": [
+    {
+      "type": "contains",
+      "pattern": "npu-smi info",
+      "description": "回复中提到了 npu-smi info"
+    }
+  ]
+}
 ```
 
-### Prompt
+#### 字段说明
 
-发送给 skill/team 的用户问题。
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | int | **是** | 用例编号，从 1 开始连续递增 |
+| `title` | string | **是** | 用例标题 |
+| `config` | object | 是 | 用例级配置，见下方 |
+| `prompt` | string | **是** | 发送给 AI 的测试问题 |
+| `expected_output` | string | **是** | 对 AI 回复的语义预期，描述应覆盖的关键要点 |
+| `files` | string[] | 否 | 输入文件路径列表（skill-creator 使用，ST 框架忽略） |
+| `expectations` | array | 否 | 断言列表，见下方 |
 
-### Expected Output
+#### config 字段
 
-预期回答的要点描述，供评审模型评分时参考。
+| 键 | 类型 | 说明 | 默认值 |
+|-----|------|------|--------|
+| `max_tokens` | int | Token 消耗硬上限 | 无限制 |
+| `max_tokens_by_model` | object | 按模型的 Token 上限，如 `{"deepseek-v4-flash": 240000}` | `{}` |
+| `ascend_platforms` | string[] | 适用平台列表，如 `["A2"]` | `[]` |
+| `disabled` | bool | `true` 跳过该用例 | `false` |
+| `distractor_skills` | string[] | 正向看护：干扰 skill 名称列表 | `[]` |
+| `timeout` | int | 执行超时秒数 | `600` |
+| `eval_mode` | string | 覆盖文件级评测模式 | 同文件级 |
+| `dim_thresholds` | object | 维度阈值覆盖，如 `{"覆盖度": 25}` | `{}` |
+| `truncate_len` | int | AI 回复截断长度（字符） | `30000` |
+| `cann_bench_operator` | string | cann_bench 模式：目标算子名称 | - |
+| `cann_bench_level` | string | cann_bench 模式：难度等级 | `level1` |
+| `cann_bench_device` | string | cann_bench 模式：NPU 设备 ID | `0` |
+| `cann_bench_no_perf` | bool | cann_bench 模式：跳过性能评测 | `false` |
 
-### Expectations
+#### expectations 条目
 
-可选的断言列表，支持以下类型：
+每条包含三个字段：
 
-```markdown
-## Expectations
-- [contains] npu-smi info           # 输出中必须包含
-- [not_contains] - [ ]               # AI 最终回复中不得包含（仅检查 AI 回复文本，不检查参考文档）
-- [file_exists] todo.md              # 文件必须存在
-- [file_list] *.md                   # 沙箱中有匹配 glob 的文件
-- [skill_activated] cann-env-setup   # 程序化检查 AI 是否加载了指定 skill（正向看护）
-```
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | string | 断言类型：`contains` / `not_contains` / `file_exists` / `file_list` / `file_contains` / `skill_activated` |
+| `pattern` | string | 匹配模式 |
+| `description` | string | 可读描述（供 skill-creator 使用，ST 框架仅用 type+pattern） |
 
-### Team evals.md 示例
+各 type 含义：
 
-```markdown
----
-team_name: ops-direct-invoke
-eval_mode: text
----
+| type | pattern 说明 |
+|------|-------------|
+| `contains` | AI **最终回复**中必须包含该字符串 |
+| `not_contains` | AI **最终回复**中不得包含该字符串 |
+| `file_exists` | 指定文件路径必须存在于沙箱中 |
+| `file_list` | 沙箱中有匹配该 glob 模式的文件 |
+| `file_contains` | 沙箱中匹配 glob 的文件包含指定文本 |
+| `skill_activated` | 程序化检查 AI 是否加载了指定 skill |
 
-# Case 1: 基本算子开发流程问答
+### 完整示例（Team）
 
-## Config
-- Max Tokens: 200000
-- Timeout: 900
-
-## Prompt
-
-我想开发一个 Ascend C Kernel 直调算子，计算两个向量的逐元素加法。请描述完整流程。
-
-## Expected Output
-
-回复应覆盖：环境检查、tiling 策略、host/device 代码结构、代码审查、性能验收
-
-## Expectations
-
-- [contains] kernel
-- [contains] tiling
+```json
+{
+  "team_name": "ops-direct-invoke",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "基本算子开发流程问答",
+      "config": {
+        "max_tokens": 200000,
+        "timeout": 900,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "我想开发一个 Ascend C Kernel 直调算子，计算两个向量的逐元素加法。请描述完整流程。",
+      "expected_output": "回复应覆盖：环境检查、tiling 策略、host/device 代码结构、代码审查、性能验收",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "kernel", "description": "回复中提到了 kernel"},
+        {"type": "contains", "pattern": "tiling", "description": "回复中提到了 tiling"}
+      ]
+    }
+  ]
+}
 ```
 
 ## 沙箱隔离机制
@@ -395,8 +420,6 @@ tests/system/
 │   ├── ST_DESIGN_AND_DEVELOPMENT_GUIDE.md  # ST 设计规范与开发指南
 │   ├── USER_GUIDE.md            # 详细使用指南
 │   └── ST_COVERAGE_REPORT.md    # 覆盖率快照
-├── cases/                       # 集中式评测用例定义（skill/team 共用）
-│   └── <name>_evals.md          # Skill 用 skill_name，Team 用 team_name
 ├── results/                     # HTML 报告输出目录
 ├── logs/                        # 运行日志与归档压缩包
 ├── sandboxes/                   # 沙箱隔离目录（用例级别）
@@ -408,7 +431,7 @@ tests/system/
 └── scripts/
     ├── main.py                  # CI 门禁主入口（支持 skill + team）
     ├── conftest.py              # pytest 共享配置、钩子、工具函数（含 skill/team 发现逻辑）
-    ├── evals_parser.py          # evals.md Markdown 解析器（支持 skill/team/cann_bench）
+    ├── evals_json_parser.py     # evals.json JSON 解析器（当前使用）
     ├── opencode_runner.py       # opencode CLI 封装（流式输出、Session 导出）
     ├── sandbox_manager.py       # 沙箱创建与管理（含 cann-bench 部署）
     ├── subprocess_streamer.py   # 子进程流式输出封装（心跳防超时）
@@ -427,7 +450,7 @@ tests/system/
 ## 注意事项
 
 1. **变更识别**：只有配置的 `skill_dirs` / `team_dirs` 目录下的变更才会触发评测。支持白名单过滤（`skill_whitelist` / `team_whitelist`）。
-2. **评测用例必需**：target 必须在 `tests/system/cases/` 下有 `<name>_evals.md` 文件才会执行 Phase 2 评测。
+2. **评测用例必需**：target 必须在 `{skill_dir}/{skill_name}/evals/` 下有 `evals.json` 文件才会执行 Phase 2 评测。
 3. **Phase 1 拦截**：Phase 1 静态验证失败时，该 target 不进入 Phase 2（不生成 HTML 报告），需先修复基础结构问题。
 4. **`--report-only` 前提**：沙箱目录中须有可用的 JSON 文件（来自之前的完整测试运行）。若数据不完整（如 `ses.json` 截断），会话详情区块可能缺失，但评分不受影响。
 5. **超时设置**：批量评测超时 1200 秒，单个评测用例超时默认 600 秒（可通过 `Timeout` 配置覆盖）。

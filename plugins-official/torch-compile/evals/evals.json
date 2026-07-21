@@ -1,0 +1,62 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "torch.compile 图模式介绍",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": true,
+        "distractor_skills": [
+          "torch-npugraph-ex-knowledge",
+          "torch-npugraph-ex-template",
+          "torch-npugraph-ex-compile-error-diagnosis",
+          "torch-npugraph-ex-runtime-error-diagnosis"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想了解在昇腾 NPU 上使用 torch.compile 图模式来加速模型推理，torch-compile 团队能提供什么帮助？",
+      "expected_output": "回复应覆盖以下要点：\n1. torch-compile 是 PyTorch torch.compile 图模式编排入口，负责识别模式和调度对应 Subagent\n2. 当前主要支持 npugraph_ex / aclgraph 图模式\n3. 包含 torch.compile + TorchAir 的配置、脚本迁移、调试诊断、性能优化、自定义算子入图等能力\n4. 由 subagent 执行具体专科工作，主 agent 做编排和模式选择",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "图模式不适用的场景",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我的模型在 NPU 上运行，什么时候不适合用 torch.compile 图模式？图模式有什么限制？",
+      "expected_output": "回复应说明图模式适用的场景和不适用的情况：图模式主要适用于推理加速场景，对于需要动态图特性或频繁修改模型结构的场景可能不适用，应根据实际的模型结构和部署需求来判断是否使用图模式",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "使用图模式前需要的信息",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": true,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想用 torch.compile 加速模型推理，先帮我看看需要准备哪些信息，先不急着开始。",
+      "expected_output": "回复应在动手前主动确认必要信息：模型框架和来源、当前运行环境和 NPU 配置、是否已有可运行的推理脚本、性能基线数据等，而不是在缺少这些信息的情况下直接开始图模式适配",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "team_name": "torch-compile"
+}

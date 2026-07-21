@@ -231,12 +231,18 @@ CANN_BENCH_TARGET="${CANN_BENCH_PATH:-$CANN_BENCH_DEFAULT}"
 
 NEED_CANN_BENCH=false
 if [ "$ALL_MODE" -eq 1 ]; then
-    # --all 模式：扫描所有 evals 文件
-    if grep -rlq 'Eval Mode:.*cann_bench' "$FRAMEWORK_DIR/cases/" 2>/dev/null; then
-        NEED_CANN_BENCH=true
-    fi
+    # --all 模式：扫描所有 skill/team 的 evals.json 文件
+    for evals_file in "$REPO_ROOT"/ops/*/evals/evals.json \
+                     "$REPO_ROOT"/graph/*/evals/evals.json \
+                     "$REPO_ROOT"/model/*/evals/evals.json \
+                     "$REPO_ROOT"/infra/*/evals/evals.json; do
+        if [ -f "$evals_file" ] && grep -q "cann_bench" "$evals_file" 2>/dev/null; then
+            NEED_CANN_BENCH=true
+            break
+        fi
+    done
 else
-    # 增量模式：从变更文件提取实体名（取第二级目录），去重后检查对应 evals
+    # 增量模式：从变更文件提取实体名，检查对应 evals.json
     ENTITIES=()
     for f in "${changed_files_array[@]}"; do
         entity=$(echo "$f" | cut -d'/' -f2)
@@ -245,11 +251,18 @@ else
     if [ ${#ENTITIES[@]} -gt 0 ]; then
         ENTITIES=($(printf '%s\n' "${ENTITIES[@]}" | sort -u))
         for entity in "${ENTITIES[@]}"; do
-            evals_file="$FRAMEWORK_DIR/cases/${entity}_evals.md"
-            if [ -f "$evals_file" ] && grep -q 'Eval Mode:.*cann_bench' "$evals_file"; then
-                NEED_CANN_BENCH=true
-                break
-            fi
+            # 在 scan dirs 中查找对应实体的 evals.json
+            for base_dir in "$REPO_ROOT"/ops/*/ \
+                           "$REPO_ROOT"/graph/*/ \
+                           "$REPO_ROOT"/model/*/ \
+                           "$REPO_ROOT"/infra/*/ \
+                           "$REPO_ROOT"/plugins-official/*/; do
+                evals_file="${base_dir}evals/evals.json"
+                if [ -f "$evals_file" ] && grep -q "cann_bench" "$evals_file" 2>/dev/null; then
+                    NEED_CANN_BENCH=true
+                    break 2
+                fi
+            done
         done
     fi
 fi

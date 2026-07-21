@@ -26,7 +26,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import pytest
 
 from conftest import (
-    get_skill_path, get_skills_with_evals, load_evals_md, REPO_ROOT,
+    get_skill_path, get_skills_with_evals, load_evals, REPO_ROOT,
     get_opencode_text, FRAMEWORK_DIR, SANDBOX_DIR,
     parse_dimension_scores, parse_review_md,
     validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
@@ -967,7 +967,7 @@ def pytest_generate_tests(metafunc):
     for skill in get_skills_with_evals():
         if skill_names and skill not in skill_names:
             continue
-        evals_data = load_evals_md(skill)
+        evals_data = load_evals(skill)
         if not evals_data:
             continue
         skill_dir = get_skill_path(skill)

@@ -22,8 +22,13 @@ from common import (
     find_entity_path,
     discover_all_entities,
     discover_entities_with_evals,
-    load_entity_evals_md,
+    load_entity_evals,
     load_common_config,
+    FRAMEWORK_DIR,
+    CONFIG_PATH,
+    REPO_ROOT,
+    LOGS_DIR,
+    SANDBOX_DIR,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,11 +37,6 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-FRAMEWORK_DIR = Path(__file__).parent.parent  # skill-test-framework/
-CONFIG_PATH = FRAMEWORK_DIR / "config" / "st-test.config"
-REPO_ROOT = FRAMEWORK_DIR.parent.parent  # 仓库根目录
-LOGS_DIR = FRAMEWORK_DIR / "logs"  # opencode session 导出 JSON 存放目录
-SANDBOX_DIR = FRAMEWORK_DIR / "sandboxes"  # 沙箱隔离目录
 CANN_BENCH_PATH = Path(os.environ.get(
     "CANN_BENCH_PATH",
     str(REPO_ROOT.parent.parent / "cann-bench")
@@ -366,13 +366,6 @@ def parse_cann_bench_evaluation(reports_dir: Path, operator: str = "") -> Dict[s
     }
 
 
-def load_config() -> Dict[str, Any]:
-    return load_common_config()
-
-
-CONFIG = load_config()
-
-
 def get_skill_path(skill_name: str) -> Optional[Path]:
     """根据 skill 名称查找实际路径"""
     return find_entity_path(skill_name, "skill_dirs", ("SKILL.md",))
@@ -466,9 +459,9 @@ def get_skills_with_evals() -> List[str]:
     return discover_entities_with_evals("skill_whitelist", target_type="skill")
 
 
-def load_evals_md(skill_name: str) -> Optional[Dict[str, Any]]:
+def load_evals(skill_name: str) -> Optional[Dict[str, Any]]:
     """从 Skill 本地目录加载评测用例"""
-    return load_entity_evals_md(skill_name, entity_type="skill")
+    return load_entity_evals(skill_name, entity_type="skill")
 
 
 # ── Team 发现函数 ──────────────────────────────────────────────────
@@ -490,9 +483,9 @@ def get_teams_with_evals() -> List[str]:
     return discover_entities_with_evals("team_whitelist", target_type="team")
 
 
-def load_team_evals_md(team_name: str) -> Optional[Dict[str, Any]]:
+def load_team_evals(team_name: str) -> Optional[Dict[str, Any]]:
     """从 Team 本地目录加载评测用例"""
-    return load_entity_evals_md(team_name, entity_type="team")
+    return load_entity_evals(team_name, entity_type="team")
 
 
 @pytest.fixture(scope="session")
@@ -513,9 +506,9 @@ def skills_with_evals() -> List[str]:
 @pytest.fixture
 def evals_data(request, skills_with_evals) -> Dict[str, Any]:
     skill_name = request.param
-    data = load_evals_md(skill_name)
+    data = load_evals(skill_name)
     if data is None:
-        pytest.skip(f"No evals.md found for skill: {skill_name}")
+        pytest.skip(f"No evals.json found for skill: {skill_name}")
     return data
 
 
@@ -543,9 +536,9 @@ def teams_with_evals() -> List[str]:
 @pytest.fixture
 def team_evals_data(request, teams_with_evals) -> Dict[str, Any]:
     team_name = request.param
-    data = load_team_evals_md(team_name)
+    data = load_team_evals(team_name)
     if data is None:
-        pytest.skip(f"No evals.md found for team: {team_name}")
+        pytest.skip(f"No evals.json found for team: {team_name}")
     return data
 
 
@@ -966,11 +959,11 @@ def _extract_skill_name(nodeid: str) -> str:
 
 
 TEST_DESCRIPTIONS = {
-    # TestEvalsMdStructure
-    "test_evals_md_exists": "evals.md 文件存在性",
-    "test_evals_md_valid": "evals.md 格式合法性",
-    "test_evals_md_has_skill_name": "evals.md 包含 skill_name 字段",
-    "test_evals_md_has_evals_list": "evals.md 包含 evals 列表",
+    # TestEvalsJsonStructure
+    "test_evals_json_exists": "evals.json 文件存在性",
+    "test_evals_json_valid": "evals.json 格式合法性",
+    "test_evals_json_has_skill_name": "evals.json 包含 skill_name 字段",
+    "test_evals_json_has_evals_list": "evals.json 包含 evals 列表",
     # TestEvalCaseStructure
     "test_eval_cases_have_id": "评测用例具有 id 字段",
     "test_eval_cases_have_name": "评测用例具有 case_name 字段",
@@ -991,10 +984,10 @@ TEST_DESCRIPTIONS = {
     # Phase 1: test_skill_basic.py eval_mode 校验
     "test_skill_eval_mode_valid": "eval_mode 字段合法性",
     # Team Phase 1: test_team_basic.py
-    "test_team_evals_md_exists": "Team evals.md 文件存在性",
-    "test_team_evals_md_valid": "Team evals.md 格式合法性",
-    "test_team_evals_md_has_team_name": "evals.md 包含 team_name 字段",
-    "test_team_evals_md_has_evals_list": "evals.md 包含 evals 列表",
+    "test_team_evals_json_exists": "Team evals.json 文件存在性",
+    "test_team_evals_json_valid": "Team evals.json 格式合法性",
+    "test_team_evals_json_has_team_name": "evals.json 包含 team_name 字段",
+    "test_team_evals_json_has_evals_list": "evals.json 包含 evals 列表",
     "test_team_eval_cases_have_id": "Team 评测用例具有 id 字段",
     "test_team_eval_cases_have_name": "Team 评测用例具有 case_name 字段",
     "test_team_eval_cases_have_prompt": "Team 评测用例具有 prompt 字段",
@@ -1865,7 +1858,8 @@ def pytest_runtest_logreport(report):
 def _platform_matches(ascend_platforms, eval_item):
     """检查 eval 用例是否匹配指定的 Ascend 平台。
 
-    与 evals_parser 中 case 侧的 .upper() 一致做大小写归一化。
+    两端的 .upper() 大小写归一化保证一致。evals_json_parser 中 ascend_platforms
+    已做 .upper() 处理，此处做二次保障。
     返回 True 表示匹配（应保留用例），False 表示不匹配（应跳过）。
     """
     if not ascend_platforms:

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from common import (
     load_common_config,
     find_entity_path,
-    load_entity_evals_md,
+    load_entity_evals,
 )
 from subprocess_streamer import run_subprocess_streaming
 
@@ -57,7 +57,7 @@ def _find_matching_timeout(evals_data: Dict[str, Any], eval_id: str) -> Optional
 def _search_eval_timeout(target_names: List[str], eval_id: str) -> int:
     """在指定 target 中搜索 eval_id 对应的 timeout。"""
     for name in target_names:
-        evals_data = load_entity_evals_md(name)
+        evals_data = load_entity_evals(name)
         if not evals_data:
             continue
         timeout = _find_matching_timeout(evals_data, eval_id)
@@ -100,7 +100,7 @@ class GateChecker:
     @staticmethod
     def load_evals(skill_name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """加载评测用例，entity_type 为 None 时自动搜索所有目录。"""
-        return load_entity_evals_md(skill_name, entity_type=entity_type)
+        return load_entity_evals(skill_name, entity_type=entity_type)
 
     @staticmethod
     def _discover_all() -> Tuple[List[str], List[str]]:
@@ -112,12 +112,12 @@ class GateChecker:
 
     @staticmethod
     def _check_evals_file_change(parts: tuple, changed_set: set, entity_getter) -> None:
-        """检测 evals 文件变更（新架构：{dir}/{entity}/evals/evals.md）。"""
+        """检测 evals 文件变更（新架构：{dir}/{entity}/evals/evals.json）。"""
         if len(parts) < 4:
             return
 
-        # 新架构：{dir}/{skill-name}/evals/evals.md
-        if parts[-2] == "evals" and parts[-1] == "evals.md":
+        # 新架构：{dir}/{skill-name}/evals/evals.json
+        if parts[-2] == "evals" and parts[-1] == "evals.json":
             entity_name = parts[-3]  # 提取 skill-name
             if entity_getter(entity_name):
                 changed_set.add(entity_name)
@@ -141,7 +141,7 @@ class GateChecker:
         """
         max_timeout = 0
         for name in target_names:
-            evals_data = load_entity_evals_md(name)
+            evals_data = load_entity_evals(name)
             if not evals_data:
                 continue
             for e in evals_data.get("evals", []):
@@ -451,7 +451,7 @@ class GateChecker:
         return raw_workers
 
     def _resolve_eval_timeout(self, target_names: List[str], target_flag: str) -> int:
-        """从 evals.md 中读取超时配置。
+        """从 evals.json 中读取超时配置。
 
         当指定了 eval_id → 读取该用例的 Timeout 配置。
         当未指定 eval_id   → 扫描所有目标 evals 文件，取各用例最大 Timeout。
@@ -498,54 +498,6 @@ class GateChecker:
             return True
         except Exception as e:
             logger.error("%s basic validation error: %s", label, e)
-            return False
-
-    def _run_eval_pytest(self, test_script_name: str, report_prefix: str,
-                          target_flag: str, target_names: List[str]) -> bool:
-        """通用 Phase 2 eval pytest 执行器（消除 skill/team 重复代码）。"""
-        test_script = self.test_skill_dir / "scripts" / test_script_name
-        if not test_script.exists():
-            logger.info("  %s 不存在，跳过", test_script_name)
-            return True
-
-        cmd = [sys.executable, "-m", "pytest", str(test_script)]
-        for name in target_names:
-            cmd.extend([target_flag, name])
-        if self.eval_id:
-            cmd.extend(["--eval-id", self.eval_id])
-
-        beijing_tz = timezone(timedelta(hours=8))
-        timestamp = datetime.now(tz=beijing_tz).strftime("%Y%m%d_%H%M%S")
-        report_path = self.results_dir / f"{report_prefix}_{timestamp}.html"
-        cmd.extend([f"--html={report_path}", "--self-contained-html"])
-
-        if self._get_parallel_workers() != "1":
-            cmd.extend(["-n", self._get_parallel_workers()])
-
-        env = os.environ.copy()
-        if self.report_only:
-            env["REPORT_ONLY"] = "1"
-
-        eval_timeout = self._resolve_eval_timeout(target_names, target_flag)
-        try:
-            returncode, captured_stdout, captured_stderr, timed_out = run_subprocess_streaming(
-                cmd,
-                timeout=eval_timeout,
-                env=env,
-                cwd=str(self.test_skill_dir / "scripts"),
-                label=f"{report_prefix} eval",
-            )
-            if timed_out:
-                logger.error("%s 评测执行超时 (%ds)", report_prefix, eval_timeout)
-                return False
-            if returncode != 0:
-                logger.error("%s 评测执行失败 (exit code %d)", report_prefix, returncode)
-                if captured_stderr.strip():
-                    logger.error(captured_stderr[-2000:])
-                return False
-            return True
-        except Exception as e:
-            logger.error("%s 评测执行异常: %s", report_prefix, e)
             return False
 
     def _run_unified_eval_pytest(
@@ -609,7 +561,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         default=False,
-        help="Run all available eval cases (auto-discover from tests/system/cases/)"
+        help="Run all available eval cases (auto-discover from skill/team evals/ directories)"
     )
     parser.add_argument(
         "--eval-id",

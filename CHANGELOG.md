@@ -1,5 +1,8 @@
 ## 🔥 更新日志
 ### 【2026-07-20】
+#### 测试框架 Test Framework
+- 【ST测试框架】评测用例格式迁移：将全部 95 个 `evals/evals.md` 转换为 `evals/evals.json` 统一格式。新增 `scripts/convert_evals.py` 转换脚本和 `evals_json_parser.py` JSON 解析器，修改 `common.py`/`conftest.py`/`main.py`/`test_*basic.py` 等 8 个文件以读取 JSON 格式。新格式兼容 ST 框架（结构化 type+pattern）和 skill-creator（纯文本 description）双消费者。
+
 #### 问题修复 Bug Fix
 - 【文档/安装部署】清理全仓库 `ops-lab/` 历史废弃目录的残留引用（issue #435），涉及目录结构图、路径引用、扫描配置及脚本逻辑等。
 
@@ -7,7 +10,6 @@
 #### 架构重构 Architecture Refactoring
 - 【ST测试框架】重构评测用例组织架构：将集中式 `tests/system/cases/` 目录下的 95 个评测用例迁移到对应 Skill/Team 目录下的 `evals/evals.md`，实现测试用例与 Skill 代码内聚，便于维护和版本控制。
 - 【测试框架】修改 `common.py`、`conftest.py`、`main.py`，替换为分布式发现逻辑，从 Skill/Team 本地目录扫描和加载评测用例。
-- 【测试框架】新增 `migrate_evals.sh` 迁移脚本，支持一键迁移评测用例。
 
 ### 【2026-07-13】
 #### 问题修复 Bug Fix

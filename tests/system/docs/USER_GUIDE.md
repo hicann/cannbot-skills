@@ -29,7 +29,8 @@ tests/system/
 │   ├── opencode_runner.py        # opencode CLI 封装（流式输出、Session 导出）
 │   ├── sandbox_manager.py        # 沙箱环境管理
 │   ├── subprocess_streamer.py    # 子进程流式输出封装（心跳防超时）
-│   ├── evals_parser.py           # evals.md 解析器（支持 skill/team）
+│   ├── evals_json_parser.py           # evals.json JSON 解析器（当前使用）
+│   ├── evals_parser.py              # evals.md 解析器（保留为遗留参考）
 │   ├── run_eval.py               # 评测执行入口
 │   ├── session_stats.py          # Session 统计分析
 │   ├── test_opencode_runner.py   # opencode_runner 单元测试
@@ -48,7 +49,7 @@ tests/system/
 输入: changed_files
   │
   ├─ Phase 1: 静态结构检查 (test_skill_basic.py / test_team_basic.py)
-  │   ├─ evals.md 存在性、合法性、结构完整性
+  │   ├─ evals.json 文件存在性、合法性、结构完整性
   │   ├─ SKILL.md 或 AGENTS.md 存在性、frontmatter 必填字段
   │   │   (Team 额外检查: plugin.json、init.sh)
   │   ├─ 用例 ID 唯一性、顺序正确性
@@ -91,83 +92,94 @@ team_whitelist:
   - "ops-direct-invoke"
 ```
 
-### evals.md 用例文件格式
+### evals.json 用例文件格式
 
-每个 skill 的评测用例定义在 `{skill_dir}/{skill_name}/evals/evals.md`，由 **YAML frontmatter** 和多个 **Markdown 用例块** 组成：
+评测用例文件统一使用 JSON 格式，存放在每个 Skill/Team 目录下的 `evals/evals.json`：
 
-```markdown
----
-skill_name: cann-env-setup
-eval_mode: text          # 可选，默认 text。可选 file_based / code_gen
----
-
-# Case 1: 检查NPU驱动安装命令
-
-## Config
-- Max Tokens: 100000
-
-## Prompt
-
-我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？
-
-## Expected Output
-
-回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装
-
-## Expectations
-
-- [contains] npu-smi info
----
 ```
+ops/{skill-name}/evals/evals.json               # Skill 评测用例
+plugins-official/{team-name}/evals/evals.json    # Team 评测用例
 ```
 
-**Frontmatter 字段说明**：
+文件由 `scripts/convert_evals.py` 从原有的 `evals.md` 转换生成，亦可直接编写。由 `evals_json_parser.py` 解析为 ST 框架内部 dict 结构（`evals_parser.py` 保留为遗留 MD 解析器参考）。
+
+#### Skill evals.json 示例
+
+```json
+{
+  "skill_name": "cann-env-setup",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "检查NPU驱动安装命令",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？",
+      "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "npu-smi info",
+          "description": "回复中提到了 npu-smi info"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Team evals.json 示例
+
+```json
+{
+  "team_name": "ops-direct-invoke",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "基本算子开发流程问答",
+      "config": {
+        "max_tokens": 200000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想开发一个 Ascend C Kernel 直调算子，计算两个向量的逐元素加法。请描述开发这个算子的完整流程。",
+      "expected_output": "回复应覆盖：环境检查、tiling 策略、host/device 代码结构、代码审查、性能验收",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "kernel", "description": "回复中提到了 kernel"},
+        {"type": "contains", "pattern": "tiling", "description": "回复中提到了 tiling"}
+      ]
+    }
+  ]
+}
+```
+
+**顶层字段说明**：
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `skill_name` | 是（Skill） | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致。与 `team_name` 二选一 |
-| `team_name` | 是（Team） | 目标 team 名称，需与 plugin.json 中的 `name` 一致。与 `skill_name` 二选一 |
-| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`code_gen`（验证算子项目编译/运行）、`cann_bench`（cann-bench 确定性评测） |
+| `skill_name` | Skill 必填 | 目标 skill 名称，需与 SKILL.md 中的 `name` 一致。与 `team_name` 二选一 |
+| `team_name` | Team 必填 | 目标 team 名称，需与 plugin.json 中的 `name` 一致。与 `skill_name` 二选一 |
+| `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（文件验证）、`code_gen`（算子项目编译运行）、`cann_bench`（cann-bench 确定性评测） |
 
-> **注意**：`skill_name` 和 `team_name` 互斥，同一个 evals.md 文件中只能设置一个。解析器会根据 frontmatter 中的字段自动识别 target 类型。
+> **注意**：`skill_name` 和 `team_name` 互斥，同一个 evals.json 中只能设置一个。解析器会根据顶层字段自动识别 target 类型。
 
-**Team evals.md 示例**：
+**evals[] 条目字段说明**：
 
-```markdown
----
-team_name: ops-direct-invoke
-eval_mode: text
----
-
-# Case 1: 基本算子开发流程问答
-
-## Config
-- Max Tokens: 200000
-- Timeout: 900
-
-## Prompt
-
-我想开发一个 Ascend C Kernel 直调算子，计算两个向量的逐元素加法。请描述开发这个算子的完整流程。
-
-## Expected Output
-
-回复应覆盖：环境检查、tiling 策略、host/device 代码结构、代码审查、性能验收
-
-## Expectations
-
-- [contains] kernel
-- [contains] tiling
-```
-
-**用例字段说明**：
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `# Case N` | 是 | 用例标题，N 从 1 开始连续递增 |
-| `## Config` | 否 | 用例级配置，详见下方 Config 字段说明 |
-| `## Prompt` | 是 | 发送给 AI 的测试问题 |
-| `## Expected Output` | 是 | 对 AI 回复的语义预期，描述应覆盖的关键要点 |
-| `## Expectations` | 否 | 模式匹配规则列表 |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | int | **是** | 用例编号，从 1 开始连续递增 |
+| `title` | string | **是** | 用例标题 |
+| `config` | object | 是 | 用例级配置，详见下方 |
+| `prompt` | string | **是** | 发送给 AI 的测试问题 |
+| `expected_output` | string | **是** | 对 AI 回复的语义预期，描述应覆盖的关键要点 |
+| `expectations` | array | 否 | 断言列表 |
+| `files` | string[] | 否 | 输入文件路径列表（skill-creator 使用） |
 
 **Config 字段说明**：
 
@@ -228,7 +240,7 @@ cd tests/system/scripts
 # 测试指定 skill
 python -m pytest test_skill_basic.py -v -k "cann-env-setup"
 
-# 测试所有有 _evals.md 的 skill
+# 测试所有有 evals.json 的 skill
 python -m pytest test_skill_basic.py -v
 ```
 
@@ -261,7 +273,7 @@ cd tests/system/scripts
 # 测试指定 team
 python -m pytest test_team_basic.py -v -k "ops-direct-invoke"
 
-# 测试所有有 evals.md 的 team
+# 测试所有有 evals.json 的 team
 python -m pytest test_team_basic.py -v
 ```
 
@@ -300,7 +312,7 @@ python tests/system/scripts/main.py \
 | `--eval-model <model>` | 指定评测模型名称，用于按模型匹配 `Max Tokens (<model>)` 预算 |
 | `--parallel` / `-p` | 并发数，`1` 顺序执行（默认），`auto` 自动取核数，最大 32 |
 | `--ascend-platform A2 A3` | 按平台过滤，仅执行 `Ascend Platform` 匹配的用例。不指定则不过滤（所有用例均保留），但未配置 `Ascend Platform` 的用例仍被跳过 |
-| `--all` | 全量模式：自动发现所有 Skill/Team 目录下的 evals.md 并执行评测，跳过变更检测 |
+| `--all` | 全量模式：自动发现所有 Skill/Team 目录下的 evals.json 并执行评测，跳过变更检测 |
 | `--report-only` | 仅从已有沙箱 JSON 文件重新生成 HTML 报告（跳过 Phase 1 执行，跳过 opencode 调用）。前提：沙箱目录中须有前次完整运行的 JSON 文件 |
 | `--eval-id <id>` | 仅执行指定 ID 的单个用例 |
 
@@ -388,7 +400,7 @@ CANN 安装完成后，可通过以下方式验证：
 
 | 文件 | 来源 | 用途 |
 |------|------|------|
-| `basic_validation.html` | 直接运行 pytest 时生成（main.py 入口不生成） | **静态结构检查报告**，浏览器打开可看 evals.md 格式、SKILL.md frontmatter 等测试的通过/失败详情 |
+| `basic_validation.html` | 直接运行 pytest 时生成（main.py 入口不生成） | **静态结构检查报告**，浏览器打开可看 evals.json 格式、SKILL.md frontmatter 等测试的通过/失败详情 |
 | `team_basic_validation.html` | 直接运行 pytest 时生成（main.py 入口不生成） | **Team 静态结构检查报告**，包含 AGENTS.md/plugin.json/init.sh 等测试 |
 | `ST_validation_report_<YYYYMMDD_HHMMSS>.html` | Phase 2 统一 pytest-html | **Skill + Team 统一 AI 语义评测报告**，所有 target 合并展示，表中"类型"列区分 Skill/Team |
 
@@ -460,7 +472,7 @@ skill_dirs:
 
 ### 添加新 team 的 ST 看护
 
-1. 在 `{team_dir}/{team_name}/evals/` 下创建 `evals.md`（使用 `team_name` frontmatter 字段）
+1. 在 `{team_dir}/{team_name}/evals/` 下创建 `evals.json`（使用 `team_name` frontmatter 字段）
 2. 确保 `config/st-test.config` 中的 `team_dirs` 包含该 team 所在目录
 3. 将 team 名称加入 `team_whitelist`（如已启用白名单）
 4. 运行 Team Phase 1 验证格式正确
@@ -471,9 +483,9 @@ skill_dirs:
 |------|-----------|----------|
 | 源码目录 | `ops/`、`graph/`、`model/` 等 | `plugins-official/`、`plugins-community/` |
 | 标识文件 | `SKILL.md` | `AGENTS.md` + `.claude-plugin/plugin.json` |
-| evals.md frontmatter | `skill_name: <name>` | `team_name: <name>` |
+| evals.json 顶层字段 | `skill_name: <name>` | `team_name: <name>` |
 | 沙箱部署方式 | symlink skill 目录到 `.opencode/skills/` | 执行 `init.sh project opencode <sandbox>` |
-| Phase 1 检查项 | SKILL.md 格式、evals.md 结构 | AGENTS.md 格式、plugin.json 合法性、init.sh 存在性 |
+| Phase 1 检查项 | SKILL.md 格式、evals.json 结构 | AGENTS.md 格式、plugin.json 合法性、init.sh 存在性 |
 | Phase 2 统一报告 | `ST_validation_report_<ts>.html`（表中"类型"列区分 Skill/Team） |
 
 ### cann_bench 模式评测失败如何排查？

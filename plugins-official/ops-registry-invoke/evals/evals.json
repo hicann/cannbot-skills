@@ -1,0 +1,65 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "自定义算子注册开发流程",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "distractor_skills": [
+          "ops-registry-invoke-workflow",
+          "ascendc-code-review",
+          "gitcode-toolkit"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想开发一个自定义 Ascend C 算子并注册到算子库中，ops-registry-invoke 团队能做什么？开发流程是怎样的？",
+      "expected_output": "回复应覆盖以下要点：\n1. ops-registry-invoke 管理自定义算子的完整开发生命周期：设计 → 开发 → 验证 → 上库\n2.  最终产出可注册到算子库的自定义算子工程",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "registry-invoke",
+          "description": "回复中提到了 registry-invoke"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "注册调用与直调方式的区别",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "算子注册调用和 Kernel 直调有什么区别？我该什么时候用 ops-registry-invoke，什么时候用 ops-direct-invoke？",
+      "expected_output": "回复应说明：\n1. 注册调用方式将算子打包为可注册到算子库的标准工程，便于共享和复用\n2. 直调方式更轻量，适用于快速验证和调试\n3. ops-registry-invoke 适用于需要将算子注册到算子库的场景，ops-direct-invoke 适用于快速开发验证\n4. 选择依据取决于是否需要将算子入库供其他应用调用",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "开发前需要明确的信息",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想开发一个自定义算子，先帮我看看需要准备哪些信息，先别开始开发。",
+      "expected_output": "回复应在开发前主动确认必要信息：算子的数学定义和规格、输入输出数据类型和 shape、目标芯片架构、算子名称等，而不是在缺少这些信息的情况下直接开始开发",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "team_name": "ops-registry-invoke"
+}
