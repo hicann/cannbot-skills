@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_SYNC_EXPLICIT_PIPELINE",
+  "rule_name": "Explicit Pipeline Synchronization",
+  "priority": "high",
+  "domain_tags": ["U.Mix", "U.Vector"],
+  "symptom_tags": ["S.PipeStall"],
+  "context_tags": ["C.Arch.910B", "C.Arch.910D"],
+  "required_tags": ["U.Mix", "S.PipeStall"],
+  "optional_tags": ["U.Vector", "C.Arch.910B", "C.Arch.910D"]
+}

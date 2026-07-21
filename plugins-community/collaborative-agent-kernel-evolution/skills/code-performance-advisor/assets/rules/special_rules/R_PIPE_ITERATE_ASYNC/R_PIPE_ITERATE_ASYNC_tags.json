@@ -1,0 +1,24 @@
+{
+  "rule_id": "R_PIPE_ITERATE_ASYNC",
+  "domain_tags": [
+    "U.Mix",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.PipeStall"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Mix",
+    "S.PipeStall"
+  ],
+  "tags": [
+    "U.Mix",
+    "O.MatMul",
+    "S.PipeStall",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

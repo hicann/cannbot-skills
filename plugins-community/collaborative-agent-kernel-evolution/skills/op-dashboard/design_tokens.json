@@ -1,0 +1,36 @@
+{
+  "_version": "1.0",
+  "_doc": "op-dashboard 设计令牌 — 单一真源 (single source of truth)。所有颜色、阈值、芯片参数在此集中定义，panels/*.md 和 gen_dashboard.py 均引用本文件。",
+
+  "colors": {
+    "unit_vector_bg":    "#f5f0ff",
+    "unit_vector_accent":"#8250df",
+    "unit_cube_bg":      "#fffbf0",
+    "unit_cube_accent":  "#bf8700",
+    "pos_vecin":         "#0969da",
+    "pos_vecout":        "#1a7f37",
+    "pos_veccalc":       "#cf222e",
+    "pos_l1":            "#8250df",
+    "speedup_good":      "#1a7f37",
+    "speedup_ok":        "#bf8700",
+    "speedup_bad":       "#cf222e"
+  },
+
+  "thresholds": {
+    "speedup_good":  2.0,
+    "speedup_ok":    1.2,
+    "max_re_good":   0.5,
+    "max_re_warn":  10.0,
+    "mean_re_good":  0.5,
+    "mean_re_warn":  2.0,
+    "rmse_good":     0.5,
+    "rmse_warn":     2.0
+  },
+
+  "chip": {
+    "name": "Ascend910B2",
+    "ub_kb": 192,
+    "aic": 24,
+    "aiv": 48
+  }
+}

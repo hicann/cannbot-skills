@@ -1,0 +1,50 @@
+{
+  "op_name": "layer_norm",
+  "category": "normalization",
+  "description": "Layer normalization operation with learnable scale and bias parameters",
+  "shape_info": {
+    "input_shapes": [
+      {
+        "name": "x",
+        "shape": [32, 768],
+        "dtype": "float32"
+      }
+    ],
+    "output_shapes": [
+      {
+        "name": "output",
+        "shape": [32, 768],
+        "dtype": "float32"
+      }
+    ]
+  },
+  "attributes": {
+    "normalized_shape": [768],
+    "eps": 1e-5,
+    "elementwise_affine": true,
+    "normalized_dim": 1
+  },
+  "test_cases": [
+    {
+      "name": "bert_base_seq128",
+      "input_shape": [32, 128, 768],
+      "normalized_shape": [768],
+      "eps": 1e-5,
+      "dtype": "float32"
+    },
+    {
+      "name": "gpt2_small",
+      "input_shape": [8, 1024, 768],
+      "normalized_shape": [768],
+      "eps": 1e-5,
+      "dtype": "float32"
+    },
+    {
+      "name": "llm_hidden4096",
+      "input_shape": [4, 2048, 4096],
+      "normalized_shape": [4096],
+      "eps": 1e-5,
+      "dtype": "bfloat16"
+    }
+  ]
+}

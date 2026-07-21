@@ -1,0 +1,27 @@
+{
+  "rule_id": "R_MEM_L0C_ACCUM_MMAD",
+  "domain_tags": [
+    "U.Cube",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.TransferDominated"
+  ],
+  "context_tags": [
+    "C.L0.Capacity"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.TransferDominated"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MemoryBound",
+    "S.TransferDominated",
+    "C.L0.Capacity"
+  ],
+  "optional_tags": []
+}

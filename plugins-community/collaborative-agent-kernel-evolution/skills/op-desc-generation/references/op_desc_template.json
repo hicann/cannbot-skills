@@ -1,0 +1,31 @@
+{
+  "op_name": "my_operator",
+  "category": "activation",
+  "description": "算子的详细描述，说明功能、输入输出、数学公式等",
+  "shape_info": {
+    "input_shapes": [
+      {
+        "name": "x",
+        "shape": [16, 4096],
+        "dtype": "float32"
+      }
+    ],
+    "output_shapes": [
+      {
+        "name": "output",
+        "shape": [16, 4096],
+        "dtype": "float32"
+      }
+    ]
+  },
+  "attributes": {
+    "attribute_name": "attribute_value"
+  },
+  "test_cases": [
+    {
+      "name": "case_name",
+      "input_shape": [16, 4096],
+      "dtype": "float32"
+    }
+  ]
+}

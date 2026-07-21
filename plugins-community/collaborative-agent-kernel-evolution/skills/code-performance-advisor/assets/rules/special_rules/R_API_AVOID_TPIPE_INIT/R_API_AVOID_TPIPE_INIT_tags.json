@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_API_AVOID_TPIPE_INIT",
+  "domain_tags": [
+    "U.CPU",
+    "O.General"
+  ],
+  "symptom_tags": [
+    "S.LowComputeUtil",
+    "S.ScalarBound"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.CPU",
+    "S.ScalarBound"
+  ],
+  "tags": [
+    "U.CPU",
+    "O.General",
+    "S.LowComputeUtil",
+    "S.ScalarBound",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

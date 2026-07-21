@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_POOLING_INDEX_PRECOMPUTE",
+  "rule_name": "Pooling IndexBuffer Precomputation",
+  "priority": "medium",
+  "domain_tags": ["U.Vector", "O.Pooling"],
+  "symptom_tags": ["S.ScalarBound", "S.HighScalarRatio"],
+  "context_tags": ["C.UB.Capacity"],
+  "required_tags": ["U.Vector", "O.Pooling", "S.ScalarBound"],
+  "optional_tags": ["S.HighScalarRatio", "C.UB.Capacity"]
+}

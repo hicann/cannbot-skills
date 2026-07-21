@@ -1,0 +1,74 @@
+[
+    {
+        "op": "LayerNormCustom",
+        "language": "cpp",
+        "input_desc": [
+            {
+                "name": "x",
+                "param_type": "required",
+                "format": [
+                    "ND",
+                    "ND",
+                    "ND"
+                ],
+                "type": [
+                    "float16",
+                    "bfloat16",
+                    "float"
+                ]
+            },
+            {
+                "name": "weight",
+                "param_type": "required",
+                "format": [
+                    "ND",
+                    "ND",
+                    "ND"
+                ],
+                "type": [
+                    "float16",
+                    "bfloat16",
+                    "float"
+                ]
+            },
+            {
+                "name": "bias",
+                "param_type": "required",
+                "format": [
+                    "ND",
+                    "ND",
+                    "ND"
+                ],
+                "type": [
+                    "float16",
+                    "bfloat16",
+                    "float"
+                ]
+            }
+        ],
+        "output_desc": [
+            {
+                "name": "y",
+                "param_type": "required",
+                "format": [
+                    "ND",
+                    "ND",
+                    "ND"
+                ],
+                "type": [
+                    "float16",
+                    "bfloat16",
+                    "float"
+                ]
+            }
+        ],
+        "attr": [
+            {
+                "name": "eps",
+                "type": "float",
+                "default_value":0.00001,
+                "param_type":"optional"
+            }
+        ]
+    }
+]

@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_TILING_L2CACHE_SPLIT",
+  "domain_tags": [
+    "U.DMA",
+    "O.General"
+  ],
+  "symptom_tags": [
+    "S.CacheMiss",
+    "S.TransferDominated"
+  ],
+  "context_tags": [
+    "C.L2.Shared"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.CacheMiss"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.General",
+    "S.CacheMiss",
+    "S.TransferDominated",
+    "C.L2.Shared"
+  ],
+  "optional_tags": []
+}

@@ -1,0 +1,8 @@
+{
+  "rule_id": "R_REDUCE_MORE_CORES",
+  "domain_tags": ["U.Vector", "O.Loss", "O.Reduce", "T.FP32"],
+  "symptom_tags": ["S.ScalarBound", "S.LowVecUtil"],
+  "context_tags": ["C.Arch.910B", "C.Reduce.LastDim"],
+  "required_tags": ["U.Vector", "O.Reduce"],
+  "tags": ["U.Vector", "O.Loss", "O.Reduce", "T.FP32", "S.ScalarBound", "S.LowVecUtil", "C.Arch.910B", "C.Reduce.LastDim"]
+}

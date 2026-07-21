@@ -1,0 +1,32 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+# Remote NPU targets configuration.
+# Copy to project root as .npus.yaml, then add it to your local git ignore
+# rules (e.g. .git/info/exclude, or .gitignore if you want it project-wide).
+
+remotes:
+  a2:
+    backend: docker              # docker: SSH + docker exec
+    host: lite0                  # SSH alias from ~/.ssh/config
+    container: xc-dev            # Docker container name
+    workdir: /workspace           # Parent dir (repo name auto-appended, same as hdspace)
+    soc: ascend910b
+    device_isolate: 7            # ASCEND_RT_VISIBLE_DEVICES (shared server)
+
+  a3:
+    backend: hdspace             # hdspace: tunnel + SSH
+    name: DevHW                  # hdspace container name (hdspace devenv list)
+    workdir: /mnt/workspace      # Persistent path
+    soc: ascend910_93
+    login_shell: true            # Required for CANN buildtools
+    port: 10022                  # Overrides ~/.devenv/.ssh/config Port (unreliable after tunnel restart)
+
+default: a2

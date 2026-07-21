@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_DMA_GM_ALIGN_512B",
+  "domain_tags": [
+    "U.DMA",
+    "O.DataCopy"
+  ],
+  "symptom_tags": [
+    "S.TransferDominated",
+    "S.LowComputeUtil"
+  ],
+  "context_tags": [
+    "C.Align.256B"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.TransferDominated"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.DataCopy",
+    "S.TransferDominated",
+    "S.LowComputeUtil",
+    "C.Align.256B"
+  ],
+  "optional_tags": []
+}

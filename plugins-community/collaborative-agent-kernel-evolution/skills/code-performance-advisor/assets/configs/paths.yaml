@@ -1,0 +1,28 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+# Code Performance Advisor - Path Configuration
+# Paths may be relative (to the skill root) or absolute.
+
+workspace:
+  # Skill-internal working directory (inputs/sessions/cache live underneath).
+  base: workspace
+
+external:
+  # CAKE2 project root, relative to the skill root skills/code-performance-advisor/.
+  # Two levels up: skills/code-performance-advisor/ -> skills/ -> <project-root>/
+  # <project-root> is the directory that contains output/ and skills/.
+  cake2_root: "../../"
+  # Build output directory template (fallback; PathManager auto-detects first).
+  build_output: "output/{op_name}"
+
+defaults:
+  # Auto-create directories when a path does not exist.
+  auto_create_dirs: true

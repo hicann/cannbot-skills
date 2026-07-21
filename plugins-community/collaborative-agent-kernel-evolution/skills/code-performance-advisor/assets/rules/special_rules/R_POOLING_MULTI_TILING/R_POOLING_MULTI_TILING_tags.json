@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_POOLING_MULTI_TILING",
+  "rule_name": "Pooling Multi-Strategy Adaptive Tiling",
+  "priority": "high",
+  "domain_tags": ["U.Vector", "O.Pooling"],
+  "symptom_tags": ["S.LowVecUtil", "S.MteBusy"],
+  "context_tags": ["C.UB.Capacity", "C.K.Small", "C.K.Large"],
+  "required_tags": ["U.Vector", "O.Pooling", "S.LowVecUtil"],
+  "optional_tags": ["S.MteBusy", "C.UB.Capacity", "C.K.Small", "C.K.Large"]
+}

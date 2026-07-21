@@ -1,0 +1,157 @@
+# Code Performance Advisor Workflow Enforcement Hooks
+# 确保 Agent 遵守完整的工作流,不跳过关键步骤
+
+# Hook 1: 工作流状态验证 (在每次工具调用前执行)
+on-tool-call:
+  - name: validate-workflow-phase
+    description: "验证当前工作流阶段是否符合预期顺序"
+    command: |
+      python3 <<'PYTHON'
+      import json
+      import sys
+      from pathlib import Path
+
+      def _find_workspace_dir():
+            """Find the nearest workspace/ directory from CWD upwards."""
+            cwd = Path.cwd().resolve()
+            for base in [cwd, *cwd.parents]:
+                    candidate = base / "workspace"
+                    if (candidate / "sessions").exists():
+                            return candidate
+        return None
+
+      # 读取最新的 workflow_state.json（session 隔离）
+      workspace = _find_workspace_dir()
+      if not workspace:
+            sys.exit(0)
+      sessions_dir = workspace / "sessions"
+
+      if not sessions_dir.exists():
+          sys.exit(0)  # 首次运行,跳过验证
+
+      # 找到最新的 session
+      sessions = sorted(sessions_dir.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+      if not sessions:
+          sys.exit(0)
+
+    latest_session = sessions[0]
+    state_file = latest_session / "workflow_state.json"
+
+      if not state_file.exists():
+          sys.exit(0)
+
+      try:
+          state = json.loads(state_file.read_text())
+          # New schema: {"phase": "tag"} ; Legacy schema: {"current_phase": "tag"}
+          current_phase = state.get("phase") or state.get("current_phase") or "init"
+          history = state.get("history", []) if isinstance(state.get("history", []), list) else []
+
+          # 定义合法的工作流转换
+          VALID_TRANSITIONS = {
+              "init": ["tag"],
+              "tag": ["score"],
+              "score": ["route"],
+              "route": ["suggest"],
+              "suggest": ["apply", "done"],  # suggest 可以直接跳到 done (如果失败)
+              "apply": ["build", "done"],
+              "build": ["evaluate", "done"],
+              "evaluate": ["compare"],
+              "compare": ["update", "done"],
+              "update": ["done"],
+              "done": []
+          }
+
+          # 检查是否有非法跳转
+          if history:
+              last = history[-1] if isinstance(history[-1], dict) else {}
+
+              prev_phase = (
+                  last.get("from")
+                  or (history[-2].get("phase") if len(history) >= 2 and isinstance(history[-2], dict) else None)
+                  or ""
+              )
+              curr_phase = last.get("to") or last.get("phase") or current_phase
+
+              if curr_phase not in VALID_TRANSITIONS.get(prev_phase, []):
+                  print(f"⚠️  WARNING: 非法工作流跳转检测!")
+                  print(f"   从 {prev_phase.upper()} → {curr_phase.upper()}")
+                  print(f"   合法的下一步应该是: {', '.join(VALID_TRANSITIONS.get(prev_phase, []))}")
+                  print(f"   Session: {latest_session.name}")
+                  # 不阻止执行,只是警告
+
+      except Exception as e:
+          print(f"⚠️  Workflow validation warning: {e}", file=sys.stderr)
+
+      sys.exit(0)
+      PYTHON
+
+# Hook 2: SUGGEST 阶段强制检查 (确保生成了建议文件)
+on-file-write:
+  - name: ensure-suggestion-generated
+    description: "在 APPLY 阶段前,确保 suggestion 文件已生成"
+    pattern: "**/workflow_state.json"
+    command: |
+      python3 <<'PYTHON'
+      import json
+      import sys
+      from pathlib import Path
+
+      # 检查是否进入 APPLY 阶段但没有 suggestion
+      try:
+          state_file = Path("${FILE_PATH}")
+          if not state_file.exists():
+              sys.exit(0)
+
+          state = json.loads(state_file.read_text())
+          # New schema uses "phase"; keep legacy "current_phase" for backward compatibility.
+          current_phase = state.get("phase") or state.get("current_phase") or ""
+
+          if current_phase == "apply":
+              # 检查 suggestions 目录
+              session_dir = state_file.parent
+              suggestions_dir = session_dir / "suggestions"
+
+              if not suggestions_dir.exists() or not list(suggestions_dir.glob("*.md")):
+                  print("")
+                  print("❌ ERROR: 进入 APPLY 阶段但未发现任何 suggestion 文件!")
+                  print("")
+                  print("   根本问题: SUGGEST 阶段失败或被跳过")
+                  print("")
+                  print("   请检查:")
+                  print("   1. SUGGEST 阶段是否正确执行?")
+                  print("   2. 是否调用了正确的 subskill (suggest.md / deep_research.md)?")
+                  print("   3. 生成的建议是否保存到了 suggestions/ 目录?")
+                  print("")
+                  print(f"   Session: {session_dir.name}")
+                  print(f"   Expected: {suggestions_dir}/*.md")
+                  print("")
+                  # 不阻止,但强烈警告
+
+      except Exception as e:
+          pass  # 静默失败,不影响正常流程
+
+      sys.exit(0)
+      PYTHON
+
+# Hook 3: Deep Path 强制调用 subskill 提醒
+on-text-output:
+  - name: remind-deep-path-subskill
+    description: "当路由到 Deep Path 时,提醒必须调用 subskill"
+    pattern: ".*Deep Path.*|.*DEEP.*path.*|.*路由.*deep.*"
+    command: |
+      python3 <<'PYTHON'
+      print("")
+      print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+      print("🚨 Deep Path 检测")
+      print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+      print("")
+      print("📋 必须执行的操作:")
+      print("   1. 调用 deep_research subskill")
+      print("   2. 执行 5-Step Analysis")
+      print("   3. 生成 Top-3 假设")
+      print("   4. 保存到 suggestions/ 目录")
+      print("")
+      print("📖 参考: subskills/deep_research.md")
+      print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+      print("")
+      PYTHON

@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_TILING_LOAD_BALANCE",
+  "rule_name": "Multi-Core Load Balance Former/Tail Pattern",
+  "priority": "medium",
+  "domain_tags": ["U.Vector", "U.Mix", "U.Cube"],
+  "symptom_tags": ["S.LowComputeUtil", "S.PipeStall"],
+  "context_tags": ["C.Batch.Small", "C.Tile.Small"],
+  "required_tags": ["U.Vector", "S.LowComputeUtil"],
+  "optional_tags": ["U.Mix", "U.Cube", "S.PipeStall", "C.Batch.Small", "C.Tile.Small"]
+}

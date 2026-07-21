@@ -1,0 +1,27 @@
+{
+  "rule_id": "R_MEM_BT_BUFFER_BIAS",
+  "domain_tags": [
+    "U.Cube",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.DmaOverhead"
+  ],
+  "context_tags": [
+    "C.Align.256B"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MemoryBound"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MemoryBound",
+    "S.DmaOverhead",
+    "C.Align.256B"
+  ],
+  "optional_tags": []
+}

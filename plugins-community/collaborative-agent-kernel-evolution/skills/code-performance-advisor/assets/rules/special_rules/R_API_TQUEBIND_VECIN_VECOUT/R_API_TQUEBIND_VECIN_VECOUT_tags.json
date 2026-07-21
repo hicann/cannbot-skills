@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_API_TQUEBIND_VECIN_VECOUT",
+  "domain_tags": [
+    "U.DMA",
+    "O.DataCopy"
+  ],
+  "symptom_tags": [
+    "S.TransferDominated",
+    "S.MteBusy"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.TransferDominated"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.DataCopy",
+    "S.TransferDominated",
+    "S.MteBusy",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

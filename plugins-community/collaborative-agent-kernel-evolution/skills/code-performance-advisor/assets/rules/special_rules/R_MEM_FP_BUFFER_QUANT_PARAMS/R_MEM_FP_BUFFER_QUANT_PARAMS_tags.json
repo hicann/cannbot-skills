@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_MEM_FP_BUFFER_QUANT_PARAMS",
+  "domain_tags": [
+    "U.Cube",
+    "O.Fused"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.TransferDominated"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "S.MemoryBound"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.Fused",
+    "S.MemoryBound",
+    "S.TransferDominated",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

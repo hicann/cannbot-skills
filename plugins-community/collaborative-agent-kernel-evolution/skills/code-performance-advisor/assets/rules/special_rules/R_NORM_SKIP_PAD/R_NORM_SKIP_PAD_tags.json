@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_NORM_SKIP_PAD",
+  "rule_name": "SkipPad Efficient Padding Skip",
+  "priority": "medium",
+  "domain_tags": ["U.Vector", "O.Norm"],
+  "symptom_tags": ["S.LowVecUtil", "S.ScalarBound"],
+  "context_tags": ["C.Align.256B"],
+  "required_tags": ["U.Vector", "O.Norm", "S.LowVecUtil"],
+  "optional_tags": ["S.ScalarBound", "C.Align.256B"]
+}

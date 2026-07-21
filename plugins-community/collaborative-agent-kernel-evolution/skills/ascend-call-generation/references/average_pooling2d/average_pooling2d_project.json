@@ -1,0 +1,38 @@
+[
+    {
+        "op": "AveragePooling2dCustom",
+        "language": "cpp",
+        "input_desc": [
+            {
+                "name": "x",
+                "param_type": "required",
+                "format": [
+                    "ND"
+                ],
+                "type": [
+                    "bfloat16"
+                ]
+            }
+        ],
+        "output_desc": [
+            {
+                "name": "y",
+                "param_type": "required",
+                "format": [
+                    "ND"
+                ],
+                "type": [
+                    "bfloat16"
+                ]
+            }
+        ],
+        "attr": [
+            {
+                "name": "kernel_size",
+                "type": "int",
+                "param_type": "required"
+            }
+
+        ]
+    }
+]

@@ -1,0 +1,24 @@
+{
+  "rule_id": "R_API_REDUCE_INSTR_SELECTION",
+  "domain_tags": [
+    "U.Vector",
+    "O.Reduce"
+  ],
+  "symptom_tags": [
+    "S.LowVecUtil"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Vector",
+    "O.Reduce"
+  ],
+  "tags": [
+    "U.Vector",
+    "O.Reduce",
+    "S.LowVecUtil",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

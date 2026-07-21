@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_API_VECTOR_COUNTER_MODE",
+  "domain_tags": [
+    "U.Vector",
+    "O.Elementwise"
+  ],
+  "symptom_tags": [
+    "S.LowVecUtil",
+    "S.ScalarBound"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Vector",
+    "S.ScalarBound"
+  ],
+  "tags": [
+    "U.Vector",
+    "O.Elementwise",
+    "S.LowVecUtil",
+    "S.ScalarBound",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

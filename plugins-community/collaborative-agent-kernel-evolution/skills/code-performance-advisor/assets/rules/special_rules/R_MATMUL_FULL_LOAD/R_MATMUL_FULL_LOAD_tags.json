@@ -1,0 +1,29 @@
+{
+  "rule_id": "R_MATMUL_FULL_LOAD",
+  "domain_tags": [
+    "U.Cube",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.MteBusy",
+    "S.TransferDominated",
+    "S.DmaOverhead"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MteBusy"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MteBusy",
+    "S.TransferDominated",
+    "S.DmaOverhead",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

@@ -1,0 +1,16 @@
+{
+  "name": "cake",
+  "description": "CAKE2 - Collaborative Ascend Kernel Evolution. AI-powered AscendC operator generation for Ascend NPU.",
+  "version": "0.1.1",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "CANN-2.0",
+  "agents": [
+    "./agents/cake.md",
+    "./agents/cake-evo.md",
+    "./agents/cake-partial.md"
+  ]
+}

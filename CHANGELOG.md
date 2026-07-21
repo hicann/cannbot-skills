@@ -246,6 +246,10 @@
 - 【code-reviewer】Code Reviewer Agent 大版本更新。
 - 【registry-invoke-template】修复文档幻觉。
 
+### 【2026-06-02】
+#### 新特性 New Features
+- 【CAKE2 cake】新增 `plugins-community/collaborative-agent-kernel-evolution`：进化式 AscendC 算子生成 Team（仅 Vector 算子）。含 3 个 Agent（cake / cake-evo / cake-partial）与 19 个内置 Skill，覆盖「描述 → PyTorch 参考 → functional → AscendDSL baseline → DSL lowering 到 AscendC → 编译评估 →（可选）进化式多变体性能优化」全流程。自包含单插件，复用 cannbot `ascendc-docs-search`（改编为 `cake-docs-search` 并标明来源）。
+
 ### 【2026-05-29】
 - 【代码检视】新增大型 PR 检视（>10 文件自动切换，按文件组并行，负载感知波次）和快速检视（零子 Agent，定向问题 inline 输出）两种工作流，配套 7 个 step 文件。方法论增强：负向证据分值降低防 AI 偷懒、SEC-11.3 新增逐位类型交叉验证检视方法。子 Agent 改为 Grep 定位 + Read offset/limit 按需读取条例章节，不再整篇加载。`check_bounds.py` 新增能力边界提示与手动推演指引。四仓历史数值安全数据集（33 例）。
 

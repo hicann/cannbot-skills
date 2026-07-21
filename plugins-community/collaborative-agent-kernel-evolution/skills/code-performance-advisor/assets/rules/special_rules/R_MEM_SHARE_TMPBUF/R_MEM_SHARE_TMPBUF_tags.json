@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_MEM_SHARE_TMPBUF",
+  "domain_tags": [
+    "U.Vector",
+    "O.General"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.TransferDominated"
+  ],
+  "context_tags": [
+    "C.UB.Capacity"
+  ],
+  "required_tags": [
+    "U.Vector",
+    "S.TransferDominated"
+  ],
+  "tags": [
+    "U.Vector",
+    "O.General",
+    "S.MemoryBound",
+    "S.TransferDominated",
+    "C.UB.Capacity"
+  ],
+  "optional_tags": []
+}

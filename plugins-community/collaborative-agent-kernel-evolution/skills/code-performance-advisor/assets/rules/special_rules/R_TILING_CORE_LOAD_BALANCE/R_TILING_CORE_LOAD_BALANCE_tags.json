@@ -1,0 +1,24 @@
+{
+  "rule_id": "R_TILING_CORE_LOAD_BALANCE",
+  "domain_tags": [
+    "U.DMA",
+    "O.General"
+  ],
+  "symptom_tags": [
+    "S.LowComputeUtil"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.LowComputeUtil"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.General",
+    "S.LowComputeUtil",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

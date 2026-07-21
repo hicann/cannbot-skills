@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_DTYPE_MULTI_SUPPORT",
+  "rule_name": "Multi-Dtype Support with Template Design",
+  "priority": "high",
+  "domain_tags": ["U.Vector", "U.Mix", "U.Cube", "T.FP16", "T.BF16", "T.FP32"],
+  "symptom_tags": ["S.TransferDominated", "S.MteBusy", "S.MemoryBound"],
+  "context_tags": [],
+  "required_tags": ["U.Vector", "S.TransferDominated"],
+  "optional_tags": ["U.Mix", "U.Cube", "S.MteBusy", "S.MemoryBound", "T.FP16", "T.BF16", "T.FP32"]
+}

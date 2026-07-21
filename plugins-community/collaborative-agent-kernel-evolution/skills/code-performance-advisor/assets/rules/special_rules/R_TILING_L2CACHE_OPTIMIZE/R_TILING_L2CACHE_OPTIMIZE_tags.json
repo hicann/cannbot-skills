@@ -1,0 +1,32 @@
+{
+  "rule_id": "R_TILING_L2CACHE_OPTIMIZE",
+  "domain_tags": [
+    "U.DMA",
+    "O.MatMul",
+    "U.Cube"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.DmaOverhead",
+    "S.LowHbmUtil"
+  ],
+  "context_tags": [
+    "C.Arch.910B",
+    "C.K.Large"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.MemoryBound"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.MatMul",
+    "U.Cube",
+    "S.MemoryBound",
+    "S.DmaOverhead",
+    "S.LowHbmUtil",
+    "C.Arch.910B",
+    "C.K.Large"
+  ],
+  "optional_tags": []
+}

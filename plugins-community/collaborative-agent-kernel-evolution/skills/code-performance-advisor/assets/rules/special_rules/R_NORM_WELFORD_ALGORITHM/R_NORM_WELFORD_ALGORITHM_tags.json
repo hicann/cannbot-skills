@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_NORM_WELFORD_ALGORITHM",
+  "rule_name": "Welford Online Algorithm for Mean and Variance",
+  "priority": "high",
+  "domain_tags": ["U.Vector", "O.Norm", "O.Reduce"],
+  "symptom_tags": ["S.ScalarBound", "S.HighScalarRatio", "S.LowVecUtil"],
+  "context_tags": [],
+  "required_tags": ["U.Vector", "O.Norm"],
+  "optional_tags": ["S.ScalarBound", "S.HighScalarRatio", "S.MemoryBound", "S.TransferDominated", "C.Reduce.LastDim"]
+}

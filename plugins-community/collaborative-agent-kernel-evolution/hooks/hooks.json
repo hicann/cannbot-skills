@@ -1,0 +1,39 @@
+{
+  "description": "1) Prevent stopping the task if evaluation hasn't passed yet. 2) failure detection for compilation/evaluation and debug skill advisor hooks",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/check_eval_done.sh",
+            "timeout": 10,
+            "statusMessage": "Checking evaluation results..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/debug_skill_advisor.py --event PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/debug_skill_advisor.py --event PostToolUseFailure"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "rule_id": "R_MEM_L1_RESIDENT_SMALL_MATRIX",
+  "domain_tags": [
+    "U.Cube",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.MemoryBound",
+    "S.TransferDominated"
+  ],
+  "context_tags": [
+    "C.L1.Capacity"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.TransferDominated"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MemoryBound",
+    "S.TransferDominated",
+    "C.L1.Capacity"
+  ],
+  "optional_tags": []
+}

@@ -1,0 +1,20 @@
+{
+  "_comment": "单一维护点：新增 API 检查只需改这里。code-review 流程无需修改。",
+
+  "always": [
+    "api-blacklist.md"
+  ],
+
+  "conditional": {
+    "DataCopy|DataCopyPad":                          "api-datacopy.md",
+    "ReduceMax|ReduceSum|ReduceMin":                 ["api-reduce.md", "api-reduce-pattern.md"],
+    "Add|Sub|Mul|Div|Adds|Muls|Exp|Log|Sqrt|Rsqrt": "api-arithmetic.md",
+    "BinaryRepeatParams|UnaryRepeatParams|repeatTimes|repeatTime": "api-repeat-limits.md",
+    "Cast":                                          "api-precision.md",
+    "TBuf|TQue|AllocTensor|InitBuffer|FreeTensor":   "api-buffer.md",
+    "EnQue|DeQue|CrossCoreSetFlag|CrossCoreWaitFlag|SetFlag|WaitFlag|PipeBarrier": "api-pipeline.md",
+    "Compare":                                       "api-restrictions.md",
+    "aclrtSetDevice|aclrtGetDeviceInfo|aclrtMalloc|aclrtFree|aclrtResetDevice|aclInit|aclFinalize": "api-host-runtime.md"
+  }
+}
+

@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AlgoFlow",
+  "description": "op-dashboard 算子计算流图契约 v1.0。Claude 生成 algo_flow.json 必须符合此 schema。",
+  "type": "object",
+  "required": ["op_name", "shape_vars", "units"],
+  "additionalProperties": true,
+  "properties": {
+    "op_name":     {"type": "string", "description": "算子名称，如 Softmax"},
+    "description": {"type": "string", "description": "一句话算法描述（可选）"},
+    "shape_vars": {
+      "type": "array",
+      "description": "形状模板变量名，如 [\"N\",\"C\"]，与输入 tensor 维度数一致",
+      "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"},
+      "minItems": 1
+    },
+    "units": {
+      "type": "array",
+      "description": "硬件计算单元列表（仅计算，不含 DataCopy）",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "bg", "accent", "nodes"],
+        "properties": {
+          "id":     {"type": "string", "enum": ["vector", "cube"],
+                     "description": "vector=向量计算单元，cube=矩阵乘单元"},
+          "label":  {"type": "string", "description": "显示标题，如 'Vector Core  Compute'"},
+          "bg":     {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$",
+                     "description": "背景色 hex，参见 design_tokens.json colors.unit_*_bg"},
+          "accent": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$",
+                     "description": "强调色 hex，参见 design_tokens.json colors.unit_*_accent"},
+          "nodes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["api", "formula", "in_tmpl", "out_tmpl"],
+              "properties": {
+                "api":      {"type": "string",
+                             "description": "AscendC 函数名，如 ReduceMax / Exp / Matmul"},
+                "formula":  {"type": "string",
+                             "description": "数学公式，使用 Unicode 符号，如 'm = max(x, dim=−1)'"},
+                "in_tmpl":  {"type": "string",
+                             "description": "输入形状模板，如 '{N}, {C}'，变量必须在 shape_vars 中"},
+                "out_tmpl": {"type": "string",
+                             "description": "输出形状模板，如 '{N}, 1'"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

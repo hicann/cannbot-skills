@@ -1,0 +1,27 @@
+{
+  "rule_id": "R_API_MATMUL_ATOMICADD",
+  "domain_tags": [
+    "U.Cube",
+    "O.MatMul"
+  ],
+  "symptom_tags": [
+    "S.MteBusy",
+    "S.DmaOverhead"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MteBusy"
+  ],
+  "tags": [
+    "U.Cube",
+    "O.MatMul",
+    "S.MteBusy",
+    "S.DmaOverhead",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

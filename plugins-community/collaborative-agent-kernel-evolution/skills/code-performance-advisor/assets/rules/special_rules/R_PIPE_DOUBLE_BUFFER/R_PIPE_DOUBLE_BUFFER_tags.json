@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_PIPE_DOUBLE_BUFFER",
+  "domain_tags": [
+    "U.Vector",
+    "U.Mix"
+  ],
+  "symptom_tags": [
+    "S.PipeStall",
+    "S.LowComputeUtil"
+  ],
+  "context_tags": [
+    "C.UB.Capacity"
+  ],
+  "required_tags": [
+    "U.Vector",
+    "S.PipeStall"
+  ],
+  "tags": [
+    "U.Vector",
+    "U.Mix",
+    "S.PipeStall",
+    "S.LowComputeUtil",
+    "C.UB.Capacity"
+  ],
+  "optional_tags": []
+}

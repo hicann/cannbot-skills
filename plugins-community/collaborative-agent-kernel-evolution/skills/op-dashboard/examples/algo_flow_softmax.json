@@ -1,0 +1,46 @@
+{
+  "_comment": "Softmax algo_flow.json 示例 — 由 Claude 阅读 softmax_custom.cpp 生成",
+  "op_name": "Softmax",
+  "description": "Row-wise softmax: numerically stable via max subtraction, then exp / sum normalization",
+  "shape_vars": ["N", "C"],
+  "units": [
+    {
+      "id": "vector",
+      "label": "Vector Core  Compute",
+      "bg": "#f5f0ff",
+      "accent": "#8250df",
+      "nodes": [
+        {
+          "api": "ReduceMax",
+          "formula": "m = max(x, dim=−1)",
+          "in_tmpl": "{N}, {C}",
+          "out_tmpl": "{N}, 1"
+        },
+        {
+          "api": "Adds",
+          "formula": "x̂ = x − m",
+          "in_tmpl": "{N}, {C}",
+          "out_tmpl": "{N}, {C}"
+        },
+        {
+          "api": "Exp",
+          "formula": "e = exp(x̂)",
+          "in_tmpl": "{N}, {C}",
+          "out_tmpl": "{N}, {C}"
+        },
+        {
+          "api": "ReduceSum",
+          "formula": "s = Σⱼ eⱼ  (dim=−1)",
+          "in_tmpl": "{N}, {C}",
+          "out_tmpl": "{N}, 1"
+        },
+        {
+          "api": "Muls",
+          "formula": "y = e × (1/s)",
+          "in_tmpl": "{N}, {C}",
+          "out_tmpl": "{N}, {C}"
+        }
+      ]
+    }
+  ]
+}

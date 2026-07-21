@@ -1,0 +1,34 @@
+{
+	"rule_id": "R001_MATMUL_CUTK",
+	"domain_tags": [
+		"U.Cube",
+		"O.MatMul"
+	],
+	"symptom_tags": [
+		"S.TransferDominated",
+		"S.LowComputeUtil",
+		"S.MemoryBound"
+	],
+	"context_tags": [
+		"C.K.Large",
+		"C.MN.Small",
+		"C.Arch.910B"
+	],
+	"required_tags": [
+		"U.Cube",
+		"O.MatMul",
+		"S.TransferDominated",
+		"S.MemoryBound"
+	],
+	"optional_tags": [],
+	"tags": [
+		"U.Cube",
+		"O.MatMul",
+		"S.TransferDominated",
+		"S.LowComputeUtil",
+		"S.MemoryBound",
+		"C.K.Large",
+		"C.MN.Small",
+		"C.Arch.910B"
+	]
+}

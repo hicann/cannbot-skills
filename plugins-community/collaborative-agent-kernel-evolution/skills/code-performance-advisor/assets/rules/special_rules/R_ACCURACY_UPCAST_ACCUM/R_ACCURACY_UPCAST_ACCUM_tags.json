@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_ACCURACY_UPCAST_ACCUM",
+  "rule_name": "Upcast to FP32 for Accumulation",
+  "priority": "high",
+  "domain_tags": ["U.Vector", "O.Norm", "O.Pooling", "O.Reduce", "T.FP16", "T.BF16"],
+  "symptom_tags": ["S.LowVecUtil"],
+  "context_tags": [],
+  "required_tags": ["U.Vector", "O.Norm"],
+  "optional_tags": ["O.Pooling", "O.Reduce", "S.LowVecUtil", "T.FP16", "T.BF16"]
+}

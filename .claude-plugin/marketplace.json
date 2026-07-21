@@ -526,7 +526,12 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "skills", "tilelang", "translator"],
+      "keywords": [
+        "ascendc",
+        "skills",
+        "tilelang",
+        "translator"
+      ],
       "category": "skills",
       "skills": [
         "./tilelang2ascend-translator",
@@ -545,10 +550,39 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "tilelang", "translator", "kernel", "developer"],
+      "keywords": [
+        "ascendc",
+        "tilelang",
+        "translator",
+        "kernel",
+        "developer"
+      ],
       "category": "development",
       "dependencies": [
         "tilelang2ascend-ops-developer-skills"
+      ]
+    },
+    {
+      "name": "cake",
+      "source": "./plugins-community/collaborative-agent-kernel-evolution",
+      "description": "CAKE2 进化式 AscendC 算子生成 Team（仅 Vector 算子）。从算子描述→PyTorch 参考→DSL→AscendC→编译评估→进化优化的全自动流水线。含 3 个 Agent（cake/cake-evo/cake-partial）与内置 Skill。",
+      "version": "0.1.1",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "cake",
+        "ascendc",
+        "operator",
+        "evolution",
+        "dsl",
+        "npu"
+      ],
+      "category": "development",
+      "agents": [
+        "./agents/cake.md",
+        "./agents/cake-evo.md",
+        "./agents/cake-partial.md"
       ]
     },
     {

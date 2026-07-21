@@ -1,0 +1,26 @@
+{
+  "rule_id": "R_DMA_LARGE_BLOCK_TRANSFER",
+  "domain_tags": [
+    "U.DMA",
+    "O.DataCopy"
+  ],
+  "symptom_tags": [
+    "S.DmaOverhead",
+    "S.MteBusy"
+  ],
+  "context_tags": [
+    "C.Arch.910B"
+  ],
+  "required_tags": [
+    "U.DMA",
+    "S.DmaOverhead"
+  ],
+  "tags": [
+    "U.DMA",
+    "O.DataCopy",
+    "S.DmaOverhead",
+    "S.MteBusy",
+    "C.Arch.910B"
+  ],
+  "optional_tags": []
+}

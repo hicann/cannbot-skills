@@ -1,0 +1,10 @@
+{
+  "rule_id": "R_TAIL_ATOMIC_GATHER",
+  "rule_name": "Non-Aligned Tail Handling with AtomicAdd/GatherMask",
+  "priority": "high",
+  "domain_tags": ["U.Vector", "U.Mix"],
+  "symptom_tags": ["S.LocalCopyRedundant"],
+  "context_tags": ["C.Align.256B"],
+  "required_tags": ["U.Vector", "S.LocalCopyRedundant"],
+  "optional_tags": ["U.Mix", "C.Align.256B"]
+}
