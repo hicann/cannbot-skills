@@ -259,7 +259,6 @@ skills:
 | 层级 | 目录 | 用途 | 内容示例 |
 |------|------|------|---------|
 | 领域根目录 | `ops/` | 算子 Skills（正式版：Ascend C + PyPTO） | Ascend C / PyPTO 算子开发相关 |
-| 领域根目录 | `ops-lab/` | 算子 Skills/Agents（实验/非正式版） | 实验性技能模块 |
 | 领域根目录 | `model/` | 模型优化 | 模型优化相关技能 |
 | Skill 内 | `references/` | 按需加载的知识文档 | API 指南、最佳实践、约束说明 |
 | Skill 内 | `assets/` | 输出时使用的静态资源 | 模板文件、图标 |

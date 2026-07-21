@@ -428,7 +428,7 @@ analyze_changes() {
         done
 
         # Detect skill changes
-        # Patterns: skills/<name>/, ops/skills/<name>/, ops-lab/*/skills/<name>/, model/skills/<name>/
+        # Patterns: skills/<name>/, ops/skills/<name>/, model/skills/<name>/
         if [[ "$file" =~ (skills/([^/]+)/) ]] || \
            [[ "$file" =~ /skills/([^/]+)/SKILL\.md$ ]] || \
            [[ "$file" =~ /skills/([^/]+)/references/ ]]; then

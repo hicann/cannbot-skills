@@ -183,7 +183,7 @@ def _is_expected_layer(skill_file: Path, repo_root: Path) -> bool:
     path_text = str(rel_path).replace("\\", "/")
     return any(
         path_text.startswith(prefix)
-        for prefix in ("ops/", "ops-lab/", "model/", "graph/", "infra/")
+        for prefix in ("ops/", "model/", "graph/", "infra/")
     )
 
 

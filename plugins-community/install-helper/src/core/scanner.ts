@@ -59,13 +59,13 @@ function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[]; cacheTtl
     const config = parseYaml(readFileSync(configPath, "utf-8"));
     const ttlHours = config.scanCacheTtlHours || 24;
     return {
-      skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "ops-lab", "runtime"],
+      skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "runtime"],
       pluginDirs: config.pluginDirs || ["plugins-official", "plugins-community"],
       cacheTtlMs: ttlHours * 60 * 60 * 1000,
     };
   } catch {
     return {
-      skillDirs: ["ops", "model", "graph", "infra", "ops-lab", "runtime"],
+      skillDirs: ["ops", "model", "graph", "infra", "runtime"],
       pluginDirs: ["plugins-official", "plugins-community"],
       cacheTtlMs: 24 * 60 * 60 * 1000,
     };

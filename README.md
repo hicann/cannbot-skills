@@ -84,8 +84,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 
 ```
 cannbot-skills/
-├── ops/                  # 算子 Skills（正式版）
-├── ops-lab/              # 算子 Skills（实验版）
+├── ops/                  # 算子 Skills
 ├── model/                # 模型推理优化 Skills
 ├── graph/                # 图模式 Skills
 ├── runtime/              # Runtime Skills

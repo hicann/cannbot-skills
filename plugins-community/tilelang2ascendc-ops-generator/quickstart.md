@@ -89,7 +89,7 @@ bash init.sh project trae
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-community/ascendc-ops-lab-developer
+cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
 bash init.sh project codearts     # 项目级
 bash init.sh global codearts      # 全局级
 ```

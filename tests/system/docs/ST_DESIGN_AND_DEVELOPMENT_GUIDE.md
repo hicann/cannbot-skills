@@ -831,7 +831,6 @@ skill_dirs:
   - "ops"
   - "graph"
   - "model"
-  - "ops-lab"              # 新增
 
 skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空表示全部生效）
   - "ascendc-task-focus"
@@ -1003,15 +1002,15 @@ EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --
 | 64 | gitcode-pr-handler | 重新生成符合约定式提交规范的 PR 标题与描述 | `infra/gitcode-pr-handler` |
 | 65 | gitcode-toolkit | GitCode 协作通用基础参考（API/Token/URL/工作流等，内部使用） | `infra/gitcode-toolkit` |
 
-### 3.9 ops-lab/ — 实验性模块（5 个）
+### 3.9 ops/ — TileLang 算子开发（5 个）
 
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
-| 66 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops-lab/tilelang/skills/tilelang-api-best-practices` |
-| 67 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops-lab/tilelang/skills/tilelang-op-design` |
-| 68 | tilelang-op-developer | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops-lab/tilelang/skills/tilelang-op-developer` |
-| 69 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops-lab/tilelang/skills/tilelang-programming-model-guide` |
-| 70 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops-lab/tilelang/skills/tilelang-review` |
+| 66 | tilelang-api-best-practices | TileLang Ascend API 使用最佳实践，内存分配、数据搬运、矩阵计算等 | `ops/tilelang-api-best-practices` |
+| 67 | tilelang-op-design | TileLang-Ascend 算子设计文档生成，编程模式选型、内存层级规划 | `ops/tilelang-op-design` |
+| 68 | tilelang-op-develop | 基于设计文档生成 TileLang-Ascend 算子实现代码与测试 | `ops/tilelang-op-develop` |
+| 69 | tilelang-programming-model-guide | TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南 | `ops/tilelang-programming-model-guide` |
+| 70 | tilelang-review | TileLang NPU kernel 代码格式检查与自动修复（ruff/clang-format） | `ops/tilelang-review` |
 
 ### 3.10 plugins-official/ — 插件内置 Skill（2 个）
 

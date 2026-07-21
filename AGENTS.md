@@ -68,7 +68,6 @@ cannbot-skills/
 │   ├── ascendc-tiling-design/
 │   ├── ops-simulator/
 │   └── ...                   # 各 Skill 目录
-├── ops-lab/                  # 算子 Skills（实验/非正式版）
 ├── model/                    # 模型推理优化 Skills，每个子目录即一个 Skill
 │   ├── model-infer-fusion/
 │   ├── model-infer-quantization/

@@ -105,16 +105,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 # Agents: use local agents/ directory (migrated with plugin)
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
-# Skills: reference shared ops, ops-lab, and local plugin skills directories
+# Skills: reference shared ops and local plugin skills directories
 if [ -d "$PLUGIN_ROOT/../../ops" ]; then
     SHARED_SKILL_ROOT="$(cd "$PLUGIN_ROOT/../../ops" && pwd)"
 else
     SHARED_SKILL_ROOT=""
-fi
-if [ -d "$PLUGIN_ROOT/../../ops-lab" ]; then
-    SHARED_SKILL_ROOT_OPS_LAB="$(cd "$PLUGIN_ROOT/../../ops-lab" && pwd)"
-else
-    SHARED_SKILL_ROOT_OPS_LAB="/nonexistent-ops-lab"
 fi
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
 
@@ -204,10 +199,10 @@ echo ""
 # --- Step 0: Confirmation before installation ---
 step "[0/5] Checking items to be installed..."
 
-# Collect skills to install (from shared ops and ops-lab)
+# Collect skills to install (from shared ops)
 SKILLS_TO_INSTALL=""
 SKILL_COUNT=0
-for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/ "$LOCAL_SKILL_ROOT"/*/; do
+for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$LOCAL_SKILL_ROOT"/*/; do
     [ -d "$skill_dir" ] || continue
     name=$(basename "$skill_dir")
     echo "$INCLUDED_SKILLS" | tr ' ' '\n' | grep -qxF "$name" || continue
@@ -298,7 +293,7 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: per-item symlinks for skills (from shared ops, whitelist filtered)
     mkdir -p "$CANNBOT_DIR/skills"
     # Pre-clean existing skill symlinks (only whitelist items)
-    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/ "$LOCAL_SKILL_ROOT"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$LOCAL_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         echo "$INCLUDED_SKILLS" | tr ' ' '\n' | grep -qxF "$name" || continue
@@ -306,7 +301,7 @@ if [ "$TOOL" = "opencode" ]; then
         [ -e "$target" ] || [ -L "$target" ] && rm -rf "$target"
     done
     skill_count=0
-    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/ "$LOCAL_SKILL_ROOT"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$LOCAL_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         echo "$INCLUDED_SKILLS" | tr ' ' '\n' | grep -qxF "$name" || continue
@@ -441,7 +436,7 @@ else
     # Trae/Claude/Cursor: create per-skill discovery symlinks (with filter, from shared ops)
     DISCOVERY="$CONFIG_ROOT/skills"
 
-    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/ "$LOCAL_SKILL_ROOT"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$LOCAL_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         echo "$INCLUDED_SKILLS" | tr ' ' '\n' | grep -qxF "$name" || continue
@@ -450,7 +445,7 @@ else
     done
 
     link_count=0
-    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/ "$SHARED_SKILL_ROOT_OPS_LAB"/*/skills/*/ "$LOCAL_SKILL_ROOT"/*/; do
+    for skill_dir in "$SHARED_SKILL_ROOT"/*/ "$LOCAL_SKILL_ROOT"/*/; do
         [ -d "$skill_dir" ] || continue
         name=$(basename "$skill_dir")
         echo "$INCLUDED_SKILLS" | tr ' ' '\n' | grep -qxF "$name" || continue

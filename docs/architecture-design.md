@@ -10,8 +10,7 @@
 
 ```
 cannbot-skills/
-├── ops/                             # 算子 Skills（正式版）
-├── ops-lab/                         # 算子 Skills（实验 / 非正式版）
+├── ops/                             # 算子 Skills
 ├── model/                           # 模型推理优化 Skills
 ├── graph/                           # 图模式 Skills
 ├── runtime/                         # Runtime Skills

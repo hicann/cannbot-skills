@@ -1,7 +1,6 @@
 # binary.json dtype 组合推导指南
 
 > **适用范围**：ops-math / ops-nn / ops-cv / ops-transformer 仓库（使用 `add_modules_sources` + `build.sh` + OPC 编译流程）。
-> ops-lab 模板（使用 `npu_op_code_gen`）**不适用**，因为 ops-lab 不需要 `config/binary.json`。
 
 ## 1. 规则
 

@@ -18,7 +18,7 @@ const DEFAULTS_PATH = path.join(PLUGINS_DIR, "_defaults.yml");
 const OUT_PATH = path.join(ROOT, "src", "embedded-plugins.json");
 
 // scanDirs must mirror src/config/repository.yaml
-const SCAN_DIRS = ["ops", "model", "graph", "infra", "ops-lab", "runtime"];
+const SCAN_DIRS = ["ops", "model", "graph", "infra", "runtime"];
 
 let defaults = {};
 try {
