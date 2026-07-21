@@ -2,6 +2,15 @@
 name: architect
 description: 方案设计角色。负责设计算子开发方案与测试方案，产出设计类文档。write 权限：.cannbot 目录。
 mode: subagent
+skills:
+    - repo-knowledge
+    - repo-op-templates
+    - repo-coding-rules
+    - repo-build-guide
+    - repo-test-develop
+    - workflow-doc-templates
+    - ascendc-st-design
+    - ops-precision-standard
 ---
 
 # 方案设计角色
@@ -42,7 +51,7 @@ mode: subagent
 
 - **领域背景**：`repo-knowledge`（本仓算子涉及的领域标准与背景）。
 - **代码架构与模板依据**：`repo-op-templates`（算子代码模板与选择规则，作为开发方案中架构/模板选型的依据）、`repo-coding-rules`（编码规范，影响可实现性判断）、`repo-build-guide`（编译验证要求，影响接口验证方案）。
-- **测试方案依据**：`repo-test-develop`（仓库测试框架与测试开发方法，作为 golden 与分级用例设计的依据）。
+- **测试方案依据**：`repo-test-develop`（golden 与分级用例的设计方法：黑盒覆盖维度分解、等价类/边界/特殊值、分级派生、覆盖矩阵；复杂算子可复用 `ascendc-st-design` 引擎）。
 - **交付件模板**：一律引用 `workflow-doc-templates`，按其模板组织开发方案文档、测试方案文档等交付件，勿内联模板内容。
 
 以上均按逻辑名引用，读取仓内原文获取最新内容，不将领域知识硬编码进本文件。

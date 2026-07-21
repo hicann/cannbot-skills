@@ -39,6 +39,15 @@
 
 调用 `ascendc-precision-debug` 诊断根因，在报告中记录问题类型与诊断结论。
 
+## 同源与特殊用例纪律
+
+避免"假失败"、保证比对可信，四条纪律：
+
+- **golden 独立且同源**：golden 为 CPU 侧独立实现、不复用被测 Kernel（见 test-framework.md）；本仓仅一份 `golden.py`，由数据生成（`gen_data.py` 产 golden.bin，直调通路经 `run.sh` 比对）与 torch 通路校验（`test_torch.py`，`python3` 直接运行、非 pytest）共同引用，天然同源——务必保持唯一，勿在测试代码里另立第二份 golden。
+- **同源截断**：设备侧对输入所做的量化/截断，golden 必须对**同一份数据**做同样处理，否则在舍入/回绕边界假失败——整型（int8/16/32…）造数据须先 round 再 clamp 到 dtype 范围；fp16/bf16 须逐操作数先舍入到该 dtype 再计算（`fp16(x+y) ≠ fp16(fp16(x)+fp16(y))`）。
+- **负路径用例（expect_error）**：预期算子应报错/校验失败的用例，以"发生错误即通过"判定，**不做数值比对**。
+- **特殊输入语义**：0 维标量张量（shape `[]`）与空 tensor（shape 含 0）是不同用例；特殊值 `±0/±inf/nan` 原样注入，**不有限化**为普通数。
+
 ## 性能采集
 
 - 用测试工程搭建的性能采集框架跑出性能数据，覆盖需求关注的 shape/dtype。

@@ -2,6 +2,9 @@
 name: qa
 description: 验收角色。负责算子开发各 CP 点的验收，加载对应的 workflow-cp* Skill 完成判定，产出验收报告与用户确认问卷。write 权限：.cannbot 目录。
 mode: subagent
+skills:
+    - workflow-doc-templates
+    - ops-precision-standard
 ---
 
 # 验收角色
