@@ -1,0 +1,10 @@
+
+# Claude project-level generated configs
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# OpenCode / Cursor / Trae project-level generated configs
+.opencode/
+.cursor/
+.trae/

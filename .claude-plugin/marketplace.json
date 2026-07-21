@@ -628,6 +628,56 @@
       ]
     },
     {
+      "name": "ops-perf-evolution-skills",
+      "description": "Ascend C 算子性能进化优化 Skills（5 个）。进化知识库、策略库、世界模型、报告生成、ops 仓库算子评估。",
+      "source": "./plugins-community/ops-perf-evolution/skills",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["ascendc", "skills", "evolution", "perf-optimize"],
+      "category": "skills",
+      "skills": [
+        "./evolution-knowledge",
+        "./evolution-report",
+        "./evolution-strategies",
+        "./evolution-world-model",
+        "./ops-evaluation"
+      ]
+    },
+    {
+      "name": "ops-perf-evolution-shared-skills",
+      "description": "Ascend C 算子性能进化优化共享 Skills（2 个）。NPU 架构与芯片规格查询、性能采集与分析。",
+      "source": "./ops",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["ascendc", "skills", "npu-arch", "profiling"],
+      "category": "skills",
+      "skills": [
+        "./npu-arch",
+        "./ops-profiling"
+      ]
+    },
+    {
+      "name": "ops-perf-evolution",
+      "source": "./plugins-community/ops-perf-evolution",
+      "description": "Ascend C 算子性能进化优化 Agent Team。对已有 AscendC 内核或 ops 仓库算子进行多轮并行进化优化，含 1 个 Orchestrator Agent 和 4 个路径专用 Subagent。",
+      "version": "1.0.1",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": ["ascendc", "evolution", "perf-optimize", "kernel", "operator"],
+      "category": "development",
+      "dependencies": [
+        "ops-perf-evolution-skills",
+        "ops-perf-evolution-shared-skills"
+      ]
+    },
+    {
       "name": "autoresearch",
       "source": "./plugins-community/autoresearch",
       "description": "AutoResearch 算子自动优化工作流，支持 Triton Ascend、AscendC、AscendC CATLASS、KernelVerifier 和远端 Ascend worker。",

@@ -888,7 +888,7 @@ def _find_msprof_script():
     return "msprof_profile_run.sh"
 
 
-def _run_msprof_standard(wrapper_script: str, output_dir: str, warmup: int = 3):
+def _run_msprof_standard(wrapper_script: str, output_dir: str, device_id: int, warmup: int = 3):
     """调用 msprof_profile_run.sh 进行完整采集（7 组 aic-metrics + sample-based）。
 
     注意：不设置 timeout，与原来 kernel_perf.py 行为一致（默认无限等待）。
@@ -923,17 +923,28 @@ def _run_msprof_standard(wrapper_script: str, output_dir: str, warmup: int = 3):
     return str(prof_dirs[-1]), None
 
 
-def _run_msprof_quick(wrapper_script: str, output_dir: str, warmup: int = 3):
+def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warmup: int = 3):
     """快速模式：只采集 1 轮（不采集 7 个 aic-metrics，只获取 kernel 时间）。
 
     直接调用 msprof 命令（不通过 msprof_profile_run.sh，避免循环调用）。
     使用 msprof --task-time=on --ascendcl=on，不设置 --aic-metrics。
+
+    warmup 在 msprof 外部执行：先单独跑 warmup 次 wrapper 预热 NPU，
+    msprof 只采集正式 timed run，确保 task_time.csv 不含预热数据。
     """
     wrapper_path = os.path.join(output_dir, "_wrapper.py")
     os.makedirs(output_dir, exist_ok=True)
     with open(wrapper_path, "w", encoding="utf-8") as f:
         f.write(wrapper_script)
 
+    env = os.environ.copy()
+
+    # Warmup: 在 msprof 外部执行，不采集
+    for _ in range(warmup):
+        subprocess.run([sys.executable, wrapper_path],
+                       capture_output=True, text=True, env=env)
+
+    # Measurement: msprof 只采集正式 timed run
     cmd = [
         "msprof",
         f"--output={output_dir}",
@@ -941,7 +952,6 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, warmup: int = 3):
         "--ascendcl=on",
         sys.executable, wrapper_path
     ]
-    env = os.environ.copy()
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     try:
@@ -956,6 +966,23 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, warmup: int = 3):
     if not prof_dirs:
         return None, "no PROF directory found"
     return str(prof_dirs[-1]), None
+
+
+def _extract_compute_row(r: dict):
+    """从 op_summary 行提取计算算子的 (duration, op_name)。
+
+    非计算行、非法值或非正耗时返回 None。
+    """
+    task_type = r.get("Task Type", "")
+    if "AI_CORE" not in task_type and "AIV" not in task_type and "MIX" not in task_type:
+        return None
+    try:
+        duration = float(r.get("Task Duration(us)", 0) or 0)
+    except ValueError:
+        return None
+    if duration <= 0:
+        return None
+    return duration, r.get("Op Name", "unknown")
 
 
 def _parse_msprof_duration(prof_group_dir: str):
@@ -974,25 +1001,24 @@ def _parse_msprof_duration(prof_group_dir: str):
     if not rows:
         return None, None, "empty csv"
 
-    ai_core_rows = []
-    for r in rows:
-        if "AI_CORE" in r.get("Task Type", "") \
-                or "AIV" in r.get("Task Type", "") \
-                or "MIX" in r.get("Task Type", ""):
-            ai_core_rows.append(r)
-    candidates = ai_core_rows or rows
-    target = max(candidates, key=lambda r: float(r.get("Task Duration(us)", 0) or 0))
+    # 汇总所有实际计算算子的 Task Duration；参考实现可能包含多个 PyTorch native kernel，
+    # AscendC 实现也可能拆分为多个 kernel，因此采用累加而非取最大。
+    compute_rows = [cr for cr in (_extract_compute_row(r) for r in rows) if cr is not None]
 
-    duration = float(target.get("Task Duration(us)", 0) or 0)
-    op_name = target.get("Op Name", "unknown")
-    return duration, op_name, None
+    if compute_rows:
+        total_duration = sum(d for d, _ in compute_rows)
+        op_name = compute_rows[0][1] if len(compute_rows) == 1 else "multiple_kernels"
+        return total_duration, op_name, None
+
+    return None, None, "no compute rows found"
 
 
 def _parse_msprof_duration_quick(prof_group_dir: str):
     """快速模式解析：从 PROF 目录中查找 task_time.csv 或 api_statistic.csv 并提取时间。
 
     快速模式只跑 1 轮，不设置 --aic-metrics，因此没有 op_summary_*.csv。
-    对单次采集中同名 kernel 的多次下发做聚合，返回主要 kernel 的平均/中位时间。
+    warmup 已在 msprof 外部执行，task_time.csv 只包含正式 timed run 的 kernel 时间，
+    对单次采集中所有计算 kernel 的耗时直接累加即可。
     """
     # 1. 尝试从 task_time.csv 提取
     task_time_pattern = os.path.join(prof_group_dir, "mindstudio_profiler_output/task_time_*.csv")
@@ -1002,36 +1028,28 @@ def _parse_msprof_duration_quick(prof_group_dir: str):
             with open(task_time_files[0], "r", encoding="utf-8", errors="replace") as f:
                 reader = csv.DictReader(f)
                 rows = list(reader)
-            # 收集所有非元事件的 kernel 行，按 kernel_name 分组
-            kernel_times: Dict[str, List[float]] = {}
+            # 汇总所有真实计算 kernel 的耗时
+            # 参考实现可能包含大量 PyTorch native kernel；AscendC 实现也可能拆分为多个 kernel。
+            # 只累加 kernel_type 为实际计算类型的行，排除 PROFILING_ENABLE / TASK_TIMEOUT_SET 等。
+            COMPUTE_KERNEL_TYPES = {"AI_VECTOR_CORE", "AI_CORE", "MIX_AIV", "MIX"}
+            compute_rows = []
             for r in rows:
                 kernel_type = r.get("kernel_type", "")
                 task_time = r.get("task_time(us)", "")
-                if kernel_type not in ("PROFILING_ENABLE", "TASK_TIMEOUT_SET", "") and task_time:
+                if kernel_type in COMPUTE_KERNEL_TYPES and task_time:
                     try:
                         duration = float(task_time)
                         if duration > 0:
-                            kernel_name = r.get("kernel_name", "unknown")
-                            kernel_times.setdefault(kernel_name, []).append(duration)
+                            compute_rows.append((duration, r.get("kernel_name", "unknown")))
                     except ValueError:
                         continue
-
-            if kernel_times:
-                # 选择主要 kernel：优先总耗时最长、其次下发次数最多
-                main_kernel = max(
-                    kernel_times.items(),
-                    key=lambda kv: (sum(kv[1]), len(kv[1]))
-                )[0]
-                times = kernel_times[main_kernel]
-                if len(times) >= 3:
-                    sorted_t = sorted(times)
-                    filtered = sorted_t[1:-1]
-                    agg_duration = statistics.mean(filtered)
-                else:
-                    agg_duration = statistics.median(times)
-                return agg_duration, main_kernel, None
+            if compute_rows:
+                total_duration = sum(d for d, _ in compute_rows)
+                if total_duration > 0:
+                    kernel_name = compute_rows[0][1] if len(compute_rows) == 1 else "multiple_kernels"
+                    return total_duration, kernel_name, None
         except Exception:
-            return None, None, "no task_time or api_statistic csv found"
+            pass
 
     # 2. 尝试从 api_statistic.csv 提取（launch 行）
     api_pattern = os.path.join(prof_group_dir, "mindstudio_profiler_output/api_statistic_*.csv")
@@ -1140,6 +1158,10 @@ def _add_summary_section(lines, report):
     lines.append("| ---- | -- |")
     lines.append(f"| 用例数 | {report['n_cases_total']} |")
     lines.append(f"| 平均加速比（>1 表示自定义算子更快） | {report['mean_speedup']:.3f} |")
+    if report.get("geomean_ref_us") is not None:
+        lines.append(f"| 标杆几何平均耗时 (us) | {report['geomean_ref_us']:.2f} |")
+    if report.get("geomean_asc_us") is not None:
+        lines.append(f"| 自定义算子几何平均耗时 (us) | {report['geomean_asc_us']:.2f} |")
     better = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] > 1)
     worse = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] < 1)
     lines.append(f"| 自定义算子更优（比值>1） | {better} |")
@@ -1240,12 +1262,14 @@ def _report_compare_to_text(report: Dict[str, Any]) -> str:
     if report.get("mean_ref_us") is not None:
         lines.append("--- Task Duration (us) ---")
         lines.append(
-            f"  Ref  mean/median/total : {report['mean_ref_us']:.2f} / "
-            f"{report['median_ref_us']:.2f} / {report['total_ref_us']:.2f}"
+            f"  Ref  mean/median/geomean/total : {report['mean_ref_us']:.2f} / "
+            f"{report['median_ref_us']:.2f} / {report['geomean_ref_us']:.2f} / "
+            f"{report['total_ref_us']:.2f}"
         )
         lines.append(
-            f"  Asc  mean/median/total : {report['mean_asc_us']:.2f} / "
-            f"{report['median_asc_us']:.2f} / {report['total_asc_us']:.2f}"
+            f"  Asc  mean/median/geomean/total : {report['mean_asc_us']:.2f} / "
+            f"{report['median_asc_us']:.2f} / {report['geomean_asc_us']:.2f} / "
+            f"{report['total_asc_us']:.2f}"
         )
         lines.append(f"  Total speedup (Σref/Σasc) : {report['total_speedup']:.2f}x")
     lines.append("=" * 100)
@@ -1294,7 +1318,7 @@ def _measure_one_impl(mi: _MeasureInput):
             mi.out_dir, mi.case_idx, mi.impl, mi.args.seed, mi.device_id,
             mi.args.warmup, mi.jsonl_case))
         tmpdir = f"/tmp/msprof_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}"
-        prof_dir, err = _run_msprof_standard(wrapper, tmpdir, mi.args.warmup)
+        prof_dir, err = _run_msprof_standard(wrapper, tmpdir, mi.device_id, mi.args.warmup)
         if prof_dir:
             duration, _op_name, parse_err = _parse_msprof_duration(prof_dir)
             if duration is not None:
@@ -1307,8 +1331,9 @@ def _measure_one_impl(mi: _MeasureInput):
 def _measure_one_impl_quick(mi: _MeasureInput):
     """快速模式：Measure one implementation with retries and repeats.
 
-    --retry 用于解析失败重试；--repeats 用于成功后的重复采集取平均。
-    当 repeats >= 3 时，去掉最大/最小值后取平均；否则取中位数。
+    --retry 用于解析失败重试；--repeats 控制 wrapper 内 timed iteration 次数。
+    wrapper 做 repeats 次 timed run，msprof 一把采集，total / repeats = 单次耗时。
+    warmup 由 _run_msprof_quick 在 msprof 外部执行。
 
     Returns (duration_us, error, prof_dir).
     """
@@ -1317,41 +1342,25 @@ def _measure_one_impl_quick(mi: _MeasureInput):
     repeats = max(1, getattr(mi.args, "repeats", 1))
 
     for _ in range(1 + mi.args.retry):
-        durations = []
-        prof_dirs = []
+        # 让 wrapper 内跑 repeats 次 timed run，msprof 一把采集后除以 repeats 得到单次
+        wrapper = _generate_wrapper_script(_WrapperConfig(
+            mi.out_dir, mi.case_idx, mi.impl, mi.args.seed, mi.device_id,
+            repeats - 1, mi.jsonl_case))
+        tmpdir = f"/tmp/msprof_quick_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}"
+        _cleanup_prof_dirs(tmpdir)
+        prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.device_id, mi.args.warmup)
+        if not prof_dir:
+            continue
 
-        for r in range(repeats):
-            wrapper = _generate_wrapper_script(_WrapperConfig(
-                mi.out_dir, mi.case_idx, mi.impl, mi.args.seed, mi.device_id,
-                mi.args.warmup, mi.jsonl_case))
-            tmpdir = f"/tmp/msprof_quick_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}_r{r}"
-            _cleanup_prof_dirs(tmpdir)
-            prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.args.warmup)
-            if not prof_dir:
-                break
+        duration, _op_name, parse_err = _parse_msprof_duration_quick(prof_dir)
+        if duration is None:
+            err = parse_err
+            continue
 
-            duration, _op_name, parse_err = _parse_msprof_duration_quick(prof_dir)
-            if duration is None:
-                err = parse_err
-                break
+        # msprof 采集了 repeats 次 timed run，除以 repeats 得到单次耗时
+        duration = duration / repeats
+        return duration, None, prof_dir
 
-            durations.append(duration)
-            prof_dirs.append(prof_dir)
-
-        if durations:
-            if len(durations) >= 3:
-                sorted_d = sorted(durations)
-                filtered = sorted_d[1:-1]
-                avg_duration = statistics.mean(filtered)
-            else:
-                avg_duration = statistics.median(durations)
-
-            # 只保留第一个 prof_dir 给调用方，清理其余重复采集目录
-            for pd in prof_dirs[1:]:
-                _cleanup_prof_dirs(pd)
-            return avg_duration, None, prof_dirs[0]
-
-        time.sleep(0.5)
     return None, err, prof_dir
 
 
@@ -1428,25 +1437,29 @@ def _compute_speedup_stats(speedups: list) -> dict:
 def _compute_timing_stats(ref_times: list, asc_times: list) -> dict:
     """Compute timing statistics for reference and AscendC implementations.
 
-    Returns a dict with mean/median/total for ref and asc, plus total_speedup.
+    Returns a dict with mean/median/geomean/total for ref and asc, plus total_speedup.
     """
     if ref_times:
         ref_stats = {
             "mean_ref_us": statistics.mean(ref_times),
             "median_ref_us": statistics.median(ref_times),
+            "geomean_ref_us": statistics.geometric_mean(ref_times),
             "total_ref_us": sum(ref_times),
         }
     else:
-        ref_stats = {"mean_ref_us": None, "median_ref_us": None, "total_ref_us": None}
+        ref_stats = {"mean_ref_us": None, "median_ref_us": None,
+                     "geomean_ref_us": None, "total_ref_us": None}
 
     if asc_times:
         asc_stats = {
             "mean_asc_us": statistics.mean(asc_times),
             "median_asc_us": statistics.median(asc_times),
+            "geomean_asc_us": statistics.geometric_mean(asc_times),
             "total_asc_us": sum(asc_times),
         }
     else:
-        asc_stats = {"mean_asc_us": None, "median_asc_us": None, "total_asc_us": None}
+        asc_stats = {"mean_asc_us": None, "median_asc_us": None,
+                     "geomean_asc_us": None, "total_asc_us": None}
 
     total_speedup = None
     if ref_times and asc_times:
@@ -1470,12 +1483,14 @@ def _log_and_save_compare_reports(summary, out_dir, speedups, n_cases):
     if summary.get("mean_ref_us") is not None:
         LOGGER.info("--- Task Duration (us) ---")
         LOGGER.info(
-            f"  Ref  mean/median/total : {summary['mean_ref_us']:.2f} / "
-            f"{summary['median_ref_us']:.2f} / {summary['total_ref_us']:.2f}"
+            f"  Ref  mean/median/geomean/total : {summary['mean_ref_us']:.2f} / "
+            f"{summary['median_ref_us']:.2f} / {summary['geomean_ref_us']:.2f} / "
+            f"{summary['total_ref_us']:.2f}"
         )
         LOGGER.info(
-            f"  Asc  mean/median/total : {summary['mean_asc_us']:.2f} / "
-            f"{summary['median_asc_us']:.2f} / {summary['total_asc_us']:.2f}"
+            f"  Asc  mean/median/geomean/total : {summary['mean_asc_us']:.2f} / "
+            f"{summary['median_asc_us']:.2f} / {summary['geomean_asc_us']:.2f} / "
+            f"{summary['total_asc_us']:.2f}"
         )
         LOGGER.info(f"  Total speedup (Σref/Σasc) : {summary['total_speedup']:.2f}x")
     LOGGER.info("=" * 100)

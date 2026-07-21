@@ -1,0 +1,21 @@
+{
+  "name": "ops-perf-evolution",
+  "description": "Ascend C 算子性能进化优化 Agent Team。对已有 AscendC 内核或 ops 仓库算子进行多轮并行进化优化，包含 1 个 Orchestrator Agent 和 4 个路径专用 Subagent。",
+  "version": "1.0.1",
+  "author": {
+    "name": "CANNBot"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "MIT",
+  "dependencies": [
+    "ops-perf-evolution-shared-skills"
+  ],
+  "agents": [
+    "./AGENTS.md",
+    "./agents/lingxi-evo.md",
+    "./agents/ops-evo.md",
+    "./agents/lingxi-partial.md",
+    "./agents/ops-partial.md"
+  ]
+}
