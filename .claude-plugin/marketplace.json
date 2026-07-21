@@ -472,6 +472,87 @@
       ]
     },
     {
+      "name": "cannbot-knowledge-consumer-skills",
+      "description": "cannbot-knowledge 只读消费 Skill 套件（knowledge-query）。用于知识检索、知识依赖前置检索和文档查找场景。",
+      "source": "./plugins-community/cannbot-knowledge",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "knowledge-base",
+        "knowledge-query",
+        "retrieval"
+      ],
+      "category": "skills",
+      "skills": [
+        "./skills/knowledge-query"
+      ]
+    },
+    {
+      "name": "cannbot-knowledge-issue-skills",
+      "description": "cannbot-knowledge Issue 处理 Skill 套件（knowledge-issue-report）。用于整理复现材料并生成可提交的 Issue 草稿。",
+      "source": "./plugins-community/cannbot-knowledge",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "knowledge-base",
+        "knowledge-issue-report",
+        "issue"
+      ],
+      "category": "skills",
+      "skills": [
+        "./skills/knowledge-issue-report"
+      ]
+    },
+    {
+      "name": "cannbot-knowledge-contributor-skills",
+      "description": "cannbot-knowledge 知识贡献 Skills（7 个）。覆盖知识编译、知识治理、知识检索、Issue 材料整理、算子 wiki 生成和提交前体检。",
+      "source": "./plugins-community/cannbot-knowledge",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "knowledge-base",
+        "ascendc",
+        "governance"
+      ],
+      "category": "skills",
+      "skills": [
+        "./skills/ops-knowledge-ingest",
+        "./skills/ops-knowledge-reference-ingest",
+        "./skills/ops-knowledge-vv-ingest",
+        "./skills/ops-knowledge-cv-ingest",
+        "./skills/knowledge-lint",
+        "./skills/knowledge-query",
+        "./skills/knowledge-issue-report"
+      ]
+    },
+    {
+      "name": "cannbot-knowledge",
+      "source": "./plugins-community/cannbot-knowledge",
+      "description": "cannbot-knowledge 团队能力入口，提供知识编译、治理、检索和 Issue 归档完整能力。",
+      "version": "0.1.2",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "knowledge-base",
+        "ascendc",
+        "plugin"
+      ],
+      "category": "development",
+      "dependencies": [
+        "cannbot-knowledge-contributor-skills"
+      ]
+    },
+    {
       "name": "triton-op-generator-skills",
       "description": "Triton-Ascend 算子代码生成与优化 Skills（6 个）。任务提取、算法设计、代码生成、功能验证、性能优化，以及 NPU 架构参考。",
       "source": "./ops",

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.build/
+search/
+.opencode/
+.claude/
+.trae/
+.marscode/
+.traecli/
+.cursor/
+.github/
+.copilot/
