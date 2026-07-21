@@ -1,0 +1,10 @@
+Op AutoResearch
+Copyright 2026 Huawei Technologies Co., Ltd
+
+This product includes software derived from MindSpore AKG.
+
+MindSpore AKG
+Copyright 2019-2025 Huawei Technologies Co., Ltd
+
+The AscendC add_custom example is derived from the awesome-ascend-skills
+AscendC direct-invocation template. Its CANN-2.0 terms are provided in LICENSE.

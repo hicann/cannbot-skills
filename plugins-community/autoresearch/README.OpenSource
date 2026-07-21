@@ -1,0 +1,20 @@
+[
+  {
+    "Name": "MindSpore AKG br_agents snapshot",
+    "License": "Apache-2.0",
+    "License File": "LICENSE-APACHE",
+    "Version Number": "9f0f7f18248f08f037c416298349df74612f12c3",
+    "Owner": "cxian008@ucr.edu",
+    "Upstream URL": "https://atomgit.com/mindspore/akg",
+    "Description": "Source snapshot used by the standalone AutoResearch runtime; exact copied component scope is recorded in SOURCE_REVISION."
+  },
+  {
+    "Name": "awesome-ascend-skills AscendC direct-invocation template",
+    "License": "CANN-2.0",
+    "License File": "LICENSE",
+    "Version Number": "794fe73c2f7f4526a13a28770e09c91b75091ea4",
+    "Owner": "cxian008@ucr.edu",
+    "Upstream URL": "https://github.com/ascend-ai-coding/awesome-ascend-skills",
+    "Description": "Source of the AscendC add_custom registration example; exact source path is recorded in SOURCE_REVISION."
+  }
+]

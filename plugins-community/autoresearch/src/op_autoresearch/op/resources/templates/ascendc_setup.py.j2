@@ -1,0 +1,158 @@
+
+# --- ascendc direct-invoke rebuild ---
+import os
+import re
+import subprocess
+import sys
+import torch as _t
+import torch_npu as _tnp
+
+if not os.environ.get("ASCEND_HOME_PATH"):
+    raise RuntimeError(
+        "ASCEND_HOME_PATH is not set. Source the CANN environment before eval."
+    )
+
+_project_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    {{ project_dir_name_repr }},
+)
+if not os.path.isdir(_project_dir):
+    raise RuntimeError(f"ascendc project directory not found: {_project_dir}")
+
+_cmake_path = os.path.join(_project_dir, "CMakeLists.txt")
+if not os.path.isfile(_cmake_path):
+    raise RuntimeError(f"ascendc CMakeLists.txt not found: {_cmake_path}")
+with open(_cmake_path, "r", encoding="utf-8") as _fp:
+    _cmake_text = _fp.read()
+
+def _cmake_uses_arch_vars(_root):
+    _var_re = re.compile(r"\b(?:NPU_ARCH|ASCENDC_NPU_ARCH)\b")
+    for _dirpath, _dirnames, _filenames in os.walk(_root):
+        _dirnames[:] = [
+            _d for _d in _dirnames
+            if _d not in ("CMakeFiles", "__pycache__", "build", "output")
+        ]
+        for _name in _filenames:
+            if _name != "CMakeLists.txt" and not _name.endswith(".cmake"):
+                continue
+            _path = os.path.join(_dirpath, _name)
+            try:
+                with open(_path, "r", encoding="utf-8") as _fp:
+                    _text = _fp.read()
+            except UnicodeDecodeError:
+                continue
+            if _var_re.search(_text):
+                return True
+    return False
+
+_patched, _count = re.subn(
+    r"--npu-arch=[A-Za-z0-9_-]+",
+    "--npu-arch={{ npu_arch }}",
+    _cmake_text,
+)
+_uses_arch_vars = _cmake_uses_arch_vars(_project_dir)
+if _count:
+    with open(_cmake_path, "w", encoding="utf-8") as _fp:
+        _fp.write(_patched)
+elif not _uses_arch_vars:
+    raise RuntimeError(
+        "ascendc CMake has no controllable NPU arch channel. "
+        "Add a literal --npu-arch=<dav-token> flag to CMakeLists.txt, "
+        "or consume ${NPU_ARCH} / ${ASCENDC_NPU_ARCH} in project CMake files."
+    )
+else:
+    print(
+        "[WARN]: ascendc CMakeLists.txt has no literal --npu-arch flag; "
+        "passing -DNPU_ARCH / -DASCENDC_NPU_ARCH to cmake instead."
+    )
+
+_torch_npu_root = os.path.dirname(_tnp.__file__)
+_torch_npu_inc = os.path.join(_torch_npu_root, "include")
+_torch_npu_lib = os.path.join(_torch_npu_root, "lib")
+os.environ["CPLUS_INCLUDE_PATH"] = (
+    _torch_npu_inc + ":" + os.environ.get("CPLUS_INCLUDE_PATH", "")
+)
+os.environ["LIBRARY_PATH"] = (
+    _torch_npu_lib + ":" + os.environ.get("LIBRARY_PATH", "")
+)
+os.environ["LD_LIBRARY_PATH"] = (
+    _torch_npu_lib + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+)
+
+_build_dir = os.path.join(_project_dir, "build")
+if os.path.isdir(_build_dir):
+    import shutil as _shutil
+    _shutil.rmtree(_build_dir, ignore_errors=True)
+os.makedirs(_build_dir, exist_ok=True)
+
+def _find_shared_objects(_root):
+    _matches = []
+    for _dirpath, _dirnames, _filenames in os.walk(_root):
+        _dirnames[:] = [
+            _d for _d in _dirnames
+            if _d not in ("CMakeFiles", "__pycache__")
+        ]
+        for _name in _filenames:
+            if _name.endswith(".so"):
+                _path = os.path.join(_dirpath, _name)
+                _matches.append(os.path.relpath(_path, _root))
+    return sorted(_matches)
+
+_cmake_cmd = [
+    "cmake",
+    "..",
+    f"-DCMAKE_PREFIX_PATH={_t.utils.cmake_prefix_path}",
+    f"-DPython_EXECUTABLE={sys.executable}",
+    f"-DPython3_EXECUTABLE={sys.executable}",
+    "-DNPU_ARCH={{ npu_arch }}",
+    "-DASCENDC_NPU_ARCH={{ npu_arch }}",
+]
+_cfg = subprocess.run(
+    _cmake_cmd,
+    cwd=_build_dir,
+    capture_output=True,
+    text=True,
+    timeout={{ timeout }},
+)
+if _cfg.returncode != 0:
+    _details = "\n".join(
+        _part for _part in (_cfg.stdout, _cfg.stderr) if _part
+    )
+    raise RuntimeError("ascendc cmake configure failed\n" + _details)
+if not _count:
+    _cfg_log = "\n".join(
+        _part for _part in (_cfg.stdout, _cfg.stderr) if _part
+    )
+    _unused_arch_vars = {
+        _var for _var in ("NPU_ARCH", "ASCENDC_NPU_ARCH")
+        if re.search(rf"(?m)^\s*{_var}\s*$", _cfg_log)
+    }
+    if (
+        "Manually-specified variables were not used by the project"
+        in _cfg_log
+        and _unused_arch_vars == {"NPU_ARCH", "ASCENDC_NPU_ARCH"}
+    ):
+        raise RuntimeError(
+            "ascendc cmake ignored -DNPU_ARCH/-DASCENDC_NPU_ARCH; "
+            "the build may be using a stale hard-coded --npu-arch. "
+            "Add a literal --npu-arch=<dav-token> flag or consume "
+            "${NPU_ARCH} / ${ASCENDC_NPU_ARCH}.\n" + _cfg_log
+        )
+_build = subprocess.run(
+    ["cmake", "--build", ".", "--parallel", "1"],
+    cwd=_build_dir,
+    capture_output=True,
+    text=True,
+    timeout={{ timeout }},
+)
+if _build.returncode != 0:
+    _details = "\n".join(
+        _part for _part in (_build.stdout, _build.stderr) if _part
+    )
+    raise RuntimeError("ascendc cmake build failed\n" + _details)
+_built_so = _find_shared_objects(_build_dir)
+if not _built_so:
+    raise RuntimeError(
+        f"ascendc build finished without a shared library in {_build_dir}"
+    )
+print(f"[INFO]: ascendc build successful: {', '.join(_built_so)}")

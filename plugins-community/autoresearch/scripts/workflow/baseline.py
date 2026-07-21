@@ -1,0 +1,350 @@
+# Copyright 2026 Huawei Technologies Co., Ltd
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Round-0 SEED transaction.
+
+The baseline body, progress fields, and target phase are committed as one
+event.  The post-tool hook observes that result; it never advances state.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from enum import Enum
+from typing import Any, NamedTuple, Optional
+
+from op_autoresearch.utils.console import emit
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from phase_machine import (
+    BASELINE,
+    PLAN,
+    Progress,
+    append_history,
+    clear_intent,
+    history_path,
+    load_progress,
+    load_state,
+    replay_intent,
+    save_state,
+    state_transaction,
+    write_intent,
+)
+from task_config import EvalOutcome, load_task_config
+from utils.baseline_anchor import valid_metric
+from utils.git_utils import current_head_short
+
+from .progress_reducer import BaselineReduction, reduce_baseline_init
+
+# ---------------------------------------------------------------------------
+# Baseline retry precheck
+# ---------------------------------------------------------------------------
+# The baseline transaction owns the SEED history.jsonl row + the
+# progress fields in state.json. A crash between the SEED append and
+# the state save leaves an orphan SEED row that a retried baseline
+# would happily overwrite the state metrics for — without touching the
+# row itself, since _existing_seed_row() de-duplicates the append.
+# Result: SEED row carries the OLD eval's metrics, state carries the
+# NEW eval's metrics, and consistency check can't see the divergence
+# because expected_history_round=0 matches the orphan row.
+#
+# precheck_baseline runs at engine/baseline.py entry, BEFORE
+# run_eval, and decides whether to skip eval entirely (already
+# committed, or rebuilt from journal), refuse (orphan SEED with no
+# journal), or proceed. Skipping is what closes the
+# silently-divergent-metrics window — the second eval never runs
+# when the first one's row is already on disk.
+
+
+class BaselinePrecheckOutcome(Enum):
+    PROCEED = "proceed"        # no body, no state — run eval fresh
+    ALREADY_DONE = "already_done"   # state + body agree on a prior commit
+    ORPHAN_SEED = "orphan_seed"    # body ahead of state, no journal
+    MISSING_SEED = "missing_seed"   # state ahead of body, no journal
+
+
+class BaselinePrecheck(NamedTuple):
+    outcome: BaselinePrecheckOutcome
+    detail: str
+
+
+def precheck_baseline(task_dir: str) -> BaselinePrecheck:
+    """Classify the baseline transaction's pre-run state. Pure read
+    after replay — the caller decides whether to act on the outcome.
+    Does NOT mutate state beyond the replay heal.
+
+    Always runs replay_intent first so any in-flight baseline
+    transaction is healed before we read state. After replay, four
+    disk shapes are possible (matrix of progress_initialized × SEED
+    row presence):
+
+      progress_initialized | SEED row | outcome
+      ---------------------|----------|--------
+      True                 | True     | ALREADY_DONE
+      True                 | False    | MISSING_SEED  (state ahead of body)
+      False                | True     | ORPHAN_SEED   (body ahead of state)
+      False                | False    | PROCEED       (normal first run)
+
+    ALREADY_DONE: caller advances the phase (idempotent
+    on_baseline_settled) and exits with baseline_exit_code, no eval.
+
+    ORPHAN_SEED / MISSING_SEED: state and body have diverged in an
+    off-flow way the journal cannot reconstruct. Caller fails loud
+    instead of running eval — re-evaluating would either overwrite
+    the surviving artifact's metric (ORPHAN_SEED → state) or fabricate
+    a body that doesn't match state (MISSING_SEED).
+
+    PROCEED: caller runs run_eval then commits via record_baseline.
+    """
+    # Heal first. replay rebuilds state from journal when the SEED
+    # row landed but state didn't; discards the journal when the
+    # SEED row never landed; clears it when state already caught up.
+    replay = replay_intent(task_dir)
+    if replay is not None:
+        emit(f"[baseline] replay_intent {replay['action']}: "
+              f"{replay['detail']}")
+
+    state = load_state(task_dir) or {}
+    seed_on_disk = _existing_seed_row(task_dir)
+    progress_done = bool(state.get("progress_initialized"))
+
+    if progress_done and seed_on_disk:
+        return BaselinePrecheck(
+            BaselinePrecheckOutcome.ALREADY_DONE,
+            "baseline already committed (state.progress_initialized "
+            "and SEED row on disk); skipping re-eval.")
+
+    if progress_done and not seed_on_disk:
+        return BaselinePrecheck(
+            BaselinePrecheckOutcome.MISSING_SEED,
+            "state.progress_initialized is True but history.jsonl has "
+            "no SEED row. State and body have diverged in an off-flow "
+            "way the journal cannot heal (intent.json absent). "
+            "Running eval here would write a fresh SEED row whose "
+            "metrics don't match the committed state.baseline_metric. "
+            "Recover by either (a) restoring the SEED row from a "
+            "backup of history.jsonl, or (b) clearing the offending "
+            "state fields (progress_initialized + baseline_*) and "
+            "re-running baseline.py from scratch.")
+
+    if seed_on_disk and not progress_done:
+        return BaselinePrecheck(
+            BaselinePrecheckOutcome.ORPHAN_SEED,
+            "history.jsonl carries a SEED row but state.progress_"
+            "initialized is False and no intent.json journal is "
+            "present. A retry that runs run_eval here would write the "
+            "new measurement into state.baseline_metric while the "
+            "orphan SEED row keeps the prior measurement, silently "
+            "divorcing dashboards/report from sticky baseline. "
+            "Recover by either (a) hand-setting state.baseline_metric "
+            "/ state.seed_metric / state.progress_initialized to "
+            "match the SEED row, or (b) deleting the SEED row from "
+            "history.jsonl to start fresh.")
+
+    return BaselinePrecheck(BaselinePrecheckOutcome.PROCEED, "")
+
+
+def _existing_seed_row(task_dir: str) -> bool:
+    """True iff history.jsonl already has a round=0 SEED row.
+    Idempotency hook for the baseline transaction: a SIGKILL between
+    append_history and save_state can leave an orphan SEED row. With
+    this gate + the journal at the call site, a retry either: (a) sees
+    no SEED row and starts fresh, or (b) sees the orphan SEED row and
+    skips the append while still rewriting state from the journal.
+    """
+    path = history_path(task_dir)
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first = f.readline().strip()
+    except OSError:
+        return False
+    if not first:
+        return False
+    try:
+        row = json.loads(first)
+    except json.JSONDecodeError:
+        return False
+    return row.get("round") == 0 and row.get("decision") == "SEED"
+
+
+# Exit zero means the state machine may activate the task; details stay in progress.
+_EXIT_FOR = {
+    EvalOutcome.OK: 0,
+    EvalOutcome.KERNEL_FAIL: 0,
+    EvalOutcome.INFRA_FAIL: 4,
+}
+
+
+def baseline_exit_code(task_dir: str) -> int:
+    """Map the COMMITTED baseline_outcome (in state.json's progress
+    bundle) back to engine/baseline.py's exit-code convention.
+
+    Used by the ALREADY_DONE retry path: precheck_baseline skipped
+    run_eval, so the exit code can't come from this round's outcome.
+    It has to come from the prior committed outcome — otherwise a
+    retry after a crashed INFRA_FAIL baseline would silently return
+    0, and scaffold.py / batch / supervisors that key off rc==4 to
+    refuse activation would treat the task as healthy.
+
+    Returns 0 when progress isn't readable or outcome is missing
+    (defensive — ALREADY_DONE shouldn't ever reach here without
+    progress_initialized, but the consequence of a None is "treat as
+    activatable" which matches the silent default that existed
+    before this helper).
+    """
+    progress = load_progress(task_dir)
+    if progress is None:
+        return 0
+    outcome_str = progress.get("baseline_outcome")
+    if not outcome_str:
+        return 0
+    try:
+        outcome = EvalOutcome(outcome_str)
+    except ValueError:
+        return 0
+    return _EXIT_FOR.get(outcome, 0)
+
+
+def run_baseline_init(task_dir: str, eval_data: dict) -> int:
+    with state_transaction(task_dir):
+        return _run_baseline_init(task_dir, eval_data)
+
+
+def _eval_outcome(eval_data: dict) -> EvalOutcome:
+    try:
+        return EvalOutcome(eval_data.get("outcome"))
+    except (TypeError, ValueError):
+        return EvalOutcome.INFRA_FAIL
+
+
+def _park_unavailable_baseline(task_dir: str, eval_data: dict,
+                               outcome: EvalOutcome,
+                               metrics: dict) -> Optional[int]:
+    """Keep the task at BASELINE when no actionable reference exists."""
+    if (outcome != EvalOutcome.INFRA_FAIL
+            and valid_metric(metrics.get("ref_latency_us"))):
+        return None
+    state = load_state(task_dir) or {}
+    state["phase"] = BASELINE
+    save_state(task_dir, state)
+    clear_intent(task_dir)
+    reason = (eval_data.get("error") or
+              ("infrastructure failure" if outcome == EvalOutcome.INFRA_FAIL
+               else "ref_latency_us missing"))
+    emit(f"[baseline] baseline unavailable ({reason}); baseline pending; "
+          f"fix env/ref/worker and re-run.", file=sys.stderr)
+    return _EXIT_FOR[EvalOutcome.INFRA_FAIL]
+
+
+def _reject_incomplete_success(task_dir: str, config: Any,
+                               reduction: BaselineReduction) -> Optional[int]:
+    """Reject an OK evaluation that omitted its primary metric."""
+    if reduction.outcome != EvalOutcome.OK or reduction.seed_metric is not None:
+        return None
+    state = load_state(task_dir) or {}
+    state["phase"] = BASELINE
+    save_state(task_dir, state)
+    clear_intent(task_dir)
+    emit(f"[baseline] ERROR: outcome=OK but no valid "
+          f"{config.primary_metric}; baseline not committed, retrying "
+          f"will re-evaluate.", file=sys.stderr)
+    return 2
+
+
+def _report_anchor_reduction(reduction: BaselineReduction) -> None:
+    if reduction.dropped_seed_metric is not None:
+        emit(f"[baseline] dropping wrong-output seed timing "
+              f"(latency_us={reduction.dropped_seed_metric:.1f}); "
+              f"kernel failed correctness so its measurement cannot "
+              f"anchor best_metric.")
+    if reduction.anchor.message:
+        emit(f"[baseline] {reduction.anchor.message}")
+
+
+def _commit_baseline_event(task_dir: str, reduction: BaselineReduction,
+                           head_commit: str) -> None:
+    """Journal, append, and atomically commit one baseline event."""
+    state_patch = {
+        **reduction.progress.to_dict(),
+        "phase": PLAN,
+        "expected_history_round": 0,
+        "progress_initialized": True,
+    }
+    write_intent(task_dir, {
+        "kind": "baseline",
+        "round": 0,
+        "state_patch": state_patch,
+    })
+    if not _existing_seed_row(task_dir):
+        append_history(task_dir, {
+            "round": 0,
+            "description": "seed kernel initial eval",
+            "decision": "SEED",
+            "metrics": reduction.metrics,
+            "outcome": reduction.outcome.value,
+            "correctness": reduction.correctness,
+            "commit": head_commit,
+        })
+    state = load_state(task_dir) or {}
+    state.update(state_patch)
+    save_state(task_dir, state)
+    clear_intent(task_dir)
+
+
+def _baseline_result(config: Any, eval_data: dict,
+                     reduction: BaselineReduction, head_commit: str) -> int:
+    if reduction.outcome != EvalOutcome.OK:
+        emit(f"[baseline] {reduction.outcome.value}: "
+              f"{eval_data.get('error') or '(no detail)'}")
+        return _EXIT_FOR[reduction.outcome]
+    emit(f"[baseline] Initialized: task={config.name}, "
+          f"seed_{config.primary_metric}={reduction.seed_metric}, "
+          f"baseline({reduction.anchor.source})={reduction.anchor.metric}, "
+          f"commit={head_commit}")
+    return 0
+
+
+def _run_baseline_init(task_dir: str, eval_data: dict) -> int:
+    """Library entry point. engine/baseline.py calls this after
+    run_eval finishes; the return value becomes that script's exit
+    code. Side effects (progress, history, phase) are durable on disk
+    before this returns.
+    """
+    config = load_task_config(task_dir)
+    if config is None:
+        emit("[baseline] ERROR: task.yaml not found", file=sys.stderr)
+        return 1
+
+    metrics = eval_data.get("metrics") or {}
+    outcome = _eval_outcome(eval_data)
+    unavailable = _park_unavailable_baseline(
+        task_dir, eval_data, outcome, metrics)
+    if unavailable is not None:
+        return unavailable
+
+    existing = load_progress(task_dir) or Progress()
+    head_commit = current_head_short(task_dir) or "unknown"
+    reduction = reduce_baseline_init(
+        existing, config, eval_data, best_commit=head_commit)
+
+    incomplete = _reject_incomplete_success(task_dir, config, reduction)
+    if incomplete is not None:
+        return incomplete
+    _report_anchor_reduction(reduction)
+    _commit_baseline_event(task_dir, reduction, head_commit)
+    return _baseline_result(config, eval_data, reduction, head_commit)

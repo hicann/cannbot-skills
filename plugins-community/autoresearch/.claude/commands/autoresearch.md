@@ -1,0 +1,138 @@
+# AutoResearch — Init / Resume / Run Optimization Loop
+
+Single entry point: initialize a new task, resume an existing one, or kick
+off the optimization. Hooks drive every transition after activation —
+follow the latest `[AR Phase: ...]` message and never stop between phases.
+
+## Arguments
+
+`$ARGUMENTS` — one of:
+
+- **`--resume`** or **`--resume <task_dir>`** — continue the most recent task
+  (or the specified one).
+- **Task dir** — resume that specific task: `ar_tasks/my_task_123456_abc`.
+- **Init flags** — new task from a ref + seed kernel:
+  ```
+  --ref <file> --kernel <file> --op-name <name>
+  --devices <N[,M,...]>
+  [--max-rounds <N>] [--eval-timeout <sec>]
+  [--no-code-checker]
+  [--worker-url host:port[,host:port,...]]
+  ```
+  Both `--ref` and `--kernel` are required. The meaning of `--kernel` is
+  selected by `config.yaml: defaults.dsl`: single-file DSLs pass a seed
+  `.py` file; directory-backed DSLs such as `ascendc` and `ascendc_catlass`
+  pass the project directory (`ascendc_op/` or `catlass_op/`) and use the
+  sibling `kernel.py` wrapper as the Python entry.
+  `--devices` selects the local device id(s) for eval; ``arch`` is
+  auto-derived from the picked Ascend card via ``npu-smi``.
+
+  `--worker-url` routes eval to a remote HTTP worker. The worker must
+  already be running and reachable at that URL when eval starts. If it
+  isn't, stop with an actionable error — do NOT try to start, restart,
+  or repair the worker from inside the agent loop. Worker lifecycle is
+  the operator's concern, not yours.
+
+  Convention for single-file DSLs: source files live in
+  `workspace/<op_name>_ref.py` and `workspace/<op_name>_kernel.py`.
+  Directory-backed DSLs use a per-op folder containing `reference.py`,
+  `kernel.py`, and the DSL project directory.
+
+`--output-dir` defaults to `ar_tasks`.
+
+### Launch flow
+
+| flags | initial phase |
+|-------|---------------|
+| `--ref X.py --kernel Y.py` | `BASELINE` runs first; OK / KERNEL_FAIL (ref measured) → `PLAN`; INFRA_FAIL / no valid ref → task parks at `BASELINE` with no committed progress, fix env/ref and re-run |
+| `--ref X.py --kernel <dsl_project_dir>/` (directory-backed DSL pinned in `config.yaml`) | Same flow; scaffold copies the project folder and uses the sibling `kernel.py` as the wrapper seed |
+
+## Step 1 — Parse `$ARGUMENTS`
+
+```bash
+python scripts/engine/parse_args.py $ARGUMENTS
+```
+
+Returns a single-line JSON dispatch record:
+
+```json
+{
+  "mode": "scaffold|resume|ask",
+  "command": "python ... (verbatim, ready to exec)" or null,
+  "values": {ref, kernel, op_name, devices, max_rounds, ...},
+  "missing": [...]
+}
+```
+
+**`values` is the single source of truth for every flag.** Do not modify,
+do not pull defaults from elsewhere, do not substitute. If a value is
+missing, dispatch via `mode: "ask"`.
+
+## Step 2 — Dispatch by mode
+
+- **`ask`** — show `missing` to the user; re-invoke `/autoresearch` with
+  the complete flag set. Don't guess.
+- **`resume`** / **`scaffold`** — run `command` verbatim, then read the
+  resolved task_dir from the **last line of stdout**, which differs by mode:
+  - **scaffold** prints a JSON record `{"task_dir": "...", "status":
+    "ok"|"error", ...}` — use its `task_dir` field, and stop if `status` is
+    `"error"`.
+  - **resume** prints the bare task_dir path.
+
+  Non-zero exit → stop and report.
+
+Scaffold's `--run-baseline` runs the seed eval at scaffold time. The
+outcome decides the next activation's starting phase (all written to
+`state.json`, single source of truth):
+
+- **OK / KERNEL_FAIL** (ref baseline measured) → phase = `PLAN`; the
+  next activation drops into PLAN. KERNEL_FAIL means the first plan
+  items must rewrite the broken seed.
+- **INFRA_FAIL / no valid ref baseline** → phase stays at `BASELINE`
+  with no committed progress (baseline pending). Fix env / ref /
+  worker, then `/autoresearch --resume <task_dir>` re-runs baseline.
+
+## Step 3 — Activate
+
+```bash
+export AR_TASK_DIR="<task_dir from step 2>"
+```
+
+The activation hook prints `[AR Phase: ...]` guidance on stderr. Follow it.
+
+## Step 4 — Loop
+
+Follow the phase guidance. Never stop between phases.
+
+- **BASELINE** — `python scripts/engine/baseline.py "$AR_TASK_DIR"`.
+  Skipped automatically if scaffold already ran it.
+- **PLAN / REPLAN** — two-step plan creation:
+  1. Write `<items>...</items>` XML to `$AR_TASK_DIR/.ar_state/plan_items.xml`.
+  2. Run `python scripts/engine/create_plan.py "$AR_TASK_DIR"` (no
+     second argument — the script reads the canonical path).
+  See the hook guidance for the XML schema. When the hook emits a
+  plan-mirror payload, mirror it verbatim if you have a todo tool;
+  otherwise ignore it (plan.md is authoritative).
+- **DIAGNOSE** — follow the hook's `[AR Phase: DIAGNOSE]` message
+  (verbatim subagent prompt + artifact path + retry semantics). The full
+  contract — required sections, marker, R\<n\> citations, 5-attempt cap,
+  manual-planning fallback — lives in [AGENTS.md](../../AGENTS.md)
+  invariant #10 and the runtime hook guidance; no need to reproduce it
+  here.
+- **EDIT** — Edit only the files listed in task.yaml `editable_files`
+  (multiple Edit calls OK; directory-backed DSLs may expose several files).
+  When done: `python scripts/engine/pipeline.py "$AR_TASK_DIR"`.
+  For Ascend profiling evidence, append `--trace`; the round keeps
+  `kernel_details.csv`, `op_statistic.csv`, and `trace_view.json`.
+  Later PLAN / REPLAN / DIAGNOSE guidance automatically points to them;
+  read the CSVs first and the timeline JSON only when needed.
+- **FINISH** — `.ar_state/report.md` is auto-generated by `pipeline.py`. Summarize, stop. Do not write any files.
+
+## Rules
+
+- Keep going between phases.
+- Hooks block wrong actions and tell you what to do next — read their
+  messages.
+- Never hand-edit `plan.md` or `.ar_state/state.json`; always go through
+  the scripts.
+- Never invent flag values not produced by `parse_args.py`.

@@ -626,6 +626,24 @@
       "dependencies": [
         "ops-perf-optimize-skills"
       ]
+    },
+    {
+      "name": "autoresearch",
+      "source": "./plugins-community/autoresearch",
+      "description": "AutoResearch 算子自动优化工作流，支持 Triton Ascend、AscendC、AscendC CATLASS、KernelVerifier 和远端 Ascend worker。",
+      "version": "1.0.1",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "autoresearch",
+        "operator",
+        "optimization",
+        "worker",
+        "kernel-verifier"
+      ],
+      "category": "development",
+      "dependencies": []
     }
   ]
 }

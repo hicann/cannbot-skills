@@ -1,0 +1,160 @@
+
+import importlib
+import os
+import sys
+
+import torch
+
+sys.path.append(os.getcwd())
+
+def _deep_to(obj, device):
+    """Recursively move tensors to device, handling nested list/tuple."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    elif isinstance(obj, list):
+        return [_deep_to(x, device) for x in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_deep_to(x, device) for x in obj)
+    return obj
+
+def _deep_clone(obj):
+    """Recursively clone tensors, handling nested list/tuple."""
+    if isinstance(obj, torch.Tensor):
+        return obj.clone()
+    elif isinstance(obj, list):
+        return [_deep_clone(x) for x in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_deep_clone(x) for x in obj)
+    return obj
+
+def _deep_cpu(obj):
+    """Recursively move tensors to CPU, handling nested list/tuple."""
+    if isinstance(obj, torch.Tensor):
+        return obj.cpu()
+    elif isinstance(obj, list):
+        return [_deep_cpu(x) for x in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_deep_cpu(x) for x in obj)
+    return obj
+
+def generate_reference():
+    print("Starting reference data generation...")
+    save_inputs = {{ save_inputs }}
+    try:
+        try:
+            from reference import Model, get_inputs, get_init_inputs
+        except ImportError as e:
+            print(f"Import failed: {e}")
+            return False
+
+        print("Successfully imported Model and helper functions.")
+
+        backend = "{{ backend }}"
+        device_id = {{ device_id }}
+        if backend == "ascend":
+            os.environ["DEVICE_ID"] = str(device_id)
+            try:
+                importlib.import_module("torch_npu")
+            except ImportError as e:
+                print(f"torch_npu import failed: {e}")
+                return False
+            if not hasattr(torch, "npu") or not torch.npu.is_available():
+                print("Ascend backend requested but torch.npu is not available")
+                return False
+            device = "npu"
+            torch.npu.set_device(device_id)
+        else:
+            print(f"Unsupported backend for reference generation: {backend}")
+            return False
+
+        print(f"Using device: {device}")
+
+        torch.manual_seed(0)
+        print("[INFO] Random seed: 0")
+
+        try:
+            init_inputs = get_init_inputs()
+            model = Model(*init_inputs)
+            if device != "cpu":
+                model = model.to(device)
+            model.eval()
+        except Exception as e:
+            print(f"Model instantiation failed: {e}")
+            return False
+
+        if device != "cpu":
+            torch.set_default_device(device)
+
+        torch.manual_seed(0)
+        try:
+            inputs = get_inputs()
+            if device != "cpu":
+                inputs = _deep_to(inputs, device)
+        except Exception as e:
+            print(f"get_inputs failed: {e}")
+            return False
+        finally:
+            if device != "cpu":
+                torch.set_default_device("cpu")
+
+        inputs_snapshot = None
+        if save_inputs:
+            inputs_snapshot = _deep_clone(inputs)
+
+        try:
+            with torch.no_grad():
+                outputs = model(*inputs)
+            print("Forward pass successful.")
+        except Exception as e:
+            print(f"Forward pass failed: {e}")
+            return False
+
+        if not isinstance(outputs, (list, tuple)):
+            outputs = [outputs]
+
+        outputs_cpu = _deep_cpu(outputs)
+
+        ref_data = {
+            'op_name': '{{ op_name }}',
+            'seed': 0,
+            'outputs': outputs_cpu,
+            'output_shapes': [x.shape if isinstance(x, torch.Tensor) else None for x in outputs_cpu],
+            'output_dtypes': [str(x.dtype) if isinstance(x, torch.Tensor) else None for x in outputs_cpu],
+        }
+
+        if save_inputs:
+            inputs_cpu = _deep_cpu(inputs_snapshot)
+            ref_data['save_inputs'] = True
+            ref_data['inputs'] = inputs_cpu
+            ref_data['input_shapes'] = [x.shape if isinstance(x, torch.Tensor) else None for x in inputs_cpu]
+            ref_data['input_dtypes'] = [str(x.dtype) if isinstance(x, torch.Tensor) else None for x in inputs_cpu]
+            ref_data['init_inputs'] = init_inputs
+            print(
+                f"[INFO] save_inputs=True, saving inputs ({len(inputs_cpu)}) "
+                f"and init_inputs ({len(init_inputs)})"
+            )
+
+        ref_file = os.path.join(os.getcwd(), "{{ op_name }}_reference.pt")
+        torch.save(ref_data, ref_file)
+        print(f"[INFO] Reference data saved to: {ref_file}")
+        print(f"[INFO] Output count: {len(outputs_cpu)}")
+        for i, out in enumerate(outputs_cpu):
+            if isinstance(out, torch.Tensor):
+                print(f"  Output[{i}]: shape={out.shape}, dtype={out.dtype}")
+
+        return True
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    success = generate_reference()
+    if success:
+        print("REFERENCE_GENERATION_SUCCESS")
+        sys.exit(0)
+    else:
+        print("REFERENCE_GENERATION_FAILED")
+        sys.exit(1)

@@ -1,0 +1,13 @@
+        import time
+        def base_benchmark_fn():
+            return framework_model(*inputs)
+
+        for _ in range({{ warmup }}):
+            base_benchmark_fn()
+            {{ sync_code }}
+        start_time = time.perf_counter()
+        for _ in range({{ runs }}):
+            base_benchmark_fn()
+            {{ sync_code }}
+        execution_time_ms = (time.perf_counter() - start_time) * 1000 / max({{ runs }}, 1)
+        method = "{{ backend }}_loop_timer"

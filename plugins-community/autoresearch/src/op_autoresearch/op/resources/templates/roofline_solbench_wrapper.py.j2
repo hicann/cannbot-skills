@@ -1,0 +1,201 @@
+# Copyright 2025-2026 Huawei Technologies Co., Ltd
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Generated SOLBench reference wrapper for one workload."""
+
+import importlib.util
+import json
+import math
+from pathlib import Path
+
+import torch
+
+_REFERENCE_PATH = Path({{ reference_path_repr }})
+_WORKLOAD_PATH = Path({{ workload_path_repr }})
+_WORKLOAD_IDX = {{ workload_idx }}
+_INPUT_ORDER = {{ input_order_repr }}
+_INPUT_ENTRYPOINT = {{ entrypoint_repr }}
+_AXES_SPEC = {{ axes_spec_repr }}
+_INPUTS_SPEC = {{ inputs_spec_repr }}
+
+
+def _load_reference():
+    spec = importlib.util.spec_from_file_location(
+        "solbench_reference_module",
+        _REFERENCE_PATH,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load reference module: {_REFERENCE_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_reference = _load_reference()
+
+
+def _resolve_axes(workload_axes):
+    resolved = dict(workload_axes)
+    pending = dict(_AXES_SPEC)
+    for _ in range(len(pending) + 4):
+        changed = False
+        for name, spec in list(pending.items()):
+            axis_type = spec.get("type")
+            if axis_type == "var":
+                pending.pop(name, None)
+                continue
+            if axis_type == "const":
+                resolved[name] = spec.get("value")
+                pending.pop(name, None)
+                changed = True
+                continue
+            if axis_type == "expr":
+                expression = spec.get("expression")
+                try:
+                    resolved[name] = eval(
+                        expression,
+                        {"__builtins__": {}, "math": math},
+                        resolved,
+                    )
+                except Exception:
+                    continue
+                pending.pop(name, None)
+                changed = True
+        if not pending or not changed:
+            break
+    return resolved
+
+
+def _map_dtype(dtype_name):
+    name = str(dtype_name).lower()
+    mapping = {
+        "float32": torch.float32,
+        "float": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "half": torch.float16,
+        "float64": torch.float64,
+        "double": torch.float64,
+        "int64": torch.int64,
+        "long": torch.int64,
+        "int32": torch.int32,
+        "int": torch.int32,
+        "int16": torch.int16,
+        "int8": torch.int8,
+        "uint8": torch.uint8,
+        "bool": torch.bool,
+    }
+    return mapping.get(name, torch.float32)
+
+
+def _resolve_shape(shape_spec, axes):
+    if shape_spec is None:
+        return None
+    dimensions = []
+    for dimension in shape_spec:
+        if isinstance(dimension, int):
+            dimensions.append(dimension)
+        elif isinstance(dimension, str):
+            if dimension in axes:
+                dimensions.append(int(axes[dimension]))
+            else:
+                dimensions.append(
+                    int(
+                        eval(
+                            dimension,
+                            {"__builtins__": {}, "math": math},
+                            axes,
+                        )
+                    )
+                )
+        else:
+            dimensions.append(int(dimension))
+    return dimensions
+
+
+def _make_scalar(spec):
+    dtype_name = str(spec.get("dtype", "float32")).lower()
+    description = str(spec.get("description", "")).lower()
+    if "eps" in description or "epsilon" in description:
+        return 1e-5
+    if "dropout" in description:
+        return 0.1
+    if "bool" in dtype_name:
+        return False
+    if dtype_name.startswith("int") or dtype_name in {"long", "uint8"}:
+        return 1
+    return 1.0
+
+
+def _make_tensor(shape, dtype, device):
+    shape_tuple = tuple(shape)
+    if dtype == torch.bool:
+        if not shape_tuple:
+            return torch.rand((), device=device) > 0.5
+        return torch.rand(*shape_tuple, device=device) > 0.5
+    if dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
+        high = max(2, min(1024, shape_tuple[-1] if shape_tuple else 16))
+        if not shape_tuple:
+            return torch.randint(0, high, (), dtype=dtype, device=device)
+        return torch.randint(0, high, shape_tuple, dtype=dtype, device=device)
+    if not shape_tuple:
+        return torch.randn((), dtype=dtype, device=device)
+    return torch.randn(*shape_tuple, dtype=dtype, device=device)
+
+
+def _build_inputs_from_definition(axes, device):
+    built = {}
+    for name in _INPUT_ORDER:
+        spec = _INPUTS_SPEC[name]
+        shape = _resolve_shape(spec.get("shape"), axes)
+        dtype = _map_dtype(spec.get("dtype", "float32"))
+        if shape is None:
+            built[name] = _make_scalar(spec)
+        else:
+            built[name] = _make_tensor(shape, dtype, device)
+    return built
+
+
+class ReferenceModel(torch.nn.Module):
+    """Expose the SOL reference as a torch module for SOLAR."""
+
+    def forward(self, *args):
+        return _reference.run(*args)
+
+
+def get_inputs():
+    with _WORKLOAD_PATH.open(encoding="utf-8") as workload_file:
+        for index, line in enumerate(workload_file):
+            if index == _WORKLOAD_IDX:
+                workload = json.loads(line)
+                break
+        else:
+            raise IndexError(
+                f"workload index {_WORKLOAD_IDX} out of range for {_WORKLOAD_PATH}"
+            )
+    axes = _resolve_axes(workload.get("axes") or {})
+    reference_get_inputs = getattr(_reference, _INPUT_ENTRYPOINT, None)
+    if reference_get_inputs is not None:
+        generated = reference_get_inputs(axes, torch.device("cpu"))
+    else:
+        generated = _build_inputs_from_definition(axes, torch.device("cpu"))
+    if isinstance(generated, dict):
+        return [generated[name] for name in _INPUT_ORDER]
+    return generated
+
+
+def launch_reference_implementation(model, inputs):
+    if isinstance(inputs, (tuple, list)):
+        return model(*inputs)
+    return model(inputs)

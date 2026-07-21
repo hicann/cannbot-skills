@@ -1,0 +1,32 @@
+{{ set_framework_code }}        import time
+        try:
+            from op_autoresearch.op.verifier.profiler import profiler_npu
+        except ImportError:
+            profiler_npu = None
+
+        def base_benchmark_fn():
+            return framework_model(*inputs)
+
+        if profiler_npu is not None:
+            execution_time_us = profiler_npu(
+                base_benchmark_fn,
+                warmup={{ warmup }},
+                active={{ runs }},
+                prof_dir_name="prof_base_output",
+                keep_res=False,
+                suppress_warnings=True,
+                clear_l2_cache={{ clear_l2_cache }},
+                dsl="{{ profiler_dsl }}"{{ framework_arg }}
+            )
+            execution_time_ms = execution_time_us / 1000
+            method = "profiler_npu"
+        else:
+            for _ in range({{ warmup }}):
+                base_benchmark_fn()
+                {{ sync_code }}
+            start_time = time.perf_counter()
+            for _ in range({{ runs }}):
+                base_benchmark_fn()
+                {{ sync_code }}
+            execution_time_ms = (time.perf_counter() - start_time) * 1000 / max({{ runs }}, 1)
+            method = "device_loop_timer"
