@@ -9,6 +9,7 @@ skills:
   - triton-op-coding
   - triton-op-verifier
   - triton-latency-optimizer
+  - triton-simulator-optimizer
 permission:
   edit: allow
   bash: allow
@@ -450,7 +451,11 @@ ir_iteration = 0
 ir_max_iterations = 20                              # IR 专属迭代上限
 last_optimization_point = None                      # 上一轮命中的优化点编号
 ir_has_more_suggestions = true                      # latency-optimizer 返回：IR 分析是否还能给出新建议
-current_iter_dir = ""                               # 本轮产物目录（普通轮 opt_iter_{n} / IR 轮 opt_iter_{n}_ir_{k}）
+current_iter_dir = ""                               # 本轮产物目录（普通轮 opt_iter_{n} / IR 轮 opt_iter_{n}_ir_{k} / simulator 轮 opt_iter_{n}）
+
+# simulator 采集驱动相关变量
+# latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）且仍未达 target 时，转入 simulator 采集优化。
+simulator_attempted = false                         # triton-simulator-optimizer 是否已被调用（4.6 退出前置门检查项）
 
 ```
 
@@ -519,8 +524,18 @@ while opt_iteration < max_opt_iterations:
       - **不终止**，强制走 IR 子流程（优化点 25），重新提取 `last_pass.mlir` 并分析
       - `ir_iteration++`，`last_optimization_point = 25`
       - 本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}_ir_{ir_iteration}`（避免与普通轮目录冲突）
-    - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`）→ 终止优化，进入 **4.6 终局判定**
-  - 上述都不满足 → 终止优化，进入 **4.6 终局判定**
+    - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`，即 latency-optimizer 优化已耗尽）：
+      - 若 `optimized_speedup >= target_speedup`（target_reached）→ 可进入 **4.6 终局判定**
+      - 若 `optimized_speedup < target_speedup` → **强制转入下方 simulator 采集驱动分支**，禁止直接 4.6
+
+- **simulator 采集驱动分支（latency-optimizer 优化耗尽且 `optimized_speedup < target_speedup` 时触发）**：
+  - 调用 `triton-simulator-optimizer` skill（独立 skill，**只采集 + 诊断**：msprof 采集 → 解析 pipe 占比 → 产出诊断报告）。skill 不自带优化技术、不产出代码——优化技术 owner 唯一是 `triton-latency-optimizer`。
+  - ⚠️ 在拿到 simulator 采集证据（`MMAD` 占比 > 50%）前，**严禁**下"dot 是硬件瓶颈/不可优化"结论
+  - 诊断报告内容：瓶颈类型 + 热源码行 + **修复方向 = `triton-latency-optimizer` 优化点编号**（Cube 空等→19/21、标量降级→6/5/17、访存→7/21/10、barrier→19）；`MMAD` > 50% 时报告"无对应优化点（真·硬件极限）"。
+  - `simulator_attempted = true`（进入本分支即置位，无论诊断是否给出修复方向）。
+  - **修复落地（交 latency-optimizer，不在 simulator-optimizer 内改代码）**：编排器带诊断报告回到 4.1 调 `triton-latency-optimizer`，将诊断指向的优化点作为**强制命中点**传入（覆盖其静态命中判断），latency-optimizer 据此加载对应优化点参考文档产出代码。
+  - latency-optimizer 产出的代码走 4.2/4.3 验证；本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`（`opt_iteration` 正常自增）。有提升则 `opt_iteration++` 回 4.1；无提升则由 simulator-optimizer 重采确认瓶颈是否转移。
+  - 诊断报告"无对应优化点"（`MMAD` 实测 > 50% 且增大 tile / bf16 化均不可行）→ 进入 **4.6 终局判定**。
 
 **Checklist 检查（强制）**：
 
@@ -537,7 +552,7 @@ while opt_iteration < max_opt_iterations:
 
 **产物目录**：`{工作目录}/output/{current_iter_dir}/verify/`
 
-> `current_iter_dir` 由 4.1 决定：普通轮为 `opt_iter_{opt_iteration}`，IR 轮为 `opt_iter_{opt_iteration}_ir_{ir_iteration}`。下文 4.2/4.3/4.4/4.5 中所有 `opt_iter_{opt_iteration}` 路径均以 `{current_iter_dir}` 为准。
+> `current_iter_dir` 由 4.1 决定：普通轮 / simulator 轮为 `opt_iter_{opt_iteration}`，IR 轮为 `opt_iter_{opt_iteration}_ir_{ir_iteration}`。下文 4.2/4.3/4.4/4.5 中所有 `opt_iter_{opt_iteration}` 路径均以 `{current_iter_dir}` 为准。
 
 - `{op_name}_torch.py`（PyTorch 参考）
 - `{op_name}_triton_baseline.py`（Phase 3 基线，保留以便复盘）
@@ -630,38 +645,44 @@ while opt_iteration < max_opt_iterations:
   → 优化成功（几何平均加速比有提升）
   → 更新 best_code / best_speedup
   → improvement_made = true
-  → 普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
+  → 普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
   → continue
 
   否则（含相等）:
   → 视为无提升
-  → 普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
+  → 普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
   → **IR 轮不因 improvement_made == false break**：仍 continue，让下一轮 4.1 重新评估 IR 是否还能继续
-  → 普通轮：continue
+  → 普通轮 / simulator 轮：continue
+
+  ⚠️ `continue` 一律回到 4.1；退出仅由 4.6 退出前置门判定，`improvement_made` 不是退出触发器。
 
   ── 4.5 分析决策 (验证失败时) ─────────────────────
-  A 类 (优化引入逻辑错误) → 回退，调整策略，普通轮 opt_iteration++（IR 轮 ir_iteration 已在 4.1 自增），continue
+  A 类 (优化引入逻辑错误) → 回退，调整策略，普通轮 / simulator 轮 opt_iteration++（IR 轮 ir_iteration 已在 4.1 自增），continue
   B 类 (环境错误) → 终止
   C 类 (无法继续) → 终止
 
-  普通轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增
+  普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增
   continue
 
   ── 4.6 终局判定 ──────────────────────────────────
-  退出判定（仅以下任一条件成立才 break）：
+  ⚠️ **退出前置门（强制，不满足禁止 break）**：4.6 仅在以下任一条件满足时可进入：
+  - (a) `opt_iteration >= max_opt_iterations`（全局兜底）；**或**
+  - (b) latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）**且** 满足以下之一：
+    - `target_reached == true`（`optimized_speedup >= target_speedup`）；**或**
+    - `simulator_attempted == true` 且 `triton-simulator-optimizer` 已确认无更多 simulator 采集驱动改进
+      （`MMAD` 实测 > 50% 且增大 tile / bf16 化均不可行）。
 
-  - `opt_iteration >= max_opt_iterations`（全局兜底）
-  - 普通优化点耗尽 且 `ir_has_more_suggestions == false`（IR 分析明确无新建议）
-  - 普通优化点耗尽 且 `ir_iteration >= ir_max_iterations`（IR 上限达到）
+  **任何其他情况——尤其 `optimized_speedup < target_speedup` 且 `simulator_attempted == false`——
+  禁止进 4.6**：必须回到 **4.1**；若 latency-optimizer 已耗尽，强制转入 4.1 的 **simulator 采集驱动分支**
+  （不得直接 4.6）。`improvement_made == true` 不构成退出条件。
 
-  否则（IR 仍可继续）→ continue，回到 4.1 强制走 IR 多轮迭代分支
+  通过退出前置门后，按 `improvement_made` 选择最终代码：
 
-  break 后的最终判定：
   improvement_made == true:
-  → 优化成功，进入 Phase 5
+  → 优化成功，break，进入 Phase 5（最终代码 = optimized_code.py）
 
   improvement_made == false:
-  → 优化失败（做完所有尝试后没有效果），进入 Phase 5
+  → 优化失败（做完所有尝试 + simulator 采集后没有效果），break，进入 Phase 5（最终代码 = Phase 3 基线）
 
 ````
 
@@ -920,7 +941,7 @@ ${pwd}/triton_ascend_output/op_{op_name}_{timestamp}_{rid}/
 │   │   └── log.md
 │   ├── iter_1/                           # Phase 3 第 1 轮（如有）
 │   │   └── ...
-│   ├── opt_iter_0/                       # Phase 4 第 0 轮
+│   ├── opt_iter_0/                       # Phase 4 第 0 轮（普通轮 / simulator 轮）
 │   │   ├── optimized_code.py
 │   │   ├── verify/
 │   │   │   ├── {op_name}_torch.py
@@ -976,9 +997,9 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GPU Kernel 模式    | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级                                                                                                                                                                          |
 | Phase 3 最大迭代   | 5 次，禁止超出                                                                                                                                                                                                                           |
-| Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 triton-latency-optimizer 报告无更多优化点则退出                                                                                                       |
+| Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）则退出指令级循环                                                                                         |
 | Phase 4 成功底线   | 性能不劣化（speedup_vs_baseline ≥ 1.0）                                                                                                                                                                                                  |
-| Phase 4 退出判定   | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；优先级 1 场景持续迭代直到 triton-latency-optimizer 报告无更多优化点才退出                                                                                         |
+| Phase 4 退出判定   | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；latency-optimizer 耗尽且未达 target 时必须先走 simulator 采集分支（`simulator_attempted=true`）方可进 4.6，`optimized_speedup < target` 且 `simulator_attempted == false` 时禁止退出 |
 | Phase 4 基线复用   | 4.2/4.3 的基线侧 verify*result_baseline.json 和 baseline_perf_result.json 必须从 Phase 3 iter*{phase3_last_iter} 复制，禁止对基线代码重跑 verify.py 或 benchmark.py（基线代码与 Phase 3 generated_code.py 完全一致，重复执行只浪费时间） |
 | A 类连续上限       | 同一子类型连续 ≥ 3 次 → 自动终止                                                                                                                                                                                                         |
 | 禁止 PyTorch 退化  | forward() 中禁止 torch._/F._ 计算操作                                                                                                                                                                                                    |

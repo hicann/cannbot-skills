@@ -32,7 +32,7 @@ VERSION="1.0.0"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - all skills bundled with this plugin
-INCLUDED_SKILLS="triton-task-extractor triton-op-designer triton-op-coding triton-op-verifier triton-latency-optimizer triton-precision-debug npu-arch"
+INCLUDED_SKILLS="triton-task-extractor triton-op-designer triton-op-coding triton-op-verifier triton-latency-optimizer triton-precision-debug npu-arch triton-simulator-optimizer"
 
 # Source agent file (used as CLAUDE.md / AGENTS.md source)
 SOURCE_AGENT_FILE="AGENTS.md"
