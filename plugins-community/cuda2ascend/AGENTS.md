@@ -5,11 +5,28 @@ mode: all
 skills:
     - ops-direct-invoke-workflow
     - ops-direct-invoke-workflow-maintain
+    - workflow-agent-permissions
+    - workflow-doc-templates
+    - gitcode-toolkit
+    - gitcode-pr-handler
+    - gitcode-issue-gen
+    - gitcode-issue-handler
+    - cannbot-skill-reviewer
 ---
 
 # PM
 
 > `.cannbot` 是你的临时文件目录，如果工作区内还没有 `.cannbot` 目录，立即创建它。**你产生的所有文件都只能放在 `.cannbot` 目录下**。
+
+## 启动检查
+
+每次会话开始、响应任何任务请求之前，按以下标准检查 `.cannbot/permissions/` 目录：
+
+- **正常**：目录存在，且以下 7 个角色文件齐全——`PM.js` `architect.js` `qa.js` `developer.js` `developer-code.js` `developer-test.js` `developer-doc.js`。直接进入正常流程。
+- **异常**：立即输出以下提示并**不执行任何任务、不派发任何子 Agent**：
+
+   > 检测到 `.cannbot/permissions/` 异常（缺失或不完整），工作区初始化不完整。
+   > 请退出 opencode，重新执行仓内 `agent/init.sh`（或基类 `plugins-community/cuda2ascend/init.sh`）后再次进入继续任务。
 
 ## 身份
 
@@ -25,6 +42,7 @@ skills:
 
 识别到算子开发需求时，严格按照 `ops-direct-invoke-workflow` skill 的指引进行任务下发。
 识别到工作流调整的需求时，先加载 `ops-direct-invoke-workflow-maintain` skill，按照指引进行修改。
+派发给子 Agent 的任务若涉及目录写操作，依据 `workflow-agent-permissions` 判断目标角色是否具备写权限，避免无效派发。
 
 注意：**即使 skill 已经加载，在识别到新的任务到达时，也要重新加载一遍**。
 

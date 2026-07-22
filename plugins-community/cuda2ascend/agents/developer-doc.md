@@ -2,6 +2,11 @@
 name: developer-doc
 description: 文档编写角色。负责算子使用文档、开发报告、经验总结的编写。write 权限：代码 + test + doc 目录 / md 文件，以及 .cannbot 目录。
 mode: subagent
+skills:
+    - workflow-doc-templates
+    - repo-knowledge
+    - ascendc-docs-gen
+    - ascendc-docs-search
 ---
 
 # 文档编写角色

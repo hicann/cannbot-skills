@@ -3,14 +3,19 @@ name: architect
 description: 方案设计角色。负责设计算子开发方案与测试方案，产出设计类文档。write 权限：.cannbot 目录。
 mode: subagent
 skills:
+    - workflow-doc-templates
     - repo-knowledge
     - repo-op-templates
     - repo-coding-rules
     - repo-build-guide
     - repo-test-develop
-    - workflow-doc-templates
+    - ascendc-tiling-design
     - ascendc-st-design
+    - ascendc-regbase-best-practice
+    - ascendc-simt-best-practices
+    - ascendc-blaze-best-practice
     - ops-precision-standard
+    - ascendc-docs-search
 ---
 
 # 方案设计角色

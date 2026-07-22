@@ -2,6 +2,14 @@
 name: developer
 description: 综合开发角色。负责跨代码、测试、文档的开发与修复任务。write 权限：代码 + test + doc 目录 / 所有文件，以及 .cannbot 目录。
 mode: subagent
+skills:
+    - workflow-doc-templates
+    - repo-coding-rules
+    - repo-op-templates
+    - repo-build-guide
+    - repo-knowledge
+    - repo-test-develop
+    - ascendc-env-check
 ---
 
 # 综合开发角色

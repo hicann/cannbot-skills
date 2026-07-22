@@ -15,34 +15,41 @@
 //
 // 违规 → throw（阻断本次调用，原因回传模型）；放行 → 不 throw。
 //
-// ★ 以下 CONFIG 均为可调数据，改这里即可，无需改逻辑。★
+// 配置来源（按角色分开文件）：
+//   <项目根>/.cannbot/permissions/*.js —— 每角色一文件，ESM export default
+//   { categories, exts }。文件名即角色名（去 .js），如 developer-code.js。
+//   由 init.sh Step 4.5 从 skills/workflow-agent-permissions/hooks/
+//   整体复制生成；子仓 override 该 skill 时自动生效。
+//
+// 启动加载一次（v1 不支持热更新）。PM 启动闸口负责检测目录异常并阻断任务派发。
+//
+// ★ 以下 CONFIG 为工作流级约定，不暴露给仓，改这里即可。★
 // ---------------------------------------------------------------------------
 
-import { readFileSync } from "node:fs"
+import { readdirSync } from "node:fs"
 import { join, relative, sep } from "node:path"
+import { pathToFileURL } from "node:url"
 
 // 视为主 Agent(PM) 的 agent 名。实测主会话跑成 opencode 内置 "build"；
 // 设计中主 Agent 是 PM。两者都按 PM 授权，待工作流正式运行确认后收敛。
 const PRIMARY_AGENTS = ["build", "PM", "pm"]
 
-// 未知角色（未在 RULES 命中）策略：allow-warn | allow | deny
+// 未知角色（未在规则表中命中）策略：allow-warn | allow | deny
 const UNKNOWN_ROLE_POLICY = "allow-warn"
 
 // 只对这些写类工具限权，其余工具一律放行
 const GUARDED_TOOLS = ["write", "edit", "patch", "multiedit"]
 
 // 路径分类（相对项目根的前缀）。code 为兜底类别（不匹配下列任何前缀者）。
-// 仓库可用 .cannbot/permissions.json 的 "categories" 覆盖。
 const CATEGORY_PREFIXES = {
   intermediate: [".cannbot/"],
   test: ["test/"],
   doc: ["docs/", "doc/"],
 }
 
-// 角色 → 在 code/test/doc 目录的可写权限。categories 为允许写入的类别集合；
-// exts 为 "*"(任意) 或后缀白名单。（.cannbot 中间产物区所有角色均可写，已在判定中短路放行，不在此列。）
-// 依据设计文档 2.1 权限表；仓库可用 .cannbot/permissions.json 的 "rules" 覆盖。
-const RULES = {
+// 内置默认值（防御性兜底，正常流程不可达）。
+// L8 约束：必须与 skills/workflow-agent-permissions/hooks/*.js 保持同步。
+const DEFAULT_RULES = {
   PM:               { categories: [], exts: "*" },                          // 只写 .cannbot
   architect:        { categories: [], exts: "*" },                          // 只写 .cannbot
   qa:               { categories: [], exts: "*" },                          // 只写 .cannbot
@@ -52,20 +59,34 @@ const RULES = {
   "developer-doc":  { categories: ["code", "test", "doc"], exts: [".md"] }, // 各目录 md 文档
 }
 
-// --- 可选：从 <项目根>/.cannbot/permissions.json 覆盖 categories / rules ---
-function loadOverrides(projectRoot) {
+// 加载 .cannbot/permissions/*.js，按文件名（去 .js）建立角色规则。
+// 目录缺失或为空 → 返回 null，外层回退到内置默认值。
+async function loadConfig(projectRoot) {
+  const dir = join(projectRoot, ".cannbot", "permissions")
+  const agents = {}
+  let files
   try {
-    const raw = readFileSync(join(projectRoot, ".cannbot", "permissions.json"), "utf8")
-    const cfg = JSON.parse(raw)
-    return {
-      categories: cfg.categories && typeof cfg.categories === "object" ? cfg.categories : null,
-      rules: cfg.rules && typeof cfg.rules === "object" ? cfg.rules : null,
-      primaryAgents: Array.isArray(cfg.primaryAgents) ? cfg.primaryAgents : null,
-      unknownPolicy: typeof cfg.unknownRolePolicy === "string" ? cfg.unknownRolePolicy : null,
-    }
+    files = readdirSync(dir)
   } catch {
-    return { categories: null, rules: null, primaryAgents: null, unknownPolicy: null }
+    return null
   }
+  for (const f of files) {
+    if (!f.endsWith(".js")) continue
+    const role = f.slice(0, -3)
+    try {
+      const mod = await import(pathToFileURL(join(dir, f)).href)
+      const data = mod.default ?? mod
+      if (data && typeof data === "object") {
+        agents[role] = {
+          categories: Array.isArray(data.categories) ? data.categories : [],
+          exts: data.exts !== undefined ? data.exts : "*",
+        }
+      }
+    } catch (e) {
+      console.warn(`[permission-guard] load ${f} failed: ${e.message}`)
+    }
+  }
+  return Object.keys(agents).length > 0 ? agents : null
 }
 
 // 相对项目根的 POSIX 风格路径（统一分隔符、去掉 ./ 前缀）
@@ -92,11 +113,13 @@ function extOf(rel) {
 
 export const PermissionGuard = async ({ client, directory, worktree }) => {
   const projectRoot = worktree || directory || process.cwd()
-  const ov = loadOverrides(projectRoot)
-  const categoryPrefixes = ov.categories || CATEGORY_PREFIXES
-  const rules = ov.rules || RULES
-  const primaryAgents = ov.primaryAgents || PRIMARY_AGENTS
-  const unknownPolicy = ov.unknownPolicy || UNKNOWN_ROLE_POLICY
+  const categoryPrefixes = CATEGORY_PREFIXES
+  const primaryAgents = PRIMARY_AGENTS
+  const unknownPolicy = UNKNOWN_ROLE_POLICY
+
+  // 启动加载一次：文件配置按角色合并到内置默认值（v1 不支持热更新）
+  const fileAgents = await loadConfig(projectRoot)
+  const rules = fileAgents ? { ...DEFAULT_RULES, ...fileAgents } : { ...DEFAULT_RULES }
 
   const resolveRole = async (sessionID) => {
     try {
@@ -129,7 +152,7 @@ export const PermissionGuard = async ({ client, directory, worktree }) => {
       const role = normRole(agent)
       const rule = role ? rules[role] : null
 
-      // 未知角色（未命中规则）
+      // 未知角色（未命中规则表）
       if (!rule) {
         if (unknownPolicy === "deny") {
           throw new Error(`[permission-guard] 未知角色 ${agent ?? "?"} 无写权限：${rel}`)
@@ -140,10 +163,16 @@ export const PermissionGuard = async ({ client, directory, worktree }) => {
         return // allow / allow-warn
       }
 
+      const hint = (() => {
+        if (role === "PM")
+          return " 请将此操作派发给对应的子 Agent 执行，PM 只负责调度，不直接执行。"
+        return " 如果无此权限无法完成当前任务，请立即结束任务并向主 Agent 上报。"
+      })()
+
       // 目录类别校验
       if (!rule.categories.includes(cat)) {
         throw new Error(
-          `[permission-guard] 角色 ${role} 无权写入 ${cat} 目录：${rel}（可写类别：${rule.categories.join("/")})`,
+          `[permission-guard] 角色 ${role} 无权写入 ${cat} 目录：${rel}（可写类别：${rule.categories.join("/")}${hint})`,
         )
       }
       // 文件类型校验
@@ -151,7 +180,7 @@ export const PermissionGuard = async ({ client, directory, worktree }) => {
         const e = extOf(rel)
         if (!rule.exts.includes(e)) {
           throw new Error(
-            `[permission-guard] 角色 ${role} 只能写 ${rule.exts.join("/")} 类型，拒绝：${rel}`,
+            `[permission-guard] 角色 ${role} 只能写 ${rule.exts.join("/")} 类型，拒绝：${rel}${hint}`,
           )
         }
       }
@@ -159,4 +188,3 @@ export const PermissionGuard = async ({ client, directory, worktree }) => {
     },
   }
 }
-

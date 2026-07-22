@@ -51,5 +51,20 @@
 | L1 | 新增/删除 skill 后，是否重新运行了 init 使软链接生效？ |
 | L2 | 子仓 override 的逻辑名（skill 目录名 / SKILL.md 的 `name:`）是否与基类一致，能被正确匹配？ |
 | L3 | 是否只改了源文件，没有直接改运行时目录（`.opencode/`）里的软链接目标？ |
-| L4 | 新增 skill 若需被某 agent 使用，是否已加入对应 agent（或 AGENTS.md）的 `skills:` frontmatter，否则 init 收集不到？ |
+| L4 | 新增 skill 若需被某 agent 或 PM 使用，是否已加入对应 `agents/<name>.md` 或 `AGENTS.md` 的 `skills:` frontmatter，否则 init 收集不到？ |
 | L5 | 改动了流程（阶段 / CP / 回退关系）后，插件根 `README.md` 的「开发流程概览」表是否仍与 `ops-direct-invoke-workflow/SKILL.md` 的统一流程表一致（阶段、CP 编号、回退指向）？ |
+| L6 | 改动了 `init.sh` 的 CLI 参数（新增 / 删除 / 重命名 / 语义变更）或 override 展开逻辑后，`example/init.sh` 是否仍然兼容？该文件已分发到各子仓，若不兼容必须发问卷知会用户决策是否迁移 |
+| L7 | 改动 agent 文件后，检查其正文中是否有"用 `xxx` skill"、"加载 `xxx`"、"引用 `xxx`"等 skill 依赖声明——若有，该 skill 是否已全部列入 `skills:` frontmatter？漏掉的 skill 不会被 init 链接，运行时加载会失败 |
+| L8 | 修改 `skills/workflow-agent-permissions/hooks/*.js`（新增/删除角色文件、调整 categories/exts）后，是否同步更新了 hook 内置默认值 `DEFAULT_RULES`？两者互为兜底（skill 文件为真值源、hook 内置为防御兜底），不同步会导致「配置缺失时角色行为与预期不一致」 |
+
+## 六、子仓兼容性（`example/init.sh` 分发契约）
+
+`example/init.sh` 是子类仓的派生构造模板，已**分发到各已接入子仓**（如 `ops-blas/agent/init.sh`），修改后无法自动回写。
+
+| 编号 | 检查项 |
+|------|--------|
+| C1 | 本次改动是否改变了 `init.sh` 的对外 CLI 契约（参数名、参数顺序、参数语义、位置参数数量）？ |
+| C2 | 若改变了 CLI 契约，`example/init.sh` 是否仍能用旧参数正确调用基类 init？ |
+| C3 | 若 `example/init.sh` 不再兼容，是否已**发问卷明确告知用户**：哪些子仓受影响、新旧用法对比、用户是否选择本次迁移？ |
+| C4 | 用户确认「暂不迁移」后，是否在基类保留了对旧参数的兼容（至少一个版本内向后兼容）？ |
+

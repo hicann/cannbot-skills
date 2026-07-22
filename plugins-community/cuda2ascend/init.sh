@@ -257,12 +257,8 @@ Arguments:
   install_path - project 级安装目录 (默认: 当前工作目录)
 
 Options:
-  --override <dir>         - 子仓覆写根目录：等价于同时指定
-                             --override-skills <dir>/skills
-                             --override-agents <dir>/agents
-                             （两个子目录任选其一即可，都缺则报错）
-  --override-skills <dir>  - 用 <dir> 下的 skill 覆盖已链接的同名 skill（基类没有的则新增）
-  --override-agents <dir>  - 用 <dir> 下的 agent 覆盖已链接的同名 agent（基类没有的则新增）
+  --override <dir>         - 子仓覆写根目录：用 <dir>/skills/ 下的 skill 覆盖已链接的同名 skill
+                             （基类没有的则新增；无 skills/ 子目录则报错）
   --repo <name>:<path>     - 使用本地已 clone 的第三方仓（直接链接，不再 clone）
                              可多次指定，如：--repo asc-devkit:... --repo cann-samples:...
                              支持的仓库名：asc-devkit / cann-samples / ops-tensor
@@ -293,8 +289,7 @@ LEVEL="project"
 TOOL="opencode"
 INSTALL_PATH=""
 OVERRIDE_SKILL_DIR=""
-OVERRIDE_AGENT_DIR=""
-OVERRIDE_ROOT=""
+OVERRIDE_DIR=""
 
 # Local path overrides for registered repos, keyed by repo name.
 declare -A REPO_LOCAL
@@ -311,21 +306,14 @@ is_registered_repo() {
 
 POSITIONAL=()
 while [ $# -gt 0 ]; do
-    case "$1" in
+    arg="$1"
+    case "$arg" in
         --help)
             show_help; exit 0 ;;
         --override)
-            OVERRIDE_ROOT="$2"; shift 2; continue ;;
+            OVERRIDE_DIR="$2"; shift 2; continue ;;
         --override=*)
-            OVERRIDE_ROOT="${1#*=}"; shift; continue ;;
-        --override-skills)
-            OVERRIDE_SKILL_DIR="$2"; shift 2; continue ;;
-        --override-skills=*)
-            OVERRIDE_SKILL_DIR="${1#*=}"; shift; continue ;;
-        --override-agents)
-            OVERRIDE_AGENT_DIR="$2"; shift 2; continue ;;
-        --override-agents=*)
-            OVERRIDE_AGENT_DIR="${1#*=}"; shift; continue ;;
+            OVERRIDE_DIR="${1#*=}"; shift; continue ;;
         --repo)
             local_arg="$2"; shift 2
             if [[ "${local_arg}" != *:* ]]; then
@@ -361,9 +349,6 @@ while [ $# -gt 0 ]; do
             LEVEL="$1"; shift; continue ;;
         opencode)
             shift; continue ;;
-        c[l]aude|t[r]ae|c[u]rsor|c[o]pilot|c[o]dearts)
-            err "暂不支持 $1，当前仅支持 opencode"
-            exit 1 ;;
         *)
             POSITIONAL+=("$1"); shift; continue ;;
     esac
@@ -374,33 +359,14 @@ if [ ${#POSITIONAL[@]} -gt 0 ]; then
     INSTALL_PATH="${POSITIONAL[${#POSITIONAL[@]}-1]}"
 fi
 
-# --override <dir> is shorthand for:
-#   --override-skills  <dir>/skills
-#   --override-agents  <dir>/agents
-# Explicit --override-skills / --override-agents takes precedence if given alongside.
-# At least one of skills/ or agents/ must exist.
-if [ -n "${OVERRIDE_ROOT}" ]; then
-    validate_path "${OVERRIDE_ROOT}" "--override"
-    if [ -z "${OVERRIDE_SKILL_DIR}" ] && [ -d "${OVERRIDE_ROOT}/skills" ]; then
-        OVERRIDE_SKILL_DIR="${OVERRIDE_ROOT}/skills"
-    fi
-    if [ -z "${OVERRIDE_AGENT_DIR}" ] && [ -d "${OVERRIDE_ROOT}/agents" ]; then
-        OVERRIDE_AGENT_DIR="${OVERRIDE_ROOT}/agents"
-    fi
-    if [ -z "${OVERRIDE_SKILL_DIR}" ] && [ -z "${OVERRIDE_AGENT_DIR}" ]; then
-        err "--override path has neither skills/ nor agents/ subdirectory: ${OVERRIDE_ROOT}"
+# Normalize & validate override dir (absolute path for stable symlinks)
+if [ -n "${OVERRIDE_DIR}" ]; then
+    validate_path "${OVERRIDE_DIR}" "--override"
+    if [ ! -d "${OVERRIDE_DIR}/skills" ]; then
+        err "--override path has no skills/ subdirectory: ${OVERRIDE_DIR}"
         exit 1
     fi
-fi
-
-# Normalize & validate override dirs (absolute path for stable symlinks)
-if [ -n "${OVERRIDE_SKILL_DIR}" ]; then
-    validate_path "${OVERRIDE_SKILL_DIR}" "--override-skills"
-    OVERRIDE_SKILL_DIR="$(cd "${OVERRIDE_SKILL_DIR}" && pwd)"
-fi
-if [ -n "${OVERRIDE_AGENT_DIR}" ]; then
-    validate_path "${OVERRIDE_AGENT_DIR}" "--override-agents"
-    OVERRIDE_AGENT_DIR="$(cd "${OVERRIDE_AGENT_DIR}" && pwd)"
+    OVERRIDE_SKILL_DIR="$(cd "${OVERRIDE_DIR}/skills" && pwd)"
 fi
 
 # ============================================================
@@ -568,32 +534,6 @@ for f in "${AGENT_FILES[@]}"; do
     agent_count=$((agent_count + 1))
 done
 
-# Override pass: replace/add domain agents from --override-agents dir (subclass repos).
-# Runs right after the base agents are linked, so overriding agents win by same name.
-if [ -n "${OVERRIDE_AGENT_DIR}" ]; then
-    agent_override_replaced=0
-    agent_override_added=0
-    for f in "${OVERRIDE_AGENT_DIR}"/*.md; do
-        [ -f "${f}" ] || continue
-        link_name="$(basename "${f}")"
-        target="${AGENTS_LINK_DIR}/${link_name}"
-        if [ -e "${target}" ] || [ -L "${target}" ]; then
-            rm -f "${target}"
-            ln -sfn "$(realpath "${f}")" "${target}"
-            agent_override_replaced=$((agent_override_replaced + 1))
-        else
-            ln -sfn "$(realpath "${f}")" "${target}"
-            agent_count=$((agent_count + 1))
-            agent_override_added=$((agent_override_added + 1))
-        fi
-    done
-    if [ "${agent_override_replaced}" -eq 0 ] && [ "${agent_override_added}" -eq 0 ]; then
-        warn "Override dir has no agents (expected *.md files): ${OVERRIDE_AGENT_DIR}"
-    else
-        info "Overridden agents from ${OVERRIDE_AGENT_DIR}: ${agent_override_replaced} replaced, ${agent_override_added} added"
-    fi
-fi
-
 ok "Agents: ${agent_count} linked (flattened)"
 echo ""
 
@@ -619,7 +559,7 @@ done
 ok "Skills: ${skill_count} linked"
 [ -n "${missing_skills}" ] && warn "Missing skills:${missing_skills}"
 
-# Override pass: replace/add domain skills from --override-skills dir (subclass repos).
+# Override pass: replace/add domain skills from --override/<dir>/skills (subclass repos).
 # Runs right after the base skills are linked, so overriding skills win by same name.
 if [ -n "${OVERRIDE_SKILL_DIR}" ]; then
     override_replaced=0
@@ -644,6 +584,25 @@ if [ -n "${OVERRIDE_SKILL_DIR}" ]; then
     else
         info "Overridden from ${OVERRIDE_SKILL_DIR}: ${override_replaced} replaced, ${override_added} added"
     fi
+fi
+echo ""
+
+# ============================================================
+# Step 4.5: Generate permission config from workflow-agent-permissions skill
+# ============================================================
+step "[4.5] Generating permission config..."
+PERM_TEMPLATE="${SKILLS_LINK_DIR}/workflow-agent-permissions/hooks"
+PERM_TARGET="${CANNBOT_MID_DIR}/permissions"
+if [ ! -d "${PERM_TEMPLATE}" ]; then
+    warn "workflow-agent-permissions template not found, hook will use built-in defaults"
+elif [ -d "${PERM_TARGET}" ]; then
+    perm_count=$(ls -1A "${PERM_TARGET}" 2>/dev/null | wc -l)
+    info "permissions/ already exists (${perm_count} files), keeping workspace config"
+else
+    mkdir -p "${CANNBOT_MID_DIR}"
+    cp -r "${PERM_TEMPLATE}" "${PERM_TARGET}"
+    perm_count=$(ls -1A "${PERM_TARGET}" | wc -l)
+    ok "permissions/ generated from workflow-agent-permissions skill (${perm_count} files)"
 fi
 echo ""
 
@@ -734,6 +693,15 @@ for sub in skills agents; do
 done
 
 [ -d "${CANNBOT_MID_DIR}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .cannbot/ missing"; health_ok=false; }
+
+PERM_TARGET="${CANNBOT_MID_DIR}/permissions"
+if [ -d "${PERM_TARGET}" ]; then
+    perm_count=$(ls -1A "${PERM_TARGET}" 2>/dev/null | grep -c '\.js$' || true)
+    [ "${perm_count}" -eq 0 ] && { health_errors="${health_errors}\n  ${YELLOW}⚠${NC} .cannbot/permissions/ is empty"; }
+else
+    health_errors="${health_errors}\n  ${YELLOW}⚠${NC} .cannbot/permissions/ missing (PM startup check will block execution)"
+fi
+
 
 # Check all registered repos
 for entry in "${REPO_REGISTRY[@]}"; do

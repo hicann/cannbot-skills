@@ -4,6 +4,14 @@ description: 验收角色。负责算子开发各 CP 点的验收，加载对应
 mode: subagent
 skills:
     - workflow-doc-templates
+    - workflow-cp0
+    - workflow-cp1
+    - workflow-cp2-1
+    - workflow-cp2-2
+    - workflow-cp3
+    - workflow-cp4
+    - workflow-cp5
+    - workflow-cp6
     - ops-precision-standard
 ---
 

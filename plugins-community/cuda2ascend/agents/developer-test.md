@@ -8,6 +8,7 @@ skills:
     - workflow-doc-templates
     - ascendc-st-design
     - ascendc-whitebox-design
+    - ascendc-ut-develop
     - ops-precision-standard
     - ops-profiling
     - ascendc-precision-debug

@@ -23,6 +23,7 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 │   ├── repo-*/                               # 仓库领域知识 skill（virtual，可被子仓 override）
 │   ├── workflow-doc-templates/               # 交付件模板 skill（virtual，可被子仓 override）
 │   ├── workflow-cp*/                         # 各 CP 点验收标准 skill（virtual，可被子仓 override）
+│   ├── workflow-agent-permissions/           # 各 agent 权限规格（virtual，可被子仓 override）
 │   └── ops-direct-invoke-workflow-maintain/  # 本维护 skill
 └── README.md                     # 设计思想 + 设计约束章节
 ```
@@ -72,7 +73,8 @@ skills/ops-direct-invoke-workflow/
 │   └── skills/                   # 覆写基类同名 skill（按目录名匹配）：
 │       ├── repo-*/               #   仓库领域知识 skill
 │       ├── workflow-doc-templates/ # 交付件模板 skill
-│       └── workflow-cp*/         #   各 CP 点验收标准 skill
+│       ├── workflow-cp*/         #   各 CP 点验收标准 skill
+│       └── workflow-agent-permissions/ # 各 agent 权限规格
 └── .cannbot/                     # 中间目录（gitignore），init 生成
     └── cannbot-skills/           # clone 下来的基类仓
 ```
@@ -87,7 +89,8 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 ├── .opencode/agents/*.md  ->  源 agent 文件（基类 agents/ 扁平化，全 final）
 ├── .opencode/skills/*/    ->  源 skill 目录（被 override 的指向子仓 agent/skills/）
 ├── .opencode/plugin/      ->  权限插件 permission-guard.js
-└── .cannbot/            ->  中间文件 + asc-devkit + cann-samples
+├── .cannbot/              ->  中间文件 + asc-devkit + cann-samples
+└── .cannbot/permissions/*.js  ->  init Step 4.5 复制自 workflow-agent-permissions skill（角色配置文件）
 ```
 
 ## init 链接机制（软链接怎么来的）
@@ -101,11 +104,12 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 | 1 | 建 `.cannbot/` 中间目录 | — |
 | 2 | 链接配置文件 | `<install>/AGENTS.md` → `PLUGIN_ROOT/AGENTS.md` |
 | 3 | **扁平化**链接 agents | 递归 `agents/`，按 basename 链接到 `.opencode/agents/*.md` |
-| 4 | 链接 skills | 收集到的每个 skill 名 → `.opencode/skills/<name>`；带 `--override-skills` 时同名替换、基类没有的新增 |
+| 4 | 链接 skills | 收集到的每个 skill 名 → `.opencode/skills/<name>`；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增 |
+| 4.5 | 生成权限配置 | 从 `.opencode/skills/workflow-agent-permissions/hooks/` **复制**（非软链接）到 `.cannbot/permissions/`，**缺失才生成、已存在保留**（工作区配置优先） |
 | 4+ | 权限插件 | `hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`（动态按角色限权） |
 | 5/6 | clone asc-devkit / cann-samples 到 `.cannbot/` | — |
 
-**skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录；② 解析 `AGENTS.md` 与每个 agent frontmatter 的 `skills:` 列表。
+**skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录；② 解析每个 agent（`agents/*.md`）frontmatter 的 `skills:` 列表。
 
 **skill 源解析顺序**：本地 `skills/` → 共享 `../../ops/` → `../../infra/`。同名时靠前者优先。
 
@@ -116,15 +120,17 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 - **实现**：`hooks/opencode/permission-guard.js`，在 `tool.execute.before` 里 throw 阻断违规写入。
 - **加载**：init Step 4+ 链接到 `<install>/.opencode/plugin/`，opencode 自动加载。
 - **角色来源**：sessionID → `client.session.get` 反查当前 agent 名（实测坐实）。
-
-改权限规则改 `permission-guard.js` 的 RULES。仓库可用 `.cannbot/permissions.json` 覆盖 categories / rules。
+- **规格真值源**：`skills/workflow-agent-permissions/hooks/*.js`，每角色一文件（ESM `export default { categories, exts }`），init Step 4.5 复制到 `.cannbot/permissions/`；hook 启动时扫描该目录逐个 import、按文件名即角色名 per-agent 合并到内置默认值（默认值为纯防御兜底，与 skill 文件保持同步——L8 约束）。
+- **覆写方式**：子仓整体 override `workflow-agent-permissions` skill，或仓内直接编辑 `.cannbot/permissions/<Role>.js`。
+- **PM 启动闸口**：PM 每次会话开始检查 `.cannbot/permissions/` 是否齐全（7 个角色文件），异常则拒绝执行任务并提示用户退出 opencode 重跑 init.sh。
+- **不支持热更新**：hook 在 plugin 启动时加载一次，修改配置后需重启 opencode 生效。
 
 ### 子类 init（`<算子仓>/agent/init.sh`）
 
 通用脚本（不含仓名硬编码），放到任何「`<repo>/agent/init.sh` 且 `agent/` 下有 `skills/`」的仓即可用（agents 为 final、子仓不 override，故 `agent/` 下无 `agents/`）。两步：
 
 1. 在仓根建 `.cannbot/`，clone/更新基类仓到 `.cannbot/cannbot-skills`。
-2. **一次**调基类 init，install_path 固定为仓根，透传 `--override <repo>/agent`（= `--override-skills <repo>/agent/skills`）。
+2. **一次**调基类 init，install_path 固定为仓根，透传 `--override <repo>/agent`（展开为 `<repo>/agent/skills`）。
 
 即：基类 init 在**同一次运行内**先建基础工作区，再用子仓 override 目录替换同名组件。banner 只出现一次（子仓 init 自身不打 banner）。
 

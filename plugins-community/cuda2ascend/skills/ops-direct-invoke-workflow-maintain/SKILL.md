@@ -19,7 +19,9 @@ description: 工作流维护技能。任何对工作流文件的新增、修改�
 
 - **开闭 + 里氏替换**：子仓要扩展某步骤，必须 override 该步骤用到的 virtual skill（`repo-*` 仓库领域知识 / `workflow-*` 工作流定义的模板与验收标准），**不得改动基类编排与子 Agent**。override 后必须保持相同逻辑名、输入输出格式、调用约定。
 - **契约向后兼容**：基类对外暴露的契约——virtual 组件的**逻辑名**、各角色的**输入输出格式**、**调用约定**——一经发布即稳定，演进时只增不破坏。改基类前先问：这会不会让已接入仓的 override 失效？
+- **`example/init.sh` 分发契约**：`example/init.sh` 已分发到各子仓，基类 `init.sh` 的 CLI 契约一旦发生不兼容变更，必须**发问卷知会用户**（受影响子仓 + 新旧用法对比），由用户决策是否迁移——详见 [references/modify-init.md](references/modify-init.md) 第 5 条与 review-checklist C1–C4。
 - **机制优于自然语言**：能用 hook / 脚本 / 权限声明约束的行为，不要写成 prompt 里的自然语言。
+
 
 ## 修改操作指南
 

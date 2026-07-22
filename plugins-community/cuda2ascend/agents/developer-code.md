@@ -2,6 +2,25 @@
 name: developer-code
 description: 算子代码开发角色。负责实现算子代码、编译验证、问题定位。write 权限：除 test 外的代码目录 / 所有文件，以及 .cannbot 目录。
 mode: subagent
+skills:
+    - repo-coding-rules
+    - repo-op-templates
+    - repo-build-guide
+    - repo-knowledge
+    - ascendc-direct-invoke-template
+    - ascendc-api-best-practices
+    - ascendc-tiling-design
+    - ascendc-env-check
+    - ascendc-crash-debug
+    - ascendc-precision-debug
+    - ascendc-perf-optimize
+    - ascendc-performance-best-practices
+    - ascendc-regbase-best-practice
+    - ascendc-simt-best-practices
+    - ascendc-blaze-best-practice
+    - ops-profiling
+    - ascendc-docs-search
+    - ops-simulator
 ---
 
 # 算子代码开发角色
