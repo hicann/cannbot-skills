@@ -10,7 +10,8 @@
 
 | 算子类别 | 典型算子 | 建模目录 |
 |---------|---------|---------|
-| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16, MatMul_AllReduce | [matmul/](matmul/) |
+| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16 | [matmul/](matmul/) |
+| MC² 通算融合类 | matmul_all_reduce, allgather_matmul, matmul_reducescatter, alltoall_matmul | [mc2/](mc2/) |
 | Reduction 归约类 | ReduceSum, Softmax, LayerNorm, ArgMax | [reduction/](reduction/) |
 | Elementwise 逐元素类 | Sin, Cos, Abs, Exp | [elewise/](elewise/) |
 | Broadcast 广播类 | Add, Mul, Sub | [broadcast/](broadcast/) |
@@ -25,6 +26,7 @@
 
 Step 0 — 算子分类：
   ├─ MatMul 族 → matmul/
+  ├─ MC² 通算融合族 → mc2/
   ├─ Reduction 族 → reduction/
   ├─ Elementwise 族 → elewise/
   ├─ Broadcast 族 → broadcast/
@@ -54,6 +56,7 @@ Step 0 — 算子分类：
 | 算子族 | 算法路由 | 兜底算法 | 扩展算法 | 选择条件 |
 |--------|---------|---------|---------|---------|
 | MatMul | [matmul/](matmul/) | [fallback/](matmul/fallback/)（SWAT / FullLoad / StreamK） | — | — |
+| MC² 通算融合 | [mc2/](mc2/) | [fallback/](mc2/fallback/)（matmul tiling + 通算切分参数） | — | — |
 | Convolution | [convolution/](convolution/) | [fallback/](convolution/fallback/)（FORMULAS: Mmode + HWmode） | — | — |
 | Reduction | [reduction/](reduction/) | [fallback/](reduction/fallback/)（五模板通用算法） | — | — |
 | Elementwise | [elewise/](elewise/) | [fallback/](elewise/fallback/)（占位） | — | — |
@@ -76,6 +79,7 @@ Step 0 — 算子分类：
 | **Vec 类**（Elementwise, Broadcast, Conversion, Reduction 部分） | **UB** | 数据从 GM → UB，计算在 UB 上完成，无 L1 参与 |
 | **Cube 类**（MatMul, Convolution） | **L1 + UB** | 数据 GM → L1 → L0 → Cube，L1 做全局复用缓冲，UB 做 weight/fmap DMA 暂存 |
 | **融合类**（FA 等） | **L1 + UB** | 多层流水，L1 承载大块数据驻留，UB 承载计算窗口 |
+| **MC² 通算融合类** | **L1 + UB + GM（通信）** | 复用 matmul 的 L1/L0 层级，通信数据经 GM 侧 buffer 收发 |
 
 > **关键区分**：Cube/融合类算子的切分粒度在 **L1**（不是 UB），L1 split 决定了单次搬运的数据量；L0/UB 是 L1 的进一步子切分。
 

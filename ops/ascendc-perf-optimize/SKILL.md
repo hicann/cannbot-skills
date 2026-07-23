@@ -1,6 +1,6 @@
 ---
 name: ascendc-perf-optimize
-description: Ascend C 算子性能优化策略制定。结合 Tiling 建模与流水分析（仿真图 + profiling 数据），按卡间/核间/核内三层流水制定性能优化策略，并回修 Tiling 参数。触发：算子性能调优、流水分析、Tiling 修正、bound 诊断时。
+description: Ascend C 算子性能优化策略制定。结合 Tiling 建模与流水分析（仿真图 + profiling 数据），按卡间/核间/核内三层流水制定性能优化策略，并回修 Tiling 参数。触发：算子性能调优、流水分析、Tiling 修正、bound 诊断、MC² 通算融合算子优化、卡间流水配平时。
 ---
 
 # Ascend C 算子性能优化流水分析
@@ -12,7 +12,7 @@ description: Ascend C 算子性能优化策略制定。结合 Tiling 建模与�
 | 步骤 | 名称 | 适用条件 | 关注点 |
 |------|------|---------|--------|
 | **Step 1** | Tiling 理论建模 | 所有算子 | 确定理想 tiling data |
-| **Step 2** | 卡间流水优化 | 通信类算子 | 通算演算、卡间通信瓶颈 |
+| **Step 2** | 卡间流水优化 | 通信类算子 | 通算演算、卡间通信瓶颈。**MC² 算子须先采集 TilingData 和隔离测试数据（见 `comm-compute/index.md` Step 0/2），缺失时返回数据采集阶段补采** |
 | **Step 3** | 核间流水优化 | 多核间同步算子 | 核间并行效率、同步开销 |
 | **Step 4** | 单核流水优化 | 所有算子 | 核内流水、bound 诊断 |
 
@@ -62,15 +62,23 @@ Step 4 — 单核流水优化策略（核内流水分析 + tiling 修正）
 
 **输入**：Step 1 的 tiling data + 计算流程 + 仿真图 + profiling 数据
 
+> **⚠️ MC² 算子前置强制检查**：若算子为 MC² 通算融合算子（存在 fork 多 rank + CrossCoreFlag 同步），在进入流水配平分析前**必须**完成以下两项数据采集，缺失任何一项须返回数据采集阶段补采，不得在缺少数据的情况下凭经验给出切分方案：
+>
+> 1. **TilingData 采集**：从 host 代码打印获取 baseM/baseN/baseK/usedCoreNum。若 host 代码未打印，须在源码副本中启用 PrintTilingData 后重新运行。详见 `comm-compute/index.md` Step 0 和 `comm-compute/pipeline_balancing.md`「TilingData 依赖」章节。
+> 2. **隔离测试**：在 tileCnt=1 下分别注释通信/计算 process，实测 T_comm 和 T_compute，计算 R 值判定 Bound 类型。详见 `comm-compute/bound_diagnosis.md`。
+
 **过程**：加载 `references/comm-compute/`，分析卡间通信与计算的流水重叠，识别通信瓶颈。
 
 **输出**：
 - [ ] 卡间流水仿真图分析
 - [ ] 通信/profiling 数据报告
+- [ ] **TilingData 采集**（MC² 算子必选）：baseM/baseN/baseK/usedCoreNum（含长块/短块各自的 tiling data）
+- [ ] **隔离测试与 Bound 判定**（MC² 算子必选）：T_comm/T_compute/R 值
 - [ ] 卡间流水优化策略
 - [ ] 对 Step 1 tiling 策略的修正建议
+- [ ] **加速比与掩盖率**（MC² 算子必选）：基于隔离测试的 T_comm / T_compute 和各方案实测耗时，按 `references/comm-compute/index.md` 的性能指标公式核算
 
-> 当前 `references/comm-compute/` 内容为空，此步骤返回「通算演算优化策略暂未收录，跳过卡间流水分析」。
+> 加载 `references/comm-compute/`，按 Bound 判定 → 流水配平 → 膨胀分析 → 性能指标核算流程输出卡间流水优化策略与 Tiling 修正建议。
 
 ---
 

@@ -119,7 +119,8 @@ Markdown 报告包含：
    - 指定 `msprof op` / msopprof → 加载 [`references/msprof-op-guide.md`](references/msprof-op-guide.md)
    - 指定 `msprof` → 加载 [`references/msprof-guide.md`](references/msprof-guide.md)
 
-2. **用户未指定** — 探测环境：
+2. **用户未指定** — 先判定算子类型，再探测环境：
+   - **MC² / 多 rank 算子**（算子通过 `fork()` 创建多个子进程绑定不同 NPU 卡，子进程间通过 SHMEM UDMA / BarrierAll / CrossCoreFlag 协同通信，如 alltoall_matmul、allgather_matmul、matmul_reducescatter）→ **必须使用 `msprof`**，禁止使用 `msprof op`（`msprof op` 对 fork 程序的采集行为未定义，数据不可靠）。加载 [`references/msprof-guide.md`](references/msprof-guide.md) 的「MC² 多 rank 算子采集」章节，同时参考 `ascendc-perf-optimize` skill 的 `references/comm-compute/index.md`「性能采集方法」章节
    - 仅 `msopprof` 可用 → [`references/msprof-op-guide.md`](references/msprof-op-guide.md)
    - 仅 `msprof` 可用 → [`references/msprof-guide.md`](references/msprof-guide.md)
    - 两者皆可用 → 须向用户确认或按项目约定选用其一
@@ -129,8 +130,8 @@ Markdown 报告包含：
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|---------|
-| [`references/msprof-op-guide.md`](references/msprof-op-guide.md) | `msprof op`：构建 / 采集 / 归档 / 判定 / 瓶颈 / 回归 | 选用 `msprof op` 时 |
-| [`references/msprof-guide.md`](references/msprof-guide.md) | `msprof`：构建 / 采集 / 归档 / **主 Bound 判定** / 瓶颈 | 选用 `msprof` 时 |
+| [`references/msprof-guide.md`](references/msprof-guide.md) | `msprof`：构建 / 采集 / 归档 / **主 Bound 判定** / 瓶颈 + **MC² 多 rank 采集**（文末章节） | 选用 `msprof` 时，或 MC² / fork 多进程算子 |
+| [`references/msprof-op-guide.md`](references/msprof-op-guide.md) | `msprof op`：构建 / 采集 / 归档 / 判定 / 瓶颈 / 回归 | 选用 `msprof op` 时（不适用于 MC²） |
 | [`references/csv_fields_reference.md`](references/csv_fields_reference.md) | CSV 字段定义与阈值 | 理解指标含义时 |
 | [`references/optimization_quickref.md`](references/optimization_quickref.md) | 瓶颈类型与优化方法 | 定位瓶颈后 |
 
@@ -140,6 +141,7 @@ Markdown 报告包含：
 
 | 场景 | 推荐命令 | 说明 |
 |------|----------|------|
+| **MC² 多 rank 算子采集** | `msprof --aic-mode=task-based` | **必须用 msprof，禁止 msprof op**，详见 msprof-guide.md「MC² 多 rank 算子采集」章节 |
 | 算子开发完成后的性能验收 | `msprof_profile_run.sh --compare` | 快速对比自定义算子 vs 标杆 |
 | 性能问题定位 | `msprof_profile_run.sh` + `msprof_perf_summary.py` | 深度瓶颈分析 |
 | 优化效果验证 | `msprof_profile_run.sh` + `msprof_perf_summary.py` | 对比优化前后的归档数据 |

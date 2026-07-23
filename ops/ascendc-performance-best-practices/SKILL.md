@@ -8,11 +8,12 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 
 ## 算子分类体系
 
-按 **算子族（operator family）** 组织优化知识，同一族内所有变体共享同一份文档（如 `matmul`、`matmul_mxfp4`、`batch_matmul`、`matmul_all_reduce`、`matmul_a16w16` 等均归入 `matmul` 族）。
+按 **算子族（operator family）** 组织优化知识，同一族内所有变体共享同一份文档（如 `matmul`、`matmul_mxfp4`、`batch_matmul`、`matmul_a16w16` 等均归入 `matmul` 族；`matmul_all_reduce`、`allgather_matmul`、`matmul_reducescatter`、`alltoall_matmul` 等均归入 `mc2` 族）。
 
 | 类别 | 典型算子 | 适用架构 | 优化设计指南 |
 |------|---------|---------|------------|
-| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16, MatMul_AllReduce | DAV_3510 | ✅ [性能优化指南](reference/matmul/guide.md) |
+| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16 | DAV_3510 | ✅ [性能优化指南](reference/matmul/guide.md) |
+| MC² 通算融合类 | matmul_all_reduce, allgather_matmul, matmul_reducescatter, alltoall_matmul | DAV_3510 | ✅ [性能优化指南](reference/mc2/guide.md) |
 | RadixSort 基数排序类 | TopK, KthValue, Sort, ArgSort, ArgMax/Min | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/sort/radix_sort.md) |
 | Scalar 编码与诊断 | 任意 ScalarBound 算子 | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/scalar/guide.md) |
 | Reduction 归约类 | ReduceSum, Softmax, LayerNorm, RMSNorm, ArgMax | DAV_3510 | ✅ [实现索引](reference/reduce/guide.md) · [模板代码与使用指南](reference/reduce/templates/usage_guide.md) · [公共基类](reference/reduce/templates/dav310/softmax_v2_base.template) · [State Resident](reference/reduce/templates/state_resident_design.md) |

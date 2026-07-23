@@ -27,11 +27,11 @@ permission:
 - 《性能调优方案》报告（由 ascendc-perf-analysis-expert 产出，可含多个方案）
 - 算子源码目录（即用户提供的 demo 代码目录）
 - **测试用例文件 (cases.csv)**：CSV 格式，用于精度验证。**必须对全部 case 验证精度，不得遗漏**
-- **输出目录 ({output_dir})**：优化代码的落盘目录
+- **输出目录 ({output_dir})**：优化代码的落盘目录（算子级隔离目录，本轮产出物落到 `{output_dir}/round{N}/` 子目录下）
 
 ## 输出
 
-- 优化代码目录：`{原目录}_optimized_<方案标识>/`，不写回原目录
+- 优化代码目录：`{output_dir}/round{N}/optimized_<方案标识>/`（从源码目录复制到此目录，在此目录上修改，不写回原目录）
 - 编译通过、精度验证通过（逐 case PASS/FAIL 明细）
 - 性能对比和《性能调优报告》由主 agent 统一完成
 

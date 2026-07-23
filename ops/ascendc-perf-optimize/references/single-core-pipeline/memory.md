@@ -6,6 +6,8 @@
 - Vector/Cube 单元存在等待数据的空闲气泡
 - 计算密度低（Ops/Byte 低于硬件能力）
 
+> ⚠️ **MC² 通算融合场景注意**：`CrossCoreWaitFlag` 挂在 MTE2 流水线上会导致 MTE2 ratio 含通信等待空转。须先用隔离测试排除污染（参考 [bound_diagnosis.md](../comm-compute/bound_diagnosis.md)「MC² 场景 MTE2 污染判定」），确认 MTE2 ratio 反映真实访存瓶颈后再套用以下策略。若 `mte2_polluted = true`，本文档策略无效，请路由到 [comm-compute/](../comm-compute/) 通信掩盖策略。
+
 ## 仿真图分析要点
 
 - 查看 MTE2 搬移时间线与计算时间线的重叠度

@@ -17,7 +17,7 @@
 
 - 源码目录：{code_dir}
 - 测试用例文件：{cases_csv}（CSV 格式，包含所有测试用例的 shape、dtype、attrs 等参数。**若 case 数量超过 20 个，仅取前 20 个**）
-- 输出目录：{output_dir}（性能数据、报告等所有产出物落盘到此目录下）
+- 输出目录：{output_dir}（算子级隔离目录，性能数据、报告等所有产出物落盘到此目录下。本轮产出物落到 `{output_dir}/round{N}/` 子目录下，N 为当前轮次编号）
 
 ---
 
@@ -27,10 +27,11 @@
 2. **对 `{cases_csv}` 中全部用例**，使用 `/ops-profiling` 逐个 case 采集上板性能数据（msprof aiv_time）
    - **禁止只选代表性用例**：每个 case 都是用户关注的，必须全部采集
    - 所有测试用例均须在 NPU 上运行（禁止 host 侧短路绕过 kernel）
+   - **禁止使用 host 侧计时（std::chrono / gettimeofday 等）替代 msprof 采集**
 3. 从 profiling 数据中获取每个 case 的 aicore/aiv 耗时，记录数据来源（profiling），供后续分析使用
 
 【输出：阶段一】
-- **全部 case** 的性能数据采集产物（profiling 目录），存放到 `{output_dir}/perf_per_case/` 下
+- **全部 case** 的性能数据采集产物（profiling 目录），存放到 `{output_dir}/round{N}/perf_per_case/` 下
 - 每个 case 的 aiv_time 汇总表
 - 采集失败时停止，不进入阶段二
 
@@ -69,7 +70,7 @@
 
 【输出：阶段三】
 - 《性能调优方案》：方案概览 + 具体措施 + skill 路径引用 + **逐 case 覆盖清单**
-- **报告必须落盘**到 `{output_dir}/性能调优方案.md`
+- **报告必须落盘**到 `{output_dir}/round{N}/性能调优方案.md`
 - 自由发挥处显式标注「知识库暂未收录」
 
 ---
@@ -107,7 +108,7 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 - 方案描述：<从《性能调优方案》中提取该方案的完整内容，含模板代码路径、关键骨架结构、模板分支条件、逐 case 模板映射>
 - 方案标识：<方案名称，用于目录命名>
 - 测试用例文件：{cases_csv}（CSV 格式，用于精度验证）
-- 输出目录：{output_dir}（优化代码等产出物放到此目录下）
+- 输出目录：{output_dir}（优化代码等产出物放到此目录下。本轮产出物落到 `{output_dir}/round{N}/` 子目录下）
 
 **模板优先指令**：
 - 若方案中标注了模板 .h 文件路径且分类为"✅可直接拷贝使用"，**必须直接拷贝这些 .h 文件到项目 op_kernel/ 目录**，仅做最小适配（命名空间别名、TilingData 字段补充、include 路径修正），禁止从头重写
@@ -120,7 +121,7 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 
 【任务】
 按 `ascendc-perf-impl-expert.md` 执行流程，完成：复制目录 → 实现代码 → 编译 → 精度验证。
-目录命名：`{output_dir}/{算子名}_optimized_<方案标识>/`（从 `{code_dir}` 复制源码到此目录，在此目录上修改）
+目录命名：`{output_dir}/round{N}/optimized_<方案标识>/`（从 `{code_dir}` 复制源码到此目录，在此目录上修改）
 精度验证：对 `{cases_csv}` 中**全部 case** 进行精度验证，不遗漏
 完成后返回：优化代码目录路径、编译状态、精度验证结果（逐 case PASS/FAIL 明细）、**模板使用情况**（哪些模板被直接拷贝使用、哪些被降级、降级原因及尝试过的修复手段）。不采集性能、不生成报告。
   "
@@ -133,9 +134,10 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 
 1. **统一 msprof 采集**：对基线 + 所有优化方案目录，按 `{cases_csv}` **逐个 case** 用 msprof 采集 aiv_time
    - **禁止只选代表性用例**：必须覆盖全部 case
+   - **禁止使用 host 侧计时（std::chrono / gettimeofday 等）替代 msprof 采集**
    - 记录每个 case 在各个方案下的 aiv_time(us)
 2. **精度确认**：确认所有方案对全部 case 精度均通过
-3. **生成《性能调优报告》**并落盘到 `{output_dir}/性能调优报告.md`：
+3. **生成《性能调优报告》**并落盘到 `{output_dir}/round{N}/性能调优报告.md`：
    - **逐 case 内核时间对比表**（msprof aiv_time）：行 = 全部 case，列 = 基线 + 各方案
    - **逐 case 分析**：对每个 case 明确写出：
      - 当前存在的性能瓶颈是什么（bound 类型 + 关键指标）
@@ -150,6 +152,7 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 - 所有方案编译通过、精度验证通过
 - 报告含**每个 case** 的 msprof aiv_time 对比表和逐 case 分析（瓶颈 → 手段 → 加速比）
 - 所有 case 均在 NPU 上运行
+- **方案一致性**：实施参数与《性能调优方案》原始建议一致；若偏离，须标注原因并补充原始建议参数的对照实验
 - 报告已落盘
 
 ---
@@ -197,7 +200,7 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 - cann_bench 代码路径：{cann_bench_dir}
 - 评测环境信息：{env_info}
 - 测试用例文件：{cases_csv}
-- 输出目录：{output_dir}（评测报告等产出物落盘到此目录下）
+- 输出目录：{output_dir}（评测报告等产出物落盘到此目录下。CANN-Bench 评测报告为跨轮次产出，落到 `{output_dir}/` 顶层）
 
 【任务】
 
@@ -266,7 +269,7 @@ Step 2 由 **PerformanceOptimizationAgent（主 agent）** 分两个阶段完成
 - 原始基线代码和优化后代码均已接入 cann_bench 并编译通过
 - 全部 case 精度验证通过（两套代码各自通过）
 - 报告含每个 case 的三列加速比（原始基线 vs A5 / 优化后 vs A5 / 优化后 vs 原始基线）
-- 报告已落盘到 `{output_dir}/CANN-Bench评测报告.md`
+- 报告已落盘到 `{output_dir}/CANN-Bench评测报告.md`（顶层，跨轮次）
 
 ---
 

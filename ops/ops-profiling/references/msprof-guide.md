@@ -4,9 +4,16 @@
 
 ---
 
-## 适用场景
+## 适用场景与分流
 
-- 目标环境以 `msprof` 为采集手段，或团队约定采用本工具链。
+使用 `msprof` 采集时，首先判断算子是否为 MC² 多 rank 算子：
+
+| 判定条件 | 采集流程 |
+|---------|---------|
+| 算子通过 `fork()` 创建多个子进程，各绑定不同 NPU 卡，子进程间通过 SHMEM UDMA / BarrierAll / CrossCoreFlag 协同通信（如 alltoall_matmul、allgather_matmul、matmul_reducescatter） | → **[MC² 多 rank 采集](#mc-多-rank-算子采集)**（本文末尾章节） |
+| 单卡算子或单进程多设备算子 | → 下文 Step 1～3 + 主 Bound 判定（常规流程） |
+
+> MC² 多 rank 算子的采集命令、数据结构、稳态取值方法与单卡有本质区别（跨 rank 同步、木桶效应），`msprof op` 不适用于此类算子。如果不确定算子是否为 MC²，先检查源码是否调用 `fork()` 和 `aclshmemx_*` API。
 
 ---
 
@@ -87,6 +94,8 @@ python3 {skill_path}/scripts/msprof_perf_summary.py $GROUP_DIR ops/{operator_nam
 
 本节适用于 **`msprof` 经 Step 2～3 得到的归档目录**（`round_NNN/`）。判据与 `/ops-simulator` 流水图路径**同一套优先级表**，便于对接 `/ascendc-performance-optimization`。
 
+> MC² 多 rank 算子同样使用本节判定规则，但需额外注意 MTE2 污染问题（见 [MC² 特有分析](#mc-特有分析)）。
+
 ### 输入与输出
 
 | 项目 | 说明 |
@@ -161,6 +170,76 @@ ops/{算子名}/docs/perf/
 3. **MTE2/MTE3 带宽共享**：同时读写 GM 时总带宽共享，评估搬运段负载时宜按 MTE2、MTE3 合并字节量与平台带宽对照
 4. **小数据量场景**：数据量很小时头开销占比会很高，这不一定是算子问题
 5. **多核同地址访问**：多核同时读同一 512B 地址范围会被串行化，导致 MTE2 耗时异常
+
+---
+
+## MC² 多 rank 算子采集
+
+MC² 通算融合算子通过 fork 多个子进程实现多 rank 协同，每个 rank 绑定一张 NPU 卡。这类算子的性能采集与单卡算子**有本质区别**——通信开销需要跨卡交互才能真实体现，多 rank 间的 BarrierAll/CrossCoreFlag 同步使整体性能受制于最慢的 rank（木桶效应）。
+
+> **`msprof op`（msopprof）不适用于 MC² 多 rank 算子**——它设计用于单进程单设备，对 fork 程序的行为未定义，采集到的数据不可靠。
+
+### 采集命令
+
+```bash
+# MC² 多 rank 算子专用采集命令
+msprof --output={prof_dir} \
+       --ai-core=on \
+       --aic-mode=task-based \
+       --aic-metrics=PipeUtilization \
+       --task-time=on \
+       --ascendcl=on \
+       {code_dir}/build/{exe} {args...}
+```
+
+**关键参数说明**：
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `--aic-mode=task-based` | 固定 | task-based 模式确保每个 kernel launch 产生独立记录，而非聚合 |
+| `--aic-metrics=PipeUtilization` | 推荐 | 采集各流水线占比，用于瓶颈分析 |
+| `--task-time=on` | 固定 | 记录每次 kernel 的 Task Duration |
+| `--ascendcl=on` | 固定 | 采集 AscendCL 层信息 |
+
+### 多设备数据结构
+
+msprof 包裹 fork 程序时，会自动为每个活跃设备分别产出 profiling 数据：
+
+```
+{prof_dir}/
+├── PROF_{timestamp}_*/           # device 0
+│   └── mindstudio_profiler_output/
+│       └── op_summary_*.csv      # ← Task Duration(us) 在这里
+├── PROF_{timestamp}_*/           # device 1
+│   └── mindstudio_profiler_output/
+│       └── op_summary_*.csv
+├── PROF_{timestamp}_*/           # device 2
+│   └── ...
+└── PROF_{timestamp}_*/           # device 3
+    └── ...
+```
+
+每个 `op_summary_*.csv` 中每行对应一次 kernel launch。如果程序内部循环 10 次，则每个设备有 10 行。
+
+### 稳态取值
+
+MC² 算子 perf 模式下循环执行至少 10 次算子调用：
+
+1. **前 5 次为 warm-up**，丢弃
+2. **取后 5 次 Task Duration 的均值**作为该 rank 的稳态性能
+
+### 跨 rank 取最大值
+
+多 rank 协同算子存在**木桶效应**——所有 rank 通过 BarrierAll / CrossCoreFlag 同步，整体性能由**最慢的 rank** 决定.
+
+> 此方法适用于 MC² 算子的**所有**性能测试场景：基线 profiling、隔离测试、方案对比测试。
+
+### MC² 注意事项
+
+1. **必须用 `msprof` 而非 `msprof op`**：`msprof op` 对 fork 程序的采集行为未定义，数据不可靠
+2. **必须 warm-up**：前 5 次受 DVFS 和 L2 cache 预热影响，不可作为性能指标
+3. **必须取跨 rank max**：木桶效应决定整体性能由最慢 rank 决定，取平均会高估性能
+4. **隔离测试取 max 的正确性**：注释通信后某些 rank 的 Task Duration 可能极短，这是因为该 rank 无需等待通信同步。取 max 代表包含了完整同步等待的真实通信时间
 
 ---
 
