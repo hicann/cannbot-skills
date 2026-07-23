@@ -46,10 +46,10 @@ show_help() {
 CANNBot Agent Workspace Initialization Script
 
 Usage:
-  ./init.sh opencode [options]
+  ./init.sh <target> [options]
 
 Arguments:
-  opencode                  Target environment (currently the only supported one)
+  target                    Target environment: opencode, claude, etc.
 
 Options:
   -h, --help                Show this help message
@@ -61,6 +61,7 @@ Options:
 
 Examples:
   ./init.sh opencode --repo cannbot-skills:~/cannbot-skills
+  ./init.sh claude --repo cannbot-skills:~/cannbot-skills
   ./init.sh opencode --repo asc-devkit:~/asc-devkit --repo cann-samples:~/cann-samples
 EOF
 }
@@ -69,7 +70,7 @@ EOF
 # Parse target
 # ============================================================
 if [[ $# -lt 1 ]]; then
-    err "Missing required argument 'opencode'"
+    err "Missing required argument: target (e.g. opencode)"
     echo ""
     show_help
     exit 1
@@ -79,14 +80,14 @@ TARGET_ENV=""
 case "$1" in
     -h|--help)
         show_help; exit 0 ;;
-    opencode)
-        TARGET_ENV="opencode"; shift ;;
-    *)
-        err "First argument must be 'opencode', got: '$1'"
+    -*)
+        err "First argument must be a target (e.g. opencode), got option: '$1'"
         echo ""
         show_help
         exit 1
         ;;
+    *)
+        TARGET_ENV="$1"; shift ;;
 esac
 
 # ============================================================
@@ -203,7 +204,7 @@ if [ ! -f "$PLUGIN_INIT" ]; then
     exit 1
 fi
 
-PLUGIN_ARGS=("opencode" "$REPO_DIR" "--override" "$AGENT_DIR")
+PLUGIN_ARGS=("${TARGET_ENV}" "$REPO_DIR" "--override" "$AGENT_DIR")
 if [[ ${#REPO_ARGS[@]} -gt 0 ]]; then
     PLUGIN_ARGS+=("${REPO_ARGS[@]}")
 fi

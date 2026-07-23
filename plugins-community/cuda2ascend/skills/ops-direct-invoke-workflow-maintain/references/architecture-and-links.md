@@ -13,7 +13,8 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 ├── AGENTS.md                     # PM 主 Agent 配置（final，仅入口）：定位 PM 身份，
 │                                 #   引导加载 ops-direct-invoke-workflow skill，本身不承载流程
 ├── init.sh                       # 基类构造函数：搭建工作区 + 绑定 virtual 组件
-├── hooks/opencode/permission-guard.js   # 动态权限插件（按角色限写）
+├── hooks/opencode/permission-guard.js   # 动态权限插件（opencode 侧，按角色限写）
+├── hooks/claude/permission-guard.js     # 动态权限 hook（claude 侧，同一套规则语义）
 ├── agents/                       # 三类子 Agent 源文件（final，init 扁平化链接）
 │   ├── architect.md              # 方案设计
 │   ├── developer*.md             # 开发（含 -code/-test/-doc 按权限分的变体）
@@ -81,14 +82,18 @@ skills/ops-direct-invoke-workflow/
 
 ### 运行时目录（init 生成，勿手改，勿提交）
 
-init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.opencode/`）：
+init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.opencode/` 或 Claude Code 的 `.claude/`，由 init 的 tool 参数决定）：
 
 ```
 <算子仓>/
 ├── AGENTS.md            ->  基类 PLUGIN_ROOT/AGENTS.md
+├── CLAUDE.md            ->  基类 PLUGIN_ROOT/AGENTS.md（仅 claude）
 ├── .opencode/agents/*.md  ->  源 agent 文件（基类 agents/ 扁平化，全 final）
+│   （claude 为 .claude/agents/*.md）
 ├── .opencode/skills/*/    ->  源 skill 目录（被 override 的指向子仓 agent/skills/）
+│   （claude 为 .claude/skills/*/）
 ├── .opencode/plugin/      ->  权限插件 permission-guard.js
+│   （claude 为 .claude/hooks/permission-guard.js + .claude/settings.json 注册 PreToolUse）
 ├── .cannbot/              ->  中间文件 + asc-devkit + cann-samples
 └── .cannbot/permissions/*.js  ->  init Step 4.5 复制自 workflow-agent-permissions skill（角色配置文件）
 ```
@@ -102,28 +107,28 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 | 步骤 | 动作 | 链接关系 |
 |------|------|---------|
 | 1 | 建 `.cannbot/` 中间目录 | — |
-| 2 | 链接配置文件 | `<install>/AGENTS.md` → `PLUGIN_ROOT/AGENTS.md` |
-| 3 | **扁平化**链接 agents | 递归 `agents/`，按 basename 链接到 `.opencode/agents/*.md` |
-| 4 | 链接 skills | 收集到的每个 skill 名 → `.opencode/skills/<name>`；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增 |
-| 4.5 | 生成权限配置 | 从 `.opencode/skills/workflow-agent-permissions/hooks/` **复制**（非软链接）到 `.cannbot/permissions/`，**缺失才生成、已存在保留**（工作区配置优先） |
-| 4+ | 权限插件 | `hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`（动态按角色限权） |
+| 2 | 链接配置文件 | `<install>/AGENTS.md` → `PLUGIN_ROOT/AGENTS.md`；claude 时额外 `<install>/CLAUDE.md` → 同源 |
+| 3 | **扁平化**链接 agents | 递归 `agents/`，按 basename 链接到运行时 `agents/*.md`（opencode `.opencode/agents/`、claude `.claude/agents/`） |
+| 4 | 链接 skills | 收集到的每个 skill 名 → 运行时 `skills/<name>`（opencode `.opencode/skills/`、claude `.claude/skills/`）；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增 |
+| 4.5 | 生成权限配置 | 从运行时 `skills/workflow-agent-permissions/hooks/` **复制**（非软链接）到 `.cannbot/permissions/`，**缺失才生成、已存在保留**（工作区配置优先） |
+| 4+ | 权限 hook | opencode：`hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`；claude：`hooks/claude/permission-guard.js` → `<install>/.claude/hooks/`，并在 `.claude/settings.json` 幂等注册 PreToolUse hook（matcher `Write\|Edit\|MultiEdit\|NotebookEdit`） |
 | 5/6 | clone asc-devkit / cann-samples 到 `.cannbot/` | — |
 
 **skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录；② 解析每个 agent（`agents/*.md`）frontmatter 的 `skills:` 列表。
 
 **skill 源解析顺序**：本地 `skills/` → 共享 `../../ops/` → `../../infra/`。同名时靠前者优先。
 
-### 动态权限 hook（opencode）
+### 动态权限 hook（opencode / claude）
 
 按角色限制写权限——`.cannbot` 所有角色可写（任意类型）、项目外拒绝、code/test/doc 按角色限权：
 
-- **实现**：`hooks/opencode/permission-guard.js`，在 `tool.execute.before` 里 throw 阻断违规写入。
-- **加载**：init Step 4+ 链接到 `<install>/.opencode/plugin/`，opencode 自动加载。
-- **角色来源**：sessionID → `client.session.get` 反查当前 agent 名（实测坐实）。
-- **规格真值源**：`skills/workflow-agent-permissions/hooks/*.js`，每角色一文件（ESM `export default { categories, exts }`），init Step 4.5 复制到 `.cannbot/permissions/`；hook 启动时扫描该目录逐个 import、按文件名即角色名 per-agent 合并到内置默认值（默认值为纯防御兜底，与 skill 文件保持同步——L8 约束）。
+- **实现**：opencode 用 `hooks/opencode/permission-guard.js`，在 `tool.execute.before` 里 throw 阻断违规写入；claude 用 `hooks/claude/permission-guard.js`，作为 PreToolUse hook 读 stdin 事件 JSON，违规时 exit 2（stderr 回传模型）。两者同一套规则语义。
+- **加载**：opencode 由 init Step 4+ 链接到 `<install>/.opencode/plugin/` 自动加载；claude 链接到 `<install>/.claude/hooks/` 并在 `.claude/settings.json` 注册。
+- **角色来源**：opencode 用 sessionID → `client.session.get` 反查当前 agent 名（实测坐实）；claude 用 hook 输入的 `agent_type` 字段（主线程无该字段，即 PM）。
+- **规格真值源**：`skills/workflow-agent-permissions/hooks/*.js`，每角色一文件（ESM `export default { categories, exts }`），init Step 4.5 复制到 `.cannbot/permissions/`；hook 扫描该目录逐个 import、按文件名即角色名 per-agent 合并到内置默认值（默认值为纯防御兜底，与 skill 文件保持同步——L8 约束，**两侧 hook 的内置默认值都要同步**）。
 - **覆写方式**：子仓整体 override `workflow-agent-permissions` skill，或仓内直接编辑 `.cannbot/permissions/<Role>.js`。
-- **PM 启动闸口**：PM 每次会话开始检查 `.cannbot/permissions/` 是否齐全（7 个角色文件），异常则拒绝执行任务并提示用户退出 opencode 重跑 init.sh。
-- **不支持热更新**：hook 在 plugin 启动时加载一次，修改配置后需重启 opencode 生效。
+- **PM 启动闸口**：PM 每次会话开始检查 `.cannbot/permissions/` 是否齐全（7 个角色文件），异常则拒绝执行任务并提示用户退出当前 CLI 会话重跑 init.sh。
+- **热更新**：opencode hook 在 plugin 启动时加载一次，修改配置后需重启 opencode 生效；claude hook 每次调用都是独立进程，配置即改即生效。
 
 ### 子类 init（`<算子仓>/agent/init.sh`）
 

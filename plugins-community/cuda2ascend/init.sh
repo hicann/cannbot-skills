@@ -13,11 +13,11 @@
 #
 # Responsibility:
 #   1. Create .cannbot intermediate directory
-#   2. Link AGENTS.md config to the workspace
+#   2. Link AGENTS.md config to the workspace (claude 额外链接 CLAUDE.md)
 #   3. Link sub-agents (architect / developer / qa, flattened to one level)
 #   4. Link skill directories referenced by agent frontmatter
 #      (plugin skills/ first, then ops/, then infra/)
-#      and link the opencode permission plugin to .opencode/plugin/
+#      and link the permission hook (opencode plugin / claude settings.json)
 #   5. Clone third-party repos into .cannbot/ (or use local paths via --repo)
 #   6. Generate manifest and run health check
 
@@ -245,40 +245,44 @@ BANNER
 
 show_help() {
     cat << EOF
-cuda2ascend - 基类工作流安装器
+cuda2ascend - base workflow installer
 
 Usage: init.sh [level] [tool] [install_path] [options]
 
-目标工具仅支持 OpenCode。
-
 Arguments:
-  level        - 安装级别: "project" (默认) 或 "global"
-  tool         - 目标工具 (目前仅支持 "opencode")
-  install_path - project 级安装目录 (默认: 当前工作目录)
+  level        - Installation level: "project" (default) or "global"
+  tool         - Target tool: "opencode" (default) or "claude"
+  install_path - Project-level install directory (default: current working directory)
 
 Options:
-  --override <dir>         - 子仓覆写根目录：用 <dir>/skills/ 下的 skill 覆盖已链接的同名 skill
-                             （基类没有的则新增；无 skills/ 子目录则报错）
-  --repo <name>:<path>     - 使用本地已 clone 的第三方仓（直接链接，不再 clone）
-                             可多次指定，如：--repo asc-devkit:... --repo cann-samples:...
-                             支持的仓库名：asc-devkit / cann-samples / ops-tensor
-  --help                   - 显示本帮助
+  --override <dir>         - Override root directory: use skills under <dir>/skills/ to
+                                replace linked skills of the same name (adds any not
+                                already present in the base; errors if there is no
+                                skills/ subdirectory)
+  --repo <name>:<path>     - Use a locally cloned third-party repository (linked
+                                instead of cloned). Can be specified multiple times,
+                                e.g. --repo asc-devkit:... --repo cann-samples:...
+                                Supported repo names: asc-devkit / cann-samples / ops-tensor
+  --help                   - Show this help message
 
 Examples:
-  init.sh                                  # project 级
-  init.sh global                           # global 级
-  init.sh project /path/to/proj            # 指定安装目录
+  init.sh                                  # project-level opencode
+  init.sh claude                           # project-level claude
+  init.sh global                           # global-level
+  init.sh project /path/to/proj            # custom install directory
+  init.sh project claude /path/to/proj     # custom install directory + claude
   init.sh --repo asc-devkit:~/repos/asc-devkit --repo cann-samples:~/repos/cann-samples
   init.sh project /path/to/repo --override /path/to/repo/agent
 
 Installation paths:
-  .opencode/{skills,agents}/   + AGENTS.md in project root
+  opencode: .opencode/{skills,agents,plugin}/   + AGENTS.md in project root
+  claude:   .claude/{skills,agents,hooks}/      + settings.json + AGENTS.md/CLAUDE.md in project root
 
-中间文件目录:
-  .cannbot/              流程中间文件、状态文件
-  .cannbot/asc-devkit    asc-devkit 仓
-  .cannbot/cann-samples  cann-samples 仓
-  .cannbot/ops-tensor    ops-tensor 仓
+Intermediate directory:
+  .cannbot/              workflow intermediate files & state
+  .cannbot/asc-devkit    asc-devkit repo
+  .cannbot/cann-samples  cann-samples repo
+  .cannbot/ops-tensor    ops-tensor repo
 EOF
 }
 
@@ -347,16 +351,20 @@ while [ $# -gt 0 ]; do
             exit 1 ;;
         global|project)
             LEVEL="$1"; shift; continue ;;
-        opencode)
-            shift; continue ;;
+        opencode|claude) TOOL="$1"; shift; continue ;;
         *)
             POSITIONAL+=("$1"); shift; continue ;;
     esac
 done
 
-# Last unrecognized positional arg is install_path
-if [ ${#POSITIONAL[@]} -gt 0 ]; then
-    INSTALL_PATH="${POSITIONAL[${#POSITIONAL[@]}-1]}"
+# 位置参数只允许剩一个（install_path）。多余位置参数通常是未知工具名
+# （如未来新增工具而基类未升级），报错而非静默误当安装路径。
+if [ ${#POSITIONAL[@]} -gt 1 ]; then
+    err "无法识别的参数: ${POSITIONAL[*]:0:$((${#POSITIONAL[@]}-1))}（当前支持的工具: opencode claude）"
+    exit 1
+fi
+if [ ${#POSITIONAL[@]} -eq 1 ]; then
+    INSTALL_PATH="${POSITIONAL[0]}"
 fi
 
 # Normalize & validate override dir (absolute path for stable symlinks)
@@ -373,7 +381,11 @@ fi
 # Determine config root
 # ============================================================
 if [ "${LEVEL}" = "global" ]; then
-    CONFIG_ROOT="${HOME}/.config/opencode"
+    if [ "${TOOL}" = "opencode" ]; then
+        CONFIG_ROOT="${HOME}/.config/opencode"
+    elif [ "${TOOL}" = "claude" ]; then
+        CONFIG_ROOT="${HOME}/.claude"
+    fi
     INSTALL_BASE="${HOME}"
 else
     if [ -n "${INSTALL_PATH}" ]; then
@@ -382,7 +394,11 @@ else
     else
         INSTALL_BASE="${PWD}"
     fi
-    CONFIG_ROOT="${INSTALL_BASE}/.opencode"
+    if [ "${TOOL}" = "opencode" ]; then
+        CONFIG_ROOT="${INSTALL_BASE}/.opencode"
+    elif [ "${TOOL}" = "claude" ]; then
+        CONFIG_ROOT="${INSTALL_BASE}/.claude"
+    fi
 fi
 
 CANNBOT_DIR="${CONFIG_ROOT}"
@@ -514,6 +530,17 @@ else
     ln -sf "${config_src}" "${config_target}"
     ok "${config_name} → ${config_target}"
 fi
+
+# Claude Code 主记忆文件为 CLAUDE.md，链接到同一 PM 配置源
+if [ "${TOOL}" = "claude" ] && [ -f "${config_src}" ]; then
+    claude_target="$(dirname "${config_target}")/CLAUDE.md"
+    if [ "${config_src}" = "${claude_target}" ]; then
+        info "CLAUDE.md already at target location"
+    else
+        ln -sf "${config_src}" "${claude_target}"
+        ok "CLAUDE.md → ${claude_target}"
+    fi
+fi
 echo ""
 
 # ============================================================
@@ -607,18 +634,80 @@ fi
 echo ""
 
 # ============================================================
-# Step 4+: Link opencode permission-guard plugin
+# Step 4+: Link permission-guard hook (tool-specific)
 # ============================================================
-OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"
-if [ -f "${OC_PLUGIN_SRC}" ]; then
-    PLUGIN_LINK_DIR="${CONFIG_ROOT}/plugin"
-    mkdir -p "${PLUGIN_LINK_DIR}"
-    ln -sfn "$(realpath "${OC_PLUGIN_SRC}")" "${PLUGIN_LINK_DIR}/permission-guard.js"
-    ok "opencode plugin: permission-guard.js linked"
+if [ "${TOOL}" = "claude" ]; then
+    # Claude Code：PreToolUse hook，脚本链接到 .claude/hooks/，
+    # 并在 settings.json 幂等注册 hook 组
+    CLAUDE_HOOK_SRC="${PLUGIN_ROOT}/hooks/claude/permission-guard.js"
+    if [ -f "${CLAUDE_HOOK_SRC}" ]; then
+        HOOK_LINK_DIR="${CONFIG_ROOT}/hooks"
+        mkdir -p "${HOOK_LINK_DIR}"
+        ln -sfn "$(realpath "${CLAUDE_HOOK_SRC}")" "${HOOK_LINK_DIR}/permission-guard.js"
+        ok "claude hook: permission-guard.js linked"
+
+        SETTINGS_FILE="${CONFIG_ROOT}/settings.json"
+        # project 级用 ${CLAUDE_PROJECT_DIR} 占位符（随项目迁移不失效）；
+        # global 级项目目录不固定，用绝对路径
+        HOOK_REF='${CLAUDE_PROJECT_DIR}/.claude/hooks/permission-guard.js'
+        [ "${LEVEL}" = "global" ] && HOOK_REF="${HOOK_LINK_DIR}/permission-guard.js"
+        if command -v python3 > /dev/null 2>&1; then
+            python3 - "${SETTINGS_FILE}" "${HOOK_REF}" << 'SETTINGS_PY'
+import json, os, sys
+
+path, hook_ref = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            print(f"  [warn] settings.json 内容不是 JSON 对象，保留原文件未注册 hook: {path}", file=sys.stderr)
+            sys.exit(0)
+    except Exception:
+        print(f"  [warn] settings.json 解析失败，保留原文件未注册 hook: {path}", file=sys.stderr)
+        sys.exit(0)
+
+pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
+for group in pre:
+    for h in group.get("hooks", []):
+        blob = h.get("command", "") + " " + " ".join(h.get("args", []))
+        if "permission-guard.js" in blob:
+            print("  [info] settings.json 已注册 permission-guard hook，跳过")
+            sys.exit(0)
+
+pre.append({
+    "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+    "hooks": [{
+        "type": "command",
+        "command": "node",
+        "args": [hook_ref],
+    }],
+})
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print("  [ok] settings.json 注册 permission-guard PreToolUse hook")
+SETTINGS_PY
+        else
+            warn "python3 not found, 请手动在 ${SETTINGS_FILE} 注册 PreToolUse hook（见 hooks/claude/permission-guard.js 注释）"
+        fi
+    else
+        warn "claude permission-guard.js not found, skipping"
+    fi
+    echo ""
 else
-    warn "opencode permission-guard.js not found, skipping"
+    OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"
+    if [ -f "${OC_PLUGIN_SRC}" ]; then
+        PLUGIN_LINK_DIR="${CONFIG_ROOT}/plugin"
+        mkdir -p "${PLUGIN_LINK_DIR}"
+        ln -sfn "$(realpath "${OC_PLUGIN_SRC}")" "${PLUGIN_LINK_DIR}/permission-guard.js"
+        ok "opencode plugin: permission-guard.js linked"
+    else
+        warn "opencode permission-guard.js not found, skipping"
+    fi
+    echo ""
 fi
-echo ""
 
 # ============================================================
 # Step 5: Setup third-party repositories
@@ -713,6 +802,17 @@ done
 [ -f "${config_target}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} ${config_name} missing"; health_ok=false; }
 [ -f "${MANIFEST}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }
 
+if [ "${TOOL}" = "claude" ]; then
+    [ -e "${CONFIG_ROOT}/hooks/permission-guard.js" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .claude/hooks/permission-guard.js missing"; health_ok=false; }
+    [ -e "$(dirname "${config_target}")/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
+    if [ -f "${CONFIG_ROOT}/settings.json" ]; then
+        grep -q "permission-guard.js" "${CONFIG_ROOT}/settings.json" \
+            || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} settings.json 未注册 permission-guard hook"
+    else
+        health_errors="${health_errors}\n  ${YELLOW}⚠${NC} settings.json missing (hook 未注册)"
+    fi
+fi
+
 if [ "${health_ok}" = true ] && [ -z "${health_errors}" ]; then
     ok "All checks passed"
 else
@@ -723,11 +823,13 @@ fi
 # ============================================================
 # Summary
 # ============================================================
+CLI_NAME="opencode"
+[ "${TOOL}" = "claude" ] && CLI_NAME="claude"
 echo ""
 echo -e "  ${GREEN}${BOLD}✓ ${TEAM_NAME} installed!${NC}"
 echo -e "  ${DIM}Skills: ${skill_count} | Agents: ${agent_count}${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
-echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
+echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}${CLI_NAME}${NC}"
 echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16，shape 主要是 [1,128]、[4,2048]${NC}"
 echo ""

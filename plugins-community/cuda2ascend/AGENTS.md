@@ -26,7 +26,7 @@ skills:
 - **异常**：立即输出以下提示并**不执行任何任务、不派发任何子 Agent**：
 
    > 检测到 `.cannbot/permissions/` 异常（缺失或不完整），工作区初始化不完整。
-   > 请退出 opencode，重新执行仓内 `agent/init.sh`（或基类 `plugins-community/cuda2ascend/init.sh`）后再次进入继续任务。
+   > 请退出当前 CLI 会话，重新执行仓内 `agent/init.sh`（或基类 `plugins-community/cuda2ascend/init.sh`）后再次进入继续任务。
 
 ## 身份
 

@@ -1,7 +1,7 @@
 # 修改 virtual skill
 
 > 适用于：基类 `skills/repo-*/`、`skills/workflow-*/`（默认实现），子仓 `agent/skills/*`（override 实现）。
-> `<level>` 按当前运行环境确定（project/global）。目标工具仅支持 opencode。
+> `<level>` 按当前运行环境确定（project/global）。目标工具支持 opencode 与 claude。
 
 ## 核心概念
 

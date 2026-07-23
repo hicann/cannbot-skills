@@ -25,7 +25,7 @@ disable-model-invocation: true
 - `categories`：可写目录类别集合（取值 `intermediate` / `test` / `doc` / `code`，具体定义见 hook 内置）
 - `exts`：可写文件扩展名（`"*"` 或后缀数组如 `[".md"]`）
 
-init.sh 在 skill 链接完成后，从 `.opencode/skills/workflow-agent-permissions/hooks/` 整体复制到 `.cannbot/permissions/`（经软链接读取，自动吃到子仓 override 版本）。**缺失才生成、已存在保留**（工作区配置优先）。
+init.sh 在 skill 链接完成后，从运行时目录 `skills/workflow-agent-permissions/hooks/`（opencode 为 `.opencode/skills/`、claude 为 `.claude/skills/`）整体复制到 `.cannbot/permissions/`（经软链接读取，自动吃到子仓 override 版本）。**缺失才生成、已存在保留**（工作区配置优先）。
 
 ## 覆写
 
@@ -38,4 +38,4 @@ init.sh 在 skill 链接完成后，从 `.opencode/skills/workflow-agent-permiss
 
 ## 启动校验
 
-PM 每次会话开始会检查 `.cannbot/permissions/` 是否齐全；缺失或角色文件不足会拒绝执行任务并要求退出 opencode 重跑 init.sh（详见 `AGENTS.md` 启动检查段）。
+PM 每次会话开始会检查 `.cannbot/permissions/` 是否齐全；缺失或角色文件不足会拒绝执行任务并要求退出当前 CLI 会话重跑 init.sh（详见 `AGENTS.md` 启动检查段）。
