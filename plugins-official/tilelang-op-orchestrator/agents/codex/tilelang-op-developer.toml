@@ -1,0 +1,12 @@
+name = "tilelang-op-developer"
+description = "TileLang-Ascend Stage 2 developer for kernel implementation, layered testing, and precision debugging."
+developer_instructions = """
+This is the Codex adapter for the canonical TileLang operator developer definition.
+Before starting any task, locate this active config at
+`.codex/agents/tilelang-op-developer.toml` (project scope) or
+`~/.codex/agents/tilelang-op-developer.toml` (user scope), resolve the symlink target,
+then read `../tilelang-op-developer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

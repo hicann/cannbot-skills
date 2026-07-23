@@ -11,7 +11,7 @@ CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开
 - 已安装 CANN Toolkit（≥ 8.3），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已安装 PyTorch（≥ 2.6.0）和 torch_npu（≥ 2.6.0）
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### 操作步骤
 
@@ -111,6 +111,40 @@ cd tilelang-ascend && bash install_ascend.sh && cd ..
 </details>
 
 <details>
+<summary>Codex</summary>
+
+Codex 的 Skill 与 Subagent 使用不同的发现目录：
+
+- 项目级 Skill：`.agents/skills/`
+- 项目级 Subagent：`.codex/agents/*.toml`
+- 全局 Skill：`~/.agents/skills/`
+- 全局 Subagent：`~/.codex/agents/*.toml`
+
+#### 项目级安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh project codex
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+也可以安装到指定项目：
+
+```bash
+bash init.sh project codex /path/to/project
+```
+
+#### 全局安装
+
+```bash
+cd cannbot-skills/plugins-official/tilelang-op-orchestrator
+bash init.sh global codex
+cd tilelang-ascend && bash install_ascend.sh && cd ..
+```
+
+</details>
+
+<details>
 <summary>Copilot</summary>
 
 #### 项目级安装
@@ -160,7 +194,7 @@ init.sh 脚本会完成以下操作：
 |------|----------------|---------------|---------------|-------------|------------|
 | Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` | `.trae/skills/` |
 | Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` | `.trae/agents/` |
-| AGENTS.md | `.opencode/AGENTS.md` | `~/.config/opencode/AGENTS.md` | `.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | `.trae/AGENTS.md` |
+| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` |
 
 #### Cursor 安装路径
 
@@ -168,7 +202,16 @@ init.sh 脚本会完成以下操作：
 |------|--------------|--------------|
 | Skills 技能模块 | `.cursor/skills/` | `~/.cursor/skills/` |
 | Agents 子代理 | `.cursor/agents/` | `~/.cursor/agents/` |
-| AGENTS.md | `.cursor/AGENTS.md` | `~/.cursor/AGENTS.md` |
+| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.cursor/AGENTS.md` |
+
+#### Codex 安装路径
+
+| 内容 | Codex 项目级 | Codex 全局级 |
+|------|--------------|--------------|
+| Skills 技能模块 | `.agents/skills/` | `~/.agents/skills/` |
+| Agents 子代理 | `.codex/agents/` | `~/.codex/agents/` |
+| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.codex/AGENTS.md` |
+| 安装清单 | `.codex/cannbot-manifest.json` | `~/.codex/cannbot-manifest.json` |
 
 #### Copilot 安装路径
 
@@ -176,7 +219,7 @@ init.sh 脚本会完成以下操作：
 |------|---------------|---------------|
 | Skills 技能模块 | `.github/skills/` | `~/.copilot/skills/` |
 | Agents 子代理 | `.github/agents/` | `~/.copilot/agents/` |
-| AGENTS.md | `.github/AGENTS.md` | `~/.copilot/AGENTS.md` |
+| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.copilot/AGENTS.md` |
 
 #### CodeArts 安装路径
 
@@ -184,7 +227,7 @@ init.sh 脚本会完成以下操作：
 |------|----------------|----------------|
 | Skills 技能模块 | `.codeartsdoer/skills/` | `~/.codeartsdoer/skills/` |
 | Agents 子代理 | `.codeartsdoer/agents/` | `~/.codeartsdoer/agents/` |
-| AGENTS.md | `.codeartsdoer/AGENTS.md` | `~/.codeartsdoer/AGENTS.md` |
+| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.codeartsdoer/AGENTS.md` |
 
 ### 环境校验
 
@@ -205,11 +248,24 @@ cannbot-skills/plugins-official/tilelang-op-orchestrator/
 │   │   ├── tilelang-programming-model-guide/
 │   │   └── tilelang-review/
 │   ├── agents/                         # 3 个子代理（analyst / developer / perf-tuner）
-│   ├── AGENTS.md                       # 编排器（Primary）配置
 │   └── cannbot-manifest.json           # 安装清单
+├── AGENTS.md                           # 编排器（Primary）配置
 ├── tilelang-ascend                     # tilelang代码仓
 ├── init.sh                             # 初始化脚本
 └── quickstart.md                       # 本文档
+```
+
+**Codex 项目级安装**：
+
+```text
+<project>/
+├── .agents/
+│   └── skills/                         # 9 个 TileLang Skill 软链接
+├── .codex/
+│   ├── agents/                         # 3 个 Codex TOML Subagent
+│   └── cannbot-manifest.json           # 安装清单
+├── AGENTS.md                           # 编排器（Primary）配置
+└── tilelang-ascend                     # TileLang-Ascend 源码软链接
 ```
 
 ## 二、快速上手
@@ -257,11 +313,12 @@ Stage 1 算子设计（含需求理解） → Stage 2 代码实现 + 测试 + �
 
 ### 产出物示例
 
-TileLang 算子开发模式下，CANNBot 会在 `examples/{operator}/` 目录下生成文件：
+TileLang 算子开发模式下，CANNBot 会在 `custom/{operator}/` 目录下生成文件。
 
 ```
-examples/softmax/
+custom/softmax/
 ├── DESIGN.md                   # Stage 1 设计文档
+├── proto.yaml                  # Stage 1 算子接口规格
 ├── softmax.py                  # Stage 2 纯 kernel（@tilelang.jit，可 import）
 ├── test_softmax.py             # Stage 2 from softmax import kernel + golden + 分层测试 + main 块
 ├── README.md                   # 实现说明（可选）
@@ -316,11 +373,22 @@ bash ~/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh --help
 ### Q: 项目级和全局安装如何选择？
 
 - **项目级**：适合多项目开发，每个项目可以有不同配置
-- **全局**：适合单一项目，全局生效
+- **全局**：适合多个项目共用同一套配置，对当前用户全局生效
 
 ### Q: 如何更新技能模块？
 
-重新执行 init.sh 即可，脚本会自动覆盖旧版本。
+- 修改已连接的 Skill 内容会通过软链接同步。
+- 新增 Skill 时，需要把名称加入 `init.sh` 的 `INCLUDED_SKILLS`，然后重新执行安装脚本。
+- 新增 Subagent 时，需要同时创建 `agents/<name>.md` 和
+  `agents/codex/<name>.toml`。如果 Codex 的 `agents/` 使用目录软链接，新 TOML 会自动出现；
+  如果安装时已降级为普通 TOML 文件，则需要重新执行安装脚本。
+- 新增或修改 Skill/Subagent 后，建议重新启动工具或开启新会话，确保发现列表刷新。
+
+Codex 项目级更新示例：
+
+```bash
+bash init.sh project codex /path/to/project
+```
 
 ### Q: 如何选择 Developer 模式还是 Expert 模式？
 
@@ -337,6 +405,6 @@ bash ~/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh --help
 ## 总结
 
 1. TileLang 算子开发模式通过 Python DSL 实现昇腾 NPU 算子的快速开发
-2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
-3. `opencode` 是核心交互指令（也支持 `claude` / `trae` / `cursor` / `copilot` / `codearts`）
+2. 环境搭建核心两步：克隆仓库 → 执行 init.sh
+3. 支持 `opencode` / `claude` / `trae` / `cursor` / `codex` / `copilot` / `codearts`
 4. 开发前必须确认使用 Developer / Expert / 混合模式
