@@ -157,11 +157,26 @@ claude
 
 ### 开发算子示例
 
-在交互界面中输入算子开发需求，CANNBot 会自动加载工作流技能并指导开发：
+对于 `AddCustom` 这类语义明确的算子，一句描述即可启动：
 
 ```
 帮我生成一个AddCustom算子，适配 Ascend 910 芯片架构，支持 float16/bfloat16/float32 数据类型
 ```
+
+> ⚠️ **开发新算子时，请根据算子难度，参照下方描述示例，补全相关提示词信息**
+
+以开发 `GeluCustom` 算子为例：
+
+```
+帮我生成一个 GeluCustom 算子，适配 Ascend 910 芯片架构，公式（tanh 近似）：
+  gelu(x) = 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
+
+输入输出：
+  - x: [B, N] float16/bfloat16/float32，B 动态
+  - y: 与 x 同 shape / dtype（infershape：输出 = 输入）
+```
+
+把公式、输入输出规格、芯片架构写清楚，便于 CANNBot 准确解析开发需求。
 
 ### 核心工作流
 
