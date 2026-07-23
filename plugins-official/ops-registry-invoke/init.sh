@@ -110,13 +110,13 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.2.0"
+VERSION="1.2.3"
 OPS_TENSOR_REPO="https://gitcode.com/cann/ops-tensor.git"
 OPS_TENSOR_REF="master"
 
 # --- Plugin-specific filters ---
 # Skill whitelist (space-separated list) - references shared ops + local workflow
-INCLUDED_SKILLS="ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-perf-optimize ascendc-regbase-best-practice ascendc-blaze-best-practice ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ascendc-whitebox-design ops-precision-standard ops-profiling ops-simulator ops-registry-invoke-workflow spec-to-design ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
+INCLUDED_SKILLS="ascendc-api-best-practices ascendc-code-review ascendc-crash-debug ascendc-direct-invoke-template ascendc-docs-gen ascendc-docs-search ascendc-env-check npu-arch ascendc-performance-best-practices ascendc-precision-debug ascendc-perf-optimize ascendc-regbase-best-practice ascendc-blaze-best-practice ascendc-blaze-migration ascendc-registry-invoke-template ascendc-runtime-debug ascendc-st-design ascendc-tiling-design ascendc-ut-develop ascendc-whitebox-design ops-precision-standard ops-profiling ops-simulator ops-registry-invoke-workflow spec-to-design ops-spec-gen gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-ops-*"
 

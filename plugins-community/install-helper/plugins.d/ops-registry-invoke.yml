@@ -2,15 +2,15 @@ id: ops-registry-invoke
 dir: plugins-official/ops-registry-invoke
 displayName: AscendC 算子注册调用
 aliases: [ops-registry, ascendc-registry, registry]
-skills: 26
+skills: 27
 agents: 3
 description: 生产级 ACLNN 注册算子全流程：代码→UT/ST→上库
-version: "1.2.2"
+version: "1.2.3"
 configFile: AGENTS.md
 configRootConfigLink: false
 installSkills:
   - dir: ops
-    skills: [ascendc-blaze-best-practice, ascendc-api-best-practices, ascendc-code-review, ascendc-crash-debug, ascendc-direct-invoke-template, ascendc-docs-gen, ascendc-docs-search, ascendc-env-check, npu-arch, ascendc-performance-best-practices, ascendc-precision-debug, ascendc-regbase-best-practice, ascendc-registry-invoke-template, ascendc-runtime-debug, ascendc-st-design, ascendc-tiling-design, ascendc-ut-develop, ascendc-whitebox-design, ops-precision-standard, ops-profiling, ops-spec-gen]
+    skills: [ascendc-blaze-best-practice, ascendc-blaze-migration, ascendc-api-best-practices, ascendc-code-review, ascendc-crash-debug, ascendc-direct-invoke-template, ascendc-docs-gen, ascendc-docs-search, ascendc-env-check, npu-arch, ascendc-performance-best-practices, ascendc-precision-debug, ascendc-regbase-best-practice, ascendc-registry-invoke-template, ascendc-runtime-debug, ascendc-st-design, ascendc-tiling-design, ascendc-ut-develop, ascendc-whitebox-design, ops-precision-standard, ops-profiling, ops-spec-gen]
   - dir: infra
     skills: [gitcode-toolkit, gitcode-pr-handler, gitcode-issue-gen, gitcode-issue-handler]
   - dir: plugins-official/ops-registry-invoke

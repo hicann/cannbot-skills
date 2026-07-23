@@ -11,6 +11,7 @@ description: Blaze/tensor_api 路径的 Matmul 类算子开发指南（Ascend 95
 
 - **仓库**：[gitcode.com/cann/ops-tensor](https://gitcode.com/cann/ops-tensor)
 - **适用平台**：DAV_3510 / Ascend 950
+- **编码规范**：[ops-tensor/CODING_CONVENTIONS.md](https://gitcode.com/cann/ops-tensor/blob/master/CODING_CONVENTIONS.md)
 
 Blaze 库模块文档查阅：`ops-tensor/docs/API/` → [blaze-modules-index.md](references/modules/blaze-library/blaze-modules-index.md)
 

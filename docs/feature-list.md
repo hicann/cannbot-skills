@@ -35,6 +35,7 @@
 | **ascendc-docs-gen** | 算子文档写作参考，支持需求分析、详细设计等多个标准模版 | — |
 | **ops-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
 | **ascendc-blaze-best-practice** | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 | — |
+| **ascendc-blaze-migration** | 将 Ascend 950 Matmul 家族核函数等价迁移到 Blaze/tensor_api，冻结 tiling 与架构，完成原调用链逐字节一致性、性能和双仓 PR 交付 | — |
 | **ascendc-performance-best-practices** | 按算子族组织的性能优化经验与参考代码总结 | — |
 | **ascendc-regbase-best-practice** | DAV_3510 RegBase 算子 API 约束、实现结构、常见陷阱及真实参考算子 | — |
 | **cann-env-setup** | 昇腾 NPU CANN 安装与环境配置指导 | — |

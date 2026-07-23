@@ -1,7 +1,7 @@
 {
   "name": "ops-registry-invoke",
   "description": "Ascend C 算子开发工具CANNBot，管理自定义算子的完整开发流程（设计→开发→验证→上库）。",
-  "version": "1.2.0",
+  "version": "1.2.3",
   "author": {
     "name": "CANNBot"
   },

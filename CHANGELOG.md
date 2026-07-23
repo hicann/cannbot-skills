@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-07-21】
+#### 新特性 New Features
+- 【AscendC/Blaze 迁移】新增 `ascendc-blaze-migration` Skill。面向 Ascend 950 Matmul 家族，冻结 tiling 与 Blaze 架构，完成组件决策、原调用链逐字节一致性、性能验收和双仓 PR 交付；包含安装登记与 RotateQuant 闭环案例。
+
 ### 【2026-07-20】
 #### 测试框架 Test Framework
 - 【ST测试框架】评测用例格式迁移：将全部 95 个 `evals/evals.md` 转换为 `evals/evals.json` 统一格式。新增 `scripts/convert_evals.py` 转换脚本和 `evals_json_parser.py` JSON 解析器，修改 `common.py`/`conftest.py`/`main.py`/`test_*basic.py` 等 8 个文件以读取 JSON 格式。新格式兼容 ST 框架（结构化 type+pattern）和 skill-creator（纯文本 description）双消费者。

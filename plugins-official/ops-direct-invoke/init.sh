@@ -107,14 +107,14 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.0.0"
+VERSION="1.2.5"
 ASC_DEVKIT_REPO="https://gitcode.com/cann/asc-devkit.git"
 ASC_DEVKIT_REF="master"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ascendc-regbase-best-practice ascendc-blaze-best-practice ascendc-mc2-best-practice ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
+INCLUDED_SKILLS="ascendc-tiling-design npu-arch ascendc-api-best-practices ascendc-regbase-best-practice ascendc-blaze-best-practice ascendc-blaze-migration ascendc-mc2-best-practice ops-precision-standard ascendc-docs-search ascendc-env-check ascendc-precision-debug ops-profiling ascendc-direct-invoke-template torch-ascendc-op-extension ascendc-runtime-debug ascendc-crash-debug ascendc-code-review gitcode-toolkit gitcode-pr-handler gitcode-issue-gen gitcode-issue-handler"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="ascendc-kernel-*"
 

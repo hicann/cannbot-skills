@@ -118,6 +118,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "ascendc-direct-invoke-to-registry-invoke", description: "直调转注册调用", source: "ops" },
       { id: "ascendc-registry-invoke-to-direct-invoke", description: "注册调用转直调", source: "ops" },
       { id: "ascendc-blaze-best-practice", description: "Matmul/GEMM Blaze 直调生成", source: "ops" },
+      { id: "ascendc-blaze-migration", description: "AscendC Matmul 家族等价迁移到 Blaze", source: "ops" },
       { id: "ascendc-simt-best-practices", description: "SIMT 最佳实践与 API 导航", source: "ops" },
       { id: "ascendc-simt-tiling-design", description: "SIMT 算子切分设计", source: "ops" },
       { id: "torch-ascendc-op-extension", description: "Ascend C 对接 PyTorch", source: "ops" },
