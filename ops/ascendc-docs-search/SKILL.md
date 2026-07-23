@@ -17,18 +17,21 @@ permission:
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | 通过 `find "$ASC_DEVKIT_DIR/docs/api/" -name "*.md"` 智能搜索 | API 文档（不依赖具体子目录） |
+| API 文档 | 通过 `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "*.md"` 智能搜索 | API 文档（不依赖具体子目录） |
 | 高性能模板 | `$ASC_DEVKIT_DIR/examples/00_introduction/01_add/basic_api_memory_allocator_add/` | 双缓冲+流水线标准实现 |
 | 各类示例 | `$ASC_DEVKIT_DIR/examples/00_introduction/` | 加法、减法、多输入等 |
 | 完整文档 | `$ASC_DEVKIT_DIR/docs/` | 完整开发文档 |
 | Tiling 实现 | `$ASC_DEVKIT_DIR/impl/adv_api/tiling/` | Tiling 参数配置参考 |
 | 矢量计算 | `$ASC_DEVKIT_DIR/examples/00_introduction/11_vectoradd/` | 矢量 API 使用 |
 | 调试示例 | `$ASC_DEVKIT_DIR/examples/01_utilities/00_printf/printf.asc` | printf 调试方法 |
+| HCCL 通信 API 头文件 | `$ASC_DEVKIT_DIR/include/adv_api/hccl/` | HCCL 集合通信头文件（hccl.h、hccl_tiling.h 等），API 文档在 `docs/zh/api/SIMD-API/高阶API/HCCL通信类/` |
 
 ## 资料查找优先级
 
 ```
-1. $ASC_DEVKIT_DIR/docs/api/ 下的所有 .md 文档（智能 find 搜索）
+0. 先查 [api-index.md](references/api-index.md) 定位 API 所属大类和子目录路径
+         ↓
+1. $ASC_DEVKIT_DIR/docs/zh/api/ 下的所有 .md 文档（按定位的子目录 find 搜索）
          ↓ 找不到
 2. $ASC_DEVKIT_DIR/examples/ (示例代码 - 587 个)
          ↓ 找不到
@@ -52,7 +55,7 @@ permission:
 1. **列出所有变体**：
    ```bash
    # 搜索某个 API 的所有变体（将 APIName 替换为实际 API 名称）
-   find "$ASC_DEVKIT_DIR/docs/api/" -name "${APIName}*.md"
+   find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "${APIName}*.md"
 
    # 示例：
    # APIName.md        ← 基础版本
@@ -73,10 +76,10 @@ permission:
 
 ```bash
 # 查找某个 API 的所有变体（强制，将 APIName 替换为实际名称）
-find "$ASC_DEVKIT_DIR/docs/api/" -name "${APIName}*.md"
+find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "${APIName}*.md"
 
 # 在所有变体中搜索特定关键词
-grep -rl "关键词" "$ASC_DEVKIT_DIR/docs/api/" --include="*.md"
+grep -rl "关键词" "$ASC_DEVKIT_DIR/docs/zh/api/" --include="*.md"
 ```
 
 ## 环境兼容性

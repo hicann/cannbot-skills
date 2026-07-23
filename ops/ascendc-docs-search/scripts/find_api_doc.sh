@@ -11,7 +11,7 @@
 
 # find_api_doc.sh — 结构无关的 Ascend C API 文档查找工具
 #
-# 用途：在 $ASC_DEVKIT_DIR/docs/api/ 下搜索 API 文档，不假设子目录结构。
+# 用途：在 $ASC_DEVKIT_DIR/docs/zh/api/ 下搜索 API 文档，不假设子目录结构。
 #       适用于 health check、ST 测试，以及作为 agent find 命令的参考实现。
 #
 # 用法：find_api_doc.sh <APIName> [APIName2 ...]
@@ -27,14 +27,14 @@ if [ -z "$ASC_DEVKIT_DIR" ]; then
   exit 2
 fi
 
-if [ ! -d "$ASC_DEVKIT_DIR/docs/api/" ]; then
-  echo "Error: $ASC_DEVKIT_DIR/docs/api/ not found" >&2
+if [ ! -d "$ASC_DEVKIT_DIR/docs/zh/api/" ]; then
+  echo "Error: $ASC_DEVKIT_DIR/docs/zh/api/ not found" >&2
   exit 2
 fi
 
 if [ $# -eq 0 ]; then
   echo "Usage: $0 <APIName> [APIName2 ...]" >&2
-  echo "Searches $ASC_DEVKIT_DIR/docs/api/ for matching .md files" >&2
+  echo "Searches $ASC_DEVKIT_DIR/docs/zh/api/ for matching .md files" >&2
   exit 2
 fi
 
@@ -43,7 +43,7 @@ for api in "$@"; do
   while IFS= read -r path; do
     printf '%s\n' "${path#$ASC_DEVKIT_DIR/}"
     found=1
-  done < <(find "$ASC_DEVKIT_DIR/docs/api/" -name "${api}*.md" -type f 2>/dev/null | sort)
+  done < <(find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "${api}*.md" -type f 2>/dev/null | sort)
 done
 
 if [ "$found" -eq 0 ]; then

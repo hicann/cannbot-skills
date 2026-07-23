@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class AscendSearchSkill:
     """Ascend社区搜索技能主类"""
 
-    def __init__(self, base_url="https://www.hiascend.com"):
+    def __init__(self, base_url="https://www.hiascend.com/"):
         self.base_url = base_url
         self.search_endpoint = "/ascendgateway/ascendservice/intelligent/search"
         self._session = requests.Session()
