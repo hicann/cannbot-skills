@@ -322,7 +322,7 @@ A: 使用两级分块策略：外层 BLOCK_SIZE 控制 coreDim 合规，内层 B
 - [Grid/Program ID 与 AI Core 对应关系](./02-grid-and-program-id.md)
 - [NPU 内存层次](./03-memory-model.md)
 - [数据类型支持矩阵与约束](./04-data-types.md)
-- [硬件架构概览](../00-Hardware_Architecture_Overview.md)
+- [硬件架构概览](../../docs_ascendnpu_ir/00-Architecture/01-npu-hardware-overview.md)
 
 ## 源文件参考
 

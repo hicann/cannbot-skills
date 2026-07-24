@@ -378,7 +378,7 @@ A: 设置 `TRITON_DEBUG=1` 可以查看编译中间产物。如果遇到 coreDim
 - [SPMD 模型在 NPU 上的映射](./01-spmd-on-npu.md)
 - [NPU 内存层次](./03-memory-model.md)
 - [数据类型支持矩阵与约束](./04-data-types.md)
-- [硬件架构概览](../00-Hardware_Architecture_Overview.md)
+- [硬件架构概览](../../docs_ascendnpu_ir/00-Architecture/01-npu-hardware-overview.md)
 
 ## 源文件参考
 

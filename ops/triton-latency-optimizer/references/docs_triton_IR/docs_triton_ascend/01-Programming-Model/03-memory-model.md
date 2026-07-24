@@ -427,7 +427,7 @@ A: 对于 shape 为 (2048, 3) 的 Tensor，尾轴 3 会被自动补齐到 32B �
 - [SPMD 模型在 NPU 上的映射](./01-spmd-on-npu.md)
 - [Grid/Program ID 与 AI Core 对应关系](./02-grid-and-program-id.md)
 - [数据类型支持矩阵与约束](./04-data-types.md)
-- [硬件架构概览](../00-Hardware_Architecture_Overview.md)
+- [硬件架构概览](../../docs_ascendnpu_ir/00-Architecture/01-npu-hardware-overview.md)
 
 ## 源文件参考
 

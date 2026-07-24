@@ -16,7 +16,6 @@
 | [continuous-copy-aggregation.md](continuous-copy-aggregation.md) | Split / Chunk / Slice / Pad / Unbind 等纯拷贝型算子 | 连续拷贝聚合、减少 kernel 启动 |
 | [dimension-merge-large-block.md](dimension-merge-large-block.md) | BatchNorm / LayerNorm / GroupNorm / InstanceNorm / RMSNorm / Softmax | 维度合并、大 BLOCK 累加、提高 mask 覆盖率 |
 | [permute-layout-transform.md](permute-layout-transform.md) | Permute / Transpose / reshape-as-copy 等布局变换算子 | 模式特化、连续维度合并、view 短路 |
-| [swiglu-quant.md](swiglu-quant.md) | SwiGLU + 量化算子 | 量化融合、特定内存访问模式 |
 
 ### 通用辅助文档
 
