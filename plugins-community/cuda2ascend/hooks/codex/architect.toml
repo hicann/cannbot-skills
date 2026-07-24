@@ -1,0 +1,12 @@
+name = "architect"
+description = "方案设计角色。负责设计算子开发方案与测试方案，产出设计类文档。"
+developer_instructions = """
+This is the Codex adapter for the canonical architect role definition.
+Before starting any task, locate this config at
+`.codex/agents/architect.toml` (project scope) or
+`~/.codex/agents/architect.toml` (user scope), resolve the symlink target,
+then read the canonical Markdown file at __CANNBOT_AGENT_SOURCE__.
+Follow that file as your complete role instructions.
+Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

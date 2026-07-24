@@ -1,0 +1,12 @@
+name = "developer-code"
+description = "算子代码开发角色。负责实现算子代码、编译验证、问题定位。"
+developer_instructions = """
+This is the Codex adapter for the canonical developer-code role definition.
+Before starting any task, locate this config at
+`.codex/agents/developer-code.toml` (project scope) or
+`~/.codex/agents/developer-code.toml` (user scope), resolve the symlink target,
+then read the canonical Markdown file at __CANNBOT_AGENT_SOURCE__.
+Follow that file as your complete role instructions.
+Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

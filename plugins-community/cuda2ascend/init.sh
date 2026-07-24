@@ -110,6 +110,9 @@ safe_install_file() {
 
 BRAND="cannbot"
 VERSION="1.0.0"
+# Supported target tools — single source of truth (modify-init.md 红线 1).
+# Subclass init.sh queries this via `--list-tools` instead of hardcoding.
+SUPPORTED_TOOLS=("opencode" "claude" "codex")
 
 # ============================================================
 # Third-party repository registry
@@ -251,7 +254,7 @@ Usage: init.sh [level] [tool] [install_path] [options]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default) or "claude"
+  tool         - Target tool: one of ${SUPPORTED_TOOLS[*]} (default: ${SUPPORTED_TOOLS[0]})
   install_path - Project-level install directory (default: current working directory)
 
 Options:
@@ -277,6 +280,7 @@ Examples:
 Installation paths:
   opencode: .opencode/{skills,agents,plugin}/   + AGENTS.md in project root
   claude:   .claude/{skills,agents,hooks}/      + settings.json + AGENTS.md/CLAUDE.md in project root
+  codex:    .agents/skills/ + .codex/agents/     + AGENTS.md in project root (no permission hook)
 
 Intermediate directory:
   .cannbot/              workflow intermediate files & state
@@ -308,10 +312,22 @@ is_registered_repo() {
     return 1
 }
 
+# Check whether a name is a supported target tool (returns 0 if yes)
+is_supported_tool() {
+    local target="$1"
+    local t
+    for t in "${SUPPORTED_TOOLS[@]}"; do
+        [ "${t}" = "${target}" ] && return 0
+    done
+    return 1
+}
+
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     arg="$1"
     case "$arg" in
+        --list-tools)
+            echo "${SUPPORTED_TOOLS[*]}"; exit 0 ;;
         --help)
             show_help; exit 0 ;;
         --override)
@@ -351,8 +367,14 @@ while [ $# -gt 0 ]; do
             exit 1 ;;
         global|project)
             LEVEL="$1"; shift; continue ;;
-        opencode|claude) TOOL="$1"; shift; continue ;;
+        opencode)      TOOL="$arg"; shift; continue ;;
+        claude)        TOOL="$arg"; shift; continue ;;
+        codex)         TOOL="$arg"; shift; continue ;;
         *)
+            # 兜底：动态校验 SUPPORTED_TOOLS，支持未来新增工具
+            if is_supported_tool "$1"; then
+                TOOL="$1"; shift; continue
+            fi
             POSITIONAL+=("$1"); shift; continue ;;
     esac
 done
@@ -360,7 +382,7 @@ done
 # 位置参数只允许剩一个（install_path）。多余位置参数通常是未知工具名
 # （如未来新增工具而基类未升级），报错而非静默误当安装路径。
 if [ ${#POSITIONAL[@]} -gt 1 ]; then
-    err "无法识别的参数: ${POSITIONAL[*]:0:$((${#POSITIONAL[@]}-1))}（当前支持的工具: opencode claude）"
+    err "无法识别的参数: ${POSITIONAL[*]:0:$((${#POSITIONAL[@]}-1))}（当前支持的工具: ${SUPPORTED_TOOLS[*]}）"
     exit 1
 fi
 if [ ${#POSITIONAL[@]} -eq 1 ]; then
@@ -385,6 +407,8 @@ if [ "${LEVEL}" = "global" ]; then
         CONFIG_ROOT="${HOME}/.config/opencode"
     elif [ "${TOOL}" = "claude" ]; then
         CONFIG_ROOT="${HOME}/.claude"
+    elif [ "${TOOL}" = "codex" ]; then
+        CONFIG_ROOT="${HOME}/.codex"
     fi
     INSTALL_BASE="${HOME}"
 else
@@ -398,11 +422,26 @@ else
         CONFIG_ROOT="${INSTALL_BASE}/.opencode"
     elif [ "${TOOL}" = "claude" ]; then
         CONFIG_ROOT="${INSTALL_BASE}/.claude"
+    elif [ "${TOOL}" = "codex" ]; then
+        CONFIG_ROOT="${INSTALL_BASE}/.codex"
     fi
 fi
 
 CANNBOT_DIR="${CONFIG_ROOT}"
 CANNBOT_MID_DIR="${INSTALL_BASE}/.cannbot"
+
+# Codex discovers skills from .agents/skills/ (not .codex/skills/).
+# Skills and agents are linked to separate discovery roots.
+SKILL_DISCOVERY_ROOT="${CANNBOT_DIR}/skills"
+AGENT_DISCOVERY_ROOT="${CANNBOT_DIR}/agents"
+if [ "${TOOL}" = "codex" ]; then
+    if [ "${LEVEL}" = "global" ]; then
+        SKILL_DISCOVERY_ROOT="${HOME}/.agents/skills"
+    else
+        SKILL_DISCOVERY_ROOT="${INSTALL_BASE}/.agents/skills"
+    fi
+    AGENT_DISCOVERY_ROOT="${CANNBOT_DIR}/agents"
+fi
 
 # ============================================================
 # Clean up legacy dirs
@@ -547,28 +586,49 @@ echo ""
 # Step 3: Link agents (flattened)
 # ============================================================
 step "[3/6] Linking agents..."
-AGENTS_LINK_DIR="${CANNBOT_DIR}/agents"
+AGENTS_LINK_DIR="${AGENT_DISCOVERY_ROOT}"
 rm -rf "${AGENTS_LINK_DIR}"
 mkdir -p "${AGENTS_LINK_DIR}"
 
 agent_count=0
-for f in "${AGENT_FILES[@]}"; do
-    link_name="$(basename "${f}")"
-    if [ -e "${AGENTS_LINK_DIR}/${link_name}" ] || [ -L "${AGENTS_LINK_DIR}/${link_name}" ]; then
-        warn "agent name conflict, overwriting: ${link_name}"
+if [ "${TOOL}" = "codex" ]; then
+    # Codex uses standalone TOML agent definitions (agents/codex/*.toml).
+    # Each TOML has a __CANNBOT_AGENT_SOURCE__ placeholder resolved to the
+    # canonical .md agent file, so codex reads the same role instructions.
+    CODEX_AGENT_ROOT="${PLUGIN_ROOT}/hooks/codex"
+    if [ -d "${CODEX_AGENT_ROOT}" ]; then
+        for toml in "${CODEX_AGENT_ROOT}"/*.toml; do
+            [ -f "${toml}" ] || continue
+            name="$(basename "${toml}")"
+            base="${name%.toml}"
+            canonical="${LOCAL_AGENT_ROOT}/${base}.md"
+            tmpfile=$(mktemp)
+            sed "s|__CANNBOT_AGENT_SOURCE__|${canonical}|g" "${toml}" > "${tmpfile}"
+            mv "${tmpfile}" "${AGENTS_LINK_DIR}/${name}"
+            agent_count=$((agent_count + 1))
+        done
+        ok "Agents: ${agent_count} codex TOML files"
+    else
+        warn "No codex agent TOMLs found at ${CODEX_AGENT_ROOT}, skipping agents"
     fi
-    ln -sfn "$(realpath "${f}")" "${AGENTS_LINK_DIR}/${link_name}"
-    agent_count=$((agent_count + 1))
-done
-
-ok "Agents: ${agent_count} linked (flattened)"
+else
+    for f in "${AGENT_FILES[@]}"; do
+        link_name="$(basename "${f}")"
+        if [ -e "${AGENTS_LINK_DIR}/${link_name}" ] || [ -L "${AGENTS_LINK_DIR}/${link_name}" ]; then
+            warn "agent name conflict, overwriting: ${link_name}"
+        fi
+        ln -sfn "$(realpath "${f}")" "${AGENTS_LINK_DIR}/${link_name}"
+        agent_count=$((agent_count + 1))
+    done
+    ok "Agents: ${agent_count} linked (flattened)"
+fi
 echo ""
 
 # ============================================================
 # Step 4: Link skills registered by agents
 # ============================================================
 step "[4/6] Linking skills..."
-SKILLS_LINK_DIR="${CANNBOT_DIR}/skills"
+SKILLS_LINK_DIR="${SKILL_DISCOVERY_ROOT}"
 rm -rf "${SKILLS_LINK_DIR}"
 mkdir -p "${SKILLS_LINK_DIR}"
 
@@ -696,6 +756,14 @@ SETTINGS_PY
         warn "claude permission-guard.js not found, skipping"
     fi
     echo ""
+elif [ "${TOOL}" = "codex" ]; then
+    # Codex does not support PreToolUse / tool.execute.before hooks.
+    # Permission enforcement is downgraded to prompt-only constraints.
+    echo -e "  ${YELLOW}${BOLD}⚠ WARNING: Codex does not support permission-guard hooks.${NC}"
+    echo -e "  ${DIM}Role-based write restrictions (PM only-schedule, developer-code code-only, etc.)${NC}"
+    echo -e "  ${DIM}are enforced by AGENTS.md prompt, NOT by a hard hook. Subagent directory${NC}"
+    echo -e "  ${DIM}isolation is best-effort, not guaranteed.${NC}"
+    echo ""
 else
     OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"
     if [ -f "${OC_PLUGIN_SRC}" ]; then
@@ -762,6 +830,8 @@ cat > "${MANIFEST}" << MANIFEST_EOF
   "installed_skills": ${SKILLS_JSON},
   "installed_agents": ${AGENTS_JSON},
   "brand_dir": "${CONFIG_ROOT}",
+  "skill_discovery_root": "${SKILL_DISCOVERY_ROOT}",
+  "agent_discovery_root": "${AGENT_DISCOVERY_ROOT}",
   "mid_dir": "${CANNBOT_MID_DIR}",
 ${REPO_DIRS_JSON}  "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -771,7 +841,11 @@ health_ok=true
 health_errors=""
 
 for sub in skills agents; do
-    target="${CANNBOT_DIR}/${sub}"
+    if [ "${sub}" = "skills" ]; then
+        target="${SKILL_DISCOVERY_ROOT}"
+    else
+        target="${AGENT_DISCOVERY_ROOT}"
+    fi
     if [ -d "${target}" ]; then
         count=$(ls -1A "${target}" 2>/dev/null | wc -l)
         [ "${count}" -eq 0 ] && health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ${sub}/ is empty"
@@ -825,11 +899,18 @@ fi
 # ============================================================
 CLI_NAME="opencode"
 [ "${TOOL}" = "claude" ] && CLI_NAME="claude"
+[ "${TOOL}" = "codex" ] && CLI_NAME="codex"
 echo ""
 echo -e "  ${GREEN}${BOLD}✓ ${TEAM_NAME} installed!${NC}"
 echo -e "  ${DIM}Skills: ${skill_count} | Agents: ${agent_count}${NC}"
-echo ""
-echo -e "  ${BOLD}Quick Start:${NC}"
-echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}${CLI_NAME}${NC}"
-echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16，shape 主要是 [1,128]、[4,2048]${NC}"
+
+# Quick Start 仅在基类直接调用（无 --override）时输出。
+# 子类 init.sh 通过 --override 调用基类时，由子类自行输出本段，
+# 以便各子仓定制 Quick Start 内容（见 example/init.sh 的 QUICK_START 函数）。
+if [ -z "${OVERRIDE_DIR}" ]; then
+    echo ""
+    echo -e "  ${BOLD}Quick Start:${NC}"
+    echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}${CLI_NAME}${NC}"
+    echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16，shape 主要是 [1,128]、[4,2048]${NC}"
+fi
 echo ""

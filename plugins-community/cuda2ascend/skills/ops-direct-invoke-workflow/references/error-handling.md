@@ -46,5 +46,5 @@
 
 ## 恢复规则
 
-- 暂停/失败落盘到 `.cannbot/state.json`（见 [state-schema.md](state-schema.md)）的可恢复状态点：已完成阶段、当前阻塞点、已产出交付件、当前轮次。
+- 暂停/失败落盘到 `.cannbot/<算子名>/state.json`（见 [state-schema.md](state-schema.md)）的可恢复状态点：已完成阶段、当前阻塞点、已产出交付件、当前轮次。
 - 恢复时从状态点续跑，不重跑已通过阶段。

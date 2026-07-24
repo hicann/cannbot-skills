@@ -73,5 +73,5 @@
 ## 落盘与下游
 
 - 用例表 + gen_data 用例 → **test 目录**（随算子工程）。
-- 若用引擎：参数定义/因子值/覆盖报告等设计中间物 → `.cannbot` 设计目录或 `test/st/design/`，供覆盖矩阵核对。
+- 若用引擎：参数定义/因子值/覆盖报告等设计中间物 → `.cannbot/<算子名>/` 设计目录或 `test/st/design/`，供覆盖矩阵核对。
 - golden 计算路径 = 需求数学定义；精度容差、同源截断、expect_error 判定见 [precision-and-perf.md](precision-and-perf.md)。

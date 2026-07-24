@@ -1,6 +1,6 @@
 # {算子名称} 开发日志
 
-> 全程状态与进度跟踪。PM 汇总各子 Agent 的日志摘要，统一维护本文件。与 `.cannbot/state.json` 配合（state.json 是机器可读状态，本文件是人可读记录）。
+> 全程状态与进度跟踪。PM 汇总各子 Agent 的日志摘要，统一维护本文件。与 `.cannbot/<算子名>/state.json` 配合（state.json 是机器可读状态，本文件是人可读记录）。本文件落 `.cannbot/<算子名>/LOG.md`。
 
 ## 基本信息
 

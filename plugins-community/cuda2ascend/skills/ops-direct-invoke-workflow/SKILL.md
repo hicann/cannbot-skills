@@ -35,8 +35,8 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 | 编号 | 流程 | 角色 | 输入 | 输出 | 说明 | 备注 |
 |------|------|------|------|------|------|------|
 | **阶段0：开发准备** | | | | | | |
-| 0 | 开发准备 | developer | - | 环境信息文档 | 检查 NPU 设备、CANN 环境、编译环境，写入 `.cannbot` | 交付件可复用，支持独立触发 |
-| ⛔ CP0 | 环境确认 | QA | 环境信息文档 | 用户问卷 json | QA 加载 `workflow-cp0` 生成环境确认问卷，PM 发送给用户 | 固定用户确认；失败由用户决定修复或停止 |
+| 0 | 开发准备 | developer | - | 环境信息文档 | 检查 NPU 设备、CANN 环境、编译环境，写入 `.cannbot/0-环境信息.md`（共享留根） | 交付件可复用；`.cannbot/0-环境信息.md` 已存在且环境未变时跳过 0 与 CP0，新算子直入 1.1 |
+| ⛔ CP0 | 环境确认 | QA | 环境信息文档 | 用户问卷 json | QA 加载 `workflow-cp0` 生成环境确认问卷，PM 发送给用户 | 固定用户确认；失败由用户决定修复或停止；阶段 0 被跳过时一并跳过 |
 | **阶段1：需求分析** | | | | | | |
 | 1.1 | 需求分析 | PM | 对话上下文、仓库设计约束 | 需求文档 | 数学定义、算子原型、目标芯片、精度/性能要求；缺项发问卷补齐 | |
 | CP1 | 需求确认 | QA | 需求文档 | 验收结论 | QA 加载 `workflow-cp1` 核对需求；需用户确认时生成问卷 json 交 PM 发送 | 不通过打回 1.1 |
@@ -63,13 +63,13 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 | 6.5 | 检视意见修复 | developer | PR 检视意见 | 修复后代码 | 修复 PR 检视意见 | |
 | CP6 | CI 通过确认 | QA | CI 报告 + PR 状态 | 上库确认 | QA 加载 `workflow-cp6` 确认 CI 通过、检视意见闭环 | 未通过回退 6.4/6.5 后重触发 CI |
 | **阶段7：开发总结** | | | | | | |
-| 7.1 | 开发报告 | developer-doc | 全部交付物 | 开发报告 | 整理开发过程与交付物清单，写入 `.cannbot` | |
-| 7.2 | 经验总结 | developer-doc | 开发过程记录 | 经验总结文档 | 沉淀开发经验与踩坑记录，写入 `.cannbot` | |
+| 7.1 | 开发报告 | developer-doc→PM | 全部交付物 | 开发报告 | developer-doc 整理开发过程与交付物清单，PM 落盘 `.cannbot/<算子名>/` | |
+| 7.2 | 经验总结 | developer-doc→PM | 开发过程记录 | 经验总结文档 | developer-doc 沉淀开发经验与踩坑记录，PM 落盘 `.cannbot/<算子名>/` | |
 
 ## 通用约定
 
-- **状态与恢复**：每阶段（步骤或 CP）完成后将进度持久化到 `.cannbot/state.json`（结构见 [state-schema.md](references/state-schema.md)）；任何暂停/失败落盘到可恢复状态点，恢复时从该点续跑，不重跑已通过阶段。
-- **中间文件**：所有过程产物（需求/方案/报告/状态）统一放 `.cannbot`，与代码/test/doc 最终交付物区分。`.cannbot` 所有角色均可写，写入路径与命名在任务下发时约定。
+- **状态与恢复**：每阶段（步骤或 CP）完成后将进度持久化到 `.cannbot/<算子名>/state.json`（结构见 [state-schema.md](references/state-schema.md)）；任何暂停/失败落盘到可恢复状态点，恢复时从该点续跑，不重跑已通过阶段。每个算子独占一份 state，多算子互不覆盖。
+- **中间文件**：所有过程产物（需求/方案/报告/状态）统一放 `.cannbot/<算子名>/`，与代码/test/doc 最终交付物区分；环境信息文档例外，作为共享件放 `.cannbot/0-环境信息.md`。`.cannbot` 所有角色均可写，写入路径与命名在任务下发时约定。
 - **最小信息/最小权限**：调度子 Agent 只传当前任务所需输入、只授所需写权限（由 hook 按角色限权）。
 
 ## 参考资源
@@ -79,7 +79,7 @@ description: 直调算子开发工作流编排。承载从需求分析到上库�
 | Task 调用契约 | [references/task-prompts.md](references/task-prompts.md) | 各步子 Agent 的调用参数、输入/输出、验收标准 |
 | 数据流 | [references/data-flow.md](references/data-flow.md) | 各阶段文件 I/O 与 `.cannbot` 产物清单 |
 | 错误处理 | [references/error-handling.md](references/error-handling.md) | 回退策略、最大轮次、恢复规则 |
-| 状态结构 | [references/state-schema.md](references/state-schema.md) | `.cannbot/state.json` 字段约定 |
+| 状态结构 | [references/state-schema.md](references/state-schema.md) | `.cannbot/<算子名>/state.json` 字段约定 |
 | 交付件模板 | `workflow-doc-templates`（逻辑名） | 需求/方案/验收报告/README/LOG/Issue 等模板 |
 | 验收标准 | `workflow-cp*`（逻辑名） | 各 CP 点的验收对象、通过指标、判定方式；QA 在对应 CP 点加载 |
 

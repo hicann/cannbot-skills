@@ -5,7 +5,7 @@
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
 #
@@ -15,6 +15,18 @@
 # This file: https://gitcode.com/cann/cannbot-skills/blob/main/plugins-community/cuda2ascend/example/init.sh
 
 set -e
+
+# ============================================================
+# Quick Start content (shown after a successful install).
+# Customize this block for your repo. $CLI_NAME is resolved at
+# runtime from the target tool (opencode/claude).
+# ============================================================
+show_quick_start() {
+    echo ""
+    echo -e "  ${BOLD}Quick Start:${NC}"
+    echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}${CLI_NAME}${NC}"
+    echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16，shape 主要是 [1,128]、[4,2048]${NC}"
+}
 
 # ============================================================
 # Configuration
@@ -39,9 +51,38 @@ info() { echo -e "  ${DIM}${CYAN}→${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
 # ============================================================
+# Base plugin init.sh path resolution & tools passthrough
+# ============================================================
+# Resolve base plugin init.sh path from SKILLS_REPO (no clone here).
+# Echoes the path if found, empty otherwise.
+resolve_base_init() {
+    if [ -n "${SKILLS_REPO:-}" ] && [ -f "${SKILLS_REPO}/plugins-community/${PLUGIN_NAME}/init.sh" ]; then
+        echo "${SKILLS_REPO}/plugins-community/${PLUGIN_NAME}/init.sh"
+    fi
+}
+
+# Query supported tools from the base plugin init (透传基类 --list-tools 输出).
+# Falls back to a hint when the base is not yet available (e.g. first run,
+# no cache, offline). The fallback intentionally does NOT hardcode tool names.
+query_supported_tools() {
+    local base_init tools
+    base_init="$(resolve_base_init)"
+    if [ -n "${base_init}" ]; then
+        tools="$(bash "${base_init}" --list-tools 2>/dev/null)" || tools=""
+        if [ -n "${tools}" ]; then
+            echo "${tools}"
+            return
+        fi
+    fi
+    echo "(运行一次 init 或通过 --repo cannbot-skills:<path> 指定后，此列表由基类 init 动态提供)"
+}
+
+# ============================================================
 # Usage
 # ============================================================
 show_help() {
+    local tools
+    tools="$(query_supported_tools)"
     cat << EOF
 CANNBot Agent Workspace Initialization Script
 
@@ -49,7 +90,7 @@ Usage:
   ./init.sh <target> [options]
 
 Arguments:
-  target                    Target environment: opencode, claude, etc.
+  target                    Target environment. Supported (from base plugin): ${tools}
 
 Options:
   -h, --help                Show this help message
@@ -57,7 +98,7 @@ Options:
                             Supported names:
                               cannbot-skills  - skills platform (consumed here)
                               asc-devkit / cann-samples / ops-tensor
-                                            - passed through to the base plugin
+                                             - passed through to the base plugin
 
 Examples:
   ./init.sh opencode --repo cannbot-skills:~/cannbot-skills
@@ -67,39 +108,18 @@ EOF
 }
 
 # ============================================================
-# Parse target
+# Parse arguments (collect -h without exiting; defer help display
+# until SKILLS_REPO is resolved so the tools list can be queried)
 # ============================================================
-if [[ $# -lt 1 ]]; then
-    err "Missing required argument: target (e.g. opencode)"
-    echo ""
-    show_help
-    exit 1
-fi
-
+HELP_REQUESTED=false
 TARGET_ENV=""
-case "$1" in
-    -h|--help)
-        show_help; exit 0 ;;
-    -*)
-        err "First argument must be a target (e.g. opencode), got option: '$1'"
-        echo ""
-        show_help
-        exit 1
-        ;;
-    *)
-        TARGET_ENV="$1"; shift ;;
-esac
-
-# ============================================================
-# Parse options
-# ============================================================
 CANNBOT_LOCAL_PATH=""
 REPO_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
-            show_help; exit 0 ;;
+            HELP_REQUESTED=true; shift ;;
         --repo)
             if [[ -z "${2:-}" ]] || [[ "$2" != *:* ]]; then
                 err "--repo requires name:/path argument, got: '${2:-}'"
@@ -126,14 +146,29 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        *)
-            err "Unknown argument: '$1'"
+        -*)
+            err "Unknown option: '$1'"
             echo ""
             show_help
             exit 1
             ;;
+        *)
+            if [ -z "$TARGET_ENV" ]; then
+                TARGET_ENV="$1"; shift
+            else
+                err "Unexpected argument: '$1'"
+                exit 1
+            fi
+            ;;
     esac
 done
+
+if [ "$HELP_REQUESTED" = false ] && [ -z "$TARGET_ENV" ]; then
+    err "Missing required argument: target (e.g. opencode)"
+    echo ""
+    show_help
+    exit 1
+fi
 
 # ============================================================
 # Resolve paths
@@ -143,15 +178,27 @@ AGENT_DIR="${SCRIPT_DIR}"
 REPO_DIR="$(realpath "${SCRIPT_DIR}/..")"
 WORKSPACE_NAME="$(basename "$REPO_DIR")"
 
-# ============================================================
-# Validate cannbot-skills local path (if provided)
-# ============================================================
+# Determine cannbot-skills repo location (path only; clone happens later)
 if [ -n "$CANNBOT_LOCAL_PATH" ]; then
     CANNBOT_LOCAL_PATH="$(realpath "$CANNBOT_LOCAL_PATH" 2>/dev/null || echo "$CANNBOT_LOCAL_PATH")"
     if [ ! -d "$CANNBOT_LOCAL_PATH" ]; then
         err "cannbot-skills directory not found: $CANNBOT_LOCAL_PATH"
         exit 1
     fi
+    SKILLS_REPO="$CANNBOT_LOCAL_PATH"
+else
+    SKILLS_REPO="$REPO_DIR/.cannbot/cannbot-skills"
+fi
+
+# ============================================================
+# Help mode: show help immediately, no side effects.
+# Tools list is queried only from an already-available SKILLS_REPO;
+# if the base is not present (first run / offline), show the fallback
+# hint. Help must not create directories or trigger git clone.
+# ============================================================
+if [ "$HELP_REQUESTED" = true ]; then
+    show_help
+    exit 0
 fi
 
 # ============================================================
@@ -175,10 +222,8 @@ echo ""
 # ============================================================
 step "Setting up cannbot-skills..."
 if [ -n "$CANNBOT_LOCAL_PATH" ]; then
-    SKILLS_REPO="$CANNBOT_LOCAL_PATH"
     ok "Using local cannbot-skills at $SKILLS_REPO"
 else
-    SKILLS_REPO="$REPO_DIR/.cannbot/cannbot-skills"
     if [ -d "$SKILLS_REPO/.git" ]; then
         git -C "$SKILLS_REPO" pull --quiet 2>/dev/null || true
         ok "cannbot-skills updated (local cache)"
@@ -213,3 +258,11 @@ bash "$PLUGIN_INIT" "${PLUGIN_ARGS[@]}" || {
     err "Plugin '${PLUGIN_NAME}' init failed"
     exit 1
 }
+
+# ============================================================
+# Step 3: Quick Start (子仓定制；基类在 --override 时不输出)
+# ============================================================
+CLI_NAME="opencode"
+[ "$TARGET_ENV" = "claude" ] && CLI_NAME="claude"
+show_quick_start
+echo ""
