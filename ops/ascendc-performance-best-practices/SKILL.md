@@ -19,7 +19,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 | Reduction 归约类 | ReduceSum, Softmax, LayerNorm, RMSNorm, ArgMax | DAV_3510 | ✅ [实现索引](reference/reduce/guide.md) · [模板代码与使用指南](reference/reduce/templates/usage_guide.md) · [公共基类](reference/reduce/templates/dav310/softmax_v2_base.template) · [State Resident](reference/reduce/templates/state_resident_design.md) |
 | Elementwise 逐元素类 | Sin, Cos, Abs, Exp | DAV_3510 | ✅ [双缓冲设计](reference/elementwise/double_buffer_design.md) · [向量化效率优化](reference/elementwise/vector_efficiency_design.md) |
 | Broadcast 广播类 | Add, Mul, Sub 等含广播轴算子 | DAV_3510 | ✅ [性能优化指南](reference/broadcast/broadcast_design.md)（选型型，见结构 B） |
-| Conversion 数据转换类 | Transpose, Concat, Split | DAV_3510 | ✅ [Transpose融合设计](reference/conversion/transpose_fusion_design.md) |
+| Conversion 数据转换类 | Transpose, Concat, Split | DAV_3510 | ✅ [Transpose融合设计](reference/conversion/transpose_fusion_design.md) · ✅ [性能优化指南](reference/conversion/guide.md) |
 | Convolution 卷积类 | Conv2D, DepthwiseConv | — | 📋 规划中 |
 | NN 神经网络类 | FlashAttention, GroupNorm | — | 📋 规划中 |
 | Random 随机类 | RandomUniform, Dropout | — | 📋 规划中 |
