@@ -18,6 +18,7 @@ import type {
 } from "../types/index.js";
 import { getConfigRoot, getManifestPath, getAgentsFileName, VALID_TOOLS } from "../utils/paths.js";
 import { getAllPlugins } from "./registry.js";
+import { isSymlink } from "../utils/fs-helpers.js";
 
 export function readManifest(configRoot: string): CannbotManifest | null {
   const manifestPath = getManifestPath(configRoot);
@@ -107,22 +108,26 @@ function verifyPluginFilesExist(configRoot: string, manifest: CannbotManifest, t
   const skillsDir = join(configRoot, "skills");
   const agentsDir = join(configRoot, "agents");
   
+  let hasAnyComponent = false;
+  
   // 验证 skills
   if (manifest.installed_skills && manifest.installed_skills.length > 0) {
     const hasAnySkill = manifest.installed_skills.some((skillId) => {
       const skillPath = join(skillsDir, skillId);
-      return existsSync(skillPath);
+      return existsSync(skillPath) || isSymlink(skillPath);
     });
-    if (!hasAnySkill) return false;
+    if (hasAnySkill) hasAnyComponent = true;
   }
   
   // 验证 agents
   if (manifest.installed_agents && manifest.installed_agents.length > 0) {
     const hasAnyAgent = manifest.installed_agents.some((agentId) => {
       const agentPath = join(agentsDir, agentId);
-      return existsSync(agentPath);
+      const agentPathMd = join(agentsDir, agentId + ".md");
+      return existsSync(agentPath) || isSymlink(agentPath) ||
+             existsSync(agentPathMd) || isSymlink(agentPathMd);
     });
-    if (!hasAnyAgent) return false;
+    if (hasAnyAgent) hasAnyComponent = true;
   }
   
   // 验证配置文件（AGENTS.md / CLAUDE.md）
@@ -130,7 +135,11 @@ function verifyPluginFilesExist(configRoot: string, manifest: CannbotManifest, t
   const configFilePath = level === "project"
     ? join(configRoot, "..", agentsFileName)
     : join(configRoot, agentsFileName);
-  if (!existsSync(configFilePath)) return false;
+  if (existsSync(configFilePath) || isSymlink(configFilePath)) hasAnyComponent = true;
   
-  return true;
+  // 验证 per-plugin manifest 文件
+  const pluginManifestPath = join(configRoot, `${manifest.team}-manifest.json`);
+  if (existsSync(pluginManifestPath)) hasAnyComponent = true;
+  
+  return hasAnyComponent;
 }

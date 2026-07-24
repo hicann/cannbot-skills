@@ -119,3 +119,9 @@ export interface AppConfig {
   repoPath?: string;
   installedPlugins: string[];
 }
+
+export interface SkillBatchRecord {
+  batchId: string;
+  installedAt: string;
+  skills: string[];
+}

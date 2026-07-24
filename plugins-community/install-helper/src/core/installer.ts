@@ -124,7 +124,8 @@ export async function installPlugin(
           cwd,
           configRoot,
           result.manifest,
-          plugin.externalRepos?.map(r => basename(r.dir))
+          plugin.externalRepos?.map(r => basename(r.dir)),
+          plugin.configRootConfigLink
         );
         
         if (backupInfo) {
@@ -221,7 +222,8 @@ export async function installPlugin(
         cwd,
         configRoot,
         manifest,
-        plugin.externalRepos?.map(r => basename(r.dir))
+        plugin.externalRepos?.map(r => basename(r.dir)),
+        plugin.configRootConfigLink
       );
       
       if (backupInfo) {

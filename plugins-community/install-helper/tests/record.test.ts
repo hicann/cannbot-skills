@@ -171,4 +171,107 @@ describe("record", () => {
       expect(count).toBe(1);
     });
   });
+
+  describe("batch tracking", () => {
+    it("creates a batch entry on add", async () => {
+      const { addSkillsToRecord, readSkillRecord, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      addSkillsToRecord(["skill-a", "skill-b"], "opencode", "project", testDir);
+      const record = readSkillRecord();
+      const entry = record.opencode.project[testDir];
+      expect(entry.batches).toBeDefined();
+      expect(entry.batches!.length).toBe(1);
+      expect(entry.batches![0].skills).toContain("skill-a");
+      expect(entry.batches![0].skills).toContain("skill-b");
+      expect(entry.batches![0].batchId).toMatch(/^batch-/);
+      expect(entry.batches![0].installedAt).toBeTruthy();
+    });
+
+    it("creates separate batches for separate install calls", async () => {
+      const { addSkillsToRecord, readSkillRecord, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      addSkillsToRecord(["skill-a"], "opencode", "project", testDir);
+      addSkillsToRecord(["skill-b"], "opencode", "project", testDir);
+      const record = readSkillRecord();
+      const entry = record.opencode.project[testDir];
+      expect(entry.batches!.length).toBe(2);
+      expect(entry.batches![0].skills).toEqual(["skill-a"]);
+      expect(entry.batches![1].skills).toEqual(["skill-b"]);
+    });
+
+    it("getLastBatchSkills returns last batch skills", async () => {
+      const { addSkillsToRecord, getLastBatchSkills, getRecordPath } = await import("../src/core/record.js");
+      const { getConfigRoot } = await import("../src/utils/paths.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      const configRoot = getConfigRoot("opencode", "project", testDir);
+      const skillsDir = join(configRoot, "skills");
+      try {
+        mkdirSync(join(skillsDir, "skill-a"), { recursive: true });
+        mkdirSync(join(skillsDir, "skill-b"), { recursive: true });
+        mkdirSync(join(skillsDir, "skill-c"), { recursive: true });
+        addSkillsToRecord(["skill-a"], "opencode", "project", testDir);
+        addSkillsToRecord(["skill-b", "skill-c"], "opencode", "project", testDir);
+        const lastBatch = getLastBatchSkills("opencode", "project", testDir);
+        expect(lastBatch).not.toBeNull();
+        expect(lastBatch).toEqual(["skill-b", "skill-c"]);
+      } finally {
+        rmSync(configRoot, { recursive: true, force: true });
+      }
+    });
+
+    it("getLastBatchSkills returns null when no batches", async () => {
+      const { getLastBatchSkills, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      const lastBatch = getLastBatchSkills("opencode", "project", testDir);
+      expect(lastBatch).toBeNull();
+    });
+
+    it("removeSkillsFromRecord cleans up batch entries", async () => {
+      const { addSkillsToRecord, removeSkillsFromRecord, readSkillRecord, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      addSkillsToRecord(["skill-a", "skill-b"], "opencode", "project", testDir);
+      addSkillsToRecord(["skill-c"], "opencode", "project", testDir);
+      removeSkillsFromRecord(["skill-a"], "opencode", "project", testDir);
+      const record = readSkillRecord();
+      const entry = record.opencode.project[testDir];
+      expect(entry.skills).not.toContain("skill-a");
+      expect(entry.batches![0].skills).not.toContain("skill-a");
+      expect(entry.batches![0].skills).toContain("skill-b");
+    });
+
+    it("removes empty batch entries after cleanup", async () => {
+      const { addSkillsToRecord, removeSkillsFromRecord, readSkillRecord, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      const thisTestDir = join(tmpdir(), `ih-rec-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      mkdirSync(thisTestDir, { recursive: true });
+      addSkillsToRecord(["skill-a"], "opencode", "project", thisTestDir);
+      addSkillsToRecord(["skill-b"], "opencode", "project", thisTestDir);
+      removeSkillsFromRecord(["skill-a"], "opencode", "project", thisTestDir);
+      const record = readSkillRecord();
+      const entry = record.opencode.project[thisTestDir];
+      expect(entry.batches!.length).toBe(1);
+      expect(entry.batches![0].skills).toEqual(["skill-b"]);
+      rmSync(thisTestDir, { recursive: true, force: true });
+    });
+
+    it("backward compatible with old records without batches field", async () => {
+      const { readSkillRecord, writeSkillRecord, getLastBatchSkills, getRecordPath } = await import("../src/core/record.js");
+      mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
+      const oldRecord = {
+        opencode: {
+          project: {
+            [testDir]: {
+              skills: ["skill-old"],
+              installTime: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        },
+      };
+      writeSkillRecord(oldRecord);
+      const record = readSkillRecord();
+      expect(record.opencode.project[testDir].batches).toBeUndefined();
+      const lastBatch = getLastBatchSkills("opencode", "project", testDir);
+      expect(lastBatch).toBeNull();
+    });
+  });
 });

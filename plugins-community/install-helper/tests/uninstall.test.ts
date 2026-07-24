@@ -62,6 +62,45 @@ describe("isSafePath (C2 fix verification)", () => {
   });
 });
 
+describe("uninstall command options", () => {
+  it("cli accepts --all flag", async () => {
+    const { createCLI } = await import("../src/cli.js");
+    const program = createCLI();
+    const uninstallCmd = program.commands.find((c: any) => c.name() === "uninstall");
+    expect(uninstallCmd).toBeDefined();
+    const allOption = uninstallCmd?.options.find((o: any) => o.long === "--all");
+    expect(allOption).toBeDefined();
+  });
+
+  it("cli accepts --recent flag", async () => {
+    const { createCLI } = await import("../src/cli.js");
+    const program = createCLI();
+    const uninstallCmd = program.commands.find((c: any) => c.name() === "uninstall");
+    expect(uninstallCmd).toBeDefined();
+    const recentOption = uninstallCmd?.options.find((o: any) => o.long === "--recent");
+    expect(recentOption).toBeDefined();
+  });
+
+  it("cli accepts --yes flag", async () => {
+    const { createCLI } = await import("../src/cli.js");
+    const program = createCLI();
+    const uninstallCmd = program.commands.find((c: any) => c.name() === "uninstall");
+    expect(uninstallCmd).toBeDefined();
+    const yesOption = uninstallCmd?.options.find((o: any) => o.long === "--yes");
+    expect(yesOption).toBeDefined();
+  });
+
+  it("cli uninstall names are optional", async () => {
+    const { createCLI } = await import("../src/cli.js");
+    const program = createCLI();
+    const uninstallCmd = program.commands.find((c: any) => c.name() === "uninstall") as any;
+    expect(uninstallCmd).toBeDefined();
+    expect(uninstallCmd._name).toBe("uninstall");
+    const nameArg = uninstallCmd._args?.[0];
+    expect(nameArg?.required).toBeFalsy();
+  });
+});
+
 function join(...parts: string[]): string {
   return parts.join(sep);
 }

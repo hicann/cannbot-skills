@@ -22,6 +22,7 @@ import { t } from "../utils/i18n.js";
 import { getAllCategories, findSkill, getAllSkills } from "./skill-registry.js";
 import { addSkillsToRecord, removeSkillsFromRecord, getInstalledSkills } from "./record.js";
 import { selectTheme, checkboxTheme } from "../ui/theme.js";
+import { confirm } from "@inquirer/prompts";
 
 interface SkillInstallResult {
   skillId: string;
@@ -170,6 +171,7 @@ export async function uninstallSkills(
 const SELECT_ALL = "__select_all__";
 const SELECT_ALL_CATEGORY = "__select_all_category__";
 const CONTINUE_SELECT = "__continue_select__";
+const UNSELECT_ALL = "__unselect_all__";
 
 export async function interactiveSkillSelect(
   tool: AITool,
@@ -325,6 +327,277 @@ export async function interactiveSkillSelect(
           return accumulated;
         }
         if (action === CONTINUE_SELECT) {
+          step = 0;
+          break;
+        }
+        return "cancel";
+      }
+    }
+  }
+}
+
+export async function interactiveSkillUnselect(
+  tool: AITool,
+  level: InstallLevel
+): Promise<{ toUninstall: string[]; toKeep: string[] } | "back" | "cancel"> {
+  const installPath = level === "project" ? process.cwd() : getConfigRoot(tool, level);
+  const installedSkills = getInstalledSkills(tool, level, installPath);
+
+  if (installedSkills.length === 0) {
+    logger.warn(t("uninstall_no_installed_skills"));
+    return "back";
+  }
+
+  if (installedSkills.length <= 15) {
+    return await flatSkillUnselect(installedSkills);
+  }
+
+  return await categorySkillUnselect(installedSkills);
+}
+
+async function flatSkillUnselect(
+  installedSkills: string[]
+): Promise<{ toUninstall: string[]; toKeep: string[] } | "back" | "cancel"> {
+  const categories = getAllCategories();
+  const installedSet = new Set(installedSkills);
+
+  const skillChoices: Array<{ name: string; value: string; checked: boolean; description?: string } | Separator> = [
+    ...installedSkills.map((skillId) => {
+      const skill = findSkill(skillId);
+      const cat = categories.find((c) => c.skills.some((s) => s.id === skillId));
+      const catName = cat ? cat.name : "";
+      const desc = skill?.description || "";
+      return {
+        name: `${chalk.cyan(skillId)}${catName ? chalk.dim(` [${catName}]`) : ""}`,
+        value: skillId,
+        checked: false,
+        description: desc,
+      };
+    }),
+  ];
+
+  printBoxTitle(t("uninstall_interactive_title"));
+  logger.info(chalk.dim(`  ${t("uninstall_checkbox_hint_select")}`));
+  logger.blank();
+  showOperationHints(true);
+
+  const selected = await checkbox({
+    message: t("uninstall_select_items"),
+    choices: skillChoices,
+    loop: false,
+    instructions: false,
+    theme: checkboxTheme,
+    pageSize: 20,
+  });
+
+  if (selected.length === 0) {
+    logger.info(t("uninstall_nothing_to_uninstall"));
+    return "back";
+  }
+
+  const confirmed = await confirm({
+    message: t("uninstall_confirm_prompt").replace("{count}", chalk.bold(String(selected.length))),
+    default: false,
+  });
+
+  if (!confirmed) return "cancel";
+
+  return {
+    toUninstall: selected,
+    toKeep: installedSkills.filter((id) => !selected.includes(id)),
+  };
+}
+
+async function categorySkillUnselect(
+  installedSkills: string[]
+): Promise<{ toUninstall: string[]; toKeep: string[] } | "back" | "cancel"> {
+  const allCategories = getAllCategories();
+  const installedSet = new Set(installedSkills);
+
+  const categoriesWithInstalled = allCategories
+    .map((cat) => ({
+      ...cat,
+      skills: cat.skills.filter((s) => installedSet.has(s.id)),
+    }))
+    .filter((cat) => cat.skills.length > 0);
+
+  const uncategorized = installedSkills.filter(
+    (id) => !allCategories.some((cat) => cat.skills.some((s) => s.id === id))
+  );
+  if (uncategorized.length > 0) {
+    categoriesWithInstalled.push({
+      id: "__uncategorized__",
+      name: t("uninstall_uncategorized"),
+      skills: uncategorized.map((id) => ({ id, description: "", source: "", filePath: "" }) as any),
+    });
+  }
+
+  const uninstallSet = new Set<string>();
+  let step = 0;
+  let selectedCategoryId = "";
+
+  while (true) {
+    switch (step) {
+      case 0: {
+        const titleSuffix = uninstallSet.size > 0
+          ? `${t("wizard_step_3_skill_title")}（${t("uninstall_marked_count").replace("{count}", String(uninstallSet.size))}）`
+          : t("wizard_step_3_skill_title");
+        printBoxTitle(titleSuffix);
+
+        const categoryChoices: Array<{ name: string; value: string } | Separator> = [
+          {
+            name: `>> ${t("uninstall_uncheck_all")}`,
+            value: UNSELECT_ALL,
+          },
+          new Separator("──────────────"),
+          ...categoriesWithInstalled.map((cat) => {
+            const catSelectedCount = cat.skills.filter((s) => uninstallSet.has(s.id)).length;
+            const suffix = catSelectedCount > 0 ? chalk.yellow(` (${catSelectedCount} selected)`) : "";
+            return {
+              name: `> ${cat.name} (${cat.skills.length} skills)${suffix}`,
+              value: cat.id,
+            };
+          }),
+          new Separator("──────────────"),
+          ...(uninstallSet.size > 0
+            ? [{ name: `>> ${t("uninstall_confirm_count").replace("{count}", String(uninstallSet.size))}`, value: "uninstall" } as { name: string; value: string }]
+            : []),
+          { name: "<- " + t("wizard_back"), value: BACK },
+          { name: "x  " + t("wizard_cancel"), value: CANCEL },
+        ];
+
+        showOperationHints();
+        selectedCategoryId = await select({
+          message: t("uninstall_select_category"),
+          choices: categoryChoices,
+          loop: false,
+          theme: selectTheme,
+          pageSize: 15,
+        });
+
+        if (selectedCategoryId === BACK) return "back";
+        if (selectedCategoryId === CANCEL) return "cancel";
+        if (selectedCategoryId === UNSELECT_ALL) {
+          for (const id of installedSkills) {
+            uninstallSet.add(id);
+          }
+          const confirmed = await confirm({
+            message: t("uninstall_confirm_prompt").replace("{count}", chalk.bold(String(installedSkills.length))),
+            default: false,
+          });
+          if (!confirmed) return "cancel";
+          return { toUninstall: [...uninstallSet], toKeep: [] };
+        }
+        if (selectedCategoryId === "uninstall") {
+          if (uninstallSet.size === 0) {
+            logger.info(t("uninstall_nothing_to_uninstall"));
+            return "back";
+          }
+          const confirmed = await confirm({
+            message: t("uninstall_confirm_prompt").replace("{count}", chalk.bold(String(uninstallSet.size))),
+            default: false,
+          });
+          if (!confirmed) return "cancel";
+          return { toUninstall: [...uninstallSet], toKeep: installedSkills.filter((id) => !uninstallSet.has(id)) };
+        }
+        step = 1;
+        break;
+      }
+      case 1: {
+        const category = categoriesWithInstalled.find((c) => c.id === selectedCategoryId);
+        if (!category) return "back";
+
+        printBoxTitle(t("wizard_step_4_skill_title").replace("{category}", category.name));
+
+        const categorySkillIds = new Set(category.skills.map((s) => s.id));
+        const selectedInCategory = new Set([...uninstallSet].filter((id) => categorySkillIds.has(id)));
+
+        const skillChoices: Array<{ name: string; value: string; checked: boolean; description?: string } | Separator> = [
+          {
+            name: `>> ${t("uninstall_uncheck_all_category")}`,
+            value: SELECT_ALL_CATEGORY,
+            checked: selectedInCategory.size === category.skills.length,
+            description: t("uninstall_uncheck_all_category"),
+          },
+          new Separator("──────────────"),
+          ...category.skills.map((skill) => {
+            const isSelected = selectedInCategory.has(skill.id);
+            return {
+              name: `${chalk.cyan(skill.id)}`,
+              value: skill.id,
+              checked: isSelected,
+              description: skill.description || "",
+            };
+          }),
+        ];
+
+        logger.info(chalk.dim(`  ${t("uninstall_checkbox_hint_select")}`));
+        logger.blank();
+        showOperationHints(true);
+
+        const selectedSkills = await checkbox({
+          message: t("uninstall_select_items"),
+          choices: skillChoices,
+          loop: false,
+          instructions: false,
+          theme: checkboxTheme,
+          pageSize: 15,
+        });
+
+        let selectedInCat: string[];
+        if (selectedSkills.includes(SELECT_ALL_CATEGORY)) {
+          selectedInCat = category.skills.map((s) => s.id);
+        } else {
+          selectedInCat = selectedSkills.filter((id) => id !== SELECT_ALL_CATEGORY);
+        }
+
+        for (const id of categorySkillIds) {
+          if (selectedInCat.includes(id)) {
+            uninstallSet.add(id);
+          } else {
+            uninstallSet.delete(id);
+          }
+        }
+
+        const toUninstallCount = uninstallSet.size;
+        const action = await select({
+          message: toUninstallCount > 0
+            ? t("uninstall_continue_or_confirm").replace("{count}", String(toUninstallCount))
+            : t("wizard_no_selection"),
+          choices: toUninstallCount > 0
+            ? [
+                { name: ">> " + t("uninstall_confirm_count").replace("{count}", String(toUninstallCount)), value: "uninstall" },
+                { name: "> " + t("skill_continue_select"), value: CONTINUE_SELECT },
+                new Separator("──────────────"),
+                { name: "x  " + t("wizard_cancel"), value: "cancel" },
+              ]
+            : [
+                new Separator("──────────────"),
+                { name: "> " + t("skill_continue_select"), value: CONTINUE_SELECT },
+                { name: "<- " + t("wizard_back_to_reselect"), value: "back" },
+                { name: "x  " + t("wizard_cancel"), value: "cancel" },
+              ],
+          loop: false,
+          theme: selectTheme,
+        });
+
+        if (action === "uninstall") {
+          if (uninstallSet.size === 0) {
+            logger.info(t("uninstall_nothing_to_uninstall"));
+            return "back";
+          }
+          const confirmed = await confirm({
+            message: t("uninstall_confirm_prompt").replace("{count}", chalk.bold(String(uninstallSet.size))),
+            default: false,
+          });
+          if (!confirmed) return "cancel";
+          return { toUninstall: [...uninstallSet], toKeep: installedSkills.filter((id) => !uninstallSet.has(id)) };
+        }
+        if (action === CONTINUE_SELECT) {
+          step = 0;
+          break;
+        }
+        if (action === "back") {
           step = 0;
           break;
         }

@@ -110,11 +110,14 @@ export function createCLI(): Command {
     });
 
   program
-    .command("uninstall <names...>")
+    .command("uninstall [names...]")
     .description("Uninstall plugins or skills (auto-detects type)")
     .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, copilot, codearts)")
     .option("-l, --level <level>", "Install level (project, global)", "project")
-    .action(async (names: string[], options: { tool?: string; level?: string }) => {
+    .option("-y, --yes", "Skip confirmation prompts")
+    .option("-a, --all", "Uninstall ALL installed skills and plugins")
+    .option("--recent", "Uninstall the most recently installed skill batch")
+    .action(async (names: string[], options: { tool?: string; level?: string; yes?: boolean; all?: boolean; recent?: boolean }) => {
       await uninstallCommand(names, options);
     });
 

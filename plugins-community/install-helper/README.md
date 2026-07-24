@@ -51,6 +51,9 @@ install-helper install --all --tool opencode --level global --yes
 | `install-helper install --all --tool <tool> --yes` | 一键安装全部 Skills |
 | `install-helper update [plugin]` | 更新已安装的插件 |
 | `install-helper uninstall <plugin>` | 卸载指定插件 |
+| `install-helper uninstall` | 交互式批量卸载（checkbox 勾选） |
+| `install-helper uninstall --all` | 卸载全部已安装 Skills 和 Plugins |
+| `install-helper uninstall --recent` | 卸载最近一次安装批次的 Skills |
 | `install-helper status` | 查看已安装插件详情 |
 | `install-helper doctor` | 健康检查 |
 | `install-helper doctor --fix` | 健康检查 + 自动修复 |
@@ -112,10 +115,59 @@ install-helper update triton       # 更新指定插件
 ### 卸载
 
 ```bash
-install-helper uninstall ops-direct-invoke --tool opencode
+install-helper uninstall ops-direct-invoke --tool opencode  # 卸载指定插件
+install-helper uninstall npu-arch --yes                     # 跳过确认卸载 Skill
+install-helper uninstall                                     # 交互式批量卸载（checkbox 勾选）
+install-helper uninstall --all --yes                         # 一键卸载全部已安装内容
+install-helper uninstall --recent --yes                      # 卸载最近安装的 Skills 批次
+install-helper uninstall --all --tool opencode --level project  # 指定范围卸载
 ```
 
 根据安装记录精确删除所有产物，自动清理空目录。
+
+**交互式卸载**：
+
+```bash
+install-helper uninstall
+```
+
+- 自动检测已安装内容，跳过只有单一选项的步骤（如仅一个工具/级别有内容时自动选中）
+- 若 Skills 和 Plugins 都已安装，先选择卸载类型
+- ≤15 个已安装 Skill 时显示扁平列表，>15 个时按类别导航
+- **勾选=卸载**（标准 checkbox 语义），勾选后确认即可批量卸载
+- 支持跨类别累积选择
+
+**`--all` 一键卸载**：
+
+```bash
+install-helper uninstall --all --yes
+```
+
+卸载指定范围内全部已安装的 Skills 和 Plugins。通过 `--tool` / `--level` 限定范围，未指定时默认 project 级别。
+
+**`--recent` 批次卸载**：
+
+```bash
+install-helper uninstall --recent --yes
+```
+
+仅卸载最近一次安装批次中的 Skills。每次 `install-helper install` 会自动记录安装批次，`--recent` 精确卸载最后一批，不影响更早安装的内容。
+
+**安全机制**：
+
+- 仅删除 `install-helper` 安装的 symlink，不影响用户手动创建的目录或文件
+- 无安装记录时自动回退到文件系统扫描（识别 symlink）和 manifest 文件，确保残留内容可清理
+- Plugin 卸载时完整清理 skills、agents、配置文件（AGENTS.md/CLAUDE.md）、manifest、外部仓库链接
+
+**选项：**
+
+| 选项 | 说明 |
+|------|------|
+| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, copilot, codearts） |
+| `--level <level>` | 安装级别（project, global），默认 project |
+| `--yes` `-y` | 跳过确认提示 |
+| `--all` `-a` | 卸载全部已安装 Skills 和 Plugins |
+| `--recent` | 卸载最近一次安装批次的 Skills |
 
 ### 健康检查
 

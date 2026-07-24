@@ -8,14 +8,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs";
 import { join } from "path";
 import { getCannbotConfigDir, getConfigRoot } from "../utils/paths.js";
 import { atomicWriteFileSync } from "../utils/fs.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
-import type { AITool, InstallLevel, CannbotManifest } from "../types/index.js";
+import type { AITool, InstallLevel, CannbotManifest, SkillBatchRecord } from "../types/index.js";
 
 export interface InstallRecord {
   pluginId: string;
@@ -83,7 +83,8 @@ export function scanInstalledFiles(
   installPath: string,
   configRoot: string,
   manifest: CannbotManifest | null,
-  externalRepoNames?: string[]
+  externalRepoNames?: string[],
+  configRootConfigLink?: boolean
 ): InstallRecord {
   const files: string[] = [];
   const directories: string[] = [];
@@ -134,8 +135,15 @@ export function scanInstalledFiles(
   const configFilePath = level === "project"
     ? join(installPath, configFileName)
     : join(configRoot, configFileName);
-  if (existsSync(configFilePath)) {
+  if (existsSync(configFilePath) || isSymlink(configFilePath)) {
     files.push(configFilePath);
+  }
+
+  if (level === "project" && configRootConfigLink !== false) {
+    const configRootConfigPath = join(configRoot, configFileName);
+    if (configRootConfigPath !== configFilePath && (existsSync(configRootConfigPath) || isSymlink(configRootConfigPath))) {
+      files.push(configRootConfigPath);
+    }
   }
 
   const repoLinks = externalRepoNames && externalRepoNames.length > 0
@@ -170,6 +178,7 @@ export function scanInstalledFiles(
 export interface SkillInstallEntry {
   skills: string[];
   installTime: string;
+  batches?: SkillBatchRecord[];
 }
 
 export interface SkillInstallRecord {
@@ -220,12 +229,23 @@ export function addSkillsToRecord(
     record[tool][level][installPath] = { skills: [], installTime: "" };
   }
   const entry = record[tool][level][installPath];
+  const now = new Date().toISOString();
+  const newSkills: string[] = [];
   for (const id of skillIds) {
     if (!entry.skills.includes(id)) {
       entry.skills.push(id);
+      newSkills.push(id);
     }
   }
-  entry.installTime = new Date().toISOString();
+  entry.installTime = now;
+  if (newSkills.length > 0) {
+    if (!entry.batches) entry.batches = [];
+    entry.batches.push({
+      batchId: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      installedAt: now,
+      skills: newSkills,
+    });
+  }
   writeSkillRecord(record);
 }
 
@@ -239,6 +259,15 @@ export function removeSkillsFromRecord(
   if (!record[tool]?.[level]?.[installPath]) return;
   const entry = record[tool][level][installPath];
   entry.skills = entry.skills.filter((id) => !skillIds.includes(id));
+  if (entry.batches) {
+    for (const batch of entry.batches) {
+      batch.skills = batch.skills.filter((id) => !skillIds.includes(id));
+    }
+    entry.batches = entry.batches.filter((b) => b.skills.length > 0);
+    if (entry.batches.length === 0) {
+      delete entry.batches;
+    }
+  }
   if (entry.skills.length === 0) {
     delete record[tool][level][installPath];
     if (Object.keys(record[tool][level]).length === 0) {
@@ -254,16 +283,59 @@ export function removeSkillsFromRecord(
 export function getInstalledSkills(
   tool: AITool,
   level: InstallLevel,
-  installPath: string
+  installPath: string,
+  allowFsScan: boolean = true
 ): string[] {
   const record = readSkillRecord();
   const recordedSkills = record[tool]?.[level]?.[installPath]?.skills || [];
-  
-  // 验证实际文件是否存在
+
   const configRoot = getConfigRoot(tool, level);
   const skillsDir = join(configRoot, "skills");
-  
-  return recordedSkills.filter((skillId) => {
+
+  const fromRecord = recordedSkills.filter((skillId) => {
+    const skillPath = join(skillsDir, skillId);
+    return existsSync(skillPath) || isSymlink(skillPath);
+  });
+
+  if (!allowFsScan) {
+    return fromRecord;
+  }
+
+  const fromFs: string[] = [];
+  if (existsSync(skillsDir)) {
+    try {
+      const entries = readdirSync(skillsDir);
+      for (const entry of entries) {
+        if (entry === "." || entry === "..") continue;
+        const entryPath = join(skillsDir, entry);
+        if (isSymlink(entryPath) && !fromRecord.includes(entry)) {
+          fromFs.push(entry);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return [...fromRecord, ...fromFs];
+}
+
+export function getLastBatchSkills(
+  tool: AITool,
+  level: InstallLevel,
+  installPath: string
+): string[] | null {
+  const record = readSkillRecord();
+  const entry = record[tool]?.[level]?.[installPath];
+  if (!entry || !entry.batches || entry.batches.length === 0) {
+    return null;
+  }
+  const lastBatch = entry.batches[entry.batches.length - 1];
+  const configRoot = level === "project"
+    ? getConfigRoot(tool, level, installPath)
+    : getConfigRoot(tool, level);
+  const skillsDir = join(configRoot, "skills");
+  return lastBatch.skills.filter((skillId) => {
     const skillPath = join(skillsDir, skillId);
     return existsSync(skillPath) || isSymlink(skillPath);
   });
