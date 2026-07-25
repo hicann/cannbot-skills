@@ -1,8 +1,8 @@
 ---
 name: runtime_migration
-description: CUDA 应用迁移到 CANN 平台指南，仅用于用户自身合法拥有或已获授权的代码资产。当用户请求将其有权处理的应用程序迁移到华为昇腾 NPU、询问迁移可行性分析、或需要帮助改写相关代码为 CANN Runtime 时触发此技能。
+description: 将用户合法拥有或已获授权的 CUDA 应用中的 Runtime 层迁移到 CANN Runtime，包括 API、类型、错误码、初始化、内存、stream、event、IPC、构建配置和兼容层适配。仅在处理 Runtime 层迁移或可行性分析时使用；不迁移 CUDA kernel、device helper 或任何算子实现。
 ---
-# CUDA 应用迁移到 CANN 平台指南
+# CUDA Runtime 迁移到 CANN Runtime 指南
 
 ## 授权与使用边界
 
@@ -12,7 +12,7 @@ description: CUDA 应用迁移到 CANN 平台指南，仅用于用户自身合�
 
 ## 概述
 
-在满足上述授权与使用边界的前提下，本技能用于指导将 CUDA 应用程序迁移到华为昇腾 NPU (CANN Runtime) 平台。基于 `assets/src` 目录下的兼容层源码，提供两种迁移方式：
+在满足上述授权与使用边界的前提下，本技能只负责将 CUDA 应用程序的 Runtime 层迁移到华为昇腾 NPU 的 CANN Runtime。基于 `assets/src` 目录下的兼容层源码，提供两种迁移方式：
 
 1. **兼容层方式**：替换头文件并链接兼容库，最小代码修改
    说明：默认使用兼容层方式,除非用户明确要求“直接迁移方式、直接改成 CANN API”， 并遵守以下约束：
@@ -20,9 +20,8 @@ description: CUDA 应用迁移到 CANN 平台指南，仅用于用户自身合�
     - **不要主动引入新风格**：原代码没有 `CUDA_CHECK`、RAII、异常、封装类、`std::vector` 改写时，不要为了“更规范”而加入。
     - **CANN 细节不泄漏到业务源码**：兼容层方式下，业务源码不应直接 include `acl/acl.h`、`aclnnop/*.h`，也不应自己创建/销毁 `aclTensor`、`aclScalar`、workspace。
     - **缺失能力补兼容层，不堆到样例里**：遇到 `cann_runtime_compat.h` 没覆盖的能力，优先在 `assets/src` 下补兼容 API/适配函数，再让业务代码调用该 compat 接口。
-    - **明确区分 Runtime 与算子**：`cudaMalloc/cudaMemcpy/cudaFree` 是 Runtime API，可由兼容层映射；`kernel<<<...>>>` 是 CUDA 编译器语法，代表设备侧算子/Kernel 执行，必须按用户目标选择处理方式。
-    - **算子迁移选择权交给用户**：当源代码包含 `kernel<<<...>>>` 时，先确认用户是否希望把具体算子迁移为 Ascend C/SIMT 设备侧实现。用户选择“要转 / 需要真实 NPU 计算 / 需要性能验证”时，调用并遵循 `ops-lab/cuda2ascend-simt/SKILL.md`；用户选择“不转 / 只验证 Runtime API / 快速跑通”时，使用 `cudaCompatLaunchHostKernel()` 做 Host fallback，并明确记录这不是 NPU kernel 执行。
-    - **SIMT 编译模式硬约束**：当迁移后的 `.asc` 文件包含 `simt_api/asc_simt.h`，或使用 SIMT 内建变量（`blockIdx` / `threadIdx` / `blockDim`），或使用 CUDA 风格的 kernel launch 语法时，ASC 编译选项必须包含 `--enable-simt`。不要仅仅为了满足未开启 `--enable-simt` 时产生的编译器诊断，就给 SIMT kernel 添加 `__aicore__` 或 `__gm__`。
+    - **严格限定 Runtime 边界**：`cudaMalloc/cudaMemcpy/cudaFree` 等 Runtime API 可由兼容层映射；CUDA kernel、device helper 和算子实现不属于本技能，不得在本技能内部迁移或调用其他算子迁移 skill。
+    - **Kernel 启动默认 Host fallback**：当源代码包含 `kernel<<<...>>>` 时，将 kernel body 的等价 CPU 实现隔离为独立函数，并默认通过 `cudaCompatLaunchHostKernel()` 调用。必须在代码注释、README 或迁移报告中明确记录：该路径在 Host/CPU 上执行，仅用于维持流程和验证 Runtime 层，不是 NPU kernel 执行，也不能用于 NPU kernel 性能或设备侧正确性结论。
     - **每次迁移都要编译并运行最小验证**：不能只改代码不验证；如机器有坏卡或需指定设备，用环境变量如 `ASCEND_RT_VISIBLE_DEVICES` 限制可见设备。
 
 2. **直接迁移方式**：将 CUDA API 调用改写为 CANN Runtime API, 
@@ -99,19 +98,7 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 
 根据分析结果，推荐或让用户选择迁移方式。
 
-如果代码中存在 CUDA Kernel 启动语法 `kernel<<<...>>>(...)`，迁移方式选择必须额外记录一个“算子执行路径”决策：
-
-| 用户目标 | 算子执行路径 | 执行要求 |
-| -------- | ------------ | -------- |
-| 真实 NPU 设备侧计算、性能评估、尽量一比一迁移 CUDA kernel | Ascend C/SIMT 算子迁移 | 先读取并遵循 `ops-lab/cuda2ascend-simt/SKILL.md`，按其模式、计划、验证和降级门要求执行 |
-| 快速验证 CUDA Runtime API 兼容层、数据搬运、stream/event 流程和结果正确性 | Host fallback | 将 CUDA kernel body 的等价 CPU 实现隔离成函数，通过 `cudaCompatLaunchHostKernel()` 调用 |
-
-选择规则：
-
-- 用户明确说“转 Ascend C / 转 NPU 算子 / 不要 CPU fallback / 要真实性能”时，选择 Ascend C/SIMT 算子迁移。
-- 用户明确说“先跑通 / 只验证 Runtime / 不转算子 / 可以 CPU fallback”时，选择 Host fallback。
-- 用户没有明确选择且任务目标是批量兼容性验证时，默认 Host fallback，但报告中必须醒目标注“算子未迁移到 NPU”。
-- 用户没有明确选择且任务目标涉及性能、设备计算正确性或最终交付质量时，先简短询问用户选择，不要擅自把设备计算降级为 Host fallback。
+如果代码中存在 CUDA Kernel 启动语法 `kernel<<<...>>>(...)`，不要迁移 kernel 或依赖其他算子迁移 skill。默认采用 Host fallback：将 kernel body 的等价 CPU 实现隔离成函数，通过 `cudaCompatLaunchHostKernel()` 调用，并在迁移报告中醒目标注“Host/CPU fallback，不是 NPU kernel 执行”。如果用户需要 NPU 设备侧算子实现或性能验证，将该需求列为本技能范围外的后续工作，由独立的算子 skill 处理。
 
 #### 3.1 兼容层方式（推荐）
 
@@ -229,41 +216,19 @@ CUDA Kernel 启动语法需要单独处理：
 // 原 CUDA Kernel 启动
 kernel<<<grid, block, shared_mem, stream>>>(args);
 
-// 不能由普通 C++ 兼容头直接保留；必须根据用户选择改写为：
-// A. Ascend C/SIMT 设备侧算子
-// B. Host fallback 兼容性验证函数
+// 不能由普通 C++ 兼容头直接保留；本技能默认改写为 Host fallback。
 ```
 
-**路径 A：迁移为 Ascend C/SIMT 设备侧算子**
+**使用 Host fallback 验证 Runtime 兼容性**
 
-当用户选择迁移具体算子，或请求真实 NPU 执行/性能验证时：
-
-- 立即读取并遵循 `ops-lab/cuda2ascend-simt/SKILL.md`
-- 由 `cuda2ascend-simt` 负责 CUDA kernel body、device helper、launch policy、dtype/shape 分支、验证计划和降级门
-- 本技能只负责 host 侧 CUDA Runtime 到 CANN/兼容层的迁移边界，以及与算子工程的调用衔接
-- 若产物使用 Ascend C SIMT 单源 `.asc` 形态，生成 CMake/构建配置时必须为 ASC 编译添加 `--enable-simt`；如果缺少该选项，`__global__`、`blockIdx`、`threadIdx`、`blockDim` 等 SIMT 语法可能被编译器误按非 SIMT 语境诊断，不能据此盲目添加 `__aicore__` 或 `__gm__`
-- 不要用 `cudaCompatLaunchHostKernel()` 替代核心设备计算，除非用户在 `cuda2ascend-simt` 的降级门后明确接受该降级
-- README/报告必须说明算子是否真正运行在 Ascend 设备侧，以及验证硬件、构建命令、运行命令和结果
-
-常见 CANN 算子编写和启动方式包括：
-
-```c
-// 1. 编写 Ascend C Kernel 或使用算子库
-// 2. 通过 aclrtBinaryLoadFromFile 加载编译后的二进制
-// 3. 通过 aclrtBinaryGetFunction 获取函数句柄
-// 4. 通过 aclrtLaunchKernel 启动
-```
-
-如果项目使用 Ascend C SIMT 单源样例形态，也可以按 `cuda2ascend-simt` 的规则使用 SIMT kernel launch 语法；两种方式都必须以真实设备侧执行和验证证据为准。
-
-**路径 B：使用 Host fallback 验证 Runtime 兼容性**
-
-当用户选择不迁移具体算子，或当前目标只是最小化验证 Runtime API，且暂时没有 Ascend C Kernel/算子二进制时：
+当源代码包含 CUDA Kernel 启动语法时：
 
 - 不要把 fallback 计算直接散落在主流程里
 - 将 CUDA kernel body 的等价 Host fallback 隔离成独立函数
 - 通过 `cudaCompatLaunchHostKernel()` 调用该 fallback，保留主流程中的“launch”语义
-- README 必须明确说明该路径不是 NPU kernel 执行，后续如需真实性能/设备计算，需要改写为 Ascend C Kernel 或 CANN 算子
+- 在调用处添加注释，并在 README 或迁移报告中明确说明该路径在 Host/CPU 上执行，不是 NPU kernel 执行
+- 不使用 Host fallback 的结果声称已完成 NPU kernel 迁移、设备侧正确性验证或性能验证
+- 如需 NPU 设备侧实现，将其记录为本技能范围外事项，交由独立算子 skill 处理；本技能不得内部依赖或调用该 skill
 
 ##### 4.1.5 IPC 适配注意事项
 
@@ -447,8 +412,7 @@ cmake .. -DCUDA_COMPAT_DEBUG=ON && make
 | 内存分配失败                   | 设备内存不足       | 减小分配大小或检查设备状态      |
 | API 返回 cudaErrorNotSupported | 使用了不支持 API   | 查阅支持表，使用替代方案        |
 | IPC 传递失败                   | 使用 UNIX socket   | 改用共享内存传递 opaque handle  |
-| Kernel 无法运行                | CUDA Kernel 未迁移 | 编写 Ascend C Kernel            |
-| SIMT `.asc` 编译报 `__global__`、`blockIdx`、`threadIdx`、`blockDim`、`__aicore__` 或 `__gm__` 相关错误 | ASC 编译未开启 SIMT 模式或未对齐可运行 SIMT reference | 先检查 CMake/编译命令是否包含 `--enable-simt`，再对齐 `ops-lab/cuda2ascend-simt` 中可运行 reference；不要先给 SIMT kernel 添加 `__aicore__` 或 `__gm__` |
+| CUDA Kernel 启动语法无法编译   | `kernel<<<...>>>` 不能由普通 C++ 兼容头保留 | 改为 `cudaCompatLaunchHostKernel()` Host fallback，并明确记录这不是 NPU kernel 执行 |
 
 ---
 
@@ -630,3 +594,5 @@ cudaStreamDestroy(stream2);
 3. **改写后的代码**
 4. **编译命令**
 5. **测试验证步骤**
+
+如果源代码包含 CUDA Kernel 启动语法，输出还必须包含 Host fallback 清单，并逐项声明其在 Host/CPU 上执行、不是 NPU kernel 执行。NPU 算子迁移需求仅作为范围外后续事项记录，不在本技能内实现或调用其他 skill。
