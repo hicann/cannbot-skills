@@ -37,6 +37,7 @@
 
 import argparse
 import fnmatch
+import json
 import logging
 import os
 import re
@@ -44,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 
 # 常量定义
 ALLOWED_GITCODE_DOMAIN = "gitcode.com"
@@ -187,22 +189,77 @@ def _apply_file_filter(diff_content: str, file_filter: str) -> str:
     return "".join(filtered_lines)
 
 
-def _determine_base_branch(repo_dir: str) -> str:
-    """确定仓库的基础分支（main 或 master）
+def _get_base_branch_from_api(
+    owner: str, repo: str, pr_number: int
+) -> str | None:
+    """通过 GitCode API 查询 PR 的真实目标分支（base.label）
 
-    在 bare clone 中遍历 refs/heads/ 检查 main/master 是否存在。
+    PR 可能目标于发布分支（如 9.1.0、9.0.0）而非 master，仅凭 main/master
+    推断会把分支历史上累积的无关变更算进 diff（见 issue #463）。
+
+    Args:
+        owner: 仓库 owner
+        repo: 仓库名
+        pr_number: PR 编号
+
+    Returns:
+        str | None: 目标分支名（如 "9.1.0"）；查询失败返回 None（走 fallback）
+    """
+    url = (
+        f"https://{ALLOWED_GITCODE_DOMAIN}/api/v5/repos/"
+        f"{owner}/{repo}/pulls/{pr_number}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8"))
+        base = (data.get("base") or {}).get("label")
+        logger.debug("API 查询 PR #%d 目标分支: %s", pr_number, base)
+        return base
+    except (OSError, ValueError) as e:
+        logger.debug("API 查询目标分支失败: %s", e)
+        return None
+
+
+def _resolve_base_branch(
+    repo_dir: str, owner: str, repo: str, pr_number: int
+) -> str:
+    """确定 PR 的真实目标分支
+
+    优先用 GitCode API 的 base.label（支持 9.1.0 等发布分支），
+    失败时 fallback 到 main/master 推断并告警（避免静默用错 base）。
 
     Args:
         repo_dir: bare 仓库目录
+        owner: 仓库 owner
+        repo: 仓库名
+        pr_number: PR 编号
 
     Returns:
-        str: 基础分支名称（如 "master"、"main"）
+        str: 目标分支名称（如 "9.1.0"、"master"）
 
     Raises:
         RuntimeError: 当无法确定基础分支时抛出
     """
     result = run_git_command(["git", "branch"], cwd=repo_dir)
-    branches = result.stdout
+    # 精确匹配分支名（按行 strip 后全等比较），避免子串匹配误判：
+    # 例如 "9.1.0" in branches 会命中 "9.1.0-beta.1" 那行的子串，
+    # "main" 会命中 "mainline"/"domain"。见 atomic 机器人对 PR#617 的 P3 审查意见。
+    branches = {line.strip().lstrip("* ").strip() for line in result.stdout.splitlines()}
+
+    base = _get_base_branch_from_api(owner, repo, pr_number)
+    if base and base in branches:
+        return base
+
+    if base:
+        logger.warning(
+            "API 返回目标分支 %s 但本地不存在，回退到 main/master 推断", base
+        )
+    else:
+        logger.warning(
+            "未能从 API 获取目标分支，回退到 main/master 推断，diff 可能不准确"
+        )
 
     for branch in ["main", "master"]:
         if branch in branches:
@@ -266,8 +323,11 @@ def get_pr_diff_git(
             ]
         )
 
-        # 确定基础分支（用于 head ref diff 的 range spec）
-        base_branch = _determine_base_branch(repo_dir)
+        # 从 repo_url 解析 owner/repo，用于 API 查询 PR 真实目标分支
+        owner, repo = parse_repo_url(repo_url)
+
+        # 确定 PR 真实目标分支（API 取真值，支持 9.1.0 等发布分支）
+        base_branch = _resolve_base_branch(repo_dir, owner, repo, pr_number)
 
         # 优先获取 PR head 引用（PR 分支最新提交，每次 push 自动更新）
         # fallback 到 merge 引用（虚拟合并提交，可能延迟更新）
@@ -291,7 +351,21 @@ def get_pr_diff_git(
         logger.info("正在生成 diff...")
 
         if use_head_ref:
-            range_spec = f"{base_branch}...{head_ref}"
+            # 显式计算 merge-base 后用两点 diff，确保只含 PR 实际修改的文件，
+            # 不被分支历史上累积的无关变更污染（三点在某些场景下行为不一致）。
+            # 用 check=False 捕获"无共同历史"（git merge-base 此时退出码 1、
+            # stdout 为空），转为清晰的 RuntimeError 而非 CalledProcessError。
+            mb_result = run_git_command(
+                ["git", "merge-base", base_branch, head_ref],
+                cwd=repo_dir,
+                check=False,
+            )
+            merge_base = mb_result.stdout.strip()
+            if mb_result.returncode != 0 or not merge_base:
+                raise RuntimeError(
+                    f"无法计算 merge-base（{base_branch} 与 {head_ref} 无共同历史）"
+                )
+            range_spec = f"{merge_base}..{head_ref}"
             if stat_only:
                 result = run_git_command(
                     ["git", "diff", "--stat", range_spec],

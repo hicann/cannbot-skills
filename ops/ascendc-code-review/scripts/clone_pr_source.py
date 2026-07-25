@@ -67,9 +67,14 @@ def run_git(cmd: list[str], cwd: str | None = None) -> bool:
 
 
 def clone_repo(repo_url: str, clone_dir: str) -> None:
-    """浅克隆仓库到指定目录"""
+    """克隆仓库到指定目录
+
+    使用全量克隆（非 --depth=1）：子 Agent 需在仓库内做跨文件溯源，且
+    git merge-base 计算依赖完整历史——浅克隆会让 merge-base 失败，
+    导致 agent 自行算 diff 时回退到两点全量发散（见 issue #427）。
+    """
     logger.info("克隆 %s 到 %s ...", repo_url, clone_dir)
-    if not run_git(["git", "clone", "--depth=1", repo_url, clone_dir]):
+    if not run_git(["git", "clone", repo_url, clone_dir]):
         raise RuntimeError("克隆仓库失败")
 
 
