@@ -227,7 +227,7 @@ UB 容量下整行可能装不下 fp32 工作 buffer。N 拆为 `kBlockN`（典�
 
 ### 7.3 Block / Core 划分
 
-每核处理 `blockM` 行（典型 16）；AIV 子块 = `blockM / GetSubBlockNum()`；usedCoreNum = `min(20, ceil(M / blockM))`。
+每核处理 `blockM` 行（典型 16）；AIV 子块 = `blockM / GetSubBlockNum()`；usedCoreNum = `min(GetCoreNumAiv(), ceil(M / blockM))`。
 
 ---
 

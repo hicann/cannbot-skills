@@ -149,6 +149,7 @@ argument-hint: >
     workflows/templates/archive_tasks/rms_norm/kernel/op_host/rms_norm.cpp
     → 确认: 所有 tiling 参数必须是独立标量左值，禁止传 struct 指针
     → 确认: blockDim = usedCoreNum（多核统一分发），禁止 host 侧逐核循环
+    → 确认: 核数来源于平台 API 动态获取（GetCoreNumAic/Aiv），非硬编码常量
 
 0.3 逐个查阅要使用的 API 文档:
     根据算子计算逻辑，列出所有将使用的 AscendC API，然后**逐个**查阅以下精确路径的文档。
@@ -298,7 +299,21 @@ argument-hint: >
 
 **op_host/<op_name>.cpp** 模式：
 - include `torch_kernel_helper.h` + `tiling/platform/platform_ascendc.h`
-- 使用平台 API 获取 `GetCoreNumAiv()` 和 `GetCoreMemSize(UB)`
+ - 🛑 **核数获取（禁止硬编码）**：根据算子计算特征选择正确的 API，  **禁止 `constexpr int32_t = 20` 或 `min(20, ...)` 等硬编码**：
+     ```cpp
+     auto* platform = platform_ascendc::PlatformAscendCManager::GetInstance();
+
+     // 纯 Vector 计算（Norm/激活函数/逐元素等）→ GetCoreNumAiv()
+     int32_t totalCoreNum = platform->GetCoreNumAiv();
+
+     // 纯 Cube 计算（MatMul/矩阵乘）→ GetCoreNumAic()
+     int32_t totalCoreNum = platform->GetCoreNumAic();
+
+     // Cube+Vector 融合（Attention/CV融合等）→ CalcTschBlockDim(), sliceNum为数据切分的份数
+     int32_t totalCoreNum = platform->CalcTschBlockDim(
+         sliceNum, platform->GetCoreNumAic(), platform->GetCoreNumAiv());
+     ```
+- 使用平台 API 获取 `GetCoreMemSize(UB)`
 - Block 级 tiling: Cache Line 512B 对齐，formerNum/formerLength/tailNum/tailLength
 - UB 级 tiling: bufferCoefficient 推导，32B 对齐 tileLength
 - **🛑 EXEC_KERNEL_CMD 传参铁律**: 所有 tiling 参数必须是**独立标量左值**，**禁止传 struct 指针**。参照 `workflows/templates/archive_tasks/rms_norm/kernel/op_host/rms_norm.cpp` 的正确模式
