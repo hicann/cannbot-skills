@@ -145,9 +145,9 @@ P53-P88 为 fork-B 增量补充的高级策略，已纳入本索引。P94-P100 �
 | P65 | UB bank conflict avoidance | L1 | datapath | UB bank 冲突规避，优化地址分配 | strategies/perf_65_ub_bank_conflict_avoidance.md |
 | P66 | GM 512B alignment bandwidth | L1 | datapath | GM 512B 对齐带宽优化 | strategies/perf_66_gm_512b_alignment.md |
 
-## 性能优化策略 — Vector 计算效率与标量向量化 (P67-P69, P94-P100) [Layer: L1]
+## 性能优化策略 — Vector 计算效率与标量向量化 (P67-P69, P94-P101) [Layer: L1]
 
-P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约、UB 融合链）。P94-P100 为标量→向量专项替代策略，覆盖归约（P94）、逐元素运算（P95）、排序（P96）、零拷贝切片（P97）、自适应调度（P98）、Broadcast 批量（P99）、GatherMask（P100）七种反模式。
+P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约、UB 融合链）。P94-P101 为标量→向量专项替代策略，覆盖归约（P94）、逐元素运算（P95）、排序（P96）、零拷贝切片（P97）、自适应调度（P98）、Broadcast 批量（P99）、GatherMask 标量替代（P100）、GatherMask 列分量解交织（P101）八种反模式。
 
 | ID | Strategy | Layer | Tags | When to Apply | Detail File |
 |----|----------|-------|------|---------------|-------------|
@@ -160,7 +160,8 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 | P97 | Zero-copy sub-tensor slicing + batch vector ops | L1 | datapath | 从 UB tensor 按偏移取子集做批量运算，需避免逐元素 gather | cards/P97_zero_copy_subtensor.md |
 | P98 | Hybrid scalar/vector adaptive dispatch (per-tile workload) | L1 | datapath | 小 tile 向量化收益为负（EnQue/DeQue 开销>标量循环），需自适应切换 | cards/P98_hybrid_scalar_vector_dispatch.md |
 | P99 | BroadCast + batch vector op replaces row-wise scalar loop | L1 | datapath | 小向量广播到大矩阵做逐元素运算，避免逐行 Muls/Adds dispatch 开销 | cards/P99_broadcast_batch_vector_ops.md |
-| P100 | GatherMask replaces element-wise SetValue/GetValue | L1 | datapath | 按固定间隔从连续 tensor 取元素重组（解交织、RoPE 奇偶分拆等） | cards/P100_gathermask_replacement.md |
+| P100 | GatherMask replaces element-wise SetValue/GetValue | L1 | datapath | 按固定间隔从连续 tensor 取元素重组（解交织、RoPE 奇偶分拆等）；限 A2/A3（DAV_2201），A5（DAV_3510）有更高效指令 | cards/P100_gathermask_replacement.md |
+| P101 | GatherMask replaces host-side column split (`.select().contiguous()`) | L1 | datapath | interleaved (N,4)→4 路分量分离，消除 Host 侧列拆分和多路 DMA；限 A2/A3（DAV_2201），A5（DAV_3510）有更高效指令 | cards/P101_gathermask_host_column_split.md |
 
 ## 性能优化策略 — Matmul/量化专用 (P70-P72) [Layer: L1]
 
@@ -254,7 +255,7 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 |---------------|---------------|---------------|
 | LayerNorm / RMSNorm / GroupNorm | D1, D2, P1, P2, P3, A1, A2, A6 | P19, P55, P68, P69, P81, P84, P94, P95, P98, P99 |
 | Quantization ops | D1, D4, D3, P2, P4, A3, A8 | P48, P49, P70 |
-| Element-wise (foreach) | D1, D2, P1, P2, A1, A4 | P67, P69, P84, P89, P95, P97, P100 |
+| Element-wise (foreach) | D1, D2, P1, P2, A1, A4 | P67, P69, P84, P89, P95, P97, P100, P101 |
 | Softmax / Attention | D1, P1, P5, A3, A4, A5 | P14, P18, P38, P55, P68, P81, P94, P100 |
 | Pooling / Gather | D1, P1, P2, P11, A7 | P33, P56, P59 |
 | Optimizer ops | D1, P1, P2, P9, A1 | P81, P84, P94, P95 |
@@ -272,10 +273,10 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 
 | Bottleneck Type | Primary | Secondary | Anti |
 |-----------------|---------|-----------|------|
-| mte2_stall | P1, P10 | P2, P7, P19, P18, P56, P59, P66, P92, P93 | P3 |
+| mte2_stall | P1, P10 | P2, P7, P19, P18, P56, P59, P66, P92, P93, P101 | P3 |
 | mte3_stall | P1 | P8, P19, P40, P56, P59 | — |
 | tiling_imbalance | P4, P2 | P11, P47, P51, P58, P72, P73, P75 | P3 |
-| scalar_loading | P5, P67 | P2, P54, P90, P97, P99, P100 | — |
+| scalar_loading | P5, P67 | P2, P54, P90, P97, P99, P100, P101 | — |
 | scalar_compute | P5, P67, P94, P95, P98, P99, P100 | P84 | — |
 | compute_bound | D1, P46, P94, P95, P96 | A1, P47, P68, P69, P79, P84, P91, P92 | — |
 | near_optimal | P98 | — | — |

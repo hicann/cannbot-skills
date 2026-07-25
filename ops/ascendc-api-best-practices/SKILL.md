@@ -17,6 +17,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **数据搬运** | DataCopy, DataCopyPad | [api-datacopy.md](references/api-datacopy.md) | 非对齐处理、多维搬运 |
 | **LoadData / Cube 加载** | LoadData2D, LoadData2DV2, LoadData2DMx | [api-loaddata.md](references/api-loaddata.md) | L1 → L0 加载、Cube GEMM、MX 块量化格式 |
 | **Transpose / 重排** | TransDataTo5HD, Gather | [api-transpose.md](references/api-transpose.md) | 小通道 transpose、permute |
+| **数据过滤/解交织** | GatherMask | [api-gathermask.md](references/api-gathermask.md) | RoPE 奇偶拆分、列分量分离、非均匀间隔自定义 mask |
 | **Matmul 高阶 API（Cube）** | MatmulImpl, MatmulConfig, IterateAll | [api-matmul.md](references/api-matmul.md) | MatMul, BatchMatMul, MatMulBias；**限 A2/A3（DAV_2201）平台** |
 | **GMM 高阶 API** | GMMBaseParams, GMMArray, per-token dequant 管线 | [api-gmm.md](references/api-gmm.md) | GroupedMatmul, A8W8/A4W4 量化反量化；**限 A2/A3（DAV_2201）平台** |
 | **Buffer 管理** | TBuf, TQue | [api-buffer.md](references/api-buffer.md) | Double Buffer、内存规划 |
@@ -45,6 +46,9 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **流水线优化** | [api-pipeline.md](references/api-pipeline.md), [api-buffer.md](references/api-buffer.md) | Double Buffer、事件同步 |
 | **性能调优** | [api-buffer.md](references/api-buffer.md), [api-repeat-limits.md](references/api-repeat-limits.md) | Double Buffer、repeatTimes 优化 |
 | **遇到 API 限制** | [api-restrictions.md](references/api-restrictions.md) | 替代方案、避坑指南 |
+| **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 A2/A3（DAV_2201）平台** |
+| **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 A2/A3（DAV_2201）平台** |
+| **非均匀间隔自定义 mask** | [api-gathermask.md](references/api-gathermask.md) | 用户自定义 LocalTensor mask、类型匹配 |
 
 ---
 

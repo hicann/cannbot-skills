@@ -73,6 +73,18 @@ CopyIn → EnQue → DeQue → Compute → EnQue → DeQue → CopyOut
 
 **详细用法**：[api-reduce.md](api-reduce.md) | [Pattern 接口详解](api-reduce-pattern.md)
 
+### 7. GatherMask 解交织
+
+**三种用法**：
+
+| 场景 | 模式 | 关键参数 |
+|------|------|---------|
+| RoPE 奇偶拆分、按步长取元素 | 内置 pattern 1/2, Normal/Counter 均可 | `{1, 1, 8, 0}` |
+| (N,4)→4 列分量分离 | 内置 pattern 3/4/5/6 | `src0RepeatStride=8`, `repeatTimes=alignedLen/16` |
+| 非均匀间隔、复杂 mask | 用户自定义 `LocalTensor` mask | Counter/Normal 均可，mask 类型匹配 dst |
+
+⛔ **Critical**：`src0RepeatStride=8` 不可写成 1（repeat 重叠 224B → 精度全 fail）。**详细用法**：[api-gathermask.md](api-gathermask.md)
+
 ---
 
 ## 决策树：我应该用什么API？

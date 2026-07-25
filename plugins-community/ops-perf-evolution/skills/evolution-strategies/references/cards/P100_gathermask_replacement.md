@@ -4,7 +4,7 @@ bottlenecks: [scalar_compute, scalar_loading, compute_bound]
 op_families: [elementwise, special, index_scatter, attention]
 complexity: L1
 conflicts_with: []
-synergizes_with: [P97, P95]
+synergizes_with: [P97, P95, P101]
 requires: []
 has_preconditions: true
 has_playbook: false
@@ -108,3 +108,4 @@ grep -nE "GatherMask|deinterleave|rsvdCnt|GatherMaskParams" op_kernel/*.cpp
 ## 来源
 
 - tmp.md 优化点2：GatherMask 替代 SetValue/GetValue 逐元素解交织（RoPE 场景），2 条向量指令替代 2×half 次标量操作
+- 列分量解交织（如 `(N,4)→4路分量`）场景 → 见 **P101**

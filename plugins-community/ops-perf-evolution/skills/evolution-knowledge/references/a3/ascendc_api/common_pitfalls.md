@@ -207,3 +207,30 @@ CHECKLIST (run on every generated kernel):
 DETAILED GUIDE: optimization_patterns/scalar_to_vector.md
 SOURCE: NMS (30_NMS) 11.25x, GroupNorm (11_GroupNorm_evo) 1.84x, TopK (TopK_evo_0629) 4.08x
 ```
+
+## 17. GatherMask API Pitfalls
+
+```cpp
+// WRONG: src0RepeatStride=1 → 224B overlap between repeats → all outputs wrong
+GatherMaskParams gmParams(1, repeatTimes, 1, 0);
+// RIGHT: Normal mode + repeatTimes>1: stride must be 8 DataBlocks (256B)
+GatherMaskParams gmParams(1, repeatTimes, 8, 0);
+
+// WRONG: Small tile (<512) + inner-loop GatherMask → DMA blows up at large N
+// RIGHT: Tile fills UB (~2048 for 4-component deinterleave) + outer-loop deinterleaved dim
+
+// WRONG: Relying on Counter mode after GatherMask without explicit reset
+// RIGHT: GatherMask internally resets to Normal; re-enable Counter if needed
+
+CHECKLIST (run on every kernel that uses GatherMask):
+  1. grep -nE "GatherMaskParams.*repeatTimes.*, *1, *0" *.cpp
+     → src0RepeatStride=1 causes 224B overlap. Change to 8.
+
+  2. grep -nE "(TILE_[NM]|tile[NM]|MAX_TILE)\s*=\s*\d+" *.cpp
+     → Small tile + inner-loop GatherMask: DMA blows up at large N. Fill tile to UB limit.
+
+  3. GatherMask auto-resets to Normal mode after call. Re-enable Counter if needed.
+
+DETAILED GUIDE: api-gathermask.md
+SOURCE: GatherMask column deinterleave optimization
+```
