@@ -601,6 +601,50 @@
       ]
     },
     {
+      "name": "triton-optimizer-skills",
+      "description": "Triton Optimizer workflow Skills（2 个）。triton-npu-optimize 涵盖算子迭代优化全流程（baseline、测试、benchmark、profiling、IR/编译器分析、状态管理、修复指南），triton-npu-convert 完成 PyTorch 到 Triton NPU 转换与验证。",
+      "source": "./plugins-community/triton-optimizer/skills",
+      "strict": false,
+      "version": "0.1.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "triton",
+        "ascend",
+        "npu",
+        "optimize",
+        "convert",
+        "skills"
+      ],
+      "category": "skills",
+      "skills": [
+        "./triton-npu-optimize",
+        "./triton-npu-convert"
+      ]
+    },
+    {
+      "name": "triton-optimizer",
+      "source": "./plugins-community/triton-optimizer",
+      "description": "Triton Optimizer workflow 插件。面向 Triton Ascend NPU 算子优化与 PyTorch 算子转换，提供 optimize/convert Agents、workflow 状态 hooks 与下沉到 ops 的 Skills。",
+      "version": "0.1.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "triton",
+        "ascend",
+        "npu",
+        "optimize",
+        "convert",
+        "agent"
+      ],
+      "category": "development",
+      "dependencies": [
+        "triton-optimizer-skills"
+      ]
+    },
+    {
       "name": "tilelang2ascend-ops-developer-skills",
       "description": "TileLang2AscendC 算子自动生成 Skills（7 个）。TileLang 设计、AscendC 转译、Case 精简、性能分析、精度调优、Trace 记录。",
       "source": "./plugins-community/tilelang2ascendc-ops-generator/skills",

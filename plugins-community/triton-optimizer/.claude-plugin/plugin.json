@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "triton-optimizer",
+  "version": "0.1.0",
+  "description": "Claude optimize and convert workflow plugin for Triton Optimizer",
+  "author": {
+    "name": "CANNBot"
+  },
+  "dependencies": [
+    "triton-optimizer-skills"
+  ]
+}
