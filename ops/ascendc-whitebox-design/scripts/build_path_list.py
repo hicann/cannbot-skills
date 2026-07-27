@@ -338,20 +338,30 @@ def generate_glossary_md(config):
         f"> 算子：{op_name}",
         "> 数据来源：tiling 源码变量提取",
         "",
-        "| tiling_var | semantic_name | category | source | type | desc |",
-        "|------------|--------------|----------|--------|------|------|",
+        "| tiling_var | semantic_name | category | type | desc | shape_contribution |",
+        "|------------|--------------|----------|------|------|--------------------|",
     ]
 
     category_order = {"input_variable": 0, "caller_option": 1, "internal_variable": 2}
     sorted_entries = sorted(entries, key=lambda e: (category_order.get(e["category"], 99), e["tiling_var"]))
 
     for e in sorted_entries:
+        shape_contribution = format_shape_contribution(e.get("shape_contribution"))
         lines.append(
             f"| `{e['tiling_var']}` | {e['semantic_name']} | {e['category']} | "
-            f"{e['source']} | {e['type']} | {e['desc']} |"
+            f"{e['type']} | {e['desc']} | {shape_contribution} |"
         )
 
     return "\n".join(lines) + "\n"
+
+
+def format_shape_contribution(value):
+    if value is None:
+        return "-"
+    parts = [f"shape_relation={value.get('shape_relation', '')}"]
+    if value.get("representative"):
+        parts.append(f"representative={value['representative']}")
+    return "; ".join(parts)
 
 
 def _validate_glossary(glossary):
@@ -365,6 +375,23 @@ def _validate_glossary(glossary):
         if cat not in _VALID_CATEGORIES:
             errors.append(f"[INVALID_CATEGORY] glossary entry '{var}': "
                           f"category '{cat}' not in {_VALID_CATEGORIES}")
+        if "shape_contribution" not in entry:
+            errors.append(f"[MISSING_SHAPE_CONTRIBUTION] glossary entry '{var}': missing shape_contribution")
+            continue
+        shape_contribution = entry.get("shape_contribution")
+        if shape_contribution is None:
+            continue
+        if not isinstance(shape_contribution, dict):
+            errors.append(
+                f"[INVALID_SHAPE_CONTRIBUTION] glossary entry '{var}':"
+                " shape_contribution must be null or object"
+            )
+            continue
+        if not shape_contribution.get("shape_relation"):
+            errors.append(
+                f"[INVALID_SHAPE_CONTRIBUTION] glossary entry '{var}':"
+                " shape_contribution.shape_relation is required"
+            )
     return glossary_vars, errors
 
 

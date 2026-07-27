@@ -49,6 +49,17 @@ KEY_SETTING_PATTERNS = [
     re.compile(r'\b(GET_TILING_KEY)\b'),
 ]
 
+STRONG_KEY_SETTING_PATTERNS = [
+    re.compile(r'\bSetTilingKey\s*\('),
+    re.compile(r'\bsetTilingKey\s*\('),
+    re.compile(r'\bset_tiling_key\s*\('),
+    re.compile(r'\bGET_TILING_KEY\b'),
+    re.compile(r'\bGET_TPL_TILING_KEY\b'),
+    re.compile(r'\bREGISTER_TILING_FOR_TILINGKEY\b'),
+]
+
+RE_LOCAL_INCLUDE = re.compile(r'#\s*include\s+"([^"]+)"')
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Scout-T: Tiling file reconnaissance")
@@ -68,6 +79,10 @@ def read_file(filepath):
             return f.read()
     except OSError:
         return ''
+
+
+def has_strong_key_setting(content):
+    return any(pattern.search(content) for pattern in STRONG_KEY_SETTING_PATTERNS)
 
 
 def discover_tiling_files(op_host_dir):
@@ -269,7 +284,7 @@ def parse_local_includes(filepath, op_path):
     file_dir = os.path.dirname(filepath)
     content = read_file(filepath)
 
-    for m in re.finditer(r'#\s*include\s*"([^"]+)"', content):
+    for m in RE_LOCAL_INCLUDE.finditer(content):
         inc_path = m.group(1)
 
         resolved = os.path.normpath(os.path.join(file_dir, inc_path))
@@ -282,6 +297,114 @@ def parse_local_includes(filepath, op_path):
             includes.append(resolved)
 
     return includes
+
+
+def build_tiling_include_roots(op_path, p0_file):
+    op_host_dir = os.path.join(op_path, 'op_host')
+    family_root = os.path.dirname(op_path)
+    family_name = os.path.basename(family_root)
+    roots = [
+        os.path.dirname(p0_file),
+        op_host_dir,
+        os.path.join(op_host_dir, 'arch22'),
+        os.path.join(op_host_dir, 'arch35'),
+        family_root,
+        os.path.join(family_root, f'{family_name}_utils', 'op_host'),
+        os.path.join(family_root, f'{family_name}_utils'),
+    ]
+    return [os.path.abspath(root) for root in roots if os.path.isdir(root)]
+
+
+def should_skip_header(filepath, npu_arch):
+    norm = filepath.replace(os.sep, '/')
+    skip_parts = ['/tests/', '/ut/', '/st/', '/register/', '/platform/',
+                  '/log/', '/util/', '/exe_graph/']
+    if any(part in norm for part in skip_parts):
+        return True
+    if npu_arch != 'DAV_3510' and '/arch35/' in norm:
+        return True
+    if npu_arch == 'DAV_3510' and '/arch22/' in norm:
+        return True
+    return False
+
+
+def resolve_include(inc_path, current_file, include_roots):
+    candidates = [os.path.join(os.path.dirname(current_file), inc_path)]
+    candidates.extend(os.path.join(root, inc_path) for root in include_roots)
+    for candidate in candidates:
+        resolved = os.path.abspath(os.path.normpath(candidate))
+        if os.path.isfile(resolved):
+            return resolved
+    return None
+
+
+def collect_include_closure(entry_file, include_roots, npu_arch, max_depth=8):
+    visited = set()
+    ordered = []
+
+    def visit(filepath, depth):
+        if depth > max_depth:
+            return
+        content = read_file(filepath)
+        for match in RE_LOCAL_INCLUDE.finditer(content):
+            resolved = resolve_include(match.group(1), filepath, include_roots)
+            if not resolved or resolved in visited:
+                continue
+            if not resolved.endswith(('.h', '.hpp', '.hh', '.inc')):
+                continue
+            if should_skip_header(resolved, npu_arch):
+                continue
+            visited.add(resolved)
+            ordered.append(resolved)
+            visit(resolved, depth + 1)
+
+    visit(entry_file, 0)
+    return ordered
+
+
+def extract_set_tiling_key_dependency_symbols(content):
+    symbols = set()
+    for match in re.finditer(r'\bSetTilingKey\s*\(', content):
+        end = skip_parens(content, match.end())
+        if end is None:
+            continue
+        expr = content[match.end():end - 1]
+        for func_name in re.findall(r'\b([A-Za-z_]\w*)\s*\(', expr):
+            if func_name != 'SetTilingKey':
+                symbols.add(func_name)
+    return symbols
+
+
+def defines_symbol(content, symbol):
+    escaped = re.escape(symbol)
+    return bool(re.search(r'\b' + escaped + r'\s*\(', content))
+
+
+def select_key_contributing_headers(p0_file, include_headers):
+    if has_strong_key_setting(read_file(p0_file)):
+        return set(), {}
+
+    selected = []
+    reasons = {}
+    dependency_symbols = set()
+    for header in include_headers:
+        content = read_file(header)
+        if not has_strong_key_setting(content):
+            continue
+        selected.append(header)
+        reasons[header] = 'P0 has no SetTilingKey; header contains strong key setting'
+        dependency_symbols.update(extract_set_tiling_key_dependency_symbols(content))
+
+    for symbol in sorted(dependency_symbols):
+        for header in include_headers:
+            if header in selected:
+                continue
+            if defines_symbol(read_file(header), symbol):
+                selected.append(header)
+                reasons[header] = f'defines SetTilingKey dependency symbol: {symbol}'
+                break
+
+    return set(selected), reasons
 
 
 def _check_cpp_sibling(filepath, func_name, visited):
@@ -417,12 +540,27 @@ def _build_arch_aware_entries(arch_aware_regs, filepath, npu_arch):
 
 
 def _collect_p1_candidates(filepath, op_path, impl_entries):
-    p1 = set(parse_local_includes(filepath, op_path))
+    p1 = set()
     for entry in impl_entries:
         p1.update(entry.get('traced_files', set()))
         if entry['impl_file'] and not entry['def_in_p0']:
             p1.add(entry['impl_file'])
     return p1
+
+
+def collect_key_header_p1(analyses, op_path, npu_arch):
+    p1_files = set()
+    reasons = {}
+    for analysis in analyses:
+        p0_file = analysis['filepath']
+        if has_strong_key_setting(read_file(p0_file)):
+            continue
+        include_roots = build_tiling_include_roots(op_path, p0_file)
+        headers = collect_include_closure(p0_file, include_roots, npu_arch)
+        selected, selected_reasons = select_key_contributing_headers(p0_file, headers)
+        p1_files.update(selected)
+        reasons.update(selected_reasons)
+    return p1_files, reasons
 
 
 def analyze_tiling_file(filepath, op_path, op_host_dir, npu_arch):
@@ -520,6 +658,7 @@ def write_json(output_dir, scan_result, op_name, npu_arch, soc_version):
     total_count = scan_result['total_count']
     valid_count = scan_result['valid_count']
     op_path = scan_result['op_path']
+    p1_reasons = scan_result.get('p1_reasons', {})
     """Write S2P0_scout_t.json."""
     os.makedirs(output_dir, exist_ok=True)
     json_path = os.path.join(output_dir, 'S2P0_scout_t.json')
@@ -552,6 +691,9 @@ def write_json(output_dir, scan_result, op_name, npu_arch, soc_version):
         },
         'entries': entries,
         'p1_files': sorted(relpath(f, op_path) for f in all_p1),
+        'p1_file_reasons': {
+            relpath(f, op_path): reason for f, reason in sorted(p1_reasons.items())
+        },
         'excluded': [
             {'file': relpath(f, op_path), 'reason': reason}
             for f, reason in excluded_files
@@ -619,12 +761,15 @@ def _append_arch_aware_entries(lines, analysis):
         lines.append('')
 
 
-def _append_p1_section(lines, all_p1, op_path):
+def _append_p1_section(lines, all_p1, op_path, p1_reasons=None):
     lines.append('## P1 (候选文件)')
     lines.append('')
     if all_p1:
         for p1_path in sorted(all_p1):
-            lines.append(f'  P1: {relpath(p1_path, op_path)}')
+            reason = ''
+            if p1_reasons and p1_path in p1_reasons:
+                reason = f' — {p1_reasons[p1_path]}'
+            lines.append(f'  P1: {relpath(p1_path, op_path)}{reason}')
     else:
         lines.append('  （无）')
     lines.append('')
@@ -678,7 +823,7 @@ def write_report(output_dir, scan_result, platform_info, npu_arch):
                               'REGISTER_TILING_TEMPLATE')
         _append_arch_aware_entries(lines, analysis)
 
-    _append_p1_section(lines, all_p1, op_path)
+    _append_p1_section(lines, all_p1, op_path, scan_result.get('p1_reasons', {}))
     _append_p2_section(lines, excluded_files, op_path)
 
     with open(report_path, 'w') as f:
@@ -805,6 +950,8 @@ def main():
     all_p1 = set(p1_siblings)
     for analysis in analyses:
         all_p1.update(analysis['p1_candidates'])
+    key_header_p1, p1_reasons = collect_key_header_p1(analyses, op_path, npu_arch)
+    all_p1.update(key_header_p1)
 
     platform_info = {
         'op_path': op_path,
@@ -814,8 +961,9 @@ def main():
 
     scan_result = {
         'analyses': analyses, 'all_p1': all_p1,
+        'p1_reasons': p1_reasons,
         'excluded_files': excluded_files,
-        'total_count': len(all_files), 'valid_count': valid_count,
+        'total_count': len(all_files), 'valid_count': valid_count + len(key_header_p1),
         'op_path': op_path,
     }
 
@@ -825,7 +973,7 @@ def main():
 
     log_info = {
         'report_path': report_path, 'json_path': json_path,
-        'all_files': all_files, 'valid_count': valid_count,
+        'all_files': all_files, 'valid_count': scan_result['valid_count'],
         'excluded_files': excluded_files, 'op_path': op_path,
     }
     _log_summary(log_info, analyses, all_p1)

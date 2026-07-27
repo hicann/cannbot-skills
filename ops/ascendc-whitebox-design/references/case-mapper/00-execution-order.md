@@ -1,95 +1,57 @@
-# Case Mapper 执行总纲
+# Case Mapper v1 执行总纲
 
-> **路径约定**：`{skill_base}` = 技能根目录绝对路径，由主 Agent 在构建 prompt 或执行流程时作为上下文参数传入。文档中的 `{skill_base}/references/...` 需替换为实际路径后再 Read。
+> **目标**：按顺序将 Step 2 最终事实产物中的 path case 和 network config 翻译为下游可消费的输入/输出 tensor 空间，并生成 final low/high whitebox cases。
 
-## 角色
+## 读取规则（强制）
 
-将 S2P2_cases.json 的抽象参数组合映射为具体的 tensor 构造配置（shape + dtype），产出 S5_case_mapper.py 脚本 + S5_verify_mapper.py 验证脚本 + S5_merge_expand.py 合并展开脚本 + JSON / md 输出文件，供下游 pytest 和 TTK 模块消费。
-
-## 输入
-
-| 文件 | 必须？ | 用途 |
-|------|--------|------|
-| `S2P2_cases.json` | 是 | path 用例的参数组合，mapper 运行时 `json.load` 读取 |
-| `S2P1_operator_model.json` | 是 | 约束框架：inputs/outputs 的 dtype、rank、shape.constraints、attributes |
-| `S2P2_param_def.json` | 是 | dtype 参数名（`dtype_tensors[0].param`）、shape 参数 key 名与 groups 结构 |
-| `S2P1_low_configs.json` | 是 | 网络用例的语义参数值，网络映射阶段读取 |
-| `S5_mapping_spec.md` | 是 | 5b 读算子侧规格（§dtype ~ §验证规则）+ `（DYNAMIC）` 标注识别 DYNAMIC 输入；5b 生成 §网络用例映射 并写回 |
-| `S2P0_source_scope.md` | 是 | tiling 源码文件路径清单，5a-pre 据此读取源码提取参数与维度的对应关系 |
-| `infershape.cpp` 等源码 | 辅助 | 理解输出 shape 推导表达式（derived.expr） |
-| `06-dynamic-tensorlist.md` | 按需 | DYNAMIC param_type 时读取，用于 TensorList 约束处理 |
-
-### S2P2_cases.json 读取限制
-
-子 agent 在验证映射逻辑时，**禁止**全文读取 S2P2_cases.json。必须使用 Read 工具的 `offset=1, limit=30` 参数仅读取前几条用例作为验证样本。若样本用例的映射结果正确，即可认为映射逻辑验证通过，全部用例由生成的 S5_case_mapper.py 脚本运行时通过 `json.load` 批量处理。子 agent 可自行把握样本数量，以覆盖主要 group 为准。
-
-## 信息来源优先级（强制）
-
-约束信息（ndim range、tensor_constraints 等）**必须以 `S2P1_operator_model.json` 的 `inputs[*].rank` 和 `inputs[*].shape.constraints` 为唯一来源**，禁止从 tiling/infershape 源码重新推断。源码仅用于理解 shape 分解规则（decompose 策略）和输出 shape 推导表达式（derived.expr）。
-
-## 产出物概览
-
-### 可执行脚本
-
-| 文件 | 功能 |
-|------|------|
-| `S5_case_mapper.py` | `map_case()` 由 S5_mapping_spec.md 散文翻译生成（imperative Python），另有通用工具函数 |
-| `S5_verify_mapper.py` | 4 层自动验证（验证通过才能进入后续） |
-| `S5_merge_expand.py` | 合并 + 空 tensor 补全 + 元素数过滤 + data_range 展开 |
-
-## ID 命名规范
-
-| 类型 | 格式 | 示例 |
-|------|------|------|
-| path | `case{序号:05d}` | `case00000` |
-| network | `network{序号:05d}` | `network00001` |
-| 空 tensor（REQUIRED） | `case{path 最大 ID + 1:05d}_{input_name}_empty` | `case00081_x_empty` |
-| 空 tensor（DYNAMIC） | `case{path 最大 ID + 1 + idx:05d}_{name}_{suffix}` | `case00081_x_first_empty`（suffix: first/middle/last/partial_empty 或 all_empty，示例见 case00081_x_all_empty） |
-| all 变体 | `{原 ID}_all_{range}` | `case00001_all_zero` |
-| one-hot 变体 | `{原 ID}_{input_name}_{range}` | `case00001_{input_name}_{range}` |
+1. 读完本文件后，按“执行顺序约束”表逐 Step Read 并执行。**每完成一个 Step 的状态判断后，才能读取下一个 Step 的指导文件、模板或固定脚本。**
+2. 禁止在 Step 5.1 之前读取 `01-variable-semantics.md` 以外的 Step 子文件、`s5_case_mapper_template.py` 或 Step 5.3/5.4/5.5 固定脚本；禁止一次性 Read 全部流程文档和模板。
+3. 当前 Step 只读取当前行列出的指导文件、模板、固定命令、前置产物及其运行所需的最小输入。不得为了预先规划、补充背景或重复理解而读取后续 Step 内容。
+4. 后续 Step 所需语义必须优先通过前序产物传递，例如 `S5_variable_semantics.md`、mapped JSON 和 Step 5.3 验收结果。不得预读后续 Step 或回读 Step 2 推理链补齐。
+5. 如果当前 Step 的允许输入和前序产物无法解释必需语义，必须报告 Step 2 语义产物不完整；不得读取禁止输入、源码或后续 Step 内容补齐。
 
 ## 执行顺序约束（强制）
 
 以下 Steps 必须按编号顺序逐步骤执行，禁止跳步或抢跑。
 
-### Step 5a-pre：映射规格生成
-- **指导文件**：`{skill_base}/references/case-mapper/01-mapping-spec.md`
-- **前置条件**：S2P2_cases.json + S2P1_operator_model.json + S2P2_param_def.json + S2P0_source_scope.md 已就绪
-- **职责**：分析 operator_model 中各 input/output 的 param_type，生成 S5_mapping_spec.md（§dtype ~ §验证规则，不含 §网络用例映射）
-- **完成标志**：S5_mapping_spec.md 已写入
+| Step | 角色 | 核心产物 | 进入下一步条件 |
+|------|------|----------|----------------|
+| Step 5.1：理解变量语义 | LLM 分析阶段，整理 mapper 所需语义和 data_range policy。 | `S5_variable_semantics.md`、`S5_data_range_policy.json` | 两个产物已写入，mapper 必需字段已有明确语义。 |
+| Step 5.2：生成 Shape Low Mapped Cases | LLM 代码生成阶段，基于模板生成 `S5_case_mapper.py` 并产出 shape-only low 中间用例。 | `S5_case_mapper.py`、`S5_mapped_cases_path.json`、`S5_mapped_cases_network.json`、`S5_mapped_cases_low_shape.json` | Step 5.2 产物已写入，脚本无模板残留。 |
+| Step 5.3：Mapped JSON Schema 验证 | 固定脚本验收阶段，只检查 Step 5.2 输出 JSON 是否存在，且每个 case 符合 MappedCase/Tensor/TensorList schema。 | 验收结果 | 命令退出码为 0，并输出 `PASS: mapper schema accepted`。 |
+| Step 5.4：追加 Empty Low Cases | 固定脚本阶段，读取 shape-only low 中间用例，机械追加 empty cases，生成最终 low 用例文件。 | `S5_cases_low.json` | 命令退出码为 0，并输出 `PASS: appended empty cases`。 |
+| Step 5.5：生成 High Data Range Cases | 固定脚本阶段，读取最终 low 用例和 data_range policy，生成 high 档用例。 | `S5_cases_high.json` | 命令退出码为 0，并输出 `PASS: expanded high data_range cases`。 |
 
-### Step 5a：生成 mapper + verifier
-- **指导文件**：`{skill_base}/references/case-mapper/02-step5a-mapper.md`
-- **前置条件**：Step 5a-pre 完成
-- **职责**：根据 S5_mapping_spec.md 生成 S5_case_mapper.py 和 S5_verify_mapper.py；运行验证确保映射正确
-- **完成标志**：
-  - S5_case_mapper.py + S5_verify_mapper.py 已生成
-  - 运行退出码 0
-  - S5_mapped_cases_path.json 已写入
-  - case 数量 == S2P2_cases.json
-  - 0 validation errors
+固定命令：
 
-### Step 5b：映射网络用例
-- **指导文件**：`{skill_base}/references/case-mapper/03-step5b-network.md`
-- **前置条件**：Step 5a 完成
-- **职责**：读 S5_mapping_spec.md（算子侧）+ S2P1_low_configs.json（网络侧），生成映射规则写回 S5_mapping_spec.md §网络用例映射；生成 S2P2_network_cases.json；复用 5a mapper 生成 S5_mapped_cases_network.json
-- **完成标志**：
-  - S2P2_network_cases.json 已写入（字段名全部为算子参数名，_group="network"）
-  - S5_mapped_cases_network.json 已写入
-  - 网络用例 tensor 构造合法
+```bash
+python .opencode/skills/ascendc-whitebox-design/scripts/s5_check_mapper_outputs.py --whitebox-dir <operator>/tests/whitebox
+python -m py_compile .opencode/skills/ascendc-whitebox-design/scripts/s5_append_empty.py
+python .opencode/skills/ascendc-whitebox-design/scripts/s5_append_empty.py --whitebox-dir <operator>/tests/whitebox
+python -m py_compile .opencode/skills/ascendc-whitebox-design/scripts/s5_expand_high.py
+python .opencode/skills/ascendc-whitebox-design/scripts/s5_expand_high.py --whitebox-dir <operator>/tests/whitebox
+```
 
-### Step 5c：合并 + 空 tensor 补全 + data_range 展开
-- **指导文件**：`{skill_base}/references/case-mapper/04-step5c-merge-expand.md`
-- **前置条件**：Step 5b 完成
-- **职责**：合并 path + network 用例；补全空 tensor 变体；生成 low 档位（全 normal）和 high 档位（data_range 展开）
-- **完成标志**：
-  - S5_merge_expand.py 已生成
-  - `python S5_merge_expand.py` 退出码 0
-  - `python S5_merge_expand.py 5d` 退出码 0
-  - S5_mapped_cases_low.json + S5_mapped_cases_high.json 已写入
-  - 空 tensor 变体已补全
+Step 5.4 固定脚本位于 `.opencode/skills/ascendc-whitebox-design/scripts/s5_append_empty.py`，Step 5.5 固定脚本位于 `.opencode/skills/ascendc-whitebox-design/scripts/s5_expand_high.py`。二者都不需要 LLM 修改，也不需要在 whitebox 目录生成本地展开脚本。
 
-### 通用规则
-- 前置条件未全部满足时，禁止启动该 Step
-- 完成当前 Step 并确认完成标志满足后，才能进入下一 Step
-- 自检失败 → 回到对应 Step 修正，修正完成后方可继续
+**完成标志**：Step 5.1 产出语义与 policy；Step 5.2 产出 path/network 审计产物和 `S5_mapped_cases_low_shape.json`；Step 5.3 schema 验证通过；Step 5.4 产出最终 `S5_cases_low.json`；Step 5.5 产出最终 `S5_cases_high.json`。最终 `S5_case_mapper.py` 无模板残留，Step 5.4/5.5 固定脚本可直接执行。
+
+## 通用规则
+
+- 前置条件表中标明的条件未全部满足时，禁止启动该 Step 的任何操作。
+- 完成当前 Step 的全部子步骤并确认状态判断满足后，才能进入下一 Step。
+- 自检失败时，回到对应 Step 修复；修复完成并重新满足状态判断后方可继续。
+- Step 5 只允许写入 `S5*` 命名产物；禁止写入、覆盖或新建 `S1*`、`S2*`、`S3*`、`S4*` 文件，这些前缀保留给上游 Step。
+- 禁止读取 `S2P2_traceability.md`、`S2P2_param_def.json`、`S2P2_dim_spec.json`、`S2P1_path_list.json` 补字段语义；这些属于 Step 2 推理链、生成规格或路径枚举，不是 Mapper 输入。
+- 禁止读取 tiling、kernel、`_def.cpp` 或注册源码重新推导 path、tiling key、mode、接口、shape 或 case 字段语义。
+- `S5_variable_semantics.md` 和 `S5_data_range_policy.json` 是 Step 5.1 的产物，不是上游事实来源；事实来源仍是 Step 2 允许读取的最终产物。`S5_variable_semantics.md` 承载审查说明和 mapper 语义，`S5_data_range_policy.json` 承载唯一 data_range policy。
+
+## ID 命名规范
+
+| 类型 | 格式 |
+|------|------|
+| path audit | `case{index:05d}` |
+| network audit | `network{index:05d}` |
+| shape low case | `low_case_{index:02d}` |
+| empty low case | `low_case_empty_{index:02d}` |
+| range high case | `{low_case_id}_range{index:02d}` |

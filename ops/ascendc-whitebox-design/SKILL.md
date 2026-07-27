@@ -3,7 +3,7 @@ name: ascendc-whitebox-design
 description: Ascend C 算子白盒测试用例生成系统。分析算子源码提取参数维度，自动枚举参数组合，生成可执行的白盒测试用例。自动两套输出：low 档位（路径覆盖+网络+空tensor，全normal）与 high 档位（data_range 展开，信息性验证）。触发场景：(1) "为 X 算子生成白盒测试用例" (2) "算子白盒用例生成" (3) "generate whitebox test cases for operator"。
 metadata:
   category: testing
-  workflow-steps: "6+TTK"
+  workflow-steps: "5+TTK"
 ---
 
 # Ascend C 算子白盒测试用例生成
@@ -24,7 +24,7 @@ metadata:
 - 算子源码存在于项目中（需包含 tiling 代码 + kernel 代码 + 接口定义）
 - Python 3.7+ 环境，无额外 pip 依赖
 - 产物写入 `tests/whitebox/`，重复执行会覆盖已有文件
-- TTK 模块（启用时）：项目需包含 `ops-test-kit/` 目录
+- TTK 模块（启用时）：项目需包含 `ops-test-kit/` 目录；TTK kernel 验收前会检查本地 TTK/CANN 环境和传入的 golden.py 中当前算子的 `__golden__["kernel"]` 注册，任一不满足时跳过 kernel 验收
 
 ## 工作流概览
 
@@ -38,8 +38,6 @@ Step 3 Task D Contract Gate — 校验最终用例 JSON 覆盖契约
 Step 4 用户确认 ⏸ — 确认后继续（可跳过）
   ↓
 Step 5 case mapper — 参数组合映射为可执行用例
-  ↓
-Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
   ↓
 [可选] TTK CSV 生成
 ```
@@ -60,8 +58,8 @@ Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
 ## 使用指南
 
 - **查看测试设计**：`S2P3_test_design.md`
-- **运行门禁**：`pytest tests/whitebox/S6_test_{op_name}.py --cases-file=S5_mapped_cases_low.json -v`
-- **运行 data_range 验证**：`pytest tests/whitebox/S6_test_{op_name}.py --cases-file=S5_mapped_cases_high.json -v`
+- **查看 low 档用例**：`S5_cases_low.json`
+- **查看 high 档用例**：`S5_cases_high.json`
 
 ## ⚠️ 执行约束（强制）
 
@@ -120,7 +118,7 @@ Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
 
 | 文件 | 职责 |
 |------|------|
-| `references/workflow.md` | 主流程（Step 1-6 + TTK 模块） |
+| `references/workflow.md` | 主流程（Step 1-5 + TTK 模块） |
 | `references/S1-input-collection.md` | Step 1 输入收集规则 |
 | `references/source-analysis/` | Step 2 源码分析（执行总纲 + 7 个子文档） |
 |   ├── `task-a/` | Phase 1 Task A 代码路径分析（overview + step1-tiling + step2-trace + step3-kernel + path-config-schema） |
@@ -128,5 +126,4 @@ Step 6 pytest 执行 — 生成脚本 + 门禁验证 + tilingkey 覆盖率
 | `references/design-verifier/` | Step 3 Task D Contract Gate（单文件入口） |
 | `references/case-mapper/` | Step 5 case mapper（执行总纲 + 5 个子文档） |
 |   └── `01-mapping-spec.md` | Step 5a-pre 映射规格生成 |
-| `references/pytest-gen/` | Step 6 pytest 规则与模板 |
-| `references/ttk-converter/` | TTK CSV 生成规则（执行总纲 + 5 个子文档） |
+| `references/ttk-converter/` | TTK CSV 生成规则（执行总纲 + 3 个子文档） |

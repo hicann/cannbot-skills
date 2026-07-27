@@ -1,4 +1,4 @@
-# White-box Pytest Test Generation Workflow
+# White-box Test Case Generation Workflow
 
 > ⚠️ **全流程约束规则的唯一定义在 SKILL.md「执行约束（强制）」节。** 主 Agent 和子 agent 执行前必须核对。
 
@@ -96,7 +96,7 @@ IF Step 1 选择「跳过 Step 4 闸门」→ 跳过此步直接进入 Step 5；
 
 ### Step 4 闸门（强制）
 
-收到用户确认之前，**禁止**：运行 Step 5（case mapper）、生成 `S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` 或 `S6_test_{op_name}.py`。
+收到用户确认之前，**禁止**：运行 Step 5（case mapper）、生成 `S5_cases_low.json` / `S5_cases_high.json`。
 
 **允许继续条件（满足其一）**：用户在对话中明确确认（如「确认」「继续生成 cases」）或用户写明「跳过 Step4 确认」/「一次跑完全流程」。
 
@@ -104,63 +104,26 @@ IF Step 1 选择「跳过 Step 4 闸门」→ 跳过此步直接进入 Step 5；
 
 ## Step 5：映射参数组合（子 agent）
 
-> **前置条件**：Step 4 用户已确认；`S2P2_cases.json`、`S2P1_operator_model.json`、`S2P2_param_def.json`、`S2P1_low_configs.json` 均已产出。
+> **前置条件**：Step 4 用户已确认；`S2P2_cases.json`、`S2P1_operator_model.json`、`S2P1_low_configs.json` 和 `S2P1_tiling_glossary.md` 均已产出。
 
 派 1 个独立子 agent。主 Agent prompt：
 
-先 Read `{skill_base}/references/case-mapper/00-execution-order.md`，按其「执行顺序约束」表逐步 Read 子文件并执行。约束规则见 `case-mapper/05-constraints.md`。
+```text
+在 {repo_root} 中为 {whitebox_dir} 从空状态执行完整 Step 5。
+首先读取并严格遵守：
+{skill_base}/references/case-mapper/00-execution-order.md
 
-**5a**：先按 `case-mapper/01-mapping-spec.md` 生成 `S5_mapping_spec.md`（自然语言映射规格），再基于 spec 以 `S2P2_cases.json` + `S2P1_operator_model.json` + `S2P2_param_def.json` 为输入生成 `S5_case_mapper.py` + `S5_verify_mapper.py`，运行产出 `S5_mapped_cases_path.json`（路径覆盖）。验证失败→修复（最多 3 轮），仍 fail → 触发轮次耗尽协议。
-
-**5b**：读取 `S5_mapping_spec.md`（算子侧规格）+ `S2P1_low_configs.json`（网络侧结构），自行生成映射规则并写回 `S5_mapping_spec.md` §网络用例映射，将语义参数名映射为算子参数名，生成 `S2P2_network_cases.json`（与 `S2P2_cases.json` 格式一致），调用 `S5_case_mapper.main(network_cases_file, network_out_file, id_prefix="network")` 复用 5a 全部管道，附加 `_source`/`_reason` 后产出 `S5_mapped_cases_network.json`。
-
-**5c**：生成 `S5_merge_expand.py`，运行默认入口 → `S5_mapped_cases_low.json`（过滤元素数 > 1 亿的 path/network case，合并过滤后的路径覆盖 + 网络用例 + 空 tensor 变体，所有输入置 `_data_range: "normal"`，从 `S2P1_operator_model.json` 读取 `value_domain` 附加为 `_value_domain`），随后运行 `python S5_merge_expand.py 5d` → `S5_mapped_cases_high.json`（基于 low 做 one-hot + 全统一展开，按 `_value_domain` 过滤不兼容 data_range，空 tensor 变体保留 normal）。
-
-- low 用于门禁（6b）和 tilingkey 覆盖率（6c）
-- high 用于全量 data_range 验证（信息性，非门禁）
-
----
-
-## Step 6：生成 pytest 并执行
-
-> **前置条件**：Step 5 已完成，`S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` 已生成。
-
-**输入文件**：
-
-| 文件 | 用途 |
-|------|------|
-| `S5_mapped_cases_low.json` | low 档位用例（门禁 + tilingkey 覆盖率） |
-| `S5_mapped_cases_high.json` | high 档位用例（data_range 展开） |
-| `S2P2_param_def.json` | 参数定义（理解参数含义 + tilingkey 期望集合） |
-| 算子 `docs/aclnn*.md`「计算公式」节 | Reference 实现的唯一依据（只读该节） |
-
-**执行概要**：
-
-主 Agent 直接执行。先 Read `{skill_base}/references/pytest-gen/00-execution-order.md`，按其「文件索引」表按需 Read 子文件并执行。约束规则见 `pytest-gen/02-constraints.md`（全程适用）。生成 pytest 测试文件，执行门禁验证，生成 tilingkey 覆盖率。验证流程、门禁规则、失败处理均见 `pytest-gen/02-constraints.md`。
-
-修复后重新运行（最多 3 轮），仍不通过 → 触发轮次耗尽协议。
-
-**输出文件**：
-
-| 文件 | 说明 |
-|------|------|
-| `S6_test_{op_name}.py` | pytest 测试文件（通过 `--cases-file` 切换 low/high） |
-| `S6_tilingkey_coverage.json` | tilingkey 覆盖率报告（信息性产出） |
-| `tilingkey_logs/{op_name}_full.log` | plog 副本 |
-
-**验证指令**：
-
-```bash
-ASCEND_GLOBAL_LOG_LEVEL=1 pytest S6_test_{op_name}.py --cases-file=S5_mapped_cases_low.json -q --tb=line
+完成后报告文件、命令结果、case 数量、5.3 验收结果和阻塞项。
 ```
 
-单用例 tilingkey 调试（按需）：`python {skill_scripts}/tilingkey_single.py --op-path {op_path} --case-id {case_id}`。
+- low 用于路径覆盖、网络 shape 和空 tensor 的常规白盒用例集
+- high 用于 data_range 展开的信息性白盒用例集
 
 ---
 
 ## 可选模块：TTK CSV 生成
 
-> **注意**：当前 TTK 模块仅支持 `kernel` 模式（`ttk kernel`），不支持 `e2e` 和 `aclnn` 模式。执行验收时必须使用 `python3 -m ttk kernel` 命令。
+> **注意**：当前 TTK 模块仅支持 `kernel` 模式（`ttk kernel`），不支持 `e2e` 和 `aclnn` 模式。执行 TTK kernel 验收前必须先执行 TTK precheck；precheck 同时检查 TTK 环境和 assets golden 注册。`kernel_gate.status != "passed"` 时跳过 kernel 验收，但仍保留已生成的 low/high CSV 和格式校验结果。
 
 ### 启用条件
 
@@ -168,37 +131,47 @@ Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
 
 ### 调用方式
 
-**方式 A（自动）**：主流程 Step 6 门禁全部通过后自动触发。
+**方式 A（自动）**：主流程 Step 5 case mapper 完成后自动触发。
 
-> **前置条件**：Step 6 门禁全部通过（0 FAILED / 0 ERROR / 0 RuntimeError）。
+> **前置条件**：`S5_cases_low.json` / `S5_cases_high.json` 和 `S2P1_operator_model.json` 已生成。
 
-**方式 B（独立）**：用户可随时派发子 agent 单独生成，只需提供 `S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` + `S2P1_operator_model.json` 路径和算子路径，不依赖其他 Step 产物或上下文。
+**方式 B（独立）**：用户可随时单独运行 wrapper 生成，只需提供 `S5_cases_low.json` / `S5_cases_high.json` + `S2P1_operator_model.json` 路径、算子路径和 `*_def.cpp` 路径，不依赖其他 Step 产物或上下文。
 
 ### 执行
 
 #### TTK 工具目录定位（主 Agent 执行）
 
-由于 TTK 模块由子 agent 执行，且子 agent 不负责与用户交互选择工具目录，主 Agent 必须在派发 TTK 子 agent 前先确定 `{ops_test_kit_path}`。
+TTK 模块常规路径由主 Agent 直接执行固定 wrapper。主 Agent 必须在运行 wrapper 前先确定 `{ops_test_kit_path}`。
 
-主 Agent 在当前仓库根目录下执行：
+主 Agent 只在当前工作目录 `$PWD` 路径下执行：
 
 ```bash
-find "{repo_root}" -type d -name "ops-test-kit"
+find "$PWD" -type d -name "ops-test-kit"
 ```
+
+禁止扩大到 `$PWD` 以外路径搜索 `ops-test-kit`；TTK 工具目录只从当前工作目录 `$PWD` 搜索结果中选择。
 
 处理规则：
 
 - 找到 1 个目录：将该目录作为 `{ops_test_kit_path}`。
-- 找到多个目录：主 Agent 必须在派发子 agent 前询问用户选择。
-- 找不到目录：不派发 TTK 子 agent；跳过 TTK CSV 生成与 6a/6b/6c 验收，并报告缺少 `ops-test-kit/` 工具目录。
+- 找到多个目录：主 Agent 必须在运行 wrapper 前询问用户选择。
+- 找不到目录：跳过 TTK CSV 生成与 TTK kernel 验收，并报告 `$PWD` 下缺少 `ops-test-kit/` 工具目录。
 
-派 1 个独立子 agent。主 Agent prompt：指示 Read `{skill_base}/references/ttk-converter/00-execution-order.md`（优先执行入口顶部的执行顺序约束节），传入上下文参数：`S5_mapped_cases_low.json` / `S5_mapped_cases_high.json` / `S2P1_operator_model.json` / `S5_mapping_spec.md` 路径、`op_name`、算子源码路径（`*_def.cpp` / `*_infershape.cpp`，infershape 可能位于共享目录，需按 3 级回退定位实际路径后传入）、产出写入路径、`ops_test_kit_path`。`ops_test_kit_path` 已由主 Agent 在派发前定位完成，子 agent 禁止重新查找或询问用户选择。
+主 Agent 直接执行：
 
-子 agent 在 ttk-converter/00-execution-order.md 的任务 1-5 完成后返回。
+```bash
+python3 {skill_base}/scripts/run_ttk_kernel_module.py \
+  --op-name {op_name} \
+  --whitebox-dir {op_path}/tests/whitebox \
+  --op-path {op_path} \
+  --op-def-cpp {op_def_cpp_path} \
+  --ops-test-kit-path {ops_test_kit_path} \
+  --skill-base {skill_base}
+```
 
-主 Agent **必须先 Read `{skill_base}/references/ttk-converter/05-kernel-acceptance.md`**，严格按其中 6a/6b 节的命令模板执行（禁止凭经验拼凑命令）。未读取该文件禁止执行任务 6a/6b/6c。
+wrapper 会生成 `ttk_module_report.json`。`status == "passed"` 表示 CSV 生成、格式校验、precheck、low/high 单用例 TTK kernel 验收均通过；`status == "skipped"` 表示按 `kernel_gate` 或参数跳过 kernel 验收；`status == "failed"` 时读取 `issues` 和 `steps.*` 定位失败点。常规路径禁止派发 TTK 子 agent；仅当 wrapper 失败或用户要求诊断 TTK 规则时，再读取 `{skill_base}/references/ttk-converter/00-execution-order.md` 及其参考文档。
 
-**6c（全量执行，可选）**：6b 门禁通过后，主 Agent 向用户确认是否执行全量 low CSV。默认不执行；1 分钟内未回复则跳过。用户确认后用 nohup 后台执行，提供进度查询指令，不阻塞流程。
+批量抽样验收为可选增强项，默认不执行；仅当用户明确要求或提交前需要增强验证时，按 `03-kernel-mode.md` 的「可选增强验收」执行。
 
 ### 产出（仅模块启用时）
 
@@ -232,26 +205,21 @@ find "{repo_root}" -type d -name "ops-test-kit"
 ├── S2P3_test_design.md
 ├── S3_verification_report.md
 ├── S5_case_mapper.py
-├── S5_verify_mapper.py
-├── S5_merge_expand.py
-├── S5_mapping_spec.md
 ├── S5_mapped_cases_path.json
 ├── S5_mapped_cases_network.json
-├── S2P2_network_cases.json
-├── S5_mapped_cases_low.json
-├── S5_mapped_cases_high.json
-├── conftest.py
-├── S6_test_{op_name}.py
-├── S6_tilingkey_coverage.json
-├── ttk_extract_case_info.py
+├── S5_mapped_cases_low_shape.json
+├── S5_cases_low.json
+├── S5_cases_high.json
+├── ttk_precheck_report.json
 ├── ttk_{op_name}_cases_low.csv
-├── ttk_{op_name}_cases_full.csv
-├── ttk_{op_name}_cases_low_sample_result.csv   ← 6b 产出
-├── ttk_{op_name}_cases_low_result.csv          ← 6c 产出（可选）
-├── golden_plugin.py          ← 条件产物：仅自生成时（已有 tests/assets/golden.py 时不生成）
-├── tilingkey_logs/
-│   ├── {op_name}_full.log
-│   └── {op_name}_{case_id}.log
+├── ttk_{op_name}_cases_high.csv
+├── ttk_{op_name}_cases_low_one_result.csv
+├── ttk_{op_name}_cases_high_one_result.csv
+├── ttk_low_one.log
+├── ttk_high_one.log
+├── ttk_module_report.json
+├── ttk_{op_name}_cases_low_sample_result.csv   ← 可选增强验收产物
+├── ttk_{op_name}_cases_high_sample_result.csv  ← 可选增强验收产物
 ```
 
 ## 参考提示词索引
@@ -261,8 +229,5 @@ find "{repo_root}" -type d -name "ops-test-kit"
 | 1 | `S1-input-collection.md` | 主 Agent | — |
 | 2 | `source-analysis/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 10 行 |
 | 3 | `design-verifier/00-execution-order.md` + `scripts/s3_task_d_gate.py` | 主 Agent | Task D Contract Gate（D1 cases coverage + 输出汇总） |
-| 5 | `case-mapper/00-execution-order.md` + `case-mapper/05-constraints.md` | 子 agent | `执行顺序约束（强制）` — 4 步（5a-pre→5a→5b→5c 逐步按需读取） |
-| 6 | `pytest-gen/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 3 步 |
-| 6c | `scripts/compute_tilingkey_coverage.py` | 主 Agent | — |
-| 6c 路径B | `scripts/tilingkey_single.py` | 主 Agent（按需） | — |
-| TTK 模块 | `ttk-converter/00-execution-order.md` | 子 agent（可选模块，由 Step 1 输入6 控制） | `执行顺序约束（强制）` — 8 任务 |
+| 5 | `case-mapper/00-execution-order.md` | 子 agent | `执行顺序约束（强制）` — 5 步（5.1→5.2→5.3→5.4→5.5 逐步按需读取） |
+| TTK 模块 | `scripts/run_ttk_kernel_module.py` | 主 Agent（可选模块，由 Step 1 输入4 控制） | wrapper 串行执行 CSV 生成/校验/precheck/单用例验收 |

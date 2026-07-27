@@ -20,7 +20,7 @@
 | 19 | `output_ori_shapes` | SHAPE_INFER_NESTED | 否 | `None` | 原始输出 shape。 |
 | 20 | `output_ori_formats` | DTYPE_NESTED | 否 | `('ND',)` | 原始输出格式。 |
 | 21 | `attributes` | DICT | 否 | `{}` | 算子属性（编译期和运行期合并）。 |
-| 22 | `output_inplace_indexes` | INT_TUPLE | 否 | `()` | inplace 输入的索引。从 aclnn 文档参数表「输入/输出」列检测：标记为「输入/输出」的参数，记录其在输入列表中的 0-based 索引。无 inplace 时默认 `()`。详见 `03-kernel-extraction.md`「output_inplace_indexes 检测」节。 |
+| 22 | `output_inplace_indexes` | INT_TUPLE | 否 | `()` | inplace 输入的索引。Kernel CSV 生成阶段固定写入 `()`；必要的同名 inplace 由 TTK op_info 自动推导。详见 `03-kernel-mode.md`。 |
 | 23 | `output_shape_unknown_indexes` | INT_TUPLE | 否 | `()` | 编译期 shape 未知的输出索引。 |
 | 24 | `dump_file_prefix` | STRING | 否 | `None` | 数据 dump 文件的自定义文件名前缀。 |
 | 25 | `manual_input_binaries` | EVAL | 否 | `()` | 手动输入二进制文件路径。 |
@@ -50,7 +50,7 @@ testcase_name, network_name, op_name, input_shapes, input_dtypes, input_formats,
 **格式选择原因**（经 TTK 源码验证）：
 
 - **`input_shapes` / `output_shapes`**：必须展开（每个子 tensor 有独立 shape，无法广播）
-- **`input_dtypes` / `output_dtypes`**：压缩即可。TTK `_is_range_field_already_nested` 判定 dtype tuple `('float16',)` 为已嵌套，`_flatten_by_distribution` 的 `len(val)==1` 分支自动广播到所有子 tensor
+- **`input_dtypes` / `output_dtypes`**：压缩即可。TTK `_normalize_field_by_dist` 负责归一化 dtype 这类 string/scalar 字段，`_flatten_by_distribution` 的 `len(val)==1` 分支会将 `('float16',)` 自动广播到所有子 tensor
 - **`input_data_ranges` / `precision_tolerances`**：**必须展开**。range pair `(min, max)` 本身是 2 元素 tuple，TTK `_normalize_range_field_by_dist` 的 `len(field)==1` 广播分支会将 `field[0]` 整体广播，压缩嵌套 `(((-10,10),),)` 会导致每个子 tensor 收到 `((-10,10),)` 而非 `(-10,10)`，解析错误。扁平格式 `((-10,10),)` 在纯 TensorList（1 个输入）时可用，但在混合场景（TensorList + 普通 tensor）下 `_flatten_by_distribution` 会拆散 range pair，解析错误。展开嵌套是唯一通用格式
 
 `input_formats` / `output_formats` / `ori` 系列字段保持扁平格式不变（TTK 通过 `get()` 回退机制处理，无需嵌套）。

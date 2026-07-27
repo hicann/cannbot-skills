@@ -91,6 +91,8 @@
    - OP_CHECK / PARAM_CHECK 校验表达式（逐字抄录，含源码行号）
    - 属性默认值/范围（仅限 Step 1 的 attrs 清单中已声明的属性）
 
+   **aclScalar 识别（强制）**：若 aclnn 接口签名中某个参数类型为 `const aclScalar*` / `aclScalar*`，该参数按 scalar 输入建模。即使 `_def.cpp` 中该参数注册为 `Input(...).DataType(...)` 或 proto 中声明为 `INPUT(... TensorType(...))`，也不得按普通 Tensor 建模。
+
    **参数边界**：aclnn 层可能包含 def.cpp 未注册的参数（如 mode、handle 等由输出 tensor 是否 nullptr 隐式推导的参数）。此类参数**不得写入 attributes**，在 Step 7 返回文本中列出供参考。
 
    完成条件：所有 OP_CHECK 已抄录。
@@ -102,7 +104,7 @@
    搜索策略（按优先级，找到即停止）：
    1. **Runtime schema 查询（优先级最高）**：使用 Bash 导入 torch_npu，按 `npu_{op_name}` 查找注册算子。通过 `getattr(torch_npu, 函数名, None)` 探测。若为 `OpOverloadPacket`，从 `.default._schema` 提取参数名/类型/默认值/返回值。
    2. **源码搜索（兜底）**：Glob 搜索 `*npu*{op_name}*.py`、Python 绑定文件、注册代码。
-   3. 两步均找不到 → 跳过 Step 5，Step 6 组装时 `torch_npu_api_exposure` 写入 `null`。
+   3. 两步均找不到 → 跳过 Step 5 参数对比，Step 6 组装时 `torch_npu_api_exposure` 写入稳定对象：`{"status": "not_found", "param_gaps": []}`。禁止写入 `null`。
 
    #### 5b. 参数对比
    提取 torch_npu 输入/输出参数列表，分别与 Step 1 的 inputs 和 outputs 对比，供 5c 消费。
@@ -136,6 +138,9 @@
     - `outputs[*].param_type` 与 Step 1 的 `.ParamType()` 一致
     - DYNAMIC 输入的 `tensor_count` 字段已填写（param/min/max 非空）
     - DYNAMIC 输出的 `tensor_count.derived_from` 字段已填写
+    - aclnn 签名为 `aclScalar*` 的输入必须满足 `rank.min == 0 && rank.max == 0`
+    - aclnn 签名为 `aclScalar*` 的输入不得包含可变 tensor shape/rank 约束
+    - aclnn 签名为 `aclScalar*` 的输入若 dtype 依赖其它输入 dtype，必须在 dtype 或 constraints 中记录依赖关系
 
    完成条件：JSON 写入成功，自检通过。
 
@@ -249,6 +254,8 @@
   ],
 
   "torch_npu_api_exposure": {
+    "status": "found | not_found — 是否定位到 torch_npu Python 暴露入口；未找到时必须为 not_found，禁止为 null",
+    "api": "string — status=found 时填写 torch_npu 入口；status=not_found 时省略",
     "param_gaps": [
       {
         "aclnn_param": "string — aclnn 接口中存在但 torch_npu 未暴露的参数名",
@@ -281,6 +288,9 @@
 - **inputs[*].dtype**：列出 infershape / aclnn 层支持的所有 dtype。优先用 `sync_with`
 - **inputs[*].rank**：支持的最小/最大维度数。优先用 `sync_with`
 - **inputs[*].shape**：列出 shape 约束条件。优先用 `sync_with`
+- **aclScalar 输入 dtype**：若输入在 aclnn 签名中为 `aclScalar*`，dtype 以 aclnn 参数校验逻辑和文档参数说明为准。若 dtype 依赖某个 Tensor 输入 dtype，必须记录依赖关系，不得只使用 `_def.cpp` 中 `DtypeScalarToTensor2(...)` 产生的 Tensor dtype 列表
+- **aclScalar 输入 rank**：若输入在 aclnn 签名中为 `aclScalar*`，`rank` 必须填写 `{"min": 0, "max": 0}`；不得从 Tensor/TensorList 的 `MAX_SUPPORT_DIMS_NUMS`、文档 shape `0-8` 或 `_def.cpp` 的 TensorType 注册推导为可变 rank
+- **aclScalar 输入 shape**：若输入在 aclnn 签名中为 `aclScalar*`，shape 仅记录 `"aclScalar has no tensor shape; treat as rank-0 scalar for whitebox modeling"`。不得生成 shape/rank 采样维度
 - **inputs[*].value_domain**：输入 tensor 的数学定义域约束。仅当算子对输入值有数学限制时填写。无约束时填 `null` 或省略。判断依据：算子名模式匹配（见下方常见模式清单）或算子文档/源码中的数学公式
 
 **value_domain 常见模式（匹配即填，无需额外推断）**：
@@ -310,6 +320,7 @@
 - **outputs[*].shape.expr**：仅 `rule=derived` 时必填
 - **outputs[*].shape.source**：始终填写 `文件名:行号`
 - **attributes[*].name**：必须与 Step 1 的 `def.cpp.Attr()` 一致。aclnn 层额外参数不得写入 attributes
+- **torch_npu_api_exposure**：必须始终是 object，禁止为 `null`。未找到 torch_npu 暴露入口时固定写入 `{"status": "not_found", "param_gaps": []}`；找到入口时写入 `{"status": "found", "api": "torch_npu.xxx", "param_gaps": [...]}`。
 
 #### 示例
 
@@ -387,6 +398,7 @@
 5. **DYNAMIC 独立性**：每个 DYNAMIC 槽位的 tensor count 独立采样。DYNAMIC 输入之间可能存在 shape/dtype/rank 等关联约束（通过 `sync_with` 或 `shape.constraints` 表达），但 tensor count 各自独立。DYNAMIC 输出的 count 从某个输入 tensor 推导（`derived_from`），不独立采样
 6. **DYNAMIC 必填字段**：`param_type = "DYNAMIC"` 的输入必须填写 `tensor_count`（含 `param`/`min`/`max`）、`same_shape`、`same_dtype`；DYNAMIC 输出必须填写 `tensor_count.derived_from`
 7. **value_domain 按表匹配**：优先查常见模式清单，未命中时从源码/文档推断，仍无法确定则留 null。禁止猜测不存在的定义域约束
+8. **torch_npu_api_exposure 稳定对象**：无论是否找到 torch_npu 暴露入口，`torch_npu_api_exposure` 都必须是 object；未找到时写 `status=not_found` 和空 `param_gaps`，禁止写 `null`
 
 ---
 
@@ -401,3 +413,5 @@
 7. 禁止省略 DYNAMIC 输入的 `tensor_count` 字段 — `param_type = "DYNAMIC"` 时必须填写 param/min/max
 8. 禁止省略 DYNAMIC 输出的 `tensor_count.derived_from` 字段 — 必须引用决定 count 的输入 tensor
 9. 禁止将 inplace 算子的 `outputs` 留空 — 当 `_def.cpp` 无 `Output()` 声明时，必须检查注释和算子名称判断是否为 inplace 模式，若是则将被修改的输入 tensor 作为隐式输出写入 `outputs`
+10. 禁止将 Tensor/TensorList 的 rank/shape 约束套用到 aclScalar 输入
+11. 禁止把 aclnn 签名为 `aclScalar*` 的参数建模为 rank 0-8 的普通 Tensor

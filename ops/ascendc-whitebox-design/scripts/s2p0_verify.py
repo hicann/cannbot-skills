@@ -54,7 +54,12 @@ def parse_args():
 
 def verify_file_exists(op_path, rel_path):
     """Check if file exists relative to op_path."""
-    full_path = os.path.join(op_path, rel_path)
+    full_path = os.path.realpath(os.path.join(op_path, rel_path))
+    op_root = os.path.realpath(op_path)
+    family_root = os.path.realpath(os.path.dirname(op_path))
+    allowed_roots = (op_root + os.sep, family_root + os.sep)
+    if full_path != op_root and not full_path.startswith(allowed_roots):
+        return False
     return os.path.isfile(full_path)
 
 

@@ -37,16 +37,16 @@
 
    从 aclnn 文档的**参数说明表**中提取以下信息：
 
-   **1a. 参数类型识别**：
-   - 参数名后标注 `aclTensorList*` → **TensorList** 类型（对应 DYNAMIC，包含 N ≥ 1 个子 tensor）
-   - 参数名后标注 `aclTensor*` → **Tensor** 类型（对应 REQUIRED，单个 tensor）
+    **1a. 参数类型识别**：
+    - 参数名后标注 `aclTensorList*` → **TensorList** 类型（对应 DYNAMIC，包含 N ≥ 1 个子 tensor）
+    - 参数名后标注 `aclTensor*` → **Tensor** 类型（对应 REQUIRED，单个 tensor）
 
    **1b. 约束提取**：
    从每个参数的「使用说明」列提取约束，重点关注：
-   - **TensorList 的 tensor 数量约束**：如"元素个数与 x1 中 Tensor 的个数相等"、tensor count 范围等
-   - **shape 约束**：如"支持空 Tensor"、"列表内各 Tensor shape 相同"、"shape 与入参 x1 一致"等
-   - **dtype 约束**：如"数据类型保持一致"、支持的 dtype 列表等
-   - **元素数关系**：如"元素个数等于 x1 中 Tensor 的数量"等跨参数约束
+    - **TensorList 的 tensor 数量约束**：如"元素个数与 x1 中 Tensor 的个数相等"、tensor count 范围等
+    - **shape 约束**：如"支持空 Tensor"、"列表内各 Tensor shape 相同"、"shape 与入参 x1 一致"等
+    - **dtype 约束**：如"数据类型保持一致"、支持的 dtype 列表等
+    - **元素数关系**：如"元素个数等于 x1 中 Tensor 的数量"等跨参数约束
 
    **1c. 输出格式**：
    将提取结果格式化为内部工作数据（不写入文件），供 Step 2-3 消费：
@@ -55,10 +55,10 @@
    参数类型清单：
    - {name}: TensorList（aclTensorList*）
      约束: {使用说明中的约束列表}
-   - {name}: Tensor（aclTensor*）
-     约束: {使用说明中的约束列表}
+    - {name}: Tensor（aclTensor*）
+      约束: {使用说明中的约束列表}
 
-   TensorList 上限：50（Ascend C DYNAMIC TensorList 硬件限制）
+    TensorList 上限：50（Ascend C DYNAMIC TensorList 硬件限制）
    ```
 
    完成条件：所有输入/输出参数的类型和约束已提取。
@@ -87,12 +87,12 @@
    前置：Step 1-2 完成
    写入路径：`{产出写入路径}/S2P1_low_configs.json`
 
-   **组装前自检（强制）**：
-   - 每个配置中，TensorList 类型输入的同 shape 分组 tensor 数 ≤ 50
-   - TensorList 类型输入的所有子 tensor shape 在列表内一致（若 Step 1 提取了 same_shape 约束）
-   - TensorList 类型输入的所有子 tensor dtype 在列表内一致（若 Step 1 提取了 same_dtype 约束）
-   - 单 Tensor 类型输入的 shape 与使用说明中的约束一致（如"元素个数等于 x1 中 Tensor 的数量"）
-   - 所有配置的 dtype 在 Step 1 提取的支持 dtype 列表内
+    **组装前自检（强制）**：
+    - 每个配置中，TensorList 类型输入的同 shape 分组 tensor 数 ≤ 50
+    - TensorList 类型输入的所有子 tensor shape 在列表内一致（若 Step 1 提取了 same_shape 约束）
+    - TensorList 类型输入的所有子 tensor dtype 在列表内一致（若 Step 1 提取了 same_dtype 约束）
+    - 单 Tensor 类型输入的 shape 与使用说明中的约束一致（如"元素个数等于 x1 中 Tensor 的数量"）
+    - 所有配置的 dtype 在 Step 1 提取的支持 dtype 列表内
 
    自检失败 → 修正后重新自检，直到全部通过。
 

@@ -94,6 +94,15 @@ def collect_param_def_entries(param_def: Dict[str, Any]) -> Tuple[Set[Tuple[str,
     return entries, paths
 
 
+def _normalize_expected_entries(
+    entries: Set[Tuple[str, str, str, int]],
+    dtype_field: str,
+) -> Set[Tuple[str, str, str, int]]:
+    if dtype_field:
+        return entries
+    return {(group, "", path, key) for group, _dtype, path, key in entries}
+
+
 @dataclass
 class _ExpectedSets:
     path_ids: Set[str] = field(default_factory=set)
@@ -116,6 +125,7 @@ def _extract_expected_sets(path_list: Dict[str, Any], param_def: Dict[str, Any])
     expected_keys = {k for k in (raw_keys if isinstance(raw_keys, list) else []) if isinstance(k, int)}
     expected_entries, param_def_paths = collect_param_def_entries(param_def)
     dtype_field = dtype_param(param_def)
+    expected_entries = _normalize_expected_entries(expected_entries, dtype_field)
     return _ExpectedSets(
         path_ids=path_ids,
         reachable_paths=reachable_paths,
@@ -144,7 +154,7 @@ def _validate_single_case(idx: int, case: Any, exp: _ExpectedSets, cd: _CaseData
     path = case.get("path")
     key = case.get("key")
     group = case.get("_group")
-    dtype_value = case.get(exp.dtype_field) if exp.dtype_field else None
+    dtype_value = case.get(exp.dtype_field) if exp.dtype_field else ""
     missing = []
     if not isinstance(path, str):
         missing.append("path")
@@ -152,8 +162,8 @@ def _validate_single_case(idx: int, case: Any, exp: _ExpectedSets, cd: _CaseData
         missing.append("key")
     if not isinstance(group, str):
         missing.append("_group")
-    if not exp.dtype_field or not isinstance(dtype_value, str):
-        missing.append(exp.dtype_field or "dtype_param")
+    if exp.dtype_field and not isinstance(dtype_value, str):
+        missing.append(exp.dtype_field)
     if missing:
         cd.malformed.append({
             "index": idx,

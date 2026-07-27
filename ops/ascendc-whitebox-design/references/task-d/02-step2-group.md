@@ -22,7 +22,7 @@ group 命名规则：读 tiling 源码中的模式常量或分支标识命名（
 
 ## 分组规则
 
-路径 ID 采用 `T{t}K{k}` 命名（见 `01-step4-path-schema.md` §路径 ID 命名规则），分组可直接从 ID 提取，无需重新分析 tiling 源码。
+路径 ID 采用 `T{t}K{k}` 命名（见 `04-path-config-schema.md` §路径 ID 命名规则），分组可直接从 ID 提取，无需重新分析 tiling 源码。
 
 ### 基本规则
 

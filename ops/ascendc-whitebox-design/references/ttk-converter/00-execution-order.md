@@ -1,103 +1,110 @@
-# TTK Converter 执行总纲
-
-> **路径约定**：`{skill_base}` = 技能根目录绝对路径，由主 Agent 在构建 prompt 或执行流程时作为上下文参数传入。文档中的 `{skill_base}/references/...` 需替换为实际路径后再 Read。
->
-> - `{whitebox_dir}` = 白盒测试产出目录（通常为 `{算子路径}/tests/whitebox/`）
-> - `{ops_test_kit_path}` = TTK 工具目录（`ops-test-kit/`），必须由主 Agent 在派发 TTK 子 agent 前通过 `workflow.md` 的 TTK 工具目录定位步骤确定，并作为上下文参数传入。子 agent 不负责查找该目录，也不得在多候选时与用户交互。
-> - `{plugin_path}` = golden plugin 路径（任务 5 确定：已有 golden → `{算子路径}/tests/assets/golden.py`，自生成 → `{whitebox_dir}/golden_plugin.py`）
+# TTK Converter 执行入口
 
 ## 角色
 
-信息提取与格式转换器。从 `S5_mapped_cases_low.json` / `S5_mapped_cases_high.json`（Step 5 产出的已映射 tensor 配置）中直接提取字段，转换为 TTK CSV 格式。
+将 Step 5 final case 文件转换为 TTK Kernel CSV，并按需执行 low/high 单用例 TTK kernel 验收。
 
-**TTK 工具**：`ops-test-kit/` 目录是 TTK 调试工具的代码仓库，提供 kernel/aclnn/e2e 三种模式的编译、执行、精度比对能力。所有 `python3 -m ttk` 命令**必须在 `ops-test-kit/` 目录下执行**（TTK 通过 `__main__.py` 启动）。
-
-**命名规则**：输出文件带 `ttk_` 前缀（`ttk_extract_case_info.py`、`ttk_{op_name}_cases_low.csv`、`ttk_{op_name}_cases_full.csv`），例外：`golden_plugin.py` 为**自生成时**的固定文件名（已有 `tests/assets/golden.py` 时不生成）。
-
-## 模式支持
-
-TTK 工具支持三种模式，基于 CSV 表头自动识别：
-
-| 模式   | 识别条件                                   | 使用结构                          | 当前状态                    |
-| ------ | ------------------------------------------ | --------------------------------- | --------------------------- |
-| Kernel | 表头不含`api_name`                       | `UniversalTestcaseStructure`    | **已实现**            |
-| ACLNN  | 表头含`api_name` 且值以 `aclnn` 开头   | `ApiTestcaseStructure`          | 预留（见 ACLNN/E2E 预留节） |
-| E2E    | 表头含`api_name` 且值不以 `aclnn` 开头 | `FrameworkApiTestcaseStructure` | 预留（见 ACLNN/E2E 预留节） |
-
-> **当前仅 Kernel 模式已实现。** 新增 ACLNN/E2E 时，新增 `0X-{mode}-fields.md` + `0X-{mode}-extraction.md` + `0X-{mode}-tasks.md` 三个文件，无需改动现有 Kernel 文件。
+常规流程只调用固定 wrapper 脚本，不再派发 TTK 子 agent，不再读取 `03-kernel-mode.md` 做逐步 LLM 分析。`01-csv-common.md`、`02-kernel-fields.md`、`03-kernel-mode.md` 暂保留为脚本规则来源和失败诊断参考。
 
 ## 输入
 
-| 文件                            | 必须？ | 用途                                                                                                                                                                        |
-| ------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `S5_mapped_cases_low.json`    | 是     | Step 5 低档位输出（路径+网络+空 tensor，全 normal，门禁用）                                                                                                                 |
-| `S5_mapped_cases_high.json`   | 是     | Step 5 高档位输出（data_range 展开，信息性验证）                                                                                                                            |
-| `S2P1_operator_model.json`    | 是     | 算子模型（提取`attributes` 节中的属性名列表，用于过滤 `attributes`）                                                                                                    |
-| `S5_mapping_spec.md`          | 是     | 提取属性名列表 + 识别各 input/output 的 param_type（REQUIRED/DYNAMIC），用于派发提取逻辑                                                                                    |
-| `op_name`                     | 是     | 算子名称（小写字母+下划线，由主 Agent 在调用时提供）                                                                                                                        |
-| `scripts/ttk_validate_csv.py` | 辅助   | CSV 格式校验脚本（任务 4 使用），由 skill scripts 目录提供                                                                                                                  |
-| 算子源码（校验用）              | 辅助   | `*_def.cpp`（输入/输出/属性注册）、`*_tiling_check.cpp`/`*_tiling*.cpp`（约束检查）、`*_infershape.cpp`（输出 shape 推导，可能位于共享目录如 `*_utils/op_host/`） |
+| 参数 | 说明 |
+|------|------|
+| `{skill_base}` | 技能根目录绝对路径 |
+| `{whitebox_dir}` | 白盒测试产出目录，需包含 `S5_cases_low.json`、`S5_cases_high.json`、`S2P1_operator_model.json` |
+| `{op_name}` | 规范算子名，如 `add_rms_norm` |
+| `{op_path}` | 算子源码根目录，如 `.../ops-nn/norm/add_rms_norm` |
+| `{op_def_cpp_path}` | 当前算子的 `*_def.cpp` 实际路径 |
+| `{ops_test_kit_path}` | 主 Agent 已在当前工作目录 `$PWD` 下定位到的 `ops-test-kit/` 路径 |
+
+## 常规执行命令
+
+主 Agent 直接执行：
+
+```bash
+python3 {skill_base}/scripts/run_ttk_kernel_module.py \
+  --op-name {op_name} \
+  --whitebox-dir {whitebox_dir} \
+  --op-path {op_path} \
+  --op-def-cpp {op_def_cpp_path} \
+  --ops-test-kit-path {ops_test_kit_path} \
+  --skill-base {skill_base}
+```
+
+如用户提供了非默认 CANN 环境脚本，可追加：
+
+```bash
+  --setenv-path {setenv_path}
+```
+
+若只需生成/校验 CSV 和 precheck，不执行 kernel 单用例验收，可追加：
+
+```bash
+  --skip-kernel-run
+```
+
+## wrapper 内部流程
+
+`run_ttk_kernel_module.py` 串行执行以下固定步骤：
+
+1. 校验输入路径和 case 数量。
+2. 调用 `scripts/ttk_generate_kernel_csv.py` 生成 low/high CSV。
+3. 调用 `scripts/ttk_validate_csv.py` 校验 low/high CSV。
+4. 调用 `scripts/ttk_precheck_env.py` 生成 `ttk_precheck_report.json`。
+5. `kernel_gate.status == "passed"` 时，串行执行 low/high 各 1 个 `python3 -m ttk kernel` 用例。
+6. 解析 result CSV 和日志关键状态，生成 `ttk_module_report.json`。
 
 ## 输出
 
-| 文件                             | 说明                                                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `ttk_extract_case_info.py`     | 单用例信息提取脚本（直接从`case["tensors"]` / `case["params"]` 提取，无 torch 依赖）                                        |
-| `ttk_{op_name}_cases_low.csv`  | low 档位用例（`S5_mapped_cases_low.json`，全 normal）                                                                         |
-| `ttk_{op_name}_cases_full.csv` | high 档位用例（`S5_mapped_cases_high.json`，data_range 展开）                                                                 |
-| `golden_plugin.py`             | 自生成的 TTK golden 函数（通过`--plugin` 加载）。已有 `tests/assets/golden.py` 时 `--plugin` 直接指向该文件，不生成此文件 |
+| 文件 | 说明 |
+|------|------|
+| `ttk_{op_name}_cases_low.csv` | low 档位 TTK Kernel CSV |
+| `ttk_{op_name}_cases_high.csv` | high 档位 TTK Kernel CSV |
+| `ttk_precheck_report.json` | TTK 环境、assets golden 和 kernel gate 报告 |
+| `ttk_{op_name}_cases_low_one_result.csv` | low 单用例验收结果 |
+| `ttk_{op_name}_cases_high_one_result.csv` | high 单用例验收结果 |
+| `ttk_low_one.log` | low 单用例日志 |
+| `ttk_high_one.log` | high 单用例日志 |
+| `ttk_module_report.json` | wrapper 统一结构化报告，含步骤状态和耗时 |
 
-## 信息来源优先级（强制）
+## 状态判断
 
-校验阶段（任务 2/4）以算子源码为权威源，S5 映射数据为待验证对象：
+常规流程只读取 `ttk_module_report.json` 判断模块结果：
 
-- **L0** `*_def.cpp`：输入/输出名称、顺序、dtype 注册（最高权威）
-- **L1** `*_tiling_check.cpp` / `*_tiling*.cpp`：参数约束检查
-- **L2** `*_infershape.cpp`：输出 shape 推导
-- **L3** `S2P1_operator_model.json`：算子接口模型（由 _def.cpp 导出，次权威）
-- **L4** `S5_mapped_cases_*.json`：映射数据（由 S5 mapper 生成，**可能有 bug**）
+| status | 含义 | 退出码 | 典型场景 |
+|--------|------|--------|----------|
+| `passed` | CSV 生成/校验通过，TTK 能消费 CSV，low/high 单用例编译成功并产出结果 | 0 | 正常路径 |
+| `passed_with_warnings` | CSV 和执行链路通过，但 perf/precision/OOB 有非 PASS 项；数值正确性不作为 TTK 模块门禁 | 0 | 精度失败、OOB 失败、perf 非 PASS |
+| `skipped` | CSV 生成/校验通过，但 kernel 验收被跳过 | 0 | `--skip-kernel-run`、golden 缺失/未注册、`ops-test-kit` 或 CANN/TTK 环境不可用 |
+| `failed` | CSV 阶段失败，或 TTK 无法消费 CSV/完成基本执行链路 | 1 | 必需输入缺失、CSV 生成/校验失败、CSV 行数不匹配、kernel 编译失败或无 result/log |
 
-禁止直接从 S5 映射数据取值而不通过源码校验。禁止凭直觉推断 dtype/shape。
+### 输入分级
 
-## 执行顺序约束（强制）
+wrapper 将输入分为两类：
 
-以下任务必须按编号顺序逐步执行，禁止跳步或抢跑。
+| 类别 | 路径 | 缺失处理 |
+|------|------|----------|
+| CSV 必需 | `S5_cases_low.json`、`S5_cases_high.json`、`S2P1_operator_model.json`、`*_def.cpp`、三个 `ttk_*.py` 固定脚本 | `status=failed`，无法生成 CSV |
+| kernel 可选 | `ops-test-kit/`、`tests/assets/golden.py`、CANN 环境 | CSV 继续生成；precheck 记录原因；kernel 验收 `skipped` |
 
-| 任务    | 文件                                                                                                                                                                                                                                                                       | 前置条件     | 状态判断                                                            |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------- |
-| 任务 1  | `{skill_base}/references/ttk-converter/01-csv-common.md` + `{skill_base}/references/ttk-converter/02-kernel-fields.md` + `{skill_base}/references/ttk-converter/03-kernel-extraction.md` + `{skill_base}/references/ttk-converter/04-kernel-tasks.md`（任务 1 节） | 无           | ttk_extract_case_info.py 已生成，初步验证打印结果与 JSON 一致       |
-| 任务 2  | `{skill_base}/references/ttk-converter/04-kernel-tasks.md`（任务 2 节）                                                                                                                                                                                                  | 任务 1 完成  | 校验结果全部 PASS（发现 bug → 修复 → 重验证通过）                 |
-| 任务 3  | `{skill_base}/references/ttk-converter/04-kernel-tasks.md`（任务 3 节）                                                                                                                                                                                                  | 任务 2 完成  | ttk_{op_name}_cases_low.csv + ttk_{op_name}_cases_full.csv 已生成 |
-| 任务 4  | `{skill_base}/references/ttk-converter/04-kernel-tasks.md`（任务 4 节）                                                                                                                                                                                                  | 任务 3 完成  | `python scripts/ttk_validate_csv.py` 校验全部 PASS                |
-| 任务 5  | `{skill_base}/references/ttk-converter/04-kernel-tasks.md`（任务 5 节）                                                                                                                                                                                                  | 任务 4 完成  | golden_plugin.py 已生成，初步验证通过                               |
-| 任务 6a | `{skill_base}/references/ttk-converter/05-kernel-acceptance.md`（6a 节）                                                                                                                                                                                                 | 任务 5 完成  | 单用例 TTK kernel 执行成功                                          |
-| 任务 6b | `{skill_base}/references/ttk-converter/05-kernel-acceptance.md`（6b 节）                                                                                                                                                                                                 | 任务 6a 完成 | `--tc 10` 采样门禁全部 PASS                                       |
-| 任务 6c | `{skill_base}/references/ttk-converter/05-kernel-acceptance.md`（6c 节）                                                                                                                                                                                                 | 任务 6b 完成 | 用户确认后执行，nohup 后台运行                                      |
+### 常见 reason
 
-**通用规则**：
+| reason | 说明 |
+|--------|------|
+| `missing_required_for_csv` | CSV 必需输入缺失 |
+| `csv_row_count_mismatch` / `csv_validation_failed` | CSV 生成结果不满足要求 |
+| `skip_kernel_run_requested` | 用户主动跳过 kernel 验收 |
+| `golden_missing` / `golden_op_unregistered` | golden 缺失或未注册当前算子 |
+| `env_unavailable` | `ops-test-kit`、TTK kernel 或 CANN 环境不可用 |
+| `low_kernel_execution_failed` / `high_kernel_execution_failed` | kernel 编译失败，或未产出 result/log，TTK 未完成基本执行链路 |
+| `precision_status_not_pass` / `memory_oob_status_not_pass` / `perf_status_not_pass` | TTK 已完成执行链路，仅作为 warning 输出 |
 
-- 前置条件表中标明的条件未全部满足时，禁止启动该任务
-- 完成当前任务的全部子步骤并确认状态判断满足后，才能进入下一任务
-- 自检失败 → 回到对应任务修正，修正完成后方可继续
+若 precheck 报告 `checks.cann_env.status == "passed_after_source"`，wrapper 会使用报告中的 `setenv_path` 执行 low/high TTK kernel 命令。
 
-## Kernel 模式约束
+## 失败诊断
 
-代码约束详见 `04-kernel-tasks.md` 任务 5「注意事项」表（6 条）。CSV 约束详见 `01-csv-common.md`「通用禁止」节（3 条）。
+仅当 wrapper 失败或用户要求分析 TTK 规则时，再读取以下参考文档：
 
-## ACLNN/E2E 预留
-
-> TODO: 待实现。两种模式共享 `01-csv-common.md` 的 9 个公共字段，通过 CSV 表头含 `api_name` 区分。
->
-> - **ACLNN**（`ApiTestcaseStructure`，24 字段 = 9 公共 + 15 专有）：`api_name` 以 `aclnn` 开头，新增 `tensor_view_*` 系列字段、`output_tensor_indexes`、`scalar_*` 字段等
-> - **E2E**（`FrameworkApiTestcaseStructure`，19 字段 = 9 公共 + 10 专有）：`api_name` 为框架 API 路径（如 `torch.add`），新增 `tensor_view_*` 系列字段、`golden_api` 等
->   实现时新增 `0X-{mode}-fields.md` + `0X-{mode}-extraction.md` + `0X-{mode}-tasks.md` 三个文件。
-
-## 文件索引
-
-| 文件                        | 职责                                                                     | 读入时机      |
-| --------------------------- | ------------------------------------------------------------------------ | ------------- |
-| `01-csv-common.md`        | 公共字段定义（9 个，全模式通用）+ CSV 格式规则（9 条）+ 通用禁止（3 条） | 任务 1        |
-| `02-kernel-fields.md`     | Kernel 模式专有字段定义（17 个）+ CSV 列顺序（26 列）                    | 任务 1        |
-| `03-kernel-extraction.md` | S5 JSON → CSV 字段提取规则 + data_range 映射表 + 返回值结构             | 任务 1        |
-| `04-kernel-tasks.md`      | 任务 1-5 详细执行指令 + golden 函数注意事项（6 条）                      | 各任务按需    |
-| `05-kernel-acceptance.md` | 任务 6a/6b/6c TTK 执行验收标准                                           | 任务 5 完成后 |
+- `03-kernel-mode.md`：Kernel CSV 生成、字段来源、TTK kernel 验收规则。
+- `02-kernel-fields.md`：Kernel CSV 字段定义。
+- `01-csv-common.md`：公共 CSV 字段和格式规则。

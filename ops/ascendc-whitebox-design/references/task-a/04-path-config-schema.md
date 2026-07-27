@@ -101,7 +101,7 @@
 
 dtype 编码到语义字符串的源码依据必须记录在 `source_constraints` 中，保留原始赋值、case 分支或相关源码位置。
 
-例外：dispatch 变量通过框架 API 管理且不存在源码局部变量名时，允许使用描述性名称（如 `tilingKey`），但必须在 `glossary` 中记录其框架 API 来源（`source` 标注为 `framework_api`）。
+例外：dispatch 变量通过框架 API 管理且不存在源码局部变量名时，允许使用描述性名称（如 `tilingKey`），但必须在 `glossary.desc` 中说明其框架 API 来源。
 
 ---
 
@@ -155,9 +155,9 @@ Task A 不指定 group 归属。Group 划分由 Task D 在 Phase 2 完成。
   "tiling_var": "{tiling源码变量名}",
   "semantic_name": "{param}_{attr}",
   "category": "input_variable",
-  "source": "{tiling_file}:{line}",
   "type": "int",
-  "desc": "该变量的一句话含义描述"
+  "desc": "该变量的一句话含义描述",
+  "shape_contribution": null
 }
 ```
 
@@ -166,10 +166,35 @@ Task A 不指定 group 归属。Group 划分由 Task D 在 Phase 2 完成。
 1. `tiling_var` 使用 tiling 源码中的原始变量名，与 conditions 中变量名严格一致。
 2. `semantic_name` 使用 `{参数名}_{属性}`，仅用于文档可读性。
 3. `category` 为 `input_variable` / `caller_option` / `internal_variable` 三选一。
-4. `source` 为变量首次赋值或声明的文件:行号；框架 API 管理变量标注为 `framework_api`。
-5. `type` 为变量数据类型，如 int / float / bool / enum。
-6. `desc` 用一句话描述变量含义。
+4. `type` 为变量数据类型，如 int / float / bool / enum。
+5. `desc` 用一句话描述变量含义。
+6. `shape_contribution` 为必选字段，用于描述当前 tiling 变量对 input/output shape 的贡献，只服务于变量的 shape 语义理解。
 7. conditions 中出现的每个变量都必须在 glossary 中有对应记录。
+
+`shape_contribution` 规则：
+
+- `shape_contribution` 为必选字段，用于记录当前 tiling 变量与 input/output shape 的关系。
+- 不影响 shape 的变量写 `null`。
+- 影响 shape 的变量写 object，必须包含 `shape_relation`。
+- `representative` 可选，用于记录代表性 shape 构造。
+- 如果变量表示多个轴的乘积、shape size 或 aligned size，应在 `shape_relation` 中直接写明。
+- 如果填写 `representative`，需说明它是否只是代表构造。
+
+`shape_contribution` object 示例：
+
+```json
+{
+  "tiling_var": "outerSize",
+  "semantic_name": "input_leading_axes_product",
+  "category": "input_variable",
+  "type": "uint32_t",
+  "desc": "Product of the leading axes before the normalized or reduced axes.",
+  "shape_contribution": {
+    "shape_relation": "outerSize = product(input leading axes before normalized/reduced axes)",
+    "representative": "input.shape=[outerSize, innerSize] is only a rank-2 representative when innerSize describes the trailing normalized/reduced axes; it is not the only valid shape construction."
+  }
+}
+```
 
 ---
 
