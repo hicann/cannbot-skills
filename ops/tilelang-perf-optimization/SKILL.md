@@ -29,6 +29,8 @@ Step 1: 基线采集（性能 + 精度）
 - **API 用法**：[tilelang-api-best-practices](../tilelang-api-best-practices/SKILL.md)
 - **编程模式**：[tilelang-programming-model-guide](../tilelang-programming-model-guide/SKILL.md)
 - **cube最佳实践**：[cube_optimization_path.md](references/best-practices/cube_optimization_path.md)
+- **vector最佳实践**：[vector-practices/](references/vector-practices/)
+
 ---
 
 ## 执行步骤
@@ -64,7 +66,7 @@ print(func.get_kernel_source())
 
 ### Step 3: 识别优化点（强制，禁止与 Step 4 合并）
 
-根据算子类型阅读 `optimization-guide.md` 对应章节 + `performance-antipatterns.md`，如果是 cube 核额外参考最佳实践 `best-practices/cube_optimization_path.md`，在 `optimization_log.md` 中输出：
+根据算子类型阅读 `optimization-guide.md` 对应章节 + `performance-antipatterns.md`，如果是 cube 核额外参考 `best-practices/cube_optimization_path.md`，如果是 vector 核额外参考 `vector-practices/` 目录下的文档，在 `optimization_log.md` 中输出：
 
 **Part A 优化点清单**：逐条标注适用/不适用 + 原因 + 参考文件行号。`pass_configs` 不是独立优化点，是伴随修改。
 
@@ -109,7 +111,7 @@ print(func.get_kernel_source())
 
 | 算子类型 | 文档 | 核心优化技术 |
 |---------|------|-------------|
-| Vector 型 | [RoPE 优化](references/best-practices/rope-developer-mode.md) | NPU 内动态生成 Mask、Tile API 向量化、参数简化 |
+| Vector 型 | [RoPE 优化](references/best-practices/rope-developer-mode.md)、[归约遍数融合](references/vector-practices/vector_reduce_pass_fusion.md) | | NPU 内动态生成 Mask、Tile API 向量化、参数简化 |
 | Cube 型 | [GEMM Intrinsic](references/best-practices/gemm_intrinsic_optimize.md) | 多缓冲流水线、细粒度 Flag 同步、MMA intrinsic、L0 分块、负载均衡 |
 | CV 融合型 | [Flash Attention](references/best-practices/flash_attn_optimize.md) | num_stages 流水线、批量 Softmax、Cross-core Semaphore、数据布局优化；**多 shape 适配**（BSND 免转置、Sq==1 decode 窄块、加性 mask 屏蔽变长 Skv） |
 
