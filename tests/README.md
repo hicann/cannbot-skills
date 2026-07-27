@@ -284,6 +284,9 @@ export REPO_ROOT=/path/to/repo
 | S-STR-16 | metadata 必须是 string→string 映射 | error | test-structure.sh |
 | S-STR-17 | description + when_to_use ≤ 1536 字符 | warn | test-structure.sh |
 | S-STR-18 | disable-model-invocation 必须为 boolean | error | test-structure.sh |
+| S-STR-19 | 目录名不得误用单数形式（reference/ → references/） | error | test-structure.sh |
+| S-STR-20 | evals/ 基础校验（evals.md 存在、skill_name 与目录名一致） | warn | test-structure.sh |
+| S-STR-21 | scripts/*.sh 必须可执行 | warn | test-structure.sh |
 | S-CON-01 | name 与目录名一致 | error | test-content.sh |
 | S-CON-02 | description 包含触发关键词（手动 skill 跳过） | error | test-content.sh |
 | S-CON-03 | description 包含触发条件 | warn | test-content.sh |

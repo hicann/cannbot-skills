@@ -344,6 +344,40 @@ def _validate_skill_structure(fm: dict, skill_file: Path, skill_dir: Path,
         if not has_md:
             emit("error", "S-STR-04", file_str, "references/ directory contains no .md files")
 
+    # S-STR-19: no misnamed singular directory (reference/ instead of references/)
+    _SINGULAR_TO_PLURAL = {"reference": "references", "asset": "assets", "script": "scripts"}
+    for d in skill_dir.iterdir():
+        if d.is_dir() and d.name in _SINGULAR_TO_PLURAL:
+            emit("error", "S-STR-19", file_str,
+                 f"Directory '{d.name}/' should be plural '{_SINGULAR_TO_PLURAL[d.name]}/'")
+
+    # S-STR-20: evals/ basic structure check
+    evals_dir = skill_dir / "evals"
+    if evals_dir.is_dir():
+        evals_md = evals_dir / "evals.md"
+        if not evals_md.exists():
+            emit("warn", "S-STR-20", file_str,
+                 "evals/ directory exists but missing evals.md")
+        else:
+            fm_evals, _body, err = parse_frontmatter(evals_md)
+            if err:
+                emit("warn", "S-STR-20", file_str,
+                     f"evals/evals.md frontmatter issue: {err}")
+            else:
+                evals_skill_name = fm_evals.get("skill_name")
+                if evals_skill_name and evals_skill_name != skill_name:
+                    emit("warn", "S-STR-20", file_str,
+                         f"evals.md skill_name='{evals_skill_name}' does not match "
+                         f"directory name '{skill_name}'")
+
+    # S-STR-21: scripts/*.sh must be executable
+    scripts_dir = skill_dir / "scripts"
+    if scripts_dir.is_dir():
+        for sh in scripts_dir.glob("*.sh"):
+            if not os.access(sh, os.X_OK):
+                emit("warn", "S-STR-21", file_str,
+                     f"scripts/{sh.name} not executable (run: chmod +x)")
+
     # S-STR-12: XML tag injection in raw frontmatter
     raw = raw_frontmatter_text(skill_file)
     if raw and re.search(r"<[a-zA-Z_][a-zA-Z0-9_-]*>|</[a-zA-Z_][a-zA-Z0-9_-]*>", raw):

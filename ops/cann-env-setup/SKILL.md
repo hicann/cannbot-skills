@@ -47,7 +47,7 @@ if ! command -v pip3 &> /dev/null && ! command -v pip &> /dev/null; then
 fi
 ```
 
-如果任何依赖缺少，会显示提示信息，请参考 [环境依赖安装指南](./reference/env_dependence.md) 进行安装。
+如果任何依赖缺少，会显示提示信息，请参考 [环境依赖安装指南](./references/env_dependence.md) 进行安装。
 
 ### 第3步：安装CANN
 
@@ -173,5 +173,5 @@ pip3 install protobuf==3.20.0
 
 ## 参考资料
 
-详细参考资料请查看 [reference](./reference/) 目录，包含：
-- [环境依赖安装指南](./reference/env_dependence.md)：必需软件安装命令和验证方法
+详细参考资料请查看 [references](./references/) 目录，包含：
+- [环境依赖安装指南](./references/env_dependence.md)：必需软件安装命令和验证方法

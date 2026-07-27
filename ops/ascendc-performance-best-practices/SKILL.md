@@ -12,20 +12,20 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 
 | 类别 | 典型算子 | 适用架构 | 优化设计指南 |
 |------|---------|---------|------------|
-| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16 | DAV_3510 | ✅ [性能优化指南](reference/matmul/guide.md) |
-| MC² 通算融合类 | matmul_all_reduce, allgather_matmul, matmul_reducescatter, alltoall_matmul | DAV_3510 | ✅ [性能优化指南](reference/mc2/guide.md) |
-| RadixSort 基数排序类 | TopK, KthValue, Sort, ArgSort, ArgMax/Min | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/sort/radix_sort.md) |
-| Scalar 编码与诊断 | 任意 ScalarBound 算子 | DAV_2201 / DAV_3510 | ✅ [性能优化指南](reference/scalar/guide.md) |
-| Reduction 归约类 | ReduceSum, Softmax, LayerNorm, RMSNorm, ArgMax | DAV_3510 | ✅ [实现索引](reference/reduce/guide.md) · [模板代码与使用指南](reference/reduce/templates/usage_guide.md) · [公共基类](reference/reduce/templates/dav310/softmax_v2_base.template) · [State Resident](reference/reduce/templates/state_resident_design.md) |
-| Elementwise 逐元素类 | Sin, Cos, Abs, Exp | DAV_3510 | ✅ [双缓冲设计](reference/elementwise/double_buffer_design.md) · [向量化效率优化](reference/elementwise/vector_efficiency_design.md) |
-| Broadcast 广播类 | Add, Mul, Sub 等含广播轴算子 | DAV_3510 | ✅ [性能优化指南](reference/broadcast/broadcast_design.md)（选型型，见结构 B） |
-| Conversion 数据转换类 | Transpose, Concat, Split | DAV_3510 | ✅ [Transpose融合设计](reference/conversion/transpose_fusion_design.md) · ✅ [性能优化指南](reference/conversion/guide.md) |
+| MatMul 矩阵乘类 | MatMul, BatchMatMul, MatMul_MXFP4, MatMul_A16W16 | DAV_3510 | ✅ [性能优化指南](references/matmul/guide.md) |
+| MC² 通算融合类 | matmul_all_reduce, allgather_matmul, matmul_reducescatter, alltoall_matmul | DAV_3510 | ✅ [性能优化指南](references/mc2/guide.md) |
+| RadixSort 基数排序类 | TopK, KthValue, Sort, ArgSort, ArgMax/Min | DAV_2201 / DAV_3510 | ✅ [性能优化指南](references/sort/radix_sort.md) |
+| Scalar 编码与诊断 | 任意 ScalarBound 算子 | DAV_2201 / DAV_3510 | ✅ [性能优化指南](references/scalar/guide.md) |
+| Reduction 归约类 | ReduceSum, Softmax, LayerNorm, RMSNorm, ArgMax | DAV_3510 | ✅ [实现索引](references/reduce/guide.md) · [模板代码与使用指南](references/reduce/templates/usage_guide.md) · [公共基类](references/reduce/templates/dav310/softmax_v2_base.template) · [State Resident](references/reduce/templates/state_resident_design.md) |
+| Elementwise 逐元素类 | Sin, Cos, Abs, Exp | DAV_3510 | ✅ [双缓冲设计](references/elementwise/double_buffer_design.md) · [向量化效率优化](references/elementwise/vector_efficiency_design.md) |
+| Broadcast 广播类 | Add, Mul, Sub 等含广播轴算子 | DAV_3510 | ✅ [性能优化指南](references/broadcast/broadcast_design.md)（选型型，见结构 B） |
+| Conversion 数据转换类 | Transpose, Concat, Split | DAV_3510 | ✅ [Transpose融合设计](references/conversion/transpose_fusion_design.md) · ✅ [性能优化指南](references/conversion/guide.md) |
 | Convolution 卷积类 | Conv2D, DepthwiseConv | — | 📋 规划中 |
 | NN 神经网络类 | FlashAttention, GroupNorm | — | 📋 规划中 |
 | Random 随机类 | RandomUniform, Dropout | — | 📋 规划中 |
-| SIMT 线程级算子 | 条件分支、离散索引等不规则操作 | DAV_3510 | ✅ [性能优化指南](reference/simt/optimization-guide.md) |
+| SIMT 线程级算子 | 条件分支、离散索引等不规则操作 | DAV_3510 | ✅ [性能优化指南](references/simt/optimization-guide.md) |
 
-> 未收录的算子族返回「该算子族优化知识暂未收录」。各族详细的优化类型、叠加关系、选型决策见该族 `reference/<family>/` 目录。
+> 未收录的算子族返回「该算子族优化知识暂未收录」。各族详细的优化类型、叠加关系、选型决策见该族 `references/<family>/` 目录。
 > 
 > **融合算子的优化**：对于融合算子（如 AddRelu、MulSub 等组合算子），可将其拆解为上述基础算子族，分别获取各基础算子的性能优化实践后，结合融合场景进行适配。例如 AddRelu 可拆解为 Broadcast（Add）+ Elementwise（Relu），分别参考对应族的优化指南。
 
@@ -33,9 +33,9 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 
 | 优化类型 | 适用场景 | 文档 |
 |---------|---------|------|
-| **尾块处理（Tail Block）** | 数据量不能被 tile 大小整除的场景 | ✅ [尾块处理指南](reference/common/tail_block_design.md) |
-| **数据搬运（DataCopy）** | 非对齐、小批量多次搬运等的场景 | ✅ [数据搬运](reference/common/datacopy_optimization_design.md) |
-| **UB/TBuf常驻复用与Bank冲突规避** |  大量tile/loop都重复从GM搬运，会造成大量冗余MTE2开销的场景 | ✅ [UB/TBuf常驻复用与Bank冲突规避](reference/common/ub_resident_design.md |
+| **尾块处理（Tail Block）** | 数据量不能被 tile 大小整除的场景 | ✅ [尾块处理指南](references/common/tail_block_design.md) |
+| **数据搬运（DataCopy）** | 非对齐、小批量多次搬运等的场景 | ✅ [数据搬运](references/common/datacopy_optimization_design.md) |
+| **UB/TBuf常驻复用与Bank冲突规避** |  大量tile/loop都重复从GM搬运，会造成大量冗余MTE2开销的场景 | ✅ [UB/TBuf常驻复用与Bank冲突规避](references/common/ub_resident_design.md |
 
 ## 查询方式
 
@@ -44,7 +44,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 | 算子名 | 是 | 如 `matmul` / `matmul_mxfp4` / `batch_matmul` |
 | 优化类型 | 否 | 如 `pingpong` / `swat` / `streamk` / `fullload` / `scale_coalescing` / `mte2_preload`；不提供则加载全部 |
 
-查询流程：**算子名 → 映射到算子族 → 定位 `reference/<family>/` → 按优化类型筛选文档**。算子族映射规则：精确匹配族名直接命中；以族名为前缀或核心词（如 `matmul_mxfp4`、`batch_matmul`）归入该族；其他形态由调用方按功能显式指定。
+查询流程：**算子名 → 映射到算子族 → 定位 `references/<family>/` → 按优化类型筛选文档**。算子族映射规则：精确匹配族名直接命中；以族名为前缀或核心词（如 `matmul_mxfp4`、`batch_matmul`）归入该族；其他形态由调用方按功能显式指定。
 
 ### 模板代码查找链路
 
@@ -53,14 +53,14 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 ```
 SKILL.md（本文件）
   → 算子分类表中定位算子族，点击 guide.md 链接
-    → reference/<family>/guide.md
+    → references/<family>/guide.md
       → 模板表中选择方案对应的模板，点击 .md 链接
-        → reference/<family>/templates/<模板名>.md
+        → references/<family>/templates/<模板名>.md
           → 说明文档中链接同名 .h / .cpp / .template 代码文件
-            → reference/<family>/templates/<模板名>.{h,cpp,template}（以此为代码骨架实施）
+            → references/<family>/templates/<模板名>.{h,cpp,template}（以此为代码骨架实施）
 ```
 
-> **模板代码文件类型**：`.h`、`.cpp`、`.template` 都是模板代码。`.template` 是参考模板源码（如 `reference/reduce/templates/dav310/*.template`），使用前需按该目录 `usage_guide.md` 将 `.template` 转成同名 `.h`/`.cpp`（去掉 `.template` 后缀），转换后才可读、可编译。
+> **模板代码文件类型**：`.h`、`.cpp`、`.template` 都是模板代码。`.template` 是参考模板源码（如 `references/reduce/templates/dav310/*.template`），使用前需按该目录 `usage_guide.md` 将 `.template` 转成同名 `.h`/`.cpp`（去掉 `.template` 后缀），转换后才可读、可编译。
 
 > ⚠️ 查到模板代码（`.h`/`.cpp`/`.template`）后，**必须直接拷贝模板文件到项目中使用**，而非"参考模板从头重写"。具体操作：
 > 1. 若为 `.template`，先按 `usage_guide.md` 转成 `.h`/`.cpp`；再将文件拷贝到项目的 `op_kernel/` 目录（保留 `dav310/` 等子目录结构）
@@ -110,11 +110,11 @@ SKILL.md（本文件）
 
 ## 扩展新算子族
 
-1. 创建 `reference/<family>/` 目录（以族名命名，非单个变体）
+1. 创建 `references/<family>/` 目录（以族名命名，非单个变体）
 2. 判断族性质：优化型 → 按 A 写 `<优化类型>_design.md`；实现指导型 → 按 B 写总览+分册(+code/)
 3. 更新本 SKILL.md 分类表格
 
 ## 依赖
 
 无外部第三方依赖。知识主要以 Markdown 文档内置；实现指导型算子族（如 `broadcast`）另含
-`reference/<family>/code/` 下的 AscendC 范式源码（`.h/.cpp`），随 skill 一并版本化、不依赖工作区外部目录。
+`references/<family>/code/` 下的 AscendC 范式源码（`.h/.cpp`），随 skill 一并版本化、不依赖工作区外部目录。

@@ -7,16 +7,16 @@ description: 算子精度标准。描述 Ascend C 算子各种 dtype 输出对�
 
 ```
 随机数生成算子?
-  ├─ 是 → 随机数生成类标准(reference/random_generation.md)
+  ├─ 是 → 随机数生成类标准(references/random_generation.md)
   └─ 否 → 包含数值计算?
-           ├─ 否 → 非计算类标准(reference/non_compute.md)
+           ├─ 否 → 非计算类标准(references/non_compute.md)
            └─ 是 → 检查输入输出dtype
-                    ├─ 均为整型 → 整数计算类标准(reference/integer_compute.md)
-                    ├─ 整型↔浮点 → 量化计算类标准(reference/quantization.md)
-                    └─ 均为浮点 → 浮点计算类标准(reference/float_compute.md)
+                    ├─ 均为整型 → 整数计算类标准(references/integer_compute.md)
+                    ├─ 整型↔浮点 → 量化计算类标准(references/quantization.md)
+                    └─ 均为浮点 → 浮点计算类标准(references/float_compute.md)
 ```
 
 ## 辅助文档
 
-- **[标杆构造方法](reference/benchmark_construction.md)** - CPU Golden 或昇腾小算子拼接标杆构造
-- **[测试用例生成](reference/test_case_generation.md)** - 测试用例设计与边界覆盖
+- **[标杆构造方法](references/benchmark_construction.md)** - CPU Golden 或昇腾小算子拼接标杆构造
+- **[测试用例生成](references/test_case_generation.md)** - 测试用例设计与边界覆盖

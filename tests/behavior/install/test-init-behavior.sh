@@ -62,6 +62,14 @@ setup_fake_repos() {
             touch "$repo_dir/docs/README.md"
             touch "$repo_dir/examples/example.py"
             touch "$repo_dir/.test-fake-repo"
+            # Initialize as a real git repo so that git commands in init.sh
+            # (e.g. `git checkout .`, `git checkout master`) operate on this
+            # fake repo instead of falling through to the parent cann_skills
+            # repository (which would switch branches / discard changes).
+            git init --quiet "$repo_dir"
+            git -C "$repo_dir" add -A
+            git -C "$repo_dir" -c user.name="test" -c user.email="test@test.com" \
+                commit --quiet -m "test fixture"
             FAKE_REPOS_CREATED="$FAKE_REPOS_CREATED $repo"
         fi
     done < <(get_git_repo_names "$team_dir/init.sh")
@@ -2037,6 +2045,20 @@ main() {
     echo "========================================"
     echo ""
 
+    # Defensive guard: record current git branch before running any test.
+    # Some init.sh scripts run `git checkout` on sub-repo directories that
+    # may not be real git repos (fake repos created by setup_fake_repos),
+    # causing git to fall through to the parent cann_skills repo and switch
+    # its branch. This guard detects such leaks and restores the branch.
+    local guard_branch=""
+    if git -C "$SKILLS_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
+        guard_branch=$(git -C "$SKILLS_DIR" branch --show-current 2>/dev/null || echo "")
+        if [ -n "$guard_branch" ]; then
+            echo -e "${CYAN}[GUARD]${NC} Recording current branch: '$guard_branch'"
+            echo ""
+        fi
+    fi
+
     # Find all teams with init.sh (scan both plugins-official and plugins-community)
     local teams=()
     local team_roots=()
@@ -2121,6 +2143,22 @@ main() {
         cleanup_team_artifacts
         cleanup_fake_repos
     done
+
+    # Defensive guard: verify branch was not changed by init.sh git operations.
+    if [ -n "$guard_branch" ]; then
+        local final_branch
+        final_branch=$(git -C "$SKILLS_DIR" branch --show-current 2>/dev/null || echo "")
+        if [ "$final_branch" != "$guard_branch" ]; then
+            echo ""
+            echo -e "${RED}[GUARD ERROR]${NC} Git branch changed during test: '$guard_branch' → '$final_branch'"
+            echo -e "${RED}[GUARD ERROR]${NC} This indicates a test isolation bug (init.sh git ops leaked to parent repo)"
+            echo -e "${YELLOW}[GUARD]${NC} Restoring branch to '$guard_branch'"
+            git -C "$SKILLS_DIR" checkout "$guard_branch" 2>/dev/null || true
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            echo -e "${GREEN}[GUARD]${NC} Branch unchanged: '$guard_branch'"
+        fi
+    fi
 
     echo ""
     echo "========================================"

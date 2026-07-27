@@ -19,6 +19,9 @@
 # - S-STR-16: metadata string→string mapping
 # - S-STR-17: description + when_to_use combined ≤ 1536 chars (warn)
 # - S-STR-18: disable-model-invocation must be boolean
+# - S-STR-19: no misnamed singular directory (reference/ → references/)
+# - S-STR-20: evals/ basic structure (evals.md exists, skill_name matches)
+# - S-STR-21: scripts/*.sh must be executable (warn)
 #
 # Supports incremental testing via INCREMENTAL_SKILLS environment variable.
 # =============================================================================

@@ -32,9 +32,9 @@ disable-model-invocation: true
 
 | 路由 | 触发 | 执行 skill（按树） | 流程子文档 |
 |---|---|---|---|
-| **新 source 接入** | 首次接入某上游（新 bundle / 新算子仓） | reference→[`ops-knowledge-reference-ingest`](../ops-knowledge-reference-ingest/SKILL.md)；ops-VV→[`ops-knowledge-vv-ingest`](../ops-knowledge-vv-ingest/SKILL.md)；ops-CV→[`ops-knowledge-cv-ingest`](../ops-knowledge-cv-ingest/SKILL.md) | [`reference/new-source-onboarding.md`](reference/new-source-onboarding.md) |
-| **commit 级增量** | 上游推进新 commit 区间（同 ref） | 同上（各树 skill 增量更新） | [`reference/incremental-sync.md`](reference/incremental-sync.md) |
-| **大版本升级** | ref 切换（如 9.0.0→9.1.0，含架构性变更可能） | reference→[`ops-knowledge-reference-ingest`](../ops-knowledge-reference-ingest/SKILL.md) + 本编排器双 clone diff；详见目标知识库根目录下的 `SPEC-Version-update.md` | [`reference/version-bump.md`](reference/version-bump.md) |
+| **新 source 接入** | 首次接入某上游（新 bundle / 新算子仓） | reference→[`ops-knowledge-reference-ingest`](../ops-knowledge-reference-ingest/SKILL.md)；ops-VV→[`ops-knowledge-vv-ingest`](../ops-knowledge-vv-ingest/SKILL.md)；ops-CV→[`ops-knowledge-cv-ingest`](../ops-knowledge-cv-ingest/SKILL.md) | [`references/new-source-onboarding.md`](references/new-source-onboarding.md) |
+| **commit 级增量** | 上游推进新 commit 区间（同 ref） | 同上（各树 skill 增量更新） | [`references/incremental-sync.md`](references/incremental-sync.md) |
+| **大版本升级** | ref 切换（如 9.0.0→9.1.0，含架构性变更可能） | reference→[`ops-knowledge-reference-ingest`](../ops-knowledge-reference-ingest/SKILL.md) + 本编排器双 clone diff；详见目标知识库根目录下的 `SPEC-Version-update.md` | [`references/version-bump.md`](references/version-bump.md) |
 
 **判路由**：看上游变化性质——新仓=新 source 接入；同 ref 推进 commit=commit 级增量；ref 切换/大版本=大版本升级。`runbooks/` 不直接接上游；当前插件不提供开发轨迹自动进化，社区贡献按目标知识库规范执行，版本升级时可由编排器沉淀架构性变更到 `runbooks/version-migration/`。
 
@@ -102,7 +102,7 @@ disable-model-invocation: true
 
 ## §7 路由流程子文档
 
-三路由的详细 pipeline 在 [`reference/`](reference/) 子文档（渐进式披露）：
-- [`new-source-onboarding.md`](reference/new-source-onboarding.md) — 新 source 接入 pipeline
-- [`incremental-sync.md`](reference/incremental-sync.md) — commit 级增量同步 pipeline
-- [`version-bump.md`](reference/version-bump.md) — 大版本升级 pipeline（摘要，权威见目标知识库根目录的 `SPEC-Version-update.md`）
+三路由的详细 pipeline 在 [`references/`](references/) 子文档（渐进式披露）：
+- [`new-source-onboarding.md`](references/new-source-onboarding.md) — 新 source 接入 pipeline
+- [`incremental-sync.md`](references/incremental-sync.md) — commit 级增量同步 pipeline
+- [`version-bump.md`](references/version-bump.md) — 大版本升级 pipeline（摘要，权威见目标知识库根目录的 `SPEC-Version-update.md`）
