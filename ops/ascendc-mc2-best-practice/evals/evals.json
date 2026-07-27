@@ -1,0 +1,87 @@
+{
+  "skill_name": "ascendc-mc2-best-practice",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "MC2 算子开发完整工作流",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 150000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "请介绍 Ascend C MC2 通算融合算子的开发完整工作流，需要包括哪些步骤？",
+      "expected_output": "回复应覆盖 MC2 算子开发的 7 步流程（环境检查→设计方案→Walkthrough→代码开发→代码检视→修复循环→性能验证），说明每步的核心任务，以及开发前需要确认的 npu-arch 条件（dav-3510）。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "通信与计算约束理解",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "开发 MC2 通算融合算子时，通信和计算有哪些强制约束？为什么不能用 HCCL 高阶 API？",
+      "expected_output": "回复应说明：通信必须走 SHMEM，Matmul 必须走 Blaze 模板，解释 SHMEM 相比 HCCL 在通算融合场景的优势（更细粒度的通信控制），以及 Blaze 模板在高性能 Matmul 中的作用。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 3,
+      "title": "MC2 典型场景：AllToAll+Matmul 算子开发",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "我正在 Ascend 950 上开发一个 AllToAll+Matmul 通算融合算子，请告诉我开发前需要做哪些准备工作，以及开发流程中各阶段的输出产物是什么。",
+      "expected_output": "回复应说明：开发前需确认 npu-arch=dav-3510 和 CANN 环境就绪，列出各阶段的输出产物（设计方案、代码文件、检视记录、性能报告），强调 SHMEM 通信和 Blaze Matmul 模板的使用约束，以及 7 步流程的严格执行要求。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 4,
+      "title": "信息不足场景：追问多卡通信细节",
+      "config": {
+        "max_tokens": 80000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 100000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "我要做一个多卡通信的算子，需要哪些准备工作？",
+      "expected_output": "回复应覆盖 MC2 算子开发的关键准备事项：确认目标 NPU 架构（dav-3510/Ascend 950）、说明通信约束（SHMEM）、计算约束（Blaze 模板），以及 7 步开发流程的总体介绍。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 5,
+      "title": "MC2 与其他 Ascend C 技能的区分（正向看护）",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 150000
+        },
+        "ascend_platforms": ["A2"],
+        "distractor_skills": ["ascendc-direct-invoke-template", "ascendc-api-best-practices", "ascendc-tiling-design", "npu-arch"]
+      },
+      "prompt": "我想开发一个多卡通信和计算融合的 Ascend C 算子，需要遵循哪些开发规范？",
+      "expected_output": "回复应聚焦 MC2 通算融合算子的开发规范和约束，说明通信走 SHMEM、Matmul 走 Blaze 模板、以及 7 步开发流程的严格要求，区别于普通的 Kernel 直调开发流程。",
+      "files": [],
+      "expectations": [
+        { "type": "skill_activated", "pattern": "ascendc-mc2-best-practice" },
+      ]
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "skill_name": "triton-precision-debug",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "五阶隔离法完整工作流",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 150000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "请介绍 Triton-Ascend 算子精度对齐的五阶隔离法，每个阶段做什么？",
+      "expected_output": "回复应覆盖五阶隔离法的完整流程：Stage 0 预检查（shape/NaN/Inf/dtype/内存初始化）、Stage 1 端到端差异定位（min-reproduction）、Stage 2 逐操作微基准隔离（原子算子拆分对比）、Stage 3 ULP 级重写、Stage 4 编译器标志调查与规避。说明每阶段的目标和输入输出条件。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 2,
+      "title": "MERE/MARE 校验失败诊断",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "我的 Triton-Ascend 算子在 MARE 校验时发现精度不达标，该怎么排查？",
+      "expected_output": "回复应说明 MARE 校验失败时按五阶隔离法逐步排查，从预检查开始，逐步定位差异区域，通过 micro-benchmark 逐操作隔离。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 3,
+      "title": "ULP 级精度问题根因分析",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 150000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "Triton-Ascend 算子在量化场景下出现精度偏差，怀疑是常量除法精度问题，应该怎么定位和修复？",
+      "expected_output": "回复应使用五阶隔离法定位精度问题，说明 ULP 级重写的方法和编译器标志调整策略，并提及量化场景中常量除法精度偏差的处理方式。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 4,
+      "title": "信息不足场景：追问精度问题细节",
+      "config": {
+        "max_tokens": 80000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 100000
+        },
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "我的算子精度不对，帮我看看什么问题。",
+      "expected_output": "回复应主动追问关键信息：算子类型和输入输出规格、精度校验方式（MERE/MARE）、具体的精度偏差数值或比例、是否已有最小复现用例、相关代码或编译日志。不应在没有足够信息的情况下直接给出修复方案。",
+      "files": [],
+      "expectations": [
+      ]
+    },
+    {
+      "id": 5,
+      "title": "正向看护：区分精度调试技能",
+      "config": {
+        "max_tokens": 120000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 150000
+        },
+        "ascend_platforms": ["A2"],
+        "distractor_skills": ["ascendc-precision-debug", "ops-precision-standard", "pypto-op-design"]
+      },
+      "prompt": "我的 Triton-Ascend 算子精度对齐不过，ULP 级别的差异怎么排查？",
+      "expected_output": "回复应聚焦 Triton-Ascend 场景的五阶隔离法精度调试流程，特别是如何处理编译器标量/向量浮点行为差异和常量除法精度偏差等 Triton 特有的隐蔽问题。",
+      "files": [],
+      "expectations": [
+      ]
+    }
+  ]
+}

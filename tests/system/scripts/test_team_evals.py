@@ -101,10 +101,13 @@ def _setup_team_eval_sandbox(sandbox_manager: SandboxManager, cfg: _TeamSandboxC
         sandbox_manager.deploy_cann_bench(sandbox_path, CANN_BENCH_PATH)
         operator = cfg.eval_data.get("cann_bench_operator", "")
         level = cfg.eval_data.get("cann_bench_level", "level1")
-        if operator:
-            sandbox_manager.copy_cann_bench_task(
-                sandbox_path, operator, level, CANN_BENCH_PATH,
-            )
+        assert operator, (
+            f"Eval {cfg.eval_id}: cann_bench_operator is required for cann_bench mode. "
+            f"Add 'cann_bench_operator': '<operator_name>' to the eval item in evals.json."
+        )
+        sandbox_manager.copy_cann_bench_task(
+            sandbox_path, operator, level, CANN_BENCH_PATH,
+        )
 
     try:
         opencode_runner = create_opencode_runner(
