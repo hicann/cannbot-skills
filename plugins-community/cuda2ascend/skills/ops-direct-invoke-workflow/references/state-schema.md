@@ -22,6 +22,12 @@
     "round": 2,
     "loop": "acceptance"
   },
+  "rounds": { "CP1": 1, "CP2.2": 2 },
+  "pending_questionnaire": {
+    "cp": "CP2.2",
+    "path": ".cannbot/<算子名>/questionnaires/CP2.2-方案确认.json",
+    "status": "sent"
+  },
   "deliverables": {
     "env_info": ".cannbot/0-环境信息.md",
     "requirement": ".cannbot/<算子名>/1.1-需求分析.md",
@@ -41,13 +47,16 @@
 | `current_stage` | 当前所处流程表编号，恢复时的入口 |
 | `completed_stages` | 已通过的阶段列表，恢复时跳过 |
 | `blocked` | 暂停时填充；`at`=阻塞的 CP，`reason`=问题摘要，`round`=当前轮次，`loop`=所属循环（`design`/`acceptance`/`ci`，对应 [error-handling.md](error-handling.md) 的轮次表） |
+| `rounds` | 各 CP 已用轮次，**按 CP 编号分槽计数**；跨 CP 回退（如 CP2.2 因归属需求回退 1.1）不清零发起方槽位，避免往返途中计数丢失导致循环失去边界。`blocked.round` 取当前阻塞 CP 的槽值 |
+| `pending_questionnaire` | 有问卷待用户答复时填；`cp`=发出问卷的 CP，`path`=问卷 json 路径，`status`=`sent`（已发未回）/ `answered`（结论已回未处理）。用户确认类 CP（CP0 / CP1 / CP2.2）中断恢复的依据，处理完毕后清空 |
 | `deliverables` | 已产出交付件路径（与 [data-flow.md](data-flow.md) 的落盘位置一致） |
 | `updated_at` | 最后更新时间（ISO8601） |
 
 ## 更新时机
 
 - 每步/每 CP 完成后，PM 更新 `.cannbot/<算子名>/state.json` 的 `current_stage`、追加 `completed_stages`、登记 `deliverables`。
-- 暂停/失败（含过程有界超限）时填 `blocked`，作为可恢复状态点。
+- 暂停/失败（含过程有界超限）时填 `blocked`，作为可恢复状态点；每次打回/返工递增 `rounds` 中对应 CP 的槽位。
+- 用户确认类 CP 发出问卷后填 `pending_questionnaire`，用户结论回传并处理完毕后清空。**未清空即表示该 CP 尚未收口，恢复时不得跳过**——防止把已产出的问卷误判为验收已通过。
 - 恢复：读 `current_stage` + `blocked` 定位入口，`completed_stages` 决定跳过范围。
 
 > 字段结构可由 `scripts/validate_state.py`（预留）校验：编号合法性、completed_stages 与 current_stage 的顺序一致性。
