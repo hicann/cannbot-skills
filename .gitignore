@@ -51,5 +51,7 @@ tests/benchmark/cann-bench/
 plugins-official/ops-direct-invoke-flash/asc-devkit/
 plugins-official/ops-direct-invoke-flash/cann-samples/
 plugins-official/catlass-op-generator/asc-devkit/
+plugins-official/catlass-op-generator/catlass/
 plugins-official/tilelang-op-orchestrator/tilelang-ascend/
 plugins-official/pypto-op-orchestrator/pypto/
+

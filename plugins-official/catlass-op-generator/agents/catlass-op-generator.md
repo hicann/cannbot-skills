@@ -62,6 +62,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - **禁止**：猜测 catlass 模板用法，必须查阅 `catlass/include/`、`catlass/examples/`、`catlass/docs/`
 - **禁止**：写死硬件参数（blockDim/blockIdx/UB 大小）
 - **禁止**：随意降低精度标准
+- **禁止**：自行编写 verify_result.py 的精度判定逻辑——必须先 Read `cannbot-skills/ops/catlass-op-develop/references/verify_result_template.py` 并复制其判定函数，只修改 OUTPUT_SHAPE 和 OUTPUT_DTYPE
 
 ### 输入边界
 

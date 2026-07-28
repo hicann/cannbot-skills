@@ -4,6 +4,36 @@
 
 ---
 
+## Step 1.5：需求预检
+
+> 本步骤由 CANNBot 自行执行，不调用 Subagent。
+
+### 1. 核数校验（必做）
+
+1. 运行 `npu-smi info` 获取芯片型号
+2. 加载 `/npu-arch` skill，在 `references/npu-hardware-params.md` §0 产品映射表中查芯片型号对应的 NpuArch 和产品系列
+3. 在 `references/npu-hardware-params.md` §2 各架构参数中找到对应架构的 `cube_core_cnt` / `vector_core_cnt`
+
+获取 `cube_core_cnt` 后：
+- 用户核数 > 物理核数 → 告知用户超出硬件能力，等待修正
+- 用户核数 == 物理核数 → 提示满载不一定最优（910B 系列实测 20 核优于 24 核）
+- 用户核数 < 物理核数 → 通过
+- 用户未指定 → 记录物理核数，建议"910B 系列推荐 20 核"
+
+### 2. dtype 合理性校验（必做）
+
+从用户需求提取算子名前缀 + 输入输出 dtype，校验：
+- 算子含 `quant` 但输入为 fp16/bf16 → 警告（量化算子输入应为 int8/int4），需确认
+- 算子不含 `quant` 但输入为 int8 → 警告（非量化不应用整数输入），需确认
+- 输入 int8 但缺 scale 张量 → 提示
+- 警告级需用户确认后通过
+
+### 完成输出
+
+写入 `operators/{operator_name}/docs/precheck.md`：激活函数验证结果 + 物理核数与推荐 + dtype 校验结果。
+
+---
+
 ## Step 2：设计
 
 ### Subagent 调用参数
@@ -197,6 +227,9 @@ Step B：写 op_host Tiling 计算 + ACL 框架 → 编译通过
 Step C：写 op_kernel catlass 拼装类 + kernel 入口分支 + Device 调用 → 编译通过
 Step D：（如有）落盘自定义 Tile 头文件 → 编译通过
 Step E：补 gen_data.py / verify_result.py / run.sh，跑通 Level 0~2 测试
+  **verify_result.py 强制要求**：必须先读取模板文件 `cannbot-skills/ops/catlass-op-develop/references/verify_result_template.py`，
+  完整复制其精度判定逻辑（双标准：MERE/MARE + atol/rtol/error_ratio，通过任一即 PASS），
+  只允许修改 OUTPUT_SHAPE 和 OUTPUT_DTYPE。禁止自行编写精度判定函数或自选阈值。
 
 【catlass 实现强制项】
 - 直接实例化 `Kernel` + `Kernel::Params`，`Kernel{}(params)`；**禁用** `DeviceGemm` 适配器

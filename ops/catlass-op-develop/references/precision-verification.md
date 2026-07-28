@@ -83,23 +83,43 @@ cdq  = cint * scale[None, :] * per_token[:, None]       # fp32 反量化
 
 ---
 
-## 6. verify 脚本模板（fp16 输出，社区标准实践形式）
+## 6. verify_result.py 强制模板
 
-```python
-import sys, numpy as np
-ATOL, RTOL, ERROR_RATIO_THRESHOLD = 1e-3, 1e-3, 1e-3  # 社区 fp16 标准的实践等价形式
-# 依据: ops-precision-standard/reference/float_compute.md
-m, n = int(sys.argv[1]), int(sys.argv[2]); data = sys.argv[3]
-out  = np.fromfile(f"{data}/out.bin",    dtype=np.float16).astype(np.float32).reshape(m, n)
-gold = np.fromfile(f"{data}/golden.bin", dtype=np.float16).astype(np.float32).reshape(m, n)
-abs_err = np.abs(out - gold)
-tol = ATOL + RTOL * np.abs(gold)
-error_ratio = float((abs_err > tol).mean())
-print(f"[verify] error_ratio={error_ratio:.3e} (thr={ERROR_RATIO_THRESHOLD:.0e}, atol={ATOL}, rtol={RTOL})")
-sys.exit(0 if error_ratio <= ERROR_RATIO_THRESHOLD else 1)
+**禁止自行编写 verify_result.py 的精度判定逻辑。** 必须基于以下模板文件生成：
+
+```
+references/verify_result_template.py
 ```
 
-> 对量化输出（int↔fp16），同样适用；具体门限见 `float_compute.md` / `quantization.md`。
+### 模板使用规则
+
+1. **先读取模板文件** `verify_result_template.py`，完整复制其内容作为 `verify_result.py` 的基础
+2. **只允许修改 `=== 可修改区域 ===` 内的内容**：
+   - `OUTPUT_SHAPE`：根据算子输出形状修改（如 SwiGLU 改为 `(M, N // 2)`）
+   - `OUTPUT_DTYPE`：根据输出 dtype 修改（如 bf16 算子改为 `"bfloat16"`）
+   - CLI 参数解析（如需要额外参数）
+   - 文件路径（如有特殊数据目录结构）
+3. **禁止修改的部分**：
+   - `DTYPE_THRESHOLDS` 字典
+   - `ATOL` / `RTOL` / `ERROR_RATIO_THRESHOLD` 常量
+   - `calculate_mere()` / `calculate_mare()` / `check_mere_mare()` / `check_error_ratio()` 函数
+   - `verify()` 函数的判定逻辑和输出格式
+   - "通过任一即 PASS" 的最终判定规则
+
+### 通过条件
+
+两套标准同时运行，**通过任一即 PASS**：
+
+| 标准 | 判据 | 适用说明 |
+|------|------|----------|
+| Criterion 1: MERE/MARE Threshold | MERE < Threshold AND MARE < 10×Threshold | 正常域精度标准（阈值按输出 dtype 查表） |
+| Criterion 2: atol/rtol/error_ratio | error_ratio ≤ 1e-3 | 对小值域友好（atol 兜底近零值） |
+
+### 为什么是双标准
+
+- MERE/MARE 在正常值域精确度量相对误差，但对过零激活（SwiGLU/tanh-GELU）的近零值不稳定
+- atol/rtol/error_ratio 对近零值用 atol 自然兜底，但对大值域的相对精度宽松
+- 两者互补，通过任一即说明精度合格
 
 ---
 

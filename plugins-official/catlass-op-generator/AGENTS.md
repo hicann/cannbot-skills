@@ -98,6 +98,11 @@ Step 1: 环境检查 + catlass 命名校验 + catlass 源码就绪
     ├── 任一项失败 → 告知用户，停止
     │
     ▼ 全部通过
+Step 1.5: 需求预检（激活函数验证 + 核数校验 + dtype 校验）
+    │
+    ├── 任一项失败 → 告知用户，等待修正
+    │
+    ▼ 全部通过（输出 precheck.md）
 Step 2: 设计（Architect 调用 /catlass-op-design）
     │
     ├── 只输出单文件 → 重新调用 Architect 要求拆分
@@ -171,11 +176,39 @@ Step 7: 完成汇报
 - Skill NPU 设备检查失败 → 告知用户，**禁止进入 Step 2**
 - verify_environment.sh 失败（`validation.all_passed` 为 false）→ 告知用户失败原因，**禁止进入 Step 2**
 
-**完成判定**：算子名含 `catlass` ∧ `environment.json.validation.all_passed == true` ∧ `catlass/include` 可访问 → 继续 Step 2
+**完成判定**：算子名含 `catlass` ∧ `environment.json.validation.all_passed == true` ∧ `catlass/include` 可访问 → 继续 Step 1.5
+
+#### Step 1.5：需求预检（CANNBot 自行执行）
+
+**触发条件**：Step 1 通过
+
+**执行步骤**：
+
+1. **核数校验**（必做）：
+   1. 运行 `npu-smi info` 获取芯片型号
+   2. 加载 `/npu-arch` skill，在 `references/npu-hardware-params.md` §0 产品映射表中查芯片型号对应的 NpuArch 和产品系列
+   3. 在 `references/npu-hardware-params.md` §2 各架构参数中找到对应架构的 `cube_core_cnt` / `vector_core_cnt`
+   4. 获取 `cube_core_cnt` 后与用户指定核数比较：
+   - 用户核数 > 物理核数 → 告知用户超出硬件能力，等待修正
+   - 用户核数 == 物理核数 → 提示满载不一定最优（910B 系列实测 20 核优于 24 核）
+   - 用户核数 < 物理核数 → 通过
+   - 用户未指定 → 记录物理核数，建议"910B 系列推荐 20 核"
+
+2. **dtype 合理性校验**（必做）：
+   - 算子名含 `quant` 但输入为 fp16/bf16 → 警告（量化算子输入应为 int8/int4）
+   - 算子名不含 `quant` 但输入为 int8 → 警告（非量化算子不应用整数输入）
+   - 输入为 int8 但缺少 scale 张量 → 提示
+   - 警告级问题需用户确认后才通过
+
+**失败处理**：
+- 核数超出物理核数 → **等待用户修正**
+- dtype 不合理 → **等待用户确认**（确认后通过）
+
+**完成判定**：核数校验通过 ∧ dtype 已确认 ∧ 条件触发项通过或跳过 → 输出 `operators/{operator_name}/docs/precheck.md` → 继续 Step 2
 
 #### Step 2：设计
 
-**触发条件**：Step 1 通过
+**触发条件**：Step 1.5 通过
 **调用模板**：[Step 2](workflows/task-prompts.md#step-2设计) — 读取此链接的完整内容作为 prompt
 **完成判定**：`operators/{operator_name}/docs/DESIGN.md` 和 `operators/{operator_name}/docs/PLAN.md` 都存在；PRESIGN.md 含 catlass 组件选型表；如果只输出单文件，重新调用 architect
 

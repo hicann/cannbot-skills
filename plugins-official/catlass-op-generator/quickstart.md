@@ -46,7 +46,7 @@ bash init.sh global opencode    # 全局级
 帮我开发一个 catlass_matmul_gelu 算子：
 - A/B 为 FP16 行主序，输出 FP16
 - GELU 激活
-- 目标 SoC Ascend 910
+- 目标 SoC Ascend 910b3
 - 主要 shape M=N=K=512
 ```
 

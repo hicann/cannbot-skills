@@ -112,6 +112,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - 规定算子目录名、文件名、CMake 语法、构建命令
 - 把 golden 生成注释掉 / 跳过；让 verify 只覆盖基础 shape 不覆盖实网 shape
 - 在 verify 里自创零容忍小值域门限或用全体元素 MARE-max 作硬门限（过零激活会误判）
+- **自行编写 verify_result.py 的精度判定逻辑、阈值或判定函数**——必须从模板复制（见下方 ALWAYS）
 
 **ALWAYS**:
 - 先阅读 `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档），再按设计选型写代码
@@ -120,4 +121,6 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - Workspace: catlass 直调用指针透传 `GM_ADDR userWs = workspace;`（禁 `GetUserWorkspace`/`SetSysWorkspaceForce`）
 - 严格按设计选型实例化每个分支
 - 自定义 Tile 对齐目标槽位签名
+- **写 verify_result.py 前，必须先读取模板文件 `cannbot-skills/ops/catlass-op-develop/references/verify_result_template.py`**，完整复制其精度判定逻辑（DTYPE_THRESHOLDS、calculate_mere/mare、check_mere_mare、check_error_ratio、verify 函数），只修改 `=== 可修改区域 ===` 内的 OUTPUT_SHAPE 和 OUTPUT_DTYPE
+- verify 必须同时运行双标准（MERE/MARE Threshold + atol/rtol/error_ratio），通过任一即 PASS
 - verify 判据 = `ops-precision-standard` 选出的官方标准；golden 镜像内核数值路径（fp32 累加→末尾 cast）；int8 GEMM golden 用 fp32 BLAS（`|Cint|<2²⁴` 精确）；gen_data/verify 覆盖基础 + 实网 shape（见 [precision-verification.md](references/precision-verification.md)）
