@@ -118,8 +118,6 @@ ops-qa-suite/
 | **接口列表一致性** | `/scan-op-api-list ops-math` | 验证 op_api_list.md 表格一致性 |
 | **统一扫描（推荐）** | `请扫描 ops-math 仓库` | 一键执行全部扫描 |
 
-> **详细参数说明**：见 [docs/commands-reference.md](docs/commands-reference.md) 或各 Command 的 SKILL.md。
-
 ---
 
 ## 统一扫描（ops-scanner）
