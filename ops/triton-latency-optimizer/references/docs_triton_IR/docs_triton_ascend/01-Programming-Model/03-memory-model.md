@@ -434,5 +434,5 @@ A: 对于 shape 为 (2048, 3) 的 Tensor，尾轴 3 会被自动补齐到 32B �
 - [00-Architecture](../../docs_ascendnpu_ir/00-Architecture/) - 硬件架构概览
 - [programming_guide.md](https://github.com/triton-lang/triton-ascend/tree/main/docs/zh/programming_guide.md) - Triton 算子开发指南
 - [core.py (extension)](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/language/cann/extension/core.py) - NPU 扩展 API
-- [NPUTargetSpec.td](../../AscendNPU-IR/bishengir/include/bishengir/Dialect/HACC/Targets/NPUTargetSpec.td) - NPU 目标规格定义
-- [HIVMDMAOps.td](../../AscendNPU-IR/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMDMAOps.td) - DMA 操作定义
+- [NPUTargetSpec.td](https://gitcode.com/Ascend/AscendNPU-IR/blob/master/bishengir/include/bishengir/Dialect/HACC/Targets/NPUTargetSpec.td) - NPU 目标规格定义
+- [HIVMDMAOps.td](https://gitcode.com/Ascend/AscendNPU-IR/blob/master/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMDMAOps.td) - DMA 操作定义
