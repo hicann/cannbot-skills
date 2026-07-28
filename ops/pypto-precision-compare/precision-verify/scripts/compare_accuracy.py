@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # coding: utf-8
-# ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -8,7 +7,7 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-# ----------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------
 """
 PyPTO 精度检查点文件对比工具
 自动检测检查点并对比 jit 和 golden 的中间结果
@@ -22,7 +21,8 @@ import re
 import torch
 
 # PyPTO 数据类型映射
-# 参考：tools/verifier/parse_dump_tensors.py 和 docs/zh/api/datatype/DataType.md
+# 参考：tools/verifier/parse_dump_tensors.py 和
+# https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/datatype/DataType.md
 DTYPE_MAP = {
     0: ('int4', torch.int8, 1),            # DT_INT4: 4位有符号整数，2个元素打包成1个int8存储
     1: ('int8', torch.int8, 1),            # DT_INT8: 8位有符号整数

@@ -96,26 +96,42 @@
 
 ## PyPTO 算子开发
 
-### Skills
+### Skills（17 个）
 
 | Skill | 功能 |
 |-------|------|
-| **pypto-op-design** | 算子方案设计生成 |
-| **pypto-op-develop** | 算子代码实现与测试 |
-| **pypto-golden-generate** | Golden 参考实现生成 |
+| **pypto-orchestration-manual** | 编排者入口：团队原则 / 成员名册 / 强制规则 |
 | **pypto-intent-understand** | 需求意图理解与规格生成 |
+| **pypto-op-plan** | 需求规划：相似样例搜索与可行性评估 |
 | **pypto-api-explore** | API 可行性探索与分析 |
-| **pypto-precision-debug** | 精度问题代码层排查 |
+| **pypto-docs-search** | API 文档 / 参考实现 / golden / 错误码检索 |
+| **pypto-golden-generate** | Golden 参考实现生成 |
+| **pypto-op-design** | 算子方案设计生成 |
+| **pypto-op-construct** | 模块语义拆解与逐模块构建 |
+| **pypto-op-develop** | 算子代码实现与测试 |
+| **pypto-op-verify** | 验证 runner 与 `detailed_tensor_compare` 用法 |
+| **pypto-op-review** | 逐算子 PyPTO 调用提取（调试用） |
 | **pypto-precision-compare** | 精度中间结果对比分析 |
-| **pypto-op-perf-tune** | 算子性能分析与自动调优 |
+| **pypto-precision-debug** | 精度问题代码层排查 |
+| **pypto-general-debug** | 卡住/不明失败的调试路由 |
+| **pypto-op-perf-tune** | 算子性能分析与自动调优（含泳道图子技能） |
+| **pypto-op-knowledge** | 算子开发经验表 / 问题查找表 |
+| **pypto-memory-template** | 算子级 `MEMORY.md` 模板 |
 
-### Agents
+### Agents（8 个 + 编排者）
+
+编排者 `pypto-op-orchestrator`（AGENTS.md 注入，全流程唯一 owner）按 7 阶段调度 8 个子代理：
 
 | Agent | 功能 |
 |-------|------|
-| **pypto-op-analyst** | 需求分析与方案设计 |
-| **pypto-op-developer** | 算子代码实现与精度调试 |
-| **pypto-op-perf-tuner** | 性能分析与调优 |
+| **pypto-op-planner** | 需求规划：SPEC.md / API_REPORT.md |
+| **pypto-op-mathematician** | Golden 参考实现 |
+| **pypto-op-architect** | 架构设计：拆解决策、Tile、Loop 结构 |
+| **pypto-op-designer** | 模块拆解与契约、staged 文件布局 |
+| **pypto-op-coder** | 单文件 kernel 编码 |
+| **pypto-op-verifier** | 裁判：对抗测试 + 精度/layout 校验 |
+| **pypto-op-debugger** | 失败定位与补丁方案 |
+| **pypto-op-optimizer** | 性能分析与自动调优 |
 
 ## TileLang 算子开发
 

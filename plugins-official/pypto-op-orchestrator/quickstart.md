@@ -2,7 +2,7 @@
 
 ## 概述
 
-CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。采用 7 阶段状态机驱动，覆盖从需求理解到性能调优的完整开发流程，支持断点续跑与失败恢复。
+CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。由 **9 智能体团队**（orchestrator 编排者 + planner / mathematician / architect / designer / coder / verifier / debugger / optimizer 8 个子代理）驱动 7 阶段状态机，覆盖从需求理解到性能调优的完整开发流程。各阶段以门禁校验推进，并由 `state_transition` 状态机工具维护进度，支持断点续跑与失败恢复。
 
 ### 与 Kernel 直调开发的区别
 
@@ -24,16 +24,32 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
-### OpenCode（推荐）
+### 通用安装方式（init.sh）
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-official/pypto-op-orchestrator
-bash init.sh project opencode   # 项目级（默认）
+bash init.sh project <tool>   # 项目级（默认）
+bash init.sh global <tool>    # 全局级
+```
+
+`<tool>` 可取 `opencode` / `claude` / `trae` / `cursor` / `copilot` / `codearts`，省略时取默认值 `opencode`。
+
+### 各工具安装说明
+
+<details>
+<summary>OpenCode</summary>
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/pypto-op-orchestrator
+bash init.sh project opencode   # 项目级
 bash init.sh global opencode    # 全局级
 ```
 
-### 其他工具
+安装后在项目根目录生成 `.opencode/` 目录与 AGENTS.md。
+
+</details>
 
 <details>
 <summary>Claude Code</summary>
@@ -69,7 +85,7 @@ bash init.sh project trae       # 项目级
 bash init.sh global trae        # 全局级
 ```
 
-安装后自动检测 TRAE 环境，生成 `.trae/`（TRAE IDE）、`.marscode/`（TRAE Plugin）或 `.traecli/`（TRAE CLI）目录，结构与 Claude/OpenCode 基本一致。
+安装后自动检测 TRAE 环境，生成 `.trae/`（TRAE IDE）、`.marscode/`（TRAE Plugin）或 `.traecli/`（TRAE CLI）目录，结构与其他工具基本一致。
 
 </details>
 
@@ -83,7 +99,7 @@ bash init.sh project cursor     # 项目级
 bash init.sh global cursor      # 全局级
 ```
 
-安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
+安装后在项目根目录生成 `.cursor/` 目录，结构与其他工具基本一致。
 
 </details>
 
@@ -121,10 +137,10 @@ bash init.sh global codearts      # 全局级
 
 ```bash
 # 安装到当前目录
-bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project opencode
+bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project <tool>
 
 # 安装到指定项目
-bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project opencode /path/to/your_project_path
+bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh project <tool> /path/to/your_project_path
 ```
 
 ### 验证安装
@@ -132,7 +148,9 @@ bash /path/to/cannbot-skills/plugins-official/pypto-op-orchestrator/init.sh proj
 ```bash
 # OpenCode
 opencode agent list
-# 应看到 pypto-op-analyst / pypto-op-developer / pypto-op-perf-tuner
+# 应看到 pypto-op-planner / pypto-op-mathematician / pypto-op-architect / pypto-op-designer
+#        / pypto-op-coder / pypto-op-verifier / pypto-op-debugger / pypto-op-optimizer
+#        （编排者本身以 AGENTS.md 注入）
 
 # Claude Code
 claude plugin list
@@ -149,6 +167,16 @@ ls .traecli/   # TRAE CLI（init.sh 自动检测）
 
 # Cursor
 ls .cursor/
+# 应看到 skills/ agents/ cannbot-manifest.json
+# AGENTS.md 位于项目根目录
+
+# Copilot
+ls .github/        # 项目级；全局级为 ~/.copilot/
+# 应看到 skills/ agents/ cannbot-manifest.json
+# AGENTS.md 位于项目根目录
+
+# CodeArts
+ls .codeartsdoer/  # 项目级；全局级为 ~/.codeartsdoer/
 # 应看到 skills/ agents/ cannbot-manifest.json
 # AGENTS.md 位于项目根目录
 ```
@@ -168,6 +196,8 @@ claude
 > **TRAE 用户**：TRAE 通过 IDE、VS Code 插件或 CLI 启动。init.sh 会自动检测 TRAE IDE（`~/.trae-cn`）、Plugin（`~/.marscode`）或 CLI（`~/.traecli`）并安装到对应目录。安装完成后在 IDE 中直接打开项目即可。
 >
 > **Cursor 用户**：Cursor 通过 IDE 启动，`.cursor/` 目录中的配置会自动加载。安装完成后在 IDE 中直接打开项目即可。
+>
+> **Copilot / CodeArts 用户**：通过各自的 CLI 或 IDE 启动，安装目录中的 skills/agents 与项目根目录的 AGENTS.md 会自动加载。
 
 ### 开发算子示例
 
@@ -221,24 +251,34 @@ custom/softmax/
 └── history_version/           # 版本备份
 ```
 
-## 三、可用技能
+## 三、智能体团队
 
-| Skill | 用途 | 触发阶段 |
-|-------|------|---------|
-| `pypto-intent-understand` | 需求意图理解与规格生成 | Stage 1 |
-| `pypto-api-explore` | API 可行性探索与分析 | Stage 2 |
-| `pypto-golden-generate` | Golden 参考实现生成 | Stage 3 |
-| `pypto-op-design` | 算子设计方案生成 | Stage 4 |
-| `pypto-op-develop` | 算子代码实现与测试 | Stage 5 |
-| `pypto-precision-debug` | 精度问题代码层排查 | Stage 6 |
-| `pypto-precision-compare` | 精度中间结果对比分析 | Stage 6（辅助） |
-| `pypto-op-perf-tune` | 算子性能分析与自动调优 | Stage 7 |
+编排者 `pypto-op-orchestrator`（以 AGENTS.md/CLAUDE.md 注入，全流程唯一 owner）按 7 阶段调度 8 个子代理，自身不执行领域工作：
 
 | Agent | 用途 | 负责阶段 |
 |-------|------|---------|
-| `pypto-op-analyst` | Golden 生成与设计 | Stage 3-4 |
-| `pypto-op-developer` | 代码实现与精度修复 | Stage 5-6 |
-| `pypto-op-perf-tuner` | 性能分析与调优 | Stage 7 |
+| `pypto-op-planner` | 需求规划：SPEC.md / API_REPORT.md | Stage 1-2 |
+| `pypto-op-mathematician` | Golden 参考实现 `<op>_golden.py` | Stage 3 |
+| `pypto-op-architect` | 架构设计：拆解决策、Tile、Loop 结构 | Stage 4 |
+| `pypto-op-designer` | 模块拆解、模块契约、staged 文件布局 | Stage 4 |
+| `pypto-op-coder` | 单文件 kernel 编码（每次一个 impl） | Stage 5 |
+| `pypto-op-verifier` | 裁判：对抗测试 + `detailed_tensor_compare` + layout 校验 | Stage 4-7 门禁 |
+| `pypto-op-debugger` | 失败定位与补丁方案（不写生产代码） | Stage 5-6 |
+| `pypto-op-optimizer` | 性能分析与自动调优迭代 | Stage 7 |
+
+### 配套 Skills（17 个，随 `pypto-op-orchestrator-skills` 一并安装）
+
+| Skill | 用途 | 触发阶段 |
+|-------|------|---------|
+| `pypto-orchestration-manual` | 编排者入口：原则 / 名册 / 规则 | 编排者启动 |
+| `pypto-intent-understand` / `pypto-op-plan` | 需求理解与规划 | Stage 1 |
+| `pypto-api-explore` / `pypto-docs-search` | API 探索与文档/参考实现检索 | Stage 2 |
+| `pypto-golden-generate` | Golden 参考实现生成 | Stage 3 |
+| `pypto-op-design` / `pypto-op-construct` | 设计方案与逐模块构建 | Stage 4 |
+| `pypto-op-develop` / `pypto-op-verify` / `pypto-op-review` | 实现、验证、调用提取 | Stage 5 |
+| `pypto-precision-compare` / `pypto-precision-debug` / `pypto-general-debug` | 精度对比与调试路由 | Stage 6 |
+| `pypto-op-perf-tune` | 性能分析与自动调优（含泳道图子技能） | Stage 7 |
+| `pypto-op-knowledge` / `pypto-memory-template` | 经验表、MEMORY 模板 | 全流程 |
 
 ## 四、断点续跑与恢复
 
@@ -266,10 +306,10 @@ bash init.sh --help
 ### Q: 如何更新？
 
 ```bash
-# OpenCode (init.sh 方式)
-cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
+# 通用（init.sh 方式，重跑一次安装即可）
+cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh project <tool>
 
-# Claude Code
+# Claude Code 亦可用插件命令
 /plugin update pypto-op-orchestrator@cannbot
 ```
 
@@ -289,7 +329,7 @@ cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh
 ## 总结
 
 1. PyPTO 算子开发模式通过 7 阶段状态机实现端到端自动化
-2. 使用 `init.sh` 脚本一键安装（OpenCode 推荐），Claude Code 用户也可用 `/plugin install` 一键安装
-3. `opencode` / `claude` 是核心交互指令
+2. 使用 `init.sh` 脚本一键安装（支持 OpenCode / Claude Code / TRAE / Cursor / Copilot / CodeArts），Claude Code 用户也可用 `/plugin install` 一键安装
+3. 各工具的 CLI 或 IDE 入口（如 `opencode`、`claude`，或 TRAE / Cursor / Copilot / CodeArts 的 IDE）即核心交互入口
 4. 所有阶段通过门禁驱动，支持断点续跑与失败恢复
 5. 产出物包含完整的参考实现、设计文档、PyPTO 实现和测试入口

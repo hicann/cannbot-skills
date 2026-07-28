@@ -59,7 +59,7 @@ description: PyPTO 算子性能分析和自动调优技能。用于对生成及�
 | 编排器状态 | 对应主技能步骤 | 具体内容 | 编排器完成条件 |
 |-----------|--------------|---------|--------------|
 | INIT | 步骤 0：确定调优目标 | 询问用户目标、计算目标值、设置终止条件 | 用户确认目标性能值 |
-| S1_SETUP | 步骤 1：环境检查 + 精度校验 | 加载 pypto-environment-setup 检查环境（S1a），环境通过后执行精度校验（S1b） | 环境检查清单全部 ✅ + 精度通过 |
+| S1_SETUP | 步骤 1：环境检查 + 精度校验 | 检查环境（S1a），环境通过后执行精度校验（S1b） | 环境检查清单全部 ✅ + 精度通过 |
 | S2_COLLECT | 步骤 2：性能数据采集 | 启用 debug_options、运行用例、确认数据文件（2.1-2.3） | swimlane.json 存在 |
 | S3_ANALYZE | 步骤 3：性能数据分析 | 加载 perf-analyzer、生成报告、建立基准（3.1-3.3） | 性能报告文件存在 |
 | S4_TUNE | 步骤 4：分步骤调优 | 见下方第二级映射 | 3个PHASE全部完成 |
@@ -130,10 +130,14 @@ description: PyPTO 算子性能分析和自动调优技能。用于对生成及�
 2. 以文档 / 资料库为依据
 遇到问题查官方文档、权威资料、经典案例。
 3. 遇到不清晰的接口，不确定使用方法时，主动查询 API 接口文档
+4. 配置类调优开始前，先从现有 production kernel 检索配置先验，作为初始候选来源，不要从零猜配置。配置级搜索空间见 [shared/optimization_catalog.md](shared/optimization_catalog.md)：vector/cube tile shape、runtime options、stitch、loop unroll、device 调度、reuse 等。
+
+**受约束搜索**：先用先验选约 10 个初始候选 → 逐个实测，保留最优的几个 → 在最优候选附近每次只改一个参数做局部变异 → 连续多个变异体无提升即停止该优化点。精度失败、超时、超内存、编译失败的候选直接丢弃。
 
 **资料库**
+
 1. [高性能编程实践](../../../models) -- 介绍了很多高性能的编程案例，可以参考其中的高性能写法进行优化
-2. [API 接口文档](../../../docs/zh/api) -- 介绍了整个 pypto 仓库的所有接口及调优参数使用说明
+2. [API 接口文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api) -- 介绍了整个 pypto 仓库的所有接口及调优参数使用说明
 
 ### 3. 阶段摘要与上下文隔离原则
 
@@ -194,8 +198,7 @@ description: PyPTO 算子性能分析和自动调优技能。用于对生成及�
 
 **操作流程**：
 
-1. 加载 `pypto-environment-setup` 技能
-2. 逐项检查以下清单：
+1. 逐项检查以下清单：
 
 ```
 调优环境检查清单（⛔ 全部 ✅ 才能进入精度校验）：
@@ -211,7 +214,7 @@ description: PyPTO 算子性能分析和自动调优技能。用于对生成及�
 ```
 
 **不通过时的处理**：
-- 按 pypto-environment-setup 技能中的修复流程执行
+- 按环境检查清单逐项修复（NPU/卡号/PTO-ISA/编译安装）
 - 修复后重新检查清单，全部 ✅ 才放行到精度校验
 - 向用户报告环境状态（含 PTO-ISA 来源、可用卡数等关键信息）
 
@@ -436,6 +439,12 @@ Read perf-analyzer/SKILL.md
 ├─ 查看性能报告，分析核内瓶颈
 ├─ 指令级优化、核内流水优化
 └─ 特殊 Shape 处理
+
+第4步（可选）：算法级优化
+├─ 前三步配置调优收敛后仍未达标时进行
+├─ 不加载新子技能，按步骤 4.3 的检查清单逐项排查
+├─ 每次只改一个算法点，改后按步骤 1.3 验证精度 + 重新测性能
+└─ 精度回归立即回退；无收益记录后尝试下一项
 ```
 
 **⚠️ 关键：每个阶段结束后，编排器自动触发 PHASE_SUMMARY 生成阶段交接摘要并通过 Task subagent 隔离（详见 tune-orchestrator/SKILL.md），避免上下文膨胀导致后续调优质量退化！**
@@ -492,6 +501,25 @@ Read perf-analyzer/SKILL.md
 ### 4.2 阶段摘要数据模板
 
 **⛔ 阶段切换时的摘要生成和上下文隔离由编排器（tune-orchestrator）的 PHASE_SUMMARY 状态统一控制，模板和流程详见 tune-orchestrator/SKILL.md 的「阶段交接摘要模板」章节。**
+
+### 4.3 算法级优化（可选，配置级收敛后）
+
+**进入条件**：步骤 4.0 第 1~3 步配置级调优已收敛，且性能仍未达标（步骤 0.3 的终止条件均未触发）。先收敛配置再改算法——配置未收敛时改算法，无法区分收益来自配置还是算法。
+
+**检查清单**（系统性逐项检查，不要跳项）：
+- 中间 tensor 数量能否减少？
+- 数据搬运能否减少？
+- cast 次数能否减少？
+- reuse 能否增加？
+- loop 顺序能否改进？
+- memory-bound 阶段能否简化？
+- view / reshape / assemble 次数能否减少？
+
+**执行规则**：
+1. 每次只改一个算法点，验证后再改下一个。禁止一次叠加多个算法改动。
+2. 每次修改后按步骤 1.3 的强制检查流程验证精度，并按步骤 2~3 重新采集和对比性能。
+3. 精度回归或性能回退：立即回退修改，将失败尝试记入调优记录（避免重试），再尝试下一项。
+4. 算法级改动追加到已生成的调优报告（`{op_name}_tuning_report.md`）的「已采纳优化」/「已失败优化」表，阶段名填「算法」，并同步更新性能对比数据。
 
 ---
 
@@ -679,9 +707,9 @@ Read perf-analyzer/SKILL.md
 - [tune-incore](tune-incore/SKILL.md) - 核内性能调优
 
 ### 案例和文档
-- [性能调优文档](../../../docs/zh/tutorials/debug/performance.md)
-- [Matmul 高性能编程](../../../docs/zh/tutorials/debug/matmul_performance_guide.md)
-- [性能优化案例](../../../docs/zh/tutorials/debug/performance_case_quantindexerprolog.md)
+- [性能调优文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/debug/performance.md)
+- [Matmul 高性能编程](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/debug/matmul_performance_guide.md)
+- [性能优化案例](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/debug/performance_case_quantindexerprolog.md)
 - [性能调优报告模板](./perf-analyzer/templates/performance_report_template.md)
-- [高性能编程实践](../../../models/)
-- [API 接口文档](../../../docs/zh/api/)
+- 高性能编程实践（真实算子实现）：用 skill `pypto-docs-search` 搜索算子参考实现
+- [API 接口文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/)

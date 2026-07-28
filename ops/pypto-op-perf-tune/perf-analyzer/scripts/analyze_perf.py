@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # coding: utf-8
-# ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -8,7 +7,7 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-# ----------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------
 """
 PyPTO 性能分析脚本
 从bubble_analysis.log中提取性能数据并计算性能指标
@@ -559,7 +558,7 @@ def main():
 
     if len(sys.argv) < 2:
         logging.info("Usage: python analyze_perf.py <output_dir>")
-        logging.info("Example: python analyze_perf.py models/glm_v4_5/output/output_20260304_171658_543682_529508")
+        logging.info("Example: python analyze_perf.py custom/<op>/output/output_20260304_171658_543682_529508")
         logging.info("")
         logging.info("Note: output_dir should be the directory containing bubble_analysis.log")
         logging.info("      If not found, the script will search subdirectories automatically.")

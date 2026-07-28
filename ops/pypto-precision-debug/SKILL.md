@@ -104,8 +104,8 @@ def my_kernel(
 **检查内容**：查看用户代码中的装饰器是否为 `pypto.frontend.jit`
 
 **依据参考**：
-- [docs/tutorials/development/compile.md](../../../docs/zh/tutorials/development/compile.md)：官方文档使用 `@pypto.frontend.jit` 作为标准写法
-- [docs/tutorials/introduction/quick_start.md](../../../docs/zh/tutorials/introduction/quick_start.md)：快速入门示例使用 `@pypto.frontend.jit`
+- [docs/tutorials/development/compile.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/development/compile.md)：官方文档使用 `@pypto.frontend.jit` 作为标准写法
+- [docs/tutorials/introduction/quick_start.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/introduction/quick_start.md)：快速入门示例使用 `@pypto.frontend.jit`
 
 **如果用户未使用 `pypto.frontend.jit`**：
 
@@ -186,8 +186,8 @@ def my_kernel(
 - [ ] 动态 shape 场景下 valid_shape 表达式是否正确
 
 **依据参考**：
-- [pypto.view API 文档](../../../docs/zh/api/operation/pypto-view.md)：`valid_shape` 是 `view` 方法的参数，用于指定视图的有效数据大小
-- [pypto.reshape API 文档](../../../docs/zh/api/operation/pypto-reshape.md)：`valid_shape` 是 `reshape` 方法的参数，用于指定输出 Tensor 的有效数据 Shape
+- [pypto.view API 文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/operation/pypto-view.md)：`valid_shape` 是 `view` 方法的参数，用于指定视图的有效数据大小
+- [pypto.reshape API 文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/operation/pypto-reshape.md)：`valid_shape` 是 `reshape` 方法的参数，用于指定输出 Tensor 的有效数据 Shape
 
 **示例**：
 
@@ -288,7 +288,7 @@ for i in pypto.loop(range(n)):
 
 **判断**：问题是否解决
 
-**依据参考**：[docs/api/controlflow/pypto-loop.md](../../../docs/zh/api/controlflow/pypto-loop.md) - `submit_before_loop` 参数用于控制嵌套循环的调度行为，确保子循环在父循环迭代前正确提交，避免并行执行时的内存覆盖问题。
+**依据参考**：[docs/api/controlflow/pypto-loop.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/controlflow/pypto-loop.md) - `submit_before_loop` 参数用于控制嵌套循环的调度行为，确保子循环在父循环迭代前正确提交，避免并行执行时的内存覆盖问题。
 
 #### 2.4 尝试 +0.0 技巧
 
@@ -481,16 +481,16 @@ tensor_reshaped = pypto.reshape(tensor, new_shape, valid_shape=actual_size)
 
 | 文档 | 路径 | 说明 |
 |------|------|------|
-| 已知问题文档 | [docs/tutorials/appendix/issue.md](../../../docs/zh/tutorials/appendix/issue.md) | 常见问题及解决方案 |
-| 循环开发指南 | [docs/tutorials/development/loops.md](../../../docs/zh/tutorials/development/loops.md) | loop 使用方法 |
+| 已知问题文档 | [docs/tutorials/appendix/issue.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/appendix/issue.md) | 常见问题及解决方案 |
+| 循环开发指南 | [docs/tutorials/development/loops.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/development/loops.md) | loop 使用方法 |
 
 ### API 文档
 
 | API | 文档路径 | 说明 |
 |-----|---------|------|
-| pypto.loop | [docs/api/controlflow/pypto-loop.md](../../../docs/zh/api/controlflow/pypto-loop.md) | 循环接口，含 submit_before_loop 参数 |
-| pypto.loop_unroll | [docs/api/controlflow/pypto-loop_unroll.md](../../../docs/zh/api/controlflow/pypto-loop_unroll.md) | 循环展开接口，含 unroll_list 参数 |
-| pypto.tensor | [docs/tutorials/development/tensor_creation.md](../../../docs/zh/tutorials/development/tensor_creation.md) | Tensor 创建方法 |
-| pypto.reshape | [docs/api/operation/pypto-reshape.md](../../../docs/zh/api/operation/pypto-reshape.md) | reshape 操作，含 inplace 参数 |
-| pypto.view | [docs/api/operation/pypto-view.md](../../../docs/zh/api/operation/pypto-view.md) | view 操作 |
-| valid_shape | [docs/tutorials/development/tensor_operation.md](../../../docs/zh/tutorials/development/tensor_operation.md) | Tensor 操作方法，含 valid_shape 说明 |
+| pypto.loop | [docs/api/controlflow/pypto-loop.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/controlflow/pypto-loop.md) | 循环接口，含 submit_before_loop 参数 |
+| pypto.loop_unroll | [docs/api/controlflow/pypto-loop_unroll.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/controlflow/pypto-loop_unroll.md) | 循环展开接口，含 unroll_list 参数 |
+| pypto.tensor | [docs/tutorials/development/tensor_creation.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/development/tensor_creation.md) | Tensor 创建方法 |
+| pypto.reshape | [docs/api/operation/pypto-reshape.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/operation/pypto-reshape.md) | reshape 操作，含 inplace 参数 |
+| pypto.view | [docs/api/operation/pypto-view.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/operation/pypto-view.md) | view 操作 |
+| valid_shape | [docs/tutorials/development/tensor_operation.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/development/tensor_operation.md) | Tensor 操作方法，含 valid_shape 说明 |

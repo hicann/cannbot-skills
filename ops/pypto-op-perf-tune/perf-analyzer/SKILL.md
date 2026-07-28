@@ -1,6 +1,6 @@
 ---
 name: perf-analyzer
-description: 分析 PyPTO 算子的性能指标。用于分析 PyPTO 算子的性能指标，从性能数据文件中提取关键指标，计算性能评级，并提供性能瓶颈分析和优化建议。 当需要分析 PyPTO 算子性能数据、计算性能评级或定位性能瓶颈时使用此技能。
+description: 分析 PyPTO 算子的性能指标。适用于分析 PyPTO 算子的性能指标，从性能数据文件中提取关键指标，计算性能评级，并提供性能瓶颈分析和优化建议时。
 ---
 
 # PyPTO 性能指标分析技能
@@ -34,10 +34,10 @@ description: 分析 PyPTO 算子的性能指标。用于分析 PyPTO 算子的�
 python3 <脚本路径>/analyze_perf.py <output_dir>
 
 # 示例1：在算子目录下执行的，output 就在算子目录下
-python3 pypto/.agents/skills/pypto-op-perf-tune/perf-analyzer/scripts/analyze_perf.py custom/operator_name/output/output_20260304_171658_543682_529508
+python3 skills/pypto-op-perf-tune/perf-analyzer/scripts/analyze_perf.py custom/operator_name/output/output_20260304_171658_543682_529508
 
 # 示例2：使用绝对路径
-python3 pypto/.agents/skills/pypto-op-perf-tune/perf-analyzer/scripts/analyze_perf.py /home/user/project/custom/operator_name/output/output_20260304_171658_543682_529508
+python3 skills/pypto-op-perf-tune/perf-analyzer/scripts/analyze_perf.py /home/user/project/custom/operator_name/output/output_20260304_171658_543682_529508
 ```
 
 **⚠️ 路径说明**：

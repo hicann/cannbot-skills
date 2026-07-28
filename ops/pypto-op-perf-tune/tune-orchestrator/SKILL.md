@@ -1,6 +1,6 @@
 ---
 name: tune-orchestrator
-description: PyPTO 算子性能调优流程编排器。控制调优流程按固定顺序与完整迭代轮次执行、实时更新 Todo 清单。当需要编排 PyPTO 算子性能调优全流程（性能分析→调优→精度验证迭代）时使用此技能。
+description: PyPTO 算子性能调优编排器。控制调优流程按固定顺序严格执行、迭代轮次完整执行、Todo 清单实时更新。负责流程推进、完成条件校验、状态机转移，不负责具体优化建议或代码修改。适用于 PyPTO 算子性能调优流程编排时。
 ---
 
 # PyPTO 算子性能调优编排器
@@ -117,7 +117,7 @@ S4_TUNE = PHASE_FRONTEND → PHASE_SUMMARY_F
 | 当前状态 | 完成条件 | 转移到 | 强制动作 | ⛔ state_transition 门控 |
 |---------|---------|--------|---------|------------------------|
 | INIT | 用户已提供目标（如"提升X倍"/"≤X us"）或用户确认 | S1_SETUP | 记录目标到 Todo，计算目标执行时间 | 完成时调用 `state_transition(opDir, "complete_stage", 0)` |
-| S1_SETUP | 环境检查全部通过（见下方「环境检查清单」）+ 精度通过 | S2_COLLECT | ⛔ S1a 环境检查：加载 pypto-environment-setup 技能，逐项检查环境；⛔ S1b 精度校验：环境通过后运行精度校验；⛔ 全部通过后强制创建完整 Todo | S1a通过时调用 `state_transition(opDir, "start_stage", 1)`，全部通过后调用 `state_transition(opDir, "complete_stage", 1)` |
+| S1_SETUP | 环境检查全部通过（见下方「环境检查清单」）+ 精度通过 | S2_COLLECT | ⛔ S1a 环境检查：逐项检查环境；⛔ S1b 精度校验：环境通过后运行精度校验；⛔ 全部通过后强制创建完整 Todo | S1a通过时调用 `state_transition(opDir, "start_stage", 1)`，全部通过后调用 `state_transition(opDir, "complete_stage", 1)` |
 | S2_COLLECT | swimlane.json 存在 | S3_ANALYZE | 无 | 完成时调用 `state_transition(opDir, "start_stage", 2)` → 验证后调用 `complete_stage(2)` |
 | S3_ANALYZE | 性能报告文件存在 | S4_TUNE | 记录基准性能 | 完成时调用 `state_transition(opDir, "start_stage", 3)` → 验证后调用 `complete_stage(3)` |
 | S4_TUNE | ⛔ 提前达标（PHASE_SUMMARY_F / PHASE_SUMMARY_I_n 达标时直接→S5）或 外循环≤3轮全部完成（FRONTEND + [SWIMLANE→INCORE]×≤3 及其对应的 SUMMARY） | S5_REPORT | ⛔ 各PHASE间通过SUMMARY强制交接；⛔ 每轮外循环从SWIMLANE_n入口重新独立采集性能数据 | 每个 PHASE 完成时调用 `state_transition(opDir, "complete_stage", 4)` |
@@ -184,147 +184,19 @@ Step 0a: 独立性能数据分析
 
 > **与 S2_COLLECT / S3_ANALYZE 的关系**：S2+S3 提供全局初始基准（Initial Baseline），PHASE_FRONTEND 直接复用此基准。3 轮外循环中每轮的 SWIMLANE_n/INCORE_n 入口独立采集提供的是**当前轮次基准（Round_n Baseline）**，因每轮间代码已变化，不可复用历史数据。
 
-### 各 PHASE 调优流程
+### 各 PHASE 编排器职责
 
-#### PHASE_FRONTEND 开箱调优流程
+编排器不介入子技能的具体分析/优化过程，仅负责：加载子技能 → 核查产出制品 → 判断退出条件。
 
-```
-┌──────────────────────────────────────────────────────────┐
-│              开箱性能调优流程                              │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│  ⛔ 阶段A: 全局分析（对应 F-1~F-10，必须先完成）            │
-│     ├─ A1: 扫描所有 pypto.loop / Python for 调用          │
-│     │      → 产出 Loop结构分析表                           │
-│     ├─ A2: 扫描所有常量定义和 jit 参数                      │
-│     │      → 产出 常量依赖关系图（对应F-11）                 │
-│     ├─ A3: 扫描所有 pypto.reshape/squeeze/unsqueeze 调用    │
-│     │      → 产出 Reshape全局分析表（对应F-4）               │
-│     ├─ A4: 扫描所有 operation + TileShape                  │
-│     │      → 产出 基本块(TileShape)审查表（对应F-9,F-10）   │
-│     └─ A5: 汇总优化建议                                    │
-│            → 产出 基于分析的优化建议清单                     │
-│                                                          │
-│     ⛔ 编排器核查：A1+A2+A3+A4+A5 制品齐全 → 进入阶段B      │
-│                                                          │
-│  ⛔ 阶段B: 局部分析（对应 F-11~F-15，F-11已在A2分析，必须先完成） │
-│     ├─ B1: 数据操作分析(NZ/Transpose/冗余搬运)             │
-│     │      → 产出 数据操作分析表（对应F-12~F-15）           │
-│     └─ B2: 汇总最终优化点排序清单                           │
-│            → 产出 最终优化点清单（引用catalog编号）          │
-│                                                          │
-│     ⛔ 编排器核查：B1+B2 制品齐全 → 进入阶段C               │
-│                                                          │
-│  阶段C: 逐项优化（基于A+B的分析结论执行）                  │
-│     ├─ 按优化点排序清单逐项执行 ITER 循环                  │
-│     │   ├─ P0 任务粒度: F-1~F-3                             │
-│     │   ├─ P0 Reshape全局: F-4                              │
-│     │   ├─ P1 Loop写法: F-5~F-8                             │
-│     │   ├─ P2 TileShape: F-9, F-10                          │
-│     │   ├─ P3 常量配置: F-11                                 │
-│     │   └─ P3 其他: F-12~F-15                               │
-│     ├─ 每项优化必须引用阶段A/B的分析结论                     │
-│     └─ 每项优化后验证精度+性能                               │
-│                                                          │
-│  ⛔ 见「退出条件详细定义」→ 退出，进入 PHASE_SUMMARY_F        │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
+| PHASE | 加载子技能 | 编排器核查的产出制品 | 退出后进入 |
+|-------|-----------|-------------------|-----------|
+| PHASE_FRONTEND | `tune-frontend` | 阶段A 全局分析制品 + 阶段B 局部分析制品 + 最终优化点排序清单（具体清单见 `tune-frontend/SKILL.md`） | PHASE_SUMMARY_F |
+| PHASE_SWIMLANE_n | `tune-swimlane` | 核使用率分析 + 调优点清单（具体清单见 `tune-swimlane/SKILL.md`）；⛔ 泳道图重采次数记录在 Todo 中 | PHASE_SUMMARY_S_n |
+| PHASE_INCORE_n | `tune-incore` | 瓶颈 task 分析 + 调优点清单（具体清单见 `tune-incore/SKILL.md`） | PHASE_SUMMARY_I_n |
 
-**⛔ 阶段A/B 分析核查规则**：
+⛔ **核查规则**：子技能声明的所有分析制品均已生成后，才允许进入 ITER 循环。缺少任何一项 → 要求补充分析，禁止跳过进入优化。
 
-编排器在阶段C开始前，必须确认以下制品已生成：
-
-```
-阶段A 核查清单：
-□ A1: Loop结构分析表已填写（每个 pypto.loop/for 一行）
-□ A2: 常量依赖关系图已填写（每个常量一行，含引用位置）
-□ A3: Reshape全局分析表已填写（每个 reshape 一行，含冗余判定）
-□ A4: 基本块(TileShape)审查表已填写（每个 operation 一行，含TileShape匹配检查）
-□ A5: 基于分析的优化建议清单已列出
-
-阶段B 核查清单：
-□ B1: 数据操作分析表已填写（覆盖 F-12~F-15）
-□ B2: 最终优化点排序清单已生成（引用 catalog 编号，按 P0→P3 排序）
-
-⛔ 以上 7 项全部 ✅ 后，才允许进入阶段C 开始 ITER 循环。
-⛔ 缺少任何一项 → 要求补充分析，禁止跳过进入优化。
-```
-
-#### PHASE_SWIMLANE 深度调优流程（外循环第 n 轮）
-
-```
-┌────────────────────────────────────────────────────┐
-│          深度性能调优流程（外循环第n轮）              │
-├────────────────────────────────────────────────────┤
-│                                                    │
-│  ⛔ 阶段入口: 按上方「通用原则」执行 Step 0+0a   │
-│     SWIMLANE 特有: ⛔ 记录泳道图重采次数(Todo中)  │
-│                      n=1时基于 FRONTEND 优化后代码  │
-│                      n≥2时基于 INCORE_{n-1} 代码    │
-│                                                    │
-│  ⛔ 泳道图回流追踪：Step 1 和 Step 1a 中               │
-│  回到 Step 0 时，Todo 中 SWIMLANE_n 累计泳道图重采次数│
-│  自增。此回流不改变算子代码，只重新采集泳道图数据。    │
-│  ⚠️ 此回流在当前会话内执行，不触发 Task subagent 隔离。│
-│  只有 PHASE_SUMMARY 才触发 Task subagent 隔离。        │
-│                                                    │
-│  1. ⛔ 核使用率分析（合图前置条件）                   │
-│     ├─ 运行 analyze_core_usage.py 统计核使用率        │
-│     ├─ 核未满 → 调整 TileShape 用满核               │
-│     │   → 回到 阶段入口(Step 0) 重新采集泳道图数据    │
-│     │     ⛔ Todo: SWIMLANE_n 泳道图重采次数 +1       │
-│     └─ 核已满/TileShape已充分调整 → 进入 Step 1a    │
-│                                                    │
-│  1a. ⛔ 负载均衡优化（核填充后强制执行）             │
-│     ├─ 按 total(us) 排序识别瓶颈子图                │
-│     ├─ 瓶颈差距 > 20% → 调整 TileShape             │
-│     │   → 回到 阶段入口(Step 0) 重新采集泳道图数据   │
-│     │     ⛔ Todo: SWIMLANE_n 泳道图重采次数 +1      │
-│     └─ 瓶颈差距 < 20% 或 3轮无改善 → 进入 Step 2   │
-│                                                    │
-│  2. 合图调优                                       │
-│     ├─ AIC 核满 → L1Reuse / CubeNBuffer            │
-│     └─ AIV 核满 → VecNBuffer / sg_set_scope        │
-│                                                    │
-│  3. 调度策略调优                                   │
-│     └─ device_sched_mode 调整                      │
-│                                                    │
-│  ⛔ 见「退出条件详细定义」→ 退出，进入 PHASE_SUMMARY_S_n  │
-│                                                    │
-└────────────────────────────────────────────────────┘
-```
-
-#### PHASE_INCORE 核内调优流程（外循环第 n 轮）
-
-```
-┌────────────────────────────────────────────┐
-│        核内性能调优流程（外循环第n轮）       │
-├────────────────────────────────────────────┤
-│                                            │
-│  ⛔ 阶段入口: 按上方「通用原则」执行 Step 0+0a    │
-│     INCORE 特有: 基于 SWIMLANE_n 优化后的代码     │
-│                   Step 0a 额外: 找耗时最长 task    │
-│                                            │
-│  1. 定位瓶颈 task                          │
-│     └─ 通过泳道图找到耗时最长的 task       │
-│                                            │
-│  2. 分析 task 特征                         │
-│     ├─ 输入输出 Shape                      │
-│     ├─ Operation 类型                      │
-│     └─ 依赖关系                            │
-│                                            │
-│  3. 选择优化策略                           │
-│     ├─ 特殊 Shape → Vector 预处理          │
-│     ├─ 尾轴过小 → concat/transpose/reshape │
-│     ├─ 冗余依赖 → 增加冗余计算             │
-│     ├─ L2 Cache → Cache 策略优化           │
-│     └─ Operation → 检查实现/替代方案       │
-│                                            │
-│  ⛔ 见「退出条件详细定义」→ 退出，进入 PHASE_SUMMARY_I_n  │
-│                                            │
-└────────────────────────────────────────────┘
-```
+⛔ **SWIMLANE 特有**：泳道图回流（核使用率/负载均衡调整后的重采）在当前会话内执行，不触发 Task subagent 隔离。只有 PHASE_SUMMARY 才触发 Task subagent 隔离。
 
 ---
 
@@ -441,16 +313,6 @@ ITER_MODIFY 阶段，每次只允许修改一个优化参数：
 ❌ 同时改 BLOCK_SIZE + TileShape
 ❌ 同时改 unroll_list + stitch_max_num
 ❌ 同时加两个新参数
-```
-
-### 禁止跨阶段加载子技能
-
-```
-当前 PHASE 只能加载对应的子技能，禁止提前加载后续阶段的子技能：
-
-PHASE_FRONTEND   → 只能加载 tune-frontend
-PHASE_SWIMLANE_n → 只能加载 tune-swimlane
-PHASE_INCORE_n   → 只能加载 tune-incore
 ```
 
 ### ⛔ 禁止跨 PHASE 打包 Task subagent
@@ -784,223 +646,9 @@ todowrite  # 读取当前 Todo 清单
 
 ---
 
-## 阶段交接摘要模板（PHASE_SUMMARY_F / PHASE_SUMMARY_S / PHASE_SUMMARY_I）
-
-以下是 PHASE_SUMMARY 状态的执行规范。每个 PHASE 退出时进入对应的 PHASE_SUMMARY，⛔ 强制按以下顺序执行，禁止跳过任何一步。每个阶段的迭代上下文通过 Task subagent 隔离为结构化交接文档，确保后续阶段以干净上下文继续。
-
-### ⛔ 阶段交接流程（强制）
-
-PHASE 执行顺序完全确定，主 agent 只需按序列依次启动 Task subagent，每次检查达标即可：
-
-```
-固定序列：
-FRONTEND → SWIMLANE_1 → INCORE_1 → SWIMLANE_2 → INCORE_2 → SWIMLANE_3 → INCORE_3
-                                                                         ↓
-                                                                    全部完成 → S5_REPORT
-任意阶段达标 → 提前退出 → S5_REPORT
-```
-
-主 agent 的执行逻辑：
-
-```
-PHASE_QUEUE = [SWIMLANE_1, INCORE_1, SWIMLANE_2, INCORE_2, SWIMLANE_3, INCORE_3]
-
-FRONTEND 在主会话中执行（复用 S2+S3 的性能数据）。
-FRONTEND 完成后：
-
-for phase in PHASE_QUEUE:
-    1. 生成阶段交接摘要
-    2. 校验摘要完整性
-    3. 启动 Task(phase)，subagent_type="pypto-op-perf-tuner"
-       ⛔ 每个 Task 只执行一个 PHASE
-    4. Task 返回后，检查摘要中「达标状态」：
-       ✅已达标 → break（跳出循环，进入 S5_REPORT）
-       ❌未达标 → continue（启动下一个 PHASE 的 Task）
-
-循环结束（达标提前退出 或 队列耗尽）→ S5_REPORT
-```
-
-**步骤细化**：
-
-```
-每个 PHASE 的交接：
-    ↓
-步骤1: 生成阶段交接摘要（按下方模板）
-    ↓
-步骤2: 校验摘要完整性（按下方校验清单逐项确认）
-    ↓
-步骤3: 启动 Task subagent
-    - 使用 Task 工具，subagent_type 选择 "pypto-op-perf-tuner"
-    - ⛔ 每个 Task 只执行一个 PHASE，禁止跨 PHASE 打包
-    - 将阶段交接摘要作为 prompt 的核心上下文传入
-    ↓
-步骤4: Task 返回后检查达标状态
-    - 摘要中达标状态 = ✅已达标 → 结束循环，进入 S5_REPORT
-    - 摘要中达标状态 = ❌未达标 → 继续下一个 PHASE（回到步骤1）
-```
-
-禁止事项：
-❌ 只生成摘要不启动 Task subagent
-❌ 跳过摘要直接启动 Task
-❌ 不在 Task prompt 中传入完整摘要就继续
-❌ 在当前会话中直接执行 SWIMLANE/INCORE（必须通过 Task subagent 隔离）
-❌ 将多个 PHASE 打包进同一个 Task
-❌ Task 返回后不检查达标状态就继续或跳到 S5
-
-Task prompt 模板（两种变体）：
-
-**变体 A — 继续下一阶段（PHASE_SUMMARY_F → SWIMLANE / PHASE_SUMMARY_S → INCORE / PHASE_SUMMARY_I_{1,2}→SWIMLANE_{n+1}）**：
-"""
-你是 PyPTO 算子性能调优执行器。请执行以下任务：
-
-1. 加载下一阶段子技能：`[子技能路径]`
-2. 读取当前算子代码：`[算子文件路径]`
-3. 根据下方阶段交接摘要中的迭代统计，重建 Todo（状态机进度、当前迭代状态、迭代轮次记录）
-4. 根据下方阶段交接摘要，从 [下一阶段名] 开始继续调优
-
-## ⛔ 外循环状态（必须遵守）
-
-- 当前外循环轮次: [n] / 3
-- 当前执行阶段: [SWIMLANE_n / INCORE_n]
-- ⛔ 本 Task 只负责当前这一个 PHASE 的执行和退出
-- ⛔ 退出当前 PHASE 后，生成 PHASE_SUMMARY 摘要返回给主 agent，由主 agent 决定路由（继续下一 PHASE / 达标→S5 / 外循环耗尽→S5）
-- ⛔ 禁止在 Task 内部自行决定进入下一 PHASE 或进入 S5_REPORT
-
-## 调优执行规则（⛔ 必须遵守）
-
-- ITER 循环：ITER_START(选优化点) → ITER_MODIFY(改1个参数) → ITER_VERIFY(验精度) → ITER_MEASURE(测性能) → ITER_RECORD(更新Todo) → ITER_JUDGE(判退出)
-- 精度失败/性能回退 → ITER_ROLLBACK → ITER_RECORD → ITER_JUDGE
-- 单参数原则：每次只改一个参数
-- 每次回复最多推进 1-2 个子状态
-- 退出条件：性能达标 / 连续无提升达阈值(FRONTEND:5,SWIMLANE:8,INCORE:5) + 清单全标记 / 用户说停
-- 优化点必须来自调优点清单，禁止凭直觉选题
-- 每次 ITER_RECORD 后必须立即更新 Todo
-- SWIMLANE/INCORE 入口必须先独立采集性能数据
-
-## 阶段交接摘要
-[粘贴完整摘要]
-
-## 关键文件
-- 算子代码: [路径]
-- 测试命令: [命令]
-- 环境变量: [变量列表]
-
-请从 [下一阶段名] 的入口开始执行（SWIMLANE/INCORE 入口需先独立采集性能数据）。
-执行完成后，返回 PHASE_SUMMARY 摘要（含性能数据、已采纳/失败优化、迭代记录、达标状态），由主 agent 进行路由决策。
-"""
-
-**变体 B — 结束调优（PHASE_SUMMARY_F / PHASE_SUMMARY_S_n / PHASE_SUMMARY_I_n 达标→S5_REPORT）**：
-"""
-你是 PyPTO 性能调优报告生成器。请执行以下任务：
-
-1. 根据下方阶段交接摘要，生成最终调优报告
-
-## 报告生成步骤
-
-1. 更新 Todo：将所有状态（S1-S5）标记为 ✅
-2. 输出最终状态看板（目标达成、优化总结、性能趋势）
-3. 填充最终调优报告模板（性能对比、已采纳/已失败优化、最佳配置、调优记录）
-4. 保存报告到算子目录下：`{op_name}_tuning_report.md`
-5. 还原 debug_options：将 `@pypto.frontend.jit` 中的 `debug_options` 移除
-
 ## 阶段交接摘要
 
-[粘贴完整摘要]
-
-## 关键文件
-
-- 算子代码: [路径]
-- 测试命令: [命令]
-- 环境变量: [变量列表]
-
-### 隔离规则（Task subagent 信息传递）
-
-Task subagent 启动时，遵循以下信息传递规则：
-
-| 信息类别 | 保留策略 | 说明 |
-|---------|---------|------|
-| 已采纳优化 | ✅ 完整保留 | 包含具体修改和代码位置 |
-| 已失败优化 | ✅ 完整保留 | 避免重复尝试 |
-| 约束与发现 | ✅ 完整保留 | 后续阶段必须遵守 |
-| 当前代码配置 | ✅ 完整保留 | 需基于最新代码继续修改 |
-| 性能趋势 | ✅ 浓缩保留 | 只保留趋势摘要，不保留每轮详细日志 |
-| 中间调试日志 | ❌ 丢弃 | 如精度失败时的完整报错堆栈 |
-| 失败代码完整内容 | ❌ 丢弃 | 已回退的代码不再需要 |
-| 冗余性能对比细节 | ❌ 丢弃 | 只保留最终结果 |
-| 子技能完整内容 | ❌ 不重新加载 | 下一阶段加载新的子技能 |
-
-### 摘要校验清单
-
-**⛔ 生成摘要后必须逐项确认，确认后立即启动 Task subagent：**
-
-- [ ] 性能数据是否与实际一致？（执行时间、利用率、气泡率）
-- [ ] 已采纳优化是否遗漏？（核对 Todo List 中的 ✅ 项）
-- [ ] 已失败优化是否遗漏？（核对 Todo List 中的 ❌ 项）
-- [ ] 约束与发现是否遗漏？（检查调优过程中的关键发现）
-- [ ] 代码配置是否是最新的？（包含所有已采纳的修改）
-- [ ] ⛔ Todo 完整性检查：
-  - Todo 迭代轮次记录表中，所有已结束的轮次状态列是否均已填写 ✅ 或 ❌？
-  - 阶段状态（S1-S5）是否与当前实际进度一致？
-  - 当前迭代状态中的"当前轮次""连续无提升""失败累计"是否与轮次记录表一致？
-  - ❌ 任何一项不一致 → **禁止进入 Task subagent！必须先修正 Todo**
-- [ ] ⛔ 校验通过后，是否已启动 Task subagent？（未启动禁止进入下一阶段）
-- [ ] ⛔ 达标状态校验（Task 返回后检查）：
-  - 摘要中"达标状态"为 ✅已达标 → 进入 S5_REPORT
-  - 摘要中"达标状态"为 ❌未达标 → 继续启动下一个 PHASE 的 Task
-
-### 摘要模板
-
-```markdown
-## 📋 阶段交接摘要：[阶段名] → [下一阶段名/完成]
-
-### 0. 执行进度
-- 已完成阶段: [FRONTEND, SWIMLANE_1, ...]
-- 当前 PHASE: [刚完成的 PHASE 名]
-- 队列剩余: [INCORE_1, SWIMLANE_2, ...]（按序列）
-
-### 1. 性能状态
-- 基准: [值] us → 当前: [值] us (累计提升 [%]%)
-- 本阶段提升: [%]%
-- 核心利用率: [%]%
-- 气泡率: [%]%
-- 调优目标: [目标] us（差距: [%]%）
-- 达标状态: ✅已达标 / ❌未达标
-
-### 2. 已采纳优化
-| # | 轮次 | 优化项 | 修改内容 | 收益 | 代码位置 |
-|---|------|--------|---------|------|---------|
-| 1 | F-1 | BLOCK_SIZE | 128→64 | -13.6% | file:line |
-
-### 3. 已失败优化（⛔ 禁止重试）
-| # | 轮次 | 尝试项 | 失败原因 | 已回退 |
-|---|------|--------|---------|--------|
-| 1 | F-2 | unroll_list | 性能回退+8.6% | ✅ |
-
-### 4. 约束与发现
-- [约束/发现描述]
-
-### 5. 当前关键代码配置
-```python
-@pypto.frontend.jit(
-    runtime_options={...},
-    pass_options={...},
-    debug_options={"runtime_debug_mode": 1}
-)
-BLOCK_SIZE = [当前值]
-TileShape配置 = [当前值]
-```
-
-### 6. 迭代统计
-- 总轮次: N 轮
-- 成功: X 轮 (X%)
-- 失败: Y 轮 (Y%)
-- 性能曲线: [持续下降 / 先降后平 / 波动]
-
-### 7. 下一阶段建议
-- 当前瓶颈: [描述]
-- 建议方向: [描述]
-- 需关注的性能文件: [路径]
-```
+> ⛔ 执行 PHASE_SUMMARY 前必须先阅读 [references/phase-handoff.md](references/phase-handoff.md)。该文档包含阶段交接流程、Task prompt 模板（变体 A/B）、隔离规则、摘要校验清单、摘要模板等**不可跳过的操作步骤**。
 
 ---
 
@@ -1031,8 +679,4 @@ TileShape配置 = [当前值]
    - ITER_RECORD 记录失败（标记 ❌）
    - ITER_JUDGE 判断是否继续
 
-⛔ 禁止：
-- 花大量时间修复精度问题（精度问题是实现问题，不是调优问题）
-- 修正次数超过 1 次
-- 不回退就继续下一个优化点
-```
+⛔ 精度问题是实现问题，不是调优问题。禁止花大量时间修复，禁止不回退就继续下一个优化点。

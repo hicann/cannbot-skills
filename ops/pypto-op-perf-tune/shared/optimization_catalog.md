@@ -462,7 +462,7 @@
 - **优先级**: ⭐⭐ P1（融合算子中效果显著）
 - **适用条件**: 算子包含大型权重矩阵（matmul 权重），或有过大的输出 Tensor
 - **API**: `tensor.set_cache_policy(pypto.CachePolicy.NONE_CACHEABLE, True)`
-- **API 文档**: `pypto/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`
+- **API 文档**: `https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`
 - **检查方法**: 分析算子中所有权重矩阵的访问模式，识别只读一次且不复用的大 Tensor
 - **操作指南**: tune-incore SKILL.md §2
 - **调优策略**:

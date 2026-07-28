@@ -7,12 +7,16 @@
 - 可用的输出写回方式包括 `out[:] = ...`、`out.move(...)`、`pypto.assemble(..., out)`；`out = ...` 只会绑定局部变量，不会修改出参。
 - JIT 函数中的张量参数必须写成 `pypto.Tensor([...], dtype)` 类型注解。
 - JIT 函数中张量参数在前，非张量参数在后。
-- 动态轴必须在类型注解中标成 `pypto.DYNAMIC` 或 `pypto.DYN`。**禁止使用 `pypto.Tensor()` / `pypto.Tensor([], dtype)` 等空注解**（门禁 OL31 会直接判 FAIL）。
+- 动态轴必须在类型注解中标成 `pypto.DYNAMIC` 或 `pypto.DYN`。**禁止使用 `pypto.Tensor()` / `pypto.Tensor([], dtype)` 等空注解**。
 - 标成 `pypto.DYNAMIC` 的轴变化时无需重编译；标成 `pypto.STATIC` 的轴变化会触发重编译。
-- DESIGN.md 声明了动态轴时，JIT 函数内必须包含遍历动态轴的 `pypto.loop(...)` 调用，trip count 必须是 `tensor.shape[i]`、函数参数或其符号表达式；**禁止**用 `pypto.loop(1)` / 常量 trip count 的空循环冒充（门禁 OL43）。
+- DESIGN.md 声明了动态轴时，JIT 函数内必须包含遍历动态轴的 `pypto.loop(...)` 调用，trip count 必须是 `tensor.shape[i]`、函数参数或其符号表达式；**禁止**用 `pypto.loop(1)` / 常量 trip count 的空循环冒充。
 - 固定整数轴只接受该固定大小；传入其他大小会报错（runtime_debug_mode=3 开启校验时）。
 - `...` 表示剩余轴按静态轴处理。
 - `pypto.tensor(...)` 创建的 Tensor 是未初始化随机值；使用前必须初始化。
+- **尾轴对齐**（vector-sensitive 路径的通用约束）：
+  - 必须遵守每个 op 在最后一维上的对齐要求（典型为 32B 对齐：bf16/fp16 → 16 元素，fp32 → 8 元素；具体值见各 API 文档）。
+  - 如果逻辑张量"窄"到无法自然对齐，只在**回到语义的映射明确**的前提下使用对齐友好的表示（如把窄 tensor padding 到对齐宽度，并记录原始有效宽度）。
+  - 需要查具体 op 的对齐规则时：用 `pypto-docs-search` 搜索该 op 的 API 文档 `pypto-<op_name>.md`。
 
 ## 2. 基础类型与前端基础设施
 
@@ -20,7 +24,6 @@
 
 - 构造顺序固定为 `pypto.Element(dtype, value)`。
 - 需要固定标量 dtype 时，显式使用 `Element`。
-- `pypto.div`、`pypto.mul`、`pypto.add`、`pypto.sub` 等算术 API 不支持 `pypto.Element` 作为标量参数，传入会双重包装报错。这些 API 已内置 `float`/`int`→`Tensor` 类型转换，直接使用 Python 常量即可。
 
 ### `pypto.SymbolicScalar`
 
@@ -37,11 +40,18 @@
 - `dtype=None` 时按输入 tensor 的 dtype 推导；需要固定 PyPTO dtype 时显式传 `dtype`。
 - 显式标记 `format` 时，传入的 torch tensor 必须与声明的 `format` 一致。
 
+**算子开发不使用 `from_torch`。** 本仓库算子强制走 JIT 路径：`@pypto.frontend.jit` 装饰的 kernel 直接接收**原始 `torch.Tensor`**，转换在 kernel 内部（`LaunchKernelTorch` → `TorchTensorConverter`）完成。host wrapper 调用 JIT 入口时直接传原始 torch tensor，不要先 `from_torch`。
+
+- 反例：`your_op_kernel_npu(pypto.from_torch(x), output)` → 运行时报 `RuntimeError: Input tensor is not a valid torch tensor type`（`torch_tensor_converter.cpp` 的 `ParseTensorData` 要求是 torch tensor；`pypto.Tensor.data_ptr` 是 int 而非 callable）。
+- 正例：`your_op_kernel_npu(x, output)`，其中 `x` 是原始 torch tensor。
+- 准备输入数据直接用 `torch.randn(...)` 等原始 torch 张量；kernel 内部需要新建张量时用 `pypto.zeros / pypto.ones / pypto.full`。
+
 ### Tile 配置
 
 - `pypto.set_vec_tile_shapes(...)` 的每个维度都必须大于 0，参数个数最多 4 个。
 - TileShape 维度数必须和相关输出维度匹配；否则会在扩图阶段直接报错。
 - `pypto.set_cube_tile_shapes(...)` 是 `pypto.matmul` 的前置条件。
+- 具体 tile 值见 DESIGN.md §3.2.5；tile 推导规则见 skill `pypto-op-design` SKILL.md "第 2 轮：Tiling 推导" + quick_ref.md。
 
 ## 3. 控制流
 
@@ -127,11 +137,14 @@
 
 ### 4.8 Shape / 视图 / 拼接
 
+> **通用警告**：不要假设 PyTorch 的 padding / concat / layout 语义可以直接 map 到 PyPTO。当 layout / pad 操作脆弱时：
+> - 优先用**显式 reshape / concat / 对齐**的形式重写。
+> - 保持 golden 与 kernel 在每个 layout 步骤上的映射清晰可对照。
+
 - `reshape`：`inplace=True` 时，输入输出必须是当前 loop 的输入输出，且输出不能作为整个 Function 的输出。
 - `transpose`：4D 只支持部分轴交换组合，5D 只支持 `(3,4)`。
 - `view`：`offsets` 和 `valid_shape` 必须落在原 Tensor 的 shape 范围内。
 - `view`：当有效 shape 依赖别的 Tensor 标识、框架无法自动推导时，必须显式传 `valid_shape`。
-- `reshape`：含动态维度时框架无法自动推导有效形状，必须显式传 `valid_shape`。
 - `unsqueeze`：返回共享数据的 view；`dim` 必须满足 `[-input.dim-1, input.dim]`。
 - `concat`：输入 tensor 数量要求 `2 <= len(tensors) <= 128`；除拼接轴外其余维度必须完全一致。
 - `clone`：复制出的 Tensor 与输入保持同 shape、同 dtype。
@@ -155,7 +168,7 @@
 > **通用原则 —— "loop 切 tile，API 只吃静态"**
 >
 > 当算子需要动态轴，但所使用的 API 不支持接收含 `DYNAMIC` 维度的 tensor 时，统一使用以下策略，**不限于 matmul**，同样适用于任何在编译期需要 concrete shape 的计算 API。
-> 
+>
 > **如何识别 API 是否支持动态 shape**：运行时报 `dim[i] = -1, must be > 0`、`Cannot convert symbols to int`、`Not concrete value` 等错误，或文档明确说明"shape 必须在编译期确定"，均表明该 API 不支持动态 shape。
 >
 > **处理步骤**：
@@ -201,7 +214,7 @@ Python `[]` 切片语法内部会对 index 做 `int()` 转换，因此也不能�
 
 ### 5.3 正确模式："2D reshape + 嵌套 loop + concrete tile"
 
-参考 `models/glm_v4_5/glm_attention.py`：
+参考实现（用 `pypto-docs-search` 搜索 attention 类算子范本）：
 
 ```
 4D [B, N, S, D]
@@ -225,7 +238,7 @@ Python `[]` 切片语法内部会对 index 做 `int()` 转换，因此也不能�
 
 ```python
 acc = pypto.tensor([TILE, D], pypto.DT_FP32, "acc")
-for idx in pypto.loop(n, name="LOOP", idx_name="idx", unroll_list=[4, 2, 1]):
+for idx in pypto.loop(n, name="LOOP", idx_name="idx", unroll_list=[1]):  # Stage 6 之前单一值
     tile = compute_something(...)
     if pypto.is_loop_begin(idx):
         acc[:] = tile          # 首次迭代：初始化
@@ -238,6 +251,9 @@ for idx in pypto.loop(n, name="LOOP", idx_name="idx", unroll_list=[4, 2, 1]):
 
 - `pypto.tensor()` 创建的是未初始化随机值，**必须在 is_loop_begin 中初始化**
 - `unroll_list` 对内层循环使用，让编译器为不同迭代次数生成优化代码
+- **Stage 6 之前 `unroll_list` 只能含单一值（默认 `[1]`）**：直接照搬 DESIGN.md §4 中
+  Designer 选定的单一值，**不要自行扩成多值**（如 `[4, 2, 1]`）。多值会触发编译路径爆炸、
+  拖慢编译并使开发流程超时；多值展开调优仅允许在 Stage 7 optimization 进行
 
 ### 5.5 梯度算子的两趟设计模式
 
@@ -286,8 +302,8 @@ q_2d = q   # 已经是 2D，不需要 reshape
 3. 把所有动态轴显式标成 `pypto.DYNAMIC` 或 `pypto.DYN`；禁止用 `pypto.Tensor()` 空注解。声明了动态轴的 kernel 必须含真实 `pypto.loop`（trip count 为符号表达式，不能是常量），不允许 `pypto.loop(1)` 这类空循环。
 4. 把依赖 Python 标量隐式 dtype 映射的写法改成显式 `Element` 或显式 dtype 转换。
 5. 把多轴广播改写成文档支持的单轴广播或等价拆分写法。
-6. 检查 TileShape 维度数、最后一维对齐和相关算子的 Tile 约束，再执行编译。
-7. 涉及动态轴的 `pypto.view` / `pypto.reshape` 必须显式传入 `valid_shape`。
+6. 检查 TileShape 维度数、最后一维对齐和相关算子的 Tile 约束；tile 值按 DESIGN.md §3.2.5 设置，再执行编译。
+7. 无法自动推导动态 `view` 的 `valid_shape` 时，显式传入 `valid_shape`。
 8. 避免同一 Tensor 在同一图里既被读取又被 `assemble` 回写。
 9. 多动态轴算子必须采用 "2D reshape + 嵌套 loop + concrete tile" 模式（见第 5 节），不要尝试在 4D DYN tensor 上直接 matmul。
 10. `pypto.view` 的 `shape` 参数只接受 Python int；用 SymbolicScalar 做 offset 和 valid_shape，不要混入 shape。

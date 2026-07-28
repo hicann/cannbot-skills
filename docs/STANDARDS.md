@@ -219,7 +219,7 @@ skills:
 
 查看 `plugins-official/` 下各 Team 目录中的 Agent 实现：
 - `ops-direct-invoke/agents/` - 直调开发子 Agent（architect / developer / reviewer）
-- `pypto-op-orchestrator/agents/` - PyPTO 开发子 Agent（analyst / developer / perf-tuner）
+- `pypto-op-orchestrator/agents/` - PyPTO 开发子 Agent（planner / mathematician / architect / designer / coder / verifier / debugger / optimizer；编排者以 AGENTS.md 注入）
 - `ops-code-reviewer/agents/` - 代码检视子 Agent
 
 ---

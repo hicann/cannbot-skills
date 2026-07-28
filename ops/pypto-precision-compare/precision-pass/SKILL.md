@@ -1,6 +1,6 @@
 ---
 name: precision-pass
-description: Pass精度校验子技能。开启PreCheck/PostCheck进行全链路Pass校验，通过pass校验定位报错Pass，使用pass_compare逐Op对比定位具体问题Op，支持动态shape上板数据打印验证和IR图分析辅助定位。 当需要通过 Pass 校验（PreCheck/PostCheck）定位报错 Pass 或具体问题 Op 时使用此技能。
+description: Pass精度校验子技能。开启PreCheck/PostCheck进行全链路Pass校验，通过pass校验定位报错Pass，使用pass_compare逐Op对比定位具体问题Op，支持动态shape上板数据打印验证。适用于 Pass 精度校验并定位问题 Op 时。
 ---
 
 ## 快速诊断
@@ -15,7 +15,7 @@ description: Pass精度校验子技能。开启PreCheck/PostCheck进行全链路
 ```
 精度问题 → 查看验证日志 → 按错误码选择处理流程：
 ├─ 0xB4001U (tensor_graph) → 前端问题 → precision-verify
-├─ 0xB200FU (OP报错) → IR图分析 → 动态shape则打印验证
+├─ 0xB200FU (OP报错) → 检查 IR 图 → 动态shape则打印验证
 ├─ 0xB4001U + Pass名 → Pass精度 → PreCheck/PostCheck
 └─ 无报错 → 二分前端 → precision-binary-search
 ```
@@ -30,8 +30,7 @@ description: Pass精度校验子技能。开启PreCheck/PostCheck进行全链路
 4. [错误码速查表](#错误码速查表)
 5. [问题处理流程](#问题处理流程)
 6. [打印上板信息](#打印上板信息)
-7. [IR图分析](#ir图分析)
-8. [注意事项](#注意事项)
+7. [注意事项](#注意事项)
 
 ---
 
@@ -148,7 +147,7 @@ python3 your_test_case.py
 
 错误码定义：`framework/src/interface/interpreter/verify_error.h`
 
-> **判断标准**：只看 CodegenPreproc Pass（最后一个 Pass）是否通过。中间 Pass 报错（如 ReplaceTensor、SplitK 等出现 `VERIFY_RESULT_MISMATCH`）忽略，只要 CodegenPreproc PASS 即表示精度正确。只有 CodegenPreproc FAIL 时才需要用 `pass_compare.py` 进一步定位。
+> **判断标准**：只看 CodegenPreproc Pass（最后一个 Pass）是否通过。中间 Pass 报错（如 ReplaceTensor、ProcessAtomic 等出现 `VERIFY_RESULT_MISMATCH`）忽略，只要 CodegenPreproc PASS 即表示精度正确。只有 CodegenPreproc FAIL 时才需要用 `pass_compare.py` 进一步定位。
 
 ---
 
@@ -173,7 +172,7 @@ python3 your_test_case.py
 
 **2.1 OP报错**：对比 Before/After IR，确认是否误报。
 
-动态shape场景：IR显示符号变量（如 `sym_15_dim_0`）→ 参考 [docs/trouble_shooting/machine.md](../../../../docs/zh/trouble_shooting/machine.md) 进行排查。
+动态shape场景：IR显示符号变量（如 `sym_15_dim_0`）→ 参考 [docs/trouble_shooting/machine.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/trouble_shooting/machine.md) 进行排查。
 
 **2.2 精度问题**：
 
@@ -254,17 +253,24 @@ def your_kernel(...)
 ```
 恢复`tile_fwk_config.json`文件中pre_check，post_check配置
 
-### 情况三：Pass级别都Pass，精度仍有问题 → 检查同步问题
+### 情况三：Pass级别都Pass，精度仍有问题 → 检查同步/VF融合问题
 
-如果所有 Pass 校验都通过但算子精度仍有问题，可能是 pipeline 同步不及时导致的数据竞争。
+如果所有 Pass 校验都通过但算子精度仍有问题，可能是 pipeline 同步不及时导致的数据竞争或 VF 融合问题导致。
 
-**快速验证同步问题**：
+**快速验证同步/VF融合问题**：
 
 1. 修改 `framework/src/passes/block_graph_pass/insert_sync.h`，将 `bool enableDebug_{false}` 改为 `bool enableDebug_{true}`
 2. 重新编译安装 pypto：`python3 -m pip install . --verbose`
-3. 重新执行算子。若精度通过 → 说明数据同步不足导致精度失败，需定位具体缺少同步的位置
+3. 重新执行算子。若精度通过 → 说明是同步/VF融合问题，需进一步定位具体原因，恢复`bool enableDebug_{false}`参数
+4. 检查是否为 VF 融合问题（仅针对 A5）：
+   
+   **前置检查**：执行 `npu-smi info` 查看设备型号。若结果为 `Ascend950`，则继续以下步骤；否则跳过步骤4，默认为同步问题。
+   
+   - 修改 `framework/src/interface/configs/tile_fwk_config.json`，将 `"enable_vf": true` 改为 `"enable_vf": false`
+   - 重新编译安装 pypto：`python3 -m pip install . --verbose`
+   - 重新执行算子。若精度通过 → 说明是 VF 融合问题
 
-若确认数据同步导致精度失败，执行以下定位流程：
+若确认为同步问题导致精度失败，执行以下定位流程：
 
 详细步骤请参考：**[references/pipe_all.md](references/pipe_all.md)**
 
@@ -281,7 +287,7 @@ def your_kernel(...)
 
 用于：打印上板tensor数据、验证动态shape/offset值、定位AICORE执行异常。
 
-详细排查方法请参考：**[docs/trouble_shooting/machine.md](../../../../docs/zh/trouble_shooting/machine.md)**
+详细排查方法请参考：**[docs/trouble_shooting/machine.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/trouble_shooting/machine.md)**
 
 ### 打印环境配置
 
@@ -322,28 +328,12 @@ def your_kernel(...)
 | Offset值 | `AicoreLogF` | 动态offset实际值 |
 ---
 
-## IR图分析
-
-判断误报、辅助定位。详见 `pypto/.agents/skills/pypto-pass-error-locator/references/ir-analysis-guide.md`
-
-```bash
-# 查询OP详情
-python3 pypto/.agents/skills/pypto-pass-error-locator/scripts/get_op_info.py \
-    --ir-file <IR文件> --op-magic <ID>
-
-# 列出所有OP
-python3 pypto/.agents/skills/pypto-pass-error-locator/scripts/get_op_info.py \
-    --ir-file <IR文件> --list-ops
-```
-
----
-
 ## 注意事项
 
 1. Pass精度判断：只看 CodegenPreproc 是否通过
 2. tensor_graph FAIL → 调用 precision-verify
 3. 无报错但精度异常 → 调用 precision-binary-search
-4. 动态shape验证/AICORE异常排查：参考 [docs/trouble_shooting/machine.md](../../../../docs/zh/trouble_shooting/machine.md)
+4. 动态shape验证/AICORE异常排查：参考 [docs/trouble_shooting/machine.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/trouble_shooting/machine.md)
 5. 打印配置：`fixed_output_path=true`, `force_overwrite=false`
 6. 打印限制：元素数量 ≤ 80
 7. 配置备份：修改配置前建议备份原文件
@@ -355,5 +345,4 @@ python3 pypto/.agents/skills/pypto-pass-error-locator/scripts/get_op_info.py \
 
 | 文档 | 内容 |
 |------|------|
-| [docs/trouble_shooting/machine.md](../../../../docs/zh/trouble_shooting/machine.md) | MACHINE组件错误码与排查指南 |
-| [pypto-aicore-error-locator](../../pypto-aicore-error-locator/SKILL.md) | AICORE错误定位Skill |
+| [docs/trouble_shooting/machine.md](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/trouble_shooting/machine.md) | MACHINE组件错误码与排查指南 |

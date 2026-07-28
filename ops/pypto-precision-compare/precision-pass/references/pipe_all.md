@@ -167,7 +167,7 @@ cat kernel_aicore/<cce_file>
 定位到问题代码行后，使用 locate_source_line.py 映射到前端代码：
 
 ```bash
-python3 pypto/.agents/skills/pypto-aicore-error-locator/scripts/locate_source_line.py \
+python3 skills/pypto-precision-compare/precision-pass/scripts/locate_source_line.py \
     <cce_file> \
     <program_json_path> \
     <problem_line_number>

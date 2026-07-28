@@ -9,6 +9,8 @@ description: PyPTO 算子核内性能调优技能。通过分析单 task 的实�
 
 核内性能调优通过分析单 task 的实现指令及 operation，完成核内的性能调优。适用于深度性能调优后仍需要进一步优化的场景。
 
+> 资料获取统一使用 skill `pypto-docs-search`：按需搜索算子参考实现等文件/目录/内容。
+
 ## ⛔ 前置条件（强制门控）
 
 1. **完成深度性能调优**：泳道图分析和合图调优已完成
@@ -61,7 +63,7 @@ def matmul_kernel(a, b, out):
 tensor.set_cache_policy(pypto.CachePolicy.NONE_CACHEABLE, True)
 ```
 
-- **API 文档**：`pypto/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`
+- **API 文档**：`https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`
 - **当前 Python 可用策略**：仅 `CachePolicy.NONE_CACHEABLE`（C++ 层还有 `PREFETCH`，但 Python API 未暴露）
 - **效果**：标记后该 Tensor 的数据访问将绕过 L2 Cache，直接访问主存（HBM）
 
@@ -281,9 +283,8 @@ A: 不会。冗余计算是指增加一些不影响最终结果的计算（如�
 
 ## 参考资料
 
-- [set_cache_policy API 文档](../../../../docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md)
-- [CachePolicy 数据类型](../../../../docs/zh/api/datatype/CachePolicy.md)
-- [性能调优文档](../../../../docs/zh/tutorials/debug/performance.md)
-- [GLM MoE Fusion 案例](../../../../models/glm_v4_5/glm_moe_fusion.py)
-- [MLA Prolog Quant 案例](../../../../models/deepseek_v32_exp/mla_prolog_quant_impl.py)
+- [set_cache_policy API 文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md)
+- [CachePolicy 数据类型](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/datatype/CachePolicy.md)
+- [性能调优文档](https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/tutorials/debug/performance.md)
+- 算子参考实现案例（moe / quant 类等）：用 `pypto-docs-search` 搜索算子参考实现
 - [典型案例库](cases/README.md)

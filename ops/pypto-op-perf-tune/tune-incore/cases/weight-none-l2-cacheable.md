@@ -8,7 +8,7 @@ Pangu 7B 单 Kernel 融合 Layer 算子，包含 7 个 matmul（QKV proj、Q×K^
 
 ## 核心原则
 
-1. **权重矩阵只读一次，不占用 L2 Cache**：类似 weight 这种常量，算子仅从内存读取一次、不复用，没有进 L2 的必要（参考 `pypto/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`）
+1. **权重矩阵只读一次，不占用 L2 Cache**：类似 weight 这种常量，算子仅从内存读取一次、不复用，没有进 L2 的必要（参考 `https://raw.gitcode.com/cann/pypto/raw/master/docs/zh/api/tensor/pypto-Tensor-set_cache_policy.md`）
 2. **融合算子中应批量设置**：多个大权重共存时，单独绕过某个权重会打破 L2 Cache 平衡，导致其他权重访问变慢；同时全部绕过才能释放 L2 容量给真正需要的数据
 3. **输入/输出 Tensor 不适合 NONE_CACHEABLE**：输入数据量小、硬件预取已足够；输出需写回主存，绕过 L2 增加写回延迟
 

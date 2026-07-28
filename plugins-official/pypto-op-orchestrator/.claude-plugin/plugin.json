@@ -1,7 +1,7 @@
 {
   "name": "pypto-op-orchestrator",
-  "description": "PyPTO 算子端到端开发 Team。7 阶段状态机编排，含 3 个 Subagent，支持断点续跑和失败恢复。",
-  "version": "1.1.9",
+  "description": "PyPTO 算子端到端开发 Team。9 智能体状态机编排（planner/mathematician/architect/designer/coder/verifier/debugger/optimizer），7 阶段驱动，含阶段门禁与状态机，支持断点续跑和失败恢复。",
+  "version": "1.2.0",
   "author": {
     "name": "CANNBot"
   },
@@ -12,8 +12,13 @@
     "pypto-op-orchestrator-skills"
   ],
   "agents": [
-    "./agents/pypto-op-analyst.md",
-    "./agents/pypto-op-developer.md",
-    "./agents/pypto-op-perf-tuner.md"
+    "./agents/pypto-op-planner.md",
+    "./agents/pypto-op-mathematician.md",
+    "./agents/pypto-op-architect.md",
+    "./agents/pypto-op-designer.md",
+    "./agents/pypto-op-coder.md",
+    "./agents/pypto-op-verifier.md",
+    "./agents/pypto-op-debugger.md",
+    "./agents/pypto-op-optimizer.md"
   ]
 }

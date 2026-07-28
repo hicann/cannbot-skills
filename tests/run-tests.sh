@@ -441,9 +441,9 @@ analyze_changes() {
 
         # Detect agent changes
         # Patterns: agents/<name>.md (flat layout)
-        if [[ "$file" =~ /agents/([^/.]+)\.md$ ]] && [[ ! "$file" =~ /AGENTS\.md$ ]]; then
+        if [[ "$file" =~ /agents/([^/.]+)\.md$ ]]; then
             local agent_name="${BASH_REMATCH[1]}"
-            if [ -n "$agent_name" ]; then
+            if [[ "$file" != */AGENTS.md ]] && [ -n "$agent_name" ]; then
                 CHANGED_AGENTS["$agent_name"]=1
                 echo -e "  ${BLUE}[AGENT]${NC} $agent_name <- $file"
             fi

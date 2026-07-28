@@ -1,6 +1,6 @@
 ---
 name: precision-verify
-description: PyPTO 算子精精度工具对比法。使用 pypto.pass_verify_save 和 torch.save 保存中间结果到文件，然后使用对比工具分析。专注：插入检查点 → 运行测试 → 对比分析 → 定位首个失败点。 当需要用 pass_verify_save/torch.save 保存中间结果并对比定位精度问题时使用此技能。
+description: PyPTO 算子精精度工具对比法。使用 pypto.pass_verify_save 和 torch.save 保存中间结果到文件，然后使用对比工具分析。专注：插入检查点 → 运行测试 → 对比分析 → 定位首个失败点。适用于用精度工具对比定位首个失败点时。
 ---
 
 # 精度工具对比法（文件保存）

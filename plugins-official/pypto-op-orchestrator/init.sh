@@ -111,10 +111,15 @@ VERSION="1.0.0"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
-# Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="pypto-intent-understand pypto-api-explore pypto-op-design pypto-op-develop pypto-precision-debug pypto-precision-compare pypto-op-perf-tune pypto-golden-generate"
-# Agent whitelist (shell pattern) - uses local agents/
-INCLUDED_AGENT_PATTERN="pypto-op-*"
+# Skill whitelist (space-separated list) - references shared ops.
+# PyPTO 算子生成团队 skill 集（17）：编排手册 + Stage 1-7 各阶段 skill + 支撑 skill。
+INCLUDED_SKILLS="pypto-orchestration-manual pypto-intent-understand pypto-op-plan pypto-api-explore pypto-docs-search pypto-golden-generate pypto-op-design pypto-op-construct pypto-op-develop pypto-op-verify pypto-op-review pypto-precision-compare pypto-precision-debug pypto-general-debug pypto-op-perf-tune pypto-op-knowledge pypto-memory-template"
+# Agent whitelist (shell pattern) - uses local agents/. pypto-* catches the 8 stage
+# subagents.
+INCLUDED_AGENT_PATTERN="pypto-*"
+# Agent excluded from the agents/ install — it is the primary orchestrator and is
+# instead installed as AGENTS.md / CLAUDE.md in the project root.
+EXCLUDED_AGENT="pypto-op-orchestrator"
 
 show_banner() {
   echo ""
@@ -320,6 +325,7 @@ for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
     name=$(basename "$agent_entry")
     base="${name%.md}"
     [[ "$base" != $INCLUDED_AGENT_PATTERN ]] && continue
+    [ -n "$EXCLUDED_AGENT" ] && [ "$base" = "$EXCLUDED_AGENT" ] && continue
     AGENTS_TO_INSTALL="$AGENTS_TO_INSTALL $name"
     AGENT_COUNT=$((AGENT_COUNT + 1))
 done
@@ -439,6 +445,7 @@ if [ "$TOOL" = "opencode" ]; then
         base_name="${name%.md}"
         # Only clean agents that match whitelist pattern
         [[ "$base_name" != $INCLUDED_AGENT_PATTERN ]] && continue
+        [ -n "$EXCLUDED_AGENT" ] && [ "$base_name" = "$EXCLUDED_AGENT" ] && continue
         target="$CANNBOT_DIR/agents/$name"
         [ -e "$target" ] || [ -L "$target" ] && rm -rf "$target"
     done
@@ -448,6 +455,7 @@ if [ "$TOOL" = "opencode" ]; then
         name=$(basename "$agent_entry")
         base_name="${name%.md}"
         [[ "$base_name" != $INCLUDED_AGENT_PATTERN ]] && continue
+        [ -n "$EXCLUDED_AGENT" ] && [ "$base_name" = "$EXCLUDED_AGENT" ] && continue
         ln -sfn "$(realpath "$agent_entry")" "$CANNBOT_DIR/agents/$name"
         agent_count=$((agent_count + 1))
     done
@@ -520,7 +528,7 @@ elif [ "$TOOL" = "claude" ]; then
         ok "CLAUDE.md"
     fi
 else
-    # Cursor: AGENTS.md in project root (same as OpenCode)
+    # Trae / Cursor / Copilot / CodeArts: AGENTS.md in project root
     if [ "$LEVEL" = "project" ]; then
         config_target="$INSTALL_BASE/AGENTS.md"
     else
@@ -557,7 +565,7 @@ if [ "$TOOL" = "opencode" ]; then
     # OpenCode: skills/ agents already at auto-scan paths, no extra discovery needed
     ok "Auto-scan: skills/, agents/"
 else
-    # Claude/Trae/Cursor/Copilot: create per-skill discovery symlinks (with filter, from shared ops)
+    # Claude/Trae/Cursor/Copilot/CodeArts: create per-skill discovery symlinks (with filter, from shared ops)
     DISCOVERY="$CONFIG_ROOT/skills"
 
     # Pre-clean existing skills (only whitelist items)
@@ -600,6 +608,7 @@ else
         base="${name%.md}"
         # Only clean agents that match whitelist pattern
         [[ "$base" != $INCLUDED_AGENT_PATTERN ]] && continue
+        [ -n "$EXCLUDED_AGENT" ] && [ "$base" = "$EXCLUDED_AGENT" ] && continue
         target="$AGENT_DISCOVERY/$name"
         [ -e "$target" ] || [ -L "$target" ] && rm -rf "$target"
     done
@@ -610,6 +619,7 @@ else
         name=$(basename "$agent_entry")
         base="${name%.md}"
         [[ "$base" != $INCLUDED_AGENT_PATTERN ]] && continue
+        [ -n "$EXCLUDED_AGENT" ] && [ "$base" = "$EXCLUDED_AGENT" ] && continue
         target="$AGENT_DISCOVERY/$name"
         ln -sfn "$(realpath "$agent_entry")" "$target"
         agent_link_count=$((agent_link_count + 1))

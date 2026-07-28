@@ -60,10 +60,10 @@
     },
     {
       "name": "pypto-op-orchestrator-skills",
-      "description": "PyPTO 算子开发 Skills（8 个）。API 探索、Golden 生成、需求理解、算子设计与开发、性能调优、精度调试。",
+      "description": "PyPTO 算子开发 Skills（17 个）。编排手册、需求理解/规划、API 探索、文档检索、Golden 生成、模块拆解与构建、算子设计/开发/验证/审查、精度对比与调试、性能调优、经验表、MEMORY 模板。",
       "source": "./ops",
       "strict": false,
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": {
         "name": "CANNBot"
       },
@@ -73,14 +73,23 @@
       ],
       "category": "skills",
       "skills": [
-        "./pypto-api-explore",
-        "./pypto-golden-generate",
+        "./pypto-orchestration-manual",
         "./pypto-intent-understand",
+        "./pypto-op-plan",
+        "./pypto-api-explore",
+        "./pypto-docs-search",
+        "./pypto-golden-generate",
         "./pypto-op-design",
+        "./pypto-op-construct",
         "./pypto-op-develop",
-        "./pypto-op-perf-tune",
+        "./pypto-op-verify",
+        "./pypto-op-review",
+        "./pypto-op-knowledge",
+        "./pypto-memory-template",
         "./pypto-precision-compare",
-        "./pypto-precision-debug"
+        "./pypto-precision-debug",
+        "./pypto-general-debug",
+        "./pypto-op-perf-tune"
       ]
     },
     {
@@ -359,8 +368,8 @@
     {
       "name": "pypto-op-orchestrator",
       "source": "./plugins-official/pypto-op-orchestrator",
-      "description": "PyPTO 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），7 阶段状态机编排，支持断点续跑和失败恢复。",
-      "version": "1.1.9",
+      "description": "PyPTO 算子端到端开发 Team。9 智能体状态机（planner/mathematician/architect/designer/coder/verifier/debugger/optimizer + orchestrator），7 阶段驱动，阶段门禁与 state_transition 状态机，支持断点续跑和失败恢复。",
+      "version": "1.2.0",
       "author": {
         "name": "CANNBot"
       },

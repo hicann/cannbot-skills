@@ -436,6 +436,8 @@ Algorithm: Flash Attention (Forward)
 
 模板文件位于: [templates/spec-template.md](templates/spec-template.md)
 
+**生成方式（先复制模板再改）**：先用 `cp templates/spec-template.md <目标>/SPEC.md` 复制模板，再用 `Edit` 逐项替换占位符；不要自由 `Write` 重写，以免漏掉门禁要求的中文章节标题（数学公式 / 输入输出规格 / 精度要求）。
+
 使用时需替换以下占位符:
 - `{operator_name}` — 算子名称
 - `{category}` — 算子分类 (element-wise / reduction / matmul / attention / custom)
