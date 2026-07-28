@@ -1051,32 +1051,27 @@ Task 调用参数：
 ### 4.2 输入参数
 
 ```
-4.2a 全量代码检视：
+4.2 代码检视：
   - 检视文件: operators/{operator_name}/op_kernel/ + op_host/ 下所有 .cpp/.h/.hpp
   - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
   - API 预研报告（如有）：`operators/{operator_name}/tmp/checks/api_prestudy.md`
   - 报告路径: operators/{operator_name}/tmp/checks/{source_file}_review_summary.md
-
-4.2b 设计实现一致性检查：
-  - 代码文件: 同 4.2a
-  - 设计文档: operators/{operator_name}/docs/DESIGN.md
-  - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
-  - 报告路径: operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md
+```
 
 ### 4.2 验收标准
 
 ```
-4.2a：全量检视报告已生成，无 HIGH 级别"发现问题"
-4.2b：设计一致性报告已生成，S1-S7 判定无 ❌ 项
+4.2：检视报告已生成，无 HIGH 级别"发现问题"，设计一致性 S1-S7 判定无 ❌ 项（若报告含设计一致性章节）
 ```
 
 ### 4.2 检视结果处理规则
 
 ```
-├─ 4.2a 无 HIGH + 4.2b 无 ❌ → 进入 CP5
-├─ 4.2a 有 HIGH（仅规范）→ 修复 → 重跑 4.2a + 4.2b
-├─ 4.2a 有 HIGH（逻辑）→ 修复 → 重跑 4.2a + 4.2b → 重跑阶段三
-└─ 4.2b 有 ❌ → 修复 → 重跑 4.2a + 4.2b → 重跑阶段三
+├─ 无 HIGH + 无 ❌ → 进入 CP5
+├─ 有 HIGH（仅规范）+ 无 ❌ → 修复 → 重跑 4.2
+├─ 有 HIGH（仅规范）+ 有 ❌ → 修复 → 重跑 4.2 → 重跑阶段三
+├─ 有 HIGH（逻辑）→ 修复 → 重跑 4.2 → 重跑阶段三
+└─ 有 ❌ → 修复 → 重跑 4.2 → 重跑阶段三
 ```
 
 ## 4.3 开发总结

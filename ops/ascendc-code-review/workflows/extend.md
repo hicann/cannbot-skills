@@ -17,11 +17,10 @@ ascendc-code-review/
 │   └── methodology.md               检视方法论（假设检验、证据框架、置信度标准）
 │
 ├── workflows/                       工作流，按场景命名：{scene}.md
-│   ├── file-review.md              「检视代码」→ 文件检视
-│   ├── pr-review.md                「检视 PR」→ PR检视
-│   ├── pr-large-review.md          PR自动切换 → 大型PR检视（按文件组并行）
+│   ├── file-review.md              「检视代码」→ 文件检视（含可选设计一致性检查）
+│   ├── pr-review.md                「检视 PR」→ PR检视（含可选设计一致性检查）
+│   ├── pr-large-review.md          PR自动切换 → 大型PR检视（按文件组并行，含可选设计一致性检查）
 │   ├── quick-review.md             「快速检视」→ 定向问题排查
-│   ├── design-consistency.md       「设计一致性」→ 对照检查
 │   ├── extend.md                   本文件：系统规范
 │   └── ...                         新增场景按同模式添加（scope 必须与 workflow 文件名一致）
 │   └── quick-review 无需 steps/ — 主 Agent 直接执行，无子 Agent，不引用 step 文件
@@ -29,12 +28,12 @@ ascendc-code-review/
 ├── steps/                           可执行积木，命名规则：{scope}.{step}.md
 │   │                                scope = 对应 workflow 文件名去掉 .md 后缀
 │   │                                scope = "common" 表示跨场景公共步骤
-│   ├── common.{step}.md            跨场景公共（clause-routing、line-verify、report-write）
+│   ├── common.{step}.md            跨场景公共（clause-routing、line-verify、report-write、
+│   │                                docs-detect、design-check）
 │   ├── file-review.{step}.md       文件检视（code-summarize、clause-review）
 │   ├── pr-review.{step}.md         PR检视（code-fetch、code-summarize、clause-review、line-verify）
 │   ├── pr-large-review.{step}.md   大型PR（file-split、global-pre-scan、code-summarize、
 │   │                                clause-review、clause-grouping、synthesize、merge）
-│   ├── design-consistency.{step}.md ...
 │   └── ...
 │
 ├── references/                      规则文档，按领域命名：{domain}.md
@@ -106,7 +105,9 @@ ascendc-code-review/
 | 模板 | steps/{x}.clause-review.md | ≤40 | 主Agent |
 | 执行 | steps/{x}.code-summarize.md（执行指南部分） | 不限 | 子Agent |
 | 执行 | common.line-verify.md | ≤20 | 主Agent |
-| 执行 | common.report-write.md | ≤70 | 主Agent |
+| 执行 | common.report-write.md | ≤90 | 主Agent |
+| 派发 | common.docs-detect.md（派发部分） | ≤30 | 主Agent |
+| 派发 | common.design-check.md（派发部分） | ≤30 | 主Agent |
 | 知识 | core/methodology.md | ≤130 | 检视子Agent |
 | 知识 | references/*.md | 不限 | 检视子Agent（按需） |
 
@@ -253,17 +254,18 @@ steps/{scope}.{step-name}.md
 | common | 跨工作流复用 | common.clause-routing.md |
 | file-review | 文件检视专用 | file-review.code-summarize.md |
 | pr-review | PR检视专用 | pr-review.code-fetch.md |
-| design-consistency | 设计一致性专用 | design-consistency.clause-review.md |
 
 #### 鼓励复用 common.* 步骤
 
-`common.*` 前缀的步骤可跨工作流复用。新增工作流时，已有的三个公共步骤通常能满足大部分需求：
+`common.*` 前缀的步骤可跨工作流复用。新增工作流时，已有的公共步骤通常能满足大部分需求：
 
 | 公共步骤 | 作用 |
 |---------|------|
 | common.clause-routing.md | 智能条例路由 |
 | common.line-verify.md | 行号校对 |
 | common.report-write.md | 报告生成 |
+| common.docs-detect.md | 设计文档探测（与 code-summarize/clause-routing/api-prestudy 同级并行） |
+| common.design-check.md | 设计实现一致性 S1-S7 检查（含设计映射，复用摘要+API预研） |
 
 如果发现某步骤在多个工作流中重复出现，鼓励提取为 `common.*`，让后续的新工作流受益。场景特有的逻辑（如 PR 检视的越界校验）才用 `{工作流}.*` 前缀。
 

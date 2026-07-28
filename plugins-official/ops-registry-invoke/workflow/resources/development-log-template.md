@@ -93,8 +93,7 @@
     - 测试设计评审报告：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/TEST_REVIEW.md`
     - ST测试代码：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tests/`
     - UT测试代码：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tests/ut/`
-    - 全量代码检视报告：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/{source_file}_review_summary.md`
-    - 设计实现一致性报告：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/{source_file}_design_consistency_review.md`
+    - 代码检视报告（含设计一致性结论）：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/{source_file}_review_summary.md`
     - 代码检视概要分析：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/code_summary.md`
     - API 预研报告（如有）：`{绝对路径}/{算子仓}/{子类别}/{算子名称}/tmp/checks/api_prestudy.md`
     

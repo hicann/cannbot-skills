@@ -13,10 +13,9 @@ permission:
 
 | 触发条件 | 工作流文件 |
 |---------|---------|
-| 全量检视代码、审核代码、代码审查、帮我检视 xxx | workflows/file-review.md |
+| 全量检视代码、审核代码、代码审查、帮我检视 xxx、设计实现一致性、设计一致性检查、对照 DESIGN.md | workflows/file-review.md |
 | 检查是否有、有没有问题、快速检视、有什么风险、帮我看看有没有*问题、是否存在.*问题 | workflows/quick-review.md |
 | 全量检视 PR、全面审核 PR、pr #、pull request、PR # | workflows/pr-review.md |
-| 设计实现一致性、设计一致性检查、对照 DESIGN.md | workflows/design-consistency.md |
 | 扩展能力、新增规则、新增场景、怎么加规则、扩展检视、接入新规范、添加检视条例 | workflows/extend.md |
 
 ## 执行规则

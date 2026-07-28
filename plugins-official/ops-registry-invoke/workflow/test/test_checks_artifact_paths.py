@@ -27,8 +27,8 @@ NEW_REVIEW_PATHS = [
     "operators/{operator_name}/tmp/checks/SPEC_REVIEW.md",
     "operators/{operator_name}/tmp/checks/DESIGN_REVIEW.md",
     "operators/{operator_name}/tmp/checks/TEST_REVIEW.md",
-    # review-report.md 已删除 — 大规模并行检视流程的代码检视产物统一放 tmp/checks/
-    # （{source_file}_review_summary.md / {source_file}_design_consistency_review.md / code_summary.md / api_prestudy.md）
+    # review-report.md 已删除 — 代码检视产物统一放 tmp/checks/
+    # （{source_file}_review_summary.md / code_summary.md / api_prestudy.md）
 ]
 
 OLD_REVIEW_INSTRUCTIONS = [
@@ -38,8 +38,6 @@ OLD_REVIEW_INSTRUCTIONS = [
 CODE_REVIEW_INPUTS = [
     "- 检视文件: operators/{operator_name}/op_kernel/ + op_host/ 下所有 .cpp/.h/.hpp",
     "- 报告路径: operators/{operator_name}/tmp/checks/{source_file}_review_summary.md",
-    "- 设计文档: operators/{operator_name}/docs/DESIGN.md",
-    "- 报告路径: operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md",
     "- 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`",
     "- API 预研报告（如有）：`operators/{operator_name}/tmp/checks/api_prestudy.md`",
 ]

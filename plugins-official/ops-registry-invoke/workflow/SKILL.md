@@ -210,12 +210,11 @@ graph TB
 
 **关键步骤**：
 1. **4.1 文档与示例**：生成算子 README 和调用示例代码
-2. **4.2a 全量代码检视**：加载 `/ascendc-code-review` skill，进入 file-review 工作流
-3. **4.2b 设计实现一致性检查**：加载 `/ascendc-code-review` skill，进入 design-consistency 工作流
-4. **⚪ CP5 用户确认**：展示全量检视报告 + 设计一致性报告，如有修改项需确认修改方案
-5. **4.3 开发总结**：更新开发日志，补充完善 aclnnAPI 接口文档
+2. **4.2 代码检视**：加载 `/ascendc-code-review` skill，进入 file-review 工作流（自动探测设计文档并完成设计实现一致性检查）
+3. **⚪ CP5 用户确认**：展示检视报告（含设计一致性结论），如有修改项需确认修改方案
+4. **4.3 开发总结**：更新开发日志，补充完善 aclnnAPI 接口文档
 
-**说明**：4.1 → 4.2a → 4.2b → CP5 → 4.3 严格串行，代码检视的输入包含 4.1 生成的文档与示例。
+**说明**：4.1 → 4.2 → CP5 → 4.3 严格串行，代码检视的输入包含 4.1 生成的文档与示例。
 
 </details>
 
@@ -701,7 +700,7 @@ python3 workflow/resources/validate_checklist.py --stage doc-examples --operator
 
 **🚫 禁止**：禁止调度任何 subagent 进行代码检视。代码检视流程完全由 `/ascendc-code-review` skill 接管。
 
-### 4.2a 全量代码检视
+### 4.2 代码检视
 
 1. 调用 `/ascendc-code-review`，传入提示词：
    **全量检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 路径下的代码。
@@ -709,37 +708,28 @@ python3 workflow/resources/validate_checklist.py --stage doc-examples --operator
    - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
    - API 预研报告（如有）：`operators/{operator_name}/tmp/checks/api_prestudy.md`
    - 最终检视报告：`operators/{operator_name}/tmp/checks/{source_file}_review_summary.md`**
-2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
-
-### 4.2b 设计实现一致性检查
-
-1. 调用 `/ascendc-code-review`，传入提示词：
-   **参照 `operators/{operator_name}/docs/` 路径下的所有设计文档，检视 `operators/{operator_name}/op_kernel/` 和 `operators/{operator_name}/op_host/` 代码的设计实现一致性问题。
-   本流程为 ops-registry-invoke 上库流程，所有输出产物（含中间文件）统一以 `operators/{operator_name}/tmp/checks/` 为根目录，不采用 skill 默认路径：
-   - 概要分析输出：`operators/{operator_name}/tmp/checks/code_summary.md`
-   - 最终一致性报告：`operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md`**
-2. skill 接管后按其内部工作流执行，主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
+2. skill 接管后按其内部工作流执行（自动探测设计文档，若检测到则一并完成设计实现一致性 S1-S7 检查，结果并入同一份检视报告），主 Agent 不干预过程、不手动 Read skill 的 steps/ 和 workflows/ 文件
 
 ---
 
 **检视完成后回到主流程**：
 
-4.2a 和 4.2b 的 skill 工作流各自完成后，主 Agent 收回控制权，执行结果判定：
+4.2 的 skill 工作流完成后，主 Agent 收回控制权，执行结果判定：
 
-1. Read `operators/{operator_name}/tmp/checks/{source_file}_review_summary.md`，统计 HIGH / MED / LOW 数量
-2. Read `operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md`，检查 S1-S7 判定结果
-3. 按以下规则处理：
+1. Read `operators/{operator_name}/tmp/checks/{source_file}_review_summary.md`，统计 HIGH / MED / LOW 数量，并检查设计一致性 S1-S7 判定结果（若报告含「设计一致性检查」章节）
+2. 按以下规则处理：
 
 ```
-├─ 4.2a 无 HIGH + 4.2b 无 ❌ → 进入 ⚪ CP5 用户确认
-├─ 4.2a 有 HIGH（仅代码规范）→ 修复代码 → 重跑 4.2a + 4.2b
-├─ 4.2a 有 HIGH（逻辑问题）→ 修复代码 → 重跑 4.2a + 4.2b → 重跑阶段三精度测试
-└─ 4.2b 有 ❌ → 修复代码 → 重跑 4.2a + 4.2b → 重跑阶段三精度测试
+├─ 无 HIGH + 无 ❌ → 进入 ⚪ CP5 用户确认
+├─ 有 HIGH（仅代码规范）+ 无 ❌ → 修复代码 → 重跑 4.2
+├─ 有 HIGH（仅代码规范）+ 有 ❌ → 修复代码 → 重跑 4.2 → 重跑阶段三精度测试
+├─ 有 HIGH（逻辑问题）→ 修复代码 → 重跑 4.2 → 重跑阶段三精度测试
+└─ 有 ❌ → 修复代码 → 重跑 4.2 → 重跑阶段三精度测试
 ```
 
-**说明**：检视报告和一致性报告统一放 `tmp/checks/`（与 SPEC_REVIEW / DESIGN_REVIEW / TEST_REVIEW 同为临时检查产物）
+**说明**：检视报告统一放 `tmp/checks/`（与 SPEC_REVIEW / DESIGN_REVIEW / TEST_REVIEW 同为临时检查产物）
 
-**⚪ CP5 用户确认**：向用户展示全量检视报告 + 设计一致性报告，如有修改项需确认修改方案
+**⚪ CP5 用户确认**：向用户展示检视报告（含设计一致性结论），如有修改项需确认修改方案
 
 ## 4.3 开发总结
 

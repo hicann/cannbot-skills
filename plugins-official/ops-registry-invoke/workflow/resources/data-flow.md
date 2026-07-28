@@ -35,7 +35,7 @@
 | | 测试分支合并执行 | - | 汇总最终黑盒、白盒与 PyTorch ST 执行证据 | 最终测试结果 | test-branches-merge-exec-report.md | `operators/{operator_name}/tests/reports/` |
 | | 3.2 性能验收 | - | 性能分析（可选） | 算子二进制 | performance-report.md | `operators/{operator_name}/docs/` |
 | **第四阶段：上库** | 4.1 文档与示例 | - | 生成文档示例 | 需求+设计+代码 | README.md + examples/ | `operators/{operator_name}/` |
-| | 4.2 代码检视 | - | 主 Agent 直接调用 ascendc-code-review skill（file-review + design-consistency） | 算子代码 + 设计文档 | {source_file}_review_summary.md + {source_file}_design_consistency_review.md | `operators/{operator_name}/tmp/checks/` |
+| | 4.2 代码检视 | - | 主 Agent 直接调用 ascendc-code-review skill（file-review，自动探测设计文档并完成设计一致性检查） | 算子代码 + 设计文档 | {source_file}_review_summary.md（含设计一致性章节） | `operators/{operator_name}/tmp/checks/` |
 | | 4.3 开发总结 | - | 总结输出文档 | 所有文档 | aclnn{OperatorName}.md（更新）+ LOG.md | `operators/{operator_name}/` |
 
 ---
@@ -92,14 +92,13 @@ TEST.md
 | | 最终性能验收报告 | `operators/{operator_name}/docs/performance-report.md` |
 | **第四阶段** | 算子 README | `operators/{operator_name}/README.md` |
 | | 调用示例 | `operators/{operator_name}/examples/` |
-| | 代码检视报告 | `operators/{operator_name}/tmp/checks/{source_file}_review_summary.md` |
-| | 设计实现一致性报告 | `operators/{operator_name}/tmp/checks/{source_file}_design_consistency_review.md` |
+| | 代码检视报告（含设计一致性结论） | `operators/{operator_name}/tmp/checks/{source_file}_review_summary.md` |
 | | 代码检视概要分析 | `operators/{operator_name}/tmp/checks/code_summary.md` |
 | | API 预研报告（如有） | `operators/{operator_name}/tmp/checks/api_prestudy.md` |
 
 **报告命名规则**：
 - `precision-report.md` / `performance-report.md` (小写+连字符) = 最终验收报告，放 `docs/`
-- `{source_file}_review_summary.md` / `{source_file}_design_consistency_review.md` / `code_summary.md` / `api_prestudy.md` = 代码检视产物（全量检视 + 设计一致性 + 概要分析 + API预研），放 `tmp/checks/`（临时检查产物，与其他评审报告一致）
+- `{source_file}_review_summary.md`（含设计一致性章节） / `code_summary.md` / `api_prestudy.md` = 代码检视产物（全量检视 + 设计一致性 + 概要分析 + API预研），放 `tmp/checks/`（临时检查产物，与其他评审报告一致）
 - `iter{N}-*-report.md` = 中间态报告，放 `tests/reports/`
 - `integration` = 开发联调（汇合验证），侧重"ST在NPU上精度验证通过"，禁止仅编译通过或CPU Mock通过
 - `acceptance` = 正式验收，侧重"功能是否达标"
@@ -171,8 +170,7 @@ TEST.md
 │       ├── TEST_REVIEW.md
 │       ├── code_summary.md               # 代码检视概要分析
 │       ├── api_prestudy.md               # API 预研报告（条件生成）
-│       ├── {source_file}_review_summary.md     # 全量代码检视报告
-│       └── {source_file}_design_consistency_review.md  # 设计实现一致性报告
+│       └── {source_file}_review_summary.md     # 代码检视报告（含设计一致性章节）
 └── docs/
     ├── LOG.md                             # 开发日志
     ├── REQUIREMENTS.md                    # 需求分析

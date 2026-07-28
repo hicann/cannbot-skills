@@ -11,24 +11,24 @@
 
 | 任务 | 阶段 | 执行者 |
 |------|------|--------|
-| 任务0 | 文件分组 + 预扫描 | file-split（子Agent）→ global-pre-scan（子Agent × N 并行） |
+| 任务0 | 文件分组 + 预扫描 + 设计文档探测 | file-split（子Agent）→ global-pre-scan（子Agent × N 并行）∥ docs-detect（子Agent × 1，与 file-split 并行） |
 | 任务1 | 摘要 + 分组 + API 预研 | summarize（子Agent × N）∥ clause-grouping（子Agent × 1）∥ api-prestudy（子Agent × 1，仅 Kernel 侧） |
 | 任务2 | 负载感知波次检视 | 逐波派发检视子 Agent |
 | 任务3 | 共享文件检视 + 综合研判 | shared 检视（子Agent）→ synthesize（主Agent） |
-| 任务4 | 合并结果 | merge（主Agent） |
-| 任务5 | 行号校验 + 报告 | line-verify → report-write（主Agent） |
+| 任务4 | 合并结果 + 设计一致性检查 | merge（主Agent）→ design-check（子Agent × 1，仅 docs_input 非空时） |
+| 任务5 | 行号校验 + 报告 | line-verify（拆分路由）→ report-write（主Agent） |
 
-### 阶段0：文件分组 + 预扫描
+### 阶段0：文件分组 + 预扫描 + 设计文档探测
 
 1. 将任务0 标记为 in_progress
 2. 若 diff_path 和 repo_path 已由上游传入 → 跳过 code-fetch
 3. 主 Agent Read diff 前 200 行，提取变更文件路径列表
-4. 派发 **1 个子 Agent** 执行 `steps/pr-large-review.file-split.md`，传入文件路径列表，产出 file_groups
+4. **并行派发**：① 1 个子 Agent 执行 `steps/pr-large-review.file-split.md`（传入文件路径列表，产出 file_groups）；② 1 个子 Agent 执行 `steps/common.docs-detect.md`（传入 repo_path + 用户已指明文档路径，产出 docs_input）。若上游 pr-review 已传入 docs_input 则跳过 docs-detect
 5. 对每个 file_group **并行派发子 Agent** 执行 `steps/pr-large-review.global-pre-scan.md`：
    - 传入：group_file_list + repo_path
    - 产出：该组的 matched_rules（条例级匹配清单）
    - 每波 ≤10 Agent，超过 10 组分批
-6. 收集 per-group matched_rules，将任务0 标记为 done
+6. 收集 per-group matched_rules + docs_input，将任务0 标记为 done
 
 ### 阶段1：摘要 + 分组 + API 预研（并行派发）
 
@@ -53,16 +53,17 @@
 3. 主 Agent Read + 执行 `steps/pr-large-review.synthesize.md`：跨文件组模式识别、冲突解决、置信度过滤
 4. 将任务3 标记为 done
 
-### 阶段4：合并结果
+### 阶段4：合并结果 + 设计一致性检查
 
 1. 将任务4 标记为 in_progress
 2. 主 Agent Read + 执行 `steps/pr-large-review.merge.md`
-3. 将任务4 标记为 done
+3. **设计一致性检查**：若阶段0 的 docs_input 非空，派发 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`），填入 docs_input + diff路径 + repo_path + 合并后摘要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用合并摘要/API预研做 S1-S7 整体对照（避免按文件组碎片化）
+4. 将任务4 标记为 done
 
 ### 阶段5：行号校验 + 报告
 
 1. 将任务5 标记为 in_progress
-2. 主 Agent Read + 执行 `steps/pr-review.line-verify.md`（新上下文）
+2. **拆分输入路由**：clause 的 FAIL/SUSPICIOUS → Read+执行 `steps/pr-review.line-verify.md`（带 diff 范围红线）；design-check 的 S1-S7 ❌ 项 → Read+执行 `steps/common.line-verify.md`（无 diff 红线）
 3. 主 Agent Read + 执行 `steps/common.report-write.md`
 4. 输出 `./operators/pr-{N}/{N}_review_summary.md`，将任务5 标记为 done
 
@@ -75,3 +76,6 @@
 - 禁止提前 Read 未执行阶段的 step 文件
 - 每波 ≤10 Agent，>4 文件组分批
 - **主 Agent 只做编排派发**——file-split、global-pre-scan、summarize、clause-grouping 全部由子 Agent 执行
+- design-check 置于 Stage4 merge 之后：复用合并后的全局摘要做整体对照，避免按文件组碎片化；属独立轨道，不进 clause 波次规划
+- docs_input 为空时不派发 design-check，报告退化为纯条例检视
+- 阶段5 必须拆分行号校对路由：clause 走 pr-review.line-verify（diff 红线），S1-S7 ❌ 走 common.line-verify（无红线）
