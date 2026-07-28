@@ -45,7 +45,7 @@
 
 ## 通用策略（omni）
 
-参见 [`families/omni_guide.md`](omni_guide.md)（待 Phase A6 后续补）——所有 L0 策略（P1/P5/P10 等 13 张）对 matmul 族都适用。
+所有 L0 通用策略（P1 双缓冲、P5 向量化、P10 数据预取等 13 张）对 matmul 族均适用，可作为基线优化手段与上述 matmul 专用策略叠加使用。
 
 ## 叠加正交性表
 
