@@ -86,7 +86,7 @@ N = 100
 
 theoretical_pass_rate = (1 - alpha) + z * np.sqrt(alpha * (1 - alpha) / N)
 theoretical_pass_rate_percent = theoretical_pass_rate * 100
-# 约98.07%
+# 约95.93%
 ```
 
 ## 5. 支持的分布类型
@@ -184,9 +184,9 @@ summary = check_random_distribution_batch(
 #   'fail_count': 1,
 #   'actual_pass_rate': 0.99,
 #   'actual_pass_rate_percent': 99.0,
-#   'theoretical_pass_rate': 0.9807,
-#   'theoretical_pass_rate_percent': 98.07,
-#   'is_pass': True,  # 99% > 98.07%
+#   'theoretical_pass_rate': 0.9593,
+#   'theoretical_pass_rate_percent': 95.93,
+#   'is_pass': True,  # 99% > 95.93%
 #   'p_value_mean': 0.65,
 #   'p_value_std': 0.15,
 #   'detail_results': [...]

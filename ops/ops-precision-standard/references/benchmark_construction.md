@@ -59,17 +59,19 @@ def flash_attention_reference(Q, K, V):
 
 ## 4. 单标杆比对
 
-**定义：** 与单一精度标杆直接比较，标杆应为更高精度实现。
+**定义：** 与更高精度的实现（CPU 或昇腾小算子拼接）的单一精度标杆直接比较。
 
 **实现要点：**
 ```python
+from scripts.mixed_tolerance_check import check_mixed_tolerance
+
 # Golden: 高精度 CPU 实现或昇腾小算子拼接
 golden = cpu_implementation_high_precision(input)
 
 # NPU 实现
 npu_output = npu_implementation(input)
 
-# 直接比对误差指标与阈值
-mere = mean_relative_error(npu_output, golden)
-mare = max_relative_error(npu_output, golden)
+# 直接按混合容差(atol/rtol)判定
+result = check_mixed_tolerance(npu_output, golden)
+assert result['is_pass']
 ```

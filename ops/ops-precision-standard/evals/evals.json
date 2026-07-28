@@ -36,7 +36,7 @@
         "eval_mode": "text"
       },
       "prompt": "Ascend C FP16 浮点计算的精度验收标准是什么？atol 和 rtol 的参考值是多少？可以加载技能，不需要执行其他外部工具调用。",
-      "expected_output": "回复应说明 Ascend C FP16 浮点计算的精度验收标准，包括 atol 和 rtol 的参考值范围，以及验收判断公式。",
+      "expected_output": "回复应说明 Ascend C FP16 浮点计算的精度验收标准，包括 atol 和 rtol 的参考值，以及验收判断公式。",
       "files": [],
       "expectations": []
     }
