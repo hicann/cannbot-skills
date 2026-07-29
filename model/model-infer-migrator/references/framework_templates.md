@@ -1,10 +1,12 @@
 # 框架契约模板和速查
 
-本文件提供两类内容：
+本文件提供框架部署模式的两类内容：
 1. **模型类契约速查**：构造签名、forward 签名、ForwardMetaData 字段、CommManager 通信组、Packed/TND 约定
-2. **产物模板**：YAML 配置、infer.sh、modeling 骨架
+2. **拉起脚本与参考实现**：上游统一入口、已注册模型骨架对照
 
-权威接口契约定义见 [cann-recipes-infer/docs/design/executor_design.md §6](../../../../docs/design/executor_design.md)。
+YAML 模板与命名规范见共用文件 `references/yaml_template.md`；README 模板见 `references/readme_template.md`。
+
+权威接口契约定义见 `cann-recipes-infer/docs/design/executor_design.md` §6。
 
 替换 `{model_name}`（小写下划线）和 `{ModelName}`（驼峰）后使用。
 
@@ -190,93 +192,19 @@ class {ModelName}Attention(nn.Module):
 
 ---
 
-## 2. YAML 模板（offline）
+## 2. 拉起脚本
 
-`InferenceConfig` 共 5 个子配置：`DataConfig` / `ModelConfig` / `ParallelConfig` / `SchedulerConfig` / `DisaggConfig`。`DisaggConfig.disaggregation_mode` 默认 `NONE`（offline），无需在 YAML 配置；migrator 默认产物只覆盖前 4 段。online（PD 分离）需要的 disagg 字段见 [cann-recipes-infer/docs/design/online_inference_design.md](../../../../docs/design/online_inference_design.md)。
-
-
-### 2.1 单卡 eager（最小启动配置）
-
-```yaml
-model_name: "{model-key}"          # 必须与 support_models.py 中 key 一致
-world_size: 1
-
-model_config:
-  model_name: "{model-key}"
-  model_path: "{absolute_or_relative_weights_path}"
-  exe_mode: "eager"                # ["eager", "ge_graph", "npugraph_ex"]
-  enable_profiler: False
-  with_ckpt: True
-
-data_config:
-  dataset: "default"               # ["default", "LongBench"]
-  input_truncated_len: 4096
-
-parallel_config:
-  world_size: 1
-  attn_tp_size: 1                  # attn_dp_size = world_size // attn_tp_size（自动推导）
-  moe_tp_size: 1                   # moe_ep_size = world_size // moe_tp_size（自动推导，仅 MoE）
-  embed_tp_size: 1
-  lmhead_tp_size: 1
-
-scheduler_config:
-  batch_size: 1
-  max_new_tokens: 32
-  max_prefill_tokens: 4096          # 单次 prefill 最大 packed token 数，决定调度切批策略
-  # block_size 由 kvcache skill 改造为 Paged 模式时配置；migrator Legacy 模式不需要
-```
-
-> 多卡 YAML（`world_size > 1` + 各 `*_tp_size` 配置）由 model-infer-parallel-impl skill 提供。
->
-> 布尔值统一用 `True` / `False`，不用 `true` / `false`（与仓内主流风格一致）。
->
-> 命名维度：参考仓内已注册模型，按"模型_rank_N_拓扑_后端_场景"组合，禁止用非结构性差异的临时描述符（如 `_4k1k`、`_b8`）；新建 yaml 只针对结构性差异（拓扑 / 量化 / prefill/decode / 特性开关组合），运行时参数或 `exe_mode` 切换改字段即可。
-
----
-
-## 3. infer.sh 模板
+框架部署模型**不需要在模型目录单独建 `infer.sh`**，统一使用仓库上游的 `cann-recipes-infer/executor/scripts/infer.sh`，按 `--model` / `--yaml` 参数选定模型与配置：
 
 ```bash
-#!/bin/bash
-SCRIPT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-SET_ENV_ABS_PATH="${SCRIPT_PATH}/../../executor/scripts/set_env.sh"
-FUNCTION_ABS_PATH="${SCRIPT_PATH}/../../executor/scripts/function.sh"
-SET_ENV_ABS_PATH=$(realpath "${SET_ENV_ABS_PATH}")
-FUNCTION_ABS_PATH=$(realpath "${FUNCTION_ABS_PATH}")
-
-source ${SET_ENV_ABS_PATH}
-source ${FUNCTION_ABS_PATH}
-
-export MODEL_DIR=$(basename "$SCRIPT_PATH")
-export YAML_PARENT_PATH="${SCRIPT_PATH}/config"
-
-mode="$1"
-pd_role="$2"
-
-if [ "$mode" = "online" ]; then
-    export PD_ROLE="$pd_role"
-    export P_YAML="${YAML_PARENT_PATH}/{model_name}_pd.yaml"
-    export D_YAML="${YAML_PARENT_PATH}/{model_name}_pd.yaml"
-    echo "====================> launch online inference (${PD_ROLE:-auto})"
-else
-    export YAML="${YAML_PARENT_PATH}/{model_name}.yaml"
-    echo "====================> launch offline inference"
-fi
-
-launch "$mode"
+bash cann-recipes-infer/executor/scripts/infer.sh --model {model_name} --yaml {yaml_name}.yaml
 ```
 
-`../../executor/scripts/` 要求模型目录与仓库根目录之间有两层。`cann-recipes-infer/models/{model_name}/` 满足此条件。`launch` 函数会自动选用模型目录下的 `infer.py`，缺失时落回 `cann-recipes-infer/executor/offline/infer.py`。
+`launch` 函数会自动选用模型目录下的 `infer.py`，缺失时落回 `cann-recipes-infer/executor/offline/infer.py`。online / PD 分离用法见 `bash cann-recipes-infer/executor/scripts/infer.sh -h`。
 
 ---
 
-## 4. README 模板
-
-README 模板见共享文件 `references/readme_template.md`（框架部署与独立部署共用）。框架部署模式：保留 `<!-- 仅框架部署 -->` 标注的段（即"注册"段）；忽略 `<!-- 仅独立部署 -->` 标注的追加项。
-
----
-
-## 5. 参考实现
+## 3. 参考实现
 
 仓内已注册模型已经历过 kvcache / parallel-impl 等优化阶段，**不是 migrator 阶段产物**：
 

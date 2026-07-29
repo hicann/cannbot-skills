@@ -57,9 +57,11 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
 
 ### Step 2: 场景判断
 
-- 无 infer.sh → 场景 A → Step 3
-- 有 infer.sh → 执行一次：成功则场景 C → Step 4，失败则场景 B → Step 3
-- NPU 环境不可用 → 报告环境问题，结束
+按部署模式分流：
+- **框架部署**：模型已注册到 `cann-recipes-infer/executor/core/support_models.py` 且 yaml 已建 → 用 `bash cann-recipes-infer/executor/scripts/infer.sh --model {model_name} --yaml {yaml_name}.yaml` 试跑；未注册或 yaml 未建 → 场景 A → Step 3
+- **独立部署**：模型目录无 `infer.sh` → 场景 A → Step 3；有 `infer.sh` → `bash infer.sh` 试跑
+
+试跑成功 → 场景 C → Step 4；试跑失败 → 场景 B → Step 3；NPU 环境不可用 → 报告环境问题，结束
 
 ### Step 3: 代码准备（场景 A/B）
 
@@ -69,7 +71,11 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
 
 ### Step 4: 试运行 + 基线采集
 
-执行 `bash infer.sh`，按结果分流：
+按部署模式拉起：
+- **框架部署**：`bash cann-recipes-infer/executor/scripts/infer.sh --model {model_name} --yaml {yaml_name}.yaml`
+- **独立部署**：模型目录内执行 `bash infer.sh`
+
+按结果分流：
 
 - **跑通**：用 `dataset: "default"`（读 `cann-recipes-infer/dataset/default_prompt.json`）采集基线
   ```bash
@@ -80,7 +86,7 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
       --rank 1
   ```
   输出吐字正常（可读、不重复、长度合理），baseline_metadata.json 中的 output_text 需记录完整输出。多卡推理读 rank 1 的 log（rank 0 经 tee 可能截断）。
-  - **补采子场景**：reviewer log 已有 + 代码未提交新 commit + YAML 未变 → 跳过 `bash infer.sh` 重跑，直接用既有 log 调脚本提取即可
+  - **补采子场景**：reviewer log 已有 + 代码未提交新 commit + YAML 未变 → 跳过推理入口重跑，直接用既有 log 调脚本提取即可
 
 - **OOM（显存不足）**：本阶段输出代码骨架并标记"需多卡"，由 optimize 编排进入并行化阶段；并行 + kvcache 等优化跑通后由编排层补采基线。产物：多卡占位 YAML（待 parallel-impl 接入）+ 空 `agentic/baseline/` 目录 + README 标注 OOM 预期与下游 skill 任务；单卡 YAML 跑不通时不必保留。
 
@@ -99,12 +105,12 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
 ```
 {output_dir}/{model_name}/
 ├── config/{model_name}.yaml
-├── cann-recipes-infer/models/
+├── models/
 │   ├── configuration_{model_name}.py
 │   └── modeling_{model_name}.py
-├── infer.py                      ★ 独立部署模式自带；框架部署模式不带（统一走 cann-recipes-infer/executor/offline/infer.py，不推荐自带）
-├── infer.sh
-├── runner_{model_name}.py        ★ 独立模式独有
+├── infer.py                      # 仅独立部署模式自带；框架部署模式不带，统一走 cann-recipes-infer/executor/offline/infer.py
+├── infer.sh                      # 仅独立部署模式自带；框架部署模式统一走 cann-recipes-infer/executor/scripts/infer.sh
+├── runner_{model_name}.py        # 独立模式独有
 ├── requirements.txt
 ├── README.md
 └── agentic/baseline/baseline_metadata.json
@@ -157,7 +163,7 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
    ```
    含 MTP 的注册为 3 元组：`("key", MainCausalLM, MTPClass, Config)`。
 
-7. **写 YAML、infer.sh、requirements、README**：模板见 `references/framework_templates.md`。`requirements.txt` 优先对齐仓内已注册同架构模型（参考路由表），缺失的再按 HF 原仓补；避免引入与既有模型冲突的版本约束。
+7. **写 YAML、requirements、README**：YAML 模板与命名规范见 `references/yaml_template.md`（两模式共用，单卡 / 多卡完整字段、命名维度 / 粒度判定 / 保留策略均在此），README 模板见 `references/readme_template.md`，框架契约速查与拉起脚本见 `references/framework_templates.md`。框架部署模型**不建模型目录下 `infer.sh`**，拉起统一用 `bash cann-recipes-infer/executor/scripts/infer.sh --model {model_name} --yaml {yaml_name}.yaml`。`requirements.txt` 优先对齐仓内已注册同架构模型（参考路由表），缺失的再按 HF 原仓补；避免引入与既有模型冲突的版本约束。
 
 > migrator 输出框架契约骨架 + Legacy KV + HF 原版 attention 的 `world_size=1` 单卡代码。FA 算子改造、Paged 改造、复杂架构 KV、多卡部署 / 权重切分由 kvcache / parallel-impl skill 接手；本阶段不做。
 
@@ -278,12 +284,14 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
 
 共通条目（必须）：
 
-1. 标准文件结构完整（modeling + configuration + YAML + infer.sh + requirements + README）
+1. 标准文件结构完整：
+   - 框架部署：modeling + configuration + YAML + requirements + README + 注册到 `cann-recipes-infer/executor/core/support_models.py`（拉起走上游 `cann-recipes-infer/executor/scripts/infer.sh`，模型目录不建 `infer.sh`）
+   - 独立部署：modeling + configuration + YAML + runner + infer.sh + requirements + README
 2. modeling 框架契约骨架到位（构造签名 / forward 签名 / 权重契约；KV 按部署模式接入：框架部署用 Legacy `cache_unit`，独立部署用最简 list of (k, v)）
 
 跑通态条目（按场景二选一）：
 
-- **单卡可跑通**：`bash infer.sh` 跑通 + 输出吐字正常 + agentic/baseline/baseline_metadata.json 已生成
+- **单卡可跑通**：框架部署 `bash cann-recipes-infer/executor/scripts/infer.sh --model {model_name} --yaml {yaml_name}.yaml` / 独立部署 `bash infer.sh` 跑通 + 输出吐字正常 + agentic/baseline/baseline_metadata.json 已生成
 - **单卡 OOM**：标记"需多卡"，不必跑通；baseline 由 optimize 编排在并行化后补采
 
 部署模式专属：
@@ -297,8 +305,10 @@ description: 基于 PyTorch 框架的昇腾 NPU 模型推理适配与部署基�
 
 | 文档 | 路径 | 适用模式 |
 |------|------|---|
-| 框架部署模式模板和契约速查 | `references/framework_templates.md` | 框架部署 |
-| 独立部署模式模板和 Runner 速查 | `references/standalone_templates.md` | 独立部署 |
+| YAML 配置模板与命名规范 | `references/yaml_template.md` | 共通 |
+| README 模板 | `references/readme_template.md` | 共通 |
+| 框架部署契约速查与拉起脚本 | `references/framework_templates.md` | 框架部署 |
+| 独立部署 Runner 与 infer.py/infer.sh 模板 | `references/standalone_templates.md` | 独立部署 |
 | 常见问题速查 | `references/common_issues.md` | 共通 |
 | 基线采集脚本 | `scripts/collect_baseline.py` | 共通 |
 | InferenceConfig 字段语义（仓库框架） | `cann-recipes-infer/docs/common/inference_config_guide.md` | 框架部署 |

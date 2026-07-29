@@ -4,7 +4,9 @@
 1. **Runner 类骨架**：自定义 Runner（不继承框架 ModelRunner）
 2. **modeling forward 接口**：自定义参数（`past_key_values` / `kv_len` / `attention_mask`）
 3. **infer.py 入口**：实例化 Runner（传 yaml 路径），先 warmup 再正式调 `model_generate`
-4. **YAML / infer.sh 模板**
+4. **infer.sh 模板**
+
+YAML 模板与命名规范见共用文件 `references/yaml_template.md`；README 模板见 `references/readme_template.md`。
 
 替换 `{model_name}`（小写下划线）和 `{ModelName}`（驼峰）后使用。
 
@@ -284,46 +286,3 @@ python3 ${SCRIPT_DIR}/infer.py --yaml_file_path "${YAML}"
 ```
 
 > migrator 阶段是 `world_size=1` 单卡，不引入 vendoring 的 `cann-recipes-infer/executor/scripts/`；parallel-impl skill 改造为多卡时会引入。所有运行时参数（prompts / max_new_tokens 等）通过 yaml 单一来源传入，CLI 仅保留 `--yaml_file_path` 与可选 `--prompt`（调试用）。
-
----
-
-## 5. YAML 模板（与框架部署模式同 4 段式）
-
-```yaml
-model_name: "{model-key}"
-world_size: 1
-
-model_config:
-  model_name: "{model-key}"
-  model_path: "{absolute_or_relative_weights_path}"
-  exe_mode: "eager"
-  with_ckpt: True
-  enable_profiler: False
-
-data_config:
-  dataset: "default"
-  input_truncated_len: 4096
-  prompts:
-    - "What is the capital of France?"
-
-parallel_config:
-  world_size: 1
-  attn_tp_size: 1
-
-scheduler_config:
-  batch_size: 1
-  max_new_tokens: 100
-  max_prefill_tokens: 4096
-```
-
-> 字段语义与框架部署模式相同；独立模式 Runner 自己解析（不依赖 `InferenceConfig.from_dict`）。`data_config.prompts` 是独立部署专属字段（framework 模式走 `dataset` 读外部 fixture，独立模式直接在 yaml 内嵌一行示例 prompt 跑通即可）。
->
-> 布尔值统一用 `True` / `False`，不用 `true` / `false`（与仓内主流风格一致）。
->
-> 命名维度：参考仓内已注册模型，按"模型_rank_N_拓扑_后端_场景"组合，禁止用非结构性差异的临时描述符（如 `_4k1k`、`_b8`）；新建 yaml 只针对结构性差异（拓扑 / 量化 / prefill/decode / 特性开关组合），运行时参数或 `exe_mode` 切换改字段即可。
-
----
-
-## 6. README 模板
-
-README 模板见共享文件 `references/readme_template.md`（框架部署与独立部署共用）。独立部署模式：删除 `<!-- 仅框架部署 -->` 标注的"注册"段；按 `<!-- 仅独立部署 -->` 标注在"当前状态"末段追加 "独立 Runner，不接入 cann-recipes-infer/executor/core/ 框架。"。

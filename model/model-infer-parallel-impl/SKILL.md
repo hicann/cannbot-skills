@@ -321,64 +321,23 @@ ParallelLinear 替换、Embedding/LMHead 并行、模块间数据重排、MoE EP
 
 ## YAML 配置生成
 
-YAML schema 两模式 4 段式完全一致：`model_config` / `data_config` / `parallel_config` / `scheduler_config`。差异仅在解析方式（框架部署走 `InferenceConfig.from_dict`，独立部署 Runner 用 `yaml.safe_load` 直接读）。
+YAML schema 完整字段、命名规范、粒度判定、保留策略见 model-infer-migrator skill `references/yaml_template.md`（两模式共用），本段只补多卡场景填值。
 
-> 顶层 `world_size` 与 `parallel_config.world_size` 双写：前者供启动脚本（框架部署 `function.sh::launch` / 独立部署 `infer.sh`）读取，后者供业务代码（`InferenceConfig` / `build_parallel_context`）读取，需保持一致。
+### 多卡填值
 
-### 配置模板
+根据 model-infer-parallel-analysis 决策结果填入 `parallel_config` 段：
 
-```yaml
-model_name: "{model_name}"
-world_size: {W}
-
-model_config:
-  model_name: "{model_name}"
-  model_path: "/path/to/weights"
-  exe_mode: "eager"                  # 初始用 eager，后续可切 ge_graph
-  with_ckpt: True
-  enable_weight_nz: True
-  enable_profiler: False
-  custom_params:                     # 模型特有开关放这里
-    enable_multi_streams: False
-    moe_chunk_max_len: 65536         # MoE 专用，Decode 用 1024，Prefill 用 65536
-    perfect_eplb: False
-
-data_config:
-  dataset: "default"                  # framework 模式从 cann-recipes-infer/dataset/default_prompt.json 读
-  input_truncated_len: {根据场景}
-  prompts:                            # 独立部署专属：yaml 内嵌 prompts（framework 模式忽略此字段）
-    - "What is the capital of France?"
-
-parallel_config:
-  world_size: {W}
-  attn_tp_size: {value}
-  dense_tp_size: {value}
-  moe_tp_size: {value}        # MoE 模型需要
-  embed_tp_size: {value}
-  lmhead_tp_size: {value}
-  o_proj_tp_size: {value}     # MLA 模型需要
-
-scheduler_config:
-  batch_size: {根据显存估算}   # 全局 batch；按 attn_dp_size 推导每 rank batch（框架部署：ExecutionEngine 自动推导；独立部署：Runner 自管推导）
-  max_new_tokens: {根据场景}
-  block_size: 128             # Paged 块粒度
-```
-
-### 命名规范
-
-```
-config/
-├── {model_name}_rank_{W}_{W}ep_decode.yaml          # Decode 纯 EP
-├── {model_name}_rank_{W}_{tp}tp_prefill.yaml        # Prefill 纯 TP
-├── {model_name}_rank_{W}_densetp{n}_ep{m}.yaml      # 混合模式
-└── ci/
-    └── {model_name}_ci.yaml                          # CI 测试用
-```
+- 顶层 `world_size` 与 `parallel_config.world_size` 双写一致（前者供启动脚本读，后者供业务代码读）
+- `attn_tp_size` / `dense_tp_size` / `moe_tp_size` / `embed_tp_size` / `lmhead_tp_size` / `o_proj_tp_size`：按 parallel-analysis 推导值填
+- `moe_ep_size` / `attn_dp_size`：框架自动推导（`world_size // *_tp_size`），不需手填
+- `custom_params`：多卡特性开关（`enable_multi_streams` / `moe_chunk_max_len` / `perfect_eplb` 等）
+- `scheduler_config.batch_size`：全局 batch，按 `attn_dp_size` 推导每 rank batch（框架部署 ExecutionEngine 自动；独立部署 Runner 自管）
+- `scheduler_config.block_size`：Paged 块粒度，128 起步
 
 ### 完成标志
 
 - [ ] 每种部署场景有独立的 YAML 文件
-- [ ] 配置文件命名符合规范
+- [ ] 配置文件命名符合规范（按 `yaml_template.md` 命名维度 + 粒度判定）
 
 ---
 
