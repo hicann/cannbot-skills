@@ -113,7 +113,7 @@ IF Step 1 选择「跳过 Step 4 闸门」→ 跳过此步直接进入 Step 5；
 首先读取并严格遵守：
 {skill_base}/references/case-mapper/00-execution-order.md
 
-完成后报告文件、命令结果、case 数量、5.3 验收结果和阻塞项。
+完成后报告文件、命令结果、case 数量、Step 5.3 empty 生成结果、Step 5.4 high 生成结果、Step 5.5 final low/high schema 验收结果和阻塞项。
 ```
 
 - low 用于路径覆盖、网络 shape 和空 tensor 的常规白盒用例集
@@ -123,59 +123,23 @@ IF Step 1 选择「跳过 Step 4 闸门」→ 跳过此步直接进入 Step 5；
 
 ## 可选模块：TTK CSV 生成
 
-> **注意**：当前 TTK 模块仅支持 `kernel` 模式（`ttk kernel`），不支持 `e2e` 和 `aclnn` 模式。执行 TTK kernel 验收前必须先执行 TTK precheck；precheck 同时检查 TTK 环境和 assets golden 注册。`kernel_gate.status != "passed"` 时跳过 kernel 验收，但仍保留已生成的 low/high CSV 和格式校验结果。
+TTK 模块用于将 Step 5 final case 文件转换为 TTK CSV。当前执行规则、模式支持范围和内部验收行为由入口大纲统一定义。
 
-### 启用条件
+入口大纲：
 
-Step 1 输入 4 选择了「启用」。若未启用，跳过本模块。
-
-### 调用方式
-
-**方式 A（自动）**：主流程 Step 5 case mapper 完成后自动触发。
-
-> **前置条件**：`S5_cases_low.json` / `S5_cases_high.json` 和 `S2P1_operator_model.json` 已生成。
-
-**方式 B（独立）**：用户可随时单独运行 wrapper 生成，只需提供 `S5_cases_low.json` / `S5_cases_high.json` + `S2P1_operator_model.json` 路径、算子路径和 `*_def.cpp` 路径，不依赖其他 Step 产物或上下文。
-
-### 执行
-
-#### TTK 工具目录定位（主 Agent 执行）
-
-TTK 模块常规路径由主 Agent 直接执行固定 wrapper。主 Agent 必须在运行 wrapper 前先确定 `{ops_test_kit_path}`。
-
-主 Agent 只在当前工作目录 `$PWD` 路径下执行：
-
-```bash
-find "$PWD" -type d -name "ops-test-kit"
+```text
+{skill_base}/references/ttk-converter/00-execution-order.md
 ```
 
-禁止扩大到 `$PWD` 以外路径搜索 `ops-test-kit`；TTK 工具目录只从当前工作目录 `$PWD` 搜索结果中选择。
+核心产物：
 
-处理规则：
+| 文件 | 说明 |
+|------|------|
+| `ttk_{op_name}_cases_low.csv` | low 档位 TTK CSV |
+| `ttk_{op_name}_cases_high.csv` | high 档位 TTK CSV |
+| `ttk_module_report.json` | TTK 模块统一结构化报告 |
 
-- 找到 1 个目录：将该目录作为 `{ops_test_kit_path}`。
-- 找到多个目录：主 Agent 必须在运行 wrapper 前询问用户选择。
-- 找不到目录：跳过 TTK CSV 生成与 TTK kernel 验收，并报告 `$PWD` 下缺少 `ops-test-kit/` 工具目录。
-
-主 Agent 直接执行：
-
-```bash
-python3 {skill_base}/scripts/run_ttk_kernel_module.py \
-  --op-name {op_name} \
-  --whitebox-dir {op_path}/tests/whitebox \
-  --op-path {op_path} \
-  --op-def-cpp {op_def_cpp_path} \
-  --ops-test-kit-path {ops_test_kit_path} \
-  --skill-base {skill_base}
-```
-
-wrapper 会生成 `ttk_module_report.json`。`status == "passed"` 表示 CSV 生成、格式校验、precheck、low/high 单用例 TTK kernel 验收均通过；`status == "skipped"` 表示按 `kernel_gate` 或参数跳过 kernel 验收；`status == "failed"` 时读取 `issues` 和 `steps.*` 定位失败点。常规路径禁止派发 TTK 子 agent；仅当 wrapper 失败或用户要求诊断 TTK 规则时，再读取 `{skill_base}/references/ttk-converter/00-execution-order.md` 及其参考文档。
-
-批量抽样验收为可选增强项，默认不执行；仅当用户明确要求或提交前需要增强验证时，按 `03-kernel-mode.md` 的「可选增强验收」执行。
-
-### 产出（仅模块启用时）
-
-产出文件列表见「最终产物」节 TTK 模块子树。
+Agent 对 TTK 模块给结论时，以 `ttk_module_report.json` 的 `acceptance.accepted` / `acceptance.status` 为准。
 
 ---
 
@@ -204,6 +168,8 @@ wrapper 会生成 `ttk_module_report.json`。`status == "passed"` 表示 CSV 生
 ├── S2P2_traceability.md
 ├── S2P3_test_design.md
 ├── S3_verification_report.md
+├── S5_variable_semantics.md
+├── S5_data_range_policy.json
 ├── S5_case_mapper.py
 ├── S5_mapped_cases_path.json
 ├── S5_mapped_cases_network.json
@@ -213,13 +179,7 @@ wrapper 会生成 `ttk_module_report.json`。`status == "passed"` 表示 CSV 生
 ├── ttk_precheck_report.json
 ├── ttk_{op_name}_cases_low.csv
 ├── ttk_{op_name}_cases_high.csv
-├── ttk_{op_name}_cases_low_one_result.csv
-├── ttk_{op_name}_cases_high_one_result.csv
-├── ttk_low_one.log
-├── ttk_high_one.log
 ├── ttk_module_report.json
-├── ttk_{op_name}_cases_low_sample_result.csv   ← 可选增强验收产物
-├── ttk_{op_name}_cases_high_sample_result.csv  ← 可选增强验收产物
 ```
 
 ## 参考提示词索引
@@ -229,5 +189,5 @@ wrapper 会生成 `ttk_module_report.json`。`status == "passed"` 表示 CSV 生
 | 1 | `S1-input-collection.md` | 主 Agent | — |
 | 2 | `source-analysis/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 10 行 |
 | 3 | `design-verifier/00-execution-order.md` + `scripts/s3_task_d_gate.py` | 主 Agent | Task D Contract Gate（D1 cases coverage + 输出汇总） |
-| 5 | `case-mapper/00-execution-order.md` | 子 agent | `执行顺序约束（强制）` — 5 步（5.1→5.2→5.3→5.4→5.5 逐步按需读取） |
+| 5 | `case-mapper/00-execution-order.md` | 子 agent | `执行顺序约束（强制）` — 5 步（5.1 语义 → 5.2 mapper → 5.3 empty → 5.4 high → 5.5 final schema check） |
 | TTK 模块 | `scripts/run_ttk_kernel_module.py` | 主 Agent（可选模块，由 Step 1 输入4 控制） | wrapper 串行执行 CSV 生成/校验/precheck/单用例验收 |

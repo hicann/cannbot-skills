@@ -2,9 +2,9 @@
 
 > **职责**：将 Step 2 最终事实产物翻译为 Step 5.2 可直接实现的 mapper 代码指导书，并生成算子级 `S5_data_range_policy.json`。本步骤不重新分析源码。
 
-`S5_variable_semantics.md` 是 Step 5.2 的 mapper 代码指导书，不是仅供阅读的语义摘要。它必须把 Step 5.2 需要实现的 dtype 规则、format 规则、params 构造规则、input shape assembly plan、rank 覆盖目标、output 派生规则、network mapping 和 mapper 注意事项写到可直接编码的程度。
+`S5_variable_semantics.md` 是 Step 5.2 的 mapper 代码指导书，不是仅供阅读的语义摘要。它必须把 Step 5.2 需要实现的 dtype 规则、format 规则、`attributes` 构造规则、`const_inputs` 构造规则、input shape assembly plan、rank 覆盖目标、output 派生规则、network mapping 和 mapper 注意事项写到可直接编码的程度。
 
-Step 5.2 只负责翻译执行这份指导书，生成 `S5_case_mapper.py` 和 low 档 mapped cases；Step 5.2 不负责重新设计变量语义、rank 覆盖策略或 shape 组装方案。若 Step 5.2 仍需自行猜测变量语义、rank 选择、axis group、shape 拆分或 output 派生规则，则 Step 5.1 未完成。
+Step 5.2 只负责翻译执行这份指导书，生成 `S5_case_mapper.py` 和 low 档 mapped cases；Step 5.2 不负责重新设计变量语义、rank 覆盖策略或 shape 组装方案。若 Step 5.2 仍需自行猜测变量语义、rank 选择、axis group、shape 拆分、execution value 构造或 output 派生规则，则 Step 5.1 未完成。
 
 ## Step 5.1 输入输出
 
@@ -36,7 +36,7 @@ Step 5.1 只读取 mapper 消费所需的最终事实产物。禁止读取 Step 
 
 | 文件 | 用途 |
 |------|------|
-| `S2P1_operator_model.json` | input/output/attribute 结构、dtype/rank/shape 约束、param_type、output shape rule。 |
+| `S2P1_operator_model.json` | input/output/attribute/const input 结构、dtype/rank/shape 约束、param_type、output shape rule。 |
 | `S2P2_cases.json` 前 30 行 | 确认 path case 字段形态。批量处理由 Step 5.2 脚本运行时 `json.load` 完成。 |
 | `S2P1_low_configs.json` 前 30 行 | 确认 network config 字段形态。批量处理由 Step 5.2 脚本运行时 `json.load` 完成。 |
 | `S2P1_tiling_glossary.md` | 解释 case/config 字段最终语义，并提供变量对 input/output shape 的贡献关系（`shape_contribution`）。 |
@@ -53,13 +53,9 @@ Step 5.1 只读取 mapper 消费所需的最终事实产物。禁止读取 Step 
 
 本功能输出 `S5_variable_semantics.md`。该文件是 Step 5.2 生成 `S5_case_mapper.py` 的 mapper 代码指导书，必须把 mapper 需要实现的语义和构造规则写到可直接编码的程度。
 
-`S5_variable_semantics.md` 必须按主题写结论，不逐字段堆叠推理。每个结论必须能由允许输入支撑；语义不足时报告 Step 2 语义产物不完整。
-
 `S5_variable_semantics.md` 的正文说明必须使用中文。代码标识符、JSON 字段名、函数名、dtype 名称、源码变量名、case 字段名和伪代码变量名保持原文，不翻译。若上游事实产物中的自然语言为英文，Step 5.1 应将其语义转写为中文说明，但不得改写其中的代码表达式或字段名。
 
-Step 5.1 必须把 Step 5.2 要实现的逻辑写清楚，包括 dtype 规则、format 规则、params 构造规则、input shape assembly plan、rank 覆盖目标、output 派生规则、network mapping 和 mapper notes。
-
-Step 5.2 不应重新设计变量语义、rank 覆盖策略或 shape 组装方案。若 Step 5.2 仍需自行猜测变量语义、rank 选择、axis group、shape 拆分、params 构造或 output 派生规则，则 Step 5.1 未完成。
+Step 5.1 必须把 Step 5.2 要实现的逻辑写清楚，包括 dtype 规则、format 规则、`attributes` / `const_inputs` 构造规则、input shape assembly plan、rank 覆盖目标、output 派生规则、network mapping 和 mapper notes。
 
 ### 必填主题
 
@@ -71,16 +67,14 @@ Step 5.2 不应重新设计变量语义、rank 覆盖策略或 shape 组装方�
 | `format` | input/output format 构造规则；默认 `ND`，若 path/config 明确存在 format 约束，则按当前 case 的 path/config 信息写入对应 format。 |
 | `input shapes` | 主输入判定、shape assembly plan、依赖 input shape 规则；必须包含 Step 5.2 可直接实现的自然语言规则或伪代码。 |
 | `shape coverage plan` | 主输入合法维度结构覆盖目标，并明确主输入 rank 覆盖目标。依赖 input 和 output 不作为独立覆盖目标。 |
-| `outputs` | output dtype、shape、presence 规则；shape 只从 input 或明确字段派生。 |
-| `params` | mapped case 的 `params` 字段构造规则；说明 operator attributes 如何注入 params、默认值如何注入、哪些字段只进入 dtype/format/shape/meta。 |
+| `outputs` | output dtype、shape、optional placeholder 规则；shape 只从 input 或明确字段派生。 |
+| `execution values` | `attributes` 和 `const_inputs` 构造规则；说明 operator attributes、`.ValueDepend()` const input values、默认值如何注入，以及哪些字段只进入 dtype/format/shape/meta。 |
 | `network mapping` | network config 到算子参数空间的映射；network-only 信息放入 `meta`。 |
 | `mapper notes` | 保留的 meta 字段、边界条件、禁止猜测项。 |
 
 ### Shape Assembly Plan 要求
 
 `input shapes` 是 `S5_variable_semantics.md` 中最关键的代码指导章节。Step 5.1 必须在这里写出 shape assembly plan；Step 5.2 只能实现该 plan，不得重新设计 shape 组装策略。
-
-Step 5.1 必须在 `input shapes` 小节给出 shape assembly plan。无论是否存在参与 shape 构造的 tiling 变量，shape assembly plan 都是必填内容，因为 Step 5.2 必须据此生成具体 input shape。
 
 shape assembly plan 至少说明：
 
@@ -90,6 +84,7 @@ shape assembly plan 至少说明：
 - 参与 shape construction 的字段及其语义。
 - 每个 product / shape_size / aligned_size 字段对应的 axis group。
 - 依赖 input 如何同步、broadcast 或派生。
+- optional input 不输入时如何保留 descriptor 并写 `shape = null`。
 - output shape 派生所需的 input 关系。
 - Step 5.2 可直接实现的自然语言规则或伪代码。
 
@@ -99,25 +94,23 @@ shape assembly plan 至少说明：
 
 `representative` 只能作为一个构造样例，不能替代 rank 覆盖方案或 shape assembly plan。
 
-示例：若 glossary 表明：
+### Execution Values 要求
 
-- `a = product(primary leading axes)`
-- `b = product(primary trailing axes)`
+`execution values` 章节必须明确每个非 tensor 执行值写入哪个字段：
 
-且 operator model 表明主输入 rank 为 `[2, 8]`，则 Step 5.1 不能只写：
+- `.Attr("...")` 注册的 operator attribute 写入 `attributes`。
+- `.ValueDepend()` 标记的 const input value 写入 `const_inputs`。
+- Tensor/TensorList descriptor 写入 `inputs` 或 `outputs`，不得写入 `const_inputs`。
+- shape、dtype、format、data_range、tiling/router 信息和 mapper 审计字段不得写入 `attributes` 或 `const_inputs`。
+- `attributes` 和 `const_inputs` 不得同名重复。
 
-```text
-primary.shape = [a, b]
-```
+Step 5.1 必须说明默认值如何注入 `attributes` 或 `const_inputs`，以及哪些 case/config 字段仅用于 dtype、format、shape 或 `meta`。
 
-必须写出可实现的方案，例如：
+### Output 要求
 
-```text
-rank_pair = choose_rank_pair(primary_rank_range, case_index)
-leading_axes = split_product(a, rank_pair.leading_rank)
-trailing_axes = split_product(b, rank_pair.trailing_rank)
-primary.shape = leading_axes + trailing_axes
-```
+`outputs` 章节必须说明每个 output 的 dtype、format、param_type 和 shape 派生规则。outputs 必须由 mapper 完整生成，后续脚本不得推导 outputs。
+
+optional output 不输出时必须保留原 output 名并写 `shape = null`。output 任何层级不得包含 `data_range`。
 
 ### S5_variable_semantics.md 输出契约
 
@@ -126,7 +119,7 @@ primary.shape = leading_axes + trailing_axes
 ```markdown
 # {op_name} Step 5 Variable Semantics
 
-> 本文件是 Step 5.2 的 mapper 代码指导书。Step 5.2 必须将本文规则翻译为 `S5_case_mapper.py`，不得重新设计变量语义、rank 覆盖策略、params 构造或 shape 组装方案。
+> 本文件是 Step 5.2 的 mapper 代码指导书。Step 5.2 必须将本文规则翻译为 `S5_case_mapper.py`，不得重新设计变量语义、rank 覆盖策略、execution value 构造或 shape 组装方案。
 > 正文说明使用中文；代码标识符、JSON 字段名、函数名、dtype 名称、源码变量名、case 字段名和伪代码变量名保持原文。
 
 ## dtype
@@ -142,15 +135,15 @@ primary.shape = leading_axes + trailing_axes
 说明主输入合法维度结构覆盖目标和主输入 rank 覆盖目标；若未覆盖 operator model 的完整 rank 范围，说明过滤后的 rank 集合或范围及原因。依赖 input 和 output 不作为独立覆盖目标。
 
 ## outputs
-说明 output dtype、shape、presence 规则。
+说明 output dtype、format、param_type、shape 和 optional placeholder 规则。optional output 不输出时保留 descriptor，并使用 `shape = null`。
 
-## params
-说明 mapped case 的 `params` 字段如何构造。`params` 是 TTK Kernel CSV `attributes` 列的候选值来源，只允许写入 operator attributes 和 `_def.cpp` 中 `.ValueDepend()` 标记的 const input values；默认值如何注入也必须在本节说明。
+## execution values
+说明 Mapper-v1 的 `attributes` 和 `const_inputs` 如何构造。`attributes` 只写 operator attributes，`const_inputs` 只写 `.ValueDepend()` 标记的 const input values；默认值如何注入也必须在本节说明。
 
-本节还必须明确哪些 case/config 字段仅用于 dtype、format、shape 或 `meta`，不得进入 `params`。白盒路径、tiling key、group、shape 构造变量、case 来源、网络来源等 tiling/router 信息和 mapper 审计字段必须放入 `meta`。
+本节还必须明确哪些 case/config 字段仅用于 dtype、format、shape 或 `meta`，不得进入 `attributes` 或 `const_inputs`。白盒路径、tiling key、group、shape 构造变量、case 来源、网络来源等 tiling/router 信息和 mapper 审计字段必须放入 `meta`。
 
 ## network mapping
-说明 network config 如何映射到 params、tensors 和 meta。
+说明 network config 如何映射到 `attributes`、`const_inputs`、`inputs`、`outputs` 和 `meta`。
 
 ## mapper notes
 说明边界条件、保留 meta 字段和禁止猜测项。
@@ -191,13 +184,9 @@ Step 5.1 只能从以下标准 data_range 中选择，禁止自造类型。
   "version": 1,
   "mode": "per_input_cyclic",
   "inputs": {
-    "x": {
+    "input_name": {
       "participates": true,
       "supported": ["zero", "extreme", "negative", "tiny_pos", "all_ones", "near_zero", "with_inf", "with_nan"]
-    },
-    "indices": {
-      "participates": false,
-      "supported": []
     }
   }
 }
@@ -207,23 +196,23 @@ Step 5.1 只能从以下标准 data_range 中选择，禁止自造类型。
 
 - `version` 固定为 `1`。
 - `mode` 固定为 `per_input_cyclic`。
-- `inputs` 必须覆盖算子的所有 input tensor，key 使用 input 名。
+- `inputs` 必须覆盖算子的所有 input descriptor，key 使用 input 名。
 - 每个 input 只包含 `participates` 和 `supported`。
 - `participates=true` 时，`supported` 写该 input 支持的标准非 `normal` data_range。
 - `participates=false` 时，`supported` 必须为 `[]`。
 
 `S5_data_range_policy.json` 不得包含 case 级内容：
 
-- mapped case 字段，如 `id`、`source`、`params`。
+- mapped case 字段，如 `id`、`source`、`attributes`、`const_inputs`。
 - tensor 实例内容，如 input/output shape、dtype、format、param_type、data_range。
 - low/high/empty/shape/range variants。
 - range 展开状态，如 `range_by_input`、`range_index` 或展开结果。
 
 Step 5.2 不生成或修改 `S5_data_range_policy.json`。Step 5.4 直接读取该文件，并由静态区执行 per-input cyclic expansion。
 
-## 输出 shape 规则
+## 输出 descriptor 规则
 
-优先使用 `S2P1_operator_model.json.outputs[*].shape`：
+优先使用 `S2P1_operator_model.json.outputs[*]` 中的 output dtype、shape、param_type 和 TensorList 信息：
 
 - `same_as_input`：直接复用对应 input shape。
 - `fixed`：使用固定 shape。
@@ -231,7 +220,7 @@ Step 5.2 不生成或修改 `S5_data_range_policy.json`。Step 5.4 直接读取�
 
 仅当 operator model 信息不足时，读取 `infershape.cpp` 的 output shape 片段。不得借此补 tiling、kernel、接口或 case 字段语义。
 
-output shape 派生规则必须写入 `S5_variable_semantics.md` 的 `outputs` 或 `input shapes` 相关章节，达到 Step 5.2 可直接实现 `derive_output_shapes(inputs, params, meta)` 的程度。
+output descriptor 派生规则必须写入 `S5_variable_semantics.md` 的 `outputs` 章节，达到 Step 5.2 可直接实现 `derive_outputs(inputs, attributes, const_inputs, meta)` 的程度。
 
 ## 完成条件
 
@@ -240,7 +229,8 @@ output shape 派生规则必须写入 `S5_variable_semantics.md` 的 `outputs` �
 - 若存在 product / shape_size / aligned_size 变量，已说明字段语义、axis group、rank 覆盖或过滤、shape 拆分方案、dependent input 规则和 output 派生关系。
 - 若不存在 shape 变量，已说明默认 shape 采样方案、rank 覆盖目标、单轴上限、元素量上限和 dependent input 派生规则。
 - `S5_variable_semantics.md` 已说明 input/output format 构造规则；默认 `ND`，存在 path/config format 约束时已说明如何按当前 case 写入对应 format。
-- `S5_variable_semantics.md` 已说明 mapped case 的 `params` 字段如何构造，以及哪些字段不进入 `params`。
+- `S5_variable_semantics.md` 已说明 `attributes` 与 `const_inputs` 如何构造，以及哪些字段不进入二者。
+- `S5_variable_semantics.md` 已说明 outputs 完整 descriptor 的生成规则，且能直接指导 `derive_outputs(...)` 实现。
 - `S5_data_range_policy.json` 已写入，且不包含 case 级内容或展开结果。
 - 若 Step 5.2 仍需自行猜测变量语义、rank 选择、axis group、shape 拆分或 output 派生规则，则 Step 5.1 未完成。
 
@@ -257,10 +247,4 @@ output shape 派生规则必须写入 `S5_variable_semantics.md` 的 `outputs` �
 - 禁止凭字段名猜测语义。
 - 禁止只写 representative 示例而不写 shape assembly plan。
 - 禁止把 Step 5.2 的 shape 组装设计留空，让 Step 5.2 自行发挥。
-- 禁止只说明 operator attributes 而不说明 mapped case `params` 字段如何构造。
-
-data_range 边界：
-
-- 禁止自造未定义 data_range。
-- 禁止把 `normal` 写入 policy 的 `supported`。
-- 禁止在 `S5_data_range_policy.json` 中写入 mapped case、tensor shape/dtype/format、outputs、low/high case 或展开结果。
+- 禁止把 shape、dtype、format、data_range、tiling/router 信息或 mapper 审计字段写入 `attributes` 或 `const_inputs`。

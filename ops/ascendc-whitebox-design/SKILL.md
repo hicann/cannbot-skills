@@ -24,7 +24,7 @@ metadata:
 - 算子源码存在于项目中（需包含 tiling 代码 + kernel 代码 + 接口定义）
 - Python 3.7+ 环境，无额外 pip 依赖
 - 产物写入 `tests/whitebox/`，重复执行会覆盖已有文件
-- TTK 模块（启用时）：项目需包含 `ops-test-kit/` 目录；TTK kernel 验收前会检查本地 TTK/CANN 环境和传入的 golden.py 中当前算子的 `__golden__["kernel"]` 注册，任一不满足时跳过 kernel 验收
+- TTK 模块（启用时）：项目需包含 `ops-test-kit/` 目录；kernel 验收使用 `--golden-mode Disable`，只验证 TTK 能消费 CSV、完成 kernel 编译并启动基本执行链路
 
 ## 工作流概览
 
@@ -124,6 +124,5 @@ Step 5 case mapper — 参数组合映射为可执行用例
 |   ├── `task-a/` | Phase 1 Task A 代码路径分析（overview + step1-tiling + step2-trace + step3-kernel + path-config-schema） |
 |   └── `task-d/` | Phase 2 Task D 参数推导（6 个子文档） |
 | `references/design-verifier/` | Step 3 Task D Contract Gate（单文件入口） |
-| `references/case-mapper/` | Step 5 case mapper（执行总纲 + 5 个子文档） |
-|   └── `01-mapping-spec.md` | Step 5a-pre 映射规格生成 |
+| `references/case-mapper/` | Step 5 Mapper-v1（执行总纲 + schema + 模板） |
 | `references/ttk-converter/` | TTK CSV 生成规则（执行总纲 + 3 个子文档） |

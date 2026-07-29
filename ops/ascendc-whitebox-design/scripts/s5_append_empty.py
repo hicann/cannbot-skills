@@ -8,7 +8,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
-"""Append Step 5.4 empty low cases and write final low cases."""
+"""Append Mapper-v1 empty low cases and write final S5_cases_low.json."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 _logger = logging.getLogger(__name__)
-
 
 INPUT_FILE = "S5_mapped_cases_low_shape.json"
 OUTPUT_FILE = "S5_cases_low.json"
@@ -48,127 +47,115 @@ def mapped_inputs(case: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return inputs
 
 
-def _validate_input_tensor(name: str, tensor: dict[str, Any], label: str) -> None:
-    if not isinstance(tensor.get("format"), str) or not tensor.get("format"):
-        raise ValueError(f"{label}: input {name}.format must be a non-empty string")
-    kind = tensor.get("kind")
-    if kind == "tensor":
-        shape = tensor.get("shape")
-        if not isinstance(shape, list) or not all(isinstance(dim, int) for dim in shape):
-            raise ValueError(f"{label}: input {name}.shape must be list[int]")
-    elif kind == "tensor_list":
-        tensors = tensor.get("tensors")
-        if not isinstance(tensor.get("tensor_count"), int) or not isinstance(tensors, list):
-            raise ValueError(f"{label}: input {name} tensor_list must contain tensor_count and tensors")
-        if tensor["tensor_count"] != len(tensors):
-            raise ValueError(f"{label}: input {name}.tensor_count must equal len(tensors)")
-        for child_index, child in enumerate(tensors):
-            if not isinstance(child, dict):
-                raise ValueError(f"{label}: input {name} child {child_index} must be an object")
-            if not isinstance(child.get("format"), str) or not child.get("format"):
-                raise ValueError(
-                    f"{label}: input {name} child {child_index}.format must be a non-empty string"
-                )
-    else:
-        raise ValueError(f"{label}: input {name}.kind must be tensor or tensor_list")
-
-
-def _validate_output_tensor(name: str, tensor: dict[str, Any], label: str) -> None:
-    if not isinstance(tensor, dict):
-        raise ValueError(f"{label}: output {name} must be an object")
-    if not isinstance(tensor.get("format"), str) or not tensor.get("format"):
-        raise ValueError(f"{label}: output {name}.format must be a non-empty string")
-
-
-def validate_case_schema(case: Any, label: str) -> dict[str, Any]:
-    if not isinstance(case, dict):
-        raise ValueError(f"{label}: case must be an object")
-    for field in ("id", "source", "params", "inputs", "outputs", "meta"):
-        if field not in case:
-            raise ValueError(f"{label}: missing {field}")
-    if not isinstance(case["id"], str) or not isinstance(case["source"], str):
-        raise ValueError(f"{label}: id and source must be strings")
-    if not isinstance(case["params"], dict) or not isinstance(case["outputs"], dict) \
-            or not isinstance(case["meta"], dict):
-        raise ValueError(f"{label}: params, outputs, and meta must be objects")
-    for name, tensor in mapped_inputs(case).items():
-        if not isinstance(tensor, dict):
-            raise ValueError(f"{label}: input {name} must be an object")
-        _validate_input_tensor(name, tensor, label)
-    for name, tensor in case["outputs"].items():
-        _validate_output_tensor(name, tensor, label)
-    return case
-
-
 def assert_unique_ids(cases: list[dict[str, Any]], label: str) -> None:
     seen: set[str] = set()
     for case in cases:
-        case_id = case["id"]
+        case_id = case.get("id")
+        if not isinstance(case_id, str):
+            raise ValueError(f"{label}: case id must be a string")
         if case_id in seen:
             raise ValueError(f"duplicate id in {label}: {case_id}")
         seen.add(case_id)
 
 
-def select_empty_seeds(shape_cases: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-    seeds: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
+def empty_tensor_list_descriptor(descriptor: dict[str, Any]) -> None:
+    descriptor["tensor_count"] = 0
+    descriptor["tensors"] = []
+
+
+def empty_tensor_descriptor(descriptor: dict[str, Any]) -> None:
+    shape = descriptor.get("shape")
+    if isinstance(shape, list):
+        if shape:
+            descriptor["shape"] = [0, *shape[1:]]
+        else:
+            descriptor["shape"] = [0]
+    else:
+        descriptor["shape"] = [0]
+
+
+def output_matches_input(output: dict[str, Any], input_descriptor: dict[str, Any]) -> bool:
+    if output.get("kind") != input_descriptor.get("kind"):
+        return False
+    if output.get("kind") == "tensor_list":
+        return output.get("tensor_count") == input_descriptor.get("tensor_count")
+    return output.get("shape") == input_descriptor.get("shape")
+
+
+def empty_matching_outputs(case: dict[str, Any], seed: dict[str, Any], input_names: tuple[str, ...]) -> None:
+    for input_name in input_names:
+        seed_input = mapped_inputs(seed)[input_name]
+        for output in case.get("outputs", {}).values():
+            if not isinstance(output, dict):
+                continue
+            if not output_matches_input(output, seed_input):
+                continue
+            if output.get("kind") == "tensor_list":
+                empty_tensor_list_descriptor(output)
+            elif output.get("kind") == "tensor":
+                empty_tensor_descriptor(output)
+
+
+def tensor_list_seed_groups(shape_cases: list[dict[str, Any]]) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
+    result: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+    seen: set[tuple[str, ...]] = set()
     for case in shape_cases:
-        for input_name, tensor in mapped_inputs(case).items():
-            if input_name in seeds:
-                continue
-            if tensor.get("kind") == "tensor_list":
-                seeds[input_name] = case
-                order.append(input_name)
-                continue
-            shape = tensor.get("shape")
-            if tensor.get("kind") == "tensor" and isinstance(shape, list) and shape:
-                seeds[input_name] = case
-                order.append(input_name)
-    return [(input_name, seeds[input_name]) for input_name in order]
+        names = tuple(name for name, desc in mapped_inputs(case).items() if desc.get("kind") == "tensor_list")
+        if names and names not in seen:
+            seen.add(names)
+            result.append((names, case))
+    return result
 
 
-def make_empty_case(seed: dict[str, Any], input_name: str, index: int) -> dict[str, Any]:
+def tensor_seeds(shape_cases: list[dict[str, Any]]) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
+    result: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+    seen: set[str] = set()
+    for case in shape_cases:
+        for name, desc in mapped_inputs(case).items():
+            if name in seen or desc.get("kind") != "tensor":
+                continue
+            seen.add(name)
+            result.append(((name,), case))
+    return result
+
+
+def make_empty_case(seed: dict[str, Any], input_names: tuple[str, ...], index: int) -> dict[str, Any]:
     case = clone_case(seed)
     case["id"] = f"low_case_empty_{index:02d}"
     case["source"] = "empty"
     meta = case.setdefault("meta", {})
     if not isinstance(meta, dict):
-        raise ValueError(f"{seed['id']}: meta must be an object")
-    meta.update({"base_id": seed["id"], "variant_kind": "empty", "empty_input": input_name})
+        raise ValueError(f"{seed.get('id', '<unknown>')}: meta must be an object")
+    meta.update({"base_id": seed["id"], "variant_kind": "empty", "empty_inputs": list(input_names)})
 
-    target = mapped_inputs(case)[input_name]
-    if target.get("kind") == "tensor_list":
-        target["tensor_count"] = 0
-        target["tensors"] = []
-        meta["empty_mode"] = "tensor_list_empty"
-    else:
-        shape = target.get("shape")
-        if not isinstance(shape, list) or not shape:
-            raise ValueError(f"{seed['id']}: input {input_name} has no non-empty shape")
-        target["shape"] = list(shape)
-        target["shape"][0] = 0
-        meta.update({"empty_mode": "shape_dim_0", "empty_axis": 0})
-    return validate_case_schema(case, case["id"])
+    for input_name in input_names:
+        descriptor = mapped_inputs(case)[input_name]
+        if descriptor.get("kind") == "tensor_list":
+            empty_tensor_list_descriptor(descriptor)
+        elif descriptor.get("kind") == "tensor":
+            empty_tensor_descriptor(descriptor)
+        else:
+            raise ValueError(f"{case['id']}: unsupported input kind for {input_name}")
+    empty_matching_outputs(case, seed, input_names)
+    return case
 
 
 def build_final_low_cases(shape_cases: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     if not shape_cases:
         raise ValueError(f"{INPUT_FILE}: must contain at least one shape case")
-    normalized = [validate_case_schema(case, str(case.get("id", "<unknown>"))) for case in shape_cases]
-    non_shape = [case.get("id", "<unknown>") for case in normalized if case.get("source") != "shape"]
+    non_shape = [case.get("id", "<unknown>") for case in shape_cases if case.get("source") != "shape"]
     if non_shape:
-        raise ValueError(f"{INPUT_FILE}: expected only source='shape', got non-shape cases {non_shape}")
-
-    seeds = select_empty_seeds(normalized)
-    empty_cases = [make_empty_case(seed, input_name, index) for index, (input_name, seed) in enumerate(seeds)]
-    final_cases = normalized + empty_cases
+        raise ValueError(f"{INPUT_FILE}: expected source='shape', got {non_shape}")
+    seeds = tensor_list_seed_groups(shape_cases) + tensor_seeds(shape_cases)
+    empty_cases = [make_empty_case(seed, input_names, index) for index, (input_names, seed) in enumerate(seeds)]
+    final_cases = shape_cases + empty_cases
     assert_unique_ids(final_cases, OUTPUT_FILE)
     return final_cases, len(empty_cases)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    parser = argparse.ArgumentParser(description="Append empty low cases and write final Step 5 low cases.")
+    parser = argparse.ArgumentParser(description="Append Mapper-v1 empty low cases.")
     parser.add_argument("--whitebox-dir", required=True, help=f"Directory containing {INPUT_FILE}.")
     parser.add_argument("--force", action="store_true", help=f"Overwrite existing {OUTPUT_FILE}.")
     args = parser.parse_args()
@@ -177,7 +164,6 @@ def main() -> None:
     output_path = whitebox_dir / OUTPUT_FILE
     if output_path.exists() and not args.force:
         raise SystemExit(f"{OUTPUT_FILE} already exists; use --force to regenerate it")
-
     raw_cases = load_json(whitebox_dir, INPUT_FILE)
     if not isinstance(raw_cases, list):
         raise SystemExit(f"{INPUT_FILE}: root must be a JSON list")
@@ -185,8 +171,8 @@ def main() -> None:
     dump_json(whitebox_dir, OUTPUT_FILE, final_cases)
     _logger.info("PASS: appended empty cases")
     _logger.info(
-        f"input={INPUT_FILE} output={OUTPUT_FILE} shape_cases={len(raw_cases)}"
-        f" empty_cases_added={empty_count} low_cases={len(final_cases)}"
+        f"input={INPUT_FILE} output={OUTPUT_FILE} shape_cases={len(raw_cases)} "
+        f"empty_cases_added={empty_count} low_cases={len(final_cases)}"
     )
 
 

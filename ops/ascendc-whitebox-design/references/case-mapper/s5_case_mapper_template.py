@@ -45,36 +45,76 @@ def dump_json(path: str, data: Any) -> None:
 
 
 def input_tensor(
-    dtype: str, shape: list[int], param_type: str = "REQUIRED",
-    data_range: str = "normal", **extra: Any,
+    dtype: str,
+    shape: list[int] | None,
+    param_type: str = "REQUIRED",
+    data_range: str = "normal",
+    fmt: str = "ND",
+    **extra: Any,
 ) -> dict[str, Any]:
     tensor = {
-        "kind": "tensor", "dtype": dtype, "shape": list(shape),
-        "param_type": param_type, "data_range": data_range,
+        "kind": "tensor",
+        "dtype": dtype,
+        "format": fmt,
+        "shape": None if shape is None else list(shape),
+        "param_type": param_type,
+        "data_range": data_range,
     }
     tensor.update(extra)
     return tensor
 
 
 def dynamic_input_tensor(
-    dtype: str, tensors: list[dict[str, Any]],
-    data_range: str = "normal", **extra: Any,
+    dtype: str,
+    tensors: list[dict[str, Any]],
+    data_range: str = "normal",
+    fmt: str = "ND",
+    **extra: Any,
 ) -> dict[str, Any]:
     tensor = {
-        "kind": "tensor_list", "param_type": "DYNAMIC", "dtype": dtype,
-        "tensor_count": len(tensors), "tensors": tensors, "data_range": data_range,
+        "kind": "tensor_list",
+        "dtype": dtype,
+        "format": fmt,
+        "param_type": "DYNAMIC",
+        "tensor_count": len(tensors),
+        "data_range": data_range,
+        "tensors": tensors,
     }
     tensor.update(extra)
     return tensor
 
 
 def output_tensor(
-    dtype: str, shape: list[int], param_type: str = "REQUIRED",
-    present: bool = True, **extra: Any,
+    dtype: str,
+    shape: list[int] | None,
+    param_type: str = "REQUIRED",
+    fmt: str = "ND",
+    **extra: Any,
 ) -> dict[str, Any]:
     tensor = {
-        "kind": "tensor", "dtype": dtype, "shape": list(shape),
-        "param_type": param_type, "present": present,
+        "kind": "tensor",
+        "dtype": dtype,
+        "format": fmt,
+        "shape": None if shape is None else list(shape),
+        "param_type": param_type,
+    }
+    tensor.update(extra)
+    return tensor
+
+
+def output_tensor_list(
+    dtype: str,
+    tensors: list[dict[str, Any]],
+    fmt: str = "ND",
+    **extra: Any,
+) -> dict[str, Any]:
+    tensor = {
+        "kind": "tensor_list",
+        "dtype": dtype,
+        "format": fmt,
+        "param_type": "DYNAMIC",
+        "tensor_count": len(tensors),
+        "tensors": tensors,
     }
     tensor.update(extra)
     return tensor
@@ -107,9 +147,9 @@ def mapped_inputs(case: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _reset_tensor_range(tensor: dict[str, Any]) -> None:
     tensor["data_range"] = "normal"
-    if tensor.get("param_type") == "DYNAMIC":
+    if tensor.get("kind") == "tensor_list":
         for child in tensor.get("tensors", []):
-            if isinstance(child, dict):
+            if isinstance(child, dict) and "data_range" in child:
                 child["data_range"] = "normal"
 
 
@@ -120,64 +160,130 @@ def normalize_input_ranges(case: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _require_exact_keys(obj: dict[str, Any], expected: set[str], label: str) -> None:
+    actual = set(obj.keys())
+    if actual != expected:
+        raise ValueError(f"{label}: expected keys {sorted(expected)}, got {sorted(actual)}")
+
+
+def _validate_tensor_shape(shape: Any, label: str) -> None:
+    if shape is None:
+        return
+    if not isinstance(shape, list) or not all(isinstance(dim, int) for dim in shape):
+        raise ValueError(f"{label}: shape must be a list[int] or null")
+
+
+def _validate_single_tensor(tensor: dict[str, Any], label: str, *, allow_data_range: bool) -> None:
+    expected = {"kind", "dtype", "format", "shape", "param_type"}
+    if allow_data_range:
+        expected.add("data_range")
+    _require_exact_keys(tensor, expected, label)
+    _validate_tensor_shape(tensor.get("shape"), label)
+    if not isinstance(tensor.get("param_type"), str) or not tensor["param_type"]:
+        raise ValueError(f"{label}: param_type must be a non-empty string")
+    if allow_data_range:
+        if not isinstance(tensor.get("data_range"), str) or not tensor["data_range"]:
+            raise ValueError(f"{label}: data_range must be a non-empty string")
+    elif "data_range" in tensor:
+        raise ValueError(f"{label}: data_range is not allowed")
+
+
+def _validate_tensor_list_children(tensor: dict[str, Any], label: str, *, allow_data_range: bool) -> None:
+    child_expected = {"kind", "dtype", "format", "shape"}
+    if allow_data_range:
+        child_expected.add("data_range")
+    for child_index, child in enumerate(tensor["tensors"]):
+        if not isinstance(child, dict):
+            raise ValueError(f"{label}: child {child_index} must be an object")
+        _require_exact_keys(child, child_expected, f"{label}: child {child_index}")
+        _validate_tensor_shape(child.get("shape"), f"{label}: child {child_index}")
+        if child.get("kind") != "tensor":
+            raise ValueError(f"{label}: child {child_index} kind must be tensor")
+        if not isinstance(child.get("dtype"), str) or not child["dtype"]:
+            raise ValueError(f"{label}: child {child_index} dtype must be a non-empty string")
+        if not isinstance(child.get("format"), str) or not child["format"]:
+            raise ValueError(f"{label}: child {child_index} format must be a non-empty string")
+        if allow_data_range:
+            if not isinstance(child.get("data_range"), str) or not child["data_range"]:
+                raise ValueError(f"{label}: child {child_index} data_range must be a non-empty string")
+        elif "data_range" in child:
+            raise ValueError(f"{label}: child {child_index} data_range is not allowed")
+
+
+def _validate_tensor_list_descriptor(tensor: dict[str, Any], label: str, *, allow_data_range: bool) -> None:
+    expected = {"kind", "dtype", "format", "param_type", "tensor_count", "tensors"}
+    if allow_data_range:
+        expected.add("data_range")
+    _require_exact_keys(tensor, expected, label)
+    if tensor.get("param_type") != "DYNAMIC":
+        raise ValueError(f"{label}: param_type must be DYNAMIC")
+    if not isinstance(tensor.get("tensor_count"), int) or tensor["tensor_count"] < 0:
+        raise ValueError(f"{label}: tensor_count must be a non-negative int")
+    if not isinstance(tensor.get("tensors"), list):
+        raise ValueError(f"{label}: tensors must be a list")
+    if tensor["tensor_count"] != len(tensor["tensors"]):
+        raise ValueError(f"{label}: tensor_count must equal len(tensors)")
+    if allow_data_range:
+        if not isinstance(tensor.get("data_range"), str) or not tensor["data_range"]:
+            raise ValueError(f"{label}: data_range must be a non-empty string")
+    elif "data_range" in tensor:
+        raise ValueError(f"{label}: data_range is not allowed")
+    _validate_tensor_list_children(tensor, label, allow_data_range=allow_data_range)
+
+
+def _validate_tensor_descriptor(
+    tensor: dict[str, Any], label: str, *, allow_data_range: bool, kind: str
+) -> None:
+    if tensor.get("kind") != kind:
+        raise ValueError(f"{label}: kind must be {kind}")
+    if not isinstance(tensor.get("dtype"), str) or not tensor["dtype"]:
+        raise ValueError(f"{label}: dtype must be a non-empty string")
+    if not isinstance(tensor.get("format"), str) or not tensor["format"]:
+        raise ValueError(f"{label}: format must be a non-empty string")
+    if kind == "tensor":
+        _validate_single_tensor(tensor, label, allow_data_range=allow_data_range)
+    else:
+        _validate_tensor_list_descriptor(tensor, label, allow_data_range=allow_data_range)
+
+
 def _validate_mapped_case_fields(case: dict[str, Any], label: str) -> None:
     if not isinstance(case, dict):
         raise ValueError(f"{label}: case must be an object")
-    for field in ("id", "source", "params", "inputs", "outputs", "meta"):
-        if field not in case:
-            raise ValueError(f"{label}: missing {field}")
+    expected = {"id", "source", "attributes", "const_inputs", "inputs", "outputs", "meta"}
+    _require_exact_keys(case, expected, label)
     if not isinstance(case["id"], str):
         raise ValueError(f"{label}: id must be a string")
     if not isinstance(case["source"], str):
         raise ValueError(f"{label}: source must be a string")
-    if not isinstance(case["params"], dict) or not isinstance(case["meta"], dict):
-        raise ValueError(f"{label}: params and meta must be objects")
+    if not isinstance(case["attributes"], dict) or not isinstance(case["const_inputs"], dict):
+        raise ValueError(f"{label}: attributes and const_inputs must be objects")
+    if not isinstance(case["inputs"], dict) or not isinstance(case["outputs"], dict):
+        raise ValueError(f"{label}: inputs and outputs must be objects")
+    if not isinstance(case["meta"], dict):
+        raise ValueError(f"{label}: meta must be an object")
     if "supported_data_ranges" in case["meta"]:
         raise ValueError(f"{label}: meta.supported_data_ranges is not allowed")
-    if not isinstance(case.get("inputs"), dict) or not isinstance(case.get("outputs"), dict):
-        raise ValueError(f"{label}: inputs and outputs must be objects")
-
-
-def _validate_dynamic_input(name: str, tensor: dict[str, Any], label: str) -> None:
-    if tensor.get("kind") != "tensor_list" or tensor.get("param_type") != "DYNAMIC":
-        raise ValueError(f"{label}: dynamic input {name} must have kind tensor_list and param_type DYNAMIC")
-    if "tensor_count" not in tensor or "tensors" not in tensor:
-        raise ValueError(f"{label}: dynamic input {name} missing tensor_count or tensors")
-    if tensor.get("tensor_count") != len(tensor.get("tensors", [])):
-        raise ValueError(f"{label}: dynamic input {name} tensor_count must equal len(tensors)")
-    for child_index, child in enumerate(tensor.get("tensors", [])):
-        if not isinstance(child, dict):
-            raise ValueError(f"{label}: dynamic input {name} child {child_index} must be an object")
-        for field in ("kind", "dtype", "shape", "data_range"):
-            if field not in child:
-                raise ValueError(f"{label}: dynamic input {name} child {child_index} missing {field}")
-        if child.get("kind") != "tensor":
-            raise ValueError(f"{label}: dynamic input {name} child {child_index} kind must be tensor")
 
 
 def _validate_mapped_input(name: str, tensor: dict[str, Any], label: str) -> None:
     if not isinstance(tensor, dict):
         raise ValueError(f"{label}: input {name} must be an object")
-    for field in ("kind", "dtype", "param_type", "data_range"):
-        if field not in tensor:
-            raise ValueError(f"{label}: input {name} missing {field}")
-    if tensor.get("kind") == "tensor_list" or tensor.get("param_type") == "DYNAMIC":
-        _validate_dynamic_input(name, tensor, label)
-    elif "shape" not in tensor:
-        raise ValueError(f"{label}: input {name} missing shape")
-    elif tensor.get("kind") != "tensor":
-        raise ValueError(f"{label}: input {name} kind must be tensor")
+    kind = tensor.get("kind")
+    if kind == "tensor_list" or tensor.get("param_type") == "DYNAMIC":
+        _validate_tensor_descriptor(tensor, f"{label}: input {name}", allow_data_range=True, kind="tensor_list")
+    else:
+        _validate_tensor_descriptor(tensor, f"{label}: input {name}", allow_data_range=True, kind="tensor")
 
 
 def _validate_mapped_outputs(outputs: dict[str, Any], label: str) -> None:
     for name, tensor in outputs.items():
         if not isinstance(tensor, dict):
             raise ValueError(f"{label}: output {name} must be an object")
-        for field in ("kind", "dtype", "shape", "param_type", "present"):
-            if field not in tensor:
-                raise ValueError(f"{label}: output {name} missing {field}")
-        if tensor.get("kind") != "tensor":
-            raise ValueError(f"{label}: output {name} kind must be tensor")
+        kind = tensor.get("kind")
+        if kind == "tensor_list" or tensor.get("param_type") == "DYNAMIC":
+            _validate_tensor_descriptor(tensor, f"{label}: output {name}", allow_data_range=False, kind="tensor_list")
+        else:
+            _validate_tensor_descriptor(tensor, f"{label}: output {name}", allow_data_range=False, kind="tensor")
 
 
 def validate_mapped_case(case: Any, label: str) -> dict[str, Any]:
@@ -291,8 +397,13 @@ def make_network_shape_case(case: dict[str, Any]) -> dict[str, Any]:
     raise NotImplementedError
 
 
-def derive_output_shapes(inputs: dict[str, Any], params: dict[str, Any], meta: dict[str, Any]) -> dict[str, list[int]]:
-    """TODO(operator-specific): derive output shapes from complete input tensors."""
+def derive_outputs(
+    inputs: dict[str, Any],
+    attributes: dict[str, Any],
+    const_inputs: dict[str, Any],
+    meta: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """TODO(operator-specific): derive complete V1 output descriptors."""
     raise NotImplementedError
 
 

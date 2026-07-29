@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import logging
 import os
@@ -119,6 +118,9 @@ def check_ops_test_kit(path: Path) -> dict[str, Any]:
 
 def try_ttk_current_env(ops_test_kit_path: Path) -> dict[str, Any]:
     result = run_command(["python3", "-m", "ttk", "kernel", "--help"], ops_test_kit_path)
+    if passed(result):
+        result["stdout_tail"] = ""
+        result["stderr_tail"] = ""
     return {
         "status": "passed" if passed(result) else "failed",
         "mode": "current_env",
@@ -139,6 +141,9 @@ def try_ttk_with_setenv(ops_test_kit_path: Path, setenv_candidates: list[Path]) 
             "status": "passed" if passed(result) else "failed",
             "command": result,
         }
+        if passed(result):
+            result["stdout_tail"] = ""
+            result["stderr_tail"] = ""
         attempts.append(attempt)
         if passed(result):
             return {
@@ -150,77 +155,6 @@ def try_ttk_with_setenv(ops_test_kit_path: Path, setenv_candidates: list[Path]) 
     return {"status": "failed", "mode": "source_setenv", "attempts": attempts}
 
 
-def _golden_result(status: str, reason: str, path: Path, op_name: str, detail: str) -> dict[str, Any]:
-    return {
-        "status": status,
-        "reason": reason,
-        "path": str(path),
-        "op_name": op_name,
-        "detail": detail,
-    }
-
-
-def load_golden_registry(golden_path: Path) -> Any:
-    try:
-        tree = ast.parse(golden_path.read_text(encoding="utf-8"), filename=str(golden_path))
-    except Exception as exc:  # noqa: BLE001 - report parse/read failure
-        raise RuntimeError(f"failed to read or parse golden.py: {exc}") from exc
-
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if any(isinstance(target, ast.Name) and target.id == "__golden__" for target in node.targets):
-            try:
-                return ast.literal_eval(node.value)
-            except Exception as exc:  # noqa: BLE001 - report literal failure
-                raise RuntimeError(f"failed to evaluate __golden__ literal: {exc}") from exc
-    return None
-
-
-def check_golden(golden_path_arg: Optional[str], op_name: Optional[str]) -> dict[str, Any]:
-    if not golden_path_arg or not op_name:
-        return {
-            "status": "failed",
-            "reason": "golden_args_missing",
-            "path": "",
-            "op_name": op_name or "",
-            "detail": "--golden-path and --op-name are required for TTK kernel gate",
-        }
-
-    golden_path = Path(golden_path_arg).resolve()
-    if not golden_path.is_file():
-        return _golden_result("failed", "golden_missing", golden_path, op_name, "golden.py does not exist")
-
-    try:
-        registry = load_golden_registry(golden_path)
-    except RuntimeError as exc:
-        return _golden_result("failed", "golden_load_failed", golden_path, op_name, str(exc))
-
-    if registry is None:
-        return _golden_result(
-            "failed", "golden_missing___golden__", golden_path, op_name,
-            "missing module-level __golden__",
-        )
-    if not isinstance(registry, dict):
-        return _golden_result("failed", "golden_missing___golden__", golden_path, op_name, "__golden__ must be a dict")
-
-    kernel_registry = registry.get("kernel")
-    if not isinstance(kernel_registry, dict):
-        return _golden_result(
-            "failed", "golden_kernel_missing", golden_path, op_name,
-            "__golden__['kernel'] must be a dict",
-        )
-    if op_name not in kernel_registry:
-        return _golden_result(
-            "failed",
-            "golden_op_unregistered",
-            golden_path,
-            op_name,
-            f"op_name {op_name!r} is not registered in __golden__['kernel']",
-        )
-    return _golden_result("passed", "passed", golden_path, op_name, "assets golden is registered for kernel mode")
-
-
 def build_kernel_gate(report: dict[str, Any]) -> dict[str, str]:
     ops_check = report.get("checks", {}).get("ops_test_kit_path", {})
     if ops_check.get("status") != "passed":
@@ -229,10 +163,6 @@ def build_kernel_gate(report: dict[str, Any]) -> dict[str, str]:
     cann_env = report.get("checks", {}).get("cann_env", {})
     if cann_env.get("status") not in ("passed", "passed_after_source"):
         return {"status": "skipped", "reason": "env_unavailable"}
-
-    golden = report.get("checks", {}).get("golden", {})
-    if golden.get("status") != "passed":
-        return {"status": "skipped", "reason": str(golden.get("reason") or "golden_unavailable")}
 
     return {"status": "passed", "reason": "passed"}
 
@@ -247,7 +177,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     ops_check = check_ops_test_kit(ops_test_kit_path)
     report["checks"]["ops_test_kit_path"] = ops_check
-    report["checks"]["golden"] = check_golden(args.golden_path, args.op_name)
     if ops_check["status"] != "passed":
         report["kernel_gate"] = build_kernel_gate(report)
         return report
@@ -294,8 +223,6 @@ def parse_args() -> argparse.Namespace:
         help="Directory where ttk_precheck_report.json will be written.",
     )
     parser.add_argument("--ops-test-kit-path", required=True, help="Path to ops-test-kit repository.")
-    parser.add_argument("--golden-path", required=True, help="Path to assets golden.py for the operator.")
-    parser.add_argument("--op-name", required=True, help="Normalized operator name registered in __golden__['kernel'].")
     parser.add_argument("--setenv-path", default=None, help="Optional explicit CANN set_env.sh or setenv.sh path.")
     return parser.parse_args()
 

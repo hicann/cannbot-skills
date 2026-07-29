@@ -41,7 +41,6 @@ class KernelRunCase:
     csv_path: Path
     result_path: Path
     case_name: str
-    log_path: Path
 
 
 @dataclass
@@ -60,8 +59,6 @@ class KernelExecEnv:
 @dataclass
 class CsvGenPaths:
     generate_script: Path
-    operator_model: Path
-    op_def_cpp: Path
     low_cases: Path
     high_cases: Path
     low_csv: Path
@@ -73,7 +70,6 @@ class PrecheckPaths:
     precheck_script: Path
     whitebox_dir: Path
     ops_test_kit_path: Path
-    golden_path: Path
     precheck_report: Path
 
 
@@ -91,40 +87,24 @@ def tail(text: str, limit: int = 4000) -> str:
     return text[-limit:]
 
 
-def run_command(command: list[str], cwd: Path | None = None, log_path: Path | None = None) -> dict[str, Any]:
+def run_command(command: list[str], cwd: Path | None = None) -> dict[str, Any]:
     start = now_s()
     try:
-        if log_path is None:
-            proc = subprocess.run(
-                command,
-                cwd=str(cwd) if cwd else None,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            stdout = proc.stdout
-            stderr = proc.stderr
-        else:
-            with log_path.open("w", encoding="utf-8") as log_file:
-                proc = subprocess.run(
-                    command,
-                    cwd=str(cwd) if cwd else None,
-                    text=True,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                )
-            stdout = ""
-            stderr = ""
+        proc = subprocess.run(
+            command,
+            cwd=str(cwd) if cwd else None,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
         return {
             "cmd": command_string(command),
             "cwd": str(cwd) if cwd else os.getcwd(),
             "returncode": proc.returncode,
             "duration_s": round(now_s() - start, 3),
-            "stdout_tail": tail(stdout),
-            "stderr_tail": tail(stderr),
-            "log_path": str(log_path) if log_path else None,
+            "stdout_tail": tail(proc.stdout),
+            "stderr_tail": tail(proc.stderr),
         }
     except Exception as exc:  # noqa: BLE001 - surfaced in report
         return {
@@ -134,15 +114,13 @@ def run_command(command: list[str], cwd: Path | None = None, log_path: Path | No
             "duration_s": round(now_s() - start, 3),
             "stdout_tail": "",
             "stderr_tail": str(exc),
-            "log_path": str(log_path) if log_path else None,
         }
 
 
-def run_shell(command: str, cwd: Path | None = None, log_path: Path | None = None) -> dict[str, Any]:
+def run_shell(command: str, cwd: Path | None = None) -> dict[str, Any]:
     result = run_command(
         ["bash", "-lc", command],  # noqa: G.EDV.04 - shell required for source builtins
         cwd=cwd,
-        log_path=log_path,
     )
     result["cmd"] = command
     return result
@@ -198,104 +176,208 @@ def pick_case_name(csv_path: Path) -> str:
     return names[len(names) // 2]
 
 
-def read_log(path: Path) -> str:
-    if not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8", errors="replace")
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
 
 
-def _build_result_warnings(checks: dict[str, Any]) -> list[str]:
-    warnings = []
-    if not checks["perf_pass"]:
-        warnings.append("perf_status_not_pass")
-    if not checks["precision_pass"]:
-        warnings.append("precision_status_not_pass")
-    if not checks["memory_oob_pass"]:
-        warnings.append("memory_oob_status_not_pass")
-    if not checks["loaded_custom_golden"]:
-        warnings.append("custom_golden_not_loaded")
-    if not checks["status_pass_in_log"]:
-        warnings.append("status_log_not_pass")
-    if not checks["precision_pass_in_log"]:
-        warnings.append("precision_log_not_pass")
-    return warnings
+def _select_result_row(rows: list[dict[str, str]], testcase_name: str) -> dict[str, str] | None:
+    for row in rows:
+        if row.get("testcase_name") == testcase_name:
+            return row
+    return None
 
 
-def _read_csv_row(result_csv: Path) -> dict[str, str] | None:
-    with result_csv.open("r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
-    return rows[0] if rows else None
+def _dyn_precision_suppressed(value: str) -> bool:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    return bool(parts) and all(part == "SUPPRESSED" for part in parts)
 
 
-def _build_perf_checks(row: dict[str, str]) -> dict[str, Any]:
-    perf_status = row.get("perf_status", "")
-    precision_status = row.get("precision_status", "")
-    memory_oob_status = row.get("memory_oob_status", "")
-    return {
-        "perf_status": perf_status,
-        "precision_status": precision_status,
-        "memory_oob_status": memory_oob_status,
-        "perf_pass": perf_status == "PASS",
-        "precision_pass": precision_status == "PASS",
-        "memory_oob_pass": memory_oob_status in ("", "PASS"),
-    }
-
-
-def _build_log_checks(log_text: str, op_name: str) -> dict[str, Any]:
-    return {
-        "loaded_custom_golden": f"Loaded custom golden: kernel.{op_name}" in log_text,
-        "compile_success": "Compilation Result: SUCC" in log_text,
-        "status_pass_in_log": "STATUS: PASS" in log_text,
-        "precision_pass_in_log": "PRECISION_STATUS: PASS" in log_text,
-    }
-
-
-def inspect_result(result_csv: Path, log_path: Path, op_name: str) -> dict[str, Any]:
+def inspect_result(result_csv: Path, testcase_name: str, command_result: dict[str, Any]) -> dict[str, Any]:
+    failures: list[str] = []
     checks: dict[str, Any] = {
+        "command_returncode": command_result.get("returncode"),
+        "command_returncode_zero": command_result.get("returncode") == 0,
         "result_csv_exists": result_csv.is_file(),
-        "log_exists": log_path.is_file(),
+        "row_count": 0,
+        "row_found": False,
+        "required_fields_present": False,
+        "dyn_precision": "",
+        "memory_oob_status": "",
     }
+
+    if not checks["command_returncode_zero"]:
+        failures.append("TTK kernel command returncode must be 0")
     if not result_csv.is_file():
-        return {
-            "status": "failed",
-            "execution_pass": False,
-            "checks": checks,
-            "warnings": [],
-            "reason": f"missing result csv: {result_csv}",
-        }
+        failures.append("result CSV does not exist")
+        return _build_inspection(result_csv, testcase_name, None, checks, failures)
 
-    row = _read_csv_row(result_csv)
+    try:
+        rows = _read_csv_rows(result_csv)
+    except Exception as exc:  # noqa: BLE001 - surfaced in module report
+        failures.append(f"failed to read result CSV: {exc}")
+        return _build_inspection(result_csv, testcase_name, None, checks, failures)
+
+    checks["row_count"] = len(rows)
+    if not rows:
+        failures.append("result CSV has no data rows")
+        return _build_inspection(result_csv, testcase_name, None, checks, failures)
+
+    row = _select_result_row(rows, testcase_name)
+    checks["row_found"] = row is not None
     if row is None:
-        return {
-            "status": "failed",
-            "execution_pass": False,
-            "checks": checks,
-            "warnings": [],
-            "reason": f"empty result csv: {result_csv}",
+        failures.append("expected testcase row not found")
+        return _build_inspection(result_csv, testcase_name, None, checks, failures)
+
+    missing_fields = [field for field in ("testcase_name", "dyn_precision", "memory_oob_status") if field not in row]
+    checks["required_fields_present"] = not missing_fields
+    if missing_fields:
+        failures.append("missing required fields: " + ", ".join(missing_fields))
+
+    dyn_precision = row.get("dyn_precision", "").strip()
+    checks["dyn_precision"] = dyn_precision
+    if not missing_fields and not _dyn_precision_suppressed(dyn_precision):
+        failures.append("dyn_precision must be SUPPRESSED under --golden-mode Disable")
+
+    memory_oob_status = row.get("memory_oob_status", "").strip()
+    checks["memory_oob_status"] = memory_oob_status
+    if not missing_fields and memory_oob_status not in ("", "PASS"):
+        failures.append("memory_oob_status must be PASS or empty")
+
+    return _build_inspection(result_csv, testcase_name, row, checks, failures)
+
+
+def _build_inspection(
+    result_csv: Path,
+    testcase_name: str,
+    row: dict[str, str] | None,
+    checks: dict[str, Any],
+    failures: list[str],
+) -> dict[str, Any]:
+    observed_fields = {}
+    if row is not None:
+        observed_fields = {
+            field: row.get(field, "")
+            for field in ("dyn_precision", "perf_status", "memory_oob_status")
+            if field in row
         }
-
-    checks.update(_build_perf_checks(row))
-    log_text = read_log(log_path)
-    checks.update(_build_log_checks(log_text, op_name))
-    warnings = _build_result_warnings(checks)
-
-    execution_pass = (
-        checks["result_csv_exists"]
-        and checks["log_exists"]
-        and checks["compile_success"]
-    )
-    if not execution_pass:
-        status = "failed"
-    elif warnings:
-        status = "passed_with_warnings"
-    else:
-        status = "passed"
     return {
-        "status": status,
-        "execution_pass": execution_pass,
+        "status": "failed" if failures else "passed",
+        "execution_pass": not failures,
+        "result_csv": str(result_csv),
+        "expected_testcase": testcase_name,
+        "selected_testcase": row.get("testcase_name", "") if row else "",
         "checks": checks,
-        "warnings": warnings,
-        "row": row,
+        "observed_fields": observed_fields,
+        "pass_conditions": [
+            "TTK kernel command returncode is 0",
+            "result CSV exists",
+            "target testcase row exists",
+            "required fields exist: testcase_name, dyn_precision, memory_oob_status",
+            "dyn_precision is SUPPRESSED under --golden-mode Disable",
+            "memory_oob_status is PASS or empty",
+        ],
+        "failures": failures,
+    }
+
+
+def acceptance_criteria() -> dict[str, Any]:
+    return {
+        "source": "result_csv_inline_analysis",
+        "required_result_fields": ["testcase_name", "dyn_precision", "memory_oob_status"],
+        "accepted_dyn_precision": ["SUPPRESSED"],
+        "accepted_memory_oob_status": ["", "PASS"],
+        "perf_status_required": False,
+    }
+
+
+def _step(report: dict[str, Any], name: str) -> dict[str, Any]:
+    step = report.get("steps", {}).get(name, {})
+    return step if isinstance(step, dict) else {}
+
+
+def _inspection(report: dict[str, Any], name: str) -> dict[str, Any]:
+    inspection = _step(report, name).get("inspection", {})
+    return inspection if isinstance(inspection, dict) else {}
+
+
+def _first_issue_reason(report: dict[str, Any]) -> str:
+    issues = report.get("issues", [])
+    if issues and isinstance(issues[0], dict):
+        return str(issues[0].get("reason") or "unknown")
+    return "unknown"
+
+
+def _acceptance_result(report: dict[str, Any], step_name: str) -> dict[str, Any]:
+    inspection = _inspection(report, step_name)
+    checks = inspection.get("checks", {}) if isinstance(inspection.get("checks", {}), dict) else {}
+    return {
+        "accepted": inspection.get("status") == "passed",
+        "testcase_name": inspection.get("selected_testcase", ""),
+        "dyn_precision": checks.get("dyn_precision", ""),
+        "memory_oob_status": checks.get("memory_oob_status", ""),
+        "result_csv": inspection.get("result_csv", ""),
+    }
+
+
+def _acceptance_failures(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    for step_name in ("run_low_one", "run_high_one"):
+        inspection = _inspection(report, step_name)
+        for failure in inspection.get("failures", []) or []:
+            failures.append(f"{step_name}: {failure}")
+    if failures:
+        return failures
+
+    for issue in report.get("issues", []) or []:
+        if isinstance(issue, dict):
+            reason = issue.get("reason")
+            step = issue.get("step", "module")
+            if reason:
+                failures.append(f"{step}: {reason}")
+    return failures
+
+
+def build_acceptance(report: dict[str, Any]) -> dict[str, Any]:
+    low = _acceptance_result(report, "run_low_one")
+    high = _acceptance_result(report, "run_high_one")
+    accepted = low["accepted"] and high["accepted"]
+
+    if accepted:
+        status = "passed"
+        reason = "result_csv_accepted"
+        summary = "TTK module acceptance passed: low/high result CSV inline analysis passed."
+        failures: list[str] = []
+        next_action = "none"
+    elif report.get("status") == "skipped":
+        status = "skipped"
+        reason = _first_issue_reason(report)
+        if reason == "unknown":
+            reason = "result_csv_analysis_not_run"
+        summary = "TTK module acceptance was skipped because low/high result CSV inline analysis was not completed."
+        failures = _acceptance_failures(report)
+        next_action = "rerun without --skip-kernel-run in a valid TTK/CANN environment"
+    else:
+        status = "failed"
+        failures = _acceptance_failures(report)
+        reason = "result_csv_rejected"
+        if failures:
+            reason = failures[0].split(": ", 1)[-1]
+        summary = "TTK module acceptance failed: result CSV inline analysis rejected at least one case."
+        next_action = "inspect failed step and its inspection.failures in ttk_module_report.json"
+
+    return {
+        "accepted": accepted,
+        "status": status,
+        "reason": reason,
+        "summary": summary,
+        "criteria": acceptance_criteria(),
+        "results": {
+            "low": low,
+            "high": high,
+        },
+        "failures": failures,
+        "next_action": next_action,
     }
 
 
@@ -309,14 +391,14 @@ def build_ttk_command(args: argparse.Namespace, csv_path: Path, result_path: Pat
         str(csv_path),
         "-o",
         str(result_path),
-        "--plugin",
-        str((Path(args.op_path).resolve() / "tests" / "assets" / "golden.py")),
         "-t",
         case_name,
         "--pc",
         "1",
         "--seed",
         "42",
+        "--golden-mode",
+        "Disable",
     ]
 
 
@@ -336,8 +418,8 @@ def run_ttk_kernel(
 ) -> dict[str, Any]:
     command = build_ttk_command(args, case.csv_path, case.result_path, case.case_name)
     if setenv_path:
-        return run_shell(shell_ttk_command(command, ops_test_kit_path, setenv_path), log_path=case.log_path)
-    return run_command(command, cwd=ops_test_kit_path, log_path=case.log_path)
+        return run_shell(shell_ttk_command(command, ops_test_kit_path, setenv_path))
+    return run_command(command, cwd=ops_test_kit_path)
 
 
 def build_input_check(
@@ -366,11 +448,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--op-name", required=True)
     parser.add_argument("--whitebox-dir", required=True)
     parser.add_argument("--op-path", required=True)
-    parser.add_argument("--op-def-cpp", required=True)
+    parser.add_argument(
+        "--op-def-cpp",
+        default=None,
+        help="Deprecated compatibility option; CSV generation no longer uses it.",
+    )
     parser.add_argument("--ops-test-kit-path", required=True)
     parser.add_argument("--skill-base", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--setenv-path", default=None)
-    parser.add_argument("--skip-kernel-run", action="store_true")
+    parser.add_argument(
+        "--skip-kernel-run",
+        action="store_true",
+        help="Debug/smoke only. Forbidden for normal acceptance.",
+    )
     return parser.parse_args()
 
 
@@ -383,17 +473,12 @@ def _run_single_kernel(
 ) -> None:
     step = run_ttk_kernel(args, case, env.ops_test_kit_path, env.setenv_path)
     step["testcase_name"] = case.case_name
-    step["inspection"] = inspect_result(case.result_path, case.log_path, args.op_name)
+    step["inspection"] = inspect_result(case.result_path, case.case_name, step)
     if step["inspection"]["status"] == "failed":
         report["steps"][config.label] = fail_step(step, "kernel_execution_failed")
-    elif step["inspection"]["status"] == "passed_with_warnings":
-        report["steps"][config.label] = skip_step(step, "kernel_execution_passed_with_warnings")
-        report["steps"][config.label]["status"] = "passed_with_warnings"
-        for warning in step["inspection"].get("warnings", []):
-            report["warnings"].append({"step": config.label, "reason": warning})
     else:
         report["steps"][config.label] = pass_step(step)
-    if report["steps"][config.label]["status"] not in ("passed", "passed_with_warnings"):
+    if report["steps"][config.label]["status"] != "passed":
         report["issues"].append({"step": config.label, "reason": config.fail_reason})
         raise RuntimeError(config.fail_msg)
 
@@ -406,8 +491,6 @@ def _run_csv_generation(
     generate_cmd = [
         "python3", str(paths.generate_script),
         "--op-name", args.op_name,
-        "--operator-model", str(paths.operator_model),
-        "--op-def-cpp", str(paths.op_def_cpp),
         "--low-cases", str(paths.low_cases),
         "--high-cases", str(paths.high_cases),
         "--low-csv", str(paths.low_csv),
@@ -459,8 +542,6 @@ def _run_precheck(
         "python3", str(paths.precheck_script),
         "--whitebox-dir", str(paths.whitebox_dir),
         "--ops-test-kit-path", str(paths.ops_test_kit_path),
-        "--golden-path", str(paths.golden_path),
-        "--op-name", args.op_name,
     ]
     if args.setenv_path:
         precheck_cmd.extend(["--setenv-path", args.setenv_path])
@@ -491,16 +572,13 @@ def _build_paths(args: argparse.Namespace, skill_base: Path) -> dict[str, Path]:
     whitebox_dir = Path(args.whitebox_dir).resolve()
     op_path = Path(args.op_path).resolve()
     ops_test_kit_path = Path(args.ops_test_kit_path).resolve()
-    op_def_cpp = Path(args.op_def_cpp).resolve()
     return {
         "whitebox_dir": whitebox_dir,
         "op_path": op_path,
         "ops_test_kit_path": ops_test_kit_path,
-        "op_def_cpp": op_def_cpp,
         "scripts_dir": scripts_dir,
         "low_cases": whitebox_dir / "S5_cases_low.json",
         "high_cases": whitebox_dir / "S5_cases_high.json",
-        "operator_model": whitebox_dir / "S2P1_operator_model.json",
         "generate_script": scripts_dir / "ttk_generate_kernel_csv.py",
         "validate_script": scripts_dir / "ttk_validate_csv.py",
         "precheck_script": scripts_dir / "ttk_precheck_env.py",
@@ -509,9 +587,6 @@ def _build_paths(args: argparse.Namespace, skill_base: Path) -> dict[str, Path]:
         "precheck_report": whitebox_dir / PRECHECK_FILE,
         "low_result": whitebox_dir / f"ttk_{args.op_name}_cases_low_one_result.csv",
         "high_result": whitebox_dir / f"ttk_{args.op_name}_cases_high_one_result.csv",
-        "low_log": whitebox_dir / "ttk_low_one.log",
-        "high_log": whitebox_dir / "ttk_high_one.log",
-        "golden_path": op_path / "tests" / "assets" / "golden.py",
         "report_path": whitebox_dir / REPORT_FILE,
     }
 
@@ -529,7 +604,7 @@ def _run_kernels(
     low_case_name = pick_case_name(paths["low_csv"])
     low_case = KernelRunCase(
         csv_path=paths["low_csv"], result_path=paths["low_result"],
-        case_name=low_case_name, log_path=paths["low_log"],
+        case_name=low_case_name,
     )
     _run_single_kernel(
         report, args, low_case, exec_env,
@@ -539,7 +614,7 @@ def _run_kernels(
     high_case_name = pick_case_name(paths["high_csv"])
     high_case = KernelRunCase(
         csv_path=paths["high_csv"], result_path=paths["high_result"],
-        case_name=high_case_name, log_path=paths["high_log"],
+        case_name=high_case_name,
     )
     _run_single_kernel(
         report, args, high_case, exec_env,
@@ -553,10 +628,9 @@ def _run_input_check(
 ) -> None:
     required_for_csv = [
         paths["whitebox_dir"], paths["low_cases"], paths["high_cases"],
-        paths["operator_model"], paths["op_def_cpp"],
         paths["generate_script"], paths["validate_script"], paths["precheck_script"],
     ]
-    optional_for_kernel = [paths["ops_test_kit_path"], paths["golden_path"]]
+    optional_for_kernel = [paths["ops_test_kit_path"]]
     input_step = build_input_check(required_for_csv, optional_for_kernel)
     report["steps"]["input_check"] = input_step
     if input_step["status"] != "passed":
@@ -583,8 +657,6 @@ def _run_workflow(
         report, args,
         CsvGenPaths(
             generate_script=paths["generate_script"],
-            operator_model=paths["operator_model"],
-            op_def_cpp=paths["op_def_cpp"],
             low_cases=paths["low_cases"],
             high_cases=paths["high_cases"],
             low_csv=paths["low_csv"],
@@ -598,7 +670,6 @@ def _run_workflow(
             precheck_script=paths["precheck_script"],
             whitebox_dir=paths["whitebox_dir"],
             ops_test_kit_path=paths["ops_test_kit_path"],
-            golden_path=paths["golden_path"],
             precheck_report=paths["precheck_report"],
         ),
     )
@@ -622,7 +693,7 @@ def _run_workflow(
         return
 
     _run_kernels(report, args, paths, precheck)
-    report["status"] = "passed_with_warnings" if report["warnings"] else "passed"
+    report["status"] = "passed"
 
 
 def main() -> None:
@@ -644,11 +715,19 @@ def main() -> None:
             "precheck_report": str(paths["precheck_report"]),
             "low_result_csv": str(paths["low_result"]),
             "high_result_csv": str(paths["high_result"]),
-            "low_log": str(paths["low_log"]),
-            "high_log": str(paths["high_log"]),
             "module_report": str(paths["report_path"]),
         },
         "kernel_gate": {"status": "unknown", "reason": "not_run"},
+        "acceptance": {
+            "accepted": False,
+            "status": "unknown",
+            "reason": "not_run",
+            "summary": "",
+            "criteria": acceptance_criteria(),
+            "results": {},
+            "failures": [],
+            "next_action": "",
+        },
         "issues": [],
         "warnings": [],
     }
@@ -659,6 +738,7 @@ def main() -> None:
         report["issues"].append({"step": "module", "reason": str(exc)})
     finally:
         report["duration_s"] = round(now_s() - start, 3)
+        report["acceptance"] = build_acceptance(report)
         write_report(paths["report_path"], report)
         _logger.info(f"TTK module status: {report['status']}")
         _logger.info(f"TTK module report: {paths['report_path']}")
