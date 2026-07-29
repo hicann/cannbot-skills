@@ -103,6 +103,59 @@ FORBIDDEN_TENSOR_METHODS = {
     "dropout", "softplus", "hardtanh", "hardswish",
 }
 
+# ---------------------------------------------------------------------------
+# 模块级禁止（不只 forward 子树，扫整个文件）
+# ---------------------------------------------------------------------------
+
+# torch.nn 下所有"会构造带参数 Module / 调用算子"的入口。
+# 出现这些调用基本等同于借 PyTorch 现成实现作弊。
+MODULE_WIDE_FORBIDDEN_NN_ATTRS = {
+    # 卷积 / 线性
+    "Conv1d", "Conv2d", "Conv3d", "ConvTranspose1d", "ConvTranspose2d",
+    "ConvTranspose3d", "Linear", "Bilinear",
+    # 池化
+    "MaxPool1d", "MaxPool2d", "MaxPool3d", "AvgPool1d", "AvgPool2d",
+    "AvgPool3d", "AdaptiveMaxPool1d", "AdaptiveMaxPool2d", "AdaptiveMaxPool3d",
+    "AdaptiveAvgPool1d", "AdaptiveAvgPool2d", "AdaptiveAvgPool3d",
+    "FractionalMaxPool2d", "FractionalMaxPool3d", "LPPool1d", "LPPool2d", "LPPool3d",
+    # 归一化
+    "BatchNorm1d", "BatchNorm2d", "BatchNorm3d", "LayerNorm", "GroupNorm",
+    "InstanceNorm1d", "InstanceNorm2d", "InstanceNorm3d", "LocalResponseNorm",
+    # 激活
+    "ReLU", "LeakyReLU", "PReLU", "ELU", "CELU", "SELU", "GELU", "SiLU", "GLU",
+    "Hardswish", "Hardtanh", "Softplus", "Softsign", "Tanh", "Sigmoid",
+    "LogSigmoid", "Hardsigmoid", "MultiheadAttention",
+    # RNN / Embedding
+    "RNN", "LSTM", "GRU", "Embedding",
+    # Loss / Dropout
+    "MSELoss", "L1Loss", "CrossEntropyLoss", "NLLLoss", "BCELoss", "BCEWithLogitsLoss",
+    "SmoothL1Loss", "HuberLoss", "TripletMarginLoss", "Dropout", "Dropout2d", "Dropout3d",
+    # 量化 / 其它
+    "Quantize", "DeQuantize", "Flatten", "Unflatten",
+}
+
+# 任何带 nn./nn.Module 子类的限定符都视为可疑 Module 构造路径。
+# （FUNCTIONAL_QUALIFIERS 在下面定义，用函数动态合并避免顺序耦合）
+MODULE_WIDE_NN_QUALIFIERS = {
+    "nn", "torch.nn", "torch.nn.functional",
+}
+
+# rng state 操纵 API 不在模块级禁止范围——
+# torch.manual_seed / get_rng_state / set_rng_state 等虽然在作弊代码里
+# 经常和 nn.XXX 一起出现（用于复刻 baseline 随机权重），但它们也有
+# 合法用途（确定性测试、含随机性的算子如 dropout/sampling）。
+# 模块级禁用 nn.XXX 已经堵住了"复刻 nn 层权重"这一主要作弊路径。
+MODULE_WIDE_FORBIDDEN_RNG_ATTRS = set()
+
+# 模块级禁止的 torch 属性（不止计算，所有"借 PyTorch 现成算子"的入口都禁）
+MODULE_WIDE_FORBIDDEN_TORCH_ATTRS = {
+    # 直接调算子（绕过 F./nn. 形式）
+    "conv_transpose2d", "conv_transpose3d",
+    "scaled_dot_product_attention", "multi_head_attention_forward",
+    # 量化
+    "quantize_per_tensor", "quantize_per_channel", "dequantize",
+}
+
 FUNCTIONAL_QUALIFIERS = {
     "F", "functional", "torch.nn.functional", "nn.functional",
 }
@@ -605,6 +658,97 @@ def check_forbidden_torch_ops(forward_node, kernel_names=None, wrapper_names=Non
 
 
 # ---------------------------------------------------------------------------
+# 模块级禁止检查（不只 forward AST，扫整个文件）
+# ---------------------------------------------------------------------------
+
+def _violation_module_wide_for_call(node):
+    """对整个文件范围内的 ast.Call 节点应用模块级禁止规则。
+
+    覆盖 forward() AST 扫描抓不到的间接作弊：
+    - helper 函数 / __init__ 里 nn.ConvTranspose2d(...) 复刻 baseline 权重
+    - F.relu 等 functional 调用绕过算子
+    """
+    # kernel launch: kernel[grid](...) 允许
+    if isinstance(node.func, ast.Subscript):
+        return None
+
+    resolved = _resolve_call_name(node)
+    if resolved is None:
+        return None
+    qual, attr = resolved
+
+    # nn.XXX / torch.nn.functional.XXX / F.XXX 构造或调用
+    nn_qualifiers = MODULE_WIDE_NN_QUALIFIERS | FUNCTIONAL_QUALIFIERS
+    if qual in nn_qualifiers:
+        if attr in MODULE_WIDE_FORBIDDEN_NN_ATTRS:
+            return {
+                "line": node.lineno,
+                "call": f"{qual}.{attr}(...)",
+                "reason": (
+                    f"模块级禁止：{qual}.{attr} 是 PyTorch 现成算子/Module，"
+                    "在生成代码任何位置（含 helper、__init__、forward）调用"
+                    "都视为作弊。所有计算必须在 @triton.jit kernel 内完成；"
+                    "权重应当从外部传入或用常量初始化，不得借 nn.XXX 复刻 baseline 权重。"
+                ),
+            }
+        # nn.functional.* 任意调用都禁（这一类全是 PyTorch 算子入口）
+        if qual in FUNCTIONAL_QUALIFIERS:
+            return {
+                "line": node.lineno,
+                "call": f"{qual}.{attr}(...)",
+                "reason": (
+                    f"模块级禁止：{qual}.{attr} 属于 torch.nn.functional，"
+                    "是 PyTorch 算子入口，禁止在生成代码任何位置调用。"
+                ),
+            }
+
+    # torch.manual_seed / get_rng_state / set_rng_state 等 rng 操纵
+    if qual == "torch" and attr in MODULE_WIDE_FORBIDDEN_RNG_ATTRS:
+        return {
+            "line": node.lineno,
+            "call": f"{qual}.{attr}(...)",
+            "reason": (
+                f"模块级禁止：torch.{attr} 操纵随机数状态。"
+                "正常 Triton kernel 不需要操纵 rng；出现此调用通常意味着"
+                "Agent 在复刻 baseline 的随机权重或随机输入以骗过精度校验。"
+            ),
+        }
+
+    # torch.<其它 forbidden attr>（如 torch.conv_transpose2d 直接调用）
+    if qual == "torch" and attr in MODULE_WIDE_FORBIDDEN_TORCH_ATTRS:
+        return {
+            "line": node.lineno,
+            "call": f"{qual}.{attr}(...)",
+            "reason": (
+                f"模块级禁止：torch.{attr} 是 PyTorch 现成算子入口，"
+                "禁止在生成代码任何位置调用。"
+            ),
+        }
+
+    return None
+
+
+def check_forbidden_module_wide_ops(tree):
+    """扫整个 AST（不只 forward 子树）找禁止的 PyTorch 接口调用。
+
+    返回违规列表 [{"line": N, "call": str, "reason": str}, ...]。
+    设计目标：堵住 forward() AST 扫描抓不到的间接作弊路径，
+    如 nn.ConvTranspose2d 在 helper 函数里被构造、F.relu 在 wrapper
+    里被调用等。
+    """
+    violations = []
+    if tree is None:
+        return violations
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        v = _violation_module_wide_for_call(node)
+        if v is not None:
+            violations.append(v)
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # 主验证逻辑
 # ---------------------------------------------------------------------------
 
@@ -616,6 +760,7 @@ def _empty_result(filepath):
             "triton_kernel_exists": {"passed": False, "kernels": [], "error": None},
             "kernel_called_from_forward": {"passed": False, "called": [], "error": None},
             "no_forbidden_torch_ops": {"passed": False, "violations": [], "error": None},
+            "no_forbidden_module_wide_ops": {"passed": False, "violations": [], "error": None},
         },
         "regression_type": None,
         "suggestion": "",
@@ -717,6 +862,35 @@ def _check_no_forbidden_ops(result, forward_node, kernel_names, wrapper_names):
     return False
 
 
+def _check_no_forbidden_module_wide_ops(result, tree):
+    """填充 no_forbidden_module_wide_ops 检查；返回 passed。
+
+    扫整个文件（不只 forward AST）找 nn.XXX 构造、rng 操纵、F.xxx 调用等
+    间接作弊路径。
+    """
+    violations = check_forbidden_module_wide_ops(tree)
+    result["checks"]["no_forbidden_module_wide_ops"]["violations"] = violations
+
+    if not violations:
+        result["checks"]["no_forbidden_module_wide_ops"]["passed"] = True
+        return True
+
+    result["checks"]["no_forbidden_module_wide_ops"]["error"] = (
+        f"模块级发现 {len(violations)} 处禁止的 PyTorch 接口调用（不只 forward）"
+    )
+    violation_details = "; ".join(
+        f"第{v['line']}行 {v['call']}" for v in violations[:5]
+    )
+    result["regression_type"] = 3
+    result["suggestion"] = (
+        f"生成代码借 PyTorch 接口作弊: {violation_details}。"
+        "禁用 nn.XXX 构造、F.xxx 调用；"
+        "所有计算必须在 @triton.jit kernel 内完成，"
+        "权重应从外部传入或用常量初始化，不得借 nn.XXX 复刻 baseline 权重。"
+    )
+    return False
+
+
 def validate(code, filepath="<unknown>"):
     """对生成代码执行完整的退化检查。
 
@@ -738,6 +912,11 @@ def validate(code, filepath="<unknown>"):
 
     ok, forward_node, wrapper_names = _check_forward_calls_kernel(result, tree, kernel_names)
     if not ok:
+        return result
+
+    # 模块级检查放在 forward 级之前：模块级作弊（nn.XXX 复刻权重等）
+    # 比单纯的 forward 内 PyTorch 退化更严重，应当优先暴露。
+    if not _check_no_forbidden_module_wide_ops(result, tree):
         return result
 
     if not _check_no_forbidden_ops(result, forward_node, kernel_names, wrapper_names):
@@ -792,10 +971,16 @@ def _emit_fail(result):
         if check_result["error"]:
             logger.info("         %s", check_result["error"])
 
-    if result["checks"]["no_forbidden_torch_ops"]["violations"]:
+    if result["checks"]["no_forbidden_torch_ops"]["violations"] or \
+       result["checks"]["no_forbidden_module_wide_ops"]["violations"]:
         logger.info("  违规详情:")
-        for v in result["checks"]["no_forbidden_torch_ops"]["violations"]:
-            logger.info("    第 %s 行: %s — %s", v["line"], v["call"], v["reason"])
+        for check_name in ("no_forbidden_module_wide_ops", "no_forbidden_torch_ops"):
+            vs = result["checks"][check_name]["violations"]
+            if not vs:
+                continue
+            logger.info("    [%s] 共 %d 处:", check_name, len(vs))
+            for v in vs:
+                logger.info("      第 %s 行: %s — %s", v["line"], v["call"], v["reason"])
 
     logger.info("\n  修复建议: %s", result["suggestion"])
 

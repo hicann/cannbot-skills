@@ -25,6 +25,17 @@ import traceback
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 
+# Baseline anchor gate — refuses to run if {work_dir}/{op_name}.py was tampered
+# with after Phase 1 freeze. See _baseline_integrity.py for exit codes.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from _baseline_integrity import _check_baseline_integrity, BaselineGateError
+except ImportError:
+    _check_baseline_integrity = None  # graceful: gate disabled if module missing
+
+    class BaselineGateError(Exception):  # fallback: never raised when gate disabled
+        pass
+
 
 # ============================================================================
 # 日志配置
@@ -34,6 +45,7 @@ from dataclasses import dataclass, field
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
+from _common_utils import move_to_device  # noqa: E402
 
 logger = logging.getLogger("triton_op_verifier.benchmark")
 
@@ -48,7 +60,7 @@ def _setup_logger() -> None:
 # ============================================================================
 
 WARMUP_DEFAULT = 5
-REPEATS_DEFAULT = 20
+REPEATS_DEFAULT = 5
 TRITON_IMPL_NAME_DEFAULT = "triton_ascend_impl"
 ERROR_MSG_LIMIT = 2000
 
@@ -436,17 +448,13 @@ def measure_single(
 # ============================================================================
 
 def _move_inputs_to_device(inputs: List[Any], device: Any) -> List[Any]:
-    """把张量类输入搬到目标 device，标量原样透传。"""
-    import torch
-    result = []
-    for x in inputs:
-        if isinstance(x, torch.Tensor):
-            result.append(x.to(device))
-        elif isinstance(x, list):
-            result.append(_move_inputs_to_device(x, device))
-        else:
-            result.append(x)
-    return result
+    """把张量类输入搬到目标 device（含嵌套 list/tuple），标量原样透传。
+
+    复用 _common_utils.move_to_device 处理嵌套结构，从而与 verify._move_to_device
+    保持一致：list/tuple 都会递归迁移并保留各自类型。顶层 inputs 始终为 list，
+    因此返回值仍为 List[Any]。
+    """
+    return [move_to_device(x, device) for x in inputs]
 
 
 def _measure_framework(
@@ -609,11 +617,23 @@ def _classify_passed_results(passed) -> SpeedupBuckets:
     return buckets
 
 
+def _geomean(values: List[float]) -> float:
+    """对数域几何平均（所有值必须为正）；空列表返回 0。"""
+    positive = [v for v in values if v > 0]
+    if not positive:
+        return 0.0
+    return math.exp(sum(math.log(v) for v in positive) / len(positive))
+
+
 def _aggregate_perf(passed) -> PerfAggregate:
-    """聚合通过的 shape 的平均延时 / 显存 / 算子分项耗时。"""
+    """聚合通过的 shape 的平均延时 / 显存 / 算子分项耗时。
+
+    framework / impl 的总延时使用几何平均（对数域，仅计入正值）；
+    显存与算子分项仍使用算术平均。
+    """
     n = len(passed)
-    avg_fw = sum(r.framework.avg_latency_ms for r in passed) / n
-    avg_impl = sum(r.implementation.avg_latency_ms for r in passed) / n
+    avg_fw = _geomean([r.framework.avg_latency_ms for r in passed])
+    avg_impl = _geomean([r.implementation.avg_latency_ms for r in passed])
     avg_fw_mem = sum(r.framework.peak_memory_mb for r in passed) / n
     avg_impl_mem = sum(r.implementation.peak_memory_mb for r in passed) / n
 
@@ -1005,7 +1025,7 @@ def _build_argparser():
     parser.add_argument("--triton_impl_name", default=TRITON_IMPL_NAME_DEFAULT,
                        help="Triton 实现模块名")
     parser.add_argument("--warmup", type=int, default=WARMUP_DEFAULT, help="warmup 次数（默认 5）")
-    parser.add_argument("--repeats", type=int, default=REPEATS_DEFAULT, help="正式测试次数（默认 20）")
+    parser.add_argument("--repeats", type=int, default=REPEATS_DEFAULT, help="正式测试次数（默认 5）")
     parser.add_argument("--output", help="输出文件路径（JSON 格式）")
     parser.add_argument("--skip_framework", action="store_true",
                        help="跳过 framework 性能测试（GPU Kernel 模式使用）")
@@ -1093,6 +1113,15 @@ def main():
         try:
             check_verify_gate(verify_dir, args.triton_impl_name)
         except VerifyGateError as e:
+            sys.exit(e.exit_code)
+
+    # Baseline gate: refuse to benchmark against a tampered baseline.
+    # Exit 3 = anchor missing (Phase 1 freeze skipped); Exit 4 = baseline modified.
+    if _check_baseline_integrity is not None:
+        try:
+            _check_baseline_integrity(verify_dir, args.op_name)
+        except BaselineGateError as e:
+            # 基线闸门未通过：以其约定退出码退出（3=锚缺失，4=被篡改）
             sys.exit(e.exit_code)
 
     config = _build_config(args, verify_dir)

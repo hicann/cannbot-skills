@@ -31,6 +31,17 @@ import subprocess
 import traceback
 from dataclasses import dataclass
 
+# Baseline anchor gate — refuses to run if {work_dir}/{op_name}.py was tampered
+# with after Phase 1 freeze. See _baseline_integrity.py for exit codes.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from _baseline_integrity import _check_baseline_integrity, BaselineGateError
+except ImportError:
+    _check_baseline_integrity = None  # graceful: gate disabled if module missing
+
+    class BaselineGateError(Exception):  # fallback: never raised when gate disabled
+        pass
+
 
 ERROR_MSG_LIMIT = 2000
 
@@ -92,6 +103,7 @@ class InputSpec:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
+from _common_utils import move_to_device as _move_to_device  # noqa: E402
 
 logger = logging.getLogger("triton_op_verifier.verify")
 
@@ -648,10 +660,14 @@ def compare(fw_out, impl_out, data_type, input_spec=None, non_compute=False):
 
     _check_nan_inf(fw_flat, impl_flat, size)
 
+    if size == 0:
+        logger.info("  输出为空张量（numel=0），通过")
+        return
+
     finite_mask = torch.isfinite(fw_flat) & torch.isfinite(impl_flat)
     finite_count = finite_mask.sum().item()
     if finite_count == 0:
-        logger.warning("警告: 所有值都是非有限值，跳过精度检查")
+        logger.warning("警告: 所有值都是非有限值（size=%d），跳过精度检查", size)
         return
 
     fw_finite = fw_flat[finite_mask]
@@ -859,14 +875,8 @@ def run_single_case(models: ModelPair, inputs, device, case_ctx: CaseContext, no
     # 推断输入类型（"float" / "int" / "no_tensor"）→ 决定输出整型时走整数计算 vs 量化
     input_type, input_dtype = _infer_input_type(inputs)
 
-    inputs_for_impl = [
-        x.to(device) if isinstance(x, torch.Tensor) else x
-        for x in inputs
-    ]
-    inputs_for_framework = [
-        x.to(device) if isinstance(x, torch.Tensor) else x
-        for x in inputs
-    ]
+    inputs_for_impl = [_move_to_device(x, device) for x in inputs]
+    inputs_for_framework = [_move_to_device(x, device) for x in inputs]
 
     with torch.no_grad():
         impl_output = models.impl(*inputs_for_impl)
@@ -996,6 +1006,11 @@ def verify_implementations(
     import torch
     import torch_npu  # noqa: F401
 
+    # Baseline gate: refuse to verify against a tampered baseline.
+    # Exit 3 = anchor missing (Phase 1 freeze skipped); Exit 4 = baseline modified.
+    if _check_baseline_integrity is not None:
+        _check_baseline_integrity(verify_dir, op_name)
+
     modules = _load_verify_modules(op_name, verify_dir, triton_impl_name)
 
     # 在获取输入之前设置种子，确保随机生成的输入可复现
@@ -1083,6 +1098,9 @@ if __name__ == "__main__":
                 args.op_name, verify_dir, args.triton_impl_name, args.output,
                 non_compute=args.non_compute,
             )
+        except BaselineGateError as e:
+            # 基线闸门未通过：以其约定退出码退出（3=锚缺失，4=被篡改）
+            sys.exit(e.exit_code)
         except Exception as e:
             logger.error("%s", e)
             logger.error("%s", traceback.format_exc())

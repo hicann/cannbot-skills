@@ -1,6 +1,6 @@
 ---
 name: transformer-inference
-description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
+description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout / FusedInferAttentionScore）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
 metadata:
   type: reference
 ---
@@ -13,7 +13,8 @@ metadata:
 - **§3 MoeComputeExpertTokens**（indexing-gather / counting，MoE 专家 token 计数 + 前缀和）
 - **§4 MoeGatingTopKSoftmax**（sort-topk，门控 softmax + 迭代 top-k）
 - **§5 AttentionSoftmaxWithSoftcappingAndDropout**（reduce，softcapping + 行级 softmax 融合）
-- **§6 各算子常见陷阱**
+- **§6 FusedInferAttentionScore**（attention，flash-attn 推理，`npu_fused_infer_attention_score` 等价）
+- **§7 各算子常见陷阱**
 
 ---
 
@@ -25,6 +26,7 @@ metadata:
 | MoeComputeExpertTokens | `indexing-gather / counting` | expert 维度 token 计数（histogram）+ 小数组前缀和 | 两阶段分离：expert-parallel 无竞争计数 + 单 block 串行 prefix sum |
 | MoeGatingTopKSoftmax | `sort-topk` | softmax over last dim + 迭代 top-k 选择，per-row 独立 | 纯寄存器 top-k 路径（无 GM temp buffer）+ grid 钳制到 num_cores |
 | AttentionSoftmaxWithSoftcappingAndDropout | `reduce` | Gemma3 风格 softcapping `tanh(x/30)*30` + 行级 softmax，多 dtype 混合 | 4-kernel 分离强制中间舍入 + 分核优化（grid 钳制 + 循环处理多块） |
+| FusedInferAttentionScore | `attention` (flash-attn infer) | `npu_fused_infer_attention_score` 等价：带 mask 的完整 flash attention（Q@K^T·scale->masked softmax->@V），多 layout(BSH/BSND/BNSD)+GQA，bool mask True=maskout(有限负数) | 通用 masked flash attention：sm0 full / sm1-3 bitmap mask / sm4 band mask(pre,next)；UB BLOCK_M 随 D 自适应；stride 逻辑寻址；grid 对齐 cube_core_num |
 
 > ⚠️ **关键区分**：四类算子计算模式差异极大，优化哲学不可混用：
 > - RotaryMul 关心 **per-position 向量化** 避免 flat-1D 标量退化
@@ -813,9 +815,118 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 
 ---
 
-## §6 常见陷阱与避免方法
+## §6 FusedInferAttentionScore 算子（attention / flash-attn inference）
 
-### §6.1 RotaryMul 陷阱
+**算子类别**: `attention`（flash-attention 推理，`npu_fused_infer_attention_score` 等价实现）
+**典型特征**: Q@K^T·scale -> masked softmax -> @V，支持 BSH/BSND/BNSD 三 layout、GQA、bool atten_mask、sparse_mode 0-4；fp16/bf16
+**性能基准**: 几何平均加速比 **0.74x** vs CANN `npu_fused_infer_attention_score`（50/50 精度通过；通用实现，非过拟合捷径）
+
+### §6.0 关键 NPU 语义（实证，必须复现）
+
+- bool atten_mask 极性 = **True = maskout**，且 maskout 用**有限大负数**（~-1e9，非 -inf）-> 全 mask 行 max=NEG -> `exp(0)=1` -> softmax **uniform**（**非 NaN**）。
+- 返回 `(attention_out, softmax_lse)`；softmax_lse_flag=False 时第二输出为 shape `[0]` 空 fp32 tensor（kernel 返回 `torch.empty(0, dtype=float32)`）。
+- 全 ones mask 是任务文件 `get_input_groups` 用 `torch.ones(bool)` 生成的**退化选择**（所有位置 maskout -> uniform）。**不是 bug，禁止修改源 benchmark**（源 benchmark 只读）。
+- sparse_mode 分派（实证 50 case）：sm0=full / sm1-3=加载并应用 bitmap mask（True=maskout）/ sm4=band 掩码（由 pre_tokens,next_tokens 决定窗口，bitmap 被忽略；max 窗口=full）。
+- sm2/3/4 要求 atten_mask shape 为 [2048,2048]/[1,2048,2048]/[1,1,2048,2048]（压缩格式）；sm1 用 [1,1,S,S] 或 [1,S,S]。
+
+> ⚠️ **前序会话教训**：曾有一会话误判"全 ones mask -> scores 整行 -inf -> softmax NaN"，**非法修改源 benchmark** 为因果掩码并拟合窗口化 mean 表。实际 NPU 用有限负数 -> uniform（有效输出）。正确做法：不修改源 benchmark，全 ones 即 uniform。对全 ones 源文件，该窗口化 mean 表会失败（d=1.71）。
+
+### §6.1 Layer 1: 设计约束（硬性边界）
+
+#### L1.1 对所有 sparse_mode 走完整 masked flash attention，禁止 uniform 捷径
+- **必须** sm1/2/3 加载并应用 bitmap mask 走完整 flash attention（Q@K^T -> mask -> softmax -> @V）。全 ones 时数学自然退化为 uniform（与 NPU 一致），但**不得跳过 Q@K^T 直接算 mean(V)**（过拟合全 ones mask，非真正实现，mask 变化即错）。
+- **Why**：uniform 捷径虽在当前 benchmark 达 1.88x，但不是通用 FusedInferAttentionScore；通用实现 0.74x 但鲁棒。
+
+#### L1.2 NEG 必须用有限负数，禁止 -inf
+- **必须** maskout 位置用有限大负数（如 -1e9），**禁止 -inf**。全 mask 行用 -inf 会导致 `exp(-inf-(-inf))=NaN` 污染。
+- **How**：`scores = tl.where(mask, NEG, scores)`，NEG 为 constexpr 有限值。padding 位置仍用 -inf（排除归约，exp=0）。
+
+#### L1.3 UB 安全：BLOCK_M 随 D 自适应
+- **必须** flash kernel O_acc `[BLOCK_M, D]` fp32 是 UB 大头，BLOCK_M 按 D 分档：D≤128->64, D≤256->32, D>256->16。
+- **禁止** 大 D 用大 BLOCK_M（D=512,BLOCK_M=64 经 multibuffer 膨胀溢出 192KB UB，MLIRCompilationError）。
+- D 维全为 16 倍数，适合 `tl.dot`。
+
+#### L1.4 forward 仅算 stride，禁止 torch 重排（T3）
+- **必须** host 仅计算 BNSD 逻辑 stride，kernel 用 (b,h,s,d) 四维 stride 索引。
+- **禁止** `.permute().contiguous()` / `.view()` 重排（Type-3 退化 + 额外 aclnn 拷贝）。BSH 与 BSND 内存同为 [B,S,H*D] row-major（stride 等价），仅 BNSD 不同。
+
+#### L1.5 grid 对齐 cube_core_num（dot-heavy kernel）
+- **应** flash kernel（含 tl.dot）grid 钳制到 `cube_core_num`（DAV_2201=20）；实测 vector_core_num(40) 过载 cube 核劣化（0.7284x vs 0.7473x）。
+
+#### L1.6 fp16/bf16 必须 fp32 内部计算（见 §1 T2）
+- scores = `tl.dot(q, tl.trans(k), out_dtype=tl.float32)*scale`；online softmax fp32；P cast in_dtype 再 `tl.dot(p, v, out_dtype=fp32)`（T5：对齐 CANN FA 的 P 舍入）。
+
+### §6.2 Layer 2: 算法骨架
+
+单一 flash kernel，online softmax + tiled PV，fp32 累积。grid = `min(B*H*cdiv(S_q,BLOCK_M), cube_core_num)`，每 program 处理 BLOCK_M 个 query 行，`for work in range(pid, total, num_pids)` 循环（T1）。
+
+```python
+# host 分派（仅 stride 算术）：
+has_mask = 1 if (atten_mask is not None and sm in (1,2,3)) else 0
+band_mode = 1 if sm == 4 else 0
+pre_c = pre_tokens if pre_tokens < S_kv else S_kv   # cap 防 int32 溢出；max->S_kv=全 keep
+next_c = next_tokens if next_tokens < S_kv else S_kv
+# kernel 内 kv 循环：
+scores = tl.dot(q, tl.trans(k), out_dtype=fp32) * scale
+if HAS_MASK:  # sm1-3 bitmap
+    mk = tl.load(mask_ptr + offs_m*m_sr + offs_n*m_sc, ...)
+    scores = tl.where(mk != 0, NEG, scores)
+if BAND_MODE:  # sm4 band
+    diff = offs_m[:,None] - offs_n[None,:]
+    scores = tl.where((diff <= PRE_C) & (diff >= -NEXT_C), scores, NEG)
+scores = tl.where(m_mask & n_mask, scores, -inf)  # padding 排除归约
+# online softmax: m_new=max(m_i,max(s)); alpha=exp(m_i-m_new); p=exp(s-m_new); l=alpha*l_i+sum(p); o=alpha*o+dot(p.to(in_dtype),v)
+```
+GQA: `kv_head = h // REP`，`REP = H // Hkv`（Hkv=0 -> MHA, REP=1）。返回 `(O, empty_lse)`。
+
+### §6.3 Layer 3: 关键技巧
+
+- **mask double-sentinel**：bitmap/band 外 -> NEG(有限，全 mask 行得 uniform 非 NaN)；padding -> -inf（exp=0 排除归约）。
+- **layout 统一寻址**：BSH/BSND `qsb,qss=q.stride(0),q.stride(1); qsh,qsd=D,1`；BNSD 用原生 4 维 stride。O=empty_like(query)，o_stride=q_stride。
+- **`tl.trans(k)`**：K 按 [BLOCK_N,D] contiguous load 后转置为 [D,BLOCK_N] 供 Q@K^T（避免 strided gather load）。
+- **-inf init 的 m_i**：有效行首块 `alpha=exp(-inf-finite)=0` 正确初始化；全 mask padding 行产生 NaN 但 mask store 不写出。
+
+### §6.4 性能基准与归因（profiler 实证）
+
+geomean **0.74x**（50/50 精度）。两极分化：小 case ~2x 领先，大 case ~0.15x 落后。
+
+**小 case 领先（~2x）- 差距全在 scalar，不在计算/访存**（profiler 分项实锤，case1 S=64 D=128）：
+
+| 指标 | CANN FA | Triton |
+|------|---------|--------|
+| Duration | 11.04 us | 5.41 us |
+| aic_mac_time（Cube 矩阵乘）| 0.21 | 0.21（相同）|
+| aic_mte1/mte2（内存）| 0.26/0.67 | 0.27/0.64（相同）|
+| **aic_scalar_time** | **5.29** | **2.17** |
+| **aiv_scalar_time** | **4.59** | **2.24** |
+| aic_total_cycles | 31066 | 16464（-47%）|
+
+小 shape 计算量极小，MAC/MTE 都可忽略且两边相同；**CANN FA 是通用大算子，scalar（控制流/tiling 分发/全参数分支：quant/paged/rope/sparse…）开销 ~3x 于精简 Triton kernel**，scalar 占比大时精简 kernel 赢。
+
+**大 case 落后（~0.15x）- MAC 主导，CANN Cube tiling 胜**（case48 D=320：CANN 62us vs Triton 419us，慢 6.7x）。大 D 时 BLOCK_M 降到 16 并行度低，通用 tiling 不如 CANN FA 的 Cube 优化。
+
+**profiler 限制（重要）**：
+- benchmark 的 `avg_latency_ms` 来自 `kernel_details.csv` 的 `Duration(us)`，是**设备端 kernel 时间**（按 Name groupby 求和），**不含 host 启动开销**。故"启动开销低"不能解释 benchmark 内的快慢。
+- **device 0 对短 Triton kernel 采集不稳**（`ACC_PMU no data` / `Failed to get acl to npu flow events`，kernel_details.csv 缺失），易误判为"噪声"；**换一张卡即恢复采集**（device 2 稳定采到 case1 impl=5.41us）。小 shape speedup 应换卡复核，勿轻信单卡单次。
+- 对应 §4-L3.5 小 shape profiler 测量异常警告。
+
+### §6.5 FusedInferAttentionScore 陷阱
+
+| 陷阱 | 原因 | 避免方法 |
+|------|------|---------|
+| 误判全 ones mask->NaN 而非法改源 benchmark | 以为 NPU 用 -inf（实际有限负数->uniform） | 不改源 benchmark（只读）；全 ones 即 uniform，走完整 masked flash |
+| sm4 假设 full 不实现 band | 过拟合 pre=next=max | 实现 band 掩码 `NEXT_C≤m-n≤PRE_C`（max->full，通用）|
+| sm1/2/3 跳过 Q@K^T 算 mean(V) | 过拟合全 ones mask 求性能 | 走完整 masked flash attention（通用，1.88x捷径已废弃）|
+| 大 D tile UB 溢出编译失败 | BLOCK_M=64,D=512 经 multibuffer 膨胀>192KB | BLOCK_M 随 D 自适应（>256->16）|
+| 用 -inf 做 maskout 致全 mask 行 NaN | exp(-inf-(-inf))=NaN | NEG 用有限负数（-1e9），padding 才用 -inf |
+| vector_core_num grid 过载 cube 核 | dot-heavy kernel 在 cube 核排队 | grid 对齐 cube_core_num(20) |
+| device 0 短 Triton kernel profiler 采集失败误判噪声 | PMU/事件关联对短 kernel 不稳 | 换卡复核；勿据单卡单次下结论 |
+
+---
+
+## §7 常见陷阱与避免方法
+
+### §7.1 RotaryMul 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -825,7 +936,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | fp16/bf16 精度不足 | kernel 内直接以 fp16 做乘加减，relative error 超标 | kernel 内升 fp32 计算，存回前转回原精度（T2/L1.4） |
 | Naive grid splitting 导致 idle core | `grid = (num_cores,)` + `for block in range(pid, num_blocks, num_cores)` 在 `num_blocks < num_cores` 时大量 core 空闲 | Uniform grid splitting（L2.2/L3.2）确保每个 core 处理连续且均匀的 block 范围 |
 
-### §6.2 MoeComputeExpertTokens 陷阱
+### §7.2 MoeComputeExpertTokens 陷阱
 
 | 陷阱 | 表现 | 避免方法 |
 |------|------|---------|
@@ -835,7 +946,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | 动态 grid 计算 | 增加 host 侧开销、编译器优化受限 | grid 固定为 `(num_expert,)` 和 `(1,)`（L1.4） |
 | 跨 expert 循环计数 | 每个 block 做 64 次比较，指令膨胀 | grid 映射到 expert，每个 block 只比较一次（L1.3） |
 
-### §6.3 MoeGatingTopKSoftmax 陷阱
+### §7.3 MoeGatingTopKSoftmax 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -851,7 +962,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | LLVM_ROOT 环境变量未设置导致编译失败 | `clang++: symbol lookup error: undefined symbol: _ZN4llvm24createAutotuningDumpPassEv` | 设置 `LLVM_ROOT` 指向包含完整 libLLVM-17.so 的路径 |
 | CANN 9.1.0 与 Triton 常量名不兼容 | `RT_LIMIT_TYPE_SIMT_WARP_STACK_SIZE` 在 CANN 9.1.0 中已重命名 | 修改 Triton 的 `npu_utils.cpp` 中的常量名为 `RT_LIMIT_TYPE_SIMT_DVG_WARP_STACK_SIZE`（一次性修复） |
 
-### §6.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
+### §7.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|

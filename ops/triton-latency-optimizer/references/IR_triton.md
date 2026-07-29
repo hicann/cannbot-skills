@@ -12,7 +12,7 @@ IR（中间表示）分析优化器通过提取编译器的最终阶段 IR（`la
 
 ## IR 多轮迭代模式
 
-在 Phase 4 调用方（triton-op-generator AGENTS.md）开启 IR 多轮迭代后，IR（优化点 25）允许多轮重复命中，其他优化点单轮即过。每轮必须遵守：
+在 Phase 4 调用方（triton-op-generator AGENTS.md）开启 IR 多轮迭代后，IR（优化点 30）允许多轮重复命中，其他优化点单轮即过。每轮必须遵守：
 
 - **每轮重新提取 IR**：必须重新执行 `run_and_extract.sh` 提取基于"上一轮优化后代码"的最新 `last_pass.mlir`，禁止复用历史 IR 快照。
 - **聚焦增量分析**：本轮 IR 分析应聚焦两件事 —— (a) 上一轮 IR 优化是否带来预期效果（profiling 或 speedup 对比）；(b) 是否还有**新的**优化建议。

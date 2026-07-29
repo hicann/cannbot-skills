@@ -46,8 +46,8 @@ argument-hint: >
 
 latency-optimizer 在返回信息中**必须包含**以下字段：
 
-- `hit_optimization_point: int | None` —— 本轮命中的优化点编号（1-25）；无命中时为 `None`
-- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 25（IR 分析）时该字段有意义；其他轮次（命中 1-24 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
+- `hit_optimization_point: int | None` —— 本轮命中的优化点编号（1-30）；无命中时为 `None`
+- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 30（IR 分析）时该字段有意义；其他轮次（命中 1-29 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
 
 ## 优化点索引
 
@@ -72,14 +72,20 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 | 15 | 维度合并与大 BLOCK 累加 | 归一化算子中存在嵌套循环/低 mask 覆盖率/标量累加过多 | stats kernel 中连续维度处理低效 | `references/operators/dimension-merge-large-block.md` |
 | 16 | 连续拷贝聚合优化 | 纯内存拷贝型算子，多个输出块在输入侧连续 | 满足连续性且当前按 chunk 细粒度分核 | `references/operators/continuous-copy-aggregation.md` |
 | 17 | 消除冗余的边界运算 | `tl.load(..., mask=m, other=d)` 后运算链出现冗余边界保护 | KVR 分析可证存在冗余 `tl.where`、`* mask`、`+ 0` 等 | `references/redundant_boundary_operation.md` |
-| 18 | Kernel 分裂优化 | 多 Case 场景下泛用 Kernel 性能未达标 | `total_cases > 1` 且 `speedup_vs_torch < 0.8`，存在可特化分组 | `references/kernel_splitting.md` |
+| 18 | Kernel 分裂优化 | 多 Case 场景下泛用 Kernel 性能未达标 | `total_cases > 1` 且 `speedup_vs_torch < 2.0`，存在可特化分组 | `references/kernel_splitting.md` |
 | 19 | Cube/MTE3 分阶段批量解耦优化 | 多输出 kernel 中 Cube 累加输出与 atomic scatter 输出在同一循环体交替（MTE3 阻塞 Cube），且某归约维靠多 program atomic 竞争归约 | Cube/MTE3 交替阻塞 + 归约维 atomic 爆炸，该维可单 program UB 累加，重算成本可接受 | `references/cube-mte3-decoupling.md` |
 | 20 | Host 侧张量维度拼接优化 | 算子内存在复合点积 `a·c + b·d`（多次 `tl.dot` + 中间累加），各分段为同一对象连续维度 | 各分段独立存储、内存连续可 `concat`，且拼接后不溢出 UB | `references/host-tensor-concat.md` |
 | 21 | Workspace 物化解耦优化 | 多输出 kernel 输出间循环遍历顺序冲突（UB 放不下常驻累加器且 atomic 太贵），存在可物化复用的共享中间量 | 多 pass 重复 gather + 重算共享中间量，且 pass 间循环顺序 genuine 冲突无法合并 | `references/workspace-decoupling.md` |
 | 22 | Latency-Bound 循环维度 Tile 合并 | kernel 处于 latency-bound（算力利用率极低，dot 固定 issue/同步开销主导），存在外层循环每迭代发起一组 dot，且 dot 某维（常 M）小于 cube 微块可放大 | profiling 算力利用率 <5% 且带宽未饱和但 dot 调用频繁，外层循环放大 dot 维度可减迭代数，放大后连续单 tile 在 UB/CC 内 | `references/latency-bound-tile-merge.md` |
-| 23 | Ascend Interpolate 专用优化 | 算子类型为 interpolate/upsample_* | 代码为 Interpolate 类算子，存在坐标/权重运行时计算或离散访存 | `references/ascend-interpolate-optimization.md` |
-| 24 | Ascend Pooling 专用优化 | 算子类型为 MaxPool/AvgPool | 代码为 Pooling 类算子，存在 1D 扁平索引或布局/边界优化空间 | `references/ascend-pooling-optimization.md` |
-| 25 | IR分析优化 | 所有算子类型 | 每轮作为最后一个优化点必须执行 | `references/IR_triton.md` |
+| 23 | Device-side Gather 连续化 | 算子内部存在按随机索引重复 gather，离散 gather 限制大 tile 使用 | 可拆分为 device gather kernel + 连续 workspace + 后续 compute kernel | `references/device-side-gather.md` |
+| 24 | Matmul 链中间 buffer dtype 优化 | 两段及以上串联 matmul，中间 buffer 被下一段 matmul 读取 | 中间 buffer 声明为 fp32 或 `tl.dot` 前显式 `.to(tl.float32)`，导致无法走 Ascend Cube 低精度高吞吐路径 | `references/chained-matmul-buffer-dtype.md` |
+| 25 | 输出预初始化 | 输出中存在大量默认值位置（常见为 0），kernel 内用 `if`/`tl.where` 判断填充或先做 host 预 padding | 输出位置进行默认值的判断与填充 | `references/preinitialized-output-optimization.md` |
+| 26 | Ascend Interpolate 专用优化 | 算子类型为 interpolate/upsample_* | 代码为 Interpolate 类算子，存在坐标/权重运行时计算或离散访存 | `references/ascend-interpolate-optimization.md` |
+| 27 | Ascend Pooling 专用优化 | 算子类型为 MaxPool/AvgPool | 代码为 Pooling 类算子，存在 1D 扁平索引或布局/边界优化空间 | `references/ascend-pooling-optimization.md` |
+| 28 | Ascend Matmul Transpose 专用优化 | 算子类型为 MatmulBothTrans/MatmulTransA/MatmulTransB/BMM/Linear | 代码为矩阵乘法转置类算子，存在离散跨步 tile 或 Host 侧 transpose 开销 | `references/matmul-transpose.md` |
+| 29 | CV 融合优化 | CV 融合类算子（存在 Cube-Vector 混合计算，如 FlashAttention、Matmul+Bias+GELU 等） | 中间结果通过 GM 回退 或 存在多 scope 交替（>2 个 scope 切换）或 存在多 step 但未启用 Batch 流水线。**本优化点含 3 个子文档，命中后可依次加载 `references/operators/cv-fusion.md`（主流程）、`references/operators/cv-fusion-pingpong.md`（Batch 流水线）、`references/operators/cv-fusion-tiling.md`（Tiling 重评估），不受「一次只能参考一个文档」限制。** | `references/operators/cv-fusion.md` |
+| 30 | IR分析优化 | 所有算子类型 | 每轮作为最后一个优化点必须执行 | `references/IR_triton.md` |
+
 
 **检查规则**：Agent 必须严格按照上述顺序逐一检查优化点，**每次只能尝试一个优化点，命中后才能加载对应参考文档；未命中则跳过，禁止加载参考文档。**
 
@@ -94,15 +100,17 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 | **Multi-kernel** | stats + apply 双 kernel（BatchNorm/LayerNorm/GroupNorm/InstanceNorm/RMSNorm 等归一化算子） | 5, 7, 8, 15, 18 | 继承 Tiled Reduction 全部瓶颈 + kernel 分裂 |
 | **Broadcast EW** | `add/sub/mul/div` 逐元素操作，存在 shape 不等需广播 | 1, 2, 8, 12 | 入参静态化、tiling、多路径调度是关键 |
 | **Scatter/Gather** | 通过随机/不可预测索引访问全局内存 | 4, 5 | 离散访存和 scatter-add 并行轴选择 |
-| **MatMul** | 矩阵乘法 | 2, 13 | tiling 和 autotune 自动调优 |
+| **Histogram-like / Small-output-table** | histc / bincount / scatter_reduce 等小输出表规约 | 3, 30, 1 | 核数扩展优先；禁止全局 atomic；IR 诊断 match-matrix 标量降级 |
+| **MatMul** | 矩阵乘法 | 2, 13, 26 | tiling、autotune 自动调优；转置 matmul 需检查专用优化 |
 | **Memory-bound Copy** | Split/Concat/Pad/Chunk 等纯访存算子 | 16 | 连续拷贝聚合 |
 | **Pooling** | MaxPool/AvgPool | 20 | 1D 扁平索引或布局/边界优化 |
 | **Interpolate** | interpolate/upsample | 19 | 坐标/权重运行时计算或离散访存 |
 | **Permute/Layout-transform** | permute/transpose/reshape-as-copy | 1, 2, 8, 12, 13, 14, 16 | 模式特化、连续维度合并、view 短路；专用 kernel 内部必须是 tile-based 连续访存，禁止 element-wise gather 冒充特化，详见 `references/operators/permute-layout-transform.md` |
+| **CV 融合** | Cube-Vector 异构算子（存在 `tl.dot` + element-wise 后处理，如 FlashAttention、Matmul+Bias+GELU 等） | 29, 2, 13 | scope 合并、fixpipe/copy 数据通路、Batch 流水线（PIPE_STAGES=2）、T0–T5 逐拍交错；tiling 因 Batch 流水线需重新评估，详见 `references/operators/cv-fusion.md`。与 `references/multibuffer-and-double-buffering.md` 的分工：multibuffer 面向标准 compute kernel 的 load-compute 重叠（编译器自动或手写 prefetch），CV 融合 Batch 流水线面向 Cube-Vector 异构核间的 phase 级交错（手写 sync 信号 + PIPE_STAGES 调度），两者适用场景和实现机制不同，不可互相替代。 |
 
 > **Permute/Layout-transform 补充**：若常见模式专用 kernel 内部仍使用逐元素 `div`/`mod` 或 `tl.where` 链进行 gather/scatter，或未通过 `view` 合并连续维度，则优化点 2（Tiling）和 8（维度合并）**必须检查**，不得跳过。
 
-> **通用规则**：多 case（`total_cases > 1`）且 `speedup_vs_torch < 0.8` 时，
+> **通用规则**：多 case（`total_cases > 1`）且 `speedup_vs_torch < 2.0` 时，
 > 无论属于哪个类别，优化点 18（Kernel 分裂）**必须检查**，不得跳过。
 
 ## 主流程（必须严格执行）
@@ -125,7 +133,7 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 
 ```
 ┌─────────────────────────────────────┐
-│ 1. 按顺序检查优化点 1→2→...→25       │
+│ 1. 按顺序检查优化点 1→2→...→30       │      
 └──────────────┬──────────────────────┘
                │
                ▼
@@ -159,7 +167,7 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
   - 第三轮：检查 `1→2→...`，命中优化点 Z，应用并回到 1 继续
   - ...
   - 直到所有优化点都不命中，本轮主流程结束。
-- ⚠️ **优化点 25（IR 分析）支持多轮重复命中**：在 Phase 4 调用方（triton-op-generator AGENTS.md）开启的 "IR 多轮迭代模式" 下，IR 优化点可在多个 Phase 4 轮次中重复进入，每轮重新提取 `last_pass.mlir` 并分析；其他优化点（1-24）单轮即过，命中后本轮不再重复。每次调用 latency-optimizer 仍只应用一个优化点。
+- ⚠️ **优化点 30（IR 分析）支持多轮重复命中**：在 Phase 4 调用方（triton-op-generator AGENTS.md）开启的 "IR 多轮迭代模式" 下，IR 优化点可在多个 Phase 4 轮次中重复进入，每轮重新提取 `last_pass.mlir` 并分析；其他优化点单轮即过，命中后本轮不再重复。每次调用 latency-optimizer 仍只应用一个优化点。
 - ⚠️ **一次只能参考一个文档**；参考文档仅用于当前命中优化点的子流程，完成后立即返回主流程。
 
 ## 优化验证规则
@@ -183,6 +191,8 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 | 离散访存优化 | `references/discrete_memory_access.md` | gather/scatter 与随机索引访存 |
 | Scalar 转 Vector 优化 | `references/scalar_to_vector.md` | 标量操作向量化 |
 | 避免向量 API 标量降级 | `references/avoid_scalar_lowering.md` | i64、比较、扩展乘法等降级规避 |
+| Matmul 链中间 buffer dtype 优化 | `references/chained-matmul-buffer-dtype.md` | chained matmul 中间 buffer dtype 选择 |
+| 输出预初始化 | `references/preinitialized-output-optimization.md` | 输出预初始化优化：消除 kernel 内默认值判断与填充 |
 | Pass 消除合并优化 | `references/pass-merge.md` | 减少遍历、循环消除 |
 | 维度合并优化 | `references/dimension-merge.md` | 连续维度合并 |
 | Libdevice 函数使用 | `references/libdevice-usage.md` | 使用 libdevice 替代手写数学函数 |
@@ -199,8 +209,10 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 | Host 侧张量维度拼接优化 | `references/host-tensor-concat.md` | 复合点积连续维度分段拼接为单 dot |
 | Workspace 物化解耦优化 | `references/workspace-decoupling.md` | 物化共享中间量解耦冲突循环顺序 |
 | Latency-Bound 循环维度 Tile 合并 | `references/latency-bound-tile-merge.md` | latency-bound 下外层循环维度并入 dot M 维减调用数 |
+| Device-side Gather 连续化 | `references/device-side-gather.md` | device 端 gather 到连续 workspace，供后续 kernel 使用 |
 | Ascend Interpolate 优化 | `references/ascend-interpolate-optimization.md` | Interpolate/upsample 算子专用 |
 | Ascend Pooling 优化 | `references/ascend-pooling-optimization.md` | Pooling 算子专用 |
+| Ascend Matmul Transpose 优化 | `references/matmul-transpose.md` | 矩阵乘法转置类算子专用 |
 | 代码规范检查 | `references/checklist.md` | 优化后必须通过的规范 |
 | Block Size Scaling | `references/block_size_scaling.md` | 最终 block size 调优 |
 | 算子特定经验 | `references/operators/adain.md` | AdaIN Backward 优化经验 |
@@ -208,7 +220,11 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 | 算子特定经验 | `references/operators/permute-layout-transform.md` | Permute/Transpose/reshape-as-copy 布局变换算子优化 |
 | 通用辅助 | `references/operators/general-insights.md` | Triton-Ascend 通用优化洞察 |
 | 通用辅助 | `references/operators/workflow-and-debugging.md` | 验证与调试工作流 |
+| CV 融合方法论 | `references/operators/cv-fusion.md` | CV 融合算子 Cube-Vector 数据流水线、Scope 合并、同步信号设计 |
+| CV 融合-Batch 流水线 | `references/operators/cv-fusion-pingpong.md` | CV 融合算子 PIPE_STAGES 调度、T0-T5 逐拍交错、Buffer 分配策略 |
+| CV 融合-Tiling | `references/operators/cv-fusion-tiling.md` | CV 融合算子 On-Chip 容量估算、候选验证、Autotune 自动化搜索 |
 | IR分析优化 | `references/IR_triton.md` | IR分析优化 |
+| Histogram-like / Small-output-table 优化 | `references/histogram-like-table-reduction.md` | 小输出表规约类算子专用优化经验 |
 
 
 ## 最终步骤
@@ -219,7 +235,7 @@ Agent 必须始终处于以下主流程中。进入任一子流程（参考文�
 
 ### Kernel 分裂优化
 
-完成 Block Size Scaling 后，若任务满足多 Case 且泛用 Kernel 性能仍未达标（`total_cases > 1` 且 `speedup_vs_torch < 0.8`），**必须加载** `references/kernel_splitting.md`，执行 Kernel 分裂优化。
+完成 Block Size Scaling 后，若任务满足多 Case 且泛用 Kernel 性能仍未达标（`total_cases > 1` 且 `speedup_vs_torch < 2.0`），**必须加载** `references/kernel_splitting.md`，执行 Kernel 分裂优化。
 
 ## 执行流程
 

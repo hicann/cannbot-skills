@@ -68,7 +68,8 @@ argument-hint: >
 | | `@references/cases/elemwise-cast.md` | int8→fp16：二次切分 + 用满 UB |
 | | `@references/cases/elemwise-concat.md` | Slice+Concat 融合：精确切片 load |
 | | `@references/cases/elemwise-zeros.md` | 小 shape：少核、减调度开销 |
-| **Index** | `@references/cases/index-histogram.md` | 直方图：预排序 + 二分查找 |
+| **Index** | `@references/cases/index-histogram.md` | 大规模索引直方图：预排序 + 二分查找 |
+| | `@references/cases/histogram-small-bins.md` | 小 bins 直方图 / 小输出表规约：per-core local table + 二次归约 |
 | | `@references/cases/index-put.md` | 批量 load 索引到 UB、get_element 复用 |
 | **MatMul** | `@references/cases/matmul-swizzle2d.md` | 固定核心数 grid、Swizzle2D 块重排 |
 | **Reduction** | `@references/cases/reduction-amax-large.md` | M≪N：reduce 轴多核 + 原子 + 二次切分 |

@@ -17,7 +17,7 @@ Cube-Vector（CV）融合是昇腾 NPU 独有的优化技术，利用 Cube Core�
 | sync_block_all | 全局屏障同步 | mode, event_id |
 | sub_vec_id | 获取当前 Vector Core 在 AI Core 内的索引 | 返回 constexpr |
 | sub_vec_num | 获取每个 AI Core 中 Vector Core 的数量 | 返回 constexpr（通常为 2） |
-| al.Scope | 定义核心执行模式的作用域 | core_mode="cube" 或 "vector" |
+| al.scope | 定义核心执行模式的作用域 | core_mode="cube" 或 "vector" |
 
 ## CV 融合的概念
 
@@ -157,7 +157,7 @@ from triton.language.extra.cann import extension as al
 @triton.jit
 def cv_kernel(...):
     # 在 Vector 作用域内获取当前 Vector Core 的索引
-    with al.Scope(core_mode="vector"):
+    with al.scope(core_mode="vector"):
         vec_idx = al.sub_vec_id()  # 返回 0 或 1
 ```
 
@@ -181,7 +181,7 @@ sub_vec_id 和 sub_vec_num 主要用于 CV 融合中 Vector Core 间的任务分
 ```python
 @triton.jit
 def cv_fusion_kernel(...):
-    with al.Scope(core_mode="vector"):
+    with al.scope(core_mode="vector"):
         vec_idx = al.sub_vec_id()
         num_vec = al.sub_vec_num()
         # 根据 Vector Core 索引分配不同的计算任务
@@ -229,7 +229,7 @@ def cv_fusion_example(
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
 ):
     # Cube 核心执行矩阵乘法
-    with al.Scope(core_mode="cube"):
+    with al.scope(core_mode="cube"):
         offs_m = tl.arange(0, BLOCK_M)
         offs_n = tl.arange(0, BLOCK_N)
         offs_k = tl.arange(0, BLOCK_K)
@@ -244,7 +244,7 @@ def cv_fusion_example(
         al.sync_block_set("cube", "vector", 0)
 
     # Vector 核心执行后处理
-    with al.Scope(core_mode="vector"):
+    with al.scope(core_mode="vector"):
         # 等待 Cube 核心完成矩阵乘
         al.sync_block_wait("cube", "vector", 0)
 
@@ -266,7 +266,7 @@ def flash_attention_fwd(q_ptr, k_ptr, v_ptr, o_ptr, ...):
     acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
 
     # Cube 核心执行 QK 和 PV 矩阵乘
-    with al.Scope(core_mode="cube"):
+    with al.scope(core_mode="cube"):
         for start_n in range(0, N, BLOCK_N):
             qk = tl.dot(q, k)
             # 通知 Vector: QK 结果可用
@@ -278,7 +278,7 @@ def flash_attention_fwd(q_ptr, k_ptr, v_ptr, o_ptr, ...):
             al.sync_block_set("cube", "vector", 2)
 
     # Vector 核心执行 Softmax 和累加更新
-    with al.Scope(core_mode="vector"):
+    with al.scope(core_mode="vector"):
         for start_n in range(0, N, BLOCK_N):
             # 等待 Cube 完成 QK
             al.sync_block_wait("cube", "vector", 0)
@@ -290,7 +290,7 @@ def flash_attention_fwd(q_ptr, k_ptr, v_ptr, o_ptr, ...):
             acc = _update_output(pv, softmax_out, acc)
 
     # 全局同步
-    with al.Scope(core_mode="cube"):
+    with al.scope(core_mode="cube"):
         al.sync_block_all("all", 0)
 
     tl.store(o_ptr + offsets, acc)
@@ -306,7 +306,7 @@ def cv_with_sub_vec(a_ptr, b_ptr, c_ptr, bias_ptr,
                     stride_cm, stride_cn,
                     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
     # Cube 核心执行矩阵乘
-    with al.Scope(core_mode="cube"):
+    with al.scope(core_mode="cube"):
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for k in range(0, K, BLOCK_K):
             a = tl.load(a_ptr + ...)
@@ -315,7 +315,7 @@ def cv_with_sub_vec(a_ptr, b_ptr, c_ptr, bias_ptr,
         al.sync_block_set("cube", "vector", 0)
 
     # Vector 核心执行后处理，两个 Vector Core 分工
-    with al.Scope(core_mode="vector"):
+    with al.scope(core_mode="vector"):
         al.sync_block_wait("cube", "vector", 0)
 
         vec_idx = al.sub_vec_id()
@@ -345,7 +345,7 @@ def cv_with_sub_vec(a_ptr, b_ptr, c_ptr, bias_ptr,
 2. **512B 对齐要求**：CV 融合算子要求 Tensor 尾轴大小能被 512Bytes 整除
 3. **sync_block 的 event_id 范围**：0-15，共 16 个独立事件，需避免冲突
 4. **fixpipe 仅 910_95/950 支持**：其他型号需要通过 GM 中转
-5. **al.Scope 必须正确使用**：Cube 计算必须在 `core_mode="cube"` 作用域内，Vector 计算在 `core_mode="vector"` 作用域内
+5. **al.scope 必须正确使用**：Cube 计算必须在 `core_mode="cube"` 作用域内，Vector 计算在 `core_mode="vector"` 作用域内
 6. **sync_block_set 和 sync_block_wait 必须配对**：sender 和 receiver 不能相同
 
 ## 常见问题 (Q&A)
@@ -356,7 +356,7 @@ A: 不一定。CV 融合减少了 GM 访问次数，但增加了核心间同步�
 
 **Q2: 如何确定算子是否使用了 CV 融合？**
 
-A: 如果算子中使用了 `tl.dot`，编译器会自动识别为 CV 算子。也可以通过 `al.Scope(core_mode="cube"/"vector")` 显式指定核心执行模式。
+A: 如果算子中使用了 `tl.dot`，编译器会自动识别为 CV 算子。也可以通过 `al.scope(core_mode="cube"/"vector")` 显式指定核心执行模式。
 
 **Q3: sync_block 的 event_id 如何选择？**
 

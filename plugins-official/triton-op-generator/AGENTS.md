@@ -26,9 +26,12 @@ permission:
 
 ## 固定配置
 
+项目级固定配置统一从 **`<项目根目录>/config.json`** 读取，禁止在流程文档、示例或生成的 `summary.json` 中写死数值。
+
 - **framework**: `torch`
 - **dsl**: `triton_ascend`
 - **backend**: `ascend`
+- **target_speedup**: 目标几何平均加速比，读取自 `config.json` 的 `target_speedup` 字段。当前配置值为 `0.8`。
 
 ---
 
@@ -100,6 +103,33 @@ python3 -c "import datetime,random; ts=datetime.datetime.now().strftime('%Y%m%d_
 ---
 
 ## Phase 1: 任务构建
+
+### 基线冻结（强制，所有模式通用）
+
+**调用时机**：每个模式（A.1/A.2/B）在 `{工作目录}/{op_name}.py` 落盘完成后，**立即**调用：
+
+```bash
+python3 .claude/skills/triton-op-verifier/scripts/freeze_baseline.py \
+    --op_name {op_name} \
+    --work_dir {工作目录} \
+    --mode {auto|user} \
+    [--source_path <用户源 .py 绝对路径>]   # mode=user 时必传
+```
+
+`--mode` 取值：
+- `user`：用户提供 benchmark（模式 A 标杆文件、模式 A 优先级 1 的 torch 标杆）—— **必传 `--source_path`**，freeze 会校验工作目录副本 sha256 == 源 sha256，不等则 exit 5
+- `auto`：Agent 自动生成 benchmark（模式 B 兜底，从 `.pt` 翻译或手写 PyTorch 参考）—— 不传 `--source_path`
+
+**强制约束**：
+
+1. **冻结后禁止修改** `{工作目录}/{op_name}.py`。后续 Phase 2/3/4 任何对该文件的 Edit/Write 会被 verify.py / benchmark.py 启动时的基线闸门检测到（exit 4）。
+2. **源 benchmark 路径只读**：`npu_benchmark/`、`ascendc-kernelgen-data*/` 等用户数据目录由 PreToolUse hook 强制拦截 Edit/Write（已通过 `bash init.sh project claude` 注册）。
+3. **场景 B 工作目录副本必须字节级等于源**：mode=user 时 freeze 会校验 `{工作目录}/{op_name}.py` 的 sha256 == `--source_path` 指向的源文件 sha256。**Agent 不得在 Phase 1 内重写 Model 类、改 forward 签名、补确定性常数权重等**——这些都会让 freeze 失败（exit 5）。源 benchmark 有 bug（如 `__init__` 参数与 `get_init_inputs()` 不匹配）时，正确做法是在 report.md 标注 `baseline_buggy: true` 后失败退出，**不要试图修复源 benchmark**。
+4. **freeze 不可重入**：锚文件 `{工作目录}/output/.baseline_anchor.json` 一旦写入，重跑 freeze 会 exit 1 拒绝覆盖。若需重 freeze，需人工删除锚文件并审计原因。
+5. **下游依赖**：verify.py / benchmark.py 启动时会校验 `{工作目录}/{op_name}.py` 的 sha256 等于锚文件记录值（mode=user 时还会校验源文件 sha256 等于锚里记录的 source_sha256）——
+   - 锚文件缺失 → exit 3（Phase 1 未执行 freeze）
+   - sha256 不匹配 → exit 4（基线被篡改）
+   - 两者都属于 C 类终止，**不退回 Phase 3 重试**。
 
 ### 模式 A：标准算子任务
 
@@ -194,7 +224,7 @@ python3 -c "import datetime,random; ts=datetime.datetime.now().strftime('%Y%m%d_
 
 ```
 iteration = 0
-max_iterations = 5
+max_iterations = 10
 history_attempts = []
 previous_code = ""
 verifier_error = ""
@@ -299,7 +329,7 @@ while iteration < max_iterations:
 - **A 类**：代码逻辑/算法错误（可修复）
   - 含 A-PyTorchFallback-Type1/2/3 子类型
 - **B 类**：环境/基础设施错误（不可修复）
-- **C 类**：重复失败，同一 A 类子类型连续 ≥ 3 次
+- **C 类**：重复失败，同一 A 类子类型连续 ≥ 10 次
 
 **决策**：
 
@@ -436,7 +466,7 @@ opt_iteration = 0
 # 4. 若读取失败、文件不存在或统计失败，使用默认值 max_opt_iterations = 20
 
 max_opt_iterations = <由 Agent 按上述指令运行时计算>
-target_speedup = 0.8 # 目标几何平均加速比⚠️重要指标
+target_speedup = <从 config.json 读取> # 目标几何平均加速比⚠️重要指标
 best_code = ""
 best_speedup = 0.0
 baseline_code = Phase 3 产出的 generated_code.py
@@ -445,7 +475,7 @@ improvement_made = false
 target_reached = false # 是否达到目标加速比
 
 # IR 多轮迭代相关变量
-# 优化点 25（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-24）单轮即过。
+# 优化点 30（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-29）单轮即过。
 # ir_max_iterations 与 max_opt_iterations 独立计数，互不扣减。
 ir_iteration = 0
 ir_max_iterations = 20                              # IR 专属迭代上限
@@ -488,7 +518,7 @@ while opt_iteration < max_opt_iterations:
 4.3 性能测试（基线复用 + 优化侧单次执行）
 4.4 结果判定
 4.5 分析决策（验证失败时）
-4.6 终局判定 target_speedup = 0.8 # 目标几何平均加速比⚠️重要指标
+4.6 终局判定 target_speedup = <从 config.json 读取> # 目标几何平均加速比⚠️重要指标
 
 ```
 
@@ -510,9 +540,9 @@ while opt_iteration < max_opt_iterations:
 
 **分支**：
 
-> latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 25 时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
+> latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 30 时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
 
-- **存在普通优化点（1-24）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
+- **存在普通优化点（1-29）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
 - **triton-latency-optimizer 报告无更多普通优化点**：
   - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点（这些仍属普通轮）：
     - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 18）
@@ -521,8 +551,8 @@ while opt_iteration < max_opt_iterations:
       （见 `triton-latency-optimizer/SKILL.md` 的"算子类别与高频优化点"表）
   - **IR 多轮迭代分支**（普通优化点耗尽时）：
     - 若 `ir_has_more_suggestions == true` 且 `ir_iteration < ir_max_iterations`：
-      - **不终止**，强制走 IR 子流程（优化点 25），重新提取 `last_pass.mlir` 并分析
-      - `ir_iteration++`，`last_optimization_point = 25`
+      - **不终止**，强制走 IR 子流程（优化点 30），重新提取 `last_pass.mlir` 并分析
+      - `ir_iteration++`，`last_optimization_point = 30`
       - 本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}_ir_{ir_iteration}`（避免与普通轮目录冲突）
     - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`，即 latency-optimizer 优化已耗尽）：
       - 若 `optimized_speedup >= target_speedup`（target_reached）→ 可进入 **4.6 终局判定**
@@ -707,7 +737,7 @@ while opt_iteration < max_opt_iterations:
 
 - 基本信息：arch、工作目录
 - 生成结果：迭代次数、最终版本来源
-- **目标加速比**：target_speedup = 0.8，是否达到（target_reached）
+- **目标加速比**：target_speedup = <从 config.json 读取>，是否达到（target_reached）
 - **实际最佳加速比**：best_speedup（保留 4 位小数）
 - **Shape 通过率（以 verify 为准）**：`passed_cases / total_cases` 必须从
   `output/iter_{phase3_last_iter}/verify/verify_result.json` 读取。
@@ -747,9 +777,9 @@ while opt_iteration < max_opt_iterations:
   "gen_iterations": 2,
   "opt_iterations": 1,
   "optimized": true,
-  "target_speedup": 0.8,
+  "target_speedup": 2.0,
   "target_reached": true,
-  "best_speedup": 0.85,
+  "best_speedup": 2.15,
   "perf_method": "profiler",
   "skill_path": ".claude/skills/triton-op-verifier",
   "perf_data": {
@@ -790,7 +820,7 @@ while opt_iteration < max_opt_iterations:
 
 **字段说明**：
 
-- `target_speedup`: 目标几何平均加速比，固定为 0.8
+- `target_speedup`: 目标几何平均加速比，读取自 `config.json` 的 `target_speedup` 字段
 - `target_reached`: 是否达到目标加速比（optimized_speedup >= target_speedup）
 - `best_speedup`: Phase 4 历史最佳几何平均加速比
 - `speedup_vs_torch`: **几何平均**聚合 = `(∏ s_i)^(1/n)`（仅对通过且 `s_i` 为有限正数的 shape）；全部异常时为 `null`
@@ -867,7 +897,7 @@ Phase 4 有提升但未达目标时：
   "gen_iterations": 2,
   "opt_iterations": 10,
   "optimized": true,
-  "target_speedup": 0.8,
+  "target_speedup": 2.0,
   "target_reached": false,
   "best_speedup": 0.65,
   "perf_method": "profiler",
@@ -887,7 +917,7 @@ Phase 4 失败时（Phase 3 成功，优化无提升）：
   "gen_iterations": 2,
   "opt_iterations": 10,
   "optimized": false,
-  "target_speedup": 0.8,
+  "target_speedup": 2.0,
   "target_reached": false,
   "best_speedup": 0.0,
   "perf_data": {
@@ -970,6 +1000,12 @@ ${pwd}/triton_ascend_output/op_{op_name}_{timestamp}_{rid}/
 | Phase 1 (模式 A) | 任务文件验证失败          | 修复重试（最多 2 次）；多 case 模式下禁止"降级为单 case"绕过                                             |
 | Phase 1 (模式 B) | `.pt` 文件不存在          | 报错终止，提示用户上传同名 `.pt`                                                                         |
 | Phase 1 (模式 B) | `Model` 翻译验证失败      | 修复重试（最多 2 次）                                                                                    |
+| Phase 1          | freeze_baseline.py exit 1 | 锚文件已存在，拒绝重写。审计为何二次 freeze；若确需重 freeze，人工删除锚文件后重跑                        |
+| Phase 1          | freeze_baseline.py exit 2 | `{op_name}.py` 不存在，Phase 1 落盘步骤异常，回退修复                                                     |
+| Phase 1          | freeze_baseline.py exit 3 | mode=user 但未传 `--source_path`，或锚文件写入失败。补全参数或审计 IO 错误                                  |
+| Phase 1          | freeze_baseline.py exit 5 | **场景 B 工作目录副本 sha256 ≠ 源 sha256**——Agent 改写了 benchmark 而不是 cp。正确处理：在 report.md 标注 `baseline_buggy: true` 失败退出，**不要试图重写 baseline 绕过** |
+| Phase 3/4        | verify/benchmark exit 3   | **C 类终止任务**，`failure_phase: "phase1_freeze_missing"`。Phase 1 未执行 freeze，流程级 bug，不退回重试 |
+| Phase 3/4        | verify/benchmark exit 4   | **C 类终止任务**，`failure_phase: "baseline_tampered"`。基线被篡改，回滚到 freeze 时状态或人工审计       |
 | Phase 3          | 达到 max_iterations       | 输出失败报告，任务结束                                                                                   |
 | Phase 3          | B 类环境错误              | 立即终止，任务失败                                                                                       |
 | Phase 3          | C 类重复错误              | 立即终止，任务失败                                                                                       |
@@ -995,6 +1031,9 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 
 | 约束               | 说明                                                                                                                                                                                                                                     |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 安装前置条件       | 首次使用前必须跑 `bash init.sh project claude`（或 `global claude`），init.sh 会自动在 `$CONFIG_ROOT/settings.json` 注册 PreToolUse hook 拦截源 benchmark 路径篡改。**未跑 init.sh 会导致源路径保护失效**                                |
+| 源 benchmark 只读  | `npu_benchmark/`、`ascendc-kernelgen-data*/` 路径下的 `.py` 由 PreToolUse hook 强制拦截 Edit/Write（hook 由 init.sh 注册，保护路径配置在 `.claude/hooks/guard-config.json`）。源文件有 bug 也不允许改，需标注 `baseline_buggy: true` 后失败退出 |
+| 工作目录基线冻结   | Phase 1 末尾必须调 `freeze_baseline.py` 落锚。锚文件 `{工作目录}/output/.baseline_anchor.json` 写入后，`{工作目录}/{op_name}.py` 禁止再被 Edit/Write。verify/benchmark 启动时校验 sha256，不匹配 exit 4 (C 类终止)                          |
 | GPU Kernel 模式    | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级                                                                                                                                                                          |
 | Phase 3 最大迭代   | 5 次，禁止超出                                                                                                                                                                                                                           |
 | Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）则退出指令级循环                                                                                         |

@@ -127,6 +127,42 @@ python3 <skill-path>/scripts/validate_task.py /abs/path/{op_name}.py --json
 - 禁止用自创的方法替代验证脚本
 - 禁止仅做静态检查就认为验证通过（必须同时通过运行时检查）
 - 禁止将多 case 源降级为单 case 输出来通过验证
+- **禁止对源 benchmark 路径（`npu_benchmark/`、`ascendc-kernelgen-data*/`）使用 Edit/Write**——已由 PreToolUse hook 强制拦截，工具调用会被 deny 并返回原因。源文件有 bug 也不允许改，需在 report.md 标注 `baseline_buggy: true` 后失败退出
+
+### Step 4.5: 基线冻结（必须执行，禁止跳过）
+
+验证通过后、用户确认前，**立即**调用基线冻结脚本，把工作目录里的 `{op_name}.py` 哈希锚定下来。
+
+**调用命令**（用 `bash` 工具）：
+
+```bash
+python3 <triton-op-verifier-skill-path>/scripts/freeze_baseline.py \
+    --op_name {op_name} \
+    --work_dir {工作目录} \
+    --mode user \
+    --source_path <用户源 .py 绝对路径>
+```
+
+**`--mode` 取值**：
+- `user`：用户提供 benchmark（模式 A 标杆文件，绝大多数场景）—— **必传 `--source_path`**
+- `auto`：Agent 自动生成 benchmark（模式 B 兜底翻译场景）—— 不传 `--source_path`
+
+**`--source_path` 传值**（仅 mode=user 时）：
+- 模式 A 单 case：用户最初提供的源 `.py` 绝对路径
+- 模式 A 多 case：同上
+- 模式 A 优先级 1（torch 标杆 + GPU kernel）：用户提供的 torch 标杆源 `.py` 路径
+
+**退出码处理**：
+- `0` → 锚文件写入成功，进入 Step 5
+- `1` → 锚文件已存在（二次 freeze）。审计为何二次调用；若确需重 freeze，提示用户人工删除 `{工作目录}/output/.baseline_anchor.json` 后重跑
+- `2` → `{op_name}.py` 不存在，或 `--source_path` 指向的源文件不存在。本步骤前置条件异常，回退修复
+- `3` → mode=user 但未传 `--source_path`。补全参数后重跑
+- `5` → **工作目录副本 sha256 ≠ 源 sha256**。这意味着 Step 3a/3b 不是字节级 cp 而是改写过（如重写 `Model` 类、改 `forward` 签名、补 `get_init_inputs`）。**严禁绕过**：正确做法是在 report.md 标注 `baseline_buggy: true` 失败退出，告诉用户源 benchmark 自身有 bug 需要由人工修复源文件后重跑
+
+**关键约束**：
+- **Step 3a/3b 必须用字节级 cp**（`cp` 命令或等价的二进制复制），**禁止用 Read+Write 重建**、**禁止任何 Edit 修改**。源文件可能有 bug（如 `__init__` 参数与 `get_init_inputs` 不匹配），但那是源的问题，**不归 Agent 修**
+- `{工作目录}/{op_name}.py` 之后任何 Edit/Write 都会被 verify.py / benchmark.py 启动时的基线闸门检测到（exit 4，C 类终止）
+- 锚文件 `{工作目录}/output/.baseline_anchor.json` 一旦写入禁止重写
 
 ### Step 5: 用户确认（必须执行，禁止跳过）
 

@@ -133,7 +133,7 @@ class ModelNew(nn.Module):
 | ------------ | ----------------------------------------------------------------- | ------------------------------------------ |
 | Element-wise | add/mul/relu/sigmoid/tanh/gelu/exp/log/silu 等逐元素操作          | `@references/triton-ascend-elementwise.md` |
 | MatMul       | matmul/bmm/linear/gemm 等矩阵乘法                                 | `@references/triton-ascend-matmul.md`      |
-| Reduce       | sum/mean/max/min/softmax/layernorm/logsoftmax 等归约操作          | `@references/triton-ascend-reduce.md`      |
+| Reduce       | sum/mean/max/min/softmax/layernorm/logsoftmax/histc/bincount/scatter_reduce（小输出） 等归约操作 | `@references/triton-ascend-reduce.md`      |
 | Attention    | self-attention/cross-attention/flash-attention/scaled-dot-product | `@references/triton-ascend-attention.md`   |
 | Sort/Select  | nms 等排序选择操作                                                | `@references/triton-ascend-sort-select.md` |
 | Interpolate  | Interpolate等插值操作                                             | `@references/triton-ascend-interpolate.md` |

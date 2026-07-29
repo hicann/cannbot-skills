@@ -1,0 +1,31 @@
+{
+  "_comment": "Guard hook configuration. protected = deny write; allowlist = always allow (overrides protected); self_guard = deny write to hook/config/settings themselves (anti-tamper). Patterns are bash regex (unanchored, use ^ $ for full match). Protected paths are scoped to known benchmark data roots (ascendc-kernelgen-data*) to avoid false positives on unrelated directories that happen to contain 'benchmark' in their name.",
+  "protected": [
+    "/ascendc-kernelgen-data[^/]*/npu_benchmark/.*\\.py$",
+    "/ascendc-kernelgen-data[^/]*/npu_benchmark/.*\\.json$"
+  ],
+  "allowlist": [
+    ".*/triton_ascend_output/.*",
+    ".*/\\.claude/skills/.*",
+    ".*/\\.claude/template/.*"
+  ],
+  "self_guard": [
+    ".*/\\.claude/settings\\.json$",
+    ".*/\\.claude/settings\\.local\\.json$",
+    ".*/\\.claude/hooks/guard-baseline-paths\\.sh$",
+    ".*/\\.claude/hooks/guard-config\\.json$",
+    ".*/\\.claude/hooks/test_guard\\.sh$"
+  ],
+  "_fallback_when_config_missing": {
+    "protected": [
+      "/ascendc-kernelgen-data[^/]*/npu_benchmark/.*\\.py$"
+    ],
+    "allowlist": [
+      ".*/triton_ascend_output/.*"
+    ],
+    "self_guard": [
+      ".*/\\.claude/settings\\.json$",
+      ".*/\\.claude/hooks/guard-baseline-paths\\.sh$"
+    ]
+  }
+}

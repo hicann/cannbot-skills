@@ -16,7 +16,7 @@ Case 都能使用最匹配的实现，同时保持对外接口和精度一致性
 
 仅在同时满足以下条件时执行，否则跳过：
 1. `total_cases > 1`（多 case 场景）。
-2. Phase 4 最终 `speedup_vs_torch < 0.8`（泛用 Kernel 性能未达标）。
+2. Phase 4 最终 `speedup_vs_torch < 2.0`（泛用 Kernel 性能未达标）。
 
 ## 优化方法
 
@@ -218,7 +218,7 @@ class ModelNew(nn.Module):
 
 ## 关键点
 
-1. **触发条件严格**：仅 `total_cases > 1` 且 `speedup_vs_torch < 0.8` 时执行，否则跳过。
+1. **触发条件严格**：仅 `total_cases > 1` 且 `speedup_vs_torch < 2.0` 时执行，否则跳过。
 2. **精度零妥协**：任何专用 Kernel 精度不通过，立即回退到泛用 Kernel。
 3. **性能底线**：专用 Kernel 必须 ≥ 泛用 Kernel 性能，否则不采用。
 4. **路由封装**：路由逻辑必须封装在 `_route` 方法中，`forward` 仅调用该方法。
@@ -758,7 +758,7 @@ class ModelNew(nn.Module):
 
 ## 来自 SKILL.md 的原始描述（优化点 18：Kernel 分裂优化）
 
-**适用条件**：多 Case 场景下泛用 Kernel 性能未达标（`total_cases > 1` 且 `speedup_vs_torch < 0.8`）
+**适用条件**：多 Case 场景下泛用 Kernel 性能未达标（`total_cases > 1` 且 `speedup_vs_torch < 2.0`）
 
 **典型代码特征**：
 ```python
@@ -777,7 +777,7 @@ class Model(nn.Module):
 
 **判断逻辑**：
 1. 确认当前处于多 Case 场景（`total_cases > 1`）。
-2. 读取 Phase 4 最终性能数据，检查整体几何平均 `speedup_vs_torch < 0.8`。
+2. 读取 Phase 4 最终性能数据，检查整体几何平均 `speedup_vs_torch < 2.0`。
 3. 按算子类型匹配经验文档：
    - Reduce 类算子（`sum/mean/max/min/softmax/layernorm`）→ 命中
    - 广播逐元素算子（`add/sub/mul/div` 且存在 shape 不等）→ 命中

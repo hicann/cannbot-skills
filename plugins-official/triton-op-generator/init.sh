@@ -412,6 +412,81 @@ else
 fi
 echo ""
 
+# --- Step 2.5: Generate settings.json with baseline guard hook (Claude only) ---
+# Registers a PreToolUse hook that blocks Edit/Write on protected baseline
+# source paths (npu_benchmark/, ascendc-kernelgen-data*/). See:
+#   .claude/hooks/guard-baseline-paths.sh
+#   .claude/hooks/guard-config.json
+# Only Claude Code has the PreToolUse hook mechanism; other tools (opencode,
+# trae, cursor, copilot) skip this step entirely.
+if [ "$TOOL" = "claude" ]; then
+    SETTINGS_TARGET="$CONFIG_ROOT/settings.json"
+    HOOK_SCRIPT="$PLUGIN_ROOT/.claude/hooks/guard-baseline-paths.sh"
+    HOOK_CONFIG="$PLUGIN_ROOT/.claude/hooks/guard-config.json"
+    step "[2.5/4] Generating baseline guard hook in settings.json (Claude only)..."
+
+    if [ ! -f "$HOOK_SCRIPT" ]; then
+        warn "guard-baseline-paths.sh not found at $HOOK_SCRIPT, skip settings.json generation"
+    elif [ ! -f "$HOOK_CONFIG" ]; then
+        warn "guard-config.json not found at $HOOK_CONFIG, skip settings.json generation"
+    elif ! command -v python3 >/dev/null 2>&1; then
+        warn "python3 not available, skip settings.json generation"
+    else
+        # jq is a hard requirement for the guard hook to function. Without jq
+        # the hook script fails open (allows everything), defeating protection.
+        # Warn loudly so users notice at install time, not after a leak.
+        if ! command -v jq >/dev/null 2>&1; then
+            err "jq is required by the baseline guard hook but was not found in PATH."
+            echo "       Install with one of:" >&2
+            echo "         Debian/Ubuntu: sudo apt-get install -y jq" >&2
+            echo "         RHEL/CentOS:   sudo yum install -y jq" >&2
+            echo "         macOS:         brew install jq" >&2
+            echo "       Aborting init. Re-run after jq is installed." >&2
+            exit 1
+        fi
+        chmod +x "$HOOK_SCRIPT"
+        # Idempotent merge: append hook entry only if not already registered.
+        # Preserves any other keys/hooks the user already has in settings.json.
+        HOOK_SCRIPT="$HOOK_SCRIPT" SETTINGS_TARGET="$SETTINGS_TARGET" python3 - <<'PYEOF'
+import json, os, sys
+hook_script = os.environ["HOOK_SCRIPT"]
+target = os.environ["SETTINGS_TARGET"]
+settings = {}
+if os.path.exists(target):
+    try:
+        with open(target) as f:
+            settings = json.load(f)
+    except Exception:
+        settings = {}
+hooks = settings.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+already = any(
+    h.get("command") == hook_script
+    for group in pre
+    for h in group.get("hooks", [])
+)
+if not already:
+    pre.append({
+        "matcher": "Edit|Write",
+        "hooks": [{"type": "command", "command": hook_script, "args": []}],
+    })
+tmp = target + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.replace(tmp, target)
+PYEOF
+        if [ -f "$SETTINGS_TARGET" ]; then
+            ok "settings.json: baseline guard hook registered ($SETTINGS_TARGET)"
+            echo "         hook: $HOOK_SCRIPT"
+            echo "         protected paths configured in: $HOOK_CONFIG"
+        else
+            warn "settings.json generation failed silently"
+        fi
+    fi
+    echo ""
+fi
+
 # --- Step 3: Health check + manifest ---
 step "[3/3] Running health check..."
 health_ok=true
