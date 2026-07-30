@@ -4,6 +4,7 @@
 语言: C++
 侧别: All, Tiling
 领域: true
+触发: 必须触发
 默认启用: true
 适用场景: Tiling 侧（Host 侧）和 Kernel 侧（Device 侧）的 C++ 安全编码规范
 不适用场景: Python 代码（见 python-secure.md）、编译链接安全（见 compile-secure.md）
