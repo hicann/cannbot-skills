@@ -1,26 +1,26 @@
 # Transpose TilingData 结构与参数说明
 
-本文说明 Transpose 各 tiling 策略所用的 TilingData 结构体(POD blob,host 计算后原样拷入 kernel 的 `tiling` GM 参数)。结构体定义见 [`kernel/transpose_tiling_data.h`](kernel/transpose_tiling_data.h)。
+本文说明 Transpose 各 tiling 策略所用的 TilingData 结构体(POD blob,host 计算后原样拷入 kernel 的 `tiling` GM 参数)。结构体定义见 [`templates/transpose_tiling_data.template`](templates/transpose_tiling_data.template)。
 
 ## 使用方式
 
-1. 根据实际入参(dtype、shape、perm),对照 [`templates/transpose_README.md`](templates/transpose_README.md) 选择 tiling 策略。
-2. 直接引用 [`kernel/`](kernel/) 下对应策略的 kernel 头文件(见下表映射),按需微调。
-3. host 侧计算 TilingData 时,参照本文各字段含义填充;或直接复用 `kernel/transpose_tiling*.cpp` 的 host 计算逻辑。
+1. 根据实际入参(dtype、shape、perm),对照 [`guide.md`](guide.md) 策略速查表选择 tiling 策略。
+2. 直接引用 [`templates/dav3510/`](templates/dav3510/) 下对应策略的 kernel 模板文件(见下表映射),按需微调。
+3. host 侧计算 TilingData 时,参照本文各字段含义填充。
 
-## 策略 → kernel 文件 → TilingData 结构 映射
+## 策略 → kernel 模板 → TilingData 结构 映射
 
-| 策略 | kernel 文件 | TilingData 结构 | 参考文档 |
+| 策略 | kernel 模板文件 | TilingData 结构 | 参考文档 |
 |------|-------------|-----------------|----------|
-| TENSOR_MOVE | `kernel/arch35/transpose_tensor_move.h` | `TransposeOpTilingData` | `templates/transpose_tensor_move.md` |
-| SMALL_SHAPE | `kernel/arch35/transpose_small_shape.h` | `TransposeOpTilingData` | `templates/transpose_small_shape.md` |
-| CUT_ONCE | `kernel/arch35/transpose_cut_one_axis.h` | `TransposeOpTilingData` | `templates/transpose_cut_one_axis.md` |
-| CUT_TWICE | `kernel/arch35/transpose_cut_two_axis.h` | `TransposeOpTilingData` | `templates/transpose_cut_two_axis.md` |
-| N_LAST_TRANSPOSE | `kernel/arch35/transpose_n_last.h` | `TransposeOpTilingData` | `templates/transpose_n_last.md` |
-| BIG_DIM | `kernel/arch35/transpose_big_dim.h` | `TransposeOpTilingData` | `templates/transpose_big_dim.md` |
-| GATHER_TRANSPOSE | `kernel/arch35/transpose_with_gather.h` | `GatherTransposeTilingData` | `templates/transpose_gather.md` |
-| VCONV_TRANSPOSE (5HD) | `kernel/arch35/transpose_transdata_5hd.h` | `TransposeVCONVTilingData` | `templates/transpose_vconv_5hd.md` |
-| VCONV_021_TRANSPOSE | `kernel/arch35/transpose_transdata_5hd_021.h` | `Transpose021VCONVTilingData` | `templates/transpose_vconv_021.md` |
+| TENSOR_MOVE | `templates/dav3510/transpose_tensor_move.template` | `TransposeOpTilingData` | [transpose_tensor_move.md](transpose_tensor_move.md) |
+| SMALL_SHAPE | `templates/dav3510/transpose_small_shape.template` | `TransposeOpTilingData` | [transpose_small_shape.md](transpose_small_shape.md) |
+| CUT_ONCE | `templates/dav3510/transpose_cut_one_axis.template` | `TransposeOpTilingData` | [transpose_cut_one_axis.md](transpose_cut_one_axis.md) |
+| CUT_TWICE | `templates/dav3510/transpose_cut_two_axis.template` | `TransposeOpTilingData` | [transpose_cut_two_axis.md](transpose_cut_two_axis.md) |
+| N_LAST_TRANSPOSE | `templates/dav3510/transpose_n_last.template` | `TransposeOpTilingData` | [transpose_n_last.md](transpose_n_last.md) |
+| BIG_DIM | `templates/dav3510/transpose_big_dim.template` | `TransposeOpTilingData` | [transpose_big_dim.md](transpose_big_dim.md) |
+| GATHER_TRANSPOSE | `templates/dav3510/transpose_with_gather.template` | `GatherTransposeTilingData` | [transpose_gather.md](transpose_gather.md) |
+| VCONV_TRANSPOSE (5HD) | `templates/dav3510/transpose_transdata_5hd.template` | `TransposeVCONVTilingData` | [transpose_vconv_5hd.md](transpose_vconv_5hd.md) |
+| VCONV_021_TRANSPOSE | `templates/dav3510/transpose_transdata_5hd_021axis.template` | `Transpose021VCONVTilingData` | [transpose_vconv_021.md](transpose_vconv_021.md) |
 
 > NDDMA 家族共用同一个 `TransposeOpTilingData`;加速策略(gather/vconv/021)各有独立结构。所有结构均 `#pragma pack(push, 8)` 8 字节对齐。
 
@@ -95,7 +95,7 @@ NDDMA 家族把逻辑 shape 归约后对齐到固定 5 维(`NDDMA_MAX_DIM_NUM=5`
 
 ## 二、GatherTransposeTilingData(GATHER_TRANSPOSE)
 
-见 [`templates/transpose_gather.md`](templates/transpose_gather.md)。UB 内向量 gather 重排,MTE2/MTE3 两端连续大 burst。
+见 [`transpose_gather.md`](transpose_gather.md)。UB 内向量 gather 重排,MTE2/MTE3 两端连续大 burst。
 
 ### 2.1 标量控制
 
@@ -138,7 +138,7 @@ NDDMA 家族把逻辑 shape 归约后对齐到固定 5 维(`NDDMA_MAX_DIM_NUM=5`
 
 ## 三、TransposeVCONVTilingData(VCONV_TRANSPOSE 5HD,仅 16bit)
 
-见 [`templates/transpose_vconv_5hd.md`](templates/transpose_vconv_5hd.md)。2D 末轴交换,片上 `TransDataTo5HD` 做 16×16 块转置。
+见 [`transpose_vconv_5hd.md`](transpose_vconv_5hd.md)。2D 末轴交换,片上 `TransDataTo5HD` 做 16×16 块转置。
 
 辅助结构 `CoreSplitPara`(核间切分:`AlignBlockFactor`/`BlockFactor`/`BlockCount`/尾块)与 `UbSplitPara`(UB 内切分:主核/尾核的 UB align/factor/count),被下表按 R/C 方向各引用一份。
 
@@ -158,7 +158,7 @@ NDDMA 家族把逻辑 shape 归约后对齐到固定 5 维(`NDDMA_MAX_DIM_NUM=5`
 
 ## 四、Transpose021VCONVTilingData(VCONV_021_TRANSPOSE,支持 8/16/32bit)
 
-见 [`templates/transpose_vconv_021.md`](templates/transpose_vconv_021.md)。`perm=[0,2,1]` 保 batch 转置,按 batch 维循环 + `TransDataTo5HD`。
+见 [`transpose_vconv_021.md`](transpose_vconv_021.md)。`perm=[0,2,1]` 保 batch 转置,按 batch 维循环 + `TransDataTo5HD`。
 
 辅助结构 `Transpose021UbSplitPara`(`UbAlignFactor`/`UbFactor`/`UbCount`/`UbTailAlignFactor`/`UbTailFactor`),被 R/C 方向各引用一份。
 
