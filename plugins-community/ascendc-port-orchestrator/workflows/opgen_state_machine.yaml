@@ -1,0 +1,1599 @@
+# /ascendc-op-gen workflow state machine — canonical spec
+#
+# Read by engine/src/scripts/workflow/workflow_critic.py.
+# Any change here MUST be mirrored in the affected customer entry Skill under
+# skills/{ascendc-cross-gen-port,ascendc-backward-gen}/
+# (pre-commit hook enforces the bidirectional drift check).
+#
+# This YAML encodes what MUST and MUST NOT happen at each workflow phase.
+# The critic reads it and rejects phase transitions that violate invariants.
+#
+# The file's authority: if SKILL.md prose disagrees with this YAML, the YAML wins
+#
+# Security note (2026-05-12): no Discord/Slack/external channel IDs or bot
+# snowflakes ever appear in this YAML or in SKILL.md prose. Such IDs are
+# local-only (see CLAUDE.md "Discord IDs are LOCAL-ONLY"). Workflow spec
+# stays role-only: "user-direct channel", "DS-collab group channel", etc.
+# at critic-runtime.
+#
+# Invocation: use src/scripts/orch (sets PYTHONPATH=src/scripts) — the single
+# correct entry point for python3 -m orchestrator. See SKILL.md §Env setup.
+#
+# A human PR that changes an entry SKILL.md without updating YAML is blocked by
+# the sync-check hook. A human PR that changes YAML without updating at least
+# one affected entry SKILL.md is also blocked. This two-way binding prevents
+# drift.
+
+version: 1
+schema_version: "1.0"
+workflow_name: ascendc-op-gen
+last_updated: "2026-07-30"
+
+# 2026-05-05 V3.8.x: SKILL.md adds "Don't play orchestrator role" section
+# documenting 7 anti-patterns + the corrective sequence. No Phase O4 state /
+# transition change; this comment exists to satisfy the SKILL.md/YAML drift
+# pre-commit hook for that purely-prose update. The Python orchestrator IS
+# the orchestrator; LLM invoking /ascendc-op-gen does not orchestrate.
+
+# 2026-05-05 V3.8.x: SKILL.md adds anti-pressure protocols reference
+# (`${CLAUDE_PLUGIN_ROOT}/kb/shared/ANTI_PRESSURE_PROTOCOLS.md`) at file top — applies
+# to every isolated context (skills, agents, orchestrator briefs). Pure prompt
+# wiring, no state-machine routing change. Decision-point Px cite mapping:
+# done→P1+P7, PARTIAL_PERSIST→P5+P7, spawn→P3+P8, expected-failure→P5,
+# nohup→P8, manual-workaround→P6. Comment exists to satisfy SKILL.md/YAML
+# drift pre-commit hook for this purely-prose addition.
+
+# 2026-05-10 P0ack: SKILL.md adds "Auth-gate matrix" section (LLM autonomy
+# boundary table). Documents which orchestrator-related actions LLM may take
+# autonomously vs which require explicit user authorization in-turn. Triggered
+# by user 2026-05-10 incident: LLM asked for cold-start auth on FA which was
+# in finalize PARTIAL_PERSIST state (workspace backed up, archive promoted —
+# no destruction risk). Internal users had previously reported the harness
+# was forcing user-interaction at every step instead of running 0-interaction
+# as designed. Root cause: memory rule
+# `feedback_never_kill_running_orchestrator_without_authorization.md` was
+# applied universally instead of scoped to LIVE in-flight work. SKILL.md
+# matrix is now the explicit declaration; the memory rule was scope-narrowed
+# in same commit. No Phase O4 state / transition / iter cap changes; this is
+# pure LLM-caller behavior documentation. Comment exists to satisfy
+# SKILL.md/YAML drift pre-commit hook.
+
+# 2026-05-05 V3.8.x: SKILL.md refactor 1886→177 lines. Removed prose that
+# duplicated Python orchestrator behavior (Phase O0–O6 details, agent brief
+# templates, routing rules) — those are owned by this YAML, briefs/_common.py,
+# state_machine.py, orchestrator.py. SKILL.md now only documents LLM-caller
+# duties (mode detection, env setup, invocation, reporting) + anti-patterns
+# that are LLM behavior rules. Pre-refactor archive at
+# ${CLAUDE_PLUGIN_ROOT}/skills/ascendc-op-gen/SKILL.md.pre-refactor-20260505. No routing change;
+# comment exists to satisfy SKILL.md/YAML drift pre-commit hook.
+
+# DEBT-046 (2026-04-23): SKILL.md adds a Phase O1 preflight assert for
+# `.diag_enabled` when DIAGNOSTIC=true — orchestrator must `test -f
+# workspace/{op}/.diag_enabled` after touch and ABORT if absent, because
+# aog-kernel-worker Stop-hook DIAG enforcement depends on this marker. Phase O1
+# is orchestrator pre-spawn setup and is NOT modelled as a Phase O4 state in
+# this YAML; this comment is the sync record. No Phase O4 state / transition
+# / condition / iter cap changes.
+
+# V3 parallel batches (2026-04-29): parallel multi-op runs are NOT in
+# /ascendc-op-gen anymore. The new top-layer skill /aog-op-batch
+# (${CLAUDE_PLUGIN_ROOT}/skills/aog-op-batch/SKILL.md — V3.7.0 path; was merged_skills/skills/
+# until the 2026-04-30 refactor) is the scheduler:
+#   B1 probe lanes → B2 plan → B3 spawn N agents (each runs
+#   /ascendc-op-gen <op> --no-kb-merge) → B4 monitor, no retry →
+#   B5 single /aog-knowledge-maintain --batch → B6 summary.
+# /ascendc-op-gen stays serial single-op. The only addition is the
+# `--no-kb-merge` flag that suppresses Phase O6 step 1 (per-op KB
+# merge) so the batch layer can do ONE bulk merge afterwards.
+# - No Phase O4 state changes (per-op state machine unchanged)
+# - No new transitions
+# - No iter cap changes (batch layer has zero retry; per-op retry
+#   stays inside the per-op state machine defined here)
+# - Lane allocation / release lives in aog-parallel-lane-orchestrator
+#   scripts, not in workflow_critic.py
+# - Phase O6 step 1 has a SKIP_KB_MERGE branch (set by --no-kb-merge);
+#   when active, .kb_merged is NOT dropped in the archive — the batch
+#   layer does it after B5. Workflow_critic SC2 reads a
+#   `.kb_merge_pending` marker to relax the SC2 gate for archives in
+#   a batch run.
+# Critic still validates each op's state transitions independently;
+# the batch layer just dispatches.
+
+# ---------------------------------------------------------------------------
+# Global rules — apply to every phase unconditionally.
+# ---------------------------------------------------------------------------
+global_invariants:
+  - id: G1
+    description: "Orchestrator must NOT Edit workspace/{op}/kernel/*.{h,cpp}"
+    check: "PreToolUse on Edit: path under workspace/*/kernel/ rejected UNLESS marker file workspace/{op}/.kernel_worker_active OR workspace/{op}/.optimizer_active is present"
+    rationale: "Caught 2026-04-21 during op#11 — orchestrator bypassing aog-kernel-worker Stop hook produces kernels that pass superficial verify but fail hidden invariants (OL-85 anti-overfitting scan, pybind purity)."
+    enforcement: |
+      Marker-based (fixed 2026-04-23 — previous env-var-based detection was broken).
+
+      Orchestrator responsibility (Phase O4 await_worker / await_optimizer entry):
+        1. `touch workspace/{op}/.kernel_worker_active` BEFORE spawning aog-kernel-worker
+           (or .optimizer_active before aog-kernel-optimizer).
+        2. Spawn the agent.
+        3. `rm workspace/{op}/.kernel_worker_active` AFTER the agent returns (always —
+           both on success and failure; the marker must not persist past the spawn).
+
+      During the narrow window the marker exists, workspace/{op}/kernel/* Edit is
+      allowed. Outside the window (orchestrator's normal steady state), Edit is
+      rejected — catching direct-orchestrator kernel writes which is the actual bug
+      the rule was designed to prevent.
+
+      Why marker, not env var: previous implementation read `CLAUDE_SPAWNED_AGENT`
+      env var on the PreToolUse subprocess, assuming Agent tool propagates it to the
+      spawned subagent. It does NOT — the env var is inherited from orchestrator's
+      process, so spawned aog-kernel-worker inherits "orchestrator" and its own kernel
+      writes get rejected. op#17 worker happened to succeed (state before this rule
+      tightened); op#24 worker was blocked and had to return text instead of writing
+      files. Fix: markers are explicit handshake, not env magic.
+
+      Debug: if a spawned worker / optimizer reports being blocked on workspace/{op}/
+      kernel/*, check: (a) is the marker file present? (b) did orchestrator forget
+      to touch it before spawning? (c) is orchestrator running an old SKILL.md copy?
+
+  - id: G2
+    description: "Truth must be independent of the generated target implementation"
+    check: "migration uses a fresh source-arch NPU capture; backward uses CPU/fp64 autograd"
+    rationale: "A reference reconstructed from the generated kernel is circular and cannot prove correctness."
+
+  - id: G3
+    description: "RETIRED 2026-04-26 — substring ban on 'oracle'/'drift' was too coarse; semantic-drift detection moved to aog-self-critic C6 with proper context"
+    check: "no-op (kept as id-stable rule slot for backward-compat with historical state_transitions.jsonl)"
+    rationale: "User direction: 'forbidden a word cannot do anything meaningful'. The substring ban fired on legitimate documentation of the rule, scientific uses ('thermal drift'), and meta-discussion of the meaning-shift problem itself. The real concern is semantic drift (importing /aog-regression-check vocabulary into new-port artifacts where it carries the wrong meaning). Self-critic C6 (jargon creep) handles this with proper context."
+    status: "retired"
+
+  - id: G4
+    description: "Prior-art inputs remain non-authoritative and provenance-bound"
+    check: "target, sibling and archive candidates are staged separately with source path and digest; migration truth still comes from the live source-arch NPU capture"
+    rationale: "Prior implementations may accelerate authoring, but cannot replace independent source truth or be reported as newly derived work."
+    severity: BLOCKING
+
+  - id: G5
+    description: "NPU ops must be serialized on same container (PB-15, DEBT-029)"
+    check: "no concurrent Agent spawns + no bash run_in_background on NPU compute"
+    rationale: "Cross-op parallel verify/benchmark runs on same container produced false drift signatures (pure scheduling artifact). 1 container = 1 NPU lane."
+
+  - id: G6
+    description: "Independent perf re-measurement required; do not trust worker-reported numbers"
+    check: "Phase O5 must produce independently-measured ratio; verification.json must have a discrepancy_note if worker's ratio differs"
+    rationale: "CLAUDE.md 'Independent Performance Verification'. NPU is shared; worker's numbers may reflect contention."
+
+  - id: G9
+    description: "RETIRED 2026-04-28 — KB-write enforcement via global hook was rejected by user as incompatible with marketplace-distributed skills"
+    check: "no-op (kept as id-stable rule slot for backward-compat with historical state_transitions.jsonl)"
+    rationale: "Original design (added then removed same day, V3.3.11 → V3.3.11.1): PreToolUse hook rejecting orchestrator direct-Edit on canonical KB files during op-gen workflows. User direction 2026-04-28: 'I don't like the idea to have a global hook to prevent certain file changing. It cannot be part of skills that installed from a public marketplace'. Skill content (SKILL.md + references/) ships via marketplace; project-level .claude/settings.json hook wiring does not. Forcing a hook also mutates user settings on install. KB-quality enforcement now lives entirely in /aog-knowledge-maintain skill's Mode 1 step 2 (layered-shape rule + reject/accept patterns + workflow). See docs/postmortem/kb_generalization_gap_2026_04_28.md."
+    status: "retired"
+
+  - id: G7
+    description: "Every op-gen Agent() spawn MUST encode the slug `{op_slug}-{code}-{N}` as the leading token of `description`"
+    check: "PreToolUse on Agent: tool_input.description starts with `{op_slug}-(kw|pp|ko|fo|ar|da|cl)-N` for the registered worker/probe/optimizer/research/learner agents; OR tool_input.name is set (forward-compat)"
+    rationale: |
+      Without an addressable per-spawn slug, PROGRESS.md and
+      state_transitions.jsonl references are ambiguous when multiple agents
+      of the same type have run. Pattern: {op_slug}-{agent_code}-{spawn_index}.
+      See /ascendc-op-gen SKILL.md §"Agent naming convention".
+      Added 2026-04-23 (V3.3) initially read `tool_input.name`. Re-anchored
+      2026-04-25 (V3.3.1) onto `tool_input.description`'s leading slug after
+      confirming stock Claude Code (2.1.119/2.1.120) does NOT expose `name`
+      as a public Agent parameter — `additionalProperties: false` strips it
+      silently. Description IS public, so the slug rides there.
+    enforcement: "workflow_critic.py mode_pre_agent_spawn — _extract_agent_name(tool_input) tries `name` then regex-matches description; reject with exit 2 if neither yields a slug for op-gen agent_types"
+
+# ---------------------------------------------------------------------------
+# Workflow phases (sequential state machine).
+# ---------------------------------------------------------------------------
+phases:
+
+  # -------------------------------------------------------------------------
+  O0_hook_integrity_gate:
+    order: 0
+    description: "CANNBot entry gate — fail closed unless the selected hook registration surface is complete and active."
+    preconditions: []
+    required_actions:
+      - "Check workspace/.ascendc_env exists; abort with the init.sh/template configuration instructions if missing"
+      - "Call phase_o0.check_hook_integrity; it validates critical files plus the current read-only hook registration check"
+      - "Marketplace mode: require the enabled ascendc-port-orchestrator@cannbot installPath to equal this package and require the exact 9-hook plugin closure"
+      - "Direct-checkout mode: require the exact 8-hook owner-tagged closure in engine/.claude/settings.json"
+      - "If registration is missing or stale: abort; tell the user to rerun this plugin's init.sh (or reinstall/enable it), restart Claude Code, then invoke the current entry Skill again"
+    required_artifacts: []
+    invariants:
+      - "Exactly one registration surface is active: plugin-native hooks for marketplace, owner-tagged engine settings for a direct checkout"
+      - "Agent completion gates are registered on SubagentStop, never main-session Stop"
+    prohibited_actions:
+      - "Continue in soft mode after any registration error"
+      - "Run the disabled legacy preflight hook writer; it would add an obsolete partial hook set and duplicate the current registration"
+    notes:
+      - "CANNBot packaging has no legacy stamp contract. preflight_install_hooks.py --check retains STAMP_OK only as a backward-compatible verdict token for Mode 5; the check itself is read-only."
+
+  # -------------------------------------------------------------------------
+  O0_5_state_file_init:
+    order: 0.5
+    description: "V3.7.9 per-op durable state file — init or load workspace/{op}/.opgen_state.json via state_file.py before parsing args. On resumable=true, jump to current_phase per resume protocol."
+    preconditions: [O0_hook_integrity_gate]
+    required_actions:
+      - "Run `python3 src/scripts/workflow/state_file.py per-op init --op {op_name} --workspace workspace/{op} --skill ascendc-op-gen --args '{full args verbatim}' --target {a5|a3|a3-ds|a2} --soc-version {SOC_VERSION} --det-policy {required|best_effort|n/a}`"
+      - "Parse stdout JSON for `resumable` field"
+      - "If resumable=false: proceed to O1_parse_args (fresh)"
+      - "If resumable=true: print resume_summary to user-visible text; verify on-disk reality matches state-file claims (workspace artifacts present per phases_completed); if drift detected, log blocker `state_drift` and prompt user before proceeding"
+      - "Per-iter updates handled automatically by post_agent_return.py (V3.7.9 extension)"
+    required_artifacts:
+      - path: "workspace/{op}/.opgen_state.json"
+        must_exist: true
+    invariants:
+      - "If resumable=true and prior session left state at phase X with workspace artifacts intact, current session SKIPS phases [O0..X-1] and resumes at X"
+      - "State file is idempotent; re-running init on existing file loads + touches last_seen but does not reset phases_completed"
+    prohibited_actions:
+      - "Silently restart from phase O0 when state file shows resumable=true (defeats the purpose of the file)"
+      - "Skip the on-disk verification step (state file claims must match workspace reality before resuming, else stale state file pollutes session)"
+    notes:
+      - "V3.7.9 (2026-05-03): formalized after fix-batch session had 3 background spawns die mid-flight from org usage limit; ad-hoc workspace/.fix_batch_state.json had to be manually re-derived for the next attempt. State file mechanism removes the manual recovery step."
+    next: [O1_parse_args]
+
+  # -------------------------------------------------------------------------
+  O1_parse_args:
+    order: 1
+    description: "Parse CLI args, detect MODE, load .ascendc_env"
+    preconditions: [O0_5_state_file_init]
+    required_actions:
+      - "Determine MODE: port_a3_to_a5 | backward | optimize"
+      - "Determine PROBLEM_ID or SOURCE_PATH"
+      - "Create workspace/{op}/ if not exists"
+    required_artifacts: []
+    invariants:
+      - "MODE in [port_a3_to_a5, backward, optimize]"
+      - "MODE == optimize requires an existing task whose origin mode is port_a3_to_a5 or backward"
+    prohibited_actions: []
+    next: [O1_5_det_policy]
+
+  # -------------------------------------------------------------------------
+  O1_5_det_policy:
+    order: 2
+    description: "DET_POLICY classification from reference"
+    preconditions: [O1_parse_args]
+    required_actions:
+      - "Read the A3 AscendC source package or differentiable forward specification"
+      - "Apply Phase O1.5 heuristic (required | best_effort | n/a)"
+      - "Record DET_POLICY + reason in PROGRESS.md"
+    required_artifacts:
+      - path: "workspace/{op}/PROGRESS.md"
+        must_exist: true
+        content_must_contain:
+          - "Determinism Policy:"
+          - "Determinism Reason:"
+    invariants:
+      - "DET_POLICY in [required, best_effort, n/a]"
+    prohibited_actions: []
+    next: [O2_5_reference_provider]
+
+  # -------------------------------------------------------------------------
+  O2_7_reference_preflight:
+    order: 4
+    description: "Backward preflight — validate the differentiable forward specification and CPU/fp64 gradient reference"
+    condition: "MODE == backward"
+    preconditions: [O1_5_det_policy]
+    required_actions:
+      - "Import the forward specification and validate forward(**inputs) + BACKWARD_SPEC"
+      - "Invoke phase_o25_backward.provision_backward_reference to produce workspace/{op}/backward_ref.json"
+      - "ABORT when the specification cannot produce CPU/fp64 autograd truth"
+    required_artifacts:
+      - path: "workspace/{op}/backward_ref.json"
+        must_exist: true
+        json_must_contain_keys: [op, wrt, verdict, reference_method, n_ok]
+        rationale: |
+          Backward generation depends on an independently computed gradient
+          reference. The preflight exercises the supplied differentiable
+          forward specification before any target kernel is generated.
+    invariants:
+      - id: O2_7.A.verdict_actionable
+        description: "A valid backward_ref.json must exist before target-kernel generation"
+        rationale: |
+          A missing or empty independent reference makes subsequent precision
+          claims unverifiable.
+    prohibited_actions:
+      - "Skipping forward-spec preflight when MODE == backward"
+      - "Proceeding when backward_ref.json has no scoreable result"
+    next: [O2_5_reference_provider]
+
+  # -------------------------------------------------------------------------
+  O2_5_reference_provider:
+    order: 4
+    description: "Reference dataset / edge case provisioning (mode-dispatched). Every generation run must establish its mode-specific independent truth before target-kernel work starts."
+    preconditions: [O1_5_det_policy]
+    branches:
+
+      # port_a3_to_a5: A3-CANN source reference
+      port_a3_to_a5:
+        condition: "MODE == port_a3_to_a5"
+        preconditions: [O1_5_det_policy]
+        required_actions:
+          - "Stage the user-selected arch22 source with a content digest"
+          - "Optionally prestage provenance-recorded target, sibling or archive candidates as non-authoritative authoring inputs"
+          - "Derive or reuse a deterministic input generator for the source contract"
+          - "Run phase_o25_a3_ref.provision_a3_reference live against the configured source-arch NPU environment"
+          - "Bind every captured output to the source digest, runner digest, capture id and source NPU identity"
+        required_artifacts:
+          - path: "workspace/{op}/input_gen.py"
+            must_exist: true
+            grep_must_contain:
+              - "from case_gen import"
+              - "SCHEMA"
+              - "COVERAGE_TIER"
+            grep_must_not_contain:
+              - '^def generate_cases\('   # must use engine not redefine
+          - path: "workspace/{op}/edge_inputs.pt"
+            must_exist: true
+          - path: "workspace/{op}/manifest.json"
+            must_exist: true
+            json_must_contain_keys: [op, data_sha256, n_cases, cases, coverage_tier]
+          - path: "workspace/{op}/edge_dataset.pt"
+            must_exist: true
+          - path: "workspace/{op}/a3_reference_runnable.json"
+            must_exist: true
+          - path: "workspace/{op}/a3_baseline_perf.json"
+            must_exist: true
+          - path: "workspace/{op}/a3_capture_manifest.json"
+            must_exist: true
+            json_must_contain_keys: [schema, capture_id, live_exec, capture_started_ts, capture_completed_ts, source_stage_digest, source_arch, device, n_total, n_captured, files]
+        invariants:
+          - id: O2_5_B1
+            description: "edge_inputs.pt and manifest.json must share data_sha256"
+            check: "torch.load(edge_inputs.pt)['data_sha256'] == json.load(manifest.json)['data_sha256']"
+          - id: O2_5_B2
+            description: "coverage_tier in [pilot, sign_off, production]"
+            check: "manifest.json ['coverage_tier'] in allowed list"
+          - id: O2_5_B3
+            description: "migration truth is a fresh source-arch NPU capture"
+            check: "a3_ref_validate.validate_a3_capture_provenance accepts a3_capture_manifest.json as schema a3_capture/v2 with live_exec=true, source_arch=arch22, an NPU device, current source_stage_digest, current artifact digests, complete captured cases and ordered per-run timestamps"
+        prohibited_actions:
+          - "Substituting a locally reconstructed reference for A3-CANN output (G2)"
+          - "Reusing a cached source capture as the current run's truth"
+          - "Using committed source-NPU outputs as the current run's truth"
+          - "Using 'edge_input_gen.py' as filename (must be 'input_gen.py' per template)"
+          - "Writing custom def generate_cases in input_gen.py (must import from case_gen)"
+        exceptions:
+          schema_gap:
+            description: "Op has inputs that case_gen cannot represent (for example variable-length input lists or index-dependent shapes)"
+            requires_file:
+              path: "workspace/{op}/.workflow_exception_O2_5"
+              must_exist: true
+              required_content:
+                - "phase: O2_5_reference_provider"
+                - "branch: port_a3_to_a5"
+                - "reason:"
+                - "user_signature:"
+                - "date:"
+              must_be_git_committed_by: "user (not orchestrator)"
+            fallback_allows:
+              - "reuse a provenance-recorded deterministic input recipe, or provide a custom recipe for the unsupported schema"
+              - "waive only the standard case_gen/SCHEMA input-recipe form"
+            still_requires:
+              - "execute the selected input recipe during the current run to materialize the inputs"
+              - "execute the staged arch22 source operator on a source NPU during the current run"
+              - "produce edge_dataset.pt, a3_baseline_perf.json and a3_capture_manifest.json from that fresh execution"
+              - "pass a3_ref_validate.validate_a3_capture_provenance before any target-kernel agent spawn"
+            does_not_allow:
+              - "cached, archived or committed source-NPU outputs"
+              - "skipping edge_dataset.pt or the fresh source-NPU execution"
+
+      # backward: CPU/fp64 autograd reference
+      backward:
+        condition: "MODE == backward"
+        preconditions: [O1_5_det_policy]
+        required_actions:
+          - "Validate forward(**inputs) + BACKWARD_SPEC"
+          - "Generate deterministic representative and edge inputs"
+          - "Compute gradient truth with CPU/fp64 torch.autograd.grad"
+        required_artifacts:
+          - path: "workspace/{op}/backward_ref.json"
+            must_exist: true
+          - path: "workspace/{op}/backward_cpu_truth.pt"
+            must_exist: true
+        invariants:
+          - id: O2_5_C1
+            description: "backward metadata identifies a scoreable CPU/fp64 autograd reference"
+            check: "backward_ref.json records verdict == RUNNABLE, reference_method == self_contained_autograd_fp64 and n_ok > 0"
+          - id: O2_5_C2
+            description: "backward truth is independent of the generated target kernel"
+            check: "backward_cpu_truth.pt is produced by Phase O2.5 with CPU/fp64 autograd before target-kernel generation, and never from target-kernel output"
+        prohibited_actions:
+          - "Using target-kernel output as gradient truth"
+
+    next: [O3_progress_init]
+
+  # -------------------------------------------------------------------------
+  O3_progress_init:
+    order: 6
+    description: "Initialize PROGRESS.md seed + Timeline"
+    preconditions: [O2_5_reference_provider]
+    required_actions:
+      - "Write PROGRESS.md seed with Mode, DET_POLICY, DET_Reason, Targets, Timeline stub"
+      - "Append the mode-specific truth provenance summary to Timeline"
+    required_artifacts:
+      - path: "workspace/{op}/PROGRESS.md"
+        content_must_contain:
+          - "Mode:"
+          - "DET_POLICY:" # or "Determinism Policy:"
+          - "## Targets"
+          - "## Timeline"
+    prohibited_actions: []
+    next: [O4_agent_loop]
+
+  # -------------------------------------------------------------------------
+  O4_agent_loop:
+    order: 6
+    description: "aog-kernel-worker → (aog-precision-probe | aog-kernel-optimizer | aog-researcher | aog-determinism-analyzer) scheduling"
+    preconditions: [O3_progress_init]
+    required_actions:
+      - "First spawn: aog-kernel-worker with WORKER_BRIEF"
+      - "Respawn workers only with Kind-1 (precision fix) or Kind-2 (architectural rewrite) directive"
+      - "Probe / optimizer / researcher / det-analyzer spawned only on explicit @handoff from worker"
+    required_artifacts:
+      - path: "workspace/{op}/analysis.md"
+        must_exist_after_first_worker_exit: true
+      - path: "workspace/{op}/kernel/"
+        must_exist_after_first_worker_exit: true
+      - path: "workspace/{op}/verification.json"
+        must_exist_after_worker_exit_done: true
+    invariants:
+      - id: O4_I1
+        description: "Spawn budget respected"
+        check: "Every phase_o4_states iter_counter stays within that state's iter_cap, and the total stays within phase_o4_total_spawn_cap"
+      - id: O4_I2
+        description: "Probe produces probe_report.md with classification"
+        check: "if iter.probe > 0, workspace/{op}/probe_report.md exists"
+    prohibited_actions:
+      - "Orchestrator Edit on workspace/{op}/kernel/* (G1)"
+      - "Orchestrator reconstructing migration truth from target-side code (G2)"
+      - "Spawning probe/optimizer without a @handoff from worker"
+    next: [O5_post_verify]
+
+  # -------------------------------------------------------------------------
+  O5_post_verify:
+    order: 7
+    description: "Independent post-verification (anti-hack grep, anti-overfitting scan, independent perf)"
+    preconditions: [O4_agent_loop]
+    required_actions:
+      - "Anti-hack grep on pybind11.cpp (redundant re-check of worker Stop hook)"
+      - "Anti-overfitting scan on kernel.h / kernel.cpp (OL-85): case-specific predicates, epsilon perturbation"
+      - "Independently re-run performance.py with EC-33 methodology (warmup=1 repeat=2 × 3 runs, OR warmup=5 repeat=10 × ≥2 runs)"
+      - "Compare verification.json.performance.ratio to re-measured ratio"
+    required_artifacts:
+      - path: "workspace/{op}/verification.json"
+        json_must_contain_keys:
+          - precision
+          - determinism
+          - performance
+    invariants:
+      - id: O5_I1
+        description: "verification.json performance.ratio matches re-measured ratio or has discrepancy_note"
+        check: "abs(ratio - measured) ≤ 0.15 OR 'discrepancy_note' key in performance"
+      - id: O5_I2
+        description: "precision.status == 'PASS' requires pass == total (unless OL-83 waiver with probe_report.md §logic-diff)"
+        check: "if precision.status == PASS: precision.pass == precision.total OR probe_report.md has §'Reference algorithm vs kernel: step-by-step logic diff'"
+    prohibited_actions:
+      - "Accepting worker-reported perf without re-measurement (G6)"
+      - "Claiming 'PASS' when precision.pass < precision.total without logic-diff waiver"
+    next: [O6_archive_commit]
+
+  # -------------------------------------------------------------------------
+  O6_archive_commit:
+    order: 8
+    description: "Archive to output/, update REPORT.md, knowledge-maintain, commit+push"
+    preconditions: [O5_post_verify]
+    required_actions:
+      - "Copy the generated target, its source/truth provenance, verification.json and knowledge_update.md to output/{ARCHIVE_PROJECT}/src/kernels/{op}/"
+      - "Update output/{ARCHIVE_PROJECT}/docs/REPORT.md L2 row for {N}"
+      - "If knowledge_update.md exists: invoke /aog-knowledge-maintain — MANDATORY when knowledge_update.md has new entries (V3.3.10, 2026-04-28). The skill performs semantic review only; the orchestrator admits accepted entries through Arbiter into the installer-recorded user c-tier KB root (manifest user_kb_c / $ASCENDC_PORT_USER_KB), while bundled ${CLAUDE_PLUGIN_ROOT}/kb/ remains read-only at runtime. Only after that admission succeeds does the orchestrator drop .kb_merged in the archive. Without this marker workflow_critic SC2 rejects the commit. EXCEPTION (V3.4.0, 2026-04-29): when --no-kb-merge flag is active (set by /aog-op-batch), this step is SKIPPED. The archive instead carries a .kb_merge_pending marker; workflow_critic SC2 reads .kb_merge_pending and relaxes the .kb_merged check. The batch layer's Phase B5 invokes /aog-knowledge-maintain --batch ONCE for all ops in the batch, after which the orchestrator converts .kb_merge_pending → .kb_merged."
+      - "git add, commit with descriptive message, push"
+    required_artifacts:
+      - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/kernel/"
+        must_exist: true
+      - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/model.py"
+        must_exist: true
+      - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/model_new_ascendc.py"
+        must_exist: true
+      - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/verification.json"
+        must_exist: true
+      - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/knowledge_update.md"
+        must_exist: true
+    invariants:
+      - id: O6_I1
+        description: "REPORT.md has row for {N}"
+        check: "grep -E '^\\| {N} \\|' output/{ARCHIVE_PROJECT}/docs/REPORT.md succeeds"
+      - id: O6_I2
+        description: "git push success (no uncommitted archive-scope changes)"
+        check: "git status --porcelain output/{ARCHIVE_PROJECT}/src/kernels/{op}/ is empty AND HEAD is pushed"
+      - id: O6_I3
+        description: "V3.3.10 (2026-04-28): if knowledge_update.md has new entries (OL-/EC-/P-P/Candidate/hit-counter/Evidence triggers), they must be merged into the user c-tier KB (never the bundled b-tier), and .kb_merged must be present in the archive — enforced by workflow_critic SC2 at git commit time. V3.4.0 (2026-04-29): satisfied EITHER by .kb_merged OR by .kb_merge_pending (the latter set under --no-kb-merge during a /aog-op-batch run; converted to .kb_merged by the batch layer's Phase B5)."
+        check: "(test -f output/{ARCHIVE_PROJECT}/src/kernels/{op}/.kb_merged OR test -f output/{ARCHIVE_PROJECT}/src/kernels/{op}/.kb_merge_pending) when knowledge_update.md is non-trivial"
+    prohibited_actions: []
+    next: [DONE]
+
+# ---------------------------------------------------------------------------
+# Phase transition matrix (explicit):
+# ---------------------------------------------------------------------------
+transitions:
+  - from: [null]                        # session start
+    to:   O1_parse_args
+    condition: "one current customer entry Skill invoked the bundled orchestrator"
+
+  - from: O1_parse_args
+    to:   O1_5_det_policy
+    condition: "args parsed, workspace created"
+
+  - from: O1_5_det_policy
+    to:   O2_5_reference_provider
+    condition: "DET_POLICY recorded; branch by MODE"
+
+  - from: O2_5_reference_provider
+    to:   O3_progress_init
+    condition: "the selected mode's truth contract is complete; a signed schema-gap exception may waive only the standard input-recipe form, never fresh truth execution or provenance"
+
+  - from: O3_progress_init
+    to:   O4_agent_loop
+    condition: "PROGRESS.md seeded"
+
+  - from: O4_agent_loop
+    to:   O5_post_verify
+    condition: "aog-kernel-worker exited with '→ orchestrator: done' AND verification.json present"
+
+  - from: O5_post_verify
+    to:   O6_archive_commit
+    condition: "post-verify PASS"
+
+  - from: O6_archive_commit
+    to:   DONE
+    condition: "commit pushed"
+
+# ---------------------------------------------------------------------------
+# Conditional phases (2026-04-23, V3.3): phases whose activation depends on
+# per-op signals (fused? perf plateau?), NOT on linear phase order.
+#
+# Declared here so critic reads trigger + required_artifact + soft_fail
+# dynamically rather than hard-coding rules in Python. Matches the top-level
+# "YAML wins" principle.
+#
+# Schema per entry:
+#   id:          unique ID (used in rejection message)
+#   phase:       logical phase name (matches Phase O4 state names where relevant)
+#   trigger:     all-of conditions that activate the phase
+#   required_artifact: file that must exist once phase completes
+#   soft_fail:   if true, missing artifact → WARN not REJECT (heuristic triggers shouldn't hard-block)
+#   rule_id:     rule ID for critic rejection (O5.C3, etc.)
+#   rationale:   why this phase exists (for humans reading the YAML)
+# ---------------------------------------------------------------------------
+conditional_phases:
+  - id: fused_optimizer_escalation
+    phase: await_fused_optimizer
+    rule_id: "O5.C3"
+    trigger:
+      all_of:
+        - path_exists: "workspace/{op}/optimization_log.md"          # aog-kernel-optimizer ran
+        - path_exists: "workspace/{op}/analysis.md"                  # Phase A done
+        - analysis_md_contains_any: ["fused", "composite", "multi-sub-op", "multi sub-op", "sub-op"]
+        - verification_json_perf_below_threshold: true                # ratio < threshold (default 0.6)
+    required_artifact: "workspace/{op}/fused_analysis.md"
+    soft_fail: true
+    description: "fused op + optimizer plateau + no aog-fused-optimizer escalation"
+    fix: "After aog-kernel-optimizer plateaus on a fused op, /ascendc-op-gen Phase O4 should auto-escalate to aog-fused-optimizer (V3.3 rule). If the op is not actually decomposable into sub-ops, document in analysis.md §Algorithm classification to suppress fused detection."
+    rationale: |
+      Before V3.3, aog-fused-optimizer existed as a skill (created 2026-04-21 during op#11
+      pilot) but was never auto-invoked by /ascendc-op-gen Phase O4 state machine — a
+      "dangling tool" where the product value (sub-op buffer-liveness graph finds wins
+      aog-kernel-optimizer's global-ratio view misses) was only realized through manual user
+      invocation. V3.3 state machine adds await_fused_optimizer state + auto-escalation
+      transition. This critic rule catches cases where the state machine should have
+      fired but didn't, or where the op classifier mis-labeled.
+
+  # Future conditional phases are declared here. Examples for future extension:
+  # - researcher_escalation: probe classified all candidates as convention OR optimizer
+  #                          emitted hypothesis-needed flag
+  # - determinism_analyzer_escalation: DET_POLICY=required + observed_deterministic=false
+
+  # DEBT-066 (2026-05-27, DS): auto-fire hooks for previously-silent self-critic patterns
+  - id: bar_lowering_verdict_c23
+    phase: pre_finalize
+    rule_id: "C23"
+    trigger:
+      all_of:
+        - path_exists: "workspace/{op}/verification.json"
+        - analysis_md_contains_any: ["PARTIAL_PERSIST", "partial_persist"]
+    required_artifact: "workspace/{op}/probe_report.md"
+    soft_fail: true
+    description: "PARTIAL_PERSIST verdict without probe_report.md evidence (aog-self-critic C23: bar-lowering verdict)"
+    fix: "If persist_verdict is PARTIAL_PERSIST, workspace must contain probe_report.md documenting the evidence chain that justifies PARTIAL rather than FAIL. Without it, the verdict is a guess labeled as a verdict."
+    rationale: |
+      Self-critic C23 catches bar-lowering verdicts: accepting PARTIAL_PERSIST as the
+      final state without documented empirical evidence. Session 2026-05-26 demonstrated
+      this pattern repeatedly (vec-only canonical FA PARTIAL_PERSIST without documenting
+      the architecture degradation). This auto-fire hook ensures the probe evidence
+      exists on disk before finalize can proceed.
+
+  - id: structural_ceiling_claim_c28
+    phase: pre_finalize
+    rule_id: "C28"
+    trigger:
+      all_of:
+        - path_exists: "workspace/{op}/analysis.md"
+        - analysis_md_contains_any: ["V220 ceiling", "platform limitation", "hardware limit", "architectural ceiling", "cannot be fixed", "incompatible with V220"]
+    required_artifact: "workspace/{op}/probe_report.md"
+    soft_fail: true
+    description: "Structural ceiling claim without probe_report.md empirical evidence (aog-self-critic C28)"
+    fix: "Claims of platform limitation / V220 ceiling / hardware limit MUST be backed by probe_report.md with msprof or dmesg evidence showing the specific hardware constraint. Without probe evidence, 'platform limitation' is indistinguishable from 'we gave up.'"
+    rationale: |
+      Self-critic C28 catches premature platform-blame: declaring an op unportable or
+      platform-limited without running the diagnostic probe that would prove or disprove
+      the claim. Session 2026-05-26: 7_Sum_v1 507015 was initially framed as V220 ceiling
+      before cross-compare showed it was a kernel memory access bug (MPU violation), not
+      a platform limitation. The probe_report.md distinguishes these two classes.
+
+# ---------------------------------------------------------------------------
+# Phase O4 agent-loop state machine (V3.3, 2026-04-23)
+#
+# Declarative state + transition spec. Before 2026-04-23, this was prose pseudocode
+# in ${CLAUDE_PLUGIN_ROOT}/skills/ascendc-op-gen/SKILL.md only — critic couldn't read it, orchestrator
+# executed by reading prose. User flagged the principle violation (YAML wins). This
+# section makes the sub-state machine declarative so:
+#   - orchestrator reads YAML to decide next agent spawn
+#   - critic reads YAML to verify state transitions are declared + iter caps respected
+#   - SKILL.md prose is informational, YAML is authoritative
+#
+# Schema per state:
+#   id:             state name (matches spawn state identifiers in SKILL.md prose)
+#   agent:          which agent this state spawns on entry (or null for terminal)
+#   iter_cap:       max times this state can be entered in one op
+#   iter_counter:   key into orchestrator's iter dict
+#   entry_required_artifacts: files that must exist BEFORE entering this state
+#   exit_transitions: ordered list of {condition → next_state}, evaluated first-match
+#
+# Condition DSL primitives (aligned with conditional_phases):
+#   handoff_match: "<prefix>"                         # PROGRESS.md last handoff line prefix
+#   verification_precision_status_in: [PASS, ...]
+#   verification_precision_status_not_in: [PASS, PASS_WITHIN_TOLERANCE]
+#   verification_det_policy_satisfied: true|false
+#   verification_perf_below_threshold: true|false
+#   iter_below_cap: <counter_name>                    # true if iter.<name> < cap
+#   path_exists: "workspace/{op}/<file>"
+#   analysis_md_contains_any: [str, ...]
+#   probe_report_has_actionable_fix: true|false
+#   det_report_decision_in: [RECOMMEND_ARCHITECTURAL, ...]
+#   trajectory_sigs_stable: true|false                 # last 3 iters error_signatures identical
+#   trajectory_mad_tight: true|false                   # max(mads) < 1e-3
+#   trajectory_mad_loose: true|false                   # min(mads) > 1
+#   always: true
+#
+# Conditions in a list are AND-joined. Transitions evaluated top-down, first match wins.
+# ---------------------------------------------------------------------------
+phase_o4_states:
+  - id: await_worker
+    agent: aog-kernel-worker
+    # iter_cap=9 allows 8 actual spawns under off-by-one critic counting.
+    # Original intent: max 3 spawns per op.
+    # 2026-05-03 op#9 perf-investigation bumps (user-authorized via 流程修复
+    # directive + V3.7.11 ar-2 verdict ALGORITHMIC_GAP_COMPATIBLE):
+    #   4→9: kw-1 cold + kw-2 multi-AIV + kw-3 RADIX + kw-4 AscendC::TopK
+    #     rejected + kw-5 MrgSort prototype + kw-6 V3.7.11 ar-2-directive
+    #     (Sort API swap + UB aliasing) + state-log normalization entries
+    # Off-by-one critic counting fix still filed for V3.3.5.
+    iter_cap: 9
+    iter_counter: worker
+    entry_required_artifacts:
+      # First entry (initial): workspace scaffold exists
+      # Respawn: prior phase's directive artifact exists (probe_report.md / optimization_directive.md)
+      - "workspace/{op}/PROGRESS.md"
+    exit_transitions:
+      # Handoff "done" — precision + det gate, then forced-probe (O4 V3.3 rule)
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+            - verification_precision_status_not_in: [PASS, PASS_WITHIN_TOLERANCE]
+            - iter_below_cap: probe
+        goto: await_probe
+        rationale: "V3.3 O4 rule (user directive 2026-04-22): worker cannot self-declare done with residual precision. Force probe escalation."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+            - verification_det_policy_satisfied: false
+            - iter_below_cap: det_analyzer
+        goto: await_det_analyzer
+      # V3.8.4 (DEBT-075, 2026-05-04): worker self-declares "→ orchestrator: done"
+      # but perf is below threshold → still must escalate to optimizer. Without this
+      # gate, worker's "ACCEPTABLE_PLATEAU" self-verdict bypassed ko on op#22 nonzero
+      # (perf 0.37x) and the harness misled the orchestrator into accepting suboptimal.
+      # Sequence matters: probe (precision FAIL), det_analyzer (det FAIL), optimizer
+      # (perf FAIL), finalize (all PASS) — each gate checked in order before falling
+      # through.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+            - verification_perf_below_threshold: true
+            - iter_below_cap: optimizer
+            - perf_gate_profile_allows: ko_escalation
+        goto: await_optimizer
+        rationale: "V3.8.4: worker self-declared done but perf < 0.6× → escalate to optimizer regardless of worker's verdict text. Phase B4 (2026-05-20): also requires perf_gate_profile_allows: ko_escalation — under PRECISION_ONLY profile (--perf-threshold=0) this gate suppresses, falling through to the `done → finalize` transition below."
+      # P0xx (2026-05-06): if status=PASS but pass counts are inconsistent
+      # (e.g. pass_a.tier1_pass=0/31 with status=FAIL_EXPECTED, but top-level
+      # status=PASS — the 30_NMS DS scenario), force probe escalation BEFORE
+      # finalize. P0ee catches this at finalize-time but the transition was
+      # already committed. Putting the gate in YAML routing makes it pre-emptive.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+            - pass_count_consistent: false
+            - iter_below_cap: probe
+        goto: await_probe
+        rationale: "P0xx (2026-05-06): worker self-declared status=PASS but pass counts contradict (e.g. pass_a tier1_pass < total with status not in {N/A, SKIPPED}). Force probe escalation. Reported by DS agent on 30_NMS where Pass A 0/31 + status=FAIL_EXPECTED was packaged with top-level status=PASS."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+        goto: finalize
+      # V3.8.7 / DEBT-077 P0j (2026-05-04 batch4 finding): worker emits
+      # `→ orchestrator: PARTIAL_PERSIST — <Tier-2 evidence>` when precision
+      # has structural residual the worker has documented (probe_report.md
+      # OR pass_b two-tier evidence). Two ordered transitions:
+      #
+      #  1. With evidence (probe_report.md present > 100 bytes) → finalize
+      #     as PARTIAL. The finalize phase records partial verdict in
+      #     REPORT.md.
+      #  2. Without evidence → escalate to await_probe (probe will either
+      #     produce evidence or reclassify). Prevents a worker from
+      #     short-circuiting probe by claiming PARTIAL_PERSIST with a
+      #     handoff text that lacks supporting on-disk evidence.
+      #
+      # Caught op#14_adain2dbwd + op#23_hyenafft (both had real probe_report
+      # OR Tier-2 evidence) routed to abort despite legitimate work.
+      #
+      # V3.8.9 (2026-05-05): "never let PARTIAL pass" gate, per user 2026-05-05
+      # ("does it make sense to not give researcher a try if worker/probe
+      # cannot fix the precision issue in single iteration?"). The V3.8.7
+      # P0j finalize rules below pre-date V3.8.8 and don't check researcher
+      # budget. They route PARTIAL_PERSIST → finalize when probe_report.md
+      # is present, regardless of whether researcher has been tried.
+      #
+      # V3.8.9 inserts a PRECEDING rule: if PARTIAL_PERSIST + researcher
+      # budget remaining + cann_strategy_inference.md MISSING → route to
+      # await_researcher first. Mirrors V3.8.8's spirit at the worker-emit
+      # entry point. Only after researcher also exhausts can finalize fire.
+      #
+      # Concrete failure mode V3.8.9 prevents: worker iter 1 → precision
+      # residual at unfix-floor → emits PARTIAL_PERSIST → V3.8.7 P0j #3
+      # routes to probe → probe classifies `convention` (proposes fix) →
+      # worker respawn applies, residual remains → worker iter 2 emits
+      # PARTIAL_PERSIST → V3.8.7 P0j #1 finalize (researcher SKIPPED).
+      #
+      # FA/L4 follows the same standard AscendC worker, probe, optimizer and
+      # researcher path as every other in-scope operator.
+      # A structural-rewrite signal tries the researcher first when budget
+      # remains, then asks for a user decision if that path is exhausted.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: structural_rewrite_needed"
+            - iter_below_cap: researcher
+            - file_absent: "workspace/{op}/*_strategy_inference.md"
+        goto: await_researcher
+        rationale: "Mirror V3.8.9 PARTIAL_PERSIST rule: structural_rewrite_needed with researcher budget remaining and no prior research artifact must try researcher before user_decision."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: structural_rewrite_needed"
+        goto: await_user_decision
+        rationale: "Researcher exhausted (iter cap reached OR *_strategy_inference.md exists from prior researcher run) → user picks: accept partial / await_fused_optimizer / abort."
+
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERSIST"
+            - iter_below_cap: researcher
+            - file_absent: "workspace/{op}/*_strategy_inference.md"
+        goto: await_researcher
+        rationale: "V3.8.9: PARTIAL_PERSIST handoff but researcher hasn't run yet (cann_strategy_inference.md missing) and budget remains. Per 'never let PARTIAL pass' policy, researcher MUST be tried before PARTIAL_PERSIST becomes terminal. Mirrors V3.8.8 spirit at worker-emit entry point."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERSIST"
+            - probe_report_has_actionable_fix: true
+        goto: finalize
+        rationale: "V3.8.7 P0j: worker emitted PARTIAL_PERSIST + probe_report.md with content > 100 bytes (evidence present); finalize as PARTIAL."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERSIST"
+            - path_exists: "workspace/{op}/probe_report.md"
+        goto: finalize
+        rationale: "V3.8.7 P0j: PARTIAL_PERSIST + probe_report.md present (any size); finalize."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERSIST"
+            - iter_below_cap: probe
+        goto: await_probe
+        rationale: "V3.8.7 P0j: PARTIAL_PERSIST without probe_report.md → escalate to probe to produce evidence (worker cannot claim PARTIAL on assertion alone)."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERSIST"
+        goto: finalize
+        rationale: "V3.8.7 P0j: PARTIAL_PERSIST + probe cap exhausted → finalize PARTIAL with worker's claim only (logged in finalize as warning)."
+      # Explicit handoffs from worker
+      - condition:
+          all_of:
+            - handoff_match: "@aog-precision-probe"
+            - iter_below_cap: probe
+        goto: await_probe
+      - condition:
+          all_of:
+            - handoff_match: "@aog-precision-probe"
+            - trajectory_mad_loose: true
+        goto: await_researcher
+        rationale: "Math-level error (mad loose), skip probe, go researcher for algorithmic hypothesis"
+      - condition:
+          all_of:
+            - handoff_match: "@aog-kernel-optimizer"
+            - iter_below_cap: optimizer
+            - perf_gate_profile_allows: ko_escalation
+        goto: await_optimizer
+      - condition:
+          all_of:
+            - handoff_match: "@aog-kernel-optimizer"
+        goto: finalize
+        rationale: "optimizer cap exhausted OR profile.allow_ko_escalation=False (e.g. PRECISION_ONLY under --perf-threshold=0); accept best precision result without perf-driven retry"
+      - condition:
+          all_of:
+            - handoff_match: "@aog-determinism-analyzer"
+            - iter_below_cap: det_analyzer
+        goto: await_det_analyzer
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: build stuck"
+            - trajectory_sigs_stable: true
+            - iter_below_cap: researcher
+        goto: await_researcher
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: build stuck"
+        goto: abort
+        rationale: "Build stuck with stable signature after exhausting retries → ABORT"
+      # V3.8.5 / DEBT-077 #59 (2026-05-04): worker can request user decision
+      # when facing a soft-judgment call. Examples: "should we accept this
+      # PARTIAL with marginal evidence vs escalate to researcher?" "should we
+      # bump the optimizer iter cap by 2 for one more attempt?" Letting the
+      # LLM-orchestrator improvise is exactly the failure mode we're refactoring
+      # away from — explicit pause is the deterministic alternative.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: await_user_decision"
+        goto: await_user_decision
+        rationale: "V3.8.5 #59: worker explicitly requested user decision; orchestrator pauses, exits with code 10."
+      # V3.8.6 / DEBT-077 P0g (2026-05-04 op#10 finding): kw is NOT supposed
+      # to emit PARTIAL_PERF_STRUCTURAL_CEILING — that handoff is RESERVED for
+      # ko/fo after they have actually optimized. But if kw emits it anyway
+      # (defensive: prior brief had this in EXIT HANDOFF OPTIONS by mistake),
+      # treat exactly like `→ orchestrator: done` — V3.8.4 escalation kicks in
+      # if perf < 0.6×, otherwise finalize. Better than abort.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERF_STRUCTURAL_CEILING"
+            - verification_perf_below_threshold: true
+            - iter_below_cap: optimizer
+        goto: await_optimizer
+        rationale: "V3.8.6: kw improperly claimed structural ceiling; force ko escalation to actually attempt optimization (V3.8.4 spirit)."
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: PARTIAL_PERF_STRUCTURAL_CEILING"
+        goto: finalize
+        rationale: "V3.8.6: kw claimed ceiling AND perf at-or-above threshold OR optimizer cap exhausted. Finalize."
+      # P0aav (2026-05-08 DS investigation): worker honestly reports infra
+      # unreachable. Route to user_decision with diagnostic text preserved.
+      # Evidence: DS workers on A3 produced clear handoff lines like
+      # "@orchestrator: infra unreachable, manual intervention needed. Host X
+      # has NPU but missing Docker container Y." State machine had no match →
+      # fell through to abort catch-all, losing the diagnostic.
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: infra unreachable"
+        goto: await_user_decision
+        rationale: "P0aav: worker honestly reports infra unreachable → user_decision with diagnostic preserved"
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: BLOCKED"
+        goto: await_user_decision
+        rationale: "P0aav: worker explicitly declared BLOCKED (infra/tooling/capacity) → user_decision"
+      # P0abk (2026-05-09 DS-flagged): catch-all for any `@orchestrator:`-
+      # prefixed handoff that the more-specific text patterns above didn't
+      # match. DS's 3_Add worker (without 950PR) wrote a valid diagnostic
+      # handoff: "@orchestrator: build PASS, verification blocked by infra.
+      # Kernel at workspace/3_add/kernel/. Need container fix..." — that's
+      # neither "infra unreachable" nor "BLOCKED" verbatim, so without this
+      # rule the worker's honest diagnostic ended up at abort. Workers use
+      # `@orchestrator:` as the prefix for "I did work, here's what
+      # happened, user should decide next step" — text varies, intent
+      # constant. Route to await_user_decision so the diagnostic is
+      # preserved for human review.
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator:"
+        goto: await_user_decision
+        rationale: "P0abk: any @orchestrator:-prefixed handoff (catch-all for honest diagnostics not matched by specific text patterns above) → user_decision with full diagnostic preserved"
+      # Fallback (no matched handoff) — worker contract violation
+      - condition: { always: true }
+        goto: abort
+        rationale: "worker exited without recognized handoff — contract violation"
+
+  - id: await_probe
+    agent: aog-precision-probe
+    # The cap includes headroom for an infrastructure rollback that did not
+    # change the candidate. FA/L4 uses this same standard probe path.
+    iter_cap: 8
+    iter_counter: probe
+    entry_required_artifacts: [ "workspace/{op}/verification.json" ]
+    exit_transitions:
+      # V3.3 (2026-04-23): probe agent has full Edit/Build/Verify loop (per ${CLAUDE_PLUGIN_ROOT}/agents/aog-precision-probe.md
+      # "You may apply the fix yourself if it converges"). When probe closes the loop — applies
+      # fix + rebuilds + re-verifies to PASS — the update to verification.json is authoritative.
+      # In that case we skip the worker Kind-1 respawn (which was pure no-op rebuild) and go
+      # directly to finalize (orchestrator measures perf + det, routes to optimizer if perf <
+      # threshold). The old "probe diagnoses only, worker applies" pipeline was obsoleted but
+      # the YAML still forced await_worker routing — caught on op#17 2026-04-23.
+      # P0aab (2026-05-06): pass_count_consistent gate on probe-closed-loop.
+      # DS report: 30_NMS probe fixed Pass B (stale edge_dataset → 9/9) and
+      # state machine routed `await_probe → finalize` matching this rule,
+      # but Pass A still had 14/31 FAIL_EXPECTED (status=PASS top-level was
+      # contradicted by pass_a counts). Same bug class as P0xx on
+      # await_worker, but on the probe-closed-loop transition. Force probe
+      # to escalate to researcher when counts contradict.
+      - condition:
+          all_of:
+            - probe_report_has_actionable_fix: true
+            - verification_precision_status_in: ["PASS", "PASS_WITHIN_TOLERANCE"]
+            - pass_count_consistent: false
+            - iter_below_cap: researcher
+        goto: await_researcher
+        rationale: "P0aab (2026-05-06): probe applied fix + status=PASS but pass counts contradict (e.g. Pass A still has FAIL_EXPECTED entries). Force researcher escalation BEFORE finalize. Reported by DS agent on 30_NMS where probe closed loop on Pass B but Pass A residual was masked by the bare status=PASS check."
+      - condition:
+          all_of:
+            - probe_report_has_actionable_fix: true
+            - verification_precision_status_in: ["PASS", "PASS_WITHIN_TOLERANCE"]
+        goto: finalize
+        rationale: "probe_closed_loop — probe applied fix + verified PASS (with consistent per-pass counts); orchestrator finalizes directly (no worker respawn needed for perf/det — orchestrator runs performance.py + determinism checks)"
+      # V3.3.1 (2026-04-25): explicit "requirement" verdict from probe report.
+      # Probe classified the residual as architectural DEBT — there is NO
+      # candidate-side fix (e.g. CANN reference run-to-run non-determinism, OL-88).
+      # Spawning Kind-1 worker would just re-produce the same PARTIAL. Spawning
+      # researcher would chase a non-existent algorithmic gap. The honest move
+      # is to finalize PARTIAL with explicit scope documentation; the
+      # finalize-phase critic now allows this if probe_report.md confirms.
+      # Caught on op#12 KvRmsnormRopeCache 2026-04-25 — 32/50 PARTIAL all
+      # explained by OL-88, kernel itself bit-exact within in-scope path.
+      # V3.3.3 (2026-04-25): even when probe verdict=requirement (precision
+      # is honestly PARTIAL with no kernel-side fix), perf optimization should
+      # still proceed if perf < threshold AND optimizer iter budget remains.
+      # The previous version routed straight to finalize, skipping perf
+      # entirely. Caught on op#12 KvRmsnormRopeCache 2026-04-25 — kernel was
+      # mathematically correct (per python_ref_validation.md, OL-89) but
+      # ran at 0.158x of CANN ref; without this transition, aog-fused-optimizer
+      # never auto-escalates. Order matters: this MUST come before the bare
+      # `requirement → finalize` transition below.
+      - condition:
+          all_of:
+            - probe_classification_in: ["requirement"]
+            - verification_perf_below_threshold: true
+            - iter_below_cap: optimizer
+        goto: await_optimizer
+        rationale: "probe verdict=requirement closes precision work, but perf remains below threshold; use the standard AscendC optimizer path."
+      # V3.8.8 (2026-05-05): "never let PARTIAL pass" — probe verdict=requirement
+      # is NOT a terminal verdict. Even when probe (one agent's bisection within
+      # iter cap) cannot find a candidate-side fix, the researcher path may
+      # surface alternate vendor strategies (private aclnn dlsym), alternate
+      # algorithm formulations (fp64 internal compute, magnitude-aware tile
+      # shape), or vendor-specific knowledge the probe didn't have access to.
+      # Op#10 LayerNorm is the canonical anchor — kw-2 reported API-surface
+      # falsified for LayerNormV4, but researcher-path investigation of
+      # LayerNormV2/V3/NormalizeV2/dlsym-aclnnLayerNorm was the indicated next
+      # step. PARTIAL_PERSIST as a terminal state requires the FULL pipeline
+      # (probe + researcher + fused-optimizer if applicable) exhausted, not
+      # just one stage's verdict.
+      - condition:
+          all_of:
+            - probe_classification_in: ["requirement"]
+            - iter_below_cap: researcher
+        goto: await_researcher
+        rationale: "V3.8.8: probe verdict=requirement is NOT terminal. Researcher budget remains → spawn aog-researcher to investigate alternate vendor strategies (private aclnn dlsym, vendor-specific algorithm variants, fp64 internal compute paths, magnitude-aware techniques). Only after researcher also exhausts can PARTIAL_PERSIST be the terminal verdict. Per user direction 2026-05-05: 'never let PARTIAL pass' = full pipeline exhaustion required, not single-stage verdict."
+      - condition:
+          all_of:
+            - probe_classification_in: ["requirement"]
+        goto: finalize
+        rationale: "probe verdict=requirement AND researcher iter budget exhausted (or N/A) AND perf at/above threshold (or optimizer also exhausted). Finalize PARTIAL with probe_report.md + cann_strategy_inference.md (if researcher ran) as scope evidence; critic O5.C2 path accepts this only after FULL pipeline (probe + researcher) exhausted per V3.8.8."
+      - condition:
+          all_of:
+            - probe_classification_in: ["convention"]
+        goto: await_worker
+        rationale: "probe verdict=convention — the standard AscendC worker applies the fix and re-verifies it."
+      # V3.8.5 (DEBT-076 / DEBT-077, 2026-05-04): rigid probe_result.json schema
+      # introduces 3 additional classifications. `bug` = real kernel logic error
+      # → respawn worker with next_directive. `untested-cluster` = some bisection
+      # incomplete due to iter budget → respawn probe with clarified scope.
+      # `deferred` = infra blocked (sandbox/NPU/ssh) → respawn probe (different
+      # lane / time / config). All three require iter budget remaining.
+      #
+      - condition:
+          all_of:
+            - probe_classification_in: ["bug"]
+            - iter_below_cap: worker
+        goto: await_worker
+        rationale: "probe verdict=bug — the standard AscendC worker applies the concrete next_directive."
+      - condition:
+          all_of:
+            - probe_classification_in: ["untested-cluster"]
+            - iter_below_cap: probe
+        goto: await_probe
+        rationale: "probe verdict=untested-cluster — some bisection incomplete due to iter budget. Re-spawn probe with clarified scope; orchestrator surfaces untested_clusters[] to next probe brief."
+      - condition:
+          all_of:
+            - probe_classification_in: ["deferred"]
+            - iter_below_cap: probe
+        goto: await_probe
+        rationale: "probe verdict=deferred — infra blocked (sandbox/NPU/ssh denial). Re-spawn probe; orchestrator may pick different lane based on .lanes/ state."
+      - condition: { probe_report_has_actionable_fix: true }
+        goto: await_worker
+        rationale: "probe proposed a fix but precision is not yet PASS; standard worker respawn applies it."
+      - condition: { always: true }
+        goto: await_researcher
+        rationale: "Probe couldn't classify actionable fix or verdict → escalate to researcher"
+
+  - id: await_optimizer
+    agent: aog-kernel-optimizer
+    iter_cap: 5
+    iter_counter: optimizer
+    entry_required_artifacts: [ "workspace/{op}/verification.json" ]
+    # Performance is measured against the mode-specific authoritative baseline:
+    # source-arch NPU for migration, or the accepted backward baseline.
+    exit_transitions:
+      # V3.3.10 (2026-05-03, post-op#9 C27 gap): fused-escalation now pre-empts the
+      # directive-route when the op is fused AND fused-optimizer hasn't run yet.
+      # Rationale: ko-1's global-ratio incremental view mis-classified op#9's
+      # bottleneck as "architectural ceiling" after 1 KEEP iter + emitted Kind-2
+      # directive; downstream worker spawns burned 3 iter budgets without ever
+      # getting fused-optimizer's per-sub-op gap analysis (which would have
+      # localized the bottleneck to a single inner loop in 1 spawn). Pre-empting
+      # routes ko's directive THROUGH fused-optimizer first — fo can either
+      # endorse the directive (→ worker), refine it (→ worker with revised
+      # directive), or veto it as not-the-right-axis (→ finalize with structural
+      # ceiling). Net cost: 1 fused-optimizer spawn per fused op that hits
+      # plateau; net benefit: fused ops always get the right diagnostic lens.
+      - condition:
+          all_of:
+            - analysis_md_contains_any: ["fused", "composite", "multi-sub-op", "multi sub-op", "sub-op"]
+            - iter_below_cap: fused_optimizer
+            - file_absent: "workspace/{op}/fused_analysis.md"
+        goto: await_fused_optimizer
+        rationale: "V3.3.10 pre-empt: fused op + fused-optimizer not yet run → escalate BEFORE accepting Kind-2 directive (or finalize). fused-optimizer's analysis informs the directive better than ko's global-ratio view."
+      # V3.7.11 (2026-05-03, post-op#9 24h-zero-researcher gap): vendor-strategy
+      # escalation. When perf is < 0.5× of vendor reference AND the optimizer's
+      # log doesn't contain a cited algorithmic-strategy hypothesis (e.g. "vendor
+      # uses MrgSort4 inner-merge per msprof signal X" / "vendor likely uses
+      # Cooley-Tukey FFT per N-pattern Y"), the right next agent is aog-researcher
+      # — its job is bounded structural search with WebFetch (hiascend.com docs),
+      # public adv_api header grep, msprof-symbol decomposition, and KB cross-
+      # reference. Skipping researcher and writing a Kind-2 directive directly
+      # is what caused 24h of op#9 iteration without ever asking "why is CANN
+      # 3.35× faster". User pushback 2026-05-03 19:34Z.
+      - condition:
+          all_of:
+            - verification_perf_below_threshold: true   # perf still bad
+            - perf_ratio_below: 0.5                      # < 50% of vendor reference
+            - iter_below_cap: researcher
+            - file_absent: "workspace/{op}/*_strategy_inference.md"  # researcher hasn't run
+            - optimization_log_lacks_strategy_citation: true  # no "vendor uses X" hypothesis
+        goto: await_researcher
+        rationale: "V3.7.11 vendor-strategy escalation: perf << vendor ref AND no algorithmic hypothesis for the gap AND researcher hasn't consulted yet → researcher's bounded-structural-search comes BEFORE writing Kind-2 directive. Skipping this is what caused op#9's 24h zero-researcher gap."
+      - condition: { path_exists: "workspace/{op}/optimization_directive.md" }
+        goto: await_worker
+        rationale: "Kind-2 architectural rewrite directive → standard AscendC worker respawn."
+      - condition: { verification_perf_below_threshold: false }
+        goto: finalize
+        rationale: "perf target met (vs-CANN-ratio mode: ratio >= 0.6; pre-post-speedup mode: cumulative_speedup >= 1.5), done"
+      # ds agent 2026-05-15 (was P0xx in their branch): KO_PERF_PLATEAU
+      # handoff means optimizer has confirmed no further tuning path exists
+      # (structural ceiling, msprof-proven bottleneck, all attempted opts
+      # regressed). Accept best perf and finalize — do NOT keep iterating.
+      # Origin: 5_Cumsum ko-3 returned "done — KO_PERF_PLATEAU" but ko-4 /
+      # ko-5 spawned redundantly because handoff fell through to
+      # iter_below_cap rule. This match fires BEFORE iter_below_cap so the
+      # honest plateau verdict is respected.
+      - condition:
+          all_of:
+            # handoff_contains (NOT handoff_match) — the verdict token rides as a
+            # SUFFIX of the canonical arrow form `→ orchestrator: done — KO_PERF_PLATEAU`.
+            # handoff_match is prefix-only (startswith) so it silently never fired here
+            # (fixed 2026-06-03) — the plateau verdict fell through to iter_below_cap:
+            # optimizer below and respawned ko-4/ko-5 redundantly (back-agent GroupNorm/Sum
+            # archives blocked, 5_Cumsum origin). handoff_contains does `arg in handoff`.
+            - handoff_contains: "KO_PERF_PLATEAU"
+        goto: finalize
+        rationale: "ds-agent 2026-05-15: optimizer confirmed plateau with evidence — accept best perf, skip further optimizer spawns"
+      # iter_cap await_optimizer graceful-finalize fix (2026-07-24): byte-identical
+      # optimizer-landed convergence → terminal finalize. Placed RIGHT BEFORE the
+      # "keep iterating within budget" catch so it only rescues the fall-through
+      # loop (all handoff-specific + directive + fused + PLATEAU rules above still
+      # take precedence). The gap it closes: when the optimizer LANDS a kernel
+      # whose perf sits in the band between the FINALIZE floor (shippable, e.g.
+      # 0.6× via --perf-threshold) and the PARITY target (verification_perf_below_
+      # threshold uses vj.perf.threshold = 1.0 by owner default 2026-07-21), the
+      # `verification_perf_below_threshold: false → finalize` rule above does NOT
+      # fire (perf IS below parity), so control fell through to "keep iterating"
+      # and the optimizer re-landed the SAME byte-identical kernel (0 edits) every
+      # spawn until iter_cap tripped → exit-2 with no terminal finalize. This rule
+      # recognizes "optimizer converged (byte-identical across >=2 spawns) AND
+      # already shippable (perf >= finalize floor, precision PASS, det satisfied)"
+      # and finalizes cleanly (finalize state auto-runs the delegation scanner via
+      # _ensure_audit_artifacts + the PASS-branch gates). All four conditions are
+      # FACT-based (kernel md5 + verification.json), never a handoff-string match.
+      # Real cases preserved: an optimizer still making edits changes the kernel
+      # md5 each spawn → optimizer_kernel_converged=False → keeps iterating; a
+      # sub-floor op (ratio < finalize floor) → perf_at_or_above_finalize_floor=
+      # False → falls through to the existing sub-floor PARTIAL_PERSIST/researcher
+      # machinery; a precision/det-failing op → the status/det guards keep it out.
+      - condition:
+          all_of:
+            - optimizer_kernel_converged: true
+            - verification_perf_at_or_above_finalize_floor: true
+            - verification_precision_status_in: [PASS, PASS_WITHIN_TOLERANCE]
+            - verification_det_policy_satisfied: true
+        goto: finalize
+        rationale: "byte-identical optimizer-landed convergence + already shippable (perf >= finalize floor, precision PASS, det satisfied) → terminal finalize instead of looping await_optimizer to iter_cap exit-2"
+      - condition:
+          all_of:
+            - iter_below_cap: optimizer
+        goto: await_optimizer
+        rationale: "keep iterating within budget"
+      # Late-fired fused-escalation (kept as fallback for non-pre-empted paths,
+      # e.g. when iter_cap exhausted without a directive being written).
+      - condition:
+          all_of:
+            - analysis_md_contains_any: ["fused", "composite", "multi-sub-op", "multi sub-op", "sub-op"]
+            - iter_below_cap: fused_optimizer
+        goto: await_fused_optimizer
+        rationale: "V3.3 (fallback): fused op + aog-kernel-optimizer plateau → aog-fused-optimizer for per-sub-op analysis"
+      # V3.7.11 fallback: researcher escalation when researcher hasn't run + perf gap unresolved
+      - condition:
+          all_of:
+            - verification_perf_below_threshold: true
+            - iter_below_cap: researcher
+            - file_absent: "workspace/{op}/*_strategy_inference.md"
+        goto: await_researcher
+        rationale: "V3.7.11 fallback: optimizer/fused-optimizer plateau, researcher hasn't run yet, perf still bad → consult researcher before finalize"
+      - condition: { always: true }
+        goto: finalize
+        rationale: "optimizer exhausted, no further escalation available, accept best"
+
+  - id: await_fused_optimizer
+    agent: aog-fused-optimizer
+    # iter_cap=3 allows 2 actual spawns under workflow_critic.py off-by-one counting
+    # (which uses `current >= cap` where state_machine routing already increments
+    # count to 1 before spawn). Same pattern as await_det_analyzer cap=2.
+    # Original intent: 1 spawn per op; bumped 2→3 on 2026-05-03 (cap=3) for op#9
+    # V3.7.10 harness-validation re-run (fo-1 was deficient per SC5; fo-2 needed
+    # to produce the missing reg-based applicability evaluation). User-authorized
+    # via Discord DISCORD_ID_REDACTED + iterative pipeline validation directive.
+    iter_cap: 3
+    iter_counter: fused_optimizer
+    entry_required_artifacts:
+      - "workspace/{op}/verification.json"
+      - "workspace/{op}/optimization_log.md"  # aog-kernel-optimizer must have run first
+    exit_transitions:
+      # V3.7.11 (2026-05-03): vendor-strategy escalation pre-empts directive
+      # when fused-optimizer's analysis lacks an algorithmic-strategy hypothesis
+      # for why vendor is faster. Same gap that drove op#9 24h zero-researcher
+      # spawns. fo can produce a structural-ceiling verdict citing reg-based
+      # non-applicability (correct), but if it doesn't ALSO cite "vendor
+      # algorithmic strategy = X" with evidence, researcher should consult next.
+      - condition:
+          all_of:
+            - verification_perf_below_threshold: true
+            - iter_below_cap: researcher
+            - file_absent: "workspace/{op}/*_strategy_inference.md"
+            - fused_analysis_lacks_strategy_citation: true   # no "vendor uses X" hypothesis
+        goto: await_researcher
+        rationale: "V3.7.11 vendor-strategy escalation: fo's structural-ceiling verdict needs researcher's algorithmic-strategy inference. Skipping = op#9-style 24h zero-researcher gap."
+      - condition: { path_exists: "workspace/{op}/optimization_directive.md" }
+        goto: await_worker
+        rationale: "Kind-2 from aog-fused-optimizer → standard AscendC worker respawn."
+      # V3.7.12 (2026-05-03): incremental-tuning escalation. When fo finds a
+      # CB-N source-level bottleneck that's incremental-tuning territory (not
+      # architectural rewrite — e.g. "scalar 32 ops → 4 VEC Muls" type fix),
+      # fo recommends @aog-kernel-optimizer in fused_analysis.md but typically
+      # doesn't write optimization_directive.md (which is reserved for Kind-2
+      # architectural rewrites). State machine V3.7.11 had no fo→ko edge, so
+      # the recommendation was dropped. Op#12 fo-1 (2026-05-03 20:32Z) found
+      # CB-1 RoPE 384 scalar ops/row in SIMD kernel, recommended ko, but
+      # state machine fell through to researcher/finalize without ko spawning.
+      # User pushback: "如果性能不达标, 为什么没有触发 optimizer？".
+      - condition:
+          all_of:
+            - verification_perf_below_threshold: true
+            - iter_below_cap: optimizer
+            - fused_analysis_contains_tuning_candidate: true   # CB-N or RECOMMEND_KO mention
+            - file_absent: "workspace/{op}/optimization_directive.md"
+        goto: await_optimizer
+        rationale: "V3.7.12 incremental-tuning escalation: fo identified source-level tuning candidates (CB-N) without architectural rewrite directive → ko spawn for incremental tuning. Skipping = op#12-style ko-zero-spawn gap."
+      - condition: { verification_perf_below_threshold: false }
+        goto: finalize
+      - condition: { always: true }
+        goto: finalize
+        rationale: "aog-fused-optimizer pilot budget (1 iter) exhausted"
+
+  - id: await_researcher
+    agent: aog-researcher
+    iter_cap: 2
+    iter_counter: researcher
+    entry_required_artifacts: [ "workspace/{op}/PROGRESS.md" ]
+    exit_transitions:
+      # B fix (2026-04-26): if researcher writes optimization_directive.md
+      # directly (instead of just a hypothesis report), route Kind-2 to worker
+      # without manual orchestrator handoff.
+      - condition: { path_exists: "workspace/{op}/optimization_directive.md" }
+        goto: await_worker
+        rationale: "Researcher wrote Kind-2 directive directly → standard AscendC worker implements it."
+      # CANN-LEARN-ON-RESEARCH-GAP hybrid (2026-05-20, design doc
+      # KB_DESIGN_NOTES.md#cann-learn-on-research-gap-design-2026-05-20 §3.2):
+      # When researcher emits research_blocked / research_partial AND the active
+      # plugin opts in for the active in-scope mode
+      # AND cann_learn iter budget remains → route to await_cann_learn for
+      # offline pattern extraction before shipping PARTIAL / aborting.
+      # The cann_learner subagent runs through its existing carve-out
+      # (mode5_runner + sealed scanner gates C34a-C35). Researcher's next iter
+      # reads the enriched KB. Phase 1 inserts the transitions; Phase 2 flips
+      # per-plugin opt-ins to actually fire (BasePlugin default = False = unreachable).
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: research_partial"
+            - iter_below_cap: cann_learn
+            - plugin_method: "should_auto_cann_learn_on_gap"
+        goto: await_cann_learn
+        rationale: "research_partial + plugin opt-in + cann_learn iter budget remains → extract patterns from CANN reference before extending researcher iter. Auto-trigger preserves cann_learner carve-out scanners (C34a-C35); only changes WHEN cann_learner runs."
+      - condition: { handoff_match: "→ orchestrator: research_partial" }
+        goto: await_researcher
+        rationale: "Researcher exited with research_partial trend signal → extension iter (within iter_cap=2)"
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: research_blocked"
+            - iter_below_cap: cann_learn
+            - plugin_method: "should_auto_cann_learn_on_gap"
+        goto: await_cann_learn
+        rationale: "research_blocked + plugin opt-in + cann_learn iter budget remains → extract patterns from CANN reference before aborting. Auto-trigger preserves cann_learner carve-out scanners (C34a-C35); only changes WHEN cann_learner runs."
+      - condition: { handoff_match: "→ orchestrator: research_blocked" }
+        goto: abort
+        rationale: "Researcher could not converge with available rule-compliant info — escalate to user"
+      # V3.8.10 (2026-05-18): researcher emits PARTIAL_PERSIST when it has
+      # explored all mitigation candidates AND each one fails on
+      # (language feasibility | perf floor | spawn budget). This is the
+      # terminal-PARTIAL signal — researcher confirms with concrete
+      # per-path evidence that no fixable approach remains. Without this
+      # transition, the catchall fell through to `await_worker`, the
+      # worker had no directive, looped back, and iter_cap (2) killed
+      # the orchestrator with `iter_cap hit for await_researcher`.
+      # Caught: 8_Sort 2026-05-17 — researcher correctly evaluated 4
+      # mitigation paths (extension.sort wrapper / selection-sort /
+      # multi-pass merge / radix sort), all failed, emitted PARTIAL_PERSIST,
+      # state machine looped back to worker, eventual death-loop.
+      # Cross-link: V3.8.7 P0j #3 (await_worker) accepts PARTIAL_PERSIST
+      # from worker → probe → finalize. V3.8.10 extends the same logic
+      # to await_researcher: PARTIAL_PERSIST from RESEARCHER is also
+      # terminal-accepted (researcher already exhausted the budget that
+      # the worker-emit path uses probe + V3.8.9 to extend).
+      - condition: { handoff_match: "→ orchestrator: PARTIAL_PERSIST" }
+        goto: finalize
+        rationale: "V3.8.10: researcher emitted PARTIAL_PERSIST after exhausting all mitigation candidates — this is the terminal-PARTIAL signal. Researcher's per-path evidence (each candidate fails on language feasibility / perf floor / spawn budget) IS the evidence required by V3.8.7 P0j. Finalize as PARTIAL; avoid the iter_cap death-loop caught on 8_Sort 2026-05-17."
+      - condition: { always: true }
+        goto: await_worker
+        rationale: "Researcher hypothesis report → standard AscendC worker respawn with the hypothesis as directive."
+
+  - id: await_cann_learn
+    agent: aog-cann-learner
+    iter_cap: 1
+    iter_counter: cann_learn
+    entry_required_artifacts: [ "workspace/{op}/cann_strategy_inference.md" ]
+    description: |
+      CANN-LEARN-ON-RESEARCH-GAP hybrid state (2026-05-20, design doc
+      KB_DESIGN_NOTES.md#cann-learn-on-research-gap-design-2026-05-20 §3.2).
+
+      Auto-invoked from await_researcher when researcher emits
+      research_blocked / research_partial AND active plugin opts in via
+      should_auto_cann_learn_on_gap(). Runs the existing cann_learner
+      carve-out (mode5_runner.spawn_aog_cann_learner + sealed scanner gates
+      C34a-C35). Output: 0+ candidates land in
+      patterns/unverified/candidates.md with .kb_promotion_pending marker.
+
+      iter_cap=1 — one-shot per op-gen run (it's expensive).
+      Insertion semantics: cann_learn iter does NOT consume a researcher
+      iter slot; researcher iter_cap=2 stays unchanged.
+
+      Entry artifact: cann_strategy_inference.md must exist (researcher
+      iter ≥ 1 ran before us, which is the precondition guaranteeing the
+      research_blocked / research_partial signal came from a real researcher
+      attempt rather than a stub).
+    exit_transitions:
+      - condition: { handoff_match: "→ orchestrator: cann_learn_done" }
+        goto: await_researcher
+        rationale: "cann_learner extracted ≥1 candidate (sealed + scanner-cleared); route back to researcher for re-evaluation against enriched KB. Researcher iter 2 reads candidates.md before re-deciding."
+      - condition: { handoff_match: "→ orchestrator: cann_learn_empty" }
+        goto: finalize
+        rationale: "cann_learner found no extractable patterns (CANN op missing OR all candidates rejected by scanners). KB is now complete-as-it-can-be; ship PARTIAL."
+      - condition: { handoff_match: "→ orchestrator: cann_learn_blocked" }
+        goto: finalize
+        rationale: "cann_learner gated by preconditions (CANN not better than ours; ref_runnable not RUNNABLE; .candidates.md.lock held by concurrent run; etc.). Ship PARTIAL with cann_learner gate-failure as evidence in archive."
+      - condition: { always: true }
+        goto: finalize
+        rationale: "Catch-all: cann_learner emitted an unrecognized handoff; ship PARTIAL rather than loop. Forensic in workspace/{op}/cann_learn_envelope_log.jsonl."
+
+  - id: await_det_analyzer
+    agent: aog-determinism-analyzer
+    # iter_cap=2 allows 1 actual spawn under workflow_critic.py current counting
+    # (which uses `current >= cap`, where state_machine routing already increments
+    # count to 1 before spawn). Other states have ≥2 cap so the off-by-one was
+    # masked. Real fix in V3.3.5: change critic to `current > cap` strict, then
+    # we can revert this to 1. Filed in DEBT-053 follow-up notes.
+    iter_cap: 2
+    iter_counter: det_analyzer
+    entry_required_artifacts: [ "workspace/{op}/verification.json" ]
+    exit_transitions:
+      - condition: { det_report_decision_in: [RECOMMEND_ARCHITECTURAL] }
+        goto: await_researcher
+      # V3.3.4 (2026-04-26): det-analyzer RECOMMEND_FIX with directive present →
+      # route to worker for Kind-2 fix implementation. Origin: op#19 DEBT-053
+      # da-1 produced RECOMMEND_FIX (algorithmic) for variant (a) sort+segment-
+      # reduce; without this transition, det_analyzer was monitor-only and
+      # workflow dead-ended at finalize even with a clean fix path. Pattern is
+      # generalizable: any future det-analyzer recommendation that points at an
+      # algorithmic rewrite requires a directive file + worker respawn.
+      - condition:
+          all_of:
+            - det_report_decision_in: [RECOMMEND_FIX]
+            - path_exists: "workspace/{op}/optimization_directive.md"
+        goto: await_worker
+        rationale: "Det-analyzer RECOMMEND_FIX with optimization_directive.md present → standard AscendC worker implements it."
+      - condition: { always: true }
+        goto: finalize
+        rationale: "Det analyzer is monitor-only for ACCEPT_NONDET / RECOMMEND_FIX without directive: no auto-action, record + finalize."
+
+  # FA/L4 uses the registered standard AscendC worker, probe, optimizer and
+  # researcher states; the engine exposes no alternate DSL route.
+
+  # P0dd (2026-05-05): finalize was previously "terminal" but no Python pipeline
+  # ran on entry — workspace artifacts never promoted to output/<project>/src/kernels/.
+  # 20+ ops accumulated at finalize state with no archive. Refactored:
+  #   - finalize: NON-terminal state with synthetic system "agent" finalize_pipeline
+  #     (Python in-process: archive promotion + .finalized marker)
+  #   - finalize → done: always-true exit_transition after pipeline runs
+  #     (alt: → await_optimizer if .postfinal_perf_open marker present)
+  #   - done: NEW terminal state — pipeline successfully completed
+  - id: finalize
+    agent: aog-finalize-pipeline   # Python in-process; orchestrator dispatches via finalize_pipeline.finalize_op
+    iter_cap: 1
+    iter_counter: finalize
+    entry_required_artifacts:
+      - "workspace/{op}/verification.json"
+      # V3.3.2 (2026-04-25): aog-self-critic skill output is required before finalize.
+      # Triggered by op#12 KvRmsnormRopeCache + op#25 NLLLoss delegation cheating
+      # going undetected for 2 sessions / multiple commits. The skill produces
+      # a §Delegation-scan section (auto-run scanner output) plus a manual
+      # claim-audit section (C1-C18 catalog). orchestrator runs:
+      #   Skill(name="aog-self-critic", args="audit op#X delegation+claims")
+      # and the skill writes the report to workspace/{op}/self_critic_report.md.
+      # workflow_critic.py enforces presence (its existing role: artifact gate);
+      # it does NOT run audit logic itself (kept clean: workflow_critic = phase
+      # invariants, aog-self-critic = audit content).
+      - "workspace/{op}/self_critic_report.md"
+    # V3.3.7 (2026-04-27, op#19 closure): finalize is "soft-terminal" — the
+    # precision-correctness arc concluded, but the user can explicitly re-enter
+    # await_optimizer for a post-finalize perf-tuning phase. This is signaled by
+    # creating workspace/{op}/.postfinal_perf_open (orchestrator places it after
+    # user authorization). The new perf phase respects all hard gates (precision
+    # 100%, det 100%) — it CAN ONLY further-optimize, never regress correctness.
+    # Designed for the V3.3.6 PERF_METRIC_MODE=pre_post_speedup workflow where
+    # vs-CANN comparison is meaningless (e.g. ref uses CPU fallback for UB cases)
+    # and the aog-kernel-optimizer's job is monotonic improvement vs Opt0 baseline.
+    exit_transitions:
+      - condition:
+          all_of:
+            - path_exists: "workspace/{op}/.postfinal_perf_open"
+            - iter_below_cap: optimizer
+        goto: await_optimizer
+        rationale: "V3.3.7 post-finalize perf phase: user explicitly opened a perf-tuning iteration via .postfinal_perf_open marker. Re-enter await_optimizer with PERF_METRIC_MODE=pre_post_speedup. Hard gates (precision 100%, det 100%) preserved."
+      # P0dd (2026-05-05): default exit after finalize_pipeline runs.
+      # Triggered by orchestrator emitting "→ orchestrator: pipeline_done"
+      # after running the in-process finalize_pipeline.finalize_op.
+      - condition:
+          handoff_match: "→ orchestrator: pipeline_done"
+        goto: done
+        rationale: "P0dd: finalize_pipeline.finalize_op completed (workspace artifacts promoted to output/<project>/src/kernels/<op>/, .finalized marker dropped); transition to terminal `done` state."
+
+  # P0dd (2026-05-05): truly-terminal state. Reached after finalize state's
+  # in-process pipeline completed. No agent, no exit transitions.
+  - id: done
+    agent: null
+    iter_cap: 1
+    iter_counter: done
+    exit_transitions: []
+
+  - id: abort
+    agent: null  # terminal, error state
+    iter_cap: 1
+    iter_counter: abort
+    exit_transitions: []
+
+  # P96 (2026-05-15): infrastructure-issue terminal states. Distinct from
+  # `abort` (kernel-side failure that the harness understands) — these mark
+  # ENVIRONMENT problems that worker/probe/optimizer should NEVER paper over.
+  # See ANTI_PRESSURE_PROTOCOLS.md §P9 + docs/baseline/environment_baseline.yaml.
+  #
+  # INFRA_TRANSIENT_RETRY_EXHAUSTED: a retry-recoverable transient
+  # (API hiccup / proxy 429 / NPU brief lock) was tried >3 times or for
+  # >60s wallclock without resolution. Orchestrator gives up on the op
+  # in this session; aog-orchestrator-recover (or user) decides whether
+  # to retry from a fresh process after env reset. Exit code 11.
+  - id: infra_transient_retry_exhausted
+    agent: null  # terminal, infrastructure state
+    iter_cap: 1
+    iter_counter: infra_terminal
+    exit_transitions: []
+    exit_code: 11
+
+  # INFRA_BASELINE_VIOLATED: environment_baseline.yaml assertion failed
+  # (missing tool, wrong CANN version, libophost size/symbol mismatch,
+  # ops-nn-port --pkg target broken, etc.). NEVER entered by workers — only
+  # reached when preflight gate (Phase O0) detects the violation OR finalize
+  # gate detects worker-side paper-over. aog-preflight skill must run + fix
+  # baseline before any further op-gen attempt. Exit code 11.
+  - id: infra_baseline_violated
+    agent: null  # terminal, infrastructure state
+    iter_cap: 1
+    iter_counter: infra_terminal
+    exit_transitions: []
+    exit_code: 11
+
+  # V3.8.5 / DEBT-077 #59 (2026-05-04): explicit pause state for soft-judgment
+  # cases where automation could legitimately go either way (PARTIAL_PERSIST
+  # with marginal evidence vs researcher escalation; structural-ceiling accept
+  # vs different-algorithm hypothesis; iter_cap bump vs accept-best). Codex
+  # review E.3: "rather than have the LLM-orchestrator improvise the call
+  # under uncertainty, route to a pause state and let the human decide."
+  #
+  # Orchestrator behavior on entering this state:
+  #   - emit "USER ACTION REQUIRED — decision artifact: workspace/{op}/user_decision.md"
+  #   - exit with non-zero code (10) so wrappers know it's not an abort
+  #   - leave workspace state intact for the user to inspect
+  #
+  # Resume:
+  #   - user writes workspace/{op}/user_decision.md with `next_state: <id>`
+  #   - on next orchestrator invocation, current_state reads the marker via
+  #     a SAFE alias rule and routes to the user-chosen next_state
+  - id: await_user_decision
+    agent: null  # no agent spawn — orchestrator pauses for user
+    iter_cap: 1
+    iter_counter: user_decision
+    entry_required_artifacts: []
+    exit_transitions:
+      - condition:
+          all_of:
+            - path_exists: "workspace/{op}/user_decision.md"
+            - user_decision_target_in: ["await_worker", "await_probe", "await_optimizer", "await_fused_optimizer", "await_researcher", "await_det_analyzer", "finalize", "abort"]
+        goto: __from_user_decision__   # special token resolved by state_machine
+        rationale: "V3.8.5: user wrote user_decision.md with next_state — orchestrator reads target + routes there. (Non-FA path.)"
+
+# Total spawn cap across all states — safety fuse
+# Bumped 15→18→20 on 2026-05-03 for op#9 9_TopKTopP V3.7.11 vendor-strategy
+# escalation. After 18-spawn methodology investigation produced V3.7.10
+# harness fix + reg-based eval, user identified ANOTHER gap (researcher had
+# 0 spawns despite vendor 3.35× faster question being unanswered). V3.7.11
+# pipeline fix added researcher escalation paths; needs ar-2 spawn to
+# validate end-to-end. ar-2 + potential post-researcher worker = 2 slots.
+# User-authorized via Discord pushback "为什么 24 小时的迭代, 你说的这些
+# 方法都没有用到？分析、修复、重试。流程正确第一位".
+# Default 15 remains the right cap for routine ops.
+phase_o4_total_spawn_cap: 20
+
+# Initial state is mode-dependent (DEBT-045 fix, 2026-04-23):
+#   port_a3_to_a5 — migrate arch22 AscendC to arch35 → await_worker
+#   backward      — generate gradient kernel      → await_worker
+#   optimize      — tune an existing in-scope task → await_optimizer
+# Critic reads MODE from workspace/{op}/PROGRESS.md header ("Mode: <name>") and
+# dispatches to the matching initial_state. If header is missing, fall back to
+# phase_o4_initial_state (legacy single-value default = await_worker).
+phase_o4_initial_state: await_worker
+phase_o4_initial_state_by_mode:
+  port_a3_to_a5: await_worker
+  backward: await_worker
+  optimize: await_optimizer
+  # research-first (A fix, 2026-04-26): pre-op-gen research on a DONE op that
+  # needs a Kind-2 architectural rewrite. Triggered by `--research-first=<op>`
+  # flag in /ascendc-op-gen Phase O1. Researcher runs first, writes
+  # optimization_directive.md directly (B fix). State machine then routes:
+  #   await_researcher → await_worker (per artifact_present transition)
+  # Use case: DONE op with PARTIAL precision/perf needing architectural fix that
+  # requires algorithm validation BEFORE kernel work begins. Replaces the prior
+  # ad-hoc orchestrator-bootstrap flow (op#19 DEBT-053 was the forcing example).
+  research-first: await_researcher
+  # aog-precision-probe (V3.5.0, 2026-04-29): targeted precision-residual investigation
+  # on a DONE op archive. Triggered by `--precision-probe=<op>` flag in
+  # /ascendc-op-gen Phase O1. Probe runs first against existing archive +
+  # verification.json, classifies failure pattern (algorithm-level edge case /
+  # convention / requirement), and either applies in-place fix (probe has full
+  # Edit/Build/Verify loop) or hands off. State machine exits per the standard
+  # await_probe transitions:
+  #   probe_closed_loop → finalize (probe applied fix + PASS)
+  #   convention       → await_worker (Kind-1 worker respawn for trickier fix)
+  #   requirement+perf<thr → await_optimizer
+  #   requirement      → finalize (PARTIAL with scope docs)
+  #   actionable fix not yet PASS → await_worker
+  #   catchall → await_researcher (probe can't classify)
+  # Use case: existing archive with PARTIAL precision where the failure mode
+  # is edge-case-algorithmic (NMS tie-breaking, swiglu_mode formula gap) or
+  # other targeted residual that doesn't need full aog-kernel-worker re-port.
+  # Difference from --research-first: research-first does algorithm-class
+  # validation BEFORE kernel work; aog-precision-probe is direct fix-or-classify
+  # on the existing kernel (probe agent has Edit/Build/Verify in-context).
+  aog-precision-probe: await_probe
+  # W3 (2026-05-12, ROADMAP §1.5): arch22→arch35 migration mode. Triggered by
+  # `--port-a3 <ops-nn-op-dir>` flag in orchestrator main. Phase O2.5
+  # is replaced by `phase_o25_a3_ref.provision_a3_reference` (W4)
+  # which runs the existing A3-merged kernel inside the A3 container
+  # via aclnn API to capture ground-truth outputs (instead of
+  # CPU-PyTorch truth). Once O2.5 is complete, state machine enters
+  # `await_worker` like every other generation mode — kw spawns with
+  # the port_from_a3_ascendc brief variant (W5).
+  port_a3_to_a5: await_worker
+
+# ---------------------------------------------------------------------------
+# Critic hook firing matrix:
+# ---------------------------------------------------------------------------
+critic_hooks:
+  - name: pre_agent_spawn
+    trigger: "PreToolUse on Agent tool (matcher: aog-kernel-worker|aog-precision-probe|aog-kernel-optimizer|aog-researcher|aog-determinism-analyzer)"
+    checks:
+      - "Determine expected phase from PROGRESS.md last entry + spawned agent type"
+      - "Verify all preconditions phases complete (their required_artifacts present, invariants hold)"
+      - "Verify no prohibited_actions have been taken (grep workspace)"
+    on_reject: "exit 2 with structured reason (rule ID + path + what's missing)"
+
+  - name: post_agent_return
+    trigger: "PostToolUse on Agent tool"
+    checks:
+      - "Agent's expected artifacts produced"
+      - "No prohibited files created (e.g. pytorch_native_*.py written by orchestrator-side)"
+    on_reject: "exit 2 with structured reason"
+
+  - name: pre_tool_edit
+    trigger: "PreToolUse on Edit (matcher: workspace/*/kernel/*)"
+    checks:
+      - "Invoker must be aog-kernel-worker agent (not orchestrator)"
+    on_reject: "exit 2 — G1 violation"
+
+  - name: pre_commit_sync
+    trigger: "PreToolUse on Bash (matcher: git commit)"
+    checks:
+      - "If SKILL.md changed, YAML must also be in diff (or vice versa)"
+    on_reject: "exit 2 — drift prevention"
+
+# ---------------------------------------------------------------------------
+# Rejection format (for critic output):
+# ---------------------------------------------------------------------------
+# On REJECT:
+#   stderr line 1: "❌ workflow_critic: REJECTED at <phase>"
+#   stderr line 2+: "  - rule <id>: <description>"
+#                   "    expected: <what should be>"
+#                   "    actual:   <what is>"
+#                   "    fix:      <specific action>"
+#   exit code 2
+#
+# On PASS:
+#   stderr: (silent) OR "✓ workflow_critic: phase <X> PASS"
+#   exit code 0
+
+# Sync record (V3.5.1, 2026-04-29): merge with a5's symlink refactor
+# (merged_skills/skills/ → ../src/skills, commit 2f8d0d6 on origin/main).
+# No state machine changes; comment-only to satisfy DRIFT rule on the merge
+# commit (SKILL.md surface paths reshaped via symlink, no behavioral diff).
+#
+# Sync record (V3.7.0, 2026-04-30): merged_skills/ + merge_lab/ removed entirely
+# during repo refactor (commits 4b682b8..256558a). Canonical paths are now
+# `${CLAUDE_PLUGIN_ROOT}/skills/`, `engine/src/scripts/`, and `${CLAUDE_PLUGIN_ROOT}/agents/` only. AscendOpGenAgent is a git
+# submodule at `vendor/AscendOpGenAgent/` (br_430 pinned). Hooks moved to
+# project-local `.claude/settings.json`. No state machine changes — comment-only.

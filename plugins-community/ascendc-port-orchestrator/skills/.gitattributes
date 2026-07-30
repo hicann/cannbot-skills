@@ -1,0 +1,6 @@
+# These three directories are reviewed, byte-identical snapshots of their
+# repo-root ops/ sources. Preserve their source whitespace while keeping the
+# plugin copy protected by the release tree-OID equality gate.
+ops-precision-standard/** whitespace=-trailing-space
+ascendc-docs-search/** whitespace=-trailing-space
+ascendc-simt-best-practices/** whitespace=-trailing-space

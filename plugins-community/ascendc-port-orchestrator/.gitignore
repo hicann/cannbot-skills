@@ -1,0 +1,48 @@
+engine/workspace/.ascendc_env
+
+# 运行期 scratch（op-gen 输出，不应随插件发布）——阻止未来 add；
+# 已被 track 的历史 scratch 的批量 git rm --cached 去膨胀在 PR-regen(task #6) bundle-hygiene 做，
+# 需区分「测试 fixture 工作区」与「真实 op-gen 产物」，勿误伤 fixture。
+engine/workspace/**/.opgen.log
+engine/workspace/**/.opgen_state.json
+
+# CANN 源码派生的 sealed 学习（二进制）——内容政策：绝不 ship 到上游分发插件。
+engine/src/archive/sealed_cann_learn/
+engine/workspace/**/*.pt
+engine/workspace/**/*.so
+engine/workspace/**/kernel/build/
+engine/workspace/**/a5_capture/
+engine/workspace/**/*.plog
+engine/workspace/**/.cann_learn_sealed_*
+
+# B2 (2026-07-04): transient run-markers/artifacts that leaked untracked from real
+# op-gen runs (FA/gelu_spec_grad). CLEARLY transient (not test fixtures) → safe to
+# ignore. The fixture-vs-cruft-ambiguous types (orchestrator_events.jsonl /
+# op_classification.json / cpu_truth_template.md / verification.json) are LEFT for
+# the PR-regen per-dir audit above — do NOT blanket-ignore them (they're committed
+# UT fixtures in pass_a/pass_b/ctc_loss_v3/... referenced by 40+ tests).
+engine/workspace/**/.model_contract_validation.json
+engine/workspace/**/.truth_source_override
+engine/workspace/.ascendc_env.*
+engine/workspace/**/.finalized
+
+# B2 hardening (2026-07-04, after review caught 222 workspace scratch + 30 absolute-path
+# leaks in the assembly): engine/workspace/ is op-gen RUN OUTPUT, not part of the
+# shipped plugin. Ignore ALL of it except the .ascendc_env.template. Prevents run
+# scratch (orchestrator_events.jsonl / .opgen* / PROGRESS.md / .model_contract_validation
+# / a3_reference_runnable.json / analysis.md / logs) from re-tracking into the PR.
+engine/workspace/**
+!engine/workspace/.ascendc_env.template
+engine/output/
+
+# init.sh writes the safety-net hooks here (engine cwd = the only path CC loads for
+# subagents, DEBT-253). Per-install artifact, never committed.
+engine/.claude/
+
+# Project-local install targets supported by init.sh. These are user runtime
+# links/settings, not plugin source artifacts.
+.claude/
+.opencode/
+.cursor/
+.github/
+.copilot/

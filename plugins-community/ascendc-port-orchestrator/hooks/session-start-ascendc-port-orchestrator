@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# SessionStart hook for CANNBot (ascendc-port-orchestrator) plugin.
+#
+# bundle-orch: the orchestration engine ships INSIDE the plugin (engine/), so
+# there is nothing to clone. On each session start we:
+#   1. Export the ENGINE root so LLM-issued Bash commands can drive the bundled
+#      module from its actual Python source root.
+#   2. Inject AGENTS.md content as session context (with absolute paths).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENGINE_DIR="${PLUGIN_ROOT}/engine"
+
+# --- Step 1: Export engine path for Bash tool invocations ---
+# Claude Code sources $CLAUDE_ENV_FILE before every Bash command, so this makes
+# `$ASCENDC_PORT_ENGINE` usable in LLM-issued shell commands (the engine is
+# invoked as: cd "$ASCENDC_PORT_ENGINE" && PYTHONPATH=src/scripts python3 -m orchestrator …).
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -d "$ENGINE_DIR" ]; then
+  printf 'export ASCENDC_PORT_ENGINE=%q\n' "$ENGINE_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+# --- Step 2: Build session context ---
+AGENTS_MD="${PLUGIN_ROOT}/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ]; then
+  exit 0
+fi
+
+# Read AGENTS.md, strip frontmatter
+agents_content=$(sed -n '/^---$/,/^---$/!p' "$AGENTS_MD" 2>/dev/null || cat "$AGENTS_MD")
+
+# Build path guide — tell the agent where everything actually lives
+path_guide="## CANNBot Installation Paths (ascendc-port-orchestrator)
+
+All relative references in this document resolve to absolute paths:
+- \`engine/\` → \`${ENGINE_DIR}/\`  (orchestrator: cd engine && PYTHONPATH=src/scripts python3 -m orchestrator …)
+- \`agents/\` → \`${PLUGIN_ROOT}/agents/\`  (aog-* sub-agents, plugin.json-registered)
+
+User-local KB (c-tier) root: \${ASCENDC_PORT_USER_KB:-\$HOME/.ascendc-port/user_kb}."
+
+# Escape for JSON
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+path_guide_escaped=$(escape_for_json "$path_guide")
+agents_escaped=$(escape_for_json "$agents_content")
+session_context="<CANNBOT_CONTEXT>\nYou are CANNBot - AscendC 跨代际算子移植 / 正向→反向生成 Orchestrator.\n\n${path_guide_escaped}\n\n${agents_escaped}\n</CANNBOT_CONTEXT>"
+
+# Output JSON for Claude Code hook system
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${session_context}"
+  }
+}
+EOF
+else
+  cat <<EOF
+{
+  "additional_context": "${session_context}"
+}
+EOF
+fi
+
+exit 0

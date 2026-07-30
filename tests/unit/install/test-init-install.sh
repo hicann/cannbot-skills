@@ -152,6 +152,47 @@ done
 # =============================================================================
 print_section_header "Check: init.sh skill references exist"
 
+resolve_declared_dependency_skill() {
+    local team_dir="$1"
+    local skill_name="$2"
+
+    python3 - "$SKILLS_DIR" "$team_dir" "$skill_name" <<'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+team_dir = Path(sys.argv[2])
+skill_name = sys.argv[3]
+
+try:
+    manifest = json.loads(
+        (team_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    marketplace = json.loads(
+        (repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+dependencies = set(manifest.get("dependencies", []))
+for entry in marketplace.get("plugins", []):
+    if entry.get("name") not in dependencies:
+        continue
+    source = entry.get("source")
+    if not isinstance(source, str):
+        continue
+    source_root = repo_root / (source[2:] if source.startswith("./") else source)
+    for skill_rel in entry.get("skills", []):
+        if not isinstance(skill_rel, str):
+            continue
+        skill_dir = source_root / (skill_rel[2:] if skill_rel.startswith("./") else skill_rel)
+        if skill_dir.name == skill_name and (skill_dir / "SKILL.md").is_file():
+            print(skill_dir)
+            raise SystemExit(0)
+PYEOF
+}
+
 for team_dir in $(get_all_plugin_dirs); do
     [ -d "$team_dir" ] || continue
     team_name=$(basename "$team_dir")
@@ -171,6 +212,7 @@ for team_dir in $(get_all_plugin_dirs); do
             local_skill_dir="$team_dir/$skill"
             local_plugin_skill_dir="$team_dir/skills/$skill"
             workflow_dir="$team_dir/workflow"
+            dependency_skill_dir=$(resolve_declared_dependency_skill "$team_dir" "$skill" || true)
 
             if [ -d "$ops_skill_dir" ] && [ -f "$ops_skill_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists in ops/"
@@ -189,6 +231,9 @@ for team_dir in $(get_all_plugin_dirs); do
                 PASS_COUNT=$((PASS_COUNT + 1))
             elif [ -d "$local_plugin_skill_dir" ] && [ -f "$local_plugin_skill_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists as plugin-local skill"
+                PASS_COUNT=$((PASS_COUNT + 1))
+            elif [ -n "$dependency_skill_dir" ]; then
+                print_pass "[$team_name] skill '$skill' exists in a declared marketplace dependency"
                 PASS_COUNT=$((PASS_COUNT + 1))
             elif [ -d "$workflow_dir" ] && [ -f "$workflow_dir/SKILL.md" ]; then
                 print_pass "[$team_name] skill '$skill' exists as team workflow skill"
