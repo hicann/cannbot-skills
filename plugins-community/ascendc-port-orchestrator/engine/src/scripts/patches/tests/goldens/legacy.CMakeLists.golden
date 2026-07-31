@@ -1,0 +1,123 @@
+cmake_minimum_required(VERSION 3.16.0)
+project(Ascend_C)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(SOC_VERSION "${SOC_VERSION}" CACHE STRING "system on chip type")
+set(ASCEND_CANN_PACKAGE_PATH "${ASCEND_CANN_PACKAGE_PATH}" CACHE PATH "ASCEND CANN package installation directory")
+set(RUN_MODE "npu" CACHE STRING "run mode: npu")
+set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type Release/Debug (default Debug)" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "<BUILD_DIR>")
+
+if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+    set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+    set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
+    set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
+elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/x86_64-linux/tikcpp/ascendc_kernel_cmake)
+    set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/x86_64-linux/tikcpp/ascendc_kernel_cmake)
+elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/aarch64-linux/tikcpp/ascendc_kernel_cmake)
+    # A3-ARM (2026-06-30, rms_norm_backward_add_a3 on Ascend910/aarch64): ARM CANN puts
+    # ascendc_kernel_cmake under the arch subdir, not tools/compiler/devkit. Without this
+    # branch the generated CMakeLists FATAL_ERROR'd on A3. (x86_64-linux above for symmetry.)
+    set(ASCENDC_CMAKE_DIR ${ASCEND_CANN_PACKAGE_PATH}/aarch64-linux/tikcpp/ascendc_kernel_cmake)
+else()
+    message(FATAL_ERROR "ascendc_kernel_cmake does not exist, please check whether the cann package is installed.")
+endif()
+
+include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
+
+ascendc_library(kernels STATIC
+    <KERNEL_DIR>/x_kernels.cpp
+)
+
+# DEBT-20/20.1 per-source-file COMPILE_DEFINITIONS (build_overrides.json)
+set_source_files_properties("<KERNEL_DIR>/x_kernels.cpp" PROPERTIES COMPILE_DEFINITIONS "ASCENDC_MATMUL_AICORE;FOO=1")
+
+ascendc_include_directories(kernels PRIVATE
+    <KERNEL_DIR>
+    <CANN_STUBS>
+    ${ASCEND_CANN_PACKAGE_PATH}/include
+    ${ASCEND_CANN_PACKAGE_PATH}/include/experiment/runtime
+    ${ASCEND_CANN_PACKAGE_PATH}/include/experiment/msprof
+)
+
+add_library(pybind11_lib SHARED "<KERNEL_DIR>/pybind11.cpp")
+target_link_libraries(pybind11_lib PRIVATE
+  kernels
+  torch
+  torch_python
+  torch_npu
+  m
+  dl
+)
+# DEBT-110 / deformable precision (2026-06-29): conditionally link the CANN host
+# matmul-tiling libs (nnopbase + opapi) so a CUBE/MIX op_host TilingFunc gets a REAL
+# MatmulApiTiling::GetTiling (populated TCubeTiling) instead of the stub's zero-fill —
+# required for CUBE-op precision (host TCubeTiling lib enhancement, per the deformable
+# port_a3 await_user_decision). find_library keeps it CONDITIONAL: links the real libs
+# when the CANN host install is present, and falls back to the DEBT-110 stub headers
+# when absent (clean-runtime lane) — so non-CUBE / stub-only builds are unaffected.
+find_library(CANN_NNOPBASE nnopbase PATHS ${ASCEND_CANN_PACKAGE_PATH}/lib64)
+find_library(CANN_OPAPI opapi PATHS ${ASCEND_CANN_PACKAGE_PATH}/lib64)
+if(CANN_NNOPBASE AND CANN_OPAPI)
+  message("CANN host matmul-tiling libs found (${CANN_NNOPBASE} ${CANN_OPAPI}) — linking real tiling (CUBE precision enabled)")
+  target_link_libraries(pybind11_lib PRIVATE ${CANN_NNOPBASE} ${CANN_OPAPI})
+else()
+  message("CANN host matmul-tiling libs NOT found in ${ASCEND_CANN_PACKAGE_PATH}/lib64 — DEBT-110 stub headers (clean-runtime; CUBE precision deferred)")
+endif()
+# Resolve torch / torch_npu paths via importlib.find_spec, NOT `import torch_npu`
+# (2026-06-20, FA-grad .141 V351 clean-runtime lane): `import torch_npu` loads the
+# torch_npu `_C` extension, which ABI-trips at cmake-configure on a clean-runtime
+# container whose torch_npu wheel is ABI-paired to a device CANN that differs from
+# the build toolchain (the .post5/B060 case: `free(): invalid pointer` / libruntime
+# ErrorManager symbol mismatch). find_spec(...).origin returns the package dir
+# WITHOUT importing `_C`, so the include/lib paths resolve even when the runtime
+# import would crash. Works identically on a fully-paired container.
+execute_process(COMMAND python3 -c "import os,importlib.util as u; print(os.path.dirname(u.find_spec('torch').origin))"
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE TORCH_PATH
+)
+message("TORCH_PATH is ${TORCH_PATH}")
+file(GLOB TORCH_PYTHON_LIBRARIES "${TORCH_PATH}/lib/libtorch_python.so*")
+if(NOT TORCH_PYTHON_LIBRARIES)
+  message(FATAL_ERROR
+    "libtorch_python.so was not found under ${TORCH_PATH}/lib; "
+    "the generated torch::Tensor binding cannot be linked in this environment.")
+endif()
+set(ENV{ASCEND_HOME_PATH} ${ASCEND_CANN_PACKAGE_PATH})
+execute_process(COMMAND python3 -c "import os,importlib.util as u; print(os.path.dirname(u.find_spec('torch_npu').origin))"
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE TORCH_NPU_PATH
+)
+message("TORCH_NPU_PATH is ${TORCH_NPU_PATH}")
+target_link_directories(pybind11_lib PRIVATE
+  ${TORCH_PATH}/lib
+  ${TORCH_NPU_PATH}/lib
+)
+target_include_directories(pybind11_lib PRIVATE
+  "<KERNEL_DIR>"
+  ${TORCH_NPU_PATH}/include
+  ${TORCH_PATH}/include
+  ${TORCH_PATH}/include/torch/csrc/api/include
+)
+execute_process(COMMAND python3 -m pybind11 --includes
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE PYBIND11_INC
+)
+string(REPLACE " " ";" PYBIND11_INC ${PYBIND11_INC})
+target_compile_options(pybind11_lib PRIVATE
+  ${PYBIND11_INC}
+  -D_GLIBCXX_USE_CXX11_ABI=1
+)
+
+execute_process(COMMAND python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')"
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE PYTHON_EXTENSION_SUFFIX
+)
+set_target_properties(pybind11_lib PROPERTIES
+  OUTPUT_NAME x_ext
+  PREFIX ""
+  SUFFIX "${PYTHON_EXTENSION_SUFFIX}"
+)

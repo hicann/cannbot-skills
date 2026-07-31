@@ -1,0 +1,260 @@
+#!/bin/bash
+# Deploy current_task to A5 container — one command, no room for error.
+# Usage: bash src/scripts/deploy_to_a5.sh [--build]
+#
+# Reads config from workspace/.ascendc_env
+# 1. Cleans A5 current_task/
+# 2. Tars local current_task/
+# 3. Scps + docker cp + extracts
+# 4. Verifies file count matches
+# 5. Optionally builds (--build flag)
+#
+# Exit codes (Fault Tolerance spec — see kernel-worker.md "Fault Tolerance"):
+#   0  = success
+#   1  = compile error (build step failed with non-infra stderr)
+#   10 = infra failure (after 3× retry with 10s backoff)
+#   2  = config / usage error
+#
+# Marker paths (per-workspace, with /tmp fallback for backwards compat):
+#   - If env ASCENDC_WORKSPACE=path/to/workspace/op is set:
+#     writes $ASCENDC_WORKSPACE/.last_build.{stderr,class}
+#   - Otherwise (legacy): writes /tmp/ascendc_last_build.{stderr,class}
+# Side effect on exit 10: class="infra", full stderr captured
+# Side effect on exit 1:  class="compile", stderr captured
+# PreToolUse hook `block_edit_on_infra.sh` reads the same markers via workspace lookup.
+
+# intentionally NOT -e: we need to capture non-zero rc and classify.
+# intentionally NOT -u: .ascendc_env may contain passwords with '$' chars (e.g. '#$35')
+# that would trigger unbound-var errors when sourced.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/workspace/.ascendc_env"
+
+# Resolve marker location. ASCENDC_WORKSPACE can be absolute or relative to PROJECT_ROOT.
+if [ -n "${ASCENDC_WORKSPACE:-}" ]; then
+    if [ "${ASCENDC_WORKSPACE:0:1}" = "/" ]; then
+        _WS_DIR="$ASCENDC_WORKSPACE"
+    else
+        _WS_DIR="$PROJECT_ROOT/$ASCENDC_WORKSPACE"
+    fi
+    if [ ! -d "$_WS_DIR" ]; then
+        echo "[deploy] WARN: ASCENDC_WORKSPACE=$ASCENDC_WORKSPACE not a directory, falling back to /tmp markers" >&2
+        STDERR_MARKER=/tmp/ascendc_last_build.stderr
+        CLASS_MARKER=/tmp/ascendc_last_build.class
+    else
+        STDERR_MARKER="$_WS_DIR/.last_build.stderr"
+        CLASS_MARKER="$_WS_DIR/.last_build.class"
+    fi
+else
+    STDERR_MARKER=/tmp/ascendc_last_build.stderr
+    CLASS_MARKER=/tmp/ascendc_last_build.class
+fi
+
+# Clear prior markers at script start — only rewrite them on terminal failure
+: > "$STDERR_MARKER"
+: > "$CLASS_MARKER"
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "ERROR: $ENV_FILE not found. Run /ascendc-preflight first." >&2
+    exit 2
+fi
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+
+LOCAL_TASK="$HOME/workspace/AscendOpGenAgent/current_task"
+REMOTE_TASK="$BENCHMARK_ROOT/current_task"
+
+if [ ! -d "$LOCAL_TASK" ] || [ -z "$(ls -A "$LOCAL_TASK" 2>/dev/null)" ]; then
+    echo "ERROR: $LOCAL_TASK is empty. Write files first." >&2
+    exit 2
+fi
+
+SSH_CMD=(sshpass -p "$A5_PASSWORD" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${A5_USER}@${A5_HOST}")
+SCP_CMD=(sshpass -p "$A5_PASSWORD" scp -o StrictHostKeyChecking=no -o ConnectTimeout=10)
+
+# --- Infra classification ---
+# Returns 0 if stderr text matches an infra pattern, 1 otherwise.
+is_infra_stderr() {
+    local s="$1"
+    # Ordered roughly by likelihood
+    echo "$s" | grep -qiE "Connection refused|Connection timed out|Connection reset by peer|No route to host|Could not resolve hostname|Permission denied \((publickey|password)|Permission denied, please try again|Error response from daemon: No such container|Container .* is not running|sshpass: Failed to run command: Connection|ssh: connect to host|ssh_exchange_identification"
+}
+
+# is "container not running" specifically?
+is_container_not_running() {
+    local s="$1"
+    echo "$s" | grep -qiE "Container .* is not running|Error response from daemon: No such container"
+}
+
+# --- run_with_retry: invoke a command with up to 3 retries on infra failure ---
+# $1: human label for logs
+# rest: command + args (exec'd via "$@" semantics)
+# On success: echoes stdout, returns 0
+# On infra fail after retries: writes markers, returns 10
+# On other failure: returns the original command's rc
+run_with_retry() {
+    local label="$1"; shift
+    local attempt=0 rc=0 stderr_file
+    stderr_file=$(mktemp /tmp/ascendc_attempt.XXXXXX.stderr)
+    while [ $attempt -lt 3 ]; do
+        attempt=$((attempt + 1))
+        # Run command, capture stderr separately
+        "$@" 2>"$stderr_file"
+        rc=$?
+        if [ $rc -eq 0 ]; then
+            rm -f "$stderr_file"
+            return 0
+        fi
+        local err
+        err=$(cat "$stderr_file")
+        if is_infra_stderr "$err"; then
+            echo "[deploy] $label attempt $attempt/3 infra failure:" >&2
+            echo "$err" | head -5 >&2
+            # Special case: container not running → try docker start, then retry once
+            if [ $attempt -eq 1 ] && is_container_not_running "$err"; then
+                echo "[deploy] attempting 'docker start $A5_CONTAINER' ..." >&2
+                local start_err
+                start_err=$("${SSH_CMD[@]}" "docker start $A5_CONTAINER" 2>&1 >/dev/null) || true
+                sleep 5
+                if is_infra_stderr "$start_err"; then
+                    echo "[deploy] docker start also hit infra error: $start_err" >&2
+                else
+                    echo "[deploy] docker start ok, retrying $label immediately" >&2
+                    continue  # don't sleep, retry right away
+                fi
+            fi
+            if [ $attempt -lt 3 ]; then
+                echo "[deploy] sleep 10 then retry" >&2
+                sleep 10
+                continue
+            fi
+            # Final attempt: classify as infra
+            printf '%s\n' "$err" > "$STDERR_MARKER"
+            echo "infra" > "$CLASS_MARKER"
+            rm -f "$stderr_file"
+            echo "[deploy] $label: infra failure after 3 retries. Writing markers." >&2
+            return 10
+        else
+            # Non-infra error — not retried, propagate as-is
+            printf '%s\n' "$err" > "$STDERR_MARKER"
+            echo "compile" > "$CLASS_MARKER"
+            cat "$stderr_file" >&2
+            rm -f "$stderr_file"
+            return $rc
+        fi
+    done
+    rm -f "$stderr_file"
+    return $rc
+}
+
+# --- Pipeline steps ---
+
+echo "[deploy] Cleaning A5 $REMOTE_TASK/ ..."
+run_with_retry "ssh clean" "${SSH_CMD[@]}" "docker exec $A5_CONTAINER bash -c 'rm -rf $REMOTE_TASK/*'"
+rc=$?
+if [ $rc -ne 0 ]; then
+    [ $rc -eq 10 ] && exit 10
+    echo "ERROR: clean step failed (non-infra)" >&2
+    exit 1
+fi
+
+echo "[deploy] Packaging local $LOCAL_TASK/ ..."
+tar czf /tmp/current_task_deploy.tar.gz -C "$LOCAL_TASK" .
+
+# Root-disk-bypass path (2026-04-22): A5 host /dev/mapper/ts-root 100% full → docker cp fails
+# with "no space left on device" when preparing bind-mount source paths. Route via /data
+# (= /root/openeuler/data, openeuler ext4 pool with 167G avail), which npu_dev3 bind-mounts
+# at /data. scp to host /root/openeuler/data/<stage-dir>/ → container sees same file
+# at /data/<stage-dir>/ → no docker cp needed.
+#
+# Fallback not implemented: if root disk frees, this still works (openeuler pool isn't going
+# away). If openeuler fills, revert to /tmp + docker cp.
+#
+# Stage directory naming: FIXED path, container-scoped. Not per-local-user because deploy
+# happens as SSH user (typically root) — two humans sharing the same npu_dev3 would
+# race regardless. If you need per-user isolation, override via env: export
+# DEPLOY_STAGE_DIR=my_custom_stage before invoking. See PB-18 / REPRODUCE.md.
+#
+# NOTE for worker / probe ad-hoc file transfers (not deploy): if you need to transfer a
+# custom script (e.g. a minrepro probe, a custom verification harness) into the container
+# during Phase D, prefer one of:
+#   1. scp to $DEPLOY_STAGE_HOST/ + docker exec cat file (same pattern as below)
+#   2. ssh host 'docker exec -i <container> bash -c "cat > /path"' < local_file  (stdin pipe)
+# Do NOT use `docker cp` directly — it will fail while root disk is full. See PB-18.
+DEPLOY_STAGE_DIR="${DEPLOY_STAGE_DIR:-ascendc_op_gen_stage}"
+DEPLOY_STAGE_HOST=/root/openeuler/data/${DEPLOY_STAGE_DIR}
+DEPLOY_STAGE_CONTAINER=/data/${DEPLOY_STAGE_DIR}
+
+echo "[deploy] Ensuring A5 stage dir $DEPLOY_STAGE_HOST ..."
+run_with_retry "ssh mkdir stage" "${SSH_CMD[@]}" "mkdir -p $DEPLOY_STAGE_HOST"
+rc=$?
+if [ $rc -ne 0 ]; then
+    [ $rc -eq 10 ] && exit 10
+    echo "ERROR: mkdir stage failed (non-infra)" >&2
+    exit 1
+fi
+
+echo "[deploy] Uploading to A5 $DEPLOY_STAGE_HOST/ ..."
+run_with_retry "scp upload" "${SCP_CMD[@]}" /tmp/current_task_deploy.tar.gz "$A5_USER@$A5_HOST:$DEPLOY_STAGE_HOST/"
+rc=$?
+if [ $rc -ne 0 ]; then
+    [ $rc -eq 10 ] && exit 10
+    echo "ERROR: upload step failed (non-infra)" >&2
+    exit 1
+fi
+
+echo "[deploy] Extracting in container from $DEPLOY_STAGE_CONTAINER/ ..."
+run_with_retry "ssh extract" "${SSH_CMD[@]}" "docker exec $A5_CONTAINER bash -c 'cd $REMOTE_TASK && tar xzf $DEPLOY_STAGE_CONTAINER/current_task_deploy.tar.gz'"
+rc=$?
+if [ $rc -ne 0 ]; then
+    [ $rc -eq 10 ] && exit 10
+    echo "ERROR: extract step failed (non-infra)" >&2
+    exit 1
+fi
+
+# Verify (non-retry, best-effort — a wrong count here is usually transient)
+LOCAL_COUNT=$(find "$LOCAL_TASK" -type f | grep -v __pycache__ | grep -v '.pyc' | wc -l)
+REMOTE_COUNT=$("${SSH_CMD[@]}" "docker exec $A5_CONTAINER bash -c 'find $REMOTE_TASK -type f | grep -v __pycache__ | grep -v .pyc | grep -v build | wc -l'" 2>/dev/null)
+
+echo "[deploy] Verify: local=$LOCAL_COUNT files, A5=$REMOTE_COUNT files"
+if [ "$LOCAL_COUNT" != "$REMOTE_COUNT" ]; then
+    echo "WARNING: file count mismatch! Check for stale files." >&2
+fi
+
+# --- Optional build ---
+if [ "$1" = "--build" ] 2>/dev/null || [ "${1-}" = "--build" ]; then
+    echo "[deploy] Building with -v $SOC_VERSION ..."
+    BUILD_STDERR=$(mktemp /tmp/ascendc_build.XXXXXX.stderr)
+    BUILD_CMD="export PATH=$CANN_PATH/bin:\$PATH && export LD_LIBRARY_PATH=$CANN_PATH/x86_64-linux/lib64:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/driver/lib64/common:\$LD_LIBRARY_PATH && export ASCEND_HOME_PATH=$CANN_PATH && export ASCEND_OPP_PATH=\$ASCEND_HOME_PATH/opp && cd $BENCHMARK_ROOT && python3 utils/build_ascendc.py current_task -v $SOC_VERSION --build-type Release"
+
+    # Wrap the build itself in retry — infra failure during build (e.g. container died mid-build) still classifies right
+    run_with_retry "build" "${SSH_CMD[@]}" "docker exec $A5_CONTAINER bash -c '$BUILD_CMD'"
+    rc=$?
+    rm -f "$BUILD_STDERR"
+    if [ $rc -ne 0 ]; then
+        if [ $rc -eq 10 ]; then
+            exit 10
+        fi
+        # Non-infra build failure → compile error. stderr already in STDERR_MARKER, class=compile
+        echo "ERROR: Build failed — see $STDERR_MARKER" >&2
+        exit 1
+    fi
+
+    # Verify .so exists (one more infra-classified retry pass)
+    SO_CHECK=$("${SSH_CMD[@]}" "docker exec $A5_CONTAINER bash -c 'ls $REMOTE_TASK/kernel/build/*.so 2>/dev/null | wc -l'" 2>/dev/null)
+    if [ "$SO_CHECK" = "0" ]; then
+        echo "ERROR: Build returned OK but no .so produced." >&2
+        echo "compile" > "$CLASS_MARKER"
+        echo "Build step produced 0 .so files" > "$STDERR_MARKER"
+        exit 1
+    fi
+    echo "[deploy] Build OK"
+fi
+
+# Clean markers on success so the next failure is unambiguous
+: > "$STDERR_MARKER"
+: > "$CLASS_MARKER"
+
+echo "[deploy] Done."
+exit 0

@@ -1,0 +1,19 @@
+{
+  "_doc": "Path patterns + body hashes from prior ascendc-op-gen versions. /aog-preflight uses this to identify obsolete hook entries in user-global ~/.claude/settings.json AND project-local .claude/settings.json that lack the _owner tag (i.e., installed before tagging was added). Each entry triggers an interactive y/N prompt before removal (defensive — user-global may have customizations).",
+  "schema_version": "1",
+  "path_patterns": [
+    "merged_skills/scripts/workflow_critic.py",
+    "merged_skills/scripts/state_machine.py",
+    "merged_skills/scripts/check_progress_signed.py",
+    "merged_skills/scripts/scan_delegation_cheating.py",
+    "merged_skills/scripts/ascendc_static_check.py",
+    "src/scripts/workflow_critic.py"
+  ],
+  "body_hashes": [],
+  "_history": [
+    {
+      "version": "pre-v3.7.0",
+      "note": "Hooks before V3.7 lived at merged_skills/scripts/workflow_critic.py path and lacked _owner tags. Detection via path_patterns above."
+    }
+  ]
+}

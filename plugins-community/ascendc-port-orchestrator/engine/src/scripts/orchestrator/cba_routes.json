@@ -1,0 +1,8 @@
+[
+  {
+    "topic": "AscendC 精度验收标准",
+    "skill": "ops-precision-standard",
+    "reference_hint": "各 dtype 输出的 atol/rtol 精度比对与验收标准",
+    "applies_to": ["all"]
+  }
+]

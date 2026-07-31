@@ -1,0 +1,65 @@
+{
+  "_doc": "Canonical hook config for ascendc-op-gen skill (v3.7.0). Each entry tagged _owner for safe cleanup by /aog-preflight legacy scrub. CC ignores unknown JSON fields, so the _owner tag is invisible to runtime but visible to our cleanup logic.",
+  "version": "v3.7.0",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/src/scripts/workflow/workflow_critic.py",
+            "timeout": 30,
+            "_owner": "ascendc-op-gen"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/src/scripts/workflow/workflow_critic.py",
+            "timeout": 15,
+            "_owner": "ascendc-op-gen"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/src/scripts/workflow/workflow_critic.py",
+            "timeout": 10,
+            "_owner": "ascendc-op-gen"
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/src/scripts/workflow/workflow_critic.py",
+            "timeout": 5,
+            "_owner": "ascendc-op-gen"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/src/scripts/workflow/workflow_critic.py",
+            "timeout": 30,
+            "_owner": "ascendc-op-gen"
+          }
+        ]
+      }
+    ]
+  }
+}

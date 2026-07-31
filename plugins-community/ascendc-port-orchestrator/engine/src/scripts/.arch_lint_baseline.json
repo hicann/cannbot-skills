@@ -1,0 +1,124 @@
+[
+  {
+    "check": "CORE_MODE_LEAK",
+    "file": "src/scripts/orchestrator/agent_dispatch.py",
+    "mode": "port_a3_to_a5"
+  },
+  {
+    "check": "CORE_MODE_LEAK",
+    "file": "src/scripts/orchestrator/finalize_checks_precision.py",
+    "mode": "port_a3_to_a5"
+  },
+  {
+    "check": "CORE_MODE_LEAK",
+    "file": "src/scripts/orchestrator/orchestrator.py",
+    "mode": "port_a3_to_a5"
+  },
+  {
+    "check": "CORE_MODE_LEAK",
+    "file": "src/scripts/orchestrator/orchestrator_cmds.py",
+    "mode": "port_a3_to_a5"
+  },
+  {
+    "check": "CORE_MODE_LEAK",
+    "file": "src/scripts/workflow/batch_dispatcher.py",
+    "mode": "optimize"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/agent_dispatch.py",
+    "func": "spawn_for_state"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/agent_transport.py",
+    "func": "_run_streaming"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/finalize_checks_precision.py",
+    "func": "_check_perf_methodology"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/finalize_dispatch.py",
+    "func": "check_finalize_eligibility"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/finalize_dispatch.py",
+    "func": "finalize_op"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/finalize_ge_ophost.py",
+    "func": "assemble_ge_ophost"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/kb_auto_promote.py",
+    "func": "run_auto_promote"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/orchestrator.py",
+    "func": "run_single_op"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/orchestrator_cli.py",
+    "func": "main"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/orchestrator_cmds.py",
+    "func": "_cmd_port_a3"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/orchestrator_coldstart.py",
+    "func": "_cold_start_reset_workspace"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/phase_o25_a3_ref.py",
+    "func": "provision_a3_reference"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/phase_o25_backward.py",
+    "func": "provision_backward_reference"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/phase_o5_runner.py",
+    "func": "_resync_workspace_to_container"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/phase_o5_runner.py",
+    "func": "ssh_runner"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/orchestrator/phase_o5_verify.py",
+    "func": "_run_canonical_pass_a"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/workflow/fsm_conditions.py",
+    "func": "eval_condition"
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/workflow/workflow_critic.py",
+    "func": "mode_pre_agent_spawn",
+    "reason": "Existing safety-critical pre-spawn hook; preserve behavior until a dedicated refactor."
+  },
+  {
+    "check": "GOD_FUNCTION",
+    "file": "src/scripts/workflow/workflow_critic_validators.py",
+    "func": "validate_phase_o4_state",
+    "reason": "Existing phase-O4 FSM validator; preserve behavior until a dedicated refactor."
+  }
+]

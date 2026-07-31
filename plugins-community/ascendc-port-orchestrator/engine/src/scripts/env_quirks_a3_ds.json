@@ -1,0 +1,38 @@
+{
+  "target": "a3-ds",
+  "description": "DS-env (DeepSeek backend, A3 target) — per-worker infra quirks to frontload",
+  "last_updated": "2026-05-07",
+  "quirks": [
+    {
+      "category": "ssh",
+      "rule": "SSH is sandboxed inside claude --print. Use sandbox-disable for any remote command.",
+      "workaround": "add dangerouslyDisableSandbox=true to all Bash() calls that touch SSH",
+      "wrapper_path": "src/skills/a3_op/scripts/a3_exec.py",
+      "wrapper_usage": "python ~/.claude/skills/a3_op/scripts/a3_exec.py \"<command>\""
+    },
+    {
+      "category": "filesystem",
+      "rule": "LOCAL_TASK dir is readonly within sandbox. Write to /tmp/<op>_lane<N>/ instead.",
+      "workaround": "before deploy: mkdir -p /tmp/<op>_lane<N>/; cp kernel files there; then deploy from /tmp",
+      "example": "mkdir -p /tmp/op_abs_lane0 && cp -r kernel/* /tmp/op_abs_lane0/ && export LOCAL_TASK=/tmp/op_abs_lane0"
+    },
+    {
+      "category": "library_path",
+      "rule": "CANN 9.0 libs at /usr/local/Ascend/cann. LD_LIBRARY_PATH must explicitly include devlib and driver paths.",
+      "explicit_paths": [
+        "/usr/local/Ascend/cann/lib64",
+        "/usr/local/Ascend/cann/aarch64-linux/devlib",
+        "/usr/local/Ascend/driver/lib64",
+        "/usr/local/Ascend/driver/lib64/driver"
+      ],
+      "export_cmd": "export LD_LIBRARY_PATH=/usr/local/Ascend/cann/lib64:/usr/local/Ascend/cann/aarch64-linux/devlib:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/driver:$LD_LIBRARY_PATH"
+    },
+    {
+      "category": "kernel_launch",
+      "rule": "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY) is arch35-only on V220/Ascend910_9382. Causes RegisterAscendBinary 107000.",
+      "workaround": "Do NOT emit KERNEL_TASK_TYPE_DEFAULT on A3/V220. Use bare __global__ __aicore__ entry.",
+      "reference": "PLATFORM_BUGS.md PB-26 (build note)"
+    }
+  ],
+  "preamble_text": "This worker is running on DS-env (DeepSeek V4 backend, A3/V220 target). Three known infra quirks: (1) SSH requires sandbox-disable, (2) LOCAL_TASK is readonly — use /tmp, (3) CANN lib64 + devlib require explicit LD_LIBRARY_PATH, (4) KERNEL_TASK_TYPE_DEFAULT is arch35-only — omit on V220. The validate_ds_env.sh preflight has confirmed all dependencies are reachable."
+}

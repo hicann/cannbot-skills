@@ -1,0 +1,27 @@
+# ascendc-port-orchestrator runtime env (copy to .ascendc_env, fill values).
+# .ascendc_env itself is gitignored — NEVER commit credentials.
+TARGET=a5
+A5_HOST=
+A5_USER=root
+A5_PASSWORD=
+A5_CONTAINER=
+A5_CANN_PATH=/usr/local/Ascend/cann-9.0.0
+A5_SOC_VERSION=
+A5_DEFAULT_NPU_ID=0
+A3_HOST=
+A3_USER=root
+A3_PASSWORD=
+A3_CONTAINER=
+A3_CANN_PATH=/usr/local/Ascend/cann-9.0.0
+A3_SOC_VERSION=
+A3_DEFAULT_NPU_ID=0
+A3_CONTAINER_HOME=/home/npu_user
+
+# Directory containing the target's python3. Leave empty to use python3 from PATH,
+# or set a target-specific A3_NPU_PYTHON_BIN / A5_NPU_PYTHON_BIN.
+NPU_PYTHON_BIN=
+
+# OPTIONAL — multi-CANN host only: if libhccl.so / libacl_dvpp.so live in a CANN
+# different from your compile toolkit (torch_npu load error "libhccl.so: cannot open
+# shared object file"), set the runtime lib64 here. Target-specific wins over generic.
+# A5_EXTRA_LD_LIBRARY_PATH=/usr/local/Ascend/<runtime-cann>/x86_64-linux/lib64

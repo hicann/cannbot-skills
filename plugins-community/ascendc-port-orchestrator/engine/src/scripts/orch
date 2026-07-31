@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Wrapper for python3 -m orchestrator — sets PYTHONPATH so the orchestrator
+# package is importable regardless of CWD.
+# Output: terminal + /tmp log file simultaneously (tee).
+set -eo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_FILE="/tmp/orch_$(date +%Y%m%d_%H%M%S)_$$.log"
+echo "[orch] log: ${LOG_FILE}"
+PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH" python3 -m orchestrator "$@" 2>&1 | tee "${LOG_FILE}"
