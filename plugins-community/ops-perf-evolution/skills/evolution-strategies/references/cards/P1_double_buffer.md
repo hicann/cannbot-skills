@@ -47,6 +47,7 @@ CopyOut(N - 1);
 - ❌ **只改 BUFFER_NUM 不改循环** → 无性能提升，buffer 只是空转
 - ❌ **不改 tileSize** → UB 溢出，编译失败或运行时越界
 - ❌ **Prologue 和 Epilogue 遗漏** → 第一块/最后一块数据错误
+- ❌ **全队列一律 num=2** → L0C 累加器必须 num=1（链式 Mmad 依赖同块驻留）；被 SyncAll 串行化的 stage 间队列开 num=2 纯浪费。判定规则见本 skill `references/mix-cv-fusion-guide.md` 的"双缓冲决策矩阵"
 
 ## 代码搜索关键词
 用 Grep 定位当前代码中的对应结构：

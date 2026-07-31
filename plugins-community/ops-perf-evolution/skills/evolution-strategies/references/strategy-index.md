@@ -4,12 +4,12 @@ Source: 43 production-grade operators + 6 CV fused operator expert implementatio
 
 ## 编号说明
 P 系列编号中存在间隙（P15, P23, P27, P31, P36, P39），这些编号为预留位，当前无对应策略文件。
-P53-P88 为 fork-B 增量补充的高级策略，已纳入本索引。P94-P100 为标量计算向量化替代策略（2026-07 补充）。
+P53-P88 为 fork-B 增量补充的高级策略，已纳入本索引。P94-P101 为标量计算向量化替代策略（2026-07 补充，含 GatherMask 系列）。P102-P103 为 MIX CV 融合架构重写策略（2026-07 补充，gated_delta_rule 实例：scalar/VEC → MIX_AIC_1_1，geomean 8.85x）。
 所有有效策略 ID 均在下方表格中列出。Agent 在 strategy_combination 中只应使用下方表格中的 ID。
 
 ## Layer 定义
 - **L0 (Universal)**: 适用于几乎所有算子的通用策略（D1-D5, P1-P12, A1-A8）
-- **L1 (Advanced)**: 适用于特定类别算子的高级策略（P14-P100）
+- **L1 (Advanced)**: 适用于特定类别算子的高级策略（P14-P103）
 - **L2 (Discovered)**: 进化过程中发现的新策略（X1+）
 
 ## Tags 体系
@@ -145,9 +145,9 @@ P53-P88 为 fork-B 增量补充的高级策略，已纳入本索引。P94-P100 �
 | P65 | UB bank conflict avoidance | L1 | datapath | UB bank 冲突规避，优化地址分配 | strategies/perf_65_ub_bank_conflict_avoidance.md |
 | P66 | GM 512B alignment bandwidth | L1 | datapath | GM 512B 对齐带宽优化 | strategies/perf_66_gm_512b_alignment.md |
 
-## 性能优化策略 — Vector 计算效率与标量向量化 (P67-P69, P94-P101) [Layer: L1]
+## 性能优化策略 — Vector 计算效率与标量向量化 (P67-P69, P94-P103) [Layer: L1]
 
-P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约、UB 融合链）。P94-P101 为标量→向量专项替代策略，覆盖归约（P94）、逐元素运算（P95）、排序（P96）、零拷贝切片（P97）、自适应调度（P98）、Broadcast 批量（P99）、GatherMask 标量替代（P100）、GatherMask 列分量解交织（P101）八种反模式。
+P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约、UB 融合链）。P94-P101 为标量→向量专项替代策略，覆盖归约（P94）、逐元素运算（P95）、排序（P96）、零拷贝切片（P97）、自适应调度（P98）、Broadcast 批量（P99）、GatherMask 标量替代（P100）、GatherMask 列分量解交织（P101）八种反模式。P102-P103 为架构级策略：当标量/向量在**模拟矩阵运算**（matmul/dot/三角求解）时，向量化收益封顶，需 MIX CV 融合重写（P102）及 Cube Neumann 三角求逆（P103）。
 
 | ID | Strategy | Layer | Tags | When to Apply | Detail File |
 |----|----------|-------|------|---------------|-------------|
@@ -162,6 +162,8 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 | P99 | BroadCast + batch vector op replaces row-wise scalar loop | L1 | datapath | 小向量广播到大矩阵做逐元素运算，避免逐行 Muls/Adds dispatch 开销 | cards/P99_broadcast_batch_vector_ops.md |
 | P100 | GatherMask replaces element-wise SetValue/GetValue | L1 | datapath | 按固定间隔从连续 tensor 取元素重组（解交织、RoPE 奇偶分拆等）；限 A2/A3（DAV_2201），A5（DAV_3510）有更高效指令 | cards/P100_gathermask_replacement.md |
 | P101 | GatherMask replaces host-side column split (`.select().contiguous()`) | L1 | datapath | interleaved (N,4)→4 路分量分离，消除 Host 侧列拆分和多路 DMA；限 A2/A3（DAV_2201），A5（DAV_3510）有更高效指令 | cards/P101_gathermask_host_column_split.md |
+| P102 | Scalar/vector matmul emulation → MIX CV fusion rewrite | L1 | cv_fusion, matmul, attention, special | 标量/向量循环模拟矩阵运算（嵌套 dot、伪 matmul、三角求解），维度 ≥64 → 架构级重写（数量级收益） | cards/P102_scalar_matmul_to_cv_fusion_rewrite.md |
+| P103 | Cube Neumann product triangular solve | L1 | cv_fusion, attention, special | MIX 架构下标量 forward substitution 串行链 → (I-X)⁻¹=Π(I+X^{2^i}) 11 Mmad 替代 | cards/P103_cube_neumann_triangular_solve.md |
 
 ## 性能优化策略 — Matmul/量化专用 (P70-P72) [Layer: L1]
 
@@ -261,8 +263,8 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 | Optimizer ops | D1, P1, P2, P9, A1 | P81, P84, P94, P95 |
 | Broadcast / Mask ops | D1, P1, P12, A5 | P67, P99 |
 | Index / Scatter ops | D1, P1, P7, A7 | P32, P64, P100 |
-| Special / Complex ops | D2, D3 | P85, P88, P96 |
-| CV Matmul (Cube+Vector) | D1, D3, P1, P4, P7, A3 | P14, P17, P46, P47, P49, P51, P52, P63, P70, P71, P72, P73, P78, P79, P83, P86, P87, P90, P92, P93 |
+| Special / Complex ops | D2, D3 | P85, P88, P96, P102 |
+| CV Matmul (Cube+Vector) | D1, D3, P1, P4, P7, A3 | P14, P17, P46, P47, P49, P51, P52, P63, P70, P71, P72, P73, P78, P79, P83, P86, P87, P90, P92, P93, P102, P103 |
 | CV FFN (MoE) | D1, D3, P1, P4, A1 | P46, P48, P49, P50, P73, P75, P88 |
 | Flash Attention | D1, P1, P5, A4, A5 | P14, P16, P17, P18, P29, P38, P53, P57, P58, P60, P61, P76, P77, P80, P90, P91 |
 | Data Path (通用数据通路) | D1, D5, P1, P8, P10, P20, P25, P40, P54, P65, P66, P74 | — |
@@ -277,8 +279,8 @@ P67-P69 为 Vector 计算效率基础策略（Counter 模式、低延迟归约�
 | mte3_stall | P1 | P8, P19, P40, P56, P59 | — |
 | tiling_imbalance | P4, P2 | P11, P47, P51, P58, P72, P73, P75 | P3 |
 | scalar_loading | P5, P67 | P2, P54, P90, P97, P99, P100, P101 | — |
-| scalar_compute | P5, P67, P94, P95, P98, P99, P100 | P84 | — |
-| compute_bound | D1, P46, P94, P95, P96 | A1, P47, P68, P69, P79, P84, P91, P92 | — |
+| scalar_compute | P5, P67, P94, P95, P98, P99, P100, P102 | P84, P103 | — |
+| compute_bound | D1, P46, P94, P95, P96, P102 | A1, P47, P68, P69, P79, P84, P91, P92, P103 | — |
 | near_optimal | P98 | — | — |
 | no_overlap | P1 | P10, P19, P63 | — |
 | partial_overlap | P1, P2 | P8, P18, P26, P53, P83, P90 | — |

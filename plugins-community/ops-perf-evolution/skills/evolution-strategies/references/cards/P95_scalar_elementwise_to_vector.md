@@ -88,7 +88,7 @@ grep -nE "y\[i\]\s*=" op_kernel/*.cpp
 ## 常见陷阱
 
 ⚠️ `Adds`/`Muls` 的 scalar 参数类型必须与 tensor 元素类型一致（FP32 tensor + float scalar）
-⚠️ 向量链中间结果不可超出 UB 容量（每个中间 tensor = `count × sizeof(T)` 字节）
+⚠️ 向量链中间结果不可超出 UB 容量（每个中间 tensor = `count × sizeof(T)` 字节）；若后续接 P1 双缓冲（num=2），CopyIn/CopyOut 队列占用 ×2，tileSize 需重新核算减半
 ⚠️ 连续 Vector 写同一 buffer 后如果需要 MTE3 搬运，必须加 `PipeBarrier<PIPE_V>()`
 ⚠️ 极小 count（< 128）时向量化开销可能超过标量，考虑混合调度（见 P98）
 

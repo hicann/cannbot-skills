@@ -65,6 +65,7 @@ grep -nE "reinterpret_cast.*GetPhyAddr|\.GetPhyAddr\(\)" op_kernel/*.cpp
 ⚠️ `scalarBuf` 必须 `TBuf<VECCALC>` 类型且 8B 对齐，否则 `GetValue(0)` 返回错误数据
 ⚠️ `Mul(xIn, xIn, xIn, n)` in-place 平方会修改原始输入；若后续仍需原始值，需先拷贝
 ⚠️ ReduceSum 完成后，scalarLocal 上的数据在下一次 ReduceSum 前可能被覆盖；先取值再调度下一次归约
+⚠️ 向量化后若主循环呈 CopyIn→Compute→CopyOut 迭代结构，下一步用 P1 双缓冲做搬运/计算重叠（`InitBuffer(que, 2, size)` + tileSize 联动减半）；无迭代流的场景（单 tile、累加器、被 SyncAll 串行化的 stage 间队列）保持 num=1，开双缓冲纯浪费
 
 ## 代码搜索关键词
 
