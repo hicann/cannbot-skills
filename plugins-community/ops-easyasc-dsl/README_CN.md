@@ -121,17 +121,19 @@ python agent/example/kernels/a5/matmul_float_mmad.py
 
 ## 文档索引
 
-`doc_cn/` 目录由 `agent/scripts/init.sh` 还原：
+> ⚠️ `doc_cn/` 目录**不随仓库直接提供**。请先执行 `bash agent/scripts/init.sh` 还原后再查看，下面的链接才能正常访问。
 
-- [快速开始](doc_cn/01_quickstart.md)
-- [编程模型](doc_cn/02_programming_model.md)
-- [编写第一个 Kernel](doc_cn/03_write_your_first_kernel.md)
-- [混合流水线与同步](doc_cn/04_mixed_pipeline_and_sync.md)
-- [模拟器与 Trace](doc_cn/05_simulator_and_trace.md)
-- [代码生成与运行时](doc_cn/06_codegen_and_runtime.md)
-- [Kernel 模式与范式](doc_cn/07_kernel_patterns.md)
-- [测试与验证](doc_cn/08_testing_and_validation.md)
-- [API 参考](doc_cn/09_api_reference.md)
-- [故障排查](doc_cn/10_troubleshooting.md)
-- [面向贡献者的架构说明](doc_cn/11_architecture_for_contributors.md)
-- [Stub 与 Codegen 名字对照表](doc_cn/12_stub_to_codegen_name_map.md)
+文档（由 `agent/scripts/init.sh` 还原）：
+
+- 快速开始（`doc_cn/01_quickstart.md`）
+- 编程模型（`doc_cn/02_programming_model.md`）
+- 编写第一个 Kernel（`doc_cn/03_write_your_first_kernel.md`）
+- 混合流水线与同步（`doc_cn/04_mixed_pipeline_and_sync.md`）
+- 模拟器与 Trace（`doc_cn/05_simulator_and_trace.md`）
+- 代码生成与运行时（`doc_cn/06_codegen_and_runtime.md`）
+- Kernel 模式与范式（`doc_cn/07_kernel_patterns.md`）
+- 测试与验证（`doc_cn/08_testing_and_validation.md`）
+- API 参考（`doc_cn/09_api_reference.md`）
+- 故障排查（`doc_cn/10_troubleshooting.md`）
+- 面向贡献者的架构说明（`doc_cn/11_architecture_for_contributors.md`）
+- Stub 与 Codegen 名字对照表（`doc_cn/12_stub_to_codegen_name_map.md`）

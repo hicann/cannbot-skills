@@ -121,17 +121,19 @@ Note: `testcases/` is no longer part of the delivered skill bundle.
 
 ## Documentation map
 
-Documentation under `doc/` is restored by `agent/scripts/init.sh`:
+> ⚠️ The `doc/` directory is **not shipped** in the repository. Run `bash agent/scripts/init.sh` first to restore it, then the links below will work.
 
-- [Quick Start](doc/01_quickstart.md)
-- [Programming Model](doc/02_programming_model.md)
-- [Write Your First Kernel](doc/03_write_your_first_kernel.md)
-- [Mixed Pipeline and Synchronization](doc/04_mixed_pipeline_and_sync.md)
-- [Simulator and Trace](doc/05_simulator_and_trace.md)
-- [Code Generation and Runtime](doc/06_codegen_and_runtime.md)
-- [Kernel Patterns](doc/07_kernel_patterns.md)
-- [Testing and Validation](doc/08_testing_and_validation.md)
-- [API Reference](doc/09_api_reference.md)
-- [Troubleshooting](doc/10_troubleshooting.md)
-- [Architecture for Contributors](doc/11_architecture_for_contributors.md)
-- [Stub to Codegen Name Map](doc/12_stub_to_codegen_name_map.md)
+Documents (restored by `agent/scripts/init.sh`):
+
+- Quick Start (`doc/01_quickstart.md`)
+- Programming Model (`doc/02_programming_model.md`)
+- Write Your First Kernel (`doc/03_write_your_first_kernel.md`)
+- Mixed Pipeline and Synchronization (`doc/04_mixed_pipeline_and_sync.md`)
+- Simulator and Trace (`doc/05_simulator_and_trace.md`)
+- Code Generation and Runtime (`doc/06_codegen_and_runtime.md`)
+- Kernel Patterns (`doc/07_kernel_patterns.md`)
+- Testing and Validation (`doc/08_testing_and_validation.md`)
+- API Reference (`doc/09_api_reference.md`)
+- Troubleshooting (`doc/10_troubleshooting.md`)
+- Architecture for Contributors (`doc/11_architecture_for_contributors.md`)
+- Stub to Codegen Name Map (`doc/12_stub_to_codegen_name_map.md`)
