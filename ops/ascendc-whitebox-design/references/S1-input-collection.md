@@ -32,14 +32,13 @@
 
 ## 1.1 收集用户输入
 
-在 Step 1.0 完成后，使用 question 工具收集以下 4 项输入（已从用户消息或前置步骤获取的值以文字回显，仅将未收集项作为 questions 数组中的独立条目）。
+在 Step 1.0 完成后，使用 question 工具收集以下 3 项输入（已从用户消息或前置步骤获取的值以文字回显，仅将未收集项作为 questions 数组中的独立条目）。
 
 | # | 项 | 提示语 | 必填 | 默认值/可选值 |
 |---|-----|-------|------|-------------|
 | 1 | 算子名称 | "请输入算子名称" | 是 | 自由文本 |
 | 2 | Step 4 闸门 | "是否跳过 Step 4 闸门？" | 是 | 默认不跳过；可选跳过（一次跑完全流程） |
 | 3 | 算子路径 | "请选择算子路径获取方式：自动查找 / 手动输入路径" | 是 | 默认「自动查找」 |
-| 4 | TTK CSV 模块 | "是否启用 TTK CSV 模块？" | 是 | 默认不启用 |
 
 ---
 
@@ -107,7 +106,6 @@ python3 {skill_base}/scripts/normalize_op_name.py find --op-name {op_name} --sea
 - 算子名称：{op_name}
 - 算子路径：{op_path}
 - Step 4 闸门：{gate_status}
-- TTK CSV 模块：{ttk_status}
 
 结果输出到 {算子源码路径}/tests/whitebox/。
 如需修改核数、UB 大小，或有额外特殊条件需添加，请告知。
@@ -116,7 +114,7 @@ python3 {skill_base}/scripts/normalize_op_name.py find --op-name {op_name} --sea
 
 占位符填入规则：
 - `{chip_model}`/`{npu_arch}`/`{core_count}`/`{ub_size}` — 由 Step 1.0 检测 + 1.3 映射
-- `{op_name}`/`{op_path}`/`{gate_status}`/`{ttk_status}` — 由 Step 1.1 用户输入
+- `{op_name}`/`{op_path}`/`{gate_status}` — 由 Step 1.1 用户输入
 - `{算子源码路径}` — 即 Step 1.2 确定的算子路径
 
 question 工具选项定义：

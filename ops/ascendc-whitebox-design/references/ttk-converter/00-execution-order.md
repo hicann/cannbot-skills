@@ -2,7 +2,7 @@
 
 ## 角色
 
-将 Step 5 final case 文件转换为 TTK Kernel CSV，并按需执行 low/high 单用例 TTK kernel 验收。
+将 Step 5 final case 文件转换为 TTK Kernel CSV，并执行 low/high 单用例 TTK kernel 验收。
 
 常规流程只执行 `scripts/run_ttk_kernel_module.py`，不派发 TTK 子 agent，不读取 `01-csv-common.md`、`02-kernel-fields.md` 或 `03-kernel-mode.md`。`01`-`03` 仅作为 kernel 模式内部实现细节、固定脚本维护资料和失败诊断参考。
 
@@ -85,7 +85,7 @@ wrapper 将输入分为两类：
 | 类别 | 路径 | 缺失处理 |
 |------|------|----------|
 | CSV 必需 | `S5_cases_low.json`、`S5_cases_high.json`、三个 `ttk_*.py` 固定脚本 | `status=failed`，无法生成 CSV |
-| kernel 可选 | `ops-test-kit/`、CANN 环境 | CSV 继续生成；precheck 记录原因；kernel 验收 `skipped` |
+| kernel 环境 | `ops-test-kit/`、CANN 环境 | CSV 继续生成；precheck 记录原因；kernel 验收 `skipped` |
 
 ### 常见 reason
 

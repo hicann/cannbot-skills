@@ -15,7 +15,6 @@ metadata:
 | 算子名称 | 是 | — | 如 `add`、`add_rms_norm` |
 | 跳过 Step 4 闸门 | 否 | 不跳过 | 跳过则 Step 1-3 后自动进入 Step 5 |
 | 算子路径 | 否 | 自动查找 | 选择「自动查找」或「手动输入」具体路径 |
-| TTK CSV 生成 | 否 | 不生成 | 生成 ttk_ 前缀的 CSV 文件（可选模块） |
 
 平台参数（芯片型号/核数/UB）由 `npu-arch` skill 自动检测，无需用户指定。
 
@@ -24,7 +23,6 @@ metadata:
 - 算子源码存在于项目中（需包含 tiling 代码 + kernel 代码 + 接口定义）
 - Python 3.7+ 环境，无额外 pip 依赖
 - 产物写入 `tests/whitebox/`，重复执行会覆盖已有文件
-- TTK 模块（启用时）：项目需包含 `ops-test-kit/` 目录；kernel 验收使用 `--golden-mode Disable`，只验证 TTK 能消费 CSV、完成 kernel 编译并启动基本执行链路
 
 ## 工作流概览
 
@@ -39,7 +37,7 @@ Step 4 用户确认 ⏸ — 确认后继续（可跳过）
   ↓
 Step 5 case mapper — 参数组合映射为可执行用例
   ↓
-[可选] TTK CSV 生成
+TTK CSV 生成
 ```
 
 详细步骤见 `references/workflow.md`。产物目录见 `references/workflow.md`「最终产物」节。
@@ -53,7 +51,6 @@ Step 5 case mapper — 参数组合映射为可执行用例
 | Step 2 Phase 0 | 校验失败且重试仍失败时 | 仅当校验失败时 |
 | Step 2 Phase 3a | 争议路径询问保留或排除 | 仅当存在争议路径时 |
 | Step 4 | 安全闸门：确认后生成用例 | 是（除非提前选择跳过） |
-| TTK 模块 | 确认 TTK CSV 生成结果 | 仅当启用时 |
 
 ## 使用指南
 

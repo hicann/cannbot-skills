@@ -19,7 +19,7 @@
 |------|------|------|
 | `npu_arch` / `soc_version` / `chip_model` | 1.0 平台检测 | 全流程平台判断 |
 | `platform`（核数 / UB 大小） | 1.3 参数映射 | 子 agent 上下文 |
-| `op_name` / `op_path` / `gate_status` / `ttk_status` | 1.1 用户输入，1.2 两阶段查找（目录名 + OP_ADD 反查） | 流程控制和产物路径 |
+| `op_name` / `op_path` / `gate_status` | 1.1 用户输入，1.2 两阶段查找（目录名 + OP_ADD 反查） | 流程控制和产物路径 |
 
 ---
 
@@ -121,7 +121,7 @@ IF Step 1 选择「跳过 Step 4 闸门」→ 跳过此步直接进入 Step 5；
 
 ---
 
-## 可选模块：TTK CSV 生成
+## TTK模块：TTK CSV 生成
 
 TTK 模块用于将 Step 5 final case 文件转换为 TTK CSV。当前执行规则、模式支持范围和内部验收行为由入口大纲统一定义。
 
@@ -190,4 +190,4 @@ Agent 对 TTK 模块给结论时，以 `ttk_module_report.json` 的 `acceptance.
 | 2 | `source-analysis/00-execution-order.md` | 主 Agent | `执行顺序约束（强制）` — 10 行 |
 | 3 | `design-verifier/00-execution-order.md` + `scripts/s3_task_d_gate.py` | 主 Agent | Task D Contract Gate（D1 cases coverage + 输出汇总） |
 | 5 | `case-mapper/00-execution-order.md` | 子 agent | `执行顺序约束（强制）` — 5 步（5.1 语义 → 5.2 mapper → 5.3 empty → 5.4 high → 5.5 final schema check） |
-| TTK 模块 | `scripts/run_ttk_kernel_module.py` | 主 Agent（可选模块，由 Step 1 输入4 控制） | wrapper 串行执行 CSV 生成/校验/precheck/单用例验收 |
+| TTK模块 | `scripts/run_ttk_kernel_module.py` | 主 Agent（Step 5.5 通过后必须执行） | wrapper 串行执行 CSV 生成/校验/precheck/单用例验收 |
