@@ -2,7 +2,7 @@
 
 > Conv2D / DepthwiseConv 通用的 Tiling 推导流程，覆盖多核切分 → 单核 L1/L0/UB 三级 Buffer 划分 → TilingKey 的完整链路。
 >
-> 算法实现见 [demo/](demo/) 目录，`main.cpp` 注释标注了每步对应的原始代码路径。
+> 算法实现见 [script/conv_tiling.py](script/conv_tiling.py)，注释标注了每步对应的原始代码路径。
 
 ---
 

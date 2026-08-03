@@ -88,7 +88,7 @@
 |------|------|---------|
 | `batchNum` | batch 总数 | 输入参数 |
 | `singleCoreBatch` | 单核处理的 batch 数 | `CeilDiv(batchNum, batchAxisCoreNum)`；当 `batchNum × mCnt × nCnt < aicNum` 时 = 1 |
-| `batchAxisCoreNum` | 沿 batch 维分到的核数 | 见 [batch_matmul.md §2](batch_matmul.md) |
+| `batchAxisCoreNum` | 沿 batch 维分到的核数 | 见 [tiling-variants.md §4.2](tiling-variants.md) |
 
 ### 7.2 group_matmul
 
@@ -97,7 +97,7 @@
 | `groupNum` | group 总数 | 输入参数 |
 | `cubeNumBlocksN` | N 方向并行的 cube block 数（split-N 模式） | 默认 `aicNum`；split-N 不能整除时回落到 `n / 128` | weight_quant_grouped_matmul §`CalcResplitTiling` |
 | `mainBlockSize` / `mainBlockCount` | split-N 主块大小与数量 | `n / (coreNum × 256)` | 同上 |
-| `firstTailBlockSize` / `firstTailBlockCount` | 尾块主部分（split-N） | 见 [group_matmul.md §3.2](group_matmul.md) | 同上 |
+| `firstTailBlockSize` / `firstTailBlockCount` | 尾块主部分（split-N） | 见 [tiling-variants.md §5.1](tiling-variants.md) | 同上 |
 | `secondTailBlockSize` / `secondTailBlockCount` | 尾块次部分（split-N） | 同上 | 同上 |
 | `kAL1` / `kBL1` | A/B 的 L1 K 覆盖（拆分写两份） | `Align(min(stepKa·baseK, K), MX_DIVISOR_SIZE)` 与 B 对称 | quant_grouped_matmul §`DoOpTiling` |
 
