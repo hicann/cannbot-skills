@@ -269,7 +269,7 @@ get_skill_type() {
         *develop*|*test*|*ut*|*st*|*whitebox*) echo "development" ;;
         *registry-invoke*|*golden*|*intent*) echo "development" ;;
         # Utility skills
-        *env*|*check*|*task-focus*|*docs-gen*) echo "utility" ;;
+        *env*|*check*|*docs-gen*) echo "utility" ;;
         # Template skills
         *template*) echo "general" ;;
         # Default

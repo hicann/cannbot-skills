@@ -103,7 +103,6 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "ascendc-ut-develop", description: "UT 开发与覆盖率增强", source: "ops" },
       { id: "ascendc-st-design", description: "ST 测试用例设计", source: "ops" },
       { id: "ascendc-whitebox-design", description: "白盒测试用例生成", source: "ops" },
-      { id: "ascendc-task-focus", description: "长任务聚焦防迷失", source: "ops" },
       { id: "tilelang-op-test-design", description: "TileLang 测试设计", source: "ops" },
       { id: "tilelang-review", description: "TileLang 代码格式检查", source: "ops" },
       { id: "triton-op-verifier", description: "Triton 算子验证", source: "ops" },

@@ -113,7 +113,7 @@ VERSION="1.1.0"
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="ascendc-code-review ascendc-docs-search ascendc-task-focus ascendc-api-best-practices npu-arch"
+INCLUDED_SKILLS="ascendc-code-review ascendc-docs-search ascendc-api-best-practices npu-arch"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="@(ascendc-ops-reviewer|ascendc-code-summarizer)"
 
