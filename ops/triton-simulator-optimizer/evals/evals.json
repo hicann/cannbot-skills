@@ -1,0 +1,93 @@
+{
+  "skill_name": "triton-simulator-optimizer",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "端到端 benchmark 慢的瓶颈定位",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "端到端 benchmark 慢，但不知道瓶颈在 dot / 逐元素变换 / 访存 / 同步哪一项，怎么定位？",
+      "expected_output": "应先采集再断：过全 kernel 采集覆盖门禁——用 scripts/enumerate_kernels.py 枚举全部 @triton.jit kernel，对每个算子 kernel 用 msprof op simulator 采集（--kernel-name + --launch-count=1），产出覆盖表（kernel_name/是否采集/Cube top pipe/Vector top pipe/热源码行）；再解析 instr_exe.csv 与 code_exe.csv 交叉验证 pipe 占比与热源码行，综合全部 kernel 判定瓶颈；严禁在未采集前下\"硬件极限/不可优化\"结论，修复方向一律映射到 triton-latency-optimizer 的优化点编号。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "Cube 空等 Vector 的诊断",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "simulator 采集显示 Cube 核 WAIT_FLAG_DEVI 占比 > 50% 且 MMAD < 5%，瓶颈是什么？修复方向呢？",
+      "expected_output": "诊断为 Cube 空等 Vector：dot 依赖 Vector 侧变换输出，循环内串行化。修复方向指向 triton-latency-optimizer 的优化点 19（Cube/MTE3 分阶段解耦）或 21（Workspace 物化解耦）；一次循环只指向一个优化点，重新采集确认瓶颈转移后再下一个，不得多点叠加模糊因果。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "多 kernel 算子必须先全量采集",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我的算子 forward() 会启动好几个 @triton.jit kernel，只采其中一个慢的 kernel 能定位瓶颈吗？",
+      "expected_output": "不能。必须过全 kernel 采集覆盖门禁：用 scripts/enumerate_kernels.py 枚举全部算子 kernel，逐个用 msprof op simulator 采集并产出覆盖表（kernel_name/是否采集/Cube top pipe/Vector top pipe/热源码行），任一行缺失未标注即禁止诊断和结论。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "禁止未采集就断言硬件极限",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我的 fp32 dot 很慢，可以直接断定是硬件瓶颈不可优化吗？",
+      "expected_output": "不能。严禁在拿到 simulator 采集证据前下硬件极限/不可优化结论；fp32 dot 走 Cube (MMAD) 而非不走 Cube，但吞吐低于 bf16/fp16，必须综合 Cube 与 Vector 核的 instr_exe 和 code_exe 的 pipe 占比与热源码行后再下结论。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "一次循环只应用一个优化点",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "simulator 诊断出瓶颈后，我可以同时应用好几个优化点来加速吗？",
+      "expected_output": "不可以。一次循环只指向一个 triton-latency-optimizer 优化点，重新采集确认瓶颈转移后再应用下一个；多点叠加会模糊因果，且本 skill 只采集加诊断，修复落地交回 latency-optimizer。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

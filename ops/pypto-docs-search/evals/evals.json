@@ -1,0 +1,58 @@
+{
+  "skill_name": "pypto-docs-search",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "按错误码排障检索",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "PyPTO 报了个带错误码的错误，我想按错误码找对应的排障文档，怎么查？",
+      "expected_output": "报错带错误码时应通过 pypto-docs-search 的错误码索引（错误码前缀 → 组件排障文档）定位对应排障文档；或在缓存 docs/ 下按关键词 Grep 发现文档后读全文。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "缓存未就绪时先装配再检索",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我第一次用 PyPTO 文档检索，本地缓存还不存在，该怎么开始？",
+      "expected_output": "应先运行 scripts/sync_devkit.py 装配缓存到 $PYPTO_DEVKIT_DIR，成功标准是目录下出现 docs/ ops/ tests/；无法装配（离线受限）时按索引查确定文档路径，用 WebFetch 取在线文档，不凭空猜测资源位置。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "已知确定路径的单点读取不经检索",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我已经知道 PyPTO 某个 API 文档的确切路径和 URL，还需要先走检索流程吗？",
+      "expected_output": "不需要。已知确定路径或 URL 的单点读取直接 Read/WebFetch，不经本检索；检索用于按关键词发现、跨算子/跨文件定位，不是已知路径的重复查询。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

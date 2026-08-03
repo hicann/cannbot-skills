@@ -503,6 +503,7 @@ get_incremental_tests() {
     if [ ${#CHANGED_SKILLS[@]} -gt 0 ]; then
         tests+="unit/skills/test-structure.sh:fast\n"
         tests+="unit/skills/test-content.sh:fast\n"
+        tests+="unit/skills/test-evals-required.sh:fast\n"
     fi
 
     # Always run structure and content tests for changed agents
@@ -557,6 +558,7 @@ get_tests_for_category() {
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"
+            echo "unit/skills/test-evals-required.sh:fast"
             echo "unit/agents/test-structure.sh:fast"
             echo "unit/agents/test-content.sh:fast"
             echo "unit/teams/test-structure.sh:fast"
@@ -575,7 +577,7 @@ get_tests_for_category() {
             # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)
             # Other test files can be run individually via --test flag
             echo "behavior/skills/test-universal.sh:medium"
-            echo "behavior/install/test-init-behavior.sh:fast"
+            echo "behavior/install/test-init-behavior.sh:medium"
             ;;
         integration)
             for f in "$SCRIPT_DIR"/integration/test-*.sh; do

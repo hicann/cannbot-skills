@@ -354,20 +354,21 @@ def _validate_skill_structure(fm: dict, skill_file: Path, skill_dir: Path,
     # S-STR-20: evals/ basic structure check
     evals_dir = skill_dir / "evals"
     if evals_dir.is_dir():
-        evals_md = evals_dir / "evals.md"
-        if not evals_md.exists():
+        evals_json = evals_dir / "evals.json"
+        if not evals_json.exists():
             emit("warn", "S-STR-20", file_str,
-                 "evals/ directory exists but missing evals.md")
+                 "evals/ directory exists but missing evals.json")
         else:
-            fm_evals, _body, err = parse_frontmatter(evals_md)
-            if err:
+            try:
+                evals_data = json.loads(evals_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 emit("warn", "S-STR-20", file_str,
-                     f"evals/evals.md frontmatter issue: {err}")
+                     "evals/evals.json is not valid JSON")
             else:
-                evals_skill_name = fm_evals.get("skill_name")
+                evals_skill_name = evals_data.get("skill_name") if isinstance(evals_data, dict) else None
                 if evals_skill_name and evals_skill_name != skill_name:
                     emit("warn", "S-STR-20", file_str,
-                         f"evals.md skill_name='{evals_skill_name}' does not match "
+                         f"evals.json skill_name='{evals_skill_name}' does not match "
                          f"directory name '{skill_name}'")
 
     # S-STR-21: scripts/*.sh must be executable

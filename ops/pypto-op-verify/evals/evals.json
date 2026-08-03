@@ -1,0 +1,93 @@
+{
+  "skill_name": "pypto-op-verify",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "PyPTO kernel 的正确性验证方式",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "PyPTO kernel 写完了，golden 也有了，怎么验证它的正确性？",
+      "expected_output": "按 pypto-op-verify 的要求：先读 MEMORY.md 的 module_count 选路径（L0 单次端到端 / L1 走阶段化+逐模块边界验证）；用普通 Python 脚本 custom/<operator_name>/test_<operator_name>.py 从仓库根目录运行（python custom/<op>/test_<op>.py），对每个输出 leaf（含 tuple/list 的所有元素、dict 所有 key、嵌套结构）调用 detailed_tensor_compare 并要求 all_close，任何不匹配即非零退出；默认不用 pytest 作为 golden 对比驱动。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "L0 与 L1 验证路径选择",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "MEMORY.md 里 module_count=1，验证路径怎么选？",
+      "expected_output": "module_count=1 走 L0 验证路径：对每个输出 leaf 做单次端到端 detailed_tensor_compare(golden_final_output, pypto_final_output, ...)，无 staged 文件链、无逐模块验证日志，verifier 只产出 test_<op>.py 一个 E2E 测试；若 MEMORY.md 缺 module_count 字段默认按 L1 路径以保证安全并在 memory 记一行警告。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "多输出 tensor 的全面比较要求",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "kernel 有多个输出（包括元组和字典形式），验证时只比第一个输出可以吗？",
+      "expected_output": "不可以。对每个输出张量都要调用 detailed_tensor_compare 并要求 all_close，包括 tuple/list 的所有元素、dict 的所有 key、嵌套结构展平后的叶子张量；禁止只比较一个输出。任何不匹配都要非零退出并打印清晰的 PASS/FAIL 汇总。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "pytest 不能作为 golden 对比默认驱动",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我想用 pytest 来跑 golden 和 kernel 的对比验证，这样可以吗？",
+      "expected_output": "默认禁止用 pytest 作为 golden 与 PyPTO 端到端对比的驱动；应使用普通 Python 脚本 custom/<op>/test_<op>.py 从仓库根目录运行，pytest 仅可作为已记录的可选补充。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "MEMORY.md 缺少 module_count 时的处理",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "我看的 MEMORY.md 里没有 module_count 字段，验证路径怎么选？",
+      "expected_output": "缺 module_count 时默认按 L1 路径以保证安全，并在 MEMORY.md 的 Development & debug log 记一行警告；L1 走完整阶段化文件链加逐模块 golden 加逐阶段验证日志。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

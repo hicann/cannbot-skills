@@ -1,0 +1,58 @@
+{
+  "skill_name": "pypto-general-debug",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "路由 opaque 卡死失败",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": false
+      },
+      "prompt": "PyPTO kernel 跑起来卡住了，报错也不清晰，怎么排查？",
+      "expected_output": "应先路由症状：通过 references/DEBUG_GUIDEBOOK.md 的 situation → leaf 映射表定位到唯一叶子参考文件，不读所有 references；按 Failure History 记录假设/改动位置/结果/下一步；仍卡住时走 op-by-op check protocol——用 pypto-op-review 的 scripts/extract_pypto_calls.py 枚举 pypto 调用点，逐行对照文档核 dtype/shape/tile 配置/write-back。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "调试过程的 Failure History 记录要求",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "PyPTO kernel 调试过程中，每次尝试后需要记录哪些信息？",
+      "expected_output": "每轮迭代必须记录假设、确切的改动位置、结果、下一步行动、是否发生回滚，这是强制要求；记录在 custom/<op>/MEMORY.md 的 Development & debug log 段，保证交接安全。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "禁止随意注释内核代码定位问题",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A2"
+        ]
+      },
+      "prompt": "PyPTO kernel 结果不对，我可以先注释掉一半代码看看能不能定位问题吗？",
+      "expected_output": "不要注释掉半个文件：禁用单个 @jit 内任意 pypto 行通常会使图失效或隐藏真实 bug；应优先模块级 stub 缩小活区，或在一个模块内插入检查点做二分定位，用 numbered list 定位首个分歧调用点，并把过程和假设记入 memory。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

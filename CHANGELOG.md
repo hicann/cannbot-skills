@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-07-31】
+#### 测试框架 Test Framework
+- 【测试框架】新增 L1 硬性门禁 `tests/unit/skills/test-evals-required.sh`（S-EVAL-01）：强制所有 skill 必须携带 `evals/evals.json`，且文件存在、可解析为合法 JSON、含顶层 `skill_name` 字段，缺失或损坏即拦截 CI。已在 `run-tests.sh` 的 unit 与 incremental 测试清单中登记。
+
 ### 【2026-07-21】
 #### 新特性 New Features
 - 【AscendC/Blaze 迁移】新增 `ascendc-blaze-migration` Skill。面向 Ascend 950 Matmul 家族，冻结 tiling 与 Blaze 架构，完成组件决策、原调用链逐字节一致性、性能验收和双仓 PR 交付；包含安装登记与 RotateQuant 闭环案例。
