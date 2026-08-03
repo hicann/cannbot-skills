@@ -1,14 +1,18 @@
 # 黑盒用例设计方法
 
-> 黑盒(需求/接口驱动)分级功能用例的**设计方法**。从需求文档出发系统化推导覆盖,产物为本仓直调**用例表 + gen_data 用例**,不产 ttk/aclnn。测试工程组成与执行见 [test-framework.md](test-framework.md);精度与同源纪律见 [precision-and-perf.md](precision-and-perf.md);白盒补全见 [whitebox-design.md](whitebox-design.md)。
+> 黑盒(需求/接口驱动)分级功能用例的**设计方法**，按评测来源模式分两条路径：
+> - **模式 B（无评测集，默认）**：从需求文档出发系统化推导用例，产物为**用例表 + gen_data 用例 + golden 计算路径**。
+> - **模式 A（有评测集）**：评测集在算子目录（如 cann-bench `tasks/levelN/<op>/cases.yaml`）已自带用例集；本方法职责为**核对评测集 cases 对算子原型声明维度的覆盖完整性**并**补充未覆盖场景**，产物为**覆盖矩阵 + 补充用例表**。
+>
+> 下方一～五为两模式通用的设计方法；模式 A 在「落盘与下游」按对齐口径调整。测试工程组成与执行见 [test-framework.md](test-framework.md)；精度与同源纪律见 [precision-and-perf.md](precision-and-perf.md)；白盒补全见 [whitebox-design.md](whitebox-design.md)。
 >
 > 本文件是基类默认方法（属 virtual），各算子仓可 override；override 时保持逻辑名 `repo-test-develop` 不变。
 
 ## 定位
 
-- **输入**：需求文档（数学定义、算子原型、支持 dtype、shape 范围、精度要求）——唯一真值源，冲突时停止上报。
-- **产物**：按 L0/L1/L2 分级的**用例表**（编号/描述/参数/预期结果）+ 对应 `gen_data.py` 输入生成 + golden 计算路径。**不涉及** ttk/aclnn CSV。
-- **一句话**：黑盒据"需求 + 对外原型"设计用例，刻意不依赖内部实现（内部分支覆盖交给 [whitebox-design.md](whitebox-design.md)）。
+- **输入**：需求文档（数学定义、算子原型、支持 dtype、shape 范围、精度要求）——唯一真值源，冲突时停止上报。模式 A 附加：评测集 cases（待核对的用例集）。
+- **产物**：模式 B——按 L0/L1/L2 分级的**用例表**（编号/描述/参数/预期结果）+ `gen_data.py` 输入生成 + golden 计算路径。模式 A——**覆盖矩阵**（算子原型声明维度 × 评测集 cases 逐维对照表）+ **补充用例表**（评测集 cases 未覆盖的场景）；golden 由评测集自带，不产 golden。
+- **一句话**：黑盒据"需求 + 对外原型"设计用例（模式 B）或核对评测集覆盖、补缺口（模式 A），刻意不依赖内部实现（内部分支覆盖交给 [whitebox-design.md](whitebox-design.md)）。
 
 ## 一、覆盖维度分解
 
@@ -72,6 +76,7 @@
 
 ## 落盘与下游
 
-- 用例表 + gen_data 用例 → **test 目录**（随算子工程）。
+- **模式 B**：用例表 + gen_data 用例 + golden 计算路径 → **test 目录**（随算子工程）。
+- **模式 A**：覆盖矩阵 + 补充用例 → **test 目录**（随算子工程的 `tests/whitebox_cases/`）；评测集 cases 为评测权威用例集，补充用例仅供开发期自测，不替换评测集 cases。
 - 若用引擎：参数定义/因子值/覆盖报告等设计中间物 → `.cannbot/<算子名>/` 设计目录或 `test/st/design/`，供覆盖矩阵核对。
-- golden 计算路径 = 需求数学定义；精度容差、同源截断、expect_error 判定见 [precision-and-perf.md](precision-and-perf.md)。
+- 精度容差、同源纪律见 [precision-and-perf.md](precision-and-perf.md)。

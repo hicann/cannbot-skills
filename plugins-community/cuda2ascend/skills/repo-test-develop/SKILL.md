@@ -5,7 +5,12 @@ description: 仓库测试开发指导，介绍本仓测试框架的使用与测�
 
 # 仓库测试开发指导
 
-本 skill 介绍本仓测试框架的使用与测试代码的开发方法——golden 实现、分级功能用例、白盒测试补全、性能采集框架的搭建，以及精度测试的执行标准。
+本 skill 介绍本仓测试工程的使用与测试代码开发方法。
+
+本仓采用 direct launch 工程架构。测试开发按需求文档的**评测来源模式**分两条路径：
+
+- **模式 A（有评测集）**：评测集自带 golden / cases / 算子原型定义，提交方不重写——测试开发职责为对齐评测契约（schema/用例覆盖核对）、补全白盒用例、以评测集评测脚本作为 harness。
+- **模式 B（无评测集）**：由 developer-test 自建 golden + 用例 + 测试框架——参考主流评测集（如 cann-bench）的 golden/cases/评测脚本范式搭建，cann-bench 仅作参考实现。
 
 > 本文件只做路由。测试框架与精度/性能细则在 `references/` 中按需加载，不在此内联。
 > 本目录是基类**默认测试开发指导**（属 virtual），各算子仓可 override 为本仓专用框架；override 时保持 `name:` 与逻辑名 `repo-test-develop` 不变。
@@ -14,17 +19,17 @@ description: 仓库测试开发指导，介绍本仓测试框架的使用与测�
 
 | 场景 | 加载 |
 |------|------|
-| 黑盒分级功能用例的**设计方法**（覆盖维度、等价类/边界/特殊值、分级派生、空 tensor） | [references/blackbox-design.md](references/blackbox-design.md) |
-| 白盒用例的**补全方法**（源码分支枚举、尾块/非对齐/tilingkey 覆盖、观测 vs 期望） | [references/whitebox-design.md](references/whitebox-design.md) |
-| 搭建测试工程（golden、gen_data、run、分级用例、白盒补全） | [references/test-framework.md](references/test-framework.md) |
-| 精度测试标准与性能采集方法 | [references/precision-and-perf.md](references/precision-and-perf.md) |
+| 测试工程组成（模式 A 对齐评测集 / 模式 B 自建 golden+cases+run.sh） | [references/test-framework.md](references/test-framework.md) |
+| 黑盒用例设计（模式 B 从需求设计用例 / 模式 A 核对评测集 cases 覆盖并补充） | [references/blackbox-design.md](references/blackbox-design.md) |
+| 白盒用例补全（源码分支枚举、尾块/非对齐/tilingkey 覆盖，两模式通用） | [references/whitebox-design.md](references/whitebox-design.md) |
+| 精度测试标准与性能采集（模式 A 评测集容差+HAP / 模式 B 自建容差+msprof） | [references/precision-and-perf.md](references/precision-and-perf.md) |
 
 ## 依赖的共享 skill（逻辑名）
 
 | 逻辑名 | 用途 |
 |--------|------|
-| `ascendc-st-design` | 黑盒用例设计引擎：因子提取→约束→拓扑求解→分级 + 覆盖报告；产 harness-neutral 因子值表，物化到本仓用例表（见 blackbox-design.md） |
+| `ascendc-st-design` | 黑盒用例设计引擎：因子提取→约束→求解→分级 + 覆盖报告；模式 B 用于从需求设计用例，模式 A 用于核对评测集 cases 覆盖与补充设计（见 blackbox-design.md） |
 | `ascendc-whitebox-design` | 白盒设计引擎：源码分析→路径枚举→tilingkey 覆盖，供复杂/tilingkey 算子复用（见 whitebox-design.md） |
-| `ops-precision-standard` | 各 dtype 的 atol/rtol 精度标准 |
-| `ops-profiling` | msprof op 性能采集、CSV 指标解读、达标判定 |
+| `ops-precision-standard` | 各 dtype 的 atol/rtol 精度标准；开发期自检参照，模式 A 下评测集内置容差为最终裁定 |
+| `ops-profiling` | msprof op 性能采集、CSV 指标解读；模式 A 性能评测由评测集评测脚本内置 profiler 完成，模式 B 用本 skill 自采 |
 | `ascendc-precision-debug` | 精度不达标时诊断根因 |

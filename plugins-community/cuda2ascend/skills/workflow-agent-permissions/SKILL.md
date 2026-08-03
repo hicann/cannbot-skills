@@ -12,8 +12,8 @@ disable-model-invocation: true
 | architect | 仅 `.cannbot` | 任意 | 设计交付件（md） |
 | qa | 仅 `.cannbot` | 任意 | 验收报告、问卷 json |
 | developer | 代码 + test + doc | 任意 | 跨域综合修复 |
-| developer-code | 代码（除 test） | 任意 | 算子实现 |
-| developer-test | test | 任意 | 测试工程 |
+| developer-code | 代码（除 test） | 任意 | 算子实现（kernel + plugin + 工程骨架） |
+| developer-test | test | 任意 | 测试工程（评测集 cases 对齐、白盒补充、本地自测脚本） |
 | developer-doc | 代码 + test + doc | 仅 `.md` | 文档产出 |
 
 派发非 `.cannbot` 目录的写任务时，必须选择对应可写范围的角色；权限不足会被 hook 拦截并提示上报主 Agent。

@@ -1,14 +1,14 @@
 # 白盒用例补全方法
 
-> 白盒（源码驱动）用例补全的**设计方法**：以算子代码为证据，覆盖黑盒未触及的执行分支。产物为**补充用例表 + gen_data 用例 + 分支覆盖说明**，不产 pytest/ttk。黑盒设计见 [blackbox-design.md](blackbox-design.md)；测试工程与执行见 [test-framework.md](test-framework.md)。
+> 白盒（源码驱动）用例补全的**设计方法**：以算子代码为证据，覆盖已有黑盒用例未触及的执行分支。已有黑盒用例来源：模式 B 为自建用例表，模式 A 为评测集 cases。产物为**补充用例表 + 分支覆盖说明**。黑盒设计见 [blackbox-design.md](blackbox-design.md)；测试工程与执行见 [test-framework.md](test-framework.md)。
 >
 > 本文件是基类默认方法（属 virtual），各算子仓可 override；override 时保持逻辑名 `repo-test-develop` 不变。
 
 ## 定位
 
-- **输入**：算子代码（`op_kernel/*.asc` kernel、host tiling 计算）+ 已有黑盒用例。
-- **产物**：白盒补充用例（**用例表新增行 + gen_data 用例**）+ **分支覆盖说明**（记录每分支 → 命中用例 / 缺口）。**不产** pytest/ttk。
-- **一句话**：黑盒据需求设计、看不到内部；白盒据源码补全需求覆盖不到的内部分支。
+- **输入**：算子代码（`op_kernel/*.cpp` kernel、tiling 计算）+ 已有黑盒用例（模式 B 自建 / 模式 A 评测集 cases）。
+- **产物**：白盒补充用例（**用例表新增行**）+ **分支覆盖说明**（记录每分支 → 命中用例 / 缺口）。
+- **一句话**：黑盒据需求/proto 设计、看不到内部；白盒据源码补全已有黑盒用例覆盖不到的内部分支。
 
 ## 铁律
 
@@ -59,5 +59,5 @@
 
 ## 落盘与下游
 
-- 白盒补充用例 → **test 目录**（随算子工程）；**分支覆盖说明** → test 目录。
+- 白盒补充用例 → **test 目录**（随算子工程的 `tests/whitebox_cases/`）；**分支覆盖说明** → test 目录。
 - 分支覆盖说明供后续覆盖达标判定核对；expect_error / 精度纪律见 [precision-and-perf.md](precision-and-perf.md)。
