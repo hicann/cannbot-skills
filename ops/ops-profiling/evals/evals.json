@@ -38,6 +38,44 @@
       "expected_output": "回复应列出 ops-profiling 的适用场景：上板性能测试、算子性能测试、硬件性能验证、NPU 性能采集、性能优化等，涵盖从性能数据采集到分析的全流程。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "可视化报告路由到 msopprof-visualization",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我已经在 NPU 上采集了算子的 msprof 数据，想生成一份交互式 HTML 性能可视化报告，应该怎么做？不需要执行任何工具调用。",
+      "expected_output": "回复应指向 msopprof-visualization 子技能：已有含 collection_manifest.json 的采集目录时用 visualize 模式重渲染，有算子工程时用其 run_pipeline.py 采集并生成报告，不得建议使用 msprof_profile_run.sh 的对比测试链路。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "对比测试场景不路由到可视化子技能",
+      "config": {
+        "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我的自定义算子开发完成了，想对比一下它和标杆实现的加速比，用哪个工具？不需要执行任何工具调用。",
+      "expected_output": "回复应推荐 msprof_profile_run.sh 的 compare/quick 模式，输出 performance.json 和 markdown 报告，不应引导到 msopprof-visualization 可视化子技能。",
+      "files": [],
+      "expectations": []
     }
   ],
   "skill_name": "ops-profiling"

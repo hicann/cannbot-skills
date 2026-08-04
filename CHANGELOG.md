@@ -6,6 +6,10 @@
 #### 代码重构 Refactor
 - 【模型推理优化】将 model-infer-sota-approach 合并进 model-infer-optimize plugin，入口按意图分流固定阶段与探索式两条工作流。
 
+### 【2026-07-30】
+#### 新特性 New Features
+- 【ops-profiling】新增子技能 `msopprof-visualization`（issue #473，PR !718）：将上板采集的 msOpProf 算子性能数据渲染为交互式 HTML 报告，含 Details、Roofline、Timeline、Cache、Source、片上内存、Warp Stall、指令时间线、Raw Data 共 9 个页面；支持最小非重复采集、已有采集目录重渲染、缺失数据诊断与机器可读校验。加速比对比/批量场景仍走 `msprof_profile_run.sh` 链路。
+
 ### 【2026-07-21】
 #### 新特性 New Features
 - 【AscendC/Blaze 迁移】新增 `ascendc-blaze-migration` Skill。面向 Ascend 950 Matmul 家族，冻结 tiling 与 Blaze 架构，完成组件决策、原调用链逐字节一致性、性能验收和双仓 PR 交付；包含安装登记与 RotateQuant 闭环案例。

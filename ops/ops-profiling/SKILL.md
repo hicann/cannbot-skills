@@ -1,6 +1,6 @@
 ---
 name: ops-profiling
-description: NPU 性能采集与分析，融合 msprof 算子级瓶颈定位与 kernel-level 对比测试，用于采集算子性能数据、对比自定义算子 vs 标杆加速比、定位性能瓶颈并给出优化建议。当用户在算子开发过程中提到"上板性能"、"算子性能测试"、"硬件性能验证"、"NPU性能采集"、"NPU profiling"、"性能对比"、"加速比"等场景时触发。
+description: NPU 性能采集与分析，融合 msprof 算子级瓶颈定位与 kernel-level 对比测试，用于采集算子性能数据、对比自定义算子 vs 标杆加速比、定位性能瓶颈并给出优化建议。核心工具：msprof_profile_run.sh（标准采集 / --compare 对比测试 / --quick 快速对比 / --batch 批量并行）与 msprof_perf_summary.py（瓶颈分析、对比报告）；加速比对比用 msprof_profile_run.sh 的 compare/quick 模式，输出 performance.json 和 markdown 对比报告即完成，无需可视化。另含 msopprof-visualization 子技能，仅当用户明确要求把已采集数据渲染为交互式 HTML 可视化报告时使用，不用于加速比对比场景。当用户在算子开发过程中提到"上板性能"、"算子性能测试"、"硬件性能验证"、"NPU性能采集"、"NPU profiling"、"性能对比"、"加速比"、"性能可视化"、"性能报告"等场景时触发。
 ---
 
 # 上板性能采集与调优
@@ -126,6 +126,21 @@ Markdown 报告包含：
    - 两者皆可用 → 须向用户确认或按项目约定选用其一
    - 两者皆不可用 → 报错，提示检查 CANN / `ASCEND_HOME` 安装
 
+### 可视化报告（上板数据 → HTML）
+
+当用户要求把上板采集数据可视化为交互式 HTML 报告（Details、Roofline、Timeline、Cache 热力图、Source 等页面）时，加载子技能 [`msopprof-visualization/SKILL.md`](msopprof-visualization/SKILL.md)：
+
+- 有算子工程可上板 replay → 用其 `run_pipeline.py` 做最小非重复采集并生成报告；
+- 已有含 `collection_manifest.json` 的采集目录 → 只用 visualize 模式重渲染，不得重复采集。
+
+以下场景**不加载**可视化子技能：
+
+- 加速比对比（compare / quick / batch）：输出 `performance.json` + markdown 即完成；
+- MC² / fork 多进程算子：子技能基于 `msprof op`，该场景对 `msprof op` 禁用；
+- 纯瓶颈分析或 CSV 指标解读且用户未提及可视化。
+
+注意两套链路输出不互通：本技能的 `PROF_GROUP_*` 归档不能直接喂给可视化渲染，可视化子技能的采集目录结构由其自身 `collect.py` 产生。
+
 ### 参考资源
 
 | 文件 | 内容 | 何时查阅 |
@@ -150,3 +165,4 @@ Markdown 报告包含：
 | 端到端自动开发 Phase 5 | `msprof_profile_run.sh --quick` | 集成到 tilelang2ascendc-ops-generator 流程（只获取加速比） |
 | 进化优化前基线测试 | `msprof_profile_run.sh --quick` | 快速获取基线加速比 |
 | 批量性能测试 | `msprof_profile_run.sh --batch` | 多 NPU 并行批量测试 |
+| 上板数据可视化报告 | `msopprof-visualization` 子技能 | 交互式 HTML：Details/Roofline/Timeline/Cache/Source 等页面 |
