@@ -1,0 +1,172 @@
+{
+  "eval_mode": "text",
+  "skill_name": "ge-fusion-pass-skill",
+  "evals": [
+    {
+      "id": 1,
+      "title": "多 Graph Skill 环境下的端到端融合 Pass 触发",
+      "config": {
+        "max_tokens": 240000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 270000,
+          "glm-5": 255000
+        },
+        "distractor_skills": [
+          "torch-custom-ops-guide",
+          "torch-npugraph-ex-dfx-triage",
+          "torch-npugraph-ex-compile-error-diagnosis",
+          "torch-npugraph-ex-runtime-error-diagnosis"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我想为 CANN/GE 添加一个自定义融合 pass：先判断 Conv→Relu 固定子图是否适合融合，然后实现并验证。请先选择并加载最匹配的 Skill，再只返回端到端的文字计划；不要创建或修改文件，也不实际执行开发或验证。当前没有 dump、CANN 环境或真实运行日志，不能凭空假设这些证据存在。",
+      "expected_output": "回复应正确激活 ge-fusion-pass-skill，并按 G1→G2→G3 说明端到端流程。固定数据拓扑可在完成需求分析和证据核实后考虑 PatternFusionPass；缺少 dump、环境和运行日志时，应将未确认项、未运行原因和限制如实记录，而不能声称融合已成功。即使同时提供多个 graph 相关干扰 Skill，也应正确选择该 Skill。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-fusion-pass-skill",
+          "description": "技能 ge-fusion-pass-skill 被激活"
+        },
+        {
+          "type": "contains",
+          "pattern": "G1",
+          "description": "回复中包含阶段一门禁"
+        },
+        {
+          "type": "contains",
+          "pattern": "G2",
+          "description": "回复中包含阶段二门禁"
+        },
+        {
+          "type": "contains",
+          "pattern": "G3",
+          "description": "回复中包含阶段三门禁"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "纯文本需求分析的 G1 门禁",
+      "config": {
+        "max_tokens": 180000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 210000,
+          "glm-5": 195000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "只做需求分析、只返回文本且不要调用工具：我要把图中的 Add→Relu 固定子图融合，输入只给这段描述。请给出结构化需求分析和 G1 门禁；在结尾明确输出 gate_status、result_status 和 missing_fields。由于没有 dump 或输入包，请如实按 DEGRADED 标注未确认项。不要写代码或执行验证。",
+      "expected_output": "回复应只完成 G1，给出结构化需求分析、gate_status、假设和证据边界，不进入 G2 写代码或 G3 验证。由于没有 dump 或输入包，真实 GE op type、接口和环境等未核实项应标为假设或未确认，并按限制给出 DEGRADED，而不是编造已经核实的结论。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "G1",
+          "description": "回复中包含 G1"
+        },
+        {
+          "type": "contains",
+          "pattern": "gate_status",
+          "description": "回复中包含 G1 门禁状态"
+        },
+        {
+          "type": "contains",
+          "pattern": "DEGRADED",
+          "description": "缺少证据时回复采用降级状态"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "固定拓扑的 G2 选型与 API 门禁",
+      "config": {
+        "max_tokens": 180000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 210000,
+          "glm-5": 195000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "我已有 requirements-analysis.md 和已核验的摘要文件，已明确 GE 图中是固定的 Add→Relu 数据拓扑。现在只实现 C++ 融合 pass，不做验证。源码能否直接写？请说明选型、写代码前的必做门禁和本阶段结束条件。",
+      "expected_output": "回复应将固定数据拓扑选为 PatternFusionPass 路线，并说明阶段二开始前仍要核验摘要文件和建立直接调用 API 的签名核对表。应输出或说明 api_gate_status、implementation_status 与 G2 gate_status；未完成 API 签名门禁不能直接写源码。用户只要求实现时，应在 G2 结束，不自动进入 G3 验证。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "PatternFusionPass",
+          "description": "回复中选择 PatternFusionPass"
+        },
+        {
+          "type": "contains",
+          "pattern": "api_gate_status",
+          "description": "回复中包含 API 门禁状态"
+        },
+        {
+          "type": "contains",
+          "pattern": "G2",
+          "description": "回复中包含阶段二"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "控制边和动态输入下的路线选择",
+      "config": {
+        "max_tokens": 180000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 210000,
+          "glm-5": 195000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "我要实现 C++ 自定义融合 pass，目标片段包含控制边，运行期输入数量 N 可变，替换时需要扫描图、构造新的 replacement graph 并保留外部边界。只说明应该选哪种 GE pass 路线和理由，不要给出未经验证的 API 签名。",
+      "expected_output": "回复应识别控制边、动态 I/O 和边界不可表达性，不把该场景当成固定 PatternFusionPass。应选择 graph_base_pass 路线，并说明 FusionBasePass 适合扫描 Graph/GNode、构造 replacement graph 和通过子图边界完成替换；API 签名不足时只说明待核实项，不得编造接口。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "graph_base_pass",
+          "description": "回复中选择 graph_base_pass 路线"
+        },
+        {
+          "type": "contains",
+          "pattern": "FusionBasePass",
+          "description": "回复中说明 FusionBasePass"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "G3 环境缺失时如实降级",
+      "config": {
+        "max_tokens": 180000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 210000,
+          "glm-5": 195000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "我已经有 requirements-analysis.md 和 C++ pass 源码，现在只做阶段三验证；但机器没有可用的 CANN、atc、dump，以及 baseline/optimized 输出。请说明验证报告应该如何收尾，不能把未执行的步骤当成成功。",
+      "expected_output": "回复应将阶段三判为 DEGRADED，而不是仅因环境缺失判为 BLOCKED；对无法执行的环境探测、构建、加载、编译、dump 比对和输出/性能验证记录 NOT_RUN，并写明缺失条件、实际未运行原因、计划命令或证据路径和未覆盖范围。回复不得把编译、融合、正确性或性能表述为已成功。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "DEGRADED",
+          "description": "回复中将环境缺失标为降级"
+        },
+        {
+          "type": "contains",
+          "pattern": "NOT_RUN",
+          "description": "回复中保留未运行状态"
+        },
+        {
+          "type": "contains",
+          "pattern": "gate_status",
+          "description": "回复中包含阶段三门禁状态"
+        }
+      ]
+    }
+  ]
+}
