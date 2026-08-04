@@ -41,9 +41,9 @@ catlass/
 │       ├── block/block_epilogue*.hpp  # BlockEpilogue 特化
 │       ├── tile/tile_elemwise_*.hpp   # TileElemWise 激活
 │       └── tile/tile_copy.hpp         # Epilogue TileCopy
-├── examples/                      # 60+ 算子示例
-│   ├── 00_basic_matmul/           到 42_*  # A2/A3 通用
-│   ├── 43_ascend950_* 到 57_*     # Ascend950
+├── examples/                      # 算子示例（CMakeLists.txt 中 EXAMPLE_ATLASA2 / EXAMPLE_ASCEND950 定义完整清单）
+│   ├── NNN_xxx/                    # A2/A3 通用（如 00_basic_matmul, 06_optimized_matmul）
+│   ├── NNN_ascend950_xxx/          # Ascend950（如 43_ascend950_basic_matmul）
 │   └── advanced/basic_matmul_aclnn/  # aclnn 工程集成
 └── docs/zh/
     ├── 2_Design/01_kernel_design/  # matmul 总结、dispatch、swizzle
@@ -121,7 +121,7 @@ DispatchPolicy 选型：
 │   └── 默认                       → MmadAtlasA2Pingpong
 │
 └── Ascend950
-    └── 参考 43_ascend950_* 到 57_ascend950_* 的 DispatchPolicy
+    └── 参考 `catlass/examples/CMakeLists.txt` 中 `EXAMPLE_ASCEND950` 所列的 ascend950 样例的 DispatchPolicy
 ```
 
 > **性能要点（不止量化）**：`MmadAtlasA2PreloadAsyncWithCallback` 是**所有「融合 matmul+epilogue 流水」算子的性能最优 DispatchPolicy**（预取+异步+回调，AIC/AIV 细粒度重叠），与多级轮转 workspace Kernel 搭配使用，不限于量化。`Pingpong` 仅为基线/一次性验证。详见 [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md) §2。
