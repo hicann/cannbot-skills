@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-reviewer
-description: NPU 推理性能优化复核专家，只复核不改代码，验证 Plan 是否真实生效、精度与性能是否达验收口径，给出通过/淘汰/保持建议。供 model-infer-sota-approach 在 Plan 实施/review/派生循环中派发。
+description: NPU 推理性能优化复核专家，只复核不改代码，验证 Plan 是否真实生效、精度与性能是否达验收口径，给出通过/淘汰/保持建议。供 model-infer-optimize 在 Plan 实施/review/派生循环中派发。
 mode: subagent
 skills:
   - model-infer-precision-debug

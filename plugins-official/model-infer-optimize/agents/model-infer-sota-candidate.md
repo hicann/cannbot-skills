@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-candidate
-description: 优化候选发现专家，按候选来源（multi-stream DAG 拆解 / wiki / perf-insight）并行发现不限于多流的优化候选，产出候选 Plan 草案。供 model-infer-sota-approach 在候选发现阶段为每个来源派发。
+description: 优化候选发现专家，按候选来源（multi-stream DAG 拆解 / wiki / perf-insight）并行发现不限于多流的优化候选，产出候选 Plan 草案。供 model-infer-optimize 在候选发现阶段为每个来源派发。
 mode: subagent
 skills:
   - model-infer-multi-stream

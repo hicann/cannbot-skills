@@ -19,7 +19,7 @@ optimization-analysis/<case>/
 └── perf/                      perf-breakdown 的工作目录（采集 + 分析的 profile 与报告全在这；内部结构和文件名归 model-infer-perf-breakdown，本流程不感知）
 ```
 
-此外，`progress.md`（共享状态文件）不在本 case 树内——位置由主 agent 解析、找不到就创建，是跨 agent 共享上下文 + subagent 实施 / 踩坑 / 验证过程日志（沿用本插件 `progress_template.md` 的常驻区 / 工作区 / 归档约定）；编排器读它取上下文、往工作区写过程。
+此外，`progress.md`（共享状态文件）不在本 case 树内——位置由主 agent 解析、找不到就创建，是跨 agent 共享上下文 + subagent 实施 / 踩坑 / 验证过程日志（沿用本插件 `sota_progress_template.md` 的常驻区 / 工作区 / 归档约定）；编排器读它取上下文、往工作区写过程。
 
 引用关系（一份分析派生多个 Plan，不重复）：
 
@@ -42,7 +42,7 @@ baseline 性能报告 ──证据──► analysis/<source>.md ──派生─
 
 **写者规则**：dashboard（§1–§7）只有主 agent 写；`plans/plan-<id>.md` 由该 Plan 的 candidate / implementer / reviewer 产出与追加。主 agent 读 plan 文件做裁决、把关键信息 + 状态镜像进 dashboard 表，不改 plan 文件的内层结构；subagent 不写 dashboard。
 
-**dashboard / progress.md / plan-<id>.md 分工**：dashboard 只管**状态指示**（Plan 状态、采纳实现、round 裁决），是 Plan 状态的单一真相源。跨 agent 共享上下文与 subagent 实施 / 踩坑 / 验证过程落 `progress.md`（共享状态文件，路径由主 agent 解析、找不到就创建，不在本 case 树内，沿用本插件 `progress_template.md` 的常驻区 / 工作区 / 归档约定）；每个 Plan 的方案 spec 与 round 级结论摘要落 `plans/plan-<id>.md`。三者各司其职、不互相复制：看状态查 dashboard、看过程与共享上下文查 progress.md、看单个 Plan 的方案查它的 plan 文件。
+**dashboard / progress.md / plan-<id>.md 分工**：dashboard 只管**状态指示**（Plan 状态、采纳实现、round 裁决），是 Plan 状态的单一真相源。跨 agent 共享上下文与 subagent 实施 / 踩坑 / 验证过程落 `progress.md`（共享状态文件，路径由主 agent 解析、找不到就创建，不在本 case 树内，沿用本插件 `sota_progress_template.md` 的常驻区 / 工作区 / 归档约定）；每个 Plan 的方案 spec 与 round 级结论摘要落 `plans/plan-<id>.md`。三者各司其职、不互相复制：看状态查 dashboard、看过程与共享上下文查 progress.md、看单个 Plan 的方案查它的 plan 文件。
 
 ## 1. 场景与基线
 

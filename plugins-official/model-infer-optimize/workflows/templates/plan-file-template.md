@@ -2,7 +2,7 @@
 
 每个 Plan 一份，不内联到 dashboard。candidate 落初稿（方案描述 + 方案细节 + 参考 wiki），该 Plan 的 implementer / reviewer 在循环里追加 round 级结论摘要。主 agent 只读它做裁决、把关键信息 + 状态镜像进 dashboard 表，不改其结构。
 
-实施 / 踩坑 / 验证的**过程明细**写在 `progress.md` 工作区（共享状态文件，跨 agent 共享，沿用本插件 `progress_template.md` 约定）；本文件的实施记录 / Review 记录只放 round 级**结论摘要**，不复制过程流水。
+实施 / 踩坑 / 验证的**过程明细**写在 `progress.md` 工作区（共享状态文件，跨 agent 共享，沿用本插件 `sota_progress_template.md` 约定）；本文件的实施记录 / Review 记录只放 round 级**结论摘要**，不复制过程流水。
 
 按下面结构落盘：
 

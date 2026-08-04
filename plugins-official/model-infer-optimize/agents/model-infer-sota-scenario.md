@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-scenario
-description: 推理场景构造专家，负责构造可复现的推理输入、跑通精度基线、并定一把可机判的判定口径。只读不改优化代码，供 model-infer-sota-approach 编排流程在“构造输入并跑通精度基线”阶段派发。
+description: 推理场景构造专家，负责构造可复现的推理输入、跑通精度基线、并定一把可机判的判定口径。只读不改优化代码，供 model-infer-optimize 编排流程在“构造输入并跑通精度基线”阶段派发。
 mode: subagent
 skills: []
 ---

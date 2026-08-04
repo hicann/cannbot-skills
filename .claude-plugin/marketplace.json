@@ -426,28 +426,8 @@
     {
       "name": "model-infer-optimize",
       "source": "./plugins-official/model-infer-optimize",
-      "description": "NPU 模型推理端到端优化 Team。含 workflow、分析/实施/验证 Subagent，覆盖并行、KVCache/FA、融合算子、量化、图模式、多流、预取和 SuperKernel。",
-      "version": "1.0.5",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "model-infer",
-        "npu",
-        "pytorch",
-        "inference",
-        "orchestrator"
-      ],
-      "category": "development",
-      "dependencies": [
-        "model-infer-skills"
-      ]
-    },
-    {
-      "name": "model-infer-sota-approach",
-      "source": "./plugins-official/model-infer-sota-approach",
-      "description": "NPU 模型推理「baseline 之上探索式优化」编排 Team。在已有可运行 baseline 上由 profiling 驱动并行发现候选，用 Plan/round 自循环（实施→复核→派生→淘汰）逐步逼近最优；具体优化下沉调用 model-infer 单点 skill。与 model-infer-optimize 基础工作流前后衔接、互补不替代。",
-      "version": "1.0.0",
+      "description": "NPU 模型推理端到端优化 Team。涵盖从零适配到 baseline 的固定阶段优化（并行、KVCache/FA、融合算子、量化、图模式），以及 baseline 之上 profiling 驱动的探索式优化（多方向发现候选、Plan/round 自循环，按需调用多流、预取、SuperKernel 等单点优化）。",
+      "version": "1.0.6",
       "author": {
         "name": "CANNBot"
       },

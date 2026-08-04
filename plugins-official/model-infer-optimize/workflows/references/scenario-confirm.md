@@ -50,7 +50,7 @@
 - 精度 / 功能判定口径
 - 性能目标（或标"可选"）
 - 输出归档目录
-- `progress.md`（共享状态文件）路径：找得到就记录其实际位置；找不到就按本插件 `progress_template.md` 约定创建一份后记录。该路径后续作为 `<progress_path>` 下传给各 subagent，位置不在 skill 里钉死。
+- `progress.md`（共享状态文件）路径：找得到就记录其实际位置；找不到就按本插件 `sota_progress_template.md` 约定创建一份后记录。该路径后续作为 `<progress_path>` 下传给各 subagent，位置不在 skill 里钉死。
 
 这份场景定义是步骤 2 `scenario` subagent 的输入——它据此构造可复现输入、跑基线、落 `scenario.md`（执行细节见 [`scenario-setup.md`](scenario-setup.md)）。本步不写 Dashboard（Dashboard 在候选发现完成后才初始化）、不跑推理。
 

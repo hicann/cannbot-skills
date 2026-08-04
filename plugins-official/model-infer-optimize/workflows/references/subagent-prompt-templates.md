@@ -11,12 +11,12 @@
 - **Dashboard 只读**：Plan Dashboard 由主 agent 独占维护。subagent 可以读它了解全局，但不直接写入；自己的产出通过回传摘要交给主 agent 落库。
 - **性能口径统一**：凡涉及性能收益的结论，一律以 profile-analyzer 产出的分析报告为准，不拿裸 wall-clock 数字（infer 脚本打印、`time.perf_counter` 计时等）当判定依据。
 - **上下文读 progress.md，dispatch 不转述**：主 agent 的 dispatch 只给模板字段与路径，subagent 进场先读主 agent 传入的 `<progress_path>`（progress.md 共享状态文件，位置由主 agent 解析）取共享上下文（场景 / 精度口径 / baseline 瓶颈 / 已通过 Plan / 当前 round 目标），主 agent 不在 prompt 里复述这些。
-- **过程写 progress.md 工作区**：subagent 把当前 round 的实施步骤、踩坑、验证过程追加到 `progress.md` 工作区（跨 agent 共享，沿用本插件 `progress_template.md` 的工作区 / 归档约定），便于其它 agent 复用；只把结论性证据摘要回传主 agent 上浮 dashboard，把方案 spec 级结论落对应 `plan-<id>.md`。
+- **过程写 progress.md 工作区**：subagent 把当前 round 的实施步骤、踩坑、验证过程追加到 `progress.md` 工作区（跨 agent 共享，沿用本插件 `sota_progress_template.md` 的工作区 / 归档约定），便于其它 agent 复用；只把结论性证据摘要回传主 agent 上浮 dashboard，把方案 spec 级结论落对应 `plan-<id>.md`。
 
 ## scenario：构造推理输入并跑通精度基线
 
 ```text
-你是 model-infer-sota-approach 的 scenario subagent。
+你是 model-infer-optimize 的 scenario subagent。
 
 详细操作步骤见 `references/scenario-setup.md`，先读它再动手。
 
@@ -52,7 +52,7 @@
 baseline 和重采 round 的采集都用本模板（采集是非交互的），区别只在产物目录和场景上下文。分析（含 baseline）由 profile-analyzer subagent 另跑，与采集无关。
 
 ```text
-你是 model-infer-sota-approach 的 profiling-instrumenter subagent。
+你是 model-infer-optimize 的 profiling-instrumenter subagent。
 
 目标：
 - 为已跑通的推理场景插入或启用 profiling 采集。
@@ -86,7 +86,7 @@ baseline 和重采 round 的采集都用本模板（采集是非交互的），�
 baseline 与重采 round 都用本模板。perf-breakdown 需要用户敲定的拆解 spec 由主 agent 在派发前问好、随 prompt 传入，本 subagent 不与用户对话。baseline 轮用刚敲定的 spec、无前轮对照；重采轮复用 baseline spec 并与 baseline 做同口径对照得出 Δ%。
 
 ```text
-你是 model-infer-sota-approach 的 profile-analyzer subagent。
+你是 model-infer-optimize 的 profile-analyzer subagent。
 
 目标：
 - 用 model-infer-perf-breakdown 分析本轮 profiling，按主 agent 传入的拆解 spec 跑、不与用户对话。
@@ -118,7 +118,7 @@ baseline 与重采 round 都用本模板。perf-breakdown 需要用户敲定的�
 主 agent 为 SKILL §5 候选发现表的**每一行**拉一个 candidate subagent，都用这一个通用模板，按该行填占位符。候选来源只在 §5 表注册；加新来源 = §5 表加一行，本模板不变。
 
 ```text
-你是 model-infer-sota-approach 的 candidate subagent，负责「<source>」这一个候选来源（SKILL §5 候选发现表的对应行）。
+你是 model-infer-optimize 的 candidate subagent，负责「<source>」这一个候选来源（SKILL §5 候选发现表的对应行）。
 
 目标：
 - 按下面的方法从「<source>」这一个角度找候选，产出候选 Plan 草案。
@@ -144,7 +144,7 @@ baseline 与重采 round 都用本模板。perf-breakdown 需要用户敲定的�
 ## implementer：实施当前 Plan
 
 ```text
-你是 model-infer-sota-approach 的 implementer subagent。
+你是 model-infer-optimize 的 implementer subagent。
 
 目标：
 - 用当前 Plan 指定的单点 skill 实施该 Plan，只实施这一个 Plan，不顺手改其他 Plan。
@@ -194,7 +194,7 @@ baseline 与重采 round 都用本模板。perf-breakdown 需要用户敲定的�
 ## reviewer：检查并验收当前 Plan
 
 ```text
-你是 model-infer-sota-approach 的 reviewer subagent。
+你是 model-infer-optimize 的 reviewer subagent。
 
 目标：
 - 检查并验收 implementer 对当前 Plan 的工作，判断它是否真实生效、是否满足验收口径、应当通过还是淘汰。

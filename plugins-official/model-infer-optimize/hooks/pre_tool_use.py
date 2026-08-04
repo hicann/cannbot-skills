@@ -19,17 +19,27 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING, format="%(message)
 logger = logging.getLogger(__name__)
 
 # 保护模式：agent_type -> 不允许修改的文件模式列表
+# 只读模型代码与配置的 agent 共用一套：禁改 modeling/runner/yaml/executor，产物仅限 .md
+_READONLY_MODEL_PATTERNS = [
+    "modeling_*.py",
+    "runner_*.py",
+    "*.yaml",
+    "executor/*",
+]
+
 PROTECTED_PATTERNS = {
-    "model-infer-analyzer": [
-        "modeling_*.py",
-        "runner_*.py",
-        "*.yaml",
-        "executor/*",
-    ],
+    # 基础流程
+    "model-infer-analyzer": _READONLY_MODEL_PATTERNS,
     "model-infer-reviewer": [
         "modeling_*.py",
         "runner_*.py",
     ],
+    # 探索流程只读 agent（scenario/profile-analyzer/candidate/reviewer）：只读代码与配置
+    # profiling-instrumenter 需改 YAML 启用 profiling，implementer 为唯一写码方，均不纳入
+    "model-infer-sota-scenario": _READONLY_MODEL_PATTERNS,
+    "model-infer-sota-profile-analyzer": _READONLY_MODEL_PATTERNS,
+    "model-infer-sota-candidate": _READONLY_MODEL_PATTERNS,
+    "model-infer-sota-reviewer": _READONLY_MODEL_PATTERNS,
 }
 
 # 改代码前必读 progress.md 的文件模式

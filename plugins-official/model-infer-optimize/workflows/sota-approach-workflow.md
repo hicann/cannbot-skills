@@ -1,6 +1,6 @@
 # baseline 之上的探索式优化编排 · 工作流
 
-本工作流由 `model-infer-sota-approach` plugin 的 primary agent 在每次收到「baseline 之上的推理优化」请求时强制 Read，并严格按其推进。它在一个**已可运行、可复现精度的 baseline** 之上，由 profiling 数据驱动，在多个不确定方向上并行发现候选，再用 Plan 自循环（实施 → 复核 → 派生 → 淘汰）逐步逼近最优；primary 只编排不替工，具体优化下沉调用 `model-infer-*` 单点 skill。
+本工作流由 `model-infer-optimize` plugin 的 primary agent 在每次收到「baseline 之上的推理优化」请求时强制 Read，并严格按其推进。它在一个**已可运行、可复现精度的 baseline** 之上，由 profiling 数据驱动，在多个不确定方向上并行发现候选，再用 Plan 自循环（实施 → 复核 → 派生 → 淘汰）逐步逼近最优；primary 只编排不替工，具体优化下沉调用 `model-infer-*` 单点 skill。
 
 > 路径约定：本文档中 `cann-recipes-infer/...` 指 `init.sh` clone 到插件目录的参考仓；引用的模板见 `templates/`、操作细则见 `references/`。
 >
@@ -81,7 +81,7 @@ profiling 的采集与分析交给两个 skill，本流程只调用、不重复�
 - **subagent 配置继承主 agent**：所有 subagent 的 model、thinking、上下文强度等配置都与主 agent 一致，不降级、不缩短、不切配置。本约束对下文每一个 subagent 都生效，后续不再重复。
 - **主 agent 只编排不替工**：主 agent 负责阶段推进、一切用户交互（场景确认、perf-breakdown 拆解 spec 的提问等）、prompt 组装、Dashboard 维护和最终验收，不亲自下场跑采集 / 分析 / 实施。凡 subagent 因不能与用户对话而缺的交互，主 agent 在派发前先问好、把结果作为 spec 传下去；采集与分析（含第一次 baseline）都走 subagent。
 - **Dashboard 总览 + Plan 明细分离**：`plan-dashboard.md`（总览，约定路径 `optimization-analysis/<case>/plan-dashboard.md`）只放关键信息 + 状态 + 裁决，**只有主 agent 写**；每个 Plan 的完整记录（方案描述 / 方案细节 / 实施 / review / 派生）写在它自己的 `plans/plan-<id>.md`，由该 Plan 的 candidate / implementer / reviewer 产出，主 agent 不解析其结构、只把关键信息和状态镜像进 Dashboard 表。方向级分析另在 `analysis/<source>.md`。详见 [`templates/plan-dashboard-template.md`](templates/plan-dashboard-template.md) 的"分层与写者"。
-- **状态、过程、方案三处分工**：dashboard 只管**状态指示**（Plan 状态机、采纳实现、round 裁决），是 Plan 状态的单一真相源；项目级 `progress.md`（共享状态文件，路径由主 agent 解析、不在本流程钉死）承接**跨 agent 共享上下文 + subagent 实施 / 踩坑 / 验证过程**——常驻区放干活要读的上下文（场景与精度口径、baseline 瓶颈、已通过 Plan 速览、当前 round 目标，主 agent 维护），工作区由各 round 的 subagent 追加过程，其常驻区 / 工作区 / 归档（`progress_history.md`）与读写规则沿用本插件 `templates/progress_template.md` 约定的常驻区 / 工作区 / 归档结构、本流程不重复；`plans/plan-<id>.md` 装每个 Plan 的方案 spec 与 round 级结论摘要。三者互不复制：看状态查 dashboard、看过程与共享上下文查 progress.md、看单个 Plan 的方案查它的 plan 文件。progress.md 找得到就续写，找不到就用本插件 `templates/progress_template.md` 创建一份。dispatch prompt 只给模板字段与路径、**不转述上下文**，subagent 靠读 progress.md 取共享上下文。这套文件也是主 agent 跨上下文压缩重建状态的依据，关键节点即时回写、不攒到收尾。
+- **状态、过程、方案三处分工**：dashboard 只管**状态指示**（Plan 状态机、采纳实现、round 裁决），是 Plan 状态的单一真相源；项目级 `progress.md`（共享状态文件，路径由主 agent 解析、不在本流程钉死）承接**跨 agent 共享上下文 + subagent 实施 / 踩坑 / 验证过程**——常驻区放干活要读的上下文（场景与精度口径、baseline 瓶颈、已通过 Plan 速览、当前 round 目标，主 agent 维护），工作区由各 round 的 subagent 追加过程，其常驻区 / 工作区 / 归档（`progress_history.md`）与读写规则沿用本插件 `templates/sota_progress_template.md` 约定的常驻区 / 工作区 / 归档结构、本流程不重复；`plans/plan-<id>.md` 装每个 Plan 的方案 spec 与 round 级结论摘要。三者互不复制：看状态查 dashboard、看过程与共享上下文查 progress.md、看单个 Plan 的方案查它的 plan 文件。progress.md 找得到就续写，找不到就用本插件 `templates/sota_progress_template.md` 创建一份。dispatch prompt 只给模板字段与路径、**不转述上下文**，subagent 靠读 progress.md 取共享上下文。这套文件也是主 agent 跨上下文压缩重建状态的依据，关键节点即时回写、不攒到收尾。
 - **候选先发现，Dashboard 后初始化**：场景、精度、baseline profiling 和候选发现没全部完成前，不要初始化 Dashboard。
 - **性能证据统一口径**：一切性能收益判断都以 `profile-analyzer` 产出的分析报告为准，不拿裸 wall-clock 数字当结论依据。
 - **roundN 全局递增、不复用**：每一个 Plan、每一档强度、每一次尝试都用独立的全局递增 `roundN` 记录；派生出的 Plan 也分配新的 `roundN`，既不复用旧编号、也不与旧 round 合并。

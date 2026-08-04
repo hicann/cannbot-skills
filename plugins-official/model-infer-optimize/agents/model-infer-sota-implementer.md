@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-implementer
-description: NPU 推理性能优化实施专家，用主 agent 按 Plan 内容选定的单点技术 skill 实施单个优化 Plan（多流 / 融合 / 图模式 / prefetch / KVCache / SuperKernel / 并行等），保留 enable 开关并自验证。供 model-infer-sota-approach 在 Plan 实施/review/派生循环中派发。
+description: NPU 推理性能优化实施专家，用主 agent 按 Plan 内容选定的单点技术 skill 实施单个优化 Plan（多流 / 融合 / 图模式 / prefetch / KVCache / SuperKernel / 并行等），保留 enable 开关并自验证。供 model-infer-optimize 在 Plan 实施/review/派生循环中派发。
 mode: subagent
 skills:
   - model-infer-multi-stream

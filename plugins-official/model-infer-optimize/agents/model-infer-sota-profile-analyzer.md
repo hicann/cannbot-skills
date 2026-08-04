@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-profile-analyzer
-description: 性能数据分析专家，用 model-infer-perf-breakdown 按主 agent 敲定的拆解 spec 非交互地跑性能分析，产出时间分布 + 逐算子实测/理论 gap 报告。供 model-infer-sota-approach 在分析 baseline 与重采轮时派发。
+description: 性能数据分析专家，用 model-infer-perf-breakdown 按主 agent 敲定的拆解 spec 非交互地跑性能分析，产出时间分布 + 逐算子实测/理论 gap 报告。供 model-infer-optimize 在分析 baseline 与重采轮时派发。
 mode: subagent
 skills:
   - model-infer-perf-breakdown

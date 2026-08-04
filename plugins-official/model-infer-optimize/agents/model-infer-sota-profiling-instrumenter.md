@@ -1,6 +1,6 @@
 ---
 name: model-infer-sota-profiling-instrumenter
-description: NPU profiling 采集专家，用 model-infer-profiling 为已跑通的场景插桩/启用采集并产出 profile。非交互、可关闭回退，供 model-infer-sota-approach 在 baseline(round0) 与重采轮采集时派发。
+description: NPU profiling 采集专家，用 model-infer-profiling 为已跑通的场景插桩/启用采集并产出 profile。非交互、可关闭回退，供 model-infer-optimize 在 baseline(round0) 与重采轮采集时派发。
 mode: subagent
 skills:
   - model-infer-profiling

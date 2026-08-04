@@ -73,7 +73,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **TileLang** | DSL + `@tilelang.jit`，Developer/Expert 双模式 | [tilelang-op-orchestrator](plugins-official/tilelang-op-orchestrator/AGENTS.md) |
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | [triton-op-generator](plugins-official/triton-op-generator/AGENTS.md) |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile](plugins-official/torch-compile/AGENTS.md) |
-| **模型推理优化** | NPU 推理端到端优化 + baseline 之上探索式优化 | [model-infer-optimize](plugins-official/model-infer-optimize/AGENTS.md) / [model-infer-sota-approach](plugins-official/model-infer-sota-approach/AGENTS.md) |
+| **模型推理优化** | NPU 推理端到端优化 | [model-infer-optimize](plugins-official/model-infer-optimize/AGENTS.md) |
 | **Runtime** | Runtime 接口迁移 | — |
 | **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | — |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | — |

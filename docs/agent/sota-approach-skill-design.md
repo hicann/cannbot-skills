@@ -1,6 +1,6 @@
 # 模型推理极致性能优化技能设计文档（model-infer-sota-approach）
 
-本文档描述 `model-infer-sota-approach` 这一**模型推理极致性能优化技能**的设计。Skill 体系的通用约定（目录结构、SKILL.md 规范、命名规范、Hook 机制、贡献流程等）见 [STANDARDS.md](../STANDARDS.md)，本文档不重复，只聚焦本技能独有的编排架构、潜在优化项发现、Plan 自循环、分层状态管理与证据口径设计。
+本文档描述 `model-infer-optimize` plugin 中"baseline 之上探索式优化"探索流程的设计（工作流 `workflows/sota-approach-workflow.md`，subagent `model-infer-sota-*`）。Skill 体系的通用约定（目录结构、SKILL.md 规范、命名规范、Hook 机制、贡献流程等）见 [STANDARDS.md](../STANDARDS.md)。
 
 ## 1. 概述与定位
 
@@ -116,7 +116,7 @@ profiling 的采集与分析交给两个独立 skill，本流程只调用、不�
 | `implementer` | 用 Plan 指定的单点 skill 实施单个 Plan | 代码改动、`plan-<id>.md` 实施记录 | 代码 + progress.md + plan 文件 |
 | `reviewer` | 复核验收 implementer 的工作，判通过 / 淘汰 / 保持 | `plan-<id>.md` Review 记录 | progress.md + plan 文件（**禁改代码**） |
 
-所有 subagent 均为**非交互**：它们不与用户对话，所需的交互信息由主 agent 在派发前确认、随 prompt 传入。每次派发前，主 agent 从 [`references/subagent-prompt-templates.md`](../../plugins-official/model-infer-sota-approach/workflows/references/subagent-prompt-templates.md) 取对应模板、替换占位符。
+所有 subagent 均为**非交互**：它们不与用户对话，所需的交互信息由主 agent 在派发前确认、随 prompt 传入。每次派发前，主 agent 从 [`references/subagent-prompt-templates.md`](../../plugins-official/model-infer-optimize/workflows/references/subagent-prompt-templates.md) 取对应模板、替换占位符。
 
 ### 3.2 主 agent 作为唯一交互方
 
@@ -268,7 +268,7 @@ implementer、reviewer 和主 agent 都可以提议派生，最终由主 agent �
 
 ### 5.6 状态裁决规则
 
-每轮 implementer / reviewer 返回后，主 agent 按以下规则裁决（完整判据见 [`references/decision-rules.md`](../../plugins-official/model-infer-sota-approach/workflows/references/decision-rules.md)）：
+每轮 implementer / reviewer 返回后，主 agent 按以下规则裁决（完整判据见 [`references/decision-rules.md`](../../plugins-official/model-infer-optimize/workflows/references/decision-rules.md)）：
 
 - **判 `通过`**：reviewer 建议通过或主 agent 掌握更强证据；该 Plan 代码路径在确认场景里真正执行到；功能精度满足口径；目标指标达到保留标准（性能目标可选时也要说清保留价值）；enable 开关 / 回退路径清楚可用；不破坏已通过 Plan；互斥组内当前没有更优的已通过 Plan。
 - **判 `淘汰`**：reviewer 明确判失败（非"缺一次可补的验证"）；功能 / 精度 / 稳定性 / 编译出问题；无收益或收益低于噪声且无继续空间；引入明显副作用（拖累其他模块、内存暴涨、多出 shape/layout 转换、图模式退化）；与已通过 Plan 冲突且本身更弱；互斥组内已有更优 Plan。淘汰后必须记录三件事：淘汰证据、代码是否已回退或 enable 是否已关闭、是否由此派生新 Plan。
@@ -420,11 +420,11 @@ TF5. 汇总最终方案、淘汰原因与剩余风险
 
 ## 参考索引
 
-- **本技能定义**：[`plugins-official/model-infer-sota-approach/AGENTS.md`](../../plugins-official/model-infer-sota-approach/AGENTS.md)
-- **状态裁决与 round 推进规则**：[`references/decision-rules.md`](../../plugins-official/model-infer-sota-approach/workflows/references/decision-rules.md)
-- **Subagent prompt 模板**：[`references/subagent-prompt-templates.md`](../../plugins-official/model-infer-sota-approach/workflows/references/subagent-prompt-templates.md)
-- **场景确认操作细则**：[`references/scenario-confirm.md`](../../plugins-official/model-infer-sota-approach/workflows/references/scenario-confirm.md)
-- **scenario 操作细则**：[`references/scenario-setup.md`](../../plugins-official/model-infer-sota-approach/workflows/references/scenario-setup.md)
-- **Plan Dashboard 模板**：[`references/plan-dashboard-template.md`](../../plugins-official/model-infer-sota-approach/workflows/templates/plan-dashboard-template.md)
-- **Plan 文件模板**：[`references/plan-file-template.md`](../../plugins-official/model-infer-sota-approach/workflows/templates/plan-file-template.md)
+- **本技能定义**：[`plugins-official/model-infer-optimize/AGENTS.md`](../../plugins-official/model-infer-optimize/AGENTS.md)
+- **状态裁决与 round 推进规则**：[`references/decision-rules.md`](../../plugins-official/model-infer-optimize/workflows/references/decision-rules.md)
+- **Subagent prompt 模板**：[`references/subagent-prompt-templates.md`](../../plugins-official/model-infer-optimize/workflows/references/subagent-prompt-templates.md)
+- **场景确认操作细则**：[`references/scenario-confirm.md`](../../plugins-official/model-infer-optimize/workflows/references/scenario-confirm.md)
+- **scenario 操作细则**：[`references/scenario-setup.md`](../../plugins-official/model-infer-optimize/workflows/references/scenario-setup.md)
+- **Plan Dashboard 模板**：[`references/plan-dashboard-template.md`](../../plugins-official/model-infer-optimize/workflows/templates/plan-dashboard-template.md)
+- **Plan 文件模板**：[`references/plan-file-template.md`](../../plugins-official/model-infer-optimize/workflows/templates/plan-file-template.md)
 - **Skill 体系通用设计（目录结构 / 命名 / Hook / 贡献等）**：[STANDARDS.md](../STANDARDS.md)

@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "title": "端到端推理优化流程编排",
+      "title": "端到端推理优化流程编排（基础流程）",
       "config": {
         "max_tokens": 200000,
         "distractor_skills": [
@@ -15,8 +15,8 @@
         "timeout": 900,
         "eval_mode": "text"
       },
-      "prompt": "我想对一个 PyTorch LLM 在昇腾 NPU 上的离线推理做端到端性能优化。请描述完整的优化流程：分哪些阶段、每阶段做什么、各阶段如何衔接和验证。不需要立即动手，先给出整体方案。",
-      "expected_output": "回复应正确激活 model-infer-optimize 团队，基于 optimize-workflow 给出分阶段编排：\n1. 阶段 0：模型架构分析与基线采集，单卡可跑通后再优化\n2. 阶段 1：并行化改造（多卡部署时），确定 TP/EP/DP 后再做后续阶段\n3. 阶段 2：KVCache 静态化 + FlashAttention 算子替换\n4. 阶段 3：融合算子替换（Attention 子链路、MoE/FFN/Norm）\n5. 阶段 4：图模式适配（仅 Decode）\n6. 阶段 5：优化总结\n应说明每阶段遵循 分析→确认→实施→验证 流程，验证达标才进下一阶段，由 analyzer/implementer/reviewer 三类 subagent 分工执行",
+      "prompt": "我想对一个 PyTorch LLM 在昇腾 NPU 上的离线推理做端到端性能优化，模型还没跑通、也没有 baseline。请描述完整的优化流程：分哪些阶段、每阶段做什么、各阶段如何衔接和验证。不需要立即动手，先给出整体方案。",
+      "expected_output": "回复应给出从零优化的分阶段编排：阶段 0 模型分析与建立 baseline（单卡跑通后再优化），之后并行化 → KVCache/FA → 融合算子 → 图模式 → 优化总结；每阶段遵循 分析→确认→实施→验证、达标才进下一阶段，由 analyzer/implementer/reviewer 分工执行",
       "files": [],
       "expectations": [
         {
@@ -49,6 +49,82 @@
       },
       "prompt": "帮我对模型做端到端 NPU 推理优化。先告诉我你需要哪些信息，不要现在就开始改造。",
       "expected_output": "回复应在动手前先确认必要信息：模型工作目录、模型来源（HF 链接/本地权重/仓库内已有）、权重路径、部署卡数等，而不是在缺模型路径和部署配置的情况下直接开始改造",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "baseline 之上的探索式优化编排（探索流程）",
+      "config": {
+        "max_tokens": 200000,
+        "distractor_skills": [
+          "model-infer-multi-stream",
+          "model-infer-fusion",
+          "model-infer-profiling",
+          "model-infer-perf-breakdown"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我有一个已经能跑通、精度可复现的 PyTorch NPU 推理 baseline，想在它之上继续做 profiling 驱动的多方向性能优化。整体流程怎么编排？先给方案不用动手。",
+      "expected_output": "回复应给出 baseline 之上的探索式编排：确认场景与目标 → 跑通精度基线 → 采集 baseline profiling → 分析 → 多来源并行发现候选 → 初始化 Plan Dashboard → Plan 实施/review/派生循环 → 最终验收；强调 Plan/round 自循环、性能以 perf-breakdown 报告的 Δ% 为准、只编排不替工、具体优化下沉调用单点 skill。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "profiling",
+          "description": "回复中提到了 profiling"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "无 baseline 时的入口分流",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我的模型还没适配进推理框架、也没有 baseline，想在 baseline 之上做 profiling 驱动的探索式优化，能直接开始吗？只回答能不能并说明原因。",
+      "expected_output": "回复应说明探索流程的前置是已有可运行、可复现精度的 baseline，没有 baseline 时不能直接进探索式；入口会分流到基础流程（optimize-workflow 阶段 0：框架适配 + 建立 baseline）或 model-infer-migrator 先建立 baseline，再回到探索流程。两条流程以 baseline 为界、前后衔接。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "baseline",
+          "description": "回复中提到了 baseline"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "性能收益的判据",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "在探索式优化编排里，怎么判断某一轮改动到底有没有带来性能收益？只讲判据。",
+      "expected_output": "回复应说明性能收益一律以 profile-analyzer / model-infer-perf-breakdown 的分析报告（时间分布、与 baseline 的 Δ%）为判据，不以裸 wall-clock 计时下结论；必要时按同一场景、同一口径重采 profiling 再与 baseline 对照。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "Δ",
+          "description": "回复中提到了 Δ"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "已有 baseline 但方法不明确时先澄清",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我的模型已经有可运行、精度可复现的 baseline 了，帮我继续优化推理性能。",
+      "expected_output": "回复应识别已有 baseline 但优化方法未指明，此时固定阶段流程与探索式流程都可能命中，应先向用户澄清是按固定阶段系统优化（并行/KVCache/融合/量化/图模式逐项）还是在 baseline 之上做 profiling 驱动的探索式优化，据答案再分流，而不是擅自选路。",
       "files": [],
       "expectations": []
     }

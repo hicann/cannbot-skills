@@ -2,7 +2,12 @@
 
 ## 概述
 
-`model-infer-optimize` 是 NPU 模型推理端到端优化 plugin。它通过 `workflows/optimize-workflow.md` 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三类 Subagent，覆盖并行策略、KVCache/FA、融合算子、量化适配、图模式、多流并行、预取和 SuperKernel 等优化路径。
+`model-infer-optimize` 是 NPU 模型推理端到端优化 plugin，入口按意图分流两条互补流程：
+
+- **基础流程**：`workflows/optimize-workflow.md`，编排 `model-infer-analyzer` / `model-infer-implementer` / `model-infer-reviewer`，从零适配并按固定阶段（并行策略、KVCache/FA、融合算子、量化适配、图模式）优化到可运行 baseline。
+- **探索流程**：`workflows/sota-approach-workflow.md`，编排 `model-infer-sota-*` 六个 Subagent，在已有 baseline 之上由 profiling 驱动、多方向发现候选、Plan/round 自循环收敛，按需调用多流、预取、SuperKernel 等单点优化。
+
+无 baseline 走基础流程；已有 baseline 按"固定阶段 vs profiling 探索"分流，意图不明时先澄清。
 
 ## 一、环境搭建
 
@@ -25,7 +30,7 @@ bash init.sh global opencode    # 全局级
 
 ```bash
 opencode agent list
-# 应看到 model-infer-analyzer / model-infer-implementer / model-infer-reviewer
+# 应看到 9 个 agent：model-infer-analyzer / -implementer / -reviewer 及 6 个 model-infer-sota-*（scenario/profiling-instrumenter/profile-analyzer/candidate/implementer/reviewer）
 ```
 
 ### 其他工具
@@ -126,7 +131,7 @@ bash init.sh global codearts      # 全局级
 ```bash
 # OpenCode
 opencode agent list
-# 应看到 model-infer-analyzer / model-infer-implementer / model-infer-reviewer
+# 应看到 9 个 agent（3 基础 + 6 个 model-infer-sota-*）
 
 # Claude Code
 claude plugin list

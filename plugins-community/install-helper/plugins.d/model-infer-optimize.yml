@@ -1,17 +1,17 @@
 id: model-infer-optimize
 dir: plugins-official/model-infer-optimize
 displayName: NPU 推理优化
-aliases: [model-infer, infer, inference]
-skills: 12
-agents: 3
-description: NPU 模型推理端到端优化（并行/KVCache/融合/量化/图模式/多流/SuperKernel）
-version: "1.2.2"
+aliases: [model-infer, infer, inference, sota, sota-approach, model-infer-sota]
+skills: 14
+agents: 9
+description: NPU 模型推理端到端优化，涵盖固定阶段优化（并行/KVCache/融合/量化/图模式）与 baseline 之上 profiling 驱动的探索式优化（按需调用多流/预取/SuperKernel 等单点优化）
+version: "1.2.3"
 configFile: AGENTS.md
 configRootConfigLink: true
 installSkills:
   - dir: model
-    skills: [model-infer-migrator, model-infer-parallel-analysis, model-infer-parallel-impl, model-infer-kvcache, model-infer-fusion, model-infer-quantization, model-infer-graph-mode, model-infer-precision-debug, model-infer-runtime-debug, model-infer-multi-stream, model-infer-prefetch, model-infer-superkernel]
-installAgents: [model-infer-analyzer, model-infer-implementer, model-infer-reviewer]
+    skills: [model-infer-migrator, model-infer-parallel-analysis, model-infer-parallel-impl, model-infer-kvcache, model-infer-fusion, model-infer-quantization, model-infer-graph-mode, model-infer-precision-debug, model-infer-runtime-debug, model-infer-multi-stream, model-infer-prefetch, model-infer-superkernel, model-infer-profiling, model-infer-perf-breakdown]
+installAgents: [model-infer-analyzer, model-infer-implementer, model-infer-reviewer, model-infer-sota-scenario, model-infer-sota-profiling-instrumenter, model-infer-sota-profile-analyzer, model-infer-sota-candidate, model-infer-sota-implementer, model-infer-sota-reviewer]
 externalRepos:
   - url: https://gitcode.com/cann/cann-recipes-infer.git
     dir: plugins-official/model-infer-optimize/cann-recipes-infer
