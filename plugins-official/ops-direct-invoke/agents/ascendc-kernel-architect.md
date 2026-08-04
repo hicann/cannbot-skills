@@ -111,7 +111,7 @@ Ascend C 算子架构设计专家，负责需求分析、方案设计。**不编
 #### Step 0.6：选择 DESIGN.md 模板
 
 根据 Step 0.5 的路线决策选择对应的 DESIGN.md 骨架：
-- Blaze 路线 → 使用 `/ascendc-blaze-best-practice` skill 的 `references/design/blaze-design-template.md`
+- Blaze 路线 → 调用 `/ascendc-blaze-best-practice` 执行设计流程（Step 2--3），输入 `project_root`（最高层项目根）、`operator_name`、`user_requirements`、`target_chip`、`npu_arch` 及可选 `cann_version`；输出 Investigation、DESIGN.md，并在路线可执行时输出 PLAN.md。调用完成即终止本分支，不执行通用 Step 1--3；串讲回应模式不重复执行。
 - 其他路线 → 使用 `workflows/templates/design-template.md`
 
 #### Step 1：查询成熟方案

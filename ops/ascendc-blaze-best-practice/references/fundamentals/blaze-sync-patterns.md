@@ -193,7 +193,7 @@ for (uint64_t iter = 0; iter < totalIter; ++iter) {
 ### 4.4 epilogue 循环中的正确 barrier 位置
 
 ```cpp
-for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
+for (int64_t mOff = 0; mOff < localRows; mOff += stageRows) {
     // ── 反向 barrier：等上一轮 V 计算完成,
     // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
     WaitFlag<HardEvent::V_MTE2>(ZERO_FLAG);
@@ -550,7 +550,7 @@ WaitFlag<M_MTE1>(OFFSET + 0); WaitFlag<M_MTE1>(OFFSET + 1);
 ### 9.2 AIV Epilogue 同步模板
 
 ```cpp
-for (int64_t mOff = 0; mOff < halfM; mOff += stageRows) {
+for (int64_t mOff = 0; mOff < localRows; mOff += stageRows) {
     // ── 反向 barrier：等上一轮 V 计算完成,
     // 注意：首轮SetFlag需要在Init中预发射，此处伪代码虽不作展示，但不能遗漏！
     WaitFlag<HardEvent::V_MTE2>(ZERO_FLAG);

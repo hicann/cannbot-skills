@@ -1,92 +1,79 @@
 ---
 name: ascendc-blaze-best-practice
-description: Blaze/tensor_api 路径的 Matmul 类算子开发指南（Ascend 950 / DAV_3510）。覆盖框架认知、模板目录、开发指南和扩展开发。触发：在 A5 平台开发 matmul 类算子（普通 matmul、MX 量化 matmul、Grouped matmul）及 C+V 模式融合算子（上述三类 matmul + vector epilogue）时。不适用于纯 Vector 算子和 A2/A3 平台。
+description: 在 Ascend 950 / DAV_3510 平台上，基于 Blaze/tensor_api 开发 Basic、Batch、Grouped、Quantized、MX 等 MatMul 类算子或相关的融合算子时使用。不适用于纯 Vector 算子或 A2/A3 平台。
 ---
 
-# Blaze Matmul 算子开发指南
+# Blaze MatMul 算子开发指南
 
-## 外部依赖
+## 路径与文档合同
 
-本 skill 依赖 ops-tensor 仓提供的 **blaze 库**、**tensor_api 库** 和 **官方文档**。
+将 `<project-root>` 解释为最高层项目根，将 `<operator_name>` 解释为 `operators/` 下的算子目录名：
 
-- **仓库**：[gitcode.com/cann/ops-tensor](https://gitcode.com/cann/ops-tensor)
-- **适用平台**：DAV_3510 / Ascend 950
-- **编码规范**：[ops-tensor/CODING_CONVENTIONS.md](https://gitcode.com/cann/ops-tensor/blob/master/CODING_CONVENTIONS.md)
+```text
+project_root: <project-root>
+operators_root: <project-root>/operators/
+operator_root: <project-root>/operators/<operator_name>/
+blaze_source_root: <project-root>/ops-tensor/
+investigation_report: operators/<operator_name>/docs/blaze/blaze-investigation-report.md
+design_path: operators/<operator_name>/docs/DESIGN.md
+plan_path: operators/<operator_name>/docs/PLAN.md
+```
 
-Blaze 库模块文档查阅：`ops-tensor/docs/API/` → [blaze-modules-index.md](references/modules/blaze-library/blaze-modules-index.md)
+只把 `<project-root>/ops-tensor/` 作为 Blaze 源码事实根；它与 `<project-root>/operators/` 同级。不得回退读取算子目录内、其他项目或历史工程的 ops-tensor。`project_contract_id` 是逻辑合同 ID，不是路径变量。
 
-## Blaze 及 Tensor API 简介
+统一使用以下模板；本文中的 DESIGN、PLAN 分别指其生成的 `DESIGN.md`、`PLAN.md`：
 
-**Blaze** 是构建在 Tensor API 之上的 header-only C++ 模板库，为 Ascend NPU Cube Core 上的矩阵乘法提供可组合的高层抽象。**Tensor API** 是 Blaze 的底层依赖，封装了 AscendC 原语，提供张量抽象、Layout 推导和 Copy/Mmad 算法接口。
+- [Blaze DESIGN 模板](references/kernel-design/blaze-design-template.md)
+- [Blaze PLAN 模板](references/kernel-design/blaze-plan-template.md)
 
-核心设计理念：
+Blaze skill 不读取或依赖 `environment.md`、外部 manifest 或其他工作流产物。调用方可以直接传入已经确认的 `target_chip`、`npu_arch` 和可选 `cann_version`。
 
-- **三层抽象栈**：AscendC 原语（硬件指令）→ Tensor API（张量抽象 + Layout 推导）→ Blaze（完整 Kernel 实现）
-- **Pattern 驱动派发**：Layout Pattern 作为编译时标签，驱动 Copy/Mmad 的 Routing 表自动选择正确的硬件指令路径
-- **组装式开发**：选择 Kernel + BlockMmad + Scheduler + Epilogue 四个组件，通过模板参数组合实现算子
-- **默认库路径**：普通 MatMul 单算子和 MX 量化 MatMul 默认使用 blaze library（`Blaze::Gemm`）；Grouped MatMul、普通 C+V 融合和自定义扩展场景使用 blaze_custom；MX C+V 融合使用 `MxMatmulKernelFused` 受控组合态
+## 按请求目的路由
 
-完整的 NPU 执行模型、Tensor API 核心概念、Blaze 五层架构和路径选择决策，详见 [Blaze 框架总览](references/fundamentals/blaze-framework-overview.md)。
+| 请求目的 | 执行 |
+|---|---|
+| 明确要求“开发算子”或等价的从零完整开发 | Step 1 → Step 2 → Step 3 → Step 4 |
+| 明确要求算子设计、方案分析并输出设计文档 | Step 2 → Step 3 |
+| 咨询、解释、评审、排障、能力查询 | 只读取相关 references |
 
-## 开发路径
+不要按调用者身份增加模式。不要因发现已有 DESIGN/PLAN 而单独进入 Step 4；direct invoke Developer 直接消费相同 DESIGN/PLAN，Blaze Step 4 只属于本 skill 的完整四步开发流程。
 
-基于 Blaze 开发 matmul 类算子，遵循三步主流程：
+## 四步流程
 
-### Step 1: 工程初始化
+### Step 1: Project Setup
 
-拉取 blaze 库、tensor_api，搭建工程目录与 CMake 配置；Grouped MatMul、C+V 融合或自定义扩展场景需要额外拷贝 blaze_custom 模块。MX C+V 融合同时依赖 blaze library 的 MX Block/Scheduler 与 blaze_custom 的 bridge Kernel/Epilogue。
-→ [Step 1: 工程初始化](references/development/step1-setup.md)
+创建 `operator_root`，在 `blaze_source_root` clone 或更新授权 ops-tensor，递归初始化 submodule，确认抽象版本一致性，并建立根源码、项目 Blaze 副本、项目 tensor_api 副本三个只读区。不要预先实现公式、Tiling、Golden、固定工程或场景 recipe。
 
-### Step 2: 定义 Kernel
+→ [Step 1: Project Setup](references/workflow/step1-project-setup.md)
 
-设计 kernel 入口函数签名，选择并组装 Kernel/BlockMmad/Scheduler/Policy 组件，定义 TilingData 结构体，编写 SWAT tiling 引擎。
-→ 总纲：[Step 2: Kernel 设计总纲](references/development/step2-kernel-design.md)
-→ Tiling 选择：[Blaze Tiling 选择指南](references/tiling/tiling-selection.md)
-→ 按场景查阅组装指南：
+### Step 2: Blaze Investigation
 
-| 场景 | 文档 |
-|------|------|
-| 基础 MatMul | [基础 MatMul 开发](references/scenarios/basic-matmul-development.md) |
-| A8W8 量化 MatMul | [A8W8 量化 MatMul 开发](references/scenarios/a8w8-quant-matmul-development.md) |
-| MX 量化 MatMul | [MX 量化 MatMul 开发](references/scenarios/mx-matmul-development.md) |
-| Grouped MatMul | [Grouped MatMul 开发](references/scenarios/group-matmul-development.md) |
-| CV 融合（matmul + epilogue） | [CV 融合 MatMul 开发](references/scenarios/fusion-matmul-development.md) |
+从 `project_root` 和 `operator_name` 派生路径并只读自检当前 `blaze_source_root`；不要依赖 Step 1 文件产物，不要 clone、更新、切换源码或读取场景资料。按需求语义调查候选 Blaze 组装方案、物理数据和 ABI 事实，只生成 Investigation。
 
-→ 组装时查阅模块说明：`references/modules/` 目录
+→ [Step 2: Blaze Investigation](references/workflow/step2-blaze-investigation.md)
 
-### Step 3: 编写 Launcher
+### Step 3: Kernel Design
 
-编写 host 端 C++ 入口：ACL 会话、内存管理、文件 I/O、layout dispatch、kernel launch。
-→ [Step 3: 编写 Launcher](references/development/step3-launcher.md)
+依据需求和 Investigation 完成逻辑接口、Blaze 官方方案、必要的唯一 custom 场景、最终 ABI/资源/验证合同，并用统一模板生成 DESIGN 和可执行路线的 PLAN。`unsupported` 只生成 DESIGN；一次补充调查后仍缺决定性事实时不生成最终 DESIGN/PLAN。
 
-## Blaze Custom 扩展开发
+→ [Step 3: Kernel Design](references/workflow/step3-kernel-design.md)
 
-当现有模块无法满足需求时，按层扩展：
+### Step 4: Implementation
 
-| 扩展层 | 文档 |
-|--------|------|
-| Kernel 层 | [Kernel 层扩展](references/modules/blaze-custom/development/kernel-dev-guide.md) |
-| Block 层 | [Block 层扩展](references/modules/blaze-custom/development/block-dev-guide.md) |
-| Scheduler 层 | [Scheduler 层扩展](references/modules/blaze-custom/development/scheduler-dev-guide.md) |
-| Epilogue 层 | [Epilogue 层扩展](references/modules/blaze-custom/development/epilogue-dev-guide.md) |
-| MemBase Epilogue | [MemBase Epilogue 设计](references/modules/blaze-custom/development/epilogue-membase-design.md) |
-| RegBase Epilogue | [RegBase Epilogue 设计](references/modules/blaze-custom/development/epilogue-regbase-design.md) |
+只在完整四步流程中执行当前 `operator_root` 的 DESIGN/PLAN。核对联合门禁，按冻结的第 9、10 章执行；持续更新 PLAN 第 2、4--8 章并只追加第 11 章。不得重新匹配场景、选择路线/候选、改变接口/ABI、切换备选或扩大支持域。
 
-## 参考手册
+→ [Step 4: Implementation](references/workflow/step4-operator-development.md)
 
-| 文档 | 用途 |
-|------|------|
-| [Blaze 框架总览](references/fundamentals/blaze-framework-overview.md) | 框架认知：NPU 模型、三层抽象栈 |
-| [Tensor API 参考](references/fundamentals/tensor-api-reference.md) | tensor_api API 签名、Routing 表 |
-| [Blaze 同步模式](references/fundamentals/blaze-sync-patterns.md) | 同步编码：HardEvent、CrossCore |
-| [Blaze MatMul Layout](references/fundamentals/blaze-matmul-layout.md) | Layout 格式：ND/NZ/ZN、LayoutPtn |
-| [Blaze Tiling 选择指南](references/tiling/tiling-selection.md) | Blaze 路径下选择 SWAT tiling engine 的入口 |
-| [Blaze 设计文档模板](references/design/blaze-design-template.md) | Blaze 路线算子 DESIGN.md 骨架（Architect 填充） |
+## 路线模型
 
-## 约束
+```text
+implementation_route: blaze_native | blaze_custom | unsupported
+selected_scenario: <仅 blaze_custom 填写>
+unsupported_points: <仅 unsupported 填写>
+```
 
-- **禁止猜测 API 签名**：必须以 ops-tensor 源码或 [Tensor API 参考](references/fundamentals/tensor-api-reference.md) 为准
-- **模板选择必须说明理由**：引用场景文档中的组件选择表
-- **默认禁止任意混用 blaze 库和 blaze_custom 库**：普通 MatMul 单算子与纯 MX 量化 MatMul 均走 blaze library；普通 C+V 和 Grouped C+V 走 blaze_custom。唯一受控例外是 MX C+V 融合路径 `Kernel::MxMatmulKernelFused`，它专门桥接 blaze library MX Block/Scheduler 与自定义 Epilogue（详见 [Step 2](references/development/step2-kernel-design.md) §2）
-- **默认只提供 SWAT tiling**：本 skill 的 `assets/op_tiling/` 仅维护普通 matmul SWAT 和 MX SWAT 两类 tiling；Grouped 场景复用对应非 grouped tiling
-- **伪代码不等于可编译实现**：写代码时参考场景文档中的完整组装代码
+只在 Step 3 决定项目路线。官方 Blaze 覆盖全部 required partitions 时选择 `blaze_native` 且不读取场景注册表；存在证据闭合的 native gap 且场景唯一命中时选择 `blaze_custom`；证据充分且场景零命中或多命中时选择 `unsupported`。
+
+## 扩展场景适配指导
+
+仅在维护本 skill 的扩展能力时读取[场景接入指导](references/scenarios/scenario-extension-guide.md)。在 `references/scenarios/<scenario-id>/` 内维护场景设计和开发资料，并完成索引注册、源码前提、DESIGN/PLAN 合同和唯一匹配约束；普通算子流程不自动读取其他场景。

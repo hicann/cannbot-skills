@@ -204,10 +204,10 @@ Blaze 是 header-only C++ 模板库（命名空间 `Blaze::Gemm`），构建在 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Kernel 层：GemmUniversal / MatmulKernel / ...           │
+│  Kernel层：GemmUniversal / MatmulKernel / ...            │
 │  最外层入口，SFINAE 按 ScheduleType 选择偏特化            │
 ├─────────────────────────────────────────────────────────┤
-│  Block 层：BlockMmad + BlockScheduler + BlockEpilogue    │
+│  Block层：BlockMmad + BlockScheduler + BlockEpilogue     │
 │  BlockMmad：单 tile 的 K 迭代 + 双缓冲 + 事件同步         │
 │  BlockScheduler：tile 到核的映射（蛇形遍历、尾块处理）     │
 │  BlockEpilogue：后处理（空操作等）                         │
@@ -218,7 +218,7 @@ Blaze 是 header-only C++ 模板库（命名空间 `Blaze::Gemm`），构建在 
 │  Tile 层：底层搬运/转换原语                               │
 │  pad_mx_kl1、shift_w4_to_w8、copy_gm_to_ub 等           │
 ├─────────────────────────────────────────────────────────┤
-│  Epilogue 层：后处理融合                                   │
+│  Epilogue层：后处理融合                                    │
 │  RegBase（__VEC_SCOPE__ + Reg:: API）/ MemBase（AscendC）│
 └─────────────────────────────────────────────────────────┘
 ```
@@ -226,6 +226,10 @@ Blaze 是 header-only C++ 模板库（命名空间 `Blaze::Gemm`），构建在 
 ### 4.2 DispatchPolicy 路由
 
 DispatchPolicy 是编译时标签，驱动 SFINAE 选择正确的 GemmUniversal 和 BlockMmad 偏特化：
+
+下面的类型名只是源码中用于说明“策略标签如何映射到 ScheduleType”的示意。它们不是
+Blaze skill 的固定候选清单，也不能脱离当前 Investigation 报告直接写入 DESIGN；具体
+候选组装方案必须绑定同一真实入口、同一需求分区和当前 Blaze 源码版本中观察到的 concrete witness。
 
 ```cpp
 // Policy 定义
@@ -282,13 +286,13 @@ struct BlockMmad;
 
 | 算子类型 | 推荐路径 | 理由 |
 |---------|---------|------|
-| 普通 MatMul 单算子（fp16/bf16/fp32） | **路径 B**：blaze 库直接组装 | `KernelMatmulBasic + BlockMmadMatmulBasic + BlockSchedulerMatmulBasic + BlockEpilogueEmpty` 已覆盖常规单算子场景 |
-| MX 量化 matmul（fp8/fp4） | **路径 B**：blaze 库直接组装 | blaze 已封装 Scale 反量化、fp4 shift、K-padding 等复杂逻辑 |
-| A8W8 量化 matmul | **路径 B**：blaze 库直接组装 | blaze 已封装 Fixpipe 反量化路径 |
-| matmul + vector epilogue 融合 | **路径 A**：自定义 | AIC/AIV 混合核 + CrossCore 同步 + 自定义 Epilogue |
-| Grouped matmul | **路径 A**：自定义 | 需要 GroupScheduler + per-group 迭代逻辑 |
+| 普通 MatMul/量化 MatMul | 读取当前 Blaze Investigation 报告后选择 Blaze 官方库组件 | 以当前完整 Blaze 组装方案、dtype/layout 和 Tiling 合同为准；官方能力缺失时输出 `unsupported + blocking`，不以 custom fallback 替代 |
+| matmul + vector epilogue 融合 | 读取当前 MatMul + Vector Epilogue 契约后选择官方、bridge 或 custom 路径 | 必须确认 L0C2UB、最终 MatMul 输出、同步、UB 和 Epilogue 契约 |
+| Grouped/Batch 等 MatMul 需求维度 | 读取当前 Investigation 的 exact Blaze 组装方案证据后设计 | 不得从普通 MatMul 组件名称推导兼容性 |
 
-### 5.2 路径 A：自定义（tensor_api + 手写 kernel/block）
+### 5.2 路径 A：定制场景授权的 custom 组件（tensor_api + 手写 kernel/block）
+
+本路径只有唯一注册的 `blaze_custom` 场景且 DESIGN 明确授权时可用。纯 MatMul（包括 Grouped、Batch、Quantized、MX）不得用本路径填补官方能力缺口。
 
 ```
 Launcher (.cpp)
@@ -298,26 +302,27 @@ Launcher (.cpp)
   ├── 调用 Tiling 引擎 → 填充 Params
   └── kernel<<<usedCoreNum>>>(params)
 
-组件来源：matmul_blaze_template（include/kernel/, include/block/, include/policy/）
-依赖：仅 tensor_api（third_party/tensor_api/）
+组件来源：以当前 Blaze Investigation 报告中解析出的组件路径为准
+依赖：以当前 Blaze 组装方案的 Tensor API trace 和构建条件为准
 ```
 
-### 5.3 路径 B：blaze 库直接组装
+### 5.3 路径 B：Blaze 官方库直接组装
 
 ```
 Launcher (.cpp)
-  ├── 选择 blaze DispatchPolicy（普通 MatMul 用 MatmulMultiBlockBasic，MX 量化用 MatmulWithScaleMx）
+  ├── 选择 Investigation 报告绑定的 concrete DispatchPolicy
   ├── 实例化：Blaze::Gemm::Block::BlockMmad<DispatchPolicy, ...>
   ├── 实例化：Blaze::Gemm::Kernel::GemmUniversal<ProblemShape, BlockMmad, BlockEpilogue, BlockScheduler>
   ├── 调用 Tiling 引擎 → 填充 Params
   └── kernel<<<usedCoreNum>>>(params)
 
-组件来源：ops-tensor 仓（include/blaze/）
-依赖：tensor_api + blaze（third_party/tensor_api/ + third_party/blaze/）
+组件来源：当前 `ops-tensor` Blaze 源码工作区的 `include/blaze/`
+依赖：当前 Blaze 组装方案绑定的 Tensor API 和构建条件
 ```
 
-各路径的完整端到端组装代码，详见 `blaze-matmul-assembly.md`。
-可用模板的完整清单和场景推荐，详见 `blaze-template-catalog.md`。
+完整 Blaze 组装方案、Params、Tiling 和当前约束请读取本次生成的
+`docs/blaze/blaze-investigation-report.md`。本文件只解释框架模型，不维护
+具体时间点的组件清单。
 
 ---
 

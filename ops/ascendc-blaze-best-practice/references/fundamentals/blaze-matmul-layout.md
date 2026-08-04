@@ -33,8 +33,7 @@ NZ 是一种分形存储格式。对原始 tensor `(dim0, dim1)` ND 排布，NZ 
 
 ## 2. 数据生成流程
 
-随机数据生成固定以数学描述 A(M,K)、B(K,N) 生成，golden 计算固定为 A @ B。
-数据生成后分两路：一路计算 golden 保存为 bin，另一路按 kernel 入参要求对 A、B 各自独立做转换后保存为 bin。
+`scripts/gen_data.py` 使用固定 seed，以数学描述 A(M,K)、B(K,N) 生成逻辑输入，普通 MatMul 的 Golden 固定为 A @ B。生成后立即分两路：一路从未做设备转换的逻辑输入计算 Golden 并写入 `data/golden/golden.bin`，另一路只对独立副本按 Kernel 入参要求转换并写入 `data/input/`。禁止从 transpose、NZ 或打包后的设备物理字节反推 Golden。
 
 ```mermaid
 flowchart TD
@@ -82,7 +81,10 @@ def to_nz_format(data, c0):
 **gen_data 范例**
 
 ```python
-def gen_data(m, k, n, dtype=torch.int8, trans_a=False, trans_b=False, a_format="nd", b_format="nd"):
+from pathlib import Path
+
+def gen_data(m, k, n, data_dir, dtype=torch.int8, trans_a=False, trans_b=False, a_format="nd", b_format="nd"):
+    torch.manual_seed(0)
     C0 = 32 // torch.tensor([], dtype=dtype).element_size()  # 动态计算 C0
 
     # 生成原始数据（固定 shape）
@@ -95,6 +97,11 @@ def gen_data(m, k, n, dtype=torch.int8, trans_a=False, trans_b=False, a_format="
 
     # golden 计算（固定 A @ B）
     golden = (A.float() @ B.float()).to(torch.bfloat16)
+
+    # 先保存独立 CPU Golden，再转换 A/B 的副本
+    golden_dir = Path(data_dir) / "golden"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    golden.view(torch.uint16).cpu().numpy().tofile(golden_dir / "golden.bin")
 
     # 按 kernel 需求转换 A（先 transpose，再 to_nz_format）
     if trans_a:
@@ -115,6 +122,11 @@ def gen_data(m, k, n, dtype=torch.int8, trans_a=False, trans_b=False, a_format="
         B_bin = to_nz_format(B_for_kernel, C0)
     else:
         B_bin = B_for_kernel
+
+    input_dir = Path(data_dir) / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    A_bin.cpu().numpy().tofile(input_dir / "input_a.bin")
+    B_bin.cpu().numpy().tofile(input_dir / "input_b.bin")
 ```
 
 ## 3. LayoutPtn 选择
@@ -205,21 +217,21 @@ return dim1Blocks * dim0Blocks * 16 * c0 * sizeof(dtype);
 
 **适配点 1 — `layout_utils.h`**：新增 NZ 的 `TagToTrans` 特化（`NZLayoutPtn` 和 `ZNLayoutPtn` 各一个）+ `IsNzOrZn` 检测 + `L1LayoutHelper` 辅助模板。
 
-**适配点 2 — `matmul_kernel.h` / `matmul_kernel_fused.h`**：GM 端 layout 构造必须使用正确的 C0（详见 §5）。
+**适配点 2 — Kernel 入口与 Fused Kernel**：GM 端 layout 构造必须使用正确的 C0（详见 §5）；纯 MatMul 使用 Investigation 报告绑定的官方 Kernel，定制场景只有在 DESIGN 授权时才使用 custom Kernel。
 
-**适配点 3 — `matmul_block_mmad.h`**：`MakeLayoutAL1` / `MakeLayoutBL1` 改用 `L1LayoutHelper`（详见 §4）。
+**适配点 3 — BlockMmad**：`MakeLayoutAL1` / `MakeLayoutBL1` 改用 `L1LayoutHelper`（详见 §4）；elementwise/broadcast Epilogue 需要 L0C2UB 适配时，按 [场景 Block专题](../scenarios/elementwise-broadcast-epilogue-fusion/block-l0c2ub-extension.md) 和当前 DESIGN 合同执行。
 
-**适配点 4 — `matmul_kernel.h`**：Slice 顺序——kernel 层做 M/N-slice（保留 fullK stride），block 层只做 K-slice：
+**适配点 4 — `matmul_kernel.h`**：Slice 顺序——Kernel层做 M/N-slice（保留 fullK stride），Block层只做 K-slice：
 
 ```cpp
-// Kernel 层：N-slice（保留 fullK stride，NZ column stride 依赖 fullK）
+// Kernel层：N-slice（保留 fullK stride，NZ column stride 依赖 fullK）
 auto gmBlockB = gmB.Slice(Coord(0, nPos), Shape(fullK, tileN));
-// Block 层：K-slice（gmBlockB 已经是 N-tile 大小）
+// Block层：K-slice（gmBlockB 已经是 N-tile 大小）
 auto gmTileB = gmB.Slice(Coord(kL1Offset, 0), Shape(curKL1, curN));
 ```
 
 > **关键**：NZ 的 column stride = `C0 × ceil_align(K, 16)`，依赖 fullK。
-> Slice 保留父 tensor 的 stride 不重算。如果 block 层同时切 K+N，
+> Slice 保留父 tensor 的 stride 不重算。如果 Block层同时切 K+N，
 > `CopyGmToCbufAlignV2NZ` 用 sliced K 计算 `smallFractalSize`，但 stride 基于 fullK → 地址错位。
 
 **适配点 5 — Launcher**：按 transA/transB + format 分发 LayoutPtn：
@@ -237,7 +249,7 @@ auto gmTileB = gmB.Slice(Coord(kL1Offset, 0), Shape(curKL1, curN));
 |------|------|
 | ≈100% mismatch，仅 transA/B 某方向触发 | launcher 里 layout 硬编码未跟 trans 标志同步 |
 | B-NZ 路径全错 | 数据生成未按 trans + format 规则转换（trans=true 时未做 transpose，format=nz 时未调 `to_nz_format`）；或 transpose 顺序错误（必须先 transpose 再 to_nz_format）；或 baseN 未 C0 对齐；或 `TagToTrans<NZLayoutPtn>` / `TagToTrans<ZNLayoutPtn>` 漏特化；或 c0 参数未按 dtype 传入 |
-| NZ 输入 K≤16 PASS，K>16 + 多 N/M-tile FAIL | Slice 顺序错误——block 层同时切 K+N（或 K+M）导致 NZ column stride 不匹配。kernel 层必须先做 N/M-slice（保留 fullK stride），block 层只做 K-slice |
+| NZ 输入 K≤16 PASS，K>16 + 多 N/M-tile FAIL | Slice 顺序错误——Block层同时切 K+N（或 K+M）导致 NZ column stride 不匹配。Kernel层必须先做 N/M-slice（保留 fullK stride），Block层只做 K-slice |
 | NZ 输入全 FAIL（所有 shape） | 数据生成 NZ 排列顺序错误——应为 `permute(2,0,1,3)` 产出 `(dim1/C0, dim0/16, 16, C0)`，而非 `permute(0,2,1,3)` |
 | NZ 输入多 tile FAIL，单 tile PASS | GM 端 `FrameLayoutFormat<NZLayoutPtn>` 使用默认 C0=16，但 int8/fp8 需要 C0=32。修复：`FrameLayoutFormat<NZLayoutPtn, Std::Int<32/sizeof(Type)>>` |
 | NZ 输入文件大小不匹配 | Host 侧 sizeA/sizeB 按逻辑维度计算，应按 NZ 物理维度 `CalcNzSize(dim0, dim1, c0)` 计算 |

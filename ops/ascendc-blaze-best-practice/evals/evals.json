@@ -1,25 +1,42 @@
 {
+  "skill_name": "ascendc-blaze-best-practice",
   "eval_mode": "text",
   "evals": [
     {
       "id": 1,
-      "title": "Matmul Blaze 三模板选型",
+      "title": "Blaze Skill 触发与适用边界",
       "config": {
         "max_tokens": 200000,
-        "max_tokens_by_model": {
-          "deepseek-v4-flash": 200000,
-          "glm-5": 200000
-        },
         "ascend_platforms": [
-          "A2"
+          "A5"
         ],
         "eval_mode": "text"
       },
-      "prompt": "在 Ascend C Matmul 单算子开发中，Blaze 路径提供了三种模板选项：纯AIC、StreamK、FixpOpti。请介绍这三种模板各自的特点和适用场景。在实际项目中选择时应该考虑哪些因素？可以加载技能，不需要执行其他外部工具调用。",
-      "expected_output": "回复应对比纯AIC、StreamK 和 FixpOpti 三种 Blaze 模板的适用场景和特点，帮助开发者根据算子特征选择合适的模板。",
+      "prompt": "这是 text-only 评测，不要执行外部工具或访问文件系统。我需要判断一个算子开发需求是否适合使用 Blaze MatMul 开发指南：需求一是在 Ascend 950 / DAV_3510 上开发 Basic、Batch、Grouped、Quantized 或 MX MatMul，或在 MatMul 最终输出后接 Vector Epilogue；需求二是在 A2 或 A3 平台开发 MatMul；需求三是在 DAV_3510 上开发纯 Vector 算子。请分别判断这些需求是否在该 Skill 的适用范围内，并说明判断依据。",
+      "expected_output": "回复应正确激活 ascendc-blaze-best-practice，并明确说明：Ascend 950 / DAV_3510 上的 Basic、Batch、Grouped、Quantized、MX MatMul 及 MatMul 后接 Vector Epilogue 属于适用范围；A2/A3 平台和纯 Vector 算子不属于适用范围。回复不得把该 Skill 描述为旧的三模板选型指南。",
       "files": [],
-      "expectations": []
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "Ascend 950"
+        },
+        {
+          "type": "contains",
+          "pattern": "DAV_3510"
+        },
+        {
+          "type": "contains",
+          "pattern": "A2"
+        },
+        {
+          "type": "contains",
+          "pattern": "A3"
+        },
+        {
+          "type": "contains",
+          "pattern": "Vector"
+        }
+      ]
     }
-  ],
-  "skill_name": "ascendc-blaze-best-practice"
+  ]
 }

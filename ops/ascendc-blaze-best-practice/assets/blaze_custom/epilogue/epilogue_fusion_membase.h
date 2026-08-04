@@ -20,6 +20,7 @@
 
 #include "epilogue/cv_sync_constants.h"
 #include "../utils/common_utils.h"
+#include "include/tensor_api/tensor.h"
 
 using namespace AscendC;
 
@@ -35,9 +36,11 @@ using namespace AscendC;
 // 计算段只保留 [USER COMPUTE] 骨架，开发者替换为具体 AscendC API 调用。
 // ============================================================================
 
+template <typename L0CDataType_ = float>
 class MulEpilogue {
 public:
-    using DataType = float;
+    using L0CDataType = L0CDataType_;
+    using DataType = L0CDataType;
 
     static constexpr uint16_t ZERO_FLAG = 0;
 
@@ -58,11 +61,13 @@ public:
 
     int64_t stageRows_{0};
     int64_t nAlignL0C_{0};
+    bool valid_{false};
     ProblemShape problemShape_;
 
     __aicore__ inline void Init(
         Params const& params, int64_t baseM, int64_t baseN, ProblemShape& problemShape)
     {
+        valid_ = false;
         // nAlign: UB 行对齐宽度（32B / sizeof(DataType) 元素一组）
         nAlignL0C_ = ::CeilDiv(baseN, ALIGN_ELEM) * ALIGN_ELEM;
 
@@ -77,13 +82,15 @@ public:
         int64_t stagePerRowBytes = nAlignL0C_ * sizeof(DataType) * 2;  // dLocal_ + cLocalTmp_
         stageRows_ = remainBytes / stagePerRowBytes;
         if (stageRows_ <= 0) {
-            stageRows_ = 1;
+            stageRows_ = 0;
+            return;
         }
 
         int64_t ubOffset = matmulArea;
         dLocal_ = cLocal_[ubOffset];
-        ubOffset += stageRows_;
+        ubOffset += stageRows_ * nAlignL0C_;
         cLocalTmp_ = cLocal_[ubOffset];
+        valid_ = true;
 
         problemShape_ = problemShape;
         outputGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ DataType*>(params.outputGmAddr));
@@ -94,7 +101,18 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }
 
-    __aicore__ inline auto GetTensor() { return cLocal_; }
+    __aicore__ inline auto GetTensor(int64_t curM, int64_t curN)
+    {
+        constexpr int64_t ubAlign = 32 / sizeof(L0CDataType);
+        int64_t curNUbAlign = ::CeilDiv(curN, ubAlign) * ubAlign;
+        int64_t curMPad = (curM + 1) & ~1L;
+        auto layoutUB = AscendC::Te::MakeFrameLayout<
+            AscendC::Te::NDExtLayoutPtn, AscendC::Std::Int<16>>(curMPad, curNUbAlign);
+        return AscendC::Te::MakeTensor(
+            AscendC::Te::MakeMemPtr<AscendC::Te::Location::UB, L0CDataType>(0), layoutUB);
+    }
+
+    __aicore__ inline bool IsValid() const { return valid_; }
 
     __aicore__ inline void operator()(
         BlockShape const& blockShape, int64_t dstOffset, int64_t flagId = CvSync::AIV_TO_AIC_FLAG)
@@ -177,6 +195,9 @@ public:
 
     __aicore__ ~MulEpilogue()
     {
+        if (!valid_) {
+            return;
+        }
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(ZERO_FLAG);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }

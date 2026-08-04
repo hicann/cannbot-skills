@@ -71,7 +71,7 @@ cp -r ops-tensor/include/blaze op_kernel/include/
 cp -r ops-tensor/include/tensor_api op_kernel/include/
 ```
 
-详见 ascendc-blaze-best-practice skill 的 step1-setup.md。
+详见 ascendc-blaze-best-practice skill 的 `references/workflow/step1-project-setup.md`。
 
 ## 参数说明
 

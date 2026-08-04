@@ -751,16 +751,64 @@ fi
 
 # --- Setup ops-tensor (for blaze skill) ---
 OPS_TENSOR_DIR="$SCRIPT_DIR/ops-tensor"
+OPS_TENSOR_REPO="https://gitcode.com/cann/ops-tensor.git"
+is_exact_git_root() {
+    local candidate="$1"
+    local repo_root
+    [ -d "$candidate" ] || return 1
+    repo_root=$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null) || return 1
+    [ "$(realpath "$repo_root")" = "$(realpath "$candidate")" ]
+}
+
+is_authorized_ops_tensor_checkout() {
+    local candidate="$1"
+    local origin_url
+    is_exact_git_root "$candidate" || return 1
+    origin_url=$(git -C "$candidate" remote get-url origin 2>/dev/null) || return 1
+    case "$origin_url" in
+        https://gitcode.com/cann/ops-tensor|https://gitcode.com/cann/ops-tensor.git|\
+        git@gitcode.com:cann/ops-tensor|git@gitcode.com:cann/ops-tensor.git|\
+        ssh://git@gitcode.com/cann/ops-tensor|ssh://git@gitcode.com/cann/ops-tensor.git) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 if [ -d "$OPS_TENSOR_DIR" ]; then
-    cd "$OPS_TENSOR_DIR"
-    git checkout . 2>/dev/null || true
-    git pull --quiet 2>/dev/null || warn "git pull failed, using existing version"
-    cd "$SCRIPT_DIR"
-    ok "ops-tensor updated"
+    if ! is_exact_git_root "$OPS_TENSOR_DIR"; then
+        warn "ops-tensor exists but is not the root of a Git checkout; update skipped"
+    elif ! is_authorized_ops_tensor_checkout "$OPS_TENSOR_DIR"; then
+        warn "ops-tensor origin is not an authorized repository; update skipped"
+    else
+        OPS_TENSOR_UPDATE_OK=true
+        git -C "$OPS_TENSOR_DIR" checkout . 2>/dev/null || true
+        git -C "$OPS_TENSOR_DIR" pull --quiet 2>/dev/null || { warn "git pull failed, using existing version"; OPS_TENSOR_UPDATE_OK=false; }
+        git -C "$OPS_TENSOR_DIR" submodule sync --recursive 2>/dev/null || { warn "ops-tensor submodule sync failed"; OPS_TENSOR_UPDATE_OK=false; }
+        git -C "$OPS_TENSOR_DIR" submodule update --init --recursive 2>/dev/null || { warn "ops-tensor submodule update failed"; OPS_TENSOR_UPDATE_OK=false; }
+        if [ "$OPS_TENSOR_UPDATE_OK" = true ]; then
+            ok "ops-tensor updated"
+        else
+            warn "ops-tensor update incomplete; validating current checkout"
+        fi
+    fi
 else
-    git clone --quiet --depth 1 https://gitcode.com/cann/ops-tensor.git "$OPS_TENSOR_DIR" 2>/dev/null \
+    git clone --quiet --depth 1 --recurse-submodules --shallow-submodules \
+        "$OPS_TENSOR_REPO" "$OPS_TENSOR_DIR" 2>/dev/null \
         && ok "ops-tensor cloned" \
         || warn "git clone failed, skipping ops-tensor"
+fi
+
+# A project-level custom install exposes the same canonical clone at
+# <project-root>/ops-tensor, alongside <project-root>/operators.
+if [ "$LEVEL" = "project" ] && is_authorized_ops_tensor_checkout "$OPS_TENSOR_DIR" && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; then
+    PROJECT_OPS_TENSOR_DIR="$INSTALL_BASE/ops-tensor"
+    if [ -L "$PROJECT_OPS_TENSOR_DIR" ] && [ "$(realpath "$PROJECT_OPS_TENSOR_DIR")" = "$(realpath "$OPS_TENSOR_DIR")" ]; then
+        ok "ops-tensor → $INSTALL_BASE/"
+    elif [ -e "$PROJECT_OPS_TENSOR_DIR" ] || [ -L "$PROJECT_OPS_TENSOR_DIR" ]; then
+        warn "ops-tensor already exists in $INSTALL_BASE and does not point to the canonical clone"
+    else
+        ln -sfn "$(realpath "$OPS_TENSOR_DIR")" "$PROJECT_OPS_TENSOR_DIR"
+        ok "ops-tensor → $INSTALL_BASE/"
+    fi
 fi
 echo ""
 
@@ -803,6 +851,31 @@ if [ -d "$ASC_DEVKIT_DIR" ]; then
     else
       health_errors="${health_errors}\n  ${YELLOW}⚠${NC} asc-devkit API docs not searchable (find returned no results for 'Add')"
     fi
+  fi
+fi
+
+# Check the Blaze source root and recursive submodules. Missing Blaze sources do
+# not block non-Blaze workflows, but Step 2 will stop until this is repaired.
+if [ ! -d "$OPS_TENSOR_DIR" ]; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor not available"
+elif ! is_exact_git_root "$OPS_TENSOR_DIR"; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor is not a valid Git checkout"
+elif ! is_authorized_ops_tensor_checkout "$OPS_TENSOR_DIR"; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor origin is not an authorized repository"
+elif ! OPS_TENSOR_TENSOR_API_ENTRY=$(git -C "$OPS_TENSOR_DIR" ls-tree HEAD include/tensor_api 2>/dev/null); then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor tensor_api gitlink status is unavailable"
+elif ! echo "$OPS_TENSOR_TENSOR_API_ENTRY" | grep -Eq '^160000 commit [0-9a-f]+[[:space:]]+include/tensor_api$'; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor include/tensor_api is not the required gitlink"
+elif ! OPS_TENSOR_SUBMODULE_STATUS=$(git -C "$OPS_TENSOR_DIR" submodule status --recursive 2>/dev/null); then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor recursive submodule status is unavailable"
+elif echo "$OPS_TENSOR_SUBMODULE_STATUS" | grep -Eq '^[-+U]'; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor recursive submodule is missing or inconsistent"
+elif ! echo "$OPS_TENSOR_SUBMODULE_STATUS" | grep -Eq '^.[0-9a-f]+[[:space:]]+include/tensor_api([[:space:]]|$)'; then
+  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor tensor_api submodule status is missing"
+fi
+if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; then
+  if [ ! -L "$INSTALL_BASE/ops-tensor" ] || [ "$(realpath "$INSTALL_BASE/ops-tensor" 2>/dev/null)" != "$(realpath "$OPS_TENSOR_DIR" 2>/dev/null)" ]; then
+    health_errors="${health_errors}\n  ${YELLOW}⚠${NC} ops-tensor canonical symlink missing in $INSTALL_BASE"
   fi
 fi
 

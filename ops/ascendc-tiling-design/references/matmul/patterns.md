@@ -9,7 +9,7 @@
 | 目标平台 | NpuArch | 开发路径 | 查阅入口 |
 |---------|---------|----------|----------|
 | Atlas A2 / A3 | `DAV_2201` | Ascend C 高阶 API | `ascendc-api-matmul-tiling.md` / `ascendc-api-gmm-tiling.md` |
-| Ascend 950 | `DAV_3510` | Blaze / tensor_api | `/ascendc-blaze-best-practice` → `references/tiling/tiling-selection.md` |
+| Ascend 950 | `DAV_3510` | Blaze / tensor_api | `/ascendc-blaze-best-practice` → `references/kernel-design/tiling-selection.md` |
 
 ---
 
@@ -28,5 +28,5 @@ A2 / A3 平台上的 MatMul 类算子采用 Ascend C 高阶 API 路径：
 
 Ascend 950 / DAV_3510 平台上的 MatMul 类算子统一采用 Blaze / tensor_api 路径，**不使用** Ascend C `MatmulImpl` / `MatmulApiTiling`。
 
-- **正确路径**：`/ascendc-blaze-best-practice` → `references/tiling/tiling-selection.md`
+- **正确路径**：`/ascendc-blaze-best-practice` → `references/kernel-design/tiling-selection.md`
 - **禁止路径**：`ascendc-api-matmul-tiling.md`、`ascendc-api-gmm-tiling.md`

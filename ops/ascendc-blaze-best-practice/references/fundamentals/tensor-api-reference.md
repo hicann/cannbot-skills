@@ -6,12 +6,7 @@
 >
 > **形态**：header-only，命名空间 `AscendC::Te`，唯一公共入口 `#include "tensor_api/tensor.h"`。**禁止**直接 include `impl/`、`include/*` 子目录头文件（编译器会给出 `#warning` 内部头警告）。
 >
-> **拉取方式**：
-> ```bash
-> git clone --depth 1 https://gitcode.com/cann/ops-tensor.git /tmp/ops-tensor
-> cp -r /tmp/ops-tensor/include/tensor_api <your_project>/third_party/
-> # 编译命令需把 third_party/tensor_api/include 与 third_party/tensor_api 同时加入 include path
-> ```
+> **项目接入**：以 `<project-root>/ops-tensor/` 为唯一 Blaze 源码来源，将同源 `tensor_api/` 复制到 `<project-root>/operators/<operator_name>/op_kernel/include/tensor_api/` 并保持只读。项目 CMake 的 include 策略见 [Blaze CMake 构建指导](blaze-cmake-build-guide.md)；不得临时克隆其他副本或从项目外目录编译。
 
 ---
 
@@ -521,7 +516,7 @@ Copy(MakeCopy(CopyL0C2GM{}), gmC, tensorL0C, FixpipeParams{/*unitFlag=*/FINAL_AC
 | ≈100% mismatch，仅 transA/B 某方向触发 | launcher 里 LayoutA/B 硬编码未跟 trans 标志同步 | 用 `conditional_t<trans, ZN, NZ>`，不要硬编码 |
 | B-NZ 路径全错 | 数据生成未对物理 ND 数据做 NZ 转换（transB=true 时应 `to_nz_format([N,K])`，transB=false 时应 `to_nz_format([K,N])`）；或 baseN 未 C0 对齐；或缺 `TagToTrans<NZLayoutPtn>` / `TagToTrans<ZNLayoutPtn>` 特化；或 `to_nz_format` 的 c0 参数未按 dtype 传入 | 五步预防：①对物理 ND 数据调用 `to_nz_format` ②baseN%C0==0 ③加 NZ+ZN 两个 TagToTrans 特化 ④c0 按 dtype 显式传入 ⑤Slice 顺序：kernel N/M-slice + block K-slice |
 | NZ 路径全错 | 数据生成 NZ 排列顺序错误（应为 `permute(2,0,1,3)` 而非 `(0,2,1,3)`）；或 Host size 按逻辑维度计算；或缺 `TagToTrans<NZ/ZN>` 特化 | 四步预防：①`permute(2,0,1,3)` ②`CalcNzSize` 按物理维度 ③加 NZ+ZN 两个特化 ④Slice 顺序：kernel N/M-slice + block K-slice |
-| NZ K≤16 PASS，K>16 多 tile FAIL | Slice 顺序错误：block 层同时切 K+N 导致 NZ stride 不匹配 | kernel 层先 N/M-slice（保留 fullK），block 层只 K-slice |
+| NZ K≤16 PASS，K>16 多 tile FAIL | Slice 顺序错误：Block层同时切 K+N 导致 NZ stride 不匹配 | Kernel层先 N/M-slice（保留 fullK），Block层只 K-slice |
 | NZ 多 tile FAIL，单 tile PASS | GM 端 `FrameLayoutFormat<NZLayoutPtn>` 使用默认 C0=16（基于 uint16_t），但 int8/fp8 需要 C0=32 | 修复：`FrameLayoutFormat<NZLayoutPtn, Std::Int<32/sizeof(Type)>>`；L1 端 `L1LayoutHelper` 已正确处理，此问题仅影响 GM 端 |
 | FP4/FP8 stride 错位 | 自定义 stride 未考虑 B4/B8 底层差异 | 用 `LayoutTraitFP4` / `LayoutTraitDefault<fp8_*>`，库内部已处理 |
 | dav-2201 上 routing 静默不搬运 | 当前 routing 表仅 V3510 有特化，其他架构落到 `*Ignore` | 编译期校验 `CURRENT_ARCH_VERSION == ArchVersion::V3510`，否则 `static_assert` |
@@ -556,4 +551,4 @@ Copy(MakeCopy(CopyL0C2GM{}), gmC, tensorL0C, FixpipeParams{/*unitFlag=*/FINAL_AC
 - LayoutPattern 速查：`impl/tensor_api/tensor/layout_pattern.h`
 - 内置 Trait：`include/utils/utils.h`（MmadTrait/MmadParams/FixpipeTrait/FixpipeParams/LoadDataTrait）
 - 示例算子：`src/add/` （Vector 路径，不直接展示 Cube 调用，但展示工程结构）
-- 完整 Matmul 实例：`ascendc-direct-invoke-template` skill → `matmul_blaze_template/include/block/matmul_block_mmad.h`
+- 完整 MatMul 实例：优先查看与 Blaze Investigation 报告绑定的 concrete 官方 Block；elementwise/broadcast Epilogue 后融合扩展按 [场景 Block专题](../scenarios/elementwise-broadcast-epilogue-fusion/block-l0c2ub-extension.md) 和当前 DESIGN 合同核对。

@@ -20,6 +20,7 @@
 
 #include "epilogue/cv_sync_constants.h"
 #include "../utils/common_utils.h"
+#include "include/tensor_api/tensor.h"
 
 using namespace AscendC;
 
@@ -35,18 +36,19 @@ using namespace AscendC;
 // Vector 计算段只保留 Load → [USER COMPUTE] → Store 骨架，
 // 开发者按需替换具体公式（Cast / Mul / Add / Exp 等）。
 //
-// 三接口合约（与 MatmulKernelFused 兼容）：
+// 三接口合约（需由具体 Fused Kernel Adapter 映射）：
 //   1) struct Params { ... };
 //   2) void Init(Params, baseM, baseN, ProblemShape)
-//   3) auto GetTensor()  — 返回 cLocal_
+//   3) auto GetTensor(curM, curN) — 返回当前 tile 的 UB Tensor
 //   4) void operator()(BlockShape, gmOffset, flagId)
 // ============================================================================
 
 #ifdef __CCE_AICORE__
 
+template <typename L0CDataType_ = float>
 class EpilogueFusionRegBase {
 public:
-    using L0CDataType = int32_t;
+    using L0CDataType = L0CDataType_;
     using ComputeType = float;
     using OutputType = bfloat16_t;
 
@@ -94,11 +96,13 @@ public:
 
     int64_t stageRows_{0};
     int64_t nAlignL0C_{0};
+    bool valid_{false};
     ProblemShape problemShape_;
 
     __aicore__ inline void Init(
         Params const& params, int64_t baseM, int64_t baseN, ProblemShape& problemShape)
     {
+        valid_ = false;
         // nAlign: UB 行对齐宽度（32B / sizeof(L0CDataType) 元素一组）
         nAlignL0C_ = ::CeilDiv(baseN, ALIGN_ELEM) * ALIGN_ELEM;
 
@@ -116,7 +120,8 @@ public:
         int64_t stagePerRowBytes = nAlignL0C_ * sizeof(ComputeType) + nAlignL0C_ * sizeof(OutputType);
         stageRows_ = remainBytes / stagePerRowBytes;
         if (stageRows_ <= 0) {
-            stageRows_ = 1;
+            stageRows_ = 0;
+            return;
         }
 
         int64_t extraBufAOffset = matmulAreaBytes / sizeof(L0CDataType);
@@ -128,6 +133,7 @@ public:
         int64_t extraBufBAreaBytes = stageRows_ * nAlignL0C_ * sizeof(ComputeType);
         int64_t outBufOffset = (matmulAreaBytes + extraBufABytes + extraBufBAreaBytes) / sizeof(L0CDataType);
         outBuf_ = cLocal_[outBufOffset].template ReinterpretCast<OutputType>();
+        valid_ = true;
 
         problemShape_ = problemShape;
         outputGlobal_.SetGlobalBuffer(reinterpret_cast<__gm__ OutputType*>(params.outputGmAddr));
@@ -143,7 +149,18 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(ZERO_FLAG);
     }
 
-    __aicore__ inline auto GetTensor() { return cLocal_; }
+    __aicore__ inline auto GetTensor(int64_t curM, int64_t curN)
+    {
+        constexpr int64_t ubAlign = 32 / sizeof(L0CDataType);
+        int64_t curNUbAlign = ::CeilDiv(curN, ubAlign) * ubAlign;
+        int64_t curMPad = (curM + 1) & ~1L;
+        auto layoutUB = AscendC::Te::MakeFrameLayout<
+            AscendC::Te::NDExtLayoutPtn, AscendC::Std::Int<16>>(curMPad, curNUbAlign);
+        return AscendC::Te::MakeTensor(
+            AscendC::Te::MakeMemPtr<AscendC::Te::Location::UB, L0CDataType>(0), layoutUB);
+    }
+
+    __aicore__ inline bool IsValid() const { return valid_; }
 
     __aicore__ inline void operator()(
         BlockShape const& blockShape, int64_t dstOffset, int64_t flagId = CvSync::AIV_TO_AIC_FLAG)
@@ -285,6 +302,9 @@ public:
 
     __aicore__ ~EpilogueFusionRegBase()
     {
+        if (!valid_) {
+            return;
+        }
         // 排空所有反向依赖
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(TILE_EVENT_ID);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(STAGE_EVENT_ID);

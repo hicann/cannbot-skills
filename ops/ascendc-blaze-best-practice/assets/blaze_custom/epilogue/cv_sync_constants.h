@@ -15,6 +15,9 @@
 
 namespace CvSync {
 
+// Reference values only. A product Fused Kernel must allocate and pass the
+// flag IDs required by its own official/custom pipeline contract.
+
 constexpr uint16_t MODE = 4;
 
 constexpr int16_t AIC_TO_AIV_FLAG = 8;
