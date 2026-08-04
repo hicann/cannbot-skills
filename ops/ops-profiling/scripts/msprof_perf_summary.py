@@ -786,43 +786,49 @@ _TORCH_DTYPE_EXPR_MAP = {
 }
 
 
-def _serialize_jsonl_tensor_input(inp, name):
-    """Generate a line for a tensor-type JSONL input."""
+# 名称提示为 offsets/cumsum 类结构性整型参数的集合（随机合成时保证单调不减）
+_OFFSETS_LIKE_NAMES = frozenset({
+    "offs", "offsets", "group_list", "group_offsets", "cumsum",
+    "cu_seqlens", "cu_seqlens_q", "cu_seqlens_k", "seqlens", "seq_lens",
+})
+
+
+def _append_tensor_input(lines, inp, name):
+    """Append a tensor-type input line to *lines*, keeping nesting depth ≤ 4."""
     dtype_str = inp.get("dtype", "float16")
     # 优先使用显式 value（如 group_list / cumsum 等结构参数）
     explicit_val = inp.get("value")
     if explicit_val is not None:
         dtype_repr = _jsonl_tensor_dtype_repr(dtype_str)
-        return [f"_inputs_dict[{repr(name)}] = torch.tensor({repr(explicit_val)}, dtype={dtype_repr})"]
+        lines.append(f"_inputs_dict[{repr(name)}] = torch.tensor({repr(explicit_val)}, dtype={dtype_repr})")
+        return
     shape = inp.get("shape", [])
+    # offsets/cumsum 类结构性整型参数：完全随机的值几乎必然违反
+    # 单调性约束导致被测实现直接抛异常，退化为单调不减序列更稳妥
+    if name.lower() in _OFFSETS_LIKE_NAMES and dtype_str.startswith(("int", "uint")):
+        dtype_repr = _jsonl_tensor_dtype_repr(dtype_str)
+        lines.append(f"_inputs_dict[{repr(name)}] = "
+                     f"torch.randint(0, 100, {shape}, dtype=torch.int64).cumsum(0).to({dtype_repr})")
+        return
     tensor_expr = _jsonl_tensor_expr(shape, dtype_str)
-    return [f"_inputs_dict[{repr(name)}] = {tensor_expr}"]
+    lines.append(f"_inputs_dict[{repr(name)}] = {tensor_expr}")
 
 
-def _serialize_jsonl_attr_scalar_input(inp, name):
-    """Generate a line for an attr/scalar-type JSONL input.
-
-    When dtype is 'str' and the value matches a torch dtype name, emit the
-    torch.xxx expression rather than a string literal.
-    """
+def _append_attr_scalar_input(lines, inp, name):
+    """Append an attr/scalar-type input line to *lines*, keeping nesting depth ≤ 4."""
+    # 显式 "value": null 表示可选参数未启用（如 offsets=None），
+    # 必须生成 None 而不是默认标量，否则会把 None 语义错传成 1.0/1
+    if "value" in inp and inp.get("value") is None:
+        lines.append(f"_inputs_dict[{repr(name)}] = None")
+        return
     val = _jsonl_scalar_value(inp)
+    # attr 的 dtype 为 str 且值是 torch dtype 名时，生成 torch.xxx 表达式而非字符串字面量
     if inp.get("dtype") == "str" and isinstance(val, str):
         dtype_expr = _TORCH_DTYPE_EXPR_MAP.get(val)
         if dtype_expr is not None:
-            return [f"_inputs_dict[{repr(name)}] = {dtype_expr}"]
-    return [f"_inputs_dict[{repr(name)}] = {repr(val)}"]
-
-
-def _serialize_jsonl_tensor_list_input(inp, name):
-    """Generate lines for a tensor_list-type JSONL input."""
-    lines = ["_tensors = []"]
-    for tinfo in inp.get("value", []):
-        shape = tinfo.get("shape", [])
-        dtype_str = tinfo.get("dtype", "float16")
-        tensor_expr = _jsonl_tensor_expr(shape, dtype_str)
-        lines.append(f"_tensors.append({tensor_expr})")
-    lines.append(f"_inputs_dict[{repr(name)}] = _tensors")
-    return lines
+            lines.append(f"_inputs_dict[{repr(name)}] = {dtype_expr}")
+            return
+    lines.append(f"_inputs_dict[{repr(name)}] = {repr(val)}")
 
 
 def _serialize_jsonl_inputs(case):
@@ -836,11 +842,17 @@ def _serialize_jsonl_inputs(case):
         name = inp.get("name", "")
         typ = inp.get("type", "tensor")
         if typ == "tensor":
-            lines.extend(_serialize_jsonl_tensor_input(inp, name))
+            _append_tensor_input(lines, inp, name)
         elif typ in ("attr", "scalar"):
-            lines.extend(_serialize_jsonl_attr_scalar_input(inp, name))
+            _append_attr_scalar_input(lines, inp, name)
         elif typ == "tensor_list":
-            lines.extend(_serialize_jsonl_tensor_list_input(inp, name))
+            lines.append("_tensors = []")
+            for tinfo in inp.get("value", []):
+                shape = tinfo.get("shape", [])
+                dtype_str = tinfo.get("dtype", "float16")
+                tensor_expr = _jsonl_tensor_expr(shape, dtype_str)
+                lines.append(f"_tensors.append({tensor_expr})")
+            lines.append(f"_inputs_dict[{repr(name)}] = _tensors")
         else:
             val = _jsonl_scalar_value(inp)
             lines.append(f"_inputs_dict[{repr(name)}] = {repr(val)}")
@@ -875,6 +887,12 @@ os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "{device_id}"
 sys.path.insert(0, str(out_dir / "kernel" / "build"))
 sys.path.insert(0, str(out_dir))
 
+torch.manual_seed({seed})
+try:
+    torch.npu.manual_seed_all({seed})
+except Exception:
+    pass
+
 def _load(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     m = importlib.util.module_from_spec(spec)
@@ -895,7 +913,7 @@ def _move(v):
         return type(v)(_move(x) for x in v)
     return v
 
-_use_kwargs = {use_kwargs}
+_use_kwargs = inputs is None
 if _use_kwargs:
     for _k, _v in _inputs_dict.items():
         if isinstance(_v, torch.Tensor):
@@ -966,17 +984,36 @@ torch.npu.synchronize()
 
 def _build_wrapper_script_content(cfg, model_file, cls_name, inputs_code):
     """Build the wrapper script string from components."""
-    use_kwargs = cfg.jsonl_case is not None
     return _WRAPPER_SCRIPT_TEMPLATE.format(
         out_dir=cfg.out_dir,
         device_id=cfg.device_id,
         case_idx=cfg.case_idx,
         warmup=cfg.warmup,
+        seed=cfg.seed,
         model_file=model_file,
         cls_name=cls_name,
         inputs_code=inputs_code,
-        use_kwargs=use_kwargs,
     )
+
+
+# 优先从 model.py 自带的输入生成器取真实输入（保证 offsets/cumsum 等结构性
+# 参数合法，且与 evaluate 输入同源）；取不到时 inputs 保持 None，回退到
+# JSONL 随机合成的 _inputs_dict kwargs 路径。
+_REAL_INPUTS_CODE = """\
+# Prefer real inputs from model.py's own generator (valid structural params,
+# same source as evaluate); fall back to serialized kwargs when unavailable.
+inputs = None
+try:
+    _ref_mod = _load(out_dir / "model.py", "ref_for_inputs")
+    _gen = getattr(_ref_mod, "get_input_groups", getattr(_ref_mod, "get_inputs", None))
+    if _gen is not None:
+        _all_input_groups = _gen()
+        if 0 <= {case_idx} < len(_all_input_groups):
+            _entry = _all_input_groups[{case_idx}]
+            inputs = list(_entry) if isinstance(_entry, (list, tuple)) else [_entry]
+except Exception:
+    inputs = None
+"""
 
 
 def _generate_wrapper_script(cfg: _WrapperConfig):
@@ -988,14 +1025,15 @@ def _generate_wrapper_script(cfg: _WrapperConfig):
         cls_name = "ModelNew"
 
     if cfg.jsonl_case is not None:
-        inputs_code = _serialize_jsonl_inputs(cfg.jsonl_case)
+        # 先准备 JSONL 随机合成的 kwargs 作为兜底，再尝试真实输入覆盖
+        inputs_code = (_serialize_jsonl_inputs(cfg.jsonl_case) + "\n\n"
+                       + _REAL_INPUTS_CODE.format(case_idx=cfg.case_idx))
     else:
-        inputs_code = f"""
-    ref_mod = _load(out_dir / "model.py", "ref_for_inputs")
-    input_groups = getattr(ref_mod, "get_input_groups",
-                           getattr(ref_mod, "get_inputs", lambda: [[]]))()
-    inputs = input_groups[{cfg.case_idx}]
-"""
+        # 无 JSONL case 时只能依赖 model.py 的输入生成器
+        inputs_code = (_REAL_INPUTS_CODE.format(case_idx=cfg.case_idx) + """
+if inputs is None:
+    raise RuntimeError("failed to obtain inputs from model.py get_input_groups()/get_inputs()")
+""")
     return _build_wrapper_script_content(cfg, model_file, cls_name, inputs_code)
 
 
@@ -1005,6 +1043,32 @@ def _find_msprof_script():
     if candidate.exists():
         return str(candidate)
     return "msprof_profile_run.sh"
+
+
+def _save_app_output(output_dir: str, stdout: str, stderr: str) -> str:
+    """把被测 app 的输出落盘，便于采集失败时回溯真实原因。返回日志路径。"""
+    log_path = os.path.join(output_dir, "app_output.log")
+    try:
+        with open(log_path, "w", encoding="utf-8", errors="replace") as f:
+            f.write("=== stdout ===\n" + (stdout or "") + "\n=== stderr ===\n" + (stderr or ""))
+    except OSError:
+        pass
+    return log_path
+
+
+def _extract_app_crash(stdout: str, stderr: str):
+    """从 msprof 输出中检测被测 app 的 Python 异常。
+
+    msprof 在 app 崩溃时仍返回退出码 0（只打 WARNING），若不主动检测，
+    上层只能看到 "no csv found" 这类误导性错误。返回最后一行异常信息或 None。
+    """
+    text = (stdout or "") + "\n" + (stderr or "")
+    if "Traceback" not in text and "An exception has occurred in process App" not in text:
+        return None
+    exc_lines = re.findall(r"^(\w[\w.]*(?:Error|Exception|Interrupt)\b[^\n]*)", text, re.M)
+    if exc_lines:
+        return exc_lines[-1].strip()[:200]
+    return "app raised an exception during profiling"
 
 
 def _run_msprof_standard(wrapper_script: str, output_dir: str, device_id: int, warmup: int = 3):
@@ -1033,12 +1097,18 @@ def _run_msprof_standard(wrapper_script: str, output_dir: str, device_id: int, w
     except OSError:
         pass
 
+    app_log = _save_app_output(output_dir, result.stdout, result.stderr)
+
     if result.returncode != 0:
-        return None, f"msprof failed: {result.stderr[-500:]}"
+        return None, f"msprof failed: {result.stderr[-500:]}\n(app log: {app_log})"
+
+    app_crash = _extract_app_crash(result.stdout, result.stderr)
+    if app_crash:
+        return None, f"profiled app crashed: {app_crash} (app log: {app_log})"
 
     prof_dirs = sorted(Path(output_dir).glob("PROF_GROUP_*"))
     if not prof_dirs:
-        return None, "no PROF_GROUP directory found"
+        return None, f"no PROF_GROUP directory found (app log: {app_log})"
     return str(prof_dirs[-1]), None
 
 
@@ -1059,9 +1129,12 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warm
     env = os.environ.copy()
 
     # Warmup: 在 msprof 外部执行，不采集
+    warmup_crash = None
     for _ in range(warmup):
-        subprocess.run([sys.executable, wrapper_path],
-                       capture_output=True, text=True, env=env)
+        w = subprocess.run([sys.executable, wrapper_path],
+                           capture_output=True, text=True, env=env)
+        if w.returncode != 0 and warmup_crash is None:
+            warmup_crash = _extract_app_crash(w.stdout, w.stderr) or (w.stderr or "")[-200:]
 
     # Measurement: msprof 只采集正式 timed run
     cmd = [
@@ -1079,12 +1152,20 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warm
     except OSError:
         pass
 
+    app_log = _save_app_output(output_dir, result.stdout, result.stderr)
+
     if result.returncode != 0:
-        return None, f"msprof failed: {result.stderr[-500:]}"
+        return None, f"msprof failed: {result.stderr[-500:]}\n(app log: {app_log})"
+
+    # msprof 在 app 崩溃时仍返回 0，必须主动检测，否则只能看到误导性的
+    # "no task_time csv found"
+    app_crash = _extract_app_crash(result.stdout, result.stderr) or warmup_crash
+    if app_crash:
+        return None, f"profiled app crashed: {app_crash} (app log: {app_log})"
 
     prof_dirs = sorted(Path(output_dir).glob("PROF_*"))
     if not prof_dirs:
-        return None, "no PROF directory found"
+        return None, f"no PROF directory found (app log: {app_log})"
     return str(prof_dirs[-1]), None
 
 
@@ -1435,7 +1516,7 @@ def _measure_one_impl(mi: _MeasureInput):
             duration, _op_name, parse_err = _parse_msprof_duration(prof_dir)
             if duration is not None:
                 return duration, None, prof_dir
-            err = parse_err
+            err = f"{parse_err} (app log: {tmpdir}/app_output.log)"
         time.sleep(0.5)
     return None, err, prof_dir
 
@@ -1466,7 +1547,7 @@ def _measure_one_impl_quick(mi: _MeasureInput):
 
         duration, _op_name, parse_err = _parse_msprof_duration_quick(prof_dir)
         if duration is None:
-            err = parse_err
+            err = f"{parse_err} (app log: {tmpdir}/app_output.log)"
             continue
 
         # msprof 采集了 repeats 次 timed run，除以 repeats 得到单次耗时

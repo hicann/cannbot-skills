@@ -170,5 +170,7 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 - [references/decision-tree.md](references/decision-tree.md) — 算子特征分析决策树、平台识别、NPU 硬件约束、API 映射规则
 - [references/quality-checklist.md](references/quality-checklist.md) — 18 项质量自检清单
 - [references/info-sources.md](references/info-sources.md) — 信息收集步骤、信息源优先级、冲突处理原则
+- [references/BlockLevelDesign.md](references/BlockLevelDesign.md) — Block 级任务划分、流水骨架、workspace 与同步关系设计
+- [references/attention-patterns/AttentionPatternIndex.md](references/attention-patterns/AttentionPatternIndex.md) — Attention / FlashAttention 模式路由索引（TND、paged KV、mask/causal、GQA/MQA、MLA、topk sparse、sink attention）
 - [examples/design-template.md](examples/design-template.md) — design.md 完整模板
 - [examples/completion-report-template.md](examples/completion-report-template.md) — 完成报告输出模板

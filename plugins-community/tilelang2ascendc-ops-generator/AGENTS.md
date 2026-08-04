@@ -15,6 +15,10 @@ skills:
   - tilelang2ascend-tilelang-designer
   - tilelang2ascend-translator
   - tilelang2ascend-trace-recorder
+  - tilelang-op-design
+  - tilelang-op-develop
+  - tilelang-perf-optimization
+  - ascendc-perf-optimize
 permission:
   external_directory: allow
 ---
@@ -104,11 +108,17 @@ Phase 1: 环境准备 + 工程初始化  (复制算子文件 + 初始化 kernel 
 Phase 2: Case 精简           (tilelang2ascend-case-simplifier)
 Phase 3: 设计表达            (分支)
   ├─ 简单算子: 架构设计 + 设计串讲 (ops-direct-invoke: DESIGN.md + PLAN.md + WALKTHROUGH.md)
-  └─ 复杂算子: TileLang 设计  (tilelang2ascend-tilelang-designer + 退化检测 + 迭代)
+  └─ 复杂算子: TileLang 设计  (tilelang2ascend-tilelang-designer)
+       ├─ Step 0: Attention 模式路由 (仅 Attention/FlashAttention 类)
+       ├─ Step 1: Block 层级设计 (技术约束检测 + 编程模式决策 + 信息收集 + 性能初检[强制门禁,产出 design/PERF_DESIGN.md])
+       ├─ Step 2: Tile 层级设计 (编码规范 + GEMM/CV融合 + V核并行化 + 性能反模式终检[强制门禁,追加 PERF_DESIGN.md])
+       ├─ Step 3: 自检 + 退化检测 + 迭代
+       └─ Step 4: TileLang 性能迭代 [强制门禁] (tilelang-perf-optimization 本体: 基线采集 → 优化点迭代[种子=PERF_DESIGN待验证清单] → 复验; 达标线 geomean≥0.6x, p_retry≤3, 产出 perf_tuning/; 框架侧不可执行且有对照实验证据时产出 SKIPPED.md 合法跳过)
+       Skill 依赖: tilelang-op-design + tilelang-op-develop + tilelang-perf-optimization
 Phase 4: AscendC 生成与验证   (分支)
   ├─ 简单算子: 开发实现 + 代码审查 + 修复循环 (ops-direct-invoke: 渐进式开发 + REVIEW.md + 最多3轮修复)
   └─ 复杂算子: 转译          (tilelang2ascend-translator + 退化检测 + 迭代)
-Phase 5: 性能分析            (ops-profiling --quick 模式)
+Phase 5: 性能分析            (ops-profiling --quick 模式; 只做测量归档, TileLang 调优已在 Phase 3 Step 4 完成)
 Phase 6: 全量验证            (恢复全量用例、验证、修复)
 Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
 ```
@@ -225,9 +235,10 @@ Subagent 返回
 
 - TileLang 退化检测连续 ≥ 3 次 → 自动终止
 - 简单算子 REVIEW.md 修复循环上限 3 轮 → 超限暂停
+- TileLang 性能迭代（Phase 3 Step 4）p_retry 上限 3 轮 → 超限必须产出 final_report.md（含上限分析）后继续，不阻塞流程；禁止以"连续无提升"为由空报终止
 - AscendC Phase 4 迭代: A 类（编译/运行时错误）上限 5 次（a_retry），D 类（精度不匹配）上限 D1 7 次 + D2 5 次 = 12 次（d_retry）。A/D 计数器相互独立，A 类用完后若转入 D 类则 D 类从 0 开始有完整 12 次机会。
 - 禁止修改 `{output_dir}/` 之外的任何文件
-- TileLang 验证失败时，若属 TileLang 自身问题可跳过并继续 Phase 4
+- TileLang 功能验证（evaluate_tilelang.sh）默认必须执行且精度必须通过——精度通过是 Phase 3 Step 4 性能迭代的强制前置；仅当对照实验证明属 TileLang 编译器/框架底层不支持时才可跳过（需记录证据）并继续 Phase 4，其余失败必须迭代修复
 - 禁止手动修改或删除 `.claude/hooks/state/precision_gate.json`（由 Hook 自动管理，绕过即违规）
 
 ---
@@ -243,3 +254,13 @@ Subagent 返回
 | 精度调试 Skill | `/tilelang2ascend-precision-tuning` | 仲裁精度争议时参考 |
 | 性能采集 Skill | `/ops-profiling` | 仲裁性能争议时参考 |
 | 历史成功任务 | `workflows/templates/archive_tasks/` | 仲裁开发模式争议时参考 |
+
+### TileLang 设计阶段 Skill 依赖（复杂算子路径）
+
+> 以下 Skill 由 `tilelang2ascend-tilelang-designer` 在设计阶段引用，提供设计方法论、编码规范和性能避坑指导。
+
+| Skill | 用途 | 使用阶段 |
+|-------|------|----------|
+| `ops/tilelang-op-design/SKILL.md` | 算子设计文档生成：技术约束检测、编程模式决策树、信息收集、Block 级设计 | Phase 3 Step 1 |
+| `ops/tilelang-op-develop/SKILL.md` | 算子代码生成：编码规范、GEMM/CV 融合、V 核并行化、TileLang 编程指南 | Phase 3 Step 2 |
+| `ops/tilelang-perf-optimization/SKILL.md` | 性能优化：反模式清单、优化指南、CV 同步调试、Cube 高级策略 | Phase 3 Step 1e, 2e（设计门禁）+ Step 4（性能迭代本体） |
