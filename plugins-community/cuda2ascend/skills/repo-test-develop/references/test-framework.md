@@ -78,7 +78,7 @@
 
 - 以算子代码（`op_kernel/*.cpp`）与已有黑盒用例（模式 B 自建 / 模式 A 评测集 cases）为输入，基于源码枚举执行分支，补充未覆盖的分支（尾核/尾块、非对齐 DataCopyPad、多核边界、tilingkey 等）。
 - 白盒补充用例放 `tests/whitebox_cases/`，产出分支覆盖说明。
-- 具体方法见 [whitebox-design.md](whitebox-design.md)；分支覆盖达标阈值由 CP3 绑定实现给定。
+- 具体方法见 [whitebox-design.md](whitebox-design.md)；分支覆盖达标阈值由 CP3 验收给定。
 
 ## golden 同源纪律（两模式通用）
 

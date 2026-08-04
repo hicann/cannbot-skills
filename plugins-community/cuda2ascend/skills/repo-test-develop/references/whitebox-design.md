@@ -1,8 +1,6 @@
 # 白盒用例补全方法
 
 > 白盒（源码驱动）用例补全的**设计方法**：以算子代码为证据，覆盖已有黑盒用例未触及的执行分支。已有黑盒用例来源：模式 B 为自建用例表，模式 A 为评测集 cases。产物为**补充用例表 + 分支覆盖说明**。黑盒设计见 [blackbox-design.md](blackbox-design.md)；测试工程与执行见 [test-framework.md](test-framework.md)。
->
-> 本文件是基类默认方法（属 virtual），各算子仓可 override；override 时保持逻辑名 `repo-test-develop` 不变。
 
 ## 定位
 

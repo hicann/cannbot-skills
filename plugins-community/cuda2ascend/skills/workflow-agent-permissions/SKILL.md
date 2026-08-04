@@ -1,6 +1,6 @@
 ---
 name: workflow-agent-permissions
-description: 派发写类任务前加载，判断目标角色是否具备对应目录写权限，避免无效派发；同时是权限规格真值源，init 物化后由权限插件加载执行。子仓可整体 override；仓内可单独调整。
+description: 派发写类任务前加载，判断目标角色是否具备对应目录写权限，避免无效派发。
 disable-model-invocation: true
 ---
 
@@ -25,16 +25,7 @@ disable-model-invocation: true
 - `categories`：可写目录类别集合（取值 `intermediate` / `test` / `doc` / `code`，具体定义见 hook 内置）
 - `exts`：可写文件扩展名（`"*"` 或后缀数组如 `[".md"]`）
 
-init.sh 在 skill 链接完成后，从运行时目录 `skills/workflow-agent-permissions/hooks/`（opencode 为 `.opencode/skills/`、claude 为 `.claude/skills/`）整体复制到 `.cannbot/permissions/`（经软链接读取，自动吃到子仓 override 版本）。**缺失才生成、已存在保留**（工作区配置优先）。
-
-## 覆写
-
-- **子仓整体 override**：提供 `<repo>/agent/skills/workflow-agent-permissions/`，沿用现有 skill override 机制整体替换基类 skill。
-- **仓内单独调整**：直接编辑 `.cannbot/permissions/<Role>.js`，不污染 skill 源；如需重置，删除 `.cannbot/permissions/` 后重跑 init.sh。
-
-## 全局配置
-
-`categories`（路径前缀分类表）/ `primaryAgents`（PM 角色别名表）/ `unknownRolePolicy` 为工作流级约定，留在 hook 内置不暴露给仓；仅在特殊场景下改动 hook 源码。
+init.sh 将 `hooks/` 下的角色文件整体复制到 `.cannbot/permissions/`（缺失才生成、已存在保留）。
 
 ## 启动校验
 

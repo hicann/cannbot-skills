@@ -5,8 +5,6 @@
 > - **模式 A（有评测集）**：评测集在算子目录（如 cann-bench `tasks/levelN/<op>/cases.yaml`）已自带用例集；本方法职责为**核对评测集 cases 对算子原型声明维度的覆盖完整性**并**补充未覆盖场景**，产物为**覆盖矩阵 + 补充用例表**。
 >
 > 下方一～五为两模式通用的设计方法；模式 A 在「落盘与下游」按对齐口径调整。测试工程组成与执行见 [test-framework.md](test-framework.md)；精度与同源纪律见 [precision-and-perf.md](precision-and-perf.md)；白盒补全见 [whitebox-design.md](whitebox-design.md)。
->
-> 本文件是基类默认方法（属 virtual），各算子仓可 override；override 时保持逻辑名 `repo-test-develop` 不变。
 
 ## 定位
 
