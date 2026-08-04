@@ -16,6 +16,13 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    // Bench files are separate so `npm run test` skips them by default.
+    // Run with `npm run test:bench`.
+    exclude: ["tests/**/*.bench.ts", "tests/**/*.bench.tsx", "node_modules", "dist", ".next"],
+  },
+  bench: {
+    include: ["tests/**/*.bench.ts", "tests/**/*.bench.tsx"],
+    exclude: ["node_modules", "dist", ".next"],
   },
   resolve: {
     alias: {

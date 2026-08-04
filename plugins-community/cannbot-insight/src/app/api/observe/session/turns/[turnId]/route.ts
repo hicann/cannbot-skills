@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getContextWindowLimit } from '@/lib/context-window-config';
 import { selectInputContextTurns } from '@/lib/ingest/input-reconstruct';
+import { isContinuationTurn } from '@/lib/shared/command-parser';
 
 // Compute stable system overhead from the first assistant turn
 // For root turns: use root session; for subagent turns: use subagent's own turns
@@ -51,6 +52,58 @@ export async function GET(
   try {
     const { turnId } = await params;
 
+    // Virtual continuation turn: turnId ends with "-continuation"
+    // The real turn in DB is the compaction turn whose id is the prefix.
+    if (turnId.endsWith('-continuation')) {
+      const compactionId = turnId.slice(0, -'-continuation'.length);
+      const compaction = await prisma.turn.findUnique({
+        where: { id: compactionId },
+        select: { id: true, sessionId: true, turnIndex: true, role: true, content: true, contentSummary: true, contentJson: true, agentName: true, isSubagent: true, subagentName: true, subagentSessionId: true, createdAt: true, createdAt_ts: true },
+      });
+      if (!compaction || compaction.agentName !== 'compaction') {
+        return NextResponse.json(
+          { error: `Continuation turn not found: "${turnId}"` },
+          { status: 404 }
+        );
+      }
+      const systemOverheadTokens = await computeSystemOverhead(compaction.sessionId, compaction.subagentSessionId);
+      return NextResponse.json({
+        turnId,
+        sessionId: compaction.sessionId,
+        turnIndex: compaction.turnIndex,
+        role: 'user',
+        content: compaction.content,
+        contentJson: compaction.contentJson,
+        contentSummary: compaction.contentSummary ?? compaction.content?.substring(0, 200) ?? null,
+        inputMessagesJson: null,
+        inputMessagesCount: 0,
+        inputMessagesTokens: 0,
+        contextWindowPct: null,
+        systemOverheadTokens,
+        agentName: 'continuation',
+        subagentName: compaction.subagentName,
+        subagentSessionId: compaction.subagentSessionId,
+        isSubagent: compaction.isSubagent,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        latencyMs: 0,
+        ttftMs: null,
+        createdAt: compaction.createdAt_ts?.toISOString() ?? compaction.createdAt.toISOString(),
+        completedAt: null,
+        model: null,
+        modelId: null,
+        providerId: null,
+        contextWindowLimit: 200000,
+        finishReason: null,
+        toolCalls: [],
+        skillEvents: [],
+      });
+    }
+
     const turn = await prisma.turn.findUnique({
       where: { id: turnId },
       include: {
@@ -87,7 +140,7 @@ export async function GET(
       const previousTurns = await prisma.turn.findMany({
         where: prevWhere,
         orderBy: [{ turnIndex: 'asc' }],
-        select: { id: true, turnIndex: true, role: true, content: true },
+        select: { id: true, turnIndex: true, role: true, content: true, agentName: true },
       });
 
       // Fetch tool calls (args + result) for prior assistant turns
@@ -108,21 +161,42 @@ export async function GET(
       // Build ordered message list: assistant messages include tool_calls, tool_results keep their content.
       // Apply compact-aware windowing: start at the most recent /compact continuation
       // before this turn and skip local CLI command noise. See input-reconstruct.
-      const filtered = selectInputContextTurns(previousTurns, turn.turnIndex);
-      const messages: Array<{ role: string; content: string | null; tokenCount: number; tool_calls?: Array<{ name: string; args: string | null; result: string | null; isSkillRelated?: boolean }> }> = [];
+      const filtered = selectInputContextTurns(previousTurns, turn.turnIndex, turn.agentName);
+
+      // Fetch compaction turn totalTokens for accurate continuation tokenCount
+      const compactionIds = filtered.filter(ct => ct.agentName === 'compaction').map(ct => ct.id);
+      const compactionTokenRows = compactionIds.length > 0 ? await prisma.turn.findMany({
+        where: { id: { in: compactionIds } },
+        select: { id: true, totalTokens: true },
+      }) : [];
+      const compactionTokenMap = new Map<string, number>();
+      for (const cr of compactionTokenRows) {
+        compactionTokenMap.set(cr.id, cr.totalTokens);
+      }
+
+      const messages: Array<{ role: string; content: string | null; tokenCount: number; agentName?: string; tool_calls?: Array<{ name: string; args: string | null; result: string | null; isSkillRelated?: boolean }> }> = [];
+      const targetInputTokens = turn.agentName === 'compaction'
+        ? (turn.inputMessagesTokens > 0 ? turn.inputMessagesTokens : 0)
+        : (turn.inputMessagesTokens > 0 ? Math.max(0, turn.inputMessagesTokens - turn.outputTokens) : 0);
       for (const ct of filtered) {
         const contentLen = ct.content?.length ?? 0;
         const baseTokens = Math.round(contentLen / 3.5);
+        const isCompaction = ct.agentName === 'compaction';
+        const isContinuation = isCompaction || (ct.role === 'user' && ct.content && isContinuationTurn(ct.content));
+        const effectiveRole = isContinuation ? 'user' : ct.role;
 
         if (ct.role === 'assistant') {
           const tcs = toolCallsByTurnId.get(ct.id) ?? [];
           const argsTokens = tcs.reduce((s, tc) => s + Math.round((tc.argsJson?.length ?? 0) / 3.5), 0);
+          const compactionTotal = compactionTokenMap.get(ct.id) ?? 0;
+          const continuationTokens = isCompaction && compactionTotal > 0 ? compactionTotal : (isContinuation && targetInputTokens > 0 ? targetInputTokens : baseTokens + argsTokens);
           const msg: typeof messages[0] = {
-            role: ct.role,
+            role: effectiveRole,
             content: ct.content ?? null,
-            tokenCount: baseTokens + argsTokens,
+            tokenCount: continuationTokens,
           };
-          if (tcs.length > 0) {
+          if (isContinuation) msg.agentName = 'continuation';
+          if (tcs.length > 0 && !isCompaction) {
             msg.tool_calls = tcs.map(tc => {
               const isSkill = tc.isSkillRelated;
               const argsMax = isSkill ? 2000 : 1500;
@@ -137,11 +211,15 @@ export async function GET(
           }
           messages.push(msg);
         } else {
-          messages.push({
-            role: ct.role,
+          const isContinuationUser = isContinuation && ct.role === 'user';
+          const continuationTokens = isContinuationUser && targetInputTokens > 0 ? targetInputTokens : baseTokens;
+          const msg: typeof messages[0] = {
+            role: effectiveRole,
             content: ct.content ?? null,
-            tokenCount: baseTokens,
-          });
+            tokenCount: continuationTokens,
+          };
+          if (isContinuation) msg.agentName = 'continuation';
+          messages.push(msg);
         }
       }
 
@@ -160,8 +238,8 @@ export async function GET(
       contentJson: turn.contentJson,
       contentSummary: turn.contentSummary ?? turn.content?.substring(0, 200) ?? null,
       inputMessagesJson,
-      inputMessagesCount: turn.inputMessagesCount,
-      inputMessagesTokens: turn.inputMessagesTokens,
+      inputMessagesCount: turn.agentName === 'compaction' ? (inputMessagesJson ? JSON.parse(inputMessagesJson).length : turn.inputMessagesCount) : turn.inputMessagesCount,
+      inputMessagesTokens: turn.agentName === 'compaction' && turn.inputMessagesTokens === turn.outputTokens ? turn.inputTokens : turn.inputMessagesTokens,
       contextWindowPct: turn.contextWindowPct,
       systemOverheadTokens,
       agentName: turn.agentName,

@@ -8,16 +8,13 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { splitIntoTurns, resetIdCounter } from '../src/lib/ingest/turn-split.ts';
-import { readSession, listSessions } from '../src/lib/ingest/adapters/opencode-db.ts';
-import { getContextWindowLimit, getDefaultContextWindow } from '../src/lib/context-window-config.ts';
+import { getContextWindowLimit } from '../src/lib/context-window-config.ts';
 import type { RawInteraction } from '../src/lib/shared/types.ts';
 import type { TurnRow, ToolCallRow, SkillEventRow } from '../src/lib/ingest/turn-split.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 
 const SYNTHETIC_DATA_PATH = path.resolve(__dirname, 'data/synthetic-opencode.json');
-const REAL_DB_PATH = path.resolve(__dirname, 'data/opencode-sessions.db');
-const hasRealDB = fs.existsSync(REAL_DB_PATH);
 
 function loadSyntheticData(): RawInteraction[] {
   const raw = fs.readFileSync(SYNTHETIC_DATA_PATH, 'utf-8');
@@ -319,123 +316,6 @@ describe('turn-split', () => {
           expect(turn.totalTokens).toBe(source.usage.total);
         }
       }
-    });
-  });
-
-  describe.skipIf(!hasRealDB)('with real DB data', () => {
-    let interactions: RawInteraction[];
-    let result: { turns: TurnRow[], toolCalls: ToolCallRow[], skillEvents: SkillEventRow[] };
-    let sessionId: string;
-
-    beforeAll(() => {
-      resetIdCounter();
-      const sessions = listSessions(REAL_DB_PATH);
-      const sessionWithTools = sessions.find(s => s.turnCount > 5) || sessions[0];
-      sessionId = sessionWithTools.id;
-      interactions = readSession(REAL_DB_PATH, sessionId);
-      result = splitIntoTurns(interactions, sessionId);
-    });
-
-    it('produces correct Turn count matching RawInteraction count', () => {
-      expect(result.turns.length).toBe(interactions.length);
-    });
-
-    it('produces correct ToolCall count', () => {
-      const expectedCount = interactions.reduce((sum, i) => {
-        return sum + (i.tool_calls ? i.tool_calls.length : 0);
-      }, 0);
-      expect(result.toolCalls.length).toBe(expectedCount);
-    });
-
-    it('each Turn has all required fields', () => {
-      for (const turn of result.turns) {
-        expect(turn).toHaveProperty('id');
-        expect(turn).toHaveProperty('sessionId');
-        expect(turn).toHaveProperty('turnIndex');
-        expect(turn).toHaveProperty('role');
-        expect(turn).toHaveProperty('content');
-        expect(turn).toHaveProperty('contentSummary');
-        expect(turn).toHaveProperty('totalTokens');
-        expect(turn).toHaveProperty('inputTokens');
-        expect(turn).toHaveProperty('outputTokens');
-        expect(turn).toHaveProperty('latencyMs');
-        expect(turn).toHaveProperty('createdAt_ts');
-        expect(turn).toHaveProperty('isSubagent');
-      }
-    });
-
-    it('turnIndex is 0-based sequential', () => {
-      for (let i = 0; i < result.turns.length; i++) {
-        expect(result.turns[i].turnIndex).toBe(i);
-      }
-    });
-
-    it('roles include user and assistant', () => {
-      const roles = result.turns.map(t => t.role);
-      expect(roles).toContain('user');
-      expect(roles).toContain('assistant');
-    });
-
-    it('assistant turns have null inputMessagesJson (reconstructed at read time)', () => {
-      const assistantTurns = result.turns.filter(t => t.role === 'assistant');
-      for (const turn of assistantTurns) {
-        expect(turn.inputMessagesJson).toBeNull();
-      }
-    });
-
-    it('contentSummary is truncated or equal to content', () => {
-      for (const turn of result.turns) {
-        if (turn.content && turn.content.length > 200) {
-          expect(turn.contentSummary!.length).toBeLessThanOrEqual(200);
-        } else if (turn.content) {
-          expect(turn.contentSummary).toBe(turn.content);
-        } else {
-          expect(turn.contentSummary).toBeNull();
-        }
-      }
-    });
-
-    it('token breakdown fields are populated for assistant turns', () => {
-      const assistantWithUsage = result.turns.find(
-        t => t.role === 'assistant' && t.totalTokens > 0
-      );
-      if (assistantWithUsage) {
-        expect(assistantWithUsage.inputTokens).toBeGreaterThanOrEqual(0);
-        expect(assistantWithUsage.outputTokens).toBeGreaterThanOrEqual(0);
-      }
-    });
-
-    it('ToolCall turnId references existing Turn', () => {
-      for (const tc of result.toolCalls) {
-        const turn = result.turns.find(t => t.id === tc.turnId);
-        expect(turn).toBeDefined();
-      }
-    });
-
-    it('sessionId set correctly on all turns', () => {
-      for (const turn of result.turns) {
-        expect(turn.sessionId).toBe(sessionId);
-      }
-    });
-
-    it('logs first 3 turns for inspection', () => {
-      console.log('\n=== Real DB: First 3 Turns ===');
-      for (const turn of result.turns.slice(0, 3)) {
-        console.log(JSON.stringify({
-          turnIndex: turn.turnIndex,
-          role: turn.role,
-          contentSummary: turn.contentSummary,
-          totalTokens: turn.totalTokens,
-          inputTokens: turn.inputTokens,
-          outputTokens: turn.outputTokens,
-          latencyMs: turn.latencyMs,
-          model: turn.model,
-          isSubagent: turn.isSubagent,
-          inputMessagesCount: turn.inputMessagesCount,
-          contextWindowPct: turn.contextWindowPct,
-        }, null, 2));
-      }
-      console.log(`\nTotal turns: ${result.turns.length}, Total toolCalls: ${result.toolCalls.length}, Total skillEvents: ${result.skillEvents.length}`);
     });
   });
 

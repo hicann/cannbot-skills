@@ -7,7 +7,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, type RefObject } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -64,6 +64,7 @@ const ROLE_COLORS: Record<string, string> = {
   tool_result: "border-l-teal-500 bg-teal-50/50 dark:bg-teal-500/5",
   command: "border-l-gray-500 bg-gray-50/50 dark:bg-gray-500/5",
   continuation: "border-l-purple-500 bg-purple-50/50 dark:bg-purple-500/5",
+  compaction: "border-l-amber-500 bg-amber-50/50 dark:bg-amber-500/5",
 }
 
 const ROLE_ICONS: Record<string, string> = {
@@ -72,16 +73,18 @@ const ROLE_ICONS: Record<string, string> = {
   system: "⚙️",
   tool_result: "🔧",
   command: "⚡",
-  continuation: "📋",
+  continuation: "⚡",
+  compaction: "⚡",
 }
 
-const ROLE_BADGE_VARIANTS: Record<string, "blue" | "green" | "gray" | "purple" | "orange"> = {
+const ROLE_BADGE_VARIANTS: Record<string, "blue" | "green" | "gray" | "purple" | "orange" | "yellow"> = {
   user: "blue",
   assistant: "green",
   system: "gray",
   tool_result: "purple",
   command: "gray",
   continuation: "purple",
+  compaction: "yellow",
 }
 
 function formatLatency(ms: number): string {
@@ -110,6 +113,83 @@ interface SubagentLane {
   turnCount: number
 }
 
+interface LaneCtx {
+  subagentBlocksByTurnId: Map<string, SubagentLane[]>
+  expandedSubagents: Set<string>
+  onToggleBridge: (bridgeId: string) => void
+  selectedTurnId: string | null
+  onSelectTurn: (turnId: string) => void
+  selectedSubRef: RefObject<HTMLButtonElement | null>
+}
+
+// Recursive subagent lane: renders a lane's turns AND, nested, any sub-lanes
+// dispatched by those turns (supports subagent-of-subagent, not just root→subagent).
+function SubagentLaneView({ lane, ctx }: { lane: SubagentLane; ctx: LaneCtx }) {
+  const isExpanded = ctx.expandedSubagents.has(lane.bridgeId)
+  const isError = lane.status === "error"
+  const childLanes: SubagentLane[] = []
+  for (const st of lane.turns) {
+    const lns = ctx.subagentBlocksByTurnId.get(st.turnId)
+    if (lns) childLanes.push(...lns)
+  }
+  return (
+    <div className={cn(
+      "border rounded-lg",
+      isError ? "border-red-300 bg-red-50/30 dark:bg-red-500/5" : "border-orange-200 bg-orange-50/20 dark:bg-orange-500/5"
+    )}>
+      <button
+        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left cursor-pointer hover:bg-accent/30 transition-colors"
+        onClick={() => ctx.onToggleBridge(lane.bridgeId)}
+      >
+        <span className="text-xs select-none">{isExpanded ? "▼" : "▶"}</span>
+        <Badge variant="orange" className="text-xs">{lane.name}</Badge>
+        {lane.summary && <span className="text-xs text-foreground/80 truncate">{lane.summary}</span>}
+        {isError && <Badge variant="red" className="text-xs">error</Badge>}
+      </button>
+      <div className="flex items-center gap-2 px-2 pb-1 text-xs text-muted-foreground">
+        <span>{lane.turnCount} turns</span>
+        {lane.totalTokens > 0 && <span>{formatTokenCount(lane.totalTokens)} tok</span>}
+        {lane.latencyMs > 0 && <span>{formatLatency(lane.latencyMs)}</span>}
+      </div>
+      {isExpanded && lane.turns.length > 0 && (
+        <div className="px-2 pb-2 space-y-1">
+          {lane.turns.map(st => (
+            <button
+              key={st.turnId}
+              ref={ctx.selectedTurnId === st.turnId ? ctx.selectedSubRef : null}
+              className={cn(
+                "w-full text-left flex items-center gap-1.5 px-2 py-1 rounded border-l-2 text-xs transition-colors cursor-pointer",
+                "border-l-orange-400 bg-orange-50/30 dark:bg-orange-500/10",
+                ctx.selectedTurnId === st.turnId ? "ring-1 ring-primary/50" : "hover:bg-accent/30"
+              )}
+              onClick={() => ctx.onSelectTurn(st.turnId)}
+            >
+              <span className="font-mono text-muted-foreground">#{st.turnIndex}</span>
+              <Badge variant={ROLE_BADGE_VARIANTS[st.role] ?? "gray"} className="text-xs">
+                {ROLE_ICONS[st.role]} {st.role}
+              </Badge>
+              {st.toolCalls.length > 0 && <Badge variant="outline" className="text-xs">{st.toolCalls.length} tools</Badge>}
+              {st.contentSummary && (
+                <span className="text-foreground/80 truncate max-w-[200px]">
+                  {st.contentSummary.replace(/^<thinking>/, "").substring(0, 40)}
+                </span>
+              )}
+              {st.totalTokens > 0 && <span className="text-muted-foreground">{formatTokenCount(st.totalTokens)}</span>}
+            </button>
+          ))}
+          {childLanes.length > 0 && (
+            <div className="ml-3 pl-3 mt-1 border-l border-orange-200 dark:border-orange-500/30 space-y-1">
+              {childLanes.map(cl => (
+                <SubagentLaneView key={cl.bridgeId} lane={cl} ctx={ctx} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, highlightSubagentTurnId, scrollToTurnId }: TurnTimelineProps) {
   const [expandedSubagents, setExpandedSubagents] = useState<Set<string>>(new Set())
   const [filterRole, setFilterRole] = useState<string | null>(null)
@@ -118,21 +198,35 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
   const selectedRef = useRef<HTMLDivElement>(null)
   const selectedSubRef = useRef<HTMLButtonElement>(null)
 
-  // Expand subagent block when highlightSubagentTurnId is set (cross-tab navigation)
-  // highlightSubagentTurnId may be either a turnId or a subagentSessionId
+  // Expand subagent block(s) when highlightSubagentTurnId is set (cross-tab navigation).
+  // highlightSubagentTurnId may be either a turnId or a subagentSessionId.
+  // For nested subagents (subagent-of-subagent), walk the bridge chain up to root
+  // and expand EVERY ancestor bridge so the target turn is actually rendered.
   useEffect(() => {
     if (!highlightSubagentTurnId) return
     let subTurn = turns.find(t => t.turnId === highlightSubagentTurnId)
     if (!subTurn) {
       subTurn = turns.find(t => t.isSubagent && t.subagentSessionId === highlightSubagentTurnId)
     }
-    if (subTurn?.isSubagent && subTurn?.subagentSessionId) {
-      const matchingBridges = bridges.filter(b => b.subagentSessionId === subTurn.subagentSessionId)
-      for (const bridge of matchingBridges) {
-        if (!expandedSubagents.has(bridge.bridgeId)) {
-          setExpandedSubagents(prev => new Set(prev).add(bridge.bridgeId))
-        }
-      }
+    if (!subTurn?.isSubagent || !subTurn?.subagentSessionId) return
+    const toExpand = new Set<string>()
+    const seen = new Set<string | null>()
+    let curSid: string | null = subTurn.subagentSessionId
+    while (curSid && !seen.has(curSid)) {
+      seen.add(curSid)
+      const bridge = bridges.find(b => b.subagentSessionId === curSid)
+      if (!bridge) break
+      toExpand.add(bridge.bridgeId)
+      if (!bridge.dispatchTurnId) break
+      const dispTurn = turns.find(t => t.turnId === bridge.dispatchTurnId)
+      curSid = dispTurn?.isSubagent ? (dispTurn.subagentSessionId ?? null) : null
+    }
+    if (toExpand.size) {
+      setExpandedSubagents(prev => {
+        const next = new Set(prev)
+        for (const id of toExpand) next.add(id)
+        return next
+      })
     }
   }, [highlightSubagentTurnId, turns, bridges])
 
@@ -158,6 +252,15 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
   }, [scrollToTurnId, turns])
 
   const rootTurns = turns.filter(t => !t.isSubagent)
+
+  const onToggleBridge = (bridgeId: string) => {
+    setExpandedSubagents(prev => {
+      const next = new Set(prev)
+      if (next.has(bridgeId)) next.delete(bridgeId)
+      else next.add(bridgeId)
+      return next
+    })
+  }
 
   // Process command turns: group consecutive command-related turns, parse each group
   const commandInfoMap = new Map<string, { display: string; output: string | null }>()
@@ -203,6 +306,15 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
       })
       .map(t => {
         const text = t.contentSummary ?? ""
+        if (t.agentName === 'compaction-boundary') {
+          return {
+            ...t,
+            displayRole: "compaction" as string,
+            displayContent: text || "/compact",
+            commandOutput: null as string | null,
+            continuationSummary: null as string | null,
+          }
+        }
         if (isCommandTurn(text)) {
           const cmdInfo = commandInfoMap.get(t.turnId)
           return {
@@ -223,7 +335,22 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
             continuationSummary: info.fullSummary,
           }
         }
-        return { ...t, displayRole: t.role, displayContent: t.contentSummary ?? "", commandOutput: null as string | null, continuationSummary: null as string | null }
+        if (t.agentName === 'continuation') {
+          const summaryLine = text.split('\n').find(l => l.trim()) ?? "Compact summary"
+          return {
+            ...t,
+            displayRole: "continuation" as string,
+            displayContent: summaryLine.substring(0, 120),
+            commandOutput: null as string | null,
+            continuationSummary: text,
+          }
+        }
+        const displayRole = t.role
+        let displayContent = t.contentSummary ?? ""
+        if (t.agentName === 'compaction') {
+          displayContent = text
+        }
+        return { ...t, displayRole, displayContent, commandOutput: null as string | null, continuationSummary: null as string | null }
       })
     const result = [...enhanced]
     for (let i = 0; i < result.length - 1; i++) {
@@ -293,6 +420,15 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
   })
 
   const rootRoles = [...new Set(displayRootTurns.map(t => t.displayRole))]
+
+  const laneCtx: LaneCtx = {
+    subagentBlocksByTurnId,
+    expandedSubagents,
+    onToggleBridge,
+    selectedTurnId,
+    onSelectTurn,
+    selectedSubRef,
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -365,6 +501,10 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
                           : `⚡ ${turn.skillEvents[0].skillName} +${turn.skillEvents.length - 1}`}
                       </Badge>
                     )}
+                    {turn.agentName === 'compaction' && turn.displayRole !== 'compaction' && (
+                      <Badge variant="yellow" className="text-xs">⚡ compact</Badge>
+                    )}
+
                   </div>
 
                   {turn.displayContent && (
@@ -373,7 +513,9 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
                         ? <span className="font-mono font-medium">{turn.displayContent}</span>
                         : turn.displayRole === "continuation"
                           ? <span className="italic">{turn.displayContent}</span>
-                          : turn.displayContent}
+                          : turn.displayRole === "compaction"
+                            ? <span className="font-mono font-medium">{turn.displayContent}</span>
+                            : turn.displayContent}
                       {turn.commandOutput && (
                         <span className="block opacity-60 mt-0.5">{turn.commandOutput}</span>
                       )}
@@ -399,77 +541,9 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
                     lanes.length === 1 ? "" : "grid gap-1.5",
                     lanes.length === 2 ? "grid-cols-2" : lanes.length === 3 ? "grid-cols-3" : "grid-cols-2"
                   )}>
-                    {lanes.map(lane => {
-                      const isExpanded = expandedSubagents.has(lane.bridgeId)
-                      const isError = lane.status === "error"
-
-                      return (
-                        <div key={lane.bridgeId} className={cn(
-                          "border rounded-lg",
-                          isError ? "border-red-300 bg-red-50/30 dark:bg-red-500/5" : "border-orange-200 bg-orange-50/20 dark:bg-orange-500/5"
-                        )}>
-                          <button
-                            className={cn(
-                              "w-full flex items-center gap-1.5 px-2 py-1.5 text-left cursor-pointer hover:bg-accent/30 transition-colors",
-                            )}
-                            onClick={() => {
-                              setExpandedSubagents(prev => {
-                                const next = new Set(prev)
-                                if (next.has(lane.bridgeId)) next.delete(lane.bridgeId)
-                                else next.add(lane.bridgeId)
-                                return next
-                              })
-                            }}
-                          >
-                            <span className="text-xs select-none">{isExpanded ? "▼" : "▶"}</span>
-                            <Badge variant="orange" className="text-xs">{lane.name}</Badge>
-                            {lane.summary && (
-                              <span className="text-xs text-foreground/80 truncate">{lane.summary}</span>
-                            )}
-                            {isError && <Badge variant="red" className="text-xs">error</Badge>}
-                          </button>
-
-                          <div className="flex items-center gap-2 px-2 pb-1 text-xs text-muted-foreground">
-                            <span>{lane.turnCount} turns</span>
-                            {lane.totalTokens > 0 && <span>{formatTokenCount(lane.totalTokens)} tok</span>}
-                            {lane.latencyMs > 0 && <span>{formatLatency(lane.latencyMs)}</span>}
-                          </div>
-
-                          {isExpanded && lane.turns.length > 0 && (
-                            <div className="px-2 pb-2 space-y-1">
-                              {lane.turns.map(st => (
-                                <button
-                                  key={st.turnId}
-                                  ref={selectedTurnId === st.turnId ? selectedSubRef : null}
-                                  className={cn(
-                                    "w-full text-left flex items-center gap-1.5 px-2 py-1 rounded border-l-2 text-xs transition-colors cursor-pointer",
-                                    "border-l-orange-400 bg-orange-50/30 dark:bg-orange-500/10",
-                                    selectedTurnId === st.turnId ? "ring-1 ring-primary/50" : "hover:bg-accent/30"
-                                  )}
-                                  onClick={() => onSelectTurn(st.turnId)}
-                                >
-                                  <span className="font-mono text-muted-foreground">#{st.turnIndex}</span>
-                                  <Badge variant={ROLE_BADGE_VARIANTS[st.role] ?? "gray"} className="text-xs">
-                                    {ROLE_ICONS[st.role]} {st.role}
-                                  </Badge>
-                                  {st.toolCalls.length > 0 && (
-                                    <Badge variant="outline" className="text-xs">{st.toolCalls.length} tools</Badge>
-                                  )}
-                                  {st.contentSummary && (
-                                    <span className="text-foreground/80 truncate max-w-[200px]">
-                                      {st.contentSummary.replace(/^<thinking>/, "").substring(0, 40)}
-                                    </span>
-                                  )}
-                                  {st.totalTokens > 0 && (
-                                    <span className="text-muted-foreground">{formatTokenCount(st.totalTokens)}</span>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                    {lanes.map(lane => (
+                      <SubagentLaneView key={lane.bridgeId} lane={lane} ctx={laneCtx} />
+                    ))}
                   </div>
                 )}
               </div>

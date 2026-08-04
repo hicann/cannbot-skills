@@ -1,0 +1,122 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+import { NextResponse } from "next/server"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { prisma } from "@/lib/db"
+import {
+  recoverSkillBody,
+  recoverMainAgentWorkflowBody,
+  buildAuditArgs,
+  buildStructuredRecords,
+  buildTranscriptArgs,
+} from "@/lib/skill-eval-audit"
+import { makeStreamingAuditResponse } from "@/lib/skill-eval-runner"
+
+/**
+ * 对当前 session 的某个 skill 跑 skill-eval 对账（审"真实执行 vs SKILL.md 声明"）。
+ *
+ * 数据流：taskId → 解出 session.id + sourcePath(opencode .db) → 恢复该 skill 正文
+ * （invoke ToolCall.resultJson 的 <skill_content>）→ 物化临时 SKILL.md →
+ * `skill-eval audit <tmp> --db <sourcePath> --session <taskId> -o <out>` → 读 audit-report.json。
+ *
+ * skill-eval 自带 LLM（走它自己的 claude CLI，注入 529 绕过 env），所以这里不透传 provider。
+ * 输出读文件不读 stdout（--format json 的 stdout 被 rich 折行 + 尾行污染）。
+ */
+export async function POST(req: Request) {
+  const { taskId, skillName, kind, framework } = await req.json()
+  if (!taskId) {
+    return NextResponse.json({ error: "Missing taskId" }, { status: 400 })
+  }
+  // kind: "skill"(默认)| "root"(审顶层主 agent 编排 vs 主 agent 的 workflow 级 SKILL.md)。
+  // root 的声明不在 skillEvents（主 agent 通常只 dispatch、不 invoke）→ 从 session 首条
+  // user turn 的注入系统提示取（recoverMainAgentWorkflowBody），而非 recoverSkillBody。
+  const auditKind: "skill" | "root" = kind === "root" ? "root" : "skill"
+  // skill 路需 skillName（恢复该 skill 正文）；root 路不用 skillName（声明从 turn0 取）。
+  if (auditKind !== "root" && !skillName) {
+    return NextResponse.json({ error: "Missing skillName" }, { status: 400 })
+  }
+
+  const session = await prisma.session.findFirst({
+    where: { taskId, ...(framework ? { framework } : {}) },
+  })
+  if (!session?.sourcePath) {
+    return NextResponse.json(
+      { error: "该 session 无 sourcePath（非从 .db 导入？skill-eval --db 需要 .db）" },
+      { status: 404 },
+    )
+  }
+
+  const body =
+    auditKind === "root"
+      ? await recoverMainAgentWorkflowBody(session.id, prisma)
+      : await recoverSkillBody(session.id, skillName, prisma)
+  if (!body) {
+    return NextResponse.json(
+      auditKind === "root"
+        ? { error: "此 session 无可对账的主 agent workflow 声明（首条 user turn 过短或缺失）" }
+        : { error: `在此 session 恢复不到 skill "${skillName}" 的正文（无 invoke 事件 / resultJson）` },
+      { status: 404 },
+    )
+  }
+
+  const skillTmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-eval-audit-"))
+  try {
+    const safeName = String(skillName).replace(/[^a-zA-Z0-9._-]/g, "_")
+    const skillDir = path.join(skillTmp, safeName)
+    fs.mkdirSync(skillDir, { recursive: true })
+    // 恢复的正文无 YAML frontmatter，而 skill-eval 的 parse_skill_md 要 `---\nname:` 才能
+    // 得名（--kind skill 切段用它匹配 transcript 里 input.skill；--kind root 不按 name 切、
+    // name 无意义，但 parse_skill_md 仍需 frontmatter 才解析指令）。注入：root 用固定名，
+    // skill 用真实 skillName（与 transcript input.skill 对得上）。
+    const declName = auditKind === "root" ? "main-agent-workflow" : skillName
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---\nname: ${declName}\ndescription: recovered from session\n---\n${body}\n`,
+    )
+
+    const outputDir = path.join(skillTmp, "out")
+    fs.mkdirSync(outputDir, { recursive: true })
+
+    // framework 决定喂法:opencode 原生 → --db(直读 sourcePath 的 sessions.db);
+    // 其余(cannbot-insight / claude-code)→ 结构化 records JSON(--transcript),把 insight 已
+    // 归一化的 Turn/ToolCall 直喂 skill-eval,绕开 opencode-native db 的格式限制。
+    const useTranscript = session.framework !== "opencode"
+    let args: string[]
+    if (useTranscript) {
+      const transcriptPath = path.join(skillTmp, "session.json")
+      fs.writeFileSync(
+        transcriptPath,
+        JSON.stringify(await buildStructuredRecords(session.id, prisma)),
+      )
+      args = buildTranscriptArgs({ skillDir, transcriptPath, outputDir, kind: auditKind })
+    } else {
+      args = buildAuditArgs({
+        skillDir,
+        dbPath: session.sourcePath,
+        sessionId: taskId,
+        outputDir,
+        kind: auditKind,
+      })
+    }
+
+    // 流式 NDJSON：spawn skill-eval，stdout 解析进度回传 progress 事件，结束回传 result/error。
+    // tmp 清理放进流的 finally（等 skill-eval 跑完），不能在路由 return 时删。
+    return makeStreamingAuditResponse(args, outputDir, () =>
+      fs.rmSync(skillTmp, { recursive: true, force: true }),
+    )
+  } catch (e) {
+    fs.rmSync(skillTmp, { recursive: true, force: true })
+    return NextResponse.json(
+      { error: `准备 skill 对账失败：${e instanceof Error ? e.message : String(e)}` },
+      { status: 500 },
+    )
+  }
+}

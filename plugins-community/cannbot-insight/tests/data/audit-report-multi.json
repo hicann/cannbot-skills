@@ -1,0 +1,87 @@
+{
+  "skill_name": "multi-skill",
+  "transcripts": ["t-1", "t-2"],
+  "transcript_sources": ["cc", "opencode"],
+  "summary": { "total": 4, "pass": 2, "fail": 2, "na": 0, "unresolved": 0, "indeterminate": 0 },
+  "refine_dropped_count": 0,
+  "by_instruction": [
+    {
+      "instruction_text": "改动前必须先读相关源码",
+      "source": "STEP",
+      "category": "step",
+      "pass_count": 1,
+      "fail_count": 1,
+      "na_count": 0,
+      "total": 2,
+      "fail_rate": 0.5,
+      "fail_in_transcripts": ["t-2"],
+      "na_in_transcripts": [],
+      "fail_seqs": [2],
+      "na_seqs": [],
+      "noise_label": "uncertain",
+      "noise_reasons": ["证据模糊"]
+    },
+    {
+      "instruction_text": "输出格式必须含变更摘要",
+      "source": "OUTPUT_FORMAT",
+      "category": "output",
+      "pass_count": 1,
+      "fail_count": 1,
+      "na_count": 0,
+      "total": 2,
+      "fail_rate": 0.5,
+      "fail_in_transcripts": ["t-1"],
+      "na_in_transcripts": [],
+      "fail_seqs": [4],
+      "na_seqs": []
+    }
+  ],
+  "findings": [
+    {
+      "instruction_text": "改动前必须先读相关源码",
+      "source": "STEP",
+      "verdict": "PASS",
+      "method": "PROGRAMMATIC",
+      "category": "step",
+      "evidence": "t-1 命中 Read",
+      "transcript": "t-1",
+      "seq": 1,
+      "sources": ["STEP"]
+    },
+    {
+      "instruction_text": "改动前必须先读相关源码",
+      "source": "STEP",
+      "verdict": "FAIL",
+      "method": "LLM",
+      "category": "step",
+      "evidence": "t-2 未先 Read",
+      "transcript": "t-2",
+      "seq": 2,
+      "sources": ["STEP"],
+      "related": ["#4"]
+    },
+    {
+      "instruction_text": "输出格式必须含变更摘要",
+      "source": "OUTPUT_FORMAT",
+      "verdict": "PASS",
+      "method": "PROGRAMMATIC",
+      "category": "output",
+      "evidence": "t-2 含摘要",
+      "transcript": "t-2",
+      "seq": 3,
+      "sources": ["OUTPUT_FORMAT"]
+    },
+    {
+      "instruction_text": "输出格式必须含变更摘要",
+      "source": "OUTPUT_FORMAT",
+      "verdict": "FAIL",
+      "method": "LLM",
+      "category": "output",
+      "evidence": "t-1 无摘要",
+      "transcript": "t-1",
+      "seq": 4,
+      "sources": ["OUTPUT_FORMAT"],
+      "related": ["#2"]
+    }
+  ]
+}

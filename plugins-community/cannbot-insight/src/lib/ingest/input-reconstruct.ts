@@ -13,6 +13,7 @@ export interface ContextTurn {
   turnIndex: number;
   role: string;
   content: string | null;
+  agentName?: string | null;
   isSubagent?: boolean;
   subagentSessionId?: string | null;
 }
@@ -37,17 +38,29 @@ export function isLocalCommandNoise(text: string | null): boolean {
 export function selectInputContextTurns(
   contextTurns: ContextTurn[],
   targetTurnIndex: number,
+  targetAgentName?: string | null,
 ): ContextTurn[] {
+  const isCompactionTurn = targetAgentName === 'compaction';
+
   let startTurnIndex = 0;
   for (const ct of contextTurns) {
-    if (ct.turnIndex < targetTurnIndex && ct.content && isContinuationTurn(ct.content)) {
-      startTurnIndex = Math.max(startTurnIndex, ct.turnIndex);
+    if (ct.turnIndex < targetTurnIndex) {
+      if (ct.content && isContinuationTurn(ct.content)) {
+        startTurnIndex = Math.max(startTurnIndex, ct.turnIndex);
+      }
+      if (ct.agentName === 'compaction' && !isCompactionTurn) {
+        startTurnIndex = Math.max(startTurnIndex, ct.turnIndex);
+      }
+      if (ct.agentName === 'compaction-boundary' && !isCompactionTurn) {
+        startTurnIndex = Math.max(startTurnIndex, ct.turnIndex + 1);
+      }
     }
   }
   return contextTurns.filter(ct =>
     ct.turnIndex < targetTurnIndex &&
     ct.turnIndex >= startTurnIndex &&
     ['user', 'assistant', 'system', 'tool_result'].includes(ct.role) &&
-    !isLocalCommandNoise(ct.content),
+    !isLocalCommandNoise(ct.content) &&
+    ct.agentName !== 'compaction-boundary',
   );
 }

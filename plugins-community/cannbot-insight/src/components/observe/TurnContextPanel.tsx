@@ -22,6 +22,7 @@ interface InputMessage {
   content: string | null
   tokenCount?: number
   name?: string
+  agentName?: string | null
   tool_calls?: ToolCallEntry[]
 }
 
@@ -52,12 +53,20 @@ interface TurnContextPanelProps {
   prevContextPct: number | null
 }
 
+const CONTINUATION_KEY = "continuation" as const
+const CONTINUATION_COLOR = "bg-purple-500" as const
+const CONTINUATION_TEXT_COLOR = "text-purple-600 dark:text-purple-400" as const
+const CONTINUATION_ICON = "⚡" as const
+const CONTINUATION_LABEL = "⚡ Continuation" as const
+const CONTINUATION_BADGE = "purple" as const
+
 const ROLE_COLORS: Record<string, string> = {
   system: "bg-purple-500",
   user: "bg-blue-500",
   assistant: "bg-emerald-500",
   tool_result: "bg-teal-500",
   tool: "bg-teal-500",
+  [CONTINUATION_KEY]: CONTINUATION_COLOR,
 }
 
 const ROLE_TEXT_COLORS: Record<string, string> = {
@@ -66,6 +75,7 @@ const ROLE_TEXT_COLORS: Record<string, string> = {
   assistant: "text-emerald-600 dark:text-emerald-400",
   tool_result: "text-teal-600 dark:text-teal-400",
   tool: "text-teal-600 dark:text-teal-400",
+  [CONTINUATION_KEY]: CONTINUATION_TEXT_COLOR,
 }
 
 const ROLE_ICONS: Record<string, string> = {
@@ -74,14 +84,16 @@ const ROLE_ICONS: Record<string, string> = {
   assistant: "🤖",
   tool_result: "🔧",
   tool: "🔧",
+  [CONTINUATION_KEY]: CONTINUATION_ICON,
 }
 
-const ROLE_BADGE_VARIANTS: Record<string, "blue" | "green" | "gray" | "purple" | "orange"> = {
+const ROLE_BADGE_VARIANTS: Record<string, "blue" | "green" | "gray" | "purple" | "orange" | "yellow"> = {
   system: "purple",
   user: "blue",
   assistant: "green",
   tool_result: "gray",
   tool: "gray",
+  [CONTINUATION_KEY]: CONTINUATION_BADGE,
 }
 
 function formatTokenCount(n: number): string {
@@ -137,28 +149,29 @@ const ROLE_LABELS: Record<string, string> = {
   assistant: "Assistant",
   tool_result: "Tool Results",
   tool: "Tool Calls",
+  [CONTINUATION_KEY]: CONTINUATION_LABEL,
 }
 
 function categorizeMessages(messages: InputMessage[]): MessageCategory[] {
-  // Group consecutive same-role messages, preserving interleaved order
   const categories: MessageCategory[] = []
 
   for (const msg of messages) {
+    const effectiveRole = msg.agentName === 'continuation' ? CONTINUATION_KEY : msg.role
     const cls = classifySkillHeader(msg)
     const isSkill = cls.isSkillHeader && msg.role === "system"
     const last = categories[categories.length - 1]
 
-    if (last && last.role === msg.role) {
+    if (last && last.role === effectiveRole) {
       last.messages.push(msg)
       last.totalTokens += msg.tokenCount ?? 0
       if (isSkill) last.skillHeaders.push({ msg, skillName: cls.skillName })
     } else {
       categories.push({
-        role: msg.role,
-        label: ROLE_LABELS[msg.role] ?? msg.role,
-        icon: ROLE_ICONS[msg.role] ?? "?",
-        color: ROLE_COLORS[msg.role] ?? "bg-gray-400",
-        textColor: ROLE_TEXT_COLORS[msg.role] ?? "text-gray-600",
+        role: effectiveRole,
+        label: ROLE_LABELS[effectiveRole] ?? msg.role,
+        icon: ROLE_ICONS[effectiveRole] ?? "?",
+        color: ROLE_COLORS[effectiveRole] ?? "bg-gray-400",
+        textColor: ROLE_TEXT_COLORS[effectiveRole] ?? "text-gray-600",
         messages: [msg],
         totalTokens: msg.tokenCount ?? 0,
         skillHeaders: isSkill ? [{ msg, skillName: cls.skillName }] : [],
@@ -419,15 +432,16 @@ function ContextSection({ info, prevPct }: { info: ContextInfo; prevPct: number 
                 const summary = truncate(msg.content ?? "", 80)
                 const showFull = isMsgExpanded && msg.content && msg.content.length > 80
                 const isSkill = cat.skillHeaders.some(sh => sh.msg === msg)
+                const isContinuationMsg = msg.agentName === 'continuation'
 
                 return (
-                  <div key={key} className={cn("border rounded-md overflow-hidden", isSkill && "border-l-3 border-l-yellow-400 bg-yellow-50/10 dark:bg-yellow-500/5")}>
+                  <div key={key} className={cn("border rounded-md overflow-hidden", isSkill && "border-l-3 border-l-yellow-400 bg-yellow-50/10 dark:bg-yellow-500/5", isContinuationMsg && "border-l-3 border-l-purple-500 bg-purple-50/20 dark:bg-purple-500/10")}>
                     <button
                       className="w-full flex items-center gap-1.5 px-2 py-1 hover:bg-accent/30 transition-colors text-xs cursor-pointer"
                       onClick={() => toggleMsg(key)}
                     >
-                      <Badge variant={ROLE_BADGE_VARIANTS[msg.role] ?? "gray"} className="text-xs">
-                        {msg.role}
+                      <Badge variant={isContinuationMsg ? CONTINUATION_BADGE : (ROLE_BADGE_VARIANTS[msg.role] ?? "gray")} className="text-xs">
+                        {isContinuationMsg ? "⚡ continuation" : msg.role}
                       </Badge>
                       {msg.name && <span className="text-muted-foreground">{msg.name}</span>}
                       {isSkill && <Badge variant="yellow" className="text-xs">⚡ skill</Badge>}

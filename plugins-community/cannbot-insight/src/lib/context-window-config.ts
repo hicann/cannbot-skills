@@ -32,7 +32,7 @@ const DEFAULT_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-4-6": 200000,
   "claude-opus-4": 200000,
   "claude-opus-4-7": 200000,
-  "claude-opus-4-8": 200000,
+  "claude-opus-4-8": 1048576,
   "claude-opus-5": 1048576,
   "claude-haiku-4-5": 200000,
   "glm-5": 200000,
@@ -102,10 +102,15 @@ export function getContextWindowLimit(model: string | null): number {
     if (DEFAULT_CONTEXT_WINDOWS[parts[1]]) return DEFAULT_CONTEXT_WINDOWS[parts[1]];
   }
 
-  for (const key of Object.keys(config.models ?? {})) {
+  // Substring fallback: match the longest (most specific) key first so e.g.
+  // "claude-opus-4-8-20250101" hits "claude-opus-4-8" (1M), not the shorter
+  // "claude-opus-4" (200k) which would otherwise shadow it by appearing earlier.
+  const configKeys = Object.keys(config.models ?? {}).sort((a, b) => b.length - a.length);
+  for (const key of configKeys) {
     if (model.includes(key)) return config.models![key];
   }
-  for (const key of Object.keys(DEFAULT_CONTEXT_WINDOWS)) {
+  const defaultKeys = Object.keys(DEFAULT_CONTEXT_WINDOWS).sort((a, b) => b.length - a.length);
+  for (const key of defaultKeys) {
     if (model.includes(key)) return DEFAULT_CONTEXT_WINDOWS[key];
   }
 

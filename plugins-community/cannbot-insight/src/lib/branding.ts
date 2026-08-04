@@ -15,4 +15,7 @@ const BRAND_CLI_ALIAS = "cbi"
 // Data format identifier — always "cannbot-insight" regardless of branding
 const BRAND_SOURCE_TYPE = "cannbot-insight"
 
-export { BRAND_NAME, BRAND_SLUG, BRAND_DESCRIPTION, BRAND_CONFIG_DIR_SUFFIX, BRAND_CLI_ALIAS, BRAND_SOURCE_TYPE }
+// 数据之湖显示名：CANNBot 品牌用 "CANNbay"，其他品牌用 "contextBay"
+const BAY_NAME = BRAND_SLUG === "cannbot-insight" ? "CANNbay" : "contextBay"
+
+export { BRAND_NAME, BRAND_SLUG, BRAND_DESCRIPTION, BRAND_CONFIG_DIR_SUFFIX, BRAND_CLI_ALIAS, BRAND_SOURCE_TYPE, BAY_NAME }

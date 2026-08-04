@@ -32,6 +32,7 @@ interface TurnRowItem {
   reasoningTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  inputMessagesTokens: number
   contextWindowPct: number | null
   latencyMs: number
   createdAt: string | null
@@ -112,8 +113,14 @@ function computeAgentStats(turns: TurnRowItem[], contextWindowLimit: number): Ag
     const compactList: Array<{ turnIndex: number; timestamp: string | null; note: string }> = []
     const contList: Array<{ turnIndex: number; timestamp: string | null }> = []
     for (const t of turns) {
-      if (t.role !== "user" || t.isSubagent) continue
+      if (t.isSubagent) continue
       const text = t.contentSummary ?? ""
+      if (t.agentName === 'compaction-boundary') {
+        compactList.push({ turnIndex: t.turnIndex, timestamp: t.createdAt, note: text || "/compact" })
+        contList.push({ turnIndex: t.turnIndex, timestamp: t.createdAt })
+        continue
+      }
+      if (t.role !== "user") continue
       if (isCommandTurn(text)) {
         const texts = [text]
         const idx = turns.indexOf(t)
@@ -187,7 +194,7 @@ function computeAgentStats(turns: TurnRowItem[], contextWindowLimit: number): Ag
   for (const [sid, agentTurns] of sessionMap) {
     const isRoot = sid === "root"
     const agentName = agentTurns[0].agentName ?? (isRoot ? "Main Agent" : "?")
-    const realInput = agentTurns.map(t => t.totalTokens)
+    const realInput = agentTurns.map(t => t.inputMessagesTokens || t.totalTokens)
     const cacheRead = agentTurns.map(t => t.cacheReadTokens ?? 0)
     const ctxPcts = agentTurns.map(t => t.contextWindowPct ?? 0).filter(p => p > 0)
 
@@ -224,7 +231,7 @@ function computeAgentStats(turns: TurnRowItem[], contextWindowLimit: number): Ag
       }
     }
 
-    const peakTurn = agentTurns.reduce((max, t) => t.totalTokens > max.totalTokens ? t : max, agentTurns[0])
+    const peakTurn = agentTurns.reduce((max, t) => (t.inputMessagesTokens || t.totalTokens) > (max.inputMessagesTokens || max.totalTokens) ? t : max, agentTurns[0])
     if (peakTurn.totalTokens > 0) {
       const pct = peakTurn.contextWindowPct ?? (peakTurn.totalTokens / contextWindowLimit * 100)
       const note = pct > 80 ? `⚠️ 接近模型限制 (${contextWindowLimit / 1000}K)` : "峰值"
@@ -295,7 +302,7 @@ export function ContextTracker({ turns, sessionModel, onNavigateToTurn }: Contex
     return `${aname} #${idx}`
   }, [agentStats])
 
-  const visibleStats = showAll ? agentStats : agentStats.slice(0, 8)
+  const visibleStats = showAll ? agentStats : agentStats.slice(0, 5)
 
   if (agentStats.length === 0) {
     return (
@@ -380,9 +387,9 @@ export function ContextTracker({ turns, sessionModel, onNavigateToTurn }: Contex
         })}
       </div>
 
-      {agentStats.length > 8 && (
+      {agentStats.length > 5 && (
         <Button variant="outline" size="sm" className="text-xs" onClick={() => setShowAll(prev => !prev)}>
-          {showAll ? `收起 (只显示前8个)` : `展开全部 ${agentStats.length} 个执行`}
+          {showAll ? `收起 (只显示前5个)` : `展开全部 ${agentStats.length} 个执行`}
         </Button>
       )}
 
@@ -459,7 +466,7 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
     for (const s of filteredStats) {
       const color = AGENT_COLORS[s.agentName] ?? DEFAULT_AGENT_COLOR
       for (const t of s.turns) {
-        pts.push({ agentName: s.agentName, turnIndex: t.turnIndex, timestamp: t.createdAt ? new Date(t.createdAt).getTime() : 0, inputTokens: t.totalTokens, color })
+        pts.push({ agentName: s.agentName, turnIndex: t.turnIndex, timestamp: t.createdAt ? new Date(t.createdAt).getTime() : 0, inputTokens: t.inputMessagesTokens, color })
       }
     }
     return pts
@@ -493,9 +500,9 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
     timeTicks.push({ x: toXFn(ts), label: `${String(d.getMonth() + 1)}/${String(d.getDate())} ${String(d.getHours()).padStart(2, "0")}:00` })
   }
 
-  const safeY = toYFn(contextWindowLimit * 0.5)
-  const cautionY = toYFn(contextWindowLimit * 0.8)
-  const limitY = toYFn(contextWindowLimit)
+  const safeY = PADDING_TOP + plotHeight - (contextWindowLimit * 0.5 / yMax) * plotHeight
+  const cautionY = PADDING_TOP + plotHeight - (contextWindowLimit * 0.8 / yMax) * plotHeight
+  const limitY = PADDING_TOP + plotHeight - (contextWindowLimit / yMax) * plotHeight
 
   const pctMarkers = useMemo(() => {
     const markers: Array<{ pct: number; y: number; label: string; color: string }> = []
@@ -536,7 +543,7 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
     const isRoot = s.isRoot
     const points = s.turns.map(t => ({
       x: toXFn(t.createdAt ? new Date(t.createdAt).getTime() : 0),
-      y: toYFn(t.totalTokens),
+      y: toYFn(t.inputMessagesTokens),
       tokens: t.totalTokens,
       cacheRead: t.cacheReadTokens,
       newInput: t.inputTokens,
@@ -857,8 +864,7 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
           {/* Tooltip */}
           {hoveredPoint && (() => {
             const tt = hoveredPoint
-            const t = tt.turn
-            const inputTotal = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens
+            const inputTotal = tt.turn.inputTokens + tt.turn.cacheReadTokens + tt.turn.cacheWriteTokens
             const cachePct = inputTotal > 0 ? tt.cacheRead / inputTotal * 100 : 0
             const newInputPct = inputTotal > 0 ? tt.newInput / inputTotal * 100 : 0
             const cacheWritePct = inputTotal > 0 ? tt.cacheWrite / inputTotal * 100 : 0
@@ -873,8 +879,8 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
             const TOOLTIP_PAD = 10
             const metricsLines = [
               `总量: ${formatTokenCount(tt.tokens)} | 输入: ${formatTokenCount(inputTotal)}`,
-              `新输入: ${formatTokenCount(tt.newInput)} | 输出: ${formatTokenCount(t.outputTokens)}`,
-              `窗口占比: ${ctxPctDisplay} | 模型: ${t.model ?? "—"}`,
+              `新输入: ${formatTokenCount(tt.newInput)} | 输出: ${formatTokenCount(tt.turn.outputTokens)}`,
+              `窗口占比: ${ctxPctDisplay} | 模型: ${tt.turn.model ?? "—"}`,
             ]
             const TOOLTIP_H = TOOLTIP_PAD + HEADER_H + 4 + BAR_H + BAR_LABEL_H + metricsLines.length * LINE_H + TOOLTIP_PAD
 
@@ -899,7 +905,7 @@ function GrowthChart({ agentStats, contextWindowLimit, displayLabel, onNavigateT
 
                 {/* Header */}
                 <text x={tx + TOOLTIP_PAD} y={ty + TOOLTIP_PAD + 13} fontSize={12} fontWeight="bold" fill={tt.color} fontFamily="system-ui, sans-serif">{tt.label} #{tt.turnIndex}</text>
-                <text x={tx + TOOLTIP_W - TOOLTIP_PAD} y={ty + TOOLTIP_PAD + 13} fontSize={9} fill="#6b7280" textAnchor="end" fontFamily="system-ui, sans-serif">{tt.time} · {t.role}</text>
+                <text x={tx + TOOLTIP_W - TOOLTIP_PAD} y={ty + TOOLTIP_PAD + 13} fontSize={9} fill="#6b7280" textAnchor="end" fontFamily="system-ui, sans-serif">{tt.time} · {tt.turn.role}</text>
 
                 {/* Composition bar */}
                 <rect x={tx + TOOLTIP_PAD} y={barStartY} width={Math.max(barWidth * cachePct / 100, 0)} height={BAR_H} rx={1} fill="#f59e0b" />

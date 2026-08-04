@@ -2,10 +2,35 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
-## [v1.03] - 2026-07-13
+## [v1.40] - 2026-07-27
 
-### Fixed
-- `start.sh -c` 将 CLI 子命令和附加参数逐项传递，避免未引用展开带来的词分割和路径名展开；附加 CLI 参数使用 `-- <cli-args...>` 显式传入
+### Added
+- File Reads · 重编汇册（Gather & Rebuild Directory）— 一键按时间戳逐行重建本会话工作目录下全部被读/写过的文件，保留路径树；点击直接打包下载 zip，服务端构建二进制响应，不在页面展开全部内容
+- `dir-restore` API（`GET /api/observe/session/dir-restore?taskId=`）服务端批量恢复全部文件并返回 `application/zip`，响应头带 `X-Restored-Count/Total-Lines/Gap-Lines`
+- 纯函数库 `src/lib/zip-store.ts`（buildZip / crc32 / normalizeZipPath），STORE 无压缩 + UTF-8 文件名标志位（bit 11）以兼容 Windows 资源管理器中文路径
+- 单测 `tests/zip-store.test.ts`（11 项）与 API 级集成测试 `tests/dir-restore-api.test.ts`（4 项，二进制校验）
+
+## [v1.39] - 2026-07-27
+
+### Added
+- Skills · SKILL.md 全文 — Skill Summary 与 Skills per Agent 每个 skill 均可点击展示该 skill 的全部内容；优先取原生 `Skill` 工具注入的 resultJson（剥 `Base directory for this skill:` 前导），回退 Read of `*/SKILL.md` 的 resultJson（剥行号），多次加载取最长版本；支持下载与收起；共用 `useSkillContent` hook
+- `skill-content` API（`GET /api/observe/session/skill-content?taskId=&skillName=`）与纯函数库 `src/lib/skill-content.ts`
+- 单测 `tests/skill-content.test.ts`（20 项）与 API 级集成测试 `tests/skill-content-api.test.ts`（6 项）
+
+## [v1.38] - 2026-07-27
+
+### Added
+- File Reads · 循迹复卷 — 每个文件行一个按钮，按时间顺序拼合本会话内的 read/write 片段重建全文（后写入者覆盖先前），未被读取的行标注 `--line N not found --`，支持下载与收起；兼容 claude（`N\t`）与 opencode（`<content>` 信封 + `N: `）两种 Read 结果格式
+- `file-restore` API（`GET /api/observe/session/file-restore?taskId=&filePath=`）与纯函数库 `src/lib/file-restore.ts`
+- 单测 `tests/file-restore.test.ts`（26 项）与 API 级集成测试 `tests/file-restore-api.test.ts`（8 项）
+
+### Changed
+- FileReadAnalysis 文件行改用 perf 风格 grid 布局（左：路径 + 读取次数轴；右：预留 badge 与按钮），轴色与 Turns Overview 统一为 `bg-blue-500`
+
+## [v1.37] - 2026-07-27
+
+### Added
+- Audit v4 — agent 中心三维度审计（完成 / 效率 / 质量）：先确定性提取每个 agent 的输入/输出/信封，再由 LLM 评完成度与质量，效率维度由信封确定性计算，渲染 agent 树
 
 ## [v0.96] - 2026-06-29
 

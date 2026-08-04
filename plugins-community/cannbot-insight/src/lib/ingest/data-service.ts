@@ -16,7 +16,7 @@ import { listSubagentSessions as listClaudeSubagentSessions, collectSubagentTool
 import { normalize } from './normalize';
 import { splitIntoTurns, resetIdCounter } from './turn-split';
 import type { TurnRow, ToolCallRow, SkillEventRow } from './turn-split';
-import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents } from './merge';
+import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls } from './merge';
 import { buildBridges, resetIdCounter as resetBridgeIdCounter } from './bridge-builder';
 import { splitExecutions, resetIdCounter as resetExecIdCounter } from './execution-split';
 import type { ExecutionRow } from './execution-split';
@@ -645,5 +645,412 @@ export async function importSession(
   } finally {
     if (sharedDb) sharedDb.close();
     if (!prisma) await client.$disconnect();
+  }
+}
+
+export async function deltaRefreshSession(
+  sessionId: string,
+  prisma: PrismaClient,
+): Promise<{ addedTurns: number; updatedTurns: number; addedToolCalls: number; updatedToolCalls: number; addedSkillEvents: number }> {
+  const session = await prisma.session.findFirst({ where: { taskId: sessionId } });
+  if (!session || !session.sourcePath) {
+    throw new Error(`Session not found or no sourcePath: "${sessionId}"`);
+  }
+
+  const sourceType = session.framework === 'opencode' ? 'opencode-db'
+    : session.framework === 'claude-code' ? 'claude-jsonl'
+    : session.framework;
+
+  const srcType = sourceType === 'opencode-db' ? 'opencode-db'
+    : sourceType === 'claude-jsonl' ? 'claude-jsonl'
+    : sourceType;
+
+  let sharedDb: Database.Database | null = null;
+  if (srcType === 'opencode-db') {
+    sharedDb = new Database(session.sourcePath, { readonly: true });
+  }
+
+  const oldTurnCount = await prisma.turn.count({ where: { sessionId: session.id } });
+
+  try {
+    const adapter = getAdapter(srcType);
+    if (!adapter) throw new Error(`No adapter for: "${srcType}"`);
+
+    const rawInteractions = srcType === 'opencode-db' && sharedDb
+      ? readSessionWithDb(sharedDb, sessionId)
+      : adapter.readSession(session.sourcePath, sessionId);
+
+    const allRawInteractions = [...rawInteractions];
+    let toolUseIdMapping: Map<string, string> | undefined = undefined;
+
+    if (srcType === 'opencode-db' && sharedDb) {
+      const subIds = listSubagentSessionsWithDb(sharedDb, sessionId);
+      for (const subId of subIds) {
+        allRawInteractions.push(...readSessionWithDb(sharedDb, subId));
+      }
+    } else if (srcType === 'claude-jsonl') {
+      const subagentFiles = listClaudeSubagentSessions(session.sourcePath, sessionId);
+      toolUseIdMapping = collectClaudeToolUseMappings(session.sourcePath, sessionId);
+      for (const sub of subagentFiles) {
+        const subInteractions = adapter.readSession(sub.filePath, sub.id);
+        for (const interaction of subInteractions) {
+          interaction.subagent_session_id = sub.id;
+        }
+        allRawInteractions.push(...subInteractions);
+      }
+    }
+
+    if (allRawInteractions.length === 0) {
+      return { addedTurns: 0, updatedTurns: 0, addedToolCalls: 0, updatedToolCalls: 0, addedSkillEvents: 0 };
+    }
+
+    const normalized = normalize(allRawInteractions, srcType);
+    resetIdCounter();
+    resetBridgeIdCounter();
+    resetExecIdCounter();
+
+    const { turns, toolCalls, skillEvents } = splitIntoTurns(normalized, sessionId);
+
+    const existingTurns = await prisma.turn.findMany({ where: { sessionId: session.id } });
+    const existingToolCalls = await prisma.toolCall.findMany({
+      where: { turnId: { in: existingTurns.map(t => t.id) } },
+    });
+    const existingSkillEvents = await prisma.skillEvent.findMany({
+      where: { turnId: { in: existingTurns.map(t => t.id) } },
+    });
+
+    const existingTurnByKey = new Map<string, TurnRow>();
+    for (const et of existingTurns) {
+      existingTurnByKey.set(`${et.turnIndex}:${et.role}`, {
+        id: et.id,
+        sessionId: et.sessionId,
+        turnIndex: et.turnIndex,
+        role: et.role,
+        content: et.content,
+        contentJson: et.contentJson,
+        contentSummary: et.contentSummary,
+        inputMessagesJson: et.inputMessagesJson,
+        inputMessagesCount: et.inputMessagesCount,
+        inputMessagesTokens: et.inputMessagesTokens,
+        contextWindowPct: et.contextWindowPct,
+        agentName: et.agentName,
+        subagentName: et.subagentName,
+        subagentSessionId: et.subagentSessionId,
+        subagentType: null,
+        totalTokens: et.totalTokens,
+        inputTokens: et.inputTokens,
+        outputTokens: et.outputTokens,
+        reasoningTokens: et.reasoningTokens,
+        cacheReadTokens: et.cacheReadTokens,
+        cacheWriteTokens: et.cacheWriteTokens,
+        cost: 0,
+        createdAt_ts: et.createdAt_ts?.toISOString() ?? null,
+        completedAt: et.completedAt?.toISOString() ?? null,
+        latencyMs: et.latencyMs,
+        ttftMs: et.ttftMs,
+        model: et.model,
+        modelId: et.modelId,
+        providerId: et.providerId,
+        temperature: et.temperature,
+        maxTokens: et.maxTokens,
+        finishReason: et.finishReason,
+        isSubagent: et.isSubagent,
+        parentExecutionId: et.parentExecutionId,
+      });
+    }
+
+    const existingTcByToolCallId = new Map<string, ToolCallRow>();
+    for (const tc of existingToolCalls) {
+      existingTcByToolCallId.set(tc.toolCallId, {
+        id: tc.id,
+        turnId: tc.turnId,
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        argsJson: tc.argsJson,
+        resultJson: tc.resultJson,
+        state: tc.state,
+        errorType: tc.errorType,
+        errorMessage: tc.errorMessage,
+        startedAt: tc.startedAt?.toISOString() ?? null,
+        completedAt: tc.completedAt?.toISOString() ?? null,
+        durationMs: tc.durationMs,
+        dispatchBridgeId: tc.dispatchBridgeId,
+        isSkillRelated: tc.isSkillRelated,
+      });
+    }
+
+    const turnIdRemap = new Map<string, string>();
+    for (const turn of turns) {
+      const key = `${turn.turnIndex}:${turn.role}`;
+      const existingDbId = existingTurnByKey.get(key)?.id;
+      if (existingDbId) {
+        turnIdRemap.set(turn.id, existingDbId);
+      }
+    }
+
+    const remapTurnId = (id: string): string => turnIdRemap.get(id) ?? id;
+
+    const { toInsert: newTurns, toUpdate: turnUpdates } = diffTurns(existingTurnByKey, turns);
+
+    const remappedToolCalls = toolCalls.map(tc => ({ ...tc, turnId: remapTurnId(tc.turnId) }));
+    const remappedSkillEvents = skillEvents.map(se => ({ ...se, turnId: remapTurnId(se.turnId) }));
+
+    const { toInsert: newToolCalls, toUpdate: tcUpdates } = diffToolCalls(existingTcByToolCallId, remappedToolCalls);
+
+    const existingSeKeys = new Set(
+      existingSkillEvents.map(se => `${se.turnId}:${se.skillName}:${se.eventType}`)
+    );
+    const newSkillEvents = remappedSkillEvents.filter(se => !existingSeKeys.has(`${se.turnId}:${se.skillName}:${se.eventType}`));
+
+    const newTurnsData = newTurns.map(t => {
+      const { cost: _turnCost, subagentType: _subagentType, ...rest } = t;
+      return { ...rest, sessionId: session.id, createdAt_ts: toDate(rest.createdAt_ts), completedAt: toDate(rest.completedAt) };
+    });
+
+    const newToolCallsData = newToolCalls.map(tc => ({
+      ...tc,
+      startedAt: toDate(tc.startedAt),
+      completedAt: toDate(tc.completedAt),
+    }));
+
+    const newSkillEventsData = newSkillEvents.map(se => ({
+      ...se,
+      startedAt: toDate(se.startedAt),
+      completedAt: toDate(se.completedAt),
+    }));
+
+    const appliedTurnUpdates = turnUpdates.map(u => {
+      const mapped: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(u.data)) {
+        if (k === 'completedAt' || k === 'createdAt_ts') {
+          mapped[k] = toDate(v as string | null);
+        } else {
+          mapped[k] = v;
+        }
+      }
+      return { dbId: u.dbId, data: mapped };
+    });
+
+    const volatileFields: (keyof TurnRow)[] = [
+      'inputMessagesCount', 'inputMessagesTokens', 'contextWindowPct',
+      'inputMessagesJson', 'contentJson',
+    ];
+    const matchedTurnVolatileUpdates: Array<{ dbId: string; data: Record<string, unknown> }> = [];
+    for (const turn of turns) {
+      const key = `${turn.turnIndex}:${turn.role}`;
+      const existingId = existingTurnByKey.get(key)?.id;
+      if (!existingId) continue;
+      const alreadyInDiffUpdate = appliedTurnUpdates.some(u => u.dbId === existingId);
+      if (alreadyInDiffUpdate) {
+        for (const f of volatileFields) {
+          appliedTurnUpdates.find(u => u.dbId === existingId)!.data[f] = turn[f];
+        }
+      } else {
+        const volatileData: Record<string, unknown> = {};
+        let hasVolatileChange = false;
+        const existingTurn = existingTurnByKey.get(key)!;
+        for (const f of volatileFields) {
+          if (turn[f] !== existingTurn[f]) {
+            volatileData[f] = turn[f];
+            hasVolatileChange = true;
+          }
+        }
+        if (hasVolatileChange) {
+          matchedTurnVolatileUpdates.push({ dbId: existingId, data: volatileData });
+        }
+      }
+    }
+
+    const appliedTcUpdates = tcUpdates.map(u => {
+      const mapped: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(u.data)) {
+        if (k === 'completedAt' || k === 'startedAt') {
+          mapped[k] = toDate(v as string | null);
+        } else {
+          mapped[k] = v;
+        }
+      }
+      return { dbId: u.dbId, data: mapped };
+    });
+
+    const executions = splitExecutions(turns, remappedToolCalls, remappedSkillEvents, sessionId);
+    const rootExecutionId = executions.find(e => !e.isSubagent)?.id ?? null;
+    const bridges: InteractionBridgeRow[] = rootExecutionId
+      ? buildBridges(normalized as unknown as RawInteraction[], remappedToolCalls, turns, sessionId, rootExecutionId, toolUseIdMapping)
+      : [];
+
+    const executionSkillsMap = computeExecutionSkills(executions, turns, remappedSkillEvents);
+
+    const uniqueSkillNames = [...new Set(remappedSkillEvents.map(se => se.skillName))];
+    const sessionSkillsData = uniqueSkillNames.map(skillName => {
+      const invocationCount = remappedSkillEvents.filter(
+        se => se.skillName === skillName && (se.eventType === 'invoke' || se.eventType === 'use' || se.eventType === 'dispatch')
+      ).length;
+      const loadEvent = remappedSkillEvents.find(se => se.skillName === skillName && se.eventType === 'load');
+      return {
+        sessionId: session.id,
+        skillName,
+        skillVersion: loadEvent?.skillVersion ?? null,
+        invocationCount,
+      };
+    });
+
+    const executionsData = executions.map(e => ({
+      id: e.id,
+      sessionId: session.id,
+      agentName: e.agentName,
+      agentSessionId: e.agentSessionId,
+      isSubagent: e.isSubagent,
+      subagentType: e.subagentType,
+      subagentName: e.subagentName,
+      parentExecutionId: e.parentExecutionId,
+      rootExecutionId: e.rootExecutionId,
+      depth: e.depth,
+      tokens: e.tokens,
+      inputTokens: e.inputTokens,
+      outputTokens: e.outputTokens,
+      reasoningTokens: e.reasoningTokens,
+      cacheReadInputTokens: e.cacheReadInputTokens,
+      cacheCreationInputTokens: e.cacheCreationInputTokens,
+      maxSingleCallTokens: e.maxSingleCallTokens,
+      cost: e.cost,
+      latencyMs: e.latencyMs,
+      createdAt: new Date(e.createdAt),
+      toolCallCount: e.toolCallCount,
+      toolCallErrorCount: e.toolCallErrorCount,
+      llmCallCount: e.llmCallCount,
+      skillLoadCount: e.skillLoadCount,
+      skillInvokeCount: e.skillInvokeCount,
+      finalResult: e.finalResult,
+      model: e.model,
+    }));
+
+    const executionSkillsData: Array<{ executionId: string; skillName: string; skillVersion: number | null; isPrimary: boolean; user: string | null }> = [];
+    for (const [execId, skills] of executionSkillsMap) {
+      for (const es of skills) {
+        executionSkillsData.push({
+          executionId: execId,
+          skillName: es.skillName,
+          skillVersion: es.skillVersion,
+          isPrimary: es.isPrimary,
+          user: es.user,
+        });
+      }
+    }
+
+    const bridgesData = bridges.map(b => ({
+      sessionId: session.id,
+      dispatchExecutionId: b.dispatchExecutionId,
+      dispatchTurnId: b.dispatchTurnId,
+      dispatchToolCallId: b.dispatchToolCallId,
+      dispatchContent: b.dispatchContent,
+      dispatchTimestamp: toDate(b.dispatchTimestamp),
+      responseExecutionId: b.responseExecutionId,
+      responseTurnId: b.responseTurnId,
+      responseContent: b.responseContent,
+      responseTimestamp: toDate(b.responseTimestamp),
+      subagentSessionId: b.subagentSessionId,
+      subagentType: b.subagentType,
+      subagentName: b.subagentName,
+      status: b.status,
+      subagentTokens: b.subagentTokens,
+      subagentLatencyMs: b.subagentLatencyMs,
+    }));
+
+    await prisma.$transaction(async (tx) => {
+      await batchCreateMany(tx, 'Turn' as Prisma.ModelName, newTurnsData);
+      for (const u of appliedTurnUpdates) {
+        await tx.turn.update({ where: { id: u.dbId }, data: u.data });
+      }
+      for (const u of matchedTurnVolatileUpdates) {
+        await tx.turn.update({ where: { id: u.dbId }, data: u.data });
+      }
+
+      await batchCreateMany(tx, 'ToolCall' as Prisma.ModelName, newToolCallsData);
+      for (const u of appliedTcUpdates) {
+        await tx.toolCall.update({ where: { id: u.dbId }, data: u.data });
+      }
+
+      await batchCreateMany(tx, 'SkillEvent' as Prisma.ModelName, newSkillEventsData);
+
+      await tx.execution.deleteMany({ where: { sessionId: session.id } });
+      await batchCreateMany(tx, 'Execution' as Prisma.ModelName, executionsData);
+
+      await batchCreateMany(tx, 'ExecutionSkill' as Prisma.ModelName, executionSkillsData);
+
+      await tx.interactionBridge.deleteMany({ where: { sessionId: session.id } });
+      await batchCreateMany(tx, 'InteractionBridge' as Prisma.ModelName, bridgesData);
+
+      await tx.sessionSkill.deleteMany({ where: { sessionId: session.id } });
+      await batchCreateMany(tx, 'SessionSkill' as Prisma.ModelName, sessionSkillsData);
+    }, { maxWait: 30000, timeout: 60000 });
+
+    const allTurnsAfterMerge = await prisma.turn.findMany({ where: { sessionId: session.id } });
+    const allToolCallsAfterMerge = await prisma.toolCall.findMany({
+      where: { turnId: { in: allTurnsAfterMerge.map(t => t.id) } },
+    });
+    const allSkillEventsAfterMerge = await prisma.skillEvent.findMany({
+      where: { turnId: { in: allTurnsAfterMerge.map(t => t.id) } },
+    });
+
+    const turnRowsForAgg = allTurnsAfterMerge.map(t => ({
+      id: t.id,
+      sessionId: t.sessionId,
+      turnIndex: t.turnIndex,
+      role: t.role,
+      totalTokens: t.totalTokens,
+      inputTokens: t.inputTokens,
+      outputTokens: t.outputTokens,
+      reasoningTokens: t.reasoningTokens,
+      cacheReadTokens: t.cacheReadTokens,
+      cacheWriteTokens: t.cacheWriteTokens,
+      cost: 0,
+      isSubagent: t.isSubagent,
+      subagentSessionId: t.subagentSessionId ?? null,
+      createdAt_ts: t.createdAt_ts ? t.createdAt_ts.toISOString() : null,
+      completedAt: t.completedAt ? t.completedAt.toISOString() : null,
+    }));
+    const updatedAggregates = computeSessionAggregates(
+      turnRowsForAgg,
+      allToolCallsAfterMerge as unknown as ToolCallRow[],
+      allSkillEventsAfterMerge as unknown as SkillEventRow[],
+    );
+
+    const safeNum = (n: number) => (typeof n === 'number' && !isNaN(n)) ? n : 0;
+    const safeDate = (d: Date | null) => d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    const query = allTurnsAfterMerge.find(t => t.role === 'user')?.content?.substring(0, 200) ?? null;
+
+    await prisma.session.update({
+      where: { id: session.id },
+      data: {
+        totalTokens: safeNum(updatedAggregates.totalTokens),
+        totalInputTokens: safeNum(updatedAggregates.totalInputTokens),
+        totalOutputTokens: safeNum(updatedAggregates.totalOutputTokens),
+        totalReasoningTokens: safeNum(updatedAggregates.totalReasoningTokens),
+        totalCacheReadTokens: safeNum(updatedAggregates.totalCacheReadTokens),
+        totalCacheWriteTokens: safeNum(updatedAggregates.totalCacheWriteTokens),
+        totalCost: safeNum(updatedAggregates.totalCost),
+        totalLatencyMs: safeNum(updatedAggregates.totalLatencyMs),
+        totalToolCallCount: safeNum(updatedAggregates.totalToolCallCount),
+        totalLlmCallCount: safeNum(updatedAggregates.totalLlmCallCount),
+        totalSkillLoadCount: safeNum(updatedAggregates.totalSkillLoadCount),
+        totalSubagentCount: safeNum(updatedAggregates.totalSubagentCount),
+        endTime: safeDate(updatedAggregates.endTime),
+        rootExecutionId,
+        ...(query ? { query } : {}),
+        ...(updatedAggregates.model ? { model: updatedAggregates.model } : {}),
+      },
+    });
+
+    const newTurnCount = allTurnsAfterMerge.length;
+    return {
+      addedTurns: Math.max(0, newTurnCount - oldTurnCount),
+      updatedTurns: appliedTurnUpdates.length,
+      addedToolCalls: newToolCallsData.length,
+      updatedToolCalls: appliedTcUpdates.length,
+      addedSkillEvents: newSkillEventsData.length,
+    };
+  } finally {
+    if (sharedDb) sharedDb.close();
   }
 }

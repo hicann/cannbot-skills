@@ -50,15 +50,10 @@ export DATABASE_URL="${DATABASE_URL:-file:$SCRIPT_DIR/prisma/dev.db}"
 UPDATE=false
 CLI=false
 CLI_CMD=""
-CLI_ARGS=()
 KILL_EXISTING=false
 FRESH=false
 ADVANCED=false
-
-usage() {
-  echo "Usage: $0 [-u] [-k] [-f] [-a] [-c <command> [-- <cli-args...>]]  (-u: update; -k: kill port; -f: fresh build; -a: show advanced tabs; -c: run CLI command)" >&2
-}
-
+ALLOWED_CLI_COMMANDS="tui sessions session turn search compare stats import delete config"
 while getopts "uc:kfa" opt; do
   case $opt in
     u) UPDATE=true ;;
@@ -66,18 +61,40 @@ while getopts "uc:kfa" opt; do
     k) KILL_EXISTING=true ;;
     f) FRESH=true ;;
     a) ADVANCED=true ;;
-    *) usage; exit 1 ;;
+    *) echo "Usage: $0 [-u] [-k] [-f] [-a] [-c <command|tui>]  (-u: update; -k: kill port; -f: fresh build; -a: show advanced tabs; -c: CLI mode)" >&2; exit 1 ;;
   esac
 done
 
-shift $((OPTIND - 1))
-if [ "$CLI" = true ] && [ "$#" -gt 0 ]; then
-  CLI_ARGS=("$@")
+if [ "$CLI" = true ]; then
+  valid=false
+  for cmd in $ALLOWED_CLI_COMMANDS; do
+    if [ "$CLI_CMD" = "$cmd" ]; then valid=true; break; fi
+  done
+  if [ "$valid" = false ]; then
+    echo "[start] ERROR: Invalid CLI command '$CLI_CMD'. Allowed: $ALLOWED_CLI_COMMANDS" >&2
+    exit 1
+  fi
 fi
 
 if [ "$UPDATE" = true ] || [ ! -d "node_modules" ]; then
   echo "[setup] Installing dependencies..."
   npm install
+fi
+
+# Ensure better-sqlite3 native module matches the running Node ABI.
+# node_modules is per-machine (gitignored); switching Node (e.g. 20 <-> 24)
+# leaves the previously-compiled .node with a mismatched ABI and crashes at
+# runtime. Auto-rebuild so the same script works across Node versions.
+if [ -d "node_modules/better-sqlite3" ]; then
+  if ! node -e "require('better-sqlite3')" 2>/dev/null; then
+    echo "[setup] better-sqlite3 native module mismatched for Node $(node -v) — rebuilding..."
+    npm rebuild better-sqlite3
+    if ! node -e "require('better-sqlite3')" 2>/dev/null; then
+      echo "[setup] better-sqlite3 rebuild failed. If build tools are missing, install them or run: npm ci" >&2
+      exit 1
+    fi
+    echo "[setup] better-sqlite3 rebuilt for Node $(node -v) ✓"
+  fi
 fi
 
 if [ "$FRESH" = true ]; then
@@ -143,6 +160,35 @@ else
   fi
 fi
 
+# Launch Python smart-agent (v2 backend) in background
+AGENT_PORT=21026
+AGENT_PID=""
+if [ -f "$SCRIPT_DIR/smart-agent/server.py" ]; then
+  if (echo > /dev/tcp/127.0.0.1/$AGENT_PORT) 2>/dev/null; then
+    echo "[start] Port $AGENT_PORT in use, assuming smart-agent already running"
+  else
+    echo "[start] Launching smart-agent (Python) on port $AGENT_PORT..."
+    (cd "$SCRIPT_DIR/smart-agent" && CANNBOT_AGENT_PORT=$AGENT_PORT python3 server.py) &
+    AGENT_PID=$!
+    export CANNBOT_AGENT_URL="http://localhost:$AGENT_PORT"
+    for i in $(seq 1 10); do
+      if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
+        echo "[start] smart-agent ready at $CANNBOT_AGENT_URL (PID $AGENT_PID)"
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+fi
+
+cleanup() {
+  if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
+    echo "[start] Stopping smart-agent (PID $AGENT_PID)..."
+    kill "$AGENT_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
 echo "[start] Launching CANNBot-Insight on port $PORT..."
 
 if [ "$CLI" = true ]; then
@@ -163,7 +209,7 @@ if [ "$CLI" = true ]; then
   done
 
   echo "[start] Launching CLI: $CLI_CMD"
-  npx tsx src/cli/index.ts "$CLI_CMD" "${CLI_ARGS[@]}" --server "$SERVER_URL"
+  npx tsx src/cli/index.ts -- "$CLI_CMD" --server "$SERVER_URL"
   kill $BACKEND_PID 2>/dev/null || true
   echo "[start] CLI exited, backend stopped"
 else

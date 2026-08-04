@@ -242,4 +242,38 @@ export class InsightClient {
       description,
     }, 120000);
   }
+
+  // Exports a session to Markdown. Same code path as the web UI's "Export Markdown"
+  // button and the audit pipeline's first step (exportSessionToMarkdown), so the
+  // output is byte-identical to /api/observe/session/export-md.
+  async exportSessionMarkdown(taskId: string, outputPath: string, framework?: string): Promise<{ size: number }> {
+    const url = new URL('/api/observe/session/export-md', this.config.baseUrl);
+    url.searchParams.set('taskId', taskId);
+    if (framework) url.searchParams.set('framework', framework);
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        ...(this.config.authToken ? { Authorization: `Bearer ${this.config.authToken}` } : {}),
+      },
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.text();
+      let errorMessage: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMessage = parsed.error ?? errorBody;
+      } catch {
+        errorMessage = errorBody;
+      }
+      throw new ApiError(res.status, errorMessage, res.status >= 500);
+    }
+
+    const text = await res.text();
+    const buffer = Buffer.from(text, 'utf-8');
+    fs.writeFileSync(outputPath, buffer);
+
+    return { size: buffer.length };
+  }
 }

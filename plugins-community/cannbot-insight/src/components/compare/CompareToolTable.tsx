@@ -45,7 +45,7 @@ export function CompareToolTable({ toolStatsA, toolStatsB }: CompareToolTablePro
 
   if (allTools.length === 0) {
     return (
-      <Card size="sm">
+      <Card>
         <CardHeader><CardTitle>Tool Call 对比</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">No tool call data available.</p>
@@ -55,7 +55,7 @@ export function CompareToolTable({ toolStatsA, toolStatsB }: CompareToolTablePro
   }
 
   return (
-    <Card size="sm">
+    <Card>
       <CardHeader><CardTitle>Tool Call 对比</CardTitle></CardHeader>
       <CardContent>
         <div className="border rounded-lg">

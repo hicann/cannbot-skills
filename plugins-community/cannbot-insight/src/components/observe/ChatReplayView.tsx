@@ -183,6 +183,28 @@ function groupTurnsIntoMessages(turns: ChatReplayTurn[]): ChatMessage[] {
       continue
     }
 
+    if (turn.agentName === 'compaction-boundary') {
+      flushCommandBuffer()
+      messages.push({
+        id: `compaction-${turn.turnId}`,
+        type: "compaction",
+        panel: "left",
+        role: "user",
+        content: text || "/compact",
+        agentName: turn.agentName ?? null,
+        isSubagent: turn.isSubagent,
+        subagentName: turn.subagentName ?? null,
+        model: null,
+        turnIndex: turn.turnIndex,
+        turnId: turn.turnId,
+        tokens: turn.totalTokens,
+        latencyMs: turn.latencyMs,
+        createdAt: turn.createdAt ?? null,
+      })
+      lastRole = "user"
+      continue
+    }
+
     // Non-command turn: flush any buffered command turns first
     flushCommandBuffer()
 
@@ -411,9 +433,9 @@ function LeftPanelBubble({ msg, expanded, onToggleExpand, onNavigate }: {
   if (msg.type === "continuation") {
     return (
       <div className="flex gap-2 items-start">
-        <div className="shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs">📋</div>
+        <div className="shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs">⚡</div>
         <div className="max-w-[85%]">
-          <span className="text-xs text-muted-foreground">Compact summary</span>
+          <span className="text-xs text-muted-foreground">⚡ Compact summary</span>
           <div className="rounded-xl px-3 py-2 text-sm bg-purple-100 dark:bg-purple-900/30 text-foreground cursor-pointer"
             onClick={() => onNavigate(msg.turnId)}>
             <span className="italic">{truncateText(msg.content ?? "", MAX_CONTENT_LEN)}</span>

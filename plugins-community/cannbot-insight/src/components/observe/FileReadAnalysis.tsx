@@ -10,6 +10,7 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { ScrollTextIcon, InfoIcon, FolderArchiveIcon } from "lucide-react"
 
 interface ReadEntry {
   turnId: string
@@ -46,6 +47,19 @@ interface FileReadsResponse {
   }
 }
 
+interface RestoreLine {
+  n: number
+  content: string | null
+  source: "read" | "write" | "gap"
+}
+
+interface RestoreResponse {
+  path: string
+  lines: RestoreLine[]
+  maxLine: number
+  opsUsed: number
+}
+
 interface FileReadAnalysisProps {
   taskId: string
   onNavigateToTurn?: (turnId: string) => void
@@ -57,6 +71,86 @@ export function FileReadAnalysis({ taskId, onNavigateToTurn }: FileReadAnalysisP
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<"all" | "overlap">("all")
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  const [restoring, setRestoring] = useState<Set<string>>(new Set())
+  const [restored, setRestored] = useState<Map<string, RestoreResponse>>(new Map())
+  const [restoreError, setRestoreError] = useState<Map<string, string>>(new Map())
+
+  async function restoreContent(path: string) {
+    setRestoring(prev => new Set(prev).add(path))
+    setRestoreError(prev => { const n = new Map(prev); n.delete(path); return n })
+    try {
+      const r = await fetch(
+        `/api/observe/session/file-restore?taskId=${encodeURIComponent(taskId)}&filePath=${encodeURIComponent(path)}`
+      )
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d: RestoreResponse = await r.json()
+      setRestored(prev => new Map(prev).set(path, d))
+    } catch (e) {
+      setRestoreError(prev => new Map(prev).set(path, e instanceof Error ? e.message : String(e)))
+    } finally {
+      setRestoring(prev => { const n = new Set(prev); n.delete(path); return n })
+    }
+  }
+
+  function downloadRestored(path: string) {
+    const data = restored.get(path)
+    if (!data) return
+    const text = data.lines
+      .map(l => (l.content === null ? `--line ${l.n} not found --` : l.content))
+      .join("\n")
+    const basename = path.split("/").pop() || "restored"
+    const dot = basename.lastIndexOf(".")
+    const stem = dot > 0 ? basename.slice(0, dot) : basename
+    const ext = dot > 0 ? basename.slice(dot) : ""
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = window.document.createElement("a")
+    a.href = url
+    a.download = `${stem}.restored${ext}`
+    window.document.body.appendChild(a)
+    a.click()
+    window.document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function clearRestored(path: string) {
+    setRestored(prev => { const n = new Map(prev); n.delete(path); return n })
+    setRestoreError(prev => { const n = new Map(prev); n.delete(path); return n })
+  }
+
+  const [restoringAll, setRestoringAll] = useState(false)
+  const [allError, setAllError] = useState<string | null>(null)
+  const [allDone, setAllDone] = useState<{ count: number; totalLines: number; gapLines: number } | null>(null)
+
+  async function restoreAll() {
+    setRestoringAll(true)
+    setAllError(null)
+    setAllDone(null)
+    try {
+      const r = await fetch(`/api/observe/session/dir-restore?taskId=${encodeURIComponent(taskId)}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = window.document.createElement("a")
+      a.href = url
+      const cd = r.headers.get("Content-Disposition") || ""
+      const m = cd.match(/filename="?([^"]+)"?/)
+      a.download = m ? decodeURIComponent(m[1]) : `session_${taskId}_restored.zip`
+      window.document.body.appendChild(a)
+      a.click()
+      window.document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setAllDone({
+        count: Number(r.headers.get("X-Restored-Count") ?? 0),
+        totalLines: Number(r.headers.get("X-Restored-Total-Lines") ?? 0),
+        gapLines: Number(r.headers.get("X-Restored-Gap-Lines") ?? 0),
+      })
+    } catch (e) {
+      setAllError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRestoringAll(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -140,7 +234,7 @@ export function FileReadAnalysis({ taskId, onNavigateToTurn }: FileReadAnalysisP
         </Card>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Badge
           variant={filter === "all" ? "default" : "outline"}
           className="cursor-pointer"
@@ -155,7 +249,55 @@ export function FileReadAnalysis({ taskId, onNavigateToTurn }: FileReadAnalysisP
         >
           With Overlap ({data.summary.filesWithOverlap})
         </Badge>
+        <span className="ml-auto" />
+        <span
+          role="button"
+          title="重编汇册：按时间戳逐行重建本会话工作目录下全部被读/写过的文件，保留路径树打包下载 zip"
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+            allDone
+              ? "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
+              : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
+          }`}
+          onClick={() => {
+            if (restoringAll) return
+            if (allDone || allError) { setAllDone(null); setAllError(null); return }
+            restoreAll()
+          }}
+        >
+          <FolderArchiveIcon className="size-3.5" />
+          {restoringAll ? "重编中…" : "重编汇册 Gather & Rebuild Directory"}
+        </span>
       </div>
+
+      {(allDone || allError) && (
+        <div className="p-3 border rounded-md border-teal-400/30 bg-teal-500/5 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 dark:text-teal-400">
+              <FolderArchiveIcon className="size-3.5" />
+              {allError ? "重编失败" : `已打包下载 ${allDone?.count ?? 0} 个文件`}
+              {allDone && (
+                <span className="text-muted-foreground">
+                  （共 {allDone.totalLines} 行，{allDone.gapLines} 行未采集）
+                </span>
+              )}
+            </span>
+            <span
+              role="button"
+              title="关闭"
+              className="text-muted-foreground cursor-pointer hover:text-foreground text-sm leading-none px-1"
+              onClick={() => { setAllDone(null); setAllError(null) }}
+            >
+              ×
+            </span>
+          </div>
+          <div className="text-[11px] text-muted-foreground leading-snug">
+            按时间顺序逐行拼合本会话内每个被读、被写文件的内容，后写入者覆盖先前。局部改写（str_replace）未纳入，未被读到的行标注「未采集」并写入 zip。
+          </div>
+          {allError && (
+            <div className="text-xs text-destructive">Error: {allError}</div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         {filteredFiles.map(file => (
@@ -172,23 +314,119 @@ export function FileReadAnalysis({ taskId, onNavigateToTurn }: FileReadAnalysisP
                 setExpandedFiles(next)
               }}
             >
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-medium truncate flex-1">{file.displayPath}</span>
-                <Badge variant="secondary">{file.totalReads} reads</Badge>
-                {file.overlappingReads > 0 && (
-                  <Badge variant="destructive">{file.overlappingReads} overlap</Badge>
-                )}
-              </div>
-              <div className="flex gap-0.5 h-3 rounded-full overflow-hidden bg-muted">
-                <div
-                  className={file.overlappingReads > 0 ? "bg-blue-400 h-full rounded-full" : "bg-blue-500 h-full rounded-full"}
-                  style={{
-                    width: `${(file.totalReads / maxReads) * 100}%`,
-                    minWidth: "2px",
-                  }}
-                />
+              <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium truncate block pr-2">{file.displayPath}</span>
+                  </div>
+                  <div
+                    className="h-2.5 bg-muted/30 rounded overflow-hidden w-4/5"
+                    title={`${file.totalReads} reads`}
+                  >
+                    <div
+                      className="bg-blue-500 h-full rounded transition-all"
+                      style={{
+                        width: `${Math.max((file.totalReads / maxReads) * 100, 2)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 justify-end shrink-0">
+                  <Badge variant="secondary">{file.totalReads} reads</Badge>
+                  {file.overlappingReads > 0 && (
+                    <Badge variant="destructive">{file.overlappingReads} overlap</Badge>
+                  )}
+                  <span
+                    role="button"
+                    title="循迹复卷：按时间戳逐行重建该文件的全部内容"
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                      restored.has(file.path)
+                        ? "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
+                        : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (restored.has(file.path)) {
+                        clearRestored(file.path)
+                      } else if (!restoring.has(file.path)) {
+                        restoreContent(file.path)
+                      }
+                    }}
+                  >
+                    <ScrollTextIcon className="size-3.5" />
+                    {restoring.has(file.path) ? "复卷中…" : restored.has(file.path) ? "已复卷·收起" : "循迹复卷"}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {(restoring.has(file.path) || restored.has(file.path) || restoreError.has(file.path)) && (
+              <div className="ml-4 mt-2 p-3 border rounded-md border-teal-400/30 bg-teal-500/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 dark:text-teal-400">
+                    <ScrollTextIcon className="size-3.5" />
+                    循迹复卷 · {restored.get(file.path)?.lines.length ?? 0} 行
+                    {restored.get(file.path) && restored.get(file.path)!.opsUsed > 0 && (
+                      <span className="text-muted-foreground">
+                        （{restored.get(file.path)!.opsUsed} 次读写，{restored.get(file.path)!.lines.filter(l => l.source === 'gap').length} 行未采集）
+                      </span>
+                    )}
+                    <InfoIcon
+                      className="size-3.5 text-muted-foreground cursor-help"
+                      title="按时间顺序拼合本会话中该文件的读写片段，后写入者覆盖先前内容。局部改写（str_replace）未纳入，未被读取的行标注为「未采集」，故重建结果未必等于任一时刻的真实文件。"
+                    />
+                  </span>
+                  <span className="flex items-center gap-3">
+                    {restored.has(file.path) && (
+                      <span
+                        role="button"
+                        className="text-xs font-medium text-blue-500 cursor-pointer hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          downloadRestored(file.path)
+                        }}
+                      >
+                        Download
+                      </span>
+                    )}
+                    <span
+                      role="button"
+                      title="收起"
+                      className="text-muted-foreground cursor-pointer hover:text-foreground text-sm leading-none px-1"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        clearRestored(file.path)
+                      }}
+                    >
+                      ×
+                    </span>
+                  </span>
+                </div>
+                <div className="text-[11px] text-muted-foreground leading-snug">
+                  按时间顺序拼合本会话中该文件的读写片段，后写入者覆盖先前内容。局部改写（str_replace）未纳入，未被读取的行标注为「未采集」，故重建结果未必等于任一时刻的真实文件。
+                </div>
+                {restoreError.has(file.path) && (
+                  <div className="text-xs text-destructive">
+                    Error: {restoreError.get(file.path)}
+                  </div>
+                )}
+                {restored.has(file.path) && (() => {
+                  const r = restored.get(file.path)!
+                  return (
+                    <pre className="max-h-96 overflow-auto rounded border bg-background p-2 text-xs font-mono whitespace-pre">
+                      {r.lines.map(l => (
+                        <div
+                          key={l.n}
+                          className={l.content === null ? "text-muted-foreground italic" : ""}
+                        >
+                          {l.content === null ? `--line ${l.n} not found --` : `${l.n}\t${l.content}`}
+                        </div>
+                      ))}
+                    </pre>
+                  )
+                })()}
+              </div>
+            )}
 
             {expandedFiles.has(file.path) && (
               <div className="ml-4 mt-2 p-3 border rounded-md bg-muted/30 space-y-2">

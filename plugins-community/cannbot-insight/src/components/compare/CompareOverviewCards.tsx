@@ -82,7 +82,7 @@ export function CompareOverviewCards({ sessionA, sessionB }: { sessionA: Session
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {[sessionA, sessionB].map((session, idx) => (
-        <Card key={session.taskId} size="sm">
+        <Card key={idx} size="sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Badge variant={idx === 0 ? "blue" : "orange"}>

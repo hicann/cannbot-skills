@@ -60,10 +60,10 @@ interface CannbaySession {
   filename: string
   taskId: string
   query: string | null
-  model: string | null
-  startTime: string | null
-  totalTokens: number
-  turnCount: number
+  author: string
+  submitter: string
+  commitTime: string
+  commitMessage: string
   size: number
 }
 
@@ -73,12 +73,6 @@ function formatSize(size: number): string {
   if (size < 1024) return `${size}B`
   if (size < 1048576) return `${(size / 1024).toFixed(1)}K`
   return `${(size / 1048576).toFixed(1)}M`
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
 }
 
 function formatTime(iso: string): string {
@@ -576,10 +570,10 @@ export function LocalFileImport() {
         )}
 
         {step === "browse" && (
-          <div className="space-y-3">
+          <div className="space-y-3 overflow-hidden">
             <div className="flex items-center gap-2 text-sm font-medium bg-muted/50 px-3 py-2 rounded-md">
-              <FolderIcon className="size-4 text-blue-500" />
-              <span className="truncate">{currentDir}</span>
+              <FolderIcon className="size-4 text-blue-500 shrink-0" />
+              <span className="flex-1 min-w-0 truncate">{currentDir}</span>
             </div>
             {parentDir && (
               <Button variant="ghost" size="sm" onClick={handleGoUp} className="gap-1.5">
@@ -593,11 +587,11 @@ export function LocalFileImport() {
                 <span className="text-sm text-muted-foreground">Loading directory...</span>
               </div>
             ) : (
-              <div className="max-h-[320px] overflow-y-auto border rounded-lg">
-                <Table>
+              <div className="max-h-[320px] overflow-y-auto overflow-x-hidden border rounded-lg">
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[24px]"></TableHead>
+                      <TableHead className="w-[40px]"></TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead className="w-[80px]">Size</TableHead>
                       <TableHead className="w-[100px]">Type</TableHead>
@@ -626,10 +620,12 @@ export function LocalFileImport() {
                           }
                         </TableCell>
                         <TableCell className="text-sm">
-                          <span className={entry.isImportableFile ? "font-medium text-emerald-600 dark:text-emerald-400" : ""}>
-                            {entry.name}
-                          </span>
-                          {entry.isDir && <ChevronRightIcon className="size-3.5 ml-1 inline text-muted-foreground" />}
+                          <div className="flex items-center gap-1">
+                            <span className={`flex-1 min-w-0 truncate${entry.isImportableFile ? " font-medium text-emerald-600 dark:text-emerald-400" : ""}`} title={entry.name}>
+                              {entry.name}
+                            </span>
+                            {entry.isDir && <ChevronRightIcon className="size-3.5 text-muted-foreground shrink-0" />}
+                          </div>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground tabular-nums">
                           {entry.isDir ? "" : formatSize(entry.size)}
@@ -708,7 +704,7 @@ export function LocalFileImport() {
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Input
-                placeholder="Search by query, model, or task ID..."
+                placeholder="Search by query, user, commit message, or task ID..."
                 value={cannbayFilter}
                 onChange={(e) => setCannbayFilter(e.target.value)}
                 className="flex-1"
@@ -717,9 +713,16 @@ export function LocalFileImport() {
             </div>
             {(() => {
               const q = cannbayFilter.toLowerCase()
-              const filtered = cannbaySessions.filter(s =>
-                !q || (s.query?.toLowerCase().includes(q) ?? false) || (s.model?.toLowerCase().includes(q) ?? false) || s.taskId.toLowerCase().includes(q) || s.filename.toLowerCase().includes(q)
-              )
+              const filtered = cannbaySessions
+                .filter(s =>
+                  !q || (s.query?.toLowerCase().includes(q) ?? false)
+                  || (s.submitter?.toLowerCase().includes(q) ?? false)
+                  || (s.commitMessage?.toLowerCase().includes(q) ?? false)
+                  || s.taskId.toLowerCase().includes(q)
+                  || s.filename.toLowerCase().includes(q)
+                )
+                .slice()
+                .sort((a, b) => (b.commitTime || "").localeCompare(a.commitTime || ""))
               const allFilteredSelected = filtered.length > 0 && filtered.every(s => cannbaySelected.has(s.filename))
               return (
                 <>
@@ -745,23 +748,21 @@ export function LocalFileImport() {
                         : `${filtered.length} of ${cannbaySessions.length} shown`}
                     </span>
                   </div>
-                  <div className="max-h-[320px] overflow-y-auto border rounded-lg">
-                    <Table>
+              <div className="max-h-[320px] overflow-y-auto overflow-x-hidden border rounded-lg">
+                    <Table className="table-fixed">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[40px]"></TableHead>
-                          <TableHead className="max-w-[180px]">First Query</TableHead>
-                          <TableHead>Time</TableHead>
-                          <TableHead className="max-w-[140px]">Model</TableHead>
-                          <TableHead>Tokens</TableHead>
-                          <TableHead>Turns</TableHead>
-                          <TableHead className="w-[70px]">Size</TableHead>
+                          <TableHead className="w-[220px]">First Query</TableHead>
+                          <TableHead className="w-[120px]">用户名</TableHead>
+                          <TableHead className="w-[150px]">时间</TableHead>
+                          <TableHead>提交信息</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {filtered.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground py-4">
+                            <TableCell colSpan={5} className="text-center text-muted-foreground py-4">
                               No sessions match your search
                             </TableCell>
                           </TableRow>
@@ -771,14 +772,24 @@ export function LocalFileImport() {
                             <TableCell>
                               <Checkbox checked={cannbaySelected.has(s.filename)} onCheckedChange={() => toggleCannbaySelection(s.filename)} />
                             </TableCell>
-                            <TableCell className="max-w-[180px] truncate text-xs" title={s.query ?? s.taskId}>
-                              {s.query ?? <span className="text-muted-foreground">{s.taskId}</span>}
+                            <TableCell className="text-xs py-2 align-middle">
+                              <span className="block truncate" title={s.query ?? s.taskId ?? ""}>
+                                {s.query ?? <span className="text-muted-foreground">{s.taskId}</span>}
+                              </span>
                             </TableCell>
-                            <TableCell className="text-xs whitespace-nowrap">{s.startTime ? formatTime(s.startTime) : "—"}</TableCell>
-                            <TableCell className="text-xs max-w-[140px] truncate">{s.model ?? "—"}</TableCell>
-                            <TableCell className="text-xs tabular-nums">{s.totalTokens > 0 ? formatTokens(s.totalTokens) : "—"}</TableCell>
-                            <TableCell className="text-xs tabular-nums">{s.turnCount}</TableCell>
-                            <TableCell className="text-xs tabular-nums">{formatSize(s.size)}</TableCell>
+                            <TableCell className="text-xs py-2 align-middle">
+                              <span className="block truncate" title={s.submitter ?? ""}>
+                                {s.submitter || "—"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs whitespace-nowrap py-2 align-middle">
+                              {s.commitTime ? formatTime(s.commitTime) : "—"}
+                            </TableCell>
+                            <TableCell className="text-xs py-2 align-middle">
+                              <span className="block truncate" title={s.commitMessage ?? ""}>
+                                {s.commitMessage || "—"}
+                              </span>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

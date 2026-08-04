@@ -18,84 +18,129 @@ interface TokenData {
 }
 
 function formatTokenCount(n: number): string {
-  if (n === 0) return "0"
+  if (n === 0) return "-"
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
   return `${n}`
 }
 
-const TOKEN_SEGMENTS: Array<{ key: keyof TokenData; label: string; colorA: string; colorB: string }> = [
-  { key: "inputTokens", label: "Input", colorA: "#3b82f6", colorB: "#f97316" },
-  { key: "outputTokens", label: "Output", colorA: "#10b981", colorB: "#fb923c" },
-  { key: "reasoningTokens", label: "Reasoning", colorA: "#8b5cf6", colorB: "#c084fc" },
-  { key: "cacheReadTokens", label: "Cache Read", colorA: "#eab308", colorB: "#fbbf24" },
-  { key: "cacheWriteTokens", label: "Cache Write", colorA: "#6366f1", colorB: "#a855f7" },
+const COLOR_A = "#3b82f6"
+const COLOR_B = "#f97316"
+
+const TOKEN_SEGMENTS: Array<{ key: keyof TokenData; label: string }> = [
+  { key: "inputTokens", label: "Input" },
+  { key: "outputTokens", label: "Output" },
+  { key: "reasoningTokens", label: "Reasoning" },
+  { key: "cacheReadTokens", label: "Cache Read" },
+  { key: "cacheWriteTokens", label: "Cache Write" },
 ]
 
 export function CompareTokenChart({ tokenA, tokenB }: { tokenA: TokenData; tokenB: TokenData }) {
-  const SVG_W = 600
-  const SVG_H = 300
-  const PAD_L = 80
-  const PAD_R = 60
-  const PAD_T = 20
-  const PAD_B = 40
-  const GROUP_GAP = 24
-
-  const plotW = SVG_W - PAD_L - PAD_R
-  const plotH = SVG_H - PAD_T - PAD_B
-  const groupH = (plotH - GROUP_GAP * (TOKEN_SEGMENTS.length - 1)) / TOKEN_SEGMENTS.length
-
-  const maxVal = Math.max(
+  const globalMax = Math.max(
     ...TOKEN_SEGMENTS.map(s => Math.max(tokenA[s.key], tokenB[s.key])),
     1
   )
 
-  function barHeight(value: number): number {
-    return (value / maxVal) * groupH
+  function blendedPct(value: number, rowMax: number): number {
+    const globalPct = (value / (globalMax * 1.25)) * 100
+    const rowPct = (value / (rowMax * 1.25)) * 100
+    return Math.min(globalPct * 0.2 + rowPct * 0.8, 82)
   }
 
   return (
-    <Card size="sm">
+    <Card>
       <CardHeader>
         <CardTitle>Token 对比</CardTitle>
       </CardHeader>
       <CardContent>
-        <svg
-          width="100%"
-          height={SVG_H}
-          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-          preserveAspectRatio="xMidYMid meet"
-          className="min-w-[400px]"
-        >
-          {TOKEN_SEGMENTS.map((seg, i) => {
-            const groupY = PAD_T + i * (groupH + GROUP_GAP)
-            const groupBottom = groupY + groupH
+        <div className="space-y-2">
+          {TOKEN_SEGMENTS.map((seg) => {
             const valA = tokenA[seg.key]
             const valB = tokenB[seg.key]
-            const hA = barHeight(valA)
-            const hB = barHeight(valB)
-            const barW = plotW / 2 - 4
+            const rowMax = Math.max(valA, valB, 1)
+            const pctA = valA === 0 ? 0 : blendedPct(valA, rowMax)
+            const pctB = valB === 0 ? 0 : blendedPct(valB, rowMax)
+            const zeroA = valA === 0
+            const zeroB = valB === 0
+            const bigA = pctA > 25
+            const bigB = pctB > 25
 
             return (
-              <g key={seg.key}>
-                <text x={4} y={groupY + groupH / 2 + 3} fontSize={10} fill="#9ca3af">{seg.label}</text>
-                <line x1={PAD_L} y1={groupBottom} x2={SVG_W - PAD_R} y2={groupBottom} stroke="#374151" strokeWidth={0.5} />
+              <div key={seg.key} className="flex items-center">
+                <div className="w-[90px] shrink-0 text-sm font-medium text-muted-foreground text-right pr-3">
+                  {seg.label}
+                </div>
 
-                <rect x={PAD_L} y={groupBottom - hA} width={barW} height={Math.max(hA, 1)} fill={seg.colorA} rx={2} opacity={0.85} />
-                <text x={PAD_L + barW - 4} y={groupBottom - hA + hA / 2 + 3} fontSize={9} fill={seg.colorA} textAnchor="end">{formatTokenCount(valA)}</text>
+                <div className="flex-1 min-w-0 flex">
+                  <div className="flex-1 flex justify-end items-center">
+                    {zeroA ? (
+                      <div
+                        className="h-6 rounded-l-md flex items-center justify-center text-xs font-semibold"
+                        style={{ width: "24px", backgroundColor: COLOR_A, opacity: 0.18, color: "#9ca3af" }}
+                      >
+                        -
+                      </div>
+                    ) : bigA ? (
+                      <div
+                        className="h-6 rounded-l-md flex items-center justify-end pr-2 text-xs font-semibold"
+                        style={{ width: `${pctA}%`, backgroundColor: COLOR_A, opacity: 0.85, color: "#fff", minWidth: "40px" }}
+                      >
+                        <span className="truncate">{formatTokenCount(valA)}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-xs font-semibold tabular-nums mr-2" style={{ color: "#374151" }}>
+                          {formatTokenCount(valA)}
+                        </span>
+                        <div
+                          className="h-6 rounded-l-md shrink-0"
+                          style={{ width: `${pctA}%`, backgroundColor: COLOR_A, opacity: 0.85, minWidth: "4px" }}
+                        />
+                      </>
+                    )}
+                  </div>
 
-                <rect x={PAD_L + plotW / 2 + 4} y={groupBottom - hB} width={barW} height={Math.max(hB, 1)} fill={seg.colorB} rx={2} opacity={0.85} />
-                <text x={PAD_L + plotW / 2 + 4 + barW - 4} y={groupBottom - hB + hB / 2 + 3} fontSize={9} fill={seg.colorB} textAnchor="end">{formatTokenCount(valB)}</text>
-              </g>
+                  <div className="shrink-0 w-[2px] bg-border self-stretch" />
+
+                  <div className="flex-1 flex justify-start items-center">
+                    {zeroB ? (
+                      <div
+                        className="h-6 rounded-r-md flex items-center justify-center text-xs font-semibold"
+                        style={{ width: "24px", backgroundColor: COLOR_B, opacity: 0.18, color: "#9ca3af" }}
+                      >
+                        -
+                      </div>
+                    ) : bigB ? (
+                      <div
+                        className="h-6 rounded-r-md flex items-center justify-start pl-2 text-xs font-semibold"
+                        style={{ width: `${pctB}%`, backgroundColor: COLOR_B, opacity: 0.85, color: "#fff", minWidth: "40px" }}
+                      >
+                        <span className="truncate">{formatTokenCount(valB)}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          className="h-6 rounded-r-md shrink-0"
+                          style={{ width: `${pctB}%`, backgroundColor: COLOR_B, opacity: 0.85, minWidth: "4px" }}
+                        />
+                        <span className="text-xs font-semibold tabular-nums ml-2" style={{ color: "#374151" }}>
+                          {formatTokenCount(valB)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             )
           })}
-        </svg>
+        </div>
 
-        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-3 rounded bg-blue-500" /> Session A
+        <div className="flex items-center gap-6 mt-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-2">
+            <span className="inline-block w-4 h-2.5 rounded" style={{ backgroundColor: COLOR_A, opacity: 0.85 }} /> Session A
           </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-3 rounded bg-orange-500" /> Session B
+          <span className="flex items-center gap-2">
+            <span className="inline-block w-4 h-2.5 rounded" style={{ backgroundColor: COLOR_B, opacity: 0.85 }} /> Session B
           </span>
         </div>
       </CardContent>

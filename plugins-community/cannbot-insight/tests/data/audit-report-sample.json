@@ -1,0 +1,81 @@
+{
+  "skill_name": "opdef-developer",
+  "transcripts": ["ses_cuid_abc"],
+  "transcript_sources": ["cc"],
+  "summary": { "total": 6, "pass": 2, "fail": 2, "na": 1, "unresolved": 1, "indeterminate": 0 },
+  "warnings": ["transcript ses_cuid_abc 缺少 assistant 收尾 turn"],
+  "refine_dropped_count": 3,
+  "findings": [
+    {
+      "instruction_text": "改动前必须先读相关源码再动手",
+      "source": "STEP",
+      "verdict": "FAIL",
+      "method": "LLM",
+      "category": "step",
+      "evidence": "第 2 turn 直接改文件，未先 Read",
+      "transcript": "ses_cuid_abc",
+      "seq": 1,
+      "sources": ["STEP"],
+      "related": ["#9"],
+      "noise_label": "tool_noise",
+      "noise_reasons": ["Read 结果为空，疑似工具噪声"]
+    },
+    {
+      "instruction_text": "禁止编造未验证的 API 参数",
+      "source": "CONSTRAINT",
+      "verdict": "FAIL",
+      "method": "LLM",
+      "category": "prohibition",
+      "evidence": "调用 ascendc 时编了 backend=foo 参数",
+      "transcript": "ses_cuid_abc",
+      "seq": 2,
+      "sources": ["CONSTRAINT"],
+      "noise_label": "skill_issue"
+    },
+    {
+      "instruction_text": "用 Read 工具读源码",
+      "source": "TOOL_REQUIREMENT",
+      "verdict": "PASS",
+      "method": "PROGRAMMATIC",
+      "category": "conditional",
+      "evidence": "tool_trace 命中 Read(file_path=*.cpp)",
+      "transcript": "ses_cuid_abc",
+      "seq": 3,
+      "sources": ["TOOL_REQUIREMENT"]
+    },
+    {
+      "instruction_text": "输出格式必须含变更摘要",
+      "source": "OUTPUT_FORMAT",
+      "verdict": "PASS",
+      "method": "PROGRAMMATIC",
+      "category": "output",
+      "evidence": "最终 assistant turn 含 # 变更摘要",
+      "transcript": "ses_cuid_abc",
+      "seq": 4,
+      "sources": ["OUTPUT_FORMAT"]
+    },
+    {
+      "instruction_text": "场景不适用示例",
+      "source": "HEADING_STEP",
+      "verdict": "N/A",
+      "method": "LLM",
+      "category": "step",
+      "evidence": "本次未触发该步骤",
+      "transcript": "ses_cuid_abc",
+      "seq": 5,
+      "sources": ["HEADING_STEP"]
+    },
+    {
+      "instruction_text": "未提及的占位指令",
+      "source": "ANTI_FABRICATION",
+      "verdict": "UNRESOLVED",
+      "method": "LLM",
+      "category": "prohibition",
+      "evidence": "LLM 未给出明确结论",
+      "transcript": "ses_cuid_abc",
+      "seq": 9,
+      "sources": ["ANTI_FABRICATION"],
+      "related": ["#1"]
+    }
+  ]
+}

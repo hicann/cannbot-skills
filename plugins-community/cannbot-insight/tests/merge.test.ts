@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { describe, it, expect } from 'vitest';
-import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents } from '../src/lib/ingest/merge.ts';
+import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls } from '../src/lib/ingest/merge.ts';
 import type { TurnRow, ToolCallRow, SkillEventRow } from '../src/lib/ingest/turn-split.ts';
 
 function makeTurn(turnIndex: number, role: string, sessionId: string = 's1'): TurnRow {
@@ -219,6 +219,107 @@ describe('merge', () => {
       ];
       const result = mergeSkillEvents(existing, incoming);
       expect(result.length).toBe(2);
+    });
+  });
+
+  describe('diffTurns', () => {
+    it('all new turns → all inserted, zero updated', () => {
+      const existing = new Map<string, TurnRow>();
+      const incoming = [makeTurn(0, 'user'), makeTurn(1, 'assistant')];
+      const { toInsert, toUpdate } = diffTurns(existing, incoming);
+      expect(toInsert.length).toBe(2);
+      expect(toUpdate.length).toBe(0);
+    });
+
+    it('identical turns → zero inserted, zero updated', () => {
+      const t0 = makeTurn(0, 'user');
+      const t1 = makeTurn(1, 'assistant');
+      const existing = new Map<string, TurnRow>([
+        ['0:user', t0],
+        ['1:assistant', t1],
+      ]);
+      const incoming = [t0, t1];
+      const { toInsert, toUpdate } = diffTurns(existing, incoming);
+      expect(toInsert.length).toBe(0);
+      expect(toUpdate.length).toBe(0);
+    });
+
+    it('existing turn with changed content → 1 updated', () => {
+      const old = makeTurn(1, 'assistant');
+      const newTurn = { ...old, content: 'updated content', completedAt: '2026-01-02', latencyMs: 500 };
+      const existing = new Map<string, TurnRow>([['1:assistant', old]]);
+      const { toInsert, toUpdate } = diffTurns(existing, [newTurn]);
+      expect(toInsert.length).toBe(0);
+      expect(toUpdate.length).toBe(1);
+      expect(toUpdate[0].dbId).toBe(old.id);
+      expect(toUpdate[0].data['content']).toBe('updated content');
+      expect(toUpdate[0].data['completedAt']).toBe('2026-01-02');
+      expect(toUpdate[0].data['latencyMs']).toBe(500);
+    });
+
+    it('mix of new + changed + unchanged', () => {
+      const old0 = makeTurn(0, 'user');
+      const old1 = makeTurn(1, 'assistant');
+      const new1 = { ...old1, totalTokens: 999, completedAt: '2026-01-03' };
+      const new2 = makeTurn(2, 'user');
+      const existing = new Map<string, TurnRow>([
+        ['0:user', old0],
+        ['1:assistant', old1],
+      ]);
+      const { toInsert, toUpdate } = diffTurns(existing, [old0, new1, new2]);
+      expect(toInsert.length).toBe(1);
+      expect(toInsert[0].turnIndex).toBe(2);
+      expect(toUpdate.length).toBe(1);
+      expect(toUpdate[0].data['totalTokens']).toBe(999);
+    });
+
+    it('null→null changes are not included in update', () => {
+      const old = makeTurn(1, 'assistant');
+      const newTurn = { ...old };
+      const existing = new Map<string, TurnRow>([['1:assistant', old]]);
+      const { toUpdate } = diffTurns(existing, [newTurn]);
+      expect(toUpdate.length).toBe(0);
+    });
+  });
+
+  describe('diffToolCalls', () => {
+    it('all new tool calls → all inserted, zero updated', () => {
+      const existing = new Map<string, ToolCallRow>();
+      const incoming = [makeToolCall('tc1', 't1', 'bash'), makeToolCall('tc2', 't1', 'read')];
+      const { toInsert, toUpdate } = diffToolCalls(existing, incoming);
+      expect(toInsert.length).toBe(2);
+      expect(toUpdate.length).toBe(0);
+    });
+
+    it('identical tool calls → zero inserted, zero updated', () => {
+      const tc = makeToolCall('tc1', 't1', 'bash');
+      const existing = new Map<string, ToolCallRow>([['tc1', tc]]);
+      const { toInsert, toUpdate } = diffToolCalls(existing, [tc]);
+      expect(toInsert.length).toBe(0);
+      expect(toUpdate.length).toBe(0);
+    });
+
+    it('tool call with completed result → 1 updated', () => {
+      const old = makeToolCall('tc1', 't1', 'bash');
+      const newTc = { ...old, resultJson: '{"stdout":"ok"}', state: 'completed', completedAt: '2026-01-02', durationMs: 1200 };
+      const existing = new Map<string, ToolCallRow>([['tc1', old]]);
+      const { toInsert, toUpdate } = diffToolCalls(existing, [newTc]);
+      expect(toInsert.length).toBe(0);
+      expect(toUpdate.length).toBe(1);
+      expect(toUpdate[0].data['resultJson']).toBe('{"stdout":"ok"}');
+      expect(toUpdate[0].data['state']).toBe('completed');
+      expect(toUpdate[0].data['completedAt']).toBe('2026-01-02');
+      expect(toUpdate[0].data['durationMs']).toBe(1200);
+    });
+
+    it('tool call with error → 1 updated', () => {
+      const old = makeToolCall('tc2', 't1', 'read');
+      const newTc = { ...old, state: 'error', errorType: 'NotFound', errorMessage: 'file not found' };
+      const existing = new Map<string, ToolCallRow>([['tc2', old]]);
+      const { toInsert, toUpdate } = diffToolCalls(existing, [newTc]);
+      expect(toUpdate.length).toBe(1);
+      expect(toUpdate[0].data['state']).toBe('error');
+      expect(toUpdate[0].data['errorType']).toBe('NotFound');
     });
   });
 });

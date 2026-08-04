@@ -217,6 +217,18 @@ function _readSession(db: Database.Database, sessionId: string): RawInteraction[
     `SELECT message_id, data FROM part WHERE message_id IN (${msgIds.map(() => '?').join(',')}) AND json_extract(data, '$.type') = 'tool' ORDER BY time_created`
   ).all(...msgIds) as { message_id: string; data: string }[];
 
+  const allCompactionParts = db.prepare(
+    `SELECT message_id, data FROM part WHERE message_id IN (${msgIds.map(() => '?').join(',')}) AND json_extract(data, '$.type') = 'compaction' ORDER BY time_created`
+  ).all(...msgIds) as { message_id: string; data: string }[];
+
+  const compactionByMsg = new Map<string, { auto: boolean; tailStartId: string }>();
+  for (const p of allCompactionParts) {
+    try {
+      const pd = JSON.parse(p.data);
+      compactionByMsg.set(p.message_id, { auto: pd.auto === true, tailStartId: pd.tail_start_id ?? '' });
+    } catch { /* skip */ }
+  }
+
   const textByMsg = new Map<string, string[]>();
   for (const p of allTextParts) {
     try {
@@ -284,8 +296,23 @@ function _readSession(db: Database.Database, sessionId: string): RawInteraction[
     try {
       const msgData = JSON.parse(msg.data);
       const role = msgData.role || 'unknown';
-      const content = extractMessageContentBulk(msg.id, msgData, textByMsg, reasoningByMsg);
-      const agent = msgData.agent || null;
+      const isCompactionSummary = role === 'assistant' && (msgData.mode === 'compaction' || msgData.summary === true);
+      const compactionInfo = compactionByMsg.get(msg.id);
+      const hasNoTextContent = !textByMsg.has(msg.id) && !reasoningByMsg.has(msg.id) && !(msgData.content && typeof msgData.content === 'string');
+
+      let content: string | null;
+      let agent: string | null;
+
+      if (compactionInfo && hasNoTextContent) {
+        content = compactionInfo.auto ? '/compact (auto)' : '/compact';
+        agent = 'compaction-boundary';
+      } else if (isCompactionSummary) {
+        content = extractMessageContentBulk(msg.id, msgData, textByMsg, reasoningByMsg);
+        agent = 'compaction';
+      } else {
+        content = extractMessageContentBulk(msg.id, msgData, textByMsg, reasoningByMsg);
+        agent = msgData.agent || null;
+      }
 
       const timeInfo = msgData.time
         ? {

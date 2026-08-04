@@ -24,6 +24,7 @@ interface InputMessage {
   content: string | null
   tokenCount?: number
   name?: string
+  agentName?: string | null
   tool_calls?: ToolCallEntry[]
 }
 
@@ -80,11 +81,15 @@ export function LlmContextView({
   const autoExpand = totalVisibleTokens < 6000
 
   const [isExpanded, setIsExpanded] = useState(autoExpand)
-  const [expandedMessages, setExpandedMessages] = useState<Set<number>>(() =>
-    autoExpand ? new Set(messages.map((_, i) => i)) : new Set()
-  )
+  const [expandedMessages, setExpandedMessages] = useState<Set<number>>(() => {
+    if (autoExpand) return new Set(messages.map((_, i) => i))
+    const set = new Set<number>()
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].agentName === 'continuation') set.add(i)
+    }
+    return set
+  })
 
-  // System overhead: stable from first turn + delta for subsequent turns
   const stableHidden = systemOverheadTokens ?? 0
   const deltaTokens = Math.max(0, inputMessagesTokens - totalVisibleTokens - stableHidden)
 
@@ -175,14 +180,13 @@ export function LlmContextView({
             </div>
           )}
 
-          {/* Visible messages in interleaved order */}
           {messages.map((msg, index) => {
             const isMsgExpanded = expandedMessages.has(index)
             const msgTokens = msg.tokenCount ?? estimateTokensFromChars(msg.content?.length ?? 0)
-            const isLongContent = msg.content && msg.content.length > 500
+            const isContinuation = msg.agentName === 'continuation'
 
             return (
-              <div key={index} className="border rounded-md overflow-hidden">
+              <div key={index} className={cn("border rounded-md overflow-hidden", isContinuation && "border-l-3 border-l-purple-500 bg-purple-50/20 dark:bg-purple-500/10")}>
                 <span
                   role="button"
                   tabIndex={0}
@@ -190,9 +194,9 @@ export function LlmContextView({
                   onClick={() => toggleMessage(index)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleMessage(index) }}
                 >
-                  <div className={cn("w-2 h-2 rounded-sm shrink-0", ROLE_DOT_COLOR[msg.role] ?? "bg-gray-400")} />
-                  <Badge variant={ROLE_BADGE_VARIANTS_INLINE[msg.role] ?? "gray"} className="text-xs">
-                    {msg.role}
+                  <div className={cn("w-2 h-2 rounded-sm shrink-0", isContinuation ? "bg-purple-500" : (ROLE_DOT_COLOR[msg.role] ?? "bg-gray-400"))} />
+                  <Badge variant={isContinuation ? "purple" : (ROLE_BADGE_VARIANTS_INLINE[msg.role] ?? "gray")} className="text-xs">
+                    {isContinuation ? "continuation" : msg.role}
                   </Badge>
                   {msg.name && (
                     <span className="text-xs text-muted-foreground">{msg.name}</span>
@@ -200,21 +204,18 @@ export function LlmContextView({
                   {msgTokens > 0 && (
                     <span className="text-xs text-muted-foreground">{formatTokenCount(msgTokens)}t</span>
                   )}
-                  {isLongContent && (
-                    <span className="text-xs text-muted-foreground">
-                      {isMsgExpanded ? "▼" : "▶"}
-                    </span>
-                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {isMsgExpanded ? "▼" : "▶"}
+                  </span>
                   {msg.content && <CopyButton text={msg.content} className="ml-auto size-4 text-muted-foreground hover:text-foreground" />}
                 </span>
 
                 {isMsgExpanded && msg.content && (
-                  <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto bg-muted/30">
+                  <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words overflow-y-auto bg-muted/30 max-h-[300px]">
                     {msg.content}
                   </div>
                 )}
 
-                {/* Tool calls attached to assistant message */}
                 {isMsgExpanded && msg.tool_calls && msg.tool_calls.length > 0 && (
                   <div className="px-2 pb-2 space-y-1.5">
                     {msg.tool_calls.map((tc, tcIdx) => {

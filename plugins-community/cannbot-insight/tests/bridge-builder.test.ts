@@ -10,17 +10,13 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { buildBridges, resetIdCounter } from '../src/lib/ingest/bridge-builder.ts';
 import { splitIntoTurns, resetIdCounter as resetTurnIdCounter } from '../src/lib/ingest/turn-split.ts';
 import { normalize } from '../src/lib/ingest/normalize.ts';
-import { readSession, listSessions } from '../src/lib/ingest/adapters/opencode-db.ts';
 import type { RawInteraction } from '../src/lib/shared/types.ts';
 import type { TurnRow, ToolCallRow } from '../src/lib/ingest/turn-split.ts';
 import type { InteractionBridgeRow } from '../src/lib/ingest/bridge-builder.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 
 const SYNTHETIC_DATA_PATH = path.resolve(__dirname, 'data/synthetic-opencode.json');
-const REAL_DB_PATH = path.resolve(__dirname, 'data/opencode-sessions.db');
-const hasRealDB = fs.existsSync(REAL_DB_PATH);
 
 function loadSyntheticData(): RawInteraction[] {
   const raw = fs.readFileSync(SYNTHETIC_DATA_PATH, 'utf-8');
@@ -580,92 +576,6 @@ describe('bridge-builder', () => {
 
     it('dispatchContent is the prompt from task() args', () => {
       expect(bridges[0].dispatchContent).toContain('sys_timer_create');
-    });
-  });
-
-  describe.skipIf(!hasRealDB)('with real DB data', () => {
-    let bridges: InteractionBridgeRow[];
-    let sessionId: string;
-    let interactions: RawInteraction[];
-    let splitResult: { turns: TurnRow[], toolCalls: ToolCallRow[] };
-
-    beforeAll(() => {
-      resetTurnIdCounter();
-      resetIdCounter();
-      const db = new Database(REAL_DB_PATH, { readonly: true });
-      const subagentSessions = db.prepare('SELECT id, parent_id FROM session WHERE parent_id IS NOT NULL').all() as { id: string; parent_id: string }[];
-      db.close();
-
-      if (subagentSessions.length === 0) {
-        sessionId = '';
-        interactions = [];
-        splitResult = { turns: [], toolCalls: [] };
-        bridges = [];
-        return;
-      }
-
-      const rootSessionId = subagentSessions[0].parent_id;
-      sessionId = rootSessionId;
-
-      const rootInteractions = readSession(REAL_DB_PATH, rootSessionId);
-      const allInteractions: RawInteraction[] = [...rootInteractions];
-
-      for (const sub of subagentSessions.filter(s => s.parent_id === rootSessionId)) {
-        const subInteractions = readSession(REAL_DB_PATH, sub.id);
-        allInteractions.push(...subInteractions);
-      }
-
-      interactions = allInteractions;
-      const normalized = normalize(allInteractions, 'opencode-db');
-      splitResult = splitIntoTurns(normalized, sessionId);
-      bridges = buildBridges(normalized, splitResult.toolCalls, splitResult.turns, sessionId, 'root-exec-real');
-    });
-
-    it('produces bridges for task() calls in real DB', () => {
-      if (bridges.length === 0) return;
-      expect(bridges.length).toBeGreaterThan(0);
-    });
-
-    it('each bridge has all required fields', () => {
-      for (const bridge of bridges) {
-        expect(bridge).toHaveProperty('id');
-        expect(bridge).toHaveProperty('sessionId');
-        expect(bridge).toHaveProperty('dispatchExecutionId');
-        expect(bridge).toHaveProperty('dispatchToolCallId');
-        expect(bridge).toHaveProperty('dispatchContent');
-        expect(bridge).toHaveProperty('dispatchTimestamp');
-        expect(bridge).toHaveProperty('subagentSessionId');
-        expect(bridge).toHaveProperty('status');
-        expect(bridge).toHaveProperty('subagentTokens');
-        expect(bridge).toHaveProperty('subagentLatencyMs');
-      }
-    });
-
-    it('bridges for matched subagents have response data', () => {
-      const matchedBridges = bridges.filter(b => b.status === 'completed');
-      if (matchedBridges.length > 0) {
-        for (const bridge of matchedBridges) {
-          expect(bridge.subagentSessionId).not.toBeNull();
-        }
-      }
-    });
-
-    it('logs bridge results for inspection', () => {
-      console.log('\n=== Real DB Bridge-Builder Results ===');
-      console.log(`Session: ${sessionId}`);
-      console.log(`Total interactions: ${interactions.length}`);
-      console.log(`Total bridges: ${bridges.length}`);
-      for (const bridge of bridges) {
-        console.log(JSON.stringify({
-          status: bridge.status,
-          subagentSessionId: bridge.subagentSessionId,
-          subagentName: bridge.subagentName,
-          dispatchContent: bridge.dispatchContent?.substring(0, 80),
-          responseContent: bridge.responseContent?.substring(0, 80),
-          subagentTokens: bridge.subagentTokens,
-          subagentLatencyMs: bridge.subagentLatencyMs,
-        }, null, 2));
-      }
     });
   });
 

@@ -7,13 +7,13 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { use } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeftIcon, UploadIcon, LayoutDashboardIcon, MessageSquareIcon, GitBranchIcon, SearchIcon, UsersIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, BrainIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
+import { ArrowLeftIcon, LayoutDashboardIcon, MessageSquareIcon, SearchIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, WifiIcon, ShieldCheckIcon, GaugeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { VERSION_DISPLAY } from "@/lib/version"
@@ -21,23 +21,17 @@ import { BRAND_NAME } from "@/lib/branding"
 import { TurnTimeline } from "@/components/observe/TurnTimeline"
 import { TurnDetail } from "@/components/observe/TurnDetail"
 import { TurnContextPanel } from "@/components/observe/TurnContextPanel"
-import { SubagentCards } from "@/components/observe/SubagentCards"
-import { InteractionGraph } from "@/components/observe/InteractionGraph"
 import { SkillDetail } from "@/components/observe/SkillDetail"
-import { WorkflowTreeView } from "@/components/observe/WorkflowTreeView"
-import { WorkflowAIView } from "@/components/observe/WorkflowAIView"
-import { WorkflowAnalyseTab } from "@/components/observe/WorkflowAnalyseTab"
+import { AuditBoardTab } from "@/components/observe/AuditBoardTab"
+import { PerfPanorama } from "@/components/observe/PerfPanorama"
 import { TraceView } from "@/components/observe/TraceView"
 import { ContextTracker } from "@/components/observe/ContextTracker"
 import { FileReadAnalysis } from "@/components/observe/FileReadAnalysis"
 import { AgentCallGraph } from "@/components/observe/AgentCallGraph"
-import { AgentRelationGraph } from "@/components/observe/AgentRelationGraph"
 import { ChatReplayView } from "@/components/observe/ChatReplayView"
 import { summarizeToolCallErrors } from "@/lib/tool-call-errors"
-import type { WorkflowTree } from "@/lib/ingest/phase-split"
-import type { AIProviderConfig } from "@/lib/ai/analyzer"
 
-type TabKey = "overview" | "turns" | "workflow" | "trace" | "subagents" | "skills" | "interactions" | "workflowAI" | "workflowAnalyse" | "context" | "fileReads" | "replay"
+type TabKey = "overview" | "turns" | "trace" | "skills" | "workflowAnalyse" | "performance" | "context" | "fileReads" | "replay"
 
 interface SessionData {
   sessionId: string
@@ -196,28 +190,6 @@ interface ExecutionItem {
   skills: Array<{ skillName: string; skillVersion: number | null; isPrimary: boolean }>
 }
 
-interface SubagentItem {
-  executionId: string
-  agentName: string | null
-  agentSessionId: string | null
-  subagentType: string | null
-  subagentName: string | null
-  parentExecutionId: string | null
-  rootExecutionId: string | null
-  depth: number
-  tokens: number
-  inputTokens: number
-  outputTokens: number
-  cost: number
-  latencyMs: number
-  toolCallCount: number
-  skillLoadCount: number
-  skillInvokeCount: number
-  llmCallCount: number
-  model: string | null
-  createdAt: string
-}
-
 interface BridgeItem {
   bridgeId: string
   dispatchExecutionId: string
@@ -260,7 +232,7 @@ interface SkillEventForDetail {
   }
 }
 
-const HIDDEN_TABS_DEFAULT = ["subagents", "interactions", "workflowAI", "workflow", "replay"]
+const HIDDEN_TABS_DEFAULT = ["replay"]
 
 const ALL_TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; highlight?: boolean }> = [
   { key: "overview", label: "Overview", icon: <LayoutDashboardIcon className="size-3.5 text-blue-500" /> },
@@ -268,12 +240,9 @@ const ALL_TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; highl
   { key: "trace", label: "Trace", icon: <SearchIcon className="size-3.5 text-yellow-500" /> },
   { key: "context", label: "Context", icon: <BarChart3Icon className="size-3.5 text-pink-500" /> },
   { key: "workflowAnalyse", label: "Audit", icon: <ShieldCheckIcon className="size-3.5 text-emerald-500" />, highlight: true },
+  { key: "performance", label: "Perf", icon: <GaugeIcon className="size-3.5 text-amber-500" /> },
   { key: "skills", label: "Skills", icon: <SparklesIcon className="size-3.5 text-orange-500" /> },
-  { key: "fileReads", label: "File Reads", icon: <FileSearchIcon className="size-3.5 text-teal-500" /> },
-  { key: "workflow", label: "Workflow", icon: <GitBranchIcon className="size-3.5 text-violet-500" />, highlight: true },
-  { key: "subagents", label: "Subagents", icon: <UsersIcon className="size-3.5 text-cyan-500" /> },
-  { key: "interactions", label: "Interactions", icon: <MessageSquareIcon className="size-3.5 text-emerald-500" /> },
-  { key: "workflowAI", label: "AI Workflow", icon: <BrainIcon className="size-3.5 text-violet-500" />, highlight: true },
+  { key: "fileReads", label: "Files", icon: <FileSearchIcon className="size-3.5 text-teal-500" /> },
   { key: "replay", label: "Replay", icon: <PlayIcon className="size-3.5 text-pink-500" /> },
 ]
 
@@ -329,85 +298,52 @@ export default function SessionDetailPage({
   const [turns, setTurns] = useState<TurnRowItem[]>([])
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
   const [highlightSubagentTurnId, setHighlightSubagentTurnId] = useState<string | null>(null)
+  const [showAllErrorTurns, setShowAllErrorTurns] = useState(false)
   const [scrollToTurnId, setScrollToTurnId] = useState<string | null>(null)
   const [selectedBridgeId, setSelectedBridgeId] = useState<string | null>(null)
-  const [highlightSubagentSessionId, setHighlightSubagentSessionId] = useState<string | null>(null)
-  const [highlightAgent, setHighlightAgent] = useState<string | null>(null)
   const [selectedTurnDetail, setSelectedTurnDetail] = useState<TurnDetailData | null>(null)
   const [executions, setExecutions] = useState<ExecutionItem[]>([])
-  const [subagents, setSubagents] = useState<SubagentItem[]>([])
   const [bridges, setBridges] = useState<BridgeItem[]>([])
-  const [workflowData, setWorkflowData] = useState<WorkflowTree | null>(null)
-  const [workflowAIResult, setWorkflowAIResult] = useState<WorkflowTree | null>(null)
-  const [workflowAIAnalyzing, setWorkflowAIAnalyzing] = useState(false)
-  const [workflowAIError, setWorkflowAIError] = useState<string | null>(null)
   const [allSkillEvents, setAllSkillEvents] = useState<SkillEventForDetail[]>([])
-  const [workflowSelectedTurnId, setWorkflowSelectedTurnId] = useState<string | null>(null)
+  // Audit 板块受控状态：子 tab（workflow|skill）+ Skill 子 tab 选中 {name, kind}。
+  // Skills tab 的"对账 ↗"跳转时由 onAuditSkill 一并 set，跨 tab 一气呵成（无需 effect/外部 store）。
+  const [auditSub, setAuditSub] = useState<"workflow" | "skill">("workflow")
+  const [auditSelected, setAuditSelected] = useState<{ name: string; kind: "skill" | "agent" | "root" } | null>(null)
+  // 主 agent workflow 对账目标是否可用：session 首条 user turn(isSubagent=0)内容达阈值
+  // （≥500 字）即注入的 workflow skill 声明。主 agent 通常只 dispatch、不 invoke skill，
+  // 其 workflow 声明只能从 turn0 取，故单独 gate（见 audit-skilleval kind=root）。
+  const [hasMainAgentWorkflow, setHasMainAgentWorkflow] = useState(false)
+  // 主 agent workflow 的真名（扫盘按 turn0 body 匹配 disk SKILL.md 的 frontmatter name）。
+  // null=未取/无 workflow；MAIN_AGENT_WORKFLOW_NAME 回退由端点返回。
+  const [mainAgentWorkflowName, setMainAgentWorkflowName] = useState<string | null>(null)
+  // 主 agent workflow 合成行的逐栏数据：dispatch 计数（编排动作）+ 主 agent turn 的 token 汇总。
+  const mainAgentWorkflowStats = useMemo(() => {
+    const dispatchCount = allSkillEvents.filter(e => !e.isSubagent && e.eventType === "dispatch").length
+    let inputTokens = 0, outputTokens = 0, reasoningTokens = 0, cacheReadTokens = 0, totalTokens = 0
+    for (const t of turns) {
+      if (t.isSubagent) continue
+      inputTokens += t.inputTokens ?? 0
+      outputTokens += t.outputTokens ?? 0
+      reasoningTokens += t.reasoningTokens ?? 0
+      cacheReadTokens += t.cacheReadTokens ?? 0
+      totalTokens += t.totalTokens ?? 0
+    }
+    return { dispatchCount, inputTokens, outputTokens, reasoningTokens, cacheReadTokens, totalTokens }
+  }, [allSkillEvents, turns])
+
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [exporting, setExporting] = useState(false)
   const [exportingMd, setExportingMd] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-
-  async function handleExport() {
-    if (exporting) return
-    setExporting(true)
-    try {
-      const res = await fetch("/api/ingest/export-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        toast.error("Export failed", { description: err.error ?? "Unknown error" })
-        return
-      }
-      const blob = await res.blob()
-      const defaultName = `cannbot_session_${taskId}.db`
-      if (typeof window.showSaveFilePicker === "function") {
-        try {
-          const handle = await window.showSaveFilePicker({
-            suggestedName: defaultName,
-            types: [{ description: "SQLite Database", accept: { "application/x-sqlite3": [".db"] } }],
-          })
-          const writable = await handle.createWritable()
-          await writable.write(blob)
-          await writable.close()
-          toast.success("Database exported", {
-            description: `Saved to ${handle.name}.`,
-            icon: <CheckCircleIcon className="size-4" />,
-            duration: 5000,
-          })
-          return
-        } catch (e: unknown) {
-          if (e instanceof DOMException && e.name === "AbortError") return
-        }
-      }
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = defaultName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 10000)
-      toast.success("Database exported", {
-        description: `${defaultName} has been downloaded.`,
-        icon: <CheckCircleIcon className="size-4" />,
-        duration: 5000,
-      })
-    } catch {
-      toast.error("Export failed", { description: "Network error" })
-    } finally {
-      setExporting(false)
-    }
-  }
+  const refreshingRef = useRef(false)
+  const lastMaxTimeUpdatedRef = useRef<number>(-1)
+  const pollInitializedRef = useRef(false)
 
   async function handleRefresh() {
-    if (refreshing) return
+    if (refreshing || refreshingRef.current) return
     setRefreshing(true)
+    refreshingRef.current = true
     try {
       const fwParam = framework ? `&framework=${encodeURIComponent(framework)}` : ""
       const res = await fetch("/api/ingest/refresh-session", {
@@ -421,13 +357,13 @@ export default function SessionDetailPage({
         return
       }
       toast.success(data.message ?? "刷新完成")
-      // Re-trigger all data fetches by re-running the useEffect
       setLoading(true)
       loadAllData()
     } catch {
       toast.error("刷新失败", { description: "网络错误" })
     } finally {
       setRefreshing(false)
+      refreshingRef.current = false
     }
   }
 
@@ -530,7 +466,6 @@ export default function SessionDetailPage({
         if (res.ok) {
           const data = await res.json()
           setExecutions(data.items ?? [])
-          setSubagents(data.subagents ?? [])
         }
       } catch {
         setError("Failed to load executions")
@@ -555,7 +490,12 @@ export default function SessionDetailPage({
         if (res.ok) {
           const data = await res.json()
           const events: SkillEventForDetail[] = []
+          // 首条 user turn(isSub=0)的全文长度 → 主 agent workflow 声明 gate（≥500 字）
+          let firstUserTurnLen = -1
           for (const turn of data.items ?? []) {
+            if (firstUserTurnLen < 0 && turn.role === "user" && !(turn.isSubagent ?? false)) {
+              firstUserTurnLen = (turn as { contentLength?: number }).contentLength ?? 0
+            }
             for (const se of turn.skillEvents ?? []) {
               events.push({
                 id: `${turn.turnId}-${se.skillName}-${se.eventType}`,
@@ -581,31 +521,168 @@ export default function SessionDetailPage({
             }
           }
           setAllSkillEvents(events)
+          setHasMainAgentWorkflow(firstUserTurnLen >= 500)
         }
       } catch {
         setError("Failed to load skill events")
       }
     }
 
-    async function fetchWorkflow() {
-      try {
-        const res = await fetch(`/api/observe/session/workflow?taskId=${encodeURIComponent(taskId)}${frameworkParam}`)
-        if (res.ok) {
-          const data = await res.json()
-          setWorkflowData(data)
-        }
-      } catch {
-      }
-    }
-
     setLoading(true)
-    Promise.all([fetchSessionData(), fetchTurns(), fetchExecutions(), fetchBridges(), fetchSkillEvents(), fetchWorkflow()])
+    Promise.all([fetchSessionData(), fetchTurns(), fetchExecutions(), fetchBridges(), fetchSkillEvents()])
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
     loadAllData()
   }, [taskId])
+
+  // 有主 agent workflow 声明时，扫盘反查真名（identifier）用于显示。
+  useEffect(() => {
+    if (!hasMainAgentWorkflow) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await fetch(
+          `/api/observe/session/main-agent-workflow?taskId=${encodeURIComponent(taskId)}&framework=${encodeURIComponent(framework ?? "")}`,
+        )
+        if (!r.ok) return
+        const d = (await r.json()) as { name?: string | null }
+        if (!cancelled) setMainAgentWorkflowName(d.name ?? null)
+      } catch {
+        /* 取名失败不影响对账（回退合成名） */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [taskId, framework, hasMainAgentWorkflow])
+
+  useEffect(() => {
+    if (!session || session.framework !== "opencode" || !session.sourcePath) return
+
+    const POLL_INTERVAL = 5000
+    let active = true
+
+    const poll = async () => {
+      if (!active || refreshingRef.current) return
+      try {
+        const res = await fetch(`/api/observe/auto-refresh?taskId=${encodeURIComponent(taskId)}`)
+        if (!res.ok || !active) return
+        const data = await res.json()
+        if (!pollInitializedRef.current) {
+          pollInitializedRef.current = true
+          lastMaxTimeUpdatedRef.current = data.maxTimeUpdated ?? -1
+          return
+        }
+        if (!data.settled) return
+        const countChanged = data.countChanged === true
+        const timeChanged = typeof data.maxTimeUpdated === 'number' && data.maxTimeUpdated !== lastMaxTimeUpdatedRef.current
+        const needRefresh = countChanged || timeChanged
+        if (needRefresh && active) {
+          lastMaxTimeUpdatedRef.current = data.maxTimeUpdated ?? -1
+          refreshingRef.current = true
+          setRefreshing(true)
+          const refreshRes = await fetch("/api/ingest/refresh-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId, framework }),
+          })
+          const refreshData = await refreshRes.json()
+          if (refreshRes.ok && active) {
+            const added = refreshData.addedTurns ?? 0
+            const updated = refreshData.updatedTurns ?? 0
+            const msg = added > 0 ? `自动同步: +${added} 轮` : (updated > 0 ? `自动同步: 更新 ${updated} 轮` : "自动同步完成")
+            toast.success(msg, { duration: 3000 })
+            setLoading(true)
+            loadAllData().finally(() => {
+              refreshingRef.current = false
+              setRefreshing(false)
+            })
+          } else {
+            refreshingRef.current = false
+            setRefreshing(false)
+          }
+        }
+      } catch {
+        refreshingRef.current = false
+        setRefreshing(false)
+      }
+    }
+
+    const intervalId = setInterval(poll, POLL_INTERVAL)
+
+    return () => {
+      active = false
+      clearInterval(intervalId)
+    }
+  }, [taskId, session?.framework, session?.sourcePath, framework])
+
+  useEffect(() => {
+    if (!session || session.framework !== "claude-code" || !session.sourcePath) return
+
+    let active = true
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(`/api/observe/auto-refresh-stream?taskId=${encodeURIComponent(taskId)}`)
+    } catch {
+      return
+    }
+
+    es.onmessage = async (e) => {
+      if (!active) return
+      let data: { settled?: boolean; maxTimeUpdated?: number }
+      try {
+        data = JSON.parse(e.data)
+      } catch {
+        return
+      }
+      if (!pollInitializedRef.current) {
+        pollInitializedRef.current = true
+        lastMaxTimeUpdatedRef.current = data.maxTimeUpdated ?? -1
+        return
+      }
+      if (refreshingRef.current) return
+      if (!data.settled) return
+      const timeChanged = typeof data.maxTimeUpdated === "number" && data.maxTimeUpdated !== lastMaxTimeUpdatedRef.current
+      if (!timeChanged) return
+      lastMaxTimeUpdatedRef.current = data.maxTimeUpdated ?? -1
+      refreshingRef.current = true
+      setRefreshing(true)
+      try {
+        const refreshRes = await fetch("/api/ingest/refresh-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, framework }),
+        })
+        const refreshData = await refreshRes.json()
+        if (refreshRes.ok && active) {
+          const added = refreshData.addedTurns ?? 0
+          const updated = refreshData.updatedTurns ?? 0
+          const msg = added > 0 ? `自动同步: +${added} 轮` : (updated > 0 ? `自动同步: 更新 ${updated} 轮` : "自动同步完成")
+          toast.success(msg, { duration: 3000 })
+          setLoading(true)
+          loadAllData().finally(() => {
+            refreshingRef.current = false
+            setRefreshing(false)
+          })
+        } else {
+          refreshingRef.current = false
+          setRefreshing(false)
+        }
+      } catch {
+        refreshingRef.current = false
+        setRefreshing(false)
+      }
+    }
+
+    es.onerror = () => {
+      pollInitializedRef.current = false
+    }
+
+    return () => {
+      active = false
+      es?.close()
+    }
+  }, [taskId, session?.framework, session?.sourcePath, framework])
 
   useEffect(() => {
     if (!selectedTurnId) {
@@ -780,83 +857,7 @@ export default function SessionDetailPage({
             }
             setActiveTab("turns")
           }} />
-
-          {(() => {
-            const errorTurns = turns
-              .map(t => ({ turn: t, errors: summarizeToolCallErrors(t.toolCalls, t.skillEvents) }))
-              .filter(({ errors }) => errors.total > 0)
-
-            if (errorTurns.length === 0) return <div />
-
-            return (
-              <Card size="sm" className="border-red-200 dark:border-red-500/30">
-                <CardHeader>
-                  <CardTitle className="text-red-600 dark:text-red-400">⚠ Error Turns ({errorTurns.length})</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {errorTurns.map(({ turn: t, errors }) => (
-                      <button
-                        key={t.turnId}
-                        className="w-full px-2 py-1.5 rounded-md border border-red-100 dark:border-red-500/20 bg-red-50/30 dark:bg-red-500/5 text-xs hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors cursor-pointer text-left"
-                        onClick={() => {
-                          setSelectedTurnId(t.turnId)
-                          if (t.isSubagent) setHighlightSubagentTurnId(t.turnId)
-                          setScrollToTurnId(t.turnId)
-                          setActiveTab("turns")
-                        }}
-                      >
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-mono text-muted-foreground">#{t.turnIndex}</span>
-                          <Badge variant="outline" className="text-xs">{t.role}</Badge>
-                          {t.isSubagent && t.subagentName && <Badge variant="orange" className="text-xs">🔗 {t.subagentName}</Badge>}
-                          {errors.cancelled > 0 && <Badge variant="orange" className="text-xs">{errors.cancelled} cancelled</Badge>}
-                          {errors.failed > 0 && <Badge variant="red" className="text-xs">{errors.failed} failed</Badge>}
-                          {errors.skillFail > 0 && <Badge variant="red" className="text-xs">{errors.skillFail} skill_fail</Badge>}
-                          {t.model && <span className="text-muted-foreground ml-auto">{t.model}</span>}
-                        </div>
-                        {t.contentSummary && (
-                          <p className="text-foreground/80 truncate mb-0.5">{t.contentSummary.substring(0, 80)}</p>
-                        )}
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
-                          {errors.details.map((d, i) => (
-                            <span key={i} className={d.type === "failed" ? "text-red-500 dark:text-red-400" : d.type === "cancelled" ? "text-orange-500" : "text-red-500"}>
-                              {d.type === "skill_fail" ? "⚡" : "🔧"} {d.toolName}
-                            </span>
-                          ))}
-                          {t.toolCalls.filter(tc => {
-                            const r = tc.resultJson ?? ""
-                            return r.includes("Exit code") || r.includes("<tool_use_error>") || tc.state === "error" || tc.state === "failed"
-                          }).map(tc => {
-                            const r = tc.resultJson ?? ""
-                            const exitMatch = r.match(/Exit code (\d+)/)
-                            const errMsg = r.includes("<tool_use_error>") ? r.replace(/.*<tool_use_error>/, "").replace(/<\/tool_use_error>.*/, "").substring(0, 60) : exitMatch ? `exit ${exitMatch[1]}` : ""
-                            return errMsg ? <span key={tc.toolCallId} className="text-red-500/80 dark:text-red-400/80 truncate max-w-[180px]">{tc.toolName}: {errMsg}</span> : null
-                          })}
-                          {t.skillEvents.filter(se => !se.success && se.errorMessage).map(se => (
-                            <span key={se.skillName} className="text-red-500/80 dark:text-red-400/80 truncate max-w-[180px]">⚡ {se.skillName}: {se.errorMessage!.substring(0, 60)}</span>
-                          ))}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })()}
         </div>
-
-        <AgentRelationGraph agents={s.agents} bridges={bridges} onViewTurns={(agentSessionId) => {
-          if (agentSessionId) {
-            setHighlightSubagentTurnId(agentSessionId)
-            const firstSubTurn = turns.find(t => t.isSubagent && t.subagentSessionId === agentSessionId)
-            if (firstSubTurn) {
-              setSelectedTurnId(firstSubTurn.turnId)
-              setScrollToTurnId(firstSubTurn.turnId)
-            }
-          }
-          setActiveTab("turns")
-        }} />
 
         <Card size="sm">
           <CardHeader>
@@ -927,6 +928,80 @@ export default function SessionDetailPage({
             })()}
           </CardContent>
         </Card>
+
+        {(() => {
+          const errorTurns = turns
+            .map(t => ({ turn: t, errors: summarizeToolCallErrors(t.toolCalls, t.skillEvents) }))
+            .filter(({ errors }) => errors.total > 0)
+
+          if (errorTurns.length === 0) return <div />
+
+          const visibleErrorTurns = showAllErrorTurns ? errorTurns : errorTurns.slice(0, 3)
+
+          return (
+            <Card size="sm" className="border-red-200 dark:border-red-500/30">
+              <CardHeader>
+                <CardTitle className="text-red-600 dark:text-red-400">⚠ Error Turns ({errorTurns.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {visibleErrorTurns.map(({ turn: t, errors }) => (
+                    <button
+                      key={t.turnId}
+                      className="w-full px-2 py-1.5 rounded-md border border-red-100 dark:border-red-500/20 bg-red-50/30 dark:bg-red-500/5 text-xs hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+                      onClick={() => {
+                        setSelectedTurnId(t.turnId)
+                        if (t.isSubagent) setHighlightSubagentTurnId(t.turnId)
+                        setScrollToTurnId(t.turnId)
+                        setActiveTab("turns")
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-mono text-muted-foreground">#{t.turnIndex}</span>
+                        <Badge variant="outline" className="text-xs">{t.role}</Badge>
+                        {t.isSubagent && t.subagentName && <Badge variant="orange" className="text-xs">🔗 {t.subagentName}</Badge>}
+                        {errors.cancelled > 0 && <Badge variant="orange" className="text-xs">{errors.cancelled} cancelled</Badge>}
+                        {errors.failed > 0 && <Badge variant="red" className="text-xs">{errors.failed} failed</Badge>}
+                        {errors.skillFail > 0 && <Badge variant="red" className="text-xs">{errors.skillFail} skill_fail</Badge>}
+                        {t.model && <span className="text-muted-foreground ml-auto">{t.model}</span>}
+                      </div>
+                      {t.contentSummary && (
+                        <p className="text-foreground/80 truncate mb-0.5">{t.contentSummary.substring(0, 80)}</p>
+                      )}
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
+                        {errors.details.map((d, i) => (
+                          <span key={i} className={d.type === "failed" ? "text-red-500 dark:text-red-400" : d.type === "cancelled" ? "text-orange-500" : "text-red-500"}>
+                            {d.type === "skill_fail" ? "⚡" : "🔧"} {d.toolName}
+                          </span>
+                        ))}
+                        {t.toolCalls.filter(tc => {
+                          const r = tc.resultJson ?? ""
+                          return r.includes("Exit code") || r.includes("<tool_use_error>") || tc.state === "error" || tc.state === "failed"
+                        }).map(tc => {
+                          const r = tc.resultJson ?? ""
+                          const exitMatch = r.match(/Exit code (\d+)/)
+                          const errMsg = r.includes("<tool_use_error>") ? r.replace(/.*<tool_use_error>/, "").replace(/<\/tool_use_error>.*/, "").substring(0, 60) : exitMatch ? `exit ${exitMatch[1]}` : ""
+                          return errMsg ? <span key={tc.toolCallId} className="text-red-500/80 dark:text-red-400/80 truncate max-w-[180px]">{tc.toolName}: {errMsg}</span> : null
+                        })}
+                        {t.skillEvents.filter(se => !se.success && se.errorMessage).map(se => (
+                          <span key={se.skillName} className="text-red-500/80 dark:text-red-400/80 truncate max-w-[180px]">⚡ {se.skillName}: {se.errorMessage!.substring(0, 60)}</span>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {errorTurns.length > 3 && (
+                  <button
+                    className="w-full mt-1 py-1 rounded-md border border-red-100 dark:border-red-500/20 bg-red-50/20 dark:bg-red-500/5 text-xs text-red-600 dark:text-red-400 hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                    onClick={() => setShowAllErrorTurns(v => !v)}
+                  >
+                    {showAllErrorTurns ? "收起" : `展开全部 (${errorTurns.length})`}
+                  </button>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })()}
       </div>
     )
   }
@@ -1133,35 +1208,21 @@ export default function SessionDetailPage({
     )
   }
 
-  function renderSubagents() {
-    return (
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <SubagentCards
-          subagents={subagents}
-          bridges={bridges}
-          highlightAgent={highlightAgent}
-          onViewTurns={(agentSessionId) => {
-            if (agentSessionId) {
-              setHighlightSubagentTurnId(agentSessionId)
-              const firstSubTurn = turns.find(t => t.isSubagent && t.subagentSessionId === agentSessionId)
-              if (firstSubTurn) {
-                setSelectedTurnId(firstSubTurn.turnId)
-                setScrollToTurnId(firstSubTurn.turnId)
-              }
-              setActiveTab("turns")
-            }
-          }}
-        />
-      </div>
-    )
-  }
-
   function renderSkills() {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto">
         <SkillDetail
+          taskId={taskId}
           sessionSkills={s.skills}
           skillEvents={allSkillEvents}
+          hasMainAgentWorkflow={hasMainAgentWorkflow}
+          mainAgentWorkflowName={mainAgentWorkflowName}
+          mainAgentWorkflowStats={mainAgentWorkflowStats}
+          onAuditSkill={(skillName, kind) => {
+            setAuditSub("skill")
+            setAuditSelected({ name: skillName, kind })
+            setActiveTab("workflowAnalyse")
+          }}
           onNavigateToTurn={(turnIndex) => {
             const turn = turns.find(t => t.turnIndex === turnIndex)
             if (turn) {
@@ -1178,279 +1239,6 @@ export default function SessionDetailPage({
         />
       </div>
     )
-  }
-
-  function renderInteractions() {
-    const rootAgentName = s.agents.find(a => !a.isSubagent)?.agentName ?? null
-    return (
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <InteractionGraph
-          bridges={bridges}
-          rootAgentName={rootAgentName}
-          sessionStartTime={s.startTime}
-          sessionLatencyMs={s.totalLatencyMs}
-        />
-      </div>
-    )
-  }
-
-  function renderWorkflow() {
-    if (!workflowData) {
-      return (
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          No workflow data available
-        </div>
-      )
-    }
-    const workflowBridges: Array<{
-      bridgeId: string
-      dispatchContent: string | null
-      dispatchTimestamp: string | null
-      responseContent: string | null
-      responseTimestamp: string | null
-      subagentName: string | null
-      subagentType: string | null
-      status: string
-      subagentTokens: number
-      subagentLatencyMs: number
-    }> = bridges.map(b => ({
-      bridgeId: b.bridgeId,
-      dispatchContent: b.dispatchContent,
-      dispatchTimestamp: b.dispatchTimestamp,
-      responseContent: b.responseContent,
-      responseTimestamp: b.responseTimestamp,
-      subagentName: b.subagentName,
-      subagentType: b.subagentType,
-      status: b.status,
-      subagentTokens: b.subagentTokens,
-      subagentLatencyMs: b.subagentLatencyMs,
-    }))
-    const workflowTurnRanges: Array<{
-      turnIndex: number
-      subagentSessionId: string | null
-      isSubagent: boolean
-      role: string
-    }> = turns.map(t => ({
-      turnIndex: t.turnIndex,
-      subagentSessionId: t.subagentSessionId,
-      isSubagent: t.isSubagent,
-      role: t.role,
-    }))
-
-    const workflowTurn = workflowSelectedTurnId ? turns.find(t => t.turnId === workflowSelectedTurnId) : null
-
-    const workflowRootContext = workflowTurn && !workflowTurn.isSubagent ? {
-      agentName: workflowTurn.agentName ?? "root",
-      model: workflowTurn.model ?? null,
-      inputMessagesJson: null as string | null,
-      inputMessagesCount: 0,
-      inputMessagesTokens: workflowTurn.inputTokens,
-      contextWindowPct: workflowTurn.contextWindowPct ?? null,
-      endContextWindowPct: computeEndPct(workflowTurn),
-      contextWindowLimit: 200000,
-      systemOverheadTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      isSubagent: false,
-      subagentName: null,
-    } : workflowTurn && workflowTurn.isSubagent ? (() => {
-      const rootTurns = turns.filter(t => !t.isSubagent)
-      const rootTurn = rootTurns.reduce((best, t) => {
-        if (!t.createdAt || !workflowTurn.createdAt) return best
-        const rootTime = new Date(t.createdAt).getTime()
-        const selectedTime = new Date(workflowTurn.createdAt).getTime()
-        if (rootTime <= selectedTime && (!best || new Date(best.createdAt!).getTime() < rootTime)) return t
-        return best
-      }, null as TurnRowItem | null)
-      return {
-        agentName: rootTurn?.agentName ?? "root",
-        model: rootTurn?.model ?? null,
-        inputMessagesJson: null as string | null,
-        inputMessagesCount: 0,
-        inputMessagesTokens: 0,
-        contextWindowPct: null,
-        endContextWindowPct: null,
-        contextWindowLimit: 200000,
-        systemOverheadTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-        isSubagent: false,
-        subagentName: null,
-      }
-    })() : null
-
-    const workflowSubagentContexts: Array<{
-      agentName: string | null
-      model: string | null
-      inputMessagesJson: string | null
-      inputMessagesCount: number
-      inputMessagesTokens: number
-      contextWindowPct: number | null
-      endContextWindowPct: number | null
-      contextWindowLimit: number
-      systemOverheadTokens: number
-      cacheReadTokens: number
-      cacheWriteTokens: number
-      isSubagent: boolean
-      subagentName: string | null
-    }> = []
-
-    if (workflowTurn?.isSubagent) {
-      workflowSubagentContexts.push({
-        agentName: workflowTurn.agentName ?? null,
-        model: workflowTurn.model ?? null,
-        inputMessagesJson: null,
-        inputMessagesCount: 0,
-        inputMessagesTokens: workflowTurn.inputTokens,
-        contextWindowPct: workflowTurn.contextWindowPct ?? null,
-        endContextWindowPct: computeEndPct(workflowTurn),
-        contextWindowLimit: 200000,
-        systemOverheadTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-        isSubagent: true,
-        subagentName: workflowTurn.subagentName ?? null,
-      })
-    } else if (workflowTurn) {
-      const dispatchBridges = bridges.filter(b => b.dispatchTurnId === workflowTurn.turnId)
-      for (const bridge of dispatchBridges) {
-        if (bridge.subagentSessionId) {
-          const subTurns = turns.filter(t => t.subagentSessionId === bridge.subagentSessionId)
-          const lastSubTurn = subTurns[subTurns.length - 1]
-          workflowSubagentContexts.push({
-            agentName: lastSubTurn?.agentName ?? null,
-            model: lastSubTurn?.model ?? null,
-            inputMessagesJson: null,
-            inputMessagesCount: 0,
-            inputMessagesTokens: lastSubTurn?.inputTokens ?? 0,
-            contextWindowPct: lastSubTurn?.contextWindowPct ?? null,
-            endContextWindowPct: computeEndPct(lastSubTurn ?? null),
-            contextWindowLimit: 200000,
-            systemOverheadTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-            isSubagent: true,
-            subagentName: bridge.subagentName ?? bridge.subagentType ?? null,
-          })
-        }
-      }
-    }
-
-    const workflowPrevPct = (() => {
-      if (!workflowTurn) return null
-      const rootAssistantTurns = turns.filter(t => !t.isSubagent && t.role === 'assistant')
-      const currentIdx = rootAssistantTurns.findIndex(t => t.turnId === workflowTurn.turnId)
-      if (currentIdx > 0) return rootAssistantTurns[currentIdx - 1]?.contextWindowPct ?? null
-      const sorted = turns.filter(t => !t.isSubagent).sort((a, b) => a.turnIndex - b.turnIndex)
-      const selIdx = sorted.findIndex(t => t.turnId === workflowTurn.turnId)
-      if (selIdx < 0) return null
-      const prevAssistant = sorted.slice(0, selIdx).reverse().find(t => t.role === 'assistant')
-      return prevAssistant?.contextWindowPct ?? null
-    })()
-
-    return (
-      <div className="flex flex-1 h-full min-h-0">
-        <div className="flex-1 min-h-0 overflow-y-auto border-r">
-          <WorkflowTreeView
-            workflow={workflowData}
-            bridges={workflowBridges}
-            turns={workflowTurnRanges}
-            taskId={taskId}
-            onViewTurnsInteraction={() => {
-              setActiveTab("turns")
-            }}
-            onSelectTurn={(turnId) => {
-              setWorkflowSelectedTurnId(turnId)
-            }}
-          />
-        </div>
-
-        <div className="w-[320px] border-l flex flex-col min-h-0 overflow-hidden">
-          <TurnContextPanel
-            selectedTurn={workflowTurn ? { turnId: workflowTurn.turnId, turnIndex: workflowTurn.turnIndex, role: workflowTurn.role } : null}
-            rootContext={workflowRootContext}
-            subagentContexts={workflowSubagentContexts}
-            prevContextPct={workflowPrevPct}
-          />
-          {workflowTurn && (
-            <div className="px-3 pb-3 shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs w-full"
-                onClick={() => {
-                  setSelectedTurnId(workflowTurn.turnId)
-                  setActiveTab("turns")
-                }}
-              >
-                View in Turns tab →
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  function renderWorkflowAI() {
-    const workflowBridges = bridges.map(b => ({
-      bridgeId: b.bridgeId,
-      dispatchContent: b.dispatchContent,
-      dispatchTimestamp: b.dispatchTimestamp,
-      responseContent: b.responseContent,
-      responseTimestamp: b.responseTimestamp,
-      subagentName: b.subagentName,
-      subagentType: b.subagentType,
-      status: b.status,
-      subagentTokens: b.subagentTokens,
-      subagentLatencyMs: b.subagentLatencyMs,
-    }))
-    const workflowTurns = turns.map(t => ({
-      turnIndex: t.turnIndex,
-      subagentSessionId: t.subagentSessionId,
-      isSubagent: t.isSubagent,
-      role: t.role,
-    }))
-    return (
-      <WorkflowAIView
-        taskId={taskId}
-        turnsCount={turns.length}
-        bridgesCount={bridges.length}
-        bridges={workflowBridges}
-        turns={workflowTurns}
-        result={workflowAIResult}
-        isAnalyzing={workflowAIAnalyzing}
-        error={workflowAIError}
-        onAnalyze={handleWorkflowAIAnalyze}
-        onClearResult={() => {
-          setWorkflowAIResult(null)
-          setWorkflowAIError(null)
-        }}
-      />
-    )
-  }
-
-  async function handleWorkflowAIAnalyze(provider: AIProviderConfig) {
-    setWorkflowAIAnalyzing(true)
-    setWorkflowAIError(null)
-    try {
-      const res = await fetch("/api/ai/analyze-workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, provider }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        setWorkflowAIError(err.error ?? "Analysis failed")
-        return
-      }
-      const data = await res.json()
-      setWorkflowAIResult(data.result)
-    } catch (e) {
-      setWorkflowAIError(e instanceof Error ? e.message : "Network error")
-    } finally {
-      setWorkflowAIAnalyzing(false)
-    }
   }
 
   function navigateToTab(tab: string, turnId?: string | null, bridgeId?: string | null) {
@@ -1574,19 +1362,50 @@ export default function SessionDetailPage({
   }
 
   function renderWorkflowAnalyse() {
-    return <WorkflowAnalyseTab taskId={taskId} />
+    return (
+      <AuditBoardTab
+        taskId={taskId}
+        framework={framework}
+        skillEvents={allSkillEvents}
+        hasMainAgentWorkflow={hasMainAgentWorkflow}
+        mainAgentWorkflowName={mainAgentWorkflowName}
+        sub={auditSub}
+        onSubChange={setAuditSub}
+        skillSelected={auditSelected}
+        onSkillSelectedChange={setAuditSelected}
+        onJumpToTurn={(turn) => {
+          // §N in analysis evidence maps to DB turnIndex (1-based, same as errorTurnParam).
+          // Prefer a non-subagent turn so subagent turnIndexes don't shadow main turns.
+          const t =
+            turns.find(x => x.turnIndex === turn && !x.isSubagent) ??
+            turns.find(x => x.turnIndex === turn)
+          if (t) navigateToTab("turns", t.turnId)
+        }}
+      />
+    )
+  }
+
+  function renderPerformance() {
+    const handleTurnIndex = (turn: number) => {
+      const t =
+        turns.find(x => x.turnIndex === turn && !x.isSubagent) ??
+        turns.find(x => x.turnIndex === turn)
+      if (t) navigateToTab("turns", t.turnId)
+    }
+    return (
+      <div className="h-full overflow-auto p-4 space-y-4">
+        <PerfPanorama taskId={taskId} framework={framework} onJumpToTurn={handleTurnIndex} />
+      </div>
+    )
   }
 
   const TAB_RENDERERS: Record<TabKey, () => React.ReactNode> = {
     overview: renderOverview,
     turns: renderTurns,
-    workflow: renderWorkflow,
     trace: renderTrace,
-    subagents: renderSubagents,
     skills: renderSkills,
-    interactions: renderInteractions,
-    workflowAI: renderWorkflowAI,
     workflowAnalyse: renderWorkflowAnalyse,
+    performance: renderPerformance,
     context: renderContext,
     fileReads: renderFileReads,
     replay: renderReplay,
@@ -1605,35 +1424,49 @@ export default function SessionDetailPage({
             <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
           </div>
           <h1 className="text-xl font-bold truncate max-w-[400px]">Session: {s.label ?? s.query ?? taskId}</h1>
+          <div className="flex items-center gap-1.5 text-sm">
+            {refreshing ? (
+              <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                <RefreshCwIcon className="size-3.5 animate-spin" />
+                同步中...
+              </span>
+            ) : (session?.framework === "opencode" || session?.framework === "claude-code") && session?.sourcePath ? (
+              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <WifiIcon className="size-3.5" />
+                自动同步
+              </span>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={handleRefresh}
+                disabled={refreshing || !session?.sourcePath}
+              >
+                <RefreshCwIcon className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+                {refreshing ? "刷新中..." : "刷新"}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-muted-foreground"
+              onClick={handleRefresh}
+              disabled={refreshing || !session?.sourcePath}
+            >
+              <RefreshCwIcon className="size-3.5" />
+            </Button>
+          </div>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="gap-1"
-            onClick={handleRefresh}
-            disabled={refreshing || !session?.sourcePath}
-          >
-            <RefreshCwIcon className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "刷新中..." : "刷新"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1 font-semibold"
+            className="gap-1 text-muted-foreground"
             onClick={handleExportMd}
             disabled={exportingMd}
+            title="Export MD"
           >
             <FileTextIcon className="size-4" />
-            {exportingMd ? "导出中..." : "Export MD"}
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            className="gap-1 font-semibold"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            <UploadIcon className="size-4" />
-            {exporting ? "导出中..." : "Export DB"}
+            {exportingMd ? "导出中..." : ""}
           </Button>
         </div>
         <div className="flex items-center gap-4 text-sm mb-2">
@@ -1691,13 +1524,16 @@ export default function SessionDetailPage({
         </div>
       </div>
 
-      {activeTab !== "trace" && (
+      {activeTab !== "trace" && activeTab !== "performance" && (
         <div className="flex-1 min-h-0">
           {TAB_RENDERERS[activeTab]()}
         </div>
       )}
       <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "trace" ? "" : "hidden")}>
         {renderTrace()}
+      </div>
+      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "performance" ? "" : "hidden")}>
+        {renderPerformance()}
       </div>
     </div>
   )

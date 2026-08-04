@@ -22,6 +22,7 @@ import { deleteCommand } from './commands/delete';
 import { configCommand } from './commands/config';
 import { analyzeCommand } from './commands/analyze';
 import { exportCommand } from './commands/export';
+import { exportMdCommand } from './commands/export-md';
 import { uploadCommand } from './commands/upload';
 import { InsightError } from './errors';
 
@@ -54,6 +55,7 @@ export function createProgram(): Command {
   program.addCommand(configCommand());
   program.addCommand(analyzeCommand());
   program.addCommand(exportCommand());
+  program.addCommand(exportMdCommand());
   program.addCommand(uploadCommand());
 
   return program;

@@ -242,13 +242,12 @@ export function splitIntoTurns(
       inputMessagesJson = null;
       let count = 0;
       const mySubagentSessionId = interaction.subagent_session_id ?? null;
-      // After a /compact, the history is replaced by the continuation summary,
-      // so count only turns from the last compact boundary onward (plus the
-      // summary itself) instead of every pre-compact turn.
-      const startJ = prevCompactBoundaryIdx >= 0 ? prevCompactBoundaryIdx : 0;
+      const isCompactionSummary = interaction.agent === 'compaction';
+      const startJ = isCompactionSummary ? 0 : (prevCompactBoundaryIdx >= 0 ? prevCompactBoundaryIdx : 0);
       for (let j = startJ; j < i; j++) {
         const prev = interactions[j];
         const prevRole = prev.role === 'subagent' ? 'assistant' : prev.role;
+        if (prev.agent === 'compaction-boundary') continue;
         // For subagent turns, only count prior turns in the same subagent session
         // For root turns, count all prior root turns (skip subagent turns)
         if (mySubagentSessionId) {
@@ -261,13 +260,12 @@ export function splitIntoTurns(
       }
       inputMessagesCount = count;
 
-      // Use totalTokens (the authoritative prompt size reported by the agent)
-      // as the context-size base. It correctly reflects /compact — the prompt
-      // shrinks when the history is replaced by a summary. The adapter's
-      // input+cacheRead+cacheWrite proxy is unreliable on cache-cold turns
-      // (post-compact cacheRead=0) and under-reports the real prompt.
       const adapterInputMessagesTokens = usage?.inputMessagesTokens ?? 0;
-      inputMessagesTokens = totalTokens > 0 ? totalTokens : adapterInputMessagesTokens;
+      if (isCompactionSummary && inputTokens > 0) {
+        inputMessagesTokens = inputTokens;
+      } else {
+        inputMessagesTokens = totalTokens > 0 ? totalTokens : adapterInputMessagesTokens;
+      }
 
       // Monotonic floor: within a compact segment the context should not
       // decrease (smooths cache-read noise / reporting dips). The floor resets
@@ -296,7 +294,10 @@ export function splitIntoTurns(
     // produced by /compact: the conversation history is replaced by the summary
     // that follows. Mark it so the next assistant turn in this context resets
     // its monotonic floor and input-message count.
-    if (role === 'user' && !isSubagent && content && isContinuationTurn(content)) {
+    // Also detect opencode's compaction-boundary (agent field) — same effect.
+    const isCompactBoundary = (interaction.agent === 'compaction-boundary') ||
+      (role === 'user' && !isSubagent && content && isContinuationTurn(content));
+    if (isCompactBoundary && !isSubagent) {
       prevInputMessagesTokens = 0;
       prevCompactBoundaryIdx = i;
     }

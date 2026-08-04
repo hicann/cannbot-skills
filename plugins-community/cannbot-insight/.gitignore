@@ -55,8 +55,13 @@ tests/data/e2e/opencode-sample.db-wal
 # favicon: use src/app/icon.svg (text) instead of binary .ico (OAT: no binary)
 src/app/favicon.ico
 
-# logs (large DB files)
+# logs (large DB files, generated analysis JSON, and runtime symlink)
 logs/
+logs
+
+# temp files (compressed trajectories, analysis outputs)
+/tmp/
+smart-agent/tmp/
 
 # vercel
 .vercel

@@ -53,10 +53,9 @@ interface AgentCallGraphProps {
   onViewTurns?: (agentSessionId: string | null) => void
 }
 
-const ROW_HEIGHT = 32
-const BAR_HEIGHT = 8
-const LANE_LABEL_WIDTH = 52
-const AGENT_LABEL_WIDTH = 240
+const LANE_LABEL_WIDTH = 109
+const SUB_BAR_H = 12
+const SUB_GAP = 3
 const MAX_VISIBLE_HEIGHT = 300
 
 const AGENT_COLORS = [
@@ -129,7 +128,7 @@ function assignToLane(agent: AgentItem): LaneDef {
   }
   const shortName = agent.agentName ?? "unknown"
   const color = getAgentColor(agent.agentName)
-  return { key: shortName, label: shortName.length > 6 ? shortName.substring(0, 6) + "…" : shortName, color, bg: `${color}20` }
+  return { key: shortName, label: shortName, color, bg: `${color}20` }
 }
 
 interface TooltipData {
@@ -190,7 +189,18 @@ export function AgentCallGraph({ agents, bridges, onViewTurns }: AgentCallGraphP
       if (b[0] === "command") return 1
       return new Date(a[1].agents[0].createdAt).getTime() - new Date(b[1].agents[0].createdAt).getTime()
     })
-    return entries.map(([key, { def, agents }]) => ({ key, def, agents }))
+    return entries.map(([key, { def, agents }]) => {
+      const trackEnds: number[] = []
+      const packed = agents.map(agent => {
+        const startMs = new Date(agent.createdAt).getTime()
+        const endMs = startMs + agent.latencyMs
+        let ti = trackEnds.findIndex(e => e <= startMs)
+        if (ti === -1) { ti = trackEnds.length; trackEnds.push(endMs) }
+        else trackEnds[ti] = endMs
+        return { agent, trackIdx: ti }
+      })
+      return { key, def, packed, trackCount: trackEnds.length }
+    })
   }, [sorted])
 
   const bridgeBySessionId = useMemo(() => {
@@ -245,7 +255,7 @@ export function AgentCallGraph({ agents, bridges, onViewTurns }: AgentCallGraphP
       <CardHeader><CardTitle>Agent Swimlane ({agents.length})</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         <div className="flex">
-          <div className="shrink-0" style={{ width: LANE_LABEL_WIDTH + AGENT_LABEL_WIDTH }} />
+          <div className="shrink-0" style={{ width: LANE_LABEL_WIDTH }} />
           <div className="flex-1 relative h-[20px]">
             {ticks.map((t, i) => (
               <div key={i} className="absolute text-[10px] text-muted-foreground tabular-nums" style={{ left: `${t.pct}%`, transform: "translateX(-50%)" }}>
@@ -257,69 +267,51 @@ export function AgentCallGraph({ agents, bridges, onViewTurns }: AgentCallGraphP
         <div className="h-px bg-border" />
 
         <div className="overflow-y-auto" style={{ maxHeight: MAX_VISIBLE_HEIGHT }}>
-          {lanes.map(({ key, def, agents: laneAgents }) => (
-            <div key={key} className="flex border-b last:border-b-0">
-              <div
-                className="shrink-0 flex items-center justify-center text-xs font-bold border-r-2"
-                style={{ width: LANE_LABEL_WIDTH, backgroundColor: def.bg, borderColor: def.color, color: def.color }}
-              >
-                {def.label}
-              </div>
+          {lanes.map(({ key, def, packed, trackCount }) => {
+            const laneHeight = Math.max(22, trackCount * SUB_BAR_H + (trackCount + 1) * SUB_GAP)
+            return (
+              <div key={key} className="flex border-b last:border-b-0">
+                <div
+                  className="shrink-0 flex flex-col items-center justify-center text-[10px] font-bold border-r-2 leading-tight px-1.5"
+                  style={{ width: LANE_LABEL_WIDTH, height: laneHeight, backgroundColor: def.bg, borderColor: def.color, color: def.color }}
+                >
+                  <span className="break-all text-center">{def.label}</span>
+                </div>
 
-              <div className="flex-1 min-w-0">
-                {laneAgents.map((agent, idx) => {
-                  const startPct = getStartPct(agent.createdAt)
-                  const widthPct = getWidthPct(agent.latencyMs)
-                  const agentColor = getAgentColor(agent.agentName)
-                  const label = agent.agentName ?? (agent.isSubagent ? "subagent" : "root")
-                  const bridge = agent.isSubagent && agent.agentSessionId ? bridgeBySessionId.get(agent.agentSessionId) : undefined
-                  const isError = bridge?.status === "error" || bridge?.status === "failed"
-                  const statusIcon = bridge?.status === "failed" ? "❌" : bridge?.status === "running" ? "⏳" : ""
-
-                  return (
-                    <div key={agent.executionId} className="flex" style={{ height: ROW_HEIGHT, backgroundColor: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.03)" }}>
+                <div className="flex-1 relative min-w-0" style={{ height: laneHeight }}>
+                  {ticks.filter(t => t.pct > 0 && t.pct < 100).map((t, i) => (
+                    <div key={i} className="absolute top-0 h-full w-px bg-border/20" style={{ left: `${t.pct}%` }} />
+                  ))}
+                  {packed.map(({ agent, trackIdx }) => {
+                    const startPct = getStartPct(agent.createdAt)
+                    const widthPct = getWidthPct(agent.latencyMs)
+                    const agentColor = getAgentColor(agent.agentName)
+                    const bridge = agent.isSubagent && agent.agentSessionId ? bridgeBySessionId.get(agent.agentSessionId) : undefined
+                    const isError = bridge?.status === "error" || bridge?.status === "failed"
+                    return (
                       <div
-                        className="shrink-0 px-2 py-1 cursor-pointer hover:bg-accent/30 transition-colors"
-                        style={{ width: AGENT_LABEL_WIDTH }}
+                        key={agent.executionId}
+                        className="absolute rounded-sm cursor-pointer"
+                        style={{
+                          left: `${startPct}%`,
+                          width: `${widthPct}%`,
+                          minWidth: 4,
+                          height: SUB_BAR_H,
+                          top: SUB_GAP + trackIdx * (SUB_BAR_H + SUB_GAP),
+                          backgroundColor: agentColor,
+                          opacity: isError ? 0.4 : 0.8,
+                          border: isError ? "2px solid #ef4444" : `1px solid ${agentColor}`,
+                        }}
                         onClick={() => onViewTurns?.(agent.isSubagent ? agent.agentSessionId : null)}
                         onMouseEnter={(e) => handleMouseEnter(e, agent, def.label)}
                         onMouseLeave={handleMouseLeave}
-                      >
-                        <div className="text-xs font-semibold truncate" style={{ color: isError ? "#ef4444" : agentColor }}>
-                          {statusIcon} {label}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground">
-                          {formatTokenCount(agent.maxSingleCallTokens)} token max · {formatTokenCount(agent.tokens)} total · {formatLatency(agent.latencyMs)}
-                        </div>
-                      </div>
-
-                      <div className="flex-1 relative min-w-0" style={{ height: ROW_HEIGHT }}>
-                        {ticks.filter(t => t.pct > 0 && t.pct < 100).map((t, i) => (
-                          <div key={i} className="absolute top-0 h-full w-px bg-border/20" style={{ left: `${t.pct}%` }} />
-                        ))}
-                        <div
-                          className="absolute rounded-sm cursor-pointer"
-                          style={{
-                            left: `${startPct}%`,
-                            width: `${widthPct}%`,
-                            minWidth: 4,
-                            height: BAR_HEIGHT,
-                            top: (ROW_HEIGHT - BAR_HEIGHT) / 2,
-                            backgroundColor: agentColor,
-                            opacity: isError ? 0.4 : 0.8,
-                            border: isError ? "2px solid #ef4444" : `1px solid ${agentColor}`,
-                          }}
-                          onClick={() => onViewTurns?.(agent.isSubagent ? agent.agentSessionId : null)}
-                          onMouseEnter={(e) => handleMouseEnter(e, agent, def.label)}
-                          onMouseLeave={handleMouseLeave}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
+                      />
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex flex-wrap gap-2 pt-1">

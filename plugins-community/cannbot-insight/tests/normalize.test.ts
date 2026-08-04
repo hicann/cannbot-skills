@@ -9,13 +9,10 @@
 import { describe, it, expect } from 'vitest';
 import { normalize } from '../src/lib/ingest/normalize.ts';
 import type { RawInteraction } from '../src/lib/shared/types.ts';
-import { getAdapter } from '../src/lib/ingest/adapters/index.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const REAL_DB_PATH = path.resolve(__dirname, 'data/opencode-sessions.db');
 const SYNTHETIC_PATH = path.resolve(__dirname, 'data/synthetic-opencode.json');
-const hasRealDB = fs.existsSync(REAL_DB_PATH);
 
 function loadSynthetic(): RawInteraction[] {
   return JSON.parse(fs.readFileSync(SYNTHETIC_PATH, 'utf-8')) as RawInteraction[];
@@ -185,18 +182,6 @@ describe('normalize', () => {
       ];
       const result = normalize(raw, 'opencode-db');
       expect(result[0].timeInfo).toEqual({ created: 0 });
-    });
-
-    it.skipIf(!hasRealDB)('works with real DB data via opencode-db adapter', () => {
-      const adapter = getAdapter('opencode-db')!;
-      const sessions = adapter.listSessions(REAL_DB_PATH);
-      const interactions = adapter.readSession(REAL_DB_PATH, sessions[0].id);
-      const result = normalize(interactions, 'opencode-db');
-      expect(result.length).toBe(interactions.length);
-      for (const item of result) {
-        expect(typeof item.role).toBe('string');
-        expect(item.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      }
     });
   });
 

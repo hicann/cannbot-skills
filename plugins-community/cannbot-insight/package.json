@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cli": "tsx src/cli/index.ts",
-    "test:cli": "vitest run tests/cli/"
+    "test:cli": "vitest run tests/cli/",
+    "test:bench": "vitest bench --run"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -48,6 +49,7 @@
     "@vitejs/plugin-react": "^4",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "happy-dom": "^20.10.6",
     "prisma": "^6",
     "tailwindcss": "^4",
     "typescript": "^5",

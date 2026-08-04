@@ -71,3 +71,84 @@ export function mergeSkillEvents(existing: SkillEventRow[], incoming: SkillEvent
 
   return merged;
 }
+
+export interface TurnUpdate {
+  dbId: string;
+  data: Record<string, unknown>;
+}
+
+export interface ToolCallUpdate {
+  dbId: string;
+  data: Record<string, unknown>;
+}
+
+const TURN_UPDATE_FIELDS: (keyof TurnRow)[] = [
+  'content', 'contentSummary',
+  'totalTokens', 'inputTokens', 'outputTokens', 'reasoningTokens',
+  'cacheReadTokens', 'cacheWriteTokens', 'completedAt', 'latencyMs',
+  'ttftMs', 'model', 'modelId', 'providerId', 'finishReason',
+];
+
+const TC_UPDATE_FIELDS: (keyof ToolCallRow)[] = [
+  'resultJson', 'state', 'errorType', 'errorMessage',
+  'completedAt', 'durationMs', 'dispatchBridgeId', 'isSkillRelated',
+];
+
+export function diffTurns(
+  existingByKey: Map<string, TurnRow>,
+  incoming: TurnRow[],
+): { toInsert: TurnRow[]; toUpdate: TurnUpdate[] } {
+  const toInsert: TurnRow[] = [];
+  const toUpdate: TurnUpdate[] = [];
+
+  for (const turn of incoming) {
+    const key = `${turn.turnIndex}:${turn.role}`;
+    const existing = existingByKey.get(key);
+    if (!existing) {
+      toInsert.push(turn);
+      continue;
+    }
+    const changes: Record<string, unknown> = {};
+    for (const field of TURN_UPDATE_FIELDS) {
+      const oldVal = existing[field];
+      const newVal = turn[field];
+      if (oldVal !== newVal && (oldVal !== null || newVal !== null)) {
+        changes[field] = newVal;
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      toUpdate.push({ dbId: existing.id, data: changes });
+    }
+  }
+
+  return { toInsert, toUpdate };
+}
+
+export function diffToolCalls(
+  existingById: Map<string, ToolCallRow>,
+  incoming: ToolCallRow[],
+): { toInsert: ToolCallRow[]; toUpdate: ToolCallUpdate[] } {
+  const toInsert: ToolCallRow[] = [];
+  const toUpdate: ToolCallUpdate[] = [];
+
+  for (const tc of incoming) {
+    const existing = existingById.get(tc.toolCallId);
+    if (!existing) {
+      toInsert.push(tc);
+      continue;
+    }
+    const changes: Record<string, unknown> = {};
+    for (const field of TC_UPDATE_FIELDS) {
+      const oldVal = existing[field];
+      const newVal = tc[field];
+      if (oldVal !== newVal && (oldVal !== null || newVal !== null)) {
+        changes[field] = newVal;
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      toUpdate.push({ dbId: existing.id, data: changes });
+    }
+  }
+
+  return { toInsert, toUpdate };
+}

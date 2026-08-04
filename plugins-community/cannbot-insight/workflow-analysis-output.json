@@ -1,0 +1,430 @@
+{
+  "sessionSummary": "L3 全自动运行 ops-registry-invoke-glacier 为 softplus_v2_grad 算子开发，完成阶段一全部 16 个固定 Task + 3 个 fan-out 子 Task（12.1/12.2/12.3），进入阶段二完成 Task 17-27，Task 28（批量黑盒验证）dispatch ❌ 停止。8.1h / 98.9M token，100 次 skill 调用（29 verifier + 26 ascendc-regbase-best-practice + 10 designer + 13 developer + 4 ops-spec-gen + 4 ops-requirement-analysis + 其他），无正式 CP 门控执行，designer+BP+verifier 三件套串行重复消耗大量 token。",
+  "sessionMeta": {
+    "sessionId": "ses_0b9ec4ea7ffesRcKKOREpBxaz1",
+    "operator": "softplus_v2_grad",
+    "model": "cannbot/glm-5.2",
+    "duration": "8.1h",
+    "tokens": "98.9M (in: 83.4M / out: 424.2K / reasoning: 817.9K)",
+    "autonomy": "L3 全自动",
+    "reachedPhase": "阶段二 进行中（Task 28 dispatch 失败停止）",
+    "cpsExecuted": [],
+    "cpsMissing": ["CP1", "CP1.5", "CP2", "CP3", "CP4", "CP5"],
+    "phasesNotReached": ["阶段三 验收", "阶段四 上库"]
+  },
+  "flow": [
+    {"id": "n1", "skill": "ops-registry-invoke-glacier", "step": "1.1 加载workflow", "type": "invoke", "turn": 2, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n2", "skill": "developer", "step": "Task 1 创建开发目录", "type": "dispatch", "turn": 4, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n3", "skill": "verifier", "step": "Task 1 验收", "type": "dispatch", "turn": 5, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n4", "skill": "ops-requirement-analysis", "step": "Task 1 验收（主Agent load skill）", "type": "invoke", "turn": 5, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "turn 5 同时 invoke ops-requirement-analysis（L532）与 dispatch verifier（L470），前者是主 Agent 嵌套加载 skill 但当前任务是验收而非需求分析", "diagnosis": "主 Agent 在 verifier turn 中仍 invoke ops-requirement-analysis skill（之前 turn 已加载），属于冗余 skill 加载", "suggestion": "workflow SKILL.md 明确：只在当前 Task 需要特定 skill 时才 invoke；验收 Task 不应 load 需求分析 skill"}]},
+    {"id": "n5", "skill": "state-generator", "step": "STATE.md 骨架生成", "type": "dispatch", "turn": 7, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "gate-autopassed", "dimension": "process", "severity": "high", "evidence": "STATE.md 骨架生成后无 verifier 验收步骤（n5 后直接跳到 n6 验收 Task 1），但 STATE.md 是后续全流程的 governing artifact", "diagnosis": "workflow SKILL.md 的 4 步流程中，step 3 只派发 state-generator 生成骨架，没有随后派发 verifier 验收 STATE.md 骨架正确性；目录创建有 verifier（step 2）但更重要的 STATE.md 无 verifier——不对称", "suggestion": "workflow SKILL.md 在 step 3 后增加 step 3.5：「派发 verifier 验证 STATE.md 骨架（非空、无占位符、标题正确、固定阶段 Task 齐全）」"}]},
+    {"id": "n6", "skill": "verifier", "step": "Task 1 验收（二次）", "type": "dispatch", "turn": 10, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "medium", "evidence": "Task 1 在 turn 5 已被 verifier 验收通过（n3），turn 10 再次 dispatch verifier 验收同一个 Task 1", "diagnosis": "主 Agent 在 state-generator 完成后重新从头读取 STATE.md，发现 Task 1 未勾选（verifier 之前验收但 STATE.md 骨架刚重新生成导致勾选丢失），故二次验收", "suggestion": "workflow SKILL.md 在 STATE.md 骨架生成验收通过后，应将已完成的 Task 勾选状态保留，避免重复验收"}]},
+    {"id": "n7", "skill": "developer", "step": "Task 2 LOG.md 初始化", "type": "dispatch", "turn": 12, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n8", "skill": "verifier", "step": "Task 2 验收", "type": "dispatch", "turn": 13, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n9", "skill": "req-analyst", "step": "Task 3 需求分析", "type": "dispatch", "turn": 15, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n10", "skill": "ops-requirement-analysis", "step": "Task 3 需求分析（主Agent load skill）", "type": "invoke", "turn": 15, "parallel": "p1", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n11", "skill": "ops-requirement-analysis", "step": "Task 3 需求分析（再次 invoke）", "type": "invoke", "turn": 15, "parallel": "p1", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同一 turn 15 内 ops-requirement-analysis invoke 2 次（L2875 + L3576）", "diagnosis": "主 Agent 在同一 turn 内重复 invoke 同一 skill", "suggestion": "skill invoke 应只一次，避免同 turn 重复加载"}]},
+    {"id": "n12", "skill": "ops-spec-gen", "step": "Task 3 需求分析（主Agent load spec skill）", "type": "invoke", "turn": 15, "parallel": "p1", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "在需求分析 Task 中 invoke ops-spec-gen skill（当前 Task 是需求分析而非 spec 生成）", "diagnosis": "主 Agent 在 req-analyst dispatch turn 同时 invoke 了无关的 spec-gen skill", "suggestion": "只在当前 Task 需要时才 invoke 对应 skill"}]},
+    {"id": "n13", "skill": "req-verifier", "step": "Task 3 验收", "type": "dispatch", "turn": 16, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n14", "skill": "ops-requirement-analysis", "step": "Task 3 验收（再次 invoke）", "type": "invoke", "turn": 16, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn 中再次 invoke ops-requirement-analysis", "diagnosis": "verifier dispatch turn 中主 Agent 不必要地 invoke 需求分析 skill", "suggestion": "验收 turn 不应 load 产出 skill，仅 load 验收相关 skill"}]},
+    {"id": "n15", "skill": "spec-generator", "step": "Task 4 spec 生成", "type": "dispatch", "turn": 18, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n16", "skill": "ops-spec-gen", "step": "Task 4 spec 生成（主Agent load skill）", "type": "invoke", "turn": 18, "parallel": "p2", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n17", "skill": "ops-spec-gen", "step": "Task 4 spec 生成（再次 invoke）", "type": "invoke", "turn": 18, "parallel": "p2", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同一 turn 18 内 ops-spec-gen invoke 2 次（L6803 + L9021）", "diagnosis": "主 Agent 在同一 turn 内重复 invoke 同一 skill", "suggestion": "skill invoke 只需一次"}]},
+    {"id": "n18", "skill": "ascendc-regbase-best-practice", "step": "Task 4 spec 生成（BP 加载）", "type": "invoke", "turn": 18, "parallel": "p2", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n19", "skill": "ascendc-regbase-best-practice", "step": "Task 4 spec 生成（BP 再次 invoke）", "type": "invoke", "turn": 18, "parallel": "p2", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同 turn 18 内 ascendc-regbase-best-practice invoke 2 次（L9954 + L10759）", "diagnosis": "主 Agent 在同一 turn 内重复 invoke BP skill", "suggestion": "BP skill invoke 只需一次"}]},
+    {"id": "n20", "skill": "spec-verifier", "step": "Task 4 spec 验收 + CP1.5", "type": "dispatch", "turn": 19, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "gate-autopassed", "dimension": "process", "severity": "high", "evidence": "Task 4 验收包含 CP1.5「必看清单」（L11045/L12146），仅标注 ⚠ 条款供人工确认，但 L3 全自动模式下无人工确认环节，CP1.5 被自动放行", "diagnosis": "workflow 定义 CP1.5 为「非阻塞仅提示」人工 review，但 L3 模式下无人工介入机制，CP1.5 实际被跳过", "suggestion": "workflow SKILL.md 增加 L3 模式下 CP1.5 处置规则：自动标注并继续，或暂停等待人工确认"}]},
+    {"id": "n21", "skill": "ops-spec-gen", "step": "Task 4 spec 验收（再次 invoke）", "type": "invoke", "turn": 19, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "spec-verifier dispatch turn 中 invoke ops-spec-gen", "diagnosis": "验收 Agent 已包含 spec-gen skill 的校验场景五，主 Agent 不需要再 invoke", "suggestion": "验收 turn 不再 invoke 产出 skill"}]},
+    {"id": "n22", "skill": "designer", "step": "Task 5 DESIGN.md 初始化", "type": "dispatch", "turn": 21, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n23", "skill": "ascendc-regbase-best-practice", "step": "Task 5 BP 加载", "type": "invoke", "turn": 21, "parallel": "p3", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n24", "skill": "ascendc-regbase-best-practice", "step": "Task 5 BP 再次 invoke", "type": "invoke", "turn": 21, "parallel": "p3", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同 turn 21 内 BP invoke 2 次（L12375 + L12720）", "diagnosis": "designer dispatch 与 BP invoke 并行，但 BP invoke 重复", "suggestion": "BP invoke 只需一次"}]},
+    {"id": "n25", "skill": "verifier", "step": "Task 5 验收", "type": "dispatch", "turn": 22, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n26", "skill": "designer", "step": "Task 6 DESIGN §1", "type": "dispatch", "turn": 24, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n27", "skill": "ascendc-regbase-best-practice", "step": "Task 6 BP 加载", "type": "invoke", "turn": 24, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n28", "skill": "verifier", "step": "Task 6 验收", "type": "dispatch", "turn": 25, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n29", "skill": "ascendc-regbase-best-practice", "step": "Task 6 验收（BP invoke）", "type": "invoke", "turn": 25, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn 中 invoke BP skill（L15183）", "diagnosis": "verifier 验收不需要 BP skill，但主 Agent 仍在验收 turn invoke BP", "suggestion": "验收 turn 不 invoke BP"}]},
+    {"id": "n30", "skill": "designer", "step": "Task 7 DESIGN §2", "type": "dispatch", "turn": 27, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n31", "skill": "ascendc-regbase-best-practice", "step": "Task 7 BP 加载", "type": "invoke", "turn": 27, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n32", "skill": "verifier", "step": "Task 7 验收", "type": "dispatch", "turn": 28, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n33", "skill": "ascendc-regbase-best-practice", "step": "Task 7 验收（BP invoke）", "type": "invoke", "turn": 28, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn invoke BP（L16338）", "diagnosis": "同 n29", "suggestion": "同 n29"}]},
+    {"id": "n34", "skill": "designer", "step": "Task 8 DESIGN §3", "type": "dispatch", "turn": 30, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n35", "skill": "ascendc-regbase-best-practice", "step": "Task 8 BP 加载", "type": "invoke", "turn": 30, "parallel": "p4", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n36", "skill": "ascendc-regbase-best-practice", "step": "Task 8 BP 再次 invoke", "type": "invoke", "turn": 30, "parallel": "p4", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同 turn 30 BP invoke 2 次（L17487 + L18191）", "diagnosis": "BP invoke 重复", "suggestion": "BP invoke 只需一次"}]},
+    {"id": "n37", "skill": "verifier", "step": "Task 8 验收", "type": "dispatch", "turn": 31, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n38", "skill": "designer", "step": "Task 9 DESIGN §4", "type": "dispatch", "turn": 33, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n39", "skill": "ascendc-regbase-best-practice", "step": "Task 9 BP 加载", "type": "invoke", "turn": 33, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n40", "skill": "verifier", "step": "Task 9 验收", "type": "dispatch", "turn": 34, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n41", "skill": "designer", "step": "Task 10 DESIGN §5", "type": "dispatch", "turn": 36, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n42", "skill": "ascendc-regbase-best-practice", "step": "Task 10 BP 加载", "type": "invoke", "turn": 36, "parallel": "p5", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n43", "skill": "ascendc-regbase-best-practice", "step": "Task 10 BP 再次 invoke", "type": "invoke", "turn": 36, "parallel": "p5", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同 turn 36 BP invoke 2 次（L20678 + L21151）", "diagnosis": "BP invoke 重复", "suggestion": "BP invoke 只需一次"}]},
+    {"id": "n44", "skill": "verifier", "step": "Task 10 验收", "type": "dispatch", "turn": 37, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n45", "skill": "designer", "step": "Task 11 DESIGN §6", "type": "dispatch", "turn": 39, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n46", "skill": "ascendc-regbase-best-practice", "step": "Task 11 BP 加载", "type": "invoke", "turn": 39, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n47", "skill": "verifier", "step": "Task 11 验收", "type": "dispatch", "turn": 40, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n48", "skill": "ascendc-regbase-best-practice", "step": "Task 11 验收（BP invoke）", "type": "invoke", "turn": 40, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn invoke BP（L24603）", "diagnosis": "同 n29", "suggestion": "验收 turn 不 invoke BP"}]},
+    {"id": "n49", "skill": "design-task-generator", "step": "Task 12 分支设计任务生成", "type": "dispatch", "turn": 42, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n50", "skill": "verifier", "step": "Task 12 验收", "type": "dispatch", "turn": 43, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n51", "skill": "ascendc-regbase-best-practice", "step": "Task 12 验收（BP invoke）", "type": "invoke", "turn": 43, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn invoke BP（L26518）", "diagnosis": "同 n29", "suggestion": "验收 turn 不 invoke BP"}]},
+    {"id": "n52", "skill": "designer", "step": "Task 12.1 DESIGN-BRANCH-1", "type": "dispatch", "turn": 46, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n53", "skill": "ascendc-regbase-best-practice", "step": "Task 12.1 BP 加载", "type": "invoke", "turn": 46, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n54", "skill": "verifier", "step": "Task 12.1 验收", "type": "dispatch", "turn": 47, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n55", "skill": "ascendc-regbase-best-practice", "step": "Task 12.1 验收（BP invoke）", "type": "invoke", "turn": 47, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "验收 turn invoke BP（L29067）", "diagnosis": "同 n29", "suggestion": "验收 turn 不 invoke BP"}]},
+    {"id": "n56", "skill": "designer", "step": "Task 12.2 DESIGN-BRANCH-2", "type": "dispatch", "turn": 49, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n57", "skill": "ascendc-regbase-best-practice", "step": "Task 12.2 BP 加载", "type": "invoke", "turn": 49, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n58", "skill": "verifier", "step": "Task 12.2 验收", "type": "dispatch", "turn": 50, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n59", "skill": "designer", "step": "Task 12.3 DESIGN §7", "type": "dispatch", "turn": 52, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n60", "skill": "ascendc-regbase-best-practice", "step": "Task 12.3 BP 加载", "type": "invoke", "turn": 52, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n61", "skill": "verifier", "step": "Task 12.3 验收", "type": "dispatch", "turn": 53, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n62", "skill": "find-proto", "step": "Task 13 proto 提取", "type": "dispatch", "turn": 55, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n63", "skill": "verifier", "step": "Task 13 验收", "type": "dispatch", "turn": 56, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n64", "skill": "opdef-developer", "step": "Task 14 ACLNN 项目创建", "type": "dispatch", "turn": 58, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n65", "skill": "verifier", "step": "Task 14 验收", "type": "dispatch", "turn": 59, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n66", "skill": "opdef-developer", "step": "Task 15 OpDef 开发", "type": "dispatch", "turn": 61, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n67", "skill": "verifier", "step": "Task 15 验收", "type": "dispatch", "turn": 62, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n68", "skill": "task-generator", "step": "Task 16 设计驱动任务生成", "type": "dispatch", "turn": 64, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n69", "skill": "verifier", "step": "Task 16 验收", "type": "dispatch", "turn": 65, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n70", "skill": "developer", "step": "Task 17 TilingData 结构体", "type": "dispatch", "turn": 68, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n71", "skill": "ascendc-regbase-best-practice", "step": "Task 17 BP 加载", "type": "invoke", "turn": 68, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n72", "skill": "verifier", "step": "Task 17 验收", "type": "dispatch", "turn": 69, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n73", "skill": "developer", "step": "Task 18 公共 TilingUT", "type": "dispatch", "turn": 71, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n74", "skill": "ascendc-regbase-best-practice", "step": "Task 18 BP 加载", "type": "invoke", "turn": 71, "parallel": "p6", "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n75", "skill": "ascendc-regbase-best-practice", "step": "Task 18 BP 再次 invoke", "type": "invoke", "turn": 71, "parallel": "p6", "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "low", "evidence": "同 turn 71 BP invoke 2 次（L48495 + L54634）", "diagnosis": "BP invoke 重复", "suggestion": "BP invoke 只需一次"}]},
+    {"id": "n76", "skill": "verifier", "step": "Task 18 验收", "type": "dispatch", "turn": 72, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n77", "skill": "developer", "step": "Task 19 公共 Tiling 实现", "type": "dispatch", "turn": 74, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n78", "skill": "ascendc-regbase-best-practice", "step": "Task 19 BP 加载", "type": "invoke", "turn": 74, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n79", "skill": "verifier", "step": "Task 19 验收", "type": "dispatch", "turn": 75, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n80", "skill": "developer", "step": "Task 20 Branch-1 TilingUT（首次空返回）", "type": "dispatch", "turn": 77, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "retry", "dimension": "process", "severity": "medium", "evidence": "turn 77 dispatch developer for Task 20，结果返回空（subagent 空输出），主 Agent 在 turn 78 re-dispatch", "diagnosis": "Task 20 developer 子代理首次执行返回空结果，可能是超时或异常", "suggestion": "workflow SKILL.md 增加 re-dispatch 上限（如 3 次）与超时设置，避免无限重试"}]},
+    {"id": "n81", "skill": "developer", "step": "Task 20 Branch-1 TilingUT（re-dispatch）", "type": "dispatch", "turn": 78, "parallel": null, "retryOf": "n80", "status": "ok", "problems": []},
+    {"id": "n82", "skill": "verifier", "step": "Task 20 验收", "type": "dispatch", "turn": 79, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n83", "skill": "developer", "step": "Task 21 Branch-1 Tiling", "type": "dispatch", "turn": 81, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n84", "skill": "verifier", "step": "Task 21 验收", "type": "dispatch", "turn": 82, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n85", "skill": "developer", "step": "Task 22 Branch-1 Kernel ST", "type": "dispatch", "turn": 84, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n86", "skill": "ops-registry-invoke-glacier", "step": "Task 22 主 Agent 重载 workflow skill", "type": "invoke", "turn": 84, "parallel": null, "retryOf": null, "status": "ok", "problems": [{"type": "redundant", "dimension": "S2", "severity": "medium", "evidence": "turn 84 在 developer dispatch 同一 turn 内再次 invoke ops-registry-invoke-glacier skill（L76042），该 skill 在 turn 2 已加载", "diagnosis": "主 Agent 在开发阶段中期再次 invoke workflow skill，可能是为了刷新编排指令，但 skill 内容不变，属于冗余", "suggestion": "workflow skill invoke 只在 session 开始时一次，后续不重复 invoke"}]},
+    {"id": "n87", "skill": "verifier", "step": "Task 22 验收", "type": "dispatch", "turn": 85, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n88", "skill": "kernel-developer", "step": "Task 23 Branch-1 Kernel", "type": "dispatch", "turn": 87, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n89", "skill": "ascendc-regbase-best-practice", "step": "Task 23 BP 加载", "type": "invoke", "turn": 87, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n90", "skill": "verifier", "step": "Task 23 验收", "type": "dispatch", "turn": 88, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n91", "skill": "developer", "step": "Task 24 Branch-2 TilingUT", "type": "dispatch", "turn": 90, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n92", "skill": "verifier", "step": "Task 24 验收", "type": "dispatch", "turn": 91, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n93", "skill": "developer", "step": "Task 25 Branch-2 Tiling", "type": "dispatch", "turn": 93, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n94", "skill": "verifier", "step": "Task 25 验收", "type": "dispatch", "turn": 94, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n95", "skill": "developer", "step": "Task 26 Branch-2 Kernel ST", "type": "dispatch", "turn": 96, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n96", "skill": "verifier", "step": "Task 26 验收", "type": "dispatch", "turn": 97, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n97", "skill": "kernel-developer", "step": "Task 27 Branch-2 Kernel", "type": "dispatch", "turn": 99, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n98", "skill": "ascendc-regbase-best-practice", "step": "Task 27 BP 加载", "type": "invoke", "turn": 99, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n99", "skill": "verifier", "step": "Task 27 验收", "type": "dispatch", "turn": 100, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "n100", "skill": "developer", "step": "Task 28 批量黑盒验证（dispatch ❌）", "type": "dispatch", "turn": 102, "parallel": null, "retryOf": null, "status": "failed", "problems": [{"type": "failure", "dimension": "process", "severity": "high", "evidence": "turn 102 developer dispatch ❌（L103611），Error: running/unknown", "diagnosis": "Task 28 developer 子代理 dispatch 失败，可能是 session token 上限或 runtime error 导致子代理无法启动", "suggestion": "workflow SKILL.md 增加 dispatch 失败时的 re-dispatch 策略与 session 终止条件（如 token budget 预警）"}]},
+    {"id": "g1", "skill": "◆ 阶段一完成", "step": "◆ 阶段一完成", "type": "terminal", "turn": 65, "parallel": null, "retryOf": null, "status": "ok", "problems": []},
+    {"id": "g2", "skill": "◆ 阶段二进行中", "step": "◆ 阶段二进行中（Task 28 ❌ 停止）", "type": "terminal", "turn": 102, "parallel": null, "retryOf": null, "status": "failed", "problems": [{"type": "missing-prereq", "dimension": "process", "severity": "high", "evidence": "阶段二未通过 CP2 门控即开始执行", "diagnosis": "workflow 规范要求 CP2（阶段一/二门控）必需确认才能进入阶段二，但实际 session 无任何 CP 执行", "suggestion": "workflow SKILL.md 在 STATE.md Task 16 验收通过后插入 ⛔CP2 门控节点"}]}
+  ],
+  "skillQuality": [
+    {
+      "skill": "ops-registry-invoke-glacier",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "编排者严格按 STATE.md 顺序派发 Task，所有 Task 均按流程推进，无跳步"},
+        "G2": {"rating": "pass", "note": "编排者遵守 SKILL.md 五条强制规则：只编排不执行、只读 STATE.md、不自己修改勾选"},
+        "G3": {"rating": "n-a", "note": "编排者不产出具体内容，安全性由下游 skill 评估"},
+        "G4": {"rating": "weak", "note": "未执行 CP 门控，阶段一跳过 CP1/CP1.5/CP2；STATE.md 骨架无验收步骤", "evidence": "n5 state-generator 后无 verifier 验收 STATE.md 骨架；n20 CP1.5 仅标注 ⚠ 无人工确认", "diagnosis": "workflow SKILL.md 的 4 步流程缺 STATE.md 验收步骤和 CP 门控节点", "suggestion": "workflow SKILL.md 增加 step 3.5（STATE.md 验收）和 CP1/CP1.5/CP2 门控节点"},
+        "G5": {"rating": "n-a", "note": "编排者无边界处理场景，鲁棒性由下游 skill 评估"},
+        "S1": {"rating": "weak", "note": "SKILL.md 指令清晰但 IO 契约缺失、缺失败路径、缺示例、过度约束", "evidence": "子代理严格按规则执行（不读其他文件、不自行执行），但出现冗余 skill invoke 和 Task 1 二次验收等执行偏差", "diagnosis": "SKILL.md 缺 STATE.md 验收步骤导致 Task 1 二次验收；缺输入契约导致 {OP} 占位符未显式定义来源；缺失败路径导致 Task 20 re-dispatch 无上限", "suggestion": "补 STATE.md 验收步骤、IO 契约、retry 上限、终止条件；提供完整 dispatch cycle 示例", "staticChecks": [
+          {"category": "io-unclear", "severity": "high", "issue": "无输入契约：skill 未声明编排者接收什么输入（算子名来源？格式？），{OP} 占位符来源未定义", "snippet": "你正在根据所提供的算子描述，基于ACLNN开发框架(operators/)构建", "suggestion": "显式声明 Input Contract：{operator_name: snake_case string, from: user prompt}"},
+          {"category": "io-unclear", "severity": "high", "issue": "无终止条件/成功状态定义：workflow 的最终成功状态未声明（全 Task 勾选？构建通过？）", "snippet": "读取 STATE.md，按顺序逐一完成其中的 Tasks", "suggestion": "声明 Terminal Condition：STATE.md 所有 Task 勾选 = workflow 完成"},
+          {"category": "asymmetry", "severity": "high", "issue": "STATE.md 骨架（全流程 governing artifact）无验证步骤，但目录创建有验证步骤——不对称", "snippet": "派发 state-generator agent 依据 STATE.md.templ 生成干净的 STATE.md 骨架（…无残留）", "suggestion": "在 step 3 后增加 step 3.5：派发 verifier 验证 STATE.md 骨架正确性"},
+          {"category": "structure", "severity": "high", "issue": "缺 MUST/SHOULD 分级：5 条强制规则全为 MUST 级，无 SHOULD 级或失败处理路径", "snippet": "强制规则（不可违反）：1.只做编排派发…5.前序Task未通过不得派发后续", "suggestion": "分级：MUST（只编排、不修改 STATE.md）；SHOULD（只读 STATE.md——调试时可读 LOG.md）；补 retry 上限与终止条件"},
+          {"category": "structure", "severity": "medium", "issue": "4 个 workflow checkbox 无 agent 负责勾选，编排者自己不能勾选（Rule 4），形成结构矛盾", "snippet": "- [ ] 派发 developer agent…- [ ] 读取 STATE.md…", "suggestion": "改用 numbered steps 而非 checkbox，或指定编排者可勾选 workflow step"},
+          {"category": "ambiguity", "severity": "medium", "issue": "\"正文只交目标，不夹带调度指令\"边界模糊——什么算调度指令无定义", "snippet": "向「执行者」指定的 agent 派发任务，正文只交「目标」，不夹带调度指令", "suggestion": "定义「调度指令」边界或给出示例：目标=Task 目标段落；调度指令=verify/dispatch/schedule 等编排关键字"},
+          {"category": "structure", "severity": "medium", "issue": "缺 retry 上限和失败升级路径：\"未通过则依据反馈重新派发执行者修复\"无次数限制", "snippet": "验收通过…后，再读取 STATE.md 推进下一个 Task；未通过则依据反馈重新派发执行者修复", "suggestion": "补 retry 上限（3 次）和失败升级路径（3 次后报错暂停/标记 Task 为 blocked）"},
+          {"category": "reference", "severity": "medium", "issue": "skill_files 中 DESIGN.md.templ / LOG.md.templ 列出但 workflow 中未引用——死引用", "snippet": "<skill_files>…DESIGN.md.templ…LOG.md.templ…</skill_files>", "suggestion": "要么在 workflow 中引用这些模板，要么从 skill_files 列表中移除"},
+          {"category": "reference", "severity": "low", "issue": "$SKILL macro 未解释，依赖平台解析，无 fallback", "snippet": "[STATE.md.templ]($SKILL/templates/STATE.md.templ)", "suggestion": "补 $SKILL macro 说明或改用相对路径"},
+          {"category": "ambiguity", "severity": "low", "issue": "\"验证算子开发目录成功创建\"验收标准模糊——成功=目录存在？非空？有子结构？", "snippet": "派发 verifier agent 验证算子开发目录成功创建", "suggestion": "明确验收标准：目录存在 + 非空 + LOG.md 存在"}
+        ]},
+        "S2": {"rating": "weak", "note": "2 次 invoke + Task 1 二次验收 + 多次冗余 skill invoke + 98.9M token 总消耗", "evidence": "ops-registry-invoke-glacier invoke 2 次（L27 + L76042）；Task 1 verifier 二次验收（n3 + n6）；同 turn 内 skill invoke 重复约 6 处", "diagnosis": "主 Agent 在每个 turn 重复 invoke 已加载的 skill（BP/ops-requirement-analysis/ops-spec-gen），显著增加 token", "suggestion": "workflow SKILL.md 明确：skill invoke 只在首次需要时一次，后续不重复 invoke；验收 turn 不 invoke 产出 skill"},
+        "S3": {"rating": "pass", "note": "SKILL.md 结构清晰：角色定义 + 5 条强制规则 + 4 步 workflow + skill_files，分段合理易改"}
+      },
+      "summary": "编排 skill 指令清晰但 IO 契约缺失、缺 CP 门控和 STATE.md 验收步骤、缺 retry 上限、过度约束且冗余 invoke 消耗大量 token"
+    },
+    {
+      "skill": "ascendc-regbase-best-practice",
+      "occurrences": 26,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "所有 designer/developer/kernel-developer 子代理均先加载 BP skill 再设计/编码，产出均通过 verifier 验收"},
+        "G2": {"rating": "pass", "note": "BP skill 的 guardrails 被遵守：渐进式披露、不超过 5 leaf notes、不自动复用"},
+        "G3": {"rating": "pass", "note": "BP skill 提供的 API 约束、同步模式、数值稳定范式被正确引用到设计中"},
+        "G4": {"rating": "weak", "note": "BP skill 被 invoke 26 次（含验收 turn 8 次冗余 invoke），但每次 invoke 内容相同，覆盖完整", "evidence": "BP invoke 在验收 turn 8 次（n29/n33/n48/n51/n55 等），但验收不需要 BP skill", "diagnosis": "主 Agent 在验收 turn 仍 invoke BP skill，属于冗余覆盖而非缺失", "suggestion": "验收 turn 不 invoke BP skill"},
+        "G5": {"rating": "pass", "note": "BP skill 的 pitfalls 卡片被正确引用，避免常见 API 误用"},
+        "S1": {"rating": "pass", "note": "SKILL.md 指令清晰、渐进式披露设计合理、guardrails 明确；子代理 26 次调用均按规则执行", "evidence": "designer/developer 子代理每次 dispatch 前均 invoke BP skill 并按 Reading Order 读取 references", "diagnosis": "BP skill 指令被准确执行，子代理行为符合预期", "suggestion": "无重大 S1 缺陷，仅建议增加 MUST/SHOULD 分级和输出契约", "staticChecks": [
+          {"category": "io-unclear", "severity": "medium", "issue": "无输出契约：skill 未声明 agent 读完 references 后应产出什么（设计文档？代码？推荐？）", "snippet": "Its job is to provide a reliable regbase-oriented reading path", "suggestion": "补 Output Contract：读完 references 后产出 regbase 设计决策记录（引用哪些卡片、采用什么范式、API 约束清单）"},
+          {"category": "structure", "severity": "medium", "issue": "无 MUST/SHOULD 分级：安全 guardrails（\"Do not treat candidate as proof of reusability\"）和效率建议（\"Prefer indexed reading path\"）用相同语法权重，无法区分", "snippet": "Guardrails: - Prefer the indexed reading path… - Do not treat a candidate…", "suggestion": "分级：MUST 级（candidate reusability guardrail）；SHOULD 级（indexed reading path、5 leaf cap）"},
+          {"category": "ambiguity", "severity": "low", "issue": "\"expand at most 5\" 未定义什么构成\"closing the question\"——输出验收标准缺失", "snippet": "expand at most 5 of them before you either close the question or split it into smaller subproblems", "suggestion": "定义\"close the question\"的验收标准：产出含引用卡片列表的设计决策摘要"},
+          {"category": "reference", "severity": "low", "issue": "spec.yaml 是跨 skill 依赖但未声明——Reading Order step 6 引用 op.paradigms from spec.yaml", "snippet": "Read paradigm design guides by op.paradigms from spec.yaml", "suggestion": "声明前置依赖：spec.yaml 必须存在且包含 op.paradigms 字段"},
+          {"category": "structure", "severity": "low", "issue": "Asset Map paradigm 列表不全：列出 broadcast/elewise/reduction/matmul/conversion/quantization 6 类但 filesystem 还有 layout_transform", "snippet": "references/paradigms/：…broadcast, elewise, reduction, matmul, conversion, quantization", "suggestion": "补 layout_transform 到 Asset Map 或注明\"paradigm 目录可能扩展\""}
+        ]},
+        "S2": {"rating": "fail", "note": "26 次 invoke（含 8 次验收 turn 冗余 invoke + 4 次同 turn 重复 invoke），每次 invoke 全文重复加载，token 消耗巨大", "evidence": "BP invoke 26 次（含验收 turn 8 次 + 同 turn 重复 4 次），98.9M token 中 BP invoke 占约 20%", "diagnosis": "主 Agent 在每个 Task 的执行和验收 turn 均 invoke BP skill，且同 turn 内多次 invoke；BP skill 全文每次重复加载到 context", "suggestion": "workflow SKILL.md 明确：BP skill 只在 designer/developer/kernel-developer dispatch turn invoke 一次，验收 turn 不 invoke；考虑 skill 内容 caching 机制"},
+        "S3": {"rating": "pass", "note": "52 行 SKILL.md 结构清晰：When To Use + Reading Order + Asset Map + Guardrails，分段合理易改"}
+      },
+      "summary": "BP skill 指令清晰、渐进式披露设计优秀，但被 invoke 26 次（大量冗余）导致 token 消耗巨大——是本 session 最高的 S2 成本问题"
+    },
+    {
+      "skill": "designer",
+      "occurrences": 10,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "10 次 dispatch 均产出设计内容并通过 verifier 验收，DESIGN.md §1-§7 + 2 个 DESIGN-BRANCH 全部完成"},
+        "G2": {"rating": "pass", "note": "designer 严格遵守范围：只写目标节/分支、不实现算法、不臆造需求，gap 用 {{DESIGN 缺口}} 标记"},
+        "G3": {"rating": "pass", "note": "designer 每次 dispatch 前强制加载 BP skill，设计决策引用 regbase API 约束"},
+        "G4": {"rating": "pass", "note": "DESIGN §1-§7 每节覆盖 spec.yaml 和 REQUIREMENTS.md 对应内容，表与 spec 一致"},
+        "G5": {"rating": "pass", "note": "designer 的自检步骤覆盖：产物存在、无占位符、目标节替换、其他节未动、表与 spec 一致"},
+        "S1": {"rating": "pass", "note": "agents/designer.md 定义清晰：角色/输入/范围/步骤0-4/验收标准，指令以祈使句给出，步骤零强制加载 BP skill 解释了 Why", "evidence": "10 次 designer dispatch 均按步骤0-4执行，产出通过 verifier 验收", "diagnosis": "designer agent 定义被准确执行，无理解偏差", "suggestion": "无重大 S1 缺陷，仅建议增加 Type B（写某节）的 few-shot 示例", "staticChecks": [
+          {"category": "io-unclear", "severity": "medium", "issue": "agents/designer.md 引用 REQUIREMENTS.md / spec.yaml 作为输入但未声明前置条件：这些文件必须存在且内容完整", "snippet": "你的输入：Task goal from STATE.md；mandatory ascendc-regbase-best-practice skill；{OP}…；requirement sources（REQUIREMENTS.md, spec.yaml…）", "suggestion": "补前置条件：REQUIREMENTS.md 和 spec.yaml 必须已通过 verifier 验收"},
+          {"category": "structure", "severity": "medium", "issue": "步骤零\"加载 regbase best practice skill\"是 MUST 级但未标注分级，与步骤1-4 的 SHOULD 级指令（\"理解任务\"/\"执行\"/\"自检\"）用相同语法权重", "snippet": "步骤零 · 加载 regbase 最佳实践（强制，先于一切设计动作）", "suggestion": "标注 MUST/SHOULD：步骤零 = MUST；步骤1-3 = SHOULD（推荐但可调整）；步骤4 自检 = MUST"},
+          {"category": "reference", "severity": "low", "issue": "DESIGN.md.templ / DESIGN-BRANCH.md.templ 引用路径为 skill templates 目录，但 agent 定义未给确定路径——依赖 dispatch prompt 传入", "snippet": "模板（DESIGN.md.templ, DESIGN-BRANCH.md.templ）", "suggestion": "agent 定义补模板路径：$SKILL/templates/DESIGN.md.templ，或声明\"由 dispatch prompt 传入模板路径\""},
+          {"category": "ambiguity", "severity": "low", "issue": "\"不实现算法、不臆造需求里没有的语义\"——\"算法\"与\"设计\"的边界模糊：Tiling 切分公式属于设计还是算法？", "snippet": "只据给定输入把该目标写成设计文字，完成后追加日志", "suggestion": "补边界定义：Tiling 切分公式属于设计（§5）；kernel 计算步骤属于实现（不写）"}
+        ]},
+        "S2": {"rating": "pass", "note": "designer 每个 dispatch 产出聚焦单一节/分支文件，无冗余输出"},
+        "S3": {"rating": "pass", "note": "107 行 agents/designer.md 结构清晰：角色/输入/范围/步骤0-4/验收标准，与 STATE.md Task 格式对齐"}
+      },
+      "summary": "designer agent 定义清晰、执行准确，10 次 dispatch 全部通过验收；仅建议补前置条件声明和 MUST/SHOULD 分级"
+    },
+    {
+      "skill": "verifier",
+      "occurrences": 29,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "29 次 verifier dispatch 均完成验收，勾选 STATE.md 对应 Task，全部 PASS"},
+        "G2": {"rating": "pass", "note": "verifier 严格按 STATE.md 验收标准执行，只修改勾选框不改正文"},
+        "G3": {"rating": "n-a", "note": "verifier 不产出设计/代码内容，安全性由产出 skill 评估"},
+        "G4": {"rating": "pass", "note": "verifier 覆盖 STATE.md 每个 Task 的验收标准，无遗漏"},
+        "G5": {"rating": "weak", "note": "verifier 仅做布尔判定（PASS/FAIL），无质量梯度评估；对 STATE.md 骨架无验收（n5 后缺验收步骤）", "evidence": "n5 state-generator 后无 verifier 验收 STATE.md 骨架正确性", "diagnosis": "verifier 只验收 STATE.md 中的 Task 勾选，对 STATE.md 骨架本身不验收", "suggestion": "增加 STATE.md 骨架验收：非空、无占位符、标题正确、固定阶段 Task 齐全"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "verifier agent 定义（agents/verifier.md）仅在 STATE.md Task 中引用（\"验收者：verifier（agents/verifier.md）\"），全文未嵌入 session MD，无法做 staticChecks"},
+        "S2": {"rating": "weak", "note": "29 次 verifier dispatch，每个验收 Task 仅做布尔判定+勾选修改，但主 Agent 在验收 turn 仍 invoke BP skill 等冗余 skill，token 消耗高", "evidence": "验收 turn invoke BP 8 次（n29/n33/n48/n51/n55/n29等同），invoke ops-requirement-analysis 2 次（n4/n14），invoke ops-spec-gen 1 次（n21）", "diagnosis": "主 Agent 在验收 turn 不必要地 invoke 产出 skill，增加 token", "suggestion": "验收 turn 不 invoke 产出 skill；verifier dispatch 仅传验收标准，不传 skill 全文"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "verifier agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "verifier 29 次全部 PASS，执行准确但 S2 成本高（验收 turn 冗余 skill invoke）；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "ops-requirement-analysis",
+      "occurrences": 4,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "REQUIREMENTS.md 产出通过 req-verifier 验收，结构完整、COPY 规范遵守"},
+        "G2": {"rating": "pass", "note": "需求分析遵守 COPY 规范（逐字复制中间件），降级规则正确执行（无源码仓标注来源）"},
+        "G3": {"rating": "pass", "note": "需求文档覆盖数学公式、dtype/芯片/容差口径，下游 spec.yaml 可追溯"},
+        "G4": {"rating": "pass", "note": "REQUIREMENTS.md 包含输出模板全部固定章节，COPY 章节逐字复制"},
+        "G5": {"rating": "weak", "note": "降级场景处理正确但缺 TOC 重建循环上限（潜在无限循环）", "evidence": "skill 七、错误处理表覆盖 5 种场景但无 TOC 重建循环上限", "diagnosis": "\"修正目录直到通过\"无 max-retry", "suggestion": "补 TOC 重建 max-retry（如 3 次）和 fallback"},
+        "S1": {"rating": "pass", "note": "SKILL.md 指令清晰、流水线三阶段明确、降级规则合理；子代理产出通过验收", "evidence": "req-analyst 产出 REQUIREMENTS.md 通过 req-verifier 验收", "diagnosis": "需求分析 skill 指令被准确执行", "suggestion": "无重大 S1 缺陷，仅建议补输入验证、TOC 循环上限、\"2-5 个典型模型场景\"决策规则", "staticChecks": [
+          {"category": "io-unclear", "severity": "medium", "issue": "输入表\"客户需求\"字段未枚举：运行环境/调用方式/网络信息只在 output template 出现，不在输入表", "snippet": "客户需求 | 任务目标 / 用户 prompt | 运行环境、调用方式、网络信息（缺省用默认值并标注「假设」）", "suggestion": "输入表补枚举：{runtime: Ascend950PR/950DT, call_mode: single_op+PyTorch, network_info: optional}"},
+          {"category": "structure", "severity": "medium", "issue": "缺 MUST/SHOULD 分级：约束全用\"必须\"（MUST），\"所有外部链接必须有效\"不可执行", "snippet": "约束：4. 所有外部链接必须有效", "suggestion": "改为 SHOULD：\"尽力验证链接有效性并在文档中标注检查日期\""},
+          {"category": "structure", "severity": "medium", "issue": "无\"三框架全定位失败\"处置规则：单框架标 ❌ 跳过，但全部 ❌ 时未定义 abort/continue", "snippet": "某框架完全找不到就在文档中标注 ❌ 并跳过其竞品章节", "suggestion": "补规则：三框架全 ❌ → 标注\"无竞品实证\"并仅用模型知识推导，不 abort"},
+          {"category": "ambiguity", "severity": "low", "issue": "\"2-5 个典型模型场景\"无决策规则——何时停2 vs 写5", "snippet": "典型模型场景（2–5 个…）", "suggestion": "补决策规则：≥2 即可，复杂算子建议 3-5"},
+          {"category": "reference", "severity": "medium", "issue": "references/output_template.md 是关键依赖但未验证存在性，无 fallback", "snippet": "严格按 references/output_template.md 组装", "suggestion": "补前置条件：output_template.md 必须存在；缺失时用内嵌最小模板"},
+          {"category": "asymmetry", "severity": "low", "issue": "输出侧有 4 约束+TOC 校验但输入侧无结构校验：{OP} 格式、客户需求完整性均无检查", "snippet": "约束1-4 全针对输出；输入表无校验规则", "suggestion": "补输入校验：{OP} 必须为 snake_case；客户需求缺项用默认值+标注"}
+        ]},
+        "S2": {"rating": "weak", "note": "invoke 4 次（含验收 turn 2 次冗余 invoke），但 skill 全文每次重复加载", "evidence": "ops-requirement-analysis invoke 4 次（L532/L2875/L3576/L5647），其中 L532 和 L5647 在验收 turn 冗余 invoke", "diagnosis": "同 S2 模式：验收 turn 冗余 invoke", "suggestion": "验收 turn 不 invoke 产出 skill"},
+        "S3": {"rating": "pass", "note": "~130 行 SKILL.md 结构清晰：一输入/二流水线/三名称解析/四三维研究/五需求总结/六源码路径/七错误处理/八约束，分段合理"}
+      },
+      "summary": "需求分析 skill 指令清晰、降级规则合理，产出通过验收；仅建议补输入校验、TOC 循环上限、MUST/SHOULD 分级"
+    },
+    {
+      "skill": "ops-spec-gen",
+      "occurrences": 4,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "spec.yaml 产出通过 9-stage 全 PASS + 14 SPEC-* 条款全 ✓/⚠"},
+        "G2": {"rating": "pass", "note": "spec 生成遵守分类决策流程（先读 registries），非交互模式正确使用 --paradigms"},
+        "G3": {"rating": "pass", "note": "spec.yaml 覆盖 dtype/芯片/公式/容差，boundary case 按范式最低集覆盖"},
+        "G4": {"rating": "pass", "note": "13 SPEC-* 条款（MUST 级 S1-S4 全 ✓）覆盖 dtype/芯片/接口/公式/范式一致性"},
+        "G5": {"rating": "pass", "note": "9-stage 校验 + formula smoke eval 覆盖边界验证"},
+        "S1": {"rating": "pass", "note": "SKILL.md 指令清晰、分类决策流程有示例、9-stage 定义明确；但 session MD 中 skill 文本截断在 §3.4", "evidence": "spec-verifier 产出通过验收（9-stage 全 PASS + 14 条款 ✓/⚠）", "diagnosis": "spec-gen skill 指令被准确执行，但 session MD 截断导致完整 S1 分析受限", "suggestion": "补 §3.4 之后的 skill 文本完整性保障；session export 应完整嵌入 skill 全文", "staticChecks": [
+          {"category": "io-unclear", "severity": "medium", "issue": "§2 输入输出表描述\"inputs（带 dtype_set）\"格式模糊——是 {name, dtype_set} 元组？逗号分隔字符串？", "snippet": "入参（生成）| 算子名、category、paradigms[]、inputs（带 dtype_set）、outputs", "suggestion": "补格式定义：inputs = [{name: string, dtype_set: [dtype,…]}] 或 CLI --inputs \"x:fp16,fp32;…\""},
+          {"category": "structure", "severity": "medium", "issue": "skill 文本在 session MD 中截断于 §3.4（\"outputs[].dtype_rule\"中句），§4 校验器全文缺失——session export 不完整", "snippet": "outputs[].dtype_rule — numpy 子集表达式（如 c.dtype = np.promote_types(a.dty [截断]", "suggestion": "session export 应保证 skill 全文完整嵌入；截断处标注\"[SKILL TEXT TRUNCATED]\"并建议用户附加 SKILL.md"},
+          {"category": "structure", "severity": "medium", "issue": "所有指令为 MUST 级无 SHOULD 分级：\"必须先读 registries\"/\"禁止凭直觉\"/\"必须对照 REQUIREMENTS.md\"/\"必须手填 TODO\"", "snippet": "必须先读取分类注册表…禁止凭直觉猜测…必须对照 REQUIREMENTS.md…必须手填", "suggestion": "分级：MUST（必须读 registries、必须手填 TODO）；SHOULD（对照 REQUIREMENTS.md——缺失时用默认推理并标注）"},
+          {"category": "ambiguity", "severity": "low", "issue": "\"禁止仅凭 cheatsheet\"与 skill 内嵌 cheatsheet-like 内容（决策示例+常见混淆表）矛盾", "snippet": "禁止：仅凭 cheatsheet 的启发式规则选 category…常见混淆：Broadcast vs LayoutTransform…", "suggestion": "明确：cheatsheet 作为辅助参考可用，但必须以 registries 为决策依据"},
+          {"category": "reference", "severity": "medium", "issue": "5 个外部依赖（category_enum.yaml/paradigm_enum.yaml/category_paradigm_map.yaml/spec-cheatsheet.md/usage-scenarios.md）无 fallback", "snippet": "读 registries/category_enum.yaml…读 registries/paradigm_enum.yaml…读 references/spec-cheatsheet.md", "suggestion": "补前置条件：registries 必须存在；缺失时 abort 并报错"}
+        ]},
+        "S2": {"rating": "weak", "note": "invoke 4 次（含验收 turn 1 次冗余 invoke），skill 全文每次重复加载", "evidence": "ops-spec-gen invoke 4 次（L6803/L9021/L11123），其中 L11123 在验收 turn 冗余 invoke", "diagnosis": "验收 turn 冗余 invoke + 同 turn 重复 invoke", "suggestion": "验收 turn 不 invoke 产出 skill"},
+        "S3": {"rating": "weak", "note": "skill 文本在 session MD 中截断于 §3.4，§4 校验器及后续章节缺失——无法完整评 S3", "evidence": "session MD L11611 截断", "diagnosis": "session export 不完整嵌入 skill 全文", "suggestion": "session export 应完整嵌入 skill 全文，或标注截断位置"}
+      },
+      "summary": "spec-gen skill 指令清晰、分类决策流程优秀，产出通过验收；但 session MD 截断导致完整分析受限；建议补 skill 全文嵌入完整性"
+    },
+    {
+      "skill": "developer",
+      "occurrences": 13,
+      "ratings": {
+        "G1": {"rating": "weak", "note": "12 次 ✅ + 1 次 ❌（Task 28 dispatch 失败）；Task 20 首次空返回需 re-dispatch", "evidence": "Task 20 首次 developer 返回空结果（n80）；Task 28 developer dispatch ❌（n100）", "diagnosis": "Task 20 子代理空返回可能是超时；Task 28 dispatch ❌ 可能是 session token 上限或 runtime error", "suggestion": "workflow SKILL.md 增加 retry 上限和 dispatch 失败处置策略"},
+        "G2": {"rating": "pass", "note": "developer 子代理严格按 Task 目标执行，自检步骤覆盖"},
+        "G3": {"rating": "pass", "note": "developer 在 dispatch 前加载 BP skill，引用 regbase API 约束"},
+        "G4": {"rating": "pass", "note": "developer 覆盖 Task 17-27 的全部开发内容"},
+        "G5": {"rating": "weak", "note": "Task 20 首次空返回（无产物）；Task 28 dispatch ❌（无产物）", "evidence": "n80 空返回 + n100 ❌", "diagnosis": "子代理执行异常导致产物缺失", "suggestion": "增加 retry 策略和 dispatch 失败自动恢复"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "developer agent 定义仅在 STATE.md Task 中引用（\"执行者：developer（agents/developer.md）\"），全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "developer dispatch 产出聚焦单一 Task，无冗余输出"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "developer agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "developer 12 次通过验收 + 1 次 dispatch 失败，Task 20 有 re-dispatch；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "kernel-developer",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 23/27 kernel 实现通过 verifier 验收，ST 42/42 全通过"},
+        "G2": {"rating": "pass", "note": "kernel-developer 按 DESIGN-BRANCH 实现计算链，自检步骤覆盖"},
+        "G3": {"rating": "pass", "note": "kernel 实现引用 regbase API 约束，数值稳定处理正确"},
+        "G4": {"rating": "pass", "note": "Branch-1/Branch-2 kernel 实现覆盖全部 §2.2 dtype 组合"},
+        "G5": {"rating": "pass", "note": "kernel ST 42/42 全通过（含 nan_propagates 等特殊值验证）"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "kernel-developer agent 定义仅在 STATE.md Task 中引用，全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "2 次 dispatch 产出聚焦，无冗余"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "kernel-developer agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "kernel-developer 2 次通过验收，ST 42/42 全通过；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "req-analyst",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "REQUIREMENTS.md 产出通过 req-verifier 验收"},
+        "G2": {"rating": "pass", "note": "req-analyst 按 ops-requirement-analysis skill 执行"},
+        "G3": {"rating": "pass", "note": "需求文档覆盖数学公式和 dtype/芯片口径"},
+        "G4": {"rating": "pass", "note": "需求文档包含全部固定章节"},
+        "G5": {"rating": "n-a", "note": "req-analyst 为需求分析角色，无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "req-analyst agent 定义仅在 STATE.md Task 中引用，全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch 产出聚焦，无冗余"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "req-analyst agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "req-analyst 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "req-verifier",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 3 REQUIREMENTS.md 验收 PASS"},
+        "G2": {"rating": "pass", "note": "req-verifier 按验收标准执行"},
+        "G3": {"rating": "n-a", "note": "验收角色不产出设计内容"},
+        "G4": {"rating": "pass", "note": "覆盖结构完整性+COPY规范+目录一致性"},
+        "G5": {"rating": "n-a", "note": "验收角色无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "req-verifier agent 定义全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "req-verifier agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "req-verifier 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "spec-generator",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "spec.yaml 产出通过 9-stage 全 PASS"},
+        "G2": {"rating": "pass", "note": "spec-generator 按 ops-spec-gen skill 执行分类决策流程"},
+        "G3": {"rating": "pass", "note": "spec 覆盖 dtype/芯片/公式/容差"},
+        "G4": {"rating": "pass", "note": "13 SPEC-* 条款全 ✓/⚠"},
+        "G5": {"rating": "pass", "note": "9-stage 全 PASS"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "spec-generator agent 定义仅在 STATE.md Task 中引用，全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "spec-generator agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "spec-generator 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "spec-verifier",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 4 spec 验收 PASS + CP1.5 必看清单产出"},
+        "G2": {"rating": "pass", "note": "9-stage 全 PASS + 14 SPEC-* 条款 ✓/⚠"},
+        "G3": {"rating": "pass", "note": "CP1.5 必看清单标注 ⚠ tolerance 数值合理性"},
+        "G4": {"rating": "pass", "note": "覆盖 9-stage + 14 条款"},
+        "G5": {"rating": "pass", "note": "校验覆盖完整"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "spec-verifier agent 定义全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "spec-verifier agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "spec-verifier 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "state-generator",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "STATE.md 骨架生成成功"},
+        "G2": {"rating": "pass", "note": "state-generator 按 SKILL.md 模板执行，无占位符残留"},
+        "G3": {"rating": "n-a", "note": "骨架生成无安全内容"},
+        "G4": {"rating": "weak", "note": "STATE.md 骨架生成后无 verifier 验收步骤——关键 governing artifact 缺验收", "evidence": "n5 state-generator 后无 verifier 验收 STATE.md 骨架", "diagnosis": "workflow SKILL.md 缺 STATE.md 验收步骤", "suggestion": "workflow SKILL.md 增加 STATE.md 验收步骤"},
+        "G5": {"rating": "n-a", "note": "骨架生成无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "state-generator agent 定义仅在 dispatch prompt 中部分嵌入，未完整嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "state-generator agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "state-generator 1 次通过，但 STATE.md 骨架无后续验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "design-task-generator",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 12 分支设计任务生成成功（3 个子任务 12.1/12.2/12.3）"},
+        "G2": {"rating": "pass", "note": "子任务三段齐全、编号连续、未改动固定阶段"},
+        "G3": {"rating": "n-a", "note": "任务生成无安全内容"},
+        "G4": {"rating": "pass", "note": "3 个子任务覆盖 §6 的 2 个 tilingKey + §7"},
+        "G5": {"rating": "n-a", "note": "任务生成无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "design-task-generator agent 定义仅在 dispatch prompt 中部分嵌入"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "design-task-generator agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "design-task-generator 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "task-generator",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 16 设计驱动任务生成成功（Task 17-28）"},
+        "G2": {"rating": "pass", "note": "12 个 Task 三段齐全、编号连续 17-28、未改动固定阶段"},
+        "G3": {"rating": "n-a", "note": "任务生成无安全内容"},
+        "G4": {"rating": "pass", "note": "覆盖 M1-M5 全部里程碑"},
+        "G5": {"rating": "n-a", "note": "任务生成无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "task-generator agent 定义仅在 dispatch prompt 中部分嵌入"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "task-generator agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "task-generator 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "find-proto",
+      "occurrences": 1,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "proto.md 提取成功"},
+        "G2": {"rating": "pass", "note": "proto 提取按 Task 目标执行"},
+        "G3": {"rating": "n-a", "note": "proto 提取无安全内容"},
+        "G4": {"rating": "pass", "note": "proto 提取覆盖算子接口定义"},
+        "G5": {"rating": "n-a", "note": "proto 提取无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "find-proto agent 定义全文未嵌入 session MD"},
+        "S2": {"rating": "pass", "note": "1 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "find-proto agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "find-proto 1 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    },
+    {
+      "skill": "opdef-developer",
+      "occurrences": 2,
+      "ratings": {
+        "G1": {"rating": "pass", "note": "Task 14/15 OpDef 开发通过 verifier 验收"},
+        "G2": {"rating": "pass", "note": "OpDef stub 按 proto.md 实现"},
+        "G3": {"rating": "n-a", "note": "OpDef stub 无安全内容"},
+        "G4": {"rating": "pass", "note": "OpDef 覆盖算子接口"},
+        "G5": {"rating": "n-a", "note": "OpDef stub 无边界处理场景"},
+        "S1": {"rating": "n-a(定义未嵌入)", "note": "opdef-developer agent 定义仅在 STATE.md Task 中引用"},
+        "S2": {"rating": "pass", "note": "2 次 dispatch"},
+        "S3": {"rating": "n-a(定义未嵌入)", "note": "opdef-developer agent 定义全文未嵌入 session MD"}
+      },
+      "summary": "opdef-developer 2 次通过验收；S1/S3 因 agent 定义未嵌入而 n-a"
+    }
+  ],
+  "workflowLevelIssues": [
+    {"id": "wf-1", "type": "gate-skipped", "severity": "high", "title": "全部 CP 门控缺失", "detail": "workflow 规范定义 CP1/CP1.5/CP2 必需确认、CP3/CP4/CP5 后续门控，但实际 session 无任何 CP 执行。CP1.5 仅在 Task 4 spec 验收时由 spec-verifier 产出「必看清单」（⚠ 标注供人工确认），但 L3 全自动模式无人工介入机制，CP1.5 实际被自动放行（wf-gate-autopassed）。阶段一与阶段二之间缺 CP2 门控——Task 16 验收后直接开始 Task 17 开发，无阶段间确认。", "suggestion": "workflow SKILL.md 增加 CP 门控节点：1) STATE.md Task 4 验收后插入 ⛔CP1（spec 确认）+ CP1.5（语义确认）；2) Task 16 验收后插入 ⛔CP2（设计完成确认）；3) L3 模式下 CP 门控规则：自动标注+继续 vs 暂停等待人工"},
+    {"id": "wf-2", "type": "redundant", "severity": "high", "title": "ascendc-regbase-best-practice 26 次冗余 invoke", "detail": "BP skill 被 invoke 26 次：其中执行 turn invoke 16 次（合理但部分同 turn 重复）、验收 turn invoke 8 次（冗余——验收不需要 BP skill）、同 turn 内重复 invoke 4 次。每次 invoke 将 52 行 SKILL.md + references 全文重复加载到 context，token 消耗约 20%。", "suggestion": "workflow SKILL.md 明确：1) BP skill 只在 designer/developer/kernel-developer dispatch turn invoke 一次；2) 验收 turn 不 invoke BP skill；3) 考虑 skill 内容 caching 机制避免同 skill 重复全文加载"},
+    {"id": "wf-3", "type": "redundant", "severity": "medium", "title": "验收 turn 冗余 invoke 产出 skill", "detail": "主 Agent 在验收 turn 仍 invoke 产出 skill：BP invoke 8 次、ops-requirement-analysis 2 次、ops-spec-gen 1 次。验收 verifier 只需验收标准，不需要产出 skill 全文。", "suggestion": "workflow SKILL.md 明确：验收 turn 只 dispatch verifier，不 invoke 任何产出 skill"},
+    {"id": "wf-4", "type": "incomplete", "severity": "high", "title": "STATE.md 骨架无验收步骤", "detail": "workflow SKILL.md step 3 只派发 state-generator 生成 STATE.md 骨架，没有随后派发 verifier 验收骨架正确性。但更简单的目录创建（step 1）有 verifier 验收（step 2）——关键的 governing artifact（STATE.md）反而缺验收。这导致 Task 1 的勾选在骨架重新生成后丢失，需要二次验收（n6）。", "suggestion": "workflow SKILL.md 增加 step 3.5：「派发 verifier 验证 STATE.md 骨架（非空、无占位符残留、标题正确、固定阶段 Task 齐备）」"},
+    {"id": "wf-5", "type": "other", "severity": "medium", "title": "designer+verifier 串行循环无并行优化", "detail": "阶段一的 7 个 DESIGN 节（Task 5-11）+ 3 个分支设计（Task 12.1-12.3）均按 designer→BP→verifier 三件套串行执行。§1-§7 之间有依赖（§5 依赖 §2/§3），但 §2/§3 之间无依赖，理论上可并行设计。实际每个节耗费 2-5 min（designer 3-5min + verifier 30-40s + BP invoke），10 个节合计约 40min。", "suggestion": "workflow SKILL.md 支持无依赖节并行设计：§1 和 §2 可并行（§2 接口定义独立于 §1 overview）；§3 和 §4 可并行（§3 shape 推导和 §4 验证矩阵独立）"},
+    {"id": "wf-6", "type": "incomplete", "severity": "high", "title": "session export 不完整嵌入 dispatch skill 全文", "detail": "session MD 中 4 个 invoke skill 文本（ops-registry-invoke-glacier/ops-requirement-analysis/ops-spec-gen/ascendc-regbase-best-practice）嵌入，但 ops-spec-gen 截断于 §3.4；所有 dispatch skill 的 agent 定义（verifier/developer/designer/kernel-developer/opdef-developer/state-generator 等）仅在 STATE.md Task 中引用（\"agents/designer.md\"），全文未嵌入 session MD——导致 S1/S3 大量 n-a。", "suggestion": "session export 增加：1) 每个 dispatch skill 的 agent 定义全文嵌入（或在子代理首 turn 嵌入）；2) invoke skill 文本完整性保障（截断处标注）；3) 导出选项：可选附加 SKILL.md 全文"},
+    {"id": "wf-7", "type": "other", "severity": "medium", "title": "ops-registry-invoke-glacier skill 二次 invoke", "detail": "workflow skill 在 turn 2 首次 invoke 后，turn 84 再次 invoke（L76042），可能是主 Agent 刷新编排指令。但 skill 内容不变，属于冗余。", "suggestion": "workflow skill invoke 只在 session 开始时一次，后续不重复 invoke"}
+  ],
+  "optimizationPriorities": [
+    {"priority": 1, "target": "skill:ops-registry-invoke-glacier", "action": "增加 STATE.md 验收步骤（step 3.5）和 CP1/CP1.5/CP2 门控节点；明确 L3 模式下 CP 门控处置规则", "expectedGain": "避免 Task 1 二次验收 + 阶段间无确认导致的流程缺陷，减少约 10min/2 verifier dispatch 冗余"},
+    {"priority": 2, "target": "skill:ascendc-regbase-best-practice", "action": "workflow SKILL.md 明确 BP skill 只在执行 turn invoke 一次、验收 turn 不 invoke；考虑 skill caching 机制", "expectedGain": "减少 8 次 BP 冗余 invoke + 4 次同 turn 重复 invoke，节省约 15-20% token"},
+    {"priority": 3, "target": "skill:ops-registry-invoke-glacier", "action": "明确验收 turn 不 invoke 产出 skill（BP/ops-requirement-analysis/ops-spec-gen）；明确 skill invoke 只一次不重复", "expectedGain": "减少约 10 次 冗余 skill invoke，节省约 5-8% token"},
+    {"priority": 4, "target": "skill:ops-registry-invoke-glacier", "action": "增加 retry 上限（3 次）和 dispatch 失败处置策略（re-dispatch + session 终止条件）", "expectedGain": "避免 Task 28 类似的 session 无效终止，提升鲁棒性"},
+    {"priority": 5, "target": "workflow:session-export", "action": "session export 完整嵌入 dispatch skill agent 定义全文；invoke skill 文本截断处标注并建议附加 SKILL.md", "expectedGain": "使 S1/S3 8 维全覆盖可评，减少 n-a 评分"},
+    {"priority": 6, "target": "skill:ops-registry-invoke-glacier", "action": "补 IO 契约（输入：operator_name from user prompt；终止条件：STATE.md 全 Task 勾选）；分级 MUST/SHOULD（MUST=只编排/不修改 STATE.md；SHOULD=只读 STATE.md）；补 retry 上限；提供完整 dispatch cycle 示例", "expectedGain": "提升编排 skill 指令可执行性，减少理解偏差和执行冗余"},
+    {"priority": 7, "target": "skill:ascendc-regbase-best-practice", "action": "补 MUST/SHOULD 分级（MUST=candidate reusability guardrail；SHOULD=indexed reading path/5 leaf cap）；补 Output Contract（读完 references 后产出 regbase 设计决策记录）", "expectedGain": "提升 BP skill 指令精确度，减少子代理理解偏差"},
+    {"priority": 8, "target": "workflow:designer-cycle", "action": "支持无依赖节并行设计：§1/§2 可并行、§3/§4 可并行；减少串行等待时间", "expectedGain": "阶段一设计周期从约 40min 缩短到约 25min"}
+  ]
+}

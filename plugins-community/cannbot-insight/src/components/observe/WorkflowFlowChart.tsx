@@ -7,7 +7,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 
 type Severity = "high" | "medium" | "low"
@@ -16,6 +16,14 @@ export interface Problem {
   severity: Severity
   evidence?: string
   diagnosis?: string
+  suggestion?: string
+}
+export interface WorkflowIssue {
+  id: string
+  type: string
+  severity: Severity
+  title: string
+  detail?: string
   suggestion?: string
 }
 type DimKey = "G1" | "G2" | "G3" | "G4" | "G5" | "S1" | "S2" | "S3"
@@ -52,14 +60,52 @@ interface FlowNode {
   retryOf: string | null
   status: string
   problems: Problem[]
+  durationSec?: number
+  tokensKt?: number
+  turnCount?: number
+  subSessions?: string[]
 }
 export interface Analysis {
   sessionSummary: string
   sessionMeta: Record<string, unknown>
   flow: FlowNode[]
-  workflowLevelIssues: Problem[]
+  workflowLevelIssues: WorkflowIssue[]
   optimizationPriorities: Array<{ priority: number; target: string; action: string; expectedGain: string }>
   skillQuality?: SkillQuality[]
+  perfAnalysis?: PerfAnalysis
+}
+
+interface SlowSession {
+  session: string
+  task: string
+  skill: string
+  durationSec: number
+  turnCount: number
+  problem: string
+  diagnosis: string
+  suggestion: string
+}
+
+interface ParallelOpp {
+  tasks: string[]
+  reason: string
+  currentMode: string
+  suggestion: string
+  estimatedSaving: string
+}
+
+interface PerfAnalysis {
+  totalDuration?: string
+  totalDurationSec?: number
+  totalTokensKt?: number
+  mainTurns?: number
+  subagentSessions?: number
+  subagentTurns?: number
+  parallelSessions?: number
+  serialRatio?: number
+  topSlowSessions?: SlowSession[]
+  parallelizationOpportunities?: ParallelOpp[]
+  summary?: string
 }
 
 const DIMS: DimKey[] = ["G1", "G2", "G3", "G4", "G5", "S1", "S2", "S3"]
@@ -90,11 +136,11 @@ const DIM_DESC: Record<DimKey, { group: string; desc: string; principles?: Array
   ] },
 }
 
-const NODE_W = 188
-const NODE_H = 54
+const NODE_W = 200
+const NODE_H = 62
 const COL_GAP = 14
-const ROW_GAP = 30
-const LEFT_LABEL_W = 168
+const ROW_GAP = 28
+const LEFT_LABEL_W = 220
 const PAD = 28
 const RIGHT_RETRY_LANE = 60
 
@@ -109,22 +155,88 @@ function shortName(s: string): string {
   return s.replace(/^ascendc-ops-/, "").replace(/^ascendc-/, "").replace(/^ops-registry-invoke-/, "wf-")
 }
 
-interface WorkflowFlowChartProps {
-  analysis: Analysis
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  return text.slice(0, maxLen - 1) + "…"
 }
 
-export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
+// Render a string, turning §N or §N.M turn references into clickable chips that jump to that turn.
+const TURN_REF = /§(\d+(?:\.\d+)*)/
+function TurnRefText({ text, onJump }: { text: string; onJump?: (turn: number) => void }) {
+  if (!onJump || !text) return <>{text}</>
+  const parts = text.split(TURN_REF)
+  const out: ReactNode[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i]
+    if (i % 2 === 1) {
+      const n = Math.floor(Number(seg))
+      out.push(
+        <button
+          key={i}
+          type="button"
+          onClick={() => onJump(n)}
+          className="text-blue-600 hover:underline font-mono px-0.5"
+          title={`跳转到 turn ${n}`}
+        >
+          §{seg}
+        </button>,
+      )
+    } else if (seg) {
+      out.push(<span key={i}>{seg}</span>)
+    }
+  }
+  return <>{out}</>
+}
+
+interface WorkflowFlowChartProps {
+  analysis: Analysis
+  onJumpToTurn?: (turn: number) => void
+}
+
+export function WorkflowFlowChart({ analysis, onJumpToTurn }: WorkflowFlowChartProps) {
   const [selected, setSelected] = useState<string | null>(
-    analysis.flow.find(n => n.problems.length > 0)?.id ?? analysis.flow[0]?.id ?? null,
+    analysis.flow?.find(n => n.problems.length > 0)?.id ?? analysis.flow?.[0]?.id ?? null,
   )
   const [selectedSq, setSelectedSq] = useState<{ skill: string; dim: DimKey } | null>(null)
 
   const layout = useMemo(() => {
-    const groups: { step: string; nodes: FlowNode[] }[] = []
-    for (const n of analysis.flow) {
-      const g = groups.find(x => x.step === n.step)
+    // Group nodes into rows: nodes sharing a `parallel` id land in the same row
+    // (parallel branches); non-parallel nodes each get their own row (keyed by
+    // node id, NOT by step text — two sequential retries with the same step
+    // description must NOT be merged into a parallel-looking row).
+    const groups: { key: string; step: string; nodes: FlowNode[] }[] = []
+    for (const n of analysis.flow ?? []) {
+      const key = n.parallel ? `__par__${n.parallel}` : `__node__${n.id}`
+      const g = groups.find(x => x.key === key)
       if (g) g.nodes.push(n)
-      else groups.push({ step: n.step, nodes: [n] })
+      else groups.push({ key, step: n.step, nodes: [n] })
+    }
+    // For parallel rows whose branches carry different steps, derive a compact
+    // header: factor a shared word-prefix into "prefix ∥ N分支", else join with ‖.
+    const commonWordPrefix = (labels: string[]): string => {
+      const split = labels.map(l => l.split(/\s+/))
+      const minLen = Math.min(...split.map(s => s.length))
+      const prefix: string[] = []
+      for (let i = 0; i < minLen; i++) {
+        const w = split[0][i]
+        if (split.every(s => s[i] === w)) prefix.push(w)
+        else break
+      }
+      return prefix.join(" ")
+    }
+    for (const g of groups) {
+      if (g.nodes.length > 1) {
+        const clean = (s: string) => s.replace(/\s*\(.*$/, "")
+        const labels = [...new Set(g.nodes.map(n => clean(n.step)))]
+        if (labels.length > 1) {
+          const prefix = commonWordPrefix(labels)
+          if (prefix && labels.every(l => l.length > prefix.length + 1)) {
+            g.step = `${prefix} ∥ ${labels.length}分支`
+          } else {
+            g.step = labels.join(" ‖ ")
+          }
+        }
+      }
     }
     const maxRowNodes = Math.max(...groups.map(g => g.nodes.length))
     const width = LEFT_LABEL_W + maxRowNodes * (NODE_W + COL_GAP) + RIGHT_RETRY_LANE + PAD * 2
@@ -148,9 +260,18 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
 
   const selectedNode = analysis.flow.find(n => n.id === selected) ?? null
 
+  const top3SlowIds = useMemo(() => {
+    const ids = (analysis.flow ?? [])
+      .filter(n => n.durationSec != null && n.durationSec > 0)
+      .sort((a, b) => (b.durationSec ?? 0) - (a.durationSec ?? 0))
+      .slice(0, 3)
+      .map(n => n.id)
+    return new Set(ids)
+  }, [analysis])
+
   const retryEdges = useMemo(() => {
     const edges: { from: string; to: string; key: string }[] = []
-    for (const n of analysis.flow) {
+    for (const n of analysis.flow ?? []) {
       if (n.retryOf) edges.push({ from: n.id, to: n.retryOf, key: `${n.id}->${n.retryOf}` })
     }
     return edges
@@ -203,21 +324,21 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
         </div>
         <div className="flex gap-2 mt-3 text-xs flex-wrap">
           <span className="text-muted-foreground">CP 执行:</span>
-          {(analysis.sessionMeta.cpsExecuted as string[]).map(cp => (
+          {(analysis.sessionMeta.cpsExecuted as string[] | undefined)?.map(cp => (
             <Badge key={cp} variant="green">{cp} ✅</Badge>
           ))}
-          {(analysis.sessionMeta.cpsMissing as string[]).map(cp => (
+          {(analysis.sessionMeta.cpsMissing as string[] | undefined)?.map(cp => (
             <Badge key={cp} variant="gray">{cp} 未到</Badge>
           ))}
           <span className="text-muted-foreground ml-2">未达阶段:</span>
-          {(analysis.sessionMeta.phasesNotReached as string[]).map(p => (
+          {(analysis.sessionMeta.phasesNotReached as string[] | undefined)?.map(p => (
             <Badge key={p} variant="gray">{p}</Badge>
           ))}
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4">
-        <div className="rounded-lg border bg-card overflow-auto">
+        <div className="rounded-lg border bg-card overflow-auto flex justify-center relative">
           <svg width={layout.width} height={layout.height} className="block" style={{ minWidth: layout.width }}>
             <defs>
               <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -233,9 +354,11 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
               const x = LEFT_LABEL_W / 2 + PAD
               return (
                 <g key={row.step}>
-                  <text x={PAD} y={row.y + NODE_H / 2 + 4} className="fill-muted-foreground" fontSize="11" fontWeight={600}>
-                    {row.step}
-                  </text>
+                  <foreignObject x={PAD - 4} y={row.y} width={LEFT_LABEL_W - PAD} height={NODE_H}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: 10, fontWeight: 600, lineHeight: 1.3, color: "var(--foreground)", wordBreak: "break-word", overflow: "hidden", textAlign: "center" }}>
+                      {row.step}
+                    </div>
+                  </foreignObject>
                   {next && (
                     <line
                       x1={x} y1={row.y + NODE_H} x2={x} y2={next.y}
@@ -251,29 +374,41 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
                     return (
                       <g key={n.id} transform={`translate(${p.x},${p.y})`} className="cursor-pointer" onClick={() => setSelected(n.id)}>
                         <rect
-                          width={NODE_W} height={NODE_H} rx={isGate ? 26 : 8}
+                          width={NODE_W} height={NODE_H} rx={isGate ? 30 : 8}
                           fill={fill} stroke={stroke} strokeWidth={selected === n.id ? 2.5 : 1.5}
                         />
-                        <text x={NODE_W / 2} y={20} textAnchor="middle" fontSize="11" fontWeight={700} className="fill-foreground">
-                          {shortName(n.skill)}
+                        <text x={NODE_W / 2} y={18} textAnchor="middle" fontSize="11" fontWeight={700} className="fill-foreground">
+                          {truncateText(shortName(n.skill), 22)}
                         </text>
-                        <text x={NODE_W / 2} y={36} textAnchor="middle" fontSize="9" className="fill-muted-foreground">
-                          {n.type === "gate" ? n.status : `turn ${n.turn} · ${n.type}`}
+                        <text x={NODE_W / 2} y={33} textAnchor="middle" fontSize="9" className="fill-foreground/70">
+                          {n.type === "gate" ? truncateText(n.status, 24) : `turn ${n.turn} · ${n.type}`}
                         </text>
+                        {n.durationSec != null && n.durationSec > 0 && (
+                          <text x={NODE_W / 2} y={NODE_H - 8} textAnchor="middle" fontSize="8" fontWeight={600}>
+                            <tspan fill={top3SlowIds.has(n.id) ? "#dc2626" : "#64748b"}>
+                              {n.durationSec >= 60 ? `${(n.durationSec / 60).toFixed(0)}min` : `${n.durationSec.toFixed(0)}s`}
+                            </tspan>
+                            {n.tokensKt ? (
+                              <tspan fill="#2563eb">
+                                {` · ${n.tokensKt >= 1000 ? `${(n.tokensKt / 1000).toFixed(1)}M` : `${n.tokensKt.toFixed(0)}K`} tokens`}
+                              </tspan>
+                            ) : null}
+                          </text>
+                        )}
                         {n.retryOf && (
                           <g>
-                            <circle cx={NODE_W - 8} cy={8} r={8} fill="#dc2626" />
-                            <text x={NODE_W - 8} y={11.5} textAnchor="middle" fontSize="9" fill="white" fontWeight={700}>↻</text>
+                            <circle cx={NODE_W - 10} cy={10} r={9} fill="#dc2626" />
+                            <text x={NODE_W - 10} y={13.5} textAnchor="middle" fontSize="9" fill="white" fontWeight={700}>↻</text>
                           </g>
                         )}
                         {sev && !n.retryOf && (
                           <g>
-                            <circle cx={NODE_W - 8} cy={8} r={7} fill={SEV_COLOR[sev]} />
-                            <text x={NODE_W - 8} y={11.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>!</text>
+                            <circle cx={NODE_W - 10} cy={10} r={8} fill={SEV_COLOR[sev]} />
+                            <text x={NODE_W - 10} y={13.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>!</text>
                           </g>
                         )}
                         {n.problems.length > 1 && (
-                          <text x={NODE_W - 18} y={11.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>×{n.problems.length}</text>
+                          <text x={NODE_W - 22} y={13.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>×{n.problems.length}</text>
                         )}
                         {(() => {
                           const sq = sqBySkill.get(n.skill)
@@ -284,8 +419,8 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
                           const col = hasFail ? "#dc2626" : "#d97706"
                           return (
                             <g>
-                              <circle cx={11} cy={NODE_H - 11} r={8} fill={col} />
-                              <text x={11} y={NODE_H - 7.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>{wf.length}</text>
+                              <circle cx={12} cy={NODE_H - 12} r={9} fill={col} />
+                              <text x={12} y={NODE_H - 8.5} textAnchor="middle" fontSize="8" fill="white" fontWeight={700}>{wf.length}</text>
                               <title>{`${n.skill} 质量看板: ${wf.length} 项 weak/fail (${wf.join(", ")})`}</title>
                             </g>
                           )
@@ -309,12 +444,13 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
               )
             })}
           </svg>
-          <div className="flex gap-4 px-4 py-2 text-xs border-t flex-wrap">
-            <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm border" style={{ borderColor: "#10b981" }} />正常</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm border" style={{ borderColor: "#d97706" }} />有中等问题</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm border" style={{ borderColor: "#6366f1" }} />门控/终点</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5" style={{ background: "#dc2626" }} />↻ 重试回退</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-full" style={{ background: "#d97706" }} />节点左下=质量 weak/fail 数</span>
+          <div className="sticky top-0 ml-auto self-start flex flex-col gap-1.5 px-3 py-2 rounded-lg border bg-background/95 backdrop-blur text-[10px] max-w-[200px]">
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm border" style={{ borderColor: "#10b981" }} />正常</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm border" style={{ borderColor: "#d97706" }} />有中等问题</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm border" style={{ borderColor: "#6366f1" }} />门控/终点</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-0.5" style={{ background: "#dc2626" }} />↻ 重试回退</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: "#dc2626" }} />Top3 耗时节点</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#d97706" }} />左下=质量 weak/fail 数</span>
           </div>
         </div>
 
@@ -339,9 +475,9 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
                         <Badge variant="outline" style={{ color: SEV_COLOR[p.severity], borderColor: SEV_COLOR[p.severity] }}>{SEV_LABEL[p.severity]}</Badge>
                         <span className="font-mono">{p.type}</span>
                       </div>
-                      {p.evidence && <p className="text-muted-foreground"><span className="font-semibold">证据:</span> {p.evidence}</p>}
-                      {p.diagnosis && <p><span className="font-semibold">诊断:</span> {p.diagnosis}</p>}
-                      {p.suggestion && <p className="text-blue-600"><span className="font-semibold">建议:</span> {p.suggestion}</p>}
+                      {p.evidence && <p className="text-muted-foreground"><span className="font-semibold">证据:</span> <TurnRefText text={p.evidence} onJump={onJumpToTurn} /></p>}
+                      {p.diagnosis && <p><span className="font-semibold">诊断:</span> <TurnRefText text={p.diagnosis} onJump={onJumpToTurn} /></p>}
+                      {p.suggestion && <p className="text-blue-600"><span className="font-semibold">建议:</span> <TurnRefText text={p.suggestion} onJump={onJumpToTurn} /></p>}
                     </div>
                   ))}
                 </div>
@@ -389,14 +525,14 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
           <div className="rounded-lg border bg-card p-4">
             <h3 className="font-semibold text-sm mb-2">Workflow 级问题</h3>
             <div className="space-y-2">
-              {analysis.workflowLevelIssues.map(iss => (
+              {(analysis.workflowLevelIssues ?? []).map(iss => (
                 <div key={iss.id} className="text-xs rounded border p-2" style={{ borderColor: SEV_COLOR[iss.severity] + "55" }}>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" style={{ color: SEV_COLOR[iss.severity], borderColor: SEV_COLOR[iss.severity] }}>{SEV_LABEL[iss.severity]}</Badge>
                     <span className="font-semibold">{iss.title}</span>
                   </div>
-                  <p className="text-muted-foreground mt-1">{iss.detail}</p>
-                  <p className="text-blue-600 mt-1">{iss.suggestion}</p>
+                  <p className="text-muted-foreground mt-1"><TurnRefText text={iss.detail ?? ""} onJump={onJumpToTurn} /></p>
+                  <p className="text-blue-600 mt-1"><TurnRefText text={iss.suggestion ?? ""} onJump={onJumpToTurn} /></p>
                 </div>
               ))}
             </div>
@@ -405,7 +541,7 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
           <div className="rounded-lg border bg-card p-4">
             <h3 className="font-semibold text-sm mb-2">优化优先级</h3>
             <ol className="space-y-2">
-              {analysis.optimizationPriorities.map(op => (
+              {(analysis.optimizationPriorities ?? []).map(op => (
                 <li key={op.priority} className="text-xs">
                   <div className="flex items-center gap-2">
                     <Badge variant="purple">P{op.priority}</Badge>
@@ -502,9 +638,9 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
                   <span className="text-muted-foreground">出现 {sq.occurrences} 次</span>
                 </div>
                 {r.note && <p className="text-foreground">{r.note}</p>}
-                {r.evidence && <p className="text-muted-foreground"><span className="font-semibold">证据:</span> {r.evidence}</p>}
-                {r.diagnosis && <p><span className="font-semibold">诊断:</span> {r.diagnosis}</p>}
-                {r.suggestion && <p className="text-blue-600"><span className="font-semibold">建议:</span> {r.suggestion}</p>}
+                {r.evidence && <p className="text-muted-foreground"><span className="font-semibold">证据:</span> <TurnRefText text={r.evidence} onJump={onJumpToTurn} /></p>}
+                {r.diagnosis && <p><span className="font-semibold">诊断:</span> <TurnRefText text={r.diagnosis} onJump={onJumpToTurn} /></p>}
+                {r.suggestion && <p className="text-blue-600"><span className="font-semibold">建议:</span> <TurnRefText text={r.suggestion} onJump={onJumpToTurn} /></p>}
                 {r.staticChecks && r.staticChecks.length > 0 && (
                   <div className="mt-2 pt-2 border-t">
                     <p className="font-semibold mb-1">静态分析（扫 skill 文本）</p>
@@ -559,6 +695,108 @@ export function WorkflowFlowChart({ analysis }: WorkflowFlowChartProps) {
             </div>
           </div>
         </div>
+        </div>
+      )}
+
+      {/* 性能分析 */}
+      {analysis.perfAnalysis && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2">
+            <span className="text-base">⚡</span> 性能分析（耗时瓶颈 + 优化建议）
+          </h3>
+
+          {analysis.perfAnalysis.summary && (
+            <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
+              <TurnRefText text={analysis.perfAnalysis.summary} onJump={onJumpToTurn} />
+            </p>
+          )}
+
+          {/* 总览数据 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
+            {analysis.perfAnalysis.totalDuration && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">总耗时</div>
+                <div className="font-semibold text-sm">{analysis.perfAnalysis.totalDuration}</div>
+              </div>
+            )}
+            {analysis.perfAnalysis.mainTurns != null && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">主 Agent turns</div>
+                <div className="font-semibold text-sm">{analysis.perfAnalysis.mainTurns}</div>
+              </div>
+            )}
+            {analysis.perfAnalysis.subagentSessions != null && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">子代理 sessions</div>
+                <div className="font-semibold text-sm">{analysis.perfAnalysis.subagentSessions}</div>
+              </div>
+            )}
+            {analysis.perfAnalysis.subagentTurns != null && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">子代理 turns</div>
+                <div className="font-semibold text-sm">{analysis.perfAnalysis.subagentTurns}</div>
+              </div>
+            )}
+            {analysis.perfAnalysis.parallelSessions != null && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">并行 sessions</div>
+                <div className="font-semibold text-sm">{analysis.perfAnalysis.parallelSessions}</div>
+              </div>
+            )}
+            {analysis.perfAnalysis.serialRatio != null && (
+              <div className="rounded border p-2">
+                <div className="text-muted-foreground">串行占比</div>
+                <div className={`font-semibold text-sm ${analysis.perfAnalysis.serialRatio >= 0.9 ? "text-red-600" : analysis.perfAnalysis.serialRatio >= 0.5 ? "text-amber-600" : "text-green-600"}`}>
+                  {(analysis.perfAnalysis.serialRatio * 100).toFixed(0)}%
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Top 慢 session */}
+          {analysis.perfAnalysis.topSlowSessions && analysis.perfAnalysis.topSlowSessions.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-semibold text-xs">耗时最长的子代理 session</h4>
+              <div className="space-y-1.5">
+                {analysis.perfAnalysis.topSlowSessions.map((s, i) => (
+                  <div key={i} className="rounded border p-2.5 text-xs space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-semibold text-blue-600 hover:underline cursor-pointer" onClick={() => { const m = s.session.match(/§(\d+)/); if (m && onJumpToTurn) onJumpToTurn(Number(m[1])) }}>{s.session}</span>
+                      <Badge variant="outline" className="text-[10px]">{s.task}</Badge>
+                      <span className="text-muted-foreground">{s.skill}</span>
+                      <span className="font-semibold text-red-600">{(s.durationSec / 60).toFixed(0)}min</span>
+                      {s.turnCount > 0 && <span className="text-muted-foreground">{s.turnCount} turns</span>}
+                      <Badge variant={s.problem === "task-oversized" ? "destructive" : "secondary"} className="text-[10px]">{s.problem}</Badge>
+                    </div>
+                    <div className="text-muted-foreground"><TurnRefText text={s.diagnosis} onJump={onJumpToTurn} /></div>
+                    <div className="text-blue-600">建议: <TurnRefText text={s.suggestion} onJump={onJumpToTurn} /></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 并行化机会 */}
+          {analysis.perfAnalysis.parallelizationOpportunities && analysis.perfAnalysis.parallelizationOpportunities.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-semibold text-xs">并行化机会</h4>
+              <div className="space-y-1.5">
+                {analysis.perfAnalysis.parallelizationOpportunities.map((opp, i) => (
+                  <div key={i} className="rounded border p-2.5 text-xs space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {opp.tasks.map(t => (
+                        <Badge key={t} variant="blue" className="text-[10px]">{t}</Badge>
+                      ))}
+                    </div>
+                    <div className="text-muted-foreground">原因: <TurnRefText text={opp.reason} onJump={onJumpToTurn} /></div>
+                    <div className="text-muted-foreground">现状: <TurnRefText text={opp.currentMode} onJump={onJumpToTurn} /></div>
+                    <div className="text-blue-600">建议: <TurnRefText text={opp.suggestion} onJump={onJumpToTurn} /></div>
+                    <div className="text-green-600 font-semibold">预期: {opp.estimatedSaving}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { importSession } from '@/lib/ingest/data-service';
+import { deltaRefreshSession } from '@/lib/ingest/data-service';
 import { prisma } from '@/lib/db';
 
 export const maxDuration = 300;
@@ -34,23 +34,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No sourcePath stored for this session — cannot refresh' }, { status: 400 });
     }
 
-    const sourceType = session.framework === 'opencode' ? 'opencode-db'
-      : session.framework === 'claude-code' ? 'claude-jsonl'
-      : session.framework;
-
-    const existingTurnCount = await prisma.turn.count({ where: { sessionId: session.id } });
-
-    const result = await importSession(session.sourcePath, taskId, prisma, session.sourcePath, sourceType);
-
-    const newTurnCount = await prisma.turn.count({ where: { sessionId: session.id } });
-    const addedTurns = newTurnCount - existingTurnCount;
+    const result = await deltaRefreshSession(taskId, prisma);
 
     return NextResponse.json({
       success: true,
       sessionId: session.id,
-      newTurnCount: addedTurns,
-      totalTurnCount: newTurnCount,
-      message: addedTurns > 0 ? `刷新完成，新增 ${addedTurns} 轮` : '刷新完成，无新增数据',
+      addedTurns: result.addedTurns,
+      updatedTurns: result.updatedTurns,
+      addedToolCalls: result.addedToolCalls,
+      updatedToolCalls: result.updatedToolCalls,
+      addedSkillEvents: result.addedSkillEvents,
+      message: result.addedTurns > 0
+        ? `增量刷新完成，新增 ${result.addedTurns} 轮，更新 ${result.updatedTurns} 轮`
+        : `增量刷新完成，更新 ${result.updatedTurns} 轮`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

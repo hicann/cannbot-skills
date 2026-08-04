@@ -107,7 +107,10 @@ function parseJsonlLines(filePath: string): ClaudeJsonlLine[] {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     if (!content.trim()) return [];
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = content.split('\n').filter(l => {
+      const t = l.trim();
+      return t && !t.startsWith('//');
+    });
     const result: ClaudeJsonlLine[] = [];
     for (const line of lines) {
       try {
@@ -665,7 +668,7 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
   // Merge them into a single consolidated system turn.
   for (let i = result.length - 1; i >= 0; i--) {
     const r = result[i];
-    if (r.role !== 'system') continue;
+    if (!r || r.role !== 'system') continue;
     const content = r.content ?? '';
     const isSkillInjection = content.includes('Base directory for this skill') ||
       content.includes('<skill-format>') ||
@@ -676,7 +679,7 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
     // Look backward for consecutive system/skill-injection turns to merge
     const mergeGroup: number[] = [i];
     let j = i - 1;
-    while (j >= 0 && result[j].role === 'system') {
+    while (j >= 0 && result[j]?.role === 'system') {
       const prevContent = result[j].content ?? '';
       const prevIsSkill = prevContent.includes('Base directory for this skill') ||
         prevContent.includes('<skill-format>') ||
@@ -708,6 +711,10 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
           result.splice(idx, 1);
         }
       }
+      // Splicing shrank the array; clamp i to the merged turn so the for-loop's
+      // i-- lands on the element just before the group. Without this, i keeps its
+      // pre-splice value, goes out of range, and result[i] is undefined (crash).
+      i = earliestIdx;
     }
   }
 

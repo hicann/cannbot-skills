@@ -9,8 +9,8 @@
 import { describe, it, expect } from 'vitest';
 import { selectInputContextTurns, isLocalCommandNoise, type ContextTurn } from '../src/lib/ingest/input-reconstruct';
 
-function ct(turnIndex: number, role: string, content: string): ContextTurn {
-  return { id: `t${turnIndex}`, turnIndex, role, content, isSubagent: false, subagentSessionId: null };
+function ct(turnIndex: number, role: string, content: string, agentName?: string | null): ContextTurn {
+  return { id: `t${turnIndex}`, turnIndex, role, content, agentName: agentName ?? null, isSubagent: false, subagentSessionId: null };
 }
 
 const CONT = 'This session is being continued from a previous conversation that ran out of context.';
@@ -108,5 +108,71 @@ describe('input-reconstruct — compact-aware LLM input window', () => {
     expect(isLocalCommandNoise('summary mentions <command-name>/x</command-name> in passing')).toBe(false);
     expect(isLocalCommandNoise(null)).toBe(false);
     expect(isLocalCommandNoise('normal user text')).toBe(false);
+  });
+
+  describe('opencode compaction: agent-based detection', () => {
+    it('excludes compaction-boundary and starts window at compaction summary', () => {
+      const turns: ContextTurn[] = [
+        ct(0, 'system', 'system prompt'),
+        ct(1, 'user', 'old question', null),
+        ct(2, 'assistant', 'old answer', null),
+        ct(3, 'assistant', 'old answer 2', null),
+        ct(4, 'user', '/compact', 'compaction-boundary'),
+        ct(5, 'assistant', '## Goal\nCompact summary of conversation', 'compaction'),
+        ct(6, 'user', 'new question after compact', null),
+        ct(7, 'assistant', 'response', null),
+      ];
+      const win = selectInputContextTurns(turns, 7);
+      expect(win.map(t => t.turnIndex)).toEqual([5, 6]);
+      expect(win.find(t => t.agentName === 'compaction-boundary')).toBeUndefined();
+      expect(win.find(t => t.turnIndex === 0)).toBeUndefined();
+      expect(win.find(t => t.turnIndex === 1)).toBeUndefined();
+      expect(win.find(t => t.turnIndex === 2)).toBeUndefined();
+    });
+
+    it('compaction summary turn has no reconstructable prior context', () => {
+      const turns: ContextTurn[] = [
+        ct(0, 'system', 'system prompt'),
+        ct(1, 'user', 'old question', null),
+        ct(2, 'assistant', 'old answer', null),
+        ct(3, 'user', '/compact', 'compaction-boundary'),
+        ct(4, 'assistant', '## Goal\nCompact summary', 'compaction'),
+      ];
+      const win = selectInputContextTurns(turns, 4);
+      expect(win).toEqual([]);
+    });
+
+    it('handles multiple compactions with agent-based boundaries', () => {
+      const turns: ContextTurn[] = [
+        ct(0, 'user', 'q1', null),
+        ct(1, 'assistant', 'a1', null),
+        ct(2, 'user', '/compact', 'compaction-boundary'),
+        ct(3, 'assistant', 'summary 1', 'compaction'),
+        ct(4, 'user', 'q2', null),
+        ct(5, 'assistant', 'a2', null),
+        ct(6, 'user', '/compact (auto)', 'compaction-boundary'),
+        ct(7, 'assistant', 'summary 2', 'compaction'),
+        ct(8, 'user', 'q3', null),
+        ct(9, 'assistant', 'a3', null),
+      ];
+      const win = selectInputContextTurns(turns, 9);
+      expect(win.map(t => t.turnIndex)).toEqual([7, 8]);
+      expect(win.find(t => t.agentName === 'compaction-boundary')).toBeUndefined();
+    });
+
+    it('mixed format: old continuation + new compaction-boundary', () => {
+      const turns: ContextTurn[] = [
+        ct(0, 'user', 'q1', null),
+        ct(1, 'assistant', 'a1', null),
+        ct(2, 'user', CONT, null),
+        ct(3, 'assistant', 'a2 after old compact', null),
+        ct(4, 'user', '/compact', 'compaction-boundary'),
+        ct(5, 'assistant', 'new format summary', 'compaction'),
+        ct(6, 'user', 'q3', null),
+        ct(7, 'assistant', 'a3', null),
+      ];
+      const win = selectInputContextTurns(turns, 7);
+      expect(win.map(t => t.turnIndex)).toEqual([5, 6]);
+    });
   });
 });

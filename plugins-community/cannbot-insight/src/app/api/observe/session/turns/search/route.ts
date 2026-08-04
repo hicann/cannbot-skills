@@ -32,7 +32,7 @@ interface SearchItem {
   subagentSessionId: string | null;
   contentSummary: string | null;
   matchContext: string;
-  matchField: 'content' | 'contentSummary' | 'toolResult' | 'toolError';
+  matchField: 'content' | 'contentSummary' | 'toolResult' | 'toolError' | 'toolArgs';
   toolName?: string;
   createdAt: string;
   hasDispatchBridge: boolean;
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       orderBy: [{ turnIndex: 'asc' }],
       include: {
         toolCalls: {
-          select: { toolCallId: true, toolName: true, dispatchBridgeId: true, resultJson: true, errorMessage: true },
+          select: { toolCallId: true, toolName: true, dispatchBridgeId: true, argsJson: true, resultJson: true, errorMessage: true },
         },
       },
     });
@@ -112,16 +112,21 @@ export async function GET(request: NextRequest) {
       }
 
       for (const tc of t.toolCalls) {
+        const argsLower = (tc.argsJson ?? '').toLowerCase();
         const resultLower = (tc.resultJson ?? '').toLowerCase();
         const errorLower = (tc.errorMessage ?? '').toLowerCase();
+        const argsMatch = argsLower.includes(normalizedKeyword);
         const resultMatch = resultLower.includes(normalizedKeyword);
         const errorMatch = errorLower.includes(normalizedKeyword);
 
-        if (resultMatch || errorMatch) {
+        if (argsMatch || resultMatch || errorMatch) {
           if (seenTurnIds.has(t.id) && items.some(it => it.turnId === t.id && (it.matchField === 'content' || it.matchField === 'contentSummary'))) continue;
           seenTurnIds.add(t.id);
-          const matchText = resultMatch ? tc.resultJson ?? '' : tc.errorMessage ?? '';
-          const field: 'toolResult' | 'toolError' = resultMatch ? 'toolResult' : 'toolError';
+          let matchText = '';
+          let field: 'toolArgs' | 'toolResult' | 'toolError' = 'toolArgs';
+          if (argsMatch) { matchText = tc.argsJson ?? ''; field = 'toolArgs'; }
+          else if (resultMatch) { matchText = tc.resultJson ?? ''; field = 'toolResult'; }
+          else { matchText = tc.errorMessage ?? ''; field = 'toolError'; }
           items.push({
             turnId: t.id,
             turnIndex: t.turnIndex,

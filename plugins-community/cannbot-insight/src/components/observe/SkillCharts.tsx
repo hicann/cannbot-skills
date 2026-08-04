@@ -12,6 +12,8 @@ import stringWidth from "string-width"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { BookOpenIcon } from "lucide-react"
+import { useSkillContent } from "@/components/observe/use-skill-content"
 
 function truncateVisual(str: string, maxWidth: number): string {
   if (stringWidth(str) <= maxWidth) return str
@@ -48,6 +50,7 @@ interface SkillEventItem {
 }
 
 interface SkillChartsProps {
+  taskId?: string
   skillEvents: SkillEventItem[]
 }
 
@@ -188,8 +191,9 @@ function TokenUsageBySkillChart({ skillEvents }: SkillChartsProps) {
   )
 }
 
-function SkillsPerAgentChart({ skillEvents }: SkillChartsProps) {
+function SkillsPerAgentChart({ taskId, skillEvents }: SkillChartsProps) {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
+  const sc = useSkillContent(taskId ?? "")
 
   const data = useMemo(() => {
     const byAgent = new Map<string, Map<string, { calls: number; input: number; output: number; reasoning: number; cacheRead: number }>>()
@@ -278,17 +282,73 @@ function SkillsPerAgentChart({ skillEvents }: SkillChartsProps) {
                       <span className="tabular-nums text-right" style={{ width: 60 }}>Cache</span>
                       <span className="tabular-nums text-right" style={{ width: 60 }}>Total</span>
                     </div>
-                    {agent.skills.map(skill => (
-                      <div key={skill.name} className="flex items-center gap-3 px-2 py-1 rounded">
-                        <span className="text-xs" style={{ minWidth: 160 }}>{truncateVisual(skill.name, 36)}</span>
-                        <span className="text-xs tabular-nums text-muted-foreground text-center" style={{ width: 36 }}>{skill.calls}</span>
-                        <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.input)}</span>
-                        <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.output)}</span>
-                        <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.reasoning)}</span>
-                        <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.cacheRead)}</span>
-                        <span className="text-xs tabular-nums text-right font-medium" style={{ width: 60 }}>{formatTokens(skill.total)}</span>
-                      </div>
-                    ))}
+                    {agent.skills.map(skill => {
+                      const contentData = sc.content.get(skill.name)
+                      const contentError = sc.error.get(skill.name)
+                      const isOpen = !!contentData || !!contentError
+                      return (
+                        <div key={skill.name} className="space-y-0.5">
+                          <div className="flex items-center gap-3 px-2 py-1 rounded">
+                            <span className="text-xs truncate" style={{ minWidth: 160, maxWidth: 160 }}>{truncateVisual(skill.name, 36)}</span>
+                            <span className="text-xs tabular-nums text-muted-foreground text-center" style={{ width: 36 }}>{skill.calls}</span>
+                            <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.input)}</span>
+                            <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.output)}</span>
+                            <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.reasoning)}</span>
+                            <span className="text-xs tabular-nums text-right" style={{ width: 60 }}>{formatTokens(skill.cacheRead)}</span>
+                            <span className="text-xs tabular-nums text-right font-medium" style={{ width: 60 }}>{formatTokens(skill.total)}</span>
+                            <span
+                              role="button"
+                              title="查看 SKILL.md 全文"
+                              className={`ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-colors shrink-0 ${
+                                isOpen
+                                  ? "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
+                                  : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
+                              }`}
+                              onClick={() => {
+                                if (isOpen) sc.clear(skill.name)
+                                else if (!sc.loading.has(skill.name)) sc.fetchOne(skill.name)
+                              }}
+                            >
+                              <BookOpenIcon className="size-2.5" />
+                              {sc.loading.has(skill.name) ? "…" : isOpen ? "收起" : "全文"}
+                            </span>
+                          </div>
+                          {isOpen && (
+                            <div className="ml-2 mr-2 mb-1 p-2 border rounded-md border-teal-400/30 bg-teal-500/5 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-teal-600 dark:text-teal-400">
+                                  <BookOpenIcon className="size-3" />
+                                  {skill.name} · SKILL.md
+                                  {contentData?.source && (
+                                    <span className="text-muted-foreground">
+                                      （{contentData.source === "skill-tool" ? "Skill 工具注入" : "Read 读取"}，{contentData.length} 字符）
+                                    </span>
+                                  )}
+                                </span>
+                                {contentData?.content && (
+                                  <span
+                                    role="button"
+                                    className="text-[11px] font-medium text-blue-500 cursor-pointer hover:underline"
+                                    onClick={() => sc.download(skill.name)}
+                                  >
+                                    Download
+                                  </span>
+                                )}
+                              </div>
+                              {contentError ? (
+                                <div className="text-[11px] text-destructive">Error: {contentError}</div>
+                              ) : contentData?.content ? (
+                                <pre className="max-h-72 overflow-auto rounded border bg-background p-2 text-[11px] font-mono whitespace-pre-wrap break-words">
+                                  {contentData.content}
+                                </pre>
+                              ) : (
+                                <div className="text-[11px] text-muted-foreground">未采集到该 skill 的 SKILL.md 内容。</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -363,7 +423,7 @@ function FailedSkillsChart({ skillEvents }: SkillChartsProps) {
   )
 }
 
-export function SkillCharts({ skillEvents }: SkillChartsProps) {
+export function SkillCharts({ taskId, skillEvents }: SkillChartsProps) {
   if (skillEvents.length === 0) {
     return (
       <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
@@ -376,7 +436,7 @@ export function SkillCharts({ skillEvents }: SkillChartsProps) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <TokenUsageBySkillChart skillEvents={skillEvents} />
-        <SkillsPerAgentChart skillEvents={skillEvents} />
+        <SkillsPerAgentChart taskId={taskId} skillEvents={skillEvents} />
       </div>
       <FailedSkillsChart skillEvents={skillEvents} />
     </div>

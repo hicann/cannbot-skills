@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { summarizeToolCallErrors, type ErrorSummary } from "@/lib/tool-call-errors"
 
 interface TurnRowItem {
   turnId: string
@@ -31,8 +32,8 @@ interface TurnRowItem {
   createdAt: string | null
   completedAt: string | null
   model: string | null
-  toolCalls: Array<{ toolCallId: string; toolName: string; state: string; durationMs: number }>
-  skillEvents: Array<{ skillName: string; eventType: string; success: boolean }>
+  toolCalls: Array<{ toolCallId: string; toolName: string; argsJson?: string | null; resultJson?: string | null; state: string; errorType?: string | null; errorMessage?: string | null; durationMs: number }>
+  skillEvents: Array<{ skillName: string; eventType: string; success: boolean; errorMessage?: string | null }>
 }
 
 interface BridgeItem {
@@ -64,7 +65,7 @@ interface SearchResultItem {
   subagentSessionId: string | null
   contentSummary: string | null
   matchContext: string
-  matchField: "content" | "contentSummary" | "toolResult" | "toolError"
+  matchField: "content" | "contentSummary" | "toolResult" | "toolError" | "toolArgs"
   toolName?: string
   createdAt: string
   hasDispatchBridge: boolean
@@ -129,6 +130,17 @@ function classifyTurnSource(item: SearchResultItem): SourceType {
   if (item.role === "assistant" && item.hasDispatchBridge) return "root_agent_dispatch"
   if (item.role === "assistant") return "model_output"
   return "model_output"
+}
+
+function ErrorBadges({ errors }: { errors: ErrorSummary }) {
+  if (errors.total === 0) return null
+  return (
+    <>
+      {errors.cancelled > 0 && <Badge variant="orange" className="text-xs">{errors.cancelled} cancelled</Badge>}
+      {errors.failed > 0 && <Badge variant="red" className="text-xs">{errors.failed} failed</Badge>}
+      {errors.skillFail > 0 && <Badge variant="red" className="text-xs">{errors.skillFail} skill_fail</Badge>}
+    </>
+  )
 }
 
 function inferMedium(prevItem: SearchResultItem, currItem: SearchResultItem): PropagationMedium {
@@ -212,7 +224,43 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
     })
   }, [searchResults, bridgeByDispatchTurnId, bridges])
 
-  const sourceDistribution = useMemo(() => {
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
+
+  const turnById = useMemo(() => {
+    const map = new Map<string, TurnRowItem>()
+    for (const t of turns) map.set(t.turnId, t)
+    return map
+  }, [turns])
+
+  const errorsByTurnId = useMemo(() => {
+    const map = new Map<string, ErrorSummary>()
+    for (const t of turns) map.set(t.turnId, summarizeToolCallErrors(t.toolCalls, t.skillEvents))
+    return map
+  }, [turns])
+
+  const toolsByTurnId = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    for (const t of turns) {
+      const set = new Set<string>()
+      for (const tc of t.toolCalls) set.add(tc.toolName.toLowerCase())
+      map.set(t.turnId, set)
+    }
+    return map
+  }, [turns])
+
+  const toolFilterStats = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const r of classifiedResults) {
+      const tools = toolsByTurnId.get(r.turnId)
+      if (!tools) continue
+      for (const tn of tools) counts.set(tn, (counts.get(tn) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [classifiedResults, toolsByTurnId])
+
+  const sourceStats = useMemo(() => {
     const dist: Record<SourceType, number> = {
       user_input: 0, model_output: 0, tool_output: 0,
       root_agent_dispatch: 0, subagent_output: 0, bridge_response: 0,
@@ -223,18 +271,43 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
     return dist
   }, [classifiedResults])
 
+  const thinkingCount = useMemo(() => {
+    let n = 0
+    for (const r of classifiedResults) {
+      const t = turnById.get(r.turnId)
+      if (t && t.reasoningTokens > 0) n++
+    }
+    return n
+  }, [classifiedResults, turnById])
+
+  const filteredResults = useMemo(() => {
+    if (!activeFilter) return classifiedResults
+    if (activeFilter === "thinking") {
+      return classifiedResults.filter(r => (turnById.get(r.turnId)?.reasoningTokens ?? 0) > 0)
+    }
+    if (activeFilter.startsWith("tool:")) {
+      const tool = activeFilter.slice(5)
+      return classifiedResults.filter(r => toolsByTurnId.get(r.turnId)?.has(tool))
+    }
+    if (activeFilter.startsWith("src:")) {
+      const src = activeFilter.slice(4) as SourceType
+      return classifiedResults.filter(r => r.sourceType === src)
+    }
+    return classifiedResults
+  }, [classifiedResults, activeFilter, turnById, toolsByTurnId])
+
   const propagationChain = useMemo(() => {
-    if (classifiedResults.length === 0) return []
+    if (filteredResults.length === 0) return []
     const chain: Array<{
       item: SearchResultItem & { sourceType: SourceType; bridgeId: string | null }
       medium: PropagationMedium | null
     }> = []
-    for (let i = 0; i < classifiedResults.length; i++) {
-      const medium = i === 0 ? null : inferMedium(classifiedResults[i - 1], classifiedResults[i])
-      chain.push({ item: classifiedResults[i], medium })
+    for (let i = 0; i < filteredResults.length; i++) {
+      const medium = i === 0 ? null : inferMedium(filteredResults[i - 1], filteredResults[i])
+      chain.push({ item: filteredResults[i], medium })
     }
     return chain
-  }, [classifiedResults, bridges])
+  }, [filteredResults, bridges])
 
   function toggleExpanded(turnId: string) {
     setExpandedTurns(prev => {
@@ -367,18 +440,77 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
           <div className="shrink-0 px-3 py-2 border-b">
             <div className="flex items-center gap-2 mb-1.5">
               <span className="text-sm font-medium">搜索: &quot;{lastKeyword}&quot;</span>
-              <Badge variant="blue">{classifiedResults.length} 命中</Badge>
-            </div>
-            <div className="flex gap-1.5 items-center mb-1.5">
-              {Object.entries(sourceDistribution).filter(([, count]) => count > 0).map(([type, count]) => {
-                const cfg = SOURCE_TYPE_CONFIG[type as SourceType]
+              <Badge variant="blue">{filteredResults.length} 命中</Badge>
+              {activeFilter && (
+                <span className="text-xs text-muted-foreground">/ 共 {classifiedResults.length}</span>
+              )}
+              {activeFilter && (() => {
+                let label = activeFilter
+                if (activeFilter === "thinking") label = "🧠 thinking"
+                else if (activeFilter.startsWith("src:")) {
+                  const cfg = SOURCE_TYPE_CONFIG[activeFilter.slice(4) as SourceType]
+                  label = `${cfg.icon} ${cfg.label}`
+                } else if (activeFilter.startsWith("tool:")) {
+                  label = `🔧 ${activeFilter.slice(5)}`
+                }
                 return (
-                  <Badge key={type} variant={cfg.badgeVariant} className="text-xs">
-                    {cfg.icon} {cfg.label}: {count}
-                  </Badge>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="text-xs px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/30 flex items-center gap-1 cursor-pointer hover:bg-primary/20 transition-colors"
+                    onClick={() => setActiveFilter(null)}
+                    onKeyDown={(e) => { if (e.key === "Enter") setActiveFilter(null) }}
+                    title="点击清除过滤"
+                  >
+                    已过滤: {label}
+                    <span className="text-[10px] leading-none">✕</span>
+                  </span>
                 )
-              })}
+              })()}
             </div>
+            {(() => {
+              const chip = "text-xs px-1.5 py-0.5 rounded border cursor-pointer transition-colors select-none"
+              const off = "border-border bg-transparent hover:bg-accent text-muted-foreground"
+              const on = "bg-primary/10 text-primary border-primary/50 font-medium"
+              const toggle = (key: string) => setActiveFilter(prev => prev === key ? null : key)
+              const keyHandler = (key: string) => (e: React.KeyboardEvent) => { if (e.key === "Enter") toggle(key) }
+              return (
+                <>
+                  <div className="flex gap-1.5 items-center flex-wrap mb-1.5">
+                    <span className="text-xs text-muted-foreground shrink-0 w-14">source:</span>
+                    <span role="button" tabIndex={0} className={cn(chip, !activeFilter ? on : off)} onClick={() => setActiveFilter(null)} onKeyDown={keyHandler("__all__")}>全部</span>
+                    {Object.entries(sourceStats).filter(([, count]) => count > 0).map(([type, count]) => {
+                      const cfg = SOURCE_TYPE_CONFIG[type as SourceType]
+                      const key = `src:${type}`
+                      return (
+                        <span key={type} role="button" tabIndex={0} className={cn(chip, off, activeFilter === key && on)} onClick={() => toggle(key)} onKeyDown={keyHandler(key)}>
+                          {cfg.icon} {cfg.label} {count}
+                        </span>
+                      )
+                    })}
+                    {thinkingCount > 0 && (
+                      <span role="button" tabIndex={0} className={cn(chip, off, activeFilter === "thinking" && on)} onClick={() => toggle("thinking")} onKeyDown={keyHandler("thinking")}>
+                        🧠 thinking {thinkingCount}
+                      </span>
+                    )}
+                  </div>
+                  {toolFilterStats.length > 0 && (
+                    <div className="flex gap-1.5 items-center flex-wrap mb-1.5">
+                      <span className="text-xs text-muted-foreground shrink-0 w-14">tools:</span>
+                      <span role="button" tabIndex={0} className={cn(chip, !activeFilter ? on : off)} onClick={() => setActiveFilter(null)} onKeyDown={keyHandler("__all__")}>全部</span>
+                      {toolFilterStats.map(t => {
+                        const key = `tool:${t.name}`
+                        return (
+                          <span key={t.name} role="button" tabIndex={0} className={cn(chip, off, activeFilter === key && on)} onClick={() => toggle(key)} onKeyDown={keyHandler(key)}>
+                            {t.name} {t.count}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
             <div className="flex gap-1">
               {(["chain", "list", "graph"] as ViewMode[]).map(mode => (
                 <Button
@@ -395,21 +527,28 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
-            {viewMode === "chain" && <PropagationChainView
+            {filteredResults.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                当前过滤条件下无命中（{activeFilter} 在搜索结果中未出现）
+              </p>
+            )}
+            {filteredResults.length > 0 && viewMode === "chain" && <PropagationChainView
               chain={propagationChain}
               keyword={lastKeyword}
               expandedTurns={expandedTurns}
               onToggleExpanded={toggleExpanded}
               onViewTurn={(turnId) => navigateToTab("turns", turnId)}
               onViewBridge={(bridgeId) => navigateToTab("interactions", null, bridgeId)}
+              errorsByTurnId={errorsByTurnId}
             />}
-            {viewMode === "list" && <ListView
-              results={classifiedResults}
+            {filteredResults.length > 0 && viewMode === "list" && <ListView
+              results={filteredResults}
               keyword={lastKeyword}
               onViewTurn={(turnId) => navigateToTab("turns", turnId)}
               onViewBridge={(bridgeId) => navigateToTab("interactions", null, bridgeId)}
+              errorsByTurnId={errorsByTurnId}
             />}
-            {viewMode === "graph" && <DAGGraphView
+            {filteredResults.length > 0 && viewMode === "graph" && <DAGGraphView
               chain={propagationChain}
               keyword={lastKeyword}
               onViewTurn={(turnId) => navigateToTab("turns", turnId)}
@@ -426,16 +565,18 @@ interface PropagationChainViewItem {
   medium: PropagationMedium | null
 }
 
-function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded, onViewTurn, onViewBridge }: {
+function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded, onViewTurn, onViewBridge, errorsByTurnId }: {
   chain: PropagationChainViewItem[]
   keyword: string
   expandedTurns: Set<string>
   onToggleExpanded: (turnId: string) => void
   onViewTurn: (turnId: string) => void
   onViewBridge: (bridgeId: string | null) => void
+  errorsByTurnId: Map<string, ErrorSummary>
 }) {
   const origin = chain[0]
   const originCfg = SOURCE_TYPE_CONFIG[origin.item.sourceType]
+  const originErrors = errorsByTurnId.get(origin.item.turnId)
 
   return (
     <div className="space-y-0">
@@ -450,6 +591,8 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
             )}
           {origin.item.matchField === "toolResult" && <Badge variant="purple" className="text-xs">🔧 工具结果</Badge>}
           {origin.item.matchField === "toolError" && <Badge variant="red" className="text-xs">❌ 工具错误</Badge>}
+          {origin.item.matchField === "toolArgs" && <Badge variant="purple" className="text-xs">🔧 工具参数</Badge>}
+          {originErrors && <ErrorBadges errors={originErrors} />}
           <span className="text-xs text-muted-foreground">{formatTimestamp(origin.item.createdAt)}</span>
           </div>
           <p className="text-xs text-foreground/80 line-clamp-2">
@@ -473,6 +616,7 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
         const medCfg = medium ? MEDIUM_CONFIG[medium] : null
         const isExpanded = expandedTurns.has(item.turnId)
         const borderColor = SOURCE_BORDER_COLORS[item.sourceType]
+        const itemErrors = errorsByTurnId.get(item.turnId)
 
         return (
           <div key={`${item.turnId}-${i}`}>
@@ -496,6 +640,8 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
                 )}
                 {item.matchField === "toolResult" && <Badge variant="purple" className="text-xs">🔧 {item.toolName ?? "工具结果"}</Badge>}
                 {item.matchField === "toolError" && <Badge variant="red" className="text-xs">❌ {item.toolName ?? "工具错误"}</Badge>}
+                {item.matchField === "toolArgs" && <Badge variant="purple" className="text-xs">🔧 {item.toolName ?? "工具参数"}</Badge>}
+                {itemErrors && <ErrorBadges errors={itemErrors} />}
                 <span className="text-xs text-muted-foreground">{formatTimestamp(item.createdAt)}</span>
               </div>
 
@@ -523,23 +669,26 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
   )
 }
 
-function ListView({ results, keyword, onViewTurn, onViewBridge }: {
+function ListView({ results, keyword, onViewTurn, onViewBridge, errorsByTurnId }: {
   results: Array<SearchResultItem & { sourceType: SourceType; bridgeId: string | null }>
   keyword: string
   onViewTurn: (turnId: string) => void
   onViewBridge: (bridgeId: string | null) => void
+  errorsByTurnId: Map<string, ErrorSummary>
 }) {
   return (
     <div className="space-y-1">
-      {results.map(item => {
+      {results.map((item, i) => {
         const cfg = SOURCE_TYPE_CONFIG[item.sourceType]
+        const errs = errorsByTurnId.get(item.turnId)
         return (
-          <div key={item.turnId} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border hover:bg-accent/30 transition-colors">
+          <div key={`${item.turnId}-${i}`} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border hover:bg-accent/30 transition-colors">
             <span className="text-xs font-mono text-muted-foreground shrink-0 w-8">#{item.turnIndex}</span>
             <Badge variant={cfg.badgeVariant} className="text-xs shrink-0">{cfg.icon}</Badge>
             <span className="text-xs text-muted-foreground shrink-0">
               {item.agentName === "build" ? "root" : item.agentName ?? "?"}
             </span>
+            {errs && <ErrorBadges errors={errs} />}
             <span className="text-xs text-muted-foreground shrink-0">{formatTimestamp(item.createdAt)}</span>
             <p className="text-xs text-foreground/80 truncate flex-1 min-w-0">
               {highlightKeyword(item.matchContext, keyword)}
@@ -662,7 +811,7 @@ function DAGGraphView({ chain, keyword, onViewTurn }: {
         const isCrossColumn = prevNode && prevX !== x
 
         return (
-          <g key={node.turnId}>
+          <g key={`${node.turnId}-${i}`}>
             {prevNode && (
               <line
                 x1={prevX}

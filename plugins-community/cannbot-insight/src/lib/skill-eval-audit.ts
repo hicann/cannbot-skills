@@ -1,0 +1,304 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+import type { PrismaClient } from "@prisma/client";
+import { extractSkillNameFromArgs } from "@/lib/skill-event-grouping";
+
+/**
+ * skill-eval 对账桥接：从 insight 的 session 里恢复某 skill 的 SKILL.md 正文，
+ * 物化成临时 skill 目录，shell out 调 `skill-eval audit`，读回 audit-report.json。
+ *
+ * 每个 skill 的完整正文存在 invoke 类 ToolCall 的 resultJson 里，以
+ * `<skill_content name="…">…</skill_content>` 包裹（见 skill-event-grouping.ts 的 invokeTc）。
+ */
+
+const SKILL_CONTENT_RE = /<skill_content[^>]*>([\s\S]*?)<\/skill_content>/;
+
+/** skill 工具调用里能带 <skill_content> 正文的 toolName（小写）。 */
+const SKILL_INVOKE_TOOLS = new Set(["skill", "skill/invoke", "skill/use"]);
+
+/**
+ * 从一段文本里剥出 `<skill_content>…</skill_content>` 内部的正文（trim）。
+ * 没有外壳 / 空输入 → null。audit 期望的是纯 SKILL.md markdown，不要外壳。
+ */
+export function stripSkillContent(resultJson: string | null | undefined): string | null {
+  if (!resultJson) return null;
+  const m = resultJson.match(SKILL_CONTENT_RE);
+  return m ? m[1].trim() : null;
+}
+
+/** 一个 ToolCall 是不是"带正文的 skill invoke 调用"（区别于 task/agent dispatch）。 */
+export function isSkillInvokeToolCall(toolName: string | null | undefined): boolean {
+  return !!toolName && SKILL_INVOKE_TOOLS.has(toolName.toLowerCase());
+}
+
+/**
+ * audit 调用参数（不含二进制名 `skill-eval`，由调用方加）。skill 目录作位置参。
+ *
+ * `--kind skill` 始终带:本路(--db)是 per-skill 对账(只传一个 skill 的 SKILL.md)。不带它,
+ * skill-eval 会拿本 skill 的指令去对账整条 session(含别的 skill 跑的 turn)→ 误判。skill-eval
+ * 靠传入 SKILL.md 的 name + --kind skill 切出本 skill 被 Skill 调用期间的段,只对账这些段
+ * (audit.py;skill 未被调用过 → exit 2,而此处正文必来自一次 invoke,不会触发)。
+ */
+export function buildAuditArgs(opts: {
+  skillDir: string;
+  dbPath: string;
+  sessionId: string;
+  outputDir: string;
+  kind?: "skill" | "agent" | "root";
+}): string[] {
+  return [
+    "audit",
+    opts.skillDir,
+    "--db",
+    opts.dbPath,
+    "--session",
+    opts.sessionId,
+    "-o",
+    opts.outputDir,
+    "--kind",
+    opts.kind ?? "skill",
+  ];
+}
+
+/**
+ * `--transcript` 路的参数(cannbot-insight / claude-code framework 用):
+ * 把 session 序列化成结构化 records JSON 喂 skill-eval,绕开 `--db` 的 opencode-native 限制。
+ * `kind` 必带:skill=按 Skill 调用切(skill 对账)、agent=按 agent 归属切(被 dispatch 的 agent 对账)。
+ */
+export function buildTranscriptArgs(opts: {
+  skillDir: string;
+  transcriptPath: string;
+  outputDir: string;
+  kind: "skill" | "agent" | "root";
+}): string[] {
+  return ["audit", opts.skillDir, "--transcript", opts.transcriptPath, "-o", opts.outputDir, "--kind", opts.kind];
+}
+
+/**
+ * 一个声明单元在 session 里以哪些「面」出现 → 该跑哪些 kind 的对账。
+ *
+ * Skills tab 每行按 events 的 eventType 路由对账按钮:
+ *   - invoke / use 事件 → skill 面(Skill 调用锚点,正文从 session 的 resultJson 恢复)
+ *   - dispatch 事件 → agent 面(被 dispatch 的子 agent,.md 声明从 AGENTS_ROOT 读)
+ *
+ * 注:**主 agent 的 workflow 对账（root 面）不在此派生**——主 agent 通常不 invoke skill
+ * （只 dispatch 子 agent），其 workflow skill 声明是 session 首条 user turn 的注入系统
+ * 提示（见 audit-skilleval 路由 kind=root + recoverMainAgentWorkflowBody）。root 目标由
+ * SkillAuditTab / SkillDetail 按 turn0 长度阈值合成添加，不靠 skillEvents 的 eventType。
+ *
+ * dispatch-only 行(如 developer)原来也挂 skill 对账按钮,但无 invoke 事件 → recoverSkillBody
+ * 返回 null → 必 404。路由到 agent 对账才对。dual-nature(同既 invoke 又 dispatch,如 st-verifier)
+ * 两面都返,UI 出两个按钮各审各的(与 skill-eval 的 kind 分路一致——同名 skill 声明 ≠ agent 声明)。
+ *
+ * 输入只读 eventType,与 SkillEventItem 结构兼容(鸭子类型);未知 eventType → 不计入任何面。
+ */
+export function auditKindsForEvents(
+  events: { eventType: string }[],
+): ("skill" | "agent")[] {
+  const kinds: ("skill" | "agent")[] = []
+  if (events.some((e) => e.eventType === "invoke" || e.eventType === "use")) kinds.push("skill")
+  if (events.some((e) => e.eventType === "dispatch")) kinds.push("agent")
+  return kinds
+}
+
+/**
+ * In-flight 去重:同 key 的请求在飞时,复用已有 promise、不再调 fetcher。
+ *
+ * SkillEvalAuditDialog 的 audit POST 在 useEffect 里,dev 下 remount(HMR / Fast Refresh 回退
+ * 全页刷新)会重跑 effect → 不去重就再发一次 POST。而服务端 execFileSync 不可中止、单跑可达
+ * 30 分钟 → 多轮堆叠抢 LLM 端点 → 限流失败(实测 opdef-developer:两轮重叠 2 分钟,先起的被
+ * 529 杀)。去重让重发复用在飞的 promise,从根上杜绝堆叠。settle(resolve/reject)后清条目,
+ * 下次 open 重跑无妨(已有结果不再缓存,允许用户重审)。
+ *
+ * cache 入参可注入(便于测);生产由调用方传模块级单例。泛型 T = 请求结果类型。
+ */
+export function getInflightAudit<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  cache: Map<string, Promise<T>>,
+): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const p = fetcher().finally(() => {
+    cache.delete(key);
+  });
+  cache.set(key, p);
+  return p;
+}
+
+/** 安全解析 ToolCall.argsJson(JSON 字符串)→ 对象；坏 / 空 → {}。 */
+function parseArgs(argsJson: string | null | undefined): Record<string, unknown> {
+  if (!argsJson) return {};
+  try {
+    return JSON.parse(argsJson) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 把 insight 的 session(Turn + ToolCall)序列化成 skill-eval 结构化 records JSON：
+ * `{format:"skill-eval-records", records:[{role, text?, agent?, parent_tool_use_id, tool_calls?}]}`。
+ * skill-eval 收到后展开成 cc 记录、按 skill 切段对账（见 skill-eval evals/structured.py）。
+ *
+ * scope-aware:子 agent turn 的 parent_tool_use_id = subagentSessionId(缺则 parentExecutionId),
+ * 主 turn 恒 null。skill-eval 切片器(slice.py _scope_of)据此归作用域——子 agent 里跑的 skill 段
+ * 不再被主 scope 的 last-invoked-owns 污染(主 scope 噪声混进段)。无需合成 Agent tool_use:零嵌套
+ * 数据下 parent_tool_use_id 直接归段即正确(slice.py 的 depth-1 closure 在无 Agent tool_use 时是
+ * no-op,归段只靠 parent_tool_use_id)。turn 按 turnIndex 升序;turn 内 tool_calls 按 createdAt 升序。
+ */
+export async function buildStructuredRecords(
+  sessionId: string,
+  prisma: PrismaClient,
+): Promise<{ format: string; records: unknown[] }> {
+  const turns = await prisma.turn.findMany({
+    where: { sessionId },
+    orderBy: { turnIndex: "asc" },
+  });
+  if (turns.length === 0) return { format: "skill-eval-records", records: [] };
+
+  const turnIds = turns.map((t) => t.id);
+  const toolCalls = await prisma.toolCall.findMany({
+    where: { turnId: { in: turnIds } },
+    orderBy: { createdAt: "asc" },
+  });
+  const byTurn = new Map<string, typeof toolCalls>();
+  for (const tc of toolCalls) {
+    const arr = byTurn.get(tc.turnId) ?? [];
+    arr.push(tc);
+    byTurn.set(tc.turnId, arr);
+  }
+
+  const records = turns.map((t) => {
+    const rec: Record<string, unknown> = {
+      role: t.role,
+      // 子 agent turn → subagentSessionId 归独立 scope(缺则 parentExecutionId 兜底);主 turn → null
+      // (主 scope)。skill-eval 切片器按此归段,隔离子 agent 的 skill 执行、免主 scope 噪声污染。
+      parent_tool_use_id: t.isSubagent ? (t.subagentSessionId || t.parentExecutionId || null) : null,
+    };
+    if (t.content) rec.text = t.content;
+    if (t.agentName) rec.agent = t.agentName;
+    const tcs = byTurn.get(t.id) ?? [];
+    if (tcs.length > 0) {
+      // **不带 result**(`tc.resultJson`):audit 判定只读 user_turns(scene)+ tool 输入
+      // (input → tool_trace)+ assistant 文本(transcript_text),**工具结果对 verdict 零贡献**
+      // (见 skill-eval audit/auditor.py:rebuild 只取这三项;derive_declarations 只读
+      // input_files 的 path,而 path 来自 Read 的 file_path 输入、不靠 result)。真实 session
+      // 的 resultJson 常达 10MB+(Read 整文件 / skill 正文 / 大输出),回传它会让 --transcript
+      // 的 session.json 撑到 20MB+,序列化 / 落盘 / skill-eval 解析全慢——纯死重量,砍之。
+      // skill-eval 结构化 reader 对缺 result 的 tool_call 本就容错(不产 tool_result 块)。
+      rec.tool_calls = tcs.map((tc) => ({
+        name: tc.toolName,
+        input: parseArgs(tc.argsJson),
+      }));
+    }
+    return rec;
+  });
+  return { format: "skill-eval-records", records };
+}
+
+/** 主 agent workflow 对账目标的合成名（Skills / Audit skill 子 tab 用；root 的 skillName 无意义，仅作 key + 显示）。 */
+export const MAIN_AGENT_WORKFLOW_NAME = "主 agent workflow";
+
+/** 主 agent workflow 声明的最小长度（首条 user turn 内容达此才视为注入的 workflow skill 正文）。 */
+export const MAIN_AGENT_WORKFLOW_MIN_LEN = 500;
+
+/**
+ * 恢复主 agent 的 workflow 声明正文：取 session **首条 user turn**（isSubagent=false、
+ * role=user、turnIndex 最小）的 content。opencode/cannbot-insight 里主 agent 配置的
+ * workflow skill 会被注入成首条 user 消息（系统提示），主 agent 通常不 invoke skill
+ * （只 dispatch 子 agent）→ 其 workflow 声明只能从 turn0 取，不在 skillEvents。
+ *
+ * 内容过短（< MAIN_AGENT_WORKFLOW_MIN_LEN）→ null（视为普通短用户查询，非 workflow 声明）。
+ * 找不到 user turn → null。
+ */
+export async function recoverMainAgentWorkflowBody(
+  sessionId: string,
+  prisma: PrismaClient,
+): Promise<string | null> {
+  const t = await prisma.turn.findFirst({
+    where: { sessionId, role: "user", isSubagent: false },
+    orderBy: { turnIndex: "asc" },
+  });
+  if (!t?.content) return null;
+  return t.content.length >= MAIN_AGENT_WORKFLOW_MIN_LEN ? t.content : null;
+}
+
+/**
+ * 按 session + skillName 恢复该 skill 的纯 SKILL.md 正文：
+ * 找该 session 内这个 skill 的 invoke SkillEvent → 同 turn 里按 argsJson.name 匹配的
+ * skill ToolCall → 从 resultJson 剥 <skill_content>。
+ * 找不到 / 无正文 → null。
+ */
+export async function recoverSkillBody(
+  sessionId: string,
+  skillName: string,
+  prisma: PrismaClient,
+): Promise<string | null> {
+  const se = await prisma.skillEvent.findFirst({
+    where: { skillName, eventType: "invoke", turn: { sessionId } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!se) return null;
+
+  const tcs = await prisma.toolCall.findMany({
+    where: { turnId: se.turnId, isSkillRelated: true },
+  });
+  const candidates = tcs.filter((tc) => isSkillInvokeToolCall(tc.toolName));
+  const byName = candidates.find((tc) => extractSkillNameFromArgs(tc.argsJson) === skillName);
+  const tc = byName ?? candidates[0];
+  if (!tc?.resultJson) return null;
+
+  return stripSkillContent(tc.resultJson);
+}
+
+/**
+ * Skill audit 板块的 target 列表：从 session 已有的 skillEvents 派生本 session 所有可对账的
+ * 声明单元，同名合并。每行按 events 的 eventType 路由对账面：
+ *
+ * - skill 面：eventType=invoke/use → skill 对账（正文从 session 的 resultJson 恢复）
+ * - agent 面：eventType=dispatch → agent 对账（.md 声明从 AGENTS_SCAN_ROOT 本地扫描，
+ *   见 audit-agenteval 路由 + agent-md-scan.ts）
+ *
+ * 注：root 面（主 agent workflow 对账）**不在此派生**——主 agent 通常只 dispatch、不 invoke
+ * skill，其 workflow 声明是 session 首条 user turn 的注入系统提示。root 目标由 SkillAuditTab /
+ * SkillDetail 按 turn0 长度阈值合成添加（见 audit-skilleval kind=root +
+ * recoverMainAgentWorkflowBody）。
+ *
+ * dual-nature（同既 invoke 又 dispatch，如 st-verifier）两面都返，UI 出多个条目各审各的
+ * （与 skill-eval 的 kind 分路一致——同名 skill 声明 ≠ agent 声明）。
+ *
+ * 输入是 page.tsx 已加载的内存数据（不查 DB），鸭子类型兼容 SkillEventForDetail。
+ */
+export interface AuditableTarget {
+  name: string;
+  kinds: ("skill" | "agent" | "root")[];
+  skillEventCount: number;
+}
+
+export function deriveAuditableTargets(
+  skillEvents: { skillName: string; eventType: string }[],
+): AuditableTarget[] {
+  const byName = new Map<string, { skillEvents: { eventType: string }[] }>();
+  for (const se of skillEvents) {
+    const name = se.skillName;
+    if (!name) continue;
+    const entry = byName.get(name) ?? { skillEvents: [] };
+    entry.skillEvents.push(se);
+    byName.set(name, entry);
+  }
+  const targets: AuditableTarget[] = [];
+  for (const [name, e] of byName) {
+    const kinds = auditKindsForEvents(e.skillEvents);
+    if (kinds.length === 0) continue;
+    targets.push({ name, kinds, skillEventCount: e.skillEvents.length });
+  }
+  targets.sort((a, b) => a.name.localeCompare(b.name));
+  return targets;
+}

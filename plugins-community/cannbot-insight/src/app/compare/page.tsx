@@ -79,14 +79,16 @@ export default function ComparePage() {
 
 function Loading() {
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <main className="flex w-full max-w-7xl flex-col gap-6 px-6 py-8 mx-auto">
+    <div className="flex h-screen flex-col bg-background">
+      <div className="shrink-0 border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Session Compare</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Session Compare</h1>
           <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
         </div>
+      </div>
+      <div className="flex-1 min-h-0 px-4 py-6 overflow-y-auto">
         <p className="text-muted-foreground">Loading...</p>
-      </main>
+      </div>
     </div>
   )
 }
@@ -97,7 +99,6 @@ function ComparePageContent() {
   const idsParam = searchParams.get("ids") ?? ""
   const [activeTab, setActiveTab] = useState<Tab>("overview")
 
-  // ids=sessionId1,sessionId2 (unique cuid) or sessions=taskId1,taskId2 (legacy)
   const parsedIds = useMemo(() => {
     if (idsParam) return idsParam.split(",").filter(Boolean)
     return sessionsParam.split(",").filter(Boolean)
@@ -158,8 +159,8 @@ function ComparePageContent() {
         const qA = sessionA ? `taskId=${encodeURIComponent(sessionA.taskId)}&framework=${encodeURIComponent(sessionA.framework ?? 'unknown')}` : `taskId=${parsedIds[0]}`
         const qB = sessionB ? `taskId=${encodeURIComponent(sessionB.taskId)}&framework=${encodeURIComponent(sessionB.framework ?? 'unknown')}` : `taskId=${parsedIds[1]}`
         const [turnsResA, turnsResB] = await Promise.all([
-          fetch(`/api/observe/session/turns?${qA}&includeContent=true`),
-          fetch(`/api/observe/session/turns?${qB}&includeContent=true`),
+          fetch(`/api/observe/session/turns?${qA}&includeContent=true&skipOverhead=true&maxContentLen=0`),
+          fetch(`/api/observe/session/turns?${qB}&includeContent=true&skipOverhead=true&maxContentLen=0`),
         ])
 
         if (!turnsResA.ok || !turnsResB.ok) {
@@ -194,31 +195,35 @@ function ComparePageContent() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
-        <main className="flex w-full max-w-7xl flex-col gap-6 px-6 py-8 mx-auto">
+      <div className="flex h-screen flex-col bg-background">
+        <div className="shrink-0 border-b px-4 py-3">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Session Compare</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Session Compare</h1>
             <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
           </div>
+        </div>
+        <div className="flex-1 min-h-0 px-4 py-6 overflow-y-auto">
           <p className="text-muted-foreground">Loading...</p>
-        </main>
+        </div>
       </div>
     )
   }
 
   if (error || !sessionA || !sessionB) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
-        <main className="flex w-full max-w-7xl flex-col gap-6 px-6 py-8 mx-auto">
+      <div className="flex h-screen flex-col bg-background">
+        <div className="shrink-0 border-b px-4 py-3">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Session Compare</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Session Compare</h1>
             <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
           </div>
+        </div>
+        <div className="flex-1 min-h-0 px-4 py-6 overflow-y-auto">
           <p className="text-red-600 dark:text-red-400">{error ?? "Missing session data"}</p>
           <Link href="/">
-            <Button variant="outline" size="sm">← Back to Home</Button>
+            <Button variant="outline" size="sm" className="mt-4">← Back to Home</Button>
           </Link>
-        </main>
+        </div>
       </div>
     )
   }
@@ -227,29 +232,39 @@ function ComparePageContent() {
   const toolStatsB = computeToolStats(turnsB)
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <main className="flex w-full max-w-7xl flex-col gap-6 px-6 py-8 mx-auto">
+    <div className="flex h-screen flex-col bg-background">
+      <div className="shrink-0 border-b px-4 py-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Session Compare</h1>
-            <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="blue">A: {sessionA.query ?? sessionA.taskId}</Badge>
-            <span className="text-muted-foreground">vs</span>
-            <Badge variant="orange">B: {sessionB.query ?? sessionB.taskId}</Badge>
+          <div className="flex items-center gap-3">
             <Link href="/">
-              <Button variant="outline" size="sm">← Back</Button>
+              <Button variant="ghost" size="sm" className="h-7 px-2">←</Button>
             </Link>
+            <h1 className="text-lg font-bold tracking-tight">Session Compare</h1>
+            <span className="text-xs text-muted-foreground">{VERSION_DISPLAY}</span>
+            <div className="flex items-center gap-2 ml-2">
+              <Badge variant="blue" className="text-xs">A: {sessionA.query ?? sessionA.taskId}</Badge>
+              <span className="text-muted-foreground text-xs">vs</span>
+              <Badge variant="orange" className="text-xs">B: {sessionB.query ?? sessionB.taskId}</Badge>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 border-b">
+        <div className="flex items-center gap-4 text-sm mt-2">
+          <span className="text-muted-foreground">Model: <span className="font-medium">{sessionA.model ?? "unknown"}</span></span>
+          <span className="text-muted-foreground">Tokens: <span className="font-medium tabular-nums">{sessionA.totalTokens}</span></span>
+          <span className="text-muted-foreground">Tools: <span className="font-medium tabular-nums">{sessionA.totalToolCallCount}</span></span>
+          <span className="text-muted-foreground">→</span>
+          <span className="text-muted-foreground">Model: <span className="font-medium">{sessionB.model ?? "unknown"}</span></span>
+          <span className="text-muted-foreground">Tokens: <span className="font-medium tabular-nums">{sessionB.totalTokens}</span></span>
+          <span className="text-muted-foreground">Tools: <span className="font-medium tabular-nums">{sessionB.totalToolCallCount}</span></span>
+        </div>
+
+        <div className="flex items-center gap-1 border-b -mb-px mt-3">
           {TABS.map(tab => (
             <button
               key={tab.key}
               className={cn(
-                "px-4 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px",
+                "px-3 py-1.5 text-sm font-medium cursor-pointer border-b-2 -mb-px transition-colors",
                 activeTab === tab.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -260,11 +275,12 @@ function ComparePageContent() {
             </button>
           ))}
         </div>
+      </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "overview" && (
-          <>
+          <div className="px-6 py-4 space-y-4">
             <CompareOverviewCards sessionA={sessionA} sessionB={sessionB} />
-
             <CompareTokenChart
               tokenA={{
                 inputTokens: sessionA.totalInputTokens,
@@ -281,19 +297,18 @@ function ComparePageContent() {
                 cacheWriteTokens: sessionB.totalCacheWriteTokens,
               }}
             />
-
             <CompareToolTable toolStatsA={toolStatsA} toolStatsB={toolStatsB} />
-          </>
+          </div>
         )}
 
-        {activeTab === "turns" && (
-          turnsLoading ? (
-            <p className="text-muted-foreground">Loading turn data with content...</p>
+        <div className={cn("px-4 py-4 h-full", activeTab !== "turns" && "hidden")}>
+          {turnsLoading ? (
+            <p className="text-muted-foreground">正在获取 turn 数据...</p>
           ) : (
             <CompareTurns turnsA={turnsA} turnsB={turnsB} />
-          )
-        )}
-      </main>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

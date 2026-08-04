@@ -87,19 +87,31 @@ export async function GET(request: NextRequest) {
 
     const session = sessions[0];
 
-    const userTurns = await prisma.turn.findMany({
-      where: { sessionId: session.id, role: 'user' },
+    // Fetch first user prompts for root and each subagent.
+    // Previous version loaded *all* user turns (with full content) just to
+    // pick the first per group on a 4000-turn session — that's hundreds of KB
+    // of unused content pulled across thousands of rows.
+    //
+    // Root: findFirst with take:1 — exactly one row.
+    // Subagents: findMany for isSubagent=true user turns, dedupe by
+    // subagentSessionId in memory (one query instead of N per-subagent).
+    const rootFirstUserTurn = await prisma.turn.findFirst({
+      where: { sessionId: session.id, role: 'user', isSubagent: false },
       orderBy: { turnIndex: 'asc' },
-      select: { contentSummary: true, content: true, isSubagent: true, subagentSessionId: true },
+      select: { contentSummary: true, content: true },
     });
+    const rootFirstPrompt: string | null = rootFirstUserTurn
+      ? (rootFirstUserTurn.contentSummary ?? rootFirstUserTurn.content?.substring(0, 80) ?? null)
+      : null;
 
-    let rootFirstPrompt: string | null = null;
+    const subUserTurns = await prisma.turn.findMany({
+      where: { sessionId: session.id, role: 'user', isSubagent: true, subagentSessionId: { not: null } },
+      orderBy: [{ turnIndex: 'asc' }],
+      select: { contentSummary: true, content: true, subagentSessionId: true },
+    });
     const subFirstPrompts = new Map<string, string>();
-    for (const t of userTurns) {
-      if (!t.isSubagent && rootFirstPrompt === null) {
-        rootFirstPrompt = t.contentSummary ?? t.content?.substring(0, 80) ?? null;
-      }
-      if (t.isSubagent && t.subagentSessionId && !subFirstPrompts.has(t.subagentSessionId)) {
+    for (const t of subUserTurns) {
+      if (t.subagentSessionId && !subFirstPrompts.has(t.subagentSessionId)) {
         subFirstPrompts.set(t.subagentSessionId, t.contentSummary ?? t.content?.substring(0, 80) ?? '');
       }
     }

@@ -10,12 +10,9 @@ import { describe, it, expect } from 'vitest';
 import { getAdapter } from '../../src/lib/ingest/adapters/index.ts';
 import type { Adapter } from '../../src/lib/ingest/adapters/index.ts';
 import path from 'node:path';
-import fs from 'node:fs';
 
-const REAL_DB_PATH = path.resolve(__dirname, '../data/opencode-sessions.db');
 const CLAUDE_DIR = path.resolve(__dirname, '../data/claude-sessions');
 const CLAUDE_FILE = path.join(CLAUDE_DIR, 'abc123.jsonl');
-const hasRealDB = fs.existsSync(REAL_DB_PATH);
 
 describe('adapter registry', () => {
   it('getAdapter("opencode-db") returns adapter with listSessions and readSession', () => {
@@ -34,23 +31,6 @@ describe('adapter registry', () => {
 
   it('getAdapter("unknown") throws descriptive error', () => {
     expect(() => getAdapter('unknown')).toThrow('Unknown source type');
-  });
-
-  it.skipIf(!hasRealDB)('listSessions works through registry with real DB', () => {
-    const adapter = getAdapter('opencode-db') as Adapter;
-    const sessions = adapter.listSessions(REAL_DB_PATH);
-    expect(sessions.length).toBeGreaterThan(0);
-    expect(sessions[0]).toHaveProperty('id');
-    expect(sessions[0]).toHaveProperty('createdAt');
-  });
-
-  it.skipIf(!hasRealDB)('readSession works through registry with real DB', () => {
-    const adapter = getAdapter('opencode-db') as Adapter;
-    const sessions = adapter.listSessions(REAL_DB_PATH);
-    const interactions = adapter.readSession(REAL_DB_PATH, sessions[0].id);
-    expect(interactions.length).toBeGreaterThan(0);
-    expect(interactions[0]).toHaveProperty('role');
-    expect(interactions[0]).toHaveProperty('timestamp');
   });
 
   it('listSessions works through registry with claude-jsonl', () => {

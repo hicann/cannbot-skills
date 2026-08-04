@@ -17,11 +17,9 @@ import { OverviewTab } from '@/cli/tui/tabs/OverviewTab';
 import { TurnsTab } from '@/cli/tui/tabs/TurnsTab';
 import { WorkflowTab, useWorkflowInteraction } from '@/cli/tui/tabs/WorkflowTab';
 import { TraceTab, useTraceInteraction } from '@/cli/tui/tabs/TraceTab';
-import { SubagentsTab } from '@/cli/tui/tabs/SubagentsTab';
 import { SkillsTab } from '@/cli/tui/tabs/SkillsTab';
 import { BridgesTab } from '@/cli/tui/tabs/BridgesTab';
 import { ContextTab } from '@/cli/tui/tabs/ContextTab';
-import { InteractionsTab, useInteractionInteraction } from '@/cli/tui/tabs/InteractionsTab';
 import type { InsightClient } from '@/cli/client';
 import type { ApiTurnDetailResponse, ApiTurnItem } from '@/cli/types';
 
@@ -30,8 +28,6 @@ const TABS = [
   { key: 'turns', label: 'Turns', icon: '🔄' },
   { key: 'workflow', label: 'Workflow', icon: '✦' },
   { key: 'trace', label: 'Trace', icon: '🔍' },
-  { key: 'interactions', label: 'Interactions', icon: '🔗' },
-  { key: 'subagents', label: 'Subagents', icon: '🤖' },
   { key: 'skills', label: 'Skills', icon: '🔧' },
   { key: 'bridges', label: 'Bridges', icon: '🔗' },
   { key: 'context', label: 'Context', icon: '📊' },
@@ -47,7 +43,6 @@ interface SessionDetailProps {
 export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionDetailProps) {
   const [activeTab, setActiveTab] = useState('overview');
   const [turnSelectedIndex, setTurnSelectedIndex] = useState(0);
-  const [subagentSelectedIndex, setSubagentSelectedIndex] = useState(0);
   const [bridgeSelectedIndex, setBridgeSelectedIndex] = useState(0);
   const [skillSelectedIndex, setSkillSelectedIndex] = useState(0);
   const [turnDetail, setTurnDetail] = useState<ApiTurnDetailResponse | null>(null);
@@ -59,13 +54,11 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
   const fetchSession = useCallback(() => client.getSession(taskId), [client, taskId]);
   const fetchTurns = useCallback(() => client.getTurns(taskId), [client, taskId]);
   const fetchWorkflow = useCallback(() => client.getWorkflow(taskId), [client, taskId]);
-  const fetchExecutions = useCallback(() => client.getExecutions(taskId), [client, taskId]);
   const fetchBridges = useCallback(() => client.getBridges(taskId), [client, taskId]);
 
   const { data: session, loading: sessionLoading, refresh: refreshSession } = useApi(fetchSession, [client, taskId]);
   const { data: turnsData, refresh: refreshTurns } = useApi(fetchTurns, [client, taskId]);
   const { data: workflow, refresh: refreshWorkflow } = useApi(fetchWorkflow, [client, taskId]);
-  const { data: executions, refresh: refreshExec } = useApi(fetchExecutions, [client, taskId]);
   const { data: bridgesData, refresh: refreshBridges } = useApi(fetchBridges, [client, taskId]);
 
   const workflowInteraction = useWorkflowInteraction(
@@ -75,10 +68,6 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
 
   const traceInteraction = useTraceInteraction(
     searchResults ?? turnsData?.items ?? [],
-    bridgesData?.items ?? []
-  )
-
-  const interactionInteraction = useInteractionInteraction(
     bridgesData?.items ?? []
   )
 
@@ -103,8 +92,8 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
   }, [client, taskId]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshSession(), refreshTurns(), refreshWorkflow(), refreshExec(), refreshBridges()]);
-  }, [refreshSession, refreshTurns, refreshWorkflow, refreshExec, refreshBridges]);
+    await Promise.all([refreshSession(), refreshTurns(), refreshWorkflow(), refreshBridges()]);
+  }, [refreshSession, refreshTurns, refreshWorkflow, refreshBridges]);
 
   const isSearchableTab = activeTab === 'turns' || activeTab === 'trace';
 
@@ -131,10 +120,7 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
         workflowInteraction.handleUp();
       } else if (activeTab === 'trace') {
         traceInteraction.handleUp();
-      } else if (activeTab === 'interactions') {
-        interactionInteraction.handleUp();
       } else if (activeTab === 'turns') setTurnSelectedIndex(i => Math.max(0, i - 1));
-      else if (activeTab === 'subagents') setSubagentSelectedIndex(i => Math.max(0, i - 1));
       else if (activeTab === 'bridges') setBridgeSelectedIndex(i => Math.max(0, i - 1));
       else if (activeTab === 'skills') setSkillSelectedIndex(i => Math.max(0, i - 1));
     },
@@ -144,14 +130,9 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
         workflowInteraction.handleDown();
       } else if (activeTab === 'trace') {
         traceInteraction.handleDown();
-      } else if (activeTab === 'interactions') {
-        interactionInteraction.handleDown();
       } else if (activeTab === 'turns') {
         const max = searchResults?.length ?? turnsData?.items.length ?? 0;
         setTurnSelectedIndex(i => Math.min(max - 1, i + 1));
-      } else if (activeTab === 'subagents') {
-        const max = executions?.subagents.length ?? 0;
-        setSubagentSelectedIndex(i => Math.min(max - 1, i + 1));
       } else if (activeTab === 'bridges') {
         const max = bridgesData?.items.length ?? 0;
         setBridgeSelectedIndex(i => Math.min(max - 1, i + 1));
@@ -171,8 +152,6 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
         workflowInteraction.handleEnter();
       } else if (activeTab === 'trace') {
         traceInteraction.handleEnter();
-      } else if (activeTab === 'interactions') {
-        interactionInteraction.handleEnter();
       } else if (activeTab === 'turns') {
         const turns = searchResults ?? turnsData?.items ?? [];
         const selectedTurn = turns[turnSelectedIndex];
@@ -253,18 +232,6 @@ export function SessionDetail({ client, taskId, onBack, onSelectTurn }: SessionD
             expandedTurns={traceInteraction.expandedTurns}
             selectedTurnDetail={traceInteraction.selectedTurnDetail}
           />
-        ) : activeTab === 'interactions' && bridgesData && session ? (
-          <InteractionsTab
-            bridges={bridgesData.items}
-            rootAgentName={session.agents.find(a => !a.isSubagent)?.agentName ?? null}
-            sessionStartTime={session.startTime}
-            sessionLatencyMs={session.totalLatencyMs}
-            sortedBridges={interactionInteraction.sortedBridges}
-            cursorIndex={interactionInteraction.cursorIndex}
-            expandedBridges={interactionInteraction.expandedBridges}
-          />
-        ) : activeTab === 'subagents' && executions ? (
-          <SubagentsTab subagents={executions.subagents} bridges={bridgesData?.items ?? []} selectedIndex={subagentSelectedIndex} />
         ) : activeTab === 'skills' && session && turnsData ? (
           <SkillsTab
             skills={session.skills}

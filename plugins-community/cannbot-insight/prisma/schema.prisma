@@ -17,94 +17,94 @@ generator client {
 
 // ─── Session ────────────────────────────────────────────────
 model Session {
-  id           String   @id @default(cuid())
-  taskId       String
-  label        String?
-  query        String?
-  framework    String   @default("unknown")
-  model        String?
-  startTime    DateTime @default(now())
-  endTime      DateTime?
+  id        String    @id @default(cuid())
+  taskId    String
+  label     String?
+  query     String?
+  framework String    @default("unknown")
+  model     String?
+  startTime DateTime  @default(now())
+  endTime   DateTime?
 
-  totalTokens         Int      @default(0)
-  totalInputTokens    Int      @default(0)
-  totalOutputTokens   Int      @default(0)
-  totalReasoningTokens Int    @default(0)
-  totalCacheReadTokens Int      @default(0)
+  totalTokens           Int     @default(0)
+  totalInputTokens      Int     @default(0)
+  totalOutputTokens     Int     @default(0)
+  totalReasoningTokens  Int     @default(0)
+  totalCacheReadTokens  Int     @default(0)
   totalCacheWriteTokens Int     @default(0)
-  totalCost           Float    @default(0)
-  totalLatencyMs      Int      @default(0)
-  totalToolCallCount  Int      @default(0)
-  totalLlmCallCount   Int      @default(0)
-  totalSkillLoadCount Int      @default(0)
-  totalSubagentCount  Int      @default(0)
-  rootExecutionId     String?
-  sourcePath          String?
+  totalCost             Float   @default(0)
+  totalLatencyMs        Int     @default(0)
+  totalToolCallCount    Int     @default(0)
+  totalLlmCallCount     Int     @default(0)
+  totalSkillLoadCount   Int     @default(0)
+  totalSubagentCount    Int     @default(0)
+  rootExecutionId       String?
+  sourcePath            String?
 
-  parentId            String?
-  version             String?
-  directory           String?
-  summaryAdditions    Int      @default(0)
-  summaryDeletions    Int      @default(0)
-  summaryFiles        Int      @default(0)
+  parentId         String?
+  version          String?
+  directory        String?
+  summaryAdditions Int     @default(0)
+  summaryDeletions Int     @default(0)
+  summaryFiles     Int     @default(0)
 
-  user        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  user      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  turns          Turn[]
-  executions     Execution[]
+  turns              Turn[]
+  executions         Execution[]
   interactionBridges InteractionBridge[]
-  skills         SessionSkill[]
+  skills             SessionSkill[]
 
   @@unique([taskId, framework])
 }
 
 // ─── Turn ───────────────────────────────────────────
 model Turn {
-  id             String   @id @default(cuid())
-  sessionId      String
-  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  turnIndex      Int
-  role           String
-  content        String?
-  contentJson    String?
-  contentSummary String?
-  inputMessagesJson String?
-  inputMessagesCount Int    @default(0)
-  inputMessagesTokens Int    @default(0)
-  contextWindowPct  Float?
-  agentName      String?
-  subagentName   String?
-  subagentSessionId String?
+  turnIndex           Int
+  role                String
+  content             String?
+  contentJson         String?
+  contentSummary      String?
+  inputMessagesJson   String?
+  inputMessagesCount  Int     @default(0)
+  inputMessagesTokens Int     @default(0)
+  contextWindowPct    Float?
+  agentName           String?
+  subagentName        String?
+  subagentSessionId   String?
 
-  totalTokens        Int      @default(0)
-  inputTokens        Int      @default(0)
-  outputTokens       Int      @default(0)
-  reasoningTokens    Int      @default(0)
-  cacheReadTokens    Int      @default(0)
-  cacheWriteTokens   Int      @default(0)
+  totalTokens      Int @default(0)
+  inputTokens      Int @default(0)
+  outputTokens     Int @default(0)
+  reasoningTokens  Int @default(0)
+  cacheReadTokens  Int @default(0)
+  cacheWriteTokens Int @default(0)
 
-  createdAt_ts       DateTime?
-  completedAt        DateTime?
-  latencyMs         Int      @default(0)
-  ttftMs            Int?
+  createdAt_ts DateTime?
+  completedAt  DateTime?
+  latencyMs    Int       @default(0)
+  ttftMs       Int?
 
-  model             String?
-  modelId           String?
-  providerId        String?
-  temperature       Float?
-  maxTokens         Int?
-  finishReason      String?
+  model        String?
+  modelId      String?
+  providerId   String?
+  temperature  Float?
+  maxTokens    Int?
+  finishReason String?
 
-  isSubagent        Boolean  @default(false)
+  isSubagent        Boolean @default(false)
   parentExecutionId String?
 
-  createdAt         DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  toolCalls      ToolCall[]
-  skillEvents    SkillEvent[]
+  toolCalls   ToolCall[]
+  skillEvents SkillEvent[]
 
   @@index([sessionId, turnIndex])
   @@index([sessionId, isSubagent])
@@ -114,26 +114,26 @@ model Turn {
 
 // ─── ToolCall ───────────────────────────────────────────
 model ToolCall {
-  id             String   @id @default(cuid())
-  turnId         String
-  turn           Turn     @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  turnId String
+  turn   Turn   @relation(fields: [turnId], references: [id], onDelete: Cascade)
 
-  toolCallId     String
-  toolName       String
-  argsJson       String?
-  resultJson     String?
-  state          String   @default("ok")
-  errorType      String?
-  errorMessage   String?
+  toolCallId   String
+  toolName     String
+  argsJson     String?
+  resultJson   String?
+  state        String  @default("ok")
+  errorType    String?
+  errorMessage String?
 
-  startedAt      DateTime?
-  completedAt    DateTime?
-  durationMs     Int      @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int       @default(0)
 
   dispatchBridgeId String?
-  isSkillRelated  Boolean  @default(false)
+  isSkillRelated   Boolean @default(false)
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([turnId])
   @@index([toolName])
@@ -142,22 +142,22 @@ model ToolCall {
 
 // ─── SkillEvent ──────────────────────────────────────────
 model SkillEvent {
-  id             String   @id @default(cuid())
-  turnId         String
-  turn           Turn     @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  turnId String
+  turn   Turn   @relation(fields: [turnId], references: [id], onDelete: Cascade)
 
-  skillName      String
-  skillVersion   Int?
-  eventType      String
-  success        Boolean  @default(true)
-  errorMessage   String?
-  argsJson       String?
+  skillName    String
+  skillVersion Int?
+  eventType    String
+  success      Boolean @default(true)
+  errorMessage String?
+  argsJson     String?
 
-  startedAt      DateTime?
-  completedAt    DateTime?
-  durationMs     Int      @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int       @default(0)
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([turnId])
   @@index([skillName])
@@ -166,39 +166,39 @@ model SkillEvent {
 
 // ─── Execution ───────────────────────────────────────────
 model Execution {
-  id              String   @id @default(cuid())
-  sessionId       String
-  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  agentName       String?
-  agentSessionId  String?
-  isSubagent      Boolean  @default(false)
-  subagentType    String?
-  subagentName    String?
+  agentName      String?
+  agentSessionId String?
+  isSubagent     Boolean @default(false)
+  subagentType   String?
+  subagentName   String?
 
   parentExecutionId String?
   rootExecutionId   String?
-  depth            Int      @default(0)
+  depth             Int     @default(0)
 
-  tokens              Int      @default(0)
-  inputTokens         Int      @default(0)
-  outputTokens        Int      @default(0)
-  reasoningTokens     Int      @default(0)
-  cacheReadInputTokens Int     @default(0)
-  cacheCreationInputTokens Int  @default(0)
-  maxSingleCallTokens Int      @default(0)
-  cost                Float    @default(0)
-  latencyMs           Int      @default(0)
-  toolCallCount       Int      @default(0)
-  toolCallErrorCount  Int      @default(0)
-  llmCallCount        Int      @default(0)
-  skillLoadCount      Int      @default(0)
-  skillInvokeCount    Int      @default(0)
+  tokens                   Int   @default(0)
+  inputTokens              Int   @default(0)
+  outputTokens             Int   @default(0)
+  reasoningTokens          Int   @default(0)
+  cacheReadInputTokens     Int   @default(0)
+  cacheCreationInputTokens Int   @default(0)
+  maxSingleCallTokens      Int   @default(0)
+  cost                     Float @default(0)
+  latencyMs                Int   @default(0)
+  toolCallCount            Int   @default(0)
+  toolCallErrorCount       Int   @default(0)
+  llmCallCount             Int   @default(0)
+  skillLoadCount           Int   @default(0)
+  skillInvokeCount         Int   @default(0)
 
-  finalResult     String?
-  model           String?
+  finalResult String?
+  model       String?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   executionSkills ExecutionSkill[]
 
@@ -226,14 +226,14 @@ model ExecutionSkill {
 
 // ─── SessionSkill ─────────────────────────────────────────
 model SessionSkill {
-  id           String    @id @default(cuid())
-  sessionId    String
-  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  skillName    String
-  skillVersion Int?
-  invocationCount Int   @default(0)
-  user         String?
-  createdAt    DateTime  @default(now())
+  id              String   @id @default(cuid())
+  sessionId       String
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  skillName       String
+  skillVersion    Int?
+  invocationCount Int      @default(0)
+  user            String?
+  createdAt       DateTime @default(now())
 
   @@unique([sessionId, skillName])
   @@index([skillName])
@@ -241,31 +241,31 @@ model SessionSkill {
 
 // ─── InteractionBridge ───────────────────────────────────
 model InteractionBridge {
-  id             String   @id @default(cuid())
-  sessionId      String
-  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  dispatchExecutionId  String
-  dispatchTurnId       String?
-  dispatchToolCallId   String?
-  dispatchContent      String?
-  dispatchTimestamp    DateTime?
+  dispatchExecutionId String
+  dispatchTurnId      String?
+  dispatchToolCallId  String?
+  dispatchContent     String?
+  dispatchTimestamp   DateTime?
 
-  responseExecutionId  String?
-  responseTurnId       String?
-  responseContent      String?
-  responseTimestamp    DateTime?
+  responseExecutionId String?
+  responseTurnId      String?
+  responseContent     String?
+  responseTimestamp   DateTime?
 
-  subagentSessionId    String?
-  subagentType         String?
-  subagentName         String?
-  status               String   @default("dispatched")
+  subagentSessionId String?
+  subagentType      String?
+  subagentName      String?
+  status            String  @default("dispatched")
 
-  subagentTokens       Int      @default(0)
-  subagentLatencyMs    Int      @default(0)
+  subagentTokens    Int @default(0)
+  subagentLatencyMs Int @default(0)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([sessionId])
   @@index([dispatchExecutionId])
