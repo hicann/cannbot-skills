@@ -1,0 +1,52 @@
+{
+  "skill_name": "msprof-compare",
+  "evals": [
+    {
+      "id": 0,
+      "name": "walkthrough",
+      "prompt": "我有两个 kernel 想对比性能。dense FA 测试跑 (1,32,32,1024,1024,128)；PA 测试跑 (1,32,32,1024,128)。两边 SHAPE_LIST 都已经加好对应入口，pytest 也都 collect 得到。NPU 我已经登录上了。\n\n给我一个 msprof profile + 解析的完整步骤清单，要包含：每条 shell 命令、关键 flag 为什么这么写、跑完怎么知道哪个慢、读哪几列。**不需要真跑**，我只要清单——之后我自己照着执行。",
+      "files": [],
+      "assertions": [
+        {"text": "Tells user to wrap the kernel call in a repeat loop (e.g. FA_PERF_REPEAT env var, or 'call N times then take min') AND explains why — short single-shot tasks don't capture msprof PipeUtilization counters"},
+        {"text": "msprof command includes --task-time=on"},
+        {"text": "msprof command includes --aic-metrics=PipeUtilization"},
+        {"text": "Each kernel variant gets its own cwd, with rm -rf PROF_* before each run"},
+        {"text": "Aggregation picks min Task Duration (not mean) and explains why"},
+        {"text": "Identifies output as mindstudio_profiler_output/op_summary_*.csv inside PROF_<id>"},
+        {"text": "Calls out the key CSV columns (Task Duration col 10, aic_mac_time col 24, aic_mte2_time col 30)"},
+        {"text": "Gives interpretation rules (high mac_ratio = compute-bound; high mte2_ratio with lower mac = data-load bottleneck)"}
+      ]
+    },
+    {
+      "id": 1,
+      "name": "zeros-explanation",
+      "prompt": "我刚才在 NPU 上 msprof 一个 CANNBotDSL kernel，跑了 10 次。看 op_summary_xxx.csv，aic_mac_time / aic_mte2_time / aic_fixpipe_time 这些列大部分行都是 0.0，只有第一行有正常数值（mac=709us、mte2=675us 那种）。Task Duration 列 10 行都正常。\n\n这是哪儿的问题？是 kernel 跑挂了吗？怎么排查、怎么修？",
+      "files": [],
+      "assertions": [
+        {"text": "Identifies this as PipeUtilization sampling artifact, not a kernel crash or msprof bug"},
+        {"text": "Explains Task Duration is on a separate path so its normal values confirm kernel ran fine"},
+        {"text": "Suggests increasing repeat count OR picking the row with highest mac_ratio as representative"},
+        {"text": "Does NOT advise destructive/false 'fixes' (restart kernel, reinstall msprof, sync points etc.)"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "parse-and-report",
+      "prompt": "我手头有两份 msprof 的 op_summary CSV，是同一个 shape 下 dense FA 和 paged_attention 各 profile 10 次的结果：\n\n- dense: /tmp/msprof_test/dense/op_summary_20260521091757.csv\n- pa_random: /tmp/msprof_test/pa_random/op_summary_20260521091757.csv\n- pa_identity: /tmp/msprof_test/pa_identity/op_summary_20260521091757.csv\n\n帮我对比一下：哪个最快、哪个最慢、慢多少倍、瓶颈在哪个 pipe。给我可读的结论。",
+      "files": [
+        "/tmp/msprof_test/dense/op_summary_20260521091757.csv",
+        "/tmp/msprof_test/pa_random/op_summary_20260521091757.csv",
+        "/tmp/msprof_test/pa_identity/op_summary_20260521091757.csv"
+      ],
+      "assertions": [
+        {"text": "Correctly identifies dense as fastest (min ~761us)"},
+        {"text": "Correctly identifies pa_random as slowest (min ~1515us, ~1.99x dense)"},
+        {"text": "Correctly places pa_identity in the middle (min ~1021us, ~1.34x dense)"},
+        {"text": "Uses min Task Duration (not mean) — explicitly or implicitly arrives at min values"},
+        {"text": "Calls out dense is compute-bound (mac_ratio ~0.93)"},
+        {"text": "Calls out PA is data-load bottlenecked (mac drops to ~0.73-0.74, mte2 stays ~0.80)"},
+        {"text": "Uses parse_op_summary.py (bundled script) rather than hand-rolling awk/CSV parsing"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "skill_name": "npu-plog-diagnosis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在 NPU 上跑 pytest，一个算子测试挂了，报这个：\nRuntimeError: npuSynchronizeDevice:... NPU function error: device error type 3, error code is 507015\n[ERROR] ... (PID:3524977, Device:0, RankID:-1) ERR00100 PTA call acl api failed\n帮我查一下根因。设备连接用 on-board-debugging 那套。",
+      "expected_output": "应识别这是 aicore exception 设备 fault；说明要去 ~/ascend/log/debug/plog/plog-3524977_*.log 抓 ProcessDavinciStarsCoreErrorInfo 和 kernel_symbol_locator，按 coreType/errModule 定位核和单元；若指向坏指针，进一步看 GetArgsInfo 参数区。给出具体的 grep 命令和读法，而不是泛泛而谈。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "板子上一个 flash attention 用例 torch.npu.synchronize() 卡死不返回，等了好几分钟没反应。同一个算子的 dense 版本能正常跑通，只有我新写的 channel 版卡住。怎么定位？",
+      "expected_output": "应识别这是 hang 而非 fault（无错误码）；指出根因多为跨核同步没配平；建议把 channel 版和能跑通的 dense 版做同步原语(acquire/commit/wait/release)计数 diff；提到 drain 守卫写反、生产端少 commit 等常见形态。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我从 plog 里 grep 到了这段，但看不懂是什么意思，帮我解读：\nProcessDavinciStarsCoreErrorInfo: ... core id is 0, error code = 263, dump info: pc start: 0x120041000000, current: 0x12004100023c, su error info: 0xb7fbdefb1bdc0078, mte error info: 0x989deb7f0005bfdf, vec error info: 0, cube error info: 0, para base: 0x12004ba00000\nkernel_symbol_locator: ... coreType=1, errModule=SU_ERROR_T0_0, symbol=_Z18kernel_fa_kernel_0..._mix_aiv+0x240",
+      "expected_output": "应逐字段解读：errcode 263=标量访存地址非法；su error info 非 0=Scalar Unit 出错；coreType=1=AIV 向量核；errModule SU=标量单元；symbol +0x240=AIV 函数入口附近第一批访存。联立得出：AIV 核在函数入口用垃圾基址做标量 GM 读，高度怀疑 host 传参把某 GM 指针传成垃圾值，建议看参数区验证。",
+      "files": []
+    }
+  ]
+}
