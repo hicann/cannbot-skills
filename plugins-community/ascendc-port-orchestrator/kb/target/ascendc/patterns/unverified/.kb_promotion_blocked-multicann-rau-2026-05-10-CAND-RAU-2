@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-rau-2026-05-10",
+  "candidate_id": "CAND-RAU-2",
+  "ts": 1778465907.1039848,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe traversal principle is generalizable, but the candidate has offset/stride ambiguity that must be fixed before canonical promotion: it says the softmax tensor is `[sum(seq_i_padded_to_block), ...]` while the anchor computes offsets from `actualSeqQlen` actual cumulative lengths, which is only correct for unpadded packed storage, not padded-per-batch storage. The text also says \u201cper-batch stride must use actual `seqNumBatch`,\u201d which conflicts with \u201cpadded_to_block\u201d layouts where the stride must use padded length or a separate cumulative padded-offset table. The absolute claims about never precomputing maps and GM/UB caching are too strong for canonical KB without measured support; they should be softened into tradeoffs/typical guidance."
+}

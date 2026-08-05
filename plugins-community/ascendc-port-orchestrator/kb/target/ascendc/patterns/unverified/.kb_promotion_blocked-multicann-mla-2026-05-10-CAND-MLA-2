@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-mla-2026-05-10",
+  "candidate_id": "CAND-MLA-2",
+  "ts": 1778465654.3850462,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nStrong transferable principle, but not ready for canonical promotion as written: it explicitly says `unverified_on: a5_ops` and its own \u201cPromote when\u201d gate has not been met, so canonical status would overstate evidence. It also has at least one KB contradiction: `OL-58` is cast-to-int32 workspace for non-float atomicAdd, not DataCopyPad tail handling. Tighten unsupported performance claims such as \u201csame MTE3 cost as a single contiguous DataCopy\u201d / div-mod \u201cfree\u201d unless measured on target SoC, and clarify DataCopy/DataCopyPad length units and alignment wording."
+}

@@ -199,7 +199,7 @@ def main() -> int:
         if conflicts:
             print(f"ERROR: --status cannot be combined with: {', '.join(conflicts)}")
             return 2
-            return _orch_attr("_cmd_status")()
+        return _orch_attr("_cmd_status")()
 
     if args.port_a3 is not None:
         conflicts = _conflicts(
@@ -223,7 +223,7 @@ def main() -> int:
         except ValueError as exc:
             print(f"ERROR: {exc}")
             return 2
-            return _orch_attr("_cmd_port_a3")(
+        return _orch_attr("_cmd_port_a3")(
             port_a3_dir=args.port_a3,
             lane=lane,
             plan_only=args.plan,
@@ -246,7 +246,7 @@ def main() -> int:
         lane, lane_rc = _validated_lane(args.lane)
         if lane_rc:
             return lane_rc
-            return _orch_attr("_cmd_backward")(
+        return _orch_attr("_cmd_backward")(
             forward_spec=args.backward,
             lane=lane,
             plan_only=args.plan,
@@ -274,7 +274,7 @@ def main() -> int:
         lane, lane_rc = _validated_lane(args.lane)
         if lane_rc:
             return lane_rc
-            return _orch_attr("_cmd_resume")(
+        return _orch_attr("_cmd_resume")(
             op=args.op,
             all_mode=args.all,
             lane=lane,

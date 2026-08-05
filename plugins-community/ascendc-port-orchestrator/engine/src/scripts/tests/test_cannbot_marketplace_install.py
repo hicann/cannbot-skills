@@ -146,6 +146,25 @@ def test_shared_skills_are_declared_as_one_minimal_marketplace_dependency():
     )
 
 
+def test_knowledge_dependency_uses_a_manifest_free_skills_root():
+    """Do not merge the knowledge team's plugin manifest into its skill bundle."""
+    manifest = json.loads(
+        (INIT.parent / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    package = "cannbot-knowledge-consumer-skills"
+    assert package in manifest["dependencies"]
+
+    repo_root = INIT.parent.parents[1]
+    marketplace = json.loads(
+        (repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    entry = next(item for item in marketplace["plugins"] if item["name"] == package)
+    source_root = repo_root / entry["source"]
+    assert source_root == repo_root / "plugins-community/cannbot-knowledge/skills"
+    assert entry["skills"] == ["./knowledge-query"]
+    assert not (source_root / ".claude-plugin" / "plugin.json").exists()
+
+
 def test_health_check_accepts_installed_links_or_marketplace_dependencies():
     s = _src()
     assert "marketplace_skill_present" in s
@@ -217,7 +236,11 @@ def test_installer_completes_from_a_marketplace_layout():
         for name in _whitelist("LOCAL_SKILLS"):
             assert (Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / name).is_symlink()
         for name in _whitelist("SHARED_SKILLS") + _whitelist("KNOWLEDGE_SKILLS"):
-            assert not (Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / name).exists()
+            installed = Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / name
+            assert installed.is_symlink()
+            assert (installed / "SKILL.md").is_file()
+            cache_root = Path(env["CLAUDE_CONFIG_DIR"]) / "plugins" / "cache"
+            assert installed.resolve().is_relative_to(cache_root.resolve())
         assert (plugin / "engine" / "workspace" / ".ascendc_env").is_file()
         manifest = json.loads(
             (Path(env["CLAUDE_CONFIG_DIR"]) / "cannbot-manifest.json").read_text()

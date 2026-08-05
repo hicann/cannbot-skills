@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-rau-2026-05-10",
+  "candidate_id": "CAND-RAU-3",
+  "ts": 1778465934.7069454,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe general principle is transferable, but the candidate has correctness gaps before canonical promotion: `src1BlkStride=0` broadcasts one 8-fp32 block across the repeat, so the anchor computes `data[r,j] *= scale[r, j % 8]` unless the scale block is already duplicated; it does not by itself broadcast `scale[r,0]` to all lanes. The text also allows `softmax_tail < 8`, but `softmax_tail / 8` then becomes 0 and breaks the stated key row-walk behavior. Add a hard precondition that `scale` is block-padded/duplicated as needed and `softmax_tail` is a positive multiple of 8 blocks, or include a prior Duplicate/Brcb step for true `[R]` scalars. Also constrain `dstRepStride/src0RepStride = inner/8` to uint8 limits, not only `src1RepStride`, and avoid claiming identical results to P-P62 unless the scale block lane semantics match."
+}

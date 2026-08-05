@@ -1,0 +1,7 @@
+{
+  "run_id": "b07626d2d8a2",
+  "candidate_id": "CAND-FA2",
+  "ts": 1778465343.3774402,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe core recurrence is generalizable and aligns with online softmax/logsumexp practice, but promotion needs cleanup before canonical KB: the `R_round / 8` Brcb note contradicts itself by saying rows are aligned up to 8 while also claiming `R=1` makes repeat count 0; clarify the exact repeat-count formula and failure mode. The first-tile path also needs a distinct accumulator update because it says \u201cdo NOT compute delta\u201d but Step 4 unconditionally uses `delta`. Finally, the entry explicitly says it is source-structure-only with no a5_ops implementation and no second-op portability confirmation, which conflicts with its own promotion-risk gate for P-P status."
+}

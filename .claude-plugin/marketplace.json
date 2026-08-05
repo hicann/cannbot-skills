@@ -465,7 +465,7 @@
     {
       "name": "cannbot-knowledge-consumer-skills",
       "description": "cannbot-knowledge 只读消费 Skill 套件（knowledge-query）。用于知识检索、知识依赖前置检索和文档查找场景。",
-      "source": "./plugins-community/cannbot-knowledge",
+      "source": "./plugins-community/cannbot-knowledge/skills",
       "strict": false,
       "version": "1.0.0",
       "author": {
@@ -478,7 +478,7 @@
       ],
       "category": "skills",
       "skills": [
-        "./skills/knowledge-query"
+        "./knowledge-query"
       ]
     },
     {
@@ -831,6 +831,27 @@
       ],
       "category": "development",
       "dependencies": []
+    },
+    {
+      "name": "ascendc-port-orchestrator",
+      "source": "./plugins-community/ascendc-port-orchestrator",
+      "description": "社区版 AscendC 算子移植 Team：① 跨代际算子移植（当前 arch22→arch35）② 正向→反向生成。bundle-orch（编排器引擎 + aog-* 子 agent + OKF KB c>b>a + 安全网）。",
+      "version": "0.1.4",
+      "author": {
+        "name": "a5_ops contributors"
+      },
+      "keywords": [
+        "ascendc",
+        "kernel",
+        "port",
+        "cross-generation",
+        "operator"
+      ],
+      "category": "development",
+      "dependencies": [
+        "ascendc-port-orchestrator-shared-skills",
+        "cannbot-knowledge-consumer-skills"
+      ]
     }
   ]
 }

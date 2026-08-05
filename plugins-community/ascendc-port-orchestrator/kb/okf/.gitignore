@@ -1,0 +1,9 @@
+# rebuildable retrieval/graph products (see SPEC-Retrieve §11)
+search/
+.build/
+
+# The repo-root `**/build/` rule (compiled-output) wrongly matches the OKF-mandated
+# field-notes/build/ CONTENT dir (SPEC-FieldNotes: field-notes/{build,precision,perf}).
+# Re-include it (must re-include the directory before its files).
+!runbooks/field-notes/build/
+!runbooks/field-notes/build/**

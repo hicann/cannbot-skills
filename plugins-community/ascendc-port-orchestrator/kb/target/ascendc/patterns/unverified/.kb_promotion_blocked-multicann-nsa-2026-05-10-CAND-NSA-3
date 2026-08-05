@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-nsa-2026-05-10",
+  "candidate_id": "CAND-NSA-3",
+  "ts": 1778465827.6964347,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is transferable, but this candidate has blocking contradictions: the core \u201csingle strided DataCopy\u201d relies on a negative effective `srcStride` even though public `DataCopyParams` uses unsigned stride/gap semantics, and the anchor still casts `(M - W)` to `uint16_t` despite later warning this can overflow/wrap. The triangular weight schedule is also underspecified/misframed: coverage count is absolute-position and boundary dependent, not generally a fixed local `[0,W)` kernel for every chunk, so the \u201cwhy it works\u201d convolution claim and boundary zero-pad note need tightening. It should remain unpromoted until the gather implementation is expressed with valid public APIs and the exact mathematical score definition is made consistent."
+}

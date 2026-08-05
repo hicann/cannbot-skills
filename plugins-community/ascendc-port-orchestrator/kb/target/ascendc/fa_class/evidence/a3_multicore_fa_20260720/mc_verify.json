@@ -1,0 +1,230 @@
+{
+  "op": "libkfc_fa_multicore",
+  "target": "a3-ds",
+  "soc": "Ascend910_9382",
+  "precision_pass": 20,
+  "precision_total": 20,
+  "all_ok": true,
+  "rows": [
+    {
+      "BN": 2,
+      "S": 64,
+      "D": 64,
+      "num_cores": 1,
+      "max_abs": 0.000566,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 2,
+      "S": 64,
+      "D": 64,
+      "num_cores": 2,
+      "max_abs": 0.000566,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 2,
+      "S": 64,
+      "D": 64,
+      "num_cores": 4,
+      "max_abs": 0.000566,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 2,
+      "S": 64,
+      "D": 64,
+      "num_cores": -1,
+      "max_abs": 0.000566,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 8,
+      "S": 128,
+      "D": 64,
+      "num_cores": 1,
+      "max_abs": 0.000365,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 8,
+      "S": 128,
+      "D": 64,
+      "num_cores": 2,
+      "max_abs": 0.000365,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 8,
+      "S": 128,
+      "D": 64,
+      "num_cores": 4,
+      "max_abs": 0.000365,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 8,
+      "S": 128,
+      "D": 64,
+      "num_cores": -1,
+      "max_abs": 0.000365,
+      "cos": 0.999999,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 16,
+      "S": 256,
+      "D": 64,
+      "num_cores": 1,
+      "max_abs": 0.00037,
+      "cos": 1.0,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 16,
+      "S": 256,
+      "D": 64,
+      "num_cores": 2,
+      "max_abs": 0.00037,
+      "cos": 1.0,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 16,
+      "S": 256,
+      "D": 64,
+      "num_cores": 4,
+      "max_abs": 0.00037,
+      "cos": 1.0,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 16,
+      "S": 256,
+      "D": 64,
+      "num_cores": -1,
+      "max_abs": 0.00037,
+      "cos": 1.0,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 128,
+      "D": 64,
+      "num_cores": 1,
+      "max_abs": 0.000445,
+      "cos": 0.999998,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 128,
+      "D": 64,
+      "num_cores": 2,
+      "max_abs": 0.000445,
+      "cos": 0.999998,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 128,
+      "D": 64,
+      "num_cores": 4,
+      "max_abs": 0.000445,
+      "cos": 0.999998,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 128,
+      "D": 64,
+      "num_cores": -1,
+      "max_abs": 0.000445,
+      "cos": 0.999998,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 512,
+      "D": 64,
+      "num_cores": 1,
+      "max_abs": 0.000333,
+      "cos": 1.000015,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 512,
+      "D": 64,
+      "num_cores": 2,
+      "max_abs": 0.000333,
+      "cos": 1.000015,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 512,
+      "D": 64,
+      "num_cores": 4,
+      "max_abs": 0.000333,
+      "cos": 1.000015,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    },
+    {
+      "BN": 32,
+      "S": 512,
+      "D": 64,
+      "num_cores": -1,
+      "max_abs": 0.000333,
+      "cos": 1.000015,
+      "pass_prec": true,
+      "deterministic": true,
+      "bit_eq_1core": true
+    }
+  ]
+}

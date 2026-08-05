@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-fag-2026-05-10",
+  "candidate_id": "CAND-FAG-1",
+  "ts": 1778465470.6353626,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is plausible and cross-op transferable, but it is not ready for canonical KB as written. It relies on unverified a5_ops evidence while its own \u201cPromote when\u201d condition has not been met, and several claims are too strong or internally inconsistent: fp32 atomic-add is described as deterministic, then later called the determinism risk; fp16 atomic support/error/performance claims need qualification by dtype/platform; and the predicted \u201cother instances\u201d mix cases that may use reductions rather than low-precision output atomic accumulation. Revise by narrowing the canonical claim to the verified FA-grad structure, qualifying atomic determinism/support claims, and requiring measured a5_ops evidence before promotion."
+}

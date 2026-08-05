@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-nsa-2026-05-10",
+  "candidate_id": "CAND-NSA-1",
+  "ts": 1778465754.4458795,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe candidate has useful scope, but the recipe is internally inconsistent: the concrete anchor launches `bmm2.IterateAll(...)` and then consumes `gPV` in `runVecPhase2` without a visible `bmm2.WaitIterateAll(); bmm2.End();`, despite asserting every cube call must retire through that pair. The advertised cross-iteration overlap is also not represented by the loop shape, which waits on `bmm1` immediately and never pre-kicks next-iter `bmm1` before the current vector tail. Most importantly, the local `MTE3_MTE2` flag only orders same-AIV MTE3-to-MTE2 traffic; the text should justify or narrow any AIV-GM-write to subsequent `Matmul<>` cube-read handoff, because that is not the same as a local AIV MTE2 read. Revise to make the actual dependency graph, `WaitIterateAll/End` placement for both BMMs, and overlap schedule unambiguous before promotion."
+}

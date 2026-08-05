@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-mla-2026-05-10",
+  "candidate_id": "CAND-MLA-3",
+  "ts": 1778465684.7175076,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is generalizable and appears orthogonal to P-P75/CAND-FA1, but it should not be promoted as canonical yet because the candidate itself says `unverified_on: a5_ops` and its own \u201cPromote when\u201d gate is unmet. Revision should narrow it to an unverified candidate or add a5_ops evidence, and add hard preconditions: all participating AIV sub-blocks must reach the same `WaitAllCore` unconditionally, flag IDs must be proven user-owned/disjoint, and the pipe choice must be tied to the actual last producer pipe."
+}

@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-mla-2026-05-10",
+  "candidate_id": "CAND-MLA-4",
+  "ts": 1778465733.6750872,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\n\nThe principle is promising and cross-op transferable, but not ready for canonical promotion. The main issue is a layout contradiction: the trigger says input/output RoPE on interleaved pairs `(x0,x1,x2,x3,...)`, while the concrete anchor writes results as two contiguous halves `output[0:col/2]` and `output[col/2:]`; that is a gathered/half-half RoPE result unless a later reinterleave is required or the consumer expects half-half. Also fix the GatherMask terminology: pattern `1` selects zero-based even elements and pattern `2` selects zero-based odd elements, but the text calls them odd/even inconsistently. Finally, the entry itself says the exact shape is unverified in `a5_ops` and promotion requires a shipped a5_ops implementation plus measured vec-instruction/perf comparison, so canonical promotion is premature without tightening it to an unverified candidate or adding that evidence."
+}

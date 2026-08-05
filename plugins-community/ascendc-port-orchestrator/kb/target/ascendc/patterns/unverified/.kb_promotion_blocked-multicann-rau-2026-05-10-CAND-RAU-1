@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-rau-2026-05-10",
+  "candidate_id": "CAND-RAU-1",
+  "ts": 1778465890.2661805,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe algebra is generalizable, but the candidate has a serious contract contradiction around `o`: the merge formula `o = (s_a'/s) * o_a + (s_b'/s) * o_b` is correct when `o_a/o_b` are already normalized partial attention outputs, while the hard do-not-apply section says the opposite and claims the merge expects unnormalized accumulators. If `o_i` is unnormalized `sum(exp(score-m_i) * V)`, the output update is different. This must be fixed before canonical promotion; otherwise adopters can silently implement the wrong reducer. Also keep the fp32 order-sensitivity caveat, since \u201cassociative+commutative\u201d is only real-arithmetic true, not bit-exact floating point."
+}

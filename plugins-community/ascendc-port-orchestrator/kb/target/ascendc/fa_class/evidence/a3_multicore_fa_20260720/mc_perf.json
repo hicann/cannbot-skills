@@ -1,0 +1,18 @@
+{
+  "op": "libkfc_fa_multicore",
+  "target": "a3-ds",
+  "soc": "Ascend910_9382",
+  "npu_fusion_attention_on_a3": true,
+  "vendor_probe_err": null,
+  "perf": [
+    {
+      "shape": "B4N8S512D64",
+      "BN": 32,
+      "mine_median_us": 550.76,
+      "mine_min_us": 543.78,
+      "vendor_median_us": 102.3,
+      "vendor_min_us": 95.39,
+      "ratio_vendor_over_mine": 0.186
+    }
+  ]
+}

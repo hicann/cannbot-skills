@@ -1,0 +1,7 @@
+{
+  "run_id": "b07626d2d8a2",
+  "candidate_id": "CAND-FA4",
+  "ts": 1778465455.8332877,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is transferable, but the candidate is not canonical-ready because several shape contracts are internally inconsistent or under-specified. The `W=64` variant says a single stage suffices while its own comments require a second finish stage; final-stage repeat handling for `R` not divisible by 8 is not specified and can read/write padded row slots; the `W=512` \u201cfull-fan-in\u201d constraint is wrong (`R * W` divisible by 4096 means `R` must be a multiple of 8 for `W=512`, not merely `R \u2265 8`); and the mask-helper half ordering / `count==64` behavior needs public-doc or probe confirmation before promotion. The core idea is plausible, but canonical KB should not carry these ambiguous examples."
+}

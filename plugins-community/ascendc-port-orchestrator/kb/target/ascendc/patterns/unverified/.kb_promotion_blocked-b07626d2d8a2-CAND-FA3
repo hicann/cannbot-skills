@@ -1,0 +1,7 @@
+{
+  "run_id": "b07626d2d8a2",
+  "candidate_id": "CAND-FA3",
+  "ts": 1778465384.1548884,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is generalizable and does not conflict with P-P77/A-P61, but it is not promotion-ready as canonical because the body itself says `unverified_on: a5_ops` and its own \u201cPromote when\u201d gate has not been met. Keep it candidate-tier until an a5_ops multi-stage cube\u2194vec kernel implements the rotation, msprof shows real cross-stage overlap, and `knowledge_update.md` structurally proves the bounded-retention/release condition. Also tighten any \u201cif and only if\u201d wording to the exact case of `(MAX_LAG+1)` slots with reuse every iteration; larger rings or explicit release/credit protocols are valid generalizations."
+}

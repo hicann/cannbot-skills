@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-nsa-2026-05-10",
+  "candidate_id": "CAND-NSA-4",
+  "ts": 1778465864.7732704,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe core principle is generalizable and transferable, but it has sync-contract issues that must be fixed before canonical promotion: the text contains an invalid/inconsistent hard-event form (`WaitFlag<HardEvent::MTE3_V>` vs canonical `WaitFlag<HardEvent::V_MTE3>`), and its \u201cMTE writes intervene\u201d guidance conflicts with existing OL-128 on V220 where bare `TBuf<VECCALC>` \u2192 MTE3 `DataCopy` may read stale data even with `V_MTE3` fences. It also overstates determinism/safety for GM round-trips: `V_MTE3` only orders VEC before MTE3 consumption, not necessarily a later MTE2 read-back phase unless the full MTE3 completion/read-after-write ordering is specified. Revise with an explicit V220/OL-128 carve-out, precise event-direction wording, and narrower applicability to pure UB phase reuse unless a verified MTE boundary protocol is documented."
+}

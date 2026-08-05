@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-mla-2026-05-10",
+  "candidate_id": "CAND-MLA-1",
+  "ts": 1778465606.666206,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is plausible and cross-op transferable, but it is not promotion-ready as canonical KB because it explicitly remains unverified in a5_ops and even says promotion requires a future shipped latent-projection op plus measured benefit. It also has correctness/KB consistency issues: it references CAND-MLA-3 as the per-row RmsNorm pattern, but current CAND-MLA-3 is the whole-VEC repartition barrier; the skeleton wording permits `Matmul<>` while also relying on CAND-FA1 manual cross-core flags, which conflicts with CAND-FA1\u2019s hard exclusion unless proven disjoint; and the fused content/rope slice locality claim needs layout verification rather than being stated generally."
+}

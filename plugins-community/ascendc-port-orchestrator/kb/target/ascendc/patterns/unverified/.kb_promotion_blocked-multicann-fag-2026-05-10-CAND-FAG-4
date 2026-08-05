@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-fag-2026-05-10",
+  "candidate_id": "CAND-FAG-4",
+  "ts": 1778465567.5677898,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe FA-grad evidence is strong, but this is not ready for canonical promotion: it remains `unverified_on: a5_ops` and its own \u201cPromote when\u201d gate is unmet. It also overgeneralizes the trigger from \u201cmulti-output bwd with a provably shared expensive ancestor\u201d to effectively any N-output backward; several predicted transfers are weak as written, especially convolution and fused LN+Linear. The \u201c10x duplicated work\u201d claim is overstated because separate dV does not need dP/ds, and the `qkvIdx==2` scale skip is attention-specific, not a general multi-output rule."
+}

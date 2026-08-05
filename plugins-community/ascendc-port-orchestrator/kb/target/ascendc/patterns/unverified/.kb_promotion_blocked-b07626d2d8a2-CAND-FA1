@@ -1,0 +1,7 @@
+{
+  "run_id": "b07626d2d8a2",
+  "candidate_id": "CAND-FA1",
+  "ts": 1778465312.0466206,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nPromotion is blocked because the candidate\u2019s own evidence says `unverified_on: a5_ops` and its \u201cPromote when\u201d condition has not occurred. It also needs reconciliation with existing local references: `ascend950pr.md` says Set/Wait parameters must match including template args while this candidate mandates un-templated `CrossCoreWaitFlag`; translator/archive examples use `CrossCoreWaitFlag<0x2>` and sometimes flag `0x8`, conflicting with the proposed reserved/user-owned ID split; and `MAX_REVERSE_DEPTH = 16` should be reconciled with the documented max-count 15 wording. The `PIPE_MTE2` slot-free variant should be removed from canonical scope or clearly left as non-promoted evidence, since it is explicitly unverified for the FA anchor and a5_ops."
+}

@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-fag-2026-05-10",
+  "candidate_id": "CAND-FAG-2",
+  "ts": 1778465507.2688465,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is promotable, but this candidate has blocking correctness issues: it conflates unique ownership of `(s1,s2)` work tiles with unique ownership of output elements. In FA backward, `dq` is reduced over `s2` and `dk/dv` over `s1`, so a bijection over `(s1_tile,s2_tile)` alone still creates multiple writers to the same output row unless the owning core performs the full fixed-order reduction for that output region or writes to private workspace followed by deterministic merge. The concrete `AssignTile` anchor is also internally inconsistent: it omits `n2/g`, uses a local `taskId` but divides by `totalCores`, and the stated GCD proof is not sufficient to prove the shown mapping is bijective. Revise to separate \u201csingle writer per output element\u201d from \u201csingle executor per compute tile,\u201d and require a verified ownership/reduction scheme for `dq/dk/dv` before promotion."
+}

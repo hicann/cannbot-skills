@@ -1,0 +1,7 @@
+{
+  "run_id": "p0acw-r2-test",
+  "candidate_id": "CAND-FA1",
+  "ts": 1778470629.8164089,
+  "reason": "codex+claude_fallback both unavailable",
+  "codex_feedback": "claude fallback spawn failed: 'AgentResult' object has no attribute 'result_text'"
+}

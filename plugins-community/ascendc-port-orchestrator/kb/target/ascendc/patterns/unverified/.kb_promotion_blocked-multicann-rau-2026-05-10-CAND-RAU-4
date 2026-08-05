@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-rau-2026-05-10",
+  "candidate_id": "CAND-RAU-4",
+  "ts": 1778465632.2498226,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is transferable, but the candidate is too broad and has a few promotion-blocking precision issues: offset must be the aligned/padded tile extent, not necessarily logical `N`; alignment requirements must be stated generically per dtype/vector primitive, not only fp32 `N % 8`; the \u201ccache locality\u201d benefit is speculative and should be removed or downgraded; and examples like KV-cache append / 3-way packing stretch beyond the verified binary same-lifetime pair pattern. It also needs a clearer status label because current evidence is source-structure only and `a5_ops` remains unverified, so it should not present measured benefit as established."
+}

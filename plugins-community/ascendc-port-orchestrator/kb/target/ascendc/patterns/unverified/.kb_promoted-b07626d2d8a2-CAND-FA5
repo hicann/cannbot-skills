@@ -1,0 +1,11 @@
+{
+  "run_id": "b07626d2d8a2",
+  "candidate_id": "CAND-FA5",
+  "ts": 1778448596.3807163,
+  "promoted_to": "P-P89",
+  "codex_review": "approve",
+  "promoted": "CAND-FA5",
+  "target": "src/skills/references/target/ascendc/patterns/PATTERN_INDEX.md",
+  "new_id": "P-P89",
+  "block_size_lines": 49
+}

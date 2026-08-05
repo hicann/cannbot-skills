@@ -1,0 +1,7 @@
+{
+  "run_id": "multicann-nsa-2026-05-10",
+  "candidate_id": "CAND-NSA-2",
+  "ts": 1778465797.3031871,
+  "reason": "codex NEEDS_REVISION (no revised_body in feedback)",
+  "codex_feedback": "VERDICT: NEEDS_REVISION\nThe principle is transferable and orthogonal to existing row-reduction KB, but the candidate is not safe for canonical promotion yet: the concrete `Add` anchor silently casts both repeat stride and `repeat` to `uint8_t` while only guarding stride, so `S1_tile * G / (2p) > 255` can wrap; it also lacks a clear `K <= vector-mask lane limit` or chunk-over-`K` requirement, even though `mask=K` is not valid for arbitrary per-head column counts. The cost statement is also wrong: total pairwise `Add` repeats across all passes are `S1_tile * (G - 1)`, not `S1_tile * G / 2`. Fix those bounds/fallbacks and wording before promotion."
+}

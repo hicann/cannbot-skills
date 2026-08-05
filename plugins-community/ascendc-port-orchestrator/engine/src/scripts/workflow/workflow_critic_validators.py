@@ -663,11 +663,11 @@ def check_phase_O5_post_verify(ws: Path, rejections: list[Rejection]) -> None:
         # on CPU-side reverse-engineering simulations only, never running msprof on
         # the actual CANN reference call. User correction 2026-04-26 5_Cumsum.
         try:
-            ptxt = probe.read_text()
+            probe_text = probe.read_text()
         except Exception:
-            ptxt = ""
+            probe_text = ""
         has_requirement_verdict = bool(re.search(
-            r"(?im)^[\s\-\*]*Type\s*:\s*\*{0,2}\s*requirement\b", ptxt
+            r"(?im)^[\s\-\*]*Type\s*:\s*\*{0,2}\s*requirement\b", probe_text
         ))
         if has_requirement_verdict:
             outputs_dir = ws / "probes" / "probe_outputs"
