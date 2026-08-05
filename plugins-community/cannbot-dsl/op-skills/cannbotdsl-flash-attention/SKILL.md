@@ -11,9 +11,9 @@ FA 在这个 DSL 里最难的部分**不是数学**——online softmax 是死�
 
 ## 第 1 步 —— 把用户的需求定到一个变体
 
-如果用户要的组合不存在（例如"causal + mxfp8"），按**最难加上的那个维度**选蓝本：在 mxfp8 基础上加 GQA / causal mask 很机械（head 索引、mask 在 softmax 前）；但**在 FP16 基础上加 mxfp8 不机械**——它会动 L0 buffer 类型、scale buffer、copy engine、matmul 签名。深度 preload 只能基于 Channel FIFO 可表达的蓝本扩展；旧 nbuffer-preload 蓝本不能作为可编写 API 范例。
+如果用户要的组合不存在（例如"causal + mxfp8"），按**最难加上的那个维度**选蓝本：在 mxfp8 基础上加 GQA / causal mask 很机械（head 索引、mask 在 softmax 前）；但**在 FP16 基础上加 mxfp8 不机械**——它会动 L0 buffer 类型、scale buffer、copy engine、matmul 签名。深度 preload 只能基于 Channel 生产/消费顺序可表达的蓝本扩展；旧 nbuffer-preload 蓝本不能作为可编写 API 范例。
 
-> **sync 写法：channel-first。** depth-N 的 L1/L0/UB storage 用 `Channel(..., depth=N)`，单块无同步 scratch 用 `Buffer`；buf_id/sync_id 由框架自动管理，跨核 handoff 用 `kind=CrossCore`。旧蓝本中手工 NBuffer、外部指定 buf_id 或 MX 地址空间的公开前端 API 均已移除；`Buffer` 也不接受 L0A_MX/L0B_MX。如果一个旧 mxfp8/深流水方案必须手工多槽、精确 MX offset 且无法用 Channel 表达，当前应明确标为"前端不支持"，不得伪造替代 API。隐式 MX handle 由现有 `matmul` lowering 推导的 channel-first 路径可继续使用。
+> **sync 写法：channel-first。** depth-N 的 L1/L0/UB storage 用 `Channel(..., depth=N)`，单块无同步 scratch 用 `Buffer`。旧蓝本中手工 NBuffer 或 MX 地址空间的公开前端 API 均已移除；`Buffer` 也不接受 L0A_MX/L0B_MX。如果一个旧 mxfp8/深流水方案必须手工多级、精确 MX offset 且无法用 Channel 表达，当前应明确标为"前端不支持"，不得伪造替代 API。隐式 MX handle 由现有 `matmul` lowering 推导的 channel-first 路径可继续使用。
 
 挑好蓝本后，**先和用户确认**，一句话即可："我准备以 `<file>` 为蓝本，做这些调整：`<diff 列表>`，对不对？"
 
@@ -24,12 +24,12 @@ FA 在这个 DSL 里最难的部分**不是数学**——online softmax 是死�
 | Class | 作用 |
 | --- | --- |
 | `Source` | L1 / L0A / L0B / L0C / L0A_MX / L0B_MX / UB 的累加式字节分配器，返回 offset。手工填 offset 容易踩坑（见 `feedback_fp8_softmax_ub_overlap`），**永远走 Source 分配**。 |
-| `Matmul` | 包装 cube 侧所有 op：`load_q/k/v`、`load_scale_*`（仅 mxfp8）、`mm_qk`、`mm_pv[_chunk]`、`store_*`。持有 L0A/L0B/L0C Channel，用 depth 表示槽数。 |
+| `Matmul` | 包装 cube 侧所有 op：`load_q/k/v`、`load_scale_*`（仅 mxfp8）、`mm_qk`、`mm_pv[_chunk]`、`store_*`。持有 L0A/L0B/L0C Channel，用 depth 表示级数。 |
 | `Vector` | 包装 vec 侧 softmax：`atten_mask`、`online_Softmax[_first]`（preload 变体里是 4 个 `softmax_round_*_finalize_*`）、`store_p`、`init/update/finalize_o`。持有 UB buffer 与三 buffer 的 softmax_max/sum/exp 标量。 |
 | `BlockInfo` | 算 `(n_min, n_max)` 行 tile 范围——处理 causal 稀疏。 |
 | `FlashAttention` | 顶层编排。`__init__` 配置 tile 与 sparse_mode；`flash_attention_kernel` 是 `@kernel` 装饰的主循环；`run` 是 host 侧 `@jit` 入口。 |
 
-简单变体从最近的、已迁移为 Buffer/Channel 的可编译蓝本做减法。不得复制仍依赖已删除多槽 API 的旧变体。
+简单变体从最近的、已迁移为 Buffer/Channel 的可编译蓝本做减法。不得复制仍依赖已删除多级 API 的旧变体。
 
 ## 第 3 步 —— 写代码前先**算 buffer 预算**
 
@@ -43,7 +43,7 @@ Ascend 内存层级有硬上限：
 | L0B | ~64 KB | K tile（PV 时也是 V tile） |
 | L0C | ~256 KB | QK 与 PV 的 fp32 累加器 |
 
-超上限的表现是 **NPU error 507015**——编译干净，跑到 `torch.npu.synchronize()` 时报错。我们在这上面烧过好几天（见 `project_fa_mxfp8_preload_ub_oob`）。**在 `Matmul.__init__` / `Vector.__init__` 写第一行 alloc 之前，先在 docstring 里列出 buffer 预算表算一遍。**
+超上限的表现是设备错误——编译干净，跑到 `torch.npu.synchronize()` 时报错。我们在这上面烧过好几天（见 `project_fa_mxfp8_preload_ub_oob`）。**在 `Matmul.__init__` / `Vector.__init__` 写第一行 alloc 之前，先在 docstring 里列出 buffer 预算表算一遍。**
 
 预算模板与已知合法配置见 `references/buffer-budget.md`。
 
@@ -51,12 +51,12 @@ mxfp8 还有一个**关键坑**：`asc_mmad_mx` 跑 fp8 时，**只要 L0A / L0B
 
 ## 第 4 步 —— 规划 cube/vec PIPE sync
 
-CANNBotDSL 同步分两种通道（channel-first 下均由框架自动合成）：
+CANNBotDSL 同步分两种通道：
 
-- **4 相协议（acquire/commit/wait/release）**：ring-buffer slot 生命期锁。每个 Channel 的 `buf_id` 是一个通道，生产者/消费者要为整个 slot 生命周期持锁。
-- **跨 PIPE 点对点同步**：两个 PIPE 之间在 `(PIPE, buf_id)` 通道上的显式 happens-before。
+- **Channel 缓冲区生命期**：每个 Channel 的生产者/消费者要为整个缓冲区生命周期持锁。
+- **跨 PIPE 点对点同步**：两个 PIPE 之间的显式 happens-before。
 
-`*_sync_intra_*` 第一个参数 = **执行 wait/arrive 那一侧的 pipe**（规则见 `../../core-skills/cannbotdsl-cv-fusion/SKILL.md` §5 铁律 3）。搞反不报编译错，但会读到陈旧数据（见 `feedback_debug_dump_pipe_sync`）。
+`*_sync_intra_*` 第一个参数 = **执行 wait/arrive 那一侧的 pipe**。搞反不报编译错，但会读到陈旧数据（见 `feedback_debug_dump_pipe_sync`）。
 
 PIPE 含义（是动作类别，不是位置）：
 | PIPE | 动作 |
@@ -68,11 +68,15 @@ PIPE 含义（是动作类别，不是位置）：
 | `M` | Cube mmad |
 | `FIXPIPE` | L0C → UB / L0C → GM |
 
-FA 用到的 cube↔vec 同步模式（p_l1 交接、softmax 状态 triple-buffer、variant D 的 sp_l1 通道）走 channel-first：跨核 handoff Channel 用 `kind=CrossCore`，框架自动合成 arrive/wait；macro 级 triple-buffer 也用 `Channel(..., depth=3)` 表示存储与同步。如果旧 `[macro_idx % 3]` 手动多槽方案依赖 Channel 无法表达的自定义调度，则该方案当前不支持。
+FA 用到的 cube↔vec 同步模式（p_l1 交接、softmax 状态 triple-buffer、variant D 的 sp_l1 通道）走 channel-first：macro 级 triple-buffer 用 `Channel(..., depth=3)` 表示存储与同步。如果旧 `[macro_idx % 3]` 手动多级方案依赖 Channel 无法表达的自定义调度，则该方案当前不支持。
+
+**causal 变体的分发轴顺序**：causal 下每个 tile 的实际 kv 块数沿 m-block 轴变化（`nkb = mb+1`）。若 `idx2crd` 把 m-block 放最内层且 extent 整除 GRID，该轴取值每核恒定 → 最贵的核永远最贵。把 m-block 轴挪到 `idx2crd` 维度表最外层即可均衡，这是纯排列、数值逐位不变。详见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
 
 ## 第 5 步 —— 放对 `vf` fusion 区域
 
 `vf`（vector-fold）是把几个 vec op 融合到一个 AscendC vector 循环里、消掉中间 UB 写读的机制，是 FA 性能最大的旋钮。
+
+**若 shape 参数化导致常量随 shape 变化且需 `range_constexpr` 静态展开**（如 `MODE_P`/`BM`/`BN`/`CAUSAL` 全随 shape 变），三层类结构与框架约束冲突 —— `@jit`/`@kernel` 必须是模块级 `def`，实例属性做不到 trace 期就是 Python 值。此时退化为扁平模块级 `@jit` 函数 + 全局常量改写，`@jit` 铁律与 Channel 归属规则不变。详见 `../../core-skills/cannbotdsl-kernel-structure/SKILL.md` §1.1。
 
 三条规则：
 1. **`vf` 内禁止 runtime 分支**。`scf.if` 在 vf 里不会折叠。所以 preload 变体把 `softmax_round_b_finalize` 拆成 4 个直线函数（`first_has_second` / `first_no_second` / `more_has_second` / `more_no_second`），而不是一个带 `if has_second` 的。
@@ -115,9 +119,11 @@ FA 用到的 cube↔vec 同步模式（p_l1 交接、softmax 状态 triple-buffe
 pytest -m ascendc_toolchain <case> -q
 ```
 
-报 507015 → buffer 预算溢出（UB 通常是元凶）。在纸上算一遍，找出超 256 KB 的那一笔，把双 buffer 降单 buffer 或缩 tile。
+报设备错误 → buffer 预算溢出（UB 通常是元凶）。在纸上算一遍，找出超 256 KB 的那一笔，把双 buffer 降单 buffer 或缩 tile。
 
 `unit_scale` 测试精度挂（输入全 1、K=1）→ 是数学 bug，不是量化。先查 softmax_max/sum 的三 buffer 索引，再查 `vf` 的 outputs 列表。能撑到精度挂这一步的疑案，大概率是 `references/pitfalls.md` 里的某条。
+
+**性能验证前先判吞吐受限 vs 延迟受限**：FA 的 vec 段优化（减指令 vs 重排交错）收益天差地别。UNROLL 1/2/4 时间基本不变 = 吞吐受限（只有删指令有用）；变 = 延迟受限（重排有效）。别靠 `cycles/op vs 理想 IPC` 推断。详见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 2 步。
 
 ## References
 

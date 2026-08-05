@@ -12,7 +12,7 @@ CANNBotDSL 算子设计方法论。Architect sub-agent 在 Stage 2 使用；输�
 ## 使用前提
 
 - 设计前先用 `cannbotdsl-api-reference` 查已知框架限制，避免设计出无法实现的方案。
-- 涉及 Buffer 层次先读 `../cannbotdsl-tiling-design/SKILL.md`；涉及 VF 先读 `../cannbotdsl-vf-fusion/SKILL.md`，涉及 Channel 先读 `../cannbotdsl-channel/SKILL.md`。
+- 涉及 Buffer 层次先读 `../cannbotdsl-tiling-design/SKILL.md`；涉及 VF 先读 `../cannbotdsl-vf-fusion/SKILL.md`。
 - **真实 API 以源码为准**：真实 buffer 分配 API 与容量上限以源码为准。
 
 ## 1. 算子分类路由
@@ -45,13 +45,11 @@ UB   ~256 KB  vector 工作区
 
 > **L0C 实测为 256 KB**（`_onchip.py:_MEM_LOC_CAPACITY_BYTES`），上表的 128 KB 偏保守。
 
-Channel lowering 使用 `buf_id ∈ [0,31]` 的硬件锁；这些 ID 由框架自动分配。Buffer 不消耗 buf_id。
+Buffer 无同步语义。
 
-### 2.0 L0A/L0B 紧张时：生命周期不重叠的操作数可显式别名
+### 2.0 L0A/L0B 紧张时：显式别名是**下策**，先确认真的装不下
 
-attention 类算子有两个串行 matmul（QK 与 PV），左操作数形状不同（`(BM,D)` 与 `(BM,BN)`）。各自独立分配时，D=256 需 64 KB + 32 KB > 64 KB 上限。
-
-**两个 matmul 被中间的 vec 段隔开、生命周期不重叠**，因此可共用同一块 L0A：
+attention 类算子有两个串行 matmul（QK 与 PV），左操作数形状不同（`(BM,D)` 与 `(BM,BN)`）。各自独立分配时，D=256 需 64 KB + 32 KB > 64 KB 上限。一个自然想法是让它们共用同一块 L0A：
 
 ```python
 a_q = Channel(MemLoc.L0A, shape=(BM, D),  dtype=dtypes.float16, depth=1, addr=0)
@@ -60,12 +58,32 @@ a_p = Channel(MemLoc.L0A, shape=(BM, BN), dtype=dtypes.float16, depth=1, addr=0)
 
 显式 `addr=` 让别名成为**有意声明**而非分配顺序的偶然（框架 docstring 明确认可："Explicit addresses may intentionally alias an earlier allocation"）。
 
-**使用前必须自证三条**（写进 DESIGN.md）：
-1. 两个操作数的**活跃区间确实不重叠**（中间有 vec 段等串行点，不是靠"应该不会同时用"）；
-2. 别名块大小取 `max(两者字节)`，且仍在容量内；
-3. **无 double buffer** —— 一旦某操作数 `depth≥2`，环形 slot 会打破不重叠假设。
+> ⚠ **但"框架认可"只到地址层为止：别名没有任何同步保护。先读完本节再决定用不用。**
+>
+> 两个别名 channel 的地址重叠对同步层完全不可见，没有任何 pass 会因为二者同址而串行化它们。
+>
+> **跨迭代竞态**（真实失效路径，不是理论担忧）：
+> ```
+> MTE1: l0a_q(n) l0b_k(n) l0a_p(n) l0b_v(n) │ l0a_q(n+1) ...
+> M   : QK(n)                       PV(n)   │ QK(n+1)   ...
+> ```
+> `MTE1(l0a_p)(n)` 阻塞在 P 的跨核到达上；一旦 P 到达，`M(PV)(n)`（lhs 刚就绪）与 `MTE1(l0a_q)(n+1)`（唯一门禁是 `l0a_q` 自己的 WAR 锁，早在 `QK(n)` 后就释放）**同时可发射，且写同一批字节**。
+>
+> **关键**：自证第 1 条"活跃区间不重叠"若只看**单次迭代内**的数据依赖，会得出安全的错误结论 —— 而 `k_l1`/`v_l1` 取 `depth=2` 的全部意义就是让**相邻迭代重叠**，重叠一生效别名就破。**别名操作数自己 `depth=1` 不构成保护。**
+>
+> **实测**：去掉数据依赖后别名立刻静默算错（QK max_abs **78.45**）；四通道分开则 1.5e-5 / 9.5e-6 正常。编译无告警、运行无 fault。
 
-**实测收益**：GQA 通用版靠这条把 L0A/L0B 从"恰好 100%、零余量"降到 50%，同时让 D=256 装得下。**代价**：后续给 L0 加 DB 必须先撤销别名。
+**决策顺序**：
+
+1. **先算不别名装不装得下** —— 四个独立通道 `l0a_q (BM,D)` + `l0a_p (BM,BN)`、`l0b_k (BN,D)` + `l0b_v (D,BN)`，逐个 (mode, BM, BN, D) 组合核对。实测某 GQA 全量配置**最坏恰好 100% 用满 64 KB、零溢出** —— 当初逼出别名的是自设的「L0 ≤ 半容量」余量规则，不是硬件。**别为一条自设的余量规则去换一个静默竞态。**
+2. 真的装不下 → 先调 tile（降 BM/BN）。
+3. 仍不行才考虑别名，且**必须自证三条**（写进 DESIGN.md）：
+   1. 两个操作数的**活跃区间确实不重叠**，且论证必须覆盖**跨迭代**（不能只看单次迭代内的数据依赖）；
+   2. 别名块大小取 `max(两者字节)`，且仍在容量内；
+   3. **无 double buffer** —— 一旦某操作数 `depth≥2`，多级缓冲轮转会打破不重叠假设。
+4. 用了别名就**记录一条硬约束**：后续给 L0 加 DB 必须先撤销别名。
+
+**代价对照**：别名把 L0 占用减半，代价是一个同步层看不见、只在流水重叠时才暴露的静默竞态。绝大多数情况下，**不别名 + 合适的 tile 是更好的交易**。
 
 **真实分配 API**：
 
@@ -75,48 +93,36 @@ Buffer(mem_loc, shape, dtype, *, addr=None, stride=None,
        data_format=None, n1_pad=0)
 
 # depth-N / double buffer / 同步存储
-Channel(mem_loc, shape, dtype, *, depth, kind=ChannelKind.SameCore,
+Channel(mem_loc, shape, dtype, *, depth,
         addr=None, stride=None, data_format=None, n1_pad=0)
 ```
 
-> Buffer 与 Channel 共用地址 arena；`addr=None` 自动 bump 分配，显式 `addr=` 可声明有意 alias。Buffer 始终只有一块，不带 buf_id/sync_id。旧 NBuffer、`make_*`、`make_buf/make_nbuf` 已移除；无法由 Channel 表达的旧手动多槽方案当前不受支持，不要伪造替代 API。
+> Buffer 与 Channel 共用地址 arena；`addr=None` 自动 bump 分配，显式 `addr=` 可声明有意 alias。Buffer 始终只有一块，无同步语义。旧 NBuffer、`make_*`、`make_buf/make_nbuf` 已移除；无法由 Channel 表达的旧手动多级方案当前不受支持，不要伪造替代 API。
 
 **字节计算**：
 
 ```
-bytes_per_slot = prod(shape) * (dtype.width // 8)
-total_bytes    = num_slots * aligned(bytes_per_slot, align)
+bytes_per_buffer = prod(shape) * (dtype.width // 8)
+total_bytes    = num_buffers * aligned(bytes_per_buffer, align)
 ```
 
-dtype 宽度：`dtypes.float16/bfloat16 = 16`，`dtypes.float32/int32 = 32`，`dtypes.int64 = 64` bit。Buffer 占一个 slot；Channel 总占用按 `depth` 个物理 slot 核算。
+dtype 宽度：`dtypes.float16/bfloat16 = 16`，`dtypes.float32/int32 = 32`，`dtypes.int64 = 64` bit。Buffer 占一块；Channel 总占用按 `depth` 级核算。
 
 **对齐要求**：vector UB 访问需 32B 对齐 —— per-row 标量要 pad 到 32B stride（fp16 → 16 elems/row，fp32 → 8 elems/row，见 §5 的 `SM_MAX_STRIDE`）。矩阵 tile 的 NZ 物理形状：`m0=16, n0=32//dtype_bytes`，logical (M,N) → 4D `(n1, m1, m0, n0)`。
-
-### 2.1 Channel 硬件 slot 预算表（强制产出）
-
-字节预算够不代表硬件 Channel 资源够。列出每个 Channel 的 `depth`、kind 和所属硬件池；具体 buf_id/sync_id 由 arena 自动选择，用户文档不得手工指定。
-
-| storage | mem_loc | 表示 | buf_id slots | sync_id slots | 用途 |
-|---------|---------|------|:------------:|:-------------:|------|
-| 例 `state` | UB | Buffer | 0 | 0 | vec 单块驻留状态 |
-| 例 `cv_ub` | UB | CrossCore Channel depth 2 | 2（auto） | 2（auto） | QK 结果跨核交接 |
-| 例 `p_ub` | UB | SameCore Channel depth 2 | 2（auto） | 0 | softmax P |
-
-核算规则：CUBE/Vec buf_id pool 各最多 32 slot；所有 CrossCore Channel 的全局 `Σ depth ≤ 8`；Buffer 不进入两种 ID 预算。显式同址 Buffer/Channel alias 只影响地址容量和生命周期证明，不改变 ID 分配。若硬件 slot 超限，降低 depth 或拆 kernel。
 
 ## 3. 4 轮迭代设计法
 
 | 轮次 | 步骤 | 产出 | 锁定的决策 |
 |------|------|------|-----------|
 | **R1 计算图 + dtype 路由** | 画 op DAG，标注每条边 dtype 与精度提升点（如 softmax：fp16 in → fp32 做 exp/reduce → cast 出）；判断是否含 matmul 定硬件路径 | 带 dtype 标注的计算图 + 类别归属（§1） | 硬件路径（纯 Vec/纯 Cube/C-V Mix）、每个中间量的存储 dtype |
-| **R2 Buffer 预算 + Tiling** | 选 tile 尺寸；枚举所有 on-chip storage，用 §2 公式算字节，逐层对硬限制加和；核算 Channel 自动 ID slot | storage 清单（Buffer/Channel、mem_loc/shape/dtype/depth/字节）+ 各层占用合计 | tile 大小、ring depth、Channel slot 预算、对齐 |
+| **R2 Buffer 预算 + Tiling** | 选 tile 尺寸；枚举所有 on-chip storage，用 §2 公式算字节，逐层对硬限制加和 | storage 清单（Buffer/Channel、mem_loc/shape/dtype/depth/字节）+ 各层占用合计 | tile 大小、Channel depth、对齐 |
 | **R3 流水方案 + 伪代码** | 定 preload 深度与 prologue/main/epilogue；写 channel-first `mem_copy/matmul/muls` + 计算 op 伪代码，标 PIPE（MTE2 load / MTE1 L1→L0 / M mmad / FIXPIPE 输出 / V 向量） | kernel 体伪代码（含 pipe 标注与 depth 决策） | 同步序列、pipe 分配、cursor vs 显式 `[i%N]` 索引 |
 | **R2.5 设计期 API 可行性检查** | 逐表确认设计中每个 buffer 的数据流方向、vec 实现路径、tile_view 维度是否在框架能力范围内 | 三张检查表（表 1/2/3）的逐条确认记录 | vec 实现路径（高层 API vs raw-VF）、Buffer 中转方案、tile_view 维度策略 |
-| **R4 交叉验证** | 逐 tile 推演 ring slot 不冲突；核对 get/release 成对且顺序与数据流一致（防 ticket-lock 死锁）；核对精度契约（golden 与 device fp16 round 对齐） | slot 冲突推演表 + 死锁检查 + golden 对齐说明 | 可编译无死锁、数值精度容差 |
+| **R4 交叉验证** | 逐 tile 推演缓冲不冲突；核对生产/消费顺序与数据流一致（防死锁）；核对精度契约（golden 与 device fp16 round 对齐） | 缓冲冲突推演表 + 死锁检查 + golden 对齐说明 | 可编译无死锁、数值精度容差 |
 
 ### R2.5 设计期 API 可行性检查
 
-> **关键原则：vec 计算优先使用 `vf(mode='raw')` 模式。** 在 CV 融合算子（含 CrossCore channel + 动态循环）中，高层结构化 vec API（`expand`/`muls`/`cast`/`reduce_max`/`reduce_sum` 等）的 VF 自动归组脆弱，raw-VF 是最可靠的 vec 实现路径。R3 伪代码应以 raw-VF 为基准编写 vec 段。
+> **关键原则：vec 计算优先使用 `vf(mode='raw')` 模式。** 在 CV 融合算子（含跨核 channel + 动态循环）中，高层结构化 vec API（`expand`/`muls`/`cast`/`reduce_max`/`reduce_sum` 等）的 VF 自动归组脆弱，raw-VF 是最可靠的 vec 实现路径。R3 伪代码应以 raw-VF 为基准编写 vec 段。
 
 在 R2 Buffer 预算完成、R3 伪代码编写之前，必须逐表确认以下三项。任一未通过则需调整设计。代码示例见 `references/api-feasibility-checklist.md`。
 
@@ -126,8 +132,8 @@ dtype 宽度：`dtypes.float16/bfloat16 = 16`，`dtypes.float32/int32 = 32`，`d
 |--------|---------|---------|------|
 | `expand` op | 任何位置使用 | `vf-transform found no template for operation 'cannir.expand'` | raw-VF `vload` + `vdup_lane0` 替代广播 |
 | 不同 shape vec op 相邻 | 如 `(64,128)` 和 `(64,1)` 的 `muls` 被 VF grouping 合并 | `vector elementwise operands require matching logical shapes` | 在不同 shape 的 vec op 之间插入 DMA 操作打断 grouping |
-| 动态循环内 CrossCore channel | 动态 `range` + CrossCore channel 操作数 | Channel shape 变为 `(-1,N)`，VF grouping 失败 | vec 段全部用 `vf(mode='raw')` |
-| 高层 API in-place channel | `muls(ch, ch, scalar)` 在 channel 无 producer 时 | `in-place use of a channel with no producer, slot would never be filled` | pre-loop 首迭代在循环外建立 producer |
+| 动态循环内跨核 channel | 动态 `range` + 跨核 channel 操作数 | Channel shape 变为 `(-1,N)`，VF grouping 失败 | vec 段全部用 `vf(mode='raw')` |
+| 高层 API in-place channel | `muls(ch, ch, scalar)` 在 channel 无 producer 时 | `in-place use of a channel with no producer, buffer would never be filled` | pre-loop 首迭代在循环外建立 producer |
 
 **表 2 — Channel 与 Buffer 数据流约束**
 
@@ -135,7 +141,7 @@ dtype 宽度：`dtypes.float16/bfloat16 = 16`，`dtypes.float32/int32 = 32`，`d
 |-----------|:-------:|------------|
 | GM → Buffer (`mem_copy(buffer, gm)`) | 可行 | 直接 `mem_copy` |
 | Buffer → GM (`mem_copy(gm, buffer)`) | **不可行，输出全零** | `muls(channel, buffer, 1.0)` → `mem_copy(gm, channel)` |
-| CrossCore channel → Buffer (`mem_copy(buffer, channel)`) | **不可行，输出全零** | `muls(buffer, channel, scalar)` |
+| 跨核 channel → Buffer (`mem_copy(buffer, channel)`) | **不可行，输出全零** | `muls(buffer, channel, scalar)` |
 | Buffer → channel (`mem_copy(channel, buffer)`) | 可行 | 直接 `mem_copy` |
 | channel → channel (`muls(dst_ch, src_ch, scalar)`) | 可行 | 直接 `muls` |
 
@@ -152,40 +158,40 @@ dtype 宽度：`dtypes.float16/bfloat16 = 16`，`dtypes.float32/int32 = 32`，`d
 
 - **简单**（纯 elementwise / 单归约，单 vf 段，UB-only，无跨核）→ 跳过模块验证，直接完整实现 + translate 断言 + 一个 NPU precision test。
 - **中等**（online softmax 类：多 vf 段 + 跨 tile 状态 running max/sum，或纯 Cube tiled matmul）→ 验 **2–3 个模块**：(1) 单段 vf 数值正确，(2) 跨 tile 状态校正，(3) buffer layout/32B 对齐。translate + CPU + NPU 三重 test。
-- **复杂**（C/V Mix、attention、动态 shape、多核尾核分发）→ 验 **4–6 个模块**：tiling/尾核分发、L1 ring slot 推演、跨核 sync token、Cube 累加、vec tail、动态 shape（`Dim` + `TensorSpec` + staged `.compile()`，并覆盖约束与维度关系的缓存身份）。
+- **复杂**（C/V Mix、attention、动态 shape、多核尾核分发）→ 验 **4–6 个模块**：tiling/尾核分发、L1 缓冲推演、跨核 sync token、Cube 累加、vec tail、动态 shape（`Dim` + `TensorSpec` + staged `.compile()`，并覆盖约束与维度关系的缓存身份）。
 
 ## 5. 真实最小 kernel 骨架
 
-### 5.0 默认范式：channel-first（真机验证）
+### 5.0 默认范式：channel-first
 
-**新算子默认这样写**：声明 `Channel`（只给 `depth` 和 `kind`），直接把它当操作数传给 `mem_copy/matmul/muls/…`，acquire/commit/wait/release 4 相协议由框架自动合成，buf_id/sync_id 自动分配（用户不指定）。
+**新算子默认这样写**：声明 `Channel`（只给 `depth`），直接把它当操作数传给 `mem_copy/matmul/muls/…`。
 
-跨核 C/V mix 最小骨架（零手写 4 相原语）：
+跨核 C/V mix 最小骨架：
 
 ```python
 from cannbotdsl.channel import Channel
 from cannbotdsl import dtypes
 from cannbotdsl.math import matmul, muls
 from cannbotdsl.tensor import tile_view, make_copy_engine, mem_copy
-from cannbotdsl.typing.types import ChannelKind, MemLoc
+from cannbotdsl.typing.types import MemLoc
 
-a_l1  = Channel(MemLoc.L1,  shape=(tile_m, tile_k), dtype=dtypes.float16, depth=2)  # depth≥2 → DB，框架合成 ring
+a_l1  = Channel(MemLoc.L1,  shape=(tile_m, tile_k), dtype=dtypes.float16, depth=2)  # depth≥2 → DB
 l0a   = Channel(MemLoc.L0A, shape=(tile_m, tile_k), dtype=dtypes.float16, depth=2)
-l0c   = Channel(MemLoc.L0C, shape=(tile_m, tile_n), dtype=dtypes.float32, depth=1)  # K-loop 同 slot 累加
-cv_ub = Channel(MemLoc.UB,  shape=(tile_vm, tile_n), dtype=dtypes.float32, depth=2, kind=ChannelKind.CrossCore)  # 跨核 handoff
+l0c   = Channel(MemLoc.L0C, shape=(tile_m, tile_n), dtype=dtypes.float32, depth=1)  # K-loop 同级累加
+cv_ub = Channel(MemLoc.UB,  shape=(tile_vm, tile_n), dtype=dtypes.float32, depth=2)  # 跨核 handoff
 out_ub = Channel(MemLoc.UB, shape=(tile_vm, tile_n), dtype=dtypes.float32, depth=2)
 nd2nz   = make_copy_engine(format_transform="nd2nz", dtype=dtypes.float16, pad_value=0.0)
 fixpipe = make_copy_engine(dtype=dtypes.float32, dual_dst_ctl=1)
 
-mem_copy(a_l1, a_gm, engine=nd2nz)   # Channel 直接做 dst，4 相协议自动合成
+mem_copy(a_l1, a_gm, engine=nd2nz)   # Channel 直接做 dst
 mem_copy(l0a, a_l1)                   # 既做 dst 又做 src
 matmul(l0c, l0a, l0b)                 # K-loop 累加器由框架识别（仅 matmul）
-mem_copy(cv_ub, l0c, engine=fixpipe)  # 跨核 CUBE→VEC，kind=CrossCore 仍显式声明
-muls(out_ub, cv_ub, scale)            # vec 侧原地事务也自动合成
+mem_copy(cv_ub, l0c, engine=fixpipe)  # 跨核 CUBE→VEC
+muls(out_ub, cv_ub, scale)            # vec 侧原地事务
 mem_copy(tile_view(out_gm, (tile_vm, tile_n), (subblock_idx, 0)), out_ub)
 ```
 
-> `depth`、`kind`、软件流水结构（prologue/steady/epilogue、跨核环形依赖的 lag-N）是算法决策，框架推不出，须显式写。channel-first 是**同步去样板器，不是流水调度器**（见 §6 / `cannbotdsl-channel`）。
+> `depth` 与软件流水结构（prologue/steady/epilogue、跨核反馈依赖的 lag-N）是算法决策，框架推不出，须显式写。
 
 ## 6. 同步方案选型（强制产出，进 DESIGN.md）
 
@@ -193,22 +199,22 @@ mem_copy(tile_view(out_gm, (tile_vm, tile_n), (subblock_idx, 0)), out_ub)
 
 | 方案 | 机制 | 优点 | 代价 / 上限 |
 |------|------|------|------------|
-| **Channel (channel-first)** | ring-buffer 抽象，`Channel(mem_loc,...,depth=N)` 直接传给 `mem_copy`/`matmul`/…，4 相协议由框架自动合成 | 大幅减少手动 sync 记账、跨核 handoff 不易死锁、加深流水只改 `depth` | CrossCore Channel **最大 8 slot**（见 `cannbotdsl-api-reference` 已知限制），超过需拆分 |
+| **Channel (channel-first)** | depth-N 多级缓冲抽象，`Channel(mem_loc,...,depth=N)` 直接传给 `mem_copy`/`matmul`/… | 大幅减少手动 sync 记账、加深流水只改 `depth` | 跨核 Channel 过多时需拆分（见 `cannbotdsl-cv-fusion` §4.2） |
 
 **决策信号**：
 
-- **默认 channel-first**（含纯核内单生产单消费 DoubleBuffer）：一个 `SameCore` Channel + `depth=2` 就零手写、零 buf_id 记账拿到 DB；跨核 handoff 用 `kind=CrossCore`。
+- **默认 channel-first**（含纯核内单生产单消费 DoubleBuffer）：一个 Channel + `depth=2` 就拿到 DB。
 - 跨核 Cube↔Vec 多通道 handoff、preload_num ≥ 3 的宏流水、sync 通道数 ≥ 4 → channel-first 收益最大。
-- **CrossCore 在途 slot > 8** → 拆 kernel（中间量落 GM），拆分决策见 `cannbotdsl-cv-fusion` §4.4。
+- **跨核 handoff 过多** → 拆 kernel（中间量落 GM），拆分决策见 `cannbotdsl-cv-fusion` §4.2。
 
 **产出要求**：DESIGN.md 的同步通道表前，写一句选型结论 + 理由。关键是**决策被记录、理由可追溯**。示例：
 
-- 选 **channel-first**："跨核通道 3 条、preload_num=2，全部落在框架可合成的事务形态（per-op / 单 K-loop 累加 / 消费者原地事务），无跨兄弟循环累加器 → channel-first，buf_id/sync_id 交 arena，只显式声明 depth 和 CrossCore。"
+- 选 **channel-first**："跨核通道 3 条、preload_num=2，无跨兄弟循环累加器 → channel-first，只显式声明 depth。"
 
 ## 7. 流水编排设计（强制产出，进 DESIGN.md）
 
-Tiling 定"切多大"、Channel depth 定"多少 slot 在途"，本节定"怎么让搬运与计算重叠"。
-**double buffer 不是纯性能旋钮**：它同时改地址预算（`depth × bytes`）、Channel buf_id/sync_id slot 预算和 ring 同步。事后再加 ≈ 重做 §2 / §2.1 / §4，故必须在**设计阶段决策、初版实现即落地**，不能整体推给 Perf-Tune。
+Tiling 定"切多大"、Channel depth 定"多少级在途"，本节定"怎么让搬运与计算重叠"。
+**double buffer 不是纯性能旋钮**：它同时改地址预算（`depth × bytes`）和多级同步。事后再加 ≈ 重做 §2 / §4，故必须在**设计阶段决策、初版实现即落地**，不能整体推给 Perf-Tune。
 
 ### 7.1 两类流水，两种时机
 
@@ -221,22 +227,21 @@ Tiling 定"切多大"、Channel depth 定"多少 slot 在途"，本节定"怎么
 
 ### 7.2 三类流水的重叠策略（逐条产出）
 
-1. **Cube 核内**（Matmul / Composite 必产）：`MTE2(GM→L1)→MTE1(L1→L0)→M(mmad)→FIXPIPE(L0C→UB)` 四 PIPE 在相邻 tile / K-step 上重叠。L0A/L0B 上 `depth=2` 让"载入 k+1"与"mmad k"并行；K-loop 累加同一 L0C slot。详见 `../cannbotdsl-perf-optimize/SKILL.md`。
+1. **Cube 核内**（Matmul / Composite 必产）：`MTE2(GM→L1)→MTE1(L1→L0)→M(mmad)→FIXPIPE(L0C→UB)` 四 PIPE 在相邻 tile / K-step 上重叠。L0A/L0B 上 `depth=2` 让"载入 k+1"与"mmad k"并行；K-loop 累加同一 L0C 缓冲区。详见 `../cannbotdsl-perf-optimize/SKILL.md`。
 2. **Vec 核内**（含 Vec epilogue 必产）：`MTE2(GM→UB)→V(compute)→MTE3(UB→GM)` 三 PIPE 重叠；输入/输出 UB 上 `depth=2` 让"载入 tile n+1"、"算 tile n"、"存 tile n-1"并行。详见 `../cannbotdsl-perf-optimize/SKILL.md`。
-3. **Cube↔Vec 核间**（C/V Mix / Attention 必产）：Cube fixpipe 写 `cv_ub[slot b]` 的同时 Vec 消费 `cv_ub[slot a]`，靠 CrossCore Channel `depth≥2` 解耦；`depth=1` 则 Cube 与 Vec 严格串行、跨核流水失效。CrossCore ≤8 slot。
+3. **Cube↔Vec 核间**（C/V Mix / Attention 必产）：Cube fixpipe 写 `cv_ub[缓冲 b]` 的同时 Vec 消费 `cv_ub[缓冲 a]`，靠跨核 Channel `depth≥2` 解耦；`depth=1` 则 Cube 与 Vec 严格串行、跨核流水失效。
 
 ### 7.3 depth 决策回填（硬要求）
 
 每个 on-chip buffer 给一行 depth 决策，并把结果**回填**：
-- §2 Buffer 预算表：字节按 `depth × slot_bytes` 重算，再对硬限制（L1 512KB / L0A/B 64KB / L0C 128KB / UB 256KB）校验。
-- §2.1 Channel slot 表：`depth≥2` 的 Channel 占用 `depth` 个自动 buf_id slot；CrossCore 还占同数 sync_id。Buffer 只能是单块、depth 不适用。
+- §2 Buffer 预算表：字节按 `depth × buffer_bytes` 重算，再对硬限制（L1 512KB / L0A/B 64KB / L0C 128KB / UB 256KB）校验。
 
 | buffer | 建议 depth | 理由 |
 |--------|:---------:|------|
 | L0A / L0B tile | 2 | 载入与 mmad 重叠（常规 DB） |
 | cv_ub (Cube→Vec) | 2 | 解耦跨核，Cube 不等 Vec |
 | Vec 输入/输出 UB | 2 | 载入/计算/写回三段重叠 |
-| L0C 累加器 | 1 | K-loop 同 slot 累加，无 DB 收益 |
+| L0C 累加器 | 1 | K-loop 同级累加，无 DB 收益 |
 | 单发不复用的常驻量 | 1 | 无相邻 tile 重叠收益 |
 
 ### 7.4 与 Perf-Tune 的边界
@@ -245,17 +250,16 @@ Tiling 定"切多大"、Channel depth 定"多少 slot 在途"，本节定"怎么
 
 ## 输出模板
 
-**TILING.md**：多级 tiling（GM/L1/L0/UB tile shape）、Buffer/Channel 预算表（每项字节 + 各层合计 ≤ 硬限制）、**Channel 硬件 slot 表（§2.1）**、depth 配置、Tail block 策略、验证策略（简单/中等/复杂）。
+**TILING.md**：多级 tiling（GM/L1/L0/UB tile shape）、Buffer/Channel 预算表（每项字节 + 各层合计 ≤ 硬限制）、depth 配置、Tail block 策略、验证策略（简单/中等/复杂）。
 
-**DESIGN.md**：架构概览、Kernel 类结构、Buffer 分配表、**同步方案选型结论 + 理由（§6）**、**流水编排（§7：Cube 核内 / Vec 核内 / Cube↔Vec 核间三类流水重叠策略 + 每 buffer 的 DB 深度决策，回填预算/buf_id）**、同步通道表、VF 融合区域、多核 dispatch、伪代码（含 shape/dtype 标注）、AOT 动态 shape 方案（如适用）。
+**DESIGN.md**：架构概览、Kernel 类结构、Buffer 分配表、**同步方案选型结论 + 理由（§6）**、**流水编排（§7：Cube 核内 / Vec 核内 / Cube↔Vec 核间三类流水重叠策略 + 每 buffer 的 DB 深度决策，回填预算）**、同步通道表、VF 融合区域、多核 dispatch、伪代码（含 shape/dtype 标注）、AOT 动态 shape 方案（如适用）。
 
 ## 门禁
 
 - 所有 mem_loc 的 Total bytes ≤ 硬限制才能输出 TILING.md。
-- **Channel 硬件 slot 表完整；buf_id/sync_id 均标 auto，并验证 CUBE/Vec 各 ≤32、CrossCore `Σ depth≤8`（§2.1）。Buffer 标 0 个 ID slot。**
 - **含跨核 handoff / 深流水的算子已显式做同步方案选型（§6）并在 DESIGN.md 记录理由。**
-- **流水编排设计已产出（§7）**：Cube 核内 / Vec 核内 / Cube↔Vec 核间三类流水各自的重叠策略（按算子类别必产项）+ 每个 buffer 的 DB 深度决策；depth 默认 2，选 `depth=1` 须逐条论证；深度已回填 §2 预算表与 §2.1 buf_id 表。常规 double buffer 属设计+实现范围，**不得整体推给 Perf-Tune**，仅 macro 级深流水(preload_num≥3)可延后。
-- 同步通道表完整列出所有 Channel 4 相协议预期配对（acquire↔commit、wait↔release）。
+- **流水编排设计已产出（§7）**：Cube 核内 / Vec 核内 / Cube↔Vec 核间三类流水各自的重叠策略（按算子类别必产项）+ 每个 buffer 的 DB 深度决策；depth 默认 2，选 `depth=1` 须逐条论证；深度已回填 §2 预算表。常规 double buffer 属设计+实现范围，**不得整体推给 Perf-Tune**，仅 macro 级深流水(preload_num≥3)可延后。
+- 同步通道表完整列出所有 Channel 的生产/消费配对。
 - VF 区域声明完整 outputs 列表。
 - 必须输出验证策略决策。
 - **R2.5 三张检查表（表 1/2/3）逐条确认通过后才可进入 R3。**

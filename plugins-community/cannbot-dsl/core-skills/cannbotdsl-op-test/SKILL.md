@@ -90,6 +90,25 @@ at_limit = (m_big["MERE"] <= 1.5 * m_big_floor["MERE"] and ...)   # 逐项比 id
 
 ## L2：边界 + AOT 动态 shape
 
+### L2.0 先问一句：benchmark 全过，到底覆盖了什么？
+
+**一份官方用例集全绿，不等于算子对它自己声称支持的输入都正确。** benchmark 的 shape 按典型场景选，不按实现的分支选 —— 它天然覆盖不到"host 规划器接受、但没人测过"的几何。
+
+**做法：把规划器接受的域枚举出来，减去用例集覆盖的域，差集就是要补的 L2。** 用脚本枚举，别目测：
+
+```python
+covered = {plan(c.shape) for c in cases}          # 用例集实际覆盖的几何
+for shape in enumerate_accepted_shapes():         # 规划器接受的全部组合
+    if plan(shape) not in covered:
+        print("untested geometry:", shape)        # ← 这些才是 L2 该测的
+```
+
+同时对每条**被拒绝**的 shape 确认它是**干净拒绝**（host 抛异常、不下发设备），而不是算出错数。
+
+> **实测**（GQA）：20 个官方用例的 `G ∈ {4,12,16}` 全过，而 Mode D 在 **`G > 32` 时静默算错** —— 缓冲高度 `VH` 被硬编码成 16、行循环却按 `BMV = G/2` 迭代，越界读写；`NPAD = VH-BMV` 变负还让 `const_expr(NPAD > 0)` 守卫自己失效（见 `../cannbotdsl-vf-fusion/SKILL.md` 陷阱 11）。`G=64` 经官方比较器是 MERE **1.048** / MARE **98.8** —— 无 crash、无 fault、无告警。而 `desc.md` 声明 `N_q ≤ 256`、`N_kv ≥ 1`，一次普通 MQA decode 就落在这个洞里。**用例集永远发现不了它，只有"按实现枚举"能。**
+
+**其余 L2 常规项**：
+
 - **tail block**：非整除 shape（如 M=130，tile=64 → 尾块 2 行），验 `tile_view` 尾块处理。
 - **AOT 动态 shape**（`test/cannbotdsl/test_aot_p1a.py:156-164 cite-skip (cannbot-dsl 源码仓测试)`，**编译部分无需 NPU**）：
 

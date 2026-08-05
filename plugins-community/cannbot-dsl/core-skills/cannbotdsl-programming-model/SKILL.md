@@ -1,6 +1,6 @@
 ---
 name: cannbotdsl-programming-model
-description: "理解 CANNBotDSL 独特编程模型时使用。CANNBotDSL 的 @jit/@kernel 双层装饰器、trace-time 执行、AST 预处理改写控制流与 TileLang/Triton/AscendC 差异大，容易混淆。讲清 @jit vs @kernel 语义和调用约定、trace-time/compile-time/runtime 三阶段执行、Buffer 单块静态分配、Channel depth-N/4 相协议、VF 三种模式选择、多核 dispatch、典型 kernel 骨架。Triggers: cannbotdsl 编程模型, @jit, @kernel, trace-time, AST 预处理, Buffer, Channel, channel_rewind, Channel depth, 多核 dispatch, kernel 骨架。工作流 Stage 1/3 参考。"
+description: "理解 CANNBotDSL 独特编程模型时使用。CANNBotDSL 的 @jit/@kernel 双层装饰器、trace-time 执行、AST 预处理改写控制流与 TileLang/Triton/AscendC 差异大，容易混淆。讲清 @jit vs @kernel 语义和调用约定、trace-time/compile-time/runtime 三阶段执行、Buffer 单块静态分配、Channel depth-N 存储、VF 三种模式选择、多核 dispatch、典型 kernel 骨架。Triggers: cannbotdsl 编程模型, @jit, @kernel, trace-time, AST 预处理, Buffer, Channel, Channel depth, 多核 dispatch, kernel 骨架。工作流 Stage 1/3 参考。"
 ---
 
 # cannbotdsl-programming-model
@@ -18,7 +18,7 @@ CANNBotDSL 编程模型指南。CANNBotDSL 是 Python 嵌入式编译器：Pytho
 ## 1. `@jit` vs `@kernel` 与调用约定
 
 - **`@jit`**：DSL runtime 入口，也是 host launcher。从 Python 调用会触发完整编译 + 执行。
-- **`@kernel`**：device kernel。通过 `op[block_dim](*args)` 发射 `cannir.kernel_launch`，在多核上跑。**launch 实参按位置绑定、不按名字**：host wrapper 里传参顺序与 `@kernel` signature 槽位错位会静默错路由张量 → NaN，且编译/launch 均成功、无 device fault，极难定位。逐槽核对顺序。详见 `../cannbotdsl-api-reference/SKILL.md` §5 #18。
+- **`@kernel`**：device kernel。通过 `op[block_dim](*args)` 发射 `cannir.kernel_launch`，在多核上跑。**launch 实参按位置绑定、不按名字**：host wrapper 里传参顺序与 `@kernel` signature 槽位错位会静默错路由张量 → NaN，且编译/launch 均成功、无 device fault，极难定位。逐槽核对顺序。详见 `../cannbotdsl-api-reference/SKILL.md` §5 #17。
 
 调用约定矩阵（权威表，caller → callee）：
 
@@ -86,11 +86,12 @@ CANNBotDSL 编程模型指南。CANNBotDSL 是 Python 嵌入式编译器：Pytho
 
 ## 4. Buffer / Channel 分配模型
 
-- `Buffer(MemLoc.*, shape, dtype, ...)` 表示**一块**片上临时存储。它要求 trace-time 静态正整数 shape/stride 和静态 `addr`，不分配 buf_id/sync_id，也没有 slot 光标。
-- `Channel(..., depth=N)` 表示 depth-N ring/synchronized storage。buf_id/sync_id 由框架自动分配，用户不指定。
+- `Buffer(MemLoc.*, shape, dtype, ...)` 表示**一块**片上临时存储。它要求 trace-time 静态正整数 shape/stride 和静态 `addr`，无同步语义，也没有缓冲区游标。
+- `Channel(..., depth=N)` 表示 depth-N 同步存储。
 - 两者共享同一地址 bump allocator；自动地址不会重叠。显式 `addr=` 可有意 alias，并推进高水位，但调用者必须自行保证生命周期不重叠。
-- `channel_rewind()` 同时重置 Buffer/Channel 地址状态，并重置 Channel 的 buf_id；`reset_sync_id=False` 时保留 sync_id。
 - 旧 `BufferArena`、NBuffer、`make_*`、`make_buf/make_nbuf` 和 `.current()/.advance()` 前端接口已移除。double/depth-N storage 必须用 Channel；无法由 Channel 表达的旧手动 NBuffer 方案当前不受支持。
+
+> **三层类不适用的情况**：当 tile 尺寸等常量随 shape 变化、又参与 `range_constexpr` / `const_expr` 静态展开时，实例属性 `self.BMV` 做不到 trace 期就是 Python 值 —— 常量只能放模块级全局、由 host 在 launch 前改写。此时三层类退化为纯命名空间，**扁平的模块级 `@jit` 函数 + 全局常量更直接**（`@jit`/`@kernel` 必须是模块级 `def`，动态合成一律 `FE002_TARGET_NOT_FOUND`）。变的只是"代码怎么摆"，Channel 归属与 `@jit` 铁律不变。详见 `../cannbotdsl-kernel-structure/SKILL.md` §1.1。
 
 ### 4.1 Buffer 生命周期规则
 
@@ -122,9 +123,9 @@ def softmax_step(qk_ch, p_ub, m_ub, l_ub, alpha_ub):
 
 **错误写法**：running state 声明在 `@jit` 方法内 → 每次调用新建，跨迭代不持久，rescale 值丢失。
 
-## 5. Channel 4 相协议（`channel.py`）
+## 5. Channel（`channel.py`）
 
-Channel 是环形缓冲抽象，用 `acquire → commit`（生产）/ `wait → release`（消费）四相协议。SameCore / CrossCore 两种 `kind`。**CrossCore depth ≤ 8**（raise，sync_id 预算 16 base + CUBE +16 doubling → 每 slot 用 2 个计数器）。详见 `../cannbotdsl-channel/SKILL.md`。写单跑 Channel op 需在 `@jit`/`@kernel` 上下文内。
+Channel 表示 depth-N 的同步存储：用户只声明 `depth`。跨核 handoff channel 全局 depth 总和有上限（≤8，超出编译期 raise）。写单跑 Channel op 需在 `@jit`/`@kernel` 上下文内。
 
 ## 6. VF 三种模式（`vf.py`）
 
@@ -148,10 +149,12 @@ for tile_idx in range(block_idx, total_tile_num, block_num):   # stride = block_
 out_half = tile_view(out_tile, (tile_vec_m, tile_n), (subblock_idx, 0))
 ```
 
+> **dispatch 轴顺序影响每核负载**：`idx2crd` 的维度表排列决定哪个轴变化最快。tile 代价沿某轴变化时（causal 的 `nkb = mb+1`），把该轴放最内层且 extent 整除 GRID 会导致每核工作量恒定不均。把代价沿轴变化的轴挪到最外层即可均衡。详见 `../cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
+
 ## 8. 典型 kernel 骨架
 
 见 `../cannbotdsl-op-design/SKILL.md §5`：单块 scratch 用 `Buffer(MemLoc.*, ...)`，流水/同步 storage 用 `Channel(..., depth=N)`；Cube 计算仍通过 L0A/L0B/L0C Channel + `matmul`。
 
 ## 参考
 
-- `../cannbotdsl-vf-fusion/SKILL.md`（VF 细节）、`../cannbotdsl-channel/SKILL.md`（Channel 细节）、`../cannbotdsl-op-design/SKILL.md`（kernel 骨架）
+- `../cannbotdsl-vf-fusion/SKILL.md`（VF 细节）、`../cannbotdsl-op-design/SKILL.md`（kernel 骨架）

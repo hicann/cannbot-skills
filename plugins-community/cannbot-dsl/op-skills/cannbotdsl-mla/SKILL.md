@@ -60,7 +60,7 @@ rope 段要用**独立且尺寸精确**的 channel（`d_rope=64` ≠ `d_chunk`�
 ## 第 3 步 —— 写代码前先算 buffer 预算
 
 硬限制：**UB 256 K、L1 512 K、L0A/L0B 各 64 K、L0C 256 K**。
-超限在 `Channel` 构造期就会 `ValueError`，不用等 507015。
+超限在 `Channel` 构造期就会 `ValueError`，不用等运行时设备错误。
 
 **L0B 是最紧的**：`(128,128) f16 = 32 K`，depth=2 就打满，再加 rope 的 L0B 立刻超。
 L0B depth 只能给 1。
@@ -79,32 +79,28 @@ L1  232 K / 512 K     UB  225 K / 256 K   ← 最紧的两个是 L0B 和 UB
 **QK：切归约轴，累加进同一区域**
 
 ```python
-slot = self.qk_l0c.acquire()
-acc = local_slice(slot, (m_rows, tile_n))     # m_rows 见第 5 步
+acc = local_slice(self.qk_l0c, (m_rows, tile_n))   # m_rows 见第 5 步
 for c in tuple(range(n_dchunk)):              # nope chunks
     Q_nope[:, c] -> L1 -> L0A ; K_nope[:, c] -> L1 -> L0B   # L0B 不加 transpose
     matmul(acc, l0a, l0b, init=(c == 0))      # ← init=False 累加
 Q_rope -> L1 -> L0A_r ; K_rope -> L1 -> L0B_r
 matmul(acc, l0a_r, l0b_r, init=False)         # rope 继续累加
-qk_l0c.commit(slot)
 ```
 
 **PV：切输出轴，各写不同列带**
 
 ```python
 mem_copy(self.l0a_pv, p_l1_ch)                # P 一次，所有 band 共用
-slot = self.pv_l0c.acquire()
 for c in tuple(range(n_dchunk)):
     V[:, c] -> L1 -> L0B_pv  (transpose=True) # ← PV 必须转置，QK 不要
-    band = local_slice(slot, (m_rows, d_chunk), offset=c * m * d_chunk * 4)
+    band = local_slice(self.pv_l0c, (m_rows, d_chunk), offset=c * m * d_chunk * 4)
     matmul(band, l0a_pv, l0b_pv, init=True)   # ← 各 band 独立，init=True
-pv_l0c.commit(slot)
 ```
 
 三个必须注意的点：
 
 1. **`init` 语义相反**：QK 多 chunk 写同一区域要累加（`init=False`）；PV 各 band 互不重叠，各自 `init=True`。
-2. **必须手动 L0C 事务**：N 个 mmad 写同一 slot 时，channel-first 自动 4 相协议会报 `no legal FIFO solution`。
+2. **N 个 mmad 写同一 L0C 区域会编译期报错**：框架看到单个区域上有多个可移动写事务时拒绝求解。channel-first 写法是用 `tuple(range(n))` 静态展开 + `local_slice(region, ..., offset=...)` 把每个 mmad 的输出切成同一区域的不同列带，让框架看到**单个写事务**（累加）或**互不重叠的子区域**（各 band 独立）。不要把循环拆成"便宜 n-1 轮 + 尾部一轮"——那会制造 channel 第二读作用域，同样编译期拒绝（见 `../../core-skills/cannbotdsl-kernel-structure/SKILL.md` 陷阱 8）。raw-VF 算子的操作数序也容易在此处踩坑（见 `../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 10）。
 3. **静态展开用 `tuple(range(n))`**，`const_expr(range(n))` 返回 bool 会报 TypeError。
 
 ## 第 5 步 —— d_chunk 取「能整除 d_nope 的最大值」
@@ -126,8 +122,8 @@ d_chunk = 128 if d_nope % 128 == 0 else 64         # 512→128, 448→64
 三处 M 相关的处理，缺一个就在 decode/MTP 上错：
 
 **(a) L0C 累加器跟随实际 M**。GM 的 Q 视图是 tail-aware 的，M 尾块时 L0A 行数
-< tile_cube_m，而 L0C slot 仍是声明的满尺寸 → mmad verifier 报
-`M dimension mismatch: dst[0]=64 vs lhs[0]=1`。用 `local_slice(slot, (m_rows, ...))` 对齐。
+< tile_cube_m，而 L0C 缓冲区仍是声明的满尺寸 → mmad verifier 报
+`M dimension mismatch: dst[0]=64 vs lhs[0]=1`。用 `local_slice(region, (m_rows, ...))` 对齐。
 
 **(b) 每个 m-tile 的行数必须 > tile_vec_m**。split-M 的空分区 AIV 会污染共享 softmax
 状态（详见 pitfalls §2）。做法：按 S 缩小 M tile（下限 16 = NZ fractal），
@@ -165,6 +161,8 @@ K/V 会被重读 `N_q` 遍——decode 实测 9.13 GB 流量 vs 71 MB 真实数�
 序列轴当成单头问题。实测 **decode 2532 µs → 52.97 µs，47.8×**。
 
 细节、适用边界、以及 causal 版本为什么失败，见 `references/perf.md`。
+
+**causal 版本的分发轴顺序**：causal MLA 下每个 m-tile 的 kv 块数沿 m-block 轴变化。若 `idx2crd` 把 m-block 放最内层且 extent 整除 GRID，该轴取值每核恒定 → 最贵的核永远最贵。把 m-block 轴挪到 `idx2crd` 维度表最外层即可均衡，这是纯排列、数值逐位不变。详见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
 
 ## References
 

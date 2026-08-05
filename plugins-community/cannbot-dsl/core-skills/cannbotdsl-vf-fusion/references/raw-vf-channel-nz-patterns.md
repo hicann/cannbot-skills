@@ -4,7 +4,9 @@
 
 ## 1. raw-VF softmax 完整模式
 
-展示 raw-VF 直接读写 CrossCore Channel slot 的完整 softmax 链路：`vload_deinterleave` 读 QK fp32 → scale + rowmax + exp → `vcast` + `vor` + `vstore_strided` 写 P fp16 NZ。
+展示 raw-VF 直接读写 Channel 缓冲区的完整 softmax 链路：`vload_deinterleave` 读 QK fp32 → scale + rowmax + exp → `vcast` + `vor` + `vstore_strided` 写 P fp16 NZ。
+
+> **操作数序陷阱**：下面的代码里 `vmuls(ve, SCALE)` / `vsub(ve, rmb)` / `vexp(...)` 等的参数顺序看起来"自然"，但 raw-VF 的操作数序与签名不可观测、源码无语义注释。`vmadd(acc, lhs, rhs)` 实测是 `acc*lhs + rhs`（不是 `acc + lhs*rhs`）；`vexp_sub(a, b)` 是 `exp(a-b)`（不是 `exp(b-a)`）。在复用本节代码前，先用三个互不对称的值写探针钉死每个 op 的语义 —— 详见 `../SKILL.md` 陷阱 10。
 
 ```python
 from cannbotdsl.jit_runner import jit
@@ -22,8 +24,8 @@ VL = 64   # fp32 向量长度
 def softmax_init(qk_ch, p_nz_ub, m_ub, l_ub):
     """首迭代: m=rowmax, l=rowsum, P=exp(scale*S - m).
 
-    qk_ch:   CrossCore Channel (UB, fp32, ND) — Cube 侧 fixpipe 写入
-    p_nz_ub: SameCore Channel (UB, fp16, NZ) — raw-VF vstore_strided 写入
+    qk_ch:   Channel (UB, fp32, ND) — Cube 侧 fixpipe 写入
+    p_nz_ub: Channel (UB, fp16, NZ) — raw-VF vstore_strided 写入
     m_ub:    Buffer(UB, fp32, (64, 8)) — running row max
     l_ub:    Buffer(UB, fp32, (64, 8)) — running row sum
     """
@@ -110,7 +112,6 @@ p_nz_ub = Channel(MemLoc.UB, (128, 128), dtypes.float16, depth=1,
 
 # P handoff: UB(NZ) → L1(NZ), 无 engine
 p_l1 = Channel(MemLoc.L1, (128, 128), dtypes.float16, depth=1,
-               kind=ChannelKind.CrossCore,
                data_format="nz", n1_pad=16)       # ← 需与 p_nz_ub 相同的 nz/n1_pad
 
 mem_copy(p_l1, p_nz_ub)                           # ← NZ→NZ 直接拷贝, 无需 nd2nz engine

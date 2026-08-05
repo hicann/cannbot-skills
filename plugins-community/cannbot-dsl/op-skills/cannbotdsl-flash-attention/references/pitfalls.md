@@ -20,13 +20,13 @@ self.l0b = Channel(MemLoc.L0B, (tile_n_qk, tile_d), Float8E4M3FN,
 # Python 前端手工构造。
 ```
 
-`Buffer` 明确拒绝 L0A_MX/L0B_MX，也不接受 buf_id。因此，依赖手动 MX 地址共享或外部 buf_id 的旧方案已不受公开前端支持；不要把上述 channel-first 示例扩写成不存在的 MX Buffer API。
+`Buffer` 明确拒绝 L0A_MX/L0B_MX。因此，依赖手动 MX 地址共享的旧方案已不受公开前端支持；不要把上述 channel-first 示例扩写成不存在的 MX Buffer API。
 
 来源：memory `project_fa_fp8_pv_zero`；蓝本的 `Matmul.__init__`。
 
-## 2. UB 越界 → NPU error 507015
+## 2. UB 越界 → 设备错误
 
-**症状**：`torch.npu.synchronize()` 抛 `device error type 3, error code is 507015`。编译干净。
+**症状**：UB 分配超 256 KB 上限。编译干净，运行时报设备错误。
 
 **原因**：UB 分配超 256 KB 上限。最常见的触发是把某个大 buffer（例如 `qk_ub`）从单 buf 改 DB 之后没重新算预算。**`vf` 区域内的 cast destination 不一定会被折叠掉**（cast→mem_copy(nd2nz) 边界两侧 storealign / loadalign 不匹配），所以 fp8 暂存 buffer 仍可能实占 UB，即使你以为 vf 会消掉它。
 
@@ -51,9 +51,9 @@ self.l0b = Channel(MemLoc.L0B, (tile_n_qk, tile_d), Float8E4M3FN,
 
 **症状**：你想看某个中间结果，插一条回读，看到零或乱码，认定"上游 op 坏了"，然后追一个根本不存在的 bug。
 
-**原因**：跨 PIPE 同步规则（`../../../core-skills/cannbotdsl-cv-fusion/SKILL.md` §5 铁律 3：跨核同步由框架自动合成，wait/arrive 跟随执行侧的 pipe）——`mem_copy(gm, ub)` 跑在 MTE3 上，所以想等 fixpipe 产出的 UB，需要等 MTE3 通道就绪——**不是** FIXPIPE（那会把 FIXPIPE 自己 block 住）、**也不是** V。
+**原因**：跨 PIPE 同步规则——`mem_copy(gm, ub)` 跑在 MTE3 上，所以想等 fixpipe 产出的 UB，需要等 MTE3 通道就绪——**不是** FIXPIPE（那会把 FIXPIPE 自己 block 住）、**也不是** V。
 
-**修法**：调试回读用的对照表（channel-first 下框架自动合成 wait/arrive，源/目的侧只标注 pipe 语义即可）：
+**修法**：调试回读用的对照表（源/目的侧只标注 pipe 语义即可）：
 
 | 产回读 buffer 的源 | 源侧 pipe | 回读侧 pipe（永远 MTE3）|
 | --- | --- | --- |
@@ -77,9 +77,9 @@ self.l0b = Channel(MemLoc.L0B, (tile_n_qk, tile_d), Float8E4M3FN,
 
 ## 6. PV fixpipe 漏切 slice → 写过 pv_ub 边界
 
-**症状**：`pv_ub` 的 `(M, D)` 区域后面是垃圾；严重时撞上 UB 上限 → 507015。
+**症状**：`pv_ub` 的 `(M, D)` 区域后面是垃圾；严重时撞上 UB 上限。
 
-**原因**：L0C 是按 QK 的 `(M, N_qk=128)` 大小分配的。PV 写其中 `(M, D=128)` 子区域。如果你 fixpipe-drain 整个 L0C slot 到 `(vec_m, D)` 大小的 `pv_ub`，fixpipe 会按父 slot 的 N=N_qk 推 `n_size`，越界写。
+**原因**：L0C 是按 QK 的 `(M, N_qk=128)` 大小分配的。PV 写其中 `(M, D=128)` 子区域。如果你 fixpipe-drain 整个 L0C 缓冲区到 `(vec_m, D)` 大小的 `pv_ub`，fixpipe 会按父缓冲区的 N=N_qk 推 `n_size`，越界写。
 
 **修法**：在 `_delayed_pv_and_update` 里给 `mm_pv_chunk` 和 `store_single_tile_to_ub` 都传一个 `local_slice(l0c, (M, D), 0)`。slice 自带正确的 `(M, D)` 形状。
 
@@ -99,7 +99,7 @@ self.l0b = Channel(MemLoc.L0B, (tile_n_qk, tile_d), Float8E4M3FN,
 
 **原因**：softmax_max / sum / exp 用 macro_idx % 3 三 buffer 轮转。如果索引错了周期（例如本该读 previous 的拿了 current），rescale 拿到未初始化数据。
 
-**修法**：可支持的新实现用 `Channel(..., depth=3)` 让生产/消费顺序驱动 slot。旧蓝本的 `m_axis_triple = (macro_idx + 2) % 3` 随机槽访问若无法改写为 Channel FIFO，当前前端不支持；不要复制旧 API 或自行发明索引接口。
+**修法**：可支持的新实现用 `Channel(..., depth=3)` 让生产/消费顺序驱动缓冲区轮转。旧蓝本的 `m_axis_triple = (macro_idx + 2) % 3` 随机索引访问若无法改写为 Channel 生产/消费顺序，当前前端不支持；不要复制旧 API 或自行发明索引接口。
 
 ## 9. K-chunk PV 用 init=True/False 时需要跨 chunk rescale（variant D）
 

@@ -97,8 +97,10 @@ TORCH_DEVICE_BACKEND_AUTOLOAD=0   # 避免 torch 自动加载 NPU 后端
 - `mem_copy(..., transpose=True)` 对 unsupported copy 方向缺少 verifier，可能静默忽略语义。
 - `@jit` 依赖 file-backed source，`python -c` / REPL / notebook 需要额外处理。
 - NPU packaged operator 缺失导致校验侧 torch_npu 报错；优先 CPU 创建 tensor 后 `.npu()`。
-- `tile_view`/`local_slice` view 不一定有稳定 `buf_id`；跨 PIPE 同步应锁原始 owning buffer，view 只作为算子操作数。
-- 高层 `cast(int8_dst, fp16_src)` 会产生 stride-2 反交织静默错误（见 `../cannbotdsl-api-reference/SKILL.md` §5 #21）；退到 raw vf 用 `vstore_pack(mode=B32_TO_B8)`。
+- `tile_view`/`local_slice` view 不一定有稳定同步标识；跨 PIPE 同步应锁原始 owning buffer，view 只作为算子操作数。
+- 高层 `cast(int8_dst, fp16_src)` 会产生 stride-2 反交织静默错误（见 `../cannbotdsl-api-reference/SKILL.md` §5 #20）；退到 raw vf 用 `vstore_pack(mode=B32_TO_B8)`。
+- `const_expr(cond)` 守卫在 cond 变负时静默失效（如 `NPAD = VH - BMV` 变负时 `if const_expr(NPAD > 0):` 被跳过，越界写读照常发生）。给守卫加下界断言（`assert VH >= BMV`），或让参数在 host 侧推导而非硬编码。详见 `../cannbotdsl-vf-fusion/SKILL.md` 陷阱 11。
+- 把循环拆成"便宜 n-1 轮 + 尾部一次贵的调用"会让常驻 channel 变成一写 + 两个读作用域，`cannir-resolve-channel-operands` 编译期拒绝。在循环体内用运行时 `scf.if` 分支选择路径是合法的。详见 `../cannbotdsl-kernel-structure/SKILL.md` 陷阱 8。
 
 ## 输出要求
 

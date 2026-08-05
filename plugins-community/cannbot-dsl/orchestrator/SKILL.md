@@ -64,7 +64,7 @@ Stage 4 测试+审查 (→ tester)       gate: L0+L1+L2 通过 + 审查通过 �
 - `DESIGN_ERROR` → 回滚 Stage 2，附 `design_error_reason`。
 
 ### Stage 4 — 测试+审查+完成报告（tester）
-分派 `cannbotdsl-kernel-tester`。分层测试 L0（编译，覆盖 dtype 组合）→ L1（NPU 精度 vs CPU golden）→ L2（tail block、动态 shape、极端 dtype）→ L3（性能，可选）。代码审查（sync 配对、buf_id 冲突、VF 正确性、Buffer 预算）。生成 `COMPLETION.md`。
+分派 `cannbotdsl-kernel-tester`。分层测试 L0（编译，覆盖 dtype 组合）→ L1（NPU 精度 vs CPU golden）→ L2（tail block、动态 shape、极端 dtype）→ L3（性能，可选）。代码审查（sync 配对、VF 正确性、Buffer 预算）。生成 `COMPLETION.md`。
 **门禁**：L0+L1+L2 全通过 + 审查通过。
 
 ### Perf-Tune — 性能调优（perf-tuner，独立触发）

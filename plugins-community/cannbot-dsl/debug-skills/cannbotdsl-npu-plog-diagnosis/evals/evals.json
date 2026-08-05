@@ -10,13 +10,19 @@
     {
       "id": 2,
       "prompt": "板子上一个 flash attention 用例 torch.npu.synchronize() 卡死不返回，等了好几分钟没反应。同一个算子的 dense 版本能正常跑通，只有我新写的 channel 版卡住。怎么定位？",
-      "expected_output": "应识别这是 hang 而非 fault（无错误码）；指出根因多为跨核同步没配平；建议把 channel 版和能跑通的 dense 版做同步原语(acquire/commit/wait/release)计数 diff；提到 drain 守卫写反、生产端少 commit 等常见形态。",
+      "expected_output": "应识别这是 hang 而非 fault（无错误码）；指出根因多为跨核同步没配平；建议把 channel 版和能跑通的 dense 版做同步原语计数 diff；提到 drain 守卫写反、生产端少发一次等常见形态。",
       "files": []
     },
     {
       "id": 3,
       "prompt": "我从 plog 里 grep 到了这段，但看不懂是什么意思，帮我解读：\nProcessDavinciStarsCoreErrorInfo: ... core id is 0, error code = 263, dump info: pc start: 0x120041000000, current: 0x12004100023c, su error info: 0xb7fbdefb1bdc0078, mte error info: 0x989deb7f0005bfdf, vec error info: 0, cube error info: 0, para base: 0x12004ba00000\nkernel_symbol_locator: ... coreType=1, errModule=SU_ERROR_T0_0, symbol=_Z18kernel_fa_kernel_0..._mix_aiv+0x240",
       "expected_output": "应逐字段解读：errcode 263=标量访存地址非法；su error info 非 0=Scalar Unit 出错；coreType=1=AIV 向量核；errModule SU=标量单元；symbol +0x240=AIV 函数入口附近第一批访存。联立得出：AIV 核在函数入口用垃圾基址做标量 GM 读，高度怀疑 host 传参把某 GM 指针传成垃圾值，建议看参数区验证。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "一个 causal flash attention kernel 在 NPU 上跑，torch.npu.synchronize() 超时挂死。我检查了同步原语计数，acquire/commit 和 wait/release 都配平了，drain 守卫也没写反。但 plog 显示一直是某个 AIV 核在等。这是什么原因？",
+      "expected_output": "应识别这是负载不均衡导致的单核 timeout，而非 sync 死锁；指出 causal 下 tile 代价沿 m-block 轴变化（nkb = mb+1），若 idx2crd 把 m-block 放最内层且 extent 整除 GRID 则每核工作量恒定不均；建议用 host 侧算术算每核负载 max/mean，若 > 1.2 则是分发问题；修法是把 m-block 轴挪到 idx2crd 最外层。",
       "files": []
     }
   ]

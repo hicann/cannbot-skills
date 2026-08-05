@@ -111,7 +111,7 @@ with vf(outputs=[p_ub]):
     cast(p_ub, qk_ub)
 ```
 
-两个 vf 区域的 RaW 不再被 vf 保证——退回到 PIPE 调度。如果 lowering 把它们扔进同一个 V for-loop，可能 OK；但保险做法是要么把两段合到一个 vf 里、要么由 channel-first pass 合成跨 PIPE 同步。
+两个 vf 区域的 RaW 不再被 vf 保证——退回到 PIPE 调度。如果 lowering 把它们扔进同一个 V for-loop，可能 OK；但保险做法是要么把两段合到一个 vf 里、要么由 channel-first pass 处理跨 PIPE 同步。
 
 ## `outputs=[...]` 的精确语义
 

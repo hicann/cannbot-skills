@@ -82,23 +82,31 @@ muls(l_ub, l_ub, 0.0)
 
 ## 3. Channel 与 Buffer 的同步边界（表 2）
 
-`Buffer` 只是无同步语义的单块 scratch。一条数据流如果跨 PIPE、跨核或需要 depth-N slot 生命期，它的生产者/消费者边界必须由 Channel 表达，不能指望 Buffer 隐式生成 sync。
+`Buffer` 只是无同步语义的单块 scratch。一条数据流如果跨 PIPE、跨核或需要 depth-N 缓冲区生命期，它的生产者/消费者边界必须由 Channel 表达，不能指望 Buffer 隐式生成 sync。
 
 ### 3.1 Buffer 计算结果 → GM
 
 ```python
-# Buffer → SameCore Channel → GM：Channel 承担跨 PIPE 生命期。
+# Buffer → Channel → GM：Channel 承担跨 PIPE 生命期。
 muls(out_ub, o_ub, 1.0)              # o_ub 是 Buffer，out_ub 是 Channel
 o_tile = tile_view(o_gm, (64, 128), (0, 0))
 mem_copy(o_tile, out_ub)
 ```
 
-### 3.2 CrossCore Channel → Buffer
+### 3.2 跨核 Channel → Buffer
 
 ```python
 # 让消费 op 直接读 Channel，并把结果写入 Buffer。
-muls(s_ub, qk_ub, SCALE)             # qk_ub: CrossCore Channel; s_ub: Buffer
+muls(s_ub, qk_ub, SCALE)             # qk_ub: 跨核 Channel; s_ub: Buffer
 ```
+
+### 3.3 显式 `addr=` 别名 channel 无同步保护
+
+两个 Channel 用 `addr=` 显式别名时，**地址重叠对同步层完全不可见**。单迭代内靠数据依赖可能侥幸正确；一旦别名操作数或其相邻操作数 `depth≥2` 让相邻迭代重叠，立刻静默串数据（编译无告警、运行无 fault）。**别名操作数自己 `depth=1` 不构成保护。** 决策顺序与实测见 `../SKILL.md` §2.0。
+
+### 3.4 `const_expr(cond)` 守卫变负失效
+
+形如 `if const_expr(NPAD > 0):` 的保护，当 `NPAD = VH - BMV` 因上游参数变化而变负时**静默跳过**，被保护的越界写读照常发生。API 可行性检查时，所有 `const_expr` 守卫须确认 cond 中的变量有下界保证（`assert VH >= BMV`）或参数在 host 侧推导。详见 `../../cannbotdsl-vf-fusion/SKILL.md` 陷阱 11。
 
 ## 4. Buffer 生命周期（表 2 补充）
 

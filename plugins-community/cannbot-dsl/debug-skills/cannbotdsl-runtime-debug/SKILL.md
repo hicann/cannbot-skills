@@ -20,7 +20,7 @@ CANNBotDSL 编译错误和运行时错误（非 NPU 精度、非 crash/hang）�
 | ---- | ---- | -------- | -------- | ---- |
 | **A** | 语法/前端 | trace（AST 预处理） | early-exit raise、`range` 参数数、闭包变量缺失 | CODE |
 | **B** | IR / lowering | IR build / verify / lowering | 类型不匹配、SSA dominance 违反、VF 区域形成失败 | CODE |
-| **C** | 设计层 | verify / runtime | Buffer 超限、buf_id 冲突、sync 死锁、L0 容量 | CODE（回 Stage 2 设计） |
+| **C** | 设计层 | verify / runtime | Buffer 超限、sync 死锁、L0 容量 | CODE（回 Stage 2 设计） |
 | **D** | bisheng | compile | AscendC C++ 编译失败 | CODE（codegen 或写法） |
 | **F** | 框架能力 | 任意 | API 标 Planned/未实现、某特性行为异常且非本地代码问题 | **FW**（转 `cannbotdsl-framework-probe`） |
 
@@ -39,7 +39,7 @@ CANNBotDSL 编译错误和运行时错误（非 NPU 精度、非 crash/hang）�
 
 - **A 型**：读 `../../core-skills/cannbotdsl-programming-model/SKILL.md §3` 控制流改写规则；改 Python 写法（const_expr / 去 early-exit / 显式传参）。
 - **B 型**：读 verify 失败时打印的完整 IR module，定位是哪一步 lowering、哪种类型不匹配。
-- **C 型**：回 Stage 2 用 `cannbotdsl-op-design` 重算 Buffer 预算 / buf_id 分配 / sync 序列；返回 `DESIGN_ERROR`。
+- **C 型**：回 Stage 2 用 `cannbotdsl-op-design` 重算 Buffer 预算 / sync 序列；返回 `DESIGN_ERROR`。
 - **D 型**：读 bisheng stderr，确认生成的 AscendC 是否合法 C。
 - **F 型**：转 `cannbotdsl-framework-probe`，写 probe、找 workaround。
 
@@ -85,13 +85,14 @@ vec_sync_block_wait(PIPE.MTE2, flag_id + 1)
 
 **症状**：`free(): double free detected in tcache 2`，发生在 IR build 阶段。
 
-**历史结论已失效**：旧文档把多个 CrossCore Channel 与 factory scratch 的组合归因于独立 arena 冲突。当前 `Buffer` 与 Channel 共享同一个地址 allocator，自动地址不会重叠；应按真实 IR/设备日志继续定位容量、显式 alias 或同步问题。
+**历史结论已失效**：旧文档把多条跨核 Channel 与 factory scratch 的组合归因于独立 arena 冲突。当前 `Buffer` 与 Channel 共享同一个地址 allocator，自动地址不会重叠；应按真实 IR/设备日志继续定位容量、显式 alias 或同步问题。
 
 **排查方向**：
-1. 检查 func 内 CrossCore channel 总数（`Σ depth ≤ 8`）
+1. 检查 func 内跨核 channel 总数（`Σ depth ≤ 8`）
 2. 核对 Buffer/Channel 总物理字节数以及所有显式 `addr=` alias 的生命周期
-3. 尝试减少 CrossCore channel 数量（如将 Vec→Cube handoff 改为 GM 中转 + sync_block）
-4. 只有临时量确实需要 ring/同步语义时才改为 SameCore Channel；单块 scratch 保持 Buffer
+3. 尝试减少跨核 channel 数量（如将 Vec→Cube handoff 改为 GM 中转 + sync_block）
+4. 只有临时量确实需要多级 / 同步语义时才改为 Channel；单块 scratch 保持 Buffer
+5. 若 sync 计数配平但仍 hang/crash → 查分发轴顺序致某核负载远超平均（causal 下 m-block 轴放 `idx2crd` 最内层且整除 GRID → 每核工作量恒定不均）。先用 host 侧算术算每核负载，见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 0 步
 
 ## 门禁
 

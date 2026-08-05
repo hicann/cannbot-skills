@@ -11,14 +11,14 @@
 | L0C   | ~256 KB | QK 的 fp32 累加器（PV 写入 (M, D) 子区域）|
 | L0A_MX / L0B_MX | 小 | mxfp8 的 e8m0 scale |
 
-任何 region 超上限的表现都是**runtime NPU error 507015**（编译干净）。最常踩的是 UB。
+任何 region 超上限的表现都是**runtime 设备错误**（编译干净）。最常踩的是 UB。
 
 ## 预算 tally 模板
 
 写 kernel 前，在文件 docstring 里填这张表：
 
 ```
-| Buffer            | shape           | dtype     | slots | bytes |
+| Buffer            | shape           | dtype     | depth | bytes |
 | ---               | ---             | ---       | ---   | ---   |
 | qk_ub             | (M, N_qk)       | fp32      | 2     | 64K   |
 | p_ub              | (M+1, N_qk)     | fp8       | 2     | 32.5K |
@@ -36,7 +36,7 @@ TOTAL 超上限时，按顺序拉以下手段：
 
 1. **`tile_n_qk`（或 `tile_k_pv_chunk`）减半**：所有沿 K 轴的 buffer 大小减半。影响 `qk_ub`（−N_qk×M×4）、`p_ub`（−N_qk×M）、`atten_mask_ub`（−N_qk×M×4）。只要 N 仍 ≥ cube 最小有效 N（~64），cube 利用率没有大塌方。
 
-2. **`qk_ub` Channel 由 depth=2 降到 depth=1**（−`tile_n_qk × M × 4`）：失去 cube-QK / vec-P 重叠，但 FA 是 PV-bound 的，性能损失有限。QK_a 与 QK_b 都 drain 到同一个 slot，FIXPIPE ↔ V 的生命期锁由 Channel lowering 生成。**这是 507015 修复时用过的手段**（见 pitfall #2）。
+2. **`qk_ub` Channel 由 depth=2 降到 depth=1**（−`tile_n_qk × M × 4`）：失去 cube-QK / vec-P 重叠，但 FA 是 PV-bound 的，性能损失有限。QK_a 与 QK_b 都 drain 到同一个缓冲区，FIXPIPE ↔ V 的生命期锁由 Channel lowering 生成。**这是预算溢出修复时用过的手段**（见 pitfall #2）。
 
 3. **`p_ub` 双 buf 降单 buf**：失去 cast→store_p 在 round 之间的重叠。
 
@@ -48,10 +48,10 @@ TOTAL 超上限时，按顺序拉以下手段：
 
 | Buffer | 典型 | 备注 |
 | --- | --- | --- |
-| q_l1 | (M, D) fp8，1 slot × 16 KB | Q 在整个 batch_head iter 内保留 |
-| k_l1 | (N_qk, D) fp8，2 slot × 16 KB | DB 用于 cube prefetch |
-| v_l1 | (K_pv_total, D) fp8，2 slot × 32 KB | DB |
-| p_l1 | (M, K_pv_total) fp8，Channel depth=3 × 32 KB | macro preload 深度对齐的三槽 storage |
+| q_l1 | (M, D) fp8，1 级 × 16 KB | Q 在整个 batch_head iter 内保留 |
+| k_l1 | (N_qk, D) fp8，2 级 × 16 KB | DB 用于 cube prefetch |
+| v_l1 | (K_pv_total, D) fp8，2 级 × 32 KB | DB |
+| p_l1 | (M, K_pv_total) fp8，Channel depth=3 × 32 KB | macro preload 深度对齐的三级 storage |
 | sq_l1 | (M, ks_qk) e8m0，1 × 0.5 KB | mxfp8 only |
 | sk_l1 | (ks_qk, N_qk) e8m0，2 × 1 KB | mxfp8 only |
 | sv_l1 | (ks_pv, D) e8m0，2 × 1 KB | mxfp8 only |
@@ -61,13 +61,13 @@ Channel depth=3 preload 参数下大约 250 KB，余量充裕。
 
 ## L0 预算
 
-L0A 与 L0B 上限 ~64 KB。`(128, 128)` fp8 = 16 KB / slot，2 slot = 32 KB，舒服。
+L0A 与 L0B 上限 ~64 KB。`(128, 128)` fp8 = 16 KB / 级，2 级 = 32 KB，舒服。
 
-**关键**：mxfp8 的 L0A/L0B 数据通道需使 lowering 能推导隐式 L0A_MX/L0B_MX handle。旧的“手动让 PV/QK 的 MX buffer 共享 offset 0”方案需要已删除的 MX/NBuffer 前端 API，当前不可表达，不得伪造替代接口。可支持的 channel-first 方案应按物理 slot 容量核算 `max(QK_size, PV_size)` 或分别分配。
+**关键**：mxfp8 的 L0A/L0B 数据通道需使 lowering 能推导隐式 L0A_MX/L0B_MX handle。旧的“手动让 PV/QK 的 MX buffer 共享 offset 0”方案需要已删除的 MX/NBuffer 前端 API，当前不可表达，不得伪造替代接口。可支持的 channel-first 方案应按物理缓冲容量核算 `max(QK_size, PV_size)` 或分别分配。
 
 ## L0C 预算
 
-L0C 256 KB。一个 Channel slot `(M, N_qk) fp32` = 64 KB；depth=2 占 128 KB。PV 通过 `local_slice` 写 `(M, D)` 子视图。
+L0C 256 KB。一个 Channel 缓冲区 `(M, N_qk) fp32` = 64 KB；depth=2 占 128 KB。PV 通过 `local_slice` 写 `(M, D)` 子视图。
 
 ## 已验证可行的 shape 组合
 
@@ -79,7 +79,7 @@ L0C 256 KB。一个 Channel slot `(M, N_qk) fp32` = 64 KB；depth=2 占 128 KB�
 
 ## 预算挂了的 debug 步骤
 
-1. 按本页表格重新纸面核算每个 UB buffer 的 `depth × slot_bytes`，加总与 262144（= 256 KB）比较，找出溢出点。
+1. 按本页表格重新纸面核算每个 UB buffer 的 `depth × buffer_bytes`，加总与 262144（= 256 KB）比较，找出溢出点。
 2. 重点复核最近改过 depth 的 buffer——最常见的触发是把某个大 buffer 从单 buf 改 DB 之后没重算预算。
 3. 复核 `vf` 区域内的 cast destination：它**不一定**被折叠掉（见 `vf-folding.md`），预算紧时按「不折」计。
 4. 确认所有 UB 地址都来自 `Source.alloc_buffer_ub(...)` 机械计算，没有手写 offset。

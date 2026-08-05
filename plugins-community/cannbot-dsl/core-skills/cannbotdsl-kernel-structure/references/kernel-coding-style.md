@@ -1,6 +1,6 @@
 # CANNBotDSL Kernel 代码风格
 
-> 本清单以 **channel-first** 为基准：核内 staging / 跨核 handoff 一律用 `Channel`，sync 由框架自动完成，代码里**不出现** `buf_id` / 手工 FIXPIPE wait-arrive / 跨 PIPE 同步原语。
+> 本清单以 **channel-first** 为基准：核内 staging / 跨核 handoff 一律用 `Channel`。
 
 ## 三层职责分离
 
@@ -14,7 +14,7 @@
 
 **反例**：VF 代码散落在顶层循环里做 per-row cast→add→cast；跨核交接自己写一个 `C2VUbHandoff` 同步类在读写代码之外传递 token。
 
-**正例**：`Matmul.compute_qk` / `Vector.softmax_first` 各自封装一个 PIPE 相干单步，顶层 `__call__` 只按 stage 顺序调用它们；跨核交接就是一个 `kind=CrossCore` 的 `Channel`，无独立同步类。
+**正例**：`Matmul.compute_qk` / `Vector.softmax_first` 各自封装一个 PIPE 相干单步，顶层 `__call__` 只按 stage 顺序调用它们；跨核交接就是一条 `Channel`，无独立同步类。
 
 ## Channel 声明位置由「连接谁」决定
 
@@ -25,13 +25,13 @@
 | 核内 staging（GM→L1→L0→L0C 中转） | **对应模块类** `__init__` | `Matmul.q_l1 / k_l1 / v_l1 / l0a / l0b / l0c` |
 | vec 产出的同核 channel | **vec 模块类** `__init__` | `Vector.o_ub` |
 | vec 内部跨迭代状态 / scratch | **vec 模块类**，用 `Buffer(MemLoc.UB, ...)` | `Vector.res_o / sm_max_tb / sm_sum_tb / sm_exp_tb` |
-| 跨核 handoff（`kind=CrossCore`） | **顶层 kernel 类** `__init__`，作参数传进模块方法 | `flash_attention_kernel.qk_ub / pv_ub / p_l1` |
+| 跨核 handoff | **顶层 kernel 类** `__init__`，作参数传进模块方法 | `flash_attention_kernel.qk_ub / pv_ub / p_l1` |
 
 **反例**（把核内 staging 藏进模块类是对的，但把跨核 handoff 也塞进模块类是错的）：
 ```python
 class Matmul:
     def __init__(self):
-        self.qk_ub = Channel(MemLoc.UB, ..., kind=ChannelKind.CrossCore)  # 错：跨核边归任一模块破坏封装
+        self.qk_ub = Channel(MemLoc.UB, ..., depth=2)  # 错：跨核边归任一模块破坏封装
 ```
 
 **正例**：核内 staging 归模块类，跨核 handoff 归顶层、传参进模块方法：
@@ -46,15 +46,15 @@ class Matmul:
 @kernel
 class flash_attention_kernel:
     def __init__(self, ...):
-        self.qk_ub = Channel(MemLoc.UB, ..., depth=2, kind=ChannelKind.CrossCore)  # 跨核边归顶层
+        self.qk_ub = Channel(MemLoc.UB, ..., depth=2)  # 跨核边归顶层
         self.matmul = Matmul(...)
     def __call__(self, ...):
         self.matmul.store_s(self.qk_ub)                     # 编排层持有并传入
 ```
 
-原因：① 跨核边连接两个模块，归属任一方都破坏「模块只管自己核内」；② `Σ(CrossCore depth) ≤ 8` 是 per-kernel **全局**预算，必须在能看到所有 handoff 的编排层集中声明才数得清。
+原因：① 跨核边连接两个模块，归属任一方都破坏「模块只管自己核内」；② 跨核 channel 的 `Σ depth ≤ 8` 是 per-kernel **全局**预算，必须在能看到所有 handoff 的编排层集中声明才数得清。
 
-> **Buffer vs Channel**：跨迭代要 ring/sync 语义 → `Channel`；只是驻留累加器 / 临时 lane 向量、由同一段 vf 读改写 → `Buffer`（无 sync 开销）。参考代码里 `sm_max_tb`/`res_o` 是 Buffer，`p_ub`/`o_ub` 是 Channel。
+> **Buffer vs Channel**：跨迭代要多级缓冲 / sync 语义 → `Channel`；只是驻留累加器 / 临时 lane 向量、由同一段 vf 读改写 → `Buffer`（无 sync 开销）。参考代码里 `sm_max_tb`/`res_o` 是 Buffer，`p_ub`/`o_ub` 是 Channel。
 
 ## Matmul 不切分 D 维度
 
@@ -74,21 +74,6 @@ def compute_qk(self):
     matmul(self.l0c, self.l0a, self.l0b, init=True)
 ```
 L0 channel 的 size 按 `max(tile_n, tile_d)` 放宽（参考代码 `tmp_n = max(tile_n, tile_d)`），避免为切 D 而拆多次 matmul。
-
-## sync 由 Channel 自动完成，不手写 token
-
-channel-first 下，producer/consumer 的 wait-arrive 四相协议由框架自动插入。**代码里不出现任何手工 sync token**。
-
-**反例**：独立的 `C2VUbHandoff` 类把 FIXPIPE 同步从实际读写代码中抽离，或在 `store_to_ub` 内手写 `wait → write → arrive`。
-
-**正例**（跨核交接 = 一次 `mem_copy` 到 CrossCore channel，sync 隐式）：
-```python
-# cube 侧 produce
-self.matmul.store_s(self.qk_ub)          # L0C -> UB(FIXPIPE)，跨核 produce，sync 自动
-# vec 侧 consume
-self.vector.softmax_first(self.qk_ub, ...)   # 直接读 qk_ub，sync 自动
-```
-同步和读写天然在同一处，因为它们就是同一个 `Channel` 的两端，无需独立类去配对。
 
 ## VF 操作数：owning UB 或直接读写 Channel，不进 tile_view 视图
 
@@ -149,6 +134,10 @@ def run(self, attn_out, query, key, value, scale, attn_mask, ...):
     op = flash_attention_kernel(tile_cube_m=tile_cube_m, ...)
     op[36](attn_out, query, key, value, scale, attn_mask, ...)
 ```
+
+## 循环剥离会制造 channel 第二读作用域
+
+想让"多数迭代走便宜路径、少数走贵路径"时，**用循环体内的运行时分支，不要剥离循环**。把循环拆成"便宜的 n-1 轮 + 尾部一次贵的调用"，会让常驻 channel（如 read-many 的 `q_l1`）变成一写 + 两个读作用域，`cannir-resolve-channel-operands` 直接拒绝。**而在单个循环体内部放运行时 `scf.if` 选择两条路径是合法的** —— channel 仍是一写、一个包围读作用域。这个报错是循环嵌套的问题，不是分支的问题 —— 看到它别去掉分支，去看谁被拆出了第二个读作用域。附带好处：分支两侧各自是直线 vf region，正是 VF 折叠喜欢的形状。详见 `../SKILL.md` 陷阱 8。
 
 ## 验证顺序
 

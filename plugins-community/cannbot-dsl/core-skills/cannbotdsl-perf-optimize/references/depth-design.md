@@ -11,7 +11,7 @@
 | 3 | macro TB | 3 | vec softmax(now) ↔ cube PV(now-1) ↔ cube QK_prefetch(now+1) 三段同时 |
 | 4+ | 深流水 | 4+ | 罕见 — L1 cost 急剧上升，cube/vec 通常已经塞满 |
 
-**FA 用 N=3 的实际理由**：softmax 需要保留 previous max/sum 做 rescale，本来就要 triple-buffer。把 p_l1、sp_l1 也跟着 N=3，槽位轮转与 softmax 状态机周期对齐——索引算法和同步通道都简单。N=2 时 vec 没空间塞 softmax_max 的"前一拍"。
+**FA 用 N=3 的实际理由**：softmax 需要保留 previous max/sum 做 rescale，本来就要 triple-buffer。把 p_l1、sp_l1 也跟着 N=3，缓冲轮转与 softmax 状态机周期对齐——索引算法和同步通道都简单。N=2 时 vec 没空间塞 softmax_max 的"前一拍"。
 
 ## L1 cost 曲线
 
@@ -27,7 +27,7 @@ L1 总上限 512 KB；其他必要占用（Q/K/V/sQ/sK/sV + L0 staging）约 250
 
 ## UB cost
 
-softmax 状态三 buffer（max / sum / exp）随 N 线性增长，但每个 slot 只 (M, 1) fp32 = 0.25 KB。N=3 时增 ~2.25 KB，可忽略。UB 不是 preload 的瓶颈——UB 的压力来自 qk_ub、p_ub、tmp_* 这些"working set"。
+softmax 状态三 buffer（max / sum / exp）随 N 线性增长，但每级缓冲只 (M, 1) fp32 = 0.25 KB。N=3 时增 ~2.25 KB，可忽略。UB 不是 preload 的瓶颈——UB 的压力来自 qk_ub、p_ub、tmp_* 这些"working set"。
 
 ## 性能收益曲线（FA 估算）
 
@@ -71,21 +71,21 @@ profile 显示 cube 利用率 < 70%？
 | sparse 强（causal 把后半行 tile 砍掉） | DB —— 实际有效 macro 太少 |
 | 短 S2（≤256） | DB —— n_macros 太少 |
 
-variant D 的 Channel depth=3 蓝本当前只支持 `sparse_mode=0`、`S2 >= 512`。要往更小 shape 推时先在 host 端做 fallback。旧 `gqa_mxfp8_nbuffer_preload` 名称只能用于识别历史方案，不得复制其已删除的多槽 API。
+variant D 的 Channel depth=3 蓝本当前只支持 `sparse_mode=0`、`S2 >= 512`。要往更小 shape 推时先在 host 端做 fallback。旧 `gqa_mxfp8_nbuffer_preload` 名称只能用于识别历史方案，不得复制其已删除的多级索引 API。
 
 ## 调深的代价不只是 L1
 
-- **代码量**：warmup + drain 各 N-1 次展开，steady-state 的生产/消费点也增多；slot 由 Channel 管理，不手写 `%N` 索引。
+- **代码量**：warmup + drain 各 N-1 次展开，steady-state 的生产/消费点也增多；缓冲区由 Channel 管理，不手写 `%N` 索引。
 - **首次正确性**：stage 延迟错一个 +1 / -1 就可能产生中间 NaN。N=3 调通后再加深，每加一级都要重新过 unit_scale 与死锁检查。
-- **可表达性**：Channel 只提供 FIFO 生产/消费语义。如果 N=4 设计要求随机槽读写而不能重写为 FIFO，当前前端不支持，不得伪造 `slot_now/slot_prev` 类 API。
+- **可表达性**：Channel 只提供生产/消费顺序驱动的同步语义。如果 N=4 设计要求随机索引读写而不能改写为顺序生产/消费，当前前端不支持，不得伪造 `now/prev` 类索引 API。
 
 ## 常用快查
 
 ```
 preload_num = 3 时（FA 标配）：
-  写当前 slot   slot_now   = macro_idx % 3
-  读 1 个之前   slot_prev  = (macro_idx + 2) % 3
-  读 2 个之前   slot_pprev = (macro_idx + 1) % 3
+  写当前缓冲    now    = macro_idx % 3
+  读 1 个之前   prev   = (macro_idx + 2) % 3
+  读 2 个之前   pprev  = (macro_idx + 1) % 3
 ```
 
 `(macro_idx + N - k) % N` 等于 `(macro_idx - k) % N`（Python `%` 是非负的）——两种写法都对，但**显式 +N 形式更不容易看错**。

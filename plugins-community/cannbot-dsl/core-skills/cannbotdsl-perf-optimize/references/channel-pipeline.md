@@ -5,18 +5,18 @@
 
 ## 1. 核心思想：depth 声明式
 
-让 4 个 cube PIPE（MTE2/MTE1/M/FIXPIPE）在相邻 tile / K-step 上错位并行，写法是把每级 buffer 声明成 `Channel(mem_loc, ..., depth=N)`，`depth` 就是预取/流水深度旋钮，然后写**最朴素的 fused K-loop**。acquire→fill→commit（生产）与 wait→use→release（消费）4 相协议、buf_id、sync_id 全部由框架合成；尾块也由框架在使用点自动插 `local_slice` 视图。**加深流水只改 depth，不动循环体。**
+让 4 个 cube PIPE（MTE2/MTE1/M/FIXPIPE）在相邻 tile / K-step 上错位并行，写法是把每级 buffer 声明成 `Channel(mem_loc, ..., depth=N)`，`depth` 就是预取/流水深度旋钮，然后写**最朴素的 fused K-loop**。尾块由框架在使用点自动插 `local_slice` 视图。**加深流水只改 depth，不动循环体。**
 
-Channel 是双游标环形缓冲：写游标与读游标各自推进，depth 个 slot 让生产/消费错位在途。
+Channel 有各自推进的写游标与读游标，depth 级缓冲让生产/消费错位在途。
 
 ## 2. 声明骨架（cube 四级 buffer 全 Channel）
 
 ```python
 from cannbotdsl.channel import Channel
 from cannbotdsl import dtypes
-from cannbotdsl.typing.types import MemLoc, ChannelKind
+from cannbotdsl.typing.types import MemLoc
 
-P_NUM = 2   # 预取深度：L1 携带 P_NUM+1 个 slot
+P_NUM = 2   # 预取深度：L1 携带 P_NUM+1 级缓冲
 
 a_l1 = Channel(MemLoc.L1,  shape=(tile_m, tile_k), dtype=dtypes.float16, depth=P_NUM + 1)   # depth=3: MTE2 预取 2 个未来 K-tile
 b_l1 = Channel(MemLoc.L1,  shape=(tile_k, tile_n), dtype=dtypes.float16, depth=P_NUM + 1)
@@ -26,7 +26,7 @@ l0c  = Channel(MemLoc.L0C, shape=(tile_m, tile_n), dtype=dtypes.float32, depth=2
 ```
 
 - 一律用 `shape=(...), dtype=...` 声明完整整块 tile；尾块由框架在使用点自动插 `local_slice` 视图，一份编译产物仍跑多组动态 M/K/N。
-- 跨核 handoff（Cube→Vec）用 `Channel(MemLoc.UB, ..., depth>=2, kind=ChannelKind.CrossCore)`。
+- 跨核 handoff（Cube→Vec）用 `Channel(MemLoc.UB, ..., depth>=2)`。
 
 ## 3. 朴素 K-loop（无 prologue/epilogue/drain）
 
@@ -42,22 +42,24 @@ for k in range(K_TILES):
 mem_copy(out_tile, l0c, engine=fixpipe)           # L0C→GM (FIXPIPE)
 ```
 
-channel-first 下用户不写 prologue/epilogue/drain、不写 4 相原语、不维护 buf_id——全部由框架合成。
+channel-first 下用户不写 prologue/epilogue/drain。
+
+> **不要把循环拆成"便宜 n-1 轮 + 尾部贵一轮"**：那会让常驻 channel 变成一写 + 两个读作用域，`cannir-resolve-channel-operands` 编译期拒绝。在循环体内用 `scf.if` 分支选择两条路径是合法的 —— channel 仍是一写、一个包围读作用域。详见 `../../cannbotdsl-kernel-structure/SKILL.md` 陷阱 8。
 
 ## 4. depth 语义（每级 buffer 该开多深）
 
 | buffer | depth | 作用 |
 | --- | --- | --- |
-| L1（K/V tile） | `P_NUM+1` | 双游标环 = 预取窗口：depth=3 时 MTE2 可载入 k+1、k+2 而 matmul 还在消费 k |
+| L1（K/V tile） | `P_NUM+1` | 双游标 = 预取窗口：depth=3 时 MTE2 可载入 k+1、k+2 而 matmul 还在消费 k |
 | L0A / L0B | 2 | tile double buffer：载入 k+1 与 mmad k 重叠 |
-| L0C | 2 | K-loop 累加器；单 K-loop 单累加器，acquire/commit 由框架提升到循环外 |
-| cv_ub（Cube→Vec, CrossCore） | ≥2 | Cube fixpipe 写 slot b 时 Vec 消费 slot a、不互等 |
+| L0C | 2 | K-loop 累加器；单 K-loop 单累加器，生产事务由框架提升到循环外 |
+| cv_ub（Cube→Vec，跨核） | ≥2 | Cube fixpipe 写缓冲 b 时 Vec 消费缓冲 a、不互等 |
 
-CrossCore Channel 的 depth 上限是 8（超过编译期 raise；超过预算需拆 kernel，见 `../../cannbotdsl-cv-fusion/SKILL.md` §4.4）。
+跨核 Channel 的 depth 总和上限是 8（超过编译期 raise；超过预算需拆 kernel，见 `../../cannbotdsl-cv-fusion/SKILL.md` §4.2）。
 
 ## 5. 预算换算（depth 进 op-design §2 预算表）
 
-Channel 字节 = `depth × slot_bytes`，按 depth 对硬限制校验（L1 512KB / L0A/B 64KB / L0C 128KB / UB 256KB）。
+Channel 字节 = `depth × buffer_bytes`，按 depth 对硬限制校验（L1 512KB / L0A/B 64KB / L0C 128KB / UB 256KB）。
 
 例（fp16、tile=128）：
 - L1 各 `3 × 32KB = 96KB`
@@ -66,6 +68,8 @@ Channel 字节 = `depth × slot_bytes`，按 depth 对硬限制校验（L1 512KB
 - 均在限内。
 
 ## 6. 性能基线
+
+> **性能数据解读前提：先判吞吐受限 vs 延迟受限**。compute bound 的段，下一步是"减指令"还是"重排让依赖链重叠"？两条路收益天差地别。直接测：UNROLL 1/2/4，时间基本不变 = 吞吐受限（只有删指令有用）；变 = 延迟受限（重排有效）。别靠 `cycles/op vs 理想 IPC` 推断。详见 `../SKILL.md` 第 2 步。
 
 数据来自 cookbook 的 tiled-matmul（M×N×K = 1664×1664×1152、tile=128、L1 depth=3、L0* depth=2、32 blocks）在真机上的 msprof PipeUtilization：
 

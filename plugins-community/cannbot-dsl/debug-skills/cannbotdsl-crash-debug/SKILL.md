@@ -1,6 +1,6 @@
 ---
 name: cannbotdsl-crash-debug
-description: "CANNBotDSL kernel 在 NPU 上 crash 或 hang 时做从 Python 层到设备层的全栈定位时使用。当 kernel 出现 SegFault/AIC exception、torch.npu.synchronize() 超时卡死、或间歇性崩溃时触发。Hang 诊断：区分编译慢 vs kernel hang、Channel 4 相协议配对审计（acquire/commit/wait/release 平衡、cross-core 跨核 arrive/wait 对称）、同步原语计数 diff。Crash 诊断：委托 npu-plog-diagnosis 读设备 plog、参数区解码（ABI 错位/坏指针）、Buffer/Channel 地址越界或 Channel slot 预算超限。间歇性：Channel depth-N 时序、未初始化 storage 读取。Triggers: cannbotdsl crash, hang, SegFault, AIC exception, synchronize 超时, sync 死锁, 参数区, buffer 越界, 间歇性崩溃。Developer 在 Stage 3 调用。"
+description: "CANNBotDSL kernel 在 NPU 上 crash 或 hang 时做从 Python 层到设备层的全栈定位时使用。当 kernel 出现 SegFault/AIC exception、torch.npu.synchronize() 超时卡死、或间歇性崩溃时触发。Hang 诊断：区分编译慢 vs kernel hang、Channel 生产/消费配对审计、同步原语计数 diff。Crash 诊断：委托 npu-plog-diagnosis 读设备 plog、参数区解码（ABI 错位/坏指针）、Buffer/Channel 地址越界或 Channel 预算超限。间歇性：Channel depth-N 时序、未初始化 storage 读取。Triggers: cannbotdsl crash, hang, SegFault, AIC exception, synchronize 超时, sync 死锁, 参数区, buffer 越界, 间歇性崩溃。Developer 在 Stage 3 调用。"
 ---
 
 # cannbotdsl-crash-debug
@@ -26,9 +26,10 @@ hang 的头号原因是 sync 不配对形成 ticket-lock 死锁。审计手段�
 1. 在 kernel 源码里 **diff 同步原语的计数**：`sync_intra_arrive`/`sync_intra_wait` 配对、notify/wait 的 `event_id`：
    - `sync_intra_arrive` 无对应 `sync_intra_wait` → 等待方永久阻塞。
    - `sync_notify(src,dst,eid)` 无对应 `sync_wait` → 等待方永久阻塞。
-2. **cross-core 跨核 arrive/wait 配对计数**：Cube 侧 arrive 数须等于 Vec 侧 wait 数（反之亦然）。per-subblock token 用 `id + subblock*16` 对称。
-3. **Channel 4 相协议平衡**：channel-first 下 4 相由框架合成，重点核对每条 Channel 的 Write/Read 操作数是否成对出现在数据流上；CrossCore `Σdepth≤8`。
+2. **跨核 arrive/wait 配对计数**：Cube 侧 arrive 数须等于 Vec 侧 wait 数（反之亦然）。per-subblock token 用 `id + subblock*16` 对称。
+3. **Channel 生产/消费平衡**：重点核对每条 Channel 的 Write/Read 操作数是否成对出现在数据流上；跨核 channel `Σdepth≤8`。
 4. 对比法：和一个已知能跑通的等价版本逐条 diff 同步原语序列，差出来的那条就是死锁点。
+5. **负载不均衡致单核 timeout**：sync 计数配平但某核分到的 tile 代价远超平均（causal 下 m-block 轴放 `idx2crd` 最内层且 extent 整除 GRID → 每核工作量恒定不均）。先用 host 侧算术算每核负载（`max(load)/mean(load) > 1.2` → 分发问题，不是 sync 问题），见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
 
 execution 边界的 allocator rewind **不等于**同步 handoff —— ready token 被 free/init token 顶替是经典 hang 源。
 
@@ -36,16 +37,15 @@ execution 边界的 allocator rewind **不等于**同步 handoff —— ready to
 
 1. **委托 `cannbotdsl-npu-plog-diagnosis`** 读设备 plog，拿 AIC/AIV exception 地址与类型。
 2. **参数区解码**：ABI 错位 / 坏指针 —— `KernelArgTensor` 结构体 dtype/ndim 与 kernel 签名不符（见 `cannbotdsl-runtime-debug` marshalling 段）。
-3. **errcode 169「fixpipe parameter invalid」（全 cube core，subErrType 0x4）**：查 fixpipe copy engine 是否 DEQF16 反量化（非单位 `deq_scale`）叠加 `dual_dst_ctl=1`（split-M 强制）——二者互斥。规避见 `../../core-skills/cannbotdsl-api-reference/SKILL.md` §5 #17。
-4. **Buffer 越界**：
-   - Channel 硬件 slot/sync 预算超限或错误 alias。
-   - L0/UB 容量超限：手动别名 + double buffer 时单槽已满还 `advance` 第二槽 → 设备错误。
+3. **Buffer 越界**：
+   - L0/UB 容量超限：手动别名 + double buffer 时单级已满还 `advance` 第二级。
    - 先算真实字节区间对照硬限制（`../../core-skills/cannbotdsl-op-design/SKILL.md §2`）。
 
 ## 间歇性崩溃（时对时错）
 
-- **Channel depth-N 时序错误**：软件流水 lag/prologue/drain 与生产消费顺序不一致，读到还没写完的 slot。
+- **Channel depth-N 时序错误**：软件流水 lag/prologue/drain 与生产消费顺序不一致，读到还没写完的缓冲区。
 - **未初始化 buffer 读取**：表现为随机值或全零；GM/UB 未初始化就读。
+- **`const_expr(cond)` 守卫变负失效**：形如 `if const_expr(NPAD > 0):` 的保护，当 `NPAD = VH - BMV` 变负时静默跳过 → 越界写读但无 fault。查所有 `const_expr` 守卫的变量是否可能为负，见 `../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 11。
 - 复现策略：固定 seed，多次运行看是否稳定错；临时把 `Channel(..., depth=N)` 改为 `depth=1` 排除流水时序问题。
 
 ## 定位后路由
@@ -53,7 +53,7 @@ execution 边界的 allocator rewind **不等于**同步 handoff —— ready to
 | 根因 | 修复归属 |
 |------|----------|
 | sync 漏配对 / 不对称 | 本层修 kernel sync；对照 `cannbotdsl-code-review` §1 |
-| buf_id 冲突 / 容量超限 | 回 Stage 2 设计（`cannbotdsl-op-design`），C 型 DESIGN_ERROR |
+| 容量超限 | 回 Stage 2 设计（`cannbotdsl-op-design`），C 型 DESIGN_ERROR |
 | ABI / marshalling | `cannbotdsl-runtime-debug` marshalling 段 |
 | 疑似框架 lowering bug | 拆最小 case → `cannbotdsl-framework-probe` |
 

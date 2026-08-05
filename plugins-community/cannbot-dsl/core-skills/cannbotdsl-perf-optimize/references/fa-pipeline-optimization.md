@@ -57,9 +57,9 @@ flash_attn_kernel (@kernel class)
 ### 为什么不能用 @kernel def
 
 `@kernel def` 中所有代码被 trace 到一个 IR function 中。当 stage-gate 的
-`if tick >= 1 and ...` 编译成 `scf.if` 时，`scf.if` 分支内的 CrossCore channel
-`wait/release` 会被 框架复制到所有分支路径，
-导致 ring buffer 游标错位 → L1 越界崩溃。
+`if tick >= 1 and ...` 编译成 `scf.if` 时，`scf.if` 分支内的跨核 channel
+同步会被框架复制到所有分支路径，
+导致游标错位 → L1 越界崩溃。
 
 `@kernel class` 的 `@jit` 方法是独立的 IR function，channel 操作在方法内部
 （不在 `__call__` 的 `scf.if` 分支中），框架能正确分析每个 stage 的 channel
@@ -82,8 +82,8 @@ class Matmul:
 
 关键点：
 - **K 和 V 用独立 channel**（`k_l1`/`v_l1`），不能共享一个 `b_l1`。pipeline 中
-  QK stage 加载 K(n) 的同时 PV stage 加载 V(n-2)，共享 channel 会 slot 冲突。
-- **L0A/L0B 也 depth=2**：QK 写 L0A slot 0 时 PV 读 L0A slot 1。
+  QK stage 加载 K(n) 的同时 PV stage 加载 V(n-2)，共享 channel 会缓冲冲突。
+- **L0A/L0B 也 depth=2**：QK 写 L0A 缓冲 0 时 PV 读 L0A 缓冲 1。
 - **tmp_n = max(tile_n, tile_d)**：QK 时 L0A 是 (M, K)，PV 时 L0A 是 (M, N)，
   取最大值避免 shape 不匹配。
 
@@ -92,7 +92,7 @@ class Matmul:
 ```python
 class Vector:
     def __init__(self, ...):
-        # Triple-buffer softmax state — 槽与生产/消费同步由 Channel 管理
+        # Triple-buffer softmax state — 缓冲与生产/消费同步由 Channel 管理
         self.sm_max_tb = Channel(MemLoc.UB, (tile_vec_m, 1), dtypes.float32,
                                  depth=preload_num)
         self.sm_sum_tb = Channel(MemLoc.UB, (tile_vec_m, 1), dtypes.float32,
@@ -112,23 +112,23 @@ class Vector:
 关键点：
 - **softmax state stride=1**：`Channel(MemLoc.UB, (tile_vec_m, 1), dtypes.float32, depth=preload_num)` 让 64 行的
   max/sum/exp 连续存储（256 bytes），`vload_brc` 能正确广播。
-- **sm_max/sm_sum 与 sm_exp 的消费顺序必须是 Channel FIFO 可表达的顺序**。旧实现若要求
-  `m_seq % preload_num` 与 `tick % preload_num` 两套手工随机槽索引，且无法改写为 FIFO 生产/消费，
-  该深流水当前不受公开前端支持；不得用 Buffer 数组伪装成带同步的多槽 storage。
-- **p_ub depth=2**：softmax Pass-B 写 P(n) 到 p_ub slot 0，`store_p` 把 p_ub
-  拷到 p_l1 slot 0；同时 PV 读 p_l1 slot 1（来自 P(n-2)）。
+- **sm_max/sm_sum 与 sm_exp 的消费顺序必须是 Channel 生产/消费顺序可表达的**。旧实现若要求
+  `m_seq % preload_num` 与 `tick % preload_num` 两套手工随机索引，且无法改写为 Channel 生产/消费顺序，
+  该深流水当前不受公开前端支持；不得用 Buffer 数组伪装成带同步的多级 storage。
+- **p_ub depth=2**：softmax Pass-B 写 P(n) 到 p_ub 缓冲 0，`store_p` 把 p_ub
+  拷到 p_l1 缓冲 0；同时 PV 读 p_l1 缓冲 1（来自 P(n-2)）。
 
 ## 3. DelayLineGroup + stage-gate 调度
 
 ### DelayLineGroup
 
 ```python
-delay_slots = preload_num + 1  # = 4
-dl = DelayLineGroup(delay_slots, 'tile', 'n', 'm_seq')
+delay_depth = preload_num + 1  # = 4
+dl = DelayLineGroup(delay_depth, 'tile', 'n', 'm_seq')
 ```
 
 DelayLineGroup 是移位寄存器，`push` 写当前 tick 的参数，`tap(K)` 取 K 拍前的参数。
-`advance()` 所有 slot 向前移 1 格。
+`advance()` 所有级向前移 1 格。
 
 ### Stage-gate 条件
 
@@ -166,20 +166,20 @@ for _ in range(preload_num):  # = 3
 
 drain 只发剩余 stage，不发 QK。一个循环体 + 两个条件 = 覆盖 warmup/steady/drain。
 
-## 4. CrossCore channel depth 设计
+## 4. 跨核 channel depth 设计
 
-| Channel | depth | kind | 依赖距离 | 原因 |
-|---------|-------|------|---------|------|
-| qk_ub | 2 | CrossCore | QK→SM = 1 | Cube 写 slot[t%2]，Vec 读 slot[(t-1)%2] |
-| p_l1 | **3** | CrossCore | SM→PV = 2 | Vec 写 slot[t%3]，Cube 读 slot[(t-2)%3] |
-| pv_ub | 2 | CrossCore | PV→UPD = 1 | Cube 写 slot[t%2]，Vec 读 slot[(t-1)%2] |
+| Channel | depth | 依赖距离 | 原因 |
+|---------|-------|---------|------|
+| qk_ub | 2 | QK→SM = 1 | Cube 写缓冲[t%2]，Vec 读缓冲[(t-1)%2] |
+| p_l1 | **3** | SM→PV = 2 | Vec 写缓冲[t%3]，Cube 读缓冲[(t-2)%3] |
+| pv_ub | 2 | PV→UPD = 1 | Cube 写缓冲[t%2]，Vec 读缓冲[(t-1)%2] |
 
 **p_l1 depth=3 的原因**：softmax 写 P(n) 到 p_l1，2 个 tick 后 PV 才读 P(n)。
-depth=2 时 produce 堆积 2 个 slot 后才 consume，ring buffer 游标可能错位。
-depth=3 提供 3 个 slot 缓冲，匹配 `scf.if` 分支展开后的 4 次 release（3 个
+depth=2 时 produce 堆积 2 级后才 consume，游标可能错位。
+depth=3 提供 3 级缓冲，匹配 `scf.if` 分支展开后的 4 次消费（3 个
 分支 × 1 次执行 + 1 次 drain）。
 
-**CrossCore depth ≤ 8**（框架限制，见 `../cannbotdsl-channel/SKILL.md`）。
+**跨核 channel `Σ depth ≤ 8`**（框架限制，见 `../../cannbotdsl-cv-fusion/SKILL.md` §5 铁律 1）。
 Σ depth = 2+3+2 = 7 ≤ 8 ✓。
 
 ## 5. 两遍 softmax + vmem_bar
@@ -238,7 +238,7 @@ o = vdiv(o, safe_sum, mask=mask)
 
 末次 tile 还融合了除法，消掉独立的 `finalize` pass。
 
-## 7. store_p 的 channel-first 4 相协议
+## 7. store_p 的 channel-first 跨核 handoff
 
 `store_p` 在 Vec 侧把 p_ub（UB）拷到 p_l1（L1）—— 这是 Vec→Cube 的跨核 handoff：
 
@@ -248,58 +248,37 @@ def store_p(self, p_l1_ch, partition):
     mem_copy(piece, self.p_ub)
 ```
 
-`partition_view` 把 L1 CrossCore channel 切成 per-AIV 的 M-tile 半块。
+`partition_view` 把 L1 跨核 channel 切成 per-AIV 的 M-tile 半块。
 `mem_copy(piece, self.p_ub)` 是 UB→L1（MTE3 pipe），channel-first 下框架自动
-合成 acquire/commit（Vec 侧 produce）和 wait/release（Cube 侧 consume）。
+合成 Vec 侧 produce 与 Cube 侧 consume 的同步。
 
 关键：`store_p` 不是 `@jit` 方法 — 它是普通方法，被 `_stage_softmax`（`@jit`）
 内联调用。这样 channel 操作在 `_stage_softmax` 的 IR function 内，不在
 `__call__` 的 `scf.if` 分支中。
 
-## 8. finalize_o 的手动 4 相协议
+## 8. local_slice 的使用规则
 
-`finalize_o` 用手动 acquire/commit/wait/release 来支持 M-tail：
-
-```python
-def finalize_o(self, o_tile_gm, sm_sum_buf, div_done=False):
-    # ... div if needed ...
-    o_slot = self.o_ub.acquire()
-    o_full = local_slice(o_slot, (tile_vec_m, tile_d), stride=(tile_d, 1))
-    cast(o_full, self.res_o)        # fp32 → fp16
-    self.o_ub.commit(o_slot)
-
-    o_slot_r = self.o_ub.wait()
-    o_view_r = local_slice(o_slot_r, (actual_vec_m, tile_d), stride=(tile_d, 1))
-    mem_copy(half, o_view_r)        # UB → GM
-    self.o_ub.release(o_slot_r)
-```
-
-手动 4 相的原因：`local_slice` 需要根据 `actual_vec_m`（M-tail 的实际行数）
-动态切视图，channel-first 的自动合成不支持这种动态 shape。
-
-## 9. local_slice 的使用规则
-
-`local_slice` 创建 channel slot 的零拷贝视图，用于：
+`local_slice` 创建 channel 缓冲区的零拷贝视图，用于：
 1. **qk_ub → softmax**：`local_slice(self.qk_ub, (actual_vec_m, actual_n), stride=(tile_n, 1))`
-   — 让 softmax 读到正确的 slot 和 shape
+   — 让 softmax 读到正确的缓冲区和 shape
 2. **pv_ub → update_o**：同上
 3. **p_l1 → compute_pv**：`local_slice(self.p_l1, (tile_cube_m, actual_n))`
-   — 让 PV matmul 读到正确的 P slot
-4. **o_ub → finalize_o**：`local_slice(o_slot, ...)` — 动态 M-tail 支持
+   — 让 PV matmul 读到正确的 P 缓冲区
+4. **o_ub → finalize_o**：`local_slice(...)` — 动态 M-tail 支持
 
 规则：
 - `local_slice` 必须在 `@jit` 方法内调用（不在 `__call__` 的 `scf.if` 中）
 - stride 参数必须匹配 channel 的 physical stride
 - `actual_vec_m` / `actual_n` 从 `tile_view` 或 `partition_view` 的 `.shape` 获取
 
-## 10. 已知限制与调试经验
+## 9. 已知限制与调试经验
 
 ### scf.if 内的 channel 操作问题
 
 `__call__` 中的 `if/elif/else` 选择不同 `@jit` stage 方法时，编译器为每个分支
-生成 `scf.if`。如果 `@jit` 方法内部有 CrossCore channel 的 `wait/release`，
+生成 `scf.if`。如果 `@jit` 方法内部有跨核 channel 的消费同步，
 框架可能在所有分支路径上复制 channel 操作，
-导致 ring buffer 游标错位。
+导致游标错位。
 
 **规避**：把 channel 操作放在 `@jit` 方法内部，`__call__` 中的 `if/elif/else`
 只选择调用哪个 `@jit` 方法。`_stage_update` 内部有 `if/elif/else` 分支
@@ -318,7 +297,9 @@ kernel 崩溃后 NPU 设备状态可能被污染，导致后续所有 kernel 都
 
 **调试建议**：每次崩溃后换一个干净环境重测，或用 `pytest` 的进程隔离。
 
-## 11. 性能数据汇总
+## 10. 性能数据汇总
+
+> **性能数据解读前提：核对每核负载是否均衡。** msprof 的 pipe ratio 描述的是被 profile 的那一个核，不是核阵。causal FA 下若 `idx2crd` 把 m-block 轴放最内层且 extent 整除 GRID，每核 kv 块数恒定不均 → max/mean 可达 1.78，最贵核永远最贵。改分发轴顺序后净得 1.61×，一条向量指令没改。先用 host 侧算术算每核负载（`max(load)/mean(load) > 1.2` → 分发问题），再看下表。详见 `../SKILL.md` 第 0 步。
 
 | 版本 | Task Duration | mac_ratio | vec_ratio | 说明 |
 |------|--------------|-----------|-----------|------|
@@ -332,3 +313,5 @@ kernel 崩溃后 NPU 设备状态可能被污染，导致后续所有 kernel 都
 - Fixpipe 重叠（fix 0.155 → 0.752）
 - Fused O update（减少 UB 访问）
 - 两遍 softmax + vmem_bar（Pass A/B 并行度更好）
+
+> **vec 段优化前先判吞吐 vs 延迟受限**：上表的优化路径假设"减少指令数"有效，但这只在吞吐受限时成立。实测同一 GQA vec 段：UNROLL 1/2/4 = 717.8 / 715.6 / 716.6 µs —— 并行度变 4 倍，时间差 0.3% → 吞吐受限，重排/交错全部无效，只有删掉工作才有用。判法见 `../SKILL.md` 第 2 步。

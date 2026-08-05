@@ -46,28 +46,7 @@ L0B 要的是 B 操作数的 `(K, N)` 且按 B^T 打包：
 
 ---
 
-## 3. 多个 mmad 写同一 L0C slot 必须手动事务
-
-**现象**：这条**会**报错（不算静默），但错误信息看不出根因：
-
-```
-error: cannot uniquely resolve unified channel epoch ledger ... (depth 1):
-no legal FIFO solution; fixed transactions 0, movable write units 4, movable read units 1
-```
-
-**修法**：手动 4 相协议，把 slot 显式持有到所有 mmad 完成：
-
-```python
-slot = ch.acquire()
-for c in tuple(range(n)):
-    matmul(local_slice(slot, ...), a, b, init=...)
-ch.commit(slot)
-rd = ch.wait(); mem_copy(dst, rd, ...); ch.release(rd)
-```
-
----
-
-## 4. 共用 L0 channel：形状只在特定 tile 配置下偶然重合 ⚠️
+## 3. 共用 L0 channel：形状只在特定 tile 配置下偶然重合 ⚠️
 
 **本清单里最贵的一条。** 详细复盘见 SKILL.md §3。
 
@@ -96,7 +75,7 @@ else:
 
 ---
 
-## 5. split-M 的空分区 AIV 会污染共享状态
+## 4. split-M 的空分区 AIV 会污染共享状态
 
 **现象**：query 长度 S ≤ `tile_vec_m` 时**所有行**都错（不只是某一半），误差看起来均匀。
 边界锐利：`tile_vec_m=16` 时 S=16 全错、S=17 全对。
@@ -113,7 +92,7 @@ m-tile 只有 1 行，同样触发（错行恰好是 `[64]`）。把 S 补齐到
 
 ---
 
-## 6. causal 场景补 query 行必须**前置**
+## 5. causal 场景补 query 行必须**前置**
 
 **现象**：补齐 query 行后，非 causal 全对、causal 系统性偏差。
 
@@ -128,7 +107,7 @@ n 个 key**。**前置**则真实行 i 移到 i+n，`(i+n) + (S_kv - (S+n))` 恒
 
 ---
 
-## 7. 归约轴的零填充列污染 softmax 分母
+## 6. 归约轴的零填充列污染 softmax 分母
 
 **现象**：`S_kv % tile_n != 0` 时精度不达标，误差随**被 padding 的列数**增长
 （补 1 列能过、补 64 列错得最凶），而非随尾块大小。
@@ -145,14 +124,14 @@ causal **只减轻不消除**：mask 跟的是因果对角线，不是 S_kv 边�
 
 ---
 
-## 8. 用同 dtype golden 当精度基准会误判
+## 7. 用同 dtype golden 当精度基准会误判
 
 见 SKILL.md §6。低精度参考实现自身误差可能比被测 kernel 还大
 （实测 fp16 golden 2.10e-3 vs kernel 1.64e-3）。必须用 fp64 golden + 官方 checker。
 
 ---
 
-## 9. 高层 `cast(int8_dst, fp16_src)` 反交织
+## 8. 高层 `cast(int8_dst, fp16_src)` 反交织
 
 **现象**：fp16→int8 的高层 `cast` 输出按 2 反交织（`res[k] == ref[2k]`），编译不报错、
 结果静默错。
@@ -161,12 +140,52 @@ causal **只减轻不消除**：mask 跟的是因果对角线，不是 S_kv 边�
 
 ---
 
-## 10. `@kernel` launch 按位置绑定，不按名字
+## 9. `@kernel` launch 按位置绑定，不按名字
 
 **现象**：host wrapper 里传参顺序与 `@kernel` signature 错位 → 张量被静默错路由
 （如 `q_scale` 落进 `key` 槽）→ NaN。编译和 launch 都成功、无 device fault。
 
 **修法**：逐槽核对 launch 调用顺序与 signature。看似关键字的对应关系**不生效**。
+
+---
+
+## 10. 显式 `addr=` 别名 channel 跨迭代竞态
+
+**现象**：两个 Channel 用 `addr=` 显式别名，单迭代测试全对；一旦相邻操作数 `depth≥2` 让相邻迭代重叠，立刻静默串数据（编译无告警、运行无 fault）。
+
+**机制**：别名 channel 的地址重叠对同步层完全不可见，无 pass 串行化；`depth≥2` 让相邻迭代的写操作同时发射且写同一批字节。别名操作数自己 `depth=1` 不构成保护。
+
+**修法**：先算不别名装不装得下 → 调 tile → 仍不行才别名，且必须论证跨迭代不重叠。详见 `../../core-skills/cannbotdsl-op-design/SKILL.md` §2.0。
+
+---
+
+## 11. `const_expr(cond)` 守卫变负失效
+
+**现象**：形如 `if const_expr(NPAD > 0):` 的保护，当 `NPAD = VH - BMV` 因上游参数变化而变负时**静默跳过**，而它本该保护的越界写读照常发生 —— 守卫非但没报警，还掩盖了唯一线索。
+
+**机制**：`const_expr` 在 trace 期求值 cond；cond 变负时 `NPAD > 0` 为 `False`，整个 `if` 分支被跳过。但被保护的代码（如 padding 填充）本应执行，跳过后越界写读无声发生。
+
+**修法**：给守卫加下界断言（`assert VH >= BMV`），或让参数在 host 侧推导而非硬编码。比守卫本身更可靠。
+
+**验证**：枚举上游参数变化域，确认 NPAD 变负时是否有断言拦截。详见 `../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 11。
+
+---
+
+## 12. raw-VF 操作数序猜错
+
+**现象**：raw-VF 算子的操作数序与 lane 布局，签名里看不出来，猜错就是静默算错。编译通过、无 device fault、结果数值范围正常但全错。
+
+**机制**：这些 op 的 Python 签名只有形参名（`acc`/`lhs`/`rhs`），源码直接建 MLIR op、无语义注释；两种读法都类型合法、都能编译、都返回有限值。
+
+| op | 实测语义 | 猜错的后果 |
+|---|---|---|
+| `vmadd(acc, lhs, rhs)` | `acc*lhs + rhs` | 自然读法 `acc + lhs*rhs`，两种都能编译，写错即静默错数 |
+| `vexp_sub(a, b)` | `exp(a - b)` | 反了得 `exp(+Δ)`，有限、看着合理、全错 |
+| 窄化 `vcast`（fp32→fp16） | 64 个结果落在偶数 lane，与 `reg_layout` 无关 | 以为 `ZERO`+`ONE`+`vmerge` 能拼成 128 lane → 纯几何置换。正解：两次 `ZERO` cast 再 `vdeintlv` |
+| `vreduce_max/sum` | 不广播，只有 lane0 有效 | 少一个 `vdup_lane0` 就跨行污染 |
+| `vload_brc` | 广播 4 字节偏移处的单个元素 | 按"每 datablock 一个"理解会静默混行 |
+
+**修法**：写 20 行探针钉死语义，比在 500 行 kernel 里查便宜一个数量级。测操作数序用**三个互不相同、不满足任何对称性**的值（如 2.0 / 3.0 / 5.0）。详见 `../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 10。
 
 ---
 

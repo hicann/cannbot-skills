@@ -6,6 +6,7 @@
 
 - [1. 单核 cube 探针（验证 matmul 形状/语义）](#1-单核-cube-探针)
 - [2. 跨核 cube→UB→GM 探针](#2-跨核-cubeubgm-探针)
+- [2.1. 探针假 PASS 的两种方式](#21-探针假-pass-的两种方式)
 - [3. 参数扫描骨架](#3-参数扫描骨架)
 - [4. 误差形态定位脚本](#4-误差形态定位脚本)
 - [5. 数值路径模拟器（精度归因）](#5-数值路径模拟器)
@@ -33,7 +34,7 @@ from cannbotdsl.runtime import from_torch_npu
 from cannbotdsl.tensor import (local_slice, make_copy_engine,
                                make_partition_tiler, mem_copy,
                                partition_view, tile_view)
-from cannbotdsl.typing.types import ChannelKind, MemLoc, Tensor
+from cannbotdsl.typing.types import MemLoc, Tensor
 
 M, N, K = 64, 128, 128
 
@@ -51,7 +52,7 @@ class probe_kernel:
         self.l0b = Channel(MemLoc.L0B, shape=(K, N), dtype=dtypes.float16, depth=1)
         self.l0c = Channel(MemLoc.L0C, shape=(M, N), dtype=dtypes.float32, depth=1)
         self.ub = Channel(MemLoc.UB, shape=(M // 2, N), dtype=dtypes.float32,
-                          depth=1, kind=ChannelKind.CrossCore)
+                          depth=1)
         self.subblock_idx = get_subblock_id()
 
     def __call__(self, out: Tensor, a: Tensor, b: Tensor):
@@ -64,13 +65,10 @@ class probe_kernel:
         matmul(self.l0c, self.l0a, self.l0b, init=True)
 
         split = make_partition_tiler((M, N), (M, N))
-        rd = self.l0c.wait() if False else self.l0c   # 单次 mmad 可全自动
         mem_copy(self.ub, self.l0c, engine=self.fixpipe, partition=split)
         ot = tile_view(out[0, 0, None, None], (M, N), (0, 0))
         half = partition_view(ot, split, self.subblock_idx)
-        slot = self.ub.wait()
-        mem_copy(half, slot)
-        self.ub.release(slot)
+        mem_copy(half, self.ub)
 
 
 @jit
@@ -99,28 +97,52 @@ if __name__ == "__main__":
     main()
 ```
 
-**多个 mmad 写同一个 L0C slot 时**必须手动事务，自动 4 相协议会报
-`no legal FIFO solution`：
-
-```python
-slot = self.l0c.acquire()
-for c in tuple(range(n_chunk)):          # 静态展开：tuple(range(..))，不是 const_expr
-    band = local_slice(slot, (M, W), offset=c * M * W * 4)
-    matmul(band, self.l0a, self.l0b, init=True)
-self.l0c.commit(slot)
-rd = self.l0c.wait()
-mem_copy(self.ub, rd, engine=self.fixpipe, partition=split)
-self.l0c.release(rd)
-```
-
----
-
 ## 2. 跨核 cube→UB→GM 探针
 
 在 §1 基础上把 vec 侧也拉进来，验证 fixpipe split-M、UB 布局、
-`partition_view` 的行分配。要点：`ChannelKind.CrossCore`，且每个 slot 的
-`wait()/release()` 区间内必须有可分类的 consumer 数据 op，否则报
+`partition_view` 的行分配。要点：每个缓冲区的消费区间内必须有可分类的
+consumer 数据 op，否则报
 `cannot classify consumer pipe in the wait/release interval`。
+
+---
+
+## 2.1 探针假 PASS 的两种方式
+
+探针挂掉很好办 —— 你会看到报错。**危险的是探针"跑通了"但结论无效**：它给你绿灯，而你据此改了 kernel。
+
+**坑 A：一个 region 里连写同一 buffer 的多个偏移。** 想省事把 N 个问题写进一个 buffer 的 N 个偏移一次跑完，结果前几个对、后几个错 —— **包括一个逻辑上平凡正确的对照组也错了**。根因是 `../../cannbotdsl-vf-fusion/SKILL.md` §6 陷阱 4（融合时桥接到陈旧 store）反噬探针本身，与被测 op 无关。
+
+> 症状识别：**对照组都错了，先怀疑探针结构，别怀疑硬件。**
+> 规避：**每个问题一个独立 `@jit` region、一个独立 buffer。** 多跑几次的成本远低于一个假结论。
+
+**坑 B：用了让两种假设无法区分的输入。** 验证 `vmadd(acc,lhs,rhs)` 是 `acc + lhs*rhs` 还是 `acc*lhs + rhs` 时，第一版探针写的是 `vmadd(a, b, a)` —— 而 `a + b*a == a*b + a`（交换律），**两种读法数值完全相同**。探针返回 PASS，"证实"你原本相信的那个，你无从察觉。
+
+> 症状识别：这类探针**永远 PASS**，无论真相如何 —— 所以它的 PASS 不携带任何信息。
+> 规避：设计输入时先自问「**如果我的假设是反的，这个输入会给出不同的数吗？**」答案是"不会"就换输入。测操作数序要用**三个互不相同、不满足任何对称性**的值（如 2.0 / 3.0 / 5.0）。
+
+**通用判据**：一个探针的 PASS 只有在**它的 FAIL 是可能的**时才有意义。写完先问一句：**什么情况下这个探针会失败？** 答不出来，它测的就不是你以为的东西。详见 `../SKILL.md` §2.1。
+
+### 2.2 raw-VF 操作数序探针的具体写法
+
+验 raw-VF 操作数序（如 `vmadd`/`vexp_sub`）时，用**三个互不相同、不满足任何对称性**的值。下面是 `vmadd(acc, lhs, rhs)` 的探针骨架：
+
+```python
+@jit
+def probe_vmadd(out_buf):
+    """验证 vmadd(acc, lhs, rhs) = acc*lhs + rhs 还是 acc + lhs*rhs"""
+    with vf(mode='raw'):
+        m32 = full_mask(elem_bits=32)
+        # 三个不对称值：2.0, 3.0, 5.0
+        # 若 vmadd = acc*lhs + rhs: 2*3+5 = 11
+        # 若 vmadd = acc + lhs*rhs: 2+3*5 = 17
+        acc = vdup_scalar(2.0, mask=m32)
+        lhs = vdup_scalar(3.0, mask=m32)
+        rhs = vdup_scalar(5.0, mask=m32)
+        res = vmadd(acc, lhs, rhs)
+        vstore(out_buf, 0, res, m32)
+```
+
+判定：读回 `out_buf[0]`，11 → `acc*lhs + rhs`，17 → `acc + lhs*rhs`。**不要用 `vmadd(a, b, a)`** —— 交换律下两种读法数值完全相同，探针永远 PASS。详见 `../../cannbotdsl-vf-fusion/SKILL.md` 陷阱 10。
 
 ---
 

@@ -85,7 +85,7 @@ tmp_col    = local_slice(tmp_mat, (C, 1), stride=(1, 1), offset=0)
 - **Reduction（axis split）**：用 `local_slice` 沿单轴取行/列 view（`(1,C)` 行、`(C,1)` 列）配 stride 做逐轴 reduce/scan。
 - **Elementwise（flat）**：`tile_view` + `ceil_div(total, tile)` 线性遍历；`tile_view` 尾块感知保证非整除边界只算 actual extent。
 
-storage 容量按 physical layout 决定，逻辑 tiling 按 logical shape；Buffer 只有一个物理 slot，Channel 的每槽间距按 physical addressable extent（ND stride 下为 `stride[0]*shape[0]`）核算。
+storage 容量按 physical layout 决定，逻辑 tiling 按 logical shape；Buffer 只有一个物理块，Channel 的每级间距按 physical addressable extent（ND stride 下为 `stride[0]*shape[0]`）核算。
 
 ### 4.1 tile_view 维度限制
 
@@ -151,9 +151,11 @@ case  D   BM  SV |    UB     L1  L0A   L0C | 结论
   8  128 128  64 | 116KB  128KB 32KB 128KB | OK
 ```
 
-`BM` 随 `D` 自适应（`BM*D*dtype_bytes` 要装进 L0A），`BN` 固定即可。**全部 OK 才动手写码**——本轮 20 个 case 一次核算全过，避免了写完才发现某个 shape 装不下。若某行 OVER，先调 BM/BN 或考虑 L0 别名复用（见 `../cannbotdsl-op-design/SKILL.md` §2.0）。
+`BM` 随 `D` 自适应（`BM*D*dtype_bytes` 要装进 L0A），`BN` 固定即可。**全部 OK 才动手写码**——本轮 20 个 case 一次核算全过，避免了写完才发现某个 shape 装不下。若某行 OVER，先调 BM/BN；**L0 别名复用是下策**（无同步保护、流水重叠下静默串数据，见 `../cannbotdsl-op-design/SKILL.md` §2.0 —— 先确认不别名真的装不下再考虑）。
 
 > **一句提醒**：可行性核算过了 ≠ 数值就对。通用化重写会同时引入 online 递推、跨块状态、raw-VF 等多个新面，**每一面都要单独验证**（见 `../../debug-skills/cannbotdsl-precision-debug/SKILL.md` 调试原则 8/9）。本轮实测：分块策略一次核算全过，但数值调试仍花了远超预期的时间。
+
+> **这张表是"容量端"，还有一个"覆盖端"**：这里枚举的是 benchmark 用例集需要哪些几何、装不装得下；但**规划器最终接受的几何域通常比用例集更大**，那部分差集**一个用例都测不到**。写完 kernel 后要再枚举一次「规划器接受的域 − 用例集覆盖的域」，差集才是边界测试的真正目标 —— 做法与实例见 `../cannbotdsl-op-test/SKILL.md` §L2.0（实测有算子在用例集全绿的同时 `G > 32` 静默算错）。
 
 ## 6. 动态 shape tiling
 
@@ -170,6 +172,10 @@ c_spec = cannbotdsl.TensorSpec((M, 128), dtypes.float32)
   约束不一致会拒绝编译。
 - shape/stride 可使用 `+`、`-`、`*` 和正整数除数的 `//`，例如 `B * S`、
   `S // 64`。每个 `Dim` 必须至少在一个槽位裸出现，以便从实参直接绑定；框架不反解方程。
+
+> **tiling 决定的轴顺序直接影响每核负载**：`idx2crd(tidx, [...])` 的维度表排列决定哪个轴变化最快。causal 下 tile 代价沿 m-block 轴变化（`nkb = mb+1`），若把 m-block 放最内层且 extent 整除 GRID，该轴取值每核恒定 → 最贵的核永远最贵。把代价沿轴变化的轴挪到最外层即可均衡，这是纯排列、数值逐位不变。详见 `../cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
+
+> **tiling 还要配合吞吐/延迟判定**：tile 放大后 compute bound 的段，先测吞吐受限还是延迟受限再决定优化方向 —— UNROLL 1/2/4 时间基本不变就是吞吐受限（只有删指令有用），变就是延迟受限（重排/交错有效）。别靠 `cycles/op vs 理想 IPC` 推断。详见 `../cannbotdsl-perf-optimize/SKILL.md` 第 2 步。
 - `Dim` 及其派生表达式是调用契约，不是 kernel 内的 IR 值，**不能直接用于
   `range()` 或控制流**。
 

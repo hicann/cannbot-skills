@@ -8,7 +8,7 @@ CANNBotDSL 算子开发技能框架，为 opencode 设计。基于 cannbot-dsl �
 skills/
 ├── install.sh               # 安装器：把 skills/agents 挂到 .opencode/
 ├── README.md                # 本文件
-├── core-skills/             # 核心/基础/开发/测试/优化/工具 skill（15 个）
+├── core-skills/             # 核心/基础/开发/测试/优化/工具 skill（14 个）
 │   ├── cannbotdsl-env-setup/
 │   ├── cannbotdsl-api-reference/
 │   ├── cannbotdsl-programming-model/
@@ -17,7 +17,6 @@ skills/
 │   ├── cannbotdsl-probe-debug/
 │   ├── cannbotdsl-op-test/
 │   ├── cannbotdsl-tiling-design/
-│   ├── cannbotdsl-channel/
 │   ├── cannbotdsl-vf-fusion/
 │   ├── cannbotdsl-cv-fusion/
 │   ├── cannbotdsl-kernel-structure/
@@ -84,7 +83,7 @@ skills/
 
 ## Skills 总览
 
-### core-skills（15 个）
+### core-skills（14 个）
 
 | 层级 | Skill | 说明 |
 |------|-------|------|
@@ -96,11 +95,10 @@ skills/
 | **设计** | `cannbotdsl-tiling-design` | 多级 tiling 策略（tile_view、tail block、layout 代数） |
 | **开发** | `cannbotdsl-op-develop` | 算子开发（三件套结构、渐进式实现、质量门禁） |
 | **开发** | `cannbotdsl-vf-fusion` | VF 向量折叠（3 种模式、铁律、陷阱） |
-| **开发** | `cannbotdsl-channel` | Channel 跨迭代/跨核通信（channel-first 写法） |
 | **开发** | `cannbotdsl-kernel-structure` | 三层职责分离编码规范 |
 | **开发** | `cannbotdsl-probe-debug` | 静默算错的探针定位法（最小探针、参数扫描、误差形态） |
 | **测试** | `cannbotdsl-op-test` | 分层测试（L0-L3）、CPU golden 规范 |
-| **测试** | `cannbotdsl-code-review` | 代码审查（Channel slot/sync、VF、Buffer/Channel 预算） |
+| **测试** | `cannbotdsl-code-review` | 代码审查（Channel sync、VF、Buffer/Channel 预算） |
 | **优化** | `cannbotdsl-perf-optimize` | 4 层优化栈（tiling → 核内流水 → 宏级流水 → 系统级） |
 | **工具** | `cannbotdsl-op-skill-creator` | 创建新 op-skill 并自动注册到工作流 |
 
@@ -134,7 +132,7 @@ skills/
 | Agent | 职责 | 绑定 Skills |
 |-------|------|------------|
 | `cannbotdsl-kernel-architect` | 算子设计（Stage 2） | 6 个 |
-| `cannbotdsl-kernel-developer` | 算子开发（Stage 3） | 8 个 |
+| `cannbotdsl-kernel-developer` | 算子开发（Stage 3） | 7 个 |
 | `cannbotdsl-kernel-tester` | 测试+审查（Stage 4） | 3 个 |
 | `cannbotdsl-perf-tuner` | 性能调优（独立） | 2 个 |
 
@@ -143,6 +141,7 @@ skills/
 ## 新增 op-skill
 
 `op-skills/` 下的 skill 为特定算子提供专属知识（blueprint、buffer budget、已知陷阱）。新增一个算子专用 skill **推荐使用 `cannbotdsl-op-skill-creator` skill 自动完成**，无需手动改 5 个文件。
+
 
 ### 用法
 

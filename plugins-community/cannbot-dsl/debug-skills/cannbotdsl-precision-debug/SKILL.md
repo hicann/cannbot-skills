@@ -15,7 +15,9 @@ description: "调试 CANNBotDSL runtime/NPU 精度、随机输出、hang、DataC
 | `local_slice`、UB→UB copy、sync、32×32 matmul 风险 | `references/runtime-precision-checklist.md` |
 | `run()` 已返回但 `torch.npu.synchronize()` hang | `references/runtime-precision-checklist.md` 的“长跑与 hang”和“混合 AIC/AIV 同步审计” |
 | 单 kernel 精度基线、layout 连续性风险或 split launch 验收口径 | `../../core-skills/cannbotdsl-op-design/references/single-kernel-fusion-lessons.md` |
-| 编译+launch 均成功、无 device fault，却部分 row/全 NaN | `@kernel` launch 按位置绑定，先核对 `run()` 传参顺序 vs signature 槽位（`../../core-skills/cannbotdsl-api-reference/SKILL.md` §5 #18） |
+| 编译+launch 均成功、无 device fault，却部分 row/全 NaN | `@kernel` launch 按位置绑定，先核对 `run()` 传参顺序 vs signature 槽位（`../../core-skills/cannbotdsl-api-reference/SKILL.md` §5 #17） |
+| 部分行静默错数、无 fault、编译干净 | 查显式 `addr=` 别名 + `depth≥2` 跨迭代竞态（`../../core-skills/cannbotdsl-op-design/SKILL.md` §2.0）；查 raw-VF 操作数序猜错（`../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 10） |
+| 探针返回 PASS 但 kernel 仍然错 | 探针可能假 PASS：同一 buffer 多偏移连写触发陈旧 store（`../../core-skills/cannbotdsl-probe-debug/SKILL.md` §2.1 坑 A）；或输入无法区分两种假设（§2.1 坑 B）。先问「这个探针什么情况下会 FAIL？」答不出来就换输入 |
 
 ## 调试原则
 
@@ -34,7 +36,7 @@ description: "调试 CANNBotDSL runtime/NPU 精度、随机输出、hang、DataC
 
 - CPU/translate 是否能生成目标路径。
 - `local_slice` source/destination offset 是否进入 lowering。
-- UB、L1、L0 buffer 物理地址和 `buf_id` 是否存在非法 alias。
+- UB、L1、L0 buffer 物理地址是否存在非法 alias。
 - sync id 是否单 producer/consumer，pipe 是否匹配。
 - cube matmul 的 shape、L0B transpose、ND/NZ layout 是否有独立最小测试。
 - AIV/AIC 混合 kernel 是否存在长时间无输出或等待错配。

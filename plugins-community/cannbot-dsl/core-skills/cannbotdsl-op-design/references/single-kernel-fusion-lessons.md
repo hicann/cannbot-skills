@@ -39,9 +39,9 @@
 
 ## 写代码前先画生命周期表
 
-> **前提**：CANNBotDSL 默认走 channel-first（Channel 直接当操作数，buf_id/sync_id 由框架自动合成，4 相协议零手写，见 `../SKILL.md` §5.0 与 `cannbotdsl-channel`）。channel-first 下**不需要**人肉画 token/wait/publish/release。下面这张生命周期表只用于排查 channel-first 下 hang / 数值错时理清预期的数据流——把它对照源码里每条 Channel 的 Write/Read 操作数，确认生产/消费关系是否符合预期。
+> **前提**：CANNBotDSL 默认走 channel-first（Channel 直接当操作数，见 `../SKILL.md` §5.0）。下面这张生命周期表只用于排查 hang / 数值错时理清预期的数据流——把它对照源码里每条 Channel 的 Write/Read 操作数，确认生产/消费关系是否符合预期。
 
-手写四原语时，每个跨角色或跨阶段 buffer 都要写清楚：
+手写同步时，每个跨角色或跨阶段 buffer 都要写清楚：
 
 | 数据 | producer | consumer | 位置 | token/id | wait | publish | release | 复用周期 |
 |------|----------|----------|------|----------|------|---------|---------|----------|
@@ -55,7 +55,11 @@
 - 初始化 token 必须覆盖后续所有会 wait 的 buffer id。
 - `tile_view` / `local_slice` view 只作为操作数；同步锁 owning buffer。
 - 遇到 hang 时先审计 wait/publish/release 是否成对，再改算法。
-- channel-first 场景遇 hang / 静默数值错，先确认 Channel 操作数 + 数据依赖是否正确传给框架（累加器被 per-op 化最常见），而不是先去人肉配对——arena 合成的配对本身不会漏。
+- 遇 hang / 静默数值错，先确认 Channel 操作数 + 数据依赖是否正确传给框架（累加器被 per-op 化最常见），而不是先去人肉配对。
+
+> **生命周期表之外还有"覆盖端"**：上面这张表排查的是"预期的数据流是否符合设计"。但**规划器接受的几何域通常比 benchmark 用例集大**，那部分差集一个用例都测不到。写完 kernel 后要再枚举一次「规划器接受的域 − 用例集覆盖的域」，差集才是边界测试的真正目标 —— 做法与实例见 `../../cannbotdsl-op-test/SKILL.md` §L2.0（实测有算子在用例集全绿的同时 `G > 32` 静默算错）。
+
+> **生命周期表里还要标注显式 `addr=` 别名**：两个 Channel 用 `addr=` 别名时，地址重叠需要手动管理。在生命周期表里给别名 channel 加一列"是否别名？"，并注明别名操作数及其相邻操作数的 depth —— 任一 `depth≥2` 就须论证跨迭代不重叠。详见 `../SKILL.md` §2.0。
 
 ## 复用参考实现的正确方式
 
@@ -81,9 +85,9 @@
 
 ## 复杂子算法迁移
 
-- 对分块求逆、递推、online 更新、packed layout 等复杂子算法，先迁移生命周期和数据槽位，再迁移具体公式。
-- 注释要说明每个槽位保存什么、哪一步生产、哪一步消费、何时可覆盖。
-- 不要把 CPU reference、workspace slot、临时近似值和最终输出混用。
+- 对分块求逆、递推、online 更新、packed layout 等复杂子算法，先迁移生命周期和数据区域，再迁移具体公式。
+- 注释要说明每个区域保存什么、哪一步生产、哪一步消费、何时可覆盖。
+- 不要把 CPU reference、workspace 区域、临时近似值和最终输出混用。
 
 ## 验证顺序
 

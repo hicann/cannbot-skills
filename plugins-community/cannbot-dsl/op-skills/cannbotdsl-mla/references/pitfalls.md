@@ -117,17 +117,16 @@ out = out[:, pad_rows:] if layout == "BSND" else out[:, :, pad_rows:]
 `'cannir.matmul' op M dimension mismatch: dst[0]=64 vs lhs[0]=1`。
 
 **根因**：GM 的 Q 视图是 tail-aware 的，M 尾块时 L0A 行数 < tile_cube_m，
-而 L0C slot 仍是声明的满尺寸。
+而 L0C 缓冲区仍是声明的满尺寸。
 
 **修法**：`compute_qk` / `compute_pv` 里把累加器切到实际 M：
 
 ```python
 m_rows = qn_slice.shape[0]
-slot = self.qk_l0c.acquire()
-acc = local_slice(slot, (m_rows, self.tile_n))     # ← 对齐 M
+acc = local_slice(self.qk_l0c, (m_rows, self.tile_n))   # ← 对齐 M
 ```
 
-PV 的 band 同理用 `local_slice(slot, (m_rows, d_chunk), offset=...)`。
+PV 的 band 同理用 `local_slice(self.pv_l0c, (m_rows, d_chunk), offset=...)`。
 
 ---
 
@@ -171,7 +170,10 @@ lane 压成 -inf），属最精密且已验证的一段。动前**先写只测�
 |---|---|
 | `tile_view` 的 coord 是 **tile 索引** | chunk 循环写 `(0, c)` 而非 `(0, c*CHUNK)` |
 | PV 的 L1→L0B 需 `transpose=True`，QK 不需要 | 两个 chunk 循环 |
-| N 个 mmad 写同一 L0C slot 需**手动事务** | QK 5 个 chunk、PV 4 个 band 都要 |
+| N 个 mmad 写同一 L0C 区域编译期报错 | QK 5 个 chunk、PV 4 个 band 都要 `tuple(range(n))` 静态展开 + `local_slice` 切子区域 |
 | `const_expr(range(n))` 不是循环包装器 | 静态展开写 `tuple(range(n))` |
 | `@jit` 参数不能是 Python `bool` | 编译期开关放 `__init__` 属性 |
 | 同 dtype golden 当精度基准会误判 | 验收必须用官方 checker |
+| `const_expr(cond)` 守卫变负失效 | `NPAD = VH - BMV` 变负时 `if const_expr(NPAD > 0):` 静默跳过，加 `assert VH >= BMV` |
+| 显式 `addr=` 别名 channel 无同步保护 | depth≥2 重叠即静默串数据，先确认不别名装不装得下 |
+| benchmark 覆盖差集 | 规划器接受的域 − 用例集覆盖的域 = 边界测试目标，MLA 的 `G > 32` 就在差集里 |

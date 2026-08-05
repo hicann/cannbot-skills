@@ -48,7 +48,7 @@
    - 区分 ready token 和 free/release token：消费者必须等待真实 producer 发出的 ready，不能用初始化 free token 或本阶段自 Set/Wait 伪装数据可见。
    - 执行边界如果只回收 allocator 游标，必须同时说明后续是否还会读取同一物理 buffer；只有确认没有跨 pipe 或跨边界消费者仍在读时，才能 rewind 后覆盖。
    - 使用 per-subblock token offset 的 handoff，发布和等待都要按 `id + subblock*16` 建表，不能只让多个 subblock 等同一个 base id。
-   - L0C 经 FIXPIPE 写回后要分别考虑两个消费者：后续 M 复用 L0C 槽需要 `FIXPIPE -> M`，后续 MTE2 读 GM 需要 `FIXPIPE -> MTE2`。二者不能互相替代。
+   - L0C 经 FIXPIPE 写回后要分别考虑两个消费者：后续 M 复用 L0C 缓冲区需要 `FIXPIPE -> M`，后续 MTE2 读 GM 需要 `FIXPIPE -> MTE2`。二者不能互相替代。
 
 6. **VF 和 dtype 表**
    - 每个 `with vf()` 对应一个逻辑向量公式，列出输入 UB、输出 UB、中间 FP32/BF16 buffer、producer、consumer。
@@ -89,9 +89,9 @@
    - 目标实现默认走 on-chip 通路：GM 输入搬到 L1/UB，Cube 在 L1/L0/FIXPIPE 间推进，Vector 在 UB 内处理，再通过明确 handoff 写到 L1/UB 或最终 GM。
    - 阶段内复用或多次消费的数据应优先常驻 L1/UB；不要每次写 GM 再读回。
    - 算法内部临时量、局部累加、结构化辅助张量、广播/变换临时区等短生命周期数据不应默认落 GM。只有容量或工具链限制证明不可行时，才可作为临时 GM scratch。
-   - 如果使用 `Buffer(..., addr=...)`、Channel 显式地址或 GM slot 编址，必须说明别名关系和生命周期；Buffer/Channel 都不会替你提供 alias 排序保护。
+   - 如果使用 `Buffer(..., addr=...)`、Channel 显式地址或 GM 区域编址，必须说明别名关系和生命周期；Buffer/Channel 都不会替你提供 alias 排序保护。
    - 手动复用物理地址时同时核对视图 shape 和字节区间；不能把较大视图挂到较小 buffer 的地址上，即使 dtype 或 tile 维度看起来相近。
-   - L0A/L0B/L0C double buffer 需要先算清单槽容量和 arena 上限；如果一个 tile 已经占满对应 L0 空间，advance 到第二槽会越界，必须退回单槽或缩小 tile。
+   - L0A/L0B/L0C double buffer 需要先算清单级容量和 arena 上限；如果一个 tile 已经占满对应 L0 空间，advance 到第二级会越界，必须退回单级或缩小 tile。
    - 多个 GM 输出、workspace 或 scratch 共存时，store 目标和 offset 要单独校验；不要只凭变量名判断写到了正确输出。
 
 5. **参数命名稳定**
@@ -100,7 +100,7 @@
    - 常量不要使用裸缩写；使用带语义的名称，并在定义处说明含义、单位和是否为公开约束。
    - 中间变量名要反映真实逻辑轴角色和数据语义。不要因为两个 tile 形状相同，就使用同一个命名前缀或把一个语义的数据伪装成另一个语义。
    - 只有真实发生某轴分块时才引入对应的 `*_tile_size`、`*_tile_idx`、`*_tile_num`，并说明这是实现分块，不是算法公式。
-   - 通用代码注释不要写只在个人上下文里成立的内部代称；需要区分版本或阶段时写清楚算法阶段、buffer 槽位或数据语义。
+   - 通用代码注释不要写只在个人上下文里成立的内部代称；需要区分版本或阶段时写清楚算法阶段、buffer 区域或数据语义。
    - 文件内保留一处 layout 映射说明，后续代码只引用这套命名。
    - buffer 和 tile 名字优先表达领域语义。不要因为当前 API 参数是矩阵乘的左右操作数，就把真实公式里的数据改名成 `lhs/rhs`；使用能追踪公式的数据名，例如 `<tensor_role>_l1`、`<state_name>_ub`、`<output_name>_tile`。
 
@@ -110,8 +110,8 @@
    - 多个 matmul 或多阶段结果相加时用 `accumulate_*`。
 
 7. **复杂数学过程必须可读**
-   - 分块求逆、迭代近似、组合公式、递推更新等复杂过程，要用中文注释解释数据槽位、近似公式、组合顺序和输出含义。
-   - 注释重点是算法不变量和 buffer 语义，例如“槽 0/1 保存上一轮近似与本轮修正项”“先组合对角块，再写回尾块”，不要逐行翻译赋值语句。
+   - 分块求逆、迭代近似、组合公式、递推更新等复杂过程，要用中文注释解释数据区域、近似公式、组合顺序和输出含义。
+   - 注释重点是算法不变量和 buffer 语义，例如“缓冲 0/1 保存上一轮近似与本轮修正项”“先组合对角块，再写回尾块”，不要逐行翻译赋值语句。
 
 ## 推荐结构
 
@@ -170,7 +170,7 @@ class Operator:
    - 内部算法需要 base block、chunk、tile、padding 或特殊布局时，在 kernel 内用 UB/L1/L0 buffer 和 `tile_view`/`local_slice` 表达。
    - 结构化辅助张量、边界标记、稀疏/三角/窗口等规则尽量在 Vector 内部生成或用局部 buffer 表达。
    - 不要把内部高维 scratch 当成外部 tensor 传入。
-   - 对来自参考实现的 L1 resident、TSCM、L0 double buffer、RHS 预取路径，单槽映射为 Buffer，多槽/同步路径映射为 Channel + copy engine。无法由 Channel 表达的旧手动多槽方案标为不支持，不要直接退化成 GM workspace 或伪造 API。
+   - 对来自参考实现的 L1 resident、TSCM、L0 double buffer、RHS 预取路径，单块映射为 Buffer，多级/同步路径映射为 Channel + copy engine。无法由 Channel 表达的旧手动多级方案标为不支持，不要直接退化成 GM workspace 或伪造 API。
 
 4. **先调度后性能**
    - 先做一版可解释、可 translate、可 smoke 的实现。
@@ -195,7 +195,7 @@ class Operator:
 - 如果 Cube 等两个 AIV subblock 的 GM ready，Vector 生产侧必须分别发布 base 和 `base+16`；如果两个 Vector subblock 消费 Cube/FIXPIPE 结果，也必须分别等待 base 和 `base+16`。
 - 如果同一阶段先 `SetFlag` 再立即 `WaitFlag`，要先判断它是否消费了初始化 token，而不是等待上游真实 producer。
 - barrier、notify/wait 和 release 链只在确认没有真实消费者后才能删除；保护 scratch 或 GM 可见性的同步点不能因为当前小 shape 不 hang 就视为多余。
-- `tile_view`/`local_slice` view 可能没有稳定 `buf_id`。同步锁 owning buffer，view 只作为 `mem_copy`/vector op 的 operand。
+- `tile_view`/`local_slice` view 可能没有稳定同步标识。同步锁 owning buffer，view 只作为 `mem_copy`/vector op 的 operand。
 
 ## 参数和 layout 操作模式
 
@@ -254,7 +254,7 @@ class Operator:
 - 搜索 `gm_*scratch`：每个 GM scratch 都必须能在 GM 例外表中找到理由；否则改成 UB/L1/L0。
 - 搜索形如 `axis_a // axis_b`、`*_tile_num` 的切分常量：确认这是实现分块，不是算法公式；变量名必须带真实逻辑轴语义。
 - 搜索带形状暗示的变量名和固定 tile shape：确认命名和真实逻辑轴角色一致，不是因为尺寸相同而复用错误语义。
-- 搜索 `UBBuffer(`、手动地址和 slot 常量：确认只有别名复用或特殊生命周期才使用，并有中文注释。
+- 搜索 `UBBuffer(`、手动地址和区域常量：确认只有别名复用或特殊生命周期才使用，并有中文注释。
 - 检查 copy engine 是否归属 Cube/Vector，而不是由顶层 kernel 创建后随处透传。
 - 检查短生命周期算法临时量、迭代临时量、局部累加和结构化辅助张量是否常驻 L1/UB/L0；若落 GM，必须有容量或工具链限制说明。
 - 搜索 `lhs` / `rhs` / `tmp` / `problem` / `参考` / `对齐`：确认命名和注释不是来源说明或代数占位，而是当前公式、输入集、buffer 生命周期的真实语义。通用库可使用代数名，具体算子文件不应滥用。

@@ -42,21 +42,21 @@
 
 - 手动地址、别名 buffer、`reserve_*` 后的 view 必须核对物理字节区间，确认 shape 不会越过被复用 buffer 的真实容量。
 - `rewind_*` 只回收 allocator 游标，不自动表达跨 pipe handoff；复用地址前确认上一段执行已经完成，且后续不再读取同一物理 buffer。
-- 如果某个 L0A/L0B/L0C tile 单槽已占满硬件空间，不要再按 double buffer 方式 advance 到第二槽；设备错误可先按 L0 越界方向排查。
+- 如果某个 L0A/L0B/L0C tile 单级已占满硬件空间，不要再按 double buffer 方式 advance 到第二级；设备错误可先按 L0 越界方向排查。
 
 ## 6. sync id
 
 为每个 handoff 建表：
 
-| 数据 | producer | consumer | pipe arrive | pipe wait | id |
-|------|----------|----------|-------------|-----------|----|
-| 例：`gm_M` | AIV MTE3 | AIC MTE2 | MTE3 | MTE2 | `_M_GM_SYNC_ID` |
+| 数据 | producer | consumer | id |
+|------|----------|----------|----|
+| 例：`gm_M` | AIV MTE3 | AIC MTE2 | `_M_GM_SYNC_ID` |
 
 风险模式：
 
 - 同 id 多个不相关 producer。
 - wait pipe 和 arrive pipe 不匹配。
-- id 与 buffer `buf_id` 复用但生命周期不同。
+- id 与 buffer 地址复用但生命周期不同。
 - `id+16` 与另一半 subblock 或 cube lock 混淆。
 - ready token 被初始化 token 或 free/release token 顶替，导致 consumer 没有真正等待 producer。
 - 使用 per-subblock token offset 的 handoff 只发布或只等待 base id，导致非 base subblock 抢错 token；发布和等待都要按 `id + subblock*16` 对称审计。
@@ -88,7 +88,7 @@
 运行能返回但报设备错误或出现 NaN/Inf 时：
 
 - 先设置可观测检查点或早退开关，把失败压到首个产生异常的计算/搬运边界，不同时修改 sync、layout、dtype 和 tile。
-- 设备错误优先审计最近进入的 DataCopy、L1→L0、L0C/FIXPIPE 和手动地址复用；先核对地址、slot、stride、copy 方向是否越界或不支持。
+- 设备错误优先审计最近进入的 DataCopy、L1→L0、L0C/FIXPIPE 和手动地址复用；先核对地址、缓冲区、stride、copy 方向是否越界或不支持。
 - NaN/Inf 先二分关键中间量的生产链，记录“进入某个检查点前正常、检查点之后异常”的最小边界。
 - 如果完整路径才异常，而局部计算早退正常，把最终 store、barrier、wait-only 和写前/写后路径拆开验证，先区分等待链问题还是 copy 出问题。
 - `run()` 返回但 `torch.npu.synchronize()` 后失败，说明 kernel 执行期或同步期仍有问题；不要把它归类为 Python host 或 expected output 问题。

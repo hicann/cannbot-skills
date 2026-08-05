@@ -92,9 +92,11 @@ grep -E "timeout|wait|hang|not finish|SQE|stream.*abort|task_id" \
 
 hang 的根因几乎都是**跨核同步没配对**:某个核在 `wait` 一个永远不会到来的 event/flag。排查方向:
 
-- channel/手动 sync 的 acquire/commit/wait/release **计数是否配平**——生产端 commit 次数必须等于消费端 wait 次数。对照一个已知能跑通的版本做计数 diff,数量应一致。
+- channel/手动 sync 的 **计数是否配平**——生产端提交次数必须等于消费端等待次数。对照一个已知能跑通的版本做计数 diff,数量应一致。
 - 流水线 drain 阶段的守卫条件是否写反——多发一个 wait 没有对应 arrive 就会挂死。
 - 错误模块若指向某个 PIPE 一直在 `lock` 等待,对照该 PIPE 的生产者是否真的提交了。
+- **负载不均衡致单核 timeout**:sync 计数配平但某核分到的 tile 代价远超平均（causal 下 m-block 轴放 `idx2crd` 最内层且 extent 整除 GRID → 每核工作量恒定不均）。先用 host 侧算术算每核负载（`max(load)/mean(load) > 1.2` → 分发问题,不是 sync 问题），见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md` 第 0 步。
+- **`const_expr(cond)` 守卫变负致越界间接触发 timeout**：`NPAD = VH - BMV` 变负时 `if const_expr(NPAD > 0):` 静默跳过 → 越界写读 → 间接触发设备异常或 hang。plog 里看不到 sync 不配平，但会看到越界地址访问。查所有 `const_expr` 守卫的变量是否可能为负，见 `../../core-skills/cannbotdsl-vf-fusion/SKILL.md` 陷阱 11。
 
 详见 `references/hang-patterns.md`。
 

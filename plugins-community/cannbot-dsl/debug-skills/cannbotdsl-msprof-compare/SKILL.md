@@ -10,7 +10,7 @@ description: 在 Ascend NPU 上跑 msprof 性能对比并解析 op_summary CSV�
 这个 skill 专做一件事：把两个（或多个）已有的 CANNBotDSL kernel 在 NPU 上跑 msprof，把 `op_summary_*.csv` 解析出来，给出可读的对比。
 
 它**不**做：
-- 修改 kernel 实现（去对应的 `cannbotdsl-flash-attention` / `cannbotdsl-channel` / `cube-pipeline` / `vec-pipeline` skill）
+- 修改 kernel 实现（去对应的 `cannbotdsl-flash-attention` / `cube-pipeline` / `vec-pipeline` skill）
 - 设计 matched shape——本 skill 假设被测 test 文件里 shape 已经对齐
 - 登录 NPU + 配 CANN 环境（去 `on-board-debugging` skill；如果当前会话还没登录上 NPU，**先调用它**）
 
@@ -108,6 +108,36 @@ FA_PERF_REPEAT=10 msprof \
 | 39-40 | aiv_vec_time / ratio | vec active 时间 / 占比 |
 
 如果以后 CANN 改 schema，先 `head -1 op_summary*.csv | tr , '\n' | nl` 重新对一下列号。
+
+## pipe ratio 的作用域：一个核，不是核阵
+
+**`aic_*_ratio` / `aiv_*_ratio` 描述的是被 profile 的那一个核。** 这决定了它能回答什么：
+
+- 能回答：**这个核**的时间花在哪个 pipe 上。
+- **不能回答**：这个 pipe 是不是整个 kernel 的瓶颈。
+
+因为高 ratio 有两个完全不同的来源，而计数器长得一模一样：
+
+| 真实原因 | 该做什么 |
+|---|---|
+| 该单元本身吃满了 | 减少该 pipe 的工作量 |
+| **这个核被分到远超平均的活，其他核在等它** | **改分发，别动 pipe** |
+
+kernel 墙钟由最慢的核决定，两种情况下"忙核"都会被 profile 到、都显示高 ratio。**只看 ratio 无法区分，会把负载不均衡误判成 pipe 瓶颈。**
+
+**所以解读 ratio 之前，先花几行代码算每核负载**（纯 host 侧算术，不用上板）：
+
+```python
+# dispatch 形如 for tidx in range(get_block_idx(), TOTAL, get_block_num())
+load = [sum(cost_of_tile(t) for t in range(c, TOTAL, GRID)) for c in range(GRID)]
+print(max(load) / (sum(load) / GRID))     # > 1.2 → 先修分发，ratio 先别信
+```
+
+`cost_of_tile` 用**真实代价**（如 causal 下该 tile 实际迭代的 kv 块数），不是 tile 计数 —— 均分 tile 数不等于均分工作量。
+
+> **实测**：某 GQA kernel 显示 `aiv_vec_ratio 0.854 / aic_mac_ratio 0.082`，按征兆是典型 "vec bound"。实际是 `idx2crd` 把 m-block 轴放最内层、其 extent 整除 GRID，导致该轴取值**每核恒定** → causal 下最贵的核永远最贵，max/mean = **1.78**。改分发轴顺序后净得 **1.61×**，一条向量指令没动。若当时直接按 ratio 去减 vec op，方向就错了。
+
+完整决策树（含此第 0 步）见 `../../core-skills/cannbotdsl-perf-optimize/SKILL.md`。
 
 ## 远端执行模板
 
