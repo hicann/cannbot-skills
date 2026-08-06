@@ -10,8 +10,9 @@
 
 ```
 cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
-├── AGENTS.md                     # PM 主 Agent 配置（final，仅入口）：定位 PM 身份，
-│                                 #   引导加载 ops-direct-invoke-workflow skill，本身不承载流程
+├── AGENTS.md                     # PM 主 Agent 配置（仅入口）：定位 PM 身份，
+│                                 #   引导加载 ops-direct-invoke-workflow skill，本身不承载流程；
+│                                 #   可被子仓 agent/AGENTS.md 覆写（存在即链接子仓版）
 ├── init.sh                       # 基类构造函数：搭建工作区 + 绑定 virtual 组件
 ├── hooks/opencode/permission-guard.js   # 动态权限插件（opencode 侧，按角色限写）
 ├── hooks/claude/permission-guard.js     # 动态权限 hook（claude 侧，同一套规则语义）
@@ -24,6 +25,8 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 │   ├── repo-*/                               # 仓库领域知识 skill（virtual，可被子仓 override）
 │   ├── workflow-doc-templates/               # 交付件模板 skill（virtual，可被子仓 override）
 │   ├── workflow-cp*/                         # 各 CP 点验收标准 skill（virtual，可被子仓 override）
+│   ├── plugin-*/                             # 可插拔流程插件（mini-workflow，可覆写/可新增；
+│   │                                         #   frontmatter 声明挂载点，init 注册到 plugin-registry.json）
 │   ├── workflow-agent-permissions/           # 各 agent 权限规格（virtual，可被子仓 override）
 │   └── ops-direct-invoke-workflow-maintain/  # 本维护 skill
 └── README.md                     # 设计思想 + 设计约束章节
@@ -71,10 +74,13 @@ skills/ops-direct-invoke-workflow/
 <算子仓>/
 ├── agent/                        # 子仓 override 源 + 子类 init
 │   ├── init.sh                   # 子类构造函数：拉基类仓 → 调基类 init → 透传 --override
+│   ├── AGENTS.md                 # 可选：覆写基类 PM 入口（存在即链接子仓版；
+│   │                             #   须保留基类 skills 登记基线，再追加子仓 skill/插件）
 │   └── skills/                   # 覆写基类同名 skill（按目录名匹配）：
 │       ├── repo-*/               #   仓库领域知识 skill
 │       ├── workflow-doc-templates/ # 交付件模板 skill
 │       ├── workflow-cp*/         #   各 CP 点验收标准 skill
+│       ├── plugin-*/             #   新增/覆写可插拔流程插件（含嵌套子 skill）
 │       └── workflow-agent-permissions/ # 各 agent 权限规格
 └── .cannbot/                     # 中间目录（gitignore），init 生成
     └── cannbot-skills/           # clone 下来的基类仓
@@ -111,16 +117,17 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 | 步骤 | 动作 | 链接关系 |
 |------|------|---------|
 | 1 | 建 `.cannbot/` 中间目录 | — |
-| 2 | 链接配置文件 | `<install>/AGENTS.md` → `PLUGIN_ROOT/AGENTS.md`；claude 时额外 `<install>/CLAUDE.md` → 同源 |
+| 2 | 链接配置文件 | `<install>/AGENTS.md` → `PLUGIN_ROOT/AGENTS.md`；`--override` 目录含 `AGENTS.md` 时 → `<override>/AGENTS.md`；claude 时额外 `<install>/CLAUDE.md` → 同源 |
 | 3 | **扁平化**链接 agents | 递归 `agents/`，按 basename 链接到运行时 `agents/*.md`（opencode `.opencode/agents/`、claude `.claude/agents/`）；**codex** 从 `hooks/codex/*.toml` 生成 `.codex/agents/*.toml`（`__CANNBOT_AGENT_SOURCE__` 替换为 `agents/*.md` 绝对路径） |
-| 4 | 链接 skills | 收集到的每个 skill 名 → 运行时 `skills/<name>`（opencode `.opencode/skills/`、claude `.claude/skills/`、**codex `.agents/skills/`**）；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增 |
+| 4 | 链接 skills | 收集到的每个 skill 名 → 运行时 `skills/<name>`（opencode `.opencode/skills/`、claude `.claude/skills/`、**codex `.agents/skills/`**）；`plugin-*/` 下含 SKILL.md 的嵌套子 skill 一并顶层链接；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增（含嵌套子 skill） |
 | 4.5 | 生成权限配置 | 从运行时 `skills/workflow-agent-permissions/hooks/` **复制**（非软链接）到 `.cannbot/permissions/`，**缺失才生成、已存在保留**（工作区配置优先） |
+| 4.6 | 生成插件注册表 | 扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 的 `workflow-hook` / `workflow-stages`，写 `.cannbot/plugin-registry.json`：**重扫重写，保留各插件 `enabled`、并入新增（新增时 `surveyed` 复位）、剔除失效**；非法 hook / 缺 stages 仅 warn 不注册；`--plugin-enable <name> on|off` 直接改 `enabled` |
 | 4+ | 权限 hook | opencode：`hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`；claude：`hooks/claude/permission-guard.js` → `<install>/.claude/hooks/`，并在 `.claude/settings.json` 幂等注册 PreToolUse hook（matcher `Write\|Edit\|MultiEdit\|NotebookEdit`）；**codex：无权限 hook**，init 输出 WARNING 告知降级（角色隔离靠 prompt，非机制保证） |
 | 5/6 | clone asc-devkit / cann-samples 到 `.cannbot/` | — |
 
-**skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录；② 解析每个 agent（`agents/*.md`）frontmatter 的 `skills:` 列表。
+**skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录（含 `plugin-*/` 嵌套子 skill）；② 解析 AGENTS.md（`--override` 目录含 `AGENTS.md` 时优先子仓版）与每个 agent frontmatter 的 `skills:` 列表。
 
-**skill 源解析顺序**：本地 `skills/` → 共享 `../../ops/` → `../../infra/`。同名时靠前者优先。
+**skill 源解析顺序**：本地 `skills/` → 本地 `plugin-*/` 嵌套子 skill → override `skills/` → override `plugin-*/` 嵌套子 skill → 共享 `../../ops/` → `../../infra/`。同名时靠前者优先。
 
 ### 动态权限 hook（opencode / claude）
 
@@ -149,5 +156,17 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 | 类型 | 匹配依据 | 行为 |
 |------|---------|------|
 | skill | override 目录下的**子目录名** | 同名替换基类默认；基类没有的**新增** |
+| AGENTS.md | override 目录下是否存在 `AGENTS.md` | 存在则替换基类 PM 入口；须保留基类 `skills:` 登记基线 |
 
 **关键**：工作流编排始终通过**逻辑名**引用组件（如 `repo-coding-rules`、`workflow-cp5`）。子仓覆写的是「逻辑名 → 实现」这层绑定，编排层不感知底层实现被替换（依赖倒置 + 里氏替换）。所以子仓 override 时**逻辑名必须与基类一致**（skill 目录名、SKILL.md 的 `name:` 字段都要对齐），否则匹配不上，退化为「新增」。
+
+## 可插拔流程插件（plugin-*）
+
+plugin-* 是第三类知识（与 final 编排、virtual 组件并列）：可插拔的子流程 skill，解决「并非所有算子仓都希望集成某段流程」的定制诉求（如提交 PR 到上库、性能迭代）。
+
+- **声明**：插件 SKILL.md frontmatter 携带 `workflow-hook`（挂载点，after/before 单步）与 `workflow-stages`（内部步骤编号）；`standalone: true` 表示可单独任务触发。
+- **注册**：init Step 4.6 扫描插件 frontmatter，生成 `.cannbot/plugin-registry.json`（name / hook / stages / standalone / enabled / surveyed）。
+- **启用**：工作流编排 skill 的通用约定指导 PM 在接到算子开发任务时读 registry；`surveyed=false` 时首次问卷询问用户启用哪些插件，选择落盘 `enabled`（也可用 `init.sh --plugin-enable` 调整）。
+- **触发**：编排（final）不感知具体插件；PM 推进到挂载点时触发 `enabled` 的插件，加载其 SKILL.md 按内部步骤表执行；未启用的挂载点自然跳过。
+- **自闭环**：插件自带内部步骤表、task-prompts、回退与验收（执行/验收不同实例），内部步骤编号写入主 `state.json`。
+- **覆写**：子仓 `agent/skills/plugin-*/` 同名替换/新增（含嵌套子 skill）；子仓 `agent/AGENTS.md` 存在时替换基类 PM 入口（保留基类 `skills:` 登记基线后追加子仓插件）。

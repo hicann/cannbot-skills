@@ -261,7 +261,11 @@ Options:
   --override <dir>         - Override root directory: use skills under <dir>/skills/ to
                                 replace linked skills of the same name (adds any not
                                 already present in the base; errors if there is no
-                                skills/ subdirectory)
+                                skills/ subdirectory). If <dir>/AGENTS.md exists, it is
+                                linked as the PM entry instead of the base AGENTS.md
+  --plugin-enable <name> <on|off>
+                             - Enable or disable a pluggable workflow plugin (plugin-* skill)
+                                in .cannbot/plugin-registry.json
   --repo <name>:<path>     - Use a locally cloned third-party repository (linked
                                 instead of cloned). Can be specified multiple times,
                                 e.g. --repo asc-devkit:... --repo cann-samples:...
@@ -276,6 +280,7 @@ Examples:
   init.sh project claude /path/to/proj     # custom install directory + claude
   init.sh --repo asc-devkit:~/repos/asc-devkit --repo cann-samples:~/repos/cann-samples
   init.sh project /path/to/repo --override /path/to/repo/agent
+  init.sh --plugin-enable plugin-pr-submit off
 
 Installation paths:
   opencode: .opencode/{skills,agents,plugin}/   + AGENTS.md in project root
@@ -287,6 +292,7 @@ Intermediate directory:
   .cannbot/asc-devkit    asc-devkit repo
   .cannbot/cann-samples  cann-samples repo
   .cannbot/ops-tensor    ops-tensor repo
+  .cannbot/plugin-registry.json  pluggable workflow plugins (plugin-* skills): hook points, stages, enabled
 EOF
 }
 
@@ -348,6 +354,18 @@ while [ $# -gt 0 ]; do
             fi
             REPO_LOCAL["${local_name}"]="${local_path}"
             continue ;;
+        --plugin-enable)
+            PLUGIN_ENABLE_NAME="$2"
+            PLUGIN_ENABLE_STATE="$3"
+            if [ -z "${PLUGIN_ENABLE_NAME}" ] || [ -z "${PLUGIN_ENABLE_STATE}" ]; then
+                err "--plugin-enable format invalid: must be <name> <on|off>"
+                exit 1
+            fi
+            if [ "${PLUGIN_ENABLE_STATE}" != "on" ] && [ "${PLUGIN_ENABLE_STATE}" != "off" ]; then
+                err "--plugin-enable state must be on or off, got: ${PLUGIN_ENABLE_STATE}"
+                exit 1
+            fi
+            shift 3; continue ;;
         --repo=*)
             local_arg="${1#*=}"; shift
             if [[ "${local_arg}" != *:* ]]; then
@@ -476,11 +494,32 @@ collect_agents() {
     done < <(find "${LOCAL_AGENT_ROOT}" -type f -name '*.md' 2>/dev/null | sort)
 }
 
-# Resolve skill source path: local skills/ first, then shared ops/, then infra/.
+# Resolve skill source path: local skills/ first (plugin-* nests sub-skills one level
+# down, e.g. plugin-<name>/<sub-skill>), then shared ops/, then infra/.
 resolve_skill_src() {
     local skill="$1"
     if [ -d "${LOCAL_SKILL_ROOT}/${skill}" ]; then
         echo "${LOCAL_SKILL_ROOT}/${skill}"; return
+    fi
+    local plugin_dir
+    for plugin_dir in "${LOCAL_SKILL_ROOT}"/plugin-*/; do
+        [ -d "${plugin_dir}" ] || continue
+        if [ -d "${plugin_dir}${skill}" ] && [ -f "${plugin_dir}${skill}/SKILL.md" ]; then
+            echo "${plugin_dir}${skill}"; return
+        fi
+    done
+    # Skills from the override dir (linked in the override pass) — resolve them
+    # here too so frontmatter-registered override skills are not flagged missing.
+    if [ -n "${OVERRIDE_SKILL_DIR}" ]; then
+        if [ -d "${OVERRIDE_SKILL_DIR}/${skill}" ]; then
+            echo "${OVERRIDE_SKILL_DIR}/${skill}"; return
+        fi
+        for plugin_dir in "${OVERRIDE_SKILL_DIR}"/plugin-*/; do
+            [ -d "${plugin_dir}" ] || continue
+            if [ -d "${plugin_dir}${skill}" ] && [ -f "${plugin_dir}${skill}/SKILL.md" ]; then
+                echo "${plugin_dir}${skill}"; return
+            fi
+        done
     fi
     if [ -n "${SHARED_SKILL_ROOT}" ] && [ -d "${SHARED_SKILL_ROOT}/${skill}" ]; then
         echo "${SHARED_SKILL_ROOT}/${skill}"; return
@@ -497,16 +536,38 @@ resolve_skill_src() {
 # Deduplicated.
 collect_skills() {
     local raw=""
-    # 1) All local skills under skills/ (default-linked)
+    # 1) All local skills under skills/ (default-linked); plugin-* may nest
+    #    sub-skills one level down (e.g. plugin-<name>/<sub-skill>) — those
+    #    are linked at top level as well.
     if [ -d "${LOCAL_SKILL_ROOT}" ]; then
         for skill_dir in "${LOCAL_SKILL_ROOT}"/*/; do
             [ -d "${skill_dir}" ] || continue
-            raw="${raw}
+            case "$(basename "${skill_dir}")" in
+                plugin-*)
+                    # plugin-* 须根有 SKILL.md 才算插件，其嵌套子 skill 顶层链接
+                    [ -f "${skill_dir}/SKILL.md" ] || continue
+                    raw="${raw}
 $(basename "${skill_dir}")"
+                    for sub_dir in "${skill_dir}"*/; do
+                        [ -d "${sub_dir}" ] || continue
+                        [ -f "${sub_dir}/SKILL.md" ] || continue
+                        raw="${raw}
+$(basename "${sub_dir}")"
+                    done
+                    ;;
+                *)
+                    raw="${raw}
+$(basename "${skill_dir}")"
+                    ;;
+            esac
         done
     fi
-    # 2) Skills registered by AGENTS.md + each agent frontmatter
+    # 2) Skills registered by AGENTS.md + each agent frontmatter.
+    #    With --override, an AGENTS.md in the override dir wins as the PM entry.
     local agents_file="${PLUGIN_ROOT}/AGENTS.md"
+    if [ -n "${OVERRIDE_DIR}" ] && [ -f "${OVERRIDE_DIR}/AGENTS.md" ]; then
+        agents_file="${OVERRIDE_DIR}/AGENTS.md"
+    fi
     [ -f "${agents_file}" ] && raw="${raw}
 $(parse_yaml_list "${agents_file}" "skills")"
     for f in "${AGENT_FILES[@]}"; do
@@ -554,6 +615,10 @@ step "[2/6] Installing configuration..."
 mkdir -p "${CONFIG_ROOT}"
 
 config_src="${PLUGIN_ROOT}/AGENTS.md"
+# 子仓可用 --override 目录下的 AGENTS.md 覆写基类 PM 入口
+if [ -n "${OVERRIDE_DIR}" ] && [ -f "${OVERRIDE_DIR}/AGENTS.md" ]; then
+    config_src="$(cd "${OVERRIDE_DIR}" && pwd)/AGENTS.md"
+fi
 config_name="AGENTS.md"
 if [ "${LEVEL}" = "project" ]; then
     config_target="${INSTALL_BASE}/${config_name}"
@@ -665,6 +730,21 @@ if [ -n "${OVERRIDE_SKILL_DIR}" ]; then
             skill_count=$((skill_count + 1))
             override_added=$((override_added + 1))
         fi
+        # plugin-* from override may nest sub-skills; link them at top level too
+        case "${name}" in
+            plugin-*)
+                for sub_dir in "${skill_dir}"*/; do
+                    [ -d "${sub_dir}" ] || continue
+                    [ -f "${sub_dir}/SKILL.md" ] || continue
+                    sub_name="$(basename "${sub_dir}")"
+                    sub_target="${SKILLS_LINK_DIR}/${sub_name}"
+                    if [ -e "${sub_target}" ] || [ -L "${sub_target}" ]; then
+                        rm -rf "${sub_target}"
+                    fi
+                    ln -sfn "$(realpath "${sub_dir}")" "${sub_target}"
+                done
+                ;;
+        esac
     done
     if [ "${override_replaced}" -eq 0 ] && [ "${override_added}" -eq 0 ]; then
         warn "Override dir has no skills (expected subdirs with SKILL.md): ${OVERRIDE_SKILL_DIR}"
@@ -691,6 +771,160 @@ else
     perm_count=$(ls -1A "${PERM_TARGET}" | wc -l)
     ok "permissions/ generated from workflow-agent-permissions skill (${perm_count} files)"
 fi
+echo ""
+
+# ============================================================
+# Step 4.6: Generate plugin registry (plugin-* skills)
+# ============================================================
+step "[4.6] Generating plugin registry..."
+REGISTRY_FILE="${CANNBOT_MID_DIR}/plugin-registry.json"
+mkdir -p "${CANNBOT_MID_DIR}"
+
+# Parse a single-value YAML key from frontmatter (e.g. workflow-hook: after:6.1)
+parse_yaml_value() {
+    local file="$1"
+    local key="$2"
+    awk -v key="${key}" '
+        $0 ~ "^"key":" { sub("^"key":[[:space:]]*", ""); gsub(/^"|"$/, ""); print; exit }
+    ' "${file}" 2>/dev/null || true
+}
+
+# Stage ids from the base flow table (first column of ops-direct-invoke-workflow/SKILL.md)
+FLOW_SKILL="${LOCAL_SKILL_ROOT}/ops-direct-invoke-workflow/SKILL.md"
+flow_stages=""
+if [ -f "${FLOW_SKILL}" ]; then
+    flow_stages=$(awk -F'|' '/^\| *[⛔]? *[0-9CP]/ { gsub(/[⛔ ]/,"",$2); print $2 }' "${FLOW_SKILL}" | sort -u)
+fi
+
+# Collect plugin sources: base first, then override (override wins by same name)
+declare -A PLUGIN_SRC=()
+if [ -d "${LOCAL_SKILL_ROOT}" ]; then
+    for pdir in "${LOCAL_SKILL_ROOT}"/plugin-*/; do
+        [ -d "${pdir}" ] || continue
+        if [ ! -f "${pdir}/SKILL.md" ]; then
+            warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
+            continue
+        fi
+        PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
+    done
+fi
+if [ -n "${OVERRIDE_SKILL_DIR}" ] && [ -d "${OVERRIDE_SKILL_DIR}" ]; then
+    for pdir in "${OVERRIDE_SKILL_DIR}"/plugin-*/; do
+        [ -d "${pdir}" ] || continue
+        if [ ! -f "${pdir}/SKILL.md" ]; then
+            warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
+            continue
+        fi
+        PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
+    done
+fi
+
+# Build plugin records: name|hook|stages(csv)|standalone; invalid hooks are skipped with warn
+PLUGIN_RECORDS="$(mktemp)"
+: > "${PLUGIN_RECORDS}"
+for pname in "${!PLUGIN_SRC[@]}"; do
+    pdir="${PLUGIN_SRC[${pname}]}"
+    hook="$(parse_yaml_value "${pdir}/SKILL.md" "workflow-hook")"
+    standalone="$(parse_yaml_value "${pdir}/SKILL.md" "standalone")"
+    stages="$(parse_yaml_list "${pdir}/SKILL.md" "workflow-stages" | paste -sd, -)"
+    if [ -z "${hook}" ]; then
+        warn "plugin ${pname}: frontmatter missing workflow-hook, not registered"
+        continue
+    fi
+    if [[ ! "${hook}" =~ ^(after|before):[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
+        warn "plugin ${pname}: invalid workflow-hook '${hook}' (expect after|before:<stage>), not registered"
+        continue
+    fi
+    hook_target="${hook#*:}"
+    if [ -n "${flow_stages}" ] && ! echo "${flow_stages}" | grep -qx "${hook_target}"; then
+        warn "plugin ${pname}: workflow-hook target '${hook_target}' not found in base flow table, not registered"
+        continue
+    fi
+    if [ -z "${stages}" ]; then
+        warn "plugin ${pname}: frontmatter missing workflow-stages, not registered"
+        continue
+    fi
+    [ "${standalone}" = "true" ] || standalone="false"
+    echo "${pname}|${hook}|${stages}|${standalone}" >> "${PLUGIN_RECORDS}"
+done
+
+# Merge with existing registry: keep per-plugin enabled, add new entries (enabled=true),
+# drop entries for plugins no longer present; new plugin presence resets surveyed=false.
+if command -v python3 > /dev/null 2>&1; then
+    reg_rc=0
+    python3 - "${REGISTRY_FILE}" "${PLUGIN_RECORDS}" "${PLUGIN_ENABLE_NAME:-}" "${PLUGIN_ENABLE_STATE:-}" << 'REGISTRY_PY' || reg_rc=$?
+import json, os, sys
+
+registry_path, records_path, enable_name, enable_state = sys.argv[1:5]
+
+records = []
+with open(records_path, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        name, hook, stages_csv, standalone = line.split("|")
+        records.append({
+            "name": name,
+            "hook": hook,
+            "stages": [s for s in stages_csv.split(",") if s],
+            "standalone": standalone == "true",
+        })
+
+existing = {}
+surveyed = False
+if os.path.exists(registry_path):
+    try:
+        with open(registry_path, encoding="utf-8") as f:
+            old = json.load(f)
+        if isinstance(old, dict):
+            surveyed = bool(old.get("surveyed", False))
+            for p in old.get("plugins", []):
+                if isinstance(p, dict) and p.get("name"):
+                    existing[p["name"]] = p
+    except Exception:
+        pass
+
+plugins = []
+has_new = False
+for rec in sorted(records, key=lambda r: r["name"]):
+    old = existing.get(rec["name"])
+    rec["enabled"] = bool(old.get("enabled", True)) if old else True
+    if old is None:
+        has_new = True
+    plugins.append(rec)
+if has_new:
+    surveyed = False
+
+if enable_name:
+    hit = next((p for p in plugins if p["name"] == enable_name), None)
+    if hit is not None:
+        hit["enabled"] = enable_state == "on"
+
+with open(registry_path, "w", encoding="utf-8") as f:
+    json.dump({"surveyed": surveyed, "plugins": plugins}, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+
+if enable_name and next((p for p in plugins if p["name"] == enable_name), None) is None:
+    sys.exit(2)
+REGISTRY_PY
+    if [ "${reg_rc}" -eq 2 ]; then
+        warn "--plugin-enable target not registered: ${PLUGIN_ENABLE_NAME}"
+    elif [ "${reg_rc}" -ne 0 ]; then
+        warn "plugin registry generation failed"
+    elif [ -s "${PLUGIN_RECORDS}" ]; then
+        ok "plugin-registry.json → ${REGISTRY_FILE} ($(wc -l < "${PLUGIN_RECORDS}" | tr -d ' ') plugins)"
+    else
+        ok "plugin-registry.json → ${REGISTRY_FILE} (no plugins found)"
+    fi
+else
+    if [ -n "${PLUGIN_ENABLE_NAME:-}" ]; then
+        warn "--plugin-enable ignored: python3 not found, plugin registry not generated"
+    else
+        warn "python3 not found, plugin registry not generated"
+    fi
+fi
+rm -f "${PLUGIN_RECORDS}"
 echo ""
 
 # ============================================================
@@ -875,6 +1109,15 @@ done
 
 [ -f "${config_target}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} ${config_name} missing"; health_ok=false; }
 [ -f "${MANIFEST}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }
+
+# Registry plugins must all be linked as installed skills
+REGISTRY_FILE="${CANNBOT_MID_DIR}/plugin-registry.json"
+if [ -f "${REGISTRY_FILE}" ] && command -v python3 > /dev/null 2>&1; then
+    while IFS= read -r pname; do
+        [ -n "${pname}" ] || continue
+        [ -e "${SKILLS_LINK_DIR}/${pname}" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} registry plugin not linked: ${pname}"
+    done < <(python3 -c "import json; print('\n'.join(p.get('name','') for p in json.load(open('${REGISTRY_FILE}')).get('plugins',[])))" 2>/dev/null || true)
+fi
 
 if [ "${TOOL}" = "claude" ]; then
     [ -e "${CONFIG_ROOT}/hooks/permission-guard.js" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .claude/hooks/permission-guard.js missing"; health_ok=false; }

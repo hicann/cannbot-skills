@@ -58,7 +58,18 @@
 | L7 | 改动 agent 文件后，检查其正文中是否有"用 `xxx` skill"、"加载 `xxx`"、"引用 `xxx`"等 skill 依赖声明——若有，该 skill 是否已全部列入 `skills:` frontmatter？漏掉的 skill 不会被 init 链接，运行时加载会失败 |
 | L8 | 修改 `skills/workflow-agent-permissions/hooks/*.js`（新增/删除角色文件、调整 categories/exts）后，是否同步更新了两侧 hook 内置默认值 `DEFAULT_RULES`（`hooks/opencode/` 与 `hooks/claude/`）？两者互为兜底（skill 文件为真值源、hook 内置为防御兜底），不同步会导致「配置缺失时角色行为与预期不一致」 |
 
-## 六、子仓兼容性（`example/init.sh` 分发契约）
+## 六、插件约束（plugin-*）
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| P1 | 插件 frontmatter 是否含合法的 `workflow-hook`（after\|before:<基类流程表编号>）与 `workflow-stages`，且 stages 与内部步骤表一致？ | 挂载点唯一 |
+| P2 | 插件是否自闭环：输入/输出契约、内部通过指标、回退有界、执行与验收不同实例？ | 插件自闭环 / D1 / D4 |
+| P3 | 基类流程表是否未引用具体插件（只保留 registry 机制注记）？插件缺席时基线流程是否仍可闭合？ | 基线不感知插件 |
+| P4 | 新增/删除/改名插件后是否重跑 init，`.cannbot/plugin-registry.json` 与 frontmatter、已链接插件三者一致（registry ⊆ installed）？ | L1 / L4 / L7 |
+| P5 | 子仓覆写 AGENTS.md 时是否保留 PM 入口语义与基类 `skills:` 登记基线？ | AGENTS.md 覆写保持入口语义 |
+| P6 | 插件 SKILL.md 与 references 是否无 override / virtual / 基类 / 逻辑名等机制词汇？ | F6 |
+
+## 七、子仓兼容性（`example/init.sh` 分发契约）
 
 `example/init.sh` 是子类仓的派生构造模板，已**分发到各已接入子仓**（如 `ops-blas/agent/init.sh`），修改后无法自动回写。
 

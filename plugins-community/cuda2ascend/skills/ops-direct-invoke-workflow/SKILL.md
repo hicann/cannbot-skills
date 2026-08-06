@@ -41,30 +41,30 @@ description: 直调算子开发工作流编排技能，承载从算子需求分�
 | 3.2 | 测试工程开发 | developer-test | 测试方案文档 | golden 代码 + 用例表 + 性能采集框架 | 实现 golden、功能用例、性能采集框架 | 测试线 |
 | 3.3 | 白盒测试补全 | developer-test | 算子代码、测试代码 | 白盒用例 + 分支覆盖说明 | 按源码枚举分支补全，覆盖尾核/非对齐/tilingkey 等黑盒未涉及分支 | 3.1/3.2 汇合后 |
 | CP3 | 功能验收 | QA | 算子代码 + 测试代码 | 功能验收报告 | QA 加载 `workflow-cp3` 执行全量功能测试（含精度比对） | 不通过回退 3.1 |
-| **阶段4：性能迭代与验收** | | | | | | |
+| **阶段4：性能验收** | | | | | | |
 | 4.1 | 性能采集执行 | developer-test | 算子代码（CP3 通过后） | 性能数据 | 用 3.2 搭的性能采集框架跑出性能数据 | 基于 CP3 通过后的最终代码 |
-| 4.2 | 性能迭代 | developer | 算子代码 + 性能数据 | 优化后算子代码 + 性能迭代记录 | 阅读 cann-samples 寻找适用于本算子的性能优化最佳实践，尝试所有适用的优化路径，逐次记录优化效果，路径穷尽即收尾 | 全量用例回归验证通过方可进入 CP4 |
-| CP4 | 性能验收 | QA | 算子代码 + 性能数据 | 性能验收报告 | QA 加载 `workflow-cp4` 评估性能是否达标 | 不通过回退 3.1（重走 3.3→CP3→4.1→4.2→CP4） |
+| CP4 | 性能验收 | QA | 算子代码 + 性能数据 | 性能验收报告 | QA 加载 `workflow-cp4` 评估性能是否达标 | 不通过回退 3.1（重走 3.3→CP3→4.1→CP4）；性能迭代为可插拔步骤，未启用时按 4.1 基线数据验收 |
 | **阶段5：代码检视** | | | | | | |
 | CP5 | 代码检视 | QA | 全部变更文件 | 检视结论 | QA 加载 `workflow-cp5` 完成多维度代码检视 | 不通过回退 3.1（重走至 CP5） |
 | **阶段6：上库准备** | | | | | | |
 | 6.1 | 文档补全 | developer-doc | 算子代码 + 设计文档 | 算子文档 | 补全算子使用文档 | |
-| 6.2 | 提交 PR | developer-doc | 全部代码 + 文档 | PR | 提交 PR | 提交前 PM 汇总 state.json / Issue-问题记录 / 各子 Agent 回传摘要做遗留问题清零检查；有遗留（不论优先级多低）须发问卷经用户确认接受后方可提交，确认结论记入 state.json |
-| 6.3 | CI 流水线 | CI（外部） | PR | CI 报告 | 触发 CI：编译 + UT + ST | 非调度子 Agent；外部异步流水线——提交 PR 后落盘等待态并结束会话，告知用户 CI 出结果后回传再继续，禁止本地轮询死等 |
-| 6.4 | codecheck 修复 | developer | 用户导出的 codecheck 报告 | 修复后代码 | 修复 codecheck 问题 | 报告由用户从线上导出并传入工作区给出路径，禁止凭空猜测问题清单 |
-| 6.5 | 检视意见修复 | developer | PR 检视意见 | 修复后代码 | 修复 PR 检视意见 | |
-| CP6 | CI 通过确认 | QA | CI 报告 + PR 状态 | 上库确认 | QA 加载 `workflow-cp6` 确认 CI 通过、检视意见闭环 | 未通过回退 6.4/6.5 后重触发 CI |
 | **阶段7：开发总结** | | | | | | |
 | 7.1 | 开发报告 | developer-doc→PM | 全部交付物 | 开发报告 | developer-doc 整理开发过程与交付物清单，PM 落盘 `.cannbot/<算子名>/` | |
 | 7.2 | 经验总结 | developer-doc→PM | 开发过程记录 | 经验总结文档 | developer-doc 沉淀开发经验与踩坑记录，PM 落盘 `.cannbot/<算子名>/` | |
 
 - ⛔ 标记的为**用户确认点**，QA 生成结构化问卷 json，用 question 工具直接发送用户并收集结论；问卷与用户回复成对落盘 `.cannbot/<算子名>/questionnaires/`（回复记为问卷同名 `.reply.json`）
+- 可插拔流程步骤（如提交 PR 到上库、性能迭代）由 PM 按 `.cannbot/plugin-registry.json` 中启用的插件在其挂载点触发，不在本表列出
 - 方案线与测试线在阶段 2、3 并行推进
 - CP3/CP4/CP5 任一不通过均回退到算子开发（3.1）后依次重走
 
 ## 通用约定
 
-- **任务清单**：PM 接到算子开发任务时，先把统一流程表的全部步骤（含各 CP 点）整体加载到自己的 todolist（任务清单工具），随流程推进逐项刷新状态，保证全程进度可见、不漏步、不跳步。
+- **任务清单**：PM 接到算子开发任务时，先把统一流程表的全部步骤（含各 CP 点）整体加载到自己的 todolist（任务清单工具），随流程推进逐项刷新状态，保证全程进度可见、不漏步、不跳步；可插拔流程插件触发时，其内部步骤表全部步骤并入 todolist。
+- **插件注册**：PM 接到算子开发任务、启动工作流时，读取 `.cannbot/plugin-registry.json`（init 生成的可插拔流程插件注册表）：
+  - **registry 缺失**：不阻塞，按无可插拔流程继续。
+  - **`surveyed` 为 `false`**：首次先按 registry 逐项询问用户启用哪些插件（on/off），结果写回各插件的 `enabled` 并置 `surveyed` 为 `true`；非交互场景跳过询问并保持现状。
+  - **后续会话**：沿用 registry 中的 `enabled`；用户要求调整时随时可改（也可用 `init.sh --plugin-enable <name> on|off`）。
+  - 流程推进到某插件的挂载点时，仅触发 `enabled` 为 `true` 的插件，加载对应 `plugin-*` skill 按其内部步骤表执行；未启用的挂载点自然跳过。
 - **状态与恢复**：每阶段（步骤或 CP）完成后**立即**将进度持久化到 `.cannbot/<算子名>/state.json`（结构见 [state-schema.md](references/state-schema.md)）——调度下一步前先落盘，禁止攒到算子开发完成后一次性补写。
 - **中间文件**：所有过程产物统一放 `.cannbot/<算子名>/`，环境信息文档作为共享件放 `.cannbot/环境信息.md`。各角色的临时产物（一次性脚本、中间分析、日志等）统一收敛到 `.cannbot/<算子名>/tmp/`，不在 `.cannbot` 根或算子目录下散落。
 - **任务下发**：严格按照 [task-prompts.md](references/task-prompts.md) 中的角色、prompt 调度子 Agent。
@@ -78,5 +78,6 @@ description: 直调算子开发工作流编排技能，承载从算子需求分�
 | 数据流 | [references/data-flow.md](references/data-flow.md) | 各阶段文件 I/O 与 `.cannbot` 产物清单 |
 | 错误处理 | [references/error-handling.md](references/error-handling.md) | 回退策略、最大轮次、恢复规则 |
 | 状态结构 | [references/state-schema.md](references/state-schema.md) | `.cannbot/<算子名>/state.json` 字段约定 |
+| 可插拔流程 | `.cannbot/plugin-registry.json` | 已注册插件（`skills/plugin-*`）的挂载点、步骤编号与启用状态；PM 在流程推进到挂载点时触发启用的插件 |
 | 交付件模板 | `workflow-doc-templates` | 需求/方案/验收报告/README/LOG/Issue 等模板 |
 | 验收标准 | `workflow-cp*` | 各 CP 点的验收对象、通过指标、判定方式；QA 在对应 CP 点加载 |

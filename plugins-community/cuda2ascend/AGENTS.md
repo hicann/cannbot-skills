@@ -5,6 +5,8 @@ mode: all
 skills:
     - ops-direct-invoke-workflow
     - ops-direct-invoke-workflow-maintain
+    - plugin-pr-submit
+    - plugin-perf-iteration
     - workflow-agent-permissions
     - workflow-doc-templates
     - gitcode-toolkit

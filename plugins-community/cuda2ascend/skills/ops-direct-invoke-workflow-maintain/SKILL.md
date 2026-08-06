@@ -21,6 +21,7 @@ description: 工作流维护技能。任何对工作流文件的新增、修改�
 - **契约向后兼容**：基类对外暴露的契约——virtual 组件的**逻辑名**、各角色的**输入输出格式**、**调用约定**——一经发布即稳定，演进时只增不破坏。改基类前先问：这会不会让已接入仓的 override 失效？
 - **`example/init.sh` 分发契约**：`example/init.sh` 已分发到各子仓，基类 `init.sh` 的 CLI 契约一旦发生不兼容变更，必须**发问卷知会用户**（受影响子仓 + 新旧用法对比），由用户决策是否迁移——详见 [references/modify-init.md](references/modify-init.md) 第 5 条与 review-checklist C1–C4。
 - **机制优于自然语言**：能用 hook / 脚本 / 权限声明约束的行为，不要写成 prompt 里的自然语言。
+- **约束文件的修订**：`design-constraints.md` 既有条款不改；新增条款须先经独立 Agent 检视确认后增补，并同步 review-checklist 派生条款。
 - **运行时文档去设计化**：面向对象设计与机制说法（final / 基类 / 子仓 / override / virtual / 逻辑名绑定 / 最小权限等原则标签、设计思想与定制方法）只写在 README 设计章节与本维护 skill；工作流运行时文档（AGENTS.md、编排 skill、agents、`repo-*`/`workflow-*` skill 正文）只写执行规则——init 完成后机制对执行 agent 已屏蔽，写入即无用上下文干扰。检视见 review-checklist F6。
 
 
@@ -31,6 +32,7 @@ description: 工作流维护技能。任何对工作流文件的新增、修改�
 | 修改对象 | 参考文档 | 涉及文件 |
 |---------|---------|---------|
 | 工作流编排 / PM 入口 | [references/modify-workflow.md](references/modify-workflow.md) | `skills/ops-direct-invoke-workflow/`、`AGENTS.md` |
+| 可插拔流程插件（`plugin-*`，基类内置或子仓新增） | [references/modify-plugin.md](references/modify-plugin.md) | `skills/plugin-*/`、`.cannbot/plugin-registry.json`、子仓 `agent/AGENTS.md` |
 | virtual skill（`repo-*` 领域知识 / `workflow-*` 模板与验收标准，基类默认或子仓 override） | [references/modify-skill.md](references/modify-skill.md) | `skills/repo-*/`、`skills/workflow-*/`、子仓 `agent/skills/*` |
 | 三类固定角色（architect / developer / qa） | [references/modify-agent.md](references/modify-agent.md) | `agents/*.md` |
 | init 脚本 | [references/modify-init.md](references/modify-init.md) | 基类 `init.sh`、子仓 `agent/init.sh` |

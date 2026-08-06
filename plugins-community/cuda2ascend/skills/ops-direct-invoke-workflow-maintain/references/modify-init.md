@@ -11,14 +11,16 @@
 ## 修改基类 init 的红线
 
 1. **位置参数契约**：`[level] [tool] [install_path]` 的顺序与语义须保持兼容（对齐旧版 ops-direct-invoke）。目标工具支持列表由基类 `SUPPORTED_TOOLS` 单点维护与校验，子仓 init 只把首参原样透传、不校验工具名；新增工具 = 基类追加 `SUPPORTED_TOOLS` + 增加对应安装分支，**已分发的子仓 init 零改动**。多余位置参数报错（防未知工具名被静默误当 install_path）。
-2. **override 参数契约**：`--override <dir>` 的名称与语义是子仓 init 依赖的接口，属对外契约，只增不破坏（S6）。展开时只使用 `<dir>/skills/`。
-3. **skill 收集顺序**（本地 skills/ → 共享 ops/ → infra/）与 **override 匹配规则**（skill 同名替换+新增）若变更，须同步更新本 skill 的 SKILL.md 描述与 review-checklist。
+2. **override 参数契约**：`--override <dir>` 的名称与语义是子仓 init 依赖的接口，属对外契约，只增不破坏（S6）。展开时使用 `<dir>/skills/` 与 `<dir>/AGENTS.md`（存在时，见红线 8）。
+3. **skill 收集顺序**（本地 skills/（含 `plugin-*/` 嵌套子 skill）→ 共享 ops/ → infra/）与 **override 匹配规则**（skill 同名替换+新增；`AGENTS.md` 存在即替换）若变更，须同步更新本 skill 的 SKILL.md 描述与 review-checklist。
 4. 遵守 F2（机制优于自然语言）：能在 init 里用脚本保证的初始化行为，不要下放成 agent 的 prompt 要求。
 5. **`example/init.sh` 兼容性**（review-checklist C1–C4）：`example/init.sh` 已分发到各子仓，改基类 init 的 CLI 契约后必须：
    - 对比基类参数解析与 `example/init.sh` 的调用方式是否仍兼容。
    - 不兼容 → 向用户发结构化问卷（受影响子仓 + 新旧用法对比），由用户决策是否本次迁移。
    - 用户选「暂不迁移」→ 基类保留旧参数兼容层（接受并 warn），至少维持一个版本后再移除。
 6. **Step 4.5 权限配置生成契约**：从已链接的运行时 `skills/workflow-agent-permissions/hooks/`（opencode `.opencode/skills/`、claude `.claude/skills/`）整体复制到 `.cannbot/permissions/`。**缺失才生成、已存在保留**（工作区配置优先）。模板路径经软链接解析，自动获得子仓 override 版本。模板目录缺失仅 warn、不 fail（hook 走内置默认值兜底）。
+7. **Step 4.6 插件注册表生成契约**：扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 生成 `.cannbot/plugin-registry.json`。**每次重扫重写：保留各插件 `enabled`、并入新增条目（新增时 `surveyed` 复位）、剔除已失效插件**。`workflow-hook` 须通过格式与挂载点存在性（基类流程表）校验、`workflow-stages` 必填，不合法仅 warn 不注册。`--plugin-enable <name> on|off` 为新增可选参数，不改既有位置参数与 `--override` 语义。
+8. **AGENTS.md 覆写**：`--override` 目录含 `AGENTS.md` 时，Step 2 链接子仓版为 PM 入口，且 skill 收集第二步同步改读子仓版 frontmatter——**两处读源必须同源**，否则子仓登记的 skill 收集不到。
 
 
 ## 修改子类 init 的注意

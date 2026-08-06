@@ -150,7 +150,7 @@
 - 【skills】立即加载 `workflow-cp3`、`workflow-doc-templates`。
 ```
 
-# 阶段 4：性能迭代与验收
+# 阶段 4：性能验收
 
 ## 4.1 性能采集执行
 
@@ -162,18 +162,6 @@
 - 【输出】性能数据（各 shape/dtype 的耗时、带宽、利用率），落 test 目录采集输出。
 - 【skills】立即加载 `repo-test-develop`、`ops-profiling`。
 - 【验收标准】性能数据完整覆盖需求关注的 shape/dtype。
-```
-
-## 4.2 性能迭代
-
-- **角色**：developer
-
-```md
-- 【权限】你可写算子代码目录、`.cannbot/<算子名>/`；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
-- 【输入】算子代码 + 性能数据（4.1 基线）；共享依赖仓 `.cannbot/cann-samples/`。
-- 【输出】优化后算子代码 + 性能迭代记录（逐次优化路径与优化效果），写入 `.cannbot/<算子名>/4.2-性能迭代记录.md`。
-- 【skills】立即加载 `ascendc-perf-optimize`、`repo-coding-rules`、`repo-build-guide`。
-- 【验收标准】适用的优化路径均已尝试并逐次记录效果；全量用例回归验证通过。
 ```
 
 ## CP4 性能验收
@@ -212,65 +200,6 @@
 - 【输出】算子文档，写 doc 目录；格式模板：`workflow-doc-templates/references/6.1-算子文档.md`。
 - 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`ascendc-docs-gen`。
 - 【验收标准】接口、参数、约束、示例齐全。
-```
-
-## 6.2 提交 PR
-
-- **角色**：developer-doc
-
-```md
-- 【权限】你可写 doc 目录（仅 md）；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
-- 【输入】全部代码 + 文档。
-- 【输出】PR：提交 PR，回传 PR 链接。
-- 【skills】立即加载 `workflow-doc-templates`。
-- 【验收标准】PR 描述完整，变更范围清晰；本地遗留问题清零，或已经用户问卷确认接受。
-```
-
-## 6.3 CI 流水线
-
-- **角色**：PM（CI 为外部异步流水线，不调度子 Agent）
-
-```md
-- 【权限】你可写 `.cannbot/<算子名>/`；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
-- 【输入】PR 链接（6.2 回传）。
-- 【输出】`state.json` 落盘 `pending_ci`（`waiting`）；告知用户 CI 出结果后回传再继续，随后结束本会话。用户回传后置 `reported`，按结果进 6.4/6.5 或 CP6。
-- 【skills】立即加载 `gitcode-toolkit`。
-- 【验收标准】`pending_ci` 已落盘且用户已被告知；禁止本地轮询死等线上结果。
-```
-
-## 6.4 codecheck 修复
-
-- **角色**：developer
-
-```md
-- 【权限】你可写代码、test、doc 目录；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
-- 【输入】用户导出的 codecheck 报告（路径以下发时给定为准）。
-- 【输出】修复后代码（修复可能同时触及代码、测试与文档）。
-- 【skills】立即加载 `repo-coding-rules`、`repo-build-guide`。
-- 【验收标准】codecheck 问题清零。
-```
-
-## 6.5 检视意见修复
-
-- **角色**：developer
-
-```md
-- 【权限】你可写代码、test、doc 目录；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
-- 【输入】PR 检视意见。
-- 【输出】修复后代码：逐条闭环修复检视意见。
-- 【skills】立即加载 `repo-coding-rules`、`repo-build-guide`。
-- 【验收标准】检视意见逐条闭环。
-```
-
-## CP6 CI 通过确认
-
-- **角色**：QA
-
-```md
-- 【权限】你只可写 `.cannbot/<算子名>/tmp/`，其它写入操作会被 hooks 拦截。
-- 【输入】CI 报告 + PR 状态。
-- 【输出】CI 通过确认结果（未通过，回退 6.4/6.5 后重触发 CI / 通过）
-- 【skills】立即加载 `workflow-cp6`、`workflow-doc-templates`。
 ```
 
 # 阶段 7：开发总结
@@ -312,8 +241,7 @@
 | 2.1 / 2.2 | architect | 读方案文档继续 |
 | CP2.2 | QA | 按 `pending_questionnaire` 状态续跑：无该字段则重跑评审；`sent` 则由 QA 重发问卷收集结论；`answered` 则无异议进 3.1、有异议按语义归属回退 |
 | 3.1 / 3.2 / 3.3 | developer-code / developer-test | 读代码与测试继续 |
-| 4.1 / 4.2 | developer-test / developer | 读性能数据与性能迭代记录继续 |
+| 4.1 | developer-test | 读性能数据继续 |
 | CP3 / CP4 / CP5 | QA | 读对应报告继续；回退则从 3.1 重走 |
-| CP6 | QA | 读 CI 报告与 PR 状态继续 |
-| 6.x | developer-doc / developer | 读 PR 状态继续；6.3 等待态按 `pending_ci` 续跑：`waiting` 则保持等待、提示用户回传 CI 结果，`reported` 则按回传报告进 6.4/6.5 或 CP6 |
+| 6.1 | developer-doc | 读算子文档继续 |
 | 7.x | developer-doc | 读交付物继续 |
