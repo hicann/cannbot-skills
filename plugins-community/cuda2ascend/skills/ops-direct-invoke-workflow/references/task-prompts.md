@@ -12,9 +12,10 @@
 
 ```md
 - 【权限】你只可写 `.cannbot/环境信息.md`，其它写入操作会被 hooks 拦截。
-- 【输出】填充模板：`workflow-doc-templates/references/环境信息.md`，写入 `.cannbot/环境信息.md`。
+- 【输出】填充模板：`workflow-doc-templates/references/环境信息.md`（含「环境补充记录」节），写入 `.cannbot/环境信息.md`。**把全部环境信息统计到该文件**——硬件、软件、凭据及其它后续子任务可能需要的环境项，一次统计完整；该文件是环境信息唯一来源，后续子任务的环境信息一律从该文件获取、不再自行探索环境。
 - 【skills】立即加载 `workflow-doc-templates`、`ascendc-env-check`。
-- 【验收标准】环境信息文档完整，各检查项有明确结论；Git 凭据位置候选已列出且不含任何凭据明文。
+- 【验收标准】环境信息文档完整，各检查项有明确结论，环境项一次统计齐全；Git 凭据位置候选已列出且不含任何凭据明文。
+- 【探索申请】统计后发现某环境项缺失/信息不全：不得自行探索，先向 PM 提出探索申请，PM 批准后方可探索；探索完成后把结果回填 `.cannbot/环境信息.md` 对应项，并在「环境补充记录」节追加一条记录（时间/补充项/摘要/来源）。构建/测试脚本运行期的自检属工具链行为，不视为探索。
 ```
 
 ## CP0 环境确认
@@ -28,6 +29,8 @@
 - 【skills】立即加载 `workflow-cp0`、`workflow-doc-templates`。
 ```
 
+> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】不发送问卷，按 settings.md 默认决策执行」，QA 落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`），不向用户发送问卷。
+
 # 阶段 1：需求分析
 
 ## 1.1 需求分析
@@ -39,7 +42,7 @@
 - 【输入】对话上下文、仓库设计约束。
 - 【输出】需求文档，写入 `.cannbot/<算子名>/1.1-需求分析.md`；格式模板：`workflow-doc-templates/references/1.1-需求分析.md`。
 - 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`ascendc-regbase-best-practice`、`ascendc-simt-best-practices`。
-- 【验收标准】确认项无遗漏，用户原始需求逐条记录；只出推荐，不代替用户决定架构。
+- 【验收标准】确认项无遗漏，用户原始需求逐条记录；架构选型候选按目标芯片映射——ascend950 为 SIMD（RegBase 实现）与 SIMT 两种，其余低版本芯片仅 SIMD（MemBase 实现）一个选项，RegBase 与 MemBase 互斥（支持 RegBase 的芯片不使用 MemBase）；只出推荐，不代替用户决定架构。
 ```
 
 ## CP1 需求确认
@@ -52,6 +55,8 @@
 - 【输出】需求确认结果（不通过，打回 1.1 / 通过）；问卷与回复落盘 `.cannbot/<算子名>/questionnaires/`。
 - 【skills】立即加载 `workflow-cp1`、`workflow-doc-templates`。
 ```
+
+> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】不发送问卷，按 settings.md 默认决策执行」，QA 核对无硬伤即通过（架构选型采用 1.1 推荐项），落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`）。
 
 # 阶段 2：方案设计（方案线 / 测试线并行）
 
@@ -100,6 +105,8 @@
 - 【输出】方案检查结果（不通过，按语义归属打回 2.2 或 1.1 / 通过）；问卷与回复落盘 `.cannbot/<算子名>/questionnaires/`。
 - 【skills】立即加载 `workflow-cp2-2`、`workflow-doc-templates`。
 ```
+
+> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】不发送问卷，按 settings.md 默认决策执行」，QA 评审通过即视为用户确认，落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`）。
 
 # 阶段 3：代码开发（开发线 / 测试线并行）
 

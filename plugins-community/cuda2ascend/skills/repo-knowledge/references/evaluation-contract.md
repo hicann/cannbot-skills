@@ -138,7 +138,7 @@ $$
 <评测集>/docker/eval/run.sh <提交目录> --operator <Op> --no-perf
 ```
 
-评测报告输出到 `reports/`，分阶段产出 correctness / performance / final 报告（json / md / html）。
+评测报告输出到 `reports/`，分阶段产出 correctness / performance / 终版报告（json / md / html）。
 
 ## 参考实现索引
 

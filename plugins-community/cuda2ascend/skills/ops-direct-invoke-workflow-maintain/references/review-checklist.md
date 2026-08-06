@@ -64,12 +64,23 @@
 |------|--------|--------|
 | P1 | 插件 frontmatter 是否含合法的 `workflow-hook`（after\|before:<基类流程表编号>）与 `workflow-stages`，且 stages 与内部步骤表一致？ | 挂载点唯一 |
 | P2 | 插件是否自闭环：输入/输出契约、内部通过指标、回退有界、执行与验收不同实例？ | 插件自闭环 / D1 / D4 |
-| P3 | 基类流程表是否未引用具体插件（只保留 registry 机制注记）？插件缺席时基线流程是否仍可闭合？ | 基线不感知插件 |
-| P4 | 新增/删除/改名插件后是否重跑 init，`.cannbot/plugin-registry.json` 与 frontmatter、已链接插件三者一致（registry ⊆ installed）？ | L1 / L4 / L7 |
+| P3 | 基类流程表是否未引用具体插件（只保留 `.cannbot/settings.json` 的 plugins 注记）？插件缺席时基线流程是否仍可闭合？ | 基线不感知插件 |
+| P4 | 新增/删除/改名插件后是否重跑 init，`.cannbot/settings.json` 的 plugins 与 frontmatter、已链接插件三者一致（settings.plugins ⊆ installed）？ | L1 / L4 / L7 |
 | P5 | 子仓覆写 AGENTS.md 时是否保留 PM 入口语义与基类 `skills:` 登记基线？ | AGENTS.md 覆写保持入口语义 |
 | P6 | 插件 SKILL.md 与 references 是否无 override / virtual / 基类 / 逻辑名等机制词汇？ | F6 |
 
-## 七、子仓兼容性（`example/init.sh` 分发契约）
+## 七、工作流模式（静默）
+
+| 编号 | 检查项 |
+|------|--------|
+| M1 | `.cannbot/settings.json` 的生成（init Step 5.5）与读取（AGENTS.md / 编排 skill 通用约定）是否一致：`--mode` 写入 `mode`，未传参保留现有值，缺失按 `interactive`？ |
+| M2 | silent 下的行为是否只豁免「询问与进度输出」，未豁免过程有界 / 状态可观测 / 可恢复性等调度约束？ |
+| M3 | ⛔ 确认点（CP0/CP1/CP2.2）的静默默认决策是否落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`），中断恢复表（task-prompts recovery）是否无需感知静默？ |
+| M4 | 静默例外清单是否完整且唯一（权限预检警告 / 任务完成总结），无其它隐含输出；插件内异步等待的告知是否归插件自身约定而非主工作流例外清单？ |
+| M5 | 修改 `--mode` 或 Step 5.5 后，`example/init.sh` 是否仍兼容（基类参数只增不破坏）？ |
+| M6 | 静默问卷拦截两侧是否同步（`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？ |
+
+## 八、子仓兼容性（`example/init.sh` 分发契约）
 
 `example/init.sh` 是子类仓的派生构造模板，已**分发到各已接入子仓**（如 `ops-blas/agent/init.sh`），修改后无法自动回写。
 

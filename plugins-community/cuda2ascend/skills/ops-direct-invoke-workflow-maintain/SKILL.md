@@ -32,7 +32,7 @@ description: 工作流维护技能。任何对工作流文件的新增、修改�
 | 修改对象 | 参考文档 | 涉及文件 |
 |---------|---------|---------|
 | 工作流编排 / PM 入口 | [references/modify-workflow.md](references/modify-workflow.md) | `skills/ops-direct-invoke-workflow/`、`AGENTS.md` |
-| 可插拔流程插件（`plugin-*`，基类内置或子仓新增） | [references/modify-plugin.md](references/modify-plugin.md) | `skills/plugin-*/`、`.cannbot/plugin-registry.json`、子仓 `agent/AGENTS.md` |
+| 可插拔流程插件（`plugin-*`，基类内置或子仓新增） | [references/modify-plugin.md](references/modify-plugin.md) | `skills/plugin-*/`、`.cannbot/settings.json`、子仓 `agent/AGENTS.md` |
 | virtual skill（`repo-*` 领域知识 / `workflow-*` 模板与验收标准，基类默认或子仓 override） | [references/modify-skill.md](references/modify-skill.md) | `skills/repo-*/`、`skills/workflow-*/`、子仓 `agent/skills/*` |
 | 三类固定角色（architect / developer / qa） | [references/modify-agent.md](references/modify-agent.md) | `agents/*.md` |
 | init 脚本 | [references/modify-init.md](references/modify-init.md) | 基类 `init.sh`、子仓 `agent/init.sh` |

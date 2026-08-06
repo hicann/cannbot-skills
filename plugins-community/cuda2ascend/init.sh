@@ -265,7 +265,14 @@ Options:
                                 linked as the PM entry instead of the base AGENTS.md
   --plugin-enable <name> <on|off>
                              - Enable or disable a pluggable workflow plugin (plugin-* skill)
-                                in .cannbot/plugin-registry.json
+                                in .cannbot/settings.json (plugins.<name>.enabled)
+  --mode <interactive|silent>
+                           - Workflow mode written to .cannbot/settings.json:
+                                interactive (default) = questionnaire prompts & progress
+                                reports stay as-is; silent = unattended run (no prompts,
+                                no progress output, only permission warning, final summary
+                                and blocked reports). Existing mode is kept when omitted.
+  --list-tools             - Print supported target tools (used by subclass init scripts)
   --repo <name>:<path>     - Use a locally cloned third-party repository (linked
                                 instead of cloned). Can be specified multiple times,
                                 e.g. --repo asc-devkit:... --repo cann-samples:...
@@ -292,7 +299,7 @@ Intermediate directory:
   .cannbot/asc-devkit    asc-devkit repo
   .cannbot/cann-samples  cann-samples repo
   .cannbot/ops-tensor    ops-tensor repo
-  .cannbot/plugin-registry.json  pluggable workflow plugins (plugin-* skills): hook points, stages, enabled
+  .cannbot/settings.json      workflow config & plugin registration (mode, surveyed, plugins)
 EOF
 }
 
@@ -304,6 +311,7 @@ TOOL="opencode"
 INSTALL_PATH=""
 OVERRIDE_SKILL_DIR=""
 OVERRIDE_DIR=""
+MODE=""
 
 # Local path overrides for registered repos, keyed by repo name.
 declare -A REPO_LOCAL
@@ -340,6 +348,10 @@ while [ $# -gt 0 ]; do
             OVERRIDE_DIR="$2"; shift 2; continue ;;
         --override=*)
             OVERRIDE_DIR="${1#*=}"; shift; continue ;;
+        --mode)
+            MODE="$2"; shift 2; continue ;;
+        --mode=*)
+            MODE="${1#*=}"; shift; continue ;;
         --repo)
             local_arg="$2"; shift 2
             if [[ "${local_arg}" != *:* ]]; then
@@ -415,6 +427,12 @@ if [ -n "${OVERRIDE_DIR}" ]; then
         exit 1
     fi
     OVERRIDE_SKILL_DIR="$(cd "${OVERRIDE_DIR}/skills" && pwd)"
+fi
+
+# Validate workflow mode (interactive | silent)
+if [ -n "${MODE}" ] && [ "${MODE}" != "interactive" ] && [ "${MODE}" != "silent" ]; then
+    err "--mode invalid: ${MODE} (valid: interactive / silent)"
+    exit 1
 fi
 
 # ============================================================
@@ -773,161 +791,6 @@ else
 fi
 echo ""
 
-# ============================================================
-# Step 4.6: Generate plugin registry (plugin-* skills)
-# ============================================================
-step "[4.6] Generating plugin registry..."
-REGISTRY_FILE="${CANNBOT_MID_DIR}/plugin-registry.json"
-mkdir -p "${CANNBOT_MID_DIR}"
-
-# Parse a single-value YAML key from frontmatter (e.g. workflow-hook: after:6.1)
-parse_yaml_value() {
-    local file="$1"
-    local key="$2"
-    awk -v key="${key}" '
-        $0 ~ "^"key":" { sub("^"key":[[:space:]]*", ""); gsub(/^"|"$/, ""); print; exit }
-    ' "${file}" 2>/dev/null || true
-}
-
-# Stage ids from the base flow table (first column of ops-direct-invoke-workflow/SKILL.md)
-FLOW_SKILL="${LOCAL_SKILL_ROOT}/ops-direct-invoke-workflow/SKILL.md"
-flow_stages=""
-if [ -f "${FLOW_SKILL}" ]; then
-    flow_stages=$(awk -F'|' '/^\| *[⛔]? *[0-9CP]/ { gsub(/[⛔ ]/,"",$2); print $2 }' "${FLOW_SKILL}" | sort -u)
-fi
-
-# Collect plugin sources: base first, then override (override wins by same name)
-declare -A PLUGIN_SRC=()
-if [ -d "${LOCAL_SKILL_ROOT}" ]; then
-    for pdir in "${LOCAL_SKILL_ROOT}"/plugin-*/; do
-        [ -d "${pdir}" ] || continue
-        if [ ! -f "${pdir}/SKILL.md" ]; then
-            warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
-            continue
-        fi
-        PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
-    done
-fi
-if [ -n "${OVERRIDE_SKILL_DIR}" ] && [ -d "${OVERRIDE_SKILL_DIR}" ]; then
-    for pdir in "${OVERRIDE_SKILL_DIR}"/plugin-*/; do
-        [ -d "${pdir}" ] || continue
-        if [ ! -f "${pdir}/SKILL.md" ]; then
-            warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
-            continue
-        fi
-        PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
-    done
-fi
-
-# Build plugin records: name|hook|stages(csv)|standalone; invalid hooks are skipped with warn
-PLUGIN_RECORDS="$(mktemp)"
-: > "${PLUGIN_RECORDS}"
-for pname in "${!PLUGIN_SRC[@]}"; do
-    pdir="${PLUGIN_SRC[${pname}]}"
-    hook="$(parse_yaml_value "${pdir}/SKILL.md" "workflow-hook")"
-    standalone="$(parse_yaml_value "${pdir}/SKILL.md" "standalone")"
-    stages="$(parse_yaml_list "${pdir}/SKILL.md" "workflow-stages" | paste -sd, -)"
-    if [ -z "${hook}" ]; then
-        warn "plugin ${pname}: frontmatter missing workflow-hook, not registered"
-        continue
-    fi
-    if [[ ! "${hook}" =~ ^(after|before):[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
-        warn "plugin ${pname}: invalid workflow-hook '${hook}' (expect after|before:<stage>), not registered"
-        continue
-    fi
-    hook_target="${hook#*:}"
-    if [ -n "${flow_stages}" ] && ! echo "${flow_stages}" | grep -qx "${hook_target}"; then
-        warn "plugin ${pname}: workflow-hook target '${hook_target}' not found in base flow table, not registered"
-        continue
-    fi
-    if [ -z "${stages}" ]; then
-        warn "plugin ${pname}: frontmatter missing workflow-stages, not registered"
-        continue
-    fi
-    [ "${standalone}" = "true" ] || standalone="false"
-    echo "${pname}|${hook}|${stages}|${standalone}" >> "${PLUGIN_RECORDS}"
-done
-
-# Merge with existing registry: keep per-plugin enabled, add new entries (enabled=true),
-# drop entries for plugins no longer present; new plugin presence resets surveyed=false.
-if command -v python3 > /dev/null 2>&1; then
-    reg_rc=0
-    python3 - "${REGISTRY_FILE}" "${PLUGIN_RECORDS}" "${PLUGIN_ENABLE_NAME:-}" "${PLUGIN_ENABLE_STATE:-}" << 'REGISTRY_PY' || reg_rc=$?
-import json, os, sys
-
-registry_path, records_path, enable_name, enable_state = sys.argv[1:5]
-
-records = []
-with open(records_path, encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        name, hook, stages_csv, standalone = line.split("|")
-        records.append({
-            "name": name,
-            "hook": hook,
-            "stages": [s for s in stages_csv.split(",") if s],
-            "standalone": standalone == "true",
-        })
-
-existing = {}
-surveyed = False
-if os.path.exists(registry_path):
-    try:
-        with open(registry_path, encoding="utf-8") as f:
-            old = json.load(f)
-        if isinstance(old, dict):
-            surveyed = bool(old.get("surveyed", False))
-            for p in old.get("plugins", []):
-                if isinstance(p, dict) and p.get("name"):
-                    existing[p["name"]] = p
-    except Exception:
-        pass
-
-plugins = []
-has_new = False
-for rec in sorted(records, key=lambda r: r["name"]):
-    old = existing.get(rec["name"])
-    rec["enabled"] = bool(old.get("enabled", True)) if old else True
-    if old is None:
-        has_new = True
-    plugins.append(rec)
-if has_new:
-    surveyed = False
-
-if enable_name:
-    hit = next((p for p in plugins if p["name"] == enable_name), None)
-    if hit is not None:
-        hit["enabled"] = enable_state == "on"
-
-with open(registry_path, "w", encoding="utf-8") as f:
-    json.dump({"surveyed": surveyed, "plugins": plugins}, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-
-if enable_name and next((p for p in plugins if p["name"] == enable_name), None) is None:
-    sys.exit(2)
-REGISTRY_PY
-    if [ "${reg_rc}" -eq 2 ]; then
-        warn "--plugin-enable target not registered: ${PLUGIN_ENABLE_NAME}"
-    elif [ "${reg_rc}" -ne 0 ]; then
-        warn "plugin registry generation failed"
-    elif [ -s "${PLUGIN_RECORDS}" ]; then
-        ok "plugin-registry.json → ${REGISTRY_FILE} ($(wc -l < "${PLUGIN_RECORDS}" | tr -d ' ') plugins)"
-    else
-        ok "plugin-registry.json → ${REGISTRY_FILE} (no plugins found)"
-    fi
-else
-    if [ -n "${PLUGIN_ENABLE_NAME:-}" ]; then
-        warn "--plugin-enable ignored: python3 not found, plugin registry not generated"
-    else
-        warn "python3 not found, plugin registry not generated"
-    fi
-fi
-rm -f "${PLUGIN_RECORDS}"
-echo ""
-
-# ============================================================
 # Step 4+: Link permission-guard hook (tool-specific)
 # ============================================================
 if [ "${TOOL}" = "claude" ]; then
@@ -964,14 +827,22 @@ if os.path.exists(path):
 
 pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
 for group in pre:
+    matcher = group.get("matcher", "")
     for h in group.get("hooks", []):
         blob = h.get("command", "") + " " + " ".join(h.get("args", []))
         if "permission-guard.js" in blob:
-            print("  [info] settings.json 已注册 permission-guard hook，跳过")
+            if "Question" in matcher:
+                print("  [info] settings.json 已注册 permission-guard hook，跳过")
+            else:
+                group["matcher"] = matcher + "|Question"
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                print("  [ok] settings.json 已注册 permission-guard hook（matcher 补充 Question，静默问卷拦截生效）")
             sys.exit(0)
 
 pre.append({
-    "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+    "matcher": "Write|Edit|MultiEdit|NotebookEdit|Question",
     "hooks": [{
         "type": "command",
         "command": "node",
@@ -1010,6 +881,198 @@ else
     fi
     echo ""
 fi
+
+# ============================================================
+
+# ============================================================
+# Step 5.5: Generate workflow config (.cannbot/settings.json)
+#   settings.json 是工作流运行时配置的唯一文件：mode（工作流模式）、surveyed（插件启用
+#   是否已询问）、plugins（插件注册信息：hook/stages/standalone/enabled，由 plugin-* 的
+#   frontmatter 扫描生成，重扫重写保留 enabled/surveyed、并入新增、剔除失效）、元数据。
+#   旧版 .cannbot/plugin-registry.json 存在时一次性迁移并入（迁移后不再生成该文件）。
+# ============================================================
+step "[5.5] Generating workflow config..."
+wf_rc=""
+if command -v python3 > /dev/null 2>&1; then
+    # --- 扫描插件 frontmatter（基类 + override，override 同名优先）---
+    parse_yaml_value() {
+        local file="$1"
+        local key="$2"
+        awk -v key="${key}" '
+            $0 ~ "^"key":" { sub("^"key":[[:space:]]*", ""); gsub(/^"|"$/, ""); print; exit }
+        ' "${file}" 2>/dev/null || true
+    }
+    PLUGIN_RECORDS="$(mktemp)"
+    : > "${PLUGIN_RECORDS}"
+    declare -A PLUGIN_SRC=()
+    if [ -d "${LOCAL_SKILL_ROOT}" ]; then
+        for pdir in "${LOCAL_SKILL_ROOT}"/plugin-*/; do
+            [ -d "${pdir}" ] || continue
+            if [ ! -f "${pdir}/SKILL.md" ]; then
+                warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
+                continue
+            fi
+            PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
+        done
+    fi
+    if [ -n "${OVERRIDE_SKILL_DIR}" ] && [ -d "${OVERRIDE_SKILL_DIR}" ]; then
+        for pdir in "${OVERRIDE_SKILL_DIR}"/plugin-*/; do
+            [ -d "${pdir}" ] || continue
+            if [ ! -f "${pdir}/SKILL.md" ]; then
+                warn "plugin-* dir without SKILL.md skipped: $(basename "${pdir}")"
+                continue
+            fi
+            PLUGIN_SRC["$(basename "${pdir}")"]="$(cd "${pdir}" && pwd)"
+        done
+    fi
+    # 校验：workflow-hook 格式与挂载点存在性（对照基类流程表）、workflow-stages 必填
+    FLOW_SKILL="${LOCAL_SKILL_ROOT}/ops-direct-invoke-workflow/SKILL.md"
+    flow_stages=""
+    if [ -f "${FLOW_SKILL}" ]; then
+        flow_stages=$(awk -F'|' '/^\| *[⛔]? *[0-9CP]/ { gsub(/[⛔ ]/,"",$2); print $2 }' "${FLOW_SKILL}" | sort -u)
+    fi
+    for pname in "${!PLUGIN_SRC[@]}"; do
+        pdir="${PLUGIN_SRC[${pname}]}"
+        hook="$(parse_yaml_value "${pdir}/SKILL.md" "workflow-hook")"
+        standalone="$(parse_yaml_value "${pdir}/SKILL.md" "standalone")"
+        stages="$(parse_yaml_list "${pdir}/SKILL.md" "workflow-stages" | paste -sd, -)"
+        if [ -z "${hook}" ]; then
+            warn "plugin ${pname}: frontmatter missing workflow-hook, not registered"
+            continue
+        fi
+        if [[ ! "${hook}" =~ ^(after|before):[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
+            warn "plugin ${pname}: invalid workflow-hook '${hook}' (expect after|before:<stage>), not registered"
+            continue
+        fi
+        hook_target="${hook#*:}"
+        if [ -n "${flow_stages}" ] && ! echo "${flow_stages}" | grep -qx "${hook_target}"; then
+            warn "plugin ${pname}: workflow-hook target '${hook_target}' not found in base flow table, not registered"
+            continue
+        fi
+        if [ -z "${stages}" ]; then
+            warn "plugin ${pname}: frontmatter missing workflow-stages, not registered"
+            continue
+        fi
+        [ "${standalone}" = "true" ] || standalone="false"
+        echo "${pname}|${hook}|${stages}|${standalone}" >> "${PLUGIN_RECORDS}"
+    done
+
+    MODE_ARG="${MODE}" CONFIG_TARGET="${CANNBOT_MID_DIR}/settings.json" \
+    PLUGIN_RECORDS_FILE="${PLUGIN_RECORDS}" \
+    PLUGIN_ENABLE_NAME_ARG="${PLUGIN_ENABLE_NAME:-}" PLUGIN_ENABLE_STATE_ARG="${PLUGIN_ENABLE_STATE:-}" \
+    python3 - << 'CONFIG_PY' || wf_rc=$?
+import json, os, sys
+
+path = os.environ["CONFIG_TARGET"]
+mode_arg = os.environ["MODE_ARG"]
+records_path = os.environ["PLUGIN_RECORDS_FILE"]
+enable_name = os.environ.get("PLUGIN_ENABLE_NAME_ARG", "")
+enable_state = os.environ.get("PLUGIN_ENABLE_STATE_ARG", "")
+
+records = {}
+with open(records_path, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        name, hook, stages_csv, standalone = line.split("|")
+        records[name] = {
+            "hook": hook,
+            "stages": [s for s in stages_csv.split(",") if s],
+            "standalone": standalone == "true",
+        }
+
+config = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            config = json.load(f)
+        if not isinstance(config, dict):
+            print(f"  [warn] settings.json 内容不是 JSON 对象，将重建: {path}", file=sys.stderr)
+            config = {}
+    except Exception as e:
+        print(f"  [warn] settings.json 解析失败，将重建: {e}", file=sys.stderr)
+        config = {}
+
+# 既有状态：settings.json 的 plugins（保留 enabled）；旧 plugin-registry.json 一次性迁移
+existing = {}
+surveyed = bool(config.get("surveyed", False))
+old_plugins = config.get("plugins")
+if not isinstance(old_plugins, dict):
+    old_plugins = {}
+for name, entry in old_plugins.items():
+    if isinstance(entry, dict):
+        existing[name] = entry
+if not existing:
+    registry = os.path.join(os.path.dirname(path), "plugin-registry.json")
+    if os.path.exists(registry):
+        try:
+            with open(registry, encoding="utf-8") as f:
+                reg = json.load(f)
+            if isinstance(reg, dict):
+                surveyed = bool(reg.get("surveyed", surveyed))
+                for item in reg.get("plugins", []):
+                    if isinstance(item, dict) and isinstance(item.get("name"), str):
+                        existing[item["name"]] = {
+                            "hook": item.get("hook", ""),
+                            "stages": item.get("stages", []),
+                            "standalone": bool(item.get("standalone")),
+                            "enabled": bool(item.get("enabled", True)),
+                        }
+            os.remove(registry)
+            print(f"  [ok] 旧 plugin-registry.json 已迁移并入 settings.json 并删除", file=sys.stderr)
+        except Exception as e:
+            print(f"  [warn] 旧 plugin-registry.json 迁移失败: {e}", file=sys.stderr)
+
+# 重扫重写：保留 enabled，并入新增（新增复位 surveyed），剔除失效插件
+plugins = {}
+has_new = False
+for name in sorted(records):
+    rec = records[name]
+    old = existing.get(name)
+    rec["enabled"] = bool(old.get("enabled", True)) if old else True
+    if old is None:
+        has_new = True
+    plugins[name] = rec
+if has_new:
+    surveyed = False
+
+if enable_name:
+    if enable_name in plugins:
+        plugins[enable_name]["enabled"] = enable_state == "on"
+    else:
+        sys.exit(2)
+
+config = {
+    "version": 2,
+    "mode": mode_arg or config.get("mode") or "interactive",
+    "surveyed": surveyed,
+    "plugins": plugins,
+    "updated_at": __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print(f"  [ok] settings.json → {path} (mode={config['mode']}, {len(plugins)} plugins)")
+CONFIG_PY
+    if [ -n "${wf_rc:-}" ] && [ "${wf_rc}" -eq 2 ]; then
+        warn "--plugin-enable target not registered: ${PLUGIN_ENABLE_NAME}"
+    elif [ -n "${wf_rc:-}" ] && [ "${wf_rc}" -ne 0 ]; then
+        warn "workflow config generation failed (rc=${wf_rc})"
+    fi
+    unset wf_rc
+    rm -f "${PLUGIN_RECORDS}"
+else
+    warn "python3 not found, skipping workflow config generation"
+    if [ -n "${PLUGIN_ENABLE_NAME:-}" ]; then
+        warn "--plugin-enable ignored: python3 not found"
+    fi
+fi
+echo ""
 
 # ============================================================
 # Step 5: Setup third-party repositories
@@ -1109,14 +1172,15 @@ done
 
 [ -f "${config_target}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} ${config_name} missing"; health_ok=false; }
 [ -f "${MANIFEST}" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} Manifest generation failed"; health_ok=false; }
+[ -f "${CANNBOT_MID_DIR}/settings.json" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} .cannbot/settings.json missing (workflow runs in default interactive mode)"
 
-# Registry plugins must all be linked as installed skills
-REGISTRY_FILE="${CANNBOT_MID_DIR}/plugin-registry.json"
-if [ -f "${REGISTRY_FILE}" ] && command -v python3 > /dev/null 2>&1; then
+# Registered plugins must all be linked as installed skills
+SETTINGS_FILE="${CANNBOT_MID_DIR}/settings.json"
+if [ -f "${SETTINGS_FILE}" ] && command -v python3 > /dev/null 2>&1; then
     while IFS= read -r pname; do
         [ -n "${pname}" ] || continue
-        [ -e "${SKILLS_LINK_DIR}/${pname}" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} registry plugin not linked: ${pname}"
-    done < <(python3 -c "import json; print('\n'.join(p.get('name','') for p in json.load(open('${REGISTRY_FILE}')).get('plugins',[])))" 2>/dev/null || true)
+        [ -e "${SKILLS_LINK_DIR}/${pname}" ] || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} settings plugin not linked: ${pname}"
+    done < <(python3 -c "import json; print('\n'.join(json.load(open('${SETTINGS_FILE}')).get('plugins',{}).keys()))" 2>/dev/null || true)
 fi
 
 if [ "${TOOL}" = "claude" ]; then

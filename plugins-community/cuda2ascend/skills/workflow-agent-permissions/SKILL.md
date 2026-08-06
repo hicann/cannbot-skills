@@ -18,6 +18,10 @@ disable-model-invocation: true
 
 派发非 `.cannbot` 目录的写任务时，必须选择对应可写范围的角色；权限不足会被 hook 拦截并提示上报主 Agent。
 
+## 静默模式问卷拦截
+
+静默模式（`.cannbot/settings.json` 的 `mode=silent`）启用时，permission-guard hook 在机制层拦截问卷工具（opencode 的 `question`/`ask`、claude 的 `Question`）的发送：任何角色（含 QA）在静默下调用问卷工具都会被阻断并回传「按静默默认决策执行、落盘 `.reply.json`」的提示。这是 prompt 层约束（QA 不发送问卷）的机制兜底；settings.json 的 `mode` 切换为 `interactive` 后立即解除拦截（opencode 每次调用实时读配置，claude 天然每次调用独立进程）。
+
 ## 规格文件
 
 `hooks/` 下每角色一个 `.js` 文件，文件名即角色名（如 `PM.js`、`developer-code.js`），ESM `export default { categories, exts }` 形式：

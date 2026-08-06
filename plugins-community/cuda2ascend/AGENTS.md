@@ -7,6 +7,7 @@ skills:
     - ops-direct-invoke-workflow-maintain
     - plugin-pr-submit
     - plugin-perf-iteration
+    - plugin-experience-summary
     - workflow-agent-permissions
     - workflow-doc-templates
     - gitcode-toolkit
@@ -29,6 +30,20 @@ skills:
 
    > 检测到 `.cannbot/permissions/` 异常（缺失或不完整），工作区初始化不完整。
    > 请退出当前 CLI 会话，重新执行仓内 `agent/init.sh`（或 `plugins-community/cuda2ascend/init.sh`）后再次进入继续任务。
+
+## 工作流配置
+
+启动检查通过后，读取 `.cannbot/settings.json`（init 生成的运行时配置，缺失或字段非法按 `interactive` 处理）。会话中用户可直接指示「开启静默模式 / 关闭静默模式」，此时立即更新该文件的 `mode` 字段（并刷新 `updated_at`），随后按新模式继续。
+
+**静默模式（`mode=silent`）**：完全无人值守——不输出中间进度、不向用户询问，工作流自动推进直到任务完成或遇阻断。规则细节见 `ops-direct-invoke-workflow` skill 的通用约定与 references/settings.md。进入静默工作流前，先执行**权限预检**：
+
+1. 检查工作区 `opencode.json` / `opencode.jsonc`（含 `.opencode/` 下的同名文件）的 `permission` 配置：
+   - **已全量授权**：`permission` 存在且全部规则为 `allow`（无 `ask` / `deny` 规则）→ 不提示。
+   - **未全量授权**：存在 `ask` / `deny` 规则，或配置文件缺失 → 输出以下提示（**仅提示，不阻塞**）：
+
+   > ⚠ 静默模式已开启，但工作区 opencode 权限未全量授予（存在 ask/deny 规则或未配置）。
+   > 运行期间若触发工具权限确认，会被 opencode 拦截并打断自动流程。
+   > 建议：预先在 opencode.json 的 `permission` 中授权所需工具，或改用交互模式（可随时说「关闭静默模式」）。
 
 ## 身份
 

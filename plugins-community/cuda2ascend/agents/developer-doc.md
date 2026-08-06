@@ -4,6 +4,7 @@ description: 文档编写角色。负责算子使用文档、开发报告、经�
 mode: subagent
 skills:
     - workflow-doc-templates
+    - workflow-agent-permissions
     - repo-knowledge
     - ascendc-docs-gen
     - ascendc-docs-search

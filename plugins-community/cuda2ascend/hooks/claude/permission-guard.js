@@ -47,6 +47,10 @@ const UNKNOWN_ROLE_POLICY = "allow-warn"
 // 只对这些写类工具限权，其余工具一律放行（Claude Code 工具名）
 const GUARDED_TOOLS = ["write", "edit", "multiedit", "notebookedit"]
 
+// 静默模式（.cannbot/settings.json 的 mode=silent）下拦截的询问类工具。
+// 拦截问卷发送是机制兜底；正常流程下 QA 已按静默默认决策执行（prompt 层约束）。
+const SILENT_GUARDED_TOOLS = ["question"]
+
 // 路径分类（相对项目根的前缀）。code 为兜底类别（不匹配下列任何前缀者）。
 const CATEGORY_PREFIXES = {
   intermediate: [".cannbot/"],
@@ -132,6 +136,19 @@ function deny(reason) {
   process.exit(2)
 }
 
+// 读取 .cannbot/settings.json 的静默开关（hook 为一次性进程，天然实时；
+// 读失败按非静默处理，避免误伤）
+function readSilentMode(projectRoot) {
+  try {
+    const data = JSON.parse(
+      readFileSync(join(projectRoot, ".cannbot", "settings.json"), "utf8"),
+    )
+    return data && data.mode === "silent"
+  } catch {
+    return false
+  }
+}
+
 function main() {
   const raw = readFileSync(0, "utf8") // stdin
 
@@ -143,6 +160,19 @@ function main() {
   }
 
   const tool = (input.tool_name || "").toLowerCase()
+
+  // 静默模式：拦截问卷发送（任何角色都不得绕过）
+  if (SILENT_GUARDED_TOOLS.includes(tool)) {
+    const projectRoot = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd()
+    if (readSilentMode(projectRoot)) {
+      deny(
+        "静默模式已启用，问卷发送被拦截：请按静默默认决策执行——不发送问卷，落盘 " +
+          '.reply.json（{"mode":"silent","decision":"accepted"}）；如需恢复交互，请让用户关闭静默模式。',
+      )
+    }
+    return
+  }
+
   if (!GUARDED_TOOLS.includes(tool)) return // 非写类工具放行
 
   const toolInput = input.tool_input || {}

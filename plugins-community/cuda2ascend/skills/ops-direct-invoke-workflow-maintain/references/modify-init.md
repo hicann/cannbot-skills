@@ -19,8 +19,8 @@
    - 不兼容 → 向用户发结构化问卷（受影响子仓 + 新旧用法对比），由用户决策是否本次迁移。
    - 用户选「暂不迁移」→ 基类保留旧参数兼容层（接受并 warn），至少维持一个版本后再移除。
 6. **Step 4.5 权限配置生成契约**：从已链接的运行时 `skills/workflow-agent-permissions/hooks/`（opencode `.opencode/skills/`、claude `.claude/skills/`）整体复制到 `.cannbot/permissions/`。**缺失才生成、已存在保留**（工作区配置优先）。模板路径经软链接解析，自动获得子仓 override 版本。模板目录缺失仅 warn、不 fail（hook 走内置默认值兜底）。
-7. **Step 4.6 插件注册表生成契约**：扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 生成 `.cannbot/plugin-registry.json`。**每次重扫重写：保留各插件 `enabled`、并入新增条目（新增时 `surveyed` 复位）、剔除已失效插件**。`workflow-hook` 须通过格式与挂载点存在性（基类流程表）校验、`workflow-stages` 必填，不合法仅 warn 不注册。`--plugin-enable <name> on|off` 为新增可选参数，不改既有位置参数与 `--override` 语义。
-8. **AGENTS.md 覆写**：`--override` 目录含 `AGENTS.md` 时，Step 2 链接子仓版为 PM 入口，且 skill 收集第二步同步改读子仓版 frontmatter——**两处读源必须同源**，否则子仓登记的 skill 收集不到。
+7. **AGENTS.md 覆写**：`--override` 目录含 `AGENTS.md` 时，Step 2 链接子仓版为 PM 入口，且 skill 收集第二步同步改读子仓版 frontmatter——**两处读源必须同源**，否则子仓登记的 skill 收集不到。
+8. **Step 5.5 工作流配置生成契约（唯一配置，聚合插件注册）**：`.cannbot/settings.json` 是工作流配置唯一文件（version / mode / surveyed / plugins / updated_at），由 Step 5.5 一次生成。**每次重扫重写**：扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 的 `workflow-hook` / `workflow-stages` / `standalone` 生成 `plugins`，保留各插件 `enabled`、并入新增（新增时顶层 `surveyed` 复位）、剔除失效；`workflow-hook` 须通过格式与挂载点存在性（基类流程表）校验、`workflow-stages` 必填，不合法仅 warn 不注册。`--mode interactive|silent`（非法值报错退出）写入 `mode`（未传保留现有值，首先生成默认 `interactive`）；`--plugin-enable <name> on|off` 直接改对应插件 `enabled`（未注册仅 warn）。旧版 `.cannbot/plugin-registry.json` 一次性迁移并入后删除，不再生成。两个参数均为可选，不改既有位置参数与 `--override` 语义；生成失败仅 warn 不 fail（工作流按默认交互模式运行）。
 
 
 ## 修改子类 init 的注意

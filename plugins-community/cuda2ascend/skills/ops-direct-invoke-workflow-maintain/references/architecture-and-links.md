@@ -26,7 +26,7 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 │   ├── workflow-doc-templates/               # 交付件模板 skill（virtual，可被子仓 override）
 │   ├── workflow-cp*/                         # 各 CP 点验收标准 skill（virtual，可被子仓 override）
 │   ├── plugin-*/                             # 可插拔流程插件（mini-workflow，可覆写/可新增；
-│   │                                         #   frontmatter 声明挂载点，init 注册到 plugin-registry.json）
+│   │                                         #   frontmatter 声明挂载点，init 注册到 settings.json 的 plugins）
 │   ├── workflow-agent-permissions/           # 各 agent 权限规格（virtual，可被子仓 override）
 │   └── ops-direct-invoke-workflow-maintain/  # 本维护 skill
 └── README.md                     # 设计思想 + 设计约束章节
@@ -104,9 +104,14 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 ├── .opencode/plugin/      ->  权限插件 permission-guard.js
 │   （claude 为 .claude/hooks/permission-guard.js + .claude/settings.json 注册 PreToolUse）
 │   （codex 无权限 hook，init 时输出 WARNING 告知降级）
-├── .cannbot/              ->  中间文件 + asc-devkit + cann-samples
-└── .cannbot/permissions/*.js  ->  init Step 4.5 复制自 workflow-agent-permissions skill（角色配置文件）
+├── .cannbot/              ->  中间文件 + asc-devkit + cann-samples + ops-tensor
+├── .cannbot/permissions/*.js  ->  init Step 4.5 复制自 workflow-agent-permissions skill（角色配置文件）
+└── .cannbot/settings.json ->  init Step 5.5 生成的工作流运行时配置（唯一文件：mode / surveyed / plugins / version / updated_at）
 ```
+
+### 工作流配置（settings.json）
+
+运行时配置的唯一载体，init Step 5.5 生成、PM 会话中可显式修改（如「开启/关闭静默模式」直接改 `mode` 字段）。`mode=interactive` 为默认交互式（问卷直发）；`mode=silent` 为完全无人值守（不询问、不输出中间进度，仅权限预检警告与任务完成总结两类输出；插件内异步等待的告知归插件自身约定）。⛔ 确认点在 silent 下由 QA 按默认决策执行并落盘 `.reply.json`，状态机与中断恢复不感知静默。结构、优先级与默认决策详见 `ops-direct-invoke-workflow/references/settings.md`。
 
 ## init 链接机制（软链接怎么来的）
 
@@ -121,9 +126,9 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 | 3 | **扁平化**链接 agents | 递归 `agents/`，按 basename 链接到运行时 `agents/*.md`（opencode `.opencode/agents/`、claude `.claude/agents/`）；**codex** 从 `hooks/codex/*.toml` 生成 `.codex/agents/*.toml`（`__CANNBOT_AGENT_SOURCE__` 替换为 `agents/*.md` 绝对路径） |
 | 4 | 链接 skills | 收集到的每个 skill 名 → 运行时 `skills/<name>`（opencode `.opencode/skills/`、claude `.claude/skills/`、**codex `.agents/skills/`**）；`plugin-*/` 下含 SKILL.md 的嵌套子 skill 一并顶层链接；带 `--override <dir>` 时用 `<dir>/skills/` 同名替换、基类没有的新增（含嵌套子 skill） |
 | 4.5 | 生成权限配置 | 从运行时 `skills/workflow-agent-permissions/hooks/` **复制**（非软链接）到 `.cannbot/permissions/`，**缺失才生成、已存在保留**（工作区配置优先） |
-| 4.6 | 生成插件注册表 | 扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 的 `workflow-hook` / `workflow-stages`，写 `.cannbot/plugin-registry.json`：**重扫重写，保留各插件 `enabled`、并入新增（新增时 `surveyed` 复位）、剔除失效**；非法 hook / 缺 stages 仅 warn 不注册；`--plugin-enable <name> on|off` 直接改 `enabled` |
-| 4+ | 权限 hook | opencode：`hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`；claude：`hooks/claude/permission-guard.js` → `<install>/.claude/hooks/`，并在 `.claude/settings.json` 幂等注册 PreToolUse hook（matcher `Write\|Edit\|MultiEdit\|NotebookEdit`）；**codex：无权限 hook**，init 输出 WARNING 告知降级（角色隔离靠 prompt，非机制保证） |
-| 5/6 | clone asc-devkit / cann-samples 到 `.cannbot/` | — |
+| 4+ | 权限 hook | opencode：`hooks/opencode/permission-guard.js` → `<install>/.opencode/plugin/`；claude：`hooks/claude/permission-guard.js` → `<install>/.claude/hooks/`，并在 `.claude/settings.json` 幂等注册 PreToolUse hook（matcher `Write\|Edit\|MultiEdit\|NotebookEdit\|Question`，已注册而 matcher 缺 Question 时自动补充）；**codex：无权限 hook**，init 输出 WARNING 告知降级（角色隔离靠 prompt，非机制保证） |
+| 5.5 | 生成工作流配置（唯一配置） | 写 `.cannbot/settings.json`（version 2 / mode / surveyed / plugins / updated_at）：**扫描 `skills/plugin-*/`（基类 + override，override 同名优先）frontmatter 生成 `plugins`（hook/stages/standalone/enabled）——重扫重写，保留各插件 `enabled`、并入新增（新增时 `surveyed` 复位）、剔除失效**；非法 hook / 缺 stages 仅 warn 不注册；`--mode` 写 `mode`（未传保留现有值）；`--plugin-enable <name> on|off` 直接改 `enabled`；旧版 `plugin-registry.json` 一次性迁移并入后删除；生成失败仅 warn 不 fail |
+| 5/6 | clone asc-devkit / cann-samples / ops-tensor 到 `.cannbot/` | — |
 
 **skill 收集来源（两步取并集去重）**：① 枚举本地 `skills/` 下所有目录（含 `plugin-*/` 嵌套子 skill）；② 解析 AGENTS.md（`--override` 目录含 `AGENTS.md` 时优先子仓版）与每个 agent frontmatter 的 `skills:` 列表。
 
@@ -134,6 +139,7 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 按角色限制写权限——`.cannbot` 所有角色可写（任意类型）、项目外拒绝、code/test/doc 按角色限权：
 
 - **实现**：opencode 用 `hooks/opencode/permission-guard.js`，在 `tool.execute.before` 里 throw 阻断违规写入；claude 用 `hooks/claude/permission-guard.js`，作为 PreToolUse hook 读 stdin 事件 JSON，违规时 exit 2（stderr 回传模型）。两者同一套规则语义。
+- **静默问卷拦截**：`mode=silent`（`.cannbot/settings.json`）时，两侧 hook 额外拦截问卷工具（opencode `question` / claude `Question`，matcher 含 Question 由 init 注册并在已注册时自动补充），阻断任何角色发送问卷；mode 为 `interactive` 时放行。opencode 每次调用实时读 settings.json（会话内切换即时生效），claude 天然每次调用独立进程。
 - **加载**：opencode 由 init Step 4+ 链接到 `<install>/.opencode/plugin/` 自动加载；claude 链接到 `<install>/.claude/hooks/` 并在 `.claude/settings.json` 注册。
 - **角色来源**：opencode 用 sessionID → `client.session.get` 反查当前 agent 名（实测坐实）；claude 用 hook 输入的 `agent_type` 字段（主线程无该字段，即 PM）。
 - **规格真值源**：`skills/workflow-agent-permissions/hooks/*.js`，每角色一文件（ESM `export default { categories, exts }`），init Step 4.5 复制到 `.cannbot/permissions/`；hook 扫描该目录逐个 import、按文件名即角色名 per-agent 合并到内置默认值（默认值为纯防御兜底，与 skill 文件保持同步——L8 约束，**两侧 hook 的内置默认值都要同步**）。
@@ -165,8 +171,8 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 plugin-* 是第三类知识（与 final 编排、virtual 组件并列）：可插拔的子流程 skill，解决「并非所有算子仓都希望集成某段流程」的定制诉求（如提交 PR 到上库、性能迭代）。
 
 - **声明**：插件 SKILL.md frontmatter 携带 `workflow-hook`（挂载点，after/before 单步）与 `workflow-stages`（内部步骤编号）；`standalone: true` 表示可单独任务触发。
-- **注册**：init Step 4.6 扫描插件 frontmatter，生成 `.cannbot/plugin-registry.json`（name / hook / stages / standalone / enabled / surveyed）。
-- **启用**：工作流编排 skill 的通用约定指导 PM 在接到算子开发任务时读 registry；`surveyed=false` 时首次问卷询问用户启用哪些插件，选择落盘 `enabled`（也可用 `init.sh --plugin-enable` 调整）。
+- **注册**：init Step 5.5 扫描插件 frontmatter，写入 `.cannbot/settings.json` 的 `plugins`（name → hook / stages / standalone / enabled）+ 顶层 `surveyed`。
+- **启用**：工作流编排 skill 的通用约定指导 PM 在接到算子开发任务时读 settings.json；`surveyed=false` 时首次问卷询问用户启用哪些插件，选择落盘 `plugins.<name>.enabled`（也可用 `init.sh --plugin-enable` 调整）。
 - **触发**：编排（final）不感知具体插件；PM 推进到挂载点时触发 `enabled` 的插件，加载其 SKILL.md 按内部步骤表执行；未启用的挂载点自然跳过。
 - **自闭环**：插件自带内部步骤表、task-prompts、回退与验收（执行/验收不同实例），内部步骤编号写入主 `state.json`。
 - **覆写**：子仓 `agent/skills/plugin-*/` 同名替换/新增（含嵌套子 skill）；子仓 `agent/AGENTS.md` 存在时替换基类 PM 入口（保留基类 `skills:` 登记基线后追加子仓插件）。

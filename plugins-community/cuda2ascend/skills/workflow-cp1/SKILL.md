@@ -112,7 +112,7 @@ disable-model-invocation: true
 }
 ```
 
-「代码架构选型」页的候选枚举随目标架构而定：arch35 为 SIMD / MemBase / RegBase-SIMT，其余架构为 MemBase / RegBase / SIMT；推荐项放 options 首位。
+「代码架构选型」页的候选枚举与实现载体按目标芯片确定：ascend950 为 SIMD（RegBase 实现）与 SIMT 两种，其余低版本芯片仅 SIMD（MemBase 实现）一个选项（RegBase 与 MemBase 互斥，支持 RegBase 的芯片不使用 MemBase）；推荐项放 options 首位。
 
 ## 判定规则
 

@@ -26,7 +26,7 @@
 // ★ 以下 CONFIG 为工作流级约定，不暴露给仓，改这里即可。★
 // ---------------------------------------------------------------------------
 
-import { readdirSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -39,6 +39,10 @@ const UNKNOWN_ROLE_POLICY = "allow-warn"
 
 // 只对这些写类工具限权，其余工具一律放行
 const GUARDED_TOOLS = ["write", "edit", "patch", "multiedit"]
+
+// 静默模式（.cannbot/settings.json 的 mode=silent）下拦截的询问类工具。
+// 拦截问卷发送是机制兜底；正常流程下 QA 已按静默默认决策执行（prompt 层约束）。
+const SILENT_GUARDED_TOOLS = ["question", "ask"]
 
 // 路径分类（相对项目根的前缀）。code 为兜底类别（不匹配下列任何前缀者）。
 const CATEGORY_PREFIXES = {
@@ -111,6 +115,19 @@ function extOf(rel) {
   return dot >= 0 ? base.slice(dot).toLowerCase() : ""
 }
 
+// 读取 .cannbot/settings.json 的静默开关（每次调用实时读——会话中
+// 「关闭静默模式」后立即解除拦截；读失败按非静默处理，避免误伤）
+function readSilentMode(projectRoot) {
+  try {
+    const data = JSON.parse(
+      readFileSync(join(projectRoot, ".cannbot", "settings.json"), "utf8"),
+    )
+    return data && data.mode === "silent"
+  } catch {
+    return false
+  }
+}
+
 export const PermissionGuard = async ({ client, directory, worktree }) => {
   const projectRoot = worktree || directory || process.cwd()
   const categoryPrefixes = CATEGORY_PREFIXES
@@ -136,6 +153,19 @@ export const PermissionGuard = async ({ client, directory, worktree }) => {
   return {
     "tool.execute.before": async (input, output) => {
       const tool = (input?.tool || "").toLowerCase()
+
+      // 静默模式：拦截问卷发送（任何角色都不得绕过）
+      if (SILENT_GUARDED_TOOLS.includes(tool)) {
+        if (readSilentMode(projectRoot)) {
+          throw new Error(
+            "[permission-guard] 静默模式已启用，问卷发送被拦截：请按静默默认决策执行——" +
+              "不发送问卷，落盘 .reply.json（{\"mode\":\"silent\",\"decision\":\"accepted\"}）；" +
+              "如需恢复交互，请让用户关闭静默模式。",
+          )
+        }
+        return
+      }
+
       if (!GUARDED_TOOLS.includes(tool)) return // 非写类工具放行
 
       const filePath = output?.args?.filePath ?? output?.args?.path
