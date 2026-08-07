@@ -100,6 +100,7 @@ for (uint64_t i = AscendC::Simt::GetBlockIdx() * AscendC::Simt::GetThreadNum() +
 - **overview.md** -- SIMT API 总览：VF启动机制、头文件映射、核函数定义、混合编程辅助函数速查
 - **debug-api.md** -- 调测接口速查：printf/assert/__trap 使用要点
 - **macro-api.md** -- 内置宏速查：特殊值(INF/NAN/MAX/MIN)、数学常数(pi/e/ln2等)
+- **编译与运行.md** -- 异构编译场景编译与运行速查：SIMT/AI CPU 算子的 bisheng 命令行与 CMake 编译命令、`<<<...>>>` 内核调用符
 
 **完整 API 文档：**
 
