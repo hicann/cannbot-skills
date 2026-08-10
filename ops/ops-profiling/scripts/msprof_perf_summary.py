@@ -44,10 +44,9 @@ import sqlite3
 import statistics
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 LOGGER = logging.getLogger(__name__)
@@ -667,12 +666,18 @@ def _extract_shape_dtype_from_jsonl(case):
 
 
 def _case_has_empty_tensor(case):
-    """判断 case 中是否包含 0 元素张量（空 tensor）。"""
+    """判断 case 中是否包含 0 元素张量（空 tensor）。
+
+    shape=None 表示形状未指定（如可选 bias），不应视作空 tensor。
+    只有形状明确包含 0 维度或为空列表的才是真正的空 tensor。
+    """
     if not case:
         return False
     for inp in case.get("inputs", []):
         if inp.get("type") == "tensor":
             shape = inp.get("shape", [])
+            if shape is None:
+                continue
             if not shape or any(s == 0 for s in shape):
                 return True
     return False
@@ -869,11 +874,13 @@ class _WrapperConfig:
     device_id: int
     warmup: int
     jsonl_case: Optional[Dict[str, Any]] = None
+    repeats: int = 1
 
 
 _WRAPPER_SCRIPT_TEMPLATE = """\
 #!/usr/bin/env python3
 import importlib.util
+import inspect
 import logging
 import os
 import sys
@@ -949,36 +956,61 @@ elif _init_args:
 else:
     model = cls().to(device).eval()
 
-_use_positional_fallback = 0  # 0=kargs, 1=spread
-for _ in range({warmup}):
+def _bind_ok(sig, args, kwargs):
+    try:
+        sig.bind(*args, **kwargs)
+        return True
+    except TypeError:
+        return False
+
+
+_forward_sig = None
+try:
+    _forward_sig = inspect.signature(model.forward)
+except Exception:
+    pass
+
+# 0=kwargs, 1=spread, 2=tuple
+# 先按 forward 签名预绑定选择调用方式：仅当确认参数确实绑定不上时才降级；
+# 运行期调用抛出的 TypeError 视为模型内部真实错误，直接失败，不再静默降级
+# （否则 forward 内部的业务 TypeError 会被误判成"参数形式不匹配"而测错调用方式）。
+_use_positional_fallback = 0
+if _use_kwargs and _forward_sig is not None:
+    if _bind_ok(_forward_sig, (), _inputs_dict):
+        _use_positional_fallback = 0
+    elif _bind_ok(_forward_sig, tuple(_inputs_list), dict()):
+        _use_positional_fallback = 1
+    elif _bind_ok(_forward_sig, (tuple(_inputs_list),), dict()):
+        _use_positional_fallback = 2
+
+
+def _one_iter():
     with torch.no_grad():
         if _use_kwargs:
-            try:
+            if _use_positional_fallback == 0:
                 _ = model(**_inputs_dict)
-            except TypeError:
-                _use_positional_fallback = 1
-                try:
-                    _ = model(*_inputs_list)
-                except TypeError:
-                    LOGGER.info(
-                        "model() failed with both kwargs and positional "
-                        "arguments for case %d. Aborting.",
-                        {case_idx},
-                    )
-                    sys.exit(1)
+            elif _use_positional_fallback == 1:
+                _ = model(*_inputs_list)
+            else:
+                _ = model(tuple(_inputs_list))
         else:
             _ = model(*inputs)
     torch.npu.synchronize()
 
-with torch.no_grad():
-    if _use_kwargs:
-        if _use_positional_fallback == 0:
-            _ = model(**_inputs_dict)
-        else:
-            _ = model(*_inputs_list)
-    else:
-        _ = model(*inputs)
-torch.npu.synchronize()
+
+# ---- in-process warmup: 与 torch_npu profiler 的 warmup 语义一致 ----
+# 这些迭代同样落在 msprof 采集窗口内，解析时按 run 拆分后丢弃前 {warmup} 次。
+# 任一迭代失败（含模型内部异常）时记录 case 编号后优雅退出，不打印原始 traceback。
+try:
+    for _ in range({warmup}):
+        _one_iter()
+
+    # ---- timed repeats ----
+    for _ in range({repeats}):
+        _one_iter()
+except Exception as _e:
+    LOGGER.info("[CASE %s] model call failed, skip case: %s", {case_idx}, _e)
+    sys.exit(1)
 """
 
 
@@ -989,6 +1021,7 @@ def _build_wrapper_script_content(cfg, model_file, cls_name, inputs_code):
         device_id=cfg.device_id,
         case_idx=cfg.case_idx,
         warmup=cfg.warmup,
+        repeats=cfg.repeats,
         seed=cfg.seed,
         model_file=model_file,
         cls_name=cls_name,
@@ -1214,19 +1247,59 @@ def _parse_msprof_duration(prof_group_dir: str):
     return None, None, "no compute rows found"
 
 
-def _parse_msprof_duration_quick(prof_group_dir: str):
-    """快速模式解析：从 PROF 目录中查找 task_time.csv 或 api_statistic.csv 并提取时间。
+_META_KERNEL_TYPES = ("PROFILING_ENABLE", "PROFILING_DISABLE", "TASK_TIMEOUT_SET", "")
+
+
+def _split_task_time_runs(rows: List[Dict[str, str]], n_runs: int):
+    """把 task_time.csv 的 kernel 行按「重复的 kernel 序列」拆成 n_runs 次 run。
+
+    采集窗口内包含 warmup + repeats 次迭代，每次迭代发射完全相同的 kernel 序列。
+    按 task_start 排序后，总行数应能被 n_runs 整除，且每个分块的 kernel_name
+    序列必须逐位相同 —— 否则说明迭代次数与预期不符，返回 None 由调用方回退。
+
+    Returns: list[list[float]] 每个 run 的 kernel 耗时列表，或 None。
+    """
+    kernels = []
+    for r in rows:
+        if r.get("kernel_type", "") in _META_KERNEL_TYPES:
+            continue
+        try:
+            dur = float(r.get("task_time(us)", "") or 0)
+            start = float((r.get("task_start(us)", "") or "0").strip())
+        except ValueError:
+            continue
+        if dur <= 0:
+            continue
+        kernels.append((start, r.get("kernel_name", "unknown"), dur))
+
+    if not kernels or n_runs < 1 or len(kernels) % n_runs:
+        return None
+    kernels.sort(key=lambda x: x[0])
+
+    n = len(kernels) // n_runs
+    runs, seq = [], [k[1] for k in kernels[:n]]
+    for i in range(n_runs):
+        chunk = kernels[i * n:(i + 1) * n]
+        if [k[1] for k in chunk] != seq:
+            return None
+        runs.append([k[2] for k in chunk])
+    return runs
+
+
+def _parse_msprof_duration_quick(prof_group_dir: str, warmup: int = 0, repeats: int = 1):
+    """快速模式解析：从 PROF 目录中查找 task_time.csv 并提取时间。
 
     快速模式只跑 1 轮（不采集 7 个 aic-metrics），因此没有 op_summary_*.csv。
 
-    warmup 已在 msprof 外部执行，task_time.csv 只包含正式 timed run 的 kernel 时间，
-    对单次采集中所有计算 kernel 的耗时直接累加即可。
+    采集窗口内包含 warmup + repeats 次 in-process 迭代（与 torch_npu profiler 的
+    warmup/active 语义一致）。这里按 kernel 序列把它们拆开，**只对后 repeats 次
+    （active）求平均**，丢弃 warmup 次 —— 避免首次迭代的冷启动污染测量值。
+    若拆分失败（行数不匹配等），回退为按时间排序后的位置分片，同样丢弃 warmup 份。
 
     兼容两种目录结构：
       - 无 --aic-metrics: PROF_*/mindstudio_profiler_output/task_time_*.csv
       - 有 --aic-metrics: PROF_*/PROF_PipeUtilization/mindstudio_profiler_output/task_time_*.csv
     """
-    # 1. 尝试从 task_time.csv 提取（两种可能路径）
     task_time_patterns = [
         os.path.join(prof_group_dir, "mindstudio_profiler_output", "task_time_*.csv"),
         os.path.join(prof_group_dir, "PROF_*", "mindstudio_profiler_output", "task_time_*.csv"),
@@ -1237,38 +1310,76 @@ def _parse_msprof_duration_quick(prof_group_dir: str):
             continue
         try:
             with open(task_time_files[0], "r", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
-                rows = list(reader)
-            # 收集所有非元事件的 kernel 行，按 kernel_name 分组
-            kernel_times: Dict[str, List[float]] = {}
-            for r in rows:
-                kernel_type = r.get("kernel_type", "")
-                task_time = r.get("task_time(us)", "")
-                if kernel_type not in ("PROFILING_ENABLE", "PROFILING_DISABLE", "TASK_TIMEOUT_SET", "") and task_time:
-                    try:
-                        duration = float(task_time)
-                        if duration > 0:
-                            kernel_name = r.get("kernel_name", "unknown")
-                            kernel_times.setdefault(kernel_name, []).append(duration)
-                    except ValueError:
-                        continue
+                rows = list(csv.DictReader(f))
 
-            if kernel_times:
-                # 汇总所有 kernel 的耗时
-                all_durations = []
-                all_kernel_names = set()
-                for times in kernel_times.values():
-                    all_durations.extend(times)
-                for name in kernel_times.keys():
-                    all_kernel_names.add(name)
-                total_duration = sum(all_durations)
-                if total_duration > 0:
-                    kernel_name = list(all_kernel_names)[0] if len(all_kernel_names) == 1 else "multiple_kernels"
-                    return total_duration, kernel_name, None
+            # 优先：按 run 拆分，只取 active（后 repeats 次）的均值
+            runs = _split_task_time_runs(rows, warmup + repeats)
+            if runs is not None:
+                active = runs[warmup:] if warmup < len(runs) else runs
+                per_run = [sum(x) for x in active]
+                return (sum(per_run) / len(per_run)), "multiple_kernels", None
+
+            # 回退路径：run 拆分失败（kernel 名称序列不一致等），位置分片
+            kernels = _collect_kernels(rows)
+            result = _split_kernels_by_position(kernels, warmup, repeats)
+            if result is None:
+                continue
+            kernel_names = list({k[1] for k in kernels})
+            kernel_name = kernel_names[0] if len(kernel_names) == 1 else "multiple_kernels"
+            return result, kernel_name, None
         except Exception as e:
-            LOGGER.warning("Failed to parse %s: %s", task_time_files[0], e)
+            LOGGER.debug("Failed to parse %s: %s", task_time_files[0], e)
 
     return None, None, "no task_time or api_statistic csv found"
+
+
+def _collect_kernels(rows):
+    """从 task_time 行中收集有效 kernel：过滤元数据 kernel、空/非法/非正耗时。"""
+    kernels = []
+    for r in rows:
+        kernel_type = r.get("kernel_type", "")
+        task_time = r.get("task_time(us)", "")
+        if kernel_type in _META_KERNEL_TYPES or not task_time:
+            continue
+        try:
+            dur = float(task_time)
+            start = float((r.get("task_start(us)", "") or "0").strip())
+        except ValueError:
+            continue
+        if dur <= 0:
+            continue
+        kernels.append((start, r.get("kernel_name", "unknown"), dur))
+    return kernels
+
+
+def _split_kernels_by_position(kernels, warmup: int, repeats: int):
+    """按时间排序后做位置分片，丢弃前 warmup 份，返回单次迭代估算耗时。
+
+    行数可整除时按位置精确分片；不可整除时按比例估算。kernels 为空返回 None。
+    """
+    if not kernels:
+        return None
+    kernels.sort(key=lambda x: x[0])
+    total = sum(d for _, _, d in kernels)
+    n_total = warmup + repeats
+    if n_total <= 0:
+        n_total = 1
+    n_kernels = len(kernels)
+
+    if n_kernels % n_total == 0:
+        # 行数可整除：按位置精确分片，丢弃前 warmup 份
+        k_per = n_kernels // n_total
+        active_kernels = kernels[warmup * k_per:]
+        return sum(d for _, _, d in active_kernels) / max(1, repeats)
+
+    # 行数不可整除：按比例估算，丢弃时间轴上前 warmup/n_total 的部分
+    split_idx = max(0, int(n_kernels * warmup / n_total))
+    active_kernels = kernels[split_idx:]
+    if not active_kernels:
+        return total / n_total
+    # 按 active kernel 数占总 kernel 数的比例折算单次迭代耗时
+    active_total = sum(d for _, _, d in active_kernels)
+    return active_total / (len(active_kernels) / (n_kernels / n_total))
 
 
 def pick_idle_npu(default=0):
@@ -1343,22 +1454,29 @@ def _add_per_case_table(lines, report):
 
 def _add_summary_section(lines, report):
     """Add the summary and dtype tables."""
-    if report.get("geomean_speedup") is None:
+    has_speedup = report.get("geomean_speedup") is not None
+    has_timing = (report.get("mean_ref_us") is not None
+                  or report.get("mean_asc_us") is not None)
+    if not has_speedup and not has_timing:
         return
     lines.append("## 全量汇总")
     lines.append("")
     lines.append("| 指标 | 值 |")
     lines.append("| ---- | -- |")
     lines.append(f"| 用例数 | {report['n_cases_total']} |")
-    lines.append(f"| 平均加速比（>1 表示自定义算子更快） | {report['mean_speedup']:.3f} |")
+    if has_speedup:
+        lines.append(f"| 平均加速比（>1 表示自定义算子更快） | {report['mean_speedup']:.3f} |")
+    else:
+        lines.append("| 平均加速比 | N/A（--impl 单边采集或无双侧有效 case） |")
     if report.get("geomean_ref_us") is not None:
         lines.append(f"| 标杆几何平均耗时 (us) | {report['geomean_ref_us']:.2f} |")
     if report.get("geomean_asc_us") is not None:
         lines.append(f"| 自定义算子几何平均耗时 (us) | {report['geomean_asc_us']:.2f} |")
-    better = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] > 1)
-    worse = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] < 1)
-    lines.append(f"| 自定义算子更优（比值>1） | {better} |")
-    lines.append(f"| 标杆更优（比值<1） | {worse} |")
+    if has_speedup:
+        better = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] > 1)
+        worse = sum(1 for c in report.get('per_case', []) if c.get('speedup') and c['speedup'] < 1)
+        lines.append(f"| 自定义算子更优（比值>1） | {better} |")
+        lines.append(f"| 标杆更优（比值<1） | {worse} |")
     lines.append("")
 
     dtype_groups = {}
@@ -1452,6 +1570,7 @@ def _report_compare_to_text(report: Dict[str, Any]) -> str:
         lines.append(f"  Median  : {report['median_speedup']:.2f}x")
         lines.append(f"  Min/Max : {report['min_speedup']:.2f}x / {report['max_speedup']:.2f}x")
         lines.append(f"  Valid   : {report['n_cases_valid']}/{report['n_cases_total']}")
+    # 单边采集（--impl ref/asc）时只渲染已测到的一侧，未测的一侧不出现
     if report.get("mean_ref_us") is not None:
         lines.append("--- Task Duration (us) ---")
         lines.append(
@@ -1459,11 +1578,13 @@ def _report_compare_to_text(report: Dict[str, Any]) -> str:
             f"{report['median_ref_us']:.2f} / {report['geomean_ref_us']:.2f} / "
             f"{report['total_ref_us']:.2f}"
         )
+    if report.get("mean_asc_us") is not None:
         lines.append(
             f"  Asc  mean/median/geomean/total : {report['mean_asc_us']:.2f} / "
             f"{report['median_asc_us']:.2f} / {report['geomean_asc_us']:.2f} / "
             f"{report['total_asc_us']:.2f}"
         )
+    if report.get("total_speedup") is not None:
         lines.append(f"  Total speedup (Σref/Σasc) : {report['total_speedup']:.2f}x")
     lines.append("=" * 100)
 
@@ -1524,34 +1645,50 @@ def _measure_one_impl(mi: _MeasureInput):
 def _measure_one_impl_quick(mi: _MeasureInput):
     """快速模式：Measure one implementation with retries and repeats.
 
-    --retry 用于解析失败重试；--repeats 控制 wrapper 内 timed iteration 次数。
-    wrapper 做 repeats 次 timed run，msprof 一把采集，total / repeats = 单次耗时。
-    warmup 由 _run_msprof_quick 在 msprof 外部执行。
+    --retry 用于解析失败重试。
+
+    与 torch_npu profiler 对齐的口径：wrapper 在**同一个被采集的进程内**先跑
+    --warmup 次预热迭代、再跑 --repeats 次计时迭代，msprof 一把全采；解析时按
+    kernel 序列拆分成 (warmup + repeats) 次 run，只对后 repeats 次求平均。
+
+    旧实现把 warmup 放在 msprof 外部的独立进程里执行，对被采集的那个进程毫无
+    预热作用，导致采到的必然是冷 run（首个 kernel 被放大 ~47%）。--ext-warmup
+    保留了旧行为，默认关闭。
 
     Returns (duration_us, error, prof_dir).
     """
     prof_dir = None
     impl_abbr = "ref" if mi.impl == "reference" else "asc"
     repeats = max(1, getattr(mi.args, "repeats", 1))
+    warmup = max(0, getattr(mi.args, "warmup", 0))
+    ext_warmup = max(0, getattr(mi.args, "ext_warmup", 0))
 
     for _ in range(1 + mi.args.retry):
-        # 让 wrapper 内跑 repeats 次 timed run，msprof 一把采集后除以 repeats 得到单次
         wrapper = _generate_wrapper_script(_WrapperConfig(
             mi.out_dir, mi.case_idx, mi.impl, mi.args.seed, mi.device_id,
-            repeats - 1, mi.jsonl_case))
-        tmpdir = f"/tmp/msprof_quick_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}"
+            warmup, mi.jsonl_case, repeats))
+        tag = getattr(mi.args, "prof_tag", None)
+        if tag:
+            if not _PROF_TAG_RE.match(tag):
+                raise ValueError(
+                    f"--prof-tag 只允许 [A-Za-z0-9_.-]+，收到 {tag!r}；"
+                    f"该值会拼进临时目录名并在随后被 rmtree 清理，禁止路径分隔符")
+            tag_suffix = f"_{tag}"
+        else:
+            tag_suffix = ""
+        tmpdir = (f"/tmp/msprof_quick_{impl_abbr}_{mi.out_dir.name}_c{mi.case_idx}"
+                  + tag_suffix)
         _cleanup_prof_dirs(tmpdir)
-        prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.device_id, mi.args.warmup)
+        prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.device_id, ext_warmup)
         if not prof_dir:
             continue
 
-        duration, _op_name, parse_err = _parse_msprof_duration_quick(prof_dir)
+        duration, _op_name, parse_err = _parse_msprof_duration_quick(
+            prof_dir, warmup, repeats)
         if duration is None:
             err = f"{parse_err} (app log: {tmpdir}/app_output.log)"
             continue
 
-        # msprof 采集了 repeats 次 timed run，除以 repeats 得到单次耗时
-        duration = duration / repeats
         return duration, None, prof_dir
 
     return None, err, prof_dir
@@ -1673,6 +1810,10 @@ def _log_and_save_compare_reports(summary, out_dir, speedups, n_cases):
         LOGGER.info(f"  Median  : {summary['median_speedup']:.2f}x")
         LOGGER.info(f"  Min/Max : {summary['min_speedup']:.2f}x / {summary['max_speedup']:.2f}x")
         LOGGER.info(f"  Valid   : {len(speedups)}/{n_cases}")
+    else:
+        LOGGER.info("--- Speedup ---")
+        LOGGER.info("  (N/A: 无双侧均有效的 case —— --impl 单边采集或双侧测量失败)")
+    # 单边采集（--impl ref/asc）时只渲染已测到的一侧，未测的一侧不出现
     if summary.get("mean_ref_us") is not None:
         LOGGER.info("--- Task Duration (us) ---")
         LOGGER.info(
@@ -1680,11 +1821,13 @@ def _log_and_save_compare_reports(summary, out_dir, speedups, n_cases):
             f"{summary['median_ref_us']:.2f} / {summary['geomean_ref_us']:.2f} / "
             f"{summary['total_ref_us']:.2f}"
         )
+    if summary.get("mean_asc_us") is not None:
         LOGGER.info(
             f"  Asc  mean/median/geomean/total : {summary['mean_asc_us']:.2f} / "
             f"{summary['median_asc_us']:.2f} / {summary['geomean_asc_us']:.2f} / "
             f"{summary['total_asc_us']:.2f}"
         )
+    if summary.get("total_speedup") is not None:
         LOGGER.info(f"  Total speedup (Σref/Σasc) : {summary['total_speedup']:.2f}x")
     LOGGER.info("=" * 100)
 
@@ -1726,43 +1869,68 @@ def _log_compare_header(out_dir, args):
     LOGGER.info("-" * 100)
 
 
+_PROF_TAG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+# 与 _measure_one_impl* 中硬编码的 /tmp/msprof_* 前缀保持一致；
+# 不用 tempfile.gettempdir()，避免 TMPDIR 环境变量改写导致误拒清理。
+_TMP_ROOT = os.path.realpath("/tmp")
+
+
 def _cleanup_prof_dirs(*dirs):
-    """Remove profiling directories if they exist."""
+    """Remove profiling directories if they exist.
+
+    防御：删除前先 realpath 解析，确认目标位于临时目录根下且不是根本身，
+    才允许删除。prof_tag 等用户输入会拼进目录名，防止路径逃逸导致误删。
+    """
     for d in dirs:
-        if d and os.path.isdir(d):
-            shutil.rmtree(d, ignore_errors=True)
-
-
-def _run_compare_loop(out_dir, cases, n_cases, args, device_id):
-    """Run the measurement loop over all cases. Returns rows and stats."""
-    rows, speedups, ref_times, asc_times = [], [], [], []
-
-    for idx in range(n_cases):
-        shape, dtype = _extract_shape_dtype_from_jsonl(cases[idx]) if cases else ("?", "?")
-        jsonl_case = cases[idx] if cases else None
-
-        if _case_has_empty_tensor(jsonl_case):
-            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
-                  f"{'--':>12} {'--':>12} "
-                  f"{'skip':>10}  (empty tensor)")
-            rows.append({
-                "case": idx, "shape": shape, "dtype": dtype,
-                "ref_us": None, "asc_us": None, "speedup": None,
-                "ref_error": None, "asc_error": None,
-                "skipped": "empty_tensor",
-            })
+        if not d:
             continue
+        real = os.path.realpath(d)
+        if real == _TMP_ROOT or os.path.commonpath([real, _TMP_ROOT]) != _TMP_ROOT:
+            LOGGER.warning("Refusing to remove %s: not under %s", real, _TMP_ROOT)
+            continue
+        if os.path.isdir(real):
+            shutil.rmtree(real, ignore_errors=True)
 
-        ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
-        asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
-        ref_us, ref_err, ref_prof_dir = _measure_one_impl(ref_mi)
-        asc_us, asc_err, asc_prof_dir = _measure_one_impl(asc_mi)
 
+@dataclass
+class _LoopAccumulator:
+    """对比/快速模式共用的逐 case 统计累积器。
+
+    Args:
+        args: argparse.Namespace（需含 keep_prof 属性）
+        rows: 逐 case 的测量结果列表
+        speedups: 有效 speedup 值列表
+        ref_times: 参考实现耗时列表（us）
+        asc_times: AscendC 实现耗时列表（us）
+
+    record() 统一完成双侧耗时累计、speedup 统计、日志输出、rows 登记与
+    PROF 目录清理，对比/快速两个循环共用同一份逻辑。
+    """
+    args: argparse.Namespace
+    rows: List[Dict[str, Any]] = field(default_factory=list)
+    speedups: List[float] = field(default_factory=list)
+    ref_times: List[float] = field(default_factory=list)
+    asc_times: List[float] = field(default_factory=list)
+
+    def record(self, idx, shape, dtype, ref_result, asc_result):
+        """累计单个 case 的测量结果。
+
+        ref_result/asc_result 为 _measure_one_impl(_quick) 返回的
+        (duration_us, error, prof_dir) 三元组。
+
+        单侧失败或 --impl 单边采集时，仍累计已测到的一侧耗时，生成单边汇总；
+        speedup 仅在双侧都有效时统计。
+        """
+        ref_us, ref_err, ref_prof_dir = ref_result
+        asc_us, asc_err, asc_prof_dir = asc_result
+
+        if ref_us is not None:
+            self.ref_times.append(ref_us)
+        if asc_us is not None and asc_us > 0:
+            self.asc_times.append(asc_us)
         if ref_us is not None and asc_us is not None and asc_us > 0:
             sp = ref_us / asc_us
-            speedups.append(sp)
-            ref_times.append(ref_us)
-            asc_times.append(asc_us)
+            self.speedups.append(sp)
             LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} {ref_us:>12.2f} {asc_us:>12.2f} {sp:>9.3f}x")
         else:
             LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
@@ -1770,7 +1938,7 @@ def _run_compare_loop(out_dir, cases, n_cases, args, device_id):
                   f"{'N/A' if asc_us is None else f'{asc_us:.2f}':>12} "
                   f"{'N/A':>10}  (ref_err={ref_err}, asc_err={asc_err})")
 
-        rows.append({
+        self.rows.append({
             "case": idx, "shape": shape, "dtype": dtype,
             "ref_us": ref_us, "asc_us": asc_us,
             "speedup": (ref_us / asc_us) if (ref_us and asc_us and asc_us > 0) else None,
@@ -1780,10 +1948,38 @@ def _run_compare_loop(out_dir, cases, n_cases, args, device_id):
             "asc_prof_dir": asc_prof_dir,
         })
 
-        if not args.keep_prof:
+        if not self.args.keep_prof:
             _cleanup_prof_dirs(ref_prof_dir, asc_prof_dir)
 
-    return rows, speedups, ref_times, asc_times
+
+def _run_compare_loop(out_dir, cases, n_cases, args, device_id):
+    """Run the measurement loop over all cases. Returns rows and stats."""
+    acc = _LoopAccumulator(args)
+
+    for idx in range(n_cases):
+        shape, dtype = _extract_shape_dtype_from_jsonl(cases[idx]) if cases else ("?", "?")
+        jsonl_case = cases[idx] if cases else None
+
+        if _case_has_empty_tensor(jsonl_case):
+            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
+                  f"{'--':>12} {'--':>12} "
+                  f"{'skip':>10}  (empty tensor)")
+            acc.rows.append({
+                "case": idx, "shape": shape, "dtype": dtype,
+                "ref_us": None, "asc_us": None, "speedup": None,
+                "ref_error": None, "asc_error": None,
+                "skipped": "empty_tensor",
+            })
+            continue
+
+        ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
+        asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
+        ref_result = _measure_one_impl(ref_mi)
+        asc_result = _measure_one_impl(asc_mi)
+
+        acc.record(idx, shape, dtype, ref_result, asc_result)
+
+    return acc.rows, acc.speedups, acc.ref_times, acc.asc_times
 
 
 def _run_quick_loop(out_dir, cases, n_cases, args, device_id):
@@ -1791,9 +1987,15 @@ def _run_quick_loop(out_dir, cases, n_cases, args, device_id):
 
     Returns rows and stats.
     """
-    rows, speedups, ref_times, asc_times = [], [], [], []
+    acc = _LoopAccumulator(args)
 
-    for idx in range(n_cases):
+    sel = getattr(args, "cases", None)
+    if sel:
+        idx_list = [int(x) for x in str(sel).split(",") if x.strip() != ""]
+    else:
+        idx_list = list(range(n_cases))
+
+    for idx in idx_list:
         shape, dtype = _extract_shape_dtype_from_jsonl(cases[idx]) if cases else ("?", "?")
         jsonl_case = cases[idx] if cases else None
 
@@ -1801,7 +2003,7 @@ def _run_quick_loop(out_dir, cases, n_cases, args, device_id):
             LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
                   f"{'--':>12} {'--':>12} "
                   f"{'skip':>10}  (empty tensor)")
-            rows.append({
+            acc.rows.append({
                 "case": idx, "shape": shape, "dtype": dtype,
                 "ref_us": None, "asc_us": None, "speedup": None,
                 "ref_error": None, "asc_error": None,
@@ -1809,37 +2011,22 @@ def _run_quick_loop(out_dir, cases, n_cases, args, device_id):
             })
             continue
 
-        ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
-        asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
-        ref_us, ref_err, ref_prof_dir = _measure_one_impl_quick(ref_mi)
-        asc_us, asc_err, asc_prof_dir = _measure_one_impl_quick(asc_mi)
-
-        if ref_us is not None and asc_us is not None and asc_us > 0:
-            sp = ref_us / asc_us
-            speedups.append(sp)
-            ref_times.append(ref_us)
-            asc_times.append(asc_us)
-            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} {ref_us:>12.2f} {asc_us:>12.2f} {sp:>9.3f}x")
+        # 按 --impl 选择实现；单侧失败或单边采集时仍累计已测到的一侧耗时。
+        which = getattr(args, "impl", "both")
+        if which in ("both", "ref"):
+            ref_mi = _MeasureInput(out_dir, idx, "reference", args, device_id, jsonl_case)
+            ref_result = _measure_one_impl_quick(ref_mi)
         else:
-            LOGGER.info(f"{idx:<5} {shape:<35} {dtype:<10} "
-                  f"{'N/A' if ref_us is None else f'{ref_us:.2f}':>12} "
-                  f"{'N/A' if asc_us is None else f'{asc_us:.2f}':>12} "
-                  f"{'N/A':>10}  (ref_err={ref_err}, asc_err={asc_err})")
+            ref_result = (None, "skipped (--impl)", None)
+        if which in ("both", "asc"):
+            asc_mi = _MeasureInput(out_dir, idx, "ascendc", args, device_id, jsonl_case)
+            asc_result = _measure_one_impl_quick(asc_mi)
+        else:
+            asc_result = (None, "skipped (--impl)", None)
 
-        rows.append({
-            "case": idx, "shape": shape, "dtype": dtype,
-            "ref_us": ref_us, "asc_us": asc_us,
-            "speedup": (ref_us / asc_us) if (ref_us and asc_us and asc_us > 0) else None,
-            "ref_error": ref_err,
-            "asc_error": asc_err,
-            "ref_prof_dir": ref_prof_dir,
-            "asc_prof_dir": asc_prof_dir,
-        })
+        acc.record(idx, shape, dtype, ref_result, asc_result)
 
-        if not args.keep_prof:
-            _cleanup_prof_dirs(ref_prof_dir, asc_prof_dir)
-
-    return rows, speedups, ref_times, asc_times
+    return acc.rows, acc.speedups, acc.ref_times, acc.asc_times
 
 
 def run_compare_mode(args):
@@ -1877,6 +2064,13 @@ def run_quick_mode(args):
     if case_source:
         LOGGER.info(f"[INFO] Loaded {n_cases} cases from {case_source}")
 
+    max_cases = getattr(args, "max_cases", 0)
+    if max_cases and max_cases < n_cases:
+        n_cases = max_cases
+        LOGGER.info(f"[INFO] --max-cases: limiting to first {n_cases} cases")
+
+    LOGGER.info(f"[INFO] in-process warmup={args.warmup}, timed repeats={args.repeats}, "
+                f"ext-warmup={getattr(args, 'ext_warmup', 0)}, impl={getattr(args, 'impl', 'both')}")
     _log_compare_header(out_dir, args)
     rows, speedups, ref_times, asc_times = _run_quick_loop(
         out_dir, cases, n_cases, args, device_id)
@@ -2118,8 +2312,8 @@ def _run_standard_mode(args):
     LOGGER.info("\n%s", summary)
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+def _build_arg_parser():
+    """构建命令行参数解析器（标准/对比/批量三种模式）。"""
     parser = argparse.ArgumentParser(description="msprof 解析 & 归档 & 对比测试脚本（统一入口）")
 
     # 标准模式参数
@@ -2132,8 +2326,20 @@ def main():
     parser.add_argument("--compare", action="store_true", help="启用对比模式（8 轮采集：7 metrics + sample）")
     parser.add_argument("--quick", action="store_true", help="启用快速模式（1 轮采集：只获取 kernel 时间，不采集 7 个 aic-metrics）")
     parser.add_argument("--output-dir", dest="output_dir", help="算子输出目录（对比模式/快速模式）")
-    parser.add_argument("--warmup", type=int, default=3, help="msprof warmup 次数")
-    parser.add_argument("--repeats", type=int, default=1, help="重复采集次数")
+    parser.add_argument("--warmup", type=int, default=3,
+                        help="quick 模式：被采集进程内的预热迭代次数（解析时丢弃）")
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="quick 模式：被采集进程内的计时迭代次数（解析时取均值）")
+    parser.add_argument("--ext-warmup", dest="ext_warmup", type=int, default=0,
+                        help="旧行为：在 msprof 外部另起进程预热的次数（对被采集进程无预热效果，默认 0）")
+    parser.add_argument("--impl", choices=["both", "ref", "asc"], default="both",
+                        help="quick 模式只采集指定实现（ref=参考实现，asc=AscendC 实现）")
+    parser.add_argument("--max-cases", dest="max_cases", type=int, default=0,
+                        help="quick 模式只跑前 N 个 case（0=全部，用于冒烟测试）")
+    parser.add_argument("--cases", default=None,
+                        help="quick 模式只跑指定 case 下标，逗号分隔，如 0,4,9,18（优先于 --max-cases）")
+    parser.add_argument("--prof-tag", dest="prof_tag", default=None,
+                        help="PROF 临时目录后缀，用于同一 case 多次独立采集互不覆盖")
     parser.add_argument("--seed", type=int, default=0, help="随机种子")
     parser.add_argument("--retry", type=int, default=2, help="单 case 解析失败重试次数")
     parser.add_argument("--device", type=int, default=None, help="NPU 设备 id")
@@ -2143,7 +2349,22 @@ def main():
     parser.add_argument("--batch", metavar="BASE_DIR", help="启用批量模式，指定根目录")
     parser.add_argument("--output-md", help="批量模式 Markdown 输出路径")
     parser.add_argument("--output-json", help="批量模式 JSON 输出路径")
+    return parser
 
+
+def _run_or_exit(run_fn, args) -> int:
+    """执行模式函数，ValueError（参数/输入不合法）时打日志并返回退出码 1。"""
+    try:
+        run_fn(args)
+    except ValueError as e:
+        LOGGER.error("%s", e)
+        return 1
+    return 0
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     # 模式路由
@@ -2151,25 +2372,18 @@ def main():
         if not args.output_dir:
             parser.error("--compare 模式必须指定 --output-dir")
         run_compare_mode(args)
-    elif args.quick:
+        return 0
+    if args.quick:
         if not args.output_dir:
             parser.error("--quick 模式必须指定 --output-dir")
         run_quick_mode(args)
-    elif args.batch:
-        try:
-            run_batch_mode(args)
-        except ValueError as e:
-            LOGGER.error("%s", e)
-            sys.exit(1)
-    else:
-        if not args.prof_group_dir or not args.ops_dir:
-            parser.error("标准模式需要 prof_group_dir 和 ops_dir 参数")
-        try:
-            _run_standard_mode(args)
-        except ValueError as e:
-            LOGGER.error("%s", e)
-            sys.exit(1)
+        return 0
+    if args.batch:
+        return _run_or_exit(run_batch_mode, args)
+    if not args.prof_group_dir or not args.ops_dir:
+        parser.error("标准模式需要 prof_group_dir 和 ops_dir 参数")
+    return _run_or_exit(_run_standard_mode, args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
