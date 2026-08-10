@@ -45,6 +45,8 @@
 - 【验收标准】确认项无遗漏，用户原始需求逐条记录；架构选型候选按目标芯片映射——ascend950 为 SIMD（RegBase 实现）与 SIMT 两种，其余低版本芯片仅 SIMD（MemBase 实现）一个选项，RegBase 与 MemBase 互斥（支持 RegBase 的芯片不使用 MemBase）；只出推荐，不代替用户决定架构。
 ```
 
+> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】代码架构选型候选仅 SIMD（实现载体按目标芯片确定：ascend950 为 RegBase、其余芯片为 MemBase），不评估 SIMT，推荐项直接取 SIMD」。
+
 ## CP1 需求确认
 
 - **角色**：QA
@@ -56,7 +58,7 @@
 - 【skills】立即加载 `workflow-cp1`、`workflow-doc-templates`。
 ```
 
-> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】不发送问卷，按 settings.md 默认决策执行」，QA 核对无硬伤即通过（架构选型采用 1.1 推荐项），落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`）。
+> **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】不发送问卷，按 settings.md 默认决策执行」，QA 核对无硬伤即通过（架构选型固定采用 SIMD——静默下 1.1 仅推荐 SIMD、不评估 SIMT），落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`）。
 
 # 阶段 2：方案设计（方案线 / 测试线并行）
 
