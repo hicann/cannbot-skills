@@ -24,7 +24,7 @@
 #endif
 #include "lib/matmul_intf.h"
 
-#include "integral_constant.h"
+#include "blaze_custom/utils/integral_constant.h"
 
 // On-chip buffer capacities.
 // L0A/L0B are architecture-independent (defined unconditionally by the SDK).

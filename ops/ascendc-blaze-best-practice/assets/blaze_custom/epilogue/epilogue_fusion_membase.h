@@ -18,11 +18,9 @@
 #include "kernel_operator_intf.h"
 #endif
 
-#include "epilogue/cv_sync_constants.h"
-#include "../utils/common_utils.h"
-#include "include/tensor_api/tensor.h"
-
-using namespace AscendC;
+#include "blaze_custom/epilogue/cv_sync_constants.h"
+#include "blaze_custom/utils/common_utils.h"
+#include "tensor_api/tensor.h"
 
 // ============================================================================
 // MemBase Epilogue 参考样例 — matmul + 简单 Vector 融合
@@ -49,12 +47,13 @@ public:
         GM_ADDR outputGmAddr{nullptr};
     };
 
-    using BlockShape = AscendC::Shape<int64_t, int64_t, int64_t, int64_t>;
-    using ProblemShape = AscendC::Shape<int64_t, int64_t, int64_t, int64_t>;
+    using BlockShape = AscendC::Te::Shape<int64_t, int64_t, int64_t, int64_t>;
+    using ProblemShape = AscendC::Te::Shape<int64_t, int64_t, int64_t, int64_t>;
 
-    AscendC::LocalTensor<DataType> cLocal_{AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE};
-    AscendC::LocalTensor<DataType> dLocal_{AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE};
-    AscendC::LocalTensor<DataType> cLocalTmp_{AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE};
+private:
+    AscendC::LocalTensor<DataType> cLocal_;
+    AscendC::LocalTensor<DataType> dLocal_;
+    AscendC::LocalTensor<DataType> cLocalTmp_;
 
     AscendC::GlobalTensor<DataType> outputGlobal_;
     AscendC::GlobalTensor<DataType> extraInputGlobal_;
@@ -64,9 +63,13 @@ public:
     bool valid_{false};
     ProblemShape problemShape_;
 
+public:
     __aicore__ inline void Init(
         Params const& params, int64_t baseM, int64_t baseN, ProblemShape& problemShape)
     {
+        cLocal_ = AscendC::LocalTensor<DataType>(AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE);
+        dLocal_ = AscendC::LocalTensor<DataType>(AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE);
+        cLocalTmp_ = AscendC::LocalTensor<DataType>(AscendC::TPosition::VECIN, 0, AscendC::TOTAL_UB_SIZE);
         valid_ = false;
         // nAlign: UB 行对齐宽度（32B / sizeof(DataType) 元素一组）
         nAlignL0C_ = ::CeilDiv(baseN, ALIGN_ELEM) * ALIGN_ELEM;
@@ -103,13 +106,13 @@ public:
 
     __aicore__ inline auto GetTensor(int64_t curM, int64_t curN)
     {
-        constexpr int64_t ubAlign = 32 / sizeof(L0CDataType);
-        int64_t curNUbAlign = ::CeilDiv(curN, ubAlign) * ubAlign;
+        constexpr int64_t UB_ALIGN = 32 / sizeof(L0CDataType);
+        int64_t curNUbAlign = ::CeilDiv(curN, UB_ALIGN) * UB_ALIGN;
         int64_t curMPad = (curM + 1) & ~1L;
-        auto layoutUB = AscendC::Te::MakeFrameLayout<
+        auto layoutUb = AscendC::Te::MakeFrameLayout<
             AscendC::Te::NDExtLayoutPtn, AscendC::Std::Int<16>>(curMPad, curNUbAlign);
         return AscendC::Te::MakeTensor(
-            AscendC::Te::MakeMemPtr<AscendC::Te::Location::UB, L0CDataType>(0), layoutUB);
+            AscendC::Te::MakeMemPtr<AscendC::Te::Location::UB, L0CDataType>(0), layoutUb);
     }
 
     __aicore__ inline bool IsValid() const { return valid_; }
@@ -118,8 +121,8 @@ public:
         BlockShape const& blockShape, int64_t dstOffset, int64_t flagId = CvSync::AIV_TO_AIC_FLAG)
     {
         (void)flagId;
-        int64_t curM = Get<0>(blockShape);
-        int64_t curN = Get<1>(blockShape);
+        int64_t curM = AscendC::Te::Get<0>(blockShape);
+        int64_t curN = AscendC::Te::Get<1>(blockShape);
 
         // ---- SplitM 行数计算 ----
         int64_t halfM = ::CeilDiv(curM, AscendC::GetTaskRation());
@@ -129,9 +132,9 @@ public:
             return;  // V1 无数据，CV 同步由 kernel 层处理
         }
 
-        int64_t N = Get<MNK_N>(problemShape_);
-        int64_t tileM0 = dstOffset / N;
-        int64_t tileN0 = dstOffset % N;
+        int64_t n = AscendC::Te::Get<MNK_N>(problemShape_);
+        int64_t tileM0 = dstOffset / n;
+        int64_t tileN0 = dstOffset % n;
         int64_t subM0 = tileM0 + AscendC::GetSubBlockIdx() * halfM;
 
         // per-call nAlign（从 blockShapeN，非 Init 时的 baseN）
@@ -148,10 +151,10 @@ public:
 
             // GM→UB 加载额外输入（GM offset 含 sub-block 偏移）
             {
-                int64_t gmOffset = stageM0 * N + tileN0;
+                int64_t gmOffset = stageM0 * n + tileN0;
                 uint16_t nRows = static_cast<uint16_t>(rowsThisStage);
                 uint32_t rowBytes = static_cast<uint32_t>(curN * sizeof(DataType));
-                uint32_t gmRowGap = static_cast<uint32_t>((N - curN) * sizeof(DataType));
+                uint32_t gmRowGap = static_cast<uint32_t>((n - curN) * sizeof(DataType));
                 // GM→UB: srcStride=GM 侧 bytes, dstStride=UB 侧 32B 单位（nAlign 对齐时传 0）
                 AscendC::DataCopyExtParams cp{nRows, rowBytes, gmRowGap, 0, 0};
                 AscendC::DataCopyPadExtParams<DataType> pp{false, 0, 0, 0};
@@ -177,10 +180,10 @@ public:
 
             // UB→GM 写回（GM offset 含 sub-block 偏移）
             {
-                int64_t gmOffset = stageM0 * N + tileN0;
+                int64_t gmOffset = stageM0 * n + tileN0;
                 uint16_t nRows = static_cast<uint16_t>(rowsThisStage);
                 uint32_t rowBytes = static_cast<uint32_t>(curN * sizeof(DataType));
-                uint32_t gmRowGap = static_cast<uint32_t>((N - curN) * sizeof(DataType));
+                uint32_t gmRowGap = static_cast<uint32_t>((n - curN) * sizeof(DataType));
                 // UB→GM: srcStride=UB 侧 32B 单位（nAlign 对齐时传 0），dstStride=GM 侧 bytes
                 AscendC::DataCopyExtParams outParams{nRows, rowBytes, 0, gmRowGap, 0};
                 AscendC::DataCopyPad<DataType>(outputGlobal_[gmOffset], cLocalTmp_, outParams);

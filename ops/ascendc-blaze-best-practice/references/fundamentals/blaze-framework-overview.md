@@ -375,10 +375,14 @@ constexpr uint32_t CURRENT_ARCH_VERSION = GetArchVersion{}();  // 取自 __NPU_A
 
 ```cpp
 #include "platform_ascendc.h"
-auto& mgr = platform_ascendc::PlatformAscendCManager::GetInstance();
-int aicNum = mgr.GetCoreNumAiv();       // AIC 核数
-int l1Size = mgr.GetCoreMemSize(1);     // L1 容量（字节）
-int ubSize = mgr.GetCoreMemSize(0);     // UB 容量（字节）
+if (auto* mgr = platform_ascendc::PlatformAscendCManager::GetInstance();
+    mgr != nullptr) {
+    int aicNum = mgr->GetCoreNumAiv();       // AIC 核数
+    int l1Size = mgr->GetCoreMemSize(1);     // L1 容量（字节）
+    int ubSize = mgr->GetCoreMemSize(0);     // UB 容量（字节）
+} else {
+    // 独立 Host/CTest 中可选平台探针记录 skipped；必需事实应显式阻断。
+}
 ```
 
 ### 7.3 Kernel 侧编译时常量

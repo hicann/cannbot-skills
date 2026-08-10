@@ -13,9 +13,10 @@
  * \brief Host-side SWAT tiling engine for ordinary matmul kernels.
  *
  * Ordinary matmul means A/B input matrices, optional bias, and one output C.
- * Grouped matmul reuses this engine with totalM; group metadata is not part of
- * the tiling data. Full-load, StreamK, and 4-buffer variants are intentionally
- * not provided by this skill.
+ * Grouped matmul reuses this engine with totalM. Its grouped overload keeps
+ * group metadata in the outer POD while ordinary MM remains unaware of it.
+ * Full-load, StreamK, and 4-buffer variants are intentionally not provided by
+ * this skill.
  */
 
 #ifndef BLAZE_MATMUL_TILING_H
@@ -28,6 +29,7 @@
 #include <string>
 
 #include "platform/platform_ascendc.h"
+#include "blaze_group_matmul_tiling_data.h"
 #include "blaze_matmul_tiling_data.h"
 
 namespace blaze_matmul_tiling {
@@ -60,7 +62,7 @@ inline T CeilDiv(T a, T b)
 template <typename T>
 inline T Align(T a, T b)
 {
-    return CeilDiv(a, b) * b;
+    return blaze_matmul_tiling::CeilDiv(a, b) * b;
 }
 
 template <typename T>
@@ -151,16 +153,15 @@ public:
         bool isATrans = false, bool isBTrans = false, bool isANz = false, bool isBNz = false,
         bool hasBias = false, uint64_t biasElemBytes = blaze_matmul_tiling::DATA_SIZE_FP32)
     {
-        using namespace blaze_matmul_tiling;
-
         BLAZE_TILING_CHECK_COND(inputElemBytes > 0UL, "inputElemBytes must be greater than zero.");
-        platformInfo_ = LoadPlatformInfo();
+        platformInfo_ = blaze_matmul_tiling::LoadPlatformInfo();
         args_ = {m, n, k, inputElemBytes, biasElemBytes, hasBias, isATrans, isBTrans, isANz, isBNz};
         runInfo_ = {};
 
         ResetBase();
         FormulateLoadBalanceBlock();
-        if (runInfo_.baseM == BASIC_BLOCK_SIZE_256 && runInfo_.baseN == BASIC_BLOCK_SIZE_256) {
+        if (runInfo_.baseM == blaze_matmul_tiling::BASIC_BLOCK_SIZE_256 &&
+            runInfo_.baseN == blaze_matmul_tiling::BASIC_BLOCK_SIZE_256) {
             OptimizeEdgeBasicBlock();
         }
         CalcTailBasicBlock();
@@ -174,6 +175,22 @@ public:
     {
         GetTilingData(m, n, k, 2UL, tilingData, isATrans, isBTrans, isANz, isBNz, false,
             blaze_matmul_tiling::DATA_SIZE_FP32);
+    }
+
+    // Grouped construction reuses ordinary SWAT and is the only complete POD producer.
+    void GetTilingData(uint64_t m, uint64_t n, uint64_t k, uint64_t inputElemBytes,
+        GroupMatmulTilingData& tilingData, uint64_t groupListAddr, uint32_t groupNum,
+        uint8_t groupListType = 0, bool isATrans = false, bool isBTrans = false,
+        bool isANz = false, bool isBNz = false, bool hasBias = false,
+        uint64_t biasElemBytes = blaze_matmul_tiling::DATA_SIZE_FP32)
+    {
+        BLAZE_TILING_CHECK_COND(groupNum > 0U, "groupNum must be greater than zero.");
+        BLAZE_TILING_CHECK_COND(groupListType <= 1U, "groupListType must be 0 or 1.");
+        GetTilingData(m, n, k, inputElemBytes, tilingData.matmul, isATrans, isBTrans, isANz, isBNz,
+            hasBias, biasElemBytes);
+        tilingData.groupListAddr = groupListAddr;
+        tilingData.groupNum = groupNum;
+        tilingData.groupListType = groupListType;
     }
 
 private:
@@ -209,11 +226,10 @@ private:
 
     void ResetBase()
     {
-        using namespace blaze_matmul_tiling;
         runInfo_.usedCoreNum = platformInfo_.aicNum;
-        runInfo_.baseM = BASIC_BLOCK_SIZE_256;
-        runInfo_.baseN = BASIC_BLOCK_SIZE_256;
-        runInfo_.baseK = BASIC_BLOCK_SIZE_128 / args_.inputElemBytes;
+        runInfo_.baseM = blaze_matmul_tiling::BASIC_BLOCK_SIZE_256;
+        runInfo_.baseN = blaze_matmul_tiling::BASIC_BLOCK_SIZE_256;
+        runInfo_.baseK = blaze_matmul_tiling::BASIC_BLOCK_SIZE_128 / args_.inputElemBytes;
         runInfo_.stepM = 1UL;
         runInfo_.stepN = 1UL;
         runInfo_.dbL0c = 1UL;
@@ -224,52 +240,57 @@ private:
 
     void FormulateLoadBalanceBlock()
     {
-        using namespace blaze_matmul_tiling;
-        runInfo_.baseM = std::min(Align(args_.m, MAlignment()), runInfo_.baseM);
-        runInfo_.baseN = std::min(Align(args_.n, NAlignment()), runInfo_.baseN);
+        runInfo_.baseM = std::min(blaze_matmul_tiling::Align(args_.m, MAlignment()), runInfo_.baseM);
+        runInfo_.baseN = std::min(blaze_matmul_tiling::Align(args_.n, NAlignment()), runInfo_.baseN);
 
-        uint64_t mCore = CeilDiv(args_.m, runInfo_.baseM);
-        uint64_t nCore = CeilDiv(args_.n, runInfo_.baseN);
+        uint64_t mCore = blaze_matmul_tiling::CeilDiv(args_.m, runInfo_.baseM);
+        uint64_t nCore = blaze_matmul_tiling::CeilDiv(args_.n, runInfo_.baseN);
         if (mCore * nCore < platformInfo_.aicNum) {
             CalcBasicBlock();
         }
 
-        runInfo_.baseM = Align(runInfo_.baseM, MAlignment());
-        runInfo_.baseN = Align(runInfo_.baseN, NAlignment());
+        runInfo_.baseM = blaze_matmul_tiling::Align(runInfo_.baseM, MAlignment());
+        runInfo_.baseN = blaze_matmul_tiling::Align(runInfo_.baseN, NAlignment());
         runInfo_.dbL0c =
-            runInfo_.baseM * runInfo_.baseN * DATA_SIZE_FP32 * DB_SIZE <= platformInfo_.l0cSize ? DB_SIZE : 1UL;
+            runInfo_.baseM * runInfo_.baseN * blaze_matmul_tiling::DATA_SIZE_FP32 * blaze_matmul_tiling::DB_SIZE <=
+            platformInfo_.l0cSize ? blaze_matmul_tiling::DB_SIZE : 1UL;
 
-        mCore = CeilDiv(args_.m, runInfo_.baseM);
-        nCore = CeilDiv(args_.n, runInfo_.baseN);
+        mCore = blaze_matmul_tiling::CeilDiv(args_.m, runInfo_.baseM);
+        nCore = blaze_matmul_tiling::CeilDiv(args_.n, runInfo_.baseN);
         runInfo_.usedCoreNum = std::max<uint64_t>(1UL,
             std::min(mCore * nCore, static_cast<uint64_t>(platformInfo_.aicNum)));
 
         uint64_t kAlign = KAlignment();
-        uint64_t kValueAlign = Align(args_.k, kAlign);
-        uint64_t kValueMax = FloorAlign(
-            platformInfo_.l0aSize / DB_SIZE / args_.inputElemBytes / std::max(runInfo_.baseM, runInfo_.baseN), kAlign);
+        uint64_t kValueAlign = blaze_matmul_tiling::Align(args_.k, kAlign);
+        uint64_t kValueMax = blaze_matmul_tiling::FloorAlign(
+            platformInfo_.l0aSize / blaze_matmul_tiling::DB_SIZE / args_.inputElemBytes /
+                std::max(runInfo_.baseM, runInfo_.baseN),
+            kAlign);
         BLAZE_TILING_CHECK_COND(kValueMax >= kAlign, "Failed to derive valid baseK from L0A capacity.");
         runInfo_.baseK = std::min(kValueAlign, kValueMax);
     }
 
     void CalcBasicBlock()
     {
-        using namespace blaze_matmul_tiling;
-        uint64_t mCore = CeilDiv(args_.m, runInfo_.baseM);
-        uint64_t nCore = CeilDiv(args_.n, runInfo_.baseN);
+        uint64_t mCore = blaze_matmul_tiling::CeilDiv(args_.m, runInfo_.baseM);
+        uint64_t nCore = blaze_matmul_tiling::CeilDiv(args_.n, runInfo_.baseN);
         if (mCore == 0UL || nCore == 0UL) {
             return;
         }
         if (mCore <= nCore) {
-            runInfo_.baseM = Align(CeilDiv(args_.m, mCore), MAlignment());
-            mCore = CeilDiv(args_.m, runInfo_.baseM);
+            runInfo_.baseM = blaze_matmul_tiling::Align(
+                blaze_matmul_tiling::CeilDiv(args_.m, mCore), MAlignment());
+            mCore = blaze_matmul_tiling::CeilDiv(args_.m, runInfo_.baseM);
             nCore = std::max<uint64_t>(1UL, runInfo_.usedCoreNum / mCore);
-            runInfo_.baseN = Align(CeilDiv(args_.n, nCore), NAlignment());
+            runInfo_.baseN = blaze_matmul_tiling::Align(
+                blaze_matmul_tiling::CeilDiv(args_.n, nCore), NAlignment());
         } else {
-            runInfo_.baseN = Align(CeilDiv(args_.n, nCore), NAlignment());
-            nCore = CeilDiv(args_.n, runInfo_.baseN);
+            runInfo_.baseN = blaze_matmul_tiling::Align(
+                blaze_matmul_tiling::CeilDiv(args_.n, nCore), NAlignment());
+            nCore = blaze_matmul_tiling::CeilDiv(args_.n, runInfo_.baseN);
             mCore = std::max<uint64_t>(1UL, runInfo_.usedCoreNum / nCore);
-            runInfo_.baseM = Align(CeilDiv(args_.m, mCore), MAlignment());
+            runInfo_.baseM = blaze_matmul_tiling::Align(
+                blaze_matmul_tiling::CeilDiv(args_.m, mCore), MAlignment());
         }
     }
 
@@ -291,26 +312,33 @@ private:
 
     void GetOuterAxisTailCnt(bool nLoadBalance, uint32_t& baseTailSplitCnt, uint64_t& tailMain)
     {
-        using namespace blaze_matmul_tiling;
         uint64_t aicNum = platformInfo_.aicNum;
         uint64_t x = nLoadBalance ? args_.n : args_.m;
         uint64_t y = nLoadBalance ? args_.m : args_.n;
         uint64_t baseX = nLoadBalance ? runInfo_.baseN : runInfo_.baseM;
         uint64_t baseY = nLoadBalance ? runInfo_.baseM : runInfo_.baseN;
-        uint64_t xCnt = CeilDiv(x, baseX);
-        uint64_t yCnt = CeilDiv(y, baseY);
+        uint64_t xCnt = blaze_matmul_tiling::CeilDiv(x, baseX);
+        uint64_t yCnt = blaze_matmul_tiling::CeilDiv(y, baseY);
         uint64_t xTail = x % baseX;
-        uint64_t totalWindows = CeilDiv(xCnt * yCnt, aicNum);
-        uint64_t mainWindows = CeilDiv((xCnt - 1UL) * yCnt + yCnt % aicNum, aicNum);
+        uint64_t totalWindows = blaze_matmul_tiling::CeilDiv(xCnt * yCnt, aicNum);
+        uint64_t mainWindows = blaze_matmul_tiling::CeilDiv((xCnt - 1UL) * yCnt + yCnt % aicNum, aicNum);
         uint64_t tailWindows = totalWindows - mainWindows;
         uint64_t perfRes = mainWindows * baseX + tailWindows * xTail;
-        uint64_t baseTailCntMax = std::min((baseX - xTail) / BASIC_BLOCK_SIZE_16, xCnt);
+        uint64_t baseTailCntMax = std::min(
+            (baseX - xTail) / blaze_matmul_tiling::BASIC_BLOCK_SIZE_16, xCnt);
         for (uint64_t mergeLen = 1UL; mergeLen < baseTailCntMax; ++mergeLen) {
-            uint64_t newTailMain = Align(CeilDiv((mergeLen * baseX + xTail), mergeLen + 1UL), BASIC_BLOCK_SIZE_16);
+            uint64_t newTailMain = blaze_matmul_tiling::Align(
+                blaze_matmul_tiling::CeilDiv((mergeLen * baseX + xTail), mergeLen + 1UL),
+                blaze_matmul_tiling::BASIC_BLOCK_SIZE_16);
             uint64_t newTailLast = mergeLen * (baseX - newTailMain) + xTail;
             uint64_t newMainRound = mergeLen < xCnt - 1UL ?
-                CeilDiv(((xCnt - 1UL - mergeLen) * yCnt + (mergeLen + 1UL) * yCnt) % aicNum, aicNum) : 0UL;
-            uint64_t newTailRound = std::min(CeilDiv(mergeLen * yCnt + yCnt % aicNum, aicNum), totalWindows - newMainRound);
+                blaze_matmul_tiling::CeilDiv(
+                    ((xCnt - 1UL - mergeLen) * yCnt + (mergeLen + 1UL) * yCnt) % aicNum,
+                    aicNum) :
+                0UL;
+            uint64_t newTailRound = std::min(
+                blaze_matmul_tiling::CeilDiv(mergeLen * yCnt + yCnt % aicNum, aicNum),
+                totalWindows - newMainRound);
             uint64_t curPerf = newMainRound * baseX + newTailRound * newTailMain +
                 (totalWindows - newMainRound - newTailRound) * newTailLast;
             if (curPerf < perfRes || (!nLoadBalance && curPerf == perfRes)) {
@@ -323,9 +351,8 @@ private:
 
     void CalcTailBasicBlock()
     {
-        using namespace blaze_matmul_tiling;
-        uint64_t mCnt = CeilDiv(args_.m, runInfo_.baseM);
-        uint64_t nCnt = CeilDiv(args_.n, runInfo_.baseN);
+        uint64_t mCnt = blaze_matmul_tiling::CeilDiv(args_.m, runInfo_.baseM);
+        uint64_t nCnt = blaze_matmul_tiling::CeilDiv(args_.n, runInfo_.baseN);
         uint64_t mnCnt = mCnt * nCnt;
         uint64_t tailCnt = mnCnt <= platformInfo_.aicNum ? 0UL : mnCnt % platformInfo_.aicNum;
         runInfo_.tailInfo.mCnt = 1UL;
@@ -342,30 +369,37 @@ private:
 
     void CalL1Tiling()
     {
-        using namespace blaze_matmul_tiling;
-        uint64_t biasBytes = args_.hasBias ? Align(args_.n, NAlignment()) * args_.biasElemBytes : 0UL;
+        uint64_t biasBytes = args_.hasBias ?
+            blaze_matmul_tiling::Align(args_.n, NAlignment()) * args_.biasElemBytes :
+            0UL;
         BLAZE_TILING_CHECK_COND(platformInfo_.l1Size > biasBytes, "L1 space is insufficient after reserving bias.");
         uint64_t totalL1Size = platformInfo_.l1Size - biasBytes;
-        runInfo_.depthA1 = std::max(totalL1Size / NUM_TWO / runInfo_.baseM / runInfo_.baseK / args_.inputElemBytes, 1UL);
-        runInfo_.depthB1 = std::max(totalL1Size / NUM_TWO / runInfo_.baseN / runInfo_.baseK / args_.inputElemBytes, 1UL);
+        runInfo_.depthA1 = std::max(
+            totalL1Size / blaze_matmul_tiling::NUM_TWO / runInfo_.baseM / runInfo_.baseK /
+                args_.inputElemBytes,
+            1UL);
+        runInfo_.depthB1 = std::max(
+            totalL1Size / blaze_matmul_tiling::NUM_TWO / runInfo_.baseN / runInfo_.baseK /
+                args_.inputElemBytes,
+            1UL);
         uint64_t depthASize = runInfo_.depthA1 * runInfo_.baseM * runInfo_.baseK * args_.inputElemBytes;
         uint64_t depthBSize = runInfo_.depthB1 * runInfo_.baseN * runInfo_.baseK * args_.inputElemBytes;
         if (depthASize + depthBSize > totalL1Size) {
             if (runInfo_.baseM <= runInfo_.baseN) {
-                runInfo_.depthA1 = std::max(runInfo_.depthA1 / NUM_TWO, 1UL);
+                runInfo_.depthA1 = std::max(runInfo_.depthA1 / blaze_matmul_tiling::NUM_TWO, 1UL);
             } else {
-                runInfo_.depthB1 = std::max(runInfo_.depthB1 / NUM_TWO, 1UL);
+                runInfo_.depthB1 = std::max(runInfo_.depthB1 / blaze_matmul_tiling::NUM_TWO, 1UL);
             }
         }
-        runInfo_.stepKa = std::max(runInfo_.depthA1 / DB_SIZE, 1UL);
-        runInfo_.stepKb = std::max(runInfo_.depthB1 / DB_SIZE, 1UL);
+        runInfo_.stepKa = std::max(runInfo_.depthA1 / blaze_matmul_tiling::DB_SIZE, 1UL);
+        runInfo_.stepKb = std::max(runInfo_.depthB1 / blaze_matmul_tiling::DB_SIZE, 1UL);
         if (runInfo_.stepKa >= runInfo_.stepKb) {
             runInfo_.stepKa = std::max(runInfo_.stepKa / runInfo_.stepKb * runInfo_.stepKb, 1UL);
         } else {
             runInfo_.stepKb = std::max(runInfo_.stepKb / runInfo_.stepKa * runInfo_.stepKa, 1UL);
         }
-        runInfo_.depthA1 = runInfo_.stepKa * DB_SIZE;
-        runInfo_.depthB1 = runInfo_.stepKb * DB_SIZE;
+        runInfo_.depthA1 = runInfo_.stepKa * blaze_matmul_tiling::DB_SIZE;
+        runInfo_.depthB1 = runInfo_.stepKb * blaze_matmul_tiling::DB_SIZE;
         runInfo_.singleCoreM = runInfo_.baseM;
         runInfo_.singleCoreN = runInfo_.baseN;
     }

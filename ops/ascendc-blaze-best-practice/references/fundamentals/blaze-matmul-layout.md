@@ -33,7 +33,33 @@ NZ 是一种分形存储格式。对原始 tensor `(dim0, dim1)` ND 排布，NZ 
 
 ## 2. 数据生成流程
 
-`scripts/gen_data.py` 使用固定 seed，以数学描述 A(M,K)、B(K,N) 生成逻辑输入，普通 MatMul 的 Golden 固定为 A @ B。生成后立即分两路：一路从未做设备转换的逻辑输入计算 Golden 并写入 `data/golden/golden.bin`，另一路只对独立副本按 Kernel 入参要求转换并写入 `data/input/`。禁止从 transpose、NZ 或打包后的设备物理字节反推 Golden。
+`scripts/gen_data.py` 使用固定 seed，以数学描述 A(M,K)、B(K,N) 生成逻辑输入；对普通、非序列化 MatMul，Golden 固定为 A @ B。生成后立即分两路：一路从未做设备转换的逻辑输入计算 Golden 并写入 `data/golden/golden.bin`，另一路只对独立副本按 Kernel 入参要求转换并写入 `data/input/`。禁止从 transpose、NZ 或打包后的设备物理字节反推 Golden。
+
+执行合同所需的 Golden 后端或依赖不可用时，数据生成必须失败并记录
+`blocking`；不得静默改用累加顺序、dtype、舍入或公式不同的 serial/fallback。
+只有已经证明与合同等价的实现才能作为 fallback，且等价性证据必须进入
+DESIGN/PLAN 和执行记录。
+
+如果 Golden 进程在 import、backend autoload 或初始化阶段超时，首个失败边界是
+Host/test setup，不是公式、Kernel 或设备精度。应保留 timeout、环境和返回码，
+隔离可选 device backend 后用同一 Golden 合同重跑；不能为了消除初始化问题修改
+公式、dtype、误差阈值或静默切换未经证明的后端。恢复后的 Golden 仍必须由当前
+合同和实际输入生成，并在执行记录中保留两次命令的分类。
+
+### 2.1 序列化/量化输入的 Golden 例外
+
+如果冻结合同把已编码的 MX/FP8 value、E8M0 scale 或其他量化字节直接作为
+设备输入，那么“实际写给设备的字节”就是该变体的 Golden 事实源：
+
+1. 从最终送入设备的输入字节读取 value、scale 和必要的 padding 字节（通常由
+   `data/input/` 提供；若 Launcher 还有物理转换，则以转换后的字节为准）；
+2. 按目标 CANN/ops-tensor 的真实 dtype 与布局解码，并裁剪 K tail 等无效范围；
+3. 用解码后的值执行合同公式，保存最终 Golden；
+4. 在记录中同时保留逻辑 FP32 到设备字节的生成关系，便于复现，但不得用
+   量化前 FP32 替代最终 Golden。
+
+该例外只改变 Golden 的事实源，不改变输入合同；未序列化的普通 MatMul 仍使用
+上一段的逻辑输入规则。
 
 ```mermaid
 flowchart TD

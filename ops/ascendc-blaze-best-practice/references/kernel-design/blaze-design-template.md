@@ -502,10 +502,23 @@ comparison_threshold_and_nonfinite_gate: <rtol/atol or exact rule, NaN/Inf polic
 demand_partition_and_boundary_coverage: <requirement/partition IDs and boundary matrix>
 diagnostic_checks: <source-backed intermediate or invariant checks>
 repeat_and_final_regression: <repeat count semantics, cleanup and final clean run>
+semantic_golden_consistency: confirmed | conflict | blocking
+golden_authority_and_conflict_resolution: <authority, conflict and recovery condition>
 verification_status: planned | unverified
 ```
 
-Golden 必须先从未做设备布局转换的逻辑输入计算，再对独立副本做 device packing。通用模板不预填 Grouped、MX、SplitM、固定诊断模式或固定矩阵；专项要求只来自 `scenario_validation_additions`。Step 3 不实现、不运行设备，也不得写设备 PASS。
+在冻结验证合同前，逐项比较需求正文、接口合同和可执行 Golden 的公式、dtype、
+转换顺序、分支/轴语义。发现冲突时必须标记 `conflict` 或 `blocking`，记录权威
+来源及恢复条件；不得静默选择一个公式继续生成。执行冻结 Golden 所需的后端或
+依赖不可用时，`semantic_golden_consistency` 必须为 `blocking`；只有具备等价性证据
+的后端才能作为 fallback，不得静默改变累加顺序、dtype、舍入或公式。
+
+对普通、非序列化 MatMul，Golden 必须先从未做设备布局转换的逻辑输入计算，
+再对独立副本做 device packing。若冻结合同把已编码 MX/FP8 value、E8M0 scale 或 FP4
+字节作为设备输入，则必须从最终写入设备的实际字节解码后计算 Golden；量化前
+逻辑 FP32 只能作为生成源，不能替代最终 Golden。通用模板不预填 Grouped、MX、
+SplitM、固定诊断模式或固定矩阵；专项要求只来自 `scenario_validation_additions`。
+Step 3 不实现、不运行设备，也不得写设备 PASS。
 
 ---
 

@@ -100,6 +100,17 @@ logical argument
 ```
 
    每行还必须记录稳定 `crosswalk_row_id`、方向、可空条件、字节范围/offset 单位、所有权/生命周期和 `source_refs`。TilingData、workspace、grid/usedCore、stream/dispatch 等非逻辑参数也要作为辅助 ABI 对象记录其 host 产生者、入口/Wrapper 绑定和设备消费者。不得将不同 `design_binding_ref` 的参数顺序或 crosswalk 行混用。
+   若设计使用 Skill Asset 或项目副本作为结构起点，必须额外完成 Asset 能力边界核对：
+
+   - 记录 Asset 实际提供的 Kernel、Block、Scheduler、Epilogue 和同步层；
+   - 记录它明确不提供的 Host Tiling、Launcher、额外 operand、workspace、Golden 和验证层；
+   - 将目标项目的适配点和首个设备消费者接入现有 ABI crosswalk、场景 delta 和 source refs。
+   - 对会被项目 include 的 Host/ASC 资产执行同名全局 helper 探针；内部
+     `Align`、`CeilDiv`、`FloorAlign` 等 helper 必须显式限定所属命名空间，不能
+     依赖 include 顺序或调用方的 `using namespace` 消除歧义。
+
+   任何一层未闭合都必须标记为 `adaptation_required` 或 `extension_missing`，不能因为
+   Asset 文件存在或局部组件可编译就将端到端方案标记为 complete/native。
 5. 从每个真实 witness 在对应 `abi_bindings[]` 记录中生成 `source_backed_signature_skeleton`，保留入口声明形态、参数顺序、Wrapper 或 dispatch 调用关系及其 `source_refs`。它是设计合同，不是可复制 Kernel recipe；只有 witness 已明确的修饰符、`__cube__`/`__mix__`、GM 参数、模板参数和调用方式才能写入，其他位置保留待项目命名的占位，不得猜测。
 6. 若某一项决定性事实缺失且报告尚无已完成的补充，提出只描述需求语义和待查 Blaze 源码关系的补充问题，返回 Step 2。补充问题不得包含场景 ID、场景路径或路线建议。若同一报告已完成一次补充后仍缺关键事实，停止为“未完成设计，等待澄清”；不写最终路线，也不生成 DESIGN/PLAN。
 7. 若已有事实表明某个需求不能由选定官方方案覆盖，逐项记录 `native_gaps`，再进入 2.4。可接受的依据是来源明确的不兼容/拒绝，或对该精确需求已穷尽声明读取边界后的无匹配事实；孤立 `not_found`、`indexed`、未读目录或未知事实不得写为 `native_gaps`。

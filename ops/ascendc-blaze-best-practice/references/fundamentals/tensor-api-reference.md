@@ -398,6 +398,41 @@ Routing 表是 tensor_api 的编译期派发核心。组合不在表中 → `sta
 
 > 不在表中的组合（如 `L1=ZZ, GM=NDExt`）→ 编译失败。
 
+#### Copy specialization 的 stride 消费审计
+
+`Layout` 能保存某个 stride，不代表 Routing 选中的 Copy specialization
+会读取该 stride。对每个实际 Copy 调用点，必须沿 concrete
+specialization 核对它消费的 shape、offset 和 stride 轴；未被实现读取的轴不能
+作为非连续访问已受支持的证据。
+
+当逻辑重排或预打包用于适配 Copy 时，打包后的地址、Pattern、shape、
+`lda`/stride、storage span 和下游消费者必须作为同一个物理合同重新绑定。
+验证同时保留正例和差分负例：不能因为 packed 中间数据正确，就在下游仍消费
+旧 `lda`/stride 时判定链路闭合。
+
+#### MX ScaleB 的坐标视图与 raw bytes
+
+`ScaleBNDLayoutPtn` 的逻辑坐标不能直接当作文件维序。对当前 checkout 的
+E8M0、C0=2、非转置 ND 路线，必须沿 `layout_pattern.h`、`routing.h` 和实际
+`CopyGmToCbufScaleBND2Nn` specialization 闭合以下三层：
+
+| 层 | 含义 |
+|---|---|
+| 数学视图 | 每个 K-scale、每个 N 列一项，坐标为 `[scaleK,N]` |
+| Pattern/Copy 坐标 | `ScaleBNDLayoutPtn` 实际接收的 shape、offset、stride |
+| GM raw bytes | C0=2 槽位对应的物理容器及 byte address |
+
+当前 ND witness 的 raw bytes 保持 `[ceil(scaleK/2),N,2]`；令
+`scaleIndex=2*group+slot`，其地址为
+`group*(N*2)+n*2+slot`。因此 Golden 为构造 `[scaleK,N]` 数学视图而执行的
+`permute/reshape` 只是派生视图，不能未经 Copy 地址公式证明就物化成设备输入
+文件。Batch 只在外层增加已证明的 batch stride，不改变单 batch 内的三层合同。
+
+其他 transpose、Pattern、dtype、C0 或 CANN revision 必须重新从 concrete
+specialization 推导，不能继承上述 ND 地址公式。Investigation、DESIGN 和
+manifest 应分别记录数学坐标、Pattern 坐标、raw file order、byte span 和
+Golden-only transform，防止逻辑 view 与物理 ABI 漂移。
+
 ### 3.2 L1 → L0A（`CopyL12L0A`） / L1 → L0B（`CopyL12L0B`）
 
 派发还依赖 `CopyMode`（由 `(transposed, isB8B4)` 派生）：

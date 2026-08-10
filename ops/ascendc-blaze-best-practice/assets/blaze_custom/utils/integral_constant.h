@@ -23,15 +23,15 @@
 namespace AscendC {
 namespace Std {
 template <typename...>
-struct always_false : public false_type {};
+struct AlwaysFalse : public false_type {};
 
-template <typename... Tp>
-constexpr bool always_false_v = always_false<Tp...>::value;
+template <typename... Types_>
+constexpr bool ALWAYS_FALSE_V = AlwaysFalse<Types_...>::value;
 } // namespace Std
 } // namespace AscendC
 
-template <int32_t t>
-using Int = AscendC::Std::integral_constant<int32_t, t>;
+template <int32_t Value_>
+using Int = AscendC::Std::integral_constant<int32_t, Value_>;
 
 using _0 = Int<0>;
 

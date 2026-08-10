@@ -111,6 +111,10 @@ cp -r <project-root>/ops-tensor/include/tensor_api \
 
 Skill Asset 原文件同样只读。后续编译 include path 显式指向项目副本，不通过修改只读源码绕过版本问题。
 
+每次复制都必须显式区分 source 和 destination，并在命令返回后核对目标文件树；
+source 与 destination 相同、目标目录落入只读区或复制返回非零时，首个失败边界是
+Step 1 setup，必须先修复并重新核对，不能继续生成代码或把工具错误归因于编译/设备。
+
 ## 4. Custom 隔离区
 
 Step 1 可以建立空目录：

@@ -10,23 +10,25 @@
  * for the full text of the License.
  */
 
-#ifndef EPILOGUE_CV_SYNC_CONSTANTS_H
-#define EPILOGUE_CV_SYNC_CONSTANTS_H
+#ifndef BLAZE_CUSTOM_DISPATCH_POLICY_H
+#define BLAZE_CUSTOM_DISPATCH_POLICY_H
 
 #include <cstdint>
 
-namespace CvSync {
+namespace Blaze {
+namespace Gemm {
 
-// Reference values only. A product fused kernel must validate the flag IDs
-// against its selected official/custom pipeline contract.
-constexpr uint16_t MODE = 4;
+struct KernelMmadDualBranchGlu {};
 
-constexpr int16_t AIC_TO_AIV_FLAG = 8;
-constexpr int16_t AIV_TO_AIC_FLAG = 5;
+template <uint64_t FullLoadMode_ = 0, bool AtomicAdd_ = false, bool RefineNearZeroFp16_ = false>
+struct MatmulDualBranchGlu {
+    using ScheduleType = KernelMmadDualBranchGlu;
+    static constexpr uint64_t FULL_LOAD_MODE = FullLoadMode_;
+    static constexpr bool IS_ATOMIC_ADD = AtomicAdd_;
+    static constexpr bool REFINE_NEAR_ZERO_FP16 = RefineNearZeroFp16_;
+};
 
-constexpr int16_t COUNT_ID_MAX = 15;
-constexpr int16_t COUNT_FLAG = 3;
+} // namespace Gemm
+} // namespace Blaze
 
-} // namespace CvSync
-
-#endif // EPILOGUE_CV_SYNC_CONSTANTS_H
+#endif // BLAZE_CUSTOM_DISPATCH_POLICY_H

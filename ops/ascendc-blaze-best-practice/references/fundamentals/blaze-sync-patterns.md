@@ -8,12 +8,13 @@
 
 ## 1. 同步机制总览
 
-### 1.1 三种同步机制对比
+### 1.1 四种同步机制对比
 
 | 机制 | 粒度 | 适用场景 | 性能开销 |
 |------|------|---------|---------|
 | `SetFlag/WaitFlag<HardEvent>` | 精确到两个 pipe 之间 | 双缓冲流水、buffer 生命周期管理 | 低（硬件事件寄存器） |
 | `CrossCoreSetFlag/WaitFlag` | AIC↔AIV 核间 | MIX 模板中 Cube 与 Vector 的 tile 级同步 | 中（跨核信号） |
+| `SyncAll` | 已声明参与者的全核阶段交接 | 所有 producer 完成后重新分配完整行等全局 ownership | 高（全核等待） |
 | `PipeBarrier<pipe_t>` | 排空单个 pipe 或全部 pipe | 调试、核间同步前强制排空 | 高（全流水停顿） |
 
 ### 1.2 硬件流水线架构
@@ -182,6 +183,28 @@ for (uint64_t iter = 0; iter < totalIter; ++iter) {
     需要 MTE3_MTE2 反向 barrier 保护。
 ```
 
+### 4.2.1 每个 UB staging slot 的写者都必须参加生命周期
+
+清零、填充或其他 Vector 写入不是“初始化旁路”，而是对 UB staging slot 的真实
+写入者。异步 MTE2 搬运正在写同一 slot 时，不能并发执行 `ZeroUb` 或其他 VF
+store；否则设备上可能观察到 GM 输入非零、但 UB 被清零，最终表现为 scale 落到
+floor 或输出只在部分 shape 错误。
+
+对每个 slot，先按当前所有者等待旧 producer 完成，再发起下一次写入；MTE2 写入
+完成后再让 V 读取：
+
+```text
+Wait(V -> MTE2, slot)       # 回收旧的 Vector 写者
+DataCopy(GM -> UB, slot)    # MTE2 写入
+Set/Wait(MTE2 -> V, slot)   # V 读取前的正向交接
+Vector compute/store
+Set(V -> MTE2, slot)        # 允许下一轮覆盖
+```
+
+不要用 `PipeBarrier` 或一次通过替代缺失的 producer/consumer 配对；若确实保留
+清零，应把它列入同一 slot 的 writer 集合，并在 DESIGN/PLAN 中记录其顺序和
+生命周期。
+
 ### 4.3 遗漏反向依赖的症状
 
 | 场景 | 现象 | 原因 |
@@ -230,6 +253,39 @@ for (int64_t mOff = 0; mOff < localRows; mOff += stageRows) {
 ```
 
 > **关键**：`V_MTE2` barrier 放在循环内、MTE2 操作之前WaitFlag, V 完成后SetFlag，注意首轮尾轮和中间轮次的区别。
+
+### 4.4 交付前同步闭合检查
+
+提交设备精度结果前，逐个异步 producer/consumer 对照 DESIGN/PLAN：每个
+GM→UB 搬运都必须在消费者读取前有对应的正向等待（Vector 读取通常是
+`MTE2_V`），每个循环复用的 slot 都必须有消费者完成到下一次覆盖的反向依赖，
+并在尾轮排空仍在途事件。缺少任一配对时只能标记 `unverified`，不能用单次
+通过或加大 `PipeBarrier` 的偶然结果宣称同步已闭合。
+
+---
+
+## 4.5 Kernel 编排层的对象所有权
+
+当 `BlockMmad` 与有状态 `Epilogue` 都持有本地流水事件时，二者由 Kernel 编排
+层作为同级对象初始化和持有；Epilogue 只消费 Kernel 已映射的 tile/view，不把
+跨阶段状态隐式嵌套在 `BlockMmad` 内。这样可以在设计层明确 C/V 交接、阶段
+`SyncAll`/CrossCore 参与者和最终输出的 owner。
+
+对象析构只负责其对象内部、且与词法生命周期一致的本地 `HardEvent` drain。它
+不能替代 Kernel 负责的跨核 flag 释放、阶段性 `SyncAll`、最终 producer/consumer
+drain 或 `acl` 资源释放；这些动作必须在 Kernel/Host 的显式编排点完成。无状态
+Epilogue 不因本节强行引入额外状态对象。
+
+对于 `MTE3 -> V` 这类“下一轮复用”事件，`WaitFlag` 只能等待同一生命周期中已
+由上一轮或 Init 发出的 `SetFlag`；不能为了保险在首轮插入没有 producer 的 wait，
+也不能把同轮的析构当作跨核完成协议。首轮预发、循环内复用等待和尾轮 drain
+ 分别由所属对象和 Kernel 按 DESIGN 的参与者集合闭合。
+
+新增 MTE2/MTE3/V event bridge 也必须先找到当前 source/API witness 或完成最小
+设备 probe，再按 producer -> consumer -> reuse -> final-drain 闭合。不要因为
+某个 copy 位于 MTE2 就自行插入另一组 MTE2 event；重复或错配的 event 可能在
+stream synchronize 才暴露为挂起。`PipeBarrier`、析构和一次偶然通过都不能替代
+缺失的 producer/consumer 配对。
 
 ---
 
@@ -369,6 +425,27 @@ WaitFlag<HardEvent::MTE2_V>(eventId);
 Compute(x);
 ```
 
+### 6.6 `PipeBarrier<PIPE_ALL>` 与 `SyncAll` 不可互换
+
+`PipeBarrier<PIPE_ALL>()` 只排空当前执行核的本地流水。它不能证明其他核已经
+完成 GM 写回，也不能建立其他 producer 到当前 consumer 的跨核可见性。
+
+当设计记号写作 `CV1 + V2` 时，`+` 必须由 DESIGN 冻结的全核完成协议实现。
+当前 GroupMatmul 通用 C+V1+V2 参考资产在选定的 C+V1 Kernel 返回后调用硬同步
+`AscendC::SyncAll<true, config>()`；`true` 将同步 effect domain 限定为 AIV，
+文件级 `SyncAllConfig config` 的 trigger/wait 均显式为 `PIPE_ALL`。正确顺序是：
+
+```text
+CV1 local final drain
+    -> all declared AIV participants reach SyncAll()
+    -> repartition complete logical rows
+    -> V2
+```
+
+若 producer/consumer 集包含 AIC，不能照搬默认 AIV-only 形式；必须按当前 API
+和真实 MIX binding 重新证明参与者并选择相应同步形式。使用硬同步的 Launcher
+还必须满足目标 CANN 版本对调度模式、逻辑 block 数和物理核数的约束。
+
 ---
 
 ## 7. 核间同步（CrossCoreSetFlag / CrossCoreWaitFlag）
@@ -395,6 +472,20 @@ __aicore__ inline void CrossCoreWaitFlag(uint16_t flagId);
 | AIV WaitFlag（等待 AIC 数据） | `PIPE_V` | Vector pipe 等待，阻塞后续 V 计算 |
 | AIV SetFlag（通知 AIC 消费完成） | `PIPE_MTE3` | MTE3 写回 GM 后才可通知 |
 | AIC WaitFlag（等待 AIV 消费完） | `PIPE_FIX` | FixPipe pipe 等待，阻塞下一 tile 的 L0C→UB |
+
+这张表是“按数据流方向推导”的通用默认，不是 concrete Blaze MIX entry 的替代
+合同。必须优先读取当前 entry 实际调用的 helper；例如 pinned Blaze 的
+`Blaze::Gemm::NotifyCube()` 以 `CrossCoreSetFlag<..., PIPE_V>` 发布 AIV→AIC
+完成，`WaitForCube()` 也以 `PIPE_V` 等待。仅因 AIV 最终还会写 GM 就把该通知改成
+`PIPE_MTE3`，会把不同的硬件等待语义混在一起；在多 expert 场景中可能表现为第二个
+非空 expert 永久等待。修改 concrete pipe 前必须保留 source witness，并以同一设备、
+同一 entry 的正回归证明配对的 Set/Wait、flag slot 和尾轮 drain。
+
+同样，局部 `rowCount=0`/`localRows=0` 的 AIV lane 不能执行一个只会由该 lane 的
+MTE3/V producer 设置的本地 wait，否则 N-tail 或奇数 M 会等待不存在的 event。应按
+实际 producer 是否运行条件化本地 drain；但如果对端仍等待该 lane 的跨核完成通知，
+该 lane 仍必须发送协议要求的 CrossCore flag。`rowCount=0` 不是跳过整个交接协议的
+理由。
 
 ### 7.4 FLAG_ID_MAX 与双 AIV
 
@@ -470,6 +561,18 @@ if ASCEND_IS_AIC {
 }
 ```
 
+### 7.8 前置 producer 的参与者闭合
+
+`__mix__(1,2)` 只描述物理 AIC/AIV 配比，不证明某个前置 Vector 阶段必然由
+两个独立 AIV producer 完成。若 entry 在主 MatMul 前增加 AIV 数据准备，并由
+AIC 消费其 GM/UB 结果，DESIGN 必须冻结该阶段的实际 producer/consumer 集合、
+写入完成与可见性条件、事件方向和每个 consumer 等待的 producer。consumer
+只能等待已证明参与且会发出完成事件的 producer；不得仅按 mix ratio 推导 flag
+数量，否则可能遗漏首个 consumer 的可见性依赖或等待不存在的事件。
+
+验证必须分别证明准备后的物理数据正确，以及首个 AIC consumer 读取到该数据；
+前者通过不能替代 producer→consumer 交接证据。
+
 ---
 
 ## 8. 常见挂死问题与排查
@@ -486,6 +589,7 @@ if ASCEND_IS_AIC {
 | D6 | L1 双缓冲 hang | 构造时未预发 MTE1_MTE2 | 构造函数 SetFlag 所有 slot |
 | D7 | L0C ping-pong deadlock | l0cDB==1 和 l0cDB==2 同步模式混用 | 统一 L0C 同步模式 |
 | D8 | EnQue/DeQue hang | 队列空等或满等 | 检查 Alloc/Free/EnQue/DeQue 配对 |
+| D9 | 前置 Vector 准备后首个 Cube 结果错误或挂死 | 由 mix ratio 猜测 producer 数量，导致缺失可见性依赖或等待不存在的事件 | 冻结实际参与者集合，并逐 consumer 配对已证明的完成事件 |
 
 ### 8.2 排查流程
 
@@ -688,3 +792,23 @@ DataCopyExtParams outParams{nRows, rowBytes, 0, gmRowGap, 0};
 ```
 
 > **常见错误**：将 UB 侧 stride 按 bytes 计算（如 `(nAlign - N) * sizeof(T)`）。虽然对齐场景下结果恰好为 0 不暴露，但 tail + 窄 dtype（如 bf16）场景会导致行步长错误。
+
+### 9.6 DataCopyPad 的 32B 填充上限
+
+DAV_3510 的 CANN `DataCopyPad` 检查以一个 32B block 为 padding 上限；
+`leftPadding/rightPadding` 是**元素个数**，因此必须满足
+`padding_count * sizeof(T) <= 32`。tail 搬运的右填充应从元素宽度推导，而
+不是用整个 UB tile 的剩余长度：
+
+```cpp
+const uint32_t elemPerBlock = 32 / sizeof(T);
+const uint32_t rightPadding =
+    (AlignUp(length, elemPerBlock) - length);  // <= elemPerBlock - 1
+DataCopyPadParams pad{true, 0, rightPadding, 0};
+```
+
+当 tail 大于一个 32B block 时，先拆成对齐搬运和一个小 tail，不能把
+`tileLength - length` 直接写入 `rightPadding`。这类越界参数会在真实设备上
+表现为 AIV `MTE instruction is abnormal`（通常返回 vector-core exception），
+而不是编译错误；问题记录必须保留首个失败 kernel、设备返回码和修复后的
+device-visible 回归。

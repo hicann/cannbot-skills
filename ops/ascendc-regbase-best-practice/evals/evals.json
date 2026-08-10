@@ -19,6 +19,18 @@
       "expected_output": "回复应列出 RegBase 开发可参考的资源类型，包括文档、社区实现和用例等，供开发者参考学习。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "UpdateMask 计数变量只能有一个推进者",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "RegBase VF tail 循环写成 `uint32_t remaining = cols; for (...) { auto mask = UpdateMask<float>(remaining); remaining -= VL; }`，并声称这样可以显式推进循环。请判断问题并给出两种合法修复：一种让 UpdateMask(remaining) 独自推进，另一种让 UpdateMask(active) 与独立的 remaining/索引推进配合。不要执行工具。",
+      "expected_output": "必须指出当前 SDK 的 UpdateMask<T>(uint32_t&) 会通过引用更新传入计数；对同一个 remaining 再手工递减是 double-decrement，会跳过 slice/tail。合法方案包括 UpdateMask(remaining) 后不再修改 remaining，或先保存 step、把 active 传给 UpdateMask(active)，再用未被更新的 step 推进 remaining 和 offset。不能依赖调用后的 active 推导偏移，也不能把 MaskReg 当作同步原语；应回到当前 SDK header 核对 dtype/trait 细节。",
+      "files": [],
+      "expectations": []
     }
   ],
   "skill_name": "ascendc-regbase-best-practice"

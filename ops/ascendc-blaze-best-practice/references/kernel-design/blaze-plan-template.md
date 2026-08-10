@@ -318,6 +318,11 @@ failure_rollback
 
 覆盖当前 DESIGN 要求的静态 ABI、构建、功能、边界/tail、布局/offset、资源/生命周期、场景诊断、设备精度、重复运行和最终回归。
 
+每个涉及精度或设备的 checkpoint 必须在 `evidence_to_record` 中区分原始失败、
+前置风险和环境阻塞，并保存执行上下文（sandbox/device-visible、设备节点、
+架构、命令、返回码）。只有真实设备路径的完整构建和验证证据才能标记
+`device_verified`；没有同合同性能基线时性能字段固定为 `NOT_EVALUATED`。
+
 第一个相关 checkpoint 必须静态核对：必需逻辑参数和辅助 ABI 对象的物理字节/offset 单位、TilingData/Params、workspace、grid/usedCore、Wrapper/entry 绑定以及设备消费者均有闭合 crosswalk；缺失时不允许启动 Kernel。
 
 ### 9.9 最终交付件与清理
