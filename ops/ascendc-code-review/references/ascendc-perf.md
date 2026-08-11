@@ -183,11 +183,14 @@ pipe.InitBuffer(outQueue, BUFFER_NUM, tileLength * sizeof(T));
 
 ### 问题描述
 
-PipeBarrier 用于跨 Pipe 数据依赖同步。同一 Pipe 内的操作由硬件保序，额外的 PipeBarrier 虽然冗余但不会影响正确性，属于防御性编程风格，检视时不应标记为错误。
+PipeBarrier 用于跨 Pipe 数据依赖同步。同一 Pipe 内的操作由硬件保序。
 
-真正需要关注的是 **Barrier 粒度过粗** 的问题：例如在同一 Pipe 内本只需 `PipeBarrier<PIPE_V>()` 却使用了 `PipeBarrier<PIPE_ALL>()`，这会不必要地阻塞其他 Pipe 的执行。
+两种情况需区分对待：
 
-> **说明**：业务代码中倾向冗余使用 PipeBarrier 以确保安全性，这是可接受的工程实践。
+1. **同 Pipe 内冗余 Barrier**（如连续 Vector 操作间加 `PipeBarrier<PIPE_V>()`）：虽冗余但不影响正确性，属于防御性编程风格，**不告警**。
+2. **粒度过粗的 `PipeBarrier<PIPE_ALL>()`**：本可用更细粒度（如 `PIPE_V`/`PIPE_MTE2`）却用了 `PIPE_ALL`，会不必要地阻塞所有 Pipe 的执行，打断流水、影响性能。**应告警 SUSPICIOUS（低）**。
+
+> **说明**：业务代码中倾向冗余使用 PipeBarrier 以确保安全性，这是可接受的工程实践——但仅限同 Pipe 粒度的冗余（如 `PIPE_V`）。用 `PIPE_ALL` 替代细粒度 Barrier 不在此列，属于性能缺陷。
 
 ### 需要 Barrier 的场景
 
@@ -198,12 +201,12 @@ PipeBarrier 用于跨 Pipe 数据依赖同步。同一 Pipe 内的操作由硬�
 | 连续 Vector 操作 | V → V | ⚠️ 硬件保序，冗余但无害（防御性编程） |
 | Reduce 后读标量 | V → Scalar | ✅ 需要 |
 
-### 需关注的场景（粒度过粗）
+### 应告警的场景（粒度过粗的 PIPE_ALL）
 
 ```cpp
-// ⚠️ 粒度过粗：同一 PIPE_V 内操作只需 PIPE_V，不需要 PIPE_ALL
+// ❌ SUSPICIOUS 低：同一 PIPE_V 内操作只需 PIPE_V，PIPE_ALL 会阻塞所有 Pipe
 AscendC::Adds<T>(xLocal, xLocal, 1.0f, count);
-AscendC::PipeBarrier<PIPE_ALL>();  // 可用 PIPE_V 替代，PIPE_ALL 会阻塞所有 Pipe
+AscendC::PipeBarrier<PIPE_ALL>();  // 应改为 PipeBarrier<PIPE_V>()
 AscendC::Mul<T>(yLocal, xLocal, val, count);
 ```
 
@@ -235,7 +238,39 @@ outQueueY.EnQue(yLocal);
 
 ### 检视方法
 
-仅关注 Barrier 粒度过粗的问题（如 PIPE_ALL 替代 PIPE_V）。冗余的同 Pipe Barrier 属于防御性编程，不标记为 FAIL 或 SUSPICIOUS。
+- **粒度过粗的 `PipeBarrier<PIPE_ALL>()`**（本可用 `PIPE_V`/`PIPE_MTE2` 等细粒度）：标记 **SUSPICIOUS（低）**，建议改为细粒度 Barrier。
+- **同 Pipe 内冗余 Barrier**（如连续 Vector 间的 `PipeBarrier<PIPE_V>()`）：防御性编程，**不告警**。
+
+判定要点：检查 `PipeBarrier<PIPE_ALL>()` 前后的操作是否都在同一 Pipe 内（如连续的 Vector 计算）。若是，则 PIPE_ALL 粒度过粗，应告警。
+
+### 真实检视案例（均被人工采纳）
+
+案例1 — ops-transformer PR#0309，`op_kernel/rope_with_sin_cos_cache_f_bf16.h:631`：
+
+> 评论：「建议此处不要使用 PipeBarrier<PIPE_ALL>()，应该使用 V 等 MTE2 同步指令。否则会打断其它流水，影响执行效率。」
+
+```cpp
+ 629 |     DataCopy(inQQueBeforeCastLocal, query_in_GM[query_in_offset],
+ 630 |              {1, static_cast<uint16_t>(loopNQhead * headBlockLen / 2), 0, 0});
+ 631 |     PipeBarrier<PIPE_ALL>();   // ❌ SUSPICIOUS 低：此处为 local tensor 间复制，只需 PIPE_V/PIPE_MTE2
+ 632 |     DataCopy(inQueCalLocal, inQQueBeforeCastLocal,
+ 633 |              {static_cast<uint16_t>(loopNQhead), static_cast<uint16_t>(rotaryBlockLen / 2),
+ 634 |               static_cast<uint16_t>(headBlockLen / 2 - rotaryBlockLen / 2), 0});
+ 635 |     PipeBarrier<PIPE_ALL>();   // ❌ 同上
+```
+
+案例2 — ops-math PR#3019，`op_kernel/*.h:268`：
+
+> 评论：「PipeBarrier<PIPE_ALL> 同步冗余，会影响流水」
+
+```cpp
+ 267 |     DataCopyPad(castLocal, gradOutputGM[gradGmBase + srcOffset], gParams, {false, 0, 0, 0});
+ 268 |     PipeBarrier<PIPE_ALL>();   // ❌ SUSPICIOUS 低：DataCopyPad 后接 Cast，只需 MTE2→V 同步
+ 269 |     int64_t castCount = ((batchLen + 7) / 8) * 8;
+ 270 |     if (castCount > castCapacity) castCount = castCapacity;
+ 271 |     Cast(gradChunk[dstOffset], castLocal, RoundMode::CAST_NONE, static_cast<uint32_t>(castCount));
+ 272 |     PipeBarrier<PIPE_ALL>();   // ❌ 同上
+```
 
 ---
 

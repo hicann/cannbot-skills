@@ -275,6 +275,15 @@ struct tm *make_tm(int year, int mon, int day, int hour, int min, int sec)
 
 > **Kernel 侧不适用**：Kernel 禁止 new/delete。
 
+##### 专属检视方法
+
+除 Tiling 侧（`op_host/`）外，**测试代码**（`tests/`、`ut/`、`st/` 目录下的 `.cpp/.h`）同样适用 new/delete 配对检查——测试代码中 `new` 创建的对象若无对应 `delete`，会导致内存泄漏。
+
+检视指引：
+- Grep 测试文件中的 `new ` 创建对象语句 → 追踪同一作用域或对象生命周期内是否有对应 `delete`
+- 重点关注：测试函数内的局部 `new`（函数结束前未释放）、SetUp/TearDown 中的成员对象创建与销毁配对、`new[]` 是否用 `delete[]`（而非 `delete`）释放
+- 豁免：智能指针（`std::unique_ptr`/`std::shared_ptr`/`std::make_unique`/`std::make_shared`）管理的对象、RAII 模式封装的对象、测试框架自动管理的 fixture 成员
+
 #### 4.3 使用恰当的方式处理new操作符的内存分配错误 `[适用: Tiling]`
 
 > **Kernel 侧不适用**：Kernel 禁止 new。

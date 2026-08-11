@@ -20,13 +20,14 @@ Agent({
 
 【目标】
 
-为待检视的算子代码找到其对应的设计文档（描述算子功能、架构、API、数据流、约束等的 .md/.yaml 文件），供后续设计一致性检查对照。
+为待检视的算子代码找到其对应的设计文档（描述算子功能、架构、API、数据流、约束等的 .md/.yaml 文件），供后续设计一致性检查对照。**返回设计文档所在的 docs 目录路径**（而非单个文件），使 design-check 能枚举该目录下所有 .md 文档（含 README、DESIGN.md、aclnn{Op}.md 等）进行设计对照与文档格式检视。
 
 【约束】
 
 - 用户已指明路径（{user_docs_hint} 非空）→ 优先采用，校验有效后返回
 - 否则由你自行判断：代码与哪些文档相关。你拥有完全的判断自由——可读代码、grep 线索、浏览目录结构、匹配算子名/接口名/功能语义,用你认为最可靠的方式定位
 - 设计文档常见于算子目录的 docs/ 下（DESIGN.md / REQUIREMENTS.md / aclnn{Op}.md 等），但**不局限于此**——算子可能复用同族其他算子的文档、文档可能在上级目录、也可能只有单个 .md 文件
+- **返回目录优先**：找到设计文档后，返回其所在的 docs 目录路径（向上回溯到 docs/ 根目录）。仅当文档为孤立单文件（无同级 docs 目录）时返回文件路径
 - 跳过过程产物（非设计基准）：LOG.md、*_REVIEW.md、*-report.md（precision/performance 报告）
 - 找到 → 返回路径（可多个，逗号分隔）；确实找不到 → 返回空。宁可返回空，不要硬凑无关文档
 
@@ -42,4 +43,4 @@ docs_input: {文档路径或目录，可多个逗号分隔；未检测到则为�
 ## 输出
 
 - `docs_input`（路径字符串，可多个逗号分隔）或空字符串
-- 后续：file-review / pr-review / pr-large-review 的 Stage1 据此决定是否并行派发 design-check；design-check 子 Agent 据此读取设计文档做 S1-S7 对照。
+- 后续：file-review / pr-review / pr-large-review 的 Stage1 据此决定是否并行派发 design-check；design-check 子 Agent 据此读取设计文档做 S1-S7 + D8 对照。

@@ -49,13 +49,13 @@
    - 波次内并行，波次间串行
 4. **🆕design-check 与波次1 同消息并行**：派发**波次1 的那一条消息时**，若 docs_input 非空，在同一消息里额外加入 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`，不进 clause-routing 分组规划，独立输出）。填入 docs_input + diff路径 + repo_path + 概要路径 + API 预研路径（若存在）。**禁止把 design-check 排到所有波次之后单独派发**——它必须与波次1 的 clause 子 Agent 在同一条消息里发出，以实现真正并行
 5. 波次2 及之后：仅派发 clause 子 Agent（design-check 已在波次1 并行发出，无需重复）
-6. 每波完成后输出进度，所有波次完成后汇总（含 design-check 的 S1-S7 结果）
+6. 每波完成后输出进度，所有波次完成后汇总（含 design-check 的 S1-S7 + D8 结果）
 7. 将任务1 标记为 done
 
 ### 阶段2：行号校对
 
 1. 将任务2 标记为 in_progress
-2. **拆分输入路由（correctness 关键）**：clause-review 的 FAIL/SUSPICIOUS → Read+执行 `steps/pr-review.line-verify.md`（带 diff 范围红线）；design-check 的 S1-S7 ❌ 项 → Read+执行 `steps/common.line-verify.md`（无 diff 红线，因设计偏差常指向未变更代码）
+2. **拆分输入路由（correctness 关键）**：clause-review 的 FAIL/SUSPICIOUS → Read+执行 `steps/pr-review.line-verify.md`（带 diff 范围红线）；design-check 的 S1-S7 + D8 ❌ 项 → Read+执行 `steps/common.line-verify.md`（无 diff 红线，因设计偏差常指向未变更代码）
 3. 将任务2 标记为 done
 
 ### 阶段3：撰写报告
@@ -81,7 +81,7 @@
 - 严格按阶段顺序执行，禁止跳步
 - 阶段0 的子 Agent 必须在单个消息中并行派发（A + B + D 总是，C 仅 Kernel 侧）
 - design-check 与 clause-review 波次1 并行派发，但属独立轨道，不进 clause-routing 分组规划
-- 阶段2 必须拆分行号校对路由：clause 走 pr-review.line-verify（diff 红线），S1-S7 ❌ 走 common.line-verify（无红线）
+- 阶段2 必须拆分行号校对路由：clause 走 pr-review.line-verify（diff 红线），S1-S7 + D8 ❌ 走 common.line-verify（无红线）
 - docs_input 为空时不派发 design-check
 - PR 检视模式下 code-fetch 失败则终止流程
 - 禁止提前 Read 未执行阶段的 step 文件

@@ -46,6 +46,7 @@ global-pre-scan 产出的 per-group matched_rules，每组已知：file_group �
 | PERF / PREC / TIL（ascendc-perf） | 性能 | 4 |
 | CMP（compile-secure） | 编译 | 5 |
 | PY（python-secure） | Python | 5 |
+| cpp-style 全部 19 条 | 代码风格 | 1（专项，见 Step 2.5） |
 
 ### Step 2 — 小组策略打组
 
@@ -73,6 +74,28 @@ global-pre-scan 产出的 per-group matched_rules，每组已知：file_group �
   estimated_load: 10                           // file_count × rule_count
 }
 ```
+
+### Step 2.5 — 代码风格专项分组
+
+cpp-style 的 19 条条例**不按 file_group 拆分**，合并为 1 个跨文件组的全局组：
+
+```
+{
+  group_id: "style_global",
+  file_group: "ALL",                      // 跨所有文件组
+  file_list: [所有变更的 C++ 文件],
+  rule_ids: [cpp-style 全部 19 条],
+  priority: 1,                            // 并入第一波
+  file_count: {C++ 文件总数},
+  rule_count: 19,
+  estimated_load: file_count × 19,
+  style: true                             // 标记：读取方式与输出格式特殊
+}
+```
+
+- 读取方式：直接 Read `references/cpp-style.md` 全文（其专属检视方法已声明不走 `Grep ^{条例ID}` 逐条定位）
+- 输出标记：所有结果以 `[STYLE]` 前缀输出，供报告单独归入「代码风格」章节，不进 PASS/FAIL/SUSPICIOUS 统计
+- 派发位置：并入第一波（与高危安全条例同波并行）
 
 ### Step 3 — 负载感知波次构建
 

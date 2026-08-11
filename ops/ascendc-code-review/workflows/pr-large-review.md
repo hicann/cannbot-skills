@@ -57,13 +57,13 @@
 
 1. 将任务4 标记为 in_progress
 2. 主 Agent Read + 执行 `steps/pr-large-review.merge.md`
-3. **设计一致性检查**：若阶段0 的 docs_input 非空，派发 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`），填入 docs_input + diff路径 + repo_path + 合并后摘要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用合并摘要/API预研做 S1-S7 整体对照（避免按文件组碎片化）
+3. **设计一致性检查**：若阶段0 的 docs_input 非空，派发 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`），填入 docs_input + diff路径 + repo_path + 合并后摘要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用合并摘要/API预研做 S1-S7 + D8 整体对照（避免按文件组碎片化）
 4. 将任务4 标记为 done
 
 ### 阶段5：行号校验 + 报告
 
 1. 将任务5 标记为 in_progress
-2. **拆分输入路由**：clause 的 FAIL/SUSPICIOUS → Read+执行 `steps/pr-review.line-verify.md`（带 diff 范围红线）；design-check 的 S1-S7 ❌ 项 → Read+执行 `steps/common.line-verify.md`（无 diff 红线）
+2. **拆分输入路由**：clause 的 FAIL/SUSPICIOUS → Read+执行 `steps/pr-review.line-verify.md`（带 diff 范围红线）；design-check 的 S1-S7 + D8 ❌ 项 → Read+执行 `steps/common.line-verify.md`（无 diff 红线）
 3. 主 Agent Read + 执行 `steps/common.report-write.md`
 4. 输出 `./operators/pr-{N}/{N}_review_summary.md`，将任务5 标记为 done
 
@@ -78,4 +78,4 @@
 - **主 Agent 只做编排派发**——file-split、global-pre-scan、summarize、clause-grouping 全部由子 Agent 执行
 - design-check 置于 Stage4 merge 之后：复用合并后的全局摘要做整体对照，避免按文件组碎片化；属独立轨道，不进 clause 波次规划
 - docs_input 为空时不派发 design-check，报告退化为纯条例检视
-- 阶段5 必须拆分行号校对路由：clause 走 pr-review.line-verify（diff 红线），S1-S7 ❌ 走 common.line-verify（无红线）
+- 阶段5 必须拆分行号校对路由：clause 走 pr-review.line-verify（diff 红线），S1-S7 + D8 ❌ 走 common.line-verify（无红线）

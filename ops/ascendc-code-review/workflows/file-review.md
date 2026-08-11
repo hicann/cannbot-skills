@@ -46,9 +46,9 @@
    - `subagent_type` 使用 `"general"`
    - 每组用 prompt 模板填入：侧别 + 条例ID和标题 + file_input + 代码概要路径 + API 预研路径（若存在）
    - 波次内并行，波次间串行
-4. **🆕design-check 与波次1 同消息并行**：派发**波次1 的那一条消息时**，若 docs_input 非空，在同一消息里额外加入 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`，不进 clause-routing 分组规划，独立输出）。填入 docs_input + file_input + 代码概要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用概要/API预研做 S1-S7 对照。**禁止把 design-check 排到所有波次之后单独派发**——它必须与波次1 的 clause 子 Agent 在同一条消息里发出，以实现真正并行
+4. **🆕design-check 与波次1 同消息并行**：派发**波次1 的那一条消息时**，若 docs_input 非空，在同一消息里额外加入 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`，不进 clause-routing 分组规划，独立输出）。填入 docs_input + file_input + 代码概要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用概要/API预研做 S1-S7 + D8 对照。**禁止把 design-check 排到所有波次之后单独派发**——它必须与波次1 的 clause 子 Agent 在同一条消息里发出，以实现真正并行
 5. 波次2 及之后：仅派发 clause 子 Agent（design-check 已在波次1 并行发出，无需重复）
-6. 每波完成后输出进度，所有波次完成后汇总（含 design-check 的 S1-S7 结果）
+6. 每波完成后输出进度，所有波次完成后汇总（含 design-check 的 S1-S7 + D8 结果）
 7. 将任务1 标记为 done
 
 ### 阶段2：行号校对
@@ -74,7 +74,7 @@
                  ├─ api-prestudy → API 预研报告路径（仅 Kernel 侧）
                  └─ docs-detect → docs_input（设计文档路径/目录或空）
                          ↓
-阶段1 → 逐条结果 (PASS/FAIL/SUSPICIOUS) +（docs_input 非空时）design-check 的 S1-S7 结果
+阶段1 → 逐条结果 (PASS/FAIL/SUSPICIOUS) +（docs_input 非空时）design-check 的 S1-S7 + D8 结果
          ↓
 阶段2 → 校对后的 FAIL/SUSPICIOUS（含设计一致性 ❌ 项）
          ↓

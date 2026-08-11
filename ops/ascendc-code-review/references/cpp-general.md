@@ -152,6 +152,51 @@ typedef std::shared_ptr<FooBar> FooBarPtr;
 
 ##### 规则 4.2 禁止使用魔鬼数字\字符串 `[适用: All]`
 
+代码中禁止直接使用未经命名的字面量（魔鬼数字/魔鬼字符串），应使用 `constexpr` 或 `const` 命名常量替代，使含义自解释。例外：`0`、`-1`、`1` 等基础值，数组索引 `0`，`true`/`false`/`nullptr`。
+
+**【真实检视案例】**（来自 ops-math 历史检视 PR，均被人工采纳）
+
+案例1 — Kernel 侧，`32` 作为对齐粒度反复出现（ops-math PR#377，`op_kernel/split_d.h:213`）：
+
+> 评论：「避免魔鬼数字 32，建议用 static constexpr 变量替换，用变量名体现 32 的含义」
+
+```cpp
+ 208 | template <typename T>
+ 209 | __aicore__ inline void DataCopyPadInAdaptive(AscendC::LocalTensor<T> dst, AscendC::GlobalTensor<T> src,const uint32_t calCount) {
+ 210 |     const uint64_t totalByte = calCount * sizeof(T);
+ 211 |     uint64_t st =  reinterpret_cast<uint64_t>(src.GetPhyAddr());
+ 212 |     uint64_t en = st + totalByte;
+ 213 |     uint32_t pre = (32 - st % 32) % 32;   // ❌ 魔鬼数字 32 = 对齐字节数，应定义为 constexpr uint32_t ALIGN_BYTES = 32;
+ 214 |     uint32_t aft = en % 32;               // ❌ 同一魔鬼数字多处重复
+ 215 |     uint32_t prenum = pre / sizeof(T);
+ 216 |     uint32_t midnum = (totalByte - pre - aft) / sizeof(T);
+```
+
+案例2 — Tiling 侧，`32` 作为 blockSize（ops-math PR#1767，`op_host/div_mod_tiling.cpp:136`）：
+
+> 评论：「建议通过接口获取 blockSize，消除魔鬼数字」
+
+```cpp
+ 135 |     uint32_t typeSize = (dataType == ge::DT_FLOAT16) ? 2 : 4;
+ 136 |     uint32_t alignNum = 32 / typeSize;   // ❌ 魔鬼数字 32 = block 字节数，建议用 Ops::Base::GetUbBlockSize(context) 获取
+ 137 |     uint32_t totalLengthAligned = ((totalLength + alignNum - 1) / alignNum) * alignNum;
+```
+
+案例3 — Tiling 侧，`4`/`10` 作为 buffer 数量（ops-math PR#387，`op_host/round_tiling.cpp:113`）：
+
+> 评论：「魔鬼数字建议使用具有含义的常量表示」
+
+```cpp
+ 110 |     ge::DataType dataType = context->GetInputDesc(0)->GetDataType();
+ 111 |     if (dataType == ge::DT_INT32) {
+ 112 |         // x, y → 2 个，因为要做 doublebuffer 优化，所以 x(x2), y(x2) → 共 4 个
+ 113 |         ubDataNumber = 4;                 // ❌ 魔鬼数字 4 = buffer 数量，应定义为命名常量
+ 114 |     } else if (dataType == ge::DT_FLOAT16 || dataType == ge::DT_BF16) {
+ 115 |         if (decimals) {
+ 116 |             // x(x2), y(x2), round_temp(x2), x_as_float32(x2), x_scaled(x2) → 共 10 个
+ 117 |             ubDataNumber = 10;            // ❌ 魔鬼数字 10
+```
+
 ##### 建议 4.3 建议每个常量保证单一职责 `[适用: All]`
 
 ---
