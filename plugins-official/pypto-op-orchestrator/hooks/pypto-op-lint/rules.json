@@ -1,0 +1,741 @@
+{
+  "version": "2.0.0",
+  "tolerance_schema": {
+    "type": "dict",
+    "description": "tolerance 必须是 dict，且满足以下任一模式",
+    "oneOf": [
+      {
+        "mode": "standard",
+        "required": [
+          "atol",
+          "rtol"
+        ],
+        "description": "标准容差模式（atol + rtol）"
+      },
+      {
+        "mode": "custom_metrics",
+        "required": [
+          "mare_matrix",
+          "mere_matrix",
+          "rmse_matrix"
+        ],
+        "description": "自定义三分位指标模式"
+      }
+    ]
+  },
+  "dimensions": {
+    "D1": {
+      "name": "框架约束合规"
+    },
+    "D2": {
+      "name": "工件完整性与流程合规"
+    },
+    "D3": {
+      "name": "三文件分离"
+    },
+    "D4": {
+      "name": "测试规范"
+    },
+    "D5": {
+      "name": "跨文件一致性"
+    }
+  },
+  "rules": [
+    {
+      "id": "OL01",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "kernel 函数必须有且仅有一个 @pypto.frontend.jit 装饰器"
+    },
+    {
+      "id": "OL02",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "输出写回必须用 [:]/move()/assemble()，禁止 out = expr"
+    },
+    {
+      "id": "OL03",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "kernel 函数不能有 return 语句"
+    },
+    {
+      "id": "OL04",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "@pypto.frontend.jit 入口及其同文件可达的 Layer I/H helper 中必须调用 set_vec_tile_shapes 或 set_cube_tile_shapes；允许 JIT 入口保持一行委托"
+    },
+    {
+      "id": "OL05",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "kernel 张量参数必须有 pypto.Tensor 类型注解"
+    },
+    {
+      "id": "OL06",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "kernel 内禁用 Python 原生 min()/max()"
+    },
+    {
+      "id": "OL07",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "impl 文件必须且只能使用正规 `import pypto` 作为 PyPTO 导入；禁止 alias、import pypto.frontend as ... 与 from-import"
+    },
+    {
+      "id": "OL08",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "wrapper 函数必须导出且以 _wrapper 结尾"
+    },
+    {
+      "id": "OL23",
+      "severity": "S2",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "所有算子的 impl 应显式说明是否需要 loop；若未检测到 loop 相关结构则给出提醒"
+    },
+    {
+      "id": "OL09",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        1
+      ],
+      "target": "gate",
+      "rule": "SPEC.md 必须通过结构化章节校验（数学公式、输入输出规格、精度要求）和 front matter schema 校验（p0_shapes/supported_dtypes/tolerance 格式）"
+    },
+    {
+      "id": "OL10",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        1
+      ],
+      "target": "gate",
+      "rule": "API_REPORT.md 必须通过结构化章节校验（API 映射、约束、Tiling）；Stage 1 产出，Stage 3 设计阶段读取"
+    },
+    {
+      "id": "OL11",
+      "severity": "S2",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        2
+      ],
+      "target": "gate",
+      "rule": "Stage 2 完成时校验 {op}_golden.py 可导入（作为 Stage 3/4/5 精度基线）"
+    },
+    {
+      "id": "OL12",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        3,
+        4
+      ],
+      "target": "gate",
+      "rule": "DESIGN.md 结构化章节校验（计算图、Tiling、验证方案），Stage 3 完成时即校验，Stage 4 复查兜底"
+    },
+    {
+      "id": "OL13",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        5
+      ],
+      "target": "gate",
+      "rule": "集成成品三件套完整: {op}_impl.py, test_{op}.py, README.md (Stage 5 cleanup)"
+    },
+    {
+      "id": "OL14",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        6
+      ],
+      "target": "gate",
+      "rule": "进入 Stage 6（结构验证）需 Stage 5（含 cleanup）已 completed"
+    },
+    {
+      "id": "OL15",
+      "severity": "S1",
+      "dimension": "D3",
+      "fix_effort": "E1",
+      "stages": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "target": "golden",
+      "rule": "golden 文件须为纯 torch 规范化实现：禁止 import pypto，禁止 `.T` / `.t()`（须用 torch.transpose）"
+    },
+    {
+      "id": "OL16",
+      "severity": "S1",
+      "dimension": "D3",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "impl 文件不应导入 golden 模块"
+    },
+    {
+      "id": "OL17",
+      "severity": "S1",
+      "dimension": "D3",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 文件不应包含 kernel 实现代码"
+    },
+    {
+      "id": "OL18",
+      "severity": "S1",
+      "dimension": "D3",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 文件必须从 impl 和 golden 分别导入"
+    },
+    {
+      "id": "OL19",
+      "severity": "S1",
+      "dimension": "D4",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 必须使用 assert_allclose 或 detailed_tensor_compare 做精度比对，禁止手写 assert max_diff"
+    },
+    {
+      "id": "OL20",
+      "severity": "S1",
+      "dimension": "D4",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 必须处理 TILE_FWK_DEVICE_ID 环境变量并调用 set_device"
+    },
+    {
+      "id": "OL21",
+      "severity": "S2",
+      "dimension": "D4",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 必须有 Level 0 和 Level 1 两级测试函数"
+    },
+    {
+      "id": "OL22",
+      "severity": "S2",
+      "dimension": "D4",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "test 应设置 torch.manual_seed 保证可复现"
+    },
+    {
+      "id": "OL24",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "target": "gate",
+      "rule": ".orchestrator_state.json 结构合法"
+    },
+    {
+      "id": "OL25",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Tensor 注解禁止空注解：pypto.Tensor() / pypto.Tensor([], dtype) 一律 FAIL；只缺 dtype 时 WARN"
+    },
+    {
+      "id": "OL26",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "JIT 函数中张量参数必须在非张量参数之前"
+    },
+    {
+      "id": "OL28",
+      "severity": "S2",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "sigmoid/softmax/sin/cos 仅支持 DT_FP32，非 FP32 dtype 时警告"
+    },
+    {
+      "id": "OL29",
+      "severity": "S2",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Tensor 注解的 shape 中应声明 pypto.DYNAMIC/pypto.DYN 维度"
+    },
+    {
+      "id": "OL30",
+      "severity": "S2",
+      "dimension": "D5",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "spec.md 声明支持的 dtype 必须在测试文件中覆盖"
+    },
+    {
+      "id": "OL31",
+      "severity": "S1",
+      "dimension": "D5",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "design.md 动态轴声明须与 impl Tensor 注解中的 DYNAMIC 一致"
+    },
+    {
+      "id": "OL32",
+      "severity": "S2",
+      "dimension": "D5",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "spec.md 精度容差(atol/rtol)须与 test 文件一致"
+    },
+    {
+      "id": "OL33",
+      "severity": "S2",
+      "dimension": "D5",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "golden 与 wrapper 的必需参数数量应一致（避免调用接口不兼容）"
+    },
+    {
+      "id": "OL34",
+      "severity": "S1",
+      "dimension": "D5",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "spec.md P0 测试配置 shape 应在 test 文件中覆盖"
+    },
+    {
+      "id": "OL37",
+      "severity": "S3",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "design 与 impl 的关键中间变量命名应具备可追溯性（重合较少时给出信息提示）"
+    },
+    {
+      "id": "OL39",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "strict 模式下文档必须包含 front matter"
+    },
+    {
+      "id": "OL40",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "strict 模式下 front matter 必填字段必须完整"
+    },
+    {
+      "id": "OL41",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "代码工件禁止包含 lint/门禁输出文本污染；覆盖顶层产物和 modules/<op>_module*_impl.py / _golden.py / test_*.py"
+    },
+    {
+      "id": "OL42",
+      "severity": "S1",
+      "dimension": "D4",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "test",
+      "rule": "NPU 环境可用时，test 禁止硬编码 sim 模式（default='sim' 或 run_mode='sim'）"
+    },
+    {
+      "id": "OL43",
+      "severity": "S1",
+      "dimension": "D5",
+      "fix_effort": "E3",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "DESIGN.md 声明动态轴时，每个相关 impl 的 jit 函数必须包含遍历动态轴的真实 pypto.loop；该规则为硬性门禁，不得因 NPU 运行通过而跳过"
+    },
+    {
+      "id": "OL44",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E2",
+      "stages": [
+        5
+      ],
+      "target": "gate",
+      "rule": "Stage 5 active Phase M_k requires modules/<op>_module<suffix_k>_impl.py + _golden.py + test_*.py three-set"
+    },
+    {
+      "id": "OL45",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E3",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Layer K (host wrapper / host_wrapper / *_wrapper) must NOT contain `for ... in range(...)` calling the kernel per chunk; chunking belongs inside _kernel_impl as pypto.loop(N) + pypto.view offsets"
+    },
+    {
+      "id": "OL46",
+      "severity": "S2",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "pypto.loop(1) wrapper is only valid when no other pypto.loop(N) exists in the same scope; redundant pypto.loop(1) around an inner pypto.loop(N) is forbidden"
+    },
+    {
+      "id": "OL47",
+      "severity": "S3",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "When _kernel_impl calls 2+ pypto_* sub-kernels, prefer setting tile shapes inside each sub-kernel (per-stage local tiles) rather than once at the top of _kernel_impl"
+    },
+    {
+      "id": "OL48",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "set_vec_tile_shapes / set_cube_tile_shapes 的所有 tile 参数（含 list 元素）必须是编译期可知的 Python int 字面量，或解析到字面量的模块级 / 函数局部常量 Assign；禁止使用 kernel 入参、tensor.shape[i]、SymbolicScalar、运行时计算等动态值。此外 set_cube_tile_shapes 的 m/k/n 每轴必须是 2 元素 list [L0, L1]（不能是单元素 [L0] 或 3+ 元素），且 L0/L1 为字面量时须满足 0 < L0 <= L1 且 L1 % L0 == 0（见 docs/zh/api/config/pypto-set_cube_tile_shapes.md）"
+    },
+    {
+      "id": "OL49",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "unroll_list 只能出现在最内层 pypto.loop（即其 body 内不再嵌套其他 pypto.loop）；外层 pypto.loop 携带 unroll_list 会触发编译路径爆炸或寄存器拷贝 pass 引起的精度异常"
+    },
+    {
+      "id": "OL56",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        4,
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Stage 6 之前 pypto.loop 的 unroll_list 只能含单一值（默认 [1]，有依据时可用其它单值）；含 2 个及以上值会触发编译路径爆炸、拖慢编译并使开发流程超时。多值展开调优仅允许在 Stage 7 optimization。在 DESIGN.md（```python``` 代码块）与 <op>_impl.py / modules/<op>_module*_impl.py 上 post-edit 即时拒绝"
+    },
+    {
+      "id": "OL57",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E3",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "@pypto.frontend.jit 图代码（kernel 本体 + 其调用到的所有函数 / 含 pypto 算子的函数）内允许 pypto.loop / pypto.loop_unroll / for...in range(...) 循环；禁止 while 和非 range 的 Python for（及含 pypto 算子的推导式）。迭代可用 pypto.loop（迭代间有依赖时加 submit_before_loop=True）或 for...in range(...)（编译期全展开）。Layer K host wrapper 的 kernel 驱动循环由 OL45 管辖"
+    },
+    {
+      "id": "OL58",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Layer K host wrapper 内禁止调用 pypto.zeros / pypto.empty / pypto.ones / pypto.full —— 这些是 JIT-context creation API, 在 host 上下文调用会 runtime crash (`device=` kwarg 不接受, 或 `F21003 INVALID_TYPE`)。output buffer 必须用 torch.empty / torch.zeros / torch.empty_like 等 torch allocation API (显式 dtype= 与 device=) 预先分配, 再作为参数传给 @pypto.frontend.jit 入口。每个传入 JIT 入口的 Name 参数必须解析到 wrapper 参数, 或 torch.* allocation, 或对 wrapper 参数的 torch 变换 (例 .reshape / .contiguous)"
+    },
+    {
+      "id": "OL52",
+      "severity": "S1",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "pypto.view(t, shape=[...], offsets=[...], valid_shape=[...]) 的 shape/offsets/valid_shape 必须同 rank（list 长度一致）。pypto.view 是同 rank 的 sub-view 抽取 API，不是 reshape"
+    },
+    {
+      "id": "OL50",
+      "severity": "S1",
+      "dimension": "D5",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "Layer K wrapper 的显式参数必须与 eval/module_interfaces.yaml 的 primary_inputs 声明顺序（以及对应 module 的 inputs[*].name source=primary）完全一致；生产 ABI 不暴露 runtime/debug 参数，调试扩展走 **kwargs 或 _debug/ 产物"
+    },
+    {
+      "id": "OL51",
+      "severity": "S1",
+      "dimension": "D5",
+      "fix_effort": "E2",
+      "stages": [
+        5,
+        6,
+        7
+      ],
+      "target": "impl",
+      "rule": "OL51.a 数量层: 对 eval/module_interfaces.yaml 声明的输出数 N，impl 内至少存在 N 个真实写出点 (pypto.assemble / out.move / out[:]=)。OL51.b 非平凡写入层: JIT 写出的 output 不得是平凡 pass-through (直接复制输入 / pypto.zeros / 浅层 reshape)，须由真实 pypto compute op 产生。"
+    },
+    {
+      "id": "OL62",
+      "severity": "S0",
+      "dimension": "D5",
+      "fix_effort": "E3",
+      "stages": [
+        5,
+        6,
+        7
+      ],
+      "target": "impl",
+      "rule": "<op>_impl.py 内 torch 仅可用于 layout/alloc/cast/reshape；任何 torch 张量算术 (torch.matmul / .exp / .sum / `@` / F.* 等) 即 FAIL。算子数值计算必须在 @pypto.frontend.jit 图内用 pypto.* op 实现，host (wrapper / 非 JIT helper) 只允许打包/分配/布局/dtype 转换。封堵 dummy-JIT 全谱 (dead JIT+host torch / 小 JIT+torch 主计算 / torch 旁路再计算)。AST 检测，忽略注释与 __main__/_validate 等自测块"
+    },
+    {
+      "id": "OL53",
+      "severity": "S2",
+      "dimension": "D5",
+      "fix_effort": "E1",
+      "stages": [
+        5,
+        6
+      ],
+      "target": "gate",
+      "rule": "MEMORY.md → Golden function inventory 章节的所有行都必须标记为 Status ✅（仅在 complete_stage 时严格判定；complete_phase 允许未着手 module 行为 ❌）"
+    },
+    {
+      "id": "OL54",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        5
+      ],
+      "target": "gate",
+      "rule": "complete_phase 时，MEMORY.md 中必须有 `## Phase M_k self-review` 章节，且 6 个必须项（signature 一致 / output 写出 / view rank / inventory 更新 / 无 for-range / JIT exactly once）全部标记为 `- [x]`"
+    },
+    {
+      "id": "OL55",
+      "severity": "S0",
+      "dimension": "D1",
+      "fix_effort": "E1",
+      "stages": [
+        4,
+        5,
+        6
+      ],
+      "target": "impl",
+      "rule": "禁止使用 PyPTO 中不存在的 `pypto.<attr>` — 通过对比 AST 中的属性访问与 `dir(pypto)` 校验, 在 DESIGN.md (代码块内) 与 `<op>_impl.py` / `modules/<op>_module*_impl.py` 上 post-edit 即时拒绝, 防止 typo (如 `pypto.empty` / `pypto.empty_like`) 走到 runtime"
+    },
+    {
+      "id": "OL59",
+      "severity": "S1",
+      "dimension": "D2",
+      "fix_effort": "E1",
+      "stages": [
+        2
+      ],
+      "target": "gate",
+      "rule": "Stage 2 完成时 GOLDEN_PERF_REPORT.md 必须存在且包含 Op Performance section（由 pypto-golden-generate/scripts/profile_golden.py §15 生成）"
+    },
+    {
+      "id": "OL60",
+      "severity": "S0",
+      "dimension": "D4",
+      "stages": [
+        5,
+        6,
+        7
+      ],
+      "target": "test",
+      "rule": "test_<op>.py 从 *_impl 模块 import 并实际调用的入口函数, 必须在同文件可达调用链中能到达至少一个 @pypto.frontend.jit 函数。否则测试跳过 PyPTO 内核 (flash_kda 类失败模式: test 调用纯 PyTorch 入口, 绕过 @jit)。"
+    },
+    {
+      "id": "OL61",
+      "severity": "S1",
+      "dimension": "D2",
+      "stages": [5, 6],
+      "target": "gate",
+      "rule": "Experience Preflight 门禁（Stage 5/6，Coder 写 impl 前创建并自检；Stage 1-4 不触碰 MEMORY.md）: (1) MEMORY.md `## Experience Preflight` section 存在且非占位符; (2) 格式合规（markdown checklist 非表格，≤20 条，[-] 项须有 ⚠️ 待验证 注释）; (3) 所有 [-] 待验证项必须消除（改为 [x] 或标注 ✅ 已知风险）; (4) 对 impl.py 做 AST 扫描检测 4 类反模式（F4 非法 cast 路径/F2 Element 双重包装/F1 scalar 首参/F8 zeros dtype 位置错误）"
+    }
+  ]
+}

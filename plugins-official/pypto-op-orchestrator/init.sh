@@ -120,6 +120,7 @@ INCLUDED_AGENT_PATTERN="pypto-*"
 # Agent excluded from the agents/ install — it is the primary orchestrator and is
 # instead installed as AGENTS.md / CLAUDE.md in the project root.
 EXCLUDED_AGENT="pypto-op-orchestrator"
+INSTALL_OPENCODE_HOOKS=true
 
 show_banner() {
   echo ""
@@ -460,6 +461,12 @@ if [ "$TOOL" = "opencode" ]; then
         agent_count=$((agent_count + 1))
     done
     step1_summary="${step1_summary}agents(${agent_count})"
+    if [ "$INSTALL_OPENCODE_HOOKS" = true ]; then
+        mkdir -p "$CANNBOT_DIR/plugins" "$CANNBOT_DIR/hooks/pypto-op-lint"
+        cp -a "$PLUGIN_ROOT/hooks/opencode/." "$CANNBOT_DIR/plugins/"
+        cp -a "$PLUGIN_ROOT/hooks/pypto-op-lint/." "$CANNBOT_DIR/hooks/pypto-op-lint/"
+        step1_summary="${step1_summary} hooks"
+    fi
     ok "Linked: $step1_summary"
 else
     # Claude/Trae/Cursor/Copilot: create directories (per-item symlinks handled in Step 3)
