@@ -15,6 +15,7 @@ description: 交付件模板，提供设计文档、验收报告等中间交付�
 | 需求文档 | 1.1 | [references/1.1-需求分析.md](references/1.1-需求分析.md) |
 | 测试方案文档 | 2.1 | [references/2.1-测试方案设计.md](references/2.1-测试方案设计.md) |
 | 开发方案文档 | 2.2 | [references/2.2-开发方案设计.md](references/2.2-开发方案设计.md) |
+| 联调报告 | 3.4 | [references/3.4-联调报告.md](references/3.4-联调报告.md) |
 | 功能验收报告 | CP3 | [references/CP3-功能验收报告.md](references/CP3-功能验收报告.md) |
 | 性能验收报告 | CP4 | [references/CP4-性能验收报告.md](references/CP4-性能验收报告.md) |
 | 代码检视报告 | CP5 | [references/CP5-代码检视报告.md](references/CP5-代码检视报告.md) |

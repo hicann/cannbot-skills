@@ -28,6 +28,7 @@
     "requirement": ".cannbot/<算子名>/1.1-需求分析.md",
     "test_plan": ".cannbot/<算子名>/2.1-测试方案设计.md",
     "dev_plan": ".cannbot/<算子名>/2.2-开发方案设计.md",
+    "joint_debug_report": ".cannbot/<算子名>/3.4-联调报告.md",
     "cp3_report": ".cannbot/<算子名>/CP3-功能验收报告.md"
   },
   "updated_at": "2026-07-09T00:00:00Z"
@@ -41,8 +42,8 @@
 | `operator` / `chip` | 算子名、目标芯片，贯穿全程 |
 | `current_stage` | 当前所处流程表编号，恢复时的入口 |
 | `completed_stages` | 已通过的阶段列表，恢复时跳过。可插拔流程插件的内部步骤编号亦记入本列表，编号含义见对应插件文档 |
-| `blocked` | 暂停时填充；`at`=阻塞的 CP，`reason`=问题摘要，`round`=当前轮次，`loop`=所属循环（`design`/`acceptance` 对应 [error-handling.md](error-handling.md) 的轮次表；`ci` 属上库插件的轮次表，见对应插件文档） |
-| `rounds` | 各 CP 已用轮次，**按 CP 编号分槽计数**；跨 CP 回退（如 CP2.2 因归属需求回退 1.1）不清零发起方槽位，避免往返途中计数丢失导致循环失去边界。`blocked.round` 取当前阻塞 CP 的槽值 |
+| `blocked` | 暂停时填充；`at`=阻塞的环节（CP 或流程表步骤），`reason`=问题摘要，`round`=当前轮次，`loop`=所属循环（`design`/`joint_debug`/`acceptance` 对应 [error-handling.md](error-handling.md) 的轮次表；`ci` 属上库插件的轮次表，见对应插件文档） |
+| `rounds` | 各环节已用轮次，**按流程表编号分槽计数**（含 3.4 联调槽位）；跨环节回退（如 CP2.2 因归属需求回退 1.1）不清零发起方槽位，避免往返途中计数丢失导致循环失去边界。`blocked.round` 取当前阻塞环节的槽值 |
 | `pending_questionnaire` | 有问卷待用户答复时填；`cp`=发出问卷的 CP，`path`=问卷 json 路径，`reply_path`=用户回复落盘路径（问卷同名加 `.reply` 后缀，如 `1.需求.json` → `1.需求.reply.json`），`status`=`sent`（PM 派出问卷类 CP 时预填，已发未回）/ `answered`（QA 结论已回传、未处理）。问卷由 QA 用 question 工具直接发送用户：发出时落盘 `path`，收到回复后先落盘 `reply_path` 再回传，问卷与回复成对持久化。用户确认类 CP（CP0 / CP1 / CP2.2）中断恢复的依据，处理完毕后清空 |
 | `deliverables` | 已产出交付件路径（与 [data-flow.md](data-flow.md) 的落盘位置一致） |
 | `updated_at` | 最后更新时间（ISO8601） |

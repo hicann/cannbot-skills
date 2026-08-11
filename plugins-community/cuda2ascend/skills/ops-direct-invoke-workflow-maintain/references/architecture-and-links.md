@@ -53,7 +53,7 @@ cannbot-skills/plugins-community/cuda2ascend/   # 基类插件根 = PLUGIN_ROOT
 ```
 skills/ops-direct-invoke-workflow/
 ├── SKILL.md                      # 角色总览 + CP 标记说明 + 【统一流程表】+ 通用约定 + 参考资源
-│                                 #   统一流程表内联于此（8 阶段粗体分组、15 步骤 + 8 CP 点、回退备注），
+│                                 #   统一流程表内联于此（8 阶段粗体分组、16 步骤 + 8 CP 点、回退备注），
 │                                 #   一眼见全貌；列：编号|流程|角色|输入|输出|说明|备注
 └── references/                   # 明细按【关注点】切分（非按阶段）
     ├── task-prompts.md           # 各步 Task 调用契约：角色/输入/输出/验收标准/引用的逻辑名

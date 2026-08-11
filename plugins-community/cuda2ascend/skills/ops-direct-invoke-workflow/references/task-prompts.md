@@ -148,6 +148,18 @@
 - 【验收标准】声明的执行分支 / tilingkey 覆盖达标（阈值由对应验收 skill 给定），产出分支覆盖说明。
 ```
 
+## 3.4 联调
+
+- **角色**：developer-code
+
+```md
+- 【权限】你可写算子代码目录；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
+- 【输入】算子代码（3.1 产物）、测试代码（3.2/3.3 产物）。
+- 【输出】联调结果（通过 / 不通过——代码问题回退 3.1、测试问题回退 3.2）；联调报告写入 `.cannbot/<算子名>/3.4-联调报告.md`，格式模板：`workflow-doc-templates/references/3.4-联调报告.md`。
+- 【skills】立即加载 `repo-build-guide`、`repo-test-develop`、`repo-knowledge`、`ascendc-precision-debug`。
+- 【验收标准】全量用例跑通、精度比对通过；代码侧问题已修复并编译验证通过；测试侧问题（golden/用例/框架缺陷）不自行修改 test 目录，在联调报告中定位并指明修改点。
+```
+
 ## CP3 功能验收
 
 - **角色**：QA
@@ -250,6 +262,7 @@
 | 2.1 / 2.2 | architect | 读方案文档继续 |
 | CP2.2 | QA | 按 `pending_questionnaire` 状态续跑：无该字段则重跑评审；`sent` 则由 QA 重发问卷收集结论；`answered` 则无异议进 3.1、有异议按语义归属回退 |
 | 3.1 / 3.2 / 3.3 | developer-code / developer-test | 读代码与测试继续 |
+| 3.4 | developer-code | 读联调报告继续；测试侧问题回退 3.2 后重走 3.3 → 3.4 |
 | 4.1 | developer-test | 读性能数据继续 |
 | CP3 / CP4 / CP5 | QA | 读对应报告继续；回退则从 3.1 重走 |
 | 6.1 | developer-doc | 读算子文档继续 |
