@@ -20,12 +20,41 @@ namespace Gemm {
 
 struct KernelMmadDualBranchGlu {};
 
+struct KernelWeightQuantMatmul {};
+
 template <uint64_t FullLoadMode_ = 0, bool AtomicAdd_ = false, bool RefineNearZeroFp16_ = false>
 struct MatmulDualBranchGlu {
     using ScheduleType = KernelMmadDualBranchGlu;
     static constexpr uint64_t FULL_LOAD_MODE = FullLoadMode_;
     static constexpr bool IS_ATOMIC_ADD = AtomicAdd_;
     static constexpr bool REFINE_NEAR_ZERO_FP16 = RefineNearZeroFp16_;
+};
+
+/**
+ * @brief Matmul dispatch tag for the SWAT streaming (non-full-load) path.
+ * @tparam FULL_LOAD_MODE_ Selects the streaming variant (0 = stream both A and B).
+ */
+template <uint64_t FULL_LOAD_MODE_>
+struct MatmulMultiBlockPolicy {
+    static constexpr uint64_t fullLoadMode = FULL_LOAD_MODE_;
+};
+
+/**
+ * @brief Weight-quant matmul dispatch tag for the V+C fusion SWAT path.
+ *
+ * Activates the weight-quant BlockMmad specialization
+ * (weight_quant_matmul_block_mmad.h) and the GemmUniversal weight-quant
+ * kernel specialization. The prologue/dequant logic is NOT part of
+ * BlockMmad — it lives in weight_quant_matmul_kernel.h.
+ *
+ * Weight-quant matmul = V+C fusion: AIV dequantizes weight to bf16 in
+ * UB, writes the result to L1; AIC then consumes the dequantized B from L1
+ * for MMAD.
+ */
+template <uint64_t FULL_LOAD_MODE_>
+struct WeightQuantMatmulPolicy {
+    using ScheduleType = KernelWeightQuantMatmul;
+    static constexpr uint64_t fullLoadMode = FULL_LOAD_MODE_;
 };
 
 } // namespace Gemm

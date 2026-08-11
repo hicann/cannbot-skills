@@ -42,6 +42,12 @@ Blaze skill 不读取或依赖 `environment.md`、外部 manifest 或其他工�
 
 不要按调用者身份增加模式。不要因发现已有 DESIGN/PLAN 而单独进入 Step 4；direct invoke Developer 直接消费相同 DESIGN/PLAN，Blaze Step 4 只属于本 skill 的完整四步开发流程。
 
+## 计算执行原则
+
+本 skill 开发的算子，其全部计算步骤必须在 device 侧单一 Kernel 中完成。不得将算子需求中的任何计算步骤放到 host 侧执行。host 侧只负责数据准备、Tiling 计算、Kernel launch 和结果搬运。
+
+此原则适用于全部路线（`blaze_native`、`blaze_custom`）和全部场景。Step 3 在判定 Blaze 官方方案覆盖性时必须以完整算子语义为对象，不得通过将非 matmul 计算步骤排除到 host 侧来缩小 `native_gaps` 的判定范围。
+
 ## 四步流程
 
 ### Step 1: Project Setup

@@ -107,6 +107,8 @@ requirement_contracts:
     design_impact: <接口、实现、资源或验证影响>
 ```
 
+需求合同的 partition 必须覆盖用户需求的完整算子语义。算子中的全部计算步骤（包括 matmul 及其前/后的所有非 matmul 计算）必须作为 required partition 纳入 §2.3 的官方方案覆盖性检查。算子的所有计算必须在 device 侧完成，不得拆分到 host 侧执行。
+
 需求合同必须覆盖实际适用的以下方面，不得用场景名或候选名代替精确需求：
 
 | 方面 | 需要冻结的内容 |

@@ -40,6 +40,7 @@ PLAN 的 `reading_manifest`、action `source_refs` 和 `read_before_action_ids` 
 - 修改根 `ops-tensor`、Skill Asset 原文件、项目根之外的路径，或在已登记的缺失目录原样物化之外写入项目内官方副本和 DESIGN `forbidden_change_scope`；
 - 引入具体提交 ID、hash、构建时间戳或提交节点；
 - 修改或引用独立验证工程。
+- 在 host 侧执行算子需求中声明的任何计算步骤；算子的全部计算（包括但不限于反量化、scale/dequant、cast、activation、normalization 等）必须在 device Kernel 中完成，不得将 host 侧计算的中间结果作为 device Kernel 的输入。
 
 ## 2. DESIGN/PLAN 联合门禁
 

@@ -114,7 +114,13 @@ logical argument
 5. 从每个真实 witness 在对应 `abi_bindings[]` 记录中生成 `source_backed_signature_skeleton`，保留入口声明形态、参数顺序、Wrapper 或 dispatch 调用关系及其 `source_refs`。它是设计合同，不是可复制 Kernel recipe；只有 witness 已明确的修饰符、`__cube__`/`__mix__`、GM 参数、模板参数和调用方式才能写入，其他位置保留待项目命名的占位，不得猜测。
 6. 若某一项决定性事实缺失且报告尚无已完成的补充，提出只描述需求语义和待查 Blaze 源码关系的补充问题，返回 Step 2。补充问题不得包含场景 ID、场景路径或路线建议。若同一报告已完成一次补充后仍缺关键事实，停止为“未完成设计，等待澄清”；不写最终路线，也不生成 DESIGN/PLAN。
 7. 若已有事实表明某个需求不能由选定官方方案覆盖，逐项记录 `native_gaps`，再进入 2.4。可接受的依据是来源明确的不兼容/拒绝，或对该精确需求已穷尽声明读取边界后的无匹配事实；孤立 `not_found`、`indexed`、未读目录或未知事实不得写为 `native_gaps`。
-8. 若一个完整官方方案覆盖所有 required partitions，写入：
+
+   `native_gaps` 的判定对象是 §0.4 需求合同中的完整算子语义，不是其中的某个子步骤。官方方案覆盖性检查必须满足以下原则：
+   - 算子的全部计算步骤（包括 matmul 及其前/后的所有非 matmul 计算）必须由单一 Blaze 官方 Kernel 方案覆盖，才算 blaze_native。多个独立 Kernel 分别覆盖不同步骤不构成 blaze_native。
+   - 禁止将用户需求中的任何计算步骤排除到 Blaze 官方方案分析范围之外（如声明为"辅助预处理""host 侧步骤""非 Blaze 操作"等），从而缩小 `native_gaps` 的判定范围使剩余步骤单独满足 blaze_native 条件。
+   - 算子的所有计算必须在 device 侧完成。不得将需求中声明的计算步骤放到 host 侧执行后将其结果作为中间输入传入 device Kernel。
+
+8. 若一个完整官方方案以单一 Kernel 覆盖算子的全部计算步骤（包括 matmul 及其前/后的非 matmul 计算），且全部在 device 侧完成，写入：
 
 ```text
 implementation_route: blaze_native
@@ -163,7 +169,7 @@ selected_scenario: <唯一 scenario_id>
 |---|---|---|
 | 判断需要的 Blaze 源码事实缺失，尚未补充 | 生成一次语义化补充问题，回 Step 2 | 无最终路线、无 DESIGN/PLAN |
 | 一次补充后仍缺关键事实，或需求合同本身不清 | 停止等待用户澄清 | 无最终路线、无 DESIGN/PLAN |
-| 官方 Blaze 方案完整 | `implementation_route=blaze_native`，跳过注册表 | DESIGN + PLAN |
+| 官方 Blaze 方案以单一 device Kernel 覆盖算子全部计算步骤 | `implementation_route=blaze_native`，跳过注册表 | DESIGN + PLAN |
 | 官方方案有 `native_gaps`，场景唯一命中且前提充分 | `implementation_route=blaze_custom` | DESIGN + PLAN |
 | 官方方案有 `native_gaps`，场景零命中或多命中 | `implementation_route=unsupported` | 仅阻塞 DESIGN |
 
