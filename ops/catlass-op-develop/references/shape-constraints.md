@@ -51,3 +51,20 @@ catlass 模板按 dtype 实例化（fp16 / bf16 / fp32 / int8）。**每个**设
 - **发现边界未达标先归因再定性**：区分「shape 驱动的调度局限（design_issue，需换调度/分块）」vs「计算效率劣势（可调优）」——看逐核 `cube_time` 是否均衡、平均 cube 是否输竞品。前者要回设计，后者才是 Step 6 调优范畴。
 
 向调用方提的需求：对标/测试矩阵覆盖上述边界类别（按算子形态取适用项），不接受单 shape 结论。
+
+---
+
+## Δ5：FlashAttention / MHA / GQA 类 shape 覆盖按算法维度生成
+
+FlashAttention 的 shape 不应只按 GEMM 的 `(M,N,K)` 或历史调试 tuple 设计。测试矩阵必须说明每个 shape 对应的覆盖类别。
+
+| 覆盖类别 | 构造方式 | 目的 |
+|---------|---------|------|
+| B/Sq/Sk 组合 | 单 batch/多 batch；`Sq == Sk`、`Sq < Sk` | 覆盖核调度与 KV 分块路径 |
+| `Skv` 对齐边界 | `Skv` 恰为 128 倍数 / 非倍数（如 177） | 覆盖尾块 0 填充路径（bin 读入与 device 块格式尺寸分离）|
+| H / head 形态 | MHA（Hq==Hkv）、GQA（Hq>Hkv）；单头/多头 | 覆盖 head 合并到 Mmad m 维的路径 |
+| `D` / headSize | 64 / 128，`D % 16 == 0` | 覆盖 cube 友好分块 |
+| 数值边界 | 全零 Q/K/V、近零 softmax 输出、极值 scale | 暴露 softmax 状态递推与 mixed tolerance 问题 |
+| 对标 shape | 与 `aclnnFlashAttentionScore` 完全同 shape、同 layout、同 dtype | 标杆对比可比性 |
+
+向调用方提的需求：脚本保留固定 shape tuple 时，必须在报告/注释标明每个 tuple 来自哪个覆盖类别；否则视为硬编码经验，不视为完整测试设计。

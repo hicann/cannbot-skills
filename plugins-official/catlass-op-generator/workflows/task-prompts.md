@@ -28,6 +28,13 @@
 - 输入 int8 但缺 scale 张量 → 提示
 - 警告级需用户确认后通过
 
+### 3. FlashAttention 预检（命中 FA/MHA/GQA/fused attention 时必做）
+
+- 输入布局确认：Q/K/V 是否 BNSD `[B,H,S,D]`（若不满足，记录 host 需做的布局转换）
+- `D % 16 == 0` 校验（cube 友好），`scale = 1/sqrt(D)` 约定确认
+- 目标 SoC 确认：A2 必须走 `PAGED=true` + 恒等 block_table（`PAGED=false` 有 aicore exception），950PR 需单独评估
+- baseline 确认：冻结 `aclnnFlashAttentionScore` 作为精度标杆
+
 ### 完成输出
 
 写入 `operators/{operator_name}/docs/precheck.md`：激活函数验证结果 + 物理核数与推荐 + dtype 校验结果。

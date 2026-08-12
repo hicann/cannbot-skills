@@ -63,6 +63,12 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - **禁止**：写死硬件参数（blockDim/blockIdx/UB 大小）
 - **禁止**：随意降低精度标准
 - **禁止**：自行编写 verify_result.py 的精度判定逻辑——必须先 Read `cannbot-skills/ops/catlass-op-develop/references/verify_result_template.py` 并复制其判定函数，只修改 OUTPUT_SHAPE 和 OUTPUT_DTYPE
+- **禁止（FlashAttention）**：在 A2 上走 `PAGED_CACHE_FLAG=false`（aicore exception）、把 BNSD 布局转换塞进 kernel（应放 host）、跳过 aclnn 标杆精度对比
+
+**FlashAttention 场景必须**：
+- 先读 `/catlass-op-develop` 的 `references/patterns/flash-attention.md`：BNSD 公开接口 + host 布局转换（Q→BSND、K/V→块格式、O→BNSD，bin 读入尺寸与 device 尺寸分离）、A2 固定 `PAGED=true` + 恒等 block_table、尾块 0 填充
+- kernel 用 `FAInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, ...>` 组件（**复用catlass `examples/23_flash_attention_infer/`，复用 catlass examples/23**），workspace 用独立 GM buffer 指针透传
+- 精度双口径：内部 golden + `aclnnFlashAttentionScore`（`npu_fusion_attention`）标杆对比（atol=0.02/rtol=0.1，max_abs<0.05）
 
 ### 输入边界
 

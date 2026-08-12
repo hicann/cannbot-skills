@@ -127,3 +127,14 @@ references/verify_result_template.py
 
 - 必须在**所有交付 shape** 上跑 gen_data → 运行 → verify：基础 shape（如 512³，覆盖每个合法 dtype/转置/swizzle 分支）**与**实网 shape（大 M/N/K）。
 - 仅基础 shape 通过 **不代表** 实网通过：本仓的 `catlass_quant_matmul_swiglu` 正是「512³ 过、N>512 全错」的结构性 bug（见 [mmad-epilogue 选型](../../catlass-op-design/references/mmad-epilogue-selection.md) §4 双操作数 epilogue）。verify 必须覆盖到能暴露这类问题的 shape。
+
+---
+
+## 8. FlashAttention / MHA / GQA 类精度验证补充
+
+FlashAttention 融合算子的 golden 与测试覆盖还需满足：
+
+1. **冻结 baseline 层级**：full-flow fused op 必须对齐同语义 full-flow baseline，**首选 `aclnnFlashAttentionScore`**（`torch_npu.npu_fusion_attention(q, k, v, H, "BNSD", scale=scale)`）。语义、dtype、layout、scale（`1/sqrt(D)`）必须与交付目标一致。
+2. **双口径验证**：① 内部 golden（CPU numpy/torch fp32 累加 softmax attention）；② **aclnn 标杆对比**（算子 dump BNSD 输出 O 到 `o.bin`，与 aclnn 输出逐元素对比）。
+3. **mixed tolerance 报告字段固定**：每 case 输出 `shape`、`dtype`、`atol`、`rtol`、`matched_ratio`、`max_abs`、`pass/fail`。浮点判据按 `ops-precision-standard`：`abs(actual-golden) <= atol + rtol*abs(golden)`。FA 经验阈值：`atol=0.02, rtol=0.1`，通过率 ≥99.9% 且 `max_abs < 0.05`（A2 实测 custom vs aclnn max_abs ~1e-4）。
+4. **shape 覆盖按算法维度生成**：覆盖 B/Sq/Sk 组合、`Skv` 非 128 对齐尾块、MHA/GQA、D=64/128、数值边界。详见 [shape-constraints.md](shape-constraints.md) Δ5。

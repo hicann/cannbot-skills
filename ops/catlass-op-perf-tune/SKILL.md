@@ -65,6 +65,21 @@ L0C 占用 ≈ L1.M * L1.N * 4(fp32)                              ≤ 128KB
 
 > Cube 利用率已达 ~90%+ 即接近 roofline；此时再提速通常受 fp16 L1 容量（K-tile 上限）这类硬件结构约束，需以 profiler 证据说明。
 
+## FlashAttention Stage Tuning
+
+当目标是 FlashAttention（MHA/GQA）融合算子时，先读取 `catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md`。FA 的常见瓶颈不是单个 TileShape，而是 C1→V1→C2→V2 四段流水的 AIC/AIV 重叠、CrossCoreFlag、workspace slot、online softmax 状态递推的组合问题。
+
+| 现象 | 优先归因 | 优先检查 |
+|---|---|---|
+| AIC/AIV 互等明显 | stage 边界或 flag 放在内层循环 | wait/set 是否只在 stage 入口/末尾；workspace slot 是否冲突 |
+| Cube 利用率低但 MTE 不高 | QK^T 与 PV 未重叠 | AIC/AIV 双特化重叠、Bk 分块、TileShape（参考 `GemmShape<128,128,128>`）|
+| 长上下文变慢 | KV 分块 / block_table 粒度 | blockSize=128 块重排是否与 kernel 消费一致 |
+| 非 128 对齐 tail 慢或错 | 尾块未 0 填充 | 尾块填充路径、bin/device 尺寸分离 |
+| 小 `Sq*H` 慢 | 核调度不足 | 先评估分块/核分配，不只调 TileShape |
+| GQA 场景慢 | head 合并策略 | 同 kvHead 的 query head 是否合并到 Mmad m 维 |
+
+性能报告必须把判断写进 `docs/perf/round_NNN/`：说明瓶颈属于 stage 重叠、flag、workspace、分块、尾块还是 baseline unsupported；A2 参考经验：正确重叠后 cube_util ~96%、与参考 example 长上下文 parity（1159μs vs 1166μs）。
+
 ## Code Modification Pattern
 
 ```diff

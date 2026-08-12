@@ -129,15 +129,17 @@ snake_case → CamelCase 类名一致映射（如 `catlass_matmul_add` → `Catl
 
 #### Step 1：算子类型与需求结构化
 
-根据算子特征确定类型（GEMM / Matmul + Epilogue / Quant Matmul / 其他可由 catlass 表达的融合算子）。
+根据算子特征确定类型（GEMM / Matmul + Epilogue / Quant Matmul / FlashAttention / 其他可由 catlass 表达的融合算子）。
 
 提取并结构化：算子功能、数学公式、I/O dtype/shape/布局、目标 SoC、转置约定、是否量化、约束条件。**信息不全则向上游追问，禁止臆测**。
+
+若命中 FlashAttention / MHA / GQA / fused attention / QK^T-softmax-V，先执行 `/catlass-op-design` 的 `references/kernels/flash-attention.md`：冻结 full-flow baseline（`aclnnFlashAttentionScore`）、**FA 内核来源锁定（catlass `examples/23_flash_attention_infer/`，复用 catlass examples/23）**、组件选型（BlockMmadQK/PV + EpilogueOnlineSoftmax/RescaleO）、BNSD 接口与 host 布局转换方案，再进入具体 catlass 组件选型。
 
 #### Step 2：加载 `/catlass-op-design` 完成 catlass 组件选型
 
 **强制加载** `/catlass-op-design` skill。按 skill 内的「选型方法」执行：
 
-1. **定位最接近的 catlass example**：在 `catlass/examples/` 找形态最接近的样例（例如 GEMM 选 `00_basic_matmul`，MatmulEpilogue 看 `03_matmul_add`，量化看 `12_quant_matmul`），记录路径与选型理由
+1. **定位最接近的 catlass example**：在 `catlass/examples/` 找形态最接近的样例（例如 GEMM 选 `00_basic_matmul`，MatmulEpilogue 看 `03_matmul_add`，量化看 `12_quant_matmul`）。**例外：FlashAttention 不走 example，直接用catlass `examples/23_flash_attention_infer/` 的 `FAInferKernel`**。记录路径与选型理由
 2. **组件选型表格**（写入 DESIGN.md）：ArchTag / BlockMmad / BlockEpilogue / BlockScheduler / Kernel
 3. **BlockEpilogue 槽位清单**（仅当 BlockEpilogue ≠ void）：打开 `catlass/include/catlass/epilogue/block/block_epilogue_<policy>.hpp`，列出每个 Tile 槽的模板形参与签名，标记「现成 / 粒度 A 自定义 / 粒度 B 新特化」
 4. **自定义 Tile 契约**（如有）：按 `/catlass-op-design` references/custom-epilogue.md 写出头文件骨架与契约

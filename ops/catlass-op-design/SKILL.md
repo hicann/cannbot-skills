@@ -79,6 +79,8 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 ## When to Use Each Source
 
 - **mmad + epilogue 最优选型（性能/精度决策）→ [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md)**
+- **FlashAttention / MHA / GQA / fused attention 类算子设计路由 → [references/kernels/flash-attention.md](references/kernels/flash-attention.md)**
+- **A2/A3 FlashAttention stage 分层、workspace/flag、online softmax 状态 → [../catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md](../catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md)**
 - 理解分层架构 → `catlass/docs/zh/3_API/gemm_api.md`
 - DispatchPolicy 选型 → `catlass/docs/zh/2_Design/01_kernel_design/03_dispatch_policies.md`
 - matmul 模板总览 → `catlass/docs/zh/2_Design/01_kernel_design/04_matmul_summary.md`
@@ -94,6 +96,7 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 ### Step 1: Identify Operator Type
 
 ```
+FlashAttention（QK^T→softmax→V 融合）？ → FlashAttention 路径（详见 [kernels/flash-attention.md](references/kernels/flash-attention.md)）
 量化（有 scale/dequant）？ → QuantMatmul 路径
 分组（多组独立 A×B）？     → Grouped Matmul 路径（详见 [kernels/grouped-matmul.md](references/kernels/grouped-matmul.md)）
 纯 matmul / matmul+激活？   → 标准 Matmul 路径（详见 [kernels/matmul.md](references/kernels/matmul.md)）
@@ -210,6 +213,8 @@ epilogue 操作数是否跨 N？
 | [architecture/03-kernel-layer.md](references/architecture/03-kernel-layer.md) | Kernel 类型、组装、Params |
 | [kernels/matmul.md](references/kernels/matmul.md) | **Matmul 类算子设计路由**：场景 A–F、组件选型、分支实例化 |
 | [kernels/grouped-matmul.md](references/kernels/grouped-matmul.md) | **Grouped Matmul（含 MoE 融合）设计路由**：分组 tiling、Async DispatchPolicy、★融合 epilogue 跨 N-block 风险评估、A2/950 平台能力核对 |
+| [kernels/flash-attention.md](references/kernels/flash-attention.md) | **FlashAttention（MHA/GQA）设计路由**：full-flow 判定与 baseline（aclnnFA）冻结、BlockMmadQK/PV + OnlineSoftmax/RescaleO 组件选型、AIC/AIV 协作、BNSD 接口转换、shape 覆盖矩阵、mixed tolerance 与性能基准、PAGED 平台陷阱 |
+| [a2-a3-flash-attention-stage-design.md](../catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md) | **A2/A3 FlashAttention stage 设计经验**：C1→V1→C2→V2 四段流水、online softmax 状态递推、GM workspace/CrossCoreFlag、尾块填充、AIC/AIV 重叠 |
 
 ## Never / Always
 
@@ -222,6 +227,7 @@ epilogue 操作数是否跨 N？
 - 把 `MatmulActivation`/`MatmulEpilogue`（整块 `[M,N]` HBM 往返）当作大 N 的**性能**交付方案
 - 用「每 slot 单 tile」的 per-block workspace 实现 SwiGLU 等**跨 N-half 门控** epilogue（大 N 会算错）
 - 臆定 TileShape 而不核算 L1/L0 容量；臆定 `UB_STAGES` 而不核算 UB 预算与事件 ID 上限
+- 命中 FlashAttention 场景时：跳过 baseline 冻结（aclnnFA）、在 A2 上走 `PAGED=false`、或把 BNSD 接口交给 kernel 运行时处理（应放 host）
 
 **ALWAYS**:
 - 先阅读 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档），再查 catlass 官方文档选型

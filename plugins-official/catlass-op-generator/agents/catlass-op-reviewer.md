@@ -128,6 +128,13 @@ python3 workflows/scripts/verify_cmake_config.py operators/{operator_name}/CMake
 
 C1–C7 任一不通过 → REVIEW.md 标记必须修复项；C8–C11 不通过 → 计入扣分。
 
+**FlashAttention 场景额外检视（FA1–FA11）**：命中 FlashAttention / MHA / GQA / fused attention 时，追加执行 `catlass-op-develop/references/patterns/flash-attention.md` 的 FA1–FA11 检查表，重点核查：
+- **FA3**：A2 上是否固定 `PAGED=true` + 恒等 block_table（`PAGED=false` 触发 aicore exception 应判定为必须修复）
+- **FA1**：公开接口是否严格 BNSD、布局转换是否在 host（kernel 无运行时布局分支）
+- **FA4**：KV 非 128 对齐尾块 0 填充、bin 读入尺寸与 device 尺寸分离
+- **FA9**：精度是否双口径（内部 golden + `aclnnFlashAttentionScore` 标杆对比），记录 max_abs / matched_ratio
+- 组件选型是否 BlockMmadQK/PV + EpilogueOnlineSoftmax/RescaleO（**复用catlass `examples/23_flash_attention_infer/` 的 FAInferKernel，复用 catlass examples/23**）
+
 #### Step 3：代码质量评估（7 维度评分）
 
 按下述维度逐项检查（`workflows/references/review-checklist.md` 中的通用 Ascend C 检视清单仍适用，但 catlass 算子的「计算 API」一项替换为「catlass 拼装合规性」检查）。
