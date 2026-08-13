@@ -1,0 +1,59 @@
+"""Plan-level simulator checks for {function_name}."""
+
+import torch
+
+from refs.compose import composed as planned_compose
+from refs.oracle import oracle
+{ref_imports}
+{kernel_imports}
+
+
+PLAN_ATOL = {plan_atol}
+PLAN_RTOL = {plan_rtol}
+IMPLEMENTATION_ATOL = {implementation_atol}
+IMPLEMENTATION_RTOL = {implementation_rtol}
+NODE_TOLERANCES = {node_tolerances}
+
+
+def _items(value):
+    return tuple(value) if isinstance(value, (tuple, list)) else (value,)
+
+
+def assert_close(actual, expected, atol, rtol, label):
+    actual_items = _items(actual)
+    expected_items = _items(expected)
+    if len(actual_items) != len(expected_items):
+        raise AssertionError("%s arity mismatch" % label)
+    for index, (act, exp) in enumerate(zip(actual_items, expected_items)):
+        torch.testing.assert_close(
+            act.float(), exp.float(), atol=atol, rtol=rtol,
+            msg=lambda message: "%s[%d]: %s" % (label, index, message),
+        )
+
+
+def run_dsl({input_args}):
+    {dsl_compose_body}
+
+
+def check_case(inputs, label):
+    {node_checks}
+    planned = planned_compose(*inputs)
+    actual = run_dsl(*inputs)
+    assert_close(
+        actual, planned, IMPLEMENTATION_ATOL, IMPLEMENTATION_RTOL,
+        label + " DSL vs planned compose",
+    )
+    assert_close(
+        actual, oracle(*inputs), PLAN_ATOL, PLAN_RTOL,
+        label + " DSL vs original oracle",
+    )
+
+
+def main():
+    torch.manual_seed(42)
+    {test_cases}
+    print("simulator vs refs: OK")
+
+
+if __name__ == "__main__":
+    main()

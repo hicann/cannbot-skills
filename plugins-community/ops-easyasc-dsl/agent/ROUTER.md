@@ -1,35 +1,55 @@
 # Agent Router
 
-First routing layer. Pick one route; each route names ONE starting file. The starting file (usually a playbook or the facts router) then points at the smaller files you actually need. Do not preload every drill-down listed — read only what the starting file tells you to, and stop once that file or the focused fact page it points to already answered your question.
+Read this file first and choose exactly one workflow. Then read
+[`common-language.md`](common-language.md) in full before opening the selected
+playbook. The router and common language are the fixed initial documentation
+baseline; do not preload catalogs or multiple playbooks.
 
-## Primary Routes
+## Workflow routes
 
-| Task | Start here | Then (only if needed) |
-|------|-----------|-----------------------|
-| **Quick fact / value look-up** (device caps, pipe pairs, mutex signatures, hard rules, simulator gotchas) | `agent/references/facts.md` (quick chooser) | one focused facts page; then `agent/references/constraints/<topic>.md` for the *why* |
-| **Write a new kernel** | `agent/playbooks/clarify-first.md` (mandatory Step 0) → `agent/playbooks/kernel-authoring.md` (tool-first fast path) | one focused facts / constraint / pattern file named by the playbook |
-| **Debug an existing kernel** | `agent/playbooks/kernel-debugging.md` (match the Symptom-to-check map first) | one focused facts page; then the constraint file named by the playbook section |
-| **Find an example kernel** | `agent/scripts/select_kernel_example.py` or `agent/references/examples/kernel-index.md` (filter to ≤3 candidates) | `agent/references/examples/kernel-catalog.md` (read ONLY the matching `###` entry) → source file |
-| **Practice problems (write-from-scratch)** | `agent/references/examples/kernel-practice.md` | — |
-| **Modify or add a tool** | `agent/playbooks/tool-authoring.md` | `agent/references/examples/tool-catalog.md` |
-| **Modify or extend docs** | `agent/playbooks/doc-authoring.md` | `README.md`, `README_CN.md`, `doc/`, `doc_cn/` |
-| **Repo structure question** | `agent/references/repo-map.md` | `doc/11_architecture_for_contributors.md` |
-| **Which code path implements X?** | `agent/references/code-paths.md` | `agent/references/simulator-v2.md` for sim-specific paths; then source/tests |
+Use the first matching row. A settled contract and an ONNX model are inputs to
+the single-kernel workflow; they do not create separate authoring routes.
 
-## Reading Rule
+| Request | Workflow |
+| --- | --- |
+| Explicitly author, integrate, debug, or optimize a Device-side AICPU kernel | [`aicpu-kernel-authoring.md`](playbooks/aicpu-kernel-authoring.md) |
+| Build one new runtime `@kernel` from PyTorch, ONNX, a golden, a formula, a settled contract, or a reference kernel | [`pytorch-to-single-kernel.md`](playbooks/pytorch-to-single-kernel.md) |
+| Explicitly decompose a PyTorch function into multiple runtime kernels | [`decompose-pytorch.md`](playbooks/decompose-pytorch.md) |
+| Implement DSL kernels from an existing verified decomposition | [`author-kernel-from-decomposition.md`](playbooks/author-kernel-from-decomposition.md) |
+| Debug an existing kernel | [`kernel-debugging.md`](playbooks/kernel-debugging.md) |
+| Optimize an existing correct kernel | [`kernel-optimization.md`](playbooks/kernel-optimization.md) |
+| Integrate or evaluate an EasyASC-generated ACLNN op in `cann-bench`, package assembled operators as a CANN Bench submission zip, or submit one to `cannbench.com` and read its scored results | [`cann-bench-aclnn-evaluation.md`](playbooks/cann-bench-aclnn-evaluation.md) |
+| Change framework, stubs, parser, simulator, tests, tools, catalogs, or documentation | [`repository-maintenance.md`](playbooks/repository-maintenance.md) |
 
-1. `facts.md` is the chooser for quick factual questions — jump from there to one focused facts page, not all of them.
-2. For authoring/debugging, read one playbook and let it pick which constraint / pattern / example files you actually need. Do not preload the full list.
-3. For examples, prefer the selector tool first; otherwise filter with the index, then open only the one catalog entry that matches.
-4. Open source files only when the guidance layers stop being enough.
-5. `Files to study` / `Fallback references` lists at the bottom of a constraint or pattern file are depth pointers, NOT mandatory follow-ups. If the file you are in already answered your question, stop. In particular, do not bounce back through the facts router once you already reached the focused facts page that owns the value you needed.
+Single-kernel and decomposition routes are mutually exclusive. Do not turn a
+one-kernel request into host composition or multiple launches without an
+explicit contract change.
 
-## Machine-readable fallbacks
+## Focused lookups
 
-- `agent/index/kernels.json`, `agent/index/tools.json` — for programmatic selection tools only; agents should prefer the markdown catalogs.
+Open only what the selected workflow requires.
 
-## Deeper references (addressed by the starting files above)
+| Need | Reference |
+| --- | --- |
+| Kernel authoring safety gate | [`authoring-preflight.md`](references/authoring-preflight.md) |
+| Explicitly requested AICPU authoring or integration | [`aicpu-authoring.md`](references/aicpu-authoring.md) |
+| Device capacity and runtime facts | [`facts-device-runtime.md`](references/facts-device-runtime.md) |
+| Detailed authoring facts and DBuff formulas | [`facts-authoring.md`](references/facts-authoring.md) |
+| Simulator, `OpExec`, or `shape_bindings` | [`facts-simulator-opexec.md`](references/facts-simulator-opexec.md) |
+| Current simulator cycle model | [`cycle-model.md`](references/cycle-model.md) |
+| Composite API recipe | [`composite-api-recipes.md`](references/composite-api-recipes.md) |
+| Reusable multi-primitive dataflow | [`pattern-index.md`](references/pattern-index.md) |
+| Known pitfall | [`pitfall-records.md`](references/pitfall-records.md) |
+| Example kernel | `python agent/scripts/select_kernel_example.py --device <a2|a5> --query "..." --limit 3` |
+| Repository layout or implementation path | [`repo-map.md`](references/repo-map.md) or [`code-paths.md`](references/code-paths.md) |
+| Missing evidence or capability claim | [`evidence-escalation.md`](references/evidence-escalation.md) |
+| Unresolved semantic ambiguity | [`clarification-template.md`](references/clarification-template.md) |
+| Terminology owner or Chinese/English alias | revisit the matching section of the already-loaded [`common-language.md`](common-language.md) |
 
-- `agent/references/constraints/` — topic-focused constraint files (tiling, autosync, counters, precision, tail-safety, online-softmax-tail, datamove, reduction, mask, vec-stride, a2-device, a5-device, a2-vec-kernel, vec-reduction-a2)
-- `agent/references/patterns/` — topology-specific pipeline shapes (a2-* and generic cube/vec combinations)
-- `agent/references/simulator-v2.md` — V2 runtime and bridge map
+## Reading rules
+
+- After the fixed router and common-language baseline, let the selected playbook
+  name the next evidence needed.
+- Prefer a selector or index before a catalog or source file.
+- Treat patterns as a fast path, not a closed set.
+- Stop reading when the current layer answers the task.

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "name": "{sub_name}",
+      "ref": "refs/{sub_name}_ref.py",
+      "check": "refs/{sub_name}_check.py",
+      "inputs": ["{input}"],
+      "outputs": ["{output}"]
+    }
+  ],
+  "edges": [
+    {
+      "tensor": "{tensor}",
+      "producer": "{producer_or_public_input}",
+      "consumers": ["{consumer_or_public_output}"],
+      "shape": "{shape}",
+      "dtype": "{dtype}",
+      "layout": "{layout}"
+    }
+  ],
+  "public_inputs": ["{input}"],
+  "public_outputs": ["{output}"]
+}

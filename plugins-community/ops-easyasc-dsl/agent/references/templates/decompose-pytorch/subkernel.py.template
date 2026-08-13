@@ -1,0 +1,18 @@
+"""Pure PyTorch reference for sub-kernel {sub_name}."""
+
+import torch
+
+
+def subkernel({args}):
+    """Return the expected output for this sub boundary."""
+    {body}
+
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    {sample_inputs}
+    result = subkernel({sample_call_args})
+    if isinstance(result, tuple):
+        print([tuple(item.shape) for item in result], [item.dtype for item in result])
+    else:
+        print(tuple(result.shape), result.dtype)

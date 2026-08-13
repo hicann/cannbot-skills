@@ -1,84 +1,83 @@
 # Repository Map
 
-Use this file when the question is about where something lives in the repository.
-Workflow routing lives in `agent/ROUTER.md`; this file is not a second task router.
+Use this file for layout and ownership. Workflow selection belongs only to
+`agent/ROUTER.md`.
 
-## Top-level areas
+## Top-level owners
 
-- `skill/`
-  - skill entrypoint (`skill/SKILL.md`); the only file the skill surface is supposed to expose directly
-- `agent/`
-  - the reusable easyasc DSL to AscendC workflow used by the skill
-  - router-first guidance, focused references, playbooks, scripts, archived payloads, and examples
-- `README.md`, `README_CN.md`
-  - top-level project and documentation entry points
-- `AGENTS.md`, `CLAUDE.md`
-  - repository-local working rules for agent-style contributors
+- `easyasc/`: DSL facades, stubs, parser/codegen, simulator, runtime models,
+  dtype helpers, and shortcut implementations.
+- `agent/example/kernels/a2/`, `agent/example/kernels/a5/`: tracked single-kernel examples by device.
+  CANN Bench competition kernels live in the sibling
+  `easyasc_cannbench_kernels` extension repository, mirroring these paths
+  under category-local `cann_bench/` directories; an external `cann-bench`
+  checkout is not part of either repository and is resolved only through
+  `machine_specs.md`.
+- `agent/example/projects/a5/`: multi-kernel projects. Current roots are `gdn_fwd`,
+  `gdn_bwd`, `kda_fwd`, `kda_bwd`, `delta_rule_fwd`, and `delta_rule_bwd`.
+- `agent/example/demo/`: public end-to-end demonstrations that are not cataloged kernel
+  references.
+- `agent/example/testcases/`: parser, codegen, simulator, and tool tests, described by
+  `agent/example/testcases/README.md`.
+- `agent/scripts/`: selectors, generators, diagnostics, and repository checks.
+- `doc/`, `doc_cn/`: public English and Chinese documentation.
+- `agent/`: router-first task guidance and focused repository knowledge.
 
-Restored on demand by `agent/scripts/init.sh`:
+Machine access belongs only in the git-ignored root `machine_specs.md`.
+Temporary runners and exercises belong under ignored `tmp/<task>/` and are not
+repository evidence.
 
-- `easyasc/`
-  - core DSL, parser/codegen, simulator, runtime models, and public API surface
-- `doc/`
-  - English project and API documentation
-- `doc_cn/`
-  - Chinese mirror of the documentation set
-- `agent/example/kernels/`
-  - curated kernel examples, reference kernels, and runnable validation stories
-- `agent/example/demo/`
-  - manual runners and compile/integration demos grouped by device family
+## Agent layout
 
-Removed from the delivered skill bundle:
+```text
+agent/
+├── ROUTER.md
+├── playbooks/
+│   ├── aicpu-kernel-authoring.md
+│   ├── pytorch-to-single-kernel.md
+│   ├── decompose-pytorch.md
+│   ├── author-kernel-from-decomposition.md
+│   ├── kernel-debugging.md
+│   ├── kernel-optimization.md
+│   ├── cann-bench-aclnn-evaluation.md
+│   └── repository-maintenance.md
+├── references/
+│   ├── adapters/                  # ONNX and legacy-plan input adapters
+│   ├── constraints/               # device/topic invariants
+│   ├── patterns/                  # reusable multi-primitive dataflows
+│   ├── optimization/              # optimization-only levers
+│   ├── templates/                 # decomposition and authoring artifacts
+│   ├── agent/example/demo/                  # human catalogs and generated lean index
+│   ├── aicpu-authoring.md
+│   ├── authoring-preflight.md
+│   ├── authoring-overview.md
+│   ├── clarification-template.md
+│   ├── facts-device-runtime.md
+│   ├── facts-authoring.md
+│   ├── facts-simulator-opexec.md
+│   ├── cycle-model.md
+│   ├── pattern-index.md
+│   ├── code-paths.md
+│   ├── pitfall-records.md
+│   └── repo-map.md
+├── common-language.md             # terms and Chinese/English aliases only
+├── diary.md                       # temporary internal kernel-change notes
+└── index/                         # generated JSON indexes
+```
 
-- `testcases/`
-  - no longer part of the delivered tree; references to it elsewhere describe historical layout only
+## Ownership boundaries
 
-## `agent/` layout
+- repository layout: this file and `doc/11_architecture_for_contributors.md`
+- implementation lookup: `code-paths.md`
+- target capacities and runtime behavior: `facts-device-runtime.md`
+- cross-cutting authoring safety: `authoring-preflight.md`
+- simulator use: `facts-simulator-opexec.md`
+- cycle estimator meaning and owners: `cycle-model.md`
+- reusable dataflow: `pattern-index.md`
+- kernel/tool selection metadata: Markdown catalogs under `agent/example/demo/`
+- generated discovery views: `agent/references/examples/kernel-index.md` and
+  `agent/index/*.json`
+- recurring failure routing: `pitfall-records.md`
 
-- `agent/ROUTER.md`
-  - first task router
-- `agent/scripts/`
-  - repository-maintenance scripts, including `init.sh` that restores archived trees
-- `agent/assets/`
-  - archived payloads (`ops-easyasc-dsl-runtime.tar.gz`, `ops-easyasc-dsl-example.tar.gz`)
-- `agent/playbooks/`
-  - short workflow guides for common tasks
-- `agent/references/contract-intake.md`
-  - intake rules when `clarify-first.md` needs to extract a contract from a reference file
-- `agent/references/facts.md`
-  - quick chooser for factual lookups
-- `agent/references/facts-*.md`
-  - focused fact sheets for device/runtime values, authoring rules, and simulator/`OpExec` gotchas
-- `agent/references/constraints/`
-  - topic-focused invariants such as tiling, autosync, counters, precision, tails, and device-specific limits
-- `agent/references/patterns/`
-  - topology-specific pipeline patterns, especially the a2 mixed-pipeline routes
-- `agent/references/examples/`
-  - human-readable kernel and tool catalogs, plus optional deep notes for a few complex kernels
-- `agent/references/code-paths.md`
-  - implementation-path lookup guide when the issue is in lowering or runtime behavior
-- `agent/references/repo-map.md`
-  - this file
-- `agent/references/simulator-v2.md`
-  - focused simulator runtime and bridge map
-- `agent/index/`
-  - generated machine-readable catalogs derived from the example markdown files
-- `agent/example/`
-  - restored kernel examples (`agent/example/kernels/`) and manual demos (`agent/example/demo/`)
-
-## Owner files
-
-Use the smallest owner file that answers the question:
-
-- repository layout and area ownership -> `agent/references/repo-map.md`
-- implementation-path lookup -> `agent/references/code-paths.md`
-- contributor-facing architecture fallback -> `doc/11_architecture_for_contributors.md`
-- kernel example metadata -> `agent/references/examples/kernel-index.md` and `agent/references/examples/kernel-catalog.md`
-- tool summaries -> `agent/scripts/tools_summary.md`
-
-## Reading rule
-
-- use `agent/ROUTER.md` for workflow questions
-- use this file for layout and ownership questions
-- if archived content (`easyasc/`, `doc/`, `doc_cn/`, `agent/example/`) is missing, run `bash agent/scripts/init.sh`
-- open source files only after the map is no longer enough
+Do not copy a stable fact into the glossary, router, diary, or a generated
+index. Update the owner and link to it.

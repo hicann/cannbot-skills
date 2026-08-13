@@ -1,4 +1,4 @@
-# Deep Note: `agent/example/kernels/a5/flash_attn_full_fp8_causal.py`
+# Deep Note: `agent/example/kernels/a5/attention/flash_attn_full_fp8_causal.py`
 
 Open this file only after the short catalog entry confirmed the kernel is relevant.
 Its job is to capture the extra rationale that would otherwise bloat the catalog entry.
@@ -13,12 +13,12 @@ Its job is to capture the extra rationale that would otherwise bloat the catalog
 
 - treat both causal masking and `S2` tail invalidation in score space before `rowmax`
 - keep future fully-invalid tiles out of the loop with `active_tiles_n = Min(tiles_n, tile_m + 1)`
-- publish vec-produced `e5m2` probability tiles into ND `l1p` for the delayed cube consumer
+- publish vec-produced `e5m2` probability tiles into default-NZ `l1p` via UB -> L1 nd2nz for the delayed cube consumer
 - keep separate `l0c_qk/l0c_pv` and `ub_score/ub_pv` families; do not collapse them into one scratch lineage
 - compress row-state scratch into narrow `[1,64]` UB tensors so the larger full-sequence path still fits local memory
 
 ## Prefer another kernel when
 
 - the query side is still row-specialized (`L=1`) and `mha_ifa*` already matches
-- stage 2 truly wants NZ-published probability tiles
+- stage 2 truly wants contiguous ND probability tiles instead of cube-ready NZ operands
 - the contract is half-domain or non-fp8 rather than `e5m2` `q/k/v`

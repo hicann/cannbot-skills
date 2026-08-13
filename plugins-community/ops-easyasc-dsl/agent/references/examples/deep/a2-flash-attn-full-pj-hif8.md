@@ -1,4 +1,4 @@
-# Deep Note: `agent/example/kernels/a2/flash_attn_full_pj_hif8.py`
+# Deep Note: `agent/example/kernels/a2/attention/flash_attn_full_pj_hif8.py`
 
 Open this file only after the short catalog entry confirmed the kernel is relevant.
 

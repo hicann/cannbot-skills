@@ -1,0 +1,54 @@
+"""Pure PyTorch composition check for {function_name} / {plan_id}."""
+
+import sys
+from pathlib import Path
+
+import torch
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from oracle import oracle  # noqa: E402
+{sub_imports}
+
+
+PLAN_ATOL = {plan_atol}
+PLAN_RTOL = {plan_rtol}
+
+
+def composed({input_args}):
+    {compose_body}
+
+
+def sample_inputs():
+    torch.manual_seed(42)
+    {sample_body}
+    return {sample_return}
+
+
+def _as_tuple(value):
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(value)
+    return (value,)
+
+
+def main():
+    inputs = sample_inputs()
+    expected = _as_tuple(oracle(*inputs))
+    actual = _as_tuple(composed(*inputs))
+    if len(actual) != len(expected):
+        raise AssertionError(f"arity mismatch: actual={len(actual)} expected={len(expected)}")
+    for idx, (act, exp) in enumerate(zip(actual, expected)):
+        if not torch.isfinite(act).all() or not torch.isfinite(exp).all():
+            raise AssertionError(f"non-finite output at index {idx}")
+        torch.testing.assert_close(
+            act.float(), exp.float(), atol=PLAN_ATOL, rtol=PLAN_RTOL,
+        )
+    print("compose: OK")
+
+
+if __name__ == "__main__":
+    main()

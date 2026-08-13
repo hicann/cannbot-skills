@@ -1,0 +1,22 @@
+"""End-to-end PyTorch oracle for {function_name}.
+
+This file lives inside one plan's refs/ directory and is the local ground truth
+for refs/compose.py and ../check_simulator_vs_ref.py.
+"""
+
+import torch
+
+
+def oracle(*args, **kwargs):
+    """Return the original PyTorch result for the plan inputs."""
+    {oracle_body}
+
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    {sample_inputs}
+    result = oracle({sample_call_args})
+    if isinstance(result, tuple):
+        print([tuple(item.shape) for item in result], [item.dtype for item in result])
+    else:
+        print(tuple(result.shape), result.dtype)

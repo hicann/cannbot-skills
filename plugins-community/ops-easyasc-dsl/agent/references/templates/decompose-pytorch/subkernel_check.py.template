@@ -1,0 +1,51 @@
+"""Local randomized check for {sub_name}_ref.py."""
+
+import sys
+from pathlib import Path
+
+import torch
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from {sub_name}_ref import subkernel  # noqa: E402
+
+
+ATOL = {atol}
+RTOL = {rtol}
+
+
+def expected({args}):
+    {expected_body}
+
+
+def sample_inputs():
+    torch.manual_seed(42)
+    {sample_body}
+    return {sample_return}
+
+
+def _as_tuple(value):
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(value)
+    return (value,)
+
+
+def main():
+    inputs = sample_inputs()
+    actual = _as_tuple(subkernel(*inputs))
+    expected_items = _as_tuple(expected(*inputs))
+    if len(actual) != len(expected_items):
+        raise AssertionError(f"arity mismatch: actual={len(actual)} expected={len(expected_items)}")
+    for idx, (act, exp) in enumerate(zip(actual, expected_items)):
+        if not torch.isfinite(act).all() or not torch.isfinite(exp).all():
+            raise AssertionError(f"non-finite output at index {idx}")
+        torch.testing.assert_close(act.float(), exp.float(), atol=ATOL, rtol=RTOL)
+    print("{sub_name}: OK")
+
+
+if __name__ == "__main__":
+    main()

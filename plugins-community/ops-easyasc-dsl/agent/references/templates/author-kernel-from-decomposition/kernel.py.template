@@ -1,0 +1,50 @@
+"""Self-contained EasyASC kernel for decomposition node {sub_name}."""
+
+import torch
+
+from easyasc.{hw_target} import *  # noqa: F401, F403
+from easyasc.simulator import SimulatorConfig
+
+
+DEFAULT_CORE_COUNT = {default_core_count}
+DEFAULT_SIM_TIMEOUT_S = {default_sim_timeout_s}
+SHAPE_BINDINGS = {shape_bindings}
+
+
+{helper_blocks}
+
+
+@kernel()
+def {kernel_name}({kernel_args}):
+    {kernel_body}
+
+
+def run({run_args}, simulator=True, trace=None, out_dir=""):
+    {shape_derivation}
+    {output_placeholders}
+    previous_config = getattr({kernel_name}, "_simulator_config", None)
+    if simulator:
+        {kernel_name}._simulator_config = SimulatorConfig(
+            core_count=DEFAULT_CORE_COUNT,
+            execution_timeout_s=DEFAULT_SIM_TIMEOUT_S,
+            trace_enabled=bool(trace),
+        )
+    try:
+        return OpExec(
+            {kernel_name}, out_dir=out_dir, simulator=simulator, trace=trace,
+        )({opexec_args}, shape_bindings=SHAPE_BINDINGS)
+    finally:
+        if simulator and previous_config is None:
+            try:
+                delattr({kernel_name}, "_simulator_config")
+            except AttributeError:
+                pass
+        elif simulator:
+            {kernel_name}._simulator_config = previous_config
+
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    {main_inputs}
+    result = run({main_call_args})
+    print(result)

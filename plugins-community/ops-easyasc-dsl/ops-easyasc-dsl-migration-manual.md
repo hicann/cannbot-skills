@@ -1,294 +1,508 @@
-# Legacy Repo Migration Playbook
+# ops-easyasc-dsl Migration Manual
 
-Use this playbook when you need to transform the original `easyasc` repository layout into the current `ops-easyasc-dsl` skill-oriented layout.
+Use this guide to migrate validated EasyASC content from:
 
-Read this file first for migration tasks.
-Do not start by guessing folder moves from memory.
+- source: `<source-easyasc-root>`
+- target: `<cannbot-skills-root>/plugins-community/ops-easyasc-dsl`
 
-## Goal State
+The source repository owns the current EasyASC content. The target repository
+owns the delivery layout. Migration therefore follows one rule:
 
-The migrated repository should end in this shape:
+> Preserve the target structure; rebuild its managed content from the source.
 
-- repository root name: `ops-easyasc-dsl`
-- `agent/` is the primary skill-facing surface
-- `agent/SKILL.md` is the entrypoint
-- `agent/ROUTER.md` drives progressive disclosure
-- `agent/scripts/` holds repository-maintenance scripts
-- `agent/example/kernels/` holds curated kernel examples
-- `agent/example/demo/` holds manual demo programs
-- `agent/assets/ops-easyasc-dsl-runtime.tar.gz` stores the archived `easyasc/`, `doc/`, and `doc_cn/` payload
-- `agent/scripts/init.sh` restores `easyasc/`, `doc/`, and `doc_cn/` on demand
-- `testcases/` is removed from the delivered skill bundle
-- delivered `.py` / `.sh` / `.bash` files carry the required script license header
-- delivered `.h` / `.cpp` files carry the required C/C++ license header
+The target's existing file contents are not a compatibility boundary. Files may
+be added, replaced, renamed, or deleted in large numbers as long as the target
+structure, entrypoints, archive contract, and fresh-user workflow remain valid.
 
-## Migration Order
+This source-side manual is authoritative. A same-name copy in the target is a
+legacy snapshot until this file is migrated over it.
 
-Apply the transformation in this order so paths stay valid while you edit the repository:
+## 1. Migration contract
 
-1. Inspect the original tree.
-2. Remove obsolete top-level content.
-3. Move repository tools into the skill surface.
-4. Move runnable examples into the skill surface.
-5. Convert `agent/` into a real skill entrypoint.
-6. Archive the runtime/docs payload and add an initialization script.
-7. Rename the repository root.
-8. Repair documentation, routes, and path references.
-9. Apply the required license headers.
-10. Validate the migrated repository from a fresh-user workflow.
+### 1.1 What must remain stable
 
-## Detailed Steps
+The following are structural contracts:
 
-### 1. Inspect the original tree
+- the plugin remains at `plugins-community/ops-easyasc-dsl/`;
+- `SKILL.md` (plugin root) remains the user-facing entrypoint;
+- `agent/ROUTER.md` remains the task router;
+- `agent/common-language.md` remains the fixed terminology baseline;
+- target-facing playbooks and references remain under `agent/`;
+- delivered maintenance tools remain under `agent/scripts/`;
+- generated indexes remain under `agent/index/`;
+- the two payload archives remain under `agent/assets/`;
+- `agent/scripts/init.sh` restores the archived payloads;
+- runtime/docs restore to `easyasc/`, `doc/`, and `doc_cn/`;
+- examples restore below `agent/example/`.
 
-Confirm the original repository still has the legacy layout:
+These paths and roles must survive. Their old bytes do not need to survive.
 
-- top-level `easyasc/`
-- top-level `doc/`
-- top-level `doc_cn/`
-- top-level `kernels/`
-- top-level `demo/`
-- top-level `tools/`
-- top-level `testcases/`
-- existing `agent/` content that is not yet a complete skill entrypoint
+### 1.2 What may change
 
-Record which files describe structure or commands before moving anything:
+Within the protected structure, migration may:
 
-- `README.md`
-- `README_CN.md`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `agent/ROUTER.md`
-- `agent/references/repo-map.md`
-- `agent/references/code-paths.md`
+- replace an existing file with the current source version;
+- delete a stale target file that no longer has a source owner;
+- add new source files and subdirectories;
+- treat a source rename as a target deletion plus addition;
+- rewrite target entry documents for target paths and archive-backed usage;
+- rebuild catalogs, generated indexes, and both archives;
+- remove obsolete target-only semantic surfaces.
 
-### 2. Remove obsolete top-level content
+For example, an obsolete target-only documentation role is not a protected
+structural anchor. It may be deleted when the current EasyASC routing model no
+longer uses it. Likewise, keeping `agent/playbooks/` does not require keeping
+every historical playbook inside it.
 
-- Delete `testcases/` from the delivered repository.
-- Treat removed tests as historical context only; if they need to be mentioned, describe them as removed from the skill bundle rather than still available.
+### 1.3 What requires a separate design change
 
-### 3. Move repository tools into the skill surface
+Do not change these incidentally during content migration:
 
-- Create `agent/scripts/` if it does not exist.
-- Move every file from top-level `tools/` into `agent/scripts/`.
-- Preserve script filenames so existing references can be updated with simple path rewrites.
-- Move or regenerate the tool summary file under `agent/scripts/tools_summary.md`.
+- the plugin root or the root `SKILL.md` entrypoint location;
+- the archive-backed delivery model;
+- archive names or `init.sh` restore destinations;
+- `agent/scripts/`, `agent/index/`, or `agent/assets/` ownership;
+- the four `agent/example/` content classes;
+- the parent repository's plugin installation model.
 
-Expected path rewrite:
+If one of those needs to change, describe and review it as a packaging or
+plugin-architecture change rather than hiding it inside a migration.
 
-- `tools/<name>` -> `agent/scripts/<name>`
+## 2. Protected target structure
 
-### 4. Move runnable examples into the skill surface
-
-- Create `agent/example/`.
-- Move top-level `kernels/` into `agent/example/kernels/`.
-- Move top-level `demo/` into `agent/example/demo/`.
-- Remove the original top-level `kernels/` and `demo/` directories after the move.
-
-Expected path rewrites:
-
-- `kernels/<path>` -> `agent/example/kernels/<path>`
-- `demo/<path>` -> `agent/example/demo/<path>`
-
-### 5. Convert `agent/` into a real skill entrypoint
-
-Add or rewrite these files:
-
-- `agent/SKILL.md`: user-facing skill entrypoint
-- `agent/ROUTER.md`: first routing layer with progressive disclosure
-
-`agent/SKILL.md` should:
-
-- explain that `agent/scripts/init.sh` must run before reading archived runtime/docs content
-- point readers to `agent/ROUTER.md`
-- describe the preferred read order: router -> one playbook -> one focused reference -> one source example
-- list `agent/example/`, `agent/scripts/`, and `agent/assets/`
-- avoid machine-specific absolute paths in environment guidance
-
-`agent/ROUTER.md` should:
-
-- route kernel authoring to `agent/playbooks/kernel-authoring.md`
-- route kernel debugging to `agent/playbooks/kernel-debugging.md`
-- route tool work to `agent/playbooks/tool-authoring.md`
-- route documentation work to `agent/playbooks/doc-authoring.md`
-- route repo-structure questions to `agent/references/repo-map.md`
-
-### 6. Archive the runtime/docs payload and add an initialization script
-
-Create a compressed archive that contains exactly:
-
-- `easyasc/`
-- `doc/`
-- `doc_cn/`
-
-Recommended artifact path:
-
-- `agent/assets/ops-easyasc-dsl-runtime.tar.gz`
-
-Then create:
-
-- `agent/scripts/init.sh`
-
-`init.sh` should:
-
-- resolve the repository root relative to itself
-- verify that the archive exists
-- restore `easyasc/`, `doc/`, and `doc_cn/` only when missing
-- be safe to run multiple times
-
-After the archive and init script are in place:
-
-- delete the unpacked `easyasc/`, `doc/`, and `doc_cn/` trees from the repository snapshot
-- rely on `init.sh` to restore them when needed
-- whenever you later edit restored files under `easyasc/`, `doc/`, or `doc_cn/`, rebuild `agent/assets/ops-easyasc-dsl-runtime.tar.gz` and delete the unpacked trees again so the delivered repository returns to the skill-only state
-
-### 7. Rename the repository root
-
-- Rename the top-level checkout directory from `easyasc` to `ops-easyasc-dsl`.
-- Update every document and script that still mentions the old repository root name when the new name matters.
-
-### 8. Repair documentation, routes, and path references
-
-Update all docs and scripts that referenced removed or moved paths.
-
-Mandatory rewrite categories:
-
-- command examples that referenced `kernels/...`
-- command examples that referenced `demo/...`
-- tool references that referenced `tools/...`
-- repository maps that still describe `testcases/`
-- skill/router docs that do not yet mention `init.sh`
-- environment guidance that hardcodes a machine-specific absolute path
-- generated scripts or runtime helpers that hardcode a machine-specific CANN install root
-
-Preferred style after the migration:
-
-- use repo-relative paths such as `agent/example/kernels/...`
-- use environment variables such as `ASCEND_HOME_PATH` instead of fixed host paths
-- if an environment name is mentioned, present it as an example rather than a required default
-- check both the visible repository files and the archived `easyasc/`, `doc/`, `doc_cn/` payload before declaring the migration complete
-
-Practical repair checklist:
-
-- update visible docs such as `README.md`, `README_CN.md`, `AGENTS.md`, `CLAUDE.md`, and `agent/SKILL.md`
-- if the archive has already been restored once, inspect `easyasc/`, `doc/`, and `doc_cn/` for hardcoded host paths such as `/home/ubuntu/...` or `/usr/local/Ascend/...`
-- update `easyasc/kernelbase/kernelbase.py` so generated scripts prefer environment variables over a fixed CANN path
-- update any restored helper scripts under `easyasc/resources/` that still assume a fixed local install path
-- normalize every validation example to `python agent/example/kernels/a5/matmul_float_mmad.py`
-- after fixing restored files, rebuild `agent/assets/ops-easyasc-dsl-runtime.tar.gz` and remove the unpacked trees again
-
-### 9. Apply the required license headers
-
-Before final delivery, add the required license headers to all delivered source and script files.
-
-For `.py`, `.sh`, and `.bash` files, prepend this header.
-If a file has a shebang, keep the shebang as the first line and insert the header immediately after it:
+The checked-in target must retain this shape:
 
 ```text
-# ----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# ----------------------------------------------------------------------------------------------------------
+ops-easyasc-dsl/
+├── AGENTS.md
+├── CLAUDE.md
+├── README.md
+├── README_CN.md
+├── ops-easyasc-dsl-migration-manual.md
+├── requirements.txt
+├── sitecustomize.py
+├── wsl_setenv.sh
+├── skill/
+│   └── SKILL.md
+└── agent/
+    ├── ROUTER.md
+    ├── common-language.md
+    ├── assets/
+    │   ├── ops-easyasc-dsl-runtime.tar.gz
+    │   └── ops-easyasc-dsl-example.tar.gz
+    ├── index/
+    ├── playbooks/
+    ├── references/
+    └── scripts/
+        └── init.sh
 ```
 
-For `.h` and `.cpp` files, prepend this header:
+Files such as `agent/common-language.md`, `agent/diary.md`, individual
+playbooks, individual references, mapped tools, catalogs, and generated JSON
+belong to content zones. They should exist when required by the current source
+workflow, but their historical target versions are not structural anchors.
+
+After `bash agent/scripts/init.sh`, the expanded shape must be:
 
 ```text
-/**
- * Copyright (c) 2026 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
-
-
-/*
- * Copyright (c) Huawei Technologies Co., Ltd. 2022-2023. All rights reserved.
- */
+ops-easyasc-dsl/
+├── easyasc/
+├── doc/
+├── doc_cn/
+└── agent/
+    └── example/
+        ├── kernels/
+        ├── demo/
+        ├── projects/
+        └── testcases/
 ```
 
-License-header checklist:
+The expanded trees are working copies of archived content. Under the current
+packaging model they are removed again before commit; the rebuilt archives are
+the checked-in payload.
 
-- apply headers to the delivered repository tree, not just to manually edited files
-- include files under `agent/`, restored `easyasc/`, restored `doc/` helper scripts, generated `b.sh` / `r.sh`, and generated runtime source files if they are part of the delivered snapshot
-- make the insertion idempotent so rerunning it does not duplicate headers
-- after any validation run that creates new `.py`, `.sh`, `.bash`, `.h`, or `.cpp` files, rerun the license-header pass before finalizing the migration
+## 3. Content ownership
 
-### 10. Validate the migrated repository
+Treat the target as a set of independently managed zones. Never mirror the
+source repository onto the target plugin root in one operation.
 
-Validate from the perspective of a fresh user:
+| Target zone | Content owner | Migration behavior |
+| --- | --- | --- |
+| `SKILL.md`, `agent/scripts/init.sh`, archive names and restore contract | target integration | Preserve their roles and paths; rewrite content when source routing or payloads change. |
+| Root README/agent guidance and visible `agent` docs | current source semantics plus target path adaptation | Reconcile to the current source document set; delete superseded target-only semantic files. |
+| `agent/scripts/*.py` | mapped source `tools/*.py` | Replace from source and adapt target root calculation; retain documented target-only integration scripts. Delivered inside the runtime archive (restored by `init.sh`), not as tracked plain files. |
+| `agent/scripts/tools_summary.md` | target quick-reference integration | Regenerate or rewrite from the delivered tool surface. |
+| `agent/index/*.json` | Markdown catalogs and index generator | Regenerate; never preserve or hand-edit stale JSON. |
+| runtime archive | source `easyasc/`, `doc/`, `doc_cn/` | Reconcile full selected trees, then repack. |
+| example archive | mapped source examples/projects/tests | Reconcile full selected trees under the four target containers, then repack. |
+| local scratch and workstation files | no target owner by default | Exclude unless deliberately productized. |
 
-1. start from the migrated repository root
-2. run `bash agent/scripts/init.sh`
-3. confirm that `easyasc/`, `doc/`, and `doc_cn/` are restored
-4. run `python agent/example/kernels/a5/matmul_float_mmad.py`
-5. confirm that the example validates both:
-   - `OpExec(..., simulator=True)`
-   - `OpExec(..., simulator=False)`
-6. if the validation run generates fresh `b.sh`, `r.sh`, or runtime source files, rerun the license-header pass
-7. rebuild `agent/assets/ops-easyasc-dsl-runtime.tar.gz` if the restored trees were edited during validation or repair
-8. remove the unpacked `easyasc/`, `doc/`, and `doc_cn/` trees again so the final delivered repository stays skill-only
+For each managed zone, the desired result is:
 
-If the non-simulator path is slow, let it complete naturally instead of forcing a shell timeout into the repository script unless the user explicitly asks for that behavior.
+```text
+mapped current source content
++ explicitly listed target-integration files
+- stale target content
+```
 
-## Files Commonly Updated During This Migration
+A target-only file is retained only when its target-specific purpose is stated.
+"It was already there" is not a retention reason.
 
-- `README.md`
-- `README_CN.md`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `agent/SKILL.md`
-- `agent/ROUTER.md`
-- `agent/references/repo-map.md`
-- `agent/references/code-paths.md`
-- `agent/references/examples/kernel-catalog.md`
-- `agent/references/examples/tool-catalog.md`
-- `agent/index/kernels.json`
-- `agent/index/tools.json`
-- `agent/playbooks/*.md`
-- `agent/scripts/tools_summary.md`
-- restored `easyasc/kernelbase/kernelbase.py`
-- restored `easyasc/resources/debug/build.sh`
-- restored `easyasc/resources/debug/run.sh`
-- restored `doc/01_quickstart.md`
-- restored `doc_cn/01_quickstart.md`
-- restored `doc_cn/index.md`
+## 4. Source-to-target mapping
 
-## Anti-Patterns
+| Source path | Target path | Rule |
+| --- | --- | --- |
+| `easyasc/` | restored `easyasc/` | Preserve the source-relative subtree inside the runtime archive. |
+| `doc/` | restored `doc/` | Preserve the source-relative subtree inside the runtime archive. |
+| `doc_cn/` | restored `doc_cn/` | Preserve the source-relative subtree inside the runtime archive. |
+| `kernels/` | restored `agent/example/kernels/` | Preserve the path relative to `kernels/`. |
+| `examples/` | restored `agent/example/demo/` | Use an explicit demo mapping; keep device grouping meaningful. |
+| `projects/` | restored `agent/example/projects/` | Preserve the path relative to `projects/`. |
+| `testcases/` | restored `agent/example/testcases/` | Preserve the path relative to `testcases/`. |
+| `tools/*.py` | `agent/scripts/*.py` | Adapt repository-root resolution and target-facing paths. |
+| `agent/ROUTER.md`, `agent/common-language.md`, `agent/playbooks/`, `agent/references/`, `agent/diary.md` | same semantic paths under target `agent/` | Reconcile the source-owned document set without overwriting target packaging directories. |
+| `agent/references/examples/*-catalog.md` | same target paths | Treat Markdown catalogs as the human-owned index source. |
+| `agent/index/*.json` | same target paths | Rebuild with the target-side generator. |
+| root `README*`, `AGENTS.md`, `CLAUDE.md`, `requirements.txt`, `sitecustomize.py`, `wsl_setenv.sh` | same visible paths | Rewrite source content for archive-backed target paths. |
+| this manual | target root, same name | Replace the target legacy copy. |
 
-Avoid these mistakes during the migration:
+Target-only integration paths with no literal source counterpart include:
 
-- leaving duplicate live copies of `kernels/` or `demo/` at the repository root
-- keeping `testcases/` in the delivered skill bundle after claiming it was removed
-- hardcoding a workstation path such as `<user-home>/...` into user-facing docs
-- hardcoding a generic fallback such as `/usr/local/Ascend/...` into delivered scripts when the repository is supposed to be environment-driven
-- describing archived `easyasc/`, `doc/`, or `doc_cn/` as always present
-- forgetting to update validation commands after moving examples
-- fixing restored archive contents but forgetting to rebuild `agent/assets/ops-easyasc-dsl-runtime.tar.gz`
-- running validation, generating new source files, and forgetting to add license headers to those generated files
-- introducing a shell `timeout` into repository scripts just to simplify one local verification run
+- `SKILL.md`;
+- `agent/scripts/init.sh`;
+- `agent/assets/ops-easyasc-dsl-runtime.tar.gz`;
+- `agent/assets/ops-easyasc-dsl-example.tar.gz`;
+- `agent/scripts/tools_summary.md`.
 
-## Completion Check
+Generated indexes are also target outputs rather than files to copy blindly.
 
-The migration is complete when all of the following are true:
+Concrete mappings include:
 
-- `agent/SKILL.md` is the repository entrypoint
-- `agent/ROUTER.md` supports progressive disclosure
-- `agent/scripts/` owns the former tool scripts
-- `agent/example/` owns the former `kernels/` and `demo/`
-- `agent/assets/ops-easyasc-dsl-runtime.tar.gz` exists
-- `agent/scripts/init.sh` restores the archived trees
-- `testcases/` is gone
-- visible files and archived payloads no longer hardcode machine-specific absolute paths
-- delivered `.py` / `.sh` / `.bash` files carry the required script license header
-- delivered `.h` / `.cpp` files carry the required C/C++ license header
-- docs no longer tell users to use stale paths
-- a fresh-user validation passes from `python agent/example/kernels/a5/matmul_float_mmad.py`
+- `tools/select_kernel_example.py` ->
+  `agent/scripts/select_kernel_example.py`;
+- `kernels/a5/matmul/matmul_float_mmad.py` ->
+  `agent/example/kernels/a5/matmul/matmul_float_mmad.py`;
+- `examples/torchapi/torchapimgr_demo.py` ->
+  `agent/example/demo/a5/torchapimgr_demo.py`;
+- `projects/a5/gdn_fwd/` ->
+  `agent/example/projects/a5/gdn_fwd/`;
+- `testcases/simulator/trace/test_trace.py` ->
+  `agent/example/testcases/simulator/trace/test_trace.py`.
+
+## 5. Migration workflow
+
+### Step 1: Record the baseline
+
+Work from clean source and target worktrees. Record:
+
+- the source commit being migrated;
+- the target branch and commit;
+- the current target structural anchors;
+- archive member lists;
+- relevant source checks and target parent-repository checks.
+
+Useful read-only commands include:
+
+```bash
+git status --short
+tar -tzf agent/assets/ops-easyasc-dsl-runtime.tar.gz
+tar -tzf agent/assets/ops-easyasc-dsl-example.tar.gz
+```
+
+Do not infer archive contents from the source layout or an older manual.
+
+### Step 2: Declare the migration scope
+
+Build a reviewed inventory for every affected managed zone:
+
+- source path;
+- mapped target path;
+- add, replace, rename, or delete action;
+- target-specific adaptation, if any;
+- validation owner.
+
+The scope may be one subsystem or the full delivered surface. Within the
+declared scope, reconcile to the desired current state instead of retaining
+unreviewed target leftovers.
+
+Classify files into:
+
+- protected target integration;
+- visible managed content;
+- archived runtime/docs content;
+- archived example content;
+- generated content;
+- excluded local-only content.
+
+### Step 3: Restore archived content
+
+From the target plugin root:
+
+```bash
+bash agent/scripts/init.sh
+```
+
+`init.sh` restores only missing trees. Before using a restored tree as a
+baseline, confirm it came from the current checked-in archive and does not
+contain leftovers from an earlier migration.
+
+### Step 4: Reconcile the visible agent surface
+
+Rebuild the source-owned semantic surface:
+
+- root README and agent guidance;
+- `agent/ROUTER.md`;
+- `agent/common-language.md`;
+- `agent/playbooks/`;
+- `agent/references/`;
+- `agent/diary.md` when current workflow rules require it;
+- catalogs and templates.
+
+Do not copy the entire source `agent/` directory over the target `agent/`
+directory. That would endanger target-owned `assets/`, `scripts/`, and
+`index/`.
+
+Within the semantic subtrees:
+
+- add new current source files;
+- replace changed files;
+- delete files removed or superseded in the source;
+- repair every route and owner link in the same change.
+
+Obsolete target-only documentation roles must not survive merely because their
+directories exist in the old target.
+
+Rewrite target entry documents for this reading path:
+
+```text
+SKILL.md -> agent/ROUTER.md -> common-language baseline
+         -> one playbook -> focused reference -> restored source/example
+```
+
+### Step 5: Reconcile delivered tools
+
+For each delivered source tool:
+
+1. map `tools/X.py` to `agent/scripts/X.py`;
+2. replace the old target implementation;
+3. change source-root calculation for the deeper target path;
+4. update commands and links to target paths;
+5. preserve the required CANN license header;
+6. update the tool catalog and `tools_summary.md`.
+
+A typical source root expression:
+
+```python
+ROOT = Path(__file__).resolve().parent.parent
+```
+
+usually becomes:
+
+```python
+ROOT = Path(__file__).resolve().parent.parent.parent
+```
+
+Do not delete `agent/scripts/init.sh`: it is target integration, not a mapped
+source tool. Delete other target-only tools when they have no documented
+target-specific role, together with their catalog, summary, and index entries.
+
+### Step 6: Reconcile runtime and documentation payloads
+
+Treat restored `easyasc/`, `doc/`, and `doc_cn/` as replaceable content
+zones:
+
+- copy new and changed source files;
+- delete stale target files absent from the selected source scope;
+- preserve source-relative directory structure;
+- keep English and Chinese entry maps consistent;
+- preserve environment-driven behavior;
+- keep C/C++ resource and delivered script license headers valid.
+
+Do not preserve an old runtime or document merely to reduce diff size.
+
+### Step 7: Reconcile examples, projects, and tests
+
+Populate the four target containers:
+
+- `kernels/` -> `agent/example/kernels/`;
+- `examples/` -> `agent/example/demo/`;
+- `projects/` -> `agent/example/projects/`;
+- `testcases/` -> `agent/example/testcases/`.
+
+Kernel, project, and testcase mappings preserve their relative subtrees. Demo
+mapping may deliberately convert a source grouping such as `torchapi/` into a
+device-oriented target grouping, but that mapping must be explicit.
+
+Delete stale target examples inside the declared scope. Add new source
+categories without moving the four target container roots.
+
+After changing kernels or tools:
+
+- update their Markdown catalogs;
+- update the short human selector material where applicable;
+- regenerate JSON indexes;
+- verify every catalog path against the restored target tree.
+
+### Step 8: Repair target-facing references
+
+Search both visible files and restored payloads for:
+
+- source-only `tools/`, `kernels/`, `examples/`, `projects/`, or
+  `testcases/` paths;
+- removed playbooks or references;
+- absolute source repository paths;
+- user home directories, host aliases, work IDs, or IP addresses;
+- private notes under `tmp/<task>/`;
+- machine-specific CANN installation paths.
+
+Use target paths in all delivered commands. Replace private locations with
+placeholders such as `<repo-root>`, `<remote-a5-host>`,
+`<ascend-cann-root>`, and `<python-bin>`.
+
+### Step 9: Regenerate owned outputs
+
+From the target plugin root, run the migrated target-side tools:
+
+```bash
+python agent/scripts/build_agent_index.py
+python agent/scripts/check_kernel_catalog.py --fail-on-warning
+python agent/scripts/build_agent_index.py --check
+python agent/scripts/check_agent_docs.py
+```
+
+If a checker is newly migrated, adapt it to the target layout before treating
+its result as authoritative. Never hand-edit generated JSON to make a check
+pass.
+
+### Step 10: Rebuild archives
+
+Remove generated junk from the restored payloads, then rebuild the archives
+from the target plugin root:
+
+```bash
+find easyasc doc doc_cn agent/example -name '.DS_Store' -delete
+find easyasc doc doc_cn agent/example -name '._*' -delete
+find easyasc doc doc_cn agent/example -name '__pycache__' -type d -prune -exec rm -rf {} +
+find easyasc doc doc_cn agent/example \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+if tar --version 2>&1 | head -1 | grep -qi bsdtar; then
+  archive_owner_args=(--uid 0 --gid 0 --uname root --gname root)
+else
+  archive_owner_args=(--owner=0 --group=0 --numeric-owner)
+fi
+
+COPYFILE_DISABLE=1 tar "${archive_owner_args[@]}" \
+  -czf agent/assets/ops-easyasc-dsl-runtime.tar.gz \
+  easyasc doc doc_cn
+COPYFILE_DISABLE=1 tar "${archive_owner_args[@]}" \
+  -czf agent/assets/ops-easyasc-dsl-example.tar.gz \
+  agent/example
+```
+
+Fixed archive ownership is part of the privacy boundary. Without it, tar may
+record the local account and group that performed the migration even when file
+contents are clean. Python bytecode and AppleDouble files are excluded for the
+same reason: both may retain workstation paths or metadata even when the source
+text has already been sanitized.
+
+Confirm the archive roots:
+
+```bash
+tar -tzf agent/assets/ops-easyasc-dsl-runtime.tar.gz | sed -n '1,40p'
+tar -tzf agent/assets/ops-easyasc-dsl-example.tar.gz | sed -n '1,40p'
+tar -tvzf agent/assets/ops-easyasc-dsl-runtime.tar.gz | sed -n '1,10p'
+tar -tvzf agent/assets/ops-easyasc-dsl-example.tar.gz | sed -n '1,10p'
+```
+
+The runtime archive must contain `easyasc/`, `doc/`, and `doc_cn/`. The
+example archive must contain all four `agent/example/` containers. The verbose
+listing must not contain a personal account, employee identifier, or local
+machine group in its owner metadata. Also scan the decompressed archive payload,
+including binary strings, rather than assuming that a clean visible worktree
+proves the archive is clean.
+
+### Step 11: Validate a fresh-user state
+
+Return to the delivered archive-only shape:
+
+```bash
+rm -rf -- easyasc doc doc_cn agent/example
+```
+
+Run the restore flow again:
+
+```bash
+bash agent/scripts/init.sh
+```
+
+Then verify:
+
+- every protected structural anchor exists;
+- all required restored roots exist;
+- Router and entry documents resolve;
+- indexes are fresh;
+- catalogs resolve to restored files;
+- migrated tools run from `agent/scripts/`;
+- focused runtime, simulator, parser, kernel, project, and testcase checks pass;
+- no source-layout path leaked into target-facing commands.
+
+After validation, remove the restored trees again before commit when retaining
+the archive-only packaging model.
+
+### Step 12: Validate in the parent repository
+
+If the result will be proposed to `cannbot-skills`:
+
+- update the parent `CHANGELOG.md`;
+- follow `docs/CONTRIBUTING.md`;
+- use Bash 4 or newer for the parent test harness;
+- run the fast parent gate from `<cannbot-skills-root>`.
+
+```bash
+bash tests/run-tests.sh --fast
+```
+
+Record environment-only failures separately from failures caused by migrated
+content. Do not hide an old target-content failure by weakening the structural
+or content checks.
+
+## 6. Excluded by default
+
+Do not migrate these source development surfaces unless they are deliberately
+productized:
+
+- `tmp/` and other scratch directories;
+- `.claude/`, `.vscode/`, and `.pytest_cache/`;
+- `machine_specs.md`;
+- local runner scripts such as `b.sh` and `r.sh`;
+- workstation-specific test configuration;
+- generated caches, logs, build outputs, and temporary probes.
+
+An excluded source file must not be retained from an old target copy as an
+accidental substitute.
+
+## 7. Completion criteria
+
+Migration is complete only when:
+
+- the protected target paths and their roles remain intact;
+- no source top-level layout has replaced the target packaging layout;
+- managed content matches the declared mapped source scope;
+- stale target semantic files have been removed or explicitly justified;
+- target-only integration files are listed and still functional;
+- superseded target-only designs do not remain accidentally;
+- runtime/docs and example archives contain the rebuilt desired state;
+- `agent/example/` still contains `kernels/`, `demo/`, `projects/`, and
+  `testcases/`;
+- all target-facing links and commands use target paths;
+- catalogs and generated indexes match restored content;
+- privacy and machine-path scans are clean;
+- archive payloads and owner metadata contain no local account or machine data;
+- fresh `init.sh` restore and focused validation succeed;
+- expanded archived trees are absent from the final commit;
+- parent contribution and fast-test requirements are handled when proposing the
+  migration upstream.
+
+The size of the diff is not a completion criterion. A large, reviewed content
+replacement is valid; preserving obsolete files merely to keep the diff small
+is not.

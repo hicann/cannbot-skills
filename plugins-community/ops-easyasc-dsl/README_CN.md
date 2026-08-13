@@ -2,138 +2,186 @@
 
 [English README](README.md)
 
-***有天我一拍脑袋想看看 AI 究竟能做成啥样，所以就有了这个仓。代码基本是纯添加零天然。我只是个傻读代码和指手画脚的人类罢了。***
+***人工，然后智能。***
 
-`ops-easyasc-dsl` 把 easyasc DSL → AscendC 的工作流封装成一个 skill。其内部仍然提供用 Python 描述 Ascend 风格混合 kernel 的 DSL 框架，它可以：
-
-- 从 Python 代码生成指令 IR
-- 把 IR 下沉成拆分后的 cube/vec 代码路径
-- 在内置模拟器中运行 kernel
-- 为非模拟器场景生成 custom-op 源码产物
-
-这个仓库主要围绕三件事展开：
-
-1. 用 `@kernel`、`Tensor`、`GMTensor`、`Var` 以及可选的 `@vf` 微函数辅助，在 Python 里编写 kernel。
-2. 由框架负责构建指令 IR、补上各执行侧需要的同步，并把程序拆成 cube 和 vec 两条路径。
-3. 再通过模拟器或生成出来的运行时产物验证结果。
+`ops-easyasc-dsl` 将 easyasc 的 DSL 到 AscendC 工作流打包为一个 skill。
+easyasc 是一个用于编写 Ascend 风格 kernel 的 Python DSL：经过装饰的
+Python 函数会转换成指令 IR，框架可以进一步将其拆分成 cube/vec 两条路径，
+在内置模拟器中执行，或下沉为 custom-op 源码产物。
 
 ## Skill 入口
 
-面向用户的 skill 入口是 [`skill/SKILL.md`](skill/SKILL.md)。可复用的工作流位于 [`agent/`](agent/) 下。
-
-在阅读已归档的运行时/文档内容或运行示例之前，需要先按需还原：
+面向用户的 skill 入口是插件根目录的 `SKILL.md`，可复用的工作流位于 `agent/`。
+在阅读归档的运行时/文档内容或运行示例之前，先按需恢复它们：
 
 ```bash
 bash agent/scripts/init.sh
 ```
 
-脚本是幂等的，只会还原缺失的目录。
+该脚本幂等，只恢复缺失的目录树（`easyasc/`、`doc/`、`doc_cn/`、
+`agent/scripts/` 维护工具与 `agent/example/`）。
 
-## 为什么会有这个仓库
+本插件采用“直接使用源码仓库”的交付方式，不是一个可安装的 Python package。
+建议先在模拟器中验证，并确保插件根目录位于 `PYTHONPATH`；只有 kernel 与参考
+实现对齐后，再进入依赖 CANN 的执行路径。
 
-这个代码库主要服务于 kernel 的开发、实验和调试，尤其适合下面这些场景：
+## 可以用它做什么
 
-- 快速验证新的纯 cube 或混合 cube/vec 流水线原型
-- 在模拟环境里验证尾块处理、tiling 和精度边界
-- 查已有 kernel，看看哪些 DSL 写法和实现套路是可行的
+- 通过同一套 Python 表达方式编写纯 cube 或混合 cube/vec kernel
+- 在内置模拟器中验证 tiling、尾块、同步和精度边界
+- 生成可用于 CANNSIM 或 Ascend 真机的源码与运行时产物
+- 从可运行的参考 kernel 中学习受支持的 DSL 模式
 
-## 安装
+## 公开目标接口
 
-不用安装。执行 `bash agent/scripts/init.sh` 还原 `easyasc/` 后，想办法把 `easyasc.a5` 或者 `easyasc.a2` 给 import 进来即可。
+| Import | 目标 profile | Worker 数量 | 目标特有能力 |
+|---|---|---:|---|
+| `easyasc.a2` | Ascend A2，默认 B3 | 20 cube / 40 vec | A2 vector API 与 A2 int4 契约 |
+| `easyasc.a3` | Ascend 910C，`Ascend910_9362` | 20 cube / 40 vec | 面向 `ascend910_93` 编译的 A2/C220 API |
+| `easyasc.a5` | Ascend 950 | 32 cube / 64 vec | `@vf`、`@simt`、寄存器 micro API 与 MX 格式 |
+| `easyasc.a5pr` | Ascend 950PR | 28 cube / 56 vec | 使用 950PR profile 的 A5/C310 API |
+
+`a2` 与 `a3` 共享 C220 编写 API，但选择不同的设备与构建 profile；A5 系列则是
+并列的另一套架构接口。
+
+> **目标隔离规则：**一个 Python 进程只能导入 `easyasc.a2`、`easyasc.a3`、
+> `easyasc.a5`、`easyasc.a5pr` 中的一个。导入 facade 会选择进程级全局设备状态；受 Python
+> 模块缓存影响，重新导入先前 facade 不会恢复旧 target。切换 target 时应启动
+> 新进程。
 
 ## 快速开始
 
-示例环境（仅作参考，并非必须）：
+### 1. 还原归档 payload
 
 ```bash
-# 仅作参考——请根据本地情况调整
+bash agent/scripts/init.sh
+```
+
+运行时（`easyasc/`）、文档（`doc/`、`doc_cn/`）、维护工具与示例都封装在
+`agent/assets/` 下的归档中，执行本步骤后才会出现在磁盘上。
+
+### 2. 准备 Python 环境
+
+如果仓库所在机器提供了 `torch210npu` conda 环境，优先使用它：
+
+```bash
 conda activate torch210npu
 ```
 
-然后运行一个最小可执行的 kernel 示例（需先执行 `bash agent/scripts/init.sh`）：
+如果只需要新建一个模拟器环境，可以安装仓库依赖：
 
 ```bash
-python agent/example/kernels/a5/matmul_float_mmad.py
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-这个示例展示了最小的端到端流程：
+如果已经在使用 CANN / `torch-npu` 环境，应保持 `torch` 与 `torch-npu`
+版本匹配，只补装缺少的依赖。`requirements.txt` 不负责安装 CANN 本身。
 
-1. 用 `@kernel` 定义一个 kernel
-2. 通过 `OpExec(..., simulator=True)` 启动它
-3. 把模拟输出和 PyTorch 参考结果做对比
+### 3. 把源码仓库加入 `PYTHONPATH`
 
-## `OpExec` 真机构建 + CANNSIM 所需环境变量
+在仓库根目录运行示例前，先执行：
 
-使用默认的 `simulator=False` 跑 `OpExec(kernel)` 时，框架会在**当前工作目录**生成并执行 `b.sh`、`r.sh`。脚本里已写入通用基线；若本机布局不同，请在启动 Python 前自行导出下表变量。
+```bash
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+```
 
-| 变量 | 何时需要设置 | 示例值 |
-|------|--------------|--------|
-| `ASCEND_HOME_PATH` | 必须；指向你的 CANN 安装根 | `<你的 CANN 安装路径>`（其下应有 `bin/setenv.bash`） |
-| `ASCEND_CUSTOM_OPP_PATH` | 需要拼接额外自定义 OPP 根 | 可为空；导出后避免 `set -u` 与 `set_env.bash` 冲突 |
-| `EASYASC_PYTHON_BIN` | CANN `opbuild` 调用的 `python3` 需要 **NumPy** | 含有该解释器的目录（如某 conda 环境的 `bin`），会加入 `PATH` |
-| `PYTHONPATH` | 需从仓库根 import `easyasc` | 仓库根目录 |
+直接运行嵌套目录中的 Python 脚本时，Python 自动加入 import 路径的是脚本所在
+目录，而不是仓库根目录，因此这里需要显式设置。
 
-`b.sh` / `r.sh` 用 **`EASYASC_ROOT`**（脚本所在目录）拼接相对路径；请在**仓库根目录**跑代码生成，使脚本落在根目录。脚本会尝试 `source "${ASCEND_HOME_PATH}/bin/setenv.bash"`，配置厂商库 `LD_LIBRARY_PATH`，并用 `cannsim` 跑 aclnn 测试二进制。
+### 4. 运行最小模拟器示例
 
-若 `op_build` 缺 `.so`，检查 `ASCEND_HOME_PATH` 与 `setenv.bash`；若报缺少 `numpy`，设置 `EASYASC_PYTHON_BIN` 指向带 NumPy 的 Python 所在目录。
+```bash
+python agent/example/kernels/a5/matmul/matmul_float_mmad.py
+```
 
-## 核心概念
+成功运行后，输出末尾会出现类似结果：
 
-- `easyasc.a5`：面向 A5 风格架构与指令序列的一套公开 DSL 接口。当前仓库里大多数 kernel 和测试都在使用它，包含 cube、vec、micro、寄存器、cast 和调试辅助功能。
-- `easyasc.a2`：面向 A2 风格架构与指令序列的另一套公开 DSL 接口。它不是 `a5` 的兼容层，而是针对另一类指令族的并列架构接口。
-- `GMTensor`：全局内存张量，对应 kernel 的输入和输出。
-- `Tensor`：位于 `L1`、`L0A`、`L0B`、`L0C` 或 `UB` 中的片上张量。
-- `DBuff` / `TBuff`：用来描述基于 slot 复用的缓冲张量辅助类型。
-- `Var`：用于表示循环边界、维度和符号形状的标量值。
-- `OpExec`：运行时入口，可用于模拟器执行或代码生成。
+```text
+max_abs_diff=0.000000e+00
+```
 
-## 典型开发流程
+这个示例会定义一个 kernel，通过 `OpExec(..., simulator=True)` 执行，并将
+输出与 `x @ y.t()` 比较。
 
-1. 先把精确的 PyTorch 公式写清楚。
-2. 选择流水线拓扑：
-   - 仅 cube
-   - cube -> vec
-   - vec -> cube
-   - vec -> cube -> vec
-   - cube -> vec -> cube
-3. 用 Python 把 kernel 实现出来。
-4. 使用 `OpExec(..., simulator=True)` 验证。
-5. 如果重复出现的标量维度让形状推导变得不明确，就显式加上 `shape_bindings`。
-6. 只有在模拟器结果和参考实现对齐之后，再继续看生成产物和硬件相关执行。
+## 最小 kernel 结构
+
+完整可运行源码位于 `agent/example/kernels/a5/matmul/matmul_float_mmad.py`
+（`init.sh` 还原后可见）：
+
+```python
+from easyasc.a5 import *
+
+
+@kernel()
+def matmul_float_mmad_kernel(x: GMTensor, y: GMTensor, z: GMTensor, M: Var, N: Var, K: Var):
+    l1x = Tensor(DT.float, [M, K], Position.L1)
+    l1y = Tensor(DT.float, [N, K], Position.L1)
+    l0c = Tensor(DT.float, [M, N], Position.L0C)
+    with auto_sync():
+        l1x <<= x[:, :]
+        l1y <<= y[:, :]
+        matmul(l0c, l1x, l1y, m=M, n=N, k=K, is_init=True)
+        z[:, :] <<= l0c
+    return z
+```
+
+`GMTensor` 构成公开的 GM 输入输出契约，本地 `Tensor` 描述片上存储，`<<=`
+则根据每一组源和目标发射相应的数据搬运或写回指令。
+
+## 执行模式
+
+| 目标 | `OpExec` 配置 | 额外要求 |
+|---|---|---|
+| 开发与调试 | `simulator=True` | 只需要 Python 依赖 |
+| 查看生成产物 | `simulator=False, gen_only=True` | 所选生成路径需要的依赖 |
+| 使用 CANNSIM | `simulator=False, cannsim=True` | 兼容的 CANN 安装 |
+| 构建并在真机运行 | `simulator=False` | 兼容的 CANN 安装与 Ascend 设备 |
+
+`OpExec` 默认使用 `simulator=False`，因此在编写阶段应显式传入
+`simulator=True`。生成目录布局、环境变量、CANNSIM chipset、构建/运行脚本
+以及日志位置统一参见 `doc_cn/06_codegen_and_runtime.md`。
+
+## 推荐开发流程
+
+1. 写出精确的 PyTorch 参考公式，包括 cast 顺序。
+2. 选择目标 facade 和流水线拓扑。
+3. 实现 kernel，并使用 `simulator=True` 验证。
+4. 覆盖尾块 shape；标量推导有歧义时显式提供 `shape_bindings`。
+5. 检查生成产物，再进入 CANNSIM 或真机执行。
+
+## 文档与示例入口
+
+下表中的 `doc_cn/` 文档与示例目录均封装在归档 payload 内，阅读前请先执行
+`bash agent/scripts/init.sh` 解包还原；未还原的全新 checkout 中这些路径不存在。
+
+| 需求 | 建议入口 |
+|---|---|
+| 完成第一次运行 | `doc_cn/01_quickstart.md` |
+| 理解概念和 kernel 语法 | `doc_cn/02_programming_model.md` 与 `doc_cn/03_write_your_first_kernel.md` |
+| 查看完整文档地图 | `doc_cn/index.md` |
+| 查询公开 API | `doc_cn/api/index.md` |
+| 查看 feature 与 dtype 契约 | `doc_cn/topics/index.md` |
+| 选择可运行 kernel | `agent/example/kernels/README.md` |
+| 理解模拟器与生成行为 | `doc_cn/05_simulator_and_trace.md` 及 `doc_cn/06_codegen_and_runtime.md` |
+| 排查常见问题 | `doc_cn/10_troubleshooting.md` |
 
 ## 仓库结构
 
-- `skill/` — skill 入口（`skill/SKILL.md`）
-- `agent/` — 可复用的 easyasc DSL → AscendC 工作流
-  - `agent/ROUTER.md` — 渐进披露的 router
-  - `agent/scripts/` — 维护脚本（包含 `init.sh`）
-  - `agent/assets/` — 归档的 runtime/docs（`ops-easyasc-dsl-runtime.tar.gz`）与 example（`ops-easyasc-dsl-example.tar.gz`）
-  - `agent/example/` — 精选 kernel 示例与手动 demo（按需还原）
-  - `agent/references/` / `agent/playbooks/` / `agent/index/` — 参考、playbook 与 JSON 索引
-- 由 `agent/scripts/init.sh` 按需还原：
-  - `easyasc/` — DSL 运行时与 codegen
-  - `doc/` — 英文文档
-  - `doc_cn/` — 中文文档镜像
-  - `agent/example/kernels/` — 精选示例 kernel
-  - `agent/example/demo/` — 按设备家族整理的手动运行示例
+- `easyasc/`：公开 facade、parser/codegen、模拟器与运行时
+- `agent/example/kernels/`：按目标组织的精选单 kernel 参考实现
+- `agent/example/projects/`：组合多个 kernel 的多文件系统工程
+- `agent/example/demo/`：不属于 kernel catalog 的端到端框架示例
+- `agent/example/testcases/`：parser、模拟器、codegen 与工具回归测试
+- `doc/`：canonical 英文文档
+- `doc_cn/`：中文文档
+- `agent/`：面向 AI / agent 贡献者的 router-first 指引
 
-注意：`testcases/` 已从交付的 skill 包中移除。
+其中 `easyasc/`、`doc/`、`doc_cn/`、`agent/example/` 与 `agent/scripts/*.py`
+工具都通过 `agent/assets/` 下的两个归档交付，`init.sh` 还原后才存在；
+`agent/` 指引文档为仓内明文。
 
-## 文档索引
-
-> ⚠️ `doc_cn/` 目录**不随仓库直接提供**。请先执行 `bash agent/scripts/init.sh` 还原后再查看，下面的链接才能正常访问。
-
-文档（由 `agent/scripts/init.sh` 还原）：
-
-- 快速开始（`doc_cn/01_quickstart.md`）
-- 编程模型（`doc_cn/02_programming_model.md`）
-- 编写第一个 Kernel（`doc_cn/03_write_your_first_kernel.md`）
-- 混合流水线与同步（`doc_cn/04_mixed_pipeline_and_sync.md`）
-- 模拟器与 Trace（`doc_cn/05_simulator_and_trace.md`）
-- 代码生成与运行时（`doc_cn/06_codegen_and_runtime.md`）
-- Kernel 模式与范式（`doc_cn/07_kernel_patterns.md`）
-- 测试与验证（`doc_cn/08_testing_and_validation.md`）
-- API 参考（`doc_cn/09_api_reference.md`）
-- 故障排查（`doc_cn/10_troubleshooting.md`）
-- 面向贡献者的架构说明（`doc_cn/11_architecture_for_contributors.md`）
-- Stub 与 Codegen 名字对照表（`doc_cn/12_stub_to_codegen_name_map.md`）
+修改框架的贡献者还应阅读 `doc_cn/11_architecture_for_contributors.md`
+与 `agent/example/testcases/README.md`。

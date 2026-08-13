@@ -9,7 +9,8 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 #
-# Restore the archived runtime/docs payload and example payload into the repository.
+# Restore the archived runtime/docs payload (easyasc/, doc/, doc_cn/, and the
+# agent/scripts maintenance tools) and the example payload into the repository.
 # Safe to run multiple times; only missing trees are restored.
 
 set -eu
@@ -33,9 +34,14 @@ restore_runtime() {
             break
         fi
     done
+    # The maintenance tools travel inside the runtime archive; one marker file
+    # stands in for the whole set.
+    if [ ! -f "${REPO_ROOT}/agent/scripts/check_agent_docs.py" ]; then
+        need_extract=1
+    fi
 
     if [ "${need_extract}" -eq 0 ]; then
-        echo "[init] runtime trees already present (easyasc/, doc/, doc_cn/) — skipping"
+        echo "[init] runtime trees already present (easyasc/, doc/, doc_cn/, agent/scripts tools) — skipping"
         return 0
     fi
 

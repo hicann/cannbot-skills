@@ -1,12 +1,22 @@
 # Tools Summary
 
+The Python tools listed here are delivered inside the runtime archive
+(`agent/assets/ops-easyasc-dsl-runtime.tar.gz`) together with `easyasc/`;
+run `bash agent/scripts/init.sh` once to restore them before use.
+
 ## Scope
 - `agent/scripts/estimate_matmul_datamove.py` is a lightweight estimator for matmul data movement and tile-space feasibility.
 - `agent/scripts/build_agent_index.py` builds machine-readable agent indexes from the human-readable example catalogs under `agent/references/examples/`.
 - `agent/scripts/select_kernel_example.py` ranks existing kernel examples from the generated kernel index so authoring can start from the right study target faster.
 - `agent/scripts/check_kernel_catalog.py` checks that `kernel-catalog.md`, the generated kernel index, and the real `agent/example/kernels/*.py` files still agree.
-- `agent/scripts/gen_kernel_skeleton.py` generates repository-style kernel scaffolds for cube-only, cube->vec, vec->cube, vec->cube->vec, cube->vec->cube->vec, and vec->cube->vec->cube topologies, with topology-specific profile variants.
-- These tools do not launch kernels. They evaluate metadata, formulas, search candidates, or strategy estimates in Python.
+- `agent/scripts/check_agent_docs.py` validates the routed agent documentation: link resolution, backticked repository paths, generated-index freshness, and archive privacy metadata.
+- `agent/scripts/check_public_docs.py` validates public documentation parity (EN/CN), navigation, and the documented API surfaces against `agent/scripts/data/public_docs_manifest.json`.
+- `agent/scripts/gen_kernel_from_manifest.py` generates a kernel authoring scaffold from a declarative kernel manifest.
+- `agent/scripts/analyze_sim_trace.py` summarizes a simulator trace JSON into per-pipe occupancy and stall attribution.
+- `agent/scripts/run_preferred_simulator.py` runs a kernel script under the preferred simulator configuration.
+- `agent/scripts/init.sh` restores the archived runtime/docs and example payloads (target integration, not a mapped source tool).
+- `agent/scripts/_logutil.py` is a shared stdout/stderr logging helper imported by the tools above (not a standalone entry point).
+- These tools do not launch kernels on hardware. They evaluate metadata, formulas, search candidates, or strategy estimates in Python.
 
 ## Core APIs
 - `estimate_percore_datamove(m, n, k, TILEM, TILEN, TILEK, mode, dbuf_left=True, dbuf_right=True, dbuf_l0c=True)`

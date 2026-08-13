@@ -2,138 +2,195 @@
 
 [Chinese README / 中文版说明](README_CN.md)
 
-***I'm just curious how far AI can go, so the codes are 90%+ developed by AI in this repo. I'm just a software architect and code reviewer.***
+***Artificial, then Intelligence.***
 
-`ops-easyasc-dsl` packages the easyasc DSL to AscendC workflow as a skill. It still provides the Python DSL for describing mixed Ascend-style kernels with a single authoring surface that can:
-
-- emit instruction IR from Python code
-- lower that IR into split cube/vec code
-- run the kernel in a built-in simulator
-- generate custom-op source artifacts for non-simulator execution
-
-The repository is organized around three ideas:
-
-1. Author kernels in Python with `@kernel`, `Tensor`, `GMTensor`, `Var`, and optional `@vf` micro helpers.
-2. Let the framework build instruction IR, insert side-specific synchronization, and split the program into cube and vec paths.
-3. Validate the result either in the simulator or through generated runtime artifacts.
+`ops-easyasc-dsl` packages the easyasc DSL-to-AscendC workflow as a skill.
+easyasc is a Python DSL for authoring Ascend-style kernels: a decorated
+Python function becomes instruction IR that the framework can split into cube
+and vec paths, execute in the built-in simulator, or lower into custom-op
+source artifacts.
 
 ## Skill entrypoint
 
-The user-facing skill entrypoint is [`skill/SKILL.md`](skill/SKILL.md). The reusable workflow lives under [`agent/`](agent/).
-
-Before reading archived runtime/docs content or running examples, restore them on demand:
+The user-facing skill entrypoint is `SKILL.md` at the plugin root. The reusable workflow
+lives under `agent/`. Before reading archived runtime/docs content or running
+examples, restore them on demand:
 
 ```bash
 bash agent/scripts/init.sh
 ```
 
-This is idempotent and only restores missing trees.
+This is idempotent and only restores missing trees (`easyasc/`, `doc/`,
+`doc_cn/`, the `agent/scripts/` maintenance tools, and `agent/example/`).
 
-## Why this repository exists
+This is a repository-first delivery rather than an installable Python package.
+Start in the simulator, keep the plugin root on `PYTHONPATH`, and use the
+CANN-backed paths only after the kernel matches its reference.
 
-The codebase is designed for kernel development, experimentation, and debugging. It is especially useful when you want to:
+## What you can do
 
-- prototype a new cube-only or mixed cube/vec pipeline
-- validate tail handling, tiling, and precision boundaries in simulation
-- inspect existing kernels for legal DSL patterns and implementation templates
+- author cube-only and mixed cube/vec kernels through one Python surface
+- validate tiling, tail handling, synchronization, and precision boundaries in
+  the built-in simulator
+- generate source and runtime artifacts for CANNSIM or Ascend hardware
+- study runnable reference kernels for supported DSL patterns
 
-## Installation
+## Public target surfaces
 
-No need. Just import `easyasc.a5` or `easyasc.a2` via whatever method you like, after running `bash agent/scripts/init.sh`.
+| Import | Target profile | Workers | Target-specific surface |
+|---|---|---:|---|
+| `easyasc.a2` | Ascend A2, B3 by default | 20 cube / 40 vec | A2 vector APIs and the A2 int4 contract |
+| `easyasc.a3` | Ascend 910C, `Ascend910_9362` | 20 cube / 40 vec | A2/C220 APIs compiled for `ascend910_93` |
+| `easyasc.a5` | Ascend 950 | 32 cube / 64 vec | `@vf`, `@simt`, register micro APIs, and MX formats |
+| `easyasc.a5pr` | Ascend 950PR | 28 cube / 56 vec | A5/C310 API with the 950PR device profile |
+
+`a2` and `a3` share the C220 authoring API but select distinct device/build
+profiles; the A5 family is a parallel architecture-specific API.
+
+> **Target isolation:** import exactly one of `easyasc.a2`, `easyasc.a3`,
+> `easyasc.a5`, or `easyasc.a5pr` in a Python process. Importing a facade selects process-global
+> device state, and Python's module cache does not restore an earlier target
+> when that facade is imported again. Start a fresh process to switch targets.
 
 ## Quick start
 
-Example environment (not required):
+### 1. Restore the archived payloads
 
 ```bash
-# example only — adjust to your local setup
+bash agent/scripts/init.sh
+```
+
+The runtime (`easyasc/`), documentation (`doc/`, `doc_cn/`), maintenance
+tools, and examples all live in the archives under `agent/assets/` and only
+exist on disk after this step.
+
+### 2. Prepare Python
+
+If your machine already provides the `torch210npu` conda environment, use it:
+
+```bash
 conda activate torch210npu
 ```
 
-Then run the smallest runnable kernel example (after `bash agent/scripts/init.sh`):
+For a fresh simulator-only environment, install the repository dependencies:
 
 ```bash
-python agent/example/kernels/a5/matmul_float_mmad.py
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-That example shows the minimal end-to-end loop:
+If you already use a CANN / `torch-npu` environment, keep its `torch` and
+`torch-npu` versions aligned and install only the missing dependencies. CANN
+itself is not installed by `requirements.txt`.
 
-1. describe a kernel with `@kernel`
-2. launch it through `OpExec(..., simulator=True)`
-3. compare the simulated output against a PyTorch reference
+### 3. Put the checkout on `PYTHONPATH`
 
-## Environment variables for `OpExec` build + CANNSIM (non-simulator)
+Run examples from the repository root after exporting:
 
-When you run `OpExec(kernel)` with the default `simulator=False`, the framework generates `b.sh` and `r.sh` next to your current working directory and runs them. Those scripts already define a portable baseline; set the variables below **before** starting Python if your machine differs from the defaults.
+```bash
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+```
 
-| Variable | When to set | Example value |
-|----------|-------------|---------------|
-| `ASCEND_HOME_PATH` | Required; points at your CANN toolkit root | `<path to your CANN install>` (directory that contains `bin/setenv.bash`) |
-| `ASCEND_CUSTOM_OPP_PATH` | Only if you chain extra custom OPP roots | Empty; scripts export it so `set -u` + `vendors/customize/bin/set_env.bash` stays safe |
-| `EASYASC_PYTHON_BIN` | CANN `opbuild` invokes `python3` and needs **NumPy** | Directory containing that interpreter (for example the `bin` directory of a conda env), prepended to `PATH` inside `b.sh` / `r.sh` |
-| `PYTHONPATH` | Python must import this repository | The repository root |
+The export is required because running a nested script directly adds that
+script's directory—not the repository root—to Python's import path.
 
-Generated `b.sh` and `r.sh` resolve paths from **`EASYASC_ROOT`**, the directory where those scripts live (run codegen from the repository root so `b.sh` / `r.sh` end up there). They source `${ASCEND_HOME_PATH}/bin/setenv.bash` when present, export vendor `LD_LIBRARY_PATH`, and run `cannsim` for the aclnn smoke binary.
+### 4. Run the smallest simulator example
 
-If kernel packaging fails with missing shared libraries for `op_build`, ensure `setenv.bash` ran (correct `ASCEND_HOME_PATH`). If it fails importing `numpy` under CANN Python, set `EASYASC_PYTHON_BIN` to a Python that has NumPy.
+```bash
+python agent/example/kernels/a5/matmul/matmul_float_mmad.py
+```
 
-## Core concepts
+A successful run ends with output similar to:
 
-- `easyasc.a5`: one public DSL surface for the A5-style architecture and instruction sequences. Most current kernels and tests in this repository use it, including cube, vec, micro, register, cast, and debug helpers.
-- `easyasc.a2`: another public DSL surface for the A2-style architecture and instruction sequences. It is not a compatibility layer of `a5`; it targets a different instruction family and should be read as a parallel architecture-specific API.
-- `GMTensor`: a global-memory tensor that corresponds to kernel inputs and outputs.
-- `Tensor`: an on-chip tensor in `L1`, `L0A`, `L0B`, `L0C`, or `UB`.
-- `DBuff` / `TBuff`: buffered tensor helpers used to model slot-based reuse.
-- `Var`: scalar values used for loop bounds, dimensions, and symbolic shapes.
-- `OpExec`: runtime entry point for simulator execution or code generation.
+```text
+max_abs_diff=0.000000e+00
+```
 
-## Typical development workflow
+The example defines a kernel, runs it through
+`OpExec(..., simulator=True)`, and compares its output with `x @ y.t()`.
 
-1. Start from an exact PyTorch formula.
-2. Choose a pipeline topology:
-   - cube only
-   - cube -> vec
-   - vec -> cube
-   - vec -> cube -> vec
-   - cube -> vec -> cube
-3. Implement the kernel in Python.
-4. Validate it with `OpExec(..., simulator=True)`.
-5. Add explicit `shape_bindings` if repeated scalar dimensions make shape inference ambiguous.
-6. Only after the simulator matches the reference should you move on to generated artifacts and hardware-specific execution.
+## Minimal kernel anatomy
 
-## Repository layout
+The runnable source is `agent/example/kernels/a5/matmul/matmul_float_mmad.py`
+(present after `init.sh`):
 
-- `skill/` — skill entrypoint (`skill/SKILL.md`)
-- `agent/` — the reusable easyasc DSL to AscendC workflow
-  - `agent/ROUTER.md` — progressive-disclosure router
-  - `agent/scripts/` — repository-maintenance scripts (including `init.sh`)
-  - `agent/assets/` — archived runtime/docs (`ops-easyasc-dsl-runtime.tar.gz`) and example (`ops-easyasc-dsl-example.tar.gz`) payloads
-  - `agent/example/` — curated kernel examples and manual demos (restored on demand)
-  - `agent/references/` / `agent/playbooks/` / `agent/index/` — catalogs, playbooks, and JSON indexes
-- Restored on demand by `agent/scripts/init.sh`:
-  - `easyasc/` — DSL runtime and codegen package
-  - `doc/` — English documentation
-  - `doc_cn/` — Chinese documentation mirror
-  - `agent/example/kernels/` — curated sample kernels
-  - `agent/example/demo/` — manual runnable examples grouped by device family
+```python
+from easyasc.a5 import *
 
-Note: `testcases/` is no longer part of the delivered skill bundle.
 
-## Documentation map
+@kernel()
+def matmul_float_mmad_kernel(x: GMTensor, y: GMTensor, z: GMTensor, M: Var, N: Var, K: Var):
+    l1x = Tensor(DT.float, [M, K], Position.L1)
+    l1y = Tensor(DT.float, [N, K], Position.L1)
+    l0c = Tensor(DT.float, [M, N], Position.L0C)
+    with auto_sync():
+        l1x <<= x[:, :]
+        l1y <<= y[:, :]
+        matmul(l0c, l1x, l1y, m=M, n=N, k=K, is_init=True)
+        z[:, :] <<= l0c
+    return z
+```
 
-> ⚠️ The `doc/` directory is **not shipped** in the repository. Run `bash agent/scripts/init.sh` first to restore it, then the links below will work.
+`GMTensor` values form the public GM input/output contract, local `Tensor`
+values describe on-chip storage, and `<<=` emits the appropriate data movement
+or writeback for each source/destination pair.
 
-Documents (restored by `agent/scripts/init.sh`):
+## Execution modes
 
-- Quick Start (`doc/01_quickstart.md`)
-- Programming Model (`doc/02_programming_model.md`)
-- Write Your First Kernel (`doc/03_write_your_first_kernel.md`)
-- Mixed Pipeline and Synchronization (`doc/04_mixed_pipeline_and_sync.md`)
-- Simulator and Trace (`doc/05_simulator_and_trace.md`)
-- Code Generation and Runtime (`doc/06_codegen_and_runtime.md`)
-- Kernel Patterns (`doc/07_kernel_patterns.md`)
-- Testing and Validation (`doc/08_testing_and_validation.md`)
-- API Reference (`doc/09_api_reference.md`)
-- Troubleshooting (`doc/10_troubleshooting.md`)
-- Architecture for Contributors (`doc/11_architecture_for_contributors.md`)
-- Stub to Codegen Name Map (`doc/12_stub_to_codegen_name_map.md`)
+| Goal | `OpExec` configuration | Additional requirements |
+|---|---|---|
+| Develop and debug | `simulator=True` | Python dependencies only |
+| Inspect generated artifacts | `simulator=False, gen_only=True` | Generation dependencies for the selected path |
+| Run in CANNSIM | `simulator=False, cannsim=True` | Compatible CANN installation |
+| Build and run on hardware | `simulator=False` | Compatible CANN installation and Ascend device |
+
+`OpExec` defaults to `simulator=False`, so pass `simulator=True` explicitly
+while authoring. For generated directory layout, environment variables,
+CANNSIM chipsets, build/run scripts, and logs, see
+`doc/06_codegen_and_runtime.md`.
+
+## Recommended development loop
+
+1. Write the exact PyTorch reference formula, including cast order.
+2. Choose the target facade and pipeline topology.
+3. Implement the kernel and validate it with `simulator=True`.
+4. Cover tail shapes and add explicit `shape_bindings` when scalar inference is
+   ambiguous.
+5. Inspect generated artifacts, then move to CANNSIM or hardware execution.
+
+## Documentation and examples
+
+The `doc/` pages and example trees below are shipped inside the archived
+payloads — run `bash agent/scripts/init.sh` once to unpack them before
+reading; the paths do not exist in a fresh checkout.
+
+| Need | Start here |
+|---|---|
+| First successful run | `doc/01_quickstart.md` |
+| Concepts and kernel syntax | `doc/02_programming_model.md` and `doc/03_write_your_first_kernel.md` |
+| Full documentation map | `doc/index.md` |
+| Public APIs | `doc/api/index.md` |
+| Feature and dtype contracts | `doc/topics/index.md` |
+| Runnable kernel selection | `agent/example/kernels/README.md` |
+| Simulator and generation behavior | `doc/05_simulator_and_trace.md` and `doc/06_codegen_and_runtime.md` |
+| Troubleshooting | `doc/10_troubleshooting.md` |
+
+## Repository map
+
+- `easyasc/`: public facades, parser/codegen, simulator, and runtime
+- `agent/example/kernels/`: curated single-kernel references by target
+- `agent/example/projects/`: multi-file systems that compose several kernels
+- `agent/example/demo/`: end-to-end framework demos outside the kernel catalog
+- `agent/example/testcases/`: parser, simulator, codegen, and tool regression tests
+- `doc/`: canonical English documentation
+- `doc_cn/`: Chinese documentation
+- `agent/`: router-first guidance for AI/agent contributors
+
+`easyasc/`, `doc/`, `doc_cn/`, `agent/example/`, and the `agent/scripts/*.py`
+tools are delivered inside the two archives under `agent/assets/` and appear
+only after `init.sh`; the `agent/` guidance documents are plain files.
+
+Framework contributors should also read
+`doc/11_architecture_for_contributors.md` and `agent/example/testcases/README.md`.

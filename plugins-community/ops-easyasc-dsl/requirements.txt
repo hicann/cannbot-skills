@@ -3,8 +3,11 @@
 # CANN itself is not installed through pip and is therefore not listed here.
 
 numpy
-torch
-torch-npu
+torch==2.10.0
+# Keep torchvision aligned with torch. Without an explicit pin, pip may
+# resolve a newer torchvision that upgrades torch (for example to 2.12).
+torchvision==0.25.0
+# torch-npu
 einops
 prettytable
 rich
@@ -14,3 +17,4 @@ decorator
 scipy
 attrs
 psutil
+pytest
