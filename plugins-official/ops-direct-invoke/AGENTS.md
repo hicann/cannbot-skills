@@ -231,6 +231,28 @@ Step 7: 完成汇报
 - 性能概要（Task Duration、主导流水、达标状态）
 - 关键问题列表（如有）
 
+#### 状态文件维护（state.json）
+
+`operators/{operator_name}/state.json` 是工作流的**机器可读状态文件**，随阶段推进**实时更新**（非最终汇总），断点恢复依赖其实时性。
+
+- **谁写**：仅 CANNBot 维护（读各阶段交付文档写回），Subagent 不写此文件。
+- **何时写**：每步/每 CP 完成后**立即**落盘，禁止攒到 Step 7 一次性补写。
+- **模板**：`workflows/references/state.json`（空模板）；字段语义与更新规则见 `workflows/references/state-template.md`。
+- **校验**：任意时刻可运行 `python workflows/scripts/validate_state.py operators/{operator_name}/state.json`。
+- **各阶段更新点**：
+
+| 阶段 | 更新键 | 取值来源 |
+|------|--------|---------|
+| 初始化（Step 1 前） | `workflow` + `operator` 已知字段，`1` 置 `running` | `framework`=运行工具@版本（如 `opencode --version`）；`cannbot-skills commit`=`git rev-parse HEAD` |
+| Step 1 完成 | `1`/`CP1` + `env_summary` | environment.md |
+| Step 2 完成 | `2`/`CP2` + `operator` 补全 | DESIGN.md / PLAN.md |
+| Step 2.5 完成 | `2.5`/`CP2.5` | WALKTHROUGH.md |
+| Step 3 完成 | `3`/`CP3` + `results.build` | 编译结果 |
+| Step 4 完成 | `4`/`CP4`（附 `verdict`/`score`） | REVIEW.md |
+| Step 5 完成 | `5`/`CP5`（未触发置 `skipped`） | REVIEW.md |
+| Step 6 完成 | `6`/`6a`/`6b`/`CP6` + `results.precision`/`results.performance` | precision/summary.txt、perf/summary.txt |
+| Step 7 完成 | `7` + `usage`（可采集时） | 会话统计 |
+
 ### 争议仲裁
 
 当 Developer 对 Reviewer 的审查结果有异议时，CANNBot 直接仲裁。
@@ -278,3 +300,6 @@ Step 7: 完成汇报
 | 官方示例 | `$ASC_DEVKIT_DIR/examples/` | 仲裁开发争议时参考 |
 | 精度调试 Skill | `/ascendc-precision-debug` | 仲裁精度争议时参考 |
 | 性能采集 Skill | `/ops-profiling` | 仲裁性能争议时参考 |
+| 状态模板 | `workflows/references/state.json` | 机器可读状态文件空模板 |
+| 状态说明 | `workflows/references/state-template.md` | 字段语义、实时更新规则、usage 采集方法 |
+| 状态校验 | `workflows/scripts/validate_state.py` | state.json 合法性校验脚本 |
