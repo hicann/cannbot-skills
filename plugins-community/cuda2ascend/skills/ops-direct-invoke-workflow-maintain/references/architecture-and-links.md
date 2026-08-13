@@ -139,7 +139,7 @@ init 把源文件软链接到算子仓根的运行时目录（OpenCode 的 `.ope
 按角色限制写权限——`.cannbot` 所有角色可写（任意类型）、项目外拒绝、code/test/doc 按角色限权：
 
 - **实现**：opencode 用 `hooks/opencode/permission-guard.js`，在 `tool.execute.before` 里 throw 阻断违规写入；claude 用 `hooks/claude/permission-guard.js`，作为 PreToolUse hook 读 stdin 事件 JSON，违规时 exit 2（stderr 回传模型）。两者同一套规则语义。
-- **静默问卷拦截**：`mode=silent`（`.cannbot/settings.json`）时，两侧 hook 额外拦截问卷工具（opencode `question` / claude `Question`，matcher 含 Question 由 init 注册并在已注册时自动补充），阻断任何角色发送问卷；mode 为 `interactive` 时放行。opencode 每次调用实时读 settings.json（会话内切换即时生效），claude 天然每次调用独立进程。
+- **静默问卷拦截**：`mode=silent`（`.cannbot/settings.json`）时，两侧 hook 额外拦截问卷工具（opencode `question`/`ask` / claude `AskUserQuestion`；hook 内按工具名子串匹配，matcher 含 `Question` 由 init 注册并在已注册时自动补充——matcher 为正则子串匹配，`Question` 可命中 `AskUserQuestion`），阻断任何角色发送问卷；mode 为 `interactive` 时放行。opencode 每次调用实时读 settings.json（会话内切换即时生效），claude 天然每次调用独立进程。
 - **加载**：opencode 由 init Step 4+ 链接到 `<install>/.opencode/plugin/` 自动加载；claude 链接到 `<install>/.claude/hooks/` 并在 `.claude/settings.json` 注册。
 - **角色来源**：opencode 用 sessionID → `client.session.get` 反查当前 agent 名（实测坐实）；claude 用 hook 输入的 `agent_type` 字段（主线程无该字段，即 PM）。
 - **规格真值源**：`skills/workflow-agent-permissions/hooks/*.js`，每角色一文件（ESM `export default { categories, exts }`），init Step 4.5 复制到 `.cannbot/permissions/`；hook 扫描该目录逐个 import、按文件名即角色名 per-agent 合并到内置默认值（默认值为纯防御兜底，与 skill 文件保持同步——L8 约束，**两侧 hook 的内置默认值都要同步**）。

@@ -17,4 +17,4 @@ description: 仓库领域知识，提供本仓算子涉及的领域标准、概�
 | 算子族设计方法论 | `ascendc-tiling-design` | 各算子族（Reduction / Elementwise / Broadcast / Conversion / MatMul 等）的场景路由、Tiling 策略、Buffer 规划、数据流方法论 |
 | 目标芯片架构 | `npu-arch` | 芯片型号 / SocVersion / NpuArch 概念、`--npu-arch` 合法值（ascend910b / ascend910_93 / ascend950）、架构特性 |
 | 代码架构选型 | `ascendc-regbase-best-practice`（RegBase 路线适用条件、约束与陷阱）、`ascendc-simt-best-practices`（SIMT 路线编程范式与 API 边界）；MemBase 默认路线的适用性依 `ascendc-tiling-design` 判断，目标芯片对各架构的支持情况依 `npu-arch` 判断 | 各代码架构的适用条件与代价，作为架构选型推荐的判断依据 |
-| 精度领域标准 | `ops-precision-standard` | 各 dtype 的精度容差标准与判定口径；**外部评测以评测集内置容差为最终裁定**，本标准作为开发期自检参照 |
+| 精度领域标准 | `ops-precision-standard` | 各 dtype 的精度容差标准与判定口径；**模式 A 下以评测框架实际执行判定的口径为最终裁定**（溯源方法见 evaluation-contract.md），本标准用于模式 B 及权威源未声明处的取值 |

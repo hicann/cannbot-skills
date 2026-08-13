@@ -35,27 +35,37 @@
 "use strict"
 
 const { readdirSync, readFileSync } = require("node:fs")
-const { join, relative, sep, isAbsolute } = require("node:path")
+const { join, relative, resolve, sep, isAbsolute } = require("node:path")
 
 // 视为主 Agent(PM) 的情形：主线程 hook 输入无 agent_type 字段；
 // 经 `claude --agent` 以 PM 身份启动时 agent_type 为 PM/pm。
 const PRIMARY_AGENTS = ["PM", "pm"]
 
 // 未知角色（未在规则表中命中）策略：allow-warn | allow | deny
-const UNKNOWN_ROLE_POLICY = "allow-warn"
+// deny：规则表已枚举全部角色，未命中即为配置异常或越权调用；
+// 且 .cannbot 写入在分类阶段已短路放行，deny 只影响代码/测试/文档目录。
+const UNKNOWN_ROLE_POLICY = "deny"
 
 // 只对这些写类工具限权，其余工具一律放行（Claude Code 工具名）
 const GUARDED_TOOLS = ["write", "edit", "multiedit", "notebookedit"]
 
 // 静默模式（.cannbot/settings.json 的 mode=silent）下拦截的询问类工具。
 // 拦截问卷发送是机制兜底；正常流程下 QA 已按静默默认决策执行（prompt 层约束）。
-const SILENT_GUARDED_TOOLS = ["question"]
+// 按**子串**匹配工具名（小写后），覆盖 AskUserQuestion 等带前后缀的命名。
+const SILENT_GUARDED_TOOLS = ["question", "ask"]
 
-// 路径分类（相对项目根的前缀）。code 为兜底类别（不匹配下列任何前缀者）。
-const CATEGORY_PREFIXES = {
-  intermediate: [".cannbot/"],
-  test: ["test/"],
-  doc: ["docs/", "doc/"],
+// 中间产物区：锚定项目根，只认根下的 .cannbot。
+// 不参与下方段级匹配——否则代码树里任意一个同名目录都会拿到
+// 「所有角色可写、不限文件类型」的短路放行，成为越权口子。
+const INTERMEDIATE_DIR = ".cannbot"
+
+// 其余路径分类：按相对项目根路径的**目录段**命中（段名需完全相等）。
+// 用段级匹配而非前缀匹配——测试/文档目录未必在顶层、也未必是单数形式
+// （如 <工程目录>/tests/），前缀匹配会把它们兜底成 code，
+// 使测试角色写不了自己的目录。code 为兜底类别（无目录段命中者）。
+const CATEGORY_DIR_NAMES = {
+  test: ["test", "tests"],
+  doc: ["doc", "docs"],
 }
 
 // 内置默认值（防御性兜底，正常流程不可达）。
@@ -116,10 +126,12 @@ function relPosix(projectRoot, filePath) {
 }
 
 // 判定路径类别；写到项目根之外(以 .. 开头)返回 "external"
-function classify(rel, categoryPrefixes) {
+function classify(rel, categoryDirNames) {
   if (rel.startsWith("../") || rel === "..") return "external"
-  for (const [cat, prefixes] of Object.entries(categoryPrefixes)) {
-    for (const p of prefixes) if (rel === p.replace(/\/$/, "") || rel.startsWith(p)) return cat
+  if (rel === INTERMEDIATE_DIR || rel.startsWith(INTERMEDIATE_DIR + "/")) return "intermediate"
+  const dirs = rel.split("/").slice(0, -1) // 末段是文件名，不参与目录段匹配
+  for (const [cat, names] of Object.entries(categoryDirNames)) {
+    if (dirs.some((d) => names.includes(d))) return cat
   }
   return "code" // 兜底：其余视为代码目录
 }
@@ -162,7 +174,7 @@ function main() {
   const tool = (input.tool_name || "").toLowerCase()
 
   // 静默模式：拦截问卷发送（任何角色都不得绕过）
-  if (SILENT_GUARDED_TOOLS.includes(tool)) {
+  if (SILENT_GUARDED_TOOLS.some((t) => tool.includes(t))) {
     const projectRoot = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd()
     if (readSilentMode(projectRoot)) {
       deny(
@@ -176,12 +188,14 @@ function main() {
   if (!GUARDED_TOOLS.includes(tool)) return // 非写类工具放行
 
   const toolInput = input.tool_input || {}
-  const filePath = toolInput.file_path ?? toolInput.notebook_path
-  if (!filePath || !isAbsolute(filePath)) return // 拿不到绝对路径，不拦（避免误伤）
+  const rawPath = toolInput.file_path ?? toolInput.notebook_path
+  if (!rawPath) return // 拿不到路径，不拦（避免误伤）
 
   const projectRoot = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd()
+  // 相对路径按会话工作目录解析后再分类：直接放行会让相对路径成为绕过口子
+  const filePath = isAbsolute(rawPath) ? rawPath : resolve(input.cwd || projectRoot, rawPath)
   const rel = relPosix(projectRoot, filePath)
-  const cat = classify(rel, CATEGORY_PREFIXES)
+  const cat = classify(rel, CATEGORY_DIR_NAMES)
 
   // .cannbot（中间产物区）所有角色均可写，任意文件类型——短路放行。
   // 写哪、怎么命名由任务下发时约定，不在此卡。

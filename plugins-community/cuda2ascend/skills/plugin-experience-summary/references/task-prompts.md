@@ -26,8 +26,8 @@
 - 【权限】你只可写 `.cannbot/<算子名>/tmp/`，其它写入操作会被 hooks 拦截。
 - 【输入】本次会话的拦截记录（从 state.json、LOG.md、Issue-问题记录、tmp/ 中寻找 permission-guard / 静默问卷拦截相关记录）；hook 源文件：`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js`（只读，不修改）。
 - 【输出】hooks 分析与修复建议段落，写入 `.cannbot/<算子名>/tmp/经验总结-2-hooks分析.md`。
-- 【skills】立即加载 `workflow-agent-permissions`。
-- 【验收标准】逐条记录本次会话中的实际拦截/漏拦/误拦事件（含事件上下文、角色、工具、结果）；对照两侧 hook 源给出建议修复点（如规则缺失、误伤、语义不一致），每条标注严重度与修复位置；无拦截记录时明确写出「本次会话无 hooks 拦截记录」，并基于两侧 hook 源给静态建议。
+- 【参考资料】读取 `workflow-agent-permissions` 的 SKILL.md **原文**作为权限范围与守卫边界的基准（该 skill 不经 skill 加载工具触发，直接读文件）。
+- 【验收标准】逐条记录本次会话中的实际拦截/漏拦/误拦事件（含事件上下文、角色、工具、结果）；对照两侧 hook 源给出建议修复点（如规则缺失、误伤、语义不一致、两侧语义不同步），每条标注严重度与修复位置；无拦截记录时明确写出「本次会话无 hooks 拦截记录」，并基于两侧 hook 源给静态建议。**误拦事件须追到规则层根因**（是路径分类规则不匹配，还是角色权限范围本身不含该目录）——绕开守卫落盘属绕行手段，不作为修复结论。
 ```
 
 ## plugin-experience-summary-3 耗时统计与重试定位

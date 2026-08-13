@@ -78,7 +78,7 @@
 | M3 | ⛔ 确认点（CP0/CP1/CP2.2）的静默默认决策是否落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`），中断恢复表（task-prompts recovery）是否无需感知静默？ |
 | M4 | 静默例外清单是否完整且唯一（权限预检警告 / 任务完成总结），无其它隐含输出；插件内异步等待的告知是否归插件自身约定而非主工作流例外清单？ |
 | M5 | 修改 `--mode` 或 Step 5.5 后，`example/init.sh` 是否仍兼容（基类参数只增不破坏）？ |
-| M6 | 静默问卷拦截两侧是否同步（`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？ |
+| M6 | 静默问卷拦截两侧是否同步（`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？**`SILENT_GUARDED_TOOLS` 的取值是否与两侧 harness 的问卷工具真实名对得上**（claude 侧为 `AskUserQuestion`，hook 内按子串匹配；只对 matcher 不对工具名，拦截会静默空转） |
 
 ## 八、子仓兼容性（`example/init.sh` 分发契约）
 

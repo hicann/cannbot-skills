@@ -27,6 +27,6 @@ description: 仓库测试开发指导，介绍本仓测试框架的使用与测�
 |--------|------|
 | `ascendc-st-design` | 黑盒用例设计引擎：因子提取→约束→求解→分级 + 覆盖报告；模式 B 用于从需求设计用例，模式 A 用于核对评测集 cases 覆盖与补充设计（见 blackbox-design.md） |
 | `ascendc-whitebox-design` | 白盒设计引擎：源码分析→路径枚举→tilingkey 覆盖，供复杂/tilingkey 算子复用（见 whitebox-design.md） |
-| `ops-precision-standard` | 各 dtype 的 atol/rtol 精度标准；开发期自检参照，模式 A 下评测集内置容差为最终裁定 |
+| `ops-precision-standard` | 各 dtype 的 atol/rtol 精度标准；用于模式 B 及权威源未声明处的取值，模式 A 下以评测框架实际执行判定的口径为最终裁定 |
 | `ops-profiling` | msprof op 性能采集、CSV 指标解读；模式 A 性能评测由评测集评测脚本内置 profiler 完成，模式 B 用本 skill 自采 |
 | `ascendc-precision-debug` | 精度不达标时诊断根因 |

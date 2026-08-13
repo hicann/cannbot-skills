@@ -54,7 +54,8 @@
 | 失败回退 | 按 [error-handling.md](error-handling.md) 自动回退至最大轮次；超上限 = 阻断 |
 | 阻断 | 输出结构化问题清单与可恢复状态点（属中止性总结，静默下唯一允许的问题输出） |
 | 插件内异步等待（如提交 PR 后的 CI 等待） | 属插件内部步骤（如 `plugin-pr-submit`）：照常落盘等待态结束会话、用户回传结果，其等待态告知归插件自身输出约定，不计入主工作流例外清单 |
-| 任务完成 | **必汇报**：输出完整总结——交付物清单、各 CP 结论、遗留问题 |
+| 需求级硬门槛放宽 | 按默认决策收口继续推进，同时落盘完整依据并标记 `pending_user_review`；不单独弹问卷，随任务完成总结上报 |
+| 任务完成 | **必汇报**：输出完整总结——交付物清单、各 CP 结论、遗留问题，以及全部 `pending_user_review` 条目（逐条含决策内容与依据） |
 
 ### 静默下唯一允许的输出
 
@@ -63,7 +64,7 @@
 
 其余一切进度、结论、中间信息均不输出。
 
-> **机制兜底**：`mode=silent` 时 permission-guard hook 在工具层拦截问卷发送（opencode `question` / claude `Question`，任何角色都不得绕过）——「QA 不发送问卷」既是 prompt 约束，也有 hook 保证；`mode` 切回 `interactive` 后立即解除拦截（见 `workflow-agent-permissions` skill）。
+> **机制兜底**：`mode=silent` 时 permission-guard hook 在工具层拦截问卷发送（opencode `question`/`ask` / claude `AskUserQuestion`，按工具名子串匹配，任何角色都不得绕过）——「QA 不发送问卷」既是 prompt 约束，也有 hook 保证；`mode` 切回 `interactive` 后立即解除拦截（见 `workflow-agent-permissions` skill）。
 
 ### 静默默认决策表（用户确认点替代）
 
@@ -72,6 +73,9 @@
 | CP0 环境确认 | 按环境信息文档通过（文档缺失或记录异常 = 阻断，交用户） |
 | CP1 需求确认 | 需求文档核对无硬伤即通过；架构选型固定采用 SIMD，不评估 SIMT |
 | CP2.2 方案检查 | QA 评审通过即视为用户确认（按方案文档决策执行） |
+| 需求级硬门槛放宽（性能 / 精度标准未达成的收口） | 可收口继续推进，但**须落盘完整收口依据并标记 `pending_user_review`**（见 [state-schema.md](state-schema.md)），随任务完成总结逐条上报；依据不全时不得收口，按阻断处理 |
+
+> **默认决策 ≠ 永久定案**：上表前三项是常规确认点的默认放行，静默下即视为已确认；最后一项性质不同——它放宽的是需求文档声明的硬门槛，属需求级决策，静默下只是"不阻塞地继续推进"，**必须以待复核状态留痕并上报**，由用户在下一次交互中裁定。放宽依据的构成见 [error-handling.md](error-handling.md)「需求级硬门槛放宽」。
 
 ### 与插件机制的关系
 
