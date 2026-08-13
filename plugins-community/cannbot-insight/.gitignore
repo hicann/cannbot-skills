@@ -76,3 +76,7 @@ package-lock.json
 # dev docs (temporary logs/reports)
 docs/dev-log.md
 docs/report.md
+
+# export-db.mjs output
+dbfile/
+jsonlfile/

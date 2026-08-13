@@ -75,31 +75,17 @@ export async function POST(req: Request) {
     )
   }
 
-  let agentBody: string
-  try {
-    agentBody = fs.readFileSync(resolved.mdPath, "utf8")
-  } catch {
-    return NextResponse.json(
-      { error: `读 agent 声明失败：${resolved.mdPath}` },
-      { status: 404 },
-    )
-  }
-
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-eval-agent-audit-"))
   try {
-    const safeName = String(agentName).replace(/[^a-zA-Z0-9._-]/g, "_")
-    const skillDir = path.join(tmp, safeName)
-    fs.mkdirSync(skillDir, { recursive: true })
-    // agent .md 自带 YAML frontmatter（name: <agentName>），与 session 里 agentName 一致——
-    // skill-eval 的 --kind agent 靠这个 name 切段（匹配 records 的 agent 字段）。原样物化即可。
-    fs.writeFileSync(path.join(skillDir, "SKILL.md"), agentBody)
-
     const transcriptPath = path.join(tmp, "session.json")
     fs.writeFileSync(transcriptPath, JSON.stringify(await buildStructuredRecords(session.id, prisma)))
 
     const outputDir = path.join(tmp, "out")
     fs.mkdirSync(outputDir, { recursive: true })
-    const args = buildTranscriptArgs({ skillDir, transcriptPath, outputDir, kind: "agent" })
+    // agent .md 直传 skill-eval：skill-eval 94ed7d3 去 SKILL.md 硬约束后，parse_skill_md 接受任意
+    // .md 文件（直读其 frontmatter+body），无需再把正文拷成 <tmp>/SKILL.md。身份仍靠 frontmatter
+    // 的 name（--kind agent 拿它当切片 target，匹配 records 的 agent 字段），与文件名无关。
+    const args = buildTranscriptArgs({ skillPath: resolved.mdPath, transcriptPath, outputDir, kind: "agent" })
 
     // 流式 NDJSON：spawn skill-eval，stdout 解析进度回传 progress 事件，结束回传 result/error。
     // tmp 清理放进流的 finally（等 skill-eval 跑完），不能在路由 return 时删。

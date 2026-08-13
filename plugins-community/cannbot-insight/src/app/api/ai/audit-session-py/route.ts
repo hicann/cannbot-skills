@@ -29,7 +29,9 @@ export async function POST(req: Request) {
 
   let trajectoryText: string
   try {
+    const t0 = Date.now()
     trajectoryText = await exportSessionToMarkdown(taskId, prisma, framework)
+    console.log(`[audit-py] exportSessionToMarkdown ${Date.now() - t0}ms (${(trajectoryText.length / 1024).toFixed(0)}KB)`)
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "MD 组装失败" }, { status: 500 })
   }
@@ -38,7 +40,10 @@ export async function POST(req: Request) {
   let agentIo: unknown = null
   if (mode === "v4") {
     try {
+      const t0 = Date.now()
       agentIo = await buildAgentIO(taskId, prisma, framework)
+      const agentCount = Array.isArray((agentIo as { agents?: unknown[] } | null)?.agents) ? (agentIo as { agents: unknown[] }).agents.length : 0
+      console.log(`[audit-py] buildAgentIO ${Date.now() - t0}ms (${agentCount} agents)`)
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : "agent-IO 提取失败" }, { status: 500 })
     }
@@ -46,6 +51,7 @@ export async function POST(req: Request) {
 
   let upstream: Response
   try {
+    const t0 = Date.now()
     upstream = await fetch(`${PYTHON_AGENT_URL}/compress-and-analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -57,6 +63,7 @@ export async function POST(req: Request) {
       }),
       signal: AbortSignal.timeout(1800000),
     })
+    console.log(`[audit-py] upstream fetch ${Date.now() - t0}ms (status ${upstream.status})`)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "agent v2 unreachable（Python 服务未启动？）"
     return NextResponse.json({ error: msg }, { status: 500 })

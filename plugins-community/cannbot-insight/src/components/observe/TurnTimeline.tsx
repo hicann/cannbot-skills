@@ -55,6 +55,7 @@ interface TurnTimelineProps {
   onSelectTurn: (turnId: string) => void
   highlightSubagentTurnId?: string | null
   scrollToTurnId?: string | null
+  onJumpToTurnIndex?: (turnIndex: number) => void
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -190,10 +191,11 @@ function SubagentLaneView({ lane, ctx }: { lane: SubagentLane; ctx: LaneCtx }) {
   )
 }
 
-export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, highlightSubagentTurnId, scrollToTurnId }: TurnTimelineProps) {
+export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, highlightSubagentTurnId, scrollToTurnId, onJumpToTurnIndex }: TurnTimelineProps) {
   const [expandedSubagents, setExpandedSubagents] = useState<Set<string>>(new Set())
   const [filterRole, setFilterRole] = useState<string | null>(null)
-  const [searchKeyword, setSearchKeyword] = useState("")
+  const [jumpInput, setJumpInput] = useState("")
+  const [jumpNotFound, setJumpNotFound] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const selectedRef = useRef<HTMLDivElement>(null)
   const selectedSubRef = useRef<HTMLButtonElement>(null)
@@ -410,12 +412,6 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
 
   const filteredRootTurns = displayRootTurns.filter(t => {
     if (filterRole && t.displayRole !== filterRole) return false
-    if (searchKeyword.trim()) {
-      const search = searchKeyword.trim().toLowerCase()
-      const summary = t.displayContent.toLowerCase()
-      const tools = t.toolCalls.map(tc => tc.toolName.toLowerCase()).join(" ")
-      if (!summary.includes(search) && !tools.includes(search)) return false
-    }
     return true
   })
 
@@ -428,6 +424,23 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
     selectedTurnId,
     onSelectTurn,
     selectedSubRef,
+  }
+
+  const handleJump = () => {
+    if (!onJumpToTurnIndex) return
+    const raw = jumpInput.trim().replace(/^#/, "")
+    const idx = parseInt(raw, 10)
+    if (!Number.isFinite(idx) || idx <= 0) {
+      setJumpNotFound(true)
+      return
+    }
+    const exists = turns.some(t => t.turnIndex === idx)
+    if (!exists) {
+      setJumpNotFound(true)
+      return
+    }
+    setJumpNotFound(false)
+    onJumpToTurnIndex(idx)
   }
 
   return (
@@ -457,12 +470,41 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
           ))}
         </div>
 
-        <Input
-          placeholder="Search content or tool name..."
-          value={searchKeyword}
-          onChange={(e) => setSearchKeyword(e.target.value)}
-          className="h-6 text-xs"
-        />
+        {onJumpToTurnIndex && (
+          <div className="flex gap-1.5">
+            <Input
+              placeholder="Go to turn #"
+              value={jumpInput}
+              onChange={(e) => {
+                setJumpInput(e.target.value)
+                setJumpNotFound(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleJump()
+                }
+              }}
+              className={cn(
+                "h-6 text-xs w-28 font-mono",
+                jumpNotFound && "border-red-500 focus-visible:ring-red-500"
+              )}
+              inputMode="numeric"
+              title="Jump to a turn by its number (e.g. 459 or #459) and scroll it into view. Works for subagent turns too. Press Enter or click Go."
+            />
+            <button
+              type="button"
+              onClick={handleJump}
+              className="h-6 px-2 rounded text-xs font-medium bg-muted text-muted-foreground hover:bg-accent transition-colors shrink-0"
+              title="Jump to a turn by its number (e.g. 459 or #459) and scroll it into view. Works for subagent turns too. Press Enter or click Go."
+            >
+              Go
+            </button>
+          </div>
+        )}
+        {jumpNotFound && (
+          <p className="text-xs text-red-500">Turn #{jumpInput.trim().replace(/^#/, "")} not found</p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0" ref={containerRef}>

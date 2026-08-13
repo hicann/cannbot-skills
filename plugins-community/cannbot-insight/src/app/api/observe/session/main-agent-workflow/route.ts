@@ -1,24 +1,23 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
-// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-// CANN Open Software License Agreement Version 2.0 (the "License").
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
+// This file is licensed under the CANN Open Software License Agreement Version 2.0.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { recoverMainAgentWorkflowBody, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/skill-eval-audit';
-import { resolveWorkflowSkillNameAuto } from '@/lib/skill-md-scan';
+import { recoverWorkflowDeclaration, resolveWorkflowSkillName, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/skill-eval-audit';
 
 /**
- * 主 agent workflow skill 的真名（identifier）：扫盘按 turn0 body 前缀匹配 disk SKILL.md
- * → frontmatter name（如 ops-registry-invoke-glacier）。供 Skills/Audit 行显示真名用
- * （替代合成名「主 agent workflow」）。主 agent 不 invoke skill，其 workflow 声明在
- * session 首条 user turn（无 frontmatter/name），故真名只能扫盘按 body 匹配反查。
+ * 主 agent 编排 对账目标的可用性 + 真名：
  *
- * 返回：{ name }（匹配到真名）；{ name: MAIN_AGENT_WORKFLOW_NAME }（有 turn0 但扫盘没对到，
- * 回退合成名）；null（无 turn0/过短 → 该 session 无 workflow 声明）。
+ * - available：session 有 workflow 编排规程（主 agent Skill invoke → SKILL.md body /
+ *   skill resources 恢复）→ 可 root 对账。无 workflow skill invoke → available=false。
+ *
+ * - name：workflow skill 真名（主 agent Skill invoke 的 skillName，如
+ *   ops-registry-invoke-glacier）。无 invoke → 回退合成名 MAIN_AGENT_WORKFLOW_NAME。
+ *
+ * - source：声明来源标识（如 "task-prompts.md" / "ops-registry-invoke-workflow (SKILL.md)"）。
+ *
+ * 返回：{ available, name, source }。available=true 时 name 非 null、source 非 null；
+ * available=false 时 name=null、source=null。
  */
 export async function GET(request: Request) {
   try {
@@ -37,13 +36,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    const body = await recoverMainAgentWorkflowBody(session.id, prisma);
-    if (!body) {
-      return NextResponse.json({ name: null });
+    // available + source：workflow 编排规程能否恢复——root 对账送它
+    const decl = await recoverWorkflowDeclaration(session.id, prisma);
+    if (!decl) {
+      return NextResponse.json({ available: false, name: null, source: null });
     }
 
-    const name = resolveWorkflowSkillNameAuto(body) ?? MAIN_AGENT_WORKFLOW_NAME;
-    return NextResponse.json({ name });
+    // name：主 agent Skill invoke 的 skillName（workflow skill 真名）
+    const name = (await resolveWorkflowSkillName(session.id, prisma)) ?? MAIN_AGENT_WORKFLOW_NAME;
+    return NextResponse.json({ available: true, name, source: decl.source });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

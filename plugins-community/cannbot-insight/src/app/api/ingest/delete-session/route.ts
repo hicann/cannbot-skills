@@ -12,12 +12,27 @@ import { prisma } from '@/lib/db';
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { taskId, framework, deleteAll } = body;
+    const { taskId, framework, deleteAll, sessions: batchSessions } = body;
 
     if (deleteAll) {
       const count = await prisma.session.count();
       await prisma.session.deleteMany({});
       return NextResponse.json({ deleted: count });
+    }
+
+    if (Array.isArray(batchSessions)) {
+      let deleted = 0;
+      for (const entry of batchSessions) {
+        if (!entry || typeof entry.taskId !== 'string') continue;
+        const where: Record<string, string> = { taskId: entry.taskId };
+        if (typeof entry.framework === 'string') where.framework = entry.framework;
+        const found = await prisma.session.findMany({ where });
+        for (const s of found) {
+          await prisma.session.delete({ where: { id: s.id } });
+          deleted++;
+        }
+      }
+      return NextResponse.json({ deleted, batch: batchSessions.length });
     }
 
     if (!taskId) {

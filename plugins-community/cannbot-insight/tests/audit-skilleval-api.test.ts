@@ -51,9 +51,9 @@ function happySpawn() {
     proc.stderr = new EventEmitter()
     proc.kill = vi.fn()
     setImmediate(() => {
-      const skillDir = args[1]
+      const skillPath = args[1]
       try {
-        lastWrittenSkillMd = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8")
+        lastWrittenSkillMd = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8")
       } catch {
         lastWrittenSkillMd = null
       }
@@ -122,30 +122,50 @@ describe("audit-skilleval route", () => {
     expect(lastWrittenSkillMd).toContain("BODY")
   })
 
-  it("kind=root → --kind root（body 从 session 首条 user turn 恢复，name 固定 main-agent-workflow）", async () => {
-    const workflowBody = "# 基于 ACLNN 的算子开发工作流\n\n你是纯编排者（Orchestrator）" + "x".repeat(500)
+  it("kind=root → skill resources 文件（task-prompts.md）恢复 → --kind root", async () => {
+    const resourceContent = "# Task 调用参数\n\n## 1.1 开发准备\n\n- [ ] 开发日志已创建\n- [ ] 问题目录已创建\n- [ ] 环境检查已执行\n" + "x".repeat(120)
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
-    fakePrisma.turn.findFirst.mockResolvedValue({ content: workflowBody })
+    fakePrisma.skillEvent.findFirst.mockResolvedValue({ skillName: "ops-registry-invoke-workflow" })
+    fakePrisma.toolCall.findMany.mockResolvedValue([
+      { toolName: "read", argsJson: '{"filePath":"/x/ops-registry-invoke-workflow/resources/task-prompts.md"}', resultJson: `<content>${resourceContent}</content>` },
+    ])
     spawnMock.mockImplementation(happySpawn())
 
-    const res = await POST(makeRequest({ taskId: "ses_1", skillName: "主 agent workflow", kind: "root" }))
+    const res = await POST(makeRequest({ taskId: "ses_1", skillName: "主 agent 编排", kind: "root" }))
+    await readNdjson(res)
     expect(res.status).toBe(200)
-    const events = await readNdjson(res)
-    expect((events.at(-1) as { stage: string }).stage).toBe("result")
-
     const [, args] = spawnMock.mock.calls[0]
     expect(args).toContain("--kind")
     expect(args[args.indexOf("--kind") + 1]).toBe("root")
-    // root 不走 recoverSkillBody（不调 skillEvent），走 turn.findFirst 恢复首条 user turn
-    expect(fakePrisma.skillEvent.findFirst).not.toHaveBeenCalled()
-    // body 是 turn0 内容；name 固定（root 不按 name 切）
-    expect(lastWrittenSkillMd).toContain("你是纯编排者")
+    expect(lastWrittenSkillMd).toContain("开发准备")
     expect(lastWrittenSkillMd).toContain("name: main-agent-workflow")
   })
 
-  it("kind=root 但首条 user turn 过短 → 404", async () => {
+  it("kind=root → 无 resources 文件 → 退 SKILL.md body（编排规程）", async () => {
+    const skillBody = "# Skill: ops-registry-invoke-workflow\n\n## 核心原则\n\n- 测试驱动\n- 阶段递进\n- 阶段门控\n" + "x".repeat(120)
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
-    fakePrisma.turn.findFirst.mockResolvedValue({ content: "短查询" })
+    // resolveWorkflowSkillName → skillName; recoverSkillBody → turnId
+    fakePrisma.skillEvent.findFirst
+      .mockResolvedValueOnce({ skillName: "ops-registry-invoke-workflow" })
+      .mockResolvedValueOnce({ turnId: "t1" })
+    // first findMany: resource file (empty); second: skill invoke ToolCall
+    fakePrisma.toolCall.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { toolName: "skill", argsJson: '{"name":"ops-registry-invoke-workflow"}', resultJson: `<skill_content name="ops-registry-invoke-workflow">${skillBody}</skill_content>` },
+      ])
+    spawnMock.mockImplementation(happySpawn())
+
+    const res = await POST(makeRequest({ taskId: "ses_1", skillName: "主 agent 编排", kind: "root" }))
+    await readNdjson(res)
+    expect(res.status).toBe(200)
+    expect(lastWrittenSkillMd).toContain("核心原则")
+    expect(lastWrittenSkillMd).toContain("name: main-agent-workflow")
+  })
+
+  it("kind=root → 无主 agent Skill invoke → 404", async () => {
+    fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
+    fakePrisma.skillEvent.findFirst.mockResolvedValue(null)
     const res = await POST(makeRequest({ taskId: "ses_1", kind: "root" }))
     expect(res.status).toBe(404)
   })

@@ -17,6 +17,7 @@ const FIXTURE_FILE = path.join(FIXTURE_DIR, 'abc123.jsonl');
 const SIMPLE_FILE = path.join(FIXTURE_DIR, 'simple-session.jsonl');
 const EMPTY_FILE = path.join(FIXTURE_DIR, 'empty-session.jsonl');
 const PARALLEL_TOOLS_FILE = path.join(FIXTURE_DIR, 'parallel-tools.jsonl');
+const E2E_SAMPLE_FILE = path.resolve(__dirname, '../data/e2e/claude-sample.jsonl');
 
 describe('claude-jsonl adapter', () => {
   describe('listSessions', () => {
@@ -27,13 +28,16 @@ describe('claude-jsonl adapter', () => {
       const first = sessions[0];
       expect(first).toHaveProperty('id');
       expect(first).toHaveProperty('createdAt');
+      expect(first).toHaveProperty('endedAt');
       expect(first).toHaveProperty('firstQuery');
       expect(first).toHaveProperty('turnCount');
       expect(first).toHaveProperty('modelName');
+      expect(first).toHaveProperty('totalTokens');
 
       expect(typeof first.id).toBe('string');
       expect(typeof first.createdAt).toBe('string');
       expect(typeof first.turnCount).toBe('number');
+      expect(typeof first.totalTokens).toBe('number');
       expect(first.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
 
@@ -76,6 +80,26 @@ describe('claude-jsonl adapter', () => {
     it('derives session id from file name', () => {
       const sessions = listSessions(SIMPLE_FILE);
       expect(sessions[0].id).toBe('simple-session');
+    });
+
+    it('sums totalTokens across assistant usage blocks', () => {
+      const sessions = listSessions(FIXTURE_FILE);
+      const abc = sessions.find(s => s.id === 'abc123');
+      expect(abc?.totalTokens).toBe(630);
+
+      const simple = listSessions(SIMPLE_FILE).find(s => s.id === 'simple-session');
+      expect(simple?.totalTokens).toBe(15);
+    });
+
+    it('extracts endedAt from last line timestamp and returns null when absent', () => {
+      const sessions = listSessions(E2E_SAMPLE_FILE);
+      expect(sessions.length).toBe(1);
+      const s = sessions[0];
+      expect(s.endedAt).toBe('2026-05-19T09:26:27.511Z');
+      expect(s.totalTokens).toBe(1500);
+
+      const noTs = listSessions(FIXTURE_FILE).find(x => x.id === 'abc123');
+      expect(noTs?.endedAt).toBeNull();
     });
   });
 

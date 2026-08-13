@@ -15,6 +15,7 @@ import {
   EMPTY_FILTER,
   filterFindings,
   groupFindingsByInstruction,
+  groupFindingsByVerdict,
   hasNonPass,
   isMultiTranscript,
   sortFindings,
@@ -24,18 +25,21 @@ import {
 import { FindingFilters, verdictCounts } from "./FindingFilters"
 import { FindingCard } from "./FindingCard"
 import { ByInstructionTable } from "./ByInstructionTable"
+import { StageBreakdownTable } from "./StageBreakdownTable"
 
 /**
  * 对账报告原生视图（替代 iframe 嵌 skill-eval HTML）。数据 = SkillAuditResult
  * （AuditReport + 可选 _html 逃生口）。移植 audit-report.html 的全部区块：header →
- * warnings → by_instruction（多 transcript）→ 过滤 → findings（分组/扁平）→ _html 逃生口。
+ * warnings → by_instruction 概要表（单/多 transcript 都显）→ 过滤 → findings（分组）→ _html 逃生口。
  */
 export function AuditReportView({
   result,
   onRerun,
+  onJumpToTurn,
 }: {
   result: SkillAuditResult
   onRerun?: () => void
+  onJumpToTurn?: (turn: number) => void
 }) {
   const { _html, ...report } = result
   const [filter, setFilter] = useState<FindingFilter>(EMPTY_FILTER)
@@ -101,6 +105,11 @@ export function AuditReportView({
         </details>
       </div>
 
+      {/* ①b 阶段耗时 / token（诊断慢在哪；旧 report 无 stage_breakdown 则不显） */}
+      {(report.stage_breakdown ?? []).length > 0 && (
+        <StageBreakdownTable stages={report.stage_breakdown ?? []} durationSeconds={report.duration_seconds} />
+      )}
+
       {/* ② warnings */}
       {(report.warnings ?? []).length > 0 && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-2.5">
@@ -111,9 +120,9 @@ export function AuditReportView({
         </div>
       )}
 
-      {/* ③ by_instruction（多 transcript 才显） */}
-      {multi && (report.by_instruction ?? []).length > 0 && (
-        <ByInstructionTable byInstruction={report.by_instruction ?? []} nTrans={(report.transcripts ?? []).length} />
+      {/* ③ by_instruction 概要表(单/多 transcript 都显;多 transcript 带跨会话列,单 transcript 精简) */}
+      {(report.by_instruction ?? []).length > 0 && (
+        <ByInstructionTable byInstruction={report.by_instruction ?? []} nTrans={(report.transcripts ?? []).length} onJumpToSeq={jumpToSeq} />
       )}
 
       {/* ④ 过滤 + findings */}
@@ -134,18 +143,30 @@ export function AuditReportView({
               {(filtered ?? []).map((g) => (
                 <details key={g.key} open={hasNonPass(g.findings)} className="rounded border border-border bg-card/50">
                   <summary className="cursor-pointer select-none px-2.5 py-1.5 text-xs font-medium">
-                    {g.key} <span className="text-muted-foreground">({g.findings.length})</span>
+                    {g.findings[0]?.headline || g.key} <span className="text-muted-foreground">({g.findings.length})</span>
                   </summary>
                   <div className="space-y-1 px-2 pb-2">
-                    {g.findings.map((f) => <FindingCard key={f.seq ?? f.instruction_text + f.transcript} f={f} onJumpToSeq={jumpToSeq} />)}
+                    {g.findings.map((f) => <FindingCard key={f.seq ?? f.instruction_text + f.transcript} f={f} onJumpToSeq={jumpToSeq} onJumpToTurn={onJumpToTurn} />)}
                   </div>
                 </details>
               ))}
               {(filtered ?? []).length === 0 && <EmptyFilter />}
             </div>
           ) : (
-            <div className="space-y-1">
-              {(flat ?? []).map((f) => <FindingCard key={f.seq ?? f.instruction_text + f.transcript} f={f} onJumpToSeq={jumpToSeq} />)}
+            <div className="space-y-1.5">
+              {groupFindingsByVerdict(flat ?? []).map(({ verdict, findings: items }) => {
+                const vd = VERDICT_DISPLAY[verdict]
+                return (
+                  <details key={verdict} open={verdict !== "PASS"} className="rounded border border-border bg-card/50">
+                    <summary className="cursor-pointer select-none px-2.5 py-1.5 text-xs font-medium">
+                      {vd.icon} {vd.label} <span className="text-muted-foreground">({items.length})</span>
+                    </summary>
+                    <div className="space-y-1 px-2 pb-2">
+                      {items.map((f) => <FindingCard key={f.seq ?? f.instruction_text + f.transcript} f={f} onJumpToSeq={jumpToSeq} onJumpToTurn={onJumpToTurn} />)}
+                    </div>
+                  </details>
+                )
+              })}
               {(flat ?? []).length === 0 && <EmptyFilter />}
             </div>
           )}

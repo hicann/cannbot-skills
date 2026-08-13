@@ -81,13 +81,13 @@ describe("skill-audit-job (cross-tab resume)", () => {
     expect(body.skillName).toBeUndefined()
   })
 
-  it("root kind → POST 到 audit-skilleval 且带 kind:root（合成主 agent workflow 目标，body 从 turn0 恢复）", () => {
-    startSkillAudit({ taskId: "ses_1", kind: "root", name: "主 agent workflow" })
+  it("root kind → POST 到 audit-skilleval 且带 kind:root（合成主 agent 编排 目标，body 从 turn0 恢复）", () => {
+    startSkillAudit({ taskId: "ses_1", kind: "root", name: "主 agent 编排" })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe("/api/ai/audit-skilleval")
     const body = JSON.parse(init.body as string)
-    expect(body.skillName).toBe("主 agent workflow")
+    expect(body.skillName).toBe("主 agent 编排")
     expect(body.kind).toBe("root")
     expect(body.agentName).toBeUndefined()
   })

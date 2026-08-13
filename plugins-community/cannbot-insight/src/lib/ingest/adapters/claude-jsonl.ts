@@ -180,6 +180,8 @@ export function listSessions(dirPath: string): SessionListItem[] {
     let firstQuery: string | null = null;
     let modelName: string | null = null;
     let createdAt: string;
+    let endedAt: string | null = null;
+    let totalTokens = 0;
 
     try {
       createdAt = fs.statSync(file).mtime.toISOString();
@@ -188,6 +190,9 @@ export function listSessions(dirPath: string): SessionListItem[] {
     }
 
     for (const line of lines) {
+      if (line.timestamp) {
+        endedAt = line.timestamp;
+      }
       if (line.type === 'user' && line.message) {
         const text = extractTextContent(line.message.content);
         if (text && !firstQuery) {
@@ -199,14 +204,20 @@ export function listSessions(dirPath: string): SessionListItem[] {
           modelName = line.message.model;
         }
       }
+      if (line.type === 'assistant' && line.message?.usage) {
+        const u = line.message.usage;
+        totalTokens += (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      }
     }
 
     result.push({
       id: sessionId,
       createdAt,
+      endedAt,
       firstQuery,
       turnCount: lines.length,
       modelName,
+      totalTokens,
     });
   }
 

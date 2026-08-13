@@ -58,7 +58,8 @@
       "transcript": "t-2",
       "seq": 2,
       "sources": ["STEP"],
-      "related": ["#4"]
+      "related": ["#4"],
+      "turn_refs": [7]
     },
     {
       "instruction_text": "输出格式必须含变更摘要",

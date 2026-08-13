@@ -47,7 +47,7 @@ class Handler(BaseHTTPRequestHandler):
                      "outputPath": os.path.join(ctx.output_dir, f"{ctx.output_basename}-agentio.json")})
         analyze_log_path = os.path.join(
             ctx.output_dir, f"smart-agent-{ctx.output_basename}.jsonl")
-        analyze_logger = JsonlLogger(log_path=analyze_log_path, cwd=os.getcwd())
+        analyze_logger = JsonlLogger(log_path=analyze_log_path, cwd=os.getcwd(), append=False)
         v4ctx = RunContext(output_dir=ctx.output_dir, output_basename=ctx.output_basename,
                            on_progress=ctx.on_progress, logger=analyze_logger,
                            mode="v4", agent_io=agent_io)

@@ -19,9 +19,10 @@ import type { InstructionAggregate } from "@/lib/skill-eval-audit-types"
 import { CATEGORY_LABEL, NOISE_LABELS } from "./verdictConfig"
 
 /**
- * 多 transcript 的指令级聚合表（移植自 audit-report.html）。FAIL 与 N/A 语义不同，
- * 拆两张表：违规表看 fail% / fail/total + 噪声判别；不适用表看 na/total + 哪几段不适用。
- * 全 PASS 不列。cannbot-insight 实际单 transcript 多数无 by_instruction，此时整块不显。
+ * 指令级聚合概要表（移植自 audit-report.html ③ 区块，单/多 transcript 都显）。FAIL 与 N/A
+ * 语义不同，拆两张表。多 transcript 带跨会话列（fail% / fail/total / in transcripts）；
+ * 单 transcript 无跨会话可比，精简成「明细 № / 指令 / 类别（+ FAIL 噪声判别）」。
+ * 全无 fail → 不列违规表；全无 na → 不列不适用表。
  */
 function NoiseCell({ a }: { a: InstructionAggregate }) {
   if (!a.noise_label) return <span className="text-muted-foreground">—</span>
@@ -34,13 +35,37 @@ function NoiseCell({ a }: { a: InstructionAggregate }) {
   )
 }
 
+/** 明细 #N 链接簇:点 #N 跳到对应 finding(复用 onJumpToSeq,与 FindingCard related 同机制)。 */
+function SeqLinks({ seqs, onJumpToSeq }: { seqs: number[]; onJumpToSeq?: (seq: number) => void }) {
+  if (!seqs.length) return <span className="text-muted-foreground">—</span>
+  return (
+    <>
+      {seqs.map((s, i) => (
+        <span key={s}>
+          {i > 0 && ", "}
+          <button
+            type="button"
+            className="font-mono text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            onClick={() => onJumpToSeq?.(s)}
+          >
+            #{s}
+          </button>
+        </span>
+      ))}
+    </>
+  )
+}
+
 export function ByInstructionTable({
   byInstruction,
   nTrans,
+  onJumpToSeq,
 }: {
   byInstruction: InstructionAggregate[]
   nTrans: number
+  onJumpToSeq?: (seq: number) => void
 }) {
+  const multi = nTrans > 1
   const failRows = byInstruction.filter((a) => a.fail_count > 0)
   const naRows = byInstruction
     .filter((a) => a.na_count > 0)
@@ -51,34 +76,37 @@ export function ByInstructionTable({
       {failRows.length > 0 && (
         <div>
           <h3 className="mb-1.5 text-sm font-semibold">
-            违规 FAIL（跨 {nTrans} transcript）
+            {multi ? `违规 FAIL（跨 ${nTrans} transcript）` : "违规 FAIL"}
           </h3>
           <Table className="text-xs">
             <TableHeader>
               <TableRow>
-                <TableHead>明细 #</TableHead>
-                <TableHead>fail%</TableHead>
+                <TableHead>明细 №</TableHead>
+                {multi && <TableHead>fail%</TableHead>}
                 <TableHead>指令</TableHead>
                 <TableHead>类别</TableHead>
-                <TableHead>fail/total</TableHead>
+                {multi && <TableHead>fail/total</TableHead>}
                 <TableHead>噪声判别</TableHead>
-                <TableHead>fail in transcripts</TableHead>
+                {multi && <TableHead>fail in transcripts</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {failRows.map((a, i) => {
                 const pct = Math.round((a.fail_rate ?? 0) * 100)
                 const cls = (a.fail_rate ?? 0) >= 0.5 ? "text-red-600 dark:text-red-400 font-medium" : "text-orange-700 dark:text-orange-400"
-                const seqs = (a.fail_seqs ?? []).map((s) => `#${s}`).join(", ")
                 return (
                   <TableRow key={i}>
-                    <TableCell className="font-mono text-[10px] text-muted-foreground">{seqs}</TableCell>
-                    <TableCell className={cls + " tabular-nums"}>{pct}%</TableCell>
-                    <TableCell className="whitespace-normal">{a.instruction_text}</TableCell>
+                    <TableCell className="text-[10px]">
+                      <SeqLinks seqs={a.fail_seqs ?? []} onJumpToSeq={onJumpToSeq} />
+                    </TableCell>
+                    {multi && <TableCell className={cls + " tabular-nums"}>{pct}%</TableCell>}
+                    <TableCell className="whitespace-normal" title={a.instruction_text}>
+                      {a.headline || a.source_excerpt || a.instruction_text}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{CATEGORY_LABEL[a.category] ?? a.category}</TableCell>
-                    <TableCell className="tabular-nums">{a.fail_count}/{a.total}</TableCell>
+                    {multi && <TableCell className="tabular-nums">{a.fail_count}/{a.total}</TableCell>}
                     <TableCell><NoiseCell a={a} /></TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">{(a.fail_in_transcripts ?? []).join(", ")}</TableCell>
+                    {multi && <TableCell className="text-[10px] text-muted-foreground">{(a.fail_in_transcripts ?? []).join(", ")}</TableCell>}
                   </TableRow>
                 )
               })}
@@ -90,28 +118,31 @@ export function ByInstructionTable({
       {naRows.length > 0 && (
         <div>
           <h3 className="mb-1.5 text-sm font-semibold">
-            场景不适用 N/A（跨 {nTrans} transcript）
+            {multi ? `场景不适用 N/A（跨 ${nTrans} transcript）` : "场景不适用 N/A"}
           </h3>
           <Table className="text-xs">
             <TableHeader>
               <TableRow>
-                <TableHead>明细 #</TableHead>
-                <TableHead>na/total</TableHead>
+                <TableHead>明细 №</TableHead>
+                {multi && <TableHead>na/total</TableHead>}
                 <TableHead>指令</TableHead>
                 <TableHead>类别</TableHead>
-                <TableHead>na in transcripts</TableHead>
+                {multi && <TableHead>na in transcripts</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {naRows.map((a, i) => {
-                const seqs = (a.na_seqs ?? []).map((s) => `#${s}`).join(", ")
                 return (
                   <TableRow key={i}>
-                    <TableCell className="font-mono text-[10px] text-muted-foreground">{seqs}</TableCell>
-                    <TableCell className="tabular-nums text-orange-700 dark:text-orange-400 font-medium">{a.na_count}/{a.total}</TableCell>
-                    <TableCell className="whitespace-normal">{a.instruction_text}</TableCell>
+                    <TableCell className="text-[10px]">
+                      <SeqLinks seqs={a.na_seqs ?? []} onJumpToSeq={onJumpToSeq} />
+                    </TableCell>
+                    {multi && <TableCell className="tabular-nums text-orange-700 dark:text-orange-400 font-medium">{a.na_count}/{a.total}</TableCell>}
+                    <TableCell className="whitespace-normal" title={a.instruction_text}>
+                      {a.headline || a.source_excerpt || a.instruction_text}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{CATEGORY_LABEL[a.category] ?? a.category}</TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">{(a.na_in_transcripts ?? []).join(", ")}</TableCell>
+                    {multi && <TableCell className="text-[10px] text-muted-foreground">{(a.na_in_transcripts ?? []).join(", ")}</TableCell>}
                   </TableRow>
                 )
               })}

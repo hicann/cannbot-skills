@@ -19,10 +19,10 @@ export function listSessions(dbPath: string): SessionListItem[] {
 
   try {
     const sessions = db.prepare(
-      'SELECT id, taskId, query, model, startTime, totalLlmCallCount FROM "Session" ORDER BY startTime DESC'
+      'SELECT id, taskId, query, model, startTime, endTime, totalLlmCallCount, totalTokens FROM "Session" ORDER BY startTime DESC'
     ).all() as {
       id: string; taskId: string; query: string | null; model: string | null;
-      startTime: string; totalLlmCallCount: number;
+      startTime: string; endTime: string | null; totalLlmCallCount: number; totalTokens: number | null;
     }[];
 
     let versionBySession: Map<string, string | null> = new Map();
@@ -36,9 +36,11 @@ export function listSessions(dbPath: string): SessionListItem[] {
     return sessions.map(s => ({
       id: s.taskId,
       createdAt: new Date(s.startTime).toISOString(),
+      endedAt: s.endTime ? new Date(s.endTime).toISOString() : null,
       firstQuery: s.query,
       turnCount: s.totalLlmCallCount,
       modelName: s.model,
+      totalTokens: s.totalTokens ?? 0,
       version: versionBySession.get(s.taskId) ?? null,
     }));
   } finally {

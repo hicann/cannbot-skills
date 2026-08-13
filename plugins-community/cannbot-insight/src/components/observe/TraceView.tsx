@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { summarizeToolCallErrors, type ErrorSummary } from "@/lib/tool-call-errors"
+import { highlightKeyword, type TurnHighlight } from "@/lib/shared/highlight"
 
 interface TurnRowItem {
   turnId: string
@@ -152,37 +153,12 @@ function inferMedium(prevItem: SearchResultItem, currItem: SearchResultItem): Pr
   return "model_reasoning"
 }
 
-function highlightKeyword(text: string, keyword: string): React.ReactNode {
-  if (!keyword.trim()) return text
-  const lowerText = text.toLowerCase()
-  const lowerKeyword = keyword.trim().toLowerCase()
-  const parts: Array<{ text: string; isKeyword: boolean }> = []
-  let lastIndex = 0
-  let idx = lowerText.indexOf(lowerKeyword)
-  while (idx !== -1) {
-    if (idx > lastIndex) {
-      parts.push({ text: text.substring(lastIndex, idx), isKeyword: false })
-    }
-    parts.push({ text: text.substring(idx, idx + keyword.trim().length), isKeyword: true })
-    lastIndex = idx + keyword.trim().length
-    idx = lowerText.indexOf(lowerKeyword, lastIndex)
-  }
-  if (lastIndex < text.length) {
-    parts.push({ text: text.substring(lastIndex), isKeyword: false })
-  }
-  return parts.map((p, i) =>
-    p.isKeyword
-      ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-500/30 text-foreground rounded px-0.5">{p.text}</mark>
-      : p.text
-  )
-}
-
 interface TraceViewProps {
   turns: TurnRowItem[]
   bridges: BridgeItem[]
   taskId: string
   sessionQuery: string | null
-  navigateToTab: (tab: string, turnId?: string | null, bridgeId?: string | null) => void
+  navigateToTab: (tab: string, turnId?: string | null, bridgeId?: string | null, highlight?: TurnHighlight) => void
 }
 
 export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab }: TraceViewProps) {
@@ -357,6 +333,13 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
       .catch(() => setSearchResults([]))
       .finally(() => setSearching(false))
   }, [taskId])
+
+  const viewTurn = useCallback((turnId: string, matchField?: SearchResultItem["matchField"], toolName?: string) => {
+    const highlight: TurnHighlight | undefined = lastKeyword
+      ? { keyword: lastKeyword, matchField, toolName }
+      : undefined
+    navigateToTab("turns", turnId, undefined, highlight)
+  }, [lastKeyword, navigateToTab])
 
   const exampleKeywords = useMemo(() => {
     const kws: string[] = []
@@ -537,21 +520,21 @@ export function TraceView({ turns, bridges, taskId, sessionQuery, navigateToTab 
               keyword={lastKeyword}
               expandedTurns={expandedTurns}
               onToggleExpanded={toggleExpanded}
-              onViewTurn={(turnId) => navigateToTab("turns", turnId)}
+              onViewTurn={viewTurn}
               onViewBridge={(bridgeId) => navigateToTab("interactions", null, bridgeId)}
               errorsByTurnId={errorsByTurnId}
             />}
             {filteredResults.length > 0 && viewMode === "list" && <ListView
               results={filteredResults}
               keyword={lastKeyword}
-              onViewTurn={(turnId) => navigateToTab("turns", turnId)}
+              onViewTurn={viewTurn}
               onViewBridge={(bridgeId) => navigateToTab("interactions", null, bridgeId)}
               errorsByTurnId={errorsByTurnId}
             />}
             {filteredResults.length > 0 && viewMode === "graph" && <DAGGraphView
               chain={propagationChain}
               keyword={lastKeyword}
-              onViewTurn={(turnId) => navigateToTab("turns", turnId)}
+              onViewTurn={viewTurn}
             />}
           </div>
         </div>
@@ -570,7 +553,7 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
   keyword: string
   expandedTurns: Set<string>
   onToggleExpanded: (turnId: string) => void
-  onViewTurn: (turnId: string) => void
+  onViewTurn: (turnId: string, matchField?: SearchResultItem["matchField"], toolName?: string) => void
   onViewBridge: (bridgeId: string | null) => void
   errorsByTurnId: Map<string, ErrorSummary>
 }) {
@@ -599,7 +582,7 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
             {highlightKeyword(origin.item.matchContext, keyword)}
           </p>
           <div className="flex gap-1.5 mt-1.5">
-            <Button size="sm" variant="outline" className="h-5 text-xs" onClick={() => onViewTurn(origin.item.turnId)}>
+            <Button size="sm" variant="outline" className="h-5 text-xs" onClick={() => onViewTurn(origin.item.turnId, origin.item.matchField, origin.item.toolName)}>
               View Turn →
             </Button>
             {origin.item.bridgeId && (
@@ -651,7 +634,7 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
 
               {isExpanded && (
                 <div className="flex gap-1.5 mt-1.5">
-                  <Button size="sm" variant="outline" className="h-5 text-xs" onClick={(e) => { e.stopPropagation(); onViewTurn(item.turnId) }}>
+                  <Button size="sm" variant="outline" className="h-5 text-xs" onClick={(e) => { e.stopPropagation(); onViewTurn(item.turnId, item.matchField, item.toolName) }}>
                     View Turn →
                   </Button>
                   {item.bridgeId && (
@@ -672,7 +655,7 @@ function PropagationChainView({ chain, keyword, expandedTurns, onToggleExpanded,
 function ListView({ results, keyword, onViewTurn, onViewBridge, errorsByTurnId }: {
   results: Array<SearchResultItem & { sourceType: SourceType; bridgeId: string | null }>
   keyword: string
-  onViewTurn: (turnId: string) => void
+  onViewTurn: (turnId: string, matchField?: SearchResultItem["matchField"], toolName?: string) => void
   onViewBridge: (bridgeId: string | null) => void
   errorsByTurnId: Map<string, ErrorSummary>
 }) {
@@ -693,7 +676,7 @@ function ListView({ results, keyword, onViewTurn, onViewBridge, errorsByTurnId }
             <p className="text-xs text-foreground/80 truncate flex-1 min-w-0">
               {highlightKeyword(item.matchContext, keyword)}
             </p>
-            <Button size="sm" variant="outline" className="h-5 text-xs shrink-0" onClick={() => onViewTurn(item.turnId)}>
+            <Button size="sm" variant="outline" className="h-5 text-xs shrink-0" onClick={() => onViewTurn(item.turnId, item.matchField, item.toolName)}>
               →
             </Button>
           </div>

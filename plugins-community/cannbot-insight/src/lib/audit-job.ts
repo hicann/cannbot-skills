@@ -208,7 +208,9 @@ async function runAuditJob(opts: StartAuditJobOpts): Promise<void> {
     }
     if (analysis) {
       const result = analysis as AnyAnalysis & { _auditMeta?: V4AuditMeta }
+      const prevMeta = (result._auditMeta ?? {}) as V4AuditMeta
       result._auditMeta = {
+        ...prevMeta,
         generatedAt: new Date().toISOString(),
         elapsedSec: Math.floor((Date.now() - startedAt) / 1000),
       }

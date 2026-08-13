@@ -7,9 +7,10 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { CopyButton } from "./CopyButton"
+import { highlightKeyword, type TurnHighlight } from "@/lib/shared/highlight"
 
 interface ToolCallItem {
   id: string
@@ -26,6 +27,7 @@ interface ToolCallItem {
 
 interface ToolCallListProps {
   toolCalls: ToolCallItem[]
+  highlight?: TurnHighlight | null
 }
 
 function hasResultError(resultJson: string | null): boolean {
@@ -61,8 +63,10 @@ function extractSkillLabel(argsJson: string | null): string | null {
   return null
 }
 
-export function ToolCallList({ toolCalls }: ToolCallListProps) {
+export function ToolCallList({ toolCalls, highlight }: ToolCallListProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [prevKw, setPrevKw] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const skillCalls = toolCalls.filter(tc => tc.isSkillRelated)
   const nonSkillCalls = toolCalls.filter(tc => !tc.isSkillRelated)
@@ -76,8 +80,54 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
     })
   }
 
+  // Trace-search jump: when the highlight keyword changes, auto-expand tool
+  // calls that carry the match. Render-phase prop-change pattern (no
+  // setState-in-effect).
+  const currentKw = highlight?.keyword ?? null
+  if (currentKw !== prevKw) {
+    setPrevKw(currentKw)
+    if (currentKw && highlight) {
+      const isToolMatch = highlight.matchField === "toolResult" || highlight.matchField === "toolError" || highlight.matchField === "toolArgs"
+      if (isToolMatch) {
+        const lower = currentKw.trim().toLowerCase()
+        if (lower) {
+          const toExpand = new Set<string>()
+          for (const tc of nonSkillCalls) {
+            if (highlight.toolName && tc.toolName === highlight.toolName) {
+              toExpand.add(tc.id)
+              continue
+            }
+            if (
+              (tc.argsJson?.toLowerCase().includes(lower) ?? false) ||
+              (tc.resultJson?.toLowerCase().includes(lower) ?? false) ||
+              (tc.errorMessage?.toLowerCase().includes(lower) ?? false)
+            ) {
+              toExpand.add(tc.id)
+            }
+          }
+          if (toExpand.size > 0) {
+            setExpandedIds(prev => {
+              const next = new Set(prev)
+              for (const id of toExpand) next.add(id)
+              return next
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // Scroll the first highlighted match into view once expanded.
+  useEffect(() => {
+    if (!highlight?.keyword) return
+    const t = setTimeout(() => {
+      rootRef.current?.querySelector("mark")?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 60)
+    return () => clearTimeout(t)
+  }, [highlight, expandedIds])
+
   return (
-    <div className="space-y-1.5">
+    <div ref={rootRef} className="space-y-1.5">
       {skillCalls.map(tc => {
         const displayState = toolCallDisplayState(tc.state, tc.errorType, tc.resultJson)
         const skillLabel = extractSkillLabel(tc.argsJson)
@@ -130,7 +180,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
               <div className="px-2 pb-2 space-y-2">
                 {tc.errorMessage && (
                   <div className="text-xs text-red-600 dark:text-red-400 p-1.5 bg-red-50/50 dark:bg-red-500/10 rounded">
-                    {tc.errorMessage}
+                    {highlightKeyword(tc.errorMessage, highlight?.keyword)}
                   </div>
                 )}
 
@@ -141,7 +191,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
                       <CopyButton text={tc.argsJson} className="size-4 text-muted-foreground hover:text-foreground" />
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto bg-muted/30 p-1.5 rounded">
-                      {truncateJson(tc.argsJson, 2000) ?? tc.argsJson}
+                      {highlightKeyword(highlight?.keyword ? tc.argsJson : (truncateJson(tc.argsJson, 2000) ?? tc.argsJson), highlight?.keyword)}
                     </pre>
                   </div>
                 )}
@@ -153,7 +203,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
                       <CopyButton text={tc.resultJson} className="size-4 text-muted-foreground hover:text-foreground" />
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto bg-muted/30 p-1.5 rounded">
-                      {truncateJson(tc.resultJson, 2000) ?? tc.resultJson}
+                      {highlightKeyword(highlight?.keyword ? tc.resultJson : (truncateJson(tc.resultJson, 2000) ?? tc.resultJson), highlight?.keyword)}
                     </pre>
                   </div>
                 )}

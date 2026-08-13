@@ -40,29 +40,31 @@ interface Props {
   taskId: string
   framework?: string
   skillEvents: { skillName: string; eventType: string }[]
-  /** 主 agent workflow 对账目标是否可用（session 首条 user turn 达阈值 → 合成 root 目标）。 */
+  /** 主 agent 编排 对账目标是否可用（STATE.md 可恢复 → 合成 root 目标）。 */
   hasMainAgentWorkflow?: boolean
-  /** 主 agent workflow 的真名（扫盘反查的 identifier）；未取/回退时用合成名 MAIN_AGENT_WORKFLOW_NAME。 */
+  /** 主 agent 编排 的真名（扫盘反查的 identifier）；未取/回退时用合成名 MAIN_AGENT_WORKFLOW_NAME。 */
   mainAgentWorkflowName?: string | null
   selected: SelEntry | null
   onSelectedChange: (s: SelEntry | null) => void
+  /** 点击 finding 的 turn_refs #N → 跳转到 Turns tab 对应对话 turn。 */
+  onJumpToTurn?: (turn: number) => void
 }
 
 /**
- * 合成的"主 agent workflow"目标：root kind，声明从 session 首条 user turn 恢复（注入系统提示）。
+ * 合成的"主 agent 编排"目标：root kind，声明从 STATE.md（运行时任务清单）恢复。
  * 显示名用真名（扫盘反查，如 ops-registry-invoke-glacier）；未取到回退 MAIN_AGENT_WORKFLOW_NAME。
  * 内部 key 用真名/回退名（与 SkillDetail 对账按钮传的 name 一致），路由按 kind=root 忽略 skillName。
  */
 const MAIN_AGENT_WORKFLOW_TARGET: SelEntry = { name: MAIN_AGENT_WORKFLOW_NAME, kind: "root" }
 
-export function SkillAuditTab({ taskId, framework, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, selected, onSelectedChange }: Props) {
+export function SkillAuditTab({ taskId, framework, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, selected, onSelectedChange, onJumpToTurn }: Props) {
   const targets = useMemo(() => deriveAuditableTargets(skillEvents), [skillEvents])
-  // 主 agent workflow 显示名：真名（扫盘）→ 回退合成名。对账按钮传此 name，路由 kind=root 忽略。
+  // 主 agent 编排 显示名：真名（扫盘）→ 回退合成名。对账按钮传此 name，路由 kind=root 忽略。
   const workflowName = mainAgentWorkflowName || MAIN_AGENT_WORKFLOW_NAME
   const entries = useMemo(
     () => {
       const skillEntries = targets.flatMap(t => t.kinds.map(k => ({ name: t.name, kind: k } as SelEntry)))
-      // 主 agent workflow 目标置顶（独立于 skillEvents——主 agent 不 invoke skill）
+      // 主 agent 编排 目标置顶（独立于 skillEvents——主 agent 不 invoke skill）
       return hasMainAgentWorkflow ? [{ ...MAIN_AGENT_WORKFLOW_TARGET, name: workflowName }, ...skillEntries] : skillEntries
     },
     [targets, hasMainAgentWorkflow, workflowName],
@@ -98,7 +100,7 @@ export function SkillAuditTab({ taskId, framework, skillEvents, hasMainAgentWork
 
         <div className="flex-1 min-h-0 overflow-y-auto p-3">
           {selected ? (
-            <EntryPanel taskId={taskId} framework={framework} entry={selected} />
+            <EntryPanel taskId={taskId} framework={framework} entry={selected} onJumpToTurn={onJumpToTurn} />
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
               从左侧选一个声明单元跑对账
@@ -151,10 +153,12 @@ function EntryPanel({
   taskId,
   framework,
   entry,
+  onJumpToTurn,
 }: {
   taskId: string
   framework?: string
   entry: SelEntry
+  onJumpToTurn?: (turn: number) => void
 }) {
   const key = skillAuditKey(taskId, entry.kind, entry.name)
   const st = useSyncExternalStore(subscribeSkillAudit, () => getSkillAuditSnapshot(key), getSkillAuditServerSnapshot)
@@ -197,7 +201,7 @@ function EntryPanel({
     )
   }
   if (st.result) {
-    return <AuditReportView result={st.result} onRerun={start} />
+    return <AuditReportView result={st.result} onRerun={start} onJumpToTurn={onJumpToTurn} />
   }
   return (
     <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -207,7 +211,7 @@ function EntryPanel({
           {entry.kind === "skill"
             ? "不 re-run，对账真实执行 vs SKILL.md 声明（正文从 session 恢复）"
             : entry.kind === "root"
-              ? "不 re-run，--kind root 切顶层主 agent 作用域，审主 agent 编排 vs 其 workflow 级 SKILL.md（声明从 session 首条 user turn 的注入系统提示恢复）"
+              ? "不 re-run，--kind root 切顶层主 agent 作用域，审主 agent 编排 vs STATE.md 具体工作流计划（声明从 session 文件工具调用恢复）"
               : "不 re-run，对账真实执行 vs agent .md 声明（.md 从本地 AGENTS_SCAN_ROOT 扫描）"}
         </div>
       </div>

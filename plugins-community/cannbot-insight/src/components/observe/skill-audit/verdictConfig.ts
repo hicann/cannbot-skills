@@ -125,6 +125,27 @@ export function groupFindingsByInstruction(
   return order.map((key) => ({ key, findings: sortFindings(map.get(key)!) }))
 }
 
+/**
+ * 单 transcript 按 verdict 分组(顺序 FAIL → UNRESOLVED → INDETERMINATE → N/A → PASS,
+ * 与 VERDICT_ORDER 一致;未知 verdict 排末尾),跳过空组。每组 findings 已按 verdict 排序。
+ * 用于单 transcript 明细:违规/未判定/存疑/不适用/通过 分节前置,替代扁平列表——
+ * 让"哪几条违规、哪几条不适用"一眼可见,不必滚扁平列表找。
+ */
+export function groupFindingsByVerdict(
+  findings: AuditFinding[],
+): Array<{ verdict: AuditVerdict; findings: AuditFinding[] }> {
+  const map = new Map<AuditVerdict, AuditFinding[]>()
+  for (const fd of findings) {
+    const arr = map.get(fd.verdict) ?? []
+    arr.push(fd)
+    map.set(fd.verdict, arr)
+  }
+  const verdicts = [...map.keys()].sort(
+    (a, b) => (VERDICT_ORDER[a] ?? 9) - (VERDICT_ORDER[b] ?? 9),
+  )
+  return verdicts.map((v) => ({ verdict: v, findings: sortFindings(map.get(v)!) }))
+}
+
 /** 是否多 transcript（决定 by_instruction 表 + 分组显示）。 */
 export function isMultiTranscript(transcripts: string[]): boolean {
   return transcripts.length > 1

@@ -12,6 +12,7 @@
 
 import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 
 export type V4Rating = "pass" | "weak" | "fail" | "n-a"
@@ -67,6 +68,7 @@ export interface V4Problem {
   title: string
   detail?: string
   suggestion?: string
+  evidence?: string
 }
 
 export interface V4OptimizationPriority {
@@ -74,11 +76,15 @@ export interface V4OptimizationPriority {
   target: string
   action: string
   expectedGain: string
+  evidence?: string
 }
 
 export interface V4AuditMeta {
   generatedAt: string   // ISO 时间
   elapsedSec: number    // 审计耗时
+  tokensKt?: number         // 审计消耗总 token（K）
+  inputTokensK?: number     // 输入 token（K）
+  outputTokensK?: number    // 输出 token（K）
 }
 
 export interface V4Analysis {
@@ -133,6 +139,31 @@ function buildTree(agents: V4AgentAudit[]): TreeNode[] {
     return { agent: a, children: (byParent.get(a.id) ?? []).map(node) }
   }
   return (byParent.get(null) ?? []).map(node)
+}
+
+function isFullyPass(a: V4AgentAudit): boolean {
+  const d = a.dimensions
+  return d.completion.rating === "pass" && d.efficiency.rating === "pass" && d.quality.rating === "pass"
+}
+
+function filterPassedSubagents(nodes: TreeNode[]): TreeNode[] {
+  const out: TreeNode[] = []
+  for (const n of nodes) {
+    const kids = filterPassedSubagents(n.children)
+    const hideCandidate = n.agent.role === "subagent" && isFullyPass(n.agent)
+    if (hideCandidate && kids.length === 0) continue
+    out.push({ agent: n.agent, children: kids })
+  }
+  return out
+}
+
+function countSubagents(nodes: TreeNode[]): number {
+  let n = 0
+  for (const node of nodes) {
+    if (node.agent.role === "subagent") n++
+    n += countSubagents(node.children)
+  }
+  return n
 }
 
 function DimCell({ label, dim }: { label: string; dim: V4DimRating }) {
@@ -191,8 +222,9 @@ function EnvelopeChips({ env }: { env: V4Envelope }) {
 
 function TurnChips({ turns, onJump }: { turns: number[]; onJump?: (t: number) => void }) {
   const MAX = 14
-  const shown = turns.slice(0, MAX)
-  const rest = turns.length - shown.length
+  const uniq = [...new Set(turns)]
+  const shown = uniq.slice(0, MAX)
+  const rest = uniq.length - shown.length
   return (
     <div className="flex flex-wrap items-center gap-1">
       <span className="text-[10px] text-muted-foreground shrink-0">turns:</span>
@@ -212,6 +244,42 @@ function TurnChips({ turns, onJump }: { turns: number[]; onJump?: (t: number) =>
         </button>
       ))}
       {rest > 0 && <span className="text-[10px] text-muted-foreground">+{rest}</span>}
+    </div>
+  )
+}
+
+function EvidenceLine({ evidence, onJumpToTurn }: { evidence: string; onJumpToTurn?: (turn: number) => void }) {
+  // 解析 `#turn`（可点击跳转）与 `agent:<name>`（高亮 agent）引用，其余为纯文本。
+  const parts = evidence.split(/(#\d+|agent:[^\s;]+)/)
+  return (
+    <div className="text-[11px] text-muted-foreground leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5">
+      <span className="font-medium text-foreground/70">证据：</span>
+      {parts.map((s, i) => {
+        const turn = /^#(\d+)$/.exec(s)
+        if (turn) {
+          const n = Number(turn[1])
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={!onJumpToTurn}
+              onClick={() => onJumpToTurn?.(n)}
+              className={cn(
+                "font-mono px-1 rounded border text-[10px]",
+                onJumpToTurn ? "cursor-pointer hover:bg-accent text-foreground/70 border-border" : "text-muted-foreground/60 border-transparent"
+              )}
+              title={onJumpToTurn ? `跳转到 turn #${n}` : undefined}
+            >
+              #{n}
+            </button>
+          )
+        }
+        const agent = /^agent:(.+)$/.exec(s)
+        if (agent) {
+          return <Badge key={i} variant="blue" className="text-[10px] px-1 py-0 h-4 font-mono">{agent[1]}</Badge>
+        }
+        return s ? <span key={i} className="whitespace-pre-wrap">{s}</span> : null
+      })}
     </div>
   )
 }
@@ -310,7 +378,17 @@ function AgentCard({ node, depth, onJumpToTurn }: { node: TreeNode; depth: numbe
 }
 
 export function WorkflowAgentAudit({ analysis, onJumpToTurn }: { analysis: V4Analysis; onJumpToTurn?: (turn: number) => void }) {
-  const tree = useMemo(() => buildTree(analysis.agents), [analysis.agents])
+  const [showAllPass, setShowAllPass] = useState(false)
+  const fullTree = useMemo(() => buildTree(analysis.agents), [analysis.agents])
+  const totalSubagents = useMemo(
+    () => analysis.agents.filter(a => a.role === "subagent").length,
+    [analysis.agents]
+  )
+  const tree = useMemo(
+    () => (showAllPass ? fullTree : filterPassedSubagents(fullTree)),
+    [fullTree, showAllPass]
+  )
+  const hiddenCount = totalSubagents - countSubagents(tree)
   const summary = useMemo(() => {
     const counts: Record<V4Rating, number> = { pass: 0, weak: 0, fail: 0, "n-a": 0 }
     for (const a of analysis.agents) {
@@ -329,16 +407,24 @@ export function WorkflowAgentAudit({ analysis, onJumpToTurn }: { analysis: V4Ana
           {analysis._auditMeta && (
             <span className="text-[10px] text-muted-foreground font-mono shrink-0">
               审计 {new Date(analysis._auditMeta.generatedAt).toLocaleString("zh-CN", { hour12: false })} · 耗时 {analysis._auditMeta.elapsedSec}s
+              {analysis._auditMeta.tokensKt != null && ` · token ${analysis._auditMeta.tokensKt}K`}
             </span>
           )}
         </div>
-        <div className="flex gap-1.5 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap items-center">
           {(["pass", "weak", "fail", "n-a"] as V4Rating[]).map(r => (
             <Badge key={r} variant={ratingVariant(r)} className="text-[10px]">
               {ratingLabel(r)} {summary[r]}
             </Badge>
           ))}
           <Badge variant="blue" className="text-[10px]">agents {analysis.agents.length}</Badge>
+          <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer select-none ml-1">
+            <Checkbox checked={showAllPass} onCheckedChange={(v) => setShowAllPass(v === true)} />
+            <span>显示全部通过的子 agent</span>
+            {!showAllPass && hiddenCount > 0 && (
+              <Badge variant="gray" className="text-[10px] px-1 py-0 h-4 ml-0.5">已隐藏 {hiddenCount}</Badge>
+            )}
+          </label>
         </div>
       </div>
 
@@ -357,6 +443,7 @@ export function WorkflowAgentAudit({ analysis, onJumpToTurn }: { analysis: V4Ana
                 <span className="text-muted-foreground text-[10px]">{p.type}</span>
               </div>
               {p.detail && <p className="text-muted-foreground">{p.detail}</p>}
+              {p.evidence && <EvidenceLine evidence={p.evidence} onJumpToTurn={onJumpToTurn} />}
               {p.suggestion && <p className="text-muted-foreground"><span className="font-medium text-foreground/70">建议：</span>{p.suggestion}</p>}
             </div>
           ))}
@@ -373,6 +460,7 @@ export function WorkflowAgentAudit({ analysis, onJumpToTurn }: { analysis: V4Ana
                 <span className="font-medium font-mono">{p.target}</span>
               </div>
               <p className="text-muted-foreground">{p.action}</p>
+              {p.evidence && <EvidenceLine evidence={p.evidence} onJumpToTurn={onJumpToTurn} />}
               <p className="text-emerald-600 dark:text-emerald-400 text-[11px]">预期收益：{p.expectedGain}</p>
             </div>
           ))}

@@ -127,6 +127,17 @@ opencode sessions.db (external) → better-sqlite3 read → opencode-db adapter 
 
 ## Code Conventions
 
+- **License header**: Every newly added source file (`*.ts`/`*.tsx`/`*.js`/`*.mjs`/`*.py`/`*.sh`) must start with the CANN copyright header — `//` prefix for TS/JS, `#` for Python/shell. Verbatim text (see `start.sh` or any `src/app/api/**/route.ts` for canonical copy):
+  ```
+  Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
+  This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+  CANN Open Software License Agreement Version 2.0 (the "License").
+  Please refer to the License for details. You may not use this file except in compliance with the License.
+  THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+  INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+  See LICENSE in the root of the software repository for the full text of the License.
+  ```
+  This is the one exception to "no comments".
 - **Comments**: Don't write them unless asked
 - **Doc files**: Don't create `.md` / README unless explicitly requested
 - **README sync**: When features are added, removed, or changed, update both `README.md` and `README-zh.md` feature lists and tab descriptions to match reality

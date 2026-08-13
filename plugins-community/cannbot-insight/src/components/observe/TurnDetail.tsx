@@ -15,6 +15,7 @@ import { LlmOutputView } from "./LlmOutputView"
 import { TokenBarChart } from "./TokenBarChart"
 import { ToolCallList } from "./ToolCallList"
 import { SkillEventList } from "./SkillEventList"
+import type { TurnHighlight } from "@/lib/shared/highlight"
 
 interface TurnDetailData {
   turnId: string
@@ -99,7 +100,7 @@ function formatTimestamp(ts: string | null): string {
   }
 }
 
-export function TurnDetail({ turn }: { turn: TurnDetailData }) {
+export function TurnDetail({ turn, highlight }: { turn: TurnDetailData; highlight?: TurnHighlight | null }) {
   if (!turn) return null
 
   const contentLength = (turn.content ?? "").length + (turn.contentJson ?? "").length
@@ -166,6 +167,7 @@ export function TurnDetail({ turn }: { turn: TurnDetailData }) {
         outputTokens={turn.outputTokens}
         reasoningTokens={turn.reasoningTokens}
         role={turn.role}
+        highlight={highlight}
       />
 
       {turn.toolCalls.length > 0 && (
@@ -174,7 +176,7 @@ export function TurnDetail({ turn }: { turn: TurnDetailData }) {
             <CardTitle>Tool Calls ({turn.toolCalls.length}{turn.toolCalls.some(tc => tc.isSkillRelated) ? `, ${turn.toolCalls.filter(tc => tc.isSkillRelated).length} skill` : ""})</CardTitle>
           </CardHeader>
           <CardContent>
-            <ToolCallList toolCalls={turn.toolCalls} />
+            <ToolCallList toolCalls={turn.toolCalls} highlight={highlight} />
           </CardContent>
         </Card>
       )}

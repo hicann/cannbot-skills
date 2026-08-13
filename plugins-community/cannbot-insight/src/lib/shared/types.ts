@@ -9,9 +9,11 @@
 export interface SessionListItem {
   id: string;
   createdAt: string;
+  endedAt?: string | null;
   firstQuery: string | null;
   turnCount: number;
   modelName: string | null;
+  totalTokens?: number | null;
   version?: string | null;
 }
 

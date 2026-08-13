@@ -109,7 +109,7 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
   const totalPages = Math.ceil(total / pageSize);
   const hasNext = page < totalPages;
   const hasPrev = page > 1;
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteMode, setDeleteMode] = useState<'all' | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const [uploadStatus, setUploadStatus] = useState<Record<string, UploadStatus>>({})
@@ -124,7 +124,7 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
       const next = new Set(prev)
       if (next.has(sessionId)) {
         next.delete(sessionId)
-      } else if (next.size < 2) {
+      } else {
         next.add(sessionId)
       }
       return next
@@ -137,6 +137,22 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deleteAll: true }),
+      })
+      if (res.ok) window.location.reload()
+    } catch {}
+  }
+
+  async function handleDeleteSelected() {
+    const entries = selectedArr
+      .map(id => items.find(i => i.sessionId === id))
+      .filter((i): i is SessionListItem => i != null)
+      .map(i => ({ taskId: i.taskId, framework: i.framework ?? 'unknown' }))
+    if (entries.length === 0) return
+    try {
+      const res = await fetch('/api/ingest/delete-session', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions: entries }),
       })
       if (res.ok) window.location.reload()
     } catch {}
@@ -249,8 +265,10 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
         <h2 className="text-lg font-semibold">Sessions ({total})</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
-            {selectedIds.size === 0 && "Select 2 sessions to compare"}
-            {selectedIds.size === 1 && "1 selected — select 1 more"}
+            {selectedIds.size === 0 && "Select 2 to compare, or any number to delete"}
+            {selectedIds.size === 1 && "1 selected"}
+            {selectedIds.size === 2 && "2 selected — Compare ready"}
+            {selectedIds.size > 2 && `${selectedIds.size} selected`}
           </span>
           {selectedIds.size === 2 && (
             <Button
@@ -264,8 +282,25 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
               Compare Selected
             </Button>
           )}
+          {selectedIds.size >= 1 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-1"
+              onClick={() => setDeleteMode('selected')}
+            >
+              <TrashIcon className="size-3.5" />
+              Delete Selected ({selectedIds.size})
+            </Button>
+          )}
           {total > 0 && (
-            <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1"
+              onClick={() => setDeleteMode('all')}
+            >
+              <TrashIcon className="size-3.5" />
               Delete All
             </Button>
           )}
@@ -276,17 +311,26 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
         <span className="text-xs text-red-500">{uploadError}</span>
       )}
 
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <Dialog open={deleteMode !== null} onOpenChange={(open) => { if (!open) setDeleteMode(null) }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete All Sessions</DialogTitle>
+            <DialogTitle>
+              {deleteMode === 'all' ? 'Delete All Sessions' : `Delete ${selectedIds.size} Session${selectedIds.size > 1 ? 's' : ''}`}
+            </DialogTitle>
             <DialogDescription className="text-base">
-              将从 Insight 数据库中移除全部 {total} 个 session 的分析数据。原始会话文件不受影响，可随时重新导入。
+              {deleteMode === 'all'
+                ? `将从 Insight 数据库中移除全部 ${total} 个 session 的分析数据。原始会话文件不受影响，可随时重新导入。`
+                : `将从 Insight 数据库中移除选中的 ${selectedIds.size} 个 session 的分析数据。原始会话文件不受影响，可随时重新导入。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>取消</Button>
-            <Button variant="destructive" onClick={() => { setDeleteDialogOpen(false); handleDeleteAll() }}>确认删除全部</Button>
+            <Button variant="outline" onClick={() => setDeleteMode(null)}>取消</Button>
+            <Button variant="destructive" onClick={() => {
+              const mode = deleteMode
+              setDeleteMode(null)
+              if (mode === 'all') handleDeleteAll()
+              else if (mode === 'selected') handleDeleteSelected()
+            }}>确认删除</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -360,12 +404,11 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
               const uStatus = uploadStatus[item.sessionId] ?? 'idle'
               const eStatus = exportStatus[item.sessionId] ?? 'idle'
               return (
-                <TableRow key={item.sessionId} className={selectedIds.has(item.sessionId) ? 'bg-blue-500/10' : selectedIds.size >= 2 ? 'opacity-50' : ''}>
+                <TableRow key={item.sessionId} className={selectedIds.has(item.sessionId) ? 'bg-blue-500/10' : ''}>
                   <TableCell className="w-8 px-2">
                     <Checkbox
                       checked={selectedIds.has(item.sessionId)}
                       onCheckedChange={() => handleToggle(item.sessionId)}
-                      disabled={selectedIds.size >= 2 && !selectedIds.has(item.sessionId)}
                     />
                   </TableCell>
                   <TableCell className="max-w-[300px] truncate text-xs">

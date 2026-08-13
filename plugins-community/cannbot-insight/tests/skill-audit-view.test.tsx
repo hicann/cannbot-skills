@@ -24,6 +24,7 @@ import {
   CATEGORY_LABEL,
   filterFindings,
   groupFindingsByInstruction,
+  groupFindingsByVerdict,
   hasNonPass,
   isMultiTranscript,
   METHOD_TAG,
@@ -114,6 +115,20 @@ describe("verdictConfig 纯函数", () => {
     expect(g.findings[1].verdict).toBe("PASS")
   })
 
+  it("groupFindingsByVerdict: 按 verdict 分组(FAIL 在前 / PASS 在末),跳空组,总数守恒", () => {
+    const groups = groupFindingsByVerdict(SAMPLE.findings as AuditFinding[])
+    expect(groups.length).toBeGreaterThan(1)
+    // 无空组
+    expect(groups.every((g) => g.findings.length > 0)).toBe(true)
+    // 顺序由 VERDICT_ORDER 决定:首组 FAIL(问题在前)、末组 PASS
+    expect(groups[0].verdict).toBe("FAIL")
+    expect(groups[groups.length - 1].verdict).toBe("PASS")
+    // 组内 verdict 一致
+    expect(groups.every((g) => g.findings.every((f) => f.verdict === g.verdict))).toBe(true)
+    // 总数守恒(所有 finding 都进组,无丢)
+    expect(groups.reduce((n, g) => n + g.findings.length, 0)).toBe(SAMPLE.findings.length)
+  })
+
   it("isMultiTranscript / hasNonPass", () => {
     expect(isMultiTranscript(MULTI.transcripts)).toBe(true)
     expect(isMultiTranscript(SAMPLE.transcripts)).toBe(false)
@@ -123,18 +138,56 @@ describe("verdictConfig 纯函数", () => {
 })
 
 describe("FindingCard render smoke", () => {
-  it("FAIL finding 渲染 verdict 徽章 + #seq + 指令 + 证据 + transcript + noise + related 跳转按钮", () => {
+  it("FAIL finding 渲染 verdict 徽章 + №seq + 指令 + 证据 + transcript + noise + related 跳转按钮", () => {
     const html = renderToStaticMarkup(createElement(FindingCard, { f: FAIL as AuditFinding }))
     expect(html).toContain("✗")
     expect(html).toContain("失败")
-    expect(html).toContain("#1")
+    expect(html).toContain("№1")
     expect(html).toContain("改动前必须先读相关源码")
     expect(html).toContain("未先 Read")
     expect(html).toContain("ses_cuid_abc")
     expect(html).toContain("疑似工具噪声")
-    expect(html).toContain("同源违规")
-    expect(html).toContain("#9") // related 按钮
+    expect(html).toContain("↔ 同源")
+    expect(html).toContain("№9") // related 按钮（finding 序号，用 № 不用 #）
     expect(html).toContain("LLM") // method
+  })
+
+  it("有 turn_refs + onJumpToTurn 时 №seq 渲染为可点击 button（跳 turn_refs[0]）", () => {
+    // FAIL finding (seq=1, step) has turn_refs: [2]
+    const html = renderToStaticMarkup(
+      createElement(FindingCard, { f: FAIL as AuditFinding, onJumpToTurn: () => {} }),
+    )
+    // №seq 是 button（含 onClick），title 提示跳转（turn 用 #）
+    expect(html).toContain("№1")
+    expect(html).toContain("跳转到 turn #2")
+    // 不再有独立 turn chips 段
+    expect(html).not.toContain(">turn<")
+  })
+
+  it("turn_refs 多个时 title 列出全部 turn（seq=2 有 turn_refs: [5, 6]）", () => {
+    const f2 = SAMPLE.findings[1] as AuditFinding
+    const html = renderToStaticMarkup(
+      createElement(FindingCard, { f: f2, onJumpToTurn: () => {} }),
+    )
+    expect(html).toContain("№2")
+    expect(html).toContain("共 2 个")
+    expect(html).toContain("#5") // turn 序号用 #
+    expect(html).toContain("#6")
+  })
+
+  it("有 turn_refs 但无 onJumpToTurn 时 №seq 不可点击（灰显 span）", () => {
+    const html = renderToStaticMarkup(createElement(FindingCard, { f: FAIL as AuditFinding }))
+    expect(html).toContain("№1")
+    // 是 span 不是 button
+    expect(html).not.toContain("跳转到 turn")
+  })
+
+  it("无 turn_refs 的 finding №seq 不可点击（conditional PASS）", () => {
+    const html = renderToStaticMarkup(
+      createElement(FindingCard, { f: PASS as AuditFinding, onJumpToTurn: () => {} }),
+    )
+    expect(html).toContain("№3")
+    expect(html).not.toContain("跳转到 turn")
   })
 
   it("N/A finding 渲染场景不触发 hint", () => {
@@ -182,5 +235,31 @@ describe("AuditReportView render smoke (base-ui 组合)", () => {
     expect(html).toContain("跨 2 transcript")
     expect(html).toContain("fail%")
     expect(html).toContain("待确认")
+  })
+
+  it("单 transcript 也渲染 by_instruction 概要表(去跨会话列 fail%/in transcripts,标题不带「跨」)", async () => {
+    const { AuditReportView } = await import("@/components/observe/skill-audit/AuditReportView")
+    // SAMPLE 单 transcript、原 by_instruction 空 → 注入 1 fail 行 + 1 na 行
+    const result = {
+      ...SAMPLE,
+      findings: SAMPLE.findings as AuditFinding[],
+      by_instruction: [
+        { instruction_text: "改动前必须先读相关源码", source: "CONSTRAINT", category: "prohibition",
+          pass_count: 0, fail_count: 1, na_count: 0, total: 1, fail_rate: 1.0,
+          fail_in_transcripts: ["ses_cuid_abc"], fail_seqs: [1],
+          noise_label: "uncertain", noise_reasons: ["r"] },
+        { instruction_text: "Use ref: x.md", source: "REFERENCE_USAGE", category: "conditional",
+          pass_count: 0, fail_count: 0, na_count: 1, total: 1, fail_rate: 0.0,
+          fail_in_transcripts: [], na_in_transcripts: ["ses_cuid_abc"], na_seqs: [4] },
+      ],
+    } as SkillAuditStoredResult
+    const html = renderToStaticMarkup(createElement(AuditReportView, { result }))
+    expect(html).toContain("违规 FAIL")
+    expect(html).toContain("场景不适用 N/A")
+    // 单 transcript 精简:标题不带「跨 N transcript」、无跨会话列
+    expect(html).not.toContain("（跨 ")
+    expect(html).not.toContain("fail%")
+    expect(html).not.toContain("fail/total")
+    expect(html).not.toContain("in transcripts")
   })
 })

@@ -190,13 +190,13 @@ def _agent_io() -> dict:
 
 
 def test_run_v4_pipeline_success(tmp_path):
-    def fake_audit(provider, agent):
-        return {"completion": {"rating": "pass", "note": "ok"},
+    def fake_audit(provider, agent, subagent_dir=None, tool_use_id=None):
+        return ({"completion": {"rating": "pass", "note": "ok"},
                 "quality": {"rating": "pass", "note": "ok"},
-                "efficiency": {"note": "lean"}}
+                "efficiency": {"note": "lean"}}, {})
 
-    def fake_agg(provider, task_query, summary_list):
-        return {"sessionSummary": "all ok", "crossIssues": [], "optimizationPriorities": []}
+    def fake_agg(provider, task_query, summary_list, logger=None):
+        return ({"sessionSummary": "all ok", "crossIssues": [], "optimizationPriorities": []}, {})
 
     events: list = []
     with patch.object(ta, "_audit_one_agent", side_effect=fake_audit), \
@@ -218,8 +218,8 @@ def test_run_v4_pipeline_success(tmp_path):
     assert agents[0]["dimensions"]["efficiency"]["rating"] == "pass"
     assert agents[1]["dimensions"]["completion"]["rating"] == "pass"
     stages = [e["stage"] for e in events]
-    assert "claude-start" in stages
-    assert "claude-done" in stages
+    assert "llm-start" in stages
+    assert "llm-done" in stages
     assert "done" in stages
 
 

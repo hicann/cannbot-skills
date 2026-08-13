@@ -257,8 +257,11 @@ export async function buildAgentIO(taskId: string, prisma: PrismaClient, framewo
   const firstUserTurn = allTurns.find(t => !t.isSubagent && t.role === "user")
 
   const flat: AgentNode[] = []
+  const visited = new Set<string>()
 
   function buildNode(agentId: string, parentId: string | null) {
+    if (visited.has(agentId)) return
+    visited.add(agentId)
     const isMain = agentId === "main"
     const turns = turnsByAgent.get(agentId) ?? []
     const bridge = isMain ? null : (bridgeByChild.get(agentId) ?? null)
@@ -327,7 +330,7 @@ export async function buildAgentIO(taskId: string, prisma: PrismaClient, framewo
       outputSummary,
       artifacts,
       actions,
-      turns: turns.map(t => t.turnIndex),
+      turns: [...new Set(turns.map(t => t.turnIndex))],
       envelope: env,
     })
 

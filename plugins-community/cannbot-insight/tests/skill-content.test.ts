@@ -91,6 +91,8 @@ describe('skill-content', () => {
       expect(r).not.toBeNull();
       expect(r!.source).toBe('skill-tool');
       expect(r!.content).toBe('# Foo\n\nreal content');
+      expect(r!.fullRead).toBe(true);
+      expect(r!.maxLine).toBeNull();
     });
 
     it('falls back to Read of SKILL.md when no Skill tool', () => {
@@ -106,6 +108,37 @@ describe('skill-content', () => {
       expect(r).not.toBeNull();
       expect(r!.source).toBe('read');
       expect(r!.content).toBe('# Foo\n\nbody');
+      expect(r!.fullRead).toBe(true);
+      expect(r!.maxLine).toBe(3);
+    });
+
+    it('marks Read with offset/limit as partial (not full)', () => {
+      const ops: SkillToolCall[] = [
+        {
+          toolName: 'Read',
+          argsJson: '{"file_path":"/a/b/foo/SKILL.md","offset":10,"limit":5}',
+          resultJson: '10\t# Foo\n11\t\n12\tbody',
+          startedAt: t(1),
+        },
+      ];
+      const r = selectSkillContent(ops, 'foo');
+      expect(r!.source).toBe('read');
+      expect(r!.fullRead).toBe(false);
+      expect(r!.maxLine).toBe(12);
+    });
+
+    it('marks Read with truncation marker as partial', () => {
+      const ops: SkillToolCall[] = [
+        {
+          toolName: 'Read',
+          argsJson: '{"file_path":"/a/b/foo/SKILL.md"}',
+          resultJson: '1\t# Foo\n2\tbody\n<system-reminder>File is large; only showing first 2 lines.</system-reminder>',
+          startedAt: t(1),
+        },
+      ];
+      const r = selectSkillContent(ops, 'foo');
+      expect(r!.source).toBe('read');
+      expect(r!.fullRead).toBe(false);
     });
 
     it('picks the longest among multiple Skill tool candidates', () => {

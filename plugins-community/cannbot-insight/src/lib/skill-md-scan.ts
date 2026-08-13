@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 /**
- * Server-only（fs/path）：主 agent workflow skill 的真名解析。
+ * Server-only（fs/path）：主 agent 编排 skill 的真名解析。
  *
  * 主 agent 的 workflow 声明在 session 首条 user turn（注入系统提示，剥了 frontmatter），
  * 只有 body 没 name。但盘上对应 SKILL.md 有 frontmatter `name:`（真 identifier）。

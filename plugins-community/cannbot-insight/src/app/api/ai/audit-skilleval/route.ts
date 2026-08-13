@@ -13,7 +13,7 @@ import path from "node:path"
 import { prisma } from "@/lib/db"
 import {
   recoverSkillBody,
-  recoverMainAgentWorkflowBody,
+  recoverWorkflowDeclaration,
   buildAuditArgs,
   buildStructuredRecords,
   buildTranscriptArgs,
@@ -35,11 +35,12 @@ export async function POST(req: Request) {
   if (!taskId) {
     return NextResponse.json({ error: "Missing taskId" }, { status: 400 })
   }
-  // kind: "skill"(默认)| "root"(审顶层主 agent 编排 vs 主 agent 的 workflow 级 SKILL.md)。
-  // root 的声明不在 skillEvents（主 agent 通常只 dispatch、不 invoke）→ 从 session 首条
-  // user turn 的注入系统提示取（recoverMainAgentWorkflowBody），而非 recoverSkillBody。
+  // kind: "skill"(默认)| "root"(审顶层主 agent 编排 vs workflow skill 编排规程)。
+  // root 的声明是 workflow skill 的编排规程（SKILL.md body / task-prompts.md），
+  // 从主 agent Skill invoke 定位 skillName → recoverWorkflowDeclaration 恢复。
+  // 按 skill-eval 设计意图（slice.py："root 声明常是 workflow 级 SKILL.md"）。
   const auditKind: "skill" | "root" = kind === "root" ? "root" : "skill"
-  // skill 路需 skillName（恢复该 skill 正文）；root 路不用 skillName（声明从 turn0 取）。
+  // skill 路需 skillName（恢复该 skill 正文）；root 路不用 skillName（声明从 workflow skill 取）。
   if (auditKind !== "root" && !skillName) {
     return NextResponse.json({ error: "Missing skillName" }, { status: 400 })
   }
@@ -54,14 +55,16 @@ export async function POST(req: Request) {
     )
   }
 
-  const body =
+  const decl =
     auditKind === "root"
-      ? await recoverMainAgentWorkflowBody(session.id, prisma)
-      : await recoverSkillBody(session.id, skillName, prisma)
+      ? await recoverWorkflowDeclaration(session.id, prisma)
+      : null
+  const body =
+    decl?.content ?? (auditKind === "root" ? null : await recoverSkillBody(session.id, skillName, prisma))
   if (!body) {
     return NextResponse.json(
       auditKind === "root"
-        ? { error: "此 session 无可对账的主 agent workflow 声明（首条 user turn 过短或缺失）" }
+        ? { error: "此 session 无可对账的 workflow 编排规程（无主 agent Skill invoke / 无 skill resources / 无 SKILL.md body）" }
         : { error: `在此 session 恢复不到 skill "${skillName}" 的正文（无 invoke 事件 / resultJson）` },
       { status: 404 },
     )
@@ -70,15 +73,15 @@ export async function POST(req: Request) {
   const skillTmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-eval-audit-"))
   try {
     const safeName = String(skillName).replace(/[^a-zA-Z0-9._-]/g, "_")
-    const skillDir = path.join(skillTmp, safeName)
-    fs.mkdirSync(skillDir, { recursive: true })
+    const skillPath = path.join(skillTmp, safeName)
+    fs.mkdirSync(skillPath, { recursive: true })
     // 恢复的正文无 YAML frontmatter，而 skill-eval 的 parse_skill_md 要 `---\nname:` 才能
     // 得名（--kind skill 切段用它匹配 transcript 里 input.skill；--kind root 不按 name 切、
     // name 无意义，但 parse_skill_md 仍需 frontmatter 才解析指令）。注入：root 用固定名，
     // skill 用真实 skillName（与 transcript input.skill 对得上）。
     const declName = auditKind === "root" ? "main-agent-workflow" : skillName
     fs.writeFileSync(
-      path.join(skillDir, "SKILL.md"),
+      path.join(skillPath, "SKILL.md"),
       `---\nname: ${declName}\ndescription: recovered from session\n---\n${body}\n`,
     )
 
@@ -96,10 +99,10 @@ export async function POST(req: Request) {
         transcriptPath,
         JSON.stringify(await buildStructuredRecords(session.id, prisma)),
       )
-      args = buildTranscriptArgs({ skillDir, transcriptPath, outputDir, kind: auditKind })
+      args = buildTranscriptArgs({ skillPath, transcriptPath, outputDir, kind: auditKind })
     } else {
       args = buildAuditArgs({
-        skillDir,
+        skillPath,
         dbPath: session.sourcePath,
         sessionId: taskId,
         outputDir,

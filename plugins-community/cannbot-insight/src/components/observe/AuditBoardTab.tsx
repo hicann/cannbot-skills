@@ -23,9 +23,9 @@ interface Props {
   taskId: string
   framework?: string
   skillEvents: { skillName: string; eventType: string }[]
-  /** 主 agent workflow 对账目标是否可用（session 首条 user turn 达阈值）。 */
+  /** 主 agent 编排 对账目标是否可用（session 首条 user turn 达阈值）。 */
   hasMainAgentWorkflow?: boolean
-  /** 主 agent workflow 的真名（扫盘反查的 identifier）；未取/回退时由 SkillAuditTab 用合成名。 */
+  /** 主 agent 编排 的真名（扫盘反查的 identifier）；未取/回退时由 SkillAuditTab 用合成名。 */
   mainAgentWorkflowName?: string | null
   onJumpToTurn?: (turn: number) => void
   sub: SubTab
@@ -69,6 +69,7 @@ export function AuditBoardTab({ taskId, framework, skillEvents, hasMainAgentWork
             mainAgentWorkflowName={mainAgentWorkflowName}
             selected={skillSelected}
             onSelectedChange={onSkillSelectedChange}
+            onJumpToTurn={onJumpToTurn}
           />
         )}
       </div>

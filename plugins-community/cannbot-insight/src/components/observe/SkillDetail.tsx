@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { auditKindsForEvents, MAIN_AGENT_WORKFLOW_NAME } from "@/lib/skill-eval-audit"
+import { auditKindsForEvents, MAIN_AGENT_WORKFLOW_NAME, isDispatchOnlyAgent } from "@/lib/skill-eval-audit"
 import { SkillCharts } from "@/components/observe/SkillCharts"
+import { SkillContentAudit } from "@/components/observe/SkillContentAudit"
 import { BookOpenIcon } from "lucide-react"
 import { useSkillContent } from "@/components/observe/use-skill-content"
 import {
@@ -58,11 +59,14 @@ interface SkillDetailProps {
   taskId: string
   sessionSkills: SessionSkillItem[]
   skillEvents: SkillEventItem[]
-  /** 主 agent workflow 对账目标是否可用（session 首条 user turn 达阈值 → 顶部合成 root 行）。 */
+  /** 主 agent 编排 对账目标是否可用（STATE.md 可恢复 → 顶部合成 root 行）。 */
   hasMainAgentWorkflow?: boolean
-  /** 主 agent workflow 的真名（扫盘反查的 identifier）；未取/回退时用合成名。 */
+  /** 主 agent 编排 的真名（扫盘反查的 identifier）；未取/回退时用合成名。 */
   mainAgentWorkflowName?: string | null
-  /** 主 agent workflow 合成行的逐栏数据（dispatch 计数 + 主 agent turn token 汇总）。 */
+  /** 主 agent 编排 声明的来源标识（如 "STATE.md" / "PLAN.md" / "scan:work-plan.md"），
+   *  来自 main-agent-workflow 端点（recoverPlanFileDeclaration 的 source）。供 root 行直接显示。 */
+  mainAgentWorkflowSource?: string | null
+  /** 主 agent 编排 合成行的逐栏数据（dispatch 计数 + 主 agent turn token 汇总）。 */
   mainAgentWorkflowStats?: {
     dispatchCount: number
     inputTokens: number
@@ -96,11 +100,11 @@ function formatTokens(n: number): string {
   return `${n}`
 }
 
-export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, mainAgentWorkflowStats, onNavigateToTurn, onAuditSkill }: SkillDetailProps) {
+export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, mainAgentWorkflowSource, mainAgentWorkflowStats, onNavigateToTurn, onAuditSkill }: SkillDetailProps) {
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set())
   const sc = useSkillContent(taskId)
-  // 主 agent workflow 显示名：真名（扫盘）→ 回退合成名。对账按钮传此 name（与 SkillAuditTab target 一致）。
-  // 全文 fetch 仍用 MAIN_AGENT_WORKFLOW_NAME sentinel（skill-content 路由按 sentinel 识别走 turn0 恢复）。
+  // 主 agent 编排 显示名：真名（扫盘）→ 回退合成名。对账按钮传此 name（与 SkillAuditTab target 一致）。
+  // 全文 fetch 仍用 MAIN_AGENT_WORKFLOW_NAME sentinel（skill-content 路由按 sentinel 识别走 STATE.md 恢复）。
   const workflowName = mainAgentWorkflowName || MAIN_AGENT_WORKFLOW_NAME
 
   function toggleExpanded(skillName: string) {
@@ -121,7 +125,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
     return m
   })()
 
-  const skillAggregates = (() => {
+  const allSkillAggregates = (() => {
     const byName = new Map<string, {
       skillName: string
       version: number | null
@@ -191,10 +195,19 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
     return Array.from(byName.values())
   })()
 
-  if (skillAggregates.length === 0 && skillEvents.length === 0) {
+  // Skills + subagent（dispatch）都展示：invoke/use 的 skill 行 + dispatch-only 的 agent 行。
+  // 与 Audit 的 skill/agent 划分对齐：auditKindsForEvents 按行 events 路由对账按钮 kind。
+  const skillAggregates = allSkillAggregates
+
+  const skillNames = skillAggregates.map(s => s.skillName)
+
+  // 图表同表一致：全部展示。
+  const chartSkillEvents = skillEvents
+
+  if (skillAggregates.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        No skill data found
+      <div className="flex flex-col items-center justify-center h-64 gap-2 text-muted-foreground">
+        <span>No skill data found</span>
       </div>
     )
   }
@@ -204,11 +217,11 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
       <div className="flex items-center gap-3">
         <Badge variant="outline">Skills</Badge>
         <span className="text-sm text-muted-foreground">
-          {skillAggregates.length} skills, {skillEvents.length} events
+          {skillAggregates.length} skills/agents, {skillEvents.length} events
         </span>
       </div>
 
-      <SkillCharts taskId={taskId} skillEvents={skillEvents} />
+      <SkillCharts taskId={taskId} skillEvents={chartSkillEvents} />
 
       <Card size="sm">
         <CardHeader>
@@ -239,8 +252,15 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                 <TableRow key="__main_agent_workflow__" className="bg-amber-500/5">
                   <TableCell className="text-xs select-none w-6">◆</TableCell>
                   <TableCell className="text-xs font-medium truncate max-w-[20ch]" title={workflowName}>
-                    <Badge variant="yellow" className="mr-1 h-4 px-1 text-[10px]">root</Badge>
-                    {workflowName}
+                    <div className="flex items-center gap-1">
+                      <Badge variant="yellow" className="h-4 px-1 text-[10px] shrink-0">root</Badge>
+                      <span className="truncate">{workflowName}</span>
+                    </div>
+                    {mainAgentWorkflowSource && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5" title="计划文件来源（D 混合方案：文件名模式 + 内容特征 fallback）">
+                        来源: {mainAgentWorkflowSource}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">N/A</TableCell>
                   <TableCell className="text-xs tabular-nums" title="主 agent 的 dispatch 次数（编排动作数）">
@@ -257,7 +277,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                   <TableCell className="text-right w-20">
                     <span
                       role="button"
-                      title="查看主 agent workflow 声明全文（session 首条 user turn 注入提示）"
+                      title="查看主 agent 编排 编排规程全文（skill resources / SKILL.md body）"
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
                         sc.content.has(MAIN_AGENT_WORKFLOW_NAME) || sc.error.has(MAIN_AGENT_WORKFLOW_NAME)
                           ? "border-amber-500 bg-amber-500/25 text-amber-700 dark:text-amber-200"
@@ -281,7 +301,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                       size="sm"
                       variant="ghost"
                       className="text-xs h-6 px-2"
-                      title="跳转到 Audit · Skill 子 tab 用 --kind root 对账主 agent 编排（声明从 session 首条 user turn 恢复）"
+                      title="跳转到 Audit · Skill 子 tab 用 --kind root 对账主 agent 编排（声明从 workflow skill 编排规程恢复）"
                       onClick={(e) => { e.stopPropagation(); onAuditSkill(workflowName, "root") }}
                     >
                       root ↗
@@ -298,7 +318,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                             {workflowName} · workflow 声明
                             {sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.source && (
                               <span className="text-muted-foreground">
-                                （来源：{sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.source === "session-turn0" ? "session 首条 user turn" : sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.source}，{sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.length} 字符）
+                                （来源：{sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.source}，{sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.length} 字符）
                               </span>
                             )}
                           </span>
@@ -323,7 +343,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                           </span>
                         </div>
                         <div className="text-[11px] text-muted-foreground leading-snug">
-                          主 agent 的 workflow 级 SKILL.md 声明，来自 session 首条 user turn 的注入系统提示（主 agent 通常只 dispatch、不 invoke skill，其 workflow 声明不在 skillEvents）。即 --kind root 对账所用的声明。
+                          主 agent 的 workflow 编排规程（skill resources / SKILL.md body），从主 agent Skill invoke 恢复。即 --kind root 对账所用的声明（审编排规程遵循度）。
                         </div>
                         {sc.error.get(MAIN_AGENT_WORKFLOW_NAME) ? (
                           <div className="text-xs text-destructive">Error: {sc.error.get(MAIN_AGENT_WORKFLOW_NAME)}</div>
@@ -332,7 +352,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                             {sc.content.get(MAIN_AGENT_WORKFLOW_NAME)?.content}
                           </pre>
                         ) : (
-                          <div className="text-xs text-muted-foreground">此 session 无可对账的主 agent workflow 声明（首条 user turn 过短或缺失）。</div>
+                          <div className="text-xs text-muted-foreground">此 session 无可恢复的 workflow 编排规程（无主 agent Skill invoke / 无 skill resources / 无 SKILL.md body，跳过 root 目标）。</div>
                         )}
                       </div>
                     </TableCell>
@@ -341,6 +361,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
               ]}
               {skillAggregates.map(sa => {
                 const isExpanded = expandedSkills.has(sa.skillName)
+                const isAgentOnly = isDispatchOnlyAgent(sa.events)
                 const rows = [
                   <TableRow key={sa.skillName} className="cursor-pointer hover:bg-accent/30" onClick={() => toggleExpanded(sa.skillName)}>
                     <TableCell className="text-xs select-none w-6">
@@ -387,18 +408,23 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                     <TableCell className="text-right w-20">
                       <span
                         role="button"
-                        title="查看 SKILL.md 全文"
+                        title={isAgentOnly ? "查看 agent .md 全文（从磁盘扫描）" : "查看 SKILL.md 全文"}
                         className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
                           sc.content.has(sa.skillName) || sc.error.has(sa.skillName)
-                            ? "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
-                            : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
+                            ? isAgentOnly
+                              ? "border-purple-500 bg-purple-500/25 text-purple-700 dark:text-purple-200"
+                              : "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
+                            : isAgentOnly
+                              ? "border-purple-500/50 bg-purple-500/15 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 hover:border-purple-500"
+                              : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
                         }`}
                         onClick={(e) => {
                           e.stopPropagation()
                           if (sc.content.has(sa.skillName) || sc.error.has(sa.skillName)) {
                             sc.clear(sa.skillName)
                           } else if (!sc.loading.has(sa.skillName)) {
-                            sc.fetchOne(sa.skillName)
+                            if (isAgentOnly) sc.fetchAgent(sa.skillName)
+                            else sc.fetchOne(sa.skillName)
                           }
                         }}
                       >
@@ -427,18 +453,25 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                 ]
                 const contentData = sc.content.get(sa.skillName)
                 const contentError = sc.error.get(sa.skillName)
+                const contentLabel = isAgentOnly ? "agent.md" : "SKILL.md"
                 if (contentData || contentError) {
                   rows.push(
                     <TableRow key={`${sa.skillName}-content`}>
-                      <TableCell colSpan={14} className="p-3 bg-teal-500/5 border-x border-teal-400/30">
+                      <TableCell colSpan={14} className={`p-3 border-x ${isAgentOnly ? "bg-purple-500/5 border-purple-400/30" : "bg-teal-500/5 border-teal-400/30"}`}>
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 dark:text-teal-400">
+                            <span className={`inline-flex items-center gap-1 text-xs font-medium ${isAgentOnly ? "text-purple-600 dark:text-purple-400" : "text-teal-600 dark:text-teal-400"}`}>
                               <BookOpenIcon className="size-3.5" />
-                              {sa.skillName} · SKILL.md
+                              {sa.skillName} · {contentLabel}
                               {contentData?.source && (
                                 <span className="text-muted-foreground">
-                                  （来源：{contentData.source === "skill-tool" ? "Skill 工具注入" : "Read 读取"}，{contentData.length} 字符）
+                                  （来源：{isAgentOnly ? `磁盘扫描（${contentData.source}）` : contentData.source === "skill-tool" ? "Skill 工具注入" : "Read 读取"}，{contentData.length} 字符
+                                  {contentData.source === "read"
+                                    ? contentData.fullRead
+                                      ? "，判定全文·无 offset/limit"
+                                      : "，部分读取·有 offset/limit 或截断"
+                                    : "，框架注入全文"}
+                                  {contentData.maxLine != null && `，到第 ${contentData.maxLine} 行`}）
                                 </span>
                               )}
                             </span>
@@ -537,6 +570,19 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
           </Table>
         </CardContent>
       </Card>
+
+      <SkillContentAudit
+        taskId={taskId}
+        skillNames={skillNames}
+        onView={(skillName) => {
+          if (!expandedSkills.has(skillName)) {
+            setExpandedSkills(prev => new Set(prev).add(skillName))
+          }
+          if (!sc.content.has(skillName) && !sc.error.has(skillName) && !sc.loading.has(skillName)) {
+            sc.fetchOne(skillName)
+          }
+        }}
+      />
     </div>
   )
 }

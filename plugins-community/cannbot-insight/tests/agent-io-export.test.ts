@@ -57,6 +57,9 @@ describe("buildAgentIO (v4 Step 1)", () => {
       expect(e.turnCount).toBeGreaterThanOrEqual(0);
       expect(e.errorCount).toBeGreaterThanOrEqual(0);
       expect(Array.isArray(a.artifacts)).toBe(true);
+      // turns must be unique (no duplicate turnIndex — regression for
+      // "two children with the same key" when an agent's turns array had dups)
+      expect(new Set(a.turns).size).toBe(a.turns.length);
     }
 
     // at least one subagent should exist (we picked a session with a bridge)

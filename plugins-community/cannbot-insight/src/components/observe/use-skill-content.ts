@@ -13,6 +13,8 @@ export interface SkillContentResponse {
   content: string | null
   source: string | null
   length: number
+  fullRead: boolean
+  maxLine: number | null
 }
 
 export function useSkillContent(taskId: string) {
@@ -37,6 +39,24 @@ export function useSkillContent(taskId: string) {
     }
   }, [taskId])
 
+  /** Skills tab subagent 行"全文"按钮：取 agent .md（从磁盘扫，非 session）。 */
+  const fetchAgent = useCallback(async (agentName: string, framework?: string) => {
+    setLoading(prev => new Set(prev).add(agentName))
+    setError(prev => { const n = new Map(prev); n.delete(agentName); return n })
+    try {
+      const r = await fetch(
+        `/api/observe/session/agent-content?taskId=${encodeURIComponent(taskId)}&agentName=${encodeURIComponent(agentName)}&framework=${encodeURIComponent(framework ?? '')}`
+      )
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d: SkillContentResponse = await r.json()
+      setContent(prev => new Map(prev).set(agentName, d))
+    } catch (e) {
+      setError(prev => new Map(prev).set(agentName, e instanceof Error ? e.message : String(e)))
+    } finally {
+      setLoading(prev => { const n = new Set(prev); n.delete(agentName); return n })
+    }
+  }, [taskId])
+
   const clear = useCallback((skillName: string) => {
     setContent(prev => { const n = new Map(prev); n.delete(skillName); return n })
     setError(prev => { const n = new Map(prev); n.delete(skillName); return n })
@@ -56,5 +76,5 @@ export function useSkillContent(taskId: string) {
     URL.revokeObjectURL(url)
   }, [content])
 
-  return { loading, content, error, fetchOne, clear, download }
+  return { loading, content, error, fetchOne, fetchAgent, clear, download }
 }

@@ -36,9 +36,10 @@ import {
 interface SessionPreview {
   id: string
   createdAt: string
+  endedAt: string | null
   firstQuery: string | null
   turnCount: number
-  model: string | null
+  totalTokens: number | null
 }
 
 interface ImportStatus {
@@ -82,6 +83,12 @@ function formatTime(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1000000) return `${(n / 1000).toFixed(1)}K`
+  return `${(n / 1000000).toFixed(2)}M`
 }
 
 export function LocalFileImport() {
@@ -165,7 +172,7 @@ export function LocalFileImport() {
       })
       const data = await res.json()
       if (res.ok && data.query) {
-        setSessions([{ id: sessionId, createdAt: new Date().toISOString(), firstQuery: data.query, turnCount: 0, model: null }])
+        setSessions([{ id: sessionId, createdAt: new Date().toISOString(), endedAt: null, firstQuery: data.query, turnCount: 0, totalTokens: null }])
       }
       setImportStatuses(prev =>
         prev.map(s => s.sessionId === sessionId
@@ -223,7 +230,7 @@ export function LocalFileImport() {
         })
         const data = await res.json()
         if (res.ok && data.query) {
-          setSessions([{ id: sessionId, createdAt: new Date().toISOString(), firstQuery: data.query, turnCount: 0, model: null }])
+          setSessions([{ id: sessionId, createdAt: new Date().toISOString(), endedAt: null, firstQuery: data.query, turnCount: 0, totalTokens: null }])
         }
         setImportStatuses(prev =>
           prev.map(s => s.sessionId === sessionId
@@ -348,9 +355,10 @@ export function LocalFileImport() {
         .map(r => ({
           id: r.taskId,
           createdAt: new Date().toISOString(),
+          endedAt: null,
           firstQuery: r.query ?? null,
           turnCount: 0,
-          model: null,
+          totalTokens: null,
         }))
       setSessions(sessionPreviews)
     } catch (e) {
@@ -670,10 +678,11 @@ export function LocalFileImport() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[40px]"></TableHead>
-                    <TableHead>Time</TableHead>
+                    <TableHead>Start Time</TableHead>
+                    <TableHead>End Time</TableHead>
                     <TableHead className="max-w-[200px]">First Query</TableHead>
                     <TableHead>Turns</TableHead>
-                    <TableHead>Model</TableHead>
+                    <TableHead>Tokens</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -682,12 +691,15 @@ export function LocalFileImport() {
                       <TableCell>
                         <Checkbox checked={selectedIds.has(s.id)} onCheckedChange={() => toggleSelection(s.id)} />
                       </TableCell>
-                      <TableCell className="text-xs">{formatTime(s.createdAt)}</TableCell>
-                      <TableCell className="max-w-[200px] truncate text-xs">
-                        {s.firstQuery ?? "(empty)"}
+                      <TableCell className="text-xs whitespace-nowrap">{formatTime(s.createdAt)}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{s.endedAt ? formatTime(s.endedAt) : "—"}</TableCell>
+                      <TableCell className="max-w-[200px] text-xs">
+                        <span className="block truncate" title={s.firstQuery ?? ""}>
+                          {s.firstQuery ?? "(empty)"}
+                        </span>
                       </TableCell>
                       <TableCell className="text-xs tabular-nums">{s.turnCount}</TableCell>
-                      <TableCell className="text-xs max-w-[160px] truncate">{s.model ?? "—"}</TableCell>
+                      <TableCell className="text-xs tabular-nums">{s.totalTokens != null ? formatTokens(s.totalTokens) : "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

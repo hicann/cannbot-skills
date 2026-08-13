@@ -50,6 +50,25 @@ export function listSessions(dbPath: string): SessionListItem[] {
       }
     }
 
+    const lastMsgTimeBySession = db.prepare(
+      `SELECT session_id, MAX(time_created) AS max_ts FROM message WHERE session_id IN (${sessionIds.map(() => '?').join(',')}) GROUP BY session_id`
+    ).all(...sessionIds) as { session_id: string; max_ts: number | null }[];
+
+    const endTsBySession = new Map<string, number | null>();
+    for (const r of lastMsgTimeBySession) {
+      endTsBySession.set(r.session_id, r.max_ts);
+    }
+
+    const tokenSumBySession = new Map<string, number>();
+    for (const m of assistantMsgs) {
+      try {
+        const msgData = JSON.parse(m.data);
+        if (msgData.tokens && typeof msgData.tokens.total === 'number') {
+          tokenSumBySession.set(m.session_id, (tokenSumBySession.get(m.session_id) ?? 0) + msgData.tokens.total);
+        }
+      } catch { /* skip */ }
+    }
+
     // Only need first user message per session — filter parts by those specific message IDs
     const firstUserMsgBySession = new Map<string, string>();
     for (const m of userMsgs) {
@@ -123,9 +142,11 @@ export function listSessions(dbPath: string): SessionListItem[] {
       result.push({
         id: session.id,
         createdAt: new Date(session.time_created).toISOString(),
+        endedAt: endTsBySession.get(session.id) ? new Date(endTsBySession.get(session.id) as number).toISOString() : null,
         firstQuery,
         turnCount,
         modelName,
+        totalTokens: tokenSumBySession.get(session.id) ?? 0,
         version: session.version,
       });
     }

@@ -18,7 +18,8 @@
       "sources": ["STEP"],
       "related": ["#9"],
       "noise_label": "tool_noise",
-      "noise_reasons": ["Read 结果为空，疑似工具噪声"]
+      "noise_reasons": ["Read 结果为空，疑似工具噪声"],
+      "turn_refs": [2]
     },
     {
       "instruction_text": "禁止编造未验证的 API 参数",
@@ -30,7 +31,8 @@
       "transcript": "ses_cuid_abc",
       "seq": 2,
       "sources": ["CONSTRAINT"],
-      "noise_label": "skill_issue"
+      "noise_label": "skill_issue",
+      "turn_refs": [5, 6]
     },
     {
       "instruction_text": "用 Read 工具读源码",

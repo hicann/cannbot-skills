@@ -160,25 +160,45 @@ else
   fi
 fi
 
-# Launch Python smart-agent (v2 backend) in background
+# Launch Python smart-agent (v2 backend) in background.
+# 每次启动都重启 smart-agent，确保加载最新 .py 改动（端口被占说明上次的还在跑旧代码）。
 AGENT_PORT=21026
 AGENT_PID=""
+AGENT_LOG="$SCRIPT_DIR/tmp/smart-agent.log"
+
+# 取占住某端口的 PID（用于重启时杀旧进程）
+port_pid() {
+  local port=$1
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | grep ":$port " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -ti "tcp:$port" 2>/dev/null | head -1
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser "$port/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1
+  fi
+}
+
 if [ -f "$SCRIPT_DIR/smart-agent/server.py" ]; then
-  if (echo > /dev/tcp/127.0.0.1/$AGENT_PORT) 2>/dev/null; then
-    echo "[start] Port $AGENT_PORT in use, assuming smart-agent already running"
+  EXISTING=$(port_pid "$AGENT_PORT")
+  if [ -n "$EXISTING" ]; then
+    echo "[start] Restarting smart-agent (killing stale PID $EXISTING on port $AGENT_PORT; reloading to pick up *.py changes)..."
+    kill "$EXISTING" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$EXISTING" 2>/dev/null; then kill -9 "$EXISTING" 2>/dev/null || true; sleep 0.5; fi
   else
     echo "[start] Launching smart-agent (Python) on port $AGENT_PORT..."
-    (cd "$SCRIPT_DIR/smart-agent" && CANNBOT_AGENT_PORT=$AGENT_PORT python3 server.py) &
-    AGENT_PID=$!
-    export CANNBOT_AGENT_URL="http://localhost:$AGENT_PORT"
-    for i in $(seq 1 10); do
-      if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
-        echo "[start] smart-agent ready at $CANNBOT_AGENT_URL (PID $AGENT_PID)"
-        break
-      fi
-      sleep 0.5
-    done
   fi
+  mkdir -p "$SCRIPT_DIR/tmp"
+  (cd "$SCRIPT_DIR/smart-agent" && CANNBOT_AGENT_PORT=$AGENT_PORT python3 server.py) > "$AGENT_LOG" 2>&1 &
+  AGENT_PID=$!
+  export CANNBOT_AGENT_URL="http://localhost:$AGENT_PORT"
+  for i in $(seq 1 10); do
+    if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
+      echo "[start] smart-agent ready at $CANNBOT_AGENT_URL (PID $AGENT_PID, log $AGENT_LOG)"
+      break
+    fi
+    sleep 0.5
+  done
 fi
 
 cleanup() {
@@ -188,6 +208,38 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM
+
+BASE_PORT=21025
+PORT=$BASE_PORT
+
+# -k: kill any process occupying BASE_PORT, then use that port
+if [ "$KILL_EXISTING" = true ]; then
+  OCCUPIER_PID=$(lsof -ti :$BASE_PORT 2>/dev/null || true)
+  if [ -n "$OCCUPIER_PID" ]; then
+    echo "[start] -k: Killing process on port $BASE_PORT (PID $OCCUPIER_PID)..."
+    kill $OCCUPIER_PID 2>/dev/null || true
+    sleep 2
+  else
+    echo "[start] -k: Port $BASE_PORT is free, no process to kill"
+  fi
+  PORT=$BASE_PORT
+else
+  # Find next available port (skips AGENT_PORT since smart-agent is already listening).
+  MAX_ATTEMPTS=128
+  for i in $(seq 0 $((MAX_ATTEMPTS - 1))); do
+    PORT=$((BASE_PORT + i))
+    if (echo > /dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
+      echo "[start] Port $PORT is in use, trying next..."
+      continue
+    fi
+    break
+  done
+
+  if [ $PORT -ge $((BASE_PORT + MAX_ATTEMPTS)) ]; then
+    echo "[start] ERROR: No available port in range $BASE_PORT-$((BASE_PORT + MAX_ATTEMPTS - 1))" >&2
+    exit 1
+  fi
+fi
 
 echo "[start] Launching CANNBot-Insight on port $PORT..."
 

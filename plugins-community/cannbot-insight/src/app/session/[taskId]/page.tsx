@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { VERSION_DISPLAY } from "@/lib/version"
 import { BRAND_NAME } from "@/lib/branding"
+import type { TurnHighlight } from "@/lib/shared/highlight"
 import { TurnTimeline } from "@/components/observe/TurnTimeline"
 import { TurnDetail } from "@/components/observe/TurnDetail"
 import { TurnContextPanel } from "@/components/observe/TurnContextPanel"
@@ -30,6 +31,7 @@ import { FileReadAnalysis } from "@/components/observe/FileReadAnalysis"
 import { AgentCallGraph } from "@/components/observe/AgentCallGraph"
 import { ChatReplayView } from "@/components/observe/ChatReplayView"
 import { summarizeToolCallErrors } from "@/lib/tool-call-errors"
+import { dispatchOnlySkillNames } from "@/lib/skill-eval-audit"
 
 type TabKey = "overview" | "turns" | "trace" | "skills" | "workflowAnalyse" | "performance" | "context" | "fileReads" | "replay"
 
@@ -300,6 +302,7 @@ export default function SessionDetailPage({
   const [highlightSubagentTurnId, setHighlightSubagentTurnId] = useState<string | null>(null)
   const [showAllErrorTurns, setShowAllErrorTurns] = useState(false)
   const [scrollToTurnId, setScrollToTurnId] = useState<string | null>(null)
+  const [traceHighlight, setTraceHighlight] = useState<TurnHighlight | null>(null)
   const [selectedBridgeId, setSelectedBridgeId] = useState<string | null>(null)
   const [selectedTurnDetail, setSelectedTurnDetail] = useState<TurnDetailData | null>(null)
   const [executions, setExecutions] = useState<ExecutionItem[]>([])
@@ -309,14 +312,17 @@ export default function SessionDetailPage({
   // Skills tab 的"对账 ↗"跳转时由 onAuditSkill 一并 set，跨 tab 一气呵成（无需 effect/外部 store）。
   const [auditSub, setAuditSub] = useState<"workflow" | "skill">("workflow")
   const [auditSelected, setAuditSelected] = useState<{ name: string; kind: "skill" | "agent" | "root" } | null>(null)
-  // 主 agent workflow 对账目标是否可用：session 首条 user turn(isSubagent=0)内容达阈值
+  // 主 agent 编排 对账目标是否可用：session 首条 user turn(isSubagent=0)内容达阈值
   // （≥500 字）即注入的 workflow skill 声明。主 agent 通常只 dispatch、不 invoke skill，
   // 其 workflow 声明只能从 turn0 取，故单独 gate（见 audit-skilleval kind=root）。
   const [hasMainAgentWorkflow, setHasMainAgentWorkflow] = useState(false)
-  // 主 agent workflow 的真名（扫盘按 turn0 body 匹配 disk SKILL.md 的 frontmatter name）。
+  // 主 agent 编排 的真名（扫盘按 turn0 body 匹配 disk SKILL.md 的 frontmatter name）。
   // null=未取/无 workflow；MAIN_AGENT_WORKFLOW_NAME 回退由端点返回。
   const [mainAgentWorkflowName, setMainAgentWorkflowName] = useState<string | null>(null)
-  // 主 agent workflow 合成行的逐栏数据：dispatch 计数（编排动作）+ 主 agent turn 的 token 汇总。
+  // 主 agent 编排 声明的来源标识（如 "STATE.md" / "PLAN.md" / "scan:work-plan.md"），
+  // 来自 main-agent-workflow 端点（recoverPlanFileDeclaration 的 source）。供 Skills tab root 行显示。
+  const [mainAgentWorkflowSource, setMainAgentWorkflowSource] = useState<string | null>(null)
+  // 主 agent 编排 合成行的逐栏数据：dispatch 计数（编排动作）+ 主 agent turn 的 token 汇总。
   const mainAgentWorkflowStats = useMemo(() => {
     const dispatchCount = allSkillEvents.filter(e => !e.isSubagent && e.eventType === "dispatch").length
     let inputTokens = 0, outputTokens = 0, reasoningTokens = 0, cacheReadTokens = 0, totalTokens = 0
@@ -490,12 +496,7 @@ export default function SessionDetailPage({
         if (res.ok) {
           const data = await res.json()
           const events: SkillEventForDetail[] = []
-          // 首条 user turn(isSub=0)的全文长度 → 主 agent workflow 声明 gate（≥500 字）
-          let firstUserTurnLen = -1
           for (const turn of data.items ?? []) {
-            if (firstUserTurnLen < 0 && turn.role === "user" && !(turn.isSubagent ?? false)) {
-              firstUserTurnLen = (turn as { contentLength?: number }).contentLength ?? 0
-            }
             for (const se of turn.skillEvents ?? []) {
               events.push({
                 id: `${turn.turnId}-${se.skillName}-${se.eventType}`,
@@ -521,7 +522,6 @@ export default function SessionDetailPage({
             }
           }
           setAllSkillEvents(events)
-          setHasMainAgentWorkflow(firstUserTurnLen >= 500)
         }
       } catch {
         setError("Failed to load skill events")
@@ -537,9 +537,9 @@ export default function SessionDetailPage({
     loadAllData()
   }, [taskId])
 
-  // 有主 agent workflow 声明时，扫盘反查真名（identifier）用于显示。
+  // 主 agent 编排 对账目标：从端点取可用性（STATE.md 可恢复）+ 真名（扫盘反查）。
+  // STATE.md 是具体工作流（任务清单），root 对账送它；turn0 长度不再是 gate（之前误把角色当工作流）。
   useEffect(() => {
-    if (!hasMainAgentWorkflow) return
     let cancelled = false
     void (async () => {
       try {
@@ -547,14 +547,18 @@ export default function SessionDetailPage({
           `/api/observe/session/main-agent-workflow?taskId=${encodeURIComponent(taskId)}&framework=${encodeURIComponent(framework ?? "")}`,
         )
         if (!r.ok) return
-        const d = (await r.json()) as { name?: string | null }
-        if (!cancelled) setMainAgentWorkflowName(d.name ?? null)
+        const d = (await r.json()) as { available?: boolean; name?: string | null; source?: string | null }
+        if (!cancelled) {
+          setHasMainAgentWorkflow(!!d.available)
+          setMainAgentWorkflowName(d.name ?? null)
+          setMainAgentWorkflowSource(d.source ?? null)
+        }
       } catch {
-        /* 取名失败不影响对账（回退合成名） */
+        /* 取不到不影响主流程 */
       }
     })()
     return () => { cancelled = true }
-  }, [taskId, framework, hasMainAgentWorkflow])
+  }, [taskId, framework])
 
   useEffect(() => {
     if (!session || session.framework !== "opencode" || !session.sourcePath) return
@@ -747,6 +751,11 @@ export default function SessionDetailPage({
 
   const s = session
 
+  // Overview 的 Skills 计数/列表也排除仅 dispatch 的子代理（如 blackbox-designer），
+  // 与 Skills 表/图表、Audit 的 agent/skill 划分对齐。
+  const dispatchOnlyNames = dispatchOnlySkillNames(allSkillEvents)
+  const displaySkills = s ? s.skills.filter(sn => !dispatchOnlyNames.has(sn.skillName)) : []
+
   // Compute endContextWindowPct: next same-scope assistant turn's contextWindowPct
   // (that IS the context % at the end of this turn)
   function computeEndPct(turn: TurnRowItem | null): number | null {
@@ -861,14 +870,14 @@ export default function SessionDetailPage({
 
         <Card size="sm">
           <CardHeader>
-            <CardTitle>Skills ({s.skills.length})</CardTitle>
+            <CardTitle>Skills ({displaySkills.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            {s.skills.length === 0 ? (
+            {displaySkills.length === 0 ? (
               <div className="text-sm text-muted-foreground">No skills loaded</div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {s.skills.map(sn => {
+                {displaySkills.map(sn => {
                   const skillEvents = allSkillEvents.filter(e => e.skillName === sn.skillName)
                   const skillTokens = skillEvents.reduce((sum, e) => sum + e.turnTokens.totalTokens, 0)
                   const formatT = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
@@ -883,6 +892,11 @@ export default function SessionDetailPage({
                     </div>
                   )
                 })}
+              </div>
+            )}
+            {dispatchOnlyNames.size > 0 && (
+              <div className="text-[11px] text-muted-foreground mt-2">
+                已排除 {dispatchOnlyNames.size} 个仅分派的子代理（见 Audit · agent 面）
               </div>
             )}
           </CardContent>
@@ -1182,13 +1196,28 @@ export default function SessionDetailPage({
               setSelectedTurnId(turnId)
               setHighlightSubagentTurnId(null)
               setScrollToTurnId(null)
+              setTraceHighlight(null)
+            }}
+            onJumpToTurnIndex={(turnIndex) => {
+              const turn = turns.find(t => t.turnIndex === turnIndex)
+              if (turn) {
+                setSelectedTurnId(turn.turnId)
+                if (turn.isSubagent) {
+                  setHighlightSubagentTurnId(turn.turnId)
+                } else {
+                  setHighlightSubagentTurnId(null)
+                }
+                setScrollToTurnId(turn.turnId)
+                setTraceHighlight(null)
+                setActiveTab("turns")
+              }
             }}
           />
         </div>
 
         <div ref={turnDetailRef} className="flex-1 min-h-0 overflow-y-auto">
           {selectedTurnDetail ? (
-            <TurnDetail turn={selectedTurnDetail} />
+            <TurnDetail turn={selectedTurnDetail} highlight={traceHighlight} />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               Select a turn from the timeline
@@ -1217,6 +1246,7 @@ export default function SessionDetailPage({
           skillEvents={allSkillEvents}
           hasMainAgentWorkflow={hasMainAgentWorkflow}
           mainAgentWorkflowName={mainAgentWorkflowName}
+          mainAgentWorkflowSource={mainAgentWorkflowSource}
           mainAgentWorkflowStats={mainAgentWorkflowStats}
           onAuditSkill={(skillName, kind) => {
             setAuditSub("skill")
@@ -1241,7 +1271,7 @@ export default function SessionDetailPage({
     )
   }
 
-  function navigateToTab(tab: string, turnId?: string | null, bridgeId?: string | null) {
+  function navigateToTab(tab: string, turnId?: string | null, bridgeId?: string | null, highlight?: TurnHighlight) {
     setActiveTab(tab as TabKey)
     if (turnId) {
       setSelectedTurnId(turnId)
@@ -1253,6 +1283,7 @@ export default function SessionDetailPage({
         setHighlightSubagentTurnId(null)
       }
     }
+    if (highlight) setTraceHighlight(highlight)
     if (bridgeId) {
       const bridge = bridges.find(b => b.bridgeId === bridgeId)
       if (bridge) {

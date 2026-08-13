@@ -47,9 +47,11 @@ export async function POST(request: NextRequest) {
       sessions: sessions.map(s => ({
         id: s.id,
         createdAt: s.createdAt,
+        endedAt: s.endedAt ?? null,
         firstQuery: s.firstQuery,
         turnCount: s.turnCount,
         model: s.modelName,
+        totalTokens: s.totalTokens ?? null,
       })),
     });
   } catch (error) {

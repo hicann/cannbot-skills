@@ -12,12 +12,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
 import subprocess
+import sys
 import threading
 import time
+import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -26,6 +30,7 @@ from typing import Any
 
 import requests
 
+from jsonl_logger import JsonlLogger
 from trajectory_parser import (
     extract_key_sections,
     extract_skeleton,
@@ -34,6 +39,11 @@ from trajectory_parser import (
     extract_gates,
     extract_errors,
 )
+
+_LOG = logging.getLogger("smart-agent")
+if not _LOG.handlers:
+    _LOG.addHandler(logging.StreamHandler(sys.stderr))
+    _LOG.setLevel(logging.INFO)
 
 REQUIRED_TOP_KEYS = [
     "sessionSummary",
@@ -1086,30 +1096,262 @@ def _validate_v4_inputs(agent_io: Any, provider):
     return agents, agent_io.get("taskQuery", ""), len(agents)
 
 
+def _llm_log(msg: str) -> None:
+    """实时写一行到日志（smart-agent 终端可见），便于 LLM 调用性能定位。"""
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    _LOG.info("%s %s", ts, msg)
+
+
+def _is_rate_or_timeout(err: str | None) -> bool:
+    """判断错误是否为限流/超时（应触发并发回退）。"""
+    if not err:
+        return False
+    e = err.lower()
+    return any(k in e for k in ("429", "rate", "timeout", "超时", "quota", "too many", "limit"))
+
+
+V4_AUDIT_MIN_WORKERS = int(os.environ.get("V4_AUDIT_MIN_WORKERS", "6"))
+V4_AUDIT_MAX_WORKERS = int(os.environ.get("V4_AUDIT_MAX_WORKERS", "32"))
+
+
+class AdaptiveLimiter:
+    """动态并发限流器：在 [low, high] 间调整实际并发数。
+
+    激进策略：从 high（如 32）起跑，撞限流/超时再乘性回退到 low，窗口清了再加性爬回 high。
+    用法：所有任务提交到 max_workers=high 的线程池，每个任务先 acquire()（阻塞至有空位，
+    返回 False 表示已中止、应跳过）再干活、finally release()；主线程在 as_completed 循环里
+    按健康度 set_limit() 调整，或 abort() 中止（唤醒所有阻塞者，避免悬挂）。
+    """
+
+    def __init__(self, low: int, high: int, log=None):
+        self._cond = threading.Condition()
+        self._low = low
+        self._high = high
+        self._limit = high   # 激进起步：直接从上限起跑，撞限流再乘性回退、窗口清了再爬回 high
+        self._inflight = 0
+        self._aborted = False
+        self._log = log
+
+    def acquire(self) -> bool:
+        with self._cond:
+            while not self._aborted and self._inflight >= self._limit:
+                self._cond.wait()
+            if self._aborted:
+                return False
+            self._inflight += 1
+            return True
+
+    def release(self) -> None:
+        with self._cond:
+            self._inflight -= 1
+            self._cond.notify()
+
+    def inflight(self) -> int:
+        with self._cond:
+            return self._inflight
+
+    def limit(self) -> int:
+        with self._cond:
+            return self._limit
+
+    def aborted(self) -> bool:
+        with self._cond:
+            return self._aborted
+
+    def set_limit(self, new: int, reason: str = "") -> bool:
+        new = max(self._low, min(self._high, new))
+        with self._cond:
+            old = self._limit
+            self._limit = new
+            grew = new > old
+            if grew:
+                self._cond.notify_all()
+        if new != old and self._log:
+            self._log(f"[limiter] concurrency {old} -> {new} ({reason})")
+        return new != old
+
+    def abort(self, reason: str = "") -> None:
+        with self._cond:
+            if self._aborted:
+                return
+            self._aborted = True
+            self._limit = self._low
+            self._cond.notify_all()
+        if self._log:
+            self._log(f"[limiter] ABORT ({reason})")
+
+
+@dataclass
+class _PerAgentState:
+    """_run_per_agent_audit 的可变累加器（消除闭包 dict，便于拆分小函数）。"""
+    per_agent: dict = field(default_factory=dict)
+    bridges: list = field(default_factory=list)
+    usage_acc: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
+    durations: list = field(default_factory=list)
+    slowest: dict = field(default_factory=lambda: {"aid": "", "ms": 0})
+    err_count: dict = field(default_factory=lambda: {"n": 0})
+    done: dict = field(default_factory=lambda: {"n": 0})
+    recent: deque = field(default_factory=lambda: deque(maxlen=12))
+
+
+def _audit_one_task(limiter: AdaptiveLimiter, agent_tids: dict,
+                    provider: AIProviderConfig, subagent_dir: Path,
+                    agent: dict) -> tuple[str, dict, dict]:
+    """单个 agent 的 acquire/release 包装：限流中止返回 n-a stub，否则调 _audit_one_agent。"""
+    aid = agent.get("id", "?")
+    tool_use_id = agent_tids.get(aid, "")
+    if limiter.aborted() or not limiter.acquire():
+        return aid, {
+            "completion": {"rating": "n-a", "note": "（限流中止，跳过审计）"},
+            "quality": {"rating": "n-a", "note": "（限流中止，跳过审计）"},
+            "efficiency": {},
+        }, {"error": "aborted", "tool_use_id": tool_use_id}
+    try:
+        dims, stats = _audit_one_agent(provider, agent,
+                                       subagent_dir=subagent_dir, tool_use_id=tool_use_id)
+        return aid, dims, stats
+    finally:
+        limiter.release()
+
+
+def _collect_task_result(fut, agent_for: dict) -> tuple[str, dict, dict]:
+    """从 future 取结果；任务异常时回退全 n-a + 空 stats（tool_use_id 由 bridge 兜底）。"""
+    try:
+        return fut.result()
+    except Exception as e:
+        aid = agent_for.get("id", "?")
+        dims = {"completion": {"rating": "n-a", "note": f"任务异常: {e}"},
+                "quality": {"rating": "n-a", "note": f"任务异常: {e}"},
+                "efficiency": {}}
+        stats = {"error": type(e).__name__, "error_msg": str(e)[:160]}
+        return aid, dims, stats
+
+
+def _build_bridge(stats: dict, aid: str, agent_for: dict, agent_tids: dict) -> dict:
+    return {
+        "tool_use_id": stats.get("tool_use_id", agent_tids.get(aid, "")),
+        "agent_id": aid,
+        "name": agent_for.get("name", ""),
+        "role": agent_for.get("role", ""),
+        "result": stats.get("result_content", "") or "",
+    }
+
+
+def _accumulate_perf(state: _PerAgentState, aid: str, stats: dict) -> tuple[str | None, int]:
+    """累加 token/耗时/错误，返回 (err, dur_ms)。"""
+    err = stats.get("error")
+    state.usage_acc["input_tokens"] += int(stats.get("input_tokens", 0) or 0)
+    state.usage_acc["output_tokens"] += int(stats.get("output_tokens", 0) or 0)
+    dur_ms = int(stats.get("duration_ms", 0) or 0)
+    state.durations.append(dur_ms)
+    if dur_ms > state.slowest["ms"]:
+        state.slowest = {"aid": aid, "ms": dur_ms}
+    if err:
+        state.err_count["n"] += 1
+    state.recent.append((err, dur_ms))
+    state.done["n"] += 1
+    return err, dur_ms
+
+
+def _adjust_concurrency(limiter: AdaptiveLimiter, recent: deque,
+                        done_n: int, err: str | None) -> None:
+    """AIMD：限流回退 / 健康 probe-up / 持续限流则 abort。"""
+    cur = limiter.limit()
+    if _is_rate_or_timeout(err):
+        limiter.set_limit(max(V4_AUDIT_MIN_WORKERS, cur - max(2, cur // 3)),
+                          f"backoff:{err}")
+    elif done_n % 5 == 0 and not any(e for e, _ in recent):
+        limiter.set_limit(min(V4_AUDIT_MAX_WORKERS, cur + 2), "probe-up")
+    if not limiter.aborted():
+        rt = sum(1 for e, _ in recent if _is_rate_or_timeout(e))
+        if len(recent) >= 8 and rt >= 8:
+            limiter.abort(f"sustained rate-limit: {rt}/{len(recent)}")
+
+
+@dataclass
+class _PerAgentCall:
+    """单次 per-agent 审计结果快照（_log_per_agent_progress 的参数包，避免参数过多）。"""
+    done_n: int
+    agent_count: int
+    aid: str
+    dur_ms: int
+    stats: dict
+    err: str | None
+
+
+def _log_per_agent_progress(ctx: RunContext, limiter: AdaptiveLimiter,
+                            call: _PerAgentCall) -> None:
+    if ctx.on_progress:
+        msg = (f"已审计 {call.done_n}/{call.agent_count}: {call.aid}"
+               f"（{(call.dur_ms/1000):.0f}s）并发 {limiter.limit()}")
+        ctx.on_progress({"stage": "llm", "round": call.done_n, "msg": msg})
+    if ctx.logger:
+        ctx.logger.log_system("perf", {"phase": "per_agent", "event": "call_done",
+            "seq": call.done_n, "of": call.agent_count, "agent": call.aid,
+            "duration_ms": call.dur_ms, "error": call.err or "",
+            "input_tokens": int(call.stats.get("input_tokens", 0) or 0),
+            "output_tokens": int(call.stats.get("output_tokens", 0) or 0),
+            "model": call.stats.get("model", ""),
+            "concurrency": limiter.limit(), "inflight": limiter.inflight()})
+
+
+def _build_perf_summary(state: _PerAgentState, limiter: AdaptiveLimiter,
+                        pa_ms: float) -> dict:
+    durations = state.durations
+    return {
+        "wall_ms": int(pa_ms), "calls": len(durations), "sum_ms": sum(durations),
+        "errors": state.err_count["n"], "aborted": limiter.aborted(),
+        "max_ms": state.slowest["ms"], "max_agent": state.slowest["aid"],
+        "avg_ms": int(sum(durations) / len(durations)) if durations else 0,
+        "input_tokens": state.usage_acc["input_tokens"],
+        "output_tokens": state.usage_acc["output_tokens"],
+    }
+
+
 def _run_per_agent_audit(agents: list, provider: AIProviderConfig,
-                          ctx: RunContext) -> dict:
-    per_agent: dict[str, dict] = {}
-    done = {"n": 0}
+                          ctx: RunContext) -> tuple[dict, list, dict]:
+    """并行 per-agent LLM 审计（AIMD 动态并发 6..32）。每个 agent 调一次 LLM 并写成
+    Claude Code 子 agent session（subagents/<id>.jsonl + .meta.json），主 session 的
+    dispatch 桥接由 run_v4_pipeline 统一写。返回 (per_agent, bridges, perf_summary)。"""
+    state = _PerAgentState()
     agent_count = len(agents)
+    out_dir = Path(ctx.output_dir)
+    main_session_id = f"smart-agent-{ctx.output_basename}"
+    subagent_dir = (out_dir / main_session_id / "subagents").resolve()
+    if subagent_dir.exists():
+        for _old in subagent_dir.glob("*"):
+            _old.unlink(missing_ok=True)
+    subagent_dir.mkdir(parents=True, exist_ok=True)
+    agent_tids = {a.get("id", "?"): str(uuid.uuid4()) for a in agents}
 
-    def _audit_one(agent: dict) -> tuple[str, dict]:
-        return agent.get("id", "?"), _audit_one_agent(provider, agent)
+    limiter = AdaptiveLimiter(V4_AUDIT_MIN_WORKERS, V4_AUDIT_MAX_WORKERS, log=_llm_log)
+    pa_t0 = time.monotonic()
+    if ctx.logger:
+        ctx.logger.log_system("perf", {"phase": "per_agent", "event": "start",
+            "agents": agent_count, "min_workers": V4_AUDIT_MIN_WORKERS,
+            "max_workers": V4_AUDIT_MAX_WORKERS, "start_concurrency": limiter.limit()})
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futs = {ex.submit(_audit_one, a): a for a in agents}
+    with ThreadPoolExecutor(max_workers=V4_AUDIT_MAX_WORKERS) as ex:
+        futs = {
+            ex.submit(_audit_one_task, limiter, agent_tids, provider, subagent_dir, a): a
+            for a in agents
+        }
         for fut in as_completed(futs):
-            aid, dims = fut.result()
-            per_agent[aid] = dims
-            done["n"] += 1
-            if ctx.on_progress:
-                ctx.on_progress({"stage": "claude", "round": done["n"],
-                             "msg": f"已审计 {done['n']}/{agent_count}: {aid}"})
-            if ctx.logger:
-                ctx.logger.log_system("progress", {"stage": "claude-agent",
-                    "round": done["n"], "id": aid,
-                    "completion": dims.get("completion", {}).get("rating"),
-                    "quality": dims.get("quality", {}).get("rating")})
-    return per_agent
+            agent_for = futs[fut]
+            aid, dims, stats = _collect_task_result(fut, agent_for)
+            state.per_agent[aid] = dims
+            state.bridges.append(_build_bridge(stats, aid, agent_for, agent_tids))
+            err, dur_ms = _accumulate_perf(state, aid, stats)
+            _adjust_concurrency(limiter, state.recent, state.done["n"], err)
+            _log_per_agent_progress(ctx, limiter, _PerAgentCall(
+                state.done["n"], agent_count, aid, dur_ms, stats, err))
+
+    pa_ms = (time.monotonic() - pa_t0) * 1000
+    perf = _build_perf_summary(state, limiter, pa_ms)
+    if ctx.logger:
+        ctx.logger.log_system("perf", {"phase": "per_agent", "event": "phase_done", **perf})
+    return state.per_agent, state.bridges, {
+        "wall_ms": int(pa_ms), "usage_acc": state.usage_acc, "perf": perf}
 
 
 def _build_v4_summary_list(agents: list, per_agent: dict) -> list:
@@ -1117,11 +1359,17 @@ def _build_v4_summary_list(agents: list, per_agent: dict) -> list:
     for a in agents:
         aid = a.get("id", "?")
         d = per_agent.get(aid, {})
+        comp = d.get("completion") or {}
+        qual = d.get("quality") or {}
         summary_list.append({
             "id": aid, "role": a.get("role"), "name": a.get("name"),
-            "completion": (d.get("completion") or {}).get("rating", "n-a"),
-            "quality": (d.get("quality") or {}).get("rating", "n-a"),
-            "note": (d.get("completion") or {}).get("note", ""),
+            "turns": a.get("turns", []) or [],
+            "completion": comp.get("rating", "n-a"),
+            "completionEvidence": comp.get("evidence", ""),
+            "completionNote": comp.get("note", ""),
+            "quality": qual.get("rating", "n-a"),
+            "qualityEvidence": qual.get("evidence", ""),
+            "qualityNote": qual.get("note", ""),
         })
     return summary_list
 
@@ -1153,6 +1401,82 @@ def _v4_progress(on_progress, logger, stage: str, prog_msg: str, log_msg: str) -
         logger.log_system("progress", {"stage": stage, "msg": log_msg})
 
 
+def _write_dispatch_bridges(ctx: RunContext, bridges: list,
+                            provider: AIProviderConfig | None) -> None:
+    """主 session 写 dispatch 桥：一条 assistant（N 个 Agent tool_use）+ 一条 user（N 个 tool_result），
+    与子 session 的 .meta.json 用同一 toolUseId 互链，复刻 Claude Code 的 subagent 存储结构。"""
+    if not (ctx.logger and bridges):
+        return
+    _tool_uses = [
+        {"type": "tool_use", "id": b["tool_use_id"], "name": "Agent",
+         "input": {"agentId": b["agent_id"], "name": b["name"], "role": b["role"],
+                   "subagent_session_id": b["agent_id"],
+                   "subagent_type": "SmartAgent",
+                   "description": b["role"]}}
+        for b in bridges if b["tool_use_id"]
+    ]
+    _tool_results = [
+        {"type": "tool_result", "tool_use_id": b["tool_use_id"], "content": b["result"]}
+        for b in bridges if b["tool_use_id"]
+    ]
+    if _tool_uses:
+        ctx.logger.log_assistant(_tool_uses,
+                                 model=provider.model if provider else "", stage="dispatch")
+    if _tool_results:
+        ctx.logger.log_user_blocks(_tool_results, stage="dispatch-result")
+
+
+@dataclass
+class _V4FinalizePerf:
+    """_finalize_v4 的 perf 参数包（避免参数过多，G.FNM.03）。"""
+    pa_info: dict
+    agg_ms: float
+    usage_acc: dict
+    total_ms: float
+
+
+def _finalize_v4(ctx: RunContext, analysis: dict, analysis_path: Path, steps: int,
+                 perf: _V4FinalizePerf) -> AnalysisResult:
+    """写 _auditMeta + analysis.json + perf/done 日志，返回 AnalysisResult。"""
+    in_t = perf.usage_acc["input_tokens"]
+    out_t = perf.usage_acc["output_tokens"]
+    analysis["_auditMeta"] = {
+        "inputTokensK": round(in_t / 1000, 1),
+        "outputTokensK": round(out_t / 1000, 1),
+        "tokensKt": round((in_t + out_t) / 1000, 1),
+    }
+    analysis_path.write_text(
+        json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+    if ctx.logger:
+        ctx.logger.log_system("perf", {"phase": "v4_pipeline", "event": "done",
+            "wall_ms": int(perf.total_ms),
+            "per_agent_wall_ms": perf.pa_info["wall_ms"],
+            "aggregate_wall_ms": int(perf.agg_ms),
+            "input_tokens": in_t, "output_tokens": out_t})
+    if ctx.on_progress:
+        ctx.on_progress({"stage": "done",
+            "msg": (f"完成（{steps} 个 agent）· 总耗时 {(perf.total_ms/1000):.0f}s · "
+                    f"token {analysis['_auditMeta']['tokensKt']}K")})
+    if ctx.logger:
+        ctx.logger.log_result(f"完成（{steps} 个 agent）", subtype="success")
+        ctx.logger.close()
+    return AnalysisResult(output_path=str(analysis_path), steps=steps, analysis=analysis)
+
+
+def _merge_aggregate_usage(usage_acc: dict, agg_usage: dict, agg_ms: float,
+                           ctx: RunContext) -> None:
+    """把聚合调用的 token 并入总量并记 perf 日志。"""
+    usage_acc["input_tokens"] += int(agg_usage.get("input_tokens", 0) or 0)
+    usage_acc["output_tokens"] += int(agg_usage.get("output_tokens", 0) or 0)
+    if ctx.logger:
+        ctx.logger.log_system("perf", {"phase": "aggregate", "event": "done",
+            "wall_ms": int(agg_ms),
+            "duration_ms": int(agg_usage.get("duration_ms", 0) or 0),
+            "input_tokens": int(agg_usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(agg_usage.get("output_tokens", 0) or 0),
+            "model": agg_usage.get("model", "")})
+
+
 def run_v4_pipeline(
     agent_io: Any,
     prompt_md: str,
@@ -1161,41 +1485,39 @@ def run_v4_pipeline(
 ) -> AnalysisResult:
     """v4：agent 中心三维度审计（并行版）。agent-IO 由 Next.js 路由确定性算好传入。
 
-    流程：
-    1. 写 agentio.json（留档）。
-    2. 并行 per-agent LLM 调用（ThreadPoolExecutor, max 6）：每个 agent 一次 json_object 调用，
-       输入只含该 agent 的 input/output/actions/artifacts/envelope → {completion, quality, efficiency:{note?}}。
-       每 agent 输入小、不截断、覆盖 100%；互不依赖天然并行。
-    3. 一次聚合 LLM 调用：所有 agent 的 ratings 摘要 + taskQuery → sessionSummary / crossIssues / optimizationPriorities。
-    4. 组装 LLM-analysis 形态 → validate_v4_schema → inject_v4_merge（用 agent_io 填结构 + 确定性 efficiency.rating）。
+    流程：写 agentio.json → 并行 per-agent LLM 审计 → 聚合 LLM → 组装+inject_v4_merge。
     """
     try:
+        pipe_t0 = time.monotonic()
+        if ctx.logger:
+            ctx.logger.log_system("perf", {"phase": "v4_pipeline", "event": "start",
+                "agents": len(agent_io.get("agents", [])) if isinstance(agent_io, dict) else 0})
         agentio_path, analysis_path = _prepare_v4_paths(ctx, agent_io)
         agents, task_query, agent_count = _validate_v4_inputs(agent_io, provider)
 
-        _v4_progress(ctx.on_progress, ctx.logger, "claude-start",
+        _v4_progress(ctx.on_progress, ctx.logger, "llm-start",
                      f"并行审计 {agent_count} 个 agent（每 agent 一次 LLM 调用）…",
                      f"v4 并行审计 {agent_count} 个 agent")
 
-        per_agent = _run_per_agent_audit(agents, provider, ctx)
+        per_agent, bridges, pa_info = _run_per_agent_audit(agents, provider, ctx)
+        usage_acc = pa_info["usage_acc"]
 
-        _v4_progress(ctx.on_progress, ctx.logger, "claude-done",
+        _v4_progress(ctx.on_progress, ctx.logger, "llm-done",
                      f"per-agent 完成（{agent_count}），开始聚合…",
                      f"per-agent 完成（{agent_count}）")
 
-        agg = _aggregate_session(
-            provider, task_query, _build_v4_summary_list(agents, per_agent))
-        analysis = _assemble_v4_analysis(agents, per_agent, agg, agent_io)
+        _write_dispatch_bridges(ctx, bridges, provider)
 
-        analysis_path.write_text(
-            json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
-        steps = agent_count
-        if ctx.on_progress:
-            ctx.on_progress({"stage": "done", "msg": f"完成（{steps} 个 agent）"})
-        if ctx.logger:
-            ctx.logger.log_result(f"完成（{steps} 个 agent）", subtype="success")
-            ctx.logger.close()
-        return AnalysisResult(output_path=str(analysis_path), steps=steps, analysis=analysis)
+        summary_list = _build_v4_summary_list(agents, per_agent)
+        agg_t0 = time.monotonic()
+        agg, agg_usage = _aggregate_session(provider, task_query, summary_list, logger=ctx.logger)
+        agg_ms = (time.monotonic() - agg_t0) * 1000
+        _merge_aggregate_usage(usage_acc, agg_usage, agg_ms, ctx)
+
+        analysis = _assemble_v4_analysis(agents, per_agent, agg, agent_io)
+        total_ms = (time.monotonic() - pipe_t0) * 1000
+        return _finalize_v4(ctx, analysis, analysis_path, agent_count,
+                            _V4FinalizePerf(pa_info, agg_ms, usage_acc, total_ms))
     except Exception as e:
         if ctx.logger:
             ctx.logger.log_result(f"失败：{type(e).__name__}: {e}", subtype="error")
@@ -1232,8 +1554,52 @@ V4_AGENT_SYSTEM = """你是 CANNBot Agent 审计顾问，对**单个 agent** 做
 """
 
 
-def _audit_one_agent(provider: AIProviderConfig, agent: dict) -> dict:
-    """对单个 agent 调一次 LLM，返回 {completion, quality, efficiency}。失败回退全 n-a。"""
+@dataclass
+class SubagentWriteParams:
+    """_write_subagent 的具名参数包（参数多且有相关性，按 G.FNM.03 封装）。"""
+    agent: dict
+    tool_use_id: str
+    user_text: str
+    resp_content: str
+    model: str
+    usage: dict
+    duration_ms: int
+
+
+def _write_subagent(subagent_dir: Path, params: SubagentWriteParams) -> None:
+    """把单个 per-agent 调用写成 Claude Code 子 agent session：
+    subagents/<agentId>.jsonl（user→assistant 一问一答）+ <agentId>.meta.json（toolUseId 链回主 session）。
+    每次清空重写（append=False）。"""
+    agent = params.agent
+    aid = agent.get("id") or "unknown"
+    sub_dir = subagent_dir
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    sub_path = sub_dir / f"{aid}.jsonl"
+    sub_logger = JsonlLogger(log_path=str(sub_path), cwd=os.getcwd(), append=False)
+    try:
+        sub_logger.log_exchange(params.user_text, [{"type": "text", "text": params.resp_content}],
+                                model=params.model, usage=params.usage or {},
+                                duration_ms=params.duration_ms, stage="per_agent")
+    finally:
+        sub_logger.close()
+    meta = {
+        "toolUseId": params.tool_use_id,
+        "name": agent.get("name", ""),
+        "agentType": "SmartAgent",
+        "agentId": aid,
+        "role": agent.get("role", ""),
+        "description": f"audit subagent: {agent.get('name', aid)}",
+    }
+    (sub_dir / f"{aid}.meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+
+def _audit_one_agent(provider: AIProviderConfig, agent: dict,
+                     subagent_dir: Path | None = None, tool_use_id: str | None = None
+                     ) -> tuple[dict, dict]:
+    """对单个 agent 调一次 LLM，返回 (dims, stats)。dims={completion,quality,efficiency}；
+    stats={input_tokens,output_tokens,duration_ms,model,result_content,tool_use_id}。失败回退全 n-a + 空 stats。
+    若传入 subagent_dir+tool_use_id，把本轮 user+assistant 写成子 agent session（subagents/<id>.jsonl + .meta.json），
+    主 session 只保留 dispatch 桥接（由 run_v4_pipeline 统一写）。"""
     user = (
         "请审计下面这个 agent 的三维度，输出严格 JSON。\n"
         "agent 数据（JSON）：\n"
@@ -1245,6 +1611,11 @@ def _audit_one_agent(provider: AIProviderConfig, agent: dict) -> dict:
             _load_v4_prompt("audit-v4-agent.md", V4_AGENT_SYSTEM),
             [{"role": "user", "content": user}],
         )
+        if subagent_dir is not None and tool_use_id:
+            _write_subagent(subagent_dir, SubagentWriteParams(
+                agent=agent, tool_use_id=tool_use_id, user_text=user,
+                resp_content=resp.content, model=resp.model,
+                usage=_normalize_usage(resp.usage), duration_ms=resp.duration_ms))
         data = _load_json_lenient(resp.content)
         if not isinstance(data, dict):
             raise AnalysisError("LLM 返回非 JSON 对象")
@@ -1255,28 +1626,36 @@ def _audit_one_agent(provider: AIProviderConfig, agent: dict) -> dict:
         for d in (completion, quality):
             if d.get("rating") not in ("pass", "weak", "fail", "n-a"):
                 d["rating"] = "n-a"
-        return {"completion": completion, "quality": quality, "efficiency": eff}
-    except Exception:
+        return {"completion": completion, "quality": quality, "efficiency": eff}, {
+            **_normalize_usage(resp.usage),
+            "duration_ms": resp.duration_ms,
+            "model": resp.model,
+            "result_content": resp.content,
+            "tool_use_id": tool_use_id or "",
+        }
+    except Exception as e:
         return {
             "completion": {"rating": "n-a", "note": "（agent 审计调用失败，回退 n-a）"},
             "quality": {"rating": "n-a", "note": "（agent 审计调用失败，回退 n-a）"},
             "efficiency": {},
-        }
+        }, {"error": type(e).__name__, "error_msg": str(e)[:160], "tool_use_id": tool_use_id or ""}
 
 
-V4_AGG_SYSTEM = """你是 CANNBot Agent 审计聚合器。输入是 session 的 taskQuery + 每个 agent 的三维度评级摘要。
+V4_AGG_SYSTEM = """你是 CANNBot Agent 审计聚合器。输入是 session 的 taskQuery + \
+每个 agent 的三维度评级摘要（含 turns 列表与 per-dim evidence，evidence 已引用 `#turn tool`）。
 产出：
 - sessionSummary：一句话概括本 session 整体完成情况与最突出问题（如：主 agent 因 X 未完成整体交付，N 个子 agent 中 M 个 weak/fail…）。
-- crossIssues[]：跨 agent 问题，每项 {type(从 incomplete/out-of-order/redundant/missing-step/session-crash/other 选), severity(high/medium/low), title, detail?, suggestion?}。
-- optimizationPriorities[]：按预期收益排序，每项 {priority(从1递增), target(agent:<id> 或 workflow:<step>), action, expectedGain}。
+- crossIssues[]：跨 agent 问题，每项 {type(从 incomplete/out-of-order/redundant/missing-step/session-crash/other 选), severity(high/medium/low), title, detail?, suggestion?, evidence}。**evidence 必填**：指出问题发生在哪个 agent（用 `agent:<name>` 或 `agent:<id>`）和哪一轮（用 `#turn` 或 turns 列表里的编号），多个证据用 `;` 分隔，如 `agent:build-coder #12 Edit; agent:verifier #15 Bash`。优先复用摘要里现成的 evidence 字符串。
+- optimizationPriorities[]：按预期收益排序，每项 {priority(从1递增), target(agent:<id> 或 workflow:<step>), action, expectedGain, evidence}。**evidence 必填**：指向要优化的 agent 与轮次（`agent:<name> #turn`），可引用该 agent 的 completionEvidence/qualityEvidence。
 只基于给定摘要，不臆测。输出严格 JSON：{"sessionSummary":"","crossIssues":[],"optimizationPriorities":[]}
 """
 
 
-def _aggregate_session(provider: AIProviderConfig, task_query: str, summary_list: list) -> dict:
+def _aggregate_session(provider: AIProviderConfig, task_query: str, summary_list: list,
+                       logger=None) -> tuple[dict, dict]:
     user = (
         f"taskQuery: {task_query}\n\n"
-        f"各 agent 评级摘要（JSON）：\n{json.dumps(summary_list, ensure_ascii=False)}"
+        f"各 agent 评级摘要（JSON，含 turns 与 evidence）：\n{json.dumps(summary_list, ensure_ascii=False)}"
     )
     try:
         resp = call_llm(
@@ -1284,9 +1663,15 @@ def _aggregate_session(provider: AIProviderConfig, task_query: str, summary_list
             _load_v4_prompt("audit-v4-agg.md", V4_AGG_SYSTEM),
             [{"role": "user", "content": user}],
         )
+        if logger:
+            logger.log_exchange(user, [{"type": "text", "text": resp.content}],
+                                model=resp.model, usage=_normalize_usage(resp.usage),
+                                duration_ms=resp.duration_ms, stage="aggregate")
         data = _load_json_lenient(resp.content)
         if not isinstance(data, dict):
-            return {"sessionSummary": "", "crossIssues": [], "optimizationPriorities": []}
+            return {"sessionSummary": "", "crossIssues": [], "optimizationPriorities": []}, {
+                **_normalize_usage(resp.usage), "duration_ms": resp.duration_ms, "model": resp.model,
+            }
         return {
             "sessionSummary": str(data.get("sessionSummary", ""))[:2000],
             "crossIssues": data.get("crossIssues") if isinstance(data.get("crossIssues"), list) else [],
@@ -1294,9 +1679,9 @@ def _aggregate_session(provider: AIProviderConfig, task_query: str, summary_list
                 data.get("optimizationPriorities")
                 if isinstance(data.get("optimizationPriorities"), list) else []
             ),
-        }
+        }, {**_normalize_usage(resp.usage), "duration_ms": resp.duration_ms, "model": resp.model}
     except Exception:
-        return {"sessionSummary": "", "crossIssues": [], "optimizationPriorities": []}
+        return {"sessionSummary": "", "crossIssues": [], "optimizationPriorities": []}, {}
 
 
 def run_analysis_pipeline(
@@ -1354,7 +1739,6 @@ def analyze_trajectory(
     prompt_md = Path(prompt_path).read_text(encoding="utf-8")
     basename = Path(trajectory_path).stem
 
-    from jsonl_logger import JsonlLogger
     log_path = os.path.join(output_dir, f"smart-agent-{basename}.jsonl")
     logger = JsonlLogger(log_path=log_path, cwd=os.getcwd())
 

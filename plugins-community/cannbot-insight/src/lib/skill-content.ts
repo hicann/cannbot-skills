@@ -19,6 +19,10 @@ export interface SkillContentResult {
   content: string;
   source: 'skill-tool' | 'read';
   length: number;
+  /** 是否判定为读取了完整 SKILL.md。skill-tool 注入恒为 true；read 需无 offset/limit 且无截断标记。 */
+  fullRead: boolean;
+  /** read 来源时实际读到的最大行号（文件真实行号）；skill-tool 为 null。 */
+  maxLine: number | null;
 }
 
 const SKILL_TOOL_NAMES = new Set(['skill', 'load_skill', 'skill/load_skill', 'skill/invoke']);
@@ -64,6 +68,29 @@ function joinReadContent(resultJson: string): string {
   return keys.map(k => m.get(k)!).join('\n');
 }
 
+function readMaxLine(resultJson: string): number | null {
+  const m = parseReadLines(resultJson);
+  if (m.size === 0) return null;
+  let max = 0;
+  for (const n of m.keys()) if (n > max) max = n;
+  return max;
+}
+
+function hasReadOffsetOrLimit(argsJson: string | null): boolean {
+  if (!argsJson) return false;
+  try {
+    const a = JSON.parse(argsJson);
+    return (a.offset != null && a.offset > 0) || a.limit != null;
+  } catch { return false; }
+}
+
+const TRUNCATION_RE = /(?:only\s+showing\s+(?:the\s+)?first\s+\d+\s+lines)|(?:lines?\s+(?:hidden|omitted|not\s+shown|truncated))|(?:content\s+(?:was\s+)?truncat)|(?:file\s+is\s+(?:large|too\s+large))/i;
+
+function hasReadTruncation(resultJson: string | null): boolean {
+  if (!resultJson) return false;
+  return TRUNCATION_RE.test(resultJson);
+}
+
 export function selectSkillContent(
   toolCalls: SkillToolCall[],
   skillName: string
@@ -96,7 +123,7 @@ export function selectSkillContent(
       (b.resultJson?.length ?? 0) > (a.resultJson?.length ?? 0) ? b : a
     );
     const content = stripSkillPreamble(best.resultJson!);
-    return { content, source: 'skill-tool', length: content.length };
+    return { content, source: 'skill-tool', length: content.length, fullRead: true, maxLine: null };
   }
 
   if (readCandidates.length > 0) {
@@ -104,7 +131,14 @@ export function selectSkillContent(
       (b.resultJson?.length ?? 0) > (a.resultJson?.length ?? 0) ? b : a
     );
     const content = joinReadContent(best.resultJson!);
-    return { content, source: 'read', length: content.length };
+    const partial = hasReadOffsetOrLimit(best.argsJson) || hasReadTruncation(best.resultJson);
+    return {
+      content,
+      source: 'read',
+      length: content.length,
+      fullRead: !partial,
+      maxLine: readMaxLine(best.resultJson!),
+    };
   }
 
   return null;

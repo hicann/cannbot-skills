@@ -7,10 +7,11 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { CopyButton } from "./CopyButton"
+import { highlightKeyword, type TurnHighlight } from "@/lib/shared/highlight"
 
 interface LlmOutputViewProps {
   content: string | null
@@ -19,6 +20,7 @@ interface LlmOutputViewProps {
   outputTokens: number
   reasoningTokens?: number
   role?: string | null
+  highlight?: TurnHighlight | null
 }
 
 function formatTokenCount(n: number): string {
@@ -88,13 +90,45 @@ export function LlmOutputView({
   outputTokens,
   reasoningTokens,
   role,
+  highlight,
 }: LlmOutputViewProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false)
+  const [prevKw, setPrevKw] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  const sections = parseContentSections(content, contentJson)
+
+  // Trace-search jump: when the highlight keyword changes, auto-expand so the
+  // highlighted match is visible. Uses the render-phase prop-change pattern
+  // (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+  // instead of setState-in-effect.
+  const currentKw = highlight?.keyword ?? null
+  if (currentKw !== prevKw) {
+    setPrevKw(currentKw)
+    if (currentKw && highlight) {
+      const isContentMatch = !highlight.matchField || highlight.matchField === "content" || highlight.matchField === "contentSummary"
+      if (isContentMatch) {
+        setIsExpanded(true)
+        const lower = currentKw.trim().toLowerCase()
+        if (sections.some(s => s.type === "thinking" && s.content.toLowerCase().includes(lower))) {
+          setIsThinkingExpanded(true)
+        }
+      }
+    }
+  }
+
+  // Scroll the first highlighted match into view once expanded.
+  useEffect(() => {
+    if (!highlight?.keyword || !isExpanded) return
+    const t = setTimeout(() => {
+      rootRef.current?.querySelector("mark")?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 60)
+    return () => clearTimeout(t)
+  }, [highlight, isExpanded])
 
   if (!content && !contentJson) return null
 
-  const sections = parseContentSections(content, contentJson)
   const summary = contentSummary ?? (content ? (content.length > 200 ? content.substring(0, 200) + "..." : content) : null)
 
   const HEADER_LABELS: Record<string, string> = {
@@ -106,7 +140,7 @@ export function LlmOutputView({
   const headerLabel = HEADER_LABELS[role ?? ""] ?? "Content"
 
   return (
-    <div className="border rounded-lg">
+    <div ref={rootRef} className="border rounded-lg">
       <span
         role="button"
         tabIndex={0}
@@ -157,7 +191,7 @@ export function LlmOutputView({
                   </span>
                   {isThinkingExpanded && (
                     <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words max-h-[400px] overflow-y-auto bg-purple-50/30 dark:bg-purple-500/5">
-                      {section.content}
+                      {highlightKeyword(section.content, highlight?.keyword)}
                     </div>
                   )}
                 </div>
@@ -174,7 +208,7 @@ export function LlmOutputView({
                   <CopyButton text={section.content} className="ml-auto size-4 text-muted-foreground hover:text-foreground" />
                 </div>
                 <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto">
-                  {section.content}
+                  {highlightKeyword(section.content, highlight?.keyword)}
                 </div>
               </div>
             )
