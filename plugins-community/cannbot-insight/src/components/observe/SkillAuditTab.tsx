@@ -7,7 +7,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { useSyncExternalStore } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,7 @@ interface Props {
  * 内部 key 用真名/回退名（与 SkillDetail 对账按钮传的 name 一致），路由按 kind=root 忽略 skillName。
  */
 const MAIN_AGENT_WORKFLOW_TARGET: SelEntry = { name: MAIN_AGENT_WORKFLOW_NAME, kind: "root" }
+const LLM_WORKFLOW_TARGET: SelEntry = { name: `${MAIN_AGENT_WORKFLOW_NAME}（LLM）`, kind: "llm-root" }
 
 export function SkillAuditTab({ taskId, framework, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, selected, onSelectedChange, onJumpToTurn }: Props) {
   const targets = useMemo(() => deriveAuditableTargets(skillEvents), [skillEvents])
@@ -65,7 +66,11 @@ export function SkillAuditTab({ taskId, framework, skillEvents, hasMainAgentWork
     () => {
       const skillEntries = targets.flatMap(t => t.kinds.map(k => ({ name: t.name, kind: k } as SelEntry)))
       // 主 agent 编排 目标置顶（独立于 skillEvents——主 agent 不 invoke skill）
-      return hasMainAgentWorkflow ? [{ ...MAIN_AGENT_WORKFLOW_TARGET, name: workflowName }, ...skillEntries] : skillEntries
+      // 确定性提取（root）+ LLM 提取（llm-root）并排，方便对比
+      const rootEntries = hasMainAgentWorkflow
+        ? [{ ...MAIN_AGENT_WORKFLOW_TARGET, name: workflowName }, LLM_WORKFLOW_TARGET]
+        : [LLM_WORKFLOW_TARGET]
+      return [...rootEntries, ...skillEntries]
     },
     [targets, hasMainAgentWorkflow, workflowName],
   )
@@ -134,7 +139,7 @@ function EntryRow({
           isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/40",
         )}
       >
-        <Badge variant={entry.kind === "skill" ? "blue" : entry.kind === "root" ? "yellow" : "purple"} className="text-[10px] px-1 py-0 h-4 shrink-0">
+        <Badge variant={entry.kind === "skill" ? "blue" : entry.kind === "root" || entry.kind === "llm-root" ? "yellow" : "purple"} className="text-[10px] px-1 py-0 h-4 shrink-0">
           {entry.kind}
         </Badge>
         <span className="truncate flex-1" title={entry.name}>{entry.name}</span>
@@ -162,22 +167,59 @@ function EntryPanel({
 }) {
   const key = skillAuditKey(taskId, entry.kind, entry.name)
   const st = useSyncExternalStore(subscribeSkillAudit, () => getSkillAuditSnapshot(key), getSkillAuditServerSnapshot)
+  // 运行中每秒刷新耗时计时器(Date.now 只在 effect 的 interval 回调里跑,不进 render——react-hooks/purity;
+  // 不在 effect body 直接 setState,经 tick() 间接调用)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!st.running) return
+    const tick = () => setElapsed(st.startedAt ? Math.floor((Date.now() - st.startedAt) / 1000) : 0)
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [st.running, st.startedAt])
+
+  // 进度条平滑插值：收到新目标后，ease-out 动画从当前值滑到目标值。
+  // ease-out（快开始慢结束）比线性更自然；目标值只增不减（防退回）。
+  // 用 st.percent 初始化 ref/state（修 remount 后退回 0% 的 bug）。
+  const animPctRef = useRef(st.percent)
+  const [animPct, setAnimPct] = useState(st.percent)
+  const animTargetRef = useRef(st.percent)
+  const animRef = useRef({ from: 0, to: 0, start: 0 })
+  useEffect(() => {
+    if (!st.running) return
+    // 目标只增不减（防退回）
+    const target = Math.max(st.percent, animTargetRef.current)
+    animTargetRef.current = target
+    animRef.current = { from: animPctRef.current, to: target, start: Date.now() }
+    const timer = setInterval(() => {
+      const elapsedMs = Date.now() - animRef.current.start
+      const duration = 10000 // 10s 到达目标
+      const t = Math.min(elapsedMs / duration, 1)
+      // ease-out cubic：快开始慢结束
+      const eased = 1 - Math.pow(1 - t, 3)
+      const val = animRef.current.from + (animRef.current.to - animRef.current.from) * eased
+      animPctRef.current = val
+      setAnimPct(val)
+    }, 100)
+    return () => clearInterval(timer)
+  }, [st.percent, st.running])
 
   const start = () => startSkillAudit({ taskId, kind: entry.kind, name: entry.name, framework })
 
   if (st.running) {
-    const pct = Math.max(0, Math.min(100, st.percent))
+    const smoothPct = Math.max(0, Math.min(100, animPct))
+    const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground px-6">
         <div className="w-full max-w-md">
           <div className="flex items-center justify-between text-xs mb-1">
             <span className="animate-pulse">正在跑 skill-eval audit…</span>
-            <span className="tabular-nums font-medium text-foreground">{pct}%</span>
+            <span className="tabular-nums font-medium text-foreground">{Math.round(smoothPct)}% · {elapsedStr}</span>
           </div>
           <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
             <div
-              className="h-full rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${pct}%` }}
+              className="h-full rounded-full bg-primary"
+              style={{ width: `${smoothPct}%` }}
             />
           </div>
         </div>
@@ -211,8 +253,10 @@ function EntryPanel({
           {entry.kind === "skill"
             ? "不 re-run，对账真实执行 vs SKILL.md 声明（正文从 session 恢复）"
             : entry.kind === "root"
-              ? "不 re-run，--kind root 切顶层主 agent 作用域，审主 agent 编排 vs STATE.md 具体工作流计划（声明从 session 文件工具调用恢复）"
-              : "不 re-run，对账真实执行 vs agent .md 声明（.md 从本地 AGENTS_SCAN_ROOT 扫描）"}
+              ? "不 re-run，--kind root 切顶层主 agent 作用域，审主 agent 编排 vs workflow skill 编排规程（确定性提取）"
+              : entry.kind === "llm-root"
+                ? "不 re-run，--kind root + LLM 提取编排规程（claude CLI 读 session 前 few turns 总结），审主 agent 编排 vs LLM 提取的规程"
+                : "不 re-run，对账真实执行 vs agent .md 声明（.md 从本地 AGENTS_SCAN_ROOT 扫描）"}
         </div>
       </div>
       <Button size="sm" onClick={start}>对账</Button>

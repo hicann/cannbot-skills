@@ -77,7 +77,8 @@ interface SkillDetailProps {
   }
   onNavigateToTurn?: (turnIndex: number) => void
   /** 跳转到 Audit 板块的 Skill 子 tab 并预选该 {name, kind} 进行对账。按行 eventType+isSubagent 路由 kind。 */
-  onAuditSkill?: (skillName: string, kind: "skill" | "agent" | "root") => void
+  onAuditSkill?: (skillName: string, kind: "skill" | "agent" | "root" | "llm-root") => void
+  framework?: string
 }
 
 const EVENT_TYPE_BADGE: Record<string, "blue" | "green" | "orange" | "gray"> = {
@@ -100,9 +101,72 @@ function formatTokens(n: number): string {
   return `${n}`
 }
 
-export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, mainAgentWorkflowSource, mainAgentWorkflowStats, onNavigateToTurn, onAuditSkill }: SkillDetailProps) {
+/** 模块级缓存：taskId → LLM 提取状态。切 tab 不 re-fetch，切 session 才重取。 */
+const llmExtractCache = new Map<string, { loading: boolean; content: string | null; error: string | null }>();
+
+export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, mainAgentWorkflowSource, mainAgentWorkflowStats, onNavigateToTurn, onAuditSkill, framework }: SkillDetailProps) {
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set())
   const sc = useSkillContent(taskId)
+  // agent .md 全文用独立实例（磁盘扫描），与 skill SKILL.md（session 注入）分桶，避免同名覆盖。
+  const scAgent = useSkillContent(taskId)
+  // LLM 提取编排规程：不自动触发，点「提取」按钮才跑（服务端非阻塞缓存 + 前端轮询）。
+  const cached = llmExtractCache.get(taskId)
+  const [llmLoading, setLlmLoading] = useState(cached ? cached.loading : false)
+  const [llmContent, setLlmContent] = useState<string | null>(cached ? cached.content : null)
+  const [llmError, setLlmError] = useState<string | null>(cached ? cached.error : null)
+
+  /** 点击「提取」按钮：启动 LLM 编排规程提取 + 轮询（不自动触发，只在用户点击时跑） */
+  function fetchLlmWorkflow() {
+    // 已完成缓存 → 直接展开，不重跑
+    const cached = llmExtractCache.get(taskId)
+    if (cached && !cached.loading) {
+      setLlmLoading(false)
+      setLlmContent(cached.content)
+      setLlmError(cached.error)
+      toggleExpanded("__llm_workflow__")
+      return
+    }
+    if (cached && cached.loading) return // 已在轮询中
+
+    const initState = { loading: true, content: null, error: null as string | null }
+    llmExtractCache.set(taskId, initState)
+    setLlmLoading(true)
+    setLlmContent(null)
+    setLlmError(null)
+    toggleExpanded("__llm_workflow__")
+
+    let timer: ReturnType<typeof setTimeout>
+    let active = true
+
+    const poll = async () => {
+      try {
+        const r = await fetch(
+          `/api/observe/session/llm-workflow-extract?taskId=${encodeURIComponent(taskId)}&framework=${encodeURIComponent(framework ?? "")}`
+        )
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        if (!active) return
+
+        const state = { loading: !!d.loading, content: d.content ?? null, error: d.error ?? null }
+        llmExtractCache.set(taskId, state)
+        setLlmLoading(state.loading)
+        setLlmContent(state.content)
+        setLlmError(state.error)
+
+        if (state.loading) timer = setTimeout(poll, 5000)
+      } catch (e) {
+        if (!active) return
+        const msg = e instanceof Error ? e.message : String(e)
+        const state = { loading: false, content: null, error: msg }
+        llmExtractCache.set(taskId, state)
+        setLlmLoading(false)
+        setLlmError(msg)
+      }
+    }
+    poll()
+
+    return () => { active = false; if (timer) clearTimeout(timer) }
+  }
   // 主 agent 编排 显示名：真名（扫盘）→ 回退合成名。对账按钮传此 name（与 SkillAuditTab target 一致）。
   // 全文 fetch 仍用 MAIN_AGENT_WORKFLOW_NAME sentinel（skill-content 路由按 sentinel 识别走 STATE.md 恢复）。
   const workflowName = mainAgentWorkflowName || MAIN_AGENT_WORKFLOW_NAME
@@ -243,7 +307,7 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                 <TableHead className="text-xs">Reason Tok</TableHead>
                   <TableHead className="text-xs">Cache Read Tok</TableHead>
                   <TableHead className="text-xs">Total Tok</TableHead>
-                  <TableHead className="text-xs w-20 text-right">全文</TableHead>
+                  <TableHead className="text-xs w-28 text-center">全文</TableHead>
                   <TableHead className="text-xs">对账</TableHead>
                 </TableRow>
             </TableHeader>
@@ -359,9 +423,126 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                   </TableRow>
                 ),
               ]}
+              {onAuditSkill && [
+                <TableRow key="__llm_workflow__" className="bg-amber-500/5">
+                  <TableCell className="text-xs select-none w-6">◆</TableCell>
+                  <TableCell className="text-xs font-medium truncate max-w-[20ch]" title={`${workflowName}（LLM）`}>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="yellow" className="h-4 px-1 text-[10px] shrink-0">llm</Badge>
+                      <span className="truncate">{workflowName}（LLM）</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs">N/A</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell><span className="text-muted-foreground">—</span></TableCell>
+                  <TableCell><span className="text-muted-foreground">—</span></TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">N/A</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell className="text-xs tabular-nums text-muted-foreground">—</TableCell>
+                  <TableCell className="text-right w-20">
+                    {llmLoading ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300 animate-pulse">
+                        提取中…
+                      </span>
+                    ) : llmContent ? (
+                      <span
+                        role="button"
+                        title="查看 LLM 提取的编排规程全文"
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
+                          expandedSkills.has("__llm_workflow__")
+                            ? "border-amber-500 bg-amber-500/25 text-amber-700 dark:text-amber-200"
+                            : "border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 hover:border-amber-500"
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleExpanded("__llm_workflow__")
+                        }}
+                      >
+                        <BookOpenIcon className="size-3" />
+                        {expandedSkills.has("__llm_workflow__") ? "收起" : "全文"}
+                      </span>
+                    ) : (
+                      <span
+                        role="button"
+                        title={llmError ? (llmError + "（点击重试）") : "点击用 LLM（claude CLI）提取编排规程"}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 hover:border-amber-500 cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); fetchLlmWorkflow() }}
+                      >
+                        {llmError ? "重试" : "提取"}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs h-6 px-2"
+                      title="跳转到 Audit · Skill 子 tab 用 --kind root + LLM 提取编排规程（claude CLI 读 session 总结），与确定性提取对比"
+                      onClick={(e) => { e.stopPropagation(); onAuditSkill(`${workflowName}（LLM）`, "llm-root") }}
+                    >
+                      llm-root ↗
+                    </Button>
+                  </TableCell>
+                </TableRow>,
+                !llmLoading && llmContent && expandedSkills.has("__llm_workflow__") && (
+                  <TableRow key="__llm_workflow__-content">
+                    <TableCell colSpan={14} className="p-3 bg-amber-500/5 border-x border-amber-400/30">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                            <BookOpenIcon className="size-3.5" />
+                            {workflowName}（LLM）· 编排规程
+                            <span className="text-muted-foreground">
+                              （来源：claude CLI LLM 提取，{llmContent.length} 字符）
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-3">
+                            <span
+                              role="button"
+                              className="text-xs font-medium text-blue-500 cursor-pointer hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (llmContent) {
+                                  const blob = new Blob([llmContent], { type: "text/plain;charset=utf-8" })
+                                  const url = URL.createObjectURL(blob)
+                                  const a = window.document.createElement("a")
+                                  a.href = url
+                                  a.download = `${workflowName.replace(/[^a-zA-Z0-9_-]/g, "_")}.LLM.md`
+                                  window.document.body.appendChild(a)
+                                  a.click()
+                                  window.document.body.removeChild(a)
+                                  URL.revokeObjectURL(url)
+                                }
+                              }}
+                            >
+                              Download
+                            </span>
+                            <span
+                              role="button"
+                              title="收起"
+                              className="text-muted-foreground cursor-pointer hover:text-foreground text-sm leading-none px-1"
+                              onClick={(e) => { e.stopPropagation(); toggleExpanded("__llm_workflow__") }}
+                            >
+                              ×
+                            </span>
+                          </span>
+                        </div>
+                        <pre className="max-h-[28rem] overflow-auto rounded border bg-background p-2 text-xs font-mono whitespace-pre-wrap break-words">
+                          {llmContent}
+                        </pre>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ),
+              ]}
               {skillAggregates.map(sa => {
                 const isExpanded = expandedSkills.has(sa.skillName)
                 const isAgentOnly = isDispatchOnlyAgent(sa.events)
+                const kinds = auditKindsForEvents(sa.events)
+                const hasAgentMd = kinds.includes("agent")
                 const rows = [
                   <TableRow key={sa.skillName} className="cursor-pointer hover:bg-accent/30" onClick={() => toggleExpanded(sa.skillName)}>
                     <TableCell className="text-xs select-none w-6">
@@ -405,78 +586,96 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                         return null
                       })()}
                     </TableCell>
-                    <TableCell className="text-right w-20">
-                      <span
-                        role="button"
-                        title={isAgentOnly ? "查看 agent .md 全文（从磁盘扫描）" : "查看 SKILL.md 全文"}
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
-                          sc.content.has(sa.skillName) || sc.error.has(sa.skillName)
-                            ? isAgentOnly
-                              ? "border-purple-500 bg-purple-500/25 text-purple-700 dark:text-purple-200"
-                              : "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
-                            : isAgentOnly
-                              ? "border-purple-500/50 bg-purple-500/15 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 hover:border-purple-500"
-                              : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (sc.content.has(sa.skillName) || sc.error.has(sa.skillName)) {
-                            sc.clear(sa.skillName)
-                          } else if (!sc.loading.has(sa.skillName)) {
-                            if (isAgentOnly) sc.fetchAgent(sa.skillName)
-                            else sc.fetchOne(sa.skillName)
-                          }
-                        }}
-                      >
-                        <BookOpenIcon className="size-3" />
-                        {sc.loading.has(sa.skillName) ? "加载中…" : (sc.content.has(sa.skillName) || sc.error.has(sa.skillName)) ? "收起" : "全文"}
-                      </span>
+                    <TableCell className="text-right w-28">
+                      {/* skill 全文（session 里 Skill invoke 的 SKILL.md body）；isAgentOnly 无 skill kind 不显 */}
+                      {!isAgentOnly && (() => {
+                        const loaded = sc.content.has(sa.skillName) || sc.error.has(sa.skillName)
+                        return (
+                          <span
+                            role="button"
+                            title="查看 SKILL.md 全文（session 注入内容）"
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
+                              loaded
+                                ? "border-teal-500 bg-teal-500/25 text-teal-700 dark:text-teal-200"
+                                : "border-teal-500/50 bg-teal-500/15 text-teal-600 dark:text-teal-300 hover:bg-teal-500/25 hover:border-teal-500"
+                            } ${sc.loading.has(sa.skillName) ? "animate-pulse" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (loaded) sc.clear(sa.skillName)
+                              else if (!sc.loading.has(sa.skillName)) sc.fetchOne(sa.skillName)
+                            }}
+                          >
+                            <BookOpenIcon className="size-3" />
+                            {sc.loading.has(sa.skillName) ? "加载中…" : loaded ? "收起" : "全文"}
+                          </span>
+                        )
+                      })()}
+                      {/* agent .md 全文（磁盘扫描）；有 agent kind 才显（isAgentOnly 或 dual） */}
+                      {hasAgentMd && (() => {
+                        const loaded = scAgent.content.has(sa.skillName) || scAgent.error.has(sa.skillName)
+                        return (
+                          <span
+                            role="button"
+                            title="查看 agent .md 全文（从磁盘扫描）"
+                            className={`ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
+                              loaded
+                                ? "border-purple-500 bg-purple-500/25 text-purple-700 dark:text-purple-200"
+                                : "border-purple-500/50 bg-purple-500/15 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 hover:border-purple-500"
+                            } ${scAgent.loading.has(sa.skillName) ? "animate-pulse" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (loaded) scAgent.clear(sa.skillName)
+                              else if (!scAgent.loading.has(sa.skillName)) scAgent.fetchAgent(sa.skillName, framework)
+                            }}
+                          >
+                            <BookOpenIcon className="size-3" />
+                            {scAgent.loading.has(sa.skillName) ? "加载中…" : loaded ? "收起" : "全文"}
+                          </span>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell className="text-xs">
-                      {onAuditSkill && (() => {
-                        const kinds = auditKindsForEvents(sa.events)
-                        return kinds.map(k => (
-                          <Button
-                            key={k}
-                            size="sm"
-                            variant="ghost"
-                            className="text-xs h-6 px-2"
-                            title={`跳转到 Audit · Skill 子 tab 对账此 ${k}（${k === "agent" ? ".md 从本地扫描" : "正文从 session 恢复"}）`}
-                            onClick={(e) => { e.stopPropagation(); onAuditSkill(sa.skillName, k) }}
-                          >
-                            {k} ↗
-                          </Button>
-                        ))
-                      })()}
+                      {onAuditSkill && kinds.map(k => (
+                        <Button
+                          key={k}
+                          size="sm"
+                          variant="ghost"
+                          className="text-xs h-6 px-2"
+                          title={`跳转到 Audit · Skill 子 tab 对账此 ${k}（${k === "agent" ? ".md 从本地扫描" : "正文从 session 恢复"}）`}
+                          onClick={(e) => { e.stopPropagation(); onAuditSkill(sa.skillName, k) }}
+                        >
+                          {k} ↗
+                        </Button>
+                      ))}
                     </TableCell>
                   </TableRow>,
                 ]
-                const contentData = sc.content.get(sa.skillName)
-                const contentError = sc.error.get(sa.skillName)
-                const contentLabel = isAgentOnly ? "agent.md" : "SKILL.md"
-                if (contentData || contentError) {
+                // skill 全文内容行（teal, session 注入的 SKILL.md body）；isAgentOnly 无 skill kind 跳过
+                const skillContentData = !isAgentOnly ? sc.content.get(sa.skillName) : undefined
+                const skillContentError = !isAgentOnly ? sc.error.get(sa.skillName) : undefined
+                if (skillContentData || skillContentError) {
                   rows.push(
                     <TableRow key={`${sa.skillName}-content`}>
-                      <TableCell colSpan={14} className={`p-3 border-x ${isAgentOnly ? "bg-purple-500/5 border-purple-400/30" : "bg-teal-500/5 border-teal-400/30"}`}>
+                      <TableCell colSpan={14} className="p-3 border-x bg-teal-500/5 border-teal-400/30">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className={`inline-flex items-center gap-1 text-xs font-medium ${isAgentOnly ? "text-purple-600 dark:text-purple-400" : "text-teal-600 dark:text-teal-400"}`}>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 dark:text-teal-400">
                               <BookOpenIcon className="size-3.5" />
-                              {sa.skillName} · {contentLabel}
-                              {contentData?.source && (
+                              {sa.skillName} · SKILL.md
+                              {skillContentData?.source && (
                                 <span className="text-muted-foreground">
-                                  （来源：{isAgentOnly ? `磁盘扫描（${contentData.source}）` : contentData.source === "skill-tool" ? "Skill 工具注入" : "Read 读取"}，{contentData.length} 字符
-                                  {contentData.source === "read"
-                                    ? contentData.fullRead
+                                  （来源：{skillContentData.source === "skill-tool" ? "Skill 工具注入" : "Read 读取"}，{skillContentData.length} 字符
+                                  {skillContentData.source === "read"
+                                    ? skillContentData.fullRead
                                       ? "，判定全文·无 offset/limit"
                                       : "，部分读取·有 offset/limit 或截断"
                                     : "，框架注入全文"}
-                                  {contentData.maxLine != null && `，到第 ${contentData.maxLine} 行`}）
+                                  {skillContentData.maxLine != null && `，到第 ${skillContentData.maxLine} 行`}）
                                 </span>
                               )}
                             </span>
                             <span className="flex items-center gap-3">
-                              {contentData?.content && (
+                              {skillContentData?.content && (
                                 <span
                                   role="button"
                                   className="text-xs font-medium text-blue-500 cursor-pointer hover:underline"
@@ -498,14 +697,80 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
                           <div className="text-[11px] text-muted-foreground leading-snug">
                             按时间顺序取本会话内该 skill 的注入内容或 SKILL.md 读取结果；若多次加载，取最长版本。仅含已采集内容，非运行时实时文件。
                           </div>
-                          {contentError ? (
-                            <div className="text-xs text-destructive">Error: {contentError}</div>
-                          ) : contentData?.content ? (
+                          {skillContentError ? (
+                            <div className="text-xs text-destructive">Error: {skillContentError}</div>
+                          ) : skillContentData?.content ? (
                             <pre className="max-h-[28rem] overflow-auto rounded border bg-background p-2 text-xs font-mono whitespace-pre-wrap break-words">
-                              {contentData.content}
+                              {skillContentData.content}
                             </pre>
                           ) : (
                             <div className="text-xs text-muted-foreground">未采集到该 skill 的 SKILL.md 内容（本会话可能未通过 Skill 工具加载或读取 SKILL.md）。</div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                }
+                // agent .md 全文内容行（purple, 磁盘扫描）；有 agent kind 才显（isAgentOnly 或 dual）
+                const agentContentData = hasAgentMd ? scAgent.content.get(sa.skillName) : undefined
+                const agentContentError = hasAgentMd ? scAgent.error.get(sa.skillName) : undefined
+                if (agentContentData || agentContentError) {
+                  rows.push(
+                    <TableRow key={`${sa.skillName}-agent-content`}>
+                      <TableCell colSpan={14} className="p-3 border-x bg-purple-500/5 border-purple-400/30">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-400">
+                              <BookOpenIcon className="size-3.5" />
+                              {sa.skillName} · agent.md
+                              {agentContentData?.source && (
+                                <span className="text-muted-foreground">
+                                  （来源：磁盘扫描（{agentContentData.source}），{agentContentData.length} 字符）
+                                </span>
+                              )}
+                            </span>
+                            <span className="flex items-center gap-3">
+                              {agentContentData?.content && (
+                                <span
+                                  role="button"
+                                  className="text-xs font-medium text-blue-500 cursor-pointer hover:underline"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const blob = new Blob([agentContentData.content!], { type: "text/plain;charset=utf-8" })
+                                    const url = URL.createObjectURL(blob)
+                                    const a = window.document.createElement("a")
+                                    a.href = url
+                                    a.download = `${sa.skillName.replace(/[^a-zA-Z0-9_-]/g, "_")}.agent.md`
+                                    window.document.body.appendChild(a)
+                                    a.click()
+                                    window.document.body.removeChild(a)
+                                    URL.revokeObjectURL(url)
+                                  }}
+                                >
+                                  Download
+                                </span>
+                              )}
+                              <span
+                                role="button"
+                                title="收起"
+                                className="text-muted-foreground cursor-pointer hover:text-foreground text-sm leading-none px-1"
+                                onClick={(e) => { e.stopPropagation(); scAgent.clear(sa.skillName) }}
+                              >
+                                ×
+                              </span>
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground leading-snug">
+                            从本地 AGENTS_SCAN_ROOT 扫描的 agents/ 目录读 .md 原文；session 不持久化 agent .md（dispatch 只带任务 prompt），故取磁盘当前文件。
+                          </div>
+                          {agentContentError ? (
+                            <div className="text-xs text-destructive">Error: {agentContentError}</div>
+                          ) : agentContentData?.content ? (
+                            <pre className="max-h-[28rem] overflow-auto rounded border bg-background p-2 text-xs font-mono whitespace-pre-wrap break-words">
+                              {agentContentData.content}
+                            </pre>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">未扫到该 agent 的 .md（扫描根下 agents/ 目录无此文件）。</div>
                           )}
                         </div>
                       </TableCell>

@@ -243,6 +243,10 @@ fi
 
 echo "[start] Launching CANNBot-Insight on port $PORT..."
 
+# Build the embedded export-view bundle (self-contained interactive HTML export)
+echo "[setup] Building export-view bundle..."
+npm run build:export-view >/dev/null 2>&1 || echo "  [warn] export-view build failed — HTML export disabled until npm run build:export-view succeeds"
+
 if [ "$CLI" = true ]; then
   SERVER_URL="http://localhost:$PORT"
 
@@ -275,14 +279,18 @@ else
       # WSL: use Windows cmd.exe to open browser
       if grep -qi microsoft /proc/version 2>/dev/null && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
         /mnt/c/Windows/System32/cmd.exe /c start "http://localhost:$PORT" 2>/dev/null || true
-      elif command -v xdg-open > /dev/null 2>&1; then
+      # xdg-open / sensible-browser 需图形会话;无 DISPLAY 的远程/无头 VM 会静默失败,故加守卫跳过
+      elif [ -n "$DISPLAY" ] && command -v xdg-open > /dev/null 2>&1; then
         xdg-open "http://localhost:$PORT" 2>/dev/null || true
-      elif command -v open > /dev/null 2>&1; then
+      elif [ "$(uname)" = "Darwin" ] && command -v open > /dev/null 2>&1; then
         open "http://localhost:$PORT" 2>/dev/null || true
-      elif command -v sensible-browser > /dev/null 2>&1; then
+      elif [ -n "$DISPLAY" ] && command -v sensible-browser > /dev/null 2>&1; then
         sensible-browser "http://localhost:$PORT" 2>/dev/null || true
       else
-        echo "[start] Could not detect browser command. Open manually: http://localhost:$PORT"
+        # 无图形会话(远程/无头 VM):服务器开不了你本机浏览器,端口转发后本地访问
+        echo "[start] 无图形会话(远程/无头 VM)——服务器无法启动你本机浏览器。"
+        echo "[start] 若已端口转发(如 ssh -L $PORT:localhost:$PORT)或走 VS Code Remote,在本地浏览器打开:"
+        echo "[start]   http://localhost:$PORT"
       fi
       break
     fi

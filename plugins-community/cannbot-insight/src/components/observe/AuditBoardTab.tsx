@@ -31,8 +31,8 @@ interface Props {
   sub: SubTab
   onSubChange: (s: SubTab) => void
   /** Skill 子 tab 当前选中（受控 {name, kind}，由 page 持有），转发给 SkillAuditTab。 */
-  skillSelected: { name: string; kind: "skill" | "agent" | "root" } | null
-  onSkillSelectedChange: (s: { name: string; kind: "skill" | "agent" | "root" } | null) => void
+  skillSelected: { name: string; kind: "skill" | "agent" | "root" | "llm-root" } | null
+  onSkillSelectedChange: (s: { name: string; kind: "skill" | "agent" | "root" | "llm-root" } | null) => void
 }
 
 export function AuditBoardTab({ taskId, framework, skillEvents, hasMainAgentWorkflow, mainAgentWorkflowName, onJumpToTurn, sub, onSubChange, skillSelected, onSkillSelectedChange }: Props) {

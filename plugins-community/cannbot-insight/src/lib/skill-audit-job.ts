@@ -16,7 +16,7 @@
 
 import type { AuditReport, SkillAuditStoredResult } from "@/lib/skill-eval-audit-types"
 
-export type AuditKind = "skill" | "agent" | "root"
+export type AuditKind = "skill" | "agent" | "root" | "llm-root"
 
 /**
  * store 侧的 result：AuditReport + 可选 _html（"在新页打开原始 HTML"逃生口）。
@@ -32,9 +32,11 @@ export interface SkillAuditJobState {
   progress: string | null
   /** 0-100，按 skill-eval 的批次/完成解析的粗略百分比。 */
   percent: number
+  /** 对账开始时间戳（ms），用于前端计算耗时。 */
+  startedAt: number | null
 }
 
-const EMPTY_STATE: SkillAuditJobState = { running: false, error: null, result: null, progress: null, percent: 0 }
+const EMPTY_STATE: SkillAuditJobState = { running: false, error: null, result: null, progress: null, percent: 0, startedAt: null }
 
 export function skillAuditKey(taskId: string, kind: AuditKind, name: string): string {
   return `${kind}:${taskId}:${name}`
@@ -118,9 +120,9 @@ export function startSkillAudit(opts: {
   const { taskId, kind, name, framework } = opts
   const key = skillAuditKey(taskId, kind, name)
   if (states.get(key)?.running) return // 去重：已在跑则不重发（重跑 finished 时 running=false 可重启）
-  update(key, { running: true, error: null, result: null, progress: null, percent: 0 })
+  update(key, { running: true, error: null, result: null, progress: null, percent: 0, startedAt: Date.now() })
   void runSkillAudit(taskId, kind, name, framework).catch((e: unknown) => {
-    update(key, { running: false, error: e instanceof Error ? e.message : String(e), progress: null })
+    update(key, { running: false, error: e instanceof Error ? e.message : String(e), progress: null, startedAt: null })
   })
 }
 
@@ -141,7 +143,7 @@ async function runSkillAudit(
   const key = skillAuditKey(taskId, kind, name)
   // skill / root 都走 audit-skilleval（root 的声明同 skill——从 session 恢复 SKILL.md，
   // 只是 --kind root 切主 agent 作用域）；agent 走 audit-agenteval。skill 路由按 body.kind 选 --kind。
-  const useSkillRoute = kind === "skill" || kind === "root"
+  const useSkillRoute = kind === "skill" || kind === "root" || kind === "llm-root"
   try {
     const res = await fetch(useSkillRoute ? "/api/ai/audit-skilleval" : "/api/ai/audit-agenteval", {
       method: "POST",
@@ -169,13 +171,11 @@ async function runSkillAudit(
       if (evt.stage === "progress") {
         update(key, { running: true, progress: evt.msg ?? null, percent: evt.percent ?? 0 })
       } else if (evt.stage === "result") {
-        // evt.report 是 AuditReport（runner 在 result 事件必带）；?? {} 仅为类型兜底，
-        // 实际无 report 时 runner 走 error 分支。as 收声到 SkillAuditResult。
         const r = { ...(evt.report ?? {}), _html: evt._html } as SkillAuditResult
         persistToStorage(taskId, kind, name, r)
-        update(key, { running: false, result: r, progress: null, percent: 100 })
+        update(key, { running: false, result: r, progress: null, percent: 100, startedAt: null })
       } else if (evt.stage === "error") {
-        update(key, { running: false, error: evt.msg ?? "对账失败", progress: null })
+        update(key, { running: false, error: evt.msg ?? "对账失败", progress: null, startedAt: null })
       }
     }
     while (true) {
@@ -202,10 +202,10 @@ async function runSkillAudit(
     }
     // 流结束若仍是 running（未收 result/error 事件）→ 视为异常结束
     if (states.get(key)?.running) {
-      update(key, { running: false, error: "对账流结束但未收到结果", progress: null })
+      update(key, { running: false, error: "对账流结束但未收到结果", progress: null, startedAt: null })
     }
   } catch (e: unknown) {
-    update(key, { running: false, error: e instanceof Error ? e.message : String(e), progress: null })
+    update(key, { running: false, error: e instanceof Error ? e.message : String(e), progress: null, startedAt: null })
   }
 }
 

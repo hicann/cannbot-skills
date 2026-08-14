@@ -20,6 +20,9 @@
 # production
 /build
 
+# export-view bundle (构建产物，由 npm run build:export-view 生成，start.sh 自动构建)
+/public/export-view.js
+
 # misc
 .DS_Store
 *.pem

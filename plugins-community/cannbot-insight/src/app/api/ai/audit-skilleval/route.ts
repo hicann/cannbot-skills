@@ -18,6 +18,7 @@ import {
   buildStructuredRecords,
   buildTranscriptArgs,
 } from "@/lib/skill-eval-audit"
+import { llmExtractWorkflowDeclaration } from "@/lib/llm-workflow-extract"
 import { makeStreamingAuditResponse } from "@/lib/skill-eval-runner"
 
 /**
@@ -31,15 +32,18 @@ import { makeStreamingAuditResponse } from "@/lib/skill-eval-runner"
  * 输出读文件不读 stdout（--format json 的 stdout 被 rich 折行 + 尾行污染）。
  */
 export async function POST(req: Request) {
-  const { taskId, skillName, kind, framework } = await req.json()
+  const { taskId, skillName, kind, framework, extract } = await req.json()
   if (!taskId) {
     return NextResponse.json({ error: "Missing taskId" }, { status: 400 })
   }
   // kind: "skill"(默认)| "root"(审顶层主 agent 编排 vs workflow skill 编排规程)。
+  //        "llm-root" = root + 用 LLM（claude CLI）从 session 行为提取编排规程。
   // root 的声明是 workflow skill 的编排规程（SKILL.md body / task-prompts.md），
   // 从主 agent Skill invoke 定位 skillName → recoverWorkflowDeclaration 恢复。
   // 按 skill-eval 设计意图（slice.py："root 声明常是 workflow 级 SKILL.md"）。
-  const auditKind: "skill" | "root" = kind === "root" ? "root" : "skill"
+  // extract: "llm" → 同 llm-root（兼容直接传 extract 参数）。
+  const auditKind: "skill" | "root" = kind === "root" || kind === "llm-root" ? "root" : "skill"
+  const useLlmExtract = kind === "llm-root" || extract === "llm"
   // skill 路需 skillName（恢复该 skill 正文）；root 路不用 skillName（声明从 workflow skill 取）。
   if (auditKind !== "root" && !skillName) {
     return NextResponse.json({ error: "Missing skillName" }, { status: 400 })
@@ -57,14 +61,18 @@ export async function POST(req: Request) {
 
   const decl =
     auditKind === "root"
-      ? await recoverWorkflowDeclaration(session.id, prisma)
+      ? useLlmExtract
+        ? await llmExtractWorkflowDeclaration(session.id, prisma)
+        : await recoverWorkflowDeclaration(session.id, prisma)
       : null
   const body =
     decl?.content ?? (auditKind === "root" ? null : await recoverSkillBody(session.id, skillName, prisma))
   if (!body) {
     return NextResponse.json(
       auditKind === "root"
-        ? { error: "此 session 无可对账的 workflow 编排规程（无主 agent Skill invoke / 无 skill resources / 无 SKILL.md body）" }
+        ? { error: useLlmExtract
+          ? "LLM 提取编排规程失败（claude CLI 超时/无输出/无 dispatch 前 turns）"
+          : "此 session 无可对账的 workflow 编排规程（无主 agent Skill invoke / 无 skill resources / 无 SKILL.md body）" }
         : { error: `在此 session 恢复不到 skill "${skillName}" 的正文（无 invoke 事件 / resultJson）` },
       { status: 404 },
     )
@@ -72,7 +80,9 @@ export async function POST(req: Request) {
 
   const skillTmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-eval-audit-"))
   try {
-    const safeName = String(skillName).replace(/[^a-zA-Z0-9._-]/g, "_")
+    const safeName = auditKind === "root"
+      ? (useLlmExtract ? "llm-workflow" : "main-agent-workflow")
+      : String(skillName).replace(/[^a-zA-Z0-9._-]/g, "_")
     const skillPath = path.join(skillTmp, safeName)
     fs.mkdirSync(skillPath, { recursive: true })
     // 恢复的正文无 YAML frontmatter，而 skill-eval 的 parse_skill_md 要 `---\nname:` 才能

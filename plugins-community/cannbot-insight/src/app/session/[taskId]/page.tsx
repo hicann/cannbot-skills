@@ -13,7 +13,7 @@ import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeftIcon, LayoutDashboardIcon, MessageSquareIcon, SearchIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, WifiIcon, ShieldCheckIcon, GaugeIcon } from "lucide-react"
+import { ArrowLeftIcon, LayoutDashboardIcon, MessageSquareIcon, SearchIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, WifiIcon, ShieldCheckIcon, GaugeIcon, GlobeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { VERSION_DISPLAY } from "@/lib/version"
@@ -258,6 +258,177 @@ function formatTokenCount(n: number): string {
   return `${n}`
 }
 
+// ─── HTML 导出：客户端 DOM 快照（1:1 复刻已渲染的 insight 界面 + 展开交互） ───
+
+function captureStylesheets(): string {
+  const out: string[] = []
+  for (let i = 0; i < document.styleSheets.length; i++) {
+    const sheet = document.styleSheets[i]
+    try {
+      const rules = sheet.cssRules
+      if (!rules || rules.length === 0) continue
+      for (let j = 0; j < rules.length; j++) out.push(rules[j].cssText)
+    } catch { /* 跨源样式表跳过 */ }
+  }
+  return out.join("\n")
+}
+
+// 预取会话视图依赖的所有 /api/observe/* 端点，按 path 存入 {path: json} 供 fetch 拦截器返回
+// 规范化全 URL 为匹配 key（path + 排序后 query），与 entry.tsx 的 urlKey 一致
+function urlKeyOf(u: string): string {
+  try {
+    const parsed = new URL(u, "http://e")
+    const params = [...parsed.searchParams.entries()].sort().map(([k, v]) => `${k}=${v}`).join("&")
+    return params ? `${parsed.pathname}?${params}` : parsed.pathname
+  } catch {
+    return u.split("?")[0]
+  }
+}
+
+// 收集：核心端点按 path 存 data；skill-content/agent-content 按 全 URL 存 param（per-参数区分）；
+// sessionStorage 的 skill 对账结果存 skillAudits（迁移到导出 HTML 供 hydrate）
+async function gatherExportData(
+  taskId: string,
+  framework: string | undefined,
+  skills: Array<{ skillName: string }>,
+  agents: Array<{ agentName: string | null; isSubagent: boolean }>,
+): Promise<{ data: Record<string, unknown>; param: Record<string, unknown>; skillAudits: Record<string, string> }> {
+  const fw = framework ? `&framework=${encodeURIComponent(framework)}` : ""
+  const data: Record<string, unknown> = {}
+  const param: Record<string, unknown> = {}
+
+  // 核心端点 → 按 path 存（一路径一份数据，容忍 query 差异）
+  const coreUrls = [
+    `/api/observe/session?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/session/turns?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/session/bridges?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/executions?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/session/main-agent-workflow?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/session/workflow?taskId=${encodeURIComponent(taskId)}`,
+    `/api/observe/stats?taskId=${encodeURIComponent(taskId)}`,
+    `/api/observe/session/file-reads?taskId=${encodeURIComponent(taskId)}`,
+    `/api/observe/session/skill-content-audit?taskId=${encodeURIComponent(taskId)}${fw}`,
+    `/api/observe/session/llm-workflow-extract?taskId=${encodeURIComponent(taskId)}`,
+  ]
+  // skill-content（每个 skill 一份，"全文"按钮按需取，预取内嵌）+ agent-content（每个 dispatched 子 agent 一份）
+  const paramUrls = [
+    ...skills.map(s => `/api/observe/session/skill-content?taskId=${encodeURIComponent(taskId)}&skillName=${encodeURIComponent(s.skillName)}`),
+    ...[...new Set(agents.filter(a => a.isSubagent && a.agentName).map(a => a.agentName!))].map(name =>
+      `/api/observe/session/agent-content?taskId=${encodeURIComponent(taskId)}&agentName=${encodeURIComponent(name)}&framework=${encodeURIComponent(framework ?? "")}`,
+    ),
+  ]
+
+  const fetchOne = async (u: string, store: Record<string, unknown>, keyFn: (x: string) => string) => {
+    try {
+      const res = await fetch(u)
+      if (!res.ok) return
+      store[keyFn(u)] = await res.json()
+    } catch { /* 忽略单个端点失败 */ }
+  }
+  await Promise.all([
+    ...coreUrls.map(u => fetchOne(u, data, x => x.split("?")[0])),
+    ...paramUrls.map(u => fetchOne(u, param, urlKeyOf)),
+  ])
+
+  // skill/agent 对账结果（sessionStorage 里 skill-audit-${taskId}-${kind}-${name}）
+  const skillAudits: Record<string, string> = {}
+  const prefix = `skill-audit-${taskId}-`
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i) ?? ""
+      if (k.startsWith(prefix)) {
+        const v = sessionStorage.getItem(k)
+        if (!v) continue
+        // 剥掉 _html（skill-eval 原始 HTML 报告，体积大且含 </script> 会破坏内联脚本；保留 findings/summary 等结构化结果）
+        try {
+          const parsed = JSON.parse(v)
+          if (parsed && typeof parsed === "object" && "_html" in parsed) delete (parsed as Record<string, unknown>)._html
+          skillAudits[k] = JSON.stringify(parsed)
+        } catch {
+          skillAudits[k] = v
+        }
+      }
+    }
+  } catch { /* sessionStorage 不可用 */ }
+
+  return { data, param, skillAudits }
+}
+
+// 组装嵌入式 SPA HTML：内联 CSS + 三块数据全局 + bundle + #root，离线打开即跑真实 React 应用
+function assembleEmbeddedHtml(
+  cssText: string,
+  bundleJs: string,
+  taskId: string,
+  framework: string | undefined,
+  payload: { data: Record<string, unknown>; param: Record<string, unknown>; skillAudits: Record<string, string> },
+): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  // 鲁棒转义：内联进 <script> 的内容里，任何 </script 序列（大小写不敏感、任意后缀）
+  // 都会提前截断 script 标签；把 </script 改成 <\/script（HTML 解析器见 <\ 不视为结束，JS/JSON 里 \/ 即 /）
+  const safeForScript = (s: string) => s.replace(/<\/script/gi, "<\\/script")
+  const dataJson = safeForScript(JSON.stringify(payload.data))
+  const paramJson = safeForScript(JSON.stringify(payload.param))
+  const skillAuditsJson = safeForScript(JSON.stringify(payload.skillAudits))
+  const bundleSafe = safeForScript(bundleJs)
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session ${esc(taskId)} — ${esc(BRAND_NAME)}</title>
+<style>
+html, body, #root { height: 100%; margin: 0; }
+${cssText}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+window.__EXPORT_TASK_ID = ${JSON.stringify(taskId)};
+window.__EXPORT_FRAMEWORK = ${JSON.stringify(framework ?? "")};
+window.__EXPORT_DATA = ${dataJson};
+window.__EXPORT_PARAM = ${paramJson};
+window.__EXPORT_SKILL_AUDITS = ${skillAuditsJson};
+</script>
+<script>${bundleSafe}</script>
+</body>
+</html>`
+}
+
+function downloadHtml(html: string, filename: string): void {
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" })
+  const opts = {
+    suggestedName: filename,
+    types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
+  }
+  const w = window as unknown as {
+    showSaveFilePicker?: (o: typeof opts) => Promise<{ createWritable: () => Promise<{ write: (d: Blob) => Promise<void>; close: () => Promise<void> }> }>
+  }
+  if (typeof w.showSaveFilePicker === "function") {
+    w.showSaveFilePicker(opts).then(async (handle) => {
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+    }).catch((e: unknown) => {
+      if (e instanceof DOMException && e.name === "AbortError") return
+      fallbackDownload(blob, filename)
+    })
+    return
+  }
+  fallbackDownload(blob, filename)
+}
+
+function fallbackDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 15000)
+}
+
 function formatCost(cost: number): string {
   if (cost === 0) return "$0.00"
   if (cost < 0.01) return `$${cost.toFixed(4)}`
@@ -311,7 +482,7 @@ export default function SessionDetailPage({
   // Audit 板块受控状态：子 tab（workflow|skill）+ Skill 子 tab 选中 {name, kind}。
   // Skills tab 的"对账 ↗"跳转时由 onAuditSkill 一并 set，跨 tab 一气呵成（无需 effect/外部 store）。
   const [auditSub, setAuditSub] = useState<"workflow" | "skill">("workflow")
-  const [auditSelected, setAuditSelected] = useState<{ name: string; kind: "skill" | "agent" | "root" } | null>(null)
+  const [auditSelected, setAuditSelected] = useState<{ name: string; kind: "skill" | "agent" | "root" | "llm-root" } | null>(null)
   // 主 agent 编排 对账目标是否可用：session 首条 user turn(isSubagent=0)内容达阈值
   // （≥500 字）即注入的 workflow skill 声明。主 agent 通常只 dispatch、不 invoke skill，
   // 其 workflow 声明只能从 turn0 取，故单独 gate（见 audit-skilleval kind=root）。
@@ -341,6 +512,7 @@ export default function SessionDetailPage({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [exportingMd, setExportingMd] = useState(false)
+  const [exportingHtml, setExportingHtml] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const refreshingRef = useRef(false)
   const lastMaxTimeUpdatedRef = useRef<number>(-1)
@@ -431,6 +603,33 @@ export default function SessionDetailPage({
       toast.error("Export Markdown failed", { description: "Network error" })
     } finally {
       setExportingMd(false)
+    }
+  }
+
+  async function handleExportHtml() {
+    if (exportingHtml) return
+    setExportingHtml(true)
+    try {
+      // 1. 捕获当前页 CSS（Tailwind v4 + shadcn 变量，覆盖会话视图用到的类）
+      const cssText = captureStylesheets()
+      // 2. 收集：核心数据 + skill 全文/agent 全文（param）+ skill 对账结果（sessionStorage 迁移）
+      const payload = await gatherExportData(taskId, framework, session?.skills ?? [], session?.agents ?? [])
+      // 3. 取预构建的单 JS bundle（/public/export-view.js）
+      const bundleRes = await fetch("/export-view.js")
+      if (!bundleRes.ok) throw new Error("export-view.js 未构建，请先运行 npm run build:export-view")
+      const bundleJs = await bundleRes.text()
+      // 4. 组装内联 HTML 并下载
+      const html = assembleEmbeddedHtml(cssText, bundleJs, taskId, framework, payload)
+      downloadHtml(html, `session_${taskId}.html`)
+      toast.success("HTML exported", {
+        description: `session_${taskId}.html — 嵌入式 SPA（离线可交互）`,
+        icon: <CheckCircleIcon className="size-4" />,
+        duration: 5000,
+      })
+    } catch (e) {
+      toast.error("Export HTML failed", { description: e instanceof Error ? e.message : "Unknown error" })
+    } finally {
+      setExportingHtml(false)
     }
   }
 
@@ -1248,6 +1447,7 @@ export default function SessionDetailPage({
           mainAgentWorkflowName={mainAgentWorkflowName}
           mainAgentWorkflowSource={mainAgentWorkflowSource}
           mainAgentWorkflowStats={mainAgentWorkflowStats}
+          framework={framework}
           onAuditSkill={(skillName, kind) => {
             setAuditSub("skill")
             setAuditSelected({ name: skillName, kind })
@@ -1499,6 +1699,17 @@ export default function SessionDetailPage({
             <FileTextIcon className="size-4" />
             {exportingMd ? "导出中..." : ""}
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-muted-foreground"
+            onClick={handleExportHtml}
+            disabled={exportingHtml}
+            title="Export HTML"
+          >
+            <GlobeIcon className="size-4" />
+            {exportingHtml ? "导出中..." : ""}
+          </Button>
         </div>
         <div className="flex items-center gap-4 text-sm mb-2">
           <div className="flex items-center gap-1.5">
@@ -1556,14 +1767,14 @@ export default function SessionDetailPage({
       </div>
 
       {activeTab !== "trace" && activeTab !== "performance" && (
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0" data-export-panel>
           {TAB_RENDERERS[activeTab]()}
         </div>
       )}
-      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "trace" ? "" : "hidden")}>
+      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "trace" ? "" : "hidden")} data-export-panel>
         {renderTrace()}
       </div>
-      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "performance" ? "" : "hidden")}>
+      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "performance" ? "" : "hidden")} data-export-panel>
         {renderPerformance()}
       </div>
     </div>

@@ -184,6 +184,40 @@ exit /b 1
 echo [start] Launching CANNBot-Insight on port %PORT%...
 
 :: ============================================================
+:: Launch smart-agent (Python) in background (optional, AI audit v2)
+:: Mirrors start.sh: auto-start if server.py exists and python present,
+:: skip silently otherwise. Shares the console so it dies with the window.
+:: ============================================================
+set "AGENT_PORT=21026"
+if not exist "%SCRIPT_DIR%smart-agent\server.py" goto :agent_done
+netstat -ano 2>nul | findstr ":%AGENT_PORT% " | findstr "LISTENING" >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [start] Port %AGENT_PORT% in use, assuming smart-agent already running
+    goto :agent_done
+)
+where python >nul 2>&1
+if !errorlevel! neq 0 (
+    echo [start] Python not found - smart-agent \(AI audit v2\) skipped
+    echo [start]   Install Python 3 from https://python.org to enable it
+    goto :agent_done
+)
+echo [start] Launching smart-agent ^(Python^) on port %AGENT_PORT%...
+pushd "%SCRIPT_DIR%smart-agent"
+set "CANNBOT_AGENT_PORT=%AGENT_PORT%"
+start /b python server.py
+popd
+set "CANNBOT_AGENT_URL=http://localhost:%AGENT_PORT%"
+for /l %%i in (1,1,10) do (
+    curl -s "http://localhost:%AGENT_PORT%/health" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [start] smart-agent ready at %CANNBOT_AGENT_URL%
+        goto :agent_done
+    )
+    timeout /t 1 /nobreak >nul
+)
+:agent_done
+
+:: ============================================================
 :: CLI mode: start backend + CLI
 :: ============================================================
 if not %CLI%==1 goto :web_mode
@@ -207,6 +241,9 @@ for /l %%i in (1,1,60) do (
 echo [start] Launching CLI: %CLI_CMD%
 call npx tsx src/cli/index.ts %CLI_CMD% --server %SERVER_URL%
 echo [start] CLI exited, backend stopped
+:: Stop backend + smart-agent by port (start /b children otherwise orphaned)
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":%PORT% " ^| findstr "LISTENING"') do taskkill /pid %%a /f >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":%AGENT_PORT% " ^| findstr "LISTENING"') do taskkill /pid %%a /f >nul 2>&1
 exit /b 0
 
 :: ============================================================
@@ -229,5 +266,8 @@ for /l %%i in (1,1,30) do (
 
 :wait_server
 echo [start] Server running at http://localhost:%PORT%
-echo [start] Press Ctrl+C to stop...
+echo [start] Close this window to stop the server and smart-agent.
+echo [start] Or press Ctrl+C, then answer the prompt.
+:agent_cleanup_loop
 pause >nul
+goto :agent_cleanup_loop

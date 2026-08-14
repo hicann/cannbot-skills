@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:export-view": "node scripts/build-export-view.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
