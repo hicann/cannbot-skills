@@ -10,10 +10,11 @@ Issues applicable to all operator types regardless of dominant pipeline. Check t
 
 | Issue | Detection metric | Threshold | Fix | Section |
 |-------|------------------|-----------|-----|---------|
-| Single-core / under-launched kernel | `kernel_info.ai_core_active` | `== 1` on a multi-core chip — `imbalance_ratio` does **not** catch this | Launch all cores (priority over every pipe-bound rule) | §1.1 |
+| Single-core / under-launched kernel | `kernel_info.ai_core_active` | `== 1` on a multi-core chip — `imbalance_ratio` does **not** catch this | Launch all cores (priority over every pipe-bound rule), then verify §2 | §1.1 |
 | Multi-Core Load Imbalance — block dim or remainder | `top_level_diagnosis.imbalance_ratio` | `> 1.3` (mild), `> 2.0` (severe) | Rebalance tiling across cores | §1.1, §1.2, §1.3 |
 | Multi-Core Load Imbalance — tail round | `imbalance_ratio` slightly > 1.0 AND `0 <` `tail_tiles` (`total_tiles % blockDim`) `< blockDim/2` | tail round leaves cores idle | Split tail tiles in N (e.g. `baseN/2`) | §1.4 |
-| Kernel Underutilization | `AIC_CUBE.mean` + overlaps + tiles/core | `AIC_CUBE.mean < 0.10` AND all overlaps `< 0.10` AND tiles/core `< 2` (imbalance optional) | Shrink blockDim, grow problem, or shrink baseM/baseN | §2 |
+| Kernel Underutilization (AIC) | `AIC_CUBE.mean` + overlaps + tiles/core | `AIC_CUBE.mean < 0.10` AND all overlaps `< 0.10` AND tiles/core `< 2` (imbalance optional) | Shrink blockDim, grow problem, or shrink baseM/baseN | §2 |
+| Kernel Underutilization (AIV) | `AIVx_SIMD.mean` AND `AIVx_SIMT.mean` + overlaps + tiles/core | both `< 0.05` AND all `AIV0_*_vs_AIV0_VEC` overlaps `< 0.10` AND tiles/core `< 2` (imbalance optional) | Shrink blockDim (AIV variant: `GetCoreNumAiv` + tiles/2), grow problem, or shrink tile size | §2 |
 
 ---
 
@@ -54,7 +55,7 @@ Here core 2 (index 2, value 0.7201) is the slowest — it finishes CUBE work muc
 
 **Problem**: Kernel launches fewer cores than the chip has available — idle cores are never used. The extreme case is a single-core baseline (`blockDim = 1`).
 
-**Detection**: `kernel_info.ai_core_active == 1` (or far below the chip's core count) on a many-core chip. This is the dominant bottleneck and **takes priority over every pipeline-bound rule** — launching all cores is the first fix, not double buffering or `ubFactor`.
+**Detection**: `kernel_info.ai_core_active == 1` (or far below the chip's core count) on a many-core chip. This is the dominant bottleneck and **takes priority over every pipeline-bound rule** — launching all cores is the first fix, not double buffering or `ubFactor`. After launching, verify via §2 that the shape can actually utilize the cores — a shape too small for the chosen `blockDim` will show up there, even for AIV kernels.
 
 > **`imbalance_ratio` does not catch this.** When only one core runs (or the simulator traces a single core), `imbalance_ratio` is `1.0` and `per_core` has one entry — the profile looks "balanced". Do not infer balance from `imbalance_ratio = 1.0` when `ai_core_active == 1`; read `ai_core_active` **first**. A single-core kernel also shows every `pipeline_overlap.*` near zero and no pipe saturated (`dominant_pipeline_util < 0.50`) — symptoms that mimic a double-buffer problem and will route an unwary agent into MTE2/MTE3 Bound. Resist that: parallelize across cores first, then re-profile and re-diagnose the *new* dominant pipe.
 
@@ -152,13 +153,15 @@ The kernel barely does any compute work. CUBE (and / or SIMD) is mostly idle, no
 
 | Metric | Path | Condition |
 |--------|------|-----------|
-| CUBE almost idle | `pipe_utilization.pipeline_util_summary.AIC_CUBE.mean` | `< 0.10` |
+| CUBE almost idle (AIC kernel) | `pipe_utilization.pipeline_util_summary.AIC_CUBE.mean` | `< 0.10` |
+| VECTOR/SIMT almost idle (AIV kernel) | `pipe_utilization.pipeline_util_summary.AIVx_SIMD.mean` AND `AIVx_SIMT.mean` | both `< 0.05` |
 | Imbalance (optional, not required) | `top_level_diagnosis.imbalance_ratio` | often `> 1.5`, but a balanced too-small shape also qualifies |
-| All overlaps near zero | every `pipeline_overlap.AIC_*_vs_AIC_CUBE` | `< 0.10` |
-| Scalar dispatch dominant but no spill | `scalar_instructions.AIC.load_store_ratio` | `< 0.30` AND `AIC_SCALAR.mean` is the dominant pipe |
+| All overlaps near zero (AIC) | every `pipeline_overlap.AIC_*_vs_AIC_CUBE` | `< 0.10` |
+| All overlaps near zero (AIV) | every `pipeline_overlap.AIV0_*_vs_AIV0_VEC` | `< 0.10` |
+| Scalar dispatch dominant but no spill (AIC) | `scalar_instructions.AIC.load_store_ratio` | `< 0.30` AND `AIC_SCALAR.mean` is the dominant pipe |
 | Tiles per core | `CeilDiv(m, baseM) * CeilDiv(n, baseN) / blockDim` (compute from kernel params) | `< 2` |
 
-This pattern superficially looks like SCALAR Bound (dominant pipe is `AIC_SCALAR`), but `load_store_ratio < 0.30` excludes register spill. [aic §6.3](performance-issues-aic.md) routes back here when CUBE util is under 0.40 for the same reason.
+This pattern superficially looks like SCALAR Bound (dominant pipe is `AIC_SCALAR` or `AIVx_SCALAR`), but `load_store_ratio < 0.30` excludes register spill. [aic §6.3](performance-issues-aic.md) routes back here when CUBE util is under 0.40 for the same reason. For AIV kernels, [aiv §1 VECTOR Bound](performance-issues-aiv.md) and [aiv §4 SCALAR Bound](performance-issues-aiv.md) will similarly false-trigger — route them back here.
 
 ### Fix Method
 
@@ -170,9 +173,14 @@ Pick one of these — they're alternatives, not a sequence:
 // ❌ Before — always use every available AIC, regardless of problem
 uint32_t blockDim = ascendcPlatform->GetCoreNumAic();
 
-// ✅ After — clamp to what the shape can actually fill (≥ 2 tiles per core)
+// ✅ After (AIC kernel) — clamp to what the shape can actually fill (≥ 2 tiles per core)
 uint32_t maxCores = ascendcPlatform->GetCoreNumAic();
 uint32_t tiles    = CeilDiv(m, BASE_M) * CeilDiv(n, BASE_N);
+uint32_t blockDim = std::min(maxCores, std::max<uint32_t>(1u, tiles / 2));
+
+// ✅ AIV (vector) kernel — same logic, query AIV core count
+uint32_t maxCores = ascendcPlatform->GetCoreNumAiv();  // 64 on Ascend 950
+uint32_t tiles    = CeilDiv(totalElements, TILE_ELEMS); // or CeilDiv(m, TILE_M) for 2-D
 uint32_t blockDim = std::min(maxCores, std::max<uint32_t>(1u, tiles / 2));
 ```
 
@@ -186,5 +194,6 @@ If both the shape and the core count are fixed external constraints (production 
 
 ### Pitfalls
 
-- **Do not "fix" CUBE Bound or SCALAR Bound first.** The §1.x CUBE and §6.x scalar rules will all "trigger" on this profile, but their fixes (double buffer, spill cleanup, inter-core staggering) cannot change anything — the kernel doesn't have enough iterations for them to act on.
+- **Do not "fix" CUBE Bound or SCALAR Bound first.** The §1.x CUBE and §6.x scalar rules will all "trigger" on this profile, but their fixes (double buffer, spill cleanup, inter-core staggering) cannot change anything — the kernel doesn't have enough iterations for them to act on. For AIV kernels, [aiv §1 VECTOR Bound](performance-issues-aiv.md) and [aiv §4/§5 SCALAR Bound](performance-issues-aiv.md) will similarly false-trigger — their fixes (VF RegAPI, ubFactor, SIMT rewrite) also cannot help when the kernel simply doesn't have enough work per core.
 - **Don't trust per-core data on this profile.** With `tiles_per_core < 1`, the `per_core` array reflects the single core that got the only tile, not a meaningful average across the launch.
+- **§2 "shrink" interacts with §6.1 fold for SIMD VF kernels.** When the kernel uses `__simd_vf__` + `asc_vf_call`, §2's detection criteria will fire for small shapes. Shrinking blockDim increases rows per core — this can make the §6.1 fold more effective (more inner-loop iterations) but reduces parallelism. Whether shrinking helps depends on this tradeoff; it is not automatically correct or wrong. Compare `kernel_total_clocks` across 2–3 blockDim values before committing to §2's shrink for SIMD VF kernels. See [aiv §6 General principle: multi-core + fold coupling](performance-issues-aiv.md).

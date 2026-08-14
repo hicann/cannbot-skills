@@ -17,7 +17,7 @@ AIC-side pipeline bound diagnosis and fix solutions. All metric paths refer to f
 | MTE2 Bound (AIC) — small DMA granularity | `bandwidth.AIC_MTE2_OUT_TO_L1.avg_transaction_gbps` | very low | Scale preload, UB batching | §2.1 |
 | MTE2 Bound (AIC) — quant Scale reloaded per K-chunk (fallback) | `kernel_instructions_executed` / `scalar_instructions.AIC.total_count` inflated vs `AIC_CUBE.mean` | MTE2 dominant AND Scale re-loaded inside K-loop | Coalesce Scale across full K (`scaleKL1 = K`) | §2.1 |
 | MTE2 Bound (AIC) — partial overlap, pingpong already on | `pipeline_overlap.AIC_MTE2_vs_AIC_CUBE` AND L1 pingpong present in code | overlap `0.30–0.60` | SWAT tile scheduling (M-window + N-zigzag) | §2.2 |
-| MTE2 Bound (AIC) — redundant A re-transfer (small A, huge N) | `AIC_MTE2` dominant AND `baseM/baseN` non-trivial AND A re-loaded per N-tile | structural; verify on msprof (not cannsim) | Keep A L1-resident (A full-load) | §2.3 |
+| MTE2 Bound (AIC) — redundant A re-transfer (small A, huge N) | `AIC_MTE2` dominant AND `baseM/baseN` non-trivial AND A re-loaded per N-tile | structural; verify on msprof (not npusim) | Keep A L1-resident (A full-load) | §2.3 |
 | MTE1 Bound — L0 not prefetched | `pipeline_overlap.AIC_MTE1_vs_AIC_CUBE` | `< 0.30` | Double buffer L0A / L0B | §3 |
 | FIXPIPE Bound — small N tile | `pipeline_overlap.AIC_FIXP_vs_AIC_CUBE` AND `baseN` small | `< 0.30` AND `baseN < 16` | Increase N-axis tile size | §4.1 |
 | FIXPIPE Bound — serial drain, L0C DB not feasible | `pipeline_overlap.AIC_FIXP_vs_AIC_CUBE` AND no L0C double-buffer | `< 0.30` AND single L0C buffer | UnitFlag (`mmadParams.unitFlag`) | §4.2 |
@@ -204,7 +204,7 @@ The change lives in the `BlockScheduler`, not the inner `BlockMmad`. The matmul 
 **Verification after the fix**:
 - `pipeline_overlap.AIC_MTE2_vs_AIC_CUBE` should rise (target ≥ 0.60).
 - `AIC_CUBE.mean` should rise.
-- On cannsim (single-core trace) the improvement is bounded — SWAT's larger payoff comes from inter-core L2 sharing which a single-core trace under-represents. Treat a small win on cannsim as direction-confirmed, not full impact (see [metrics-reference.md note on `ai_core_active`](performance-metrics-reference.md)).
+- On npusim (single-core trace) the improvement is bounded — SWAT's larger payoff comes from inter-core L2 sharing which a single-core trace under-represents. Treat a small win on npusim as direction-confirmed, not full impact (see [metrics-reference.md note on `ai_core_active`](performance-metrics-reference.md)).
 - The tile reorder can shift load onto other pipes. If `AIC_FIXP_vs_AIC_CUBE` falls below 0.30 after applying SWAT, route to §4.2.
 
 #### §2.3 Redundant operand re-transfer — A full-load
@@ -230,9 +230,9 @@ Keep A (and its scale, for quant) L1-resident across the N-loop; stream only B /
 
 📖 Best practice: [fullload_design](../../ascendc-performance-best-practices/reference/matmul/fullload_design.md) (co-located in `ops/`).
 
-### Profiling caveat — measure on real hardware, not cannsim
+### Profiling caveat — measure on real hardware, not npusim
 
-The A-full-load payoff only appears when `n` is large (needed both to balance all cores at small `m` and for A-reuse to matter). That regime is a huge MAC volume — **cannsim, being cycle-accurate, cannot simulate it in feasible time** (it does not finish). The published win for this optimization was measured with **msprof on real hardware**, and the simplified tutorial demo even regresses on cannsim. Treat A full-load as a structural recommendation; validate it with `msprof`, not a cannsim `summary.json` delta.
+The A-full-load payoff only appears when `n` is large (needed both to balance all cores at small `m` and for A-reuse to matter). That regime is a huge MAC volume — **npusim, being cycle-accurate, cannot simulate it in feasible time** (it does not finish). The published win for this optimization was measured with **msprof on real hardware**, and the simplified tutorial demo even regresses on npusim. Treat A full-load as a structural recommendation; validate it with `msprof`, not a npusim `summary.json` delta.
 
 ### When NOT to Apply
 

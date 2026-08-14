@@ -32,7 +32,7 @@ export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
 
 **解决方案**：
 ```bash
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
 ```
 
 ---
@@ -59,20 +59,20 @@ target_compile_options(ascendc_kernels_bbit PRIVATE
 ### 日志位置
 
 ```
-build/cannsim_*/cannsim.log
+build/npusim_*/npusim.log
 ```
 
 ### 常用分析命令
 
 ```bash
 # 查看完整日志
-cat cannsim_*/cannsim.log
+cat npusim_*/npusim.log
 
 # 查看错误信息
-grep -i "error" cannsim_*/cannsim.log
+grep -i "error" npusim_*/npusim.log
 
 # 查看警告信息
-grep -i "warning" cannsim_*/cannsim.log
+grep -i "warning" npusim_*/npusim.log
 ```
 
 ---

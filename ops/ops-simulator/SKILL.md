@@ -1,28 +1,30 @@
 ---
 name: ops-simulator
-description: NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。当需要在无 NPU 硬件环境下验证算子功能、分析性能瓶颈、定位精度问题时使用。也用于分析已有的 cannsim 性能报告（summary.json）并给出优化建议。
+description: NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。当需要在无 NPU 硬件环境下验证算子功能、分析性能瓶颈、定位精度问题时使用。也用于分析已有的 npusim 性能报告（summary.json）并给出优化建议。
 ---
 
 # NPU 仿真器使用指南
 
 ## 概述
 
-CANN Simulator 是一款面向算子开发场景的 SoC 级芯片仿真工具，通过 `cannsim` 命令行工具提供以下能力：
+CANN Simulator 是一款面向算子开发场景的 SoC 级芯片仿真工具，通过 `npusim` 命令行工具提供以下能力：
+
+> **Note**: Starting from CANN 9.2.0, the command-line tool has been renamed from `cannsim` to `npusim`. The old `cannsim` command still works but is deprecated. Output directories and log files are also renamed (`npusim_*` / `npusim.log` instead of `cannsim_*` / `cannsim.log`). This skill uses `npusim` in all examples.
 
 - **精度仿真**：输出 bit 级精度结果，协助算子精度验证
 - **性能仿真**：输出指令流水图，协助定位性能瓶颈
 
 
-### cannsim 主命令
+### npusim 主命令
 
-`cannsim` 是性能仿真分析的命令行入口，提供两个子命令：
+`npusim` 是性能仿真分析的命令行入口，提供两个子命令：
 
 | 子命令 | 功能 | 说明 |
 |--------|------|------|
-| `cannsim record` | 执行仿真 | 在仿真环境中运行用户程序，记录仿真数据 |
-| `cannsim report` | 生成报告 | 基于仿真结果生成性能分析报告和流水线图 |
+| `npusim record` | 执行仿真 | 在仿真环境中运行用户程序，记录仿真数据 |
+| `npusim report` | 生成报告 | 基于仿真结果生成性能分析报告和流水线图 |
 
-**使用方式**：`cannsim <子命令> [选项]`
+**使用方式**：`npusim <子命令> [选项]`
 
 ## 适用场景
 
@@ -48,36 +50,36 @@ CANN Simulator 是一款面向算子开发场景的 SoC 级芯片仿真工具，
 
 ```bash
 # 精度仿真 + 性能仿真（生成报告）
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
 
 # 指定输出目录
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -o ./sim_output
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -o ./sim_output
 
 # 传递算子自定义参数
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -u "--shape 1024,1024 --dtype float16"
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -u "--shape 1024,1024 --dtype float16"
 ```
 
 ### 2. 生成性能报告
 
 ```bash
 # 从仿真结果生成流水线报告（默认当前目录）
-cannsim report -e ./cannsim_Ascend950_*
+npusim report -e ./npusim_Ascend950_*
 
 # 指定输出目录
-cannsim report -e ./cannsim_Ascend950_* -o ./report_output
+npusim report -e ./npusim_Ascend950_* -o ./report_output
 
 # 指定查看的 Core ID
-cannsim report -e ./cannsim_Ascend950_* -n 0         # 查看单个 core
-cannsim report -e ./cannsim_Ascend950_* -n 0-2       # 查看 core 范围
-cannsim report -e ./cannsim_Ascend950_* -n 0-2,5,12-14  # 混合格式
-cannsim report -e ./cannsim_Ascend950_* -n all       # 查看所有 core
+npusim report -e ./npusim_Ascend950_* -n 0         # 查看单个 core
+npusim report -e ./npusim_Ascend950_* -n 0-2       # 查看 core 范围
+npusim report -e ./npusim_Ascend950_* -n 0-2,5,12-14  # 混合格式
+npusim report -e ./npusim_Ascend950_* -n all       # 查看所有 core
 ```
 
 ### 3. 查看输出文件
 
 ```
-cannsim_output/
-├── cannsim.log               # 仿真执行日志
+npusim_output/
+├── npusim.log               # 仿真执行日志
 └── report/
     ├── trace_core0.json      # 指令流水图文件
     └── ...
@@ -85,7 +87,7 @@ cannsim_output/
 
 ### 4. 性能瓶颈定位（Trace 空泡分析）
 
-cannsim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core 各 pipeline（SCALAR/VECTOR/MTE2/CUBE 等）的指令级周期事件。按 `references/pipeline-bubble-analysis.md` 的判定标准自主分析：
+npusim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core 各 pipeline（SCALAR/VECTOR/MTE2/CUBE 等）的指令级周期事件。按 `references/pipeline-bubble-analysis.md` 的判定标准自主分析：
 
 > 提示：trace 分析成本高。建议先用 `summary.json` 做快速诊断（见下方"性能分析"章节），仅在需要确认根因时下钻到 trace。
 
@@ -99,11 +101,11 @@ cannsim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core
 
 ## 命令参考
 
-### cannsim record - 执行仿真
+### npusim record - 执行仿真
 
 在 AscendOps 仿真环境中运行用户程序，记录仿真数据。
 
-**基本语法**：`cannsim record <user_app> -s <SOC_VERSION> [选项]`
+**基本语法**：`npusim record <user_app> -s <SOC_VERSION> [选项]`
 
 | 参数 | 简写 | 必填 | 说明 |
 |------|------|------|------|
@@ -115,28 +117,28 @@ cannsim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core
 
 **示例**：
 ```bash
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -o ./sim_output
-cannsim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -u "--shape 1024,1024"
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -o ./sim_output
+npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -u "--shape 1024,1024"
 ```
 
-### cannsim report - 生成性能报告
+### npusim report - 生成性能报告
 
 基于仿真结果生成可视化的性能分析报告和指令流水线图。
 
-**基本语法**：`cannsim report -e <EXPORT_FOLDER> [选项]`
+**基本语法**：`npusim report -e <EXPORT_FOLDER> [选项]`
 
 | 参数 | 简写 | 必填 | 说明 |
 |------|------|------|------|
-| `--export` | `-e` | 是 | 仿真结果文件夹路径（cannsim record 的输出） |
+| `--export` | `-e` | 是 | 仿真结果文件夹路径（npusim record 的输出） |
 | `--output` | `-o` | 否 | 流水线图输出目录 |
 | `--core-id` | `-n` | 否 | 指定 Core ID（支持 0、0-2、0-2,5、all 等格式） |
 
 **示例**：
 ```bash
-cannsim report -e ./cannsim_Ascend950_*
-cannsim report -e ./cannsim_Ascend950_* -n 0-2
-cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
+npusim report -e ./npusim_Ascend950_*
+npusim report -e ./npusim_Ascend950_* -n 0-2
+npusim report -e ./npusim_Ascend950_* -n all -o ./report_output
 ```
 
 > 详细命令参数、输出目录结构、返回值说明见 [references/simulator-advanced.md](references/simulator-advanced.md)
@@ -147,7 +149,7 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 |------|---------|
 | 仿真失败 | 确保代码中只设置 0 卡，仅使用 AI Core 计算算子 |
 | 性能报告未生成 | 确保使用 `--gen-report` 参数 |
-| 找不到仿真结果 | 使用 `-o` 指定输出目录，或检查当前目录下的 `cannsim_*` 文件夹 |
+| 找不到仿真结果 | 使用 `-o` 指定输出目录，或检查当前目录下的 `npusim_*` 文件夹 |
 
 ## 参考资料
 
@@ -156,11 +158,11 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 | `references/simulator-advanced.md` | 仿真进阶命令参考 | 需要高级参数或批量仿真时 |
 | `references/troubleshooting.md` | 问题排查指南 | 仿真失败或报告未生成时 |
 | `references/pipeline-bubble-analysis.md` | 指令流水空泡分类、因果归因、周期性模式检测 | 生成 trace 后，定位性能瓶颈根因时 |
-| `scripts/trace_bubble_analyzer.py` | 自动化空泡分析脚本（兼容 msprof/cannsim 双格式） | 批量分析多核 trace 或获取预分析报告时 |
+| `scripts/trace_bubble_analyzer.py` | 自动化空泡分析脚本（兼容 msprof/npusim 双格式） | 批量分析多核 trace 或获取预分析报告时 |
 | `references/performance-metrics-reference.md` | summary.json 字段、阈值、Analysis Priority | 分析 summary.json 时 |
 | `references/performance-issues-general.md` | 多核负载不均衡 + Kernel 利用率不足 | 分析 summary.json 时 |
 | `references/performance-issues-aic.md` | AIC: CUBE/MTE2/MTE1/FIXPIPE/SCALAR + L0C→UB | 分析 summary.json 时 |
-| `references/performance-issues-aiv.md` | AIV: VECTOR/MTE2/MTE3/SCALAR + SIMT | 分析 summary.json 时 |
+| `references/performance-issues-aiv.md` | AIV: VECTOR/MTE2/MTE3/SCALAR + SIMT + SIMD VF Code-Shape (§6) | 分析 summary.json 时 |
 | `references/performance-issues-template.md` | 新增 issue 条目的规范 | 维护 |
 
 ---
@@ -173,8 +175,8 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 
 ### 分析工作流
 
-1. **生成报告** — 执行 `cannsim record --gen-report` 或 `cannsim report`
-2. **读取 `summary.json`** — 位于 `sim_output/cannsim_*/report/summary.json`
+1. **生成报告** — 执行 `npusim record --gen-report` 或 `npusim report`
+2. **读取 `summary.json`** — 位于 `sim_output/npusim_*/report/summary.json`
 3. **检查 `top_level_diagnosis`** — 读取 `dominant_pipeline` 和 `imbalance_ratio` 获得初步判断
 4. **识别瓶颈类型** — 按下方快速诊断表定位，然后查阅对应的 reference
 5. **推荐优化方案** — 从对应 issue reference 中提取具体修复动作
@@ -194,17 +196,21 @@ cannsim report -e ./cannsim_Ascend950_* -n all -o ./report_output
 
 **Step 1.5 — Kernel 利用率合理性检查**：如果 `dominant_pipeline_util < 0.50` **且** 所有 `pipeline_overlap.*` 接近零 **且** 计算流水空闲 — 对于 **Cube** 型 kernel `AIC_CUBE.mean < 0.10`，对于 **纯 Vector** 型 kernel `AIVx_SIMD.mean` **与** `AIVx_SIMT.mean` 均 `< 0.05` — 说明 kernel 工作量不足以支撑分析（可能是 `blockDim` 对 shape 而言过大，或 shape 本身太小）。`imbalance_ratio` **不**是必要条件（均衡但 shape 过小同样适用）。请跳转到 [通用问题 §2 Kernel 利用率不足](references/performance-issues-general.md)；不要继续执行 Step 2 — 瓶颈类型规则会误判。
 
+**For SIMD VF kernels** (`__simd_vf__` + `asc_vf_call`): §2's shrink interacts with §6.1 fold — see [general §2 Pitfall](references/performance-issues-general.md) and [aiv §6 General principle](references/performance-issues-aiv.md). Do not apply §2 blindly — compare `kernel_total_clocks` across blockDim values.
+
+**Step 1.7 — SIMD VF 代码形态检查**：如果 `summary.json` 中 `simd_vf_metrics` 块非空（kernel 使用了 `__simd_vf__` + `asc_vf_call`），在进入 pipe-bound 诊断（Step 2）**之前**先检查 [AIV §6 SIMD VF Code-Shape Patterns](references/performance-issues-aiv.md)（§6.1–§6.3）。代码形态问题（VF 碎片化、串行依赖、二叉折叠）常表现为 pipe-bound 症状（SCALAR overhead、MTE2 主导）—— 先修复 VF 结构，再重新 profile 并重新诊断新的主导流水线。
+
 **Step 2 — 识别瓶颈类型**，基于 `top_level_diagnosis.dominant_pipeline`（下表源自 [performance-metrics-reference.md](references/performance-metrics-reference.md) §2 利用率解读 / §3 — 该文件是阈值的唯一可信源）：
 
-| 主导流水线 | 瓶颈类型 | 下一步检查的关键指标 | 主要优化动作 |
-|------------|----------|---------------------|-------------|
-| `AIC_CUBE` (mean > 0.80) | CUBE 瓶颈 | `pipeline_overlap.AIC_MTE2_vs_AIC_CUBE`、`AIC_MTE1_vs_AIC_CUBE` | 核间 Cube/Vector 交错；对 L0A/L0B 和 L1 开启双缓冲 |
-| `AIVx_SIMD` (mean > 0.50) | VECTOR 瓶颈 | `aiv_vector_instructions.ub_traffic_ratio` | 若 `ub_traffic_ratio ≥ 1.0`，使用 VF RegAPI |
-| `AIVx_SIMT`（最高） | SIMT 瓶颈 | `SIMT_ExecIPC`、`SIMT_BranchIPC` | 已是 SIMT 模式；若分支发散（`SIMT_BranchIPC` 偏低），降低分支发散。参见 [AIV §5](references/performance-issues-aiv.md) |
-| `AIC_MTE2` / `AIVx_MTE2` | MTE2 瓶颈 | `bandwidth.*.avg_transaction_gbps` | 开启双缓冲；若 DMA 粒度较小，使用 UB 批量搬运 |
-| `AIC_MTE1` | MTE1 瓶颈 | `pipeline_overlap.AIC_MTE1_vs_AIC_CUBE` | 对 L0A/L0B 开启双缓冲 |
-| `AIC_FIXP` | FIXPIPE 瓶颈 | `pipeline_overlap.AIC_FIXP_vs_AIC_CUBE` | 若 < 0.30：CUBE 因排空 L0C 而阻塞 → 增大 N 轴 tile 尺寸 |
-| `AIC_SCALAR` / `AIVx_SCALAR` | SCALAR 瓶颈 | `scalar_instructions.*.load_store_ratio`、`pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | 若 ratio ≥ 0.30 则存在溢出；若 SCALAR_vs_CUBE overlap 偏低（< 0.20）则为反压（按 CUBE Bound 处理）|
+| 主导流水线                        | 瓶颈类型       | 下一步检查的关键指标                                                                         | 主要优化动作                                                                                         |
+| ---------------------------- | ---------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `AIC_CUBE` (mean > 0.80)     | CUBE 瓶颈    | `pipeline_overlap.AIC_MTE2_vs_AIC_CUBE`、`AIC_MTE1_vs_AIC_CUBE`                     | 核间 Cube/Vector 交错；对 L0A/L0B 和 L1 开启双缓冲                                                         |
+| `AIVx_SIMD` (mean > 0.50)    | VECTOR 瓶颈  | `aiv_vector_instructions.ub_traffic_ratio`                                         | 若 `ub_traffic_ratio ≥ 1.0`，使用 VF RegAPI                                                        |
+| `AIVx_SIMT`（最高）              | SIMT 瓶颈    | `SIMT_ExecIPC`、`SIMT_BranchIPC`                                                    | 已是 SIMT 模式；若分支发散（`SIMT_BranchIPC` 偏低），降低分支发散。参见 [AIV §5](references/performance-issues-aiv.md) |
+| `AIC_MTE2` / `AIVx_MTE2`     | MTE2 瓶颈    | `bandwidth.*.avg_transaction_gbps`                                                 | 开启双缓冲；若 DMA 粒度较小，使用 UB 批量搬运                                                                    |
+| `AIC_MTE1`                   | MTE1 瓶颈    | `pipeline_overlap.AIC_MTE1_vs_AIC_CUBE`                                            | 对 L0A/L0B 开启双缓冲                                                                                |
+| `AIC_FIXP`                   | FIXPIPE 瓶颈 | `pipeline_overlap.AIC_FIXP_vs_AIC_CUBE`                                            | 若 < 0.30：CUBE 因排空 L0C 而阻塞 → 增大 N 轴 tile 尺寸                                                     |
+| `AIC_SCALAR` / `AIVx_SCALAR` | SCALAR 瓶颈  | `scalar_instructions.*.load_store_ratio`、`pipeline_overlap.AIC_SCALAR_vs_AIC_CUBE` | 若 ratio ≥ 0.30 则存在溢出；若 SCALAR_vs_CUBE overlap 偏低（< 0.20）则为反压（按 CUBE Bound 处理）                  |
 
 **Step 3 — 带宽/搬运交叉验证**（独立于 `dominant_pipeline`）：
 - 若 `bandwidth` 存在：扫描是否存在*冗余搬运* — 最常见的是 `AIC_FIXPIPE_L0C_TO_OUT` + `AIVx_MTE2_OUT_TO_UB` 搬运相同数据。此特征说明 matmul tile 经由 GM 绕了一圈，可通过 L0C→UB 直连 Fixpipe 消除。

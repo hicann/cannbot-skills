@@ -19,10 +19,10 @@
 python3 {skill_path}/scripts/trace_bubble_analyzer.py report/trace_core0.json
 
 # 分析 simulator 输出目录（自动发现所有核）
-python3 {skill_path}/scripts/trace_bubble_analyzer.py ./cannsim_Ascend950_*/report/
+python3 {skill_path}/scripts/trace_bubble_analyzer.py ./npusim_Ascend950_*/report/
 
 # 输出 JSON 供进一步分析
-python3 {skill_path}/scripts/trace_bubble_analyzer.py ./cannsim_Ascend950_*/report/ --json -o bubble_report.json
+python3 {skill_path}/scripts/trace_bubble_analyzer.py ./npusim_Ascend950_*/report/ --json -o bubble_report.json
 ```
 ---
 
@@ -34,9 +34,9 @@ python3 {skill_path}/scripts/trace_bubble_analyzer.py ./cannsim_Ascend950_*/repo
 
 | 情况 | 说明 |
 |------|------|
-| cannsim VECTOR 细分 | cannsim 将 VECTOR 拆分为 RVECSU/RVECEX/RVECLD/RVECST/RVECLP，分析时统一归并为 VECTOR |
-| FIXPIPE 别名 | cannsim 中字段名为 `FIXP`，与 `FIXPIPE` 等价 |
-| 指令缓存未命中 | msprof 中为 `CACHEMISS`，cannsim 中为 `ICACHELOAD` |
+| npusim VECTOR 细分 | npusim 将 VECTOR 拆分为 RVECSU/RVECEX/RVECLD/RVECST/RVECLP，分析时统一归并为 VECTOR |
+| FIXPIPE 别名 | npusim 中字段名为 `FIXP`，与 `FIXPIPE` 等价 |
+| 指令缓存未命中 | msprof 中为 `CACHEMISS`，npusim 中为 `ICACHELOAD` |
 
 ---
 
