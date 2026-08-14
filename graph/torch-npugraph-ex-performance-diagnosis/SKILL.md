@@ -275,6 +275,24 @@ check_reinplace_streams (见上文 `utils.py` 路径约定)
 - **未命中且值得查**：`check multi-stream is False` / `check stream safety failed`（见「多流校验」节）/ `check reinplace is False` / `missed opportunities ... N bytes`(N>0) / 输入侧 `can_inplace return False`。
 - **未命中但正确（无需改）**：`mutate program inputs`（交给「reinplace_input_mutated_ops 日志」节）、`self_has_wrong_metadata`、`repeated self argument`。
 
+## 历史定位案例（按需加载）
+
+历史案例只作为当前证据的补充，不替代对本次 Profiling、FX 图、日志和版本信息的核对。
+
+匹配规则：
+
+1. 先确认实际后端，再匹配算子名、FX 结构和日志关键词。
+2. 同一分支中的命中条件需同时满足；表中用“或”分隔的内容表示可独立命中的不同分支。
+3. 只读取命中的案例，并说明当前问题与历史案例的相同点和差异。
+4. 未命中时继续执行通用诊断流程，不强行选择相近案例。
+
+| CASE | 适用范围 | 最小命中条件 | 定位主题 |
+|---|---|---|---|
+| [CASE-001](references/case-001-pad-noncontiguous-sliceaicore.md) | ACLNN / npugraph_ex Profiling | `aclnnConstantPadNd` 内出现 `SliceAiCore`；Pad 输入非连续 | Pad 内部隐式连续化 |
+| [CASE-002](references/case-002-deepseek-v4-view-cast-format.md) | npugraph_ex | `auto_functionalized_v2` 的 mutable base 是跨 dtype View；展开后出现 `clone + copy_` | 跨 dtype Cache View 阻断 Reinplace |
+| [CASE-003](references/case-003-mla-prolog-v3-cache-tensormove.md) | GE / Ascend IR 后端边界案例 | 实际后端为 GE/Ascend IR；`MlaPrologV3` 前存在 Cache `TensorMove` | Legacy Functional Converter 搬运 |
+| [CASE-004](references/case-004-kimi-k3-state-writeback-clone.md) | Kimi K3 / npugraph_ex | KDA State 尾部批量 `copy_`，或 ShortConv 冻结权重重复产生 `clone` | State 写回与显式连续化 |
+
 ## 兜底文档
 
 - `torch-npugraph-ex-knowledge` 中「性能优化」「调试定位」小节

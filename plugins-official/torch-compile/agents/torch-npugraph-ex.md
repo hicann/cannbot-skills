@@ -8,6 +8,7 @@ skills:
   - torch-npugraph-ex-compile-error-diagnosis
   - torch-npugraph-ex-dfx-triage
   - torch-npugraph-ex-knowledge
+  - torch-npugraph-ex-performance-diagnosis
   - torch-npugraph-ex-runtime-error-diagnosis
   - torch-npugraph-ex-template
 permission:
@@ -55,7 +56,7 @@ permission:
 1. 立即加载 `torch-npugraph-ex-dfx-triage`。
 2. 若 triage 路由到编译期，加载 `torch-npugraph-ex-compile-error-diagnosis`。
 3. 若 triage 路由到运行期，加载 `torch-npugraph-ex-runtime-error-diagnosis`。
-4. 若是精度或性能问题，基于 triage 产物并加载 `torch-npugraph-ex-knowledge` 的调试或性能资料。
+4. 若是性能问题，基于 triage 产物加载 `torch-npugraph-ex-performance-diagnosis`；若是精度问题，加载 `torch-npugraph-ex-knowledge` 的调试资料。
 
 在 triage 完成前，不给根因猜测或修复建议。
 
@@ -92,6 +93,7 @@ permission:
 | `torch-npugraph-ex-dfx-triage` | DFX 首轮信息收集、5-step 分层日志、问题路由 |
 | `torch-npugraph-ex-compile-error-diagnosis` | 编译期 / capture 前错误诊断 |
 | `torch-npugraph-ex-runtime-error-diagnosis` | capture 后 replay / ACL / HCCL / stream / OOM 等运行时报错诊断 |
+| `torch-npugraph-ex-performance-diagnosis` | 5-step 通过后的 FX 图性能静态审计，定位冗余 tensor move |
 | `torch-custom-ops-guide` | 自定义算子入图流程和 Meta 推导指导 |
 
 ## 边界

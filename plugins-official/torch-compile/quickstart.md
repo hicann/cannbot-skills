@@ -2,7 +2,7 @@
 
 ## 概述
 
-`torch-compile` 是 PyTorch `torch.compile` 图模式编排入口，用 `agents/` 下的 Subagent 组织不同图模式能力。当前已提供 `torch-npugraph-ex` Subagent，面向昇腾 NPU `npugraph_ex` / `aclgraph` 模式，覆盖 torch.compile + TorchAir 的配置指导、脚本迁移、自定义算子入图、编译错误和运行时错误诊断。
+`torch-compile` 是 PyTorch `torch.compile` 图模式编排入口，用 `agents/` 下的 Subagent 组织不同图模式能力。当前已提供 `torch-npugraph-ex` Subagent，面向昇腾 NPU `npugraph_ex` / `aclgraph` 模式，覆盖 torch.compile + TorchAir 的配置指导、脚本迁移、自定义算子入图、编译错误、运行时错误和性能诊断。
 
 ## 一、环境搭建
 
@@ -165,6 +165,7 @@ ls .trae/ .cursor/ .codex/ .copilot/ 2>/dev/null
 | `torch-npugraph-ex-dfx-triage` | 问题定位分诊 |
 | `torch-npugraph-ex-compile-error-diagnosis` | 编译错误诊断 |
 | `torch-npugraph-ex-runtime-error-diagnosis` | 运行时错误诊断 |
+| `torch-npugraph-ex-performance-diagnosis` | 性能诊断 |
 | `torch-custom-ops-guide` | 自定义算子入图指导 |
 
 ## 五、常见问题

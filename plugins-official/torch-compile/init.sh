@@ -111,7 +111,7 @@ VERSION="1.0.1"
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared graph/
-INCLUDED_SKILLS="torch-npugraph-ex-knowledge torch-npugraph-ex-template torch-npugraph-ex-dfx-triage torch-npugraph-ex-compile-error-diagnosis torch-npugraph-ex-runtime-error-diagnosis torch-custom-ops-guide"
+INCLUDED_SKILLS="torch-npugraph-ex-knowledge torch-npugraph-ex-template torch-npugraph-ex-dfx-triage torch-npugraph-ex-compile-error-diagnosis torch-npugraph-ex-runtime-error-diagnosis torch-npugraph-ex-performance-diagnosis torch-custom-ops-guide"
 # Agent whitelist (shell pattern) - uses local agents/
 INCLUDED_AGENT_PATTERN="torch-*"
 
