@@ -453,19 +453,16 @@ while iteration < max_iterations:
 
 opt_iteration = 0
 
-# max_opt_iterations 动态计算指令：
-
-# Agent 必须在 Phase 4 开始时执行以下步骤：
-
-# 1. 使用 Read 工具读取 .claude/skills/triton-latency-optimizer/SKILL.md
-
-# 2. 统计文本中 "### 优化点" 出现的次数（即为优化点个数）
-
-# 3. 计算 max_opt_iterations = 优化点个数 + 1
-
-# 4. 若读取失败、文件不存在或统计失败，使用默认值 max_opt_iterations = 20
-
-max_opt_iterations = <由 Agent 按上述指令运行时计算>
+max_opt_iterations = 50   # 上限 50（31 个优化点 + IR 多轮 + 候选扫描预留），明细见 skill 内 references/Index.md
+no_improve_streak = 0         # 连续无提升轮数；4.4 判无提升时 +1，有提升时归 0
+hit_history = []              # 每轮命中的优化点编号（含无提升的）
+# ── 扫描状态机（B 方案：编排器持有循环，扫描完整性由编排器推导，不依赖 skill 自报）──
+cursor = 1                    # 下次 scan_from；skill 返回命中点 P 即可推导 [cursor, P-1] 均未命中
+code_version = 0              # 每采纳一个优化 +1；代码变了则此前的"未命中"结论全部失效
+excluded = []                 # 【版本作用域】本 code_version 下已判无提升的点；版本变更时清空
+fail_count = {}               # 【跨版本】各点累计"命中但无提升"次数；>=3 永久禁用
+banned_points = []            # 永久禁用编号；与 excluded 合并后作为 exclude_points 传入
+scan_complete = false         # 从 cursor=1 走完一整趟仍无命中 → true
 target_speedup = <从 config.json 读取> # 目标几何平均加速比⚠️重要指标
 best_code = ""
 best_speedup = 0.0
@@ -475,7 +472,7 @@ improvement_made = false
 target_reached = false # 是否达到目标加速比
 
 # IR 多轮迭代相关变量
-# 优化点 30（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-29）单轮即过。
+# 优化点 29（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-28）单轮即过。
 # ir_max_iterations 与 max_opt_iterations 独立计数，互不扣减。
 ir_iteration = 0
 ir_max_iterations = 20                              # IR 专属迭代上限
@@ -484,7 +481,7 @@ ir_has_more_suggestions = true                      # latency-optimizer 返回�
 current_iter_dir = ""                               # 本轮产物目录（普通轮 opt_iter_{n} / IR 轮 opt_iter_{n}_ir_{k} / simulator 轮 opt_iter_{n}）
 
 # simulator 采集驱动相关变量
-# latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）且仍未达 target 时，转入 simulator 采集优化。
+# latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）且仍未达 target 时，转入 simulator 采集优化。
 simulator_attempted = false                         # triton-simulator-optimizer 是否已被调用（4.6 退出前置门检查项）
 
 ```
@@ -528,11 +525,22 @@ while opt_iteration < max_opt_iterations:
 
 **调用 Skill**：`triton-latency-optimizer`
 
+⚠️ 必须实际发起 Skill 调用（与 3.1 调用 `triton-op-coding` 完全同一方式）。**禁止**改为 Read 其 `SKILL.md` 后自行内联改写代码——那样 skill 主流程的终止步骤（autotune / Block Size Scaling）不会被执行。本轮无 `Skill(triton-latency-optimizer)` 调用即视为 4.1 未执行，不得进入 4.2。
+
 **输入参数**：
 
 - `baseline_code`（或上一轮优化后的代码）
 - `opt_iteration`
 - `task_desc` / `arch` / `user_requirements`（按需传入）
+- **`scan_from = cursor`**（必传）
+- **`exclude_points = excluded ∪ banned_points`**（必传）
+
+**返回处理（扫描完整性由编排器推导，不依赖 skill 自报）**：
+
+- skill 返回 `hit_optimization_point = P`：可确定 `[cursor, P-1]` 区间**均未命中**，无需 skill 逐条上报。
+- skill 返回 `None`：可确定 `[cursor, 31]` 均未命中。
+  - 若 `cursor == 1` → **`scan_complete = true`**，进入 **4.5.T 终止步骤**。
+  - 若 `cursor > 1` → 置 `cursor = 1` 后 continue，从头再走一趟确认（代码可能已变更）。
 
 **产物**：
 
@@ -542,17 +550,17 @@ while opt_iteration < max_opt_iterations:
 
 > latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 30 时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
 
-- **存在普通优化点（1-29）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
+- **存在普通优化点（1-28）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
 - **triton-latency-optimizer 报告无更多普通优化点**：
   - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点（这些仍属普通轮）：
-    - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 18）
+    - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 17）
     - `speedup_vs_torch < target_speedup` 且 `opt_iteration < 3`：
       要求重新扫描，重点检查当前算子类别对应的高频命中点
-      （见 `triton-latency-optimizer/SKILL.md` 的"算子类别与高频优化点"表）
+      （见 `triton-latency-optimizer/references/Index.md` 的"算子类别与高频优化点"表）
   - **IR 多轮迭代分支**（普通优化点耗尽时）：
     - 若 `ir_has_more_suggestions == true` 且 `ir_iteration < ir_max_iterations`：
-      - **不终止**，强制走 IR 子流程（优化点 30），重新提取 `last_pass.mlir` 并分析
-      - `ir_iteration++`，`last_optimization_point = 30`
+      - **不终止**，强制走 IR 子流程（优化点 29），重新提取 `last_pass.mlir` 并分析
+      - `ir_iteration++`，`last_optimization_point = 29`
       - 本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}_ir_{ir_iteration}`（避免与普通轮目录冲突）
     - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`，即 latency-optimizer 优化已耗尽）：
       - 若 `optimized_speedup >= target_speedup`（target_reached）→ 可进入 **4.6 终局判定**
@@ -561,7 +569,7 @@ while opt_iteration < max_opt_iterations:
 - **simulator 采集驱动分支（latency-optimizer 优化耗尽且 `optimized_speedup < target_speedup` 时触发）**：
   - 调用 `triton-simulator-optimizer` skill（独立 skill，**只采集 + 诊断**：msprof 采集 → 解析 pipe 占比 → 产出诊断报告）。skill 不自带优化技术、不产出代码——优化技术 owner 唯一是 `triton-latency-optimizer`。
   - ⚠️ 在拿到 simulator 采集证据（`MMAD` 占比 > 50%）前，**严禁**下"dot 是硬件瓶颈/不可优化"结论
-  - 诊断报告内容：瓶颈类型 + 热源码行 + **修复方向 = `triton-latency-optimizer` 优化点编号**（Cube 空等→19/21、标量降级→6/5/17、访存→7/21/10、barrier→19）；`MMAD` > 50% 时报告"无对应优化点（真·硬件极限）"。
+  - 诊断报告内容：瓶颈类型 + 热源码行 + **修复方向 = `triton-latency-optimizer` 优化点编号**（Cube 空等→18/20、标量降级→6/5/16、访存→7/20/10、barrier→18）；`MMAD` > 50% 时报告"无对应优化点（真·硬件极限）"。
   - `simulator_attempted = true`（进入本分支即置位，无论诊断是否给出修复方向）。
   - **修复落地（交 latency-optimizer，不在 simulator-optimizer 内改代码）**：编排器带诊断报告回到 4.1 调 `triton-latency-optimizer`，将诊断指向的优化点作为**强制命中点**传入（覆盖其静态命中判断），latency-optimizer 据此加载对应优化点参考文档产出代码。
   - latency-optimizer 产出的代码走 4.2/4.3 验证；本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`（`opt_iteration` 正常自增）。有提升则 `opt_iteration++` 回 4.1；无提升则由 simulator-optimizer 重采确认瓶颈是否转移。
@@ -675,11 +683,23 @@ while opt_iteration < max_opt_iterations:
   → 优化成功（几何平均加速比有提升）
   → 更新 best_code / best_speedup
   → improvement_made = true
+  → `no_improve_streak = 0`
+  → **代码已变更**：`code_version += 1`；`excluded = []`；`cursor = 1`
+    （此前判定"未命中"的点在新代码下可能重新命中，必须允许重扫——见场景 3）
   → 普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
   → continue
 
   否则（含相等）:
-  → 视为无提升
+  → 视为无提升，回退到本轮之前的 best_code
+  → `no_improve_streak += 1`
+  → **无效命中防护（场景 2）**：设本轮命中点为 P
+    - `excluded += [P]`（**仅本 code_version 有效**，代码变更后自动解除）
+    - **`cursor = P + 1`**（游标强制前进，杜绝原地重复命中）
+    - `fail_count[P] += 1`；**达到 3 次（跨 3 个不同 code_version）→ `banned_points += [P]` 永久禁用**，
+      并在 `{current_iter_dir}/log.md` 标注"无效重复命中"
+
+  ⚠️ **终止性保证**：每轮迭代要么 `cursor` 前进（上限 29），要么 `code_version` 递增
+  （递增需要真实性能提升，而 speedup 单调有界），因此循环必然收敛。
   → 普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增（不再重复）
   → **IR 轮不因 improvement_made == false break**：仍 continue，让下一轮 4.1 重新评估 IR 是否还能继续
   → 普通轮 / simulator 轮：continue
@@ -694,10 +714,32 @@ while opt_iteration < max_opt_iterations:
   普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增
   continue
 
+  ── 4.5.T Block Size 候选扫描（命中优化点 31 后触发）────────
+  **进入条件**：本轮 `hit_optimization_point == 31`（skill 已真实加载
+  `references/block_size_scaling.md` 并产出候选阶梯计划）。
+  ⚠️ 本阶段**不消耗** `max_opt_iterations` 预算。
+
+  skill 已应用计划中的第一个候选，本阶段负责跑完其余候选：
+  ```
+  for cand in plan.向上候选:            # ladder ×2, ×4 … 至任一档 > 65536
+      改写 BLOCK → 4.2 verify → 失败则停止向上方向
+                 → 4.3 benchmark → 记录 (cand, speedup)
+  for cand in plan.向下候选:            # ladder ÷2，至少一档
+      同上，失败则停止向下方向
+  取实测 latency 最低者作为本轮结果，交 4.4 判定
+  ```
+  产物目录 `opt_iter_{n}_bs_{BLOCK}`；每个候选的 (BLOCK, verify, speedup) 写入 report.md。
+
   ── 4.6 终局判定 ──────────────────────────────────
-  ⚠️ **退出前置门（强制，不满足禁止 break）**：4.6 仅在以下任一条件满足时可进入：
+  ⚠️ **退出前置门（强制，不满足禁止 break）**
+
+  **前提**：`scan_complete == true`（由编排器按 4.1 的推导规则判定：从 `cursor=1` 走完
+  一整趟仍无命中）。
+  ⚠️ `scan_complete` 是编排器自己算出来的，**不采信 skill 自称"已扫完"**。
+
+  满足该前提后，4.6 仅在以下任一条件满足时可进入：
   - (a) `opt_iteration >= max_opt_iterations`（全局兜底）；**或**
-  - (b) latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）**且** 满足以下之一：
+  - (b) latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）**且** 满足以下之一：
     - `target_reached == true`（`optimized_speedup >= target_speedup`）；**或**
     - `simulator_attempted == true` 且 `triton-simulator-optimizer` 已确认无更多 simulator 采集驱动改进
       （`MMAD` 实测 > 50% 且增大 tile / bf16 化均不可行）。
@@ -1036,7 +1078,7 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 | 工作目录基线冻结   | Phase 1 末尾必须调 `freeze_baseline.py` 落锚。锚文件 `{工作目录}/output/.baseline_anchor.json` 写入后，`{工作目录}/{op_name}.py` 禁止再被 Edit/Write。verify/benchmark 启动时校验 sha256，不匹配 exit 4 (C 类终止)                          |
 | GPU Kernel 模式    | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级                                                                                                                                                                          |
 | Phase 3 最大迭代   | 5 次，禁止超出                                                                                                                                                                                                                           |
-| Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-24 + IR 点 25 均耗尽）则退出指令级循环                                                                                         |
+| Phase 4 迭代策略   | max_opt_iterations = 50（上限），达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）则退出指令级循环                                                                                         |
 | Phase 4 成功底线   | 性能不劣化（speedup_vs_baseline ≥ 1.0）                                                                                                                                                                                                  |
 | Phase 4 退出判定   | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；latency-optimizer 耗尽且未达 target 时必须先走 simulator 采集分支（`simulator_attempted=true`）方可进 4.6，`optimized_speedup < target` 且 `simulator_attempted == false` 时禁止退出 |
 | Phase 4 基线复用   | 4.2/4.3 的基线侧 verify*result_baseline.json 和 baseline_perf_result.json 必须从 Phase 3 iter*{phase3_last_iter} 复制，禁止对基线代码重跑 verify.py 或 benchmark.py（基线代码与 Phase 3 generated_code.py 完全一致，重复执行只浪费时间） |
