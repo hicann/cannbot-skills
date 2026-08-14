@@ -1,6 +1,6 @@
 # 逐条检视 prompt 模板（PR 检视）
 
-workflow 按 clause-routing 产出的波次规划，逐波派发子 Agent。每组使用以下 prompt 模板。
+workflow 按 plan-design 产出的检视计划，逐波派发子 Agent。每组使用以下 prompt 模板。
 
 ## prompt 模板
 
@@ -55,7 +55,7 @@ FAIL/SUSPICIOUS 展开完整分析：
 - 修复建议：{建议}
 ```
 
-`[STYLE]` 标记的代码风格条例（不走假设检验，无证据分值）：
+`[STYLE]` 标记的代码风格条例（专项检视子 agent，不走假设检验，无证据分值）：
 ```
 [STYLE] {条例编号+名称} FAIL 置信度:MED/LOW
 - 问题描述：{描述}

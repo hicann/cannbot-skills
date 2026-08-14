@@ -1,7 +1,7 @@
 # 大型 PR 检视场景
 
 ## 触发
-由 `workflows/pr-review.md` Stage 0 自动检测（文件数 >10）后跳转进入。不单独暴露给用户。
+由 `workflows/pr-review.md` Stage 0 自动检测（文件数 >20 且 diff 总变更行数 ≥3000）后跳转进入。不单独暴露给用户。
 
 ## 编排
 
@@ -13,9 +13,9 @@
 |------|------|--------|
 | 任务0 | 文件分组 + 预扫描 + 设计文档探测 | file-split（子Agent）→ global-pre-scan（子Agent × N 并行）∥ docs-detect（子Agent × 1，与 file-split 并行） |
 | 任务1 | 摘要 + 分组 + API 预研 | summarize（子Agent × N）∥ clause-grouping（子Agent × 1）∥ api-prestudy（子Agent × 1，仅 Kernel 侧） |
-| 任务2 | 负载感知波次检视 | 逐波派发检视子 Agent |
+| 任务2 | 负载感知波次检视 | 逐波派发通用检视子 agent |
 | 任务3 | 共享文件检视 + 综合研判 | shared 检视（子Agent）→ synthesize（主Agent） |
-| 任务4 | 合并结果 + 设计一致性检查 | merge（主Agent）→ design-check（子Agent × 1，仅 docs_input 非空时） |
+| 任务4 | 合并结果 + 设计一致性检查 | merge（主Agent）→ design-check（专项检视子 agent × 1，仅 docs_input 非空时） |
 | 任务5 | 行号校验 + 报告 | line-verify（拆分路由）→ report-write（主Agent） |
 
 ### 阶段0：文件分组 + 预扫描 + 设计文档探测
@@ -27,14 +27,14 @@
 5. 对每个 file_group **并行派发子 Agent** 执行 `steps/pr-large-review.global-pre-scan.md`：
    - 传入：group_file_list + repo_path
    - 产出：该组的 matched_rules（条例级匹配清单）
-   - 每波 ≤10 Agent，超过 10 组分批
+   - 每波 ≤6 Agent（上限见 `core/review-load-balance.md`），超过 6 组分批
 6. 收集 per-group matched_rules + docs_input，将任务0 标记为 done
 
 ### 阶段1：摘要 + 分组 + API 预研（并行派发）
 
 1. 将任务1 标记为 in_progress
 2. 在单个消息中并行派发子 Agent：
-   - **summarize × N**：对每个 file_group 派发，Read `steps/pr-large-review.code-summarize.md`，每波 ≤10 Agent
+   - **summarize × N**：对每个 file_group 派发，Read `steps/pr-large-review.code-summarize.md`，每波 ≤6 Agent（见 `core/review-load-balance.md`）
    - **clause-grouping × 1**：派发 1 个子 Agent，Read `steps/pr-large-review.clause-grouping.md`，传入 per-group matched_rules
    - **api-prestudy × 1**（条件派发：仅当 diff 含 `op_kernel/` 路径或代码特征判定为 Kernel/混合侧时）：Read `steps/common.api-prestudy.md`，传入 Kernel 侧文件列表 + 预研报告路径 `./operators/pr-{pr_number}/api_prestudy.md`
 3. 收集 per-group summary_path + 全局波次规划表 + API 预研路径（若已派发），将任务1 标记为 done
@@ -43,7 +43,7 @@
 
 1. 将任务2 标记为 in_progress
 2. Read `steps/pr-large-review.clause-review.md` 获取 prompt 模板
-3. 使用波次规划表逐波派发：每波 ≤10 组，每组 2-3 条例 + ≤5 文件，波内并行波间串行
+3. 使用波次规划表逐波派发：每波 ≤6 组（见 `core/review-load-balance.md`），每组按各文件 `<检视负载>` 头的 `通用检视子 agent 检视条款容量上限` 打包（合并组取最小值）+ ≤5 文件，波内并行波间串行
 4. 收集全部结果，将任务2 标记为 done
 
 ### 阶段3：共享文件检视 + 综合研判
@@ -57,7 +57,7 @@
 
 1. 将任务4 标记为 in_progress
 2. 主 Agent Read + 执行 `steps/pr-large-review.merge.md`
-3. **设计一致性检查**：若阶段0 的 docs_input 非空，派发 1 个 `common.design-check` 子 Agent（`subagent_type: "general"`），填入 docs_input + diff路径 + repo_path + 合并后摘要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用合并摘要/API预研做 S1-S7 + D8 整体对照（避免按文件组碎片化）
+3. **设计一致性检查**：若阶段0 的 docs_input 非空，派发 1 个专项检视子 agent（design-check，`subagent_type: "general"`），填入 docs_input + diff路径 + repo_path + 合并后摘要路径 + API 预研路径（若存在）。子 Agent 内部读设计文档 + 建立设计映射 + 复用合并摘要/API预研做 S1-S7 + D8 整体对照（避免按文件组碎片化）
 4. 将任务4 标记为 done
 
 ### 阶段5：行号校验 + 报告
@@ -74,7 +74,7 @@
 - 严格按阶段顺序执行，禁止跳步
 - code-fetch 失败则终止流程
 - 禁止提前 Read 未执行阶段的 step 文件
-- 每波 ≤10 Agent，>4 文件组分批
+- 每波 ≤6 Agent（见 `core/review-load-balance.md`），>4 文件组分批
 - **主 Agent 只做编排派发**——file-split、global-pre-scan、summarize、clause-grouping 全部由子 Agent 执行
 - design-check 置于 Stage4 merge 之后：复用合并后的全局摘要做整体对照，避免按文件组碎片化；属独立轨道，不进 clause 波次规划
 - docs_input 为空时不派发 design-check，报告退化为纯条例检视

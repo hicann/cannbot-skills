@@ -6,6 +6,7 @@
 领域: true
 触发: 必须触发
 默认启用: true
+
 适用场景: Ascend C 算子开发中实际高频出现的编码问题，来源于生产环境经验总结
 介绍: Ascend C TOPK 高频问题清单，14 条条款覆盖算子开发中最常触发的错误模式
 类别(All): 野指针(局部变量指针生命周期)、特殊值(nan/inf/+0/-0边界处理)、整数vs浮点(可整数计算时禁止转浮点)、宏定义命名冲突
@@ -13,6 +14,10 @@
 类别(Kernel): atomic累加(src(ub)与dst(gm)双清零)、通信算子融合(核间同步)
 > **说明**：TOPK 问题是检视实践中发现的高频风险点，需重点关注。条款标注适用范围：`[适用: All]` / `[适用: Host]` / `[适用: Kernel]`
 </适用>
+
+<检视负载>
+通用检视子 agent 检视条款容量上限: 3
+</检视负载>
 
 ## 快速索引
 
@@ -51,7 +56,7 @@
 
 ### 1. 必须校验函数返回值 `[适用: Host]`
 
-> **交叉引用**：涉及指针返回值的判空检视策略，参见 SEC-3.5。
+> **交叉引用**：涉及指针返回值的判空检视策略，参见 ascendc-red-line.md 条例6。
 
 **问题说明**
 
@@ -105,7 +110,7 @@ ge::DataType dtype = tensor->GetDataType();  // 不推荐
 
 ### 3. 生命周期内使用局部变量指针，避免野指针 `[适用: All]`
 
-> **交叉引用**：未初始化导致的野指针检视策略，参见 SEC-3.1；指针判空策略参见 SEC-3.5。
+> **交叉引用**：未初始化导致的野指针检视策略，参见 ascendc-red-line.md 条例5；指针判空策略参见 ascendc-red-line.md 条例6。
 
 **问题说明**
 
@@ -213,7 +218,7 @@ auto* attrActivateLeft = attrs->GetAttrPointer<int>(INDEX_ATTR_ACTIVATE_LEFT);  
 
 ### 6. 必须考虑nan/inf/+0/-0等特殊值和边界值处理 `[适用: All]`
 
-> **交叉引用**：除零检视策略参见 SEC-2.3。
+> **交叉引用**：除零检视策略参见 ascendc-red-line.md 条例1。
 
 **问题说明**
 
@@ -232,7 +237,7 @@ auto* attrActivateLeft = attrs->GetAttrPointer<int>(INDEX_ATTR_ACTIVATE_LEFT);  
 
 ### 7. 融合规则/InferShape/Tiling外部输入校验 `[适用: Host]`
 
-> **交叉引用**：除零检视策略参见 SEC-2.3；外部输入合法性校验策略参见 SEC-4.1。
+> **交叉引用**：除零检视策略参见 ascendc-red-line.md 条例1；外部输入合法性校验策略参见 cpp-secure.md SEC-3.1。
 
 **问题说明**
 

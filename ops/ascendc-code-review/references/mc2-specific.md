@@ -6,8 +6,13 @@
 领域: true
 触发: hccl_, AllGather, AllReduce, ReduceScatter, AlltoAll, SyncAll, SetFlag, WaitFlag, PipeBarrier, SyncFunc, expert, expertIds, dispatch, combine, moeExpertNum, quant, BasicQuantMode, PERTENSOR, PERCHANNEL, AlltoAllV, sendCounts, InitV2, Finalize, SetCcTiling, CCU, AICPU
 默认启用: true
+
 排除场景: 纯通信中转(有hccl_但无expert/dispatch/combine路由逻辑且无Matmul/GroupedMatmul/quant), 纯计算无集合通信(有计算无hccl_)
 </适用>
+
+<检视负载>
+通用检视子 agent 检视条款容量上限: 5
+</检视负载>
 
 > **MC² = Matrix Computation & Communication**（通算融合算子框架）
 >

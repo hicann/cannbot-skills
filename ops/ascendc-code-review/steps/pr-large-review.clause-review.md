@@ -25,12 +25,20 @@ workflow 按全局波次规划逐波派发子 Agent。每组使用以下 prompt 
 - API 约束信息：若已提供 API 预研报告，以其为主要来源。若预研报告未覆盖当前条款涉及的 API，使用 `/ascendc-docs-search` 补充查阅
 - 对每条分配的条例：若检视条款中已附带行号（references/{file}.md:{line}），从该行号起 Read 到下一个 `^####` 标题为止；否则 Grep `^{条例ID}` 定位起始行号 + 下一标题定位结束行号，Read offset={start} limit={end-start}。**只读该条例章节，禁止 Read 整个规则文档**。若条例包含专属检视方法，必须严格按该指引执行（如 cpp-style 声明全文 Read 且不走假设检验，则覆盖本条逐条 Grep 与下方的假设检验要求）
 - 若检视条款来自 ascendc-api / ascendc-perf / simt-api-analysis / mc2-specific 且预研报告未覆盖，使用 `/ascendc-docs-search` 查阅对应 API 的最新官方文档
+- 若分配的条款包含 RB-\*（RegBase 路线专项），需额外加载 `ascendc-regbase-best-practice` skill 获取 API 白名单和参考实现文档
 - **严格约束**：只读取「检视文件列表」中的文件，不越界读取其他文件组的文件
 - 先 Read diff 中本组文件的变更部分，再按需 Read 完整源码追溯变量来源
 - 大 PR 模式下深度分析（变量溯源、TilingData 值域）需自行按需 grep，summary 不提供
 - 严格按假设检验驱动流程执行（H0/H1、证据收集、自信值计算）。**例外**：若条例的专属检视方法已声明不走假设检验（如 cpp-style），按专属方法执行，不收集证据分值
 - 所有条款检视完成后直接输出逐条结果，禁止生成报告文件
 - 每条结果标注文件组：`[{group_name}] {条例ID} PASS/FAIL`
+
+【⚠️ 逃逸信号检测】
+一旦发现自己即将输出以下内容，立即停止并重新从第一条条款开始：
+- "批量处理多个任务"/"合并处理" → 每条必须独立经过完整假设检验流程
+- "直接生成检视报告"/"总结所有结果" → 必须完成所有分配条款后才能输出
+- "提高效率"/"节省时间"/"简化流程" → 效率不是跳过步骤的理由
+触发时输出 `⚠️ 检测到逃逸信号，重置到第一条条款` → 立即重新执行
 ```
 
 ## 输出格式
@@ -52,7 +60,7 @@ FAIL/SUSPICIOUS 展开完整分析：
 - 修复建议：{建议}
 ```
 
-`[STYLE]` 标记的代码风格条例（不走假设检验，无证据分值；style_global 组的 group_name 为 `style_global`）：
+`[STYLE]` 标记的代码风格条例（专项检视子 agent，不走假设检验，无证据分值；style_global 组的 group_name 为 `style_global`）：
 ```
 [style_global] [STYLE] {条例编号+名称} FAIL 置信度:MED/LOW
 - 问题描述：{描述}

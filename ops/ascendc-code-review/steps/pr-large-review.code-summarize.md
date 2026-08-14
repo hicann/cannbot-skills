@@ -156,8 +156,8 @@ Grep `constexpr` / `const` / `#define`，填入：
 
 | 跳过的分析 | 原因 |
 |-----------|------|
-| 变量声明→初始化→校验链追踪 | 检视子 Agent 按需 grep |
-| TilingData 每个字段的 Host 侧赋值公式 | 检视子 Agent 按需 grep |
+| 变量声明→初始化→校验链追踪 | 通用检视子 agent 按需 grep |
+| TilingData 每个字段的 Host 侧赋值公式 | 通用检视子 agent 按需 grep |
 | 流水线模式 / Buffer 管理 / 多核切分 | 性能条例检视时自行分析 |
 | 跨文件防御摘要 | 按文件组隔离后不需要跨文件追踪 |
 

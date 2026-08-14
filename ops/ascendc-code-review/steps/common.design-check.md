@@ -34,7 +34,7 @@ Agent({
 - S3 API 清单：优先复用 {api_prestudy_path} 的 API 约束，检查代码 API 使用与设计是否一致、是否用了黑名单接口
 - 仅当摘要/预研未覆盖某要素时，才 Grep 代码补充
 
-【独立性】本检查不引 core/methodology.md 假设检验框架、不依赖 clause-routing 输出。它是设计 vs 实现的对照检查，与编码条例检视是平行轨道，输出格式不同（✅/❌/N/A vs PASS/FAIL/SUSPICIOUS）。**例外**：D8 文档格式检视读取 `references/doc-style.md` 获取格式规则，但同样不走假设检验（格式违反为确定性判定）。"
+【独立性】本检查不引 core/methodology.md 假设检验框架、不依赖 plan-design 输出。它是设计 vs 实现的对照检查，与编码条例检视是平行轨道，输出格式不同（✅/❌/N/A vs PASS/FAIL/SUSPICIOUS）。**例外**：D8 文档格式检视读取 `references/doc-style.md` 获取格式规则，但同样不走假设检验（格式违反为确定性判定）。"
 })
 ```
 

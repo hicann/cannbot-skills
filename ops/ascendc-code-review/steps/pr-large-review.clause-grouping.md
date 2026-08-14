@@ -16,6 +16,7 @@ Agent({
 - 各组文件数: {group_file_counts}
 
 【执行要求】
+先 Read `core/review-load-balance.md` 获取规则（每组容量从文件 `<检视负载>` 头读取、合并取最小值、每波上限）。
 严格按本文件「执行流程」中定义的步骤执行，产出全局波次规划表。禁止生成报告文件。"
 })
 ```
@@ -50,14 +51,7 @@ global-pre-scan 产出的 per-group matched_rules，每组已知：file_group �
 
 ### Step 2 — 小组策略打组
 
-按类别分组，每组上限：
-
-| 类别 | 每组合上限 |
-|------|----------|
-| 高危安全 | **2 条** |
-| API使用 / 一般安全 | **2 条** |
-| 领域规则 | **2 条** |
-| 通用规范 / 性能 / 编译 / Python | **3 条** |
+按类别分组，每组上限按各条款所属文件 `<检视负载>` 头的 `通用检视子 agent 检视条款容量上限` 字段（合并组取最小值）。具体容量值由各文件自声明，不在此重复。
 
 每组的文件列表维持 file_group 的原始文件（≤5 文件，由 file-split 保证）。
 
@@ -67,11 +61,12 @@ global-pre-scan 产出的 per-group matched_rules，每组已知：file_group �
   group_id: "kernel_G1_安全_01",
   file_group: "kernel_G1",
   file_list: ["file1.cpp", "file2.h", ...],  // ≤5 文件
-  rule_ids: ["SEC-2.1", "SEC-2.3"],          // 2-3 条
+  rule_ids: ["SEC-2.1", "SEC-2.3"],          // 按容量打包
   priority: 1,
   file_count: 5,
   rule_count: 2,
-  estimated_load: 10                           // file_count × rule_count
+  capacity: 10,                               // 来自 cpp-secure <检视负载> 头，合并组取最小值
+  estimated_load: 10                          // file_count × rule_count（无加权，仅用于排序粗排）
 }
 ```
 
@@ -88,8 +83,8 @@ cpp-style 的 19 条条例**不按 file_group 拆分**，合并为 1 个跨文�
   priority: 1,                            // 并入第一波
   file_count: {C++ 文件总数},
   rule_count: 19,
-  estimated_load: file_count × 19,
-  style: true                             // 标记：读取方式与输出格式特殊
+  estimated_load: file_count × 19,             // cpp-style 专项，不参与容量打包
+  style: true                                  // 标记：读取方式与输出格式特殊
 }
 ```
 
@@ -102,13 +97,13 @@ cpp-style 的 19 条条例**不按 file_group 拆分**，合并为 1 个跨文�
 ```
 1. 将所有 rule_group 按 priority 升序排列（priority 1 先）
 
-2. 同 priority 内按 estimated_load 降序排列
+2. 同 priority 内按 estimated_load（file_count × rule_count）降序粗排
    （重负载组先派发，避免轻负载组全跑完了重负载还在等）
 
 3. 贪心构建波次:
    wave = []
    for group in sorted_groups:
-     if len(wave) < 10:
+     if len(wave) < 6:
        wave.append(group)
      else:
        开始新 wave

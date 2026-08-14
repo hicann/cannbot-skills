@@ -14,12 +14,17 @@
 触发(间接): UpdateMask, LoadAlign, StoreAlign, LoadDist, StoreDist, CastTrait, __ubuf__
   说明: RegBase 上下文中常见，标准代码中也可能出现，需与其他信号联合判断
 默认启用: true
+
 适用架构: arch35 及以上（Ascend 950 系列及后续架构）
 适用场景: Kernel 侧 arch35 及以上 RegBase 路线代码
 不适用场景: Tiling 侧不涉及 RegBase 编程模型
 排除场景: 仅使用标准 AscendC vector API (DataCopy/Add/Mul 等) 且无 RegTensor/VF 相关代码, DESIGN.md 明确选择 MemBase/SIMD 路线
 介绍: RegBase 是基于寄存器的编程模型，与传统 MemBase（基于 UB 的 LocalTensor 计算）不同，使用 RegTensor 在寄存器上直接计算，通过 VF function（__simd_vf__）和 AscendC::Reg::* API 实现高性能计算
 </适用>
+
+<检视负载>
+通用检视子 agent 检视条款容量上限: 5
+</检视负载>
 
 **快速索引**
 

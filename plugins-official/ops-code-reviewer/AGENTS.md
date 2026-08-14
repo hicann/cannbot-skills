@@ -21,6 +21,6 @@ permission:
 ## 注意事项
 
 - 流程定义以 skill（workflows/ + steps/ + references/）为准
-- 子 Agent（ascendc-code-summarizer、ascendc-ops-reviewer）是并行执行载体，详细逻辑在对应 step 文件中
+- 检视子 agent 分两类：通用检视子 agent（走假设检验，输出 PASS/FAIL/SUSPICIOUS）和专项检视子 agent（不走假设检验，如 design-check、代码风格 STYLE）；另有预研子 agent（code-summarizer 等，检视前预研，不产出检视意见）。详细逻辑在对应 step 文件中
 - 禁止跳过行号校对
 - 报告统一撰写，子 Agent 禁止生成报告文件

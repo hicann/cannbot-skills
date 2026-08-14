@@ -19,7 +19,7 @@ ascendc-code-review/
 ├── workflows/                       工作流，按场景命名：{scene}.md
 │   ├── file-review.md              「检视代码」→ 文件检视（含可选设计一致性检查）
 │   ├── pr-review.md                「检视 PR」→ PR检视（含可选设计一致性检查）
-│   ├── pr-large-review.md          PR自动切换 → 大型PR检视（按文件组并行，含可选设计一致性检查）
+│   ├── pr-large-review.md          文件数>20且变更≥3000行 → 大型PR检视（按文件组并行，含可选设计一致性检查）
 │   ├── quick-review.md             「快速检视」→ 定向问题排查
 │   ├── extend.md                   本文件：系统规范
 │   └── ...                         新增场景按同模式添加（scope 必须与 workflow 文件名一致）
@@ -28,7 +28,7 @@ ascendc-code-review/
 ├── steps/                           可执行积木，命名规则：{scope}.{step}.md
 │   │                                scope = 对应 workflow 文件名去掉 .md 后缀
 │   │                                scope = "common" 表示跨场景公共步骤
-│   ├── common.{step}.md            跨场景公共（clause-routing、line-verify、report-write、
+│   ├── common.{step}.md            跨场景公共（plan-design、line-verify、report-write、
 │   │                                docs-detect、design-check）
 │   ├── file-review.{step}.md       文件检视（code-summarize、clause-review）
 │   ├── pr-review.{step}.md         PR检视（code-fetch、code-summarize、clause-review、line-verify）
@@ -108,8 +108,8 @@ ascendc-code-review/
 | 执行 | common.report-write.md | ≤90 | 主Agent |
 | 派发 | common.docs-detect.md（派发部分） | ≤30 | 主Agent |
 | 派发 | common.design-check.md（派发部分） | ≤30 | 主Agent |
-| 知识 | core/methodology.md | ≤130 | 检视子Agent |
-| 知识 | references/*.md | 不限 | 检视子Agent（按需） |
+| 知识 | core/methodology.md | ≤130 | 通用检视子 agent |
+| 知识 | references/*.md | 不限 | 通用检视子 agent（按需） |
 
 ### 1.4 工作流示例：PR检视
 
@@ -124,16 +124,19 @@ SKILL.md (34行)
 pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步骤细节
   │
   ├─ 阶段0 ──────────────────────────────────────
-  │   │  获取 diff + 代码概要 + 条例路由
+  │   │  获取 diff + 代码概要 + API 预研 + 设计文档探测 + 检视计划设计
   │   │
   │   ├─ steps/pr-review.code-fetch.md (20行)       主Agent执行
   │   │
-  │   ├─ steps/pr-review.code-summarize.md           子Agent A (并行)
+  │   ├─ steps/pr-review.code-summarize.md           代码概要子 Agent (并行)
   │   │   ├─ 派发指令 (~30行) → 主Agent读到
   │   │   └─ 执行指南 (~230行) → 仅子Agent读到
   │   │
-  │   └─ steps/common.clause-routing.md (~110行)     子Agent B (并行, haiku)
-  │       扫描 references/*.md 的 <适用> 头 → 分组规划
+  │   ├─ steps/common.api-prestudy.md                 API 预研子 Agent (并行, 仅 Kernel 侧)
+  │   ├─ steps/common.docs-detect.md                  设计文档探测子 Agent (并行)
+  │   │
+  │   └─ steps/common.plan-design.md (~90行)         检视计划子 Agent (三个子 Agent 返回后派发)
+  │       读概要 → 匹配/筛查/合并 → 检视计划
   │
   ├─ 阶段1 ──────────────────────────────────────
   │   │  逐条检视
@@ -141,7 +144,7 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
   │   ├─ steps/pr-review.clause-review.md (37行)     prompt模板
   │   │      主Agent填充: 条例ID + diff路径 + 代码范围
   │   │
-  │   └─ 逐波派发检视子Agent (≤10/波)
+  │   └─ 逐波派发通用检视子 agent (≤6/波，见 core/review-load-balance.md)
   │       子Agent加载链: skill → methodology.md → 概要 → 规则文档
   │                                                   ◀── 扩展点：放新规则
   │
@@ -160,9 +163,9 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
 |------|------|------|
 | 主Agent | SKILL.md → pr-review.md | 34 + 88 |
 | 主Agent | code-fetch / 派发指令 / prompt模板 / line-verify / report-write | 20 + 30 + 37 + 22 + 65 |
-| 路由子Agent | common.clause-routing.md | 110 |
+| 计划设计子Agent | common.plan-design.md | 200 |
 | 概要子Agent | 执行指南 | 230 |
-| 检视子Agent | methodology.md + 分配的规则文档 | 126 + 按需 |
+| 通用检视子 agent | methodology.md + 分配的规则文档 | 126 + 按需 |
 
 主Agent全程加载 ≤300行编排内容，子Agent各自独立加载执行细节，不互相污染。
 
@@ -222,7 +225,7 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
 
 工作流负责子Agent的派发编排。step 文件提供 prompt 模板，不包含 `Agent()` 调用逻辑。子Agent类型统一使用 `"general"`。
 
-每波 ≤10 个子Agent，波次内并行，波次间串行。
+每波 ≤6 个子Agent（上限见 `core/review-load-balance.md`），波次内并行，波次间串行。
 
 ### 2.5 注册新工作流
 
@@ -251,7 +254,7 @@ steps/{scope}.{step-name}.md
 
 | scope | 含义 | 示例 |
 |-------|------|------|
-| common | 跨工作流复用 | common.clause-routing.md |
+| common | 跨工作流复用 | common.plan-design.md |
 | file-review | 文件检视专用 | file-review.code-summarize.md |
 | pr-review | PR检视专用 | pr-review.code-fetch.md |
 
@@ -261,10 +264,10 @@ steps/{scope}.{step-name}.md
 
 | 公共步骤 | 作用 |
 |---------|------|
-| common.clause-routing.md | 智能条例路由 |
+| common.plan-design.md | 检视计划设计（条例匹配/合并/分组/筛查） |
 | common.line-verify.md | 行号校对 |
 | common.report-write.md | 报告生成 |
-| common.docs-detect.md | 设计文档探测（与 code-summarize/clause-routing/api-prestudy 同级并行） |
+| common.docs-detect.md | 设计文档探测（与 code-summarize/api-prestudy 同级并行） |
 | common.design-check.md | 设计实现一致性 S1-S7 检查（含设计映射，复用摘要+API预研） |
 
 如果发现某步骤在多个工作流中重复出现，鼓励提取为 `common.*`，让后续的新工作流受益。场景特有的逻辑（如 PR 检视的越界校验）才用 `{工作流}.*` 前缀。
@@ -325,7 +328,7 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 
 ### 4.1 `<适用>` 声明头
 
-每个 `references/{id}.md` 文件开头必须有 `<适用>` 声明，定义规则的适用条件。路由子Agent在检视时自动扫描 `references/` 目录，读取每个文件的 `<适用>` 头进行匹配。
+每个 `references/{id}.md` 文件开头必须有 `<适用>` 声明，定义规则的适用条件。计划设计子Agent在检视时自动扫描 `references/` 目录，读取每个文件的 `<适用>` 头进行匹配。
 
 ```markdown
 <适用>
@@ -337,6 +340,19 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 排除场景: {可选，领域规则的排除条件}
 </适用>
 ```
+
+### 4.1.1 `<检视负载>` 声明头
+
+每个 `references/{id}.md` 文件 `<适用>` 头之后必须有 `<检视负载>` 声明，定义通用检视子 agent 检视该文件条款时的派发参数。路由子 agent 扫描该头读取容量，按其打包每组条款（规则见 `core/review-load-balance.md`）。
+
+```markdown
+<检视负载>
+通用检视子 agent 检视条款容量上限: {数字}
+</检视负载>
+```
+
+- 数字（如 3/5/10）= 一个通用检视子 agent 一次检视该文件条款的上限；越小表示检视负载越重（少打包）
+- 专项文件（如 cpp-style、doc-style）写「此条款文档由专项检视子 agent 独立托管，不参与条款派发流程」，不进通用检视波次
 
 ### 4.2 字段说明
 
@@ -351,12 +367,12 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 
 #### `<适用>` 头是规则自发现的唯一接口
 
-路由子Agent在每次检视时自动扫描 `references/` 目录，读取每个 `.md` 文件的 `<适用>` 头，与代码特征匹配。**整个过程不需要修改任何路由代码或配置文件。**
+计划设计子Agent在每次检视时自动扫描 `references/` 目录，读取每个 `.md` 文件的 `<适用>` 头，与代码特征匹配。**整个过程不需要修改任何路由代码或配置文件。**
 
 ```
 新增规则文件 → 放入 references/ → 写 <适用> 头
     ↓
-路由子Agent启动
+计划设计子Agent启动
     ↓
 Step 1: 扫描 references/*.md → 收集所有领域规则的 触发: 关键词
 Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
@@ -367,7 +383,7 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 - **通用规则**（`领域: false`）：只要语言和侧别匹配就纳入，不需要触发特征
 - **领域规则**（`领域: true`）：代码中出现 `触发:` 字段中的任一关键词才激活
 - **`触发:` 字段是领域规则的关键**：关键词来自代码中实际出现的 API 名、宏、include 路径。不同仓的规则只要声明不同的触发关键词（如 `ops-nn::` vs `ops-math::`），路由就会自动分流，互不干扰
-- **排除场景**：领域规则可以在 `<适用>` 头中声明排除条件，路由子Agent会读取并应用
+- **排除场景**：领域规则可以在 `<适用>` 头中声明排除条件，计划设计子Agent会读取并应用
 
 ### 4.3 快速索引表
 
@@ -412,12 +428,12 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 {关键注意点}
 
 ### 专属检视方法（可选）
-{本条条例特有的检视步骤，如类型分析、多步验证等。检视子Agent必须严格遵循}
+{本条条例特有的检视步骤，如类型分析、多步验证等。通用检视子 agent必须严格遵循}
 ```
 
 ### 4.5 注册方式
 
-文件放入 `references/` 目录即自动注册。路由子Agent在每次检视时扫描该目录。无需修改任何其他文件。
+文件放入 `references/` 目录即自动注册。计划设计子Agent在每次检视时扫描该目录。无需修改任何其他文件。
 
 ### 4.6 文件命名与条例编号前缀
 
@@ -479,8 +495,9 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 
 **必须包含**：
 1. `<适用>` 声明头（见第四章）
-2. `## 快速索引` 表（含范畴和适用范围列）
-3. 每条条例的完整详情（问题描述/错误示例/正确示例）
+2. `<检视负载>` 声明头（见 4.1.1）
+3. `## 快速索引` 表（含范畴和适用范围列）
+4. 每条条例的完整详情（问题描述/错误示例/正确示例）
 
 **注册**：文件放入 `references/` 即自动生效，无需注册。
 

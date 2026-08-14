@@ -1,6 +1,6 @@
 # 设计文档探测
 
-文件检视、PR 检视、大型 PR 检视共用。派发为 `general` 子 Agent 执行，与 code-summarize / clause-routing / api-prestudy **同级并行**，互不依赖。
+文件检视、PR 检视、大型 PR 检视共用。派发为 `general` 子 Agent 执行，与 code-summarize / api-prestudy **同级并行**，互不依赖。
 
 合并后设计文档路径由 skill 自行探测（不再依赖调用方传入）。返回 `docs_input`（文件/目录路径，可多个）或空。空表示未检测到设计文档，后续 design-check 不派发。
 
@@ -43,4 +43,4 @@ docs_input: {文档路径或目录，可多个逗号分隔；未检测到则为�
 ## 输出
 
 - `docs_input`（路径字符串，可多个逗号分隔）或空字符串
-- 后续：file-review / pr-review / pr-large-review 的 Stage1 据此决定是否并行派发 design-check；design-check 子 Agent 据此读取设计文档做 S1-S7 + D8 对照。
+- 后续：file-review / pr-review / pr-large-review 的 Stage1 据此决定是否并行派发 design-check；专项检视子 agent（design-check）据此读取设计文档做 S1-S7 + D8 对照。

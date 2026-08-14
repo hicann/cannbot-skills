@@ -7,7 +7,11 @@
 默认启用: true
 </适用>
 
-> **定位**：本文件不走 clause-routing 条例路由，由 `steps/common.design-check.md` 的 D8 维度直接 Read。检视对象为 docs_input 目录下的所有 .md 文档（含 README、DESIGN.md 等）。
+<检视负载>
+此条款文档由专项检视子 agent 独立托管，不参与条款派发流程
+</检视负载>
+
+> **定位**：本文件不走 plan-design 条例路由，由 `steps/common.design-check.md` 的 D8 维度直接 Read。检视对象为 docs_input 目录下的所有 .md 文档（含 README、DESIGN.md 等）。
 
 ## 快速索引
 

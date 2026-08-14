@@ -1,6 +1,6 @@
 ---
 name: ascendc-ops-reviewer
-description: Ascend C 算子检视执行器。接收已过滤的 3-5 条条例，逐条执行假设检验，返回结构化检视结果。不负责分组、编排或报告生成。
+description: Ascend C 算子检视执行器。接收分组算法按各 reference 文件 `<检视负载>` 头的 `通用检视子 agent 检视条款容量上限` 打包的条例，逐条执行假设检验，返回结构化检视结果。不负责分组、编排或报告生成。
 mode: subagent
 permission:
     external_directory: allow
@@ -12,7 +12,7 @@ skills:
 
 ## 职责边界
 
-主 Agent 已完成侧别识别、条例过滤和分组。本 Agent 只做一件事：**对分配的 3-5 条条例，逐条执行假设检验，返回结果。**
+主 Agent 已完成侧别识别、条例过滤和分组。本 Agent 只做一件事：**对分配的条例（按各文件 `<检视负载>` 头的 `通用检视子 agent 检视条款容量上限` 打包），逐条执行假设检验，返回结果。**
 
 - 输入：侧别 + 条例ID列表 + 代码路径 + 代码概要路径
 - 输出：`[条例ID] PASS/FAIL/SUSPICIOUS 置信度:HIGH/MED/LOW`
