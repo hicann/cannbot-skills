@@ -130,11 +130,29 @@ references/verify_result_template.py
 
 ---
 
-## 8. FlashAttention / MHA / GQA 类精度验证补充
+## 8. Linear Attention / GDN 类精度验证补充
+
+Linear Attention、GDN、KDA、retention、RWKV 等状态递推类算子的 golden 与测试覆盖还需满足：
+
+1. **先冻结 baseline 层级**：full-flow fused op 必须对齐同语义 full-flow baseline；GDN forward 首选 `flash_chunk_gated_delta_rule_fwd`。stage operator 必须说明上下游中间量契约。
+2. **stage-aware golden 有前提**：可用 stage-aware reference 验证单 stage，但上游中间量必须先被 independent baseline 或 full-flow reference 验证，不能用当前 kernel 的中间量自证。
+3. **mixed tolerance 报告字段固定**：每个 case 输出 `case_name`、`shape`、`dtype`、`output_name`、`atol`、`rtol`、`matched_ratio`、`max_abs`、`pass/fail`。浮点判据按 `ops-precision-standard`：`abs(actual-golden) <= atol + rtol * abs(golden)`，并联合检查匹配比例与最大绝对误差。
+4. **shape 覆盖按算法维度生成**：覆盖 BT/chunk、V/K、HK/HV/GQA、batch/head、TilingKey、zero gate/high beta/近零输出等类别。详见 [shape-constraints.md](shape-constraints.md) Δ5。
+5. **evaluation baseline 只作辅助对比**：Triton/开源 baseline 可用于辅助记录同 shape 对比结果和 baseline_status；baseline 某些 shape 不支持时，记录 `baseline_status=UNSUPPORTED/FAIL/MISSING`，不影响 custom 对 independent golden 的主判定。
+6. **复用已有输出**：`--reuse-existing` 只能用于“重新汇总/重新按新指标判定旧输出”。如果 kernel 已修改，必须重新运行 custom 输出，避免旧输出掩盖回归。
+
+KDA dAv 已验证的实践：
+
+- smoke case 只用于环境/功能门禁；完整精度报告必须按 [shape-constraints.md](shape-constraints.md) Δ5 覆盖 Linear Attention 类算法维度，不能用少量固定 shape tuple 代替完整覆盖。
+- `cann9_precision_cases` 可同时作为输入数据根和已有输出根；报告生成脚本需要明确区分 inputs、custom outputs、golden/baseline。
+- 若只剩个别 case 缺报告，可以直接读取已有 case 目录中的输出和 baseline 重新汇总；不要重复生成昂贵 golden，除非输入文件缺失或标准变更需要重算。
+- runtime 报 `aclrtSynchronizeStream ret=507014` 时，先确认设备健康、case 是否 varlen 长跑、runner 是否旧二进制，再判断 kernel 精度问题。
+
+## 9. FlashAttention / MHA / GQA 类精度验证补充
 
 FlashAttention 融合算子的 golden 与测试覆盖还需满足：
 
 1. **冻结 baseline 层级**：full-flow fused op 必须对齐同语义 full-flow baseline，**首选 `aclnnFlashAttentionScore`**（`torch_npu.npu_fusion_attention(q, k, v, H, "BNSD", scale=scale)`）。语义、dtype、layout、scale（`1/sqrt(D)`）必须与交付目标一致。
 2. **双口径验证**：① 内部 golden（CPU numpy/torch fp32 累加 softmax attention）；② **aclnn 标杆对比**（算子 dump BNSD 输出 O 到 `o.bin`，与 aclnn 输出逐元素对比）。
 3. **mixed tolerance 报告字段固定**：每 case 输出 `shape`、`dtype`、`atol`、`rtol`、`matched_ratio`、`max_abs`、`pass/fail`。浮点判据按 `ops-precision-standard`：`abs(actual-golden) <= atol + rtol*abs(golden)`。FA 经验阈值：`atol=0.02, rtol=0.1`，通过率 ≥99.9% 且 `max_abs < 0.05`（A2 实测 custom vs aclnn max_abs ~1e-4）。
-4. **shape 覆盖按算法维度生成**：覆盖 B/Sq/Sk 组合、`Skv` 非 128 对齐尾块、MHA/GQA、D=64/128、数值边界。详见 [shape-constraints.md](shape-constraints.md) Δ5。
+4. **shape 覆盖按算法维度生成**：覆盖 B/Sq/Sk 组合、`Skv` 非 128 对齐尾块、MHA/GQA、D=64/128、数值边界。详见 [shape-constraints.md](shape-constraints.md) Δ6。

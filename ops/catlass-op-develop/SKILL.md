@@ -77,6 +77,8 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - **精度脚本（golden/verify）编写 → [precision-verification.md](references/precision-verification.md)**（先经 `ops-precision-standard` 选标准）
 - **最优 mmad/epilogue 选型理由 → [catlass-op-design/references/mmad-epilogue-selection.md](../catlass-op-design/references/mmad-epilogue-selection.md)**（实现时据此核对 DESIGN 选型）
 - **FlashAttention / MHA / GQA 类实现注意事项 → [patterns/flash-attention.md](references/patterns/flash-attention.md)**（BNSD 接口、PAGED 方案、host 布局转换、aclnn 精度对比）
+- **Linear Attention / GDN / KDA / retention 类实现注意事项 → [patterns/linear-attention.md](references/patterns/linear-attention.md)**
+- **线性 Attention 设计路由 → [attention/linear-attention.md](../catlass-op-design/references/kernels/attention/linear-attention.md)**（实现 GDN/KDA/retention/RWKV 时先进入 Attention 大类路由，再按子场景渐进读取开源参考、shape 覆盖规则、mixed tolerance 精度规则和既有 Catlass 经验）
 
 ---
 
@@ -95,6 +97,8 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 | [patterns/quant-matmul.md](references/patterns/quant-matmul.md) | 量化 Matmul AIC/AIV 协同 |
 | [patterns/branch-instantiation.md](references/patterns/branch-instantiation.md) | 多分支 if constexpr 实例化 |
 | [patterns/grouped-matmul.md](references/patterns/grouped-matmul.md) | 分组矩阵乘（含 MoE 融合）实现注意事项：跨 PIPE 同步栅栏、跨 N-block 行归约两趟 epilogue、中间结果 dump 调试、A2 平台约束 |
+| [patterns/linear-attention.md](references/patterns/linear-attention.md) | Linear Attention（GDN/KDA/retention/RWKV）实现注意事项：dependency stage、GM workspace/flag、L1/L0/UB 复用、V=256 split accumulation、GQA/HK 缓存、shape/precision/perf 归档 |
+| [patterns/a2-a3-linear-attention-stage-design.md](references/patterns/a2-a3-linear-attention-stage-design.md) | A2/A3 线性 Attention stage 设计细则：stage/window 调度、4-slot workspace、CrossCoreFlag、L1 resident、L0/UB double buffer、物理转置、GQA/HK cache、`V=256` split accumulation |
 | [patterns/flash-attention.md](references/patterns/flash-attention.md) | FlashAttention（MHA/GQA）实现注意事项：BNSD 公开接口 + host 布局转换、A2 PAGED=true+恒等 block_table、尾块填充、AIC/AIV 协作、dump O + aclnn 标杆精度对比、FA1–FA11 检查表 |
 | [patterns/a2-a3-flash-attention-stage-design.md](references/patterns/a2-a3-flash-attention-stage-design.md) | A2/A3 FlashAttention stage 设计细则：C1→V1→C2→V2 四段流水、online softmax 状态递推、GM workspace/CrossCoreFlag、尾块处理、AIC/AIV 流水重叠 |
 | [rules.md](references/rules.md) | 强制性规则 Δ1–Δ10 |
@@ -116,6 +120,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - 把 golden 生成注释掉 / 跳过；让 verify 只覆盖基础 shape 不覆盖实网 shape
 - 在 verify 里自创零容忍小值域门限或用全体元素 MARE-max 作硬门限（过零激活会误判）
 - **自行编写 verify_result.py 的精度判定逻辑、阈值或判定函数**——必须从模板复制（见下方 ALWAYS）
+- 命中 Linear Attention / GDN 场景时，把历史 shape tuple 无解释地硬编码为全部测试覆盖
 - 命中 FlashAttention 场景时：在 A2 上走 `PAGED=false`、把 BNSD 布局转换塞进 kernel、或跳过 aclnn 标杆精度对比
 
 **ALWAYS**:
@@ -128,5 +133,7 @@ rg "gmScale|gmPerTokenScale|ptrScale" catlass/include/catlass/gemm/kernel/
 - **写 verify_result.py 前，必须先读取模板文件 `cannbot-skills/ops/catlass-op-develop/references/verify_result_template.py`**，完整复制其精度判定逻辑（DTYPE_THRESHOLDS、calculate_mere/mare、check_mere_mare、check_error_ratio、verify 函数），只修改 `=== 可修改区域 ===` 内的 OUTPUT_SHAPE 和 OUTPUT_DTYPE
 - verify 必须同时运行双标准（MERE/MARE Threshold + atol/rtol/error_ratio），通过任一即 PASS
 - verify 判据 = `ops-precision-standard` 选出的官方标准；golden 镜像内核数值路径（fp32 累加→末尾 cast）；int8 GEMM golden 用 fp32 BLAS（`|Cint|<2²⁴` 精确）；gen_data/verify 覆盖基础 + 实网 shape（见 [precision-verification.md](references/precision-verification.md)）
+- Linear Attention / GDN / KDA / retention / RWKV 场景必须额外读取 [patterns/linear-attention.md](references/patterns/linear-attention.md)，按 BT/chunk、V/K、HK/HV/GQA、batch/head、数值边界和 TilingKey 构造覆盖矩阵
+- 当线性 Attention 算子包含多 stage、Cube/Vector 协作、CrossCoreFlag、L1 resident、`V=256`、GQA/GVA、partial/varlen 或 stage operator 时，必须继续读取 [patterns/a2-a3-linear-attention-stage-design.md](references/patterns/a2-a3-linear-attention-stage-design.md)，并按其中 checklist 设计/实现 workspace slot、flag、resident 和 split accumulation
 - FlashAttention 场景必须额外读取 [patterns/flash-attention.md](references/patterns/flash-attention.md)：BNSD 公开接口 + host 布局转换、A2 `PAGED=true`+恒等 block_table、尾块 0 填充、dump O + `aclnnFlashAttentionScore` 标杆对比（atol=0.02/rtol=0.1，max_abs<0.05）
 - FlashAttention 多 stage/AIC-AIV 场景必须继续读取 [patterns/a2-a3-flash-attention-stage-design.md](references/patterns/a2-a3-flash-attention-stage-design.md)，按 checklist 设计 workspace slot、CrossCoreFlag、online softmax 状态递推和尾块处理

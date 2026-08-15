@@ -1,6 +1,6 @@
 # Catlass 代码审查参考手册
 
-> 本文件由 Reviewer 在 Step 3（代码质量评估）时读取，逐项对照检查。包含通用 Ascend C 检视项 + catlass 专属检视项 C1–C11。
+> 本文件由 Reviewer 在 Step 4（代码审查）时读取，逐项对照检查。包含通用 Ascend C 检视项 + catlass 专属检视项 C1–C11。场景专项门禁通过“Operator-type specific review gates”入口下沉到对应 reference。
 
 ---
 
@@ -12,7 +12,7 @@
 | C2 | catlass 源码位于工作区根 `./catlass/`，**未**克隆到 `operators/{operator_name}/` 内 | `find operators -name catlass -type d` 应不命中 | 阻塞 |
 | C3 | CMakeLists.txt 注入 `-I<catlass>/include` + `-DCATLASS_ARCH=<arch>` | `verify_cmake_config.py` | 阻塞 |
 | C4 | op_kernel **禁用** `DeviceGemm` 适配器；必须直接 `Kernel` + `Kernel::Params` + `Kernel{}(params)` | `grep -n DeviceGemm op_kernel/*.asc` 应不命中；`grep -n 'Kernel{}'` 应命中 | 阻塞 |
-| C5 | op_kernel **禁止**自实现矩阵乘 / 逐元素 / 拷贝循环 | 目视 + grep 标量循环模式 | 阻塞 |
+| C5 | op_kernel **禁止**自实现矩阵乘 / 顶层散乱逐元素 / 顶层拷贝循环；不得 host 真实计算，不得空 device kernel | 目视 + grep 证据：kernel 入口、`Kernel{}(params)`、host 计算关键词、自定义组件路径 | 阻塞 |
 | C6 | catlass hand-launch 直调 Workspace 指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` | `grep -n 'GetUserWorkspace\|SetSysWorkspaceForce' op_kernel/*.asc` 应**不命中**；`grep -n 'userWs = workspace'` 应命中 | 阻塞 |
 | C7 | op_kernel **禁止** `#include` 算子自身的 tiling 实现文件（仅可 include 共享 POD `*_tiling.h`） | `grep -n '#include.*tiling' op_kernel/*.asc` | 阻塞 |
 | C8 | TilingKey 分支实例化与 DESIGN.md §2.1 列出的合法组合一致 | 对照 DESIGN.md | 高 |
@@ -37,6 +37,10 @@ grep -n "Kernel{}(params)\|Kernel{}\s*(" operators/{operator_name}/op_kernel/*.a
 
 # C5：禁用自实现循环
 grep -n "for\s*(" operators/{operator_name}/op_kernel/*.asc | head -20
+grep -n "__global__ __aicore__" operators/{operator_name}/op_kernel/*.asc
+grep -n "Kernel{}(params)\|Kernel{}\s*(" operators/{operator_name}/op_kernel/*.asc
+grep -RIn "cpu.*compute\|host.*compute\|forward\|golden\|matmul\|for\s*(" operators/{operator_name}/op_host operators/{operator_name}/scripts | head -50
+find operators/{operator_name}/op_kernel -type f \( -name "*block*" -o -name "*tile*" -o -path "*/custom/*" \)
 
 # C6：Workspace（catlass 直调应指针透传；GetUserWorkspace/SetSysWorkspaceForce 均应不命中）
 grep -n "GetUserWorkspace" operators/{operator_name}/op_kernel/*.asc
@@ -45,6 +49,10 @@ grep -n "userWs = workspace" operators/{operator_name}/op_kernel/*.asc
 
 # C7：include 边界
 grep -n "#include" operators/{operator_name}/op_kernel/*.asc | grep -i tiling
+
+# Operator-type specific review gates
+# Linear Attention / GDN / KDA / retention / RWKV / state recurrence:
+#   read workflows/references/attention-linear-review.md
 ```
 
 ---
@@ -100,6 +108,16 @@ grep -n "#include" operators/{operator_name}/op_kernel/*.asc | grep -i tiling
 4. 调优场景：PRE/POST 单变量变更证据是否齐全（C11）
 
 **与 Developer 性能数据对比**：读取 `operators/{operator_name}/docs/perf/` 目录下 Developer 数据，与 Reviewer 独立采集结果对比，差异过大需在 REVIEW.md 中说明。
+
+## Operator-type specific review gates
+
+公共 C1-C11 完成后，Reviewer 必须按 operator type 判断是否存在专项门禁：
+
+| Operator type | 专项 reference | 触发信号 |
+|---|---|---|
+| Attention / State Recurrence | [attention-linear-review.md](attention-linear-review.md) | Linear Attention / GDN / KDA / retention / RWKV / state recurrence |
+
+命中专项门禁时，REVIEW.md 必须记录专项 reference 路径和逐项检查结果。专项门禁失败时，总审查结论必须为 FAIL。
 
 ---
 

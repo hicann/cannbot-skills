@@ -65,6 +65,43 @@ L0C 占用 ≈ L1.M * L1.N * 4(fp32)                              ≤ 128KB
 
 > Cube 利用率已达 ~90%+ 即接近 roofline；此时再提速通常受 fp16 L1 容量（K-tile 上限）这类硬件结构约束，需以 profiler 证据说明。
 
+## Linear Attention Stage Tuning
+
+当目标是 GDN/KDA/retention/RWKV 等线性 Attention stage 或融合算子时，先读取 `catlass-op-develop/references/patterns/a2-a3-linear-attention-stage-design.md`。这类算子常见瓶颈不是单个 TileShape，而是 stage/window 调度、CrossCoreFlag、workspace slot、L1 resident 和 `V=256` split accumulation 的组合问题。
+
+| 现象 | 优先归因 | 优先检查 |
+|---|---|---|
+| Cube/Vector 互等明显 | stage 边界或 flag 放在内层循环 | wait/set 是否只在 stage 入口/末尾 |
+| GQA/GVA 重复计算 | HK/HV cache scope 错 | K-side 中间量是否按 `hk` 复用 |
+| `V=256` 明显变慢或错 | split accumulation / Fixpipe 边界 | 是否只在末 subtile writeback |
+| partial/varlen case 慢 | 尾块切得过碎 | 是否用 pad/mask 保持块搬运 |
+| 小 `B*chunk` 慢 | 核调度不足 | 先评估 schedule mode，不只调 TileShape |
+| Vector MTE/地址开销高 | transpose/scatter 热路径 | 是否改为物理转置 workspace |
+
+性能报告必须把这些判断写进 `docs/perf/round_NNN/`：不是只给 speedup，还要说明瓶颈属于 tile、workspace、flag、resident、schedule 还是 baseline unsupported。
+
+### KDA dAv / varlen 性能排障
+
+KDA dAv、GDN backward 或同类 varlen stage 出现低加速比、长时间无输出、或某个 GVA/varlen case 卡住时，按以下顺序排查：
+
+| 现象 | 优先检查 | 经验结论 |
+|---|---|---|
+| varlen case 分钟级长跑 | 是否把物理 `chunkLen=BT` 改成 `chunkLen=validRows` | 对当前 Catlass TLA 路径，actual shape 收敛可能进入不规则尾块慢路径；先恢复 full-BT + validRows mask |
+| `V=256` 低于 baseline | split accumulation、Fixpipe writeback、L0C 复用边界 | 先保证正确生命周期，再调 TileShape |
+| GVA/GQA 低速 | `HV/HK` 映射和 HK cache scope | K-side 中间量按 HK 复用，避免按 HV 重算 |
+| 小 `B*chunk` 低速 | task 数少于核心数 | 这是 schedule mode 问题，不是单纯 TileShape 问题 |
+| benchmark 进程看似不退出 | `time`/Python driver/C++ runner 进程树 | 三个进程同时存在正常；看 runner 输出、report mtime、NPU 健康 |
+| `libruntime.so` 缺失 | CANN set_env 和 `LD_LIBRARY_PATH` | 先修环境，不归因 kernel |
+
+性能优化必须先恢复已通过精度的状态，再单变量调优。KDA dAv 经验中，盲目尝试 `RunDv` 提前、`Dv256 64x256x64`、varlen actual shape 收敛，均可能编译通过但运行长跑；这类优化必须单独分支、单独报告、失败立即回滚。
+
+### 复用 baseline 与输入数据
+
+- 性能测试允许复用已有 inputs 和 baseline，减少重复 golden/Triton 生成时间。
+- `--reuse-existing-inputs` 只复用 case-root 中输入；custom runner 仍会重新执行。
+- `--reuse-baseline` 只从当前 `--report-dir` 的已有 report 读取 baseline。如果新建 report dir，需要先复制历史 `catlass_*_perf_report.json/md` 进去。
+- baseline 某些 shape 不支持时，记录 `baseline_status=UNSUPPORTED/FAIL/MISSING`，不要把 speedup 强行算成 0 或 FAIL。
+
 ## FlashAttention Stage Tuning
 
 当目标是 FlashAttention（MHA/GQA）融合算子时，先读取 `catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md`。FA 的常见瓶颈不是单个 TileShape，而是 C1→V1→C2→V2 四段流水的 AIC/AIV 重叠、CrossCoreFlag、workspace slot、online softmax 状态递推的组合问题。

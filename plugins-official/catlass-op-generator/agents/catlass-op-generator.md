@@ -37,6 +37,8 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - 根据 `operators/{operator_name}/docs/DESIGN.md` 进行代码实现
 - **前置阅读** `./catlass/README.md`、`./catlass/docs/` 及参考 `examples/` 样例（含样例目录内文档）
 - **强制加载** `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装与 Device 调用
+- 若 DESIGN 命中 GDN / KDA / retention / RWKV / linear attention / state recurrence，必须额外读取 `/catlass-op-develop` 的 `references/patterns/linear-attention.md` 和 `/catlass-op-design` 的 `references/kernels/attention/linear-attention.md`，再按子场景路由渐进读取 open-source map、GDN/KDA、mixed tolerance 精度规则等 reference，按 dependency stage、GM workspace/flag、远程开源参考规范、仓内 GDN/KDA case reference、用户数学 contract、非 GEMM 自定义 Block/Tile、shape/precision/perf 归档规则实现
+- 若命中 Linear Attention / GDN / KDA，必须读取 `docs/OPEN_SOURCE_ALIGNMENT.md` 并执行 source-of-truth check：逐项核对 `reference_source`、`clone_status`、用户数学 contract、primary reference 关键文件或摘要章节、evaluation_baseline、scale/mask/clamp/cast/layout/varlen/workspace/tiling 差异裁决。`reference_source=USER_LOCAL` 时以用户显式本地实现参考为实现骨架；`reference_source=OPEN_SOURCE` 且 `clone_status=CLONED` 时以 clone 的开源参考为实现骨架；`clone_status=UNAVAILABLE` 时以仓内开源规范摘要、远程搜索路径和 curated reference 为可追溯骨架继续实现。evaluation_baseline 只能用于评测脚本、shape、报告字段和 baseline_status，禁止用于实现骨架。禁止在用户未显式给本地实现参考时改用开发机本地实现或历史算子目录；禁止从空白模板重新发明 pipeline
 - 起骨架（CMake + .asc）、构建、测试、问题处理
 - 性能采集（通过 `ops-profiling`）、调优（通过 `/catlass-op-perf-tune`）
 - 结果总结、文档编写
@@ -54,7 +56,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 
 - **禁止**：跳过 `/catlass-op-develop` skill 自行编排 catlass 拼装写法
 - **禁止**：op_kernel 中使用 catlass `DeviceGemm` 适配器（仅 example 用，必须直接实例化 `Kernel` + `Kernel::Params`）
-- **禁止**：op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环（只能用 catlass `Kernel` / `Block*` / `Tile*` 组件）
+- **禁止**：op_kernel 顶层自实现矩阵乘 / 散乱逐元素 / 拷贝循环。Linear Attention 的 gate/decay/mask/finalize 等非 GEMM 逻辑可封装在 Catlass-style 自定义 `Block*` / `Tile*` 组件内部，但不得手写 GEMM、不得 host 真实计算、不得空 device kernel
 - **禁止**：使用 `SetSysWorkspaceForce`；catlass hand-launch 直调 Workspace 用指针透传 `GM_ADDR userWs = workspace;`，**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界，仅 aclnn/框架路径适用）
 - **禁止**：op_kernel `#include` 算子自身的 tiling 实现文件
 - **禁止**：遇到问题时简化/删除/重写代码
@@ -78,6 +80,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - catlass 源码树：`./catlass/include`、`./catlass/examples`、`./catlass/docs`
 - （修复模式）审查报告：`operators/{operator_name}/docs/REVIEW.md`
 - （串讲模式）设计文档 + 开发计划
+- Linear Attention / GDN / KDA 对齐记录：`operators/{operator_name}/docs/OPEN_SOURCE_ALIGNMENT.md`（如适用，缺失则返回 design_issue）
 
 ### 输出边界
 
@@ -101,6 +104,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 |------|------|---------|
 | 0 | 阅读 catlass 仓库文档 | 已读 README.md、docs/ 关键文档、参考 example 样例（含样例目录内文档） |
 | 1 | 读取设计方案 | 理解 catlass 选型表、参考 example、TilingKey 分支、Workspace 量级 |
+| 3.0 | Dev-LA-Source Check | Linear Attention / GDN / KDA 场景已读取 OPEN_SOURCE_ALIGNMENT.md，并把参考实现 pipeline/差异裁决写入 PLAN.md |
 | 2 | 算子实现 | 代码文件创建完成，编译通过 |
 | 3 | 构建和测试 | Level 0~2 测试通过 |
 | 4 | 上板性能采集 | 性能数据已归档 |
@@ -146,6 +150,11 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 - [ ] 已读取 DESIGN.md（特别是 §1.2 catlass 选型与 §2.1 TilingKey 分支）
 - [ ] 已对照打开参考 example 源码（路径来自 §1.3）
 - [ ] 已加载 `/catlass-op-develop` skill
+- [ ] Linear Attention / GDN / KDA 场景已读取 `patterns/linear-attention.md` 与 `references/kernels/attention/linear-attention.md`，并按子场景路由核对 full-flow/stage、开源参考、用户数学 contract、workspace slot、flag、非 GEMM 自定义 Block/Tile 与 shape 覆盖矩阵
+- [ ] Linear Attention / GDN / KDA 场景已读取 `docs/OPEN_SOURCE_ALIGNMENT.md`；若文件缺失或差异裁决不完整，停止开发并返回 design_issue
+- [ ] Linear Attention / GDN / KDA 场景已确认 `reference_source` 合法：未给用户本地实现参考路径时必须是 `OPEN_SOURCE`；用户 baseline/评测路径只进入 evaluation_baseline
+- [ ] 若 OPEN_SOURCE_ALIGNMENT.md 把 evaluation_baseline 当 primary reference 或实现骨架，停止开发并返回 design_issue
+- [ ] 已把参考实现关键文件到本实现文件的映射、采用/偏离裁决写入 PLAN.md
 
 #### 阶段 2：算子实现（渐进式开发）
 
@@ -161,7 +170,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 
 ##### Step A：起工程骨架 → 编译通过（空 Kernel）
 
-基于 `catlass/examples/` 中选定的参考 example 起骨架（**只抄结构，不照搬代码**）。生成：
+基于 `catlass/examples/` 中选定的参考 example 起工程骨架；Linear Attention / GDN / KDA 场景还必须基于 `OPEN_SOURCE_ALIGNMENT.md` 中按 `reference_source` 锁定的 primary reference 起 kernel pipeline 骨架（只做 catlass 直调适配和用户 contract 修正，禁止从空白模板重写语义流水）。用户未显式给本地实现参考路径时，primary reference 必须是开源参考；clone 不可用时按摘要降级继续，不得改用本地历史实现。生成：
 
 ```
 operators/{operator_name}/
@@ -230,7 +239,8 @@ target_compile_options(<kernel_target> PRIVATE
 
 **禁项**（违反 = 审查不通过）：
 - 不得使用 catlass `DeviceGemm` 适配器
-- 不得自实现矩阵乘 / 逐元素 / 拷贝循环
+- 不得在 op_kernel 顶层自实现矩阵乘 / 散乱逐元素 / 拷贝循环
+- Linear Attention 非 GEMM 逐元素逻辑必须封装进自定义 Block/Tile；组件内部可用 Ascend C Vector API 和固定 tile 内循环，但不得手写 GEMM、不得 host 真实计算
 - 不得调用 `SetSysWorkspaceForce`，catlass hand-launch 直调用指针透传 `GM_ADDR userWs = workspace;`，**禁用** `AscendC::GetUserWorkspace`（直调路径丢入参返回 kfc 地址致 MTE 越界）
 - 不得在 op_kernel `#include` 算子自身的 tiling 实现文件
 
@@ -252,6 +262,8 @@ target_compile_options(<kernel_target> PRIVATE
 | Level 0 | M/N/K = L1 分块整数倍（如 128/256/256） | 必须避免过小 M/N（个位数易触发 AIV UB 越界） |
 | Level 1 | 1K~4K 元素，覆盖 DESIGN.md §2.1 列出的每个 dtype/转置/Swizzle 分支 | 同上 |
 | Level 2 | 极值/零值/边界（K=1, K=L1.K-1 等） | 同上 |
+
+Linear Attention / GDN / KDA / retention / RWKV / state recurrence 场景的 Level 1/2 必须按 DESIGN 的覆盖矩阵补充 BT/chunk、V/K、HK/HV/GQA、batch/head、zero gate、high beta、近零输出和状态初值边界；固定 tuple 需在报告中标明覆盖类别。
 
 完善 `gen_data.py`（NumPy 随机数据 + golden）、`verify_result.py`（atol/rtol 比对）、`run.sh`（编译 → gen_data → 跑可执行 → verify）。
 
@@ -336,7 +348,7 @@ target_compile_options(<kernel_target> PRIVATE
 | C1 | **必须**先阅读 `./catlass/README.md`、`./catlass/docs/` 及 DESIGN.md §1.3 指定 `examples/` 样例（含样例目录内文档），再进入实现 | 开发流程 |
 | C2 | **必须**先加载 `/catlass-op-develop` 完成 op_kernel 内 catlass 模板拼装 | 开发流程 |
 | C3 | **必须**直接实例化 `Kernel` + `Kernel::Params`；**禁用** `DeviceGemm` 适配器 | catlass 实现约束 |
-| C4 | **禁止**op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | catlass 实现约束 |
+| C4 | **禁止**op_kernel 顶层自实现矩阵乘 / 散乱逐元素 / 拷贝循环；Linear Attention 非 GEMM 逐元素逻辑必须组件化为自定义 Block/Tile，且不得手写 GEMM | catlass 实现约束 |
 | C5 | **必须**指针透传 `GM_ADDR userWs = workspace;`；**禁用** `AscendC::GetUserWorkspace`（直调丢入参返回 kfc 地址致 MTE 越界）与 `SetSysWorkspaceForce` | catlass 实现约束 |
 | C6 | **禁止**op_kernel `#include` 算子自身的 tiling 实现文件 | catlass 实现约束 |
 | C7 | **必须**在 CMakeLists.txt 注入 `-I<CATLASS_DIR>/include` + `-DCATLASS_ARCH=<架构号>` | 编译选项 |

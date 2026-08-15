@@ -105,6 +105,8 @@ Step 1.5: 需求预检（激活函数验证 + 核数校验 + dtype 校验）
     ▼ 全部通过（输出 precheck.md）
 Step 2: 设计（Architect 调用 /catlass-op-design）
     │
+    ├── CANNBot 主流程检查：Linear Attention 类缺 OPEN_SOURCE_ALIGNMENT.md → 重新调用 Architect 要求先对齐开源/仓内参考实现
+    │
     ├── 只输出单文件 → 重新调用 Architect 要求拆分
     │
     ▼ DESIGN.md + PLAN.md 都存在且含 catlass 选型表
@@ -126,7 +128,7 @@ Step 3: 开发（Developer 调用 /catlass-op-develop）
     ├── Developer 返回 design_issue → 回退 Step 2 调用 Architect
     │
     ▼ 开发完成
-Step 4: 审查（Reviewer 含 catlass C1–C11）
+Step 4: 审查（Reviewer 含 catlass C1–C11；Linear Attention 类额外检查 LA-OS）
     │
     ├── REVIEW.md == PASS / PASS WITH NOTES → 跳到 Step 6
     │
@@ -210,7 +212,7 @@ Step 7: 完成汇报
 
 **触发条件**：Step 1.5 通过
 **调用模板**：[Step 2](workflows/task-prompts.md#step-2设计) — 读取此链接的完整内容作为 prompt
-**完成判定**：`operators/{operator_name}/docs/DESIGN.md` 和 `operators/{operator_name}/docs/PLAN.md` 都存在；PRESIGN.md 含 catlass 组件选型表；如果只输出单文件，重新调用 architect
+**完成判定**：`operators/{operator_name}/docs/DESIGN.md` 和 `operators/{operator_name}/docs/PLAN.md` 都存在；DESIGN.md 含 catlass 组件选型表；如果只输出单文件，重新调用 architect。若需求命中 GDN / KDA / retention / RWKV / linear attention / state recurrence，CANNBot 主流程必须在 Architect 返回后检查 `operators/{operator_name}/docs/OPEN_SOURCE_ALIGNMENT.md` 是否存在，且 DESIGN.md 中是否有该文件的摘要或链接；缺失则禁止进入 Step 2.5/Step 3，重新调用 Architect 要求先对齐 open-source / 仓内参考实现。Reviewer 在 Step 4 复核该门禁，但不作为首次发现缺失的主要节点。
 
 #### Step 2.5：设计串讲
 
@@ -227,7 +229,7 @@ Step 7: 完成汇报
 
 **触发条件**：Developer 完成开发
 **调用模板**：[Step 4](workflows/task-prompts.md#step-4审查) — 读取此链接的完整内容作为 prompt
-**完成判定**：`operators/{operator_name}/docs/REVIEW.md` 存在，C1–C11 逐条覆盖
+**完成判定**：`operators/{operator_name}/docs/REVIEW.md` 存在，C1–C11 逐条覆盖；Linear Attention / GDN / KDA 场景还必须覆盖 LA-OS open-source 对齐门禁
 
 #### Step 5：修复循环
 
@@ -286,6 +288,7 @@ Step 7: 完成汇报
 | G2 | 工作区根 `./catlass/` 存在（含 `include/`、`examples/`），缺失自动克隆 | Step 1 |
 | G3 | CMakeLists.txt 注入 `-I<catlass>/include` + `-DCATLASS_ARCH=<架构号>` | Step 3 |
 | G4 | op_kernel 直接 `Kernel{}(params)`，禁用 `DeviceGemm`；禁用自实现矩阵乘/逐元素/拷贝循环；禁用 `SetSysWorkspaceForce` | Step 4 |
+| G5 | Linear Attention 类（GDN / KDA / retention / RWKV / state recurrence）必须先产出 OPEN_SOURCE_ALIGNMENT.md，并逐项裁决用户 contract 与参考实现差异；缺失或不完整不得开发/审查通过；其他类型算子不适用 | Step 2 / Step 4 |
 
 ### 高风险行为限制
 

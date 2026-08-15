@@ -33,6 +33,8 @@ Catlass 是 Ascend C 的高阶模板封装；**算子工程结构与通用 ascen
 1. **catlass 仓库文档阅读（前置）**：阅读 `./catlass/README.md`、`./catlass/docs/` 及目标相关 `examples/` 样例（含样例目录内文档），建立算子组装先验
 2. **需求分析**：理解算子数学公式、I/O 规格、dtype/布局要求；**强制校验** `op_name` 含 `catlass` 子串
 3. **catlass 组件选型**：**强制加载** `/catlass-op-design` skill 完成 ArchTag / BlockMmad / BlockEpilogue / BlockScheduler / Kernel 的选型决策
+   - 若需求命中 GDN / KDA / retention / RWKV / linear attention / state recurrence，必须额外读取 `/catlass-op-design` 的 `references/kernels/attention/linear-attention.md`，再按该入口的子场景路由渐进读取 open-source map、GDN/KDA、mixed tolerance 精度规则等 reference，在 DESIGN 中输出 full-flow vs stage 判定、远程开源参考 URL、仓内 GDN/KDA case reference、dependency graph、baseline、workspace/flag、shape 覆盖矩阵、用户数学 contract 冻结记录、非 GEMM 自定义 Block/Tile 或 stage 化路线
+   - 命中 Linear Attention / GDN / KDA 时，必须先创建 `docs/OPEN_SOURCE_ALIGNMENT.md`，再写 DESIGN.md。参考来源选择规则是硬门禁：只有用户 prompt 明确把某个本地路径标注为“本地参考实现 / 实现参考 / source-of-truth / 按此实现或 pipeline 对齐”时，才使用该本地路径作为 implementation primary reference；否则必须按 `references/kernels/attention/linear-attention.md` 路由启用远程开源仓作为 primary reference，并在需要源码细节时尝试 `git clone` 到工作区可复现目录。用户给出的 baseline / 评测 / 性能对比路径只能作为 `evaluation_baseline`，禁止作为实现参考。clone 失败不得阻塞设计，需记录 `clone_status=UNAVAILABLE`、失败原因，并降级使用仓内开源规范摘要和 curated reference。仓内 GDN/KDA case reference 和历史 Catlass 算子只能作为 curated reference / 工程经验，不能在未获用户本地实现参考路径时替代开源 primary reference。
 4. **参考 example 锁定**：在 `catlass/examples/` 中按算子形态找最接近的样例，记录路径与选型理由
 4. **API 验证**：对自定义 Tile / 非 catlass 内置组件，使用 `ascendc-api-best-practices` / `ascendc-docs-search` 验证
 5. **精度需求评估**：基于 `ops-precision-standard` 评估 atol/rtol 与是否需要混合精度
@@ -56,7 +58,8 @@ Catlass 是 Ascend C 的高阶模板封装；**算子工程结构与通用 ascen
 - **禁止**：使用不含 `catlass` 子串的算子名定稿
 - **禁止**：合并 DESIGN.md 和 PLAN.md 为单文件
 - **禁止**：在 op_kernel 设计中使用 catlass `DeviceGemm` 适配器（仅 example 用）
-- **禁止**：设计在 op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环（标量循环在 AICore 上极慢）
+- **禁止**：设计在 op_kernel 顶层自实现矩阵乘 / 散乱逐元素 / 拷贝循环。Linear Attention 的非 GEMM 逐元素逻辑可设计为 Catlass-style 自定义 Block/Tile，但不得手写 GEMM、不得 host 真实计算
+- **禁止**：用户未显式指定本地实现参考路径时，自动扫描或选用开发机本地仓库、当前工作区之外的同名实现、历史算子目录作为 primary reference；用户给出的 baseline / 评测 / 性能对比路径也不得作为 primary reference
 
 ### 输入边界
 
@@ -69,6 +72,7 @@ Catlass 是 Ascend C 的高阶模板封装；**算子工程结构与通用 ascen
 
 - `operators/{operator_name}/docs/DESIGN.md` — 技术设计文档（含 catlass 选型表）
 - `operators/{operator_name}/docs/PLAN.md` — 开发计划文档（含 catlass 编译选项与 catlass kernel 测试 shape 约束）
+- `operators/{operator_name}/docs/OPEN_SOURCE_ALIGNMENT.md` — Linear Attention / GDN / KDA 的参考实现对齐记录（如适用）
 - （串讲回应模式）`WALKTHROUGH.md ### Architect 回应`
 
 ---
@@ -129,7 +133,31 @@ snake_case → CamelCase 类名一致映射（如 `catlass_matmul_add` → `Catl
 
 #### Step 1：算子类型与需求结构化
 
-根据算子特征确定类型（GEMM / Matmul + Epilogue / Quant Matmul / FlashAttention / 其他可由 catlass 表达的融合算子）。
+根据算子特征确定类型（GEMM / Matmul + Epilogue / Quant Matmul / FlashAttention / Linear Attention stage / 其他可由 catlass 表达的融合算子）。
+
+若命中 Linear Attention / GDN / KDA / retention / RWKV / state recurrence，先执行 `/catlass-op-design` 的 `references/kernels/attention/linear-attention.md`，再按其子场景路由读取 open-source map 或 GDN/KDA 专项 reference，并按以下顺序选择参考来源，再进入具体 catlass 组件选型：
+
+1. **USER_LOCAL**：只有用户需求文本明确把某个本地路径标注为“本地参考实现 / 实现参考 / source-of-truth / 按此实现或 pipeline 对齐”时启用。读取该路径作为 implementation primary reference，并记录用户给出的原始路径、解析后的路径、git commit 或文件状态。
+2. **OPEN_SOURCE**：用户未显式给本地实现参考路径时启用。按 `references/kernels/attention/linear-attention.md` 路由到的开源参考 URL 作为 primary reference；若需要源码细节且工作区没有该源码，尝试 `git clone` 到 `tmp/open_source_refs/<repo>` 或同等可复现工作区目录。clone 成功则记录 URL、commit/tag、clone 路径和 `clone_status=CLONED`；clone 失败则记录 `clone_status=UNAVAILABLE`、失败原因，继续使用仓内开源规范摘要、远程搜索路径和 curated reference，不得停止设计。
+3. **EVALUATION_BASELINE**：用户需求文本中以“性能 baseline / evaluation baseline / 精度或性能评测 / 对比指标 / 使用 X 评测”给出的本地路径只用于评测口径、shape、报告字段和 baseline_status，禁止进入 implementation primary reference 或 pipeline 骨架。
+4. **CURATED_REFERENCE**：仓内 GDN/KDA 用例矩阵、mixed tolerance 精度规则、既有 Catlass 经验只作为 shape、报告格式和工程风险来源。它们不得在 USER_LOCAL 缺失时替代 OPEN_SOURCE 成为 primary reference。
+
+完成参考来源选择后，冻结 full-flow vs stage operator、同语义 baseline、dependency graph、GM workspace/flag 协议、shape 覆盖矩阵和用户数学 contract。
+
+同时创建 `operators/{operator_name}/docs/OPEN_SOURCE_ALIGNMENT.md`，至少包含：
+- 用户数学 contract 逐项冻结，User Contract Priority 规则按 `references/kernels/attention/linear-attention.md` 链接到的集中定义执行
+- `reference_source=USER_LOCAL|OPEN_SOURCE`，以及选择理由
+- USER_LOCAL：用户显式给出的本地实现参考路径、解析路径、git commit 或文件版本状态、关键文件清单
+- OPEN_SOURCE：远程 URL、clone_status、commit/tag 或摘要版本、clone 到工作区的路径（如有）、关键文件清单或摘要章节/远程搜索路径
+- EVALUATION_BASELINE：用户给出的 baseline 路径、用途、调用方式、支持/不支持 shape、baseline_status 记录规则，并明确“仅评测，不作为实现参考”
+- CURATED_REFERENCE：仓内 GDN/KDA case reference、精度规则和工程经验清单及其用途，明确“非 primary reference”
+- 公式到参考实现函数/文件位置、本设计落点、差异裁决表
+- scale 作用位置、mask/clamp、dtype/cast/round mode、layout、varlen/partial、workspace/flag、tiling key、baseline 限制
+- 采用 primary reference pipeline 的范围；若偏离，必须给出用户 contract 或 catlass 直调约束依据
+
+该类场景缺失 OPEN_SOURCE_ALIGNMENT.md 时，禁止进入 Step 2 组件选型；非 Linear Attention 类算子不适用。
+
+如果公开 Catlass epilogue/Tile 不能直接表达 gate、decay、causal mask、validRows、scan/state、finalize、layout 转换等非 GEMM 节点，不要直接返回设计阻塞；必须先设计 Catlass-style 自定义 Block/Tile 或 dependency-based stage。只有 device 主路径无法形成、只能 host 真实计算或空 kernel 时，才标记为 design_issue。
 
 提取并结构化：算子功能、数学公式、I/O dtype/shape/布局、目标 SoC、转置约定、是否量化、约束条件。**信息不全则向上游追问，禁止臆测**。
 
@@ -174,13 +202,15 @@ DESIGN.md 必须覆盖：
 | §1.2 Catlass 组件选型表 | `/catlass-op-design` Step 2 |
 | §1.3 参考 example 路径与理由 | `/catlass-op-design` Step 1 |
 | §1.4 Kernel 适配方案 | example main() → op_kernel device 调用拆分 |
-| §1.5 BlockEpilogue 槽位清单（如有） | `/catlass-op-design` Step 2.5 |
+| §1.5 BlockEpilogue 槽位清单（如有） | `/catlass-op-design` Step 5 |
 | §1.6 自定义 Tile 契约（如有） | `/catlass-op-design` Step 3 |
 | §2.1 TilingKey 分支条件与合法组合 | `/catlass-op-design` Step 4 |
 | §2.2 Workspace 量级来源 | `/catlass-op-design` Step 5 |
 | §2.3 实现约束 | catlass-op-generator agent 的禁项（C3/C4/C6） |
 
-PLAN.md 必须覆盖：文件清单、catlass 编译选项（`-I./catlass/include` + `-DCATLASS_ARCH=<arch>`）、测试用例（含 catlass kernel 运行期 shape 约束：避免过小 M/N，选 L1 分块 M/N 整数倍）、阶段检查项。
+Linear Attention / GDN / KDA / retention / RWKV / state recurrence 场景额外要求：创建 `docs/OPEN_SOURCE_ALIGNMENT.md`（参考 `workflows/templates/attention/open-source-alignment-template.md`），并在 DESIGN.md 中加入该文件的摘要与链接。非 Linear Attention 类算子不要求该文件或摘要章节。
+
+PLAN.md 必须覆盖：文件清单、catlass 编译选项（`-I./catlass/include` + `-DCATLASS_ARCH=<arch>`）、测试用例（含 catlass kernel 运行期 shape 约束：避免过小 M/N，选 L1 分块 M/N 整数倍；Linear Attention / GDN / KDA / retention / RWKV / state recurrence 场景额外覆盖 BT/chunk、V/K、HK/HV/GQA、batch/head、TilingKey 与数值边界）、阶段检查项。
 
 ### 子任务：串讲回应模式
 
@@ -213,8 +243,10 @@ PLAN.md 必须覆盖：文件清单、catlass 编译选项（`-I./catlass/includ
 | C5 | **必须**资料获取优先从 `catlass/docs/`、`catlass/examples/`、`catlass/include/`，非 catlass API 从 `asc-devkit/docs/` | 资料来源 |
 | C6 | **必须**校验 op_name 含 `catlass` 子串；不含则向上游追问 | 命名约束 |
 | C7 | **必须**API 兼容当前环境（从 environment.json 读取 CANN 版本和 SoC） | 环境兼容 |
-| C8 | **禁止**使用 catlass `DeviceGemm` 适配器；**禁止**设计在 op_kernel 中自实现矩阵乘 / 逐元素 / 拷贝循环 | 实现约束 |
+| C8 | **禁止**使用 catlass `DeviceGemm` 适配器；**禁止**设计在 op_kernel 顶层自实现矩阵乘 / 散乱逐元素 / 拷贝循环。Linear Attention 的非 GEMM 逐元素逻辑可设计为 Catlass-style 自定义 Block/Tile，但不得手写 GEMM、不得 host 真实计算 | 实现约束 |
 | C9 | **必须**输出两个独立文件（DESIGN.md + PLAN.md），禁止合并 | 文档规范 |
+| ARCH-LA1 | Linear Attention / GDN / KDA **必须**输出 OPEN_SOURCE_ALIGNMENT.md；缺失或差异裁决不完整时禁止定稿；非 Linear Attention 类不适用 | 语义门禁 |
+| ARCH-LA2 | Linear Attention / GDN / KDA **必须**按用户输入选择 reference_source：用户显式本地实现参考才用 USER_LOCAL，否则自动使用 OPEN_SOURCE；baseline/评测路径只能是 EVALUATION_BASELINE，禁止当 source-of-truth | 参考来源门禁 |
 | C10 | **禁止**Host 侧对算子输入 tensor 做预处理（如转置等） | 设计原则 |
 
 ### 高风险行为限制

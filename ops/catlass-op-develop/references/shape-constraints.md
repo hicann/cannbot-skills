@@ -54,7 +54,29 @@ catlass 模板按 dtype 实例化（fp16 / bf16 / fp32 / int8）。**每个**设
 
 ---
 
-## Δ5：FlashAttention / MHA / GQA 类 shape 覆盖按算法维度生成
+## Δ5：Linear Attention / GDN 类 shape 覆盖按算法维度生成
+
+Linear Attention、GDN、KDA、retention、RWKV 等状态递推类算子的 shape 不应只按 `(M,N,K)` 或历史调试 tuple 设计。测试矩阵必须说明每个 shape 对应的覆盖类别。
+
+| 覆盖类别 | 构造方式 | 目的 |
+|---------|---------|------|
+| TilingKey 分支 | dtype、V_DIM、CHUNK_SIZE、schedule mode、GQA mode 每个合法分支至少一例 | 覆盖模板实例化和 host tiling 分流 |
+| `BT` / chunk 边界 | 1 chunk、2 chunk、多 chunk、尾 chunk、不整除边界；常见 `BT=64/128` 都应覆盖 | 暴露状态递推、workspace slot、flag 复用和尾块问题 |
+| `K` / `V` | 常见覆盖 `K=128`、`V=128/256`；`V=256` 覆盖 split accumulation。`V=64` 为可选覆盖，仅当用户需求、TilingKey 或 primary reference 支持时必测 | 暴露 L0/UB 容量、fixpipe/writeback 和 workspace 压力边界 |
+| `HK/HV/GQA` | `HK==HV`、`HV>HK`、`HV/HK` 整除共享；GVA/GQA 场景需覆盖 `HV>HK` | 验证 K-side 中间量按 HK 复用而非按 HV 重算 |
+| batch/head | 单 batch/head、多 batch/head、`B*chunk` 小于/接近/大于核数；覆盖小规模和大规模两端 | 暴露小规模核空转、多核调度、workspace 量级和长跑问题 |
+| sequence mode | fixed 与 varlen 都要覆盖；varlen 覆盖短序列、长序列、尾 chunk、`cu_seqlens` / `chunk_indices` 非均匀分布 | 暴露真实 chunk 索引、partial chunk、有效行写回和 mask 问题 |
+| layout / shape range | 以用户 contract 和 primary reference 为准；GDN/KDA 常见经验覆盖 `BSND`、`B=1..711`、`T=24..65536`、`HV/HK` 多组组合 | 避免只按单一实网规模或历史调试 tuple 设计测试 |
+| 数值边界 | zero gate、high beta、exp(g) 饱和风险、近零输出、状态初值边界 | 暴露 mixed tolerance 与状态更新稳定性问题 |
+| evaluation baseline 状态 | Triton/开源 baseline unsupported、MISSING 或 FAIL 时仍记录 `baseline_status` | 防止把 baseline 不支持误判为 custom 精度失败 |
+
+向调用方提的需求：若脚本保留固定 shape tuple，必须在报告或注释里标明每个 tuple 来自哪个覆盖类别；否则视为硬编码经验，不视为完整测试设计。
+
+Linear Attention 同族算子统一使用本节作为 shape 覆盖来源，不为 GDN/KDA/retention/RWKV 分别维护独立 case 数据文件。smoke case 只用于环境和基本功能门禁；正式精度或性能结论必须覆盖上表中与本算子 contract 相关的维度，并说明未覆盖维度的原因。
+
+代表性子集不得少于 8 例，并至少覆盖：noGVA/GVA、`V=128/256`、fixed/varlen、`BT=64/128`、小/大 `B*chunk` 各一组。少于 8 例或缺少任一必需维度时，只能标记为 smoke，不能声称 representative。
+
+## Δ6：FlashAttention / MHA / GQA 类 shape 覆盖按算法维度生成
 
 FlashAttention 的 shape 不应只按 GEMM 的 `(M,N,K)` 或历史调试 tuple 设计。测试矩阵必须说明每个 shape 对应的覆盖类别。
 
