@@ -371,8 +371,9 @@ def _prepare_and_spawn(
                 int(_state_obj_inc.get("lifetime_spawn_count", 0)) + 1
             )
             _state_fp_inc.write_text(json.dumps(_state_obj_inc, indent=2))
-    except Exception:
-        pass  # don't block orchestrator on state-update failure
+    except Exception as exc:
+        # don't block orchestrator on state-update failure
+        log.warning("cannot persist lifetime_spawn_count: %s", exc)
     duration_s, cost_usd = _result_metrics(result)
     duration_label = f"{duration_s:.1f}" if duration_s is not None else "unknown"
     cost_label = f"{cost_usd:.2f}" if cost_usd is not None else "unknown"
@@ -388,6 +389,128 @@ def _prepare_and_spawn(
     return spawn_index, result, None
 
 
+def _stop_gate_blocked(
+    ctx: OrchestratorContext, agent_type: str, spawn_index: int,
+) -> Optional[HandlerResult]:
+    """HandlerResult when this spawn's stop gate refused its artifacts, else None.
+
+    A rejected stop gate must STOP the run, not merely be logged. Claude Code enforces these
+    gates through SubagentStop, which blocks the sub-agent from exiting. Harnesses without
+    that event get them from the dispatcher instead (agent_dispatch._run_stop_gate), which can
+    only mark the result — and marking was not enough: `result.is_error` had no consumer here,
+    the canonical handoff line sits at the END of output_text so a prepended failure reason
+    does not disturb extraction, and the marker file was read by nothing. The run therefore
+    advanced its state on artifacts the gate had just refused.
+    """
+    workspace = ctx.workspace
+    gate_marker = workspace / f".agent_gate_stop_failed_{agent_type}"
+    if not gate_marker.is_file():
+        return None
+    try:
+        reason = gate_marker.read_text(errors="replace").strip()[:800]
+    except OSError as exc:
+        # The marker exists, so the gate DID refuse this spawn; an unreadable marker must
+        # fail closed here, not crash the orchestrator loop.
+        reason = f"<stop-gate marker unreadable: {exc}>"
+    log.error("[stop-gate] refusing to advance state after %s: %s", agent_type, reason)
+    events.emit(
+        workspace, "orchestrator.stop_gate_blocked", lane=ctx.lane,
+        data={"agent_type": agent_type, "spawn_index": spawn_index, "reason": reason},
+    )
+    log.error(
+        "stop gate rejected %s (spawn %s); artifacts were not accepted and the state was "
+        "NOT advanced.\n%s", agent_type, spawn_index, reason,
+    )
+    # Not cleared here: the marker is the durable record that this spawn's artifacts were
+    # never accepted, and a resume that does not re-run the agent must not step over it.
+    # The next dispatch of this agent type clears it before the agent starts
+    # (agent_dispatch._clear_stop_gate_marker), so a retry is judged by its own gate rather
+    # than inheriting this verdict.
+    return HandlerResult.ret(7)
+
+
+def _capture_canonical_handoff(ctx: OrchestratorContext, result, workspace) -> None:
+    """Populate ctx.last_handoff from worker stdout, with a PROGRESS.md-tail fallback.
+
+    2026-05-13 (rms_norm_quant gap): some workers write the canonical handoff into
+    PROGRESS.md but their `claude --print` result.output_text doesn't include it (the
+    final response was a Bash command call, not a text emission containing the marker).
+    Fall back to scanning the workspace PROGRESS.md tail before routing to abort.
+    """
+    ctx.last_handoff = ctx.extract_canonical_handoff(result.output_text)
+    if ctx.last_handoff and ctx.last_handoff != result.output_text.strip():
+        log.info(f"extracted handoff: {ctx.last_handoff[:120]}")
+        return
+    progress_md = workspace / "PROGRESS.md"
+    if not progress_md.exists():
+        return
+    pre_stamp = getattr(result, "progress_pre_spawn_stamp", None)
+    post_stamp = _file_stamp(progress_md)
+    if pre_stamp == post_stamp:
+        log.info("PROGRESS.md tail fallback skipped: file was not updated by this spawn")
+        return
+    progress_tail = "\n".join(progress_md.read_text().splitlines()[-50:])
+    progress_handoff = ctx.extract_canonical_handoff(progress_tail)
+    if progress_handoff and any(
+        progress_handoff.startswith(p) for p in ctx.canonical_handoff_prefixes
+    ):
+        ctx.last_handoff = progress_handoff
+        log.info(
+            f"extracted handoff from PROGRESS.md tail (stdout had none): "
+            f"{ctx.last_handoff[:120]}"
+        )
+
+
+def _run_perf_checkpoint(ctx: OrchestratorContext, workspace) -> None:
+    """Task #56 (2026-05-29): IL perf-iter precision checkpoint + advance.
+
+    After the probe agent updates verification.json, run the hill-climbing checkpoint:
+    first clean PASS → snapshot kernel/ → .precision_baseline/; on a post-re-emit
+    re-entry → 3-state advance (regress→revert, faster→update best, not-faster→revert).
+    Reverts restore the best-known-good kernel + verification.json so the downstream
+    next_state/finalize sees the protected state, and are tagged `perf_regression_revert`
+    (consumes budget, caps the dice-roll loop). Closes #55 (known-good never lost to an
+    in-place re-emit overwrite). Non-fatal: any error returns NOOP and the loop proceeds
+    unchanged.
+    """
+    try:
+        _ckpt = perf_checkpoint.checkpoint_and_advance(workspace)
+        if _ckpt.action != perf_checkpoint.Action.NOOP:
+            log.info(
+                f"[task#56 perf_checkpoint] {_ckpt.action.value}: "
+                f"{_ckpt.detail}"
+            )
+            events.emit(workspace, "orchestrator.perf_checkpoint", lane=ctx.lane,
+                        data={"action": _ckpt.action.value,
+                              "reverted": _ckpt.reverted,
+                              "consumes_budget": _ckpt.consumes_budget,
+                              "rollback_kind": _ckpt.rollback_kind,
+                              "consecutive_no_improve": _ckpt.consecutive_no_improve,
+                              "baseline_ratio": _ckpt.baseline_ratio,
+                              "current_ratio": _ckpt.current_ratio})
+    except Exception as _e:  # noqa: BLE001 - non-fatal by design, see docstring
+        log.warning(f"[task#56 perf_checkpoint] non-fatal: {_e!r}")
+
+
+def _record_optimizer_kernel_signature(workspace, spawn_index: int) -> None:
+    """Record the current kernel md5 before next_state (deterministic, fail-open).
+
+    iter_cap await_optimizer graceful-finalize fix (2026-07-24): after an
+    aog-kernel-optimizer spawn, record the CURRENT kernel md5 to the byte-identical
+    convergence ledger BEFORE computing next_state, so the `optimizer_kernel_converged`
+    FSM primitive (read by the await_optimizer finalize transition) sees THIS spawn's
+    signature. Deterministic + fail-open (the recorder never raises); non-optimizer
+    states are untouched.
+    """
+    try:
+        import ko_variant_ledger
+        ko_variant_ledger.record_optimizer_kernel_signature(
+            workspace, spawn_index=spawn_index
+        )
+    except Exception as _e:  # noqa: BLE001 - non-fatal by design, see docstring
+        log.warning(f"optimizer kernel-signature record (non-fatal): {_e!r}")
+
+
 def _post_spawn_transition(
     ctx: OrchestratorContext, snap, agent_type: str, result, spawn_index: int,
 ) -> HandlerResult:
@@ -395,6 +518,10 @@ def _post_spawn_transition(
     gate, canonical-handoff extraction, task#56 perf-checkpoint, next_state
     transition + record. Returns the loop HandlerResult."""
     workspace = ctx.workspace
+
+    blocked = _stop_gate_blocked(ctx, agent_type, spawn_index)
+    if blocked is not None:
+        return blocked
 
     # Zheng 2026-05-21: --kw-1-only stops after kernel-worker spawn 1.
     # Skip schema_norm + state transition + all downstream phases
@@ -425,74 +552,15 @@ def _post_spawn_transition(
     # Extract canonical handoff line for state machine routing.
     # state_machine.handoff_match uses .startswith() — worker stdout starts
     # with markdown summary, canonical handoff line is at the END.
-    ctx.last_handoff = ctx.extract_canonical_handoff(result.output_text)
-    if ctx.last_handoff and ctx.last_handoff != result.output_text.strip():
-        log.info(f"extracted handoff: {ctx.last_handoff[:120]}")
-    else:
-        # 2026-05-13 (rms_norm_quant gap): some workers write the canonical
-        # handoff into PROGRESS.md but their `claude --print` result.output_text
-        # doesn't include it (the final response was a Bash command call, not
-        # a text emission containing the marker). Fall back to scanning the
-        # workspace PROGRESS.md tail for a canonical handoff before routing
-        # to abort.
-        progress_md = workspace / "PROGRESS.md"
-        if progress_md.exists():
-            pre_stamp = getattr(result, "progress_pre_spawn_stamp", None)
-            post_stamp = _file_stamp(progress_md)
-            if pre_stamp == post_stamp:
-                log.info("PROGRESS.md tail fallback skipped: file was not updated by this spawn")
-            else:
-                progress_tail = "\n".join(progress_md.read_text().splitlines()[-50:])
-                progress_handoff = ctx.extract_canonical_handoff(progress_tail)
-                if progress_handoff and any(
-                    progress_handoff.startswith(p) for p in ctx.canonical_handoff_prefixes
-                ):
-                    ctx.last_handoff = progress_handoff
-                    log.info(f"extracted handoff from PROGRESS.md tail (stdout had none): {ctx.last_handoff[:120]}")
+    _capture_canonical_handoff(ctx, result, workspace)
 
-    # Task #56 (2026-05-29): IL perf-iter precision checkpoint + advance.
-    # After the probe agent updates verification.json, run the hill-climbing
-    # checkpoint: first clean PASS → snapshot kernel/ → .precision_baseline/;
-    # on a post-re-emit re-entry → 3-state advance (regress→revert,
-    # faster→update best, not-faster→revert). Reverts restore the
-    # best-known-good kernel + verification.json so the downstream
-    # next_state/finalize sees the protected state, and are tagged
-    # `perf_regression_revert` (consumes budget, caps the dice-roll loop).
-    # Closes #55 (known-good never lost to an in-place re-emit overwrite).
-    # Non-fatal: any error returns NOOP and the loop proceeds unchanged.
+    # Task #56: IL perf-iter precision checkpoint + advance (see helper).
     if snap.current_state == "await_probe":
-        try:
-            _ckpt = perf_checkpoint.checkpoint_and_advance(workspace)
-            if _ckpt.action != perf_checkpoint.Action.NOOP:
-                log.info(
-                    f"[task#56 perf_checkpoint] {_ckpt.action.value}: "
-                    f"{_ckpt.detail}"
-                )
-                events.emit(workspace, "orchestrator.perf_checkpoint", lane=ctx.lane,
-                            data={"action": _ckpt.action.value,
-                                  "reverted": _ckpt.reverted,
-                                  "consumes_budget": _ckpt.consumes_budget,
-                                  "rollback_kind": _ckpt.rollback_kind,
-                                  "consecutive_no_improve": _ckpt.consecutive_no_improve,
-                                  "baseline_ratio": _ckpt.baseline_ratio,
-                                  "current_ratio": _ckpt.current_ratio})
-        except Exception as _e:
-            log.warning(f"[task#56 perf_checkpoint] non-fatal: {_e!r}")
+        _run_perf_checkpoint(ctx, workspace)
 
-    # iter_cap await_optimizer graceful-finalize fix (2026-07-24): after an
-    # aog-kernel-optimizer spawn, record the CURRENT kernel md5 to the
-    # byte-identical convergence ledger BEFORE computing next_state, so the
-    # `optimizer_kernel_converged` FSM primitive (read by the await_optimizer
-    # finalize transition) sees THIS spawn's signature. Deterministic + fail-open
-    # (the recorder never raises); non-optimizer states are untouched.
+    # iter_cap await_optimizer graceful-finalize fix (2026-07-24, see helper).
     if snap.current_state == "await_optimizer":
-        try:
-            import ko_variant_ledger
-            ko_variant_ledger.record_optimizer_kernel_signature(
-                workspace, spawn_index=spawn_index
-            )
-        except Exception as _e:
-            log.warning(f"optimizer kernel-signature record (non-fatal): {_e!r}")
+        _record_optimizer_kernel_signature(workspace, spawn_index)
 
     # Compute next state + record transition.
     # P0bb (2026-05-05): pass from_state=snap.current_state explicitly.

@@ -41,7 +41,12 @@ assert_tracked_plugin_has_no_match() {
     local pattern="$1"
     local label="$2"
     local matches
-    if matches=$(git -C "$REPO_ROOT" grep -n -i -E "$pattern" -- "$PLUGIN_REL" 2>/dev/null); then
+    # 豁免（自引用守卫与特性文件）：插件自己的测试为证明"绝不走外部加速器路径"而
+    # 命名这些 family；model_reference 特性按设备名同步用户提供的 torch 模型。
+    if matches=$(git -C "$REPO_ROOT" grep -n -i -E "$pattern" -- "$PLUGIN_REL" 2>/dev/null \
+            | grep -vE "^$PLUGIN_REL/([^:]*/)*tests/" \
+            | grep -vE "^$PLUGIN_REL/([^:]*/)*test_[^/]*" \
+            | grep -vE "^$PLUGIN_REL/([^:]*/)*[^/]*model_reference[^/]*"); then
         echo "$matches" >&2
         fail "$label"
     fi

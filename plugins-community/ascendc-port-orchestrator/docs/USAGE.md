@@ -4,56 +4,85 @@
 1. **`ascendc-cross-gen-port`** — 跨代际算子移植（当前 arch22→arch35，如 910C/V220 → 950PR/V300）。
 2. **`ascendc-backward-gen`** — 正向→反向（梯度）算子生成。
 
-> 两个 skill 都是**薄 NL 前端**，底下调用打包在 `engine/` 的编排器（`python -m orchestrator`）。流水线逻辑全在引擎、不在 skill。
-> ⚠ 当前依赖 Claude Code 运行时（skill 格式 / hook / sub-agent 经 `claude` 调用）；底座无关适配计划见 `README.md` / `ARCHITECTURE.md §8`。
+> 两个入口都是**薄 NL 前端**，底下调用打包在 `engine/` 的编排器（`python -m orchestrator`）。流水线逻辑全在引擎、不在入口。
+> 支持两种 agent harness：**Claude Code** 与 **opencode**。两者共用同一个启动器
+> （`scripts/launch_orchestrator.sh`）、同一条流水线、同一套 canonical 安全网；差异只在安装面，
+> 见 §1。harness 相关的实现说明见 `ARCHITECTURE.md §8`。
 
 ---
 
 ## 0. 前置条件
 
+**共同**
 - **CANN Toolkit ≥ 9.0.0**，已配置 NPU 设备（目标芯片可访问）。
-- **Claude Code 运行时**（见上）。
-- arch22→arch35 移植还需：来源架构参考 NPU（跑来源 CANN 真值基线）+ 目标架构 NPU（生成 + 精度验证）。反向生成只需目标 NPU（参考真值 = CPU/fp64 autograd）。
+- **Python 3.10+**（引擎）。
+- arch22→arch35 移植按参考输入选择环境：默认实时 A3 参考（`a3_live`）需要**来源 A3** 和
+  **目标 A5**；显式提供 `model.py + test.py`（`model_reference`）时只需要**目标 A5**。
+  这份模型在 A5 验证环境中自行决定使用 CPU 或 NPU，不会被隐式派发到 A3。反向生成只需目标 NPU
+  （参考真值 = CPU/fp64 autograd）。
+
+**按 harness**
+
+| | Claude Code | opencode |
+|---|---|---|
+| 运行时 | `claude` CLI | `opencode` CLI（**已验证版本：1.18.18**） |
+| 额外依赖 | — | **`node`**（安全网适配器需要） |
+| 联网 | 安装期不需要 | 首次安装需拉一次插件依赖（约 1-2 分钟），完全离线需按 §1.3 预置 |
 
 ---
 
 ## 1. 安装
 
+安装器同一个（`init.sh`），第二个参数选 harness。**两种 harness 的安装面差别很大**，分别说明。
+
+### 1.1 Claude Code
+
 ```bash
-# 1) 添加 cannbot marketplace 并安装插件及依赖
 claude plugin marketplace add /path/to/cannbot-skills
 claude plugin install ascendc-port-orchestrator@cannbot
 
-# 2) Claude Code 只复制插件，不会自动执行 init.sh；从安装清单取真实缓存路径
+# Claude Code 只复制插件，不会自动执行 init.sh；从安装清单取真实缓存路径
 PLUGIN_INSTALL_PATH="$(claude plugin list --json | jq -r \
   '.[] | select(.id == "ascendc-port-orchestrator@cannbot") | .installPath')"
 test -n "$PLUGIN_INSTALL_PATH"
 bash "$PLUGIN_INSTALL_PATH/init.sh" global claude
 ```
-需要隔离验证或使用非默认 Claude 配置目录时，在上述三条命令中使用同一个
-`CLAUDE_CONFIG_DIR`；用户 KB 路径可用 `ASCENDC_PORT_USER_KB` 覆盖。
 
-`init.sh` 会：
-1. 将插件内置 Skills/Agents 链接到 Claude 配置目录，并检查 marketplace 提供的 `knowledge-query` 依赖。
-2. 验证 marketplace 自动注册的安全网 hooks 及客户 Agent 产物门禁。
-3. 建**用户本地 KB(c 层)** 根目录 + 索引，并从模板 scaffold `engine/workspace/.ascendc_env`。
+装了什么：Skills/Agents 以**逐项软链**进 `$CLAUDE_CONFIG_DIR`（默认 `~/.claude`）；安全网 hook 以
+marketplace 的 `hooks/hooks.json` 为唯一注册面（源码 checkout 直跑 `init.sh` 时才写 owner-tagged 配置门）。
 
-Marketplace 安装只使用插件内的 `hooks/hooks.json` 作为唯一注册面：
-`output_read_guard` / `workflow_critic` / `ship_claim_audit` 负责生成期安全网，
-`agent-gate-dispatch.py` 按 `agent_type` 路由 worker/optimizer/probe 的产物和进度门禁。
-安装器不再把同一组命令复制到用户 settings 和版本化缓存路径，避免每次工具
-调用重复执行，也避免升级/卸载后留下失效绝对路径。仅从仓库 checkout 直接执行
-`init.sh` 时，才会写入 owner-tagged 的配置门禁。
+> **装完必须看到最后一行 `✓ hooks verified live`。** 打勾前安装器会真的执行一次守卫：
+> 子 agent 读 `output/` 必须被拒（exit 2）、主 agent 必须放行（exit 0）。没有这一行或退出码非 0，
+> **不要开始跑算子** —— 防作弊层没上，产出的"通过"不可信（DEBT-253）。
 
-> **装完请确认最后一行出现 `✓ hooks verified live`。** 安装器在打勾之前会真的执行一次守卫：
-> 子 agent 读 `output/` 必须被拒（exit 2）、主 agent 必须放行（exit 0），两条都对才算装好。
-> 早期版本只统计装了几个文件就打勾，结果出现过"skills/agents 都在、hook 全程没生效"的**静默
-> 缴械安装**（DEBT-253）。**如果这一行没出现或安装以非 0 退出，不要开始跑算子** —— 那说明防作弊
-> 层没上，产出的"通过"不可信。
+### 1.2 opencode
 
-**激活**：插件经 cannbot marketplace 激活（`marketplace.json` 注册插件 + skills）；子 agent（aog-*）经 `plugin.json` 的 `agents` 注册。激活后 Claude 能发现两个入口 skill。
+```bash
+bash /path/to/ascendc-port-orchestrator/init.sh global opencode
+# 或项目级：装到 $PWD/.opencode
+bash /path/to/ascendc-port-orchestrator/init.sh project opencode
+```
 
----
+装完同样看**最后一行 `✓ safety net ENFORCES`**：安装器会用真实 opencode 二进制证明配置被接受、
+守卫真的会拦（kernel-worker 读别的 workspace 被拒、读自己的放行）。没有这一行或退出码非 0，
+**不要开始跑算子**。
+
+首次在全新 opencode 环境安装时，opencode 会先在 config 目录做一次插件依赖解析（约 1-2 分钟，
+需要访问 npm registry；安装器有进度提示与超时兜底）。
+
+> 安装面的实现细节（两级证明、agent/适配器经 `OPENCODE_CONFIG_CONTENT` 注入、与 CC 的差异、
+> 模型驱动端到端验证）见 `ARCHITECTURE.md §8.2`。
+
+### 1.3 离线 / 受限网络环境
+
+opencode 首次安装需要一次性拉取插件依赖（npm registry）。完全离线时的处理方式：先在一台联网机器上
+跑一次 `init.sh … opencode` 并触发一次 `opencode run`，把生成的
+`$CONFIG_ROOT/{node_modules,package.json,package-lock.json}` 搬到目标机器；或在目标机器预置 npm 镜像。
+
+### 1.4 两者共用的部分
+
+`init.sh` 还会（与 harness 无关）：建**用户本地 KB(c 层)** 根目录 + 索引、构建官方 OKF 索引、
+从模板 scaffold `engine/workspace/.ascendc_env`。
 
 ## 2. Preflight（运行前就绪检查）
 
@@ -61,9 +90,9 @@ Marketplace 安装只使用插件内的 `hooks/hooks.json` 作为唯一注册面
 
 ```bash
 # 确认 .ascendc_env 已填（缺它引擎 fail-fast、rc=2 + 提示）
-test -f <plugin>/ascendc-port-orchestrator/engine/workspace/.ascendc_env && echo "env OK" || echo "先填 .ascendc_env（见 §3）"
+test -f <plugin>/engine/workspace/.ascendc_env && echo "env OK" || echo "先填 .ascendc_env（见 §3）"
 ```
-- 调用 skill 后，引擎在生成前先跑 **Phase O0 就绪门**（hook 完整性 + KB + deploy 脚本存在）+ `.ascendc_env` 解析 + **P129 容器 mount 门**（核对目标容器 home 挂载，用你配的 `A3_CONTAINER_HOME`）。
+- 调用入口后，引擎在生成前先跑 **Phase O0 就绪门**（hook 完整性 + KB + deploy 脚本存在 + 安全网重新证明）+ `.ascendc_env` 解析。只有 `a3_live` 路径还会执行 **P129 A3 容器 mount 门**（核对你配置的 `A3_CONTAINER_HOME`）。
 - 缺 `.ascendc_env` → 干净报错（不会白跑到 build 才崩）。真正的 NPU 就绪（精度/性能）在实际运行时按阶段判（见 §6）。
 
 ---
@@ -80,7 +109,7 @@ A5_PASSWORD=<...>
 A5_CONTAINER=<A5 容器名>
 A5_CANN_PATH=/usr/local/Ascend/cann-9.0.0
 A5_SOC_VERSION=<npu-smi/GetSocName 返回的完整 SoC 字符串>
-A3_HOST=<A3 参考 NPU host>          # 来源 A3 参考（仅 --port-a3 需要，跑 A3-CANN 真值）
+A3_HOST=<A3 参考 NPU host>          # 仅 reference.source=a3_live 需要（跑 A3-CANN 真值）
 A3_USER=root
 A3_PASSWORD=<...>
 A3_CONTAINER=<A3 容器名>
@@ -91,6 +120,7 @@ A3_CONTAINER_HOME=<A3 容器内 canonical home>   # config-driven；容器内工
 NPU_PYTHON_BIN=<包含 python3 的目录；留空则使用 PATH>
 ```
 - **`opgen_mode` 不在这里配**——由 CLI flag 决定（`--port-a3` → `port_a3_to_a5`；`--backward` → `backward`）。
+- `A3_*` 与 `A3_CONTAINER_HOME` 仅在默认的实时 A3 路径（`reference.source=a3_live`）使用；提供 `--reference-model` 与 `--reference-test` 的外部模型参考只要求 A5 连接配置。
 - `A3_CONTAINER_HOME` 是**你部署的 A3 容器内 canonical home**（引擎按它拼容器内路径 + 核 P129 mount 门）；不同部署设自己的值。
 - `.ascendc_env` 是 **gitignored**（含凭证）——**永不提交**。
 
@@ -102,11 +132,70 @@ NPU_PYTHON_BIN=<包含 python3 的目录；留空则使用 PATH>
 ```
 > 把这个算子移植到 arch35（a5）：<来源 AscendC 算子的 ops-nn 目录>
 ```
-例：`把 ~/workspace/cann/ops-nn/activation/gelu 移植到 a5`。skill 内部把请求翻成引擎的 `port_a3_to_a5` mode 并以流式后台启动编排器 —— **你不需要、也不应直接跑引擎命令**（`bash orch` 是 skill 内部实现细节，非对外接口）。
+例：`把 ~/workspace/cann/ops-nn/activation/gelu 移植到 a5`。skill 内部把请求翻成引擎的 `port_a3_to_a5` mode 并以流式后台启动编排器；下面的 CLI 仅供自动化/排障时确认参数，不需要绕过 skill 手工执行。
 
-引擎走确定性流水线 **O0→O6**：解析 → 分类 → **A3-CANN 参考采集**（在 A3 NPU 跑来源算子取真值基线）→ 移植 → 构建（A5）→ **精度验证**（真值 = A3-CANN 输出、非 CPU-PyTorch）→ [性能优化] → 归档，经安全网校验。
+### 4.1 选择功能参考
 
-**产出**：`engine/workspace/<op>/verification.json`（customer-view 判据）+ 归档到 `engine/output/a3_to_a5_port/<op>/`（ops-nn 镜像布局）+ 复现指引。看 `verification.json` 的 `precision.status`（PASS / PASS_WITHIN_TOLERANCE）+ 逐 case 计数 + `bit_exact_vs_a3` 证据。
+`--port-a3` 始终提供待移植的 arch22 源算子；一对可选的外部文件只改变**功能参考**，不改变
+`opgen_mode`。不要传 `--reference-provider` 或新 mode。
+
+| 传递方式 | 内部 `reference.source` | 真值与所需环境 | 性能报告 |
+|---|---|---|---|
+| 仅提供源算子 | `a3_live` | 当次在 A3 上执行来源 CANN，再在 A5 构建/验证 | 保留实时 A3/A5 的既有性能契约 |
+| 同时提供 `model.py` 和 `test.py` | `model_reference` | 在 A5 验证环境执行这对文件；无需 A3，模型代码自行选择 CPU/NPU | `speedup_vs_model_reference`，不称为 A3/A5 ratio |
+| 离线 A3 tensor 包 | 预留 `a3_offline_bundle` | **本版本不支持** | 不能冒充实时 A3 结果 |
+
+外部模型参考的自然语言请求示例：
+
+```text
+> 把 <ops-nn 源算子目录> 移植到 A5；使用 /work/model.py 作为功能参考，
+> 使用 /work/test.py 作为测试用例。
+```
+
+对应的启动器参数为：
+
+```bash
+bash /path/to/ascendc-port-orchestrator/scripts/launch_orchestrator.sh \
+  --skill-base /path/to/ascendc-port-orchestrator/skills/ascendc-cross-gen-port \
+  --mode port-a3 --source /path/to/arch22/op --lane 0 \
+  --reference-model /work/model.py --reference-test /work/test.py
+```
+
+`--reference-model` 和 `--reference-test` 只能成对用于 `--port-a3`；缺一项会在创建 workspace 前报错：
+
+```text
+ERROR: --reference-model requires --reference-test. Provide test.py, or explicitly ask the agent to generate test cases before invoking the run.
+ERROR: --reference-test requires --reference-model. Provide model.py together with the test suite.
+```
+
+默认测试来源是 `user_supplied`。引擎**不会**因缺少 `test.py` 而让 LLM 静默生成用例；只有用户明确授权
+“生成 `test.py` 并执行”时，agent 才可先生成普通测试文件，并在启动时额外传
+`--reference-test-origin agent_generated`。最终报告会把这类覆盖标为 agent-generated、未由用户确认。
+
+### 4.2 `model.py` 与 `test.py` 的最小契约
+
+- `model.py` 导出 `create_model()`，返回可调用对象；为兼容已有用例，也接受零参数且可调用的 `Model`。
+- `test.py` 必须导出 `get_test_cases()`，返回至少一个 case。每个 case 至少有稳定的 `id`，可选 `args`、
+  `kwargs`、`comparison`、`weight` 和 `benchmark.accelerator_devices`。后者列出计时期间可能提交异步工作的设备；CPU-only 用例写空列表。
+- 输入由用户测试代码决定 dtype、shape、随机种子和设备。引擎不替模型或输入做设备迁移；`model.py` 在 A5 验证环境中自行使用 CPU 或可访问的 NPU。
+- 用例与参考输出在 O2.5 一次性物化、稳定性校验并冻结。resume 复用已绑定的 capture，不重新执行 `get_test_cases()` 或重新计算参考真值。
+
+### 4.3 验证、性能与工件
+
+引擎走确定性流水线 **O0→O6**：解析 → 分类 → 参考采集 → 移植 → A5 构建 → 精度验证 → 性能 → 归档。
+其中 `a3_live` 在 O2.5 采集实时 A3-CANN 输出；`model_reference` 则采集已暂存模型与用例的 canonical 输出，
+O5 只使用该 capture，绝不回退读取 `a3_outputs`。
+
+外部模型参考的性能基线就是该模型本身：在同一个 A5 session 中以 ABBA 顺序测量参考和候选，默认每侧
+10 次 warmup、50 个样本，报告中给出 `speedup_vs_model_reference`。第一期不对该 ratio 套用通用数值阈值；
+测量完成是性能门，数值供用户判断。若同步、输出一致性或计时失败，报告为 `MEASUREMENT_FAILED` /
+`INCOMPLETE_PERFORMANCE`，不产生 ratio，也不伪装成成功交付。
+
+**产出**：`engine/workspace/<op>/verification.json`（customer-view 判据）+ 归档到
+`engine/output/a3_to_a5_port/<op>/`（ops-nn 镜像布局）+ 复现指引。外部模型路径还会保留内容寻址的
+`reference_inputs/<bundle-digest>/`、冻结 capture 与 `model_reference_performance.json`；实时 A3 路径则保留
+对应的 A3 provenance。查看 `precision.status`、逐 case 计数和与所选参考来源一致的证据，不能把
+`model_reference` 的结果解读成 `bit_exact_vs_a3`。
 
 ---
 
@@ -148,6 +237,9 @@ NPU_PYTHON_BIN=<包含 python3 的目录；留空则使用 PATH>
 |---|---|
 | `ERROR: failed to load .ascendc_env` (rc=2) | 没填 `.ascendc_env`。跑 `init.sh` scaffold 后填连接信息（§3）。 |
 | `P129 mount gate FAILED: /home/... ← ''` | 目标 A3 容器的 home 挂载和 `A3_CONTAINER_HOME` 对不上。要么按提示重建容器挂载，要么改 `.ascendc_env` 的 `A3_CONTAINER_HOME` 匹配实际。 |
+| `--reference-model requires --reference-test` | 外部模型参考必须由模型和用户测试文件共同定义。补 `test.py`；只有你明确授权 agent 生成用例时，才使用 `--reference-test-origin agent_generated`。 |
+| 外部模型参考却要求/连接 A3 | 检查是否同时传入了 `--reference-model` 与 `--reference-test`。两者齐全时为 `model_reference`，只需要 A5 构建/验证；模型中的 CPU/NPU 选择由模型代码负责。 |
+| `MEASUREMENT_FAILED` / `INCOMPLETE_PERFORMANCE` | 外部模型的同会话 ABBA 测量、设备同步或输出一致性未完成。精度证据会保留，但无可信 ratio，不能把它当作 release PASS。 |
 | NPU errcode（507035/507057 等） | **不等于硬件坏、别急着 reboot**。按顺序查：容器设备映射 → 权限 → `torch.npu.is_available()`。 |
 | 精度 FAIL | 读 `verification.json` 的 per-case 输出定位（哪个 output / dtype / case）。**别急着标 hw-floor**——先做 apples-to-apples probe（对齐输入/dtype/参考）。超越函数按 KB 的 OL-103（Rsqrt/Sigmoid ~fp16、用 Sqrt+scalar / Newton-Raphson）。 |
 | 反向 fp16/bf16 精度可疑 | 已知 grader 项（cause_1）：backward 的 golden 见 fp32 输入、kernel 见量化输入 → fp16/bf16 可能 false-FAIL（非真错、待 DEBT 修）。fp32 结果为准；fp16/bf16 标已知项、别误判 regression。 |
@@ -162,9 +254,10 @@ NPU_PYTHON_BIN=<包含 python3 的目录；留空则使用 PATH>
 
 本使用说明是操作向导；系统的**详细架构设计**（为什么这么设计、约束、不变量）见：
 
-- **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — 架构设计（cannbot 插件）：总体结构 / 确定性流水线 FSM（§2）/ Agent 角色（§4）/ **双层 KB + 社区 skills 知识源（§5，含 §5.4 统一分层契约 + §5.5 实现状态）** / 安全网 gates（§6）/ 跨代际可扩展（§7）/ 底座依赖 + 适配计划（§8）/ 集成装配（§10）。
+- **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — 架构设计（cannbot 插件）：总体结构 / 确定性流水线 FSM（§2）/ Agent 角色（§4）/ **双层 KB + 社区 skills 知识源（§5，含 §5.4 统一分层契约 + §5.5 实现状态）** / 安全网 gates（§6）/ 跨代际可扩展（§7）/ Harness 抽象与 opencode 安装面细节（§8）/ 集成装配（§10）。
+- **[参考输入设计](./design/reference-inputs/design.md)** — 真值来源与测试来源的边界设计。
 - **[`README.md`](../README.md)** — 一页概览 + 底座依赖与适配路线。
 - **[`quickstart.md`](../quickstart.md)** — 最短上手。
-- **KB 分层统一设计**（跨 cannbot / a5_ops / npu-autoport 三方共设计的 canonical 契约）：a5_ops `docs/design/KB_TIERING_DESIGN.md`（`ARCHITECTURE.md §5.4` 引它）。
+- **KB 分层统一设计**：KB 分层契约的 canonical 设计文档（`ARCHITECTURE.md §5.4` 引用）。
 
 > 遇到本说明未覆盖的问题，先查 `ARCHITECTURE.md` 对应节，再看 `engine/workspace/<op>/` 的 `PROGRESS.md` + 日志。

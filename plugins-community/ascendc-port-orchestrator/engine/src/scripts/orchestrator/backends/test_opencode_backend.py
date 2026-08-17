@@ -26,10 +26,17 @@ import textwrap
 import types
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parents[1]))  # orchestrator/
 
 from backends.opencode_backend import OpencodeBackend  # noqa: E402
+
+# Private seams under test, bound once (see G.CLS.11 note in test_stop_gate_dispatch.py).
+_opencode_config_content = getattr(OpencodeBackend, "_opencode_config_content")
+_select_agent = getattr(OpencodeBackend, "_select_agent")
+_engine_root = getattr(OpencodeBackend, "_engine_root")
 
 
 def test_opencode_run_cmd_uses_stdin_and_dir_not_positional_prompt() -> None:
@@ -271,104 +278,74 @@ def test_opencode_dispatch_marks_hook_agent_context(monkeypatch) -> None:
     assert env["AOG_HOOK_AGENT_TYPE"] == "aog-kernel-worker"
 
 
-def test_opencode_kernel_worker_prompt_carries_real_ascendc_guard() -> None:
-    backend = OpencodeBackend(opencode_bin="/tmp/opencode")
+def test_backend_prompt_carries_no_semantic_policy() -> None:
+    """A backend WIRES the harness; it must not own kernel-authoring rules.
 
-    prompt = getattr(backend, '_format_prompt')("aog-kernel-worker", "Return marker", kind="agent")
-
-    assert "opencode a5_ops runtime smoke guard" in prompt
-    assert "/root/miniconda3/envs/py311/bin/python3.11" in prompt
-    assert "aclrtLaunchKernelWithHostArgs" in prompt
-    assert "libacl_dvpp.so" in prompt
-    assert "opencode a5_ops kernel-worker compatibility guard" in prompt
-    assert "Do not satisfy precision with CPU/PyTorch/NumPy fallback code" in prompt
-    assert "extern \"C\" __global__ __aicore__" in prompt
-    assert "OPENVINO_HIDDEN" in prompt
-    assert "workspace/<op>/kernel/" in prompt
-    assert "aclrtlaunch_<kernel>" in prompt
-    assert "ACLRT_LAUNCH_KERNEL(<kernel>)" in prompt
-    assert "never include nonexistent `torch/pybind.h`" in prompt
-    assert "m.def(\"run_<op>\", &run_<op>)" in prompt
-    assert "do not use device-side `__gm__` qualifiers in pybind host code" in prompt
-    assert "do not create PR4778" in prompt
-    assert "Do not call raw `aclrtLaunchKernel(...)` directly" in prompt
-    assert "do not use `py::tensor`" in prompt
-    assert "ACLRTLauchKernel.h" in prompt
-    assert "`py::object`" in prompt
-    assert "not a `uint32_t` launch status" in prompt
-    assert "TORCH_CHECK(ret == 0" in prompt
-    assert "`_<op>_ext` where `<op>` is the workspace directory basename" in prompt
-    assert "pybind11/strict_rcward.h" in prompt
-    assert "reinterpret_cast<GM_ADDR>(&tiling)" in prompt
-    assert "PYBIND11_MODULE` binding only in `pybind11.cpp" in prompt
-    assert "not just declare it" in prompt
-    assert "`kernel.h` must not declare or define that extern kernel entry" in prompt
-    assert "never `KERNEL_OPERATOR_H`" in prompt
-    assert "fixed tile byte-size" in prompt
-    assert "never `totalElems * sizeof(float)`" in prompt
-    assert "complete DataCopy/Add/DataCopy tile loop over chunks" in prompt
-    assert "must be ASCII only" in prompt
-    assert "`TPipe` only initializes queue buffers" in prompt
-    assert "do not call `InitBuffer(xTbuf_, depth, bytes)`" in prompt
-    assert "with each `DeQue` stored in a LocalTensor variable exactly once" in prompt
-    assert "do not invent `epilogue_len`" in prompt
-    assert "yDequeonge" in prompt
-    assert "`EnQue` twice on the same LocalTensor" in prompt
-    assert "not as file-scope globals" in prompt
-    assert "`pipe.Barrier()`" in prompt
-    assert "`blockDim = 8`" in prompt
-    assert "8-element aligned" in prompt
-    assert "non-overlapping" in prompt
-    assert "block0 write 0..7" in prompt
-    assert "blockSize = (total + blockNum - 1) / blockNum" in prompt
-    assert "`tileLenAligned`" in prompt
-    assert "`aclrtlaunch_<kernel>` host stubs should use" in prompt
-    assert "`void*` tensor `data_ptr` arguments" in prompt
-    assert "never write `kernel_module_t`" in prompt
-    assert "reinterpret_cast<__gm__ float*>(offset)" in prompt
-    assert "deploy_to_npu_lane.sh --lane <LANE> --build" in prompt
-    assert "Do not pipe any `deploy_to_npu*.sh` output" in prompt
-    assert "Do not scan project-wide `output/` archives" in prompt
-    assert "provenance-tracked prior-art/prestage context" in prompt
-    assert "never treat it as truth" in prompt
-    assert "Do not read, grep, glob, or Bash-inspect any other `workspace/<op>`" in prompt
-    assert "the kernel worker owns code generation" in prompt
-    assert "`pass_a_runner.py` and `pass_b_runner.py`" in prompt
-    assert "If you create `pass_b_runner.py`" in prompt
-    assert "`{'cases': [{'inputs': {...}, 'outputs': {...}}, ...]}`" in prompt
-    assert "Do not silently replace that oracle" in prompt
-    assert "`verification.json` with `precision`, `determinism`, and `performance`" in prompt
-    assert "`performance.independent_re_measure`" in prompt
-    assert "check_verification_schema.py" in prompt
-    assert "cannot produce honest verification artifacts" in prompt
-    assert "do not mkdir, touch, read, or write `op_host/` or `op_kernel/`" in prompt
+    These rules used to be appended to the prompt here, and only for opencode — so an
+    opencode worker and a Claude Code worker were held to different rules for the same job,
+    with no way to see the divergence from either side. They now live in canonical KB
+    (kb/shared/KERNEL_AUTHORING_GUARDS.md) which both harnesses read, per the boundary
+    invariant stated in backends/base.py.
+    """
+    backend = OpencodeBackend()
+    for target in ("aog-kernel-worker", "aog-kernel-optimizer", "aog-precision-probe"):
+        prompt = getattr(backend, "_format_prompt")(target, "Return marker", kind="agent")
+        for leaked in (
+            "compatibility guard",
+            "runtime smoke guard",
+            "pybind11.cpp",
+            "op_host",
+            "ACLRT_LAUNCH_KERNEL",
+        ):
+            assert leaked not in prompt, (
+                f"backend re-introduced semantic policy for {target}: {leaked!r} — put it in "
+                "kb/shared/KERNEL_AUTHORING_GUARDS.md so both harnesses get the same rules"
+            )
 
 
-def test_opencode_precision_probe_prompt_carries_runtime_smoke_guard_only() -> None:
-    backend = OpencodeBackend(opencode_bin="/tmp/opencode")
+def test_kernel_authoring_guards_are_canonical_and_reachable() -> None:
+    """The relocated rules must survive, and be reachable by BOTH harnesses.
 
-    prompt = getattr(backend, '_format_prompt')("aog-precision-probe", "Return marker", kind="agent")
+    Deleting backend-owned policy is only correct if the rules did not vanish with it: they
+    are loaded through shared/ALWAYS_LOADED_RULES.md, which every kernel-authoring agent is
+    required to read regardless of harness.
+    """
+    kb = Path(__file__).resolve().parents[5] / "kb" / "shared"
+    guards = kb / "KERNEL_AUTHORING_GUARDS.md"
+    assert guards.is_file(), "canonical kernel-authoring guards are missing"
+    body = guards.read_text()
+    for rule in ("pybind", "op_host", "ACLRT_LAUNCH_KERNEL", "aog-kernel-optimizer"):
+        assert rule in body, f"guard content lost in the move: {rule!r}"
+    always = (kb / "ALWAYS_LOADED_RULES.md").read_text()
+    assert "KERNEL_AUTHORING_GUARDS" in always, (
+        "guards are not referenced from ALWAYS_LOADED_RULES.md, so no agent is told to read them"
+    )
 
-    assert "opencode a5_ops runtime smoke guard" in prompt
-    assert "/root/miniconda3/envs/py311/bin/python3.11" in prompt
-    assert "aclrtLaunchKernelWithHostArgs" in prompt
-    assert "libacl_dvpp.so" in prompt
-    assert "opencode a5_ops kernel-worker compatibility guard" not in prompt
 
+def test_kernel_authoring_guards_carry_no_operator_specific_environment() -> None:
+    """Canonical KB is authoring rules, not one operator's machine.
 
-def test_opencode_optimizer_prompt_carries_runtime_guard_and_a5_exec_rule() -> None:
-    backend = OpencodeBackend(opencode_bin="/tmp/opencode")
-
-    prompt = getattr(backend, '_format_prompt')("aog-kernel-optimizer", "Return marker", kind="agent")
-
-    assert "opencode a5_ops runtime smoke guard" in prompt
-    assert "/root/miniconda3/envs/py311/bin/python3.11" in prompt
-    assert "Do not nest `docker exec` inside an `a5_exec.py` command" in prompt
-    assert "missing `libtorch_python.so` means" in prompt
-    assert "opencode a5_ops kernel-optimizer compatibility guard" in prompt
-    assert "Do not hand-roll deployment with tar/scp/manual copies" in prompt
-    assert "deploy_to_npu_lane.sh" in prompt
-    assert "opencode a5_ops kernel-worker compatibility guard" not in prompt
+    This file was populated by relocating text out of the backend, and that text had grown an
+    environment half: an absolute interpreter path from a private container, a pinned CANN
+    root, a hand-built LD_LIBRARY_PATH ordering, and a helper script that lives outside this
+    repo. None of it is portable, none of it is knowledge about writing kernels, and once the
+    file was wired into ALWAYS_LOADED_RULES.md every Claude Code kernel agent was required to
+    read it too. Relocation is the moment such content escapes, so the check lives here.
+    """
+    kb = Path(__file__).resolve().parents[5] / "kb" / "shared"
+    body = (kb / "KERNEL_AUTHORING_GUARDS.md").read_text()
+    forbidden = {
+        "/root/miniconda3": "absolute interpreter path from one operator's container",
+        "cann-9.1.T500": "CANN root pinned to one installed version",
+        "/usr/local/Ascend/8.5.0": "second pinned CANN root",
+        "a5_exec.py": "helper script that is not part of this plugin",
+        "~/.claude/skills": "path into a user's private skill install",
+    }
+    for needle, why in forbidden.items():
+        assert needle not in body, (
+            f"canonical KB carries operator-specific environment ({why}): {needle!r}. "
+            "Environment belongs in workspace/.ascendc_env and the deploy wrapper."
+        )
 
 
 def test_opencode_skill_prompt_does_not_carry_kernel_worker_guard() -> None:
@@ -376,8 +353,8 @@ def test_opencode_skill_prompt_does_not_carry_kernel_worker_guard() -> None:
 
     prompt = getattr(backend, '_format_prompt')("aog-op-classify", "Return marker", kind="skill")
 
-    assert "opencode a5_ops runtime smoke guard" not in prompt
-    assert "opencode a5_ops kernel-worker compatibility guard" not in prompt
+    assert "kernel-worker authoring guard" not in prompt
+    assert "kernel-optimizer authoring guard" not in prompt
     assert "aog-op-classify/SKILL.md" in prompt
 
 
@@ -427,28 +404,63 @@ def test_opencode_dispatch_marks_active_workspace_for_hooks(monkeypatch) -> None
     assert env["CLAUDE_ACTIVE_WORKSPACE"] == workspace
 
 
-def test_opencode_dispatch_keeps_explicit_active_workspace(monkeypatch) -> None:
+def _dispatch_env(monkeypatch, inherited: str) -> dict:
     calls: list[dict] = []
 
     def fake_run(cmd, **kwargs):
         calls.append({"cmd": cmd, **kwargs})
         return types.SimpleNamespace(returncode=0, stdout="OK\n", stderr="")
 
-    monkeypatch.setenv("ASCENDC_WORKSPACE", "/explicit/workspace")
-    monkeypatch.setenv("CLAUDE_ACTIVE_WORKSPACE", "/explicit/workspace")
+    monkeypatch.setenv("ASCENDC_WORKSPACE", inherited)
+    monkeypatch.setenv("CLAUDE_ACTIVE_WORKSPACE", inherited)
     monkeypatch.setattr(subprocess, "run", fake_run)
-    backend = OpencodeBackend(opencode_bin="/tmp/opencode")
-
-    backend.dispatch(
+    OpencodeBackend(opencode_bin="/tmp/opencode").dispatch(
         "aog-kernel-worker",
         "ASCENDC_WORKSPACE: /repo/workspace/opencode_e2e_clean_add_a3",
         kind="agent",
         cwd="/repo",
     )
+    return calls[0]["env"]
 
-    env = calls[0]["env"]
-    assert env["ASCENDC_WORKSPACE"] == "/explicit/workspace"
-    assert env["CLAUDE_ACTIVE_WORKSPACE"] == "/explicit/workspace"
+
+def test_opencode_dispatch_keeps_an_agreeing_inherited_workspace(monkeypatch) -> None:
+    """An inherited value that names the same op is kept (and is a no-op either way)."""
+    env = _dispatch_env(monkeypatch, "/repo/workspace/opencode_e2e_clean_add_a3")
+
+    assert env["ASCENDC_WORKSPACE"] == "/repo/workspace/opencode_e2e_clean_add_a3"
+    assert env["CLAUDE_ACTIVE_WORKSPACE"] == "/repo/workspace/opencode_e2e_clean_add_a3"
+
+
+@pytest.mark.parametrize(
+    "inherited",
+    [
+        "/repo/workspace/some_other_op",  # a SIBLING — the worst case, see below
+        "/repo/workspace",                # the workspace root
+        "/repo",                          # an ancestor of it
+        "/explicit/workspace",            # outside the tree entirely
+    ],
+)
+def test_opencode_dispatch_replaces_a_disagreeing_inherited_workspace(monkeypatch, inherited) -> None:
+    """Any inherited value naming a different place is replaced by the dispatch's own.
+
+    The door scopes its cross-workspace rules to this variable, so a wrong value does not
+    weaken the guard evenly — it relocates it. Measured with the real door while dispatching
+    to opA:
+
+      ASCENDC_WORKSPACE=.../opA   read opB -> BLOCK    read own opA -> ALLOW
+      ASCENDC_WORKSPACE=.../opB   read opB -> ALLOW    read own opA -> BLOCK
+      ASCENDC_WORKSPACE=.../      read opB -> BLOCK (root disarms the matcher; armed by the
+                                                     door's own fallback)
+
+    The sibling row is the one that matters: the worker gains another operator's
+    `verification.json` — precisely what the anti-cheating layer exists to stop — and loses
+    its own files. An earlier version of this check accepted any path under the workspace
+    root, so the sibling passed and this test asserted it as intended behaviour.
+    """
+    env = _dispatch_env(monkeypatch, inherited)
+
+    assert env["ASCENDC_WORKSPACE"] == "/repo/workspace/opencode_e2e_clean_add_a3"
+    assert env["CLAUDE_ACTIVE_WORKSPACE"] == "/repo/workspace/opencode_e2e_clean_add_a3"
 
 
 def test_opencode_streaming_extracts_json_text_events(tmp_path) -> None:
@@ -646,3 +658,129 @@ def test_opencode_wire_safety_points_to_host_hook_plugin() -> None:
     assert "tool.execute.before" in wiring["events"]
     assert "tool.execute.after" in wiring["events"]
     assert Path(wiring["plugin_path"]).is_file()
+
+
+def test_generated_config_is_byte_stable_across_processes() -> None:
+    """Tool grants must not depend on Python's per-process string hash seed.
+
+    opencode collapses edit/write/patch into ONE write-side group and the LAST key for that
+    group wins. Building the record from a set therefore made each agent's write capability
+    random per process — measured at 4/10 runs keeping `edit` for aog-kernel-worker. A run
+    that lost it did not fail loudly: the model reported "I don't have a write tool" and
+    fell back to `bash printf > file`, which no generated-code rule inspects.
+    """
+    import hashlib
+    import subprocess as sp
+
+    src = (
+        "import sys; sys.path.insert(0, %r);"
+        "from backends.opencode_backend import OpencodeBackend as B;"
+        # Inside a string: this runs in a CHILD process, where only `B` exists.
+        "print(B._opencode_config_content())"
+    ) % str(Path(__file__).resolve().parents[1])
+    digests = set()
+    for seed in ("0", "1", "12345"):
+        env = dict(os.environ, PYTHONHASHSEED=seed)
+        out = sp.run([sys.executable, "-c", src], capture_output=True, text=True, env=env)
+        assert out.returncode == 0, out.stderr
+        digests.add(hashlib.sha256(out.stdout.strip().encode()).hexdigest())
+    assert len(digests) == 1, f"config varies with PYTHONHASHSEED: {len(digests)} variants"
+
+
+def test_write_group_semantics_are_respected() -> None:
+    """A kernel author keeps write; an analyzer-only agent does not get it."""
+    cfg = json.loads(_opencode_config_content())
+    agents = cfg["agent"]
+
+    kw = agents["aog-kernel-worker"]["tools"]
+    assert kw.get("edit") is True and kw.get("write") is True, (
+        "kernel worker lost its write tools; it will fall back to bash redirection, which "
+        "bypasses every generated-code guard"
+    )
+    # `patch` aliases the same group: emitting it as False switches write off entirely.
+    assert "patch" not in kw, "patch must not be emitted — it aliases the edit/write group"
+
+    analyzer = agents["aog-determinism-analyzer"]["tools"]
+    assert analyzer.get("edit") is False and analyzer.get("write") is False, (
+        "analyzer-only agent was widened to write; door.py's write guards only bind "
+        "kernel-author agents, so it could author kernel sources unjudged"
+    )
+
+    # Grants must be emitted AFTER denials. opencode resolves the edit/write/patch alias
+    # group by LAST key, so reversing this order silently strips write from every agent that
+    # should have it — and nothing else in the suite notices.
+    keys = list(kw)
+    granted = [k for k in keys if kw[k] is True]
+    denied_keys = [k for k in keys if kw[k] is False]
+    assert denied_keys and granted, "expected both denials and grants for a kernel author"
+    assert keys.index(granted[0]) > keys.index(denied_keys[-1]), (
+        "grants are not emitted last; under opencode's last-key-wins alias resolution the "
+        "write group would resolve to denied"
+    )
+
+    # Edit-only is NOT expressible: CC grants aog-kernel-optimizer Edit without Write, but
+    # the alias group resolves together, so we grant the group explicitly instead of
+    # emitting a restriction the harness discards.
+    optimizer = agents["aog-kernel-optimizer"]["tools"]
+    assert optimizer.get("edit") is True and optimizer.get("write") is True, (
+        "Edit-only agents must be granted the whole write group; emitting write=false here "
+        "resolves to edit=false too and leaves the agent unable to work"
+    )
+
+
+def test_skills_are_bindable_agents() -> None:
+    """Skill dispatch passes --agent; the name must exist or identity self-contradicts."""
+    cfg = json.loads(_opencode_config_content())
+    for skill in ("aog-knowledge-maintain", "aog-op-classify", "aog-a3-author"):
+        assert skill in cfg["agent"], f"{skill} is dispatched with --agent but not registered"
+        assert cfg["agent"][skill]["mode"] == "primary"
+    assert _select_agent("aog-knowledge-maintain", "skill") == "aog-knowledge-maintain"
+
+
+def test_kb_root_is_expanded_for_opencode() -> None:
+    """${CLAUDE_PLUGIN_ROOT} is prompt text; opencode does not expand it in tool arguments."""
+    cfg = _opencode_config_content()
+    assert "${CLAUDE_PLUGIN_ROOT}" not in cfg
+    bodies = _engine_root() / "workspace" / ".opencode-agents"
+    worker = bodies / "aog-kernel-worker.md"
+    if worker.is_file():
+        assert "${CLAUDE_PLUGIN_ROOT}" not in worker.read_text(), (
+            "agent body still addresses the KB through an unexpanded variable; the worker "
+            "would try to open a literal path and give up"
+        )
+
+
+def test_inherited_config_cannot_disarm_the_safety_net(monkeypatch) -> None:
+    """An inherited OPENCODE_CONFIG_CONTENT must not suppress our injection.
+
+    It is a user-exportable INPUT variable — the same argument launch_orchestrator.sh makes
+    when it refuses to use OPENCODE_CONFIG* as a host fingerprint. Treating it as "already
+    configured" disarmed everything: no plugin registration, so the adapter never loaded,
+    `--agent` did not resolve, and an answer-bearing output/ read that is BLOCKED in an armed
+    run SUCCEEDED with exit 0. One exported variable, whole safety net off, failing OPEN.
+    """
+    monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", "{}")
+    env = OpencodeBackend().build_env("aog-kernel-worker", "brief", kind="agent")
+    cfg = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    plugins = cfg.get("plugin") or []
+    assert any("a5_ops_hooks" in str(p) for p in plugins), (
+        "adapter registration was dropped because the environment already carried a config; "
+        "sub-agents would run with no door, no identity guard and no output guard"
+    )
+    assert "aog-kernel-worker" in cfg.get("agent", {})
+
+
+def test_unregistered_dispatch_target_is_still_bindable() -> None:
+    """`--agent <unknown>` only warns and falls back, so identity would self-contradict.
+
+    kb_auto_promote dispatches Claude Code's built-in "general-purpose" and resume()
+    dispatches the pseudo-target "resume"; neither is a plugin agent or skill. Without an
+    entry the run binds opencode's default agent while the hook env announces the requested
+    name, the identity guard then refuses every tool call, and exit 0 makes the orchestrator
+    record the refusal as a successful result.
+    """
+    for target in ("general-purpose", "resume"):
+        cfg = json.loads(_opencode_config_content(extra_agent=target))
+        assert target in cfg["agent"], f"{target} is dispatched but not bindable"
+        assert cfg["agent"][target]["mode"] == "primary"
+        assert _select_agent(target, "agent") == target

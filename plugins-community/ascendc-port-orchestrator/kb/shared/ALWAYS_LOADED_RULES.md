@@ -403,3 +403,9 @@ fp16 Div / Mul / Pow 在 NPU 上的行为**bit-level 匹配 PyTorch**。
 - [ ] 性能数字是同条件 A/B 测出来的吗？（OL-27）
 - [ ] 同类 kernel 的同样问题检查过了吗？（OL-24）
 - [ ] 专家反馈 / 用户纠正都改到代码里了吗？（OL-1）
+
+## Kernel-authoring guards
+
+Kernel-authoring agents (`aog-kernel-worker`, `aog-kernel-optimizer`) MUST also read
+`shared/KERNEL_AUTHORING_GUARDS.md` before writing or editing kernel sources. Those rules
+are harness-neutral: they apply identically under Claude Code and opencode.

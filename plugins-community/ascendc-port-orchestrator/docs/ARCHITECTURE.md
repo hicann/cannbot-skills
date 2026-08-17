@@ -78,6 +78,24 @@ cannbot 生态里「workflow」的官方定义（`docs/STANDARDS.md §目录结�
 
 **这就是本插件 bundle 一个 engine（FSM 是代码）、而非像其它 cannbot 插件只发 `workflows/*.md` 提示词的原因**：可复现 / 安全 / 防漂移的硬保证来自代码 FSM，不来自 LLM 对 prose 手册的遵守——LLM 会漂，Python FSM 不会。（注：本插件根的 `workflows/development-guide.md` 是**描述性**文档、给人读的，不是真正的驱动；真正的驱动是 engine 里的 FSM，别把它当 cannbot 那种 prose-workflow。）
 
+### 2.2 跨代际移植的参考来源
+
+`--port-a3` 仍是同一个 `opgen_mode=port_a3_to_a5`：它提供要分析和移植的 arch22 源算子。功能参考由
+可选的文件对选择，而不是新增 `opgen_mode` 或要求用户指定 provider：
+
+| CLI 输入 | `reference.source` | O2.5 / O5 真值 | 环境与性能语义 |
+|---|---|---|---|
+| 仅 `--port-a3 <source-op>` | `a3_live` | 当次实时 A3-CANN capture；既有 two-tier grader | 需要 A3 + A5；沿用 live A3/A5 性能契约 |
+| `--port-a3` + `--reference-model model.py` + `--reference-test test.py` | `model_reference` | 暂存文件的一次性 case/canonical-output capture；model-reference grader | 只需要 A5。模型在该环境自行选择 CPU/NPU；性能指标为 `speedup_vs_model_reference`，不是 A3/A5 ratio |
+
+这对外部文件必须一起出现，默认 `test_origin=user_supplied`。引擎不得因为缺失 `test.py` 而自行生成
+用例；只有前端取得用户明确授权后才可生成，再显式传 `--reference-test-origin agent_generated`，并在
+state/报告中保留该来源。O1 以内容寻址方式将文件固定到 `reference_inputs/<bundle-digest>/`，O2.5 只使用
+固定副本；resume 验证既有 capture，不重新调用 `get_test_cases()` 或重新计算参考真值。
+
+离线 A3 tensor 包预留为未来的 `a3_offline_bundle`，不属于本实现。它必须有独立 provenance/hash/replay
+契约，绝不能被报告为 `a3_live` 或实时 A3/A5 ratio。
+
 ## 3. 插件结构
 
 ```
@@ -179,7 +197,8 @@ plugins-community/ascendc-port-orchestrator/
 
 ### 6.2 性能门（perf gate）：强制测量、阈值与失效处理
 
-性能测量策略与 a5_ops 一致，移植未作修改，无 cannbot 特例。本节记录策略、一次实测失效及其处理，作为后续自动化移植的参照。
+性能门先按 `reference.source` 分流。本节下面的既有 A3/A5 阈值、对称性和实测失效记录仅适用于
+`a3_live`；它的语义保持不变。`model_reference` 使用 §6.2.1 的单独基线，不能把两者的 ratio 混用。
 
 **策略**：性能默认强制测量。是否升级优化 / 拦截交付，由性能比（目标 kernel 相对参考实现的耗时比）与阈值判定。阈值解析顺序：`.ascendc_env` 覆盖 > 插件按算子类给出的 band-aware 阈值（`plugin.ko_escalation_threshold(op_class)`）> AscendC 默认 `0.6×`（`schema_norm.py`，本插件默认值完好，未在移植中改动）。**跳过性能测量为显式开关**：`--perf-threshold=0` → `PRECISION_ONLY` profile（`perf_gate.py`），仅在明确指定时生效，不隐式跳过。
 
@@ -203,18 +222,69 @@ plugins-community/ascendc-port-orchestrator/
 
 结论：本次失效是「自披露测量无效后仍声明通过」与「门失败后未 fail-fast」两个缺陷叠加，非性能策略需要放宽。
 
+#### 6.2.1 `model_reference` 的性能基线
+
+当用户提供 `model.py + test.py` 时，性能基线就是这份已暂存的参考模型，不再抓取 A3 时间。O5 从 O2.5
+冻结的输入/canonical 输出恢复 case，在一个 A5 session 内以 ABBA 顺序测量 A=reference、B=A5 candidate；
+模型构造、用例生成和输入克隆都在计时包络外。默认每侧 10 次 warmup、50 个样本，对每 case 取 median，
+再按 case weight 汇总：
+
+```text
+speedup_vs_model_reference = weighted reference median latency
+                              / weighted candidate median latency
+```
+
+计时必须对每个 case 声明的 `benchmark.accelerator_devices` 完成设备同步，并再次验证输出与 O2.5 的
+canonical capture 一致。成功工件记录 `baseline_kind=model_reference`、`metric=speedup_vs_model_reference`、
+ABBA order/device evidence 和两侧延迟；它不表示 A3/A5 加速比。第一期不为该指标设统一数值阈值，
+“测量完整可信”本身是 gate，数值由用户判断。
+
+任何 staging/capture、设备同步、输出一致性或同会话测量无法完成，都必须写
+`performance.status=MEASUREMENT_FAILED`，最终为 `INCOMPLETE_PERFORMANCE` 且没有 ratio；不得将只有精度
+证据的运行标为 release PASS。resume 从性能子阶段重新完整测量 reference 和 candidate，不能复用跨会话
+延迟或缓存 candidate 时间。
+
 ## 7. 跨代际可扩展
 
 当前 arch22→arch35。新增目标架构/产品 = 加 NL→canonical-target 映射 + 该目标的 KB，**入口与流水线范式不变**。规划：更多目标 + 反向跨代际移植（如 910C→910A）。
 
-## 8. 底座依赖（Claude Code 耦合）+ 适配计划
+## 8. Harness 抽象（Claude Code / opencode）+ 安装面差异
 
-CANNBot 与底座 agent harness（OpenCode / Claude Code 等）**不直接耦合**；但本插件由 a5_ops 移植而来，**当前与 Claude Code 耦合**：
-- **skill 格式**：沿用 Claude Code 的 skill 约定。
-- **hook 机制**：流水线的安全网（如完整性门）依赖 Claude Code 的 hook。
-- **sub-agent 调度**：流水线**直接调用 `claude` 命令**拉起子 agent（worker/optimizer/probe 等）。
+CANNBot 与底座 agent harness 不直接耦合：引擎经 `backends/` 的 `Backend` 抽象调度子 agent
+（`cc_backend` / `opencode_backend` / `codex_backend`），边界不变量是
+**backend 只接线 harness、绝不自带语义规则**（规则在 canonical checker / KB）。
 
-→ 插件**当前需要 Claude Code 运行时**。**适配计划**：后续做去耦/适配，使其符合 CANNBot 底座无关约定（skill 格式归一、hook 抽象、sub-agent 调度改为底座中立接口）。该依赖在 README 与 RFC 中均如实声明；README 列出适配路线。
+### 8.1 两个 harness 的差异一览
+
+| | Claude Code | opencode |
+|---|---|---|
+| agent 文件 | marketplace 安装为本地 agent | **不落盘**，每次 dispatch 经 `OPENCODE_CONFIG_CONTENT` 注入（open code 的 agent frontmatter `tools:` 是 record，落盘会令该机器所有工程的 opencode 无法启动） |
+| 安全网触发面 | PreToolUse / PostToolUse / SubagentStop hook | `tool.execute.before` / `permission.ask` 适配器 + 编排器 dispatch 站点 stop gate |
+| 安全网注册 | 写用户 settings/hooks 声明 | 同样经注入配置注册 `a5_ops_hooks.mjs`，不写用户的 `opencode.json`（0600、含明文 key） |
+| 入口 | skill | `.opencode/command/*.md`（安装时 `@@PLUGIN_DIR@@` 物化为真实路径） |
+
+### 8.2 opencode 安装面的安全网证明（两级，实现细节）
+
+USAGE.md 只要求用户看最后一行 `✓ safety net ENFORCES`；这里放实现细节。
+
+- **结构级**：真实 opencode 二进制必须解析注入配置（agents 为 `mode: primary`、入口 skills 可见），
+  否则 **exit 1**。首次在全新 opencode 环境下安装会先触发 opencode 的插件依赖解析（`bun install`，
+  实测 >90s、在线约 110s），安装器有进度提示 + 180s 超时兜底。
+- **行为级**：`engine/src/opencode/probe_safety_net.mjs` 用真实 JS runtime 调适配器的
+  `tool.execute.before`，要求 **deny/allow 成对**：kernel-worker 读别的 workspace 必须被拒、读自己的
+  必须放行。通过 → manifest `hooks_verified_live: true`；不通过 → exit 1；无 node/bun → 只告警。
+  （只做 deny 半边不够：一个"什么都拒"的坏门与"武装完好"从外面看一模一样，只有 allow 半边能区分。）
+
+**三道证明的共同盲区**（安装探针、Phase O0 探针、单测）：都是自己驱动适配器，证的是
+「到达守卫后判得对」，不是「opencode 会让它到达」。要验证后者，跑模型驱动端到端
+（`AOG_E2E_OPENCODE_MODEL=<provider>/<model> python3 -m pytest src/scripts/tests/test_opencode_e2e_live.py`，
+需凭证、花 token、默认 skip）。
+
+### 8.3 离线安装
+
+opencode 首次安装需一次性拉插件依赖（npm registry）。完全离线：在联网机器跑一次
+`init.sh … opencode` + 一次 `opencode run`，把 `$CONFIG_ROOT/{node_modules,package.json,package-lock.json}`
+搬到目标机器；或预置 npm 镜像。
 
 ## 9. 待定（依赖社区）
 
@@ -234,13 +304,13 @@ CANNBot 与底座 agent harness（OpenCode / Claude Code 等）**不直接耦合
 ### 10.1 实现状态（如实，随实现更新）
 | 设计项 | 设计 | 实现 | 测试 |
 |---|---|---|---|
-| 确定性流水线 FSM | ✅ §2 | ✅ a5_ops orch(353-py 生产) | ✅ a5_ops；**未 bundle 进插件** |
+| 确定性流水线 FSM | ✅ §2 | ✅ bundle-orch（`engine/src/scripts/orchestrator` 随插件交付） | ✅ 单测全绿；PR #814 e2e 验证 |
 | 三源 READ resolver (c>b>a) | ✅ §5.2 | ✅ `cba_resolver.py` | ✅ test_cba_toggle(真 KB+cannbot 树) |
 | 三部分 KB / dedup 覆盖证明 | ✅ §5.0 | ✅ converter + `coverage_gate.py` | ✅ 44 passed |
-| 安全网 gates | ✅ §6 | ✅ hermeticity/cannbot_ut/coverage + a5_ops O0/provenance/self-critic | ✅ 单测；**未集成进插件回路** |
+| 安全网 gates | ✅ §6 | ✅ hermeticity/cannbot_ut/coverage + 插件内 O0 钩子门/provenance/self-critic | ✅ 单测全绿；已随插件运行 |
 | 用户 KB 存储+索引 | ✅ §5.1 | ❌ 待实现 | ❌ |
 | 写回用户 KB(c)、不改 b | ✅ §5.3 | ❌ 待实现 | ❌ |
-| **集成（bundle-orch 端到端生成算子）** | ✅ §10 | ❌ **未建（插件当前 orch-less）** | ❌ **未 e2e** |
+| **集成（bundle-orch 端到端生成算子）** | ✅ §10 | ✅ **已 bundle**：入口 skill → `python -m orchestrator` → 全流水线随插件交付 | ✅ 引擎单测全绿 + PR #814（含 opencode harness）e2e 走通 |
 
 > 本表是「恐惧清单」的对账：已实现+测的不是幻觉（44 单测过）；❌ 项是真空白，按本文档落地。
 
@@ -277,14 +347,14 @@ codex（read-only、喂了本文档 + cba_resolver/converter/coverage_gate + AGE
 | 钩子完整性 O0 | Primary(orch-shell) | 插件 hook 配置 | 完整性 verdict | hook 完整或自愈 |
 | 解析/配置 O1 | Primary(orch-shell) | 用户 NL 目标 + 源算子 | 任务配置(source/target/mode) | 目标可归一、源可识别 |
 | 分类 O1.5 | orchestrator | 源算子 | op-family + det-policy | 分类完成 |
-| 参考/真值 O2.5 | orchestrator | 源算子(移植) / 正向(反向) | reference / golden | 真值自洽可评分 |
+| 参考/真值 O2.5 | orchestrator | 源算子；移植时可选 `model.py + test.py` / 正向(反向) | reference / golden | 真值自洽、来源与 state 绑定 |
 | **生成 O4（差异阶段）** | aog-kernel-worker | 配置 + 参考 | 目标 AscendC kernel | 编译通过 |
 | 构建 | build harness | kernel | .so + provenance | build green |
 | 精度验证 O5 | orchestrator + precision | kernel + 真值 | precision verdict(分层) | 达阈值 / 记录 ceiling |
 | 性能(可选) | aog-kernel-optimizer | kernel + profiling | perf ratio | ≥阈值 或 记录 |
 | 报告 O6 | aog-report-gen | 全产物 | REPORT + 复现指引 | 报告完整 |
 
-差异阶段 = 参考 O2.5 与生成 O4：cross-gen-port 走来源架构实测真值→目标 kernel；backward-gen 走 CPU/fp64 autograd 梯度真值→反向 kernel。其余阶段两模式共用。
+差异阶段 = 参考 O2.5 与生成 O4：cross-gen-port 默认走来源架构实时 A3 真值，也可在用户提供模型与测试时走冻结的外部模型真值→目标 kernel；backward-gen 走 CPU/fp64 autograd 梯度真值→反向 kernel。其余阶段两模式共用。
 
 ### 13.1 模式 A：ascendc-cross-gen-port（跨代际算子移植）
 
@@ -292,9 +362,10 @@ codex（read-only、喂了本文档 + cba_resolver/converter/coverage_gate + AGE
 - **适用场景**：已有 arch22(910C/V220) 的 AscendC 算子、需在 arch35(950PR/V300) 上得到等价算子；用户能用自然语言指定目标。
 - **不适用场景**：源不是 AscendC（用其它 op-gen 模式）；目标架构超出当前支持（当前仅 arch22→arch35）；纯新算子无源参考（用直调/注册模式）。
 - **标准工作流**：见 §13.0，生成阶段走移植路径。
+- **参考输入**：默认 `a3_live` 当次在 A3 执行来源 CANN；用户同时传入 `--reference-model model.py` 与 `--reference-test test.py` 时为 `model_reference`，在 A5 验证环境冻结模型/用例真值。后者不需要 A3，但仍需要 A5 构建/验证；测试默认必须由用户给出，显式授权生成时才记录 `test_origin=agent_generated`。离线 A3 tensor 包不在本模式当前实现内。
 - **Agent 设计**：Primary（AGENTS.md，orch-shell）= 解析 NL→canonical target、选 lane、调编排器、收口状态/报告，**不亲自逐阶段写 kernel**；Subagent = aog-kernel-worker（生成+构建+验证）、aog-kernel-optimizer（perf）、aog-precision-probe（精度卡壳）、aog-fused-optimizer（fused 升级）、aog-researcher（架构探索）、aog-determinism-analyzer（确定性）。触发条件见 §4。
 - **Skill 依赖（阶段级）**：入口 `ascendc-cross-gen-port`（O1）；KB resolver c>b>a（O2.5/O4 按需注入）；社区 skills a 层（O4 生成，如 ascendc-api-best-practices）；gates 安全网（O0/O5）；KB writer（O6 写回 c）。
-- **工件契约**：state（`workspace/{op}/.opgen_state.json`）、kernel（`workspace/{op}/kernel/*.{h,cpp}` + pybind11.cpp）、build provenance、precision/perf report、user-KB 写回文件；消费者 = 后续阶段 + reviewer + 用户复现。
+- **工件契约**：state（`workspace/{op}/.opgen_state.json`）、kernel（`workspace/{op}/kernel/*.{h,cpp}` + pybind11.cpp）、build provenance、precision/perf report、user-KB 写回文件；`model_reference` 额外有内容寻址的 `reference_inputs/`、case/capture manifest 与 `model_reference_performance.json`。消费者 = 后续阶段 + reviewer + 用户复现。
 - **失败恢复**：可重试（编译/精度内层循环、`--optimize` 再入）；可回滚（状态机回退阶段）；保留现场（workspace 持久化、可中断恢复）；blocked（真值不可得/硬件不支持 → 升级 aog-researcher 或 await_user_decision）；用户需补充（目标歧义时回询）。
 - **用户入口示例**：`把这个算子移植到 arch35：<算子源/名称>`；`移植到 950PR / A5：<算子源/名称>`。
 

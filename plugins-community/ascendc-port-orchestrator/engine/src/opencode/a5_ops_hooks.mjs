@@ -18,6 +18,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const TOOL_MAP = new Map([
   ["agent", "Agent"],
@@ -31,7 +32,47 @@ const TOOL_MAP = new Map([
   ["grep", "Grep"],
   ["glob", "Glob"],
   ["webfetch", "WebFetch"],
+  // --- opencode 1.18.18 tools that must reach the same canonical guards --------------
+  // Verified against the installed binary before mapping: `websearch` occurs 220 times,
+  // `codesearch` ZERO. A mapping for a tool the harness does not have is not coverage — it
+  // is an untestable claim (the test for it had to invent its own argument shape), and it
+  // hides the fact that an unmapped tool would be refused by the unknown-tool default
+  // anyway, which is the safe direction. Map only what the harness actually exposes.
+  ["websearch", "WebFetch"],
 ]);
+
+// Tools that carry no file/command payload and therefore have nothing for the canonical
+// guards to judge. Listed EXPLICITLY so that "not dangerous" is a decision on record
+// rather than the accidental result of a missing map entry.
+// Tools and permission prompts with no file, shell, or network side effect. They reach the
+// canonical guards under names those guards do not know, so without this they would hit the
+// default-deny below and break ordinary sessions.
+//
+// Measured against the installed opencode 1.18.18 rather than assumed — `opencode debug agent`
+// reports exactly: bash, edit, glob, grep, invalid, question, read, skill, task, todowrite,
+// webfetch, write. An earlier version of this list carried `todoread` and `lsp`, neither of
+// which exists in that toolset, while omitting `question`, which does — so the real tool was
+// denied and the two dead entries covered nothing. A name that the harness does not have is
+// not coverage, it is an untestable claim.
+const BENIGN_TOOLS = new Set(["todowrite", "skill", "invalid", "question"]);
+
+// Permission prompts, which arrive through `permission.ask` named by PERMISSION rather than by
+// tool (`external_directory` is the one that maps onto a real tool and is handled separately).
+// These three are opencode's own session controls — the runaway-loop breaker and the two plan
+// mode transitions — so denying them would wedge a session over a prompt that touches nothing.
+const BENIGN_PERMISSIONS = new Set(["doom_loop", "plan_enter", "plan_exit"]);
+
+// Write-class tools opencode may expose that this adapter cannot faithfully normalise into
+// the {file_path, content} shape the canonical checkers expect. `apply_patch` is the live
+// example: it carries a multi-file patch blob, and opencode REMOVES `edit`/`write` from the
+// toolset when it enables apply_patch (gpt-class models), so an unmapped apply_patch would
+// silently become the only write path — with every write guard bypassed. Refuse instead of
+// guessing: a wrong path extraction would hand the guards the wrong file and "pass".
+const UNSUPPORTED_WRITE_TOOLS = new Set(["apply_patch", "applypatch", "patch"]);
+
+// The Claude-Code tool names the canonical guards know how to judge. Used to accept a
+// permission event whose PERMISSION name has already been mapped onto one of these.
+const KNOWN_GUARDED_TOOLS = new Set([...TOOL_MAP.values()]);
 
 const AUTO_ALLOW_AFTER_GUARD = new Set([
   "Agent",
@@ -44,16 +85,74 @@ const AUTO_ALLOW_AFTER_GUARD = new Set([
   "Glob",
   "WebFetch",
 ]);
-const KERNEL_AUTHOR_AGENTS = new Set(["aog-kernel-worker", "aog-kernel-optimizer"]);
 
-function isKernelAuthor(payload) {
-  return KERNEL_AUTHOR_AGENTS.has(payload.agent_type || "");
+// ---- agent identity -------------------------------------------------------------------
+// opencode's tool hooks carry only {tool, sessionID, callID} — no agent identity
+// (@opencode-ai/plugin index.d.ts). Identity therefore has to come from `chat.params`,
+// which DOES carry an authoritative `agent` keyed by sessionID, and is emitted before the
+// turn's first tool call (measured on 1.18.18).
+//
+// Two traps this encodes:
+//  1. opencode runs internal utility agents (title/summary/compaction) inside the SAME
+//     sessionID, concurrently. A naive last-writer-wins can therefore attribute a worker's
+//     tool call to `title`, which is not an aog-* agent, so the dispatcher would select an
+//     empty gate set and ALLOW. Utility agents are filtered out of identity resolution.
+//  2. Process env alone cannot identify a sub-agent: every task-tool child of one process
+//     shares it. Env is used only to establish "this process is a plugin-driven run".
+const UTILITY_AGENTS = new Set(["title", "summary", "compaction"]);
+const SESSION_AGENTS = new Map();
+
+function recordSessionAgent(sessionID, agent) {
+  if (!sessionID || !agent) return;
+  if (UTILITY_AGENTS.has(String(agent))) return;
+  SESSION_AGENTS.set(String(sessionID), String(agent));
 }
 
+// Returns {agentType, agentId, unresolved}. `unresolved` is true only for a plugin-driven
+// run whose identity could not be confirmed — callers must fail CLOSED on it rather than
+// fall back to the empty-identity path, which the canonical read guard treats as the main
+// agent and allows.
+function resolveIdentity(sessionID) {
+  const dispatched = process.env.AOG_HOOK_AGENT_TYPE || "";
+  const observed = sessionID ? SESSION_AGENTS.get(String(sessionID)) || "" : "";
+  if (!dispatched) {
+    // Not a plugin dispatch (interactive opencode, or another project's session).
+    // Do not impose this plugin's gates on an unrelated session.
+    return { agentType: "", agentId: "", unresolved: false };
+  }
+  if (observed && observed !== dispatched) {
+    // Two independent signals disagree about who is executing. The classic cause is
+    // `run --agent <x>` silently falling back to opencode's default agent while our env
+    // still claims <x>: gates would judge as <x> while something else runs. Refuse.
+    return { agentType: observed, agentId: "", unresolved: true };
+  }
+  // Under Path A one `opencode run` process serves exactly one dispatched agent, so the
+  // env label is a sound baseline. `chat.params` is used to CONTRADICT it, not to license
+  // it — requiring an observation would make enforcement depend on hook ordering.
+  return {
+    agentType: dispatched,
+    agentId: process.env.AOG_HOOK_AGENT_ID || `opencode:${dispatched}`,
+    unresolved: false,
+  };
+}
+
+// A NAMESPACED name (`mcp__<server>__bash`, `some.plugin.write`) is not the builtin it happens
+// to end with, and must not inherit its identity. Matching on the leaf segment used to do
+// exactly that: an MCP tool called `mcp__x__bash` became `Bash`, the guards then inspected an
+// argument shape they do not understand (that server names its command field whatever it
+// likes), found no command to judge, and allowed the call — while `assertToolIsGuardable` saw
+// a KNOWN_GUARDED_TOOLS name and stood down. Guard-SHAPED but content-blind is strictly worse
+// than unknown, because unknown fails closed in plugin-dispatched runs. So namespaced names
+// are passed through verbatim and land on that default-deny path.
 function titleToolName(raw) {
   const s = String(raw || "");
-  const leaf = s.split(".").pop().split("__").pop().toLowerCase();
-  return TOOL_MAP.get(leaf) || s;
+  if (isNamespacedToolName(s)) return s;
+  return TOOL_MAP.get(s.toLowerCase()) || s;
+}
+
+function isNamespacedToolName(raw) {
+  const s = String(raw || "");
+  return s.includes("__") || s.includes(".");
 }
 
 function titlePermissionName(raw) {
@@ -70,9 +169,24 @@ function normalizeToolInput(toolName, args) {
   if ((toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") && input.file_path == null) {
     input.file_path = input.filePath || input.filepath || input.path || input.file || "";
   }
-  if (toolName === "Read") {
+  // Read-class content tools must surface the path they touch under BOTH `file_path` and
+  // `path`, because the canonical output guard inspects whichever field the Claude-Code
+  // tool would have supplied and opencode names it differently per tool (filePath/path).
+  // Grep is included because `codesearch` normalises to it and reads file CONTENT — if its
+  // target never reaches the payload the archive guard sees nothing to judge and allows it.
+  //
+  // Glob is deliberately NOT included: its `pattern` is a match expression, not a path, and
+  // copying it into `path` makes the inline guard read a project-wide glob as a scoped one
+  // (it distinguishes them precisely by `path` being empty).
+  if (toolName === "Read" || toolName === "Grep") {
     if (input.file_path == null) {
-      input.file_path = input.filePath || input.filepath || input.path || input.file || input.pattern || "";
+      // `pattern` is deliberately NOT a fallback, for the reason the Glob branch below spells
+      // out: it is a match expression, not a path. Copying it here made a grep for a string
+      // that merely CONTAINS "workspace/" or "output/" read as a scoped path and get refused,
+      // while the case those rules are actually for — a grep with no `path`, i.e. the whole
+      // project — still slipped past, because the rules were then judging the regex instead of
+      // the absent scope.
+      input.file_path = input.filePath || input.filepath || input.path || input.file || "";
     }
     if (input.path == null && input.file_path != null) {
       input.path = input.file_path;
@@ -131,505 +245,128 @@ function runChecker(projectRoot, scriptRel, payload, timeoutMs) {
     timeout: timeoutMs,
     env,
   });
-  if (res.error) {
-    throw new Error(`[a5_ops opencode hook] ${scriptRel} failed: ${res.error.message}`);
+  // `status === null` means the child never exited normally — killed by a signal, which for
+  // this call is overwhelmingly the `timeout` above (SIGTERM). `res.error` is NOT set in that
+  // case, and `res.status && …` reads null as falsy, so a checker that was killed before it
+  // could object used to be indistinguishable from one that approved. runDoor already fails
+  // closed on this; the checker path did not.
+  if (res.error || res.status === null) {
+    const why = res.error ? res.error.message : `killed by signal ${res.signal || "unknown"}`;
+    throw new Error(`[a5_ops opencode hook] ${scriptRel} failed: ${why}`);
   }
-  if (res.status && res.status !== 0) {
+  if (res.status !== 0) {
     const stderr = (res.stderr || "").trim();
     const stdout = (res.stdout || "").trim();
     throw new Error(stderr || stdout || `[a5_ops opencode hook] ${scriptRel} exited ${res.status}`);
   }
 }
 
-function basename(p) {
-  return String(p || "").split(/[\\/]/).pop();
-}
-
-function expectedPybindModuleName(filePath, workspace) {
-  const fromWorkspace = String(workspace || process.env.ASCENDC_WORKSPACE || "");
-  if (fromWorkspace) {
-    return `_${path.basename(fromWorkspace)}_ext`;
-  }
-  const normalized = String(filePath || "").replace(/\\/g, "/");
-  const match = normalized.match(/(?:^|\/)workspace\/([^/]+)\/kernel\/pybind11\.cpp$/);
-  return match ? `_${match[1]}_ext` : "";
-}
-
-function generatedKernelPath(p) {
-  const s = String(p || "");
-  const b = basename(s);
-  if (/(^|\/)(op_host|op_kernel)\//.test(s)) {
-    return true;
-  }
-  if (["model_new_ascendc.py", "pybind11.cpp", "kernels.cpp", "kernel.h"].includes(b)) {
-    return true;
-  }
-  return /(^|\/)kernel\/[^/]+\.(h|hpp|cpp|cc)$/.test(s);
-}
-
-function contentFromToolInput(input) {
-  if (!input || typeof input !== "object") return "";
-  const chunks = [];
-  for (const key of ["content", "file_text", "new_string", "replacement"]) {
-    if (typeof input[key] === "string") chunks.push(input[key]);
-  }
-  if (Array.isArray(input.edits)) {
-    for (const edit of input.edits) {
-      if (edit && typeof edit.new_string === "string") chunks.push(edit.new_string);
-      if (edit && typeof edit.replacement === "string") chunks.push(edit.replacement);
-    }
-  }
-  return chunks.join("\n");
-}
-
-function extractWorkspaceFromCommand(command) {
-  const s = String(command || "");
-  const match = s.match(/(?:^|\s)ASCENDC_WORKSPACE=(?:"([^"]+)"|'([^']+)'|(\S+))/);
-  return match ? (match[1] || match[2] || match[3] || "") : "";
-}
-
-function findShortInitBufferLine(content) {
-  for (const line of String(content || "").split(/\r?\n/)) {
-    if (!/\bInitBuffer\s*\(/.test(line)) continue;
-    const args = line.match(/\bInitBuffer\s*\(([^)]*)\)/);
-    if (!args) continue;
-    const commaCount = (args[1].match(/,/g) || []).length;
-    if (commaCount < 2) return line.trim();
-  }
-  return "";
-}
-
-function findDynamicInitBufferLine(content) {
-  for (const line of String(content || "").split(/\r?\n/)) {
-    if (!/\bInitBuffer\s*\(/.test(line)) continue;
-    const args = line.match(/\bInitBuffer\s*\(([^)]*)\)/);
-    if (!args) continue;
-    const parts = args[1].split(",").map((p) => p.trim());
-    const bytesExpr = parts.length >= 3 ? parts.slice(2).join(",") : "";
-    if (/\b(totalElems?|totalSize|blockSize|count|numel|shapeSize|nElems?)\b/i.test(bytesExpr)) {
-      return line.trim();
-    }
-  }
-  return "";
-}
-
-function hasAscendCKernelDefinition(content) {
-  return /\bextern\s+"C"\s+__global__\s+__aicore__\s+void\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*\{/s.test(String(content || ""));
-}
-
-function hasAscendCKernelDeclarationOnly(content) {
-  const s = String(content || "");
-  return /\bextern\s+"C"\s+__global__\s+__aicore__\s+void\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*;/s.test(s)
-    && !hasAscendCKernelDefinition(s);
-}
-
-function hasPybindKernelLaunch(content) {
-  const s = String(content || "");
-  return /\bACLRT_LAUNCH_KERNEL\s*\(/.test(s) || /\baclrtlaunch_[A-Za-z0-9_]+\s*\(/.test(s);
-}
-
-function findShortSetGlobalBufferLine(content) {
-  for (const line of String(content || "").split(/\r?\n/)) {
-    if (!/\bSetGlobalBuffer\s*\(/.test(line)) continue;
-    const callText = line.slice(line.indexOf("SetGlobalBuffer"));
-    if (!/,/.test(callText)) return line.trim();
-  }
-  return "";
-}
-
-function usesUnqualifiedAscendSymbolsWithoutNamespace(content) {
-  const s = String(content || "");
-  if (!/\b(?:TPipe|TQue|GlobalTensor|LocalTensor)\b/.test(s)) return false;
-  if (/\busing\s+namespace\s+AscendC\s*;/.test(s)) return false;
-  if (/\bAscendC::(?:TPipe|TQue|GlobalTensor|LocalTensor)\b/.test(s)) return false;
-  return true;
-}
-
-function findNonAsciiLine(content) {
-  for (const line of String(content || "").split(/\r?\n/)) {
-    if (/[^\x00-\x7F]/.test(line)) return line.trim();
-  }
-  return "";
-}
-
-function findOverlappingAlignedBlockDataCopy(content) {
-  const s = String(content || "");
-  const remainderBlockSplit =
-    /\bbase\s*=\s*\(?\s*total_?\s*\/\s*blockNum\s*\)?\s*;/.test(s)
-    && /\bremainder\s*=\s*total_?\s*%\s*blockNum\s*;/.test(s)
-    && /\bstart\s*=\s*blockIdx\s*\*\s*base\b/.test(s)
-    && /\bcount\s*=\s*base\s*\+/.test(s);
-  const ceilBlockSizeSplit =
-    /\bblockSize\s*=\s*\(\s*total_?\s*\+\s*blockNum\s*-\s*1\s*\)\s*\/\s*blockNum\s*;/.test(s)
-    && /\bstart\s*=\s*blockIdx\s*\*\s*blockSize\s*;/.test(s)
-    && /\bend\s*=\s*\([^;]*start\s*\+\s*blockSize[^;]*\)\s*\?[^;]*total_?[^;]*:[^;]*start\s*\+\s*blockSize[^;]*;/.test(s)
-    && /\bcount\s*=\s*end\s*-\s*start\s*;/.test(s);
-  const scalarBlockSplit = remainderBlockSplit || ceilBlockSizeSplit;
-  if (!scalarBlockSplit) return "";
-  const alignedFromCount =
-    /\balignedCount\s*=\s*\([^;]*\bcount\b[^;]*\+[^;]*(?:7|kFP32BlockElems\s*-\s*1)[^;]*\)[^;]*;/.test(s)
-    || /\balignedCount\s*=.*\bAlign(?:Up|UP)?[^;]*\bcount\b/s.test(s)
-    || /\btileLenAligned\s*=\s*\([^;]*\btileLen\b[^;]*\+[^;]*(?:7|kFP32BlockElems\s*-\s*1)[^;]*\)[^;]*;/.test(s);
-  if (!alignedFromCount) return "";
-  const copiesAlignedTileFromScalarStart =
-    /\bDataCopy\s*\([^;]*\[\s*start\s*\+\s*offset\s*\][^;]*,\s*[^;]*\btileSize\b[^;]*\)\s*;/.test(s)
-    || /\bDataCopy\s*\([^;]*,\s*[^;]*\[\s*start\s*\+\s*offset\s*\][^;]*,\s*[^;]*\btileSize\b[^;]*\)\s*;/.test(s)
-    || /\bDataCopy\s*\([^;]*\[\s*start\s*\+\s*offset\s*\][^;]*,\s*[^;]*\btileLenAligned\b[^;]*\)\s*;/.test(s)
-    || /\bDataCopy\s*\([^;]*,\s*[^;]*\[\s*start\s*\+\s*offset\s*\][^;]*,\s*[^;]*\btileLenAligned\b[^;]*\)\s*;/.test(s);
-  return copiesAlignedTileFromScalarStart
-    ? "scalar block split with count-rounded DataCopy at start+offset"
-    : "";
-}
-
-function isProjectWideRecursiveGlob(pattern, searchPath, projectRoot) {
-  const p = String(pattern || "");
-  if (!p.includes("**/")) return false;
-  const root = String(searchPath || "").trim();
-  if (!root || root === "." || root === projectRoot) return true;
-  const resolved = path.resolve(root);
-  return resolved === projectRoot;
-}
-
-function activeWorkspaceRoot() {
-  const ws = process.env.ASCENDC_WORKSPACE || process.env.CLAUDE_ACTIVE_WORKSPACE || "";
-  return ws ? path.resolve(ws) : "";
-}
-
-function referencesOtherWorkspacePath(value, projectRoot) {
-  const text = String(value || "");
-  const active = activeWorkspaceRoot();
-  const root = path.resolve(projectRoot);
-  const workspaceRoot = path.join(root, "workspace");
-  const patterns = [
-    /(?:^|[\s'"`(])((?:\.\/)?workspace\/[^\s'"`)]+)/g,
-    new RegExp(`(?:^|[\\s'"\\\`(])(${workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\/[^\\s'"\\\`)]+)`, "g"),
-  ];
-  for (const re of patterns) {
-    for (const match of text.matchAll(re)) {
-      const raw = match[1] || "";
-      const resolved = path.resolve(root, raw);
-      if (!resolved.startsWith(workspaceRoot + path.sep)) continue;
-      if (active && (resolved === active || resolved.startsWith(active + path.sep))) continue;
-      return raw;
-    }
-  }
-  return "";
-}
-
-function runInlineAccessGuard(projectRoot, payload) {
-  if (!isKernelAuthor(payload)) return;
-  const input = payload.tool_input || {};
-  const tool = payload.tool_name;
-
-  if (tool === "Glob") {
-    const pattern = String(input.pattern || input.file_path || "");
-    const searchPath = String(input.path || "");
-    const otherWorkspace = referencesOtherWorkspacePath(`${searchPath} ${pattern}`, projectRoot);
-    if (otherWorkspace) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked cross-workspace glob by aog-kernel-worker: ${otherWorkspace}`);
-    }
-    if (/(^|\/)output\//.test(pattern) || /(^|\/)output\//.test(searchPath)) {
-      throw new Error("[a5_ops opencode hook] access guard blocked kernel-worker glob over output/ archives; use current workspace, KB, SDK headers, and source inputs");
-    }
-    if (isProjectWideRecursiveGlob(pattern, searchPath, projectRoot)) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked project-wide recursive glob '${pattern}' from aog-kernel-worker; scope Glob to ASCENDC_WORKSPACE or an explicit source directory`);
-    }
-    if (/\b(pass_[ab]_runner|verification\.json|tested_[A-Za-z0-9_]+|model_new_[A-Za-z0-9_]+\.py)\b/.test(pattern) && !searchPath) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked answer-bearing glob '${pattern}' without an explicit non-output search path`);
-    }
-  }
-
-  if (tool === "Grep") {
-    const searchPath = String(input.path || input.file_path || "");
-    const otherWorkspace = referencesOtherWorkspacePath(searchPath, projectRoot);
-    if (otherWorkspace) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked cross-workspace grep by aog-kernel-worker: ${otherWorkspace}`);
-    }
-    if (/(^|\/)output\//.test(searchPath)) {
-      throw new Error("[a5_ops opencode hook] access guard blocked kernel-worker grep over output/ archives");
-    }
-  }
-
-  if (tool === "Read") {
-    const filePath = String(input.file_path || input.path || "");
-    const otherWorkspace = referencesOtherWorkspacePath(filePath, projectRoot);
-    if (otherWorkspace) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked cross-workspace read by aog-kernel-worker: ${otherWorkspace}`);
-    }
-  }
-
-  if (tool === "Bash") {
-    const command = String(input.command || "");
-    const otherWorkspace = referencesOtherWorkspacePath(command, projectRoot);
-    if (otherWorkspace) {
-      throw new Error(`[a5_ops opencode hook] access guard blocked cross-workspace Bash access by aog-kernel-worker: ${otherWorkspace}`);
-    }
-    if (/(^|[\s'"`])(?:\.\/|\/[^\s'"`]*)?(op_host|op_kernel)(?:\/|[\s'"`]|$)/.test(command)) {
-      throw new Error("[a5_ops opencode hook] access guard blocked op_host/op_kernel Bash access in direct-pybind kernel-worker mode");
-    }
-    if (/a5_exec\.py\b[\s\S]*\bdocker\s+exec\b/.test(command)) {
-      throw new Error("[a5_ops opencode hook] runtime guard blocked nested docker exec through a5_exec.py; a5_exec.py already runs inside the configured A5 container");
-    }
-  }
-}
-
-function runBuildArtifactGuard(payload) {
-  if (!isKernelAuthor(payload)) return;
-  if (payload.tool_name !== "Bash") return;
-  const command = String((payload.tool_input || {}).command || "");
-  if (/\bdeploy_to_npu(?:_lane)?\.sh\b/.test(command) && /\|\s*(tail|head|grep|sed|awk)\b/.test(command)) {
-    throw new Error("[a5_ops opencode hook] build guard blocked deploy: do not pipe deploy_to_npu*.sh output; pipes mask exit status and can hang post-build sync");
-  }
-  if (/\bdeploy_to_npu(?:_lane)?\.sh\b/.test(command) && /\bunpiped\b/.test(command)) {
-    throw new Error("[a5_ops opencode hook] build guard blocked deploy: run deploy_to_npu*.sh with direct output; do not append unsupported marker words such as unpiped");
-  }
-  if (!/deploy_to_npu_lane\.sh\b/.test(command) || !/--build\b/.test(command)) return;
-
-  const workspace = extractWorkspaceFromCommand(command) || process.env.ASCENDC_WORKSPACE || "";
-  if (!workspace) {
-    throw new Error("[a5_ops opencode hook] build guard blocked deploy: ASCENDC_WORKSPACE is required for op workspace validation");
-  }
-  const pybindPath = path.join(workspace, "kernel", "pybind11.cpp");
-  const modelPath = path.join(workspace, "model_new_ascendc.py");
-  if (!fs.existsSync(pybindPath)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: missing ${pybindPath}; build_ascendc.py does not auto-generate pybind11.cpp`);
-  }
-  if (!fs.existsSync(modelPath)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: missing ${modelPath}`);
-  }
-
-  const pybind = fs.readFileSync(pybindPath, "utf8");
-  const model = fs.readFileSync(modelPath, "utf8");
-  const kernelDir = path.join(workspace, "kernel");
-  const kernelFiles = fs.readdirSync(kernelDir)
-    .filter((name) => /\.(h|hpp|cpp|cc)$/.test(name))
-    .map((name) => path.join(kernelDir, name));
-  let kernelDefinitionSeen = false;
-  for (const file of kernelFiles) {
-    const name = path.basename(file);
-    const content = fs.readFileSync(file, "utf8");
-    if (/\bcoreCoord_t\b/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} uses unsupported coreCoord_t; use GetBlockIdx()/GetBlockNum() scalars`);
-    }
-    if (/\b(?:IN_QUE_NUM|OUT_QUE_NUM)\b/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} uses undefined IN_QUE_NUM/OUT_QUE_NUM queue constants`);
-    }
-    if (/\bWaitAllDone\s*\(/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} uses unsupported TQue::WaitAllDone()`);
-    }
-    if (/\bGlobalTensor\s*</.test(content) && !/\bSetGlobalBuffer\s*\(/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} declares GlobalTensor but never calls SetGlobalBuffer`);
-    }
-    if (/^\s*TQue<[^;]+>\s+g_[A-Za-z_][A-Za-z0-9_]*\s*;/m.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} declares file-scope TQue queues; keep queues inside the kernel operator object`);
-    }
-    const shortGm = findShortSetGlobalBufferLine(content);
-    if (shortGm) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} calls GlobalTensor::SetGlobalBuffer without an element-count argument: ${shortGm}`);
-    }
-    const shortInit = findShortInitBufferLine(content);
-    if (shortInit) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} calls TPipe::InitBuffer without a byte-size argument: ${shortInit}`);
-    }
-    const dynamicInit = findDynamicInitBufferLine(content);
-    if (dynamicInit) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} allocates UB buffer from dynamic full input size; use a fixed tile byte-size and loop over chunks: ${dynamicInit}`);
-    }
-    if (/\bpipe\s*\.\s*Barrier\s*\(/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} calls unsupported pipe.Barrier(); use TQue EnQue/DeQue or documented PipeBarrier APIs`);
-    }
-    if (usesUnqualifiedAscendSymbolsWithoutNamespace(content)) {
-      throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} uses unqualified AscendC symbols without using namespace AscendC or AscendC:: qualification`);
-    }
-    if (/\.(cpp|cc)$/.test(name) && name !== "pybind11.cpp") {
-      if (hasAscendCKernelDefinition(content)) {
-        kernelDefinitionSeen = true;
-      }
-      if (hasAscendCKernelDeclarationOnly(content)) {
-        throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} declares an AscendC kernel but does not define its body`);
-      }
-      const includes = [...content.matchAll(/#include\s+"([^"]+)"/g)].map((m) => m[1]);
-      for (const includeName of includes) {
-        if (includeName === "kernel_operator.h" || includeName.startsWith("aclrtlaunch_")) continue;
-        if (!fs.existsSync(path.join(kernelDir, includeName))) {
-          throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${file} includes missing local header ${includeName}`);
-        }
-      }
-    }
-  }
-  if (!kernelDefinitionSeen) {
-    throw new Error("[a5_ops opencode hook] build guard blocked deploy: kernel/*.cpp lacks an extern \"C\" __global__ __aicore__ kernel definition");
-  }
-  const moduleMatch = pybind.match(/PYBIND11_MODULE\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,/);
-  if (!moduleMatch) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${pybindPath} lacks literal PYBIND11_MODULE(_<op>_ext, m)`);
-  }
-  const moduleName = moduleMatch[1];
-  const expectedModule = expectedPybindModuleName(pybindPath, workspace);
-  if (!moduleName.startsWith("_") || !moduleName.endsWith("_ext") || (expectedModule && moduleName !== expectedModule)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: pybind module ${moduleName} must use exact _<op>_ext naming${expectedModule ? ` (${expectedModule})` : ""}`);
-  }
-  if (!model.includes("kernel") || !model.includes("build") || !/sys\.path\.(insert|append)\s*\(/.test(model)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${modelPath} must add workspace/<op>/kernel/build to sys.path before importing the extension`);
-  }
-  if (/\bfrom\s+kernel\s+import\b/.test(model)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${modelPath} must import ${moduleName} from kernel/build, not from package kernel`);
-  }
-  const escapedModule = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const importPattern = new RegExp(`\\bimport\\s+${escapedModule}\\b`);
-  const fromImportPattern = new RegExp(`\\bfrom\\s+${escapedModule}\\s+import\\s+`);
-  if (!importPattern.test(model) && !fromImportPattern.test(model)) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ${modelPath} must import ${moduleName}, matching PYBIND11_MODULE`);
-  }
-  const callsModuleWrapper = /\.run_[A-Za-z0-9_]+\s*\(/.test(model)
-    || (fromImportPattern.test(model) && /\brun_[A-Za-z0-9_]+\s*\(/.test(model));
-  if (!callsModuleWrapper) {
-    throw new Error(`[a5_ops opencode hook] build guard blocked deploy: ModelNew.forward must call the pybind run_<op> wrapper`);
-  }
-}
-
-function runInlineGeneratedCodeGuard(payload) {
-  if (!isKernelAuthor(payload)) return;
-  if (!["Write", "Edit", "MultiEdit"].includes(payload.tool_name)) return;
-  const input = payload.tool_input || {};
-  const filePath = input.file_path || input.path || "";
-  if (!generatedKernelPath(filePath)) return;
-  const b = basename(filePath);
-  if (/(^|\/)(op_host|op_kernel)\//.test(String(filePath))) {
+// Default-deny for tools this adapter does not understand.
+//
+// The map above is a whitelist and `titleToolName` passes unmapped names through verbatim,
+// so before this check any tool absent from the map matched nothing in runGuardSet and ran
+// COMPLETELY unguarded. That turns "upstream added a tool" into a silent hole in the
+// anti-cheating layer, and opencode's toolset is model-dependent (apply_patch appears only
+// for gpt-class models), so the hole opens based on which model the operator picks.
+//
+// Only plugin-dispatched runs fail closed: an unrelated interactive opencode session must
+// not be crippled by this plugin's presence.
+function assertToolIsGuardable(payload, rawTool) {
+  if (!process.env.AOG_HOOK_AGENT_TYPE) return;
+  // Permission events are named by PERMISSION, not by tool (`external_directory`, …), and
+  // titlePermissionName has already mapped them onto a Claude-Code tool name. If that
+  // mapping produced a name the guards understand, the call is guardable — re-deriving from
+  // the raw permission string would classify every permission as an unknown tool and deny
+  // it, which broke the two permission-path tests when this check was first added here.
+  if (KNOWN_GUARDED_TOOLS.has(payload.tool_name)) return;
+  // Both allowlists below are keyed by BUILTIN name, so they may only be consulted for a name
+  // that actually is one. A namespaced tool that merely ends in a benign leaf
+  // (`mcp__x__todoread`) is a different tool from a different vendor and gets no free pass —
+  // it falls through to the default-deny throw at the end.
+  const raw = String(rawTool || "");
+  const leaf = raw.toLowerCase();
+  if (isNamespacedToolName(raw)) {
     throw new Error(
-      `[a5_ops opencode hook] generated-code guard blocked ${filePath}: direct pybind benchmark tasks must not create op_host/ or op_kernel/ scaffold`
+      `[a5_ops opencode hook] tool guard blocked namespaced tool '${raw}': this adapter can ` +
+        "only normalise opencode's builtin tools for the canonical guards, so an MCP/plugin " +
+        "tool would run unguarded inside a plugin-dispatched run.",
     );
   }
-  if (["kernel.h", "kernels.cpp", "pybind11.cpp"].includes(b) && !/(^|\/)kernel\//.test(String(filePath))) {
+  if (BENIGN_TOOLS.has(leaf) || BENIGN_PERMISSIONS.has(leaf)) return;
+  if (UNSUPPORTED_WRITE_TOOLS.has(leaf)) {
     throw new Error(
-      `[a5_ops opencode hook] generated-code guard blocked ${filePath}: kernel sources must live under workspace/<op>/kernel/ for deploy sync`
+      `[a5_ops opencode hook] tool guard blocked '${leaf}': its multi-file payload cannot be ` +
+        "normalised for the canonical write guards, and opencode drops edit/write when it is " +
+        "enabled. Use edit/write (select a model whose toolset provides them).",
     );
   }
-  const content = contentFromToolInput(input);
-  if (!content) return;
+  if (!TOOL_MAP.has(leaf)) {
+    throw new Error(
+      `[a5_ops opencode hook] tool guard blocked unknown tool '${leaf}': this adapter has no ` +
+        "mapping for it, so the canonical guards would not see it. Add an explicit mapping " +
+        "(or list it as benign) before allowing it in a guarded run.",
+    );
+  }
+}
 
-  const checks = [];
-  if (b === "model_new_ascendc.py") {
-    checks.push(
-      [/return\s+[A-Za-z_]\w*\s*[-+*/]\s*[A-Za-z_]\w*/m, "model_new_ascendc.py host arithmetic fallback"],
-      [/\btorch\.(add|sub|mul|div|matmul|mm|bmm|sum|mean|max|min|sort|topk|where)\s*\(/, "model_new_ascendc.py torch compute fallback"],
-      [/torch\.nn\.functional\./, "model_new_ascendc.py torch functional fallback"],
-      [/\bnumpy\b|\bnp\./, "model_new_ascendc.py numpy fallback"],
+// The JS↔Python door. Policy decisions are made in Python (src/opencode/door.py), next to
+// the canonical checkers; this file only translates events and enforces the verdict.
+//
+// Before this existed, the access / build-artifact / generated-code rules were implemented
+// HERE in JavaScript with their own regexes. That broke the boundary invariant in
+// backends/base.py (a backend WIRES, it does not own gate logic) and made denials
+// indistinguishable from canonical ones — a difference that hid a real bug: an O0 liveness
+// canary stayed green with the canonical Python guard deleted, because the JS copy was
+// answering instead.
+//
+// Fail CLOSED: unlike the autoresearch door (which safe-allows on internal error because it
+// nudges workflow phases), this door guards an anti-cheating boundary, so "we could not
+// decide" must mean refuse.
+function runDoor(projectRoot, payload) {
+  // The door ships WITH this adapter, so resolve it from this module's own location.
+  // `projectRoot` points at the engine whose canonical checkers runChecker() invokes — a
+  // different thing, and not necessarily a tree that contains the adapter bundle.
+  const doorPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "door.py");
+  if (!fs.existsSync(doorPath)) {
+    throw new Error(
+      `[a5_ops opencode hook] policy door missing at ${doorPath}; refusing rather than ` +
+        "running the tool call unjudged",
     );
   }
-  if (["pybind11.cpp", "kernels.cpp"].includes(b) || /(^|\/)kernel\/[^/]+\.(cpp|cc)$/.test(String(filePath))) {
-    checks.push(
-      [/\baclrtLaunchKernel\s*\(/, "direct aclrtLaunchKernel call; use auto-generated aclrtlaunch_* wrapper via ACLRT_LAUNCH_KERNEL"],
-      [/#include\s*<torch_npu\/csrc\/aten\/common\/ACLRT(?:Launch|Lauch)Kernel\.h>/, "non-portable torch_npu ACLRT macro header; use generated aclrtlaunch_<kernel>.h or an explicit extern aclrtlaunch_<kernel> stub"],
-      [/#include\s*<pybind11\/strict_rcward\.h>/, "invalid pybind11 strict_rcward header"],
-      [/#include\s*<torch\/npu\.h>/, "non-project torch/npu.h include; use torch_npu NPUStream header for current stream"],
-      [/\bpy::object\b/, "pybind wrapper uses py::object; use torch::Tensor or at::Tensor for NPU tensors"],
-      [/\bpy::tensor\b/, "pybind wrapper uses py::tensor; use torch::Tensor or at::Tensor for NPU tensors"],
-      [/\bpy::array_t\b/, "CPU pybind array fallback"],
-      [/\btorch::kCPU\b|\bc10::DeviceType::CPU\b|\.device\s*\(\s*torch::kCPU\s*\)/, "CPU tensor allocation/device in generated pybind; output must stay on NPU"],
-      [/\b(?:static\s+)?uint32_t\s+run_[A-Za-z0-9_]*\s*\(/, "pybind run_<op> wrapper returns launch status instead of output tensor"],
-      [/\bretistory\b|\blaunchRetistory\b|\bstatusistory\b/, "pybind launch-status check references an invented status variable"],
-      [/reinterpret_cast\s*<\s*GM_ADDR\s*>\s*\(\s*&/, "host stack pointer passed as GM_ADDR tiling/workspace"],
-      [/\b(?:uint64_t|int64_t|uint32_t|int32_t)\s+[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]+\]\s*=\s*\{[^;]*\}[\s\S]*reinterpret_cast\s*<\s*uint64_t\s*>\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)/, "host stack array passed as GM tiling/workspace; create a NPU tensor and pass its data_ptr"],
-      [/\baclrtlaunch_[A-Za-z0-9_]+\s*\([^;{)]*\buint64_t\b[^;{)]*\)\s*;/s, "aclrtlaunch_<kernel> host stub uses uint64_t GM addresses; generated stubs take void* tensor data_ptr arguments"],
-      [/(\bkernel_module_t\b|\bKernelAddParams\b|\bKERNEL_STATUS_SUCCESS\b)/, "OPP/PR4778 op_kernel registration scaffold in direct pybind path"],
-      [/std::vector<[^>]+>\s+\w+_h\b|for\s*\([^)]*\)\s*\{[^{}]*(out|result)[^{}]*=/s, "host-side compute loop in generated binding"],
-      [/\btorch::(add|sub|mul|div|matmul|mm|bmm|sum|mean|max|min|sort|topk)\s*\(/, "torch C++ compute fallback"],
+  // project_root travels INSIDE the payload: the cross-workspace and project-wide-glob
+  // rules are relative to the engine root, which the door cannot infer from cwd alone.
+  const encoded = Buffer.from(
+    JSON.stringify({ ...payload, project_root: projectRoot }),
+    "utf8",
+  ).toString("base64");
+  const res = spawnSync("python3", [doorPath, "check", encoded], {
+    cwd: projectRoot,
+    encoding: "utf8",
+    timeout: 30000,
+    env: process.env,
+  });
+  if (res.error || res.status === null) {
+    throw new Error(
+      `[a5_ops opencode hook] policy door did not complete (${res.error || "killed/timeout"}); ` +
+        "refusing rather than allowing an unjudged tool call",
     );
-    if (b === "pybind11.cpp") {
-      checks.push(
-        [/\b__gm__\b/, "pybind host wrapper must not use device-side __gm__ pointer qualifiers; use void*, uint8_t*, or ordinary host pointer types for launch stubs"],
-      );
-    }
-    if (b === "kernels.cpp") {
-      checks.push(
-        [/\bPYBIND11_MODULE\s*\(/, "kernels.cpp must hold AscendC kernel/source glue, not a pybind module"],
-        [hasAscendCKernelDeclarationOnly, "kernels.cpp declares an AscendC kernel but does not define its body"],
-      );
-    }
   }
-  if (b === "pybind11.cpp" && /PYBIND11_MODULE\s*\(/.test(content)) {
-    if (/\bpy::tensor\b/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: pybind wrapper uses py::tensor; use torch::Tensor or at::Tensor for NPU tensors`);
-    }
-    if (/\bpy::object\b/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: pybind wrapper uses py::object; use torch::Tensor or at::Tensor for NPU tensors`);
-    }
-    if (/#include\s*<torch\/pybind\.h>/.test(content)) {
-      throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: invalid torch/pybind.h header; use torch/extension.h`);
-    }
-    const pybindChecks = [
-      [/\bm\.def\s*\([^;]*&\s*ACLRT_LAUNCH_KERNEL\s*\(/s, "pybind exposes ACLRT_LAUNCH_KERNEL directly; wrap it in a run_<op> function"],
-      [hasPybindKernelLaunch, "missing aclrtlaunch_<kernel> or ACLRT_LAUNCH_KERNEL launch in pybind wrapper"],
-      [/\bgetCurrentNPUStream\s*\(/, "missing c10_npu::getCurrentNPUStream() stream handoff"],
-      [/#include\s*[<"]torch_npu\/csrc\/core\/npu\/NPUStream\.h[>"]/, "missing torch_npu NPUStream header for c10_npu::getCurrentNPUStream()"],
-      [/\b(?:torch|at)::empty(?:_like)?\s*\(/, "missing NPU output allocation before launch"],
-      [/\bm\.def\s*\(\s*["']run_/, "pybind module must expose a run_<op> wrapper function"],
-    ];
-    const moduleMatch = content.match(/PYBIND11_MODULE\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,/);
-    const expectedModule = expectedPybindModuleName(filePath, "");
-    if (moduleMatch && expectedModule && moduleMatch[1] !== expectedModule) {
-      throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: pybind module ${moduleMatch[1]} must be ${expectedModule}`);
-    }
-    for (const [pattern, reason] of pybindChecks) {
-      const present = typeof pattern === "function" ? Boolean(pattern(content)) : pattern.test(content);
-      const mustReject = reason.startsWith("pybind exposes") ? present : !present;
-      if (mustReject) {
-        throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: ${reason}`);
-      }
-    }
-  }
-  if (/\.(h|hpp|cpp|cc)$/.test(b) || /(^|\/)kernel\/[^/]+\.(h|hpp|cpp|cc)$/.test(String(filePath))) {
-    checks.push(
-      [/\bOPENVINO_HIDDEN\b/, "OpenVINO token in AscendC kernel"],
-      [/\b__opencl__\b/, "OpenCL kernel qualifier in AscendC kernel"],
-      [/\bKernelTensor\b/, "non-project KernelTensor API in AscendC kernel"],
-      [/reinterpret_cast\s*<\s*__gm__\s+\w+\s*\*\s*>\s*\(\s*(offset|idx|index)\s*\)/, "fake GM pointer reconstructed from numeric offset instead of saved GM_ADDR base"],
-      [/#include\s+" +ascendc\//, "malformed ascendc include path"],
-      [findNonAsciiLine, "non-ASCII text in generated C/C++ source"],
-      [/\/\/\s*\.\.\.|\/\*\s*\.\.\.|write process logic|TODO(?:\b|_)/i, "placeholder/TODO left in generated C/C++ source"],
-      [/\b\w+\s*--\s*\)/, "post-decrement expression in tile/count calculation; use explicit arithmetic"],
-      [/\b[A-Za-z_][A-Za-z0-9_]*(?:onge|istory|apse)\b/, "hallucinated identifier suffix in generated C/C++ source"],
-      [/\bpipe_\s*\.\s*(?:EnQue|DeQue)\s*\(/, "TPipe has no EnQue/DeQue queue operations; use TQue::EnQue/DeQue on LocalTensor values"],
-      [/\bGetTPipe\s*\(/, "unsupported GetTPipe() in generated kernel; keep a TPipe member inside the kernel operator object and call pipe_.InitBuffer(...)"],
-      [/\bextern\s+"C"\s+__global__\s+__aicore__\s+void\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*__gm__\s+\w+\s*\*/s, "kernel entry parameters must use GM_ADDR; cast to __gm__ pointers inside the operator Init"],
-      [/\bperBlock\s*=\s*\(\s*total_?\s*\+\s*blockNum\s*-\s*1\s*\)\s*\/\s*blockNum\s*;/, "unaligned per-block ceil division for fp32 DataCopy; use blockDim=8 for the simple smoke or round per-block/tile counts to 8 elements and handle tails explicitly"],
-      [findOverlappingAlignedBlockDataCopy, "overlapping aligned DataCopy block partition; do not scalar-split total/blockNum and then round each block count to 8 at start+offset"],
-      [/\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*DeQue\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)/, "TQue::DeQue takes no LocalTensor argument; store `queue.DeQue<T>()` exactly once"],
-      [/\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*EnQue\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;\s*\1\s*\.\s*EnQue\s*\(\s*\2\s*\)\s*;/s, "same LocalTensor enqueued twice without an intervening DeQue"],
-      [/\bDataCopy\s*\(\s*[A-Za-z_][A-Za-z0-9_]*Queue[A-Za-z0-9_]*\s*,/i, "DataCopy destination must be LocalTensor, not a TQue queue"],
-      [/\bDataCopy\s*\([^,]+,\s*[A-Za-z_][A-Za-z0-9_]*Queue[A-Za-z0-9_]*\s*,/i, "DataCopy source must be LocalTensor/GlobalTensor, not a TQue queue"],
-      [/\bFreeTensor\s*\(\s*[A-Za-z_][A-Za-z0-9_]*Queue[A-Za-z0-9_]*\s*\.\s*DeQue\s*</, "do not DeQue inside FreeTensor; store the DeQue result once and free that LocalTensor"],
-      [/\bInitBuffer\s*\(\s*[A-Za-z_][A-Za-z0-9_]*Tbuf_\s*,\s*\d+\s*,/i, "TBuf used as a queue buffer in TPipe::InitBuffer; initialize TQue queues for the DataCopy/Add pipeline"],
-      [/\bepilogue_len\b|\b(?:Add|Sub|Mul|Div|Muls|Adds)\s*\([^;]*,\s*[A-Za-z_][A-Za-z0-9_]*\s*[-+*/]\s*[A-Za-z_][A-Za-z0-9_]*\s*\)/, "vector intrinsic count uses invented tail arithmetic; pass the current tile count directly"],
-      [/\busing\s+namespace\s+ascendc\b/, "lowercase ascendc namespace"],
-      [/#ifndef\s+(?:__)?KERNEL_OPERATOR_H(?:__)?\b/, "kernel_operator.h header guard collision"],
-      [/^\s*TQue<[^;]+>\s+g_[A-Za-z_][A-Za-z0-9_]*\s*;/m, "file-scope TQue queues; keep queues inside the kernel operator object"],
-      [/\bpipe\s*\.\s*Barrier\s*\(/, "unsupported pipe.Barrier(); use TQue EnQue/DeQue or documented PipeBarrier APIs"],
-      [findShortSetGlobalBufferLine, "GlobalTensor::SetGlobalBuffer without an element-count argument"],
-      [usesUnqualifiedAscendSymbolsWithoutNamespace, "unqualified AscendC symbols without using namespace AscendC or AscendC:: qualification"],
-      [findShortInitBufferLine, "TPipe::InitBuffer without a byte-size argument"],
-      [findDynamicInitBufferLine, "TPipe::InitBuffer uses dynamic full-input size; use fixed tile byte-size and loop over chunks"],
+  let verdict;
+  try {
+    verdict = JSON.parse(String(res.stdout || "").trim().split("\n").pop());
+  } catch {
+    throw new Error(
+      "[a5_ops opencode hook] policy door returned an unreadable verdict: " +
+        String(res.stderr || res.stdout || "").slice(0, 300),
     );
-    if (/\.(h|hpp)$/.test(b)) {
-      checks.push(
-        [/\bextern\s+"C"\s+__global__\s+__aicore__\s+void\b/, "kernel entry definition/declaration belongs in kernels.cpp, not kernel.h"],
-        [/}\s*\/\/\s*namespace\s+AscendC/, "do not close or define namespace AscendC in generated kernel.h; use `using namespace AscendC;` or explicit `AscendC::`"],
-      );
-    }
   }
-  for (const [pattern, reason] of checks) {
-    const matched = typeof pattern === "function" ? pattern(content) : pattern.test(content);
-    if (matched) {
-      throw new Error(`[a5_ops opencode hook] generated-code guard blocked ${filePath}: ${reason}`);
-    }
+  if (verdict && verdict.blocked) {
+    throw new Error(verdict.reason || "[a5_ops opencode hook] blocked by policy door");
   }
 }
 
 function runGuardSet(projectRoot, payload) {
-  runInlineAccessGuard(projectRoot, payload);
-  runBuildArtifactGuard(payload);
-  runInlineGeneratedCodeGuard(payload);
+  runDoor(projectRoot, payload);
   const tool = payload.tool_name;
   if (["Agent", "Edit", "Write", "MultiEdit", "Bash", "WebFetch"].includes(tool)) {
     runChecker(projectRoot, "src/scripts/workflow/workflow_critic.py", payload, 30000);
@@ -645,28 +382,53 @@ function runGuardSet(projectRoot, payload) {
 function hookPayload(hookEventName, input, output) {
   const toolName = titleToolName(input.tool || input.type || input.permission || output.tool);
   const toolInput = normalizeToolInput(toolName, toolArgs(input, output));
+  const ident = resolveIdentity(input.sessionID);
   return {
     hook_event_name: hookEventName,
     tool_name: toolName,
     tool_input: toolInput,
     session_id: input.sessionID,
     call_id: input.callID,
-    agent_id: process.env.AOG_HOOK_AGENT_ID || "",
-    agent_type: process.env.AOG_HOOK_AGENT_TYPE || "",
+    agent_id: ident.agentId,
+    agent_type: ident.agentType,
+    __identity_unresolved: ident.unresolved,
     cwd: process.cwd(),
   };
 }
 
+// A plugin-driven run whose executing agent could not be confirmed must not reach the
+// canonical guards with an empty agent_id: that is the main-agent path, which allows
+// answer-bearing reads. Refuse the tool call instead.
+function assertIdentityResolved(payload) {
+  if (payload.__identity_unresolved) {
+    throw new Error(
+      "[a5_ops opencode hook] identity guard blocked " +
+        `${payload.tool_name}: this is a plugin-dispatched run (expected ` +
+        `'${process.env.AOG_HOOK_AGENT_TYPE}') but opencode has not reported a matching ` +
+        "executing agent for this session; refusing rather than running unguarded",
+    );
+  }
+}
+
 function permissionPayload(input) {
   const toolName = titlePermissionName(input.type || input.permission);
+  // Resolve identity the same way tool.execute.before does. Reading the env directly here
+  // meant this path never set __identity_unresolved, so assertIdentityResolved() was a
+  // no-op on it — and this is the branch that AUTO-ALLOWS after the guards pass, i.e. the
+  // one place where a contradicted identity (`run --agent X` silently falling back to the
+  // default agent) is most costly. It also skipped resolveIdentity's `opencode:<agent>`
+  // fallback, so a missing AOG_HOOK_AGENT_ID produced an EMPTY agent_id — which the
+  // canonical read guard treats as the main agent and allows.
+  const ident = resolveIdentity(input.sessionID);
   return {
     hook_event_name: "PreToolUse",
     tool_name: toolName,
     tool_input: normalizePermissionInput(toolName, input),
     session_id: input.sessionID,
     call_id: input.callID,
-    agent_id: process.env.AOG_HOOK_AGENT_ID || "",
-    agent_type: process.env.AOG_HOOK_AGENT_TYPE || "",
+    agent_id: ident.agentId,
+    agent_type: ident.agentType,
+    __identity_unresolved: ident.unresolved,
     cwd: process.cwd(),
   };
 }
@@ -674,9 +436,22 @@ function permissionPayload(input) {
 export async function A5OpsHooksPlugin(ctx, options = {}) {
   const projectRoot = path.resolve(String(options.projectRoot || process.env.AOG_PROJECT_ROOT || ctx.directory));
   return {
+    // Identity source. opencode emits this per LLM turn with an authoritative `agent`,
+    // keyed by sessionID; the tool hooks carry no identity of their own.
+    async "chat.params"(input) {
+      recordSessionAgent(input && input.sessionID, input && input.agent);
+    },
+    async "chat.message"(input) {
+      recordSessionAgent(input && input.sessionID, input && input.agent);
+    },
+
     async "permission.ask"(input, output) {
       try {
         const payload = permissionPayload(input);
+        assertIdentityResolved(payload);
+        // Same default-deny as the tool path: an unmapped tool reaching the guards under a
+        // name they do not understand matches nothing and would then be AUTO-ALLOWED below.
+        assertToolIsGuardable(payload, input.type || input.permission);
         runGuardSet(projectRoot, payload);
         if (AUTO_ALLOW_AFTER_GUARD.has(payload.tool_name)) {
           output.status = "allow";
@@ -689,6 +464,8 @@ export async function A5OpsHooksPlugin(ctx, options = {}) {
 
     async "tool.execute.before"(input, output) {
       const payload = hookPayload("PreToolUse", input, output);
+      assertIdentityResolved(payload);
+      assertToolIsGuardable(payload, input && input.tool);
       runGuardSet(projectRoot, payload);
     },
 

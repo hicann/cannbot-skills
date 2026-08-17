@@ -16,6 +16,8 @@ tools:
 
 > **Anti-pressure protocols (MANDATORY, load first)**: read `${CLAUDE_PLUGIN_ROOT}/kb/shared/ANTI_PRESSURE_PROTOCOLS.md` before any decision. P1–P8 are LLM-pressure drift modes that override technical rules under load. Cite relevant Px at every high-leverage decision point (handoff / done / PARTIAL / skip-verify / nohup / workaround).
 
+> **Always-loaded rules (MANDATORY)**: read `${CLAUDE_PLUGIN_ROOT}/kb/shared/ALWAYS_LOADED_RULES.md` before editing any kernel source. You hold the same Edit/Build/Verify loop as the kernel worker, so the same authoring rules bind you — including §5 (fp precision iron law), which is the rule most at risk in precision debugging.
+
 
 # aog-precision-probe
 

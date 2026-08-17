@@ -25,6 +25,8 @@ relying on the first violation to surface the bug.
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +38,7 @@ _PROJECT_ROOT = _HERE.parent.parent.parent.parent
 try:
     from kb_paths import kb_root as _kb_root
 except ImportError:  # pragma: no cover — fallback if orchestrator/ not on sys.path
+
     def _kb_root() -> Path:
         return _PROJECT_ROOT.parent / "kb"
 
@@ -74,8 +77,188 @@ class O0Report:
     summary: str = ""
 
 
+def _active_backend_name() -> str:
+    """Canonical name of the harness backend this run will dispatch through."""
+    raw = (os.environ.get("AOG_HARNESS_BACKEND") or "claude_code").strip().lower()
+    return raw.replace("-", "_")
+
+
+def _opencode_probe_script(adapter, tool: str, path: str) -> str:
+    """The JS the canary runs: drive the adapter's real tool hook and report the verdict."""
+    import json  # noqa: PLC0415
+
+    return (
+        'import { A5OpsHooksPlugin } from %s;\n'
+        'const h = await A5OpsHooksPlugin({directory: process.cwd()}, '
+        '{projectRoot: %s});\n'
+        'let blocked = false;\n'
+        'try { await h["tool.execute.before"]('
+        '{tool: %s, sessionID: "o0probe", callID: "c0"}, '
+        '{args: {filePath: %s, content: "probe"}}); } catch (e) { blocked = true; }\n'
+        'console.log(blocked ? "DENIED" : "ALLOWED");\n'
+    ) % (
+        json.dumps(str(adapter)),
+        json.dumps(str(_PROJECT_ROOT)),
+        json.dumps(tool),
+        json.dumps(path),
+    )
+
+
+def _run_opencode_probe(adapter, agent_type: str, *, tool: str, path: str) -> tuple[bool, str]:
+    """Run one canary. Returns (was_denied, error). A non-empty error means UNKNOWN, not allowed."""
+    import subprocess  # noqa: PLC0415
+
+    env = dict(os.environ)
+    if agent_type:
+        env["AOG_HOOK_AGENT_TYPE"] = agent_type
+        env["AOG_HOOK_AGENT_ID"] = f"opencode:{agent_type}"
+    else:
+        env.pop("AOG_HOOK_AGENT_TYPE", None)
+        env.pop("AOG_HOOK_AGENT_ID", None)
+    # Same runtime order the installer uses. opencode ships as a bun-compiled binary, so a
+    # machine can perfectly well have `bun` and no `node`; hard-coding node here while the
+    # installer accepted either meant such a machine installed with a green
+    # `hooks_verified_live` and then failed this gate on every single run — a success that
+    # could never be acted on.
+    runtime = shutil.which("node") or shutil.which("bun")
+    if not runtime:
+        return False, "neither node nor bun found — cannot prove the opencode safety net is armed"
+    try:
+        res = subprocess.run(
+            [runtime, "--input-type=module", "-e", _opencode_probe_script(adapter, tool, path)],
+            cwd=str(_PROJECT_ROOT), text=True, capture_output=True, timeout=60, env=env,
+        )
+    except FileNotFoundError:
+        return False, f"{runtime} vanished — cannot prove the opencode safety net is armed"
+    except subprocess.TimeoutExpired:
+        return False, "opencode safety-net canary timed out"
+    if res.returncode != 0:
+        return False, f"canary failed to run: {res.stderr.strip()[:200]}"
+    return "DENIED" in res.stdout, ""
+
+
+def _opencode_plugin_registration_errors(cfg: dict) -> list[str]:
+    errors: list[str] = []
+    plugins = cfg.get("plugin") or []
+    if not any(isinstance(p, list) and p and str(p[0]).endswith("a5_ops_hooks.mjs")
+               for p in plugins):
+        errors.append(
+            "opencode config does not register a5_ops_hooks.mjs — sub-agents would run "
+            "with no safety net"
+        )
+    if not _plugin_registration_has_project_root(plugins):
+        errors.append(
+            "opencode plugin registration carries no projectRoot — the adapter cannot "
+            "locate the canonical checkers"
+        )
+    return errors
+
+
+def _plugin_registration_has_project_root(plugins) -> bool:
+    """One plugin entry must be a list whose options dict carries a truthy projectRoot."""
+    return any(
+        isinstance(entry, list) and len(entry) > 1
+        and (entry[1] or {}).get("projectRoot")
+        for entry in plugins
+    )
+
+
+def _opencode_safety_net_errors(adapter) -> list[str]:
+    """Run the read and write deny/allow pairs. Returns the errors they found.
+
+    Each pair must DISCRIMINATE, not merely deny. A guard that always throws — the exact shape
+    produced by a missing checker script, since python3 then exits non-zero and the adapter
+    rethrows — would satisfy a deny-only probe while proving nothing. So every check below runs
+    the same operation twice and requires opposite verdicts. This mirrors the Claude Code
+    liveness proof in init.sh, which is deliberately a deny/allow pair.
+
+    The READ pair's agent type is deliberately NOT one of the adapter's KERNEL_AUTHOR_AGENTS:
+    those take the adapter's inline JS access guard, which refuses output/ reads on its own, so
+    a canary using them stays green even when the canonical Python checker is missing entirely.
+    A non-kernel-author agent routes the decision through output_read_guard.py alone.
+
+    The WRITE pair exists because the read pair exercises output_read_guard only; the
+    generated-code rules are a different code path, and a canary that never writes cannot tell
+    whether they are live.
+    """
+    probes = (
+        ("read_deny", "aog-precision-probe", "read",
+         str(_PROJECT_ROOT / "output" / "_o0probe" / "verification.json")),
+        ("read_allow", "", "read",
+         str(_PROJECT_ROOT / "output" / "_o0probe" / "verification.json")),
+        ("write_deny", "aog-kernel-worker", "write",
+         str(_PROJECT_ROOT / "workspace" / "_o0probe" / "op_host" / "probe.cpp")),
+        ("write_allow", "aog-kernel-worker", "write",
+         str(_PROJECT_ROOT / "workspace" / "_o0probe" / "probe_notes.md")),
+    )
+    verdicts: dict = {}
+    for key, agent_type, tool, path in probes:
+        denied, err = _run_opencode_probe(adapter, agent_type, tool=tool, path=path)
+        if err:
+            return [err]
+        verdicts[key] = denied
+
+    errors: list[str] = []
+    if not verdicts["write_deny"]:
+        errors.append(
+            "opencode safety net did NOT refuse a kernel author writing op_host/ scaffold — "
+            "the generated-code rules are not reaching the write path"
+        )
+    if verdicts["write_allow"]:
+        errors.append(
+            "opencode safety net refused an ordinary kernel-author write — the write-side "
+            "guard is not discriminating (an always-deny guard proves nothing)"
+        )
+    if not verdicts["read_deny"]:
+        errors.append(
+            "opencode safety net did NOT refuse an answer-bearing output/ read by a "
+            "dispatched sub-agent — sub-agents would run unguarded"
+        )
+    if verdicts["read_allow"]:
+        errors.append(
+            "opencode safety net refused the MAIN agent too — it is not discriminating "
+            "(an always-deny guard, e.g. a missing/broken canonical checker, proves nothing)"
+        )
+    return errors
+
+
+def _check_opencode_registration() -> tuple[str, Path, list[str]]:
+    """Prove the opencode safety net is armed — by BEHAVIOUR, not by counting files.
+
+    The Claude Code checker validates a settings.json/hooks.json declaration, which does
+    not exist for opencode: its adapter is registered through the process-private
+    OPENCODE_CONFIG_CONTENT the backend injects at dispatch time. So verify the two things
+    that actually decide whether a sub-agent runs guarded:
+
+      1. the backend really emits a `plugin` registration carrying `projectRoot`;
+      2. the adapter, driven with a payload the canonical guard MUST refuse, does refuse —
+         i.e. adapter -> canonical Python checker -> denial actually works end to end.
+
+    (2) exercises the real adapter and the real canonical checker. It does NOT prove that
+    opencode itself loaded the adapter in a given session; that is the installer canary's
+    job and is reported separately.
+    """
+    adapter = _PROJECT_ROOT / "src" / "opencode" / "a5_ops_hooks.mjs"
+    if not adapter.is_file():
+        return "opencode", adapter, [f"opencode hook adapter missing: {adapter}"]
+
+    try:
+        sys.path.insert(0, str(_PROJECT_ROOT / "src" / "scripts" / "orchestrator"))
+        from backends.opencode_backend import OpencodeBackend  # noqa: PLC0415
+
+        cfg = OpencodeBackend.opencode_config()
+    except Exception as exc:
+        return "opencode", adapter, [f"cannot build opencode config: {exc!r}"]
+
+    errors = _opencode_plugin_registration_errors(cfg)
+    errors.extend(_opencode_safety_net_errors(adapter))
+    return "opencode", adapter, errors
+
+
 def _check_hook_registration() -> tuple[str, Path, list[str]]:
     """Load the cannbot registration checker from the engine script root."""
+    if _active_backend_name() == "opencode":
+        return _check_opencode_registration()
     checker_path = _PROJECT_ROOT / "src" / "scripts" / "preflight_install_hooks.py"
     spec = importlib.util.spec_from_file_location(
         "ascendc_port_hook_registration", checker_path

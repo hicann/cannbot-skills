@@ -1,9 +1,9 @@
 {
   "name": "ascendc-port-orchestrator",
-  "description": "跨代际 AscendC 算子移植插件。两项能力：① 跨代际算子移植（当前 arch22→arch35）② 正向→反向生成。bundle-orch：编排器引擎打包在 engine/（python -m orchestrator 驱动确定性 FSM+安全网+aog-* 子agent调度），两个入口 skill（ascendc-cross-gen-port / ascendc-backward-gen）作 orch-shell。双层 KB（用户本地 > 插件自带）并接入社区 skills。当前与 Claude Code 耦合（见 docs/ARCHITECTURE.md §8）。安装见 init.sh。",
+  "description": "跨代际 AscendC 算子移植插件。两项能力：① 跨代际算子移植（当前 arch22→arch35）② 正向→反向生成。bundle-orch：编排器引擎打包在 engine/（python -m orchestrator 驱动确定性 FSM+安全网+aog-* 子agent调度），两个入口 skill（ascendc-cross-gen-port / ascendc-backward-gen）作 orch-shell。双层 KB（用户本地 > 插件自带）并接入社区 skills。支持 Claude Code 与 opencode 两种 agent harness（安装面差异见 docs/USAGE.md §1，实现见 docs/ARCHITECTURE.md §8）。安装见 init.sh。",
   "version": "0.1.4",
   "author": {
-    "name": "a5_ops contributors"
+    "name": "CANNBot"
   },
   "homepage": "https://gitcode.com/cann/cannbot-skills",
   "repository": "https://gitcode.com/cann/cannbot-skills",

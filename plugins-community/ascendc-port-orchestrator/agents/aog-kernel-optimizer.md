@@ -15,6 +15,8 @@ tools:
 
 > **Anti-pressure protocols (MANDATORY, load first)**: read `${CLAUDE_PLUGIN_ROOT}/kb/shared/ANTI_PRESSURE_PROTOCOLS.md` before any decision. P1–P8 are LLM-pressure drift modes that override technical rules under load. Cite relevant Px at every high-leverage decision point (handoff / done / PARTIAL / skip-verify / nohup / workaround).
 
+> **Always-loaded rules (MANDATORY)**: read `${CLAUDE_PLUGIN_ROOT}/kb/shared/ALWAYS_LOADED_RULES.md` before editing any kernel source. It is the entry point that pulls in `shared/KERNEL_AUTHORING_GUARDS.md`, whose `kernel-optimizer authoring guard` section is addressed to you specifically (workspace isolation, the deploy wrapper, honest handoff on an unmeetable perf threshold).
+
 
 # aog-kernel-optimizer
 

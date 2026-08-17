@@ -44,7 +44,7 @@ class _StreamState:
     num_turns: int | None = None
     invalid_tool_count: int = 0
     invalid_tool_event: bool = False
-    pending: str = ""
+    pending: bytes = b""
 
 
 class OpencodeBackend(Backend):
@@ -68,9 +68,17 @@ class OpencodeBackend(Backend):
         use_json_events = mode == "streaming" or (
             kind == "skill" and os.environ.get("AOG_OPENCODE_SKILL_FORMAT", "").lower() == "json"
         )
+        # `opencode run` AUTO-REJECTS every permission request unless --auto is passed
+        # (measured on 1.18.18: `permission requested: ...; auto-rejecting`). That is the
+        # analogue of CC's bypassPermissions, so honour permission_mode by default and let
+        # AOG_OPENCODE_AUTO override explicitly.
+        auto_env = os.environ.get("AOG_OPENCODE_AUTO")
+        auto = (auto_env == "1") if auto_env is not None else (
+            permission_mode == "bypassPermissions"
+        )
         cmd = self._build_run_cmd(
             session_id=session,
-            auto=os.environ.get("AOG_OPENCODE_AUTO") == "1",
+            auto=auto,
             cwd=str(cwd) if cwd is not None else None,
             extra_args=extra_args,
             format_json=use_json_events,
@@ -80,7 +88,8 @@ class OpencodeBackend(Backend):
         )
         if sandbox_prefix:
             cmd = list(sandbox_prefix) + cmd
-        env = self._build_env(target, formatted)
+        env = self.build_env(target, formatted, kind=kind,
+                             cwd=str(cwd) if cwd is not None else None)
         if mode == "background":
             return self._dispatch_background(cmd, formatted, env, output_file)
         if mode == "streaming" or use_json_events:
@@ -96,6 +105,70 @@ class OpencodeBackend(Backend):
                 tee_path=tee_path,
             )
         return self._dispatch_foreground(cmd, formatted, env, timeout, tee_path, kind, mode)
+
+    @staticmethod
+    def opencode_config(extra_agent: str | None = None) -> dict:
+        """Public view of the process-private opencode config, parsed into a dict.
+
+        Preflight callers (phase_o0 hook registration check) inspect the same config
+        the backend injects at dispatch time without reaching into private members.
+        """
+        content = OpencodeBackend._opencode_config_content(extra_agent=extra_agent)
+        if not content:
+            return {}
+        try:
+            parsed = json.loads(content)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def build_env(target: str, prompt: str | None = None, *, kind: str = "agent",
+                  cwd: str | None = None) -> dict:
+        env = os.environ.copy()
+        # NOT setdefault: a stale value inherited from an outer dispatch would otherwise win
+        # and mislabel this process's identity for every hook payload it emits.
+        env["AOG_HOOK_AGENT_ID"] = f"opencode:{target}"
+        env["AOG_HOOK_AGENT_TYPE"] = target
+        # opencode selects the PROJECT config from PWD; Popen(cwd=)/`--dir` do NOT update an
+        # explicitly inherited PWD (documented in autoresearch/.opencode/run_loop.py:223).
+        # Without this the child discovers config from the orchestrator's cwd (engine/).
+        if cwd:
+            env["PWD"] = str(cwd)
+        # The agent definitions address the knowledge base as ${CLAUDE_PLUGIN_ROOT}/kb/...
+        # (agents/aog-kernel-worker.md). Claude Code sets that variable; opencode does not,
+        # so without this the worker receives an UNEXPANDED literal and the entire KB — the
+        # always-loaded rules, the kernel-authoring guards, the error catalogue — is
+        # unaddressable for it. The name is Claude-Code-flavoured but it is simply the
+        # plugin-root contract the agent prompts are written against, so the opencode
+        # backend must satisfy it too.
+        env.setdefault("CLAUDE_PLUGIN_ROOT", str(OpencodeBackend._plugin_root()))
+        # Regenerated unconditionally: an inherited OPENCODE_CONFIG_CONTENT is user input,
+        # and it carries the safety-net adapter registration (cfg["plugin"]) for every
+        # dispatch kind — trusting an inherited value would run sub-agents with the whole
+        # door, identity guard and output guard silently absent.
+        content = OpencodeBackend._opencode_config_content(extra_agent=target)
+        if content:
+            env["OPENCODE_CONFIG_CONTENT"] = content
+        workspace = OpencodeBackend._extract_workspace_from_prompt(prompt or "")
+        if workspace:
+            # Still setdefault rather than assignment, for the reason it always was:
+            # `workspace` is SCRAPED FROM THE PROMPT with a regex and is therefore influenced
+            # by brief content, so an explicit value from the caller stays the more
+            # trustworthy of the two and keeps winning.
+            #
+            # What changed: an inherited value is no longer trusted *blindly*. One pointing at
+            # the workspace ROOT instead of an op directory disarms every cross-workspace rule
+            # in the door (each sibling op then reads as "inside" the active workspace), so it
+            # is the one inherited value that is more dangerous than no value at all. Such a
+            # value is discarded here in favour of the dispatch's own workspace. The door
+            # applies the same test independently — this is the near side of a fix that has to
+            # hold even when the operator, not the orchestrator, exported the variable.
+            for name in ("ASCENDC_WORKSPACE", "CLAUDE_ACTIVE_WORKSPACE"):
+                if not OpencodeBackend._agrees_with_dispatch(env.get(name), workspace):
+                    env[name] = workspace
+        return env
+
 
     @staticmethod
     def _dispatch_background(cmd: list, formatted: str, env: dict, output_file) -> subprocess.Popen:
@@ -207,7 +280,32 @@ class OpencodeBackend(Backend):
 
     @staticmethod
     def _select_agent(target: str, kind: str) -> str | None:
-        return OpencodeBackend._select_env_value("AGENT", target, kind)
+        """Resolve the `--agent` value for this dispatch.
+
+        `kind="agent"` MUST bind to the dispatched target: without it opencode runs its
+        default agent while the hook payload still claims the worker's identity, so gates
+        judge as the worker while a different agent executes.
+
+        `kind="skill"` MUST NOT pass `--agent`: the skill funnel dispatches skill names
+        (aog-knowledge-maintain / aog-a3-author / aog-op-classify), which are not registered
+        agents. Passing them would select a nonexistent agent. Skill instructions are
+        inlined into the prompt by `load_skill_context()` instead.
+        """
+        explicit = OpencodeBackend._select_env_value("AGENT", target, kind)
+        if explicit:
+            return explicit
+        # Skills are registered as primary agents alongside the aog-* agents (see
+        # _opencode_config_content), so binding them is both possible and REQUIRED: without
+        # `--agent` the run falls back to opencode's default agent while the hook env still
+        # claims the skill's name, and the identity guard then refuses every tool call.
+        # Every kind, including "resume": the target is auto-registered in the generated
+        # config when it is not a plugin agent/skill, so it is always bindable. Leaving a
+        # kind unbound means running the default agent while the hook env claims a different
+        # identity, which the identity guard correctly refuses — turning the whole dispatch
+        # into a silent, exit-0 failure.
+        if target:
+            return target
+        return None
 
     @staticmethod
     def _select_variant(target: str, kind: str) -> str | None:
@@ -226,15 +324,317 @@ class OpencodeBackend(Backend):
         return os.environ.get(f"AOG_OPENCODE_{name}")
 
     @staticmethod
-    def _build_env(target: str, prompt: str | None = None) -> dict:
-        env = os.environ.copy()
-        env.setdefault("AOG_HOOK_AGENT_ID", f"opencode:{target}")
-        env.setdefault("AOG_HOOK_AGENT_TYPE", target)
-        workspace = OpencodeBackend._extract_workspace_from_prompt(prompt or "")
-        if workspace:
-            env.setdefault("ASCENDC_WORKSPACE", workspace)
-            env.setdefault("CLAUDE_ACTIVE_WORKSPACE", workspace)
-        return env
+    def _agrees_with_dispatch(candidate, dispatch_workspace) -> bool:
+        """True only when the inherited value names the SAME op this dispatch is for.
+
+        An earlier version accepted anything under the workspace root, which let a stale
+        SIBLING through — and a sibling is the worst case of all, because the door scopes its
+        cross-workspace rules to this value. Measured with the real door, dispatching to opA
+        while `ASCENDC_WORKSPACE` still said opB: the worker could read opB's
+        `verification.json` — another operator's answers, exactly what the anti-cheating layer
+        exists to stop — and was refused its OWN files. The guard was not merely off, it was
+        pointed backwards.
+
+        There is no reading of a disagreement that favours the inherited value: the dispatch
+        knows which op it is running. So agreement is the whole test, and anything else is
+        replaced.
+        """
+        if not candidate:
+            return False
+        return os.path.abspath(str(candidate)) == os.path.abspath(str(dispatch_workspace))
+
+    # ---- process-private opencode config (agents + skill discovery) --------------------
+    # opencode 1.18.18's own tool set, as reported by `opencode debug agent <name>`. Used to
+    # restore whitelist semantics: opencode's per-agent `tools` record is additive, so every
+    # tool NOT granted by the Claude Code definition has to be denied explicitly.
+    # NOTE `patch` is deliberately absent: opencode treats edit/write/patch as ALIASES of one
+    # write-side group, so emitting `patch: false` switches the whole group off and an agent
+    # that Claude Code grants Edit to ends up unable to write at all. Measured consequence of
+    # getting this wrong: the worker loses its write tool, falls back to `bash printf > file`,
+    # and every generated-code rule — which only fires on Write/Edit/MultiEdit — is bypassed.
+    _OPENCODE_TOOLS = {
+        "bash", "read", "glob", "grep", "edit", "write", "task", "webfetch",
+        "todowrite", "skill", "question", "invalid",
+    }
+
+    _CC_TO_OPENCODE_TOOL = {
+        "read": "read", "write": "write", "edit": "edit", "multiedit": "edit",
+        "grep": "grep", "glob": "glob", "bash": "bash", "webfetch": "webfetch",
+        "skill": "skill", "task": "task",
+    }
+
+    @staticmethod
+    def _plugin_root() -> Path:
+        # backends/ -> orchestrator/ -> scripts/ -> src/ -> engine/ -> <plugin root>
+        return Path(__file__).resolve().parents[5]
+
+    @staticmethod
+    def _engine_root() -> Path:
+        # backends/ -> orchestrator/ -> scripts/ -> src/ -> engine/
+        return Path(__file__).resolve().parents[4]
+
+    @staticmethod
+    def _neutralize_file_macro(text: str) -> str:
+        """Defuse opencode's `{file:...}` config macro in prose.
+
+        opencode expands `{file:PATH}` inside config strings and hard-fails the whole config
+        when PATH does not exist. Prose that merely mentions the token must not be able to
+        break the harness, so insert a zero-width-safe space after the brace.
+        """
+        return text.replace("{file:", "{ file:")
+
+    @staticmethod
+    def _parse_frontmatter(text: str) -> tuple[dict, str]:
+        """Return (frontmatter_dict, body). Minimal + dependency-free."""
+        if not text.startswith("---"):
+            return {}, text
+        end = text.find("\n---", 3)
+        if end == -1:
+            return {}, text
+        raw = text[3:end].lstrip("\n")
+        body = text[end + 4:].lstrip("\n")
+        try:
+            import yaml  # noqa: PLC0415
+            data = yaml.safe_load(raw) or {}
+            if isinstance(data, dict):
+                return data, body
+        except Exception as exc:
+            # Deliberate fallback, not a swallowed error: PyYAML is optional here, and a
+            # frontmatter block it rejects is still parseable by the minimal key: value
+            # reader below. Raising would make an unparseable agent file abort every
+            # dispatch, which is a strictly worse outcome than a slightly poorer parse.
+            logging.getLogger(__name__).debug(
+                "PyYAML frontmatter parse failed; using the minimal reader: %s", exc
+            )
+        return _parse_frontmatter_minimal(raw), body
+
+    @staticmethod
+    def _parse_frontmatter_minimal(raw: str) -> dict:
+        """Dependency-free key: value reader used when PyYAML is absent or rejects the block."""
+        data: dict = {}
+        key = None
+        for line in raw.splitlines():
+            if line.startswith("  - ") and key:
+                data.setdefault(key, [])
+                if isinstance(data[key], list):
+                    data[key].append(line[4:].strip())
+                continue
+            if ":" in line and not line.startswith((" ", "\t")):
+                key, _, val = line.partition(":")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                data[key] = val if val else []
+        return data
+
+    @staticmethod
+    def _tools_record(fm: dict) -> dict | None:
+        """Translate a Claude Code `tools:` whitelist into an opencode `tools` record.
+
+        Returns None when the agent declares no list (opencode then keeps its defaults, which
+        is what the absent-frontmatter case meant before).
+        """
+        tools = fm.get("tools")
+        if not (isinstance(tools, list) and tools):
+            return None
+        allowed = set()
+        for t in tools:
+            oc = OpencodeBackend._CC_TO_OPENCODE_TOOL.get(str(t).strip().lower())
+            if oc:
+                allowed.add(oc)
+        # opencode cannot express "Edit but not Write": edit/write/patch are one alias group
+        # and resolve together. Measured on 1.18.18 — {"edit": true, "write": false} resolves
+        # to edit=False write=False, and {"write": false, "edit": true} resolves to BOTH true.
+        # So an agent that Claude Code grants Edit to will have Write as well, whatever we
+        # emit. Make that explicit rather than emitting `write: false` and believing a
+        # restriction the harness silently discards: aog-kernel-optimizer / aog-fused-optimizer
+        # / aog-researcher are Edit-only in CC and DO resolve write=true here. This is a
+        # harness-parity gap, not a whitelist.
+        if allowed & {"edit", "write"}:
+            allowed |= {"edit", "write"}
+        if not allowed:
+            return None
+        # A Claude Code `tools:` list is a WHITELIST — anything absent is denied. opencode's
+        # `tools` record is ADDITIVE: unlisted tools keep their default (enabled). Emitting
+        # only the allowed ones therefore silently WIDENS every agent's surface — measured: an
+        # analyzer-only agent whose CC definition grants Read/Grep/Glob/Bash/WebFetch/Skill
+        # came back with edit/write/task enabled. That matters beyond tidiness: door.py's
+        # write-side guards only apply to kernel-author agents, so a widened analyzer could
+        # write kernel sources with none of the generated-code rules judging it. Deny every
+        # other known tool explicitly to restore whitelist semantics.
+        #
+        # Order matters and must be DETERMINISTIC. opencode collapses edit/write/patch into
+        # one write-side group and the LAST key for that group wins, so a set-comprehension
+        # here made each agent's write capability depend on Python's per-process string hash
+        # seed (measured: kernel-worker kept `edit` in 4 runs out of 10). Emit denials first
+        # and grants last, from sorted lists, so the grant always wins and the config is
+        # byte-stable across processes. `tool_name`, never `name`: `name` is the AGENT name
+        # the entry is keyed by, and rebinding it here silently filed every agent under the
+        # last tool it was granted.
+        record = {tool_name: False for tool_name in sorted(OpencodeBackend._OPENCODE_TOOLS - allowed)}
+        for tool_name in sorted(allowed):
+            record[tool_name] = True
+        return record
+
+    @staticmethod
+    def _agent_prompt_value(root, bodies_dir, name: str, body: str) -> str:
+        """Materialise an agent body and return the value to put in `prompt`.
+
+        The bodies address the KB as ${CLAUDE_PLUGIN_ROOT}/kb/... . That is PROMPT TEXT, not
+        shell: the model passes it to the read tool verbatim and opencode does not expand
+        environment variables in tool arguments, so the worker tries to open a literal
+        "${CLAUDE_PLUGIN_ROOT}/kb/..." and gives up (measured: READ_OK=no on the very first
+        mandatory KB file). Exporting the variable to the child does NOT help, for the same
+        reason. Expand it while materialising instead.
+        """
+        body = body.replace("${CLAUDE_PLUGIN_ROOT}", str(root))
+        body = body.replace("$CLAUDE_PLUGIN_ROOT", str(root))
+        prompt_value = OpencodeBackend._neutralize_file_macro(body)
+        if bodies_dir is not None:
+            body_path = bodies_dir / f"{name}.md"
+            try:
+                body_path.write_text(body)
+                prompt_value = "{file:%s}" % body_path
+            except OSError as exc:
+                # Body file is an optimisation: keep the inlined prompt text on failure.
+                logging.getLogger(__name__).debug(
+                    "cannot persist agent body file %s: %s", body_path, exc
+                )
+        return prompt_value
+
+    @staticmethod
+    def _agents_from_markdown(root, agents_dir, bodies_dir) -> dict:
+        agents: dict = {}
+        if not agents_dir.is_dir():
+            return agents
+        for md in sorted(agents_dir.glob("*.md")):
+            try:
+                fm, body = OpencodeBackend._parse_frontmatter(md.read_text(errors="replace"))
+            except OSError:
+                continue
+            name = str(fm.get("name") or md.stem).strip()
+            if not name:
+                continue
+            entry: dict = {
+                "description": OpencodeBackend._neutralize_file_macro(
+                    str(fm.get("description") or name).strip()
+                ),
+                # primary: `opencode run --agent` refuses to bind a subagent and silently
+                # falls back to the default agent.
+                "mode": "primary",
+                "prompt": OpencodeBackend._agent_prompt_value(root, bodies_dir, name, body),
+            }
+            record = OpencodeBackend._tools_record(fm)
+            if record is not None:
+                entry["tools"] = record
+            agents[name] = entry
+        return agents
+
+    @staticmethod
+    def _register_skill_agents(skills_dir, agents: dict) -> None:
+        """Register the plugin's SKILLS as primary agents too.
+
+        Skill dispatches used to run with no `--agent`, i.e. as opencode's default `build`
+        agent, while the hook env still announced AOG_HOOK_AGENT_TYPE=<skill name>. Once the
+        adapter was loaded for skill dispatches as well, those two signals contradicted each
+        other and the identity guard refused EVERY tool call of every skill run — and because
+        `opencode run` still exits 0, the orchestrator recorded the refusal prose as a
+        successful skill result. Registering the skill under its own name makes the observed
+        agent match the dispatched one, so identity is consistent instead of merely silent.
+        """
+        if not skills_dir.is_dir():
+            return
+        for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+            try:
+                fm, _body = OpencodeBackend._parse_frontmatter(
+                    skill_md.read_text(errors="replace")
+                )
+            except OSError:
+                continue
+            name = str(fm.get("name") or skill_md.parent.name).strip()
+            if not name or name in agents:
+                continue
+            # MINIMAL prompt on purpose — do NOT preload the SKILL.md body.
+            #
+            # Registering a skill exists solely so `--agent <skill>` binds and the observed
+            # agent matches the announced identity. Skill CONTENT is delivered by the caller:
+            # inlined via the load_skill_context helper, or — for skills in
+            # _PROMPT_MANAGED_SKILLS — by a slim purpose-built prompt that tells the model what
+            # to read. Front-loading the body as a system prompt duplicates that and is
+            # expensive: aog-self-critic's SKILL.md is ~150 KB, and preloading it pushed the
+            # pre-spawn critic past its deliberately short 180 s opencode budget
+            # (critic_invoke._default_prespawn_critic_timeout_sec). Measured in an end-to-end
+            # run: critic timed out with no report, where the same call had completed before by
+            # reading the file on demand.
+            agents[name] = {
+                "description": OpencodeBackend._neutralize_file_macro(
+                    str(fm.get("description") or name).strip()
+                ),
+                "mode": "primary",
+                "prompt": (
+                    f"You are running the a5_ops skill {name!r}. Its instructions are "
+                    f"either included in the prompt below or readable at {skill_md}. "
+                    "Follow the orchestrator brief and return only what it asks for."
+                ),
+            }
+
+    @staticmethod
+    def _opencode_config_content(extra_agent: str | None = None) -> str | None:
+        """Build the JSON passed via OPENCODE_CONFIG_CONTENT.
+
+        Converts the plugin's CC-format `agents/*.md` into opencode `agent{}` entries with
+        `mode: "primary"` and points skill discovery at the plugin's own skills dir.
+        """
+        root = OpencodeBackend._plugin_root()
+        agents_dir = root / "agents"
+        skills_dir = root / "skills"
+        # opencode expands `{file:...}` macros inside config STRINGS. An agent body that
+        # merely mentions `{file:line, before/after}` (aog-precision-probe.md:285) makes the
+        # whole config invalid and opencode refuses to start. Referencing the body as
+        # `{file:<abs>}` is the supported form, and the referenced file's own content is NOT
+        # re-expanded (measured), so arbitrary prose stays safe.
+        bodies_dir = OpencodeBackend._engine_root() / "workspace" / ".opencode-agents"
+        if agents_dir.is_dir():
+            try:
+                bodies_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                bodies_dir = None
+        agents = OpencodeBackend._agents_from_markdown(root, agents_dir, bodies_dir)
+        OpencodeBackend._register_skill_agents(skills_dir, agents)
+
+        # Any dispatch target that is neither an agent nor a skill of this plugin still has
+        # to be BINDABLE, or the run silently degrades: `opencode run --agent <unknown>`
+        # only warns and falls back to the default agent (exit code unaffected), while
+        # build_env still announces AOG_HOOK_AGENT_TYPE=<unknown> — so the identity guard
+        # then refuses every tool call of that run and the orchestrator, seeing exit 0,
+        # files the refusal prose as a successful result. Live examples that hit this:
+        # kb_auto_promote dispatching Claude Code's built-in "general-purpose", and
+        # resume() dispatching the pseudo-target "resume".
+        if extra_agent and extra_agent not in agents:
+            agents[extra_agent] = {
+                "description": f"a5_ops dispatch target {extra_agent}",
+                "mode": "primary",
+                "prompt": (
+                    f"You are running as the a5_ops dispatch target {extra_agent!r}. "
+                    "Follow the orchestrator brief supplied on stdin."
+                ),
+            }
+
+        cfg: dict = {}
+        if agents:
+            cfg["agent"] = agents
+        if skills_dir.is_dir():
+            cfg["skills"] = {"paths": [str(skills_dir)]}
+        # Safety-net adapter. Registering it here (rather than copying a file into the
+        # user's config dir) keeps the install footprint at zero: the tuple form delivers
+        # `options.projectRoot` to A5OpsHooksPlugin(ctx, options), which is how the adapter
+        # locates the canonical Python checkers under engine/src/scripts/workflow/.
+        engine = OpencodeBackend._engine_root()
+        adapter = engine / "src" / "opencode" / "a5_ops_hooks.mjs"
+        if adapter.is_file():
+            cfg["plugin"] = [[f"file://{adapter}", {"projectRoot": str(engine)}]]
+        if not cfg:
+            return None
+        return json.dumps(cfg)
 
     @staticmethod
     def _extract_workspace_from_prompt(prompt: str) -> str | None:
@@ -358,8 +758,11 @@ class OpencodeBackend(Backend):
             if proc.poll() is not None:
                 self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
                 if state.pending and not state.invalid_tool_event:
-                    self._record_stream_line(state, state.pending, tee, progress_callback)
-                    state.pending = ""
+                    self._record_stream_line(
+                        state, state.pending.decode("utf-8", errors="replace"),
+                        tee, progress_callback,
+                    )
+                    state.pending = b""
                 return False, False
             if selector.select(self._stream_wait_interval(state.last_output_at, deadline, silence_timeout_sec)):
                 self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
@@ -400,10 +803,15 @@ class OpencodeBackend(Backend):
                 return
 
     def _process_stream_chunk(self, state: _StreamState, chunk: bytes, tee, progress_callback) -> None:
-        state.pending += chunk.decode("utf-8", errors="replace")
-        while "\n" in state.pending:
-            line, state.pending = state.pending.split("\n", 1)
-            self._record_stream_line(state, line + "\n", tee, progress_callback)
+        # Buffer BYTES and decode only complete lines: a multi-byte UTF-8 sequence split
+        # across two os.read() chunks would otherwise decode to U+FFFD on both sides and
+        # silently corrupt (then drop) that JSON event line.
+        state.pending += chunk
+        while b"\n" in state.pending:
+            raw_line, state.pending = state.pending.split(b"\n", 1)
+            self._record_stream_line(
+                state, raw_line.decode("utf-8", errors="replace") + "\n", tee, progress_callback
+            )
             if state.invalid_tool_event:
                 return
 
@@ -583,7 +991,7 @@ class OpencodeBackend(Backend):
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
-                pass
+                return
             proc.wait(timeout=5)
 
     @staticmethod
@@ -593,322 +1001,16 @@ class OpencodeBackend(Backend):
     def _format_prompt(self, target: str, prompt: str, *, kind: str) -> str:
         skill_context = load_skill_context(target) if kind == "skill" else None
         skill_block = f"\n\n{skill_context}" if skill_context else ""
-        guard_block = self._compatibility_guard(target, kind)
+        # No semantic guidance here: canonical KB rules are shared by both harnesses, and
+        # backends/base.py forbids a backend owning semantics.
         return (
             f"You are running as the a5_ops harness backend target {target!r} "
             f"(kind={kind!r}) through opencode CLI.\n\n"
             "Follow the a5_ops orchestrator brief below. Return only the final "
             "worker/skill result text expected by the orchestrator."
-            f"{guard_block}"
             f"{skill_block}\n\n"
             "----- a5_ops prompt -----\n"
             f"{prompt}"
-        )
-
-    @staticmethod
-    def _compatibility_guard(target: str, kind: str) -> str:
-        if kind != "agent":
-            return ""
-        runtime_guard = ""
-        if target in {"aog-kernel-worker", "aog-kernel-optimizer", "aog-precision-probe"}:
-            runtime_guard = OpencodeBackend._runtime_smoke_guard()
-        if target == "aog-kernel-optimizer":
-            return runtime_guard + (
-                "\n\n=== opencode a5_ops kernel-optimizer compatibility guard ===\n"
-                "- Optimize only the current `ASCENDC_WORKSPACE`. Do not read, "
-                "grep, glob, copy, tar, or manually sync any other `workspace/<op>` "
-                "directory or old remote `current_task` archive.\n"
-                "- Do not hand-roll deployment with tar/scp/manual copies into "
-                "`current_task`. Use the project wrapper from the local repo: "
-                "`ASCENDC_WORKSPACE=<workspace/op> bash src/scripts/deploy_to_npu_lane.sh "
-                "--lane <LANE> --build`. Keep its output direct; do not pipe it "
-                "through `tail`/`head`/`grep`/`sed`/`awk` and do not append marker "
-                "words such as `unpiped`.\n"
-                "- After a build, run precision/perf from the deployed current_task "
-                "using the runtime smoke guard above. If using `a5_exec.py`, pass "
-                "only the in-container command; do not include `docker exec` in "
-                "that command.\n"
-                "- If a simple elementwise kernel is precision-correct but cannot "
-                "meet the perf threshold after a bounded optimization attempt, "
-                "write an honest `verification.json`/`PROGRESS.md` update and "
-                "handoff with the measured ratio and reason. Do not keep retrying "
-                "environment setup or replace the kernel with a host fallback.\n"
-                "=== end opencode kernel-optimizer compatibility guard ==="
-            )
-        if target != "aog-kernel-worker":
-            return runtime_guard
-        return runtime_guard + OpencodeBackend._kernel_worker_guard()
-
-    @staticmethod
-    def _runtime_smoke_guard() -> str:
-        return (
-            "\n\n=== opencode a5_ops runtime smoke guard ===\n"
-            "- When validating a direct-pybind AscendC build on the A5 remote "
-            "container and the extension is compiled for Python 3.11, run the "
-            "smoke with `/root/miniconda3/envs/py311/bin/python3.11`. Set "
-            "`CANN_ROOT=/usr/local/Ascend/cann-9.1.T500`, "
-            "`PYTHONPATH=$CANN_ROOT/python/site-packages`, "
-            "`ASCEND_HOME_PATH=$CANN_ROOT`, and "
-            "`ASCEND_OPP_PATH=$CANN_ROOT/opp`.\n"
-            "- Use this `LD_LIBRARY_PATH` ordering for that smoke: "
-            "`$CANN_ROOT/x86_64-linux/lib64:$CANN_ROOT/lib64:"
-            "/usr/local/Ascend/driver/lib64/driver:"
-            "/usr/local/Ascend/driver/lib64/common:"
-            "/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/lib:"
-            "/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch_npu/lib:"
-            "/root/miniconda3/envs/py311/lib:"
-            "/usr/local/Ascend/8.5.0/x86_64-linux/lib64:$LD_LIBRARY_PATH`. "
-            "Keep the 9.1.T500 runtime before the 8.5.0 fallback: 9.1.T500 "
-            "provides `aclrtLaunchKernelWithHostArgs`; 8.5.0 is only a "
-            "fallback provider for `libacl_dvpp.so`. Putting 8.5.0 first "
-            "causes undefined-symbol failures.\n"
-            "- `~/.claude/skills/a5_op/scripts/a5_exec.py` already executes "
-            "inside the configured A5 container. Do not nest `docker exec` "
-            "inside an `a5_exec.py` command. If using `a5_exec.py`, pass a "
-            "plain in-container command such as `cd ... && source ... && "
-            "export ... && /root/miniconda3/envs/py311/bin/python3.11 ...`. "
-            "If using raw ssh, then and only then wrap the command in a "
-            "single `docker exec <container> bash -c ...`.\n"
-            "- Do not debug `libhccl.so`/`libtorch_python.so` by trying random "
-            "activation commands or `conda run`. Use the exact CANN/PYTHONPATH/"
-            "LD_LIBRARY_PATH order above; missing `libtorch_python.so` means "
-            "the torch site-packages `torch/lib` directory was omitted from "
-            "`LD_LIBRARY_PATH`.\n"
-            "=== end opencode runtime smoke guard ==="
-        )
-
-    @staticmethod
-    def _kernel_worker_guard() -> str:
-        return "".join((
-            OpencodeBackend._kernel_worker_scope_guard(),
-            OpencodeBackend._kernel_worker_pybind_guard(),
-            OpencodeBackend._kernel_worker_kernel_guard(),
-            OpencodeBackend._kernel_worker_verification_guard(),
-        ))
-
-    @staticmethod
-    def _kernel_worker_scope_guard() -> str:
-        return (
-            "\n\n=== opencode a5_ops kernel-worker compatibility guard ===\n"
-            "- This is a real AscendC generation task. Do not satisfy precision "
-            "with CPU/PyTorch/NumPy fallback code in model_new_ascendc.py, "
-            "pybind11.cpp, kernels.cpp, or any runner. Pybind may only do "
-            "metadata, allocation/contiguous conversion, launch, and sync; all "
-            "operator arithmetic must be in AscendC kernel code.\n"
-            "- For A3/V220 kernels, do not emit foreign-backend-looking "
-            "syntax. Use the project AscendC surface: #include \"kernel_operator.h\", "
-            "using namespace AscendC, and a bare extern \"C\" __global__ __aicore__ "
-            "entry. Do not use OPENVINO_HIDDEN, __opencl__, KernelTensor, "
-            "lowercase ascendc namespace, or includes such as \" ascendc/...\".\n"
-            "- Prefer repo KB/templates, declared source, and SDK headers named by "
-            "the brief. Direct raw archive scans are blocked; use only staged, "
-            "provenance-tracked prior-art/prestage context, and never treat it as "
-            "truth or replace the kernel with a host fallback.\n"
-            "- Do not scan project-wide `output/` archives or copy answer-bearing "
-            "runners such as archived `pass_a_runner.py`/`verification.json`. "
-            "Inside the current workspace, the kernel worker owns code generation, "
-            "one real build, runner generation, and verification artifact writing "
-            "before a `done` handoff.\n"
-            "- Do not read, grep, glob, or Bash-inspect any other `workspace/<op>` "
-            "directory from previous runs. Use only the current `ASCENDC_WORKSPACE`, "
-            "KB, SDK headers, and source inputs named by the brief.\n"
-            "- Write direct-pybind/backward kernel sources under workspace/<op>/kernel/ "
-            "(`kernel.h`, `kernels.cpp`, `pybind11.cpp`). `model_new_ascendc.py` "
-            "belongs at workspace root and imports the built extension from "
-            "kernel/build. The deploy wrapper syncs only the kernel/ subtree for "
-            "kernel sources. `build_ascendc.py` does not auto-generate "
-            "`pybind11.cpp`; missing `workspace/<op>/kernel/pybind11.cpp` is a "
-            "hard build failure.\n"
-        )
-
-    @staticmethod
-    def _kernel_worker_pybind_guard() -> str:
-        return "".join((
-            OpencodeBackend._kernel_worker_pybind_api_guard(),
-            OpencodeBackend._kernel_worker_pybind_layout_guard(),
-        ))
-
-    @staticmethod
-    def _kernel_worker_pybind_api_guard() -> str:
-        return (
-            "- For pybind, use the project A3 pattern: include the generated "
-            "`torch/extension.h` and `torch_npu/csrc/core/npu/NPUStream.h`, "
-            "never include nonexistent `torch/pybind.h`, declare the generated "
-            "`extern \"C\" uint32_t aclrtlaunch_<kernel>(uint32_t blockDim, "
-            "void* stream, ...)` stub or include the generated "
-            "`aclrtlaunch_<kernel>.h`, get "
-            "`auto stream = c10_npu::getCurrentNPUStream().stream(false)`, "
-            "use `torch::Tensor` or `at::Tensor` function signatures, "
-            "do not use device-side `__gm__` qualifiers in pybind host code "
-            "or launch stub declarations, "
-            "allocate the output tensor with `at::empty_like` or "
-            "`torch::empty`, call `aclrtlaunch_<kernel>(blockDim, stream, ...)` "
-            "or `ACLRT_LAUNCH_KERNEL(<kernel>)(blockDim, stream, ...)`, check "
-            "the return code when using the explicit stub with a compilable "
-            "status variable, e.g. `uint32_t ret = aclrtlaunch_...(...); "
-            "TORCH_CHECK(ret == 0, \"aclrtlaunch failed\", ret);`, return the output "
-            "tensor from `run_<op>` (not a `uint32_t` launch status), and expose "
-            "`m.def(\"run_<op>\", &run_<op>)` from the "
-            "literal `PYBIND11_MODULE(_<op>_ext, m)`. Do not expose "
-            "`&ACLRT_LAUNCH_KERNEL(...)` directly in `m.def`. Do not call raw "
-            "`aclrtLaunchKernel(...)` directly; do not "
-            "include `torch_npu/csrc/aten/common/ACLRTLauchKernel.h`; do not "
-            "use `py::tensor` or `py::object` for NPU tensors. "
-            "For torch_npu device checks and tensor options, use "
-            "`c10::DeviceType::PrivateUse1` / `at::kPrivateUse1`. Kernel tiling/workspace arguments "
-            "are GM addresses: create NPU tensors for tiling/workspace and "
-            "pass their `data_ptr` values; never pass a host stack array such "
-            "as `uint64_t tiling[2]` or `reinterpret_cast<uint64_t>(tiling)`. "
-            "pass the project launcher's expected blockDim/grid values exactly "
-            "as the local examples do. Do not include nonexistent pybind "
-            "headers such as `pybind11/strict_rcward.h`. Do not pass a host "
-            "stack pointer such as `reinterpret_cast<GM_ADDR>(&tiling)` as "
-            "kernel GM tiling/workspace. Keep `kernels.cpp` as kernel/source "
-            "glue; put the `PYBIND11_MODULE` binding only in `pybind11.cpp`.\n"
-        )
-
-    @staticmethod
-    def _kernel_worker_pybind_layout_guard() -> str:
-        return (
-            "- In `model_new_ascendc.py`, insert `workspace/<op>/kernel/build` "
-            "into `sys.path`, import the literal pybind module "
-            "`_<op>_ext` where `<op>` is the workspace directory basename "
-            "(for example `_opencode_e2e_agent17_add_a3_ext`), and call its `run_<op>(...)` wrapper from "
-            "`ModelNew.forward`. Do not use `from kernel import ...`.\n"
-            "- For direct-pybind tasks, do not create PR4778 "
-            "`op_host/`, `op_kernel/`, or Ascend950 config scaffolds unless the "
-            "brief explicitly asks for a vendor OPP package. The verifier path "
-            "uses `workspace/<op>/kernel/` plus `model_new_ascendc.py`.\n"
-            "- In this direct-pybind path, do not mkdir, touch, read, or write "
-            "`op_host/` or `op_kernel/`; those scaffolds are a different backend "
-            "shape and the opencode hook will block them.\n"
-            "- In the direct-pybind path, never write `kernel_module_t`, "
-            "`KernelAddParams`, or OPP registration scaffolds. The local deploy "
-            "wrapper builds the `workspace/<op>/kernel/` subtree directly.\n"
-        )
-
-    @staticmethod
-    def _kernel_worker_kernel_guard() -> str:
-        return "".join((
-            OpencodeBackend._kernel_worker_memory_guard(),
-            OpencodeBackend._kernel_worker_elementwise_guard(),
-            OpencodeBackend._kernel_worker_partition_guard(),
-        ))
-
-    @staticmethod
-    def _kernel_worker_memory_guard() -> str:
-        return (
-            "- In kernel code, keep GM base pointers from the entry arguments "
-            "and add element offsets to those bases. Do not fabricate GM "
-            "pointers from numeric offsets such as "
-            "`reinterpret_cast<__gm__ float*>(offset)`.\n"
-        )
-
-    @staticmethod
-    def _kernel_worker_elementwise_guard() -> str:
-        return (
-            "- For simple fp32 elementwise add, use the proven direct-pybind "
-            "shape: `kernel/kernels.cpp` includes literal `\"kernel.h\"`; "
-            "`kernel/kernels.cpp` must define the actual `extern \"C\" "
-            "__global__ __aicore__` kernel body, not just declare it; "
-            "`kernel.h` must not declare or define that extern kernel entry; "
-            "`kernel.h` must use its own project-specific include guard such as "
-            "`OP_ADD_KERNEL_H`, never `KERNEL_OPERATOR_H` or "
-            "`__KERNEL_OPERATOR_H__` because that collides with the SDK header; "
-            "`kernel.h` uses `using namespace AscendC`, `TPipe`, "
-            "`TQue<QuePosition::VECIN,...>`, `GlobalTensor<float>`, and "
-            "calls `SetGlobalBuffer(reinterpret_cast<__gm__ float*>(arg) + "
-            "start, elems)` in `Init`. `TPipe::InitBuffer` calls must pass "
-            "queue, depth, and a fixed tile byte-size such as "
-            "`kTileElems * sizeof(float)`, never `totalElems * sizeof(float)` "
-            "or another full-input dynamic size. The kernel entry must take "
-            "`GM_ADDR` parameters, e.g. `extern \"C\" __global__ __aicore__ "
-            "void add_kernel(GM_ADDR a, GM_ADDR b, GM_ADDR c, int64_t total)`; "
-            "cast to `__gm__` pointers only inside the operator `Init`. Keep "
-            "`TPipe pipe_` as a member and call `pipe_.InitBuffer(...)`; do "
-            "not use `GetTPipe()`. Write the complete "
-            "DataCopy/Add/DataCopy tile loop over chunks. Generated C/C++ "
-            "must be ASCII only and must not contain TODOs, ellipses, "
-            "placeholder comments, or thinking text. `TPipe` only initializes "
-            "queue buffers for this path; do not call "
-            "`InitBuffer(xTbuf_, depth, bytes)` or mix unused `TBuf` scratch "
-            "members with a TQue DataCopy/Add pipeline. `TPipe` does not have "
-            "`EnQue`/`DeQue`. Use the sequence "
-            "`AllocTensor` -> `DataCopy(LocalTensor, GlobalTensor, count)` -> "
-            "`EnQue` -> `DeQue` -> `Add` -> `EnQue` -> `DeQue` -> "
-            "`DataCopy(GlobalTensor, LocalTensor, count)` -> `FreeTensor`, "
-            "with each `DeQue` stored in a LocalTensor variable exactly once. "
-            "Pass the current tile count directly to vector intrinsics such as "
-            "`Add(..., tileLen)` or `Add(..., remaining)`; do not invent "
-            "`epilogue_len` or subtract an undeclared tail value from the count. "
-            "Do not emit typo identifiers such as `yDequeonge`, and never call "
-            "`EnQue` twice on the same LocalTensor without an intervening `DeQue`. Keep queues and tensors inside "
-            "the kernel operator object, not as file-scope globals. Split work by scalar `GetBlockIdx()` "
-            "and `GetBlockNum()`; do not invent `coreCoord_t`, `IN_QUE_NUM`, "
-            "`OUT_QUE_NUM`, `pipe.Barrier()`, or `TQue::WaitAllDone()`. "
-        )
-
-    @staticmethod
-    def _kernel_worker_partition_guard() -> str:
-        return (
-            "If DataCopy counts are rounded up to 8 fp32 elements, the block "
-            "ranges themselves must be 8-aligned and non-overlapping. Do not "
-            "compute `base = total / blockNum`, `count = base + remainder`, "
-            "then round each block's `count` to 8 and copy at `start + offset`; "
-            "also do not compute `blockSize = (total + blockNum - 1) / blockNum`, "
-            "`start = blockIdx * blockSize`, then use `tileLenAligned` for "
-            "`DataCopy(...[start + offset], ..., tileLenAligned)`. "
-            "for small or tail cases this makes block0 write 0..7, block1 "
-            "write 1..8, etc. Use one block for tiny inputs, or partition the "
-            "padded element range into disjoint 8-aligned spans and only return "
-            "the original prefix. "
-            "When splitting fp32 DataCopy/Add work across blocks, do not use "
-            "`perBlock = (total + blockNum - 1) / blockNum` directly with "
-            "`blockDim=56`; DataCopy element counts must stay 8-element aligned "
-            "for the normal vector path. For the simple add smoke either launch "
-            "with `blockDim = 8` for the provided 8-aligned cases or round "
-            "per-block/tile counts up to an 8-element boundary and handle the "
-            "tail explicitly.\n"
-            "- In `pybind11.cpp`, `aclrtlaunch_<kernel>` host stubs should use "
-            "`void*` tensor `data_ptr` arguments for GM addresses, matching the "
-            "generated stub signature. Do not declare GM address parameters as "
-            "`uint64_t` and do not cast tensor data pointers through `uint64_t`.\n"
-        )
-
-    @staticmethod
-    def _kernel_worker_verification_guard() -> str:
-        return (
-            "- Build with the project wrapper by setting/using ASCENDC_WORKSPACE "
-            "and running `bash src/scripts/deploy_to_npu_lane.sh --lane <LANE> "
-            "--build`. Do not pipe any `deploy_to_npu*.sh` output through "
-            "`tail`/`head`/`grep`/`sed`/`awk`; that masks exit status, can hang "
-            "post-build sync, and hides build markers. Do not invent unsupported "
-            "flags such as `--workspace`, do not append unsupported marker words "
-            "such as `unpiped`, and do not manually copy files into LOCAL_TASK.\n"
-            "- Before reporting done, run the mandated pre-build checks and one "
-            "real build with direct output, then generate and run the workspace-local "
-            "`pass_a_runner.py` and `pass_b_runner.py` or set "
-            "`precision.pass_b.status` to `N/A` with a non-empty reason when the "
-            "mode has no independent Pass B. If you create `pass_b_runner.py`, "
-            "then `verification.json.precision.pass_b.status` must be real "
-            "`PASS` or `FAIL`, not `N/A`. For an `edge_dataset.pt` fixture, "
-            "support the dict shape "
-            "`{'cases': [{'inputs': {...}, 'outputs': {...}}, ...]}` as well "
-            "as legacy list cases; use the first output tensor from `outputs` "
-            "as the oracle CPU truth when the output key is not obvious. Do "
-            "not silently replace that oracle by recomputing a lower-precision "
-            "truth just to pass an edge case; if the oracle precision policy is "
-            "incompatible with the kernel dtype, report the Pass B result "
-            "honestly as FAIL with the observed max diff. Write `verification.json` with "
-            "`precision`, `determinism`, and `performance`; include "
-            "`performance.independent_re_measure` with either a real ratio/ran "
-            "field or an explicit skipped reason. Run "
-            "`python3 src/scripts/orchestrator/check_verification_schema.py "
-            "workspace/<op>/verification.json` and fix any schema failure before "
-            "the handoff. If the implementation uses host fallback, cannot build "
-            "a real AscendC kernel, or cannot produce honest verification "
-            "artifacts, report FAIL/handoff instead of done.\n"
-            "=== end opencode compatibility guard ==="
         )
 
     def normalize(self, raw: Any) -> Envelope:

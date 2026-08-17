@@ -266,18 +266,133 @@ def test_installer_completes_from_a_marketplace_layout():
 
 @pytest.mark.parametrize(
     ("skill_name", "mode"),
-    (("ascendc-cross-gen-port", "--port-a3"), ("ascendc-backward-gen", "--backward")),
+    (("ascendc-cross-gen-port", "port-a3"), ("ascendc-backward-gen", "backward")),
 )
-def test_entry_skill_background_launch_is_self_contained(skill_name, mode):
+def test_entry_skill_delegates_to_the_shared_launcher(skill_name, mode):
+    """The entry skill must hand off to the shared launcher, not re-derive the launch.
+
+    This contract used to be checked against an inline shell snippet pasted into each
+    SKILL.md. That snippet is now a single shared script (scripts/launch_orchestrator.sh)
+    so a second harness cannot grow a third divergent copy; the assertions therefore moved
+    to the launcher (see the test below), and what remains checkable here is that the skill
+    delegates, passes its own base dir, and selects the right mode.
+    """
     text = (INIT.parent / "skills" / skill_name / "SKILL.md").read_text()
     command_line = next(line for line in text.splitlines() if 'command="' in line)
 
+    for token in ("launch_orchestrator.sh", "--skill-base", "--mode", mode):
+        assert token in command_line, f"{skill_name} entry does not delegate: missing {token}"
+    # The old inline form must not creep back in alongside the launcher.
+    assert "python3 -m orchestrator" not in command_line, (
+        "entry skill re-derives the launch instead of delegating to the shared launcher"
+    )
+
+
+def test_shared_launcher_enforces_self_containment():
+    """The launcher owns the two settings whose absence fails SILENTLY.
+
+    * AOG_HARNESS_BACKEND: unset simply falls back to Claude Code, so an opencode session
+      would spawn `claude` with no error at all.
+    * CLAUDE_CONFIG_DIR: unset makes a spawned worker fall back to ~/.claude, where a
+      different operator-generation suite may be installed — wrong KB, broken
+      self-containment, again with no error.
+    Both must be exported by the launcher before the orchestrator process starts, because
+    the dispatch sites bind their backend at module import time.
+    """
+    launcher = (INIT.parent / "scripts" / "launch_orchestrator.sh").read_text()
+
     for token in (
-        "SKILL_BASE=", "realpath", "../../scripts/resolve_engine.py",
-        "ENGINE_DIR=", "--base-dir", "$ENGINE_DIR/workspace/.ascendc_env",
-        'cd \\"$ENGINE_DIR\\"', mode,
+        "resolve_engine.py",            # engine resolved, never guessed from cwd
+        "--base-dir",
+        "workspace/.ascendc_env",       # config validated before launch
+        "export AOG_HARNESS_BACKEND",   # harness selection made explicit
+        "CLAUDE_CONFIG_DIR",            # self-containment for the CC path
+        "python3 -m orchestrator",
     ):
-        assert token in command_line
+        assert token in launcher, f"shared launcher lost: {token}"
+
+
+def _fake_launcher_tree(root: Path) -> tuple[Path, Path]:
+    """A minimal plugin+engine tree the real launcher can drive to completion.
+
+    The engine's `orchestrator` package is a stub that prints the environment it was started
+    with, so the launcher can be observed rather than read.
+    """
+    plugin = root / "plugin"
+    scripts = plugin / "scripts"
+    engine = plugin / "engine"
+    orch = engine / "src" / "scripts" / "orchestrator"
+    orch.mkdir(parents=True)
+    (engine / "workspace").mkdir(parents=True)
+    (engine / "workspace" / ".ascendc_env").write_text("TARGET=a5\n")
+    (orch / "__main__.py").write_text(
+        "import os, sys\n"
+        "print('BACKEND=' + os.environ.get('AOG_HARNESS_BACKEND', ''))\n"
+        "print('CCDIR=' + os.environ.get('CLAUDE_CONFIG_DIR', ''))\n"
+        "print('ARGV=' + ' '.join(sys.argv[1:]))\n"
+    )
+    scripts.mkdir(parents=True)
+    shutil.copy(INIT.parent / "scripts" / "launch_orchestrator.sh", scripts / "launch_orchestrator.sh")
+    (scripts / "resolve_engine.py").write_text(
+        "import sys\n"
+        f"sys.stdout.write({str(engine)!r})\n"
+    )
+    return plugin, engine
+
+
+def _run_launcher(plugin: Path, harness: str, home: Path) -> dict:
+    # Cleared so the launcher's own exports are the only source of these: an inherited
+    # CLAUDE_CONFIG_DIR would make a launcher that never sets it look like one that does,
+    # and inherited harness/host fingerprints would decide the backend for it.
+    _cleared = ("CLAUDE_CONFIG_DIR", "AOG_HARNESS_BACKEND", "OPENCODE", "OPENCODE_PID",
+                "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+    env = {k: v for k, v in os.environ.items() if k not in _cleared}
+    env["HOME"] = str(home)
+    proc = subprocess.run(
+        [_bash(), str(plugin / "scripts" / "launch_orchestrator.sh"),
+         "--skill-base", str(plugin / "skills" / "ascendc-cross-gen-port"),
+         "--mode", "port-a3", "--source", "/tmp/src-op", "--lane", "3",
+         "--harness", harness],
+        capture_output=True, text=True, env=env, timeout=120,
+    )
+    assert proc.returncode == 0, f"launcher failed: {proc.stdout}\n{proc.stderr}"
+    observed = {}
+    for line in proc.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in ("BACKEND", "CCDIR", "ARGV"):
+            observed[key] = value
+    return observed
+
+
+def test_shared_launcher_actually_exports_what_the_orchestrator_reads():
+    """Observe the launcher, do not read it.
+
+    The token check above passes on a launcher that merely MENTIONS these names — deleting
+    the `export CLAUDE_CONFIG_DIR=...` line leaves the name behind in the comment explaining
+    it, so the grep stays green while self-containment is gone. Both settings fail silently
+    at runtime, so the test for them has to be the one that runs the thing.
+    """
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t)
+        plugin, _ = _fake_launcher_tree(root)
+        home = root / "home"
+        (home / ".claude").mkdir(parents=True)
+
+        cc = _run_launcher(plugin, "claude_code", home)
+        assert cc["BACKEND"] == "claude_code"
+        assert cc["CCDIR"] == str(home / ".claude"), (
+            "launcher did not export CLAUDE_CONFIG_DIR, so a spawned worker falls back to "
+            f"whatever ~/.claude happens to hold: {cc['CCDIR']!r}"
+        )
+        assert cc["ARGV"] == "--port-a3 /tmp/src-op --lane 3"
+
+        oc = _run_launcher(plugin, "opencode", home)
+        assert oc["BACKEND"] == "opencode", (
+            "launcher did not export AOG_HARNESS_BACKEND=opencode; the dispatch sites bind "
+            "the backend at import time and would silently spawn `claude` instead"
+        )
 
 
 def test_missing_marketplace_dependencies_fails_loudly():
@@ -288,4 +403,44 @@ def test_missing_marketplace_dependencies_fails_loudly():
         assert r.returncode != 0, (
             "installer reported success with marketplace dependencies absent.\n"
             f"stdout:\n{r.stdout}"
+        )
+
+
+def test_project_install_refuses_to_overwrite_its_own_command_templates():
+    """`init.sh project opencode` run from the plugin directory must not eat the templates.
+
+    At project level CONFIG_ROOT is `$PWD/.opencode`, so running it from inside the plugin
+    makes destination and SOURCE the same file. `sed src > dst` truncates the redirect target
+    before sed reads it, which empties the template — a tracked file in this repo — and the
+    installer then counted it as installed and reported success, because its "did the
+    placeholder get substituted?" check passes vacuously on an empty file.
+
+    Run against a COPY of the plugin: the condition is only that CONFIG_ROOT and the template
+    directory are the same path, which a copy reproduces exactly, and running the real
+    installer in the checkout would litter it with install artefacts.
+    """
+    with tempfile.TemporaryDirectory() as t:
+        plugin = Path(t) / "ascendc-port-orchestrator"
+        shutil.copytree(
+            INIT.parent, plugin, symlinks=True,
+            ignore=shutil.ignore_patterns("output", "__pycache__", "node_modules", ".git"),
+        )
+        templates = sorted((plugin / ".opencode" / "command").glob("*.md"))
+        assert templates, "no opencode command templates to protect"
+        before = {t_: t_.read_bytes() for t_ in templates}
+        assert all(before.values()), "fixture templates were already empty"
+
+        proc = subprocess.run(
+            [_bash(), str(plugin / "init.sh"), "project", "opencode"],
+            cwd=str(plugin), capture_output=True, text=True, timeout=600,
+        )
+
+        after = {t_: t_.read_bytes() for t_ in templates}
+        emptied = [t_.name for t_ in templates if not after[t_]]
+        assert not emptied, f"installer emptied its own source templates: {emptied}"
+        damaged = [t_.name for t_ in templates if after[t_] != before[t_]]
+        assert not damaged, f"installer modified its own source templates: {damaged}"
+        assert proc.returncode != 0, (
+            "installer reported success while installing into the plugin's own source tree:\n"
+            f"{proc.stdout[-2000:]}"
         )

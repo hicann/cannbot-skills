@@ -34,6 +34,19 @@ warn() { echo -e "  ${YELLOW}⚠${NC}${DIM} $*${NC}"; }
 err()  { echo -e "  ${RED}✗${NC}${DIM} $*${NC}"; }
 step() { echo -e "${DIM}$*${NC}"; }
 
+# Run a command bounded by coreutils `timeout` where it exists (GNU/Linux, the plugin's
+# target platform). On hosts without it (macOS) run unbounded rather than failing the
+# probe setup: the bound exists to stop opencode's first-run plugin dependency
+# resolution from hanging the installer forever, not to add a hard platform requirement.
+_oc_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$@"
+  else
+    shift
+    "$@"
+  fi
+}
+
 # safe_link SRC DST OURROOT — symlink SRC→DST without silently clobbering a
 # non-plugin target (name collision, e.g. a co-installed a5_ops skill of the same
 # name, or a user's own skill dir). Rules:
@@ -212,7 +225,10 @@ done
 KNOWLEDGE_CHECKOUT_ROOT="$PLUGIN_DIR/../cannbot-knowledge/skills"
 if [ -d "$KNOWLEDGE_CHECKOUT_ROOT/knowledge-query" ]; then
   knowledge_source="$(realpath "$KNOWLEDGE_CHECKOUT_ROOT/knowledge-query")"
-  if safe_link "$knowledge_source" "$CONFIG_ROOT/skills/knowledge-query" "$KNOWLEDGE_CHECKOUT_ROOT"; then
+  # Normalise ourroot too: safe_link compares it against readlink -f output, and a
+  # ../-bearing root would make our own prior links look like foreign collisions on
+  # every idempotent re-run.
+  if safe_link "$knowledge_source" "$CONFIG_ROOT/skills/knowledge-query" "$(realpath "$KNOWLEDGE_CHECKOUT_ROOT")"; then
     sc=$((sc + 1))
   fi
 elif knowledge_source="$(marketplace_skill_path knowledge-query)"; then
@@ -261,13 +277,93 @@ for want in $INCLUDED_AGENTS; do
   [ -f "$LOCAL_AGENT_ROOT/$want.md" ] || warn "whitelisted agent NOT in plugin agents/: $want"
 done
 ac=0
-for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
-  [ -e "$agent_entry" ] || continue
-  name=$(basename "$agent_entry"); base="${name%.md}"
-  echo "$INCLUDED_AGENTS" | grep -qw "$base" || continue
-  target="$CONFIG_ROOT/agents/$name"
-  if safe_link "$(realpath "$agent_entry")" "$target" "$LOCAL_AGENT_ROOT"; then ac=$((ac + 1)); fi
-done
+# opencode MUST NOT receive the Claude-Code agent files. Their frontmatter carries
+# `tools:` as a YAML LIST, while opencode's agent schema expects a record; a single such
+# file makes opencode reject its whole configuration ("Configuration is invalid ...
+# Expected object | undefined, got [...]") and EVERY opencode invocation on that machine
+# fails, not just this plugin's. opencode gets its agents from the process-private
+# OPENCODE_CONFIG_CONTENT the backend injects at dispatch time (already converted to
+# `mode: primary` + a record-shaped tool map), so no install-time agent files are needed.
+if [ "$TOOL" = "opencode" ]; then
+  ok "agents: provided at dispatch time via OPENCODE_CONFIG_CONTENT (no agent files installed)"
+  # Entry layer. opencode scans {command,commands}/**/*.md under its config dirs. The
+  # shipped templates carry an @@PLUGIN_DIR@@ placeholder because a command file is a
+  # prompt, not a script: it cannot resolve its own location the way the Claude Code skill
+  # loader does (which echoes a base directory). Materialise it with the real path so the
+  # command can invoke the SHARED launcher rather than re-deriving how to start the engine.
+  cc=0
+  cmd_fail=0
+  if [ -d "$PLUGIN_DIR/.opencode/command" ]; then
+    mkdir -p "$CONFIG_ROOT/command"
+    for cmd_src in "$PLUGIN_DIR/.opencode/command"/*.md; do
+      [ -f "$cmd_src" ] || continue
+      cmd_dst="$CONFIG_ROOT/command/$(basename "$cmd_src")"
+      # `init.sh project opencode` puts CONFIG_ROOT at $PWD/.opencode, so running it from
+      # inside the plugin directory makes destination and SOURCE the same file. The shell
+      # truncates the redirect target before sed ever reads it, so that would empty the
+      # template — a tracked file in this repo — and then count it as installed. Refuse: a
+      # "project install" into the plugin's own source tree is not an install.
+      if [ "$cmd_dst" -ef "$cmd_src" ]; then
+        err "refusing to install into the plugin's own source tree ($cmd_dst)"
+        err "run 'init.sh project opencode' from YOUR project directory, or use 'global'"
+        cmd_fail=$((cmd_fail + 1))
+        continue
+      fi
+      # -F (fixed strings): the plugin path is data, not a BRE — dots/plus/pipes in it
+      # must not turn the probe into a wrong match or an invalid pattern.
+      if [ -e "$cmd_dst" ] && ! grep -Fq "@@PLUGIN_DIR@@" "$cmd_dst" 2>/dev/null \
+          && ! grep -Fq "$PLUGIN_DIR" "$cmd_dst" 2>/dev/null; then
+        warn "user-owned command preserved: $(basename "$cmd_dst")"
+        continue
+      fi
+      # Via a temp file in the destination directory, then mv: a redirect straight onto
+      # cmd_dst truncates it first, so an interrupted install leaves an empty command rather
+      # than the previous working one.
+      cmd_tmp="$(mktemp "${cmd_dst}.XXXXXX")"
+      # Escape the replacement string: a plugin path containing & (or \, |) would be
+      # reinterpreted by sed's replacement syntax otherwise.
+      escaped_plugin_dir="$(printf '%s' "$PLUGIN_DIR" | sed 's/[&|\\]/\\&/g')"
+      if sed "s|@@PLUGIN_DIR@@|$escaped_plugin_dir|g" "$cmd_src" > "$cmd_tmp" && mv -f "$cmd_tmp" "$cmd_dst"; then
+        cc=$((cc + 1))
+      else
+        rm -f "$cmd_tmp"
+        err "failed to install command $(basename "$cmd_src")"
+        cmd_fail=$((cmd_fail + 1))
+      fi
+    done
+  fi
+  if [ "$cc" -gt 0 ]; then
+    ok "commands: $cc installed → $CONFIG_ROOT/command (entry layer)"
+  else
+    warn "no opencode commands installed — users have no /ascendc-* entry point"
+  fi
+  # Fail loud if a placeholder survived: a command still saying @@PLUGIN_DIR@@ would tell
+  # the agent to run a path that does not exist.
+  # NOTE: health_ok is initialised to true further down (step 4), so setting it here would
+  # be silently overwritten. Carry the verdict in ENTRY_LAYER_OK and fold it in at the gate.
+  # cmd_fail joins the verdict too: "1 of N commands installed" was previously reported as
+  # a clean entry layer (cc>0), i.e. exactly the armed-vs-disarmed confusion this script
+  # exists to prevent.
+  if grep -rl "@@PLUGIN_DIR@@" "$CONFIG_ROOT/command" >/dev/null 2>&1; then
+    err "command install left an unsubstituted @@PLUGIN_DIR@@ placeholder"
+    ENTRY_LAYER_OK=false
+  elif [ "$cmd_fail" -gt 0 ]; then
+    err "failed to install $cmd_fail opencode command file(s) — entry layer incomplete"
+    ENTRY_LAYER_OK=false
+  elif [ "$cc" -gt 0 ]; then
+    ENTRY_LAYER_OK=true
+  else
+    ENTRY_LAYER_OK=false
+  fi
+else
+  for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
+    [ -e "$agent_entry" ] || continue
+    name=$(basename "$agent_entry"); base="${name%.md}"
+    echo "$INCLUDED_AGENTS" | grep -qw "$base" || continue
+    target="$CONFIG_ROOT/agents/$name"
+    if safe_link "$(realpath "$agent_entry")" "$target" "$LOCAL_AGENT_ROOT"; then ac=$((ac + 1)); fi
+  done
+fi
 ok "skills: $sc symlinks   agents: $ac symlinks"
 if [ "$COLLISIONS" -gt 0 ]; then
   warn "$COLLISIONS name collision(s) — a same-named skill/agent (e.g. a co-installed a5_ops or another plugin) was overwritten or skipped; see above"
@@ -419,14 +515,44 @@ for want in $INCLUDED_SKILLS; do
   health_ok=false
 done
 EFFECTIVE_AGENTS=""
-for want in $INCLUDED_AGENTS; do
-  if [ -e "$CONFIG_ROOT/agents/$want.md" ]; then
-    EFFECTIVE_AGENTS="$EFFECTIVE_AGENTS $want"
+if [ "$TOOL" = "opencode" ] && [ "${ENTRY_LAYER_OK:-false}" != true ]; then
+  err "opencode entry layer not installed — users would have no /ascendc-* command"
+  health_ok=false
+fi
+if [ "$TOOL" = "opencode" ]; then
+  # opencode resolves agents from the backend's process-private OPENCODE_CONFIG_CONTENT,
+  # not from files under CONFIG_ROOT. Prove the CONVERSION works rather than counting
+  # files: every whitelisted agent must appear in the generated config as mode=primary
+  # (a subagent-mode entry would make `opencode run --agent` silently fall back).
+  if OPENCODE_AGENT_CHECK="$(ASCENDC_PORT_WANT="$INCLUDED_AGENTS" python3 - "$PLUGIN_DIR" <<'PYOC'
+import json, os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "engine", "src", "scripts", "orchestrator"))
+from backends.opencode_backend import OpencodeBackend as B
+cfg = json.loads(B._opencode_config_content() or "{}")
+agents = cfg.get("agent", {})
+missing = [w for w in os.environ["ASCENDC_PORT_WANT"].split() if w not in agents]
+bad = [n for n, v in agents.items() if v.get("mode") != "primary"]
+if missing or bad:
+    print("missing=%s not_primary=%s" % (missing, bad)); sys.exit(1)
+print(" ".join(sorted(agents)))
+PYOC
+  )"; then
+    EFFECTIVE_AGENTS="$OPENCODE_AGENT_CHECK"
+    ok "agents: $(echo "$EFFECTIVE_AGENTS" | wc -w | tr -d ' ') resolvable as mode=primary via OPENCODE_CONFIG_CONTENT"
   else
-    err "agent not installed: $want"
+    err "opencode agent config invalid: $OPENCODE_AGENT_CHECK"
     health_ok=false
   fi
-done
+else
+  for want in $INCLUDED_AGENTS; do
+    if [ -e "$CONFIG_ROOT/agents/$want.md" ]; then
+      EFFECTIVE_AGENTS="$EFFECTIVE_AGENTS $want"
+    else
+      err "agent not installed: $want"
+      health_ok=false
+    fi
+  done
+fi
 
 # Hook LIVENESS proof (DEBT-253). Counting files is what let a disarmed install tick ✓:
 # skills/agents were present, hooks were written — to a path CC never reads. So prove two
@@ -486,6 +612,126 @@ PYCHK
   else health_ok=false; fi
 fi
 
+# --- opencode: prove the safety net against the REAL binary -------------------------------
+# The adapter is registered through the process-private OPENCODE_CONFIG_CONTENT the backend
+# injects at dispatch time, so there is no declaration file to inspect. Two levels of proof,
+# and `hooks_verified_live` is only ever set by the level that actually proves enforcement:
+#
+#   STRUCTURAL (always, offline-safe) — the real opencode binary must RESOLVE our injected
+#     config: the agents must exist as mode=primary and the plugin skills must be visible.
+#     This catches a config opencode silently refuses, which is the failure that would make
+#     every later dispatch fall back to the default agent.
+#   BEHAVIOURAL (src/opencode/probe_safety_net.mjs) — the adapter's real `tool.execute.before`
+#     must REFUSE a kernel-worker's cross-workspace read and ALLOW its own-workspace read.
+#     Enforcement, not resolution. It needs no model, so it runs on ordinary installs.
+#
+# Counting files and calling it armed is precisely the DEBT-253 failure this gate exists to
+# prevent, so `hooks_verified_live` is set only by the behavioural level. What the behavioural
+# level still does NOT cover is whether opencode itself invokes the hook for a model-driven
+# tool call. Phase O0 does not close that either — it drives the same entry point through node.
+# Only a real model turn shows it, which is what src/scripts/tests/test_opencode_e2e_live.py
+# does when an operator points AOG_E2E_OPENCODE_MODEL at a configured model.
+if [ "$TOOL" = "opencode" ]; then
+  oc_ok=true
+  OC_BIN="${AOG_OPENCODE_BIN:-opencode}"
+  if ! command -v "$OC_BIN" >/dev/null 2>&1; then
+    warn "opencode binary not found ($OC_BIN) — cannot verify the safety net"
+    oc_ok=false
+  else
+    OC_CFG="$(cd "$PLUGIN_DIR/engine" && PYTHONPATH=src/scripts python3 -c "
+import sys; sys.path.insert(0,'src/scripts/orchestrator')
+from backends.opencode_backend import OpencodeBackend as B
+sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
+    if [ -z "$OC_CFG" ]; then
+      err "backend produced no opencode config — agents/skills/adapter would all be absent"
+      oc_ok=false
+    else
+      # First run against a pristine opencode config dir triggers opencode's plugin
+      # dependency resolution (a bun install) before any debug output: measured >90s
+      # online, unbounded in the offline containers this plugin targets. Bound it and
+      # say so — a probe that hangs forever is indistinguishable from a broken install.
+      step "probing opencode plugin resolution — first run can take 1-2 minutes..."
+      if ! _oc_timeout 180 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent aog-kernel-worker \
+             >/dev/null 2>&1; then
+        err "opencode did not resolve agent aog-kernel-worker from the injected config (or the probe timed out)"
+        oc_ok=false
+      fi
+      # `debug skill` emits ~350 KB of JSON. Piping that into `grep -q` is NOT a sound
+      # probe: grep exits at the first match and the resulting SIGPIPE truncates the
+      # stream, so the verdict depends on scheduling — it reported "skills missing" for a
+      # config whose skills in fact all resolve. Redirect to a file, then inspect.
+      # Explicit XXXXXX template, not `mktemp -t PREFIX`: BSD/macOS treats -t's argument as
+      # a PREFIX, GNU coreutils treats it as a TEMPLATE and fails with "too few X's in
+      # template". Under `set -e` that aborted the install before the manifest was written —
+      # invisible on macOS, fatal in the Linux containers this plugin actually targets.
+      if [ "$oc_ok" = true ]; then
+        OC_SKILLS="$(mktemp "${TMPDIR:-/tmp}/cannbot_oc_skills.XXXXXX")"
+        if ! _oc_timeout 180 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug skill >"$OC_SKILLS" 2>/dev/null; then
+          err "opencode skill listing probe failed or timed out"
+          oc_ok=false
+        fi
+      fi
+      if [ "$oc_ok" = true ] && ! python3 - "$OC_SKILLS" <<'PYSKILL'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception as exc:
+    print(f"  could not read opencode skill listing: {exc}"); sys.exit(1)
+names = {s.get("name") for s in data if isinstance(s, dict)}
+missing = [w for w in ("ascendc-cross-gen-port", "ascendc-backward-gen") if w not in names]
+if missing:
+    print(f"  opencode resolved {len(names)} skills but not: {missing}"); sys.exit(1)
+PYSKILL
+      then
+        err "opencode did not resolve the plugin entry skills from the injected config"
+        oc_ok=false
+      fi
+      [ -n "${OC_SKILLS:-}" ] && rm -f "$OC_SKILLS"
+    fi
+  fi
+  if [ "$oc_ok" = true ]; then
+    ok "opencode resolves injected agents + skills (structural)"
+    # BEHAVIOURAL. Driven by src/opencode/probe_safety_net.mjs, which calls the adapter's real
+    # `tool.execute.before` in the real JS runtime and requires a deny/allow PAIR. It needs no
+    # model, so unlike the earlier design it runs on virtually every install rather than
+    # never — the previous block described this level in its comments but never implemented
+    # it, so every opencode install fell through to the refusal below and the override turned
+    # into a required incantation. A bypass everyone is forced to set protects nothing.
+    OC_JS=""
+    for oc_rt in node bun; do
+      if command -v "$oc_rt" >/dev/null 2>&1; then OC_JS="$oc_rt"; break; fi
+    done
+    if [ -z "$OC_JS" ]; then
+      # opencode itself ships as a bun/node program, so this is close to unreachable in a
+      # working install; it stays a warning rather than a failure because the runtime gate is
+      # the load-bearing one and refusing here would only strand the operator.
+      warn "no node/bun runtime found — cannot run the behavioural safety-net proof"
+      warn "Phase O0 re-proves it, with a deny/allow pair, before the first agent of every run"
+    else
+      OC_PROBE_OUT="$("$OC_JS" "$PLUGIN_DIR/engine/src/opencode/probe_safety_net.mjs" 2>&1 || true)"
+      if printf '%s\n' "$OC_PROBE_OUT" | grep -q '^OK$'; then
+        ok "safety net ENFORCES (cross-workspace read refused, own-workspace read allowed)"
+        hooks_live=true
+      elif printf '%s\n' "$OC_PROBE_OUT" | grep -q '^SKIP:'; then
+        # The probe could not be SET UP on this machine (read-only temp, no symlink
+        # permission). That is not evidence about the guards, so it must not be reported as
+        # their failure — and blocking the install here would strand the operator over
+        # something they cannot fix.
+        warn "behavioural safety-net proof could not run here: ${OC_PROBE_OUT#SKIP: }"
+        warn "Phase O0 re-proves it, with a deny/allow pair, before the first agent of every run"
+      else
+        # Distinct from the structural failure above: opencode accepted the config, but the
+        # guards do not enforce. Installing that is installing a decoration.
+        err "behavioural safety-net proof FAILED — the adapter does not enforce"
+        err "  ${OC_PROBE_OUT}"
+        health_ok=false
+      fi
+    fi
+  else
+    health_ok=false
+  fi
+fi
+
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 EFFECTIVE_SKILLS=""
 for want in $INCLUDED_SKILLS; do
@@ -532,10 +778,18 @@ else
   echo -e "  ${RED}${BOLD}✗ install had errors, see above${NC}"; exit 1
 fi
 echo ""
-echo -e "  ${BOLD}Quick start (Claude Code):${NC}"
-echo -e "  ${CYAN}1.${NC} fill ${GREEN}engine/workspace/.ascendc_env${NC} (A3/A5 host+container) — docs/USAGE.md"
-echo -e "  ${CYAN}2.${NC} launch ${GREEN}claude${NC}, then a customer entry skill:"
-echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn op dir>${NC}   (→ orch --port-a3)"
-echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
+if [ "$TOOL" = "opencode" ]; then
+  echo -e "  ${BOLD}Quick start (opencode):${NC}"
+  echo -e "  ${CYAN}1.${NC} fill ${GREEN}engine/workspace/.ascendc_env${NC} (A3/A5 host+container) — docs/USAGE.md"
+  echo -e "  ${CYAN}2.${NC} launch ${GREEN}opencode${NC} in your project, then a customer entry command:"
+  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn op dir>${NC}   (→ orch --port-a3)"
+  echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
+else
+  echo -e "  ${BOLD}Quick start (Claude Code):${NC}"
+  echo -e "  ${CYAN}1.${NC} fill ${GREEN}engine/workspace/.ascendc_env${NC} (A3/A5 host+container) — docs/USAGE.md"
+  echo -e "  ${CYAN}2.${NC} launch ${GREEN}claude${NC}, then a customer entry skill:"
+  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn op dir>${NC}   (→ orch --port-a3)"
+  echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
+fi
 echo -e "  ${DIM}Pipeline logic lives entirely in engine/; the entry skills are thin NL front-ends.${NC}"
 echo ""

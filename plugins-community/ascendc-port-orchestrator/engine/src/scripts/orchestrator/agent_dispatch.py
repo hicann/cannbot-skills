@@ -29,7 +29,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
+import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -50,6 +53,8 @@ from briefs.fo_brief import build_fused_optimizer_brief
 from briefs.da_brief import build_det_analyzer_brief
 from briefs.cl_brief import build_cann_learner_brief
 
+
+_STOP_GATE_LOG = logging.getLogger(__name__)
 
 _backend = get_backend()
 
@@ -327,6 +332,14 @@ def spawn_for_state(
     else:
         tee = workspace / f".cc_stream_log_{agent_type}_{spawn_index}.jsonl"
         progress_cb = _make_progress_printer(agent_type, spawn_index)
+        # The marker describes THIS dispatch, so the previous one's verdict is dropped before
+        # the agent runs. Without this the first stop-gate failure for an agent type wedged
+        # the workspace permanently: `_post_spawn_transition` checks the file after every
+        # later spawn, so each retry was killed on sight by the stale reason no matter what
+        # its own gate said — including the retry that fixed the artifacts. Clearing it here
+        # rather than in `_run_stop_gate` also covers the dispatch that raises before the
+        # gate is ever reached.
+        _clear_stop_gate_marker(workspace, agent_type)
         with _active_agent_marker(workspace, agent_type):
             result = _backend.dispatch(
                 agent_type, brief, kind="agent", mode="streaming",
@@ -336,8 +349,85 @@ def spawn_for_state(
                 silence_timeout=None,
                 sandbox_prefix=sandbox_prefix,
             )
+        _run_stop_gate(workspace, agent_type, result)
         persist_envelope(workspace, agent_type, result, spawn_index=spawn_index, brief=brief)
         return result
+
+
+# Claude Code fires the agent stop gates from its own SubagentStop hook. No other harness
+# has that event, but under this dispatch model the ORCHESTRATOR owns the completion: the
+# gated agents (see STOP_GATES in hooks/agent-gate-dispatch.py) are spawned exclusively
+# here, one process each, so the gate can be invoked where the process is reaped instead of
+# requiring a harness-side hook.
+#
+# Semantics differ from CC in one way that must not be papered over: CC's SubagentStop can
+# block the agent from exiting so the SAME agent fixes its artifacts, whereas here the
+# process is already gone. So a failed gate cannot be "repaired in place" — it is turned
+# into a FAILED dispatch, which is the honest representation and keeps the FSM from
+# treating unvalidated artifacts as a completed spawn.
+_STOP_GATE_MARKER = ".agent_gate_stop_failed"
+
+
+def _run_stop_gate(workspace, agent_type: str, result) -> None:
+    if _backend.name == "claude_code":
+        return  # already covered by the harness hook; running it here would double-fire
+    gate = Path(__file__).resolve().parents[4] / "hooks" / "agent-gate-dispatch.py"
+    if not gate.is_file():
+        _mark_stop_gate_failure(
+            workspace, agent_type, result,
+            f"agent gate dispatcher missing at {gate}; a gate we cannot run is not a gate "
+            "that passed",
+        )
+        return
+    # cwd MUST be the ENGINE root, not the op workspace. hooks/v3/_common.sh resolves
+    # `${WORKSPACE_ROOT:-workspace}` RELATIVE to cwd and returns "" when that directory is
+    # absent — and check_worker.sh treats "" as "nothing to check" and exits 0. Running from
+    # inside workspace/<op> therefore looks for workspace/<op>/workspace, finds nothing, and
+    # every stop gate passes unconditionally. That early return happens BEFORE the
+    # CLAUDE_ACTIVE_WORKSPACE branch, so the env var alone cannot rescue it; Claude Code
+    # never hit this because its hooks run with the engine as cwd.
+    engine_root = Path(__file__).resolve().parents[3]
+    payload = json.dumps({
+        "hook_event_name": "SubagentStop",
+        "agent_type": agent_type,
+        "agent_id": f"{_backend.name}:{agent_type}",
+        "cwd": str(engine_root),
+    })
+    gate_env = dict(os.environ)
+    gate_env["CLAUDE_ACTIVE_WORKSPACE"] = str(workspace)
+    gate_env["ASCENDC_WORKSPACE"] = str(workspace)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(gate), "stop"],
+            input=payload, text=True, capture_output=True,
+            cwd=str(engine_root), env=gate_env, timeout=120,
+        )
+    except Exception as exc:  # a gate we cannot run is not a gate that passed
+        _mark_stop_gate_failure(workspace, agent_type, result, f"stop gate could not run: {exc!r}")
+        return
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[:1500]
+        _mark_stop_gate_failure(
+            workspace, agent_type, result,
+            f"stop gate rejected {agent_type} (rc={proc.returncode}): {detail}",
+        )
+
+
+def _clear_stop_gate_marker(workspace, agent_type: str) -> None:
+    # missing_ok=True avoids a bare except: an absent marker is the normal case.
+    (Path(workspace) / f"{_STOP_GATE_MARKER}_{agent_type}").unlink(missing_ok=True)
+
+
+def _mark_stop_gate_failure(workspace, agent_type: str, result, reason: str) -> None:
+    _STOP_GATE_LOG.error("[stop-gate] %s", reason)
+    try:
+        (Path(workspace) / f"{_STOP_GATE_MARKER}_{agent_type}").write_text(reason + "\n")
+    except OSError as exc:
+        # The verdict is already logged; a marker we cannot persist must not be swallowed.
+        _STOP_GATE_LOG.warning("[stop-gate] cannot persist failure marker: %s", exc)
+    if result is not None:
+        result.is_error = True
+        result.output_text = f"{reason}\n\n{result.output_text or ''}"
 
 
 def _make_progress_printer(agent_type: str, spawn_index: int):

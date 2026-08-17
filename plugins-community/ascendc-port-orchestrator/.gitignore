@@ -42,7 +42,17 @@ engine/.claude/
 # Project-local install targets supported by init.sh. These are user runtime
 # links/settings, not plugin source artifacts.
 .claude/
-.opencode/
+# Ignore the user-runtime CONTENTS of .opencode/ (a USER's opencode workspace lives
+# there: init.sh project opencode writes AGENTS.md / skills/ / workflows/ /
+# cannbot-manifest.json / node_modules into it), but keep the shipped command
+# templates visible: they are plugin PAYLOAD — init.sh installs them for TOOL=opencode,
+# so if they are not tracked the published plugin has no /ascendc-* entry point at all.
+# NOTE: ignore `.opencode/*` (contents) rather than `.opencode/` (the dir itself),
+# otherwise the re-include below needs a `!.opencode/` that un-ignores EVERYTHING the
+# installer generated and `git add -A` starts committing runtime artifacts.
+.opencode/*
+!.opencode/command/
+!.opencode/command/*.md
 .cursor/
 .github/
 .copilot/

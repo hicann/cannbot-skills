@@ -31,11 +31,15 @@ argument-hint: >
    ```python
    # agent 侧用 Bash 工具起，NPU lane 默认 0
    Bash(
-       command="SKILL_BASE=\"<skill-base>\"; RESOLVER=\"$(realpath \"$SKILL_BASE\")/../../scripts/resolve_engine.py\"; ENGINE_DIR=\"$(python3 \"$RESOLVER\" --base-dir \"$SKILL_BASE\")\" || exit $?; test -f \"$ENGINE_DIR/src/scripts/orchestrator/__main__.py\" || exit 2; test -f \"$ENGINE_DIR/workspace/.ascendc_env\" || { echo 'configure $ENGINE_DIR/workspace/.ascendc_env first' >&2; exit 2; }; cd \"$ENGINE_DIR\" && CLAUDE_CONFIG_DIR=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" PYTHONPATH=src/scripts python3 -m orchestrator --backward <forward_spec.py> --lane 0",
+       command="bash \"$(realpath \"<skill-base>\")/../../scripts/launch_orchestrator.sh\" --skill-base \"<skill-base>\" --mode backward --source <forward_spec.py> --lane 0",
        run_in_background=True,
    )
    ```
-   **CLAUDE_CONFIG_DIR 必须显式带上（自包含铁律）**：引擎 spawn 的子 agent 从 `CLAUDE_CONFIG_DIR` 解析 skill/agent/KB；不显式带、上游某层丢了它 → worker 回退 `~/.claude`（可能装着别的套件）→ 破坏自包含。启动命令**必须** `CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"` 前缀，显式贯穿入口 config-dir 到 orch → worker。
+   **启动逻辑集中在 `scripts/launch_orchestrator.sh`（两个 harness 共用）**：解析引擎根、
+   校验 `.ascendc_env`、探测 harness 并导出 `AOG_HARNESS_BACKEND`、按 harness 设置
+   config-dir，再 exec 编排器。两处最易漂移的设置**失败都是静默的** ——
+   `AOG_HARNESS_BACKEND` 漏设会回落 Claude Code；`CLAUDE_CONFIG_DIR` 漏设会让 worker
+   回退 `~/.claude`（可能装着别的套件）→ 破坏自包含。启动器显式贯穿两者。
    **启动纪律（违反则 console 全黑、录屏/交互体验差）**：
    - 用 `run_in_background=True`；**禁** trailing `&`、**禁** `nohup`（都脱离 CC task tracker → UI 看不到、`TaskOutput`/`TaskStop` 失效）。
    - **禁** shell 重定向 `> foo.log 2>&1`（Bash 工具已给 task 自己的输出文件并经 `TaskOutput` 实时暴露；重定向把日志吞进文件、console 变黑箱）。
