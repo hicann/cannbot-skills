@@ -1,4 +1,9 @@
 ## 🔥 更新日志
+### 【2026-08-12】
+#### 架构重构 Architecture Refactoring
+- 【GitCode 协作】`gitcode-issue-handler` 保留公开名称与单 Issue 入口，内核升级为同时支持显式单 Issue 和当前仓库批量 Issue 的处理状态机，新增服务时钟、算子责任人路由、环境一致性与稳定复现门禁、受管 worktree、并行分组、严格报告和咨询 Issue 自动闭环；单 Issue 保留交互确认，批量默认 dry-run，直接推送始终单独确认。
+- 【GitCode 协作】在仓内既有 `gitcode-toolkit` 上纳入 Issue Handler 所需的共享 GitCode API 客户端和 Issue 评论/指派流程，新增显式授权契约，并将环境预检改为在 API、Git、提交和复现等真实操作前按需执行；既有 API、PR/Issue 创建和 Git 操作资料继续作为唯一真源。`infra-skills` 保持兼容增强版本 `1.1.0`。
+
 ### 【2026-07-31】
 #### 测试框架 Test Framework
 - 【测试框架】新增 L1 硬性门禁 `tests/unit/skills/test-evals-required.sh`（S-EVAL-01）：强制所有 skill 必须携带 `evals/evals.json`，且文件存在、可解析为合法 JSON、含顶层 `skill_name` 字段，缺失或损坏即拦截 CI。已在 `run-tests.sh` 的 unit 与 incremental 测试清单中登记。

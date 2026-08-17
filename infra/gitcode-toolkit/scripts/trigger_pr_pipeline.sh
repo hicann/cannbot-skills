@@ -48,7 +48,7 @@ REPO_NAME="${REPO#*/}"
 API_URL="https://api.gitcode.com/api/v5/repos/${OWNER}/${REPO_NAME}/pulls/${PR_NUMBER}/comments?access_token=${GITCODE_TOKEN}"
 
 # Escape comment for JSON
-COMMENT_ESCAPED=$(python3 -c "import json; print(json.dumps('$COMMENT'))")
+COMMENT_ESCAPED=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$COMMENT")
 
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
     -H 'Content-Type: application/json' \

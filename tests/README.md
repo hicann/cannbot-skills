@@ -52,6 +52,8 @@ tests/
 ├── unit/                       # L1 单元测试（无需 CLI，< 30s）
 │   ├── test-line-endings.sh    # 全局换行符检查（CRLF 检测）
 │   ├── test-dependency-graph.sh # 依赖图完整性验证（DG-01~10）
+│   ├── infra/
+│   │   └── test-gitcode-issue-workflow.sh # GitCode Issue 工作流 pytest 用例入口
 │   ├── skills/
 │   │   ├── test-structure.sh   # Skill 结构验证（S-STR-01~18）
 │   │   └── test-content.sh     # Skill 内容验证（S-CON-01~06）
@@ -262,6 +264,15 @@ export REPO_ROOT=/path/to/repo
 ## 测试内容
 
 ### L1 单元测试
+
+#### Infrastructure 测试
+
+| 测试文件 | 验证项 |
+|---------|--------|
+| `test-gitcode-issue-workflow.sh` | 运行 `gitcode-issue-handler` 与 `gitcode-toolkit` 就近维护的 pytest 单元与契约测试 |
+
+该入口不访问网络，也不需要 Claude Code 或 OpenCode CLI。运行前需安装
+`tests/system/scripts/requirements.txt` 中声明的 pytest、PyYAML 与 requests 依赖。
 
 #### Skills 测试规则详情
 

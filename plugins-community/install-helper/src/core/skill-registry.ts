@@ -213,7 +213,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
     skills: [
       { id: "gitcode-pr-handler", description: "GitCode PR 标题/描述生成", source: "infra" },
       { id: "gitcode-issue-gen", description: "GitCode Issue 生成与关联", source: "infra" },
-      { id: "gitcode-issue-handler", description: "GitCode Issue 端到端处置", source: "infra" },
+      { id: "gitcode-issue-handler", description: "GitCode 单 Issue/批量 Issue 自动处理", source: "infra" },
       { id: "gitcode-toolkit", description: "GitCode 协作通用参考", source: "infra" },
       { id: "cannbot-skill-reviewer", description: "Skill 入库质量审查", source: "infra" },
     ],

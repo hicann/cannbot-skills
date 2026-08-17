@@ -39,6 +39,11 @@
 | 目标分支 | `master` | 上游仓库的目标分支 |
 | 用户仓库 | 当前 git 配置 | 从 git remote 获取 |
 
+下文的 `origin` / `master` 是直接调用方的兼容默认示例。长流程编排器如果已经根据
+Issue URL、manifest 或已验证的 remote 得到精确的 `fork_remote`、`base_ref` 和
+`base_branch`，后续命令必须使用这些调用方值；不得为了套用示例而改回
+`origin` / `master`。这项覆盖不改变未传这些字段的既有工作流。
+
 ### 1.1 检测 Remote 配置
 
 ```bash
@@ -49,9 +54,10 @@ git remote -v
 - 上游仓库：URL 中包含 `cann/` 的 remote
 - Fork 仓库：其他 remote（非 cann 组织）
 
-### 1.2 如果无法自动识别
+### 1.2 如果仍无法自动识别
 
-用 AskUserQuestion 让用户选择哪个是 fork 仓库。
+展示候选 remote 及 URL，请用户选择 fork 仓库。不得在无法确定时静默
+选择可能的推送目标。
 
 ### 1.3 获取当前信息
 
@@ -149,6 +155,12 @@ first_commit=$(git log master..HEAD --pretty=format:"%s" --no-merges | head -1)
 
 确认时展示：PR 标题、源分支 → 目标分支、填充后的模板内容。
 
+如果调用方已显式采用
+[authorization-contract.md](authorization-contract.md)，并提供当前会话中覆盖
+当前准确目标和完整内容的合法检查点，可复用该确认而不重复询问。
+不得根据调用方名称或“处理/修复 Issue”等宽泛请求推断已经授权创建 PR。调用方不传
+检查点证据时，继续使用上述原有确认流程。
+
 ---
 
 ## Step 5: 校验 git 提交身份
@@ -237,6 +249,9 @@ git ls-remote --heads origin ${branch_name}
 
 ## Step 7: 创建 PR
 
+先按 `head + base + state=opened` 查询已有 PR。找到匹配项时直接复用并记录 URL，避免
+重试、恢复运行或上次响应丢失造成重复创建；只有确认不存在时才 POST。
+
 **API**
 
 ```
@@ -254,17 +269,19 @@ POST https://api.gitcode.com/api/v5/repos/{upstream_owner}/{upstream_repo}/pulls
 ```bash
 curl -X POST "https://api.gitcode.com/api/v5/repos/${upstream_owner}/${upstream_repo}/pulls" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "access_token=${token}" \
-  -d "title=${pr_title}" \
-  -d "body=${pr_body}" \
-  -d "head=${username}:${branch_name}" \
-  -d "base=master" \
+  --data-urlencode "access_token=${token}" \
+  --data-urlencode "title=${pr_title}" \
+  --data-urlencode "body=${pr_body}" \
+  --data-urlencode "head=${username}:${branch_name}" \
+  --data-urlencode "base=master" \
   --connect-timeout 30
 ```
 
 **head 参数格式**：从 fork 仓库向上游创建 PR 时，`head` 必须是 `{fork用户名}:{分支名}`，例如 `your-username:fix/xxx`。当 fork 改过名时建议用更稳的 `{fork_owner}/{fork_repo}:{branch}` 格式。
 
-**成功响应 (HTTP 201)**：
+**成功响应**：接受 API 实际返回的 HTTP 200 或 201，但必须校验 JSON 中存在 PR iid
+和 `web_url`，再 GET 回查源分支、目标分支和 opened 状态。HTTP 成功但字段/回查不匹配
+仍视为失败；422 提示已存在时重新查询并复用已有 PR。
 
 ```json
 {

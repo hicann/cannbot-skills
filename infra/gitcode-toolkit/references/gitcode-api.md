@@ -135,7 +135,9 @@ curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}
 -d '{"body": "compile"}'
 ```
 
-> 脚本封装：`bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>`
+> 脚本封装：`bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>`。
+> 共享脚本只执行 GitCode 评论调用，不解释调用方的业务授权模式。调用方必须在执行脚本前
+> 完成真实用户确认和授权证据记录。
 
 ### 更新 PR
 
@@ -226,6 +228,8 @@ curl -s "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues/${issue_nu
 | `body` | Issue 正文（包含模板和待填写内容） |
 | `labels` | 标签列表 |
 | `state` | 状态（open/closed） |
+| `issue_state` | 仓库自定义流程状态名称 |
+| `issue_state_detail.id` | 自定义流程状态 ID；只作观测，不得跨仓库硬编码 |
 
 ### 创建 Issue
 
@@ -285,6 +289,25 @@ curl -X PATCH 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues/{numbe
 -H 'Content-Type: application/json' \
 -d '{"state": "closed"}'
 ```
+
+### 读取与更新自定义 Issue 状态
+
+GitCode 的核心 `state`（open/closed）和看板自定义 `issue_state` 是两层状态。切换自定义
+状态时，先实时读取仓库所属组的可用状态目录，再用名称完成迁移；状态 ID 会随组配置变化，
+禁止硬编码。
+
+```text
+GET https://web-api.gitcode.com/api/v2/groups/{owner}/issue-extend/issue_extend_status_list
+GET https://web-api.gitcode.com/issuepr/api/v1/issue/{project_id}/issue-extend/info/{number}
+PUT https://web-api.gitcode.com/issuepr/api/v1/issue/{project_id}/issue-extend/status-flow/{number}
+Content-Type: application/json
+
+{"status_before":"<current_status>","status_current":"<target_status>"}
+```
+
+`project_id` 从标准 Issue 详情的 `repository.id` 获取。写前必须把当前/目标状态名称和是否
+同时更新核心 state 纳入授权预览；PUT 后重新 GET extend info，只有名称与目标一致才算
+成功。若还需要更新核心 `state`，使用上面的标准 PATCH 接口并单独回查。
 
 ### 提交 Issue 评论
 
@@ -348,7 +371,7 @@ curl 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/contents/{path}?ref={b
 | GitCode PR 模板 | `.gitcode/PULL_REQUEST_TEMPLATE.zh-CN.md` |
 | GitHub Issue 模板 | `.github/ISSUE_TEMPLATE/*.md` |
 | GitCode Issue 模板 | `.gitcode/ISSUE_TEMPLATE/` |
-| GitLab MR 模板 | `.gitlab/merge_request_templates/*.md` |
+| GitLab 合并请求模板 | `.gitlab/merge_request_templates/*.md` |
 
 ---
 
@@ -365,7 +388,7 @@ curl 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/contents/{path}?ref={b
 | 404 | 资源不存在 | 确认链接是否正确 |
 | 409 | 冲突 | PR 可能已更新，重新获取代码 |
 | 422 | 参数验证失败 | 检查参数格式和有效性 |
-| 429 | 请求频率限制 | 等待后重试 |
+| 429 | 请求频率限制 | 按 `Retry-After`/reset 设置共享 cooldown 后重试；总计最多 3 次 attempt |
 
 ### 错误响应格式
 

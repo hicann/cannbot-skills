@@ -1004,7 +1004,7 @@ EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --
 | 序号 | Skill 名称 | 功能描述 | 路径 |
 |------|-----------|---------|------|
 | 62 | gitcode-issue-gen | 根据 PR 代码变更生成关联 Issue，自动选用模板并回写 PR 描述 | `infra/gitcode-issue-gen` |
-| 63 | gitcode-issue-handler | GitCode Issue 端到端处置，自动判断 PR 路径或 Comment 路径 | `infra/gitcode-issue-handler` |
+| 63 | gitcode-issue-handler | GitCode 交互式单 Issue/默认 dry-run 批量处理，含分诊、复现、修复、PR/回评和报告 | `infra/gitcode-issue-handler` |
 | 64 | gitcode-pr-handler | 重新生成符合约定式提交规范的 PR 标题与描述 | `infra/gitcode-pr-handler` |
 | 65 | gitcode-toolkit | GitCode 协作通用基础参考（API/Token/URL/工作流等，内部使用） | `infra/gitcode-toolkit` |
 

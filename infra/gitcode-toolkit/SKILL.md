@@ -1,6 +1,6 @@
 ---
 name: gitcode-toolkit
-description: GitCode 协作通用基础参考（内部参考，不直接触发）。提供 GitCode API、Token 配置、URL 解析、日志规范、变更展示，Git 克隆/分支/diff/log/remote 通用操作，以及 PR 创建工作流和 Issue 创建工作流（API/模板/head 格式等）等共享文档与确定性脚本。供 gitcode-pr-handler、gitcode-issue-gen、gitcode-issue-handler 等 GitCode 协作类 skill 引用使用，本 skill 自身不响应用户触发。
+description: GitCode 协作通用基础参考（内部参考，不直接触发）。提供 GitCode API、Token 配置、URL 解析、日志规范、变更展示，Git 克隆/分支/diff/log/remote 通用操作，以及 PR 创建、Issue 创建和 Issue 评论工作流等共享文档与确定性脚本。供 gitcode-pr-handler、gitcode-issue-gen、gitcode-issue-handler 等 GitCode 协作类 skill 引用使用，本 skill 自身不响应用户触发。
 disable-model-invocation: true
 license: CANN-2.0
 ---
@@ -74,6 +74,8 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 | Token | 获取优先级：用户消息 → `GITCODE_TOKEN` → 询问 | [token-config.md](references/token-config.md) | — |
 | URL | 解析 PR/Issue 链接：`/pull/{n}`, `/issues/{n}`, `/merge_requests/{n}` | [url-parsing.md](references/url-parsing.md) | `python scripts/parse_gitcode_url.py "<url>"` |
 | API | PR/Issue/仓库 API + 错误码处理 | [gitcode-api.md](references/gitcode-api.md) | — |
+| Issue 评论 | 目标解析、评论 POST/GET 回查、幂等与安全 | [issue-comment-workflow.md](references/issue-comment-workflow.md) | `gitcode_client.py` |
+| 写操作授权 | 写前精确确认、内容变化失效与写后回查 | [authorization-contract.md](references/authorization-contract.md) | — |
 
 ### 建议流程（SHOULD）
 
@@ -97,6 +99,22 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 
 ## 工作流
 
+### 外部写操作调用约定
+
+评论、Issue 更新、push、PR 和 CI 触发在写操作前必须有用户确认。已有工作流的“完整
+预览 → 确认”契约继续有效。需要跨子流程复用检查点时按以下步骤传递证据：
+
+1. 输入：调用方传入覆盖当前准确目标、操作类型和内容摘要的当前会话证据。
+2. 复核：按 [authorization-contract.md](references/authorization-contract.md) 校验证据；
+   证据缺失、目标或内容变化时停在写操作前，不得扩大作用域。
+3. 执行：只执行检查点覆盖的 API 或 Git 命令，不自动合并，不改换目标。
+4. 验证：评论/PR 使用 GET 回查，push 使用 `git ls-remote` 回查；失败时按具体工作流
+   重试、降级或返回 blocker，不用 HTTP 成功码代替最终验证。
+
+在依赖它们的具体操作前发现 Token、git author 或 remote 缺失时返回对应门禁；
+这类凭据恢复不能替代用户确认。
+调用共享脚本不能替代上层的真实用户确认。
+
 ### PR 创建工作流
 
 从 fork 仓库向上游创建 PR 的完整 8 步流程（Step 1~8），含 git 提交身份校验（Step 5：5.1 硬性阻断 + 5.2 建议性校验）。详见：
@@ -109,6 +127,20 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 
 > **[references/issue-creation-workflow.md](references/issue-creation-workflow.md)**
 
+## 验证
+
+修改本 Skill 或脚本后至少运行：
+
+```bash
+python3 -m pytest -q infra/gitcode-toolkit/tests
+bash -n infra/gitcode-toolkit/scripts/trigger_pr_pipeline.sh
+python3 tests/lib/skill_validator.py validate-skill infra/gitcode-toolkit/SKILL.md
+```
+
+测试失败、脚本语法错误或 validator 不通过时不得发布；缺少可选测试依赖时明确记录
+未验证边界，不得声称全部通过。`trigger_pr_pipeline.sh` 的参数测试不得设置 Token
+或访问网络。
+
 ---
 
 ## 脚本工具
@@ -117,6 +149,7 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 |------|------|------|
 | `scripts/parse_gitcode_url.py` | 确定性 URL 解析，输出 JSON | `python scripts/parse_gitcode_url.py "<url>"` |
 | `scripts/preflight.sh` | 环境预检，输出结构化报告 | `bash scripts/preflight.sh [--skip-git-author]` |
+| `scripts/gitcode_client.py` | 共享的 GitCode HTTP、Token、URL、限流重试工具 | Python 模块，由上层脚本导入 |
 | `scripts/fetch_pr_context.py` | 一键获取 PR 上下文（clone+diff+log） | `python scripts/fetch_pr_context.py --repo <owner/repo> --pr <N>` |
 | `scripts/trigger_pr_pipeline.sh` | 触发 PR CI 流水线（提交 "compile" 评论） | `bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>` |
 
@@ -137,6 +170,8 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 | [url-parsing.md](references/url-parsing.md) | URL 格式识别与解析 | **MUST** |
 | [token-config.md](references/token-config.md) | Token 获取优先级 | **MUST** |
 | [pr-creation-workflow.md](references/pr-creation-workflow.md) | PR 创建 8 步完整流程（含 git 身份校验） | SHOULD |
+| [issue-comment-workflow.md](references/issue-comment-workflow.md) | Issue 评论的目标解析、POST/GET、幂等和安全边界 | SHOULD |
+| [authorization-contract.md](references/authorization-contract.md) | 外部写操作的通用精确确认与回查边界 | MUST |
 | [issue-creation-workflow.md](references/issue-creation-workflow.md) | Issue 创建 7 步流程（含预设模板） | SHOULD |
 | [clone-and-checkout.md](references/clone-and-checkout.md) | 克隆、浅克隆、PR 分支检出、merge-base | SHOULD |
 | [diff-and-changes.md](references/diff-and-changes.md) | diff 变更统计（merge-base / triple-dot 模式） | SHOULD |

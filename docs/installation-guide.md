@@ -105,7 +105,15 @@ install-helper update
 install-helper uninstall <plugin>
 ```
 
-独立 Skill 安装的更新与卸载使用 `npx skills` 命令，详见 [skills CLI 文档](https://github.com/vercel-labs/skills)。
+通过 install-helper 安装的独立 Skill 使用重复安装来刷新：
+
+```bash
+install-helper install <skill-name> --tool <tool> --level <level>
+install-helper uninstall <skill-name> --tool <tool> --level <level>
+```
+
+通过 `npx skills` 安装的独立 Skill，其更新与卸载使用 `npx skills` 命令，详见
+[skills CLI 文档](https://github.com/vercel-labs/skills)。
 
 ---
 

@@ -208,36 +208,81 @@ python infra/gitcode-toolkit/scripts/fetch_pr_context.py --repo cann/ops-math --
 
 ### gitcode-issue-handler
 
-读取 Issue → **自动判断要不要改代码** → 分两条路径：
+使用统一状态机处理 GitCode Issue，公开名称和单 Issue 入口保持不变，同时支持：
 
-- **PR 路径**：克隆 fork → 改代码 → 测试 → 提交 → 上游 PR（覆盖 bug 修复 / 功能增强 / 文档补全等任意代码变更场景）
-- **Comment 路径**：只读克隆主仓 → 分析 → 答复评论（覆盖答疑 / 设计澄清 / 用法说明等不需改代码场景）
+- **显式单 Issue**：从 URL 推导目标仓库，不受批量时间窗或 `no_attention` 过滤。已有回复、责任人或 PR 作为诊断证据，用于避免重复动作。
+- **当前仓库批量处理**：默认只对 `need_attention` 做获取、分类、诊断并生成动作预览；用户批准当前仓库、Issue 清单和动作范围后，才执行评论、指派或代码交付。
+- **只回复**：用户明确说“只回复 / 答疑 / 不改代码”时，仅做有证据的文字诊断、回评与 GET 回查，不创建分支、commit、push 或 PR。
 
-模式由 Step 1.5 决定，主要看 Issue 内容是否需要改代码；用户消息有"修复 / 提 PR"或"只回复 / 答疑 / 不改代码"会直接锁定。
+代码修复在受管 worktree 内执行，且必须通过环境一致性、稳定复现、最终根因、最小方案和测试门禁。单 Issue 的 PR 路径有三类业务确认点：修改前确认根因与方案；每条外部评论展示目标和完整正文后确认；验证完成后，用一次聚合确认覆盖精确暂存、commit、功能分支 push、创建 PR 和首次触发 CI。直接推送上游不包含在这三类授权中，commit 形成后还要单独确认 exact remote、目标分支和 commit SHA。PR 只创建、不自动合并。每次运行最后生成可审计的精简 Markdown 报告。
 
-**使用示例（PR 路径，典型代码变更）：**
+仓库特定配置、分类数据、缓存、复现证据和处理报告统一放在目标仓库的
+`.cannbot/gitcode-issue-handler/`；最新报告为 `reports/latest.md`。新配置优先，仓根旧配置
+只作只读兼容回退，新产物不再散落在仓根。
 
+**首次安装（每个工具、每个安装级别只需一次）**：通过 CANNBot 现有安装机制把
+`gitcode-issue-handler` 和 `gitcode-toolkit` 安装到同一工具的 `skills/` 目录。Python
+已经可以导入 `requests` 和 `yaml` 时，可以跳过依赖安装命令。例如：
+
+```bash
+python3 -m pip install -r /path/to/cannbot-skills/infra/gitcode-issue-handler/requirements.txt
+install-helper install gitcode-issue-handler gitcode-toolkit --tool opencode --level project
 ```
+
+install-helper 将两者安装为独立 Skill。支持自动暴露 Skill slash 入口的 OpenCode 版本
+可继续使用 `/gitcode-issue-handler`；其他版本以及通过
+`npx skills` 安装的工具均可使用自然语言调用：`使用 gitcode-issue-handler 处理
+<Issue URL>`。
+
+Claude Marketplace 的 `infra-skills` 已同时包含两者；Codex 等其他工具也可用
+`npx skills` 同时选择两项。完整安装、批量配置、更新和卸载说明见
+[安装与配置指南](../infra/gitcode-issue-handler/docs/installation-guide.md)。安装完成后不需要
+为每个 Issue 重复执行上述命令，直接在目标仓库目录中触发 Skill 即可。
+
+以下 slash 示例适用于 Claude Marketplace，以及支持自动暴露 Skill slash 入口的 OpenCode。
+其他客户端将示例首行替换为 `使用 gitcode-issue-handler` 即可。
+
+**处理单个 Issue：**
+
+```text
 /gitcode-issue-handler
 issue_url=https://gitcode.com/cann/ops-math/issues/1511
-fork_url=https://gitcode.com/your-name/ops-math.git
 ```
 
-PR 路径下仅给 Issue 链接时会弹窗询问「自动 fork / 手动粘贴 fork 链接 / 取消」。
+**只分析和回复，不修改代码：**
 
-**使用示例（Comment 路径，典型答疑）：**
-
-```
+```text
 /gitcode-issue-handler
-帮我答复一下 https://gitcode.com/cann/ops-math/issues/456 这个咨询问题
+只回复 https://gitcode.com/cann/ops-math/issues/456，不改代码
 ```
 
-Comment 路径全程只读，不 fork、不 commit、不开 PR；只克隆上游主仓做分析后发评论。
+**批量预览，默认 dry-run：**
 
-**可选参数：**
+```text
+/gitcode-issue-handler
+处理当前仓库需要关注的 Issue
+```
 
-| 参数 | 说明 |
-|------|------|
-| `issue_url` | GitCode Issue 链接（必填） |
-| `fork_url` | 你 fork 出来的仓库链接（仅 PR 路径需要；缺省时交互询问） |
-| `base_branch` | 上游目标分支（仅 PR 路径用），默认 `master` |
+**明确授权批量执行：**
+
+```text
+/gitcode-issue-handler
+对当前仓库最近 7 天的 need_attention Issue 批量自动执行，
+按预览范围评论、指派、修复并创建 PR，不允许直接推送上游。
+```
+
+也可以先运行 dry-run，检查仓库、Issue 清单、动作范围和交付模式，再明确批准该次预览。
+批准只覆盖预览中的范围；直接推送上游始终需要另行确认。
+
+**预览长期未响应咨询 Issue：**
+
+```text
+/gitcode-issue-handler
+预览当前仓库已答复且长期无响应的咨询 Issue，不要实际关闭。
+```
+
+自动闭环默认只预览。实际执行必须在检查结果后明确要求执行 `auto-close-stale` 并使用
+`--apply`；未明确要求时不得评论或关闭 Issue。
+
+单 Issue 模式不要求 YAML 或预建运行目录。批量模式可从当前仓库 remote 推导目标，也可
+按需复制 `assets/` 中的配置模板；运行数据目录由流程创建。

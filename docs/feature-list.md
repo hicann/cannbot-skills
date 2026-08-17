@@ -255,7 +255,7 @@
 |-------|------|---------|
 | **gitcode-pr-handler** | 根据 GitCode PR 代码变更重新生成标题（约定式提交）与描述（沿用仓库 PR 模板）并写回 PR | [查看](skills-usage.md#gitcode-pr-handler) |
 | **gitcode-issue-gen** | 自动判断两条路径：(PR路径) 从 PR diff 生成关联 Issue 并完成双向关联；(手动路径) 交互式收集信息生成 Issue 草稿，经确认后提交 | [查看](skills-usage.md#gitcode-issue-gen) |
-| **gitcode-issue-handler** | GitCode Issue 端到端处置，按内容自动选择 PR 代码变更路径或 Comment 答复路径 | [查看](skills-usage.md#gitcode-issue-handler) |
+| **gitcode-issue-handler** | GitCode 单 Issue/批量 Issue 状态机：分诊、责任人路由、稳定复现、最小修复、测试、经确认的 PR/回评与报告；批量默认 dry-run | [查看](skills-usage.md#gitcode-issue-handler) |
 | **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | [查看](skills-usage.md#gitcode-toolkit) |
 
 ## 社区 Plugins

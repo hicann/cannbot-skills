@@ -34,9 +34,13 @@ curl "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}?access_
 
 ## 注意事项
 
-1. **权限确认**：确保 Token 有对应仓库的读写权限
+1. **权限确认**：先用目标仓库必需的轻量只读接口验证；不要用 `/user` 或 `/emails` 的
+   403 判定 Token 整体无效，它们可能需要额外账号 scope
 2. **安全保护**：不在日志中输出 token 明文
-3. **过期处理**：遇到 401 错误时，提示用户提供新 token
+3. **失效处理**：目标仓库必需接口遇到 401/403 时重新进入 Token 预检，收到替换 Token
+   后从失败请求恢复；同一会话正常阶段不重复询问
+4. **授权边界**：Token 只表示具备接口凭据，不代表用户已授权评论、指派、push、PR
+   或 CI 等外部写操作；写操作仍按 [authorization-contract.md](authorization-contract.md) 确认
 
 ---
 
