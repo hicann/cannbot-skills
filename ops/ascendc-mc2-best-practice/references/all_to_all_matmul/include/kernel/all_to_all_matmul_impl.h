@@ -28,7 +28,7 @@
 // [PITFALL] CrossCoreSetFlag 和 CrossCoreWaitFlag 必须按 idx 一一配对（1:1）。
 //           多次 Wait 同一 flagId 会死锁；Set 了不 Wait 会让 AIV 写覆盖未读数据。
 // [PITFALL] PIPE_MTE3（AIV 输出）↔ PIPE_MTE2（AIC 输入）是 AIV→AIC 的固定方向；
-//           反向（AIC→AIV）用 PIPE_FIX → PIPE_MTE3。idx 编号 0x2 是 AIV↔AIC 间的固定类别。
+//           反向（AIC→AIV）用 PIPE_FIX → PIPE_MTE3。modeId 0x2 是 AIV↔AIC 跨核同步模式。
 //
 // 进阶细节：references/mc2_architecture.md（AIV/AIC 分工） + references/matmul_blaze.md
 // ============================================================================

@@ -76,9 +76,9 @@ uint32_t tileCnt = 1;
 
 ### 阶段 B：扫描 `tileCnt` 找最优（Step 6 性能验收）
 
-**扫描候选值**：`tileCnt ∈ {1, 2, 4, 8, 16, 32}`（必须是 2 的幂，便于 `bufferId = mLoopIdx & (bufferSize - 1)` 位掩码）
+**扫描候选值**：`tileCnt ∈ {1, 2, 4, 8, 16, 32}`（建议为 2 的幂，便于均匀切分和调试）
 
-> 注意：`bufferSize` 独立于 `tileCnt`，默认 4。`tileCnt` 决定通信块总数，`bufferSize` 决定 SHMEM 中同时存在的 buffer 数。
+> 注意：`bufferSize` 独立于 `tileCnt`，默认 4。`tileCnt` 决定通信块总数，`bufferSize` 决定 SHMEM 中同时存在的 buffer 数。`bufferId = mLoopIdx & (bufferSize - 1)` 的位掩码约束作用于 `bufferSize`（要求 `bufferSize` 为 2 的幂），不约束 `tileCnt`。
 
 **每个 `tileCnt` 的测试流程**：
 
@@ -99,8 +99,8 @@ msprof --ai-core=on --aic-mode=task-based \
     --output="${PROJ}/docs/perf/tileCnt_8" \
     --application="${PROJ}/build/{op_name} 2048 8192 3584 4 perf"
 
-# 5. 多卡后处理：每卡取最后 5 次 main kernel 平均，4 卡取最大
-python3 scripts/extract_perf.py "${PROJ}/docs/perf/tileCnt_8" AllToAllQuantMatmulKernelE4M3E4M3 5
+# 5. 多卡后处理：使用 ops-profiling skill 的 msprof_perf_summary.py
+python3 ${SKILL_PATH}/scripts/msprof_perf_summary.py "${PROJ}/docs/perf/tileCnt_8" ops/{op_name}
 ```
 
 **选最优的标准**（优先级从高到低）：

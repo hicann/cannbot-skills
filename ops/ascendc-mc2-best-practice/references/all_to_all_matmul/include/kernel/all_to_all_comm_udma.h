@@ -24,7 +24,7 @@
 // [PITFALL] aclshmemx_udma_put_nbi 的 dst 是"本 rank 视角下本 rank 的 SHMEM 地址"，
 //           不是 remoteRank 的地址。SHMEM 内部做地址翻译。详见 comm_shmem.md §2。
 // [PITFALL] aclshmemx_udma_quiet(remoteRank) 必须在每次 Put 后调用，否则不保序。
-// [PITFALL] BarrierAll 用 aclshmemx_barrier_all_vec，不能用 HCCL 同步原语。
+// [PITFALL] BarrierAll 用 aclshmem_barrier_all()，不能用 HCCL 同步原语。
 // [PITFALL] 每个 Block 负责发往对应的 remoteRank（不是单 Block 串行）——多 Block 并发
 //           才能让 UDMA 引擎并行下发，避免单 Block 成瓶颈。
 //
@@ -201,9 +201,8 @@ __aicore__ inline void AllToAllComm<XType>::PutSegmentToRank(uint32_t remoteRank
     dataSize,
     remoteRank
   );
-  // 确保对该远程 Rank 的传输指令已下发
-  // [PITFALL] aclshmemx_udma_quiet 只保证"下发"，不保证"对端收到"。
-  //           对端收到要靠 aclshmemx_barrier_all_vec（在 BarrierAll 中调用）。
+  // 确保对该远程 Rank 的传输已完成（数据已到达对端 PE）
+  // [PITFALL] aclshmemx_udma_quiet 确保数据到达对端，不是"只下发不等对端"。
   aclshmemx_udma_quiet(remoteRank);
 }
 
@@ -230,7 +229,7 @@ template<typename XType>
 __aicore__ inline void AllToAllComm<XType>::BarrierAll()
 {
   // 全卡同步等待
-  aclshmemx_barrier_all_vec();
+  aclshmem_barrier_all();
 }
 
 template<typename XType>

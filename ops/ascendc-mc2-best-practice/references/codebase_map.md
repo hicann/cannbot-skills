@@ -152,7 +152,7 @@ __aicore__ inline void AllReduceComm<XType>::PutToTargetRank(
 **注意事项**：
 - 不要改 `aclshmemx_udma_put_nbi` 的调用方式（src/dst/size 语义固定）；
 - `aclshmemx_udma_quiet(remoteRank)` 必须保留；
-- `BarrierAll()` 用 `aclshmemx_barrier_all_vec()`，不要换成 HCCL 同步。
+- `BarrierAll()` 用 `aclshmem_barrier_all()`，不要换成 HCCL 同步。
 
 ### 3.3 `include/kernel/all_to_all_matmul_impl.h`（通算融合主类）
 
@@ -183,7 +183,7 @@ auto gmScaleA = Te::MakeTensor(...);
 mmadOp_(gmBlockA, gmBlockB, gmBlockScaleA, gmBlockScaleB, gmBlockBias, gmBlockC, ...);
 
 // 改（去 scale）：
-using DispatchPolicy = Blaze::Gemm::MatmulMultiBlockPolicy<NONE_FULL_LOAD_MODE>;
+using DispatchPolicy = Blaze::Gemm::MatmulMultiBlockBasic<NONE_FULL_LOAD_MODE>;
 // ...
 mmadOp_(gmBlockA, gmBlockB, gmBlockBias, gmBlockC, ...);  // 去 scale 参数
 ```

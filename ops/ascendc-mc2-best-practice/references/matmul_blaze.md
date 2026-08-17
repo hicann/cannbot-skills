@@ -2,7 +2,7 @@
 
 本文档承载 MC2 skill 的"计算子能力"。涵盖：Blaze 模板选型、BlockMmad 接入、Tiling 数据流、与通信层的 buffer 协议。
 
-> Blaze 是 Ascend C 的 CUTLASS 风格模板库，由 `tensor_api/` 提供。本 skill 与 `ascendc-blaze-best-practice` 共享 Blaze 基底（tensor_api 均来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支），但聚焦 MC2 场景下的差异点。**禁止使用 asc-devkit 的 matmul API（`AscendC::Matmul` 等）**。
+> Blaze 是 Ascend C 的 CUTLASS 风格模板库，blaze 头文件位于 CANN toolkit 的 `opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc/common`（参考工程 CMakeLists 用 `_BLAZE_COMMON_DIR` 指向该目录）。`AscendC::Te::*`（Tensor / Layout 抽象）由 `tensor_api/` 提供，来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支 clone。本 skill 与 `ascendc-blaze-best-practice` 共享这套 Blaze 基底，但聚焦 MC2 场景下的差异点。**直调工程不使用 asc-devkit 的 matmul 高阶 API（`AscendC::Matmul` 等）**——它是官方通算融合（单算子 API 调用）路径的计算接口，不支持 Kernel 直调场景（详见 SKILL.md §1 约束 ②）。
 
 ---
 
@@ -12,9 +12,9 @@
 
 | 层级 | 组件 | 文件 | 作用 |
 |------|------|------|------|
-| **Kernel** | `Blaze::Gemm::Kernel::QuantMatmulMxKernelSwat` | `include/kernel/qbmm_mx_kernel.h` | SWAT 量化 Matmul kernel 包装，遍历所有 rank 累加 L0C |
+| **Kernel** | `Blaze::Gemm::Kernel::QuantMatmulMxKernelSwat`（项目级） | `include/kernel/qbmm_mx_kernel.h` | SWAT 量化 Matmul kernel 包装，遍历所有 rank 累加 L0C |
 | **Block** | `Blaze::Gemm::Block::BlockMmad` | `blaze/gemm/block/block_mmad_qbmm_mx.h`（toolkit 内） | 单 Block 的 MMAD 计算（L0A×L0B→L0C→GM） |
-| **Block Scheduler** | `Blaze::Gemm::Block::Block_schedulerQuantBatchMatmulV3` | `include/block/quant_matmul_mx_block_scheduler_swat.h` | 多 Block 间任务切分 |
+| **Block Scheduler** | `Blaze::Gemm::Block::BlockSchedulerQuantBatchMatmulV3` | `include/block/quant_matmul_mx_block_scheduler_swat.h` | 多 Block 间任务切分 |
 | **Dispatch Policy** | `Blaze::Gemm::MatmulWithScaleMx` | `blaze/gemm/policy/dispatch_policy.h`（toolkit 内） | 流水策略（含 scale 处理） |
 | **Tile** | `Blaze::Gemm::Tile::*` | `include/tile/*.h` | L1→L0 搬运、Scale pad |
 | **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/`（asc-devkit clone） | Tensor / Layout 抽象 |
@@ -160,7 +160,7 @@ tilingEngine.GetTilingData(headMSize, n, ka, false, true, tilingData.tileQbmmTil
 
 ### Tiling 算法
 
-`include/tiling/quant_matmul_mx_tiling_swat.h` 实现了 SWAT（Soft Wassenaar Allocation of Tiling，软分配 tiling）算法：
+`include/tiling/quant_matmul_mx_tiling_swat.h` 实现了 SWAT tiling 算法（SWAT 为项目内部命名，CANN 库中无此术语的官方定义。算法行为是滑动窗口 + N 轴 zigzag 的 tile 调度）：
 
 1. `CalcBasicBlock()`：从 256 出发，对齐到 CUBE_BLOCK（16）和 L1 对齐粒度；
 2. `OptimizeEdgeBasicBlock()`：合并 K 对齐时的尾块；
@@ -181,14 +181,14 @@ using DispatchPolicy = Blaze::Gemm::MatmulWithScaleMx<NONE_FULL_LOAD_MODE, false
 ```
 
 - `NONE_FULL_LOAD_MODE`：A/B 不全载 L1（与 `ascendc-blaze-best-practice` 的模式选择一致）；
-- 第二个模板参数 `false` 是 `isKClonedToMTE1`（K 是否克隆到 MTE1 缓存）。
+- 第二个模板参数 `false` 是 `ATOMIC_ADD`（是否启用输出 atomic add，默认关闭）。
 
 可选的 DispatchPolicy（详见 `ascendc-blaze-best-practice` 的 `matmul_pattern.md` §10）：
-- `MatmulMultiBlockPolicy<NO_FULL_LOAD_MODE>`：通用多 block SWAT；
-- `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>`：A 全载（N≫M 时用）；
+- `MatmulMultiBlockBasic<NONE_FULL_LOAD_MODE>`：通用多 block SWAT（CANN 库 `dispatch_policy.h` 中的实际类名）；
+- `MatmulMultiBlockBasic<A_FULL_LOAD_MODE>`：A 全载（N≫M 时用）；
 - `MatmulWithScaleMx<...>`：MX 量化 matmul（参考工程用）。
 
-MC2 算子若非量化场景，可改用 `MatmulMultiBlockPolicy`。
+MC2 算子若非量化场景，可改用 `MatmulMultiBlockBasic`。
 
 ---
 
@@ -225,7 +225,7 @@ allToAllComm_.PutScaleToAllRanks(0, axisM_);  // offset=0, 全 M 行
 | 精度错（局部对，整体差） | `remoteRankCnt` 没从 0 起算 / rank==rankId 时未切换到本卡 GM | 核对 ProcessSingleBatch 中的 if (rank == rankId) 分支 |
 | L0C 累加结果不对 | `splitKNum` 与实际 rank 遍历数不一致 | 检查 SetupParams 中 `splitKNum = rankSize_` 是否正确 |
 | fixpipe 时崩溃 | C 地址偏移错（mOffset 算错） | 打印 `cGm_ + mOffset * axisN_ * sizeof(CType)` 与预期对比 |
-| 性能不达标（cube ratio 低） | L1 深度过浅，K 轴反复加载 | 调大 `scaleKL1` 或换 `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>` |
+| 性能不达标（cube ratio 低） | L1 深度过浅，K 轴反复加载 | 调大 `scaleKL1` 或换 `MatmulMultiBlockBasic<A_FULL_LOAD_MODE>` |
 | blaze 头文件找不到 | `target_include_directories` 漏了 `_BLAZE_COMMON_DIR` | 参考 `CMakeLists.txt` 的 `target_include_directories` 段 |
 
 ---

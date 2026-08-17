@@ -18,7 +18,7 @@
 //   - 所有 rank 的部分和在 L0C 上累加（remoteRankCnt 控制 L0C 偏移），最后一次触发 fixpipe 输出 GM。
 //
 // 与 ascendc-blaze-best-practice 的关系：
-//   复用 Blaze 基底（BlockMmad、Block_scheduler），通过遍历所有 rank 接入通算流水。
+//   复用 Blaze 基底（BlockMmad、BlockScheduler），通过遍历所有 rank 接入通算流水。
 //   单卡 Matmul（无通信）等价于 ascendc-blaze-best-practice 的常规用法。
 //
 // 改造场景：

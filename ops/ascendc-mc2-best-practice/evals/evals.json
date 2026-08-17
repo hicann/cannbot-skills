@@ -4,82 +4,99 @@
   "evals": [
     {
       "id": 1,
-      "title": "MC2 算子开发完整工作流",
+      "title": "通算融合算子开发完整工作流",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A2"
+          "A5"
         ]
       },
-      "prompt": "请介绍 Ascend C MC2 通算融合算子的开发完整工作流，需要包括哪些步骤？",
-      "expected_output": "回复应覆盖 MC2 算子开发的 7 步流程（环境检查→设计方案→Walkthrough→代码开发→代码检视→修复循环→性能验证），说明每步的核心任务，以及开发前需要确认的 npu-arch 条件（dav-3510）。",
+      "prompt": "请介绍 Ascend C 通算融合算子（多卡通信+计算融合 Kernel 直调）的开发完整工作流，需要包括哪些步骤？",
+      "expected_output": "回复应覆盖通算融合算子开发的核心流程：SHMEM/UDMA 路径按环境检查→设计方案→Walkthrough→代码开发→代码检视→修复循环→性能验证的 7 步流程执行；MTE window 路径（MoE Dispatch/Combine）默认拆成 samples 规格补齐、api-rules、tiling-scheme 三部分推进；开发前需先走决策树判断算子属于哪条通信路径。",
       "files": [],
       "expectations": []
     },
     {
       "id": 2,
-      "title": "通信与计算约束理解",
+      "title": "两条通信路径的区分与决策",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A2"
+          "A5"
         ]
       },
-      "prompt": "开发 MC2 通算融合算子时，通信和计算有哪些强制约束？为什么不能用 HCCL 高阶 API？",
-      "expected_output": "回复应说明：通信必须走 SHMEM，Matmul 必须走 Blaze 模板，解释 SHMEM 相比 HCCL 在通算融合场景的优势（更细粒度的通信控制），以及 Blaze 模板在高性能 Matmul 中的作用。",
+      "prompt": "通算融合算子开发中，SHMEM/UDMA 路径和 MTE window 路径分别用在什么场景？如何判断一个算子该走哪条路径？",
+      "expected_output": "回复应说明：SHMEM/UDMA 路径适合计算密集型通算融合（AllToAll+Matmul、AllReduce+Matmul、TP/SP），MTE window 路径适合路由通信密集型场景（MoE Dispatch/Combine、专家并行 EP、token 路由分发、mega_moe）；判断方法看通信机制——SHMEM API 走 SHMEM 路径，winContext/mc2Context 走 MTE 路径。",
       "files": [],
       "expectations": []
     },
     {
       "id": 3,
-      "title": "MC2 典型场景：AllToAll+Matmul 算子开发",
+      "title": "SHMEM 路径约束：通信与计算红线",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A2"
+          "A5"
         ]
       },
-      "prompt": "我正在 Ascend 950 上开发一个 AllToAll+Matmul 通算融合算子，请告诉我开发前需要做哪些准备工作，以及开发流程中各阶段的输出产物是什么。",
-      "expected_output": "回复应说明：开发前需确认 npu-arch=dav-3510 和 CANN 环境就绪，列出各阶段的输出产物（设计方案、代码文件、检视记录、性能报告），强调 SHMEM 通信和 Blaze Matmul 模板的使用约束，以及 7 步流程的严格执行要求。",
+      "prompt": "开发 AllToAll+Matmul 通算融合算子时，通信和计算有哪些强制约束？为什么不能用 HCCL 高阶 API 和 asc-devkit Matmul 高阶 API？",
+      "expected_output": "回复应说明：通信必须走 SHMEM（host 侧 aclshmem_*，device 侧 aclshmemx_udma_* + aclshmem_barrier_all），禁止 Hccl::AllReduce/AlltoAll 等高阶 API；Matmul 必须走 Blaze 模板（Block::BlockMmad + Kernel::*）；原因是 HCCL 和 AscendC::Matmul 高阶 API 依赖框架注入的 GetHcclContext 上下文，Kernel 直调场景拿不到该上下文，无法使用。",
       "files": [],
       "expectations": []
     },
     {
       "id": 4,
-      "title": "信息不足场景：追问多卡通信细节",
+      "title": "MTE window 路径约束：MoE 特化四红线",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A2"
+          "A5"
         ]
       },
-      "prompt": "我要做一个多卡通信的算子，需要哪些准备工作？",
-      "expected_output": "回复应覆盖 MC2 算子开发的关键准备事项：确认目标 NPU 架构（dav-3510/Ascend 950）、说明通信约束（SHMEM）、计算约束（Blaze 模板），以及 7 步开发流程的总体介绍。",
+      "prompt": "开发 MoE Dispatch 或 MoE Combine 算子时，MTE window 路径有哪些强制约束？",
+      "expected_output": "回复应覆盖 MTE window 路径的四大约束：① 通信走 MTE window，禁止 Hccl::AlltoAll/AlltoAllV/AllReduce 等高阶原语做数据搬运；② window 地址必须走 compat 层（GetBaseWindAddrByRankId 等统一接口），禁止直接硬编码 HcclA3OpResParam/HcclA5OpResParam 字段偏移；③ 共享 GM/状态区走 DataCopyPad，禁止 GetValue/SetValue 直接访问；④ 状态协议：先数据后状态、每核只写自己槽位、消费后清理。",
       "files": [],
       "expectations": []
     },
     {
       "id": 5,
-      "title": "MC2 与其他 Ascend C 技能的区分（正向看护）",
+      "title": "MTE window 路径的工程推进方式",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A2"
+          "A5"
+        ]
+      },
+      "prompt": "我要生成一个新的 MoE dispatch 算子，或者在样例工程基础上改造，应该如何推进？",
+      "expected_output": "回复应说明 MTE window 路径不再套用通用 add.asc 模板，默认拆成三部分推进：① samples 规格补齐与样例工程（spec-template → dispatch-dataflow 或 combine-dataflow）；② api-rules MoE 特化 API 规则（DataCopyPad、window 地址获取、同步与可见性、状态协议、接口契约）；③ tiling-scheme MoE 特化分核方案（window-memory-layout → multi-core-formulas → split-core-design → double-buffer-protocol）；若同时包含阅读已有实现任务，先走入口 A 阅读路径再进入入口 B。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "通算融合 Skill 与其他 Ascend C 技能的区分（正向看护）",
+      "config": {
+        "max_tokens": 500000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 520000
+        },
+        "ascend_platforms": [
+          "A5"
         ],
         "distractor_skills": [
           "ascendc-direct-invoke-template",
@@ -89,7 +106,7 @@
         ]
       },
       "prompt": "我想开发一个多卡通信和计算融合的 Ascend C 算子，需要遵循哪些开发规范？",
-      "expected_output": "回复应聚焦 MC2 通算融合算子的开发规范和约束，说明通信走 SHMEM、Matmul 走 Blaze 模板、以及 7 步开发流程的严格要求，区别于普通的 Kernel 直调开发流程。",
+      "expected_output": "回复应聚焦通算融合算子的开发规范与约束：先按决策树判断走 SHMEM/UDMA 路径（通信走 SHMEM、Matmul 走 Blaze 模板）还是 MTE window 路径（MoE Dispatch/Combine 四红线），并说明与普通 Kernel 直调开发流程的区别。",
       "files": [],
       "expectations": [
         {

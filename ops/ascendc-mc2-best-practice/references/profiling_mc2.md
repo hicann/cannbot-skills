@@ -167,69 +167,20 @@ msprof 在 `--output` 指定目录下生成 `PROF_{timestamp}_{pid}/` 子目录�
 
 **为什么取最后 5 条？** 前 5 轮可能受冷启动 / device 频率未稳定影响，后 5 轮进入稳态，取均值降低随机波动。
 
-**为什么 4 卡取最大？** MC2 是多卡并行 + 跨卡同步（`aclshmemx_barrier_all_vec`），整体性能由最慢的卡（木桶效应）决定。取平均会高估性能。
+**为什么 4 卡取最大？** MC2 是多卡并行 + 跨卡同步（`aclshmem_barrier_all`），整体性能由最慢的卡（木桶效应）决定。取平均会高估性能。
 
-### 4.5 后处理脚本（Python）
+### 4.5 多卡后处理
 
-```python
-#!/usr/bin/env python3
-# extract_perf.py —— MC2 多卡性能后处理
-# 用法: python3 extract_perf.py <output_dir> <main_kernel_name> [last_n]
-import csv, glob, sys, os
-
-output_dir = sys.argv[1]                # e.g. docs/perf/round_001
-main_kernel = sys.argv[2]               # e.g. AllToAllQuantMatmulKernelE4M3E4M3
-LAST_N = int(sys.argv[3]) if len(sys.argv) > 3 else 5
-
-# 找所有 PROF_xxx 子目录（每卡一个，由 fork 子进程分别产生）
-prof_dirs = sorted(glob.glob(f"{output_dir}/PROF_*"))
-assert prof_dirs, f"no PROF_* under {output_dir}"
-
-rank_avgs = []
-for rank_id, prof_dir in enumerate(prof_dirs):
-    csv_path = glob.glob(f"{prof_dir}/mindstudio_profiler_output/op_summary_*.csv")
-    assert csv_path, f"no op_summary_*.csv under {prof_dir}"
-    rows = list(csv.DictReader(open(csv_path[0])))
-    # 过滤主 kernel 记录，保持采集顺序
-    main_rows = [r for r in rows if r.get("Op Name", "") == main_kernel]
-    assert len(main_rows) >= LAST_N, f"rank {rank_id}: only {len(main_rows)} main kernel records"
-    last_n_rows = main_rows[-LAST_N:]
-    durations = [float(r["Task Duration (us)"]) for r in last_n_rows]
-    avg = sum(durations) / LAST_N
-    rank_avgs.append(avg)
-    print(f"Rank {rank_id}: last {LAST_N} = {durations} us, avg = {avg:.2f} us")
-
-overall = max(rank_avgs)
-print(f"\nOverall (max of {len(rank_avgs)} ranks): {overall:.2f} us")
-```
-
-### 4.6 完整流程示例
+使用 `ops-profiling` skill 的 `msprof_perf_summary.py` 进行多卡数据后处理：
 
 ```bash
-#!/bin/bash
-set -e
-
-OP_NAME=all_to_all_matmul
-MAIN_KERNEL=AllToAllQuantMatmulKernelE4M3E4M3
-M=2048; K=8192; N=3584; RANK=4
-PROJ="$(pwd)"
-
-# Step 1: 精度验证（确保算子正确性，再测性能）
-bash run.sh $M $K $N $RANK precision
-
-# Step 2: 编译 perf 模式（run.sh 已自动编译，这里确认）
-cmake --build build -j
-
-# Step 3: msprof task-based 采集（无 warm-up；L2 flush 由 perf 主循环内部保证）
-ROUND_DIR="$PROJ/docs/perf/round_001"
-rm -rf "$ROUND_DIR"
-msprof --ai-core=on --aic-mode=task-based \
-    --output="$ROUND_DIR" \
-    --application="$PROJ/build/$OP_NAME $M $K $N $RANK perf"
-
-# Step 4: 多卡后处理（每卡取最后 5 次 main kernel 平均，4 卡取最大）
-python3 scripts/extract_perf.py "$ROUND_DIR" "$MAIN_KERNEL" 5
+# 使用 ops-profiling skill 的统一解析工具
+python3 ${SKILL_PATH}/scripts/msprof_perf_summary.py "$ROUND_DIR" ops/{op_name}
 ```
+
+> `msprof_perf_summary.py` 支持 task-based 采集的多卡数据解析，包括每卡 Task Duration 提取、核间负载均衡分析等。详见 `ops-profiling` skill 的 [`references/msprof-guide.md`](../../ops-profiling/references/msprof-guide.md)。
+
+MC2 场景需特别关注的后处理规则（§4.4）：每卡取最后 5 次 main kernel 的 Task Duration 求平均，4 卡取最大值作为整体性能。若 `msprof_perf_summary.py` 的默认输出不直接包含此规则，可基于其 CSV 输出手动计算。
 
 ---
 
@@ -240,7 +191,7 @@ python3 scripts/extract_perf.py "$ROUND_DIR" "$MAIN_KERNEL" 5
 MC2 算子是"通信+计算融合"，预期主导流水是 **AIC cube**：
 
 ```
-cube_ratio 应在 40-70%
+cube_ratio 应 >40%（下限来自 MindStudio 官方文档；上限无官方阈值，内部经验约 70%）
 ```
 
 若 `vec_ratio` 过高，说明：

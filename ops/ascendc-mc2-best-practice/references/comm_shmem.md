@@ -3,6 +3,22 @@
 本文档承载 MC2 skill 的"通信子能力"。涵盖：SHMEM API 目录、host/device 侧用法、禁止 HCCL 清单的执行细则、扩展其他通信原语（AllReduce / ReduceScatter / AllGather）的思路。
 
 > 官方文档：<https://shmem-doc.pages.dev/>。本文件不重抄官方 API；只记录参考工程用到的子集 + MC2 场景下的使用要点。
+>
+> **接口来源核验**（基于 `gitcode.com/cann/shmem` 仓库源码核对，仓库 version v1.5.0 系列）：
+>
+> | 接口 | 仓库证据（`include/` 下头文件） |
+> |------|--------------------------------|
+> | `aclshmemx_init_attr` | `host/init/shmem_host_init.h:66` |
+> | `aclshmemx_uniqueid_t` / `aclshmemx_init_attr_t` / `ACLSHMEMX_INIT_WITH_DEFAULT` | `host/shmem_host_def.h:106-111`、`host/shmem_host_def.h:164-181` |
+> | `aclshmem_align` / `aclshmem_free` | `host/mem/shmem_host_heap.h:53,62` |
+> | `aclshmem_my_pe` / `aclshmem_n_pes`（device 侧） | `device/team/shmem_device_team.h:27,35` |
+> | `aclshmem_ptr` | device: `device/gm2gm/engine/shmem_device_mte.h:26`；host: `host/data_plane/shmem_host_rma.h:74` |
+> | `aclshmemx_udma_put_nbi` / `aclshmemx_udma_quiet` | `device/gm2gm/engine/shmem_device_udma.h:63,106`（实现 `src/device/gm2gm/engine/shmem_device_udma.hpp`） |
+> | `aclshmem_barrier_all` | device: `device/gm2gm/shmem_device_cc.h:76`；host: `host/data_plane/shmem_host_cc.h:49` |
+> | `ACLSHMEM_DATA_OP_UDMA` / `ACLSHMEM_DATA_OP_MTE` | `host_device/shmem_common_types.h:81-86` |
+> | `L2_CACHELINE_SIZE = 512` | `host_device/shmem_common_types.h:166-168` |
+>
+> 平台限制：UDMA 引擎仅在 `__NPU_ARCH__ == 3510`（Ascend 950/A5）上启用（`src/device/gm2gm/engine/shmem_device_udma.hpp:21-24`），与 SKILL.md §1 的架构约束一致。
 
 ---
 
@@ -49,7 +65,7 @@ for (int rankId = 0; rankId < rankNum; ++rankId) {
 | 参数 | 含义 | 参考工程取值 |
 |------|------|------------|
 | `SHMEM_SPACE_SIZE` | 单卡 SHMEM 空间大小 | `1024 * 1024 * 1024` (1 GB) |
-| `PACKAGE_SIZE` | SHMEM 对齐粒度 | `512` bytes（UDMA 要求） |
+| `PACKAGE_SIZE` | SHMEM 对齐粒度（`aclshmem_align` 第一参） | `512` bytes。shmem 仓库已定义 `L2_CACHELINE_SIZE = 512`（`include/host_device/shmem_common_types.h:166-168`），参考工程取该值对齐 |
 | `ACLSHMEM_DATA_OP_UDMA` | 数据搬运引擎选 UDMA（不是 RDMA） | 必须选 UDMA |
 
 ### 资源释放
@@ -74,14 +90,14 @@ ACL_CHECK(aclFinalize());
 |-----|------|---------|
 | `aclshmem_n_pes()` | 返回总 rank 数 | `InitParams` |
 | `aclshmem_my_pe()` | 返回当前 rank ID | `InitParams` |
-| `aclshmem_ptr(shmemSpace, rankId)` | 拿到本 rank 视角下指定 rank 的 SHMEM 基地址（GM 地址） | `GetDataAddrGm` / `GetScaleAddrGm` |
+| `aclshmem_ptr(shmemSpace, pe)` | 把对称地址 `shmemSpace` 翻译到 `pe` 视角的 GM 地址（传本卡 rankId 即本卡基地址） | `GetDataAddrGm` / `GetScaleAddrGm` |
 | `aclshmemx_udma_put_nbi(dst, src, ubuf, size, remoteRank)` | 非阻塞 Put：本地 src → 远程 dst | `PutSegmentToRank` |
-| `aclshmemx_udma_quiet(remoteRank)` | 等本次 Put 下发完（不等对端收） | `PutSegmentToRank` |
-| `aclshmemx_barrier_all_vec()` | 全卡 Barrier（等所有 Put 被对端收到） | `BarrierAll` |
+| `aclshmemx_udma_quiet(remoteRank)` | 等本次 Put 数据已到达对端 PE（completed） | `PutSegmentToRank` |
+| `aclshmem_barrier_all()` | 全卡 Barrier（跨核同步点） | `BarrierAll` |
 
 ### Put 的 dst 地址语义
 
-UDMA Put 的 `dst` 是**对端 rank 的 GM 地址**，但本 rank 拿不到对端 GM 物理地址。SHMEM 的设计：所有 rank 通过 `aclshmem_align` 分配等大空间，本 rank 通过 `aclshmem_ptr(shmemSpace, remoteRank)` 拿到"本 rank 视角下 remoteRank 那块 SHMEM 的 GM 地址"，写到这个地址就等于写到对端。
+UDMA Put 的 `dst` 是**本 rank 视角下本 rank 的 SHMEM 对称地址**。SHMEM 采用对称分配模型：所有 rank 通过 `aclshmem_align` 分配等大空间，本 rank 通过 `aclshmem_ptr(shmemSpace, rankId_)`（注意第二个参数是**本卡 rankId**）拿到本卡的 SHMEM 基地址。UDMA 引擎根据 `remoteRank` 参数将写入数据翻译到对端 rank 的对应地址。本 rank 不需要知道对端物理地址。
 
 ```cpp
 // all_to_all_comm_udma.h::GetDataAddrGm
@@ -89,11 +105,11 @@ GM_ADDR baseAddr = (GM_ADDR)(aclshmem_ptr(shmemContextGM_, rankId_));
 return baseAddr + bufferId * bufferBlockSize_;
 ```
 
-注意 `aclshmem_ptr` 第二个参数是 `rankId_`（**本卡自己的 rank**），不是 remoteRank。本卡视角下本卡的 SHMEM 基地址就是其他卡 Put 过来的数据落点。
+注意 `aclshmem_ptr` 第二个参数是 `rankId_`（**本卡自己的 rank**），不是 remoteRank。本卡视角下本卡的 SHMEM 基地址就是其他卡 Put 过来的数据落点。UDMA 引擎负责地址翻译，开发者只需对本卡对称地址写入数据并指定 remoteRank。
 
 ### ubuf 参数
 
-`aclshmemx_udma_put_nbi` 的第三个参数 `(__ubuf__ uint8_t*)nullptr` 在参考工程中始终为 `nullptr`。它的本意是提供 UB 缓冲（用于小消息聚合），MC2 的大块 Put 直接走 GM→GM，不需要 UB 中转。
+`aclshmemx_udma_put_nbi` 的第三个参数 `(__ubuf__ uint8_t*)nullptr` 在参考工程中始终为 `nullptr`。该参数为兼容 API 而保留的 UB 缓冲参数，UDMA 实现中直接 `(void)buf` 忽略（`src/device/gm2gm/engine/shmem_device_udma.hpp` 中 `aclshmemx_udma_put_nbi` 实现），因此传 `nullptr` 合法；MC2 的大块 Put 直接走 GM→GM。
 
 ---
 
@@ -140,7 +156,7 @@ __aicore__ inline void AllToAllComm<XType>::PutSegmentToRank(
     (__ubuf__ uint8_t*)nullptr,
     dataSize,
     remoteRank);
-  aclshmemx_udma_quiet(remoteRank);  // 保序
+  aclshmemx_udma_quiet(remoteRank);  // 确保数据已到达对端 PE
 }
 ```
 
@@ -191,8 +207,8 @@ AllGather = 每卡 Put 自己段给所有其他卡，但不 reduce。本质就�
 
 ### 4.4 自定义原语注意点
 
-- 必须保留 `aclshmemx_udma_quiet(remoteRank)` 调用，否则 Put 不保序；
-- Barrier 类操作必须用 `aclshmemx_barrier_all_vec`，不能用 HCCL 的同步原语；
+- 必须保留 `aclshmemx_udma_quiet(remoteRank)` 调用，确保数据已到达对端 PE；
+- Barrier 类操作用 `aclshmem_barrier_all()`；`aclshmemx_barrier_all_vec` 已废弃（shmem 仓库 `device/gm2gm/shmem_device_cc.h:85,93` 标记 `[[deprecated]]`，提示改用 `aclshmem_barrier_all`），不能用 HCCL 的同步原语；
 - 跨核同步（AIV↔AIC）必须用 `CrossCoreSetFlag` / `CrossCoreWaitFlag`，不能用 SHMEM 的 barrier 替代。
 
 ---
@@ -206,7 +222,7 @@ AllGather = 每卡 Put 自己段给所有其他卡，但不 reduce。本质就�
 grep -rn "Hccl::" operators/{op}/
 ```
 
-完整禁止清单（13 类）：
+完整禁止清单（7 类 18 个 API）：
 
 | 类别 | API |
 |------|-----|
@@ -218,9 +234,9 @@ grep -rn "Hccl::" operators/{op}/
 | 跨组同步 | `Hccl::InterHcclGroupSync()` |
 | Context | `GetHcclContext<>()` |
 
-### 历史背景
+### 历史背景与正确理解
 
-这些 API 来自 `asc-devkit/adv_api/hccl/`，在 CANN 早期版本是集合通信的主要入口。它们的特点是**服务端调度**：API 内部把任务发给通信 CPU，Kernel 不能干预时序。MC2 场景下通信必须与计算在同一 Kernel 内深度耦合，HCCL 无法满足。
+这些 API 是 asc-devkit 官方通算融合路径（`docs/zh/api/SIMD-API/adv_api/HCCL_communication/`）的通信入口，也是官方 AllGatherMatmul 类算子样例使用的接口。**注意**：官方文档明确 Hccl 高阶 API 本身支持在 Kernel 内编排"先通信后计算 / 先计算后通信"（见 `HCCL_usage.md`），并非只能串行。本 skill 不用它们的真正原因只有一个：**官方通算融合仅支持单算子 API 调用（aclnn），不支持 Kernel 直调**；而本 skill 的 MC2 工程是 Kernel 直调形态，拿不到框架注入的通信上下文。直调场景下通信必须由 Kernel 自建（SHMEM/UDMA），才能与计算在同一 Kernel 内深度耦合。
 
 ---
 
@@ -231,7 +247,7 @@ grep -rn "Hccl::" operators/{op}/
 1. `third_party/shmem` 由 cmake 首次配置时自动 `git clone --branch v1.5.0 --depth 1`（gitcode.com/cann/shmem），无需 git submodule；
 2. CMake 首次配置时触发 `add_custom_target(cann_samples_shmem_dependencies)`：
    - 若 `third_party/shmem/CMakeLists.txt` 不存在，执行 `git clone`；
-   - 用 `cmake -S ... -B .../build -DSOC_TYPE=Ascend950` 构建 shmem 静态库；
+   - 用 `cmake -S ... -B .../build -DSOC_TYPE=Ascend950` 构建 shmem 共享库（`libshmem.so` 等）；
    - `cmake --build ... --target install` 安装到 `third_party/shmem/install/shmem/`；
 3. 生成两个 IMPORTED 共享库：
    - `cann_samples_shmem_bootstrap_uid`：基于 UID 的 bootstrap；
@@ -251,7 +267,7 @@ grep -rn "Hccl::" operators/{op}/
 | 现象 | 可能原因 | 排查方向 |
 |------|---------|---------|
 | `aclshmem_align` 返回 nullptr | SHMEM 空间已被前次分配占满 | 检查 `aclshmem_finalize` 是否被调用；减小 `SHMEM_SPACE_SIZE` |
-| `aclshmemx_udma_put_nbi` 后立即读 buffer 拿不到数据 | Put 是非阻塞的，没等 quiet/barrier | 在读前调 `aclshmemx_barrier_all_vec()` |
+| `aclshmemx_udma_put_nbi` 后立即读 buffer 拿不到数据 | Put 是非阻塞的，没等 quiet/barrier | 在读前调 `aclshmemx_udma_quiet` 确保数据到达对端 |
 | 多卡运行 deadlock | AIV 的 `CrossCoreSetFlag` idx 与 AIC 的 `CrossCoreWaitFlag` idx 不匹配 | 检查 `mLoopIdx` 在两侧是否一致 |
 | Put 数据错位 | `dstDataOffset` 算错（rankId 没乘对 commMSize） | 打印 bufferId、srcMOffset、dstDataOffset 在 host 端验证 |
 | 编译报 `aclshmemx_udma_put_nbi` 未定义 | 没链接 `cann_samples::shmem` | 检查 `target_link_libraries` 是否含 `cann_samples::shmem` |

@@ -21,17 +21,15 @@ MC2 = Multi-Card Compute-Communication Coupling，多卡通算融合。典型场
 
 ## 2. 为什么不用 HCCL
 
-HCCL（Huawei Collective Communication Library）的高阶 API（`Hccl::AllReduce` 等）是**服务端调度**的：
+HCCL（Huawei Collective Communication Library）的高阶 API（`Hccl::AllReduce` 等）是 asc-devkit 官方通算融合路径的通信入口，但该路径**不支持 Kernel 直调，仅支持单算子 API 调用**（见 asc-devkit 官方文档《通算融合》算子实现章节）：
 
 ```
-应用层:    aclnnApi → HCCL → Server (通信 CPU) → NIC
-                                    ↑
-                            Kernel 不能干预调度
+官方通算融合: aclnn 单算子 API → Kernel 内 Hccl 高阶 API（依赖框架注入的 GetHcclContext 上下文）
+                                     ↑
+                     直调（<<<>>>）拿不到框架注入的通信上下文，无法接入
 ```
 
-而 MC2 的核心诉求是：**Kernel 内部下发通信 + 下发计算，让两者在硬件流水上重叠**。HCCL 把调度权放在 Server 端，Kernel 无法在"通信进行中"插入计算指令，通信与计算是串行的。
-
-SHMEM/UDMA 路径把通信下发权交回 Kernel：
+而 MC2 直调的核心诉求是：**Kernel 内部下发通信 + 下发计算，让两者在硬件流水上重叠**。官方通算融合路径不向内核直调场景开放 Hccl 高阶 API；SHMEM/UDMA 直调路径把通信下发权交回 Kernel：
 
 ```
 应用层: Kernel 内直接调 aclshmemx_udma_put_nbi(...)
@@ -40,12 +38,12 @@ SHMEM/UDMA 路径把通信下发权交回 Kernel：
                 ↓ （同时）
         AIC 管线继续下发 MMAD 指令
                 ↓
-        aclshmemx_barrier_all_vec() 等通信完成
+        aclshmem_barrier_all() 等通信完成
 ```
 
 UDMA（Unified DMA，对应 URMA 协议——Unreliable Remote Memory Access）是 Ascend 950 提供的 Kernel 级跨卡通信原语，所有通信下发在 Kernel 内完成，可与计算流水深度耦合。
 
-> **官方文档**：<https://shmem-doc.pages.dev/>。SKILL.md 列出的 13 类 HCCL API 在本 skill 全部禁用。
+> **官方文档**：<https://shmem-doc.pages.dev/>。SKILL.md 列出的 7 类 18 个 HCCL API 在本 skill 全部禁用。
 
 ## 3. AIV/AIC 分工
 
@@ -81,8 +79,8 @@ CrossCoreSetFlag<0x2, PIPE_MTE3>(mLoopIdx);
 CrossCoreWaitFlag<0x2, PIPE_MTE2>(mLoopIdx);
 ```
 
-- `<0x2>` 是 flag 类别（自定义编号，AIV↔AIC 间用 0x2）；
-- `PIPE_MTE3` 是 AIV 的 Memory Transfer Engine 3（输出管线），`PIPE_MTE2` 是 AIC 的输入管线；
+- `<0x2>` 是 `modeId`（同步模式参数），asc-devkit 中模式 2 表示"AI Core 内部 AIC 与所有 AIV 之间的同步控制"（AIV 发 `CrossCoreSetFlag` → AIC 侧 `CrossCoreWaitFlag` 解除阻塞，见 `CrossCoreSetFlag_ISASI.md`）。flag 的实际标识由函数参数 `flagId`（即 `mLoopIdx`）提供；
+- `PIPE_MTE3` 是 AIV 的输出管线（UB→GM/L1，在 3510 的 sync 层面 AIV 独有），`PIPE_MTE2` 是 AIV 和 AIC **共有**的输入管线（AIV: GM→UB, AIC: GM→L1）；
 - idx 用 `mLoopIdx`，AIV 写第 i 轮 buffer → AIC 读第 i 轮 buffer，idx 一一对应。
 
 ### 流水深度控制
@@ -173,16 +171,16 @@ aclshmemx_udma_put_nbi(remoteWinAddr + dstOffset,
                         dataSize,
                         remoteRank);
 
-// 2. Quiet：等本次 Put 真正下发到 UDMA 引擎（不等对端收完）
+// 2. Quiet：确保本次 Put 数据已到达对端 PE
 aclshmemx_udma_quiet(remoteRank);
 
-// 3. 全卡 Barrier：等所有卡的 Put 都被对端收完
-aclshmemx_barrier_all_vec();
+// 3. 全卡 Barrier：跨核同步点
+aclshmem_barrier_all();
 ```
 
 - `Put_nbi` 是非阻塞的——下发完立即返回，AIV 继续下一条 Put；
-- `quiet` 保证后续对同一 remoteRank 的 Put 在前面 Put 之后下发（保序）；
-- `barrier_all_vec` 是真正等对端收到的同步点。
+- `quiet` 确保本次 Put 数据已到达对端 PE（completed）；
+- `aclshmem_barrier_all()` 是全卡跨核同步点。
 
 参考工程在 `PutToAllRanks` 中"每个 Block 负责发往对应的 remoteRank"（`all_to_all_comm_udma.h::PutToAllRanks`），让多 Block 并发下发，避免单 Block 串行 Put 所有 rank。
 
