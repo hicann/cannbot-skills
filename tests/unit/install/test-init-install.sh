@@ -290,6 +290,14 @@ for team_dir in $(get_all_plugin_dirs); do
             print_fail "[$team_name] no agent matches pattern '$agent_pattern'"
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
+
+        for agent_file in "$team_dir/agents/"*.md; do
+            [ -f "$agent_file" ] || continue
+            base_name=$(basename "$agent_file" .md)
+            if [[ "$base_name" != $agent_pattern ]]; then
+                print_info "[$team_name] agent '$base_name' excluded by pattern '$agent_pattern'"
+            fi
+        done
     else
         # Some plugins (e.g. cuda2ascend) use a different agent installation
         # mechanism (collect_agents / direct glob) instead of INCLUDED_AGENT_PATTERN.
@@ -374,6 +382,167 @@ for team_dir in $(get_all_plugin_dirs); do
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
     done < <(grep -nE '\$\(cd "\$(PLUGIN_ROOT|SCRIPT_DIR)/[^"]*" && pwd\)' "$init_script" 2>/dev/null || true)
+done
+
+# =============================================================================
+# Check 7: Frontmatter-declared skills must be covered by init.sh install whitelist
+# =============================================================================
+# Ensures every skill declared in YAML frontmatter `skills:` fields is actually
+# installed by init.sh. Validates two declaration sources:
+#   - agent .md files in agents/ subdirectory (subagent runtime dependencies)
+#   - plugin root AGENTS.md (primary agent runtime dependencies)
+#
+# A skill is considered "covered" if it appears in at least one of:
+#   - init.sh INCLUDED_SKILLS (the install whitelist)
+#   - plugin-local skill directories (skills/, workflow/, or plugin root)
+#
+# Reports FAIL when a declared skill exists in the shared repo roots but is
+# missing from INCLUDED_SKILLS, indicating the plugin would install without
+# a skill its agent needs at runtime.
+# =============================================================================
+print_section_header "Check: frontmatter skills covered by init.sh whitelist"
+
+for team_dir in $(get_all_plugin_dirs); do
+    [ -d "$team_dir" ] || continue
+    team_name=$(basename "$team_dir")
+    init_script="$team_dir/init.sh"
+
+    [ -f "$init_script" ] || continue
+    [ -d "$team_dir/agents" ] || [ -f "$team_dir/AGENTS.md" ] || continue
+
+    included_skills=$(grep -oE 'INCLUDED_SKILLS="[^"]+"' "$init_script" 2>/dev/null | sed 's/INCLUDED_SKILLS="//;s/"$//' || true)
+
+    if [ -z "$included_skills" ]; then
+        if grep -qE 'collect_skills|find.*skills.*-type f|SKILL_FILES' "$init_script" 2>/dev/null; then
+            print_info "[$team_name] no INCLUDED_SKILLS (alternative skill collection), skipping"
+        else
+            print_info "[$team_name] no INCLUDED_SKILLS, skipping agent-skill coverage check"
+        fi
+        continue
+    fi
+
+    agent_pattern=$(grep -oE 'INCLUDED_AGENT_PATTERN="[^"]+"' "$init_script" 2>/dev/null | sed 's/INCLUDED_AGENT_PATTERN="//;s/"$//' || true)
+
+    matched_agents=""
+    if [ -d "$team_dir/agents" ]; then
+        for agent_file in "$team_dir/agents/"*.md; do
+            [ -f "$agent_file" ] || continue
+            base_name=$(basename "$agent_file" .md)
+            if [ -z "$agent_pattern" ] || [[ "$base_name" == $agent_pattern ]]; then
+                matched_agents="$matched_agents $base_name"
+            fi
+        done
+    fi
+
+    python_output=$(python3 - "$SKILLS_DIR" "$team_dir" "$included_skills" "$matched_agents" <<'PYEOF'
+import sys, re
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+team_dir = Path(sys.argv[2])
+included_skills = set(sys.argv[3].split())
+matched_agents = set(sys.argv[4].split()) if len(sys.argv) > 4 else set()
+team_name = team_dir.name
+
+agents_dir = team_dir / "agents"
+
+local_skill_names = set()
+for base in [team_dir / "skills", team_dir, team_dir / "workflow"]:
+    if not base.is_dir():
+        continue
+    for child in base.iterdir():
+        if child.is_dir() and (child / "SKILL.md").is_file():
+            local_skill_names.add(child.name)
+
+shared_roots = [repo_root / r for r in ("ops", "model", "graph", "infra")]
+
+def parse_skills_from_frontmatter(filepath):
+    if not filepath.is_file():
+        return []
+    content = filepath.read_text(encoding="utf-8", errors="replace")
+    fm_match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+    if not fm_match:
+        return []
+    fm = fm_match.group(1)
+    skills_match = re.search(r'^skills:\s*\n((?:[ \t]+-[ \t]+\S.*\n?)*)', fm, re.MULTILINE)
+    if not skills_match:
+        return []
+    return re.findall(r'^[ \t]+-[ \t]+(\S+)', skills_match.group(1), re.MULTILINE)
+
+def agent_is_installed(base_name):
+    if not matched_agents:
+        return True
+    return base_name in matched_agents
+
+def check_declared_skills(source_label, declared_skills):
+    global checked_sources, has_failure
+    if not declared_skills:
+        return
+    checked_sources += 1
+
+    missing = []
+    for skill in declared_skills:
+        if skill in included_skills:
+            continue
+        if skill in local_skill_names:
+            continue
+        missing.append(skill)
+
+    if missing:
+        has_failure = True
+        for skill in missing:
+            exists_in_repo = any(
+                (root / skill / "SKILL.md").is_file() for root in shared_roots
+            )
+            if exists_in_repo:
+                print(f"FAIL:[{team_name}] {source_label} declares skill '{skill}' which exists in repo but is NOT in init.sh INCLUDED_SKILLS")
+            else:
+                print(f"FAIL:[{team_name}] {source_label} declares skill '{skill}' which is NOT found in INCLUDED_SKILLS or local skills")
+    else:
+        print(f"PASS:[{team_name}] {source_label}: all {len(declared_skills)} declared skill(s) covered")
+
+checked_sources = 0
+has_failure = False
+
+if agents_dir.is_dir():
+    for agent_file in sorted(agents_dir.glob("*.md")):
+        base_name = agent_file.stem
+        if not agent_is_installed(base_name):
+            continue
+        declared_skills = parse_skills_from_frontmatter(agent_file)
+        check_declared_skills(f"agent '{base_name}'", declared_skills)
+
+agents_md = team_dir / "AGENTS.md"
+declared_skills = parse_skills_from_frontmatter(agents_md)
+check_declared_skills("AGENTS.md (primary)", declared_skills)
+
+if checked_sources == 0 and not has_failure:
+    print(f"INFO:[{team_name}] no sources with skills: frontmatter found")
+
+sys.exit(1 if has_failure else 0)
+PYEOF
+    ) || true
+
+    if [ -n "$python_output" ]; then
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            status="${line%%:*}"
+            message="${line#*:}"
+            case "$status" in
+                PASS)
+                    print_pass "$message"
+                    PASS_COUNT=$((PASS_COUNT + 1))
+                    ;;
+                FAIL)
+                    print_fail "$message"
+                    FAIL_COUNT=$((FAIL_COUNT + 1))
+                    ;;
+                INFO)
+                    print_info "$message"
+                    ;;
+            esac
+        done <<< "$python_output"
+    fi
 done
 
 # =============================================================================

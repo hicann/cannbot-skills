@@ -113,24 +113,37 @@ else
 fi
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
 
-# Parse skill dependencies from AGENTS.md frontmatter
+# Parse skill dependencies from AGENTS.md and agents/*.md frontmatter
 if [ -f "$PLUGIN_ROOT/AGENTS.md" ]; then
   INCLUDED_SKILLS=$(python3 -c "
 import re, sys
-with open('$PLUGIN_ROOT/AGENTS.md') as f:
-    content = f.read()
-m = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if m:
-    fm = m.group(1)
-    sm = re.search(r'^skills:\n((?:\s+-\s+.+\n?)*)', fm, re.MULTILINE)
-    if sm:
-        skills = re.findall(r'^\s+-\s+(.+)$', sm.group(0), re.MULTILINE)
-        filtered = [s for s in skills if not re.search(r'triton', s, re.IGNORECASE)]
-        print(' '.join(filtered))
+from pathlib import Path
+
+plugin_root = Path('$PLUGIN_ROOT')
+all_skills = set()
+
+md_files = [plugin_root / 'AGENTS.md']
+agents_dir = plugin_root / 'agents'
+if agents_dir.is_dir():
+    md_files.extend(sorted(agents_dir.glob('*.md')))
+
+for md_file in md_files:
+    if not md_file.is_file():
+        continue
+    content = md_file.read_text()
+    m = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+    if m:
+        fm = m.group(1)
+        sm = re.search(r'^skills:\n((?:\s+-\s+.+\n?)*)', fm, re.MULTILINE)
+        if sm:
+            all_skills.update(re.findall(r'^\s+-\s+(.+)$', sm.group(0), re.MULTILINE))
+
+filtered = sorted(s for s in all_skills if not re.search(r'triton', s, re.IGNORECASE))
+print(' '.join(filtered))
 " 2>/dev/null)
   if [ -z "$INCLUDED_SKILLS" ]; then
     warn "Failed to parse skill dependencies from AGENTS.md, using fallback"
-    INCLUDED_SKILLS="npu-arch ascendc-api-best-practices ascendc-docs-search ascendc-tiling-design tilelang2ascend-case-simplifier tilelang2ascend-operator-project-init ops-profiling ascendc-precision-debug tilelang2ascend-precision-tuning tilelang2ascend-tilelang-designer tilelang2ascend-translator tilelang2ascend-trace-recorder tilelang-op-design tilelang-op-develop tilelang-perf-optimization ascendc-perf-optimize"
+    INCLUDED_SKILLS="npu-arch ascendc-api-best-practices ascendc-docs-search ascendc-tiling-design ascendc-crash-debug tilelang2ascend-case-simplifier tilelang2ascend-operator-project-init ops-profiling ascendc-precision-debug tilelang2ascend-precision-tuning tilelang2ascend-tilelang-designer tilelang2ascend-translator tilelang2ascend-trace-recorder tilelang-op-design tilelang-op-develop tilelang-perf-optimization ascendc-perf-optimize"
   fi
 else
   err "AGENTS.md not found at $PLUGIN_ROOT/AGENTS.md"

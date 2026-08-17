@@ -114,7 +114,7 @@
     },
     {
       "name": "torch-npugraph-ex-skills",
-      "description": "PyTorch 昇腾 NPU npugraph_ex Skills（6 个）。覆盖图模式知识、代码模板、问题分诊、编译错误、运行时错误和自定义算子入图。",
+      "description": "PyTorch 昇腾 NPU npugraph_ex Skills（7 个）。覆盖图模式知识、代码模板、问题分诊、编译错误、运行时错误、性能诊断和自定义算子入图。",
       "source": "./graph",
       "strict": false,
       "version": "1.0.0",
@@ -134,6 +134,7 @@
         "./torch-npugraph-ex-compile-error-diagnosis",
         "./torch-npugraph-ex-dfx-triage",
         "./torch-npugraph-ex-knowledge",
+        "./torch-npugraph-ex-performance-diagnosis",
         "./torch-npugraph-ex-runtime-error-diagnosis",
         "./torch-npugraph-ex-template"
       ]

@@ -30,7 +30,7 @@ VERSION="1.0.0"
 
 # --- Team-specific filters ---
 INCLUDED_AGENT_PATTERN="ascendc-perf-*"
-INCLUDED_SKILLS="ops-simulator ops-profiling ascendc-perf-optimize ascendc-performance-best-practices ascendc-docs-search"
+INCLUDED_SKILLS="ops-simulator ops-profiling ascendc-perf-optimize ascendc-performance-best-practices ascendc-docs-search ascendc-env-check"
 # OpenCode registers markdown agents by filename under agents/; the primary agent
 # (AGENTS.md, mode: primary) must be linked there to be loadable. Claude keeps it
 # as CLAUDE.md at the config root.
