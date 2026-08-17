@@ -3,6 +3,8 @@
 > 本插件各步子 Agent 的调用参数、输入/输出、验收标准。编号与 [SKILL.md 内部步骤表](../SKILL.md#内部步骤表) 一一对应。
 >
 > **调用原则**：PM 每步首次调度子 Agent 时，必须严格按照本文档指定的角色和 prompt **原样调用**，仅允许替换 prompt 中的 `<算子名>` 项，**严禁干涉实现细节**。
+> **工具差异（dsh / codex）**：无权限 hook 环境下【权限】行的「会被 hooks 拦截」为提示性约束（子 Agent 依 `workflow-agent-permissions` 自律，无机制拦截）；dsh 派发方式见主工作流 task-prompts 头部说明。
+
 
 ## plugin-pr-submit-1 提交 PR
 

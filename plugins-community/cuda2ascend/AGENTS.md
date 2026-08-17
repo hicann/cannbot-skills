@@ -35,15 +35,28 @@ skills:
 
 启动检查通过后，读取 `.cannbot/settings.json`（init 生成的运行时配置，缺失或字段非法按 `interactive` 处理）。会话中用户可直接指示「开启静默模式 / 关闭静默模式」，此时立即更新该文件的 `mode` 字段（并刷新 `updated_at`），随后按新模式继续。
 
-**静默模式（`mode=silent`）**：完全无人值守——不输出中间进度、不向用户询问，工作流自动推进直到任务完成或遇阻断。规则细节见 `ops-direct-invoke-workflow` skill 的通用约定与 references/settings.md。进入静默工作流前，先执行**权限预检**：
+**静默模式（`mode=silent`）**：完全无人值守——不输出中间进度、不向用户询问，工作流自动推进直到任务完成或遇阻断。规则细节见 `ops-direct-invoke-workflow` skill 的通用约定与 references/settings.md。进入静默工作流前，先执行**权限预检**（按当前运行环境选择对应检查项）：
 
-1. 检查工作区 `opencode.json` / `opencode.jsonc`（含 `.opencode/` 下的同名文件）的 `permission` 配置：
+1. **opencode**：检查工作区 `opencode.json` / `opencode.jsonc`（含 `.opencode/` 下的同名文件）的 `permission` 配置：
    - **已全量授权**：`permission` 存在且全部规则为 `allow`（无 `ask` / `deny` 规则）→ 不提示。
    - **未全量授权**：存在 `ask` / `deny` 规则，或配置文件缺失 → 输出以下提示（**仅提示，不阻塞**）：
 
    > ⚠ 静默模式已开启，但工作区 opencode 权限未全量授予（存在 ask/deny 规则或未配置）。
    > 运行期间若触发工具权限确认，会被 opencode 拦截并打断自动流程。
    > 建议：预先在 opencode.json 的 `permission` 中授权所需工具，或改用交互模式（可随时说「关闭静默模式」）。
+
+2. **dsh（DeepSeek Harness）**：检查自身运行上下文中声明的**文件策略与审批策略**（如 `danger-full-access` / `workspace-write` 沙箱模式、审批策略 `ask` / `never`）：
+   - **已全量授权**：文件策略为全量访问、审批策略为 `never`（无需人工确认）→ 不提示。
+   - **未全量授权**：文件策略受限（如 `workspace-write`）或审批策略为 `ask` → 输出以下提示（**仅提示，不阻塞**）：
+
+   > ⚠ 静默模式已开启，但当前 dsh 会话权限未全量授予（文件沙箱受限或审批策略为 ask）。
+   > 运行期间若触发文件访问审批或沙箱拦截，会打断自动流程。
+   > 建议：在会话/部署层配置全量文件策略与 never 审批，或改用交互模式（可随时说「关闭静默模式」）。
+
+   注：若已安装部署级权限守卫（`hooks/dsh/install.sh`，挂 `$DSH_HOME/cordis.patch.yml`），
+   按角色的写权限隔离与静默问卷拦截已由机制保证，本预检只需聚焦会话级审批/沙箱。
+
+3. **其余环境（claude / codex 等）**：无法从项目文件预检时跳过本项（不提示、不阻塞）。
 
 ## 身份
 

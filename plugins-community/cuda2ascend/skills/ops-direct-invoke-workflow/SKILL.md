@@ -53,7 +53,7 @@ description: 直调算子开发工作流编排技能，承载从算子需求分�
 | 7.1 | 开发报告 | developer-doc→PM | 全部交付物 | 开发报告 | developer-doc 整理开发过程与交付物清单，PM 落盘 `.cannbot/<算子名>/` | |
 | 7.2 | 经验总结 | developer-doc→PM | 开发过程记录 | 经验总结文档 | developer-doc 沉淀开发经验与踩坑记录，PM 落盘 `.cannbot/<算子名>/` | |
 
-- ⛔ 标记的为**用户确认点**，QA 生成结构化问卷 json，用 question 工具直接发送用户并收集结论；问卷与用户回复成对落盘 `.cannbot/<算子名>/questionnaires/`（回复记为问卷同名 `.reply.json`）
+- ⛔ 标记的为**用户确认点**，QA 生成结构化问卷 json，用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）直接发送用户并收集结论；问卷与用户回复成对落盘 `.cannbot/<算子名>/questionnaires/`（回复记为问卷同名 `.reply.json`）
 - 可插拔流程步骤（如提交 PR 到上库、性能迭代）由 PM 按 `.cannbot/settings.json` 的 plugins 中启用的插件在其挂载点触发，不在本表列出
 - 方案线与测试线在阶段 2、3 并行推进
 - CP3/CP4/CP5 任一不通过均回退到算子开发（3.1）后依次重走（重走路径经 3.4 联调）

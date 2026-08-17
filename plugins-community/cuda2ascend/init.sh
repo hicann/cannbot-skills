@@ -112,7 +112,7 @@ BRAND="cannbot"
 VERSION="1.0.0"
 # Supported target tools — single source of truth (modify-init.md 红线 1).
 # Subclass init.sh queries this via `--list-tools` instead of hardcoding.
-SUPPORTED_TOOLS=("opencode" "claude" "codex")
+SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh")
 
 # ============================================================
 # Third-party repository registry
@@ -293,6 +293,11 @@ Installation paths:
   opencode: .opencode/{skills,agents,plugin}/   + AGENTS.md in project root
   claude:   .claude/{skills,agents,hooks}/      + settings.json + AGENTS.md/CLAUDE.md in project root
   codex:    .agents/skills/ + .codex/agents/     + AGENTS.md in project root (no permission hook)
+  dsh:      .dsh/skills/ + .dsh/agents/          + AGENTS.md in project root
+                skills discovered natively at <projectRoot>/.dsh/skills (DSH project-dsh root);
+                agents are role reference only (DSH subagents are prompt-driven);
+                no project-level permission hook — optional deployment-level guard:
+                hooks/dsh/install.sh (Cordis plugin via $DSH_HOME/cordis.patch.yml)
 
 Intermediate directory:
   .cannbot/              workflow intermediate files & state
@@ -400,6 +405,7 @@ while [ $# -gt 0 ]; do
         opencode)      TOOL="$arg"; shift; continue ;;
         claude)        TOOL="$arg"; shift; continue ;;
         codex)         TOOL="$arg"; shift; continue ;;
+        dsh)           TOOL="$arg"; shift; continue ;;
         *)
             # 兜底：动态校验 SUPPORTED_TOOLS，支持未来新增工具
             if is_supported_tool "$1"; then
@@ -445,6 +451,10 @@ if [ "${LEVEL}" = "global" ]; then
         CONFIG_ROOT="${HOME}/.claude"
     elif [ "${TOOL}" = "codex" ]; then
         CONFIG_ROOT="${HOME}/.codex"
+    elif [ "${TOOL}" = "dsh" ]; then
+        # DSH（DeepSeek Harness）用户数据根：$DSH_HOME，默认 ~/.dsh
+        # （对齐 dsh-home-paths 的 resolveDshHome 优先级：显式配置 > $DSH_HOME > ~/.dsh）
+        CONFIG_ROOT="${DSH_HOME:-${HOME}/.dsh}"
     fi
     INSTALL_BASE="${HOME}"
 else
@@ -460,6 +470,11 @@ else
         CONFIG_ROOT="${INSTALL_BASE}/.claude"
     elif [ "${TOOL}" = "codex" ]; then
         CONFIG_ROOT="${INSTALL_BASE}/.codex"
+    elif [ "${TOOL}" = "dsh" ]; then
+        # DSH 项目级配置根：<install>/.dsh。
+        # 其下的 skills/ 正是 DSH 的 project-dsh 发现根（<projectRoot>/.dsh/skills，
+        # 最近 .git 祖先判定，rank 100），无需额外配置即可被扫描。
+        CONFIG_ROOT="${INSTALL_BASE}/.dsh"
     fi
 fi
 
@@ -468,6 +483,12 @@ CANNBOT_MID_DIR="${INSTALL_BASE}/.cannbot"
 
 # Codex discovers skills from .agents/skills/ (not .codex/skills/).
 # Skills and agents are linked to separate discovery roots.
+#
+# dsh（DeepSeek Harness）走默认分支即正确：
+#   - skills 链接到 <install>/.dsh/skills —— 即 DSH 的 project-dsh 发现根
+#     （<projectRoot>/.dsh/skills，rank 100；global 为 $DSH_HOME/skills，rank 400）
+#   - agents 链接到 <install>/.dsh/agents —— DSH 无原生 agent 注册（子 Agent 纯
+#     prompt 驱动），此处仅为角色定义参考文件，供 PM 读取后组装子 Agent prompt
 SKILL_DISCOVERY_ROOT="${CANNBOT_DIR}/skills"
 AGENT_DISCOVERY_ROOT="${CANNBOT_DIR}/agents"
 if [ "${TOOL}" = "codex" ]; then
@@ -705,6 +726,9 @@ else
     done
     ok "Agents: ${agent_count} linked (flattened)"
 fi
+if [ "${TOOL}" = "dsh" ]; then
+    info "dsh: agents linked to .dsh/agents/ as role reference (DSH subagents are prompt-driven, no native agent registration)"
+fi
 echo ""
 
 # ============================================================
@@ -712,6 +736,10 @@ echo ""
 # ============================================================
 step "[4/6] Linking skills..."
 SKILLS_LINK_DIR="${SKILL_DISCOVERY_ROOT}"
+if [ "${TOOL}" = "dsh" ] && [ "${LEVEL}" = "global" ]; then
+    warn "global 安装将重建 ${SKILLS_LINK_DIR}（DSH 的 user-dsh 技能根，rank 400）——"
+    warn "该目录下既有的非 cannbot 全局技能会被移除（重跑 init 前请确认无自定义技能）"
+fi
 rm -rf "${SKILLS_LINK_DIR}"
 mkdir -p "${SKILLS_LINK_DIR}"
 
@@ -868,6 +896,22 @@ elif [ "${TOOL}" = "codex" ]; then
     echo -e "  ${DIM}Role-based write restrictions (PM only-schedule, developer-code code-only, etc.)${NC}"
     echo -e "  ${DIM}are enforced by AGENTS.md prompt, NOT by a hard hook. Subagent directory${NC}"
     echo -e "  ${DIM}isolation is best-effort, not guaranteed.${NC}"
+    echo ""
+elif [ "${TOOL}" = "dsh" ]; then
+    # DSH（DeepSeek Harness）无项目级 PreToolUse / tool.execute.before 拦截点，
+    # 不部署 permission-guard hook。角色写权限隔离默认由 AGENTS.md prompt 约束
+    # （非机制保证）；DSH 自身的沙箱模式与审批策略（sandbox / approval）在会话/
+    # 部署层配置，不属于本项目文件机制。.cannbot/permissions/ 仍生成，供 PM 启动
+    # 闸口与 workflow-agent-permissions skill 使用。
+    # 可选机制升级：hooks/dsh/install.sh 安装部署级 Cordis 守卫插件（挂载到
+    # $DSH_HOME/cordis.patch.yml，对所有 profile 生效，仅作用于 cuda2ascend
+    # 初始化的工作区），恢复按角色的写权限隔离与静默问卷拦截。
+    echo -e "  ${YELLOW}${BOLD}⚠ WARNING: DSH does not support project-level permission-guard hooks.${NC}"
+    echo -e "  ${DIM}Role-based write restrictions (PM only-schedule, developer-code code-only, etc.)${NC}"
+    echo -e "  ${DIM}are enforced by AGENTS.md prompt, NOT by a hard hook. DSH sandbox / approval${NC}"
+    echo -e "  ${DIM}policies are configured at session/deployment level, not by project files.${NC}"
+    echo -e "  ${DIM}可选机制升级: ${GREEN}hooks/dsh/install.sh${NC}${DIM} 安装部署级权限守卫${NC}"
+    echo -e "  ${DIM}(Cordis 插件 → ${DIM}\$DSH_HOME/cordis.patch.yml，恢复角色写权限隔离与静默问卷拦截)${NC}"
     echo ""
 else
     OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"
@@ -1207,6 +1251,7 @@ fi
 CLI_NAME="opencode"
 [ "${TOOL}" = "claude" ] && CLI_NAME="claude"
 [ "${TOOL}" = "codex" ] && CLI_NAME="codex"
+[ "${TOOL}" = "dsh" ] && CLI_NAME="dsh"
 echo ""
 echo -e "  ${GREEN}${BOLD}✓ ${TEAM_NAME} installed!${NC}"
 echo -e "  ${DIM}Skills: ${skill_count} | Agents: ${agent_count}${NC}"

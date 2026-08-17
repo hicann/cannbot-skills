@@ -3,6 +3,10 @@
 > 各步子 Agent 的调用参数、输入/输出、验收标准。编号与 [SKILL.md 统一流程表](../SKILL.md#统一流程表) 一一对应。
 >
 > **调用原则**：PM 每阶段首次调度子 Agent 时，必须严格按照本文档指定的角色和 prompt **原样调用**，仅允许替换 prompt 中的 `<算子名>` 项，**严禁干涉实现细节**。
+>
+> **工具差异（dsh）**：dsh（DeepSeek Harness）无命名 agent 注册（子 Agent 纯 prompt 驱动，角色定义文件位于 `.dsh/agents/<角色>.md`），PM 用 subagent 工具派发：**prompt = 对应角色定义全文（`.dsh/agents/<角色>.md` 正文）+ 本文档 prompt 原样 + 任务输入**，子 Agent 才能获得完整角色上下文；回退/续跑复用原子 Agent 会话（send_message 追加 prompt），不新建会话。**派发时 subagent 工具的 description 必须含角色名**（如「architect：需求分析」）——部署级权限守卫（`hooks/dsh/install.sh`）据此识别子 Agent 角色并按 `.cannbot/permissions/` 规则判权。
+>
+> **权限行的机制差异**：各 prompt 的【权限】行中「其它写入操作会被 hooks 拦截」在 opencode / claude 由 permission-guard hook 机制保证；在无项目级 hook 环境（dsh / codex）下降级为**提示性约束**——子 Agent 依据 `workflow-agent-permissions` 的规则自律，违规写入不会被拦截，PM 派发时仍须按该 skill 判定角色权限。**dsh 可选升级**：运行 `hooks/dsh/install.sh` 安装部署级守卫后，dsh 恢复机制保证（拦截语义与 opencode/claude 一致）。
 
 # 阶段 0：开发准备
 

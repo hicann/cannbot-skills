@@ -19,7 +19,7 @@ set -e
 # ============================================================
 # Quick Start content (shown after a successful install).
 # Customize this block for your repo. $CLI_NAME is resolved at
-# runtime from the target tool (opencode/claude).
+# runtime from the target tool (opencode/claude/codex/dsh).
 # ============================================================
 show_quick_start() {
     echo ""
@@ -264,5 +264,7 @@ bash "$PLUGIN_INIT" "${PLUGIN_ARGS[@]}" || {
 # ============================================================
 CLI_NAME="opencode"
 [ "$TARGET_ENV" = "claude" ] && CLI_NAME="claude"
+[ "$TARGET_ENV" = "codex" ] && CLI_NAME="codex"
+[ "$TARGET_ENV" = "dsh" ] && CLI_NAME="dsh"
 show_quick_start
 echo ""

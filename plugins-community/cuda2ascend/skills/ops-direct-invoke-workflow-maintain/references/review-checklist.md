@@ -51,12 +51,12 @@
 |------|--------|
 | L1 | 新增/删除 skill 后，是否重新运行了 init 使软链接生效？ |
 | L2 | 子仓 override 的逻辑名（skill 目录名 / SKILL.md 的 `name:`）是否与基类一致，能被正确匹配？ |
-| L3 | 是否只改了源文件，没有直接改运行时目录（`.opencode/` / `.claude/`）里的软链接目标？ |
+| L3 | 是否只改了源文件，没有直接改运行时目录（`.opencode/` / `.claude/` / `.dsh/`）里的软链接目标？ |
 | L4 | 新增 skill 若需被某 agent 或 PM 使用，是否已加入对应 `agents/<name>.md` 或 `AGENTS.md` 的 `skills:` frontmatter，否则 init 收集不到？ |
 | L5 | 改动了流程（阶段 / CP / 回退关系）后，插件根 `README.md` 的「开发流程概览」表是否仍与 `ops-direct-invoke-workflow/SKILL.md` 的统一流程表一致（阶段、CP 编号、回退指向）？ |
 | L6 | 改动了 `init.sh` 的 CLI 参数（新增 / 删除 / 重命名 / 语义变更）或 override 展开逻辑后，`example/init.sh` 是否仍然兼容？该文件已分发到各子仓，若不兼容必须发问卷知会用户决策是否迁移 |
 | L7 | 改动 agent 文件后，检查其正文中是否有"用 `xxx` skill"、"加载 `xxx`"、"引用 `xxx`"等 skill 依赖声明——若有，该 skill 是否已全部列入 `skills:` frontmatter？漏掉的 skill 不会被 init 链接，运行时加载会失败 |
-| L8 | 修改 `skills/workflow-agent-permissions/hooks/*.js`（新增/删除角色文件、调整 categories/exts）后，是否同步更新了两侧 hook 内置默认值 `DEFAULT_RULES`（`hooks/opencode/` 与 `hooks/claude/`）？两者互为兜底（skill 文件为真值源、hook 内置为防御兜底），不同步会导致「配置缺失时角色行为与预期不一致」 |
+| L8 | 修改 `skills/workflow-agent-permissions/hooks/*.js`（新增/删除角色文件、调整 categories/exts）后，是否同步更新了**三侧**内置默认值 `DEFAULT_RULES`（`hooks/opencode/`、`hooks/claude/` 与 `hooks/dsh/permission-guard.js`）？三者互为兜底（skill 文件为真值源、hook 内置为防御兜底），不同步会导致「配置缺失时角色行为与预期不一致」 |
 
 ## 六、插件约束（plugin-*）
 
@@ -78,7 +78,7 @@
 | M3 | ⛔ 确认点（CP0/CP1/CP2.2）的静默默认决策是否落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`），中断恢复表（task-prompts recovery）是否无需感知静默？ |
 | M4 | 静默例外清单是否完整且唯一（权限预检警告 / 任务完成总结），无其它隐含输出；插件内异步等待的告知是否归插件自身约定而非主工作流例外清单？ |
 | M5 | 修改 `--mode` 或 Step 5.5 后，`example/init.sh` 是否仍兼容（基类参数只增不破坏）？ |
-| M6 | 静默问卷拦截两侧是否同步（`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？**`SILENT_GUARDED_TOOLS` 的取值是否与两侧 harness 的问卷工具真实名对得上**（claude 侧为 `AskUserQuestion`，hook 内按子串匹配；只对 matcher 不对工具名，拦截会静默空转） |
+| M6 | 静默问卷拦截是否三侧同步（`hooks/opencode/permission-guard.js`、`hooks/claude/permission-guard.js` 与 `hooks/dsh/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？**`SILENT_GUARDED_TOOLS` 的取值是否与各 harness 的问卷工具真实名对得上**（claude 侧为 `AskUserQuestion`、dsh 侧为 `ask_user_question`，hook 内按子串匹配；只对 matcher 不对工具名，拦截会静默空转） |
 
 ## 八、子仓兼容性（`example/init.sh` 分发契约）
 

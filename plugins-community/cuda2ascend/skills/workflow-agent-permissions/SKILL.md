@@ -16,7 +16,7 @@ disable-model-invocation: true
 | developer-test | test | 任意 | 测试工程（评测集 cases 对齐、白盒补充、本地自测脚本） |
 | developer-doc | 代码 + test + doc | 仅 `.md` | 文档产出 |
 
-派发非 `.cannbot` 目录的写任务时，必须选择对应可写范围的角色；权限不足会被 hook 拦截并提示上报主 Agent。
+派发非 `.cannbot` 目录的写任务时，必须选择对应可写范围的角色；权限不足会被 hook 拦截并提示上报主 Agent（**dsh / codex 无项目级权限 hook**：默认拦截缺失，规则降级为 prompt 约束——PM 依本 skill 判定避免无效派发，子 Agent 依 prompt 自律，违规写入无机制拦截。**dsh 可选机制升级**：运行 `hooks/dsh/install.sh` 安装部署级 Cordis 守卫插件（`$DSH_HOME/cordis.patch.yml`，对所有 profile 生效），即恢复与 opencode/claude 同语义的机制拦截，仅作用于 cuda2ascend 初始化的工作区）。
 
 ## 目录类别的判定方式
 
@@ -33,7 +33,7 @@ disable-model-invocation: true
 
 ## 守卫边界
 
-拦截发生在**写类工具**（write / edit / patch / multiedit / notebookedit）这一层：
+拦截发生在**写类工具**（write / edit / patch / multiedit / notebookedit 等，dsh 为 write / edit）这一层：
 
 - 用 shell 命令写文件（重定向、`cp`、`tee` 等）**不经过守卫**。落盘一律用写类工具，不得用 shell 绕过权限范围——绕过既失去拦截，也失去留痕。
 - 权限不足时正确做法是结束任务并向主 Agent 上报，由其改派具备该目录写权限的角色，不是换一种写法把文件落下去。
@@ -41,7 +41,7 @@ disable-model-invocation: true
 
 ## 静默模式问卷拦截
 
-静默模式（`.cannbot/settings.json` 的 `mode=silent`）启用时，permission-guard hook 在机制层拦截问卷工具（opencode 的 `question`/`ask`、claude 的 `AskUserQuestion`；按工具名子串匹配，覆盖带前后缀的同类命名）的发送：任何角色（含 QA）在静默下调用问卷工具都会被阻断并回传「按静默默认决策执行、落盘 `.reply.json`」的提示。这是 prompt 层约束（QA 不发送问卷）的机制兜底；settings.json 的 `mode` 切换为 `interactive` 后立即解除拦截（opencode 每次调用实时读配置，claude 天然每次调用独立进程）。
+静默模式（`.cannbot/settings.json` 的 `mode=silent`）启用时，permission-guard hook 在机制层拦截问卷工具（opencode 的 `question`/`ask`、claude 的 `AskUserQuestion`；按工具名子串匹配，覆盖带前后缀的同类命名）的发送：任何角色（含 QA）在静默下调用问卷工具都会被阻断并回传「按静默默认决策执行、落盘 `.reply.json`」的提示。这是 prompt 层约束（QA 不发送问卷）的机制兜底；settings.json 的 `mode` 切换为 `interactive` 后立即解除拦截（opencode 每次调用实时读配置，claude 天然每次调用独立进程）。**dsh**：默认无项目级 hook、无机制兜底，仅靠 prompt 约束（task-prompts 的「【静默模式】不发送问卷」追加指令 + QA 自律）；安装部署级守卫（`hooks/dsh/install.sh`）后，`tools/pre-execute` 门会拦截 `ask_user_question` 等问卷工具（按子串匹配，dsh 侧含 `ask`），恢复机制兜底。**codex**：无任何 hook，仅 prompt 约束。
 
 ## 规格文件
 

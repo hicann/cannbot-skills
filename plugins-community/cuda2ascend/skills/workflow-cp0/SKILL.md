@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # 环境确认验收标准
 
-获取到 `.cannbot/环境信息.md` 时，立即用 question 工具按下列格式向用户发送问卷。每个标题对应问卷的一页（`questions` 数组的一项），`{...}` 为占位符，取值自环境信息文档的实测结果：
+获取到 `.cannbot/环境信息.md` 时，立即用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）按下列格式向用户发送问卷。每个标题对应问卷的一页（`questions` 数组的一项），`{...}` 为占位符，取值自环境信息文档的实测结果：
 
 ```json
 {
@@ -48,6 +48,6 @@ disable-model-invocation: true
 
 ## 结果处理
 
-1. 发出的问卷 json 落盘 `.cannbot/<算子名>/questionnaires/CP0-环境确认.json`；question 工具返回的用户回复（按 questions 顺序的选中 label 数组，含自定义输入）落盘同名 `.reply.json`。
+1. 发出的问卷 json 落盘 `.cannbot/<算子名>/questionnaires/CP0-环境确认.json`；问卷工具返回的用户回复（按 questions 顺序的选中 label 数组，含自定义输入）落盘同名 `.reply.json`。
 2. Git 凭据页选「同意记录位置」时，保留环境信息文档「Git 凭据」节已记录的凭据位置；选「我另行提供」或「不同意记录」时，删除该节已记录的凭据位置，不再持久化。
 3. 回传结构化摘要（状态 / 结论 / 交付件路径）。

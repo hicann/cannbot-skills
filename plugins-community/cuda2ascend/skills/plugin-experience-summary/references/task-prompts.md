@@ -24,10 +24,10 @@
 
 ```md
 - 【权限】你只可写 `.cannbot/<算子名>/tmp/`，其它写入操作会被 hooks 拦截。
-- 【输入】本次会话的拦截记录（从 state.json、LOG.md、Issue-问题记录、tmp/ 中寻找 permission-guard / 静默问卷拦截相关记录）；hook 源文件：`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js`（只读，不修改）。
+- 【输入】本次会话的拦截记录（从 state.json、LOG.md、Issue-问题记录、tmp/ 中寻找 permission-guard / 静默问卷拦截相关记录）；hook 源文件：`hooks/opencode/permission-guard.js` 与 `hooks/claude/permission-guard.js`（只读，不修改；**dsh 未安装部署级守卫时 / codex 等无 hook 环境没有这些源文件**，见验收标准；dsh 已安装守卫时另可对照 `hooks/dsh/permission-guard.js`）。
 - 【输出】hooks 分析与修复建议段落，写入 `.cannbot/<算子名>/tmp/经验总结-2-hooks分析.md`。
 - 【参考资料】读取 `workflow-agent-permissions` 的 SKILL.md **原文**作为权限范围与守卫边界的基准（该 skill 不经 skill 加载工具触发，直接读文件）。
-- 【验收标准】逐条记录本次会话中的实际拦截/漏拦/误拦事件（含事件上下文、角色、工具、结果）；对照两侧 hook 源给出建议修复点（如规则缺失、误伤、语义不一致、两侧语义不同步），每条标注严重度与修复位置；无拦截记录时明确写出「本次会话无 hooks 拦截记录」，并基于两侧 hook 源给静态建议。**误拦事件须追到规则层根因**（是路径分类规则不匹配，还是角色权限范围本身不含该目录）——绕开守卫落盘属绕行手段，不作为修复结论。
+- 【验收标准】逐条记录本次会话中的实际拦截/漏拦/误拦事件（含事件上下文、角色、工具、结果）；对照两侧 hook 源给出建议修复点（如规则缺失、误伤、语义不一致、两侧语义不同步），每条标注严重度与修复位置；无拦截记录时明确写出「本次会话无 hooks 拦截记录」，并基于两侧 hook 源给静态建议。**误拦事件须追到规则层根因**（是路径分类规则不匹配，还是角色权限范围本身不含该目录）——绕开守卫落盘属绕行手段，不作为修复结论。**无 hook 环境（dsh 未安装部署级守卫时 / codex）**：直接输出「该环境无 permission-guard 机制、无拦截记录」，并基于 `workflow-agent-permissions` 的规则表（路径分类 / 角色可写范围 / 静默问卷约束）给静态建议，不引用不存在的 hook 源。
 ```
 
 ## plugin-experience-summary-3 耗时统计与重试定位
@@ -50,6 +50,6 @@
 - 读取 `.cannbot/<算子名>/tmp/经验总结-{1,2,3}-*.md` 三段，整合为完整经验总结：① 踩坑回顾（仅本仓 skill 未说明确的点）② hooks 异常拦截分析与建议修复点 ③ 耗时统计与反复重试定位 ④ 汇总与后续建议；落盘 `.cannbot/<算子名>/插件经验总结.md`。
 - **环境检查**：读取 `.cannbot/环境信息.md` 的「环境补充记录」节——若该节非空（本次开发中环境项曾被探索补充），说明初始环境检查（步骤 0）未覆盖到这些项，在总结中**建议提 Issue 补充环境检查内容**（列出被补充的环境项与缺失原因）；该建议与其它建议一并纳入下方 issue 征询。
 - 三段任一缺失或不全：回退对应步骤（plugin-experience-summary-1/2/3）补齐后重试，往返不超过 2 轮。
-- 落盘后征询用户：是否需要拟一条 issue 反馈到 cannbot-skills 仓（gitcode.com/cann/cannbot-skills）？——交互模式用 question 工具直接发送用户；静默模式并入任务完成总结列出选项。
+- 落盘后征询用户：是否需要拟一条 issue 反馈到 cannbot-skills 仓（gitcode.com/cann/cannbot-skills）？——交互模式用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）直接发送用户；静默模式并入任务完成总结列出选项。
 - 用户同意：加载 `gitcode-issue-gen`，按模板拟 issue 草稿（标题、分类、现象、建议修复点、复现/证据），**先交用户确认后再提交**；用户不同意或暂缓：在插件经验总结.md 中记录征询结论。
 ```
