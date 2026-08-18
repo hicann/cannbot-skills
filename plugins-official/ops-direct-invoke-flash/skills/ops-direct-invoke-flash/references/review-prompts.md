@@ -1,5 +1,10 @@
 # 评审提示词模板
 
+**先看开关：** 文档评审受 Team `AGENTS.md` 的 `harness.review` 控制，取值 `auto`（默认）/ `on` / `off`。
+仅在 `on`（simple 档）或 `auto`/`on`（complex 档）时才需要用到本文件的模板；
+按开关跳过时在 STATE.md 记录即可，**不要**生成空的 `review_*.md` 占位文件。
+详见 SKILL.md「文档评审开关 `harness.review`」——跳过的只是子 Agent 评审，其中的确定性红线仍由主 Agent 执行。
+
 所有评审都使用 `Agent` 工具。在单条消息中以 `run_in_background=true` 同时启动成对的评审 Agent 以实现并行执行。
 
 **重要：** 在把这些提示词传给 Agent 工具之前，请将 `{OP}` 替换为算子名，将 `{SOURCE_PATH}` 替换为算子源文件路径。Agent 无法访问父会话的变量。如果不存在源文件（公式或文本输入），请从提示词中删除对源文件的引用。

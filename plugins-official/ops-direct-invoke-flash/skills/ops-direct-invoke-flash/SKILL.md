@@ -55,7 +55,7 @@ hooks:
 
 1. 分析算子来源，提取语义，并在算子工程根目录中选择一个已完成的算子作为结构参考。
 2. 创建 `docs/{OP}/STATE.md`，然后在编写核函数代码之前先完成定义文档和设计文档。
-3. 用子 Agent 评审文档，打磨完善，再以小步增量的方式实现。
+3. 按 `harness.review` 决定是否用子 Agent 评审文档，打磨完善，再以小步增量的方式实现。
 4. 运行本地构建/测试，随后在真实 NPU 硬件上进行验证；若 `harness.test_gate` 为 `on`，再执行黑/白盒测试门禁。
 5. 在 `docs/{OP}/plans/troubleshooting.md` 中记录非平凡问题，并将预防措施反馈回工作流。
 
@@ -70,7 +70,28 @@ hooks:
 
 判据存疑时按 **complex** 处理。合并评审的提示词模板见 [references/review-prompts.md](references/review-prompts.md)。
 
+## 文档评审开关 `harness.review`
+
+从 Team `AGENTS.md` frontmatter 读取 `harness.review`，取值 `auto` / `on` / `off`，**默认 `auto`**。它与复杂度档位共同决定阶段 3/4 的文档评审、以及阶段 6 的 Reg API 扫描是否起子 Agent：
+
+| 取值 | simple 档 | complex 档 |
+|---|---|---|
+| `auto`（默认） | **跳过**：阶段 3/4 不起评审 Agent；阶段 6 的禁用 API 扫描由主 Agent 自行 grep | **评审**：阶段 3/4 分项多 Agent；阶段 6 重跑 API 扫描 Agent |
+| `on` | **评审**：阶段 3/4 各 1 个合并 Agent；阶段 6 重跑 API 扫描 Agent | 同 `auto` 的 complex 列 |
+| `off` | **跳过**：同 `auto` 的 simple 列 | **跳过**：同左 |
+
+跳过时，在 `docs/{OP}/STATE.md` 记录「按配置跳过文档评审（`harness.review=<取值>`，复杂度档位 `<档位>`）」并继续，**不要**生成空的 `review_*.md` 占位文件。
+
+**跳过的是子 Agent 评审，不是校验本身。** 以下检查由主 Agent 自己完成，在任何取值下都必须执行：
+
+- 阶段 4：每个块大小 / 传输计数常量对所有支持 dtype 满足 `count * sizeof(T) >= 32`；UB 预算涵盖所有存活缓冲区且不超限；Cast 链符合支持矩阵。
+- 阶段 6 构建前：grep host-only 辅助函数（`ceil_div` / `align_down` / `align_up`）。
+- 阶段 6 构建前（dav-3510）：对照 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml) grep 禁用 API（`AscendC::MicroAPI`、Membase、除 `asc_vf_call` 外的裸 `asc_*`、经典 AscendC 计算/Cast/规约），并确认掩码为元素计数、尾块存储已加掩码。
+- 阶段 6/7：构建通过且 `pytest` 全部用例在真机通过——这是最终的正确性关卡，任何取值下都不可跳过。
+
 ## 并行起草（缩短评审空等）
+
+本节仅在按 `harness.review` 实际发起了评审时适用；跳过评审时没有 barrier，直接顺序推进即可。
 
 评审 Agent 是 barrier，起草下一份**独立产物**不是。在等待某阶段后台评审时，可并行起草下一阶段中不依赖该评审结论的产物，评审返回后再对照吸收：
 
@@ -90,7 +111,7 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 - **阶段 6（实现）**：实现完整核函数后，复用阶段 2 的配置做**首次也是唯一一次**构建（`cd build && make -j`；这是全流程唯一的 ASC 编译），随后**一次性**跑接口测试 + `--collect-only` + 完整 NPU 参数化用例。失败则修复后仅重编该文件。提交。
 - **阶段 7（验证）**：simple 档**跳过独立的干净重建**——阶段 6 的 `make` 是在阶段 2 全新配置的 build/ 上的首次编译，本就干净。仅确认 `{OP}.asc` 为完整实现（非骨架）、阶段 6 日志显示全部用例通过。**唯有**怀疑陈旧产物时才触发一次 `rm -rf build` 干净重建。
 
-并行化：阶段 3/4 的后台评审可与实现草稿重叠——simple 档在评审进行时并行起草阶段 6 实现，评审 FAIL 再回改。
+并行化：`harness.review=on` 时，阶段 3/4 的后台评审可与实现草稿重叠——simple 档在评审进行时并行起草阶段 6 实现，评审 FAIL 再回改。按开关跳过评审时无此空等，直接顺序推进。
 
 风险：本路径牺牲了「骨架早编暴露编译错误」与「阶段 7 独立新鲜度重建」两道安全网，换取 ~2/3 的编译墙钟。仅在低风险（照抄参考算子）时使用。
 
@@ -112,8 +133,9 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 6. 探测目标芯片：运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/detect_soc.py`，从输出中读取 `SocVersion` 与 `NpuArch`（形如 `dav-3510`）。据此判定后续路径——`NpuArch` 为 `dav-3510`（Ascend950）时走 `AscendC::Reg` 路径。若脚本因无 NPU 或环境缺失而失败，向用户询问目标芯片。这两个值会在阶段 1 记入 STATE.md。
 7. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)，并把 `operators/mul`（dav-3510 Reg 路径的最小参考算子）作为 Reg 计算形态的结构参考。`add`/`sqrt` 用的是经典 AscendC 计算 API，仅供 harness/CMake/test 结构参考。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
 8. 判定算子复杂度档位（simple / complex，见上文「算子复杂度分档」），据此缩放后续评审强度。这将在阶段 1 记入 STATE.md。
+9. 从 Team `AGENTS.md` frontmatter 读取 `harness.review`（`auto` / `on` / `off`，默认 `auto`），与步骤 8 的档位一起查「文档评审开关」表，确定阶段 3/4/6 是否发起评审 Agent。该取值也在阶段 1 记入 STATE.md。
 
-**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子，已探测到目标芯片（`SocVersion` / `NpuArch`），已判定复杂度档位。
+**退出条件：** 已确定 `{OP}` 名称，`docs/{OP}/plans/` 已存在，已确定参考算子，已探测到目标芯片（`SocVersion` / `NpuArch`），已判定复杂度档位，已读取 `harness.review`。
 
 ### 阶段 1：状态跟踪
 
@@ -158,17 +180,18 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 
 在编写 CPU 参考伪代码之前，检查来源（如果提供了代码）是否存在迭代累加模式 —— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 迭代累加精度。如果输入是公式或描述，验证推导是否严谨，并与用户一起补全缺失的 I/O 细节。
 
-按复杂度档位缩放评审（见「算子复杂度分档」）：
-- **simple 档**：`run_in_background=true` 启动 **1 个** `definition-review` 合并 Agent（数学+语义 checklist 合并）。
-- **complex 档**：`run_in_background=true` 并行启动 `math-review` 和 `semantics-review` 两个 Agent。
+按 `harness.review` 与复杂度档位决定本阶段是否评审（见「文档评审开关」，默认 `auto`）：
+- **跳过**（`off`，或 `auto` + simple 档）：不发起评审 Agent，在 STATE.md 记录按配置跳过，写完定义文档直接提交并进入阶段 4。
+- **`on` + simple 档**：`run_in_background=true` 启动 **1 个** `definition-review` 合并 Agent（数学+语义 checklist 合并）。
+- **`auto` / `on` + complex 档**：`run_in_background=true` 并行启动 `math-review` 和 `semantics-review` 两个 Agent。
 
 Agent 都会阅读定义文档与算子来源（如果存在来源文件）。准确的提示词（含合并版）、验证清单以及结构化判定格式见 [references/review-prompts.md](references/review-prompts.md)。
 
-在等待评审时，可并行起草阶段 4 设计文档草稿（见「并行起草」）。等待所有 Agent 完成，然后在提交前吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
+发起了评审时：在等待评审时，可并行起草阶段 4 设计文档草稿（见「并行起草」）。等待所有 Agent 完成，然后在提交前吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
 
 提交。
 
-**退出条件：** 定义文档已存在，两份评审结论均已吸收（没有未解决的 FAIL），已提交。
+**退出条件：** 定义文档已存在并已提交；若发起了评审，其结论均已吸收（没有未解决的 FAIL）；若跳过，STATE.md 已记录跳过原因。
 
 ### 阶段 4：设计文档
 
@@ -181,11 +204,14 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 - Cast 链（如果输出 dtype 与计算 dtype 不同）
 - 对于 Ascend950 / `dav-3510`：Reg 包装器清单、掩码/尾块策略、`CastTrait` 细节、规约标量槽布局，以及禁止 API 的规避
 
-按复杂度档位缩放评审（见「算子复杂度分档」）：
-- **simple 档**：`run_in_background=true` 启动 **1 个** `design-review` 合并 Agent（UB 预算 + 指令序列 checklist 合并；dav-3510 时该 checklist 额外含 Reg API 合规项）。
-- **complex 档**：`run_in_background=true` 并行启动 `ub-review` 和 `instr-review`；对 Ascend950 / `dav-3510` 再加 `reg-api-review`。
+按 `harness.review` 与复杂度档位决定本阶段是否评审（见「文档评审开关」，默认 `auto`）：
+- **跳过**（`off`，或 `auto` + simple 档）：不发起评审 Agent，在 STATE.md 记录按配置跳过。**下方「设计定稿前的确定性校验」仍须执行。**
+- **`on` + simple 档**：`run_in_background=true` 启动 **1 个** `design-review` 合并 Agent（UB 预算 + 指令序列 checklist 合并；dav-3510 时该 checklist 额外含 Reg API 合规项）。
+- **`auto` / `on` + complex 档**：`run_in_background=true` 并行启动 `ub-review` 和 `instr-review`；对 Ascend950 / `dav-3510` 再加 `reg-api-review`。
 
-准确的提示词（含合并版）与验证清单见 [references/review-prompts.md](references/review-prompts.md)。在等待评审时，可并行起草阶段 5 测试套件（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。在仍存在未解决的 Reg API FAIL 结论时，不要提交设计。
+准确的提示词（含合并版）与验证清单见 [references/review-prompts.md](references/review-prompts.md)。发起了评审时：在等待评审时，可并行起草阶段 5 测试套件（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。在仍存在未解决的 Reg API FAIL 结论时，不要提交设计。
+
+**设计定稿前的确定性校验（与 `harness.review` 无关，始终执行）：** 逐条核对每个块大小 / 传输计数常量对所有支持 dtype 满足 `count * sizeof(T) >= 32`；UB 预算涵盖所有存活缓冲区且不超限；Cast 链符合支持矩阵。把核对结果写进设计文档——关掉评审后，这三项没有其他兜底。
 
 在最终确定设计文档之前，对照 [references/common-failure-modes.md](references/common-failure-modes.md) 中的陷阱进行验证 —— 尤其是 UB 拷贝路径、32B DMA 最小值以及 Cast 支持矩阵。
 
@@ -193,7 +219,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 提交。
 
-**退出条件：** 设计文档已存在，两份评审结论均已吸收，已提交。
+**退出条件：** 设计文档已存在并已提交，确定性校验已完成；若发起了评审，其结论均已吸收；若跳过，STATE.md 已记录跳过原因。
 
 ### 阶段 5：测试套件
 
@@ -239,7 +265,11 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 在最终确定之前，对照 [references/common-failure-modes.md](references/common-failure-modes.md) 验证 —— 尤其是 device 侧辅助函数调用、TBuf 生命周期 和 AscendC Cast 支持矩阵。代码模式见 [references/implementation-patterns.md](references/implementation-patterns.md)。
 
-对于 Ascend950 / `dav-3510`，实现完成后重新运行只读的 API 查询子 Agent 或评审提示词，对照 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml) 扫描实际的核函数源码。在构建前解决每一项禁止 API 的发现。
+对于 Ascend950 / `dav-3510`，实现完成后对照 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml) 扫描实际的核函数源码，扫描方式按 `harness.review`（见「文档评审开关」）：
+- **跳过**（`off`，或 `auto` + simple 档）：不起子 Agent，由主 Agent 直接对 `{OP}.asc` grep 该 yaml 中的禁止模式，并核对掩码为元素计数、尾块存储已加掩码。
+- **其余取值**：重新运行只读的 API 查询子 Agent 或评审提示词做扫描。
+
+无论走哪条路径，都要在构建前解决每一项禁止 API 的发现。
 
 在阶段 6 中使用多个 Agent 时，始终使用 `isolation="worktree"`。
 
@@ -293,7 +323,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 使用 `Agent` 工具进行评审和可并行的分析。模式：
 
-**并行评审 Agent** —— 在单条消息中以 `run_in_background=true` 启动：
+**并行评审 Agent** —— 是否发起由 `harness.review` 决定（见「文档评审开关」）；发起时在单条消息中以 `run_in_background=true` 启动：
 - 为每个 Agent 起描述性的名字（例如 `math-review`、`ub-review`）
 - 保持提示词具体：`Read X and Y, verify A/B/C, write findings to Z.`
 - 要求结构化判定（PASS/FAIL/CONCERN）—— 见 [references/review-prompts.md](references/review-prompts.md)

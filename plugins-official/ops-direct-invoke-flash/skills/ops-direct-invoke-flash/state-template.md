@@ -12,6 +12,7 @@
 创建时间：{DATE}
 目标芯片：SocVersion={SOC_VERSION} / NpuArch={NPU_ARCH}（阶段 0 由 scripts/detect_soc.py 探测）
 复杂度档位：{simple|complex}（阶段 0 判定，决定阶段 3/4 评审是合并单 Agent 还是分项多 Agent）
+文档评审：`harness.review = {auto|on|off}`（阶段 0 从 Team `AGENTS.md` 读取，默认 `auto`；`off` 或 `auto`+simple 时跳过阶段 3/4/6 的评审 Agent，确定性红线仍照常执行）
 
 ## 阶段 2：可编译骨架
 <!-- simple 档快速路径：本阶段只跑 cmake 配置、不 make；唯一一次 ASC 编译与真机测试推迟到阶段 6。 -->
@@ -26,8 +27,8 @@
 - [ ] 若提供了源代码：检查是否存在迭代累加模式——评估精度风险
 - [ ] 若为公式/描述：与用户确认公式并补全缺失的 I/O 细节
 - [ ] 编写 `docs/{OP}/{OP}_definition.md`
-- [ ] 子 Agent 评审（simple 档：1 个合并 `definition-review`；complex 档：`math-review` + `semantics-review`），判定 PASS/FAIL/CONCERN
-- [ ] 润色并提交
+- [ ] 文档评审：按 `harness.review` 决定——跳过（`off` 或 `auto`+simple）则记录跳过原因；`on`+simple 跑 1 个合并 `definition-review`；complex 跑 `math-review` + `semantics-review`，判定 PASS/FAIL/CONCERN
+- [ ] 若发起了评审则吸收结论；润色并提交
 
 ## 阶段 4：算子设计文档
 - [ ] 编写 `docs/{OP}/{OP}_design.md`
@@ -35,8 +36,9 @@
 - [ ] 对每个块大小或传输计数常量，验证对所有支持的 dtype（fp16、fp32）满足 `count * sizeof(T) >= 32`
 - [ ] 若输出 dtype 与计算 dtype 不同，依据 implementation-patterns.md § 类型转换（Cast）支持矩阵 设计 Cast 链
 - [ ] 若面向 Ascend950 / `dav-3510`：记录 Reg 包装函数、掩码/尾块处理、32B 规约标量槽位、`CastTrait`/dist 模式以及禁用 API 的规避
-- [ ] 子 Agent 评审（simple 档：1 个合并 `design-review`；complex 档：`ub-review` + `instr-review`，dav-3510 再加 `reg-api-review`），判定 PASS/FAIL/CONCERN
-- [ ] 润色并提交
+- [ ] 确定性校验（与 `harness.review` 无关，始终执行）：块大小/传输计数对所有 dtype 满足 `count*sizeof(T)>=32`、UB 预算涵盖所有存活缓冲区且不超限、Cast 链符合支持矩阵，结果写入设计文档
+- [ ] 文档评审：按 `harness.review` 决定——跳过（`off` 或 `auto`+simple）则记录跳过原因；`on`+simple 跑 1 个合并 `design-review`；complex 跑 `ub-review` + `instr-review`（dav-3510 再加 `reg-api-review`），判定 PASS/FAIL/CONCERN
+- [ ] 若发起了评审则吸收结论；润色并提交
 
 ## 阶段 5：测试套件
 - [ ] 在 `test_{OP}.py` 中定义 `SHAPES` 用例矩阵（最少：小/大/非对齐形状，边界场景取值）与 `DTYPES`（每个支持的 dtype）
@@ -51,7 +53,7 @@
 - [ ] 实现 tiling 函数 `calc_{OP}_tiling_params()`（返回 numBlocks/blockLength/tileSize）
 - [ ] 若面向 Ascend950 / `dav-3510`：用 `__simd_vf__` + `AscendC::Reg` + `asc_vf_call` 包装函数实现向量计算/类型转换/规约
 - [ ] 若面向 Ascend950 / `dav-3510` 且为该算子指定了 VF 融合上限 `N`：每个 `__simd_vf__` 函数融合 ≤ `N` 条 VF 计算指令（更长的链拆分为多个包装函数，通过各自独立的 `asc_vf_call` 串接）。在设计文档中记录所选的 `N`；若未指定上限则跳过。
-- [ ] 若面向 Ascend950 / `dav-3510`：扫描禁用 API（`AscendC::MicroAPI`、Membase、除 `asc_vf_call` 外的裸 `asc_*`、经典 AscendC 计算/类型转换/规约）
+- [ ] 若面向 Ascend950 / `dav-3510`：扫描禁用 API（`AscendC::MicroAPI`、Membase、除 `asc_vf_call` 外的裸 `asc_*`、经典 AscendC 计算/类型转换/规约）——按 `harness.review`，跳过时由主 Agent 直接 grep，否则重跑只读 API 查询子 Agent
 - [ ] 若面向 Ascend950 / `dav-3510`：验证掩码为元素计数、尾块存储已加掩码、规约使用 32B 标量槽位，且 Reg 产生的标量不经由 `GetValue()` 取出
 - [ ] 验证每个 `TBuf::Get<T>()` 调用都由与其对应 `pipe.InitBuffer()` 相同的 `if constexpr` 条件守护
 - [ ] 验证 device 侧代码中使用的所有辅助函数在 device 侧编译上下文中均有效

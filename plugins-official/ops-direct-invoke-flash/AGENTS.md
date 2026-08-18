@@ -13,6 +13,7 @@ permission:
   external_directory: allow
 harness:
   test_gate: off
+  review: auto
 ---
 
 # CANNBot
