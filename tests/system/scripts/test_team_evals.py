@@ -154,7 +154,7 @@ def pytest_generate_tests(metafunc):
             logger.warning("Team directory not found for %s, skipping eval cases", team_name)
             continue
         for eval_item in evals_data.get("evals", []):
-            if eval_id and str(eval_item.get("id")) != str(eval_id):
+            if eval_id and str(eval_item.get("id")) not in {str(e) for e in eval_id}:
                 continue
             if not _platform_matches(ascend_platforms, eval_item):
                 continue

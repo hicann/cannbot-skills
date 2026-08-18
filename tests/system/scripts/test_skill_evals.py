@@ -972,7 +972,7 @@ def pytest_generate_tests(metafunc):
             continue
         skill_dir = get_skill_path(skill)
         for eval_item in evals_data.get("evals", []):
-            if eval_id and str(eval_item.get("id")) != str(eval_id):
+            if eval_id and str(eval_item.get("id")) not in {str(e) for e in eval_id}:
                 continue
             if not _platform_matches(ascend_platforms, eval_item):
                 continue
@@ -1373,7 +1373,7 @@ def _run_eval_with_retry(
 ) -> None:
     """执行评测并支持重试，验证不通过时抛出异常。"""
     # EVAL_EXEC_RETRIES: 额外重试次数。0 = 不重试（1 次尝试），1 = 重试 1 次（2 次尝试），以此类推
-    max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "2"))
+    max_retries = int(os.environ.get("EVAL_EXEC_RETRIES", "1"))
     last_error = None
     best_session_file = None
 

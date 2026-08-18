@@ -444,7 +444,8 @@ def pytest_configure(config):
 def pytest_addoption(parser):
     parser.addoption("--skill", action="append", default=None, help="Run evals for specific skill(s)")
     parser.addoption("--team", action="append", default=None, help="Run evals for specific team(s)")
-    parser.addoption("--eval-id", action="store", default=None, help="Run specific eval by ID")
+    parser.addoption("--eval-id", action="append", default=None, 
+                     help="Run specific eval IDs (repeatable, scoped to --skill/--team)")
     parser.addoption("--ascend-platform", action="append", default=None,
                      help="Filter eval cases by Ascend platform (A2/A3/A5). Repeatable.")
 
