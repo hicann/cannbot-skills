@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION="0.1.2"
-ALL_SKILLS="ops-knowledge-ingest ops-knowledge-reference-ingest ops-knowledge-vv-ingest ops-knowledge-cv-ingest knowledge-lint knowledge-query knowledge-issue-report"
+ALL_SKILLS="ops-knowledge-ingest ops-knowledge-reference-ingest ops-knowledge-vv-ingest ops-knowledge-cv-ingest ops-knowledge-optimization-ingest knowledge-lint knowledge-query knowledge-issue-report"
 LEGACY_SKILLS="ops-reference-ingest ops-vv-knowledge-ingest ops-cv-knowledge-ingest"
 CONSUMER_SKILLS="knowledge-query"
 ISSUE_SKILLS="knowledge-issue-report"

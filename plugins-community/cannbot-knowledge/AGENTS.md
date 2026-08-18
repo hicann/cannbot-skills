@@ -7,6 +7,7 @@ skills:
   - ops-knowledge-reference-ingest
   - ops-knowledge-vv-ingest
   - ops-knowledge-cv-ingest
+  - ops-knowledge-optimization-ingest
   - knowledge-lint
   - knowledge-query
   - knowledge-issue-report
