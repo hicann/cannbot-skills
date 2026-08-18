@@ -87,4 +87,31 @@ describe("skill-registry", () => {
       expect(skills.find((s) => s.id === "ops-registry-invoke-workflow")).toBeUndefined();
     });
   });
+
+  describe("newly added skills (static fallback)", () => {
+    it("includes ascendc-simt-tiling-design", () => {
+      const skills = getAllSkills();
+      expect(skills.find((s) => s.id === "ascendc-simt-tiling-design")).toBeDefined();
+    });
+
+    it("includes cann-env-setup", () => {
+      const skills = getAllSkills();
+      expect(skills.find((s) => s.id === "cann-env-setup")).toBeDefined();
+    });
+
+    it("includes torch-ops-profiler", () => {
+      const skills = getAllSkills();
+      expect(skills.find((s) => s.id === "torch-ops-profiler")).toBeDefined();
+    });
+
+    it("includes ascendc-direct-invoke-to-registry-invoke", () => {
+      const skills = getAllSkills();
+      expect(skills.find((s) => s.id === "ascendc-direct-invoke-to-registry-invoke")).toBeDefined();
+    });
+
+    it("includes ascendc-registry-invoke-to-direct-invoke", () => {
+      const skills = getAllSkills();
+      expect(skills.find((s) => s.id === "ascendc-registry-invoke-to-direct-invoke")).toBeDefined();
+    });
+  });
 });

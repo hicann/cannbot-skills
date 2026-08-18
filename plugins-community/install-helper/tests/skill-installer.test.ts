@@ -298,4 +298,114 @@ describe("skill-installer", () => {
       expect(src).toContain("cpSync(resolvedSource, targetPath, { recursive: true })");
     });
   });
+
+  describe("multi-skill batch installation", () => {
+    it("installs multiple skills in one call", async () => {
+      const { installSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+      const { getConfigRoot } = await import("../src/utils/paths.js");
+
+      const repoPath = join(testDir, "repo");
+      const skillNames = ["skill-a", "skill-b", "skill-c"];
+      for (const name of skillNames) {
+        const dir = join(repoPath, "ops", name);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n---\n# ${name}`);
+      }
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        const configRoot = getConfigRoot("opencode", "project");
+        mkdirSync(join(configRoot, "skills"), { recursive: true });
+
+        initFromScan(skillNames.map((name) => ({
+          id: name,
+          description: "test",
+          source: "ops",
+          filePath: join(repoPath, "ops", name, "SKILL.md"),
+        })));
+
+        const results = await installSkills(skillNames, "opencode", "project", repoPath);
+        expect(results.length).toBe(3);
+        expect(results.every((r) => r.success)).toBe(true);
+        for (const name of skillNames) {
+          expect(existsSync(join(configRoot, "skills", name, "SKILL.md"))).toBe(true);
+        }
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
+
+    it("handles mixed source dirs in batch", async () => {
+      const { installSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+      const { getConfigRoot } = await import("../src/utils/paths.js");
+
+      const repoPath = join(testDir, "repo");
+      mkdirSync(join(repoPath, "ops", "ops-skill"), { recursive: true });
+      writeFileSync(join(repoPath, "ops", "ops-skill", "SKILL.md"), "---\nname: ops-skill\n---\n");
+      mkdirSync(join(repoPath, "infra", "infra-skill"), { recursive: true });
+      writeFileSync(join(repoPath, "infra", "infra-skill", "SKILL.md"), "---\nname: infra-skill\n---\n");
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        const configRoot = getConfigRoot("opencode", "project");
+        mkdirSync(join(configRoot, "skills"), { recursive: true });
+
+        initFromScan([
+          { id: "ops-skill", description: "test", source: "ops", filePath: join(repoPath, "ops", "ops-skill", "SKILL.md") },
+          { id: "infra-skill", description: "test", source: "infra", filePath: join(repoPath, "infra", "infra-skill", "SKILL.md") },
+        ]);
+
+        const results = await installSkills(["ops-skill", "infra-skill"], "opencode", "project", repoPath);
+        expect(results.length).toBe(2);
+        expect(results.every((r) => r.success)).toBe(true);
+        expect(existsSync(join(configRoot, "skills", "ops-skill", "SKILL.md"))).toBe(true);
+        expect(existsSync(join(configRoot, "skills", "infra-skill", "SKILL.md"))).toBe(true);
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
+  });
+
+  describe("cross-plugin shared skill", () => {
+    it("second install of same skill is skipped (already exists)", async () => {
+      const { installSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+      const { getConfigRoot } = await import("../src/utils/paths.js");
+
+      const repoPath = join(testDir, "repo");
+      const skillDir = join(repoPath, "ops", "shared-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: shared-skill\n---\n# Shared");
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        const configRoot = getConfigRoot("opencode", "project");
+        mkdirSync(join(configRoot, "skills"), { recursive: true });
+
+        initFromScan([{
+          id: "shared-skill",
+          description: "test",
+          source: "ops",
+          filePath: join(skillDir, "SKILL.md"),
+        }]);
+
+        const results1 = await installSkills(["shared-skill"], "opencode", "project", repoPath);
+        expect(results1.length).toBe(1);
+        expect(results1[0].success).toBe(true);
+        expect(existsSync(join(configRoot, "skills", "shared-skill", "SKILL.md"))).toBe(true);
+
+        const results2 = await installSkills(["shared-skill"], "opencode", "project", repoPath);
+        expect(results2.length).toBe(1);
+        expect(results2[0].success).toBe(true);
+        expect(existsSync(join(configRoot, "skills", "shared-skill", "SKILL.md"))).toBe(true);
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
+  });
 });

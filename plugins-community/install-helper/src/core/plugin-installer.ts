@@ -135,7 +135,7 @@ async function installExternalRepos(
         await execa("git", ["pull", "--quiet"], { cwd: targetDir, timeout: 120000 });
       } catch {
         logger.warn(t("external_repo_update_failed").replace("{dir}", repo.dir));
-        continue;
+        // 不 continue — 目录已存在且可用，继续创建 symlink（与 init.sh 行为一致）
       }
     } else if (!existsSync(targetDir)) {
       const args = ["clone"];

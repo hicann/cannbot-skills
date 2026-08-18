@@ -2,16 +2,15 @@ id: pypto-op-orchestrator
 dir: plugins-official/pypto-op-orchestrator
 displayName: PyPTO 算子开发
 aliases: [pypto, pytorch]
-skills: 8
-agents: 3
+skills: 17
 description: PyPTO Python API 算子全流程开发，覆盖需求理解、API 探索、实现与调优
-version: "1.2.2"
+# version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: false
 installSkills:
   - dir: ops
-    skills: [pypto-intent-understand, pypto-api-explore, pypto-op-design, pypto-op-develop, pypto-precision-debug, pypto-precision-compare, pypto-op-perf-tune, pypto-golden-generate]
-installAgents: [pypto-op-analyst, pypto-op-developer, pypto-op-perf-tuner]
+    skills: [pypto-orchestration-manual, pypto-intent-understand, pypto-op-plan, pypto-api-explore, pypto-docs-search, pypto-golden-generate, pypto-op-design, pypto-op-construct, pypto-op-develop, pypto-op-verify, pypto-op-review, pypto-precision-compare, pypto-precision-debug, pypto-general-debug, pypto-op-perf-tune, pypto-op-knowledge, pypto-memory-template]
+installAgents: [pypto-op-planner, pypto-op-mathematician, pypto-op-architect, pypto-op-designer, pypto-op-coder, pypto-op-verifier, pypto-op-debugger, pypto-op-optimizer]
 externalRepos:
   - url: https://gitcode.com/cann/pypto.git
     dir: plugins-official/pypto-op-orchestrator/pypto

@@ -3,12 +3,11 @@ dir: plugins-official/ops-code-reviewer
 displayName: 代码检视
 aliases: [code-review, reviewer, review]
 skills: 4
-agents: 2
 description: Ascend C 算子代码 4 阶段全量检视（主 Agent 编排 + 子 Agent 并行检视）
-version: "1.2.2"
+# version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: false
 installSkills:
   - dir: ops
     skills: [ascendc-code-review, ascendc-docs-search, ascendc-api-best-practices, npu-arch]
-installAgents: [ascendc-code-summarizer, ascendc-ops-reviewer]
+installAgents: [ascendc-ops-reviewer, ascendc-code-summarizer]

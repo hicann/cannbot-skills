@@ -1,4 +1,4 @@
 # Default values for all plugins
 script: "init.sh"
 skills: 0
-agents: 0
+# agents count is derived from plugin.json at build/runtime — never hardcode here

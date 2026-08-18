@@ -310,7 +310,7 @@ describe("plugin-installer", () => {
       }
     });
 
-    it("updates existing external repo with git pull instead of clone", async () => {
+    it("creates symlink even when git pull fails on existing external repo", async () => {
       const { installViaManifest } = await import("../src/core/plugin-installer.js");
 
       const pluginDir = join(testDir, "my-plugin");
@@ -340,8 +340,10 @@ describe("plugin-installer", () => {
 
       await installViaManifest(plugin as any, testDir, "opencode", "project", testDir);
 
-      // git pull fails (not a real repo), so link is skipped but ext-repo content is preserved
+      // git pull fails (not a real repo), but dir exists → symlink is still created
       expect(existsSync(join(extRepoDir, "README.md"))).toBe(true);
+      // project-level symlink must be created even when pull fails
+      expect(existsSync(join(testDir, "ext-repo"))).toBe(true);
     });
   });
 });

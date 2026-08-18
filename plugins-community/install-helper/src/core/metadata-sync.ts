@@ -8,8 +8,8 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, statSync, readdirSync } from "fs";
+import { join, sep } from "path";
 import type { PluginEntry, PluginManifestSkillEntry, PluginManifestSkillSource } from "../types/index.js";
 import { PLUGIN_REGISTRY } from "./registry.js";
 import { getScanDirs } from "./scanner.js";
@@ -42,11 +42,32 @@ function parseIncludedSkills(pluginDir: string): string[] {
   }
 }
 
-function findSkillSourceDir(skillName: string, repoRoot: string, scanDirs: string[]): string | null {
+function parseAllSkills(pluginDir: string): string[] {
+  const initPath = join(pluginDir, "init.sh");
+  try {
+    const text = readFileSync(initPath, "utf-8");
+    const m = text.match(/ALL_SKILLS="([^"]*)"/);
+    if (!m) return [];
+    const val = m[1];
+    if (val.includes("$(") || val.includes("${")) return [];
+    return val.split(/\s+/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function findSkillSourceDir(skillName: string, repoRoot: string, scanDirs: string[], pluginDir?: string): string | null {
   for (const dir of scanDirs) {
     const candidate = join(repoRoot, dir, skillName);
     if (existsSync(candidate) && statSync(candidate).isDirectory()) {
       return dir;
+    }
+  }
+  if (pluginDir) {
+    const localCandidate = join(pluginDir, "skills", skillName);
+    if (existsSync(localCandidate) && statSync(localCandidate).isDirectory()) {
+      const relPluginDir = pluginDir.replace(repoRoot + sep, "").replace(repoRoot + "/", "");
+      return `${relPluginDir}/skills`;
     }
   }
   return null;
@@ -71,8 +92,69 @@ function collectDeclaredSkillNames(
 function resolveAgentsFromPluginJson(pj: PluginJson | null): string[] {
   if (!pj || !Array.isArray(pj.agents)) return [];
   return pj.agents
+    .filter((a) => a.startsWith("./agents/"))
     .map((a) => a.replace(/^\.\/agents\//, "").replace(/\.md$/, ""))
     .filter(Boolean);
+}
+
+function parseIncludedAgentPattern(initShPath: string): string | null {
+  try {
+    const text = readFileSync(initShPath, "utf-8");
+    const m = text.match(/INCLUDED_AGENT_PATTERN="([^"]*)"/);
+    if (!m) return null;
+    return m[1].trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function simpleGlobToRegExp(pattern: string): RegExp {
+  let re = "^";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "*") re += ".*";
+    else if (c === "?") re += ".";
+    else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(re + "$");
+}
+
+function matchAgentsByPattern(agentsDir: string, pattern: string): string[] {
+  const filePattern = pattern.endsWith(".md") ? pattern : pattern + ".md";
+  try {
+    const fsSync = require("fs") as typeof import("fs");
+    if (typeof fsSync.globSync === "function") {
+      return fsSync.globSync(filePattern, { cwd: agentsDir })
+        .map((f: string) => f.replace(/\.md$/, "").replace(/\\/g, "/"));
+    }
+  } catch {}
+  if (filePattern.includes("@(") || filePattern.includes("+(") || filePattern.includes("!(")) {
+    return [];
+  }
+  try {
+    const re = simpleGlobToRegExp(filePattern);
+    return readdirSync(agentsDir)
+      .filter((f) => f.endsWith(".md") && re.test(f))
+      .map((f) => f.replace(/\.md$/, ""));
+  } catch {
+    return [];
+  }
+}
+
+function discoverAgents(pluginDir: string, pj: PluginJson | null, initShPath: string, fallbackAgents?: string[]): string[] {
+  const fromPj = resolveAgentsFromPluginJson(pj);
+  if (fromPj.length > 0) return fromPj;
+  if (pj && Array.isArray(pj.agents) && pj.agents.length === 0) return [];
+  const pattern = parseIncludedAgentPattern(initShPath);
+  if (pattern) {
+    const agentsDir = join(pluginDir, "agents");
+    if (existsSync(agentsDir)) {
+      const fromPattern = matchAgentsByPattern(agentsDir, pattern);
+      if (fromPattern.length > 0) return fromPattern;
+    }
+  }
+  // Layer 3: fallback agents (from embedded/yml installAgents, last resort)
+  return fallbackAgents || [];
 }
 
 function countSkills(installSkills: PluginManifestSkillSource[] | undefined): number {
@@ -95,14 +177,17 @@ function mergeInitSkills(
 ): PluginManifestSkillSource[] {
   const base = existing || [];
   const seen = collectDeclaredSkillNames(base);
-  const initSkills = parseIncludedSkills(pluginDir);
+  let initSkills = parseIncludedSkills(pluginDir);
+  if (initSkills.length === 0) {
+    initSkills = parseAllSkills(pluginDir);
+  }
   if (initSkills.length === 0) return base;
 
   const merged: PluginManifestSkillSource[] = base.map((s) => ({ ...s, skills: [...s.skills] }));
 
   for (const skill of initSkills) {
     if (seen.has(skill)) continue;
-    const srcDir = findSkillSourceDir(skill, repoRoot, scanDirs);
+    const srcDir = findSkillSourceDir(skill, repoRoot, scanDirs, pluginDir);
     if (!srcDir) continue;
     let bucket = merged.find((b) => b.dir === srcDir);
     if (!bucket) {
@@ -123,7 +208,7 @@ function mergeInitSkills(
  *  - version            ← plugin.json version
  *  - description        ← plugin.json description (only if currently empty)
  *  - displayName        ← plugin.json name (only for dynamically discovered plugins with bare dir name)
- *  - installAgents      ← plugin.json agents (only if currently empty)
+ *  - installAgents      ← plugin.json agents (SoT), fallback to init.sh pattern, then embedded
  *  - installSkills      ← existing + init.sh INCLUDED_SKILLS supplement
  *  - skills / agents    ← recomputed counts
  *
@@ -154,13 +239,9 @@ export function enrichPluginMetadata(repoPath: string): void {
       plugin.displayName = pj.name;
     }
 
-    // installAgents: fill from plugin.json if currently empty
-    if ((!plugin.installAgents || plugin.installAgents.length === 0)) {
-      const agents = resolveAgentsFromPluginJson(pj);
-      if (agents.length > 0) {
-        plugin.installAgents = agents;
-      }
-    }
+    // installAgents: discover from plugin.json (SoT) with init.sh pattern + embedded fallback
+    const initShPath = join(pluginDir, "init.sh");
+    plugin.installAgents = discoverAgents(pluginDir, pj, initShPath, plugin.installAgents);
 
     // installSkills: merge init.sh INCLUDED_SKILLS into existing
     const merged = mergeInitSkills(plugin.installSkills, pluginDir, repoPath, scanDirs);
@@ -168,6 +249,6 @@ export function enrichPluginMetadata(repoPath: string): void {
 
     // recompute counts
     plugin.skills = countSkills(merged);
-    plugin.agents = plugin.installAgents ? plugin.installAgents.length : 0;
+    plugin.agents = plugin.installAgents.length;
   }
 }

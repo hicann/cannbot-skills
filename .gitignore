@@ -48,10 +48,16 @@ tests/benchmark/cann-bench/
 **/*.tsbuildinfo
 
 # 外部克隆仓库（安装时动态拉取，不纳入版本管理）
+plugins-official/ops-direct-invoke/asc-devkit/
+plugins-official/ops-direct-invoke/ops-tensor/
 plugins-official/ops-direct-invoke-flash/asc-devkit/
 plugins-official/ops-direct-invoke-flash/cann-samples/
+plugins-official/ops-registry-invoke/asc-devkit/
+plugins-official/ops-registry-invoke/ops-tensor/
+plugins-official/ops-registry-invoke/reference/
 plugins-official/catlass-op-generator/asc-devkit/
 plugins-official/catlass-op-generator/catlass/
 plugins-official/tilelang-op-orchestrator/tilelang-ascend/
 plugins-official/pypto-op-orchestrator/pypto/
+plugins-official/model-infer-optimize/cann-recipes-infer/
 

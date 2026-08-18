@@ -2,13 +2,12 @@ id: torch-compile
 dir: plugins-official/torch-compile
 displayName: torch.compile 图模式
 aliases: [torch, compile, graph]
-skills: 6
-agents: 1
+skills: 7
 description: NPU 图模式 npugraph_ex 配置、脚本迁移、编译诊断与自定义算子入图
-version: "1.2.2"
+# version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: true
 installSkills:
   - dir: graph
-    skills: [torch-npugraph-ex-knowledge, torch-npugraph-ex-template, torch-npugraph-ex-dfx-triage, torch-npugraph-ex-compile-error-diagnosis, torch-npugraph-ex-runtime-error-diagnosis, torch-custom-ops-guide]
+    skills: [torch-npugraph-ex-knowledge, torch-npugraph-ex-template, torch-npugraph-ex-dfx-triage, torch-npugraph-ex-compile-error-diagnosis, torch-npugraph-ex-runtime-error-diagnosis, torch-npugraph-ex-performance-diagnosis, torch-custom-ops-guide]
 installAgents: [torch-npugraph-ex]

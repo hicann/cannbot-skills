@@ -3,9 +3,8 @@ dir: plugins-official/catlass-op-generator
 displayName: Catlass 算子直调
 aliases: [catlass]
 skills: 14
-agents: 3
 description: Catlass 模板拼装 GEMM/Matmul/Epilogue 算子开发
-version: "1.2.2"
+# version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: true
 installSkills:

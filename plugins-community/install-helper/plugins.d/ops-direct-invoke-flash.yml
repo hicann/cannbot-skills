@@ -3,9 +3,8 @@ dir: plugins-official/ops-direct-invoke-flash
 displayName: AscendC Kernel 直调（快速版）
 aliases: [flash, kernel-flash]
 skills: 7
-agents: 1
 description: 从数学公式或代码片段快速构建并验证 Ascend NPU 核函数
-version: "1.2.2"
+# version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: true
 installSkills:
