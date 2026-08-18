@@ -71,20 +71,19 @@ outQueueY.FreeTensor(yOut);
 ### 方案二：PipeBarrier 手动同步
 
 ```cpp
-// ✅ 可用：使用 PipeBarrier 同步
+// ✅ 可用：PipeBarrier 手动同步（替代队列同步）
 AscendC::LocalTensor<float> xLocal = inQueueX.AllocTensor<float>();
 AscendC::LocalTensor<float> yLocal = outQueueY.AllocTensor<float>();
 
 AscendC::DataCopyPad(xLocal, xGm[gmOffset], copyInParams, padParams);
-AscendC::PipeBarrier<PIPE_ALL>();          // 等待 MTE2 完成
+AscendC::PipeBarrier<PIPE_MTE2>();  // 等待 MTE2（GM→UB）完成
 
 AscendC::Adds<float>(yLocal, xLocal, 1.0f, count);
+AscendC::PipeBarrier<PIPE_V>();     // 等待 Vector 完成
 
 AscendC::DataCopyPad(yGm[gmOffset], yLocal, copyOutParams);
-AscendC::PipeBarrier<PIPE_ALL>();          // 等待 MTE3 完成
+AscendC::PipeBarrier<PIPE_MTE3>();  // 等待 MTE3（UB→GM）完成
 ```
-
-**缺点**：性能开销大（全流水线停顿），不推荐用于高性能场景
 
 ---
 
@@ -92,10 +91,10 @@ AscendC::PipeBarrier<PIPE_ALL>();          // 等待 MTE3 完成
 
 | 特性 | EnQue/DeQue | PipeBarrier |
 |-----|-------------|-------------|
-| 同步粒度 | buffer 级别 | 全流水线 |
-| 性能 | 高（支持并行） | 低（串行等待） |
+| 同步粒度 | buffer 级别 | 队列级 |
+| 性能 | 高（支持并行） | 较低（手动同步点） |
 | 代码复杂度 | 需要队列管理 | 简单直接 |
-| 推荐程度 | ⭐⭐⭐⭐⭐ | ⭐⭐（仅调试用） |
+| 推荐程度 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
 
 ### EnQue/DeQue 的双重作用
 

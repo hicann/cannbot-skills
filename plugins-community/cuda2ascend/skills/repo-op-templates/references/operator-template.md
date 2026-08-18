@@ -25,7 +25,7 @@ direct launch 算子统一一套模板，按算子复杂度调整 Kernel 类内�
 | Conv / Matmul / MoE（L3） | CUBE 运算（Mmad），多 Tiling 策略，多核切分复杂 |
 | Attention / RNN（L4） | 多算子融合，复杂数据流，多 stage 流水 |
 
-> 通用 Ascend C kernel 编写范式（Tiling 设计、Buffer 规划、数据流方法论）参照 `ascendc-tiling-design`；代码架构选型（MemBase/RegBase/SIMT）参照 `repo-knowledge`。
+> 通用 Ascend C kernel 编写范式（Tiling 设计、Buffer 规划、数据流方法论）参照 `ascendc-tiling-design`；代码架构选型（SIMD 载体 MemBase/RegBase/Cube 与 SIMT 路线）参照 `repo-knowledge`。
 
 ## op_kernel/<op>_kernel.cpp（bisheng 编译）
 

@@ -77,7 +77,7 @@ Process / 每核循环：
    mm_.SetTensorA / SetTensorB / SetBias
    mm_.IterateAll(cGm[off], enAtomic)
    ↓
-PipeBarrier<PIPE_ALL>() + SetAtomicNone()
+PipeBarrier<PIPE_AIC>() + SetAtomicNone()  // 等 Cube（AIC）完成
    ↓
 mm_.End()
 ```
@@ -312,7 +312,7 @@ public:
         mm_.SetTensorB(bGm_[offsetB], false);
         if (header_.cubeTiling.isBias) mm_.SetBias(biasGm_[offsetBias]);
         mm_.IterateAll(cGm_[offsetC], 0);
-        PipeBarrier<PIPE_ALL>();
+        PipeBarrier<PIPE_AIC>();  // 等 Cube（AIC）完成
     }
 
     __aicore__ inline void End() { mm_.End(); }
@@ -361,4 +361,4 @@ private:
 - [ ] `SetHF32(false,0)` 与 host `MatrixMadType::NORMAL` 配对
 - [ ] host 端 GetTiling 后强制覆写 M/N/Ka/Kb
 - [ ] 越界守卫：`if (blockIdx >= totalBlock) return;`
-- [ ] `PipeBarrier<PIPE_ALL>()` + `SetAtomicNone()` 收尾
+- [ ] `PipeBarrier<PIPE_AIC>()` + `SetAtomicNone()` 收尾

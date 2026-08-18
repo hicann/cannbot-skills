@@ -121,8 +121,11 @@ AscendC::DataCopyPad(xLocal, xGm_[offset], copyParams, padParams);
 | `AllocTensor` 无对应 `FreeTensor`（内存泄漏） | 每个 Alloc 配对 Free；`grep -c AllocTensor`/`grep -c FreeTensor` 核对数量 |
 | EnQue/DeQue 未配对 | 配对；`grep -c EnQue`/`grep -c DeQue` 核对 |
 | 冗余 PipeBarrier（同 pipe 连续操作间加 barrier） | 只在跨 pipe 数据依赖点保留 barrier |
+| **热路径（主循环内）无差别使用 `PipeBarrier<PIPE_ALL>`** | 依赖只涉及单一队列时用定向 barrier，见下方「定向 barrier 优先原则」 |
 
 > Pipe 归属：PIPE_MTE2（GM→UB）、PIPE_V（矢量/归约/Cast）、PIPE_MTE3（UB→GM）、Scalar。跨 pipe 且存在 RAW/WAW 依赖才需 barrier；同 pipe 硬件保序。
+>
+> **定向 barrier 优先原则**：`PipeBarrier` 按队列定向同步——依赖只涉及单一队列时用定向 barrier；`PIPE_ALL` 会排空全部队列（MTE2/MTE3/V/S 全等到调用点），每次都是整段流水线气泡，主循环内逐操作全同步会把 double buffer 重叠度打回串行。依赖映射：等 GM→UB 完成 → `PIPE_MTE2`；等 Vector 完成 → `PIPE_V`；等 UB→GM 完成 → `PIPE_MTE3`；等 Cube 完成 → `PIPE_AIC`；标量 `GetValue/SetValue` 回读/回写 UB 属 V 依赖 → `PIPE_V`。`PIPE_ALL` 仅限多队列汇聚（VF 读 UB 前、跨核 flag 收发前）与调试定位；调试定位后必须替换为定向 barrier 或 EnQue/DeQue 再交付。
 
 ### B4. Kernel 内禁止事项（阻塞）
 

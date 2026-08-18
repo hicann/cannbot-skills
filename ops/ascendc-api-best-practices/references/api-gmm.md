@@ -256,5 +256,5 @@ AIV:  WaitFlag ← AIC
 - [ ] 量化场景 UB 分块参数非零（ubDivideBlkNum / ubBlockAlign）
 - [ ] workspace 大小为 `usedCoreNum × baseM × baseN × sizeof(int32_t)` 的倍数
 - [ ] AIC/AIV cross-core sync flag 正确配对（SetFlag / WaitFlag）
-- [ ] `PipeBarrier<PIPE_ALL>()` 在 Cube 完成后、AIV 开始时
+- [ ] Cube 完成后 `PipeBarrier<PIPE_AIC>()`；跨核 AIC→AIV 依赖用 flag 配对
 - [ ] A8W8 perToken 场景的 Dequant API 顺序：Cast→Mul(RowBroadcast)→Mul(ColBroadcast)→Cast

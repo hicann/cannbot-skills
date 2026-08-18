@@ -90,7 +90,7 @@ GatherMask(x1, src, static_cast<uint8_t>(3), false, 0, gmParams, rsvdCnt);
 GatherMask(y1, src, static_cast<uint8_t>(4), false, 0, gmParams, rsvdCnt);
 GatherMask(x2, src, static_cast<uint8_t>(5), false, 0, gmParams, rsvdCnt);
 GatherMask(y2, src, static_cast<uint8_t>(6), false, 0, gmParams, rsvdCnt);
-PipeBarrier<PIPE_ALL>();
+PipeBarrier<PIPE_V>();  // GatherMask 是 V 操作，等 V 完成
 
 // 尾块: tileLen 非 16 倍数时标量补齐（≤15 元素，开销可忽略）
 for (int32_t j = alignedLen; j < tileLen; ++j) {
@@ -107,7 +107,7 @@ for (int32_t j = alignedLen; j < tileLen; ++j) {
 | `src0RepeatStride` | `8` (8 DataBlocks = 256B) | `1` | 连续 repeat 重叠 224B → 精度全 fail |
 | 对齐粒度 | 16（Normal 每 repeat 输出 16 dst） | 8 | 不匹配 Normal 语义 |
 | `repeatTimes` | `alignedLen / 16` | `tileLen / 16`（不向下对齐） | 尾 repeat 源数据不足 256B |
-| GatherMask 后 | `PipeBarrier<PIPE_ALL>()` | 无 barrier | dst 被后续指令读为旧值 |
+| GatherMask 后 | `PipeBarrier<PIPE_V>()` | 无 barrier | dst 被后续指令读为旧值 |
 
 ---
 
@@ -196,7 +196,7 @@ Normal 模式：`repeatTimes = 总源元素数 / 64`，`src0RepeatStride = 8`（
 | 混用模式后计算结果异常 | GatherMask 调用后自动切回 Normal | Counter 模式下调用后显式重新设置 |
 | 大 N 加速比退化到 <1x | tile < 512 且解交织维度放内层循环 | tile ≥ 2048 + 解交织维度放外层 |
 | 尾块数据错乱 | `repeatTimes = tileLen/16` 未向下对齐 | `alignedLen = (tileLen/16)*16`，尾块标量 |
-| dst 数据被读为旧值 | GatherMask 后未加 barrier | 添加 `PipeBarrier<PIPE_ALL>()` |
+| dst 数据被读为旧值 | GatherMask 后未加 barrier | 添加 `PipeBarrier<PIPE_V>()` |
 | 用户自定义模式 dst 类型与 mask 类型不匹配 | half dst 配 uint32_t mask | half/uint16_t → uint16_t mask；float/uint32_t → uint32_t mask |
 
 ---
@@ -216,7 +216,7 @@ Normal 模式：`repeatTimes = 总源元素数 / 64`，`src0RepeatStride = 8`（
 - [ ] 不同时对两侧做 GatherMask（小维度走标量）
 
 **同步**：
-- [ ] GatherMask 后 `PipeBarrier<PIPE_ALL>()`
+- [ ] GatherMask 后 `PipeBarrier<PIPE_V>()`
 - [ ] Counter 模式混用时注意自动切回 Normal 行为
 
 ---
