@@ -11,13 +11,13 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ]
       },
       "prompt": "请介绍 Ascend C 通算融合算子（多卡通信+计算融合 Kernel 直调）的开发完整工作流，需要包括哪些步骤？",
       "expected_output": "回复应覆盖通算融合算子开发的核心流程：SHMEM/UDMA 路径按环境检查→设计方案→Walkthrough→代码开发→代码检视→修复循环→性能验证的 7 步流程执行；MTE window 路径（MoE Dispatch/Combine）默认拆成 samples 规格补齐、api-rules、tiling-scheme 三部分推进；开发前需先走决策树判断算子属于哪条通信路径。",
-      "files": [],
-      "expectations": []
+      "expectations": [],
+      "files": []
     },
     {
       "id": 2,
@@ -28,13 +28,13 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ]
       },
       "prompt": "通算融合算子开发中，SHMEM/UDMA 路径和 MTE window 路径分别用在什么场景？如何判断一个算子该走哪条路径？",
       "expected_output": "回复应说明：SHMEM/UDMA 路径适合计算密集型通算融合（AllToAll+Matmul、AllReduce+Matmul、TP/SP），MTE window 路径适合路由通信密集型场景（MoE Dispatch/Combine、专家并行 EP、token 路由分发、mega_moe）；判断方法看通信机制——SHMEM API 走 SHMEM 路径，winContext/mc2Context 走 MTE 路径。",
-      "files": [],
-      "expectations": []
+      "expectations": [],
+      "files": []
     },
     {
       "id": 3,
@@ -45,13 +45,13 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ]
       },
       "prompt": "开发 AllToAll+Matmul 通算融合算子时，通信和计算有哪些强制约束？为什么不能用 HCCL 高阶 API 和 asc-devkit Matmul 高阶 API？",
       "expected_output": "回复应说明：通信必须走 SHMEM（host 侧 aclshmem_*，device 侧 aclshmemx_udma_* + aclshmem_barrier_all），禁止 Hccl::AllReduce/AlltoAll 等高阶 API；Matmul 必须走 Blaze 模板（Block::BlockMmad + Kernel::*）；原因是 HCCL 和 AscendC::Matmul 高阶 API 依赖框架注入的 GetHcclContext 上下文，Kernel 直调场景拿不到该上下文，无法使用。",
-      "files": [],
-      "expectations": []
+      "expectations": [],
+      "files": []
     },
     {
       "id": 4,
@@ -62,13 +62,13 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ]
       },
       "prompt": "开发 MoE Dispatch 或 MoE Combine 算子时，MTE window 路径有哪些强制约束？",
       "expected_output": "回复应覆盖 MTE window 路径的四大约束：① 通信走 MTE window，禁止 Hccl::AlltoAll/AlltoAllV/AllReduce 等高阶原语做数据搬运；② window 地址必须走 compat 层（GetBaseWindAddrByRankId 等统一接口），禁止直接硬编码 HcclA3OpResParam/HcclA5OpResParam 字段偏移；③ 共享 GM/状态区走 DataCopyPad，禁止 GetValue/SetValue 直接访问；④ 状态协议：先数据后状态、每核只写自己槽位、消费后清理。",
-      "files": [],
-      "expectations": []
+      "expectations": [],
+      "files": []
     },
     {
       "id": 5,
@@ -79,13 +79,13 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ]
       },
       "prompt": "我要生成一个新的 MoE dispatch 算子，或者在样例工程基础上改造，应该如何推进？",
       "expected_output": "回复应说明 MTE window 路径不再套用通用 add.asc 模板，默认拆成三部分推进：① samples 规格补齐与样例工程（spec-template → dispatch-dataflow 或 combine-dataflow）；② api-rules MoE 特化 API 规则（DataCopyPad、window 地址获取、同步与可见性、状态协议、接口契约）；③ tiling-scheme MoE 特化分核方案（window-memory-layout → multi-core-formulas → split-core-design → double-buffer-protocol）；若同时包含阅读已有实现任务，先走入口 A 阅读路径再进入入口 B。",
-      "files": [],
-      "expectations": []
+      "expectations": [],
+      "files": []
     },
     {
       "id": 6,
@@ -96,7 +96,7 @@
           "deepseek-v4-flash": 520000
         },
         "ascend_platforms": [
-          "A5"
+          "A2"
         ],
         "distractor_skills": [
           "ascendc-direct-invoke-template",
@@ -107,13 +107,73 @@
       },
       "prompt": "我想开发一个多卡通信和计算融合的 Ascend C 算子，需要遵循哪些开发规范？",
       "expected_output": "回复应聚焦通算融合算子的开发规范与约束：先按决策树判断走 SHMEM/UDMA 路径（通信走 SHMEM、Matmul 走 Blaze 模板）还是 MTE window 路径（MoE Dispatch/Combine 四红线），并说明与普通 Kernel 直调开发流程的区别。",
-      "files": [],
       "expectations": [
         {
           "type": "skill_activated",
           "pattern": "ascendc-mc2-best-practice"
         }
-      ]
+      ],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "SHMEM 路径性能验收与流水调优",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在做 AllReduce+Matmul 通算融合算子的性能验收，实测性能不达预期，多卡数据该怎么采集和处理才能定位瓶颈？流水又该如何调优？",
+      "expected_output": "回复应覆盖 SHMEM 路径性能验收与调优方法：用 msprof 做 task-based 采集，验收证据需含 L2 flush（src 中含 heavy_add_kernel 调用或等效 L2 flush 实现，对应 Reviewer 检查项 R6）以避免 L2 命中导致性能虚高，并做多卡数据后处理；调优时先用 tileCnt=1 做串行基线，再扫描 tileCnt 找通算并行最优值。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "MTE 路径阅读已有实现与融合形态判定",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要先理解现有 MoE dispatch 和 combine 的实现再动手改造，应该按什么顺序读代码？如果这份实现是融合形态的 mega_moe，读法有什么不同？",
+      "expected_output": "回复应说明阅读已有实现（入口 A）的路径：先判断是否属于融合实现（mega_moe）——输入侧沿用 dispatch 风格、输出侧直接产出 combine 最终输出、主入口同时包含路由/发送/expert 计算/聚合/回写、通信协议不能拆成独立 dispatch+combine，命中任一特征归入 mega-moe-reading-guide；非融合实现先用 common-reading-method 建立通用理解框架，dispatch 用 dispatch-reading-guide、combine 用 combine-reading-guide。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "MTE 跨路径设计原则：dispatch/combine 状态语义",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在改造 MoE combine 算子，需要同步改对应的 dispatch 侧接口，中间量 expandIdx 和 epRecvCounts、epSendCounts 这些字段该怎么理解才不会出错？host 侧和 kernel 侧的分工是怎样的？",
+      "expected_output": "回复应覆盖 MTE 跨路径设计原则：阅读或改造 dispatch、combine 任一侧时都要同步核对另一侧的接口和状态语义；expandIdx、epRecvCounts、epSendCounts 等中间量必须成对理解，不要单独局部解释字段；host 侧只传总核数，kernel 侧负责决定每个阶段实际使用多少核以及如何切分工作项。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "通算融合算子架构约束与平台支持",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我准备在昇腾平台上开发通算融合算子，SHMEM/UDMA 路径和 MTE window 路径分别支持哪些芯片架构？跨平台有什么兼容性红线？",
+      "expected_output": "回复应说明架构约束：SHMEM/UDMA 路径仅支持 Ascend 950（dav-3510），其他架构的 SHMEM/UDMA 行为未验证；MTE window 路径支持 A3（dav-2201）与 A5（Ascend 950/dav-3510）双平台；A3/A5 的 window 地址结构不同（A3 远端地址通过链表跳转、A5 状态区在前 1MB），必须通过 compat 层统一接口访问，不要在主流程中手写平台分支。",
+      "expectations": [],
+      "files": []
     }
   ]
 }

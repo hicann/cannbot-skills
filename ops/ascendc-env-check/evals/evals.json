@@ -143,6 +143,66 @@
       "expected_output": "回复应推荐编写 Python 脚本来调用 npu-smi 结构化子命令，说明可通过 `npu-smi info --help` 动态发现可用子命令，优先使用 `npu-smi info -t common` 批量获取数据，避免硬编码命令列表。应给出使用示例。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "Kirin 平台开发环境检查",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要在 KirinX90 设备上开发端侧算子，环境检查结果里的 Simulator 状态是什么意思？怎么判断当前环境支不支持 Kirin 平台开发？",
+      "expected_output": "回复应说明 Kirin 系列芯片（KirinX90、Kirin9030 等以 Kirin 开头的平台）是端侧 AI 处理器，主要通过模拟器 Simulator 进行开发；应检查环境检查结果中的 Simulator 支持情况，如不支持则环境检查结论为不支持 Kirin 平台开发，需要强调并告知用户；Kirin 开发需要安装 mobile-station 版本的 CANN 才有对应的 Kirin Simulator。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "Python 结构化获取 NPU 信息",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我写自动化脚本要读取 NPU 设备的健康状态和设备 ID 列表，不想解析 npu-smi 的文本输出，仓库里有没有现成的 Python 工具能直接拿到结构化数据？",
+      "expected_output": "回复应推荐调用 _npu_info.py Python 脚本获取结构化 NPU 数据，并说明支持 --json（完整 JSON 输出）、--list（设备 ID 列表）、--health（健康状态）等参数。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "确认 NPU 是否被进程占用",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我用 npu-smi 看到某块卡有 HBM 占用，怀疑被别的进程占用了，怎么确认到底有没有进程在用这块卡？空闲的设备显示少量 HBM 占用正常吗？",
+      "expected_output": "回复应说明使用 npu-smi info -t usages -i <device_id> 查看设备上运行中的进程；并指出空闲设备仍会有少量 HBM 被驱动占用，这是正常现象，不应误判为设备被进程占用。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 13,
+      "title": "CANN 环境检查清单与关键配置项",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要在一台新昇腾服务器上运行自定义算子，跑之前想系统检查一遍 CANN 环境，应该用哪个脚本、重点确认哪些配置项？",
+      "expected_output": "回复应推荐运行 bash scripts/check_env.sh 做完整环境检查，并说明重点检查项：ASCEND_HOME_PATH（CANN Toolkit 路径，必需）、ASCEND_OPP_PATH（CANN Ops 路径，运行时必需）、自定义算子包 op_api（运行自定义算子必需）、CANN 工具 msprof/cannsim（可选）等；并确认 CANN 版本及运行时依赖基线。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-env-check"
