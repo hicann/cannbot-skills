@@ -812,7 +812,8 @@
       "skills": [
         "./ops-precision-standard",
         "./ascendc-docs-search",
-        "./ascendc-simt-best-practices"
+        "./ascendc-simt-best-practices",
+        "./ascendc-api-best-practices"
       ]
     },
     {

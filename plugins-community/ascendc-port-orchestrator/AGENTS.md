@@ -41,7 +41,7 @@ PYTHONPATH="<plugin>/engine/src/scripts" python3 -m orchestrator \
 ```
 
 - **引擎 = `engine/src/scripts/orchestrator/`**（FSM + 安全网 + 迭代到绿 + 子 agent 调度）；FSM 权威契约 = `workflows/opgen_state_machine.yaml` + `engine/src/scripts/workflow/state_machine.py`。
-- **构建** = `engine/src/scripts/patches/build_ascendc.py`；**子 agent** = `agents/aog-*.md`（插件根扁平约定 / plugin.json 注册；引擎用 `claude --agent` 拉起 kernel-worker/optimizer/probe 等）。
+- **构建** = `engine/src/scripts/patches/build_ascendc.py`；**子 agent** = `agents/aog-*.md`（插件根扁平约定 / plugin.json 注册；引擎经 `backends/` 统一抽象拉起 kernel-worker/optimizer/probe 等，`AOG_HARNESS_BACKEND` 切换 `claude_code`/`opencode`）。
 - **知识** = `references/`（b 层）+ 用户本地 KB（c 层）+ cannbot skills（a 层）；引擎按 c>b>a 注入子 agent brief（见 docs/ARCHITECTURE.md §5.2）。
 - **你的职责**：① 入口意图解析 + 目标归一 ② 选空闲 NPU lane ③ 调引擎 ④ 回传引擎的状态/报告。**不要自己逐阶段写 kernel、不要绕过引擎**——确定性（状态机/钩子/迭代上限）来自引擎，你 NL 复刻不了。
 
@@ -63,6 +63,6 @@ PYTHONPATH="<plugin>/engine/src/scripts" python3 -m orchestrator \
 
 ## 底座依赖（如实声明）
 
-本插件由 a5_ops 移植而来，**编排器引擎 + 子 agent 定义 + 脚本 + KB 已打包进 `engine/`、自包含**——**不需要外部 a5_ops checkout**。生成由**打包进来的引擎**驱动（`python -m orchestrator`，见上「执行模型」），引擎用 `claude --agent` 拉起 aog-* 子 agent。仍与 Claude Code 耦合：skill 格式、hook 安全网、引擎用 `claude` 命令调度子 agent → **当前需 Claude Code 运行时**；底座无关适配（OpenCode 等）见 docs/ARCHITECTURE.md §8。
+本插件由 a5_ops 移植而来，**编排器引擎 + 子 agent 定义 + 脚本 + KB 已打包进 `engine/`、自包含**——**不需要外部 a5_ops checkout**。生成由**打包进来的引擎**驱动（`python -m orchestrator`，见上「执行模型」），引擎经 `backends/` 的 `Backend` 统一抽象拉起 aog-* 子 agent：`AOG_HARNESS_BACKEND=claude_code|opencode` 切换 harness，**两套运行时互不依赖**（claude 模式不需要 opencode/node；opencode 模式完全不需要 claude 环境，安装面由 `init.sh` 按 harness 各自预检，`--strict-deps` 可升级为硬失败）。OpenCode 的子 agent 模型由其自身配置或 `AOG_OPENCODE_MODEL*` 显式指定；其 1.18.18 版本线仅作兼容性 warning，真正硬门是可执行文件与安全网行为探针；Claude 模式沿用其 settings.json。实现与边界详见 docs/ARCHITECTURE.md §8。
 
 > 详细 FSM / 各 agent / 用户侧 KB 格式与维护 / 安全网设计见同目录 `docs/ARCHITECTURE.md`。

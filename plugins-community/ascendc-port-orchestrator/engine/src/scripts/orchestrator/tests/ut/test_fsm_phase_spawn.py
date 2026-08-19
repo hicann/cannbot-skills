@@ -23,17 +23,19 @@ Run: cd src/scripts/orchestrator && PYTHONPATH=.:plugins python3 -m pytest \
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent.parent))
 
-# Force the orchestrator.py MODULE identity into sys.modules["orchestrator"] so
-# the ctx read-through accessors (ctx._resolve_env etc.) resolve the live module.
-import orchestrator  # noqa: E402,F401
+# The package named ``orchestrator`` can already be cached when this test is run
+# alongside backend tests. Keep the live ``orchestrator.py`` module identity for
+# the ctx read-through accessors (ctx._resolve_env etc.) instead.
 import agent_dispatch  # noqa: E402
 import agent_transport  # noqa: E402
 import critic_invoke  # noqa: E402
@@ -44,6 +46,8 @@ import state_executor  # noqa: E402
 import fsm_phase_spawn as S  # noqa: E402
 from fsm_context import OrchestratorContext  # noqa: E402
 
+test_seams = SimpleNamespace(module=None)
+
 
 # ---------------------------------------------------------------------------
 # Fakes / fixtures
@@ -52,6 +56,18 @@ class _Snap:
     def __init__(self, state="await_worker", iter_counts=None):
         self.current_state = state
         self.iter_counts = iter_counts or {}
+
+
+@pytest.fixture(autouse=True)
+def _use_orchestrator_module(monkeypatch):
+    """Prevent a prior test's same-named package import from leaking here."""
+    module_path = _HERE.parent.parent.parent / "orchestrator.py"
+    spec = importlib.util.spec_from_file_location("orchestrator", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "orchestrator", module)
+    spec.loader.exec_module(module)
+    test_seams.module = module
 
 
 def _worker_result(handoff="@aog-precision-probe iter1"):
@@ -109,7 +125,7 @@ def test_itercap_not_legitimate_returns_exit_2(ctx, monkeypatch):
     monkeypatch.setattr(state_executor, "next_agent", lambda st: "aog-precision-probe")
     monkeypatch.setattr(state_executor, "at_iter_cap", lambda ws, st: True)
     monkeypatch.setattr(state_executor, "iter_cap", lambda st, workspace=None: 3)
-    monkeypatch.setattr(orchestrator, "_is_legitimate_pipeline_exhaustion",
+    monkeypatch.setattr(test_seams.module, "_is_legitimate_pipeline_exhaustion",
                         lambda ws, st: False)
     res = S.handle_spawn(ctx, _Snap("await_probe"))
     assert (res.action, res.exit_code) == ("return", 2)
@@ -119,10 +135,10 @@ def test_itercap_legitimate_exhaustion_continues_and_sets_handoff(ctx, monkeypat
     monkeypatch.setattr(state_executor, "next_agent", lambda st: "aog-researcher")
     monkeypatch.setattr(state_executor, "at_iter_cap", lambda ws, st: True)
     monkeypatch.setattr(state_executor, "iter_cap", lambda st, workspace=None: 3)
-    monkeypatch.setattr(orchestrator, "_is_legitimate_pipeline_exhaustion",
+    monkeypatch.setattr(test_seams.module, "_is_legitimate_pipeline_exhaustion",
                         lambda ws, st: True)
     recorded = {}
-    monkeypatch.setattr(orchestrator, "_record_partial_persist_finalize",
+    monkeypatch.setattr(test_seams.module, "_record_partial_persist_finalize",
                         lambda ws, st, c, cap: recorded.setdefault("hit", (st, c, cap)))
     res = S.handle_spawn(ctx, _Snap("await_researcher", {"researcher": 3}))
     assert res.action == "continue"
@@ -135,7 +151,7 @@ def test_plan_only_returns_exit_0(ctx, monkeypatch):
     monkeypatch.setattr(state_executor, "next_agent", lambda st: "aog-kernel-worker")
     monkeypatch.setattr(state_executor, "at_iter_cap", lambda ws, st: False)
     # stale-output archive is a ctx read-through — stub via orchestrator module
-    monkeypatch.setattr(orchestrator, "_archive_stale_outputs_before_spawn",
+    monkeypatch.setattr(test_seams.module, "_archive_stale_outputs_before_spawn",
                         lambda ws, st, idx: None)
     res = S.handle_spawn(ctx, _Snap())
     assert (res.action, res.exit_code) == ("return", 0)
@@ -151,7 +167,7 @@ def test_spawn_exception_returns_exit_3(ctx, monkeypatch):
         raise RuntimeError("crash")
     monkeypatch.setattr(agent_dispatch, "spawn_for_state", boom)
     marked = {}
-    monkeypatch.setattr(orchestrator, "_mark_agent_died",
+    monkeypatch.setattr(test_seams.module, "_mark_agent_died",
                         lambda ws, st, msg: marked.setdefault("m", msg))
     res = S.handle_spawn(ctx, _Snap())
     assert (res.action, res.exit_code) == ("return", 3)
@@ -169,9 +185,11 @@ def test_silence_timeout_budget_exhausted_returns_exit_3(ctx, monkeypatch):
             agent_type="aog-kernel-worker", silent_seconds=1, last_event_type="t")
     monkeypatch.setattr(agent_dispatch, "spawn_for_state", silent)
     # already at budget → give up
-    monkeypatch.setattr(orchestrator, "_load_silence_retry_count",
-                        lambda ws, st: agent_transport.STREAM_SILENCE_RETRY_MAX)
-    monkeypatch.setattr(orchestrator, "_mark_agent_died", lambda ws, st, msg: None)
+    backend_base = getattr(S, "_backend_base")
+    monkeypatch.setattr(backend_base, "STREAM_SILENCE_RETRY_MAX", 1)
+    monkeypatch.setattr(test_seams.module, "_load_silence_retry_count",
+                        lambda ws, st: 1)
+    monkeypatch.setattr(test_seams.module, "_mark_agent_died", lambda ws, st, msg: None)
     res = S.handle_spawn(ctx, _Snap())
     assert (res.action, res.exit_code) == ("return", 3)
 
@@ -186,9 +204,9 @@ def test_silence_timeout_under_budget_continues_and_bumps(ctx, monkeypatch):
         raise agent_transport.StreamSilenceTimeout(
             agent_type="aog-kernel-worker", silent_seconds=1, last_event_type="t")
     monkeypatch.setattr(agent_dispatch, "spawn_for_state", silent)
-    monkeypatch.setattr(orchestrator, "_load_silence_retry_count", lambda ws, st: 0)
+    monkeypatch.setattr(test_seams.module, "_load_silence_retry_count", lambda ws, st: 0)
     bumped = {}
-    monkeypatch.setattr(orchestrator, "_bump_silence_retry_count",
+    monkeypatch.setattr(test_seams.module, "_bump_silence_retry_count",
                         lambda ws, st: bumped.setdefault("b", True))
     res = S.handle_spawn(ctx, _Snap())
     assert res.action == "continue"
@@ -250,8 +268,8 @@ def test_patch_bite_resolve_env_through_ctx(ctx, monkeypatch, happy_seams):
     def sentinel_env():
         called["hit"] = True
         raise RuntimeError("resolve_env sentinel")
-    monkeypatch.setattr(orchestrator, "_resolve_env", sentinel_env)
-    monkeypatch.setattr(orchestrator, "_mark_agent_died", lambda ws, st, msg: None)
+    monkeypatch.setattr(test_seams.module, "_resolve_env", sentinel_env)
+    monkeypatch.setattr(test_seams.module, "_mark_agent_died", lambda ws, st, msg: None)
     res = S.handle_spawn(ctx, _Snap())
     # the sentinel exception is caught by the generic spawn-exception guard → exit 3
     assert called.get("hit") is True

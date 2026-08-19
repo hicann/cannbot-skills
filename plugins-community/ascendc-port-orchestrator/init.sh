@@ -21,7 +21,7 @@
 #   - No asc-devkit step (the op-gen engine is bundled under engine/).
 #   - Also creates the user-side KB(c) root + scaffolds engine/workspace/.ascendc_env.
 # Engine packaged under engine/ (PYTHONPATH=engine/src/scripts python3 -m orchestrator …).
-# Currently coupled to Claude Code (skill format / hooks / sub-agent via `claude`); see docs/ARCHITECTURE.md §8.
+# Supports independent Claude Code and OpenCode harnesses; see docs/ARCHITECTURE.md §8.
 set -euo pipefail
 
 if [ -t 1 ]; then
@@ -45,6 +45,60 @@ _oc_timeout() {
     shift
     "$@"
   fi
+}
+
+# JS runtime for opencode-side probes: node preferred, bun as fallback. This is the
+# canonical rule, shared with the engine's runtime self-check
+# (backends/opencode_runtime.pick_js_runtime) — keep both sides in this order.
+js_runtime() {
+  command -v node >/dev/null 2>&1 && { echo "node"; return 0; }
+  command -v bun >/dev/null 2>&1 && { echo "bun"; return 0; }
+  return 1
+}
+
+# Match Python's `.strip()` normalization before comparing the probe's one-line
+# protocol token. This keeps the installer and runtime verdict table identical
+# even when a runner emits harmless leading/trailing whitespace or CRLF.
+trim_probe_output() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+# Harness dependency preflight (G4). Each harness declares ONLY its own runtime deps:
+#   claude   → the claude CLI (honors CLAUDE_BIN)
+#   opencode → the opencode CLI + a JS runtime (node or bun)
+# Default is warn-only (exit 0); --strict-deps turns every miss into a hard error.
+# cursor/copilot config-only installs have no runtime dependency to check.
+check_harness_deps() {
+  local dep_ok=true missing=""
+  case "$TOOL" in
+    claude)
+      if ! command -v "${CLAUDE_BIN:-claude}" >/dev/null 2>&1; then
+        dep_ok=false; missing="${CLAUDE_BIN:-claude} CLI"
+      fi ;;
+    opencode)
+      if ! command -v "${AOG_OPENCODE_BIN:-opencode}" >/dev/null 2>&1; then
+        dep_ok=false; missing="${AOG_OPENCODE_BIN:-opencode} CLI"
+      fi
+      if [ -z "$(js_runtime)" ]; then
+        dep_ok=false; missing="${missing:+$missing, }node/bun runtime"
+      fi ;;
+  esac
+  if [ "$dep_ok" = false ]; then
+    if [ "$STRICT_DEPS" = 1 ]; then
+      err "missing harness dependency for tool=$TOOL: $missing — refusing under --strict-deps"
+      exit 1
+    fi
+    warn "missing harness dependency for tool=$TOOL: $missing"
+    warn "engine dispatch for tool=$TOOL will fail until it is installed (see docs/USAGE.md §Dependencies)"
+    # This is explicitly warn-only unless --strict-deps was requested.  Returning
+    # non-zero here would trigger the top-level errexit and abort the installer.
+    return 0
+  fi
+  ok "harness deps for tool=$TOOL present ($(case "$TOOL" in claude) echo "${CLAUDE_BIN:-claude}";; opencode) echo "${AOG_OPENCODE_BIN:-opencode} + $(js_runtime)";; esac))"
+  return 0
 }
 
 # safe_link SRC DST OURROOT — symlink SRC→DST without silently clobbering a
@@ -82,13 +136,13 @@ PLUGIN="ascendc-port-orchestrator"
 # Reusable ops Skills keep a single canonical copy under repository ops/ and are
 # supplied by the ascendc-port-orchestrator-shared-skills marketplace dependency.
 LOCAL_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen"
-SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices"
+SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices"
 # OKF query is owned by plugins-community/cannbot-knowledge.
 KNOWLEDGE_SKILLS="knowledge-query"
 # Keep this literal union in sync with the three lists above: the repository's
 # dependency validator and third-party installers consume this declaration without
 # evaluating shell variable expansion.
-INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ops-precision-standard ascendc-docs-search ascendc-simt-best-practices knowledge-query"
+INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices knowledge-query"
 # Customer agents, kept CONSISTENT with plugin.json agents[] (9).
 # Both installer and manifest must expose the same set: a missing dispatched agent crashes,
 # while every advertised agent must have its customer Skill installed. The
@@ -100,15 +154,16 @@ INCLUDED_AGENTS="aog-kernel-worker aog-precision-probe aog-kernel-optimizer aog-
 # explicit 9-agent closure above.
 INCLUDED_AGENT_PATTERN="aog-*"
 
-LEVEL="project"; TOOL="claude"
+LEVEL="project"; TOOL="claude"; STRICT_DEPS=0
 for arg in "${@:-}"; do
   case "$arg" in
-    --help) echo "Usage: init.sh [project|global] [claude|opencode|cursor|copilot]  (Claude honors \$CLAUDE_CONFIG_DIR)"; exit 0 ;;
+    --help) echo "Usage: init.sh [project|global] [claude|opencode|cursor|copilot] [--strict-deps]  (Claude honors \$CLAUDE_CONFIG_DIR)"; exit 0 ;;
     global|project) LEVEL="$arg" ;;
     claude)   TOOL="claude" ;;
     opencode) TOOL="opencode" ;;
     cursor)   TOOL="cursor" ;;
     copilot)  TOOL="copilot" ;;
+    --strict-deps) STRICT_DEPS=1 ;;   # missing harness deps become hard errors instead of warnings
   esac
 done
 
@@ -116,13 +171,26 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_AGENT_ROOT="$PLUGIN_DIR/agents"
 LOCAL_SKILL_ROOT="$PLUGIN_DIR/skills"
 SHARED_SKILL_ROOT="$PLUGIN_DIR/../../ops"
-# A checkout can link canonical shared Skills directly. A marketplace copy has no
+# A checkout can link canonical shared Skills directly. A Claude marketplace copy has no
 # repository root and relies on the declared shared-skills dependency instead.
 if [ -d "$SHARED_SKILL_ROOT" ]; then DIRECT_CHECKOUT=1; else DIRECT_CHECKOUT=0; fi
+
+# OpenCode intentionally never treats Claude Code's marketplace cache as a dependency source:
+# doing so would reintroduce a hidden ~/.claude read. The currently packaged OpenCode setup
+# therefore requires a full repository checkout, where all canonical shared Skills are present.
+if [ "$TOOL" = "opencode" ] && [ "$DIRECT_CHECKOUT" != "1" ]; then
+  err "OpenCode setup requires a full cannbot-skills checkout (shared skills are not read from Claude marketplace cache)"
+  err "Run init.sh from the repository checkout, not from a Claude marketplace cache path."
+  exit 1
+fi
 
 claude_root() { echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
 marketplace_skill_path() {
   local skill="$1" cache_root hit
+  # OpenCode setup must be self-contained with respect to Claude Code: even a
+  # best-effort cache lookup would read a user's ~/.claude tree. Direct checkout
+  # dependencies remain usable; marketplace-only skills are reported normally.
+  [ "$TOOL" = "opencode" ] && return 1
   cache_root="$(claude_root)/plugins/cache"
   [ -d "$cache_root" ] || return 1
   hit="$(find "$cache_root" -type f -path "*/$skill/SKILL.md" -print -quit 2>/dev/null || true)"
@@ -157,6 +225,9 @@ else
     CONFIG_ROOT="$PWD/.claude"
   fi
 fi
+
+# G4: per-harness dependency preflight — warn by default, hard-fail under --strict-deps.
+check_harness_deps
 
 echo ""
 echo -e "  ${BOLD}CANNBot · ${PLUGIN} (bundle-orch)${NC}"
@@ -656,6 +727,24 @@ sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
         err "opencode did not resolve agent aog-kernel-worker from the injected config (or the probe timed out)"
         oc_ok=false
       fi
+      # G4: assert the FULL aog-* agent closure, not just the first agent. A config
+      # that resolves kernel-worker but silently drops a later agent would fail at
+      # dispatch time, deep inside a run — catch it at install time instead.
+      if [ "$oc_ok" = true ]; then
+        for _ag in "$PLUGIN_DIR"/agents/aog-*.md; do
+          [ -e "$_ag" ] || continue
+          _agname="$(basename "$_ag" .md)"
+          # The structural probe above already checked this first agent.  Do not
+          # spend a second 60-second timeout budget on the same resolution.
+          [ "$_agname" = "aog-kernel-worker" ] && continue
+          if ! _oc_timeout 60 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent "$_agname" \
+                 >/dev/null 2>&1; then
+            err "opencode did not resolve agent $_agname from the injected config (or the probe timed out)"
+            oc_ok=false
+            break
+          fi
+        done
+      fi
       # `debug skill` emits ~350 KB of JSON. Piping that into `grep -q` is NOT a sound
       # probe: grep exits at the first match and the resulting SIGPIPE truncates the
       # stream, so the verdict depends on scheduling — it reported "skills missing" for a
@@ -697,22 +786,28 @@ PYSKILL
     # never — the previous block described this level in its comments but never implemented
     # it, so every opencode install fell through to the refusal below and the override turned
     # into a required incantation. A bypass everyone is forced to set protects nothing.
-    OC_JS=""
-    for oc_rt in node bun; do
-      if command -v "$oc_rt" >/dev/null 2>&1; then OC_JS="$oc_rt"; break; fi
-    done
+    OC_JS="$(js_runtime)" || OC_JS=""   # canonical node→bun rule, shared with the engine self-check
     if [ -z "$OC_JS" ]; then
       # opencode itself ships as a bun/node program, so this is close to unreachable in a
       # working install; it stays a warning rather than a failure because the runtime gate is
       # the load-bearing one and refusing here would only strand the operator.
       warn "no node/bun runtime found — cannot run the behavioural safety-net proof"
-      warn "Phase O0 re-proves it, with a deny/allow pair, before the first agent of every run"
+      warn "OpenCode runtime self-check will refuse dispatch until node/bun is installed"
     else
-      OC_PROBE_OUT="$("$OC_JS" "$PLUGIN_DIR/engine/src/opencode/probe_safety_net.mjs" 2>&1 || true)"
-      if printf '%s\n' "$OC_PROBE_OUT" | grep -q '^OK$'; then
+      # Keep the exact verdict contract in lockstep with the backend runtime
+      # self-check: (rc=0, output=OK) passes; (rc=2, output=SKIP:...) is the
+      # only non-fatal setup result. Capture rc inside an `if` so errexit does
+      # not discard it before we can make the same decision as Python.
+      if OC_PROBE_OUT="$("$OC_JS" "$PLUGIN_DIR/engine/src/opencode/probe_safety_net.mjs" 2>&1)"; then
+        OC_PROBE_RC=0
+      else
+        OC_PROBE_RC=$?
+      fi
+      OC_PROBE_OUT="$(trim_probe_output "$OC_PROBE_OUT")"
+      if [ "$OC_PROBE_RC" -eq 0 ] && [ "$OC_PROBE_OUT" = "OK" ]; then
         ok "safety net ENFORCES (cross-workspace read refused, own-workspace read allowed)"
         hooks_live=true
-      elif printf '%s\n' "$OC_PROBE_OUT" | grep -q '^SKIP:'; then
+      elif [ "$OC_PROBE_RC" -eq 2 ] && [[ "$OC_PROBE_OUT" == SKIP:* ]]; then
         # The probe could not be SET UP on this machine (read-only temp, no symlink
         # permission). That is not evidence about the guards, so it must not be reported as
         # their failure — and blocking the install here would strand the operator over
@@ -777,6 +872,23 @@ if [ "$health_ok" = true ]; then
 else
   echo -e "  ${RED}${BOLD}✗ install had errors, see above${NC}"; exit 1
 fi
+echo ""
+# G4: harness dependency checklist (warn-level misses were already surfaced above).
+case "$TOOL" in
+  claude)
+    if command -v "${CLAUDE_BIN:-claude}" >/dev/null 2>&1; then
+      echo -e "  ${DIM}harness deps: ${GREEN}claude ✓${NC}"
+    else
+      echo -e "  ${DIM}harness deps: ${RED}claude ✗ (engine dispatch will fail until installed)${NC}"
+    fi ;;
+  opencode)
+    _js="$(js_runtime)" || _js=""
+    if command -v "${AOG_OPENCODE_BIN:-opencode}" >/dev/null 2>&1 && [ -n "$_js" ]; then
+      echo -e "  ${DIM}harness deps: ${GREEN}opencode ✓ + $_js ✓${NC}"
+    else
+      echo -e "  ${DIM}harness deps: ${RED}opencode/js-runtime ✗ (engine dispatch will fail until installed)${NC}"
+    fi ;;
+esac
 echo ""
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${BOLD}Quick start (opencode):${NC}"

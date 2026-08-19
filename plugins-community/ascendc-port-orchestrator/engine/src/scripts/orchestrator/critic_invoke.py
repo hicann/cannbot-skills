@@ -22,7 +22,7 @@ P135.S9 (2026-05-18): trigger-specific subset filtering (LLM evaluates fewer
 items but still loads full SKILL.md → only the *evaluation* shrinks).
 
 Q1 slim self-critic (2026-05-21): INLINE catalog extraction. Instead of
-"Invoke the /aog-self-critic skill" (which causes claude --print to auto-load
+"Invoke the /aog-self-critic skill" (which makes the harness auto-load
 the full 1485-LOC SKILL.md), build the prompt with ONLY the trigger-subset
 items inlined. Token cost drops 64-86% per fire matching subset cardinality
 (measured per-trigger average ~76%). Per main agent 2026-05-21 Q1 vote.

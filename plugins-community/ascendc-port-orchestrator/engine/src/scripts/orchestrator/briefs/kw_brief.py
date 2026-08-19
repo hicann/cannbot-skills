@@ -139,7 +139,7 @@ def build_worker_brief(
         handoff_from_prior_agent: handoff text from prior agent's exit
 
     Returns:
-        complete prompt body (str) ready to pass to agent_transport
+        complete prompt body (str) ready to pass to the backend dispatch
     """
     if env is None:
         env = load_env()

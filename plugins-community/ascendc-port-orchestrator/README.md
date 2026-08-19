@@ -1,37 +1,36 @@
 # ascendc-port-orchestrator
 
-**跨代际 AscendC 算子移植插件。** 两项能力，两个入口 skill，共享一条确定性流水线 + 安全网 + 双层 KB 反馈环：
+面向 AscendC 算子的社区编排插件。两个入口共享同一条确定性流水线、安全网和本地知识库：
 
-1. **`ascendc-cross-gen-port` — 跨代际算子移植**：把 AscendC 算子从来源架构移植到目标架构/产品。**当前支持 arch22 → arch35**（如 Ascend910C/V220 → Ascend950PR/V300）；规划支持更多目标架构/产品与**反向跨代移植**（如 910C→910A）。
-2. **`ascendc-backward-gen` — 正向→反向生成**：由正向算子自动生成反向（梯度）算子，真值由 CPU/fp64 autograd 生成。
+1. **`ascendc-cross-gen-port` — 跨代际移植**：当前仅支持 **arch22 源算子 → arch35 / A5 目标**（例如 Ascend910C/V220 → Ascend950PR/V300）。来源架构由代码分析确认；目标固定为 A5，不支持把 A3/arch22 作为此模式的目标。
+2. **`ascendc-backward-gen` — 正向→反向生成**：由可微 PyTorch 正向规格生成并验证 AscendC 反向（梯度）算子。
 
-**入口**：用户用自然语言指定目标架构/产品（`arch35` / `950PR` / `A5` / SoC 编号 / 代际皆可）；**来源架构由代码分析自动识别**，无需指定。
+## 支持的运行底座
 
-## 架构
+插件已支持 **Claude Code** 和 **OpenCode** 两条独立运行路径。两者共用 `engine/` 中的编排器和安全网；启动器会按当前会话选择后端，用户不需要手工设置 `AOG_HARNESS_BACKEND` 或 `OPENCODE_CONFIG_CONTENT`。
 
-确定性流水线（状态机）+ 安全网（防作弊/防退化）+ 双层 KB 反馈环（用户本地 KB > 插件自带 KB > 社区 skills）。详见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+| 底座 | 用户入口 | 运行时要求 |
+|---|---|---|
+| Claude Code | `/ascendc-cross-gen-port`、`/ascendc-backward-gen` Skills | 可调用的 `claude` CLI 与已配置的认证/模型 |
+| OpenCode | 同名 `/ascendc-*` Commands | 可调用的 `opencode` CLI、`node` 或 `bun`、已配置的 provider/model |
 
-## ⚠ 底座依赖与适配路线
+OpenCode `1.18.18` 是已验证的建议版本；更低版本只会产生兼容性 warning，不会因版本号本身拒绝执行。可执行文件缺失或安全网检查失败仍会阻断运行。
 
-CANNBot 与底座 agent harness（OpenCode / Claude Code 等）**不直接耦合**。但本插件由 a5_ops 移植而来，**当前与 Claude Code 耦合**，体现在三点：
+## 运行前需要准备什么
 
-1. **skill 格式**：沿用 Claude Code 的 skill 约定。
-2. **hook 机制**：流水线的安全网（如完整性门）依赖 Claude Code 的 hook。
-3. **sub-agent 调度**：流水线**直接调用 `claude` 命令**拉起子 agent（worker / optimizer / probe 等）。
+- 控制端需要 Bash、Python 3.10+、SSH/SCP，以及一个安装后不会被移动或删除的插件副本。
+- 在 `.ascendc_env` 中配置实际执行任务的 NPU 主机/容器、CANN 路径、SoC、认证和 Python 环境；其中可能包含凭证，文件已 gitignore，绝不能提交。
+- 跨代移植使用实时 A3 参考并在 A5 构建/验证，因此需要可达的 **A3 与独立 A5** 环境；反向生成只需所选目标 NPU，但其正向规格运行环境需具备 PyTorch。
+- 远端执行会使用 SSH/SCP 和容器命令；密码认证还需要 `sshpass`，也可使用默认 SSH 配置或 `A3_SSH_KEY` / `A5_SSH_KEY`。
 
-**因此本插件当前需要 Claude Code 运行时。**
+安装、配置、验收标志、离线安装和排障请看：
 
-**适配路线（后续工作）**：
-- **skill 格式归一**：对齐 CANNBot 的 skill 约定。
-- **hook 抽象**：把安全网的 hook 依赖抽象为底座中立接口。
-- **sub-agent 调度中立化**：把直接 `claude` 调用改为底座中立的子 agent 调度接口，使插件可在 OpenCode / Claude Code 等底座上运行。
+- [`quickstart.md`](./quickstart.md)：最短的 Claude Code / OpenCode 上手路径。
+- [`docs/USAGE.md`](./docs/USAGE.md)：完整前置条件、配置字段和运行说明。
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)：编排器、安全网、双层 KB 和 harness 实现边界。
 
 ## 知识库
 
-- **用户本地 KB**：用户可写层（格式与维护见 `docs/ARCHITECTURE.md` §5.1）。
-- **插件自带 KB**：随 #611 以 OKF 格式交付的 arch/平台经验。
+运行时知识优先级为用户本地 KB（c）> 插件自带 KB（b）> 社区 Skills（a）。用户 KB 默认位于 `~/.ascendc-port/user_kb/`，可用 `ASCENDC_PORT_USER_KB` 覆盖；插件自带 KB 位于 `kb/`，运行时只读。
 
-## 安装
-
-见 [`quickstart.md`](./quickstart.md) 与 `init.sh`。本插件处于社区维护阶段，源码位于
-`plugins-community/ascendc-port-orchestrator/`。
+本插件处于社区维护阶段，源码位于 `plugins-community/ascendc-port-orchestrator/`。

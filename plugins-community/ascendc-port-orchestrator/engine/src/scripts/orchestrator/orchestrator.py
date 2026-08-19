@@ -15,9 +15,9 @@ on workspaces whose persisted mode was created by one of those two entries.
 
 Architecture:
 - Reads opgen_state_machine.yaml as source of truth (via state_executor)
-- Per-state: build brief from templates (no LLM), spawn CC subagent via
-  `claude --print --agent`, parse JSON envelope, normalize schema, route
-  by YAML transition
+- Per-state: build brief from templates (no LLM), spawn the subagent via the
+  active harness backend (Claude Code / opencode), parse the JSON envelope,
+  normalize schema, route by YAML transition
 - LLM never drives the top-level loop. Inside spawned agents, LLM does
   kernel-write / probe-analysis / KB-merge / self-critic.
 """
@@ -380,7 +380,7 @@ def run_single_op(
     # `_cmd_backward` ALREADY seeds op_classification.json (source=
     # "cli_flag_backward", tags ['backward','GRADIENT']) — the CLI flag IS the
     # classification (same shortcut as _cmd_port_a3 W12). Re-running the
-    # `/aog-op-classify` claude --print subprocess is (a) redundant and (b)
+    # `/aog-op-classify` backend skill subprocess is (a) redundant and (b)
     # flaky for a bare backward forward-spec: the skill, lacking a benchmark
     # <op>.py/<op>.json in scope, returns a clarifying question ("Which option
     # do you want?") instead of writing the file → "classification failed"
@@ -422,7 +422,7 @@ def run_single_op(
             pass  # backward mode skip — already logged above; pre-seed authoritative
         elif o17.error:
             # Distinguish sentinel-cached skip ("skill unavailable") from real failures
-            # so the log makes it obvious whether O1.7 cost a claude --print or not.
+            # so the log makes it obvious whether O1.7 cost a harness skill call or not.
             if "skill unavailable" in (o17.error or ""):
                 if "cached error" in (o17.error or ""):
                     log.info("phase O1.7: SKIPPED (cached error from prior timeout — 0.0s)")

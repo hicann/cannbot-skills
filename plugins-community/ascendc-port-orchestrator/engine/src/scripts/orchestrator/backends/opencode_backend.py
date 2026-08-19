@@ -18,14 +18,19 @@ import os
 import json
 import re
 import selectors
-import signal
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .base import Backend, Envelope
+from .base import (
+    Backend, Envelope, STREAM_SILENCE_TIMEOUT_SEC, StreamSilenceTimeout,
+    TranscriptSkills, format_backend_agent, normalize_backend_envelope,
+)
+from . import opencode_runtime as _runtime
 from .skill_context import load_skill_context
+
+log = logging.getLogger(__name__)
 
 _OPENCODE_RUN_MARKERS = ("opencode run", "opencode  run")
 _OP_SLUG_RE = re.compile(r"\b([a-z][a-z0-9_]*)-(?:kw|pp|ko|fo|ar|da|bs|td|tt|tpo|cl)-\d+")
@@ -47,6 +52,76 @@ class _StreamState:
     pending: bytes = b""
 
 
+@dataclass
+class _TranscriptSkillState:
+    """Evidence accumulated while validating a native OpenCode transcript."""
+
+    skill_calls: dict[tuple[str, str], str] = field(default_factory=dict)
+    completed: set[tuple[str, str]] = field(default_factory=set)
+    errored: set[tuple[str, str]] = field(default_factory=set)
+    unproven: set[tuple[str, str]] = field(default_factory=set)
+    opencode_shaped: bool = False
+
+
+@dataclass(frozen=True)
+class _DispatchCommandContext:
+    """Correlated dispatch inputs for command construction (G.FNM.03)."""
+
+    target: str
+    kind: str
+    session: str | None
+    permission_mode: str
+    cwd: Any
+    extra_args: list | None
+    use_json_events: bool
+    sandbox_prefix: list | None
+
+
+@dataclass(frozen=True)
+class _ForegroundRun:
+    """One foreground command execution and its envelope metadata (G.FNM.03)."""
+
+    cmd: list
+    formatted: str
+    env: dict
+    timeout: float | None
+    tee_path: Any
+    kind: str
+    mode: str
+
+
+@dataclass(frozen=True)
+class _StreamFinishContext:
+    """Resources and metadata required to finish one stream (G.FNM.03)."""
+
+    cmd: list
+    proc: subprocess.Popen
+    selector: selectors.BaseSelector
+    stdout_fd: int
+    state: _StreamState
+    started: float
+    timeout_sec: int | None
+    deadline: float | None
+    silence_timeout_sec: int | None
+    tee: Any
+    progress_callback: Any
+    agent_type: str | None
+    kind: str
+    mode: str
+
+
+@dataclass(frozen=True)
+class _TranscriptToolEvent:
+    """Native tool-event fields consumed together during transcript validation (G.FNM.03)."""
+
+    event: dict
+    part: dict
+    line_no: int
+    session_id: str
+    part_id: str
+    state: _TranscriptSkillState
+
+
 class OpencodeBackend(Backend):
     name = "opencode"
 
@@ -60,51 +135,45 @@ class OpencodeBackend(Backend):
                  extra_args: Optional[list] = None, output_file=None, cwd=None,
                  permission_mode: str = "bypassPermissions", output_format: Optional[str] = "json",
                  stdin_prompt: bool = False) -> Envelope:
-        if mode == "background":
-            if output_file is None:
-                raise ValueError("dispatch(mode='background') requires output_file")
-
+        self._require_background_output_file(mode, output_file)
+        runtime_failure = self._runtime_failure(mode)
+        if runtime_failure is not None:
+            return runtime_failure
         formatted = self._format_prompt(target, prompt, kind=kind)
-        use_json_events = mode == "streaming" or (
-            kind == "skill" and os.environ.get("AOG_OPENCODE_SKILL_FORMAT", "").lower() == "json"
+        use_json_events = self._uses_json_events(kind, mode)
+        cmd = self._build_dispatch_command(
+            _DispatchCommandContext(
+                target=target,
+                kind=kind,
+                session=session,
+                permission_mode=permission_mode,
+                cwd=cwd,
+                extra_args=extra_args,
+                use_json_events=use_json_events,
+                sandbox_prefix=sandbox_prefix,
+            )
         )
-        # `opencode run` AUTO-REJECTS every permission request unless --auto is passed
-        # (measured on 1.18.18: `permission requested: ...; auto-rejecting`). That is the
-        # analogue of CC's bypassPermissions, so honour permission_mode by default and let
-        # AOG_OPENCODE_AUTO override explicitly.
-        auto_env = os.environ.get("AOG_OPENCODE_AUTO")
-        auto = (auto_env == "1") if auto_env is not None else (
-            permission_mode == "bypassPermissions"
-        )
-        cmd = self._build_run_cmd(
-            session_id=session,
-            auto=auto,
-            cwd=str(cwd) if cwd is not None else None,
-            extra_args=extra_args,
-            format_json=use_json_events,
-            model=self._select_model(target, kind),
-            agent=self._select_agent(target, kind),
-            variant=self._select_variant(target, kind),
-        )
-        if sandbox_prefix:
-            cmd = list(sandbox_prefix) + cmd
-        env = self.build_env(target, formatted, kind=kind,
-                             cwd=str(cwd) if cwd is not None else None)
+        cwd_text = str(cwd) if cwd is not None else None
+        env = self.build_env(target, formatted, kind=kind, cwd=cwd_text)
         if mode == "background":
             return self._dispatch_background(cmd, formatted, env, output_file)
         if mode == "streaming" or use_json_events:
             return self._run_streaming(
-                cmd,
-                formatted,
-                kind=kind,
-                mode=mode,
+                cmd, formatted, agent_type=target, kind=kind, mode=mode, env=env,
+                timeout=timeout, silence_timeout=silence_timeout,
+                progress_callback=progress_callback, tee_path=tee_path,
+            )
+        return self._dispatch_foreground(
+            _ForegroundRun(
+                cmd=cmd,
+                formatted=formatted,
                 env=env,
                 timeout=timeout,
-                silence_timeout=silence_timeout,
-                progress_callback=progress_callback,
                 tee_path=tee_path,
+                kind=kind,
+                mode=mode,
             )
-        return self._dispatch_foreground(cmd, formatted, env, timeout, tee_path, kind, mode)
+        )
 
     @staticmethod
     def opencode_config(extra_agent: str | None = None) -> dict:
@@ -169,6 +238,110 @@ class OpencodeBackend(Backend):
                     env[name] = workspace
         return env
 
+    # Keep static transcript helpers before instance methods.  G.CLS.06 requires
+    # one uniform static/instance ordering throughout this class.
+
+    @staticmethod
+    def _parse_transcript_line(line: str, line_no: int) -> dict | TranscriptSkills | None:
+        line = line.strip()
+        if not line:
+            return None
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode JSONL event at line {line_no} is malformed",
+            )
+        if isinstance(event, dict):
+            return event
+        return TranscriptSkills(
+            parseable=False,
+            note=f"opencode JSONL event at line {line_no} is not an object",
+        )
+
+    @staticmethod
+    def _transcript_part_identity(event: dict, part: dict, part_type: str,
+                                  line_no: int) -> tuple[str, str] | TranscriptSkills:
+        session_id = event.get("sessionID") or event.get("session_id")
+        if not isinstance(session_id, str) or not session_id.strip():
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode {part_type} event at line {line_no} lacks a session id",
+            )
+        part_id = part.get("id")
+        if not isinstance(part_id, str) or not part_id.strip():
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode {part_type} event at line {line_no} lacks a stable part id",
+            )
+        return session_id, part_id
+
+    @staticmethod
+    def _event_tool_name(event: dict, part: dict):
+        for source, keys in ((part, ("tool", "toolName", "name")),
+                             (event, ("tool", "toolName"))):
+            for key in keys:
+                value = source.get(key)
+                if value:
+                    return value
+        return None
+
+    @staticmethod
+    def _skill_name_from_state(tool_state: dict) -> str | None:
+        tool_input = tool_state.get("input")
+        if not isinstance(tool_input, dict):
+            return None
+        for key in ("name", "skill", "command"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                return value.strip()
+        return None
+
+    @staticmethod
+    def _record_skill_status(tool_state: dict, call_key: tuple[str, str],
+                             state: _TranscriptSkillState) -> None:
+        status = tool_state.get("status")
+        normalized_status = status.lower() if isinstance(status, str) else ""
+        if normalized_status == "error":
+            state.errored.add(call_key)
+            state.unproven.discard(call_key)
+            return
+        if normalized_status == "completed":
+            state.completed.add(call_key)
+            state.unproven.discard(call_key)
+            return
+        if call_key not in state.completed and call_key not in state.errored:
+            state.unproven.add(call_key)
+
+    @staticmethod
+    def _transcript_skill_result(state: _TranscriptSkillState) -> TranscriptSkills:
+        invoked: set[str] = set()
+        unproven_names: set[str] = set()
+        for call_key, name in state.skill_calls.items():
+            if call_key in state.completed and call_key not in state.errored:
+                invoked.add(name)
+        for call_key in state.unproven:
+            if call_key not in state.completed and call_key not in state.errored:
+                unproven_names.add(state.skill_calls[call_key])
+        return TranscriptSkills(invoked=invoked, unproven=unproven_names, parseable=True)
+
+    @staticmethod
+    def _require_background_output_file(mode: str, output_file) -> None:
+        if mode == "background" and output_file is None:
+            raise ValueError("dispatch(mode='background') requires output_file")
+
+    @staticmethod
+    def _uses_json_events(kind: str, mode: str) -> bool:
+        if mode == "streaming":
+            return True
+        return kind == "skill" and os.environ.get("AOG_OPENCODE_SKILL_FORMAT", "").lower() == "json"
+
+    @staticmethod
+    def _auto_enabled(permission_mode: str) -> bool:
+        """Map the Claude-compatible permission mode to OpenCode's --auto flag."""
+        auto_env = os.environ.get("AOG_OPENCODE_AUTO")
+        return auto_env == "1" if auto_env is not None else permission_mode == "bypassPermissions"
 
     @staticmethod
     def _dispatch_background(cmd: list, formatted: str, env: dict, output_file) -> subprocess.Popen:
@@ -184,79 +357,37 @@ class OpencodeBackend(Backend):
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
+                **_runtime.spawn_new_session_kwargs(),
             )
         if proc.stdin is not None:
             proc.stdin.write(formatted)
             proc.stdin.close()
         return proc
 
-    def _dispatch_foreground(self, cmd: list, formatted: str, env: dict, timeout: Optional[float], tee_path,
-                             kind: str, mode: str) -> Envelope:
-        try:
-            completed = subprocess.run(
-                cmd,
-                input=formatted,
-                capture_output=True,
-                text=True,
-                timeout=int(timeout) if timeout else None,
-                env=env,
-            )
-            if tee_path:
-                Path(tee_path).parent.mkdir(parents=True, exist_ok=True)
-                Path(tee_path).write_text(completed.stdout or "")
-            return Envelope(
-                is_error=completed.returncode != 0,
-                output_text=completed.stdout or "",
-                raw_envelope={
-                    "returncode": completed.returncode,
-                    "stderr": completed.stderr or "",
-                    "cmd_kind": kind,
-                    "backend": self.name,
-                    "mode": mode,
-                },
-            )
-        except subprocess.TimeoutExpired:
-            return Envelope(
-                is_error=True,
-                output_text="",
-                raw_envelope={"timed_out": True, "backend": self.name, "cmd_kind": kind},
-            )
-        except FileNotFoundError as e:
-            return Envelope(
-                is_error=True,
-                output_text="",
-                raw_envelope={"not_found": True, "stderr": str(e), "backend": self.name},
-            )
+    @staticmethod
+    def _timeout_output(error: subprocess.TimeoutExpired) -> tuple[str, str]:
+        stdout = error.output or ""
+        stderr = error.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return stdout, stderr
 
-    def _build_run_cmd(self, prompt: str | None = None, *, session_id: str | None = None,
-                       auto: bool = False, cwd: str | None = None,
-                       extra_args: Optional[list] = None, format_json: bool = False,
-                       model: str | None = None, agent: str | None = None,
-                       variant: str | None = None) -> list:
-        # Backward-compatible wrapper for tests/callers from v3.13.0. The
-        # prompt parameter is intentionally ignored: opencode run receives the
-        # full a5_ops brief on stdin, not as a positional argv message.
-        cmd = [self.opencode_bin, "run"]
-        if session_id:
-            cmd += ["--session", session_id]
-        if auto:
-            cmd += ["--auto"]
-        if cwd:
-            cmd += ["--dir", cwd]
-        env_model = model if model is not None else os.environ.get("AOG_OPENCODE_MODEL")
-        if env_model and not self._has_model_arg(extra_args or []):
-            cmd += ["--model", env_model]
-        env_agent = agent if agent is not None else os.environ.get("AOG_OPENCODE_AGENT")
-        if env_agent and not self._has_agent_arg(extra_args or []):
-            cmd += ["--agent", env_agent]
-        env_variant = variant if variant is not None else os.environ.get("AOG_OPENCODE_VARIANT")
-        if env_variant and not self._has_variant_arg(extra_args or []):
-            cmd += ["--variant", env_variant]
-        if format_json and not self._has_format_arg(extra_args or []):
-            cmd += ["--format", "json"]
-        if extra_args:
-            cmd += list(extra_args)
-        return cmd
+    @staticmethod
+    def _collect_timeout_output(proc: subprocess.Popen, stdout: str, stderr: str) -> tuple[str, str]:
+        try:
+            final_stdout, final_stderr = proc.communicate(timeout=1)
+        except Exception as cleanup_error:
+            log.debug("Recoverable operation failed.", exc_info=cleanup_error)
+            return stdout, stderr
+        return final_stdout or stdout, final_stderr or stderr
+
+    @staticmethod
+    def _write_tee(tee_path, stdout: str) -> None:
+        if tee_path:
+            Path(tee_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(tee_path).write_text(stdout or "")
 
     @staticmethod
     def _has_model_arg(extra_args: list) -> bool:
@@ -343,26 +474,6 @@ class OpencodeBackend(Backend):
             return False
         return os.path.abspath(str(candidate)) == os.path.abspath(str(dispatch_workspace))
 
-    # ---- process-private opencode config (agents + skill discovery) --------------------
-    # opencode 1.18.18's own tool set, as reported by `opencode debug agent <name>`. Used to
-    # restore whitelist semantics: opencode's per-agent `tools` record is additive, so every
-    # tool NOT granted by the Claude Code definition has to be denied explicitly.
-    # NOTE `patch` is deliberately absent: opencode treats edit/write/patch as ALIASES of one
-    # write-side group, so emitting `patch: false` switches the whole group off and an agent
-    # that Claude Code grants Edit to ends up unable to write at all. Measured consequence of
-    # getting this wrong: the worker loses its write tool, falls back to `bash printf > file`,
-    # and every generated-code rule — which only fires on Write/Edit/MultiEdit — is bypassed.
-    _OPENCODE_TOOLS = {
-        "bash", "read", "glob", "grep", "edit", "write", "task", "webfetch",
-        "todowrite", "skill", "question", "invalid",
-    }
-
-    _CC_TO_OPENCODE_TOOL = {
-        "read": "read", "write": "write", "edit": "edit", "multiedit": "edit",
-        "grep": "grep", "glob": "glob", "bash": "bash", "webfetch": "webfetch",
-        "skill": "skill", "task": "task",
-    }
-
     @staticmethod
     def _plugin_root() -> Path:
         # backends/ -> orchestrator/ -> scripts/ -> src/ -> engine/ -> <plugin root>
@@ -406,7 +517,7 @@ class OpencodeBackend(Backend):
             logging.getLogger(__name__).debug(
                 "PyYAML frontmatter parse failed; using the minimal reader: %s", exc
             )
-        return _parse_frontmatter_minimal(raw), body
+        return OpencodeBackend._parse_frontmatter_minimal(raw), body
 
     @staticmethod
     def _parse_frontmatter_minimal(raw: str) -> dict:
@@ -425,6 +536,26 @@ class OpencodeBackend(Backend):
                 val = val.strip().strip('"').strip("'")
                 data[key] = val if val else []
         return data
+
+    # ---- process-private opencode config (agents + skill discovery) --------------------
+    # opencode 1.18.18's own tool set, as reported by `opencode debug agent <name>`. Used to
+    # restore whitelist semantics: opencode's per-agent `tools` record is additive, so every
+    # tool NOT granted by the Claude Code definition has to be denied explicitly.
+    # NOTE `patch` is deliberately absent: opencode treats edit/write/patch as ALIASES of one
+    # write-side group, so emitting `patch: false` switches the whole group off and an agent
+    # that Claude Code grants Edit to ends up unable to write at all. Measured consequence of
+    # getting this wrong: the worker loses its write tool, falls back to `bash printf > file`,
+    # and every generated-code rule — which only fires on Write/Edit/MultiEdit — is bypassed.
+    _OPENCODE_TOOLS = {
+        "bash", "read", "glob", "grep", "edit", "write", "task", "webfetch",
+        "todowrite", "skill", "question", "invalid",
+    }
+
+    _CC_TO_OPENCODE_TOOL = {
+        "read": "read", "write": "write", "edit": "edit", "multiedit": "edit",
+        "grep": "grep", "glob": "glob", "bash": "bash", "webfetch": "webfetch",
+        "skill": "skill", "task": "task",
+    }
 
     @staticmethod
     def _tools_record(fm: dict) -> dict | None:
@@ -649,64 +780,14 @@ class OpencodeBackend(Backend):
                 return match.group(1).rstrip(".,)")
         return None
 
-    def _run_streaming(self, cmd: list, prompt: str, *, kind: str, mode: str, env: dict,
-                       timeout: Optional[float], silence_timeout: Optional[int] = None,
-                       progress_callback=None,
-                       tee_path=None) -> Envelope:
-        started = time.monotonic()
-        state, timeout_sec, deadline, silence_timeout_sec = self._new_stream_state(
-            started, timeout, silence_timeout
-        )
-        tee = None
-        proc: subprocess.Popen | None = None
-        sel: selectors.BaseSelector | None = None
-        try:
-            tee = self._open_tee(tee_path)
-            proc, sel, stdout_fd = self._open_stream_process(cmd, prompt, env)
-            timed_out, silence_timed_out = self._monitor_stream(
-                proc,
-                sel,
-                stdout_fd,
-                state,
-                deadline=deadline,
-                silence_timeout_sec=silence_timeout_sec,
-                tee=tee,
-                progress_callback=progress_callback,
-            )
-            if timed_out or silence_timed_out or state.invalid_tool_event:
-                self._terminate_process_group(proc)
-                return self._stream_failure_envelope(
-                    cmd,
-                    state,
-                    proc,
-                    started=started,
-                    timeout_sec=timeout_sec,
-                    silence_timeout_sec=silence_timeout_sec,
-                    silence_timed_out=silence_timed_out,
-                    kind=kind,
-                    mode=mode,
-                    tee=tee,
-                )
-            rc = proc.wait()
-            return self._stream_success_envelope(cmd, state, rc, started, kind, mode)
-        except FileNotFoundError as e:
-            return Envelope(
-                is_error=True,
-                output_text="",
-                raw_envelope={"not_found": True, "stderr": str(e), "backend": self.name},
-            )
-        finally:
-            self._close_stream_resources(sel, tee)
-
-    def _new_stream_state(self, started: float, timeout: Optional[float], silence_timeout: Optional[int]
-                          ) -> tuple[_StreamState, int | None, float | None, int | None]:
-        timeout_sec = int(timeout) if timeout else None
-        return (
-            _StreamState(last_output_at=started, invalid_tool_limit=self._invalid_tool_limit()),
-            timeout_sec,
-            started + timeout_sec if timeout_sec else None,
-            self._stream_silence_timeout(silence_timeout),
-        )
+    @staticmethod
+    def _stream_completed_without_failure(timed_out: bool, silence_timed_out: bool,
+                                          state: _StreamState) -> bool:
+        if timed_out:
+            return False
+        if silence_timed_out:
+            return False
+        return not state.invalid_tool_event
 
     @staticmethod
     def _open_tee(tee_path):
@@ -733,7 +814,7 @@ class OpencodeBackend(Backend):
             text=False,
             env=env,
             bufsize=0,
-            start_new_session=True,
+            **_runtime.spawn_new_session_kwargs(),
         )
         if proc.stdin is not None:
             proc.stdin.write(prompt.encode("utf-8"))
@@ -745,29 +826,6 @@ class OpencodeBackend(Backend):
         os.set_blocking(stdout_fd, False)
         selector.register(proc.stdout, selectors.EVENT_READ)
         return proc, selector, stdout_fd
-
-    def _monitor_stream(self, proc: subprocess.Popen, selector: selectors.BaseSelector, stdout_fd: int,
-                        state: _StreamState, *, deadline: float | None, silence_timeout_sec: int | None,
-                        tee, progress_callback) -> tuple[bool, bool]:
-        while True:
-            timed_out, silence_timed_out = self._stream_timeout_state(
-                state.last_output_at, deadline, silence_timeout_sec
-            )
-            if timed_out or silence_timed_out:
-                return timed_out, silence_timed_out
-            if proc.poll() is not None:
-                self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
-                if state.pending and not state.invalid_tool_event:
-                    self._record_stream_line(
-                        state, state.pending.decode("utf-8", errors="replace"),
-                        tee, progress_callback,
-                    )
-                    state.pending = b""
-                return False, False
-            if selector.select(self._stream_wait_interval(state.last_output_at, deadline, silence_timeout_sec)):
-                self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
-                if state.invalid_tool_event:
-                    return False, False
 
     @staticmethod
     def _stream_timeout_state(last_output_at: float, deadline: float | None,
@@ -789,6 +847,408 @@ class OpencodeBackend(Backend):
         if silence_timeout_sec is not None:
             wait = min(wait, max(0.0, silence_timeout_sec - (now - last_output_at)))
         return wait
+
+    @staticmethod
+    def _stream_silence_timeout(silence_timeout: Optional[int]) -> int | None:
+        value = silence_timeout
+        if value is None:
+            env_value = os.environ.get("AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC")
+            if env_value:
+                try:
+                    value = int(env_value)
+                except ValueError:
+                    value = STREAM_SILENCE_TIMEOUT_SEC
+            else:
+                value = STREAM_SILENCE_TIMEOUT_SEC
+        if value is None or value <= 0:
+            return None
+        return int(value)
+
+    @staticmethod
+    def _invalid_tool_limit() -> int:
+        raw = os.environ.get("AOG_OPENCODE_INVALID_TOOL_LIMIT", "1")
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 1
+        return max(1, value)
+
+    @staticmethod
+    def _joined_output(parts: list[str]) -> str:
+        return "\n".join(part.strip("\n") for part in parts if part is not None)
+
+    @staticmethod
+    def _emit_text_progress(progress_callback, text: str) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+        except Exception as error:
+            logging.getLogger(__name__).debug(
+                "Recoverable operation failed.", exc_info=error
+            )
+
+    @staticmethod
+    def _emit_tool_progress(progress_callback, name: str, tool_input: Any) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback({
+                "type": "assistant",
+                "message": {"content": [{"type": "tool_use", "name": name, "input": tool_input or {}}]},
+            })
+        except Exception as error:
+            logging.getLogger(__name__).debug(
+                "Recoverable operation failed.", exc_info=error
+            )
+
+    @staticmethod
+    def _terminate_process_group(proc: subprocess.Popen) -> None:
+        """G6: delegate to the tested cross-platform contract (opencode_runtime):
+        killpg(TERM) → grace → killpg(KILL) → reap. The child owns a dedicated
+        session, so normal descendants are covered without unsafe /proc scanning;
+        this helper never raises to its caller."""
+        _runtime.terminate_process_group(proc)
+
+    @staticmethod
+    def _redacted_cmd(cmd: list) -> list:
+        return [str(part) for part in cmd]
+
+    # ---- Backend interface ----
+
+    def normalize(self, raw: Any) -> Envelope:
+        return normalize_backend_envelope(raw, self.name)
+
+    def format_agent(self, agent_def: dict) -> dict:
+        return format_backend_agent(agent_def, self.name)
+
+    def wire_safety(self, checkers: list) -> dict:
+        plugin_path = Path(__file__).resolve().parents[3] / "opencode" / "a5_ops_hooks.mjs"
+        return {
+            "backend": self.name,
+            "kind": "host-hook-plugin",
+            "plugin_path": str(plugin_path),
+            "events": [
+                "tool.execute.before",
+                "tool.execute.after",
+                "permission.ask",
+            ],
+            "checkers": list(checkers or []),
+        }
+
+    def resume(self, session_id: str, prompt: str) -> Envelope:
+        return self.dispatch("resume", prompt, kind="resume", session=session_id)
+
+    def transcript_skills(self, transcript_path) -> TranscriptSkills:
+        """Return verified Skill calls from a native OpenCode NDJSON transcript."""
+        try:
+            text = Path(transcript_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return TranscriptSkills(parseable=False, note=f"transcript unreadable: {transcript_path}")
+        state = _TranscriptSkillState()
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            failure = self._record_transcript_line(line, line_no, state)
+            if failure is not None:
+                return failure
+        if not state.opencode_shaped:
+            return TranscriptSkills(
+                parseable=False, note="transcript is not native opencode NDJSON")
+        return self._transcript_skill_result(state)
+
+    def identify_cmd(self, cmd: str) -> bool:
+        return any(marker in cmd for marker in _OPENCODE_RUN_MARKERS)
+
+    def parse_op_from_cmd(self, cmd: str) -> Optional[str]:
+        match = _OP_SLUG_RE.search(cmd)
+        return match.group(1) if match else None
+
+
+    def _runtime_failure(self, mode: str) -> Envelope | None:
+        """Return a foreground failure envelope, or reject unsafe background work directly."""
+        if os.environ.get("AOG_OPENCODE_SKIP_RUNTIME_CHECK") == "1":
+            return None
+        check = _runtime.ensure_opencode_runtime(self.opencode_bin)
+        if check.ok:
+            for warning in check.warnings:
+                log.warning("opencode runtime check: %s", warning)
+            return None
+        if mode == "background":
+            raise RuntimeError(f"opencode runtime self-check failed: {check.reason}")
+        return Envelope(
+            is_error=True,
+            output_text="",
+            raw_envelope={"runtime_check_failed": True, "reason": check.reason},
+        )
+
+
+    def _build_dispatch_command(self, context: _DispatchCommandContext) -> list:
+        cwd_text = str(context.cwd) if context.cwd is not None else None
+        cmd = self._build_run_cmd(
+            session_id=context.session,
+            auto=self._auto_enabled(context.permission_mode),
+            cwd=cwd_text,
+            extra_args=context.extra_args,
+            format_json=context.use_json_events,
+            model=self._select_model(context.target, context.kind),
+            agent=self._select_agent(context.target, context.kind),
+            variant=self._select_variant(context.target, context.kind),
+        )
+        return list(context.sandbox_prefix) + cmd if context.sandbox_prefix else cmd
+
+
+    def _dispatch_foreground(self, run_or_cmd, *legacy_args) -> Envelope:
+        """Dispatch a foreground run, accepting the legacy positional test seam too."""
+        if isinstance(run_or_cmd, _ForegroundRun):
+            run = run_or_cmd
+        else:
+            formatted, env, timeout, tee_path, kind, mode = legacy_args
+            run = _ForegroundRun(run_or_cmd, formatted, env, timeout, tee_path, kind, mode)
+        try:
+            result = self._run_foreground(run)
+        except subprocess.TimeoutExpired:
+            return Envelope(
+                is_error=True,
+                output_text="",
+                raw_envelope={"timed_out": True, "backend": self.name, "cmd_kind": run.kind},
+            )
+        except FileNotFoundError as e:
+            return Envelope(
+                is_error=True,
+                output_text="",
+                raw_envelope={"not_found": True, "stderr": str(e), "backend": self.name},
+            )
+        if isinstance(result, Envelope):
+            return result
+        stdout, stderr, returncode = result
+        self._write_tee(run.tee_path, stdout)
+        return self._foreground_envelope(stdout, stderr, returncode, run.kind, run.mode)
+
+    def _run_foreground(self, run: _ForegroundRun):
+        timeout_sec = int(run.timeout) if run.timeout else None
+        if timeout_sec is not None:
+            return self._run_foreground_with_timeout(run, timeout_sec)
+        completed = subprocess.run(
+            run.cmd,
+            input=run.formatted,
+            capture_output=True,
+            text=True,
+            env=run.env,
+            **_runtime.spawn_new_session_kwargs(),
+        )
+        return completed.stdout or "", completed.stderr or "", completed.returncode
+
+    def _run_foreground_with_timeout(self, run: _ForegroundRun, timeout_sec: int):
+        proc = subprocess.Popen(
+            run.cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=run.env,
+            **_runtime.spawn_new_session_kwargs(),
+        )
+        try:
+            stdout, stderr = proc.communicate(run.formatted, timeout=timeout_sec)
+        except subprocess.TimeoutExpired as error:
+            _runtime.terminate_process_group(proc)
+            stdout, stderr = self._timeout_output(error)
+            stdout, stderr = self._collect_timeout_output(proc, stdout, stderr)
+            self._write_tee(run.tee_path, stdout)
+            return self._foreground_timeout_envelope(
+                stdout, stderr, proc.returncode, run.kind, run.mode
+            )
+        return stdout or "", stderr or "", proc.returncode
+
+
+    def _foreground_timeout_envelope(self, stdout: str, stderr: str, returncode, kind: str,
+                                     mode: str) -> Envelope:
+        return Envelope(
+            is_error=True,
+            output_text=stdout or "",
+            raw_envelope={
+                "timed_out": True,
+                "returncode": returncode,
+                "stderr": stderr or "",
+                "cmd_kind": kind,
+                "backend": self.name,
+                "mode": mode,
+            },
+        )
+
+    def _foreground_envelope(self, stdout: str, stderr: str, returncode, kind: str,
+                             mode: str) -> Envelope:
+        return Envelope(
+            is_error=returncode != 0,
+            output_text=stdout or "",
+            raw_envelope={
+                "returncode": returncode,
+                "stderr": stderr or "",
+                "cmd_kind": kind,
+                "backend": self.name,
+                "mode": mode,
+            },
+        )
+
+    def _build_run_cmd(self, prompt: str | None = None, *, session_id: str | None = None,
+                       auto: bool = False, cwd: str | None = None,
+                       extra_args: Optional[list] = None, format_json: bool = False,
+                       model: str | None = None, agent: str | None = None,
+                       variant: str | None = None) -> list:
+        # Backward-compatible wrapper for tests/callers from v3.13.0. The
+        # prompt parameter is intentionally ignored: opencode run receives the
+        # full a5_ops brief on stdin, not as a positional argv message.
+        cmd = [self.opencode_bin, "run"]
+        if session_id:
+            cmd += ["--session", session_id]
+        if auto:
+            cmd += ["--auto"]
+        if cwd:
+            cmd += ["--dir", cwd]
+        env_model = model if model is not None else os.environ.get("AOG_OPENCODE_MODEL")
+        if env_model and not self._has_model_arg(extra_args or []):
+            cmd += ["--model", env_model]
+        env_agent = agent if agent is not None else os.environ.get("AOG_OPENCODE_AGENT")
+        if env_agent and not self._has_agent_arg(extra_args or []):
+            cmd += ["--agent", env_agent]
+        env_variant = variant if variant is not None else os.environ.get("AOG_OPENCODE_VARIANT")
+        if env_variant and not self._has_variant_arg(extra_args or []):
+            cmd += ["--variant", env_variant]
+        if format_json and not self._has_format_arg(extra_args or []):
+            cmd += ["--format", "json"]
+        if extra_args:
+            cmd += list(extra_args)
+        return cmd
+
+    def _run_streaming(self, cmd: list, prompt: str, *, kind: str, mode: str, env: dict,
+                       timeout: Optional[float], silence_timeout: Optional[int] = None,
+                       progress_callback=None,
+                       tee_path=None, agent_type: str | None = None) -> Envelope:
+        started = time.monotonic()
+        state, timeout_sec, deadline, silence_timeout_sec = self._new_stream_state(
+            started, timeout, silence_timeout
+        )
+        tee = None
+        proc: subprocess.Popen | None = None
+        sel: selectors.BaseSelector | None = None
+        try:
+            tee = self._open_tee(tee_path)
+            proc, sel, stdout_fd = self._open_stream_process(cmd, prompt, env)
+            return self._finish_stream(
+                _StreamFinishContext(
+                    cmd=cmd,
+                    proc=proc,
+                    selector=sel,
+                    stdout_fd=stdout_fd,
+                    state=state,
+                    started=started,
+                    timeout_sec=timeout_sec,
+                    deadline=deadline,
+                    silence_timeout_sec=silence_timeout_sec,
+                    tee=tee,
+                    progress_callback=progress_callback,
+                    agent_type=agent_type,
+                    kind=kind,
+                    mode=mode,
+                )
+            )
+        except FileNotFoundError as e:
+            return Envelope(
+                is_error=True,
+                output_text="",
+                raw_envelope={"not_found": True, "stderr": str(e), "backend": self.name},
+            )
+        finally:
+            self._close_stream_resources(sel, tee)
+
+    def _finish_stream(self, context: _StreamFinishContext) -> Envelope:
+        timed_out, silence_timed_out = self._monitor_stream(
+            context.proc, context.selector, context.stdout_fd, context.state,
+            deadline=context.deadline,
+            silence_timeout_sec=context.silence_timeout_sec,
+            tee=context.tee,
+            progress_callback=context.progress_callback,
+        )
+        if self._stream_completed_without_failure(timed_out, silence_timed_out, context.state):
+            return self._stream_success_envelope(
+                context.cmd, context.state, context.proc.wait(), context.started,
+                context.kind, context.mode,
+            )
+        self._terminate_process_group(context.proc)
+        failure = self._stream_failure_envelope(
+            context.cmd, context.state, context.proc, started=context.started,
+            timeout_sec=context.timeout_sec,
+            silence_timeout_sec=context.silence_timeout_sec,
+            silence_timed_out=silence_timed_out,
+            kind=context.kind,
+            mode=context.mode,
+            tee=context.tee,
+        )
+        self._raise_stream_silence_timeout_if_needed(
+            context, timed_out, silence_timed_out, failure,
+        )
+        return failure
+
+
+    def _raise_stream_silence_timeout_if_needed(self, context: _StreamFinishContext,
+                                                timed_out: bool, silence_timed_out: bool,
+                                                failure: Envelope) -> None:
+        """Raise the shared retry signal only for FSM streaming agent work."""
+        if not silence_timed_out:
+            return
+        if timed_out:
+            return
+        if context.kind != "agent":
+            return
+        if context.mode != "streaming":
+            return
+        raise StreamSilenceTimeout(
+            context.agent_type or self.name,
+            time.monotonic() - context.state.last_output_at,
+            getattr(context.state, "last_event_type", None),
+            partial_output=failure.output_text,
+            raw_envelope=failure.raw_envelope,
+        )
+
+    def _new_stream_state(self, started: float, timeout: Optional[float], silence_timeout: Optional[int]
+                          ) -> tuple[_StreamState, int | None, float | None, int | None]:
+        timeout_sec = int(timeout) if timeout else None
+        return (
+            _StreamState(last_output_at=started, invalid_tool_limit=self._invalid_tool_limit()),
+            timeout_sec,
+            started + timeout_sec if timeout_sec else None,
+            self._stream_silence_timeout(silence_timeout),
+        )
+
+
+    def _monitor_stream(self, proc: subprocess.Popen, selector: selectors.BaseSelector, stdout_fd: int,
+                        state: _StreamState, *, deadline: float | None, silence_timeout_sec: int | None,
+                        tee, progress_callback) -> tuple[bool, bool]:
+        while True:
+            # Drain first: select() may time out precisely while a child event is already
+            # buffered in the pipe.  Classifying that state as silent loses the partial
+            # result and raises a false retry signal.
+            self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
+            if state.invalid_tool_event:
+                return False, False
+            timed_out, silence_timed_out = self._stream_timeout_state(
+                state.last_output_at, deadline, silence_timeout_sec
+            )
+            if timed_out or silence_timed_out:
+                return timed_out, silence_timed_out
+            if proc.poll() is not None:
+                self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
+                if state.pending and not state.invalid_tool_event:
+                    self._record_stream_line(
+                        state, state.pending.decode("utf-8", errors="replace"),
+                        tee, progress_callback,
+                    )
+                    state.pending = b""
+                return False, False
+            if selector.select(self._stream_wait_interval(state.last_output_at, deadline, silence_timeout_sec)):
+                self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
+                if state.invalid_tool_event:
+                    return False, False
+
 
     def _drain_stream_stdout(self, state: _StreamState, stdout_fd: int, tee, progress_callback) -> None:
         while True:
@@ -927,76 +1387,6 @@ class OpencodeBackend(Backend):
                 num_turns = tokens["total"]
         return session_id, total_cost, num_turns, invalid_tool
 
-    @staticmethod
-    def _stream_silence_timeout(silence_timeout: Optional[int]) -> int | None:
-        value = silence_timeout
-        if value is None:
-            env_value = os.environ.get("AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC")
-            if env_value:
-                try:
-                    value = int(env_value)
-                except ValueError:
-                    value = None
-        if value is None or value <= 0:
-            return None
-        return int(value)
-
-    @staticmethod
-    def _invalid_tool_limit() -> int:
-        raw = os.environ.get("AOG_OPENCODE_INVALID_TOOL_LIMIT", "1")
-        try:
-            value = int(raw)
-        except ValueError:
-            value = 1
-        return max(1, value)
-
-    @staticmethod
-    def _joined_output(parts: list[str]) -> str:
-        return "\n".join(part.strip("\n") for part in parts if part is not None)
-
-    @staticmethod
-    def _emit_text_progress(progress_callback, text: str) -> None:
-        if progress_callback is None:
-            return
-        try:
-            progress_callback({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
-        except Exception as error:
-            logging.getLogger(__name__).debug(
-                "Recoverable operation failed.", exc_info=error
-            )
-
-    @staticmethod
-    def _emit_tool_progress(progress_callback, name: str, tool_input: Any) -> None:
-        if progress_callback is None:
-            return
-        try:
-            progress_callback({
-                "type": "assistant",
-                "message": {"content": [{"type": "tool_use", "name": name, "input": tool_input or {}}]},
-            })
-        except Exception as error:
-            logging.getLogger(__name__).debug(
-                "Recoverable operation failed.", exc_info=error
-            )
-
-    @staticmethod
-    def _terminate_process_group(proc: subprocess.Popen) -> None:
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                return
-            proc.wait(timeout=5)
-
-    @staticmethod
-    def _redacted_cmd(cmd: list) -> list:
-        return [str(part) for part in cmd]
 
     def _format_prompt(self, target: str, prompt: str, *, kind: str) -> str:
         skill_context = load_skill_context(target) if kind == "skill" else None
@@ -1013,44 +1403,61 @@ class OpencodeBackend(Backend):
             f"{prompt}"
         )
 
-    def normalize(self, raw: Any) -> Envelope:
-        if isinstance(raw, Envelope):
-            return raw
-        if isinstance(raw, dict):
-            return Envelope(
-                is_error=bool(raw.get("is_error")),
-                output_text=raw.get("result") or raw.get("output_text") or "",
-                api_error_status=raw.get("api_error_status"),
-                session_id=raw.get("session_id"),
-                raw_envelope=raw,
+    def _record_transcript_line(self, line: str, line_no: int,
+                                state: _TranscriptSkillState) -> TranscriptSkills | None:
+        event = self._parse_transcript_line(line, line_no)
+        if event is None:
+            return None
+        if isinstance(event, TranscriptSkills):
+            return event
+        return self._record_transcript_event(event, line_no, state)
+
+    def _record_transcript_event(self, event: dict, line_no: int,
+                                 state: _TranscriptSkillState) -> TranscriptSkills | None:
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        part_type = part.get("type")
+        if not isinstance(part_type, str):
+            return None
+        identity = self._transcript_part_identity(event, part, part_type, line_no)
+        if isinstance(identity, TranscriptSkills):
+            return identity
+        session_id, part_id = identity
+        if part_type in {"text", "reasoning", "step-start", "step_start", "step-finish", "step_finish"}:
+            state.opencode_shaped = True
+            return None
+        if part_type != "tool":
+            return TranscriptSkills(
+                parseable=False,
+                note=f"unrecognized typed opencode part at line {line_no}: {part_type}",
             )
-        return Envelope(is_error=False, output_text=str(raw), raw_envelope={"backend": self.name})
+        return self._record_transcript_tool(
+            _TranscriptToolEvent(event, part, line_no, session_id, part_id, state)
+        )
 
-    def format_agent(self, agent_def: dict) -> dict:
-        rendered = dict(agent_def)
-        rendered["harness_backend"] = self.name
-        return rendered
-
-    def wire_safety(self, checkers: list) -> dict:
-        plugin_path = Path(__file__).resolve().parents[3] / "opencode" / "a5_ops_hooks.mjs"
-        return {
-            "backend": self.name,
-            "kind": "host-hook-plugin",
-            "plugin_path": str(plugin_path),
-            "events": [
-                "tool.execute.before",
-                "tool.execute.after",
-                "permission.ask",
-            ],
-            "checkers": list(checkers or []),
-        }
-
-    def resume(self, session_id: str, prompt: str) -> Envelope:
-        return self.dispatch("resume", prompt, kind="resume", session=session_id)
-
-    def identify_cmd(self, cmd: str) -> bool:
-        return any(marker in cmd for marker in _OPENCODE_RUN_MARKERS)
-
-    def parse_op_from_cmd(self, cmd: str) -> Optional[str]:
-        m = _OP_SLUG_RE.search(cmd)
-        return m.group(1) if m else None
+    def _record_transcript_tool(self, tool_event: _TranscriptToolEvent) -> TranscriptSkills | None:
+        tool_state = tool_event.part.get("state")
+        if not isinstance(tool_state, dict):
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode tool event at line {tool_event.line_no} has no native state object",
+            )
+        tool_event.state.opencode_shaped = True
+        tool = self._event_tool_name(tool_event.event, tool_event.part)
+        if not isinstance(tool, str) or not tool.strip():
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode tool event at line {tool_event.line_no} lacks a tool name",
+            )
+        if tool.lower() != "skill":
+            return None
+        call_key = (tool_event.session_id, tool_event.part_id)
+        name = self._skill_name_from_state(tool_state)
+        if name:
+            tool_event.state.skill_calls[call_key] = name
+        if call_key not in tool_event.state.skill_calls:
+            return TranscriptSkills(
+                parseable=False,
+                note=f"opencode skill event at line {tool_event.line_no} lacks a skill name",
+            )
+        self._record_skill_status(tool_state, call_key, tool_event.state)
+        return None

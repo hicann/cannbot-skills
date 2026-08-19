@@ -49,6 +49,14 @@ from pathlib import Path
 from typing import Optional
 
 from logging_config import get_logger  # cv-agent style logger
+
+# G1 harness-decoupling: the stream-silence contract (exception + retry budget) is shared
+# across backends and lives in backends.base; re-exported here so the historical
+# agent_transport.StreamSilenceTimeout / agent_transport.STREAM_SILENCE_RETRY_MAX
+# references keep resolving.
+from backends.base import (  # noqa: F401  (re-export)
+    STREAM_SILENCE_RETRY_MAX, STREAM_SILENCE_TIMEOUT_SEC, StreamSilenceTimeout,
+)
 log = get_logger(__name__)
 
 
@@ -91,29 +99,8 @@ STREAM_POLL_INTERVAL_SEC = 1.0
 #   - infinite loop with no observable output
 #   - lost network mid-call with no error surface
 #
-# Override via env: AOG_STREAM_SILENCE_TIMEOUT_SEC, AOG_STREAM_SILENCE_RETRY_MAX
-STREAM_SILENCE_TIMEOUT_SEC = int(os.environ.get("AOG_STREAM_SILENCE_TIMEOUT_SEC", "1800"))
-STREAM_SILENCE_RETRY_MAX = int(os.environ.get("AOG_STREAM_SILENCE_RETRY_MAX", "2"))
-
-
-class StreamSilenceTimeout(Exception):
-    """Raised when subprocess stdout has been silent for longer than
-    STREAM_SILENCE_TIMEOUT_SEC. The subprocess has been SIGTERMed by
-    the time this exception is raised. Caller (orchestrator) should
-    catch this distinctly from generic Exception to enable bounded
-    auto-respawn.
-    """
-
-    def __init__(self, agent_type: str, silent_seconds: float,
-                 last_event_type: Optional[str] = None):
-        self.agent_type = agent_type
-        self.silent_seconds = silent_seconds
-        self.last_event_type = last_event_type
-        super().__init__(
-            f"{agent_type}: stdout silent for {silent_seconds:.0f}s "
-            f"(last event type: {last_event_type or 'none'}); "
-            f"SIGTERMed subprocess"
-        )
+# Override via env: AOG_STREAM_SILENCE_TIMEOUT_SEC / AOG_STREAM_SILENCE_RETRY_MAX
+# (both are shared contracts in backends.base).
 
 
 # P0n (2026-05-05): orchestrator-interrupt → claude-killed propagation.

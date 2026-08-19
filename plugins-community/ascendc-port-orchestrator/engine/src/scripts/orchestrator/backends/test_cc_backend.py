@@ -142,6 +142,8 @@ def test_dispatch_agent_modes_delegate_faithfully():
     """streaming/background modes delegate to agent_transport faithfully + pass sandbox_prefix VERBATIM +
     thread progress_callback/tee/silence/output_file. No claude spawn (agent_transport stubbed).
     """
+    # cc_backend.dispatch resolves the canonical flat transport via
+    # `import agent_transport`, so shadow that one module for the delegation.
     _orig = sys.modules.get("agent_transport")
     at = types.ModuleType("agent_transport")
     calls = {}

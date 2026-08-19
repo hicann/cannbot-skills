@@ -30,19 +30,30 @@ reached it.
 Skipped unless AOG_E2E_OPENCODE_MODEL names a configured opencode model, because it needs
 credentials and spends tokens:
 
-    AOG_E2E_OPENCODE_MODEL=<provider>/<model> python3 -m pytest src/scripts/tests/test_opencode_e2e_live.py
+    AOG_E2E_OPENCODE_MODEL=<provider>/<model> \\
+        python3 -m pytest src/scripts/tests/test_opencode_e2e_live.py
 
-Measured on 2026-08-14 with opencode 1.18.18 and deepseek-anthropic/deepseek-v4-pro: the model
-issued the cross-workspace read, opencode invoked the hook, and the read came back
-`[a5_ops opencode hook] access guard blocked cross-workspace read by aog-kernel-worker` with no
-marker leaked; the own-workspace read returned its marker.
+G8 hardening (2026-08): the run is no longer just "an answer came back". Every test below
+asserts REAL evidence:
+  * deny/allow pair — the refusal string `[a5_ops opencode hook]` is emitted BY the guard,
+    so its presence is hook-firing evidence for a model-driven tool call (not a prose claim);
+  * anti-random — the probe test requires the worker to READ a pre-written README_PROBE.md
+    whose unique token it cannot know otherwise, AND asserts a tool-call event appears in
+    opencode's own NDJSON stream (tee), so a lucky guess cannot pass.
+
+Requires: node/bun on PATH and credentials for the explicitly selected model. OpenCode 1.18.18
+is the tested and recommended version; an older or unparseable version produces an advisory
+warning but is not rejected solely for its version. This file is the operator-measured backstop;
+CI runs it only in skip mode.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -81,11 +92,10 @@ def probe_workspaces():
             shutil.rmtree(path, ignore_errors=True)
 
 
-def _dispatch(instruction: str, workspace: Path) -> str:
+def _dispatch(instruction: str, workspace: Path, *, mode: str = "blocking",
+              tee_path: "Path | None" = None) -> str:
     sys.path.insert(0, str(ENGINE / "src" / "scripts"))
     sys.path.insert(0, str(ENGINE / "src" / "scripts" / "orchestrator"))
-    os.environ["AOG_HARNESS_BACKEND"] = "opencode"
-    os.environ["AOG_OPENCODE_MODEL"] = MODEL
     from backends.opencode_backend import OpencodeBackend
 
     brief = (
@@ -93,11 +103,40 @@ def _dispatch(instruction: str, workspace: Path) -> str:
         "Do it now with a single tool call, then state in one line whether the tool call "
         "SUCCEEDED or was REFUSED, and quote any marker you saw."
     )
-    result = OpencodeBackend().dispatch(
-        "aog-kernel-worker", brief, kind="agent", mode="blocking",
-        timeout=600, cwd=str(ENGINE),
-    )
+    # Directly instantiate the backend, so do not leak a process-wide harness
+    # selection into the rest of pytest.  Model selection still comes from the
+    # explicit E2E-only environment variable.
+    with patch.dict(os.environ, {"AOG_OPENCODE_MODEL": MODEL}, clear=False):
+        result = OpencodeBackend().dispatch(
+            "aog-kernel-worker", brief, kind="agent", mode=mode,
+            timeout=600, cwd=str(ENGINE), tee_path=str(tee_path) if tee_path else None,
+        )
     return getattr(result, "output_text", "") or ""
+
+
+def _tool_events_in_tee(tee_path: Path) -> list:
+    """Count model-driven tool-call events in opencode's own NDJSON stream.
+
+    Event shape mirrors backends/opencode_backend.py transcript_skills(): a line is a tool
+    event when its `part` (or the event root) carries tool/toolName/name. Evidence source is
+    the tee written verbatim by the backend from `opencode run --format json` stdout — i.e.
+    opencode's record that the MODEL issued a tool call, not an orchestrator claim.
+    """
+    hits = []
+    for line in tee_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        tool = (part.get("tool") or part.get("toolName") or part.get("name")
+                or ev.get("tool") or ev.get("toolName"))
+        if part.get("type") == "tool" and tool:
+            hits.append(tool)
+    return hits
 
 
 def test_opencode_actually_invokes_the_hook_for_a_model_driven_read(probe_workspaces):
@@ -127,4 +166,45 @@ def test_the_same_worker_may_still_read_its_own_workspace(probe_workspaces):
     assert OWN_MARKER in answer, (
         f"the worker could not read its OWN workspace, so the net refuses everything:\n{answer[-1500:]}"
     )
-    assert REFUSAL not in answer, f"spurious refusal on the allow half:\n{answer[-1500:]}"
+    assert REFUSAL not in answer, (
+        "the own-workspace read was refused, so the net refuses everything:\n"
+        f"{answer[-1500:]}"
+    )
+
+
+PROBE_TOKEN = "READ_PROBE_7e41b9"
+
+
+def test_model_driven_tool_call_reads_probe_file(probe_workspaces, tmp_path):
+    """G8 anti-random: the worker MUST read a pre-written file to know the token, and the
+    tool call must be visible in opencode's own NDJSON stream (tee).
+
+    A prose claim or a lucky guess cannot pass: the token exists nowhere else, and the
+    stream-event assertion is opencode's record that the MODEL issued a tool call — the
+    same evidence class the deny half (REFUSAL string, emitted by the guard itself) gives
+    for hook firing.
+    """
+    mine, _ = probe_workspaces
+    probe_file = mine / "README_PROBE.md"
+    probe_file.write_text(f"probe token: {PROBE_TOKEN}\n")
+    tee = tmp_path / "oc_stream.jsonl"
+
+    answer = _dispatch(
+        f"To answer, you MUST first read the file {probe_file} with a tool. "
+        "Then write exactly one line: the full contents of that file.",
+        mine, mode="streaming", tee_path=tee,
+    )
+
+    assert PROBE_TOKEN in answer, (
+        "the worker never read README_PROBE.md — the unique token cannot appear otherwise. "
+        f"Model answer:\n{answer[-1500:]}"
+    )
+    assert REFUSAL not in answer, (
+        "the own-workspace read was refused, so the anti-random test cannot establish "
+        f"a working allow path:\n{answer[-1500:]}"
+    )
+    tool_calls = _tool_events_in_tee(tee)
+    assert tool_calls, (
+        "no tool-call event in the opencode NDJSON stream, yet the answer contains the "
+        "token. Either the stream format changed or the answer was not tool-derived"
+    )

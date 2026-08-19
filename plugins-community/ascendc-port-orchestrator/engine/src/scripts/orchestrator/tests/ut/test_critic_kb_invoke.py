@@ -9,7 +9,8 @@
 # ----------------------------------------------------------------------------------------------------------
 """Tests for critic_invoke + kb_invoke transport (P0f, Day 4 finding).
 
-Both modules call `claude --print` directly. P0f fixes:
+Both modules dispatch through the active harness backend (P0f origin: they used to
+call `claude --print` directly; the funnel step moved the spawn behind Backend.dispatch). P0f fixes:
   1. permission_mode = bypassPermissions (not acceptEdits — Bash gets denied)
   2. timeout raised (critic 300→900s, kb 600→1200s)
   3. timeout caught + reported, NOT raised — orchestrator continues

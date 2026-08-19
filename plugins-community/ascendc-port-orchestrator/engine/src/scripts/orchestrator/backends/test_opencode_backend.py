@@ -24,6 +24,7 @@ import os
 import stat
 import textwrap
 import types
+import builtins
 from pathlib import Path
 
 import pytest
@@ -32,11 +33,15 @@ _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parents[1]))  # orchestrator/
 
 from backends.opencode_backend import OpencodeBackend  # noqa: E402
+from backends.base import Envelope, STREAM_SILENCE_TIMEOUT_SEC, StreamSilenceTimeout  # noqa: E402
 
 # Private seams under test, bound once (see G.CLS.11 note in test_stop_gate_dispatch.py).
 _opencode_config_content = getattr(OpencodeBackend, "_opencode_config_content")
 _select_agent = getattr(OpencodeBackend, "_select_agent")
 _engine_root = getattr(OpencodeBackend, "_engine_root")
+_stream_silence_timeout = getattr(OpencodeBackend, "_stream_silence_timeout")
+_parse_frontmatter = getattr(OpencodeBackend, "_parse_frontmatter")
+_dispatch_foreground = getattr(OpencodeBackend, "_dispatch_foreground")
 
 
 def test_opencode_run_cmd_uses_stdin_and_dir_not_positional_prompt() -> None:
@@ -56,6 +61,33 @@ def test_opencode_run_cmd_uses_stdin_and_dir_not_positional_prompt() -> None:
     assert "--auto" in cmd
     assert "--model" in cmd and "mini/model" in cmd
     assert "Return marker" not in cmd
+
+
+def test_opencode_stream_silence_uses_shared_default_and_local_override(monkeypatch) -> None:
+    monkeypatch.delenv("AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC", raising=False)
+    assert _stream_silence_timeout(None) == STREAM_SILENCE_TIMEOUT_SEC
+
+    monkeypatch.setenv("AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC", "15")
+    assert _stream_silence_timeout(None) == 15
+
+    monkeypatch.setenv("AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC", "invalid")
+    assert _stream_silence_timeout(None) == STREAM_SILENCE_TIMEOUT_SEC
+
+
+def test_opencode_frontmatter_fallback_works_without_pyyaml(monkeypatch) -> None:
+    """A clean OpenCode install must not require a transitive PyYAML package."""
+    original_import = builtins.__import__
+
+    def _import(name, *args, **kwargs):
+        if name == "yaml":
+            raise ImportError("simulated clean environment")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+    frontmatter, body = _parse_frontmatter(
+        "---\nname: aog-test\ntools:\n  - Read\n---\nagent body\n")
+    assert frontmatter == {"name": "aog-test", "tools": ["Read"]}
+    assert body == "agent body\n"
 
 
 def test_opencode_run_cmd_can_pin_model_from_env(monkeypatch) -> None:
@@ -223,6 +255,7 @@ def test_opencode_background_dispatch_accepts_output_file(tmp_path, monkeypatch)
 
     assert result is process
     assert calls[0]["stdout"].name == str(output_file)
+    assert calls[0]["start_new_session"] is True
     assert output_file.exists()
     assert writes and "Return marker" in writes[0]
 
@@ -379,6 +412,160 @@ def test_opencode_prespawn_critic_timeout_default_is_shorter() -> None:
 
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert proc.stdout.strip() == "180"
+
+
+def test_opencode_dispatch_blocks_when_runtime_check_fails(monkeypatch, tmp_path) -> None:
+    """A refused runtime self-check blocks dispatch before it can spawn."""
+    monkeypatch.delenv("AOG_OPENCODE_SKIP_RUNTIME_CHECK", raising=False)
+    monkeypatch.setattr(
+        "backends.opencode_runtime.ensure_opencode_runtime",
+        lambda bin: types.SimpleNamespace(ok=False, reason="safety-net probe failed", warnings=[]),
+    )
+    spawned = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: spawned.append(cmd))
+    backend = OpencodeBackend(opencode_bin=str(tmp_path / "opencode"))
+    env = backend.dispatch("aog-op-classify", "Return marker", kind="skill", mode="foreground")
+    assert env.is_error
+    assert env.raw_envelope["runtime_check_failed"] is True
+    assert "safety-net probe failed" in env.raw_envelope["reason"]
+    assert spawned == [], "a refused runtime check must not reach a spawn"
+
+
+def test_opencode_dispatch_passes_through_ok_runtime_check(monkeypatch, tmp_path) -> None:
+    """G5: ok check (with a warning) lets dispatch proceed to the fake opencode spawn."""
+    monkeypatch.delenv("AOG_OPENCODE_SKIP_RUNTIME_CHECK", raising=False)
+    monkeypatch.setattr(
+        "backends.opencode_runtime.ensure_opencode_runtime",
+        lambda bin: types.SimpleNamespace(ok=True, reason="ok", warnings=["probe SKIP"]),
+    )
+
+    class _Popen:
+        returncode = 0
+
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        @staticmethod
+        def communicate(_input, timeout=None):
+            return "OK\n", ""
+
+    monkeypatch.setattr(subprocess, "Popen", _Popen)
+    backend = OpencodeBackend(opencode_bin=str(tmp_path / "opencode"))
+    env = backend.dispatch("aog-op-classify", "Return marker", kind="skill", mode="foreground", timeout=10)
+    assert not env.is_error
+
+
+def test_opencode_background_runtime_failure_raises_not_envelope(monkeypatch, tmp_path) -> None:
+    """Background callers own a Popen lifecycle, so fail-closed must not return an Envelope."""
+    monkeypatch.delenv("AOG_OPENCODE_SKIP_RUNTIME_CHECK", raising=False)
+    monkeypatch.setattr(
+        "backends.opencode_runtime.ensure_opencode_runtime",
+        lambda bin: types.SimpleNamespace(ok=False, reason="safety-net probe failed", warnings=[]),
+    )
+    backend = OpencodeBackend(opencode_bin=str(tmp_path / "opencode"))
+    with pytest.raises(RuntimeError, match="runtime self-check failed"):
+        backend.dispatch(
+            "aog-kernel-worker", "Return marker", kind="agent", mode="background",
+            output_file=tmp_path / "opencode.log",
+        )
+
+
+def test_opencode_runtime_skip_requires_exact_one(monkeypatch, tmp_path) -> None:
+    """`AOG_OPENCODE_SKIP_RUNTIME_CHECK=0` must not silently disable fail-closed."""
+    calls = []
+    monkeypatch.setenv("AOG_OPENCODE_SKIP_RUNTIME_CHECK", "0")
+    monkeypatch.setattr(
+        "backends.opencode_runtime.ensure_opencode_runtime",
+        lambda bin: calls.append(bin) or types.SimpleNamespace(ok=False, reason="refused", warnings=[]),
+    )
+    env = OpencodeBackend(opencode_bin=str(tmp_path / "opencode")).dispatch(
+        "aog-op-classify", "Return marker", kind="skill")
+    assert env.is_error and calls == [str(tmp_path / "opencode")]
+
+
+def test_o17_uses_opencode_auto_compatible_permissions(monkeypatch, tmp_path) -> None:
+    """O1.7 keeps Claude's acceptEdits shape, but OpenCode needs --auto."""
+    import phase_o17_classify as o17
+
+    calls = []
+
+    def dispatch(*args, **kwargs):
+        calls.append(kwargs)
+        return Envelope(is_error=False, output_text="{}", raw_envelope={})
+
+    opencode_backend = types.SimpleNamespace(name="opencode", dispatch=dispatch)
+    claude_backend = types.SimpleNamespace(name="claude_code", dispatch=dispatch)
+    monkeypatch.setattr(o17, "_backend", opencode_backend)
+    invoke_claude_skill = getattr(o17, "_invoke_claude_skill")
+    ok, _, _ = invoke_claude_skill(tmp_path)
+    assert ok
+    assert calls[-1]["permission_mode"] == "bypassPermissions"
+
+    monkeypatch.setattr(o17, "_backend", claude_backend)
+    ok, _, _ = invoke_claude_skill(tmp_path)
+    assert ok
+    assert calls[-1]["permission_mode"] == "acceptEdits"
+
+
+def test_o17_surfaces_opencode_runtime_refusal_reason(monkeypatch, tmp_path) -> None:
+    """The fail-closed runtime reason must survive the O1.7 compatibility wrapper."""
+    import phase_o17_classify as o17
+
+    class _Backend:
+        name = "opencode"
+
+        @staticmethod
+        def dispatch(*args, **kwargs):
+            return Envelope(
+                is_error=True,
+                output_text="",
+                raw_envelope={
+                    "runtime_check_failed": True,
+                    "reason": "safety-net probe failed: door open",
+                },
+            )
+
+    monkeypatch.setattr(o17, "_backend", _Backend())
+    invoke_claude_skill = getattr(o17, "_invoke_claude_skill")
+    ok, _, stderr = invoke_claude_skill(tmp_path)
+    assert not ok
+    assert "safety-net probe failed" in stderr
+
+
+def test_opencode_foreground_timeout_terminates_process_group(monkeypatch) -> None:
+    """Foreground timeout uses the same G6 process-group cleanup as streaming."""
+    calls = []
+
+    class _Popen:
+
+        def __init__(self):
+            self.pid = 123
+            self.returncode = None
+            self.communicate_calls = 0
+
+        def communicate(self, _input=None, timeout=None):
+            self.communicate_calls += 1
+            if self.communicate_calls == 1:
+                raise subprocess.TimeoutExpired(["opencode", "run"], timeout, output="partial", stderr="late")
+            self.returncode = -15
+            return "partial", "late"
+
+    proc = _Popen()
+
+    def _fake_popen(*_args, **kwargs):
+        calls.append(kwargs)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    terminated = []
+    monkeypatch.setattr(
+        "backends.opencode_runtime.terminate_process_group", lambda p: terminated.append(p))
+    env = _dispatch_foreground(OpencodeBackend(opencode_bin="opencode"),
+        ["opencode", "run"], "prompt", {}, 1, None, "agent", "foreground")
+    assert env.is_error and env.raw_envelope["timed_out"] is True
+    assert env.output_text == "partial"
+    assert terminated == [proc]
+    assert calls[0]["start_new_session"] is True
 
 
 def test_opencode_dispatch_marks_active_workspace_for_hooks(monkeypatch) -> None:
@@ -583,20 +770,55 @@ def test_opencode_streaming_silence_timeout_returns_partial_output(tmp_path) -> 
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     backend = OpencodeBackend(opencode_bin=str(fake))
 
-    env = backend.dispatch(
-        "aog-precision-probe",
-        "Return marker",
-        kind="agent",
-        mode="streaming",
-        cwd=tmp_path,
-        timeout=30,
-        silence_timeout=1,
-    )
+    # G1 harness-decoupling: mid-work silence raises the SHARED StreamSilenceTimeout
+    # (backends.base) so the FSM's respawn-budget logic is harness-agnostic — the
+    # partial output is attached to the exception, not discarded with the
+    # retry signal.
+    with pytest.raises(StreamSilenceTimeout) as exc_info:
+        backend.dispatch(
+            "aog-precision-probe",
+            "Return marker",
+            kind="agent",
+            mode="streaming",
+            cwd=tmp_path,
+            timeout=30,
+            silence_timeout=1,
+        )
 
+    assert exc_info.value.agent_type == "aog-precision-probe"
+    assert exc_info.value.silent_seconds >= 0.9
+    assert exc_info.value.last_event_type is None  # _StreamState has no event type field
+    assert exc_info.value.partial_output == "partial"
+    assert exc_info.value.raw_envelope["silence_timed_out"] is True
+
+
+def test_opencode_json_skill_silence_returns_envelope_for_graceful_fallback(tmp_path, monkeypatch) -> None:
+    """JSON transport is also used by skills, but only FSM agent work may raise retry signals."""
+    fake = tmp_path / "opencode"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        + textwrap.dedent(
+            r'''
+            import json
+            import sys
+            import time
+
+            sys.stdin.read()
+            print(json.dumps({"type": "text", "sessionID": "ses_skill",
+                              "part": {"type": "text", "text": "partial"}}), flush=True)
+            time.sleep(60)
+            '''
+        )
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("AOG_OPENCODE_SKILL_FORMAT", "json")
+    env = OpencodeBackend(opencode_bin=str(fake)).dispatch(
+        "aog-op-classify", "Return marker", kind="skill", cwd=tmp_path,
+        timeout=30, silence_timeout=1,
+    )
     assert env.is_error
     assert env.output_text == "partial"
     assert env.raw_envelope["silence_timed_out"] is True
-    assert env.raw_envelope["silence_timeout_sec"] == 1
 
 
 def test_opencode_streaming_invalid_tool_event_fails_fast(tmp_path) -> None:

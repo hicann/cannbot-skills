@@ -26,7 +26,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-from .base import Backend, Envelope
+from .base import (
+    Backend, Envelope, TranscriptSkills, format_backend_agent,
+    normalize_backend_envelope,
+)
 from .skill_context import load_skill_context
 
 _CODEX_EXEC_MARKERS = ("codex exec", "codex  exec")
@@ -133,22 +136,10 @@ class CodexBackend(Backend):
         )
 
     def normalize(self, raw: Any) -> Envelope:
-        if isinstance(raw, Envelope):
-            return raw
-        if isinstance(raw, dict):
-            return Envelope(
-                is_error=bool(raw.get("is_error")),
-                output_text=raw.get("result") or raw.get("output_text") or "",
-                api_error_status=raw.get("api_error_status"),
-                session_id=raw.get("session_id"),
-                raw_envelope=raw,
-            )
-        return Envelope(is_error=False, output_text=str(raw), raw_envelope={"backend": self.name})
+        return normalize_backend_envelope(raw, self.name)
 
     def format_agent(self, agent_def: dict) -> dict:
-        rendered = dict(agent_def)
-        rendered["harness_backend"] = self.name
-        return rendered
+        return format_backend_agent(agent_def, self.name)
 
     def wire_safety(self, checkers: list) -> None:
         return None
@@ -179,6 +170,13 @@ class CodexBackend(Backend):
                 Path(last_path).unlink()
             except OSError:
                 pass
+
+    def transcript_skills(self, transcript_path) -> TranscriptSkills:
+        """Report that Codex transcripts cannot prove tier-a skill invocation."""
+        return TranscriptSkills(
+            parseable=False,
+            note="codex transcripts carry no skill-tool events — CBA route gate cannot prove tier-a USE",
+        )
 
     def identify_cmd(self, cmd: str) -> bool:
         return any(marker in cmd for marker in _CODEX_EXEC_MARKERS)

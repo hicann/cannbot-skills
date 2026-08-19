@@ -105,7 +105,7 @@ class AscendCEnv:
     backend: str = "ascendc"
     # P0xxx xulei commit 12a1b71e (2026-05-13): per-subagent settings file.
     # Reads SUBAGENT_SETTINGS_<AGENT_TYPE_UPPER>=<path> from .ascendc_env.
-    # Used by agent_dispatch._build_extra_args to pass --settings to claude CLI
+    # Used by agent_dispatch._build_extra_args to pass --settings to the CC harness CLI
     # per agent type. Empty dict means default settings.json applies.
     # xulei's original commit added the caller but forgot the storage + method;
     # added here 2026-05-15 to unblock cold-starts (a5 audit catch).

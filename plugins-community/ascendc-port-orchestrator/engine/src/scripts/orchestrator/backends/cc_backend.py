@@ -20,11 +20,14 @@ skill/resume are wired at their respective funnel steps (kb_invoke / resume site
 exact existing logic rather than reimplement subprocess handling prematurely.
 """
 from __future__ import annotations
+import json
+import logging
 import os
 import re
+from pathlib import Path
 from typing import Any, Optional
 
-from .base import Backend, Envelope
+from .base import Backend, Envelope, TranscriptSkills
 
 # recover.py's identify/op-extract logic, mirrored so the RECOVERY coupling is backend-owned
 # (survey finding #2). Kept identical to recover._classify_proc / _extract_op_from_cmd.
@@ -32,10 +35,77 @@ _CLAUDE_PRINT_MARKERS = ("claude --print", "claude  --print")
 _OP_SLUG_RE = re.compile(r"\b([a-z][a-z0-9_]*)-(?:kw|pp|ko|fo|ar|da|bs)-\d+")
 
 
+def _cc_transcript_content(line: str) -> Optional[list]:
+    """Return a Claude Code message-content list, or ignore a non-event line."""
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    message = event.get("message", {})
+    content = message.get("content") if isinstance(message, dict) else None
+    return content if isinstance(content, list) else None
+
+
+def _cc_skill_name(content: dict) -> Optional[str]:
+    """Extract the first historical Skill-name field from a tool-use block."""
+    input_data = content.get("input", {}) or {}
+    for key in ("skill", "command", "name"):
+        value = input_data.get(key)
+        if isinstance(value, str) and value:
+            return value.strip()
+    return None
+
+
+def _record_cc_skill_call(content: dict, skill_calls: dict) -> None:
+    """Record a historical Claude Code Skill tool-use block."""
+    if content.get("type") != "tool_use" or content.get("name") != "Skill":
+        return
+    name = _cc_skill_name(content)
+    if name is not None:
+        skill_calls[content.get("id")] = name
+
+
+def _cc_tool_result_is_error(content: dict) -> bool:
+    """Identify a failed historical Skill result with the existing evidence rules."""
+    body = content.get("content", "")
+    if isinstance(body, list):
+        body = " ".join(item.get("text", "") for item in body if isinstance(item, dict))
+    return bool(
+        content.get("is_error")
+        or "tool_use_error" in str(body)
+        or "No such tool available" in str(body)
+    )
+
+
+def _record_cc_tool_error(content: dict, errored_ids: set) -> None:
+    """Record a failed historical Claude Code tool-result block."""
+    if content.get("type") == "tool_result" and _cc_tool_result_is_error(content):
+        errored_ids.add(content.get("tool_use_id"))
+
+
+def _parse_cc_transcript(text: str) -> tuple[dict, set, bool]:
+    """Collect Skill calls and failed call ids from Claude Code stream-json text."""
+    skill_calls: dict = {}
+    errored_ids: set = set()
+    cc_shaped = False
+    for raw_line in text.splitlines():
+        content_blocks = _cc_transcript_content(raw_line)
+        if content_blocks is None:
+            continue
+        cc_shaped = True
+        for content in content_blocks:
+            if isinstance(content, dict):
+                _record_cc_skill_call(content, skill_calls)
+                _record_cc_tool_error(content, errored_ids)
+    return skill_calls, errored_ids, cc_shaped
+
+
 class CCBackend(Backend):
     name = "claude_code"
 
-    # ---- dispatch (agent path faithfully delegates to the canonical transport) ----
     def dispatch(self, target: str, prompt: str, *, kind: str = "agent", mode: str = "foreground",
                  settings: Optional[str] = None, session: Optional[str] = None,
                  timeout: Optional[float] = None, sandbox_prefix: Optional[list] = None,
@@ -122,8 +192,8 @@ class CCBackend(Backend):
             base += [prompt]
         return list(sandbox_prefix or []) + base
 
-    # ---- normalize: agent_transport.AgentResult (or raw envelope dict) -> canonical Envelope ----
     def normalize(self, raw: Any) -> Envelope:
+        """Normalize a transport result or raw envelope into the canonical Envelope."""
         if isinstance(raw, dict):
             env = raw
             return Envelope(
@@ -174,6 +244,19 @@ class CCBackend(Backend):
             base += ["--output-format", output_format]
         base += [prompt]
         return base
+
+    def transcript_skills(self, transcript_path) -> TranscriptSkills:
+        """Parse Claude Code stream-json Skill calls, excluding errored invocations."""
+        try:
+            text = Path(transcript_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return TranscriptSkills(parseable=False, note=f"transcript unreadable: {transcript_path}")
+        skill_calls, errored_ids, cc_shaped = _parse_cc_transcript(text)
+        if not cc_shaped:
+            return TranscriptSkills(
+                parseable=False, note="transcript is not Claude Code stream-json (no message events)")
+        invoked = {name for call_id, name in skill_calls.items() if call_id not in errored_ids}
+        return TranscriptSkills(invoked=invoked, parseable=True)
 
     def resume(self, session_id: str, prompt: str) -> Envelope:
         """Resume a prior CC session. NOTE (survey finding, 2026-07-05): a5ops has **no live caller**

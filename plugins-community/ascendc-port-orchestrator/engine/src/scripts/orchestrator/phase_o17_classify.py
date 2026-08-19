@@ -12,7 +12,7 @@
 Replaces the bench-name-keyed `op_taxonomy.OP_TAGS` map (P0aai regression).
 Per user direction: classification should be done by an LLM agent reading the
 source, not a hardcoded Python dict + regex catalog. This module wraps the
-`claude --print --skill aog-op-classify` headless call, parses the resulting
+headless backend skill call (aog-op-classify), parses the resulting
 JSON, returns a structured dataclass for brief construction.
 
 Architecture:
@@ -21,7 +21,7 @@ Architecture:
 - Failure mode graceful: subprocess error → falls back to None, brief uses default-only KB
 - No state-machine integration (classification is a Python pipeline step, not a state)
 
-Subprocess layer is testable via monkeypatch — unit tests inject fake `claude` exec.
+Subprocess layer is testable via monkeypatch — unit tests inject a fake backend.
 """
 from __future__ import annotations
 import logging
@@ -205,17 +205,20 @@ def _invoke_claude_skill(workspace: Path, timeout: int = 300) -> tuple[bool, str
     Returns (ok, stdout, stderr). ok=False indicates subprocess error or non-zero exit.
     """
     prompt = f"/{_SKILL_NAME} {workspace}"
-    # Funnel through the pluggable Backend. Divergent shape preserved verbatim: acceptEdits +
-    # plain-text output (output_format=None → no --output-format json) + prompt via stdin.
+    # Claude's historical O1.7 shape is acceptEdits + plain text + stdin.  OpenCode
+    # rejects all permission requests unless --auto is used, and its backend maps
+    # bypassPermissions to that explicit --auto flag, so preserve the behavior rather
+    # than silently degrading this phase under the OpenCode harness.
+    permission_mode = "bypassPermissions" if getattr(_backend, "name", "") == "opencode" else "acceptEdits"
     env = _backend.dispatch(_SKILL_NAME, prompt, kind="skill", timeout=timeout,
-                            permission_mode="acceptEdits", output_format=None, stdin_prompt=True)
+                            permission_mode=permission_mode, output_format=None, stdin_prompt=True)
     raw = env.raw_envelope
     if raw.get("timed_out"):
         return False, "", f"timeout after {timeout}s"
     if raw.get("not_found"):
         return False, "", f"claude CLI not found: {raw.get('stderr')}"
     stdout = env.output_text or ""
-    stderr = raw.get("stderr") or ""
+    stderr = raw.get("stderr") or raw.get("reason") or ""
     if env.is_error:  # returncode != 0
         return False, stdout, stderr or f"exit {raw.get('returncode')}"
     return True, stdout, stderr

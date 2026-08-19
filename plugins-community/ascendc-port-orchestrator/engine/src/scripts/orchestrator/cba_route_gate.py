@@ -24,10 +24,11 @@ Pure stdlib. importable + CLI. Unit-tested.
 from __future__ import annotations
 import logging
 import argparse
-import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from backends import get_backend  # G7: transcript parsing is backend-owned
 
 
 @dataclass
@@ -35,62 +36,48 @@ class GateResult:
     ok: bool
     invoked_skills: set = field(default_factory=set)
     missing: list = field(default_factory=list)   # (topic, skill) required but not invoked
+    # G7: the active backend may not prove its native transcript format; BLOCK explicitly.
+    blocked_note: str = ""
 
 
 def skills_invoked(transcript_path: Path) -> set:
-    """Return the set of skill names invoked via the `Skill` tool in a CC stream JSONL."""
-    invoked: set = set()
+    """Return skills invoked in a transcript the active backend can prove."""
+    # Backend-owned parsers preserve the historical CC stream-json and OpenCode NDJSON
+    # formats. Unprovable input raises here; route enforcement calls check() for BLOCKED.
     try:
-        text = transcript_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return invoked
-    skill_calls = {}   # tool_use_id -> skill name
-    errored_ids = set()
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        skip_current_item = False
-        try:
-            ev = json.loads(line)
-        except Exception as error:
-            logging.getLogger(__name__).debug(
-                "Recoverable operation failed.", exc_info=error
-            )
-            skip_current_item = True
-        if skip_current_item:
-            continue
-        msg = ev.get("message", {})
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if not isinstance(content, list):
-            continue
-        for c in content:
-            if not isinstance(c, dict):
-                continue
-            if c.get("type") == "tool_use" and c.get("name") == "Skill":
-                inp = c.get("input", {}) or {}
-                for k in ("skill", "command", "name"):
-                    v = inp.get(k)
-                    if isinstance(v, str) and v:
-                        skill_calls[c.get("id")] = v.strip()
-                        break
-            elif c.get("type") == "tool_result":
-                # a Skill call that errored (e.g. "No such tool available: Skill") does NOT count
-                body = c.get("content", "")
-                if isinstance(body, list):
-                    body = " ".join(y.get("text", "") for y in body if isinstance(y, dict))
-                if c.get("is_error") or "tool_use_error" in str(body) or "No such tool available" in str(body):
-                    errored_ids.add(c.get("tool_use_id"))
-    # only count skill calls whose result did NOT error (success = real a-tier usage)
-    for tid, name in skill_calls.items():
-        if tid not in errored_ids:
-            invoked.add(name)
-    return invoked
+        ts = get_backend().transcript_skills(transcript_path)
+    except Exception as error:
+        logging.getLogger(__name__).debug(
+            "Recoverable operation failed.", exc_info=error
+        )
+        raise RuntimeError(f"transcript parse failed: {error}") from error
+    if not ts.parseable:
+        raise RuntimeError(ts.note or "transcript format is not provable for the active backend")
+    return ts.invoked
 
 
 def check(transcript_path: Path, required_routes: dict) -> GateResult:
-    """required_routes: {topic_key: cannbot_skill_name}. All must be invoked."""
-    invoked = skills_invoked(transcript_path)
+    """Verify every required route against a transcript proved by the active backend."""
+    # Unprovable native-format input produces BLOCKED, never a fabricated missing list.
+    try:
+        ts = get_backend().transcript_skills(transcript_path)
+    except Exception as error:
+        logging.getLogger(__name__).debug(
+            "Recoverable operation failed.", exc_info=error
+        )
+        return GateResult(ok=False, blocked_note=f"transcript parse failed: {error}")
+    if not ts.parseable:
+        return GateResult(ok=False, blocked_note=ts.note)
+    invoked = ts.invoked
+    required_skills = set(required_routes.values())
+    unproven_required = sorted(set(getattr(ts, "unproven", set())) & required_skills)
+    if unproven_required:
+        return GateResult(
+            ok=False,
+            invoked_skills=invoked,
+            blocked_note=("native transcript has non-terminal required skill call(s): "
+                          + ", ".join(unproven_required)),
+        )
     missing = [(t, s) for t, s in required_routes.items() if s not in invoked]
     return GateResult(ok=(not missing), invoked_skills=invoked, missing=missing)
 
@@ -112,6 +99,9 @@ def main(argv=None) -> int:
     if res.ok:
         print(f"CBA_ROUTE_GATE PASS — all {len(routes)} required tier-a route(s) invoked")
         return 0
+    if res.blocked_note:
+        print(f"CBA_ROUTE_GATE BLOCKED — {res.blocked_note}")
+        return 1
     for t, s in res.missing:
         print(f"CBA_MISSING_A_TIER: topic={t} required cannbot skill={s} NOT invoked")
     return 1

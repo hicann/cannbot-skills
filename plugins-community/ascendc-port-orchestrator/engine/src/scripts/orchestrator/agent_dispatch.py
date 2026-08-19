@@ -7,22 +7,22 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
-"""Agent dispatch — combines brief construction + agent_transport spawn.
+"""Agent dispatch — combines brief construction + harness-backend spawn.
 
 Single entry point for orchestrator.py main loop:
 
     result = dispatch.spawn_for_state(op, workspace, state, lane, ...)
-    # → AgentResult with parsed JSON envelope
+    # → backend Envelope (is_error / output_text / raw_envelope)
 
 Internally:
 1. Resolve agent type from state via state_executor.next_agent
 2. Build G7 slug
 3. Construct brief via briefs/<agent>_brief.py
-4. Spawn via agent_transport.spawn_agent_*
+4. Spawn via the active harness backend (backends.registry.get_backend)
 5. Persist raw envelope to workspace/<op>/.cc_envelope_log.jsonl (codex #6)
-6. Return AgentResult (or raise on transport failure)
+6. Return Envelope (or raise on backend/transport failure)
 
-Codex C5 spike confirmed CC Agent transport from Python is feasible. This
+Codex C5 spike confirmed subagent transport from Python is feasible. This
 module is the production-ready wrapper.
 """
 from __future__ import annotations
@@ -43,6 +43,7 @@ import state_executor
 # spawn_for_state still owns brief + graybox/bwrap sandbox_prefix build (orchestrator-canonical, inv#2);
 # it passes the OPAQUE prefix to the backend, which verbatim-prepends it.
 from backends import get_backend
+from backends.base import Envelope
 from briefs._common import g7_slug, load_env
 from briefs.kw_brief import build_worker_brief
 from briefs.pp_brief import build_probe_brief
@@ -280,9 +281,9 @@ def spawn_for_state(
     else:
         raise NotImplementedError(f"brief signature for {agent_type!r} not handled in dispatch")
 
-    # Resolve subagent settings file (--settings flag to claude CLI).
+    # Resolve subagent settings file (--settings flag to the CC harness CLI).
     # If configured, the agent spawn inherits that settings file's model / hooks.
-    # If not configured, no --settings flag → claude uses default settings.json.
+    # If not configured, no --settings flag → the harness uses default settings.json.
     extra_args = _build_extra_args(env, agent_type)
 
     # gap#2 airtight graybox seal (a-fs): build the bwrap mount-namespace prefix when this
@@ -526,7 +527,7 @@ def _backend_manifest_cmd(agent_type: str) -> list[str]:
 def persist_envelope(
     workspace: Path,
     agent_type: str,
-    result: agent_transport.AgentResult,
+    result: Envelope,
     *,
     spawn_index: int,
     brief: Optional[str] = None,

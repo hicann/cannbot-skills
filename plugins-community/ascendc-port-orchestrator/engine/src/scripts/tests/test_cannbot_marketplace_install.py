@@ -113,7 +113,7 @@ def test_checkout_detection_resolves_shared_skills_from_ops():
     assert 'if [ -d "$SHARED_SKILL_ROOT" ]; then DIRECT_CHECKOUT=1' in s
     assert set(_whitelist("SHARED_SKILLS")) == {
         "ops-precision-standard", "ascendc-docs-search",
-        "ascendc-simt-best-practices",
+        "ascendc-simt-best-practices", "ascendc-api-best-practices",
     }
     assert not set(_whitelist("SHARED_SKILLS")) & set(_whitelist("LOCAL_SKILLS"))
 
@@ -124,7 +124,7 @@ def test_only_product_owned_skills_use_the_plugin_local_linking_path():
     assert 'for skill_dir in "$LOCAL_SKILL_ROOT"/*/' in s
     assert not {
         "ops-precision-standard", "ascendc-docs-search",
-        "ascendc-simt-best-practices",
+        "ascendc-simt-best-practices", "ascendc-api-best-practices",
     } & set(_whitelist("LOCAL_SKILLS"))
 
 
@@ -214,9 +214,9 @@ def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, di
     return plugin, env
 
 
-def _run(plugin: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run(plugin: Path, env: dict[str, str], tool: str = "claude") -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [_bash(), "init.sh", "global", "claude"],
+        [_bash(), "init.sh", "global", tool],
         cwd=plugin,
         env=env,
         capture_output=True,
@@ -262,6 +262,16 @@ def test_installer_completes_from_a_marketplace_layout():
             )
             assert resolved.returncode == 0, resolved.stderr
             assert Path(resolved.stdout.strip()) == (plugin / "engine").resolve()
+
+
+def test_opencode_marketplace_cache_fails_loudly_without_reading_claude_dependencies():
+    """OpenCode's no-Claude contract is explicit until its own dependency bundle exists."""
+    with tempfile.TemporaryDirectory() as t:
+        plugin, env = _fake_marketplace_tree(Path(t), with_dependencies=True)
+        r = _run(plugin, env, tool="opencode")
+        assert r.returncode != 0
+        assert "full cannbot-skills checkout" in r.stdout
+        assert "Claude marketplace cache" in r.stdout
 
 
 @pytest.mark.parametrize(

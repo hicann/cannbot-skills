@@ -16,8 +16,8 @@ CC-coupling survey (docs/design/CC_COUPLING_SURVEY.md). One implementation per h
 (CCBackend first — extracts the current command-runner coupling; other harness
 adapters remain independent of the operator programming model.)
 
-This module is PURE INTERFACE (no behavior) — adding it changes nothing until a site funnels
-through it. Canonical gate behavior must stay stable
+This module owns the interface and small backend-independent value transforms only.  It does
+not launch a harness or implement a canonical gate; canonical gate behavior stays stable
 across the whole refactor.
 
 **Boundary invariant (never violate):** a Backend only WIRES/adapts the harness (dispatch /
@@ -25,9 +25,49 @@ agent-format / hook-trigger / envelope). It NEVER re-implements or weakens a can
 gate/precision/provider check LOGIC stays in the orchestrator.
 """
 from __future__ import annotations
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
+
+
+# ── cross-backend stream-silence contract (G1) ──────────────────────────────────────────────
+# Every streaming backend (Claude Code, opencode, ...) SIGTERMs its subprocess and signals
+# "mid-work stdout silence" through the SAME exception so the FSM's respawn budget logic
+# (fsm_phase_spawn.py) is harness-agnostic.  Fields are backend-normalized:
+#   agent_type      — the dispatched agent name (backend maps what it has; may be the backend name)
+#   silent_seconds  — observed silence duration before SIGTERM
+#   last_event_type — last streamed event type when tracked, else None
+STREAM_SILENCE_RETRY_MAX = int(os.environ.get("AOG_STREAM_SILENCE_RETRY_MAX", "2"))
+# Same default for every streaming harness. A backend may offer a narrower
+# explicit override, but `None` must still preserve this watchdog contract.
+STREAM_SILENCE_TIMEOUT_SEC = int(os.environ.get("AOG_STREAM_SILENCE_TIMEOUT_SEC", "1800"))
+
+
+class StreamSilenceTimeout(Exception):
+    """Raised when a subprocess stdout stream has been silent longer than the
+    backend's silence watchdog allows.  The subprocess has been SIGTERMed by
+    the time this exception is raised.  The caller (orchestrator FSM) catches
+    this distinctly from generic Exception to enable bounded auto-respawn.
+    """
+
+    def __init__(self, agent_type: str, silent_seconds: float,
+                 last_event_type: Optional[str] = None, *, partial_output: str = "",
+                 raw_envelope: Optional[dict] = None):
+        self.agent_type = agent_type
+        self.silent_seconds = silent_seconds
+        self.last_event_type = last_event_type
+        # Streaming callers that choose exception-based recovery still retain the
+        # evidence already received before the watchdog fired.  Existing callers
+        # only consume the first three fields, so this remains backward compatible.
+        self.partial_output = partial_output
+        self.raw_envelope = raw_envelope or {}
+        super().__init__(
+            f"{agent_type}: stdout silent for {silent_seconds:.0f}s "
+            f"(last event type: {last_event_type or 'none'}); "
+            f"SIGTERMed subprocess"
+        )
 
 
 @dataclass
@@ -67,6 +107,49 @@ class Envelope:
         return self.total_cost_usd
 
 
+def normalize_backend_envelope(raw: Any, backend_name: str) -> Envelope:
+    """Apply the backend-independent Envelope normalization contract."""
+    if isinstance(raw, Envelope):
+        return raw
+    if isinstance(raw, dict):
+        return Envelope(
+            is_error=bool(raw.get("is_error")),
+            output_text=raw.get("result") or raw.get("output_text") or "",
+            api_error_status=raw.get("api_error_status"),
+            session_id=raw.get("session_id"),
+            raw_envelope=raw,
+        )
+    return Envelope(
+        is_error=False,
+        output_text=str(raw),
+        raw_envelope={"backend": backend_name},
+    )
+
+
+def format_backend_agent(agent_def: dict, backend_name: str) -> dict:
+    """Return a backend-labelled copy of a harness-neutral agent definition."""
+    rendered = dict(agent_def)
+    rendered["harness_backend"] = backend_name
+    return rendered
+
+
+@dataclass
+class TranscriptSkills:
+    """Backend-parsed skill invocations from a dispatch transcript (G7 / CBA route gate).
+
+    parseable=False means the backend could not even confirm its NATIVE transcript format
+    — no claim of "skills missing" may be derived from that; the gate must surface an
+    explicit BLOCKED note instead of a silent skip or a false missing list.
+    """
+    invoked: set = field(default_factory=set)
+    # Names observed in a native but non-terminal tool event. The route gate
+    # decides whether one intersects a required route; unrelated in-flight work
+    # must not invalidate independently proven required use.
+    unproven: set = field(default_factory=set)
+    parseable: bool = True
+    note: str = ""
+
+
 class Backend(ABC):
     """One per harness (Claude Code / opencode / …). Swappable adapter layer ONLY."""
 
@@ -98,6 +181,11 @@ class Backend(ABC):
     @abstractmethod
     def resume(self, session_id: str, prompt: str) -> Envelope:
         """Resume a prior session (CC: --resume; opencode: --continue)."""
+
+    # ---- CBA transcript coupling (G7 — the tier-a route gate must parse BOTH formats) ----
+    @abstractmethod
+    def transcript_skills(self, transcript_path: Path) -> TranscriptSkills:
+        """Parse a native transcript without raising for unreadable or foreign input."""
 
     # ---- RECOVERY coupling (survey finding #2 — a dispatch-only abstraction MISSES this) ----
     @abstractmethod

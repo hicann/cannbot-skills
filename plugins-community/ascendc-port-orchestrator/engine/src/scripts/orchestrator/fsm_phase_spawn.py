@@ -44,7 +44,7 @@ DEPENDENCY CONTRACT (why the monkeypatch surface still bites):
   `monkeypatch.setattr(orchestrator, X)` still bites. Per-run inputs
   (op/workspace/lane/plan_only/kw_1_only/runtime_kwargs) come off `ctx`.
 - SIBLING modules (state_executor, events, critic_invoke, agent_dispatch,
-  agent_transport, schema_norm, perf_checkpoint, kb_invoke) are imported
+  schema_norm, perf_checkpoint, kb_invoke) are imported
   directly here — the SAME module objects the tests patch, so
   `monkeypatch.setattr(<sibling>, ...)` bites the direct reference with no
   indirection needed.
@@ -69,13 +69,14 @@ import os
 from typing import Optional, Tuple
 
 import agent_dispatch
-import agent_transport
 import critic_invoke
 import events
 import perf_checkpoint
 import schema_norm
 import state_executor
 from logging_config import get_logger
+from backends import base as _backend_base
+from backends.base import Envelope, StreamSilenceTimeout
 
 from fsm_context import HandlerResult, OrchestratorContext
 
@@ -229,7 +230,7 @@ def _route_itercap(ctx: OrchestratorContext, snap) -> Optional[HandlerResult]:
 
 def _prepare_and_spawn(
     ctx: OrchestratorContext, snap, agent_type: str,
-) -> Tuple[int, Optional["agent_transport.AgentResult"], Optional[HandlerResult]]:
+) -> Tuple[int, Optional["Envelope"], Optional[HandlerResult]]:
     """Compute spawn_index, archive stale outputs, plan_only short-circuit,
     first-spawn self-critic, then spawn the agent.
 
@@ -282,7 +283,7 @@ def _prepare_and_spawn(
         # Infra escape hatch (2026-07-02, upstreamed from cannbot bundle):
         # when the orchestrator runs inside an agent's background-task context
         # with the plugin installed in the config-dir, the fire_critic
-        # `claude --print --permission-mode bypassPermissions` child can
+        # harness skill child (bypassPermissions) can
         # re-enter and re-launch the orchestrator (fork-bomb -> resource
         # exhaustion -> SIGKILL of this parent). The pre-spawn self-critic is
         # non-fatal-by-design and orthogonal to port correctness, so allow
@@ -324,7 +325,7 @@ def _prepare_and_spawn(
             logging.getLogger(__name__).debug(
                 "Recoverable operation failed.", exc_info=error
             )
-    except agent_transport.StreamSilenceTimeout as e:
+    except StreamSilenceTimeout as e:
         # P0aal-2 (2026-05-19): stdout silence detected mid-work.
         # Subprocess already SIGTERMed by transport. Respawn up to
         # STREAM_SILENCE_RETRY_MAX times before giving up.
@@ -334,10 +335,10 @@ def _prepare_and_spawn(
                           "silent_seconds": e.silent_seconds,
                           "last_event_type": e.last_event_type,
                           "retry": silence_retries + 1,
-                          "max_retries": agent_transport.STREAM_SILENCE_RETRY_MAX})
-        if silence_retries >= agent_transport.STREAM_SILENCE_RETRY_MAX:
+                          "max_retries": _backend_base.STREAM_SILENCE_RETRY_MAX})
+        if silence_retries >= _backend_base.STREAM_SILENCE_RETRY_MAX:
             log.info(f"silence-timeout exceeded retry budget "
-                  f"({silence_retries}/{agent_transport.STREAM_SILENCE_RETRY_MAX}); "
+                  f"({silence_retries}/{_backend_base.STREAM_SILENCE_RETRY_MAX}); "
                   f"giving up. {e}")
             ctx.mark_agent_died(workspace, snap.current_state,
                              f"silence-timeout retry budget exhausted: {e}")
@@ -346,7 +347,7 @@ def _prepare_and_spawn(
                               "reason": f"silence-timeout retry budget exhausted: {e}"})
             return spawn_index, None, HandlerResult.ret(3)
         log.info(f"silence-timeout #{silence_retries + 1}/"
-              f"{agent_transport.STREAM_SILENCE_RETRY_MAX} on "
+              f"{_backend_base.STREAM_SILENCE_RETRY_MAX} on "
               f"{agent_type}: {e}. Respawning fresh.")
         ctx.bump_silence_retry_count(workspace, snap.current_state)
         return spawn_index, None, HandlerResult.cont()  # loop back — same state, fresh spawn
@@ -433,7 +434,7 @@ def _capture_canonical_handoff(ctx: OrchestratorContext, result, workspace) -> N
     """Populate ctx.last_handoff from worker stdout, with a PROGRESS.md-tail fallback.
 
     2026-05-13 (rms_norm_quant gap): some workers write the canonical handoff into
-    PROGRESS.md but their `claude --print` result.output_text doesn't include it (the
+    PROGRESS.md but their backend result.output_text doesn't include it (the
     final response was a Bash command call, not a text emission containing the marker).
     Fall back to scanning the workspace PROGRESS.md tail before routing to abort.
     """
