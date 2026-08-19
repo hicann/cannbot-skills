@@ -2,24 +2,43 @@
 
 ## 红线硬约束
 
-**diff 范围校验（红线）**：对每条 FAIL/SUSPICIOUS 发现，必须验证其代码片段的关键行是否出现在 diff 变更范围内。验证方法：Grep diff 文件，搜索该发现引用的代码片段关键行内容。若关键行不在 diff 中 → 该发现**强制降级为范围外备注**，禁止进入 FAIL/SUSPICIOUS 正文。此约束不可跳过，不可降级为"建议"。
+**diff 范围校验（红线）**：对每条 clause 类 FAIL/SUSPICIOUS 发现，脚本验证其代码片段关键行是否出现在 diff 变更范围内。关键行不在 diff 中 → yaml 标记 `out_of_range: true`，报告阶段归入范围外备注，不进入正文。此约束由脚本自动执行，不可跳过。
 
 ## 执行步骤
 
-对所有 FAIL/SUSPICIOUS 发现：
+调用 `{skill_base}/scripts/workflow.line_verify.py` 扫描 yaml 目录，原地修正行号 + diff 红线校验。
 
-1. **diff 范围校验（红线，必须最先执行）**：Grep diff 文件，搜索每条发现的核心代码行（至少1行）。核心代码行不在 diff 中 → 强制移至范围外备注，跳过后续步骤
-2. 使用 Grep 搜索关键代码模式定位实际行号
-3. 使用 Read 读取源文件对应行号范围，验证代码片段与行号匹配
-4. 纠正偏差后，再次确认代码片段与行号匹配
+**PR 检视模式**：
 
-## PR 模式特殊处理
+```bash
+python3 {skill_base}/scripts/workflow.line_verify.py \
+    --dir {yaml_output_dir} \
+    --diff {diff_file_path} \
+    --repo {repo_path}
+```
 
-- 子 Agent 可能使用 diff 内行号
-- 必须 Grep 完整源码（`{repo_path}`）定位代码的实际文件行号
-- 报告中统一使用实际行号
-- 无法在完整源码中定位的，标注「行号待确认」
+**脚本行为**（拆分路由逻辑保持现有设计）：
+- **clause 类 yaml**：
+  1. diff 范围红线校验（最先执行）：grep diff 文件搜索代码片段关键行，不在 diff 的 `+` 行中 → 标记 `out_of_range: true`
+  2. 行号校对：grep 完整源码（`{repo_path}`）定位实际文件行号，原地更新 `code_snippet.start_line/end_line`
+  3. 无法在完整源码中定位的 → 标记 `line_verified: false`
+- **design 类 yaml**：
+  - 无 diff 红线（设计偏差常指向未变更代码，不做范围过滤）
+  - 仅校对 `deviations` / `doc_violations` 的行号
+
+## 输入
+
+- `yaml_output_dir`：阶段0 router 创建的 yaml 输出目录路径
+- `diff_file_path`：PR diff 文件路径
+- `repo_path`：完整源码路径
 
 ## 输出
 
-校对后的 FAIL/SUSPICIOUS 列表，行号已修正。越界发现已移至范围外备注，不进入正文。
+- yaml 文件原地更新行号字段 + out_of_range 标记
+- stdout 打印校对摘要（处理 yaml 数、FAIL/SUSPICIOUS 项数、out_of_range 数、行号修正数、待确认数）
+
+## 约束
+
+- 本 step 为主 Agent 直接执行，不派发子 Agent
+- 行号校对逻辑（含 diff 红线 + 拆分路由）由脚本统一处理，主 Agent 不手动 grep/read 源码
+- design 类 yaml 始终无 diff 红线（与 clause 类的拆分路由在脚本内部实现）

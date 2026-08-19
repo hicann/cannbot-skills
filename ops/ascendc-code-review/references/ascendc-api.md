@@ -581,7 +581,7 @@ grep -n "CrossCoreSetFlag\|CrossCoreWaitFlag" <cube_file> <vec_file>
 
 ### 问题描述
 
-CANN 每版本废弃（日落）一批接口并提供替代，废弃接口在删除期限后无法编译。覆盖 Runtime API(C/Python) 的 `aclrt*`/`acl.op.*` 与算子库 `aclnn*`。清单随版本动态变化，由 `scripts/workflow.get_sunset_api.py` 动态解析官方废弃文档生成。
+CANN 每版本废弃（日落）一批接口并提供替代，废弃接口在删除期限后无法编译。覆盖 Runtime API(C/Python) 的 `aclrt*`/`acl.op.*` 与算子库 `aclnn*`。清单随版本动态变化，由 `scripts/clause.get_sunset_api.py` 动态解析官方废弃文档生成。
 
 ### 错误示例
 
@@ -603,7 +603,7 @@ aclnnGroupedMatmulV5(...);          // ✅ 最新版
 
 1. Read `{api_prestudy_path}` 的「## 日落 API」章节（api-prestudy Step 2.5 比对产出）。
 2. 无命中 → PASS。有命中 → Grep 命中行核实是否真使用（排除注释/字符串/死代码），且是日落符号本身而非 `V2`/`V3` 等替代品。真使用 → FAIL(HIGH) + 替代接口 + 删除期限；仅注释提及 → PASS + 清理提示。
-3. 预研报告无此章节 → fallback：`python3 {skill_base}/scripts/workflow.get_sunset_api.py` 得清单（格式 `sym -> rep`，**只取箭头左侧的日落符号**，右侧是替代品勿混入），grep 代码 `acl(rt|nn)[A-Za-z0-9_]+` / `acl\.(op|rt)\.` 比对（注意词法边界，不误匹配替代品）。无法获取 → SUSPICIOUS + 标注。
+3. 预研报告无此章节 → fallback：`python3 {skill_base}/scripts/clause.get_sunset_api.py` 得清单（格式 `sym -> rep`，**只取箭头左侧的日落符号**，右侧是替代品勿混入），grep 代码 `acl(rt|nn)[A-Za-z0-9_]+` / `acl\.(op|rt)\.` 比对（注意词法边界，不误匹配替代品）。无法获取 → SUSPICIOUS + 标注。
 
 ---
 
@@ -626,4 +626,4 @@ target_link_libraries(... libopapi.so)    // ❌ → libopapi_${ops_project}.so
 
 1. Read `{api_prestudy_path}`「## 日落 API」章节（含头文件/库命中）。
 2. 无命中 → PASS。有命中 → Grep 确认是真实 `#include`/链接配置（非注释），且是日落路径本身（`op_proto/inc` 日落，`op_graph/inc` 替代）。真引用 → FAIL(HIGH) + 替代 + 期限；仅注释 → PASS + 清理提示。
-3. 预研报告无此章节 → fallback：`workflow.get_sunset_api.py` 得「算子库(头文件/库)」清单，grep `#include.*op_proto` / `libopapi\.so`。无法获取 → SUSPICIOUS。
+3. 预研报告无此章节 → fallback：`clause.get_sunset_api.py` 得「算子库(头文件/库)」清单，grep `#include.*op_proto` / `libopapi\.so`。无法获取 → SUSPICIOUS。

@@ -19,7 +19,7 @@ ascendc-code-review/
 ├── workflows/                       工作流，按场景命名：{scene}.md
 │   ├── file-review.md              「检视代码」→ 文件检视（含可选设计一致性检查）
 │   ├── pr-review.md                「检视 PR」→ PR检视（含可选设计一致性检查）
-│   ├── pr-large-review.md          文件数>20且变更≥3000行 → 大型PR检视（按文件组并行，含可选设计一致性检查）
+│   ├── pr-large-review.md          review_mode.py 判 mode=large → 大型PR检视（按文件组并行，阈值见 scripts/workflow.review-thresholds.yaml）
 │   ├── quick-review.md             「快速检视」→ 定向问题排查
 │   ├── extend.md                   本文件：系统规范
 │   └── ...                         新增场景按同模式添加（scope 必须与 workflow 文件名一致）
@@ -46,7 +46,7 @@ ascendc-code-review/
 │   ├── ...                          另有 cpp-style、python-secure、simt-api-analysis、mc2-specific 等
 │
 └── scripts/                         工具脚本：{tool}.py
-    ├── check_bounds.py              数值边界静态分析
+    ├── clause.check_bounds.py              数值边界静态分析
     ├── get_gitcode_pr_diff.py        PR diff获取
     ├── clone_pr_source.py            PR源码克隆
     └── ...

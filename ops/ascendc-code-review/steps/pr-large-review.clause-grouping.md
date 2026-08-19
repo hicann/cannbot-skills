@@ -14,10 +14,12 @@ Agent({
 【输入】
 - per-group matched_rules: {matched_rules}
 - 各组文件数: {group_file_counts}
+- 检视类型: {review_type}（pr）
+- 检视标识: {review_id}（PR 号）
 
 【执行要求】
 先 Read `core/review-load-balance.md` 获取规则（每组容量从文件 `<检视负载>` 头读取、合并取最小值、每波上限）。
-严格按本文件「执行流程」中定义的步骤执行，产出全局波次规划表。禁止生成报告文件。"
+严格按本文件「执行流程」中定义的步骤执行，产出全局波次规划表 + yaml_dir。禁止生成报告文件。"
 })
 ```
 
@@ -30,6 +32,14 @@ Agent({
 global-pre-scan 产出的 per-group matched_rules，每组已知：file_group 名、文件数、激活的规则文件、匹配的条例ID 列表。
 
 ## 执行流程
+
+### Step 0 — 创建 yaml 输出目录
+
+调用 `{skill_base}/scripts/workflow.create_review_dir.py` 创建本次检视的结构化 yaml 输出目录：
+- 命令：`python3 {skill_base}/scripts/workflow.create_review_dir.py --type {review_type} --id {review_id}`
+- 捕获 stdout 输出作为 `yaml_dir`（绝对路径，如 `/tmp/pr1234_a3b7x9`）
+- 将 `yaml_dir` 作为返回值之一回传主 Agent。**主 Agent 保留 yaml_dir 用于启动 collector 服务和阶段5 脚本调用，不传给 clause-review / design-check 子 Agent**（子 Agent 通过 collector HTTP 端点提交 yaml，不接触目录路径）
+- 目录创建失败（exit code 非 0）则终止，报错返回
 
 ### Step 1 — 条例归类
 
@@ -120,6 +130,8 @@ cpp-style 的 19 条条例**不按 file_group 拆分**，合并为 1 个跨文�
 ### 输出格式
 
 ```
+yaml_dir: /tmp/{目录名}
+
 全局波次规划:
 
 Wave 1（10组，优先级1-2）:
@@ -140,6 +152,6 @@ Wave 3（7组，优先级3-4）:
 
 ## 约束
 
-- 主 Agent 直接执行，不派发子 Agent（纯计算，无需读代码）
+- 本步骤由子 Agent 执行，Step 0（调用 workflow.create_review_dir.py）由该子 Agent 负责调用，将 `yaml_dir` 作为返回值回传主 Agent
 - 每文件组单波占比 ≤50%（均衡硬约束）
 - 不生成报告文件，波次规划表直接用于 Stage 2

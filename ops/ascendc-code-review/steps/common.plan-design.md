@@ -17,10 +17,20 @@ Agent({
 - scope_hint：{scope_hint}（条例类别,空则全量）
 - （PR 模式）diff 路径：{diff_file_path}
 - 代码文件路径：{file_input 或 repo_path}
+- 检视类型：{review_type}（file 或 pr）
+- 检视标识：{review_id}（PR 检视时为 PR 号；文件检视时留空）
+- mode：{minimal|compact|standard}（由 code-fetch/file-review 调 workflow.review_mode.py 判定,阈值见 scripts/workflow.review-thresholds.yaml）
+- guidance：{对应 mode 的编排指导,同上脚本输出}
 
 【执行】
 
-Step 1 读上游产出。Read 概要提取侧别/API 调用索引/变量溯源/跨文件防御摘要/函数清单;Read API 预研（若有）。统计改动量:PR 取 diff 变更行数（排除注释空行）,文件检视取代码总行数。模式:≤20 极简 / 21-100 紧凑 / >100 标准。
+Step 0 创建 yaml 输出目录。调用 `{skill_base}/scripts/workflow.create_review_dir.py` 创建本次检视的结构化 yaml 输出目录：
+- 命令：`python3 {skill_base}/scripts/workflow.create_review_dir.py --type {review_type} --id {review_id}`
+- 捕获 stdout 输出作为 `yaml_dir`（绝对路径，如 `/tmp/pr1234_a3b7x9`）
+- 将 `yaml_dir` 作为返回值之一回传主 Agent。**主 Agent 保留 yaml_dir 用于启动 collector 服务和阶段2/3 脚本调用，不传给 clause-review / design-check 子 Agent**（子 Agent 通过 collector HTTP 端点提交 yaml，不接触目录路径）
+- 目录创建失败（exit code 非 0）则终止，报错返回
+
+Step 1 读上游产出。Read 概要提取侧别/API 调用索引/变量溯源/跨文件防御摘要/函数清单;Read API 预研（若有）。检视模式直接用上游传入的 mode（不再自行统计行数判档）。
 提取 references 触发关键词:执行 sed -n '/<适用>/,/<\/适用>/p' references/*.md,对领域=true 文件取 触发: 字段关键词去重。
 禁止 Read 源码仓;reference 只 sed 取快速索引段。
 
@@ -42,11 +52,8 @@ Step 6 合并 + 容量。
 6.2 同根因合并:同一代码位置（行号/函数名）被 ≥2 条条例命中→合并;多条条例命中同一变量且同风险等级→合并。禁止合并:跨侧别;红线/必触发条例独立成组。合并后容量超限→按主条例拆同波多子组。
 6.3 容量:Read core/review-load-balance.md 获取规则,扫描各文件 <检视负载> 头取容量,合并组取 min。
 
-Step 7 分组 + 波次。按模式走分支:
+Step 7 分组 + 波次。按上游传入的 mode 走对应 guidance 执行（mode/guidance 由 code-fetch/file-review 调 workflow.review_mode.py 判定,阈值见 scripts/workflow.review-thresholds.yaml,plan-design 不自行判档）。
 红线（ascendc-red-line）与 topK（ascendc-topk）永远是最高优先级:优先级序中排在 1 之前,独立成组（不参与 Step 6.2 合并,见 6.2 禁止合并项）,必进第一波;模式分档与每波 ≤6 组限制不削弱其优先级——分波/挤波时若第一波已满,红线/topK 仍优先占位,其余条例让位后延。
-极简（≤20行）: 极简模式应该做到只发射一个波次,也即≤6个子 agent 并行检视
-紧凑（21-100行）: 正常合并,优先挤在同一波;≤6 组单波,超过分波。
-标准（>100行）: 直接用 Step 6 结果。侧别标签:全 [适用:Kernel]→[仅Kernel];全 [适用:Tiling]/[适用:Host]→[仅Tiling];含 [适用:All] 或混合→[全部]。优先级:1.数值安全+内存安全+输入验证 2.API使用+数据搬运 3.领域规则 4.性能 5.通用规范 6.Python。每波 ≤6 组。
 cpp-style 专项（所有模式追加）:19 条单独成 1 组,组名 style,标签 [全部],并入第一波,全文 Read references/cpp-style.md,结果以 [STYLE] 前缀输出,不进 PASS/FAIL 统计。
 
 Step 8 design-check 发射。docs_input 非空→发射（与波次1 同消息并行,独立轨道不进通用分组）;为空→不发射。写入专项清单。
@@ -54,6 +61,7 @@ Step 8 design-check 发射。docs_input 非空→发射（与波次1 同消息�
 Step 9 输出检视计划。
 
 【输出格式】
+yaml_dir: /tmp/{目录名}
 检视计划 [{极简/紧凑/标准}]
 代码行数: {N} | 检视范围: {全量/scope_hint}
 代码语言: {C++/Python/Build/混合} | 侧别: {Kernel/Tiling/混合}
@@ -76,7 +84,7 @@ Step 9 输出检视计划。
 
 共 G 组,分 W 波。
 
-工具调用预算 ≤10 次:概要1+预研0-1+docs0-1+改动量1+sed1-2+兜底grep0-3。超预算砍兜底 grep。
+工具调用预算 ≤10 次:概要1+预研0-1+docs0-1+sed1-2+兜底grep0-3。超预算砍兜底 grep。
 禁止生成报告文件。"
 })
 ```

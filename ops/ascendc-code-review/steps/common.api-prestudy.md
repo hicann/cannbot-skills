@@ -56,7 +56,7 @@ Step 2 — 按代际查阅官方文档
 
 Step 2.5 — 日落 API 比对
 
-2.5.1 运行 `python3 {skill_base}/scripts/workflow.get_sunset_api.py` 动态拉取最新 CANN 废弃接口/头文件清单（~2-3 秒）。离线/失败 → 跳过 2.5.2，报告「## 日落 API」写"获取失败，clause-review 需 fallback"。
+2.5.1 运行 `python3 {skill_base}/scripts/clause.get_sunset_api.py` 动态拉取最新 CANN 废弃接口/头文件清单（~2-3 秒）。离线/失败 → 跳过 2.5.2，报告「## 日落 API」写"获取失败，clause-review 需 fallback"。
 
 2.5.2 将 Step 1 提取的代码 API 清单与日落清单比对：
 - `aclrt*` / `aclnn*` / `acl.op.*` 符号词法边界匹配（`aclrtGetVersion` 不误匹配替代品 `aclrtGetVersionV2`）

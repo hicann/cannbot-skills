@@ -339,7 +339,7 @@ int64_t totalSize = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3 * dim4;
 
 **【检视策略 — 工具驱动】**
 
-核心流程：运行 check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
+核心流程：运行 clause.check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
 
 **Step 1 — 提取表达式与类型**
 
@@ -347,7 +347,7 @@ int64_t totalSize = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3 * dim4;
 
 **Step 2 — 首次工具运行**
 
-为操作数设定初始边界后运行 check_bounds.py：
+为操作数设定初始边界后运行 clause.check_bounds.py：
 
 边界设定规则：
 ① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
@@ -359,7 +359,7 @@ int64_t totalSize = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3 * dim4;
 - 用类型标签代替边界（"int64_t 所以够大不会溢出"——int64_t 的值可以是 1）
 
 ```bash
-python3 {skill_base}/scripts/check_bounds.py \
+python3 {skill_base}/scripts/clause.check_bounds.py \
   --expr "{表达式}" \
   --vars "a=int32_t:0:47" "b=int32_t:3:3" "c=int64_t:100:1000000" \
   --check overflow
@@ -442,7 +442,7 @@ int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
 
 **【检视策略 — 工具驱动】**
 
-核心流程：运行 check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
+核心流程：运行 clause.check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
 
 **Step 1 — 提取表达式与类型**
 
@@ -450,7 +450,7 @@ int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
 
 **Step 2 — 首次工具运行**
 
-为操作数设定初始边界后运行 check_bounds.py：
+为操作数设定初始边界后运行 clause.check_bounds.py：
 
 边界设定规则：
 ① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
@@ -462,7 +462,7 @@ int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
 - 用类型标签代替边界（"uint64_t 所以够大不会回绕"——uint64_t 的值可以是 0）
 
 ```bash
-python3 {skill_base}/scripts/check_bounds.py \
+python3 {skill_base}/scripts/clause.check_bounds.py \
   --expr "{表达式}" \
   --vars "a=uint32_t:0:47" "b=uint32_t:3:3" "c=int64_t:100:1000000" \
   --check wraparound

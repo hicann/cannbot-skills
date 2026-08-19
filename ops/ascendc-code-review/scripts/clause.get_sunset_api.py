@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 
 BASE = "https://www.hiascend.com"
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stderr)
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
 UA = {"User-Agent": "Mozilla/5.0"}
 GW = {**UA, "Referer": "https://www.hiascend.com/"}
@@ -170,13 +170,12 @@ def main():
     for it in out:
         grouped.setdefault(it["cat"], []).append(it)
 
-    # 以下 print 为脚本最终产物输出（日落清单），非诊断日志，按 G.LOG.02 豁免
-    print(f"# 日落（废弃）API/头文件清单 | CANN {code} ({name})")  # pylint: disable=G.LOG.02
+    logger.info(f"# 日落（废弃）API/头文件清单 | CANN {code} ({name})")
     for cat, its in grouped.items():
-        print(f"## {cat}")  # pylint: disable=G.LOG.02
+        logger.info(f"## {cat}")
         for it in its:
             dl = f"[删除期限 {it['deadline']}] " if it.get("deadline") else ""
-            print(f"{dl}{it['sym']} -> {' / '.join(it['rep'])}")  # pylint: disable=G.LOG.02
+            logger.info(f"{dl}{it['sym']} -> {' / '.join(it['rep'])}")
 
 
 if __name__ == "__main__":
