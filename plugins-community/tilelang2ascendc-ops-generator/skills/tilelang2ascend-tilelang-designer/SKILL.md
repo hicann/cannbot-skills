@@ -41,6 +41,7 @@ argument-hint: >
 - 只允许修改或新增 `{output_dir}/` 目录中的文件，不要改动其他目录中的文件。
 - 只允许读取当前工作区目录结构内的文件与子目录；禁止读取当前工作区之外的任何路径，包括父目录、兄弟目录、用户目录、绝对路径以及系统其他目录。
 - 禁止读取 `asc-devkit/docs/` 目录及其下任何文件；该目录仅供 AscendC 阶段使用，与本阶段无关。
+- **🛑 参考实现 ≠ 可复制代码**：`workflows/templates/archive_tasks/` 用于理解结构范式（目录组织、TileLang 结构、任务划分、缓冲规划），**禁止整体照抄其代码**。复用任何参考代码必须：① 按当前算子的 shape/dtype/归约路径/广播形态**逐行适配**；② 重新推导 tiling 与 UB 预算（不沿用 archive 的硬编码参数）；③ 全量验证通过。archive 中存在的缺陷不得被复制进新算子。
 - **⚠️ 算子设计准则**（在 block/tile 设计中必须遵守，详见 `tilelang-op-design` §4 算子设计准则）：
   1. **UB 空间复用与扩满**：设计计算块时尽可能实现 buffer 复用，减少临时 buffer；扩大 UB 使用量，尽可能用满所有可用 UB 空间
   2. **避免不必要的 Cast**：在不影响精度的条件下，不考虑额外的数据类型转换；仅当精度不足时才允许 Cast 到更高精度
@@ -71,6 +72,15 @@ argument-hint: >
 - `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/evaluate_tilelang.sh` — TileLang 功能验证脚本（步骤 3c 强制使用；精度通过是步骤 4 性能迭代的强制前置）
 - `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/validate_tilelang_impl.py` — TileLang 实现退化检测（检测 PyTorch 回退）
 - `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/verification_tilelang.py` — TileLang 精度验证
+
+### 本 skill 自带设计模式参考
+
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/DesignPatternIndex.md` — 归约/重排类设计模式索引（(O,R,I) 路径路由、规律 pattern vs 建表、广播源行共享、按最终布局摆放、核数分档）
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/reduce_design.md` — 归约族算子设计决策要点（设计阶段定，可 TileLang DSL 表达）
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/shuffle_design.md` — 重排/搬运类算子设计决策要点
+
+> 设计模式参考只含**设计阶段决策**；AscendC 实现细节见 translator references
+> （ascendc_reduce_patterns / ascendc_shuffle_patterns）。
 
 ### 设计方法论（ops/tilelang-op-design 贡献，不复制、只引用）
 
@@ -164,6 +174,45 @@ argument-hint: >
 - 如果触发条件满足但 0.1-0.4 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
 - 如果触发条件不满足 → 跳过步骤 0，直接进入步骤 1
 - 禁止凭记忆或经验跳过模式文档直接设计
+
+---
+
+### 🛑 步骤 0-A: 归约 / 重排类设计模式路由（命中特征时强制执行）
+
+```
+⚠️ 本步骤是硬性门禁。如果 model.py 是归约族或重排/搬运类算子，
+   必须逐个完成以下 checklist 后才能进入步骤 1。禁止跳过。
+```
+
+**触发条件**：`{output_dir}/model.py` 的 forward() 中包含以下任一特征：
+- 归约族：`torch.sum / mean / max / min / prod` 等沿维（或全部）归约计算；
+  以及均值/方差统计量（`layer_norm` / `LayerNorm` / `batch_norm` / `rms_norm` / `var` / `std` 等）
+- 重排/搬运类：奇偶交织 / stride 切片重组（`chunk`/`split`/`cat`/`stack`）/ gather / scatter /
+  广播消费（RoPE 交织、RotaryMul、permute 类变体）
+
+**强制执行清单**：
+
+```
+0-A.1 🛑 读取设计模式索引（必须，不可跳过）:
+    Read references/design-patterns/DesignPatternIndex.md
+
+0-A.2 🛑 只读取命中的模式文档（渐进式披露，只读需要的）:
+    - 归约族 → Read references/design-patterns/references/reduce_design.md
+    - 重排/搬运类 → Read references/design-patterns/references/shuffle_design.md
+    （两族同命中 → 都读）
+
+0-A.3 🛑 在思考中确认:
+    - 归约族：本算子落入 (O,R,I) 哪条路径（A 跨行 RA / B 多行批归约 / C 分块两级树），
+      tile 内 pad 语义、累积精度、核数分档如何定
+    - 重排/搬运类：重排走哪种结构（规律 pattern vs 建表）、广播源行如何共享、
+      输出是否按最终布局摆放、核数分档档位
+    - 本算子的 block-level 设计骨架应与命中的设计模式对齐
+```
+
+**门禁规则**：
+- 如果触发条件满足但 0-A.1-0-A.3 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
+- 如果触发条件不满足 → 跳过步骤 0-A，直接进入步骤 1
+- 禁止凭记忆或经验跳过设计模式直接设计
 
 ---
 

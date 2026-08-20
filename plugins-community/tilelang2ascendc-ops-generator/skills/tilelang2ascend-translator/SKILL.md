@@ -27,7 +27,10 @@ argument-hint: >
 - 禁止读取 `.claude/skills/tilelang2ascend-translator/references/TileLangAscendProgrammingGuide.md`；该文档是 TileLang 编程指南，仅供 TileLang 阶段使用，与本阶段无关。
 - 严格按照算子描述生成kernel，ascend c kernel的功能应该和标杆完全一致，不能出现部分功能使用ascend c，部分使用torch算子的情况
 - 即使测试用例中不包含某个功能或者分支对应的case，也要生成对应的ascend c kernel代码
+- **🛑 参考实现 ≠ 可复制代码**：`workflows/templates/archive_tasks/` 用于理解结构范式（目录组织、API 用法、EXEC_KERNEL_CMD 传参模式、缓冲规划），**禁止整体照抄其代码**。复用任何参考代码必须：① 按当前算子的 shape/dtype/归约路径/广播形态**逐行适配**；② 重新推导 tiling 与 UB 预算（不沿用 archive 的硬编码参数）；③ 全量验证通过。archive 中存在的缺陷不得被复制进新算子。
 - **🛑 同步机制强制门禁**: 涉及 MIX_AIC / CrossCore / WorkspaceQueue / 死锁 / 全零输出 时，必须先完成 **步骤 0-C** 的同步 checklist。详见下方步骤 0-C 章节。
+- **🛑 性能计时口径**：性能数据只接受 device 侧 kernel 时间（msprof Task_Duration，经 ops-profiling 采集）；禁止用 torch_npu Event / 墙钟计时作为性能结论——其读数包含 host 下发间隙与共享设备干扰，µs 级算子会出现数量级假数据（实测发生过参考侧虚高 ~100x 的事故）。
+- **🛑 长时间性能测试防卡死**：执行耗时较长的性能测试 / 批量 benchmark（msprof 采集、逐 case 长跑等）时，必须对测试进程做**轮询 + 超时保护**——周期性检查其是否仍在推进（输出增长 / 进程存活 / 心跳），超时立即终止并上报，防止 kernel 挂死（hang / aicore timeout）导致无限等待、吞掉整个生成流程。
 
 ### 算子设计准则（必须遵守）
 
@@ -94,6 +97,8 @@ argument-hint: >
 - `.claude/skills/tilelang2ascend-translator/references/dsl2Ascendc.md` — TileLang 转 AscendC 指南
 - `.claude/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` — TileLang 与 AscendC API 映射表
 - `.claude/skills/tilelang2ascend-translator/references/AscendCVerification.md` — AscendC 验证指南
+- `.claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md` — 归约族算子实现指南（(O,R,I) 路由、补零/行距铁律、应避免的结构、精度与验证约定）
+- `.claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
 - `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention）
 - `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
@@ -163,6 +168,37 @@ argument-hint: >
 - 如果触发条件满足但 0-A.1-0-A.4 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
 - 如果触发条件不满足 → 跳过步骤 0-A，直接进入步骤 0-B
 - 禁止凭记忆或经验跳过模式文档直接转译
+
+### 🛑 步骤 0-A2: 归约 / 重排类算子实现指南路由（命中特征时强制执行）
+
+**触发条件**（步骤 0-A 读取 model.py forward() 后一并检查）：
+- 归约族特征：`torch.sum / mean / max / min / prod` 等沿维（或全部）归约计算；
+  以及均值/方差统计量型算子（`layer_norm` / `LayerNorm` / `batch_norm` / `rms_norm` /
+  `var` / `std` 等——其 forward 必然内含归约）
+- 重排/搬运类特征：奇偶交织 / stride 切片重组（含 `chunk`/`split`/`cat`/`stack`
+  半区拆分重组）/ gather / scatter / 广播消费（如 RoPE 交织、RotaryMul 旋转乘、
+  permute 类变体）
+
+如果命中，必须完成以下 checklist：
+
+```
+0-A2.1 🛑 只读取命中族的实现指南（渐进式披露，只读需要的）:
+    - 归约族 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md
+    - 重排/搬运类 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md
+    （两族同命中 → 都读）
+
+0-A2.2 🛑 在思考中确认:
+    - 归约族：本算子落入 (O,R,I) 哪条路径（A 跨行 RA / B 多行批归约 / C 分块两级树），
+      以及补零/行距、精度约定等铁律的落点
+    - 重排/搬运类：本算子的重排结构走哪条硬件 pattern 路线，
+      固定开销结构（launch 建表 / 广播物化 / strided 拼写回）是否全部规避
+    - 本算子的 AscendC 转译策略应与命中指南的结构规则对齐
+```
+
+**门禁规则**：
+- 命中但 0-A2.1/0-A2.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 未命中 → 跳过 0-A2，直接进入步骤 0-B
+- 禁止凭记忆或经验跳过指南直接转译
 
 ---
 
@@ -586,6 +622,7 @@ def run(x, dim=-1):
 | **编译错误: GlobalTensor/LocalTensor** | `asc-devkit/docs/api/SIMD-API/基础数据结构/` 下对应简介.md |
 | **运行时 vector core exception / UB 违例 / all-zero output** | ① 🛑 **优先执行步骤 0-C** 完成 sync checklist<br>② `asc-devkit/docs/guide/算子实践参考/.../TBuf的使用.md` 检查 buffer 大小<br>③ `workflows/templates/archive_tasks/rms_norm/` 对比 EXEC_KERNEL_CMD 传参模式<br>④ 检查是否有 struct 指针被传给 `EXEC_KERNEL_CMD`（常见根因） |
 | **运行时 hang/死锁 / 跨核数据不流通** | 🛑 **必须先执行步骤 0-C**（含读取 ascendc-sync-guide.md 全文 + 6 项 checkpoint），再逐项排查 |
+| **多核非确定性（单核正确/多核错，失败行随时序漂移）** | ① 用 `usedCoreNum=1` 单核强制复跑二分：单核对/多核错 ⇒ launch 模型正确、问题在 compute 侧数据竞争<br>② 查 Gather 源是否 alias TQue 队列 tensor（跨迭代 slot 复用，见 `references/ascendc_shuffle_patterns.md` §1.7）<br>③ 查输入/输出是否误用 TBuf（见步骤 0-C） |
 | **运行时 vector core timeout (507034)** | 🛑 这是硬件级别的 core 挂起错误。按顺序排查:<br>① **work buffer 尺寸**: 检查所有 API 的 work buffer (ReduceSum/Cos/Sin/Broadcast) 是否通过 GetXxxMaxMinTmpSize 正确计算 — 硬编码不足是最常见根因<br>② **Buffer 总溢出**: 计算所有 InitBuffer 分配的总 UB 字节数，确认不超过 GetCoreMemSize(UB)<br>③ **PipeBarrier 配对**: 每个 GM→UB (MTE2) 后必须有 PIPE_MTE2 barrier; 每个 V 计算块结束后必须有 PIPE_V barrier; 每个 UB→GM (MTE3) 前必须有 PIPE_V barrier<br>④ **循环边界**: 检查所有循环的边界类型一致性 (int32_t vs int64_t)，确认不会因类型不匹配导致死循环<br>⑤ **隔离法**: 将 kernel 逐步简化为 identity copy，每次恢复一个操作，定位触发 timeout 的具体 API<br>⑥ **参考历史**: 查阅 workflows/templates/archive_tasks/ 中相似规模的融合算子，对比 work buffer 计算方式 |
 | **精度不匹配 (MERE/MARE 超标)** | 调用 `ascendc-precision-debug` skill（见步骤 4） |
 

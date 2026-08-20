@@ -925,6 +925,10 @@ class ModelNew(nn.Module):
 2. **执行快速性能测试**：只跑 1 轮 msprof，获取 `reference` 和 `ascendc` 的 kernel 时间，计算加速比
 3. **获取性能报告**：记录各实现的耗时和加速比
 
+> **msprof `writable by groups` 报错修复**：若 msprof 报 `Argument --output is writable by groups`，
+> 是 shell umask 为 `0002` 导致 `msprof_perf_summary.py` 的 `os.makedirs` 建出组可写（775）临时目录、
+> msprof 安全机制拒绝写入。**必须 `umask 022` 后重跑 msprof**，禁止以此为理由降级到 Event/墙钟计时。
+
 **产出**：性能分析报告，`performance.json`，记录每个 case 的加速比；性能打屏日志，`performance.log`
 
 **Phase 5 强制检查（必须执行）**：

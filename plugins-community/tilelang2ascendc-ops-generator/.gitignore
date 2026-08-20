@@ -8,3 +8,6 @@
 asc-devkit
 .github
 .copilot
+
+# Install-time generated copies (init.sh refreshes these; not source)
+**/skills/tilelang2ascend-tilelang-designer/references/attention-patterns/
