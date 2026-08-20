@@ -61,11 +61,13 @@ description: Ascend C 算子 Tiling 设计指南。提供算子分类体系和 T
 - 输出 buffer（outQueue）
 - 中间计算 buffer（tmpBuf, workBuf 等）
 - Double Buffer 优化
+- **UB 复用与扩满**（必须遵守）：设计计算块时，尽可能实现 buffer 复用，减少临时 buffer 的申请；扩大 UB 使用量，实现尽可能用满所有可用 UB 空间。当多个计算步骤的 buffer 生命周期不重叠时，应复用同一 TBuf 而非申请新 buffer；在不超过 `GetCoreMemSize(UB)` 上限的前提下，增大 tile size 使 UB 利用率尽可能接近 100%
 
 **输出**：
 - [ ] Buffer 列表及用途
 - [ ] 各 Buffer 大小计算公式
-- [ ] 总 UB 使用量
+- [ ] Buffer 复用方案（哪些 buffer 可复用同一 TBuf）
+- [ ] 总 UB 使用量及 UB 利用率（总分配 / `GetCoreMemSize(UB)`）
 
 ### 4. 分支场景覆盖
 

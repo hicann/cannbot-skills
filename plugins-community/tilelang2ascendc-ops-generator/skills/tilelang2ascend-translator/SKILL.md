@@ -29,6 +29,36 @@ argument-hint: >
 - 即使测试用例中不包含某个功能或者分支对应的case，也要生成对应的ascend c kernel代码
 - **🛑 同步机制强制门禁**: 涉及 MIX_AIC / CrossCore / WorkspaceQueue / 死锁 / 全零输出 时，必须先完成 **步骤 0-C** 的同步 checklist。详见下方步骤 0-C 章节。
 
+### 算子设计准则（必须遵守）
+
+以下三条准则在 AscendC kernel 设计与转译全程中必须遵守：
+
+**准则 1：UB 空间复用与扩满**
+
+设计计算块时，尽可能实现 buffer 复用，减少临时 buffer 的申请；扩大 UB 使用量，实现尽可能用满所有可用 UB 空间。
+
+- **复用优先**：当多个计算步骤的 buffer 生命周期不重叠时，应复用同一 TBuf 而非申请新 buffer。例如 softmax 的 max buffer 和 sum buffer 在不同 pass 中使用，可复用同一 TBuf
+- **扩满 UB**：在不超过 `GetCoreMemSize(UB)` 上限的前提下，增大 tile size 使 UB 利用率尽可能接近 100%。通过 `platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreMemSize(UB)` 获取 UB 总量，所有 InitBuffer 分配之和应接近该值
+- **减少临时 buffer**：优先使用 `ReinterpretCast` 复用已有 buffer 的内存空间，而非申请新 TBuf
+
+**准则 2：避免不必要的 Cast**
+
+在不影响精度的条件下，不考虑额外的数据类型转换（即 Cast 操作）。
+
+- **默认不 Cast**：若输入为 fp16/bf16 且该 dtype 下 AscendC API 支持直接计算，则不做 fp16→fp32→fp16 的升降精度往返。例如 `SoftMax<half>` 可直接处理 fp16 输入，无需先 Cast 到 fp32
+- **精度优先例外**：当某步计算在当前 dtype 下会导致精度丢失（如 reduce 在 fp16 下精度不足），才允许 Cast 到更高精度
+- **注意**：本准则受准则 3 约束——若内置 API 要求特定 dtype，允许为满足 API 调用条件而做 Cast
+
+**准则 3：优先使用内置库算子或 API 接口**
+
+设计算子代码时，在保证精度及可运行的条件下，优先选择可调用的内置库算子或 API 接口的途径，可为了满足内置库算子或 API 的使用条件而进行数据类型转换。若该方法设计出的算子在最终性能测试过程中加速比低于 0.8x，则考虑将内置库算子或 API 替换为自定义步骤计算的途径。若自定义步骤计算性能更低，则仍采用内置库算子或 API 的途径。若某种途径会导致精度丢失或运行错误，则不予考虑该途径。
+
+- **优先级**：内置库算子/API（如 `at::softmax`、`SoftMax` 高阶 API、`aclnnXxx`）> 自定义步骤计算（手动 Exp/Reduce/Div）
+- **允许为 API 做 Cast**：若内置 API 要求特定 dtype（如 `SoftMax<half>` 要求 fp16 输入），允许 Cast 以满足调用条件（本条优先于准则 2）
+- **op_host 层面也适用**：当内置库算子（如 `at::softmax` dispatch 到 `aclnnSoftmax`）能在 op_host 中直接调用且精度完全匹配时，优先采用该途径而非自定义 kernel
+- **性能回退阈值 0.8x**：内置 API 路径在性能测试中加速比 < 0.8x 时，尝试自定义实现；若自定义更慢则回退到内置 API
+- **精度/运行错误排除**：任一路径导致精度丢失或运行错误，立即排除该路径，不考虑采用
+
 ## 目标任务目录结构
 ```text
 .
@@ -281,8 +311,76 @@ argument-hint: >
 
 ---
 
+### 🛑 步骤 0-D: 性能设计门禁（每次代码生成前强制执行）
+
+#### 核心原理：搬运单元容量最大化
+
+NPU 上每一次数据搬运（DataCopyPad DMA）、每一次流水线迭代（tile 循环）都携带**固定开销**（DMA 建链、地址计算、同步信号、流水线起停）。实际性能取决于：
+
+```
+有效性能 = 有用数据量 / (有用数据量 + 固定开销)
+```
+
+当每次搬运/迭代处理的数据量很小时，固定开销 dominate，性能急剧下降。**因此，一切性能优化的根因都指向一个目标：让每个流水线单元（DMA 调用、tile 迭代、计算步骤）处理尽可能多的数据，把固定开销摊到最小。**
+
+#### 因果链与检查清单
+
+以下 5 项检查按因果链组织，前项是后项的使能条件：
+
+```
+① 消除冗余搬运（wrapper 零拷贝）
+   │  原理: 多做一次全量拷贝 = 多一份 100% 固定开销, 零有效数据
+   │  检查: forward() 中是否有 permute/contiguous/reshape/to(dtype)？
+   │  要求: 0 次全量拷贝。所有布局/精度变换移入 kernel 内部
+   │  度量: wrapper_copy_bytes = 0
+   │
+   ② 单次 DMA 传满（禁止逐行循环）
+   │  原理: 逐行调用 32 次 DMA = 32 倍固定开销; 2D strided 1 次 = 1 倍
+   │  检查: CopyIn/CopyOut 中是否有 for 循环逐行调用 DataCopyPad？
+   │  要求: 跨行数据用 2D DataCopyPad (blockCount>1, srcStride) 一次加载
+   │  度量: bytes_per_dma_call 应接近 UB tile 大小（如 4KB+），而非 128B
+   │
+   ③ 每个 tile 算满（Tile 利用率 ≥ 80%）
+   │  原理: tile 被截断为 64 元素时, 每步向量指令只处理 64 元素 → 固定开销占比极高
+   │  检查: 对所有测试用例, actual_tileSize 是否接近 TILE_SIZE？
+   │  要求: rowSize < TILE_SIZE 时启用 multi-row tile, 打满 TILE_SIZE
+   │  度量: tile_utilization = actual_tileSize / TILE_SIZE ≥ 80%
+   │
+   ④ 流水线不空转（双缓冲）
+   │  原理: BUFFER_NUM=1 时, tile N 的 CopyIn 等 tile N-1 的 CopyOut 完成 → 流水线空泡
+   │  检查: TQue 的 BUFFER_NUM 是否 ≥ 2？
+   │  要求: VECIN/VECOUT 队列 BUFFER_NUM=2, 实现 CopyIn/Compute/CopyOut 重叠
+   │  度量: pipeline_overlap = 1 (BUFFER_NUM≥2)
+   │
+   ⑤ 多核不空闲（核利用率 ≥ 90%）
+   │  原理: 空闲核不做有效计算但仍承担初始化开销
+   │  检查: usedCoreNum 是否接近物理核数（大张量时）？
+   │  要求: usedCoreNum = min(物理核数, max(1, totalOutput)), 动态获取, 禁止硬编码
+   │  度量: core_utilization = usedCoreNum / physicalCoreNum ≥ 90%
+```
+
+**三维分解（outerSize, dimSize, innerSize）是 ①②③ 的共同使能条件**：
+- 它定义 `rowSize`、`inputRowSize`、`stride`，使 kernel 能直接在原始内存布局上操作任意 dim
+- 没有它，kernel 只能处理 dim=-1，其余 dim 必须 wrapper 做全量拷贝（违反 ①）
+- 没有它，无法计算 `rowSize`，无法检测 multi-row，无法计算 2D stride（违反 ②③）
+
+**门禁规则**：
+- ①②③ 未确认前，禁止进入步骤 1 编写代码——违反将导致 10~30 倍性能劣化
+- ④⑤ 未确认前，禁止进入步骤 1——违反将导致 2~5 倍性能劣化
+- 同步机制（TQue+EnQue/DeQue 替代 TBuf+PipeBarrier）是 ④ 的前置——错误同步会导致 V 核读到未就绪数据（精度失败）
+
+**经验数据**（来自 SwiGLU 算子 A/B 对比，验证因果链）：
+```
+             ①wrapper   ②DMA       ③tile    ④buffer  Avg Speedup
+未优化:       permute拷贝  逐行循环    3.1%     BUFFER=1   1.16x
+优化后:       零拷贝      2D strided  100%     BUFFER=2   1.72x
+```
+仅修复 ②③（multi-row + 2D DMA），即使 ① 仍有缺陷，Avg Speedup 仍从 1.16x 提升到 1.72x。
+
+---
+
 ## 流程
-执行以下各步骤前，必须先完成 **步骤 0-A（如触发）、步骤 0-B 和步骤 0-C（如触发）的全部查阅**，再开始实现、验证与迭代。
+执行以下各步骤前，必须先完成 **步骤 0-A（如触发）、步骤 0-B、步骤 0-C（如触发）和步骤 0-D 的全部查阅**，再开始实现、验证与迭代。
 
 ### 步骤 1: TileLang 转译成 AscendC
 
@@ -324,8 +422,77 @@ argument-hint: >
 - template class `Kernel<OpName>` 含 Init/Process/CopyIn/Compute/CopyOut
 - BUFFER_NUM = 2 (double buffer)；如算子需要在循环中同时持有多个 queue tensor，需相应增大 BUFFER_NUM
 - DataCopyPad 用于 GM↔UB 搬运
-- FP16/BF16 升精度到 FP32 计算
+- dtype 处理遵循准则 2：默认不做额外 Cast；仅当 API 不支持当前 dtype 或精度不足时才升精度到 FP32 计算（如 reduce 类操作在 fp16 下精度不足）
+- UB buffer 分配遵循准则 1：优先复用 TBuf，扩满 UB 空间
 - 整核/尾核偏移和尾块对齐处理
+
+**🛑 搬运单元容量最大化：三维分解 + Multi-row Tile + 2D DataCopyPad（必须检查）**：
+
+当算子需要沿任意 dim 操作（非仅末尾维度），或输出 shape 与输入不同（如 chunk/split 后逐半处理：SwiGLU/GeGLU/ReGLU 等），必须通过三维分解使 kernel 直接在原始内存布局上操作，避免 wrapper 做全量拷贝。
+
+**根因**：DMA 每次调用有固定开销（建链、地址计算、同步）。三维分解提供 `rowSize`/`inputRowSize`/`stride` 参数，使 kernel 能：(1) 免 wrapper 拷贝直接访问任意 dim 数据；(2) 检测 multi-row 打满 TILE_SIZE；(3) 用 2D strided 一次 DMA 加载多行。三者共同将固定开销摊到最小。
+
+**第一步：三维分解（对应指标 1: Wrapper 零搬运）**
+
+Host 侧（op_host）必须将任意 shape 分解为三维逻辑结构：
+```cpp
+// dim 之前所有维度乘积
+int64_t outerSize = 1;
+for (int32_t i = 0; i < normDim; ++i) outerSize *= x.size(i);
+// dim 维大小
+int64_t dimSize = x.size(normDim);
+// dim 之后所有维度乘积
+int64_t innerSize = 1;
+for (int32_t i = normDim + 1; i < ndim; ++i) innerSize *= x.size(i);
+
+int64_t halfDim = dimSize / 2;
+int64_t rowSize = halfDim * innerSize;       // 输出每"行"元素数
+int64_t inputRowSize = dimSize * innerSize;  // 输入每"行"元素数 = 2 * rowSize
+int64_t totalOutput = outerSize * rowSize;
+```
+
+**关键恒等式**：`inputRowSize = 2 * rowSize`（恒成立，因为 dimSize = 2 * halfDim）。
+
+这意味着 `a` 和 `b` 在同一行内相邻（a 在前半，b 在后半），跨行间隔为 `inputRowSize`。kernel 通过 stride 直接访问，**无需 wrapper 做 permute+contiguous**。
+
+**第二步：Multi-row Tile 检测（对应指标 2: Tile 利用率）**
+
+在 `Init()` 中检测：
+```cpp
+if (rowSize > 0U && rowSize < static_cast<uint32_t>(TILE_SIZE) &&
+    (rowSize * sizeof(dataType)) % 32U == 0U) {
+    multiRowMode = true;
+    elementsPerCore = CeilDivU32(elementsPerCore, rowSize) * rowSize;  // 核间行对齐
+}
+```
+
+**第三步：2D DataCopyPad 跨行加载（对应指标 3: DMA 效率）**
+
+`CopyIn()` 中 multi-row 模式使用 2D strided DataCopyPad：
+```cpp
+// 一次 DMA 加载 numRows 行的 a 数据（跳过 b 块）
+DataCopyExtParams copyParams{
+    static_cast<uint16_t>(numRows),  // blockCount = 行数
+    rowSize * sizeof(T),              // blockLen = 每行字节数
+    rowSize * sizeof(T),             // srcStride = 行间隔（跳过 b 块，单位字节）
+    0,                                // dstStride = UB 中连续排列
+    0
+};
+DataCopyPad(aLocal, xGm[aBaseOffset], copyParams, padParams);
+DataCopyPad(bLocal, xGm[bBaseOffset], copyParams, padParams);  // bBaseOffset = aBaseOffset + rowSize
+```
+
+**stride 语义**（来源：`ascendc-api-best-practices/references/api-datacopy.md`）：
+- `srcStride`：GM 侧，单位**字节**，含义为前一块尾部到后一块头部的距离
+- `dstStride`：UB 侧，单位 **32 字节块**，0 表示连续
+
+**禁止的替代方案**：逐行循环调用 1D DataCopyPad（违反指标 3，tile 数量膨胀 32 倍）。
+
+详见：
+- `ascendc-api-best-practices/references/api-datacopy.md` 的「2D strided 跨行加载」场景
+- `ascendc-tiling-design/references/elewise/tiling.md` 第七章 Multi-row Tile 优化
+
+**经验教训**：未启用 multi-row 时，`rowSize=64` 的 case tile 被截断为 64（vs 理想 2048），tile 数量膨胀 32 倍，固定开销 dominate，性能可劣化 10~30 倍。同一算子仅 `dim` 参数不同即产生 20+ 倍延迟差异。
 
    **ops.h** 模式：
    ```cpp
@@ -349,39 +516,53 @@ argument-hint: >
 
 ### 步骤 2: 编写 model_new_ascendc.py + 编译验证
 
-编写 `{output_dir}/model_new_ascendc.py`，采用**双路径加载**模式：
-- 优先 `import <op_name>_ext`（whl 安装后自动触发 TORCH_LIBRARY 注册）
-- 失败回退 `torch.ops.load_library()` 直加载 `kernel/build/<op_name>_ext*.so`
-- forward() 中调用 `torch.ops.npu.<op_name>(...)`
+编写 `{output_dir}/model_new_ascendc.py`。
 
-示例：
+**🛑 Wrapper 最小化原则（对应指标 1: Wrapper 零搬运）**：
+
+`model_new_ascendc.py` 的 forward() **禁止**包含以下操作：
+- `x.permute(...)` + `.contiguous()` — 全量数据拷贝，性能杀手
+- `x.reshape(...)` 强制改变张量布局 — 应在 kernel 内部处理
+- `x.to(dtype)` 全量精度转换 — 应在 kernel 内部通过 Cast 处理
+- 任何 `torch.*` / `F.*` 计算算子
+
+**允许**的操作：
+- `torch.ops.npu.<op_name>(x, ...)` 直接调用
+- 必要时 `x.contiguous()` 仅当输入确实非连续时（kernel 要求连续输入）
+
+**理想模式**（Wrapper 极简，kernel 原生处理所有维度/精度）：
 ```python
-import sys
-from pathlib import Path
+import torch
+import torch_npu
 
+def run(x, dim=-1):
+    return torch.ops.npu.swiglu(x, dim)
+```
+
+**兼容模式**（当 kernel 仅支持特定布局时使用，但必须在 PERF_DESIGN.md 中记录原因）：
+```python
 import torch
 import torch.nn as nn
 
-_KERNEL_BUILD = Path(__file__).resolve().parent / "kernel" / "build"
-_LIB_PATTERN = str(_KERNEL_BUILD / "<op_name>_ext*")
-
-try:
-    import <op_name>_ext  # noqa: F401 — whl path
-except ImportError:
-    # Fallback: direct .so loading
-    if _LIB_PATTERN not in "".join(sys.path):
-        import glob as _glob
-        _libs = _glob.glob(_LIB_PATTERN)
-        if _libs:
-            torch.ops.load_library(_libs[0])
-
 class ModelNew(nn.Module):
-    def forward(self, x, ...):
-        ...
-        return torch.ops.npu.<op_name>(x, ...)
+    def forward(self, x, dim=-1):
+        if not x.is_contiguous():
+            x = x.contiguous()
+        return torch.ops.npu.swiglu(x, dim)
+
+_model = None
+def run(x, dim=-1):
+    global _model
+    if _model is None:
+        _model = ModelNew()
+    return _model(x, dim)
 ```
 
-**禁止**在 model_new_ascendc.py 中使用 `torch.*` / `F.*` 计算算子。
+**⚠️ npu-kernelbench 兼容性**：当 solution.json 用于 npu-kernelbench 评测时：
+- 禁止 `torch.ops.load_library()`（被 anti-hack 检测拦截）
+- entry_point 应为模块级函数 `run()`，不是 class 方法
+- runner 会自动加载编译产物 `.so`，wrapper 无需自行加载
+
 然后调用 `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh {output_dir}` 编译并验证（内部 cmake + make + whl 安装）。
 
 ---

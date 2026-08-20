@@ -22,6 +22,30 @@ Step 1: 基线采集（性能 + 精度）
 - **性能验证**：必须使用 `msprof op`，禁止用 Python/Torch 计时
 - **Host 轻量化**：禁止 host 侧全量数据搬运（`F.pad`、`.contiguous()`、`.to(dtype)` 等），必须移入 kernel
 
+## 通用性能指标（搬运单元容量最大化门禁）
+
+### 核心原理
+
+NPU 上每一次 DMA 调用、每一次 tile 迭代都携带固定开销。性能 = 有用数据量 / (有用数据量 + 固定开销)。以下 5 项检查按因果链组织——前项是后项的使能条件，三维分解（outerSize, dimSize, innerSize）是 ①②③ 的共同使能条件：
+
+| # | 检查项 | 因果关系 | 度量方法 | 达标标准 | 违反后果 |
+|---|--------|---------|---------|---------|---------|
+| ① | 消除冗余搬运 | 多做一次全量拷贝 = 多一份 100% 固定开销 | forward() 中全量拷贝次数 | = 0 | dim≠-1 case 10~30x 劣化 |
+| ② | 单次 DMA 传满 | 逐行循环 N 次 = N 倍固定开销; 2D strided 1 次 | CopyIn 中是否有逐行循环 | 无循环 | 同上 |
+| ③ | 每个 tile 算满 | tile 截断 → 每步向量指令处理量小 → 固定开销占比高 | actual_tileSize / TILE_SIZE | ≥ 80% | 小末尾维 10~30x 劣化 |
+| ④ | 流水线不空转 | BUFFER_NUM=1 → 每次迭代一次空泡 | BUFFER_NUM ≥ 2 | 所有队列 ≥ 2 | 计算密集 20~30% 劣化 |
+| ⑤ | 多核不空闲 | 空闲核不做有效计算但仍承担初始化 | usedCoreNum / physicalCoreNum | ≥ 90% | 并行度不足 |
+
+**检查时机**：Step 3（识别优化点）和 Step 5（效果验证）中逐项检查，每次修复迭代后重新检查。
+
+**经验数据参考**（SwiGLU A/B 对比，验证因果链）：
+```
+             ①冗余搬运   ②DMA循环   ③tile   ④buffer   Avg Speedup
+未优化:       permute拷贝  逐行循环    3.1%     BUFFER=1    1.16x
+优化后:       零拷贝      2D strided  100%     BUFFER=2    1.72x
+```
+仅修复 ②③（multi-row + 2D DMA）即使 ① 仍有缺陷，Avg Speedup 从 1.16x → 1.72x。
+
 ## 参考文档
 
 - **优化指南**：[optimization-guide.md](references/optimization-guide.md)

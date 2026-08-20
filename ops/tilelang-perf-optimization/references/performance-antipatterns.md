@@ -2,6 +2,26 @@
 
 本文件用于生成、改写或评审 TileLang Ascend 算子时快速排查常见潜在性能劣化模式。遇到性能关注项时，优先按“替代写法”调整；如果必须临时保留，需要记录 shape、dtype、原因和后续优化计划。
 
+## 核心原理：搬运单元容量最大化
+
+NPU 上每一次 DMA 调用、每一次 tile 迭代、每一条向量指令都携带**固定开销**（DMA 建链、地址计算、同步信号、流水线起停）。性能取决于固定开销与有效数据量的比值：
+
+```
+有效性能 = 有用数据量 / (有用数据量 + 固定开销)
+```
+
+本清单中的所有反模式，本质都是**让固定开销在有效数据中占比过高**。按根因归类：
+
+| 根因类别 | 对应反模式 | 固定开销倍数 |
+|---------|-----------|-------------|
+| 搬运 0 次有效数据（纯冗余） | Wrapper 侧 permute+contiguous | ∞（100% 开销，0 有效增量） |
+| 搬运次数爆炸 | 逐行 DataCopyPad 循环 | N 倍（N=行数） |
+| 单次搬运量过小 | tile size 过小 | TILE_SIZE/actual_tile 倍 |
+| 流水线空转 | 单缓冲 BUFFER_NUM=1 | 每次迭代一次空泡 |
+| 布局限制导致被迫冗余搬运 | 强制 2D reshape | 100% 全量拷贝 |
+
+**三维分解（outerSize, dimSize, innerSize）** 是消除上述根因的共同使能条件：它提供 `rowSize`、`inputRowSize`、`stride` 参数，使 kernel 能直接在原始内存布局上操作任意维度，无需 wrapper 做布局变换。
+
 ## 目录
 
 - [使用方式](#使用方式)
@@ -14,6 +34,10 @@
 - [AIC/AIV 混合算子未开启 CV overlap](#aicaiv-混合算子未开启-cv-overlap)
 - [纯 AIV memory bound 算子未做流水/双 buffer](#纯-aiv-memory-bound-算子未做流水双-buffer)
 - [正交轴串行化（Scalar Scan on Parallelizable Axis）](#正交轴串行化scalar-scan-on-parallelizable-axis)
+- [Wrapper 侧数据搬运（permute/contiguous/reshape）](#wrapper-侧数据搬运permutecontiguousreshape)
+- [逐行 DataCopyPad 循环（替代：2D strided）](#逐行-datacopypad-循环替代2d-strided)
+- [单缓冲 BUFFER_NUM=1](#单缓冲-buffer_num1)
+- [强制 2D reshape（替代：三维分解）](#强制-2d-reshape替代三维分解)
 - [评审记录模板](#评审记录模板)
 
 ---
@@ -473,6 +497,131 @@ PASS_CONFIGS = {
     tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
     tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
     # 已通过生成代码确认误分核时，关闭不需要的 AUTO_CV_COMBINE
+
+## Wrapper 侧数据搬运（permute/contiguous/reshape）
+
+**识别特征**：`model_new_ascendc.py` 的 `forward()` 中存在 `x.permute(perm).contiguous()`、`x.reshape(M, N)` 等 PyTorch 张量变换操作，且这些操作导致全量数据拷贝。
+
+**性能原因**：`permute` + `contiguous()` 等于对整个输入张量做一次全量拷贝（GM→GM），开销与张量大小成正比。对于大张量（如 `[8192, 2048]`），这相当于 16~32MB 的额外数据搬移。参考实现（PyTorch）通过 `torch.chunk` 创建 view（零拷贝）后直接操作非连续视图，效率远高于 wrapper 的全量拷贝。
+
+**影响量级**：dim≠-1 的 case 加速比可从 1~2x 降至 0.13~0.18x（10 倍劣化）。
+
+**替代方向**：kernel 原生支持任意 dim 参数，通过三维分解 `[outerSize, dimSize, innerSize]` 在 GM 中直接通过 stride/offset 定位数据，无需 wrapper 做任何布局变换。
+
+```python
+# ❌ wrapper 强制 permute+contiguous
+def forward(self, x, dim=-1):
+    if dim != x.ndim - 1:
+        perm = list(range(x.ndim))
+        perm.pop(dim)
+        perm.append(dim)
+        x = x.permute(perm).contiguous()  # 全量拷贝！
+    return torch.ops.npu.swiglu(x.reshape(M, N), 1)
+
+# ✅ kernel 原生处理任意 dim
+def forward(self, x, dim=-1):
+    return torch.ops.npu.swiglu(x, dim)  # kernel 内部三维分解
+```
+
+**检查点**：
+- forward() 中是否有 `permute` / `contiguous` / `reshape` 组合？
+- 是否有 `x.to(dtype)` 全量精度转换（应移入 kernel Cast）？
+- wrapper_copy_bytes / kernel_compute_bytes 是否为 0？
+
+---
+
+## 逐行 DataCopyPad 循环（替代：2D strided）
+
+**识别特征**：`CopyIn()` 或 `CopyOut()` 中存在 for 循环，每次迭代调用一次 1D `DataCopyPad` 处理单行数据。
+
+```cpp
+// ❌ 逐行循环，32 次 DMA 建链
+for (int32_t r = 0; r < rows; ++r) {
+    DataCopyPad(aLocal[ubOff], inputGm_[inRowOff], rowCp, pp);
+}
+```
+
+**性能原因**：每次 `DataCopyPad` 调用有固定的 DMA 建链开销（地址计算、通道分配、同步信号）。当行数多（如 65536 行）但每行元素少（如 64 个）时，有效数据量很小但调用次数爆炸，固定开销 dominate。
+
+**替代方向**：使用 2D `DataCopyPad` 的 `blockCount > 1` + `srcStride` 模式，一次 DMA 传输多行跨行数据。
+
+```cpp
+// ✅ 2D strided，一次 DMA 加载 32 行
+DataCopyExtParams copyParams{
+    static_cast<uint16_t>(numRows),  // blockCount = 行数
+    rowSize * sizeof(T),              // blockLen = 每行字节数
+    rowSize * sizeof(T),             // srcStride = 行间隔（跳过 b 块）
+    0, 0                              // dstStride = 0 (UB 连续)
+};
+DataCopyPad(aLocal, xGm[aBaseOffset], copyParams, padParams);
+```
+
+**影响量级**：同一 shape/dtype/totalOutput，逐行循环 vs 2D strided 延迟差 20~30 倍。
+
+**检查点**：
+- CopyIn/CopyOut 中是否有 for 循环调用 DataCopyPad？
+- 能否用 blockCount > 1 替代循环？
+
+---
+
+## 单缓冲 BUFFER_NUM=1
+
+**识别特征**：`TQue` 声明使用 `BUFFER_NUM = 1`，CopyIn/Compute/CopyOut 完全串行执行。
+
+```cpp
+// ❌ 单缓冲，无流水重叠
+TQue<TPosition::VECIN, 1> aQueue;
+TQue<TPosition::VECOUT, 1> yQueue;
+```
+
+**性能原因**：`BUFFER_NUM=1` 时，tile N 的 CopyIn 必须等 tile N-1 的 CopyOut 完成后才能开始。三级流水（CopyIn→Compute→CopyOut）完全串行，无法利用 MTE2/MTE3 与 Vector 的并行能力。
+
+**替代方向**：使用 `BUFFER_NUM=2`（双缓冲），tile N 的 Compute 与 tile N+1 的 CopyIn 重叠。
+
+```cpp
+// ✅ 双缓冲，流水重叠
+TQue<TPosition::VECIN, 2> aQueue;
+TQue<TPosition::VECOUT, 2> yQueue;
+```
+
+**影响量级**：计算密集型 case（大 float32）提升约 20~30%；搬运密集型 case 提升较小。
+
+**检查点**：
+- 所有 VECIN/VECOUT 队列的 BUFFER_NUM 是否 ≥ 2？
+- UB 空间不足降为 1 时是否在 PERF_DESIGN.md 记录原因？
+- 循环中同时持有的 queue tensor 数量 + 1 是否 ≤ BUFFER_NUM？
+
+**注意**：`BUFFER_NUM` 过大不会线性提升性能（pipeline depth 受三级流水限制），通常 2 即可。
+
+---
+
+## 强制 2D reshape（替代：三维分解）
+
+**识别特征**：Host 侧（op_host）假设输入为 2D `[M, N]`，wrapper 必须将任意维张量 reshape 为 2D 后才能调用 kernel。
+
+```cpp
+// ❌ 仅支持 2D
+at::Tensor swiglu(const at::Tensor &x, int64_t dim) {
+    TORCH_CHECK(x.dim() == 2, "x must be 2D");
+    int32_t M = x.size(0);
+    int32_t N = x.size(1);
+    ...
+}
+```
+
+**性能原因**：强制 2D 意味着 wrapper 必须将 dim 参数移到末尾位置（permute+contiguous），然后 reshape 为 2D。这对 dim≠-1 的输入造成全量拷贝。即使 dim=-1，reshape 为 2D 也丢失了原始维度的语义信息，无法利用 stride 跨行访问。
+
+**替代方向**：Host 侧将任意 shape 分解为 `[outerSize, dimSize, innerSize]` 三维逻辑结构，kernel 通过 `rowSize = halfDim * innerSize` 和 `inputRowSize = dimSize * innerSize` 直接在 GM 中定位 a/b 数据。
+
+```cpp
+// ✅ 三维分解，支持任意 dim
+at::Tensor swiglu(const at::Tensor &x, int64_t dim) {
+    int32_t normDim = dim < 0 ? dim + x.dim() : dim;
+    int64_t outerSize = 1, innerSize = 1;
+    for (int32_t i = 0; i < normDim; ++i) outerSize *= x.size(i);
+    for (int32_t i = normDim + 1; i < x.dim(); ++i) innerSize *= x.size(i);
+    int64_t dimSize = x.size(normDim);
+    ...
 }
 ```
 
@@ -482,8 +631,10 @@ PASS_CONFIGS = {
 - kernel 内是否使用了 `T.alloc_var`？
 - 三者同时满足 → 检查生成代码中变量定义/使用的核归属；仅在确认误分核后关闭
   `AUTO_CV_COMBINE`
+- op_host 是否假设固定维度数（如 `x.dim() == 2`）？
+- 是否有 `TORCH_CHECK(x.dim() == ...)` 限制？
+- 能否用 `[outerSize, dimSize, innerSize]` 三维分解替代？
 
----
 
 ## 评审记录模板
 

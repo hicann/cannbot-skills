@@ -111,6 +111,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 
 ### 步骤 3：生成实现代码
 
+
 > **⚠️ 生成代码时必须遵守 [references/ascend-constraints.md](references/ascend-constraints.md) §2「Host 侧 Buffer 操作约束」**：算子的核心计算逻辑全部在 kernel 内实现。host 侧对 NPU 张量只能做「只改元数据」的视图操作（`reshape`/`view`/`transpose`/`permute`/`expand`）以及数据准备 / kernel 调用 / 结果验证；禁止改数据指针、禁止 `.contiguous()` 等真实重排、禁止改写 buffer 内容、禁止用新 buffer 作弊。拿不准时，一律放入 kernel。
 
 > **⚠️ dtype 特化检查（支持多 dtype 的算子必须执行）**：生成代码时必须检查每个支持的 dtype 是否走硬件加速路径。如果 dtype 回退标量路径，必须比较同宽 reinterpret、kernel 内 cast、record-aware DMA、块 DMA + UB-local 标量重排等候选。**禁止把大张量降级成逐元素 strided GM load/store，也不能把“逐行 T.copy”误当成可完成任意转置。** UB 内局部标量 lowering 可以作为经最大 case 验证的 fallback；不得在 host 侧用 `.to(dtype)` / `.contiguous()` / `torch.stack` 绕过。详见 [references/coding-conventions.md §7](references/coding-conventions.md#7-dtype-性能特化)。
@@ -132,6 +133,15 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 GM 标量访问、逐元素 div/mod、active cores、每核串行任务和最大 case timeout。任一
 指标无法估算时先读取 §6.1 补齐；大张量路径出现 numel 级 GM 标量访问或海量短 DMA
 时不得进入精度验收。
+
+> **⚠️ 算子编码准则（必须遵守）**
+>
+> 1. **UB 空间复用与扩满**：设计计算块时，尽可能实现 buffer 复用，减少临时 buffer 的申请；扩大 UB 使用量，实现尽可能用满所有可用 UB 空间。当多个计算步骤的 buffer 生命周期不重叠时，应复用同一 alloc 而非申请新 buffer。
+>
+> 2. **避免不必要的 Cast**：在不影响精度的条件下，不考虑额外的数据类型转换（即 Cast 操作）。若输入 dtype 下 API 支持直接计算，则不做升降精度往返；仅当精度不足时才允许 Cast 到更高精度。
+>
+> 3. **优先使用内置库算子或 API**：在保证精度及可运行的条件下，优先选择可调用的内置库算子或 API 接口，可为了满足 API 的使用条件而进行数据类型转换（本条优先于准则 2）。若内置 API 路径加速比 < 0.8x，则尝试自定义实现；若自定义更慢则回退到内置 API。若某路径导致精度丢失或运行错误，则不予考虑。
+
 
 基于 design.md 的 API 映射 + 参考示例的代码风格，生成**两个文件**：`{op}.py`（纯 kernel）与 `test_{op}.py`（golden + L0 + main，L1/L2/Boundary 留桩，从 `{op}.py` import kernel）。完整文件结构骨架与融合算子注意事项见 [examples/code-skeleton.md](examples/code-skeleton.md)。
 

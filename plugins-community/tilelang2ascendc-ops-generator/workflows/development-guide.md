@@ -95,3 +95,53 @@ generation → AST退化检测 → [通过] → 功能验证 → [通过] → �
 - 必须将核心计算融合成单个算子
 - 文件操作范围限制在 {output_dir}/ 内
 - 优先使用块级/向量化操作，避免标量逐元素写法
+
+## 评测环境清理最佳实践
+
+### 问题
+
+`npu-kernelbench` 的 `pre_build()` 使用 `mkdir(exist_ok=True)`，不清理旧工作目录。连续运行时残留三类有害物：
+
+| 残留物 | 路径 | 影响 |
+|--------|------|------|
+| Profile 数据累积 | `profile/<op>-<sol>/<pid>_<timestamp>_ascend_pt/` | 每次运行追加新子目录，profiler 可能读到旧数据，导致延迟测量错误（出现固定异常值） |
+| CMake 构建缓存 | `build/CMakeCache.txt`, `build/CMakeFiles/` | 可能跳过重新配置，复用旧编译参数 |
+| traces.jsonl 追加模式 | 默认追加 | 旧 trace 混入新结果 |
+
+### 方案：运行前清理（推荐）
+
+评测脚本（`evaluate_ascendc.sh` / `evaluate_tilelang.sh`）执行前，必须清理工作目录和旧 traces：
+
+```bash
+# 清理工作目录（CMake 缓存 + 旧 kernel.so + profile 数据）
+WORK_DIR="/tmp/npu-kernelbench/${OP_NAME}-${SOLUTION_NAME}"
+rm -rf "$WORK_DIR"
+
+# 清理旧 traces（避免追加模式混入旧结果）
+TRACE_FILE="/tmp/npu-kernelbench/traces.jsonl"
+rm -f "$TRACE_FILE"
+```
+
+也可封装为一键脚本：
+
+```bash
+#!/bin/bash
+set -euo pipefail
+# 1. 清理工作目录
+rm -rf /tmp/npu-kernelbench/${OP_NAME}-${SOLUTION_NAME}
+# 2. 清理旧 traces
+rm -f /tmp/npu-kernelbench/traces.jsonl
+# 3. source CANN 环境 + 运行评测
+source <CANN_PATH>/set_env.sh
+cd <BENCH_DIR>
+uv run npu-kernelbench eval \
+    --definition "$DEF" --workload "$WL" --solution "$SOL" \
+    -o /tmp/npu-kernelbench/traces.jsonl
+```
+
+### 验证清理效果
+
+清理后运行评测，确认：
+- `traces.jsonl` 的行数 = workload 的 case 数（无多余旧记录）
+- profile 目录下只有本次运行的子目录
+- 延迟数据无固定异常值（如多次运行同一 case 延迟完全相同且不合理）
