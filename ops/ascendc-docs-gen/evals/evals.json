@@ -5,7 +5,7 @@
       "id": 1,
       "title": "为 Add 算子生成需求分析文档",
       "config": {
-        "max_tokens": 150000,
+        "max_tokens": 160000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 180000,
           "glm-5": 200000
@@ -43,7 +43,7 @@
       "id": 3,
       "title": "为 Add 算子生成迭代执行计划",
       "config": {
-        "max_tokens": 120000,
+        "max_tokens": 160000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 150000,
           "glm-5": 135000
@@ -100,7 +100,7 @@
       "id": 6,
       "title": "信息不足时主动追问",
       "config": {
-        "max_tokens": 80000,
+        "max_tokens": 160000,
         "ascend_platforms": [
           "A2"
         ],
@@ -112,10 +112,10 @@
       "expectations": []
     },
     {
-      "id": 8,
+      "id": 7,
       "title": "文档类型体系和命名规范知识验证",
       "config": {
-        "max_tokens": 80000,
+        "max_tokens": 160000,
         "ascend_platforms": [
           "A2"
         ],
@@ -125,6 +125,66 @@
       "expected_output": "回复应完整列出 5 种文档类型及其命名规范：\n\n- 需求分析文档：REQUIREMENTS.md\n- 详细设计文档：DESIGN.md\n- 迭代执行计划：PLAN.md\n- aclnnAPI 接口文档：aclnn{OperatorName}.md（如 aclnnAdd.md）\n- 算子 README：README.md\n\n应说明文档间的依赖关系：需求分析确认后产出详细设计，详细设计产出迭代计划；aclnnAPI 文档的数据来源于需求文档的算子规格、API 定义和约束部分；算子 README 的数据来源于需求文档、设计文档和代码。应提及文档存放位置（docs/ 目录或算子根目录）。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "需求变更后的文档更新与版本管理",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我之前已经为 Add 算子输出了一版需求分析文档 REQUIREMENTS.md（v1.0，已和设计评审确认过）。现在需求变更了：输入数据类型要从只支持 fp16 扩展到同时支持 fp16 和 fp32，对应的详细设计文档也需要跟着改。请告诉我更新这些文档时在版本管理上应该注意什么。",
+      "expected_output": "回复应覆盖版本管理规范要点：算子文档需包含修订记录（修订记录表格含版本、修订内容、修订时间、修订人）；需求变更后应新增一条修订记录并递增版本号（如 v1.0 → v1.1）；修订内容需明确记录\"输入数据类型扩展支持 fp16、fp32\"；版本变更需记录修改人和修改内容；同时应评估下游文档（详细设计 DESIGN.md、迭代计划 PLAN.md）是否需要同步更新。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "设计锁定后的变更处理流程",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我们的 Softmax 算子需求分析文档已经评审确认并锁定，详细设计也已经基于它完成。现在需求方提出要新增一个 axis 参数来控制按哪个维度做 softmax，这会改动需求规格和详细设计。这种情况应该怎么处理？",
+      "expected_output": "回复应覆盖设计锁定与变更管理机制：需求分析文档确认后即锁定、详细设计文档确认后即锁定；变更需经过确认后才能更新文档；应先更新需求分析文档（含算子规格、API 定义、约束部分），重新确认后再同步更新详细设计文档；涉及 aclnnAPI 接口文档时，其数据来源（需求文档的算子规格、API 定义、约束部分）也需同步更新；变更过程需记录修订记录。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "aclnnAPI 接口文档的数据来源与关键章节",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要为 LayerNorm 算子编写 aclnnAPI 接口文档（aclnnLayerNorm.md），但接口定义、参数约束这些内容我不确定该从哪里获取。帮我梳理一下写这份文档需要哪些输入资料，以及文档本身要包含哪些关键内容。",
+      "expected_output": "回复应覆盖 aclnnAPI 接口文档的写作要点：文档数据来源是需求分析文档的算子规格、API 定义和约束部分；文档输出位置为 operators/layernorm/docs/aclnnLayerNorm.md；接口采用两段式声明（先调用 aclnnLayerNormGetWorkspaceSize 获取 workspace 大小与执行器，再调用 aclnnLayerNorm 执行计算）；文档应包含产品支持情况表（按固定产品顺序用 √/× 标注）、函数原型、参数说明表（8 字段：参数名/输入输出/描述/使用说明/数据类型/数据格式/维度shape/非连续Tensor）、约束说明（含确定性说明三选一）、调用示例。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "算子 README 的数据来源与结构",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我负责的 Exp 算子已经完成开发并合入开源仓，现在要为它编写算子 README 文档。请问写 README 需要参考哪些已有资料，README 里要包含哪些核心章节？",
+      "expected_output": "回复应覆盖算子 README 的写作要点：README 的数据来源是需求分析文档、详细设计文档和代码；输出位置为 operators/exp/README.md（算子根目录）；应包含产品支持情况表（按固定产品顺序用 √/× 标注）、功能说明（含计算公式）、参数说明表（5 列：参数名/输入输出属性/描述/数据类型/数据格式）、约束说明（无特殊约束时写\"无\"）、调用说明（表格列出 aclnn 调用和图模式调用，链接到 examples 目录样例代码），可包含参考资源链接到算子设计文档。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-docs-gen"
