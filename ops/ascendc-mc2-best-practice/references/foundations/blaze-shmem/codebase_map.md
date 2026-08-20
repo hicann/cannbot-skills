@@ -1,6 +1,6 @@
 # 参考工程（all_to_all_matmul/）改造食谱
 
-本文档是 Agent 在 Step 3（开发）阶段的实操指南：从基底工程 `references/all_to_all_matmul/` 复制起手，按 `[REUSE]` / `[MODIFY]` 标记定点改造。
+本文档是 Agent 在开发阶段的实操指南：从基底工程 `references/foundations/blaze-shmem/all_to_all_matmul/` 复制起手，按 `[REUSE]` / `[MODIFY]` 标记定点改造。
 
 读完本文档应能回答：
 - 哪些文件不能动？
@@ -12,7 +12,7 @@
 ## 1. 工程总览
 
 ```
-references/all_to_all_matmul/
+references/foundations/blaze-shmem/all_to_all_matmul/
 ├── CMakeLists.txt              # [REUSE]   构建脚本，含 NPU_ARCH 校验、SHMEM/Blaze 链接
 ├── run.sh                      # [REUSE]   一键脚本：cmake + gen_data + 跑算子 + verify
 ├── cmake/
@@ -66,7 +66,7 @@ references/all_to_all_matmul/
 | **加 bias** | 不动 | `qbmm_mx_kernel.h`（bias 地址）、`all_to_all_matmul_impl.h`（params） | 加 bias 字段 | 改 gen_data | 改 bias 参数 |
 | **换卡数**（4 → 8） | 不动 | 不动 | 不动 | 改 gen_data | 第 4 参改 8 |
 | **改流水深度**（bufferSize 4 → 8） | 不动 | 不动 | `all_to_all_matmul_tiling_data.h`（字段值） | 不动 | 改 `bufferSize` 字段 + SHMEM 空间 |
-| **调通算并行**（tileCnt 1→N） | 不动 | 不动 | 不动 | 不动 | 改 `headMSize` 计算（详见 [`pipeline_tuning.md`](pipeline_tuning.md)） |
+| **调通算并行**（tileCnt 1→N） | 不动 | 不动 | 不动 | 不动 | 改 `headMSize` 计算（详见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)） |
 
 ---
 
@@ -281,12 +281,12 @@ RANK="${4:-8}"
 
 ---
 
-## 6. 改造清单（Step 3 Developer 的工作流）
+## 6. 改造清单（Developer 工作流）
 
-Developer 在 Step 3 应按以下顺序工作：
+Developer 应按以下顺序工作：
 
 ```
-1. cp -r references/all_to_all_matmul operators/{op_name}
+1. cp -r references/foundations/blaze-shmem/all_to_all_matmul operators/{op_name}
 
 2. 改名（src/all_to_all_matmul.cpp → src/{op_name}.cpp）
    全局替换 all_to_all_matmul → {op_name}
@@ -307,7 +307,7 @@ Developer 在 Step 3 应按以下顺序工作：
 6. 全量精度测试：
    bash run.sh  # 默认 shape
 
-7. 把改动写入 PLAN.md 的"实际改动清单"，供 Reviewer Step 4 核对
+7. 把改动写入 PLAN.md 的"实际改动清单"，供代码审查核对
 ```
 
 **禁止**：
@@ -317,17 +317,17 @@ Developer 在 Step 3 应按以下顺序工作：
 
 ---
 
-## 7. Reviewer 改动审查清单
+## 7. 代码审查清单
 
-Step 4 时 Reviewer 应检查：
+代码审查时应检查：
 
-| 检查项 | 方法 |
-|--------|------|
-| 改动文件清单与 DESIGN.md 一致 | `diff -r references/all_to_all_matmul operators/{op} --brief` |
-| `[REUSE]` 文件未被修改 | 同上 diff，`[REUSE]` 文件不应出现在 diff 中 |
-| CMakeLists 目标名与文件名一致 | `grep "add_executable" operators/{op}/CMakeLists.txt` |
-| run.sh 默认参数合理 | 检查 M/K/N/RANK 默认值 |
-| kernel 入口函数名与 host 调用一致 | `grep "__global__" operators/{op}/include/kernel/*.h` |
+| 检查项 | 验收条件 |
+|--------|---------|
+| 改动文件清单与 DESIGN.md 一致 | 与基底工程对比，改动文件清单与设计文档一致 |
+| `[REUSE]` 文件未被修改 | `[REUSE]` 文件不出现在 diff 中 |
+| CMakeLists 目标名与文件名一致 | `add_executable` 目标名与算子名匹配 |
+| run.sh 默认参数合理 | M/K/N/RANK 默认值正确 |
+| kernel 入口函数名与 host 调用一致 | `__global__` 入口函数名与 main.cpp 中的 LaunchKernel 调用一致 |
 
 ---
 

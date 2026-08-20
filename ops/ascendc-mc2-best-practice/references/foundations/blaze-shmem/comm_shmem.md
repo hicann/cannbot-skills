@@ -18,7 +18,7 @@
 > | `ACLSHMEM_DATA_OP_UDMA` / `ACLSHMEM_DATA_OP_MTE` | `host_device/shmem_common_types.h:81-86` |
 > | `L2_CACHELINE_SIZE = 512` | `host_device/shmem_common_types.h:166-168` |
 >
-> 平台限制：UDMA 引擎仅在 `__NPU_ARCH__ == 3510`（Ascend 950/A5）上启用（`src/device/gm2gm/engine/shmem_device_udma.hpp:21-24`），与 SKILL.md §1 的架构约束一致。
+> 平台限制：UDMA 引擎仅在 `__NPU_ARCH__ == 3510`（Ascend 950/A5）上启用（`src/device/gm2gm/engine/shmem_device_udma.hpp:21-24`），与 [`../capability-declaration.md`](../../capability-declaration.md) 中 dav-3510 × UDMA 的已验证路径一致。
 
 ---
 
@@ -215,12 +215,7 @@ AllGather = 每卡 Put 自己段给所有其他卡，但不 reduce。本质就�
 
 ## 5. 禁止 HCCL API 速查
 
-以下 API 出现在 `operators/{op}/` 任意文件即视为违反约束 1，Step 4 直接 FAIL：
-
-```bash
-# Reviewer 标准检查命令
-grep -rn "Hccl::" operators/{op}/
-```
+以下 API 出现在 `operators/{op}/` 任意文件即视为违反约束 1，代码审查直接 FAIL：
 
 完整禁止清单（7 类 18 个 API）：
 

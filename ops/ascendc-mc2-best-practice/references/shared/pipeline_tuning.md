@@ -27,6 +27,12 @@ tilingData.commTilingData.tileCnt = tileCnt;
 - AIC 在通信 buffer 上逐块做 Blaze Matmul；
 - 通过 `CrossCoreSetFlag<0x2, PIPE_MTE3>(i)` / `CrossCoreWaitFlag<0x2, PIPE_MTE2>(i)` 让 AIV 的 Put(i+1) 与 AIC 的 MMAD(i) 并行——这就是通算并行。
 
+> **路线差异**：上述 `PIPE_MTE2` 编排适用于 blaze-shmem 路线和 apace PUT 模式。
+> apace GET 模式使用不同的 PIPE 配对：
+> - GET 模式 AIV WaitFlag：`PIPE_S`（而非 `PIPE_MTE2`）
+> - GET 模式 AIC SetFlag：`PIPE_FIX`（而非 `PIPE_MTE3`）
+> 详见 [`../foundations/apace/fusion.md`](../foundations/apace/fusion.md) §3（GET/PUT flag 编排模式）与 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`（API 签名与平台生效性）。
+
 ---
 
 ## 2. tileCnt 与通算并行度

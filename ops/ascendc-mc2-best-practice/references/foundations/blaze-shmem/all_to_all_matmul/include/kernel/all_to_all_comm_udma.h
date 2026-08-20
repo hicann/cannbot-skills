@@ -13,7 +13,7 @@
 // ----------------------------------------------------------------------------
 // 该头文件实现"所有 rank 互发 M 段数据"的 AllToAll 语义，承载通算融合中
 // "通"的部分。所有跨卡通信走 SHMEM/UDMA，**禁止使用 HCCL 高阶 API**
-// （Hccl::AllReduce / Hccl::AllGather / ... 见 SKILL.md 约束 1）。
+// （Hccl::AllReduce / Hccl::AllGather / ... 禁止清单见 references/foundations/blaze-shmem/comm_shmem.md §5）。
 //
 // 改造场景：
 //   [MODIFY] N1  改通信原语（AllToAll → AllReduce/ReduceScatter/AllGather）：

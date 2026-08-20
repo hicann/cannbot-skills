@@ -1,0 +1,660 @@
+# apace 算子解剖（kernel 侧）
+
+> 本文档从官网两个已实现算子（all_to_all_quant_matmul PUT / all_gather_quant_matmul PUT）提取共性模式，覆盖完整 kernel 侧骨架：文件构成、tiling_data、Impl 类、入口函数。
+
+## 目录
+
+1. [已实现算子共性模式](#1-已实现算子共性模式)
+2. [算子文件骨架](#2-算子文件骨架)
+3. [Tiling 结构与 Host 填充](#3-tiling-结构与-host-填充)
+4. [Impl 类契约](#4-impl-类契约)
+5. [入口函数规则](#5-入口函数规则)
+6. [AllGather 变体与 CCU 变体](#6-allgather-变体与-ccu-变体)
+
+---
+
+## 1. 已实现算子共性模式
+
+以下共性逐条对照官网两个 impl 文件核实（`kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h`、`kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_impl.h`）。
+
+### 成员持有（两算子一致）
+
+| 成员 | A2A PUT | AG PUT |
+|:---|:---|:---|
+| 计算 kernel | `quantMatmulKernelImpl_`（`QuantMatmulMxKernel<..., UdmaCommWaitPolicy>`） | `quantMatmulKernelImpl_`（`QmmMxKernelAgUdma<...>`） |
+| data 通信对象 | `allToAllA_`（`CollectiveComm<AllToAll, PUT, AType, TeamBarrier>`） | `allGatherData_`（`CollectiveComm<AllGather, PUT, AType, TeamBarrier>`） |
+| scale 通信对象 | `allToAllScaleA_`（`CollectiveComm<AllToAll, PUT, fp8_e8m0_t, TeamBarrier>`） | `allGatherScale_`（`CollectiveComm<AllGather, PUT, fp8_e8m0_t, TeamBarrier>`） |
+| 跨卡同步 | `teamBarrier_`（`TeamBarrier`） | `teamBarrier_`（`TeamBarrier`） |
+| 通信上下文 | `udmaCtx_` + `syncBuffer_`（= `&hcommCtx->udmaCtx / ubmemCtx`） | `udmaCtx_` + `ubmemCtx_`（另持有 `hcommCtx_` 原指针） |
+| GM 基址 | `baseParams_.aGm / scaleAGm / bGm / scaleBGm / cGm` | `aGM_ / aScaleGM_ / bGM_ / bScaleGM_ / cGM_` |
+| tiling | `const allToAllMatmulTilingData* tilingData_` | `const AllGatherMxMatmulUdmaTilingData* tilingData_` |
+
+### Init 序列（两算子同构）
+
+```
+保存 GM 地址与 tilingData 指针
+  → 提取 udmaCtx_ / ubmemCtx_（rankId / rankSize 取自 udmaCtx_）
+  → InitBaseParams() 推导（commTurn、headMSize/tileM、rankDataBytes/dataRegionBytes 等）
+  → UB 静态分配（局部 ubOffset 线性累加：commBuf 512B + commScaleBuf 512B + barrierBuf 32B）
+  → teamBarrier_.Init(barrierBuf, ubmemCtx, rankSize, GetBlockIdx())
+  → data 通信 Init<BARRIER_NONE>（winOffset 缺省 = 0，Win 区起始段）
+  → scale 通信 Init（winOffset = data 段字节数：A2A 为 rankSize × rankDataBytes，AG 为 dataRegionBytes_）
+```
+
+> AG 在 Init 末尾额外有一次 `SyncAll<true>()`；AG 的 `commTilingData_ / commTilingScale_` 是成员变量、在 Init 内由 `tilingData->commTile` 重推导后传给通信对象，A2A 则直接把 tiling 字段传给通信对象 Init。
+
+### Run 编排（两算子同构）
+
+编译期 `ASCEND_IS_AIV` / `ASCEND_IS_AIC` 分支：**AIV 通信先行**（scale 先 Commit、data 后 Commit、同 channel 只 Wait 一次、`SyncAll<true>()`、`CrossCoreSetFlag<0x2, PIPE_MTE3>` 通知 AIC），**AIC 计算等待**（经 `WaitTile` / `CrossCoreWaitFlag<0x2, PIPE_MTE2>` 消费通信 tile，waitedMask 按位去重 + 尾部兜底）。
+
+### 差异点表
+
+| 维度 | A2A PUT | AG PUT |
+|:---|:---|:---|
+| 通信原语 | AllToAll | AllGather |
+| 切分轴 | K（每 rank 持 Ka = K/rankNum，通信沿 M 推送） | M（`tileM = min(m, 512)`，不切 K） |
+| AIC 编排 | `Run()`：`localMatmul` 0/1/2 分支（`RunLocalMatmul` + `RunMatmul`） | `Process()`：`FragmentTensor` HEAD/MAIN/TAIL 虚拟重排 + dependId 预触发 |
+| `__global__` 入口 | 4 个 dtype 变体（`tests/st/all_to_all_quant_matmul/src/kernel_launcher.h`） | 1 个（impl 头文件末尾 `AllGatherQuantMatmulKernel`） |
+| Impl 模板参数 | 5 个：`<AType, BType, CType, TransA, TransB>` | 3 个：`<AType, BType, CType>`（无转置参数） |
+| scale Init barrier | 缺省 BarrierMode | 显式 `Init<BARRIER_DEVICE>` |
+| 命名空间 | `Apace`（CommContext 在全局命名空间） | `AllGatherQuantMatmulImpl`（CommContext 在 `Apace::AivComm` 命名空间） |
+
+---
+
+## 2. 算子文件骨架
+
+一个 apace 算子的 kernel 侧由四类文件构成（以官网两个算子为实例）：
+
+| 文件 | 职责 | 官网实例 |
+|:---|:---|:---|
+| `<op>_tiling_data.h` | 算子级 tiling 结构 + `CommContext` 聚合体定义 | `kernel/all_to_all_quant_matmul/all_to_all_matmul_tiling_data.h`、`kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_tiling_data.h` |
+| qbmm kernel 头文件 | Blaze matmul 调度（CommPolicy 注入）、tile 依赖解析 | `kernel/all_to_all_quant_matmul/quant_matmul_mx_kernel.h`、`kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h` |
+| `<op>_impl.h` | Impl 主类（Init + Run/Process） | `all_to_all_mx_quant_matmul_udma_impl.h`、`all_gather_mx_matmul_udma_impl.h` |
+| `__global__` 入口 | 实例化 + Init + Run/Process | A2A：ST 的 `kernel_launcher.h`；AG：impl 头文件末尾（见 §5） |
+
+### 依赖层次
+
+```
+外部库 (adv_api/hcomm, blaze, kernel_tiling)
+    ↑
+共享层 (block/aiv_comm/*, tiling/*)
+    ↑
+算子层 (quant_matmul_mx_kernel.h, all_to_all_matmul_tiling_data.h)
+    ↑
+Impl (all_to_all_mx_quant_matmul_udma_impl.h)
+```
+
+| 层次 | 关键头文件 | 提供能力 |
+|:---|:---|:---|
+| 外部库 | `adv_api/hcomm/hcomm.h`, `blaze/gemm/block/block_mmad_qbmm_mx.h`, `kernel_tiling/kernel_tiling.h` | Hcomm 底层通信、Blaze matmul、kernel 基础设施 |
+| 共享层 | `block/aiv_comm/collective_comm_api.h`, `block/aiv_comm/collective_comm_context.h`, `tiling/comm_tiling_data.h`, `block/aiv_comm/barrier/barrier_ubmem.h` | CollectiveComm、CommContext、CommTilingData、TeamBarrier |
+| 算子层 | `kernel/all_to_all_quant_matmul/quant_matmul_mx_kernel.h`, `kernel/all_to_all_quant_matmul/all_to_all_matmul_tiling_data.h` | Blaze matmul 调度（CommPolicy 注入）、本算子 tiling 结构 |
+
+---
+
+## 3. Tiling 结构与 Host 填充
+
+### 3.1 三层 tiling 组合
+
+apace tiling 数据结构采用三层组合：
+
+```
+Layer 1: CommTilingData (apace/tiling/comm_tiling_data.h)               ← 通信切分参数（5 字段）
+Layer 2: QuantMatmulTilingData (apace/tiling/quant_matmul_tiling_data.h) ← 计算切分参数（17 字段）
+Layer 3: 算子级 tiling_data (apace/kernel/<op>/<op>_tiling_data.h)        ← kernel 专属组合
+```
+
+组合关系图（官网两个算子）：
+
+```
+allToAllMatmulTilingData                 AllGatherMxMatmulUdmaTilingData
+(apace/kernel/all_to_all_quant_matmul/   (apace/kernel/all_gather_quant_matmul/
+  all_to_all_matmul_tiling_data.h)         all_gather_mx_matmul_udma_tiling_data.h)
+├── CommTilingData commTilingData        ├── QuantMatmulTilingData mmTile   ← Layer 2
+├── CommTilingData scaleCommTilingData   └── CommTilingData commTile        ← Layer 1
+├── QuantMatmulTilingData tileQbmmTilingData
+└── uint32_t localMatmul
+```
+
+> 官网 tiling/ 目录仅有 `comm_tiling_data.h`、`quant_matmul_tiling_{base,common,data,swat}.h`；**无 `comm_tiling_base.h`**（headMSize 推导逻辑内联在 ST main.cpp 中，见 §3.7）。
+
+### 3.2 CommTilingData（通信切分）
+
+`CommTilingData` 是 apace 统一的通信切分参数，同时被 host 端切分算法和 kernel 端通信实现使用。定义在 `apace/tiling/comm_tiling_data.h`。
+
+字段语义与不变量：
+
+| 字段 | 含义 | 单位 | 不变量 |
+|:---|:---|:---|:---|
+| `splitAxisTileSize` | 头块大小 | 元素个数 | 头块切分轴长度 |
+| `splitAxisTileCnt` | 头块数量 | 个 | ≥ 1 |
+| `splitAxisTailSize` | 尾块大小 | 元素个数 | 无尾块时 = 0 |
+| `splitAxisTailCnt` | 尾块数量 | 个 | 无尾块时 = 0 |
+| `nonSplitAxisSize` | 非切分轴大小 | 元素个数 | 所有内轴乘积 |
+
+**切分不变量**：`切分轴总元素数 = splitAxisTileSize × splitAxisTileCnt + splitAxisTailSize × splitAxisTailCnt`；每个 tile 字节大小 = `splitAxisTileSize × nonSplitAxisSize × sizeof(dtype)`。
+
+PUT 算子中的映射（all_to_all_quant_matmul）：A 按 K 轴切分（每 rank 持有 Ka = K/rankNum），通信沿 M 轴逐 tile 推送 A 与 ScaleA。host 侧填充见 `apace/tests/st/all_to_all_quant_matmul/src/main.cpp` `runAllToAllMatmul`：
+
+| 字段 | PUT data 通道 | PUT scale 通道 |
+|:---|:---|:---|
+| `splitAxisTileSize` | headMSize（= `CeilDiv(usedCoreNum, nTile) * baseM`） | 同 data |
+| `splitAxisTileCnt` | headTileCnt = m / headMSize | 同 data |
+| `splitAxisTailSize` | tailMSize = m % headMSize | 同 data |
+| `splitAxisTailCnt` | tailMSize > 0 ? 1 : 0 | 同 data |
+| `nonSplitAxisSize` | `ka`（per-rank K） | `ka / 32`（MXFP 压缩比） |
+
+> scale 通道直接复制 data 通道后改 `nonSplitAxisSize = ka / 32`。
+
+AG 算子中的映射（all_gather_quant_matmul）：host 侧填充见 `apace/tests/st/all_gather_quant_matmul/src/main.cpp` `RunAllGatherQuantMatmul`：切分轴 = M 轴（`tileM = min(m, 512)`，基准 `TILE_M=512`，`m < tileM` 时收缩为 `m`），`nonSplitAxisSize = k`（全量 K，AllGather 不切 K）。
+
+> ⚠️ AG host 侧**不填充** scale 通道的通信 tiling——AG tiling 结构只有 `mmTile` + `commTile`，scale 通道的 `nonSplitAxisSize = scaleKLen` 由 kernel 侧 `Init` 重新推导（见 `all_gather_mx_matmul_udma_impl.h`），并非遗漏。
+
+kernel 端消费：kernel 从 `CommTilingData` 推导通信轮次与 tile 依赖（`apace/kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h` `InitBaseParams`）：
+
+| 派生量 | 推导公式 |
+|:---|:---|
+| `commTurn`（总流水步数） | = `splitAxisTileCnt + splitAxisTailCnt` |
+| `headMSize` | = `splitAxisTileSize` |
+| `axisM` / `axisKa` | = `tileQbmmTilingData.m` / `.k` |
+
+### 3.3 QuantMatmulTilingData（计算切分）
+
+`QuantMatmulTilingData` 是量化 matmul 的 tiling POD 结构（`apace/tiling/quant_matmul_tiling_data.h`）。
+
+字段分类：
+
+| 类别 | 字段 | 用途 |
+|:---|:---|:---|
+| **问题形状** | m, n, k | 传给 Blaze ProblemShape |
+| **Base tile** | baseM, baseN, baseK | Blaze tile 形状，由 SWAT tiling 推导 |
+| **Scale** | scaleKL1 | L1 中 scale 的 K 长度 |
+| **尾块** | mTailTile, nTailTile, mBaseTailSplitCnt, nBaseTailSplitCnt, mTailMain, nTailMain | 尾块调度参数 |
+| **资源** | usedCoreNum, stepK, nBufferNum, dbL0c | 核数、K 步进、L1 buffer、L0C 双缓冲 |
+
+`#pragma pack(push, 8)` 与 `alignas(8)`：
+
+```cpp
+#pragma pack(push, 8)
+struct alignas(8) QuantMatmulTilingData { /* 字段见上表 */ };
+#pragma pack(pop)
+```
+
+**不变量**：字段顺序是 host-device 契约的一部分（源文件注释明示 "field order is part of the host-device contract"），layout 稳定性比重排便利性更重要。8 字节对齐确保 host/device 结构体布局一致。修改字段顺序或增删字段视为 ABI break。
+
+### 3.4 算子级 tiling 结构
+
+PUT：allToAllMatmulTilingData，定义在 `apace/kernel/all_to_all_quant_matmul/all_to_all_matmul_tiling_data.h`：
+
+| 字段 | 类型 | 用途 |
+|:---|:---|:---|
+| `commTilingData` | `CommTilingData` | data 通道通信切分 |
+| `scaleCommTilingData` | `CommTilingData` | scale 通道通信切分（`nonSplitAxisSize = ka / 32`） |
+| `tileQbmmTilingData` | `QuantMatmulTilingData` | 计算 tiling（头尾块共用一份，尾块由 Blaze 尾块调度字段处理） |
+| `localMatmul` | `uint32_t` | 0：不使能 local 先行；1：使能 AtomicAdd（2 = DEFERRED_SYNC，见 [`fusion.md`](fusion.md)） |
+
+同文件另有 CCU 变体 `ccuAllToAllMatmulTilingData`（`mc2InitTiling` + `mc2CcTiling` + `commTilingData` + `tileQbmmTilingData` + `localMatmul`），走 CCU 通信，非 UDMA 直调路径。
+
+AG：AllGatherMxMatmulUdmaTilingData，定义在 `apace/kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_tiling_data.h`：
+
+| 字段 | 类型 | 用途 |
+|:---|:---|:---|
+| `mmTile` | `QuantMatmulTilingData` | 计算 tiling（对 `rankNum × 单卡逻辑 M` 的总形状推导） |
+| `commTile` | `CommTilingData` | 通信切分（`tileM = min(m, 512)`，见 §3.2） |
+
+整体带 `#pragma pack(push, 8)` + `alignas(8)`。
+
+> ⚠️ 官网无 GET 样例（`quant_matmul_all_to_all`）与 ReduceScatter 样例；GET 的三 tiling（tile/tail/local）+ bufferSize 环形缓冲结构未上库，本文不展开。
+
+### 3.5 Win 区地址布局
+
+PUT 模式下 Win 区按 rank-major 布局存放通信到的 A/scaleA 数据：
+
+```
+本 rank Win 区 (selfWinAddr = udmaCtx_->commBufferAddrs[rankId])
+┌──────────────────────────────────────────────┐
+│  data 段：rankSize × rankDataBytes            │  ← winOffset = 0
+│  （rank0 A 块 │ rank1 A 块 │ ... ）           │
+├──────────────────────────────────────────────┤
+│  scale 段：rankSize × scaleKaSize × axisM     │  ← winOffset = rankSize × rankDataBytes
+└──────────────────────────────────────────────┘
+```
+
+| 角色 | 地址 | 锚点 |
+|:---|:---|:---|
+| AIC 读远端 A | `selfWinAddr`（`mmadParams.aGmAddr`） | `RunMatmul` |
+| AIC 读远端 scaleA | `selfWinAddr + rankSize × rankDataBytes`（`mmadParams.scaleAGmAddr`） | `RunMatmul` |
+| AIC 读本地 A | `baseParams_.aGm`（`localParams.localAGmAddr`，本地 GM 直读） | `RunMatmul` / kernel `gmALocal` |
+
+### 3.6 CommContext 通信上下文
+
+`CommContext` 由 `CommUdmaContext`（UDMA 通信通道）和 `CommUbmemContext`（Barrier 通道）组成。`CommUdmaContext`/`CommUbmemContext` 与常量 `COMM_MAX_RANK_NUM=64`、`COMM_WORKSPACE_SIZE=512` 定义在 `apace/block/aiv_comm/collective_comm_context.h`；`CommContext` 聚合体由各算子 tiling_data.h 定义（PUT 在全局命名空间，AG 在 `Apace::AivComm` 命名空间）。
+
+**结构概要**：`CommUdmaContext` 含 `rankId`/`rankSize`/每 rank 的 `channelHandles[]` 和 `commBufferAddrs[]`；`CommUbmemContext` 含 `rankId`/`rankSize`/每 rank 的 `commBufferAddrs[]`（barrier 缓冲区 GM 地址）。
+
+> 完整字段表与不变量详见 [`communication.md`](communication.md) §9 通信上下文 CommContext。
+
+Host 侧构造：Host 侧通过 HCCL channel 创建工具（`apace/utils/comm_channel_builder.h` `CommChannelBuilder::CreateDeviceContext`）构造 `CommContext`，写入 GM 后传给 kernel：
+
+1. 创建 HCCL channel（URMA 数据通道 / UBMEM barrier 通道）
+2. 获取每 rank 的 channelHandle 和 commBufferAddr
+3. 填充 `CommUdmaContext` 和 `CommUbmemContext`
+4. `HcclEngineCtxCopy` 写入 GM，将 GM 指针作为 kernel 第一参数
+
+> 详细步骤见 [`communication.md`](communication.md) §12 Host 侧 HCCL channel 创建。
+
+按值传递规则验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | tiling 传递方式 | 算子级 tiling_data 在 `__global__` 入口**按值传递**（见 `apace/tests/st/all_to_all_quant_matmul/src/kernel_launcher.h` 4 个入口） |
+| 2 | CommContext 传递方式 | `CommContext` 通过 `__gm__` 指针传递（kernel 第一参数） |
+| 3 | CommContext 不按值传递的原因 | 含 rankSize 级数组，体积大且由 Host 动态构造 |
+| 4 | Impl 解析 | `Init()` 从 `hcommCtx` 解析 `udmaCtx_`/`ubmemCtx_`/`rankId_`/`rankSize_`（PUT 见 `all_to_all_mx_quant_matmul_udma_impl.h` `Init`，AG 见 `all_gather_mx_matmul_udma_impl.h` `Init`）；tilingData 在 Impl 内以 `const *` 持有 |
+
+### 3.7 Host 侧 tiling 推导
+
+SWAT tiling 算法：
+
+| 文件 | 作用 |
+|:---|:---|
+| `apace/tiling/quant_matmul_tiling_common.h` | `QuantMatmulPlatformInfo`（硬件信息）、`QuantMatmulArgs`（问题形状）、`QuantMatmulRunInfo`（中间状态） |
+| `apace/tiling/quant_matmul_tiling_base.h` | `QuantMatmulTilingBase` 基类：驱动 `InitCompileInfo → InitShapeArgs → DoOpTiling → PrintTilingData` |
+| `apace/tiling/quant_matmul_tiling_swat.h` | `QuantMatmulTilingSwat`：SWAT 策略，实现 `CalcBasicBlock`/`CalcTailBasicBlock`/`CalcPathSpecificL1`/`CalStepKs`/`CalScaleFactors` |
+
+> ✅ 上游 swat 重命名已完成：官网两份 ST main.cpp 均 include 新名 `apace/tiling/quant_matmul_tiling_swat.h`，无断链。
+
+GetTilingData 签名：
+
+```cpp
+// apace/tiling/quant_matmul_tiling_base.h QuantMatmulTilingBase：
+void GetTilingData(uint64_t m, uint64_t n, uint64_t k, bool transA, bool transB, QuantMatmulTilingData& tilingData);
+// 4 参重载等价于 transA=false, transB=true：
+void GetTilingData(uint64_t m, uint64_t n, uint64_t k, QuantMatmulTilingData& tilingData);
+```
+
+| 参数 | PUT（all_to_all） | AG（all_gather） |
+|:---|:---|:---|
+| `m` | 单卡 M | `totalLogicalM = rankNum × (tileCnt×tileM + tailCnt×paddedTailM)` |
+| `n` | 全量 N | 全量 N |
+| `k` | per-rank K（ka = K/rankNum） | 全量 K |
+| 转置 | `false, true`（ST 显式传 6 参） | 4 参重载（默认 false, true） |
+| 额外配置 | — | `SetOptimizeEnable(false)` + `SetMTailAlignEnable(true)` |
+
+headMSize 推导（PUT，内联于 ST main.cpp）：官网无 `comm_tiling_base.h`；通信切分与 matmul tile 粒度的对齐由 ST main.cpp 内联完成（`runAllToAllMatmul`）：
+
+```
+nTile      = CeilDiv(n, baseN)
+headMSize  = CeilDiv(usedCoreNum, nTile) * baseM   // 与 matmul tile 粒度对齐
+headTileCnt = m / headMSize
+tailMSize   = m % headMSize
+```
+
+**不变量**：headMSize 确保每个通信 tile 的数据量匹配一份核算力覆盖的 M-range，实现通信与计算流水并行；scale 通道的 `nonSplitAxisSize` 按 MXFP 压缩比（`ka / 32`）缩减，与 data 通道共享切分结构。
+
+host 输入校验（两份 ST main.cpp 实测）：
+
+| ST | 校验 |
+|:---|:---|
+| PUT（all_to_all main.cpp `parseArguments`） | `k % rankNum == 0`；`CeilDiv(ka, 64) % 2 == 0` |
+| AG（all_gather main.cpp `ParseArgs`） | `k % 32 == 0`（MXFP8 量化）；`CeilDiv(k, 64) % 2 == 0` |
+
+推导验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 输入解析 | 问题形状 (M, K, N, rankNum) + ST 入参校验通过 |
+| 2 | GetTilingData | 先调 `GetTilingData` 得 `usedCoreNum/baseM/baseN`（PUT 用 ka，AG 用 totalLogicalM） |
+| 3 | CommTilingData 填充 | 5 字段已填充，满足切分不变量；headMSize 与 matmul tile 粒度对齐 |
+| 4 | scale 通道 | 复用 data 切分，`nonSplitAxisSize = ka / 32`（PUT）或 `scaleKLen = CeilDiv(k,64)×2`（AG，见 `all_gather_mx_matmul_udma_impl.h` `Init`） |
+| 5 | CommContext 构造 | 通过 `CommChannelBuilder::CreateDeviceContext` 填充（详见 communication.md §12） |
+| 6 | launch | tilingData 按值传递，CommContext 按指针传递 |
+
+Scale 内存分配（PUT 模式）：Scale 的内存分配跟随其对应矩阵的数据分布。PUT 模式（A 按 K 轴切分，B 全量复制）：
+
+| Scale | 分布模式 | 公式 | 说明 |
+|:---|:---|:---|:---|
+| ScaleA | K-split（随 A 切分） | `CeilDiv(ka, 64) × 2 × M` | ka = K/rankSize |
+| ScaleB | 全量复制（随 B 复制） | `CeilDiv(K, 64) × 2 × N` | K = 完整 K |
+
+> ⚠️ ScaleA 的**逻辑分布**为 per-rank `ka`；但 PUT ST main.cpp 实际按**全量 K** 分配 host 缓冲（`m * CeilDiv(k, 64) * 2`）——逻辑分布与 ST 分配有差异，以 ST 实测为准。
+
+**常见错误**：PUT 模式下 ScaleB 全量复制，如果误用 `CeilDiv(ka, 64)` 会导致尺寸缩小 rankSize 倍，ReadFile 失败或读取越界。
+
+> B 数据分布模式详见 [`architecture.md`](architecture.md) §4 B 数据分布模式。
+
+### 3.8 HCCL windows 模式例外
+
+HCCL windows 模式（`GetHcclContext`）不支持直调：
+
+- **不需要** `CommContext` 结构
+- **不需要** `CommUdmaContext` / `CommUbmemContext`
+- tiling_data.h 中**不定义** `CommContext`
+
+> **注意**：官网 apace kernel/ 当前两个算子（all_to_all_quant_matmul、all_gather_quant_matmul）均为 UDMA 模式，使用 `CommContext`，不走 HCCL windows。ReduceScatter 语义的替代实现思路见 [`communication.md`](communication.md) §13.1。
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | UDMA 模式判定 | tiling_data.h 含 `CommContext` 定义，kernel 入口含 `__gm__ CommContext*` 首参 |
+| 2 | HCCL windows 模式判定 | 无 `__global__` 直调入口，不支持 CANNBot Kernel 直调工作流 |
+
+---
+
+## 4. Impl 类契约
+
+主教学样例为官网 PUT 算子 `all_to_all_quant_matmul`（`kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h`）。
+
+### 4.1 模板参数
+
+| 参数 | 含义 | 取值 |
+|:---|:---|:---|
+| `AType` / `BType` | A/B 矩阵类型 | `fp8_e4m3fn_t` / `fp8_e5m2_t` |
+| `CType` | C 输出类型 | `bfloat16_t` |
+| `TransA` / `TransB` | A/B 转置标记 | `true` / `false` |
+
+### 4.2 组件持有关系
+
+```
+AllToAllMxQuantMatmulUdmaImpl（成员定义见 all_to_all_mx_quant_matmul_udma_impl.h `class AllToAllMxQuantMatmulUdmaImpl`）
+├── quantMatmulKernelImpl_ (QuantMatmulMxKernel<..., UdmaCommWaitPolicy>)  ← AIC 侧计算（CommPolicy 注入）
+├── allToAllA_        (CollectiveComm<AllToAll, PUT, AType>)      ← AIV 侧通信：data
+├── allToAllScaleA_   (CollectiveComm<AllToAll, PUT, fp8_e8m0_t>) ← AIV 侧通信：scale
+├── teamBarrier_      (TeamBarrier)                               ← 跨卡同步
+├── syncBuffer_       (CommUbmemContext*)  ← = &hcommCtx->ubmemCtx
+├── udmaCtx_          (CommUdmaContext*)   ← = &hcommCtx->udmaCtx
+├── baseParams_       (BaseParams)         ← GM 地址 / rankId / rankSize / commTurn / rankDataBytes
+└── tilingData_       (allToAllMatmulTilingData*)
+```
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 计算与通信分离 | `quantMatmulKernelImpl_` 在 AIC，`allToAllA_` / `allToAllScaleA_` 在 AIV，无交叉调用 |
+| 2 | 通信组件类型 | data 与 scale 各持一个 `CollectiveComm<AllToAll, PUT, ..., TeamBarrier>`，共享同一 channel |
+| 3 | 同步组件独立 | `teamBarrier_` 持有独立 UB flag，与通信 workspace 不重叠 |
+| 4 | 上下文注入 | `hcommCtx` 由外部传入，Impl 不自行创建 |
+| 5 | 等待策略注入 | AIC 等待经 `CommPolicy` 模板参数（`UdmaCommWaitPolicy`）注入 kernel，编译期绑定，无运行期开销 |
+
+### 4.3 Init 步骤不变量
+
+`Init()` 初始化顺序（`all_to_all_mx_quant_matmul_udma_impl.h` `Init`）：
+
+| # | 不变量 | 验收条件（符号锚点） |
+|:---|:---|:---|
+| 1 | GM 地址已保存 | `baseParams_.aGm / scaleAGm / bGm / scaleBGm / cGm` 赋值 |
+| 2 | 上下文已提取 | `syncBuffer_ = &hcommCtx->ubmemCtx`、`udmaCtx_ = &hcommCtx->udmaCtx`，`rankId / rankSize` 取自 `udmaCtx_` |
+| 3 | 基础参数已推导 | `InitBaseParams()`：`headMSize = commTilingData.splitAxisTileSize`，`commTurn = splitAxisTileCnt + splitAxisTailCnt`，`rankDataBytes = axisM × axisKa × sizeof(AType)` |
+| 4 | Win 基址已取 | `baseParams_.selfWinAddr = udmaCtx_->commBufferAddrs[rankId]` |
+| 5 | 双 commBuf 已分配 | data 和 scale 各分配 `COMM_WORKSPACE_SIZE`（512B，`block/aiv_comm/collective_comm_context.h`），局部 `ubOffset` 累加两次 |
+| 6 | barrier 已分配 | `teamBarrier_.Init(barrierBuf, syncBuffer_, rankSize, GetBlockIdx())` |
+| 7 | data 通信已初始化 | `allToAllA_.Init<BARRIER_NONE>(...)`，winOffset 缺省 = 0（Win 区起始段） |
+| 8 | scale 通信已初始化 | `allToAllScaleA_.Init(..., winOffset = rankSize × rankDataBytes)`（data 段之后） |
+
+双通信对象 winOffset 契约：
+
+| 通信对象 | winOffset | 说明 |
+|:---|:---|:---|
+| data (`allToAllA_`) | 0 | Win 区起始段 |
+| scale (`allToAllScaleA_`) | `rankSize × rankDataBytes` | data 段之后 |
+
+> `rankDataBytes = axisM × axisKa × sizeof(AType)`，详见 [`communication.md`](communication.md) §5.1 winOffset 实战。
+
+> 注意：PUT impl 的 UB 分配使用**局部变量** `uint32_t ubOffset = 0`（`Init` 内），不是成员变量。
+
+### 4.4 UB 分配
+
+PUT impl 的 UB 分配（局部 `ubOffset` 线性累加）：
+
+| 分配 | 大小 | 用途 |
+|:---|:---|:---|
+| `commBuf` | 512B（`COMM_WORKSPACE_SIZE`，`block/aiv_comm/collective_comm_context.h`） | data 通信 workspace |
+| `commScaleBuf` | 512B（`COMM_WORKSPACE_SIZE`） | scale 通信 workspace |
+| `barrierBuf` | 32B（`UB_SIZE` = `BARRIER_FLAG_SIZE`，`block/aiv_comm/barrier/barrier_ubmem.h`） | 跨卡同步 flag |
+| **合计（PUT）** | **1056B**（512B×2 + 32B） | 双通信对象 + barrier；GET 式单通信对象为 512B + 32B = **544B** |
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 线性分配 | `ubOffset` 单调递增，不可回退 |
+| 2 | 双对象翻倍 | 双通信对象共 2 × `COMM_WORKSPACE_SIZE` |
+| 3 | 总量约束 | UB 分配总量不超过 UB 容量 |
+
+---
+
+## 5. 入口函数规则
+
+参考算子为官网现有的两个 PUT 算子：`all_to_all_quant_matmul`（4 变体入口）与 `all_gather_quant_matmul`（单入口）。
+
+### 5.1 第一红线：禁用 schedmode
+
+**绝对不能**使用 `__schedmode__(1)` 和 `[[bisheng::core_ratio(1,1)]]`。
+
+`__schedmode__(1)` 强制 AIC/AIV 串行调度，导致通算流水无法重叠 → **死锁**（`aclError:507015`）。
+
+> 注：`aclError:507015` 为通用 timeout/trap 错误码，另有 MTE 未排空根因（见 [`fusion.md`](fusion.md) §4）；遇此码需按两路径鉴别。
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 无 schedmode | 代码中不含 `__schedmode__` 或 `core_ratio` |
+| 2 | 核配比来源 | 核配比由 `KERNEL_TYPE_MIX_AIC_1_1` 保证，不依赖 schedmode |
+
+### 5.2 核配比 KERNEL_TYPE_MIX_AIC_1_1
+
+核配比（AIC:AIV 比例）唯一由 `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1)` 保证为 1:1。
+
+- `KERNEL_TYPE_MIX_AIC_1_1` 表示 AIC 和 AIV 1:1 配对
+- 每个 AIC 核对应一个 AIV 核，同一 block 内的 AIC/AIV 共享同一 `GetBlockIdx()`
+- 不需要也不应该用 `__schedmode__` 或 `core_ratio` 额外指定
+- 头文件来源：`kernel_basic_intf.h`（官网 ST 以 `apace/tests/st/all_to_all_quant_matmul/src/main.cpp` include `"kernel_basic_intf.h"`；impl 侧以 `apace/kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h` include `"basic_api/kernel_basic_intf.h"`）
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 核配比宏 | 每个入口函数含 `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1)` |
+| 2 | 无冗余属性 | 不含 `__schedmode__` / `core_ratio` |
+
+### 5.3 入口变体：PUT 4 入口与 AG 单入口
+
+PUT：4 变体入口（all_to_all_quant_matmul），定义在 `apace/tests/st/all_to_all_quant_matmul/src/kernel_launcher.h`，对应 4 种 FP8 类型组合：
+
+| 入口函数名 | AType | BType | CType |
+|:---|:---|:---|:---|
+| `AllToAllQuantMatmulKernelE4M3E4M3_Udma` | `fp8_e4m3fn_t` | `fp8_e4m3fn_t` | `bfloat16_t` |
+| `AllToAllQuantMatmulKernelE5M2E5M2_Udma` | `fp8_e5m2_t` | `fp8_e5m2_t` | `bfloat16_t` |
+| `AllToAllQuantMatmulKernelE4M3E5M2_Udma` | `fp8_e4m3fn_t` | `fp8_e5m2_t` | `bfloat16_t` |
+| `AllToAllQuantMatmulKernelE5M2E4M3_Udma` | `fp8_e5m2_t` | `fp8_e4m3fn_t` | `bfloat16_t` |
+
+统一约定：
+
+- 输出类型恒为 `bfloat16_t`
+- 4 个入口的函数体**完全相同**，仅 Impl 模板类型参数不同
+- Impl 均为 `Apace::AllToAllMxQuantMatmulUdmaImpl<AType, BType, CType, false, true>`（TransA=false, TransB=true）
+
+AG：单入口（all_gather_quant_matmul），仅 1 个 `__global__` 入口 `AllGatherQuantMatmulKernel`，定义在 impl 头文件 `apace/kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_impl.h` 末尾：
+
+- Impl 为 `AllGatherQuantMatmulImpl::AllGatherMxMatmulUdmaImpl<fp8_e4m3fn_t, fp8_e4m3fn_t, bfloat16_t>`（仅 3 个类型参数，无转置参数）
+- 函数体调 `Init(...) + Process()`（而非 `Run()`）
+
+扩展非 FP8 dtype（扩展方向，官网未上库）：
+
+| 目标 dtype | 扩展方式 | 注意事项 |
+|:---|:---|:---|
+| INT8 量化 | 新增 INT8 入口，AType/BType 改为 `int8_t` | Scale 处理逻辑需适配（非 MX 格式） |
+| 纯 BF16 | 新增 BF16 入口，去掉 Scale 参数 | DispatchPolicy 从 `MatmulWithScaleMx` 改为普通策略 |
+| FP32 | 新增 FP32 入口 | 注意 L0C 容量约束（FP32 占用翻倍） |
+
+> 扩展 dtype 时需同步修改 Blaze DispatchPolicy 和 Scale 处理逻辑，详见 [`compute.md`](compute.md)。
+
+### 5.4 模板参数：dtype 与转置
+
+PUT Impl 模板签名为 `template<typename AType, typename BType, typename CType, bool TransA, bool TransB>`（`apace/kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h`），入口固定实例化 `<..., false, true>`（TransA=false, TransB=true，由 Blaze BlockMmad layout 定义承接）。
+
+> ⚠️ 官网 PUT/AG 入口均**无 `LocalDelay` 模板参数、无 `TPipe`**；local/remote 编排由 tiling 字段 `localMatmul` 在 Impl::Run 内分支（详见 [`fusion.md`](fusion.md)）。
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 模板参数 | PUT Impl 含 `<AType, BType, CType, TransA, TransB>`；AG Impl 含 `<AType, BType, CType>` |
+| 2 | 转置实例化 | PUT 入口实例化 `TransA=false, TransB=true` |
+
+### 5.5 入口签名要素
+
+标准签名（UDMA 模式，PUT）：
+
+```cpp
+// apace/tests/st/all_to_all_quant_matmul/src/kernel_launcher.h
+__global__ __aicore__ void AllToAllQuantMatmulKernelE4M3E4M3_Udma(
+    __gm__ CommContext *hcommCtx,        // 1. 通信上下文（GM 指针）
+    GM_ADDR aGM, GM_ADDR scaleAGM,       // 2-3. A 矩阵与 Scale
+    GM_ADDR bGM, GM_ADDR scaleBGM,       // 4-5. B 矩阵与 Scale
+    GM_ADDR cGM,                         // 6. C 输出
+    allToAllMatmulTilingData tilingData) // 7. tiling（按值）
+```
+
+AG 单入口 `AllGatherQuantMatmulKernel` 签名同构（7 参数，`AllGatherMxMatmulUdmaTilingData tilingData` 按值）。
+
+参数顺序约定：
+
+| 位置 | 参数 | 传递方式 | 类型 |
+|:---|:---|:---|:---|
+| 1 | `hcommCtx` | `__gm__` 指针 | `CommContext*` |
+| 2-6 | GM_ADDR | GM 地址 | `GM_ADDR` |
+| 7 | tilingData | 按值 | 算子级 tiling_data |
+
+参数数量：官网两个 UDMA 算子入口均为 7 个参数。委托模式算子（无 `__global__` 入口）不支持直调。
+
+### 5.6 函数体固定模式
+
+入口函数只做"实例化 + Init + Run/Process"三件事，其余逻辑全部封装在 Impl 类中：
+
+```cpp
+KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1);
+Apace::AllToAllMxQuantMatmulUdmaImpl<fp8_e4m3fn_t, fp8_e4m3fn_t, bfloat16_t, false, true> impl;
+impl.Init(hcommCtx, aGM, scaleAGM, bGM, scaleBGM, cGM, &tilingData);  // tiling 取址传 const*
+impl.Run();   // AG 入口为 impl.Process()
+```
+
+不应出现的代码：
+
+- 通信原语调用（`Commit`/`Wait`/`Finalize`）— 在 Impl 内部
+- Blaze matmul 调用（`mmadOp_`）— 在 qbmm kernel 内部
+- `CrossCoreSetFlag`/`CrossCoreWaitFlag` — 在 Impl/qbmm 内部
+- `if ASCEND_IS_AIV` / `if ASCEND_IS_AIC` 分支 — 在 Impl::Run/Process 内部
+- `__schedmode__` / `core_ratio` — **绝对禁止**
+- `TPipe` — 官网两个算子入口均不建 TPipe（UB 缓冲用 `Te::MakeMemPtr` 静态分配，见 §4.3）
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 固定 3 步 | 函数体仅含 `KERNEL_TASK_TYPE_DEFAULT` → `Impl` 实例化 → `Init` + `Run`（PUT）/ `Process`（AG） |
+| 2 | 无业务逻辑 | 不含通信原语、matmul 调用、flag 操作、AIC/AIV 分支 |
+| 3 | 无禁用属性 | 不含 `__schedmode__` / `core_ratio` |
+
+kernel_launcher.h 模式：
+
+| 模式 | `__global__` 入口位置 | 官网实例 |
+|:---|:---|:---|
+| **kernel_launcher.h 模式** | ST 的 src/kernel_launcher.h | all_to_all_quant_matmul |
+| **impl 内嵌模式** | impl.h 末尾 | all_gather_quant_matmul |
+
+### 5.7 CommContext 传递模式
+
+模式对比：
+
+| 模式 | CommContext | 上下文获取方式 | 支持直调 |
+|:---|:---|:---|:---|
+| **UDMA** | 第一参数，`__gm__` 指针传递 | Impl::Init 从指针提取 `udmaCtx` 和 `ubmemCtx` | ✅ |
+| **HCCL windows** | 不传 | kernel 内部 `GetHcclContext`（依赖框架注入） | ❌ |
+
+> **重要限制**：HCCL windows 模式**无 `__global__` 入口，不支持 CANNBot Kernel 直调工作流**。官网 apace 现有两个算子均为 UDMA 模式。详见 [`architecture.md`](architecture.md) §10 ④。
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | UDMA 模式 | 入口签名含 `__gm__ CommContext*` 参数 |
+| 2 | Host 构造 | Host 侧构造 CommContext → 写入 GM → 传指针（完整序列见 [`host-and-testing.md`](host-and-testing.md) §1） |
+| 3 | CommContext 定义位置 | `CommContext` 聚合体（udmaCtx+ubmemCtx）定义在**本算子 tiling_data.h** 中（PUT 在全局命名空间；AG 在 `Apace::AivComm` 命名空间） |
+
+### 5.8 入口函数验收条件汇总
+
+创建或修改入口函数后，必须满足以下验收条件（与 [`review-checklist.md`](review-checklist.md) R1~R8 一致）：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 无 schedmode | 代码中不含 `__schedmode__` 或 `core_ratio` |
+| 2 | 有核配比 | 每个入口函数都含 `KERNEL_TYPE_MIX_AIC_1_1` |
+| 3 | 入口数量 | PUT 型算子 4 个 dtype 变体入口；AG 型算子单入口（`Init`+`Process`） |
+| 4 | flag idx 配对 | AIV `SetFlag` idx == AIC `WaitFlag` idx（PUT）；Set/Wait flagId 配对（通用） |
+| 5 | CommContext 匹配 | UDMA 模式有 `__gm__ CommContext*` 参数 |
+
+---
+
+## 6. AllGather 变体与 CCU 变体
+
+### 6.1 AllGather PUT 模式
+
+> `all_gather_quant_matmul` UDMA 实现（`kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_impl.h`）采用 AllGather PUT + 组合模式。
+
+验收条件：
+
+| # | 验收项 | 达标条件 |
+|:---|:---|:---|
+| 1 | 通信原语 | data：`CollectiveComm<AllGather, PUT, AType, TeamBarrier>`；scale：`CollectiveComm<AllGather, PUT, fp8_e8m0_t, TeamBarrier>`（`AllGatherCommData` / `AllGatherCommScale` 类型别名） |
+| 2 | 双通信对象 | data 用 `Init<BARRIER_NONE>`（winOffset 缺省 0）；scale 用 `Init<BARRIER_DEVICE>` + winOffset = `dataRegionBytes_`（`Init`） |
+| 3 | 单入口 | `Process()` 单入口：`ASCEND_IS_AIV` → `AllGatherProcess()`，`ASCEND_IS_AIC` → `MatmulProcess()`（`Process`） |
+| 4 | dependId 预触发 | AIV 在 `AllGatherProcess()` 循环前预置 `CrossCoreSetFlag<0x2, PIPE_MTE3>(0)`，注释明确"自身数据始终就绪，AIC 可直接消费" |
+| 5 | AIV→AIC 同步 | AIV 每轮 AllGather 完成后 `CrossCoreSetFlag<0x2, PIPE_MTE3>(round + 1)` 通知 AIC（round 0 对应 dependTileIdx=1） |
+| 6 | Commit/Wait | 每轮 `allGatherScale_.Commit()` → `allGatherData_.Commit()` → `allGatherData_.Wait<BARRIER_DEVICE>()`（同 channel 只 Wait 一次）+ `SyncAll<true>()` |
+| 7 | FragmentTensor | kernel 侧用 `FragmentTensor` 虚拟重排 HEAD/MAIN/TAIL 区域，`ResolveTileCtx()` 解析当前 tile 所属区域与 dependId（`qmm_mx_kernel_ag_udma.h` `ResolveTileCtx` / `BuildFragmentTensors`） |
+| 8 | 去重 wait | kernel 侧 `waitedMask` 按位去重，尾部兜底补 wait（`qmm_mx_kernel_ag_udma.h`） |
+| 9 | Init 末尾同步 | `Init()` 末尾有一次 `SyncAll<true>()` |
+| 10 | Finalize | 循环结束后 `allGatherScale_.Finalize()` + `allGatherData_.Finalize()`（无分核 guard，全 AIV 执行） |
+
+与 AllToAll PUT 的关键差异：
+
+| 维度 | AllToAll PUT | AllGather PUT |
+|:---|:---|:---|
+| 通信原语 | AllToAll | AllGather |
+| AIC/AIV 顺序 | AIV 先 → AIC 后 | AIV 先 → AIC 后 |
+| 离散内存 | 无（Win 区连续 rank-major） | **FragmentTensor（HEAD/MAIN/TAIL 虚拟重排）** |
+| dependId 预触发 | 无 | **有（dependTileIdx=0 预置）** |
+| 切分轴 | K | **M** |
+| `__global__` 入口 | 4 个变体（在 `tests/st/all_to_all_quant_matmul/src/kernel_launcher.h`） | 1 个（`all_gather_mx_matmul_udma_impl.h` 文件末尾 `AllGatherQuantMatmulKernel`） |
+
+> 详见 [`compute.md`](compute.md) §7（FragmentTensor）。
+
+### 6.2 CCU 变体（HcclServerType::HCCL_SERVER_TYPE_CCU）
+
+> `all_to_all_quant_matmul` 另有一个 HCCL CCU 变体（`kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_hcomm_impl.h`），面向框架注册场景，**不支持直调**。
+
+与 UDMA 变体的差异：
+
+| 维度 | UDMA 变体 | CCU 变体（hcomm impl） |
+|:---|:---|:---|
+| 通信上下文 | apace `CommContext`（外部注入） | `Hccl<HCCL_SERVER_TYPE_CCU>`，`InitV2(GetHcclContext<0>(), mc2InitTiling)`（`HcommCommState`） |
+| 等待策略 | `UdmaCommWaitPolicy::WaitTile` → `CrossCoreWaitFlag<0x2, PIPE_MTE2>` | `HcommCommWaitPolicy::WaitTile` → `hccl_.Wait(handle)`（scale/head/tail 三 handle 按 tileIdx 选择） |
+| `__global__` 入口 | 有（tests/st launcher，4 变体） | 无（框架注入入口） |
+| 直调支持 | ✅ | ❌（依赖框架创建的 HCCL 上下文） |
+
+**复用点**：两者共用同一个 `QuantMatmulMxKernel`（`quant_matmul_mx_kernel.h`），仅 `CommPolicy` 模板参数不同——这是 CommPolicy 策略注入设计的直接收益。
+
+> ⚠️ `GetHcclContext` 依赖算子框架在 kernel launch 前创建通信上下文，直调模式下指针无效。详见 [`architecture.md`](architecture.md) §10 ④。
+
+---
+
+## 后续阅读
+
+- [`fusion.md`](fusion.md) — PUT 编排验收 / AIC 等待机制 / localMatmul 三种模式
+- [`host-and-testing.md`](host-and-testing.md) — host 初始化序列、kernel launch 与 ST 工程
+- [`communication.md`](communication.md) — Commit/Wait 底层机制、CommContext 字段、winOffset 实战
+- [`compute.md`](compute.md) / [`communication.md`](communication.md) — 接口层

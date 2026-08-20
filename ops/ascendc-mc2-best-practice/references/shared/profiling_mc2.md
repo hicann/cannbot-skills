@@ -171,16 +171,14 @@ msprof 在 `--output` 指定目录下生成 `PROF_{timestamp}_{pid}/` 子目录�
 
 ### 4.5 多卡后处理
 
-使用 `ops-profiling` skill 的 `msprof_perf_summary.py` 进行多卡数据后处理：
+使用 `ops-profiling` skill 的 `perf_summary.py` 进行多卡数据后处理：
 
 ```bash
-# 使用 ops-profiling skill 的统一解析工具
-python3 ${SKILL_PATH}/scripts/msprof_perf_summary.py "$ROUND_DIR" ops/{op_name}
+# 使用 ops-profiling skill 的统一解析工具（生成统计摘要并归档，用法见 ops-profiling/SKILL.md）
+python3 ${SKILL_PATH}/scripts/perf_summary.py "$ROUND_DIR" ops/{op_name}
 ```
 
-> `msprof_perf_summary.py` 支持 task-based 采集的多卡数据解析，包括每卡 Task Duration 提取、核间负载均衡分析等。详见 `ops-profiling` skill 的 [`references/msprof-guide.md`](../../ops-profiling/references/msprof-guide.md)。
-
-MC2 场景需特别关注的后处理规则（§4.4）：每卡取最后 5 次 main kernel 的 Task Duration 求平均，4 卡取最大值作为整体性能。若 `msprof_perf_summary.py` 的默认输出不直接包含此规则，可基于其 CSV 输出手动计算。
+> `perf_summary.py` 对 CSV 指标生成 min/avg/max 统计摘要（不做判定）。MC2 场景需特别关注的后处理规则（§4.4）：每卡取最后 5 次 main kernel 的 Task Duration 求平均，4 卡取最大值作为整体性能——该规则需基于其输出的 CSV/摘要手动计算。
 
 ---
 

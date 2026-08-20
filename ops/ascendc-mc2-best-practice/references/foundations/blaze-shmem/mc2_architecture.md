@@ -11,7 +11,7 @@
 
 ## 1. MC2 是什么
 
-MC2 = Multi-Card Compute-Communication Coupling，多卡通算融合。典型场景：
+MC2 = Matrix Computation & Communication，多卡通算融合。典型场景：
 
 - **AllToAll + Matmul**：MoE 模型专家路由；每张卡把自己负责的 M 段通过 AllToAll 发给其他卡，接收方在收到的数据上做本地 Matmul。
 - **AllReduce + Matmul**：DDP 前向反向；Matmul 后的部分和通过 AllReduce 聚合。
@@ -43,7 +43,7 @@ HCCL（Huawei Collective Communication Library）的高阶 API（`Hccl::AllReduc
 
 UDMA（Unified DMA，对应 URMA 协议——Unreliable Remote Memory Access）是 Ascend 950 提供的 Kernel 级跨卡通信原语，所有通信下发在 Kernel 内完成，可与计算流水深度耦合。
 
-> **官方文档**：<https://shmem-doc.pages.dev/>。SKILL.md 列出的 7 类 18 个 HCCL API 在本 skill 全部禁用。
+> **官方文档**：<https://shmem-doc.pages.dev/>。7 类 18 个 HCCL 高阶 API 在本路线全部禁用（清单及理由见 [`comm_shmem.md`](comm_shmem.md) §5）。
 
 ## 3. AIV/AIC 分工
 
@@ -157,7 +157,7 @@ SHMEM base (rankId 视角)
 - 必须让单次 Put 的数据量 `headMSize * kPerRank * sizeof(dtype)` 落在 UDMA 高效区间（数百 KB ~ 数 MB）；
 - `headMSize = M / tileCnt`，调整 `tileCnt` 即调整 `headMSize`。
 
-**`tileCnt` 是通算流水的深度旋钮**——`tileCnt=1` 时无掩盖（串行基线），`tileCnt>1` 时 N-1 级流水掩盖通信延迟。CANNBot 流程中分两阶段调优（详见 [`pipeline_tuning.md`](pipeline_tuning.md)）：Step 2-4 用 `tileCnt=1` 做串行基线简化精度/审查，Step 6 扫描 `tileCnt` 找最优。
+**`tileCnt` 是通算流水的深度旋钮**——`tileCnt=1` 时无掩盖（串行基线），`tileCnt>1` 时 N-1 级流水掩盖通信延迟。分两阶段调优（详见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)）：精度调试阶段用 `tileCnt=1` 做串行基线简化精度/审查，性能调优阶段扫描 `tileCnt` 找最优。
 
 ## 7. UDMA 通信原语速览
 
@@ -186,7 +186,7 @@ aclshmem_barrier_all();
 
 ## 8. 性能采集要点
 
-MC2 算子的性能采集有一条核心特殊点：每轮主 kernel 前必须调用 `heavy_add_kernel` 刷 L2 cache，否则前一轮的 B 矩阵驻留 L2 会让本轮带宽指标虚高。详细流程（msprof task-based 采集、4 卡数据后处理、优化速查）见 [`profiling_mc2.md`](profiling_mc2.md)。
+MC2 算子的性能采集有一条核心特殊点：每轮主 kernel 前必须调用 `heavy_add_kernel` 刷 L2 cache，否则前一轮的 B 矩阵驻留 L2 会让本轮带宽指标虚高。详细流程（msprof task-based 采集、4 卡数据后处理、优化速查）见 [`profiling_mc2.md`](../../shared/profiling_mc2.md)。
 
 ## 9. 后续阅读
 

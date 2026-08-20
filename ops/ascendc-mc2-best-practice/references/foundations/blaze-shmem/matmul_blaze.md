@@ -2,7 +2,11 @@
 
 本文档承载 MC2 skill 的"计算子能力"。涵盖：Blaze 模板选型、BlockMmad 接入、Tiling 数据流、与通信层的 buffer 协议。
 
-> Blaze 是 Ascend C 的 CUTLASS 风格模板库，blaze 头文件位于 CANN toolkit 的 `opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc/common`（参考工程 CMakeLists 用 `_BLAZE_COMMON_DIR` 指向该目录）。`AscendC::Te::*`（Tensor / Layout 抽象）由 `tensor_api/` 提供，来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支 clone。本 skill 与 `ascendc-blaze-best-practice` 共享这套 Blaze 基底，但聚焦 MC2 场景下的差异点。**直调工程不使用 asc-devkit 的 matmul 高阶 API（`AscendC::Matmul` 等）**——它是官方通算融合（单算子 API 调用）路径的计算接口，不支持 Kernel 直调场景（详见 SKILL.md §1 约束 ②）。
+> Blaze 是 Ascend C 的 CUTLASS 风格模板库，由 `tensor_api/` 提供。**两条路线的 Blaze/tensor_api 来源不同**：
+> - **blaze-shmem 路线**：tensor_api 来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支，Blaze 来自 CANN toolkit 内置 `opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc/common`（参考工程 CMakeLists 用 `_BLAZE_COMMON_DIR` 指向该目录）
+> - **apace 路线**：Blaze **和** tensor_api 均来自 `gitcode.com/cann/ops-tensor` 仓（tensor_api 是 ops-tensor 的 submodule，指向 asc-devkit）
+>
+> 与 `ascendc-blaze-best-practice` 共享 Blaze 基底，但聚焦 MC2 场景下的差异点。**禁止使用 asc-devkit 的 matmul 高阶 API（`AscendC::Matmul` 等）**——它是官方通算融合（单算子 API 调用）路径的计算接口，不支持 Kernel 直调场景。
 
 ---
 
@@ -17,7 +21,7 @@
 | **Block Scheduler** | `Blaze::Gemm::Block::BlockSchedulerQuantBatchMatmulV3` | `include/block/quant_matmul_mx_block_scheduler_swat.h` | 多 Block 间任务切分 |
 | **Dispatch Policy** | `Blaze::Gemm::MatmulWithScaleMx` | `blaze/gemm/policy/dispatch_policy.h`（toolkit 内） | 流水策略（含 scale 处理） |
 | **Tile** | `Blaze::Gemm::Tile::*` | `include/tile/*.h` | L1→L0 搬运、Scale pad |
-| **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/`（asc-devkit clone） | Tensor / Layout 抽象 |
+| **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/`（SHMEM: asc-devkit clone; apace: ops-tensor submodule） | Tensor / Layout 抽象 |
 
 **Agent 开发原则**：`include/block/`、`include/tile/`、`include/policy/` 下的文件 **`[REUSE]`**，常规 MC2 算子不需要改。需要改的是：
 - `include/kernel/qbmm_mx_kernel.h`：Scale 处理、A/B 来源切换；
@@ -156,7 +160,7 @@ tilingData.commTilingData.bufferSize = 4;
 tilingEngine.GetTilingData(headMSize, n, ka, false, true, tilingData.tileQbmmTilingData);
 ```
 
-> `headMSize=512` 只是参考工程经验起点，**实际最优 `tileCnt`（即 `headMSize = M/tileCnt`）以 `msprof op` 实测为准**。Step 2-4 设计/审查阶段建议先用 `tileCnt=1`（`headMSize=m`）做串行基线，Step 6 再扫描 `tileCnt` 找最优——详见 [`pipeline_tuning.md`](pipeline_tuning.md)。
+> `headMSize=512` 只是参考工程经验起点，**实际最优 `tileCnt`（即 `headMSize = M/tileCnt`）以 `msprof op` 实测为准**。精度调试阶段建议先用 `tileCnt=1`（`headMSize=m`）做串行基线，性能调优阶段再扫描 `tileCnt` 找最优——详见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)。
 
 ### Tiling 算法
 
@@ -183,9 +187,9 @@ using DispatchPolicy = Blaze::Gemm::MatmulWithScaleMx<NONE_FULL_LOAD_MODE, false
 - `NONE_FULL_LOAD_MODE`：A/B 不全载 L1（与 `ascendc-blaze-best-practice` 的模式选择一致）；
 - 第二个模板参数 `false` 是 `ATOMIC_ADD`（是否启用输出 atomic add，默认关闭）。
 
-可选的 DispatchPolicy（详见 `ascendc-blaze-best-practice` 的 `matmul_pattern.md` §10）：
-- `MatmulMultiBlockBasic<NONE_FULL_LOAD_MODE>`：通用多 block SWAT（CANN 库 `dispatch_policy.h` 中的实际类名）；
-- `MatmulMultiBlockBasic<A_FULL_LOAD_MODE>`：A 全载（N≫M 时用）；
+可选的 DispatchPolicy（详见 `ascendc-blaze-best-practice` 的 `references/scenarios/mx-matmul-development.md`）：
+- `MatmulMultiBlockPolicy<NO_FULL_LOAD_MODE>`：通用多 block SWAT；
+- `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>`：A 全载（N≫M 时用）；
 - `MatmulWithScaleMx<...>`：MX 量化 matmul（参考工程用）。
 
 MC2 算子若非量化场景，可改用 `MatmulMultiBlockBasic`。
@@ -232,16 +236,16 @@ allToAllComm_.PutScaleToAllRanks(0, axisM_);  // offset=0, 全 M 行
 
 ## 8. 与 ascendc-blaze-best-practice 的关系
 
-`ascendc-blaze-best-practice` skill 是 Blaze 单算子（无跨卡通信）的完整指南。本 skill 复用其 Blaze 基底，但在以下方面不同：
+`ascendc-blaze-best-practice` skill 是 Blaze 单算子（无跨卡通信）的完整指南。复用其 Blaze 基底，但在以下方面不同：
 
-| 维度 | ascendc-blaze-best-practice | 本 skill（MC2） |
+| 维度 | ascendc-blaze-best-practice | MC2 场景 |
 |------|-----------------------------|----------------|
 | 通信 | 无 | SHMEM/UDMA 跨卡 |
 | 数据来源 | 全部本卡 GM | rank==rankId 走本卡 GM，其他 rank 走 SHMEM buffer |
 | Tiling | 单卡 L1/L0 容量 | + SHMEM 空间预算 |
 | Scale | 可选 | 量化场景必需（参考工程是 MX FP8） |
 
-新算子设计时，**先读 `ascendc-blaze-best-practice` 选 Blaze 模板，再用本 skill 把模板接入 MC2 通算流水**。
+新算子设计时，**先读 `ascendc-blaze-best-practice` 选 Blaze 模板，再将模板接入 MC2 通算流水**。
 
 ---
 
@@ -251,5 +255,5 @@ allToAllComm_.PutScaleToAllRanks(0, axisM_);  // offset=0, 全 M 行
 |--------|---|
 | SHMEM/UDMA 通信层 | `comm_shmem.md` |
 | MC2 整体架构 | `mc2_architecture.md` |
-| Blaze 单算子细节（模板选型、Tiling 算法） | `ascendc-blaze-best-practice/references/matmul_pattern.md` |
+| Blaze 单算子细节（模板选型、Tiling 算法） | `ascendc-blaze-best-practice/references/scenarios/mx-matmul-development.md` |
 | 参考工程改造食谱 | `codebase_map.md` |
