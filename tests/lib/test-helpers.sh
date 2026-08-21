@@ -601,7 +601,7 @@ get_all_skills_with_paths() {
     # discovered as top-level skills.
     find "$SKILLS_DIR" \
         \( -name "node_modules" -o -name ".git" -o -name "teams" \) -prune -o \
-        \( -path "*/skills/*" -o -path "*/ops/*" -o -path "*/graph/*" -o -path "*/model/*" -o -path "*/infra/*" \) \
+        \( -path "*/skills/*" -o -path "*/ops/*" -o -path "*/graph/*" -o -path "*/model/*" -o -path "*/infra/*" -o -path "*/tools/*" \) \
         -iname "skill.md" \
         -print 2>/dev/null > "$tmpfile" || true
 

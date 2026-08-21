@@ -57,7 +57,7 @@ CANNBot 智能体生态架构（自底向上）
      ↑ 效果评测横向覆盖所有层级 ↑
 ```
 
-> 注：领域指业务领域目录，如 `ops/`（算子）、`model/`（模型）、`graph/`（图编译）、`runtime/`（运行时）等
+> 注：领域指业务领域目录，如 `ops/`（算子）、`model/`（模型）、`graph/`（图编译）、`runtime/`（运行时）、`tools/`（CANN 工具链）等
 
 ## 项目结构
 
@@ -78,6 +78,10 @@ cannbot-skills/
 ├── infra/                    # 基础设施 Skills（跨领域工具）
 │   ├── gitcode-toolkit/
 │   └── ...
+├── tools/                    # CANN 工具链 Skills（工具使用指导）
+│   ├── asys-toolkit/
+│   ├── msaicerr-toolkit/
+│   └── msnpureport-toolkit/
 ├── plugins-official/         # 官方 Plugin（Plugin 配置 + Agents + init.sh）
 │   ├── ops-registry-invoke/  # 算子开发 Plugin（示例）
 │   │   ├── agents/           # Agent 定义（.md）

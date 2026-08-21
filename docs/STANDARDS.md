@@ -260,6 +260,7 @@ skills:
 |------|------|------|---------|
 | 领域根目录 | `ops/` | 算子 Skills（正式版：Ascend C + PyPTO） | Ascend C / PyPTO 算子开发相关 |
 | 领域根目录 | `model/` | 模型优化 | 模型优化相关技能 |
+| 领域根目录 | `tools/` | CANN 工具链使用指导 | asys / msaicerr / msnpureport 等维测工具，命名为 `{工具名}-toolkit` |
 | Skill 内 | `references/` | 按需加载的知识文档 | API 指南、最佳实践、约束说明 |
 | Skill 内 | `assets/` | 输出时使用的静态资源 | 模板文件、图标 |
 | Skill 内 | `scripts/` | 可执行脚本 | 数据生成、验证脚本 |

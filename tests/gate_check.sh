@@ -235,7 +235,8 @@ if [ "$ALL_MODE" -eq 1 ]; then
     for evals_file in "$REPO_ROOT"/ops/*/evals/evals.json \
                      "$REPO_ROOT"/graph/*/evals/evals.json \
                      "$REPO_ROOT"/model/*/evals/evals.json \
-                     "$REPO_ROOT"/infra/*/evals/evals.json; do
+                     "$REPO_ROOT"/infra/*/evals/evals.json \
+                     "$REPO_ROOT"/tools/*/evals/evals.json; do
         if [ -f "$evals_file" ] && grep -q "cann_bench" "$evals_file" 2>/dev/null; then
             NEED_CANN_BENCH=true
             break
@@ -256,6 +257,7 @@ else
                            "$REPO_ROOT"/graph/*/ \
                            "$REPO_ROOT"/model/*/ \
                            "$REPO_ROOT"/infra/*/ \
+                           "$REPO_ROOT"/tools/*/ \
                            "$REPO_ROOT"/plugins-official/*/; do
                 evals_file="${base_dir}evals/evals.json"
                 if [ -f "$evals_file" ] && grep -q "cann_bench" "$evals_file" 2>/dev/null; then

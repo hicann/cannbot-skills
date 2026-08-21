@@ -267,6 +267,30 @@
       ]
     },
     {
+      "name": "cann-tools-skills",
+      "description": "CANN 工具 Skills（3 个）。asys 一键式故障信息收集与解析、msaicerr AI Core Error 分析与 Dump 转换、msnpureport Device 侧日志导出与维测配置。",
+      "source": "./tools",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "keywords": [
+        "tools",
+        "asys",
+        "msaicerr",
+        "msnpureport",
+        "troubleshooting",
+        "skills"
+      ],
+      "category": "skills",
+      "skills": [
+        "./asys-toolkit",
+        "./msaicerr-toolkit",
+        "./msnpureport-toolkit"
+      ]
+    },
+    {
       "name": "ops-direct-invoke",
       "source": "./plugins-official/ops-direct-invoke",
       "description": "Ascend C Kernel 直调算子开发 Team。含完整工作流（设计→实现→审查→性能验收）、3 个专业 Agent 和工程模板。",

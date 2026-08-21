@@ -89,6 +89,7 @@ cannbot-skills/
 ├── graph/                # 图模式 Skills
 ├── runtime/              # Runtime Skills
 ├── infra/                # 基础设施 Skills（治理 / GitCode 协作）
+├── tools/                # CANN 工具链 Skills（asys / msaicerr / msnpureport）
 ├── plugins-official/     # 官方 Plugins（开发路径入口，含 Agents/Workflows）
 ├── plugins-community/    # 社区 Plugins
 ├── docs/                 # 项目文档
