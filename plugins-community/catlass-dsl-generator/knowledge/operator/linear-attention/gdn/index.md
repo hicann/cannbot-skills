@@ -1,0 +1,16 @@
+# Gated Delta Rule Operators
+
+- [Chunk Gated Delta Rule](chunk-gated-delta-rule.md)
+- [Chunk Bwd Dqkwg](chunk-bwd-dqkwg.md)
+- [Chunk Bwd Dv Local](chunk-bwd-dv-local.md)
+- [Chunk Fwd O](chunk-fwd-o.md)
+- [Chunk Gated Delta Rule Bwd Dhu](chunk-gated-delta-rule-bwd-dhu.md)
+- [Chunk Gated Delta Rule Fwd H](chunk-gated-delta-rule-fwd-h.md)
+- [Chunk Local Cumsum](chunk-local-cumsum.md)
+- [Chunk Scaled Dot Kkt](chunk-scaled-dot-kkt.md)
+- [Prepare Wy Repr Bwd Da](prepare-wy-repr-bwd-da.md)
+- [Prepare Wy Repr Bwd](prepare-wy-repr-bwd.md)
+- [Prepare Wy Repr Bwd Full](prepare-wy-repr-bwd-full.md)
+- [Recompute W U Fwd](recompute-w-u-fwd.md)
+- [Recurrent Gated Delta Rule](recurrent-gated-delta-rule.md)
+- [Solve Tri](solve-tri.md)

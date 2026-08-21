@@ -1,0 +1,11 @@
+{
+  "round": 1,
+  "correctness_status": "passed",
+  "command_results": {
+    "full-test": {
+      "status": "passed",
+      "evidence": ".catlass-dsl/optimize-runs/attention-20260802-143527/traces/iter-001-tile/correctness/full-test.txt"
+    }
+  },
+  "benchmark_result": ".catlass-dsl/optimize-runs/attention-20260802-143527/traces/iter-001-tile/benchmark/result.json"
+}

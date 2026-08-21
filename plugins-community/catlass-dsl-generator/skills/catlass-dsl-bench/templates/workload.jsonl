@@ -1,0 +1,2 @@
+{"uuid":"vector-add-001","axes":null,"inputs":{"x":{"type":"random","shape":[1024],"dtype":"float32"},"y":{"type":"random","shape":[1024],"dtype":"float32"}},"tolerance":{"max_atol":0.00001,"max_rtol":0.00001,"required_matched_ratio":1.0,"max_error_cap":null,"allow_negative_inf":false}}
+{"uuid":"vector-add-tail","axes":null,"inputs":{"x":{"type":"random","shape":[1003],"dtype":"float32"},"y":{"type":"random","shape":[1003],"dtype":"float32"}},"tolerance":{"max_atol":0.00001,"max_rtol":0.00001,"required_matched_ratio":1.0,"max_error_cap":null,"allow_negative_inf":false}}

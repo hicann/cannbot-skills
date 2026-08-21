@@ -1,0 +1,20 @@
+{
+  "name": "catlass-dsl-generator-dev",
+  "interface": {
+    "displayName": "CATLASS DSL Plugin"
+  },
+  "plugins": [
+    {
+      "name": "catlass-dsl-generator",
+      "source": {
+        "source": "url",
+        "url": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

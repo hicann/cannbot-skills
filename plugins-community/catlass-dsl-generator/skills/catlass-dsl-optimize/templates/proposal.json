@@ -1,0 +1,10 @@
+{
+  "hypothesis": "Describe one falsifiable performance hypothesis.",
+  "axis_id": "tiling",
+  "expected_effect": "Describe the expected metric movement and mechanism.",
+  "falsification_condition": "Describe the measurement that rejects this hypothesis.",
+  "knowledge_sources": [
+    ".catlass-dsl/knowledge/optimization/tiling-and-capacity.md"
+  ],
+  "profile_evidence": []
+}

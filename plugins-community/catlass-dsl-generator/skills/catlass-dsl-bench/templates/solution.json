@@ -1,0 +1,18 @@
+{
+  "name": "vector_add_catlass_dsl",
+  "definition": "vector_add",
+  "author": "catlass-dsl-developer",
+  "description": "Replace the illustrative Torch body with the CATLASS Python DSL implementation.",
+  "spec": {
+    "languages": ["python"],
+    "target_hardware": ["LOCAL"],
+    "entry_point": "solution.py::run",
+    "destination_passing_style": false
+  },
+  "sources": [
+    {
+      "path": "solution.py",
+      "content": "import torch\n\n\ndef run(x, y):\n    return torch.add(x, y)\n"
+    }
+  ]
+}

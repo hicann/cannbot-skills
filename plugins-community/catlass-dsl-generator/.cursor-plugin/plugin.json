@@ -1,0 +1,10 @@
+{
+  "name": "catlass-dsl-generator",
+  "displayName": "CATLASS DSL 自动算子",
+  "description": "基于单一 Markdown 任务契约的 CATLASS DSL 算子开发优化工作流。",
+  "version": "0.2.0",
+  "author": {"name": "CATLASS DSL contributors"},
+  "license": "Apache-2.0",
+  "keywords": ["catlass-dsl", "catlass", "ascend", "npu", "operator-generation"],
+  "skills": "./skills/"
+}

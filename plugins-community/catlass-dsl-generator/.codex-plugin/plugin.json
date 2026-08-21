@@ -1,0 +1,35 @@
+{
+  "name": "catlass-dsl-generator",
+  "version": "0.2.0+codex.20260812091621",
+  "description": "\u57fa\u4e8e Markdown \u4efb\u52a1\u5951\u7ea6\u7684\u7cbe\u7b80 CATLASS DSL \u5f00\u53d1\u4e0e\u77e5\u8bc6\u5de5\u4f5c\u6d41\u3002",
+  "author": {
+    "name": "CATLASS DSL contributors"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "catlass-dsl",
+    "catlass",
+    "ascend",
+    "npu",
+    "operator-generation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CATLASS DSL \u81ea\u52a8\u7b97\u5b50",
+    "shortDescription": "\u7528\u5355\u4e00 Markdown \u5951\u7ea6\u5f00\u53d1 CATLASS DSL \u7b97\u5b50\u3002",
+    "longDescription": "\u8bbe\u8ba1\u5951\u7ea6\uff0c\u5e76\u6309\u9700\u6267\u884c\u5f00\u53d1\u3001benchmark\u3001\u6027\u80fd\u4f18\u5316\u3001\u77e5\u8bc6\u6536\u5f55\u6216\u5b8c\u6574\u4ea4\u4ed8\u3002",
+    "developerName": "CATLASS DSL contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Code Review"
+    ],
+    "defaultPrompt": [
+      "\u8bbe\u8ba1 CATLASS DSL Markdown \u4efb\u52a1\u5951\u7ea6\u3002",
+      "\u6309\u5df2\u6279\u51c6\u5951\u7ea6\u5f00\u53d1 CATLASS DSL \u7b97\u5b50\u3002",
+      "\u72ec\u7acb\u4f18\u5316\u5df2\u6709 CATLASS DSL \u7b97\u5b50\u3002",
+      "\u6267\u884c CATLASS DSL benchmark\u3002",
+      "\u67e5\u8be2 CATLASS DSL OKF \u77e5\u8bc6\u3002"
+    ]
+  }
+}

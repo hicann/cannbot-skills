@@ -1,0 +1,6 @@
+schema_version: "1"
+operator_families:
+  gated-delta-rule:
+    aliases:
+      - gdn
+      - gdn2

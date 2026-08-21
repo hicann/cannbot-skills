@@ -1,0 +1,25 @@
+{
+  "schema": "catlass.dsl.workflow.v3",
+  "config": {
+    "approval": {"revision": "1", "approval_status": "approved", "approved_by": "<user>", "approved_at": "<RFC-3339>", "config_digest": "<computed>"},
+    "repository": {"repository_root": "<absolute workspace root>"},
+    "specification": {"operator_name": "<name>", "operator_family": "<family>", "purpose": "<purpose>"},
+    "tensor_interface": [
+      {"name": "x", "direction": "input", "shape": "<shape>", "dtype": "<dtype>", "layout": "<layout>", "semantics": "<meaning>"},
+      {"name": "output", "direction": "output", "shape": "<shape>", "dtype": "<dtype>", "layout": "<layout>", "semantics": "<meaning>"}
+    ],
+    "semantics": {"computation": "<definition/reference/workload paths and SHA-256>", "boundary_behavior": "<behavior>", "numerical_behavior": "<behavior>"},
+    "reference_validation": {"status": "<passed>", "reference": "<path>", "reference_sha256": "<sha256>", "definition": "<path>", "definition_sha256": "<sha256>", "workload": "<path>", "workload_sha256": "<sha256>", "cases": []},
+    "preliminary_design": {"algorithm": "<algorithm>", "dataflow": "<dataflow>", "tiling_and_layout": "<strategy>", "memory_and_sync": "<strategy>"},
+    "kernel_path": "<operator.py>",
+    "allowed_paths": [{"path": "<operator.py>", "purpose": "CATLASS DSL implementation"}],
+    "commands": [
+      {"command_id": "full-test", "phase": "full_test", "argv": "[\"python3\",\"-m\",\"pytest\"]"},
+      {"command_id": "benchmark", "phase": "benchmark", "argv": "[\"python3\",\"skills/catlass-dsl-bench/scripts/bench.py\"]"}
+    ],
+    "required_cases": [{"case_id": "correctness-main", "category": "correctness", "inputs": "<inputs>", "oracle": "<oracle>", "command_id": "full-test"}],
+    "performance": {"required": "no", "metric_path": "performance.candidate.mean_ms", "direction": "not_applicable", "threshold": "not_applicable", "benchmark_command_id": "benchmark", "max_iterations": "not_applicable", "stall_threshold": "not_applicable", "min_improvement_fraction": "not_applicable", "profiling_required": "yes"},
+    "risk": {"risk_level": "standard", "risk_reasons": "none", "targeted_review_focus": "not_applicable"},
+    "delivery": {"design_document": "DESIGN.md", "design_sha256": "<sha256>", "evidence_directory": ".catlass-dsl/develop-runs/<name>-YYYYMMDD-HHMMSS", "knowledge_mode": "batch_at_finish", "delivery": "working_tree"}
+  }
+}

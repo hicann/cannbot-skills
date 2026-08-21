@@ -1,0 +1,11 @@
+{
+  "command_results": {
+    "full-test": {
+      "status": "passed",
+      "evidence": ".catlass-dsl/optimize-runs/attention-20260802-143527/final/correctness/full-test.txt"
+    }
+  },
+  "benchmark_result": ".catlass-dsl/optimize-runs/attention-20260802-143527/final/benchmark/result.json",
+  "remaining_bottlenecks": "Summarize the bottlenecks supported by the final profile.",
+  "next_steps": "Summarize the most promising direction for the next session."
+}

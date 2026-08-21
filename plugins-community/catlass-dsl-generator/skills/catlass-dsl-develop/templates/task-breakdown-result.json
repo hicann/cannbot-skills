@@ -1,0 +1,21 @@
+{
+  "stage": "task_breakdown",
+  "status": "passed",
+  "kernel_sha256": "<sha256 of current kernel>",
+  "evidence": [
+    ".catlass-dsl/develop-runs/example-20260802-143527/traces/iter-001-task_breakdown/task-breakdown.md"
+  ],
+  "tasks": [
+    {
+      "task_id": "implement-main-path",
+      "depends_on": [],
+      "allowed_paths": [
+        "src/operator.py"
+      ],
+      "required_cases": [
+        "correctness-main"
+      ],
+      "done_when": "required correctness case passes"
+    }
+  ]
+}
