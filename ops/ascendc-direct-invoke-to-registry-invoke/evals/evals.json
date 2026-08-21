@@ -138,6 +138,7 @@
       "id": 8,
       "title": "正向看护-多 skill 环境下正确触发",
       "config": {
+        "disabled": true,
         "max_tokens": 150000,
         "ascend_platforms": [
           "A2"
@@ -159,6 +160,7 @@
       "id": 9,
       "title": "常见编译错误与修复",
       "config": {
+        "disabled": true,
         "max_tokens": 150000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 180000,

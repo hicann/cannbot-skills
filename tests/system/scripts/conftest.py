@@ -51,12 +51,6 @@ DEFAULT_DIMENSION_THRESHOLDS: Dict[str, int] = {
     "Token": 3,     # max 10
 }
 
-CODE_GEN_DIMENSION_THRESHOLDS: Dict[str, int] = {
-    "算子项目工程完整度": 20,  # max 40
-    "可编译性": 15,           # max 30
-    "可运行性": 15,           # max 30
-}
-
 DIMENSION_MAX_SCORES: Dict[str, int] = {
     "覆盖度": 40,
     "准确性": 30,
@@ -64,17 +58,7 @@ DIMENSION_MAX_SCORES: Dict[str, int] = {
     "Token": 10,
 }
 
-CODE_GEN_DIMENSION_MAX_SCORES: Dict[str, int] = {
-    "算子项目工程完整度": 40,
-    "可编译性": 30,
-    "可运行性": 30,
-}
-
 DIMENSION_ORDER: List[str] = ["覆盖度", "准确性", "质量", "Token"]
-
-CODE_GEN_DIMENSION_ORDER: List[str] = [
-    "算子项目工程完整度", "可编译性", "可运行性",
-]
 
 # ── cann_bench 评测维度常量 ────────────────────────────────────────
 # cann_bench 模式使用确定性评测（非 AI 评审），维度来自 cann-bench 评测管道
@@ -106,22 +90,6 @@ DIMENSION_NAME_NORMALIZE = {
     "token消耗": "Token",
     "token 消耗": "Token",
     "token": "Token",
-    "可编译性": "可编译性",
-    "可运行性": "可运行性",
-}
-
-# code_gen 维度名归一化映射（将模板/AI 可能的变体统一映射为规范名）
-CODE_GEN_DIMENSION_NAME_NORMALIZE = {
-    "算子项目工程完整度": "算子项目工程完整度",
-    "工程完整度": "算子项目工程完整度",
-    "项目完整度": "算子项目工程完整度",
-    "可编译性": "可编译性",
-    "编译正确性": "可编译性",
-    "编译正确": "可编译性",
-    "可运行性": "可运行性",
-    "功能正确性": "可运行性",
-    "功能正确": "可运行性",
-    "计算结果精度": "可运行性",
 }
 
 
@@ -157,7 +125,6 @@ def validate_dimension_scores(
             failures.append(f"{dim}: score not found in reason field")
         elif score < threshold:
             max_score = (DIMENSION_MAX_SCORES.get(dim)
-                         or CODE_GEN_DIMENSION_MAX_SCORES.get(dim)
                          or CANN_BENCH_DIMENSION_MAX_SCORES.get(dim)
                          or "?")
             failures.append(f"{dim} ({score}/{max_score}) 低于阈值 ({threshold})")
@@ -1270,17 +1237,15 @@ def _format_dimension_label(dim_scores: Dict[str, int]) -> str:
     if not dim_scores:
         return ""
     dim_parts = []
-    # 使用 dim_scores 中实际存在的维度键展示，兼容旧四维和 code_gen 三维
+    # 使用 dim_scores 中实际存在的维度键展示，兼容旧四维和 cann_bench
     for dim, s in dim_scores.items():
         max_ = (
             DIMENSION_MAX_SCORES.get(dim)
-            or CODE_GEN_DIMENSION_MAX_SCORES.get(dim)
             or CANN_BENCH_DIMENSION_MAX_SCORES.get(dim)
             or "?"
         )
         thresh = (
             DEFAULT_DIMENSION_THRESHOLDS.get(dim)
-            or CODE_GEN_DIMENSION_THRESHOLDS.get(dim)
             or CANN_BENCH_DIMENSION_THRESHOLDS.get(dim)
             or 0
         )
@@ -1299,11 +1264,7 @@ def _build_review_html_from_template(template_path: Path) -> tuple:
         return "", None, {}
     try:
         review_content = template_path.read_text(encoding="utf-8")
-        # 通过维度表格中的维度名自动检测是否为 code_gen 模板
-        is_code_gen = "可编译性" in review_content or "可运行性" in review_content
-        dim_order = CODE_GEN_DIMENSION_ORDER if is_code_gen else DIMENSION_ORDER
-        dim_max_scores = CODE_GEN_DIMENSION_MAX_SCORES if is_code_gen else DIMENSION_MAX_SCORES
-        result = parse_review_md(review_content, dim_order=dim_order, dim_max_scores=dim_max_scores)
+        result = parse_review_md(review_content)
     except (IOError, OSError):
         logger.warning("Failed to read review template from %s", template_path)
         return "", None, {}
@@ -1516,7 +1477,7 @@ def _rating_for_score(score, eval_mode="text"):
 
     Args:
         score: 评测得分 (0-100)
-        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
+        eval_mode: 评测模式 ('text', 'file_based', 'cann_bench')
 
     Returns:
         (label: str, css_class: str)。label 为空字符串表示无评级。
@@ -1592,7 +1553,7 @@ def _format_rating_cell(score, eval_mode="text"):
 
     Args:
         score: 评测得分 (0-100)
-        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
+        eval_mode: 评测模式 ('text', 'file_based', 'cann_bench')
     """
     rating_label, rating_cls = _rating_for_score(score, eval_mode)
     if rating_label:
@@ -1676,7 +1637,7 @@ def _set_eval_score_on_report(report, score, dim_scores=None,
     Args:
         cann_bench_html: cann-bench HTML 报告内容。若提供，存入
             user_properties 以便跨 xdist 序列化后在 controller 侧恢复。
-        eval_mode: 评测模式 ('text', 'code_gen', 'cann_bench')
+        eval_mode: 评测模式 ('text', 'file_based', 'cann_bench')
     """
     if score is None or getattr(report, '_eval_score', None) is not None:
         return
@@ -1714,7 +1675,7 @@ def _inject_phase2_details(report, extra_items, skill_name, eval_id, extras):
         )
         return
 
-    # 原有逻辑：text / file_based / code_gen
+    # 原有逻辑：text / file_based / cann_bench
     has_phase2 = any(
         'log-block' in (
             item.get('content', '') if isinstance(item, dict)

@@ -171,7 +171,7 @@ class TestEvalMode:
         data = load_evals(skill_name)
         assert data is not None, f"Could not load evals.json for skill: {skill_name}"
         eval_mode = data.get("eval_mode", "text")
-        valid_modes = ("text", "file_based", "code_gen", "cann_bench")
+        valid_modes = ("text", "file_based", "cann_bench")
         assert eval_mode in valid_modes, (
             f"eval_mode '{eval_mode}' should be one of {valid_modes} "
             f"in skill: {skill_name}"

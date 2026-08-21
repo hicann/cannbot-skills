@@ -151,8 +151,8 @@ class TestTeamEvalMode:
         data = load_team_evals(team_name)
         assert data is not None, f"Could not load evals.json for team: {team_name}"
         eval_mode = data.get("eval_mode", "text")
-        assert eval_mode in ("text", "file_based", "code_gen", "cann_bench"), \
-            f"eval_mode '{eval_mode}' should be 'text', 'file_based', 'code_gen', or 'cann_bench' in team: {team_name}"
+        assert eval_mode in ("text", "file_based", "cann_bench"), \
+            f"eval_mode '{eval_mode}' should be 'text', 'file_based', or 'cann_bench' in team: {team_name}"
 
 
 class TestTeamDirectory:

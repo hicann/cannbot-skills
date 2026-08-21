@@ -30,8 +30,6 @@ from conftest import (
     get_opencode_text, FRAMEWORK_DIR, SANDBOX_DIR,
     parse_dimension_scores, parse_review_md,
     validate_dimension_scores, DEFAULT_DIMENSION_THRESHOLDS,
-    CODE_GEN_DIMENSION_THRESHOLDS, CODE_GEN_DIMENSION_ORDER,
-    CODE_GEN_DIMENSION_MAX_SCORES,
     CANN_BENCH_PATH,
     parse_cann_bench_evaluation,
     DIMENSION_ORDER, DIMENSION_MAX_SCORES,
@@ -277,52 +275,6 @@ REVIEW_RUBRIC = """
 - 当某个评分子项因回复内容性质而确实不适用时（例如设计原则类回答不涉及具体 API/命令引用），应给予该项满分的 60% 作为中性基础分，而非 0 分。注意："不适用"与"内容错误/质量缺陷"不同，请区分对待。
 """
 
-CODE_GEN_REVIEW_RUBRIC = """
-## 评分标准（总分 100，总分 ≥ 60 且各维度均不低于最低阈值方为通过）
-
-### 算子项目工程完整度（0-40 分）— 最低通过阈值：20 分
-逐文件检查预期输出的项目文件是否生成齐全，代码体是否完整覆盖要求：
-- 按预期输出中列举的文件/模块逐项检查
-- 每项满分 10 分（当预期有 4 项时），按覆盖程度打分：
-  * 10 分：文件生成完整，代码体完整覆盖要求
-  * 5-9 分：文件已生成但有部分内容缺失
-  * 0-4 分：文件缺失或代码严重遗漏
-- 若预期输出未明确分项，则按文件/功能模块自行划分并评分
-- 计算公式：各要点得分求和 = 工程完整度总分（上限 40）
-
-### 可编译性（0-30 分）— 最低通过阈值：15 分
-在实际编译环境中执行编译命令，根据编译结果评分：
-- 编译成功，生成可执行文件：30 分
-- 编译成功，但有警告：25 分
-- 编译失败，但 CMake 配置正确：15 分
-- 编译失败，CMake 配置错误：0 分
-如因环境限制（无 CANN 工具链等）无法编译，应注明原因，
-然后通过代码审查评估编译可行性（参考 CMake 配置、API 引用、头文件正确性），
-并在合理范围内评分。
-
-### 可运行性（0-30 分）— 最低通过阈值：15 分
-执行编译后的可执行文件，检查运行结果和精度验证，根据结果评分：
-- 运行成功，精度验证通过：30 分
-- 运行成功，精度验证失败：15 分
-- 运行失败，但生成了部分输出：10 分
-- 运行失败，无输出：0 分
-如因环境限制（无 NPU 设备等）无法运行，应注明原因，
-然后通过代码审查评估运行正确性（核函数入口、数据搬运、tiling 策略、
-精度验证逻辑等），并在合理范围内评分。
-
-## 通过规则
-1. 总分 ≥ 60
-2. **三个维度均不低于各自的最低阈值**
-3. 任一维度不达标，应判定为不通过（status: "fail"）
-
-## 评审注意事项
-- **优先基于实际编译/运行结果评分**，将执行结果作为主要评分依据
-- 编译/运行环境问题导致的执行失败，不属于代码质量缺陷，不应扣分
-- 如无法实际编译/运行，则通过代码审查评估，并在评审意见中注明原因
-- 需要区分"环境问题导致的失败"和"代码质量问题导致的失败"
-- reason 字段必须填写，逐一说明各维度的得分和扣分依据
-"""
-
 
 @dataclass
 class ReviewPromptContext:
@@ -338,8 +290,8 @@ class ReviewPromptContext:
 
 
 def _build_file_section(ctx: ReviewPromptContext) -> str:
-    """构建文件清单 section（用于 file_based / code_gen 模式）。"""
-    if ctx.eval_mode in ("file_based", "code_gen") and ctx.file_list:
+    """构建文件清单 section（用于 file_based 模式）。"""
+    if ctx.eval_mode == "file_based" and ctx.file_list:
         file_paths = "\n".join(f"- {f}" for f in ctx.file_list)
         return f"""
 ### 生成的文件清单（路径基于沙箱目录）
@@ -353,39 +305,13 @@ def _build_file_section(ctx: ReviewPromptContext) -> str:
     return ""
 
 
-def _build_compile_run_section(ctx: ReviewPromptContext) -> str:
-    """构建 code_gen 模式的编译/运行执行指引。"""
-    if ctx.eval_mode != "code_gen":
-        return ""
-    return """
-## 编译与运行验证（关键步骤）
-**在执行评审之前，你必须先在沙箱中实际编译和运行生成的算子代码。**
-
-### 编译验证
-1. 使用 `ls` 或 `glob` 工具探索沙箱目录结构，找到算子项目文件夹
-2. 进入算子项目目录，查找 run.sh 或 CMakeLists.txt
-3. 执行编译命令：`bash run.sh`（或根据项目结构手动执行 cmake/make）
-4. 检查编译产物：确认是否生成可执行文件（如 `ls -la build/` 下是否有目标文件）
-5. 记录编译结果（成功/警告/失败的具体信息）
-
-### 运行验证
-1. 执行运行命令：`bash run.sh --skip-build`（跳过编译直接运行）
-2. 检查运行输出：确认是否生成 output.bin 等结果文件
-3. 检查精度验证：执行 `python3 verify_result.py` 或查看其输出结果
-4. 记录运行结果（成功/失败/精度验证结果）
-
-**如果编译或运行因环境限制失败**（如缺少 CANN 工具链、无 NPU 设备等），
-请在评审意见中明确注明环境限制原因，然后基于代码审查评估进行评分。
-"""
-
-
 def _build_threshold_note(ctx: ReviewPromptContext) -> str:
     """构建非默认的维度阈值覆盖说明。"""
     if not ctx.dim_thresholds:
         return ""
     parts = []
-    dim_order = CODE_GEN_DIMENSION_ORDER if ctx.eval_mode == "code_gen" else DIMENSION_ORDER
-    max_scores = CODE_GEN_DIMENSION_MAX_SCORES if ctx.eval_mode == "code_gen" else DIMENSION_MAX_SCORES
+    dim_order = DIMENSION_ORDER
+    max_scores = DIMENSION_MAX_SCORES
     for dim in dim_order:
         if dim in ctx.dim_thresholds:
             max_ = max_scores.get(dim, "?")
@@ -393,38 +319,6 @@ def _build_threshold_note(ctx: ReviewPromptContext) -> str:
     if parts:
         return "\n### 本用例的维度阈值（覆盖默认值）\n" + "\n".join(parts) + "\n"
     return ""
-
-
-def _build_code_gen_review_prompt(ctx: ReviewPromptContext) -> str:
-    """构造 code_gen 模式的评测 prompt（跳过 AI 中间步骤，只传 prompt + 预期 + 文件清单）。"""
-    header = "你是一个代码生成测试评审员。请根据生成的文件内容和预期项目结构要求进行代码评分和评审。"
-    threshold_note = _build_threshold_note(ctx)
-    file_section = _build_file_section(ctx)
-    compile_run_section = _build_compile_run_section(ctx)
-    return f"""{header}
-{CODE_GEN_REVIEW_RUBRIC}
-{threshold_note}## 待评审
-
-### 用户原始问题
-{ctx.original_prompt}
-
-### 预期项目结构（应覆盖的要点）
-{ctx.expected_output}
-{file_section}
-{compile_run_section}
-## 评审操作步骤
-1. 使用 Read 工具读取当前目录下的 review-template.md 文件
-2. 逐一读取生成文件清单中的每个文件（文件在沙箱目录中，直接使用相对路径读取即可）
-3. **执行编译验证**：按照"编译与运行验证"部分的指引编译算子代码
-4. **执行运行验证**：按照"编译与运行验证"部分的指引运行算子
-5. 根据实际编译/运行结果，结合上述评分标准进行全面代码评审
-6. 使用 Write 工具将评审结果写入 review-template.md，替换所有方括号占位符：
-   - [PASS/FAIL] 替换为实际判定结果（PASS 或 FAIL）
-   - [0-100] 替换为实际总分（0-100 的整数）
-   - 表格中 [0-40]、[0-30]、[0-30] 替换为各维度实际得分（整数）
-   - 表格中 [YES/NO] 替换为各维度是否通过（得分 >= 阈值则为 YES，否则为 NO）
-   - [detailed review text here] 替换为详细评审意见，逐一说明每个维度的得分理由和扣分依据
-7. 只替换方括号占位符及其内容，不要修改模板的其他结构（标题、表格、分隔线、HTML注释）"""
 
 
 def _build_standard_review_prompt(ctx: ReviewPromptContext) -> str:
@@ -464,14 +358,7 @@ def _build_standard_review_prompt(ctx: ReviewPromptContext) -> str:
 
 
 def create_review_prompt(ctx: ReviewPromptContext) -> str:
-    """构造评测 session 的完整 prompt（评分标准 + 动态数据 + 模板填写指引）。
-
-    根据 eval_mode 分发到对应的 prompt 构建函数：
-    - code_gen: 跳过 AI 中间步骤，仅传 prompt + 预期输出 + 文件清单
-    - file_based / text: 标准模式，含 AI 中间步骤和回复
-    """
-    if ctx.eval_mode == "code_gen":
-        return _build_code_gen_review_prompt(ctx)
+    """构造评测 session 的完整 prompt（评分标准 + 动态数据 + 模板填写指引）。"""
     return _build_standard_review_prompt(ctx)
 
 
@@ -804,16 +691,9 @@ def validate_output(ctx: ValidationContext) -> None:
             _validate_expectation(exp_ctx)
 
 
-def _copy_review_template(sandbox_path: Optional[Path],
-                           eval_mode: str = "text") -> Optional[Path]:
-    """将对应评测模式的 review-template 复制到沙箱目录，返回目标路径或 None。
-
-    code_gen 模式使用 review-template-code-gen.md，其余使用 review-template.md。
-    """
-    template_name = (
-        "review-template-code-gen.md" if eval_mode == "code_gen"
-        else "review-template.md"
-    )
+def _copy_review_template(sandbox_path: Optional[Path]) -> Optional[Path]:
+    """将 review-template.md 复制到沙箱目录，返回目标路径或 None。"""
+    template_name = "review-template.md"
     template_src = FRAMEWORK_DIR / "config" / template_name
     template_dst = sandbox_path / "review-template.md" if sandbox_path else None
 
@@ -824,21 +704,11 @@ def _copy_review_template(sandbox_path: Optional[Path],
     return None
 
 
-def _read_review_result(template_dst: Optional[Path],
-                         eval_mode: str = "text") -> Dict[str, Any]:
-    """从沙箱读取填写后的 review-template.md 并解析评审结果。
-
-    code_gen 模式使用专用的维度常量解析，其余使用默认常量。
-    """
+def _read_review_result(template_dst: Optional[Path]) -> Dict[str, Any]:
+    """从沙箱读取填写后的 review-template.md 并解析评审结果。"""
     if template_dst and template_dst.exists():
         try:
             review_content = template_dst.read_text(encoding="utf-8")
-            if eval_mode == "code_gen":
-                return parse_review_md(
-                    review_content,
-                    dim_order=CODE_GEN_DIMENSION_ORDER,
-                    dim_max_scores=CODE_GEN_DIMENSION_MAX_SCORES,
-                )
             return parse_review_md(review_content)
         except (IOError, OSError) as e:
             return {"status": "error", "reason": f"读取模板文件失败: {e}"}
@@ -855,10 +725,7 @@ def _assert_review_passed(result: Dict[str, Any], ctx: ValidationContext) -> Non
 
     dim_thresholds = ctx.dim_thresholds
     if dim_thresholds is None:
-        dim_thresholds = (
-            CODE_GEN_DIMENSION_THRESHOLDS if ctx.eval_mode == "code_gen"
-            else DEFAULT_DIMENSION_THRESHOLDS
-        )
+        dim_thresholds = DEFAULT_DIMENSION_THRESHOLDS
     dim_scores = parse_dimension_scores(result.get("dimensions"))
     dim_check_msg = validate_dimension_scores(dim_scores, dim_thresholds, ctx.eval_id or "")
 
@@ -897,7 +764,7 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
                 len(ctx.generated_files) if ctx.generated_files else 0,
                 env_size)
 
-    template_dst = _copy_review_template(ctx.sandbox_path, ctx.eval_mode)
+    template_dst = _copy_review_template(ctx.sandbox_path)
 
     review_prompt = create_review_prompt(ReviewPromptContext(
         original_prompt=ctx.original_prompt,
@@ -905,8 +772,8 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
         reasoning=reasoning[:ctx.truncate_len],
         expected_output=ctx.expected_output,
         eval_mode=ctx.eval_mode,
-        file_list=ctx.generated_files if ctx.eval_mode in ("file_based", "code_gen") else None,
-        sandbox_path=ctx.sandbox_path if ctx.eval_mode in ("file_based", "code_gen") else None,
+        file_list=ctx.generated_files if ctx.eval_mode == "file_based" else None,
+        sandbox_path=ctx.sandbox_path if ctx.eval_mode == "file_based" else None,
         dim_thresholds=ctx.dim_thresholds,
     ))
 
@@ -915,7 +782,7 @@ def _validate_expected_output(ctx: ValidationContext) -> None:
     )
     assert not review_error, f"Eval {ctx.eval_id}: review session error - {review_error}"
 
-    result = _read_review_result(template_dst, ctx.eval_mode)
+    result = _read_review_result(template_dst)
     brief = {k: v for k, v in result.items() if k != "reason"}
     logger.info("[REVIEW RESULT] %s", json.dumps(brief, ensure_ascii=False))
     _assert_review_passed(result, ctx)
@@ -1309,7 +1176,7 @@ def _unpack_eval_inputs(eval_case: Dict[str, Any]) -> _EvalInputs:
     _validate_prompt(prompt, str(eval_id))
 
     eval_mode = eval_case.get("eval_mode", "text")
-    if eval_mode in ("file_based", "code_gen"):
+    if eval_mode == "file_based":
         prompt = prompt.rstrip() + FILE_BASED_HINT
     elif eval_mode == "cann_bench":
         prompt = prompt.rstrip() + CANN_BENCH_HINT

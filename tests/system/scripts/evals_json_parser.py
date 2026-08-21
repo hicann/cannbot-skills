@@ -86,7 +86,7 @@ def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
         eval_mode = "text"
     else:
         eval_mode = eval_mode.strip().lower()
-        if eval_mode not in ("text", "file_based", "code_gen", "cann_bench"):
+        if eval_mode not in ("text", "file_based", "cann_bench"):
             logger.warning("Invalid eval_mode '%s', falling back to 'text'", eval_mode)
             eval_mode = "text"
 
