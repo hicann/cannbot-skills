@@ -878,6 +878,55 @@
         "ascendc-port-orchestrator-shared-skills",
         "cannbot-knowledge-consumer-skills"
       ]
+    },
+    {
+      "name": "shmem-ops-skills",
+      "description": "SHMEM 自定义通信算子开发 Skills（10 个）。覆盖设计、代码生成、编译调试、正确性评估、HCCL 对比评测、性能优化、代码审查和 PyTorch 绑定。",
+      "source": "./plugins-community/shmem-ops-generator",
+      "strict": false,
+      "version": "0.1.0",
+      "author": {
+        "name": "CANNBot Community"
+      },
+      "keywords": [
+        "shmem",
+        "communication",
+        "collective",
+        "hccl",
+        "ascendc"
+      ],
+      "category": "skills",
+      "skills": [
+        "./skills/shmem-ops-dev",
+        "./skills/shmem-ops-design",
+        "./skills/shmem-ops-testcase-gen",
+        "./skills/shmem-ops-code-gen",
+        "./skills/shmem-ops-compile-debug",
+        "./skills/shmem-ops-correctness-eval",
+        "./skills/shmem-ops-performance-eval",
+        "./skills/shmem-ops-performance-optim",
+        "./skills/shmem-ops-code-review",
+        "./skills/shmem-ops-torch-bind"
+      ]
+    },
+    {
+      "name": "shmem-ops-generator",
+      "source": "./plugins-community/shmem-ops-generator",
+      "description": "基于 SHMEM 的 Ascend 自定义集体通信算子端到端开发插件，涵盖需求到性能优化的完整工作流。",
+      "version": "0.1.0",
+      "author": {
+        "name": "CANNBot Community"
+      },
+      "keywords": [
+        "shmem",
+        "communication",
+        "collective",
+        "operator"
+      ],
+      "category": "development",
+      "dependencies": [
+        "shmem-ops-skills"
+      ]
     }
   ]
 }

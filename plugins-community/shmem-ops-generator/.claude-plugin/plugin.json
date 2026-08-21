@@ -1,0 +1,17 @@
+{
+  "name": "shmem-ops-generator",
+  "description": "基于 SHMEM 的 Ascend 集体通信自定义算子开发插件，覆盖需求澄清、通信方案设计、代码生成、编译调试、正确性验证、性能评测与自动优化。",
+  "version": "0.1.0",
+  "author": {
+    "name": "CANNBot Community"
+  },
+  "homepage": "https://gitcode.com/cann/cannbot-skills",
+  "repository": "https://gitcode.com/cann/cannbot-skills",
+  "license": "CANN-2.0",
+  "dependencies": [
+    "shmem-ops-skills"
+  ],
+  "agents": [
+    "./AGENTS.md"
+  ]
+}
