@@ -61,6 +61,7 @@ skills:
 ## 依据什么
 
 - **编码依据**：`repo-coding-rules`（编码规范与常见错误条款）、`repo-op-templates`（算子代码模板与选择规则；开发时先把模板复制到工作区，以此为起点开发）。
+- **载体路线依据**：代码实现涉及 Cube（Blaze/tensor_api 路线）时，API 用法、参数签名与模板参数以 `ascendc-blaze-best-practice` 为权威源，不确定的用法先查该 skill 再编码，禁止凭记忆编写 Blaze/tensor_api 调用。
 - **编译验证依据**：`repo-build-guide`（代码验证要做到哪一步）。
 - **领域背景**：`repo-knowledge`。
 

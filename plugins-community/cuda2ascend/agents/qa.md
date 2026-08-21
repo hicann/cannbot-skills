@@ -12,6 +12,8 @@ skills:
     - workflow-cp4
     - workflow-cp5
     - ops-precision-standard
+    - ascendc-blaze-best-practice
+    - ascendc-docs-search
 ---
 
 # 验收角色

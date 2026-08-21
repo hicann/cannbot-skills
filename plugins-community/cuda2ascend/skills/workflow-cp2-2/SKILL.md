@@ -19,7 +19,7 @@ disable-model-invocation: true
 - **架构承接一致**：开发方案的代码架构与需求文档中用户已拍板的选型结果完全一致，未擅自改选；方案只做该架构下的落地细化，且所选模板与该架构匹配（对照 `repo-op-templates` 的模板选择规则）。
 - **schema 对齐**：plugin 层 `m.def(...)` 注册的 schema 与评测集算子原型定义（如 cann-bench `tasks/levelN/<op>/proto.yaml`）的 `schema:` 字段逐字一致（参数名、类型、默认值、返回值）。
 - **关键设计齐备**：Buffer 规划、Tiling 策略、多核切分策略均有明确设计，无悬空项。
-- **接口可行**：所用 Ascend C 接口经过验证、在目标架构上可用（对照 `repo-build-guide`、`repo-knowledge`）。
+- **接口可行**：所用 Ascend C 接口经过验证、在目标架构上可用（对照 `repo-build-guide`、`repo-knowledge`）。**按实现路径核对验证源**：代码实现涉及 Cube（Blaze/tensor_api 路线）时，接口验证须以 `ascendc-blaze-best-practice` 为权威源（在 skill 文档与 assets/ 中核对参数签名、类型约束与模板参数）；RegBase / MemBase / SIMT 路线须给出 `ascendc-docs-search` 的官方文档验证结果并覆盖同一 API 的所有变体。Blaze 路线下出现未经 `ascendc-blaze-best-practice` 确认的 API，判不通过。
 - **承接需求无冲突**：方案中的 dtype/shape/容差等承接自需求文档（= proto.yaml），未另立真值、无相互矛盾。
 - **资源约束自洽**：Buffer/Tiling 设计在目标芯片的 UB 大小、AI Core 数等资源约束内自洽。
 - **能力边界已核对**：方案依赖的硬件与编译器能力项逐条给出「支持 / 不支持 / 需绕行」结论与核对方式，不支持项已给绕行方案；留「应该可以 / 待定」式空结论者判不通过。

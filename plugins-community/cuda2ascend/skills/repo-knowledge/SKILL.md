@@ -16,5 +16,6 @@ description: 仓库领域知识，提供本仓算子涉及的领域标准、概�
 | **direct launch 评测契约** | [references/evaluation-contract.md](references/evaluation-contract.md) | 评测集结构（算子原型 / golden / cases / 性能基线）、提交工程契约（wheel + torch.ops schema 对齐）、三阶段评测流程（编译/精度/性能）、HAP 评分公式与取值边界、提交反作弊红线总览 |
 | 算子族设计方法论 | `ascendc-tiling-design` | 各算子族（Reduction / Elementwise / Broadcast / Conversion / MatMul 等）的场景路由、Tiling 策略、Buffer 规划、数据流方法论 |
 | 目标芯片架构 | `npu-arch` | 芯片型号 / SocVersion / NpuArch 概念、`--npu-arch` 合法值（ascend910b / ascend910_93 / ascend950）、架构特性 |
-| 代码架构选型 | `ascendc-regbase-best-practice`（RegBase 路线适用条件、约束与陷阱）、`ascendc-simt-best-practices`（SIMT 路线编程范式与 API 边界）；MemBase 默认路线与 **Cube 路线（矩阵计算单元，SIMD 的一种实现形态）** 的适用性分别依 `ascendc-tiling-design`、`ascendc-blaze-best-practice` 判断，目标芯片对各架构的支持情况依 `npu-arch` 判断 | 各代码架构的适用条件与代价，作为架构选型推荐的判断依据 |
+| 代码架构选型 | `ascendc-regbase-best-practice`（RegBase 路线适用条件、约束与陷阱）、`ascendc-simt-best-practices`（SIMT 路线编程范式与 API 边界）；MemBase 默认路线的适用性依 `ascendc-tiling-design` 判断，目标芯片对各架构的支持情况依 `npu-arch` 判断 | 各代码架构（候选两级：SIMD / SIMT）的适用条件与代价，作为架构选型推荐的判断依据 |
+| Cube 实现路径选型 | `ascendc-blaze-best-practice`（**Cube 实现路径/Blaze 路线权威源**：Ascend 950 / `DAV_3510` 上 Matmul 类算子——GEMM / BMM / 量化 matmul / matmul+bias 及其融合——的适用性判断、API 参数签名、类型约束与模板参数；纯 Vector 算子与非 ascend950 芯片不适用） | **独立于架构选型的载体层决策**：代码实现涉及 Cube 时，其实现路径（Blaze/tensor_api 路线）的选型依据；避免将 Cube 误作与 SIMD 并列的架构候选 |
 | 精度领域标准 | `ops-precision-standard` | 各 dtype 的精度容差标准与判定口径；**模式 A 下以评测框架实际执行判定的口径为最终裁定**（溯源方法见 evaluation-contract.md），本标准用于模式 B 及权威源未声明处的取值 |
