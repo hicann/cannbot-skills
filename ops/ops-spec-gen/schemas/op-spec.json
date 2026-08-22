@@ -140,7 +140,7 @@
         "properties": {
           "name": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"},
           "description": {"type": "string", "description": "自然语言说明（4.1 文档生成消费）"},
-          "role": {"enum": ["tensor", "scalar", "attribute_alias", "state"]},
+          "role": {"enum": ["tensor", "tensor_list", "scalar", "attribute_alias", "state"]},
           "dtype_set": {
             "type": "array",
             "minItems": 1,
@@ -166,11 +166,22 @@
           },
           "contiguous": {"enum": ["required", "optional", "any"]},
           "optional": {"type": "boolean"},
+          "list_length": {"$ref": "#/$defs/list_length"},
           "aliasing": {
             "type": "string",
             "pattern": "^(none|may_alias_with\\([a-zA-Z_][a-zA-Z0-9_]*\\))$"
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["role"],
+              "properties": {"role": {"const": "tensor_list"}}
+            },
+            "then": {"required": ["list_length"]},
+            "else": {"not": {"required": ["list_length"]}}
+          }
+        ]
       }
     },
     "attributes": {
@@ -218,6 +229,9 @@
         "properties": {
           "name": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"},
           "description": {"type": "string", "description": "自然语言说明（4.1 文档生成消费）"},
+          "role": {"enum": ["tensor", "tensor_list"], "default": "tensor"},
+          "optional": {"type": "boolean"},
+          "list_length": {"$ref": "#/$defs/list_length"},
           "shape_rule_kind": {"enum": ["numpy_expr", "data_dependent", "textual_only"]},
           "shape_rule": {"type": "string", "minLength": 1},
           "shape_rule_description": {"type": "string", "description": "可选，自然语言形状描述；data_dependent 强烈建议，numpy_expr 可由校验器回灌"},
@@ -241,7 +255,17 @@
             "pattern": "^(none|inplace_with\\([a-zA-Z_][a-zA-Z0-9_]*\\))$"
           },
           "data_dependent_shape": {"type": "boolean"}
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["role"],
+              "properties": {"role": {"const": "tensor_list"}}
+            },
+            "then": {"required": ["list_length"]},
+            "else": {"not": {"required": ["list_length"]}}
+          }
+        ]
       }
     },
     "shape_constraints": {
@@ -322,6 +346,66 @@
               "count": {"type": "integer"},
               "axis": {"type": "integer"},
               "policy": {"enum": ["no_broadcast", "numpy", "equal_or_one", "must_equal"]}
+            }
+          }
+        }
+      }
+    },
+    "semantic_cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "when", "inputs", "outputs"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"},
+          "when": {"type": "string", "minLength": 1},
+          "inputs": {"$ref": "#/$defs/semantic_case_inputs"},
+          "outputs": {"$ref": "#/$defs/semantic_case_outputs"}
+        }
+      }
+    },
+    "layout_contract": {
+      "type": "object",
+      "description": "可选的逻辑布局契约：声明布局变体下各已声明 Tensor 的逻辑轴顺序；不替代 inputs/outputs[].layout 的物理 format。",
+      "required": ["variants"],
+      "additionalProperties": false,
+      "properties": {
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "tensors"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"},
+              "when": {
+                "type": "string",
+                "minLength": 1,
+                "description": "可选。复用 semantic_cases.when 的受限 guard 语法；省略表示无条件生效。"
+              },
+              "tensors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["ref", "logical_axes"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "ref": {
+                      "type": "string",
+                      "pattern": "^(input|output)\\.[a-z][a-zA-Z0-9_]*$"
+                    },
+                    "logical_axes": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"}
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -585,6 +669,48 @@
     }
   },
   "$defs": {
+    "list_length": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["unconstrained", "fixed", "range", "same_as", "expression"]},
+        "value": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "string", "minLength": 1}]},
+        "min": {"type": "integer", "minimum": 0},
+        "max": {"type": "integer", "minimum": 0},
+        "ref": {"type": "string", "pattern": "^(input|output)\\.[a-z][a-zA-Z0-9_]*$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "unconstrained"}}}, "then": {"not": {"anyOf": [{"required": ["value"]}, {"required": ["min"]}, {"required": ["max"]}, {"required": ["ref"]}]}}},
+        {"if": {"properties": {"kind": {"const": "fixed"}}}, "then": {"required": ["value"], "properties": {"value": {"type": "integer", "minimum": 0}}}},
+        {"if": {"properties": {"kind": {"const": "range"}}}, "then": {"required": ["min", "max"]}},
+        {"if": {"properties": {"kind": {"const": "same_as"}}}, "then": {"required": ["ref"]}},
+        {"if": {"properties": {"kind": {"const": "expression"}}}, "then": {"required": ["value"], "properties": {"value": {"type": "string", "minLength": 1}}}}
+      ]
+    },
+    "semantic_case_inputs": {
+      "type": "object",
+      "required": ["required", "forbidden"],
+      "additionalProperties": false,
+      "properties": {
+        "required": {"$ref": "#/$defs/name_list"},
+        "forbidden": {"$ref": "#/$defs/name_list"}
+      }
+    },
+    "semantic_case_outputs": {
+      "type": "object",
+      "required": ["present", "absent"],
+      "additionalProperties": false,
+      "properties": {
+        "present": {"$ref": "#/$defs/name_list"},
+        "absent": {"$ref": "#/$defs/name_list"}
+      }
+    },
+    "name_list": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"}
+    },
     "dtype": {
       "enum": [
         "float64", "float32", "float16", "bfloat16",

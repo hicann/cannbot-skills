@@ -20,6 +20,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from validate_spec import (
+    Finding,
+    _check_interface_contracts,
+    _check_list_length_cycles,
+    _validate_list_length_expression,
+    _validate_semantic_guard,
+)
+
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = SKILL_ROOT / "scripts" / "validate_spec.py"
@@ -84,3 +92,99 @@ class TestErrorCodes:
         s2 = next(s for s in out["stages"] if s["stage_id"] == 2)
         assert s2["status"] == "FAIL"
         assert any("error_code_not_declared" in f["rule_id"] for f in s2["findings"])
+
+
+def test_guard_rejects_bare_input_reference():
+    errors = _validate_semantic_guard("input.x", set(), {"x"})
+    assert errors
+    assert any("裸 input.x" in error for error in errors)
+
+
+def test_list_length_expression_subtraction_requires_rhs_upper_bound():
+    attrs = {
+        "a": {"name": "a", "type": "int64", "machine_constraint": {"lower_inclusive": 0}},
+        "b": {"name": "b", "type": "int64", "machine_constraint": {"lower_inclusive": 0}},
+    }
+    assert _validate_list_length_expression("attr.a - attr.b", attrs, set())
+
+    attrs["a"]["machine_constraint"]["lower_inclusive"] = 3
+    attrs["b"]["machine_constraint"]["upper_inclusive"] = 3
+    assert not _validate_list_length_expression("attr.a - attr.b", attrs, set())
+
+
+def test_list_length_expression_multiplication_requires_non_negative_operands():
+    attrs = {
+        "a": {"name": "a", "type": "int64", "machine_constraint": {"lower_inclusive": -1}},
+        "b": {"name": "b", "type": "int64", "machine_constraint": {"lower_inclusive": -1}},
+    }
+    assert _validate_list_length_expression("attr.a * attr.b", attrs, set())
+
+    attrs["a"]["machine_constraint"]["lower_inclusive"] = 0
+    attrs["b"]["machine_constraint"]["lower_inclusive"] = 0
+    assert not _validate_list_length_expression("attr.a * attr.b", attrs, set())
+
+
+def test_list_length_cycle_is_reported_once():
+    inputs = [
+        {"name": "a", "role": "tensor_list", "list_length": {"kind": "same_as", "ref": "input.b"}},
+        {"name": "b", "role": "tensor_list", "list_length": {"kind": "same_as", "ref": "input.c"}},
+        {"name": "c", "role": "tensor_list", "list_length": {"kind": "same_as", "ref": "input.a"}},
+    ]
+    findings: list[Finding] = []
+    _check_list_length_cycles(inputs, [], findings)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "interface_contract.list_length_cycle"
+
+
+def test_semantic_case_and_layout_contract_valid_and_invalid_references():
+    base = {
+        "inputs": [
+            {"name": "x", "role": "tensor", "optional": True},
+            {"name": "mask", "role": "tensor", "optional": True},
+        ],
+        "outputs": [{"name": "y", "role": "tensor", "optional": True}],
+        "attributes": [{"name": "mode", "type": "string"}],
+    }
+    valid = {
+        **base,
+        "semantic_cases": [{
+            "id": "with_mask",
+            "when": "input.mask.is_present and attr.mode == 'fast'",
+            "inputs": {"required": ["x"], "forbidden": ["mask"]},
+            "outputs": {"present": ["y"], "absent": []},
+        }],
+        "layout_contract": {
+            "variants": [{
+                "id": "default",
+                "tensors": [
+                    {"ref": "input.x", "logical_axes": ["B", "S"]},
+                    {"ref": "output.y", "logical_axes": ["B", "S"]},
+                ],
+            }],
+        },
+    }
+    findings: list[Finding] = []
+    _check_interface_contracts(valid, findings)
+    assert not findings
+
+    invalid = {
+        **base,
+        "semantic_cases": [{
+            "id": "bad",
+            "when": "input.unknown.is_present",
+            "inputs": {"required": ["unknown"], "forbidden": []},
+            "outputs": {"present": [], "absent": []},
+        }],
+        "layout_contract": {
+            "variants": [{
+                "id": "bad",
+                "tensors": [{"ref": "input.missing", "logical_axes": ["B"]}],
+            }],
+        },
+    }
+    findings = []
+    _check_interface_contracts(invalid, findings)
+    rule_ids = {finding.rule_id for finding in findings}
+    assert "interface_contract.semantic_case_invalid_guard" in rule_ids
+    assert "interface_contract.semantic_case_unknown_member" in rule_ids
+    assert "interface_contract.layout_contract_unknown_ref" in rule_ids

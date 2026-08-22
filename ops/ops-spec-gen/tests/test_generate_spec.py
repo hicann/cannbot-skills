@@ -11,6 +11,7 @@ from __future__ import annotations
 import yaml
 
 from evaluators.stages import stage_3
+import generate_spec
 from generate_spec import GenInput, TensorSpec, render
 
 
@@ -73,3 +74,25 @@ def test_reduction_composite_keeps_same_shape_template():
     assert 'symbolic: ["...x"]' in spec
     assert "np.reduce_shape" not in spec
     assert "y.shape = x.shape" in spec
+
+
+def test_collect_list_length_retries_non_integer(monkeypatch):
+    monkeypatch.setattr(generate_spec, "prompt_choice", lambda *args, **kwargs: "fixed")
+    answers = iter(["abc", "2"])
+    monkeypatch.setattr("builtins.input", lambda *_args: next(answers))
+
+    assert generate_spec.collect_list_length("xs") == {"kind": "fixed", "value": 2}
+
+
+def test_collect_list_length_retries_invalid_range(monkeypatch):
+    monkeypatch.setattr(generate_spec, "prompt_choice", lambda *args, **kwargs: "range")
+    answers = iter(["3", "2", "1", "4"])
+    monkeypatch.setattr("builtins.input", lambda *_args: next(answers))
+
+    assert generate_spec.collect_list_length("xs") == {"kind": "range", "min": 1, "max": 4}
+
+
+def test_stateful_first_input_defaults_to_state():
+    assert generate_spec._default_input_role(None, ["Stateful"], 0) == "state"
+    assert generate_spec._default_input_role(None, ["Stateful"], 1) == "tensor"
+    assert generate_spec._default_input_role("tensor", ["Stateful"], 0) == "tensor"

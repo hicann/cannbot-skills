@@ -85,6 +85,17 @@ class TensorSpec:
     name: str
     dtype_set: list[str]
     rank_range: tuple[int, int] = (0, 8)
+    role: str | None = None
+    optional: bool = False
+    list_length: dict | None = None
+
+
+@dataclass
+class OutputSpec:
+    name: str
+    role: str = "tensor"
+    optional: bool = False
+    list_length: dict | None = None
 
 
 @dataclass
@@ -94,7 +105,7 @@ class GenInput:
     category: str
     paradigms: list[str]
     inputs: list[TensorSpec]
-    outputs: list[str]
+    outputs: list[str | OutputSpec]
     promotion: str = "same_as_first_input"
     broadcast_kind: str = "numpy"
     accumulation_order: str = "none"
@@ -103,10 +114,20 @@ class GenInput:
     axis_source: str = "attribute"
     paradigm_groups_mode: str = ""  # "" | "combination" | "fusion"
     format_variants: list[dict] = field(default_factory=list)
+    attributes: list[dict] = field(default_factory=list)
+    semantic_cases: list[dict] = field(default_factory=list)
+    layout_contract: dict | None = None
 
     def __post_init__(self):
         if self.supported_chips is None:
             self.supported_chips = []
+
+
+def _default_input_role(role: str | None, paradigms: list[str], index: int) -> str:
+    """Resolve the implicit role used by both interactive and CLI rendering."""
+    if role:
+        return role
+    return "state" if "Stateful" in paradigms and index == 0 else "tensor"
 
 
 def _filter_elementwise(paradigms: list[str]) -> list[str]:
@@ -214,6 +235,22 @@ def parse_tensor_arg(s: str) -> TensorSpec:
     return TensorSpec(name=name, dtype_set=dtype_set)
 
 
+def _normalize_outputs(outputs: list[str | OutputSpec]) -> list[OutputSpec]:
+    """Preserve the historical list[str] caller interface while supporting roles."""
+    return [item if isinstance(item, OutputSpec) else OutputSpec(name=item) for item in outputs]
+
+
+def _output_names(outputs: list[str | OutputSpec]) -> list[str]:
+    return [item.name if isinstance(item, OutputSpec) else item for item in outputs]
+
+
+def _render_mapping(lines: list[str], key: str, value: dict, indent: str) -> None:
+    """Render a small YAML mapping without introducing a second serializer path."""
+    lines.append(f"{indent}{key}:")
+    dumped = yaml.safe_dump(value, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    lines.extend(f"{indent}  {line}" for line in dumped.splitlines())
+
+
 def prompt(msg: str, default: str = "", allow_empty: bool = False) -> str:
     """Read a line from stdin; type 'q' or Ctrl-D / Ctrl-C to quit.
 
@@ -306,6 +343,176 @@ def prompt_multi_choice(msg: str, choices: list[str], defaults: list[str] | None
         return picked
 
 
+def prompt_name_list(msg: str) -> list[str]:
+    """Collect a comma-separated list; schema/stage 2 validates declared names."""
+    raw = prompt(msg, default="", allow_empty=True)
+    return [name.strip() for name in raw.split(",") if name.strip()]
+
+
+def _prompt_non_negative_int(msg: str, default: str) -> int:
+    """Prompt until a decimal non-negative integer is entered."""
+    while True:
+        raw = prompt(msg, default=default)
+        try:
+            value = int(raw)
+        except ValueError:
+            print("  [error] value must be a non-negative integer")
+            continue
+        if value < 0:
+            print("  [error] value must be a non-negative integer")
+            continue
+        return value
+
+
+def collect_list_length(label: str) -> dict:
+    """Collect the outer-length contract for one TensorList in interactive mode."""
+    kind = prompt_choice(
+        f"  {label}.list_length.kind",
+        ["unconstrained", "fixed", "range", "same_as", "expression"],
+        default="unconstrained",
+    )
+    if kind == "fixed":
+        return {
+            "kind": kind,
+            "value": _prompt_non_negative_int(
+                "    value (non-negative integer)", default="0",
+            ),
+        }
+    if kind == "range":
+        while True:
+            minimum = _prompt_non_negative_int(
+                "    min (non-negative integer)", default="0",
+            )
+            maximum = _prompt_non_negative_int(
+                "    max (non-negative integer)", default="1",
+            )
+            if minimum <= maximum:
+                return {"kind": kind, "min": minimum, "max": maximum}
+            print("  [error] min must be less than or equal to max")
+    if kind == "same_as":
+        return {"kind": kind, "ref": prompt("    ref (input.<name> or output.<name>)")}
+    if kind == "expression":
+        return {"kind": kind, "value": prompt("    expression")}
+    return {"kind": kind}
+
+
+def collect_conditional_attributes() -> list[dict]:
+    """Collect existing `attributes[]` entries needed by conditional signatures."""
+    attributes: list[dict] = []
+    if prompt_choice("是否补充用于条件签名的 attributes", ["no", "yes"], default="no") != "yes":
+        return attributes
+    print("  仅填写条件签名实际依赖的属性；自动注入属性无需重复填写。")
+    while True:
+        name = prompt(f"Attribute #{len(attributes) + 1} name (blank to finish)", default="", allow_empty=True)
+        if not name:
+            break
+        attr_type = prompt_choice(
+            "  type",
+            ["bool", "enum", "int64", "float32", "string", "list[int64]"],
+            default="bool",
+        )
+        default_text = prompt(
+            "  default (YAML scalar/list)", default="false" if attr_type == "bool" else "", allow_empty=True,
+        )
+        try:
+            default = yaml.safe_load(default_text)
+        except yaml.YAMLError as exc:
+            print(f"  ✗ default 不是合法 YAML 值: {exc}")
+            continue
+        attributes.append({
+            "name": name,
+            "type": attr_type,
+            "default": default,
+            "semantics": prompt("  semantics"),
+        })
+    return attributes
+
+
+def collect_semantic_cases(inputs: list[TensorSpec], outputs: list[OutputSpec]) -> list[dict]:
+    """Collect only presence contracts; formula/shape/dtype stay in their existing fields."""
+    if not any(item.optional for item in [*inputs, *outputs]):
+        return []
+    if prompt_choice("是否声明 optional I/O 的 semantic_cases", ["no", "yes"], default="no") != "yes":
+        return []
+    cases: list[dict] = []
+    print("  when 可使用 attr.<name>、input.<name>.dtype、input.<name>.is_present。")
+    while True:
+        case_id = prompt(f"Case #{len(cases) + 1} id (blank to finish)", default="", allow_empty=True)
+        if not case_id:
+            break
+        cases.append({
+            "id": case_id,
+            "when": prompt("  when"),
+            "inputs": {
+                "required": prompt_name_list("  required inputs (comma-separated, blank for none)"),
+                "forbidden": prompt_name_list("  forbidden inputs (comma-separated, blank for none)"),
+            },
+            "outputs": {
+                "present": prompt_name_list("  present outputs (comma-separated, blank for none)"),
+                "absent": prompt_name_list("  absent outputs (comma-separated, blank for none)"),
+            },
+        })
+    return cases
+
+
+def collect_layout_contract(inputs: list[TensorSpec], outputs: list[OutputSpec]) -> dict | None:
+    """Collect an optional logical-layout contract without adding CLI parameters.
+
+    Physical format stays in the existing per-I/O ``layout`` field.  This
+    collector records only the observable logical axis order for single-Tensor
+    inputs and outputs in each conditional layout variant.
+    """
+    eligible = [
+        # TensorSpec.role=None is the legacy/default construction path used by
+        # the non-interactive generator; build_inputs_block renders it as
+        # role=tensor.  Treat it identically here.
+        *[f"input.{item.name}" for item in inputs if item.role in (None, "tensor")],
+        *[f"output.{item.name}" for item in outputs if item.role == "tensor"],
+    ]
+    if not eligible:
+        return None
+    if prompt_choice(
+        "是否声明 layout_contract（逻辑布局变体及各 Tensor 的轴顺序）",
+        ["no", "yes"], default="no",
+    ) != "yes":
+        return None
+
+    variants: list[dict] = []
+    print("  when 可使用 attr.<name>、input.<name>.dtype、input.<name>.is_present；留空表示无条件。")
+    print(f"  可声明的单 Tensor 引用: {', '.join(eligible)}")
+    while True:
+        variant_id = prompt(
+            f"Layout variant #{len(variants) + 1} id (blank to finish)",
+            default="", allow_empty=True,
+        )
+        if not variant_id:
+            if not variants:
+                print("  至少需要 1 个 layout variant 或选 no")
+                continue
+            break
+        variant: dict = {"id": variant_id, "tensors": []}
+        when = prompt("  when (blank for unconditional)", default="", allow_empty=True)
+        if when:
+            variant["when"] = when
+        while True:
+            ref = prompt(
+                "  tensor ref (input.<name> or output.<name>; blank to finish this variant)",
+                default="", allow_empty=True,
+            )
+            if not ref:
+                if not variant["tensors"]:
+                    print("    至少需要 1 个 Tensor 轴表")
+                    continue
+                break
+            axes = prompt("    logical_axes (comma-separated, e.g. B,S,N,D)")
+            variant["tensors"].append({
+                "ref": ref,
+                "logical_axes": [axis.strip() for axis in axes.split(",") if axis.strip()],
+            })
+        variants.append(variant)
+    return {"variants": variants}
+
+
 def interactive_collect(reg: dict) -> GenInput:
     print("\n=== algorithm-spec.yaml interactive generator ===\n")
     op_name = prompt("Operator name (lowercase, e.g. softmax)")
@@ -396,10 +603,20 @@ def interactive_collect(reg: dict) -> GenInput:
                 continue
             break
         dtypes = prompt("  dtype_set (comma-separated)", default="float16,float32,bfloat16")
-        inputs.append(TensorSpec(name=name, dtype_set=[d.strip() for d in dtypes.split(",")]))
+        role = prompt_choice(
+            "  role",
+            ["tensor", "tensor_list", "scalar", "attribute_alias", "state"],
+            default=_default_input_role(None, paradigms, len(inputs)),
+        )
+        optional = prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        list_length = collect_list_length(name) if role == "tensor_list" else None
+        inputs.append(TensorSpec(
+            name=name, dtype_set=[d.strip() for d in dtypes.split(",")],
+            role=role, optional=optional, list_length=list_length,
+        ))
 
     print("\n--- Outputs ---")
-    outputs: list[str] = []
+    outputs: list[OutputSpec] = []
     while True:
         name = prompt(f"Output #{len(outputs)+1} name (blank to finish)", default="", allow_empty=True)
         if not name:
@@ -407,7 +624,14 @@ def interactive_collect(reg: dict) -> GenInput:
                 print("  must have ≥ 1 output")
                 continue
             break
-        outputs.append(name)
+        role = prompt_choice("  role", ["tensor", "tensor_list"], default="tensor")
+        optional = prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        list_length = collect_list_length(name) if role == "tensor_list" else None
+        outputs.append(OutputSpec(name=name, role=role, optional=optional, list_length=list_length))
+
+    attributes = collect_conditional_attributes()
+    semantic_cases = collect_semantic_cases(inputs, outputs)
+    layout_contract = collect_layout_contract(inputs, outputs)
 
     promotion = prompt_choice(
         "dtype_policy.promotion",
@@ -453,11 +677,14 @@ def interactive_collect(reg: dict) -> GenInput:
         axis_source=axis_source,
         paradigm_groups_mode=paradigm_groups_mode,
         format_variants=format_variants,
+        attributes=attributes,
+        semantic_cases=semantic_cases,
+        layout_contract=layout_contract,
     )
 
 
 def build_attributes_block(category: str, paradigms: list[str], inputs: list[TensorSpec],
-                           axis_source: str = "attribute") -> str:
+                           axis_source: str = "attribute", explicit_attributes: list[dict] | None = None) -> str:
     """Inject minimum required attrs per paradigm injection table.
 
     Multiple injectors may apply (e.g. Quantization + RandomSampling). Order
@@ -470,6 +697,7 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
       - implicit_all:   no axis parameter, reduces all axes
     """
     blocks: list[str] = []
+    injected_names: set[str] = set()
 
     if "Reduction" in paradigms and "Recurrence" not in paradigms:
         if axis_source == "attribute":
@@ -489,6 +717,7 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
                     f'      lower_inclusive: "-rank({target})"\n'
                     f'      upper_exclusive: "rank({target})"'
                 )
+                injected_names.add("dim")
         if _is_pure_reduction(category, paradigms) and axis_source != "implicit_all":
             blocks.append(
                 "  - name: keep_dims\n"
@@ -497,6 +726,7 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
                 '    semantics: "是否保留归约轴；保留时归约轴长度为 1"\n'
                 "    machine_constraint: {kind: bool}"
             )
+            injected_names.add("keep_dims")
 
     if "Quantization" in paradigms:
         blocks.append(
@@ -507,6 +737,7 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
             '    semantics: "量化零点"\n'
             "    machine_constraint: {kind: int_in_range}"
         )
+        injected_names.update({"scale", "zero_point"})
 
     if "RandomSampling" in paradigms:
         blocks.append(
@@ -514,8 +745,19 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
             '    semantics: "随机数种子；固定 seed 保证 bitwise_reproducible"\n'
             "    machine_constraint: {kind: int_in_range}"
         )
+        injected_names.add("seed")
 
-    return "\n".join(blocks) if blocks else "  []"
+    explicit_attributes = explicit_attributes or []
+    explicit_names = [item.get("name") for item in explicit_attributes]
+    duplicates = {name for name in explicit_names if explicit_names.count(name) > 1}
+    duplicates |= injected_names & set(explicit_names)
+    if duplicates:
+        raise ValueError(f"attributes 与自动注入属性重名: {sorted(duplicates)}")
+    explicit_block = ""
+    if explicit_attributes:
+        dumped = yaml.safe_dump(explicit_attributes, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+        explicit_block = "\n".join(f"  {line}" for line in dumped.splitlines())
+    return "\n".join(part for part in ("\n".join(blocks), explicit_block) if part) or "  []"
 
 
 def build_op_block(op_name: str, description: str, category: str,
@@ -553,13 +795,12 @@ def build_op_block(op_name: str, description: str, category: str,
 
 def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category: str) -> str:
     lines = []
-    has_stateful = "Stateful" in paradigms
     is_pure_reduction = _is_pure_reduction(category, paradigms)
     for i, inp in enumerate(inputs):
         # 折叠维名直接用 input 全名，避免多 input 同首字母冲突（e.g. xa/xb 都生成 "...x"）
         folded_name = inp.name.lower()
         # Stateful: 第一个 input 自动设为 role: state（占位；用户可改）
-        role = "state" if (has_stateful and i == 0) else "tensor"
+        role = _default_input_role(inp.role, paradigms, i)
         lines.append(f"  - name: {inp.name}")
         lines.append(f"    role: {role}")
         lines.append(f"    dtype_set: [{', '.join(inp.dtype_set)}]")
@@ -571,10 +812,14 @@ def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category:
             lines.append(f'      symbolic: ["...{folded_name}", "R"]')
         else:
             lines.append(f'      symbolic: ["...{folded_name}"]')
+        if inp.optional:
+            lines.append("    optional: true")
+        if inp.list_length is not None:
+            _render_mapping(lines, "list_length", inp.list_length, "    ")
     return "\n".join(lines)
 
 
-def build_outputs_block(outputs: list[str], first_input: str, category: str, paradigms: list[str],
+def build_outputs_block(outputs: list[str | OutputSpec], first_input: str, category: str, paradigms: list[str],
                         inputs: list[TensorSpec], axis_source: str = "attribute") -> str:
     """生成 outputs 段。
 
@@ -594,8 +839,15 @@ def build_outputs_block(outputs: list[str], first_input: str, category: str, par
         and any(d in ("int32", "int64") for d in inp.dtype_set)
         for inp in inputs
     )
-    for out in outputs:
+    for output in _normalize_outputs(outputs):
+        out = output.name
         lines.append(f"  - name: {out}")
+        if output.role != "tensor":
+            lines.append(f"    role: {output.role}")
+        if output.optional:
+            lines.append("    optional: true")
+        if output.list_length is not None:
+            _render_mapping(lines, "list_length", output.list_length, "    ")
         if is_variable_output:
             lines.append(f"    shape_rule_kind: data_dependent")
             lines.append(f"    data_dependent_shape: true")
@@ -651,6 +903,26 @@ def build_outputs_block(outputs: list[str], first_input: str, category: str, par
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
         lines.append(f"    layout: ND")
         lines.append(f"    aliasing: none")
+    return "\n".join(lines)
+
+
+def build_semantic_cases_block(cases: list[dict]) -> str:
+    if not cases:
+        return ""
+    dumped = yaml.safe_dump(cases, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    lines = ["semantic_cases:"]
+    lines.extend(f"  {line}" for line in dumped.splitlines())
+    return "\n".join(lines)
+
+
+def build_layout_contract_block(contract: dict | None) -> str:
+    """Render the optional top-level logical-layout contract."""
+    if not contract:
+        return ""
+    dumped = yaml.safe_dump(contract, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    lines = ["layout_contract:"]
+    # The root key was emitted above; insert only its mapping contents.
+    lines.extend(f"  {line}" for line in dumped.splitlines())
     return "\n".join(lines)
 
 
@@ -1071,7 +1343,8 @@ def build_format_variants_block(variants: list[dict]) -> str:
 def render(gi: GenInput) -> str:
     text = TEMPLATE.read_text(encoding="utf-8")
     first_input = gi.inputs[0].name
-    first_output = gi.outputs[0]
+    output_names = _output_names(gi.outputs)
+    first_output = output_names[0]
 
     techniques = "[]"
     if gi.numerical_stability_required:
@@ -1089,7 +1362,9 @@ def render(gi: GenInput) -> str:
     extra_extreme_cases = build_extra_extreme_cases(gi.paradigms, first_input)
 
     # 推断错误码集合并补一条 raises_error 占位 case，让 stage 2 J 规则有可校验对象
-    attributes_block = build_attributes_block(gi.category, gi.paradigms, gi.inputs, gi.axis_source)
+    attributes_block = build_attributes_block(
+        gi.category, gi.paradigms, gi.inputs, gi.axis_source, gi.attributes,
+    )
     error_codes = infer_error_codes(gi.paradigms, attributes_block)
     raises_error_case = build_raises_error_boundary_case(error_codes, first_input)
     extra_boundary_cases = (extra_boundary_cases + "\n" + raises_error_case
@@ -1110,6 +1385,8 @@ def render(gi: GenInput) -> str:
         "{{inputs_block}}": build_inputs_block(gi.inputs, gi.paradigms, gi.category),
         "{{attributes_block}}": attributes_block,
         "{{outputs_block}}": build_outputs_block(gi.outputs, first_input, gi.category, gi.paradigms, gi.inputs, gi.axis_source),
+        "{{semantic_cases_block}}": build_semantic_cases_block(gi.semantic_cases),
+        "{{layout_contract_block}}": build_layout_contract_block(gi.layout_contract),
         "{{reduction_block}}": build_reduction_block(gi.axis_source),
         "{{shape_symbols}}": build_shape_symbols_block(gi.category, gi.paradigms),
         "{{first_input}}": first_input,
@@ -1121,12 +1398,12 @@ def render(gi: GenInput) -> str:
         "{{numerical_stability_required}}": str(gi.numerical_stability_required).lower(),
         "{{numerical_stability_techniques}}": techniques,
         "{{accumulator_block}}": build_accumulator_block(gi.category, gi.paradigms),
-        "{{composition_block}}": build_composition_block(gi.paradigms, gi.inputs, gi.outputs),
+        "{{composition_block}}": build_composition_block(gi.paradigms, gi.inputs, output_names),
         "{{format_variants_block}}": build_format_variants_block(gi.format_variants),
         "{{supported_combinations_block}}": build_supported_combinations_block(
-            gi.inputs, gi.outputs, gi.promotion, gi.axis_source),
+            gi.inputs, output_names, gi.promotion, gi.axis_source),
         "{{per_dtype_tolerance_block}}": build_per_dtype_tolerance_block(
-            gi.inputs, gi.outputs, gi.promotion, gi.axis_source),
+            gi.inputs, output_names, gi.promotion, gi.axis_source),
         "{{extra_boundary_cases}}": extra_boundary_cases,
         "{{extra_extreme_cases}}": extra_extreme_cases,
     }
@@ -1181,9 +1458,14 @@ def main() -> int:
         category = _resolve_category(args.category, paradigms)
         if args.inputs:
             inputs = [parse_tensor_arg(s) for s in args.inputs.split(";") if s.strip()]
+            outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
+            attributes = []
+            semantic_cases = []
         else:
             inputs = [TensorSpec(name="x", dtype_set=["float32"])]
-        outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
+            outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
+            attributes = []
+            semantic_cases = []
 
         # supported_chips: CLI 显式给 → 直接用；否则按 dtype_set 自动收窄
         declared_dtypes: set[str] = set()
@@ -1220,6 +1502,9 @@ def main() -> int:
             axis_source=args.axis_source,
             paradigm_groups_mode=pg_mode,
             format_variants=parse_format_variants(args.format_variants, reg.get("layouts")),
+            attributes=attributes,
+            semantic_cases=semantic_cases,
+            layout_contract=None,
         )
         if args.axis_source == "attribute" and "Reduction" in paradigms:
             print(

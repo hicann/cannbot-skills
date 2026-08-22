@@ -71,7 +71,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 python3 scripts/generate_spec.py --output-dir <ops_dir>/<op_name>
 ```
 
-向导会问：op 名称、category（26 类单选）、paradigms（在 category 必含基础上自由追加）、每个 input/output 名+dtype、promotion / broadcast / accumulation_order。
+向导会问：op 名称、category（26 类单选）、paradigms（在 category 必含基础上自由追加）、每个 input/output 名+dtype、promotion / broadcast / accumulation_order；当需求存在逻辑布局变体时，还会收集 `layout_contract`。
 
 ### 3.2 非交互式（CI / 脚本）
 
@@ -96,6 +96,8 @@ python3 scripts/generate_spec.py \
 
 **format_variants**：当算子支持多种数据排布（NCHW/NHWC/NCDHW 等）且归约轴或计算逻辑因格式而异时，使用 `--format-variants` 参数声明每种格式的具体参数（归约轴、oracle kwargs 等）。生成器会在 `math_semantics` 下注入 `format_variants` 段。
 
+**layout_contract**：当 layout selector 会改变多个 Tensor 的业务逻辑轴顺序（如 attention 的 BSND/BNSD、NCHW→NHWC）时，仅交互式收集 `variants[].when` 与各 Tensor 的 `logical_axes`。它复用已有 `inputs[].layout` / `outputs[].layout` 记录物理 format，不新增 CLI 参数，也不代替 shape rule 或公式。
+
 **paradigm_groups 自动注入**：使用 `--paradigm-groups combination` 或 `--paradigm-groups fusion` 声明范式组合模式。`combination` 模式下 Elementwise 不会被自动过滤（它代表独立的范式分支），生成器为每个 paradigm 生成一条 combination 组（switch/when 为 TODO 占位符，需手填）。交互模式下，当选了 ≥ 2 个范式时会自动询问。
 
 ### 3.4 必须手填的 TODO
@@ -117,6 +119,7 @@ python3 scripts/generate_spec.py \
 - `boundary_conditions` — 校核 / 补全自动注入的退化 case 描述（详见 cheatsheet §B6）
 - `extreme_inputs` — 校核 / 补全 NaN / Inf / 全零三类
 - `math_semantics.format_variants` — 若算子支持多种数据排布（NCHW/NHWC/NCDHW 等）且计算因格式而异，校核每种格式的 reduction_axes 和 oracle_kwargs
+- `layout_contract` — 若存在逻辑布局变体，校核 selector、参与 Tensor 和每个 variant 的逻辑轴顺序；未确认的布局事实不得猜测生成
 
 ## 4. 校验 spec.yaml
 
@@ -131,7 +134,7 @@ python3 scripts/validate_spec.py path/to/spec.yaml --stage 1 --stage 2  # 仅跑
 | stage | 名称 | 核心检查 |
 |-------|------|---------|
 | 1 | schema_static | JSON Schema 字段校验（必填、类型、enum、pattern） |
-| 2 | category_paradigm_consistency | category↔paradigm 必含映射 + paradigm_groups + paradigm 内部约束 + 白名单 |
+| 2 | category_paradigm_consistency | category↔paradigm 必含映射 + paradigm_groups + paradigm 内部约束 + 白名单 + TensorList/semantic_cases/layout_contract 跨字段约束 |
 | 3 | shape_closure | `outputs[].shape_rule` numpy_expr 求值 + data_dependent 分流 |
 | 4 | dtype_closure | `outputs[].dtype_rule` 推导 vs supported_combinations 交叉验证 |
 | 5 | broadcast_legality | broadcast 语义校验（numpy / none / explicit） |
@@ -299,7 +302,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 | 职责层级 | 字段 | 说明 |
 |----------|------|------|
-| **L0 数学约束** | `inputs` / `outputs` / `math_semantics` / `shape_constraints` / `dtype_policy` / `broadcast` / `paradigm_groups` | 算子"应该做什么"，下游不可覆盖 |
+| **L0 数学约束** | `inputs` / `outputs` / `layout_contract` / `math_semantics` / `shape_constraints` / `dtype_policy` / `broadcast` / `paradigm_groups` | 算子"应该做什么"，下游不可覆盖 |
 | **L0 边界语义** | `boundary_conditions` / `extreme_inputs` | 算子在边界/异常情况的行为预期，下游不可覆盖 |
 | **L0 精度语义** | `numerical_tolerance` / `numerical_stability` / `determinism` | 算子精度要求，下游不可覆盖 |
 | **已移出** | `test_matrix` | 测试生成参数由 `ascendc-st-design` skill 独立管理 |

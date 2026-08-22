@@ -5,13 +5,13 @@
 
 ---
 
-## A. 顶层 15 个字段（test_matrix 已移出）
+## A. 顶层 17 个字段（test_matrix 已移出）
 
 ### A0. 字段职责分层
 
 | 职责层级 | 字段 | 说明 |
 |----------|------|------|
-| **L0 语义** | `op` / `inputs` / `attributes` / `outputs` / `shape_constraints` / `dtype_policy` / `broadcast`（计算是否需要数据广播） / `math_semantics` | 数学约束，下游不可覆盖 |
+| **L0 语义** | `op` / `inputs` / `attributes` / `outputs` / `semantic_cases` / `layout_contract` / `shape_constraints` / `dtype_policy` / `broadcast`（计算是否需要数据广播） / `math_semantics` | 数学约束，下游不可覆盖 |
 | **L0 语义** | `boundary_conditions`（合法但退化的输入 case）/ `extreme_inputs`（NaN / Inf / 全零等异常输入 case） | 下游不可覆盖 |
 | **L0 语义** | `numerical_tolerance` / `numerical_stability` / `determinism` | 精度语义，下游不可覆盖 |
 | **已移出** | `test_matrix` | 测试生成参数由 `ascendc-st-design` skill 独立管理 |
@@ -24,6 +24,8 @@ op:                        # 元信息：name / version / description / category
 inputs: []                 # 张量/标量/state，按位置排列
 attributes: []             # 非张量参数，含 machine_constraint
 outputs: []                # 用 numpy 子集表达式描述 shape/dtype 推导规则
+semantic_cases: []         # 可选输入/输出的条件存在性；when 只允许 attr.<name>、input.<name>.dtype 或 input.<name>.is_present
+layout_contract: {}        # 可选逻辑布局变体：selector + 已声明 Tensor 的 logical_axes；不替代各 I/O 的 layout
 shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 9-stage 机器校验，见 §D.8）+ notes
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
 broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
@@ -181,7 +183,35 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 
 跨字段占位符（用于 oracle.kwargs / formula 等）：`${attr.<name>}` / `${input.<name>.shape[i]}` / `${output.<name>.dtype}` / `${format_variants[].<field>}`。
 
-### B5c. format_variants（数据排布格式变体）
+### B5c. layout_contract（逻辑布局变体）
+
+`layout_contract` 是可选顶层字段，用于表达一个 layout selector 下，多个已声明 Tensor 的**逻辑轴名称和顺序**。它适用于 attention 的 BSND/BNSD、NCHW↔NHWC 转换、image/grid/output 的空间轴对应等；普通逐元素算子可省略。
+
+```yaml
+layout_contract:
+  variants:
+    - id: bsnd
+      when: "attr.input_layout == 'BSND'"
+      tensors:
+        - {ref: input.query, logical_axes: [B, S1, N1, Dk]}
+        - {ref: input.key,   logical_axes: [B, S2, N2, Dk]}
+        - {ref: output.y,    logical_axes: [B, S1, N1, Dv]}
+    - id: bnsd
+      when: "attr.input_layout == 'BNSD'"
+      tensors:
+        - {ref: input.query, logical_axes: [B, N1, S1, Dk]}
+        - {ref: input.key,   logical_axes: [B, N2, S2, Dk]}
+        - {ref: output.y,    logical_axes: [B, N1, S1, Dv]}
+```
+
+- **`variants[].id`**：必填且全局唯一的 layout variant 标识符。
+- **`variants[].when`**：可选；复用 `semantic_cases.when` 的受限 guard DSL。缺失表示该变体无条件生效。
+- **`variants[].tensors[].ref`**：必填，引用已声明的 `input.<name>` 或 `output.<name>`，且该接口必须是 `role: tensor`。
+- **`logical_axes`**：必填、非空、同一 Tensor 内唯一的标识符数组，按张量的维度位置顺序书写。它们是轴语义标签，不自动声明跨 Tensor 的长度相等。
+
+`layout_contract` **不**添加 `physical_format`：物理/表示 format 仍唯一地由既有 `inputs[].layout` / `outputs[].layout` 声明。它也不重复声明 transpose/permutation 或 shape 公式；这些仍由 `math_semantics.formula` 与 `outputs[].shape_rule` 定义。固定 rank input 的 `logical_axes` 个数由 Stage 2 校验；输出没有 `rank_range`，不从其 shape rule 猜测 rank。
+
+### B5d. format_variants（数据排布格式变体）
 
 当算子支持多种数据排布（如 NCHW/NHWC/NCDHW）且**归约轴或计算逻辑因格式而异**时，
 在 `math_semantics.format_variants` 中声明每种格式的具体参数：

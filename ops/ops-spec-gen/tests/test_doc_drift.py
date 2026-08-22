@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import dump_rule_ids
+
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 TOOL = SKILL_ROOT / "scripts" / "dump_rule_ids.py"
@@ -32,3 +34,12 @@ def test_error_codes_doc_in_sync():
         "    python3 scripts/dump_rule_ids.py --write\n\n"
         + r.stderr + r.stdout
     )
+
+
+def test_direct_finding_rule_ids_are_scanned():
+    rule_ids, _ = dump_rule_ids._scan()
+    assert {
+        "interface_contract.list_length_cycle",
+        "interface_contract.semantic_case_conflicting_members",
+        "interface_contract.semantic_case_unknown_member",
+    } <= rule_ids

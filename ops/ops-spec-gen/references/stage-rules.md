@@ -43,6 +43,27 @@
 | `format_variants.reduction_axes_negative` | format_variants[].reduction_axes 含负值 ⇒ ERR |
 | `format_variants.reduction_axes_out_of_rank` | format_variants[].reduction_axes 中某值 ≥ variant.rank ⇒ ERR |
 | `format_variants.oracle_kwargs_dim_mismatch` | format_variants[].oracle_kwargs.dim 与 reduction_axes 不一致 ⇒ WARN |
+| `interface_contract.tensor_list_length_missing` | role=tensor_list 必须声明 list_length |
+| `interface_contract.list_length_non_list` | 非 tensor_list 接口不得声明 list_length |
+| `interface_contract.list_length_negative` | fixed/range 的列表长度必须非负 |
+| `interface_contract.list_length_invalid_range` | list_length.range 必须满足 min <= max |
+| `interface_contract.list_length_unknown_ref` | list_length.same_as 引用必须指向已声明接口 |
+| `interface_contract.list_length_ref_not_list` | list_length.same_as 目标必须是 tensor_list |
+| `interface_contract.list_length_cycle` | list_length.same_as 不得形成循环引用，单个环只报告一次 |
+| `interface_contract.list_length_expression` | expression 必须遵循受限 DSL 且可证明非负 |
+| `interface_contract.semantic_case_duplicate_id` | semantic_cases[].id 必须唯一 |
+| `interface_contract.semantic_case_invalid_guard` | semantic_cases[].when 必须遵循受限 guard DSL |
+| `interface_contract.semantic_case_unknown_member` | semantic case 只能引用已声明的 input/output |
+| `interface_contract.semantic_case_conflicting_members` | 同一 semantic case 不得同时把成员列入正反集合 |
+| `interface_contract.semantic_case_input_not_optional` | semantic case 只能改变 optional input 的存在性 |
+| `interface_contract.semantic_case_output_not_optional` | semantic case 只能改变 optional output 的存在性 |
+| `interface_contract.semantic_case_conflicting_same_guard` | 相同 guard 不得声明冲突的 I/O 存在性 |
+| `interface_contract.layout_contract_duplicate_variant_id` | layout_contract.variants[].id 重复 ⇒ ERR |
+| `interface_contract.layout_contract_invalid_guard` | layout_contract.variants[].when 未遵循 semantic_cases 的受限 guard DSL ⇒ ERR |
+| `interface_contract.layout_contract_unknown_ref` | layout_contract 引用了未声明的 input/output Tensor ⇒ ERR |
+| `interface_contract.layout_contract_ref_not_tensor` | layout_contract 引用的接口不是 role=tensor ⇒ ERR |
+| `interface_contract.layout_contract_duplicate_tensor_ref` | 同一 layout variant 中重复声明同一 Tensor ⇒ ERR |
+| `interface_contract.layout_contract_rank_mismatch` | 固定 rank input 的 logical_axes 数量不等于 rank ⇒ ERR |
 
 ### paradigm_groups 字段说明
 

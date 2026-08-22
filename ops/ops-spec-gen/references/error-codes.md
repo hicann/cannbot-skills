@@ -43,6 +43,31 @@
 - `invariant_kind_resolved.tolerance_inherit_required`
 - `invariant_kind_resolved.unknown_kind`
 
+## Stage 2 interface_contract
+
+- `interface_contract.layout_contract_duplicate_tensor_ref`
+- `interface_contract.layout_contract_duplicate_variant_id`
+- `interface_contract.layout_contract_invalid_guard`
+- `interface_contract.layout_contract_rank_mismatch`
+- `interface_contract.layout_contract_ref_not_tensor`
+- `interface_contract.layout_contract_unknown_ref`
+- `interface_contract.list_length_cycle`
+- `interface_contract.list_length_expression`
+- `interface_contract.list_length_invalid_range`
+- `interface_contract.list_length_negative`
+- `interface_contract.list_length_non_list`
+- `interface_contract.list_length_ref_not_list`
+- `interface_contract.list_length_unexpected_field`
+- `interface_contract.list_length_unknown_ref`
+- `interface_contract.semantic_case_conflicting_members`
+- `interface_contract.semantic_case_conflicting_same_guard`
+- `interface_contract.semantic_case_duplicate_id`
+- `interface_contract.semantic_case_input_not_optional`
+- `interface_contract.semantic_case_invalid_guard`
+- `interface_contract.semantic_case_output_not_optional`
+- `interface_contract.semantic_case_unknown_member`
+- `interface_contract.tensor_list_length_missing`
+
 ## Stage 3 shape_closure
 
 - `shape_closure.data_dependent_flag_missing`

@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import functools
 import json
 import re
@@ -138,6 +139,7 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
     _check_composition_hint(spec, paradigms, res.findings)
     _check_broadcast_paradigm_hint(spec, paradigms, res.findings)
     _check_format_variants(spec, res.findings)
+    _check_interface_contracts(spec, res.findings)
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -145,6 +147,499 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
 
 
 # ---------- stage 2 sub-checks --------------------------------------------
+
+
+def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
+    """Validate TensorList and conditional-interface additions.
+
+    JSON Schema owns field types and conditional requiredness.  This stage owns
+    cross-reference validation (list-length references and semantic cases) and
+    the deliberately small, non-executable guard/expression languages.
+    """
+    inputs = spec.get("inputs") or []
+    outputs = spec.get("outputs") or []
+    attributes = spec.get("attributes") or []
+    input_by_name = {item.get("name"): item for item in inputs}
+    output_by_name = {item.get("name"): item for item in outputs}
+    attr_names = {item.get("name") for item in attributes}
+    attrs_by_name = {item.get("name"): item for item in attributes}
+
+    def error(rule_id: str, path: str, message: str, fix: str) -> None:
+        findings.append(Finding("error", rule_id, path, message, fix))
+
+    def check_list_length(item: dict, path: str, default_role: str) -> None:
+        role = item.get("role", default_role)
+        length = item.get("list_length")
+        if role == "tensor_list" and not isinstance(length, dict):
+            error(
+                "interface_contract.tensor_list_length_missing", path,
+                "role=tensor_list 必须声明 list_length。",
+                "添加 list_length: {kind: unconstrained} 或来源支持的更强约束。",
+            )
+            return
+        if role != "tensor_list" and length is not None:
+            error(
+                "interface_contract.list_length_non_list", f"{path}.list_length",
+                "list_length 只允许用于 role=tensor_list。",
+                "删除 list_length，或将 role 改为 tensor_list。",
+            )
+            return
+        if not isinstance(length, dict):
+            return
+
+        kind = length.get("kind")
+        allowed_fields = {
+            "unconstrained": {"kind"},
+            "fixed": {"kind", "value"},
+            "range": {"kind", "min", "max"},
+            "same_as": {"kind", "ref"},
+            "expression": {"kind", "value"},
+        }
+        if kind in allowed_fields and (unexpected := set(length) - allowed_fields[kind]):
+            error(
+                "interface_contract.list_length_unexpected_field", f"{path}.list_length",
+                f"list_length.kind={kind!r} 不允许字段 {sorted(unexpected)}。",
+                f"仅保留 {sorted(allowed_fields[kind])}。",
+            )
+        if kind == "fixed" and isinstance(length.get("value"), int):
+            if length["value"] < 0:
+                error(
+                    "interface_contract.list_length_negative", f"{path}.list_length.value",
+                    "list_length.fixed value 必须非负。",
+                    "将 value 设置为大于等于 0 的整数。",
+                )
+        elif kind == "range" and isinstance(length.get("min"), int) and isinstance(length.get("max"), int):
+            if length["min"] < 0 or length["max"] < 0:
+                error(
+                    "interface_contract.list_length_negative", f"{path}.list_length",
+                    "list_length.range 的 min 和 max 必须非负。",
+                    "将 min 和 max 设置为大于等于 0 的整数。",
+                )
+            if length["min"] > length["max"]:
+                error(
+                    "interface_contract.list_length_invalid_range", f"{path}.list_length",
+                    "list_length.range 必须满足 min <= max。",
+                    "交换或修正 min/max。",
+                )
+        elif kind == "same_as":
+            ref = length.get("ref")
+            target = None
+            if isinstance(ref, str) and ref.startswith("input."):
+                target = input_by_name.get(ref.removeprefix("input."))
+            elif isinstance(ref, str) and ref.startswith("output."):
+                target = output_by_name.get(ref.removeprefix("output."))
+            if target is None:
+                error(
+                    "interface_contract.list_length_unknown_ref", f"{path}.list_length.ref",
+                    f"list_length.same_as 引用了不存在的 {ref!r}。",
+                    "引用已声明的 input.<name> 或 output.<name>。",
+                )
+            elif target.get("role", "tensor") != "tensor_list":
+                error(
+                    "interface_contract.list_length_ref_not_list", f"{path}.list_length.ref",
+                    f"{ref!r} 不是 role=tensor_list，不能作为列表长度引用。",
+                    "改为引用 tensor_list，或为目标声明 role: tensor_list。",
+                )
+        elif kind == "expression":
+            expression = length.get("value")
+            if isinstance(expression, str):
+                for message in _validate_list_length_expression(expression, attrs_by_name, set(input_by_name)):
+                    error(
+                        "interface_contract.list_length_expression", f"{path}.list_length.value",
+                        message,
+                        "只使用 attr.<name>、len(attr.<list_attr>)、shape.<input>[<常量轴>]、整数、+、-、* 和括号。",
+                    )
+
+    for index, item in enumerate(inputs):
+        check_list_length(item, f"inputs[{index}]", "tensor")
+    for index, item in enumerate(outputs):
+        check_list_length(item, f"outputs[{index}]", "tensor")
+    _check_list_length_cycles(inputs, outputs, findings)
+
+    seen_ids: set[str] = set()
+    signatures: dict[str, tuple[set[str], set[str], set[str], set[str]]] = {}
+    for index, case in enumerate(spec.get("semantic_cases") or []):
+        path = f"semantic_cases[{index}]"
+        case_id = case.get("id")
+        if case_id in seen_ids:
+            error(
+                "interface_contract.semantic_case_duplicate_id", f"{path}.id",
+                f"semantic case id {case_id!r} 重复。",
+                "为每个 semantic case 使用唯一 id。",
+            )
+        seen_ids.add(case_id)
+
+        when = case.get("when")
+        if isinstance(when, str):
+            for message in _validate_semantic_guard(when, attr_names, set(input_by_name)):
+                error(
+                    "interface_contract.semantic_case_invalid_guard", f"{path}.when", message,
+                    "guard 只可引用 attr.<name>、input.<name>.dtype、input.<name>.is_present，"
+                    "并使用 ==/!=/in/not in/and/or/not。",
+                )
+
+        case_inputs = case.get("inputs") or {}
+        case_outputs = case.get("outputs") or {}
+        required = set(case_inputs.get("required") or [])
+        forbidden = set(case_inputs.get("forbidden") or [])
+        present = set(case_outputs.get("present") or [])
+        absent = set(case_outputs.get("absent") or [])
+        _check_case_name_set(required, forbidden, input_by_name, "input", path, findings)
+        _check_case_name_set(present, absent, output_by_name, "output", path, findings)
+
+        for name in required | forbidden:
+            if name in input_by_name and not input_by_name[name].get("optional", False):
+                error(
+                    "interface_contract.semantic_case_input_not_optional", f"{path}.inputs",
+                    f"{name!r} 不是 optional input，不能由 semantic_cases 改变存在性。",
+                    "在 input 上添加 optional: true，或删除该 case 约束。",
+                )
+        for name in present | absent:
+            if name in output_by_name and not output_by_name[name].get("optional", False):
+                error(
+                    "interface_contract.semantic_case_output_not_optional", f"{path}.outputs",
+                    f"{name!r} 不是 optional output，不能由 semantic_cases 改变存在性。",
+                    "在 output 上添加 optional: true，或删除该 case 约束。",
+                )
+
+        signature = (required, forbidden, present, absent)
+        if isinstance(when, str) and when in signatures and signatures[when] != signature:
+            error(
+                "interface_contract.semantic_case_conflicting_same_guard", path,
+                f"guard {when!r} 与先前 case 的 input/output 存在性约束冲突。",
+                "合并 case，或使用互斥的 when guard。",
+            )
+        elif isinstance(when, str):
+            signatures[when] = signature
+
+    _check_layout_contract(
+        spec.get("layout_contract"), input_by_name, output_by_name, attr_names, findings,
+    )
+
+
+def _check_layout_contract(
+    contract: Any, input_by_name: dict, output_by_name: dict,
+    attr_names: set[str], findings: list[Finding],
+) -> None:
+    """Validate cross references in the optional logical-layout contract.
+
+    Schema validation owns the tree shape, identifiers and duplicate axis names.
+    This function owns references to the declared interface, guard DSL reuse and
+    the one rank fact available in the current interface model: input.rank_range.
+    """
+    if not isinstance(contract, dict):
+        return
+
+    def error(rule_id: str, path: str, message: str, fix: str) -> None:
+        findings.append(Finding("error", rule_id, path, message, fix))
+
+    seen_ids: set[str] = set()
+    for index, variant in enumerate(contract.get("variants") or []):
+        if not isinstance(variant, dict):
+            continue
+        path = f"layout_contract.variants[{index}]"
+        variant_id = variant.get("id")
+        if variant_id in seen_ids:
+            error(
+                "interface_contract.layout_contract_duplicate_variant_id", f"{path}.id",
+                f"layout variant id {variant_id!r} 重复。",
+                "为每个 layout variant 使用唯一 id。",
+            )
+        seen_ids.add(variant_id)
+
+        when = variant.get("when")
+        if isinstance(when, str):
+            for message in _validate_semantic_guard(when, attr_names, set(input_by_name)):
+                error(
+                    "interface_contract.layout_contract_invalid_guard", f"{path}.when", message,
+                    "guard 只可引用 attr.<name>、input.<name>.dtype、input.<name>.is_present，"
+                    "并使用 ==/!=/in/not in/and/or/not。",
+                )
+
+        seen_refs: set[str] = set()
+        for tensor_index, tensor in enumerate(variant.get("tensors") or []):
+            if not isinstance(tensor, dict):
+                continue
+            tensor_path = f"{path}.tensors[{tensor_index}]"
+            ref = tensor.get("ref")
+            if ref in seen_refs:
+                error(
+                    "interface_contract.layout_contract_duplicate_tensor_ref", f"{tensor_path}.ref",
+                    f"{ref!r} 在同一 layout variant 中重复。",
+                    "每个 Tensor 在一个 variant 中只声明一次 logical_axes。",
+                )
+            seen_refs.add(ref)
+
+            target = None
+            is_input = False
+            if isinstance(ref, str) and ref.startswith("input."):
+                target = input_by_name.get(ref.removeprefix("input."))
+                is_input = True
+            elif isinstance(ref, str) and ref.startswith("output."):
+                target = output_by_name.get(ref.removeprefix("output."))
+            if target is None:
+                error(
+                    "interface_contract.layout_contract_unknown_ref", f"{tensor_path}.ref",
+                    f"layout_contract 引用了未声明的 Tensor {ref!r}。",
+                    "引用已声明的 input.<name> 或 output.<name>。",
+                )
+                continue
+            if target.get("role", "tensor") != "tensor":
+                error(
+                    "interface_contract.layout_contract_ref_not_tensor", f"{tensor_path}.ref",
+                    f"{ref!r} 的 role={target.get('role', 'tensor')!r}，不能声明单 Tensor 的 logical_axes。",
+                    "只引用 role=tensor 的 input/output；TensorList 的元素布局需单独建模。",
+                )
+                continue
+
+            # Outputs currently have no rank_range. Do not infer rank from a
+            # shape formula; only validate an explicit, exact input rank.
+            rank_range = target.get("rank_range") if is_input else None
+            axes = tensor.get("logical_axes")
+            if (
+                isinstance(rank_range, list) and len(rank_range) == 2
+                and rank_range[0] == rank_range[1]
+                and isinstance(rank_range[0], int)
+                and isinstance(axes, list) and len(axes) != rank_range[0]
+            ):
+                error(
+                    "interface_contract.layout_contract_rank_mismatch", f"{tensor_path}.logical_axes",
+                    f"{ref!r} 的固定 rank 为 {rank_range[0]}，但 logical_axes 有 {len(axes)} 项。",
+                    "使 logical_axes 项数与该 input 的固定 rank 一致，或修正 rank_range。",
+                )
+
+
+def _check_case_name_set(
+    positive: set[str], negative: set[str], declared: dict, kind: str,
+    path: str, findings: list[Finding],
+) -> None:
+    if overlap := positive & negative:
+        findings.append(Finding(
+            "error", "interface_contract.semantic_case_conflicting_members", path,
+            f"同一 semantic case 中 {kind} 同时出现在相反集合：{sorted(overlap)}。",
+            "将每个名称仅保留在 required/forbidden 或 present/absent 的一侧。",
+        ))
+    for name in sorted((positive | negative) - set(declared)):
+        findings.append(Finding(
+            "error", "interface_contract.semantic_case_unknown_member", path,
+            f"semantic case 引用了未声明的 {kind} {name!r}。",
+            f"改为已声明的 {kind} 名称，或先在接口中声明它。",
+        ))
+
+
+def _check_list_length_cycles(inputs: list[dict], outputs: list[dict], findings: list[Finding]) -> None:
+    """same_as may follow input/output references, but it must not form a cycle."""
+    refs: dict[str, str] = {}
+    for prefix, items in (("input", inputs), ("output", outputs)):
+        for item in items:
+            length = item.get("list_length") or {}
+            if length.get("kind") == "same_as" and isinstance(length.get("ref"), str):
+                refs[f"{prefix}.{item.get('name')}"] = length["ref"]
+
+    reported_cycles: set[frozenset[str]] = set()
+    for start in refs:
+        seen: list[str] = []
+        current = start
+        while current in refs:
+            if current in seen:
+                cycle = seen[seen.index(current):] + [current]
+                cycle_nodes = frozenset(cycle[:-1])
+                if cycle_nodes not in reported_cycles:
+                    findings.append(Finding(
+                        "error", "interface_contract.list_length_cycle", "list_length.ref",
+                        f"list_length.same_as 存在循环引用：{' -> '.join(cycle)}。",
+                        "让至少一个 TensorList 使用 unconstrained/fixed/range/expression 作为长度根。",
+                    ))
+                    reported_cycles.add(cycle_nodes)
+                break
+            seen.append(current)
+            current = refs[current]
+def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[str]) -> list[str]:
+    """Return validation errors for the non-executable semantic-case guard DSL."""
+    try:
+        tree = ast.parse(guard, mode="eval")
+    except SyntaxError as exc:
+        return [f"guard 不是合法表达式：{exc.msg}。"]
+
+    errors: list[str] = []
+    parents = {
+        id(child): parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+    def ref(node: ast.AST) -> tuple[str, str, str] | None:
+        if not isinstance(node, ast.Attribute):
+            return None
+        if isinstance(node.value, ast.Name) and node.value.id == "attr":
+            return ("attr", node.attr, "")
+        if isinstance(node.value, ast.Name) and node.value.id == "input":
+            # `input.x` 是 `input.x.dtype/is_present` 的中间 AST 节点。
+            return ("input_base", node.attr, "")
+        if isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name) and node.value.value.id == "input":
+            return ("input", node.value.attr, node.attr)
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            errors.append("guard 不允许函数调用。")
+        elif isinstance(node, ast.BinOp):
+            errors.append("guard 不允许算术运算。")
+        elif isinstance(node, ast.Compare) and any(not isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
+            errors.append("guard 只允许 ==、!=、in、not in 比较。")
+        elif isinstance(node, ast.Attribute):
+            parsed = ref(node)
+            if parsed is None:
+                errors.append("guard 引用必须是 attr.<name>、input.<name>.dtype 或 input.<name>.is_present。")
+                continue
+            kind, name, leaf = parsed
+            if kind == "attr" and name not in attr_names:
+                errors.append(f"guard 引用了未声明属性 attr.{name}。")
+            if kind in {"input", "input_base"}:
+                if name not in input_names:
+                    errors.append(f"guard 引用了未声明输入 input.{name}。")
+                if kind == "input_base":
+                    parent = parents.get(id(node))
+                    if not (isinstance(parent, ast.Attribute) and parent.value is node):
+                        errors.append(
+                            f"guard 不支持裸 input.{name}；只允许 input.{name}.dtype 或 input.{name}.is_present。"
+                        )
+                if kind == "input" and leaf not in {"dtype", "is_present"}:
+                    errors.append(f"guard 不支持 input.{name}.{leaf}；只允许 dtype 或 is_present。")
+        elif isinstance(node, ast.Name) and node.id not in {"attr", "input", "true", "false"}:
+            errors.append(f"guard 不允许名称 {node.id!r}。")
+        elif isinstance(node, (ast.Expression, ast.Name, ast.BoolOp, ast.UnaryOp, ast.Compare, ast.Load,
+                               ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.In, ast.NotIn,
+                               ast.Constant, ast.List, ast.Tuple)):
+            continue
+        elif isinstance(node, ast.Attribute):
+            continue
+        else:
+            errors.append(f"guard 不允许语法节点 {type(node).__name__}。")
+    return list(dict.fromkeys(errors))
+
+
+def _validate_list_length_expression(
+    expression: str, attrs_by_name: dict[str, dict], input_names: set[str],
+) -> list[str]:
+    """Validate the intentionally small integer-expression language for list length."""
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        return [f"list_length expression 不是合法表达式：{exc.msg}。"]
+
+    errors: list[str] = []
+
+    def attribute_interval(name: str) -> tuple[int | None, int | None]:
+        """Return the statically known integer interval for an attribute."""
+        attr = attrs_by_name.get(name)
+        if not attr or attr.get("type") != "int64":
+            return None, None
+        constraint = attr.get("machine_constraint") or {}
+        lower = constraint.get("lower_inclusive")
+        upper = constraint.get("upper_inclusive")
+        if not isinstance(lower, int) or isinstance(lower, bool):
+            lower = None
+        if not isinstance(upper, int) or isinstance(upper, bool):
+            upper = None
+        return lower, upper
+
+    def interval(node: ast.AST) -> tuple[int | None, int | None]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+            return node.value, node.value
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "attr":
+            return attribute_interval(node.attr)
+        if isinstance(node, ast.Call):
+            return 0, None
+        if isinstance(node, ast.Subscript):
+            return 0, None
+        if isinstance(node, ast.BinOp):
+            left_lower, left_upper = interval(node.left)
+            right_lower, right_upper = interval(node.right)
+            if isinstance(node.op, ast.Add):
+                lower = (
+                    left_lower + right_lower
+                    if left_lower is not None and right_lower is not None else None
+                )
+                upper = (
+                    left_upper + right_upper
+                    if left_upper is not None and right_upper is not None else None
+                )
+                return lower, upper
+            if isinstance(node.op, ast.Mult):
+                # A product is provably non-negative only when both operands
+                # are provably non-negative.
+                lower = (
+                    left_lower * right_lower
+                    if left_lower is not None and right_lower is not None
+                    and left_lower >= 0 and right_lower >= 0
+                    else None
+                )
+                if None not in (left_lower, left_upper, right_lower, right_upper):
+                    products = [
+                        left_lower * right_lower,
+                        left_lower * right_upper,
+                        left_upper * right_lower,
+                        left_upper * right_upper,
+                    ]
+                    return min(products), max(products)
+                return lower, None
+            if isinstance(node.op, ast.Sub):
+                lower = (
+                    left_lower - right_upper
+                    if left_lower is not None and right_upper is not None else None
+                )
+                upper = (
+                    left_upper - right_lower
+                    if left_upper is not None and right_lower is not None else None
+                )
+                return lower, upper
+        return None, None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id not in {"attr", "shape", "len"}:
+            errors.append(f"list_length expression 不允许名称 {node.id!r}。")
+        elif isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == "attr":
+                if node.attr not in attrs_by_name:
+                    errors.append(f"list_length expression 引用了未声明属性 attr.{node.attr}。")
+            elif isinstance(node.value, ast.Name) and node.value.id == "shape":
+                if node.attr not in input_names:
+                    errors.append(f"list_length expression 引用了未声明输入 shape.{node.attr}。")
+            else:
+                errors.append("list_length expression 的属性引用只允许 attr.<name> 或 shape.<input>。")
+        elif isinstance(node, ast.Call):
+            valid_len_arg = (
+                len(node.args) == 1 and isinstance(node.args[0], ast.Attribute)
+                and isinstance(node.args[0].value, ast.Name) and node.args[0].value.id == "attr"
+            )
+            if not (isinstance(node.func, ast.Name) and node.func.id == "len" and valid_len_arg and not node.keywords):
+                errors.append("list_length expression 只允许 len(attr.<list_attr>) 调用。")
+            elif not str(attrs_by_name.get(node.args[0].attr, {}).get("type", "")).startswith("list["):
+                errors.append(f"len(attr.{node.args[0].attr}) 只能引用 list[...] 类型属性。")
+        elif isinstance(node, ast.Subscript):
+            if not (isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "shape" and isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, int) and node.slice.value >= 0):
+                errors.append("list_length expression 下标只允许 shape.<input>[<非负常量轴>]。")
+        elif isinstance(node, ast.BinOp) and not isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            errors.append("list_length expression 只允许 +、-、* 运算。")
+        elif isinstance(node, ast.Constant) and (not isinstance(node.value, int) or isinstance(node.value, bool) or node.value < 0):
+            errors.append("list_length expression 只允许非负整数常量。")
+        elif isinstance(node, (ast.Expression, ast.Name, ast.Attribute, ast.Call, ast.Subscript,
+                               ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Load, ast.Constant)):
+            continue
+        else:
+            errors.append(f"list_length expression 不允许语法节点 {type(node).__name__}。")
+    bound, _ = interval(tree.body)
+    if bound is None:
+        errors.append(
+            "list_length expression 无法由已声明约束证明非负；使用非负 shape/len，"
+            "或为 int64 属性声明 machine_constraint.lower_inclusive >= 0；减法还需要 RHS upper_inclusive。"
+        )
+    elif bound < 0:
+        errors.append("list_length expression 的可证明下界小于 0。")
+    return list(dict.fromkeys(errors))
 
 
 def _check_category_paradigm_consistency(cat, paradigms, registries, findings):

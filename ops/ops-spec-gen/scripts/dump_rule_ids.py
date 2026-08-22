@@ -16,6 +16,7 @@
 
 抓取范围：
   * "rule_id": "..." / rule_id="..." 字面量（不含 f-string）
+  * 校验辅助函数的 error("...", ...) 首参数（Stage 2 的跨字段规则）
   * DslError("<code>", ...) — 这些 code 在 stages.py 中按 "<stage>.<code>" 复用
 所以输出包含两份：直接 rule_id + evaluator 错误码引用一栏。
 """
@@ -34,6 +35,15 @@ DOC = SKILL_ROOT / "references" / "error-codes.md"
 
 # rule_id: "..."  /  rule_id = "..."
 _RULE_RE = re.compile(r'rule_id\s*[":=]+\s*"([a-z_][a-z0-9_.]+)"')
+# Local ``error(rule_id, path, message, fix)`` helpers are used by Stage 2
+# cross-field validators.  They still emit public rule_id values and must be
+# included in the generated catalogue.
+_ERROR_CALL_RE = re.compile(r'\berror\(\s*"([a-z_][a-z0-9_.]+)"')
+# Some validators append Finding("error", "<id>", ...) directly instead
+# of going through the local error() helper.
+_ERROR_FINDING_RE = re.compile(
+    r'\bFinding\(\s*"error"\s*,\s*"([a-z_][a-z0-9_.]+)"',
+)
 # DslError("<code>", ...
 _DSL_RE = re.compile(r'DslError\(\s*"([a-z_][a-z0-9_]*)"')
 
@@ -46,6 +56,10 @@ def _scan() -> tuple[set[str], set[str]]:
             continue
         text = p.read_text(encoding="utf-8")
         for m in _RULE_RE.finditer(text):
+            rule_ids.add(m.group(1))
+        for m in _ERROR_CALL_RE.finditer(text):
+            rule_ids.add(m.group(1))
+        for m in _ERROR_FINDING_RE.finditer(text):
             rule_ids.add(m.group(1))
         for m in _DSL_RE.finditer(text):
             dsl_codes.add(m.group(1))
@@ -68,6 +82,7 @@ _STAGE_LABEL = {
     "category_paradigm_consistency":       "Stage 2 category_paradigm_consistency",
     "paradigm_constraint":                 "Stage 2 paradigm_constraint",
     "invariant_kind_resolved":             "Stage 2 invariant_kind_resolved",
+    "interface_contract":                  "Stage 2 interface_contract",
     "shape_closure":                       "Stage 3 shape_closure",
     "dtype_closure":                       "Stage 4 dtype_closure",
     "broadcast_legality":                  "Stage 5 broadcast_legality",
