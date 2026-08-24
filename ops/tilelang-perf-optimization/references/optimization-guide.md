@@ -22,6 +22,9 @@
   - [2.15 正交轴向量化（Orthogonal Axis Vectorization）](#215-正交轴向量化orthogonal-axis-vectorization)
   - [2.16 特定 dtype 的硬件指令适配（Dtype-Specific Hardware Path Adaptation）](#216-特定-dtype-的硬件指令适配dtype-specific-hardware-path-adaptation)
   - [2.17 离散重排 fallback 的多阶段连续化](#217-离散重排-fallback-的多阶段连续化)
+  - [2.18 element-wise 算子 host 侧 tiling 优化](#218-element-wise-算子-host-侧-tiling-优化)
+  - [2.19 数学等价变形减少 V pipe 步数（Mathematical Rewriting for Fewer V Ops）](#219-数学等价变形减少-v-pipe-步数mathematical-rewriting-for-fewer-v-ops)
+  - [2.20 Buffer 数量优化（Buffer Count Reduction）](#220-buffer-数量优化buffer-count-reduction)
 - [三、核间优化](#三核间优化)
 - [四、常见问题速查](#四常见问题速查)
 
@@ -774,6 +777,111 @@ if partial > 0:
 - [ ] 余数块 buffer 为完整块大小（K3）？output 按 padded 声明（K4）？
 - [ ] fill 在 copy 之前（K5）？循环用 `n_full`（K6）？
 - [ ] 优化后精度与优化前一致？
+
+---
+
+#### 子模式：chunk/split + contiguous 合并为单输入 Kernel
+
+> **子模式**：本节为 §2.12 的扩展，针对 `chunk/split + contiguous` 这一高频反模式。如需回退只需删除本节（至下方 `<!-- END 2.12 子模式 -->`）即可。
+
+**适用场景**：Host 中使用 `torch.chunk` / `torch.split` 将输入沿某一维拆分为多个子张量，分别调用 `.contiguous()` 后传给多输入 kernel。
+
+**性能问题**：每次 `.contiguous()` 都是一次完整的 host 内存拷贝（遍历整个 tensor）。N 个子张量 = N 次 host 拷贝。大 shape 下 host 拷贝耗时可接近甚至超过 kernel 本身。
+
+**核心思路**：传单个完整输入 tensor 给 kernel，kernel 内部通过列/行偏移读取各子张量数据。
+
+##### Host 端改造
+
+```python
+# 反模式（N 次 host 拷贝）
+x0, x1 = input.chunk(2, dim=-1)
+x0 = x0.contiguous()    # 拷贝 1：遍历 tensor.shape[:-1] * half_k 个元素
+x1 = x1.contiguous()    # 拷贝 2：同上
+output = kernel(x0, x1)
+
+# 正模式（0 次 host 拷贝）
+output = kernel(input)  # kernel 内部读 input[:, :K/2] 和 input[:, K/2:]
+```
+
+##### Kernel 端改造
+
+单输入 kernel：用列偏移 `half_k + col` 代替第二个 GM 读取。
+
+```python
+# 反模式（双输入 kernel）
+@tilelang.jit(out_idx=[2])
+def kernel_dual(block_M, block_K, dtype):
+    @T.prim_func
+    def main(
+        X: T.Tensor((M, K), dtype),
+        G: T.Tensor((M, K), dtype),
+        Y: T.Tensor((M, K), dtype),
+    ):
+        T.copy(X[row, col], x0_ub)        # 从 X 读 x0
+        T.copy(G[row, col], x1_ub)        # 从 G 读 x1
+
+# 正模式（单输入 + 列偏移）
+@tilelang.jit(out_idx=[1])
+def kernel_single(block_M, block_K, K, dtype):
+    half_k = K // 2
+    @T.prim_func
+    def main(
+        X: T.Tensor((M, K), dtype),
+        Y: T.Tensor((M, half_k), dtype),
+    ):
+        T.copy(X[row, col], x0_ub)              # x0 = X[:, :half_k]
+        T.copy(X[row, half_k + col], x1_ub)     # x1 = X[:, half_k:]
+```
+
+> 注：`half_k + col` 是 JIT 编译期的符号表达式（`half_k = K // 2`，K 是 closure 参数），TileLang 编译器正确展开为符号地址偏移。
+
+##### Host 端适配层（dim=-1 快路径 vs dim≠-1 慢路径）
+
+```python
+def swi_glu(input, dim=-1):
+    half_k = input.shape[dim] // 2
+    ndim = input.ndim
+    dim = dim % ndim
+
+    # 快路径（dim==-1）：仅 reshape，0 次 contiguous / chunk 拷贝
+    if dim == ndim - 1:
+        outer = math.prod(input.shape[:-1])
+        x_2d = input.reshape(outer, input.shape[-1])
+        out_2d = kernel(x_2d)
+        return out_2d.reshape(input.shape[:-1] + (half_k,))
+
+    # 慢路径（dim≠-1）：1 次 permute+contiguous，0 次 chunk 拷贝
+    perm = [i for i in range(ndim) if i != dim] + [dim]
+    x_perm = input.permute(perm).contiguous()       # 唯一 1 次拷贝
+    outer = math.prod(x_perm.shape[:-1])
+    x_2d = x_perm.reshape(outer, input.shape[dim])
+    out_2d = kernel(x_2d)
+    # 逆置换：恢复原始轴序（dim 维回到原位置，大小由 input.shape[dim] 变为 half_k）
+    out_shape = x_perm.shape[:-1] + (half_k,)
+    out_reshaped = out_2d.reshape(out_shape)
+    return out_reshaped.movedim(-1, dim)
+```
+
+##### 适用条件
+
+| 条件 | 满足 | 不满足时的表现 |
+|------|------|--------------|
+| 子张量计算为纯 element-wise（无归约） | ✅ 单输入 kernel 可行 | 归约 kernel 仍需分张量处理 |
+| 输入沿末维等分（或可 permute 到末维） | ✅ `half_k + col` 偏移即可 | 需要 stride-aware kernel |
+| `T.copy` 支持符号列偏移 | ✅ TileLang 支持 | 仅老版本可能不支持 |
+
+##### 检查清单
+
+- [ ] host 端 `chunk()/split()` + `.contiguous() × N` 已替换为直接传原始 tensor？
+- [ ] kernel 签名从多输入改为单输入（`out_idx` 相应调整）？
+- [ ] kernel 内 `T.copy` 用列偏移（`half_k + col`）读取第二子张量？
+- [ ] dim=-1 fastpath 已实现（避免不必要的 permute/contiguous）？
+- [ ] dim≠-1 slowpath 仅保留 1 次 permute+contiguous（无 chunk 拷贝）？
+- [ ] 优化后精度与优化前一致？
+
+<!-- END 2.12 子模式 -->
+
+---
 
 #### 减少 transpose 优化
 
@@ -1615,6 +1723,143 @@ kernel 的以下形态：
 无端到端收益时保留正确 fallback，并将本优化记录为“不适用/无收益”。
 
 ---
+
+### 2.18 element-wise 算子 host 侧 tiling 优化
+
+> **适用场景**：element-wise 算子（如激活函数、逐元素运算等）。这类算子的 kernel 计算时间通常已接近 baseline，性能瓶颈在 **host 侧 adapter 的 tiling 选择**导致的 `num_blocks` 过多。
+
+**与 §2.11/§2.12 的区别**：§2.11 解决单个 (M, N) 的 tile size 选择（UB 预算反推）；§2.12 消除 host 侧不必要的 pad/contiguous 拷贝；本节解决 **多维输入如何选择最优 (M, N) 切分**来最小化 num_blocks。三者互补，可叠加使用。
+
+**核心思路**：element-wise 算子对输入做任意 reshape 不改变计算结果（只要 contiguous），因此 host 侧可以自由选择将高维输入 flatten 为哪一组 (M, N) 来最小化 `num_blocks = ceil(M/block_M) * ceil(N/block_N)`，从而减少 kernel launch 开销和提升核心利用率。
+
+#### 优化方向
+
+**方向 1：放宽小 M 场景的 block_N 上限**
+
+当输入 flatten 后 M 很小（如 1D 输入 M=1），rows_per_vec 也小，单 buffer 占用低，此时 block_N 可以取远大于常规场景的值。应根据 UB 预算动态计算 block_N 上限而非使用固定常量，避免小 M 场景下 num_blocks 不必要的膨胀。
+
+**方向 2：多维输入搜索最优 flatten 切分点**
+
+高维输入（如 3D/4D/5D）flatten 为 2D 时存在多个切分点（`shape[:k]` → M, `shape[k:]` → N）。不同切分导致 M/N 比例不同，进而影响 num_blocks。应在所有可行切分点中搜索 num_blocks 最小的方案，而非固定使用"除最后一维外合并为 M"的默认策略。
+
+#### 零拷贝前提
+
+- 输入 contiguous 时 `reshape` 只改 stride/shape metadata，**不触发物理拷贝**（与 §2.12 零拷贝前提一致）
+- 非 contiguous 时 `.contiguous()` 兜底（会触发拷贝，应避免）
+
+#### 判定指标
+
+`num_blocks = ceil(M/block_M) * ceil(N/block_N)` 是 compute-bound element-wise op 的 kernel 时间可靠代理。block_M 通过 §2.11 的 UB 预算反推，block_N 在对齐约束下搜索最优值。
+
+#### block_N 32B 对齐约束
+
+block_N 必须对齐到 32B（DataCopyNd 粒度硬约束）：fp32→8 elems, fp16/bf16→16 elems。非对齐会导致数据损坏。
+
+#### 反模式
+
+- ❌ host 侧 `F.pad` 补齐到整除 shape（增加额外 device copy 开销，净退化）
+- ❌ kernel 内 stride indexing 处理多维输入（需 kernel 重写 + lowering 改动，host 侧 reshape 零拷贝达到同样效果）
+
+---
+
+### 2.19 数学等价变形减少 V pipe 步数（Mathematical Rewriting for Fewer V Ops）
+
+**适用场景**：
+- 算子底层 intrinsic 内部含冗余步骤（如 `Duplicate` 填充常量 buffer 作为 `Div` 分子）
+- 复合函数可以通过数学等价变形拆解为更少或更高效的指令组合
+- 输入值域已知，可以判断变形后是否会溢出
+
+**核心思路**：分析底层 intrinsic 的 V pipe 步骤序列，找到可以通过公式变形消除的冗余步骤。
+
+#### 变形 1：分子为 1 的分式 -> reciprocal
+
+任何形如 `1 / f(x)` 的计算，底层通常拆为 `Duplicate(1.0) -> Div(1, f(x))` 两步、且 `Div` 需要两个操作数 buffer。可以用 `reciprocal(f(x))` 一步替代，in-place 运算，省掉 `Duplicate` 步骤和 1 个 buffer。
+
+**示例**：
+```
+# sigmoid(x) = 1 / (1 + exp(-x))
+# 底层 T.tile.sigmoid: Muls(-1) + Exp + Adds(1) + Duplicate(1) + Div = 5步, 2个buffer
+# 变形后: Muls(-1) + Exp + Adds(1) + Reciprocal = 4步, 1个buffer（in-place）
+```
+
+**泛化**：适用于任何 `1/f(x)` 形式的算子（如 `softplus(x) = log(1+exp(x))` 的中间步骤、`reciprocal` 本身等）。
+
+**精度注意**：`T.tile.reciprocal` 内部使用近似 LUT，精度低于 `Div`。必须按目标 dtype 的 MERE/MARE 标准验证：
+- bf16（阈值 2^-7）：通常满足，余量大
+- fp16（阈值 2^-10）：余量可能不足（实测约 3%），需逐 case 验证
+- fp32（阈值 2^-13）：通常不满足，不推荐
+
+#### 变形 2：改变分子分母位置消除 Muls
+
+当 `f(x) / g(x)` 中 `f(x)` 和 `g(x)` 都含 `exp` 时，可以通过提取公因式改变分子分母，消除额外的取负步骤。
+
+**示例**：
+```
+# sigmoid(x) = 1/(1+exp(-x)) = exp(x)/(1+exp(x))
+# 原式需要 Muls(-1) 来算 exp(-x)
+# 变形后直接 exp(x)，省掉 Muls(-1)
+# exp(x)/(1+exp(x)): Exp + Adds(1) + Div = 3步（原式 5步）
+```
+
+**安全条件**：`exp(x)` 不溢出。原式用 `exp(-x)` 可能在 `x` 很负时溢出（`exp(-(-1000))=exp(1000)=inf`），变形后用 `exp(x)` 在 `x` 很正时溢出。需根据值域判断哪个方向安全：
+- 值域 `[-A, A]`：`exp(A)` 不溢出即可用变形 2
+- 值域含 `+inf`：变形 2 会产生 `inf/(1+inf)=nan`，不能用
+- 值域含 `-inf`：原式 `exp(-(-inf))=exp(inf)=inf`，`1/(1+inf)=0`，原式正确
+
+#### 变形 3：小值域多项式近似
+
+输入值域已知且较小时，用 Taylor 展开的多项式替代含 `exp`/`log`/`trig` 的公式，消除最慢的 V pipe 指令。
+
+**通用方法**：
+1. 确认输入值域 `[lo, hi]`
+2. 计算 Taylor 展开：`f(x) = c0 + c1*x + c2*x^2 + ...`
+3. 用 `T.tile.mul` + `T.tile.add` 实现（Horner 法减少乘法次数）
+4. 验证值域边界处的 MERE/MARE 是否达标
+
+**精度规律**：值域越小，所需阶数越低。`|x| < 0.5` 通常 3 阶足够，`|x| < 0.2` 线性即可。
+
+**泛化**：适用于 `sigmoid`、`tanh`、`softplus`、`gelu`、`silu` 等任何光滑激活函数。
+
+#### 变形 4：常量输入直接 fill
+
+输入值域为单个常量时（如 `value_range=[0, 0]`），跳过全部计算，直接 `T.tile.fill(output, constant_value)`。仅 1 个 V op。
+
+#### 检查清单
+
+- [ ] 已分析底层 intrinsic 的 V pipe 步骤序列（用 `get_kernel_source()` 查看）？
+- [ ] 变形后 V ops 数量是否确实减少？
+- [ ] 已确认输入值域不会导致变形后的溢出？
+- [ ] 已用目标 dtype 的 MERE/MARE 验证精度（reciprocal 精度低于 div）？
+- [ ] 多项式近似是否验证了值域最大 `|x|` 处的精度？
+
+---
+
+### 2.20 Buffer 数量优化（Buffer Count Reduction）
+
+**适用场景**：cast 路径（bf16/int8）产生多个 buffer，UB 预算受限导致 tile 偏小。
+
+**核心思路**：用 in-place 操作替代需要额外操作数 buffer 的操作，减少同时存活的 buffer 数量。
+
+**典型模式**：`Div(dst, src0, src1)` 需要 `src0` 和 `src1` 两个 buffer 同时存活；`Reciprocal(dst, src)` 是 in-place，只需 1 个 buffer。当分式的分子为 1 时，用 `reciprocal` 替代 `div` 可以省掉分子 buffer。
+
+**效果评估**：
+```
+total_ub = sum(每个buffer的bytes_per_elem) * rows_per_vec * block_N
+```
+减少 1 个 fp32 buffer = 省 4 B/elem。在 budget=12500 时省 50000B，允许 tile 增大约 33~50%。
+
+**安全阈值**：`total_ub <= 196352B`（A2/A3 UB），建议留 10% 余量。
+
+#### 检查清单
+
+- [ ] 已列出所有同时存活的 buffer 及其 dtype/大小？
+- [ ] 是否有 div 可以改为 reciprocal？（分子为常量 1 时可以）
+- [ ] 已验证 `total_ub` 不超过 UB 容量且留有余量？
+- [ ] 已在目标硬件（而非仅本地）上验证更大 tile 确实更快？
+
+---
+
+
 
 ## 三、核间优化
 

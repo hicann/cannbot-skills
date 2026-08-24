@@ -92,6 +92,32 @@ T.copy(workspace[bn * block_N, k_offset], B_L1)  # 完整 block_N
 
 > **根因**：`src/op/ascend.cc` 的 `find_active_dim_indices` 和 `compute_strideN` 对 4D+ 切片的维度识别有缺陷，且即使修复后，`DataCopyPad` 硬件指令本身也不支持列方向 strided access。这是 AscendC 硬件的固有限制，非 codegen bug。详见 `tilelang-api-best-practices/references/api-kernel-memory.md` §T.copy 多维切片的硬件限制。
 
+**✅ 单输入 split 索引模式（chunk/split 类算子，如 SwiGLU `silu(x0)*x1`）**：
+
+Host 端传完整 tensor（不 chunk、不 contiguous），kernel 内用列偏移读取各子张量：
+```python
+@tilelang.jit(out_idx=[1], pass_configs=pass_configs)
+def kernel(block_M, block_N, K, dtype="float16"):
+    half_k = K // 2
+    M = T.symbolic("M")
+
+    @T.prim_func
+    def main(
+        X: T.Tensor((M, K), dtype),  # type: ignore
+        Y: T.Tensor((M, half_k), dtype),  # type: ignore
+    ):
+        with T.Kernel(...) as (cid, vid):
+            x0_ub = T.alloc_ub((rows, block_N), dtype)
+            x1_ub = T.alloc_ub((rows, block_N), dtype)
+
+            # x0 = X[:, :half_k]，x1 = X[:, half_k:]
+            T.copy(X[row, col], x0_ub)
+            T.copy(X[row, half_k + col], x1_ub)
+            # ... silu(x0) * x1 ...
+```
+
+Host 适配层：dim=-1 时仅 reshape（零拷贝）；dim≠-1 时 permute+contiguous（1 次拷贝）。完整模式与检查清单见 [tilelang-perf-optimization optimization-guide.md §2.12 子模式](../../tilelang-perf-optimization/references/optimization-guide.md)。
+
 ## 3. 同步
 
 ```python
