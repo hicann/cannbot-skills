@@ -35,8 +35,11 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # 从 validate_ascendc_impl 导入共享常量、AST 工具和检查函数
+# 注意: 用 parents[2] 而非 parents[1] —— 本脚本位于
+# <skills>/tilelang2ascend-tilelang-designer/scripts/, 兄弟 translator
+# skill 在 skills 根目录的上一层。
 _ASCENDC_SCRIPTS = (
-    Path(__file__).resolve().parents[1] / "tilelang2ascend-translator" / "scripts"
+    Path(__file__).resolve().parents[2] / "tilelang2ascend-translator" / "scripts"
 )
 if str(_ASCENDC_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_ASCENDC_SCRIPTS))

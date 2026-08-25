@@ -1,12 +1,16 @@
 ---
 name: tilelang2ascend-trace-recorder
 description: >
-  执行 trace 记录员 Skill。在算子任务完成后，回顾整个执行过程，
-  生成结构化的 trace 记录供 meta-agent 优化使用。
-  当算子任务完成后需要记录执行过程时，使用此 skill。
+  执行 trace 记录员 + 知识演进 Skill。在算子任务完成后，回顾整个执行过程，
+  生成结构化的 trace 记录（{output_dir}/trace.md），并从 trace.md 提取
+  "走偏点"与成功模式，经 cannbot-knowledge 的 ops-knowledge-ingest 标准路由
+  沉淀为 OKF (okf.v1) 知识卡写入共享知识库 runbooks/，供后续算子生成任务
+  经 knowledge-query 检索复用。当算子任务完成后需要记录执行过程
+  并进行知识演进时，使用此 skill。
 argument-hint: >
   输入：output_dir 目录路径、各阶段执行结果信息。
-  输出：{output_dir}/trace.md 结构化执行记录。
+  输出：{output_dir}/trace.md 结构化执行记录 + 共享知识库 runbooks/ 更新
+  （新卡片 / 逐层 index.md / 检索索引与图谱重建 / log 审计）。
 ---
 
 # Trace 记录 Skill
@@ -135,3 +139,133 @@ argument-hint: >
 3. **走偏分析**: 重点记录 agent 做了哪些最终被证明无效的尝试，这是 meta-agent 优化 harness 的核心输入
 4. **省略成功**: 如果某阶段一次通过且无异常，简要记录即可，不需要展开
 5. **如实跳过**: TileLang 未验证不是异常；如果流程按约定跳过，应明确记录“跳过”及原因，不要误记为失败
+
+---
+
+## 知识演进（Phase 7 后半：trace.md → 共享知识库）
+
+记录完 trace.md 后，继续完成**知识演进**：把走偏点与成功模式提炼为可复用经验，
+经 cannbot-knowledge 标准 skill 沉淀进共享 OKF 知识库，形成
+"生成 → trace → 演进 → 更高效生成"的闭环。
+
+> **标准 skill 约束（强制）**：
+> - **沉淀**：遵循 `ops-knowledge-ingest` skill（cannbot-knowledge 插件）的编排规则与
+>   摄入不变量（§3 单实体原子动作 + 红线）。本演进属开发轨迹类知识，落点为知识库
+>   `runbooks/` 树。**禁止**再调用 `scripts/evolve_traces.py` 或任何自维护脚本直接产卡。
+> - **检索/去重**：一律用 `knowledge-query` skill（`knowledge_query.py`），
+>   **禁止**自维护 INDEX.md 或 grep 卡片目录做去重。
+> - **知识库根**：`CANNBOT_KNOWLEDGE_ROOT`（当前 `/home/asc-gen-knowledge`，
+>   配置于 `~/.config/cannbot/knowledge.env`）。写入前用
+>   `knowledge_query.py discover` 确认 root；root 未解析到时停止并上报，不猜路径。
+
+### 演进闭环
+
+```
+任务完成 → trace.md
+    │ 1. 阅读 trace 原文（走偏点 / 行为轮次 / 关键错误）
+    │ 2. 检索去重（knowledge-query: preflight/search 查同根因卡片）
+    │ 3. 建/更新卡（ops-knowledge-ingest 规则 → runbooks/field_notes|optimization/）
+    │ 4. 交叉链接（双向相对链接）
+    │ 5. 维护三件套（逐层 index.md + knowledge_query build / okf_graph 图谱增量 + log/<date>.md）
+    ▼
+共享知识库 runbooks/ ← 后续生成任务经 knowledge-query 检索消费（生成前 preflight + 各阶段按需）
+```
+
+### 信息来源（按顺序）
+
+1. 本次会话产出的 trace.md：
+   - `走偏点` 段 — 每个走偏点 = 一条**负面教训**（尝试了什么、为何无效、根因、应怎么做）
+   - `Agent 行为记录` 的"第 N 轮" — 成功路径的**正面模式** + 每轮成本
+   - `关键错误信息` — 错误签名（如 `RegisterAscendBinary mix ret 107000`、
+     `vector core exception (507035)`）→ 根因映射
+   - `evaluate_*.sh 执行次数` — 迭代成本量化
+2. 知识库现有卡片（经 knowledge-query 检索）— 去重与增量更新依据
+
+### 流程
+
+1. **阅读原文**：完整阅读 trace.md 的走偏点与对应轮次原文，确认根因链与修复方向，
+   禁止只看摘要就成文。
+2. **检索去重**（knowledge-query，替代原 INDEX.md 对照）：
+   ```
+   knowledge_query.py preflight --task "<走偏点/错误签名关键词>" --brief
+   knowledge_query.py search --query "<错误码或核心短语>" --scope runbooks/
+   ```
+   - 同根因不同表述 → 更新现有卡片（追加 `source_tasks` + "证据"节，**增量补充，
+     绝不整体覆盖**），不新建
+   - 不同根因 → 新建卡片
+   - 现有卡片已覆盖且无新信息 → 跳过（在演进报告中记"跳过"及理由）
+   - 平台/环境升级导致失效（如 API 恢复可用）→ 标记 `status: superseded`，保留证据
+3. **撰写 / 更新卡片**（ops-knowledge-ingest §3.1 原子动作 + §3.2 红线）：
+   落点按 kind 分流——
+   - `implementation_trap`（同步/API/Tiling/精度/流程类坑）→ `runbooks/field_notes/<kebab-name>.md`
+   - `operator_optimization`（性能类结构性经验）→ `runbooks/optimization/<kebab-name>.md`
+
+```markdown
+---
+schema_version: okf.v1
+kind: <implementation_trap | operator_optimization>
+type: <implementation_trap | optimization_runbook>
+source_family: curated
+title: "<一句话标题：做什么（禁止 X）>"
+description: "<一句话概述（与 title 一致或更细）>"
+tags: [<关键词，含维度标签 sync|api|tiling|precision|process|perf>]
+created_at: '<UTC ISO-8601 Z（日期粒度 00:00:00Z）>'
+updated_at: '<UTC ISO-8601 Z>'
+status: active
+confidence: <high|medium|low>
+cost: <该坑导致的历史浪费轮数，近似>
+source_tasks:
+  - {op: <算子名>, trace_date: <YYYY-MM-DD>, rounds_wasted: <n>}
+---
+
+# <一句话标题：做什么（禁止 X）>
+
+## 触发条件
+- <生成/修复时命中这些情况 → 先读本节>
+
+## 症状
+- <该问题长什么样（错误信息、输出特征）>
+
+## 根因
+- <根因链>
+
+## 正确做法
+- <修复方向 / 应怎么做>
+
+## 反例（历史真实失败）
+- <具体任务 + 轮次 + 实际结果>
+
+## 证据
+- <trace.md 引用 + 关键数据>
+```
+
+   格式规则（对齐 cannbot-knowledge OKF / SPEC-frontmatter）：
+   - `schema_version: okf.v1`；kind/type/source_family 一律用受控词表；
+     `source_family: curated`（agent 提炼知识）；runbooks 允许空 `resource`，
+     出处用 `source_tasks` 回链开发轨迹
+   - **维度分类（sync/api/tiling/precision/process/perf）只进 tags，不建目录**；
+     目录只有 OKF 标准的 `field_notes/`、`optimization/`（及未来的 `version-migration/`）
+   - 时间戳 UTC ISO-8601 Z（日期粒度 `00:00:00Z`）；文件名 snake_case 无数字前缀
+   - 正文蒸馏非照搬、不嵌图；卡片间相对链接必须双向且指向真实存在的卡片
+   - **优先沉淀通用知识**：算子特异的一次性细节（单算子 shape/参数组合）不单独成卡，
+     合并进同根因通用条目；只有可复用于后续算子生成的经验才写入
+4. **交叉链接**：与相关卡片互加相对链接（`# 相关` 段由图谱 inject 管理，手写链接
+   放正文且双向）。
+5. **维护三件套**（写完卡必同步，ops-knowledge-ingest §3.1 第 5 步）：
+   - 逐层 `index.md`（`runbooks/index.md` + 对应子目录 index，每条目带非空描述，
+     每级只列本层）
+   - 检索/图谱重建：
+     ```
+     knowledge_query.py build            # 重建 search/okf.index.json
+     okf_graph.py candidates --knowledge-root $CANNBOT_KNOWLEDGE_ROOT
+     # judge 为 LLM fan-out：按 SPEC-Graph 流程判定 → okf_judge_aggregate.py 聚合
+     okf_graph.py inject → viz → verify
+     ```
+     （图谱 judge 成本较高，可攒批执行；但检索索引 build 必须当次完成）
+   - 当天 `log/<YYYY-MM-DD>.md` 顶部插入 `## [HH:MM] <op> | <题>`
+6. **演进报告**：向调用方汇报新增/更新/跳过卡片数 + 统计（kind 分布、累计成本）。
+
+### 知识演进质量原则
+
+- 每轮 trace 只新增少量高价值条目，拒绝"为了演进而演进"的批量灌水
+- 命中通用坑时优先更新现有卡片而非新建（保持知识库收敛）

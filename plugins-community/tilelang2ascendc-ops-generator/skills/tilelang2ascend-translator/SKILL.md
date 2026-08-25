@@ -102,6 +102,7 @@ argument-hint: >
 - `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention）
 - `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
+- 共享演进知识库（`$CANNBOT_KNOWLEDGE_ROOT` 的 `runbooks/`）— 历史走偏点与成功模式，**经 knowledge-query skill 检索（步骤 0-K 必读，命中即规避）**
 
 ### 🛑 官方文档目录（asc-devkit，强制查阅）
 
@@ -199,6 +200,39 @@ argument-hint: >
 - 命中但 0-A2.1/0-A2.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
 - 未命中 → 跳过 0-A2，直接进入步骤 0-B
 - 禁止凭记忆或经验跳过指南直接转译
+
+---
+
+## 🛑 步骤 0-K: 演进知识检索（每次代码生成/修改前强制执行）
+
+**触发条件**：任何 kernel 代码生成 / 修复迭代开始前，均须执行。
+
+```
+0-K.1 🛑 检索共享演进知识库（必须，不可跳过）:
+    用 cannbot-knowledge 插件的 knowledge-query skill
+    （scripts/knowledge_query.py，root 由 knowledge.env 解析，当前 /home/asc-gen-knowledge）:
+    python3 knowledge_query.py preflight --task "<本算子类型 + 关键结构特征>" --brief
+    先读 route/read_first/relevance，再按需 get 整卡。
+
+0-K.2 🛑 按维度标签补充检索命中卡片:
+    - 本算子涉及多核/混合核/搬移/跨核通信 → search --query "同步 竞态" --scope runbooks/
+      （或 --tags sync 等价语义），读 sync 维度卡
+    - 计划使用 Gather/SetVectorMask/归约等 API → 检索 api 维度卡
+    - 涉及 tiling/缓冲/核数/多 dtype → 检索 tiling 维度卡
+    - 涉及 FP16/BF16 数学函数精度 → 检索 precision 维度卡
+    - 命中卡片"触发条件" → 全文精读其"正确做法"，进入 0-K.3
+
+0-K.3 🛑 在思考中确认:
+    - 命中的已知坑清单及其规避策略（如: 不用 TBuf 做 DMA 主搬移、
+      核数上限按 UB 池数、count-mode Gather 不可用 → isSetMask=true）
+    - 规避策略将如何体现在本算子的 op_host/op_kernel 代码中
+```
+
+**门禁规则**：
+- 触发条件满足但 0-K.1-0-K.3 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 知识库条目与官方文档矛盾时以官方文档为准，并将差异在 trace 走偏点中记录
+  （供演进循环更新条目）
+- 此门禁在**每次修复迭代**中都需重新检查（不仅限于首次）
 
 ---
 

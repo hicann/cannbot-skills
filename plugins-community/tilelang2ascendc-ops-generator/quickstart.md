@@ -18,7 +18,9 @@ Phase 4: AscendC 生成与验证   (分支)
   └─ 复杂算子: 转译          (tilelang2ascend-translator + 退化检测 + 迭代)
 Phase 5: 性能分析            (ops-profiling --compare 模式)
 Phase 6: 全量验证
-Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
+Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md →
+                                经 ops-knowledge-ingest 路由按 OKF 格式写入共享知识库
+                                runbooks/，供后续任务经 knowledge-query 检索复用)
 ```
 
 ### 算子分类路由
@@ -116,8 +118,7 @@ CANNBot 会自动调度 ascend-kernel-developer 按 7 Phase 流程执行：
 4. 设计表达（简单算子走 ops-direct-invoke 架构设计 + 设计串讲，复杂算子做 TileLang 设计）
 5. AscendC 生成与验证（简单算子走开发实现 + 代码审查 + 修复循环，复杂算子走转译 + 迭代验证）
 6. 性能分析（对比 reference 和 ascendc）
-7. 全量用例验证
-8. 生成 trace.md 记录完整过程
+7. 全量用例验证 + 生成 trace.md 并完成知识演进（共享知识库 runbooks/ 更新）
 
 #### 场景二：批量性能测试
 
@@ -206,5 +207,5 @@ TileLang 当前主要用于设计表达，不是 correctness gate。若 TileLang
 
 1. 从 PyTorch Model 出发，支持双路径（简单/复杂）端到端完成算子开发
 2. 使用 `init.sh` 脚本一键安装（OpenCode 推荐），Claude Code 用户也可用 `/plugin install` 一键安装
-3. 7 Phase 工作流，自动算子分类路由，退化检测，迭代修复
-4. 产出物包含设计文档/设计表达、kernel 代码、性能报告和 trace 记录
+3. 7 Phase 工作流（含 Phase 7 知识演进闭环），自动算子分类路由，退化检测，迭代修复
+4. 产出物包含设计文档/设计表达、kernel 代码、性能报告、trace 记录和演进知识库条目

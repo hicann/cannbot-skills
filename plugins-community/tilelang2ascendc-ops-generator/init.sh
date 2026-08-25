@@ -143,7 +143,7 @@ print(' '.join(filtered))
 " 2>/dev/null)
   if [ -z "$INCLUDED_SKILLS" ]; then
     warn "Failed to parse skill dependencies from AGENTS.md, using fallback"
-    INCLUDED_SKILLS="npu-arch ascendc-api-best-practices ascendc-docs-search ascendc-tiling-design ascendc-crash-debug tilelang2ascend-case-simplifier tilelang2ascend-operator-project-init ops-profiling ascendc-precision-debug tilelang2ascend-precision-tuning tilelang2ascend-tilelang-designer tilelang2ascend-translator tilelang2ascend-trace-recorder tilelang-op-design tilelang-op-develop tilelang-perf-optimization ascendc-perf-optimize"
+    INCLUDED_SKILLS="npu-arch ascendc-api-best-practices ascendc-docs-search ascendc-tiling-design ascendc-crash-debug tilelang2ascend-case-simplifier tilelang2ascend-operator-project-init ops-profiling ascendc-precision-debug tilelang2ascend-precision-tuning tilelang2ascend-tilelang-designer tilelang2ascend-translator tilelang2ascend-trace-recorder tilelang-op-design tilelang-op-develop tilelang-perf-optimization ascendc-perf-optimize knowledge-query ops-knowledge-ingest"
   fi
 else
   err "AGENTS.md not found at $PLUGIN_ROOT/AGENTS.md"

@@ -1,7 +1,7 @@
 {
   "name": "tilelang2ascendc-ops-generator",
-  "description": "Ascend C 算子自动生成 Team。通过双路径（design.md / TileLang）设计表达和 AscendC 转译优化，端到端完成算子开发（7 Phase 工作流），含 1 个专业 Agent 和 9 个配套 Skill。",
-  "version": "1.1.0",
+  "description": "Ascend C 算子自动生成 Team。通过双路径（design.md / TileLang）设计表达和 AscendC 转译优化，端到端完成算子开发（7 Phase 工作流，含 Phase 7 知识演进闭环），含 1 个专业 Agent 和 9 个配套 Skill。",
+  "version": "1.3.1",
   "author": {
     "name": "CANNBot"
   },
@@ -10,7 +10,8 @@
   "license": "MIT",
   "dependencies": [
     "ops-direct-invoke-skills",
-    "tilelang2ascend-ops-developer-skills"
+    "tilelang2ascend-ops-developer-skills",
+    "cannbot-knowledge-contributor-skills"
   ],
   "agents": [
     "./agents/tilelang2ascendc-kernel-generator.md"

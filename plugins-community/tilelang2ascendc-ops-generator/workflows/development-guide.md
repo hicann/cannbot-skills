@@ -26,7 +26,8 @@ ascend-kernel-developer Subagent
     │     └─ 复杂: AscendC 转译 (tilelang2ascend-translator) ← 迭代循环（3轮上限）
     ├── Phase 5: 性能分析 (ops-profiling --compare 模式)
     ├── Phase 6: 全量验证
-    └── Phase 7: Trace 记录 (tilelang2ascend-trace-recorder)
+    └── Phase 7: Trace 记录 + 知识演进 (tilelang2ascend-trace-recorder:
+                trace.md → 经 ops-knowledge-ingest 路由写入共享知识库 runbooks/)
 ```
 
 ## Phase 3-4 迭代机制
@@ -85,8 +86,21 @@ generation → AST退化检测 → [通过] → 功能验证 → [通过] → �
 ├── model_new_tilelang.py     # TileLang 实现
 ├── model_new_ascendc.py      # AscendC 实现
 ├── preformance.json          # 性能数据
-└── trace.md                  # 执行记录
+└── trace.md                  # 执行记录（Phase 7 知识演进输入）
 ```
+
+## 知识演进闭环
+
+- 每个任务完成后，`tilelang2ascend-trace-recorder` 在 Phase 7 从 trace.md 的走偏点/
+  行为轮次/关键错误中提取可复用经验，经 `ops-knowledge-ingest` 标准路由按
+  OKF (okf.v1) 格式写入共享知识库（`$CANNBOT_KNOWLEDGE_ROOT`，当前
+  `/home/asc-gen-knowledge`）的 `runbooks/` 树（field_notes/optimization 子树；
+  维度分类 sync/api/tiling/precision/process 走 tags，不建目录），
+  并同步三件套（逐层 index.md + 检索索引/图谱重建 + log）。
+- 后续任务的 Phase 0 与 Phase 4 转译前经 `knowledge-query` skill 检索知识库
+  （preflight/search，禁自维护索引），命中"触发条件"即规避已知坑，
+  从而降低迭代轮数、提升生成质量。
+- 知识库卡片可随平台升级失效；失效时以官方文档为准并标记 superseded。
 
 ## 关键约束
 

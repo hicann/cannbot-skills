@@ -11,3 +11,7 @@ asc-devkit
 
 # Install-time generated copies (init.sh refreshes these; not source)
 **/skills/tilelang2ascend-tilelang-designer/references/attention-patterns/
+
+# 演进知识库已迁至共享 OKF 知识库
+# 检索经 knowledge-query，沉淀经 ops-knowledge-ingest
+skills/tilelang2ascend-trace-recorder/lessons

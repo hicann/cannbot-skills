@@ -20,6 +20,8 @@ skills:
   - tilelang2ascend-tilelang-designer
   - tilelang2ascend-trace-recorder
   - npu-arch
+  - knowledge-query
+  - ops-knowledge-ingest
 permission:
   edit: allow
   bash: allow
@@ -57,7 +59,9 @@ Phase 4: AscendC 生成与验证    (分支)
   └─ 复杂算子: TileLang→AscendC 转译 (tilelang2ascend-translator + 退化检测 + 迭代)
 Phase 5: 性能分析              (ops-profiling --quick 模式)
 Phase 6: 全量用例验证
-Phase 7: Trace 记录            (tilelang2ascend-trace-recorder)
+Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md →
+                                从 trace.md 提取走偏点与成功模式 → 经 ops-knowledge-ingest
+                                路由按 OKF 格式写入共享知识库 runbooks/)
 ```
 
 ## Hook 机制说明
@@ -137,6 +141,25 @@ Phase 7: Trace 记录            (tilelang2ascend-trace-recorder)
 | 历史成功任务 | `workflows/templates/archive_tasks/` | 确认 host/kernel 的正确传参模式 |
 
 > asc-devkit 的代码生成时查阅职责已下沉到 `tilelang2ascend-translator` skill 内部。agent 无需在调用 skill 前自行查阅。
+
+### 演进知识检索（生成前必读）
+
+共享演进知识库（`$CANNBOT_KNOWLEDGE_ROOT` 的 `runbooks/` 树，当前
+`/home/asc-gen-knowledge`，由 `~/.config/cannbot/knowledge.env` 配置）沉淀了历史任务的
+走偏点与成功模式。**检索一律经 cannbot-knowledge 插件的 knowledge-query skill**
+（`knowledge_query.py`），禁止直接读文件索引。**Phase 0 判定算子类别后、Phase 4 生成
+kernel 前**：
+
+1. `python3 knowledge_query.py preflight --task "<算子类型 + 结构特征>" --brief`（必读），
+   读取 `read_first` 命中的卡片全文（`local_path` 可直接 Read）
+2. 按本算子命中的维度（sync/api/tiling/precision/process，对应卡片 tags）与"触发条件"
+   命中情况，用 `search --query "<短语>" --scope runbooks/` 补检并 `get` 整卡
+3. 在思考中确认：命中了哪些已知坑，对应规避策略是什么
+4. 若命中 sync/tiling 类卡片且本算子可能触发（MIX_AIC/TQue/多核/缓冲），
+   在调用 translator skill 的 prompt 中显式提示规避策略
+
+> 知识库卡片来自历史 trace，若与本轮实际行为矛盾（如平台升级后 API 恢复），
+> 以 asc-devkit 官方文档为准，并在 trace.md 走偏点中记录，供演进循环更新卡片。
 
 ## 关键限制
 
@@ -953,15 +976,17 @@ Phase 5 完成后，必须验证 `{output_dir}/performance.json` 是否存在：
 
 ---
 
-## Phase 7: Trace 记录
+## Phase 7: Trace 记录 + 知识演进
 
-无论前面阶段成功或失败，都调用 `tilelang2ascend-trace-recorder` skill 生成结构化执行记录。
+无论前面阶段成功或失败，都调用 `tilelang2ascend-trace-recorder` skill 生成结构化执行记录，
+并在同一阶段完成**知识演进**（从 trace.md 提取走偏点与成功模式，去重后按 OKF 格式
+写入演进知识库）。
 
 **传入**：`output_dir` 目录路径、各阶段执行结果信息
 
-**产出**：`{output_dir}/trace.md`
+**产出**：`{output_dir}/trace.md` + 共享知识库更新（runbooks/ 新卡或更新 + 逐层 index.md + 检索索引重建 + log + 演进报告）
 
-包含内容：
+trace.md 包含内容：
 - 设计路径（ops-direct-invoke / TileLang）
 - 各阶段的执行结果（成功/失败）
 - 评测脚本的输出
@@ -970,6 +995,14 @@ Phase 5 完成后，必须验证 `{output_dir}/performance.json` 是否存在：
 - 走偏点分析
 - 若 TileLang 未验证或因框架 bug 跳过验证，必须明确记录为"跳过"及原因
 - TileLang 路径必须包含 3.5 性能迭代摘要：基线 geomean、最终 geomean、p_retry 轮数、已实施优化点列表；合法跳过时记录 SKIPPED.md 中的原因与对照实验证据
+
+知识演进要点：
+- 阅读原文 → 检索去重（knowledge-query preflight/search，禁自维护索引）→
+  按 ops-knowledge-ingest 规则撰写/更新 OKF 卡（runbooks/field_notes|optimization/）→
+  三件套（逐层 index.md + knowledge_query build / 图谱增量 + log）→ 演进报告
+- 只沉淀**通用**知识：算子特异细节并入同根因通用条目，不单独成卡
+- 演进失败不阻塞主流程：记录失败原因，与最终结果一并汇报
+- 若 trace.md 无新增教训（如一次通过且无走偏点），演进报告如实记录"无新增"即可
 
 ---
 

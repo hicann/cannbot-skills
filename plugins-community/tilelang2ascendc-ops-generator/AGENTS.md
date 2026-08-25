@@ -19,6 +19,8 @@ skills:
   - tilelang-op-develop
   - tilelang-perf-optimization
   - ascendc-perf-optimize
+  - knowledge-query
+  - ops-knowledge-ingest
 permission:
   external_directory: allow
 ---
@@ -40,7 +42,7 @@ Ascend C Kernel 算子自动生成工具 CANNBot，通过双路径（ops-direct-
 - **需求接收**：接收用户的算子开发需求（算子模型文件、测试用例等）
 - **算子分类**：自动判定简单/复杂算子，路由到对应开发路径
 - **工作流调度**：调用 `ascend-kernel-developer` Subagent 执行端到端自动开发
-- **进度监控**：监控 7 Phase 开发进度，汇报结果给用户
+- **进度监控**：监控 7 Phase 开发进度（含 Phase 7 知识演进），汇报结果给用户
 - **争议仲裁**：当开发过程中出现分歧时，基于官方文档做出裁决
 
 ### 能做什么
@@ -80,7 +82,7 @@ Ascend C Kernel 算子自动生成工具 CANNBot，通过双路径（ops-direct-
 
 ### 核心任务
 
-管理 Ascend C 算子的端到端自动开发生命周期，调度 `ascend-kernel-developer` Subagent 按 7 Phase 流程执行。
+管理 Ascend C 算子的端到端自动开发生命周期，调度 `ascend-kernel-developer` Subagent 按 7 Phase 流程执行（Phase 7 知识演进：trace.md → 演进知识库）。
 
 ### 算子分类路由
 
@@ -120,14 +122,20 @@ Phase 4: AscendC 生成与验证   (分支)
   └─ 复杂算子: 转译          (tilelang2ascend-translator + 退化检测 + 迭代)
 Phase 5: 性能分析            (ops-profiling --quick 模式; 只做测量归档, TileLang 调优已在 Phase 3 Step 4 完成)
 Phase 6: 全量验证            (恢复全量用例、验证、修复)
-Phase 7: Trace 记录          (tilelang2ascend-trace-recorder)
+Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md →
+                              从 trace.md 提取走偏点与成功模式 → 经 ops-knowledge-ingest
+                              标准路由按 OKF 格式写入共享知识库 runbooks/
+                              （$CANNBOT_KNOWLEDGE_ROOT），供后续任务经
+                              knowledge-query 检索，形成生成效率闭环)
 ```
 
 ### Phase 执行规则
 
 1. **调用 Subagent**：调用 `ascend-kernel-developer` Subagent，传入用户需求参数
 2. **进度监控**：定期检查 `{output_dir}/` 下的产出文件，判断当前 Phase
-3. **完成判定**：Phase 7 产出 `trace.md` 后流程完成
+3. **完成判定**：Phase 7 产出 `trace.md` 并完成知识演进（runbooks/ 新卡或
+   更新 + 逐层 index.md 同步 + 检索索引重建 + log 记录），流程方为完成
+   （演进失败不阻塞汇报，但需如实说明）
 4. **中断恢复**：如果流程中断，检查已有文件判断当前进度，从断点继续
 
 
@@ -254,6 +262,7 @@ Subagent 返回
 | 精度调试 Skill | `/tilelang2ascend-precision-tuning` | 仲裁精度争议时参考 |
 | 性能采集 Skill | `/ops-profiling` | 仲裁性能争议时参考 |
 | 历史成功任务 | `workflows/templates/archive_tasks/` | 仲裁开发模式争议时参考 |
+| 演进知识库 | 共享 OKF 知识库 `$CANNBOT_KNOWLEDGE_ROOT`（当前 `/home/asc-gen-knowledge`，配置于 `~/.config/cannbot/knowledge.env`）的 `runbooks/` 树；**检索一律经 `knowledge-query` skill**（preflight/search，禁自维护索引），**沉淀一律经 `ops-knowledge-ingest` skill 路由** | 历史走偏点与成功模式（OKF kind：implementation_trap/operator_optimization，维度走 tags），生成前 preflight 检索可规避已知坑 |
 
 ### TileLang 设计阶段 Skill 依赖（复杂算子路径）
 
