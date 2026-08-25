@@ -205,6 +205,12 @@ max_a0_inner = ub_size / a0_tile_unit / per_tile
 
 `used_core_num = ceil(total_work / per_core_work)`，保证 ≥ 1。
 
+  > **⚠️  核数裁剪（小 Shape）**：`used_core_num` **不要默认取满核**。小 Shape（`A1`
+  > 相对满核很小）时，每核分摊行数过少，核启动/同步开销大于计算开销，全用满核反而
+  > 更慢。应限制**每核最小计算行数**：
+  >     min_rows_per_core = 8~64（逐 shape 用 profiling 扫描校准）
+  >     used_core_num = min(满核, ceil(A1 / min_rows_per_core))
+  > 以便在启动开销与计算开销间取最优平衡。
 ---
 
 ## 6. 可选增强（Step 4）

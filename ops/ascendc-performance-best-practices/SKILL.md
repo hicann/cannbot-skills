@@ -35,7 +35,8 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 |---------|---------|------|
 | **尾块处理（Tail Block）** | 数据量不能被 tile 大小整除的场景 | ✅ [尾块处理指南](references/common/tail_block_design.md) |
 | **数据搬运（DataCopy）** | 非对齐、小批量多次搬运等的场景 | ✅ [数据搬运](references/common/datacopy_optimization_design.md) |
-| **UB/TBuf常驻复用与Bank冲突规避** |  大量tile/loop都重复从GM搬运，会造成大量冗余MTE2开销的场景 | ✅ [UB/TBuf常驻复用与Bank冲突规避](references/common/ub_resident_design.md |
+| **UB/TBuf常驻复用与Bank冲突规避** |  大量tile/loop都重复从GM搬运，会造成大量冗余MTE2开销的场景 | ✅ [UB/TBuf常驻复用与Bank冲突规避](references/common/ub_resident_design.md) |
+| **小 Shape 核数裁剪（Core Shrink）** | Vec/归约类小 Shape，`A1` 相对满核很小，全核启动/同步开销大于计算 | ✅ [核数裁剪设计](references/common/core_shrink_design.md) |
 
 ## 查询方式
 
