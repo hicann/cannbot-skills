@@ -124,22 +124,6 @@ def test_partial_persist_with_pass_evidence_auto_normalizes(ws):
     assert auto_events[0].after == "finalize"
 
 
-def test_partial_persist_without_evidence_rejected(ws):
-    """`partial_persist` without probe_report.md → REJECT."""
-    log_text = json.dumps({
-        "ts": "2026-05-04T01:00:00Z",
-        "from_state": "await_worker",
-        "to_state": "partial_persist",
-        "handoff": "→ orchestrator: PARTIAL_PERSIST",
-    }) + "\n"
-    (ws / "state_transitions.jsonl").write_text(log_text)
-    (ws / "verification.json").write_text(json.dumps({
-        "precision": {"status": "PARTIAL"},
-    }))
-    with pytest.raises(sn.SchemaNormalizationError):
-        sn.normalize_workspace(ws, fail_strict=True)
-
-
 # ---------------------------------------------------------------------------
 # TERMINAL state alias: partial_persist → finalize
 # ---------------------------------------------------------------------------
@@ -166,7 +150,14 @@ def test_partial_persist_with_probe_report_auto(ws):
 
 
 def test_partial_persist_without_evidence_rejected(ws):
-    """partial_persist with PARTIAL but NO probe_report.md and NO Tier-2 evidence → REJECT."""
+    """partial_persist with PARTIAL but NO probe_report.md and NO Tier-2 evidence → REJECT.
+
+    This file previously carried two same-named definitions of this test (the
+    second shadowed the first), differing only in the `handoff` text
+    ("PARTIAL" vs "→ orchestrator: PARTIAL_PERSIST"). They are one scenario:
+    `_check_evidence_for_terminal` routes on `to_state` and never reads the log
+    entry, so the handoff spelling is not part of this contract.
+    """
     log_text = json.dumps({
         "ts": "2026-05-04T01:00:00Z",
         "from_state": "await_worker",
@@ -179,8 +170,35 @@ def test_partial_persist_without_evidence_rejected(ws):
     }))
     # NO probe_report.md, NO pass_b two-tier evidence
 
-    with pytest.raises(sn.SchemaNormalizationError):
+    with pytest.raises(sn.SchemaNormalizationError) as exc_info:
         sn.normalize_workspace(ws, fail_strict=True)
+    # Pin the branch: the reject must come from the missing-evidence gate, not
+    # from an unrelated one (self-introspection / verification.json absent),
+    # which would let this test pass for the wrong reason.
+    assert "no probe_report.md and no Tier-2 evidence" in str(exc_info.value)
+
+
+def test_partial_persist_with_pass_b_tier2_evidence_auto(ws):
+    """partial_persist with no probe_report.md but pass_b Tier-2 verdict → finalize OK.
+
+    The evidence gate accepts probe_report.md OR two-tier evidence in
+    `precision.pass_b`; the OR-branch had no coverage of its own.
+    """
+    log_text = json.dumps({
+        "ts": "2026-05-04T01:00:00Z",
+        "from_state": "await_worker",
+        "to_state": "partial_persist",
+        "handoff": "PARTIAL_PERSIST OL-110 fail-floor",
+    }) + "\n"
+    (ws / "state_transitions.jsonl").write_text(log_text)
+    (ws / "verification.json").write_text(json.dumps({
+        "precision": {"status": "PARTIAL", "pass_b": {"op_verdict": "PASS_T2"}},
+    }))
+    # NO probe_report.md — pass_b carries the Tier-2 evidence instead
+
+    report = sn.normalize_workspace(ws, fail_strict=True)
+    auto = [e for e in report.events if e.category == "TERMINAL_AUTO"]
+    assert any(e.before == "partial_persist" and e.after == "finalize" for e in auto)
 
 
 def test_partial_persist_wrong_status_rejected(ws):
