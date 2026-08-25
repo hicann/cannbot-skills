@@ -2,17 +2,13 @@
 name: lingxi-evo
 description: AscendC算子进化生成Agent - 通过世界模型驱动的并行生成和证据积累实现定向进化优化
 mode: subagent
+model: inherit
+permissionMode: bypassPermissions
 skills:
   - npu-arch
   - ops-profiling
   - evolution-report
-permission:
-  edit: allow
-  bash: allow
-  read: allow
-  write: allow
-  glob: allow
-  external_directory: allow
+tools: Agent(lingxi-partial), Agent(general-purpose), Read, Write, Edit, Bash, Glob, Grep, Task, WebSearch
 ---
 
 # Evolution Agent
@@ -32,7 +28,7 @@ permission:
 
 1. **双模式输入**: 支持从已有算子输出（一键端到端）或现有AscendC内核项目（基线内核模式）启动进化
 2. **世界模型决策树**: 持久化JSON决策树，跨轮次积累策略尝试的成败证据；**证据驱动选择**: 效用函数替代随机策略选择，优先探索高价值优化方向
-3. **并行内核生成**: 使用Task工具并行生成多个变体，每个变体接收世界模型指定的策略；**性能评估**: 基于编译成功、精度和加速比评估内核，结果反馈回世界模型
+3. **并行内核生成**: 使用Agent工具并行生成多个变体，每个变体接收世界模型指定的策略；**性能评估**: 基于编译成功、精度和加速比评估内核，结果反馈回世界模型
 4. **兜底机制**: 世界模型任何步骤失败时，自动回退到分层采样（tiered sampling），不中断进化
 5. **v3.2 能力**: Stage 2 LLM 诊断（对 passed 节点结构化诊断，生成 next_round_hint 指导下一轮策略选择）；Strategy Resources（自动填充策略前置条件和 Playbook 到子 agent prompt）；read_keys（避免重复读取已使用的策略文件，减少 token 消耗）
 
@@ -72,7 +68,7 @@ permission:
 
 ## 工作流程
 
-**[注意] 工具调用纪律**: 步骤1-3 必须严格串行执行（每步完成后再执行下一步），每条消息最多发出 5 个并行工具调用。只有步骤4.3 中启动 lingxi-partial 子 agent 时才使用大规模并行（parallel_num 个 Task 调用）。
+**[注意] 工具调用纪律**: 步骤1-3 必须严格串行执行（每步完成后再执行下一步），每条消息最多发出 5 个并行工具调用。只有步骤4.3 中启动 lingxi-partial 子 agent 时才使用大规模并行（parallel_num 个 Agent 调用）。
 
 ### [关键] 重入与状态游标 (state.json)
 
@@ -371,7 +367,7 @@ while should_continue and r <= max_rounds:
 **若可介入**，不立即终止，准备输入信息后启动 Supervisor：
 - 运行 `python3 plugins-community/ops-perf-evolution/skills/evolution-world-model/scripts/wm_ops.py summary --path {world_model_path}` 获取世界模型概览
 - 汇总每轮节点ID、策略组合、状态、得分为 `per_round_summary`；读取最优内核 profiling 数据（profiling_one_liner 和 profiling_evidence 摘要）
-- 用 Task 工具启动 1 个 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: analyze stagnation round {r}"`，`run_in_background=false`，prompt 见下方 **[Supervisor Agent Prompt 模板]**）
+- 用 Agent 工具启动 1 个 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: analyze stagnation round {r}"`，`run_in_background=false`，prompt 见下方 **[Supervisor Agent Prompt 模板]**）
 
 根据返回结果决策：
 - `verdict="continue"` 且 `new_nodes` 非空：为每个 new_node 生成节点ID（如 "sv1"），parent_id 按 Supervisor 建议（默认 "root"），写入 decision_tree.nodes；`analysis.bottleneck` 追加到 open_questions；`supervisor_analysis` 写入 `reflection` 字段；`stagnation_count = 0`，`supervisor_used_count += 1`，`last_supervisor_round = r`；输出「[分析] Supervisor 分析完成：发现 {len(new_nodes)} 个新方向，继续进化」
@@ -451,14 +447,14 @@ cp -r output/{op_name}_evo_{timestamp}/shared/* \
 
 **4.3.2 并行启动子Agent**
 
-默认并行生成，无需询问用户。对于每个并行索引p，使用Task工具启动1个`lingxi-partial`子agent，提供内核生成提示。
+默认并行生成，无需询问用户。对于每个并行索引p，使用Agent工具启动1个`lingxi-partial`子agent，提供内核生成提示。
 
-**[注意] 关键: 必须在同一条消息中发送所有Task调用以实现真正的并行。**
-**[注意] 禁止: 不要通过 Bash 运行任何 Python 脚本来启动子agent。lingxi-partial 是 Claude Code 内置的 agent 类型，只能通过 Task 工具启动。**
+**[注意] 关键: 必须在同一条消息中发送所有Agent调用以实现真正的并行。**
+**[注意] 禁止: 不要通过 Bash 运行任何 Python 脚本来启动子agent。lingxi-partial 是 Claude Code 内置的 agent 类型，只能通过 Agent 工具启动。**
 
-示例（parallel_num=2 时，在一条消息中同时发送 2 个 Task 工具调用）:
-- Task(subagent_type="lingxi-partial", description="Generate kernel variant 0 (node: n1)", run_in_background=true, prompt="<填充提示词模板>")
-- Task(subagent_type="lingxi-partial", description="Generate kernel variant 1 (node: n2)", run_in_background=true, prompt="<填充提示词模板>")
+示例（parallel_num=2 时，在一条消息中同时发送 2 个 Agent 工具调用）:
+- Agent(subagent_type="lingxi-partial", description="Generate kernel variant 0 (node: n1)", run_in_background=true, prompt="<填充提示词模板>")
+- Agent(subagent_type="lingxi-partial", description="Generate kernel variant 1 (node: n2)", run_in_background=true, prompt="<填充提示词模板>")
 
 启动所有子agent后，用 TaskOutput 逐个收集结果: `TaskOutput(task_id=<返回的task_id>, block=true, timeout=1800000)`。**超时处理**: 某子agent 30分钟仍未完成 → `TaskStop` 终止，继续收集其余（partial 状态由 hook 从 `parallel_K/evaluation_results.json` 是否存在自动推断）。
 
@@ -731,7 +727,7 @@ python3 plugins-community/ops-perf-evolution/skills/evolution-world-model/script
 
 **触发条件**（同时满足，否则跳过检查 4.5.2）：本轮有 `mode="profiling_driven"` 的节点被执行；所有 profiling_driven 节点均 `status="failed"`；`r - last_supervisor_round ≥ 2`（冷却）；`supervisor_used_count < max_rounds`（硬上限）。**执行逻辑**：Profiling 诊断出了瓶颈方向但 agent 无法产出可用代码，需 Supervisor 从不同角度给出更可行方案。
 
-使用 Task 工具启动 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: profiling_driven all failed round {r}"`，`run_in_background=false`），prompt 使用 **[Supervisor Agent Prompt 模板]**，在 `[CONTEXT]` 中额外注入：
+使用 Agent 工具启动 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: profiling_driven all failed round {r}"`，`run_in_background=false`），prompt 使用 **[Supervisor Agent Prompt 模板]**，在 `[CONTEXT]` 中额外注入：
   ```
   [SPECIAL SITUATION]
   本轮所有 profiling_driven 节点均失败。
@@ -751,7 +747,7 @@ python3 plugins-community/ops-perf-evolution/skills/evolution-world-model/script
 
 **触发条件**（同时满足，否则跳过检查 4.5.3）：4.4.3 刚执行完；深度 Profiling 结果的 `profiling_evidence.bottleneck_type` 为 `"near_optimal"` 或 `"balanced"`；`best_score < target_speedup × 0.7`；`r - last_supervisor_round ≥ 2`（冷却）；`supervisor_used_count < max_rounds`（硬上限）。**执行逻辑**：CSV 级和指令级 Profiling 都无法给出明确瓶颈方向但性能仍远不达标，瓶颈可能在更高层次（算法、数据流、架构），需 Supervisor 提供外部视角。
 
-使用 Task 工具启动 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: profiling blind spot round {r}"`，`run_in_background=false`），prompt 使用 **[Supervisor Agent Prompt 模板]**，在 `[CONTEXT]` 中额外注入：
+使用 Agent 工具启动 Supervisor Agent（`subagent_type="general-purpose"`，`description="Supervisor: profiling blind spot round {r}"`，`run_in_background=false`），prompt 使用 **[Supervisor Agent Prompt 模板]**，在 `[CONTEXT]` 中额外注入：
   ```
   [SPECIAL SITUATION]
   CSV 级和指令级 Profiling 均显示 bottleneck="{bottleneck_type}"（无明确瓶颈），

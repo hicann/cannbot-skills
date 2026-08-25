@@ -223,6 +223,148 @@ agent_in_whitelist() {
     [[ "$base" == $INCLUDED_AGENT_PATTERN ]]
 }
 
+# Translate agent markdown for OpenCode/Trae.
+# Claude Code uses Agent(...) for subagent dispatch; OpenCode and Trae use task(...).
+# Usage: translate_agent <source_path> <target_path> <tool>
+translate_agent() {
+    local src="$1"
+    local dst="$2"
+    local target_tool="$3"
+    python3 - "$src" "$dst" "$target_tool" <<'PYEOF'
+import sys
+import re
+
+src, dst, tool = sys.argv[1:4]
+
+with open(src, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+fm_match = re.match(r'^---\n(.*?)\n---\n?(.*)$', content, re.DOTALL)
+if not fm_match:
+    with open(dst, 'w', encoding='utf-8') as f:
+        f.write(content)
+    sys.exit(0)
+
+fm_raw = fm_match.group(1)
+body = fm_match.group(2)
+
+# Parse frontmatter preserving order.
+fm_items = []
+i = 0
+lines = fm_raw.split('\n')
+while i < len(lines):
+    line = lines[i]
+    stripped = line.strip()
+    if not stripped or stripped.startswith('#'):
+        i += 1
+        continue
+    if ':' in line:
+        key, val = line.split(':', 1)
+        key = key.strip()
+        val = val.strip()
+        if val == '':
+            list_items = []
+            i += 1
+            while i < len(lines) and lines[i].strip().startswith('- '):
+                list_items.append(lines[i].strip()[2:])
+                i += 1
+            fm_items.append((key, list_items))
+            continue
+        else:
+            fm_items.append((key, val))
+    i += 1
+
+if tool == 'opencode':
+    new_items = []
+    for key, val in fm_items:
+        if key == 'tools':
+            if isinstance(val, list):
+                tools_list = val
+            else:
+                tools_list = [t.strip() for t in val.split(',') if t.strip()]
+            tool_map = {}
+            for t in tools_list:
+                if t.startswith('Agent(') and t.endswith(')'):
+                    tool_map['task'] = 'true'
+                else:
+                    tool_map[t.lower()] = 'true'
+            # Output as multi-line boolean map (OpenCode convention).
+            sorted_tools = '\n'.join([f'  {k}: {v}' for k, v in sorted(tool_map.items())])
+            new_items.append(('tools', sorted_tools))
+        elif key == 'permissionMode':
+            if val == 'bypassPermissions':
+                new_items.append(('permission', 'allow'))
+            # Other permissionMode values are dropped.
+        elif key == 'model' and val == 'inherit':
+            # OpenCode expects an explicit model name; omit to use caller default.
+            continue
+        else:
+            new_items.append((key, val))
+    fm_lines = []
+    for key, val in new_items:
+        if isinstance(val, list):
+            fm_lines.append(f'{key}:')
+            for item in val:
+                fm_lines.append(f'  - {item}')
+        elif '\n' in str(val):
+            fm_lines.append(f'{key}:')
+            fm_lines.append(val)
+        else:
+            fm_lines.append(f'{key}: {val}')
+    new_fm = '\n'.join(fm_lines)
+    new_body = re.sub(r'\bAgent\s*\(', 'task(', body)
+
+elif tool == 'trae':
+    new_items = []
+    for key, val in fm_items:
+        if key == 'tools':
+            if isinstance(val, list):
+                tools_list = val
+            else:
+                tools_list = [t.strip() for t in val.split(',') if t.strip()]
+            trae_tools = []
+            seen_tools = set()
+            for t in tools_list:
+                if t.startswith('Agent(') and t.endswith(')'):
+                    t_norm = 'task'
+                else:
+                    t_norm = t
+                if t_norm not in seen_tools:
+                    seen_tools.add(t_norm)
+                    trae_tools.append(t_norm)
+            new_items.append(('tools', ', '.join(trae_tools)))
+        elif key == 'permissionMode':
+            # Trae frontmatter does not use permissionMode.
+            continue
+        elif key == 'model' and val == 'inherit':
+            # Trae does not support 'inherit' model; omit to use IDE default.
+            continue
+        else:
+            new_items.append((key, val))
+    fm_lines = []
+    for key, val in new_items:
+        if isinstance(val, list):
+            fm_lines.append(f'{key}:')
+            for item in val:
+                fm_lines.append(f'  - {item}')
+        else:
+            fm_lines.append(f'{key}: {val}')
+    new_fm = '\n'.join(fm_lines)
+    # Best-effort: Trae's subagent invocation is not documented, but task(...) is
+    # the closest equivalent used by OpenCode and other runtimes.
+    new_body = re.sub(r'\bAgent\s*\(', 'task(', body)
+else:
+    new_fm = fm_raw
+    new_body = body
+
+with open(dst, 'w', encoding='utf-8') as f:
+    f.write('---\n')
+    f.write(new_fm)
+    f.write('\n---\n')
+    f.write(new_body)
+PYEOF
+}
+
 for agent_entry in "$LOCAL_AGENT_ROOT"/*; do
     [ -e "$agent_entry" ] || continue
     name=$(basename "$agent_entry")
@@ -345,7 +487,7 @@ if [ "$TOOL" = "opencode" ]; then
         name=$(basename "$agent_entry")
         base_name="${name%.md}"
         [[ "$base_name" != $INCLUDED_AGENT_PATTERN ]] && continue
-        ln -sfn "$(realpath "$agent_entry")" "$CANNBOT_DIR/agents/$name"
+        translate_agent "$agent_entry" "$CANNBOT_DIR/agents/$name" opencode
         agent_count=$((agent_count + 1))
     done
     step1_summary="${step1_summary}agents(${agent_count}) "
@@ -487,7 +629,11 @@ else
         base="${name%.md}"
         agent_in_whitelist "$base" || continue
         target="$AGENT_DISCOVERY/$name"
-        ln -sfn "$(realpath "$agent_entry")" "$target"
+        if [ "$TOOL" = "trae" ]; then
+            translate_agent "$agent_entry" "$target" trae
+        else
+            ln -sfn "$(realpath "$agent_entry")" "$target"
+        fi
         agent_link_count=$((agent_link_count + 1))
     done
 

@@ -395,8 +395,8 @@ check_common_artifacts() {
     if [ "$EXPECTED_AGENT_COUNT" -eq -1 ]; then
         if [ -d "$agent_dir" ]; then
             local actual_agents
-            actual_agents=$(find "$agent_dir" -maxdepth 1 -type l | wc -l)
-            print_pass "agents/ contains $actual_agents symlink(s) (dynamic count, no INCLUDED_AGENT_PATTERN)"
+            actual_agents=$(find "$agent_dir" -maxdepth 1 -mindepth 1 | wc -l)
+            print_pass "agents/ contains $actual_agents item(s) (dynamic count, no INCLUDED_AGENT_PATTERN)"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
             print_fail "agents/ directory not found"
@@ -407,13 +407,13 @@ check_common_artifacts() {
         PASS_COUNT=$((PASS_COUNT + 1))
     elif [ -d "$agent_dir" ]; then
         local actual_agents
-        actual_agents=$(find "$agent_dir" -maxdepth 1 -type l | wc -l)
+        actual_agents=$(find "$agent_dir" -maxdepth 1 -mindepth 1 | wc -l)
         if [ "$actual_agents" -eq "$EXPECTED_AGENT_COUNT" ] || \
            [ "$actual_agents" -eq "$((EXPECTED_AGENT_COUNT + agent_tolerance))" ]; then
-            print_pass "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
+            print_pass "agents/ contains $actual_agents item(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            print_fail "agents/ contains $actual_agents symlink(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
+            print_fail "agents/ contains $actual_agents item(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
     else
