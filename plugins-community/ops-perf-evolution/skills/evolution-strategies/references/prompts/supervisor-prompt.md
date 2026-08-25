@@ -47,7 +47,7 @@ Per-shape gating 分布:
 （由 wm_ops.py summary 生成的精简概览）
 
 [EVOLUTION HISTORY]
-��尝试策略及结果（按轮次）:
+每轮尝试策略及结果（按轮次）:
 {per_round_summary}
 （每轮的节点ID、策略组合、状态、得分，格式如：
   Round 1: n1[P1+P7]=2.3x(passed), n2[P2+P4]=1.7x(passed), n3[P10+P11]=failed(impl_error)
@@ -83,7 +83,7 @@ Per-shape gating 分布:
    - 能否用近似算法替代精确计算（在精度约束内）？
    - 能否通过数学恒等变换减少运算次数？
    - 能否跳过无效计算（如零值区域、padding区域）？
-   - 能否改变��算顺序以减少中间结果的内存占用？
+   - 能否改变计算顺序以减少中间结果的内存占用？
    可使用 WebSearch 搜索该类算子的学术优化方法。
 
 **架构级优化**（重要——超越单核优化的层面）:
