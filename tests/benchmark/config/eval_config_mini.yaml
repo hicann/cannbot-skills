@@ -11,6 +11,9 @@
 # 评测配置 (Mini子集)
 # 快速评测验证数据集，覆盖 L1-L4 各层级核心范式算子
 #
+# 超时策略: per-op timeout (L1=3h, L2=4h, L3=6h, L4=9h)
+# 优先级: op.timeout > category_timeouts > default_timeout > OP_TIMEOUT 环境变量
+#
 # Level1 (2个):
 #   - swi_glu                  Elementwise 门控激活 (LLaMA/DeepSeek FFN)
 #   - foreach_addcdiv_scalar   FusedComposite TensorList 批量调度 (优化器基元)
@@ -39,71 +42,110 @@ prompt_template: prompts/op_dev_prompt.txt
 cann_bench_root: cann-bench
 output_dir: results
 
+# 模型白名单: --model 与交互问询仅接受列表内模型
+# (可用 CLI --allowed-models a/b,c/d 覆盖; 置空/删除则不校验)
+allowed_models:
+  - kimi-for-coding/k3
+  - zhipuai-coding-plan/glm-5.2
+  - minimax-cn-coding-plan/MiniMax-M3
+  - deepseek/deepseek-v4-pro
+  - deepseek/deepseek-v4-flash
+
+# 超时 (秒), 优先级: op.timeout > category_timeouts[category]
+#   > default_timeout > OP_TIMEOUT 环境变量 (默认 21600)
+default_timeout: 10800
+category_timeouts:
+  Elementwise: 10800
+  FusedComposite: 32400    # L4 worst-case (L1-L3 由 per-op 覆盖)
+  Normalization: 14400
+  Reduction: 14400
+  ScatterUpdate: 14400
+  IndexGather: 14400
+  Contraction: 21600
+  SortSelect: 21600
+  LayoutTransform: 21600
+
 ops:
-  # ===== Level1 =====
+  # ===== Level1 (3h = 10800s) =====
   - op_name: cann-bench/tasks/level1/swi_glu
     category: Elementwise
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 10800
 
   - op_name: cann-bench/tasks/level1/foreach_addcdiv_scalar
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 10800
 
-  # ===== Level2 =====
+  # ===== Level2 (4h = 14400s) =====
   - op_name: cann-bench/tasks/level2/rms_norm
     category: Normalization
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
   - op_name: cann-bench/tasks/level2/softmax
     category: Normalization
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
   - op_name: cann-bench/tasks/level2/apply_rotary_pos_emb
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
   - op_name: cann-bench/tasks/level2/cummin
     category: Reduction
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
   - op_name: cann-bench/tasks/level2/scatter
     category: ScatterUpdate
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
   - op_name: cann-bench/tasks/level2/gather
     category: IndexGather
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 14400
 
-  # ===== Level3 =====
+  # ===== Level3 (6h = 21600s) =====
   - op_name: cann-bench/tasks/level3/grouped_matmul
     category: Contraction
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
   - op_name: cann-bench/tasks/level3/quant_matmul
     category: Contraction
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
   - op_name: cann-bench/tasks/level3/dequant_swiglu_quant
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
   - op_name: cann-bench/tasks/level3/add_rms_norm_dynamic_quant
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
   - op_name: cann-bench/tasks/level3/top_k
     category: SortSelect
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
   - op_name: cann-bench/tasks/level3/transpose
     category: LayoutTransform
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 21600
 
-  # ===== Level4 =====
+  # ===== Level4 (9h = 32400s) =====
   - op_name: cann-bench/tasks/level4/mla_prolog
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 32400
 
   - op_name: cann-bench/tasks/level4/mla
     category: FusedComposite
     example_path: cann-bench/examples/direct_launch_example
+    timeout: 32400

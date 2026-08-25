@@ -72,6 +72,21 @@ def show_what_will_be_cleaned(cann_bench_root: str):
     else:
         print("\n[cann-bench] 没有需要删除的 untracked 文件。")
 
+    whl_residue = []
+    for root, dirs, files in os.walk(os.path.join(cann_bench_root, "tasks")):
+        if "dist" not in root.split(os.sep):
+            continue
+        for fn in files:
+            if fn.endswith(".whl"):
+                whl_residue.append(os.path.relpath(os.path.join(root, fn),
+                                                   cann_bench_root))
+    if whl_residue:
+        print(f"\n[cann-bench] 删除 tasks/*/dist/ 遗留交付 whl ({len(whl_residue)} 个):")
+        for f in sorted(whl_residue):
+            print(f"  {f}")
+    else:
+        print("\n[cann-bench] tasks/*/dist/ 无遗留交付 whl。")
+
     results_dir = os.path.join(BENCHMARK_ROOT, "results")
     if os.path.isdir(results_dir):
         print(f"\n[benchmark] 删除 results/ 目录")
@@ -95,6 +110,23 @@ def do_cleanup(cann_bench_root: str, force: bool = False):
     print("  删除 untracked + ignored 文件 ...")
     _run(["git", "clean", "-fdx", "examples/"], cwd=cann_bench_root, check=False)
     _run(["git", "clean", "-fdx", "tasks/"], cwd=cann_bench_root, check=False)
+
+    print("  删除 tasks/*/dist/ 遗留交付 whl ...")
+    removed = 0
+    for root, dirs, files in os.walk(os.path.join(cann_bench_root, "tasks")):
+        if "dist" not in root.split(os.sep):
+            continue
+        for fn in files:
+            if fn.endswith(".whl"):
+                try:
+                    os.remove(os.path.join(root, fn))
+                    removed += 1
+                except OSError:
+                    pass
+    if removed:
+        print(f"  已删除 {removed} 个遗留 .whl")
+    else:
+        print("  无遗留 .whl")
 
     if branch != "master":
         print(f"  切回 master 分支 ...")
@@ -123,7 +155,11 @@ def main():
                         help="跳过确认直接执行")
     args = parser.parse_args()
 
-    cann_bench_root = get_cann_bench_root()
+    try:
+        cann_bench_root = get_cann_bench_root()
+    except RuntimeError as e:  # 钉版本校验 fail-fast 报警
+        print(str(e))
+        return 1
 
     if args.dry_run:
         show_what_will_be_cleaned(cann_bench_root)
