@@ -447,10 +447,175 @@ NPU 上每一次数据搬运（DataCopyPad DMA）、每一次流水线迭代（t
 ```
 仅修复 ②③（multi-row + 2D DMA），即使 ① 仍有缺陷，Avg Speedup 仍从 1.16x 提升到 1.72x。
 
+
+---
+
+### 🛑 步骤 0-E: 加速比驱动二级闭环优化（Phase 5 性能分析后、Phase 6 全量验证前强制执行）
+
+#### 执行时机
+- **前置条件**：Phase 5 (ops-profiling 性能分析) 已完成，加速比数据已采集
+- **执行窗口**：Phase 5 完成后、Phase 6 (全量验证) 启动前
+- **触发依据**：Phase 5 性能分析产出的加速比数据（bench_time / custom_time）
+- **适用范围**：数学计算类算子强制执行（Sort/TopK/Reduce/MatMul/Norm/Elementwise 等）；纯数据搬运类算子（Copy/Gather 等无计算）可跳过
+
+#### 二级闭环结构
+本步骤采用二级串联闭环：**第一级（算法层）先触发，通过后第二级（类型层）再触发**。两级相互独立，各有 3 次迭代上限。所有优化方案使用通用描述，不绑定具体算子名。
+
+---
+
+#### 0-E.1 第一级 — 整体加速比算法对比
+
+**触发条件**：整体加速比 ≤ 0.8x（所有 dtype 加速比的 geomean）
+
+**执行流程**：
+```
+Step 1: 识别自定义算子当前采用的算法
+        ├─ 检查 kernel 代码中实际调用的 AscendC 高阶 API / 自定义算法路径
+        └  记录算法名（如 MERGE_SORT / RADIX_SELECT / SEQUENTIAL_REDUCE / TREE_REDUCE）
+
+Step 2: 调研 CANN 内置实现的算法
+        ├─ 查阅 asc-devkit/docs/api/ 或 aclnn 文档，确定 CANN 标杆算子使用的算法
+        └  记录标杆算法名
+
+Step 3: 对比算法代差
+        ├─ 查阅下方"算法对比参考表"
+        └  判断自定义算法 vs 标杆算法是否存在代差
+
+Step 4: 决策
+        ├─ 算法不同且标杆更先进 → 采用更先进算法重新生成 kernel:
+        │    4a. 回到 Phase 3 重新做 TileLang 设计（更换算法，如 MERGE_SORT → RADIX_SELECT）
+        │    4b. 重新走 Phase 4 转译 + 编译 + 精度验证（evaluate_ascendc.sh）
+        │        ├─ PASS → 重新采集加速比（ops-profiling --quick），回到 Step 1 重新评估
+        │        └─ FAIL → 走 Phase 4 对应修复流程（A 类走 4.5A，D 类走 4.5D）
+        │    4c. 迭代上限：3 次（每次包含完整的 Phase 3→Phase 4 流程）
+        │    4d. 若 3 次后算法仍无法对齐或加速比仍不达标 → 进入 Step 5 微优化排查
+        ├─ 算法相同且整体加速比 > 0.8x → 第一级 PASS，进入第二级（0-E.2）
+        └─ 算法相同但整体加速比仍 ≤ 0.8x → 进入 Step 5 微优化排查
+
+Step 5: 算法已最优但不达标 — 微优化排查
+        ├─ 检查 Step 0-D 性能因果链 5 项是否已全部应用：
+        │  ① wrapper 零拷贝 ② 单次 DMA 传满 ③ tile 利用率≥80%
+        │  ④ 双缓冲 BUFFER_NUM≥2 ⑤ 核利用率≥90%
+        ├─ 若有未应用项 → 应用后重新评估加速比（计入第一级迭代次数）
+        └─ 全部已应用仍不达标 → 判定为"算法/硬件限制"
+           记录上限分析（Roofline + Amdahl），第一级退出进入第二级
+```
+
+**算法对比参考表**：
+
+| 算子族 | 落后算法 | 先进算法 | 典型代差 |
+|--------|---------|---------|---------|
+| Sort | BUBBLE_SORT / 逐行冒泡 | RADIX_SORT（按 bit 分桶） | 3-10x |
+| TopK | MERGE_SORT (O(n log k)) | RADIX_SELECT (O(n)) | 2-5x |
+| ReduceSum | SEQUENTIAL_REDUCE（顺序累加） | TREE_REDUCE（树形归约） | 2-4x |
+| MatMul | 逐块 GEMM（无 L0 cache 利用） | Blaze/tensor_api 分块（L0A/L0B/L0C 缓存） | 3-8x |
+| Norm | 逐元素 Exp/Reduce/Div 三遍扫描 | 融合单遍扫描（Online Softmax / RMSNorm 单 pass） | 2-3x |
+
+**门禁规则**：
+- 整体加速比 ≤ 0.8x 但未完成 0-E.1 算法对比 + Step 5 微优化排查 → **禁止**进入 Phase 6
+- 算法代差未消除（仍使用落后算法）→ 强制重新生成 kernel，直到算法对齐或达 3 次迭代上限
+- 算法已最优 + 微优化已全部应用仍不达标 → 记录上限分析后可退出第一级（不阻塞）
+
+---
+
+#### 0-E.2 第二级 — BF16 加速比专项优化
+
+**触发条件**：整体加速比 > 0.8x（第一级已通过），但分 dtype 统计中 **BF16 加速比 ≤ 0.8x**
+
+**执行流程**：
+```
+Step 1: 分 dtype 统计加速比
+        ├─ 按 fp32 / fp16 / bf16 分别统计 (bench_time / custom_time)
+        └  确认仅 BF16 不达标（fp32/fp16 均达标）
+
+Step 2: 诊断当前 BF16 处理策略
+        ├─ 策略 A: BF16 原生计算（kernel 直接在 BF16 上操作）
+        ├─ 策略 B: Host 端 Cast（model_new_ascendc.py 中 x.to(fp32) → kernel fp32 → .to(bf16)）
+        └─ 策略 C: Kernel-internal Cast（kernel 内 Cast<fp32, bf16> 升精度计算后 Cast 回）
+
+Step 3: 按算子类型 + 当前策略决定是否调整 Cast 策略
+        ├─ 归约/累加类算子 + 当前非 kernel-internal Cast → 调整为 kernel-internal Cast，进入 Step 4
+        ├─ 数据重排类算子（memory-bound）+ 当前为 Host Cast → 调整为 kernel-internal Cast，进入 Step 4
+        ├─ 数据重排类算子（memory-bound）+ 当前为 kernel-internal Cast → 已是最优策略，检查 RoundMode 和填充值
+        ├─ 数据重排类算子（compute-bound）+ 当前为 Host Cast → 评估 UB 容量后决定
+        ├─ 逐元素/纯 Vector 算子 + 当前为 Host Cast → 调整为 BF16 原生（移除 host Cast）
+        ├─ 逐元素/纯 Vector 算子 + 当前为 BF16 原生 → 已是最优，第二级无优化空间，退出
+        └─ 所有"已是最优策略"情况 → 检查 RoundMode/填充值是否符合硬性约束，不符则修复
+
+Step 4: 如需调整 Cast 策略 → 执行完整迭代（迭代上限 3 次）:
+  4a. 修改 kernel 代码（kernel/op_kernel/<op>.cpp 增加/调整 Cast 逻辑）
+  4b. 修改 wrapper（model_new_ascendc.py 移除/添加 host 端 Cast，保持 wrapper 零搬运原则）
+  4c. 重新编译 + 精度验证（evaluate_ascendc.sh）
+      ├─ PASS → 继续 4d
+      └─ FAIL（D 类精度不匹配）→ 走 4.5D 精度修复流程（消耗 d_retry，不计入 0-E.2 的 3 次上限）
+  4d. 重新采集加速比（ops-profiling --quick）
+  4e. 评估:
+      ├─ BF16 加速比 > 0.8x → 第二级 PASS，进入 Phase 6
+      └─ BF16 加速比仍 ≤ 0.8x 且迭代 < 3 次 → 回到 4a
+```
+
+**RoundMode 硬性约束速查表**：
+
+| Cast 方向 | RoundMode | 原因 |
+|-----------|-----------|------|
+| BF16 → FP32 | `CAST_NONE` | mantissa 7bit → 23bit 无损扩展，无需舍入 |
+| FP32 → BF16 | `CAST_RINT` | mantissa 23bit → 7bit 有损舍入，round-to-nearest-even |
+| FP32 → FP16 | `CAST_RINT` | mantissa 23bit → 10bit 有损舍入 |
+| FP16 → FP32 | `CAST_NONE` | mantissa 10bit → 23bit 无损扩展 |
+
+**⚠️ 禁止误用**：
+- 误用 `CAST_RINT` 做 BF16→FP32 会产生无效值（如 1.1939e-39），因 CAST_RINT 在扩展时尝试舍入，破坏 mantissa
+- 填充值必须使用目标 dtype 可表示范围：BF16 用 ±3.38953139e38f（BF16 max finite），**禁止**用 FP32 max (3.4028235e38f)，Cast 回 BF16 会溢出为 Inf
+
+**Kernel-internal Cast 适用范围表**：
+
+| 算子类型 | Kernel-internal Cast | 原因 |
+|---------|---------------------|------|
+| 归约/累加（Reduce/Mean/Sum） | ✅ 强制使用 | FP16/BF16 下累加精度不足 |
+| 逐元素/纯 Vector（Mul/Add/Sub） | ❌ 禁止 | BF16 原生精度足够，Cast 增加 GM 流量 |
+| 数据重排 memory-bound（Sort/TopK/Gather） | ✅ 推荐 | host 端 Cast 导致 GM 流量 5 倍放大（640MB vs 128MB），kernel 内 Cast 减少 80% GM 流量；UB 内数据量翻倍的开销远小于 GM 流量节省（TopKV2 实测验证：BF16 加速比从 0.617x 提升至达标） |
+| 数据重排 compute-bound | ⚠️ 需评估 UB 容量 | Cast 使 UB 数据量翻倍可能溢出，需确认 UB 容量充足后再使用 |
+| 矩阵乘（MatMul/Linear） | ✅ 允许 | API 要求特定 dtype，或精度需求 |
+| 激活函数（Softmax/LayerNorm） | ✅ 允许 | 中间归约步骤需高精度 |
+
+**GM 流量对比**（kernel-internal Cast vs host 端 Cast，以 128MB BF16 输入为例）：
+- kernel 内 Cast：输入 BF16 (128MB) → kernel 内升 FP32 计算 → 输出 BF16 (128MB) = **256MB GM 流量**
+- host 端 Cast：输入 BF16 (128MB) → host 升 FP32 (256MB) → kernel FP32 (256MB) → host 降 BF16 (128MB) = **640MB GM 流量**
+- kernel 内 Cast 减少 GM 流量 ~60%，对 memory-bound 算子有显著收益
+
+**门禁规则**：
+- 整体达标但 BF16 不达标且未完成 0-E.2 诊断 → **禁止**进入 Phase 6
+- Cast 策略调整后必须重新验证精度（回到步骤 3-步骤 4 精度验证流程）
+
+---
+
+#### 0-E.3 闭环退出条件
+
+```
+第一级（算法层）:
+  ├─ 3 次内算法对齐且整体加速比 > 0.8x → 第一级 PASS，进入第二级
+  └─ 3 次后仍未达标 → 记录失败原因，跳过第二级直接进入 Phase 6（全量验证时标注）
+
+第二级（类型层）:
+  ├─ 3 次内 BF16 加速比 > 0.8x → 第二级 PASS，进入 Phase 6
+  └─ 3 次后仍未达标 → 记录失败原因，进入 Phase 6（全量验证时标注）
+
+整体退出:
+  ├─ 两级均 PASS → 正常进入 Phase 6
+  ├─ 任一级达 3 次上限未达标 → 仍进入 Phase 6，但在 trace.md 中记录未达标项
+  └─ 总迭代上限：6 次（第一级 3 + 第二级 3）
+```
+
+**门禁规则**：
+- 0-E.3 退出后必须更新 trace.md，记录两级迭代次数和最终加速比
+- 禁止以"0-E 未达标"为由阻塞 Phase 6——0-E 是优化闭环，不是阻塞门禁
+
 ---
 
 ## 流程
-执行以下各步骤前，必须先完成 **步骤 0-A（如触发）、步骤 0-B、步骤 0-C（如触发）和步骤 0-D 的全部查阅**，再开始实现、验证与迭代。
+执行以下各步骤前，必须先完成 **步骤 0-A（如触发）、步骤 0-B、步骤 0-C（如触发）、步骤 0-D 的全部查阅**，再开始实现、验证与迭代。
+
+**步骤 0-E 执行说明**：0-E 在 Phase 5 性能分析完成后、Phase 6 全量验证前执行。0-E 是加速比驱动的二级闭环优化，包含算法对比（第一级 0-E.1）和 BF16 专项优化（第二级 0-E.2），两级各有 3 次迭代上限，总迭代上限 6 次。0-E 是优化闭环而非阻塞门禁——即使未达标也不阻塞 Phase 6，但必须在 trace.md 中记录未达标项与迭代次数。0-E 优化后重新生成 kernel 时，重新测量加速比用 ops-profiling --quick（不重走完整 Phase 5 流程）。
 
 ### 步骤 1: TileLang 转译成 AscendC
 
