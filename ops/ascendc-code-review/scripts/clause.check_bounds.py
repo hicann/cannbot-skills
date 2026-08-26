@@ -284,6 +284,29 @@ def collect_vars(node: ExprNode) -> Set[str]:
 
 # ─── Arithmetic helpers ──────────────────────────────────────────
 
+def c_div(l: int, r: int) -> Optional[int]:
+    """C/C++ truncated division (toward zero). Returns None if r == 0.
+
+    Uses abs-based pure-integer arithmetic to avoid float precision loss
+    on large values. Examples: -5/3 == -1, 5/-3 == -1, -5/-3 == 1.
+    """
+    if r == 0:
+        return None
+    q = abs(l) // abs(r)
+    return -q if (l < 0) != (r < 0) else q
+
+
+def c_mod(l: int, r: int) -> Optional[int]:
+    """C/C++ modulo with truncation semantics. Returns None if r == 0.
+
+    Result sign follows the dividend (C99: a%b = a - (a/b)*b).
+    Examples: -5%3 == -2, 5%-3 == 2, -5%-3 == -2.
+    """
+    if r == 0:
+        return None
+    return l - c_div(l, r) * r
+
+
 def _apply_op(op: TokenKind, l: int, r: int) -> Optional[int]:
     if op == TokenKind.PLUS:
         return l + r
@@ -292,23 +315,32 @@ def _apply_op(op: TokenKind, l: int, r: int) -> Optional[int]:
     if op == TokenKind.STAR:
         return l * r
     if op == TokenKind.SLASH:
-        return l // r if r != 0 else None
+        return c_div(l, r)
     if op == TokenKind.PERCENT:
-        return l % r if r != 0 else None
+        return c_mod(l, r)
     return None
+
+
+def _eval_div_mod(l_vals, r_vals, is_mod):
+    """Evaluate division/modulo for all (l, r) pairs, discarding zero-divisor results."""
+    op = c_mod if is_mod else c_div
+    vals = set()
+    for l in l_vals:
+        for r in r_vals:
+            vals.add(op(l, r))
+    vals.discard(None)
+    return vals
 
 
 def _div_mod_vals(l_lo, l_hi, r_lo, r_hi, is_mod):
     """All possible results of a/b or a%b over the interval corners to capture extremes."""
-    vals = set()
-    for l in (l_lo, l_hi):
-        for r in (r_lo, r_hi):
-            if r != 0:
-                vals.add(l % r if is_mod else l // r)
+    vals = _eval_div_mod((l_lo, l_hi), (r_lo, r_hi), is_mod)
     for r in (1, -1):
         if r_lo <= r <= r_hi:
-            for l in (l_lo, l_hi):
-                vals.add(l % r if is_mod else l // r)
+            vals |= _eval_div_mod((l_lo, l_hi), (r,), is_mod)
+    for l in (-1, 0, 1, l_lo + 1, l_hi - 1):
+        if l_lo <= l <= l_hi:
+            vals |= _eval_div_mod((l,), (r_lo, r_hi), is_mod)
     if not vals:
         return (0, 0)
     return (min(vals), max(vals))
@@ -320,8 +352,10 @@ def compute_interval(node: ExprNode, var_info: Dict[str, VarInfo]
                      ) -> Tuple[int, int]:
     """Compute [min, max] of the expression using interval arithmetic.
 
-    All arithmetic is done in Python's arbitrary-precision integers,
-    giving the true mathematical result before C truncation.
+    Addition, subtraction and multiplication use Python's arbitrary-precision
+    integers (relying on the overflow/wraparound checks to detect violations).
+    Division and modulo use C/C++ truncation semantics (toward zero), matching
+    the target language's integer arithmetic.
     """
     if node.kind == 'num':
         return (node.value, node.value)
@@ -376,6 +410,55 @@ def _build_corner_candidates(op: TokenKind, l_lo: int, l_hi: int,
     return candidates
 
 
+@dataclass
+class DivModCtx:
+    """Context for div/mod counter-example search, bundling related parameters."""
+    node: ExprNode
+    var_info: Dict[str, VarInfo]
+    l_lo: int
+    l_hi: int
+    r_lo: int
+    r_hi: int
+    want_min: bool
+    best_val: Optional[int]
+    best_choices: Optional[Dict[str, int]]
+
+    def try_update(self, l_val: int, r_val: int, result: int):
+        """Update best counter-example if result is more extreme."""
+        better = (self.best_val is None or
+                  (self.want_min and result < self.best_val) or
+                  (not self.want_min and result > self.best_val))
+        if not better:
+            return
+        self.best_val = result
+        if self.node.left.kind == 'var':
+            self.best_choices = {self.node.left.value: l_val,
+                                 **pick_values(self.node.right, self.var_info,
+                                               r_val == self.r_lo)}
+        else:
+            l_min = l_val <= (self.l_lo + self.l_hi) // 2
+            self.best_choices = {**pick_values(self.node.left, self.var_info, l_min),
+                                 **pick_values(self.node.right, self.var_info,
+                                               r_val == self.r_lo)}
+
+
+def _pick_div_mod_internal(ctx: DivModCtx):
+    """Search non-endpoint dividend values for div/mod, mirroring _div_mod_vals sampling.
+
+    Note: this is a heuristic — for large intervals the true extreme may still
+    fall between sampled points. Endpoint + near-zero + near-endpoint sampling
+    covers the common cases; full enumeration is infeasible for large ranges.
+    """
+    op = ctx.node.op
+    r_vals = [r for r in (ctx.r_lo, ctx.r_hi) if r != 0]
+    l_vals = [l for l in (-1, 0, 1, ctx.l_lo + 1, ctx.l_hi - 1)
+              if ctx.l_lo <= l <= ctx.l_hi]
+    pairs = [(l, r) for l in l_vals for r in r_vals]
+    evaluated = [(l, r, _apply_op(op, l, r)) for l, r in pairs]
+    for l_val, r_val, result in [t for t in evaluated if t[2] is not None]:
+        ctx.try_update(l_val, r_val, result)
+
+
 def _pick_binop_corners(node: ExprNode, var_info: Dict[str, VarInfo],
                         want_min: bool) -> Dict[str, int]:
     """Enumerate corner (endpoint) combinations for a binary op to find
@@ -405,6 +488,11 @@ def _pick_binop_corners(node: ExprNode, var_info: Dict[str, VarInfo],
                 **pick_values(node.left, var_info, l_min),
                 **pick_values(node.right, var_info, r_min),
             }
+    if op in (TokenKind.SLASH, TokenKind.PERCENT):
+        ctx = DivModCtx(node, var_info, l_lo, l_hi, r_lo, r_hi,
+                        want_min, best_val, best_choices)
+        _pick_div_mod_internal(ctx)
+        best_val, best_choices = ctx.best_val, ctx.best_choices
     return best_choices or {}
 
 
