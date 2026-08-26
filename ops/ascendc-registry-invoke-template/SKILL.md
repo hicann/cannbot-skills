@@ -29,7 +29,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | ACLNN 接口开发 | `references/add_example/op_api/`（代码注释自表达，见下方说明） |
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
-| 多芯片开发 | `references/npu-arch-adapt.md` |
+| 多芯片开发 | `references/npu-arch-adapt.md`。发起时提供：芯片名、SOC version、NpuArch 值、等价于哪个已有芯片（同架构/不同架构）、算子目录路径、待适配算子列表 |
 | SIMT 算子开发 | `references/simt-engineering-guide.md` |
 
 #### ACLNN 接口开发指南
