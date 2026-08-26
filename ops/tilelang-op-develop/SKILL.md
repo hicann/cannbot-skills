@@ -56,6 +56,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 | 逐元素运算（add/mul/sigmoid/relu） | `examples/elementwise/`、`examples/activation/` |
 | 归约运算（reduce_sum/max/min） | `examples/reduce/` |
 | 归一化（softmax/layernorm/rmsnorm） | `examples/softmax/`、`examples/normalization/` |
+| Pooling（avg_pool/max_pool） | [tilelang-op-design/references/pooling/](../tilelang-op-design/references/pooling/)（5 篇设计模式参考: 布局策略、行粒度 tile、reduce_d 快路径、自适应池化经验、反向梯度语义；转译/实现篇在 tilelang2ascend-translator Pooling 类别 `references/pooling-patterns/`） |
 | GEMM | `examples/gemm/`、`examples/developer_mode/gemm_developer.py` |
 | 融合算子 | `examples/flash_attention/`、`examples/pipeline/`、`examples/developer_mode/matmul_add_developer.py` |
 | Developer 模式 | `examples/developer_mode/` |

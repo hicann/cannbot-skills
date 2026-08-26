@@ -100,6 +100,7 @@ argument-hint: >
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md` — 归约族算子实现指南（(O,R,I) 路由、补零/行距铁律、应避免的结构、精度与验证约定）
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
 - `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention）
+- `.claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md` — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）的转译/实现模式路由索引（tilelang-translation 映射、UB 管理、对齐守卫、精度模式、反向实现、grad-v2 落地踩坑、反模式）
 - `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
 - 共享演进知识库（`$CANNBOT_KNOWLEDGE_ROOT` 的 `runbooks/`）— 历史走偏点与成功模式，**经 knowledge-query skill 检索（步骤 0-K 必读，命中即规避）**
@@ -203,36 +204,40 @@ argument-hint: >
 
 ---
 
-## 🛑 步骤 0-K: 演进知识检索（每次代码生成/修改前强制执行）
+### 🛑 步骤 0-A3: Pooling 类算子转译模式路由（命中特征时强制执行）
 
-**触发条件**：任何 kernel 代码生成 / 修复迭代开始前，均须执行。
+**触发条件**（步骤 0-A 读取 model.py forward() 后一并检查）：
+- Pooling 特征：`avg_pool` / `max_pool` / `adaptive_avg_pool` / `adaptive_max_pool`（含 1d/2d/3d）
+  及其反向（`_grad` / `_backward`，如 `avg_pool3_d_grad`）
+
+如果命中，必须完成以下 checklist：
 
 ```
-0-K.1 🛑 检索共享演进知识库（必须，不可跳过）:
-    用 cannbot-knowledge 插件的 knowledge-query skill
-    （scripts/knowledge_query.py，root 由 knowledge.env 解析，当前 /home/asc-gen-knowledge）:
-    python3 knowledge_query.py preflight --task "<本算子类型 + 关键结构特征>" --brief
-    先读 route/read_first/relevance，再按需 get 整卡。
+0-A3.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md
+    按「生成前问题」确定前向/反向、布局、实现策略，再只读命中的模式文档
+    （渐进式披露，只读需要的）:
+    - 转译映射 → references/pooling-patterns/references/tilelang-translation.md
+    - UB 管理 → references/pooling-patterns/references/ub-management.md
+    - 布局落地 → references/pooling-patterns/references/layout-implementation.md
+    - 深度快路径落地 → references/pooling-patterns/references/reduce-d-fastpath-implementation.md
+    - 对齐守卫 → references/pooling-patterns/references/alignment-guards.md
+    - 精度模式 → references/pooling-patterns/references/precision-patterns.md
+    - 反向实现 → references/pooling-patterns/references/backward-implementation.md
+    - 反向增量踩坑 → references/pooling-patterns/references/grad-v2-lessons.md
+    - 常见错误对照 → references/pooling-patterns/references/pooling-anti-patterns.md
 
-0-K.2 🛑 按维度标签补充检索命中卡片:
-    - 本算子涉及多核/混合核/搬移/跨核通信 → search --query "同步 竞态" --scope runbooks/
-      （或 --tags sync 等价语义），读 sync 维度卡
-    - 计划使用 Gather/SetVectorMask/归约等 API → 检索 api 维度卡
-    - 涉及 tiling/缓冲/核数/多 dtype → 检索 tiling 维度卡
-    - 涉及 FP16/BF16 数学函数精度 → 检索 precision 维度卡
-    - 命中卡片"触发条件" → 全文精读其"正确做法"，进入 0-K.3
-
-0-K.3 🛑 在思考中确认:
-    - 命中的已知坑清单及其规避策略（如: 不用 TBuf 做 DMA 主搬移、
-      核数上限按 UB 池数、count-mode Gather 不可用 → isSetMask=true）
-    - 规避策略将如何体现在本算子的 op_host/op_kernel 代码中
+0-A3.2 🛑 在思考中确认:
+    - 前向（滑动窗口 reduce）还是反向（scatter-add / gather）？窗口固定还是 adaptive？
+    - 布局：NCDHW 还是 NDHWC？C 维是否可向量化（C%8 / C%16 对齐守卫）
+    - 反向实现策略：input-driven gather（默认）还是 output-driven transpose-scatter（大 kernel/重叠）
+    - 是否有 data_format / ceil_mode / count_include_pad / divisor_override
+    - 本算子的转译策略应与命中模式文档的结构规则对齐
 ```
 
 **门禁规则**：
-- 触发条件满足但 0-K.1-0-K.3 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
-- 知识库条目与官方文档矛盾时以官方文档为准，并将差异在 trace 走偏点中记录
-  （供演进循环更新条目）
-- 此门禁在**每次修复迭代**中都需重新检查（不仅限于首次）
+- 命中但 0-A3.1/0-A3.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 未命中 → 跳过 0-A3，直接进入步骤 0-B
+- 禁止凭记忆或经验跳过指南直接转译
 
 ---
 

@@ -69,6 +69,17 @@
 │   - 静态循环边界 + 条件判断（替代动态边界）
 │   Kernel: T.Kernel(total_blocks) + 手动索引分解
 │
+├─ 池化类（AvgPool/MaxPool/AdaptivePool 及反向 Grad）
+│   判定: 滑动窗口 reduce（前向）/ scatter-add（反向）
+│   领域参考: references/pooling/（5 篇设计篇，⚠️ 命中即先读，随本 skill 携带）
+│   ├─ 前向 reduce: layout-strategy.md（NDHWC 布局）、row-granularity.md（行粒度 tile）、
+│   │   reduce-d-fastpath.md（KH==1&&KW==1 快路径）
+│   ├─ adaptive 窗口（AdaptiveAvg/MaxPool）: adaptive-avg-pool3d-lessons.md
+│   └─ 反向 grad: backward-patterns.md（窗口闭式公式、scatter-add、divisor 共享、block 语义对调）
+│   转译/实现篇（设计完成后）: tilelang2ascend-translator Pooling 类别
+│   （references/pooling-patterns/，含 tilelang-translation/ub-management/alignment-guards/
+│   precision-patterns/backward-implementation/grad-v2-lessons/pooling-anti-patterns）
+│
 └─ 其他复杂算子
     强制步骤: 先搜索本项目 examples/
 ```

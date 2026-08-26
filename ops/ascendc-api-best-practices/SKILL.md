@@ -27,7 +27,6 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **repeatTime 限制** | repeatTimes ≤ 255 | [api-repeat-limits.md](references/api-repeat-limits.md) | 分批处理 |
 | **API 限制** | - | [api-restrictions.md](references/api-restrictions.md) | 禁用 API、编译期限制 |
 | **Host Runtime** | aclrtSetDevice, aclrtGetDeviceInfo | [api-host-runtime.md](references/api-host-runtime.md) | 设备初始化、核数获取 |
-
 ---
 
 ## 场景索引
@@ -49,7 +48,6 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 A2/A3（DAV_2201）平台** |
 | **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 A2/A3（DAV_2201）平台** |
 | **非均匀间隔自定义 mask** | [api-gathermask.md](references/api-gathermask.md) | 用户自定义 LocalTensor mask、类型匹配 |
-
 ---
 
 ## 快速参考

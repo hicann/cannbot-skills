@@ -220,5 +220,6 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 - [references/info-sources.md](references/info-sources.md) — 信息收集步骤、信息源优先级、冲突处理原则
 - [references/BlockLevelDesign.md](references/BlockLevelDesign.md) — Block 级任务划分、流水骨架、workspace 与同步关系设计
 - [references/attention-patterns/AttentionPatternIndex.md](references/attention-patterns/AttentionPatternIndex.md) — Attention / FlashAttention 模式路由索引（TND、paged KV、mask/causal、GQA/MQA、MLA、topk sparse、sink attention）
+- [references/pooling/](references/pooling/) — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）**设计模式**：布局策略、行粒度 tile、reduce_d 快路径、adaptive 窗口、反向梯度语义（5 篇，命中路由见 §6 决策树 Pooling 分支；转译/实现篇在 tilelang2ascend-translator Pooling 类别 `references/pooling-patterns/`，含 tilelang-translation/ub-management/alignment-guards/precision-patterns/backward-implementation/grad-v2-lessons/pooling-anti-patterns）
 - [examples/design-template.md](examples/design-template.md) — design.md 完整模板
 - [examples/completion-report-template.md](examples/completion-report-template.md) — 完成报告输出模板
