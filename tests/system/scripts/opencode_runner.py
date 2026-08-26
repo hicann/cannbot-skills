@@ -136,20 +136,9 @@ class OpencodeRunner:
         self._session_name = session_name
         self._current_session_file = None
 
-        try:
-            cmd = self._build_command(
-                prompt, skill, additional_args, resume_session_id
-            )
-        except OpencodeNotFoundError as e:
-            yield {
-                "type": "error",
-                "data": str(e),
-                "error_type": "opencode_not_found",
-                "session_file": None
-            }
-            return
-
-        yield from self._execute_streaming(cmd)
+        yield from self._execute_stream(
+            prompt, skill, additional_args, resume_session_id
+        )
 
     def export_session_data(self, output_file: Optional[str] = None) -> Dict[str, Any]:
         if not self.opencode_session_id:
@@ -431,7 +420,11 @@ class OpencodeRunner:
         self._current_session_file = session_file
         self._session_name = Path(session_file).stem
 
-        yield from self._run_streaming(prompt, skill, additional_args, None, resume_session_id)
+        # 委托 _execute_stream（内部用 _execute_streaming，非公共 run_streaming——
+        # 后者会重置 _current_session_file，丢失本次 resume 的会话上下文）
+        yield from self._execute_stream(
+            prompt, skill, additional_args, resume_session_id
+        )
 
     def build_command(
             self,
@@ -501,6 +494,23 @@ class OpencodeRunner:
             session_file=None,
             metadata=metadata
         )
+
+    def _execute_stream(self, prompt, skill, additional_args, resume_session_id):
+        """构建 opencode 命令并流式执行；opencode 未安装时产出结构化 error 事件。"""
+        try:
+            cmd = self._build_command(
+                prompt, skill, additional_args, resume_session_id
+            )
+        except OpencodeNotFoundError as e:
+            yield {
+                "type": "error",
+                "data": str(e),
+                "error_type": "opencode_not_found",
+                "session_file": None
+            }
+            return
+
+        yield from self._execute_streaming(cmd)
 
     # ---- Private instance helpers ----
 
