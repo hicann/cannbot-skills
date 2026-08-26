@@ -124,7 +124,7 @@ SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh")
 #   update_strategy:  "fetch_merge" | "pull" | "pull_rebase"
 #   post_hook:        function to call after setup (empty = none)
 REPO_REGISTRY=(
-    "asc-devkit|https://gitcode.com/cann/asc-devkit.git|31f3ab38|fetch_merge|post_setup_asc_devkit"
+    "asc-devkit|https://gitcode.com/cann/asc-devkit.git||fetch_merge|post_setup_asc_devkit"
     "cann-samples|https://gitcode.com/cann/cann-samples.git||pull|"
     "ops-tensor|https://gitcode.com/cann/ops-tensor.git||pull|"
 )
