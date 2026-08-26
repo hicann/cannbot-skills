@@ -269,7 +269,17 @@ export function PerfPanorama({ taskId, framework, onJumpToTurn }: Props) {
     return <div className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">加载中…</div>
   }
   if (!model) {
-    return <div className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">暂无 execution 数据</div>
+    return (
+      <div className="rounded-lg border bg-card p-4 text-xs text-muted-foreground space-y-1">
+        <div>暂无子代理 execution 数据</div>
+        <button
+          className="text-blue-600 dark:text-blue-400 underline cursor-pointer"
+          onClick={() => setIncludeRoot(true)}
+        >
+          勾选「含 root」查看主 agent 性能数据 →
+        </button>
+      </div>
+    )
   }
 
   const cards = [

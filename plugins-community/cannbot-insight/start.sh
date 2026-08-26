@@ -194,7 +194,7 @@ if [ -f "$SCRIPT_DIR/smart-agent/server.py" ]; then
   export CANNBOT_AGENT_URL="http://localhost:$AGENT_PORT"
   for i in $(seq 1 10); do
     if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
-      echo "[start] smart-agent ready at $CANNBOT_AGENT_URL (PID $AGENT_PID, log $AGENT_LOG)"
+      echo "[start] smart-agent ready (port $AGENT_PORT, PID $AGENT_PID, log $AGENT_LOG)"
       break
     fi
     sleep 0.5
@@ -250,15 +250,16 @@ npm run build:export-view >/dev/null 2>&1 || echo "  [warn] export-view build fa
 if [ "$CLI" = true ]; then
   SERVER_URL="http://localhost:$PORT"
 
-  # Start backend in background
-  npx next dev --port $PORT &
+  # Start backend in background (stdout→file: avoid VSCode auto port-forward hijacking
+  # the printed URL and assigning a random local port instead of 21025)
+  npx next dev -H 127.0.0.1 --port $PORT > "$SCRIPT_DIR/tmp/next-dev.log" 2>&1 &
   BACKEND_PID=$!
 
   # Wait for backend to be ready
-  echo "[start] Waiting for backend at $SERVER_URL..."
+  echo "[start] Waiting for backend (port $PORT)..."
   for i in $(seq 1 60); do
     if curl -s "$SERVER_URL/api/observe/data?pageSize=1" > /dev/null 2>&1; then
-      echo "[start] Backend ready at $SERVER_URL"
+      echo "[start] Backend ready (port $PORT)"
       break
     fi
     sleep 1
@@ -269,13 +270,13 @@ if [ "$CLI" = true ]; then
   kill $BACKEND_PID 2>/dev/null || true
   echo "[start] CLI exited, backend stopped"
 else
-  npx next dev --port $PORT &
+  npx next dev -H 127.0.0.1 --port $PORT > "$SCRIPT_DIR/tmp/next-dev.log" 2>&1 &
   NEXT_PID=$!
 
-  echo "[start] Waiting for server at http://localhost:$PORT..."
+  echo "[start] Waiting for server (port $PORT)..."
   for i in $(seq 1 30); do
     if curl -s "http://localhost:$PORT" > /dev/null 2>&1; then
-      echo "[start] Server ready — opening http://localhost:$PORT"
+      echo "[start] Server ready (port $PORT)"
       # WSL: use Windows cmd.exe to open browser
       if grep -qi microsoft /proc/version 2>/dev/null && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
         /mnt/c/Windows/System32/cmd.exe /c start "http://localhost:$PORT" 2>/dev/null || true
@@ -290,7 +291,7 @@ else
         # 无图形会话(远程/无头 VM):服务器开不了你本机浏览器,端口转发后本地访问
         echo "[start] 无图形会话(远程/无头 VM)——服务器无法启动你本机浏览器。"
         echo "[start] 若已端口转发(如 ssh -L $PORT:localhost:$PORT)或走 VS Code Remote,在本地浏览器打开:"
-        echo "[start]   http://localhost:$PORT"
+        echo "[start]   在浏览器打开端口 $PORT"
       fi
       break
     fi

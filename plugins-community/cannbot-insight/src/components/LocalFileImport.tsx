@@ -24,6 +24,15 @@ import { saveImportHistory, type ImportHistoryEntry } from "@/components/ImportH
 import { Button } from "@/components/ui/button"
 import { DownloadIcon, LoaderIcon, FolderIcon, FileIcon, ChevronRightIcon, ArrowUpIcon, GlobeIcon, SearchIcon } from "lucide-react"
 import { toast } from "sonner"
+
+// imported:false has three distinct causes — label them accurately instead of
+// blanket "Already exists" (which hid file-missing behind an exists message)
+function importResultMessage(data: { imported?: boolean; reason?: string; error?: string }): string {
+  if (data.imported) return data.reason === "imported-empty" ? "Imported (empty capture — turns appear via refresh)" : "Imported";
+  if (data.reason === "no-interactions") return "No parseable records (empty or unrecognized file)";
+  return "Already exists (merged)";
+}
+
 import {
   Table,
   TableBody,
@@ -176,7 +185,7 @@ export function LocalFileImport() {
       }
       setImportStatuses(prev =>
         prev.map(s => s.sessionId === sessionId
-          ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? (data.imported ? "Imported" : "Already exists") : (data.error ?? "Import failed") }
+          ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? importResultMessage(data) : (data.error ?? "Import failed") }
           : s)
       )
     } catch (e) {
@@ -234,7 +243,7 @@ export function LocalFileImport() {
         }
         setImportStatuses(prev =>
           prev.map(s => s.sessionId === sessionId
-            ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? (data.imported ? "Imported" : "Already exists") : (data.error ?? "Import failed") }
+            ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? importResultMessage(data) : (data.error ?? "Import failed") }
             : s)
         )
       } catch (e) {
@@ -346,7 +355,7 @@ export function LocalFileImport() {
           ...s,
           sessionId: result.taskId || s.sessionId,
           status: result.imported ? "success" as const : "error" as const,
-          message: result.imported ? "Imported" : (result.error ?? "Already exists"),
+          message: result.imported ? "Imported" : (result.error ?? importResultMessage(result)),
         }
       }))
 
@@ -416,7 +425,7 @@ export function LocalFileImport() {
           )
         } else {
           setImportStatuses(prev =>
-            prev.map(s => s.sessionId === sessionId ? { ...s, status: "success", message: data.imported ? "Imported" : "Already exists" } : s)
+            prev.map(s => s.sessionId === sessionId ? { ...s, status: "success", message: importResultMessage(data) } : s)
           )
         }
       } catch (e) {

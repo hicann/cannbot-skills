@@ -39,6 +39,7 @@ interface SessionListItem {
   taskId: string;
   query: string | null;
   framework: string | null;
+  version?: string | null;
   startTime: string;
   endTime: string | null;
   totalTokens: number;
@@ -423,7 +424,12 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
                     {item.framework === 'opencode' ? (
                       <Badge variant="blue">OpenCode</Badge>
                     ) : item.framework === 'claude-code' ? (
-                      <Badge variant="orange">Claude</Badge>
+                      <span className="inline-flex items-center gap-1">
+                        <Badge variant="orange">Claude</Badge>
+                        {item.version?.endsWith('-proxy') && (
+                          <Badge variant="yellow">{item.version}</Badge>
+                        )}
+                      </span>
                     ) : item.framework === BRAND_SOURCE_TYPE ? (
                       <Badge variant="purple">{BRAND_NAME}</Badge>
                     ) : '—'}

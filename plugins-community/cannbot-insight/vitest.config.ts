@@ -11,22 +11,33 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
-  plugins: [react()],
   test: {
     environment: "node",
-    setupFiles: ["./tests/setup.ts"],
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    // Bench files are separate so `npm run test` skips them by default.
-    // Run with `npm run test:bench`.
     exclude: ["tests/**/*.bench.ts", "tests/**/*.bench.tsx", "node_modules", "dist", ".next"],
+    // Two decoupled projects: insight (Prisma-backed integration tests, needs the
+    // @ alias + react plugin for .tsx) + proxy (self-contained JSON-output tests,
+    // NO Prisma setup, NO cannbot-insight imports, no alias needed). `npm run test`
+    // runs both; `npx vitest run --project proxy` runs proxy only.
+    projects: [
+      {
+        plugins: [react()],
+        resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+        test: {
+          name: "insight",
+          include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+          setupFiles: ["./tests/setup.ts"],
+        },
+      },
+      {
+        test: {
+          name: "proxy",
+          include: ["proxy/tests/**/*.test.ts"],
+        },
+      },
+    ],
   },
   bench: {
     include: ["tests/**/*.bench.ts", "tests/**/*.bench.tsx"],
     exclude: ["node_modules", "dist", ".next"],
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
   },
 });

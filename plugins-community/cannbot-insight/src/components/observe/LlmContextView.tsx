@@ -28,12 +28,33 @@ interface InputMessage {
   tool_calls?: ToolCallEntry[]
 }
 
+// LLM Input mirrors the WIRE: messages render verbatim in original order
+// (reminder blocks stay inside their user message, registry + skills stay in
+// their system message) — no extracted copies. The System / System tools
+// panels above the list are wire TOP-LEVEL fields (system prompt, tools),
+// which are not part of any message, so they never duplicate message content.
+// reminderPrefix is used by TurnContextPanel to keep its compact summaries
+// prompt-only.
+export function reminderPrefix(content: string | null): { reminder: string; prompt: string } | null {
+  if (!content?.startsWith("<system-reminder>")) return null
+  const end = content.lastIndexOf("</system-reminder>")
+  if (end < 0) return null
+  return {
+    reminder: content.slice(0, end + "</system-reminder>".length),
+    prompt: content.slice(end + "</system-reminder>".length).trim(),
+  }
+}
+
 interface LlmContextViewProps {
   inputMessagesJson: string | null
   inputMessagesCount: number
   inputMessagesTokens: number
   contextWindowPct: number | null
   systemOverheadTokens?: number
+  systemPrompt?: string | null
+  fullContext?: {
+    tools: Array<{ name: string; description: string }>
+  } | null
 }
 
 function parseInputMessages(json: string | null): InputMessage[] {
@@ -71,6 +92,8 @@ export function LlmContextView({
   inputMessagesTokens,
   contextWindowPct,
   systemOverheadTokens,
+  systemPrompt,
+  fullContext,
 }: LlmContextViewProps) {
   if (inputMessagesCount === 0 && !inputMessagesJson) {
     return null
@@ -82,10 +105,13 @@ export function LlmContextView({
 
   const [isExpanded, setIsExpanded] = useState(autoExpand)
   const [expandedMessages, setExpandedMessages] = useState<Set<number>>(() => {
-    if (autoExpand) return new Set(messages.map((_, i) => i))
     const set = new Set<number>()
-    for (let i = 0; i < messages.length; i++) {
-      if (messages[i].agentName === 'continuation') set.add(i)
+    if (autoExpand) {
+      for (let i = 0; i < messages.length; i++) set.add(i)
+    } else {
+      for (let i = 0; i < messages.length; i++) {
+        if (messages[i].agentName === 'continuation') set.add(i)
+      }
     }
     return set
   })
@@ -164,13 +190,18 @@ export function LlmContextView({
 
       {isExpanded && (
         <div className="border-t px-3 py-2 space-y-1.5">
-          {/* Hidden system context notice */}
-          {stableHidden > 100 && (
+          {/* System context: real verbatim content (proxy capture) or hidden residual (log-imported) */}
+          {systemPrompt ? (
+            <ContextSection title="System" text={systemPrompt} />
+          ) : stableHidden > 100 && (
             <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-purple-50/50 dark:bg-purple-500/10 border border-purple-200 dark:border-purple-500/20">
               <div className="w-2 h-2 rounded-sm bg-purple-500 shrink-0" />
               <span className="text-xs font-medium text-purple-600 dark:text-purple-400">System (hidden)</span>
               <span className="text-xs text-muted-foreground">≈{formatTokenCount(stableHidden)}t</span>
             </div>
+          )}
+          {fullContext?.tools && fullContext.tools.length > 0 && (
+            <ToolsPanel tools={fullContext.tools} />
           )}
           {deltaTokens > 100 && (
             <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-yellow-50/50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20">
@@ -211,9 +242,36 @@ export function LlmContextView({
                 </span>
 
                 {isMsgExpanded && msg.content && (
-                  <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words overflow-y-auto bg-muted/30 max-h-[300px]">
-                    {msg.content}
-                  </div>
+                  (() => {
+                    const rp = reminderPrefix(msg.content)
+                    if (!rp) {
+                      return (
+                        <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words overflow-y-auto bg-muted/30 max-h-[300px]">
+                          {msg.content}
+                        </div>
+                      )
+                    }
+                    // wire keeps the reminder inside the user message; render
+                    // it as its own visually separated sub-block, prompt below
+                    return (
+                      <div className="px-2 pb-2 space-y-2 overflow-y-auto bg-muted/30 max-h-[300px]">
+                        <div className="rounded border border-purple-200 dark:border-purple-500/30 bg-purple-50/30 dark:bg-purple-500/5 overflow-hidden">
+                          <div className="flex items-center gap-2 px-2 py-1 bg-purple-50/50 dark:bg-purple-500/10">
+                            <Badge variant="purple" className="text-[10px]">system-reminder</Badge>
+                            <span className="text-[10px] text-muted-foreground">{formatTokenCount(estimateTokensFromChars(rp.reminder.length))}t</span>
+                          </div>
+                          <div className="px-2 py-1.5 text-xs whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto font-mono text-foreground/70">
+                            {rp.reminder}
+                          </div>
+                        </div>
+                        {rp.prompt && (
+                          <div className="text-sm whitespace-pre-wrap break-words">
+                            {rp.prompt}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()
                 )}
 
                 {isMsgExpanded && msg.tool_calls && msg.tool_calls.length > 0 && (
@@ -248,6 +306,85 @@ export function LlmContextView({
               </div>
             )
           })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const SYSTEM_SECTION_STYLE = {
+  badge: "purple" as const,
+  dot: "bg-purple-500",
+  border: "border-purple-200 dark:border-purple-500/20",
+  bg: "bg-purple-50/30 dark:bg-purple-500/5",
+  headerBg: "bg-purple-50/50 dark:bg-purple-500/10",
+}
+
+function ContextSection({ title, text }: { title: string; text: string }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const style = SYSTEM_SECTION_STYLE
+  const tokenCount = estimateTokensFromChars(text.length)
+  const preview = text.length > 120 ? text.substring(0, 120) + "..." : text
+  return (
+    <div className={cn("border rounded-md overflow-hidden", style.border, style.bg)}>
+      <span
+        role="button"
+        tabIndex={0}
+        className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-accent/30 transition-colors text-sm cursor-pointer"
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen) }}
+      >
+        <div className={cn("w-2 h-2 rounded-sm shrink-0", style.dot)} />
+        <Badge variant={style.badge} className="text-xs">{title}</Badge>
+        <span className="text-xs text-muted-foreground">{formatTokenCount(tokenCount)}t · {text.length.toLocaleString()} chars</span>
+        <span className="ml-auto text-xs text-muted-foreground">{isOpen ? "▼" : "▶"}</span>
+      </span>
+      {isOpen && (
+        <div className={cn("border-t", style.border)}>
+          <div className={cn("flex items-center justify-between px-2 py-1", style.headerBg)}>
+            <span className="text-[10px] text-muted-foreground truncate">{preview}</span>
+            <CopyButton text={text} />
+          </div>
+          <pre className="px-3 py-2 text-xs whitespace-pre-wrap break-words max-h-[400px] overflow-y-auto font-mono text-foreground/80">
+            {text}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolsPanel({ tools }: { tools: Array<{ name: string; description: string }> }) {
+  const [isOpen, setIsOpen] = useState(false)
+  return (
+    <div className="border rounded-md overflow-hidden bg-orange-50/30 dark:bg-orange-500/5 border-orange-200 dark:border-orange-500/20">
+      <span
+        role="button"
+        tabIndex={0}
+        className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-accent/30 transition-colors text-sm cursor-pointer"
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen) }}
+      >
+        <div className="w-2 h-2 rounded-sm bg-orange-400 shrink-0" />
+        <Badge variant="orange" className="text-xs">System tools</Badge>
+        <span className="text-xs text-muted-foreground">{tools.length} tools</span>
+        <span className="ml-auto text-xs text-muted-foreground">{isOpen ? "▼" : "▶"}</span>
+      </span>
+      {isOpen && (
+        <div className="border-t border-orange-200 dark:border-orange-500/20 space-y-1 p-1.5 max-h-[400px] overflow-y-auto">
+          {tools.map((t, i) => (
+            <div key={i} className="border rounded bg-background/60 px-2 py-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="orange" className="text-[10px]">{t.name}</Badge>
+                {t.description && <CopyButton text={t.description} className="ml-auto size-3 text-muted-foreground hover:text-foreground" />}
+              </div>
+              {t.description && (
+                <div className="mt-0.5 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
+                  {t.description}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

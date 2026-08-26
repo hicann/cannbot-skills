@@ -7,7 +7,9 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { describe, it, expect } from 'vitest';
-import { listSessions, readSession } from '../../src/lib/ingest/adapters/claude-jsonl.ts';
+import { listSessions, readSession, listSubagentSessions } from '../../src/lib/ingest/adapters/claude-jsonl.ts';
+import { readFullContext } from '../../src/lib/ingest/adapters/claude-jsonl-full-context.ts';
+import { readWireEnrichments, wireEnrichmentKey } from '../../src/lib/ingest/adapters/claude-jsonl-wire.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +19,7 @@ const FIXTURE_FILE = path.join(FIXTURE_DIR, 'abc123.jsonl');
 const SIMPLE_FILE = path.join(FIXTURE_DIR, 'simple-session.jsonl');
 const EMPTY_FILE = path.join(FIXTURE_DIR, 'empty-session.jsonl');
 const PARALLEL_TOOLS_FILE = path.join(FIXTURE_DIR, 'parallel-tools.jsonl');
+const SYSREMINDER_FILE = path.join(FIXTURE_DIR, 'system-reminder-strip.jsonl');
 const E2E_SAMPLE_FILE = path.resolve(__dirname, '../data/e2e/claude-sample.jsonl');
 
 describe('claude-jsonl adapter', () => {
@@ -236,10 +239,12 @@ describe('claude-jsonl adapter', () => {
       expect(assistant?.tool_calls).toBeNull();
     });
 
-    it('sorts sessions by createdAt DESC', () => {
+    it('sorts sessions by endedAt DESC (falling back to createdAt)', () => {
       const sessions = listSessions(FIXTURE_DIR);
       for (let i = 1; i < sessions.length; i++) {
-        expect(sessions[i - 1].createdAt >= sessions[i].createdAt).toBe(true);
+        const prev = sessions[i - 1].endedAt ?? sessions[i - 1].createdAt;
+        const curr = sessions[i].endedAt ?? sessions[i].createdAt;
+        expect(prev >= curr).toBe(true);
       }
     });
 
@@ -288,6 +293,204 @@ describe('claude-jsonl adapter', () => {
       expect(interactions[1].role).toBe('assistant');
 
       fs.rmSync(tmpDir, { recursive: true });
+    });
+  });
+
+  describe('system-reminder splitting', () => {
+    it('listSessions firstQuery excludes <system-reminder> context blocks', () => {
+      const sessions = listSessions(SYSREMINDER_FILE);
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].firstQuery).toBe('看看有哪些没有提交的代码');
+      expect(sessions[0].firstQuery).not.toContain('system-reminder');
+      expect(sessions[0].firstQuery).not.toContain('claudeMd');
+    });
+
+    it('splits the first user message into a system turn + a user prompt turn', () => {
+      const interactions = readSession(SYSREMINDER_FILE, 'system-reminder-strip');
+      // system turn carries the injected context (CLAUDE.md / currentDate)
+      const sysTurns = interactions.filter(i => i.role === 'system');
+      expect(sysTurns.length).toBeGreaterThanOrEqual(1);
+      expect(sysTurns[0].content).toContain('system-reminder');
+      expect(sysTurns[0].content).toContain('claudeMd');
+      // user turn is the real prompt only
+      const userTurns = interactions.filter(i => i.role === 'user');
+      expect(userTurns.length).toBe(1);
+      expect(userTurns[0].content).toBe('看看有哪些没有提交的代码');
+      expect(userTurns[0].content).not.toContain('system-reminder');
+    });
+
+    it('pure-context user message (no real prompt) becomes a system turn only', () => {
+      const interactions = readSession(SYSREMINDER_FILE, 'system-reminder-strip');
+      // Line 3 is a <system-reminder>-only user message (no prompt) → emitted
+      // as a system turn, NO user turn for it. Total: 1 user + 2 system + 2 assistant.
+      expect(interactions.filter(i => i.role === 'user').length).toBe(1);
+      expect(interactions.filter(i => i.role === 'system').length).toBe(2);
+      expect(interactions.filter(i => i.role === 'assistant').length).toBe(2);
+    });
+  });
+
+  describe('proxy system lines (cannbot-proxy extended claude-format)', () => {
+    const PROXY_FILE = path.join(FIXTURE_DIR, 'proxy-system-line.jsonl');
+
+    it('registry line stays inside the round 输入 turn (verbatim wire messages)', () => {
+      const interactions = readSession(PROXY_FILE, 'proxy-system-line');
+      // proxy 文件走 round-pair 切分：1 round → 输入(user) + 输出(assistant)
+      expect(interactions.map(i => i.role)).toEqual(['user', 'assistant']);
+      const input = interactions[0];
+      expect(input.content).toBe('你用的什么模型');
+      // OCP：RawInteraction 不带 content_json（管线不感知 proxy 数据），
+      // verbatim 消息由扩展层 readWireEnrichments 按需读取
+      expect(input.content_json).toBeUndefined();
+      const enrichments = readWireEnrichments(PROXY_FILE);
+      // 稳定键 (role, timeInfo.created) —— 不靠数组下标
+      const w = JSON.parse(enrichments.get(wireEnrichmentKey(input.role, input.timeInfo!.created))!.contentJson!);
+      expect(w.wireInput).toBe(true);
+      // reminder 保持在 user 消息内（不拆分），registry 是第 2 条 wire 消息
+      expect(w.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'system']);
+      expect(JSON.stringify(w.messages[0].content)).toContain('<system-reminder>');
+      expect(JSON.stringify(w.messages[1].content)).toContain('Available agent types');
+      expect(JSON.stringify(w.messages[1].content)).toContain('- Explore:');
+    });
+
+    it('输出 turn stores the verbatim accumulated request in wire order', () => {
+      const interactions = readSession(PROXY_FILE, 'proxy-system-line');
+      const output = interactions[1];
+      // OCP：RawInteraction 不带 input_messages_json
+      expect(output.input_messages_json).toBeUndefined();
+      const enrichments = readWireEnrichments(PROXY_FILE);
+      const req = JSON.parse(enrichments.get(wireEnrichmentKey(output.role, output.timeInfo!.created))!.inputMessagesJson!);
+      // wire 顺序：user(reminder+prompt) → system(registry)，registry 在
+      // user 之后、response 之前 —— 与真实 messages 数组一致
+      expect(req.map((m: { role: string }) => m.role)).toEqual(['user', 'system']);
+      expect(req[0].content).toContain('你用的什么模型');
+      expect(req[1].content).toContain('- init');
+    });
+
+    it('native claude-code type:"system" lines (no message field) stay skipped', () => {
+      const interactions = readSession(PROXY_FILE, 'proxy-system-line');
+      // The 4th line is a client-side status event (top-level content string,
+      // no message) — NOT model input, must not produce a turn.
+      expect(interactions.some(i => i.content?.includes('Caveat:'))).toBe(false);
+    });
+  });
+
+  describe('proxy compact boundary enrichment alignment', () => {
+    // Regression: compact 边界会出现「孤儿 input turn」——其配对 assistant
+    // 的 content 为空（compact 摘要生成响应，buildAssistantInteraction 返回
+    // null），buildWireRounds 仍 push 该 user input。真实 session d3514ea9
+    // 经增量 merge 后管线会丢弃这类孤儿，DB turn 数 < buildWireRounds 数组
+    // 长度 → 数组下标 ≠ DB turnIndex → 按 turnIndex 查 enrichment 会让
+    // compact 后的 turn 拿到前一个孤儿的数据（output 拿到 input 的
+    // contentJson、下一个 input 拿到 output 的 inputMessagesJson）。
+    // 修法：enrichment 按 (role, createdAt_ms) 稳定键匹配，不靠下标。
+    const PROXY_COMPACT_FILE = path.join(FIXTURE_DIR, 'proxy-compact-boundary.jsonl');
+
+    it('fixture 产生 compact 边界 + 孤儿 input（空 assistant）', () => {
+      const interactions = readSession(PROXY_COMPACT_FILE, 'compact-boundary');
+      // 8 行 → 7 interaction（空 assistant 的 round：input 五子棋 push、
+      // output 因 buildAssistantInteraction 返回 null 而 drop → 孤儿 input）
+      expect(interactions.length).toBe(7);
+      // arr2 是孤儿 input（compact 前的最后一问），后面紧跟 continuation
+      expect(interactions[2].role).toBe('user');
+      expect(interactions[2].content).toContain('compact 前的最后一问');
+      // arr3 是 continuation（"This session is being continued"）
+      expect(interactions[3].role).toBe('user');
+      expect(interactions[3].content).toContain('continued from a previous');
+    });
+
+    it('enrichment 按稳定键对齐 —— 孤儿被丢弃后 compact 后 turn 仍拿到自己的数据', () => {
+      const interactions = readSession(PROXY_COMPACT_FILE, 'compact-boundary');
+      const enrichments = readWireEnrichments(PROXY_COMPACT_FILE);
+      // 模拟管线丢弃孤儿（arr2，compact 前的最后一问）——真实 merge 会这样。
+      // 丢弃后 DB turnIndex = buildWireRounds 数组下标 -1（孤儿之后全部漂移）。
+      const dbTurns = interactions.filter((_, i) => i !== 2);
+      // DB turnIndex 2 现在是 continuation（arr3），不再是孤儿（arr2）。
+      // 按稳定键 (role, createdAt_ts) 查，必须拿到 continuation 自己的
+      // contentJson，而非孤儿的数据。
+      const continuation = dbTurns[2];
+      expect(continuation.content).toContain('continued from a previous');
+      const contKey = wireEnrichmentKey(continuation.role, continuation.timeInfo!.created);
+      const contEnrich = enrichments.get(contKey);
+      expect(contEnrich).toBeDefined();
+      expect(contEnrich!.contentJson).not.toBeNull();
+      expect(contEnrich!.inputMessagesJson).toBeNull();
+      const w = JSON.parse(contEnrich!.contentJson!);
+      expect(w.wireInput).toBe(true);
+      // continuation 的 verbatim 消息含 compact 摘要文本，不是「compact 前的最后一问」
+      expect(JSON.stringify(w.messages)).toContain('continued from a previous');
+      expect(JSON.stringify(w.messages)).not.toContain('compact 前的最后一问');
+    });
+
+    it('每个 kept turn 的稳定键都解析到自己类型的 enrichment', () => {
+      const interactions = readSession(PROXY_COMPACT_FILE, 'compact-boundary');
+      const enrichments = readWireEnrichments(PROXY_COMPACT_FILE);
+      const dbTurns = interactions.filter((_, i) => i !== 2); // 丢孤儿
+      for (const it of dbTurns) {
+        const key = wireEnrichmentKey(it.role, it.timeInfo!.created);
+        const enrich = enrichments.get(key);
+        expect(enrich).toBeDefined();
+        if (it.role === 'user') {
+          expect(enrich!.contentJson, `user turn @${it.timeInfo!.created} 应有 contentJson`).not.toBeNull();
+          expect(enrich!.inputMessagesJson).toBeNull();
+        } else {
+          expect(enrich!.contentJson).toBeNull();
+          expect(enrich!.inputMessagesJson, `assistant turn @${it.timeInfo!.created} 应有 inputMessagesJson`).not.toBeNull();
+        }
+      }
+    });
+
+    it('latency/finishReason 走管线进 interaction，ttftMs 走 enrichment（仅 output turn）', () => {
+      const interactions = readSession(PROXY_COMPACT_FILE, 'compact-boundary');
+      const enrichments = readWireEnrichments(PROXY_COMPACT_FILE);
+      // arr1 = 第一轮的回答（assistant）: fixture duration_ms=1000/stopReason=end_turn/ttftMs=120
+      const a1 = interactions[1];
+      // latency/finishReason 经标准管线（adapter 读 duration_ms + stopReason →
+      // interaction.latency/finish_reason → turn-split → DB），不进 enrichment。
+      expect(a1.latency).toBe(1000);
+      expect(a1.finish_reason).toBe('end_turn');
+      // timeInfo.completed 被 proxy-gate 置 undefined（有 duration_ms），让
+      // turn-split fallback 到 interaction.latency 而非 completed-created=0
+      expect(a1.timeInfo?.completed).toBeUndefined();
+      // ttftMs 无管线字段 → 只在 enrichment（API 层覆盖）
+      const a1Enrich = enrichments.get(wireEnrichmentKey(a1.role, a1.timeInfo!.created))!;
+      expect(a1Enrich.ttftMs).toBe(120);
+      expect(a1Enrich.contentJson).toBeNull();   // output enrichment: imJson not cJson
+      expect(a1Enrich.inputMessagesJson).not.toBeNull();
+      // input turn（arr0）ttftMs 为 null
+      const u0 = interactions[0];
+      const u0Enrich = enrichments.get(wireEnrichmentKey(u0.role, u0.timeInfo!.created))!;
+      expect(u0Enrich.ttftMs).toBeNull();
+      // input turn 不带 latency/finish_reason
+      expect(u0.latency).toBeNull();
+      expect(u0.finish_reason).toBeNull();
+    });
+  });
+
+  describe('subagent full context resolution', () => {
+    // Regression: a subagent turn must show the SUBAGENT's own system prompt +
+    // restricted toolset (from subagents/<subId>.jsonl), NOT the main session's.
+    const MAIN_FILE = path.join(FIXTURE_DIR, 'subctx.jsonl');
+    const FILE_SID = 'subctx';
+
+    it('listSubagentSessions resolves the subagent file next to the main jsonl', () => {
+      const subs = listSubagentSessions(MAIN_FILE, FILE_SID);
+      expect(subs.length).toBe(1);
+      expect(subs[0].id).toBe('sub-x');
+      expect(subs[0].filePath).toContain('subagents');
+    });
+
+    it('readFullContext on the subagent file returns the SUBAGENT context, distinct from main', () => {
+      const subs = listSubagentSessions(MAIN_FILE, FILE_SID);
+      const subCtx = readFullContext(subs[0].filePath)!;
+      const mainCtx = readFullContext(MAIN_FILE)!;
+      // Subagent has its own system prompt + restricted toolset.
+      expect(subCtx.systemPrompt).toContain('SUB_SYSTEM');
+      expect(subCtx.tools.map(t => t.name)).toEqual(['C']);
+      // Main has a different system + full toolset.
+      expect(mainCtx.systemPrompt).toContain('MAIN_SYSTEM');
+      expect(mainCtx.tools.map(t => t.name).sort()).toEqual(['A', 'B']);
+      // The bug this guards: subagent context must NOT be the main's.
+      expect(subCtx.systemPrompt).not.toBe(mainCtx.systemPrompt);
     });
   });
 });

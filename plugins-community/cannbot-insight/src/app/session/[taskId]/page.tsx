@@ -21,6 +21,7 @@ import { BRAND_NAME } from "@/lib/branding"
 import type { TurnHighlight } from "@/lib/shared/highlight"
 import { TurnTimeline } from "@/components/observe/TurnTimeline"
 import { TurnDetail } from "@/components/observe/TurnDetail"
+import { WireRounds } from "@/components/observe/WireRounds"
 import { TurnContextPanel } from "@/components/observe/TurnContextPanel"
 import { SkillDetail } from "@/components/observe/SkillDetail"
 import { AuditBoardTab } from "@/components/observe/AuditBoardTab"
@@ -33,7 +34,7 @@ import { ChatReplayView } from "@/components/observe/ChatReplayView"
 import { summarizeToolCallErrors } from "@/lib/tool-call-errors"
 import { dispatchOnlySkillNames } from "@/lib/skill-eval-audit"
 
-type TabKey = "overview" | "turns" | "trace" | "skills" | "workflowAnalyse" | "performance" | "context" | "fileReads" | "replay"
+type TabKey = "overview" | "turns" | "wireRounds" | "trace" | "skills" | "workflowAnalyse" | "performance" | "context" | "fileReads" | "replay"
 
 interface SessionData {
   sessionId: string
@@ -136,6 +137,12 @@ interface TurnDetailData {
   cacheWriteTokens: number
   contextWindowLimit?: number
   systemOverheadTokens?: number
+  systemPrompt?: string | null
+  fullContext?: {
+    tools: Array<{ name: string; description: string }>
+    memoryFiles: string
+    skills: string
+  } | null
   latencyMs: number
   ttftMs: number | null
   createdAt: string | null
@@ -234,11 +241,12 @@ interface SkillEventForDetail {
   }
 }
 
-const HIDDEN_TABS_DEFAULT = ["replay"]
+const HIDDEN_TABS_DEFAULT = ["replay", "wireRounds"]
 
 const ALL_TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; highlight?: boolean }> = [
   { key: "overview", label: "Overview", icon: <LayoutDashboardIcon className="size-3.5 text-blue-500" /> },
   { key: "turns", label: "Turns", icon: <MessageSquareIcon className="size-3.5 text-emerald-500" /> },
+  { key: "wireRounds", label: "Turns(proxy)", icon: <FileTextIcon className="size-3.5 text-sky-500" /> },
   { key: "trace", label: "Trace", icon: <SearchIcon className="size-3.5 text-yellow-500" /> },
   { key: "context", label: "Context", icon: <BarChart3Icon className="size-3.5 text-pink-500" /> },
   { key: "workflowAnalyse", label: "Audit", icon: <ShieldCheckIcon className="size-3.5 text-emerald-500" />, highlight: true },
@@ -728,8 +736,21 @@ export default function SessionDetailPage({
     }
 
     setLoading(true)
-    Promise.all([fetchSessionData(), fetchTurns(), fetchExecutions(), fetchBridges(), fetchSkillEvents()])
-      .finally(() => setLoading(false))
+    setError(null)
+    // allSettled + 每个自带 10s 超时：冷编译/WSL2 网络抖动时单个 fetch 卡住
+    // 不会永久阻塞整个页面（Promise.all 会等最慢的那个）
+    const fetchTimeout = 10000
+    const timed = (p: Promise<void>) => Promise.race([
+      p,
+      new Promise<void>(resolve => setTimeout(resolve, fetchTimeout)),
+    ])
+    Promise.all([
+      timed(fetchSessionData()),
+      timed(fetchTurns()),
+      timed(fetchExecutions()),
+      timed(fetchBridges()),
+      timed(fetchSkillEvents()),
+    ]).finally(() => setLoading(false))
   }
 
   useEffect(() => {
@@ -1248,6 +1269,8 @@ export default function SessionDetailPage({
       endContextWindowPct: computeEndPct(selectedTurnItem),
       contextWindowLimit: selectedTurnDetail?.contextWindowLimit ?? 200000,
       systemOverheadTokens: selectedTurnDetail?.systemOverheadTokens ?? 0,
+      systemPrompt: selectedTurnDetail?.systemPrompt ?? null,
+      fullContext: selectedTurnDetail?.fullContext ?? null,
       cacheReadTokens: selectedTurnDetail?.cacheReadTokens ?? 0,
       cacheWriteTokens: selectedTurnDetail?.cacheWriteTokens ?? 0,
       isSubagent: false,
@@ -1274,6 +1297,8 @@ export default function SessionDetailPage({
         endContextWindowPct: computeEndPct(rootTurn ?? null),
         contextWindowLimit: rootTurn?.contextWindowLimit ?? 200000,
         systemOverheadTokens: 0,
+        systemPrompt: null,
+        fullContext: null,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
         isSubagent: false,
@@ -1293,6 +1318,12 @@ export default function SessionDetailPage({
       endContextWindowPct: number | null
       contextWindowLimit: number
       systemOverheadTokens: number
+      systemPrompt?: string | null
+      fullContext?: {
+        tools: Array<{ name: string; description: string }>
+        memoryFiles: string
+        skills: string
+      } | null
       cacheReadTokens: number
       cacheWriteTokens: number
       isSubagent: boolean
@@ -1337,6 +1368,8 @@ export default function SessionDetailPage({
           endContextWindowPct: computeEndPct(selectedTurnItem),
           contextWindowLimit: selectedTurnDetail.contextWindowLimit ?? 200000,
           systemOverheadTokens: selectedTurnDetail.systemOverheadTokens ?? 0,
+          systemPrompt: selectedTurnDetail.systemPrompt ?? null,
+          fullContext: selectedTurnDetail.fullContext ?? null,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           isSubagent: true,
@@ -1633,6 +1666,7 @@ export default function SessionDetailPage({
   const TAB_RENDERERS: Record<TabKey, () => React.ReactNode> = {
     overview: renderOverview,
     turns: renderTurns,
+    wireRounds: () => <WireRounds taskId={taskId ?? ""} />,
     trace: renderTrace,
     skills: renderSkills,
     workflowAnalyse: renderWorkflowAnalyse,

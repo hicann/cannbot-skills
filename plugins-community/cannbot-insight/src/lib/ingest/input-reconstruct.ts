@@ -64,3 +64,34 @@ export function selectInputContextTurns(
     ct.agentName !== 'compaction-boundary',
   );
 }
+
+// Wire-fidelity pass for LLM Input reconstruction. On the wire, a
+// <system-reminder> context block rides INSIDE a user message as a text block
+// (reminder block + prompt block); the claude-jsonl adapter splits it into a
+// system turn + user turn for the conversation view. Merge it back here so the
+// reconstructed message list mirrors the original request: a reminder-split
+// system turn directly before a user turn folds into that user message, and a
+// standalone reminder turn (pure context injection, no prompt) becomes a user
+// message — exactly what was sent. Registry / skill system turns (no reminder
+// wrapper) pass through unchanged.
+export function toWireOrder(contextTurns: ContextTurn[]): ContextTurn[] {
+  const out: ContextTurn[] = [];
+  for (let i = 0; i < contextTurns.length; i++) {
+    const ct = contextTurns[i];
+    const isReminder = ct.role === 'system' && (ct.content ?? '').startsWith('<system-reminder>');
+    if (isReminder) {
+      const next = contextTurns[i + 1];
+      if (next?.role === 'user') {
+        // the reminder turn preserves the original trailing whitespace, so
+        // plain concatenation reproduces the exact wire message text
+        out.push({ ...next, content: `${ct.content}${next.content ?? ''}` });
+        i++;
+        continue;
+      }
+      out.push({ ...ct, role: 'user' });
+      continue;
+    }
+    out.push(ct);
+  }
+  return out;
+}

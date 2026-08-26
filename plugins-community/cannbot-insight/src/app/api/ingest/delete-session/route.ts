@@ -9,6 +9,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+// Delete a session and ALL its child rows. SQLite foreign-key cascade is not
+// reliably enforced (PRAGMA state varies), so child rows are removed explicitly
+// in dependency order inside a transaction. Without this, turns/toolCalls/etc.
+// orphan and accumulate across delete cycles.
+async function cascadeDeleteSession(id: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.executionSkill.deleteMany({ where: { execution: { sessionId: id } } }),
+    prisma.toolCall.deleteMany({ where: { turn: { sessionId: id } } }),
+    prisma.skillEvent.deleteMany({ where: { turn: { sessionId: id } } }),
+    prisma.execution.deleteMany({ where: { sessionId: id } }),
+    prisma.sessionSkill.deleteMany({ where: { sessionId: id } }),
+    prisma.interactionBridge.deleteMany({ where: { sessionId: id } }),
+    prisma.turn.deleteMany({ where: { sessionId: id } }),
+    prisma.session.delete({ where: { id } }),
+  ]);
+}
+
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
@@ -16,7 +33,19 @@ export async function DELETE(request: NextRequest) {
 
     if (deleteAll) {
       const count = await prisma.session.count();
-      await prisma.session.deleteMany({});
+      // Explicit cascade: delete child rows in dependency order inside a
+      // transaction. SQLite foreign-key cascade is not reliably enforced
+      // (PRAGMA state varies), so without this child rows orphan and accumulate.
+      await prisma.$transaction([
+        prisma.executionSkill.deleteMany({}),
+        prisma.toolCall.deleteMany({}),
+        prisma.skillEvent.deleteMany({}),
+        prisma.execution.deleteMany({}),
+        prisma.sessionSkill.deleteMany({}),
+        prisma.interactionBridge.deleteMany({}),
+        prisma.turn.deleteMany({}),
+        prisma.session.deleteMany({}),
+      ]);
       return NextResponse.json({ deleted: count });
     }
 
@@ -28,7 +57,7 @@ export async function DELETE(request: NextRequest) {
         if (typeof entry.framework === 'string') where.framework = entry.framework;
         const found = await prisma.session.findMany({ where });
         for (const s of found) {
-          await prisma.session.delete({ where: { id: s.id } });
+          await cascadeDeleteSession(s.id);
           deleted++;
         }
       }
@@ -49,7 +78,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     for (const s of sessions) {
-      await prisma.session.delete({ where: { id: s.id } });
+      await cascadeDeleteSession(s.id);
     }
     return NextResponse.json({ deleted: sessions.length, taskId });
   } catch (error) {

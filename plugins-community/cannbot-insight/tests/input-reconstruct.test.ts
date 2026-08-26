@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { describe, it, expect } from 'vitest';
-import { selectInputContextTurns, isLocalCommandNoise, type ContextTurn } from '../src/lib/ingest/input-reconstruct';
+import { selectInputContextTurns, isLocalCommandNoise, toWireOrder, type ContextTurn } from '../src/lib/ingest/input-reconstruct';
 
 function ct(turnIndex: number, role: string, content: string, agentName?: string | null): ContextTurn {
   return { id: `t${turnIndex}`, turnIndex, role, content, agentName: agentName ?? null, isSubagent: false, subagentSessionId: null };
@@ -174,5 +174,46 @@ describe('input-reconstruct — compact-aware LLM input window', () => {
       const win = selectInputContextTurns(turns, 7);
       expect(win.map(t => t.turnIndex)).toEqual([5, 6]);
     });
+  });
+});
+
+describe('toWireOrder', () => {
+  const t = (i: number, role: string, content: string | null, agentName?: string | null) => ({
+    id: `t${i}`, turnIndex: i, role, content, agentName: agentName ?? null,
+  });
+
+  it('folds a reminder-split system turn into the following user turn (wire: one user message)', () => {
+    const turns = [
+      t(0, 'system', '<system-reminder>\n# claudeMd\nProject instructions.\n</system-reminder>\n\n'),
+      t(1, 'user', '看看有哪些没有提交的代码'),
+      t(2, 'system', 'Available agent types for the Agent tool:\n- claude: Catch-all.'),
+      t(3, 'assistant', 'checking git status'),
+    ];
+    const wire = toWireOrder(turns);
+    expect(wire.map(w => w.role)).toEqual(['user', 'system', 'assistant']);
+    // plain concatenation: the reminder turn carries the original trailing whitespace
+    expect(wire[0].content).toBe('<system-reminder>\n# claudeMd\nProject instructions.\n</system-reminder>\n\n看看有哪些没有提交的代码');
+    // registry system turn passes through verbatim
+    expect(wire[1].content).toContain('Available agent types');
+  });
+
+  it('standalone reminder turn (pure context injection, no prompt) becomes a user message', () => {
+    const turns = [
+      t(0, 'system', '<system-reminder>\n# gitStatus\nclean\n</system-reminder>'),
+      t(1, 'assistant', 'done'),
+    ];
+    const wire = toWireOrder(turns);
+    expect(wire.map(w => w.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('non-reminder system turns and other roles pass through unchanged', () => {
+    const turns = [
+      t(0, 'user', 'hi'),
+      t(1, 'assistant', 'hello'),
+      t(2, 'system', 'skill content injection'),
+      t(3, 'tool_result', '{"ok":true}'),
+    ];
+    const wire = toWireOrder(turns);
+    expect(wire).toEqual(turns);
   });
 });

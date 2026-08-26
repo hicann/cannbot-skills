@@ -175,7 +175,7 @@ export function PerfBenchmarkChart({ points, onJumpToTurn }: {
         const sortedVals = [...vals].sort((a, b) => a - b)
         const p95 = sortedVals[Math.floor(sortedVals.length * 0.95)] ?? maxVal
         const yMaxRaw = Math.min(maxVal, Math.max(p95, minVal))
-        const yMax = m.unit === "ms" ? Math.ceil(yMaxRaw / 100) * 100 : Math.ceil(yMaxRaw / 50) * 50
+        const yMax = (m.unit === "ms" ? Math.ceil(yMaxRaw / 100) * 100 : Math.ceil(yMaxRaw / 50) * 50) || 1
         const slot = chartW / n
         const barW = Math.min(slot * 0.7, 14)
         const xOf = (i: number) => padL + slot * i + slot / 2
@@ -199,10 +199,10 @@ export function PerfBenchmarkChart({ points, onJumpToTurn }: {
               </div>
             </div>
             <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} className="block">
-              {yTicks.map(v => {
+              {yTicks.map((v, i) => {
                 const y = padT + chartH - (v / yMax) * chartH
                 return (
-                  <g key={v}>
+                  <g key={i}>
                     <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={COLORS.grid} strokeWidth={0.5} strokeDasharray="2 3" />
                     <text x={padL - 5} y={y + 3} textAnchor="end" fontSize="8" className="fill-muted-foreground" fontFamily="monospace">{fmtVal(v)}</text>
                   </g>

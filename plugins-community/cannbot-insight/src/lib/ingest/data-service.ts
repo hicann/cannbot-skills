@@ -13,6 +13,7 @@ import { BRAND_SOURCE_TYPE } from '@/lib/branding';
 import { getAdapter } from './adapters/index';
 import { listSubagentSessionsWithDb, readSessionWithDb, readSessionMeta } from './adapters/opencode-db';
 import { listSubagentSessions as listClaudeSubagentSessions, collectSubagentToolUseMappings as collectClaudeToolUseMappings, extractVersion as extractClaudeVersion } from './adapters/claude-jsonl';
+import { proxySourceOf } from './adapters/claude-jsonl-full-context';
 import { normalize } from './normalize';
 import { splitIntoTurns, resetIdCounter } from './turn-split';
 import type { TurnRow, ToolCallRow, SkillEventRow } from './turn-split';
@@ -25,6 +26,33 @@ import type { RawInteraction } from '../shared/types';
 
 function toDate(v: string | null): Date | null {
   return v ? new Date(v) : null;
+}
+
+// proxy 文件的 round-pair 切分（claude-jsonl-wire）只产 user/assistant
+// 两种 role 的 turn；原生切分会产 system role（system-reminder 拆分、
+// 注册表等）。两种形态的 turnIndex:role 键对不上，直接 merge 会新旧
+// 混杂 —— 删除旧 turns 整体重建。仅在「旧有 system turn 且 新无 system
+// turn」时触发（= 切分逻辑从原生切到了 wire 切），原生→原生、wire→wire
+// 的增量导入不受影响。
+// 连带删除 Execution/InteractionBridge/SessionSkill/ExecutionSkill：
+// 这些表的外键引用旧 turnId，reshape 后 turnId 全变 → 必须清掉防悬空。
+// merge 路径不重建这些（deltaRefresh 路径会重建）—— reshape 后 session
+// 暂无 execution/bridge 数据，但无悬空引用，不崩。
+async function rebuildIfWireReshape(
+  client: PrismaClient,
+  sessionId: string,
+  existingTurns: Array<{ id: string; role: string }>,
+  freshTurns: TurnRow[],
+): Promise<boolean> {
+  if (existingTurns.length === 0) return false;
+  const existingHasSystem = existingTurns.some(t => t.role === 'system');
+  const freshHasSystem = freshTurns.some(t => t.role === 'system');
+  if (!existingHasSystem || freshHasSystem) return false;
+  await client.turn.deleteMany({ where: { sessionId } });
+  await client.execution.deleteMany({ where: { sessionId } });
+  await client.interactionBridge.deleteMany({ where: { sessionId } });
+  await client.sessionSkill.deleteMany({ where: { sessionId } });
+  return true;
 }
 
 async function batchCreateMany(
@@ -215,14 +243,40 @@ export async function importSession(
     console.log(`[import] readSession: ${Date.now() - t1}ms, ${rawInteractions.length} interactions`);
 
     let sessionMeta: { parentId: string | null; version: string | null; directory: string | null; summaryAdditions: number; summaryDeletions: number; summaryFiles: number } = { parentId: null, version: null, directory: null, summaryAdditions: 0, summaryDeletions: 0, summaryFiles: 0 };
+    // proxy 来源标记单独留存：merge 路径的 version 回填只用它（原生文件
+    // merge 行为保持不变 —— 不回填 version），新 session 路径仍用完整 version
+    let proxyVersionMarker: string | null = null;
     if (srcType === 'opencode-db' && sharedDb) {
       sessionMeta = readSessionMeta(sharedDb, sessionId);
     } else if (srcType === 'claude-jsonl') {
-      sessionMeta.version = extractClaudeVersion(dbPath);
+      // cpx 捕获文件每行带 source 标记（claude-proxy / opencode-proxy）：
+      // 来源随文件走（改名/移动不失效）。标记优先于 jsonl 里的 version 字段
+      // 存入 Session.version，列表据此显示 proxy 徽标。
+      proxyVersionMarker = proxySourceOf(dbPath);
+      sessionMeta.version = proxyVersionMarker ?? extractClaudeVersion(dbPath);
     }
 
     if (rawInteractions.length === 0) {
       if (sharedDb) sharedDb.close();
+      // Empty claude capture file: the proxy touches it at cpx startup, so
+      // importing right after launch (or while waiting for the first user
+      // input) reads zero records. Create a PLACEHOLDER session so it's
+      // visible in the list; the merge path (refresh-session / re-import)
+      // fills in turns as the file grows.
+      if (srcType === 'claude-jsonl' && fs.existsSync(dbPath)) {
+        const existing = await client.session.findFirst({ where: { taskId: sessionId }, select: { id: true, query: true } });
+        if (existing) return { sessionId, imported: false, query: existing.query ?? null };
+        await client.session.create({
+          data: {
+            taskId: sessionId,
+            label: '（捕获中）',
+            framework: 'claude-code',
+            startTime: new Date(),
+            sourcePath,
+          },
+        });
+        return { sessionId, imported: true, query: null };
+      }
       return { sessionId, imported: false, query: null };
     }
 
@@ -282,9 +336,12 @@ export async function importSession(
     // ── 增量导入路径（dedup/merge）──
     if (!dedupResult.shouldImport && dedupResult.existingSessionId) {
       const t5 = Date.now();
-      const existingTurns = await client.turn.findMany({
+      let existingTurns = await client.turn.findMany({
         where: { sessionId: dedupResult.existingSessionId },
       });
+      if (await rebuildIfWireReshape(client, dedupResult.existingSessionId, existingTurns, turns)) {
+        existingTurns = [];
+      }
       const existingToolCalls = await client.toolCall.findMany({
         where: { turnId: { in: existingTurns.map(t => t.id) } },
       });
@@ -475,6 +532,13 @@ export async function importSession(
         endTime: safeDate(updatedAggregates.endTime),
         ...(query ? { query } : {}),
         ...(updatedAggregates.model ? { model: updatedAggregates.model } : {}),
+        // 占位 session（空捕获文件导入时创建）没有 version；merge 时补上
+        // proxy 来源标记。仅 proxy：原生文件 merge 不回填 version（行为不变）
+        ...((!existingSession.version && proxyVersionMarker) ? { version: proxyVersionMarker } : {}),
+        // 占位 label（捕获中）在文件填满后换成真实首问，不再永久显示占位文案
+        ...((query && (existingSession.label === '（捕获中）' || existingSession.label === '（捕获中，暂无内容）'))
+          ? { label: query.substring(0, 100) }
+          : {}),
       };
       await client.session.update({
         where: { id: existingSessionPrismaId },
@@ -500,7 +564,8 @@ export async function importSession(
       const sessionRow = await tx.session.create({
         data: {
           taskId: sessionId,
-          label: rawInteractions[0]?.content?.substring(0, 100) ?? null,
+          label: rawInteractions.find(i => i.role === 'user')?.content?.substring(0, 100)
+            ?? rawInteractions[0]?.content?.substring(0, 100) ?? null,
           query: rawInteractions.find(i => i.role === 'user')?.content?.substring(0, 200) ?? null,
           framework: srcType === 'claude-jsonl' ? 'claude-code' : srcType === BRAND_SOURCE_TYPE ? srcType : 'opencode',
           model: aggregates.model,
@@ -711,7 +776,10 @@ export async function deltaRefreshSession(
 
     const { turns, toolCalls, skillEvents } = splitIntoTurns(normalized, sessionId);
 
-    const existingTurns = await prisma.turn.findMany({ where: { sessionId: session.id } });
+    let existingTurns = await prisma.turn.findMany({ where: { sessionId: session.id } });
+    if (await rebuildIfWireReshape(prisma, session.id, existingTurns, turns)) {
+      existingTurns = [];
+    }
     const existingToolCalls = await prisma.toolCall.findMany({
       where: { turnId: { in: existingTurns.map(t => t.id) } },
     });
@@ -1039,6 +1107,10 @@ export async function deltaRefreshSession(
         rootExecutionId,
         ...(query ? { query } : {}),
         ...(updatedAggregates.model ? { model: updatedAggregates.model } : {}),
+        // 占位 session 补来源标记（空捕获导入时创建的 session 无 version）
+        ...((srcType === 'claude-jsonl' && !session.version && session.sourcePath)
+          ? { version: proxySourceOf(session.sourcePath) ?? undefined }
+          : {}),
       },
     });
 

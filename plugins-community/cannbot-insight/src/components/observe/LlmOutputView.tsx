@@ -11,6 +11,7 @@ import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { CopyButton } from "./CopyButton"
+import { BashEscapeView, parseBashEscape } from "./BashEscapeView"
 import { highlightKeyword, type TurnHighlight } from "@/lib/shared/highlight"
 
 interface LlmOutputViewProps {
@@ -47,9 +48,9 @@ function parseContentSections(content: string | null, contentJson: string | null
       } else if (Array.isArray(parsed)) {
         for (const block of parsed) {
           if (block.type === "thinking" || block.type === "reasoning") {
-            sections.push({ type: "thinking", content: block.content ?? block.thinking ?? String(block) })
+            sections.push({ type: "thinking", content: block.thinking ?? block.content ?? block.text ?? String(block) })
           } else if (block.type === "text") {
-            sections.push({ type: "text", content: block.content ?? String(block) })
+            sections.push({ type: "text", content: block.text ?? block.content ?? String(block) })
           }
         }
         if (sections.length > 0) return sections
@@ -170,6 +171,8 @@ export function LlmOutputView({
       {isExpanded && sections.length > 0 && (
         <div className="border-t px-3 py-2 space-y-3">
           {sections.map((section, index) => {
+            // shell 转义显示糖：有关键字高亮时退回普通渲染，保住 <mark> 跳转
+            const bashEscape = parseBashEscape(section.content)
             if (section.type === "thinking") {
               return (
                 <div key={index} className="border rounded-md">
@@ -207,8 +210,12 @@ export function LlmOutputView({
                   )}
                   <CopyButton text={section.content} className="ml-auto size-4 text-muted-foreground hover:text-foreground" />
                 </div>
-                <div className="px-2 pb-2 text-sm whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto">
-                  {highlightKeyword(section.content, highlight?.keyword)}
+                <div className="px-2 pb-2 text-sm max-h-[600px] overflow-y-auto">
+                  {!highlight?.keyword && bashEscape ? (
+                    <BashEscapeView esc={bashEscape} />
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words">{highlightKeyword(section.content, highlight?.keyword)}</div>
+                  )}
                 </div>
               </div>
             )

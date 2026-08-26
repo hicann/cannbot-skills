@@ -1,0 +1,20 @@
+#!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+#
+# cpx-cli — wrapper so users don't need an alias. Resolves its own location
+# (cwd-agnostic) and delegates to tsx + the real cpx-cli.ts. Works from any dir;
+# run `proxy/start.sh` once to put `cpx` on PATH.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+TSX=""
+for d in "$SCRIPT_DIR" "$SCRIPT_DIR/.." "$SCRIPT_DIR/../.."; do
+  [ -x "$d/node_modules/.bin/tsx" ] && TSX="$d/node_modules/.bin/tsx" && break
+done
+[ -n "$TSX" ] || TSX="npx --yes tsx"
+exec $TSX "$SCRIPT_DIR/src/cli/cpx-cli.ts" "$@"

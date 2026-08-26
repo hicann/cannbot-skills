@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"review it"},"timestamp":"2026-08-13T11:00:06.000Z"}
+{"type":"assistant","message":{"role":"assistant","id":"s1","content":[{"type":"text","text":"reviewing"}],"model":"glm-5.2","usage":{"input_tokens":8,"output_tokens":3}},"system":"SUB_SYSTEM prompt (cc_is_subagent=true)","tools":[{"name":"C","description":"c"}],"timestamp":"2026-08-13T11:00:08.000Z"}

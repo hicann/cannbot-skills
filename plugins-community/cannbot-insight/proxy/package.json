@@ -1,0 +1,21 @@
+{
+  "name": "@cannbot/proxy",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Generic agent<->model plaintext capture proxy for CANNBot-Insight",
+  "bin": {
+    "cpx-cli": "./src/cli/cpx-cli.ts"
+  },
+  "scripts": {
+    "proxy": "tsx src/server.ts",
+    "cpx-cli": "tsx src/cli/cpx-cli.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "tsx": "^4.22.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

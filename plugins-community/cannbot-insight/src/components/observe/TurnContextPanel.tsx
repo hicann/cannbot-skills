@@ -10,6 +10,7 @@
 import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { reminderPrefix } from "./LlmContextView"
 
 interface ToolCallEntry {
   name: string
@@ -429,7 +430,8 @@ function ContextSection({ info, prevPct }: { info: ContextInfo; prevPct: number 
               {cat.messages.map((msg, index) => {
                 const key = `${cat.role}-${index}`
                 const isMsgExpanded = expandedMsgs.has(key)
-                const summary = truncate(msg.content ?? "", 80)
+                const rp = reminderPrefix(msg.content)
+                const summary = truncate(rp ? (rp.prompt || "(仅注入上下文)") : (msg.content ?? ""), 80)
                 const showFull = isMsgExpanded && msg.content && msg.content.length > 80
                 const isSkill = cat.skillHeaders.some(sh => sh.msg === msg)
                 const isContinuationMsg = msg.agentName === 'continuation'

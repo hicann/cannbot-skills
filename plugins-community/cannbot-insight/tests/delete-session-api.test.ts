@@ -19,6 +19,23 @@ async function seedSession(taskId: string, framework: string = 'unknown') {
   return session;
 }
 
+// Seed a session WITH child rows (turn + toolCall + skillEvent) so cascade
+// deletion can be verified. Without explicit cascade these would orphan.
+async function seedSessionWithChildren(taskId: string, framework: string = 'opencode') {
+  const session = await prisma.session.create({ data: { taskId, framework } });
+  createdSessionIds.push(session.id);
+  const turn = await prisma.turn.create({
+    data: { sessionId: session.id, turnIndex: 0, role: 'user', content: 'hi' },
+  });
+  const toolCall = await prisma.toolCall.create({
+    data: { turnId: turn.id, toolCallId: 'tc-1', toolName: 'Read', state: 'completed' },
+  });
+  const skillEvent = await prisma.skillEvent.create({
+    data: { turnId: turn.id, skillName: 'demo', eventType: 'invoke', success: true },
+  });
+  return { session, turn, toolCall, skillEvent };
+}
+
 afterEach(async () => {
   for (const id of createdSessionIds.splice(0)) {
     await prisma.session.delete({ where: { id } }).catch(() => {});
@@ -113,5 +130,34 @@ describe('delete-session API (batch)', () => {
   it('still rejects a missing taskId in the single-session path', async () => {
     const res = await DELETE(makeDeleteRequest({}));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('delete-session API (cascade: no orphan child rows)', () => {
+  it('single delete cascades to turns/toolCalls/skillEvents', async () => {
+    const { session, turn, toolCall, skillEvent } = await seedSessionWithChildren(`cascade-single-${Date.now()}`);
+
+    const res = await DELETE(makeDeleteRequest({ taskId: session.taskId }));
+    expect(res.status).toBe(200);
+
+    expect(await prisma.session.findUnique({ where: { id: session.id } })).toBeNull();
+    expect(await prisma.turn.findUnique({ where: { id: turn.id } })).toBeNull();
+    expect(await prisma.toolCall.findUnique({ where: { id: toolCall.id } })).toBeNull();
+    expect(await prisma.skillEvent.findUnique({ where: { id: skillEvent.id } })).toBeNull();
+    createdSessionIds.splice(createdSessionIds.indexOf(session.id), 1);
+  });
+
+  it('batch delete cascades to child rows', async () => {
+    const { session, turn, toolCall, skillEvent } = await seedSessionWithChildren(`cascade-batch-${Date.now()}`);
+
+    const res = await DELETE(makeDeleteRequest({
+      sessions: [{ taskId: session.taskId, framework: 'opencode' }],
+    }));
+    expect(res.status).toBe(200);
+
+    expect(await prisma.turn.findUnique({ where: { id: turn.id } })).toBeNull();
+    expect(await prisma.toolCall.findUnique({ where: { id: toolCall.id } })).toBeNull();
+    expect(await prisma.skillEvent.findUnique({ where: { id: skillEvent.id } })).toBeNull();
+    createdSessionIds.splice(createdSessionIds.indexOf(session.id), 1);
   });
 });

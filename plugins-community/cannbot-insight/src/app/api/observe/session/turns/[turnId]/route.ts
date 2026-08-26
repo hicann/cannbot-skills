@@ -9,8 +9,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getContextWindowLimit } from '@/lib/context-window-config';
-import { selectInputContextTurns } from '@/lib/ingest/input-reconstruct';
+import { selectInputContextTurns, toWireOrder } from '@/lib/ingest/input-reconstruct';
 import { isContinuationTurn } from '@/lib/shared/command-parser';
+import { listSubagentSessions } from '@/lib/ingest/adapters/claude-jsonl';
+import { readFullContext, type FullContext } from '@/lib/ingest/adapters/claude-jsonl-full-context';
+import { readWireEnrichments, wireEnrichmentKey } from '@/lib/ingest/adapters/claude-jsonl-wire';
+import path from 'node:path';
+
+// Read the verbatim captured context (system prompt, tools, memory files, skills)
+// from the session's capture file via Session.sourcePath. The proxy writes
+// extended claude-format, so this applies to claude-code framework sessions.
+// Returns null for other sources — those have no verbatim capture.
+//
+// For a SUBAGENT turn, read the subagent's OWN jsonl (subagents/<subId>.jsonl)
+// — subagents have a different system prompt (cc_is_subagent=true) and a
+// restricted toolset. Reading the main session's file would mislabel the
+// main agent's context as the subagent's. Falls back to null (honest empty)
+// if the subagent file is missing.
+async function readSessionFullContext(sessionId: string, subagentSessionId: string | null = null): Promise<FullContext | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { taskId: true, framework: true, sourcePath: true },
+  });
+  if (!session || !session.sourcePath) return null;
+  if (session.framework !== 'claude-code') return null;
+  if (subagentSessionId) {
+    try {
+      // Subagent dirs are keyed by the session id (Session.taskId), NOT the
+      // capture filename — proxy captures carry a cpx- filename prefix while
+      // their <sid>/subagents/ dir uses the unprefixed id. For native imports
+      // taskId === filename stem, so behavior is unchanged there.
+      const fileSid = session.taskId || path.basename(session.sourcePath, '.jsonl');
+      const sub = listSubagentSessions(session.sourcePath, fileSid)
+        .find(s => s.id === subagentSessionId);
+      if (sub) return readFullContext(sub.filePath);
+    } catch { /* fall through to null */ }
+    return null;
+  }
+  return readFullContext(session.sourcePath);
+}
 
 // Compute stable system overhead from the first assistant turn
 // For root turns: use root session; for subagent turns: use subagent's own turns
@@ -67,6 +104,7 @@ export async function GET(
         );
       }
       const systemOverheadTokens = await computeSystemOverhead(compaction.sessionId, compaction.subagentSessionId);
+      const fc = await readSessionFullContext(compaction.sessionId, compaction.subagentSessionId);
       return NextResponse.json({
         turnId,
         sessionId: compaction.sessionId,
@@ -80,6 +118,8 @@ export async function GET(
         inputMessagesTokens: 0,
         contextWindowPct: null,
         systemOverheadTokens,
+        systemPrompt: fc?.systemPrompt ?? null,
+        fullContext: fc ? { tools: fc.tools, memoryFiles: fc.memoryFiles, skills: fc.skills } : null,
         agentName: 'continuation',
         subagentName: compaction.subagentName,
         subagentSessionId: compaction.subagentSessionId,
@@ -161,7 +201,9 @@ export async function GET(
       // Build ordered message list: assistant messages include tool_calls, tool_results keep their content.
       // Apply compact-aware windowing: start at the most recent /compact continuation
       // before this turn and skip local CLI command noise. See input-reconstruct.
-      const filtered = selectInputContextTurns(previousTurns, turn.turnIndex, turn.agentName);
+      // toWireOrder then folds reminder-split system turns back into their user
+      // message so the list mirrors the original request exactly.
+      const filtered = toWireOrder(selectInputContextTurns(previousTurns, turn.turnIndex, turn.agentName));
 
       // Fetch compaction turn totalTokens for accurate continuation tokenCount
       const compactionIds = filtered.filter(ct => ct.agentName === 'compaction').map(ct => ct.id);
@@ -200,16 +242,32 @@ export async function GET(
             msg.tool_calls = tcs.map(tc => {
               const isSkill = tc.isSkillRelated;
               const argsMax = isSkill ? 2000 : 1500;
-              const resultMax = isSkill ? 5000 : 3000;
               return {
                 name: tc.toolName,
                 args: tc.argsJson ? (tc.argsJson.length > argsMax ? tc.argsJson.substring(0, argsMax) + '...' : tc.argsJson) : null,
-                result: tc.resultJson ? (tc.resultJson.length > resultMax ? tc.resultJson.substring(0, resultMax) + '...' : tc.resultJson) : null,
+                result: null,
                 isSkillRelated: isSkill ? true : undefined,
               };
             });
           }
           messages.push(msg);
+          // Wire fidelity (Anthropic protocol): tool_result is its own user
+          // message AFTER the assistant tool_use — not folded into the
+          // tool_calls entry. One result message per call, in call order.
+          if (!isCompaction) {
+            for (const tc of tcs) {
+              if (tc.resultJson == null) continue;
+              const isSkill = tc.isSkillRelated;
+              const resultMax = isSkill ? 5000 : 3000;
+              const r = tc.resultJson.length > resultMax ? tc.resultJson.substring(0, resultMax) + '...' : tc.resultJson;
+              messages.push({
+                role: 'tool_result',
+                content: r,
+                tokenCount: Math.round(r.length / 3.5),
+                name: tc.toolName,
+              });
+            }
+          }
         } else {
           const isContinuationUser = isContinuation && ct.role === 'user';
           const continuationTokens = isContinuationUser && targetInputTokens > 0 ? targetInputTokens : baseTokens;
@@ -224,10 +282,53 @@ export async function GET(
       }
 
       inputMessagesJson = JSON.stringify(messages);
+      // The stored count predates the wire-order merge (reminder turn was its
+      // own message); use the reconstructed list length so header == list.
+      if (turn.agentName !== 'compaction') {
+        (turn as { inputMessagesCount?: number }).inputMessagesCount = messages.length;
+      }
     }
 
     // Compute stable system overhead (fixed for entire session)
     const systemOverheadTokens = await computeSystemOverhead(turn.sessionId, turn.subagentSessionId);
+    const fc = await readSessionFullContext(turn.sessionId, turn.subagentSessionId);
+
+    // Proxy 扩展层（OCP）：proxy turn 的 contentJson/inputMessagesJson 不存 DB
+    // （管线不感知），由扩展层 readWireEnrichments 从捕获文件按需读取 —— 与
+    // readFullContext 同构。仅 proxy 捕获 session（version 带 -proxy 后缀）触发。
+    // 按 (role, createdAt_ts) 稳定键查 —— 不按 turnIndex，因为管线在 compact
+    // 边界折叠 interaction 会使数组下标 ≠ DB turnIndex（compact 错位）。
+    // 限制：仅 root turn（subagent 的全局 createdAt_ts 与 wire 文件本地键不
+    // 对应；subagent 的 verbatim 由 readFullContext 提供 system/tools，
+    // inputMessagesJson 走标准重建）。
+    let wireContentJson = turn.contentJson;
+    let wireInputMessagesJson = inputMessagesJson;
+    let wireInputMessagesCount = turn.inputMessagesCount;
+    // ttftMs has no pipeline field (turn-split hardcodes null), so proxy output
+    // turns override it from the extension layer. latencyMs / finishReason flow
+    // through the standard pipeline (emitter duration_ms + stopReason → adapter
+    // → turn-split → DB), so they're read straight from the turn — no override.
+    let wireTtftMs = turn.ttftMs;
+    const sessionRow = await prisma.session.findUnique({
+      where: { id: turn.sessionId },
+      select: { version: true, sourcePath: true },
+    });
+    if (sessionRow?.version?.endsWith('-proxy') && sessionRow.sourcePath && !turn.subagentSessionId) {
+      const enrichments = readWireEnrichments(sessionRow.sourcePath);
+      // createdAt_ts 经管线透传不变 = buildWireRounds 赋的 timeInfo.created
+      // （已验证）；fallback createdAt（CLAUDE.md: createdAt_ts nullable）
+      const tsMs = (turn.createdAt_ts ?? turn.createdAt).getTime();
+      const enrich = enrichments.get(wireEnrichmentKey(turn.role, tsMs));
+      if (enrich) {
+        wireContentJson = enrich.contentJson;
+        // proxy 输出 turn 的 inputMessagesJson 由扩展层提供 → 跳过重建
+        if (enrich.inputMessagesJson) {
+          wireInputMessagesJson = enrich.inputMessagesJson;
+          try { wireInputMessagesCount = JSON.parse(enrich.inputMessagesJson).length; } catch { /* keep */ }
+        }
+        if (enrich.ttftMs != null) wireTtftMs = enrich.ttftMs;
+      }
+    }
 
     return NextResponse.json({
       turnId: turn.id,
@@ -235,13 +336,15 @@ export async function GET(
       turnIndex: turn.turnIndex,
       role: turn.role,
       content: turn.content,
-      contentJson: turn.contentJson,
+      contentJson: wireContentJson,
       contentSummary: turn.contentSummary ?? turn.content?.substring(0, 200) ?? null,
-      inputMessagesJson,
-      inputMessagesCount: turn.agentName === 'compaction' ? (inputMessagesJson ? JSON.parse(inputMessagesJson).length : turn.inputMessagesCount) : turn.inputMessagesCount,
+      inputMessagesJson: wireInputMessagesJson,
+      inputMessagesCount: turn.agentName === 'compaction' ? (wireInputMessagesJson ? JSON.parse(wireInputMessagesJson).length : wireInputMessagesCount) : wireInputMessagesCount,
       inputMessagesTokens: turn.agentName === 'compaction' && turn.inputMessagesTokens === turn.outputTokens ? turn.inputTokens : turn.inputMessagesTokens,
       contextWindowPct: turn.contextWindowPct,
       systemOverheadTokens,
+      systemPrompt: fc?.systemPrompt ?? null,
+      fullContext: fc ? { tools: fc.tools, memoryFiles: fc.memoryFiles, skills: fc.skills } : null,
       agentName: turn.agentName,
       subagentName: turn.subagentName,
       subagentSessionId: turn.subagentSessionId,
@@ -253,7 +356,7 @@ export async function GET(
       cacheReadTokens: turn.cacheReadTokens,
       cacheWriteTokens: turn.cacheWriteTokens,
       latencyMs: turn.latencyMs,
-      ttftMs: turn.ttftMs,
+      ttftMs: wireTtftMs,
       createdAt: turn.createdAt_ts?.toISOString() ?? turn.createdAt.toISOString(),
       completedAt: turn.completedAt?.toISOString() ?? null,
       model: turn.model,

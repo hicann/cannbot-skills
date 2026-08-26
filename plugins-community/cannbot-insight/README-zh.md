@@ -13,6 +13,8 @@ LLM 编码 Agent 的 Session 级可观测工具。辅助长上下文分析、模
 - **上下文治理** — 查看 LLM 输入上下文组成：可见消息 + 稳定的 "System (hidden)" 开销；输入窗口在每个 `/compact` 边界正确截断
 - **Subagent 追踪** — 识别 subagent session 与 dispatch→response 链路；subagent turn 在 Turns 时间线内联展示（带徽章），数量显示在 Overview 卡片
 - **Turn 快速跳转** — 在 Turns 时间线输入 turn 编号（如 `#459`）回车即可直达该轮次并滚动到视图；subagent turn 自动展开祖先 dispatch lane
+- **Wire 轮次（proxy 捕获）** — 直接读 cpx 捕获文件逐轮重组：每个 wire round 展示完整输入（累积 messages，本轮新增高亮）与输出（response 原文），与 DB 重建的 LLM Input 对照；tab 默认隐藏，`./start.sh -a` 启动才显示
+- **Round-Pair 切分（proxy 捕获）** — proxy session 的 Turns 按每轮 输入/输出 成对切分（时间线带 输入/输出 徽章）：输入 turn 逐条展示本轮新增的 verbatim wire 消息，输出 turn 的 LLM Input 存储并直接返回原始累积请求，wire 顺序（含 tool_result 与 system 注入的先后）精确保留，无需重建
 - **Skill 事件** — 跟踪每轮 skill load/invoke/use 事件
 - **Skill 全文（SKILL.md）** — Skill Summary 与 Skills per Agent 每个 skill 均可点击，取原生 Skill 工具注入内容或 SKILL.md 读取结果重建全文，支持下载
 - **概念追踪** — 跨轮次关键词搜索，查看传播链路和 DAG 图；搜索结果支持按 source（用户/模型/子agent 等）、thinking、tools 二次过滤；点击结果的 View Turn 跳转到 Turns tab，自动展开并高亮关键词至匹配位置（内容 / 工具参数 / 结果 / 错误）

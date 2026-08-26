@@ -7,6 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'node:fs';
 import { importSession } from '@/lib/ingest/data-service';
 import { BRAND_SOURCE_TYPE } from '@/lib/branding';
 import { prisma } from '@/lib/db';
@@ -32,11 +33,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Distinguish "file missing" from "session already exists" up front:
+    // both surface as imported:false downstream, and the UI used to label
+    // every imported:false as "Already exists" — misleading when the capture
+    // file was deleted or the path is wrong.
+    if (!fs.existsSync(filePath)) {
+      return NextResponse.json(
+        { error: `File not found: ${filePath}`, reason: 'file-not-found' },
+        { status: 404 }
+      );
+    }
+
     const result = await importSession(filePath, sessionId, prisma, filePath, source);
 
     return NextResponse.json({
       sessionId: result.sessionId,
       imported: result.imported,
+      // imported:false + query:null = 0 interactions parsed (unreadable file);
+      // imported:false + query = session existed, merged;
+      // imported:true + query:null = empty claude capture → placeholder created
+      reason: result.imported ? (result.query ? 'imported' : 'imported-empty') : (result.query ? 'already-exists' : 'no-interactions'),
       query: result.query ?? null,
     });
   } catch (error) {

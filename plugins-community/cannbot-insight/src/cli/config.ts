@@ -37,15 +37,21 @@ export const DEFAULT_CONFIG: CliConfig = {
   },
 };
 
-const CONFIG_DIR = path.join(os.homedir(), BRAND_CONFIG_DIR_SUFFIX);
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+// Computed lazily (not at module load) so tests can isolate HOME without
+// nuking the real ~/.cannbot-insight (which holds the proxy/ capture dir).
+function configDir(): string {
+  return path.join(os.homedir(), BRAND_CONFIG_DIR_SUFFIX);
+}
+function configFilePath(): string {
+  return path.join(configDir(), 'config.json');
+}
 
 export function loadConfig(globalOpts?: { server?: string; timeout?: string }): CliConfig {
   let config = { ...DEFAULT_CONFIG };
 
-  if (fs.existsSync(CONFIG_FILE)) {
+  if (fs.existsSync(configFilePath())) {
     try {
-      const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+      const saved = JSON.parse(fs.readFileSync(configFilePath(), 'utf-8'));
       config = { ...config, ...saved };
     } catch { /* ignore invalid config */ }
   }
@@ -70,18 +76,19 @@ export function loadConfig(globalOpts?: { server?: string; timeout?: string }): 
 }
 
 export function saveConfig(config: Partial<CliConfig>): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = configDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
   const current = loadConfig();
   const merged = { ...current, ...config };
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2));
+  fs.writeFileSync(configFilePath(), JSON.stringify(merged, null, 2));
 }
 
 export function resetConfig(): void {
-  if (fs.existsSync(CONFIG_FILE)) {
+  if (fs.existsSync(configFilePath())) {
     try {
-      fs.unlinkSync(CONFIG_FILE);
+      fs.unlinkSync(configFilePath());
     } catch (e) {
       throw new ConfigError(`Failed to reset config: ${e instanceof Error ? e.message : String(e)}`);
     }

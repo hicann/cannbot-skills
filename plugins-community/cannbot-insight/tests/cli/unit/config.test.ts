@@ -6,15 +6,38 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { loadConfig, saveConfig, resetConfig, DEFAULT_CONFIG, DEFAULT_SERVER_URL } from '@/cli/config';
 import { BRAND_CONFIG_DIR_SUFFIX } from '@/lib/branding';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const CONFIG_DIR = path.join(os.homedir(), BRAND_CONFIG_DIR_SUFFIX);
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+// Isolate HOME to a tmpdir so the config tests never touch the REAL
+// ~/.cannbot-insight (which holds the proxy/ capture dir + session jsonl).
+// config.ts reads os.homedir() lazily, so setting HOME here (before any
+// loadConfig/saveConfig call in the it-blocks) redirects CONFIG_DIR to the
+// tmpdir. Without this, fs.rmSync(CONFIG_DIR, recursive) below would nuke
+// the real ~/.cannbot-insight on every test run — the recurring "proxy dir
+// vanishing" root cause.
+let CONFIG_DIR = '';
+let CONFIG_FILE = '';
+let tmpHome = '';
+let savedHome: string | undefined;
+
+beforeAll(() => {
+  savedHome = process.env.HOME;
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cannbot-config-test-'));
+  process.env.HOME = tmpHome;
+  CONFIG_DIR = path.join(tmpHome, BRAND_CONFIG_DIR_SUFFIX);
+  CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+});
+
+afterAll(() => {
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+});
 
 describe('config', () => {
   beforeEach(() => {
@@ -68,6 +91,26 @@ describe('config', () => {
       const config = loadConfig({ server: 'http://cli-server:8080' });
       expect(config.server).toBe('http://cli-server:8080');
       delete process.env.CANNBOT_SERVER;
+    });
+
+    it('reads os.homedir() lazily so an after-import HOME change redirects CONFIG_DIR', () => {
+      // Regression guard: config.ts must NOT capture CONFIG_DIR at module
+      // load. If it did, the test's HOME isolation would fail and
+      // fs.rmSync(CONFIG_DIR) would nuke the real ~/.cannbot-insight (the
+      // recurring "proxy capture dir vanishing" root cause).
+      const altHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cannbot-config-alt-'));
+      const prev = process.env.HOME;
+      process.env.HOME = altHome;
+      try {
+        saveConfig({ server: 'http://alt-home:5555' });
+        const altConfigFile = path.join(altHome, BRAND_CONFIG_DIR_SUFFIX, 'config.json');
+        expect(fs.existsSync(altConfigFile)).toBe(true);
+        const cfg = loadConfig();
+        expect(cfg.server).toBe('http://alt-home:5555');
+      } finally {
+        process.env.HOME = prev;
+        fs.rmSync(altHome, { recursive: true, force: true });
+      }
     });
 
     it('loads saved config from file', () => {

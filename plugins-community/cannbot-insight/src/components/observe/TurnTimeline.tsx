@@ -74,8 +74,13 @@ const ROLE_ICONS: Record<string, string> = {
   system: "⚙️",
   tool_result: "🔧",
   command: "⚡",
-  continuation: "⚡",
+  continuation: "⏸",
   compaction: "⚡",
+}
+
+// displayRole → 用户可见标签（continuation 在 UI 显示为 /compact，更直观）
+const ROLE_LABELS: Record<string, string> = {
+  continuation: "/compact",
 }
 
 const ROLE_BADGE_VARIANTS: Record<string, "blue" | "green" | "gray" | "purple" | "orange" | "yellow"> = {
@@ -465,7 +470,7 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
               )}
               onClick={() => setFilterRole(role === filterRole ? null : role)}
             >
-              {ROLE_ICONS[role] ?? role} ({displayRootTurns.filter(t => t.displayRole === role).length})
+              {ROLE_ICONS[role] ?? role} {ROLE_LABELS[role] ?? role} ({displayRootTurns.filter(t => t.displayRole === role).length})
             </button>
           ))}
         </div>
@@ -528,7 +533,7 @@ export function TurnTimeline({ turns, bridges, selectedTurnId, onSelectTurn, hig
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className="text-xs font-mono text-muted-foreground">#{turn.turnIndex}</span>
                     <Badge variant={ROLE_BADGE_VARIANTS[turn.displayRole] ?? "gray"}>
-                      {ROLE_ICONS[turn.displayRole] ?? turn.displayRole} {turn.displayRole}
+                      {ROLE_ICONS[turn.displayRole] ?? turn.displayRole} {ROLE_LABELS[turn.displayRole] ?? turn.displayRole}
                     </Badge>
                     {turn.toolCalls.length > 0 && (
                       <Badge variant="outline">{turn.toolCalls.length} tools</Badge>

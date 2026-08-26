@@ -151,6 +151,8 @@ export function listSessions(dbPath: string): SessionListItem[] {
       });
     }
 
+    result.sort((a, b) => (b.endedAt ?? b.createdAt).localeCompare(a.endedAt ?? a.createdAt));
+
     return result;
   } finally {
     db.close();

@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { importSession } from '../src/lib/ingest/data-service.ts';
+import { readWireEnrichments, wireEnrichmentKey } from '../src/lib/ingest/adapters/claude-jsonl-wire.ts';
 import { PrismaClient } from '@prisma/client';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -303,5 +304,76 @@ describe('E2E: claude-jsonl skill+dispatch import → observe', () => {
         expect(tc.argsJson).toContain('subagent_type');
       }
     });
+  });
+});
+
+describe('E2E: proxy system lines → turns + label', () => {
+  const PROXY_FILE = path.resolve(__dirname, 'data/claude-sessions/proxy-system-line.jsonl');
+  const PROXY_SID = 'proxy-system-line';
+  let sessionId: string | null = null;
+
+  beforeAll(async () => {
+    const result = await importSession(PROXY_FILE, PROXY_SID, prisma, PROXY_FILE, 'claude-jsonl');
+    if (result.imported) {
+      const s = await prisma.session.findFirst({ where: { taskId: PROXY_SID } });
+      sessionId = s?.id ?? null;
+    }
+  });
+
+  afterAll(async () => {
+    if (sessionId) {
+      try { await prisma.session.delete({ where: { id: sessionId } }); } catch { /* ignore */ }
+    }
+  });
+
+  it('round-pair 切分：registry 随输入 turn 的 verbatim 消息保留（wire 顺序）', async () => {
+    expect(sessionId).not.toBeNull();
+    const turns = await prisma.turn.findMany({
+      where: { sessionId: sessionId! },
+      orderBy: { turnIndex: 'asc' },
+    });
+    // 1 个 wire round → 输入 + 输出 两条 turn，不再有独立 system turn
+    expect(turns.map(t => t.role)).toEqual(['user', 'assistant']);
+    const input = turns[0];
+    expect(input.content).toBe('你用的什么模型');
+    // OCP：DB 里 contentJson/inputMessagesJson 恒 null（管线不感知 proxy 数据），
+    // 扩展层 readWireEnrichments 按需读取
+    expect(input.contentJson).toBeNull();
+    const enrichments = readWireEnrichments(PROXY_FILE);
+    // 稳定键 (role, createdAt_ts) —— 不靠 turnIndex（管线折叠会使下标漂移）
+    const w = JSON.parse(enrichments.get(wireEnrichmentKey(input.role, (input.createdAt_ts ?? input.createdAt).getTime()))!.contentJson!);
+    expect(w.wireInput).toBe(true);
+    expect(w.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'system']);
+    expect(JSON.stringify(w.messages[1].content)).toContain('Available agent types');
+    // 输出 turn 的 LLM Input 由扩展层提供（wire 顺序 user → system）
+    expect(turns[1].inputMessagesJson).toBeNull();
+    const req = JSON.parse(enrichments.get(wireEnrichmentKey(turns[1].role, (turns[1].createdAt_ts ?? turns[1].createdAt).getTime()))!.inputMessagesJson!);
+    expect(req.map((m: { role: string }) => m.role)).toEqual(['user', 'system']);
+    expect(req[1].content).toContain('- Explore:');
+  });
+
+  it('native claude-code status system line is not a turn', async () => {
+    const caveat = await prisma.turn.findFirst({
+      where: { sessionId: sessionId!, content: { contains: 'Caveat:' } },
+    });
+    expect(caveat).toBeNull();
+  });
+
+  it('session label is the real user prompt, not the system-reminder context', async () => {
+    const session = await prisma.session.findUnique({ where: { id: sessionId! } });
+    expect(session!.label).toBe('你用的什么模型');
+    expect(session!.label).not.toContain('system-reminder');
+  });
+
+  it('proxy capture is distinguished via the in-file source marker (Session.version)', async () => {
+    const proxy = await prisma.session.findUnique({ where: { id: sessionId! } });
+    expect(proxy!.version).toBe('claude-proxy');
+    // native claude file (no marker) imports without the proxy version
+    const NATIVE_FILE = path.resolve(__dirname, 'data/claude-sessions/system-reminder-strip.jsonl');
+    const NATIVE_SID = 'sysreminder-native';
+    await importSession(NATIVE_FILE, NATIVE_SID, prisma, NATIVE_FILE, 'claude-jsonl');
+    const native = await prisma.session.findFirst({ where: { taskId: NATIVE_SID } });
+    expect(native!.version).not.toBe('cannbot-proxy');
+    try { await prisma.session.delete({ where: { id: native!.id } }); } catch { /* ignore */ }
   });
 });

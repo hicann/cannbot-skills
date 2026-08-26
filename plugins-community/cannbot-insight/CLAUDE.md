@@ -58,6 +58,36 @@ Session detail page (`session/[taskId]/`) is `"use client"` with 9 tabs fetching
 - **CLI client**: `src/cli/client.ts` — InsightClient wrapping 15 API endpoints
 - **CLI types**: `src/cli/types.ts` — `Api`-prefixed interfaces to distinguish from `src/lib/shared/types.ts`
 
+### Proxy 扩展：开闭原则（OCP）与文件隔离
+
+proxy（cpx 捕获）是 insight 的扩展来源，不是核心管线的一部分。所有 proxy
+特有的数据和行为必须**文件隔离**——放在独立的扩展层模块里，在 API/显示层
+按需读取，**不注入核心管线**。
+
+**参照模式**：`src/lib/ingest/adapters/claude-jsonl-full-context.ts`
+- 它读 proxy 扩展字段（`system`/`tools`/`memory`/`skills`），在 turns API 层
+  调用，核心管线（`readSession` → `normalize` → `turn-split` → `data-service`）
+  完全不感知。
+- proxy 以后加新扩展字段（`metadata`/`cache`/`retry`/`dedup` 标记…）在同一
+  扩展层文件内加，核心不动。
+
+**红线（不得违反）**：
+
+| 管线模块 | 能否为 proxy 改动？ |
+|----------|-------------------|
+| `src/lib/shared/types.ts` (`RawInteraction` 等) | ❌ 不加 proxy 专用字段 |
+| `src/lib/ingest/normalize.ts` | ❌ 不透传 proxy 数据 |
+| `src/lib/ingest/turn-split.ts` | ❌ 不读 proxy 扩展字段 |
+| `src/lib/ingest/data-service.ts` | ⚠️ 只允许 proxy 专用的 guard（如 reshape 检测），不透传数据 |
+| `src/lib/ingest/adapters/claude-jsonl.ts` | ✅ 入口分流（`proxySourceOfLines` → 扩展层），不内联 proxy 逻辑 |
+| `src/lib/ingest/adapters/claude-jsonl-wire.ts` | ✅ proxy 扩展层（round-pair 切分 + 按需 enrichment） |
+| `src/lib/ingest/adapters/claude-jsonl-full-context.ts` | ✅ proxy 扩展层（system/tools/memory/skills） |
+| `src/app/api/observe/session/turns/[turnId]/route.ts` | ✅ API 层调扩展层读 proxy 数据（像 `readFullContext`） |
+
+**判定标准**：如果改动让 native（非 proxy）的 `RawInteraction` /
+`NormalizedInteraction` / `TurnRow` 的字段值发生变化（哪怕是 `?? null`），
+就违反了 OCP。native 路径必须**逐字节不变**——靠架构隔离保证，不靠约定+测试。
+
 ## Constraints & Gotchas
 
 - **ESM strict** (`"type": "module"` in package.json) — no `require()`, use `import`

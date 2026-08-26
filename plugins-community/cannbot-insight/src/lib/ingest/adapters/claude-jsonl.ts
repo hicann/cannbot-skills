@@ -9,8 +9,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SessionListItem, RawInteraction, ToolCallInfo, TokenUsage } from '../../shared/types';
+import { readWireRounds } from './claude-jsonl-wire';
 
-interface ClaudeJsonlLine {
+// Shared scan helpers (claude-format concepts, also reused by the proxy
+// extension layer claude-jsonl-full-context.ts).
+export function extractSystemText(system: string | ContentBlock[] | undefined): string | null {
+  if (!system) return null;
+  if (typeof system === 'string') return system || null;
+  const parts: string[] = [];
+  for (const block of system) {
+    if (block.type === 'text' && block.text) parts.push(block.text);
+  }
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+export function findMemorySection(text: string): string {
+  const mIdx = text.indexOf('# claudeMd');
+  if (mIdx < 0) return '';
+  const after = mIdx + '# claudeMd'.length;
+  let end = text.indexOf('# currentDate', after);
+  if (end < 0) end = text.indexOf('</system-reminder>', after);
+  if (end < 0) end = text.length;
+  return text.substring(after, end).trim();
+}
+export function findSkillsSection(text: string): string {
+  const sIdx = text.indexOf('The following skills are available');
+  if (sIdx < 0) return '';
+  return text.substring(sIdx).trim();
+}
+
+export interface ClaudeJsonlLine {
   type: string;
   timestamp?: string;
   version?: string;
@@ -25,9 +52,19 @@ interface ClaudeJsonlLine {
   result?: string;
   cost_usd?: number;
   duration_ms?: number;
+  // Proxy extension fields (claude-emitter writes on assistant lines; adapter
+  // ignores them — readWireEnrichments consumes at API layer). Undefined for
+  // native claude-code lines. `duration_ms` is a native claude field the
+  // adapter already reads (→ interaction.latency); the emitter repurposes it
+  // to carry wire latency so it flows through the standard pipeline.
+  source?: string;
+  system?: unknown;
+  tools?: unknown;
+  stopReason?: string;
+  ttftMs?: number;
 }
 
-interface ContentBlock {
+export interface ContentBlock {
   type: string;
   text?: string;
   thinking?: string;
@@ -45,7 +82,7 @@ interface ClaudeUsage {
   cache_creation_input_tokens?: number;
 }
 
-function extractTextContent(content: string | ContentBlock[] | undefined): string | null {
+export function extractTextContent(content: string | ContentBlock[] | undefined): string | null {
   if (!content) return null;
   if (typeof content === 'string') return content;
   const parts: string[] = [];
@@ -57,6 +94,49 @@ function extractTextContent(content: string | ContentBlock[] | undefined): strin
     }
   }
   return parts.length > 0 ? parts.join('\n') : null;
+}
+
+// cpx 捕获文件自带来源标记：每行顶层 source:"claude-proxy" /
+// "opencode-proxy"。行级判定（避免重复解析文件）；proxy 文件走独立的
+// round-pair 切分（claude-jsonl-wire.ts），原生文件保持原有切分不变。
+export function proxySourceOfLines(lines: ClaudeJsonlLine[]): string | null {
+  for (const l of lines) {
+    const s = (l as { source?: unknown }).source;
+    if (typeof s === 'string' && s.endsWith('-proxy')) return s;
+  }
+  return null;
+}
+
+// Remove <system-reminder>...</system-reminder> blocks from a user message,
+// returning the real user prompt. Claude Code injects CLAUDE.md / gitStatus /
+// currentDate / available-skills as these tags inside user messages — they're
+// context, not real user input. Paired with extractSystemReminders (which
+// returns the blocks) to split a user message into a system context turn +
+// a user prompt turn.
+export function stripSystemReminders(text: string): string {
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, '').trim();
+}
+
+// Extract the <system-reminder>...</system-reminder> blocks (the injected
+// context) from a user message. Returns the raw PREFIX up to (and including
+// the whitespace after) the last reminder block — no trimming — so the wire
+// reconstruction (toWireOrder) can concatenate prefix + prompt back into the
+// exact original message text. Emitted as a 'system' turn so the context
+// stays visible in LLM Input (and persists in the DB, surviving even if the
+// source jsonl file is later removed).
+function extractSystemReminders(text: string): string | null {
+  const has = /<system-reminder>[\s\S]*?<\/system-reminder>/.test(text);
+  if (!has) return null;
+  // prompt-first ordering (reminder after the prompt) can't be represented as
+  // a prefix — fall back to the trimmed block join
+  if (!text.trimStart().startsWith('<system-reminder>')) {
+    const blocks = text.match(/<system-reminder>[\s\S]*?<\/system-reminder>/g);
+    return blocks && blocks.length > 0 ? (blocks.join('\n\n').trim() || null) : null;
+  }
+  const lastEnd = text.lastIndexOf('</system-reminder>') + '</system-reminder>'.length;
+  let end = lastEnd;
+  while (end < text.length && /\s/.test(text[end])) end++;
+  return text.slice(0, end) || null;
 }
 
 function extractToolCalls(content: ContentBlock[]): ToolCallInfo[] | null {
@@ -103,7 +183,7 @@ function deriveSessionId(filePath: string): string {
   return basename;
 }
 
-function parseJsonlLines(filePath: string): ClaudeJsonlLine[] {
+export function parseJsonlLines(filePath: string): ClaudeJsonlLine[] {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     if (!content.trim()) return [];
@@ -125,7 +205,7 @@ function parseJsonlLines(filePath: string): ClaudeJsonlLine[] {
   }
 }
 
-function collectAllToolResults(lines: ClaudeJsonlLine[]): Map<string, string> {
+export function collectAllToolResults(lines: ClaudeJsonlLine[]): Map<string, string> {
   const resultMap = new Map<string, string>();
   for (const line of lines) {
     if (line.type === 'user' && line.message?.content && Array.isArray(line.message.content)) {
@@ -160,7 +240,7 @@ function collectJsonlFiles(dirPath: string): string[] {
 export function listSessions(dirPath: string): SessionListItem[] {
   if (!dirPath || !fs.existsSync(dirPath)) return [];
 
-  let stat = fs.statSync(dirPath);
+  const stat = fs.statSync(dirPath);
   let files: string[];
 
   if (stat.isFile() && dirPath.endsWith('.jsonl')) {
@@ -196,7 +276,8 @@ export function listSessions(dirPath: string): SessionListItem[] {
       if (line.type === 'user' && line.message) {
         const text = extractTextContent(line.message.content);
         if (text && !firstQuery) {
-          firstQuery = text.substring(0, 200);
+          const stripped = stripSystemReminders(text);
+          if (stripped) firstQuery = stripped.substring(0, 200);
         }
       }
       if (line.type === 'assistant' && line.message?.model) {
@@ -221,7 +302,7 @@ export function listSessions(dirPath: string): SessionListItem[] {
     });
   }
 
-  return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return result.sort((a, b) => (b.endedAt ?? b.createdAt).localeCompare(a.endedAt ?? a.createdAt));
 }
 
 function findSessionFile(dirPath: string, sessionId: string): string | null {
@@ -280,7 +361,7 @@ export function collectSubagentToolUseMappings(dirPath: string, sessionId: strin
   return mapping;
 }
 
-function isValidISO(timestamp: string): boolean {
+export function isValidISO(timestamp: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp);
 }
 
@@ -296,7 +377,7 @@ export function extractVersion(filePath: string): string | null {
   return extractVersionFromLines(lines);
 }
 
-interface AssistantGroup {
+export interface AssistantGroup {
   lines: ClaudeJsonlLine[];
   startLineIndex: number;
 }
@@ -369,8 +450,191 @@ function groupAssistantLines(lines: ClaudeJsonlLine[]): AssistantGroup[] {
   return groups;
 }
 
-export function readSession(filePath: string, sessionId: string): RawInteraction[] {
-  if (!filePath || !fs.existsSync(filePath)) return [];
+// Merge one assistant group (consecutive assistant lines sharing a response)
+// into a single RawInteraction: joined text, tool_use→tool_calls with results
+// attached (via allToolResults), merged usage (max raw input, final-line cache
+// fields), model, timestamps and latency. Shared by the native split path
+// (readSession) and the proxy wire-round split (claude-jsonl-wire.ts).
+// Returns null when the group carries neither text nor tool calls.
+export function buildAssistantInteraction(
+  group: AssistantGroup,
+  allToolResults: Map<string, string>,
+  fileMtime: number,
+): RawInteraction | null {
+  const textParts: string[] = [];
+  const allToolCalls: ToolCallInfo[] = [];
+  let mergedUsage: TokenUsage | null = null;
+  let mergedModel: string | null = null;
+  let firstTimestamp: string | null = null;
+  let firstTimeCreated: number | null = null;
+  let lastTimeCreated: number | null = null;
+  let mergedFinishReason: string | null = null;
+  let explicitDurationMs: number | null = null;
+  // proxy 行带 source:"-proxy"。proxy 单行 assistant 的 timeInfo.completed ==
+  // created（都=completedAt）→ turn-split 会算 latency=completed-created=0，
+  // 覆盖掉 interaction.latency（=duration_ms=wire latency）。proxy 且有显式
+  // duration_ms 时把 completed 置 undefined，让 turn-split fallback 到
+  // interaction.latency。native 行不受影响（native byte-identical）。
+  let isProxy = false;
+
+  // Find the line with the most complete usage (has cache fields = final line)
+  // Also track the maximum raw input_tokens across all lines (thinking lines report
+  // full cumulative input, while final lines report incremental input only)
+  let finalUsageLine: ClaudeJsonlLine | null = null;
+  let maxRawInputTokens = 0;
+
+  for (let lineIdx = 0; lineIdx < group.lines.length; lineIdx++) {
+    const al = group.lines[lineIdx];
+    const alLineIndex = group.startLineIndex + lineIdx;
+    const contentBlocks = Array.isArray(al.message?.content)
+      ? al.message.content as ContentBlock[]
+      : [];
+    const text = extractTextContent(al.message?.content);
+    if (text) textParts.push(text);
+
+    const toolCalls = extractToolCalls(contentBlocks);
+    if (toolCalls) {
+      for (const tc of toolCalls) {
+        const v = allToolResults.get(tc.toolCallId) ?? tc.resultJson ?? null;
+        allToolCalls.push({
+          ...tc,
+          resultJson: v == null ? null : (typeof v === 'string' ? v : JSON.stringify(v)),
+        });
+      }
+    }
+
+    const usage = al.message?.usage;
+    if (usage) {
+      // Track the maximum raw input_tokens (thinking lines report full cumulative)
+      if ((usage.input_tokens ?? 0) > maxRawInputTokens) {
+        maxRawInputTokens = usage.input_tokens ?? 0;
+      }
+      // The final line of a streaming response includes cache_read/cache_write fields
+      // and has actual output_tokens; earlier lines report cumulative input only
+      if (usage.cache_read_input_tokens != null || usage.cache_creation_input_tokens != null || (usage.output_tokens > 0 && usage.input_tokens < (finalUsageLine?.message?.usage?.input_tokens ?? Infinity))) {
+        finalUsageLine = al;
+      }
+    }
+
+    const realTimestamp = al.timestamp || null;
+    const timeCreated = realTimestamp
+      ? (isValidISO(realTimestamp) ? new Date(realTimestamp).getTime() : 0)
+      : fileMtime + alLineIndex * 1000;
+    const timestamp = realTimestamp
+      ? (isValidISO(realTimestamp) ? realTimestamp : new Date(0).toISOString())
+      : new Date(timeCreated).toISOString();
+
+    if (firstTimeCreated == null || timeCreated < firstTimeCreated) {
+      firstTimeCreated = timeCreated;
+      firstTimestamp = timestamp;
+    }
+    if (lastTimeCreated == null || timeCreated > lastTimeCreated) {
+      lastTimeCreated = timeCreated;
+    }
+
+    if (!mergedModel && al.message?.model) mergedModel = al.message.model;
+    if (al.subtype) mergedFinishReason = al.subtype;
+    // proxy 扩展字段：emitter 把 wire stop_reason 写进 stopReason（subtype 是
+    // native 字段，语义不同）。adapter 读它进 interaction.finish_reason →
+    // turn-split 写 Turn.finishReason，走标准管线进 DB（非扩展层覆盖）。
+    if (al.stopReason) mergedFinishReason = al.stopReason;
+    if (al.duration_ms != null) explicitDurationMs = al.duration_ms;
+    if (!isProxy && typeof al.source === 'string' && al.source.endsWith('-proxy')) isProxy = true;
+  }
+
+  // Build merged usage: use final line's cache data, but for total input use the
+  // maximum raw input_tokens across all lines (thinking lines report full cumulative
+  // input while final lines report incremental only)
+  if (finalUsageLine?.message?.usage) {
+    const fu = finalUsageLine.message.usage;
+    const incrementalInput = fu.input_tokens ?? 0;
+    const cacheRead = fu.cache_read_input_tokens ?? 0;
+    const cacheWrite = fu.cache_creation_input_tokens ?? 0;
+    // inputMessagesTokens = max of thinking line's full input and incremental+cache
+    const inputMessagesTokens = Math.max(maxRawInputTokens, incrementalInput + cacheRead + cacheWrite);
+    mergedUsage = {
+      total: inputMessagesTokens + (fu.output_tokens ?? 0),
+      input: incrementalInput,
+      output: fu.output_tokens ?? 0,
+      reasoning: 0,
+      cacheRead,
+      cacheWrite,
+      cost: 0,
+      inputMessagesTokens,
+    };
+  } else if (group.lines[0]?.message?.usage) {
+    // No final line with cache fields — use first line's cumulative input
+    const u0 = group.lines[0].message.usage;
+    mergedUsage = {
+      total: (u0.input_tokens ?? 0) + (u0.output_tokens ?? 0),
+      input: u0.input_tokens ?? 0,
+      output: u0.output_tokens ?? 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      inputMessagesTokens: u0.input_tokens ?? 0,
+    };
+  }
+
+  const mergedContent = textParts.length > 0 ? textParts.join('\n') : null;
+  const mergedToolCalls = allToolCalls.length > 0 ? allToolCalls : null;
+
+  // Detect skill invocations from Read tool_use calls to SKILL.md paths
+  // When Claude Code loads a skill, it reads <skill-dir>/SKILL.md — this is the
+  // definitive signal that a skill was invoked in this turn.
+  const skillInvocations: ToolCallInfo[] = [];
+  for (const tc of allToolCalls) {
+    if (tc.toolName === 'Read' && tc.argsJson) {
+      try {
+        const args = JSON.parse(tc.argsJson);
+        const filePath = String(args.file_path ?? '');
+        if (filePath.endsWith('/SKILL.md')) {
+          const skillName = filePath.split('/').slice(-2, -1)[0] || filePath.split('/SKILL.md')[0].split('/').pop() || '';
+          skillInvocations.push({
+            toolCallId: `skill-${tc.toolCallId}`,
+            toolName: `skill/${skillName}`,
+            argsJson: JSON.stringify({ skill: skillName, file_path: filePath }),
+            resultJson: null,
+            state: 'completed',
+          });
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  const finalToolCalls = skillInvocations.length > 0
+    ? [...allToolCalls, ...skillInvocations]
+    : mergedToolCalls;
+
+  // Skip if no content and no tool calls
+  if (!mergedContent && !mergedToolCalls) return null;
+
+  const latency = explicitDurationMs ?? (lastTimeCreated && firstTimeCreated ? lastTimeCreated - firstTimeCreated : null);
+
+  return {
+    role: 'assistant',
+    content: mergedContent,
+    timestamp: firstTimestamp ?? new Date(fileMtime).toISOString(),
+    timeInfo: {
+      created: firstTimeCreated ?? fileMtime,
+      completed: (isProxy && explicitDurationMs != null) ? undefined : (lastTimeCreated ?? undefined),
+    },
+    agent: null,
+    subagent_name: null,
+    subagent_session_id: null,
+    subagent_type: null,
+    tool_calls: finalToolCalls,
+    usage: mergedUsage,
+    model: mergedModel,
+    modelID: null,
+    providerID: null,
+    latency,
+    finish_reason: mergedFinishReason,
+  };
+}
+
+export function readSession(filePath: string, sessionId: string): RawInteraction[] {  if (!filePath || !fs.existsSync(filePath)) return [];
 
   const stat = fs.statSync(filePath);
 
@@ -388,8 +652,16 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
   const lines = parseJsonlLines(resolvedFilePath);
   if (lines.length === 0) return [];
 
-  const allToolResults = collectAllToolResults(lines);
   const fileMtime = fs.statSync(resolvedFilePath).mtime.getTime();
+
+  // cpx 捕获文件（每行带 source:"-proxy" 标记）走独立的 round-pair 切分：
+  // 每个 wire round → 输入 turn（本轮新增消息）+ 输出 turn（response），
+  // 与原生 claude jsonl 的切分路径完全独立。
+  if (proxySourceOfLines(lines)) {
+    return readWireRounds(lines, fileMtime);
+  }
+
+  const allToolResults = collectAllToolResults(lines);
 
   const result: RawInteraction[] = [];
 
@@ -416,167 +688,8 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
       if (emittedGroups.has(group)) continue; // already emitted
       emittedGroups.add(group);
 
-      // Merge the group into one RawInteraction
-      const textParts: string[] = [];
-      const allToolCalls: ToolCallInfo[] = [];
-      let mergedUsage: TokenUsage | null = null;
-      let mergedModel: string | null = null;
-      let firstTimestamp: string | null = null;
-      let firstTimeCreated: number | null = null;
-      let lastTimeCreated: number | null = null;
-      let mergedFinishReason: string | null = null;
-      let explicitDurationMs: number | null = null;
-
-      // Find the line with the most complete usage (has cache fields = final line)
-      // Also track the maximum raw input_tokens across all lines (thinking lines report
-      // full cumulative input, while final lines report incremental input only)
-      let finalUsageLine: ClaudeJsonlLine | null = null;
-      let maxRawInputTokens = 0;
-
-      for (let lineIdx = 0; lineIdx < group.lines.length; lineIdx++) {
-        const al = group.lines[lineIdx];
-        const alLineIndex = group.startLineIndex + lineIdx;
-        const contentBlocks = Array.isArray(al.message?.content)
-          ? al.message.content as ContentBlock[]
-          : [];
-        const text = extractTextContent(al.message?.content);
-        if (text) textParts.push(text);
-
-        const toolCalls = extractToolCalls(contentBlocks);
-        if (toolCalls) {
-          for (const tc of toolCalls) {
-            const v = allToolResults.get(tc.toolCallId) ?? tc.resultJson ?? null;
-            allToolCalls.push({
-              ...tc,
-              resultJson: v == null ? null : (typeof v === 'string' ? v : JSON.stringify(v)),
-            });
-          }
-        }
-
-        const usage = al.message?.usage;
-        if (usage) {
-          // Track the maximum raw input_tokens (thinking lines report full cumulative)
-          if ((usage.input_tokens ?? 0) > maxRawInputTokens) {
-            maxRawInputTokens = usage.input_tokens ?? 0;
-          }
-          // The final line of a streaming response includes cache_read/cache_write fields
-          // and has actual output_tokens; earlier lines report cumulative input only
-          if (usage.cache_read_input_tokens != null || usage.cache_creation_input_tokens != null || (usage.output_tokens > 0 && usage.input_tokens < (finalUsageLine?.message?.usage?.input_tokens ?? Infinity))) {
-            finalUsageLine = al;
-          }
-        }
-
-        const realTimestamp = al.timestamp || null;
-        const timeCreated = realTimestamp
-          ? (isValidISO(realTimestamp) ? new Date(realTimestamp).getTime() : 0)
-          : fileMtime + alLineIndex * 1000;
-        const timestamp = realTimestamp
-          ? (isValidISO(realTimestamp) ? realTimestamp : new Date(0).toISOString())
-          : new Date(timeCreated).toISOString();
-
-        if (firstTimeCreated == null || timeCreated < firstTimeCreated) {
-          firstTimeCreated = timeCreated;
-          firstTimestamp = timestamp;
-        }
-        if (lastTimeCreated == null || timeCreated > lastTimeCreated) {
-          lastTimeCreated = timeCreated;
-        }
-
-        if (!mergedModel && al.message?.model) mergedModel = al.message.model;
-        if (al.subtype) mergedFinishReason = al.subtype;
-        if (al.duration_ms != null) explicitDurationMs = al.duration_ms;
-      }
-
-      // Build merged usage: use final line's cache data, but for total input use the
-      // maximum raw input_tokens across all lines (thinking lines report full cumulative
-      // input while final lines report incremental only)
-      if (finalUsageLine?.message?.usage) {
-        const fu = finalUsageLine.message.usage;
-        const incrementalInput = fu.input_tokens ?? 0;
-        const cacheRead = fu.cache_read_input_tokens ?? 0;
-        const cacheWrite = fu.cache_creation_input_tokens ?? 0;
-        // inputMessagesTokens = max of thinking line's full input and incremental+cache
-        const inputMessagesTokens = Math.max(maxRawInputTokens, incrementalInput + cacheRead + cacheWrite);
-        mergedUsage = {
-          total: inputMessagesTokens + (fu.output_tokens ?? 0),
-          input: incrementalInput,
-          output: fu.output_tokens ?? 0,
-          reasoning: 0,
-          cacheRead,
-          cacheWrite,
-          cost: 0,
-          inputMessagesTokens,
-        };
-      } else if (group.lines[0]?.message?.usage) {
-        // No final line with cache fields — use first line's cumulative input
-        const u0 = group.lines[0].message.usage;
-        mergedUsage = {
-          total: (u0.input_tokens ?? 0) + (u0.output_tokens ?? 0),
-          input: u0.input_tokens ?? 0,
-          output: u0.output_tokens ?? 0,
-          reasoning: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          cost: 0,
-          inputMessagesTokens: u0.input_tokens ?? 0,
-        };
-      }
-
-      const mergedContent = textParts.length > 0 ? textParts.join('\n') : null;
-      const mergedToolCalls = allToolCalls.length > 0 ? allToolCalls : null;
-
-      // Detect skill invocations from Read tool_use calls to SKILL.md paths
-      // When Claude Code loads a skill, it reads <skill-dir>/SKILL.md — this is the
-      // definitive signal that a skill was invoked in this turn.
-      const skillInvocations: ToolCallInfo[] = [];
-      for (const tc of allToolCalls) {
-        if (tc.toolName === 'Read' && tc.argsJson) {
-          try {
-            const args = JSON.parse(tc.argsJson);
-            const filePath = String(args.file_path ?? '');
-            if (filePath.endsWith('/SKILL.md')) {
-              const skillName = filePath.split('/').slice(-2, -1)[0] || filePath.split('/SKILL.md')[0].split('/').pop() || '';
-              skillInvocations.push({
-                toolCallId: `skill-${tc.toolCallId}`,
-                toolName: `skill/${skillName}`,
-                argsJson: JSON.stringify({ skill: skillName, file_path: filePath }),
-                resultJson: null,
-                state: 'completed',
-              });
-            }
-          } catch { /* ignore */ }
-        }
-      }
-
-      const finalToolCalls = skillInvocations.length > 0
-        ? [...allToolCalls, ...skillInvocations]
-        : mergedToolCalls;
-
-      // Skip if no content and no tool calls
-      if (!mergedContent && !mergedToolCalls) continue;
-
-      const latency = explicitDurationMs ?? (lastTimeCreated && firstTimeCreated ? lastTimeCreated - firstTimeCreated : null);
-
-      result.push({
-        role: 'assistant',
-        content: mergedContent,
-        timestamp: firstTimestamp ?? new Date(fileMtime).toISOString(),
-        timeInfo: {
-          created: firstTimeCreated ?? fileMtime,
-          completed: lastTimeCreated ?? undefined,
-        },
-        agent: null,
-        subagent_name: null,
-        subagent_session_id: null,
-        subagent_type: null,
-        tool_calls: finalToolCalls,
-        usage: mergedUsage,
-        model: mergedModel,
-        modelID: null,
-        providerID: null,
-        latency,
-        finish_reason: mergedFinishReason,
-      });
+      const merged = buildAssistantInteraction(group, allToolResults, fileMtime);
+      if (merged) result.push(merged);
       continue;
     }
 
@@ -589,33 +702,87 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
     const timeCompleted = line.duration_ms && timeCreated ? timeCreated + line.duration_ms : undefined;
 
     if (line.type === 'user' && line.message) {
-      const content = extractTextContent(line.message.content);
+      const raw = extractTextContent(line.message.content);
       // Skip user messages that only contain tool_result (no real text prompt)
-      if (!content) continue;
+      if (!raw) continue;
 
       // Claude Code injects skill context as user messages — reclassify as system
-      // Key marker: <skill-format> tag distinguishes skill injections from /compact etc.
-      const isSkillInjection = content.includes('Base directory for this skill') ||
-        content.includes('<skill-format>') ||
-        content.startsWith('Launching skill:') ||
-        content.startsWith('Launching skill ');
+      // and keep verbatim: the skill-merge post-process folds it into the
+      // preceding Skill tool_call. Markers: <skill-format> / 'Base directory for
+      // this skill' / 'Launching skill' distinguish skill injections from /compact.
+      const isSkillInjection = raw.includes('Base directory for this skill') ||
+        raw.includes('<skill-format>') ||
+        raw.startsWith('Launching skill:') ||
+        raw.startsWith('Launching skill ');
+      if (isSkillInjection) {
+        result.push({
+          role: 'system',
+          content: raw,
+          timestamp,
+          timeInfo: { created: timeCreated },
+          agent: null, subagent_name: null, subagent_session_id: null, subagent_type: null,
+          tool_calls: null, usage: null, model: null, modelID: null, providerID: null,
+          latency: null, finish_reason: null,
+        });
+        continue;
+      }
 
+      // Split <system-reminder> context blocks (CLAUDE.md / gitStatus /
+      // currentDate / available-skills) from the real user prompt. The injected
+      // context becomes a 'system' turn — visible in LLM Input AND persisted in
+      // the DB (survives even if the source jsonl is later removed); the
+      // remainder is the real user turn. This keeps "user input" = just the
+      // prompt while the context stays visible instead of becoming hidden overhead.
+      const reminders = extractSystemReminders(raw);
+      if (reminders) {
+        result.push({
+          role: 'system',
+          content: reminders,
+          timestamp,
+          timeInfo: { created: timeCreated },
+          agent: null, subagent_name: null, subagent_session_id: null, subagent_type: null,
+          tool_calls: null, usage: null, model: null, modelID: null, providerID: null,
+          latency: null, finish_reason: null,
+        });
+      }
+      const content = stripSystemReminders(raw);
+      if (content) {
+        result.push({
+          role: 'user',
+          content,
+          timestamp,
+          timeInfo: { created: timeCreated },
+          agent: null,
+          subagent_name: null,
+          subagent_session_id: null,
+          subagent_type: null,
+          tool_calls: null,
+          usage: null,
+          model: null,
+          modelID: null,
+          providerID: null,
+          latency: null,
+          finish_reason: null,
+        });
+      }
+    } else if (line.type === 'system' && line.message) {
+      // Proxy (cannbot-proxy) relays request messages with role:"system"
+      // verbatim — e.g. the "Available agent types" registry claude-code
+      // injects into the messages array. The model READS these, so emit a
+      // system turn (visible in LLM Input, persisted in DB). Native
+      // claude-code type:"system" lines (client-side status/hook events:
+      // top-level `content` string, no `message`) are NOT model input and
+      // stay skipped.
+      const raw = extractTextContent(line.message.content);
+      if (!raw) continue;
       result.push({
-        role: isSkillInjection ? 'system' : 'user',
-        content,
+        role: 'system',
+        content: raw,
         timestamp,
         timeInfo: { created: timeCreated },
-        agent: null,
-        subagent_name: null,
-        subagent_session_id: null,
-        subagent_type: null,
-        tool_calls: null,
-        usage: null,
-        model: null,
-        modelID: null,
-        providerID: null,
-        latency: null,
-        finish_reason: null,
+        agent: null, subagent_name: null, subagent_session_id: null, subagent_type: null,
+        tool_calls: null, usage: null, model: null, modelID: null, providerID: null,
+        latency: null, finish_reason: null,
       });
     } else if (line.type === 'result') {
       const resultUsage = line.cost_usd != null
