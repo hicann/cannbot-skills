@@ -25,8 +25,7 @@ static inline cudaError_t cudaMemPoolCreate(cudaMemPool_t *memPool, cudaMemPoolP
         return cudaErrorInvalidValue;
     }
 
-    // CANN does not support MemPool, return not supported
-    // In future, could implement a simple pool wrapper around cudaMalloc
+    *memPool = NULL;
     return cudaErrorNotSupported;
 }
 
@@ -77,7 +76,8 @@ static inline cudaError_t cudaMemPoolMalloc(void **ptr,
     }
 
     (void)memPool;
-    // Fallback to cudaMalloc, but return not supported for true pool behavior
+    (void)size;
+    *ptr = NULL;
     return cudaErrorNotSupported;
 }
 
@@ -87,8 +87,8 @@ static inline cudaError_t cudaMemPoolFree(void *ptr,
                                            cudaStream_t stream)
 {
     (void)ptr;
-    (void)memPool;
     (void)stream;
+    (void)memPool;
     return cudaErrorNotSupported;
 }
 
@@ -128,7 +128,7 @@ static inline cudaError_t cudaMemPoolGetAccess(cudaMemAccessFlags *access,
     (void)memPool;
     (void)location;
 
-    // Return default no access since pools are not supported
+    // Access-control attributes are not exposed by the CANN mempool API.
     *access = cudaMemAccessNone;
     return cudaErrorNotSupported;
 }
@@ -146,8 +146,6 @@ static inline cudaError_t cudaDeviceGetDefaultMemPool(cudaMemPool_t *memPool,
     }
 
     (void)device;
-
-    // No default pool in CANN
     *memPool = NULL;
     return cudaErrorNotSupported;
 }
@@ -213,8 +211,6 @@ static inline cudaError_t cudaMallocAsync(void **ptr,
 
     (void)size;
     (void)stream;
-
-    // CANN does not support async memory allocation
     *ptr = NULL;
     return cudaErrorNotSupported;
 }

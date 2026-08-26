@@ -21,8 +21,7 @@ extern "C" {
 
 
 static inline cudaError_t cudaStreamCreate(cudaStream_t *pStream) {
-    // least priority = 7 (lowest)
-    aclError ret = aclrtCreateStreamWithConfig(pStream, 7, 0);
+    aclError ret = aclrtCreateStream(pStream);
     return acl2cudaError(ret);
 }
 
@@ -120,11 +119,43 @@ static inline cudaError_t cudaStreamGetFlags(cudaStream_t hStream, unsigned int 
  * Stream Capture
  * ================================================================= */
 
-
-static inline cudaError_t cudaStreamBeginCapture(cudaStream_t stream)
+static inline aclmdlRICaptureMode cudaCompatCaptureMode(cudaStreamCaptureMode mode)
 {
-    // Use GLOBAL mode default
-    aclError ret = aclmdlRICaptureBegin(stream, ACL_MODEL_RI_CAPTURE_MODE_GLOBAL);
+    switch (mode) {
+    case cudaStreamCaptureModeGlobal:
+        return ACL_MODEL_RI_CAPTURE_MODE_GLOBAL;
+    case cudaStreamCaptureModeThreadLocal:
+        return ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL;
+    case cudaStreamCaptureModeRelaxed:
+        return ACL_MODEL_RI_CAPTURE_MODE_RELAXED;
+    default:
+        return ACL_MODEL_RI_CAPTURE_MODE_GLOBAL;
+    }
+}
+
+static inline cudaStreamCaptureStatus cudaCompatCaptureStatus(aclmdlRICaptureStatus status)
+{
+    switch (status) {
+    case ACL_MODEL_RI_CAPTURE_STATUS_NONE:
+        return cudaStreamCaptureStatusNone;
+    case ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE:
+        return cudaStreamCaptureStatusActive;
+    case ACL_MODEL_RI_CAPTURE_STATUS_INVALIDATED:
+        return cudaStreamCaptureStatusInvalidated;
+    default:
+        return cudaStreamCaptureStatusInvalidated;
+    }
+}
+
+static inline cudaError_t cudaStreamBeginCapture(cudaStream_t stream,
+#ifdef __cplusplus
+                                                 cudaStreamCaptureMode mode = cudaStreamCaptureModeGlobal
+#else
+                                                 cudaStreamCaptureMode mode
+#endif
+)
+{
+    aclError ret = aclmdlRICaptureBegin(stream, cudaCompatCaptureMode(mode));
     return acl2cudaError(ret);
 }
 
@@ -136,14 +167,96 @@ static inline cudaError_t cudaStreamEndCapture(cudaStream_t stream, cudaGraph_t 
     return acl2cudaError(ret);
 }
 
+static inline cudaError_t cudaStreamBeginCaptureToGraph(cudaStream_t stream,
+                                                        cudaGraph_t graph,
+                                                        const cudaGraphNode_t *dependencies,
+                                                        const cudaGraphEdgeData *dependencyData,
+                                                        size_t numDependencies,
+#ifdef __cplusplus
+                                                        cudaStreamCaptureMode mode = cudaStreamCaptureModeGlobal
+#else
+                                                        cudaStreamCaptureMode mode
+#endif
+)
+{
+    (void)dependencies;
+    (void)dependencyData;
+    (void)numDependencies;
+    if (!graph) {
+        return cudaErrorInvalidValue;
+    }
+    /*
+     * aclmdlRICaptureToModelRIBegin is documented by CANN as an experimental
+     * Model RI API. It may change in future releases and is not intended for
+     * production use.
+     */
+    aclError ret = aclmdlRICaptureToModelRIBegin(stream, graph, cudaCompatCaptureMode(mode));
+    return acl2cudaError(ret);
+}
+
+static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
+                                                   cudaStreamCaptureStatus *captureStatus_out,
+                                                   unsigned long long *id_out,
+                                                   cudaGraph_t *graph_out,
+                                                   const cudaGraphNode_t **dependencies_out,
+                                                   const cudaGraphEdgeData **edgeData_out,
+                                                   size_t *numDependencies_out)
+{
+    if (!captureStatus_out) {
+        return cudaErrorInvalidValue;
+    }
+
+    aclmdlRICaptureStatus status = ACL_MODEL_RI_CAPTURE_STATUS_NONE;
+    aclmdlRI modelRI = NULL;
+    aclError ret = aclmdlRICaptureGetInfo(stream, &status, &modelRI);
+    if (ret != ACL_SUCCESS) {
+        return acl2cudaError(ret);
+    }
+
+    *captureStatus_out = cudaCompatCaptureStatus(status);
+    if (id_out) {
+        *id_out = 0;
+    }
+    if (graph_out) {
+        *graph_out = modelRI;
+    }
+    if (dependencies_out) {
+        *dependencies_out = NULL;
+    }
+    if (edgeData_out) {
+        *edgeData_out = NULL;
+    }
+    if (numDependencies_out) {
+        *numDependencies_out = 0;
+    }
+    return cudaSuccess;
+}
+
+static inline cudaError_t cudaStreamGetCaptureInfo_v3(cudaStream_t stream,
+                                                      cudaStreamCaptureStatus *captureStatus_out,
+                                                      unsigned long long *id_out,
+                                                      cudaGraph_t *graph_out,
+                                                      const cudaGraphNode_t **dependencies_out,
+                                                      const cudaGraphEdgeData **edgeData_out,
+                                                      size_t *numDependencies_out)
+{
+    return cudaStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
+                                    dependencies_out, edgeData_out, numDependencies_out);
+}
+
 
 
 static inline cudaError_t cudaStreamIsCapturing(cudaStream_t stream, cudaStreamCaptureStatus *pCaptureStatus)
 {
+    if (!pCaptureStatus) {
+        return cudaErrorInvalidValue;
+    }
     aclmdlRICaptureStatus status = ACL_MODEL_RI_CAPTURE_STATUS_NONE;
-    aclmdlRI modelRI;
+    aclmdlRI modelRI = NULL;
     aclError ret = aclmdlRICaptureGetInfo(stream, &status, &modelRI);
-    *pCaptureStatus = (cudaStreamCaptureStatus)status;
+    if (ret == ACL_SUCCESS) {
+        *pCaptureStatus = cudaCompatCaptureStatus(status);
+    }
     return acl2cudaError(ret);
 }
 
@@ -155,22 +268,12 @@ static inline cudaError_t cudaThreadExchangeStreamCaptureMode(cudaStreamCaptureM
         return cudaErrorInvalidValue;
     }
 
-    aclmdlRICaptureMode cannMode;
-    // Map CUDA mode to CANN mode
-    switch (*pMode)
-    {
-    case cudaStreamCaptureModeGlobal:
-        cannMode = ACL_MODEL_RI_CAPTURE_MODE_GLOBAL;
-        break;
-    case cudaStreamCaptureModeThreadLocal:
-        cannMode = ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL;
-        break;
-    case cudaStreamCaptureModeRelaxed:
-        cannMode = ACL_MODEL_RI_CAPTURE_MODE_RELAXED;
-        break;
-    default:
+    if (*pMode != cudaStreamCaptureModeGlobal &&
+        *pMode != cudaStreamCaptureModeThreadLocal &&
+        *pMode != cudaStreamCaptureModeRelaxed) {
         return cudaErrorInvalidValue;
     }
+    aclmdlRICaptureMode cannMode = cudaCompatCaptureMode(*pMode);
 
     // Exchange mode with CANN
     aclError ret = aclmdlRICaptureThreadExchangeMode(&cannMode);

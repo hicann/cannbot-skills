@@ -191,6 +191,22 @@ extern "C"
 
     typedef enum
     {
+        cudaMemAllocationTypeInvalid = 0,
+        cudaMemAllocationTypePinned = 1,
+        cudaMemAllocationTypeMax = 0x7fffffff
+    } cudaMemAllocationType;
+
+    typedef enum
+    {
+        cudaMemHandleTypeNone = 0,
+        cudaMemHandleTypePosixFileDescriptor = 1,
+        cudaMemHandleTypeWin32 = 2,
+        cudaMemHandleTypeWin32Kmt = 4,
+        cudaMemHandleTypeFabric = 8
+    } cudaMemAllocationHandleType;
+
+    typedef enum
+    {
         cudaMemcpyHostToHost = 0,
         cudaMemcpyHostToDevice = 1,
         cudaMemcpyDeviceToHost = 2,
@@ -204,6 +220,16 @@ extern "C"
         cudaMemAttachHost = 2,
         cudaMemAttachSingle = 4
     } cudaMemAttachFlags;
+
+    typedef enum
+    {
+        cudaMemAdviseSetReadMostly = 1,
+        cudaMemAdviseUnsetReadMostly = 2,
+        cudaMemAdviseSetPreferredLocation = 3,
+        cudaMemAdviseUnsetPreferredLocation = 4,
+        cudaMemAdviseSetAccessedBy = 5,
+        cudaMemAdviseUnsetAccessedBy = 6
+    } cudaMemoryAdvise;
 
     typedef enum
     {
@@ -282,6 +308,13 @@ extern "C"
         cudaFuncCachePreferEqual = 3
     } cudaFuncCache;
 
+    typedef enum
+    {
+        cudaFuncAttributeMaxDynamicSharedMemorySize = 8,
+        cudaFuncAttributePreferredSharedMemoryCarveout = 9,
+        cudaFuncAttributeMax = 10
+    } cudaFuncAttribute;
+
     /* =================================================================
      * Function Attributes
      * ================================================================= */
@@ -346,8 +379,46 @@ extern "C"
         cudaStreamCaptureModeRelaxed = 2      /* Relaxed capture mode */
     } cudaStreamCaptureMode;
 
-    /* CUDA graph (similar to CANN's aclmdlRI) */
-    typedef void *cudaGraph_t;
+    /* CUDA graph (mapped to CANN's aclmdlRI capture/build result) */
+    typedef aclmdlRI cudaGraph_t;
+    typedef aclmdlRI cudaGraphExec_t;
+    typedef void *cudaGraphNode_t;
+    typedef aclmdlRICondHandle cudaGraphConditionalHandle;
+
+#define cudaGraphCondAssignDefault 0x1U
+
+    typedef struct dim3 {
+        unsigned int x;
+        unsigned int y;
+        unsigned int z;
+#ifdef __cplusplus
+        constexpr dim3(unsigned int vx = 1, unsigned int vy = 1, unsigned int vz = 1) : x(vx), y(vy), z(vz) {}
+#endif
+    } dim3;
+
+#define cudaGraphDebugDotFlagsVerbose 0x1
+#define cudaGraphDebugDotFlagsKernelNodeParams 0x4
+#define cudaGraphDebugDotFlagsMemcpyNodeParams 0x8
+#define cudaGraphDebugDotFlagsMemsetNodeParams 0x10
+#define cudaGraphDebugDotFlagsHostNodeParams 0x20
+#define cudaGraphDebugDotFlagsEventNodeParams 0x40
+#define cudaGraphDebugDotFlagsExtSemasSignalNodeParams 0x80
+#define cudaGraphDebugDotFlagsExtSemasWaitNodeParams 0x100
+#define cudaGraphDebugDotFlagsKernelNodeAttributes 0x200
+#define cudaGraphDebugDotFlagsHandles 0x400
+
+    typedef enum
+    {
+        cudaGraphDependencyTypeDefault = 0,
+        cudaGraphDependencyTypeProgrammatic = 1
+    } cudaGraphDependencyType;
+
+    typedef struct
+    {
+        cudaGraphNode_t from;
+        cudaGraphNode_t to;
+        cudaGraphDependencyType type;
+    } cudaGraphEdgeData;
     /* =================================================================
      * Memory Pool Types (Mock Implementation)
      * ================================================================= */
@@ -364,8 +435,12 @@ extern "C"
 
     typedef struct
     {
-        cudaMemPoolType memPoolType;
+        cudaMemAllocationType allocType;
+        cudaMemAllocationHandleType handleTypes;
         cudaMemLocation location;
+        void *win32SecurityAttributes;
+        unsigned char cudaReserved[64];
+        cudaMemPoolType memPoolType;
         size_t maxPageSize;
         size_t minPageSize;
         unsigned int reserved[4];

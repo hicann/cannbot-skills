@@ -14,14 +14,15 @@
 extern "C" {
 #endif
 
+__attribute__((weak)) aclError aclrtRecordEventWithFlag(aclrtEvent event, aclrtStream stream, uint32_t flag);
+
 /* =================================================================
  * Event Management
  * ================================================================= */
 
 
 static inline cudaError_t cudaEventCreate(cudaEvent_t *event) {
-    // enable timeline default
-    aclError ret = aclrtCreateEventExWithFlag(event, ACL_EVENT_TIME_LINE | ACL_EVENT_SYNC);
+    aclError ret = aclrtCreateEvent(event);
     return acl2cudaError(ret);
 }
 
@@ -52,6 +53,24 @@ static inline cudaError_t cudaEventRecord(cudaEvent_t event,
     return acl2cudaError(ret);
 }
 
+static inline cudaError_t cudaEventRecordWithFlags(cudaEvent_t event,
+                                                   cudaStream_t stream,
+                                                   unsigned int flags)
+{
+    uint32_t cannFlags = ((flags & cudaEventRecordExternal) != 0) ?
+        ACL_EVENT_RECORD_EXTERNAL : ACL_EVENT_RECORD_DEFAULT;
+
+    if (aclrtRecordEventWithFlag) {
+        aclError ret = aclrtRecordEventWithFlag(event, stream, cannFlags);
+        return acl2cudaError(ret);
+    }
+
+    if (cannFlags != ACL_EVENT_RECORD_DEFAULT) {
+        return cudaErrorNotSupported;
+    }
+    aclError ret = aclrtRecordEvent(event, stream);
+    return acl2cudaError(ret);
+}
 
 static inline cudaError_t cudaEventSynchronize(cudaEvent_t event) {
     aclError ret = aclrtSynchronizeEvent(event);

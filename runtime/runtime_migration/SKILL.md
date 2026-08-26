@@ -74,14 +74,17 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 | API 类别            |  支持状态  | 说明                                                      |
 | ------------------- | :---------: | --------------------------------------------------------- |
 | **设备管理**        | ✅ 完全支持 | cudaGetDeviceCount, cudaSetDevice 等 16 个 API            |
-| **内存管理**        | ✅ 完全支持 | cudaMalloc, cudaMemcpy 等 23 个 API                       |
-| **流管理**          | ✅ 完全支持 | cudaStreamCreate, cudaStreamSynchronize 等 14 个 API      |
-| **事件管理**        | ✅ 完全支持 | cudaEventCreate, cudaEventRecord 等 7 个 API              |
-| **IPC**             | ✅ 完全支持 | cudaIpcGetMemHandle 等 5 个 API (注意 opaque handle 约束) |
-| **库管理**          | ✅ 完全支持 | cudaLibraryLoadFromFile 等 5 个 API                       |
-| **内存池**        | ⚠️ 不支持 | cudaMemPoolCreate 等返回 cudaErrorNotSupported            |
+| **内存管理**        | ✅ 基本支持 | cudaMalloc, cudaMemcpy, cudaHostAlloc, cudaMemcpyToSymbol, cudaMemAdvise 等 API；CUDA SOMA 暂无真实对标 |
+| **流管理**          | ✅ 完全支持 | cudaStreamCreate, cudaStreamSynchronize, capture info 等 API |
+| **事件管理**        | ✅ 完全支持 | cudaEventCreate, cudaEventRecord, cudaEventRecordWithFlags 等 API |
+| **IPC**             | ✅ 完全支持 | cudaIpcGetMemHandle 等 5 个 API (注意 key/opaque handle 约束) |
+| **库/模块管理**     | ✅ 完全支持 | cudaLibraryLoadFromFile、cuModuleLoad、cuModuleGetFunction 等 API |
+| **内存池/UVM**        | ⚠️ 不支持 | CUDA SOMA/UVM 相关 API 返回 cudaErrorNotSupported |
+| **Occupancy/Cooperative/高级 Graph/Driver JIT/Green Context/Multicast/Tensor Map** | ⚠️ 不支持 | 返回 cudaErrorNotSupported 或 CUDA_ERROR_NOT_SUPPORTED |
 | **Texture/Surface** |  ❌ 不支持  | 需额外适配层                                              |
-| **Driver VMM**      | ✅ 完全支持 | cuMemCreate, cuMemMap 等 14 个 API                        |
+| **Driver VMM/Context** | ✅ 完全支持 | cuMemCreate, cuMemMap, cuCtxGetCurrent, cuCtxSetCurrent 等 API |
+
+具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。CUDA SOMA/UVM 不得误标为完整支持，相关内存池和异步分配接口保持 not supported；`cudaMemAdvise` 按 managed advise 能力单独处理。
 
 #### 2.3 输出可行性分析报告
 
@@ -232,17 +235,17 @@ kernel<<<grid, block, shared_mem, stream>>>(args);
 
 ##### 4.1.5 IPC 适配注意事项
 
-CANN IPC 使用 opaque handle 而非 POSIX fd：
+CANN IPC 使用 key/opaque handle 数据而非 POSIX fd：
 
 ```c
-// 跨进程传递 IPC handle 必须使用共享内存
+// 跨进程传递 IPC handle/key 数据必须使用共享内存
 // 不能使用 UNIX socket 传递文件描述符
 
 // Producer
 cudaIpcMemHandle_t handle;
 cudaIpcGetMemHandle(&handle, d_ptr);
 
-// 通过 shm_open/mmap 传递 handle
+// 通过 shm_open/mmap 传递 handle/key 数据
 int shm_fd = shm_open("/ipc_shm", O_CREAT|O_RDWR, 0666);
 ftruncate(shm_fd, sizeof(cudaIpcMemHandle_t));
 void* shm_ptr = mmap(NULL, sizeof(cudaIpcMemHandle_t), 
@@ -266,8 +269,13 @@ cudaIpcOpenMemHandle(&d_ptr, handle, cudaIpcMemLazyEnablePeerAccess);
 | `cudaFree`              | `aclrtFree`                   | 直接映射                             |
 | `cudaMemcpy`            | `aclrtMemcpy`                 | 增加 count 参数（dstSize, srcSize）  |
 | `cudaMemcpyAsync`       | `aclrtMemcpyAsync`            | 同上 + stream                        |
-| `cudaStreamCreate`      | `aclrtCreateStreamWithConfig` | 需配置参数                           |
-| `cudaEventCreate`       | `aclrtCreateEventExWithFlag`  | 需标志参数                           |
+| `cudaStreamCreate`      | `aclrtCreateStream`           | 直接映射                             |
+| `cudaEventCreate`       | `aclrtCreateEvent`            | 直接映射                             |
+| `cudaLaunchKernel`      | `aclrtLaunchKernelWithArgsArray` / `aclrtLaunchKernelWithHostArgs` / SIMT Launch 系列 | 根据参数组织方式选择 |
+| `cudaGraphDebugDotPrint` | `aclmdlRIDebugJsonPrint`     | Graph 调试信息导出                   |
+| `cudaGraphExecDestroy`  | `aclmdlRIDestroy`             | 销毁 Graph/RI 实例                   |
+| `cudaGraphLaunch`       | `aclmdlRIExecuteAsync`        | 异步执行 Graph/RI                    |
+| `cudaRuntimeGetVersion` | `aclsysGetVersionNum`         | 查询 runtime 包版本号                |
 | `cudaSetDevice`         | `aclrtSetDevice`              | 直接映射                             |
 | `cudaDeviceSynchronize` | `aclrtSynchronizeDevice`      | 直接映射                             |
 
@@ -444,7 +452,7 @@ cmake .. -DCUDA_COMPAT_DEBUG=ON && make
 | `assets/src/cann_compat_ipc.h`      | IPC API                | cudaIpcGetMemHandle 等实现参考                 |
 | `assets/src/cann_compat_library.h`  | 库管理 API             | cudaLibraryLoad 等实现参考                     |
 | `assets/src/cann_compat_exec.h`     | 执行配置 API           | 执行配置相关宏定义                             |
-| `assets/src/cann_compat_mempool.h`  | 内存池 API             | cudaMemPool 等实现（Mock）                     |
+| `assets/src/cann_compat_mempool.h`  | 内存池 API             | CUDA SOMA API 编译兼容面，当前返回 cudaErrorNotSupported |
 | `assets/src/cann_compat_cu_vmm.h`   | VMM API                | cuMemCreate 等 Driver VMM 实现                 |
 
 #### 源文件（API 实现）

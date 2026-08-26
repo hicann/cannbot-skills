@@ -19,6 +19,8 @@ extern "C"
 {
 #endif
 
+    uint64_t get_elf_file_size(const void *elf_buf);
+
     /* =================================================================
      * Virtual Memory Management
      * ================================================================= */
@@ -391,8 +393,22 @@ extern "C"
         return acl2cuError(aclrtMemRetainAllocationHandle(addr, handle));
     }
 
+
+    static inline CUresult cuMemsetD32Async(CUdeviceptr dstDevice, unsigned int ui,
+                                            size_t N, CUstream hStream)
+    {
+        if (!dstDevice) {
+            return CUDA_ERROR_INVALID_VALUE;
+        }
+        aclError ret = aclrtMemsetD32Async((void *)dstDevice, N * sizeof(uint32_t),
+                                           ui, N, (aclrtStream)hStream);
+        return acl2cuError(ret);
+    }
+
 #ifdef __cplusplus
 }
 #endif
+
+#include "cann_compat_cu_extra.h"
 
 #endif /* CUDA_COMPAT_CU_VMM_H */

@@ -27,6 +27,91 @@ extern "C"
 
 
     typedef void *CUdeviceptr;
+    typedef int CUdevice;
+    typedef void *CUcontext;
+    typedef void *CUgreenCtx;
+    typedef void *CUdevResource;
+    typedef void *CUstream;
+    typedef void *CUfunction;
+    typedef void *CUmodule;
+    typedef void *CUlinkState;
+    typedef void *CUmulticastObject;
+    typedef void *CUtensorMap;
+    typedef unsigned int cuuint32_t;
+    typedef unsigned long long cuuint64_t;
+
+    typedef enum
+    {
+        CU_FUNC_CACHE_PREFER_NONE = 0,
+        CU_FUNC_CACHE_PREFER_SHARED = 1,
+        CU_FUNC_CACHE_PREFER_L1 = 2,
+        CU_FUNC_CACHE_PREFER_EQUAL = 3
+    } CUfunc_cache;
+
+    typedef enum
+    {
+        CU_JIT_MAX_REGISTERS = 0,
+        CU_JIT_THREADS_PER_BLOCK = 1,
+        CU_JIT_WALL_TIME = 2,
+        CU_JIT_INFO_LOG_BUFFER = 3,
+        CU_JIT_ERROR_LOG_BUFFER = 5
+    } CUjit_option;
+
+    typedef enum
+    {
+        CU_JIT_INPUT_CUBIN = 0,
+        CU_JIT_INPUT_PTX = 1,
+        CU_JIT_INPUT_FATBINARY = 2,
+        CU_JIT_INPUT_OBJECT = 3,
+        CU_JIT_INPUT_LIBRARY = 4,
+        CU_JIT_INPUT_NVVM = 5
+    } CUjitInputType;
+
+    typedef enum
+    {
+        CU_DEV_RESOURCE_TYPE_SM = 0
+    } CUdevResourceType;
+
+    typedef struct
+    {
+        unsigned int type;
+        unsigned int flags;
+        unsigned long long value;
+    } CUdevResourceDesc;
+
+    typedef struct
+    {
+        size_t size;
+        unsigned long long flags;
+    } CUmulticastObjectProp;
+
+    typedef enum
+    {
+        CU_TENSOR_MAP_DATA_TYPE_UINT8 = 0,
+        CU_TENSOR_MAP_DATA_TYPE_UINT16 = 1,
+        CU_TENSOR_MAP_DATA_TYPE_UINT32 = 2,
+        CU_TENSOR_MAP_DATA_TYPE_FLOAT32 = 3
+    } CUtensorMapDataType;
+
+    typedef enum
+    {
+        CU_TENSOR_MAP_INTERLEAVE_NONE = 0
+    } CUtensorMapInterleave;
+
+    typedef enum
+    {
+        CU_TENSOR_MAP_SWIZZLE_NONE = 0
+    } CUtensorMapSwizzle;
+
+    typedef enum
+    {
+        CU_TENSOR_MAP_L2_PROMOTION_NONE = 0
+    } CUtensorMapL2promotion;
+
+    typedef enum
+    {
+        CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE = 0
+    } CUtensorMapFloatOOBfill;
     /* =================================================================
      * Memory Handle Types
      * ================================================================= */

@@ -22,10 +22,14 @@
 #include "cann_compat_stream.h"
 #include "cann_compat_event.h"
 #include "cann_compat_ipc.h"
+#include "cann_compat_symbol.h"
 #include "cann_compat_library.h"
+#include "cann_compat_graph.h"
 #include "cann_compat_cu_types.h"
+#include "cann_compat_context.h"
 #include "cann_compat_cu_vmm.h"
 #include "cann_compat_exec.h"
+#include "cann_compat_unsupported.h"
 
 /* =================================================================
  * Convenience Macros for Common Operations
@@ -77,8 +81,13 @@ extern "C"
         {
             return cudaErrorInvalidValue;
         }
-        *runtimeVersion = MOCK_CUDA_MAJOR_VERSION * 1000 + MOCK_CUDA_MINOR_VERSION * 10;
-
+        char pkgName[] = "runtime";
+        int32_t versionNum = 0;
+        aclError ret = aclsysGetVersionNum(pkgName, &versionNum);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        *runtimeVersion = versionNum;
         return cudaSuccess;
     }
 
@@ -89,8 +98,13 @@ extern "C"
         {
             return cudaErrorInvalidValue;
         }
-        *driverVersion = MOCK_CUDA_MAJOR_VERSION * 1000 + MOCK_CUDA_MINOR_VERSION * 10;
-
+        char pkgName[] = "runtime";
+        int32_t versionNum = 0;
+        aclError ret = aclsysGetVersionNum(pkgName, &versionNum);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        *driverVersion = versionNum;
         return cudaSuccess;
     }
 

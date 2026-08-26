@@ -23,6 +23,8 @@ extern "C"
     __attribute__((weak)) aclError aclrtMemcpyBatchAsyncV2(void **dsts, size_t *destMaxs, void **srcs, size_t *sizes,
         size_t numBatches, aclrtMemcpyBatchAttr *attrs, size_t *attrsIndexes, size_t numAttrs, aclrtStream stream);
 
+    __attribute__((weak)) aclError aclrtMallocHostAndRegister(void **ptr, size_t size, uint32_t flag);
+
     /* =================================================================
      * Memory Allocation/Deallocation
      * ================================================================= */
@@ -52,6 +54,19 @@ extern "C"
         return acl2cudaError(ret);
     }
 
+    static inline cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags)
+    {
+        if (!ptr) {
+            return cudaErrorInvalidValue;
+        }
+        if (aclrtMallocHostAndRegister) {
+            aclError ret = aclrtMallocHostAndRegister(ptr, size, flags);
+            return acl2cudaError(ret);
+        }
+        aclError ret = aclrtMallocHost(ptr, size);
+        return acl2cudaError(ret);
+    }
+
 
     static inline cudaError_t cudaFreeHost(void *ptr)
     {
@@ -62,15 +77,13 @@ extern "C"
 
     static inline cudaError_t cudaMallocManaged(void **devPtr, size_t size, unsigned int flags)
     {
+        (void)size;
+        (void)flags;
         if (!devPtr) {
             return cudaErrorInvalidValue;
         }
-
-        // Map CUDA flags to CANN flags (direct pass for now)
-        uint32_t cannFlag = (uint32_t)flags;
-
-        aclError ret = aclrtMemAllocManaged(devPtr, (uint64_t)size, cannFlag);
-        return acl2cudaError(ret);
+        *devPtr = NULL;
+        return cudaErrorNotSupported;
     }
 
     /* =================================================================
@@ -136,7 +149,7 @@ extern "C"
     {
         (void)dstDevice;
         (void)srcDevice;
-        // cann runtime can handle device-to-device copy without explicit device context management
+        // CANN supports device-to-device async copy only within the supported topology.
         aclError ret = aclrtMemcpyAsync(dst, count, src, count,
                                          ACL_MEMCPY_DEVICE_TO_DEVICE, stream);
         return acl2cudaError(ret);
@@ -216,6 +229,56 @@ extern "C"
 
     cudaError_t cudaPointerGetAttributes(cudaPointerAttributes *attributes,
                                          const void *ptr);
+
+    static inline cudaError_t cudaCompatMemAdviseToCann(cudaMemoryAdvise advice,
+                                                        aclrtMemManagedAdviseType *cannAdvice)
+    {
+        if (!cannAdvice) {
+            return cudaErrorInvalidValue;
+        }
+        switch (advice) {
+        case cudaMemAdviseSetReadMostly:
+            *cannAdvice = ACL_MEM_ADVISE_SET_READ_MOSTLY;
+            return cudaSuccess;
+        case cudaMemAdviseUnsetReadMostly:
+            *cannAdvice = ACL_MEM_ADVISE_UNSET_READ_MOSTLY;
+            return cudaSuccess;
+        case cudaMemAdviseSetPreferredLocation:
+            *cannAdvice = ACL_MEM_ADVISE_SET_PREFERRED_LOCATION;
+            return cudaSuccess;
+        case cudaMemAdviseUnsetPreferredLocation:
+            *cannAdvice = ACL_MEM_ADVISE_UNSET_PREFERRED_LOCATION;
+            return cudaSuccess;
+        case cudaMemAdviseSetAccessedBy:
+            *cannAdvice = ACL_MEM_ADVISE_SET_ACCESSED_BY;
+            return cudaSuccess;
+        case cudaMemAdviseUnsetAccessedBy:
+            *cannAdvice = ACL_MEM_ADVISE_UNSET_ACCESSED_BY;
+            return cudaSuccess;
+        default:
+            return cudaErrorInvalidValue;
+        }
+    }
+
+    static inline cudaError_t cudaMemAdvise(const void *devPtr, size_t count,
+                                            cudaMemoryAdvise advice, int device)
+    {
+        if (!devPtr || count == 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        aclrtMemManagedAdviseType cannAdvice;
+        cudaError_t mapRet = cudaCompatMemAdviseToCann(advice, &cannAdvice);
+        if (mapRet != cudaSuccess) {
+            return mapRet;
+        }
+
+        aclrtMemManagedLocation location;
+        location.type = ACL_MEM_LOCATIONTYPE_DEVICE;
+        location.id = device;
+        aclError ret = aclrtMemManagedAdvise(devPtr, (uint64_t)count, cannAdvice, location);
+        return acl2cudaError(ret);
+    }
 
     /* =================================================================
      * Host Memory Registration

@@ -392,6 +392,198 @@ cudaError_t cudaProfilerStop(void);
 
 ---
 
+## Version API
+
+### cudaRuntimeGetVersion
+```c
+cudaError_t cudaRuntimeGetVersion(int *runtimeVersion);
+```
+- 功能：获取 CUDA Runtime 版本号
+- 参数：runtimeVersion - 版本号输出
+- 返回：cudaSuccess 或错误码
+
+### cudaDriverGetVersion
+```c
+cudaError_t cudaDriverGetVersion(int *driverVersion);
+```
+- 功能：获取 CUDA Driver 版本号
+- 参数：driverVersion - 版本号输出
+- 返回：cudaSuccess 或错误码
+
+---
+
+## Stream Ordered Memory / UVM API
+
+### cudaMallocAsync
+```c
+cudaError_t cudaMallocAsync(void **devPtr, size_t size, cudaStream_t stream);
+```
+- 功能：在指定 Stream 上异步申请内存
+- CANN 对标结论：当前未真实对标 CUDA SOMA，兼容层返回 `cudaErrorNotSupported`
+
+### cudaFreeAsync
+```c
+cudaError_t cudaFreeAsync(void *devPtr, cudaStream_t stream);
+```
+- 功能：在指定 Stream 上异步释放内存
+- CANN 对标结论：当前未真实对标 CUDA SOMA，兼容层返回 `cudaErrorNotSupported`
+
+### cudaMemPoolSetAttribute / cudaMemPoolGetAttribute / cudaMemPoolTrimTo
+```c
+cudaError_t cudaMemPoolSetAttribute(cudaMemPool_t memPool, cudaMemPoolAttr attr, void *value);
+cudaError_t cudaMemPoolGetAttribute(cudaMemPool_t memPool, cudaMemPoolAttr attr, void *value);
+cudaError_t cudaMemPoolTrimTo(cudaMemPool_t memPool, size_t minBytesToKeep);
+```
+- 功能：设置、查询和收缩 CUDA 内存池
+- CANN 对标结论：当前未真实对标 CUDA SOMA，兼容层返回 `cudaErrorNotSupported`
+
+### cudaMallocManaged
+```c
+cudaError_t cudaMallocManaged(void **devPtr, size_t size, unsigned int flags);
+```
+- 功能：申请统一内存
+- CANN 对标结论：当前未真实对标 CUDA UVM，兼容层返回 `cudaErrorNotSupported`
+
+---
+
+## Kernel Launch API
+
+### cudaLaunchKernel
+```c
+cudaError_t cudaLaunchKernel(const void *func, dim3 gridDim, dim3 blockDim,
+                             void **args, size_t sharedMem, cudaStream_t stream);
+```
+- 功能：启动 CUDA kernel
+- 参数：func - kernel 入口，gridDim/blockDim - 网格与线程块维度，args - 参数数组，sharedMem - 动态共享内存大小，stream - 执行流
+- 返回：cudaSuccess 或错误码
+
+---
+
+## Graph API
+
+### cudaGraphDebugDotPrint
+```c
+cudaError_t cudaGraphDebugDotPrint(cudaGraph_t graph, const char *path,
+                                   unsigned int flags);
+```
+- 功能：导出 Graph 调试信息
+- 参数：graph - Graph 对象，path - 输出路径，flags - 调试输出标志
+- 返回：cudaSuccess 或错误码
+
+### cudaGraphExecDestroy
+```c
+cudaError_t cudaGraphExecDestroy(cudaGraphExec_t graphExec);
+```
+- 功能：销毁 Graph 执行实例
+- 参数：graphExec - Graph 执行实例
+- 返回：cudaSuccess 或错误码
+
+### cudaGraphLaunch
+```c
+cudaError_t cudaGraphLaunch(cudaGraphExec_t graphExec, cudaStream_t stream);
+```
+- 功能：在指定流上启动 Graph 执行实例
+- 参数：graphExec - Graph 执行实例，stream - 执行流
+- 返回：cudaSuccess 或错误码
+
+### cudaGraphConditionalHandleCreate
+```c
+cudaError_t cudaGraphConditionalHandleCreate(cudaGraphConditionalHandle *pHandle,
+                                             cudaGraph_t graph,
+                                             unsigned int defaultLaunchValue,
+                                             unsigned int flags);
+```
+- 功能：为条件 Graph 节点创建条件 handle
+- 返回：cudaSuccess 或错误码
+
+### cudaGraphGetNodes
+```c
+cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t *nodes, size_t *numNodes);
+```
+- 功能：查询 Graph 中的节点列表
+- 返回：cudaSuccess 或错误码
+
+### cudaGraphSetConditional
+```c
+cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned int value);
+```
+- 功能：设置条件 handle 的当前值
+- 返回：cudaSuccess 或错误码
+
+---
+
+## 增量支持 API 摘要
+
+本节记录新增的 CUDA Runtime/Driver API 面，兼容层已提供 CUDA to CANN Runtime 转换。
+
+| CUDA API | 功能摘要 |
+|---|---|
+| `cudaEventRecordWithFlags` | 带 flags 记录 event |
+| `cudaHostAlloc` | 分配 Host pinned 内存 |
+| `cudaGetSymbolAddress` | 获取设备符号地址 |
+| `cudaMemcpyToSymbol` | 向设备符号拷贝数据 |
+| `cuMemsetD32Async` | Driver D32 异步 memset |
+| `cudaMemAdvise` | 设置/取消 managed memory advise |
+| `cudaFuncGetAttributes` | 查询 kernel/function 属性 |
+| `cudaGraphConditionalHandleCreate` | 创建条件 Graph handle |
+| `cudaGraphGetNodes` | 查询 Graph 节点 |
+| `cudaGraphSetConditional` | 设置条件 handle 值 |
+| `cudaStreamBeginCaptureToGraph` | 将 stream capture 接入已有 Graph |
+| `cudaStreamCaptureStatus` | Stream capture 状态枚举；对应 CANN `aclmdlRICaptureStatus` |
+| `cudaStreamGetCaptureInfo` | 查询 capture 信息 |
+| `cudaStreamGetCaptureInfo_v3` | 查询 v3 capture 信息 |
+| `cuCtxGetCurrent` | 获取当前 Driver context |
+| `cuCtxSetCurrent` | 设置当前 Driver context |
+| `cuDevicePrimaryCtxGetState` | 查询 primary context 状态 |
+| `cuModuleGetFunction` | 从 module 获取 kernel function |
+| `cuModuleLoad` | 从文件加载 module |
+| `cuModuleLoadData` | 从内存加载 module |
+| `cuModuleUnload` | 卸载 module |
+| `cuStreamWriteValue32` | 在 stream 上写入 32-bit value |
+
+## 不支持 API 摘要
+
+以下接口当前无 CANN Runtime 对应能力，兼容层仅提供编译期 API 面并返回 `cudaErrorNotSupported` 或 `CUDA_ERROR_NOT_SUPPORTED`：
+
+### CUDA Runtime 不支持接口
+
+- `cudaMemPoolSetAccess`
+- `cudaFuncSetAttribute`
+- `cudaLaunchCooperativeKernel`
+- `cudaGetDriverEntryPoint`
+- `cudaGetDriverEntryPointByVersion`
+- `cudaGraphAddNode`
+- `cudaGraphAddNode_v2`
+- `cudaGraphDestroy`
+- `cudaGraphInstantiateWithFlags`
+- `cudaGraphNodeGetDependencies`
+- `cudaOccupancyMaxActiveBlocksPerMultiprocessor`
+- `cudaOccupancyMaxPotentialBlockSize`
+- `cudaStreamGetCaptureInfo_v2`
+- `cudaStreamUpdateCaptureDependencies`
+- `cudaStreamUpdateCaptureDependencies_v2`
+
+### CUDA Driver 不支持接口
+
+- `cuFuncSetCacheConfig`
+- `cuCtxPopCurrent`
+- `cuCtxPushCurrent`
+- `cuDevicePrimaryCtxRetain`
+- `cuGreenCtxCreate`
+- `cuGreenCtxDestroy`
+- `cuCtxFromGreenCtx`
+- `cuDeviceGetDevResource`
+- `cuGreenCtxStreamCreate`
+- `cuModuleLoadDataEx`
+- `cuLinkAddData`
+- `cuMulticastAddDevice`
+- `cuMulticastBindMem`
+- `cuMulticastCreate`
+- `cuMulticastUnbind`
+- `cuTensorMapEncodeTiled`
+
+---
+
 ## 错误处理 API
 
 ### cudaGetLastError
@@ -423,15 +615,3 @@ const char *cudaGetErrorName(cudaError_t error);
 - 功能：获取错误名称字符串
 - 参数：error - 错误码
 - 返回：错误名称字符串
-
----
-
-## 版本 API
-
-### cudaDriverGetVersion
-```c
-cudaError_t cudaDriverGetVersion(int *driverVersion);
-```
-- 功能：获取 CUDA Driver 版本号
-- 参数：driverVersion - 版本号输出
-- 返回：cudaSuccess

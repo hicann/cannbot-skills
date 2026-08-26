@@ -855,25 +855,28 @@ cudaError_t cudaProfilerStart(void)
 
 cudaError_t cudaProfilerStop(void)
 {
-    // Check if profiler is initialized and running
     if (!g_cuda_context.profiler_initialized)
     {
         // Treat a stopped profiler as an idempotent success.
         return cudaSuccess;
     }
 
-    if (!g_cuda_context.profiler_running)
+    if (g_cuda_context.profiler_running)
     {
-        // Treat a stopped profiler as an idempotent success.
-        return cudaSuccess;
+        aclError ret = aclprofStop(NULL); // Stop with default config
+        if (ret != ACL_SUCCESS)
+        {
+            return acl2cudaError(ret);
+        }
+        g_cuda_context.profiler_running = 0;
     }
 
-    aclError ret = aclprofStop(NULL); // Stop with default config
+    aclError ret = aclprofFinalize();
     if (ret != ACL_SUCCESS)
     {
         return acl2cudaError(ret);
     }
 
-    g_cuda_context.profiler_running = 0;
+    g_cuda_context.profiler_initialized = 0;
     return cudaSuccess;
 }

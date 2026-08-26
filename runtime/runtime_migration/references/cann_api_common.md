@@ -229,6 +229,15 @@ aclError aclrtHostRegisterV2(void *hostPtr, size_t size,
 - 参数：policy - 注册策略
 - 返回：ACL_SUCCESS 或错误码
 
+### aclrtHostRegister
+```c
+aclError aclrtHostRegister(void *ptr, uint64_t size,
+                           aclrtHostRegisterType type, void **devPtr);
+```
+- 功能：将 Host 内存映射注册为 Device 可访问的内存地址
+- 参数：type - 注册类型，devPtr - 映射后的 Device 地址输出
+- 返回：ACL_SUCCESS 或错误码
+
 ### aclrtHostUnregister
 ```c
 aclError aclrtHostUnregister(void *hostPtr);
@@ -385,27 +394,33 @@ aclError aclrtEventElapsedTime(float *ms, aclrtEvent start, aclrtEvent end);
 
 ## IPC API
 
-### aclrtMemExportToShareableHandleV2
+### aclrtIpcMemGetExportKey
 ```c
-aclError aclrtMemExportToShareableHandleV2(void *shareableHandle,
-                                             void *devPtr,
-                                             aclrtMemShareableHandleType handleType);
+aclError aclrtIpcMemGetExportKey(void *devPtr, size_t size, char *key,
+                                  size_t len, uint64_t flags);
 ```
-- 功能：导出 IPC 内存句柄
+- 功能：导出 IPC 共享内存 key
 - 参数：
-  - shareableHandle - 句柄输出(64字节)
   - devPtr - 设备指针
-  - handleType - ACL_MEM_SHAREABLE_HANDLE_TYPE_LOCAL
+  - size - 共享内存大小
+  - key - key 输出，长度固定配置为 65
+  - flags - 进程白名单校验配置
 - 返回：ACL_SUCCESS 或错误码
 
-### aclrtMemImportFromShareableHandleV2
+### aclrtIpcMemImportByKey
 ```c
-aclError aclrtMemImportFromShareableHandleV2(void **devPtr,
-                                              void *shareableHandle,
-                                              aclrtMemShareableHandleType handleType);
+aclError aclrtIpcMemImportByKey(void **devPtr, const char *key, uint64_t flags);
 ```
-- 功能：导入 IPC 内存句柄
-- 参数：devPtr - 指针输出，shareableHandle - IPC 句柄
+- 功能：通过 key 导入 IPC 共享内存
+- 参数：devPtr - Device 指针输出，key - 共享内存 key，flags - 是否开启两个 Device 之间的数据交互
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtIpcMemClose
+```c
+aclError aclrtIpcMemClose(const char *key);
+```
+- 功能：关闭 IPC 共享内存
+- 参数：key - 共享内存 key
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclrtIpcGetEventHandle
@@ -431,23 +446,24 @@ aclError aclrtIpcOpenEventHandle(aclrtEvent *event, aclrtIpcEventHandle handle);
 
 ### aclprofInit
 ```c
-aclError aclprofInit(void);
+aclError aclprofInit(const char *profilerResultPath, size_t length);
 ```
 - 功能：初始化 profiler
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclprofStart
 ```c
-aclError aclprofStart(void);
+aclError aclprofStart(const aclprofConfig *profilerConfig);
 ```
 - 功能：启动性能数据收集
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclprofStop
 ```c
-aclError aclprofStop(void);
+aclError aclprofStop(const aclprofConfig *profilerConfig);
 ```
 - 功能：停止性能数据收集
+- 说明：与 aclprofStart 配对使用；cudaProfilerStop 兼容层还需配套调用 aclprofFinalize
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclprofFinalize
@@ -455,6 +471,122 @@ aclError aclprofStop(void);
 aclError aclprofFinalize(void);
 ```
 - 功能：释放 profiler 资源
+- 返回：ACL_SUCCESS 或错误码
+
+---
+
+## Version API
+
+### aclsysGetVersionNum
+```c
+aclError aclsysGetVersionNum(char *pkgName, int32_t *versionNum);
+```
+- 功能：查询软件包版本号
+- 参数：pkgName - 包名，例如 "runtime"；versionNum - 版本号输出
+- 返回：ACL_SUCCESS 或错误码
+
+---
+
+## Kernel Launch API
+
+### aclrtLaunchKernelWithHostArgs
+```c
+aclError aclrtLaunchKernelWithHostArgs(aclrtFuncHandle funcHandle, uint32_t numBlocks,
+                                       aclrtStream stream, aclrtLaunchKernelCfg *cfg,
+                                       void *hostArgs, size_t argsSize,
+                                       aclrtPlaceHolderInfo *placeHolderArray,
+                                       size_t placeHolderNum);
+```
+- 功能：使用 Host 连续参数启动 Kernel
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtLaunchKernelWithArgsArray
+```c
+aclError aclrtLaunchKernelWithArgsArray(void *func, uint32_t numBlocks,
+                                        aclrtStream stream, aclrtLaunchKernelCfg *cfg,
+                                        void **args);
+```
+- 功能：使用 Host 参数数组启动 Kernel
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtLaunchSIMTKernelWithArgsArray
+```c
+aclError aclrtLaunchSIMTKernelWithArgsArray(void *func, dim3 gridDim, dim3 blockDim,
+                                            size_t dynUbufSize, aclrtStream stream,
+                                            aclrtLaunchKernelCfg *cfg, void **args);
+```
+- 功能：使用参数数组启动 SIMT Kernel
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtLaunchSIMTKernelWithHostArgs
+```c
+aclError aclrtLaunchSIMTKernelWithHostArgs(void *func, dim3 gridDim, dim3 blockDim,
+                                           size_t dynUbufSize, aclrtStream stream,
+                                           aclrtLaunchKernelCfg *cfg, void *hostArgs,
+                                           size_t argsSize,
+                                           aclrtPlaceHolderInfo *placeHolderArray,
+                                           size_t placeHolderNum);
+```
+- 功能：使用 Host 连续参数启动 SIMT Kernel
+- 返回：ACL_SUCCESS 或错误码
+
+---
+
+## Graph/RI API
+
+### aclmdlRIDebugJsonPrint
+```c
+aclError aclmdlRIDebugJsonPrint(aclmdlRI modelRI, const char *path, uint32_t flags);
+```
+- 功能：导出模型运行实例调试信息
+- 返回：ACL_SUCCESS 或错误码
+
+### aclmdlRIDestroy
+```c
+aclError aclmdlRIDestroy(aclmdlRI modelRI);
+```
+- 功能：销毁模型运行实例
+- 返回：ACL_SUCCESS 或错误码
+
+### aclmdlRIExecuteAsync
+```c
+aclError aclmdlRIExecuteAsync(aclmdlRI modelRI, aclrtStream stream);
+```
+- 功能：异步执行模型运行实例
+- 返回：ACL_SUCCESS 或错误码
+
+### aclmdlRICondHandleCreate
+```c
+aclError aclmdlRICondHandleCreate(aclmdlRI modelRI, uint32_t defaultLaunchValue,
+                                  aclmdlRICondHandleFlag flag,
+                                  aclmdlRICondHandle *handle);
+```
+- 功能：创建条件 handle
+- 约束：本接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
+- 返回：ACL_SUCCESS 或错误码
+
+### aclmdlRIGetStreams / aclmdlRIGetTasksByStream
+```c
+aclError aclmdlRIGetStreams(aclmdlRI modelRI, aclrtStream *streams, uint32_t *numStreams);
+aclError aclmdlRIGetTasksByStream(aclrtStream stream, aclmdlRITask *tasks, uint32_t *numTasks);
+```
+- 功能：查询 RI 中的 stream 与 task，用于兼容 Graph node 查询
+- 约束：这两个接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
+- 返回：ACL_SUCCESS 或错误码
+
+### aclmdlRICondHandleGetCondPtr
+```c
+aclError aclmdlRICondHandleGetCondPtr(aclmdlRICondHandle handle, uint64_t **ptr);
+```
+- 功能：获取条件 handle 内部条件变量的 Device 内存地址，用于写入条件值
+- 约束：本接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtValueWrite
+```c
+aclError aclrtValueWrite(void *devAddr, uint64_t value, uint32_t flag, aclrtStream stream);
+```
+- 功能：在 stream 上写入 device value
 - 返回：ACL_SUCCESS 或错误码
 
 ---
@@ -487,7 +619,47 @@ aclError aclmdlRICaptureGetInfo(aclrtStream stream,
 - 参数：status - 状态输出
 - 返回：ACL_SUCCESS 或错误码
 
+### aclmdlRICaptureStatus
+```c
+typedef enum {
+    ACL_MODEL_RI_CAPTURE_STATUS_NONE = 0,
+    ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE,
+    ACL_MODEL_RI_CAPTURE_STATUS_INVALIDATED,
+} aclmdlRICaptureStatus;
+```
+- 功能：表示 CANN Model RI stream capture 状态
+- CUDA 映射：分别对应 `cudaStreamCaptureStatusNone`、`cudaStreamCaptureStatusActive`、`cudaStreamCaptureStatusInvalidated`
+
+### aclmdlRICaptureToModelRIBegin
+```c
+aclError aclmdlRICaptureToModelRIBegin(aclrtStream stream, aclmdlRI modelRI,
+                                       aclmdlRICaptureMode mode);
+```
+- 功能：开始捕获并接入已有 Model RI
+- 约束：本接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
+- 返回：ACL_SUCCESS 或错误码
+
 ---
+
+## 增量 Runtime/Driver API
+
+| CANN API | 对应 CUDA API | 功能摘要 |
+|---|---|---|
+| `aclrtRecordEventWithFlag` | `cudaEventRecordWithFlags` | 带 flags 记录 event |
+| `aclrtMallocHostAndRegister` / `aclrtMallocHost` | `cudaHostAlloc` | Host pinned 内存分配 |
+| `aclrtGetSymbolAddress` | `cudaGetSymbolAddress` | 获取设备符号地址 |
+| `aclrtMemcpyToSymbol` | `cudaMemcpyToSymbol` | 向设备符号拷贝 |
+| `aclrtMemsetD32Async` | `cuMemsetD32Async` | D32 异步 memset |
+| `aclrtMemManagedAdvise` | `cudaMemAdvise` | Managed memory advise |
+| `aclrtGetFunctionAttribute` | `cudaFuncGetAttributes` | 查询 function 属性 |
+| `aclrtGetCurrentContext` | `cuCtxGetCurrent` | 获取当前 context |
+| `aclrtSetCurrentContext` | `cuCtxSetCurrent` | 设置当前 context |
+| `aclrtGetPrimaryCtxState` | `cuDevicePrimaryCtxGetState` | 查询 primary context |
+| `aclrtBinaryLoadFromFile` | `cuModuleLoad` | 从文件加载 binary |
+| `aclrtBinaryLoadFromData` | `cuModuleLoadData` | 从内存加载 binary |
+| `aclrtBinaryGetFunction` | `cuModuleGetFunction` | 获取 function handle |
+| `aclrtBinaryUnLoad` | `cuModuleUnload` | 卸载 binary |
+
 
 ## 错误码参考
 

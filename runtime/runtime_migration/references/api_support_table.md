@@ -32,50 +32,55 @@
 | `cudaFree()`                 | `aclrtFree()`                 |    ✅    | 设备内存释放           |
 | `cudaMallocPitch()`          | `aclrtMalloc()`               |    ✅    | 分配对齐内存           |
 | `cudaMallocHost()`           | `aclrtMallocHost()`           |    ✅    | 分配页锁定主机内存     |
+| `cudaHostAlloc()`            | `aclrtMallocHostAndRegister()` / `aclrtMallocHost()` |    ✅    | 分配 Host pinned 内存；新版 CANN 优先走分配并注册接口，旧版环境回退页锁定分配 |
 | `cudaFreeHost()`             | `aclrtFreeHost()`             |    ✅    | 释放页锁定主机内存     |
-| `cudaMallocManaged()`        | `aclrtMemAllocManaged()`      |    ✅    | 统一内存分配 (UVM)     |
 | `cudaMemcpy()`               | `aclrtMemcpy()`               |    ✅    | 同步内存拷贝           |
 | `cudaMemcpyAsync()`          | `aclrtMemcpyAsync()`          |    ✅    | 异步内存拷贝           |
 | `cudaMemcpy2D()`             | `aclrtMemcpy2d()`             |    ✅    | 2D 内存拷贝            |
 | `cudaMemcpy2DAsync()`        | `aclrtMemcpy2dAsync()`        |    ✅    | 异步 2D 内存拷贝       |
 | `cudaMemcpyPeer()`           | `aclrtMemcpy()`               |    ✅    | 点对点设备间拷贝       |
-| `cudaMemcpyPeerAsync()`      | `aclrtMemcpyAsync()`          |    ✅    | 异步点对点拷贝         |
+| `cudaMemcpyPeerAsync()`      | `aclrtMemcpyAsync()` (`ACL_MEMCPY_DEVICE_TO_DEVICE`) |    ✅    | 异步点对点拷贝；当前仅支持同一个 PCIe Switch 内 Device 之间的内存复制 |
+| `cudaMemcpyToSymbol()`       | `aclrtMemcpyToSymbol()`       |    ✅    | 向设备符号地址拷贝数据 |
 | `cudaMemcpyBatchAsync()`     | `aclrtMemcpyBatchAsyncV2()`   |   ✅*   | 批量拷贝 (CANN 9.1.0+) |
 | `cudaMemset()`               | `aclrtMemset()`               |    ✅    | 内存初始化             |
 | `cudaMemsetAsync()`          | `aclrtMemsetAsync()`          |    ✅    | 异步内存初始化         |
+| `cuMemsetD32Async()`         | `aclrtMemsetD32Async()`       |    ✅    | Driver D32 异步初始化；语义对齐 D32 写入 |
 | `cudaMemset2D()`             | `aclrtMemset()` (逐行)        |    ✅    | 2D 内存初始化          |
 | `cudaMemset2DAsync()`        | `aclrtMemsetAsync()` (逐行)   |    ✅    | 异步 2D 初始化         |
 | `cudaMemGetInfo()`           | `aclrtGetMemInfo()`           |    ✅    | 获取内存信息           |
 | `cudaPointerGetAttributes()` | `aclrtPointerGetAttributes()` |    ✅    | 获取指针属性           |
-| `cudaHostRegister()`         | `aclrtHostRegisterV2()`       |    ✅    | 注册主机内存           |
+| `cudaGetSymbolAddress()`     | `aclrtGetSymbolAddress()`     |    ✅    | 获取设备符号地址       |
+| `cudaMemAdvise()`            | `aclrtMemManagedAdvise()`     |    ✅    | UVM advise 映射；依赖 CANN managed memory 能力 |
+| `cudaHostRegister()`         | `aclrtHostRegister()` / `aclrtHostRegisterV2()` |    ✅    | 注册主机内存           |
 | `cudaHostUnregister()`       | `aclrtHostUnregister()`       |    ✅    | 取消注册主机内存       |
 | `cudaHostGetDevicePointer()` | `aclrtHostGetDevicePointer()` |    ✅    | 获取设备指针           |
 
-## 三、内存池管理 API (不支持)
+## 三、内存池管理 API
 
 
 | CUDA API                        | 实现状态 | 说明                       |
 | ------------------------------- | :-------: | -------------------------- |
-| `cudaMemPoolCreate()`           | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolDestroy()`          | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolSetAttribute()`     | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolGetAttribute()`     | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolTrimTo()`           | ⚠️ Mock | 返回 cudaErrorNotSupported |
+| `cudaMemPoolCreate()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMemPoolDestroy()`          | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMemPoolSetAttribute()`     | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMemPoolGetAttribute()`     | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMemPoolTrimTo()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
 | `cudaMemPoolSetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
 | `cudaMemPoolGetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaDeviceGetDefaultMemPool()` | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaDeviceSetMemPool()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaDeviceGetMemPool()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMallocAsync()`             | ⚠️ Mock | CANN 不支持异步内存分配，返回 cudaErrorNotSupported    |
-| `cudaFreeAsync()`               | ⚠️ Mock | CANN 不支持异步内存释放，返回 cudaErrorNotSupported    |
-| `cudaMemPrefetchAsync()`        | ⚠️ Mock | CANN 自动处理数据迁移      |
+| `cudaDeviceGetDefaultMemPool()` | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaDeviceSetMemPool()`        | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaDeviceGetMemPool()`        | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMallocManaged()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA UVM，返回 cudaErrorNotSupported |
+| `cudaMallocAsync()`             | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaFreeAsync()`               | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
+| `cudaMemPrefetchAsync()`        | ⚠️ Mock | 当前未真实对标 CUDA UVM，返回 cudaErrorNotSupported |
 
 ## 四、流管理 API
 
 
 | CUDA API                                | CANN API                              | 实现状态 | 说明               |
 | --------------------------------------- | ------------------------------------- | :------: | ------------------ |
-| `cudaStreamCreate()`                    | `aclrtCreateStreamWithConfig()`       |    ✅    | 创建流             |
+| `cudaStreamCreate()`                    | `aclrtCreateStream()`                 |    ✅    | 创建流             |
 | `cudaStreamCreateWithFlags()`           | `aclrtCreateStreamWithConfig()`       |    ✅    | 创建流（带标志）   |
 | `cudaStreamCreateWithPriority()`        | `aclrtCreateStreamWithConfig()`       |    ✅    | 创建流（带优先级） |
 | `cudaStreamDestroy()`                   | `aclrtDestroyStream()`                |    ✅    | 销毁流             |
@@ -86,7 +91,11 @@
 | `cudaStreamGetPriority()`               | `aclrtStreamGetPriority()`            |    ✅    | 获取流优先级       |
 | `cudaStreamGetFlags()`                  | `aclrtStreamGetFlags()`               |    ✅    | 获取流标志         |
 | `cudaStreamBeginCapture()`              | `aclmdlRICaptureBegin()`              |    ✅    | 开始流捕获         |
+| `cudaStreamBeginCaptureToGraph()`       | `aclmdlRICaptureToModelRIBegin()`     |    ✅*   | 开始捕获到已有 Model RI；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
 | `cudaStreamEndCapture()`                | `aclmdlRICaptureEnd()`                |    ✅    | 结束流捕获         |
+| `cudaStreamCaptureStatus`               | `aclmdlRICaptureStatus`               |    ✅    | Stream capture 状态枚举显式映射：None/Active/Invalidated |
+| `cudaStreamGetCaptureInfo()`            | `aclmdlRICaptureGetInfo()`            |    ✅    | 查询 capture 状态与 graph |
+| `cudaStreamGetCaptureInfo_v3()`         | `aclmdlRICaptureGetInfo()`            |    ✅    | v3 查询接口兼容到 CANN capture info |
 | `cudaStreamIsCapturing()`               | `aclmdlRICaptureGetInfo()`            |    ✅    | 查询流捕获状态     |
 | `cudaThreadExchangeStreamCaptureMode()` | `aclmdlRICaptureThreadExchangeMode()` |    ✅    | 交换流捕获模式     |
 
@@ -95,10 +104,11 @@
 
 | CUDA API                     | CANN API                       | 实现状态 | 说明               |
 | ---------------------------- | ------------------------------ | :------: | ------------------ |
-| `cudaEventCreate()`          | `aclrtCreateEventExWithFlag()` |    ✅    | 创建事件           |
+| `cudaEventCreate()`          | `aclrtCreateEvent()`           |    ✅    | 创建事件           |
 | `cudaEventCreateWithFlags()` | `aclrtCreateEventExWithFlag()` |    ✅    | 创建事件（带标志） |
 | `cudaEventDestroy()`         | `aclrtDestroyEvent()`          |    ✅    | 销毁事件           |
 | `cudaEventRecord()`          | `aclrtRecordEvent()`           |    ✅    | 记录事件           |
+| `cudaEventRecordWithFlags()` | `aclrtRecordEventWithFlag()` |    ✅*   | 带 flags 记录事件；本机旧头缺声明时 default flag 回退 `aclrtRecordEvent`，external flag 返回 not supported |
 | `cudaEventSynchronize()`     | `aclrtSynchronizeEvent()`      |    ✅    | 事件同步           |
 | `cudaEventQuery()`           | `aclrtQueryEventStatus()`      |    ✅    | 查询事件状态       |
 | `cudaEventElapsedTime()`     | `aclrtEventElapsedTime()`      |    ✅    | 计算事件耗时       |
@@ -108,9 +118,9 @@
 
 | CUDA API                   | CANN API                                | 实现状态 | 说明              |
 | -------------------------- | --------------------------------------- | :------: | ----------------- |
-| `cudaIpcGetMemHandle()`    | `aclrtMemExportToShareableHandleV2()`   |    ✅    | 获取 IPC 内存句柄 |
-| `cudaIpcOpenMemHandle()`   | `aclrtMemImportFromShareableHandleV2()` |    ✅    | 打开 IPC 内存句柄 |
-| `cudaIpcCloseMemHandle()`  | `aclrtFree()`                           |    ✅    | 关闭 IPC 内存句柄 |
+| `cudaIpcGetMemHandle()`    | `aclrtIpcMemGetExportKey()`            |    ✅    | 获取 IPC 内存 key |
+| `cudaIpcOpenMemHandle()`   | `aclrtIpcMemImportByKey()`             |    ✅    | 通过 IPC key 导入共享内存 |
+| `cudaIpcCloseMemHandle()`  | `aclrtIpcMemClose()`                   |    ✅    | 关闭 IPC 共享内存 |
 | `cudaIpcGetEventHandle()`  | `aclrtIpcGetEventHandle()`              |    ✅    | 获取 IPC 事件句柄 |
 | `cudaIpcOpenEventHandle()` | `aclrtIpcOpenEventHandle()`             |    ✅    | 打开 IPC 事件句柄 |
 
@@ -126,6 +136,10 @@
 | `cudaLibraryUnload()`       | `aclrtBinaryUnload()`       |    ✅    | 卸载库                     |
 | `cudaLibraryGetFunction()`  | `aclrtBinaryGetFunction()`  |    ✅    | 获取函数句柄               |
 | `cudaLibraryGetGlobal()`    | `aclrtBinaryGetGlobal()`    |   ✅*   | 获取全局变量 (CANN 9.1.0+) |
+| `cuModuleLoad()`            | `aclrtBinaryLoadFromFile()` |    ✅    | Driver module 从文件加载   |
+| `cuModuleLoadData()`        | `aclrtBinaryLoadFromData()` |    ✅    | Driver module 从内存 ELF 加载 |
+| `cuModuleGetFunction()`     | `aclrtBinaryGetFunction()`  |    ✅    | Driver module 获取函数句柄 |
+| `cuModuleUnload()`          | `aclrtBinaryUnLoad()`       |    ✅    | Driver module 卸载         |
 
 ## 八、执行控制 API
 
@@ -133,6 +147,8 @@
 | CUDA API               | CANN API                | 实现状态 | 说明         |
 | ---------------------- | ----------------------- | :------: | ------------ |
 | `cudaLaunchHostFunc()` | `aclrtLaunchHostFunc()` |    ✅    | 主机函数回调 |
+| `cudaFuncGetAttributes()` | `aclrtGetFunctionAttribute()` |    ✅    | 查询 CANN function 属性并填充 CUDA 属性结构 |
+| `cudaLaunchKernel()`   | `aclrtLaunchKernelWithHostArgs()` / `aclrtLaunchKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithHostArgs()` |    ✅    | Kernel 启动；兼容层默认使用参数数组方式下发 |
 
 ## 九、性能分析 API
 
@@ -140,7 +156,7 @@
 | CUDA API              | CANN API                           | 实现状态 | 说明         |
 | --------------------- | ---------------------------------- | :------: | ------------ |
 | `cudaProfilerStart()` | `aclprofInit()` + `aclprofStart()` |    ✅    | 启动性能分析|
-| `cudaProfilerStop()`  | `aclprofStop()`                    |    ✅    | 停止性能分析|
+| `cudaProfilerStop()`  | `aclprofStop()` + `aclprofFinalize()` |    ✅    | 停止性能分析并结束 Profiling |
 
 ## 十、错误处理 API
 
@@ -152,7 +168,26 @@
 | `cudaGetErrorName()`    | 内部实现                 |    ✅    | 获取错误名称   |
 | `cudaGetErrorString()`  | `aclGetRecentErrMsg()`  |    ✅    | 获取最近一次 ACL 错误描述；必要时结合本地错误文本包装完成 CUDA 错误字符串映射 |
 
-## 十一、CUDA Driver VMM API
+## 十一、版本管理 API
+
+
+| CUDA API                  | CANN API                | 实现状态 | 说明         |
+| ------------------------- | ----------------------- | :------: | ------------ |
+| `cudaRuntimeGetVersion()` | `aclsysGetVersionNum()` |    ✅    | 获取 Runtime 版本号 |
+
+## 十二、Graph 管理 API
+
+
+| CUDA API                   | CANN API                   | 实现状态 | 说明                |
+| -------------------------- | -------------------------- | :------: | ------------------- |
+| `cudaGraphDebugDotPrint()` | `aclmdlRIDebugJsonPrint()` |    ✅    | 导出 Graph/RI 调试信息 |
+| `cudaGraphExecDestroy()`   | `aclmdlRIDestroy()`        |    ✅    | 销毁 Graph 执行实例 |
+| `cudaGraphConditionalHandleCreate()` | `aclmdlRICondHandleCreate()` |    ✅*   | 创建条件 Graph handle；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
+| `cudaGraphGetNodes()`      | `aclmdlRIGetStreams()` + `aclmdlRIGetTasksByStream()` |    ✅*   | 通过 RI stream/task 汇总节点；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
+| `cudaGraphLaunch()`        | `aclmdlRIExecuteAsync()`   |    ✅    | 异步执行 Graph/RI |
+| `cudaGraphSetConditional()` | `aclmdlRICondHandleGetCondPtr()` + `aclrtValueWrite()` |    ✅*   | 设置条件 handle 值；`aclmdlRICondHandleGetCondPtr` 为试验特性，后续版本可能变更，不支持应用于生产环境 |
+
+## 十三、CUDA Driver VMM API
 
 
 | CUDA Driver API                    | CANN API                                | 实现状态 | 说明             |
@@ -169,6 +204,10 @@
 | `cuMemMap()`                       | `aclrtMapMem()`                         |    ✅    | 映射物理内存     |
 | `cuMemUnmap()`                     | `aclrtUnmapMem()`                       |    ✅    | 取消映射         |
 | `cuMemRetainAllocationHandle()`    | `aclrtMemRetainAllocationHandle()`      |    ✅    | 保留分配句柄     |
+| `cuCtxGetCurrent()`                | `aclrtGetCurrentContext()`              |    ✅    | 获取当前 Context |
+| `cuCtxSetCurrent()`                | `aclrtSetCurrentContext()`              |    ✅    | 设置当前 Context |
+| `cuDevicePrimaryCtxGetState()`     | `aclrtGetPrimaryCtxState()`             |    ✅    | 查询 primary context 状态 |
+| `cuStreamWriteValue32()`           | `aclrtValueWrite()`                     |    ✅    | 在 stream 上写入 32-bit value |
 
 
 ## 不支持 API 替代方案建议
@@ -176,8 +215,44 @@
 
 | 不支持 API             | 替代方案                             |
 | ---------------------- | ------------------------------------ |
-| `cudaMallocAsync`      | 使用`cudaMalloc` + 流同步            |
-| `cudaFreeAsync`        | 使用`cudaFree` + 流同步              |
+| `cudaMallocAsync`      | 暂无真实对标，返回 cudaErrorNotSupported |
+| `cudaFreeAsync`        | 暂无真实对标，返回 cudaErrorNotSupported |
 | `cudaMemPoolCreate`    | 自定义内存池管理，或使用`cudaMalloc` |
 | `cudaMemPrefetchAsync` | CANN 自动管理，无需手动处理          |
 | Texture/Surface API    | 使用普通内存 + 自定义纹理逻辑        |
+
+## 其他不支持 API
+
+
+| 不支持 API | 类型 | 说明 |
+| ---------- | ---- | ---- |
+| `cudaFuncSetAttribute()` | CUDA Runtime | CANN Runtime 暂不支持，兼容层返回 `cudaErrorNotSupported` |
+| `cudaLaunchCooperativeKernel()` | CUDA Runtime | CANN Runtime 暂不支持 cooperative launch，兼容层返回 `cudaErrorNotSupported` |
+| `cuFuncSetCacheConfig()` | CUDA Driver | CANN Runtime 暂不支持，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cudaGetDriverEntryPoint()` | CUDA Runtime | CANN Runtime 暂不支持 CUDA Driver entry point 查询，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGetDriverEntryPointByVersion()` | CUDA Runtime | CANN Runtime 暂不支持 CUDA Driver entry point 查询，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphAddNode()` | CUDA Runtime Graph | CANN Runtime 暂不支持手工添加通用 Graph Node，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphAddNode_v2()` | CUDA Runtime Graph | CANN Runtime 暂不支持手工添加通用 Graph Node，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphDestroy()` | CUDA Runtime Graph | CANN Runtime 暂不支持 CUDA Graph 对象销毁语义，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphInstantiateWithFlags()` | CUDA Runtime Graph | CANN Runtime 暂不支持带 flags 的 Graph 实例化，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphNodeGetDependencies()` | CUDA Runtime Graph | CANN Runtime 暂不支持查询 CUDA Graph Node 依赖，兼容层返回 `cudaErrorNotSupported` |
+| `cudaOccupancyMaxActiveBlocksPerMultiprocessor()` | CUDA Runtime Occupancy | 架构差异不支持 occupancy 查询，兼容层返回 `cudaErrorNotSupported` |
+| `cudaOccupancyMaxPotentialBlockSize()` | CUDA Runtime Occupancy | 架构差异不支持 occupancy 查询，兼容层返回 `cudaErrorNotSupported` |
+| `cudaStreamGetCaptureInfo_v2()` | CUDA Runtime Stream Capture | CANN Runtime 暂不支持 CUDA v2 capture info 语义，兼容层返回 `cudaErrorNotSupported` |
+| `cudaStreamUpdateCaptureDependencies()` | CUDA Runtime Stream Capture | CANN Runtime 暂不支持更新 CUDA capture dependencies，兼容层返回 `cudaErrorNotSupported` |
+| `cudaStreamUpdateCaptureDependencies_v2()` | CUDA Runtime Stream Capture | CANN Runtime 暂不支持更新 CUDA capture dependencies，兼容层返回 `cudaErrorNotSupported` |
+| `cuCtxPopCurrent()` | CUDA Driver Context | CANN Runtime 暂不支持 Driver context stack 语义，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuCtxPushCurrent()` | CUDA Driver Context | CANN Runtime 暂不支持 Driver context stack 语义，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuDevicePrimaryCtxRetain()` | CUDA Driver Context | CANN Runtime 暂不支持 primary context retain 语义，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuGreenCtxCreate()` | CUDA Driver Green Context | CANN Runtime 暂不支持 Green Context，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuGreenCtxDestroy()` | CUDA Driver Green Context | CANN Runtime 暂不支持 Green Context，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuCtxFromGreenCtx()` | CUDA Driver Green Context | CANN Runtime 暂不支持 Green Context，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuDeviceGetDevResource()` | CUDA Driver Green Context | CANN Runtime 暂不支持 DevResource 查询，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuGreenCtxStreamCreate()` | CUDA Driver Green Context | CANN Runtime 暂不支持 Green Context Stream，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuModuleLoadDataEx()` | CUDA Driver Module/JIT | CANN Runtime 暂不支持 Driver JIT module load，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuLinkAddData()` | CUDA Driver Link/JIT | CANN Runtime 暂不支持 Driver JIT link data，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuMulticastAddDevice()` | CUDA Driver Multicast | CANN Runtime 暂不支持 Multicast，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuMulticastBindMem()` | CUDA Driver Multicast | CANN Runtime 暂不支持 Multicast，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuMulticastCreate()` | CUDA Driver Multicast | CANN Runtime 暂不支持 Multicast，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuMulticastUnbind()` | CUDA Driver Multicast | CANN Runtime 暂不支持 Multicast，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
+| `cuTensorMapEncodeTiled()` | CUDA Driver Tensor Map | CANN Runtime 暂不支持 Tensor Map 编码，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |

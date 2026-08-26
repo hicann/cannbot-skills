@@ -63,9 +63,14 @@ set(CUDACOMPAT_HEADERS
     cann_compat_stream.h
     cann_compat_event.h
     cann_compat_ipc.h
+    cann_compat_symbol.h
     cann_compat_library.h
+    cann_compat_graph.h
+    cann_compat_unsupported.h
     cann_compat_cu_types.h
+    cann_compat_context.h
     cann_compat_cu_vmm.h
+    cann_compat_cu_extra.h
     cann_compat_exec.h
 )
 
