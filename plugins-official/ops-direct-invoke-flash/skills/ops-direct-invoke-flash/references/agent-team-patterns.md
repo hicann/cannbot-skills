@@ -43,26 +43,15 @@ Agent(name="{OP2}-porter", subagent_type="general-purpose",
 
 ## Worktree 隔离规则
 
-当多个 Agent 并行工作时，共享文件会引发冲突：
+不同算子之间没有共享文件——每个算子独立目录（`operators/{OP}/`），可安全并行工作。仅当多个 Agent 并发编辑**同一算子**的文件（如阶段 6 的评审与实现重叠）时，才需要 `isolation="worktree"` 防止互相覆盖。
 
-| 文件 | 冲突风险 | 缓解措施 |
-|------|---------------|------------|
-| `docs/index.md` / `AGENTS.md` | 高——多个 Agent 都要登记各自的算子 | 使用 worktree 隔离；最后合并 |
-| `operators/{OP}/{OP}.asc` | 无——每个算子独立目录 | 可安全并行工作 |
-| `operators/{OP}/CMakeLists.txt` | 无——每个算子独立目录 | 可安全并行工作 |
-| `operators/{OP}/test_{OP}.py` | 无——每个算子独立目录 | 可安全并行工作 |
-
-当 Agent 需要修改 `docs/index.md`、`AGENTS.md` 等共享的仓库级文件时，务必使用 `isolation="worktree"`。
-
-## 合并策略
+## 汇总策略
 
 当所有算子都在各自独立的 worktree 中移植完成后：
 
-1. 指定一个 Agent（或主控 Agent）作为合并协调者。
-2. 将各 worktree 分支依次合并到主分支。
-3. 通过合并各算子的登记条目来解决 `docs/index.md` 冲突。
-4. 通过合并各算子的条目来解决 `AGENTS.md` 冲突。
-5. 在最终合并后执行完整的构建与测试，以验证集成结果。
+1. 指定一个 Agent（或主控 Agent）作为汇总协调者。
+2. 由协调者将各 worktree 中的算子产物（`operators/{OP}/` 源码与 `docs/{OP}/` 文档）复制回主工作区。
+3. 全部汇总后执行完整的构建与测试，以验证集成结果。
 
 ## 通信模式
 
@@ -75,6 +64,6 @@ Agent(name="{OP2}-porter", subagent_type="general-purpose",
 
 使用 `SendMessage` 进行直接协调：
 - `SendMessage(to="math-reviewer", message="Please also check the edge case for x=0")`
-- `SendMessage(to="*", message="CMakeLists.txt has been updated, pull before building")`
+- `SendMessage(to="*", message="CMakeLists.txt has been updated, re-read before building")`
 
 只有常驻的团队 Agent 才需要关闭，对于会自然结束的后台评审 Agent 则无需关闭。

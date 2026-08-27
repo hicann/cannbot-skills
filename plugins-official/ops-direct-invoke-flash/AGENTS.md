@@ -5,10 +5,6 @@ skills:
   - ops-direct-invoke-flash
   - ascendc-st-design
   - ascendc-whitebox-design
-  - gitcode-toolkit
-  - gitcode-pr-handler
-  - gitcode-issue-gen
-  - gitcode-issue-handler
 permission:
   external_directory: allow
 harness:

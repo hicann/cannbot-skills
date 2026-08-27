@@ -106,9 +106,9 @@ hooks:
 
 ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，「增量」省不了多少。默认流程会编译 **3 次**（阶段 2 骨架、阶段 6 实现、阶段 7 干净重建）、真机全量测试 **2 次**（阶段 6、阶段 7）。本快速路径把它压到**编译 1 次、真机全量测试 1 次**，做法是推迟构建/测试并取消阶段 7 的二次重建：
 
-- **阶段 2（骨架）**：创建 `{OP}.asc` 骨架 + `CMakeLists.txt` + 接口测试文件后，只跑 `cmake` **配置**（`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} ..`）验证工具链/CMake，**不执行 `make`**。骨架的 ASC 编译推迟到阶段 6。提交。
-- **阶段 5（测试套件）**：写完整套件后**只做静态检查**（`python3 -m py_compile test_{OP}.py`，目视核对 `SHAPES`/`DTYPES` 与边界用例），**不 build、不 collect、不跑用例**——collection 需加载 `.so`，而此时尚未编译。提交。
-- **阶段 6（实现）**：实现完整核函数后，复用阶段 2 的配置做**首次也是唯一一次**构建（`cd build && make -j`；这是全流程唯一的 ASC 编译），随后**一次性**跑接口测试 + `--collect-only` + 完整 NPU 参数化用例。失败则修复后仅重编该文件。提交。
+- **阶段 2（骨架）**：创建 `{OP}.asc` 骨架 + `CMakeLists.txt` + 接口测试文件后，只跑 `cmake` **配置**（`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} ..`）验证工具链/CMake，**不执行 `make`**。骨架的 ASC 编译推迟到阶段 6。
+- **阶段 5（测试套件）**：写完整套件后**只做静态检查**（`python3 -m py_compile test_{OP}.py`，目视核对 `SHAPES`/`DTYPES` 与边界用例），**不 build、不 collect、不跑用例**——collection 需加载 `.so`，而此时尚未编译。
+- **阶段 6（实现）**：实现完整核函数后，复用阶段 2 的配置做**首次也是唯一一次**构建（`cd build && make -j`；这是全流程唯一的 ASC 编译），随后**一次性**跑接口测试 + `--collect-only` + 完整 NPU 参数化用例。失败则修复后仅重编该文件。
 - **阶段 7（验证）**：simple 档**跳过独立的干净重建**——阶段 6 的 `make` 是在阶段 2 全新配置的 build/ 上的首次编译，本就干净。仅确认 `{OP}.asc` 为完整实现（非骨架）、阶段 6 日志显示全部用例通过。**唯有**怀疑陈旧产物时才触发一次 `rm -rf build` 干净重建。
 
 并行化：`harness.review=on` 时，阶段 3/4 的后台评审可与实现草稿重叠——simple 档在评审进行时并行起草阶段 6 实现，评审 FAIL 再回改。按开关跳过评审时无此空等，直接顺序推进。
@@ -129,7 +129,7 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
    - 如果 `$ARGUMENTS` 是公式或描述，向用户询问一个简短的算子名，或从语义中推导一个。
 3. 确认 `{OP}.asc` 尚不存在。
 4. 创建 `docs/{OP}/plans/`。
-5. 阅读算子工程根目录中一个已完成的算子以了解结构，并阅读 `docs/development_guide.md`。如果不存在已完成的算子，则仅依赖 [references/implementation-patterns.md](references/implementation-patterns.md)。
+5. 阅读算子工程根目录中一个已完成的算子以了解结构。如果不存在已完成的算子，则仅依赖 [references/implementation-patterns.md](references/implementation-patterns.md)。
 6. 探测目标芯片：运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/detect_soc.py`，从输出中读取 `SocVersion` 与 `NpuArch`（形如 `dav-3510`）。据此判定后续路径——`NpuArch` 为 `dav-3510`（Ascend950）时走 `AscendC::Reg` 路径。若脚本因无 NPU 或环境缺失而失败，向用户询问目标芯片。这两个值会在阶段 1 记入 STATE.md。
 7. 如果目标是 Ascend950 / `dav-3510`，阅读 [references/reg-api-guide.md](references/reg-api-guide.md) 和 [references/reg-api-patterns.yaml](references/reg-api-patterns.yaml)，并把 `operators/mul`（dav-3510 Reg 路径的最小参考算子）作为 Reg 计算形态的结构参考。`add`/`sqrt` 用的是经典 AscendC 计算 API，仅供 harness/CMake/test 结构参考。在设计前启动一个只读的 API 查询子 Agent，检视本地范例并确认允许/禁止的 Reg API 清单。
 8. 判定算子复杂度档位（simple / complex，见上文「算子复杂度分档」），据此缩放后续评审强度。这将在阶段 1 记入 STATE.md。
@@ -139,18 +139,14 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 
 ### 阶段 1：状态跟踪
 
-依据 [state-template.md](state-template.md) 创建 `docs/{OP}/STATE.md`。这是受 git 跟踪的持久化进度记录。STATE.md 是持久化进度的唯一可信来源。
+依据 [state-template.md](state-template.md) 创建 `docs/{OP}/STATE.md`。这是本地持久化进度记录。STATE.md 是持久化进度的唯一可信来源。
 
 使用 `TaskCreate` 为每个阶段（阶段 2 到阶段 8，`harness.test_gate` 为 `on` 时包含阶段 7.5）创建会话内任务。
-开始每个阶段时使用 `TaskUpdate(status="in_progress")`，完成时使用 `TaskUpdate(status="completed")`。在提交节点更新 STATE.md 的勾选框。
+开始每个阶段时使用 `TaskUpdate(status="in_progress")`，完成时使用 `TaskUpdate(status="completed")`。完成每个阶段时更新 STATE.md 的勾选框。
 
 **恢复之前的会话：** 如果 `docs/{OP}/STATE.md` 已存在，阅读它以确定哪些阶段已完成。仅为未完成的阶段重新创建 `TaskCreate` 条目。
 
-提交规则：
-- 在每个阶段明确的 `Commit` 检查点各提交一次。
-- 例外：立即提交初始的 `STATE.md` 引导文件。
-
-**退出条件：** STATE.md 已存在并已提交，已创建会话内任务。
+**退出条件：** STATE.md 已存在，已创建会话内任务。
 
 ### 阶段 2：可编译骨架
 
@@ -162,11 +158,10 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 2. 创建 `CMakeLists.txt`（参照已完成算子：`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）。
 3. 创建带占位用例的 `test_{OP}.py`（先放一个接口存在性测试）。
 4. 在算子工程根目录构建并运行：`mkdir -p build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后回到算子目录运行 `pytest test_{OP}.py -v`。这是**唯一**需要跑 `cmake` 配置的地方；后续阶段（3~6）改源码后只需 `cd build && make -j` 增量编译，不要 `rm -rf build`。干净重建仅留到阶段 7 做新鲜度验证（或结果可疑时）。
-5. 提交。
 
 实现细节与代码模式：见 [references/implementation-patterns.md](references/implementation-patterns.md)。
 
-**退出条件：** cmake/make 构建成功，`pytest` 可运行且占位测试出现在输出中，已提交。
+**退出条件：** cmake/make 构建成功，`pytest` 可运行且占位测试出现在输出中。
 
 ### 阶段 3：定义文档
 
@@ -181,17 +176,15 @@ ASC 是单文件全量编译，改 `.asc` 即触发整个翻译单元重编，�
 在编写 CPU 参考伪代码之前，检查来源（如果提供了代码）是否存在迭代累加模式 —— 见 [references/common-failure-modes.md](references/common-failure-modes.md) § 迭代累加精度。如果输入是公式或描述，验证推导是否严谨，并与用户一起补全缺失的 I/O 细节。
 
 按 `harness.review` 与复杂度档位决定本阶段是否评审（见「文档评审开关」，默认 `auto`）：
-- **跳过**（`off`，或 `auto` + simple 档）：不发起评审 Agent，在 STATE.md 记录按配置跳过，写完定义文档直接提交并进入阶段 4。
+- **跳过**（`off`，或 `auto` + simple 档）：不发起评审 Agent，在 STATE.md 记录按配置跳过，写完定义文档并进入阶段 4。
 - **`on` + simple 档**：`run_in_background=true` 启动 **1 个** `definition-review` 合并 Agent（数学+语义 checklist 合并）。
 - **`auto` / `on` + complex 档**：`run_in_background=true` 并行启动 `math-review` 和 `semantics-review` 两个 Agent。
 
 Agent 都会阅读定义文档与算子来源（如果存在来源文件）。准确的提示词（含合并版）、验证清单以及结构化判定格式见 [references/review-prompts.md](references/review-prompts.md)。
 
-发起了评审时：在等待评审时，可并行起草阶段 4 设计文档草稿（见「并行起草」）。等待所有 Agent 完成，然后在提交前吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
+发起了评审时：在等待评审时，可并行起草阶段 4 设计文档草稿（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。如果任何检查为 FAIL，处理该问题并重新运行相关评审。如果两次评审相互矛盾，阅读双方结论与来源，做出判断，并记录解决方案。
 
-提交。
-
-**退出条件：** 定义文档已存在并已提交；若发起了评审，其结论均已吸收（没有未解决的 FAIL）；若跳过，STATE.md 已记录跳过原因。
+**退出条件：** 定义文档已存在；若发起了评审，其结论均已吸收（没有未解决的 FAIL）；若跳过，STATE.md 已记录跳过原因。
 
 ### 阶段 4：设计文档
 
@@ -209,7 +202,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 - **`on` + simple 档**：`run_in_background=true` 启动 **1 个** `design-review` 合并 Agent（UB 预算 + 指令序列 checklist 合并；dav-3510 时该 checklist 额外含 Reg API 合规项）。
 - **`auto` / `on` + complex 档**：`run_in_background=true` 并行启动 `ub-review` 和 `instr-review`；对 Ascend950 / `dav-3510` 再加 `reg-api-review`。
 
-准确的提示词（含合并版）与验证清单见 [references/review-prompts.md](references/review-prompts.md)。发起了评审时：在等待评审时，可并行起草阶段 5 测试套件（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。在仍存在未解决的 Reg API FAIL 结论时，不要提交设计。
+准确的提示词（含合并版）与验证清单见 [references/review-prompts.md](references/review-prompts.md)。发起了评审时：在等待评审时，可并行起草阶段 5 测试套件（见「并行起草」）。等待所有 Agent 完成，然后吸收其结论。在仍存在未解决的 Reg API FAIL 结论时，不要定稿设计。
 
 **设计定稿前的确定性校验（与 `harness.review` 无关，始终执行）：** 逐条核对每个块大小 / 传输计数常量对所有支持 dtype 满足 `count * sizeof(T) >= 32`；UB 预算涵盖所有存活缓冲区且不超限；Cast 链符合支持矩阵。把核对结果写进设计文档——关掉评审后，这三项没有其他兜底。
 
@@ -217,9 +210,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 对于 Ascend950 / `dav-3510`，还需对照 [references/reg-api-guide.md](references/reg-api-guide.md) 验证：在规划的向量路径中不得使用 `AscendC::MicroAPI`、不得使用 Membase、除 `asc_vf_call` 外不得使用裸 `asc_*` API，且不得使用经典 AscendC 的 compute/cast/reduce。
 
-提交。
-
-**退出条件：** 设计文档已存在并已提交，确定性校验已完成；若发起了评审，其结论均已吸收；若跳过，STATE.md 已记录跳过原因。
+**退出条件：** 设计文档已存在，确定性校验已完成；若发起了评审，其结论均已吸收；若跳过，STATE.md 已记录跳过原因。
 
 ### 阶段 5：测试套件
 
@@ -238,9 +229,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 - 确认参数化 NPU 用例能被正常收集：`pytest test_{OP}.py --collect-only -q`（应列出全部 `(shape, dtype)` 组合）。
 - **不要**在此对骨架执行整套 NPU 用例——它们注定失败、只是消耗真机时间而不带来新信息；核函数正确性在阶段 6 验证。
 
-提交。
-
-**退出条件：** 测试套件就绪，接口测试通过，参数化用例可被收集，已提交。
+**退出条件：** 测试套件就绪，接口测试通过，参数化用例可被收集。
 
 ### 阶段 6：核函数实现
 
@@ -273,9 +262,7 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 在阶段 6 中使用多个 Agent 时，始终使用 `isolation="worktree"`。
 
-提交。
-
-**退出条件：** 所有本地测试通过，已提交。
+**退出条件：** 所有本地测试通过。
 
 ### 阶段 7：验证
 
@@ -283,11 +270,10 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 
 在目标 NPU 硬件上做最终验证：
 
-1. 本地提交
-2. 在 NPU 上做一次**干净重建**（这是全流程唯一的干净重建，用于排除增量编译的陈旧产物）：`rm -rf build && mkdir build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后 `pytest test_{OP}.py -v`
-3. 检视构建/测试日志，迭代直到全部用例通过
+1. 在 NPU 上做一次**干净重建**（这是全流程唯一的干净重建，用于排除增量编译的陈旧产物）：`rm -rf build && mkdir build && cd build && cmake -DCMAKE_ASC_ARCHITECTURES=${NPU_ARCH} .. && make -j`，然后 `pytest test_{OP}.py -v`
+2. 检视构建/测试日志，迭代直到全部用例通过
 
-在提交前，确认核函数源码包含完整实现（而非阶段 2 的骨架）。陈旧构建产物的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 构建新鲜度。
+确认核函数源码包含完整实现（而非阶段 2 的骨架）。陈旧构建产物的故障排查见 [references/common-failure-modes.md](references/common-failure-modes.md) § 构建新鲜度。
 
 **退出条件：** NPU 上构建通过，测试套件全部通过。
 
@@ -302,22 +288,19 @@ Agent 都会阅读定义文档与算子来源（如果存在来源文件）。�
 - 运行 `python3 ${CLAUDE_SKILL_DIR}/scripts/validate_test_gate.py --operator-doc-dir docs/{OP}`，确认输出 `STATUS: PASSED`。
 - 若有精度用例失败，回到阶段 6 修复实现，重新完成阶段 7 和阶段 7.5，并在 `docs/{OP}/plans/troubleshooting.md` 记录非平凡问题。
 
-**退出条件：** `harness.test_gate` 为 `off` 且已记录跳过；或黑/白盒测试门禁通过；已提交。
+**退出条件：** `harness.test_gate` 为 `off` 且已记录跳过；或黑/白盒测试门禁通过。
 
 ### 阶段 8：收尾文档
 
-1. 在 `docs/index.md` 中加入新算子。
-2. 更新 `AGENTS.md`。
-3. 确认 STATE.md 所有勾选框均已勾选。
-4. 将所有剩余任务标记为已完成。
-5. 做最后一次文档提交。
-6. 向用户报告：`{OP}` Ascend C 实现完成。
+1. 确认 STATE.md 所有勾选框均已勾选。
+2. 将所有剩余任务标记为已完成。
+3. 向用户报告：`{OP}` Ascend C 实现完成。
 
-**退出条件：** 所有文档已更新，STATE.md 全部勾选，已提交。
+**退出条件：** STATE.md 全部勾选，所有任务已完成。
 
 ## 阶段回退
 
-如果在实现阶段 N 时发现某个阶段 M 产物（M < N）存在缺陷，更新该阶段 M 产物，若改动较为实质则重新运行其评审，并在继续阶段 N 之前单独提交该修复。
+如果在实现阶段 N 时发现某个阶段 M 产物（M < N）存在缺陷，更新该阶段 M 产物，若改动较为实质则重新运行其评审，再继续阶段 N。
 
 ## Agent 用法
 

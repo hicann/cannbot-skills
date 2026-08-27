@@ -11,8 +11,7 @@
         ],
         "distractor_skills": [
           "ascendc-direct-invoke-template",
-          "ascendc-env-check",
-          "gitcode-toolkit"
+          "ascendc-env-check"
         ],
         "timeout": 900,
         "eval_mode": "text"

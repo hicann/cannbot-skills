@@ -327,9 +327,7 @@
         "from-scratch"
       ],
       "category": "development",
-      "dependencies": [
-        "infra-skills"
-      ]
+      "dependencies": []
     },
     {
       "name": "ops-registry-invoke-skills",

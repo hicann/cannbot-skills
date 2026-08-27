@@ -20,7 +20,6 @@
 - [ ] 创建 `CMakeLists.txt`（`find_package(ASC)` + torch_npu，产出 `libop_{OP}.so`）
 - [ ] 创建 `test_{OP}.py`，包含接口存在性占位测试
 - [ ] 验证构建配置成功（simple：`cmake` 配置即可；complex：`cmake/make` 全量构建且 `pytest test_{OP}.py -v` 可运行）
-- [ ] 提交
 
 ## 阶段 3：算子定义文档
 - [ ] 分析算子源码并提取数学语义
@@ -28,7 +27,7 @@
 - [ ] 若为公式/描述：与用户确认公式并补全缺失的 I/O 细节
 - [ ] 编写 `docs/{OP}/{OP}_definition.md`
 - [ ] 文档评审：按 `harness.review` 决定——跳过（`off` 或 `auto`+simple）则记录跳过原因；`on`+simple 跑 1 个合并 `definition-review`；complex 跑 `math-review` + `semantics-review`，判定 PASS/FAIL/CONCERN
-- [ ] 若发起了评审则吸收结论；润色并提交
+- [ ] 若发起了评审则吸收结论；润色定稿
 
 ## 阶段 4：算子设计文档
 - [ ] 编写 `docs/{OP}/{OP}_design.md`
@@ -38,7 +37,7 @@
 - [ ] 若面向 Ascend950 / `dav-3510`：记录 Reg 包装函数、掩码/尾块处理、32B 规约标量槽位、`CastTrait`/dist 模式以及禁用 API 的规避
 - [ ] 确定性校验（与 `harness.review` 无关，始终执行）：块大小/传输计数对所有 dtype 满足 `count*sizeof(T)>=32`、UB 预算涵盖所有存活缓冲区且不超限、Cast 链符合支持矩阵，结果写入设计文档
 - [ ] 文档评审：按 `harness.review` 决定——跳过（`off` 或 `auto`+simple）则记录跳过原因；`on`+simple 跑 1 个合并 `design-review`；complex 跑 `ub-review` + `instr-review`（dav-3510 再加 `reg-api-review`），判定 PASS/FAIL/CONCERN
-- [ ] 若发起了评审则吸收结论；润色并提交
+- [ ] 若发起了评审则吸收结论；润色定稿
 
 ## 阶段 5：测试套件
 - [ ] 在 `test_{OP}.py` 中定义 `SHAPES` 用例矩阵（最少：小/大/非对齐形状，边界场景取值）与 `DTYPES`（每个支持的 dtype）
@@ -46,7 +45,6 @@
 - [ ] 检查 host 入口命名是否与 C/C++ 标准库符号冲突（使用 `namespace op_{OP}`）
 - [ ] 编写以 `@pytest.mark.parametrize` 参数化、torch 作 CPU 参考的 NPU 测试（`@pytest.mark.skipif(not torch.npu.is_available())` 守卫）
 - [ ] 验证接口测试通过（`-k interface`）且参数化用例可被收集（`--collect-only`）；不对骨架执行整套 NPU 用例
-- [ ] 提交
 
 ## 阶段 6：核函数实现
 - [ ] 实现 device kernel `{OP}_kernel<T>()`（`__global__ __aicore__`，按 tile 处理 UB 数据）
@@ -62,7 +60,6 @@
 - [ ] 添加 `TORCH_LIBRARY(op_{OP}, m)` schema 与 `TORCH_LIBRARY_IMPL(op_{OP}, PrivateUse1, m)` 绑定
 - [ ] 构建通过
 - [ ] 所有测试在本地通过
-- [ ] 提交
 
 ## 阶段 7：验证
 - [ ] 验证核函数源码包含完整实现（而非阶段 2 的骨架）
@@ -77,7 +74,6 @@ Harness 配置：`harness.test_gate = {on|off}`
 
 如果 `harness.test_gate` 为 `off`：
 - [ ] 记录按配置跳过测试门禁
-- [ ] 提交跳过记录
 
 如果 `harness.test_gate` 为 `on`：
 - [ ] 按照 `ascendc-st-design` skill 执行黑盒用例生成与执行
@@ -85,11 +81,7 @@ Harness 配置：`harness.test_gate = {on|off}`
 - [ ] 在 `test-harness/` 下记录真实测试产物、结果和日志
 - [ ] 运行 `validate_test_gate.py` 并确认 `STATUS: PASSED`
 - [ ] 若有精度失败，回到阶段 6 修复后重新验证
-- [ ] 提交
 
-## 阶段 8：最终文档
-- [ ] 更新 `docs/index.md`
-- [ ] 更新 `AGENTS.md`
+## 阶段 8：收尾文档
 - [ ] 验证所有 STATE.md 复选框均已勾选
-- [ ] 最终提交
 ```

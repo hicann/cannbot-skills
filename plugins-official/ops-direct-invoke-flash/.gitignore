@@ -9,3 +9,6 @@ asc-devkit
 cann-samples
 .github
 .copilot
+
+# 本地算子开发产物，不纳入版本管理
+operators/

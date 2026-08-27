@@ -26,7 +26,7 @@ Ascend C 算子开发工具 **CANNBot（Flash 版）**。从 CPU 函数、数学
 /ops-direct-invoke-flash 开发一个 Abs 算子
 ```
 
-默认在 `operators/` 目录下开发。仓库已内置 `operators/add`、`operators/sqrt` 作为结构参考。
+默认在 `operators/` 目录下开发。仓库已内置 `operators/add`、`operators/mul`、`operators/sqrt` 作为结构参考。
 
 ## 快速体验
 
