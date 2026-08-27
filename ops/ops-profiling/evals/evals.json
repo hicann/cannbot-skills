@@ -76,6 +76,81 @@
       "expected_output": "回复应推荐 msprof_profile_run.sh 的 compare/quick 模式，输出 performance.json 和 markdown 报告，不应引导到 msopprof-visualization 可视化子技能。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "MC² 多 Rank 算子禁止使用 msprof op",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 alltoall_matmul 通过 fork 拉起多 rank，并用 SHMEM/BarrierAll 协同。我想用 msprof op 采集并生成 HTML，可行吗？",
+      "expected_output": "回复应说明 MC²/fork 多进程算子必须使用 msprof 的 task-based 采集，禁止 msprof op，因为其 fork 采集行为未定义、数据不可靠；该场景也不走基于 msprof op 的可视化子技能",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "深度分析工具选择需探测环境",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "普通单 rank 算子要做深度瓶颈分析，用户没指定 msprof 还是 msprof op。环境选择规则是什么？",
+      "expected_output": "回复应先探测工具：只有 msopprof 时走 msprof op，只有 msprof 时走 msprof，两者都可用时向用户确认或遵循项目约定，两者都不可用则报告 CANN/ASCEND_HOME 环境问题；不得凭偏好随意选",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "对比模式的用例加载优先级",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "算子 test 目录同时有 op_perf_cases.jsonl、other.jsonl、cases.json 和 model.py 的 get_input_groups。compare 模式应优先加载哪个？",
+      "expected_output": "回复应按优先级先加载标准命名的 <op>_perf_cases.jsonl，其次任意 jsonl，再次非 bak 的 JSON Lines json，最后才回退到 model.py 的 get_input_groups",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "Quick 与标准深度采集的用途不同",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我只想快速知道自定义 kernel 相对标杆的加速比，是否要先采完 7 组 aic-metrics？什么时候才走标准模式？",
+      "expected_output": "回复应推荐 --quick 做一轮 kernel 时间对比并输出 performance.json/log/markdown；只有性能不达标或需要定位主 Bound、流水和搬运瓶颈时，才走标准采集 7 组 aic-metrics 并用 msprof_perf_summary.py 深度分析",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "两套性能产物目录不能直接互喂",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我已有 msprof_profile_run.sh 生成的 PROF_GROUP_* 归档，能否直接交给 msopprof-visualization 的 visualize 模式渲染？",
+      "expected_output": "回复应说明两套链路产物不互通，PROF_GROUP_* 不能直接作为 visualization 的采集目录；visualize 模式要求其自身 collect.py 生成且含 collection_manifest.json 的目录，有算子工程时则用 run_pipeline.py 做最小非重复采集",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ops-profiling"

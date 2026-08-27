@@ -361,6 +361,51 @@
           "description": "回复中提到了 工程模板"
         }
       ]
+    },
+    {
+      "id": 11,
+      "title": "构建宏不可按名字数值推断",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "构建系统里的 __DAV_C310__ 是否代表 __NPU_ARCH__=310？它与 arch35、DAV_3510 的关系是什么？",
+      "expected_output": "回复应说明 __DAV_C310__ 是构建系统内部宏，不可从 C310 字样按数值推断；它等价于 NpuArch::DAV_3510、arch35 和 __NPU_ARCH__=3510，应以明确映射而非猜测命名",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "架构查询失败的保留值处理",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "PlatformAscendC 查询当前芯片时 GetCurNpuArch 和 GetSocVersion 失败，会返回什么？可以继续按 DAV_2201 默认分支执行吗？",
+      "expected_output": "回复应说明失败分别返回 NpuArch::DAV_RESV 和 SocVersion::RESERVED_VERSION，不能静默假定 DAV_2201；应把未知架构作为显式错误或安全兜底路径处理，再补充平台信息",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 13,
+      "title": "同架构不同 SKU 参数不能套典型值",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "既然 Ascend950PR PCIE 和 Server 都是 DAV_3510，能否把 Server 的 32 个 Cube 核、128GB Memory 和频率硬编码给所有 arch35 产品？",
+      "expected_output": "回复应拒绝硬编码，说明同一 NpuArch 下频率、核数、L2 和 Memory 会随子型号或形态变化；应运行时通过 PlatformAscendC 或设备接口获取实际值，参考表中的典型 SKU 只能作说明，不能当所有 arch35 的真值",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "npu-arch"
