@@ -82,6 +82,71 @@
       "files": [],
       "expectations": [
       ]
+    },
+    {
+      "id": 6,
+      "title": "Stage 0 先排除基础错误",
+      "config": {
+        "max_tokens": 90000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "出现 ULP 级差异后，能否直接调整编译器选项？Stage 0 应先确认什么？",
+      "expected_output": "回复应禁止跳步，先确认输出 shape、dtype、NaN/Inf 分布和内存初始化等基础条件与参考一致；只有排除未初始化、越界、类型或形状问题后，才进入端到端差异定位和逐操作微基准。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "微基准隔离 Scalar 与 Vector 路径",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "怀疑 scale=max_val/255.0 在 Triton 中出现 1 ULP 差异，怎样确认是 scalar/vector 编译路径而不是凭直觉改公式？",
+      "expected_output": "回复应把常量除法拆成独立微基准，对同一输入分别测试 scalar 与 vector 执行路径，并和 Torch 参考逐值比较原始值及量化结果；先用证据锁定差异操作，再选择强制 vector 化或等价重写，不能仅靠端到端猜测。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "多 kernel 代码的 AST 结构适配",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "为了隔离精度问题新增一个辅助 @triton.jit kernel 后，静态检查只识别原来的 kernel，应该删除辅助 kernel 吗？",
+      "expected_output": "回复应先确认辅助 kernel 是真实调用链的一部分，并按多 kernel 场景调整 AST/调用结构使检查器能识别，而不是为通过检查删除必要计算或退化到 PyTorch；随后仍需用失败 case 做端到端和微基准验证。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "坐标或权重查表校正",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "量化坐标计算反复受 NPU 浮点除法舍入影响，已用微基准确认为根因。查表修复应怎样组织，哪些计算留在 kernel？",
+      "expected_output": "回复应建议在 host 侧按参考语义预生成有限坐标/权重查找表并作为输入传入；kernel 只负责查表、fp32 累加和最终按输入 dtype 输出。应控制表规模并在全部失败 case 上验证功能与精度，不在 kernel 内重复高风险除法。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "修复后必须回到完整验证",
+      "config": {
+        "max_tokens": 90000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "某一个最小输入 case 在修复后精度通过，是否可以直接宣布问题解决？",
+      "expected_output": "回复应说明不能；最小 case 只证明局部根因假设，应重新运行原失败 case、边界 shape/dtype 和完整 verifier case 集，确认 shape、NaN/Inf、MERE/MARE 等门限全部通过，并检查修复没有引入性能或功能回退。",
+      "expectations": [],
+      "files": []
     }
   ]
 }

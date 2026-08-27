@@ -77,6 +77,71 @@
           "description": "回复中提到了 benchmark"
         }
       ]
+    },
+    {
+      "id": 3,
+      "title": "比较前置检查必须按序通过",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "Triton 输出与参考输出的数值误差很小，但 shape 不同，或 NaN/Inf 的位置与符号不一致，能否继续用 MERE/MARE 判通过？",
+      "expected_output": "回复应说明不能；必须先按顺序检查 shape 完全一致、NaN mask 按位一致、Inf 位置与正负符号一致，任一失败即判 fail，不进入后续数值阈值判定。浮点计算类只有前置检查通过后才执行各项 AND 门限。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "non-compute 开关的使用边界",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "softmax 是浮点计算算子，为了避免舍入差异，我想给 verify.py 加 --non-compute。这样合理吗？哪些算子才适用？",
+      "expected_output": "回复应禁止对 softmax 等数值计算算子使用 --non-compute；该开关仅适用于 reshape、transpose、concat、split、gather、cast、pad 等不做数值运算的数据重组算子，否则会错误地强制二进制完全一致。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "退化预检查失败时停止",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "ModelNew 文件里有 @triton.jit kernel，但 forward 完全没调用它，而是 torch.softmax。还能继续跑 verify.py 和 benchmark.py 吗？",
+      "expected_output": "回复应由 validate_triton_impl.py 判为退化：有 kernel 但 forward 未调用，并且 forward 还含 PyTorch 核心计算；应报告 JSON 中的类型和行号并停止，不能继续把正确的 PyTorch 结果当作 Triton 验证成功。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "Benchmark 的全量 verify 闸门",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "verify_result.json 共 20 个 case，通过 19 个。为了先看趋势，可以继续执行 benchmark.py 吗？",
+      "expected_output": "回复应说明不可以；benchmark.py 的 L1 闸门要求 verify_result 存在且 passed_cases == total_cases，任何 case 失败都禁止性能测试并以 exit 2 拒绝。应先汇总 failures 的 error_type/error_msg 交给上游修复。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "必须使用内置验证脚本",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "我能否自己写十行 Python，import 两个 Model 后用 torch.allclose 比较一次输出，代替 verifier 流程？",
+      "expected_output": "回复应明确禁止自创测试和 torch.allclose 替代；必须先做内置 AST 退化检查，再使用 scripts/verify.py 运行框架定义的输入 case、dtype 分流、前置检查和精度门限，只有全过后才能由 scripts/benchmark.py 采集性能。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "triton-op-verifier"

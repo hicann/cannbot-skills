@@ -88,6 +88,71 @@
       "expected_output": "不可以。一次循环只指向一个 triton-latency-optimizer 优化点，重新采集确认瓶颈转移后再应用下一个；多点叠加会模糊因果，且本 skill 只采集加诊断，修复落地交回 latency-optimizer。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "Simulator 卡死时的降级路径",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "msprof op simulator 在大 shape 上卡死了，能否据此宣布该 kernel 无法优化？",
+      "expected_output": "回复应禁止把 simulator 卡死当作无解或硬件极限；应先缩小 shape、保持同一热点结构重新采集，仍不可用时转 board profiler。没有有效采集和覆盖表前不得给出瓶颈结论。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "四张表交叉确认瓶颈",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "只看 Cube 核 instr_exe.csv 里 MMAD 占比就能判断源代码哪一行慢吗？",
+      "expected_output": "回复应说明不够；每个 kernel 需同时查看 Cube 与 Vector 核各自的 instr_exe 和 code_exe 四张表，用 pipe 占比与热源码行交叉验证，再由 parse_prof.py 汇总覆盖表，不能用单张表推断全局瓶颈。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "i32 标量降级的证据和修复映射",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "Vector 核 SCALAR pipe 超过 30%，热点是大量 CMPN/ADD，调用次数接近 tile 元素数。这说明什么？",
+      "expected_output": "回复应将证据诊断为 i32 比较或边界计算发生标量降级，并从 latency-optimizer 的既有点 6、5、17 中选择一个最匹配的单点方向交接；一次循环只选一个，优化后重新采集确认瓶颈是否转移。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "覆盖表缺失行时禁止结论",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "枚举到 4 个 kernel，覆盖表只有 3 行，第 4 个没有记录。前三个证据很一致，可以先下全局结论吗？",
+      "expected_output": "回复应说明不能；覆盖表必须每个枚举 kernel 一行，并把状态标为已采集、失败或未触发之一。任一 kernel 缺失且未标注就未通过硬门禁，禁止诊断或“无更多改进”结论。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "不维护第二套优化目录",
+      "config": {
+        "max_tokens": 90000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "simulator 发现一种新瓶颈后，可以在这个 skill 内新增一套独立优化技巧编号并直接改代码吗？",
+      "expected_output": "回复应说明该 skill 只负责采集和诊断，不维护第二套优化技术目录，也不直接落修复；应把证据映射到 triton-latency-optimizer 已有的一个优化点，交由其修改，再重新采集验证因果。",
+      "expectations": [],
+      "files": []
     }
   ]
 }
