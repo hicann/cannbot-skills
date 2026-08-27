@@ -1,0 +1,131 @@
+{
+  "_comment": "ascendc-sync-audit benchmark 最小集（随仓库提交）：14 条例缺陷样例（SYNC-05 含 typo 与跨函数 PIPE 两种检测路径）+ 6 个正确反例 + analyzer 回归块。源：tests/ 全量语料与 references/examples。",
+  "files": {
+    "defects/bm_sync01_wait_before_set.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-01",
+      "defect_lines": [
+        24
+      ]
+    },
+    "defects/bm_sync02_datacopy_then_adds.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-02",
+      "defect_lines": [
+        26
+      ]
+    },
+    "defects/bm_sync03_single_core_residual_wait.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-03",
+      "defect_lines": [
+        26
+      ]
+    },
+    "defects/bm_sync04_two_set_one_wait.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-04",
+      "defect_lines": [
+        23,
+        24
+      ]
+    },
+    "defects/bm_sync05_hardevent_typo.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-05",
+      "defect_lines": [
+        25
+      ]
+    },
+    "defects/bm_sync06_pipebarrier_v_then_datacopy.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-06",
+      "defect_lines": [
+        26
+      ]
+    },
+    "defects/bm_sync07_flagid_over_15.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-07",
+      "defect_lines": [
+        13
+      ]
+    },
+    "defects/bm_sync08_return_skips_setflag.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-08",
+      "defect_lines": [
+        181
+      ]
+    },
+    "defects/bm_sync09_pipe_all_narrowable.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-09",
+      "defect_lines": [
+        25
+      ]
+    },
+    "defects/bm_sync10_unsigned_underflow.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-10",
+      "defect_lines": [
+        24
+      ]
+    },
+    "defects/bm_sync11_enque_deque_no_compute.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-11",
+      "defect_lines": [
+        27
+      ]
+    },
+    "defects/bm_sync12_syncall_asymmetric.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-12",
+      "defect_lines": [
+        26
+      ]
+    },
+    "defects/bm_sync13_atomic_ordering.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-13",
+      "defect_lines": [
+        12,
+        17
+      ]
+    },
+    "defects/bm_sync14_output_bundle_index.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-14",
+      "defect_lines": [
+        37,
+        38
+      ]
+    },
+    "correct/bm_good_a_standard_pipeline.asc": {
+      "label": "correct"
+    },
+    "correct/bm_good_b_double_buffer_pingpong.asc": {
+      "label": "correct"
+    },
+    "correct/bm_good_sync01_loop_pingpong.asc": {
+      "label": "correct"
+    },
+    "correct/bm_good_sync10_signed_no_report.asc": {
+      "label": "correct"
+    },
+    "correct/bm_real_blas1_correct.asc": {
+      "label": "correct"
+    },
+    "correct/bm_real_blas2_correct.asc": {
+      "label": "correct"
+    },
+    "defects/bm_sync05_conditional_pipe_wait.asc": {
+      "label": "defect",
+      "expected_sync": "SYNC-05",
+      "defect_lines": [
+        49
+      ]
+    }
+  }
+}

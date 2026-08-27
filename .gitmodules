@@ -1,0 +1,3 @@
+[submodule "ops/ascendc-sync-audit/tests"]
+	path = ops/ascendc-sync-audit/tests
+	url = https://gitcode.com/XieQianyi/ascendc-sync-audit-tests.git

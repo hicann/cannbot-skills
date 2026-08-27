@@ -21,6 +21,7 @@
 | **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 | — |
 | **ascendc-runtime-debug** | 运行时错误调试，错误码解析（161xxx/361xxx/561xxx） | — |
 | **ascendc-crash-debug** | 卡死/崩溃调试，Kernel 挂起、Coredump 分析 | — |
+| **ascendc-sync-audit** | 信号同步检验与修正，SetFlag/WaitFlag/CrossCore 配对、缺失、错序、flagId 冲突 | — |
 | **ascendc-ut-develop** | UT 单元测试用例开发与覆盖率增强 | — |
 | **ascendc-st-design** | aclnn 接口测试用例设计、L0 / L1 测试用例生成 | — |
 | **ascendc-code-review** | 代码检视方法论、5 大类别规范 | [查看](skills-usage.md#ascendc-code-review) |

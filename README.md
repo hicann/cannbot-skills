@@ -151,6 +151,7 @@ cannbot-skills/
 ║  │  ascendc-precision-debug 精度调试与症状速查                              │  ║
 ║  │  ascendc-runtime-debug   运行时错误码解析                                │  ║
 ║  │  ascendc-crash-debug     卡死/崩溃调试、Coredump 分析                    │  ║
+║  │  ascendc-sync-audit    信号同步检验与修正（SetFlag/WaitFlag/CrossCore） │  ║
 ║  │  ascendc-env-check       NPU 设备查询与环境验证                          │  ║
 ║  └─────────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                              ║

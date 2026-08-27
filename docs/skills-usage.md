@@ -110,6 +110,23 @@
 /ascendc-code-review 检查 split_core.cpp 是否有数值溢出问题
 ```
 
+### ascendc-sync-audit
+
+Ascend C 信号同步检验与修正。检测核内/核间同步的缺失、错序、不配对、flagId 冲突，支持全量检视、配对快查、死锁分诊、残留清理 4 个工作流，配套静态分析脚本 `sync_audit.py`（14 条 SYNC 条例，零依赖）。
+
+**Skill 驱动模式：**
+```
+/ascendc-sync-audit 检视 kernel.cpp 的同步有没有问题
+/ascendc-sync-audit 检查 set 和 wait 个数是否一致
+/ascendc-sync-audit 单核场景核间同步是否都取消了
+```
+
+**脚本直接使用：**
+```
+python3 ops/ascendc-sync-audit/scripts/sync_audit.py path/to/kernel.cpp
+python3 ops/ascendc-sync-audit/scripts/sync_audit.py cube.cpp vec.cpp --check pair
+```
+
 ---
 
 ## Skill 治理工具

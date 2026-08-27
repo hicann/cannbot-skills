@@ -1,0 +1,72 @@
+{
+  "eval_mode": "text",
+  "skill_name": "ascendc-sync-audit",
+  "evals": [
+    {
+      "id": 1,
+      "title": "同步问题全量检视方法（正向看护）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "我的 Ascend C 算子偶发计算结果错乱，怀疑是流水线同步有问题（SetFlag/WaitFlag 之类的），应该如何系统性地检查整个 kernel 文件的同步正确性？请说明检查流程和工具，不需要执行任何工具调用。",
+      "expected_output": "回复应说明 ascendc-sync-audit 的全量检视流程：\n- 运行静态分析脚本 sync_audit.py 生成候选问题（Set/Wait 配对、方向、缺同步等结构性检测）\n- 运行数据流图 analyzer（ascendc_flow_analyzer.py）补查 buffer 索引一致性（SYNC-14）\n- 单文件检测需发现并一并扫描关联头文件（#include），否则跨文件的 PIPE 方向匹配可能漏报\n- 脚本候选全量编号呈报，不筛选不否决；修改方案带文件名+行号+diff 对比\n- 列出修改方案后等用户确认选择，不立即修改源码",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "算子卡死死锁分诊（同步方向路由）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "distractor_skills": ["ascendc-crash-debug", "ascendc-precision-debug"],
+        "eval_mode": "text"
+      },
+      "prompt": "我的 Ascend C 融合算子在 NPU 上运行时卡死不返回（hang），代码里有 CrossCoreSetFlag/CrossCoreWaitFlag 和 SyncAll，我怀疑是同步信号导致的死等。应该按什么思路定位？不需要执行任何工具调用。",
+      "expected_output": "回复应给出同步死锁的分诊思路：\n- CrossCoreWaitFlag 无对应 SetFlag 或不配对（核间同步对称性、Set/Wait 个数一致性）\n- 提前 return/break 跳过 SetFlag 导致对端死等\n- 单核/裁剪场景残留 CrossCore 同步（该取消未取消）\n- flagId 与 Matmul 高阶 API 内部 flagId 冲突\n- SyncAll 在条件分支中部分核不到达导致死等\n- 可用静态分析脚本（sync_audit.py --check all）扫描定位，或临时加 PipeBarrier 二分定位",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "禁止否决脚本候选（行为红线看护）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "我用 ascendc-sync-audit 的 sync_audit.py 扫描算子，脚本报了一个 SYNC-02 红线候选说跨流水缺同步。但我读了代码，觉得这两个操作在同一条流水线上天然保序，应该是脚本误报。作为检视助手，你可以直接把这个候选标记为误报、从报告里去掉吗？",
+      "expected_output": "回复应拒绝否决脚本候选并说明规则：\n- 不能以\"同流水保序\"等推理理由否决或隐藏脚本的红线候选\n- 该 skill 的绝对规则是脚本候选必须原样编号呈报，LLM 是转述者不是判断者\n- 实测中 LLM 用类似理由（同流水保序等）否决脚本正确候选曾被证明错误，会造成不可见的漏报\n- 可以附加事实性说明或历史 case 证据，但\"改不改\"的决定权交给用户",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "Set/Wait 配对快查（跨核场景）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "我的 MIX 算子分成 cube kernel 和 vec kernel 两个文件，想快速检查两边的 CrossCoreSetFlag 和 CrossCoreWaitFlag 个数是否一致、EVENT_ID 是否匹配。该怎么查？不需要执行任何工具调用。",
+      "expected_output": "回复应说明配对快查方法：\n- cube 和 vec 两个文件需同时传给 sync_audit.py（跨核配对需要两侧信息），用 --check pair 模式\n- 脚本按 EVENT_ID/flag 变量分组统计 Set/Wait 数量、顺序与匹配关系\n- 核间同步需检查 AIC/AIV 侧别对称性（一侧 Set 对应另一侧 Wait）\n- 发现不配对候选按编号列出修改方案，等用户选择后执行",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "SYNC-14 buffer 索引一致性问题解释",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "什么是 Ascend C 双缓冲场景下\"同步信号与 buffer 索引不一致\"的问题？比如 SetFlag 用的是一个循环索引变量、DataCopy 用的是另一个索引变量。这类问题为什么危险，如何检测？不需要执行任何工具调用。",
+      "expected_output": "回复应解释 SYNC-14 条例：\n- 双缓冲/ping-pong 中 SetFlag/WaitFlag 的 flag_id 索引与 producer/consumer 的 buffer 索引必须同源（同一根变量），否则同步保护的 buffer 与实际读写的 buffer 错位\n- 后果是读到未完成或被覆盖的数据（数据错乱/半成品），且编译期不报错、难复现\n- 检测方式：脚本对同步窗口内 buffer 索引根变量做一致性对比，数据流图（ascendc_flow_analyzer.py）追踪索引别名与 buffer 生命周期\n- 输出 producer→consumer→sync 对比表（expected_root 与 actual_root），并可配对历史修复 PR 的 case 证据",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}
