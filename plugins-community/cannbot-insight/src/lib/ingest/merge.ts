@@ -23,17 +23,41 @@ export function dedupSession(
   return { shouldImport: true, existingSessionId: null };
 }
 
+// 稳定身份键：`${context}#${rank}`，context = subagentSessionId ?? 'main'，
+// rank 是上下文内交互次序。全局 turnIndex 是拼接数组 [main..., sub...] 的下标，
+// main 增长会平移所有 subagent 的下标导致 dedup 键漂移；上下文内 rank 不受影响。
+// 输入须为完整解析序（新解析的 turns 数组本身就是）。
+export function rankedKeyMap<T extends { subagentSessionId: string | null | undefined }>(
+  rows: T[],
+): Map<T, string> {
+  const counters = new Map<string, number>();
+  const keys = new Map<T, string>();
+  for (const row of rows) {
+    const ctx = row.subagentSessionId ?? 'main';
+    const rank = counters.get(ctx) ?? 0;
+    counters.set(ctx, rank + 1);
+    keys.set(row, `${ctx}#${rank}`);
+  }
+  return keys;
+}
+
+// DB 侧行的键推导：全局 turnIndex 升序等价于导入时的拼接数组序（各 context 连续），
+// 排序后按上下文计数即还原 rank。
+export function keyByRankedTurn<T extends { subagentSessionId: string | null | undefined; turnIndex: number }>(
+  rows: T[],
+): Map<string, T> {
+  const rowKeys = rankedKeyMap([...rows].sort((a, b) => a.turnIndex - b.turnIndex));
+  return new Map([...rowKeys.entries()].map(([row, key]) => [key, row]));
+}
+
 export function mergeTurns(existingTurns: TurnRow[], newTurns: TurnRow[]): TurnRow[] {
-  const existingKeys = new Set(
-    existingTurns.map(t => `${t.turnIndex}:${t.role}`)
-  );
+  const existingKeys = new Set(keyByRankedTurn(existingTurns).keys());
+  const incomingKeys = rankedKeyMap(newTurns);
 
   const merged = [...existingTurns];
   for (const turn of newTurns) {
-    const key = `${turn.turnIndex}:${turn.role}`;
-    if (!existingKeys.has(key)) {
+    if (!existingKeys.has(incomingKeys.get(turn)!)) {
       merged.push(turn);
-      existingKeys.add(key);
     }
   }
 
@@ -95,15 +119,17 @@ const TC_UPDATE_FIELDS: (keyof ToolCallRow)[] = [
 ];
 
 export function diffTurns(
-  existingByKey: Map<string, TurnRow>,
+  existingTurns: TurnRow[],
   incoming: TurnRow[],
 ): { toInsert: TurnRow[]; toUpdate: TurnUpdate[] } {
+  const existingByKey = keyByRankedTurn(existingTurns);
+  const incomingKeys = rankedKeyMap(incoming);
+
   const toInsert: TurnRow[] = [];
   const toUpdate: TurnUpdate[] = [];
 
   for (const turn of incoming) {
-    const key = `${turn.turnIndex}:${turn.role}`;
-    const existing = existingByKey.get(key);
+    const existing = existingByKey.get(incomingKeys.get(turn)!);
     if (!existing) {
       toInsert.push(turn);
       continue;

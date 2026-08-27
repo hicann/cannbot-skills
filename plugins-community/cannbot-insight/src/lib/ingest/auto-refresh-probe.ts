@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { PrismaClient } from '@prisma/client';
+import { isClaudeFormatSession } from '../shared/session-format';
 
 export interface AutoRefreshProbe {
   countChanged: boolean;
@@ -26,6 +27,8 @@ export interface ProbeSession {
   taskId: string;
   sourcePath: string | null;
   framework: string | null;
+  // proxy 捕获判定需要（framework=opencode + version 带 -proxy 是 claude 格式）
+  version?: string | null;
 }
 
 const NO_CHANGE: AutoRefreshProbe = {
@@ -55,11 +58,14 @@ export async function probeAutoRefresh(
   prisma: PrismaClient,
 ): Promise<AutoRefreshProbe> {
   if (!session.sourcePath) return { ...NO_CHANGE };
+  // claude 格式判定必须先于 opencode-db 分支：proxy 捕获的 opencode 会话
+  // sourcePath 是 jsonl，按 sqlite 打开只会抛错退化为 NO_CHANGE（永不触发
+  // 自动刷新）。原生 opencode（version 无 -proxy）不受影响。
+  if (isClaudeFormatSession(session.framework, session.version)) {
+    return probeClaudeCodeRefresh(session);
+  }
   if (session.framework === 'opencode') {
     return probeOpencodeRefresh(session, prisma);
-  }
-  if (session.framework === 'claude-code') {
-    return probeClaudeCodeRefresh(session);
   }
   return { ...NO_CHANGE };
 }
@@ -146,7 +152,7 @@ async function probeClaudeCodeRefresh(
     ? rawContent.split('\n').filter(l => l.trim())
     : [];
 
-  const parsed: Array<{ type?: string; message?: { role?: string; content?: unknown; stop_reason?: string | null } }> = [];
+  const parsed: Array<{ type?: string; message?: { role?: string; content?: unknown; stop_reason?: string | null }; stopReason?: string | null }> = [];
   for (const line of lines) {
     try {
       parsed.push(JSON.parse(line));
@@ -156,7 +162,7 @@ async function probeClaudeCodeRefresh(
   }
 
   // Find the last meaningful (non-metadata) line to determine session state.
-  let lastMeaningful: { type?: string; message?: { content?: unknown; stop_reason?: string | null } } | null = null;
+  let lastMeaningful: { type?: string; message?: { content?: unknown; stop_reason?: string | null }; stopReason?: string | null } | null = null;
   for (let i = parsed.length - 1; i >= 0; i--) {
     const t = parsed[i].type;
     if (t && !CLAUDE_METADATA_TYPES.has(t)) {
@@ -174,8 +180,10 @@ async function probeClaudeCodeRefresh(
       // Claude Code emits a `stop_reason` (end_turn / tool_use / ...) on a finalized
       // assistant response segment. Mirrors opencode's `time.completed IS NULL` check:
       // a present stop_reason means the response is complete (not streaming); an
-      // absent stop_reason means the response is still in progress.
-      const stopReason = lastMeaningful.message?.stop_reason;
+      // absent stop_reason means the response is still in progress. Proxy captures
+      // carry it as a TOP-LEVEL `stopReason` extension field (v1.74+) — read both,
+      // otherwise proxy captures look streaming forever and never auto-refresh.
+      const stopReason = lastMeaningful.message?.stop_reason ?? lastMeaningful.stopReason;
       streaming = !stopReason;
     } else if (t === 'result') {
       // Final result marker emitted after a completed assistant response.

@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { emit } from '../src/claude-emitter.ts';
+import { emit, ccVersionFromSystem } from '../src/claude-emitter.ts';
 import { sessionFilePath } from '../src/writer.ts';
 
 const SID = 'cpx-claude-fmt';
@@ -43,6 +43,14 @@ beforeAll(() => {
   for (const line of lines) {
     try { emit(JSON.parse(line)); } catch { /* skip */ }
   }
+});
+
+describe('ccVersionFromSystem（版本号提取）', () => {
+  it('数字 build（.467）与混合 build（.c19）都能取全，吃到 ; 为止', () => {
+    expect(ccVersionFromSystem([{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.234.467; cc_entrypoint=cli;' }])).toBe('2.1.234.467');
+    expect(ccVersionFromSystem([{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.234.c19; cc_entrypoint=sdk-cli;' }])).toBe('2.1.234.c19');
+    expect(ccVersionFromSystem('no version here')).toBeNull();
+  });
 });
 
 describe('claude-emitter: wire-record → extended claude-format JSON', () => {

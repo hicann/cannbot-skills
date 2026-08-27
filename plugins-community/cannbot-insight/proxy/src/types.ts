@@ -83,4 +83,6 @@ export interface ProxyRecord {
   // request header (verified on opencode 1.17.9) — deterministic subagent
   // routing with the parent's real session id. null for main/claude requests.
   parentSessionId?: string | null;
+  // 原始 user-agent（claude-cli/x.y.z / opencode/x.y.z）—— agent 版本号来源
+  userAgent?: string | null;
 }

@@ -17,7 +17,7 @@ import { proxySourceOf } from './adapters/claude-jsonl-full-context';
 import { normalize } from './normalize';
 import { splitIntoTurns, resetIdCounter } from './turn-split';
 import type { TurnRow, ToolCallRow, SkillEventRow } from './turn-split';
-import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls } from './merge';
+import { dedupSession, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls, rankedKeyMap, keyByRankedTurn } from './merge';
 import { buildBridges, resetIdCounter as resetBridgeIdCounter } from './bridge-builder';
 import { splitExecutions, resetIdCounter as resetExecIdCounter } from './execution-split';
 import type { ExecutionRow } from './execution-split';
@@ -107,6 +107,129 @@ function computeExecutionSkills(
   }
 
   return result;
+}
+
+// Execution / ExecutionSkill / InteractionBridge / SessionSkill 的重建数据。
+// 三条写入路径（新建、importSession merge、deltaRefresh）共用：merge 路径
+// 早期只 merge turns 不重建派生数据，subagent 有 Turn 无 Execution（Bug #5/#6）。
+// turns 的 id 须已换成 DB id（已存在的行），否则聚合挂不上 toolCalls。
+interface ExecutionGraphData {
+  executionsData: Record<string, unknown>[];
+  executionSkillsData: Array<{ executionId: string; skillName: string; skillVersion: number | null; isPrimary: boolean; user: string | null }>;
+  bridgesData: Record<string, unknown>[];
+  sessionSkillsData: Array<{ sessionId?: string; skillName: string; skillVersion: number | null; invocationCount: number }>;
+  rootExecutionId: string | null;
+}
+
+function buildExecutionGraph(
+  turns: TurnRow[],
+  toolCalls: ToolCallRow[],
+  skillEvents: SkillEventRow[],
+  interactions: RawInteraction[],
+  taskId: string,
+  toolUseIdMapping?: Map<string, string>,
+): ExecutionGraphData {
+  const executions = splitExecutions(turns, toolCalls, skillEvents, taskId);
+  const rootExecutionId = executions.find(e => !e.isSubagent)?.id ?? null;
+  const bridges: InteractionBridgeRow[] = rootExecutionId
+    ? buildBridges(interactions, toolCalls, turns, taskId, rootExecutionId, toolUseIdMapping)
+    : [];
+
+  const executionsData = executions.map(e => ({
+    id: e.id,
+    agentName: e.agentName,
+    agentSessionId: e.agentSessionId,
+    isSubagent: e.isSubagent,
+    subagentType: e.subagentType,
+    subagentName: e.subagentName,
+    parentExecutionId: e.parentExecutionId,
+    rootExecutionId: e.rootExecutionId,
+    depth: e.depth,
+    tokens: e.tokens,
+    inputTokens: e.inputTokens,
+    outputTokens: e.outputTokens,
+    reasoningTokens: e.reasoningTokens,
+    cacheReadInputTokens: e.cacheReadInputTokens,
+    cacheCreationInputTokens: e.cacheCreationInputTokens,
+    maxSingleCallTokens: e.maxSingleCallTokens,
+    cost: e.cost,
+    latencyMs: e.latencyMs,
+    createdAt: new Date(e.createdAt),
+    toolCallCount: e.toolCallCount,
+    toolCallErrorCount: e.toolCallErrorCount,
+    llmCallCount: e.llmCallCount,
+    skillLoadCount: e.skillLoadCount,
+    skillInvokeCount: e.skillInvokeCount,
+    finalResult: e.finalResult,
+    model: e.model,
+  }));
+
+  const executionSkillsMap = computeExecutionSkills(executions, turns, skillEvents);
+  const executionSkillsData: ExecutionGraphData['executionSkillsData'] = [];
+  for (const [execId, skills] of executionSkillsMap) {
+    for (const es of skills) {
+      executionSkillsData.push({
+        executionId: execId,
+        skillName: es.skillName,
+        skillVersion: es.skillVersion,
+        isPrimary: es.isPrimary,
+        user: es.user,
+      });
+    }
+  }
+
+  const bridgesData = bridges.map(b => ({
+    dispatchExecutionId: b.dispatchExecutionId,
+    dispatchTurnId: b.dispatchTurnId,
+    dispatchToolCallId: b.dispatchToolCallId,
+    dispatchContent: b.dispatchContent,
+    dispatchTimestamp: toDate(b.dispatchTimestamp),
+    responseExecutionId: b.responseExecutionId,
+    responseTurnId: b.responseTurnId,
+    responseContent: b.responseContent,
+    responseTimestamp: toDate(b.responseTimestamp),
+    subagentSessionId: b.subagentSessionId,
+    subagentType: b.subagentType,
+    subagentName: b.subagentName,
+    status: b.status,
+    subagentTokens: b.subagentTokens,
+    subagentLatencyMs: b.subagentLatencyMs,
+  }));
+
+  const uniqueSkillNames = [...new Set(skillEvents.map(se => se.skillName))];
+  const sessionSkillsData = uniqueSkillNames.map(skillName => {
+    const invocationCount = skillEvents.filter(
+      se => se.skillName === skillName && (se.eventType === 'invoke' || se.eventType === 'use' || se.eventType === 'dispatch')
+    ).length;
+    const loadEvent = skillEvents.find(se => se.skillName === skillName && se.eventType === 'load');
+    return {
+      skillName,
+      skillVersion: loadEvent?.skillVersion ?? null,
+      invocationCount,
+    };
+  });
+
+  return { executionsData, executionSkillsData, bridgesData, sessionSkillsData, rootExecutionId };
+}
+
+async function replaceExecutionGraph(
+  tx: Prisma.TransactionClient,
+  prismaSessionId: string,
+  graph: ExecutionGraphData,
+): Promise<void> {
+  await tx.execution.deleteMany({ where: { sessionId: prismaSessionId } });
+  await batchCreateMany(tx, 'Execution' as Prisma.ModelName,
+    graph.executionsData.map(e => ({ ...e, sessionId: prismaSessionId })));
+
+  await batchCreateMany(tx, 'ExecutionSkill' as Prisma.ModelName, graph.executionSkillsData);
+
+  await tx.interactionBridge.deleteMany({ where: { sessionId: prismaSessionId } });
+  await batchCreateMany(tx, 'InteractionBridge' as Prisma.ModelName,
+    graph.bridgesData.map(b => ({ ...b, sessionId: prismaSessionId })));
+
+  await tx.sessionSkill.deleteMany({ where: { sessionId: prismaSessionId } });
+  await batchCreateMany(tx, 'SessionSkill' as Prisma.ModelName,
+    graph.sessionSkillsData.map(s => ({ ...s, sessionId: prismaSessionId })));
 }
 
 export function computeSessionAggregates(
@@ -253,8 +376,20 @@ export async function importSession(
       // 来源随文件走（改名/移动不失效）。标记优先于 jsonl 里的 version 字段
       // 存入 Session.version，列表据此显示 proxy 徽标。
       proxyVersionMarker = proxySourceOf(dbPath);
-      sessionMeta.version = proxyVersionMarker ?? extractClaudeVersion(dbPath);
+      // 版本号与来源标记都保留：'<agent版本>-<marker>'（如 2.1.234.467-claude-proxy）。
+      // endsWith('-proxy') 的判定不受影响；显示层剥后缀取回版本号。
+      const agentVersion = extractClaudeVersion(dbPath);
+      sessionMeta.version = proxyVersionMarker
+        ? (agentVersion ? `${agentVersion}-${proxyVersionMarker}` : proxyVersionMarker)
+        : agentVersion;
     }
+    // framework 是 agent 归属：opencode 捕获（opencode-proxy 标记）归
+    // opencode，与捕获文件格式（claude-jsonl）正交 —— 列表/详情据此显示
+    // OpenCode 而非 Claude。
+    const frameworkForCapture = srcType === 'claude-jsonl' && (proxyVersionMarker?.endsWith('opencode-proxy') ?? false)
+      ? 'opencode'
+      : srcType === 'claude-jsonl' ? 'claude-code'
+      : srcType;
 
     if (rawInteractions.length === 0) {
       if (sharedDb) sharedDb.close();
@@ -270,7 +405,7 @@ export async function importSession(
           data: {
             taskId: sessionId,
             label: '（捕获中）',
-            framework: 'claude-code',
+            framework: frameworkForCapture,
             startTime: new Date(),
             sourcePath,
           },
@@ -326,8 +461,16 @@ export async function importSession(
     console.log(`[import] normalize+split: ${Date.now() - t3}ms, ${turns.length} turns, ${toolCalls.length} toolCalls, ${skillEvents.length} skillEvents`);
 
     const t4 = Date.now();
+    // claude-jsonl（含两种 proxy 捕获）按 taskId 找已存 session，不按
+    // framework 过滤 —— 同一捕获文件的 framework 归属曾从 claude-code 修正
+    // 为 opencode，按 framework 过滤会让老数据 miss 掉去新建重复行。
     const existingSession = await client.session.findFirst({
-      where: { taskId: sessionId, framework: srcType === 'opencode-db' ? 'opencode' : srcType === 'claude-jsonl' ? 'claude-code' : srcType },
+      where: {
+        taskId: sessionId,
+        ...(srcType === 'claude-jsonl' ? {} : {
+          framework: srcType === 'opencode-db' ? 'opencode' : srcType,
+        }),
+      },
     });
 
     const dedupResult = dedupSession(existingSession?.id ?? null, sessionId);
@@ -349,61 +492,18 @@ export async function importSession(
         where: { turnId: { in: existingTurns.map(t => t.id) } },
       });
 
-      const mergedTurnRows = mergeTurns(
-        existingTurns.map(t => ({
-          id: t.id,
-          sessionId: t.sessionId,
-          turnIndex: t.turnIndex,
-          role: t.role,
-          content: t.content,
-          contentJson: t.contentJson,
-          contentSummary: t.contentSummary,
-          inputMessagesJson: t.inputMessagesJson,
-          inputMessagesCount: t.inputMessagesCount,
-          inputMessagesTokens: t.inputMessagesTokens,
-          contextWindowPct: t.contextWindowPct,
-          agentName: t.agentName,
-          subagentName: t.subagentName,
-          subagentSessionId: t.subagentSessionId,
-          subagentType: null,
-          totalTokens: t.totalTokens,
-          inputTokens: t.inputTokens,
-          outputTokens: t.outputTokens,
-          reasoningTokens: t.reasoningTokens,
-          cacheReadTokens: t.cacheReadTokens,
-          cacheWriteTokens: t.cacheWriteTokens,
-          cost: 0,
-          createdAt_ts: t.createdAt_ts?.toISOString() ?? null,
-          completedAt: t.completedAt?.toISOString() ?? null,
-          latencyMs: t.latencyMs,
-          ttftMs: t.ttftMs,
-          model: t.model,
-          modelId: t.modelId,
-          providerId: t.providerId,
-          temperature: t.temperature,
-          maxTokens: t.maxTokens,
-          finishReason: t.finishReason,
-          isSubagent: t.isSubagent,
-          parentExecutionId: t.parentExecutionId,
-        })),
-        turns
-      );
-
       const existingSessionPrismaId = dedupResult.existingSessionId!;
 
-      const existingTurnKeyMap = new Map<string, string>();
-      for (const et of existingTurns) {
-        existingTurnKeyMap.set(`${et.turnIndex}:${et.role}`, et.id);
-      }
+      const existingTurnByRankedKey = keyByRankedTurn(existingTurns);
+      const incomingRankedKeys = rankedKeyMap(turns);
 
-      const newTurns = mergedTurnRows.filter(
-        mt => !existingTurns.some(et => et.turnIndex === mt.turnIndex && et.role === mt.role)
-      ).map(mt => ({ ...mt, sessionId: existingSessionPrismaId }));
+      const newTurns = turns
+        .filter(t => !existingTurnByRankedKey.has(incomingRankedKeys.get(t)!))
+        .map(t => ({ ...t, sessionId: existingSessionPrismaId }));
 
       const turnIdRemap = new Map<string, string>();
       for (const turn of turns) {
-        const key = `${turn.turnIndex}:${turn.role}`;
-        const existingDbId = existingTurnKeyMap.get(key);
+        const existingDbId = existingTurnByRankedKey.get(incomingRankedKeys.get(turn)!)?.id;
         if (existingDbId) {
           turnIdRemap.set(turn.id, existingDbId);
         }
@@ -415,6 +515,17 @@ export async function importSession(
       });
 
       const remapTurnId = (id: string): string => turnIdRemap.get(id) ?? id;
+
+      const remappedToolCalls = toolCalls.map(tc => ({ ...tc, turnId: remapTurnId(tc.turnId) }));
+      const remappedSkillEvents = skillEvents.map(se => ({ ...se, turnId: remapTurnId(se.turnId) }));
+      const turnsForGraph = turns.map(t => {
+        const dbId = turnIdRemap.get(t.id);
+        return dbId ? { ...t, id: dbId } : t;
+      });
+      const executionGraph = buildExecutionGraph(
+        turnsForGraph, remappedToolCalls, remappedSkillEvents,
+        normalized as unknown as RawInteraction[], sessionId, toolUseIdMapping,
+      );
 
       const mergedToolCallRows = mergeToolCalls(
         existingToolCalls.map(tc => ({
@@ -433,7 +544,7 @@ export async function importSession(
           dispatchBridgeId: tc.dispatchBridgeId,
           isSkillRelated: tc.isSkillRelated,
         })),
-        toolCalls.map(tc => ({ ...tc, turnId: remapTurnId(tc.turnId) }))
+        remappedToolCalls
       );
 
       const newToolCalls = mergedToolCallRows.filter(
@@ -460,7 +571,7 @@ export async function importSession(
           completedAt: se.completedAt?.toISOString() ?? null,
           durationMs: se.durationMs,
         })),
-        skillEvents.map(se => ({ ...se, turnId: remapTurnId(se.turnId) }))
+        remappedSkillEvents
       );
 
       const newSkillEvents = mergedSkillEventRows.filter(
@@ -479,6 +590,7 @@ export async function importSession(
         await batchCreateMany(tx, 'Turn' as Prisma.ModelName, newTurnsData);
         await batchCreateMany(tx, 'ToolCall' as Prisma.ModelName, newToolCallsData);
         await batchCreateMany(tx, 'SkillEvent' as Prisma.ModelName, newSkillEventsData);
+        await replaceExecutionGraph(tx, existingSessionPrismaId, executionGraph);
       }, { maxWait: 30000, timeout: 60000 });
 
       // Update session aggregates from all turns (old + new)
@@ -530,6 +642,7 @@ export async function importSession(
         totalSkillLoadCount: safeNum(updatedAggregates.totalSkillLoadCount),
         totalSubagentCount: safeNum(updatedAggregates.totalSubagentCount),
         endTime: safeDate(updatedAggregates.endTime),
+        rootExecutionId: executionGraph.rootExecutionId,
         ...(query ? { query } : {}),
         ...(updatedAggregates.model ? { model: updatedAggregates.model } : {}),
         // 占位 session（空捕获文件导入时创建）没有 version；merge 时补上
@@ -551,11 +664,11 @@ export async function importSession(
 
     // ── 新建 session 路径 ──
     const t6 = Date.now();
-    const executions = splitExecutions(turns, toolCalls, skillEvents, sessionId);
-    const rootExecutionId = executions.find(e => !e.isSubagent)?.id ?? null;
-    const bridges: InteractionBridgeRow[] = rootExecutionId
-      ? buildBridges(normalized as unknown as RawInteraction[], toolCalls, turns, sessionId, rootExecutionId, toolUseIdMapping)
-      : [];
+    const executionGraph = buildExecutionGraph(
+      turns, toolCalls, skillEvents,
+      normalized as unknown as RawInteraction[], sessionId, toolUseIdMapping,
+    );
+    const rootExecutionId = executionGraph.rootExecutionId;
 
     const aggregates = computeSessionAggregates(turns, toolCalls, skillEvents);
 
@@ -567,7 +680,7 @@ export async function importSession(
           label: rawInteractions.find(i => i.role === 'user')?.content?.substring(0, 100)
             ?? rawInteractions[0]?.content?.substring(0, 100) ?? null,
           query: rawInteractions.find(i => i.role === 'user')?.content?.substring(0, 200) ?? null,
-          framework: srcType === 'claude-jsonl' ? 'claude-code' : srcType === BRAND_SOURCE_TYPE ? srcType : 'opencode',
+          framework: srcType === 'claude-jsonl' ? frameworkForCapture : srcType === BRAND_SOURCE_TYPE ? srcType : 'opencode',
           model: aggregates.model,
           startTime: aggregates.startTime,
           endTime: aggregates.endTime,
@@ -613,94 +726,12 @@ export async function importSession(
         completedAt: toDate(se.completedAt),
       }));
 
-      const bridgesData = bridges.map(b => ({
-        sessionId: sid,
-        dispatchExecutionId: b.dispatchExecutionId,
-        dispatchTurnId: b.dispatchTurnId,
-        dispatchToolCallId: b.dispatchToolCallId,
-        dispatchContent: b.dispatchContent,
-        dispatchTimestamp: toDate(b.dispatchTimestamp),
-        responseExecutionId: b.responseExecutionId,
-        responseTurnId: b.responseTurnId,
-        responseContent: b.responseContent,
-        responseTimestamp: toDate(b.responseTimestamp),
-        subagentSessionId: b.subagentSessionId,
-        subagentType: b.subagentType,
-        subagentName: b.subagentName,
-        status: b.status,
-        subagentTokens: b.subagentTokens,
-        subagentLatencyMs: b.subagentLatencyMs,
-      }));
-
-      const executionsData = executions.map(e => ({
-        id: e.id,
-        sessionId: sid,
-        agentName: e.agentName,
-        agentSessionId: e.agentSessionId,
-        isSubagent: e.isSubagent,
-        subagentType: e.subagentType,
-        subagentName: e.subagentName,
-        parentExecutionId: e.parentExecutionId,
-        rootExecutionId: e.rootExecutionId,
-        depth: e.depth,
-        tokens: e.tokens,
-        inputTokens: e.inputTokens,
-        outputTokens: e.outputTokens,
-        reasoningTokens: e.reasoningTokens,
-        cacheReadInputTokens: e.cacheReadInputTokens,
-        cacheCreationInputTokens: e.cacheCreationInputTokens,
-        maxSingleCallTokens: e.maxSingleCallTokens,
-        cost: e.cost,
-        latencyMs: e.latencyMs,
-        createdAt: new Date(e.createdAt),
-        toolCallCount: e.toolCallCount,
-        toolCallErrorCount: e.toolCallErrorCount,
-        llmCallCount: e.llmCallCount,
-        skillLoadCount: e.skillLoadCount,
-        skillInvokeCount: e.skillInvokeCount,
-        finalResult: e.finalResult,
-        model: e.model,
-      }));
-
-      const executionSkillsMap = computeExecutionSkills(executions, turns, skillEvents);
-      const executionSkillsData: Array<{ executionId: string; skillName: string; skillVersion: number | null; isPrimary: boolean; user: string | null }> = [];
-      for (const [execId, skills] of executionSkillsMap) {
-        for (const es of skills) {
-          executionSkillsData.push({
-            executionId: execId,
-            skillName: es.skillName,
-            skillVersion: es.skillVersion,
-            isPrimary: es.isPrimary,
-            user: es.user,
-          });
-        }
-      }
-
-      const uniqueSkillNames = [...new Set(skillEvents.map(se => se.skillName))];
-      const sessionSkillsData = uniqueSkillNames.map(skillName => {
-        const invocationCount = skillEvents.filter(
-          se => se.skillName === skillName && (se.eventType === 'invoke' || se.eventType === 'use' || se.eventType === 'dispatch')
-        ).length;
-        const loadEvent = skillEvents.find(
-          se => se.skillName === skillName && se.eventType === 'load'
-        );
-        return {
-          sessionId: sid,
-          skillName,
-          skillVersion: loadEvent?.skillVersion ?? null,
-          invocationCount,
-        };
-      });
-
       const ts1 = Date.now();
       await batchCreateMany(tx, 'Turn' as Prisma.ModelName, turnsData);
       await batchCreateMany(tx, 'ToolCall' as Prisma.ModelName, toolCallsData);
       await batchCreateMany(tx, 'SkillEvent' as Prisma.ModelName, skillEventsData);
-      await batchCreateMany(tx, 'InteractionBridge' as Prisma.ModelName, bridgesData);
-      await batchCreateMany(tx, 'Execution' as Prisma.ModelName, executionsData);
-      await batchCreateMany(tx, 'ExecutionSkill' as Prisma.ModelName, executionSkillsData);
-      await batchCreateMany(tx, 'SessionSkill' as Prisma.ModelName, sessionSkillsData);
-      console.log(`[import] sessionSkill.createMany: ${sessionSkillsData.length} rows`);
+      await replaceExecutionGraph(tx, sid, executionGraph);
+      console.log(`[import] sessionSkill.createMany: ${executionGraph.sessionSkillsData.length} rows`);
 
       return sid;
     }, { maxWait: 30000, timeout: 60000 });
@@ -722,7 +753,9 @@ export async function deltaRefreshSession(
     throw new Error(`Session not found or no sourcePath: "${sessionId}"`);
   }
 
-  const sourceType = session.framework === 'opencode' ? 'opencode-db'
+  const sourceType = session.framework === 'opencode' && session.version?.endsWith('-proxy')
+    ? 'claude-jsonl'
+    : session.framework === 'opencode' ? 'opencode-db'
     : session.framework === 'claude-code' ? 'claude-jsonl'
     : session.framework;
 
@@ -787,9 +820,7 @@ export async function deltaRefreshSession(
       where: { turnId: { in: existingTurns.map(t => t.id) } },
     });
 
-    const existingTurnByKey = new Map<string, TurnRow>();
-    for (const et of existingTurns) {
-      existingTurnByKey.set(`${et.turnIndex}:${et.role}`, {
+    const existingTurnRows: TurnRow[] = existingTurns.map(et => ({
         id: et.id,
         sessionId: et.sessionId,
         turnIndex: et.turnIndex,
@@ -824,8 +855,8 @@ export async function deltaRefreshSession(
         finishReason: et.finishReason,
         isSubagent: et.isSubagent,
         parentExecutionId: et.parentExecutionId,
-      });
-    }
+    }));
+    const existingTurnByRankedKey = keyByRankedTurn(existingTurnRows);
 
     const existingTcByToolCallId = new Map<string, ToolCallRow>();
     for (const tc of existingToolCalls) {
@@ -847,10 +878,10 @@ export async function deltaRefreshSession(
       });
     }
 
+    const incomingRankedKeys = rankedKeyMap(turns);
     const turnIdRemap = new Map<string, string>();
     for (const turn of turns) {
-      const key = `${turn.turnIndex}:${turn.role}`;
-      const existingDbId = existingTurnByKey.get(key)?.id;
+      const existingDbId = existingTurnByRankedKey.get(incomingRankedKeys.get(turn)!)?.id;
       if (existingDbId) {
         turnIdRemap.set(turn.id, existingDbId);
       }
@@ -858,7 +889,7 @@ export async function deltaRefreshSession(
 
     const remapTurnId = (id: string): string => turnIdRemap.get(id) ?? id;
 
-    const { toInsert: newTurns, toUpdate: turnUpdates } = diffTurns(existingTurnByKey, turns);
+    const { toInsert: newTurns, toUpdate: turnUpdates } = diffTurns(existingTurnRows, turns);
 
     const remappedToolCalls = toolCalls.map(tc => ({ ...tc, turnId: remapTurnId(tc.turnId) }));
     const remappedSkillEvents = skillEvents.map(se => ({ ...se, turnId: remapTurnId(se.turnId) }));
@@ -905,8 +936,7 @@ export async function deltaRefreshSession(
     ];
     const matchedTurnVolatileUpdates: Array<{ dbId: string; data: Record<string, unknown> }> = [];
     for (const turn of turns) {
-      const key = `${turn.turnIndex}:${turn.role}`;
-      const existingId = existingTurnByKey.get(key)?.id;
+      const existingId = existingTurnByRankedKey.get(incomingRankedKeys.get(turn)!)?.id;
       if (!existingId) continue;
       const alreadyInDiffUpdate = appliedTurnUpdates.some(u => u.dbId === existingId);
       if (alreadyInDiffUpdate) {
@@ -916,7 +946,7 @@ export async function deltaRefreshSession(
       } else {
         const volatileData: Record<string, unknown> = {};
         let hasVolatileChange = false;
-        const existingTurn = existingTurnByKey.get(key)!;
+        const existingTurn = existingTurnByRankedKey.get(incomingRankedKeys.get(turn)!)!;
         for (const f of volatileFields) {
           if (turn[f] !== existingTurn[f]) {
             volatileData[f] = turn[f];
@@ -941,89 +971,15 @@ export async function deltaRefreshSession(
       return { dbId: u.dbId, data: mapped };
     });
 
-    const executions = splitExecutions(turns, remappedToolCalls, remappedSkillEvents, sessionId);
-    const rootExecutionId = executions.find(e => !e.isSubagent)?.id ?? null;
-    const bridges: InteractionBridgeRow[] = rootExecutionId
-      ? buildBridges(normalized as unknown as RawInteraction[], remappedToolCalls, turns, sessionId, rootExecutionId, toolUseIdMapping)
-      : [];
-
-    const executionSkillsMap = computeExecutionSkills(executions, turns, remappedSkillEvents);
-
-    const uniqueSkillNames = [...new Set(remappedSkillEvents.map(se => se.skillName))];
-    const sessionSkillsData = uniqueSkillNames.map(skillName => {
-      const invocationCount = remappedSkillEvents.filter(
-        se => se.skillName === skillName && (se.eventType === 'invoke' || se.eventType === 'use' || se.eventType === 'dispatch')
-      ).length;
-      const loadEvent = remappedSkillEvents.find(se => se.skillName === skillName && se.eventType === 'load');
-      return {
-        sessionId: session.id,
-        skillName,
-        skillVersion: loadEvent?.skillVersion ?? null,
-        invocationCount,
-      };
+    const turnsForGraph = turns.map(t => {
+      const dbId = turnIdRemap.get(t.id);
+      return dbId ? { ...t, id: dbId } : t;
     });
-
-    const executionsData = executions.map(e => ({
-      id: e.id,
-      sessionId: session.id,
-      agentName: e.agentName,
-      agentSessionId: e.agentSessionId,
-      isSubagent: e.isSubagent,
-      subagentType: e.subagentType,
-      subagentName: e.subagentName,
-      parentExecutionId: e.parentExecutionId,
-      rootExecutionId: e.rootExecutionId,
-      depth: e.depth,
-      tokens: e.tokens,
-      inputTokens: e.inputTokens,
-      outputTokens: e.outputTokens,
-      reasoningTokens: e.reasoningTokens,
-      cacheReadInputTokens: e.cacheReadInputTokens,
-      cacheCreationInputTokens: e.cacheCreationInputTokens,
-      maxSingleCallTokens: e.maxSingleCallTokens,
-      cost: e.cost,
-      latencyMs: e.latencyMs,
-      createdAt: new Date(e.createdAt),
-      toolCallCount: e.toolCallCount,
-      toolCallErrorCount: e.toolCallErrorCount,
-      llmCallCount: e.llmCallCount,
-      skillLoadCount: e.skillLoadCount,
-      skillInvokeCount: e.skillInvokeCount,
-      finalResult: e.finalResult,
-      model: e.model,
-    }));
-
-    const executionSkillsData: Array<{ executionId: string; skillName: string; skillVersion: number | null; isPrimary: boolean; user: string | null }> = [];
-    for (const [execId, skills] of executionSkillsMap) {
-      for (const es of skills) {
-        executionSkillsData.push({
-          executionId: execId,
-          skillName: es.skillName,
-          skillVersion: es.skillVersion,
-          isPrimary: es.isPrimary,
-          user: es.user,
-        });
-      }
-    }
-
-    const bridgesData = bridges.map(b => ({
-      sessionId: session.id,
-      dispatchExecutionId: b.dispatchExecutionId,
-      dispatchTurnId: b.dispatchTurnId,
-      dispatchToolCallId: b.dispatchToolCallId,
-      dispatchContent: b.dispatchContent,
-      dispatchTimestamp: toDate(b.dispatchTimestamp),
-      responseExecutionId: b.responseExecutionId,
-      responseTurnId: b.responseTurnId,
-      responseContent: b.responseContent,
-      responseTimestamp: toDate(b.responseTimestamp),
-      subagentSessionId: b.subagentSessionId,
-      subagentType: b.subagentType,
-      subagentName: b.subagentName,
-      status: b.status,
-      subagentTokens: b.subagentTokens,
-      subagentLatencyMs: b.subagentLatencyMs,
-    }));
+    const executionGraph = buildExecutionGraph(
+      turnsForGraph, remappedToolCalls, remappedSkillEvents,
+      normalized as unknown as RawInteraction[], sessionId, toolUseIdMapping,
+    );
+    const rootExecutionId = executionGraph.rootExecutionId;
 
     await prisma.$transaction(async (tx) => {
       await batchCreateMany(tx, 'Turn' as Prisma.ModelName, newTurnsData);
@@ -1041,16 +997,7 @@ export async function deltaRefreshSession(
 
       await batchCreateMany(tx, 'SkillEvent' as Prisma.ModelName, newSkillEventsData);
 
-      await tx.execution.deleteMany({ where: { sessionId: session.id } });
-      await batchCreateMany(tx, 'Execution' as Prisma.ModelName, executionsData);
-
-      await batchCreateMany(tx, 'ExecutionSkill' as Prisma.ModelName, executionSkillsData);
-
-      await tx.interactionBridge.deleteMany({ where: { sessionId: session.id } });
-      await batchCreateMany(tx, 'InteractionBridge' as Prisma.ModelName, bridgesData);
-
-      await tx.sessionSkill.deleteMany({ where: { sessionId: session.id } });
-      await batchCreateMany(tx, 'SessionSkill' as Prisma.ModelName, sessionSkillsData);
+      await replaceExecutionGraph(tx, session.id, executionGraph);
     }, { maxWait: 30000, timeout: 60000 });
 
     const allTurnsAfterMerge = await prisma.turn.findMany({ where: { sessionId: session.id } });

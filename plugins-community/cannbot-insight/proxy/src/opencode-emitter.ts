@@ -27,6 +27,7 @@
 import crypto from 'node:crypto';
 import type { ProxyRecord, AnthropicContentBlock, AnthropicUsage, OpenAIUsage } from './types';
 import { sessionFilePath, subagentFilePath, subagentMetaPath, appendClaudeLine, writeMeta } from './writer';
+import { proxySourceMarker } from './claude-emitter';
 
 interface OpenAIMessage {
   role: string;
@@ -214,12 +215,14 @@ export function emit(rec: ProxyRecord): void {
           content: [{ type: 'tool_result', tool_use_id: tcId, content: tcContent }],
         },
         timestamp: toISO(rec.receivedAt),
+        source: proxySourceMarker(rec.protocol),
       });
     } else {
       appendClaudeLine(targetFile, {
         type: m.role === 'user' ? 'user' : m.role,
         message: { role: m.role, content: convertUserContent(m.content) },
         timestamp: toISO(rec.receivedAt),
+        source: proxySourceMarker(rec.protocol),
       });
     }
   }
@@ -265,5 +268,13 @@ export function emit(rec: ProxyRecord): void {
     timestamp: toISO(rec.completedAt),
     system: systemText ?? undefined,
     tools,
+    version: ((rec.userAgent ?? '').match(/^opencode\/([0-9.]+)/) ?? [])[1] ?? undefined,
+    // Wire timing 三件套与 claude-emitter 对齐：duration_ms/stopReason 走
+    // adapter 进 Turn.latencyMs/finishReason，stopReason 同时是 auto-refresh
+    // probe 的"响应已完结"标记（缺失会被判 streaming 永不触发自动刷新）
+    duration_ms: rec.latencyMs,
+    stopReason: rec.response.stop_reason ?? undefined,
+    ttftMs: rec.ttftMs ?? undefined,
+    source: proxySourceMarker(rec.protocol),
   });
 }

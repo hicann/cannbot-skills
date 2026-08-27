@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server';
 import fs from 'node:fs';
 import { prisma } from '@/lib/db';
 import { probeAutoRefresh, resolveClaudeSessionFile, type ProbeSession } from '@/lib/ingest/auto-refresh-probe';
+import { isClaudeFormatSession } from '@/lib/shared/session-format';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -26,10 +27,10 @@ export async function GET(request: NextRequest | Request) {
 
   const session = await prisma.session.findFirst({
     where: { taskId },
-    select: { id: true, taskId: true, sourcePath: true, framework: true },
+    select: { id: true, taskId: true, sourcePath: true, framework: true, version: true },
   });
-  if (!session || session.framework !== 'claude-code' || !session.sourcePath) {
-    return new Response('Not a claude-code session with a sourcePath', { status: 400 });
+  if (!session || !isClaudeFormatSession(session.framework, session.version) || !session.sourcePath) {
+    return new Response('Not a claude-format session (claude-code or proxy capture) with a sourcePath', { status: 400 });
   }
 
   const filePath = resolveClaudeSessionFile(session.sourcePath, session.taskId);
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest | Request) {
     taskId: session.taskId,
     sourcePath: session.sourcePath,
     framework: session.framework,
+    version: session.version,
   };
 
   const stream = new ReadableStream<Uint8Array>({

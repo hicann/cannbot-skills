@@ -49,6 +49,14 @@ function dedupEnabled(): boolean {
 // rename/move, independent of directory conventions. The marker KEEPS the
 // original agent name (claude-proxy / opencode-proxy, by wire protocol).
 // cannbot-insight reads this at import time to label the session.
+// claude-code 把版本号放在 system 的计费头里（x-anthropic-billing-header:
+// cc_version=2.1.234.467; cc_entrypoint=cli;）—— 逐字捕获时顺手留存。
+export function ccVersionFromSystem(system: string | AnthropicContentBlock[] | undefined): string | null {
+  // 版本 token 形如 2.1.234.467 或 2.1.234.c19（数字+build hash），吃到 ; 为止
+  const m = (extractSystemText(system) ?? '').match(/cc_version=([^;\s"']+)/);
+  return m ? m[1].replace(/\.+$/, '') : null;
+}
+
 export function proxySourceMarker(protocol: Protocol): string {
   return protocol === 'openai' ? 'opencode-proxy' : 'claude-proxy';
 }
@@ -298,6 +306,7 @@ export function emit(rec: ProxyRecord): void {
     timestamp: toISO(rec.completedAt),
     system: body.system ?? undefined,
     tools: Array.isArray(body.tools) ? body.tools : undefined,
+    version: ccVersionFromSystem(body.system) ?? undefined,
     duration_ms: rec.latencyMs,
     stopReason: rec.response.stop_reason ?? undefined,
     ttftMs: rec.ttftMs ?? undefined,

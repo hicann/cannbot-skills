@@ -6,7 +6,7 @@ LLM 编码 Agent 的 Session 级可观测工具。辅助长上下文分析、模
 
 ## 功能介绍
 
-导入 opencode.db 或 Claude Code JSONL 日志，逐轮分析 Agent Session：
+导入 SQLite（opencode.db / CANNBot-Insight 归档，自动识别）或 JSONL（Claude 原生 / cpx proxy 捕获）日志，逐轮分析 Agent Session：
 
 - **Token 与费用** — 每轮 token 五项拆解柱状图，按模型上下文窗口显示占比；根据使用量和模型定价估算费用
 - **上下文增长** — 按 subagent session 展示上下文增长曲线；动画回放 context window 变化过程，含 subagent 生成/消亡标记；`/compact` 压缩标记与上下文下降标注，支持多次压缩
@@ -14,6 +14,7 @@ LLM 编码 Agent 的 Session 级可观测工具。辅助长上下文分析、模
 - **Subagent 追踪** — 识别 subagent session 与 dispatch→response 链路；subagent turn 在 Turns 时间线内联展示（带徽章），数量显示在 Overview 卡片
 - **Turn 快速跳转** — 在 Turns 时间线输入 turn 编号（如 `#459`）回车即可直达该轮次并滚动到视图；subagent turn 自动展开祖先 dispatch lane
 - **Wire 轮次（proxy 捕获）** — 直接读 cpx 捕获文件逐轮重组：每个 wire round 展示完整输入（累积 messages，本轮新增高亮）与输出（response 原文），与 DB 重建的 LLM Input 对照；tab 默认隐藏，`./start.sh -a` 启动才显示
+- **密钥脱敏（proxy 捕获）** — API key 永不落盘：在唯一落盘咽喉对敏感字段与各厂家键形（`sk-ant-` / `AIza` / `gsk_` / `LTAI` / `Bearer` 凭据 / env 回显 / URL query）统一打码（`前4…后4`），cpx 启动日志同源掩码
 - **Round-Pair 切分（proxy 捕获）** — proxy session 的 Turns 按每轮 输入/输出 成对切分（时间线带 输入/输出 徽章）：输入 turn 逐条展示本轮新增的 verbatim wire 消息，输出 turn 的 LLM Input 存储并直接返回原始累积请求，wire 顺序（含 tool_result 与 system 注入的先后）精确保留，无需重建
 - **Skill 事件** — 跟踪每轮 skill load/invoke/use 事件
 - **Skill 全文（SKILL.md）** — Skill Summary 与 Skills per Agent 每个 skill 均可点击，取原生 Skill 工具注入内容或 SKILL.md 读取结果重建全文，支持下载
@@ -41,7 +42,7 @@ Linux系统（Windows系统请使用start.bat代替）：
 
 浏览器打开 `http://localhost:21025`。导入日志文件后，点击 session 进入 9 个分析 Tab。
 
-Web UI 还支持：导出 session 为独立 SQLite 或层级 Markdown；上传 session 到 CANNBay（带提交信息对话框）。CANNBay master 最多保留最新 20 个 session（更旧的自动归档到按月命名的 `archive-YYYY-MM` 分支）；上传用持久本地镜像，每次只 fetch 增量。
+Web UI 还支持：导出 session 为独立 SQLite 或层级 Markdown；上传 session 到 CANNBay v2（atomgit 数据集仓，带提交信息对话框）。上传格式为 proxy 捕获的 claude-jsonl 文件夹（主会话 + subagents），opencode 会话自动从 DB 导出 jsonl；上传前强制数据治理（密钥清洗 + 残留熔断，密钥不出公开仓）。CANNBay 列表/下载走 partial clone（`--filter=blob:none`）持久镜像：列表只读元数据秒级返回，导入单条才按需下载 blob，千级会话仓库也不变慢。旧版 .db 快照上传/解析（gitcode CANNBay）后端保留，用于读取历史数据，界面不再展示。
 
 ## 方式二：CLI 上传 + Web 分析
 
@@ -109,7 +110,7 @@ npx tsx src/cli/index.ts upload --file ~/.claude/projects/<hash>/<uuid>.jsonl --
 | `--list` | 仅列出可选 session，不上传 |
 | `--framework <name>` | 框架类型（自动推断：opencode-db → opencode，claude-jsonl → claude-code） |
 
-上传后在 Web UI 上查看分析：导入时点击 **CANNBay** 按钮，直接从仓库选择 DB 文件导入，无需手动下载。
+上传后在 Web UI 上查看分析：导入时点击 **CANNBay** 按钮，直接从仓库选择会话文件夹导入（按需下载该会话文件），无需手动 clone。
 
 ## 方式三：零依赖导出 Session DB
 

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs';
 import { importSession } from '@/lib/ingest/data-service';
 import { BRAND_SOURCE_TYPE } from '@/lib/branding';
+import { detectSqliteSource } from '@/lib/ingest/sqlite-detect';
 import { prisma } from '@/lib/db';
 
 export const maxDuration = 300;
@@ -17,7 +18,8 @@ export const maxDuration = 300;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { source, sessionId, filePath } = body;
+    const { sessionId, filePath } = body;
+    let { source } = body;
 
     if (source !== 'opencode-db' && source !== 'claude-jsonl' && source !== BRAND_SOURCE_TYPE) {
       return NextResponse.json(
@@ -31,6 +33,13 @@ export async function POST(request: NextRequest) {
         { error: 'Missing required fields: sessionId, filePath' },
         { status: 400 }
       );
+    }
+
+    // 单一 SQLite 入口：opencode 与 CANNBot-Insight 导出库按 schema 自动
+    // 区分（与 /import-file/sessions 同一纠正逻辑）
+    if (source === 'opencode-db' || source === BRAND_SOURCE_TYPE) {
+      const detected = detectSqliteSource(filePath);
+      if (detected && detected !== source) source = detected;
     }
 
     // Distinguish "file missing" from "session already exists" up front:

@@ -176,12 +176,12 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
     setUploadError(null)
     setUploadDialogItem(null)
     try {
-      const res = await fetch('/api/ingest/upload-session', {
+      const res = await fetch('/api/ingest/cannbay2', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'upload',
           taskId: item.taskId,
-          framework: item.framework ?? 'unknown',
           description,
         }),
       })
@@ -421,13 +421,13 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
                     </Link>
                   </TableCell>
                   <TableCell className="text-xs">
-                    {item.framework === 'opencode' ? (
-                      <Badge variant="blue">OpenCode</Badge>
-                    ) : item.framework === 'claude-code' ? (
+                    {item.framework === 'opencode' || item.framework === 'claude-code' ? (
                       <span className="inline-flex items-center gap-1">
-                        <Badge variant="orange">Claude</Badge>
+                        {item.framework === 'opencode'
+                          ? <Badge variant="blue">OpenCode</Badge>
+                          : <Badge variant="orange">Claude</Badge>}
                         {item.version?.endsWith('-proxy') && (
-                          <Badge variant="yellow">{item.version}</Badge>
+                          <Badge variant="yellow">proxy</Badge>
                         )}
                       </span>
                     ) : item.framework === BRAND_SOURCE_TYPE ? (

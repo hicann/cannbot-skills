@@ -14,6 +14,7 @@ import { isContinuationTurn } from '@/lib/shared/command-parser';
 import { listSubagentSessions } from '@/lib/ingest/adapters/claude-jsonl';
 import { readFullContext, type FullContext } from '@/lib/ingest/adapters/claude-jsonl-full-context';
 import { readWireEnrichments, wireEnrichmentKey } from '@/lib/ingest/adapters/claude-jsonl-wire';
+import { isClaudeFormatSession } from '@/lib/shared/session-format';
 import path from 'node:path';
 
 // Read the verbatim captured context (system prompt, tools, memory files, skills)
@@ -29,10 +30,10 @@ import path from 'node:path';
 async function readSessionFullContext(sessionId: string, subagentSessionId: string | null = null): Promise<FullContext | null> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { taskId: true, framework: true, sourcePath: true },
+    select: { taskId: true, framework: true, version: true, sourcePath: true },
   });
   if (!session || !session.sourcePath) return null;
-  if (session.framework !== 'claude-code') return null;
+  if (!isClaudeFormatSession(session.framework, session.version)) return null;
   if (subagentSessionId) {
     try {
       // Subagent dirs are keyed by the session id (Session.taskId), NOT the

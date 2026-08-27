@@ -13,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { sessionFilePath, sidsFilePath } from '../writer.ts';
+import { redactString } from '../redactor.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -226,6 +227,31 @@ function parseOpencodeProvider(agentArgs: string[]): string | null {
 function opencodeDataDir(): string {
   const xdg = process.env.XDG_DATA_HOME;
   return xdg ? path.join(xdg, 'opencode') : path.join(os.homedir(), '.local', 'share', 'opencode');
+}
+
+// claude 原生转录：~/.claude/projects/<cwd-slug>/<session-id>.jsonl。捕获
+// sid 即 claude 的真实 session id（header 路由），文件名精确同名；slug
+// 规则 = cwd 非字母数字全部转 '-'（claude-code 约定）。候选不存在时全
+// projects 目录扫一遍兜底（agent 内部切换过 cwd 的场景）。
+function claudeNativeLogPath(sid: string): string | null {
+  const base = path.join(os.homedir(), '.claude', 'projects');
+  const slug = process.cwd().replace(/[^a-zA-Z0-9]/g, '-');
+  const candidate = path.join(base, slug, `${sid}.jsonl`);
+  if (fs.existsSync(candidate)) return candidate;
+  try {
+    for (const d of fs.readdirSync(base)) {
+      const p = path.join(base, d, `${sid}.jsonl`);
+      if (fs.existsSync(p)) return p;
+    }
+  } catch { /* */ }
+  return null;
+}
+
+// opencode ≥1.17 会话统一存单一 sqlite（opencode.db），无 per-session
+// 转录文件；运行日志在 log/ 下。
+function opencodeNativePaths(): string {
+  const dir = opencodeDataDir();
+  return `${path.join(dir, 'opencode.db')} · ${path.join(dir, 'log', 'opencode.log')}`;
 }
 
 // Provider ids with stored credentials (i.e. the ones opencode can actually
@@ -666,8 +692,7 @@ async function main(): Promise<void> {
   // （opencode/generic）下承载记录。live watch 跟踪整个目录。
   log(`capture: ${PROXY_DIR}/cpx-<claude-session-id>.jsonl  (本次占位: cpx-${sid.slice(0, 8)}…)`);
   log(`  watch live: tail -F "${PROXY_DIR}"/*.jsonl`);
-  const maskKey = (v: string) => v.length <= 8 ? '****' : `${v.slice(0, 4)}...${v.slice(-4)}`;
-  const maskSecrets = (args: string[]) => args.map(a => a.replace(/("(?:ANTHROPIC_API_KEY|OPENAI_API_KEY)"\s*:\s*")([^"]*)/, (_m, p1: string, v: string) => p1 + maskKey(v)));
+  const maskSecrets = (args: string[]) => args.map(a => redactString(a));
   log(`launching: ${agentCmd} ${maskSecrets([...extraArgs, ...agentArgs]).join(' ')}`);
 
   const child = spawn(agentCmd, [...extraArgs, ...agentArgs], {
@@ -719,6 +744,11 @@ async function main(): Promise<void> {
   let lastUrl: string | null = null;
   for (const { sid: captureSid, file: p } of produced) {
     log(`captured ${(fs.statSync(p).size / 1024).toFixed(1)}KB [${captureSid}] → importing ...`);
+    log(`  capture  : ${p}`);
+    const agentLog = profile === 'claude' ? claudeNativeLogPath(captureSid)
+      : profile === 'opencode' ? opencodeNativePaths()
+      : null;
+    if (agentLog) log(`  agent log: ${agentLog}`);
     const result = await triggerIngest(captureSid, p);
     if (result) lastUrl = `${INSIGHT_BASE}/session/${captureSid}`;
     else log('ingest failed; you can import manually via the cannbot-insight UI');

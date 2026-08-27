@@ -235,12 +235,12 @@ export class InsightClient {
     return { size: buffer.length };
   }
 
-  async uploadSession(taskId: string, description: string, framework?: string): Promise<ApiUploadResponse> {
-    return this.request<ApiUploadResponse>('POST', '/api/ingest/upload-session', undefined, {
+  async uploadSession(taskId: string, description: string): Promise<ApiUploadResponse> {
+    return this.request<ApiUploadResponse>('POST', '/api/ingest/cannbay2', undefined, {
+      action: 'upload',
       taskId,
-      framework: framework ?? 'unknown',
       description,
-    }, 120000);
+    }, 300000);
   }
 
   // Exports a session to Markdown. Same code path as the web UI's "Export Markdown"

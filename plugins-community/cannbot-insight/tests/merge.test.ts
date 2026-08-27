@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { describe, it, expect } from 'vitest';
-import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls } from '../src/lib/ingest/merge.ts';
+import { dedupSession, mergeTurns, mergeToolCalls, mergeSkillEvents, diffTurns, diffToolCalls, rankedKeyMap, keyByRankedTurn } from '../src/lib/ingest/merge.ts';
 import type { TurnRow, ToolCallRow, SkillEventRow } from '../src/lib/ingest/turn-split.ts';
 
 function makeTurn(turnIndex: number, role: string, sessionId: string = 's1'): TurnRow {
@@ -119,7 +119,7 @@ describe('merge', () => {
       expect(result.length).toBe(2);
     });
 
-    it('existing 5 turns, new adds 3 more: result has 8 turns, no duplicates', () => {
+    it('existing 5 turns, full re-parse of 7: result has 7 turns, no duplicates', () => {
       const existing = [
         makeTurn(0, 'user'),
         makeTurn(1, 'assistant'),
@@ -128,6 +128,10 @@ describe('merge', () => {
         makeTurn(4, 'user'),
       ];
       const newTurns = [
+        makeTurn(0, 'user'),
+        makeTurn(1, 'assistant'),
+        makeTurn(2, 'user'),
+        makeTurn(3, 'assistant'),
         makeTurn(4, 'user'),
         makeTurn(5, 'assistant'),
         makeTurn(6, 'user'),
@@ -141,7 +145,7 @@ describe('merge', () => {
       expect(indices).toContain(6);
     });
 
-    it('deduplicates by turnIndex+role combination', () => {
+    it('deduplicates by context rank slot', () => {
       const existing = [makeTurn(0, 'user'), makeTurn(1, 'assistant')];
       const newTurns = [makeTurn(0, 'user'), makeTurn(1, 'assistant'), makeTurn(2, 'user')];
       const result = mergeTurns(existing, newTurns);
@@ -150,20 +154,68 @@ describe('merge', () => {
       expect(same0User.length).toBe(1);
     });
 
-    it('allows different roles at same turnIndex', () => {
-      const existing = [makeTurn(0, 'user')];
-      const newTurns = [makeTurn(0, 'system')];
+    it('main 增长平移 subagent 全局下标时不产生重复（Bug #7）', () => {
+      const sub = (i: number, role: string) => ({ ...makeTurn(i, role), subagentSessionId: 'sub-x', isSubagent: true });
+      const existing = [
+        makeTurn(0, 'user'),
+        makeTurn(1, 'assistant'),
+        makeTurn(2, 'user'),
+        makeTurn(3, 'assistant'),
+        sub(4, 'user'),
+        sub(5, 'assistant'),
+      ];
+      const newTurns = [
+        makeTurn(0, 'user'),
+        makeTurn(1, 'assistant'),
+        makeTurn(2, 'user'),
+        makeTurn(3, 'assistant'),
+        makeTurn(4, 'user'),
+        sub(5, 'user'),
+        sub(6, 'assistant'),
+      ];
       const result = mergeTurns(existing, newTurns);
-      expect(result.length).toBe(2);
+      expect(result.length).toBe(7);
+      expect(result.filter(t => t.subagentSessionId === 'sub-x').length).toBe(2);
+      expect(result.some(t => t.turnIndex === 4 && t.role === 'user' && !t.subagentSessionId)).toBe(true);
     });
 
     it('result is sorted by turnIndex then role', () => {
-      const existing = [makeTurn(1, 'assistant')];
-      const newTurns = [makeTurn(0, 'user'), makeTurn(2, 'user')];
+      const existing = [makeTurn(0, 'user'), makeTurn(1, 'assistant')];
+      const newTurns = [makeTurn(0, 'user'), makeTurn(1, 'assistant'), makeTurn(2, 'user')];
       const result = mergeTurns(existing, newTurns);
       expect(result[0].turnIndex).toBe(0);
       expect(result[1].turnIndex).toBe(1);
       expect(result[2].turnIndex).toBe(2);
+    });
+  });
+
+  describe('ranked keys (Bug #7)', () => {
+    it('main 增长不改变 subagent 的键', () => {
+      const sub = (i: number, role: string) => ({ ...makeTurn(i, role), subagentSessionId: 'sub-x' });
+      const before = rankedKeyMap([
+        makeTurn(0, 'user'), makeTurn(1, 'assistant'),
+        sub(2, 'user'), sub(3, 'assistant'),
+      ]);
+      const after = rankedKeyMap([
+        makeTurn(0, 'user'), makeTurn(1, 'assistant'), makeTurn(2, 'user'),
+        sub(3, 'user'), sub(4, 'assistant'),
+      ]);
+      expect(after.get([...after.keys()].find(r => r.subagentSessionId === 'sub-x' && r.role === 'user')!)).toBe('sub-x#0');
+      expect(after.get([...after.keys()].find(r => r.subagentSessionId === 'sub-x' && r.role === 'assistant')!)).toBe('sub-x#1');
+      expect(before.get([...before.keys()].find(r => r.subagentSessionId === 'sub-x')!)).toBe('sub-x#0');
+    });
+
+    it('keyByRankedTurn 从 DB 全局下标还原上下文 rank', () => {
+      const sub = (i: number, role: string) => ({ ...makeTurn(i, role), subagentSessionId: 'sub-x' });
+      const dbRows = [
+        makeTurn(0, 'user'), makeTurn(1, 'assistant'),
+        sub(4, 'user'), sub(5, 'assistant'),
+      ].slice().sort((a, b) => b.turnIndex - a.turnIndex);
+      const byKey = keyByRankedTurn(dbRows);
+      expect(byKey.get('main#0')!.turnIndex).toBe(0);
+      expect(byKey.get('main#1')!.turnIndex).toBe(1);
+      expect(byKey.get('sub-x#0')!.turnIndex).toBe(4);
+      expect(byKey.get('sub-x#1')!.turnIndex).toBe(5);
     });
   });
 
@@ -224,9 +276,8 @@ describe('merge', () => {
 
   describe('diffTurns', () => {
     it('all new turns → all inserted, zero updated', () => {
-      const existing = new Map<string, TurnRow>();
       const incoming = [makeTurn(0, 'user'), makeTurn(1, 'assistant')];
-      const { toInsert, toUpdate } = diffTurns(existing, incoming);
+      const { toInsert, toUpdate } = diffTurns([], incoming);
       expect(toInsert.length).toBe(2);
       expect(toUpdate.length).toBe(0);
     });
@@ -234,12 +285,7 @@ describe('merge', () => {
     it('identical turns → zero inserted, zero updated', () => {
       const t0 = makeTurn(0, 'user');
       const t1 = makeTurn(1, 'assistant');
-      const existing = new Map<string, TurnRow>([
-        ['0:user', t0],
-        ['1:assistant', t1],
-      ]);
-      const incoming = [t0, t1];
-      const { toInsert, toUpdate } = diffTurns(existing, incoming);
+      const { toInsert, toUpdate } = diffTurns([t0, t1], [t0, t1]);
       expect(toInsert.length).toBe(0);
       expect(toUpdate.length).toBe(0);
     });
@@ -247,8 +293,7 @@ describe('merge', () => {
     it('existing turn with changed content → 1 updated', () => {
       const old = makeTurn(1, 'assistant');
       const newTurn = { ...old, content: 'updated content', completedAt: '2026-01-02', latencyMs: 500 };
-      const existing = new Map<string, TurnRow>([['1:assistant', old]]);
-      const { toInsert, toUpdate } = diffTurns(existing, [newTurn]);
+      const { toInsert, toUpdate } = diffTurns([old], [newTurn]);
       expect(toInsert.length).toBe(0);
       expect(toUpdate.length).toBe(1);
       expect(toUpdate[0].dbId).toBe(old.id);
@@ -262,11 +307,7 @@ describe('merge', () => {
       const old1 = makeTurn(1, 'assistant');
       const new1 = { ...old1, totalTokens: 999, completedAt: '2026-01-03' };
       const new2 = makeTurn(2, 'user');
-      const existing = new Map<string, TurnRow>([
-        ['0:user', old0],
-        ['1:assistant', old1],
-      ]);
-      const { toInsert, toUpdate } = diffTurns(existing, [old0, new1, new2]);
+      const { toInsert, toUpdate } = diffTurns([old0, old1], [old0, new1, new2]);
       expect(toInsert.length).toBe(1);
       expect(toInsert[0].turnIndex).toBe(2);
       expect(toUpdate.length).toBe(1);
@@ -276,8 +317,33 @@ describe('merge', () => {
     it('null→null changes are not included in update', () => {
       const old = makeTurn(1, 'assistant');
       const newTurn = { ...old };
-      const existing = new Map<string, TurnRow>([['1:assistant', old]]);
-      const { toUpdate } = diffTurns(existing, [newTurn]);
+      const { toUpdate } = diffTurns([old], [newTurn]);
+      expect(toUpdate.length).toBe(0);
+    });
+
+    it('main 增长平移 subagent 下标时：subagent 匹配旧行、新 main turn 插入（Bug #7）', () => {
+      const sub = (i: number, role: string) => ({
+        ...makeTurn(i, role),
+        subagentSessionId: 'sub-x',
+        isSubagent: true,
+        content: `${role} sub`,
+        contentSummary: `${role} sub`,
+      });
+      const existing = [
+        makeTurn(0, 'user'), makeTurn(1, 'assistant'),
+        makeTurn(2, 'user'), makeTurn(3, 'assistant'),
+        sub(4, 'user'), sub(5, 'assistant'),
+      ];
+      const incoming = [
+        makeTurn(0, 'user'), makeTurn(1, 'assistant'),
+        makeTurn(2, 'user'), makeTurn(3, 'assistant'),
+        makeTurn(4, 'user'),
+        sub(5, 'user'), sub(6, 'assistant'),
+      ];
+      const { toInsert, toUpdate } = diffTurns(existing, incoming);
+      expect(toInsert.length).toBe(1);
+      expect(toInsert[0].turnIndex).toBe(4);
+      expect(toInsert[0].subagentSessionId).toBeNull();
       expect(toUpdate.length).toBe(0);
     });
   });

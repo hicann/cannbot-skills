@@ -12,6 +12,8 @@ import { use } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { CopyButton } from "@/components/observe/CopyButton"
+import { isClaudeFormatSession } from "@/lib/shared/session-format"
 import { Button } from "@/components/ui/button"
 import { ArrowLeftIcon, LayoutDashboardIcon, MessageSquareIcon, SearchIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, WifiIcon, ShieldCheckIcon, GaugeIcon, GlobeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -841,7 +843,8 @@ export default function SessionDetailPage({
   }, [taskId, session?.framework, session?.sourcePath, framework])
 
   useEffect(() => {
-    if (!session || session.framework !== "claude-code" || !session.sourcePath) return
+    // proxy 捕获是扩展 claude 格式：framework 可能是 opencode（version 带 -proxy）
+    if (!session || !isClaudeFormatSession(session.framework, session.frameworkVersion) || !session.sourcePath) return
 
     let active = true
     let es: EventSource | null = null
@@ -998,6 +1001,60 @@ export default function SessionDetailPage({
   function renderOverview() {
     return (
       <div className="p-4 space-y-4 overflow-y-auto h-full min-h-0">
+        {/* 会话元信息：Tool/Model/时间/来源（从页头移入，仅 Overview 展示） */}
+        <Card size="sm">
+          <CardContent className="py-2.5 px-4">
+            <div className="flex items-center gap-x-6 text-sm whitespace-nowrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Tool:</span>
+                <span className="font-medium inline-flex items-center gap-1.5">
+                  {s.framework === "opencode" ? "OpenCode" : s.framework === "claude-code" ? "Claude Code" : s.framework ?? "N/A"}
+                  {(() => {
+                    // proxy 捕获的 version = '<agent版本>-<marker>'：版本号与 proxy 徽标都显示
+                    const ver = s.frameworkVersion?.replace(/-(claude|opencode)-proxy$/, "")
+                    return (
+                      <>
+                        {ver ? <span className="text-muted-foreground">v{ver}</span> : null}
+                        {s.frameworkVersion?.endsWith("-proxy") ? <Badge variant="yellow">proxy</Badge> : null}
+                      </>
+                    )
+                  })()}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Model:</span>
+                <span className="font-medium">{s.model ?? "N/A"}</span>
+              </div>
+              {s.summaryFiles > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Code:</span>
+                  <span className="font-medium text-green-600">+{s.summaryAdditions}</span>
+                  <span className="font-medium text-red-500">-{s.summaryDeletions}</span>
+                  <span className="text-muted-foreground">{s.summaryFiles} files</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Start:</span>
+                <span>{formatTimestamp(s.startTime)}</span>
+              </div>
+              {s.endTime && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">End:</span>
+                  <span>{formatTimestamp(s.endTime)}</span>
+                </div>
+              )}
+              {s.sourcePath && (
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span className="text-muted-foreground shrink-0">Source:</span>
+                  <span className="font-medium truncate" title={s.sourcePath}>
+                    {s.sourcePath}
+                  </span>
+                  <CopyButton text={s.sourcePath} className="size-3.5 shrink-0 text-muted-foreground hover:text-foreground" />
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           <Card size="sm" className="flex-1">
             <CardContent className="flex items-center gap-2 py-2">
@@ -1745,42 +1802,9 @@ export default function SessionDetailPage({
             {exportingHtml ? "导出中..." : ""}
           </Button>
         </div>
-        <div className="flex items-center gap-4 text-sm mb-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Tool:</span>
-            <span className="font-medium">{s.framework === "opencode" ? `OpenCode${s.frameworkVersion ? ` v${s.frameworkVersion}` : ""}` : s.framework === "claude-code" ? `Claude Code${s.frameworkVersion ? ` v${s.frameworkVersion}` : ""}` : s.framework ?? "N/A"}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Model:</span>
-            <span className="font-medium">{s.model ?? "N/A"}</span>
-          </div>
-          {s.summaryFiles > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">Code:</span>
-              <span className="font-medium text-green-600">+{s.summaryAdditions}</span>
-              <span className="font-medium text-red-500">-{s.summaryDeletions}</span>
-              <span className="text-muted-foreground">{s.summaryFiles} files</span>
-            </div>
-          )}
-          {s.sourcePath && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">Source:</span>
-              <span className="font-medium truncate max-w-[330px]">{s.sourcePath}</span>
-            </div>
-          )}
-          <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Start:</span>
-            <span>{formatTimestamp(s.startTime)}</span>
-          </div>
-          {s.endTime && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">End:</span>
-              <span>{formatTimestamp(s.endTime)}</span>
-            </div>
-          )}
-        </div>
 
-        <div className="flex gap-1 mt-3 border-b -mb-px">
+        <div className="border-b mt-2" />
+        <div className="flex gap-1 mt-2 border-b -mb-px">
           {TABS.map(tab => (
             <button
               key={tab.key}

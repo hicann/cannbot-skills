@@ -6,6 +6,8 @@
 
 核心诉求：**易用**（一条命令拉起整套栈）、**明文留存**、**复用 cannbot-insight 现有分析面**（不重写分析侧）。
 
+**红线：任何 API key / 凭据永不落盘**（见 §7）。
+
 ## 2. 上下文图（内外部组件关系与职责）
 
 系统边界 = cpx-cli + cannbot-proxy + cannbot-insight。边界外（虚线黄）：人、agent 进程、真实模型 API、浏览器。边界内（蓝）：编排、透传捕获、明文存档、结构化分析。
@@ -20,7 +22,7 @@ flowchart TB
     subgraph SYS["系统边界：cpx-cli + cannbot-proxy + cannbot-insight"]
         direction TB
         Cpx["cpx-cli 编排器<br/>起栈 · 注入 base_url · 退出后导入+开浏览器"]
-        Proxy["cannbot-proxy (node:http, per-session)<br/>透传转发 · SSE 重组 · 明文落盘(strip auth)"]
+        Proxy["cannbot-proxy (node:http, per-session)<br/>透传转发 · SSE 重组 · 明文落盘(redact 清洗)"]
         Jsonl[("明文存档 JSONL<br/>~/.cannbot-insight/proxy/sid.jsonl<br/>扩展 claude-format 行<br/>+ 扩展 system/tools + subagents/")]
         Insight["cannbot-insight（黑盒）<br/>读 jsonl → 结构化分析 → 9 tab + Full Context"]
     end
@@ -53,11 +55,11 @@ flowchart TB
 | 真实 upstream 模型 API | 外 | 推理；SSE/JSON 响应（dashscope / anthropic / openai） |
 | 浏览器 | 外 | 查看 `/session/<sid>` 9 tab 分析面 |
 | cpx-cli 编排器 | 内 | 起 cannbot-insight + per-session spawn cannbot-proxy（env 钉死 sid）、注入 base_url、spawn agent、agent 退出后触发导入 + 开浏览器 |
-| cannbot-proxy (node:http) | 内 | 透传转发到 upstream、SSE 重组、明文落盘（落盘前 strip auth、先写盘后响应）；非常驻，随 cpx-cli 生灭 |
+| cannbot-proxy (node:http) | 内 | 透传转发到 upstream、SSE 重组、明文落盘（落盘前 redact 清洗密钥、先写盘后响应）；非常驻，随 cpx-cli 生灭 |
 | 明文存档 JSONL | 内 | 扩展 claude-format（user/assistant 行 + 扩展 `system`/`tools` 字段；subagent 在 `subagents/<subId>.jsonl` + `.meta.json`）；一身二任（cannbot-insight 输入 + 明文存档） |
 | cannbot-insight（黑盒） | 内 | 读 JSONL → 结构化分析（8 Prisma 模型，零 schema 改；`Session.sourcePath` 反指 jsonl）→ 15 API + Web/TUI/CLI + 9 tab + Full Context（System/Tools/Memory/Skills/Messages） |
 
-**关键契约**：agent↔proxy↔upstream 走 HTTP（auth 透传、落盘前 strip）；proxy→JSONL 走本地 `append`（先写盘后 `res.end`，防秒退竞态）；cpx-cli 退出后 JSONL 由 cannbot-insight 读入（`Session.sourcePath` 反指该文件）。明文（扩展 claude-format）不进 Prisma——JSONL 一身二任（cannbot-insight 输入 + 明文存档），符合 "Zero schema changes" 约束。
+**关键契约**：agent↔proxy↔upstream 走 HTTP（auth 透传、密钥清洗见 §7）；proxy→JSONL 走本地 `append`（先写盘后 `res.end`，防秒退竞态）；cpx-cli 退出后 JSONL 由 cannbot-insight 读入（`Session.sourcePath` 反指该文件）。明文（扩展 claude-format）不进 Prisma——JSONL 一身二任（cannbot-insight 输入 + 明文存档），符合 "Zero schema changes" 约束。
 
 ## 3. 架构
 
@@ -81,7 +83,7 @@ flowchart TD
         direction TB
         P1["① 透传转发到真实 upstream"]
         P2["② tee SSE 流 → 重组器<br/>→ 完整 response"]
-        P3["③ 明文落盘（先写盘后 res.end，防竞态）"]
+        P3["③ 明文落盘（redact 清洗，先写盘后 res.end，防竞态）"]
         P1 --> P2 --> P3
     end
 
@@ -158,8 +160,9 @@ cpx config dedup off              # 关闭
 | tool_result 回填到对应 tool_use | adapter | ✅ |
 | 测试（proxy 自包含 12 用例：JSON 内容校验，无 Prisma/insight 依赖；全量 `npm run test` 通过） | `proxy/tests/claude-emitter.test.ts` + `proxy/tests/reassembler.test.ts` | ✅ |
 | 注入压缩（dedup，默认 off，`cpx config dedup on\|off`；只压记录不改转发；主/子代理上下文独立判重；status 显示压缩率） | `proxy/src/claude-emitter.ts` + `proxy/src/cli/cpx-cli.ts` | ✅ IT（真实任务验证子代理派发不受影响） |
+| 密钥清洗（redact：结构层键名全等 + 字符串层厂家键形，`dispatchEmit` 咽喉接入，cpx 启动行同源打码） | `proxy/src/redactor.ts` + `server.ts` | ✅ IT + 真机 E2E（claude/opencode 双链路 0 泄漏，见 §7） |
 
-**端到端实测**：`cpx-cli claude -p` → claude `--settings` 进程级注入生效 → 请求被 proxy 拦截 → sid 精确归因 → glm-5.2 真实响应捕获 → auth 未泄漏 → 导入 insight → system turn 落库（"You are Claude Code..."）。
+**端到端实测**：`cpx-cli claude -p` → claude `--settings` 进程级注入生效 → 请求被 proxy 拦截 → sid 精确归因 → glm-5.2 真实响应捕获 → 密钥 0 落盘（redact，见 §7）→ 导入 insight → system turn 落库（"You are Claude Code..."）。
 
 ### ⚠️ 当前版本边界（已知，不阻塞）
 
@@ -168,6 +171,7 @@ cpx config dedup off              # 关闭
 3. **per-message token 是估算**：总量（如 55.2k）是模型自报真实值；但 per-message 拆分（system ≈694t）是 insight 的 char/3.5 估算。要 verbatim 每条消息 token 需读路径从 jsonl 取真实 request body（read-path 增强）。
 4. **同任务多次 spawn 会合并**：subagent 按 task-prompt 哈希分组，若同一 session 内主 agent 用相同 prompt 二次 spawn 子代理，两条会并到同一 subagent_session_id。极少见；要区分需加时序序号。
 5. **model 路由/key 池**（CCR 核心能力）：当前版本只透传捕获，不做 model 映射/多 key 路由。留到后续版本。
+6. **存量捕获不回洗**：redact 上线（2026-08）之前生成的 jsonl 不做追溯清洗——需要干净副本就重跑会话；后续可加 `cpx redact <file>` 回洗命令。
 
 ### 🔲 待完善（用户后续补充）
 
@@ -186,3 +190,15 @@ cpx config dedup off              # 关闭
 | system prompt emit 成 system turn | 让 insight 的 LLM Input 重构纳入真实 system，把 "System (hidden) ≈734t" 残差变成真实内容 |
 | proxy 测试自包含（vitest projects 独立 project，无 Prisma/insight 依赖） | proxy 与 insight 仅靠 **claude-format 契约**耦合：proxy 测试只验 emitter 产出的 JSON 内容，insight 的 claude-jsonl adapter（自有测试）消费；两边独立演进，proxy 不因 Prisma/`@` alias 变动而红 |
 | 注入压缩只压捕获记录、默认关闭 | claude 无条件重注入注册表的设计假设上游有 prompt cache；改动转发有功能风险，改动记录没有。因此 v1 只做记录瘦身（标记 + originalChars 保信息），转发去重（含缓存感知旁路）留待后续按需求实施 |
+
+## 7. 密钥不落盘（`redactor.ts`）
+
+**任何 API key / 凭据永不落盘。** headers 本就不落盘，清洗的是内容：body 里的键回显（`env` 输出、`cat settings.json`、对话粘贴）、URL query 带键（`?key=…`）、body 内鉴权字段、`Bearer` 凭据。
+
+- 模块：`proxy/src/redactor.ts`，接入 `server.ts` 的 `dispatchEmit()`——所有落盘数据的唯一入口，一处拦截全覆盖
+- 结构层：键名全等命中 `api_key / authorization / x-api-key / cookie / access_token / …` → 掩码
+- 字符串层：正则打码各厂家键形（`sk-ant-` / `sk-or-` / `sk-proj-` / `gsk_` / `AIza` / `xai-` / `GL-` / `LTAI` / 泛 `sk-`）、`XX_API_KEY=…` 回显、URL query 键
+- 掩码 `前4…后4`（排障可辨厂家）；键名全等 + 长度阈值防误伤（`max_tokens`、`input_tokens`、裸 `key` 永不中弹）
+- cpx 启动行打码同用 `redactString`
+
+已验证：单测 13 用例 + `cpx claude` / `cpx opencode` 真机双链路捕获文件 0 键残留。

@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     const session = await prisma.session.findFirst({
       where: { taskId },
-      select: { id: true, taskId: true, sourcePath: true, framework: true },
+      select: { id: true, taskId: true, sourcePath: true, framework: true, version: true },
     });
 
     if (!session || !session.sourcePath) {
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     }
 
     const probe = await probeAutoRefresh(
-      { id: session.id, taskId: session.taskId, sourcePath: session.sourcePath, framework: session.framework },
+      { id: session.id, taskId: session.taskId, sourcePath: session.sourcePath, framework: session.framework, version: session.version },
       prisma,
     );
 

@@ -15,9 +15,6 @@ import type { ApiImportableSession, ApiImportableSessionsResponse } from '../typ
 import readline from 'node:readline';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import crypto from 'node:crypto';
 
 const IMPORT_COLUMNS: TableColumn[] = [
   { key: 'id', label: 'Session ID', width: 20 },
@@ -92,13 +89,6 @@ function detectSourceType(filePath: string): 'opencode-db' | 'claude-jsonl' | st
     if (stat.isDirectory()) return 'claude-jsonl';
   } catch {}
   return 'claude-jsonl';
-}
-
-const CANNBAY_PULL_URL = 'https://gitcode.com/guanxinghua/CANNBay.git';
-const CANNBAY_PUSH_URL = Buffer.from('aHR0cHM6Ly9ndWFueGluZ2h1YTpwc3F5WXAyYnpFRkI0eDVQRlVTV0dMS3lAZ2l0Y29kZS5jb20vZ3VhbnhpbmdodWEvQ0FOTkJheS5naXQ=', 'base64').toString();
-
-function runGit(cmd: string, cwd: string) {
-  return execSync(cmd, { cwd, stdio: 'pipe', timeout: 60_000 });
 }
 
 async function ensureBackend(client: InsightClient): Promise<boolean> {
@@ -198,7 +188,6 @@ export function uploadCommand(): Command {
         // Mode 1: Upload from Insight DB by taskId
         if (opts.session) {
           const taskId = opts.session;
-          const framework = opts.framework ?? 'unknown';
 
           if (needInteractive) {
             const sessionDetail = await client.getSession(taskId);
@@ -207,7 +196,7 @@ export function uploadCommand(): Command {
               user: sessionDetail.user ?? undefined,
               model: sessionDetail.model ?? undefined,
               taskId,
-              framework,
+              framework: sessionDetail.framework ?? opts.framework ?? 'unknown',
               sourcePath: undefined,
             });
           }
@@ -219,7 +208,7 @@ export function uploadCommand(): Command {
             console.log(theme.muted(description));
           }
 
-          const result = await client.uploadSession(taskId, description, framework);
+          const result = await client.uploadSession(taskId, description);
 
           if (opts.json) {
             console.log(JSON.stringify(result, null, 2));
@@ -227,7 +216,7 @@ export function uploadCommand(): Command {
           }
 
           console.log(formatSuccess(`✓ Uploaded session ${taskId} → CANNBay`));
-          console.log(theme.muted(`  Filename: ${result.filename}`));
+          console.log(theme.muted(`  Folder: ${result.folder}${result.unchanged ? ' (unchanged)' : ''}`));
           return;
         }
 
@@ -314,9 +303,9 @@ export function uploadCommand(): Command {
           if (!opts.json) console.log(theme.muted('  Importing into Insight DB...'));
           const importResult = await client.importSession(source, filePath, target.id);
 
-          // Step 2: Upload to CANNBay (use original taskId + resolved framework to find session)
+          // Step 2: Upload to CANNBay (taskId lookup happens server-side)
           if (!opts.json) console.log(theme.muted('  Uploading to CANNBay...'));
-          const uploadResult = await client.uploadSession(target.id, description, resolvedFramework);
+          const uploadResult = await client.uploadSession(target.id, description);
 
           if (opts.json) {
             console.log(JSON.stringify({ import: importResult, upload: uploadResult }, null, 2));
@@ -325,7 +314,7 @@ export function uploadCommand(): Command {
 
           console.log(formatSuccess(`✓ Imported & uploaded session ${target.id} → CANNBay`));
           console.log(theme.muted(`  Insight taskId: ${importResult.sessionId}`));
-          console.log(theme.muted(`  Filename: ${uploadResult.filename}`));
+          console.log(theme.muted(`  Folder: ${uploadResult.folder}${uploadResult.unchanged ? ' (unchanged)' : ''}`));
           return;
         }
 

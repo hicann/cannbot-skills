@@ -13,6 +13,7 @@ import { createReassembler, type ReassembledResponse } from './stream-reassemble
 import { ensureProxyDir, sessionFilePath, appendSid } from './writer';
 import { emit as claudeEmit } from './claude-emitter';
 import { emit as opencodeEmit } from './opencode-emitter';
+import { redactRecord } from './redactor';
 import type { AnthropicContentBlock, AnthropicUsage, Protocol, ProxyRecord } from './types';
 
 // Route a captured record to the right emitter. The two emitters are
@@ -22,6 +23,8 @@ import type { AnthropicContentBlock, AnthropicUsage, Protocol, ProxyRecord } fro
 // manifest so cpx knows at exit which capture files this run produced.
 const emittedSids = new Set<string>();
 function dispatchEmit(rec: ProxyRecord): void {
+  // 落盘前清洗（唯一咽喉：所有 emitter 的数据都经这里进 jsonl）
+  redactRecord(rec);
   // Child sessions file under their PARENT's tree (x-parent-session-id), so
   // only parent/main sids belong in the manifest cpx imports from.
   if (SESSION_ID && !rec.parentSessionId && !emittedSids.has(rec.sid)) {
@@ -288,6 +291,7 @@ function buildRecord(
   // different value plus x-parent-session-id pointing at the main session —
   // the opencode-emitter uses both for routing.
   const xSessionId = req ? (req.headers['x-session-id'] as string | undefined) ?? null : null;
+  const userAgent = req ? (req.headers['user-agent'] as string | undefined) ?? null : null;
   const parentSessionId = req ? (req.headers['x-parent-session-id'] as string | undefined) ?? null : null;
   return {
     sid,
@@ -310,6 +314,7 @@ function buildRecord(
     },
     xSessionId,
     parentSessionId,
+    userAgent,
   };
 }
 

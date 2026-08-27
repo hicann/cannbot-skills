@@ -197,3 +197,56 @@ describe('E2E: claude-code auto-refresh (probe + delta refresh)', () => {
     });
   });
 });
+
+describe('E2E: proxy 捕获的 auto-refresh probe（分支归属 + stopReason 字段）', () => {
+  const proxyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-probe-'));
+  const proxyFile = path.join(proxyDir, 'cpx-proxy-probe-it.jsonl');
+
+  // proxy 捕获是扩展 claude 格式：assistant 行的完结标记在顶层 stopReason
+  const userLine = JSON.stringify({ type: 'user', message: { role: 'user', content: '问' }, timestamp: '2026-08-18T10:00:00.000Z' });
+  const assistantDone = JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: 'm1', content: [{ type: 'text', text: '答' }] }, timestamp: '2026-08-18T10:00:05.000Z', stopReason: 'end_turn' });
+  const assistantOpen = JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: 'm2', content: [{ type: 'text', text: '…' }] }, timestamp: '2026-08-18T10:00:06.000Z' });
+
+  function writeCapture(lines: string[]): void {
+    fs.writeFileSync(proxyFile, lines.join('\n') + '\n');
+    const future = new Date(Date.now() + 1000);
+    fs.utimesSync(proxyFile, future, future);
+  }
+  const ses = (framework: string, version: string | null) => ({
+    id: 'probe-only', taskId: 'proxy-probe-it', sourcePath: proxyFile, framework, version,
+  });
+
+  afterAll(() => {
+    try { fs.rmSync(proxyDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('opencode-proxy 捕获走 claude 探测：不再全零 NO_CHANGE（回归：曾按 sqlite 打开抛错退化为 NO_CHANGE）', async () => {
+    writeCapture([userLine, assistantDone]);
+    const p = await probeAutoRefresh(ses('opencode', '1.17.9-opencode-proxy'), prisma);
+    expect(p.maxTimeUpdated).toBeGreaterThan(0);
+    expect(p.streaming).toBe(false);
+    expect(p.settled).toBe(true);
+  });
+
+  it('claude-proxy 捕获：顶层 stopReason 识别为已完结（回归：曾永远 streaming=true 不触发自动刷新）', async () => {
+    writeCapture([userLine, assistantDone]);
+    const p = await probeAutoRefresh(ses('claude-code', '2.1.234.467-claude-proxy'), prisma);
+    expect(p.maxTimeUpdated).toBeGreaterThan(0);
+    expect(p.streaming).toBe(false);
+    expect(p.settled).toBe(true);
+  });
+
+  it('进行中的 proxy 响应（无 stopReason）仍判 streaming', async () => {
+    writeCapture([userLine, assistantOpen]);
+    const p = await probeAutoRefresh(ses('opencode', '1.17.9-opencode-proxy'), prisma);
+    expect(p.streaming).toBe(true);
+    expect(p.settled).toBe(false);
+  });
+
+  it('原生 opencode（version 无 -proxy）仍走 opencode-db 探测：jsonl 按 sqlite 打开退化为 NO_CHANGE', async () => {
+    writeCapture([userLine, assistantDone]);
+    const p = await probeAutoRefresh(ses('opencode', null), prisma);
+    expect(p.maxTimeUpdated).toBe(0);
+    expect(p.settled).toBe(false);
+  });
+});

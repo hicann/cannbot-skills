@@ -6,7 +6,7 @@ Session-level observability tool for LLM coding agents. Helps analyze long-conte
 
 ## Features
 
-Import opencode.db or Claude Code JSONL logs, then analyze Agent sessions turn-by-turn:
+Import SQLite (opencode.db or CANNBot-Insight archive, auto-detected) or JSONL (Claude Code / cpx proxy capture) logs, then analyze Agent sessions turn-by-turn:
 
 - **Tokens & Cost** — 5-item token breakdown per turn with bar chart relative to model context window; cost estimation from token usage and model pricing
 - **Context Growth** — Context growth chart per subagent session; animated replay of context window evolution with subagent spawn/death markers; `/compact` markers with context-drop annotations across multiple compactions
@@ -14,6 +14,7 @@ Import opencode.db or Claude Code JSONL logs, then analyze Agent sessions turn-b
 - **Subagent Tracking** — Identify subagent sessions and dispatch→response bridges; subagent turns surface inline in the Turns timeline with badges, and counts appear in the Overview cards
 - **Turn Quick-Jump** — In the Turns timeline, type a turn number (e.g. `#459`) and press Enter to jump straight to that turn and scroll it into view; subagent turns auto-expand their ancestor dispatch lanes
 - **Wire Rounds (proxy captures)** — Rebuild each wire round directly from the cpx capture file: full input (accumulated messages with new-of-this-round highlighted) plus output (raw response), to cross-check the DB-reconstructed LLM Input; tab hidden by default, shown with `./start.sh -a`
+- **Key Redaction (proxy captures)** — API keys never touch disk: sensitive fields and vendor key shapes (`sk-ant-` / `AIza` / `gsk_` / `LTAI` / `Bearer` / env echoes / URL query params) are masked (`abcd…wxyz`) at the single write chokepoint before capture files are written; the cpx launch log is masked with the same rules
 - **Round-Pair Turns (proxy captures)** — Proxy sessions split Turns into per-round input/output pairs (badged in the timeline): input turns list this round's new verbatim wire messages one by one; output turns store the accumulated request at import and serve it verbatim, preserving exact wire order (including tool_result vs system-injection interleaving) with no reconstruction
 - **Skill Events** — Track skill load/invoke/use events per turn
 - **Skill Content (SKILL.md 全文)** — Per-skill button in Skill Summary and Skills per Agent reconstructs the skill's full SKILL.md content from the native Skill tool injection or Read-of-SKILL.md results; supports download
@@ -42,7 +43,7 @@ Linux (for Windows systems, use start.bat instead):
 
 Open `http://localhost:21025`. After importing a log file, click a session to explore 9 analysis tabs.
 
-Web UI also supports: exporting sessions to standalone SQLite or hierarchical Markdown; uploading sessions to CANNBay with a description dialog. CANNBay master is capped at the 20 newest sessions (older ones auto-rotate to a date-bucketed `archive-YYYY-MM` branch); uploads use a persistent local mirror so only the delta is fetched each time.
+Web UI also supports: exporting sessions to standalone SQLite or hierarchical Markdown; uploading sessions to CANNBay v2 (an atomgit dataset repo) with a description dialog. Uploads use the proxy-capture claude-jsonl folder format (main session + subagents); opencode sessions are exported to jsonl from the DB automatically. Every upload passes mandatory data governance (secret redaction + residue circuit-breaker — no keys leave the public repo). CANNBay listing/download uses a partial-clone (`--filter=blob:none`) persistent mirror: listing reads metadata only (instant), importing one session fetches just its blobs on demand — fast even with thousands of sessions. The legacy .db-snapshot upload/parse (gitcode CANNBay) remains available at the API level for reading historical data, hidden from the UI.
 
 ## Option 2: CLI Upload + Web Analysis
 
@@ -110,7 +111,7 @@ npx tsx src/cli/index.ts upload --file ~/.claude/projects/<hash>/<uuid>.jsonl --
 | `--list` | List available sessions without uploading |
 | `--framework <name>` | Framework type (auto-inferred: opencode-db → opencode, claude-jsonl → claude-code) |
 
-After upload, view analysis in Web UI: click the **CANNBay** button during import to select and import DB files directly from the repository — no manual download needed.
+After upload, view analysis in Web UI: click the **CANNBay** button during import to select and import session folders directly from the repository (blobs fetched on demand) — no manual clone needed.
 
 ## Option 3: Zero-dependency Session Export
 

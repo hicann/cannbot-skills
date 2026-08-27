@@ -74,6 +74,12 @@ describe('opencode-emitter: OpenAI wire-record → extended claude-format JSON',
     expect(asst.system).toContain('<available_skills>');
   });
 
+  it('assistant lines carry wire timing (duration_ms/stopReason) — stopReason 同时是 auto-refresh 的完结标记', () => {
+    const asst = readJsonl(mainFile).find(r => r.type === 'assistant');
+    expect(asst.duration_ms).toBe(1000);
+    expect(asst.stopReason).toBe('stop');
+  });
+
   it('system is extracted from messages[role:system], NOT emitted as a user turn', () => {
     const users = readJsonl(mainFile).filter(r => r.type === 'user');
     expect(users.every(r => !(typeof r.message?.content === 'string' && r.message.content.includes('You are opencode')))).toBe(true);
@@ -153,6 +159,12 @@ describe('opencode-emitter: OpenAI wire-record → extended claude-format JSON',
     expect(u).toBeDefined();
     expect(u.input_tokens).toBe(50);
     expect(u.output_tokens).toBe(5);
+  });
+
+  it('every emitted line carries the source marker (opencode-proxy) — provenance parity with claude-emitter', () => {
+    const all = [...readJsonl(mainFile), ...subFiles().flatMap(f => readJsonl(path.join(subagentsDir, f)))];
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every(r => r.source === 'opencode-proxy')).toBe(true);
   });
 
   it('auth/key material is never present in the emitted jsonl', () => {

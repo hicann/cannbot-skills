@@ -9,13 +9,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BRAND_SOURCE_TYPE } from '@/lib/branding';
 import { getAdapter } from '@/lib/ingest/adapters/index';
+import { detectSqliteSource } from '@/lib/ingest/sqlite-detect';
 
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { source, filePath } = body;
+    const { filePath } = body;
+    let { source } = body;
 
     if (source !== 'opencode-db' && source !== 'claude-jsonl' && source !== BRAND_SOURCE_TYPE) {
       return NextResponse.json(
@@ -29,6 +31,13 @@ export async function POST(request: NextRequest) {
         { error: 'Missing required field: filePath' },
         { status: 400 }
       );
+    }
+
+    // 单一 SQLite 入口：opencode 与 CANNBot-Insight 导出库按 schema 自动
+    // 区分（用户选错类型时按内容纠正，文件名不再是唯一判据）
+    if (source === 'opencode-db' || source === BRAND_SOURCE_TYPE) {
+      const detected = detectSqliteSource(filePath);
+      if (detected && detected !== source) source = detected;
     }
 
     const adapter = getAdapter(source);

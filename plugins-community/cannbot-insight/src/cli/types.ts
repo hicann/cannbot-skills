@@ -397,8 +397,9 @@ export interface ApiDeleteResponse {
 }
 
 export interface ApiUploadResponse {
-  success: boolean;
-  filename: string;
+  sid: string;
+  folder: string;
+  unchanged: boolean;
 }
 
 export interface ApiAIProviderConfig {

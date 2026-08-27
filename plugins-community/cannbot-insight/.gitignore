@@ -85,3 +85,4 @@ docs/report.md
 # export-db.mjs output
 dbfile/
 jsonlfile/
+proxy/node_modules/

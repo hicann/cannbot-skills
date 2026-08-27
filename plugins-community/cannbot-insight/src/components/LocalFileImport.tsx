@@ -67,14 +67,12 @@ interface DirEntry {
 }
 
 interface CannbaySession {
-  filename: string
-  taskId: string
-  query: string | null
+  sid: string
+  fileCount: number
   author: string
   submitter: string
+  description: string
   commitTime: string
-  commitMessage: string
-  size: number
 }
 
 type Step = "input" | "browse" | "select" | "cannbay" | "importing"
@@ -104,7 +102,7 @@ export function LocalFileImport() {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>("input")
   const [filePath, setFilePath] = useState("/")
-  const [sourceType, setSourceType] = useState<"opencode-db" | "claude-jsonl" | "cannbay" | typeof BRAND_SOURCE_TYPE>("opencode-db")
+  const [sourceType, setSourceType] = useState<"opencode-db" | "claude-jsonl" | "cannbay" | typeof BRAND_SOURCE_TYPE>("claude-jsonl")
   const [sessions, setSessions] = useState<SessionPreview[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [importStatuses, setImportStatuses] = useState<ImportStatus[]>([])
@@ -121,7 +119,7 @@ export function LocalFileImport() {
   function resetState() {
     setStep("input")
     setFilePath("/")
-    setSourceType("opencode-db")
+    setSourceType("claude-jsonl")
     setSessions([])
     setSelectedIds(new Set())
     setImportStatuses([])
@@ -286,7 +284,7 @@ export function LocalFileImport() {
     setCannbaySessions([])
     setCannbaySelected(new Set())
     try {
-      const res = await fetch("/api/ingest/import-from-cannbay", {
+      const res = await fetch("/api/ingest/cannbay2", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "list" }),
@@ -324,56 +322,42 @@ export function LocalFileImport() {
     if (cannbaySelected.size === 0) return
     setStep("importing")
 
-    const filenames = Array.from(cannbaySelected)
-    const statuses: ImportStatus[] = filenames.map(f => {
-      const session = cannbaySessions.find(s => s.filename === f)
-      return {
-        sessionId: session?.taskId ?? f,
-        status: "pending" as const,
-      }
-    })
-    setImportStatuses(statuses)
+    const sids = Array.from(cannbaySelected)
+    setImportStatuses(sids.map(sid => ({ sessionId: sid, status: "pending" as const })))
 
-    try {
-      const res = await fetch("/api/ingest/import-from-cannbay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "import", filenames }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? "Import from CANNBay failed")
-        setImportStatuses(prev => prev.map(s => ({ ...s, status: "error" as const, message: data.error ?? "Import failed" })))
-        return
-      }
-
-      const results: Array<{ filename: string; taskId: string; imported: boolean; query: string | null; error?: string }> = data.results ?? []
-      setImportStatuses(prev => prev.map((s, i) => {
-        const result = results[i]
-        if (!result) return s
-        return {
-          ...s,
-          sessionId: result.taskId || s.sessionId,
-          status: result.imported ? "success" as const : "error" as const,
-          message: result.imported ? "Imported" : (result.error ?? importResultMessage(result)),
+    const importedPreviews: SessionPreview[] = []
+    for (const sid of sids) {
+      try {
+        const res = await fetch("/api/ingest/cannbay2", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "import", sid }),
+        })
+        const data = await res.json()
+        const result = res.ok ? data.result : null
+        const ok = Boolean(result)
+        setImportStatuses(prev => prev.map(s =>
+          s.sessionId === sid
+            ? { ...s, status: ok ? "success" as const : "error" as const, message: ok ? "Imported" : (data.error ?? "Import failed") }
+            : s))
+        if (ok) {
+          importedPreviews.push({
+            id: sid,
+            createdAt: new Date().toISOString(),
+            endedAt: null,
+            firstQuery: result.query ?? null,
+            turnCount: 0,
+            totalTokens: null,
+          })
         }
-      }))
-
-      const sessionPreviews: SessionPreview[] = results
-        .filter(r => r.imported)
-        .map(r => ({
-          id: r.taskId,
-          createdAt: new Date().toISOString(),
-          endedAt: null,
-          firstQuery: r.query ?? null,
-          turnCount: 0,
-          totalTokens: null,
-        }))
-      setSessions(sessionPreviews)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Network error")
-      setImportStatuses(prev => prev.map(s => ({ ...s, status: "error" as const, message: e instanceof Error ? e.message : "Network error" })))
+      } catch (e) {
+        setImportStatuses(prev => prev.map(s =>
+          s.sessionId === sid
+            ? { ...s, status: "error" as const, message: e instanceof Error ? e.message : "Network error" }
+            : s))
+      }
     }
+    setSessions(prev => [...prev, ...importedPreviews])
   }
 
   function toggleSelection(id: string) {
@@ -500,27 +484,20 @@ export function LocalFileImport() {
           <div className="space-y-3">
             <div>
               <label className="text-sm font-medium mb-1.5 block">Source Type</label>
-              <div className="flex gap-2">
-                <Button
-                  variant={sourceType === "opencode-db" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => { setSourceType("opencode-db"); setError(null) }}
-                >
-                  opencode (SQLite)
-                </Button>
+              <div className="grid grid-cols-3 gap-2">
                 <Button
                   variant={sourceType === "claude-jsonl" ? "default" : "outline"}
                   size="sm"
                   onClick={() => { setSourceType("claude-jsonl"); setError(null) }}
                 >
-                  Claude Code (JSONL)
+                  JSONL (Claude / Proxy)
                 </Button>
                 <Button
-                  variant={sourceType === BRAND_SOURCE_TYPE ? "default" : "outline"}
+                  variant={sourceType === "opencode-db" || sourceType === BRAND_SOURCE_TYPE ? "default" : "outline"}
                   size="sm"
-                  onClick={() => { setSourceType(BRAND_SOURCE_TYPE); setError(null) }}
+                  onClick={() => { setSourceType("opencode-db"); setError(null) }}
                 >
-                  {BRAND_NAME} (SQLite)
+                  SQLite (auto)
                 </Button>
                 <Button
                   variant={sourceType === "cannbay" ? "default" : "outline"}
@@ -537,7 +514,7 @@ export function LocalFileImport() {
               <label className="text-sm font-medium mb-1.5 block">File Path</label>
               <div className="flex gap-2">
                 <Input
-                  placeholder={sourceType === "opencode-db" ? "/path/to/sessions.db" : sourceType === "claude-jsonl" ? "/path/to/session.jsonl or /path/to/sessions-dir" : `/path/to/${BRAND_SLUG}_session_xxx.db`}
+                  placeholder={sourceType === "claude-jsonl" ? "/path/to/session.jsonl or /path/to/sessions-dir" : "/path/to/sessions.db"}
                   value={filePath}
                   onChange={(e) => setFilePath(e.target.value)}
                   className="flex-1"
@@ -553,17 +530,18 @@ export function LocalFileImport() {
                 </Button>
               </div>
               <div className="mt-2 text-xs text-muted-foreground space-y-1">
-                {sourceType === "opencode-db" && (
-                  <p>opencode (SQLite DB): ~/.local/share/opencode/sessions.db</p>
+                {(sourceType === "opencode-db" || sourceType === BRAND_SOURCE_TYPE) && (
+                  <>
+                    <p>opencode: ~/.local/share/opencode/sessions.db</p>
+                    <p>{BRAND_NAME} 导出: {BRAND_SLUG}_session_xxx.db（导入时按库 schema 自动识别）</p>
+                  </>
                 )}
                 {sourceType === "claude-jsonl" && (
                   <>
-                    <p>Claude Code (JSONL): ~/.claude/projects/&lt;hash&gt;/sessions/&lt;id&gt;.jsonl</p>
+                    <p>Claude 原生: ~/.claude/projects/&lt;hash&gt;/&lt;id&gt;.jsonl</p>
+                    <p>cpx proxy 捕获: ~/.cannbot-insight/proxy/cpx-&lt;session-id&gt;.jsonl（claude / opencode 会话）</p>
                     <p>Or point to a directory to scan all .jsonl files</p>
                   </>
-                )}
-                {sourceType === BRAND_SOURCE_TYPE && (
-                  <p>{BRAND_NAME} 导出文件: {BRAND_SLUG}_session_xxx.db</p>
                 )}
                 <p className="text-blue-500 dark:text-blue-400">Click Browse to explore directories and select files interactively</p>
               </div>
@@ -736,15 +714,13 @@ export function LocalFileImport() {
               const q = cannbayFilter.toLowerCase()
               const filtered = cannbaySessions
                 .filter(s =>
-                  !q || (s.query?.toLowerCase().includes(q) ?? false)
+                  !q || s.description?.toLowerCase().includes(q)
                   || (s.submitter?.toLowerCase().includes(q) ?? false)
-                  || (s.commitMessage?.toLowerCase().includes(q) ?? false)
-                  || s.taskId.toLowerCase().includes(q)
-                  || s.filename.toLowerCase().includes(q)
+                  || s.sid.toLowerCase().includes(q)
                 )
                 .slice()
                 .sort((a, b) => (b.commitTime || "").localeCompare(a.commitTime || ""))
-              const allFilteredSelected = filtered.length > 0 && filtered.every(s => cannbaySelected.has(s.filename))
+              const allFilteredSelected = filtered.length > 0 && filtered.every(s => cannbaySelected.has(s.sid))
               return (
                 <>
                   <div className="flex items-center gap-2 mb-2">
@@ -752,13 +728,13 @@ export function LocalFileImport() {
                       if (allFilteredSelected) {
                         setCannbaySelected(prev => {
                           const next = new Set(prev)
-                          for (const s of filtered) next.delete(s.filename)
+                          for (const s of filtered) next.delete(s.sid)
                           return next
                         })
                       } else {
                         setCannbaySelected(prev => {
                           const next = new Set(prev)
-                          for (const s of filtered) next.add(s.filename)
+                          for (const s of filtered) next.add(s.sid)
                           return next
                         })
                       }
@@ -789,13 +765,13 @@ export function LocalFileImport() {
                           </TableRow>
                         )}
                         {filtered.map(s => (
-                          <TableRow key={s.filename} className={cannbaySelected.has(s.filename) ? "bg-primary/5" : ""}>
+                          <TableRow key={s.sid} className={cannbaySelected.has(s.sid) ? "bg-primary/5" : ""}>
                             <TableCell>
-                              <Checkbox checked={cannbaySelected.has(s.filename)} onCheckedChange={() => toggleCannbaySelection(s.filename)} />
+                              <Checkbox checked={cannbaySelected.has(s.sid)} onCheckedChange={() => toggleCannbaySelection(s.sid)} />
                             </TableCell>
                             <TableCell className="text-xs py-2 align-middle">
-                              <span className="block truncate" title={s.query ?? s.taskId ?? ""}>
-                                {s.query ?? <span className="text-muted-foreground">{s.taskId}</span>}
+                              <span className="block truncate" title={s.description || s.sid}>
+                                {s.description || <span className="text-muted-foreground">{s.sid}</span>}
                               </span>
                             </TableCell>
                             <TableCell className="text-xs py-2 align-middle">
@@ -807,8 +783,8 @@ export function LocalFileImport() {
                               {s.commitTime ? formatTime(s.commitTime) : "—"}
                             </TableCell>
                             <TableCell className="text-xs py-2 align-middle">
-                              <span className="block truncate" title={s.commitMessage ?? ""}>
-                                {s.commitMessage || "—"}
+                              <span className="block truncate" title={s.sid}>
+                                {s.fileCount} files · {s.sid}
                               </span>
                             </TableCell>
                           </TableRow>

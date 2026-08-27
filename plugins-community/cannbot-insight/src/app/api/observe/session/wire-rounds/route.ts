@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { isClaudeFormatSession } from '@/lib/shared/session-format';
 import { parseJsonlLines } from '@/lib/ingest/adapters/claude-jsonl';
 
 // Wire-rounds view: rebuild each WIRE REQUEST directly from the capture
@@ -30,14 +31,14 @@ export async function GET(request: NextRequest) {
 
     const session = await prisma.session.findFirst({
       where: { taskId },
-      select: { id: true, sourcePath: true, framework: true },
+      select: { id: true, sourcePath: true, framework: true, version: true },
       orderBy: { startTime: 'desc' },
     });
     if (!session || !session.sourcePath) {
       return NextResponse.json({ error: 'Session or sourcePath not found' }, { status: 404 });
     }
-    if (session.framework !== 'claude-code') {
-      return NextResponse.json({ error: 'Only claude-code framework sessions have a wire capture' }, { status: 400 });
+    if (!isClaudeFormatSession(session.framework, session.version)) {
+      return NextResponse.json({ error: 'Only claude-format sessions (claude-code or proxy capture) have a wire capture' }, { status: 400 });
     }
 
     const lines = parseJsonlLines(session.sourcePath);

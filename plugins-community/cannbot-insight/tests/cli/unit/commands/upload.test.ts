@@ -44,8 +44,9 @@ const sampleImportResult: ApiImportResponse = {
 };
 
 const sampleUploadResult: ApiUploadResponse = {
-  success: true,
-  filename: 'cannbot_db_session_ses_abc123_a1b2c3d4.db',
+  sid: 'ses_abc123',
+  folder: 'sessions/ses_abc123/',
+  unchanged: false,
 };
 
 const sampleSessionDetail: ApiSessionDetailResponse = {
@@ -151,25 +152,12 @@ describe('uploadCommand', () => {
       const importResult = await client.importSession('opencode-db', '/path/to/sessions.db', 'ses_abc123');
       expect(importResult.imported).toBe(true);
 
-      const uploadResult = await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: Fix bug', 'opencode');
-      expect(uploadResult.success).toBe(true);
-      expect(uploadResult.filename).toContain('cannbot_db_session');
+      const uploadResult = await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: Fix bug');
+      expect(uploadResult.folder).toContain('sessions/ses_abc123');
+      expect(uploadResult.unchanged).toBe(false);
 
       expect(mockImportSession).toHaveBeenCalledWith('opencode-db', '/path/to/sessions.db', 'ses_abc123');
-      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh\n内容描述: Fix bug', 'opencode');
-    });
-
-    it('resolves framework from source type correctly', async () => {
-      // opencode-db → opencode, claude-jsonl → claude-code
-      const client = new InsightClient('http://localhost:21025', { retries: 0 });
-
-      mockUploadSession.mockResolvedValueOnce(sampleUploadResult);
-      await client.uploadSession('ses_abc123', 'description', 'opencode');
-      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', 'description', 'opencode');
-
-      mockUploadSession.mockResolvedValueOnce(sampleUploadResult);
-      await client.uploadSession('d1ef6b6f', 'description', 'claude-code');
-      expect(mockUploadSession).toHaveBeenCalledWith('d1ef6b6f', 'description', 'claude-code');
+      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh\n内容描述: Fix bug');
     });
 
     it('uses original taskId (not Prisma sessionId) for upload', async () => {
@@ -187,8 +175,8 @@ describe('uploadCommand', () => {
       expect(importResult.sessionId).toBe('cmqyuh9bu0000abc');
 
       // Upload uses original taskId (from the importable session, not import result)
-      await client.uploadSession('ses_abc123', 'description', 'opencode');
-      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', 'description', 'opencode');
+      await client.uploadSession('ses_abc123', 'description');
+      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', 'description');
       // NOT 'cmqyuh9bu0000abc'
     });
 
@@ -209,8 +197,8 @@ describe('uploadCommand', () => {
       expect(importResult.imported).toBe(true);
 
       // Step 3: upload (using original taskId)
-      const uploadResult = await client.uploadSession(importable.sessions[0].id, 'description', 'opencode');
-      expect(uploadResult.success).toBe(true);
+      const uploadResult = await client.uploadSession(importable.sessions[0].id, 'description');
+      expect(uploadResult.sid).toBe('ses_abc123');
 
       // Verify call order
       expect(mockListImportableSessions).toHaveBeenCalledBefore(mockImportSession);
@@ -225,31 +213,23 @@ describe('uploadCommand', () => {
       mockUploadSession.mockResolvedValueOnce(sampleUploadResult);
 
       const client = new InsightClient('http://localhost:21025', { retries: 0 });
-      const result = await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: test', 'opencode');
-      expect(result.success).toBe(true);
-      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh\n内容描述: test', 'opencode');
+      const result = await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: test');
+      expect(result.sid).toBe('ses_abc123');
+      expect(result.folder).toContain('sessions/ses_abc123');
+      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh\n内容描述: test');
     });
   });
 
   describe('client.uploadSession method', () => {
-    it('sends POST to /api/ingest/upload-session with taskId, framework, description', async () => {
+    it('sends POST to /api/ingest/cannbay2 with action=upload + taskId + description', async () => {
       const client = new InsightClient('http://localhost:21025', { retries: 0, timeout: 5000 });
 
       mockUploadSession.mockResolvedValueOnce(sampleUploadResult);
-      const result = await client.uploadSession('ses_abc123', '提交人: gxh', 'opencode');
+      const result = await client.uploadSession('ses_abc123', '提交人: gxh');
 
-      expect(result.success).toBe(true);
-      expect(result.filename).toContain('cannbot_db_session');
-      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh', 'opencode');
-    });
-
-    it('defaults framework to "unknown" when not provided', () => {
-      // The client method signature: uploadSession(taskId, description, framework?)
-      // Implementation: framework ?? 'unknown'
-      // Verify the logic directly
-      const providedFramework = undefined;
-      const resolvedFramework = providedFramework ?? 'unknown';
-      expect(resolvedFramework).toBe('unknown');
+      expect(result.sid).toBe('ses_abc123');
+      expect(result.folder).toContain('sessions/ses_abc123');
+      expect(mockUploadSession).toHaveBeenCalledWith('ses_abc123', '提交人: gxh');
     });
   });
 
@@ -294,11 +274,11 @@ describe('uploadCommand', () => {
 
   describe('JSON output format', () => {
     it('upload result serializes correctly', () => {
-      const result: ApiUploadResponse = { success: true, filename: 'cannbot_db_session_ses_abc123_a1b2.db' };
+      const result: ApiUploadResponse = { sid: 'ses_abc123', folder: 'sessions/ses_abc123/', unchanged: false };
       const json = JSON.stringify(result);
       const parsed = JSON.parse(json);
-      expect(parsed.success).toBe(true);
-      expect(parsed.filename).toContain('cannbot_db_session');
+      expect(parsed.sid).toBe('ses_abc123');
+      expect(parsed.folder).toContain('sessions/ses_abc123');
     });
 
     it('combined import+upload result serializes correctly', () => {
@@ -310,7 +290,7 @@ describe('uploadCommand', () => {
       const parsed = JSON.parse(json);
       expect(parsed.import.sessionId).toBe('cmqyuh9bu0000abc');
       expect(parsed.import.imported).toBe(true);
-      expect(parsed.upload.success).toBe(true);
+      expect(parsed.upload.sid).toBe('ses_abc123');
     });
   });
 
@@ -341,7 +321,7 @@ describe('uploadCommand', () => {
       const client = new InsightClient('http://localhost:21025', { retries: 0 });
 
       mockUploadSession.mockResolvedValueOnce(sampleUploadResult);
-      await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: test', 'opencode');
+      await client.uploadSession('ses_abc123', '提交人: gxh\n内容描述: test');
 
       // Verify the uploadSession call includes description
       const callArgs = mockUploadSession.mock.calls[0];

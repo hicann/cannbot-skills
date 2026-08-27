@@ -163,7 +163,12 @@ export function ImportHistory() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {history.map((entry, i) => (
+            {history.map((entry, i) => {
+              // proxy 捕获也走 claude-jsonl 入库，但会话可能属于 opencode
+              // （cpx-ses_ 前缀）—— 徽章按 agent 归属 + proxy 来源标注
+              const isProxyCapture = entry.sourceType === "claude-jsonl" && (entry.filePath?.includes("/proxy/") ?? false)
+              const isOpencodeCapture = isProxyCapture && /cpx-ses_[^/]*\.jsonl$/.test(entry.filePath ?? "")
+              return (
               <TableRow key={`${entry.taskId}-${i}`}>
                 <TableCell className="max-w-[400px] truncate text-xs font-mono text-muted-foreground" title={entry.filePath ?? ""}>{entry.filePath ?? "—"}</TableCell>
                 <TableCell className="max-w-[260px] truncate text-xs" title={entry.query ?? entry.taskId}>{entry.query ?? entry.taskId}</TableCell>
@@ -172,7 +177,14 @@ export function ImportHistory() {
                   {entry.sourceType === "opencode-db" ? (
                     <Badge variant="blue">OpenCode</Badge>
                   ) : entry.sourceType === "claude-jsonl" ? (
-                    <Badge variant="orange">Claude</Badge>
+                    isProxyCapture ? (
+                      <span className="inline-flex items-center gap-1">
+                        {isOpencodeCapture ? <Badge variant="blue">OpenCode</Badge> : <Badge variant="orange">Claude</Badge>}
+                        <Badge variant="yellow">proxy</Badge>
+                      </span>
+                    ) : (
+                      <Badge variant="orange">Claude</Badge>
+                    )
                   ) : entry.sourceType === BRAND_SOURCE_TYPE ? (
                     <Badge variant="purple">{BRAND_NAME}</Badge>
                   ) : "—"}
@@ -197,7 +209,8 @@ export function ImportHistory() {
                   </Button>
                 </TableCell>
               </TableRow>
-            ))}
+              )
+            })}
           </TableBody>
         </Table>
       </div>

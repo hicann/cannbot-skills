@@ -95,6 +95,7 @@ describe('E2E: opencode-db import → observe', () => {
       });
       const turns = await prisma.turn.findMany({
         where: { sessionId: session!.id },
+        orderBy: { turnIndex: 'asc' },
         take: 5,
       });
       const roles = turns.map(t => t.role);
@@ -112,6 +113,7 @@ describe('E2E: opencode-db import → observe', () => {
       });
       const toolCalls = await prisma.toolCall.findMany({
         where: { turn: { sessionId: session!.id } },
+        orderBy: { startedAt: 'asc' },
         take: 5,
       });
       expect(toolCalls.length).toBeGreaterThan(0);

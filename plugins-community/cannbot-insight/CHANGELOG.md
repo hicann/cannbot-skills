@@ -2,6 +2,71 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v1.82] - 2026-08-19
+
+### Added
+- 【CANNBay v2】上传/下载切换到 atomgit 数据集仓 `cannbay2`（公开库，`main` 分支）— 上传格式 = proxy 捕获的 claude-jsonl 文件夹（`sessions/<sid>/<sid>.jsonl` + `subagents/`），native claude 原文件直传，opencode 会话由 insight DB 自动导出 jsonl；下载列表/导入走 partial clone（`--filter=blob:none`）持久镜像：列表只读元数据（ls-tree + 一次 git log walk，零 blob），导入单条才 cat-file 按需下载，千级会话仓库不变慢（实测单 blob 0.6s、上传 push 1.5s）。实现收在 `src/lib/cannbay2/`（mirror/governance/export/index），API `POST /api/ingest/cannbay2 {action: list|import|upload}`；Web/CLI/TUI 全部切 v2
+- 【数据治理】上传前唯一强制关口（fail-closed）— redactor 自 `proxy/src/redactor.ts` 移植（parity 测试锁定两份实现字节一致），所有待传文件视为不可信输入：深度遍历结构层键名 + 字符串层厂家特征清洗到 staging 副本（不改原件），独立复检残留即熔断拒绝上传（422），密钥不出公开仓；上传时自动剔除仓库 `.gitattributes` 的 `*.jsonl` LFS 行防指针化
+- 【保留 v1】gitcode CANNBay 的 .db 上传/解析 API 原样保留（UI 入口移除），历史数据仍可读取
+
+### Fixed
+- CLI `upload` 不再需要 framework 推断：v2 按 taskId 服务端定位（旧 `--file` 模式对 opencode-proxy 会话因 framework 误判上传失败的问题随之消失）
+
+
+## [v1.81] - 2026-08-18
+
+### Fixed
+- proxy 捕获的详情页自动刷新从未生效（三层修复）— ① probe 分支顺序：claude-format 判定提到 opencode-db 之前，opencode-proxy 捕获不再被当 sqlite 打开退化为 NO_CHANGE（`ProbeSession` 补 `version` 字段，两个路由传入）；② probe 完结标记读 `message.stop_reason ?? 顶层 stopReason`，proxy 格式（顶层扩展字段）此前永远判 streaming；③ opencode-emitter assistant 行补 `duration_ms/stopReason/ttftMs` 三件套——opencode 捕获此前从未落盘 wire timing（v1.74/v1.75 的 wire timing 保真对 opencode 一直缺失，Turn.latencyMs/finishReason 一并补齐）。真机验证：两种 proxy 捕获 probe 均 `settled:true`，自动同步链路（5s 轮询 + SSE）可触发
+
+
+## [v1.80] - 2026-08-18
+
+### Added
+- 【proxy】密钥不落盘（`redactor` 模块）— 捕获文件永不落任何 API key：结构层按键名全等打码（`api_key`/`authorization`/`x-api-key`/…），字符串层按厂家键形打码（`sk-ant-`/`sk-proj-`/`gsk_`/`AIza`/`xai-`/`GL-`/`LTAI`/泛 `sk-`、`Bearer` 凭据、`XX_API_KEY=` 回显、URL query 键）；接入 `dispatchEmit` 唯一落盘咽喉，cpx 启动行同源打码；掩码 `前4…后4`，`max_tokens`/`input_tokens`/裸 `key` 零误伤。真机 `cpx claude`（bigmodel）/`cpx opencode`（dashscope）双链路验证 0 泄漏。设计见 `proxy/DESIGN.md` §7
+
+## [v1.79] - 2026-08-18
+
+### Fixed
+- 重复导入 dedup 键漂移（社区检视 Bug #7）— dedup 键从全局 turnIndex 改为上下文内 rank，修复 resume 后 subagent turn 重复堆积、新增 main turn 静默丢失；import-file merge 与 refresh-session 两条路径同步修复
+- merge 路径不重建 execution/bridge（Bug #5/#6）— resume 新增的 subagent 此前只 merge Turn、无 Execution/InteractionBridge（执行树断头）；抽共享 `buildExecutionGraph`/`replaceExecutionGraph`，三条写入路径统一重建；顺带修复已存在 turn 的 toolCall 聚合计 0、bridge responseTurnId 悬空
+- opencode proxy 捕获的 agent 归属 — 行内 `source:'opencode-proxy'` 标记的捕获 framework 归 `opencode`（此前误显示为 Claude）；判定收敛到 `isClaudeFormatSession` 谓词
+
+### Added
+- agent 版本号保留 — claude 取 system 计费头 `cc_version`，opencode 取 UA `opencode/<ver>`；`version` 存 `"<版本>-<marker>"`，详情页显示 `v2.1.234.467 [proxy]`
+
+## [v1.78] - 2026-08-18
+
+### Added
+- 导入入口重整 — 入口按文件格式归并为 JSONL（Claude 原生 / cpx proxy 捕获）与 SQLite（按 schema 自动识别 opencode.db / CANNBot-Insight 导出库）；Import History 按 agent 归属显示徽标；cpx 退出输出捕获文件路径 + agent 原生日志路径
+
+## [v1.77] - 2026-08-18
+
+### Added
+- proxy 按请求头真实 session id 分流 — claude 走 `x-claude-code-session-id`、opencode 走 `x-session-id`/`x-parent-session-id`，`/resume` 自动对齐；捕获文件加 `cpx-` 前缀防归档撞名；退出按 `.sids` manifest 多文件导入
+
+### Fixed
+- 会话详情显示 — proxy 来源渲染为 `[proxy]` 徽标（不再显示 "vclaude-proxy"）；Source 路径中段截断 + 一键复制
+
+## [v1.76] - 2026-08-18
+
+### Added
+- turn 详情可读渲染 — wire 消息块数组按 block 展开渲染，不再裸显转义 JSON；`<bash-input>/<bash-stdout>/<bash-stderr>` 渲染为终端样式；cpx 启动日志 key 首尾掩码
+
+## [v1.75] - 2026-08-18
+
+### Fixed
+- wire latency/finishReason 走标准管线进 DB — latencyMs/ttftMs/finishReason 从 proxy 扩展层转入 Turn 标准字段，不触碰 OCP 红线
+
+## [v1.74] - 2026-08-18
+
+### Added
+- proxy wire timing 保真 — latencyMs/ttftMs/stopReason 随捕获行落盘（扩展层），Perf 分析可看到首 token 时延
+
+## [v1.73] - 2026-08-18
+
+### Fixed
+- proxy compact 边界 enrichment 错位 — 按稳定键对齐修复 /compact 后输入消息重组错位
+
 ## [v1.40] - 2026-07-27
 
 ### Added
