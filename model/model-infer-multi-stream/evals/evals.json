@@ -123,6 +123,86 @@
       "expected_output": "回复应说明本 skill 面向整网模块级多流并行，单个算子替换不在范围，应建议用户改用融合算子等专项",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "Stream ID 分裂不代表真实并行",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "Profiler 里副流算子的 Stream ID 已经和主流不同，但端到端耗时没降。能否据此认定多流已经物理并行，只剩资源争抢？",
+      "expected_output": "回复应拒绝仅凭 Stream ID 下结论，要求用 Start Time 和 Duration 重建时间线并计算 overlap_pct；不超过 0.05 属于假并行，应先查 GE auto-reorder 和 barrier，达到 0.5 后才进入资源争抢、shape 或 host bound 排查",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "GE 与 npugraph_ex API 不可混用",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我在 GE 图模式里用 torch.npu.Stream 切流，又用 torchair.scope.npu_wait_tensor 等待；另一个 npugraph_ex 实现则调用 torchair.scope.npu_stream_switch。这样写合适吗？",
+      "expected_output": "回复应指出两条执行路径 API 混用；GE/Ascend IR 应使用 torchair.scope 的切流与等待或既有 torchair.ops tagged-event，npugraph_ex 应使用 torch.npu Stream/Event，fullgraph 拦截对象时改用 torch.npu.npugraph_ex.scope 的 string-tag 接口",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "每个并行点派生多个独立编排",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "一个主流计算和副流通信的并行点，我只给一套流分组，然后列 C1 切流、C2 加控核、C3 加同步，是否算三种候选方案？",
+      "expected_output": "回复应说明 C1/C2/C3 只是同一编排的复杂度阶梯，不是三种候选；每个并行点至少给两种在并行对象、流分组、汇合点、tag 粒度或跨阶段 overlap 上真正不同的编排，并在落地前检查 GE 重排风险",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "显式流的 Tensor 生命周期",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "npugraph_ex 显式 Stream 路径中，主流创建的临时 tensor 会被副流异步消费，函数很快返回。只加 Event wait 就够了吗？",
+      "expected_output": "回复应要求同时检查内存生命周期，对短生命周期且跨流继续使用的 tensor 调用 record_stream，避免被缓存分配器过早复用；模型权重和常驻 cache 通常不需要，并保留 enable 开关和单流回退路径",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "真重叠无收益后的资源诊断",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "多流 overlap_pct 已经达到 0.7，但 wall time 仍没下降。应该因为看到 MatMul 就判断两流都占满 Cube 并直接控核吗？",
+      "expected_output": "回复应拒绝按算子类型二元判断，要求检查 kernel_details.csv 的 Block Dim 之和与设备 ai_core_cnt，并排查 task 数、shape、host bound、带宽争抢、拖尾及 TransData/BroadcastTo/MemSet 长尾；确认资源争抢后再按当前执行路径控核",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-multi-stream"

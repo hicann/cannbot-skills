@@ -134,6 +134,86 @@
           "description": "技能 model-infer-graph-mode 被激活"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "未指定后端时默认 npugraph_ex",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "模型已经在 NPU 上运行并导入 torch_npu，我想给 Decode 接图模式，但没有指定 GE 还是 npugraph_ex。方案设计时怎么选？",
+      "expected_output": "回复应默认选择 npugraph_ex，说明只编译 Decode、Prefill 保持 eager，并先输出包含改动文件、具体内容和影响评估的设计方案，等待用户确认后再开发",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "npugraph_ex 使用 host list 长度字段",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "LLM 的 ForwardMetaData 同时有 actual_seq_lengths_kv Tensor 和 actual_seq_lengths_list_kv。npugraph_ex 的 Decode 静态图该传哪个？普通 eager 和 GE 呢？",
+      "expected_output": "回复应说明 npugraph_ex Decode 路径使用 actual_seq_lengths_list_kv/q 或 cumulative 对应的 List[int] 字段；普通 eager 或 GE 路径继续使用对应 Tensor 字段，不能混用",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "编译缓存启用时机与失效条件",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "图模式还在发生 graph break 和偶发重编译，我能先加 cache_compile 把问题压住吗？后面哪些变化需要重建缓存？",
+      "expected_output": "回复应拒绝用 cache_compile 修复 graph break 或重编译，要求先证明 full graph 稳定捕获且 guard、shape、通信域稳定；模型代码、输入规格、rank/world_size、CANN 或 torch_npu 版本变化时应清理或重新生成缓存",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "npugraph_ex 捕获硬约束",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "Decode forward 里有 .item() 驱动 Python if，还会调用随机采样算子。我想直接 fullgraph=True 用 npugraph_ex，是否可行？",
+      "expected_output": "回复应指出 npugraph_ex 不支持 forward 内 .item()、数据依赖的动态 Python 控制流和随机数算子；应把动态值作为输入或改为 Tensor 操作，并保持模型语义，不能直接宣称 fullgraph 可用",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "Warmup 编译与正式 Decode 复用验证",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "torch.compile 第一次调用成功了，能否据此认定图模式适配完成？还要验证什么？",
+      "expected_output": "回复应说明首次编译成功不足以验收；需验证 warmup 编译正常、正式 Decode 直接复用已编译图且日志无非预期 recompile，并比较图前后输出与 Decode 性能，Prefill 仍走 eager",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-graph-mode"

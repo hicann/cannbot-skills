@@ -113,6 +113,86 @@
       "expected_output": "回复应说明本 skill 负责适配跑通和基线建立，性能提升应交给融合算子、KVCache、图模式等优化专项，不在本 skill 范围",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "根据仓库信号判定部署模式",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "dispatch 没写部署模式。模型已注册到 executor/core/support_models.py 时怎么判；只有不继承框架基类、自己管理推理循环的 runner_x.py 时又怎么判；全新模型没有信号时呢？",
+      "expected_output": "回复应依次判为框架部署、独立部署、默认框架部署；框架模式走公共 executor 的调度和 KV 契约，独立模式自带 runner/infer.py/infer.sh，不能把两套产物混在一起",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "框架模型必须 vendoring 并满足契约",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "框架部署为了省事，我想在 modeling_x.py 里直接 from transformers import XxxForCausalLM，并在 models 目录加 __init__.py，再沿用 HF 的构造和 forward 签名，可以吗？",
+      "expected_output": "回复应拒绝直接导入 HF 模型类和创建 models/__init__.py，要求 vendoring modeling/configuration、基类改 nn.Module，并落实 (config, infer_config, comm_manager, prefix) 构造、packed forward、load_weights 和权重后处理等框架契约后注册到 support_models.py",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "Migrator 阶段 KV 路径互斥且不做 FA",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "迁移阶段我既保留 Legacy cache_unit 和 BSND reshape，又抄 get_cache_info/cache_entries，并顺手接入 MLA absorb 和 NPU FA。这样能一次做完吗？",
+      "expected_output": "回复应说明 Legacy 与最简 Paged 两条路径互斥，cache 写入、读取和 forward 输入形态必须整套一致；migrator 默认只做单卡 eager 基线和 HF 原版 attention，不接 FA、MLA absorb 或复杂 attn_type，这些交给 kvcache/fusion 等后续专项",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "单卡 OOM 的交付与下游衔接",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "新模型的单卡基础适配一运行就 OOM，迁移任务是否必须继续调性能直到单卡跑通并伪造一份 baseline？",
+      "expected_output": "回复应禁止伪造 baseline 或在本阶段做性能优化；应交付框架契约骨架，标记需多卡，保留多卡占位 YAML、空 agentic/baseline 目录和 README 下游任务说明，由并行化和 KV 优化跑通后再补采真实基线",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "基线采集使用真实日志与正确 Rank",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "多卡模型已经跑通。采 baseline_metadata.json 时能否只记一小段输出、取第一次 Decode 耗时，并从 rank 0 的截断 tee 日志读取？",
+      "expected_output": "回复应要求多卡读取 rank 1 完整日志，记录完整且可读的 output_text，并让 decode_avg_ms 剔除首步冷启动；环境、YAML 路径、卡数及 all_ranks_success 等字段应来自真实运行，推算值必须用 _estimated 后缀",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-migrator"

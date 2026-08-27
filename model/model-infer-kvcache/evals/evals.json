@@ -128,6 +128,86 @@
       "expected_output": "回复应说明本 skill 仅覆盖推理阶段的 KVCache 优化，不适用于训练显存优化，应建议用户改用训练侧方案",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "先判定部署模式再实施",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "一个模型已经注册到 cann-recipes-infer/executor/core/support_models.py，另一个只有自管推理循环的 runner_model.py。两者接 Paged KVCache 时由谁构造 block_table 和 slot_mapping？",
+      "expected_output": "回复应判定前者为框架部署，由 executor/core 的 KVCacheManager、BlockPool 和 cache_utils 动态构造；后者为独立部署，由 Runner 自行分配 cache 和 block_table、每步重算 slot_mapping 并构造 forward_metadata",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "框架 Paged 模式保持 packed 协议",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "框架部署下 batch 内请求长度不同，我能把 packed hidden_states 直接 reshape 成 [B, S, H] 再跑 attention 吗？",
+      "expected_output": "回复应拒绝简单 reshape，说明 input_ids 和 position_ids 是 [TotalTokens] packed 一维，hidden_states 全程保持 [TotalTokens, hidden_size]，由 cumulative actual_seq_lengths 在 FA 中表达 batch 边界，并用 forward_metadata.is_prefill 区分阶段",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "不同 Attention 路径的 sparse_mode",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "请分别给出标准 LLM TND Paged、滑窗层、MLA absorb 在 Prefill 和 Decode 时的 sparse_mode 与 mask 选择，并指出 mask 的 dtype/shape 约束。",
+      "expected_output": "回复应说明标准 LLM Prefill/Decode 均用 sparse_mode=3 加 [2048,2048] causal mask；滑窗层两阶段均用 4 加 band mask、pre_tokens=sliding_window、next_tokens=0；MLA absorb Prefill 用 3 加 causal mask、Decode 用 0 且 mask=None；mask 仅允许 bool/int8/uint8，模式 3/4 时 shape 固定 [2048,2048]",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "FA v1 与 v2 参数名不可混用",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "把 npu_fused_infer_attention_score 从 v1 换到 v2 后代码不报错但精度崩了。我沿用了 scale、num_heads、actual_seq_lengths 和 actual_seq_lengths_kv，问题可能在哪？",
+      "expected_output": "回复应指出 v1/v2 参数名混用可能静默使用默认值；v2 应使用 softmax_scale、num_query_heads、actual_seq_qlen、actual_seq_kvlen，并核对 num_key_value_heads、layout、shape 和长度语义",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "框架 CacheInfo 与按 attn_type 取映射",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "框架部署的混合 FullAttention/SlidingWindow 模型里，我把 forward_metadata.block_table 直接当 Tensor 传给所有层，并只返回了一个简单 cache shape。这样够吗？",
+      "expected_output": "回复应指出 block_table 和 slot_mapping 是按 attn_type 分组的 Dict，各层必须按 self.attn_type 取值；还需逐层声明 cache_entries，实现包含 block_size 和正确 layer_infos 的 ModelCacheInfo，混合层设置各自 attn_type，并验证 cache storage 注入、运行期寻址和释放复用链路",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-kvcache"
