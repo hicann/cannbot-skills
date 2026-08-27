@@ -64,7 +64,7 @@
 
 其余一切进度、结论、中间信息均不输出。
 
-> **机制兜底**：`mode=silent` 时 permission-guard hook 在工具层拦截问卷发送（opencode `question`/`ask` / claude `AskUserQuestion`，按工具名子串匹配，任何角色都不得绕过）——「QA 不发送问卷」既是 prompt 约束，也有 hook 保证；`mode` 切回 `interactive` 后立即解除拦截（见 `workflow-agent-permissions` skill）。**dsh**：默认无项目级 hook、无机制兜底（仅 prompt 约束）；安装部署级守卫（`hooks/dsh/install.sh`，挂 `$DSH_HOME/cordis.patch.yml`）后，`tools/pre-execute` 门按同一语义拦截 `ask_user_question` 等问卷工具。**codex**：无 hook，仅 prompt 约束。
+> **机制兜底**：`mode=silent` 时 permission-guard hook 在工具层拦截问卷发送（opencode `question`/`ask` / claude `AskUserQuestion` / trae `AskUserQuestion`，按工具名子串匹配，任何角色都不得绕过）——「QA 不发送问卷」既是 prompt 约束，也有 hook 保证；`mode` 切回 `interactive` 后立即解除拦截（见 `workflow-agent-permissions` skill）。**dsh**：默认无项目级 hook、无机制兜底（仅 prompt 约束）；安装部署级守卫（`hooks/dsh/install.sh`，挂 `$DSH_HOME/cordis.patch.yml`）后，`tools/pre-execute` 门按同一语义拦截 `ask_user_question` 等问卷工具。**codex**：无 hook，仅 prompt 约束。**trae**：`.trae/hooks.json` 注册 PreToolUse hook 拦截 `AskUserQuestion`（按子串匹配），恢复机制兜底。
 
 ### 静默默认决策表（用户确认点替代）
 
@@ -83,4 +83,4 @@
 
 ## 交互模式（mode=interactive，默认）
 
-按工作流既有约定执行：⛔ 确认点由 QA 用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）直接发送用户并收集结论，PM 汇报中间进度。本模式为默认，settings.json 缺失时即此模式。
+按工作流既有约定执行：⛔ 确认点由 QA 用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question` / trae `AskUserQuestion`）直接发送用户并收集结论，PM 汇报中间进度。本模式为默认，settings.json 缺失时即此模式。

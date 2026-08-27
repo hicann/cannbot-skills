@@ -56,7 +56,7 @@ skills:
    注：若已安装部署级权限守卫（`hooks/dsh/install.sh`，挂 `$DSH_HOME/cordis.patch.yml`），
    按角色的写权限隔离与静默问卷拦截已由机制保证，本预检只需聚焦会话级审批/沙箱。
 
-3. **其余环境（claude / codex 等）**：无法从项目文件预检时跳过本项（不提示、不阻塞）。
+3. **其余环境（claude / codex / trae 等）**：无法从项目文件预检时跳过本项（不提示、不阻塞）。trae（TraeCode）注意：角色写权限由 `.trae/agents/*.md` 的 frontmatter `tools` 静态限权（init 生成），目录级写权限靠本 PM 依 `workflow-agent-permissions` 判定避免无效派发；静默问卷拦截由 `.trae/hooks.json` 的 PreToolUse hook 机制保证。
 
 ## 身份
 

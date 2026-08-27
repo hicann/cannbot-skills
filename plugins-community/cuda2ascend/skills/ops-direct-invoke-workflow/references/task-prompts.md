@@ -6,7 +6,7 @@
 >
 > **工具差异（dsh）**：dsh（DeepSeek Harness）无命名 agent 注册（子 Agent 纯 prompt 驱动，角色定义文件位于 `.dsh/agents/<角色>.md`），PM 用 subagent 工具派发：**prompt = 对应角色定义全文（`.dsh/agents/<角色>.md` 正文）+ 本文档 prompt 原样 + 任务输入**，子 Agent 才能获得完整角色上下文；回退/续跑复用原子 Agent 会话（send_message 追加 prompt），不新建会话。**派发时 subagent 工具的 description 必须含角色名**（如「architect：需求分析」）——部署级权限守卫（`hooks/dsh/install.sh`）据此识别子 Agent 角色并按 `.cannbot/permissions/` 规则判权。
 >
-> **权限行的机制差异**：各 prompt 的【权限】行中「其它写入操作会被 hooks 拦截」在 opencode / claude 由 permission-guard hook 机制保证；在无项目级 hook 环境（dsh / codex）下降级为**提示性约束**——子 Agent 依据 `workflow-agent-permissions` 的规则自律，违规写入不会被拦截，PM 派发时仍须按该 skill 判定角色权限。**dsh 可选升级**：运行 `hooks/dsh/install.sh` 安装部署级守卫后，dsh 恢复机制保证（拦截语义与 opencode/claude 一致）。
+> **权限行的机制差异**：各 prompt 的【权限】行中「其它写入操作会被 hooks 拦截」在 opencode / claude 由 permission-guard hook 机制保证；在无项目级 hook 环境（dsh / codex）下降级为**提示性约束**——子 Agent 依据 `workflow-agent-permissions` 的规则自律，违规写入不会被拦截，PM 派发时仍须按该 skill 判定角色权限。**dsh 可选升级**：运行 `hooks/dsh/install.sh` 安装部署级守卫后，dsh 恢复机制保证（拦截语义与 opencode/claude 一致）。**trae**：角色写权限由 `.trae/agents/*.md` 的 frontmatter `tools` 静态限权（Trae Subagent 原生机制，init 生成时按角色注入），目录级写权限（`.cannbot` 等）靠 prompt 自律——PM 派发时仍须按 `workflow-agent-permissions` 判定角色权限。
 
 # 阶段 0：开发准备
 

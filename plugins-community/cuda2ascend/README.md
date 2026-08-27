@@ -121,7 +121,7 @@
 运行时配置统一由 `.cannbot/settings.json` 承载——**唯一配置文件与唯一权威**（工作流模式、插件注册信息与启用状态、询问状态全部聚合于此；init 生成、会话中可显式修改）：
 
 - **生成**：`init.sh --mode interactive|silent` 与 `--plugin-enable <name> on|off`；未传 `--mode` 时保留现有配置（首次默认 `interactive`）。
-- **交互模式（默认）**：⛔ 用户确认点由 QA 用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）直接发送用户并收集结论，进度逐环节汇报。
+- **交互模式（默认）**：⛔ 用户确认点由 QA 用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question` / trae `AskUserQuestion`）直接发送用户并收集结论，进度逐环节汇报。
 - **静默模式（`silent`，完全无人值守）**：不输出中间进度、不发问卷（确认点由 QA 按默认决策执行，架构选型固定采用 SIMD），失败自动回退至最大轮次；仅输出启动时的权限预检警告（opencode 检查 opencode.json 未全量授权、dsh 检查运行上下文声明的文件/审批策略未全量授权时提示一次）与任务完成总结（含阻断中止性总结）。启动静默工作流前 PM 执行权限预检，未全量授权时提示「运行期间权限确认可能打断自动流程」。
 - **会话内切换**：直接对 PM 说「开启静默模式 / 关闭静默模式」，即修改配置并落盘，无需重跑 init。
 - **DSH 部署级权限守卫（可选）**：dsh 无项目级 hook（角色写隔离默认靠 prompt 约束）；运行 `hooks/dsh/install.sh` 可安装部署级 Cordis 守卫插件（挂 `$DSH_HOME/cordis.patch.yml`，对所有 profile 生效），恢复按角色的写权限隔离与静默问卷拦截的机制保证（仅作用于 cuda2ascend 初始化的工作区）。

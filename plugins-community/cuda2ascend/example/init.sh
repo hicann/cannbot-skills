@@ -19,7 +19,7 @@ set -e
 # ============================================================
 # Quick Start content (shown after a successful install).
 # Customize this block for your repo. $CLI_NAME is resolved at
-# runtime from the target tool (opencode/claude/codex/dsh).
+# runtime from the target tool chosen by the user (see --help).
 # ============================================================
 show_quick_start() {
     echo ""
@@ -101,9 +101,9 @@ Options:
                                              - passed through to the base plugin
 
 Examples:
-  ./init.sh opencode --repo cannbot-skills:~/cannbot-skills
-  ./init.sh claude --repo cannbot-skills:~/cannbot-skills
-  ./init.sh opencode --repo asc-devkit:~/asc-devkit --repo cann-samples:~/cann-samples
+  ./init.sh <target> --repo cannbot-skills:~/cannbot-skills
+  ./init.sh <target> --repo asc-devkit:~/asc-devkit --repo cann-samples:~/cann-samples
+  (target = any tool in the list above, e.g. opencode)
 EOF
 }
 
@@ -164,7 +164,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$HELP_REQUESTED" = false ] && [ -z "$TARGET_ENV" ]; then
-    err "Missing required argument: target (e.g. opencode)"
+    err "Missing required argument: target (run ./init.sh --help to list supported tools)"
     echo ""
     show_help
     exit 1
@@ -262,9 +262,6 @@ bash "$PLUGIN_INIT" "${PLUGIN_ARGS[@]}" || {
 # ============================================================
 # Step 3: Quick Start (子仓定制；基类在 --override 时不输出)
 # ============================================================
-CLI_NAME="opencode"
-[ "$TARGET_ENV" = "claude" ] && CLI_NAME="claude"
-[ "$TARGET_ENV" = "codex" ] && CLI_NAME="codex"
-[ "$TARGET_ENV" = "dsh" ] && CLI_NAME="dsh"
+CLI_NAME="$TARGET_ENV"
 show_quick_start
 echo ""

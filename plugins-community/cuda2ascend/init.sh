@@ -112,7 +112,7 @@ BRAND="cannbot"
 VERSION="1.0.0"
 # Supported target tools — single source of truth (modify-init.md 红线 1).
 # Subclass init.sh queries this via `--list-tools` instead of hardcoding.
-SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh")
+SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh" "trae")
 
 # ============================================================
 # Third-party repository registry
@@ -298,6 +298,11 @@ Installation paths:
                 agents are role reference only (DSH subagents are prompt-driven);
                 no project-level permission hook — optional deployment-level guard:
                 hooks/dsh/install.sh (Cordis plugin via $DSH_HOME/cordis.patch.yml)
+  trae:     .trae/skills/ + .trae/agents/          + AGENTS.md in project root
+                skills discovered at <projectRoot>/.trae/skills (TraeCode project skills);
+                agents generated as TraeCode Subagent .md (frontmatter tools = static per-role
+                tool allowlist, native Trae mechanism; role dir-level writes rely on prompt);
+                PreToolUse hook registered in .trae/hooks.json (silent-question interception)
 
 Intermediate directory:
   .cannbot/              workflow intermediate files & state
@@ -406,6 +411,7 @@ while [ $# -gt 0 ]; do
         claude)        TOOL="$arg"; shift; continue ;;
         codex)         TOOL="$arg"; shift; continue ;;
         dsh)           TOOL="$arg"; shift; continue ;;
+        trae)          TOOL="$arg"; shift; continue ;;
         *)
             # 兜底：动态校验 SUPPORTED_TOOLS，支持未来新增工具
             if is_supported_tool "$1"; then
@@ -455,6 +461,9 @@ if [ "${LEVEL}" = "global" ]; then
         # DSH（DeepSeek Harness）用户数据根：$DSH_HOME，默认 ~/.dsh
         # （对齐 dsh-home-paths 的 resolveDshHome 优先级：显式配置 > $DSH_HOME > ~/.dsh）
         CONFIG_ROOT="${DSH_HOME:-${HOME}/.dsh}"
+    elif [ "${TOOL}" = "trae" ]; then
+        # TraeCode 全局用户根：~/.trae-cn（含 user_rules / skills / agents / hooks.json）
+        CONFIG_ROOT="${HOME}/.trae-cn"
     fi
     INSTALL_BASE="${HOME}"
 else
@@ -475,6 +484,11 @@ else
         # 其下的 skills/ 正是 DSH 的 project-dsh 发现根（<projectRoot>/.dsh/skills，
         # 最近 .git 祖先判定，rank 100），无需额外配置即可被扫描。
         CONFIG_ROOT="${INSTALL_BASE}/.dsh"
+    elif [ "${TOOL}" = "trae" ]; then
+        # TraeCode 项目级配置根：<install>/.trae。
+        # 其下的 skills/ 是 TraeCode 项目技能目录（自动发现，无需额外配置）；
+        # agents/ 为 Subagent 定义目录；hooks.json 为 PreToolUse hook 注册。
+        CONFIG_ROOT="${INSTALL_BASE}/.trae"
     fi
 fi
 
@@ -715,6 +729,62 @@ if [ "${TOOL}" = "codex" ]; then
     else
         warn "No codex agent TOMLs found at ${CODEX_AGENT_ROOT}, skipping agents"
     fi
+elif [ "${TOOL}" = "trae" ]; then
+    # TraeCode Subagent：Markdown 定义（frontmatter name/description/tools 等），
+    # 仅内置 Agent 可调用。从 agents/*.md 生成 .trae/agents/{name}.md：
+    #   保留 name/description 与正文，注入 tools（按角色静态限权，Trae 原生机制）；
+    #   目录级写权限（.cannbot 等）Trae 不支持，由 prompt 约束兜底（同 codex 降级）。
+    agent_count=$(TRAE_AGENT_OUT="${AGENTS_LINK_DIR}" python3 - "${AGENT_FILES[@]}" << 'TRAE_AGENT_PY' 2>/dev/null)
+import os, re, sys
+
+out_dir = os.environ["TRAE_AGENT_OUT"]
+os.makedirs(out_dir, exist_ok=True)
+
+# 角色 → Trae 工具白名单（与 workflow-agent-permissions 角色语义对齐）。
+# Trae 工具名：Read/Write/Edit/Glob/Grep/LS/RunCommand/WebSearch/WebFetch/
+# AskUserQuestion/Skill/TodoWrite/LSP/mcp__*。目录级限权 Trae 不支持。
+ROLE_TOOLS = {
+    "architect": "Read, Glob, Grep, LS, Write, Edit, Skill, TodoWrite",
+    "developer": "Read, Glob, Grep, LS, Write, Edit, RunCommand, Skill, TodoWrite",
+    "developer-code": "Read, Glob, Grep, LS, Write, Edit, RunCommand, Skill, TodoWrite",
+    "developer-test": "Read, Glob, Grep, LS, Write, Edit, RunCommand, Skill, TodoWrite",
+    "developer-doc": "Read, Glob, Grep, LS, Write, Edit, RunCommand, Skill, TodoWrite",
+    "qa": "Read, Glob, Grep, LS, Write, Edit, RunCommand, Skill, TodoWrite, AskUserQuestion",
+}
+DEFAULT_TOOLS = "Read, Glob, Grep, LS, Write, Edit, Skill, TodoWrite"
+
+
+def parse_frontmatter(text):
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
+    if not m:
+        return {}, text
+    fm, body = m.group(1), m.group(2)
+    data = {}
+    for line in fm.splitlines():
+        mm = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if mm:
+            data[mm.group(1)] = mm.group(2).strip()
+    return data, body
+
+
+count = 0
+for f in sys.argv[1:]:
+    try:
+        with open(f, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        continue
+    fm, body = parse_frontmatter(text)
+    name = fm.get("name") or os.path.splitext(os.path.basename(f))[0]
+    desc = fm.get("description", "")
+    tools = ROLE_TOOLS.get(name, DEFAULT_TOOLS)
+    out = f"---\nname: {name}\ndescription: {desc}\ntools: {tools}\n---\n{body}"
+    with open(os.path.join(out_dir, name + ".md"), "w", encoding="utf-8") as fh:
+        fh.write(out)
+    count += 1
+print(count)
+TRAE_AGENT_PY
+    ok "Agents: ${agent_count} trae Subagent files generated"
 else
     for f in "${AGENT_FILES[@]}"; do
         link_name="$(basename "${f}")"
@@ -728,6 +798,9 @@ else
 fi
 if [ "${TOOL}" = "dsh" ]; then
     info "dsh: agents linked to .dsh/agents/ as role reference (DSH subagents are prompt-driven, no native agent registration)"
+fi
+if [ "${TOOL}" = "trae" ]; then
+    info "trae: agents generated as Subagent .md in .trae/agents/ (tools = static per-role allowlist, native Trae mechanism)"
 fi
 echo ""
 
@@ -912,6 +985,76 @@ elif [ "${TOOL}" = "dsh" ]; then
     echo -e "  ${DIM}policies are configured at session/deployment level, not by project files.${NC}"
     echo -e "  ${DIM}可选机制升级: ${GREEN}hooks/dsh/install.sh${NC}${DIM} 安装部署级权限守卫${NC}"
     echo -e "  ${DIM}(Cordis 插件 → ${DIM}\$DSH_HOME/cordis.patch.yml，恢复角色写权限隔离与静默问卷拦截)${NC}"
+    echo ""
+elif [ "${TOOL}" = "trae" ]; then
+    # TraeCode：PreToolUse hook 注册在 .trae/hooks.json。
+    # 角色写权限由 .trae/agents/*.md 的 frontmatter tools 静态限权（Trae 原生机制，
+    # 见 Step 3 生成逻辑），本 hook 只做**静默问卷拦截**兜底——Trae 的 PreToolUse
+    # stdin 无 agent 角色字段（与 opencode/claude 不同），无法做按角色目录限权，
+    # 目录级写权限由 prompt 约束（同 codex 降级）。
+    TRAE_HOOK_SRC="${PLUGIN_ROOT}/hooks/trae/permission-guard.js"
+    if [ -f "${TRAE_HOOK_SRC}" ]; then
+        TRAE_HOOK_DIR="${CONFIG_ROOT}/hooks"
+        mkdir -p "${TRAE_HOOK_DIR}"
+        ln -sfn "$(realpath "${TRAE_HOOK_SRC}")" "${TRAE_HOOK_DIR}/permission-guard.js"
+        ok "trae hook: permission-guard.js linked"
+
+        HOOKS_FILE="${CONFIG_ROOT}/hooks.json"
+        # 项目级用 ${CLAUDE_PROJECT_DIR} 占位符（Trae 兼容 Claude 环境变量，随项目迁移不失效）；
+        # global 级项目目录不固定，用绝对路径
+        HOOK_REF='${CLAUDE_PROJECT_DIR}/.trae/hooks/permission-guard.js'
+        [ "${LEVEL}" = "global" ] && HOOK_REF="${TRAE_HOOK_DIR}/permission-guard.js"
+        if command -v python3 > /dev/null 2>&1; then
+            python3 - "${HOOKS_FILE}" "${HOOK_REF}" << 'TRAE_HOOKS_PY'
+import json, os, sys
+
+path, hook_ref = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            print(f"  [warn] hooks.json 内容不是 JSON 对象，保留原文件未注册 hook: {path}", file=sys.stderr)
+            sys.exit(0)
+    except Exception:
+        print(f"  [warn] hooks.json 解析失败，保留原文件未注册 hook: {path}", file=sys.stderr)
+        sys.exit(0)
+
+pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
+for group in pre:
+    matcher = group.get("matcher", "")
+    for h in group.get("hooks", []):
+        blob = h.get("command", "") + " " + " ".join(h.get("args", []))
+        if "permission-guard.js" in blob:
+            if "Question" in matcher:
+                print("  [info] hooks.json 已注册 permission-guard hook，跳过")
+            else:
+                group["matcher"] = matcher + "|AskUserQuestion"
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                print("  [ok] hooks.json 已注册 permission-guard hook（matcher 补充 AskUserQuestion，静默问卷拦截生效）")
+            sys.exit(0)
+
+pre.append({
+    "matcher": "AskUserQuestion",
+    "hooks": [{
+        "type": "command",
+        "command": "node " + hook_ref,
+    }],
+})
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print("  [ok] hooks.json 注册 permission-guard PreToolUse hook（静默问卷拦截）")
+TRAE_HOOKS_PY
+        else
+            warn "python3 not found, 请手动在 ${HOOKS_FILE} 注册 PreToolUse hook（见 hooks/trae/permission-guard.js 注释）"
+        fi
+    else
+        warn "trae permission-guard.js not found, skipping"
+    fi
     echo ""
 else
     OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"
@@ -1237,6 +1380,15 @@ if [ "${TOOL}" = "claude" ]; then
         health_errors="${health_errors}\n  ${YELLOW}⚠${NC} settings.json missing (hook 未注册)"
     fi
 fi
+if [ "${TOOL}" = "trae" ]; then
+    [ -e "${CONFIG_ROOT}/hooks/permission-guard.js" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} .trae/hooks/permission-guard.js missing"; health_ok=false; }
+    if [ -f "${CONFIG_ROOT}/hooks.json" ]; then
+        grep -q "permission-guard.js" "${CONFIG_ROOT}/hooks.json" \
+            || health_errors="${health_errors}\n  ${YELLOW}⚠${NC} hooks.json 未注册 permission-guard hook"
+    else
+        health_errors="${health_errors}\n  ${YELLOW}⚠${NC} hooks.json missing (hook 未注册)"
+    fi
+fi
 
 if [ "${health_ok}" = true ] && [ -z "${health_errors}" ]; then
     ok "All checks passed"
@@ -1248,10 +1400,7 @@ fi
 # ============================================================
 # Summary
 # ============================================================
-CLI_NAME="opencode"
-[ "${TOOL}" = "claude" ] && CLI_NAME="claude"
-[ "${TOOL}" = "codex" ] && CLI_NAME="codex"
-[ "${TOOL}" = "dsh" ] && CLI_NAME="dsh"
+CLI_NAME="${TOOL}"
 echo ""
 echo -e "  ${GREEN}${BOLD}✓ ${TEAM_NAME} installed!${NC}"
 echo -e "  ${DIM}Skills: ${skill_count} | Agents: ${agent_count}${NC}"

@@ -74,7 +74,7 @@ disable-model-invocation: true
 1. 读取开发方案文档，逐项核对架构承接、schema 对齐、关键设计、接口、承接需求、资源约束、能力边界、瓶颈预判、优化项全部检查项。
 2. 对照需求文档（= proto.yaml）核实代码架构与拍板结果一致、schema 逐字对齐；对照 `repo-op-templates`、`repo-build-guide` 核实模板与架构匹配、接口可用性、真值一致性。
 3. 检查项存在不通过项时，直接返回结构化修改意见，**不进入用户确认段**。
-4. 检查项全过后，按抽取清单生成结构化问卷 json，每条带上述四要素；用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）直接发送用户；问卷与回复成对落盘 `.cannbot/<算子名>/questionnaires/`（回复记为问卷同名 `.reply.json`）。
+4. 检查项全过后，按抽取清单生成结构化问卷 json，每条带上述四要素；用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question` / trae `AskUserQuestion`）直接发送用户；问卷与回复成对落盘 `.cannbot/<算子名>/questionnaires/`（回复记为问卷同名 `.reply.json`）。
 5. 收集用户结论后汇总判定：全部条目确认无异议即通过；存在异议则按条目的语义归属标签返回修改意见。
 
 ## 输出

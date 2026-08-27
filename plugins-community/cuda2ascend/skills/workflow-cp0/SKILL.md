@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # 环境确认验收标准
 
-获取到 `.cannbot/环境信息.md` 时，立即用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question`）按下列格式向用户发送问卷。每个标题对应问卷的一页（`questions` 数组的一项），`{...}` 为占位符，取值自环境信息文档的实测结果：
+获取到 `.cannbot/环境信息.md` 时，立即用会话问卷工具（opencode `question` / claude `AskUserQuestion` / dsh `ask_user_question` / trae `AskUserQuestion`）按下列格式向用户发送问卷。每个标题对应问卷的一页（`questions` 数组的一项），`{...}` 为占位符，取值自环境信息文档的实测结果：
 
 ```json
 {
