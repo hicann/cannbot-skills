@@ -87,6 +87,76 @@
           "description": "回复中提到了 定位粒度"
         }
       ]
+    },
+    {
+      "id": 3,
+      "title": "明确关键词直接路由而不重复 tensor_graph",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "用户明确说“用上板二分和检查点 tensor 定位”。还需要先执行 tensor_graph 和 Pass 校验吗？",
+      "expected_output": "回复应识别为 mode=binary，跳过标准判断并直接加载 precision-binary-search；关键词“二分/上板二分/检查点tensor”代表用户已选路线，不应再重复 tensor_graph 或 Pass 流程。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "Golden 设置顺序和设备要求",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "tensor_graph 校验里，我先运行 PyPTO kernel，再把 NPU 上的 torch_output 传给 set_verify_golden_data，可以吗？",
+      "expected_output": "回复应指出顺序和设备都错误：必须先计算 golden，再把 CPU 上的 golden 通过 pypto.set_verify_golden_data 设置好，最后执行 PyPTO kernel；顺序错会导致 verify 日志为空或输入输出不匹配。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "首次自动校验前必须编译安装",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "auto 模式准备开启 tensor_graph 校验，能否直接运行旧安装环境里的算子？",
+      "expected_output": "回复应要求执行算子前先运行 python3 -m pip install . --verbose 完成编译安装，再配置 enable_pass_verify、pass_verify_save_tensor 和空 pass filter；不能默认旧安装已包含当前验证配置。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "拿到 tensor_graph 结果后清理验证注入",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "interpreter.log 已产生明确 tensor_graph 结果。verify_options 和 set_verify_golden_data 可以一直留在生产代码里继续定位吗？",
+      "expected_output": "回复应要求确认结果后移除 @jit 的 verify_options 参数和 pypto.set_verify_golden_data 注入，再按结果进入 precision-verify 或 precision-pass；这些诊断配置不应残留在生产路径。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "卡资源冲突与空日志的分流处理",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "开启校验后一次报 aicore/MPU 地址访问无效，另一次 verify 日志为空。这两类现象分别先查什么？",
+      "expected_output": "回复应分流：aicore/MPU 无效地址优先怀疑 NPU 卡冲突或异常，切换 TILE_FWK_DEVICE_ID 到空闲卡重试；verify 日志为空则检查 golden 是否设置、是否按计算 golden→CPU set_verify_golden_data→运行算子的顺序，以及输入输出数量是否匹配。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "pypto-precision-compare"
