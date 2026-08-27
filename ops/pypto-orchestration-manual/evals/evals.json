@@ -88,6 +88,48 @@
       "expected_output": "应读 agents.md 获取子 agent 的输入、交付物、门禁、交接信息来支撑调度与把关，无需知道子 agent 内部工作方式；并结合 principles.md 的行为准则。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "Stage 术语只能由编排手册集中管理",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "为什么 pypto-orchestration-manual 里保留完整 Stage 词汇，而普通子技能不应该复制这套状态机？",
+      "expected_output": "回复应说明该手册是 stage-management knowledge 的唯一规范来源，集中定义 roster、dispatch、gate 和 handoff；子 agent 只按自身职责执行，复制阶段状态机会形成多套控制真值，因此只由 orchestrator 加载和管理。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "agents.md 不替代子代理内部 Mandatory reads",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "orchestrator 已读 agents.md，是否需要替每个子 agent 再加载其所有内部技能和参考？",
+      "expected_output": "回复应说明不需要：agents.md 只提供编排所需的输入、交付物、门禁和交接合同；每个子 agent 的内部技能加载由其 agents/<name>.md Mandatory reads 自主管理，orchestrator 不应预加载或干预内部实现。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "强制规则按需加载但仍约束交付物",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "rules.md 不是首次调度必读，是否意味着子 agent 的输出可以不经过其中的模块逐步执行和三项禁止检查？",
+      "expected_output": "回复应说明不是：rules.md 对所有子 agent 输出仍是强制门禁，只是由各自 skill 落实，orchestrator 在需要执行细节或核对违规时按需加载；progressive disclosure 不等于规则可选。",
+      "expectations": [],
+      "files": []
     }
   ]
 }

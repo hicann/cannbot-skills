@@ -71,6 +71,62 @@
       "expected_output": "按 layout/structure 要求逐项核对：三件套是否并存、断言是否走比较助手、阶段化命名、host wrapper 是否用 Python for 驱动 kernel、pypto.view 形状秩一致、set_cube_tile_shapes 的 m/k/n 是否传 [L0,L1] 且 0 小于 L0 小于等于 L1、L1 取模 L0 为 0；任何一项违规都应在修复后再认定完成。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "view 的三组秩必须一致",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "review 时发现 pypto.view 的 shape 是 3 维、offsets 是 2 维、valid_shape 是 3 维。只要元素总数对得上可以接受吗？",
+      "expected_output": "回复应判为结构缺陷：pypto.view 不是 reshape，shape、offsets、valid_shape 的 rank 必须一致；元素总数相等不能替代秩契约。应修正 view 调用后再认定文件完成，不能在测试或 MEMORY 中绕过。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "Cube tile 每轴必须满足层级整除关系",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "set_cube_tile_shapes 的 m=[64,96]、k=[32,128]、n=[64,128]，是否通过结构 review？",
+      "expected_output": "回复应判定不通过：m/k/n 每轴都要传 [L0,L1]，满足 0<L0≤L1 且 L1%L0==0；m 的 96%64 不为 0，因此必须改为合法的层级 tile。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "测试比较禁止手写容差循环",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "test_myop.py 自己遍历 tensor 元素并判断 abs(diff)<tol，没有用项目比较助手。数值结果目前通过，能否接受？",
+      "expected_output": "回复应判为不合格：每个测试断言必须统一通过 assert_allclose 或 detailed_tensor_compare，禁止手写容差循环。即使当前样本通过也应先改为标准比较助手，再完成 review。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "调用提取器只提供有序事实清单",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "extract_pypto_calls.py 输出了所有调用点，是否等于 kernel 已通过 API 合规 review？",
+      "expected_output": "回复应说明不等于：脚本只按行号列出 pypto.* 调用形态，--json 仅改变输出格式，用作 op-by-op 调试的事实清单；仍需逐项核对 API 文档和布局结构要求，脚本不会自动证明 dtype、shape、tile 或 write-back 合规。",
+      "expectations": [],
+      "files": []
     }
   ]
 }
