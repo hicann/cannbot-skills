@@ -55,6 +55,8 @@ interface ImportStatus {
   sessionId: string
   status: "pending" | "importing" | "success" | "error"
   message?: string
+  framework?: string | null
+  version?: string | null
 }
 
 interface DirEntry {
@@ -241,7 +243,7 @@ export function LocalFileImport() {
         }
         setImportStatuses(prev =>
           prev.map(s => s.sessionId === sessionId
-            ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? importResultMessage(data) : (data.error ?? "Import failed") }
+            ? { ...s, status: res.ok ? "success" : "error", message: res.ok ? importResultMessage(data) : (data.error ?? "Import failed"), framework: data.framework ?? undefined, version: data.version ?? undefined }
             : s)
         )
       } catch (e) {
@@ -409,7 +411,7 @@ export function LocalFileImport() {
           )
         } else {
           setImportStatuses(prev =>
-            prev.map(s => s.sessionId === sessionId ? { ...s, status: "success", message: importResultMessage(data) } : s)
+            prev.map(s => s.sessionId === sessionId ? { ...s, status: "success", message: importResultMessage(data), framework: data.framework ?? undefined, version: data.version ?? undefined } : s)
           )
         }
       } catch (e) {
@@ -443,6 +445,8 @@ export function LocalFileImport() {
           query: session?.firstQuery ?? null,
           filePath: sourceType === "cannbay" ? "CANNBay" : filePath.trim(),
           sourceType: sourceType === "cannbay" ? BRAND_SOURCE_TYPE : sourceType,
+          framework: s.framework ?? null,
+          version: s.version ?? null,
         }
       })
       saveImportHistory(entries)

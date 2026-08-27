@@ -93,12 +93,14 @@ export function LlmOutputView({
   role,
   highlight,
 }: LlmOutputViewProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false)
   const [prevKw, setPrevKw] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const sections = parseContentSections(content, contentJson)
+  // 短输出默认展开（直接可读）；长输出默认折叠（标题行 + token 数概览，
+  // 点击展开）。与 LLM Input 的两级折叠习惯一致。
+  const [isExpanded, setIsExpanded] = useState((outputTokens ?? 0) <= 2000 && (content?.length ?? 0) <= 6000)
 
   // Trace-search jump: when the highlight keyword changes, auto-expand so the
   // highlighted match is visible. Uses the render-phase prop-change pattern

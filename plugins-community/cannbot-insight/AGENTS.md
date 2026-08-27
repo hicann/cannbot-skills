@@ -1,30 +1,68 @@
 # AGENTS.md — cannbot-insight
 
+> 与 `CLAUDE.md` 同步维护：主体内容对齐，本文件额外保留 CLI 前端细节与 proxy 侧红线。
+> 改动任一文件时同步另一份。
+
 ## Project
 
 CANNBot-Insight: Session-level observability tool for LLM coding agents (opencode).
-Next.js 16 App Router + Prisma + SQLite. Chinese/English mixed UI.
-UI version tracked in `src/lib/version.ts` (v0.31) — `package.json` version (0.02) is not the display version.
+Next.js 16 App Router + Prisma 6 + SQLite. Chinese/English mixed UI.
+UI version tracked in `src/lib/version.ts` — `package.json` version is NOT the display version.
 
-## CLI Frontend (New - 2026-06)
+## Commands
 
-Adding a CLI frontend alongside the existing web UI. Backend remains unchanged; CLI is a pure API client.
+| Command | Purpose |
+|---------|---------|
+| `./start.sh` | Auto port (21025+), kills existing server via `.next/dev/lock` PID, runs `prisma migrate dev` + `next dev` |
+| `./start.sh -u` | Same but also `npm install` first |
+| `./start.sh -c tui` | Backend + CLI TUI mode (backend stops when CLI exits) |
+| `npm run test` | `vitest run` — all tests |
+| `npm run test:watch` | `vitest` — watch mode |
+| `npm run test:cli` | `vitest run tests/cli/` — CLI tests only |
+| `npx vitest run tests/cli/unit/commands/import.test.ts` | Run a single test file |
+| `npm run lint` | eslint (flat config, `eslint.config.mjs`) |
+| `npm run build` | `next build` |
 
-### Tech Stack
-- **Ink 7.0.6** + React 19.2.7 (ESM required: `"type": "module"` in package.json)
-- **Commander.js** for command parsing
-- **string-width** + **cli-truncate** for CJK character width handling
-- Run with **tsx** (not ts-node) due to yoga-layout top-level await
+## Architecture
 
-### Key Decisions (PoC Verified)
-- **No third-party Ink components** — ink-table/ink-select/ink-spinner all incompatible with Ink v7
-- **Self-implement all components**: DataTable, Spinner (10 lines), TextInput (30 lines)
-- **Dual render strategy**: ink-testing-library for tests (has lastFrame), Ink native render for production
-- **stdin handling**: `resume() + setRawMode(true)` before Ink render, restore on exit
-- **Pagination over virtual scroll**: pageSize=20, n/p keys (Ink re-renders full tree anyway)
-- **CLI types use `Api` prefix** (ApiSessionListItem) to distinguish from shared types
+### Data Flow
 
-### Architecture
+```
+opencode sessions.db (external)
+  → better-sqlite3 read
+  → opencode-db adapter (src/lib/ingest/adapters/)
+  → normalize → turn-split → bridge-builder → execution-split
+  → data-service (orchestrator)
+  → Prisma write (8 models, SQLite)
+```
+
+Adapter registry in `src/lib/ingest/adapters/index.ts` — currently `opencode-db` and `claude-jsonl`.
+
+### Frontend Modes (shared backend)
+
+All three modes are pure API clients of the same 15 `/api/observe/*` endpoints:
+
+| Mode | Entry | Rendering |
+|------|-------|-----------|
+| **Web UI** | `src/app/page.tsx` (server component, direct Prisma) | Next.js + shadcn/ui v4 + Tailwind v4 + @base-ui/react |
+| **TUI** | `src/cli/tui/App.tsx` | Ink 7 + React 19 (ESM strict) |
+| **CLI** | `src/cli/index.ts` (Commander) | chalk + string-width + cli-truncate |
+
+Session detail page (`session/[taskId]/`) is `"use client"` with 10 tabs
+（`wireRounds`/`replay` 默认隐藏，URL `?a` 或 `NEXT_PUBLIC_SHOW_ADVANCED_TABS` 展开）fetching from `/api/observe/*`.
+
+### Key Code Paths
+
+- **Ingest write**: `src/lib/ingest/data-service.ts` → `importSession()` — currently uses per-row `create()` (P0 optimization: change to `createMany` + `$transaction`, see `docs/import-batch-write-optimization.md`)
+- **Ingest read**: `src/lib/ingest/adapters/opencode-db.ts` — N+1 query pattern (per-session/per-message sub-queries to `part` table)
+- **Context windows**: `src/lib/context-window-config.ts` — configurable via `context-windows.json`, hardcoded defaults as fallback. Web `ContextTracker.tsx` has its own model mapping — keep in sync.
+- **AI analysis**: `src/lib/ai/analyzer.ts` — only OpenAI-compatible `/chat/completions`, config in localStorage only
+- **CLI client**: `src/cli/client.ts` — InsightClient wrapping 15 API endpoints
+- **CLI types**: `src/cli/types.ts` — `Api`-prefixed interfaces to distinguish from `src/lib/shared/types.ts`
+- **CANNBay v2**: `src/lib/cannbay2/`（mirror 治理/导出/编排）— 设计见 `docs/cannbay-v2-design.md`
+
+### CLI Frontend
+
 ```
 src/cli/
 ├── index.ts              # Commander entry point
@@ -32,67 +70,24 @@ src/cli/
 ├── types.ts              # Api-prefixed response types
 ├── errors.ts             # Error hierarchy
 ├── config.ts             # Config management
-├── commands/             # CLI commands (sessions, session, turn, search, compare, stats, import, delete, config)
+├── commands/             # sessions, session, turn, search, compare, stats,
+│                         # import, delete, config, analyze, upload, export, export-md
 ├── hooks/                # useApi, useKeyboard, useNavigation, useTable
 ├── utils/                # format, colors, table (with padEndVisual/truncateVisual)
 └── tui/
     ├── App.tsx           # Root component (stdin switching, useMemo client)
-    ├── screens/          # SessionList, SessionDetail, TurnDetail, CompareView, ImportPanel
-    ├── tabs/             # OverviewTab, TurnsTab, WorkflowTab, SubagentsTab, SkillsTab, BridgesTab, ContextTab
+    ├── screens/          # SessionList, SessionDetail, TurnDetail, CompareView, ImportPanel, HelpScreen
+    ├── tabs/             # Overview, Turns, Workflow, Trace, Skills, Bridges, Context
     └── components/       # StatusBar, KeyBar, DataTable, MetricCards, AsciiBar, TreeView, TabBar, Spinner, TextInput
 ```
 
-### Dev Commands (CLI)
-| Command | Notes |
-|---------|-------|
-| `npx tsx src/cli/index.ts tui` | Launch TUI mode (requires real TTY) |
-| `npx tsx src/cli/index.ts sessions` | List sessions (command mode) |
-| `npx tsx src/cli/index.ts stats` | Global statistics |
-| `npm run test:cli` | CLI tests (uses ink-testing-library) |
-
-### CLI Constraints
-- **Ink v7 native render() has no lastFrame/frames/output** — only ink-testing-library provides these
-- **ESM strict**: Cannot use require(), must use import
-- **CJ width**: Chinese characters = 2 columns, use string-width for all text measurement
-- **No PTY in tests**: TUI E2E tests only run manually, CI runs component tests only
-- **Version**: Import from `@/lib/version`, never hardcode
-
-## Dev Commands
-
-| Command | Notes |
-|---------|-------|
-| `./start.sh` | Auto port (21025+), kills existing dev server via `.next/dev/lock` PID, runs `prisma migrate dev` + `next dev` |
-| `./start.sh -u` | Same but also runs `npm install` first |
-| `npm run dev` | Runs on default port 3000 — prefer `./start.sh` instead |
-| `npm run build` | Standard `next build` |
-| `npm run test` | `vitest run` — 187 tests (web) |
-| `npm run test:cli` | CLI frontend tests |
-| `npm run lint` | `eslint` (flat config, `eslint.config.mjs`) — run after edits to verify |
-
-## Architecture
-
-### Data Flow
-
-```
-opencode sessions.db (external) → better-sqlite3 read → opencode-db adapter → normalize → turn-split → bridge-builder → execution-split → merge → data-service → Prisma write (SQLite)
-```
-
-### Page Structure
-
-- **Home** (`page.tsx`): Server component, direct Prisma queries (no API layer)
-- **Session detail** (`session/[taskId]/page.tsx`): `"use client"` component, fetches from `/api/observe/*` routes via `useEffect`
-- **9 tabs**: Overview → Turns → Workflow ✦ → Trace 🔍 → Subagents → Skills → Interactions → AI Workflow (beta) → Context 📊
-
-### Key Directories
-
-- `src/app/api/ingest/` — Import/delete routes
-- `src/app/api/observe/` — Read routes (session, turns, turns/search, bridges, workflow, stats, data)
-- `src/app/api/ai/` — AI analysis routes (analyze-workflow, test-provider)
-- `src/lib/ingest/` — Ingest pipeline (opencode-db adapter, turn-split, bridge-builder, execution-split, phase-split)
-- `src/lib/ingest/turn-split.ts` — `MODEL_CONTEXT_WINDOWS` mapping (10 models), `DEFAULT_CONTEXT_WINDOW = 128000`. Frontend ContextTracker.tsx duplicates this mapping — keep them in sync.
-- `src/lib/ai/analyzer.ts` — AI phase divider (LLM call → WorkflowTree structure)
-- `src/components/observe/` — 16 tab view components (TurnTimeline, WorkflowTreeView, SubagentCards, TraceView, ContextTracker, TokenTrendChart, TokenBarChart, TimelineGantt, SkillEventList, LlmContextView, LlmOutputView, ToolCallList, etc.)
-- `src/components/ui/dialog.tsx` — Built on `@base-ui/react` (not radix-ui). Use this for custom confirm dialogs instead of browser `confirm()`.
+CLI 约束（PoC 验证过的决策）：
+- **Ink v7 原生 `render()` 无 lastFrame/frames/output** — 测试只能用 ink-testing-library
+- **无第三方 Ink 组件** — ink-table/ink-select/ink-spinner 与 v7 不兼容，全部自实现
+- **分页优先于虚拟滚动** — pageSize=20, n/p 键
+- **CJK 宽度** — 一切文本测量用 `string-width`
+- **CLI 类型 `Api` 前缀** — 与 shared types 区分
+- **版本号** — 从 `@/lib/version` 导入，禁止硬编码
 
 ### Proxy 扩展：开闭原则（OCP）与文件隔离
 
@@ -107,9 +102,15 @@ proxy（cpx 捕获）是 insight 的扩展来源，不是核心管线的一部�
 - proxy 以后加新扩展字段（`metadata`/`cache`/`retry`/`dedup` 标记…）在同一
   扩展层文件内加，核心不动。
 
+**格式契约**：捕获/导出 jsonl 的扩展字段格式一律参考 `docs/cannbay-schema-spec.md`
+（信封冻结 + `x_cannbay` 命名空间 + `(schema,version)` 声明式分发；加可选字段
+不升版本，改语义/类型必升版本并配 IT 锁）。新增或修改任何扩展字段前先读它；
+规范落地前的现状（legacy 顶层字段 `source`/`duration_ms`/`system`/`tools`）与
+双轨优先级见该文档 §6。
+
 **红线（不得违反）**：
 
-| 管线模块 | 能否为 proxy 改动？ |
+| 模块 | 能否为 proxy 改动？ |
 |----------|-------------------|
 | `src/lib/shared/types.ts` (`RawInteraction` 等) | ❌ 不加 proxy 专用字段 |
 | `src/lib/ingest/normalize.ts` | ❌ 不透传 proxy 数据 |
@@ -120,60 +121,82 @@ proxy（cpx 捕获）是 insight 的扩展来源，不是核心管线的一部�
 | `src/lib/ingest/adapters/claude-jsonl-full-context.ts` | ✅ proxy 扩展层（system/tools/memory/skills） |
 | `src/app/api/observe/session/turns/[turnId]/route.ts` | ✅ API 层调扩展层读 proxy 数据（像 `readFullContext`） |
 
-**判定标准**：如果改动让 native（非 proxy）的 `RawInteraction` /
+**proxy 侧红线**（proxy 仓内部，与上表互补）：
+
+| 模块 | 能否改动？ |
+|------|-------------------|
+| proxy 捕获层（server/emitters/writer） | ❌ 不感知 insight —— 只写 verbatim |
+| proxy `normalize/` | ❌ 只做布局归一 —— 内容解释（框架行为）一律去 insight adapter |
+| norm 文件格式 | ⚠️ 必须保持 insight 原生 claude-jsonl 可消费（含扩展字段透传） |
+
+产物布局（镜像 insight 原生子代理发现约定 `<parentDir>/<sessionId>/subagents/`）：
+
+```
+~/.cannbot-insight/proxy/
+├── cpx-<sid>.jsonl               verbatim 捕获（single source of truth）
+├── <sid>/subagents/              verbatim 子代理捕获 + meta.json
+└── norm/
+    ├── <sid>.jsonl               规范化主文件 —— insight 导入这个
+    └── <sid>/subagents/          规范化子代理 + meta.json 副本
+```
+
+**判定标准**（两侧通用）：如果改动让 native（非 proxy）的 `RawInteraction` /
 `NormalizedInteraction` / `TurnRow` 的字段值发生变化（哪怕是 `?? null`），
 就违反了 OCP。native 路径必须**逐字节不变**——靠架构隔离保证，不靠约定+测试。
+一个问题是"框架怎么行为的解释" → insight adapter；是"导入视图怎么摆" → proxy normalize。
 
 ## Constraints & Gotchas
 
-- **Zero Prisma schema changes** for feature work — computed data (workflow, context charts) built at API/render time, not persisted
-- **AI provider config stored in localStorage only** — lost on browser change, never sent to server
-- **AI only supports OpenAI-compatible `/chat/completions`** — `/apps/anthropic` path rejected with red warning
-- **`createdAt_ts` is nullable DateTime** — need `.toISOString()` fallback to `createdAt`
-- **Hydration error** — inner expand buttons in TurnTimeline must be `<span role="button">` not `<button>` to avoid nesting
-- **Next.js dev lock**: `.next/dev/lock` contains JSON with PID/port — used by start.sh to kill existing server
-- **`response_format: { type: "json_object" }`** required for AI analysis — no fallback for non-supporting models
-- **AI input optimization**: Only sends root assistant/user/system turns, 30K chars budget with auto-truncation, summaries 80 chars max
-- **Version bumps**: +0.01 per feature commit, update `src/lib/version.ts` only
-- **Turn model has no `cost` field** — set `cost: 0` in API mapping
-- **Context tracker groups by `subagentSessionId`** (27 independent sessions) not `agentName` (only 4), because same agentName has multiple independent executions
+- **ESM strict** (`"type": "module"` in package.json) — no `require()`, use `import`
+- **Ink v7 has no lastFrame/frames/output** on native `render()` — use `ink-testing-library` for tests only
+- **No third-party Ink components** — ink-table/ink-select/ink-spinner incompatible with Ink v7; self-implement all components
+- **CJK width**: Chinese chars = 2 columns; use `string-width` for all text measurement in CLI
+- **Zero Prisma schema changes** for feature work — computed data built at API/render time, not persisted
+- **Turn model has no `cost` field** — set `cost: 0` in API mapping, strip from `TurnRow` before Prisma write
+- **`createdAt_ts` is nullable DateTime** — fallback to `createdAt` with `.toISOString()`
+- **Hydration error**: inner expand buttons must be `<span role="button">` not `<button>` to avoid nesting
+- **`response_format: { type: "json_object" }`** required for AI analysis — no fallback
+- **AI input optimization**: Only root assistant/user/system turns, 30K chars budget, summaries 80 chars max
+- **Git hosted on gitcode.com** — never use `gh` CLI
+- **Path alias**: Always `@/lib/...` / `@/components/...`, never relative `../../`
 
-## 测试要求
+## Testing
 
-1. **集成优先** — 从页面或 API 层面验证，不写简单函数级单元测试
-2. **数据驱动** — 通过 JSON 或 DB 原始数据驱动测试，数据放在 `tests/data/`
-3. **Pipeline 覆盖** — 覆盖完整数据流管道（如 JSONL → adapter → turn-split → aggregates）
-4. **功能修复必须写 IT 测试** — 每个 bug 修复或功能改进必须配套集成测试，验证修复后的完整数据流表现
-5. **Fixture 管理** — 为每种场景创建独立 fixture 文件
+- **Integration over unit**: 写测试用例时，不要简单的函数级别用例，需要从页面或 API 层面进行验证
+- **Data-driven**: 通过 JSON 或 DB 原始数据驱动测试，数据准备在 `tests/data/` 目录下
+- **Pipeline coverage**: 测试应覆盖完整数据流（如 JSONL → adapter → turn-split → SkillEvent → aggregates）
+- **功能修复必须写 IT 测试**: 每个 bug 修复或功能改进必须配套集成测试，验证修复后的完整数据流表现
 
-## 提交流程
+## Commit Workflow
 
-1. **同步远端** — `git pull`
-2. **解决冲突** — 确保代码不丢失
-3. **运行测试** — `npm run test` 全部通过
-4. **更新文档** — README.md / README-zh.md（如有功能变更）
-5. **更新版本号** — `src/lib/version.ts` 仅新增特性或严重 bug 时 +0.01
-6. **提交推送** — `git commit -m "[type] v0.xx: 描述"` → `[feat]` `[fix]` `[test]` `[docs]` `[chore]`
+每次提交代码前必须完成以下步骤（顺序执行）：
+
+1. **同步远端**: `git pull` — 远端可能有更新
+2. **解决冲突**: 如有冲突，手动解决后继续
+3. **运行测试**: `npm run test` — 全部通过才能继续
+4. **更新文档**: README.md / README-zh.md（如有功能变更）
+5. **更新版本号**: `src/lib/version.ts` — 仅在新增特性或修复严重 bug 时 +0.01，小修小补不升版本
+6. **提交推送**: `git commit -m "[type] v0.xx: 描述"` → `[feat]` `[fix]` `[test]` `[docs]` `[chore]`
 
 ## Code Conventions
 
-- **License header**: Every newly added source file (`*.ts`/`*.tsx`/`*.js`/`*.mjs`/`*.py`/`*.sh`) must start with the CANN copyright header — `//` prefix for TS/JS, `#` for Python/shell. Verbatim text (see `start.sh` or any `src/app/api/**/route.ts` for canonical copy):
+- **License header**: Every newly added source file (`*.ts`/`*.tsx`/`*.js`/`*.mjs`/`*.py`/`*.sh`) must start with the CANN copyright header. Use `//` for TS/JS, `#` for Python/shell. Verbatim text (adapt comment prefix):
   ```
   Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
-  This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+  This program is free software: you can redistribute it and/or modify it under the terms of
   CANN Open Software License Agreement Version 2.0 (the "License").
   Please refer to the License for details. You may not use this file except in compliance with the License.
   THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
   INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
   See LICENSE in the root of the software repository for the full text of the License.
   ```
-  This is the one exception to "no comments".
+  See `start.sh` or any `src/app/api/**/route.ts` for the canonical copy. This is the one exception to "no comments".
 - **Comments**: Don't write them unless asked
 - **Doc files**: Don't create `.md` / README unless explicitly requested
-- **README sync**: When features are added, removed, or changed, update both `README.md` and `README-zh.md` feature lists and tab descriptions to match reality
-- **Badge variants**: default, secondary, destructive, outline, blue, green, orange, purple, gray, red, yellow (from badge.tsx cva)
-- **Path alias**: Always `@/lib/...` / `@/components/...`, never relative `../../`
-- **Git**: Hosted on gitcode.com — never use `gh` CLI
+- **README sync**: When features change, update both `README.md` and `README-zh.md` feature lists and tab descriptions
+- **Version bumps**: +0.01 only when adding features or fixing serious bugs, update `src/lib/version.ts` only
+- **Badge variants**: default, secondary, destructive, outline, blue, green, orange, purple, gray, red, yellow
 - **UI primitives**: All from `@base-ui/react` (not radix-ui) via shadcn v4 + Tailwind v4
-- **Charts**: Pure SVG, no chart libraries (recharts etc.) — matches TraceView DAG style
+- **Charts**: Pure SVG, no chart libraries — match TraceView DAG style
+- **Dialogs**: Use `src/components/ui/dialog.tsx` (built on @base-ui/react), never browser `confirm()`
 - **Search history**: sessionStorage only, never persisted

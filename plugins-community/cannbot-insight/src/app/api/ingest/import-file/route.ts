@@ -55,6 +55,15 @@ export async function POST(request: NextRequest) {
 
     const result = await importSession(filePath, sessionId, prisma, filePath, source);
 
+    // 导入后的会话归属（framework/version）以 DB 为准 —— proxy 捕获按文件内
+    // source 标记归属（opencode-proxy → opencode），路径/文件名猜不出。
+    // Recent Imports 历史条目据此显示正确的类型徽标。
+    const sessionRow = await prisma.session.findFirst({
+      where: { taskId: sessionId },
+      orderBy: { createdAt: 'desc' },
+      select: { framework: true, version: true },
+    });
+
     return NextResponse.json({
       sessionId: result.sessionId,
       imported: result.imported,
@@ -63,6 +72,8 @@ export async function POST(request: NextRequest) {
       // imported:true + query:null = empty claude capture → placeholder created
       reason: result.imported ? (result.query ? 'imported' : 'imported-empty') : (result.query ? 'already-exists' : 'no-interactions'),
       query: result.query ?? null,
+      framework: sessionRow?.framework ?? null,
+      version: sessionRow?.version ?? null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

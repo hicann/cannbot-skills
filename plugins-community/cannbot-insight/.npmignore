@@ -1,0 +1,58 @@
+# proxy/ 是独立 cpx 捕获工具，insight 运行时不依赖（adapter 读 jsonl 不 import proxy 代码，AGENTS.md 红线保证）
+proxy/
+
+# 测试
+tests/
+coverage/
+
+# 开发文档（非运行时必需，全部排除）
+docs/
+
+# 构建产物与缓存（next build 产物不放包内 —— 现场构建落 ~/.cannbot-insight/.next）
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# export-view bundle（由 postinstall 预构建，不随源码仓发，但 npm 包要带上：见 files 白名单）
+# 这里不忽略 public/export-view.js
+
+# 运行时数据（用户机器生成）
+dev.db
+dev.db-journal
+prisma/dev.db
+prisma/dev.db-journal
+logs/
+logs
+tmp/
+smart-agent/tmp/
+smart-agent/__pycache__/
+smart-agent/**/__pycache__/
+
+# 导出产物
+dbfile/
+jsonlfile/
+export-db.mjs 的输出
+
+# 环境与本地配置
+.env
+.env.*
+context-windows.json
+.claude/
+
+# 临时/分析产物
+workflow-analysis-output.json
+tmp/
+
+# IDE
+.DS_Store
+
+# 锁文件（平台特定，全局装时重生成）
+package-lock.json
+
+# 调试日志
+npm-debug.log*
+*.log
+
+# smart-agent Python 缓存与测试（保留源码 server.py 等）
+smart-agent/tests/

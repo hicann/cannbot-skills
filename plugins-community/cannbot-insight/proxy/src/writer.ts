@@ -33,6 +33,12 @@ export function sessionFilePath(sid: string): string {
   return path.join(dir(), `${captureStem(sid)}.jsonl`);
 }
 
+// Main-session meta（cc-session-meta，schema 见 docs/cannbay-schema-spec.md）：
+// producer/framework/protocol/ccVersion 等文件级声明，紧邻主捕获文件。
+export function sessionMetaPath(sid: string): string {
+  return path.join(dir(), `${captureStem(sid)}.meta.json`);
+}
+
 // Per-run manifest: the proxy appends every sid it emitted a record for.
 // With header-based routing the capture sid is claude's REAL session id
 // (differs from cpx's pinned sid; /resume can add more mid-run), so cpx reads

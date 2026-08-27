@@ -95,26 +95,31 @@ export function LlmContextView({
   systemPrompt,
   fullContext,
 }: LlmContextViewProps) {
-  if (inputMessagesCount === 0 && !inputMessagesJson) {
-    return null
-  }
-
   const messages = parseInputMessages(inputMessagesJson)
   const totalVisibleTokens = messages.reduce((s, m) => s + (m.tokenCount ?? estimateTokensFromChars(m.content?.length ?? 0)), 0)
-  const autoExpand = totalVisibleTokens < 6000
+  // 两级折叠的默认态：LLM Input 面板整体默认展开（外层 ▼ 按钮）；
+  // 长输入的消息列表默认折叠为最近几条（"显示全部 N 条"按钮）。
+  // key=turnId（TurnDetail）保证切换 turn 时回到这两个默认态。
+  const RECENT_WINDOW = 3
+  const showRecentOnly = messages.length > RECENT_WINDOW + 2
 
-  const [isExpanded, setIsExpanded] = useState(autoExpand)
+  const [isExpanded, setIsExpanded] = useState(true)
+  const [showAllMessages, setShowAllMessages] = useState(!showRecentOnly)
+  const [expandedToolResults, setExpandedToolResults] = useState<Set<string>>(new Set())
+  // 消息体默认全部折叠（点击标题行展开）—— 用户扫一眼 role/token 构成，
+  // 关注哪条点哪条。仅 continuation（/compact 摘要）默认展开：它是压缩
+  // 后的全部历史，折叠了上下文就"凭空消失"。
   const [expandedMessages, setExpandedMessages] = useState<Set<number>>(() => {
     const set = new Set<number>()
-    if (autoExpand) {
-      for (let i = 0; i < messages.length; i++) set.add(i)
-    } else {
-      for (let i = 0; i < messages.length; i++) {
-        if (messages[i].agentName === 'continuation') set.add(i)
-      }
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].agentName === 'continuation') set.add(i)
     }
     return set
   })
+
+  if (inputMessagesCount === 0 && !inputMessagesJson) {
+    return null
+  }
 
   const stableHidden = systemOverheadTokens ?? 0
   const deltaTokens = Math.max(0, inputMessagesTokens - totalVisibleTokens - stableHidden)
@@ -131,6 +136,15 @@ export function LlmContextView({
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
       else next.add(index)
+      return next
+    })
+  }
+
+  function toggleToolResult(key: string) {
+    setExpandedToolResults(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -211,24 +225,54 @@ export function LlmContextView({
             </div>
           )}
 
-          {messages.map((msg, index) => {
-            const isMsgExpanded = expandedMessages.has(index)
-            const msgTokens = msg.tokenCount ?? estimateTokensFromChars(msg.content?.length ?? 0)
-            const isContinuation = msg.agentName === 'continuation'
-
+          {(() => {
+            const firstShown = showAllMessages ? 0 : Math.max(0, messages.length - RECENT_WINDOW)
+            const hiddenCount = firstShown
+            const hiddenTokens = messages.slice(0, firstShown).reduce((s, m) => s + (m.tokenCount ?? estimateTokensFromChars(m.content?.length ?? 0)), 0)
             return (
-              <div key={index} className={cn("border rounded-md overflow-hidden", isContinuation && "border-l-3 border-l-purple-500 bg-purple-50/20 dark:bg-purple-500/10")}>
+              <>
+                {hiddenCount > 0 && !showAllMessages && (
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-md border border-dashed text-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground transition-colors cursor-pointer"
+                    onClick={() => setShowAllMessages(true)}
+                  >
+                    ▲ 显示全部 {messages.length} 条消息（已折叠前 {hiddenCount} 条 · {formatTokenCount(hiddenTokens)}t）
+                  </button>
+                )}
+                {hiddenCount > 0 && showAllMessages && (
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-md border border-dashed text-xs text-muted-foreground hover:bg-accent/30 hover:text-foreground transition-colors cursor-pointer"
+                    onClick={() => setShowAllMessages(false)}
+                  >
+                    ▼ 只看最近 {messages.length - firstShown} 条消息（折叠前 {hiddenCount} 条）
+                  </button>
+                )}
+                {messages.slice(firstShown).map((msg, index) => {
+                  const msgIndex = firstShown + index
+                  const isMsgExpanded = expandedMessages.has(msgIndex)
+                  const msgTokens = msg.tokenCount ?? estimateTokensFromChars(msg.content?.length ?? 0)
+                  const isContinuation = msg.agentName === 'continuation'
+
+                  return (
+                    <div key={msgIndex} className={cn("border rounded-md overflow-hidden", isContinuation && "border-l-3 border-l-purple-500 bg-purple-50/20 dark:bg-purple-500/10")}>
                 <span
                   role="button"
                   tabIndex={0}
                   className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-accent/30 transition-colors text-sm cursor-pointer"
-                  onClick={() => toggleMessage(index)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleMessage(index) }}
+                  onClick={() => toggleMessage(msgIndex)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleMessage(msgIndex) }}
                 >
                   <div className={cn("w-2 h-2 rounded-sm shrink-0", isContinuation ? "bg-purple-500" : (ROLE_DOT_COLOR[msg.role] ?? "bg-gray-400"))} />
                   <Badge variant={isContinuation ? "purple" : (ROLE_BADGE_VARIANTS_INLINE[msg.role] ?? "gray")} className="text-xs">
                     {isContinuation ? "continuation" : msg.role}
                   </Badge>
+                  {msg.tool_calls && msg.tool_calls.length > 0 && (
+                    <Badge variant="orange" className="text-[10px] gap-1">
+                      🔧 {msg.tool_calls.length}
+                    </Badge>
+                  )}
                   {msg.name && (
                     <span className="text-xs text-muted-foreground">{msg.name}</span>
                   )}
@@ -278,11 +322,14 @@ export function LlmContextView({
                   <div className="px-2 pb-2 space-y-1.5">
                     {msg.tool_calls.map((tc, tcIdx) => {
                       const tcTokens = Math.round(((tc.args?.length ?? 0) + (tc.result?.length ?? 0)) / 3.5)
+                      const resultKey = `${msgIndex}-${tcIdx}`
+                      const isResultOpen = expandedToolResults.has(resultKey)
+                      const resultTokens = tc.result ? Math.round(tc.result.length / 3.5) : 0
                       return (
                         <div key={tcIdx} className={cn("border rounded-md overflow-hidden bg-orange-50/30 dark:bg-orange-500/5", tc.isSkillRelated && "border-l-3 border-l-yellow-400")}>
                           <div className="flex items-center gap-2 px-2 py-1 text-xs">
-                            <Badge variant={tc.isSkillRelated ? "yellow" : "orange"} className="text-xs">{tc.isSkillRelated ? "⚡" : tc.name}</Badge>
-                            {!tc.isSkillRelated && <span className="text-muted-foreground">tool call</span>}
+                            <Badge variant={tc.isSkillRelated ? "yellow" : "orange"} className="text-xs">{tc.isSkillRelated ? `dispatch: ${tc.name}` : tc.name}</Badge>
+                            <span className="text-muted-foreground">{tc.isSkillRelated ? "skill 派发" : "tool call"}</span>
                             {tcTokens > 0 && (
                               <span className="text-muted-foreground">{formatTokenCount(tcTokens)}t</span>
                             )}
@@ -294,8 +341,25 @@ export function LlmContextView({
                             </div>
                           )}
                           {tc.result && (
-                            <div className="px-2 py-1 text-xs whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto border-t bg-muted/20">
-                              <span className="font-medium text-muted-foreground">result:</span> {tc.result}
+                            <div className="border-t bg-muted/20">
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="w-full flex items-center gap-2 px-2 py-1 text-xs hover:bg-accent/30 transition-colors cursor-pointer"
+                                onClick={() => toggleToolResult(resultKey)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleToolResult(resultKey) }}
+                              >
+                                <span className="font-medium text-muted-foreground">result</span>
+                                {resultTokens > 0 && (
+                                  <span className="text-muted-foreground">{formatTokenCount(resultTokens)}t</span>
+                                )}
+                                <span className="ml-auto text-muted-foreground">{isResultOpen ? "▼" : "▶"}</span>
+                              </span>
+                              {isResultOpen && (
+                                <div className="px-2 pb-1.5 text-xs whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto">
+                                  {tc.result}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -303,9 +367,12 @@ export function LlmContextView({
                     })}
                   </div>
                 )}
-              </div>
+                    </div>
+                  )
+                })}
+              </>
             )
-          })}
+          })()}
         </div>
       )}
     </div>

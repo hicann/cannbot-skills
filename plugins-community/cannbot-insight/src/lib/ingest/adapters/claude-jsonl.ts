@@ -9,7 +9,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SessionListItem, RawInteraction, ToolCallInfo, TokenUsage } from '../../shared/types';
-import { readWireRounds } from './claude-jsonl-wire';
 
 // Shared scan helpers (claude-format concepts, also reused by the proxy
 // extension layer claude-jsonl-full-context.ts).
@@ -62,6 +61,67 @@ export interface ClaudeJsonlLine {
   tools?: unknown;
   stopReason?: string;
   ttftMs?: number;
+  deduped?: boolean;
+  originalChars?: number;
+  // x_cannbay 声明式扩展（docs/cannbay-schema-spec.md）：信封外一切扩展的
+  // 权威源，双轨期与上方 legacy 顶层字段并存 —— 读方一律 x_cannbay 优先。
+  x_cannbay?: XCannbay;
+}
+
+export interface XCannbay {
+  schema: string;
+  version: number;
+  data: {
+    roundIndex?: number;
+    protocol?: string;
+    system?: unknown;
+    tools?: unknown;
+    requestParams?: { temperature?: number; maxTokens?: number; model?: string | null };
+    latencyMs?: number;
+    ttftMs?: number | null;
+    stopReason?: string | null;
+    status?: number;
+    ccVersion?: string | null;
+    kind?: string;
+    dedup?: { originalChars: number; fingerprint: string };
+    reasoningTokens?: number;
+    toolCalls?: Array<{ toolUseId: string; state?: string; errorType?: string; errorMessage?: string; durationMs?: number; startedAt?: string }>;
+    turnKind?: string;
+    producer?: string;
+    framework?: string;
+    sid?: string;
+    toolUseId?: string | null;
+    name?: string | null;
+    agentType?: string | null;
+    subagentSessionId?: string;
+  };
+}
+
+// cc-wire-round（cpx 捕获）与 cc-db-turn（insight 导出）都声明
+// latencyMs/stopReason 承载真实值 —— 等价于 legacy 的 *-proxy / insight-export 标记。
+// version 门禁（spec §6）：只接受已知 schema + 已知 version；未知版本整块跳过
+// （行本体照常按信封处理），防 v2 数据被旧读方按 v1 语义误读。首个 v2 落地
+// 时在此注册表加版本分支即可。
+const TURN_PAYLOAD_VERSIONS: Record<string, number[]> = {
+  'cc-wire-round': [1],
+  'cc-db-turn': [1],
+};
+export function isTurnPayload(xb: XCannbay | undefined): boolean {
+  if (!xb) return false;
+  const vs = TURN_PAYLOAD_VERSIONS[xb.schema];
+  return !!vs && typeof xb.version === 'number' && vs.includes(xb.version);
+}
+
+// meta 声明式通道的 version 门禁（spec §6）：同款"已知 schema + 已知 version"判定，
+// 未知版本 meta 整块跳过 → 落回顶层 legacy 字段。首个 v2 落地时在此注册表加版本。
+const META_PAYLOAD_VERSIONS: Record<string, number[]> = {
+  'cc-subagent-meta': [1],
+  'cc-session-meta': [1],
+};
+export function isMetaPayload(xb: XCannbay | undefined, schema: string): boolean {
+  if (!xb || xb.schema !== schema) return false;
+  const vs = META_PAYLOAD_VERSIONS[schema];
+  return !!vs && typeof xb.version === 'number' && vs.includes(xb.version);
 }
 
 export interface ContentBlock {
@@ -82,7 +142,7 @@ interface ClaudeUsage {
   cache_creation_input_tokens?: number;
 }
 
-export function extractTextContent(content: string | ContentBlock[] | undefined): string | null {
+function extractTextContent(content: string | ContentBlock[] | undefined): string | null {
   if (!content) return null;
   if (typeof content === 'string') return content;
   const parts: string[] = [];
@@ -96,47 +156,27 @@ export function extractTextContent(content: string | ContentBlock[] | undefined)
   return parts.length > 0 ? parts.join('\n') : null;
 }
 
-// cpx 捕获文件自带来源标记：每行顶层 source:"claude-proxy" /
-// "opencode-proxy"。行级判定（避免重复解析文件）；proxy 文件走独立的
-// round-pair 切分（claude-jsonl-wire.ts），原生文件保持原有切分不变。
-export function proxySourceOfLines(lines: ClaudeJsonlLine[]): string | null {
-  for (const l of lines) {
-    const s = (l as { source?: unknown }).source;
-    if (typeof s === 'string' && s.endsWith('-proxy')) return s;
-  }
-  return null;
+// Parse a <task-notification> XML (Task-tool completion notification injected
+// as a user line by claude-code) into a readable summary. Same output shape as
+// the proxy's normalize layer (proxy/src/normalize/line-transforms.ts) so
+// native and proxy imports render identically.
+export function parseTaskNotificationSummary(content: string): string {
+  const status = content.match(/<status>([^<]*)<\/status>/)?.[1]?.trim();
+  const summary = content.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim();
+  const agent = summary?.match(/Agent "([^"]*)"/)?.[1];
+  const label = agent ? `Task: ${agent}` : 'Task 完成';
+  const statusLabel = status ? ` [${status}]` : '';
+  const detail = summary ? `\n${summary.slice(0, 200)}` : '';
+  return `✅ ${label}${statusLabel}${detail}`;
 }
 
 // Remove <system-reminder>...</system-reminder> blocks from a user message,
 // returning the real user prompt. Claude Code injects CLAUDE.md / gitStatus /
 // currentDate / available-skills as these tags inside user messages — they're
-// context, not real user input. Paired with extractSystemReminders (which
-// returns the blocks) to split a user message into a system context turn +
-// a user prompt turn.
-export function stripSystemReminders(text: string): string {
+// context, not real user input. Used for the session label / firstQuery
+// extraction (the prompt preview should not be reminder noise).
+function stripSystemReminders(text: string): string {
   return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, '').trim();
-}
-
-// Extract the <system-reminder>...</system-reminder> blocks (the injected
-// context) from a user message. Returns the raw PREFIX up to (and including
-// the whitespace after) the last reminder block — no trimming — so the wire
-// reconstruction (toWireOrder) can concatenate prefix + prompt back into the
-// exact original message text. Emitted as a 'system' turn so the context
-// stays visible in LLM Input (and persists in the DB, surviving even if the
-// source jsonl file is later removed).
-function extractSystemReminders(text: string): string | null {
-  const has = /<system-reminder>[\s\S]*?<\/system-reminder>/.test(text);
-  if (!has) return null;
-  // prompt-first ordering (reminder after the prompt) can't be represented as
-  // a prefix — fall back to the trimmed block join
-  if (!text.trimStart().startsWith('<system-reminder>')) {
-    const blocks = text.match(/<system-reminder>[\s\S]*?<\/system-reminder>/g);
-    return blocks && blocks.length > 0 ? (blocks.join('\n\n').trim() || null) : null;
-  }
-  const lastEnd = text.lastIndexOf('</system-reminder>') + '</system-reminder>'.length;
-  let end = lastEnd;
-  while (end < text.length && /\s/.test(text[end])) end++;
-  return text.slice(0, end) || null;
 }
 
 function extractToolCalls(content: ContentBlock[]): ToolCallInfo[] | null {
@@ -205,7 +245,7 @@ export function parseJsonlLines(filePath: string): ClaudeJsonlLine[] {
   }
 }
 
-export function collectAllToolResults(lines: ClaudeJsonlLine[]): Map<string, string> {
+function collectAllToolResults(lines: ClaudeJsonlLine[]): Map<string, string> {
   const resultMap = new Map<string, string>();
   for (const line of lines) {
     if (line.type === 'user' && line.message?.content && Array.isArray(line.message.content)) {
@@ -302,7 +342,7 @@ export function listSessions(dirPath: string): SessionListItem[] {
     });
   }
 
-  return result.sort((a, b) => (b.endedAt ?? b.createdAt).localeCompare(a.endedAt ?? a.createdAt));
+  return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function findSessionFile(dirPath: string, sessionId: string): string | null {
@@ -352,8 +392,12 @@ export function collectSubagentToolUseMappings(dirPath: string, sessionId: strin
     try {
       if (fs.existsSync(metaPath)) {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-        if (meta.toolUseId) {
-          mapping.set(meta.toolUseId, sub.id);
+        // x_cannbay.data 优先（cc-subagent-meta，version 门禁守过），顶层旧字段 fallback（legacy 文件）
+        const xb = meta?.x_cannbay;
+        const data = xb && isMetaPayload(xb, 'cc-subagent-meta') ? xb.data : null;
+        const toolUseId = data?.toolUseId ?? meta.toolUseId;
+        if (toolUseId) {
+          mapping.set(toolUseId, sub.id);
         }
       }
     } catch {}
@@ -361,12 +405,14 @@ export function collectSubagentToolUseMappings(dirPath: string, sessionId: strin
   return mapping;
 }
 
-export function isValidISO(timestamp: string): boolean {
+function isValidISO(timestamp: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp);
 }
 
 function extractVersionFromLines(lines: ClaudeJsonlLine[]): string | null {
   for (const line of lines) {
+    const xv = line.x_cannbay?.data?.ccVersion;
+    if (xv) return xv;
     if (line.version) return line.version;
   }
   return null;
@@ -377,7 +423,7 @@ export function extractVersion(filePath: string): string | null {
   return extractVersionFromLines(lines);
 }
 
-export interface AssistantGroup {
+interface AssistantGroup {
   lines: ClaudeJsonlLine[];
   startLineIndex: number;
 }
@@ -420,8 +466,15 @@ function groupAssistantLines(lines: ClaudeJsonlLine[]): AssistantGroup[] {
       }
       current.lines.push(line);
       if (msgId && currentMsgIds) currentMsgIds.add(msgId);
-    } else if (NON_BREAKING_TYPES.has(line.type)) {
-      // Don't break the current assistant group for non-substantive lines
+    } else if (NON_BREAKING_TYPES.has(line.type)
+      && !(line.type === 'system' && line.message?.content != null)) {
+      // Don't break the current assistant group for non-substantive lines.
+      // EXCEPTION: a system line carrying message.content is substantive (our
+      // proxy/export convention for system turns & injections) — it must break
+      // the group, otherwise the next assistant (different response) merges
+      // into this one and both the system turn and that assistant line are
+      // silently dropped (lineToGroup's contiguous-index assumption breaks).
+      // Native claude metadata system lines carry no message.content → unchanged.
       continue;
     } else if (
       current &&
@@ -453,8 +506,8 @@ function groupAssistantLines(lines: ClaudeJsonlLine[]): AssistantGroup[] {
 // Merge one assistant group (consecutive assistant lines sharing a response)
 // into a single RawInteraction: joined text, tool_use→tool_calls with results
 // attached (via allToolResults), merged usage (max raw input, final-line cache
-// fields), model, timestamps and latency. Shared by the native split path
-// (readSession) and the proxy wire-round split (claude-jsonl-wire.ts).
+// fields), model, timestamps and latency. Used by the native split path
+// (readSession); proxy captures enter it as normalized native-shape lines.
 // Returns null when the group carries neither text nor tool calls.
 export function buildAssistantInteraction(
   group: AssistantGroup,
@@ -476,6 +529,10 @@ export function buildAssistantInteraction(
   // duration_ms 时把 completed 置 undefined，让 turn-split fallback 到
   // interaction.latency。native 行不受影响（native byte-identical）。
   let isProxy = false;
+
+  // x_cannbay cc-db-turn 声明的 reasoning tokens（legacy 通道无此信息，
+  // anthropic usage 也没有 reasoning 字段 —— opencode 来源经导出往返的恢复通道）
+  let mergedReasoning = 0;
 
   // Find the line with the most complete usage (has cache fields = final line)
   // Also track the maximum raw input_tokens across all lines (thinking lines report
@@ -539,7 +596,20 @@ export function buildAssistantInteraction(
     // turn-split 写 Turn.finishReason，走标准管线进 DB（非扩展层覆盖）。
     if (al.stopReason) mergedFinishReason = al.stopReason;
     if (al.duration_ms != null) explicitDurationMs = al.duration_ms;
-    if (!isProxy && typeof al.source === 'string' && al.source.endsWith('-proxy')) isProxy = true;
+    // 生成文件标记：cpx 捕获（*-proxy）与 cannbay2 DB 导出（insight-export）。
+    // 两者都声明 duration_ms 承载真实 latency（completed 置 undefined 让
+    // turn-split fallback 到 interaction.latency）；仅 *-proxy 计入
+    // Session.version（proxySourceOf 只认 -proxy 后缀，导出件不误标代理徽标）。
+    if (!isProxy && typeof al.source === 'string'
+      && (al.source.endsWith('-proxy') || al.source === 'insight-export')) isProxy = true;
+    // x_cannbay 声明式通道（优先）：同一信息的权威源 + legacy 没有的 reasoningTokens
+    const xbTurn = isTurnPayload(al.x_cannbay) ? al.x_cannbay!.data : null;
+    if (xbTurn) {
+      isProxy = true;
+      if (xbTurn.stopReason != null) mergedFinishReason = xbTurn.stopReason;
+      if (xbTurn.latencyMs != null) explicitDurationMs = xbTurn.latencyMs;
+      if (xbTurn.reasoningTokens != null) mergedReasoning = xbTurn.reasoningTokens;
+    }
   }
 
   // Build merged usage: use final line's cache data, but for total input use the
@@ -556,7 +626,7 @@ export function buildAssistantInteraction(
       total: inputMessagesTokens + (fu.output_tokens ?? 0),
       input: incrementalInput,
       output: fu.output_tokens ?? 0,
-      reasoning: 0,
+      reasoning: mergedReasoning,
       cacheRead,
       cacheWrite,
       cost: 0,
@@ -569,7 +639,7 @@ export function buildAssistantInteraction(
       total: (u0.input_tokens ?? 0) + (u0.output_tokens ?? 0),
       input: u0.input_tokens ?? 0,
       output: u0.output_tokens ?? 0,
-      reasoning: 0,
+      reasoning: mergedReasoning,
       cacheRead: 0,
       cacheWrite: 0,
       cost: 0,
@@ -652,16 +722,8 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
   const lines = parseJsonlLines(resolvedFilePath);
   if (lines.length === 0) return [];
 
-  const fileMtime = fs.statSync(resolvedFilePath).mtime.getTime();
-
-  // cpx 捕获文件（每行带 source:"-proxy" 标记）走独立的 round-pair 切分：
-  // 每个 wire round → 输入 turn（本轮新增消息）+ 输出 turn（response），
-  // 与原生 claude jsonl 的切分路径完全独立。
-  if (proxySourceOfLines(lines)) {
-    return readWireRounds(lines, fileMtime);
-  }
-
   const allToolResults = collectAllToolResults(lines);
+  const fileMtime = fs.statSync(resolvedFilePath).mtime.getTime();
 
   const result: RawInteraction[] = [];
 
@@ -706,6 +768,25 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
       // Skip user messages that only contain tool_result (no real text prompt)
       if (!raw) continue;
 
+      // claude-code 的 Task 完成通知：独立 user 行，内容是
+      // <task-notification> XML。这是框架注入的事件通知而非人类输入 ——
+      // 重分类为 system（与 skill 注入同款先例），并解析成可读摘要，
+      // 时间线/LLM Input 不再显示原始 XML。proxy 捕获由 normalize 层做
+      // 同样的变换（capture ≠ interpret），两条路径形状一致。
+      if (raw.startsWith('<task-notification>')) {
+        const summary = parseTaskNotificationSummary(raw);
+        result.push({
+          role: 'system',
+          content: summary,
+          timestamp,
+          timeInfo: { created: timeCreated },
+          agent: null, subagent_name: null, subagent_session_id: null, subagent_type: null,
+          tool_calls: null, usage: null, model: null, modelID: null, providerID: null,
+          latency: null, finish_reason: null,
+        });
+        continue;
+      }
+
       // Claude Code injects skill context as user messages — reclassify as system
       // and keep verbatim: the skill-merge post-process folds it into the
       // preceding Skill tool_call. Markers: <skill-format> / 'Base directory for
@@ -727,25 +808,12 @@ export function readSession(filePath: string, sessionId: string): RawInteraction
         continue;
       }
 
-      // Split <system-reminder> context blocks (CLAUDE.md / gitStatus /
-      // currentDate / available-skills) from the real user prompt. The injected
-      // context becomes a 'system' turn — visible in LLM Input AND persisted in
-      // the DB (survives even if the source jsonl is later removed); the
-      // remainder is the real user turn. This keeps "user input" = just the
-      // prompt while the context stays visible instead of becoming hidden overhead.
-      const reminders = extractSystemReminders(raw);
-      if (reminders) {
-        result.push({
-          role: 'system',
-          content: reminders,
-          timestamp,
-          timeInfo: { created: timeCreated },
-          agent: null, subagent_name: null, subagent_session_id: null, subagent_type: null,
-          tool_calls: null, usage: null, model: null, modelID: null, providerID: null,
-          latency: null, finish_reason: null,
-        });
-      }
-      const content = stripSystemReminders(raw);
+      // <system-reminder>（CLAUDE.md / gitStatus / currentDate 等注入上下文）
+      // 在 wire 上是 user 消息内部的 text block —— 与真实提示同属一条消息。
+      // 不再拆分成独立 system turn（拆开是过度切分：时间线零碎、LLM Input
+      // 重建时还得 toWireOrder 拼回去）。user turn 原样保留全文（wire 保真），
+      // 渲染层（LlmContextView.reminderPrefix）把 reminder 块显示为独立子块。
+      const content = raw;
       if (content) {
         result.push({
           role: 'user',

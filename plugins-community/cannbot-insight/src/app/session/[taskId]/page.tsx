@@ -248,7 +248,7 @@ const HIDDEN_TABS_DEFAULT = ["replay", "wireRounds"]
 const ALL_TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; highlight?: boolean }> = [
   { key: "overview", label: "Overview", icon: <LayoutDashboardIcon className="size-3.5 text-blue-500" /> },
   { key: "turns", label: "Turns", icon: <MessageSquareIcon className="size-3.5 text-emerald-500" /> },
-  { key: "wireRounds", label: "Turns(proxy)", icon: <FileTextIcon className="size-3.5 text-sky-500" /> },
+  { key: "wireRounds", label: "Wire 轮次", icon: <FileTextIcon className="size-3.5 text-sky-500" /> },
   { key: "trace", label: "Trace", icon: <SearchIcon className="size-3.5 text-yellow-500" /> },
   { key: "context", label: "Context", icon: <BarChart3Icon className="size-3.5 text-pink-500" /> },
   { key: "workflowAnalyse", label: "Audit", icon: <ShieldCheckIcon className="size-3.5 text-emerald-500" />, highlight: true },
@@ -258,8 +258,8 @@ const ALL_TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode; highl
   { key: "replay", label: "Replay", icon: <PlayIcon className="size-3.5 text-pink-500" /> },
 ]
 
-const showAdvanced = process.env.NEXT_PUBLIC_SHOW_ADVANCED_TABS === "true"
-const TABS = showAdvanced ? ALL_TABS : ALL_TABS.filter(t => !HIDDEN_TABS_DEFAULT.includes(t.key))
+// 默认隐藏的 tab（wire 轮次属调试视图）：URL 带 ?a 或 NEXT_PUBLIC_SHOW_ADVANCED_TABS 时展示
+const showAdvancedTabs = () => process.env.NEXT_PUBLIC_SHOW_ADVANCED_TABS === "true"
 
 function formatTokenCount(n: number): string {
   if (n === 0) return "0"
@@ -476,6 +476,9 @@ export default function SessionDetailPage({
   const searchParams = useSearchParams()
   const framework = searchParams.get("framework") ?? undefined
   const errorTurnParam = searchParams.get("errorTurn")
+  const TABS = showAdvancedTabs() || searchParams.has("a")
+    ? ALL_TABS
+    : ALL_TABS.filter(t => !HIDDEN_TABS_DEFAULT.includes(t.key))
   const [activeTab, setActiveTab] = useState<TabKey>("overview")
   const [session, setSession] = useState<SessionData | null>(null)
   const [turns, setTurns] = useState<TurnRowItem[]>([])
@@ -1824,17 +1827,23 @@ export default function SessionDetailPage({
         </div>
       </div>
 
-      {activeTab !== "trace" && activeTab !== "performance" && (
-        <div className="flex-1 min-h-0" data-export-panel>
-          {TAB_RENDERERS[activeTab]()}
+      {/* tab 内容全部保持挂载（hidden 切换，与 trace/performance 同款）：
+          切走再切回不丢状态 —— 滚动位置、展开行、选中项都留在原处。
+          代价是所有 tab 常驻 DOM；各 tab 内容懒数据获取在首次挂载时触发
+          一次，之后共享。 */}
+      {(Object.keys(TAB_RENDERERS) as TabKey[]).map(tabKey => (
+        <div
+          key={tabKey}
+          className={cn(
+            "flex-1 min-h-0",
+            (tabKey === "trace" || tabKey === "performance") && "flex flex-col",
+            activeTab === tabKey ? "" : "hidden",
+          )}
+          data-export-panel={activeTab === tabKey ? true : undefined}
+        >
+          {TAB_RENDERERS[tabKey]()}
         </div>
-      )}
-      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "trace" ? "" : "hidden")} data-export-panel>
-        {renderTrace()}
-      </div>
-      <div className={cn("flex-1 min-h-0 flex flex-col", activeTab === "performance" ? "" : "hidden")} data-export-panel>
-        {renderPerformance()}
-      </div>
+      ))}
     </div>
   )
 }

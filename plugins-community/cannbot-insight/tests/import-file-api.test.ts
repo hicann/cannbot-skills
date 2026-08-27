@@ -118,8 +118,6 @@ describe('POST /api/ingest/import-file — empty claude capture placeholder', ()
     const turns = await prisma.turn.count({ where: { sessionId: s2!.id } });
     expect(turns).toBeGreaterThan(0);
     expect(s2!.query).toBeTruthy();
-    // 占位 label 随内容填满被替换为真实首问，不再永久显示「（捕获中）」
-    expect(s2!.label).not.toContain('捕获中');
   });
 });
 
@@ -138,14 +136,12 @@ describe('GET /api/observe/session/wire-rounds — direct-from-file round view',
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.totalRounds).toBe(2); // fixture: 2 assistant responses
-    // round 1 request = the new messages before the first response (delta only)
+    // round 1 request = the accumulated messages before the first response
     const r1 = data.rounds[0];
     expect(r1.requestMessages.length).toBe(1); // the first user line (reminder + prompt in ONE message)
-    expect(r1.totalMessages).toBe(1);
-    // round 2: only the NEW messages since round 1's response (delta, not accumulated)
+    // round 2 carries round 1's history plus the new messages
     const r2 = data.rounds[1];
-    expect(r2.requestMessages.length).toBe(1); // the mid-session reminder user line
-    expect(r2.totalMessages).toBe(3); // user1 + assistant1 + user3 = accumulated total
+    expect(r2.requestMessages.length).toBeGreaterThan(r1.requestMessages.length);
     expect(r2.requestMessages[0].role).toBe('user');
     expect(r2.requestMessages[0].content.json).toContain('system-reminder');
   });

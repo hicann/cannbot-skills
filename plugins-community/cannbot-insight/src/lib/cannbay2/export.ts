@@ -20,13 +20,20 @@ interface ExportTurn {
   role: string;
   content: string | null;
   model: string | null;
+  modelId: string | null;
+  providerId: string | null;
+  temperature: number | null;
+  maxTokens: number | null;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   isSubagent: boolean;
   subagentSessionId: string | null;
   latencyMs: number;
+  ttftMs: number | null;
   finishReason: string | null;
   createdAt_ts: Date | null;
   createdAt: Date;
@@ -39,6 +46,9 @@ interface ExportToolCall {
   argsJson: string | null;
   resultJson: string | null;
   state: string;
+  errorType: string | null;
+  errorMessage: string | null;
+  durationMs: number;
   startedAt: Date | null;
 }
 
@@ -50,11 +60,17 @@ interface ExportBridge {
 }
 
 type MinimalPrisma = {
-  session: { findFirst(args: { where: Record<string, string> }): Promise<{ id: string; taskId: string; framework: string } | null> };
+  session: { findFirst(args: { where: Record<string, string> }): Promise<{ id: string; taskId: string; framework: string; version: string | null } | null> };
   turn: { findMany(args: { where: { sessionId: string }; orderBy: { turnIndex: 'asc' } }): Promise<ExportTurn[]> };
   toolCall: { findMany(args: { where: { turn: { sessionId: string } } }): Promise<ExportToolCall[]> };
   interactionBridge: { findMany(args: { where: { sessionId: string } }): Promise<ExportBridge[]> };
 };
+
+// x_cannbay 命名空间（docs/cannbay-schema-spec.md）：声明式权威源，双轨期
+// 与 legacy 顶层字段（source/duration_ms/stopReason）并存，读方 x_cannbay 优先。
+function xCannbay(schema: string, data: Record<string, unknown>) {
+  return { schema, version: 1, data };
+}
 
 function toISO(d: Date | null): string {
   return (d ?? new Date(0)).toISOString();
@@ -97,11 +113,37 @@ function turnGroupToLines(turns: ExportTurn[], toolCallsByTurn: Map<string, Expo
           usage: t.totalTokens > 0 ? {
             input_tokens: t.inputTokens,
             output_tokens: t.outputTokens,
+            cache_read_input_tokens: t.cacheReadTokens || undefined,
+            cache_creation_input_tokens: t.cacheWriteTokens || undefined,
           } : undefined,
         },
         timestamp: ts,
+        // source 标记声明"本行由 insight 导出生成、duration_ms 承载真实 latency"。
+        // 专用值 'insight-export'（不以 -proxy 结尾）：adapter 侧同源识别让
+        // duration_ms 生效，但 proxySourceOf 不认 → version/徽标不误标成代理捕获。
+        // 无任何标记时 adapter 走 native 分支，时间戳差算 latency 覆盖 duration_ms。
+        source: 'insight-export',
         duration_ms: t.latencyMs || undefined,
         stopReason: t.finishReason ?? undefined,
+        x_cannbay: xCannbay('cc-db-turn', {
+          latencyMs: t.latencyMs,
+          ttftMs: t.ttftMs ?? undefined,
+          stopReason: t.finishReason ?? undefined,
+          reasoningTokens: t.reasoningTokens || undefined,
+          modelId: t.modelId ?? undefined,
+          providerId: t.providerId ?? undefined,
+          temperature: t.temperature ?? undefined,
+          maxTokens: t.maxTokens ?? undefined,
+          toolCalls: tcs.map(tc => ({
+            toolUseId: tc.toolCallId,
+            state: tc.state,
+            errorType: tc.errorType ?? undefined,
+            errorMessage: tc.errorMessage ?? undefined,
+            durationMs: tc.durationMs || undefined,
+            startedAt: tc.startedAt ? tc.startedAt.toISOString() : undefined,
+          })),
+          turnKind: t.role === 'system' ? 'system' : 'normal',
+        }),
       }));
       if (tcs.length > 0) {
         lines.push(JSON.stringify({
@@ -122,6 +164,14 @@ function turnGroupToLines(turns: ExportTurn[], toolCallsByTurn: Map<string, Expo
       lines.push(JSON.stringify({
         type: 'user',
         message: { role: 'user', content: t.content },
+        timestamp: ts,
+      }));
+    } else if (t.role === 'system' && t.content != null) {
+      // skill 注入 / 命令消息被管线重分类为 system turn —— type:'system' 行
+      // 在 adapter 的 system 分支还原（缺这条分支时 system turn 导出即蒸发）
+      lines.push(JSON.stringify({
+        type: 'system',
+        message: { role: 'system', content: t.content },
         timestamp: ts,
       }));
     }
@@ -162,6 +212,21 @@ export async function exportSessionToClaudeJsonl(
   fs.writeFileSync(mainFile, turnGroupToLines(mainTurns, toolCallsByTurn).join('\n') + '\n');
   written.push(path.posix.join('sessions', sid, `${sid}.jsonl`));
 
+  // cc-session-meta：文件级 producer/framework/version 声明（修复重导入
+  // framework 错变 claude-code、version 丢失）
+  fs.writeFileSync(
+    path.join(sessionDir, `${sid}.meta.json`),
+    JSON.stringify({
+      x_cannbay: xCannbay('cc-session-meta', {
+        producer: 'insight-export',
+        framework: session.framework,
+        ccVersion: session.version ?? undefined,
+        sid,
+      }),
+    }, null, 2) + '\n',
+  );
+  written.push(path.posix.join('sessions', sid, `${sid}.meta.json`));
+
   // 子会话分组 → subagents/<subId>.jsonl + meta.json（toolUseId 从桥接数据取）
   const subGroups = new Map<string, ExportTurn[]>();
   for (const t of turns) {
@@ -181,6 +246,12 @@ export async function exportSessionToClaudeJsonl(
       toolUseId: bridge?.dispatchToolCallId ?? null,
       name: bridge?.subagentName ?? null,
       agentType: bridge?.subagentType ?? null,
+      x_cannbay: xCannbay('cc-subagent-meta', {
+        toolUseId: bridge?.dispatchToolCallId ?? null,
+        name: bridge?.subagentName ?? null,
+        agentType: bridge?.subagentType ?? null,
+        subagentSessionId: subId,
+      }),
     };
     const metaFile = path.join(sessionDir, 'subagents', `${subId}.meta.json`);
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2) + '\n');

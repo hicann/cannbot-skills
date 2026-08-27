@@ -2,6 +2,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v1.84] - 2026-08-20
+
+### Fixed
+- 【hydration】Settings 页 `AIProviderConfigPanel` 渲染期直接读 localStorage（`loadProviderConfig()`）——SSR 无 localStorage、客户端 hydration 首渲染读到已存配置，`✓ 已保存` 标记与三个 Input 值双重 mismatch，整树客户端重建。修复：渲染期零读，已存配置由挂载后 effect 填充；新增 hydration 契约 IT（mock loader 强制有值 + renderToString 断言渲染路径零调用与默认值输出，旧实现必红）
+
+## [v1.83] - 2026-08-19
+
+### Added
+- 【数据格式 schema 契约】捕获/导出 jsonl 引入 `x_cannbay` 声明式扩展命名空间（规范：`docs/cannbay-schema-spec.md`，roadmap #10 一期）——claude 原生字段为冻结信封，全部扩展进 `{schema, version, data}` 口袋，读方按声明分发（不认识整块跳过），终结魔法值与字段嗅探。5 个 payload：`cc-wire-round`（cpx assistant 行：roundIndex/protocol/system/tools/requestParams/latencyMs/ttftMs/stopReason/status/ccVersion）、`cc-wire-input`（cpx 输入行：roundIndex/kind/dedup）、`cc-db-turn`（DB 导出行）、`cc-session-meta`（主会话 `<sid>.meta.json`：producer/framework/ccVersion）、`cc-subagent-meta`（子代理 meta 双写）。双轨期 legacy 顶层字段并存写，读方一律 x_cannbay 优先
+- 【导出丢失修复 ×6】`Turn.reasoningTokens`（接口有字段但从未写出）、`Turn.ttftMs`（导出未取列，且管线侧恒 null——现经 post-patch 补列成为活数据）、`ToolCall` 明细（errorType/errorMessage/durationMs/startedAt，原只剩 is_error 布尔）、`Session.framework/version`（重导入不再错变 claude-code）、`Turn.modelId/providerId/temperature/maxTokens`、wire `response.status`/`request.model`（此前捕获未记录）
+- 【验证】`tests/cannbay-schema.test.ts` 四把锁：形状一致（声明 ∈ 注册表且 version=1）、双写一致（legacy ≡ x_cannbay）、**列清单对账 round-trip**（富 fixture 全列 → 导出 → 上传 → 删库 → 再导入 → 逐列多重集比对 **0 丢失 0 损造**）、混排容错（native/legacy-proxy/纯 x_cannbay 三通道同文件互不污染）；emitter 侧 4 条双写断言（roundIndex 连续、meta 双写、kind 分类）
+
+### Fixed
+- 【adapter 分组缺陷】带 `message.content` 的 system 行（system 轮/注入约定）夹在两个不同 message.id 的 assistant 行之间时，后一个 assistant 被并入前组且两行整体静默丢失——现带内容的 system 行破组（原生 claude 元数据 system 行无 message.content，行为不变）
+- 【徽标回归（自检视）】cannbay2 再导入时 cc-session-meta 的纯 ccVersion 会把 `Session.version` 的 `-proxy` 后缀徽标覆盖掉——meta patch 现仅对 `producer: 'insight-export'` 生效（cpx 捕获的 version/framework 由导入管线按行标记计算）；⑤号 IT 锁定治理上传→再导入徽标保留
+
 ## [v1.82] - 2026-08-19
 
 ### Added
@@ -11,6 +27,8 @@
 
 ### Fixed
 - CLI `upload` 不再需要 framework 推断：v2 按 taskId 服务端定位（旧 `--file` 模式对 opencode-proxy 会话因 framework 误判上传失败的问题随之消失）
+- 自检视修复三项：① sid/taskId 白名单校验（`/^[\w.-]+$/`）—— 原样拼进 git 命令存在命令注入面，入口与 `uploadFolder` 双重拦截；② `unchanged` 误报 —— commit 失败一律当"无变化"会静默吞掉真实失败（hook 拒绝等）且跳过 push，现用 `git diff --cached --quiet` 区分"确无 staged 变更"与"真实失败"；③ 治理盲区 —— subagents 目录原为整目录拷贝，杂散的 .txt/.log 等绕过清洗直接进公开仓，现白名单拷贝（.jsonl/.json）+ staging 白名单外文件熔断
+- 无 jsonl 源会话上传被拒 → DB 导出通用兜底：v1 CANNBay 下载的 `.db` 快照会话（`framework=cannbot-insight`，sourcePath 是 .db）、源文件已删/移动的会话，均从 insight DB 导出 claude-jsonl 上传（导出件不含 Full Context，管线数据齐全）；真实场景验证：`a8b8f974` 会话 9.8s 上传成功
 
 
 ## [v1.81] - 2026-08-18

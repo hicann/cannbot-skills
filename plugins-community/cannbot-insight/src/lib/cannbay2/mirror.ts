@@ -18,7 +18,7 @@ import path from 'node:path';
 export const CANNBAY2_PULL_URL = process.env.CANNBAY2_REMOTE_URL
   ?? 'https://atomgit.com/guanxinghua/cannbay2.git';
 // 密文常量（与 v1 upload-session/route.ts 同方式），解码 = https://<user>:<token>@atomgit.com/…
-const CANNBAY2_PUSH_URL_ENCODED = 'aHR0cHM6Ly9ndWFueGluZ2h1YTpwc3F5WXAyYnpFRkI0eDVQRlVTV0dMS3lAZ2l0Y29kZS5jb20vZ3VhbnhpbmdodWEvY2FubmJheTIuZ2l0';
+const CANNBAY2_PUSH_URL_ENCODED = 'aHR0cHM6Ly9ndWFueGluZ2h1YTpwc3F5WXAyYnpFRkI0eDVQRlVTV0dMS3lAYXRvbWdpdC5jb20vZ3VhbnhpbmdodWEvY2FubmJheTIuZ2l0';
 export const CANNBAY2_PUSH_URL = process.env.CANNBAY2_PUSH_URL
   ?? Buffer.from(CANNBAY2_PUSH_URL_ENCODED, 'base64').toString();
 export const CANNBAY2_BRANCH = process.env.CANNBAY2_BRANCH ?? 'main';
@@ -41,7 +41,9 @@ function runGitText(cmd: string, cwd: string): string {
 function cloneMirror(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dir), { recursive: true });
-  runGit(`git clone --quiet --filter=blob:none --no-checkout "${CANNBAY2_PULL_URL}" "${dir}"`, path.dirname(dir), 600_000);
+  // --no-local：本地路径 clone 默认走硬链接、忽略 --filter（测试指向本地 bare 仓时
+  // 会退化成全量镜像、物化不再是按需下载）；HTTPS 远端不受影响
+  runGit(`git clone --quiet --no-local --filter=blob:none --no-checkout "${CANNBAY2_PULL_URL}" "${dir}"`, path.dirname(dir), 600_000);
 }
 
 /** 确保 partial clone 镜像存在且 origin/main 元数据最新（不下载 blob）。全同步，单进程内无重入。 */
@@ -108,8 +110,9 @@ export function listSessions(): Cannbay2SessionEntry[] {
     if (m) fileCount.set(m[1], (fileCount.get(m[1]) ?? 0) + 1);
   }
 
-  // 一次 log walk：文件 → 最后触碰 commit（log 新→旧，首个命中即最新）
-  const fileCommit = new Map<string, { author: string; time: string; subject: string }>();
+  // 一次 log walk：sid → 最后触碰 commit（log 新→旧，首个命中即最新）。
+  // 单遍分组 O(files)——按 sid 再 filter 一遍是 O(N²)，千级会话时列表超 2s。
+  const sidCommit = new Map<string, { author: string; time: string; subject: string }>();
   try {
     const logOut = runGitText(
       `git log --pretty=format:%x00%an%x1f%aI%x1f%s --name-only origin/${CANNBAY2_BRANCH} -- sessions/`,
@@ -121,17 +124,15 @@ export function listSessions(): Cannbay2SessionEntry[] {
       const [author, time, ...subjectParts] = lines[0].split('\x1f');
       const subject = subjectParts.join('\x1f');
       for (const file of lines.slice(1)) {
-        if (!fileCommit.has(file)) fileCommit.set(file, { author, time, subject });
+        const m = file.match(/^sessions\/([^/]+)\//);
+        if (m && !sidCommit.has(m[1])) sidCommit.set(m[1], { author, time, subject });
       }
     }
   } catch { /* 无历史时列表退化为纯文件名 */ }
 
   const entries: Cannbay2SessionEntry[] = [];
   for (const [sid, count] of fileCount) {
-    const newest = [...fileCommit.entries()]
-      .filter(([f]) => f.startsWith(`sessions/${sid}/`))
-      .map(([, c]) => c)
-      .sort((a, b) => (b.time || '').localeCompare(a.time || ''))[0];
+    const newest = sidCommit.get(sid);
     const author = newest?.author ?? '';
     const { submitter, description } = parseCommitSubject(newest?.subject ?? '', author);
     entries.push({ sid, fileCount: count, author, submitter, description, commitTime: newest?.time ?? '' });
@@ -163,11 +164,15 @@ export function materializeSession(sid: string): string {
   const matDir = path.join(dir, 'materialized', sid);
   fs.rmSync(matDir, { recursive: true, force: true });
   let mainJsonl: string | null = null;
+  // 注：cat-file 触发逐对象懒取（每次一次 HTTPS 协商）。实测批量 fetch 无收益
+  // （1MB 会话 1.6-1.7s vs 逐取 1.1-1.5s，成本均在协商固定开销），保持简单。
   for (const e of entries) {
     const rel = e.repoPath.slice(`sessions/${sid}/`.length);
-    // sessions/<sid>/<sid>.jsonl → materialized/<sid>.jsonl
+    // sessions/<sid>/<sid>.jsonl|<sid>.meta.json → materialized/<sid>.jsonl|.meta.json
     // sessions/<sid>/subagents/* → materialized/<sid>/subagents/*
-    const targetRel = rel === `${sid}.jsonl` ? `${sid}.jsonl` : `${sid}/${rel}`;
+    const targetRel = rel === `${sid}.jsonl` || rel === `${sid}.meta.json`
+      ? rel
+      : `${sid}/${rel}`;
     const target = path.join(dir, 'materialized', targetRel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, runGit(`git cat-file -p ${e.oid}`, dir));
@@ -206,6 +211,9 @@ export interface UploadResult {
  */
 export async function uploadFolder(stagingDir: string, sid: string, commitMessage: string): Promise<UploadResult> {
   return withWriteLock(async () => {
+    // sid 拼进多条 git 命令（sparse-checkout set / add / ls-tree），
+    // 白名单校验防命令注入 —— 与 materializeSession 同款
+    if (!/^[\w.-]+$/.test(sid)) throw new Error(`Invalid session id: "${sid}"`);
     const dir = ensureMirror();
     if (!revParseMain(dir)) throw new Error('cannbay2 mirror has no main branch');
 
@@ -237,7 +245,14 @@ export async function uploadFolder(stagingDir: string, sid: string, commitMessag
     try {
       runGit(`git -c user.name=cannbot-insight -c user.email=insight@localhost commit -F "${msgFile}"`, dir);
     } catch {
-      unchanged = true; // 内容无变化（重复上传同内容）
+      // commit 失败 ≠ 无变化：staged 仍有差异说明是真实失败（hook 拒绝/index 损坏等），
+      // 不能静默报 unchanged 跳过 push。git diff --cached --quiet：exit 0 = 无 staged 差异
+      try {
+        runGit('git diff --cached --quiet', dir);
+        unchanged = true; // 确无 staged 变更（重复上传同内容）
+      } catch {
+        throw new Error(`git commit failed for session "${sid}" while staged changes exist`);
+      }
     }
     try { fs.unlinkSync(msgFile); } catch { /* ignore */ }
 

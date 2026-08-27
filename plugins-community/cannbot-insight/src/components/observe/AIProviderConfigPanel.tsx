@@ -7,7 +7,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,19 +19,32 @@ import {
   clearProviderConfig,
 } from "@/lib/ai-provider-config"
 
+const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+const DEFAULT_MODEL = "qwen3.7-max"
+
 interface Props {
   onConfigChange?: (config: AIProviderConfig | null) => void
   compact?: boolean
 }
 
 export function AIProviderConfigPanel({ onConfigChange, compact }: Props) {
-  const saved = loadProviderConfig()
-  const [baseUrl, setBaseUrl] = useState(saved?.baseUrl ?? "https://dashscope.aliyuncs.com/compatible-mode/v1")
-  const [apiKey, setApiKey] = useState(saved?.apiKey ?? "")
-  const [model, setModel] = useState(saved?.model ?? "qwen3.7-max")
-  const [savedFlag, setSavedFlag] = useState(!!saved)
+  // 渲染期不读 localStorage：SSR 无 localStorage，hydration 首渲染必须与
+  // 服务端输出一致 —— 已存配置挂载后由 effect 填充
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
+  const [apiKey, setApiKey] = useState("")
+  const [model, setModel] = useState(DEFAULT_MODEL)
+  const [savedFlag, setSavedFlag] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [testing, setTesting] = useState(false)
+
+  useEffect(() => {
+    const saved = loadProviderConfig()
+    if (!saved) return
+    setBaseUrl(saved.baseUrl)
+    setApiKey(saved.apiKey)
+    setModel(saved.model)
+    setSavedFlag(true)
+  }, [])
 
   const config: AIProviderConfig = { baseUrl, apiKey, model }
   const isAnthropicPath = baseUrl.includes("/apps/anthropic")

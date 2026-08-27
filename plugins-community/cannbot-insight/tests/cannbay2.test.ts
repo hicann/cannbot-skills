@@ -87,6 +87,8 @@ fs.writeFileSync(path.join(FIXTURES, SID, 'subagents', `${SUB_ID}.jsonl`), [
   JSON.stringify({ type: 'assistant', message: { id: 'msg_sub_1', role: 'assistant', content: [{ type: 'text', text: 'found it' }], model: 'test-model', usage: { input_tokens: 50, output_tokens: 5 } }, timestamp: '2026-08-19T03:00:09.000Z' }),
 ].join('\n') + '\n');
 fs.writeFileSync(path.join(FIXTURES, SID, 'subagents', `${SUB_ID}.meta.json`), JSON.stringify({ toolUseId: 'toolu_dispatch_1', name: 'researcher', agentType: 'general-purpose' }));
+// 杂散文件（含明文密钥）：白名单拷贝必须把它挡在 staging 之外，永不进公开仓
+fs.writeFileSync(path.join(FIXTURES, SID, 'subagents', 'stray-notes.txt'), 'DASHSCOPE_API_KEY=sk-strayfile-secret-1234567890abcd\n');
 
 const OPENCODE_DB = path.resolve(__dirname, 'data/e2e/opencode-sample.db');
 const OPENCODE_SID = 'ses_2051a32a4ffevX0jGBWVDDEqCk';
@@ -108,12 +110,25 @@ function makeRequest(body: unknown) {
   });
 }
 
+// 共享 dev.db 的并行测试文件（e2e-import-observe 等）用同一 opencode fixture
+// 会话，其 afterAll deleteMany 会与本文件的 merge update 赛跑（dedup 查到行、
+// update 时行已被删 → P2025）。对这类瞬时消失重试一次即可通过。
+async function withDbRaceRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    if (msg.includes('No record was found') || msg.includes('Session not found')) return await fn();
+    throw e;
+  }
+}
+
 beforeAll(async () => {
   await importSession(path.join(FIXTURES, `${SID}.jsonl`), SID, prisma, path.join(FIXTURES, `${SID}.jsonl`), 'claude-jsonl');
 });
 
 afterAll(async () => {
-  for (const [taskId, framework] of [[SID, 'claude-code'], [OPENCODE_SID, 'opencode'], [OPENCODE_SID, 'claude-code']] as const) {
+  for (const [taskId, framework] of [[SID, 'claude-code'], ['cc-cannbay2-it-0002', 'claude-code'], [OPENCODE_SID, 'opencode'], [OPENCODE_SID, 'claude-code']] as const) {
     try { await prisma.session.deleteMany({ where: { taskId, framework } }); } catch { /* ignore */ }
   }
   await prisma.$disconnect();
@@ -191,6 +206,18 @@ describe('cannbay2 闭环：上传（治理）→ push → 列表 → 物化 →
     expect(text).toContain('max_tokens=4096'); // 零误伤基准
   });
 
+  it('杂散文件不进公开仓：staging 白名单只带 .jsonl/.json，stray 内容零泄漏', () => {
+    mirror.materializeSession(SID);
+    const matSub = path.join(CACHE, 'materialized', SID, 'subagents');
+    const names = fs.readdirSync(matSub);
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.every(n => n.endsWith('.jsonl') || n.endsWith('.json'))).toBe(true);
+    expect(names).not.toContain('stray-notes.txt');
+    for (const f of names) {
+      expect(fs.readFileSync(path.join(matSub, f), 'utf8')).not.toContain('strayfile-secret');
+    }
+  });
+
   it('list：一次 log walk 出提交人/内容描述/时间', () => {
     const sessions = cannbay2.listCannbay2Sessions();
     const entry = sessions.find(s => s.sid === SID);
@@ -223,21 +250,23 @@ describe('cannbay2 闭环：上传（治理）→ push → 列表 → 物化 →
 
 describe('cannbay2 opencode 导出上传', () => {
   it('opencode 会话 → DB 导出 jsonl → 上传 → 导入回读一致', async () => {
-    const imported = await importSession(OPENCODE_DB, OPENCODE_SID, prisma, OPENCODE_DB, 'opencode-db');
+    const imported = await withDbRaceRetry(() => importSession(OPENCODE_DB, OPENCODE_SID, prisma, OPENCODE_DB, 'opencode-db'));
     expect(imported.imported).toBe(true);
 
-    const upload = await cannbay2.uploadCannbay2Session(prisma, OPENCODE_SID, `提交人: 测试者\n内容描述: opencode 导出上传`);
+    const upload = await withDbRaceRetry(() => cannbay2.uploadCannbay2Session(prisma, OPENCODE_SID, `提交人: 测试者\n内容描述: opencode 导出上传`));
     expect(upload.unchanged).toBe(false);
 
-    const result = await cannbay2.importCannbay2Session(OPENCODE_SID, prisma);
+    const result = await withDbRaceRetry(() => cannbay2.importCannbay2Session(OPENCODE_SID, prisma));
     expect(result).toBeTruthy();
     // 同机已有同 taskId 会话 → merge 路径（imported:false，合并进原 opencode 会话）
     // 异机下载场景：删掉本地会话再导入 → 全新建 claude-code 会话
     await prisma.session.deleteMany({ where: { taskId: OPENCODE_SID } });
     const fresh = await cannbay2.importCannbay2Session(OPENCODE_SID, prisma);
     expect(fresh).toBeTruthy();
-    const reSession = await prisma.session.findFirst({ where: { taskId: OPENCODE_SID, framework: 'claude-code' } });
+    // framework 由 cc-session-meta 声明恢复为原值（opencode），不再错变 claude-code
+    const reSession = await prisma.session.findFirst({ where: { taskId: OPENCODE_SID } });
     expect(reSession).toBeDefined();
+    expect(reSession!.framework).toBe('opencode');
     const turns = await prisma.turn.findMany({ where: { sessionId: reSession!.id } });
     expect(turns.length).toBeGreaterThan(0);
     expect(turns.some(t => t.role === 'user')).toBe(true);
@@ -262,6 +291,43 @@ describe('cannbay2 治理熔断：复检残留 → 拒绝上传且远端无新 c
   });
 });
 
+describe('cannbay2 无 jsonl 源兜底：DB 导出上传（v1 .db 快照会话 / 源文件已删）', () => {
+  const SID2 = 'cc-cannbay2-it-0002';
+  let fixtureFile: string;
+
+  it('源 jsonl 删除后上传 → DB 导出 jsonl → push 成功 → 回读有数据', async () => {
+    fixtureFile = path.join(FIXTURES, `${SID2}.jsonl`);
+    fs.writeFileSync(fixtureFile, [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '兜底导出场景：v1 db 快照会话' }, timestamp: '2026-08-19T04:00:00.000Z' }),
+      JSON.stringify({ type: 'system', message: { role: 'system', content: '<command-message>spec-to-design</command-message><command-name>spec-to-design</command-name>' }, timestamp: '2026-08-19T04:00:01.000Z' }),
+      JSON.stringify({ type: 'assistant', message: { id: 'msg_f2_1', role: 'assistant', content: [{ type: 'text', text: '导出兜底回复' }], model: 'test-model', usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 7, cache_creation_input_tokens: 2 } }, timestamp: '2026-08-19T04:00:05.000Z' }),
+    ].join('\n') + '\n');
+    await importSession(fixtureFile, SID2, prisma, fixtureFile, 'claude-jsonl');
+    const latBefore = (await prisma.turn.findFirst({ where: { session: { taskId: SID2 }, role: 'assistant' }, select: { latencyMs: true } }))?.latencyMs;
+
+    fs.rmSync(fixtureFile, { force: true }); // 模拟：sourcePath 指向的文件已不存在
+    const up = await cannbay2.uploadCannbay2Session(prisma, SID2, '提交人: 测试者\n内容描述: DB 导出兜底');
+    expect(up.unchanged).toBe(false);
+
+    const result = await cannbay2.importCannbay2Session(SID2, prisma);
+    expect(result).toBeTruthy();
+    const session = await prisma.session.findFirst({ where: { taskId: SID2 } });
+    const turns = await prisma.turn.findMany({ where: { sessionId: session!.id } });
+    expect(turns.length).toBeGreaterThanOrEqual(2);
+    expect(turns.some(t => t.role === 'user' && t.content?.includes('兜底导出场景'))).toBe(true);
+    // 导出保真：usage 携带 cache_read/cache_creation → 回读 Turn 两个 cache 维度不丢
+    const asst = turns.find(t => t.role === 'assistant');
+    expect(asst?.cacheReadTokens).toBe(7);
+    expect(asst?.cacheWriteTokens).toBe(2);
+    // system turn（skill 注入/命令消息重分类）导出不蒸发，往返保留
+    expect(turns.some(t => t.role === 'system' && t.content?.includes('spec-to-design'))).toBe(true);
+    // latency 往返：导出行 source:'insight-export' 让 duration_ms 生效
+    expect(asst?.latencyMs).toBe(latBefore);
+    // 来源标注不误标代理捕获：version 不以 -proxy 结尾（无 proxy 徽标）
+    expect(session?.version == null || !session!.version!.endsWith('-proxy')).toBe(true);
+  });
+});
+
 describe('cannbay2 route', () => {
   it('action=list 返回会话列表', async () => {
     const res = await route.POST(makeRequest({ action: 'list' }));
@@ -269,6 +335,11 @@ describe('cannbay2 route', () => {
     const data = await res.json();
     expect(Array.isArray(data.sessions)).toBe(true);
     expect(data.sessions.some((s: { sid: string }) => s.sid === SID)).toBe(true);
+  });
+
+  it('非法 taskId（命令注入面）在入口即拒绝', async () => {
+    await expect(cannbay2.uploadCannbay2Session(prisma, '../evil; rm -rf /', 'x'))
+      .rejects.toThrow(/Invalid session id/);
   });
 
   it('unknown action → 400；upload 缺 taskId → 400', async () => {

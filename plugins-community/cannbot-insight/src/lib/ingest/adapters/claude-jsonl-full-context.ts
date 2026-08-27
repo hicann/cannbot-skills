@@ -17,7 +17,6 @@ import {
   extractSystemText,
   findMemorySection,
   findSkillsSection,
-  proxySourceOfLines,
   type ClaudeJsonlLine,
   type ContentBlock,
 } from './claude-jsonl';
@@ -59,13 +58,15 @@ export function readFullContext(filePath: string): FullContext | null {
   if (lines.length === 0) return null;
 
   // 扩展字段（proxy 捕获）：第一条带 tools 的 assistant 行。
+  // x_cannbay.data（cc-wire-round）优先，legacy 顶层 system/tools fallback。
   let systemPrompt = '';
   let tools: FullContextTool[] = [];
   let foundExt = false;
   for (const line of lines) {
     if (foundExt || line.type !== 'assistant') continue;
-    const sysAny = (line as { system?: unknown }).system;
-    const toolsAny = (line as { tools?: unknown }).tools;
+    const xb = (line as { x_cannbay?: { data?: { system?: unknown; tools?: unknown } } }).x_cannbay;
+    const sysAny = xb?.data?.system ?? (line as { system?: unknown }).system;
+    const toolsAny = xb?.data?.tools ?? (line as { tools?: unknown }).tools;
     if (Array.isArray(toolsAny) && toolsAny.length > 0) {
       foundExt = true;
       systemPrompt = extractSystemText(sysAny as string | ContentBlock[] | undefined) ?? '';
@@ -84,5 +85,43 @@ export function readFullContext(filePath: string): FullContext | null {
 // （保留原始 agent 名 + "-proxy" 后缀）。与路径无关——文件改名/移动/归档后
 // 标记仍在。导入时取该值存入 Session.version，用于列表区分来源。
 export function proxySourceOf(filePath: string): string | null {
-  return proxySourceOfLines(parseJsonlLines(filePath));
+  const lines = parseJsonlLines(filePath);
+  for (const l of lines) {
+    const s = (l as { source?: unknown }).source;
+    if (typeof s === 'string' && s.endsWith('-proxy')) return s;
+  }
+  return null;
+}
+
+// post-patch 读 cc-wire-round.requestParams（spec §4.1 导入归宿 "post-patch"）：
+// Turn schema 无 temperature/maxTokens 列（zero-schema-change 约束），proxy
+// 捕获的请求参数只存在 jsonl 的 x_cannbay.data 里，按需在 turns API 叠加 ——
+// 与 readFullContext 同构（API 层调扩展层读 proxy 数据，核心管线不感知）。
+export interface TurnRequestParams {
+  temperature: number | null;
+  maxTokens: number | null;
+  model: string | null;
+}
+
+export function readTurnRequestParams(filePath: string, turnIndex: number): TurnRequestParams | null {
+  const lines = parseJsonlLines(filePath);
+  // turnIndex 指向 DB 里的 turn 序号，proxy jsonl 里 assistant 行按出现顺序
+  // 对应 turnIndex（assistant 行 = 每个 wire 轮的响应）。roundIndex 也从 0 起，
+  // 逐轮 +1，与 turnIndex 对齐 —— 直接按 assistant 行计数定位。
+  let assistantSeen = -1;
+  for (const l of lines) {
+    if (l.type !== 'assistant') continue;
+    assistantSeen++;
+    if (assistantSeen !== turnIndex) continue;
+    const xb = (l as { x_cannbay?: { schema?: string; version?: number; data?: { requestParams?: { temperature?: number; maxTokens?: number; model?: string | null } } } }).x_cannbay;
+    // version 门禁（spec §6）：只认 cc-wire-round v1
+    if (!xb || xb.schema !== 'cc-wire-round' || xb.version !== 1) continue;
+    const rp = xb.data?.requestParams;
+    return {
+      temperature: rp?.temperature ?? null,
+      maxTokens: rp?.maxTokens ?? null,
+      model: rp?.model ?? null,
+    };
+  }
+  return null;
 }

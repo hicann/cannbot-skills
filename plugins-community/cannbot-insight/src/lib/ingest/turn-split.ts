@@ -200,7 +200,11 @@ export function splitIntoTurns(
     const role = interaction.role === 'subagent' ? 'assistant' : interaction.role;
 
     const content = interaction.content;
-    const contentSummary = truncateTo200(content);
+    // 摘要剥掉 user turn 里的 <system-reminder> 前缀块（全文保留在 content，
+    // wire 保真）—— 时间线预览显示真实提示而非 XML 标签
+    const contentSummary = content?.startsWith('<system-reminder>')
+      ? truncateTo200(content.replace(/^<system-reminder>[\s\S]*?<\/system-reminder>\s*/, '') || null)
+      : truncateTo200(content);
 
     const usage = interaction.usage;
     const totalTokens = usage?.total ?? 0;

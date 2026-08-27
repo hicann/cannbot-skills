@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { normalizeSession, normalizeAll } from '../normalize';
 import { sessionFilePath, sidsFilePath } from '../writer.ts';
 import { redactString } from '../redactor.ts';
 
@@ -69,9 +70,10 @@ const USAGE = `cpx — agent↔模型明文捕获代理编排器
   cpx --agent <claude|opencode|openai|generic> -- <cmd> [args]
   cpx status [--kill [--all]]           查看状态；--kill 清理无 sid 的孤儿 proxy，--all 连活跃会话一起清
   cpx config [dedup on|off]             查看/配置；dedup=注入压缩（默认 off，热生效，只压缩捕获记录不改转发）
+  cpx normalize [<file.jsonl|sid>]      重新生成 insight-native 规范文件（norm/）；缺省 = 全部捕获
   cpx --help | -h                        本帮助
 
-在原有 claude / opencode 命令前加 cpx，其他使用完全无变化。agent 退出后自动导入 cannbot-insight 并开浏览器。`;
+在原有 claude / opencode 命令前加 cpx，其他使用完全无变化。agent 退出后自动生成 norm/ 规范文件、导入 cannbot-insight 并开浏览器。`;
 
 type AgentProfile = 'claude' | 'opencode' | 'openai' | 'generic';
 
@@ -589,6 +591,21 @@ async function main(): Promise<void> {
     runConfig(process.argv.slice(3));
     return;
   }
+  if (sub === 'normalize') {
+    const arg = process.argv[3];
+    if (arg) {
+      const file = arg.endsWith('.jsonl') ? path.resolve(arg) : path.join(PROXY_DIR, `${arg}.jsonl`);
+      if (!fs.existsSync(file)) { log(`capture not found: ${file}`); process.exit(2); }
+      const r = normalizeSession(file);
+      if (!r) { log('normalize failed'); process.exit(1); }
+      log(`norm: ${r.mainFile} (+${r.subagentFiles.length} subagents)`);
+    } else {
+      const rs = normalizeAll();
+      for (const r of rs) log(`norm: ${r.mainFile} (+${r.subagentFiles.length} subagents)`);
+      if (rs.length === 0) log('no captures found');
+    }
+    return;
+  }
   const { profile, agentCmd, agentArgs } = parseArgs(process.argv);
   if (!agentCmd) {
     console.error(USAGE);
@@ -743,15 +760,21 @@ async function main(): Promise<void> {
   }
   let lastUrl: string | null = null;
   for (const { sid: captureSid, file: p } of produced) {
-    log(`captured ${(fs.statSync(p).size / 1024).toFixed(1)}KB [${captureSid}] → importing ...`);
+    log(`captured ${(fs.statSync(p).size / 1024).toFixed(1)}KB [${captureSid}] → normalizing ...`);
     log(`  capture  : ${p}`);
     const agentLog = profile === 'claude' ? claudeNativeLogPath(captureSid)
       : profile === 'opencode' ? opencodeNativePaths()
       : null;
     if (agentLog) log(`  agent log: ${agentLog}`);
-    const result = await triggerIngest(captureSid, p);
+    // 导入的是 norm/ 规范文件（insight-native 形状，走 insight 原生导入路径）；
+    // verbatim 捕获原样保留在 <sid>.jsonl，可随时用 `cpx normalize` 重新生成。
+    const norm = normalizeSession(p);
+    if (!norm) log('  normalize failed; importing verbatim capture instead');
+    const importPath = norm?.mainFile ?? p;
+    log(`  importing: ${importPath}`);
+    const result = await triggerIngest(captureSid, importPath);
     if (result) lastUrl = `${INSIGHT_BASE}/session/${captureSid}`;
-    else log('ingest failed; you can import manually via the cannbot-insight UI');
+    else log('  ingest failed; you can import manually via the cannbot-insight UI');
   }
   if (lastUrl) {
     log(`✅ imported → opening ${lastUrl}`);

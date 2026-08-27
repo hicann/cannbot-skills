@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
         model: true,
         user: true,
         framework: true,
+        version: true,
       },
     });
 
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
       model: s.model,
       user: s.user,
       framework: s.framework,
+      version: s.version,
     }));
 
     return NextResponse.json({ items, total, page });

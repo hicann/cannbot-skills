@@ -417,3 +417,55 @@ describe('claude-emitter: dedup hot switch (config file, no restart)', () => {
     expect(readJsonl(file).filter(r => r.deduped === true).length).toBe(before);
   });
 });
+
+describe('claude-emitter: x_cannbay 声明式扩展（docs/cannbay-schema-spec.md）', () => {
+  it('assistant 行双写一致：legacy ≡ x_cannbay.data，且带 roundIndex/requestParams/status', () => {
+    const rows = readJsonl(mainFile).filter(r => r.type === 'assistant');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const xb = r.x_cannbay;
+      expect(xb?.schema).toBe('cc-wire-round');
+      expect(xb?.version).toBe(1);
+      expect(r.duration_ms).toBe(xb.data.latencyMs);
+      expect(r.system).toEqual(xb.data.system);
+      expect(r.tools).toEqual(xb.data.tools);
+      expect(r.stopReason).toBe(xb.data.stopReason);
+      expect(typeof xb.data.roundIndex).toBe('number');
+      expect(typeof xb.data.status).toBe('number');
+    }
+    // roundIndex 从 0 连续编号
+    const idx = rows.map(r => r.x_cannbay.data.roundIndex);
+    expect(idx).toEqual(idx.map((_, i) => i));
+  });
+
+  it('主会话 meta.json（cc-session-meta）已写', () => {
+    const metaPath = mainFile.replace(/\.jsonl$/, '.meta.json');
+    expect(fs.existsSync(metaPath)).toBe(true);
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    expect(meta.x_cannbay.schema).toBe('cc-session-meta');
+    expect(meta.x_cannbay.version).toBe(1);
+    expect(meta.x_cannbay.data.producer).toBe('cpx');
+    expect(['claude-code', 'opencode']).toContain(meta.x_cannbay.data.framework);
+  });
+
+  it('子代理 meta 双写：cc-subagent-meta 与顶层旧字段同值', () => {
+    const files = metaFiles();
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const meta = JSON.parse(fs.readFileSync(path.join(subagentsDir, f), 'utf-8'));
+      expect(meta.x_cannbay.schema).toBe('cc-subagent-meta');
+      expect(meta.x_cannbay.data.toolUseId).toBe(meta.toolUseId);
+      expect(meta.x_cannbay.data.subagentSessionId).toBe(f.replace(/\.meta\.json$/, ''));
+    }
+  });
+
+  it('输入行 cc-wire-input：roundIndex + kind 结构化分类', () => {
+    const rows = readJsonl(mainFile).filter(r => r.x_cannbay?.schema === 'cc-wire-input');
+    expect(rows.length).toBeGreaterThan(0);
+    const KINDS = ['user', 'tool-result', 'injection', 'system', 'command-message', 'dedup-placeholder'];
+    for (const r of rows) {
+      expect(typeof r.x_cannbay.data.roundIndex).toBe('number');
+      expect(KINDS).toContain(r.x_cannbay.data.kind);
+    }
+  });
+});

@@ -12,8 +12,7 @@ import { getContextWindowLimit } from '@/lib/context-window-config';
 import { selectInputContextTurns, toWireOrder } from '@/lib/ingest/input-reconstruct';
 import { isContinuationTurn } from '@/lib/shared/command-parser';
 import { listSubagentSessions } from '@/lib/ingest/adapters/claude-jsonl';
-import { readFullContext, type FullContext } from '@/lib/ingest/adapters/claude-jsonl-full-context';
-import { readWireEnrichments, wireEnrichmentKey } from '@/lib/ingest/adapters/claude-jsonl-wire';
+import { readFullContext, readTurnRequestParams, type FullContext } from '@/lib/ingest/adapters/claude-jsonl-full-context';
 import { isClaudeFormatSession } from '@/lib/shared/session-format';
 import path from 'node:path';
 
@@ -243,32 +242,16 @@ export async function GET(
             msg.tool_calls = tcs.map(tc => {
               const isSkill = tc.isSkillRelated;
               const argsMax = isSkill ? 2000 : 1500;
+              const resultMax = isSkill ? 5000 : 3000;
               return {
                 name: tc.toolName,
                 args: tc.argsJson ? (tc.argsJson.length > argsMax ? tc.argsJson.substring(0, argsMax) + '...' : tc.argsJson) : null,
-                result: null,
+                result: tc.resultJson ? (tc.resultJson.length > resultMax ? tc.resultJson.substring(0, resultMax) + '...' : tc.resultJson) : null,
                 isSkillRelated: isSkill ? true : undefined,
               };
             });
           }
           messages.push(msg);
-          // Wire fidelity (Anthropic protocol): tool_result is its own user
-          // message AFTER the assistant tool_use — not folded into the
-          // tool_calls entry. One result message per call, in call order.
-          if (!isCompaction) {
-            for (const tc of tcs) {
-              if (tc.resultJson == null) continue;
-              const isSkill = tc.isSkillRelated;
-              const resultMax = isSkill ? 5000 : 3000;
-              const r = tc.resultJson.length > resultMax ? tc.resultJson.substring(0, resultMax) + '...' : tc.resultJson;
-              messages.push({
-                role: 'tool_result',
-                content: r,
-                tokenCount: Math.round(r.length / 3.5),
-                name: tc.toolName,
-              });
-            }
-          }
         } else {
           const isContinuationUser = isContinuation && ct.role === 'user';
           const continuationTokens = isContinuationUser && targetInputTokens > 0 ? targetInputTokens : baseTokens;
@@ -293,42 +276,14 @@ export async function GET(
     // Compute stable system overhead (fixed for entire session)
     const systemOverheadTokens = await computeSystemOverhead(turn.sessionId, turn.subagentSessionId);
     const fc = await readSessionFullContext(turn.sessionId, turn.subagentSessionId);
-
-    // Proxy 扩展层（OCP）：proxy turn 的 contentJson/inputMessagesJson 不存 DB
-    // （管线不感知），由扩展层 readWireEnrichments 从捕获文件按需读取 —— 与
-    // readFullContext 同构。仅 proxy 捕获 session（version 带 -proxy 后缀）触发。
-    // 按 (role, createdAt_ts) 稳定键查 —— 不按 turnIndex，因为管线在 compact
-    // 边界折叠 interaction 会使数组下标 ≠ DB turnIndex（compact 错位）。
-    // 限制：仅 root turn（subagent 的全局 createdAt_ts 与 wire 文件本地键不
-    // 对应；subagent 的 verbatim 由 readFullContext 提供 system/tools，
-    // inputMessagesJson 走标准重建）。
-    let wireContentJson = turn.contentJson;
-    let wireInputMessagesJson = inputMessagesJson;
-    let wireInputMessagesCount = turn.inputMessagesCount;
-    // ttftMs has no pipeline field (turn-split hardcodes null), so proxy output
-    // turns override it from the extension layer. latencyMs / finishReason flow
-    // through the standard pipeline (emitter duration_ms + stopReason → adapter
-    // → turn-split → DB), so they're read straight from the turn — no override.
-    let wireTtftMs = turn.ttftMs;
-    const sessionRow = await prisma.session.findUnique({
-      where: { id: turn.sessionId },
-      select: { version: true, sourcePath: true },
-    });
-    if (sessionRow?.version?.endsWith('-proxy') && sessionRow.sourcePath && !turn.subagentSessionId) {
-      const enrichments = readWireEnrichments(sessionRow.sourcePath);
-      // createdAt_ts 经管线透传不变 = buildWireRounds 赋的 timeInfo.created
-      // （已验证）；fallback createdAt（CLAUDE.md: createdAt_ts nullable）
-      const tsMs = (turn.createdAt_ts ?? turn.createdAt).getTime();
-      const enrich = enrichments.get(wireEnrichmentKey(turn.role, tsMs));
-      if (enrich) {
-        wireContentJson = enrich.contentJson;
-        // proxy 输出 turn 的 inputMessagesJson 由扩展层提供 → 跳过重建
-        if (enrich.inputMessagesJson) {
-          wireInputMessagesJson = enrich.inputMessagesJson;
-          try { wireInputMessagesCount = JSON.parse(enrich.inputMessagesJson).length; } catch { /* keep */ }
-        }
-        if (enrich.ttftMs != null) wireTtftMs = enrich.ttftMs;
-      }
+    // post-patch（spec §4.1 导入归宿）：proxy 捕获的 temperature/maxTokens/
+    // 请求 model 只存在 jsonl 的 x_cannbay.data，DB 无对应列 → API 层按需叠加。
+    // root assistant turn 才对齐 roundIndex（subagent turn 的全局 turnIndex 与
+    // jsonl 行序不对应，跳过 —— 其请求参数由子代理自己的 jsonl 提供，另议）。
+    let reqParams: { temperature: number | null; maxTokens: number | null; model: string | null } | null = null;
+    if (turn.role === 'assistant' && !turn.subagentSessionId && fc !== null) {
+      const sess = await prisma.session.findUnique({ where: { id: turn.sessionId }, select: { sourcePath: true } });
+      if (sess?.sourcePath) reqParams = readTurnRequestParams(sess.sourcePath, turn.turnIndex);
     }
 
     return NextResponse.json({
@@ -337,13 +292,15 @@ export async function GET(
       turnIndex: turn.turnIndex,
       role: turn.role,
       content: turn.content,
-      contentJson: wireContentJson,
+      contentJson: turn.contentJson,
       contentSummary: turn.contentSummary ?? turn.content?.substring(0, 200) ?? null,
-      inputMessagesJson: wireInputMessagesJson,
-      inputMessagesCount: turn.agentName === 'compaction' ? (wireInputMessagesJson ? JSON.parse(wireInputMessagesJson).length : wireInputMessagesCount) : wireInputMessagesCount,
+      inputMessagesJson,
+      inputMessagesCount: turn.agentName === 'compaction' ? (inputMessagesJson ? JSON.parse(inputMessagesJson).length : turn.inputMessagesCount) : turn.inputMessagesCount,
       inputMessagesTokens: turn.agentName === 'compaction' && turn.inputMessagesTokens === turn.outputTokens ? turn.inputTokens : turn.inputMessagesTokens,
       contextWindowPct: turn.contextWindowPct,
       systemOverheadTokens,
+      temperature: reqParams?.temperature ?? null,
+      maxTokens: reqParams?.maxTokens ?? null,
       systemPrompt: fc?.systemPrompt ?? null,
       fullContext: fc ? { tools: fc.tools, memoryFiles: fc.memoryFiles, skills: fc.skills } : null,
       agentName: turn.agentName,
@@ -357,7 +314,7 @@ export async function GET(
       cacheReadTokens: turn.cacheReadTokens,
       cacheWriteTokens: turn.cacheWriteTokens,
       latencyMs: turn.latencyMs,
-      ttftMs: wireTtftMs,
+      ttftMs: turn.ttftMs,
       createdAt: turn.createdAt_ts?.toISOString() ?? turn.createdAt.toISOString(),
       completedAt: turn.completedAt?.toISOString() ?? null,
       model: turn.model,

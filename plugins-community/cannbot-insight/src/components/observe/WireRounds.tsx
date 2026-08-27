@@ -19,9 +19,6 @@ interface WireRound {
   model: string | null;
   usage: { input?: number; output?: number } | null;
   newFrom: number;
-  totalMessages: number;
-  compactBoundary: boolean;
-  prevTotalMessages: number;
   requestMessages: WireMessage[];
   response: { content: Preview; blocks: string[]; text: string };
 }
@@ -99,19 +96,9 @@ export function WireRounds({ taskId }: { taskId: string }) {
       {data.rounds.map(r => {
         const isOpen = open.has(r.index - 1);
         const totalChars = r.requestMessages.reduce((s, m) => s + m.content.chars, 0);
-        const newCount = r.requestMessages.length;
-        const histCount = Math.max(0, (r.totalMessages ?? newCount) - newCount);
+        const newCount = r.requestMessages.length - r.newFrom;
         return (
-          <div key={r.index}>
-            {r.compactBoundary && (
-              <div className="flex items-center gap-2 py-1.5 px-3 my-1 border-y border-amber-300 dark:border-amber-500/40 bg-amber-50/50 dark:bg-amber-500/10 rounded text-xs">
-                <Badge variant="yellow" className="text-[10px]">⏸ /compact</Badge>
-                <span className="text-amber-700 dark:text-amber-300">
-                  上下文被摘要替换 · 历史 {r.prevTotalMessages} → {r.totalMessages} 条
-                </span>
-              </div>
-            )}
-          <div className="border rounded-md overflow-hidden">
+          <div key={r.index} className="border rounded-md overflow-hidden">
             <span
               role="button"
               tabIndex={0}
@@ -121,7 +108,7 @@ export function WireRounds({ taskId }: { taskId: string }) {
             >
               <Badge variant="secondary" className="text-xs">Round {r.index}</Badge>
               <span className="text-xs text-muted-foreground">{(r.timestamp ?? '').slice(11, 19)}</span>
-              <Badge variant="blue" className="text-xs">新增 {newCount} 条{histCount > 0 ? `（共 ${histCount + newCount}）` : ""}</Badge>
+              <Badge variant="blue" className="text-xs">输入 {r.requestMessages.length} 条（新增 {newCount}）</Badge>
               <Badge variant="green" className="text-xs">输出 {r.response.blocks.join(",")}</Badge>
               {r.usage?.output != null && <span className="text-xs text-muted-foreground">{r.usage.output}t</span>}
               {r.model && <Badge variant="outline" className="text-xs">{r.model}</Badge>}
@@ -133,25 +120,15 @@ export function WireRounds({ taskId }: { taskId: string }) {
                 <div className="px-3 py-2">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground border-b pb-1 mb-1.5">
                     <Badge variant="blue" className="text-xs">输入</Badge>
-                    <span>本轮新增 {r.requestMessages.length} 条{histCount > 0 ? ` · 此前累积 ${histCount} 条历史` : ""}</span>
+                    <span>{r.requestMessages.length} 条消息 · 其中本轮新增 {newCount} 条</span>
                   </div>
                   <div className="space-y-1.5">
                     {r.requestMessages.map((m, i) => {
+                      const isNew = i >= r.newFrom;
                       const key = `${r.index}-${i}`;
                       const msgOpen = openMsgs.has(key);
-                      // continuation 摘要消息直接显示为 /compact 徽标，不展开长文本
-                      const isCompact = m.role === 'user' && m.content.json.includes('This session is being continued from a previous conversation');
-                      if (isCompact) {
-                        return (
-                          <div key={key} className="border rounded bg-amber-50/40 dark:bg-amber-500/5 border-amber-300 dark:border-amber-500/40 px-2 py-1 flex items-center gap-2">
-                            <Badge variant="yellow" className="text-xs">/compact</Badge>
-                            <span className="text-[10px] text-muted-foreground">上下文摘要替换历史</span>
-                            <span className="text-[10px] text-muted-foreground ml-auto">{m.content.chars.toLocaleString()} chars</span>
-                          </div>
-                        );
-                      }
                       return (
-                        <div key={key} className="border rounded bg-muted/20 overflow-hidden border-blue-300 dark:border-blue-500/40">
+                        <div key={key} className={`border rounded bg-muted/20 overflow-hidden ${isNew ? "border-blue-300 dark:border-blue-500/40" : "opacity-70"}`}>
                           <span
                             role="button"
                             tabIndex={0}
@@ -161,6 +138,7 @@ export function WireRounds({ taskId }: { taskId: string }) {
                           >
                             <span className="text-[10px] text-muted-foreground">{msgOpen ? "▼" : "▶"}</span>
                             <Badge variant={ROLE_VARIANT[m.role] ?? "gray"} className="text-xs">{m.role}</Badge>
+                            {isNew && <Badge variant="blue" className="text-[10px]">新增</Badge>}
                             <span className="text-[10px] text-muted-foreground">{m.content.chars.toLocaleString()} chars{msgOpen ? "" : " · 点击展开全文"}</span>
                             <span className="text-[10px] text-muted-foreground">{(m.timestamp ?? '').slice(11, 19)}</span>
                           </span>
@@ -187,7 +165,6 @@ export function WireRounds({ taskId }: { taskId: string }) {
                 </div>
               </div>
             )}
-          </div>
           </div>
         );
       })}

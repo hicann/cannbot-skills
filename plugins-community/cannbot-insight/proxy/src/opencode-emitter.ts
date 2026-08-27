@@ -26,7 +26,7 @@
 
 import crypto from 'node:crypto';
 import type { ProxyRecord, AnthropicContentBlock, AnthropicUsage, OpenAIUsage } from './types';
-import { sessionFilePath, subagentFilePath, subagentMetaPath, appendClaudeLine, writeMeta } from './writer';
+import { sessionFilePath, subagentFilePath, subagentMetaPath, sessionMetaPath, appendClaudeLine, writeMeta } from './writer';
 import { proxySourceMarker } from './claude-emitter';
 
 interface OpenAIMessage {
@@ -56,11 +56,26 @@ interface OpenAIRequestBody {
 
 // --- per-proxy-process state (one cpx run = one proxy process) ---
 const prevMsgCount = new Map<string, number>(); // contextKey → last request.messages.length (delta)
+const roundCount = new Map<string, number>(); // contextKey → 已发射的 assistant 轮数（cc-wire-round.roundIndex 权威源）
 const mainXSessionId = new Map<string, string>(); // insight sid → first-seen opencode x-session-id
+const sessionMetaWritten = new Set<string>(); // 主会话 sid（已写 cc-session-meta）
 const subMetaWritten = new Set<string>(); // subIds that already got a meta.json
 // task signature (Task tool input.prompt/description) → dispatch meta, collected
 // from main agent responses so child-session meta.json can link back to the spawn.
 const taskDispatch = new Map<string, { toolUseId: string | null; name: string | null; agentType: string | null }>();
+
+// x_cannbay 命名空间（docs/cannbay-schema-spec.md）：信封外一切扩展的声明式
+// 权威源，双轨期与 legacy 顶层字段并存写 —— 读方一律 x_cannbay 优先。
+function xCannbay(schema: string, data: Record<string, unknown>) {
+  return { schema, version: 1, data };
+}
+
+// opencode 的 wire 输入分类（cc-wire-input.kind）：opencode 无 system-reminder
+// /command-message/injection，只有真实 user 输入与 tool_result 回填。
+function wireInputKind(m: OpenAIMessage): string {
+  if (m.role === 'tool') return 'tool-result';
+  return 'user';
+}
 
 function extractSystemFromMessages(messages: OpenAIMessage[] | undefined): string | null {
   if (!messages) return null;
@@ -158,6 +173,20 @@ export function emit(rec: ProxyRecord): void {
   // Collect Task-tool dispatch meta from main agent responses so child-session
   // meta.json can link back to the spawning tool_use id.
   if (!isSub) {
+    // 主会话首次发射：写 cc-session-meta（文件级 producer/framework/protocol 声明，
+    // spec §4.4 —— 消费侧恢复 Session.framework=opencode）。opencode 无 claude-code
+    // 版本头，ccVersion 留空（framework='opencode' 已足够区分）。
+    if (!sessionMetaWritten.has(mainSid)) {
+      sessionMetaWritten.add(mainSid);
+      writeMeta(sessionMetaPath(mainSid), {
+        x_cannbay: xCannbay('cc-session-meta', {
+          producer: 'cpx',
+          framework: 'opencode',
+          protocol: 'openai',
+          sid: mainSid,
+        }),
+      });
+    }
     const blocks = Array.isArray(rec.response.content) ? rec.response.content as AnthropicContentBlock[] : [];
     for (const b of blocks) {
       if (b.type !== 'tool_use' || !b.name) continue;
@@ -216,6 +245,10 @@ export function emit(rec: ProxyRecord): void {
         },
         timestamp: toISO(rec.receivedAt),
         source: proxySourceMarker(rec.protocol),
+        x_cannbay: xCannbay('cc-wire-input', {
+          roundIndex: roundCount.get(contextKey) ?? 0,
+          kind: 'tool-result',
+        }),
       });
     } else {
       appendClaudeLine(targetFile, {
@@ -223,6 +256,10 @@ export function emit(rec: ProxyRecord): void {
         message: { role: m.role, content: convertUserContent(m.content) },
         timestamp: toISO(rec.receivedAt),
         source: proxySourceMarker(rec.protocol),
+        x_cannbay: xCannbay('cc-wire-input', {
+          roundIndex: roundCount.get(contextKey) ?? 0,
+          kind: wireInputKind(m),
+        }),
       });
     }
   }
@@ -241,7 +278,18 @@ export function emit(rec: ProxyRecord): void {
       const d = taskDispatch.get(t);
       if (d) { meta = d; break; }
     }
-    writeMeta(subagentMetaPath(mainSid, subId), meta);
+    writeMeta(subagentMetaPath(mainSid, subId), {
+      // 顶层双写（spec §4.5，老代码读顶层），x_cannbay 声明式权威源（新代码读 data）
+      toolUseId: meta.toolUseId,
+      name: meta.name,
+      agentType: meta.agentType,
+      x_cannbay: xCannbay('cc-subagent-meta', {
+        toolUseId: meta.toolUseId,
+        name: meta.name,
+        agentType: meta.agentType,
+        subagentSessionId: subId,
+      }),
+    });
   }
 
   // Emit the response as one assistant line. `system` = the opencode system
@@ -255,6 +303,8 @@ export function emit(rec: ProxyRecord): void {
   const contentBlocks = Array.isArray(rec.response.content)
     ? rec.response.content as AnthropicContentBlock[]
     : [];
+  const roundIndex = roundCount.get(contextKey) ?? 0;
+  roundCount.set(contextKey, roundIndex + 1);
 
   appendClaudeLine(targetFile, {
     type: 'assistant',
@@ -276,5 +326,23 @@ export function emit(rec: ProxyRecord): void {
     stopReason: rec.response.stop_reason ?? undefined,
     ttftMs: rec.ttftMs ?? undefined,
     source: proxySourceMarker(rec.protocol),
+    // x_cannbay（cc-wire-round）是以上全部信息的声明式权威源（spec §6 双轨
+    // 并存，读方优先），并新增 legacy 通道没有的：roundIndex / requestParams /
+    // status / protocol。
+    x_cannbay: xCannbay('cc-wire-round', {
+      roundIndex,
+      protocol: 'openai',
+      system: systemText ?? undefined,
+      tools,
+      requestParams: {
+        temperature: body.temperature,
+        maxTokens: body.max_tokens,
+        model: rec.request.model,
+      },
+      latencyMs: rec.latencyMs,
+      ttftMs: rec.ttftMs ?? undefined,
+      stopReason: rec.response.stop_reason ?? undefined,
+      status: rec.response.status,
+    }),
   });
 }

@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+proxy/node_modules
 /.pnp
 .pnp.*
 .yarn/*

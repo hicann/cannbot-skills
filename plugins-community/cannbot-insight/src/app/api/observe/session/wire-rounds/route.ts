@@ -58,60 +58,41 @@ export async function GET(request: NextRequest) {
       // [newFrom..) are NEW in this round (append-only wire history)
       newFrom: number;
       requestMessages: WireMessage[];
-      // 本轮请求的累积消息总数（含历史 + 本轮新增）——只发新增消息体，
-      // totalMessages 给前端显示「共 N 条历史」而不传输全量
-      totalMessages: number;
-      // /compact 边界：本轮首条消息是 continuation 摘要（历史被替换），
-      // 前端据此渲染 compact 分隔标记 + 历史骤降提示
-      compactBoundary: boolean;
-      // compact 前的累积消息数（骤降前 → 后，如 86 → 3）
-      prevTotalMessages: number;
       response: { content: ReturnType<typeof preview>; blocks: string[]; text: string };
     }> = [];
 
-    interface HistEntry { role: string; content: string; timestamp: string | null }
-    const history: HistEntry[] = [];
-    // 只记本轮新增的消息索引范围，不发全量累积历史（O(N²) → O(N)）
-    let roundStartHistLen = 0;
-    // 上一轮结束时的 totalMessages（检测 compact 骤降）
-    let prevTotal = 0;
-    // 本轮在 closeRound 前是否检测到了 compact 边界
-    let compactThisRound = false;
-    let pending: { blocks: unknown[]; model: string | null; usage: unknown; ts: string | null; text: string } | null = null;
+    const history: Array<{ role: string; content: string; timestamp: string | null }> = [];
+    let pending: { msgsSnapshot: WireMessage[]; blocks: unknown[]; model: string | null; usage: unknown; ts: string | null; text: string; xb?: { schema?: string; version?: number; data?: { roundIndex?: number } } } | null = null;
 
-    const newMessagesSince = (from: number): WireMessage[] =>
-      history.slice(from).map(h => ({ role: h.role, content: preview(h.content), timestamp: h.timestamp }));
+    const snapshot = (): WireMessage[] => history.map(h => ({ role: h.role, content: preview(h.content), timestamp: h.timestamp }));
 
     const closeRound = () => {
       if (!pending) return;
-      const newMsgs = newMessagesSince(roundStartHistLen);
+      // roundIndex 权威化（spec §4.1 "wire 轮次对齐权威键"）：x_cannbay.data.roundIndex
+      // 优先；缺失（legacy 文件 / 老 norm）回退数组序号（rounds.length + 1）
+      const xbRound = pending.xb ? (pending.xb.schema === 'cc-wire-round' && pending.xb.version === 1 ? pending.xb.data?.roundIndex : undefined) : undefined;
       rounds.push({
-        index: rounds.length + 1,
+        index: xbRound ?? rounds.length + 1,
         timestamp: pending.ts,
         model: pending.model,
         usage: (pending.usage as { input_tokens?: number; output_tokens?: number } | null) ?? null,
-        newFrom: 0,
-        requestMessages: newMsgs,
-        totalMessages: history.length,
-        compactBoundary: compactThisRound,
-        prevTotalMessages: prevTotal,
+        newFrom: rounds.length === 0 ? 0 : (rounds[rounds.length - 1].requestMessages.length),
+        requestMessages: pending.msgsSnapshot,
         response: {
           content: preview(JSON.stringify(pending.blocks)),
           blocks: pending.blocks.map((b: { type?: string }) => b?.type ?? '?'),
           text: pending.text.slice(0, 300),
         },
       });
-      prevTotal = history.length;
       history.push({ role: 'assistant', content: JSON.stringify(pending.blocks), timestamp: pending.ts });
-      roundStartHistLen = history.length;
-      compactThisRound = false;
       pending = null;
     };
 
     for (const line of lines) {
       if (line.type === 'assistant' && line.message) {
         if (!pending) {
-          pending = { blocks: [], model: line.message.model ?? null, usage: line.message.usage ?? null, ts: line.timestamp ?? null, text: '' };
+          const xb = (line as { x_cannbay?: { schema?: string; version?: number; data?: { roundIndex?: number } } }).x_cannbay;
+          pending = { msgsSnapshot: snapshot(), blocks: [], model: line.message.model ?? null, usage: line.message.usage ?? null, ts: line.timestamp ?? null, text: '', xb };
         }
         const blocks = Array.isArray(line.message.content) ? line.message.content : [];
         pending.blocks.push(...blocks);
@@ -124,23 +105,6 @@ export async function GET(request: NextRequest) {
       }
       closeRound();
       if ((line.type === 'user' || line.type === 'system') && line.message) {
-        // /compact 边界：claude-code 用 continuation 摘要替换整个历史，
-        // 此前的消息从 messages 数组中消失。检测到时重置 history —— 后续
-        // 轮次的累积请求只含摘要 + 新消息，不再重复已被丢弃的旧消息。
-        // continuation 文本可能在第二个 text block（第一个是 system-reminder），
-        // 故逐个 text block 用 startsWith 判断（isContinuationTurn 用 startsWith
-        // 防止误匹配引用 marker 的普通消息）
-        const blocks = Array.isArray(line.message.content)
-          ? (line.message.content as Array<{ type?: string; text?: string }>)
-          : [];
-        const hasContinuation = line.type === 'user' && blocks.some(
-          b => b.type === 'text' && typeof b.text === 'string' && b.text.startsWith('This session is being continued from a previous conversation')
-        );
-        if (hasContinuation) {
-          history.length = 0;
-          roundStartHistLen = 0;
-          compactThisRound = true;
-        }
         history.push({
           role: line.message.role,
           content: JSON.stringify(line.message.content ?? ''),

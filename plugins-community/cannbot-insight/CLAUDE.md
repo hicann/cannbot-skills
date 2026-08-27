@@ -47,7 +47,7 @@ All three modes are pure API clients of the same 15 `/api/observe/*` endpoints:
 | **TUI** | `src/cli/tui/App.tsx` | Ink 7 + React 19 (ESM strict) |
 | **CLI** | `src/cli/index.ts` (Commander) | chalk + string-width + cli-truncate |
 
-Session detail page (`session/[taskId]/`) is `"use client"` with 9 tabs fetching from `/api/observe/*`.
+Session detail page (`session/[taskId]/`) is `"use client"` with 10 tabs（`wireRounds`/`replay` 默认隐藏，URL `?a` 或 `NEXT_PUBLIC_SHOW_ADVANCED_TABS` 展开）fetching from `/api/observe/*`.
 
 ### Key Code Paths
 
@@ -70,6 +70,12 @@ proxy（cpx 捕获）是 insight 的扩展来源，不是核心管线的一部�
   完全不感知。
 - proxy 以后加新扩展字段（`metadata`/`cache`/`retry`/`dedup` 标记…）在同一
   扩展层文件内加，核心不动。
+
+**格式契约**：捕获/导出 jsonl 的扩展字段格式一律参考 `docs/cannbay-schema-spec.md`
+（信封冻结 + `x_cannbay` 命名空间 + `(schema,version)` 声明式分发；加可选字段
+不升版本，改语义/类型必升版本并配 IT 锁）。新增或修改任何扩展字段前先读它；
+规范落地前的现状（legacy 顶层字段 `source`/`duration_ms`/`system`/`tools`）与
+双轨优先级见该文档 §6。
 
 **红线（不得违反）**：
 

@@ -25,6 +25,37 @@ Import SQLite (opencode.db or CANNBot-Insight archive, auto-detected) or JSONL (
 - **Session Compare** — Compare two sessions on tokens, cost, latency, tool calls, and subagents
 - **Audit** — Paste or import the workflow-analysis JSON (produced by the Audit prompt + Claude Code) to render the actual flow chart with per-node problems, the G/S 8-dimension skill-quality board, and optimization priorities. `§N` turn refs in evidence are clickable to jump to that turn; parallel branches (same `parallel` id) render in one row; the 3 slowest nodes are highlighted in red; supports importing JSON from a file and exporting the rendered analysis back to a file. Generation state survives tab switches (cross-tab resume). **v4**: agent-centric 3-dimension audit (completion / efficiency / quality) — deterministically extracts each agent's input/output/envelope first, then LLM judges completion & quality while efficiency is computed from the envelope; renders an agent tree. The agent tree hides fully-passing subagents by default (toggle to reveal them); cross-agent issues and optimization priorities each cite evidence (`agent:<name> #turn`) with clickable turn jumps, and the audit header shows the audit's total token consumption. The Audit tab is split into two sub-tabs: **Workflow audit** (the v1-v4 analysis above) and **Skill audit** — run skill-eval's `audit` against the current session to reconcile real execution vs each invoked skill's SKILL.md (no re-run), vs each dispatched agent's `.md` (scanned from local `AGENTS_SCAN_ROOT`, multi-plugin disambiguated by session coverage), and vs the main agent's workflow-level SKILL.md (`--kind root` — audits the top-level main agent's orchestration; the workflow-skill body is recovered from the session's first user turn, i.e. the injected system prompt, since the main agent typically only dispatches subagents and never invokes a skill itself; surfaced only when that first user turn is non-trivial, ≥500 chars), with per-target summary + a native report view (no iframe): five-state verdict badges, filterable findings (by verdict / category / method / instruction-or-evidence text), multi-transcript by-instruction tables, collapsible per-instruction grouping with FAIL-first sort, a verdict/method legend, and a "open raw skill-eval HTML" escape hatch. A real-time progress bar with percentage streams during the run (parsed from skill-eval's on_progress output); results persist across tab switches; requires the `skill-eval` + `claude` CLIs; `AGENTS_SCAN_ROOT` env (defaults to auto-detected skills-dev repo root) for agent audit.
 
+## Option 0: tgz install (Recommended)
+
+No source clone, no manual env setup, no npm registry config. Install from a distributed `.tgz` package file.
+
+**Install** (after obtaining `cannbot-insight-1.83.0.tgz` from the maintainer / GitCode Release):
+
+```bash
+npm install -g ./cannbot-insight-1.83.0.tgz
+cannbot-insight            # first run: auto-build + migrate (~30s-2min), then start + open browser
+```
+
+Runtime deps (next/prisma/better-sqlite3/...) auto-fetch from the public npmjs registry during install; only the package body is private in the `.tgz`. First install compiles `better-sqlite3` native (~1-2 min, needs `python3`/`make`/`g++` or a prebuild hit). Requires Node.js >= 20.
+
+All writable state lives in `~/.cannbot-insight/` (SQLite DB + `.next/` build cache); the installed package dir stays read-only. Port 21025 by default (auto-finds a free port if occupied).
+
+| Flag | Effect |
+|------|--------|
+| `-a`, `--advanced` | Show advanced tabs (wireRounds/replay) |
+| `-k`, `--kill` | Kill any process on port 21025, reuse it |
+| `-f`, `--fresh` | Clear `.next` build cache and rebuild |
+
+CLI subcommands pass straight through (same as Option 2, but no `cd`/`npx tsx` prefix):
+
+```bash
+cannbot-insight upload --file ~/.local/share/opencode/opencode.db --list
+cannbot-insight sessions
+cannbot-insight --help
+```
+
+**Requires Node.js >= 20.** Python 3 is optional (auto-detected): if present, the smart-agent backend (breather/v2 analysis) starts on port 21026; if absent, it gracefully degrades and the rest works normally.
+
 ## Option 1: Web UI
 
 **Requires Node.js >= 20.x** (v18.19.x fails to install better-sqlite3 / Prisma 6). If you have nvm, `start.sh` auto-switches to Node 20 LTS.
@@ -43,7 +74,7 @@ Linux (for Windows systems, use start.bat instead):
 
 Open `http://localhost:21025`. After importing a log file, click a session to explore 9 analysis tabs.
 
-Web UI also supports: exporting sessions to standalone SQLite or hierarchical Markdown; uploading sessions to CANNBay v2 (an atomgit dataset repo) with a description dialog. Uploads use the proxy-capture claude-jsonl folder format (main session + subagents); opencode sessions are exported to jsonl from the DB automatically. Every upload passes mandatory data governance (secret redaction + residue circuit-breaker — no keys leave the public repo). CANNBay listing/download uses a partial-clone (`--filter=blob:none`) persistent mirror: listing reads metadata only (instant), importing one session fetches just its blobs on demand — fast even with thousands of sessions. The legacy .db-snapshot upload/parse (gitcode CANNBay) remains available at the API level for reading historical data, hidden from the UI.
+Web UI also supports: exporting sessions to standalone SQLite or hierarchical Markdown; uploading sessions to CANNBay v2 (an atomgit dataset repo) with a description dialog. Uploads use the proxy-capture claude-jsonl folder format (main session + subagents); opencode sessions are exported to jsonl from the DB automatically. Every upload passes mandatory data governance (secret redaction + residue circuit-breaker — no keys leave the public repo). CANNBay listing/download uses a partial-clone (`--filter=blob:none`) persistent mirror: listing reads metadata only (instant), importing one session fetches just its blobs on demand — fast even with thousands of sessions. The legacy .db-snapshot upload/parse (gitcode CANNBay) remains available at the API level for reading historical data, hidden from the UI. All upload/capture/export jsonl now also carries a declarative `x_cannbay` extension namespace (envelope frozen, `{schema, version, data}` pockets — spec: docs/cannbay-schema-spec.md) with 6 export losses fixed (reasoningTokens/ttftMs/ToolCall details/framework/model params/wire status); a column-exhaustive round-trip IT proves DB → export → re-import loses nothing.
 
 ## Option 2: CLI Upload + Web Analysis
 

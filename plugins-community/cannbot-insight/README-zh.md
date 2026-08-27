@@ -25,6 +25,37 @@ LLM 编码 Agent 的 Session 级可观测工具。辅助长上下文分析、模
 - **Session 对比** — 对比两个 session 的 token、费用、耗时、工具调用和 subagent
 - **Audit** — 粘贴或从文件导入 workflow 分析 JSON（由 Audit 提示词 + Claude Code 产出），渲染实际流程框图 + 每节点问题、G/S 八维 skill 质量看板、优化优先级。证据里的 `§N` turn 引用可点击跳转到对应 turn；并行分支（同 `parallel` id）渲染为同一行；耗时最长的 3 个节点标红；支持从文件导入 JSON，也可把渲染好的分析导出回文件。生成状态跨 tab 切换不丢失（可恢复）。**v4**：agent 中心三维度审计（功能完成 / 开发效率 / 开发质量），先确定性提取每个 agent 的输入/输出/信封，再由 LLM 评完成度与质量、效率维度由信封确定性计算，渲染 agent 树。agent 树默认隐藏全部通过的子 agent（勾选开关才显示）；跨 agent 问题与优化优先级每项都给出证据（`agent:<name> #turn`，可点击跳转），审计头部展示本次审计消耗的 token 数。Audit tab 拆两个子 tab：**Workflow audit**（上述 v1-v4 分析）与 **Skill audit**——对当前 session 跑 skill-eval 的 `audit`，对账真实执行 vs 每个被调用 skill 的 SKILL.md（不 re-run），以及 vs 每个被 dispatch 的 agent 的 `.md`（从本地 `AGENTS_SCAN_ROOT` 扫描，多插件按 session 覆盖率消歧），以及 vs 主 agent 的 workflow 级 SKILL.md（`--kind root`——切顶层主 agent 作用域审主 agent 编排；主 agent 通常只 dispatch 子 agent、不 invoke skill，故 workflow 声明从 session 首条 user turn 的注入系统提示恢复；仅当首条 user turn 内容 ≥500 字时显示该目标），按 target 出 summary + 原生报告视图（非 iframe）：五态 verdict 徽章、findings 可过滤（按 verdict / 类别 / 方法 / 指令或证据文本）、多 transcript 指令级聚合表、按指令可折叠分组（FAIL 优先排序）、verdict/method 图例、保留"在新页打开原始 HTML"逃生口。运行中有实时进度条 + 百分比（解析 skill-eval on_progress 输出）；结果跨 tab 切换不丢失；需装 `skill-eval` + `claude` CLI；agent 对账需 `AGENTS_SCAN_ROOT` env（默认自动探测 skills-dev 仓库根）。
 
+## 方式零：tgz 安装（推荐）
+
+无需克隆源码、无需手工配环境、无需 npm registry。从分发的 `.tgz` 包文件安装。
+
+**安装**（从维护者 / GitCode Release 获取 `cannbot-insight-1.83.0.tgz` 后）：
+
+```bash
+npm install -g ./cannbot-insight-1.83.0.tgz
+cannbot-insight            # 首次：自动 build + migrate（约 30s-2min），随后启动 + 开浏览器
+```
+
+运行时依赖（next/prisma/better-sqlite3 等）在安装时自动从公共 npmjs 拉取，只有包本体在私有 `.tgz` 里。首次安装会编译 `better-sqlite3` 原生模块（约 1-2 分钟，需 `python3`/`make`/`g++` 或 prebuild 命中）。需 Node.js >= 20。
+
+所有可写状态集中在 `~/.cannbot-insight/`（SQLite 库 + `.next/` 构建缓存），安装包目录保持只读。默认端口 21025（被占则自动找空闲端口）。
+
+| 标志 | 作用 |
+|------|------|
+| `-a`, `--advanced` | 显示高级 tab（wireRounds/replay） |
+| `-k`, `--kill` | 杀掉占用 21025 端口的进程，复用该端口 |
+| `-f`, `--fresh` | 清空 `.next` 构建缓存重新构建 |
+
+CLI 子命令直接透传（同方式二，但无需 `cd`/`npx tsx` 前缀）：
+
+```bash
+cannbot-insight upload --file ~/.local/share/opencode/opencode.db --list
+cannbot-insight sessions
+cannbot-insight --help
+```
+
+**需 Node.js >= 20。** Python 3 为可选项（自动探测）：存在则启动 smart-agent 后端（breather/v2 分析，端口 21026）；缺失则静默降级，其余功能正常。
+
 ## 方式一：Web UI
 
 **需要 Node.js >= 20.x**（v18.19.x 无法安装 better-sqlite3 / Prisma 6）。如果有 nvm，`start.sh` 会自动切换到 Node 20 LTS。
@@ -42,7 +73,7 @@ Linux系统（Windows系统请使用start.bat代替）：
 
 浏览器打开 `http://localhost:21025`。导入日志文件后，点击 session 进入 9 个分析 Tab。
 
-Web UI 还支持：导出 session 为独立 SQLite 或层级 Markdown；上传 session 到 CANNBay v2（atomgit 数据集仓，带提交信息对话框）。上传格式为 proxy 捕获的 claude-jsonl 文件夹（主会话 + subagents），opencode 会话自动从 DB 导出 jsonl；上传前强制数据治理（密钥清洗 + 残留熔断，密钥不出公开仓）。CANNBay 列表/下载走 partial clone（`--filter=blob:none`）持久镜像：列表只读元数据秒级返回，导入单条才按需下载 blob，千级会话仓库也不变慢。旧版 .db 快照上传/解析（gitcode CANNBay）后端保留，用于读取历史数据，界面不再展示。
+Web UI 还支持：导出 session 为独立 SQLite 或层级 Markdown；上传 session 到 CANNBay v2（atomgit 数据集仓，带提交信息对话框）。上传格式为 proxy 捕获的 claude-jsonl 文件夹（主会话 + subagents），opencode 会话自动从 DB 导出 jsonl；上传前强制数据治理（密钥清洗 + 残留熔断，密钥不出公开仓）。CANNBay 列表/下载走 partial clone（`--filter=blob:none`）持久镜像：列表只读元数据秒级返回，导入单条才按需下载 blob，千级会话仓库也不变慢。旧版 .db 快照上传/解析（gitcode CANNBay）后端保留，用于读取历史数据，界面不再展示。 所有上传/捕获/导出 jsonl 同时携带声明式 `x_cannbay` 扩展命名空间（信封冻结 + `{schema, version, data}` 口袋，规范见 docs/cannbay-schema-spec.md），并修复 6 项导出丢失（reasoningTokens/ttftMs/ToolCall 明细/framework/模型参数/wire 状态码）；列清单对账 round-trip 集成测试证明 DB → 导出 → 再导入零丢失。
 
 ## 方式二：CLI 上传 + Web 分析
 

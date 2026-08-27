@@ -29,6 +29,8 @@ export interface ImportHistoryEntry {
   query: string | null
   filePath: string | null
   sourceType?: string
+  framework?: string | null
+  version?: string | null
 }
 
 const STORAGE_KEY = "cannbot-import-history"
@@ -83,9 +85,21 @@ export function ImportHistory() {
   const [history, setHistory] = useState<ImportHistoryEntry[] | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [deletingAll, setDeletingAll] = useState(false)
+  // taskId → DB 里的 {framework, version}（导入事实源）。Recent Imports 的
+  // 类型徽标以 DB 为准 —— localStorage 条目可能由旧版前端写入（缺 framework
+  // 字段），挂载时拉取会话列表自愈；DB 查不到的条目（已删除会话）回退条目
+  // 自带字段 → 再回退路径启发式。
+  const [dbMeta, setDbMeta] = useState<Map<string, { framework: string | null; version: string | null }>>(new Map())
 
   useEffect(() => {
     setHistory(getImportHistory())
+    fetch("/api/observe/data?limit=500")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const items = (d?.items ?? []) as Array<{ taskId: string; framework: string | null; version: string | null }>
+        setDbMeta(new Map(items.map(i => [i.taskId, { framework: i.framework, version: i.version }])))
+      })
+      .catch(() => { /* 离线/失败时走条目字段回退 */ })
   }, [])
 
   if (history === null) {
@@ -164,29 +178,43 @@ export function ImportHistory() {
           </TableHeader>
           <TableBody>
             {history.map((entry, i) => {
-              // proxy 捕获也走 claude-jsonl 入库，但会话可能属于 opencode
-              // （cpx-ses_ 前缀）—— 徽章按 agent 归属 + proxy 来源标注
+              // 类型徽标事实源优先级：DB（挂载时拉取）> 条目自带字段（新前端
+              // 写入）> 路径启发式（历史 localStorage 兜底）。
+              const db = dbMeta.get(entry.taskId)
+              const fwSource = db?.framework ?? entry.framework ?? null
+              const vSource = db?.version ?? entry.version ?? null
+              const knownFramework = fwSource === "opencode" || fwSource === "claude-code" || fwSource === BRAND_SOURCE_TYPE
+                ? fwSource
+                : null
+              const isProxy = vSource?.endsWith("-proxy") ?? false
               const isProxyCapture = entry.sourceType === "claude-jsonl" && (entry.filePath?.includes("/proxy/") ?? false)
-              const isOpencodeCapture = isProxyCapture && /cpx-ses_[^/]*\.jsonl$/.test(entry.filePath ?? "")
+              const legacyOpencode = isProxyCapture && /cpx-ses_[^/]*\.jsonl$/.test(entry.filePath ?? "")
+              const showOpencode = knownFramework === "opencode" || (!knownFramework && legacyOpencode)
+              const showProxy = knownFramework ? isProxy : isProxyCapture
               return (
               <TableRow key={`${entry.taskId}-${i}`}>
                 <TableCell className="max-w-[400px] truncate text-xs font-mono text-muted-foreground" title={entry.filePath ?? ""}>{entry.filePath ?? "—"}</TableCell>
                 <TableCell className="max-w-[260px] truncate text-xs" title={entry.query ?? entry.taskId}>{entry.query ?? entry.taskId}</TableCell>
                 <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(entry.importedAt)}</TableCell>
                 <TableCell className="text-xs">
-                  {entry.sourceType === "opencode-db" ? (
+                  {knownFramework === BRAND_SOURCE_TYPE ? (
+                    <Badge variant="purple">{BRAND_NAME}</Badge>
+                  ) : knownFramework ? (
+                    <span className="inline-flex items-center gap-1">
+                      {showOpencode ? <Badge variant="blue">OpenCode</Badge> : <Badge variant="orange">Claude</Badge>}
+                      {showProxy && <Badge variant="yellow">proxy</Badge>}
+                    </span>
+                  ) : entry.sourceType === "opencode-db" ? (
                     <Badge variant="blue">OpenCode</Badge>
                   ) : entry.sourceType === "claude-jsonl" ? (
                     isProxyCapture ? (
                       <span className="inline-flex items-center gap-1">
-                        {isOpencodeCapture ? <Badge variant="blue">OpenCode</Badge> : <Badge variant="orange">Claude</Badge>}
+                        {legacyOpencode ? <Badge variant="blue">OpenCode</Badge> : <Badge variant="orange">Claude</Badge>}
                         <Badge variant="yellow">proxy</Badge>
                       </span>
                     ) : (
                       <Badge variant="orange">Claude</Badge>
                     )
-                  ) : entry.sourceType === BRAND_SOURCE_TYPE ? (
-                    <Badge variant="purple">{BRAND_NAME}</Badge>
                   ) : "—"}
                 </TableCell>
                 <TableCell className="text-xs">

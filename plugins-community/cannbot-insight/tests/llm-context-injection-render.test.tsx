@@ -65,8 +65,17 @@ function wireProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('LlmContextView wire-fidelity display', () => {
+  // 消息体默认折叠（点击标题行展开）—— 内容断言前先展开目标消息
+  function expandMessage(container: HTMLElement, tokenLabel: string) {
+    const header = Array.from(container.querySelectorAll('[role="button"]'))
+      .find(el => el.textContent?.includes(tokenLabel));
+    expect(header, `header with ${tokenLabel} should exist`).toBeDefined();
+    act(() => { header!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  }
+
   it('user message renders the reminder as a separate sub-block above the prompt', () => {
     const { container } = renderCollect(wireProps());
+    expandMessage(container, '1.8kt');
     const h = container.innerHTML;
     // sub-block has its own label and both parts remain present exactly once
     expect(h).toContain('system-reminder');
@@ -80,8 +89,10 @@ describe('LlmContextView wire-fidelity display', () => {
   });
 
   it('wire content appears EXACTLY ONCE, in its original message (no extracted panels)', () => {
-    const { html } = renderCollect(wireProps());
-    const h = html();
+    const { container } = renderCollect(wireProps());
+    expandMessage(container, '1.8kt');
+    expandMessage(container, '2.0kt');
+    const h = container.innerHTML;
     // skills list: once, inside the expanded system message
     expect(h.split('The following skills are available').length - 1).toBe(1);
     // memory (claudeMd): once, inside the reminder of the user message
@@ -120,13 +131,15 @@ describe('LlmContextView wire-fidelity display', () => {
     expect(roleBadges).toEqual(['user', 'system']);
   });
 
-  it('collapsing a message hides its content; expanding restores verbatim', () => {
+  it('messages start collapsed; expanding reveals verbatim content, collapsing hides it', () => {
     const { container } = renderCollect(wireProps());
     const sysHeader = Array.from(container.querySelectorAll('[role="button"]'))
       .find(el => el.textContent?.includes('2.0kt'));
-    act(() => { sysHeader!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 默认折叠：内容不可见
     expect(container.innerHTML.split('The following skills are available').length - 1).toBe(0);
     act(() => { sysHeader!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.innerHTML.split('The following skills are available').length - 1).toBe(1);
+    act(() => { sysHeader!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.innerHTML.split('The following skills are available').length - 1).toBe(0);
   });
 });

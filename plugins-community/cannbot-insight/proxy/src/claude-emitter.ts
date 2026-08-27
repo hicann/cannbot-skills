@@ -25,7 +25,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ProxyRecord, Protocol, AnthropicContentBlock, AnthropicUsage, OpenAIUsage } from './types';
-import { sessionFilePath, subagentFilePath, subagentMetaPath, appendClaudeLine, writeMeta, PROXY_DIR } from './writer';
+import { sessionFilePath, sessionMetaPath, subagentFilePath, subagentMetaPath, appendClaudeLine, writeMeta, PROXY_DIR } from './writer';
+
+// x_cannbay 命名空间（docs/cannbay-schema-spec.md）：claude 原生字段是冻结
+// 信封，扩展数据进带 (schema,version) 声明的口袋。双轨期 legacy 顶层字段
+// （source/duration_ms/system/tools/ttftMs/stopReason/version/deduped/
+// originalChars）并存写 —— 读方一律 x_cannbay 优先。
+function xCannbay(schema: string, data: Record<string, unknown>) {
+  return { schema, version: 1, data };
+}
 
 // Hot switch: `cpx config dedup on|off` takes effect on a LIVE session. The
 // config file is re-read on every emit (emit runs once per wire record —
@@ -65,6 +73,8 @@ interface RequestBody {
   messages?: { role: string; content?: string | AnthropicContentBlock[] }[];
   system?: string | AnthropicContentBlock[];
   tools?: unknown;
+  temperature?: number;
+  max_tokens?: number;
 }
 
 function extractSystemText(system: string | AnthropicContentBlock[] | undefined): string | null {
@@ -135,6 +145,9 @@ const emittedInjections = new Map<string, Set<string>>();
 const agentDispatch = new Map<string, { toolUseId: string | null; name: string | null; type: string | null }>();
 const subIdForTask = new Map<string, string>();
 const metaWritten = new Set<string>();
+// contextKey → 已发出的 assistant 行数（= 该上下文的 wire 轮次号，cc-wire-round.roundIndex）
+const roundCount = new Map<string, number>();
+const sessionMetaWritten = new Set<string>();
 
 function subIdFor(task: string): string {
   let id = subIdForTask.get(task);
@@ -202,6 +215,18 @@ export function emit(rec: ProxyRecord): void {
   if (!isSub) {
     contextKey = 'main';
     targetFile = sessionFilePath(sid);
+    if (!sessionMetaWritten.has(sid)) {
+      sessionMetaWritten.add(sid);
+      writeMeta(sessionMetaPath(sid), {
+        x_cannbay: xCannbay('cc-session-meta', {
+          producer: 'cpx',
+          framework: rec.protocol === 'openai' ? 'opencode' : 'claude-code',
+          protocol: rec.protocol,
+          ccVersion: ccVersionFromSystem(body.system),
+          sid,
+        }),
+      });
+    }
   } else {
     const task = subagentTask(rec);
     const subId = task ? subIdFor(task) : 'sub-unknown';
@@ -214,6 +239,12 @@ export function emit(rec: ProxyRecord): void {
         toolUseId: meta?.toolUseId ?? null,
         name: meta?.name ?? null,
         agentType: meta?.type ?? null,
+        x_cannbay: xCannbay('cc-subagent-meta', {
+          toolUseId: meta?.toolUseId ?? null,
+          name: meta?.name ?? null,
+          agentType: meta?.type ?? null,
+          subagentSessionId: subId,
+        }),
       });
     }
   }
@@ -267,6 +298,11 @@ export function emit(rec: ProxyRecord): void {
         deduped: true,
         originalChars: injectionText!.length,
         source: proxySourceMarker(rec.protocol),
+        x_cannbay: xCannbay('cc-wire-input', {
+          roundIndex: roundCount.get(contextKey) ?? 0,
+          kind: 'dedup-placeholder',
+          dedup: { originalChars: injectionText!.length, fingerprint },
+        }),
       });
       counts.set(hash, occ + 1);
       continue;
@@ -278,6 +314,10 @@ export function emit(rec: ProxyRecord): void {
       message: { role: m.role, content: m.content ?? '' },
       timestamp: toISO(rec.receivedAt),
       source: proxySourceMarker(rec.protocol),
+      x_cannbay: xCannbay('cc-wire-input', {
+        roundIndex: roundCount.get(contextKey) ?? 0,
+        kind: wireInputKind(m),
+      }),
     });
     counts.set(hash, occ + 1);
     if (fingerprint) injections.add(fingerprint);
@@ -293,7 +333,11 @@ export function emit(rec: ProxyRecord): void {
   // WITHOUT an OCP-bending post-write) + `stopReason` (adapter reads →
   // finish_reason → Turn.finishReason). `ttftMs` has no pipeline field, so it
   // stays a pure extension field → readWireEnrichments → turns API override.
+  // x_cannbay（cc-wire-round）是以上全部信息的声明式权威源（双轨并存，读方优先），
+  // 并新增 legacy 通道没有的：roundIndex / requestParams / status。
   const contentBlocks = Array.isArray(rec.response.content) ? rec.response.content as AnthropicContentBlock[] : [];
+  const roundIndex = roundCount.get(contextKey) ?? 0;
+  roundCount.set(contextKey, roundIndex + 1);
   appendClaudeLine(targetFile, {
     type: 'assistant',
     message: {
@@ -311,5 +355,32 @@ export function emit(rec: ProxyRecord): void {
     stopReason: rec.response.stop_reason ?? undefined,
     ttftMs: rec.ttftMs ?? undefined,
     source: proxySourceMarker(rec.protocol),
+    x_cannbay: xCannbay('cc-wire-round', {
+      roundIndex,
+      protocol: rec.protocol,
+      system: body.system ?? undefined,
+      tools: Array.isArray(body.tools) ? body.tools : undefined,
+      requestParams: {
+        temperature: body.temperature,
+        maxTokens: body.max_tokens,
+        model: rec.request.model,
+      },
+      latencyMs: rec.latencyMs,
+      ttftMs: rec.ttftMs ?? undefined,
+      stopReason: rec.response.stop_reason ?? undefined,
+      status: rec.response.status,
+      ccVersion: ccVersionFromSystem(body.system) ?? undefined,
+    }),
   });
+}
+
+// cc-wire-input.kind：结构化分类替代读方的内容文本嗅探。
+function wireInputKind(m: { role: string; content?: string | AnthropicContentBlock[] }): string {
+  if (m.role === 'system') {
+    return isInjectionText(textOf(m.content) ?? '') ? 'injection' : 'system';
+  }
+  if (Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result')) return 'tool-result';
+  const text = (typeof m.content === 'string' ? m.content : textOf(m.content) ?? '').trimStart();
+  if (text.startsWith('<command-name>') || text.startsWith('<command-message>') || text.startsWith('<local-command')) return 'command-message';
+  return 'user';
 }
