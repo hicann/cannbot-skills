@@ -34,8 +34,8 @@ on-tool-call:
       if not sessions:
           sys.exit(0)
 
-    latest_session = sessions[0]
-    state_file = latest_session / "workflow_state.json"
+      latest_session = sessions[0]
+      state_file = latest_session / "workflow_state.json"
 
       if not state_file.exists():
           sys.exit(0)
