@@ -93,7 +93,7 @@ msopgen gen -i <UserOutputDir>/<op>.json -c ai_core-<soc> -lan cpp -out <VerifyP
 ./build_out/custom_opp_*.run
 ```
 
-不要追加 `--quiet` / `--install`。安装失败不得进入阶段 7；保留安装日志，修复环境或包结构后重试。见 [R-059](references/rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包)。
+不要追加 `--quiet` / `--install`。安装失败不得进入阶段 7；保留安装日志，修复环境或包结构后重试。见 [R-059](references/rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包)。
 
 ### 阶段 7：ACLNN 二进制一致性验证
 

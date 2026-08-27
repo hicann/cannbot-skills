@@ -17,7 +17,7 @@
   - [ ] **阶段 3**:`<UserOutputDir>/<op>.json` 存在,顶层非空数组,与 OpDef 契约表逐列一致 — [R-043](rules.md#r-043opjson-顶层数组--op-大驼峰) / [R-046](rules.md#r-046json-与-opdef-逐列严格一致)
   - [ ] **阶段 4**:`<VerifyProjectDir>/{CMakeLists.txt,CMakePresets.json,build.sh,op_host/,op_kernel/}` 齐全;msopgen 生成的合并 `<VerifyProjectDir>/op_host/<op>.cpp` 已被删除
   - [ ] **阶段 5**:`<VerifyProjectDir>/build_out/custom_opp_*.run` 产出(或 msopgen 不可用 → 明确告知用户已出具人工验证手册 + 本次未做编译验证 / 未安装 / 未做二进制一致性验证)
-  - [ ] **阶段 6**:已直接执行 `<VerifyProjectDir>/build_out/custom_opp_*.run`,保留 `install_custom_opp.log` — [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包)
+  - [ ] **阶段 6**:已直接执行 `<VerifyProjectDir>/build_out/custom_opp_*.run`,保留 `install_custom_opp.log` — [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包)
   - [ ] **阶段 7**:`<VerifyProjectDir>/example/{main.cpp,CMakeLists.txt,input/,output/}` 齐全;已编译运行 `opapi_test`,输出写入 `example/aclnn_output/`,并与 `example/output/` 逐 `.bin` 二进制一致 — [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)
 - [ ] 交付完成前无任一"跳步"模式:
   - grep:`[ -f "${USER_DIR}/${OP_NAME,,}.json" ]` 必须为真(否则没过阶段 3)
@@ -169,9 +169,9 @@
 
 - [ ] 环境探测已执行(`command -v msopgen` 等六条路径) — [R-047](rules.md#r-047优先探测-msopgen不可用则降级人工手册)
 - [ ] 若 msopgen 可用:`<VerifyProjectDir>` 与 `<UserOutputDir>` 同级,未放进 UserOutputDir 内部,未用 `/tmp`,带时间戳 — [R-048](rules.md#r-048验证工程目录与用户输出同级)
-- [ ] 进编译循环前已跑 OpDef 静态预检([build-verify.md § B.3](build-verify.md#b3-编译前-opdef-静态预检-r-049)),全部通过 — [R-049](rules.md#r-049编译循环前先跑-opdef-静态预检)
+- [ ] 进编译循环前已跑 OpDef 静态预检([build-verify.md § B.3](build-verify.md#b3-编译前-opdef-静态预检r-049)),全部通过 — [R-049](rules.md#r-049编译循环前先跑-opdef-静态预检)
 - [ ] 编译循环最多 5 轮,按错误关键字 → 修复动作 → 规则引用表修复,优先改 `<UserOutputDir>` 再同步 — [R-050](rules.md#r-050编译循环最多-5-轮--错误映射表)
-- [ ] 编译成功后直接执行 `.run` 安装包,命令未追加 `--quiet` / `--install`,安装日志保留 — [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包)
+- [ ] 编译成功后直接执行 `.run` 安装包,命令未追加 `--quiet` / `--install`,安装日志保留 — [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包)
 - [ ] 阶段 7 harness 位于 `<VerifyProjectDir>/example/`,复用原直调 `input/` / `output/`,未随机生成输入,未覆盖原直调 `output/` — [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)
 - [ ] `example/main.cpp` 中 aclnn 接口名按算子名拼接(`<Op>` → `aclnn<Op>GetWorkspaceSize` / `aclnn<Op>`),输入输出 tensor 与 attr 顺序来自 OpDef 契约表和原直调代码 — [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)
 - [ ] `example/CMakeLists.txt` 生成 `opapi_test`,并能按 `cd example && mkdir -p build && cd build && cmake ../ -DCMAKE_CXX_COMPILER=g++ -DCMAKE_SKIP_RPATH=TRUE && make && cd bin && ./opapi_test` 跑通 — [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)
@@ -212,7 +212,7 @@
 | 交付里出现 `op_host/<op>.cpp`(把 OpDef + InferShape + Tiling 揉一起) | [R-056](rules.md#r-056host-必须严格拆成-4-个文件禁止合并单-cpp) | 按 § B.2.1 拆成 `_def.cpp` / `_tiling.cpp` / `_infershape.cpp`;删原合并文件 |
 | 没生成 `<op>.json`,跳到只交 op_host/op_kernel | [R-057](rules.md#r-057七阶段严格流程不得跳步或合并) | 回阶段 3:按 OpDef 契约表手写 JSON,再跑阶段 4 |
 | 生成了代码但**没跑** `msopgen gen` / `bash build.sh` / `.run` 安装 / 二进制一致性验证 | [R-057](rules.md#r-057七阶段严格流程不得跳步或合并) | 回阶段 4 / 5 / 6 / 7 实际执行;msopgen 不可用才能走 § D 人工手册 |
-| `.run` 已生成但未安装或安装失败 | [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包) | 直接执行 `./build_out/custom_opp_*.run`,保留 `install_custom_opp.log`;失败先修环境/权限/旧包冲突 |
+| `.run` 已生成但未安装或安装失败 | [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包) | 直接执行 `./build_out/custom_opp_*.run`,保留 `install_custom_opp.log`;失败先修环境/权限/旧包冲突 |
 | aclnn 输出文件缺失或与原直调输出二进制不一致 | [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证) / [R-054](rules.md#r-054kernel-计算逻辑原样迁移禁止改写最高优先级凌驾于任何风格偏好) | 先核对 `example/` 下 input/output 是否来自原直调,再核对 harness dtype/shape/attr 和 aclnn 接口参数,最后按 B.3.0 回查 kernel 保真;禁止容差放行 |
 | `<VerifyProjectDir>` == `<UserOutputDir>` / 互为父子 / 落在 `/tmp` | [R-058](rules.md#r-058useroutputdir-与-verifyprojectdir-必须独立共存禁止清理验证目录) | 停手,重新挑一个与 UserOutputDir 并列的绝对路径(加时间戳),从 B.1 重跑 |
 | 验证目录被 `rm -rf` / 被建议清理 | [R-058](rules.md#r-058useroutputdir-与-verifyprojectdir-必须独立共存禁止清理验证目录) | 改为 `mv "${VERIFY_DIR}" "${VERIFY_DIR}.<reason>_$(date +%s)"` 备份;最终汇报同时列出 `<UserOutputDir>` 和 `<VerifyProjectDir>` 两个路径 |

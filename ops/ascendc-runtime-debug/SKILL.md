@@ -34,7 +34,7 @@ description: Ascend C 算子运行时错误调试技能。用于处理算子运�
 
 ## 未知错误码处理
 
-遇到速查表中未列出的错误码时，见 [debug_workflow.md](references/debug_workflow.md#未知错误码处理)
+遇到速查表中未列出的错误码时，见 [debug_workflow.md](references/debug_workflow.md#未知错误码处理兜底方案)
 
 ## 调试工具速查
 

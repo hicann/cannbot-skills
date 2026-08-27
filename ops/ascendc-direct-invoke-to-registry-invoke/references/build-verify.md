@@ -12,7 +12,7 @@
                             不可用 ──→ (D) 降级:输出人工验证手册
 ```
 
-涉及规则:[R-047](rules.md#r-047优先探测-msopgen不可用则降级人工手册), [R-048](rules.md#r-048验证工程目录与用户输出同级), [R-049](rules.md#r-049编译循环前先跑-opdef-静态预检), [R-050](rules.md#r-050编译循环最多-5-轮--错误映射表), [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包), [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)。
+涉及规则:[R-047](rules.md#r-047优先探测-msopgen不可用则降级人工手册), [R-048](rules.md#r-048验证工程目录与用户输出同级), [R-049](rules.md#r-049编译循环前先跑-opdef-静态预检), [R-050](rules.md#r-050编译循环最多-5-轮--错误映射表), [R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包), [R-060](rules.md#r-060阶段-7-必须生成-example-并用原直调输入做-aclnn-二进制一致性验证)。
 
 ---
 
@@ -328,7 +328,7 @@ done
 
 ---
 
-### B.6 阶段 6:安装算子包([R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp-run-安装算子包))
+### B.6 阶段 6:安装算子包([R-059](rules.md#r-059阶段-6-必须直接执行-custom_opp_run-安装算子包))
 
 编译成功后必须直接执行 `.run` 安装包。阶段 6 失败不得进入阶段 7。
 
@@ -452,7 +452,7 @@ agent 最终回复**必须**包含以下**双目录交付清单**([R-058]):
 - **`<VerifyProjectDir>`(交付件 2 / 编译证据链)**:绝对路径 + `build_out/custom_opp_*.run` 的完整路径;**明确告知用户此目录已原封保留**,可随时 `cd <VerifyProjectDir> && bash build.sh` 复现编译;**禁止**建议用户清理此目录([R-058])
 - **阶段 6 安装结果**:`install_custom_opp.log` 路径 + 安装命令返回码
 - **阶段 7 一致性结果**:`example/` 路径 + `example/build/bin/opapi_test` 路径 + `example/aclnn_output/` 路径 + `example/binary_compare.log` 路径 + 是否所有 `.bin` byte-level identical
-- 本轮自动修复**实际触发**的规则 / 案例清单(如"触发了 [Case 3](cases.md#case-3):把 `TILING_KEY_IS(SCH_MODE_X)` 改成字面量"),便于用户复盘
+- 本轮自动修复**实际触发**的规则 / 案例清单(如"触发了 [Case 3](cases.md#case-3tiling_key_is-用数字字面量不用-constexpr):把 `TILING_KEY_IS(SCH_MODE_X)` 改成字面量"),便于用户复盘
 - 若修复过程中产生过 `${VERIFY_DIR}.badstructure_*` / `${VERIFY_DIR}.bak_*` 等备份目录,一并列出(也属交付证据的一部分)
 - 阶段 7 harness 仅用于二进制一致性验证([R-051](rules.md#r-051skill-只生成阶段-7-二进制一致性验证-harness)),不扩展为泛化精度测试框架
 

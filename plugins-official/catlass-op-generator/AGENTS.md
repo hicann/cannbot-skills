@@ -242,7 +242,7 @@ Step 7: 完成汇报
 #### Step 6：性能验收
 
 **触发条件**：审查通过（PASS 或 PASS WITH NOTES）
-**调用模板**：[Step 6](workflows/task-prompts.md#step-6性能验收) — 读取此链接的完整内容作为 prompt
+**调用模板**：[Step 6](workflows/task-prompts.md#step-6性能验收--调优) — 读取此链接的完整内容作为 prompt
 
 #### Step 7：完成
 

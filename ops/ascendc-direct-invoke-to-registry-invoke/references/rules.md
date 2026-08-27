@@ -404,7 +404,7 @@
 - **展开**:
   - 允许产物仅限验证闭环需要的 `example/main.cpp` / `run_binary_compare.sh` / `CMakeLists.txt` 这类最小文件,调用方式参考 msOpGen 工程 `example/` 下 ACL 初始化、读 bin、创建 `aclTensor`、两段式 `aclnnXxxGetWorkspaceSize` + `aclnnXxx`、同步、写 bin。
   - 禁止扩展成随机数据生成、容差比对、torch/numpy 参考实现、性能测试或覆盖率测试。阶段 7 的判据只有 byte-level 相等。
-- **适用位置**:[build-verify.md § B.7](build-verify.md#b7-阶段-7二进制一致性验证)
+- **适用位置**:[build-verify.md § B.7](build-verify.md#b7-阶段-7二进制一致性验证r-060)
 
 ### R-052:本 skill 不生成/不修改 `main` / `ReadConfig` / `KernelCall`
 
@@ -478,7 +478,7 @@
      done
      ```
 - **校验失败处理**:**不要**改这个脚本去"适配",**也不要**小修小补迁移结果。回到 `.asc`,从原类开始**整段重搬**。连续两次仍失败 → 告诉用户 `.asc` 结构需要先分段,手工协助。
-- **适用位置**:[build-verify.md § B.3](build-verify.md#b3-编译前-opdef-静态预检-r-049) 之前;独立成门 § B.3.1
+- **适用位置**:[build-verify.md § B.3](build-verify.md#b3-编译前-opdef-静态预检r-049) 之前;独立成门 § B.3.1
 - **关联**:[R-049], [R-054]
 
 ### R-056:host 必须严格拆成 4 个文件,**禁止**合并单 cpp
@@ -511,7 +511,7 @@
       && { echo "[FATAL] IMPL_OP_INFERSHAPE 误写在 tiling.cpp"; exit 1; }
   ```
 - **违反处理**:把错放位置的代码段**整段搬到正确文件**,不要在合并文件上做小补丁。
-- **适用位置**:`<UserOutputDir>/op_host/` + [build-verify.md § B.2.1](build-verify.md#b21-host-文件拆分校验门-r-056)
+- **适用位置**:`<UserOutputDir>/op_host/` + [build-verify.md § B.2.1](build-verify.md#b21-host-文件拆分校验门r-056)
 - **关联**:R-013, R-030, R-036, R-038, R-039
 
 ### R-057:七阶段严格流程,**不得跳步或合并**
@@ -601,7 +601,7 @@
 - **违反处理**:
   - 若已经手滑把 `VERIFY_DIR` 指到 `USER_DIR` 或其子目录 → **停手**,重命名备份可能已污染的产物,重新挑一个并列路径再从 B.1 开始
   - 若脚本里出现过任何 `rm -rf "${VERIFY_DIR}"` → 删掉这条命令,改为重命名备份(`mv "${VERIFY_DIR}" "${VERIFY_DIR}.<reason>_$(date +%s)"`)
-- **适用位置**:[build-verify.md § B.1](build-verify.md#b1-准备变量) 之后,B.2 之前;汇报阶段 [§ C](build-verify.md#c-汇报)
+- **适用位置**:[build-verify.md § B.1](build-verify.md#b1-准备变量) 之后,B.2 之前;汇报阶段 [§ C](build-verify.md#c-成功失败报告)
 - **关联**:[R-048](rules.md#r-048验证工程目录与用户输出同级), [R-050](rules.md#r-050最多-5-轮错误修复循环), [R-053], [R-057]
 
 ---
@@ -613,7 +613,7 @@
   - 命令形态固定:`cd <VerifyProjectDir> && ./build_out/custom_opp_*.run 2>&1 | tee install_custom_opp.log`
   - 不追加 `--quiet` / `--install` / 自造参数;CANN 自定义算子包的 `.run` 默认交互/安装逻辑由包自身处理。
   - 若安装失败,不得进入阶段 7。先检查 CANN 环境变量、权限、旧包冲突、`ASCEND_CUSTOM_OPP_PATH` / `ASCEND_OPP_PATH` 等环境问题,修复后重试并保留失败日志。
-- **适用位置**:[build-verify.md § B.6](build-verify.md#b6-阶段-6安装算子包)
+- **适用位置**:[build-verify.md § B.6](build-verify.md#b6-阶段-6安装算子包r-059)
 - **关联**:[R-057], [R-060]
 
 ### R-060:阶段 7 必须生成 `example/` 并用原直调输入做 aclnn 二进制一致性验证
@@ -638,7 +638,7 @@
   - aclnn 输出目录必须与原直调输出目录分离,推荐 `<VerifyProjectDir>/example/aclnn_output/`;不得覆盖 `example/output/`。
   - 比较必须逐文件 `cmp -s` 或 SHA256 完全相同。任一字节不同 = 精度验证失败;禁止用 rtol/atol 容差放行,也禁止只比较 shape、文件大小或打印前几个值。
   - 不一致时优先回查 [R-054] / [R-055] kernel 保真,其次核对 OpDef dtype/format/attr、shape 推导、aclnn harness 的输入输出 dtype 与文件尺寸。
-- **适用位置**:[build-verify.md § B.7](build-verify.md#b7-阶段-7二进制一致性验证)
+- **适用位置**:[build-verify.md § B.7](build-verify.md#b7-阶段-7二进制一致性验证r-060)
 - **关联**:[R-051], [R-054], [R-055], [R-057], [R-059]
 
 ---
