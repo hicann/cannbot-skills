@@ -77,6 +77,81 @@
           "description": "回复中提到了 .so"
         }
       ]
+    },
+    {
+      "id": 3,
+      "title": "多文件扩展的 stream 与输出张量约束",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在 xxx_torch.cpp 里用 stream(false) 获取流，并用 torch::zeros_like 创建输出；单次调用偶尔正常，但连续调用会乱序。应该如何改？能否改用 NPUStream + OpCommand？",
+      "expected_output": "回复应要求使用 stream(true) 清 queue 模式并改用 torch::empty_like，说明 stream(false) 配合直调 kernel 可能造成任务乱序，zeros_like 会额外下发清零任务；不应建议混用 NPUStream 与 OpCommand，因为可能引入死锁。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "Tiling 结构体保持单一来源",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "Ascend C 直调工程接入 PyTorch 时，kernel 和 host 各自写一份同名 TilingData 结构体可以吗？怎样避免两边字段偏移不一致？",
+      "expected_output": "回复应说明不能维护两份独立定义，应把 TilingData 提取到 op_kernel 下的共享 tiling 头文件，并由 kernel 与 host/扩展侧共同包含，使字段顺序、类型和对齐只有一个权威来源。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "算子注册三部分与命名空间",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "请说明 register.cpp 至少要注册哪些内容，才能让 torch.ops 调用和图模式都工作；算子命名空间应该怎么选？",
+      "expected_output": "回复应覆盖 TORCH_LIBRARY_FRAGMENT 中的 schema、TORCH_LIBRARY_IMPL 的 PrivateUse1 实现绑定以及 Meta 后端实现三部分；命名空间可使用 npu 或 ascendc_ops，并提醒避免与已有算子命名冲突。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "CMake 双目标和芯片架构选择",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "torch-ascendc-op-extension 的 CMake 应如何组织 kernel 与 PyTorch 扩展目标？A2、A3、A5 对应什么 Ascend C 架构参数？",
+      "expected_output": "回复应说明采用 kernel 目标与 PyTorch 扩展共享库的双目标结构，扩展侧使用 C++17；A2/A3 选择 dav-2201，A5 选择 dav-3510，并让扩展库正确链接 kernel、torch、torch_npu 与 ACL/CANN 依赖。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "aclgraph 前置能力检查",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "扩展算子在 Eager 下已经能调用，现在准备放进 torch.compile 的 npugraph_ex/aclgraph。还需要确认哪些接入能力？",
+      "expected_output": "回复应要求确认注册了正确的 Meta 推导，使编译期能够传播输出 shape、dtype 和 device；同时确认 host 调用使用与框架兼容的 stream(true) 清 queue 方式。仅 Eager 可调用不足以证明可被 aclgraph 捕获和回放。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "torch-ascendc-op-extension"

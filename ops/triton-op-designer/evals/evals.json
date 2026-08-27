@@ -72,6 +72,71 @@
           "description": "回复中提到了 手写优化案例"
         }
       ]
+    },
+    {
+      "id": 3,
+      "title": "经验文件 Layer 1 约束前置自检",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "通用设计模板推荐单 kernel 展平，但项目算子类别经验文件 Layer 1 禁止。草图可以先照通用方案写，再让 coding 修正吗？",
+      "expected_output": "回复应在设计前读取类别经验文件，逐条自检 Layer 1，并在草图阶段直接重设计冲突架构；不得把已知冲突下放给 coding。最终 sketch 开头应以 @architecture_decision 注释说明符合 Layer 1 的核心选择和理由。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "GPU 参考仅用于算法结构",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "有一份 CUDA Triton kernel 使用 shared memory 和 num_warps。设计算法草图时能否照搬这些优化？",
+      "expected_output": "回复应只借鉴 GPU 参考的 grid 划分、数据流和并行思想，不能照搬 CUDA shared memory、warp 或其他 GPU 特有优化；草图必须基于 A2 的 core 并行、UB、对齐和 Ascend Triton 能力重新表达。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "按任务选择最相关手写案例",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "为小 bins histogram 设计算法时，是否应把 references/cases 下所有案例都加载进来？",
+      "expected_output": "回复应根据任务类型只选择最相关的两个手写优化案例，例如小 bins 直方图与相关 reduce/scatter 案例，并结合必选的 sketch DSL、硬件规格和类别经验；不应无差别加载所有案例。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "Layout transform 草图专用路径",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "请为覆盖常见 permutation 的 layout-transform 设计主路径。可以只写一个线性 index 映射的 generic gather 吗？",
+      "expected_output": "回复应为 2D transpose、batch transpose、相邻维交换、反转维、移动 size-1 维等常见模式设计独立 kernel 或 view 短路，优先合并连续维并明确 tile-based 连续 load/store；generic gather 只能作为罕见 permutation fallback。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "草图输出而非可执行代码",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "designer 的最终交付需要包含完整 Python、@triton.jit kernel 和 ModelNew 吗？",
+      "expected_output": "回复应明确最终只直接输出 sketch op_name { ... } 的 UnifiedSketch DSL 草图，包含架构决策、并行/切分/数据流和必要 @llm_hint；不输出可执行 Python 或 ModelNew，实际代码由 triton-op-coding 生成。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "triton-op-designer"

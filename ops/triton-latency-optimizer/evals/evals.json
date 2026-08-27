@@ -82,6 +82,71 @@
           "description": "回复中提到了 优化方式"
         }
       ]
+    },
+    {
+      "id": 3,
+      "title": "单次只应用首个命中优化点",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "扫描代码时优化点 4 和 7 都满足命中条件。一次 latency-optimizer 调用能否把两项都改完再交给 verifier？",
+      "expected_output": "回复应说明必须按 Index.md 顺序扫描，命中第一个优化点后立即停止扫描，只加载该点对应参考文档、应用这一项并执行 checklist；本次不得顺带应用后续点。verify、benchmark、采纳或回退由调用方负责。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "cursor 与 exclude_points 语义",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "调用时 cursor=8，exclude_points=[10, 12]。本轮应该从哪里开始检查，命中排除项后能否仍然应用？",
+      "expected_output": "回复应从 cursor 指定位置继续按索引顺序扫描，并无条件跳过 exclude_points 中的 10 和 12；排除项即使代码满足条件也禁止命中或应用。仍须遵守首个非排除命中即停。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "无优化点时仍生成可验证产物",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "31 个优化点都没有命中，latency-optimizer 是否可以不写 output_path，直接回复“无需优化”？",
+      "expected_output": "回复应说明不可以；即使没有优化点也必须把可执行且功能一致的代码写入 output_path，并返回代码路径、命中状态/优化点、优化说明、功能一致性和精度一致性说明，使调用方能继续交给 verifier。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "优化器不自行验证和基准",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "完成一个优化点后，请 latency-optimizer 自己连续跑精度测试、benchmark，并按结果自动回退版本。",
+      "expected_output": "回复应说明该 skill 只负责扫描、应用一个优化点、加载 checklist 检查并产出代码；verify、benchmark、版本采纳/回退和迭代目录管理均由调用方负责，本 skill 不自行执行。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "Block Size Scaling 完整候选阶梯",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "进入最终 Block Size Scaling 时当前 BLOCK=1024。因为预计更大的值不会更快，能否只产出 2048 一个候选就结束？host 侧分档可否只改其中一档？",
+      "expected_output": "回复应拒绝按耗时或性能猜测裁剪候选，按规则完整产出向上和向下的候选阶梯；单维 BLOCK 若由 host 分档控制，整个阶梯必须同步修改。停止条件只能由调用方 verify 失败或 BLOCK 超过 65536 触发。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "triton-latency-optimizer"
