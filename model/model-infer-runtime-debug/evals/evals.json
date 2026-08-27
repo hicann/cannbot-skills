@@ -118,6 +118,86 @@
       "expected_output": "回复应说明本 skill 只诊断运行时错误（crash/timeout/OOM/卡住），输出精度偏差应交给 model-infer-precision-debug，不在本 skill 范围",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "异步报错先用 synchronize 粗到细定位",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "报错栈只指向 torch.npu.synchronize，我准备一开始就在每个算子后同时加 synchronize 和 dist.barrier，快速找根因。这样合适吗？",
+      "expected_output": "回复应说明 NPU 异步执行导致 synchronize 位置不等于出错算子，先按阶段、层、模块、算子逐级少量插入 synchronize；不要一开始加 barrier，因为某 rank 崩溃会让其他 rank 永久等待，只有怀疑 rank 路径不一致时才用 monitored_barrier 并检查所有 rank 日志",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "A2 MC2 专家数超限回退",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "A2 上 Decode 卡在 npu_moe_distribute_dispatch_v2，计算得 experts_per_rank=32。应该只增大 HCCL 超时继续等吗？",
+      "expected_output": "回复应指出 A2 MC2 dispatch_v2/combine_v2 要求 experts_per_rank 不超过 24，32 已违反算子约束；应回退到 init_routing_v2 加手工 AllToAll 的 double-routing 等功能等价路径，并记录性能影响，而不是只延长超时",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "仅高位 Rank 权重加载越界",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "8 卡加载权重时 rank 0~2 正常，rank 3~7 在 lm_head narrow 时越界；原始 vocab=131125，lmhead_tp_size=8。该怎么定位和修？",
+      "expected_output": "回复应识别高位 rank 切分越界，区分 embedding 与 lm_head 的真实词表维度，把 lm_head 向上 pad 到 8 的倍数，并在加载时把原 checkpoint 权重补零到同一尺寸后再交给 weight_loader；切分必须使用 lmhead_tp_size 而非其他 TP 度",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "CPU 满载的构造阶段不是通信死锁",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "日志停在 HCCL init 后，HBM 一直约 3GB，但每个进程 CPU 都在 100%。能否直接判断 HCCL 死锁并重建通信组？",
+      "expected_output": "回复应先判为模型构造或权重初始化的 CPU 密集慢路径，而非 CPU 0% 的通信等待；重点检查大 vocab Embedding 随机初始化、VocabParallelEmbedding 瞬态全词表分配和 post_init 遍历，可用 no_init_weights 或直接创建分片参数减少无用初始化",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "修复后移除调试点并全 Rank 验收",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "加了很多 sync 后单步不再报错，是否可以保留这些检查点并宣告修复完成？",
+      "expected_output": "回复应要求先确认定位点前后通过，再移除调试 synchronize/barrier，运行完整 warmup 和 inference，逐 rank 日志确认全部成功并核对 DP 输出一致；若用了算子回退还需记录 Prefill/Decode 性能影响和未来恢复条件",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-runtime-debug"
