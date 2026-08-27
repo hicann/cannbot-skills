@@ -116,6 +116,81 @@
           "description": "技能 torch-npugraph-ex-knowledge 被激活"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "适用平台和功能边界",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "npugraph_ex 能否用于训练反向、随机数算子 Capture 和任意 Ascend 芯片？这是正式商用特性吗？",
+      "expected_output": "回复应说明 npugraph_ex 是试验特性，仅面向推理，不支持反向流程 Capture 和随机数算子 Capture；当前约束为 Atlas A2/A3 训练和推理系列，不能泛化到任意芯片或宣称正式商用。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "缓存 TTL 与最新文档请求",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "本地 TorchAir 文档缓存是 10 小时前更新的。普通配置问题和用户明确要求“查最新 API”时分别该怎么处理？",
+      "expected_output": "回复应说明普通代码或配置指导可在建议的 24 小时 TTL 内直接使用缓存；用户明确要求最新、涉及 API 行为变化或版本差异时应忽略 TTL，先尝试刷新。只有刷新失败或用户明确离线时才回退缓存，并标注可能不是最新。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "PyTorch NPU 文档版本差异",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "缓存里的 PyTorch NPU 文档来自 v2.7.1，但我的环境不是这个版本。能直接照缓存 API 写代码吗？",
+      "expected_output": "回复应提醒缓存参考固定为 v2.7.1，在线产品文档也可能覆盖不同支持版本；应优先核对用户实际安装环境中的源码、函数签名和对应版本文档，不能把缓存写法无条件当作当前 API。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "按故障阶段选择源码来源",
+      "config": {
+        "max_tokens": 130000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "定位 npugraph_ex 问题时，Eager stream 报错、aot_eager FakeTensor 报错、graph_pass 报错分别优先看哪里？",
+      "expected_output": "回复应先使用日志指向的相邻源码和本地 installed source；Eager/stream 优先 torch_npu 或 Ascend/pytorch，aot_eager/FakeTensor 优先本地 torch 或 upstream PyTorch，npugraph_ex graph_pass/backend 优先本地 torchair 或 TorchAir。只有本地证据不足时才拉取匹配仓库。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "配置指导遵循最小化原则",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我只想开启 npugraph_ex 编译缓存。回答时是否应该把多流、限核、内存复用和所有 FX Pass 开关都一起打开？",
+      "expected_output": "回复应只读取并使用编译缓存相关文档，生成满足需求的最小配置，其余选项保持默认；应标注参考文档来源，不能为了展示能力附加用户未要求的多流、限核或其他优化开关。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "torch-npugraph-ex-knowledge"

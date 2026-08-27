@@ -121,6 +121,81 @@
           "description": "技能 torch-npugraph-ex-runtime-error-diagnosis 被激活"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "Replay 阶段失败的边界归类",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "ACL graph capture 没有报错，但 replay 时某个算子 fail。因为它使用了图模式，是否仍算编译错误？",
+      "expected_output": "回复应默认归入运行时错误诊断，因为 capture 已成功而失败发生在 replay/算子执行阶段；若证据不足以完全排除 capture/Meta 边界，可同时参考 compile-error 的相关部分，但不能仅因使用图模式就归编译期。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "按时间戳锁定首个运行时因果错误",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "stdout 最后是 graph replay failed，但 CANN plog 更早出现 aclnnFoo 参数错误，之后还有 task fail 和 stream synchronize failed。根因证据选哪条？",
+      "expected_output": "回复应对齐 stdout/stderr 与 CANN plog 时间戳，优先选择最早且足以解释后续失败的 aclnnFoo 参数错误；task、stream 同步和 replay failed 很可能是级联结果，不应只根据最后一行归因。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "运行时问题的本地证据检索顺序",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "运行时报 ACL 错误码后，是不是应该先 clone TorchAir 和 PyTorch 仓库全文搜索？",
+      "expected_output": "回复应先围绕 plog 中的错误码、算子/API、stream/task/rank 等直接证据，检查本地 CANN 安装目录的错误码说明、头文件、算子规格、符号和版本；需要确认桥接时再看本地 torch_npu/torchair，只有本地证据不足时才拉取匹配仓库。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "避免无证据切换后端",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "npugraph_ex 跑几步后 OOM。为了快速结束排查，可以直接建议永久换成 eager 吗？",
+      "expected_output": "回复应先区分 device OOM、workspace 不足和碎片等根因并收集分配上下文；除非证据证明模型不适配 npugraph_ex，不应直接改变模式选型。可将局部 fallback eager 作为有边界的临时规避，但不能代替根因诊断。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "运行时诊断固定交付结构",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "完成 npugraph_ex 运行时排查后，诊断结果应该按什么结构交付？",
+      "expected_output": "回复应按问题归类（算子/通信/流事件/内存/device）、证据、最可能根因、下一步最小动作的顺序输出；证据应来自完整日志及对齐时间戳，下一步可包含按需环境变量或最小复现，不能把猜测写成确定结论。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "torch-npugraph-ex-runtime-error-diagnosis"

@@ -86,6 +86,81 @@
           "description": "技能 torch-npugraph-ex-compile-error-diagnosis 被激活"
         }
       ]
+    },
+    {
+      "id": 4,
+      "title": "区分首次捕获失败与回放失败",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "npugraph_ex 第一次调用构图时失败，和已经成功编译后第二次回放时报错，应该都按编译错误处理吗？",
+      "expected_output": "回复应区分边界：首次调用在 Dynamo、AOTAutograd、后端编译或图捕获阶段失败属于编译期诊断；图已成功生成后在 replay/执行阶段失败属于运行时错误，应转到 runtime-error-diagnosis。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "Eager 到 npugraph_ex 的分层隔离",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "模型在 torch.compile(..., backend=npugraph_ex) 下报错。请给一个最小的阶段隔离顺序，不要一上来就打开所有日志。",
+      "expected_output": "回复应按 Eager、torch.compile backend=aot_eager、torch.compile backend=npugraph_ex 的顺序逐层验证：Eager 失败先修模型或算子，aot_eager 失败聚焦 Dynamo/AOT 与 Meta，只有前两层通过而 npugraph_ex 失败才聚焦后端编译或图捕获。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "优先提取首个因果错误",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "日志最后一行只有 BackendCompilerFailed，但前面有一条算子 Meta 报错。我应该把哪一条当根因？",
+      "expected_output": "回复应优先分析调用栈中最早出现、具备具体算子和原因的因果错误；BackendCompilerFailed 往往只是外层包装或汇总。应保留完整堆栈并从首个具体失败向后验证，而不是只盯末尾异常名。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "诊断信息按成本渐进升级",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "编译失败后，为了定位问题应按什么顺序收集 debug_save、data_dump 和 TORCH_LOGS？",
+      "expected_output": "回复应先复现并使用 debug_save 保存最小编译现场，再根据初步定位按需开启 data_dump 或 TORCH_LOGS 等更重信息；不应默认同时打开全部开关，以免日志噪声和体量掩盖首个错误。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "编译期源码核查顺序",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "怀疑 npugraph_ex 编译后端实现有问题时，应该直接根据网上仓库 master 分支猜代码路径吗？",
+      "expected_output": "回复应先核对本机实际安装版本及其本地源码、日志和 debug_save 产物，避免线上版本漂移；确需查仓库时，再按失败阶段选择对应的可信官方仓库和匹配版本或提交。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "torch-npugraph-ex-compile-error-diagnosis"
