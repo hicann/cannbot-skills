@@ -123,6 +123,86 @@
           "description": "回复中提到了 parallel_config"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "按产物信号选择框架或独立部署",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "parallel_config 已确认，但 dispatch 未写部署模式。模型注册在 support_models.py 时怎么实现通信组；只有自管 runner 且不继承框架基类时又怎么实现？",
+      "expected_output": "回复应将前者判为框架部署，通过 CommManager 按需注册和获取通信组并由框架 launch；后者判为独立部署，在 Runner 中初始化 HCCL、inline ParallelContext、注入 modeling 并用 torchrun 启动，不能混用两套控制流",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "tp_size 等于 1 仍统一使用并行层包装",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "某个模块的 tp_size=1，我是否应保留原生 nn.Linear，而其他模块才换 ParallelLinear？",
+      "expected_output": "回复应说明线性层和 Embedding 仍统一使用对应 ParallelLinear 包装，即使 tp_size=1 也不产生集合通信，以保留统一的 weight_loader、quant_method 和通信上下文契约；只有对应 TP 通信组无需创建",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "MC2 组必须独立物理注册",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "MoE EP 的普通进程组和 fullmesh_v2 MC2 组形状完全相同，我让 CommManager 自动复用同一个 HCCL 物理组可以吗？",
+      "expected_output": "回复应拒绝复用，要求 moe_ep_group_mc2 注册时 allow_physical_reuse=False，并按需要计算 hccl_buffer_size；普通 ProcessGroup 用 get_group，NPU dispatch/combine 所需 HCCL 名称用 get_group_name，二者不能混淆",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "TP 加 DP 的 packed Token 通信协议",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "attn_tp_size>1 且 attn_dp_size>1 的 packed TND 模型里，我直接在每层做 AllReduce，并让各 rank 接收不同长度 token，可以吗？",
+      "expected_output": "回复应要求用 all_gather_into_tensor 与 reduce_scatter_tensor 配对而非 AllReduce，并将 packed T pad 到 TP 倍数后等长切分；Attention 入口聚合后裁回 T_real 供 cache/FA，出口补零后 ReduceScatter，metadata 仍按真实 token 构造",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "MoE EP 分阶段实现与专家权重过滤",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "moe_tp_size=1 的 EP 模型能否让 Prefill 和 Decode 共用同一套 dispatch/combine，并让每个 rank 加载所有专家权重？",
+      "expected_output": "回复应说明 Prefill 走 re_routing 加 AllToAll，Decode 走 MC2 dispatch/combine，不能共用一套链路；FusedMoEGMM 的 weight_loader 应按 ep_rank 只保留本 rank 专家范围，并用全局 expert mapping 正确加载与执行后处理",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-parallel-impl"

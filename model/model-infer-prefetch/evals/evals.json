@@ -124,6 +124,86 @@
           "description": "技能 model-infer-prefetch 被激活"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "预取必须默认关闭并保留回退",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "为了让优化默认生效，我准备直接调用 torch_npu.npu_prefetch，不加 enable_prefetch 开关。这样可以吗？",
+      "expected_output": "回复应拒绝无开关改造，要求从 YAML/InferenceConfig 贯通 enable_prefetch 且默认 False，调用走条件保护并保留原路径；还应校验启用 prefetch 时已有所需图模式和多流支持，便于单点对比和快速回退",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "没有安全依赖窗口时放弃候选",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "目标 GMM 是 memory-bound，但它之前沿关键路径全是大通信和大搬运，找不到足够长的非争抢窗口。是否仍应随便选一个前驱插预取？",
+      "expected_output": "回复应明确当前候选没有安全窗口并放弃，不能为了产生改动硬插；通信和重搬运会争带宽或引入等待，应继续寻找其他目标或更早且语义匹配的依赖节点",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "图模式依赖节点不得跨分支复用",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "图模式里 MLP 目标算子消费 attn_output，但我把另一个可选分支里的 tensor x 当 npu_prefetch dependency，因为它出现得更早。可以吗？",
+      "expected_output": "回复应拒绝跨分支依赖，要求 dependency 是与目标算子同一逻辑路径、时序稳定的明确 Tensor 节点，优先直接前驱或经验证的更早前驱；否则可能编译失败或只移动等待位置",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "先单点再逐步调大小和位置",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "Roofline 找到十个候选后，我想一次全部加预取并把 max_size 设为权重全量，出现回归再一起调。合理吗？",
+      "expected_output": "回复应要求先选一个目标、一个稳定窗口和保守的理论权重大小约 50%，验证后先固定位置调 max_size，再固定大小调 dependency，最后才叠加多个目标，避免无法归因和片上空间或带宽争抢",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "性能验收必须有开关前后实测",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "代码能编译且目标 MatMul 看起来应该更快，能否直接宣布预取优化成功？",
+      "expected_output": "回复应说明不能只凭编译或理论判断，必须分别以 enable_prefetch=False/True 实测 profiling 和输出一致性，对比目标算子、关键路径、依赖窗口退化和新拖尾，报告 baseline、优化值与改善百分比；无实测条件时只能交付脚本和报告模板并标明未验证",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-prefetch"

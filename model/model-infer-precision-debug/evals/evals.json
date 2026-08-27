@@ -129,6 +129,86 @@
           "description": "技能 model-infer-precision-debug 被激活"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "框架部署按 attn_type 取映射且保持 packed",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "框架部署的变长 batch 精度错乱。我把 forward_metadata.slot_mapping 当单 Tensor 用，并把 hidden_states reshape 成 [B,S,H]。这两个点该怎么查？",
+      "expected_output": "回复应指出框架下 block_table/slot_mapping 是 Dict，应按 self.attn_type 取对应 Tensor；packed input_ids/position_ids 为 [TotalTokens]，hidden_states 必须保持 [TotalTokens,H]，不能对变长 batch 简单 reshape，并统一用 forward_metadata.is_prefill 分阶段",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "FA v1 v2 参数混用的静默精度错误",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "FA v2 调用不报错但输出严重偏差，我还在传 scale、num_heads、actual_seq_lengths 和 antiquant_scale。应怎样核对？",
+      "expected_output": "回复应识别 v1 参数名误用于 v2，核对并改为 softmax_scale、num_query_heads、actual_seq_qlen、actual_seq_kvlen 和 v2 的 dequant_scale_key/value，同时检查 layout、shape、KV head 数和长度构造，不能因不报错就排除入参问题",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "全遮蔽行需要 inner_precise 修正",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "Prefill 使用自定义 mask，里面存在整行全部被遮蔽，FA 输出出现异常。inner_precise 应怎么选？",
+      "expected_output": "回复应说明默认 inner_precise=0/1 不处理无效行；需要行无效修正时选 2（高精度）或 3（高性能、允许更多精度损失），并继续与 eager 基线做数值对比而非只看是否不报错",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "逐层对比定位首次偏差位置",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "快速检查没发现问题，怎样用逐层 dump 找到精度从哪里开始偏？需要比较哪些位置和指标？",
+      "expected_output": "回复应要求先 dump eager 基线，再在 Block 输入、Norm、QKV、RoPE、KV 写入、FA 输出、残差和 Block 输出等位置比较优化结果，所有指标转 float32 计算 max_abs_diff、max_rel_diff 和 cosine_similarity，以首次出现偏差的层和位置缩小根因",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "DP 加 EP 的 Decode Token 必须同步",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "DP+EP 模型 Decode 几步后各 rank 选择的 token 开始分叉，随后 KVCache 累积偏差并出现 NaN。只调 FA scale 能解决吗？",
+      "expected_output": "回复应识别 EP AllToAll 浮点非确定性可能导致 DP rank token 分叉，要求每步 Decode 后从固定源 rank 广播 next_token，保证后续 KVCache 输入一致；修复后重新完整验证，不能只调 FA scale 掩盖状态分叉",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-precision-debug"

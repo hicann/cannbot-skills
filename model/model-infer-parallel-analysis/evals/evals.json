@@ -112,6 +112,86 @@
       "expected_output": "回复应说明并行策略分析面向多卡部署，单卡无切分需求时不适用，应建议用户改用单卡优化方向",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "Prefill 与 Decode 共用单套配置",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "同一个模型 Prefill 想用较大 Attention TP 降 TTFT，Decode 又想 attn_tp=1 提吞吐。可以直接输出两套 parallel_config 让运行时按阶段切换吗？",
+      "expected_output": "回复应说明当前分析要在 Prefill 和 Decode 共用的一套 parallel_config 中权衡，依据高吞吐、低时延或均衡目标确定侧重；可以输出排序后的候选方案，但不能把两阶段当成可直接切换的两套最终配置",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "参考配置只作候选种子",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "目标模型名字和仓库参考模型很像，但多了一个大参数子表和多模态编码器。我能整套复制参考 YAML 的并行配置吗？",
+      "expected_output": "回复应拒绝按模型名整套继承，要求分别拆解 Attention、Dense FFN、MoE、Embedding、LMHead 和新增大参数模块，分析其热路径、复制显存与通信边界；参考配置只能作为候选种子和 sanity check",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "MLA KVCache 显存估算不得漏项",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "估算 MLA absorb 的每卡 KVCache 时，我只按 B_local×S×L×kv_lora_rank×2 字节计算，可以吗？并行度又该取哪个模块的 dp？",
+      "expected_output": "回复应指出还要加 qk_rope_head_dim，按 B_local×S×L×(kv_lora_rank+qk_rope_head_dim)×bytes_per_kv 估算；B_local 应基于相关 Attention 的 dp_size，且各模块 dp/ep 分别由 world_size 除以各自 tp_size 推导，不能混用",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "区分硬约束与实施适配点",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "某个结构上合理的 CP/KVP 候选当前脚本没有直接支持，是否应立即从分析结果删除？哪些条件才属于必须裁掉的硬约束？",
+      "expected_output": "回复应保留结构合理候选并标为 parallel-impl 当前不直接支持的实施适配点；只有 world_size 与 TP 整除、attention/KV head 可切分、专家均匀划分等数学或结构硬约束不满足时才裁掉，并检查 KVP 下 oproj_tp_size=kvp_size 等仓库实现约束",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "候选排序必须由定量结果主导",
+      "config": {
+        "max_tokens": 150000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "最终并行分析报告应该给几个候选、按什么顺序排？未经仓库验证但定量上明显更优的方案是否必须排在已验证配置后面？",
+      "expected_output": "回复应输出并排序 2~3 个模块级组合候选，优先级依次为显存可行、跨节点通信风险、定量性能预期，已验证配置距离只作性能接近时的 tie-breaker；结构性更优但未验证的方案可标为推荐对比测试，不应自动降级",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "model-infer-parallel-analysis"
