@@ -100,6 +100,86 @@
       "expected_output": "output/ 目录应只包含以下文件：\n1. csrc/ops/gelu/op_kernel/gelu_kernel.cpp — Ascend C Kernel，支持精确（erf）和 tanh 近似两种模式，遵循经典 AscendC API 规范\n2. csrc/ops/gelu/op_kernel/gelu_launch.h — launch 函数声明\n3. csrc/ops/gelu/op_plugin/gelu_plugin.cpp — PyTorch TORCH_LIBRARY 绑定，暴露 approximate 参数\n4. csrc/ops/gelu/CMakeLists.txt — 算子编译配置\n5. cann_bench/__init__.py — 暴露 cann_bench.gelu(x, approximate=\"none\") 接口\n\n不应包含 extension.cpp、顶层 CMakeLists.txt、setup.py、cmake/ 等基础设施文件。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "缺少算子来源时必须停止",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "请启动 ops-direct-invoke-flash，但我暂时不给源文件、数学公式、代码片段或文字规格。你先创建工程骨架再说。",
+      "expected_output": "回复应停止工作并要求用户提供算子来源，说明可接受 CPU/PyTorch/Numpy 文件、数学公式、规格文档或文字描述；没有来源时不得创建骨架或臆测算子语义",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "已实现算子的快速修补不属于 Flash 从零流程",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "operators/relu/relu.asc 已经完整实现并通过测试，我只想改一行尾块处理。是否应重新走 ops-direct-invoke-flash 八阶段从零流程？",
+      "expected_output": "回复应说明本 Skill 用于从来源构建新的核函数，不适合现有完整 kernel 的快速修补、孤立测试改动或纯讲解；不应重建 STATE 和全流程，而应使用现有算子的维护或调试路径",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "dav-3510 默认采用 Reg 计算路径",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "detect_soc.py 返回 SocVersion=Ascend950、NpuArch=dav-3510。设计向量计算时能否直接沿用 add 里的经典 AscendC::Mul/Cast/ReduceSum？",
+      "expected_output": "回复应说明 dav-3510 默认走原生 AscendC::Reg 路径，需读取 Reg API 指南和模式清单并以 mul 的 Reg 形态作结构参考；计算、cast、规约不得使用经典 AscendC API、MicroAPI、Membase 或除 asc_vf_call 外的裸 asc_*，构建与测试结构才可参考 add/sqrt",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "关闭文档评审也不能跳过确定性校验",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "AGENTS.md 设置 harness.review=off。是否可以跳过 UB 预算、32B DMA、Cast 支持矩阵和 dav-3510 禁用 API 扫描，直接编译？",
+      "expected_output": "回复应拒绝，说明 review=off 只跳过子 Agent 评审并在 STATE 记录原因，不生成空 review 文件；主 Agent仍必须检查每种 dtype 的 32B 最小传输、所有存活 UB 缓冲预算、Cast 链、host-only helper，以及 dav-3510 禁用 API 和尾块 mask",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "Simple 快速路径只编译和真机全测一次",
+      "config": {
+        "max_tokens": 500000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "一个纯逐元素、无 Cast/规约/UB-to-UB 拷贝的算子完全照抄已验证 CMake 结构。simple 快速路径各阶段怎么控制编译和测试次数？",
+      "expected_output": "回复应说明阶段2只 cmake 配置不 make，阶段5只 py_compile 和静态核对，阶段6完成实现后首次且唯一一次 make，并一次跑接口、collect-only 和完整 NPU 用例；阶段7通常不再干净重建，只有怀疑陈旧产物时才重建，complex 或自定义构建不能走此快速路径",
+      "expectations": [],
+      "files": []
     }
   ],
   "team_name": "ops-direct-invoke-flash"

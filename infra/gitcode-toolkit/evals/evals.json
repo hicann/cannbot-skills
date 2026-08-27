@@ -221,6 +221,101 @@
           "description": "技能 gitcode-toolkit 被激活"
         }
       ]
+    },
+    {
+      "id": 8,
+      "title": "GitCode 外部写操作的精确授权",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "一个 GitCode 协作 skill 已经拿到 Token，用户也笼统地说过“帮我处理这个 PR”。它现在想 PATCH PR 描述并 push 一个新 commit，这些条件是否已经足够授权？",
+      "expected_output": "应说明 Token、平台工具审批或宽泛任务不能替代写前精确确认；必须绑定仓库/PR/remote/分支、操作类型以及完整内容或 commit SHA。目标、内容或操作发生实质变化时原授权失效，应停在写操作前并保留已完成的只读分析。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "Issue 评论幂等检查与写后回查",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "我要向一个 GitCode Issue 发送已经获得用户确认的长评论。如何避免重复评论，并确认 POST 返回成功后平台上的内容真的完整写入了？",
+      "expected_output": "应在 POST 前 GET 近期评论并以完整正文做幂等比对，已存在相同内容时复用而不重复提交。POST 后必须再 GET，优先用评论 ID，否则结合当前用户、时间窗和完整正文回查；结果未知时先重新 GET，不立即再 POST。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "push 后的远程 SHA 验证",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "PR 创建流程已执行 git push -u origin feature-x，命令返回成功。gitcode-toolkit 应该仅根据 push 退出码就认定远程分支已就绪吗？",
+      "expected_output": "应说明 push 成功后还要用 git ls-remote --heads <remote> <branch> 只读回查远程分支，并校验远程 SHA 与已确认的本地 commit SHA 一致。回查缺失、分支或 SHA 不匹配时不得标记完成，也不得自动改换 remote/分支。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "GitCode API 429 有界限流恢复",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "GitCode API 返回 429，响应里给了 Retry-After。为了尽快完成协作任务，是否应该让每个调用方各自立即重试，直到请求成功？",
+      "expected_output": "应遵守 Retry-After 或服务端 reset 窗口，使用共享 cooldown 协调调用方，而不是并发无界重试。重试必须受调用方预算约束，通用 API 参考总计最多 3 次 attempt；超出预算时返回限流状态。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "浅克隆下 merge-base 缺失的恢复",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 140000,
+          "glm-5": 130000
+        },
+        "eval_mode": "text"
+      },
+      "prompt": "用浅克隆拉取 GitCode PR 后，git merge-base base_branch pr_2170 找不到共同祖先。可以直接用 base_branch 与 PR 分支做 double-dot diff 代替吗？",
+      "expected_output": "不应用 base_branch 直接比较或用 double-dot 掩盖 merge-base 缺失。应先 git fetch --deepen=500 加深历史并重算 merge-base，仍失败时再考虑全量克隆；得到共同祖先后用 git diff $MERGE_BASE pr_2170 或等价 triple-dot 查看变更。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "gitcode-toolkit"

@@ -162,6 +162,86 @@
           "description": "回复中提到了 torch.compile"
         }
       ]
+    },
+    {
+      "id": 9,
+      "title": "autonomy_level 对检查点自动放行范围的影响",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "AGENTS.md 里的 autonomy_level 分别为 0、1、2、3 时，ops-registry-invoke 哪些检查点可以自动放行？门控连续失败时怎么处理？只解释规则，不要启动开发。",
+      "expected_output": "回复应准确说明：L0 无自动放行；L1 仅 CP1.5；L2 为 CP1.5 和 CP2；L3 为 CP1、CP1.5 和 CP2。自动放行仍要求门控 PASS；重试 2 次仍 FAIL 时必须降级为人工确认，且降级不改变后续检查点使用的 autonomy_level。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "CP1.5 保留人工语义判断边界",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "spec.yaml 已经 9-stage 全 PASS，独立 spec 评审也通过了。为什么 CP1.5 还要保留人工 review？人工具体看什么，yes、modify、abort 分别怎么走？",
+      "expected_output": "回复应区分机器自洽和业务语义：人工仍需判断公式数学意图、tolerance 数值合理性和 boundary case 业务覆盖。yes 进入 1.3a；modify 修订 spec 后重跑 9-stage 与独立评审再提 CP1.5；abort 退回需求分析。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "方案设计分段并发与失败重炉规则",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "说明 ops-registry-invoke 的 1.3a 到 1.3d 如何执行。5 个设计分段能不能逐个串行？组装校验失败后是否全部重做？",
+      "expected_output": "回复应说明 1.3a 设计准备、1.3b 主 Agent 切片、1.3c 同一次响应并行发起 5 个分段、1.3d 主 Agent 组装与校验。禁止逐个串行；校验失败只重发对应失败分段，每段最多重试 2 次，而不是全部重做。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "开发阶段双波次启动依赖",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "PLAN.md 配了多个开发迭代时，每个迭代的 Wave 1 和 Wave 2 如何启动？A1-Main 还没编译通过时能否提前启动 A2？",
+      "expected_output": "回复应说明 iteration_count 只能取 1、2、3；每个迭代先并行启动 Wave 1 的 A1-Main、可选 A1-P 和 B，等待 A1-Main 编译通过后才并行启动 Wave 2 的 A2 与可选 A1-P-Retry，因此不能提前启动 A2。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 13,
+      "title": "中断任务恢复的触发条件与执行边界",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "之前有个注册调用算子开发中断了。什么情况下工作流可以恢复？如果日志显示已经完成，或者没有明确日志路径，应该怎么办？",
+      "expected_output": "回复应说明恢复需同时满足：system-reminder 明确日志路径或用户明确说继续开发某算子，并且日志当前阶段不是已完成。满足后读取日志并调用相应 Subagent 继续，主 Agent 不直接执行；条件不足时应说明原因并询问意图。",
+      "expectations": [],
+      "files": []
     }
   ],
   "team_name": "ops-registry-invoke"
