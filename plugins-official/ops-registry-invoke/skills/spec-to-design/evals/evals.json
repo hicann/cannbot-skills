@@ -1,0 +1,76 @@
+{
+  "skill_name": "spec-to-design",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "spec 与需求文档的字段所有权边界",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "生成 DESIGN.md 时，spec.yaml 与 REQUIREMENTS.md 内容有冲突。dtype、shape、broadcast、tolerance 和性能目标分别以谁为准？",
+      "expected_output": "回复应将 spec.yaml 作为 dtype、shape、broadcast、formula/oracle、boundary、extreme、tolerance、determinism、reduction、paradigm_groups 的唯一真值；REQUIREMENTS.md 只承接背景、运行环境、ACLNN 自然语言接口、性能目标和资源约束。spec-owned 冲突应回到 spec-generation 修订，不能由设计覆盖。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "五个设计分段必须同响应并行",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "在 ops-registry-invoke 1.3 编排中，五个 bundle 应怎样生成？分段 Agent 能否读取 sibling spec 或旧 DESIGN.md 补充事实？",
+      "expected_output": "回复应说明五个 ascendc-ops-design-* Agent 必须在同一次响应并行发起，每个只使用自己 bundle 内的 spec 切片、需求摘要、模板摘录，并额外读取 DESIGN_PREP.md；禁止从 sibling spec 或历史设计补事实。独立使用 skill 时才可由单 agent 串行完成。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "05-plan 分段生成完整 PLAN",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "sections/05-plan.md 是 DESIGN.md 的第五个章节吗？PLAN.md 的结构字段从哪里取？",
+      "expected_output": "回复应说明 05-plan.md 生成的是完整 PLAN.md，不是 DESIGN.md 章节。PLAN 的 YAML frontmatter schema、取值约束和带 BEGIN/END 标记的正文规则都以 templates/PLAN.md.templ 为唯一权威，assemble_design.py 分别输出 DESIGN.md 与 PLAN.md。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "完整性校验失败先读日志并只重做失败分段",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "validate_completeness.py 报 broadcast gate 失败。应该全部重生成，还是如何定位和恢复？",
+      "expected_output": "回复应先读取 docs/.validate_completeness.log 的时间戳和 DEBUG gate 细节，定位如 validate_gates_broadcast 的失败分段；修订该分段后重新组装并跑 validate_design 与 validate_completeness。1.3 编排内只重发对应 Agent，每分段最多重炉 2 次，不全量重做。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "安装路径解析禁止硬编码宿主目录",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "脚本命令能否直接硬编码 .claude/skills/spec-to-design？怎样兼容不同 Agent 安装位置？",
+      "expected_output": "回复应优先读取 SPEC_TO_DESIGN_SKILL_DIR；为空时依次探测 .opencode/skills/spec-to-design 和 .claude/skills/spec-to-design，仍为空则先定位已安装 skill。后续 slice/assemble/validate 命令统一使用该变量，不能硬编码某一种宿主路径。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}
