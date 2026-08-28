@@ -215,19 +215,25 @@ def _resolve_call_name(node):
     例如：torch.empty -> ('torch', 'empty')
           my_func    -> (None, 'my_func')
           self.conv  -> ('self', 'conv')
+          torch.nn.functional.relu -> ('torch.nn.functional', 'relu')
           kernel[g]  -> 返回 None（kernel launch 通过 Subscript）
     """
     func = node.func if isinstance(node, ast.Call) else node
-    if isinstance(func, ast.Attribute):
-        if isinstance(func.value, ast.Name):
-            return (func.value.id, func.attr)
-        # 处理 torch.nn.functional.relu 形式
-        if isinstance(func.value, ast.Attribute):
-            inner = func.value
-            if isinstance(inner.value, ast.Name):
-                return (f"{inner.value.id}.{inner.attr}", func.attr)
     if isinstance(func, ast.Name):
         return (None, func.id)
+    if isinstance(func, ast.Attribute):
+        # 沿属性链收集所有 .attr（自外层向内），直到根 Name，
+        # 支持任意深度全限定调用，如 torch.nn.functional.relu
+        parts = []
+        cur = func
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            # parts[0] 为叶子方法，parts[1:] 为限定前缀
+            if len(parts) == 1:
+                return (cur.id, parts[0])
+            return (f"{cur.id}.{'.'.join(reversed(parts[1:]))}", parts[0])
     return None
 
 
