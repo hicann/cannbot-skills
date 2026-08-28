@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { auditKindsForEvents, MAIN_AGENT_WORKFLOW_NAME, isDispatchOnlyAgent } from "@/lib/skill-eval-audit"
+import { auditKindsForEvents, MAIN_AGENT_WORKFLOW_NAME, isDispatchOnlyAgent } from "@/lib/sift-audit"
 import { SkillCharts } from "@/components/observe/SkillCharts"
+import { SkillCoverageCard } from "@/components/observe/SkillCoverageCard"
 import { SkillContentAudit } from "@/components/observe/SkillContentAudit"
 import { BookOpenIcon } from "lucide-react"
 import { useSkillContent } from "@/components/observe/use-skill-content"
@@ -284,6 +285,8 @@ export function SkillDetail({ taskId, sessionSkills, skillEvents, hasMainAgentWo
           {skillAggregates.length} skills/agents, {skillEvents.length} events
         </span>
       </div>
+
+      <SkillCoverageCard taskId={taskId} framework={framework} />
 
       <SkillCharts taskId={taskId} skillEvents={chartSkillEvents} />
 

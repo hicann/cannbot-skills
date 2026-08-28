@@ -14,7 +14,7 @@
  * result 同步写 sessionStorage（reload 后可恢复）；首次挂载时 hydrate 把 sessionStorage 灌进 store。
  */
 
-import type { AuditReport, SkillAuditStoredResult } from "@/lib/skill-eval-audit-types"
+import type { AuditReport, SkillAuditStoredResult } from "@/lib/sift-audit-types"
 
 export type AuditKind = "skill" | "agent" | "root" | "llm-root"
 
@@ -28,9 +28,9 @@ export interface SkillAuditJobState {
   running: boolean
   error: string | null
   result: SkillAuditResult | null
-  /** 最新进度消息（skill-eval on_progress 输出的一行）。 */
+  /** 最新进度消息（sift on_progress 输出的一行）。 */
   progress: string | null
-  /** 0-100，按 skill-eval 的批次/完成解析的粗略百分比。 */
+  /** 0-100，按 sift 的批次/完成解析的粗略百分比。 */
   percent: number
   /** 对账开始时间戳（ms），用于前端计算耗时。 */
   startedAt: number | null
@@ -126,7 +126,7 @@ export function startSkillAudit(opts: {
   })
 }
 
-interface SkillEvalStreamEvent {
+interface SiftStreamEvent {
   stage: "progress" | "result" | "error"
   percent?: number
   msg?: string
@@ -141,11 +141,11 @@ async function runSkillAudit(
   framework?: string,
 ): Promise<void> {
   const key = skillAuditKey(taskId, kind, name)
-  // skill / root 都走 audit-skilleval（root 的声明同 skill——从 session 恢复 SKILL.md，
-  // 只是 --kind root 切主 agent 作用域）；agent 走 audit-agenteval。skill 路由按 body.kind 选 --kind。
+  // skill / root 都走 audit-skillsift（root 的声明同 skill——从 session 恢复 SKILL.md，
+  // 只是 --kind root 切主 agent 作用域）；agent 走 audit-agentsift。skill 路由按 body.kind 选 --kind。
   const useSkillRoute = kind === "skill" || kind === "root" || kind === "llm-root"
   try {
-    const res = await fetch(useSkillRoute ? "/api/ai/audit-skilleval" : "/api/ai/audit-agenteval", {
+    const res = await fetch(useSkillRoute ? "/api/ai/audit-skillsift" : "/api/ai/audit-agentsift", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
@@ -167,7 +167,7 @@ async function runSkillAudit(
     if (!reader) throw new Error("无法读取对账流")
     const decoder = new TextDecoder()
     let buf = ""
-    const handle = (evt: SkillEvalStreamEvent): void => {
+    const handle = (evt: SiftStreamEvent): void => {
       if (evt.stage === "progress") {
         update(key, { running: true, progress: evt.msg ?? null, percent: evt.percent ?? 0 })
       } else if (evt.stage === "result") {
@@ -187,7 +187,7 @@ async function runSkillAudit(
       for (const line of lines) {
         if (!line.trim()) continue
         try {
-          handle(JSON.parse(line) as SkillEvalStreamEvent)
+          handle(JSON.parse(line) as SiftStreamEvent)
         } catch {
           /* 半行 / 非 JSON 忽略 */
         }
@@ -195,7 +195,7 @@ async function runSkillAudit(
     }
     if (buf.trim()) {
       try {
-        handle(JSON.parse(buf) as SkillEvalStreamEvent)
+        handle(JSON.parse(buf) as SiftStreamEvent)
       } catch {
         /* 尾行残缺忽略 */
       }

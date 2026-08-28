@@ -87,3 +87,10 @@ docs/report.md
 dbfile/
 jsonlfile/
 proxy/node_modules/
+# proxy test fixtures (binary/base64 — not for the repo)
+proxy/tests/data/codex-zstd-request.base64
+proxy/tests/data/codex-zstd-request.json
+
+# proxy test files depending on binary fixtures (not in repo)
+proxy/tests/request-body-decoder.test.ts
+proxy/tests/server-capture.integration.test.ts

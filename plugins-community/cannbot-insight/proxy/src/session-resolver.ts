@@ -21,6 +21,7 @@ export function sidFromPath(urlPath: string): string | null {
 }
 
 export function protocolFromPath(urlPath: string): Protocol | null {
+  if (urlPath.includes('/v1/responses')) return 'responses';
   if (urlPath.includes('/v1/messages') || urlPath.includes('/messages')) return 'anthropic';
   if (urlPath.includes('/v1/chat/completions') || urlPath.includes('/chat/completions')) return 'openai';
   return null;

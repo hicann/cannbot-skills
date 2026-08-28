@@ -6,8 +6,8 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 //
-// Server-only（fs/path）：被 skill-eval-audit.ts 等客户端可达文件不能 import fs，故本扫描逻辑独立成文件，
-// 仅由 audit-agenteval 服务端 route + 测试 import。
+// Server-only（fs/path）：被 sift-audit.ts 等客户端可达文件不能 import fs，故本扫描逻辑独立成文件，
+// 仅由 audit-agentsift 服务端 route + 测试 import。
 
 import fs from "node:fs"
 import path from "node:path"

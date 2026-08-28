@@ -13,7 +13,7 @@ import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CopyButton } from "@/components/observe/CopyButton"
-import { isClaudeFormatSession } from "@/lib/shared/session-format"
+import { isClaudeFormatSession, isProxyVersion } from "@/lib/shared/session-format"
 import { Button } from "@/components/ui/button"
 import { ArrowLeftIcon, LayoutDashboardIcon, MessageSquareIcon, SearchIcon, SparklesIcon, BarChart3Icon, FileSearchIcon, FileTextIcon, PlayIcon, CheckCircleIcon, RefreshCwIcon, WifiIcon, ShieldCheckIcon, GaugeIcon, GlobeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -34,7 +34,7 @@ import { FileReadAnalysis } from "@/components/observe/FileReadAnalysis"
 import { AgentCallGraph } from "@/components/observe/AgentCallGraph"
 import { ChatReplayView } from "@/components/observe/ChatReplayView"
 import { summarizeToolCallErrors } from "@/lib/tool-call-errors"
-import { dispatchOnlySkillNames } from "@/lib/skill-eval-audit"
+import { dispatchOnlySkillNames } from "@/lib/sift-audit"
 
 type TabKey = "overview" | "turns" | "wireRounds" | "trace" | "skills" | "workflowAnalyse" | "performance" | "context" | "fileReads" | "replay"
 
@@ -349,7 +349,7 @@ async function gatherExportData(
       if (k.startsWith(prefix)) {
         const v = sessionStorage.getItem(k)
         if (!v) continue
-        // 剥掉 _html（skill-eval 原始 HTML 报告，体积大且含 </script> 会破坏内联脚本；保留 findings/summary 等结构化结果）
+        // 剥掉 _html（sift 原始 HTML 报告，体积大且含 </script> 会破坏内联脚本；保留 findings/summary 等结构化结果）
         try {
           const parsed = JSON.parse(v)
           if (parsed && typeof parsed === "object" && "_html" in parsed) delete (parsed as Record<string, unknown>)._html
@@ -498,7 +498,7 @@ export default function SessionDetailPage({
   const [auditSelected, setAuditSelected] = useState<{ name: string; kind: "skill" | "agent" | "root" | "llm-root" } | null>(null)
   // 主 agent 编排 对账目标是否可用：session 首条 user turn(isSubagent=0)内容达阈值
   // （≥500 字）即注入的 workflow skill 声明。主 agent 通常只 dispatch、不 invoke skill，
-  // 其 workflow 声明只能从 turn0 取，故单独 gate（见 audit-skilleval kind=root）。
+  // 其 workflow 声明只能从 turn0 取，故单独 gate（见 audit-skillsift kind=root）。
   const [hasMainAgentWorkflow, setHasMainAgentWorkflow] = useState(false)
   // 主 agent 编排 的真名（扫盘按 turn0 body 匹配 disk SKILL.md 的 frontmatter name）。
   // null=未取/无 workflow；MAIN_AGENT_WORKFLOW_NAME 回退由端点返回。
@@ -1018,7 +1018,7 @@ export default function SessionDetailPage({
                     return (
                       <>
                         {ver ? <span className="text-muted-foreground">v{ver}</span> : null}
-                        {s.frameworkVersion?.endsWith("-proxy") ? <Badge variant="yellow">proxy</Badge> : null}
+                        {isProxyVersion(s.frameworkVersion) ? <Badge variant="yellow">proxy</Badge> : null}
                       </>
                     )
                   })()}

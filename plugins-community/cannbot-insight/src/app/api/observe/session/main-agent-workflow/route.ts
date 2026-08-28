@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { recoverWorkflowDeclaration, resolveWorkflowSkillName, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/skill-eval-audit';
+import { recoverWorkflowDeclaration, resolveWorkflowSkillName, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/sift-audit';
 
 /**
  * 主 agent 编排 对账目标的可用性 + 真名：

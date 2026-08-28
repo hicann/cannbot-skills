@@ -19,7 +19,7 @@ import {
 
 const REPORT = { skill_name: "x", summary: { total: 2, pass: 1, fail: 1, na: 0 }, warnings: [] }
 
-/** NDJSON 流：progress → result 事件（模拟 skill-eval-runner 回传）。 */
+/** NDJSON 流：progress → result 事件（模拟 sift-runner 回传）。 */
 function ndjsonResponse(events: Array<Record<string, unknown>>): Response {
   const body = events.map((e) => JSON.stringify(e)).join("\n") + "\n"
   return new Response(body, { status: 200, headers: { "Content-Type": "application/x-ndjson" } })
@@ -73,7 +73,7 @@ describe("skill-audit-job (cross-tab resume)", () => {
     expect(st.error).toBeNull()
   })
 
-  it("agent kind → POST 到 audit-agenteval", () => {
+  it("agent kind → POST 到 audit-agentsift", () => {
     startSkillAudit({ taskId: "ses_1", kind: "agent", name: "developer" })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
@@ -81,11 +81,11 @@ describe("skill-audit-job (cross-tab resume)", () => {
     expect(body.skillName).toBeUndefined()
   })
 
-  it("root kind → POST 到 audit-skilleval 且带 kind:root（合成主 agent 编排 目标，body 从 turn0 恢复）", () => {
+  it("root kind → POST 到 audit-skillsift 且带 kind:root（合成主 agent 编排 目标，body 从 turn0 恢复）", () => {
     startSkillAudit({ taskId: "ses_1", kind: "root", name: "主 agent 编排" })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe("/api/ai/audit-skilleval")
+    expect(url).toBe("/api/ai/audit-skillsift")
     const body = JSON.parse(init.body as string)
     expect(body.skillName).toBe("主 agent 编排")
     expect(body.kind).toBe("root")

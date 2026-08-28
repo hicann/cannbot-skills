@@ -20,6 +20,11 @@ import {
   type ClaudeJsonlLine,
   type ContentBlock,
 } from './claude-jsonl';
+import { classifyProxyCapture } from '../proxy-classify';
+import {
+  parseClaudeAvailableSkills,
+  parseOpencodeAvailableSkills,
+} from '@/lib/skill-coverage';
 
 export interface FullContextTool {
   name: string;
@@ -81,16 +86,11 @@ export function readFullContext(filePath: string): FullContext | null {
   return { systemPrompt, tools, memoryFiles, skills };
 }
 
-// cpx 捕获文件自带来源标记：每行顶层 source:"claude-proxy" / "opencode-proxy"
-// （保留原始 agent 名 + "-proxy" 后缀）。与路径无关——文件改名/移动/归档后
-// 标记仍在。导入时取该值存入 Session.version，用于列表区分来源。
+// cpx 捕获来源标记（存 Session.version 用）。判定权威源是统一分类器
+// proxy-classify.ts（meta > 行级 source > wire 指纹，含早期无标记产物兜底），
+// 本函数仅保留 marker 兼容签名。
 export function proxySourceOf(filePath: string): string | null {
-  const lines = parseJsonlLines(filePath);
-  for (const l of lines) {
-    const s = (l as { source?: unknown }).source;
-    if (typeof s === 'string' && s.endsWith('-proxy')) return s;
-  }
-  return null;
+  return classifyProxyCapture(filePath).marker;
 }
 
 // post-patch 读 cc-wire-round.requestParams（spec §4.1 导入归宿 "post-patch"）：
@@ -122,6 +122,40 @@ export function readTurnRequestParams(filePath: string, turnIndex: number): Turn
       maxTokens: rp?.maxTokens ?? null,
       model: rp?.model ?? null,
     };
+  }
+  return null;
+}
+
+// Skill 覆盖度（Skills tab 用）：从捕获/原始 jsonl 提取"可用 skills 全集"。
+// 与 readFullContext 同构 —— API 层调本扩展层，核心管线不感知。
+// 全集只注入一次（系统提示），故取第一个能解析出非空列表的文本即返回：
+//   - proxy 捕获：assistant 行 x_cannbay.data.system（优先）→ legacy 顶层 system
+//   - claude 原生：user/system 行 message.content（system-reminder 注入）
+//   - opencode-proxy：system 字段里的 <available_skills> XML 块
+export function readAvailableSkills(
+  filePath: string
+): { skills: Array<{ name: string; description: string; origin: string | null }>; format: 'claude-list' | 'opencode-xml' } | null {
+  const lines = parseJsonlLines(filePath);
+  const candidates: string[] = [];
+  for (const line of lines) {
+    const xb = (line as { x_cannbay?: { data?: { system?: unknown } } }).x_cannbay;
+    const sysAny = xb?.data?.system ?? (line as { system?: unknown }).system;
+    if (typeof sysAny === 'string' && sysAny) candidates.push(sysAny);
+    const msg = line.message;
+    if (msg) {
+      if (typeof msg.content === 'string' && msg.content) candidates.push(msg.content);
+      else if (Array.isArray(msg.content)) {
+        for (const b of msg.content) {
+          if (b.type === 'text' && b.text) candidates.push(b.text);
+        }
+      }
+    }
+  }
+  for (const text of candidates) {
+    const xml = parseOpencodeAvailableSkills(text);
+    if (xml.length > 0) return { skills: xml, format: 'opencode-xml' };
+    const list = parseClaudeAvailableSkills(text);
+    if (list.length > 0) return { skills: list, format: 'claude-list' };
   }
   return null;
 }

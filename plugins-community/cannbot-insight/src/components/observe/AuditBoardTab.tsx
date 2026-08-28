@@ -12,7 +12,7 @@ import { WorkflowAnalyseTab } from "@/components/observe/WorkflowAnalyseTab"
 import { SkillAuditTab } from "@/components/observe/SkillAuditTab"
 
 /**
- * Audit 板块容器：把原 Audit（workflow 审计 v1-v4）与 skill 审计（skill-eval 对账）收进同一主 tab，
+ * Audit 板块容器：把原 Audit（workflow 审计 v1-v4）与 skill 审计（sift 对账）收进同一主 tab，
  * 内部拆两个子 tab（受控：sub/onSubChange 由 page 持有，便于 Skills tab 的"对账 ↗"跨 tab 跳转时
  * 由 page 直接 setSub("skill") + setSelected(skill) 一气呵成，无需 effect/外部 store）。
  * WorkflowAnalyseTab 自身状态（audit-job 模块级 + localStorage）已能跨 unmount 恢复。

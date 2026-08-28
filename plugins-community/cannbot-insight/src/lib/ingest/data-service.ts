@@ -12,8 +12,9 @@ import fs from 'node:fs';
 import { BRAND_SOURCE_TYPE } from '@/lib/branding';
 import { getAdapter } from './adapters/index';
 import { listSubagentSessionsWithDb, readSessionWithDb, readSessionMeta } from './adapters/opencode-db';
-import { listSubagentSessions as listClaudeSubagentSessions, collectSubagentToolUseMappings as collectClaudeToolUseMappings, extractVersion as extractClaudeVersion, isMetaPayload, type XCannbay } from './adapters/claude-jsonl';
-import { proxySourceOf } from './adapters/claude-jsonl-full-context';
+import { listSubagentSessions as listClaudeSubagentSessions, collectSubagentToolUseMappings as collectClaudeToolUseMappings, extractVersion as extractClaudeVersion } from './adapters/claude-jsonl';
+import { classifyProxyCapture, readCcSessionMeta } from './proxy-classify';
+import { isProxyVersion } from '../shared/session-format';
 import { normalize } from './normalize';
 import { splitIntoTurns, resetIdCounter } from './turn-split';
 import type { TurnRow, ToolCallRow, SkillEventRow } from './turn-split';
@@ -351,43 +352,25 @@ export async function importSession(
     // merge 行为保持不变 —— 不回填 version），新 session 路径仍用完整 version
     let proxyVersionMarker: string | null = null;
     let metaFrameworkOverride: string | null = null;
+    // 统一分类器结果（meta > 行级 source > wire 指纹，见 proxy-classify.ts）：
+    // framework 是 agent 归属（opencode / claude-code / codex），marker 进 version。
+    let proxyClass: ReturnType<typeof classifyProxyCapture> | null = null;
     if (srcType === 'opencode-db' && sharedDb) {
       sessionMeta = readSessionMeta(sharedDb, sessionId);
     } else if (srcType === 'claude-jsonl') {
-      // 优先级（spec §6 + §4.4）：cc-session-meta 文件级声明 > 行级 source 标记
-      // > jsonl version 字段。meta 是文件级权威源（producer/framework/ccVersion），
-      // 行级标记随行存在但语义略次。norm/ 已镜像 meta 文件，cannbay2 也走它。
-      const metaPath = dbPath.replace(/\.jsonl$/, '.meta.json');
-      let metaFramework: string | null = null;
-      let metaCcVersion: string | null = null;
-      try {
-        if (fs.existsSync(metaPath)) {
-          const raw = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { x_cannbay?: { schema?: string; version?: number; data?: { producer?: string; framework?: string; ccVersion?: string } } };
-          const xb = raw.x_cannbay;
-          if (xb && isMetaPayload(xb as XCannbay, 'cc-session-meta')) {
-            const d = xb.data!;
-            metaFramework = d.framework ?? null;
-            metaCcVersion = d.ccVersion ?? null;
-          }
-        }
-      } catch { /* meta 不可读 → 回退行级 */ }
-      // cpx 捕获文件每行带 source 标记（claude-proxy / opencode-proxy）：
-      // 来源随文件走（改名/移动不失效）。meta 缺失时仍靠行级标记兜底。
-      proxyVersionMarker = proxySourceOf(dbPath);
+      const metaCcVersion = readCcSessionMeta(dbPath)?.ccVersion ?? null;
+      proxyClass = classifyProxyCapture(dbPath);
+      proxyVersionMarker = proxyClass.marker;
       const agentVersion = metaCcVersion ?? extractClaudeVersion(dbPath);
       sessionMeta.version = proxyVersionMarker
         ? (agentVersion ? `${agentVersion}-${proxyVersionMarker}` : proxyVersionMarker)
         : agentVersion;
-      // meta framework 优先（文件级权威源）；缺失则按行级 source 标记推断
-      metaFrameworkOverride = metaFramework;
+      metaFrameworkOverride = proxyClass.isProxy ? proxyClass.framework : null;
     }
-    // framework 是 agent 归属：cc-session-meta 文件级声明优先（spec §4.4 权威源），
-    // 否则按行级 source 标记推断（opencode-proxy → opencode，其他 → claude-code）。
+    // framework 是 agent 归属：分类器判定（meta/行级/指纹三级信号）优先；
+    // 非 proxy 的 claude-jsonl 是 native claude-code。
     const frameworkForCapture = metaFrameworkOverride
-      ?? (srcType === 'claude-jsonl' && (proxyVersionMarker?.endsWith('opencode-proxy') ?? false)
-        ? 'opencode'
-        : srcType === 'claude-jsonl' ? 'claude-code'
-        : srcType);
+      ?? (srcType === 'claude-jsonl' ? 'claude-code' : srcType);
 
     if (rawInteractions.length === 0) {
       if (sharedDb) sharedDb.close();
@@ -748,7 +731,10 @@ export async function deltaRefreshSession(
     throw new Error(`Session not found or no sourcePath: "${sessionId}"`);
   }
 
-  const sourceType = session.framework === 'opencode' && session.version?.endsWith('-proxy')
+  // sourceType 推断走统一分类器（proxy-classify.ts）：凡 proxy 捕获
+  // （claude / opencode / codex，version 带 -proxy 后缀）都是 claude 格式
+  // jsonl 变体 → claude-jsonl adapter。native opencode 走 opencode-db。
+  const sourceType = isProxyVersion(session.version)
     ? 'claude-jsonl'
     : session.framework === 'opencode' ? 'opencode-db'
     : session.framework === 'claude-code' ? 'claude-jsonl'
@@ -1027,9 +1013,29 @@ export async function deltaRefreshSession(
     const safeDate = (d: Date | null) => d instanceof Date && !isNaN(d.getTime()) ? d : null;
     const query = previewText(allTurnsAfterMerge.find(t => t.role === 'user')?.content);
 
+    // 同 merge 路径的历史脏数据矫正：proxy 捕获（含无 source 标记的早期产物，
+    // 靠 wire 指纹兜底识别）重刷新时回填 framework/version，修复错显归属。
+    // 反向矫正：历史上被污染导出件误标的 claude-proxy 徽标清掉（导出件
+    // latency 靠 source 行内识别仍生效，不受 version 影响）。
+    let refreshProxyFix: { framework?: string; version: string | null } | null = null;
+    if (srcType === 'claude-jsonl') {
+      const cls = classifyProxyCapture(session.sourcePath);
+      if (cls.isProxy) {
+        const agentVersion = extractClaudeVersion(session.sourcePath);
+        const marker = cls.marker!;
+        refreshProxyFix = {
+          framework: cls.framework!,
+          version: agentVersion ? `${agentVersion}-${marker}` : marker,
+        };
+      } else if (isProxyVersion(session.version)) {
+        refreshProxyFix = { version: extractClaudeVersion(session.sourcePath) };
+      }
+    }
+
     await prisma.session.update({
       where: { id: session.id },
       data: {
+        ...(refreshProxyFix ?? {}),
         totalTokens: safeNum(updatedAggregates.totalTokens),
         totalInputTokens: safeNum(updatedAggregates.totalInputTokens),
         totalOutputTokens: safeNum(updatedAggregates.totalOutputTokens),

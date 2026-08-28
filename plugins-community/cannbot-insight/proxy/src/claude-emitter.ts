@@ -66,7 +66,7 @@ export function ccVersionFromSystem(system: string | AnthropicContentBlock[] | u
 }
 
 export function proxySourceMarker(protocol: Protocol): string {
-  return protocol === 'openai' ? 'opencode-proxy' : 'claude-proxy';
+  return protocol === 'openai' ? 'opencode-proxy' : protocol === 'responses' ? 'codex-proxy' : 'claude-proxy';
 }
 
 interface RequestBody {

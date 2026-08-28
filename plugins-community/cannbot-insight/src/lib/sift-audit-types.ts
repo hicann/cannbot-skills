@@ -7,10 +7,10 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 /**
- * AuditReport 的 TS 类型固化，对应 skill-eval 的
- * `skill_eval/models/audit_models.py`（AuditReport / AuditFinding /
- * InstructionAggregate）。后端 spawn skill-eval 跑出的 audit-report.json
- * 即此 shape，经 NDJSON result 事件原样回传前端（见 skill-eval-runner.ts）。
+ * AuditReport 的 TS 类型固化，对应 sift 的
+ * `sift/models/audit_models.py`（AuditReport / AuditFinding /
+ * InstructionAggregate）。后端 spawn sift 跑出的 audit-report.json
+ * 即此 shape，经 NDJSON result 事件原样回传前端（见 sift-runner.ts）。
  *
  * 判定模型两个正交维度：
  * - verdict（结果）五态：PASS / FAIL / N/A / UNRESOLVED（未判定，可重跑）/
@@ -84,7 +84,7 @@ export interface StageBreakdownRow {
   seconds: number
   input_tokens: number
   output_tokens: number
-  /** cache 命中读取的 token（仅 LLM 阶段 refine/headline/judge 才有；对齐 skill-eval stage_breakdown 透传）。 */
+  /** cache 命中读取的 token（仅 LLM 阶段 refine/headline/judge 才有；对齐 sift stage_breakdown 透传）。 */
   cache_read_input_tokens?: number
   calls: number
   /** refine/headline 在 calls=0 时："缓存命中"（开关开、跑了秒回）/ "未启用"（开关关）；其余阶段空。 */

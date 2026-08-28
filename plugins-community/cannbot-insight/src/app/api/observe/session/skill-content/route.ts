@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { selectSkillContent, type SkillToolCall } from '@/lib/skill-content';
-import { recoverWorkflowDeclaration, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/skill-eval-audit';
+import { recoverWorkflowDeclaration, MAIN_AGENT_WORKFLOW_NAME } from '@/lib/sift-audit';
 
 export async function GET(request: NextRequest) {
   try {

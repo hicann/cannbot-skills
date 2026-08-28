@@ -18,7 +18,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { createElement } from "react"
 import sample from "./data/audit-report-sample.json"
 import multi from "./data/audit-report-multi.json"
-import type { AuditFinding, AuditReport, SkillAuditStoredResult } from "@/lib/skill-eval-audit-types"
+import type { AuditFinding, AuditReport, SkillAuditStoredResult } from "@/lib/sift-audit-types"
 import {
   ALL_VERDICTS,
   CATEGORY_LABEL,

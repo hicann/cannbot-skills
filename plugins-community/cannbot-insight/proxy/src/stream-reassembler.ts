@@ -24,7 +24,9 @@ export interface Reassembler {
 }
 
 export function createReassembler(protocol: Protocol): Reassembler {
-  return protocol === 'anthropic' ? new AnthropicReassembler() : new OpenAIReassembler();
+  if (protocol === 'anthropic') return new AnthropicReassembler();
+  if (protocol === 'responses') return new ResponsesApiReassembler();
+  return new OpenAIReassembler();
 }
 
 interface AnthropicBlockState {
@@ -243,6 +245,132 @@ class OpenAIReassembler implements Reassembler {
         }
       }
       content.push({ type: 'tool_use', id: tc.id, name: tc.name, input });
+    }
+    return { model: this.model, stop_reason: this.stopReason, content, usage: this.usage, firstTokenAt: this.firstTokenAt };
+  }
+}
+
+class ResponsesApiReassembler implements Reassembler {
+  private model: string | null = null;
+  private stopReason: string | null = null;
+  private usage: AnthropicUsage | null = null;
+  private firstTokenAt: number | null = null;
+  private items = new Map<number, {
+    type: string;
+    role?: string;
+    text?: string;
+    name?: string;
+    argsPartial?: string;
+    id?: string;
+    input?: Record<string, unknown>;
+  }>();
+  private buffer = '';
+
+  feed(chunk: string): void {
+    this.buffer += chunk;
+    let idx: number;
+    while ((idx = this.buffer.indexOf('\n')) >= 0) {
+      const line = this.buffer.slice(0, idx).replace(/\r$/, '');
+      this.buffer = this.buffer.slice(idx + 1);
+      this.processLine(line);
+    }
+  }
+
+  private processLine(line: string): void {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let event: Record<string, unknown>;
+    try { event = JSON.parse(data); } catch { return; }
+    this.handleEvent(event);
+  }
+
+  private handleEvent(e: Record<string, unknown>): void {
+    const type = e.type as string;
+    if (!type) return;
+    switch (type) {
+      case 'response.created': {
+        const resp = (e as { response?: Record<string, unknown> }).response;
+        if (resp?.model) this.model = resp.model as string;
+        const u = resp?.usage as AnthropicUsage | undefined;
+        if (u) this.usage = { ...u };
+        break;
+      }
+      case 'response.output_item.added': {
+        const idx = e.output_index as number;
+        const item = e.item as Record<string, unknown>;
+        if (item && typeof idx === 'number') {
+          this.items.set(idx, {
+            type: (item.type as string) ?? 'message',
+            role: item.role as string | undefined,
+            text: '',
+            name: item.name as string | undefined,
+            argsPartial: '',
+            id: item.call_id as string | undefined,
+          });
+        }
+        break;
+      }
+      case 'response.output_text.delta': {
+        if (this.firstTokenAt === null) this.firstTokenAt = Date.now();
+        const idx = e.output_index as number;
+        const item = this.items.get(idx);
+        if (item) item.text = (item.text ?? '') + (e.delta as string);
+        break;
+      }
+      case 'response.function_call_arguments.delta': {
+        if (this.firstTokenAt === null) this.firstTokenAt = Date.now();
+        const idx = e.output_index as number;
+        const item = this.items.get(idx);
+        if (item) item.argsPartial = (item.argsPartial ?? '') + (e.delta as string);
+        break;
+      }
+      case 'response.output_item.done': {
+        const idx = e.output_index as number;
+        const item = e.item as Record<string, unknown> | undefined;
+        const state = this.items.get(idx);
+        if (state && item) {
+          if (item.type === 'message' && Array.isArray(item.content)) {
+            for (const b of item.content as Array<Record<string, unknown>>) {
+              if (b.type === 'output_text' && typeof b.text === 'string') state.text = b.text;
+            }
+          }
+          if (item.type === 'function_call') {
+            state.name = item.name as string | undefined;
+            state.id = item.call_id as string | undefined;
+            if (typeof item.arguments === 'string') {
+              try { state.input = JSON.parse(item.arguments); } catch { state.input = { _raw: item.arguments }; }
+            }
+          }
+        }
+        break;
+      }
+      case 'response.completed': {
+        const resp = (e as { response?: Record<string, unknown> }).response;
+        if (resp?.model) this.model = resp.model as string;
+        this.stopReason = (resp?.status as string) ?? null;
+        const u = resp?.usage as Record<string, unknown> | undefined;
+        if (u) {
+          this.usage = {
+            input_tokens: u.input_tokens as number | undefined,
+            output_tokens: u.output_tokens as number | undefined,
+            cache_read_input_tokens: (u as { input_tokens_details?: { cached_tokens?: number } }).input_tokens_details?.cached_tokens,
+          };
+        }
+        break;
+      }
+    }
+  }
+
+  result(): ReassembledResponse {
+    const sorted = [...this.items.entries()].sort((a, b) => a[0] - b[0]);
+    const content: AnthropicContentBlock[] = [];
+    for (const [, item] of sorted) {
+      if (item.type === 'message') {
+        if (item.text) content.push({ type: 'text', text: item.text });
+      } else if (item.type === 'function_call') {
+        content.push({ type: 'tool_use', id: item.id ?? '', name: item.name ?? '', input: item.input ?? {} });
+      }
     }
     return { model: this.model, stop_reason: this.stopReason, content, usage: this.usage, firstTokenAt: this.firstTokenAt };
   }

@@ -13,7 +13,7 @@ import os from "node:os"
 import path from "node:path"
 
 /**
- * audit-agenteval 路由测试：agent .md 从 AGENTS_SCAN_ROOT 扫描恢复（不在 session），
+ * audit-agentsift 路由测试：agent .md 从 AGENTS_SCAN_ROOT 扫描恢复（不在 session），
  * session 侧走结构化 records（--transcript）。mock spawn + prisma + 真实 tmp 扫描根。
  */
 
@@ -47,11 +47,11 @@ const fakePrisma = {
 }
 vi.mock("@/lib/db", () => ({ prisma: fakePrisma }))
 
-const { POST } = await import("@/app/api/ai/audit-agenteval/route")
+const { POST } = await import("@/app/api/ai/audit-agentsift/route")
 const { resolveScanRoot } = await import("@/lib/agent-md-scan")
 
 function makeRequest(body: unknown): Request {
-  return new Request("http://localhost/api/ai/audit-agenteval", {
+  return new Request("http://localhost/api/ai/audit-agentsift", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -108,8 +108,8 @@ afterEach(() => {
   fs.rmSync(scanRoot, { recursive: true, force: true })
 })
 
-describe("audit-agenteval route", () => {
-  it("happy：扫 .md → 结构化 records → spawn skill-eval --kind agent → NDJSON result", async () => {
+describe("audit-agentsift route", () => {
+  it("happy：扫 .md → 结构化 records → spawn sift --kind agent → NDJSON result", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "cannbot-insight" })
     fakePrisma.interactionBridge.findMany.mockResolvedValue([
       { subagentName: "developer", subagentType: null },
@@ -172,7 +172,7 @@ describe("audit-agenteval route", () => {
     expect(res.status).toBe(404)
   })
 
-  it("skill-eval 不在 PATH（spawn ENOENT）→ NDJSON error 事件", async () => {
+  it("sift 不在 PATH（spawn ENOENT）→ NDJSON error 事件", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", framework: "cannbot-insight" })
     fakePrisma.interactionBridge.findMany.mockResolvedValue([{ subagentName: "developer", subagentType: null }])
     fakePrisma.turn.findMany.mockResolvedValue([])
@@ -190,10 +190,10 @@ describe("audit-agenteval route", () => {
     const events = await readNdjson(res)
     const last = events.at(-1) as { stage: string; msg: string }
     expect(last.stage).toBe("error")
-    expect(last.msg).toMatch(/skill-eval 未找到/)
+    expect(last.msg).toMatch(/sift 未找到/)
   })
 
-  it("skill-eval 非零退出（exit 2）→ NDJSON error 事件", async () => {
+  it("sift 非零退出（exit 2）→ NDJSON error 事件", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", framework: "cannbot-insight" })
     fakePrisma.interactionBridge.findMany.mockResolvedValue([{ subagentName: "developer", subagentType: null }])
     fakePrisma.turn.findMany.mockResolvedValue([])

@@ -33,10 +33,10 @@ const fakePrisma = {
 }
 vi.mock("@/lib/db", () => ({ prisma: fakePrisma }))
 
-const { POST } = await import("@/app/api/ai/audit-skilleval/route")
+const { POST } = await import("@/app/api/ai/audit-skillsift/route")
 
 function makeRequest(body: unknown): Request {
-  return new Request("http://localhost/api/ai/audit-skilleval", {
+  return new Request("http://localhost/api/ai/audit-skillsift", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -86,7 +86,7 @@ function seedSkillBody(): void {
   ])
 }
 
-describe("audit-skilleval route", () => {
+describe("audit-skillsift route", () => {
   beforeEach(() => {
     lastWrittenSkillMd = null
     spawnMock.mockReset()
@@ -97,7 +97,7 @@ describe("audit-skilleval route", () => {
     fakePrisma.turn.findFirst.mockReset()
   })
 
-  it("happy：恢复正文 → spawn skill-eval → NDJSON result 事件", async () => {
+  it("happy：恢复正文 → spawn sift → NDJSON result 事件", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
     seedSkillBody()
     spawnMock.mockImplementation(happySpawn())
@@ -194,7 +194,7 @@ describe("audit-skilleval route", () => {
     expect(res.status).toBe(404)
   })
 
-  it("skill-eval 不在 PATH（spawn ENOENT）→ NDJSON error 事件", async () => {
+  it("sift 不在 PATH（spawn ENOENT）→ NDJSON error 事件", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
     seedSkillBody()
     spawnMock.mockImplementation(() => {
@@ -210,10 +210,10 @@ describe("audit-skilleval route", () => {
     const events = await readNdjson(res)
     const last = events.at(-1) as { stage: string; msg: string }
     expect(last.stage).toBe("error")
-    expect(last.msg).toMatch(/skill-eval 未找到/)
+    expect(last.msg).toMatch(/sift 未找到/)
   })
 
-  it("skill-eval 非零退出 → NDJSON error 事件带 exit code", async () => {
+  it("sift 非零退出 → NDJSON error 事件带 exit code", async () => {
     fakePrisma.session.findFirst.mockResolvedValue({ id: "ses_cuid_1", sourcePath: "/tmp/fake.db", framework: "opencode" })
     seedSkillBody()
     spawnMock.mockImplementation(() => {

@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from "react"
 import { BRAND_NAME, BRAND_SOURCE_TYPE } from '@/lib/branding'
+import { isProxyVersion } from '@/lib/shared/session-format'
 import {
   Table,
   TableBody,
@@ -186,7 +187,7 @@ export function ImportHistory() {
               const knownFramework = fwSource === "opencode" || fwSource === "claude-code" || fwSource === BRAND_SOURCE_TYPE
                 ? fwSource
                 : null
-              const isProxy = vSource?.endsWith("-proxy") ?? false
+              const isProxy = isProxyVersion(vSource)
               const isProxyCapture = entry.sourceType === "claude-jsonl" && (entry.filePath?.includes("/proxy/") ?? false)
               const legacyOpencode = isProxyCapture && /cpx-ses_[^/]*\.jsonl$/.test(entry.filePath ?? "")
               const showOpencode = knownFramework === "opencode" || (!knownFramework && legacyOpencode)

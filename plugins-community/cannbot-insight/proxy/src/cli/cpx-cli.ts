@@ -66,8 +66,8 @@ const INSIGHT_BASE = `http://localhost:${INSIGHT_PORT}`;
 const USAGE = `cpx — agent↔模型明文捕获代理编排器
 
 用法：
-  cpx <agent-cmd> [args...]              例: cpx claude
-  cpx --agent <claude|opencode|openai|generic> -- <cmd> [args]
+  cpx <agent-cmd> [args...]              例: cpx claude / cpx codex
+  cpx --agent <claude|opencode|codex|openai|generic> -- <cmd> [args]
   cpx status [--kill [--all]]           查看状态；--kill 清理无 sid 的孤儿 proxy，--all 连活跃会话一起清
   cpx config [dedup on|off]             查看/配置；dedup=注入压缩（默认 off，热生效，只压缩捕获记录不改转发）
   cpx normalize [<file.jsonl|sid>]      重新生成 insight-native 规范文件（norm/）；缺省 = 全部捕获
@@ -75,7 +75,7 @@ const USAGE = `cpx — agent↔模型明文捕获代理编排器
 
 在原有 claude / opencode 命令前加 cpx，其他使用完全无变化。agent 退出后自动生成 norm/ 规范文件、导入 cannbot-insight 并开浏览器。`;
 
-type AgentProfile = 'claude' | 'opencode' | 'openai' | 'generic';
+type AgentProfile = 'claude' | 'opencode' | 'codex' | 'openai' | 'generic';
 
 function log(msg: string): void { console.error(`[cpx-cli] ${msg}`); }
 
@@ -119,6 +119,7 @@ function parseArgs(argv: string[]): { profile: AgentProfile; agentCmd: string; a
     const base = path.basename(agentCmd);
     if (base === 'claude' || base === 'claude-code') profile = 'claude';
     else if (base === 'opencode') profile = 'opencode';
+    else if (base === 'codex') profile = 'codex';
     else profile = 'generic';
   }
   return { profile: profile!, agentCmd, agentArgs };
@@ -183,7 +184,8 @@ function startSessionProxy(sid: string, anthropicUpstream: string, openaiUpstrea
       resolve({ port, child, stop });
     };
     child.stdout?.on('data', (d: Buffer) => {
-      const m = d.toString().match(/http:\/\/127\.0\.0\.1:(\d+)/);
+      const s = d.toString();
+      const m = s.match(/http:\/\/127\.0\.0\.1:(\d+)/);
       if (m) onPort(parseInt(m[1]));
     });
     child.stderr?.on('data', (d: Buffer) => process.stderr.write(d));
@@ -361,6 +363,26 @@ function buildLaunch(profile: AgentProfile, proxyPort: number, claude: ClaudeSet
       const provider: Record<string, { options: { baseURL: string } }> = {};
       for (const id of providerIds) provider[id] = { options: { baseURL: `${proxyUrl}/${id}/` } };
       return { env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider }) }, extraArgs: [] };
+    }
+    case 'codex': {
+      // codex 有两种 auth：ChatGPT 登录（~/.codex/auth.json，默认）或 API key。
+      // 有 API key → 创建自定义 provider（requires_openai_auth=false，env_key 走
+      // API key）；无 API key → 仅覆盖 openai_base_url，保留内置 openai provider
+      // 的 ChatGPT 登录 auth。codex 在 base_url 后追加 /responses，所以 base_url
+      // 需带 /v1 后缀 → codex 发 POST /v1/responses，proxy 按路径分发。
+      if (process.env.OPENAI_API_KEY) {
+        const overrides = [
+          'model_provider=cpx_proxy',
+          'model_providers.cpx_proxy.name="cpx-proxy"',
+          `model_providers.cpx_proxy.base_url="${proxyUrl}/v1"`,
+          'model_providers.cpx_proxy.env_key="OPENAI_API_KEY"',
+          'model_providers.cpx_proxy.wire_api="responses"',
+          'model_providers.cpx_proxy.requires_openai_auth=false',
+        ].flatMap((o) => ['-c', o]);
+        return { env: {}, extraArgs: overrides };
+      }
+      // ChatGPT 登录用户：仅覆盖 base_url，不碰 auth
+      return { env: {}, extraArgs: ['-c', `openai_base_url="${proxyUrl}/v1"`] };
     }
     case 'openai':
     case 'generic':
@@ -594,8 +616,12 @@ async function main(): Promise<void> {
   if (sub === 'normalize') {
     const arg = process.argv[3];
     if (arg) {
-      const file = arg.endsWith('.jsonl') ? path.resolve(arg) : path.join(PROXY_DIR, `${arg}.jsonl`);
-      if (!fs.existsSync(file)) { log(`capture not found: ${file}`); process.exit(2); }
+      // Accept sid with or without cpx- prefix: try <sid>.jsonl, then cpx-<sid>.jsonl
+      const candidates = arg.endsWith('.jsonl')
+        ? [path.resolve(arg)]
+        : [path.join(PROXY_DIR, `${arg}.jsonl`), path.join(PROXY_DIR, `cpx-${arg}.jsonl`)];
+      const file = candidates.find(f => fs.existsSync(f));
+      if (!file) { log(`capture not found: ${candidates.join(', ')}`); process.exit(2); }
       const r = normalizeSession(file);
       if (!r) { log('normalize failed'); process.exit(1); }
       log(`norm: ${r.mainFile} (+${r.subagentFiles.length} subagents)`);
@@ -644,11 +670,22 @@ async function main(): Promise<void> {
   const providerUpstreams = profile === 'opencode' ? discoverProviderUpstreams(opencodeProviderIds) : {};
 
   const sid = randomUUID();
+
+  // codex ChatGPT 登录用户：proxy 上游需指向 chatgpt.com 后端（不是
+  // api.openai.com）。检测 ~/.codex/auth.json 是否存在来判断 auth 模式。
+  // cpx 已有 API key 的走自定义 provider（api.openai.com），不需要此覆盖。
+  if (profile === 'codex' && !process.env.OPENAI_API_KEY) {
+    const codexAuth = path.join(os.homedir(), '.codex', 'auth.json');
+    if (fs.existsSync(codexAuth)) {
+      process.env.CANNBOT_PROXY_RESPONSES_UPSTREAM = 'https://chatgpt.com/backend-api/codex';
+    }
+  }
+
   const sessionProxy = await startSessionProxy(sid, claude.upstream, openaiUpstream, providerUpstreams);
   const jsonlPath = sessionFilePath(sid);
   const { env, extraArgs } = buildLaunch(profile, sessionProxy.port, claude, agentArgs);
 
-  const displayUpstream = profile === 'opencode' || profile === 'openai' || profile === 'generic'
+  const displayUpstream = profile === 'opencode' || profile === 'openai' || profile === 'generic' || profile === 'codex'
     ? openaiUpstream
     : claude.upstream;
 

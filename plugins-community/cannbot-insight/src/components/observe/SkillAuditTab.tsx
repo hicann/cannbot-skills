@@ -12,8 +12,8 @@ import { useSyncExternalStore } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { deriveAuditableTargets } from "@/lib/skill-eval-audit"
-import { MAIN_AGENT_WORKFLOW_NAME } from "@/lib/skill-eval-audit"
+import { deriveAuditableTargets } from "@/lib/sift-audit"
+import { MAIN_AGENT_WORKFLOW_NAME } from "@/lib/sift-audit"
 import { AuditReportView } from "@/components/observe/skill-audit/AuditReportView"
 import {
   skillAuditKey,
@@ -27,7 +27,7 @@ import {
 
 /**
  * Skill audit 子 tab：列出本 session 可对账的声明单元——skill（invoke/use）与 agent（dispatch），
- * 跑 skill-eval audit（不 re-run）。running/result/error 由模块级 skill-audit-job store 持有
+ * 跑 sift audit（不 re-run）。running/result/error 由模块级 skill-audit-job store 持有
  * （cross-tab resume：切到别的 tab 组件 unmount 后 fetch 继续在后台、状态保留；切回来
  * useSyncExternalStore 读回 running/result）。skill 正文从 session 恢复，agent .md 从本地扫描。
  */
@@ -213,7 +213,7 @@ function EntryPanel({
       <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground px-6">
         <div className="w-full max-w-md">
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="animate-pulse">正在跑 skill-eval audit…</span>
+            <span className="animate-pulse">正在跑 sift audit…</span>
             <span className="tabular-nums font-medium text-foreground">{Math.round(smoothPct)}% · {elapsedStr}</span>
           </div>
           <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
@@ -248,7 +248,7 @@ function EntryPanel({
   return (
     <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
       <div>
-        对 <span className="font-medium text-foreground">{entry.name}</span>（{entry.kind}）跑 skill-eval 对账
+        对 <span className="font-medium text-foreground">{entry.name}</span>（{entry.kind}）跑 sift 对账
         <div className="text-xs mt-1">
           {entry.kind === "skill"
             ? "不 re-run，对账真实执行 vs SKILL.md 声明（正文从 session 恢复）"

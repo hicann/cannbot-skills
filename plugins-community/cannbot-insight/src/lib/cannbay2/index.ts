@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { listSessions, materializeSession, uploadFolder, type Cannbay2SessionEntry, type UploadResult } from './mirror';
-import { isMetaPayload } from '../ingest/adapters/claude-jsonl';
+import { readCcSessionMeta } from '../ingest/proxy-classify';
+import { isProxyVersion } from '../shared/session-format';
 import { governText } from './governance';
 import { exportSessionToClaudeJsonl } from './export';
 import { importSession } from '@/lib/ingest/data-service';
@@ -130,18 +131,11 @@ async function patchXCannbayColumns(mainJsonl: string, taskId: string, prisma: P
   // 仅 insight-export 生效：cpx 捕获的 version/framework 由导入管线按行
   // 标记计算 —— version 形如 '2.1.234.467-claude-proxy'（徽标靠 -proxy
   // 后缀），meta 里的纯 ccVersion 会把徽标覆盖掉。
-  const metaPath = mainJsonl.replace(/\.jsonl$/, '.meta.json');
-  if (fs.existsSync(metaPath)) {
-    try {
-      const metaJson = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { x_cannbay?: { schema?: string; version?: number; data?: { producer?: string; framework?: string; ccVersion?: string } } };
-      const xb = metaJson.x_cannbay;
-      const d = xb && isMetaPayload(xb, 'cc-session-meta') ? xb.data : null;
-      if (d?.producer === 'insight-export' && d.framework) {
-        const sessionPatch: Record<string, unknown> = { framework: d.framework };
-        if (d.ccVersion) sessionPatch.version = d.ccVersion;
-        await prisma.session.update({ where: { id: session.id }, data: sessionPatch });
-      }
-    } catch { /* meta 损坏 → 不 patch */ }
+  const meta = readCcSessionMeta(mainJsonl);
+  if (meta?.producer === 'insight-export' && meta.framework) {
+    const sessionPatch: Record<string, unknown> = { framework: meta.framework };
+    if (meta.ccVersion) sessionPatch.version = meta.ccVersion;
+    await prisma.session.update({ where: { id: session.id }, data: sessionPatch });
   }
 }
 
@@ -149,6 +143,7 @@ interface SessionRow {
   id: string;
   taskId: string;
   framework: string;
+  version: string | null;
   sourcePath: string | null;
 }
 
@@ -166,7 +161,10 @@ async function stageSessionFiles(session: SessionRow, prisma: PrismaLike): Promi
   fs.rmSync(stagingDir, { recursive: true, force: true });
   fs.mkdirSync(sessionDir, { recursive: true });
 
-  const hasJsonlSource = session.framework !== 'opencode'
+  // 原文件直传条件：sourcePath 是本机存在的 jsonl 且非 native opencode
+  // （native opencode 的 sourcePath 是 .db / 目录约定）。proxy 捕获的
+  // opencode 会话（framework=opencode + version 带 -proxy）是 jsonl，直传。
+  const hasJsonlSource = (session.framework !== 'opencode' || isProxyVersion(session.version))
     && !!session.sourcePath
     && session.sourcePath.endsWith('.jsonl')
     && fs.existsSync(session.sourcePath);

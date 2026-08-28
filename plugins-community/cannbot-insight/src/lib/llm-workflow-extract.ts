@@ -8,7 +8,7 @@
 
 import { spawn } from "node:child_process";
 import type { PrismaClient } from "@prisma/client";
-import type { PlanFileDeclaration } from "./skill-eval-audit";
+import type { PlanFileDeclaration } from "./sift-audit";
 
 /**
  * LLM 提取主 agent 编排规程：读 session 的前几个 turn（dispatch 动作之前），

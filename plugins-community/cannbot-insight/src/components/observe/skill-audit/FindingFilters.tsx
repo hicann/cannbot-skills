@@ -10,7 +10,7 @@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import type { AuditCategory, AuditFinding, AuditMethod, AuditVerdict } from "@/lib/skill-eval-audit-types"
+import type { AuditCategory, AuditFinding, AuditMethod, AuditVerdict } from "@/lib/sift-audit-types"
 import { ALL_VERDICTS, CATEGORY_LABEL, METHOD_TAG, VERDICT_DISPLAY, type FindingFilter } from "./verdictConfig"
 
 const ALL_CATEGORIES: AuditCategory[] = ["conditional", "prohibition", "step", "output"]

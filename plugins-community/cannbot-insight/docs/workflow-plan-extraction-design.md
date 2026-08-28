@@ -1,11 +1,11 @@
 # 主 agent 编排声明提取：设计文档
 
-> 当前实现在 `src/lib/skill-eval-audit.ts` 的 `recoverWorkflowDeclaration`。
+> 当前实现在 `src/lib/sift-audit.ts` 的 `recoverWorkflowDeclaration`。
 > root 对账（`--kind root`）审主 agent 编排规程遵循度，声明由本模块恢复。
 
 ## 背景
 
-root 对账审"主 agent 编排 vs 声明"。按 skill-eval 设计意图（`slice.py` 注释：
+root 对账审"主 agent 编排 vs 声明"。按 sift 设计意图（`slice.py` 注释：
 "root 声明常是 workflow 级 SKILL.md"），root 对账的声明应该是 **workflow skill 的编排规程**，
 不是任务清单（STATE.md）或自写计划（todowrite）——那些是"任务完成度"视角，不是
 "编排规程遵循度"。
@@ -24,7 +24,7 @@ root 对账审"主 agent 编排 vs 声明"。按 skill-eval 设计意图（`slic
 todowrite + 内容特征 scan 提取声明。问题：
 
 1. **STATE.md 是任务清单**（state-generator 生成的运行时任务），不是编排规程 → 审的是
-   "任务完成度"不是"编排纪律"，偏离 skill-eval 设计意图。
+   "任务完成度"不是"编排纪律"，偏离 sift 设计意图。
 2. **todowrite 是主 agent 自写计划** → 自审自（声明=执行者自己写的），不是"外部声明 vs 执行"
    对账。
 3. **PLAN.md 是产物**（主 agent"方案设计"步骤生成的迭代穿刺表格），从来不是 workflow 声明。
@@ -122,7 +122,7 @@ interface PlanFileDeclaration {
 
 | 文件 | 用途 |
 |---|---|
-| `audit-skilleval/route.ts` | kind=root → `recoverWorkflowDeclaration` → body |
+| `audit-skillsift/route.ts` | kind=root → `recoverWorkflowDeclaration` → body |
 | `main-agent-workflow/route.ts` | available + name + source（`resolveWorkflowSkillName` 取 name） |
 | `skill-content/route.ts` | 全文展示（MAIN_AGENT_WORKFLOW_NAME sentinel） |
 | `SkillDetail.tsx` | root 行来源标签 + 全文按钮 + 对账按钮 |

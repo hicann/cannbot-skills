@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { InstructionAggregate } from "@/lib/skill-eval-audit-types"
+import type { InstructionAggregate } from "@/lib/sift-audit-types"
 import { CATEGORY_LABEL, NOISE_LABELS } from "./verdictConfig"
 
 /**

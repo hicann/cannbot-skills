@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 /**
- * 对账报告的展示映射 + 纯函数（排序 / 过滤 / 分组），移植自 skill-eval 的
+ * 对账报告的展示映射 + 纯函数（排序 / 过滤 / 分组），移植自 sift 的
  * reporting/templates/audit-report.html 的 JS 渲染逻辑，确保原生页与原 HTML
  * 行为一致。纯函数独立可测（无 React 依赖）。
  */
@@ -16,7 +16,7 @@ import type {
   AuditFinding,
   AuditMethod,
   AuditVerdict,
-} from "@/lib/skill-eval-audit-types"
+} from "@/lib/sift-audit-types"
 
 /** Badge variant + 图标 + 中文标签，五态 verdict 一致表（汇总徽章 + 明细共用）。 */
 export const VERDICT_DISPLAY: Record<

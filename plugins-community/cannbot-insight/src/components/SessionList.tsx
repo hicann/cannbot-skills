@@ -11,6 +11,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { BRAND_NAME, BRAND_SOURCE_TYPE } from '@/lib/branding'
+import { isProxyVersion } from '@/lib/shared/session-format'
 import { useRouter } from 'next/navigation';
 import {
   Table,
@@ -426,7 +427,7 @@ export function SessionList({ items, total, page, pageSize }: SessionListProps) 
                         {item.framework === 'opencode'
                           ? <Badge variant="blue">OpenCode</Badge>
                           : <Badge variant="orange">Claude</Badge>}
-                        {item.version?.endsWith('-proxy') && (
+                        {isProxyVersion(item.version) && (
                           <Badge variant="yellow">proxy</Badge>
                         )}
                       </span>

@@ -13,7 +13,7 @@ import os from "node:os"
 import path from "node:path"
 
 /**
- * skill-eval-runner：mock spawn，验证 stdout 进度解析（批 k/total + 完成 → 百分比）+ result/error 事件。
+ * sift-runner：mock spawn，验证 stdout 进度解析（批 k/total + 完成 → 百分比）+ result/error 事件。
  */
 
 const REPORT = { skill_name: "x", summary: { total: 2, pass: 1, fail: 1, na: 0 }, findings: [] }
@@ -53,7 +53,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
+describe("runSiftAuditStreaming (via makeStreamingAuditResponse)", () => {
   it("progress 解析 + result 事件", async () => {
     spawnMock.mockImplementation(happyImpl([
       "对账 transcript 1/1: session.json",
@@ -68,7 +68,7 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
       "  [条件性] 批 2/2 判定 5 条…",
       "  [条件性] 批 2/2 完成 ⏱ 30s",
     ]))
-    const { makeStreamingAuditResponse } = await import("@/lib/skill-eval-runner")
+    const { makeStreamingAuditResponse } = await import("@/lib/sift-runner")
 
     const res = makeStreamingAuditResponse(["audit", "/tmp/skill", "-o", tmpOut], tmpOut)
     const text = await res.text()
@@ -89,7 +89,7 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
     expect(percents.at(-1)).toBeGreaterThan(0)
   })
 
-  it("ENOENT → error 事件（skill-eval 未找到）", async () => {
+  it("ENOENT → error 事件（sift 未找到）", async () => {
     spawnMock.mockImplementation(() => {
       const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void }
       proc.stdout = new EventEmitter()
@@ -98,13 +98,13 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
       setImmediate(() => proc.emit("error", Object.assign(new Error("enoent"), { code: "ENOENT" })))
       return proc
     })
-    const { makeStreamingAuditResponse } = await import("@/lib/skill-eval-runner")
+    const { makeStreamingAuditResponse } = await import("@/lib/sift-runner")
 
     const res = makeStreamingAuditResponse(["audit", "/tmp/skill", "-o", tmpOut], tmpOut)
     const text = await res.text()
     const events = text.trim().split("\n").map((l) => JSON.parse(l))
     expect(events.at(-1)).toMatchObject({ stage: "error" })
-    expect((events.at(-1) as { msg: string }).msg).toMatch(/skill-eval 未找到/)
+    expect((events.at(-1) as { msg: string }).msg).toMatch(/sift 未找到/)
   })
 
   it("非 0 退出 → error 事件带 exit code", async () => {
@@ -119,7 +119,7 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
       })
       return proc
     })
-    const { makeStreamingAuditResponse } = await import("@/lib/skill-eval-runner")
+    const { makeStreamingAuditResponse } = await import("@/lib/sift-runner")
 
     const res = makeStreamingAuditResponse(["audit", "/tmp/skill", "-o", tmpOut], tmpOut)
     const text = await res.text()
@@ -137,7 +137,7 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
       setImmediate(() => proc.emit("close", 0))
       return proc
     })
-    const { makeStreamingAuditResponse } = await import("@/lib/skill-eval-runner")
+    const { makeStreamingAuditResponse } = await import("@/lib/sift-runner")
 
     const res = makeStreamingAuditResponse(["audit", "/tmp/skill", "-o", tmpOut], tmpOut)
     const text = await res.text()
@@ -147,7 +147,7 @@ describe("runSkillEvalAuditStreaming (via makeStreamingAuditResponse)", () => {
 
   it("cleanup 在流结束后调用", async () => {
     spawnMock.mockImplementation(happyImpl([]))
-    const { makeStreamingAuditResponse } = await import("@/lib/skill-eval-runner")
+    const { makeStreamingAuditResponse } = await import("@/lib/sift-runner")
 
     const cleanup = vi.fn()
     const res = makeStreamingAuditResponse(["audit", "/tmp/skill", "-o", tmpOut], tmpOut, cleanup)

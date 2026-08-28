@@ -23,7 +23,7 @@ function captureFile(name: string, marker: string): string {
   const file = path.join(tmpDir, name);
   fs.writeFileSync(file, [
     JSON.stringify({ type: 'user', message: { role: 'user', content: '第一问' }, timestamp: '2026-08-18T10:00:00.000Z', source: marker }),
-    JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: `msg_${name}`, content: [{ type: 'text', text: '答' }], model: 'glm-5.2', usage: { input_tokens: 10, output_tokens: 5 } }, timestamp: '2026-08-18T10:00:05.000Z', duration_ms: 500, source: marker }),
+    JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: `msg_${name}`, content: [{ type: 'text', text: '答' }], model: 'glm-5.2', usage: { input_tokens: 10, output_tokens: 5 } }, timestamp: '2026-08-18T10:00:05.000Z', duration_ms: 500, source: marker, tools: [{ name: 'bash' }] }),
   ].join('\n') + '\n');
   return file;
 }
@@ -74,7 +74,7 @@ describe('proxy 捕获的 framework 归属', () => {
     const file = path.join(tmpDir, 'oc-proxy-ver.jsonl');
     fs.writeFileSync(file, [
       JSON.stringify({ type: 'user', message: { role: 'user', content: '第一问' }, timestamp: '2026-08-18T10:00:00.000Z', source: 'opencode-proxy' }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: 'msg_ver', content: [{ type: 'text', text: '答' }], model: 'glm-5.2', usage: { input_tokens: 10, output_tokens: 5 } }, timestamp: '2026-08-18T10:00:05.000Z', version: '1.17.9', source: 'opencode-proxy' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: 'msg_ver', content: [{ type: 'text', text: '答' }], model: 'glm-5.2', usage: { input_tokens: 10, output_tokens: 5 } }, timestamp: '2026-08-18T10:00:05.000Z', version: '1.17.9', source: 'opencode-proxy', tools: [{ name: 'bash' }] }),
     ].join('\n') + '\n');
     const sid = 'oc-proxy-fw-it-3';
     const res = await POST(req({ source: 'claude-jsonl', sessionId: sid, filePath: file }));

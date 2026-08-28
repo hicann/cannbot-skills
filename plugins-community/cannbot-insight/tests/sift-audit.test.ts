@@ -23,7 +23,7 @@ import {
   isDispatchOnlyAgent,
   dispatchOnlySkillNames,
   getInflightAudit,
-} from "@/lib/skill-eval-audit";
+} from "@/lib/sift-audit";
 
 /** 造一个最小 mock prisma：只实现 recoverSkillBody 用到的两个方法。 */
 function makePrisma(opts: {
@@ -117,9 +117,9 @@ describe("recoverSkillBody", () => {
 });
 
 describe("buildAuditArgs", () => {
-  it("拼出 skill-eval audit 的参数数组：位置参 skill 目录 + --db/--session/-o + --kind skill", () => {
+  it("拼出 sift audit 的参数数组：位置参 skill 目录 + --db/--session/-o + --kind skill", () => {
     // --kind skill 必带（--db 路是 per-skill 对账）：不带会拿本 skill 的 SKILL.md 去对账整条
-    // session（含别的 skill 跑的 turn）。skill-eval 靠 SKILL.md 的 name + --kind skill 切本 skill 的段。
+    // session（含别的 skill 跑的 turn）。sift 靠 SKILL.md 的 name + --kind skill 切本 skill 的段。
     expect(
       buildAuditArgs({
         skillPath: "/tmp/x/myskill",
@@ -847,7 +847,7 @@ describe("dispatchOnlySkillNames", () => {
 });
 
 describe("getInflightAudit", () => {
-  // SkillEvalAuditDialog 的 POST 在 useEffect 里,dev 下 remount(HMR / Fast Refresh 回退全页刷新)
+  // SiftAuditDialog 的 POST 在 useEffect 里,dev 下 remount(HMR / Fast Refresh 回退全页刷新)
   // 会重跑 effect → 不去重就再发一次不可中止的 POST(服务端 execFileSync 单跑可达 30 分钟)→
   // 堆叠抢 LLM 端点限流(实测 opdef-developer:两轮重叠,先起的被杀)。去重:同 key 在飞就复用。
 
@@ -928,7 +928,7 @@ describe("buildStructuredRecords", () => {
       ],
     });
     const out = await buildStructuredRecords("ses_1", prisma);
-    expect(out.format).toBe("skill-eval-records");
+    expect(out.format).toBe("sift-records");
     expect(out.records).toHaveLength(2);
     expect(out.records[0]).toMatchObject({ role: "user", text: "分析崩溃", parent_tool_use_id: null });
     const asst = out.records[1] as Record<string, unknown>;
@@ -962,7 +962,7 @@ describe("buildStructuredRecords", () => {
   it("无 turn → records 空(仍带 format 标记)", async () => {
     const prisma = makeStructuredPrisma({ turns: [], toolCalls: [] });
     const out = await buildStructuredRecords("ses_x", prisma);
-    expect(out.format).toBe("skill-eval-records");
+    expect(out.format).toBe("sift-records");
     expect(out.records).toEqual([]);
   });
 
@@ -985,7 +985,7 @@ describe("buildStructuredRecords", () => {
   });
 
   it("子 agent turn 的 parent_tool_use_id = subagentSessionId;主 turn 仍 null(scope-aware 切段)", async () => {
-    // skill-eval 切片器(slice.py _scope_of)按 parent_tool_use_id 归作用域:None=主,其他值=
+    // sift 切片器(slice.py _scope_of)按 parent_tool_use_id 归作用域:None=主,其他值=
     // 某子 agent。之前 buildStructuredRecords 恒 null → 子 agent 里跑的 skill 段被主 scope 的
     // last-invoked-owns 污染(主 scope 噪声混进段)。修:子 agent turn 指到自己的 subagentSessionId。
     // 零嵌套数据下即正确(无需合成 Agent tool_use;见 slice.py 的 scope 归段 + depth-1 closure)。

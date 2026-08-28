@@ -7,7 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 /**
- * Server-only（spawn/child_process）：spawn skill-eval audit，流式读 stdout，解析 on_progress
+ * Server-only（spawn/child_process）：spawn sift audit，流式读 stdout，解析 on_progress
  * 输出算百分比，事件以 NDJSON 回传前端。管道模式（非 tty）下 rich 输出纯文本，可可靠解析。
  *
  * 进度结构（auditor.py 的 on_progress）：
@@ -24,7 +24,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
-export interface SkillEvalEvent {
+export interface SiftEvent {
   stage: "progress" | "result" | "error"
   percent?: number
   msg?: string
@@ -79,10 +79,10 @@ function computePercent(
   return Math.max(pct, started ? 3 : 0)
 }
 
-function runSkillEvalAuditStreaming(opts: {
+function runSiftAuditStreaming(opts: {
   args: string[]
   outputDir: string
-  onEvent: (e: SkillEvalEvent) => void
+  onEvent: (e: SiftEvent) => void
   timeoutMs?: number
 }): Promise<void> {
   const { args, outputDir, onEvent, timeoutMs = 1_800_000 } = opts
@@ -131,7 +131,7 @@ function runSkillEvalAuditStreaming(opts: {
 
     let proc: ChildProcess
     try {
-      proc = spawn("skill-eval", args, {
+      proc = spawn("sift", args, {
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       })
@@ -164,7 +164,7 @@ function runSkillEvalAuditStreaming(opts: {
     proc.on("error", (e: Error & { code?: string }) => {
       clearTimeout(timer)
       if (e.code === "ENOENT") {
-        onEvent({ stage: "error", msg: "skill-eval 未找到：装好 skill-eval 并确保 `skill-eval` 在 PATH。" })
+        onEvent({ stage: "error", msg: "sift 未找到：装好 sift 并确保 `sift` 在 PATH。" })
       } else {
         onEvent({ stage: "error", msg: e.message })
       }
@@ -178,14 +178,14 @@ function runSkillEvalAuditStreaming(opts: {
         const tail = stderrBuf.trim().slice(-500)
         onEvent({
           stage: "error",
-          msg: `skill-eval audit 失败${code != null ? ` (exit ${code})` : ""}${tail ? `: ${tail}` : ""}`,
+          msg: `sift audit 失败${code != null ? ` (exit ${code})` : ""}${tail ? `: ${tail}` : ""}`,
         })
         resolve()
         return
       }
       const reportPath = path.join(outputDir, "audit-report.json")
       if (!fs.existsSync(reportPath)) {
-        onEvent({ stage: "error", msg: "skill-eval 跑完但没产出 audit-report.json。" })
+        onEvent({ stage: "error", msg: "sift 跑完但没产出 audit-report.json。" })
         resolve()
         return
       }
@@ -206,10 +206,10 @@ function runSkillEvalAuditStreaming(opts: {
 }
 
 /**
- * 把一次 skill-eval audit 跑成 NDJSON 流式 Response（progress → result/error）。
+ * 把一次 sift audit 跑成 NDJSON 流式 Response（progress → result/error）。
  * 路由 prep 好 args + outputDir 后调用本函数返回给前端。
- * cleanup 在流结束（无论成功/失败）后调用——tmp 目录的清理必须等流消费完（skill-eval 跑完），
- * 不能在路由 return 时就删（否则 skill-eval 还没读到 SKILL.md/session.json）。
+ * cleanup 在流结束（无论成功/失败）后调用——tmp 目录的清理必须等流消费完（sift 跑完），
+ * 不能在路由 return 时就删（否则 sift 还没读到 SKILL.md/session.json）。
  */
 export function makeStreamingAuditResponse(
   args: string[],
@@ -219,11 +219,11 @@ export function makeStreamingAuditResponse(
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (obj: SkillEvalEvent): void => {
+      const send = (obj: SiftEvent): void => {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"))
       }
       try {
-        await runSkillEvalAuditStreaming({ args, outputDir, onEvent: send })
+        await runSiftAuditStreaming({ args, outputDir, onEvent: send })
       } catch (e: unknown) {
         send({ stage: "error", msg: e instanceof Error ? e.message : String(e) })
       } finally {

@@ -6,8 +6,16 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// framework（agent 归属：claude-code / opencode）与捕获格式正交：proxy 捕获
-// 文件是扩展 claude 格式，但会话可能属于 opencode（version 带 -proxy 后缀）。
+/** DB 侧 proxy 判定的唯一形式：Session.version 带 -proxy 后缀（统一分类器
+ * proxy-classify.ts 导入时写入）。UI 徽标 / API 门禁一律用本谓词，不再各写
+ * endsWith 字符串比较。 */
+export function isProxyVersion(version: string | null | undefined): boolean {
+  return version?.endsWith('-proxy') ?? false;
+}
+
+// framework（agent 归属：claude-code / opencode / codex）与捕获格式正交：proxy 捕获
+// 文件（claude / opencode / codex，version 带 -proxy 后缀，统一分类器
+// proxy-classify.ts 写入）都是扩展 claude 格式的 jsonl。
 // 凡是"sourcePath 指向 claude 格式 jsonl"的判断（wire 轮次、full-context、
 // 增量刷新等）都应走本谓词，而不是单看 framework。
 export function isClaudeFormatSession(
@@ -15,5 +23,5 @@ export function isClaudeFormatSession(
   version: string | null | undefined
 ): boolean {
   if (framework === 'claude-code') return true;
-  return framework === 'opencode' && (version?.endsWith('-proxy') ?? false);
+  return isProxyVersion(version);
 }

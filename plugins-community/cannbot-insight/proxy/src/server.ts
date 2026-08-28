@@ -8,11 +8,14 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
-import { resolveSession } from './session-resolver';
+import { createRequire } from 'node:module';
+import { resolveSession, protocolFromPath } from './session-resolver';
+import { requestBodyForCapture } from './request-body-decoder';
 import { createReassembler, type ReassembledResponse } from './stream-reassembler';
 import { ensureProxyDir, sessionFilePath, appendSid } from './writer';
 import { emit as claudeEmit } from './claude-emitter';
 import { emit as opencodeEmit } from './opencode-emitter';
+import { emit as codexEmit } from './codex-emitter';
 import { redactRecord } from './redactor';
 import type { AnthropicContentBlock, AnthropicUsage, Protocol, ProxyRecord } from './types';
 
@@ -32,6 +35,7 @@ function dispatchEmit(rec: ProxyRecord): void {
     try { appendSid(SESSION_ID, rec.sid); } catch { /* best-effort */ }
   }
   if (rec.protocol === 'anthropic') claudeEmit(rec);
+  else if (rec.protocol === 'responses') codexEmit(rec);
   else opencodeEmit(rec);
 }
 
@@ -39,6 +43,7 @@ const PORT = parseInt(process.env.CANNBOT_PROXY_PORT ?? '0', 10) || 0;
 const SESSION_ID = process.env.CANNBOT_PROXY_SESSION_ID ?? '';
 const ANTHROPIC_UPSTREAM = process.env.CANNBOT_PROXY_ANTHROPIC_UPSTREAM ?? 'https://api.anthropic.com';
 const OPENAI_UPSTREAM = process.env.CANNBOT_PROXY_OPENAI_UPSTREAM ?? 'https://api.openai.com';
+const RESPONSES_UPSTREAM = process.env.CANNBOT_PROXY_RESPONSES_UPSTREAM ?? 'https://api.openai.com';
 // opencode per-provider upstream map (JSON {providerId: baseURL}), discovered
 // from the opencode binary by cpx-cli. Lets the proxy forward /<providerId>/…
 // to each provider's REAL upstream (dashscope, bigmodel, …) — fully
@@ -54,8 +59,19 @@ const STRIP_REQ_HEADERS = new Set([
 
 ensureProxyDir();
 
+// 用户的 HTTP 代理（clash/v2ray 等）—— Node 原生 fetch 不自动读 HTTPS_PROXY，
+// 需显式配置 undici ProxyAgent。undici 是 Node 内置 CJS 模块，ESM 里用
+// createRequire 访问（import 'undici' 找不到 node_modules 里的包）。
+const upstreamProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY;
+if (upstreamProxy) {
+  const { ProxyAgent, setGlobalDispatcher } = createRequire(import.meta.url)('undici');
+  setGlobalDispatcher(new ProxyAgent(upstreamProxy));
+}
+
 function upstreamBase(protocol: Protocol): string {
-  return protocol === 'anthropic' ? ANTHROPIC_UPSTREAM : OPENAI_UPSTREAM;
+  if (protocol === 'anthropic') return ANTHROPIC_UPSTREAM;
+  if (protocol === 'responses') return RESPONSES_UPSTREAM;
+  return OPENAI_UPSTREAM;
 }
 
 // Resolve the real upstream URL for a request. opencode requests carry a
@@ -69,6 +85,13 @@ function resolveUpstreamUrl(protocol: Protocol, urlPath: string): string {
     if (m && PROVIDER_UPSTREAMS[m[1]]) {
       return PROVIDER_UPSTREAMS[m[1]].replace(/\/$/, '') + m[2];
     }
+  }
+  // ChatGPT 登录用户的 upstream 是 chatgpt.com/backend-api/codex，
+  // 其路径约定是 /responses（不是 /v1/responses）。codex 发到 proxy
+  // /v1/responses（因为 cpx 设 base_url 带 /v1 后缀），转发时剥掉 /v1。
+  if (protocol === 'responses' && RESPONSES_UPSTREAM.includes('chatgpt.com')) {
+    const path = urlPath.replace(/^\/v1\//, '/');
+    return RESPONSES_UPSTREAM.replace(/\/$/, '') + path;
   }
   return upstreamBase(protocol) + stripSessionPrefix(urlPath);
 }
@@ -93,9 +116,11 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 }
 
 async function handleProxy(req: http.IncomingMessage, res: http.ServerResponse, body: Buffer): Promise<void> {
+  const protocolHint = protocolFromPath(req.url ?? '/');
+  const bodyForParsing = requestBodyForCapture(body, protocolHint, req.headers['content-encoding']);
   let parsedBody: unknown = null;
   try {
-    parsedBody = body.length > 0 ? JSON.parse(body.toString('utf-8')) : null;
+    parsedBody = bodyForParsing.length > 0 ? JSON.parse(bodyForParsing.toString('utf-8')) : null;
   } catch {
     parsedBody = null;
   }

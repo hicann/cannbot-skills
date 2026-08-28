@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 import { Badge } from "@/components/ui/badge"
-import type { AuditFinding } from "@/lib/skill-eval-audit-types"
+import type { AuditFinding } from "@/lib/sift-audit-types"
 import {
   CATEGORY_LABEL,
   METHOD_TAG,

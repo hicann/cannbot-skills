@@ -16,10 +16,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import type { StageBreakdownRow } from "@/lib/skill-eval-audit-types"
+import type { StageBreakdownRow } from "@/lib/sift-audit-types"
 
 /**
- * 阶段耗时 / token 表（移植自 skill-eval audit-report.html 的 stage-breakdown）。把 audit()
+ * 阶段耗时 / token 表（移植自 sift audit-report.html 的 stage-breakdown）。把 audit()
  * 的 6 阶段（extract/refine/headline/rebuild/judge/postprocess）各自墙钟 + token 列出，诊断
  * 慢在哪。类型列标 LLM（refine/headline/judge，橙）vs 程序（其余，灰）——程序阶段 calls/tokens
  * 恒 0，标出来免误读成「漏跑」。refine/headline 在 calls=0 时 note 标「缓存命中/未启用」。
@@ -42,7 +42,7 @@ const STAGE_KIND: Record<string, "LLM" | "程序"> = {
   postprocess: "程序",
 }
 
-// 各阶段 hover 说明（与 skill-eval audit-report.html 的 STAGE_DESC 对齐；postprocess=聚合阶段直说）。
+// 各阶段 hover 说明（与 sift audit-report.html 的 STAGE_DESC 对齐；postprocess=聚合阶段直说）。
 const STAGE_DESC: Record<string, string> = {
   extract: "从声明(SKILL.md / agent .md)静态正则抽全部候选指令",
   refine: "LLM 精筛:砍 extractor 误抽的示例/占位/描述性伪指令(per-SKILL 缓存)",

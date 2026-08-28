@@ -28,7 +28,7 @@ import { ByInstructionTable } from "./ByInstructionTable"
 import { StageBreakdownTable } from "./StageBreakdownTable"
 
 /**
- * 对账报告原生视图（替代 iframe 嵌 skill-eval HTML）。数据 = SkillAuditResult
+ * 对账报告原生视图（替代 iframe 嵌 sift HTML）。数据 = SkillAuditResult
  * （AuditReport + 可选 _html 逃生口）。移植 audit-report.html 的全部区块：header →
  * warnings → by_instruction 概要表（单/多 transcript 都显）→ 过滤 → findings（分组）→ _html 逃生口。
  */
@@ -189,7 +189,7 @@ function EmptyFilter() {
   return <div className="py-3 text-center text-xs text-muted-foreground">当前过滤无匹配结果。</div>
 }
 
-/** 把 _html 物化成 blob URL，供"在新页打开 skill-eval 原始 HTML"逃生口。SSR / 无 blob 支持时返回 null。 */
+/** 把 _html 物化成 blob URL，供"在新页打开 sift 原始 HTML"逃生口。SSR / 无 blob 支持时返回 null。 */
 function HtmlEscapeHatch({ html }: { html: string }) {
   const url = useMemo(() => {
     if (typeof window === "undefined" || typeof URL?.createObjectURL !== "function") return null
@@ -202,7 +202,7 @@ function HtmlEscapeHatch({ html }: { html: string }) {
   if (!url) return null
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
-      在新页打开 skill-eval 原始 HTML ↗
+      在新页打开 sift 原始 HTML ↗
     </a>
   )
 }

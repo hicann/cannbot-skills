@@ -11,12 +11,12 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { prisma } from "@/lib/db"
-import { buildStructuredRecords, buildTranscriptArgs } from "@/lib/skill-eval-audit"
+import { buildStructuredRecords, buildTranscriptArgs } from "@/lib/sift-audit"
 import { resolveScanRoot, scanAgentDirs, resolveAgentMd } from "@/lib/agent-md-scan"
-import { makeStreamingAuditResponse } from "@/lib/skill-eval-runner"
+import { makeStreamingAuditResponse } from "@/lib/sift-runner"
 
 /**
- * 对当前 session 的某个被 dispatch 的 agent 跑 skill-eval 对账（审"真实执行 vs agent .md 声明"）。
+ * 对当前 session 的某个被 dispatch 的 agent 跑 sift 对账（审"真实执行 vs agent .md 声明"）。
  *
  * agent .md 声明不在 session 里（dispatch args 只带任务 prompt，opencode 运行时加载 agent .md
  * 当 system prompt 不持久化），故从本地文件系统扫：AGENTS_SCAN_ROOT env（或自动探测 skills-dev 根）
@@ -24,7 +24,7 @@ import { makeStreamingAuditResponse } from "@/lib/skill-eval-runner"
  * 按本 session 被派发 agent 名集合的覆盖率消歧认对插件。
  *
  * session 侧走结构化 records（--transcript），buildStructuredRecords 已给子 agent turn 带 agent 字段，
- * skill-eval 切片器按 agent 归属切段（--kind agent）。skill-eval 自带 LLM（claude -p），不透传 provider。
+ * sift 切片器按 agent 归属切段（--kind agent）。sift 自带 LLM（claude -p），不透传 provider。
  */
 const AGENT_NAME_RE = /^[A-Za-z0-9._-]+$/
 
@@ -75,20 +75,20 @@ export async function POST(req: Request) {
     )
   }
 
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-eval-agent-audit-"))
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sift-agent-audit-"))
   try {
     const transcriptPath = path.join(tmp, "session.json")
     fs.writeFileSync(transcriptPath, JSON.stringify(await buildStructuredRecords(session.id, prisma)))
 
     const outputDir = path.join(tmp, "out")
     fs.mkdirSync(outputDir, { recursive: true })
-    // agent .md 直传 skill-eval：skill-eval 94ed7d3 去 SKILL.md 硬约束后，parse_skill_md 接受任意
+    // agent .md 直传 sift：sift 94ed7d3 去 SKILL.md 硬约束后，parse_skill_md 接受任意
     // .md 文件（直读其 frontmatter+body），无需再把正文拷成 <tmp>/SKILL.md。身份仍靠 frontmatter
     // 的 name（--kind agent 拿它当切片 target，匹配 records 的 agent 字段），与文件名无关。
     const args = buildTranscriptArgs({ skillPath: resolved.mdPath, transcriptPath, outputDir, kind: "agent" })
 
-    // 流式 NDJSON：spawn skill-eval，stdout 解析进度回传 progress 事件，结束回传 result/error。
-    // tmp 清理放进流的 finally（等 skill-eval 跑完），不能在路由 return 时删。
+    // 流式 NDJSON：spawn sift，stdout 解析进度回传 progress 事件，结束回传 result/error。
+    // tmp 清理放进流的 finally（等 sift 跑完），不能在路由 return 时删。
     return makeStreamingAuditResponse(args, outputDir, () =>
       fs.rmSync(tmp, { recursive: true, force: true }),
     )
