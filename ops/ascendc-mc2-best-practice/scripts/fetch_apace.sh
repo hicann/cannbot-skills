@@ -17,6 +17,11 @@
 #   ./fetch_apace.sh                # 更新本地仓并输出 apace 子树路径
 #   ./fetch_apace.sh --ref <commit> # 锚定到指定 commit（复现用）
 #   APACE_REPO=/path/to/ops-transformer ./fetch_apace.sh  # 使用已有本地克隆
+#   APACE_PIN_REF=<commit> ./fetch_apace.sh               # 等价 --ref（环境变量形式）
+#
+# ⚠️ master 漂移警示：官网 master 的 apace 目录结构会演进（如 block/→core/ 迁移、
+#   kernel/fusions/ 层级、新增算子）。skill 文档以 pin 的已验证快照为结构基准；
+#   拉取 master 仅用于契约核对，使用前必须 diff 校验并在文档引用失效时更新文档。
 #
 # 行为：
 #   1. APACE_REPO 已设置且含 apace 子树 → git fetch 更新该仓（零重复克隆）
@@ -30,7 +35,7 @@ set -euo pipefail
 REPO_URL="https://gitcode.com/cann/ops-transformer.git"
 APACE_SUBPATH="mc2/common/op_kernel/apace"
 CACHE_DIR="${APACE_CACHE_DIR:-$HOME/.cache/apace-reference/ops-transformer}"
-REF="master"
+REF="${APACE_PIN_REF:-master}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

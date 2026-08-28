@@ -18,9 +18,28 @@ TBuf/TQue 选择、Double Buffer 流水线并行、批量搬运模式。
 
 | 场景 | 推荐类型 | 说明 |
 |-----|---------|------|
-| MTE2/MTE3 搬运缓冲区 | `TQue<VECIN/VECOUT>` | 需要与 Vector 并行，需要 EnQue/DeQue |
+| MTE2/MTE3 搬运缓冲区（标准 GM↔UB 搬运流水） | `TQue<VECIN/VECOUT>` | 需要与 Vector 并行，需要 EnQue/DeQue |
 | 纯 Vector 计算缓冲区 | `TBuf<VECCALC>` | 不涉及 MTE 搬运，用 `Get<T>()` 获取 |
 | Double Buffer | `TQue` + `InitBuffer(que, 2, size)` | 在 InitBuffer 中设置 num=2 开启 |
+| 手动 UB 管理（无 TPipe） | `LocalTensor` + 字节偏移 | 多阶段流水算子常见模式，见下文 |
+
+---
+
+## UB 管理的两种模式（TPipe vs 手动偏移）
+
+UB 并非只有 TPipe 一种管理方式。两种模式均合法，按场景选择：
+
+| 模式 | 要点 | 适用 |
+|------|------|------|
+| TPipe（TQue/TBuf） | 声明式分配、自动管理生命周期与事件 | 标准单算子搬运/计算流水 |
+| 手动 UB 偏移 | `LocalTensor`/`__ubuf__` 指针 + 字节偏移自行规划布局，配合手动管理的 SetFlag/WaitFlag 事件流水 | 需要精细控制 UB 布局的场景：跨阶段长生命周期 buffer、per-tile 高频调用（避免 TPipe 重复 InitBuffer 耗尽 UB）、多 buffer 复杂流水编排 |
+
+**混用红线（静态区隔离）**：kernel 内存在**裸静态区域**（用 `MakeMemPtr<Location::UB>`/固定偏移排布的通信工作区等）时，TPipe 动态分配的 buffer 必须与其**物理隔离**——否则 TPipe 可能把 buffer 分配到静态区上，踩踏数据 → 死锁/精度错。两种隔离做法：
+
+1. **guard TBuf**：进入 TPipe 分配前，先 `InitBuffer` 一个占位 TBuf（大小 = 静态区总字节），TPipe 后续分配自然落在其后
+2. **全手动偏移**：所有 buffer 统一手动偏移规划，静态区与计算区各自预留段，预算合并核算
+
+手动偏移模式的纪律：偏移单一来源（一处计算多处传递）、对齐到 32B（或按 DMA 效率 64B）、UB 总预算含 pitch padding 核算、per-tile 循环外一次性完成布局。
 
 ---
 
@@ -89,6 +108,7 @@ pipe->InitBuffer(que, 1, size);  // num=1 单 Buffer
 **注意**：
 - 不开启 Double Buffer（num=1）：最多可申请 8 个 TQue
 - 开启 Double Buffer（num=2）：每个 TQue 占用 2 个 buffer，最多只能申请 4 个 TQue
+- **eventID 是 TQue 与手动 `SetFlag/WaitFlag(HardEvent)` 共享的资源**：kernel 内另用手动事件（如 MTE2_V/V_MTE3 配对）时，可用于 TQue 的预算要相应扣减，混用时合并计算配额
 
 ```cpp
 // 开启 Double Buffer 时，最多只能申请 4 个 TQue

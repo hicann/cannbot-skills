@@ -187,7 +187,7 @@ using DispatchPolicy = Blaze::Gemm::MatmulWithScaleMx<NONE_FULL_LOAD_MODE, false
 - `NONE_FULL_LOAD_MODE`：A/B 不全载 L1（与 `ascendc-blaze-best-practice` 的模式选择一致）；
 - 第二个模板参数 `false` 是 `ATOMIC_ADD`（是否启用输出 atomic add，默认关闭）。
 
-可选的 DispatchPolicy（详见 `ascendc-blaze-best-practice` 的 `references/scenarios/mx-matmul-development.md`）：
+可选的 DispatchPolicy（详见 `ascendc-blaze-best-practice` skill `references/scenarios/index.md`）：
 - `MatmulMultiBlockPolicy<NO_FULL_LOAD_MODE>`：通用多 block SWAT；
 - `MatmulMultiBlockPolicy<A_FULL_LOAD_MODE>`：A 全载（N≫M 时用）；
 - `MatmulWithScaleMx<...>`：MX 量化 matmul（参考工程用）。
@@ -255,5 +255,5 @@ allToAllComm_.PutScaleToAllRanks(0, axisM_);  // offset=0, 全 M 行
 |--------|---|
 | SHMEM/UDMA 通信层 | `comm_shmem.md` |
 | MC2 整体架构 | `mc2_architecture.md` |
-| Blaze 单算子细节（模板选型、Tiling 算法） | `ascendc-blaze-best-practice/references/scenarios/mx-matmul-development.md` |
+| Blaze 单算子细节（模板选型、Tiling 算法） | `ascendc-blaze-best-practice` skill `references/scenarios/index.md` |
 | 参考工程改造食谱 | `codebase_map.md` |

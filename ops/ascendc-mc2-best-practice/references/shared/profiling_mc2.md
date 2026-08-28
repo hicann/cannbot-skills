@@ -263,6 +263,7 @@ MC2 算子的理论耗时按"通信+计算取最大"估：
 | perf 模式跑得极慢 | `aclrtSynchronizeStream` 在每轮都同步 | 参考工程已正确实现，新算子不要每轮 sync |
 | 某张卡的 avg 明显高于其他卡 | NPU 健康 / SHMEM 端口 / 核数问题 | §5.4 |
 | Task Duration 在后 5 轮仍波动大 | device 频率未稳定 / 数据依赖 | 增大 PERF_LOOP_COUNT 到 20，取最后 5 |
+| 对照路径（torch/分步实现）trace 出现无关 kernel、计时失真 | 同步方式污染：用空转 kernel（如 `torch.exp` 循环）或全局 sync 做计时同步，会 flush 全局流水线 | 对照实验用 `torch.npu.current_stream().synchronize()` 仅同步当前流；验证 trace 中无对照组无关 kernel |
 
 ---
 

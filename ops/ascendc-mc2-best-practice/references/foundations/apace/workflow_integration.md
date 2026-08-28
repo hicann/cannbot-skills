@@ -3,6 +3,8 @@
 本文档把父级 `plugins-official/ops-direct-invoke/AGENTS.md` 的 7 步流程具体化到 apace 通算融合算子场景。CANNBot 主控和 Architect/Developer/Reviewer 三类 Subagent 在每个 Step 进入前都应先读对应小节，明确"本阶段在 apace 场景下要做什么、门禁是什么"。
 
 > 父级流程定义以 `plugins-official/ops-direct-invoke/AGENTS.md` 为准；本文件只补充 apace 场景的差异化要点，不重写父级规则。
+>
+> **与 skill 四步模型的对应**：plugin Step 1 ≈ skill Step 1（[`workflow/step1-project-setup.md`](workflow/step1-project-setup.md)）；plugin Step 2/2.5 ≈ skill Step 2+3（[`workflow/step3-design.md`](workflow/step3-design.md)）；plugin Step 3-7 ≈ skill Step 4（[`workflow/step4-implementation.md`](workflow/step4-implementation.md)）。**plugin 场景下以本文档为主要消费文档**，四步文档为模型参考；路线模型（`apace_native`/`apace_custom`/`unsupported`）、R1-R20 红线（[`review-checklist.md`](review-checklist.md)）与场景注册表（[`scenarios/`](scenarios/)）为两边共用的合同。
 
 ## 目录
 
@@ -28,7 +30,10 @@
 | CANN 版本 | 已在 CANN 9.2.0 验证；更低版本未验证 | 低于 9.2.0 提示未验证风险，由用户决策是否继续 |
 | 多卡环境 | 至少 rankNum 张卡可用 | 单卡无法运行通算融合算子 |
 | HCCL 可用 | `hccl.h` 头文件存在 | 提示用户检查 CANN 安装 |
-| ops-transformer 可拉取 | 网络可访问 gitcode.com | 提示用户检查网络或手动 clone |
+| CANN 内置 apace | 内置 apace 目录 `test -d` 实测存在（路径形态见 [`workflow/step1-project-setup.md`](workflow/step1-project-setup.md) §1） | 提示用户检查 CANN 安装版本 |
+| ops-transformer 可拉取（可选） | 网络可访问 gitcode.com | 仅跟踪 master 契约时需要；缺失不阻塞 |
+
+> **路径实测纪律**：environment.md 中记录的每条路径（bisheng、头文件、.so、apace/blaze 框架目录）必须用 `test -x`（可执行文件）或 `test -f`/`test -d` 实测通过后才标 ✅——凭记忆填写的路径（如漏掉中间目录层级）会在编译阶段才暴露。记录精确到可直接使用的完整路径。
 
 ### 门禁
 
@@ -51,9 +56,17 @@
 
 #### §切分策略
 
-- **两阶段 `splitAxisTileCnt` 策略**：精度调试阶段用 `tileCnt=1` 串行基线；性能调优阶段扫描 `{1,2,4,8,16,32}`
-- GET 模式沿 N 轴切分，PUT 模式沿 K 轴切分（⚠️ 官网暂无 GET 算子样例，GET 切分为原理推导）
-- Win 区空间预算（两段式）：data 段 `rankSize × rankDataBytes` + scale 段 `rankSize × scaleKaSize × axisM`（见 [`operator-anatomy.md`](operator-anatomy.md) §4 / [`fusion.md`](fusion.md) §6）
+- **两阶段 `splitAxisTileCnt` 策略**：精度调试阶段用 `tileCnt=1` 串行基线；性能调优阶段扫描 `{1,2,4,8}`（上限受 flag 计数约束：compute-first `T ≤ 15`、flagId 取 tid 时 `commTurn ≤ 16`，见 [`fusion.md`](fundamentals/fusion.md) §6.2.10/§3.3，超出档位非法）
+- 切分轴按**算子数据分布语义**确定（输入分布轴与输出分布轴分别冻结，见 [`compute.md`](fundamentals/compute.md) §4.7 语义判定）——通信原语只决定数据搬运方向，**不决定切分轴**；同一原语可对应不同切分（如 AllToAll PUT 既可服务输入 K 切分，也可服务 compute-first 的输入不切分/输出 M 分布）。未明确时回 grill-protocol 维度 9 澄清
+- Win 区空间预算（两段式）：data 段 `rankSize × rankDataBytes` + scale 段 `rankSize × scaleKaSize × axisM`（见 [`operator-anatomy.md`](operator-design/operator-anatomy.md) §3.5 / [`fusion.md`](fundamentals/fusion.md) §6.1）
+
+#### §golden 语义（每卡输入/输出契约）
+
+**验收条件**：明确每张卡的输入（本地数据 + 远端数据来源）与输出语义、切分轴（M/N/K 哪根轴按 rank 切）、聚合方式——这是 gen_data.py golden 的依据，切分轴写错则精度验证整体失效。
+
+#### §API 验证清单
+
+**验收条件**：DESIGN.md 选用的每个 API 标注「验证来源（官方文件:行号）+ 在当前 CANN 版本的可用性验证状态」。未验证 API 禁止入设计（生产教训：旧 CANN 版本存在符号缺失致链接失败的案例，设计阶段未发现则开发期返工）。CANN 版本以 Step 1 environment.md 记录为准，编译/运行前核对 `ASCEND_HOME_PATH` 指向同一版本。
 
 #### §AIV/AIC 分工图
 
@@ -61,17 +74,19 @@
 
 ### Architect 加载顺序
 
-1. 读 [`architecture.md`](architecture.md) 建立整体心智模型
-2. 通信侧不确定 → 读 [`communication.md`](communication.md)
-3. 计算侧不确定 → 读 [`compute.md`](compute.md)
-4. tiling 结构 → 读 [`operator-anatomy.md`](operator-anatomy.md) §3
-5. localMatmul 模式选择 → 读 [`fusion.md`](fusion.md) §5
+1. 读 [`architecture.md`](fundamentals/architecture.md) 建立整体心智模型
+2. 通信侧不确定 → 读 [`communication.md`](fundamentals/communication.md)
+3. 计算侧不确定 → 读 [`compute.md`](fundamentals/compute.md)
+4. tiling 结构 → 读 [`operator-anatomy.md`](operator-design/operator-anatomy.md) §3
+5. localMatmul 模式选择 → 读 [`fusion.md`](fundamentals/fusion.md) §5
 
 ### 门禁
 
-- 双文件齐全（DESIGN.md + PLAN.md）
+- 双文件齐全（DESIGN.md + PLAN.md）；`unsupported` 路线仅 DESIGN.md
 - DESIGN.md 包含"约束确认"小节（4 项均勾选 ✅）
+- DESIGN.md 包含 golden 语义与 API 验证清单小节
 - 切分策略参数有可解释的依据
+- 路线决策已记录（`apace_native` / `apace_custom` / `unsupported`；apace_custom 须含 `selected_scenario`）
 
 ---
 
@@ -82,7 +97,7 @@
 - `[REUSE]`/`[MODIFY]` 标记是否合理（不能把 `[REUSE]` 错标成 `[MODIFY]`）
 - AIC 的 `MatmulProcess` 是否正确遍历所有 rank
 - Win 区空间预算是否够
-- localMatmul 模式选择是否合理（参见 [`fusion.md`](fusion.md) §5）
+- localMatmul 模式选择是否合理（参见 [`fusion.md`](fundamentals/fusion.md) §5）
 
 ### 收敛
 
@@ -94,15 +109,14 @@
 
 ### 验收条件
 
+基础工程验收（工程结构/共享层零修改/编译/冒烟/精度/文档同步）按 [`development-guide.md`](operator-design/development-guide.md) §5 验收清单逐项执行；apace 场景增量项：
+
 | # | 验收项 | 达标条件 |
 |:---|:---|:---|
-| 1 | 工程结构 | 经 `scripts/fetch_apace.sh` 获取官网代码后，从 `kernel/all_to_all_quant_matmul/`（或 `kernel/all_gather_quant_matmul/`）复制起手，保持 `kernel/↔block/` 两级目录关系 |
-| 2 | 共享层 | `block/` `tiling/` `basic/` `utils/` 与官网仓对应原始文件完全一致 |
-| 3 | 编译 | 通过，无错误/警告 |
-| 4 | 冒烟测试 | 单 rank 输出非全 0 |
-| 5 | 精度验证 | `verify_result.py` 输出 PASS |
-| 6 | 精度标准 | 以各算子 ST `verify_result.py` 为准（官网 `tests/st/`：all_to_all `rtol=atol=1e-2`；all_gather bit-exact 或 ≤1 ULP（bf16 raw uint16 比较）） |
-| 7 | 文档同步 | 代码变更后必须同步 DESIGN.md（特别是 localMatmul 模式变更、通信方向变更、dtype 变更） |
+| 1 | host 前置校验 | 整除/对齐/核数下限/Win 容量/flag 计数峰值等校验在 fork/建链前完成，非法输入拒绝 launch（[`development-guide.md`](operator-design/development-guide.md) §3.5 清单模式） |
+| 2 | UB 静态区隔离 | 通信 commBuf/barrierBuf 与 TPipe 管理 buffer 物理隔离（静态偏移或 guard TBuf，[`communication.md`](fundamentals/communication.md) 陷阱 #9） |
+| 3 | 分阶段 bring-up | 新链路（bias/新通信对象/新归约）先退化对照（zero 值、T=1、rank=2）隔离验证再铺开 |
+| 4 | 精度标准 | 以各算子 ST `verify_result.py` 为准（官网 `tests/st/`：all_to_all `rtol=atol=1e-2`；all_gather bit-exact 或 ≤1 ULP（bf16 raw uint16 比较）） |
 
 ### 开发阶段红线
 
@@ -113,7 +127,7 @@
 - **禁止**修改 `localMatmul` 等关键参数后不同步更新 DESIGN.md
 - 改完每个 `[MODIFY]` 文件后立即跑一次精度验证做冒烟
 
-> 详细改造验收标准见 [`development-guide.md`](development-guide.md)。
+> 详细改造验收标准见 [`development-guide.md`](operator-design/development-guide.md)。
 
 ---
 
@@ -121,7 +135,7 @@
 
 ### 必查清单
 
-按 [`review-checklist.md`](review-checklist.md) R1~R8 逐项检查（含验收条件、常见 FAIL 原因与修复方向）。违反任意红线项 = FAIL。
+按 [`review-checklist.md`](review-checklist.md) 逐项检查（R1~R20，红线定义以 [`review-checklist.md`](review-checklist.md) 为规范源，含操作化检查方法、常见 FAIL 原因与修复方向）。违反任意红线项 = FAIL。
 
 ### 门禁
 
@@ -138,13 +152,13 @@
 
 | 问题 | 根因 | 修复路径 |
 |:---|:---|:---|
-| CrossCore flag idx 不配对 | AIC SetFlag idx ≠ AIV WaitFlag idx | 核对 flag 编排表（见 [`fusion.md`](fusion.md) §3） |
+| CrossCore flag idx 不配对 | AIC SetFlag idx ≠ AIV WaitFlag idx | 核对 flag 编排表（见 [`fusion.md`](fundamentals/fusion.md) §3） |
 | CommContext 填充错误 | 手动赋值 channelHandles/commBufferAddrs | 必须由 `CommChannelBuilder::CreateDeviceContext` 填充 |
 | tiling 不匹配 | 切换 tileCnt 后复用旧 tiling | 必须重新调 `GetTilingData` |
-| splitKNum 配置错 | `localMatmul=1` 应 `rankSize-1`，`0/2` 应 `rankSize` | 修正 splitKNum（见 [`fusion.md`](fusion.md) §5） |
-| localMatmul=1 MTE 异常（507015） | LOCAL fixpipe 未排空时 REMOTE AtomicAdd 读旧值 | RunLocalMatmul 和 RunMatmul 之间加 `PipeBarrier<PIPE_ALL>()`（详见 [`fusion.md`](fusion.md) §5） |
+| splitKNum 配置错 | `localMatmul=1` 应 `rankSize-1`，`0/2` 应 `rankSize` | 修正 splitKNum（见 [`fusion.md`](fundamentals/fusion.md) §5） |
+| localMatmul=1 MTE 异常（507015） | LOCAL fixpipe 未排空时 REMOTE AtomicAdd 读旧值 | RunLocalMatmul 和 RunMatmul 之间加 `PipeBarrier<PIPE_ALL>()`（详见 [`fusion.md`](fundamentals/fusion.md) §5） |
 
-> ⚠️ **禁止添加 PipeBarrier 后不重试直接回退到 localMatmul=2** — PipeBarrier 的开销远小于通算并行带来的收益（实测性能差距约 27%）。
+> ⚠️ **禁止添加 PipeBarrier 后不重试直接回退到 localMatmul=2** — PipeBarrier 的开销远小于通算并行带来的收益（生产实测性能差距显著）。
 
 3 轮仍未通过 → 暂停上报用户。
 
@@ -166,11 +180,11 @@ Reviewer 独立运行精度测试，输出精度验收报告 `docs/precision/sum
 | # | 验收项 | 达标条件 |
 |:---|:---|:---|
 | 1 | 采集模式 | msprof task-based 采集 |
-| 2 | L2 cache flush | 采集前必须刷 L2 cache（256MB 级大 buffer 拷贝；官网 PUT ST 有大 buffer 拷贝占位但未接线，SHMEM 基底工程用 `heavy_add_kernel`，见 [`../shared/profiling_mc2.md`](../../shared/profiling_mc2.md)），前一轮热度会污染本轮指标 |
-| 3 | 多卡数据后处理 | 每卡取最后 5 次主 kernel Task Duration 平均 → 多卡取最大值 |
-| 4 | tileCnt 扫描 | 扫描 `tileCnt ∈ {1,2,4,8,16,32}`，选 Task Duration 最小者 |
+| 2 | L2 cache flush | 采集前必须刷 L2 cache（256MB 级大 buffer 拷贝；官网 PUT ST 有大 buffer 拷贝占位但未接线，apace 场景落地模板用 `heavy_add_kernel`，见 [`host-and-testing.md`](operator-design/host-and-testing.md) §4 与 [`../shared/profiling_mc2.md`](../../shared/profiling_mc2.md)），前一轮热度会污染本轮指标 |
+| 3 | 多卡数据后处理 | 以官方 `parse_prof.py` 口径为准：跳过前 3 轮 warmup + 剔除 >1.2×min 离群后每卡取平均 → 多卡取最大值（见 [`host-and-testing.md`](operator-design/host-and-testing.md) §6.1 #2） |
+| 4 | tileCnt 扫描 | 扫描 `tileCnt ∈ {1,2,4,8}`（上限受 flag 计数约束：compute-first `T ≤ 15`、flagId 取 tid 时 `commTurn ≤ 16`，见 [`fusion.md`](fundamentals/fusion.md) §6.2.10/§3.3），选 Task Duration 最小者 |
 | 5 | 数据归档 | `docs/perf/round_NNN/` 存在且含多个 `PROF_*` 子目录 |
-| 6 | 性能达标 | 整体 Task Duration 与理论耗时差距 ≤ 50%（项目经验阈值，无官方出处） |
+| 6 | 性能达标 | 满足 R15 投产级门槛：真实大 shape × R=2/4 双档 × 三路径对标归档（判据见 [`host-and-testing.md`](operator-design/host-and-testing.md) §6） |
 
 > 官网 `tests/st/{op}/run.sh --perf` 提供 msprof 性能采集模式，产出由 `scripts/parse_prof.py --all` 解析，可复用该链路。
 >
@@ -199,12 +213,12 @@ CANNBot 主控汇总以下信息给用户：
 
 | 文档 | 何时读 |
 |:---|:---|
-| [`architecture.md`](architecture.md) | 第一次了解 apace 三层架构 |
-| [`development-guide.md`](development-guide.md) | 工程搭建时，定位改造验收标准 |
-| [`communication.md`](communication.md) | 通信接口与机制 |
-| [`compute.md`](compute.md) | 计算接口与 kernel 模式 |
-| [`operator-anatomy.md`](operator-anatomy.md) | 算子骨架（tiling/Impl/入口规则） |
-| [`fusion.md`](fusion.md) | 通算融合组合模式 |
-| [`host-and-testing.md`](host-and-testing.md) | host 序列与 ST 工程 |
+| [`architecture.md`](fundamentals/architecture.md) | 第一次了解 apace 三层架构 |
+| [`development-guide.md`](operator-design/development-guide.md) | 工程搭建时，定位改造验收标准 |
+| [`communication.md`](fundamentals/communication.md) | 通信接口与机制 |
+| [`compute.md`](fundamentals/compute.md) | 计算接口与 kernel 模式 |
+| [`operator-anatomy.md`](operator-design/operator-anatomy.md) | 算子骨架（tiling/Impl/入口规则） |
+| [`fusion.md`](fundamentals/fusion.md) | 通算融合组合模式 |
+| [`host-and-testing.md`](operator-design/host-and-testing.md) | host 序列与 ST 工程 |
 | [`../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md) | 通算并行调优 |
 | [`../shared/profiling_mc2.md`](../../shared/profiling_mc2.md) | 性能采集详细流程 |

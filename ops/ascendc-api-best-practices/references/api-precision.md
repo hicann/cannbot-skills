@@ -35,6 +35,8 @@ AscendC::LocalTensor<half> yHalf = outQueue.AllocTensor<half>();
 AscendC::Cast<half, float>(yHalf, xFloat, AscendC::RoundMode::CAST_ROUND, count);
 ```
 
+> ⚠️ **禁止向更宽类型做 in-place Cast**（如 BF16→FP32 in-place）：目标类型占 2× 空间，Cast 输出会覆盖同 buffer 内**尚未读取的源数据** → 系统性精度错误。向更宽类型 Cast 时必须使用独立目标 buffer（双缓冲场景配双份目标 buffer）。
+
 ---
 
 ## 混合精度计算模式（FP16 输入）

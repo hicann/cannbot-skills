@@ -33,7 +33,7 @@
    - 各 rank 只需自己负责的 M 段 C（如 TP 反向）→ ReduceScatter（散射输出）
 3. **验证流水可行性**：确认通信方向（PUT/GET）与计算侧（AIC Matmul）可逐 tile 重叠，掩盖条件为每 tile 计算耗时 ≥ 通信耗时。
 
-> **约束**：四种原语在 Kernel 直调场景下均不走 HCCL 高阶 API（`Hccl::*`），而是通过 SHMEM（blaze-shmem 路线）或 CollectiveComm 四段式 API（apace 路线）实现。ReduceScatter 原语在 apace block 层未直接实现，其语义可通过 AllToAll PUT + AtomicAdd 模式替代（详见 [`../foundations/apace/fusion.md`](../foundations/apace/fusion.md) §6）。
+> **约束**：四种原语在 Kernel 直调场景下均不走 HCCL 高阶 API（`Hccl::*`），而是通过 SHMEM（blaze-shmem 路线）或 CollectiveComm 四段式 API（apace 路线）实现。ReduceScatter 原语在 apace block 层未直接实现，其语义可通过 AllToAll PUT + AtomicAdd 模式替代（详见 [`../foundations/apace/fusion.md`](../foundations/apace/fundamentals/fusion.md) §6）。
 
 ## 切分轴语义
 
@@ -107,7 +107,7 @@ tile 1: Commit(data[1])         tile 1: WaitFlag(1) → Matmul(data[1])
 | **PUT**（通信→计算） | AIV 先推数据到远端，AIC 从 Win 区读取计算 | AllToAll+Matmul（推送输入数据） |
 | **GET**（计算→通信） | AIC 先算结果写到 Win 区，AIV 从远端拉回 | AllGather+Matmul（拉取结果段） |
 
-> 框架具体实现差异见 `references/foundations/blaze-shmem/mc2_architecture.md` 和 `references/foundations/apace/fusion.md`。
+> 框架具体实现差异见 `references/foundations/blaze-shmem/mc2_architecture.md` 和 `references/foundations/apace/fundamentals/fusion.md`。
 
 ### 跨核同步机制
 
@@ -129,7 +129,7 @@ AIV↔AIC 跨核同步是通算流水的核心：
 | 跨核同步 | `CrossCoreSetFlag/WaitFlag` | 同左 + `TeamBarrier` |
 | 工程组织 | 独立 CMake 工程 | `kernel/<op>/` 复用 `block/` `tiling/` |
 | 流水模式 | 4-buffer 流水 + M 轴切分 | localMatmul 0/1/2 + flag 编排 |
-| 参考文档 | `references/foundations/blaze-shmem/mc2_architecture.md` | `references/foundations/apace/fusion.md` |
+| 参考文档 | `references/foundations/blaze-shmem/mc2_architecture.md` | `references/foundations/apace/fundamentals/fusion.md` |
 
 ## 约束共性
 
@@ -140,4 +140,4 @@ AIV↔AIC 跨核同步是通算流水的核心：
 3. **架构白名单** — 仅 dav-3510（Ascend 950）已验证
 4. **性能采集必须刷 L2 cache** — 前一轮热度污染本轮指标
 
-> 路线特有约束与逐项审查条件：blaze-shmem 路线见 [`../foundations/blaze-shmem/review-checklist.md`](../foundations/blaze-shmem/review-checklist.md)（HCCL 禁止清单见 [`../foundations/blaze-shmem/comm_shmem.md`](../foundations/blaze-shmem/comm_shmem.md) §5）；apace 路线见 [`../foundations/apace/review-checklist.md`](../foundations/apace/review-checklist.md)（四大约束论述见 [`../foundations/apace/architecture.md`](../foundations/apace/architecture.md) §10）。
+> 路线特有约束与逐项审查条件：blaze-shmem 路线见 [`../foundations/blaze-shmem/review-checklist.md`](../foundations/blaze-shmem/review-checklist.md)（HCCL 禁止清单见 [`../foundations/blaze-shmem/comm_shmem.md`](../foundations/blaze-shmem/comm_shmem.md) §5）；apace 路线见 [`../foundations/apace/review-checklist.md`](../foundations/apace/review-checklist.md)（基础约束论述见 [`../foundations/apace/architecture.md`](../foundations/apace/fundamentals/architecture.md) §10）。

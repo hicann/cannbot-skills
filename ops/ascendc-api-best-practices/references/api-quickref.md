@@ -129,6 +129,52 @@ float → half → CAST_ROUND
 查阅 api-precision.md 的混合精度模式
 ```
 
+### Q6: 需要跨卡数据搬运？
+
+```
+拉远端到本地 → Hcomm ReadNbi，详见 api-hcomm.md
+推本地到远端 → Hcomm WriteNbi，详见 api-hcomm.md
+需要远端通知 → WriteWithNotifyNbi
+```
+
+### Q7: AIC 和 AIV 需要跨核协同？
+
+```
+AIC 通知 AIV：AIC CrossCoreSetFlag<0x2, PIPE_FIX>(id) → AIV CrossCoreWaitFlag<0x2, PIPE_S>(id)
+AIV 回压 AIC：AIV CrossCoreSetFlag<0x2, PIPE_MTE3>(id) → AIC CrossCoreWaitFlag<0x2, PIPE_M>(id)
+注意：A3/910b 上 modeId/pipe 模板参数不生效；950 上模式 0/1/2 不支持 PIPE_S
+详见 api-crosscore-sync.md
+```
+
+### Q8: 依赖所有 block 都完成通信后才能继续？
+
+```
+Drain 只保证本 block 的 channel 任务完成
+需要"所有 block 完成"语义时加 SyncAll<true>() 块间同步
+详见 api-hcomm.md、api-crosscore-sync.md
+```
+
+### Q9: Host 侧如何建链并下发通信上下文？
+
+```
+HcclCommInitRootInfoConfig → HcclChannelDescInit + HcclChannelAcquire
+→ HcclEngineCtxCreate + HcclEngineCtxCopy → 跨 rank 带外 barrier → launch
+详见 api-hccl-host.md
+```
+
+### Q10: 多核/多 rank 写入同一 GM 地址？
+
+```
+是 → 需要原子操作
+  累加语义（ReduceScatter/AllReduce/split-K）→ SetAtomicAdd<T>()
+  取最大值（attention 归约）→ SetAtomicMax<T>()
+  取最小值 → SetAtomicMin<T>()
+  ⛔ FP8 不支持原子操作，需先转 BF16/FP32
+  ⛔ 用完必须 DisableDmaAtomic() 关闭
+否 → 不需要（默认状态）
+详见 api-atomic.md
+```
+
 ---
 
 ## 按场景查阅详细文档
@@ -140,3 +186,7 @@ float → half → CAST_ROUND
 | UB 缓冲区管理 | [api-buffer.md](api-buffer.md) | TBuf/TQue 选择、Double Buffer、批量搬运 |
 | 流水线同步 | [api-pipeline.md](api-pipeline.md) | EnQue/DeQue 同步机制、时序图 |
 | repeatTime 限制 | [api-repeat-limits.md](api-repeat-limits.md) | 分批处理 |
+| 点对点通信 | [api-hcomm.md](api-hcomm.md) | ReadNbi/WriteNbi/Drain、URMA 队列语义 |
+| 跨核同步 | [api-crosscore-sync.md](api-crosscore-sync.md) | CrossCoreSetFlag/WaitFlag、SyncAll、flagId 硬件规则 |
+| HCCL Host | [api-hccl-host.md](api-hccl-host.md) | 建链、engine ctx、资源生命周期 |
+| DMA 原子操作 | [api-atomic.md](api-atomic.md) | SetAtomicAdd/DisableDmaAtomic、多 rank 累加前置条件 |

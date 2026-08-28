@@ -210,6 +210,156 @@
           "description": "回复提到 compat 层双平台封装"
         }
       ]
+    },
+    {
+      "id": 10,
+      "title": "apace 按请求目的路由（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要用 apace 在 Ascend 950 上开发一个 AllToAll+QuantMatmul 通算融合算子。请分别说明：1) 明确要求从零完整开发算子时走哪几步；2) 只要求算子设计、方案分析并输出设计文档时走哪些步骤；3) 只做咨询/解释/评审/排障时如何执行。",
+      "expected_output": "应说明：明确要求开发算子时走 Step 1→2→3→4 完整流程（plugin 场景以 workflow_integration.md 的 7 步映射为主要消费文档）；只要求设计时走 Step 2→3；咨询/解释/评审/排障时只读取相关 references。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 11,
+      "title": "apace 路线模型判定（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "apace 开发中如何决定实现路线选择 apace_native、apace_custom 还是 unsupported？各自的判定依据是什么？PUT/GET/compute-first 在这个模型中扮演什么角色？",
+      "expected_output": "应说明按官方 README 双模式决策：官方 apace/kernel 已有算子可直接调用或参考复用时选 apace_native（不读取场景注册表）；官方 kernel 未覆盖但可基于 apace/block 接口组合构建（含 compute-first 等自研编排）且场景唯一命中时选 apace_custom；block 接口层无法支撑或场景零命中/多命中时选 unsupported。并说明官方接口未覆盖不是绕过 apace 接口层、退回裸 Ascend C 全自建的授权——那是 ascendc-api 底座的路线选择，不是 apace 路线内的 fallback。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "apace 计算执行原则（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我计划把 apace 算子里的部分通信步骤（如数据打包/解包）放到 Host 侧实现，Kernel 里只做 MatMul。这样是否允许？为什么？",
+      "expected_output": "应说明通信与计算的流水编排、AIV-AIC 协同必须在 device 侧单次 launch 的融合 Kernel（MIX）中完成；host 侧只负责数据准备与 buffer 分配、Tiling 计算、多 rank 启动与通信建链（rootInfo 交换、HCCL/Win 资源分配、跨 rank barrier）、Kernel launch（含 dtype dispatch）和结果搬运；不得将算子语义中的任何计算或通信步骤（如归约、数据搬移、状态同步）放到 host 侧执行；CPU golden 等精度验证基建不属于算子语义，不在此限。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 13,
+      "title": "apace golden 切分轴错误必须先修 golden 再怀疑 kernel",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 ReduceScatter+QuantMatmul compute-first 算子精度验证 golden 全错、误差不收敛。开发者想直接修改 kernel 代码。请给出正确的定位顺序，不执行工具。",
+      "expected_output": "应先核对 golden 语义（每卡输入/输出分布与切分轴），确认切分轴（M/N/K 哪根轴按 rank 切）是否正确——golden 切分轴写错则精度验证整体失效，先修 gen_data 再怀疑 kernel。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 14,
+      "title": "apace flag 计数峰值超限必须 host 强制校验",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 compute-first 算子在 T=8 时正常，T=16 时出现硬件异常中断。开发者认为是 flag 编排问题，想修改 kernel 的 flag 分配逻辑。请给出正确的分析和修复方向，不执行工具。",
+      "expected_output": "应指出 flag 计数峰值 ≤ 15 是硬限制（T>1 逐轮配对时峰值 = T），T=16 已超限。修复方向是 host 侧强制校验 flag 计数峰值 ≤ 15，在 fork/建链前拒绝非法输入（R9），而不是修改 kernel flag 分配逻辑绕过限制。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 15,
+      "title": "apace 归约 in-place Cast 导致精度系统性错误",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 compute-first 算子的归约结果系统性错误，误差随来源序累积。开发者怀疑是归约公式问题，想修改归约的累加顺序。请给出正确的根因分析和修复方向，不执行工具。",
+      "expected_output": "应识别 in-place BF16→FP32 Cast 是根因（FP32 占 2× 空间覆盖未读 BF16 数据），修复方向是使用独立 srcFP32 双缓冲（R18），而不是修改归约累加顺序。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 16,
+      "title": "apace L2 flush 死代码导致性能数据不可复现",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "性能采集发现 MTE2 带宽虚高、数据不可复现。代码中分配了 cacheFlush buffer 但未调用 flush kernel。开发者认为 buffer 分配了就算 flush 了。请给出正确的分析和修复方向，不执行工具。",
+      "expected_output": "应指出只分配 cacheFlush buffer 不调 kernel = 死代码 = MTE2 带宽虚高（R20）。修复方向是每轮主 kernel 前实际调用 L2 flush kernel（如 heavy_add_kernel），msprof 记录数 == 轮数。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 17,
+      "title": "apace 场景唯一命中授权（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对当前 CANN 内置 apace 框架完成调查后，发现官方只有 PUT 模式的 AllToAll 和 AllGather 参考算子，没有 GET 模式的参考实现。用户要求开发 GET 模式 AllGather+QuantMatmul。请说明应如何记录调查结果并选择下一步，不执行工具。",
+      "expected_output": "核对结果必须记录为 not_found（AllGather GET 钩子未见源码记录；仅 AllToAll GET 钩子 all_to_all_udma_get.h 有记录），而不是 unknown 或 unsupported；说明声明读取边界内未找到不等于 apace 不支持，不得据此虚构接口或文件名。应保留官方 PUT 参考算子作为接口组合参照，复用已验证的 block 层接口，并把 GET 模式 kernel 开发、场景注册和验证列为适配与证据闭合项。场景注册表唯一命中 get-all-gather-quant-matmul 时选择 apace_custom。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 18,
+      "title": "apace 问题记录格式（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 apace 算子在编译阶段发现 ASC 设备编译报架构未选择。开发者想直接标记为 actual_failure 并记录为设备编译失败。请说明正确的分类和记录格式，不执行工具。",
+      "expected_output": "编译阶段发现的架构未选择问题属于设计/构建前风险，不能写成已经发生的设备失败。生产失败案例应按'现象 → 根因 → 修复方向'补入 review-checklist.md 常见 FAIL 原因表；设备结论必须标注执行环境、设备节点、实际命令和返回码，编译/静态通过不能写成设备已验证。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 19,
+      "title": "apace 四步流程边界（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "apace 四步流程中，Step 2（Framework Investigation）和 Step 3（Design）各自的边界是什么？Step 2 可以推荐实现路线吗？Step 3 可以写实现代码吗？",
+      "expected_output": "应说明：Step 2 是设计前核对——只读核对 apace 框架的接口事实（matmul 链路/通信接口/入口 ABI/官方覆盖性），事实默认内联于 DESIGN.md §0.3，不做方案推荐、不匹配场景、不选择路线、不编译或运行设备；Step 3 依据需求和核对事实完成路线决策，生成冻结的 DESIGN 和 PLAN，不复制文件、不写实现、不构建项目。每个步骤都有明确的边界声明。",
+      "expectations": [],
+      "files": []
     }
   ]
 }

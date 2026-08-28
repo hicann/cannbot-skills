@@ -31,7 +31,7 @@ tilingData.commTilingData.tileCnt = tileCnt;
 > apace GET 模式使用不同的 PIPE 配对：
 > - GET 模式 AIV WaitFlag：`PIPE_S`（而非 `PIPE_MTE2`）
 > - GET 模式 AIC SetFlag：`PIPE_FIX`（而非 `PIPE_MTE3`）
-> 详见 [`../foundations/apace/fusion.md`](../foundations/apace/fusion.md) §3（GET/PUT flag 编排模式）与 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`（API 签名与平台生效性）。
+> 详见 [`../foundations/apace/fusion.md`](../foundations/apace/fundamentals/fusion.md) §3（GET/PUT flag 编排模式）与 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`（API 签名与平台生效性）。
 
 ---
 
@@ -125,12 +125,23 @@ python3 ${SKILL_PATH}/scripts/msprof_perf_summary.py "${PROJ}/docs/perf/tileCnt_
 | `headMSize > 0` | `tileCnt ≤ M` | 编译期 OK，运行期 tile 为空 |
 | `M % tileCnt == 0` | 否则要显式处理 tail | host 侧 `tileCnt = (m - tailMSize) / headMSize` 当前不支持非零 tail |
 | `headMSize ≥ Blaze baseM`（典型 128/256） | Blaze `BlockMmad` 需要最小块 | `GetTilingData` 报错或推导失败 |
-| `headMSize × kPerRank × sizeof(dtype)` 落在 UDMA 高效区间 | 数百 KB ~ 数 MB | UDMA 带宽利用率下降，Put 开销暴露 |
+| `headMSize × kPerRank × sizeof(dtype)` 落在 UDMA 带宽高效区间 | 数十 KB ~ 512 KB；且**单轮 PUT 数据量 ≤ 512KB 可靠性上限**（实测 1MB 处于 UDMA Drain 可靠性边界，间歇 FAIL） | UDMA 带宽利用率下降，Put 开销暴露；超 512KB 时间歇性通信 FAIL |
 | `bufferSize × headMSize × kPerRank × rankSize × sizeof(dtype) ≤ SHMEM_SPACE_SIZE` | SHMEM 空间预算（默认 1 GB） | `aclshmem_align` 失败 |
 
-**512 不是最优值**——参考工程固定 `headMSize=512` 只是为了在 `M=2048, K=8192, rankSize=4` 的典型 shape 下取得一个合理起点（Put ≈ 1 MB，UDMA 带宽利用率高）。其他 shape/dtype 下最优值不同：
+**512 不是最优值**——参考工程固定 `headMSize=512` 只是为了在 `M=2048, K=8192, rankSize=4` 的典型 shape 下取得一个合理起点。其他 shape/dtype 下最优值不同：
 - M 大、K 小时，`tileCnt` 增大（`headMSize` 减小）让通信粒度更细，掩盖级数更多；
 - K 大时，单次 MMAD 已足够长，`tileCnt` 可减小（`headMSize` 增大）减少通信次数。
+
+**按 rank 数分档的标定值**（Ascend950PR / dav-3510 平台实测标定，不跨平台复用）：
+
+| rankSize | 推荐 headMSize | 理由 |
+|---|---|---|
+| ≤ 2 | 512 | 大 tile、少 SyncAll、通信效率高（分片大，同步次数敏感） |
+| ≥ 4 | 128 | 小 tile、多 commTurn，`AllToAll(t) ∥ Reduce(t-1)` 流水掩盖效果好 |
+
+> ⚠️ **flag 计数上限联合约束**：`T = mSeg / headMSize ≤ 15`（flagId 计数器范围 0-15，T>1 逐轮计数配对峰值 = T）。即 `headMSize ≥ ceil(mSeg / 15)`——例：R≥4 推荐 128，但 mSeg > 1920 时 T>15 无效，必须上调 headMSize（如取 ceil(mSeg/15) 的 baseM 整数倍），不能为满足分档值突破 flag 上限。
+
+同时受 Blaze baseM 约束：headMSize 需为 baseM（减半后典型 128）的整数倍；SWAT baseM=256 且 headMSize 可被 128 整除时可手动减半 baseM 至 128（见 fusion.md §6.2.8）。
 
 ---
 
@@ -218,4 +229,4 @@ Step 7: 汇报（含最优 tileCnt + 对应 Task Duration）
 | 性能采集流程（msprof task-based + L2 flush + 4 卡后处理） | `profiling_mc2.md` |
 | MC2 通算流水架构 | `mc2_architecture.md` §4 "4-Buffer 流水" |
 | Blaze tiling 字段含义 | `matmul_blaze.md` §4 "Tiling 数据流" |
-| Step 6 验收门禁 | `workflow_integration.md` §Step 6 |
+| Step 6 验收门禁 | blaze-shmem：`../foundations/blaze-shmem/workflow_integration.md` §Step 6；apace：`../foundations/apace/workflow/step4-implementation.md` §4 精度与性能验收 |

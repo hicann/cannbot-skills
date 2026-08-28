@@ -7,6 +7,7 @@
 ## 目录
 
 1. [APACE 是什么](#1-apace-是什么)
+   - 1.5 [方法论原则](#15-方法论原则apace-算子开发通用)
 2. [三层架构](#2-三层架构)
 3. [实现模式](#3-实现模式)
 4. [通信方向：GET vs PUT](#4-通信方向get-vs-put)
@@ -14,8 +15,8 @@
 6. [6 大关键技术索引](#6-6-大关键技术索引)
 7. [AIC/AIV 分工与流水](#7-aicaiv-分工与流水)
 8. [四段式通信 API 概览](#8-四段式通信-api-概览)
-9. [与 blaze-shmem 路线对照](#9-与-shmem-路线对照)
-10. [四大约束（apace 路线红线）](#10-四大约束apace-路线红线)
+9. [与 blaze-shmem 路线对照](#9-与-blaze-shmem-路线对照)
+10. [基础约束（apace 路线红线）](#10-基础约束apace-路线红线)
 11. [新建算子文件清单 + 导航](#11-新建算子文件清单--导航)
 
 ---
@@ -52,9 +53,22 @@ mc2/<op>/op_kernel  ──┐
                       └──▶ apace/kernel       (算子框架，参考实现)
 ```
 
-> ⚠️ **直调限制**：HCCL windows/CCU 模式无 `__global__` 入口，不支持直调。直调开发仅支持 UDMA 模式算子。详见 §10 ④。
+> ⚠️ **直调限制**：HCCL windows/CCU 模式无 `__global__` 入口，不支持直调（红线，详见 §10 ④）。
 
 直调形态下，`kernel/<op>/` 下创建 Impl 类（含 `__global__` 入口），复用 `apace/block/` 接口组合构建融合 kernel，tiling 结构体引用 `apace/tiling/`。注册形态下，op_host 层使用 `apace/tiling` 切分算法，op_kernel 层基于 `apace/block` 接口组合构建。
+
+---
+
+## 1.5 方法论原则（apace 算子开发通用）
+
+| # | 原则 | 内涵 |
+|---|------|------|
+| 1 | **事实源唯一** | 工程事实源 = CANN 内置 apace 直引（禁止整包复制）；知识事实源 = 每条契约单文件出处，他处只引用 |
+| 2 | **设计三拷问** | 动手前依次回答：① golden 语义（每卡输入/输出分布与切分轴）② 通信方向（compute-first 还是 comm-first）③ 编排形态（严格分离还是时分复用）——三问答错，后续全部返工 |
+| 3 | **契约驱动实现** | 每个实现决策对应一条"不变量 + 违反后果"契约（per-tile 子区间、winOffset、分核映射、flag 配对、归约批量）——契约来自生产失败案例，不是风格建议 |
+| 4 | **失败模式前置** | 优先用失败案例检查实现：每条契约都来自生产失败案例而非风格建议——完整失败案例库（现象 → 根因 → 修复方向）见 [`review-checklist.md`](../review-checklist.md) 常见 FAIL 原因表 |
+| 5 | **验收分层递进** | 编译 → 冒烟（T=1 单 rank 非全 0）→ 精度（T=1/T>1 双路径 × 多 rank × 多 shape）→ 性能（真实 shape × 多 rank 档 × 三路径对标）——每层门禁不过不进下一层 |
+| 6 | **示例与合同边界纪律** | 单实例常量（winOffset、flagId、分核编号等）不得升格为普适门禁；示例值必须标注示例属性；路线条件规则（PUT/compute-first/GET）必须分路线给出，禁止以单路线形态充当通用合同 |
 
 ---
 
@@ -126,43 +140,17 @@ kernel/all_to_all_quant_matmul/
 - Impl 类直接持有 `CollectiveComm`（通信）+ matmul kernel（计算），不通过 GemmUniversal 包装
 - PUT 模式：AIV 侧 `RunAllToAll()` 逐轮推 scale/data 到远端 Win（Commit 顺序 scale→data），`CrossCoreSetFlag` 通知 AIC；AIC 侧 kernel 内经 `CommPolicy::WaitTile` 等待通信 tile 就绪后计算
 
-> 详见 [`operator-anatomy.md`](operator-anatomy.md)（Impl 骨架）和 [`compute.md`](compute.md)（Blaze 集成）
+> 详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md)（Impl 骨架）和 [`compute.md`](compute.md)（Blaze 集成）
 
 ---
 
 ## 4. 通信方向：GET vs PUT
 
-apace 通信方向由数据流决定：
+apace 通信方向由数据流决定：**GET = 计算→通信**（AIC 先算 C 写 Win 区，AIV 从远端拉回本 rank 段，沿 N 轴切分）；**PUT = 通信→计算**（AIV 先推数据到远端 Win 区，AIC 读取计算，沿 K 轴切分）。方向语义、钩子差异与 flag 编排对比以 [`fusion.md`](fusion.md) §2 为唯一事实源，本节只保留切分轴决策与 B 分布模式。
 
-```
-                    ┌──────────────────┐
-                    │   计算 → 通信     │  GET 模式（官网暂无算子样例）
-                    │   AIC 先算 C     │  AIC = 生产者
-                    │   AIV 拉 C 回来   │  AIV = 消费者
-                    └──────┬───────────┘
-                           │ 切分轴 = N
-                           ▼
-                    （block 层钩子 all_to_all_udma_get.h 已存在，
-                     kernel/ 层无算子使用）
+> M 轴是通用首选切分轴（不同 M 段独立通信/计算），但 GET 模式按 N 轴切分（每 rank 持有 N/rankSize 列），PUT 模式按 K 轴切分（每 rank 持有 K/rankSize 行）。官网 `all_gather_quant_matmul` 即按 M 轴切分。GET 模式官网暂无算子样例（见 §5）。
 
-                    ┌──────────────────┐
-                    │   通信 → 计算     │  PUT 模式
-                    │   AIV 先推 A     │  AIV = 生产者
-                    │   AIC 算 C       │  AIC = 消费者
-                    └──────┬───────────┘
-                           │ 切分轴 = K
-                           ▼
-                    all_to_all_quant_matmul  ← 官网样例
-```
-
-| 方向 | 模式 | 切分轴 | 生产者 | 消费者 | 官网样例 |
-|:---|:---|:---|:---|:---|:---|
-| 计算→通信 | GET | N 轴 | AIC（算 C 写 Win） | AIV（从 Win 拉 C） | ⚠️ 官网暂无（仅 block 层钩子） |
-| 通信→计算 | PUT | K 轴 | AIV（推 A 到 Win） | AIC（从 Win 读 A 算 C） | all_to_all_quant_matmul |
-
-> M 轴是通用首选切分轴（不同 M 段独立通信/计算），但 GET 模式按 N 轴切分（每 rank 持有 N/rankSize 列），PUT 模式按 K 轴切分（每 rank 持有 K/rankSize 行）。官网 `all_gather_quant_matmul` 即按 M 轴切分。
-
-> ⚠️ **术语消歧**：本节「切分轴 = K」指 **rank 级数据分布轴**（每 rank 持有 A 的 K/rankSize 段）；而 `CommTilingData.splitAxis*` 字段沿 **M** 轴推进（通信 tile 经 `headMSize` 沿 M 切分，`nonSplitAxisSize = ka`）。字段映射详见 [`operator-anatomy.md`](operator-anatomy.md) §3，填 tiling 字段时不要混用两个"切分轴"概念。
+> ⚠️ **术语消歧**：本节「切分轴 = K」指 **rank 级数据分布轴**（每 rank 持有 A 的 K/rankSize 段）；而 `CommTilingData.splitAxis*` 字段沿 **M** 轴推进（通信 tile 经 `headMSize` 沿 M 切分，`nonSplitAxisSize = ka`）。字段映射详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §3，填 tiling 字段时不要混用两个"切分轴"概念。
 
 ### PUT 模式数据流（all_to_all_quant_matmul）
 
@@ -203,9 +191,9 @@ apace 通信方向由数据流决定：
 **选择规则**：
 - B 全量复制 → 内存开销大（rankSize 倍），但 AIC 可按 rank 索引直接访问对应 K 段
 - B N-split → 内存节省，每 rank 持有 B 的 N/rankSize 列
-- **泛化规则**：PUT + AtomicAdd 模式要求 B 全量复制；GET 模式 B 可 N-split
+- **泛化规则**：PUT 模式（含 AtomicAdd 串行与 3 级流水 workspace 两种实现）要求 B 全量复制；GET 模式 B 可 N-split
 
-> ScaleB 的内存分配公式与 B 分布一致，详见 [`operator-anatomy.md`](operator-anatomy.md) §3。
+> ScaleB 的内存分配公式与 B 分布一致，详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §3。
 
 ### tileSize 约束
 
@@ -214,12 +202,12 @@ apace 通信方向由数据流决定：
 | 约束 | 说明 |
 |:---|:---|
 | **baseM 整数倍** | 切分轴 tile 大小应取 Blaze base 块的整数倍，否则尾块处理复杂化 |
-| **单次传输字节数高效区间** | 单次 UDMA 传输字节数应落在 UDMA 高效区间（通常 4KB-1MB） |
+| **单次传输字节数** | 单轮 PUT 数据量（perRoundChunkBytes）≤ 512KB（生产实测经验值，官方代码无显式约束；带宽高效区间与可靠性上限是两个独立概念）——唯一定义见 [`communication.md`](communication.md) 陷阱 #13 |
 | **Win 区空间预算** | Win 区总需求不能超过容量（通常几十 MB） |
-| **通信 tile 总数 ≤ 32** | AIC 侧 `waitedMask` 为 `uint32_t`，超出静默出错（详见 [`fusion.md`](fusion.md) §4） |
+| **通信 tile 总数 ≤ 32** | AIC 侧 `waitedMask` 为 `uint32_t`，超出静默出错（详见 [`fusion.md`](fusion.md) §4.2）；与 commTurn ≤ 16（flagId 上限，[`fusion.md`](fusion.md) §3.3）是两套机制的约束，取更严者 |
 
 **经验法则**：
-- `tileCnt` 扫描范围 {1, 2, 4, 8, 16, 32}
+- `tileCnt` 扫描范围 {1, 2, 4, 8, 16, 32}（受上表两套上限约束：以轮次 tid 作 flagId 的编排下 commTurn ≤ 16，超出档位无意义）
 - `tileCnt` 增大 → 通信粒度变细 → 通算重叠度提高，但同步开销增加
 
 ---
@@ -228,24 +216,15 @@ apace 通信方向由数据流决定：
 
 官网 `kernel/` 下有 2 个算子目录：
 
-| 算子 | 通信方向 | 切分轴 | Blaze 集成 | 通信引擎 | `__global__` | CommContext | 当前状态 |
-|:---|:---|:---|:---|:---|:---|:---|:---|
-| all_to_all_quant_matmul (udma) | 通信→计算 (PUT) | K | 组合 | UDMA | 有 (×4，在 `tests/st/all_to_all_quant_matmul/src/kernel_launcher.h`) | apace CommContext | ✅ 可用（有 ST 覆盖） |
-| all_to_all_quant_matmul (hcomm) | 通信→计算 (PUT) | K | 组合 | HCCL (CCU) | 无 | HCCL | ⚠️ CCU 模式（`HcclServerType::HCCL_SERVER_TYPE_CCU` + `GetHcclContext`，纯 C 核通信，框架注册场景，非直调） |
-| all_gather_quant_matmul (udma) | 通信→计算 (PUT) | M | 组合 | UDMA | 有 (×1，`all_gather_mx_matmul_udma_impl.h` 文件末尾) | apace CommContext | ✅ 可用（有 ST 覆盖） |
+| 算子 | 通信方向 | 切分轴 | Blaze 集成 | 通信引擎 | `__global__` | CommContext | 关键特征 | 当前状态 |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| all_to_all_quant_matmul (udma) | 通信→计算 (PUT) | K | 组合 | UDMA | 有 (×4，在 `tests/st/all_to_all_quant_matmul/src/kernel_launcher.h`) | apace CommContext | localMatmul 0/1/2，双通信对象（data + scale），CommPolicy 注入 | ✅ 可用（有 ST 覆盖） |
+| all_to_all_quant_matmul (hcomm) | 通信→计算 (PUT) | K | 组合 | HCCL (CCU) | 无 | HCCL | CCU 变体（`HcclServerType::HCCL_SERVER_TYPE_CCU` + `GetHcclContext`，框架注册场景），复用同一 `QuantMatmulMxKernel`，仅 `CommPolicy` 不同 | ⚠️ 非直调 |
+| all_gather_quant_matmul (udma) | 通信→计算 (PUT) | M | 组合 | UDMA | 有 (×1，`all_gather_mx_matmul_udma_impl.h` 文件末尾) | apace CommContext | 单 `__global__` 入口 `Process()`，FragmentTensor，dependId 预触发 | ✅ 可用（有 ST 覆盖） |
 
-### 算子×路径总表
-
-| 算子/变体 | 集成模式 | 通信方向 | 关键特征 |
-|:---|:---|:---|:---|
-| all_to_all_quant_matmul (udma) | 组合 | PUT | localMatmul 0/1/2，双通信对象（data + scale），CommPolicy 注入 |
-| all_to_all_quant_matmul (hcomm) | 组合 | PUT | CCU 变体，复用同一 `QuantMatmulMxKernel`，仅 `CommPolicy` 不同 |
-| all_gather_quant_matmul (udma) | 组合 | PUT | 单 `__global__` 入口 `Process()`，FragmentTensor，dependId 预触发 |
-
-> 官网无 GET 算子（GET 钩子 `all_to_all_udma_get.h` 存在但无算子使用）、无 quant_matmul_reduce_scatter、无委托模式 epilogue。
+> 官网无 GET 算子（GET 钩子 `all_to_all_udma_get.h` 存在但无算子使用）、无 compute-first（计算在前）算子样例、无委托模式 epilogue。compute-first 算子的实现契约以 [`fusion.md`](fusion.md) §6.2 与 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §7 为准。
 >
-> - HCCL windows / CCU 模式不支持直调，直调开发仅支持 UDMA 模式算子。
-> - 标记"有 `__global__`"的样例可直接通过 `<<<>>>` 直调；标记"无"的需要外部框架提供入口。
+> 标记"有 `__global__`"的样例可直接通过 `<<<>>>` 直调；标记"无"的需要外部框架提供入口（直调限制见 §10 ④）。
 
 ---
 
@@ -257,12 +236,14 @@ APACE 设计提出 6 大关键技术。以下为逐条索引：
 |:---|:---|:---|:---|:---|
 | 1 | **多通信引擎+协议统一抽象**（四段式 API） | 已实现 | [`communication.md`](communication.md) | 是 |
 | 2 | **FragmentTensor 离散内存重映射** | 已实现 | [`compute.md`](compute.md) | 否（all_to_all）；是（all_gather UDMA） |
-| 3 | **通信计算独立调度** | 已实现 | [`operator-anatomy.md`](operator-anatomy.md) | 是 |
-| 4 | **灵活切分策略** | 已实现 | [`operator-anatomy.md`](operator-anatomy.md) | 是 |
-| 5 | **CV 协同/单核独立模式** | 已实现 | [`operator-anatomy.md`](operator-anatomy.md) | 是 |
+| 3 | **通信计算独立调度** | 已实现 | [`operator-anatomy.md`](../operator-design/operator-anatomy.md) | 是 |
+| 4 | **灵活切分策略** | 已实现 | [`operator-anatomy.md`](../operator-design/operator-anatomy.md) | 是 |
+| 5 | **CV 协同/单核独立模式** | 已实现 | [`operator-anatomy.md`](../operator-design/operator-anatomy.md) | 是 |
 | 6 | **内存编程基座**（Tensor API 地址排布分离+UB 静态规划） | 部分实现 | [`compute.md`](compute.md) | 是 |
 
 > 官网 `docs/` 目录当前仅有 .gitkeep 占位，无设计文档。以 `kernel/` 下的实际文件为准。
+>
+> **UB 容量**（技术 #6 相关）：DAV_3510（Ascend 950）硬件 UB = 256KB 物理 / 248KB 框架可用（`GetCoreMemSize(UB)` = 253952 = 256KB − 8KB 框架预留）。MC2 通算融合算子中 AIV 归约侧推荐预算 `TOTAL_UB = 192KB`，预留 headroom 给 guard 通信区与框架开销；实际可分配上限 `MAX_UB_BYTES = 180KB`（6-slot 归约布局下每元素 18B，`maxElements = MAX_UB_BYTES / perElemBytes`）。**禁止硬编码**——应以 `GetCoreMemSize(UB)` 运行时获取，上述数值仅为生产实测推荐预算。详见 [`communication.md`](communication.md) §4.1 UB 预算、[`fusion.md`](fusion.md) §6.2.6 归约 UB 布局、[`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.4。
 
 ---
 
@@ -274,22 +255,7 @@ APACE 设计提出 6 大关键技术。以下为逐条索引：
 
 ### PUT 模式流水（all_to_all_quant_matmul，对照官网）
 
-```
-AIV (生产者)                          AIC (消费者)
-─────────────                         ─────────────
-round 0: Commit(scale) → Commit(data) │
-         Wait<BARRIER_DEVICE>()       │
-         SyncAll<true>()              │
-         SetFlag<0x2,PIPE_MTE3>(0) ──────→ WaitTile(0)（WaitFlag<0x2,PIPE_MTE2>，waitedMask 去重）
-                                      │    遍历 rank: A[rank] × B[rank K 段] → L0C 累加
-round 1: Commit(scale) → Commit(data) │
-         Wait<BARRIER_DEVICE>()       │
-         SyncAll<true>()              │
-         SetFlag<0x2,PIPE_MTE3>(1) ──────→ WaitTile(1)
-                                      │    ...
-...                                   │
-Finalize(scale) + Finalize(data)      │ 尾部兜底：未 wait 的 tile 补 WaitTile
-```
+PUT 逐 tile 流水编排（AIV Commit→Wait→SyncAll→SetFlag，AIC WaitTile 消费）以 [`fusion.md`](fusion.md) §3.2 编排图为唯一事实源，本节不重复。
 
 > 若 `localMatmul == 1`，AIC 在首个 `WaitTile` 前先执行 `RunLocalMatmul()`（本地 A × 本 rank B → C），与 AIV PUT 并行。
 
@@ -362,7 +328,7 @@ using Comm = Apace::AivComm::CollectiveComm<
 | **通信抽象** | 直接调 `aclshmemx_udma_*`，手写 AllToAllComm 类 | `CollectiveComm<Op,Mode,T,Barrier>` 编译期分发 + CRTP 四段式 API |
 | **跨卡同步** | `aclshmemx_barrier_all_vec`（SHMEM barrier） | `TeamBarrier`（UBMEM 协议 GM flag 轮询，支持部分核参与） |
 | **Blaze 集成** | 细粒度 tile 级手写编排 | 组合模式（自定义 matmul kernel + CommPolicy 注入） |
-| **通信引擎** | 仅 UDMA（SHMEM） | UDMA(Hcomm)。⚠️ HCCL windows/CCU 不支持直调，详见 §10 ④ |
+| **通信引擎** | 仅 UDMA（SHMEM） | UDMA(Hcomm)；HCCL windows/CCU 仅限注册场景（§10 ④） |
 | **内存抽象** | 无（连续 GM + SHMEM Win 区） | FragmentTensor（离散内存虚拟重排，all_gather UDMA 已使用） |
 | **tiling 结构** | 分层类继承（base/common/swat 三层） | 扁平 struct 组合 + CommContext |
 
@@ -382,13 +348,13 @@ using Comm = Apace::AivComm::CollectiveComm<
 
 **apace 路线**：禁止 HCCL 高阶 API（`Hccl::AllReduce` 等服务端调度 API），但**允许 HCCL windows/CCU**（`GetHcclContext`，属 kernel 级 API，通信下发权在 Kernel 内）⚠️ 仅限非直调场景
 
-> ⚠️ **HCCL windows/CCU 直调限制**：apace 路线"允许 HCCL windows"**仅限算子框架注册场景**（有 op_host/op_kernel 完整工程）。对于 CANNBot **Kernel 直调工作流**（`<<<>>>` 直调），HCCL windows/CCU 模式不支持直调。直调开发仅支持 UDMA 模式算子（官网即 `all_to_all_quant_matmul` UDMA 变体与 `all_gather_quant_matmul`）。根因详见 §10 ④。
+> ⚠️ HCCL windows/CCU 的"允许"仅限算子框架注册场景；直调不支持（详见 §11 ④）。
 
 ---
 
-## 10. 四大约束（apace 路线红线）
+## 10. 基础约束（apace 路线红线）
 
-设计文档中必须显式确认四大约束；代码审查时交叉检查；违反任意一条 = FAIL。
+本节 4 条为 apace 路线的**基础约束**（对应红线 R1/R2/R4/R7）；完整红线（全局 + 场景约束）以 [`review-checklist.md`](../review-checklist.md) 为准。设计文档中必须显式确认基础约束；代码审查时交叉检查；违反任意一条 = FAIL。
 
 ### ① 禁止使用 `__schedmode__(1)` 和 `[[bisheng::core_ratio(1,1)]]`
 
@@ -403,7 +369,9 @@ __schedmode__(1)
 [[bisheng::core_ratio(1,1)]]
 ```
 
-> 详见 [`operator-anatomy.md`](operator-anatomy.md) §5
+> 详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §5
+>
+> 注：`aclError:507015` 是泛化 timeout/trap 错误码，多根因共用——localMatmul=1 缺 PipeBarrier 的 MTE 异常也表现为该码（见 [`fusion.md`](fusion.md) §5.4）。
 
 ### ② Matmul 走 Blaze 模板
 
@@ -417,7 +385,7 @@ __schedmode__(1)
 
 对于 CANNBot **Kernel 直调工作流**（`<<<>>>` 直调），apace 路线**仅支持 UDMA 模式**算子（官网即 `all_to_all_quant_matmul` UDMA 变体、`all_gather_quant_matmul`）。HCCL windows/CCU 模式算子**无 `__global__` 入口，不支持直调开发**。
 
-**ReduceScatter 语义的替代实现**：虽然 ReduceScatter 原语未在 block 层实现，但其语义（多 rank 部分和累加 + 输出按轴切分）可通过 **AllToAll PUT + AtomicAdd** 模式实现，无需新增 block 原语。详见 [`fusion.md`](fusion.md) §6。
+**ReduceScatter 语义**：ReduceScatter 原语未在 block 层实现（`CommCollectiveOp::ReduceScatter` 枚举值已预留但无分发实现），其语义（多 rank 部分和累加 + 输出按轴切分）可通过 compute-first 场景模式实现——编排模式见 [`fusion.md`](fusion.md) §6.2，场景合同见 [`scenarios/`](../scenarios/) 场景注册表。
 
 **原因**：HCCL 模式依赖算子框架在 kernel launch 前通过 `HcclCreateOpResCtx` 创建通信上下文（`HcclOpParam`），该上下文由框架注入 kernel。直调模式下缺少框架的上下文初始化，`GetHcclContext` 返回的指针无效，会导致通信失败或输出全为 0。
 
@@ -452,7 +420,7 @@ kernel/<op>/
 
 ### 官网算子实例
 
-官网 `kernel/` 下两个算子目录：`kernel/all_to_all_quant_matmul/`（AllToAll PUT，含 UDMA / HCCL CCU 双变体）与 `kernel/all_gather_quant_matmul/`（AllGather PUT）。文件职责与符号名详见 [`development-guide.md`](development-guide.md) §1；共性模式解剖见 [`operator-anatomy.md`](operator-anatomy.md) §1。
+官网 `kernel/` 下两个算子目录：`kernel/all_to_all_quant_matmul/`（AllToAll PUT，含 UDMA / HCCL CCU 双变体）与 `kernel/all_gather_quant_matmul/`（AllGather PUT）。文件职责与符号名详见 [`development-guide.md`](../operator-design/development-guide.md) §1；共性模式解剖见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §1。
 
 ### 后续阅读
 
@@ -462,9 +430,9 @@ kernel/<op>/
 | [`compute.md`](compute.md) | 计算原理与接口：Blaze 组件、QuantMatmulMxKernel、FragmentTensor |
 | [`communication.md`](communication.md) | 通信原理与接口：CollectiveComm 四段式、GET/PUT 钩子、TeamBarrier、CrossCore flag、host 建链 |
 | [`fusion.md`](fusion.md) | 通算融合组合：GET/PUT 选型、flag 编排、环形回压、localMatmul 模式 |
-| [`operator-anatomy.md`](operator-anatomy.md) | 算子解剖（kernel 侧）：共性模式、tiling_data、Impl 契约、入口规则 |
-| [`host-and-testing.md`](host-and-testing.md) | 算子解剖（host 与测试）：初始化序列、launch、ST 工程 |
-| [`development-guide.md`](development-guide.md) | 开发新算子：REUSE/MODIFY 标记、改造场景、验收清单 |
-| [`workflow_integration.md`](workflow_integration.md) | 设计 apace 算子前，看 apace 场景的技术要点和门禁 |
-| [`../shared/profiling_mc2.md`](../../shared/profiling_mc2.md) | 性能采集与调优时：msprof task-based 采集 + L2 flush + 多卡后处理 |
-| [`../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md) | 通算并行调优：tileCnt 两阶段策略 |
+| [`operator-anatomy.md`](../operator-design/operator-anatomy.md) | 算子解剖（kernel 侧）：共性模式、tiling_data、Impl 契约、入口规则 |
+| [`host-and-testing.md`](../operator-design/host-and-testing.md) | 算子解剖（host 与测试）：初始化序列、launch、ST 工程 |
+| [`development-guide.md`](../operator-design/development-guide.md) | 开发新算子：REUSE/MODIFY 标记、改造场景、验收清单 |
+| [`workflow/`](../workflow/) | 四步流程：Step 1 项目搭建 / Step 2 框架调查 / Step 3 设计 / Step 4 实现 |
+| [`profiling_mc2.md`](../../../shared/profiling_mc2.md) | 性能采集与调优时：msprof task-based 采集 + L2 flush + 多卡后处理 |
+| [`pipeline_tuning.md`](../../../shared/pipeline_tuning.md) | 通算并行调优：tileCnt 两阶段策略 |

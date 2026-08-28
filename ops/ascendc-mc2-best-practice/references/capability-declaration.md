@@ -20,7 +20,7 @@
 | chip | op_type | 调用形态 | 通信路径 | 编程抽象 | status | reference_impl | 知识目录 |
 |------|---------|---------|---------|---------|--------|----------------|---------|
 | dav-3510 | collective-comm | 直调 | AIV+URMA | blaze-shmem | supported | `references/foundations/blaze-shmem/all_to_all_matmul/` | `references/foundations/blaze-shmem/` |
-| dav-3510 | collective-comm | 直调 | AIV+URMA | apace | supported | ops-transformer `mc2/common/op_kernel/apace/kernel/all_to_all_quant_matmul/`、`.../all_gather_quant_matmul/` | `references/foundations/apace/` |
+| dav-3510 | collective-comm | 直调 | AIV+URMA | apace | supported | ops-transformer `mc2/common/op_kernel/apace/kernel/all_to_all_quant_matmul/`、`.../all_gather_quant_matmul/`（通信在前 PUT）；compute-first ReduceScatter 参考 `.../quant_matmul_reduce_scatter/` | `references/foundations/apace/` |
 | dav-3510 | moe | 直调 | MTE通信（AIV+UBMEM） | ascendc-api | supported | `references/foundations/ascendc-api/moe-dispatch-combine/samples/moe_dispatch_direct_invoke_sample/` | `references/foundations/ascendc-api/moe-dispatch-combine/` |
 | dav-2201 | moe | 直调 | MTE通信（AIV+UBMEM） | ascendc-api | supported | 同上（compat 层抹平 A3/A5 window 结构差异） | 同上 |
 | dav-3510 | moe | 直调 | AIV+URMA | apace | planned | ops-transformer `mc2/mega_moe/` | — |
@@ -32,7 +32,7 @@
 | 组合 | status | 原因 |
 |------|--------|------|
 | 直调 × HCCL 高阶集合通信（`Hccl::*`）× AscendC::Matmul 高阶 API | unsupported | HCCL 集合通信库（Ascend C 高阶 API 一部分，基于 HCOMM 构建）依赖框架注入的通信上下文，Kernel 直调拿不到；官方通算融合仅支持 acnn 单算子调用（详见 [`foundations/blaze-shmem/comm_shmem.md`](foundations/blaze-shmem/comm_shmem.md) §5） |
-| 直调 × HCCL windows（`GetHcclContext`） | unsupported | 无 `__global__` 入口，不支持 Kernel 直调；仅限注册场景（apace 非直调变体，见 [`foundations/apace/architecture.md`](foundations/apace/architecture.md) §10 ④） |
+| 直调 × HCCL windows（`GetHcclContext`） | unsupported | 无 `__global__` 入口，不支持 Kernel 直调；仅限注册场景（apace 非直调变体，见 [`foundations/apace/fundamentals/architecture.md`](foundations/apace/fundamentals/architecture.md) §10 ④） |
 | 直调 × CCU | unsupported | 同上，无 `__global__` 入口 |
 | dav-2201 × UDMA（blaze-shmem 或 apace） | unsupported | UDMA 路径仅 dav-3510 已验证，其他架构行为未验证，禁止使用 |
 

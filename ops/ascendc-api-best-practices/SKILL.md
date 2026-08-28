@@ -1,6 +1,6 @@
 ---
 name: ascendc-api-best-practices
-description: Ascend C API 使用最佳实践。提供算术、归约、数据搬运、Buffer管理、精度转换等 API 的正确用法和限制说明。触发：用户询问具体 API 用法（如"DataCopy 怎么用"）、遇到 API 参数错误或限制报错（如 repeatTimes、对齐问题）、需要查看 API 最佳实践或避坑指南时。
+description: Ascend C API 使用最佳实践。提供算术、归约、数据搬运、Buffer管理、精度转换、通信接口等 API 的正确用法和限制说明。触发：用户询问具体 API 用法（如"DataCopy 怎么用"、"ReadNbi 怎么用"）、遇到 API 参数错误或限制报错（如 repeatTimes、对齐问题）、需要查看 API 最佳实践或避坑指南时。
 ---
 
 # Ascend C API 最佳实践
@@ -27,6 +27,11 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **repeatTime 限制** | repeatTimes ≤ 255 | [api-repeat-limits.md](references/api-repeat-limits.md) | 分批处理 |
 | **API 限制** | - | [api-restrictions.md](references/api-restrictions.md) | 禁用 API、编译期限制 |
 | **Host Runtime** | aclrtSetDevice, aclrtGetDeviceInfo | [api-host-runtime.md](references/api-host-runtime.md) | 设备初始化、核数获取 |
+| **点对点通信** | Hcomm, ReadNbi, WriteNbi, Drain | [api-hcomm.md](references/api-hcomm.md) | 跨卡点对点搬运、URMA 队列语义 |
+| **跨核同步** | CrossCoreSetFlag, CrossCoreWaitFlag, SyncAll | [api-crosscore-sync.md](references/api-crosscore-sync.md) | AIC↔AIV 通知、flagId 硬件规则 |
+| **HCCL Host** | HcclCommInitRootInfoConfig, HcclChannelAcquire, HcclEngineCtxCreate | [api-hccl-host.md](references/api-hccl-host.md) | 通信域/channel/engine ctx 管理 |
+| **DMA 原子操作** | SetAtomicAdd, SetAtomicMax, DisableDmaAtomic | [api-atomic.md](references/api-atomic.md) | 多核/多 rank 部分和累加、split-K 累加 |
+
 ---
 
 ## 场景索引
@@ -45,6 +50,8 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **流水线优化** | [api-pipeline.md](references/api-pipeline.md), [api-buffer.md](references/api-buffer.md) | Double Buffer、事件同步 |
 | **性能调优** | [api-buffer.md](references/api-buffer.md), [api-repeat-limits.md](references/api-repeat-limits.md) | Double Buffer、repeatTimes 优化 |
 | **遇到 API 限制** | [api-restrictions.md](references/api-restrictions.md) | 替代方案、避坑指南 |
+| **通算融合（MC2）** | [api-hcomm.md](references/api-hcomm.md), [api-crosscore-sync.md](references/api-crosscore-sync.md) | Hcomm/CrossCore 原语层 API；**编排层（核分工、flag 流水、UB 隔离、通信并行度）请参考对应框架/领域技能文档** |
+| **多卡通信** | [api-hccl-host.md](references/api-hccl-host.md) | HCCL 建链、engine ctx 下发、资源生命周期 |
 | **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 A2/A3（DAV_2201）平台** |
 | **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 A2/A3（DAV_2201）平台** |
 | **非均匀间隔自定义 mask** | [api-gathermask.md](references/api-gathermask.md) | 用户自定义 LocalTensor mask、类型匹配 |

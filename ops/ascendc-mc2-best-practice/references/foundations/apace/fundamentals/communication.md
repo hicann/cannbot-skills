@@ -46,7 +46,9 @@ kernel/<op>/<op>_impl.h
 - **AIV 核驱动通信**：UDMA 引擎下通信由 AIV 核发起（ReadNbi/WriteNbi），AIC 专注 Matmul 计算，两侧经 CrossCore flag 同步（见 §4.2）。
 - **Hcomm 基础原语**：底层通信对象为 `Hcomm<COMM_PROTOCOL_UBC_CTP>`（ReadNbi/WriteNbi/Drain）；完整签名与约束见 `ascendc-api-best-practices` skill `references/api-hcomm.md`。
 
-### 文件位置（官网仓 `apace/` 相对路径）
+### 文件位置（官网仓 `apace/` 相对路径，逻辑引用）
+
+> ⚠️ 下表路径为官网快照的逻辑引用。CANN 内置树中物理子路径随版本漂移（如某版本为 `apace/core/aiv_comm/`、实现文件为 `..._urma_impl.h`），**引用核对时以 Step 1 实测登记的实际路径为准**，禁止按下表写死。
 
 | 组件 | 文件 |
 |:---|:---|
@@ -67,7 +69,7 @@ kernel/<op>/<op>_impl.h
 当 data 和 scale 两个通信对象复用同一 Win 区时，通过 `winOffset` 区分段（官网 `AllToAllMxQuantMatmulUdmaImpl::Init` 中 `allToAllScaleA_.Init(..., baseParams_.rankSize * baseParams_.rankDataBytes)`）：
 
 ```
-rankDataBytes = axisM × axisKa × sizeof(AType)
+rankDataBytes = axisM × axisKa × sizeof(AType)   // axisM = 本卡 A 的 M 轴总大小，axisKa = 本卡 A 的 K 轴大小（官方 udma_impl.h:147-148, 263）
 winOffset_scale = rankSize × rankDataBytes
 ```
 
@@ -93,7 +95,7 @@ commBufferAddrs[rankId] → ┌────────────────�
 | 引擎 | 底层 API | CommContext | 使用场景 | 直调支持 |
 |:---|:---|:---|:---|:---|
 | **UDMA** | `Hcomm::ReadNbi/WriteNbi/Drain` | 需要 `CommContext{udmaCtx, ubmemCtx}` | AIV 核驱动通信 | **是** |
-| **HCCL windows** | `GetHcclContext<0>()` | 不需要 `CommContext` | 委托模式 epilogue | 否（官网存在 CCU hcomm 变体 `all_to_all_mx_quant_matmul_hcomm_impl.h`，但无 `__global__` 直调入口） |
+| **HCCL windows** | `GetHcclContext<0>()` | 不需要 `CommContext` | 组合模式（CCU hcomm 变体） | 否（官网存在 CCU hcomm 变体 `all_to_all_mx_quant_matmul_hcomm_impl.h`，但无 `__global__` 直调入口） |
 
 #### 验收条件
 
@@ -143,6 +145,13 @@ __aicore__ inline void Init(
 
 BarrierMode 常量（同文件定义）：`BARRIER_NONE=0`、`BARRIER_DEVICE=1`、`BARRIER_CORE=2`、`BARRIER_BOTH=3`。
 
+**BarrierMode 选择规则（官网锚点）**：
+
+| 场景 | 规则 | 锚点 |
+|------|------|------|
+| 多通信对象共享同一 TeamBarrier | **仅一个对象使能 barrier，其余 `Init<BARRIER_NONE>` 去重**，避免重复同步 | AllToAll：`allToAllA_.Init<BARRIER_NONE>` + scale 默认（`all_to_all_mx_quant_matmul_udma_impl.h` Init）；AllGather：data `BARRIER_NONE` + scale `BARRIER_DEVICE`（`all_gather_mx_matmul_udma_impl.h` Init） |
+| 同 channel 多对象（data + scale） | **只 Wait/Drain 一次**（"scale 和 a 矩阵的通信使用同一 channel，因此只需要 wait 一次"） | `RunAllToAll()` 只对 `allToAllA_.Wait<BARRIER_DEVICE>()` |
+
 #### Init 不变量
 
 | 不变量 | 说明 |
@@ -150,7 +159,7 @@ BarrierMode 常量（同文件定义）：`BARRIER_NONE=0`、`BARRIER_DEVICE=1`�
 | 保存上下文 | udmaCtx、barrier、localAddr、tilingData、commBuf、winOffset |
 | 底层 comm_ 初始化 | Hcomm 对象使用 commBuf 的 COMM_WORKSPACE_SIZE（512B）workspace |
 | jobIndex → targetRank 自动分核映射 | `targetRankPerCore = ceil(rankSize / totalJobs)`；`targetRankStart = jobIndex * targetRankPerCore`；`targetRankCnt` 三分支：`targetRankStart + targetRankPerCore <= rankSize` 取 `targetRankPerCore`，`targetRankStart < rankSize` 取 `rankSize - targetRankStart`，否则钳到 0 |
-| **早退语义** | `jobIndex >= totalJobs` 时 Init 提前 return，字段未初始化——调用方必须用 `GetBlockIdx() < rankSize` 守卫保护后续 Commit/Wait/Finalize（见本节末尾「AIV 分核保护惯例」） |
+| **早退语义** | `jobIndex >= totalJobs` 时 Init 提前 return，字段未初始化——调用方必须用分核守卫保护后续 Commit/Wait/Finalize（见本节末尾「AIV 分核惯例」） |
 | chunk 大小计算 | 从 CommTilingData 的 5 字段推导：`chunkSize = splitAxisTileSize*splitAxisTileCnt + splitAxisTailSize*splitAxisTailCnt`；`chunkBytes_ = chunkSize * nonSplitAxisSize * sizeof(Dtype)`；`tileMaxByteSize_ = max(splitAxisTileSize, splitAxisTailSize) * nonSplitAxisSize * sizeof(Dtype)` |
 | PostInit 钩子调用 | Init 末尾调用 `PostInit<BarrierMode>()`，派生类可在此插入前置逻辑（如 PUT 的 barrier） |
 | 返回值 | **void**（totalTiles 经 `GetCommTurn()` 获取） |
@@ -167,7 +176,7 @@ BarrierMode 常量（同文件定义）：`BARRIER_NONE=0`、`BARRIER_DEVICE=1`�
 | 阶段 | 不变量 |
 |:---|:---|
 | Commit | `remainingChunkSize_ <= 0` 则直接返回；计算当前 tile 大小（`currentTileIdx_ < splitAxisTileCnt` 取头块 `splitAxisTileSize`，否则取尾块 `splitAxisTailSize`，再钳到 `remainingChunkSize_`）；遍历 `targetRankCnt_` 个 targetRank 调用 `DoCommit<BarrierMode>(targetRankId, currentTileByteSize)`；更新 `currentTileIdx_++`、`slotByteOffset_ += rankSize * tileMaxByteSize_`、`tileByteOffset_`、`chunkByteOffset_ += chunkBytes_`、`remainingChunkSize_ -= currentTileSize` |
-| Wait | 签名 `Wait<BarrierMode = BARRIER_BOTH>(bool waitLast = false)`。waitLast 早退语义（官网事实）：`if (waitLast && currentTileIdx_ != totalTiles - 1) return;`——在典型的 `Commit(); Wait(true);` 逐 tile 循环中（Commit 末尾 `currentTileIdx_++`），`DoWait` 仅在 `currentTileIdx_ == totalTiles - 1` 时执行一次（即倒数第二轮），**最后一轮通信不被 Drain**；`Wait(false)`（默认）每个 tile 都执行 `DoWait`。循环体：遍历 `targetRankCnt_` 个 targetRank 调用 `DoWait<BarrierMode>(targetRankId)`。⚠️ 使用 waitLast 模式（GET 语义）时需自行评估该行为是否满足时序要求 |
+| Wait | 签名 `Wait<BarrierMode = BARRIER_BOTH>(bool waitLast = false)`（`collective_comm_base.h:132-142`）。`Wait(false)`（默认）每个 tile 都执行 `DoWait`；`waitLast=true` 是调用方**可选**的早退语义：`if (waitLast && currentTileIdx_ != totalTiles - 1) return;`——在典型的 `Commit(); Wait(true);` 逐 tile 循环中（Commit 末尾 `currentTileIdx_++`），`DoWait` 仅在 `currentTileIdx_ == totalTiles - 1` 时执行一次（即倒数第二轮），**最后一轮通信不被 Drain**。循环体：遍历 `targetRankCnt_` 个 targetRank 调用 `DoWait<BarrierMode>(targetRankId)`。⚠️ 使用 waitLast 模式（GET 语义）时需自行评估该行为是否满足时序要求 |
 
 #### 受保护字段（基类提供，钩子可访问）
 
@@ -190,9 +199,25 @@ BarrierMode 常量（同文件定义）：`BARRIER_NONE=0`、`BARRIER_DEVICE=1`�
 | `remainingChunkSize_` | `uint64_t` | 当前 chunk 剩余未通信字节数 |
 | `chunkByteOffset_` | `uint64_t` | 当前 chunk 内字节偏移 |
 
-#### AIV 分核保护惯例
+#### AIV 分核惯例（按场景二选一，禁止混用）
 
-多 block 场景下，AIV 侧的 Commit/Wait 必须包裹在 `if (GetBlockIdx() < rankSize)` 守卫中（配合 Init 早退语义——超出 rankSize 的 block 未初始化通信字段）。官网两个 PUT 算子的惯例（`apace/kernel/all_to_all_quant_matmul/all_to_all_mx_quant_matmul_udma_impl.h` 的 `RunAllToAll`、`apace/kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_impl.h` 的 `AllGatherProcess`）：守卫仅包 Commit/Wait，`SyncAll<true>()` 与 `CrossCoreSetFlag` **在守卫外**由所有 AIV block 执行，Finalize 也无守卫（全 AIV 执行）。移植时以官网 kernel 实现为准。
+| 场景 | 分核映射 | 适用 |
+|:---|:---|:---|
+| **通信在前**（官方 A2A/AG PUT 算子） | **前 R 核通信**：`if (GetBlockIdx() < rankSize)` 守卫包裹 Commit/Wait（配合 Init 早退语义——超出 rankSize 的 block 未初始化通信字段）；`SyncAll<true>()` 与 `CrossCoreSetFlag` 在守卫外由所有 AIV block 执行，Finalize 无守卫（全 AIV 执行） | `all_to_all_quant_matmul`（RunAllToAll）、`all_gather_quant_matmul`（AllGatherProcess）官方惯例，移植时以官网 kernel 实现为准 |
+| **compute-first 严格分离**（默认生产形态） | **后 R 核通信**：`jobIndex = GetBlockNum() - 1 - GetBlockIdx()`，`isCommBlock = (jobIndex < rankSize)`；**前 (核数-R) 核归约**：`isComputeBlock = (blockIdx < usedCoreNum - rankSize)` | 计算在前算子（如 ReduceScatter）严格分离编排，AllToAll(t) ∥ ReduceSum(t-1) 错位流水（[`fusion.md`](fusion.md) §6.2.1） |
+
+两个惯例的 totalJobs 语义相同（AllToAll=rankSize 并行 PUT、TeamBarrier=1），仅物理核映射不同——混用（如前 R 核通信 + 后段核归约但 rsCoreNum 按前段算）会导致归约核与通信核重叠或空转，同步计数失衡。
+
+#### 通信并行度：totalJobs 配置正交性（红线）
+
+通信对象与 TeamBarrier 的 `totalJobs` 是**两个正交配置**，禁止混为一谈：
+
+| 对象 | 推荐 totalJobs | 说明 |
+|:---|:---|:---|
+| AllToAll/AllGather 通信对象 | **rankSize**（默认） | 后 rankSize 个核各负责 1 个 targetRank 并行 PUT/GET（分核映射见 Init 不变量），通信时间降为串行的 1/rankSize |
+| TeamBarrier | 1 | 仅 jobIndex=0 的核执行 CrossDevice（step=1 轮询所有远端 rank，计数天然平衡） |
+
+> ⚠️ **已证伪的臆造约束**："多核同时写同一 UBMEM flag 存在竞态，因此通信必须 totalJobs=1（仅 blockIdx==0 执行 Commit/Wait）"——**该约束不存在**。TeamBarrier totalJobs=1 已经保证只有 jobIndex=0 的核触碰 CrossDevice flag；多核 PUT 各核写各自 targetRank 的 Win 槽位与各自的 channel，不写同一 flag。把通信退化为 totalJobs=1 会让 R 个 target 串行 PUT，通信时间放大 R 倍，是生产实测过的重大性能回退（见 optimization-playbook.md）。
 
 ---
 
@@ -222,6 +247,8 @@ GET 模式 = 计算→通信：AIC 先算 C 写到 Win 区，AIV 从远端 Win �
 - `BARRIER_DEVICE`：跨设备 barrier（`barrier_.CrossDevice()`）
 
 GET 的 `DoCommit()` 和 `DoFinalize()` 中 barrier 调用顺序为**先 Core 后 Device**。
+
+> ⚠️ **GET 模式 Commit 前 barrier 不可省**：`DoCommit` 内的 `CrossCore()+CrossDevice()` 是生产者（对端 AIC）槽位就绪的回压保证，删除会读到未写入数据；对应 `DoFinalize()` 的 barrier 同样不可省（防止尾部越界覆盖）。
 
 #### GET 地址语义
 
@@ -267,6 +294,8 @@ PUT 模式 = 通信→计算：AIV 先推数据到远端 Win 区，AIC 从 Win �
 
 PUT 的 src/dst 与 GET 完全镜像：GET 从远端读，PUT 往远端写。PUT 地址公式（`AllToAllCommPutImpl::DoCommit`）：`srcAddr = localAddr_ + targetRankId * chunkBytes_ + currentTileIdx_ * tileMaxByteSize_`；`dstAddr = commBufferAddrs[targetRankId] + winOffset_ + rankId * chunkBytes_ + tileByteOffset_`。
 
+> ⚠️ **PUT/GET 数据区与 Win 区元数据区必须分离（布局验证原则）**：Win 区内若存在元数据/barrier 区，通信数据写入偏移必须跳过该区域——0 偏移覆盖元数据会造成"假通过"（精度碰巧正确但同步机制已被破坏，大 shape/多轮时紊乱），精度验证无法发现，必须靠设计红线拦截。注意两种布局并存：① apace 官网布局下 TeamBarrier flag 位于 `CreateDeviceContext` 独立分配的 2MB BARRIER_BUF（见 §4.1），**不在 Win 数据区内**，Win 数据区从偏移 0 可用；② 共享 Win 区布局的实现（部分生产算子将 barrier counter 置于 Win 区头部）必须按约定偏移跳过（示例：128B）。**偏移由 host 建链布局决定，host 侧预留与 kernel 侧读写偏移必须同源**。
+
 > GET/PUT 的算子级编排模式见 `fusion.md`。
 
 ---
@@ -307,9 +336,11 @@ __aicore__ inline void Init(
 `jobIndex_ >= totalJobs_` 时提前 return，否则：
 
 1. 读本 rank per-job 槽（`commBufferAddrs[rankId] + 32 + jobIndex*32`），count+1
-2. 先把 count 写到**基址 flag**（`commBufferAddrs[rankId]`，偏移 0），随后轮询**其他 rank 的基址 flag**（偏移 0）直到 ≥ count——注意轮询的是**跨步子集**：`step = min(totalJobs, rankSize)`，`for (i = jobIndex; i < nranks; i += step)`，跳过本 rank，并非轮询所有其他 rank 的 per-job counter
+2. 先把 count 写到**基址 flag**（`commBufferAddrs[rankId]`，偏移 0），随后轮询**其他 rank 的基址 flag**（偏移 0）直到 ≥ count——注意轮询的是**跨步子集**：`step = min(totalJobs, rankSize)`，`for (i = jobIndex; i < nranks; i += step)`，跳过本 rank，并非轮询所有其他 rank 的 per-job counter（`barrier_ubmem.h:149-189`，`CrossDeviceExecute`）
 3. 轮询通过后才把 count 写回 per-job 槽
 4. **无超时保护**：远端 rank 未就绪将无限等待挂死（不会 assert）。规避：确保所有 rank kernel 已 launch，且 `CreateDeviceContext` 后做了跨 rank host barrier（见 §6）
+
+> ⚠️ **框架限制：totalJobs=rankSize 时跨设备同步静默失效**。当 `totalJobs = rankSize` 时 `step = min(rankSize, rankSize) = rankSize`，循环 `for (i = jobIndex; i < nranks; i += rankSize)` 仅命中自身 rank 即退出——不轮询任何 remote rank，跨设备 fence 失效。现象：Rank0 精度 PASS、Rank1 NaN/大面积元素错误（约 80% 数据错误）。**解法**：TeamBarrier `totalJobs=1`（`step=1` 正确轮询所有 remote rank）+ 通信对象 `totalJobs=rankSize`（工作分片，后 R 核各负责 1 个 target 并行 PUT），手动 `teamBarrier_.CrossDevice()` 完成跨设备 fence。两个 totalJobs 正交分离，不修改框架。完整失败链（5 次迭代）见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.1a。
 
 #### CrossCore 机制（跨核，仅 AIV）
 
@@ -327,6 +358,8 @@ TeamBarrier 轮询的 GM flag 位于 `CreateDeviceContext` 内部分配的 2MB `
 
 单通信对象：`COMM_WORKSPACE_SIZE`(512B) + `UB_SIZE`(32B) = **544B**。
 data+scale 双通信对象：512×2 + 32 = **1056B**。
+
+> **AIV 归约侧 UB 总预算**：DAV_3510 硬件 UB = 248KB 框架可用（`GetCoreMemSize(UB)` = 253952）。MC2 通算融合算子中 AIV 归约模块推荐 `TOTAL_UB = 192KB`、可分配上限 `MAX_UB_BYTES = 180KB`（扣除 guard 通信区后）。6-slot 归约布局下每元素 18B，`maxElements = MAX_UB_BYTES / 18`。详见 [`architecture.md`](architecture.md) §6 UB 容量说明、[`fusion.md`](fusion.md) §6.2.6 归约 UB 布局。
 
 #### 常见错误
 
@@ -372,18 +405,13 @@ CrossCore Flag 是 AIC↔AIV 跨核同步的核心机制。每个 flag 由 `<MOD
 
 #### flagId 选择规则
 
-- 官网两个 PUT 算子均使用**轮次索引 `tid`/`round`** 作为 flagId（`CrossCoreSetFlag<0x2, PIPE_MTE3>(tid)`）
-- **硬件规则**（官方约束，详见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`）：
-  - 模式 0/1/2 每核仅 **16 个 flagId（0-15）**，超出截断低 4bit——截断机制正是直接用无界 `tid` 作 flagId 能工作的硬件基础（Set/Wait 双方截断到同一 flag，配对保持）
-  - 每个 flagId 对应计数器，Set/Wait 必须配对，否则未定义行为
-  - **SyncAll 硬同步内部占用 flagId [11-14]**，官方不建议同时使用 CrossCoreSetFlag 与 SyncAll 硬同步——PUT 模式组合使用两者，当 `tid % 16 ∈ [11,14]` 时存在与 SyncAll 内部 flag 冲突的理论风险，移植到新平台需重新确认
-  - Matmul 高阶 API 占用 flagId [0, 2N-1]（最多 [0,7]）；自定义 flagId 需避开此类保留区间
-  - 同一核连续发出的 CrossCoreSetFlag，硬件不保证执行顺序
-- `apace/utils/constant.h` 定义 `FLAG_ID_MAX = 16` 为**预留常量**（官网 apace 当前未使用）
+flagId 选择规则（保留区避让、16 通道截断机制、计数器硬上限 0-15、commTurn ≤16）统一维护在 [`fusion.md`](fusion.md) §3.3，本节不重复。
 
 ### 4.3 SyncAll（块间）
 
 `SyncAll<true>()` 是 AIV 块间硬同步原语，其内部占用 flagId [11-14]（见 §4.2 flagId 选择规则）。PUT 模式的逐轮编排用法（每轮 `SyncAll<true>()` 保证 WriteNbi 对端可见性）见 `fusion.md`；完整签名与平台生效性见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`。
+
+> ⚠️ `SyncAll<false>()`（非 isAIVOnly 变体）需要 **AIC + AIV 双方参与**——只在单侧调用会永久等待（调试实测踩坑）。MC2 场景块间同步一律用 `SyncAll<true>()`（仅 AIV），除非确认 AIC 侧也有对齐的调用点。
 
 ---
 
@@ -454,7 +482,7 @@ CommContext 的 `CommUdmaContext` 和 `CommUbmemContext` 不能手动赋值，�
 | HCCL 数据 buffer 清零 | builder 的 `AllocRegAndBuildChannels` 内部对 HCCL 内置 buffer 做 `aclrtMemset(buf, hcclBufSize, 0, hcclBufSize)`（清的是数据 buffer；barrier flag 区零初值依赖 engine 分配语义，见 §4.1） |
 | CommChannelBuilder 填充 | 通过 `builder.CreateDeviceContext` 自动填充 `udmaCtx` 和 `ubmemCtx` |
 | **跨 rank host barrier（强制）** | `CreateDeviceContext` 返回后必须做一次 rank 间 barrier（官网 ST 用 `RootInfoExchanger::Barrier()`），确保所有 channel 握手完成，再 launch kernel（`CreateDeviceContext` 头注释明确要求："调用方应在本函数返回后对 rank 间做一次 barrier"） |
-| engine 一致性 | `HcclChannelAcquire` 与 `HcclEngineCtxCreate/Get/Copy` 必须使用同一 engine（apace 用 `BUILDER_COMM_ENGINE_AIV = 4`，定义于 `apace/utils/comm_channel_builder.h`），否则 `HcclEngineCtxGet` 复用失效 |
+| engine 一致性 | `HcclChannelAcquire` 与 `HcclEngineCtxCreate/Get/Copy` 必须使用同一 engine（apace 用 `BUILDER_COMM_ENGINE_AIV = 4`，`apace/utils/comm_channel_builder.h:27`），否则 `HcclEngineCtxGet` 复用失效 |
 | ctxTag 唯一性 | 不同通信域用不同 ctxTag；同 tag 命中 `HcclEngineCtxGet` 会直接复用并跳过填充（见 `CommChannelBuilder::CreateDeviceContext` 头注释） |
 | 资源生命周期 | devContext 由 HCCL engine 管理：随 `HcclCommDestroy` 释放，或显式 `HcclEngineCtxDestroy`（推断：释放路径未经官网验证；实证：AG ST 有 aclrtFree(devContext)，all_to_all ST 无——两份 ST 处置不一致）；builder 无清理接口。⚠️ 官网两份 ST 处置不一致：all_gather ST（`apace/tests/st/all_gather_quant_matmul/src/main.cpp`）有 `aclrtFree(devContext)`，all_to_all ST（`apace/tests/st/all_to_all_quant_matmul/src/main.cpp`）不释放——推荐范式：不单独释放，随 HcclCommDestroy 连带释放 |
 | 禁止手动填充 | `channelHandles` 和 `commBufferAddrs` 必须由 `CommChannelBuilder` 通过 HCCL API 获取 |
@@ -471,7 +499,7 @@ CommContext 的 `CommUdmaContext` 和 `CommUbmemContext` 不能手动赋值，�
 | 步骤 | 不变量 |
 |:---|:---|
 | ctxTag 复用检查 | 先 `HcclEngineCtxGet(comm, ctxTag, engine, ...)`；命中已存在 context 直接返回复用，跳过建链与字段填充 |
-| 创建 device context | `HcclEngineCtxCreate(comm, ctxTag, engine, totalSize, &devCtx)`；`totalSize = ctxSize + BARRIER_BUF_SIZE`（有 barrierCtx 时），`BARRIER_BUF_SIZE = 2MB`（函数内 constexpr） |
+| 创建 device context | `HcclEngineCtxCreate(comm, ctxTag, engine, totalSize, &devCtx)`；`totalSize = ctxSize + BARRIER_BUF_SIZE`（有 barrierCtx 时），`BARRIER_BUF_SIZE = 2MB`（`comm_channel_builder.h:117` constexpr） |
 | 获取 rank 信息 | `HcclGetRankId` / `HcclGetRankSize`（自动获取，无需手动调用） |
 | 填充 CommUdmaContext | `rankId`/`rankSize` + `AllocRegAndBuildChannels(URMA)` → `channelHandles[peer]` + `commBufferAddrs[peer]`（建链循环跳过 `peer == rankId`，self 的 channelHandle 保持 0；`commBufferAddrs[self]` 填本地 HCCL buffer 地址） |
 | 填充 CommUbmemContext | `rankId`/`rankSize` + barrier buffer 取 `devCtx + ctxSize`（2MB 区域）+ `HcclCommMemReg` 注册 + `BuildChannels(UBMEM)` → `commBufferAddrs[peer]` |
@@ -510,7 +538,7 @@ CommContext (device GM)
 | AllGather | PUT | `apace/block/aiv_comm/all_gather/all_gather_udma_put.h` | ✅ 已实现（all_gather_quant_matmul 使用） |
 | AllGather | GET | — | ❌ 未实现 |
 | AllReduce | — | — | ❌ 未实现 |
-| ReduceScatter | — | — | ❌ 未实现（`CommCollectiveOp::ReduceScatter` 枚举值已在 `apace/block/aiv_comm/collective_comm_api.h` 预留但无分发实现；可用 AllToAll PUT + AtomicAdd 替代，推导见 `fusion.md`） |
+| ReduceScatter | — | — | ❌ 未实现（`CommCollectiveOp::ReduceScatter` 枚举值已在 `apace/block/aiv_comm/collective_comm_api.h` 预留但无分发实现；生产实现用 AllToAll PUT + 3 级流水 workspace 架构，见 `fusion.md` §6.2） |
 
 ### 扩展边界
 
@@ -540,7 +568,7 @@ CommContext (device GM)
 | 在 kernel 中直接调用 `Hcomm::ReadNbi` | 使用 `CollectiveComm` 四段式 API，保持抽象一致性 |
 | 跳过 `CollectiveCommHelper` 直接实例化实现类 | 通过 `CollectiveComm<Op, Mode, T, Barrier>` 编译期分发，保持类型安全 |
 
-> ReduceScatter 替代实现（AllToAll PUT + AtomicAdd）的完整推导见 `fusion.md`。
+> ReduceScatter 生产实现（AllToAll PUT + 3 级流水 + workspace 槽位独占）见 `fusion.md` §6.2。
 
 ---
 
@@ -554,6 +582,14 @@ CommContext (device GM)
 | 4 | 自跳过规则遗漏 | 自身 Win 区读写错误 | DoCommit/DoWait 跳过 `targetRankId == rankId` |
 | 5 | HCCL windows 模式误加 CommContext | 编译错误或内存浪费 | 使用 `GetHcclContext` 的 kernel 不需要 `CommContext` 结构 |
 | 6 | TeamBarrier 远端 rank 未就绪 | CrossDevice **无限等待挂死**（无超时保护，不会 assert） | 确保所有 rank kernel 已 launch；`CreateDeviceContext` 后做跨 rank host barrier 再 launch |
+| 7 | hcomm 调用返回值未检查 | 通信失败静默扩散 | 所有 hcomm 调用（WriteNbi/ReadNbi/Drain）返回值必须 `ascendc_assert(ret == 0, ...)`（官网 PUT/GET/AG 全部实现均如此） |
+| 8 | TeamBarrier flag 区复用或未清零 | epoch 计数错乱 → 同步提前放行或挂死 | TeamBarrier flag 为单调递增 epoch：HCCL **数据** buffer 的清零由 builder `AllocRegAndBuildChannels` 内 `aclrtMemset` 完成（§6）；barrier flag 区（BARRIER_BUF）零初值依赖 `HcclEngineCtxCreate` 分配语义（§4.1，未显式 memset）——新算子若新增自管理 flag/计数区必须显式清零并验证，kernel 生命周期内禁止复用/重置 |
+| 9 | AIV UB 静态偏移与 TPipe 混用 | buffer 重叠踩踏 | 通信对象的 UB 用静态偏移（`MakeMemPtr<UB>` 顺序排布 commBuf 512B×2 + barrierBuf），不与 TPipe 管理的 buffer 区域混用 |
+| 10 | 多对象共享 TeamBarrier 时重复 barrier | 多余同步开销甚至死锁 | 仅一个对象使能 barrier，其余 `Init<BARRIER_NONE>`；同 channel 多对象只 Wait 一次（见 §2 BarrierMode 选择规则） |
+| 11 | GET 模式 `Drain` 返回非 0（未实现/兼容性）（GET 场景） | assert 失败中断 | URMA Win 区是共享内存，可绕过 Drain：`TeamBarrier.CrossDevice()`（跨 rank 就绪）+ `SyncAll<true>`（核间可见）后直接 `DataCopyPad` 读远端 Win 区（GET 算子开发实测绕行方案）。⚠️ 该绕行绕开 §3.1 的 Drain assert 纪律：仅在确认 Drain 兼容性问题时作为兜底使用，正常 GET 实现仍以钩子契约为准 |
+| 12 | PUT/GET 数据覆盖 Win 区内元数据/barrier 区 | "假通过"（精度碰巧对、同步已破坏），大 shape/多轮时紊乱 | 原则与两种布局见 §3.2 ⚠️注（唯一事实源）；共享布局须按约定偏移跳过头部（具体实现形态见 [`scenarios/compute-first-reduce-scatter/design.md`](../scenarios/compute-first-reduce-scatter/design.md) §3.6；失败链见 [`failure-navigation.md`](../troubleshooting/failure-navigation.md)） |
+| 13 | 单轮 PUT 数据量超过 UDMA 可靠传输阈值（PUT 大数据量场景） | 大数据量下单轮 PUT 处于 UDMA Drain 可靠性边界，间歇性 FAIL（**生产实测经验值，官方代码无显式约束**：dav-3510 单轮 1MB 不稳定，512KB 内稳定） | host 侧强制 `perRoundChunkBytes = tileM × nonSplitAxisSize × sizeof(Dtype) ≤ 512KB`，超出则增大通信轮次 T |
+| 14 | compute-first 归约读 staging 得旧值/0 | 归约结果错误或全 0 | **先查三处，勿先加 dcci**：① AIC `SetFlag<PIPE_FIX>` 与 AIV `WaitFlag<PIPE_MTE2>` 是否逐轮配对（配对即内存序保证，staging 可见性由此而来，参考实现不依赖 dcci）；② 多核归约是否写竞争（须 SplitToCore 分治，见 `fusion.md` §6.2.6 纪律 5）；③ staging 写/读地址是否同源。对 staging 加 dcci 属误诊，掩盖真根因 |
 
 ---
 
@@ -562,4 +598,4 @@ CommContext (device GM)
 - `fusion.md` — GET/PUT 编排模式、flag 编排、环形回压、localMatmul
 - `operator-anatomy.md` — 算子完整骨架中的通信对象使用
 - `host-and-testing.md` — host launcher 序列（建链调用时机）
-- `ascendc-api-best-practices` skill `references/api-hcomm.md`、`references/api-crosscore-sync.md`、`references/api-hccl-host.md`
+- `ascendc-api-best-practices` skill `references/api-hcomm.md`、`ascendc-api-best-practices` skill `references/api-crosscore-sync.md`、`ascendc-api-best-practices` skill `references/api-hccl-host.md`

@@ -7,12 +7,22 @@ description: Ascend C MC2 通算融合算子（多卡通信+计算融合）开�
 
 MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 Blaze Cube 计算 + 通算两层流水掩盖通信开销。提供 MC2 通算融合算子开发的技术参考：通信与计算的 API 选择、时序约束、验收标准。
 
+**知识分层（依赖方向单向，禁止反向引用）**：
+
+| 层 | 技能 | 事实源范围 | 本 skill 的使用方式 |
+|----|------|-----------|-------------------|
+| 底层（通用 API） | `ascendc-api-best-practices` | Ascend C API 签名、硬件限制、平台差异（DataCopy/Cast/HardEvent/CrossCore flag/Hcomm/HCCL host 等） | 一律引用其 references，本 skill **不复述** API 细节 |
+| 底层（Blaze 模板） | `ascendc-blaze-best-practice` | Blaze/tensor_api 通用模板选型、Tiling 算法选择 | 同上 |
+| **本层（领域知识）** | 本 skill | MC2 特有：路线决策、apace/blaze-shmem/MoE 框架契约、通算流水编排、质量门禁 | — |
+
+> 下层技能不引用本 skill；本 skill 文档中凡 API 级事实（签名、限制、硬件行为）均指向下层锚点，正文只保留 MC2 场景应用与编排规则。
+
 本 skill 覆盖三种编码底座，每个底座支持特定的通信路径、算子类型与芯片组合（确切组合以 [`capability-declaration.md`](references/capability-declaration.md) 路径登记表为准）：
 
 | 底座 | 支持的通信路径 | 支持的算子类型 | 支持芯片 | 知识目录 |
 |------|---------|---------|------|------|
 | **blaze-shmem** | AIV+URMA | collective-comm（AllToAll+Matmul、AllReduce+Matmul、TP/SP 融合） | dav-3510（Ascend 950） | [`references/foundations/blaze-shmem/`](references/foundations/blaze-shmem/) |
-| **apace** | AIV+URMA | collective-comm（同上；moe 类 planned） | dav-3510（Ascend 950） | [`references/foundations/apace/`](references/foundations/apace/) |
+| **apace** | AIV+URMA | collective-comm（AllToAll/AllGather + QuantMatmul 融合、compute-first 类） | dav-3510（Ascend 950） | [`references/foundations/apace/`](references/foundations/apace/) |
 | **ascendc-api** | AIV+UBMEM | moe（MoE Dispatch/Combine、专家并行 EP） | dav-3510（A5）+ dav-2201（A3）双平台 | [`references/foundations/ascendc-api/`](references/foundations/ascendc-api/) |
 
 > 三种底座抽象层级不同（blaze-shmem 是库+模板手工组装，apace 是模板框架，ascendc-api 是直接使用ascendc API），但在"选什么写代码"这个决策点上是并列选项。apace 模板库虽基于 Ascend C 基础 API 构建，但与 ascendc-api 路线约束集、工程边界、可修改范围完全不同——详见 §1/§2/§3 各路线特有约束。
@@ -81,7 +91,7 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 
 > 以下两条是 **AIV+URMA 路径下 blaze-shmem / apace 底座的选择性约束**，不是全路线共性——若未来在 ascendc-api 底座上构建集合通信类通算融合，HCCL 高阶 API 和 `AscendC::Matmul` 高阶 API 恰是可用路径：
 > - 禁止 HCCL 高阶 API（`Hccl::*`）—— HCCL 集合通信库依赖框架注入上下文，AIV+URMA 直调场景拿不到（详见 [`blaze-shmem/comm_shmem.md`](references/foundations/blaze-shmem/comm_shmem.md) §5，7 类 18 个 API 清单）
-> - Matmul 走 Blaze 模板，禁止 `AscendC::Matmul` 高阶 API —— 同理（详见 [`blaze-shmem/matmul_blaze.md`](references/foundations/blaze-shmem/matmul_blaze.md) / [`apace/compute.md`](references/foundations/apace/compute.md)）
+> - Matmul 走 Blaze 模板，禁止 `AscendC::Matmul` 高阶 API —— 同理（详见 [`blaze-shmem/matmul_blaze.md`](references/foundations/blaze-shmem/matmul_blaze.md) / [`apace/fundamentals/compute.md`](references/foundations/apace/fundamentals/compute.md)）
 
 各底座特有约束与逐项审查清单见 §1/§2/§3。
 
@@ -124,69 +134,110 @@ SHMEM 通信库（cann/shmem，与 HCOMM 无关）驱动 AIV+URMA 跨卡搬运�
 
 APACE（Ascend PArallel Communication-compute Engine）是通算融合算子的架构底座，提供可复用的 block 层接口、kernel 层参考实现和 tiling 算法。APACE 自建通信基础 API（基于 HCOMM 通信基础库构建，与 HCCL 集合通信库无关）。apace 路线在 `kernel/<op>/` 下新建算子，复用稳定共享层 `block/` `tiling/`。
 
-> **apace 路线接口契约基准**：[cann/ops-transformer](https://gitcode.com/cann/ops-transformer) master 最新主线 `mc2/common/op_kernel/apace/` 子树。关键文件：`block/aiv_comm/collective_comm_api.h`（四段式通信 API 契约）、`kernel/all_to_all_quant_matmul/` 与 `kernel/all_gather_quant_matmul/`（参考实现）、`tests/st/`（ST 测试工程 + `__global__` 入口）。样例代码经 scripts/fetch_apace.sh 从官网现取现读（默认跟踪 master 最新，实际 commit 记录于仓内 `.apace_fetch_manifest.json`；`--ref <commit>` 可锚定复现）；引用路径为仓内相对路径（apace/... 即 mc2/common/op_kernel/apace/...）。
+> **apace 路线接口契约基准**：[cann/ops-transformer](https://gitcode.com/cann/ops-transformer) `mc2/common/op_kernel/apace/` 子树，以 pin 的已验证快照为结构基准。样例代码经 scripts/fetch_apace.sh 现取现读（支持 `--ref`/`APACE_PIN_REF` 锚定 commit）；⚠️ master 结构会演进（如目录迁移、新增算子），拉取 master 后必须与快照 diff 校验，文档引用失效时更新文档。
+>
+> **工程实现默认事实源**：CANN 内置 apace 框架（路径随 CANN 打包形态实测定位，Step 1 登记；两种已验证形态：`opp/built-in/op_impl/ai_core/tbe/impl/ops_transformer/ascendc/common/apace/`（cann-9.2.0）、`vendors/custom_transformer/op_impl/ai_core/tbe/custom_transformer_impl/ascendc/common/apace/`（cann-9.1.0）），**直调独立工程默认 CMake 直引该路径，禁止整包复制**。
 
-### 红线 / 约束
+### 按请求目的路由
 
-| # | 约束 | 说明 | 详见 |
-|---|------|------|------|
-| R1 | 禁止 `__schedmode__(1)` 和 `[[bisheng::core_ratio(1,1)]]` | 会导致 AIC/AIV 串行调度→死锁（`aclError:507015`）；核配比唯一由 `KERNEL_TYPE_MIX_AIC_1_1` 保证为 1:1 | [`architecture.md`](references/foundations/apace/architecture.md) §10 ① |
-| R2 | 有 `KERNEL_TYPE_MIX_AIC_1_1` | 每个入口函数都含核配比声明 | [`architecture.md`](references/foundations/apace/architecture.md) §10 ① |
-| R3 | 入口变体与参考算子一致 | PUT=4 dtype 变体入口于 `kernel_launcher.h`；AG=单入口于 impl.h | [`operator-anatomy.md`](references/foundations/apace/operator-anatomy.md) |
-| R4 | `block/` `tiling/` 未修改 | 与官网仓原始文件完全一致 | [`architecture.md`](references/foundations/apace/architecture.md) §10 ③ |
-| R5 | CrossCore flag idx 配对 | AIV `WaitFlag` idx == AIC `SetFlag` idx | [`fusion.md`](references/foundations/apace/fusion.md) §3 |
-| R6 | CommContext 与引擎匹配 | UDMA 模式有 `__gm__ CommContext*`；HCCL windows 无 | [`communication.md`](references/foundations/apace/communication.md) |
-| R7 | 禁止 `AscendC::Matmul` 高阶 API | 高阶 API 不支持 AIV+URMA 直调场景（与 blaze-shmem 共享此约束） | [`compute.md`](references/foundations/apace/compute.md) |
-| R8 | 禁止 HCCL 高阶 API（`Hccl::*`） | HCCL 集合通信库依赖框架注入上下文，AIV+URMA 直调场景拿不到（与 blaze-shmem 共享此约束） | [`comm_shmem.md`](references/foundations/blaze-shmem/comm_shmem.md) §5 |
+| 请求目的 | 执行 |
+|---|---|
+| 要求完整开发一个 MC2 通算融合算子 | Step 1 → Step 2 → Step 3 → Step 4（plugin 场景以 [`workflow_integration.md`](references/foundations/apace/workflow_integration.md) 的 7 步映射为主要消费文档） |
+| 只要求设计/方案分析并输出设计文档 | Step 2 → Step 3 |
+| 咨询、解释、评审、排障、能力查询 | 只读相关 references |
 
-**逐项审查清单**：[`review-checklist.md`](references/foundations/apace/review-checklist.md)（含常见 FAIL 原因与修复方向，违反红线项 = FAIL）。
+### 计算执行原则
+
+通信与计算的流水编排、AIV-AIC 协同必须在 device 侧单次 launch 的融合 Kernel（MIX）中完成。host 侧只负责：数据准备与 buffer 分配、Tiling 计算、多 rank 启动与通信建链（rootInfo 交换、HCCL/Win 资源分配、跨 rank barrier）、Kernel launch（含 dtype dispatch）和结果搬运。不得将算子语义中的任何计算或通信步骤（如归约、数据搬移、状态同步）放到 host 侧执行；CPU golden 等精度验证基建不属于算子语义，不在此限。
+
+### 四步流程
+
+1. **Step 1: Project Setup** — 建立算子工程骨架、校验 CANN 内置 apace 事实源与环境（dav-3510、多卡、HCCL）、登记只读参考点。不核对接口事实、不判定路线、不创建实现文件。→ [`workflow/step1-project-setup.md`](references/foundations/apace/workflow/step1-project-setup.md)
+2. **Step 2: 设计前核对（轻量）** — 只读核对 apace 框架的接口事实（matmul 链路/通信接口/入口 ABI/官方覆盖性）；事实**默认内联记录于 DESIGN.md §0.3**（无需独立调查报告）。不做方案推荐、不匹配场景、不选择路线。→ [`workflow/step2-investigation.md`](references/foundations/apace/workflow/step2-investigation.md)
+3. **Step 3: Design** — 依据需求和调查事实完成路线决策，生成定稿的 DESIGN 和可执行路线的 PLAN。只产出设计文档，不复制文件、不编写实现、不执行构建。→ [`workflow/step3-design.md`](references/foundations/apace/workflow/step3-design.md)
+4. **Step 4: Implementation** — 按定稿的 DESIGN/PLAN 完成实现、多卡验证与性能采集；实现层问题在项目内修复，不改设计、不改接口、不扩大支持域。→ [`workflow/step4-implementation.md`](references/foundations/apace/workflow/step4-implementation.md)
+
+> **plugin 消费流映射**：ops-direct-invoke plugin 执行 7 步流程（环境检查→设计→串讲→开发→审查→修复→验收→汇报），与本四步模型的对应为：plugin Step 1 ≈ 本 Step 1；plugin Step 2/2.5 ≈ 本 Step 2+3；plugin Step 3-7 ≈ 本 Step 4。**plugin 场景下以 [`workflow_integration.md`](references/foundations/apace/workflow_integration.md)（7 步映射）为主要消费文档**，四步文档为模型参考。
+
+### 路线模型
+
+```text
+implementation_route: apace_native | apace_custom | unsupported
+selected_scenario: <仅 apace_custom 填写>
+```
+
+按官方 README 的两种使用方式决策：
+
+- **`apace_native`**：官方 `apace/kernel` 已有算子可直接调用或参考复用——不读取场景注册表；
+- **`apace_custom`**：官方 kernel 未覆盖，但可基于 `apace/block` 接口组合构建（含 compute-first 等自研编排）——需求语义命中场景注册表语义判据时**默认查阅**对应场景指导（准入条件只含需求侧语义判据，不含实现侧决策）；
+- **`unsupported`**：`apace/block` 接口层也无法支撑的组合，或场景语义零命中/多命中。
+
+> **场景文档查阅不受官方覆盖性判定反向阻断**：本仓/用户工程中已存在某场景的生产实现时（如 compute-first 类算子已生成过），阅读该场景文档不需要"官方未覆盖"前提——场景文档同时是该类算子的改造/复用手册。
+
+官方接口未覆盖不是绕过 apace 接口层、退回裸 Ascend C 全自建的授权——那是 ascendc-api 底座的路线选择，不是 apace 路线内的 fallback。
+
+> **compute-first（ReduceScatter 类语义）算子生成阅读顺序**：[`fusion.md`](references/foundations/apace/fundamentals/fusion.md) §6.2（方法论：编排模式/事件语义/tiling 组织）→ [`scenarios/compute-first-reduce-scatter/design.md`](references/foundations/apace/scenarios/compute-first-reduce-scatter/design.md)（设计合同）→ [`scenarios/compute-first-reduce-scatter/development.md`](references/foundations/apace/scenarios/compute-first-reduce-scatter/development.md)（实现模板与验收）。方法论原则（事实源唯一/设计三拷问/契约驱动/失败前置/验收分层/示例边界）见 [`architecture.md`](references/foundations/apace/fundamentals/architecture.md) §1.5。
+
+### 红线 / 约束（全局 R 系列 + 场景约束）
+
+> 设计期与开发期必须逐条满足；完整定义、操作化检查方法与常见 FAIL 原因以 [`review-checklist.md`](references/foundations/apace/review-checklist.md) 为准。违反任意适用项 = FAIL。
+
+**全局红线（所有 apace 算子必须满足）**：
+
+| # | 约束 | 一句话理由 | 详见 |
+|---|------|-----------|------|
+| R1 | 禁止 `__schedmode__(1)` / `core_ratio(1,1)` | AIC/AIV 串行调度 → 死锁（507015）；核配比由 `KERNEL_TYPE_MIX_AIC_1_1` 保证 | architecture §10 ① |
+| R2 | 每个入口含 `KERNEL_TYPE_MIX_AIC_1_1` | 核配比 1:1 唯一保证 | architecture §10 ① |
+| R3 | 入口变体覆盖 dtype 合同全部组合 + host 运行期 dispatch | 硬编码单入口 → 异 dtype 字节流被错误模板解释，精度系统性失败 | operator-anatomy §5.3/§7.2 |
+| R4 | `block/` `tiling/` 零修改 | 共享层漂移 = 幽灵 bug 温床 | architecture §10 ③ |
+| R5 | CrossCore flag idx 配对 | AIV WaitFlag idx == AIC SetFlag idx | fusion §3 |
+| R6 | CommContext 与引擎匹配 | UDMA 有 `__gm__ CommContext*`；HCCL windows 无 | communication |
+| R7 | 禁止 `AscendC::Matmul` 高阶 API | 高阶 API 不支持直调场景 | compute |
+| R8 | 禁止 `Hccl::*` 高阶 API | 依赖框架注入上下文，直调拿不到 | comm_shmem §5 |
+| R11 | host 前置校验在 fork/建链前拒绝非法输入 | 非法输入进 kernel = 难查的死锁/精度问题（整除/对齐/核数/Win 容量等；compute-first 完整 9 项见场景文档） | development-guide §3.5 |
+| R12 | UB 静态通信区物理隔离 | 混用重叠 → 通信数据被踩踏 → 死锁；**`TPipe` 与 `MakeMemPtr` 必须二选一，禁止混用** → 507015 | communication 陷阱 #9；operator-anatomy §4.3 |
+| R13 | 通信 `totalJobs=rankSize` 多核并行 | 退化 totalJobs=1 → 通信时间放大 R 倍（已证伪臆造约束） | communication §2.2 |
+| R14 | Win 数据/元数据分离 + 单轮 PUT ≤ 512KB | 覆盖元数据 → "假通过"；超 512KB 间歇 FAIL（生产实测经验值） | communication 陷阱 #12/#13 |
+| R15 | 投产级性能验证门槛 | 真实大 shape × R=2/4 双档 × 三路径对标；仅基线 = 未达标 | host-and-testing |
+| R20 | perf 模式 L2 flush 实接线 | 只分配 buffer 不调 kernel = 死代码 = MTE2 带宽虚高 | host-and-testing §4 |
+
+**场景约束（按算子语义特征自动适用——含 compute-first 编排即适用 R9/R10/R16/R21、含归约模块即适用 R17-R19，不依赖场景注册表命中；完整定义见场景文档）**：
+
+| # | 适用场景 | 约束 | 详见 |
+|---|---------|------|------|
+| R9 | compute-first | flag 计数峰值 ≤ 15（T>1 时峰值 = T），host 强制校验 | fusion §6.2.3 |
+| R10 | compute-first | 通信轮次默认 `T \| mSeg` 无尾块；有尾块走策略 A（padding 32 对齐 + realFragmentSize + 多套 tiling） | fusion §6.2.7 |
+| R16 | compute-first | mm 内核默认 FragmentTensor 消 R 循环；vendor R×T 子调用须论证 SCALAR 占比 | fusion §6.2.2 |
+| R21 | compute-first | **localLast 编排禁止移除**：移除后每轮 Set 双 flag → 峰值 2T（T≤7）+ 丧失通信提前启动；`cFragAddrs_` 顺序写错才是 A/C 错位根因，非 localLast 本身 | fusion §6.2.2 |
+| R17 | compute-first（含归约） | 归约 2D DataCopyPad 批量（blockCount=本批行数）；逐行归约 = 性能 FAIL | fusion §6.2.6 |
+| R18 | compute-first（含 BF16→FP32 归约） | 归约独立 srcFP32 双缓冲，禁止 in-place 加宽 Cast | fusion §6.2.6 |
+| R19 | compute-first（含归约） | 归约四类 HardEvent 同迭代配对 + 残留消费；Set 无配对 Wait = 挂死（507014） | fusion §6.2.6 |
+
+### 精度与验收纪律
+
+以下纪律适用于所有 apace 通算融合算子（与方法论原则（architecture §1.5）、全局红线与场景约束互补，不重复展开）：
+
+1. **以设备输入事实源计算 Golden。** 先冻结每卡输入/输出分布与切分轴，再生成测试输入；golden 切分轴写错则精度验证整体失效（golden 语义先行，方法论原则 2①）。
+2. **golden 的 dtype 链必须完整可执行。** 从设备输入字节（FP8/MX 编码）解码 → 累加 dtype → 输出 dtype 的每步转换顺序、舍入与 clamp 都在 DESIGN 中写明；通信侧与计算侧的 dtype 约定不一致时标记冲突并停止，不用"golden 通过"掩盖。
+3. **覆盖会改变失败边界的形状与规模组合。** 精度验证至少覆盖：rank 数端点、对齐与非对齐/尾块 shape、多 tile（T>1）与连续重复 launch；T=1 全部通过不能外推到 T>1——串行基线会掩盖多 tile 的 Win 区布局与 flag 配对问题。
+4. **公开输出与诊断中间量分开判定。** 校验脚本分别报告用户可见输出与 Win 区/中间阶段数据的状态：输出通过不能掩盖中间量异常；DESIGN 已声明非公开的中间量异常也不能记为输出失败。
+
+### 失败案例记录
+
+生产失败案例按"现象 → 根因 → 修复方向"补入 [`review-checklist.md`](references/foundations/apace/review-checklist.md) 常见 FAIL 原因表（失败模式前置，方法论原则 4）；跨算子可复用的归入 Skill，算子特有的留在项目记录。设备结论必须标注执行环境、设备节点、实际命令和返回码；编译/静态通过不能写成设备已验证，单 case 重跑通过不能抹掉原始挂起。
 
 ### References
 
-**学习路径**（按序阅读建立完整认知）：
-
-| 顺序 | 文档 | 读什么 |
-|:---|:---|:---|
-| 1 | [`references/foundations/apace/architecture.md`](references/foundations/apace/architecture.md) | **入门·心智模型**：三层架构、组合模式、GET/PUT 方向、四大约束（§10） |
-| 2 | [`references/foundations/apace/compute.md`](references/foundations/apace/compute.md) | **计算**：MMAD 流水原理、Blaze 接口（BlockMmad/DispatchPolicy/BlockScheduler/Layout）、QuantMatmulMxKernel 骨架、MatmulMode、FragmentTensor |
-| 3 | [`references/foundations/apace/communication.md`](references/foundations/apace/communication.md) | **通信**：URMA/Win 区原理、CollectiveComm 四段式契约、GET/PUT 钩子、TeamBarrier/CrossCore flag/SyncAll、host 建链机制 |
-| 4 | [`references/foundations/apace/fusion.md`](references/foundations/apace/fusion.md) | **通算融合**：重叠原理、GET/PUT 选型、flag 编排模式、环形回压、localMatmul 0/1/2、winOffset 复用、扩展语义推导 |
-| 5 | [`references/foundations/apace/operator-anatomy.md`](references/foundations/apace/operator-anatomy.md) | **算子解剖·kernel 侧**：已实现算子共性模式、tiling_data 结构、Impl 契约、入口函数规则 |
-| 6 | [`references/foundations/apace/host-and-testing.md`](references/foundations/apace/host-and-testing.md) | **算子解剖·host 与测试**：host 初始化序列、launch、perf 模式、ST 工程与性能采集模板 |
-| 7 | [`references/foundations/apace/development-guide.md`](references/foundations/apace/development-guide.md) | **开发新算子**：REUSE/MODIFY 地图、开发步骤、改造场景食谱、验收清单 |
-
-**按需查阅**：
-
 | 文档 | 何时读 |
 |------|--------|
-| [`references/foundations/apace/workflow_integration.md`](references/foundations/apace/workflow_integration.md) | 设计 apace 算子前，看 apace 场景的技术要点和门禁 |
+| [`workflow_integration.md`](references/foundations/apace/workflow_integration.md) | **plugin 7 步流程 apace 映射（主要消费文档）**：设计/开发/审查/修复/验收各阶段的 apace 技术要点与门禁 |
+| [`review-checklist.md`](references/foundations/apace/review-checklist.md) | 逐项审查清单（全局红线 + 场景约束索引 + 操作化检查方法 + 常见 FAIL 原因） |
+| [`troubleshooting/failure-navigation.md`](references/foundations/apace/troubleshooting/failure-navigation.md) | 按现象定位排查方向 |
+| [`fundamentals/`](references/foundations/apace/fundamentals/) | 架构、通信、计算、融合组合模式基础知识 |
+| [`operator-design/`](references/foundations/apace/operator-design/) | DESIGN/PLAN 模板 + 算子解剖 + 开发指南 |
+| [`scenarios/`](references/foundations/apace/scenarios/) | 自定义扩展场景注册表（PUT/GET/compute-first 组合模式） |
 | [`references/shared/pipeline_tuning.md`](references/shared/pipeline_tuning.md) | 通算并行调优：tileCnt 两阶段策略（两路线共享） |
 | [`references/shared/profiling_mc2.md`](references/shared/profiling_mc2.md) | 性能采集：msprof + L2 flush + 多卡后处理（两路线共享） |
-| `scripts/fetch_apace.sh` | 从官网仓现取最新 apace 样例代码（kernel 头文件 + ST 测试工程 + 共享层），支持 `APACE_REPO` 环境变量或 sparse clone |
-
-**失败排查导航**：
-
-| 现象 | 去哪里查 |
-|:---|:---|
-| 死锁（aclError:507015） | [`workflow_integration.md`](references/foundations/apace/workflow_integration.md) Step 5 修复路径表（注意 507015 有 schedmode/MTE 未排空双根因） |
-| localMatmul=1 MTE 异常 | [`fusion.md`](references/foundations/apace/fusion.md) §5 PipeBarrier 修复方案 |
-| 精度不达标 | [`fusion.md`](references/foundations/apace/fusion.md) §5 精度风险与回退路径 + [`workflow_integration.md`](references/foundations/apace/workflow_integration.md) Step 6 |
-| 编译失败 | [`development-guide.md`](references/foundations/apace/development-guide.md) 常见构建失败对照表 |
-| Blaze matmul 排错 | [`compute.md`](references/foundations/apace/compute.md) §8 排错速查表 |
-| 通信时序错误 | [`communication.md`](references/foundations/apace/communication.md) 常见陷阱 |
-
-**PUT 模式补充阅读**：
-
-| 主题 | 文档 | 章节 |
-|:---|:---|:---|
-| PUT 模式 Run 编排与验收 | [`fusion.md`](references/foundations/apace/fusion.md) | §4 PUT 算子级编排验收 |
-| PUT 钩子差异 | [`communication.md`](references/foundations/apace/communication.md) | §3 GET/PUT 钩子职责 |
-| flag 编排与回压 | [`fusion.md`](references/foundations/apace/fusion.md) | §3 Flag 编排模式 |
-| winOffset 多对象复用 | [`fusion.md`](references/foundations/apace/fusion.md) | §6 多对象复用与扩展语义推导 |
-| localMatmul 模式选择 | [`fusion.md`](references/foundations/apace/fusion.md) | §5 localMatmul 模式（0/1/2） |
-| AtomicAdd 精度风险 | [`fusion.md`](references/foundations/apace/fusion.md) | §5 精度风险分析 |
-| ReduceScatter 替代实现 | [`fusion.md`](references/foundations/apace/fusion.md) | §6 AllToAll PUT + AtomicAdd 模式推导 |
-| AllGather PUT 模式 | [`operator-anatomy.md`](references/foundations/apace/operator-anatomy.md) | §6 AllGather 变体 |
 
 ---
 

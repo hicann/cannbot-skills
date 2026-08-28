@@ -33,6 +33,9 @@ tests/test-ut-report.html
 **/output/
 **/.orchestrator_state.json
 
+# Profiling 原始数据
+**/msprof_output/
+
 # Benchmark 框架
 tests/benchmark/results/
 tests/benchmark/cann-bench/

@@ -65,7 +65,7 @@ Blaze 集成方式：
 | Layout/Tensor | `include/tensor_api/tensor.h` | ops-tensor |
 | `QuantMatmulMxKernel` | `apace/kernel/all_to_all_quant_matmul/quant_matmul_mx_kernel.h` | ops-transformer（本仓 apace） |
 
-> Blaze/tensor_api 来自 [cann/ops-tensor](https://gitcode.com/cann/ops-tensor) 仓，由 `cmake/third_party/ops-tensor.cmake` 按 `OPTENSOR_TAG_ID`（`6184ed7c`）拉取/检出；用其它 ops-tensor 检出核对时，`WEIGHT_NZ`/`TRANS_A`/`TRANS_B` 等命名可能与本文不一致。组合模式不使用 BlockEpilogue。
+> Blaze/tensor_api 来自 [cann/ops-tensor](https://gitcode.com/cann/ops-tensor) 仓，由 `cmake/third_party/ops-tensor.cmake` 按 pin 的 tag 拉取/检出（具体 tag 以仓内 cmake 文件当前值为准，会随版本演进）；用其它 ops-tensor 检出核对时，`WEIGHT_NZ`/`TRANS_A`/`TRANS_B` 等命名可能与本文不一致。组合模式不使用 BlockEpilogue。
 
 ---
 
@@ -195,9 +195,9 @@ mmadOp_(gmBlockA, gmBlockB, gmBlockScaleA, gmBlockScaleB, gmBlockBias, gmBlockC,
 | Impl | LOCAL | REMOTE 阶段 |
 |:---|:---|:---|
 | udma | `1` | `localMatmul==1` → `rankSize - 1`；`localMatmul==0`/`2` → `rankSize` |
-| hcomm | `1` | `localMatmul != 0` → `rankDim - 1`；`localMatmul == 0` → `rankDim` |
+| hcomm | `1` | `localMatmul != 0` → `rankDim_ - 1`；`localMatmul == 0` → `rankDim_`（`rankDim_` 为 hcomm impl 成员变量，等价 rankSize） |
 
-> ⚠️ hcomm 下 `localMatmul==2` 落入 `rankDim - 1` 分支，但 kernel REMOTE 分支不跳过 self（仅 `localMatmul==1` 才 `continue`），mmad 次数与 `splitKNum` 错配且不开 AtomicAdd → self 被 LOCAL 前置重复计算，结果静默错误。mode 2 仅 UDMA impl 可达（详见 [`fusion.md`](fusion.md)）。
+> ⚠️ hcomm 下 `localMatmul==2` 的 mmad 次数与 `splitKNum` 错配 → 结果静默错误；mode 2 仅 UDMA impl 可达（完整论证见 [`fusion.md`](fusion.md) §5.1）。
 
 #### CalcDependTileIdx 与 wait 去重
 
@@ -258,6 +258,48 @@ UDMA impl（`all_to_all_mx_quant_matmul_udma_impl.h`）的 Run 编排与 hcomm i
 | Run 结构 | 无 AIV/AIC 分支：`localMatmul != 0` 先 `MatmulProcess(LOCAL)`，再 `MatmulProcess(REMOTE)`，末尾 `SyncAll()` + `commState_.hccl_.Finalize()` | 按 `ASCEND_IS_AIV`/`ASCEND_IS_AIC` 分支：AIV 执行 `RunAllToAll()`（`Finalize` 在其末尾）；AIC 仅 `localMatmul == 1` 时先 `RunLocalMatmul()`，再无条件 `RunMatmul()`；`Run()` 内无 `SyncAll`/`Finalize` |
 | 本地前置阈值 | `localMatmul != 0`（mode 2 也会触发 LOCAL 前置，错配后果见 [`fusion.md`](fusion.md)） | `localMatmul == 1` |
 | 远程阶段模式 | 恒 `MatmulMode::REMOTE` | `RunMatmul()` 按 `localMatmul == 2` 选 `DEFERRED_SYNC`，否则 `REMOTE`（见 §4.4） |
+
+### 4.6 staging 输出模式（compute-first 场景）
+
+> **适用范围**：本节仅适用于 compute-first 算子（AIC 先算、AIV 后通信聚合，编排原理见 [`fusion.md`](fusion.md) §6.2）；通信在前算子（官网两个 PUT 算子）AIC 直写 yGm，不适用。
+>
+> 生产实现中 mm 不直写 yGm，而是写 staging（workspaceGM），由 AIV AllToAll PUT + 增量归约处理。要点：
+
+1. **mm 输出即通信源**：staging 为连续 `[M, N]`，第 targetRank 段即为 PUT 发往 targetRank 的 chunk，零重排零额外拷贝：
+   ```cpp
+   params.cGM = stagingGm;  // vendor kernel LOCAL 模式一次覆盖全 M；T>1 时按轮次带行偏移
+   ```
+2. **无 L0C 跨 rank 累加**：计算在前架构不做 splitK/splitM，rank 退化（`rankId=0/rankSize=1/splitKNum=1`）⇒ `isAtomicAdd_` 恒 false。跨 rank 聚合由 AIV 增量归约完成（FP32 中间累加）。
+3. **T>1 按轮拆子区间**：tile 大小不变、只缩 problem M，逐轮 SetFlag 驱动 mm/comm 重叠；默认 FragmentTensor 一次调用（见 item 5），vendor 例外路径拆 R×T 子调用（复用同一份 tiling，受 [`fusion.md`](fusion.md) §6.2.2 SCALAR 约束）。
+4. **归约 FP32 累加**：AIV 侧 BF16 → Cast float32 → Add → Cast 回 BF16（CAST_RINT），精度保障详见 [`fusion.md`](fusion.md) §6.2.6。
+5. （FragmentTensor 路径，默认）AIC 逐 tile 构建 FragmentTensor 打包 R 个 rank 段地址，一次调用覆盖 `R × curTileM` 行，`FragmentSliceCopy<true>` scatter 各 rank 段独立写 staging——消除 R 循环、调用开销最小；vendor 例外路径的选型判据见 [`fusion.md`](fusion.md) §6.2.2。
+
+### 4.7 compute-first 算子的输入切分语义判定
+
+开发 compute-first 算子时，**先判定输入 A 的分布语义，再写 golden**——语义选错则 golden 与 kernel 全线错误。**用户未明确切分方式时必须回到需求拷问（grill-protocol 维度 9）向用户澄清，禁止默认假设**——"每卡有 X/n"类表述未区分输入切分与输出分布，是最高发误判点。典型语义对照：
+
+| 语义 | 每卡输入 A | 每卡计算 | 跨卡聚合 | 适用 |
+|:---|:---|:---|:---|:---|
+| **完整输入**（各卡 A 数据不同） | 完整 `[m, k]`（K 不切分） | 独立完整 matmul `C_i = A_i × B` → `[m, n]` | AlltoAll 按 M 轴分发 + AIV reduceSum 逐元素求和 → `[m/R, n]` | MoE/分布式推理各卡不同输入 |
+| **K 轴切分**（TP 语义） | `[m, k/R]`（K 轴按 rank 切分，全 m 行） | K 轴部分和 `C_i = A_i × B_i` | 跨卡求和补全 K 维 | TP 场景 |
+
+**完整输入语义推论**：
+
+1. **无 splitK/splitM 部分和** → AIC 侧禁用 L0C 原子累加（`SetAtomicAdd` 不使用），跨卡聚合完全下沉 AIV reduceSum
+2. **bias 可选**：`C_i = A_i × B + bias`，bias 在各卡本地 matmul 内完成（当前未实现时需在文档显式声明）
+3. **golden 生成必须与语义一致**：完整输入语义下 gen_data 每卡独立生成完整 A、各自算完整 matmul 再按 M 轴 AlltoAll+求和；⚠️ 参照 `all_to_all_quant_matmul`（其 A 按 K 切分）写 golden 会误选 TP 语义——**参考算子的输入分布不等于本算子的输入分布**
+4. **整除约束差异**：完整输入语义仅要求 `m % rankSize == 0`；TP 语义额外要求 `k % rankSize == 0` 且 per-rank K 满足 `CeilDiv(k/R, 64)` 为偶数（即单次 mm 的 K 长度满足 MXFP8 scale 对齐约束，统一表述见 [`fusion.md`](fusion.md) §6.2.10）
+
+### 4.8 精度保障规则（compute-first + 归约场景）
+
+以下来自 ops-transformer 注册版 MC2 算子的生产规则，直调开发同样适用：
+
+| # | 规则 | 适用场景 |
+|---|------|---------|
+| 1 | **FP32 中间累加全链路**：Cube 侧 L0C 用 FP32 累加器；AIV 归约先 `Cast(..., CAST_NONE)` 成 fp32 → `Add` 累加 → 输出 `Cast(..., CAST_RINT)` | compute-first + 归约 |
+| 2 | **尾块搬出必须 DataCopyPad** 按真实字节数拷贝——32B 向上对齐的 DataCopy 会越界写脏相邻 buffer | 通用（含归约） |
+| 3 | **fp8_e8m0 scale 的 `VF_CALL<CastVf>` 单次 ≤ 32 元素**（32B VF 限制），一次传全部 scale 实测精度失败，必须分批 | MXFP8 量化 |
+| 4 | 多核归约用「分片独占 + FP32 顺序累加」，不用原子加；跨 rank 归约在 L0C（FP32）或 AIV（FP32）完成 | compute-first + 多核归约 |
 
 ---
 
@@ -388,7 +430,9 @@ bool scaleAlignForL2Stream = (scaleKRowBytes & kCacheLineAlignMask) == 0 &&
 
 AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h`，`QmmMxKernelAgUdma`）用 FragmentTensor 处理 AllGather 后的离散多 rank 数据，是除 `QuantMatmulMxKernel` 外的第二种组合模式 kernel。
 
-### FragmentTensor 接口（`apace/basic/fragment_tensor/fragment_tensor.h`）
+### 7.1 AllGather 场景（通信在前）
+
+#### FragmentTensor 接口（`apace/basic/fragment_tensor/fragment_tensor.h`）
 
 | 接口 | 语义 | 约束 |
 |:---|:---|:---|
@@ -420,6 +464,61 @@ AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h
 | 1 | wait 与 AIV set 的 dependTileIdx 序列必须一一对应（含末尾 drain） | 死锁或读脏数据 |
 | 2 | MAIN 轮次切换先 wait 再 `UpdateAddrList` | 地址更新后旧数据未消费完，精度错误 |
 | 3 | HEAD 区 dependId=0 由 AIV 循环前预触发；AIC 仍经统一位掩码去重路径 wait 一次 id 0（因已预触发而立即返回，不阻塞） | 特判跳过 id 0 会破坏位掩码/drain 的统一配对假设 |
+
+### 7.2 计算在前场景（ReduceScatter 语义）
+
+> **选型提醒**：计算在前算子的 mm 内核**默认 FragmentTensor 自研 kernel**（消 R 循环），与 [`fusion.md`](fusion.md) §6.2.2 及 R16 红线一致；vendor 复用官方 `QuantMatmulMxKernel` 为例外路径（须 SCALAR 占比论证）。
+>
+> **vendor 复用不可行说明（类型不兼容）**：`QuantMatmulMxKernel` 的 `mmadParams.cGmAddr` 为 `GM_ADDR` 类型（单地址），**无法接受 FragmentTensor 对象**（多段地址数组）——C 输出无法 scatter 到 R 个 rank 段。只有 `QmmMxBlockMmadFragment` 配合自研 kernel 才支持 FragmentTensor C 输出（`operator()` 接受 `GM_ADDR* cFragAddrs` 数组 + `FragmentSliceScatter` 多段写）。此类型不兼容属设计阶段即可拦截的阻塞级选型错误。
+
+FragmentTensor 的另一种应用：**计算在前**场景——A 数据全在本卡 GM 连续 `[m, k]`，各 rank 段天然连续排列，FragmentTensor 打包本卡 GM 地址（vs AllGather 打包 win 区离散地址）。
+
+**与 AllGather 的关键差异**：
+
+| 维度 | AllGather（通信在前，§7.1） | compute-first（计算在前，本节） |
+|:---|:---|:---|
+| 数据来源 | win 区（远端 rank 推来的离散地址） | 本卡 GM（连续 rank 段） |
+| FragmentTensor 打包 | win 区各 rank 地址 | GM 中各 rank 段地址 |
+| 跨核同步 | 需 WaitFlag 等通信完成 | **无需**（计算不依赖通信） |
+| C 输出 | 直写 yGm | 写 workspace（后续 PUT 通信） |
+| dependId 预触发 | HEAD 区 dependId=0 由 AIV 循环前预触发 | 无 dependId 预触发（计算不依赖通信） |
+
+**BuildFragmentTensors 模式**：
+
+```cpp
+// 打包 R 个 rank 段地址（本卡 GM 连续）
+for (uint32_t r = 0; r < rankSize; ++r) {
+    addrListA[r] = params.aGM + r * mPerRank * dataBytesPerMRow;
+    addrListC[r] = cGM + r * mPerRank * cBytesPerM;  // workspace 各 rank 段
+}
+headFragA_ = MakeFragmentTensor<2, MAX_FRAG, MakeLayoutA, AType>(
+    MakeFragParam(fragM, realFragM, rankSize, k), addrListA);
+```
+
+- `fragM = headRows / rankSize = curTileM`（每个 rank 段在当前 tile 的行数）
+- `realFragmentSize`：尾块非对齐时限制实际读取范围（见 [`fusion.md`](fusion.md) §6.2.7）
+
+**ResolveTileCtx 的 HEAD/MAIN/TAIL 划分**：
+
+| Region | 触发条件 | FragmentTensor | 行偏移 |
+|:---|:---|:---|:---|
+| HEAD | `mPos < headRows` | `headFragA_` / `headFragC_` | `mPos` |
+| MAIN | `mPos < headRows + mainSectionRows` | `curMainA_` / `curMainC_`（按 `roundIdx` 更新地址） | `relPos % mainRoundRows` |
+| TAIL | `mPos ≥ headRows + mainSectionRows` | `tailFragA_` / `tailFragC_` | `mPos - headRows - mainSectionRows` |
+
+> per-tile 调用场景下通常只有 HEAD region（`tileCnt=0, tailCnt=0`），MAIN/TAIL 在多轮 per-tile 流水中通过外部 for-t 循环处理。
+
+**Te::MakeTensor 构建 GM Tensor**：
+
+计算在前场景的 B/ScaleB 从本卡 GM 读取（所有 rank 共享），用 `Te::MakeTensor` 构建 GM Tensor 后 Slice 传入 BlockMmadFragC：
+
+```cpp
+auto gmB = Te::MakeTensor(Te::MakeMemPtr<Te::Location::GM>(bGmAddr_),
+            MakeLayoutB{}(Ki, Ni));
+auto gmBlockB = gmB.Slice(Te::MakeCoord(0L, nPos), Te::MakeShape(Ki, curNtile));
+```
+
+> 归约侧 UB/精度/双缓冲纪律（两种 UB 管理策略）见 [`fusion.md`](fusion.md) §6.2.6。
 
 ---
 
@@ -460,6 +559,6 @@ AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h
 ## 后续阅读
 
 - [`fusion.md`](fusion.md) — 通算融合组合模式（localMatmul 选型/flag 编排）
-- [`operator-anatomy.md`](operator-anatomy.md) — 算子完整骨架（Impl/入口/host）
-- `ascendc-api-best-practices` skill references — 基础 API（CrossCore flag 编排见 `references/api-crosscore-sync.md`）
-- `ascendc-blaze-best-practice` skill — Blaze 通用最佳实践（MX 量化 matmul 模板选型见 `references/scenarios/mx-matmul-development.md`，Tiling 算法选择见 `references/tiling/tiling-selection.md`）
+- [`operator-anatomy.md`](../operator-design/operator-anatomy.md) — 算子完整骨架（Impl/入口/host）
+- `ascendc-api-best-practices` skill `references/` — 基础 API（CrossCore flag 编排见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`）
+- `ascendc-blaze-best-practice` skill — Blaze 通用最佳实践（MX 量化 matmul 与 Tiling 算法选型见其 scenarios 与 kernel-design 参考）
