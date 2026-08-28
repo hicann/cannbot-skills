@@ -55,7 +55,7 @@ curl 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}/files?a
 ```
 
 > **注意**：此 API 可能返回认证错误（`Invalid header parameter: private-token, required`）。
-> **推荐替代方案**：使用 git 命令获取变更文件，详见 [本 skill SKILL.md 速查表](../SKILL.md#git-操作核心命令) 及 [diff-and-changes.md](diff-and-changes.md)。
+> **推荐替代方案**：使用 git 命令获取变更文件，详见 [本 skill SKILL.md 速查表](../SKILL.md) 及 [diff-and-changes.md](diff-and-changes.md)。
 
 **返回字段（每个文件）**：
 

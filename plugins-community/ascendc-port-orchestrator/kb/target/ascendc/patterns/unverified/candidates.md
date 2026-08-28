@@ -4381,7 +4381,7 @@ A correctly-designed V220 Pattern C probe must use cross-core sync (`CrossCoreSe
 
 #### Cross-ref
 
-- [CAND-FA-MULTI-LAUNCH-PERF-GAP §5](candidates.md#CAND-FA-MULTI-LAUNCH-PERF-GAP) (re-scoped 2026-05-23 to V220-only; V351 has different path)
+- [CAND-FA-MULTI-LAUNCH-PERF-GAP §5](candidates.md) (re-scoped 2026-05-23 to V220-only; V351 has different path)
 - PB-34, PB-35 (still valid Pattern A V220-only falsifications)
 - `workspace/probe_a5_v300_fa_sync/PROBE_REPORT.md` (main's A5 probe + identification of intra-core vs cross-core sync defect)
 - `docs/design/fa_delta5_pattern_c_probe_snapshot/probe_pattern_c_kernel.h` (my malformed V220 probe — preserved as reproducer for the defect, NOT as falsification evidence)

@@ -57,7 +57,7 @@ description: 此技能默认不触发。
 2. 如包含 issue 链接但文件不存在 → 要求 Subagent 创建
 3. 确认 `./issues/` 目录下已有对应 issue 文件后，LOG.md 中只放链接
 
-**拒绝恢复流程**（详见 [task-prompts.md](resources/task-prompts.md#拒绝恢复流程)）：
+**拒绝恢复流程**（详见 [task-prompts.md](resources/task-prompts.md#任务恢复映射表)）：
 - 最多重试 2 次
 - 超过后主 Agent 使用 Write 工具直接创建 issue 文件
 

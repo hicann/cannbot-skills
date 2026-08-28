@@ -104,7 +104,7 @@ variable_output · spectral · histogram · atomic_update · broadcast
 ### B4. shape_rule (numpy_expr)
 
 `outputs[].shape_rule` 是受限 numpy 子集表达式（不再是 DSL 函数）。完整语义、子规则和失败码见
-[SKILL.md §4.3](../SKILL.md#43-stage-3--shape_closurenumpy_expr-求值)。
+[SKILL.md §4.3](../SKILL.md)。
 
 | kind | 适用 | shape_rule 内容 |
 |---|---|---|

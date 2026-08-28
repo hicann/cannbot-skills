@@ -6,7 +6,7 @@
 
 ## 0. 决策树（先选粒度）
 
-> **强制前置**：在写"自定义 Tile"前，先按 [SKILL.md Step 2.5](../SKILL.md#step-25blockepilogue-槽位清单关键前置) 列出 BlockEpilogue 特化的**槽位清单**。再据此决定走粒度 A 还是粒度 B。
+> **强制前置**：在写"自定义 Tile"前，先按 [SKILL.md Step 2.5](../SKILL.md#step-5-blockepilogue-slot-analysis) 列出 BlockEpilogue 特化的**槽位清单**。再据此决定走粒度 A 还是粒度 B。
 
 ```
 所选 BlockEpilogue 特化的 Tile 槽中，是否有一个槽
@@ -101,7 +101,7 @@
 ### 通用
 
 - [ ] 已检索 catlass `epilogue/tile`、`epilogue/block`、[epilogue-components.md](./epilogue-components.md)，确认「无现成组件」
-- [ ] 已按 [SKILL.md Step 2.5](../SKILL.md#step-25blockepilogue-槽位清单关键前置) 列出 BlockEpilogue 特化的槽位清单
+- [ ] 已按 [SKILL.md Step 2.5](../SKILL.md#step-5-blockepilogue-slot-analysis) 列出 BlockEpilogue 特化的槽位清单
 - [ ] 已显式标注粒度（A / B）
 
 ### 粒度 A 特有
