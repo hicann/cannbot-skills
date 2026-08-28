@@ -1499,7 +1499,6 @@ phase_o4_total_spawn_cap: 20
 # phase_o4_initial_state (legacy single-value default = await_worker).
 phase_o4_initial_state: await_worker
 phase_o4_initial_state_by_mode:
-  port_a3_to_a5: await_worker
   backward: await_worker
   optimize: await_optimizer
   # research-first (A fix, 2026-04-26): pre-op-gen research on a DONE op that
