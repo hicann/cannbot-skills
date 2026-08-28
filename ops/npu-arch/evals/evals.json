@@ -406,6 +406,246 @@
       "expected_output": "回复应拒绝硬编码，说明同一 NpuArch 下频率、核数、L2 和 Memory 会随子型号或形态变化；应运行时通过 PlatformAscendC 或设备接口获取实际值，参考表中的典型 SKU 只能作说明，不能当所有 arch35 的真值",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 14,
+      "title": "Vector BF16 支持与总算力构成",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "Ascend950PR（DAV_3510）的 Vector Core 支持 BF16 吗？950PR Server 的 BF16 峰值算力是多少，Cube 和 Vector 各贡献多少？",
+      "expected_output": "回复应明确（昇腾950 NPU架构白皮书 §4.1.2/表3-1）：\n- DAV_3510 的 Vector Core 原生支持 BF16，不存在 BF16 只能用 Cube 的限制\n- 950PR Server BF16 总算力 486 TFLOPS = Cube 432T + Vector 54T\n- 950PR PCIE 档总算力 425T = Cube 378T + Vector 47T\n- 不得再声称 Vector 不支持 bfloat16（过时错误表述）",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "原生支持",
+          "description": "回复明确 Vector 原生支持 BF16"
+        },
+        {
+          "type": "contains",
+          "pattern": "486",
+          "description": "回复中提到了总算力 486T"
+        },
+        {
+          "type": "contains",
+          "pattern": "432",
+          "description": "回复中提到了 Cube 贡献 432T"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "Vector 不支持 bfloat16",
+          "description": "回复未出现 Vector 不支持 bfloat16 的过时错误表述"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "UB 容量口径（512KB vs 248KB）",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "昇腾950 白皮书表4-2 写 UB 是 512KB per AI Core，但 GetCoreMemSize 返回 248KB，这两个数值矛盾吗？Tiling 时应该用哪个？",
+      "expected_output": "回复应说明 UB 容量口径：\n- 不矛盾：白皮书表4-2 的 512KB 是按 AI Core 组（1 AIC + 2 AIV）计的物理容量，即每 AIV 物理 256KB × 2\n- 248KB（INI ub_size=253952）是每 AIV 用户可用值，即物理 256KB − 8KB 预留\n- 结论：单 AIV 物理 256KB / 可用 248KB，组级物理 512KB\n- Tiling 一律以 GetCoreMemSize(CoreMemType::UB) 返回值为准，禁止硬编码",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "512",
+          "description": "回复中提到了组级物理 512KB"
+        },
+        {
+          "type": "contains",
+          "pattern": "248",
+          "description": "回复中提到了每 AIV 可用 248KB"
+        },
+        {
+          "type": "contains",
+          "pattern": "256",
+          "description": "回复中提到了每 AIV 物理 256KB"
+        },
+        {
+          "type": "contains",
+          "pattern": "GetCoreMemSize",
+          "description": "回复明确 Tiling 以 GetCoreMemSize 为准"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "950DT/950PR 规格档位与定位",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "Ascend950DT 和 Ascend950PR 分别面向什么场景？各自的核数档位和 Memory 规格是什么？",
+      "expected_output": "回复应说明 950 系列定位与规格（昇腾950 NPU架构白皮书 §2/§3/表3-1）：\n- 950PR：面向高性能推荐、大模型 Prefill 及多模态推理；Cube 32/28 核两档，Memory 128/112GB @ 1.6/1.4TB/s\n- 950DT：覆盖预训练、后训练及推理（含 Decode 与 Prefill）全流程；Cube 36/32/28 核三档，Memory 144/96GB @ 4TB/s\n- (Decode)/(Prefill) 仅为场景侧重标注，并非唯一用途",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "950DT",
+          "description": "回复中提到了 950DT"
+        },
+        {
+          "type": "contains",
+          "pattern": "Prefill",
+          "description": "回复中提到了 Prefill 场景定位"
+        },
+        {
+          "type": "contains",
+          "pattern": "144",
+          "description": "回复中提到了 950DT 最高 144GB"
+        },
+        {
+          "type": "contains",
+          "pattern": "4TB/s",
+          "description": "回复中提到了 950DT 4TB/s 带宽"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Memory 带宽与信息来源分级",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "Ascend950PR Server 和 PCIE 的 Memory 带宽分别是多少？Ascend910B2 的带宽呢？这些数据的来源是否经过官方证实？",
+      "expected_output": "回复应说明 Memory 带宽及来源可信度：\n- 950PR Server 1.6 TB/s、PCIE 1.4 TB/s：已由昇腾950 NPU架构白皮书表3-1/§4.3 证实\n- 950DT 最高 4 TB/s：白皮书证实\n- 910B2 1.6 TB/s：基于公开资料与经验值，未在 INI 及白皮书中找到直接可核验字段\n- 技能对信息来源分级标注：已证实条目给出白皮书章节，未验证条目明确标注为公开资料/经验值",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "1.6",
+          "description": "回复中提到了 1.6 TB/s"
+        },
+        {
+          "type": "contains",
+          "pattern": "1.4",
+          "description": "回复中提到了 1.4 TB/s"
+        },
+        {
+          "type": "contains",
+          "pattern": "白皮书",
+          "description": "回复中提到了白皮书作为 950 带宽来源"
+        },
+        {
+          "type": "contains",
+          "pattern": "经验值",
+          "description": "回复中标注 910B2 带宽为公开资料/经验值"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "NDDMA 与 BufferID 机制细节",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "DAV_3510 的 NDDMA 指令有什么能力？BufferID 同步机制相比 set/wait 有什么变化？",
+      "expected_output": "回复应说明 NDDMA 与 BufferID（昇腾950 NPU架构白皮书 §4.1.5/§4.1.6）：\n- NDDMA：对全局内存数据最多 5 个维度重排后直接写入 UB，搬运与重排/转置一步完成；内置缓存自动发掘数据局部性，将多个数据元素粒度的读合并为 128 字节读\n- BufferID：替代 set/wait 强制配对，get_buf() 对应加锁、rel_buf() 对应解锁，类似互斥锁语义，内聚性更强、与其他流水线解耦",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "5 个维度",
+          "description": "回复中提到了 NDDMA 最多 5 个维度重排"
+        },
+        {
+          "type": "contains",
+          "pattern": "128",
+          "description": "回复中提到了 128 字节读合并"
+        },
+        {
+          "type": "contains",
+          "pattern": "get_buf",
+          "description": "回复中提到了 get_buf 加锁语义"
+        },
+        {
+          "type": "contains",
+          "pattern": "rel_buf",
+          "description": "回复中提到了 rel_buf 解锁语义"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "CCU 通算融合能力",
+      "config": {
+        "max_tokens": 150000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 180000,
+          "glm-5": 160000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "DAV_3510 新增的 CCU 是什么？支持哪些集合通信算法？对算子开发有什么影响？",
+      "expected_output": "回复应说明 CCU（昇腾950 NPU架构白皮书 §4.6.4）：\n- CCU（Collective Communication Unit）：IO-Die 上新增的集合通信专用引擎\n- CCUA 集成 MemorySlice（数据存储）与 Reduce Unit（数据计算），URMA 搬运与 Reduce 计算由硬件判定执行，完成后通过 Mission 任务接口上报状态\n- 支持 Broadcast / ReduceScatter / AllGather / AllReduce / All2All / All2Allv 典型算法\n- 对算子开发者的影响：通算融合算子有了新的开发选型",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "CCU",
+          "description": "回复中提到了 CCU"
+        },
+        {
+          "type": "contains",
+          "pattern": "AllReduce",
+          "description": "回复中提到了 AllReduce"
+        },
+        {
+          "type": "contains",
+          "pattern": "All2All",
+          "description": "回复中提到了 All2All"
+        },
+        {
+          "type": "contains",
+          "pattern": "ReduceScatter",
+          "description": "回复中提到了 ReduceScatter"
+        }
+      ]
     }
   ],
   "skill_name": "npu-arch"

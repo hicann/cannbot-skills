@@ -2,6 +2,8 @@
 
 > **数据源**：`${ASCEND_HOME_PATH}/<arch>/data/platform_config/*.ini`（arch 如 `aarch64-linux`、`x86_64-linux`、`arm64-linux`），参数值以运行时 `PlatformAscendC` 接口返回为准。
 >
+> **DAV_3510 官方规格真源**：《[昇腾950 NPU架构白皮书](https://public-download.obs.cn-east-2.myhuaweicloud.com/ascend/%E6%98%87%E8%85%BE950%20NPU%E6%9E%B6%E6%9E%84%E7%99%BD%E7%9A%AE%E4%B9%A6.pdf)》——表3-1（950PR/950DT 各 SKU 核数、算力、Memory、L2）、表4-2（Memory 层次各 Buffer 物理容量）。
+>
 > **数据可信度约定**：本文档中「INI 字段」/「实测」均指从 ini 读取到的静态配置值。**ini 文件是发现硬件参数的必要不充分条件** — 并非每个 ini 都对应真实量产芯片，部分配置可能来自工程样片、仿真平台或规划中的 SKU。文档聚焦架构级常量（§1、§2）和关键差异速查（§3），变化参数仅以典型量产 SKU 举例。
 
 ---
@@ -23,6 +25,8 @@
 | MatePad Edge、MateBookPro等系列 | KirinX90 | DAV_3003 | 3003 | KirinX90 |
 
 > **一对多关系**：一个 NpuArch 可对应多个 SocVersion / 芯片型号。例如 `DAV_2201` 对应 Ascend910B1~B4、Ascend910B2C、Ascend910_93。
+>
+> **950 系列定位**（950 白皮书 §2/§3）：**Ascend950PR** 面向高性能推荐、大模型 **Prefill** 及多模态推理；**Ascend950DT** 覆盖预训练、后训练及推理（含 **Decode** 与 Prefill）全流程（Memory 规格见典型 SKU 示例）。上表中的 (Decode)/(Prefill) 为场景侧重标注，并非唯一用途。
 >
 > **运行时映射**：`Ascend910_93` 的 SocVersion 字符串在运行时映射到 `SocVersion::ASCEND910B`（非独立枚举值）。源码中虽存在 `SocVersion::ASCEND910_93` 枚举值（platform_ascendc.h），但 convertMap 中 `"Ascend910_93"` 映射到的是 `ASCEND910B`，该枚举仅在少数内部模块使用。NpuArch 同为 `DAV_2201`。
 
@@ -115,6 +119,8 @@
 | 核心类型 | `core_type_list` | `CubeCore,VectorCore` |
 | 核间关系 | — | CubeCore : VectorCore = 1 : 2 |
 
+> **与 950 白皮书对照**：白皮书表4-2 的物理容量标注为 L1 512KB / L0A/L0B 64KB / L0C 256KB per AI Core，与 INI 一致；**UB 标注为 512KB per AI Core**，与 INI 对齐的解读是按 AI Core 组（1 AIC + 2 AIV）计的物理容量（每 AIV 物理 256KB × 2，"按组计"口径为推断）。INI `ub_size` 248KB 为每 AIV 用户可用值——物理 256KB − 8KB 预留 = 248KB = 253952B，与 INI 精确吻合（本地 CANN 全部 950PR/950DT SKU 已核实一致）。完整证据链见 `npu-arch-guide.md` §Buffer 容量。
+
 ### 2.6 DAV_3003 — KirinX90 端侧系列
 
 > **重要说明**：KirinX90 端侧平台使用，架构代号 `dav-l300`。
@@ -196,6 +202,8 @@
 >
 > > 注：DAV_2201 / DAV_3510 中 CubeCore : VectorCore = 1 : 2。
 > >
+>
+> **Ascend950DT**（950 白皮书表3-1）：Cube 36/32/28 核、Vector 72/64/56 核三档；Memory 144/96 GB @ 4TB/s；L2 128MB；Cube BF16 486/432/378T、FP8 族 973/865/756T、MXFP4 1946/1730/1513T；Vector FP16/BF16 60/54/47T（三档，每档 FP16=BF16）。950PR 为 32/28 核两档（128/112GB @ 1.6/1.4TB/s，L2 128/112MB），与上表 INI 数据一致。
 
 
 ---
@@ -219,7 +227,7 @@
 
 ## 4. 基于公开资料与经验值的规格
 
-以下信息无法从当前安装的 INI 直接推导，数据来源于公开资料或工程经验积累：
+以下信息无法从当前安装的 INI 直接推导，数据来源于公开资料或工程经验积累。**自《[昇腾950 NPU架构白皮书](https://public-download.obs.cn-east-2.myhuaweicloud.com/ascend/%E6%98%87%E8%85%BE950%20NPU%E6%9E%B6%E6%9E%84%E7%99%BD%E7%9A%AE%E4%B9%A6.pdf)》（下称"950白皮书"）发布后，其中已被白皮书证实的条目在"信息来源"列标注对应章节**：
 
 > **位置标注约定**：本表"文档位置"列使用章节锚点（如 `Guide §5`），不使用行号，以避免文档行号漂移导致引用失效。
 
@@ -228,13 +236,13 @@
 | 1 | SIMT Register File 128KB | Guide §5 SIMT vs SIMD | 公开资料 / 经验值 |
 | 2 | SIMT DCache 最大 128KB | Guide §5 SIMT vs SIMD | 同上 |
 | 3 | SSBuffer 256KB | Guide §3 Buffer 容量 / SKILL.md §DAV_3510 关键变化 | 同上 |
-| 4 | CV 直通通路：L0C→UB、UB→L1、SSBuffer 消息 | Guide §4 关键数据通路改动 / SKILL.md §DAV_3510 关键变化 | 同上 |
-| 5 | L1→GM 和 GM→L0A/L0B 通路已删除 | Guide §4 关键数据通路改动 | 同上 |
-| 6 | BufferID 取代 set/wait 同步 | Guide §4 指令序列与 BufferID 同步 / SKILL.md §DAV_3510 关键变化 | 同上 |
-| 7 | 多核同时访问 GM 同地址性能优化 | Guide §4 MTE 数据搬运引擎 | 同上 |
-| 8 | SIMD-Regbase：OOO 指令双发 | Guide §6 SIMD-Regbase | 同上 |
-| 9 | Warp Scheduler 每 AIV 4 个 | Guide §5 SIMT vs SIMD | 同上 |
-| 10 | NDDMA + ND-DMA Cache 规格 | Guide §8 NDDMA 高维 DMA | 同上 |
-| 11 | CCU 三种通信范式及 KFC 调度变化 | Guide §9 CCU 通算融合 | 同上 |
-| 12 | Vector 算力 950PR Server=54T / PCIE=47T：基准 27T/23.7T × 双发 2，但并非所有 Vector 指令均支持双发 | Guide §3 算力与系统规格 → Vector 算力推导 | 公开资料 / 经验值 |
-| 13 | Memory 带宽 Server 1.6 TB/s / PCIE 1.4 TB/s | Guide §3 算力与系统规格 | 同上 |
+| 4 | CV 直通通路：L0C→UB、UB→L1、SSBuffer 消息 | Guide §4 关键数据通路改动 / SKILL.md §DAV_3510 关键变化 | L0C→UB（含随路量化）与 L1↔UB 直连：950白皮书 §4.1.1/§4.1.4；SSBuffer 消息通路：公开资料 / 经验值 |
+| 5 | L1→GM 和 GM→L0A/L0B 通路已删除 | Guide §4 关键数据通路改动 | 公开资料 / 经验值 |
+| 6 | BufferID 取代 set/wait 同步 | Guide §4 指令序列与 BufferID 同步 / SKILL.md §DAV_3510 关键变化 | 950白皮书 §4.1.6 |
+| 7 | 多核同时访问 GM 同地址性能优化 | Guide §4 MTE 数据搬运引擎 | 公开资料 / 经验值 |
+| 8 | SIMD-Regbase：OOO 指令双发 | Guide §6 SIMD-Regbase | 950白皮书 §3/§4.1.2/§4.1.3 |
+| 9 | Warp Scheduler 每 AIV 4 个 | Guide §5 SIMT vs SIMD | 公开资料 / 经验值 |
+| 10 | NDDMA + ND-DMA Cache 规格 | Guide §8 NDDMA 高维 DMA | 950白皮书 §4.1.5 |
+| 11 | CCU 三种通信范式及 KFC 调度变化 | Guide §9 CCU 通算融合 | CCU 硬件架构与算法支持：950白皮书 §4.6.4；三种通信范式与 KFC 调度细节：公开资料 / 经验值 |
+| 12 | Vector 算力 950PR Server=54T / PCIE=47T：基准 27T/23.7T × 双发 2，但并非所有 Vector 指令均支持双发 | Guide §3 算力与系统规格 → Vector 算力推导 | 950白皮书 表3-1 + §3/§4.1.2/§4.1.3 |
+| 13 | Memory 带宽 Server 1.6 TB/s / PCIE 1.4 TB/s | Guide §3 算力与系统规格 | 950白皮书 表3-1/§4.3.1；910B2 带宽仍为公开资料 / 经验值 |

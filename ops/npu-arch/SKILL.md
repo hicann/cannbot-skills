@@ -53,6 +53,8 @@ platform_ascendc::SocVersion socVer = ascendcPlatform.GetSocVersion();
 | Memory | 64 GB | 112 GB | 128 GB |
 
 > 详见 [典型SKU示例](references/npu-hardware-params.md#子型号变化参数)。
+>
+> Memory 带宽：950PR 1.6/1.4 TB/s 已由 950 白皮书表3-1 证实，910B2 仍为公开资料与经验值，详见 `npu-hardware-params.md` §4。
 
 ### 指令集与微架构
 
@@ -62,8 +64,6 @@ platform_ascendc::SocVersion socVer = ascendcPlatform.GetSocVersion();
 | CV 直通通路 | 新增 L0C→UB、UB→L1、SSBuffer 消息 |
 | 同步机制 | BufferID 替代 set/wait 强配对 |
 | 编程模型 | 新增 SIMT、SIMD-Regbase、NDDMA、CCU 通算融合 |
-
-> Memory 带宽基于公开资料与经验值，详见 `npu-hardware-params.md` §4。
 
 ## 详细文档索引
 
@@ -79,5 +79,9 @@ platform_ascendc::SocVersion socVer = ascendcPlatform.GetSocVersion();
   - **数据格式扩展**：完整数据类型表、C++ 类型名映射、MXFP Tiling 约束
   - **NDDMA / CCU**：高维 DMA 用法、CCU 三种通信范式、KFC 调度模型
   - **架构兼容性检查清单 / 参考信息来源**
+
+## 官方资料来源
+
+- 《[昇腾950 NPU架构白皮书](https://public-download.obs.cn-east-2.myhuaweicloud.com/ascend/%E6%98%87%E8%85%BE950%20NPU%E6%9E%B6%E6%9E%84%E7%99%BD%E7%9A%AE%E4%B9%A6.pdf)》—— Ascend950PR/950DT（DAV_3510）官方规格与微架构真源，章节内容地图见 `references/npu-arch-guide.md` §参考信息来源
 
 > **范围边界**：本技能聚焦架构判断与硬件能力识别。算子目录结构、CMake 配置、文件命名约定等工程模板内容不在本技能范围内。
