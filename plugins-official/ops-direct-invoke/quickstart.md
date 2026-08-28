@@ -20,7 +20,7 @@ CANNBot 算子直调开发模式适用于**快速验证自定义算子**场景�
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -82,6 +82,31 @@ bash init.sh global cursor      # 全局级
 ```
 
 安装后在项目根目录生成 `.cursor/` 目录，结构与 Claude/OpenCode 基本一致。
+
+</details>
+
+<details>
+<summary>Codex</summary>
+
+Codex 的 Skill 与 Subagent 使用不同的发现目录：
+
+- 项目级 Skill：`.agents/skills/`
+- 项目级 Subagent：`.codex/agents/*.toml`
+- 全局 Skill：`~/.agents/skills/`
+- 全局 Subagent：`~/.codex/agents/*.toml`
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-official/ops-direct-invoke
+bash init.sh project codex      # 项目级
+bash init.sh global codex       # 全局级
+```
+
+也可以安装到指定项目：
+
+```bash
+bash init.sh project codex /path/to/project
+```
 
 </details>
 
@@ -148,6 +173,12 @@ ls .traecli/   # TRAE CLI（init.sh 自动检测）
 # Cursor
 ls .cursor/
 # 应看到 skills/ agents/ cannbot-manifest.json
+# AGENTS.md 位于项目根目录
+
+# Codex
+ls .agents/skills/          # 项目级 Skill 软链接
+ls .codex/agents/           # 项目级 Codex TOML Subagent
+ls .codex/cannbot-manifest.json
 # AGENTS.md 位于项目根目录
 ```
 
@@ -281,6 +312,9 @@ cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project tra
 
 # Cursor
 cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project cursor
+
+# Codex
+cd cannbot-skills/plugins-official/ops-direct-invoke && bash init.sh project codex
 ```
 
 ### Q: 算子直调模式和算子仓模式如何选择？

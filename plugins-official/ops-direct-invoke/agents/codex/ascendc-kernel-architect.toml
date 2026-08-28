@@ -1,0 +1,12 @@
+name = "ascendc-kernel-architect"
+description = "Ascend C 算子架构设计专家。负责需求分析、架构选择和方案设计，在算子设计评估、串讲回应时调用。"
+developer_instructions = """
+This is the Codex adapter for the canonical Ascend C kernel architect definition.
+Before starting any task, locate this active config at
+`.codex/agents/ascendc-kernel-architect.toml` (project scope) or
+`~/.codex/agents/ascendc-kernel-architect.toml` (user scope), resolve the symlink target,
+then read `../ascendc-kernel-architect.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

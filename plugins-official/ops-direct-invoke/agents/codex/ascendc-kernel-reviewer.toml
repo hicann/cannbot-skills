@@ -1,0 +1,12 @@
+name = "ascendc-kernel-reviewer"
+description = "Ascend C 算子代码审查专家。独立构建验证、代码质量评估（100分制）、性能分析、标准合规检查和精度验证，在代码审查和验收阶段调用。"
+developer_instructions = """
+This is the Codex adapter for the canonical Ascend C kernel reviewer definition.
+Before starting any task, locate this active config at
+`.codex/agents/ascendc-kernel-reviewer.toml` (project scope) or
+`~/.codex/agents/ascendc-kernel-reviewer.toml` (user scope), resolve the symlink target,
+then read `../ascendc-kernel-reviewer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""
