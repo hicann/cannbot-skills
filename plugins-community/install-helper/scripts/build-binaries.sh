@@ -19,9 +19,23 @@ echo "Building install-helper v${VERSION} binaries..."
 echo "Regenerating embedded-plugins.json..."
 node scripts/gen-embedded.cjs
 
-# Clean output
-rm -rf bin/
+# Clean only build artifacts. NEVER `rm -rf bin/` — it would delete the
+# git-tracked bin/install-helper.js entry wrapper, causing npm to publish
+# a broken main package (bin/ silently missing from the tarball).
 mkdir -p bin/
+rm -f bin/install-helper-linux-x64 bin/install-helper-linux-arm64 \
+      bin/install-helper-darwin-x64 bin/install-helper-darwin-arm64 \
+      bin/install-helper-windows-x64 bin/install-helper-windows-x64.exe
+
+# Self-heal: restore the wrapper if a previous run deleted it
+if [ ! -f bin/install-helper.js ] || [ ! -f bin/package.json ]; then
+  echo "  ! bin/install-helper.js or bin/package.json missing — restoring from git..."
+  git checkout -- bin/ 2>/dev/null || {
+    echo "  ✗ cannot restore bin/ wrapper files (not a git repo or files untracked)"
+    exit 1
+  }
+  echo "  ✓ restored"
+fi
 
 # Target platforms
 TARGETS=(

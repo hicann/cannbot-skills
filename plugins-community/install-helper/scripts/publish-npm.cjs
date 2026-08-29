@@ -38,6 +38,33 @@ function publish(pkgDir, tag = "latest") {
   });
 }
 
+// Guard: verify the main package tarball actually contains the bin/ entry
+// wrapper and dist bundle. npm silently omits missing `files` entries, which
+// is exactly how 1.1.11/1.1.12 shipped without bin/ and broke startup.
+// Returns true when the tarball is complete; exits the process when not
+// (publish must abort on a broken package).
+function verifyMainPackage(rootDir = ROOT) {
+  const REQUIRED_FILES = [
+    "bin/install-helper.js",
+    "bin/package.json",
+    "dist/index.js",
+  ];
+  console.log("  Verifying main package tarball contents...");
+  const out = execSync("npm pack --dry-run --json", {
+    cwd: rootDir,
+    encoding: "utf-8",
+  });
+  const files = JSON.parse(out)[0].files.map((f) => f.path);
+  const missing = REQUIRED_FILES.filter((req) => !files.includes(req));
+  if (missing.length > 0) {
+    console.error(`  ✗ Main package is missing required files: ${missing.join(", ")}`);
+    console.error(`    npm would silently omit them. Aborting publish.`);
+    process.exit(1);
+  }
+  console.log(`  ✓ tarball contains ${files.length} files, all required entry files present`);
+  return true;
+}
+
 function run() {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(ROOT, "package.json"), "utf-8")
@@ -61,6 +88,7 @@ function run() {
   }
 
   console.log("[2/2] Publishing main package...\n");
+  verifyMainPackage();
   execSync(`npm publish --access public --tag ${tag} --registry ${REGISTRY}`, {
     cwd: ROOT,
     stdio: "inherit",
@@ -74,4 +102,8 @@ function run() {
   console.log(`==========================================\n`);
 }
 
-run();
+if (require.main === module) {
+  run();
+}
+
+module.exports = { verifyMainPackage };
