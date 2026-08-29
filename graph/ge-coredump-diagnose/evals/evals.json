@@ -1,0 +1,167 @@
+{
+  "skill_name": "ge-coredump-diagnose",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "缺少完整 backtrace 时停止诊断",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "GE 进程发生 SIGSEGV，但我只有 core 文件路径，没有完整的 all-thread backtrace。请直接判断根因。",
+      "expected_output": "应说明完整 backtrace 是 P0 材料，当前不能进入确定性源码诊断，应先要求采集所有线程的 backtrace 和信号现场。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "backtrace"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "有堆栈但没有匹配源码时降级",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我有完整的 GE 崩溃堆栈和 SIGABRT 信息，但没有匹配的二进制符号和源码，应该如何分析？",
+      "expected_output": "应允许进行崩溃线程和栈顶函数的初步判断，但不能编造源码行号或确定根因，并应要求补充匹配的二进制、debug symbols 和源码版本。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "源码"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "GE 崩溃与外部模块边界判定",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "backtrace 中同时出现 GE、runtime 和驱动库帧，如何判断是否进入 GE coredump 诊断？",
+      "expected_output": "应按栈顶或最近的非标准库帧判断 GE 纳入标准；满足条件时进入 GE 分析，但不主动展开外部模块源码，只将其作为上下文和边界依据。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GE"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "崩溃点在算子 kernel 时不纳入 GE 诊断并指路",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "训练进程 coredump，backtrace 栈顶帧是 AscendC 算子 kernel 实现，往下几层出现了 libge_runner.so 的帧，日志里也有 GE 的 GraphId 打印。请做 GE coredump 诊断。",
+      "expected_output": "应按纳入标准从栈顶向下忽略标准库帧后取最近的非标准库帧判断：栈顶明确属于 AscendC 算子 kernel，不进入 GE 源码定位；堆栈深处和日志中的 GE 字样不改变判定；应给出指路（如转算子崩溃诊断 ops/ascendc-crash-debug），不能只说不归 GE 管。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "算子"
+        },
+        {
+          "type": "contains",
+          "pattern": "栈顶"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "无任何 GE 信号的 coredump 不触发诊断",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "NPU 进程 coredump 了，帮我看下根因。",
+      "expected_output": "归属不明且无 GE 强信号时不进入 GE coredump 诊断；应提示用户补充 backtrace（含库名/命名空间信息）后再判断崩溃归属，不做任何源码级推测。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "backtrace"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "崩溃点在 runtime 时不纳入 GE 诊断并指路",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "推理进程 SIGSEGV，backtrace 栈顶帧是 aclrtSynchronizeStream，属于 libascendcl.so，往下是 libruntime.so 的帧，整个堆栈没有任何 GE 库帧。帮我做 GE coredump 诊断。",
+      "expected_output": "应按纳入标准判断：栈顶及最近非标准库帧明确属于 runtime（libascendcl/libruntime），不满足 GE 纳入标准，不进入 GE 源码定位；应给出指路（转 runtime 侧诊断），不能只说不归 GE 管。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "runtime"
+        },
+        {
+          "type": "contains",
+          "pattern": "栈顶"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "崩溃点在 HCCL 时不纳入 GE 诊断并指路",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "8 卡训练跑到 allreduce 时进程被 SIGABRT 终止，backtrace 栈顶帧在 libhccl.so 里，用户日志里打印过 InitGraph 以及 GraphId。请分析是不是 GE 的问题。",
+      "expected_output": "应判断栈顶最近非标准库帧明确属于 HCCL，不满足 GE 纳入标准；日志中的 GE 字样（InitGraph/GraphId）只是运行上下文，不改变归属判定；应给出指路（转 HCCL/通信库侧诊断），不能武断判定为 GE 问题。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "HCCL"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "崩溃点在用户应用代码时不纳入 GE 诊断",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我自己写的 C++ 推理程序 coredump 了，gdb 显示崩溃帧是 main 后第 3 层的 MyClass::Preprocess，栈里只有我自己的代码和 libstdc++/libc 帧。请做 GE coredump 诊断定位根因。",
+      "expected_output": "应判断栈顶最近非标准库帧明确属于用户应用代码，不满足 GE 纳入标准，不进入 GE 源码定位；应判定责任边界在用户应用侧，不做任何 GE 相关推测。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "用户"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "非昇腾环境的崩溃不纳入 GE 诊断",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我们 x86 服务器上的 nginx 进程段错误了，core 文件和 gdb backtrace 都有，帮我定位下根因。",
+      "expected_output": "应明确该崩溃与昇腾 GE/NPU 无关，不在本 skill 诊断范围内，不进入 GE 诊断流程，也不做源码级推测；可建议用通用 gdb/coredump 分析方法处理。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GE"
+        }
+      ]
+    }
+  ]
+}
