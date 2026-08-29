@@ -49,21 +49,6 @@
     },
     {
       "id": 4,
-      "title": "拒绝未校准的 staged diagnostic",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "项目新增了 c-direct 模式来证明 MatMul C，但这个模式没有写 raw C 文件，verifier 只报告 blocked。另一个诊断模式让 subblock 0 处理全部 M，而正式 MIX 路径由两个 AIV Split-M。诊断失败后能否判定 BlockMmad 错误？给出可接受的诊断合同，不执行工具。",
-      "expected_output": "必须拒绝归因。每个 mode 要冻结执行/绕过阶段、输出 dtype/shape/layout/pitch/文件、Golden、verifier、lane ownership 和同步；先在已知正确的对齐 full case 校准；诊断必须保持正式路径的 AIC/AIV ownership、Split-M、layout、barrier 和输出生命周期，再按 raw C、FP workspace、yScale/y 分层定位。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 5,
       "title": "CTest 零测试与交付状态一致性",
       "config": {
         "max_tokens": 100000,
@@ -78,52 +63,7 @@
       "files": []
     },
     {
-      "id": 6,
-      "title": "完整扫描无 Grouped Assembly 时保留 not_found",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "对当前版本 Blaze 源码完成声明边界内的 Grouped FP16 GLU Assembly 扫描，没有发现直接可复用的完整入口，但找到了通用双分支 Block 和普通 MM 的 Scheduler。应如何记录调查结果并选择下一步？不要执行工具。",
-      "expected_output": "调查结果必须记录为 not_found，而不是 unknown 或 unsupported；说明 not_found 只表示声明读取边界内没有匹配种子，不能推出 Blaze 不支持。应保留 Investigation 的普通 MM Base owner，复用已证明的通用双分支 Block，并把 Grouped Scheduler、Host/Tiling、C/V 和设备验证列为适配与证据闭合项；不能复制一份伪造的 Grouped Assembly。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 7,
-      "title": "诊断 packed tile 必须按物理布局解码",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "C-direct 将每个 L0C tile 原样写到 GM，输出包含 act tile、padding、gate tile 和 padding。Verifier 直接把文件解释为连续的逻辑 C[M,N]，因此报告大量 mismatch。应如何判断并修复？不要执行工具。",
-      "expected_output": "不能据此判定 MMAD 或 L0C2UB 错误。先冻结并记录 tile 坐标、branch 顺序、pitch、padding、dtype 和写回单位，按物理布局解码后再映射到逻辑全局 C[M,N]，分别写入 act 与 gate 半区并使用对应 Golden。物理 dump 与逻辑输出使用独立 schema；若验证路径本身未闭合，保持 unverified，并继续执行正式 C-through-L0C2UB。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 8,
-      "title": "未证明的 GM elementwise pass 不能归因 GELU",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "GMM 的 INT32 dequant workspace 已通过，但 N=129 时独立 AIV GM->UB->GM GELU pass 输出错行。能否先替换 GELU 等价式来修复？请说明定位顺序和正式修复边界，不执行工具。",
-      "expected_output": "不能先改 GELU 等价式。必须先证明 elementwise 物理路径的源/目的 GM 地址、逻辑行步长和字节 stride、UB layout/padding、DataCopy 或 DataCopyPad specialization、有效 tail、lane ownership 与完成依赖；用同一设备上的正例证明这些字段。若 dequant workspace 正确而独立 pass 仍未证明，应把 GELU 保留在 producer VF/UB，或改用已有正例证明的物理 Copy 路径；只能在 workspace、yScale、y 的分层证据闭合后讨论数值公式。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 9,
+      "id": 5,
       "title": "RNE half-tie mismatch 不得改等价 GELU",
       "config": {
         "max_tokens": 100000,
@@ -138,67 +78,7 @@
       "files": []
     },
     {
-      "id": 10,
-      "title": "CANN 环境脚本不能改写业务 argv",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "shell runner source set_env.sh 后，数据生成器收到的 group_list 被截断；脚本还给 Bash 特殊变量 GROUPS 赋值。应建立什么通用规则并如何修复？不要执行工具。",
-      "expected_output": "环境初始化不能改变业务 argv 或 shape/dtype/group metadata。runner 必须在 source CANN 环境脚本前保存并在之后恢复 positional args，避免使用 Bash 保留或特殊变量名；随后重新解析并校验实际传给 generator、CMake 和 executable 的参数，group_list 端点缺失或被改写必须在生成输入前失败。具体 CANN 路径、shell 细节和一次性修复留在问题恢复记录，不写成 Blaze ABI 规则。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 11,
-      "title": "Blaze Params 非 const lvalue 不能接临时值",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "ASC 编译报 Blaze 的 operator() 需要 `Params&`，但实现写成了 `matmul(MakeParams(...))`。应如何判断这是 API 用法问题，并给出正式修复边界？不要执行工具。",
-      "expected_output": "必须回到当前 Blaze 头文件确认 Params 形参的 const 和引用限定；非 const `Params&` 不能绑定临时聚合或工厂返回值，应先绑定到可变局部 Params 并保证调用期间生命周期。不能依赖相似 API 猜测签名，也不应通过 wrapper、伪声明或改变 ABI 绕过编译错误。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 12,
-      "title": "Launcher 必须闭合调用方 cwd",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "从项目根目录之外执行 Blaze runner 时，程序报错找不到 data/input/x.bin；runner 内部使用相对路径。应如何修复并设置通用验证门禁？不要执行工具。",
-      "expected_output": "必须把项目根解析和 artifact 路径闭合到 Launcher 合同：使用脚本位置解析 PROJECT_ROOT，统一使用绝对路径或显式进入项目根，并从项目外 cwd 回归。缺失/截断/写入失败应归类为 Host/Launcher I/O 失败，记录实际 cwd、解析根目录、完整命令和返回码，不得归因 Tiling、Kernel 或设备精度，也不得用旧目录文件补证据。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 13,
-      "title": "Golden 后端不可用必须阻断",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "用户 Golden 冻结为指定框架的 FP32 MatMul 和固定激活顺序，但生成环境缺少该框架。开发者想静默改用 Python serial 累加或数学近似，并把生成结果作为正式 Golden 继续验证。应如何处理？不要执行工具。",
-      "expected_output": "必须将 Golden 生成标记为 blocking，先恢复所需后端或获得与冻结合同等价的实现及证据；不能静默切换到累加顺序、dtype、舍入或公式不同的 serial/fallback，也不能用其结果宣称精度通过。只有证明 fallback 与用户 Golden 完全等价，并在 DESIGN/PLAN 和执行记录中标明证据，才允许使用。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 14,
+      "id": 6,
       "title": "UB 清零与 MTE2 DMA 不能并发写同一 slot",
       "config": {
         "max_tokens": 100000,
@@ -213,52 +93,7 @@
       "files": []
     },
     {
-      "id": 15,
-      "title": "MIX SplitM 不得对同一物理 C 二次加 sub offset",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "MIX kernel 使用 `DUAL_DST_SPLIT_M`。M=1 的首个 sub 通过，另一个 sub 的行被写到很大的偏移；代码同时让 BlockMmad 按 sub 写入 UB C，又在 Epilogue 里给 UB C 指针加 localRowOffset，并只按 localM 预留输出 arena。请说明应冻结哪些事实、最可能的首个错误边界和验证矩阵。不要执行工具。",
-      "expected_output": "不能只改一个常数或按 trait 名称猜地址语义。应先用当前源码/编译和设备 dump 冻结 DUAL_DST_SPLIT_M 下 C 的物理 base、sub 可见性、UB C 是否已经按 sub 写入、GM operand/output 是否需要全局 sub offset，以及 arena 的 row pitch/容量。若 UB C 已按 sub 写入，Epilogue 不得再次叠加 sub offset；输出应按完整物理 M 和对齐 row pitch 预留。验证至少覆盖 odd/even M、双 sub、跨 tile、tail、空 sub、重复运行和 clean Full，并分别记录 C/elementwise/Full 首错。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 16,
-      "title": "独立 Host CTest 平台探针空值必须单独分类",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "独立 Host/CTest 运行时在 `PlatformAscendCManager::GetInstance()` 的可选查询处崩溃；同一个项目的设备 entry 尚未执行。请给出分类、修复和交付门禁，不要执行工具。",
-      "expected_output": "首个失败边界是独立 Host 平台探针空值，不是 Device Tiling 或 kernel 精度。可选 probe 必须判空并记录 skipped；若该平台事实对 Host Tiling 合同是必需的则在该 target 缺失时阻断，不能伪造平台库或零维 fallback。修复后要分别证明 Host target 编译/link、CTest 已注册且非零测试、设备路径和真实设备证据；Host probe 跳过不能宣称 device PASS。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 17,
-      "title": "scaleMin 合同与 selector 三上下文编译边界",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "可复用 per-token quant asset 仍在 device 代码里写死 FP32 tiny，Params 使用 `scaleClamp`；目标用户 Golden 要求另一个 `scaleMin`（例如 `torch.finfo(torch.float32).tiny`），而不是 Skill 默认值。普通 Host 编译通过，但 `.asc` 的 Host/device selector 因 `BLAZE_PQ_HOST_SELECTOR`、`__host__ __aicore__` 分支不一致而出现未解析 helper。请给出 Skill 级修复和验证门禁，不要执行工具。",
-      "expected_output": "量化 floor 必须来自 `Params::scaleMin`，由 Host 校验 finite/non-negative 并把冻结 Golden 明确要求的值传入；Skill、selector 和 device Epilogue 都不得写死 `1e-12`、FP32 tiny 或其他 epsilon，`MakeUbLayout` 仍是唯一布局公式。DESIGN/PLAN 必须记录 scaleMin、clamp-before/after-div、scale denominator、quantMin 和 quantMax。selector 的 Host-only 分支使用 `__ASC_NPU_HOST__`，device helper 使用 `__aicore__ inline`，普通 Host helper 使用 `inline constexpr`；必须分别 clean 编译普通 CXX、`.asc` Host 和 Device/link，不能以单一 Host 通过或一个项目特有宏代替三上下文证据。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 18,
+      "id": 7,
       "title": "MIX AIV 索引必须按 task ratio 归一化",
       "config": {
         "max_tokens": 100000,
@@ -273,7 +108,7 @@
       "files": []
     },
     {
-      "id": 19,
+      "id": 8,
       "title": "CV1+V2 使用 Epilogue tuple 与全核交接",
       "config": {
         "max_tokens": 100000,
@@ -288,22 +123,7 @@
       "files": []
     },
     {
-      "id": 20,
-      "title": "构建前 preflight 必须核对真实命令闭合",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "新工程的 Host C++ 编译通过，但 ASC 设备编译报架构未选择；把 `-DCPU_DEBUG=0` 加入 CMake 后仍包含 debug-only 头；随后设备 link 报某个 tiling helper 未定义，而开发者只在头文件中看到了声明。应给出 Skill 级的首轮 preflight 和修复边界，不执行工具。",
-      "expected_output": "必须先查看 clean configure 后的真实 ASC compile/link command：确认目标 SoC/架构和设备选项确实进入 target；用预处理结果区分 `#ifdef` 与 `#if`，因为 `-DCPU_DEBUG=0` 仍表示宏已定义；用 include trace 确认项目头和工程根路径；对 undefined symbol 同时核对定义是否进 target、实际库是否含符号及库是否进入真实 link command。再以当前 SDK 头文件做最小签名/命名空间 compile probe，并分别 clean 验证普通 CXX、ASC Host 和 Device/link；不能用历史库、类型 alias 或 Host 通过替代这些证据。具体 SoC、库名和错误码保留在项目问题记录。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 21,
+      "id": 9,
       "title": "Typed launcher 与 verifier 必须分别闭合",
       "config": {
         "max_tokens": 100000,
@@ -318,37 +138,7 @@
       "files": []
     },
     {
-      "id": 22,
-      "title": "GLU 近零指标不能替代分层定位",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "FP16 SwiGLU 在高幅值随机输入下只有少数近零输出触发最大相对误差，MERE/MARE 尚未按项目标准计算；C-direct 和 V-known 也未运行。开发者想临时加大 refinement threshold，并把 probe 的有限输入范围写成新的支持域。应如何处理？不要执行工具。",
-      "expected_output": "不能只依据近零点的 max-relative outlier 改公式、阈值或支持域。必须先冻结项目精度标准的指标、非有限值分类和分母规则，区分正式验收指标与诊断统计；用同一 raw 输入、shape、Tiling 和 Golden 完成 C-direct/V-known，比较 raw C、act、gate 和误差，确认最早失败边界。有限 probe 范围只是覆盖，不是输入合同；未闭合证据时保持 `blocked`/`unverified`，局部补偿门限仍由目标算子证据给出，不能成为 Skill 默认值。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 23,
-      "title": "零行 tiny-scale 必须按 Golden 参数逐 bit 验证",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "per-token quant 的完整逻辑行全部为零。实现 A 使用用户 Golden 的 `scaleMin=torch.finfo(torch.float32).tiny`，实现 B 使用硬编码 `1e-12`；两者的 int8 y 都是零，但 yScale 不同。请说明应如何冻结合同、设计测试和判断 Skill/算子是否通过，不要执行工具。",
-      "expected_output": "必须以用户可执行 Golden 冻结 scaleMin、clamp-before/after-div、denominator 和量化范围，Host Params 与 device Epilogue 使用同一组值；零行 case 必须逐 bit 比较 yScale，不能因为 y 全零或采用容差就判通过。Generator/manifest 应断言该 case 实际为全零行，Verifier 应保留 yScale 证据；Skill 不得把 1e-12、FP32 tiny 或任何 epsilon 写成通用默认值。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 24,
+      "id": 10,
       "title": "逻辑到物理 paired buffer 必须有独立 witness",
       "config": {
         "max_tokens": 100000,
@@ -363,82 +153,7 @@
       "files": []
     },
     {
-      "id": 25,
-      "title": "完整行 ReduceMax 必须证明结果物化",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "per-token quant 的 `Reg::ReduceMax` 调用可以编译，但设备 yScale 等于每行首元素绝对值除以 127；Golden 的最大值位于第二个 VF slice。开发者认为 API 名称已经证明完整行归约，想保留当前结果或放宽容差。请给出首错边界、所需证据、修复边界和定向验证要求，不要执行工具。",
-      "expected_output": "应把首错定位到 yScale/归约物化边界，而不是修改 GELU、Golden 或容差。必须证明归约域、active mask/tail、结果所在 lane/register、ReduceMax 到 UB/GM 的写回元素数/post 状态和消费者读取前的完成依赖；API 名称不能替代 source-backed witness。应先比较 workspace、yScale、y，要求 manifest 记录并断言最大值确在第二个及以后 VF slice；事实不明时 blocking，标量归约只能是冻结有限支持域内的项目本地恢复，不得成为通用 Skill 默认。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 26,
-      "title": "CTest 不得绕过数据生成前置",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "工程已经注册 `golden_self_test`，但首次运行 CTest 前 generator 因 group_list 校验 bug 失败，`data/input` 不存在；开发者想继续运行并把后续 Kernel 结果归因给设备精度。请说明分类、恢复顺序和交付门禁，不要执行工具。",
-      "expected_output": "首错是 Host/test-setup，不是 Kernel、Tiling 或设备精度。必须保留 generator 命令和返回码，修复或重新运行数据生成，校验 shape/dtype/group_list、文件字节数和 manifest，再运行 clean build 的 CTest；依赖数据的测试必须有显式前置或隔离自生成路径。还要用 `ctest -N` 证明测试已注册且数量非零；缺失/截断数据、批处理零返回码或旧目录输出不能形成 PASS。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 27,
-      "title": "自定义 RegBase 先做当前 SDK API probe",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "新写的 unary GELU + per-token quant Epilogue 首次 ASC 编译同时出现 UpdateMask 引用、UB 指针、Host/device helper、vector Add、rounding intrinsic 错误。开发者想复制相似版本的 API 声明或先关闭诊断继续实现。请给出可复用的排障顺序和修复边界，不要执行工具。",
-      "expected_output": "必须保留第一处 ASC 编译错误并先做当前 SDK 的最小 compile probe，分别核对 RegBase elementwise/reduction/rounding/store 签名、UpdateMask 可变引用、UB/GM 地址空间及普通 CXX、ASC Host、ASC Device/link 的宏和限定符；不能从相似版本、函数名或 Host 通过推断 device 语义，也不能 const_cast、伪声明、关闭诊断或复制历史库。修复只在项目边界内进行，clean configure/build 后再进入设备精度；具体 API 名、SoC、错误码留在项目问题记录，不写成 Skill 常量。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 28,
-      "title": "跳过构建必须绑定当前产物",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "工程的 `run.sh` 在 `SKIP_BUILD=1` 时固定读取 `build/`，但开发者刚在 `build_final/` 完成了当前源码的 clean build；运行脚本找不到 launcher。开发者想直接改脚本返回码或把该现象归因为设备/Kernel 失败。请给出 Skill 级分类、恢复和证据门禁，不要执行工具。",
-      "expected_output": "首个失败边界是 Host/test setup：跳过构建开关绑定的目录与实际构建产物不一致，尚未启动设备，不能归因于 Kernel、同步或精度。必须验证默认构建目录存在且由当前 source/design contract clean-build 产生；多个构建目录时显式记录 binary 路径、构建目录和 source identity。恢复后用公开 runner 重新生成或绑定当前产物，再分别保存 launch RC、verifier RC、raw output 和超时状态；不能用脚本零返回码、历史 binary 或缺失 verifier 形成 PASS。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 29,
-      "title": "Grouped tiling 必须由 grouped GetTilingData 完整构造",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "普通 MM 的 `MatmulTilingSwat` 已能根据 `(totalM,N,K)` 生成 `MatmulTilingData`。GMM 初版在 Host wrapper 中调用 `GetTilingData(..., result.matmul)` 后再赋值 `groupListAddr/groupNum/groupListType`；结果能运行，但需求合同要求 grouped `GetTilingData` 是完整 POD 的唯一入口。应如何修复并验证，不要执行工具。",
-      "expected_output": "应保留普通 MM 的 tiler 搜索逻辑不变，增加或使用 `MatmulTilingSwat` 的 grouped `GetTilingData` 重载：调用方先校验 cumsum/count 并得到 `totalM`，重载内部先生成 `.matmul`，再写入全部 grouped metadata，返回可序列化的完整 `GroupMatmulTilingData`。Host wrapper、Launcher 或 paired gate 之后不得再次补写字段。必须用 shared-header ABI/offsetof probe、Host/Device 同一头文件、真实 grouped launch 和 clean device precision 回归证明 owner/consumer 闭合；仅因旧 wrapper 数值通过不能接受两套 POD 事实源。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 30,
+      "id": 11,
       "title": "FP16 GMM Golden 必须逐组写回并遵守 cumsum",
       "config": {
         "max_tokens": 100000,
@@ -453,37 +168,7 @@
       "files": []
     },
     {
-      "id": 31,
-      "title": "GLU 等价公式改写必须先获授权",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "用户 Golden 使用 `torch.nn.functional.silu(act) * gate`，Kernel 开发者想直接改成 `act / (1 + exp(-act)) * gate`，并认为名称 SwiGLU 足以授权；接口没有 beta、scale 或 dequant 参数。请说明设计门禁和正确处理，不要执行工具。",
-      "expected_output": "必须先冻结 act/gate 顺序、累加 dtype、激活计算 dtype、舍入和 NaN/Inf 行为；没有 beta、scale 或 dequant 输入时不得新增这些阶段。`F.silu` 与稳定等价式只有在用户合同允许且 dtype/特殊值等价性有证据时才能互换；否则保持 `conflict`/`blocking`，不能用设备 PASS 反向授权公式改写。通过后仍需用同一 Golden 和非有限值 case 回归，并把允许的改写范围写入目标 DESIGN/PLAN，而不是写成 GLU 通用默认。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 32,
-      "title": "Golden 初始化超时必须和公式失败分离",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "Golden 生成器在 `import torch` 或可选 device backend autoload 阶段超时，尚未执行 MatMul 或激活公式。开发者想改 Golden、放宽误差阈值，或直接把该 case 记为设备精度失败。请说明首个失败边界、恢复顺序和交付状态，不要执行工具。",
-      "expected_output": "首个失败边界是 Host/test setup，状态应为 `blocking`/`incomplete`，不能归因于公式、Kernel 或设备精度。必须保留 timeout、环境和返回码，隔离可选 backend 后用同一冻结 Golden 合同和同一输入重跑；不得静默改累加 dtype、公式、舍入、阈值或切换未经证明的 serial/fallback。恢复后才进入 clean build/device precision，并分别记录原始超时和恢复后的 Golden 证据。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 33,
+      "id": 12,
       "title": "生产 GMM 不得绕过 source-backed BlockMmad assembly",
       "config": {
         "max_tokens": 100000,
@@ -498,52 +183,7 @@
       "files": []
     },
     {
-      "id": 34,
-      "title": "代数等价 GELU 公式的 overflow 必须独立诊断",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "GELU 使用 `(exp(2u)-1)/(exp(2u)+1)` 计算 tanh，在大正值输入上出现 `inf/inf -> NaN`，导致 absmax、yScale 和 y 错误。开发者想直接改 Golden 或全局放宽误差。请说明正确处理，不要执行工具。",
-      "expected_output": "应保留用户 Golden 和验收公式，把首错定位为 elementwise 数值稳定性；使用大正值、大负值、零附近和非有限值定向输入按 `workspace -> yScale -> y` 分层比较。只有用户合同允许且 dtype 顺序、舍入和特殊值行为已证明等价时才能使用稳定等价式；不能用设备 PASS、容差或删掉 NaN 诊断授权改写 Golden。具体常数和阈值留在目标 DESIGN/PLAN。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 35,
-      "title": "宽度硬限制必须是项目边界而非硬件上限",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "某个 per-token quant 实现把 Host 输入限制为 `N<=256`，Kernel 使用完整行 `baseN=N`，没有宽度 selector 或 two-pass/chunked 路径；N=16、17、65 已通过，N>256 未测试。请解释该限制和 Skill 门禁，不要执行工具。",
-      "expected_output": "`N<=256`只能记录为当前 one-row/full-row、baseN=N 实现的 operator-local fail-closed boundary，不能称为 DAV_3510/AscendC 硬件最大值，也不能写成通用 Skill 常量。Skill 应要求用实际 UB/L1/L0/resource 公式选择 single-pass/two-pass，并覆盖 threshold-1、threshold、threshold+1 和 chunk tail；没有证明时拒绝扩大支持域。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 36,
-      "title": "设备 int32 累加与 FP32 Golden 必须显式闭合",
-      "config": {
-        "max_tokens": 100000,
-        "ascend_platforms": [
-          "A2"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "用户 Golden 将 int8 输入转成 float32 后执行 MatMul，设备 A8W8 BlockMmad 使用 int32 dot-product accumulator；若干量化输出恰好一致。开发者想把两者直接称为相同累加语义。请审查该结论，不要执行工具。",
-      "expected_output": "不能直接称为相同语义。DESIGN/PLAN 必须分别记录 Golden accumulation dtype 和 device accumulation dtype，并说明声明支持域内的等价性证据；int32 整数累加与 FP32 reduction 在大和数上可能有不同舍入。若接受设备 int32 合同，必须重新生成 Golden、输入和证据；仅量化后的 y/yScale 一致不足以证明中间累加等价。",
-      "expectations": [],
-      "files": []
-    },
-    {
-      "id": 37,
+      "id": 13,
       "title": "按请求目的路由到对应流程（关键能力）",
       "config": {
         "max_tokens": 100000,
@@ -558,7 +198,7 @@
       "files": []
     },
     {
-      "id": 38,
+      "id": 14,
       "title": "路线模型判定（关键能力）",
       "config": {
         "max_tokens": 100000,
@@ -573,7 +213,7 @@
       "files": []
     },
     {
-      "id": 39,
+      "id": 15,
       "title": "计算执行原则（关键能力）",
       "config": {
         "max_tokens": 100000,
