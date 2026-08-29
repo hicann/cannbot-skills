@@ -1,0 +1,162 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "判断是否是动态shape图",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "如何判断推荐模型profiling中是否含动态shape？",
+      "expected_output": "回复应说明两条判断路径：1) 从 op_summary*.csv 的 OP State 列检查是否含 dynamic 关键字；2) 从 msprof_*.json 检查是否含 ModelExecute 且有 infershape 函数或 aclnn 接口调用。两条路径任一命中即表示含动态 shape。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "OP State",
+          "description": "回复中提到了 OP State"
+        },
+        {
+          "type": "contains",
+          "pattern": "dynamic",
+          "description": "回复中提到了 dynamic"
+        },
+        {
+          "type": "contains",
+          "pattern": "op_summary",
+          "description": "回复中提到了 op_summary"
+        },
+        {
+          "type": "contains",
+          "pattern": "ModelExecute",
+          "description": "回复中提到了 ModelExecute"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "判断是否已开启自动融合",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "如何判断是否已开启自动融合？",
+      "expected_output": "回复应说明检测 *op_statistic*.csv 中 OP Type 是否含 autofuse_、autofused_、triton_per_fused_、triton_poi_fused_、triton_unk_fused_、dvm_ 前缀。有则表示已开启对应融合模式（AutoFuse/Triton/DVM），无则提示需结合 Profiling 进一步分析是否需要开启。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "op_statistic",
+          "description": "回复中提到了 op_statistic"
+        },
+        {
+          "type": "contains",
+          "pattern": "autofuse_",
+          "description": "回复中提到了 autofuse_ 前缀"
+        },
+        {
+          "type": "contains",
+          "pattern": "triton",
+          "description": "回复中提到了 triton 融合前缀"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "分析profiling的关键流程",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "分析profiling的关键流程是什么？",
+      "expected_output": "回复应覆盖以下关键流程：1) 识别 GE Profiling 还是 PyTorch Profiling；2) 计算 H2D 耗时（api_statistic InputCopy 或 msprof memcpy）、ModelExecute 耗时（step_trace 或 api_statistic ModelExecute）、D2H 耗时（OutputCopy 或 memcpy）；3) 从 op_statistic/op_summary 计算算子耗时和与迭代次数；4) 首次编译迭代排除（5x 阈值）；5) 无 step_trace 时迭代次数推断（sync count、Infer ID、Step Id、Op Name 众数）；6) 输出结构化报告含核心指标汇总表、算子分布、Top 算子、问题算子、Host 耗时分析。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "H2D",
+          "description": "回复中提到了 H2D 耗时"
+        },
+        {
+          "type": "contains",
+          "pattern": "ModelExecute",
+          "description": "回复中提到了 ModelExecute"
+        },
+        {
+          "type": "contains",
+          "pattern": "D2H",
+          "description": "回复中提到了 D2H 耗时"
+        },
+        {
+          "type": "contains",
+          "pattern": "step_trace",
+          "description": "回复中提到了 step_trace"
+        },
+        {
+          "type": "contains",
+          "pattern": "首次编译",
+          "description": "回复中提到了首次编译迭代排除"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "分析Dump图的关键点",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "分析Dump图的关键点是什么？",
+      "expected_output": "回复应覆盖以下关键点：1) 自动识别文件格式（.pbtxt 纯文本解析、.py AST 解析）；2) 提取节点信息（name、op_type、input/output、shape/dtype）；3) 重复子图分析使用 op_type 序列 n-gram 比较；4) 排序策略：有 Profiling 按总耗时降序、无 Profiling 按算子数×重复次数降序；5) Profiling 与图节点耗时匹配优先级（精确匹配→模糊匹配→aclnn 前缀→op_type→前后关联→shape）；6) 结合 Profiling 分析 Top 重复子图给出融合 pass/融合算子建议。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "pbtxt",
+          "description": "回复中提到了 pbtxt"
+        },
+        {
+          "type": "contains",
+          "pattern": "重复子图",
+          "description": "回复中提到了重复子图分析"
+        },
+        {
+          "type": "contains",
+          "pattern": "n-gram",
+          "description": "回复中提到了 n-gram 比较"
+        },
+        {
+          "type": "contains",
+          "pattern": "排序",
+          "description": "回复中提到了排序策略"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
+    }
+  ],
+  "skill_name": "model-recommend-analysis"
+}
