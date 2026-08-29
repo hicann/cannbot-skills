@@ -617,6 +617,73 @@ Step 4: 如需调整 Cast 策略 → 执行完整迭代（迭代上限 3 次）:
 
 ---
 
+### 🛑 步骤 0-F: Rope 类算子转译要点（命中旋转位置编码特征时强制执行）
+
+**触发条件**（步骤 0-A 读取 model.py forward() 后一并检查）：算子为旋转位置编码 /
+RoPE / rotary / rope / 位置编码融合类，包括：
+- 按奇偶/半切拆分重组的旋转（interleave / half / cat）
+- 与 norm（RMSNorm）或 cache（KV cache 写回）融合的复合 Rope
+- 关键词：rope、rotary_position_embedding、apply_rotary_pos_emb、
+  kv_rms_norm_rope_cache（kv_rmsnorm_rope_cache）、RopeWithSinCosCache、
+  inplace_partial_rotary_mul
+
+如果命中，必须完成以下 checklist：
+
+```
+0-F.1 🛑 先确认旋转约定（不确认就转译 → 精度必挂）:
+    按参考实现确定以下之一，并在转译全程保持一致：
+    - interleave：按奇偶位 x[..., ::2] / x[..., 1::2]
+    - half：按半切 x[..., :D/2] / x[..., D/2:]（first/second）
+    - cat 约定（kv_rms_norm_rope_cache）：p1=cat(x_even,x_odd)、
+      p2=cat(-x_odd,x_even)、k_rope=p1*cos+p2*sin
+    - neox / 非 neox 风格必须与参考实现一致
+
+0-F.2 🛑 kernel 内布局零重排（禁止 host 重排）:
+    - 3D 源输入 (N,H,head_size)（RopeWithSinCosCache 等）→ 每 token 整头
+      whole-head 拷贝、UB 内半切旋转、一次整头写回；hs>rd 尾部直通；
+      禁止按 hs==rd 强转 4D（实测 2.52x → 1.71x 教训）
+    - 天然 4D 交错 (num_tokens,1,2,half)（apply_rotary_pos_emb 类）→
+      kernel 内零重排
+    - kv_rms_norm_rope_cache 是 rms-first：kv[..., :rms]=RMSNorm 部分、
+      kv[..., rms:]=rope 部分
+    - 复合算子（RMSNorm+rope / rope+cache 写回）按行切分，VEC_NUM=1；
+      禁止 VEC_NUM>1（vid 与行号映射错位 → 精度 bug）
+    - F.pad/contiguous/permute 等 host 全量搬运必须移入 kernel
+
+0-F.3 🛑 fp16 一律 fp32 中间计算后 cast 回（max_diff≈0.004，禁止全程 half）
+
+0-F.4 🛑 CANN 内置 aclnn 参数坑（C wrapper 直调时）:
+    - aclnnKvRmsNormRopeCache 的 cos/sin 第一维必须等于 B
+      （[B,N,S,Dk] 或 [B,1,1,Dk]），[1,...] 会 tiling 报错 561002
+      （cos or sin shape is invalid）
+    - V1 结果写回 k_cache/ckv_cache（k_rope/c_kv 独立输出可能为 None）
+    - aclnnApplyRotaryPosEmbV2 可 C wrapper 直调
+    - 禁止 torch_npu Python 绑定：会分解出 Cast/BroadcastTo/ZerosLike 子 op，
+      msprof 抓到子 op 使 HW 时间严重偏低（kv_rms_norm_rope_cache
+      0.46x → C wrapper 修正 1.17x）
+
+0-F.5 🛑 msprof 对比纪律（性能验证）:
+    - HW 必须 C wrapper 直调 aclnn（ctypes CDLL 两段式：GetWorkspaceSize →
+      launch）绕过 torch_npu
+    - 必须设置 argtypes；用 torch.empty 非 torch.zeros；循环 launch ≥20
+      （warm-up 10 + 测量 10）
+    - 验证 OpBasicInfo.csv 的 Op Name 是 fused kernel 而非 Cast/ZerosLike；
+      先核对 Freq=1800/1800；验证 BlockDim；每 case 独立 TILELANG_CACHE_DIR
+      与输出目录
+
+0-F.6 🛑 精度验证:
+    - allclose(rtol=1e-5, atol=1e-6)，不用 torch.equal
+    - 覆盖 head_size=256 边界（rotary 切片按 head 维 view(N,H,hs)[:,:,:rd]）
+    - partial rotary 验证 slice 外未被修改；带 cache 算子验证 cache 输出
+```
+
+**门禁规则**：
+- 命中但 0-F.1-0-F.6 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 未命中 → 跳过步骤 0-F，直接进入步骤 1
+- 禁止凭记忆或经验跳过 checklist 直接转译
+
+---
+
 ## 流程
 执行以下各步骤前，必须先完成 **步骤 0-A（如触发）、步骤 0-B、步骤 0-C（如触发）、步骤 0-D 的全部查阅**，再开始实现、验证与迭代。
 
