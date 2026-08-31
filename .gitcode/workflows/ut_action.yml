@@ -1,0 +1,76 @@
+name: ut_action
+
+on:
+  workflow_call:
+    inputs:
+      image_version:
+        required: true
+        type: string
+      ge_st_rt2:
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  JOB_ut:
+    name: UT
+    needs: []
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+          token: ${{ secrets.GIT_TOKEN }}
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/update_file_detail.txt
+            ${{ env.obs_path }}/ut.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: redis-cache
+        uses: cann/.gitcode/actions/redis-cache@master
+      -
+        name: ut_acc
+        identifier: ut
+        run: |
+          export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+          cd ${{ steps.process_checkout.outputs.path }}
+          export GE_ST_RT2=${{ inputs.ge_st_rt2 }}
+          export GIT_TARGET_BRANCH=${{ env.TARGET_BRANCH }}
+          bash ut.sh
+      -
+        name: ut_cov
+        identifier: ut_cov
+        uses: cann/.gitcode/actions/ut-cov-report@master
+        with:
+          ut_process: ${{ steps.ut.outputs.ut_process }}
+          workspace: ${{ steps.process_checkout.outputs.path }}
+          ut_type: ops-transformer
+          target_branch: ${{ env.TARGET_BRANCH }}
+          git_token: ${{ secrets.GIT_TOKEN }}
+      -
+        name: upload
+        uses: obs-upload
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          artifact-path: |
+            ${{ steps.process_checkout.outputs.path }}/coverage_*.info
+          object-prefix: ${{ env.obs_path }}/
+    if: "${{ default() }}"
+    runs-on: ["self-hosted", "arch=x64", "spec=xlarge"]
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ inputs.image_version }}

@@ -1,0 +1,90 @@
+name: compile_action
+
+on:
+  workflow_call:
+    inputs:
+      task_name:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+      ge_st_rt2:
+        required: false
+        type: string
+        default: ''
+      arch:
+        required: false
+        type: string
+        default: 'x64'
+      package_name:
+        required: false
+        type: string
+        default: ''
+      spec:
+        required: false
+        type: string
+        default: 'xlarge'
+
+jobs:
+  JOB_compile:
+    name: Compile
+    needs: []
+    steps:
+      -
+        name: Checkout
+        identifier: process_checkout
+        uses: checkout
+        with:
+          ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+          token: ${{ secrets.GIT_TOKEN }}
+      -
+        name: download
+        uses: obs-download
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          key: |
+            ${{ env.obs_path }}/pr_filelist.txt
+            ${{ env.obs_path }}/pr_filelist_mod.txt
+            ${{ env.obs_path }}/update_file_detail.txt
+            ${{ env.obs_path }}/check.sh
+          path: ${{ steps.process_checkout.outputs.path }}
+      -
+        name: AI_review
+        identifier: compile
+        uses: build-accelerate
+        with:
+          command: |
+            export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+            cd ${{ steps.process_checkout.outputs.path }}
+            export task_name=${{ inputs.task_name }}
+            export GE_ST_RT2=${{ inputs.ge_st_rt2 }}
+            export MERGE_ID=${{ env.MERGE_ID }}
+            export GIT_TARGET_BRANCH=${{ env.TARGET_BRANCH }}
+            export OS_TYPE=${{ inputs.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+            export cui_user=${{  secrets.cui_user }}
+            export cui_token=${{  secrets.cui_token }}
+            export CANNBOT_API_KEY=${{ secrets.CANNBOT_API_KEY }}
+            BuildAccelerate bash check.sh
+          AC_SERVER_IP: ${{ vars.AC_SERVER_IP }}
+      -
+        name: upload
+        uses: obs-upload
+        with:
+          endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+          bucket: "ascend-ci"
+          access-key: ${{ secrets.AK }}
+          secret-key: ${{ secrets.SK }}
+          artifact-path: |
+            ${{ steps.process_checkout.outputs.path }}/build_out/${{ inputs.package_name != '' && inputs.package_name || '*.tar.gz' }}
+          object-prefix: ${{ env.obs_path }}/
+    if: "${{ default() }}"
+    runs-on:
+      - self-hosted
+      - arch=${{ inputs.arch }}
+      - spec=${{ inputs.spec }}
+    container:
+      image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ inputs.image_version }}
