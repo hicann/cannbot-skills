@@ -120,7 +120,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "ascendc-blaze-migration", description: "AscendC Matmul 家族等价迁移到 Blaze", source: "ops" },
       { id: "ascendc-simt-best-practices", description: "SIMT 最佳实践与 API 导航", source: "ops" },
       { id: "ascendc-simt-tiling-design", description: "SIMT 算子切分设计", source: "ops" },
-      { id: "torch-ascendc-op-extension", description: "Ascend C 对接 PyTorch", source: "ops" },
+      { id: "torch-ascendc-op-extension", description: "算子对接 PyTorch（kernel 直调 / aclnn 注册双路线）", source: "ops" },
       { id: "catlass-op-design", description: "Catlass 算子设计", source: "ops" },
       { id: "catlass-op-develop", description: "Catlass 算子开发", source: "ops" },
       { id: "catlass-op-perf-tune", description: "Catlass 性能调优", source: "ops" },
