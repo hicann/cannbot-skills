@@ -18,7 +18,7 @@ CANNBot 代码检视模式适用于**Ascend C 算子代码检视**场景，采�
 
 ### 前置条件
 
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -91,6 +91,30 @@ bash init.sh project cursor
 
 ```bash
 bash init.sh global cursor
+```
+
+</details>
+
+<details>
+<summary>Codex</summary>
+
+Codex 的 Skill 与 Subagent 使用不同的发现目录：
+
+- 项目级 Skill：`.agents/skills/`
+- 项目级 Subagent：`.codex/agents/*.toml`
+- 全局 Skill：`~/.agents/skills/`
+- 全局 Subagent：`~/.codex/agents/*.toml`
+
+#### 项目级安装
+
+```bash
+bash init.sh project codex
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global codex
 ```
 
 </details>
@@ -348,6 +372,6 @@ bash init.sh --help
 
 1. 代码检视 Team 采用"主 Agent 做大脑、子 Agent 做搜查"架构，实现高效并行检视
 2. 环境搭建核心两步：克隆仓库 → 执行 init.sh（OpenCode 推荐）
-3. `opencode` / `claude` / `trae` / `cursor` / `copilot` / `codearts` 是核心交互指令
+3. `opencode` / `claude` / `trae` / `cursor` / `codex` / `copilot` / `codearts` 是核心交互指令
 4. 4 阶段工作流确保全量条例覆盖和报告质量
 5. 自动识别代码侧别，精准过滤适用条例

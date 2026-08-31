@@ -74,7 +74,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "codex", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -88,6 +88,8 @@ Examples:
   init.sh global  claude               # Global-level, Claude Code
   init.sh project trae                 # Project-level, Trae
   init.sh project cursor               # Project-level, Cursor
+  init.sh project codex                # Project-level, Codex
+  init.sh global  codex                # Global-level, Codex
   init.sh project copilot              # Project-level, Copilot
   init.sh global  copilot              # Global-level, Copilot
   init.sh project codearts             # Project-level, CodeArts
@@ -98,6 +100,8 @@ Installation paths:
   Claude:   .claude/skills/ + CLAUDE.md    (per-item symlinks auto-created)
   Trae:     .trae/skills/ + AGENTS.md      (project-level only)
   Cursor:   .cursor/skills/ + AGENTS.md    (auto-discovered)
+  Codex:    .agents/skills/ + .codex/AGENTS.md (project)
+            ~/.agents/skills/ + ~/.codex/AGENTS.md (global)
   Copilot:  .github/skills/ + AGENTS.md    (project-level)
             ~/.copilot/skills/ + AGENTS.md (global)
   CodeArts: .codeartsdoer/skills/ + AGENTS.md    (project-level)
@@ -108,6 +112,7 @@ After installation, launch directly:
   Claude:   claude
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
+  Codex:    codex
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
   CodeArts: 通过 CodeArts CLI / IDE 启动
 
@@ -167,11 +172,11 @@ for arg in "$@"; do
     case "$arg" in
         --help)                 show_help; exit 0 ;;
         global|project)         LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot|codearts) TOOL="$arg" ;;
+        opencode|claude|trae|cursor|codex|copilot|codearts) TOOL="$arg" ;;
         *)
             # First non-keyword argument is treated as the project install path.
             if [ -n "$INSTALL_PATH" ]; then
-                echo "Error: Unexpected argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, copilot, codearts, [install_path], --help."
+                echo "Error: Unexpected argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, codex, copilot, codearts, [install_path], --help."
                 exit 1
             fi
             INSTALL_PATH="$arg"
@@ -198,6 +203,8 @@ if [ "$LEVEL" = "global" ]; then
     elif [ "$TOOL" = "trae" ]; then
         echo "Error: Global installation is not supported for Trae. Use project-level instead."
         exit 1
+    elif [ "$TOOL" = "codex" ]; then
+        CONFIG_ROOT="$HOME/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$HOME/.copilot"
     elif [ "$TOOL" = "cursor" ]; then
@@ -217,6 +224,8 @@ else
             cli)    CONFIG_ROOT="$INSTALL_BASE/.traecli" ;;
             *)      CONFIG_ROOT="$INSTALL_BASE/.trae" ;;
         esac
+    elif [ "$TOOL" = "codex" ]; then
+        CONFIG_ROOT="$INSTALL_BASE/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$INSTALL_BASE/.github"
     elif [ "$TOOL" = "cursor" ]; then
@@ -229,19 +238,33 @@ else
 fi
 
 # Determine target md filename based on tool
-if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
     TARGET_MD_NAME="AGENTS.md"
 else
     TARGET_MD_NAME="CLAUDE.md"
 fi
 
 BRAND_DIR="$CONFIG_ROOT"
+# Codex discovers skills under .agents/skills (project) / ~/.agents/skills (global),
+# separate from the .codex config root. This plugin has no subagents, so only the
+# skill discovery root needs to diverge for codex.
+SKILL_DISCOVERY_ROOT="$CONFIG_ROOT/skills"
+if [ "$TOOL" = "codex" ]; then
+    if [ "$LEVEL" = "global" ]; then
+        SKILL_DISCOVERY_ROOT="$HOME/.agents/skills"
+    else
+        SKILL_DISCOVERY_ROOT="$INSTALL_BASE/.agents/skills"
+    fi
+fi
 
 show_banner
 echo "  Tool:      $TOOL"
 echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
 echo "  MD File:   $TARGET_MD_NAME"
+if [ "$TOOL" = "codex" ]; then
+    echo "  Skills:    $SKILL_DISCOVERY_ROOT"
+fi
 echo ""
 
 if [ "$TOOL" = "trae" ]; then
@@ -293,7 +316,7 @@ echo ""
 if [ "$SKILL_COUNT" -gt 0 ]; then
     echo -e "${CYAN}Skills (${SKILL_COUNT} 项)：${NC}"
     for name in $SKILLS_TO_INSTALL; do
-        target="$BRAND_DIR/skills/$name"
+        target="$SKILL_DISCOVERY_ROOT/$name"
         if [ -e "$target" ] || [ -L "$target" ]; then
             echo -e "  ${YELLOW}$name${NC}"
         else
@@ -321,7 +344,8 @@ echo ""
 
 # --- Step 1: Create directory + per-item symlinks ---
 step "[1/4] Setting up plugin directory..."
-mkdir -p "$BRAND_DIR/skills"
+mkdir -p "$SKILL_DISCOVERY_ROOT"
+mkdir -p "$CONFIG_ROOT"
 
 # Skills: per-item symlinks for all tools (claude/opencode/trae)
 # Pre-clean existing skill symlinks (only whitelist items)
@@ -329,7 +353,7 @@ for skill_entry in "$LOCAL_SKILL_ROOT"/*; do
     [ -e "$skill_entry" ] || continue
     name=$(basename "$skill_entry")
     echo "$INCLUDED_SKILLS" | grep -qw "$name" || continue
-    target="$BRAND_DIR/skills/$name"
+    target="$SKILL_DISCOVERY_ROOT/$name"
     if [ -e "$target" ] || [ -L "$target" ]; then
         rm -rf "$target"
     fi
@@ -340,13 +364,13 @@ for skill_entry in "$LOCAL_SKILL_ROOT"/*; do
     [ -e "$skill_entry" ] || continue
     name=$(basename "$skill_entry")
     echo "$INCLUDED_SKILLS" | grep -qw "$name" || continue
-    ln -sfn "$(realpath "$skill_entry")" "$BRAND_DIR/skills/$name"
+    ln -sfn "$(realpath "$skill_entry")" "$SKILL_DISCOVERY_ROOT/$name"
     skill_link_count=$((skill_link_count + 1))
 done
 ok "Skills: $skill_link_count linked"
 
 # Clean broken symlinks (left over from earlier runs / renamed entries)
-for link in "$BRAND_DIR/skills"/*; do
+for link in "$SKILL_DISCOVERY_ROOT"/*; do
     [ -L "$link" ] && [ ! -e "$link" ] && rm "$link"
 done
 echo ""
@@ -372,13 +396,13 @@ step "[2/3] Installing configuration..."
 # Project-level: install in the project directory (INSTALL_BASE) so Claude Code can discover it
 # Global-level: install in CONFIG_ROOT
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$INSTALL_BASE/AGENTS.md"
     else
         config_target="$INSTALL_BASE/CLAUDE.md"
     fi
 else
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
@@ -390,7 +414,7 @@ config_src="$PLUGIN_ROOT/AGENTS.md"
 # Skip only when source file is already at target location (same filename and same directory)
 # This only happens for OpenCode project-level when PLUGIN_ROOT = INSTALL_BASE (AGENTS.md → AGENTS.md)
 # For Claude, source is AGENTS.md but target is CLAUDE.md, so always need symlink
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$INSTALL_BASE" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -418,7 +442,7 @@ echo ""
 #   .claude/hooks/guard-baseline-paths.sh
 #   .claude/hooks/guard-config.json
 # Only Claude Code has the PreToolUse hook mechanism; other tools (opencode,
-# trae, cursor, copilot) skip this step entirely.
+# trae, cursor, codex, copilot) skip this step entirely.
 if [ "$TOOL" = "claude" ]; then
     SETTINGS_TARGET="$CONFIG_ROOT/settings.json"
     HOOK_SCRIPT="$PLUGIN_ROOT/.claude/hooks/guard-baseline-paths.sh"
@@ -492,28 +516,25 @@ step "[3/3] Running health check..."
 health_ok=true
 health_errors=""
 
-for sub in skills; do
-  target="$BRAND_DIR/$sub"
-  if [ -d "$target" ]; then
-    count=$(ls -d "$target"/* 2>/dev/null | wc -l)
-    [ "$count" -eq 0 ] && { health_errors="${health_errors}\n  ${YELLOW}⚠${NC} $sub/ is empty"; }
-  else
-    health_errors="${health_errors}\n  ${RED}✗${NC} $sub/ missing"
+if [ -d "$SKILL_DISCOVERY_ROOT" ]; then
+    count=$(ls -d "$SKILL_DISCOVERY_ROOT"/* 2>/dev/null | wc -l)
+    [ "$count" -eq 0 ] && { health_errors="${health_errors}\n  ${YELLOW}⚠${NC} skills/ is empty"; }
+else
+    health_errors="${health_errors}\n  ${RED}✗${NC} skills/ missing"
     health_ok=false
-  fi
-done
+fi
 
 # Check config file (AGENTS.md / CLAUDE.md)
 if [ "$LEVEL" = "project" ]; then
     # Project-level: config file is in the project directory (INSTALL_BASE)
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$INSTALL_BASE/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in project directory"; health_ok=false; }
     else
         [ -f "$INSTALL_BASE/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in project directory"; health_ok=false; }
     fi
 else
     # Global-level: config file in CONFIG_ROOT
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codex" ] || [ "$TOOL" = "copilot" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
@@ -524,8 +545,8 @@ fi
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 
 SKILLS_JSON="[]"
-if [ -d "$BRAND_DIR/skills" ]; then
-  SKILLS_JSON=$(ls -d "$BRAND_DIR/skills"/* 2>/dev/null | while read d; do
+if [ -d "$SKILL_DISCOVERY_ROOT" ]; then
+  SKILLS_JSON=$(ls -d "$SKILL_DISCOVERY_ROOT"/* 2>/dev/null | while read d; do
     echo "${d##*/}"
   done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
 fi
@@ -540,6 +561,7 @@ cat > "$MANIFEST" << MANIFEST_EOF
   "installed_skills": $SKILLS_JSON,
   "installed_md_file": "$TARGET_MD_NAME",
   "brand_dir": "$CONFIG_ROOT",
+  "skills_dir": "$SKILL_DISCOVERY_ROOT",
   "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MANIFEST_EOF
@@ -560,24 +582,28 @@ echo ""
 echo -e "  ${GREEN}${BOLD}✓ triton-op-generator installed successfully!${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
+TRITON_PROMPT='生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1'
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
+elif [ "$TOOL" = "codex" ]; then
+  echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}codex${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 elif [ "$TOOL" = "trae" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 elif [ "$TOOL" = "copilot" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 GitHub Copilot CLI / IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 elif [ "$TOOL" = "codearts" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"
-  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}生成一个 Triton-Ascend 框架的 softmax 算子实现，ASCEND_RT_VISIBLE_DEVICES=1${NC}"
+  echo -e "  ${CYAN}2.${NC} 直接输入需求: ${GREEN}${BOLD}${TRITON_PROMPT}${NC}"
 fi
 echo ""
 echo -e "  ${DIM}Note: 所有执行阶段将在当前会话中实时显示${NC}"

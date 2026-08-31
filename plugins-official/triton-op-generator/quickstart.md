@@ -12,7 +12,7 @@ CANNBot Triton-Ascend 算子生成模式适用于通过 Triton DSL 开发高性�
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -156,6 +156,28 @@ cd cannbot-skills/plugins-official/triton-op-generator && bash init.sh project c
 </details>
 
 <details>
+<details>
+<summary>Codex</summary>
+
+Codex 的 Skill 使用独立发现目录（本插件无 Subagent，主 Agent 即 AGENTS.md）：
+
+- 项目级：`.agents/skills/`
+- 全局级：`~/.agents/skills/`
+
+#### 项目级安装
+
+```bash
+bash init.sh project codex
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global codex
+```
+
+</details>
+
 <summary>Copilot</summary>
 
 安装：

@@ -1,0 +1,12 @@
+name = "model-infer-sota-candidate"
+description = "优化候选发现专家，按候选来源（multi-stream DAG 拆解 / wiki / perf-insight）并行发现不限于多流的优化候选，产出候选 Plan 草案。供 model-infer-optimize 在候选发现阶段为每个来源派发。"
+developer_instructions = """
+This is the Codex adapter for the canonical model-infer-sota-candidate definition.
+Before starting any task, locate this active config at
+`.codex/agents/model-infer-sota-candidate.toml` (project scope) or
+`~/.codex/agents/model-infer-sota-candidate.toml` (user scope), resolve the symlink target,
+then read `../model-infer-sota-candidate.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

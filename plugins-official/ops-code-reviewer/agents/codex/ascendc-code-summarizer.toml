@@ -1,0 +1,12 @@
+name = "ascendc-code-summarizer"
+description = "Ascend C 算子代码概要生成。按 workflow 指定的 step 文件执行完整流程。"
+developer_instructions = """
+This is the Codex adapter for the canonical ascendc-code-summarizer definition.
+Before starting any task, locate this active config at
+`.codex/agents/ascendc-code-summarizer.toml` (project scope) or
+`~/.codex/agents/ascendc-code-summarizer.toml` (user scope), resolve the symlink target,
+then read `../ascendc-code-summarizer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

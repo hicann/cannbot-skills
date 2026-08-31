@@ -1,0 +1,12 @@
+name = "torch-npugraph-ex"
+description = "当用户需要使用 PyTorch Ascend NPU npugraph_ex / aclgraph 图模式时使用。覆盖 torch.compile + TorchAir 配置、脚本迁移、自定义算子入图、编译/运行问题诊断、性能优化。关键词：npugraph_ex、aclgraph、TorchAir、torch.compile、NPU graph mode。"
+developer_instructions = """
+This is the Codex adapter for the canonical torch-npugraph-ex definition.
+Before starting any task, locate this active config at
+`.codex/agents/torch-npugraph-ex.toml` (project scope) or
+`~/.codex/agents/torch-npugraph-ex.toml` (user scope), resolve the symlink target,
+then read `../torch-npugraph-ex.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

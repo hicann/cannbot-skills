@@ -1,0 +1,12 @@
+name = "ascendc-ops-developer"
+description = "Ascend C 算子开发工程师，负责代码开发、调试、优化及穿刺验证。"
+developer_instructions = """
+This is the Codex adapter for the canonical ascendc-ops-developer definition.
+Before starting any task, locate this active config at
+`.codex/agents/ascendc-ops-developer.toml` (project scope) or
+`~/.codex/agents/ascendc-ops-developer.toml` (user scope), resolve the symlink target,
+then read `../ascendc-ops-developer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

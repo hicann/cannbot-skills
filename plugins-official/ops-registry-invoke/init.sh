@@ -135,6 +135,8 @@ else
     INFRA_SKILL_ROOT=""
 fi
 LOCAL_AGENT_ROOT="$SCRIPT_DIR/agents"
+# Codex custom agents use standalone TOML definitions.
+CODEX_AGENT_ROOT="$LOCAL_AGENT_ROOT/codex"
 
 show_banner() {
   echo ""
@@ -159,7 +161,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "codex", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Options:
@@ -172,6 +174,8 @@ Examples:
   init.sh project claude               # Project-level, Claude Code
   init.sh project trae                 # Project-level, Trae
   init.sh project cursor               # Project-level, Cursor
+  init.sh project codex                # Project-level, Codex
+  init.sh global codex                 # Global-level, Codex
   init.sh project copilot              # Project-level, Copilot
   init.sh global copilot               # Global-level, Copilot
   init.sh project codearts             # Project-level, CodeArts
@@ -185,6 +189,8 @@ Installation paths:
   Trae Plugin:  .marscode/{skills,agents}/   + AGENTS.md in project root
   Trae CLI:     .traecli/{skills,agents}/    + AGENTS.md in project root
   Cursor:       .cursor/{skills,agents}/     + AGENTS.md in project root
+  Codex:        .agents/skills/ + .codex/agents/ + AGENTS.md in project root
+                ~/.agents/skills/ + ~/.codex/{agents,AGENTS.md} (global)
   Copilot:      .github/{skills,agents}/      + AGENTS.md in project root (project)
                 ~/.copilot/{skills,agents}/   + AGENTS.md (global)
   CodeArts:     .codeartsdoer/{skills,agents}/ + AGENTS.md in project root (project)
@@ -195,6 +201,7 @@ After installation, launch directly:
   Claude:   claude
   Trae:     通过 CLI 或 IDE 启动
   Cursor:   通过 Cursor IDE 启动
+  Codex:    codex
   Copilot:  通过 GitHub Copilot CLI / IDE 启动
   CodeArts: 通过 CodeArts CLI / IDE 启动
 EOF
@@ -209,7 +216,7 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot|codearts)   TOOL="$arg" ;;
+        opencode|claude|trae|cursor|codex|copilot|codearts)   TOOL="$arg" ;;
     esac
 done
 
@@ -217,7 +224,7 @@ done
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     case "$last_arg" in
-        --help|global|project|opencode|claude|trae|cursor|copilot|codearts) ;;
+        --help|global|project|opencode|claude|trae|cursor|codex|copilot|codearts) ;;
         *) INSTALL_PATH="$last_arg" ;;
     esac
 fi
@@ -235,6 +242,8 @@ if [ "$LEVEL" = "global" ]; then
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "codex" ]; then
+        CONFIG_ROOT="$HOME/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$HOME/.copilot"
     elif [ "$TOOL" = "codearts" ]; then
@@ -263,6 +272,8 @@ else
         esac
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.cursor"
+    elif [ "$TOOL" = "codex" ]; then
+        CONFIG_ROOT="$CONFIG_ROOT_BASE/.codex"
     elif [ "$TOOL" = "copilot" ]; then
         CONFIG_ROOT="$CONFIG_ROOT_BASE/.github"
     elif [ "$TOOL" = "codearts" ]; then
@@ -273,6 +284,15 @@ else
 fi
 
 CANNBOT_DIR="$CONFIG_ROOT"
+SKILL_DISCOVERY_ROOT="$CONFIG_ROOT/skills"
+AGENT_DISCOVERY_ROOT="$CONFIG_ROOT/agents"
+if [ "$TOOL" = "codex" ]; then
+    if [ "$LEVEL" = "global" ]; then
+        SKILL_DISCOVERY_ROOT="$HOME/.agents/skills"
+    else
+        SKILL_DISCOVERY_ROOT="$CONFIG_ROOT_BASE/.agents/skills"
+    fi
+fi
 
 # --- Clean up legacy ---
 if [ -e "$CONFIG_ROOT/$BRAND" ] || [ -L "$CONFIG_ROOT/$BRAND" ]; then
@@ -410,6 +430,10 @@ echo "  Team:      $TEAM_NAME"
 echo "  Tool:      $TOOL"
 echo "  Level:     $LEVEL"
 echo "  Path:      $CONFIG_ROOT"
+if [ "$TOOL" = "codex" ]; then
+    echo "  Skills:    $SKILL_DISCOVERY_ROOT"
+    echo "  Subagents: $AGENT_DISCOVERY_ROOT"
+fi
 echo ""
 
 if [ "$TOOL" = "trae" ]; then
@@ -477,7 +501,7 @@ mkdir -p "$CANNBOT_DIR"
 if [ "$TOOL" = "opencode" ]; then
     # OpenCode: directory-level symlink for skills (auto-scan)
     # Create a temp dir with only the needed skills, then symlink it
-    SKILLS_LINK_DIR="$CANNBOT_DIR/skills"
+    SKILLS_LINK_DIR="$SKILL_DISCOVERY_ROOT"
     rm -rf "$SKILLS_LINK_DIR"
     mkdir -p "$SKILLS_LINK_DIR"
 
@@ -494,7 +518,7 @@ if [ "$TOOL" = "opencode" ]; then
     ok "Skills: $skill_count linked"
 
     # OpenCode: per-item symlinks for agents
-    AGENTS_LINK_DIR="$CANNBOT_DIR/agents"
+    AGENTS_LINK_DIR="$AGENT_DISCOVERY_ROOT"
     rm -rf "$AGENTS_LINK_DIR"
     mkdir -p "$AGENTS_LINK_DIR"
 
@@ -511,9 +535,14 @@ if [ "$TOOL" = "opencode" ]; then
     done
     ok "Agents: $agent_count linked"
 else
-    # Trae/Claude/Cursor: create directories (per-item symlinks handled in Step 5)
-    mkdir -p "$CONFIG_ROOT/skills" "$CONFIG_ROOT/agents"
-    ok "Prepared: skills/, agents/, rules/"
+    # Trae/Claude/Cursor/Codex/Copilot: create directories (per-item symlinks handled in Step 5)
+    mkdir -p "$SKILL_DISCOVERY_ROOT"
+    if [ "$TOOL" = "codex" ]; then
+        mkdir -p "$(dirname "$AGENT_DISCOVERY_ROOT")"
+    else
+        mkdir -p "$AGENT_DISCOVERY_ROOT"
+    fi
+    ok "Prepared: $SKILL_DISCOVERY_ROOT, $AGENT_DISCOVERY_ROOT"
 fi
 echo ""
 
@@ -522,8 +551,13 @@ step "[4/7] Installing configuration..."
 mkdir -p "$CONFIG_ROOT"
 
 # Link team-local workflow skill
+# The dependency validator (DG-05) scans init.sh for the literal pattern
+# `skills/<name>` to register renamed team-local skills. Keep $CONFIG_ROOT/skills
+# in the symlink target so the regex matches; for codex the skill is also
+# installed into $SKILL_DISCOVERY_ROOT by the Step 5 resolve_skill_src loop.
 link_workflow_skill() {
     if [ -d "$SCRIPT_DIR/workflow" ]; then
+        mkdir -p "$CONFIG_ROOT/skills"
         ln -sfn "$(realpath "$SCRIPT_DIR/workflow")" "$CONFIG_ROOT/skills/ops-registry-invoke-workflow"
         ok "workflow/ → skills/ops-registry-invoke-workflow"
     fi
@@ -587,7 +621,7 @@ elif [ "$TOOL" = "claude" ]; then
         ok "CLAUDE.md"
     fi
 else
-    # Trae/Cursor: AGENTS.md in project root (same as OpenCode)
+    # Trae/Cursor/Codex/Copilot/CodeArts: AGENTS.md in project root (same as OpenCode)
     if [ "$LEVEL" = "project" ]; then
         config_target="$INSTALL_BASE/AGENTS.md"
     else
@@ -628,8 +662,8 @@ step "[5/7] Configuring tool discovery..."
 if [ "$TOOL" = "opencode" ]; then
     ok "Auto-scan: skills/, agents/"
 else
-    # Trae/Claude/Cursor: create per-skill discovery symlinks
-    DISCOVERY="$CONFIG_ROOT/skills"
+    # Trae/Claude/Cursor/Codex/Copilot/CodeArts: create per-skill discovery symlinks
+    DISCOVERY="$SKILL_DISCOVERY_ROOT"
     link_count=0
     for skill in $ALL_SKILLS; do
         src=$(resolve_skill_src "$skill")
@@ -639,21 +673,41 @@ else
     done
     ok "Skills: $link_count discovery symlinks"
 
-    # Claude/Cursor: agent discovery symlinks
-    AGENT_DISCOVERY="$CONFIG_ROOT/agents"
-    # Pre-clean existing agent symlinks (both with and without .md)
-    for agent in $DIRECT_AGENTS; do
-        rm -f "$AGENT_DISCOVERY/$agent" "$AGENT_DISCOVERY/$agent.md"
-    done
+    # Agent discovery
+    AGENT_DISCOVERY="$AGENT_DISCOVERY_ROOT"
     agent_link_count=0
-    for agent in $DIRECT_AGENTS; do
-        src=$(resolve_agent_src "$agent")
-        [ -n "$src" ] || continue
-        link_name=$(basename "$src")
-        ln -sfn "$(realpath "$src")" "$AGENT_DISCOVERY/$link_name"
-        agent_link_count=$((agent_link_count + 1))
-    done
-    ok "Agents: $agent_link_count discovery symlinks"
+    if [ "$TOOL" = "codex" ]; then
+        # Codex may ignore symlinked custom-agent TOML files (openai/codex#15345).
+        # Install regular TOML files (with __CANNBOT_AGENT_SOURCE__ resolved) so
+        # multiple plugins can coexist in the same .codex/agents/ directory.
+        mkdir -p "$AGENT_DISCOVERY"
+        for agent_entry in "$CODEX_AGENT_ROOT"/*.toml; do
+            [ -f "$agent_entry" ] || continue
+            name=$(basename "$agent_entry")
+            base="${name%.toml}"
+            [[ "$base" != $INCLUDED_AGENT_PATTERN ]] && continue
+            canonical_agent="$LOCAL_AGENT_ROOT/$base.md"
+            escaped_agent="$(echo "$canonical_agent" | sed 's/[&|\\]/\\&/g')"
+            tmpfile=$(mktemp)
+            sed "s|__CANNBOT_AGENT_SOURCE__|$escaped_agent|g" "$agent_entry" > "$tmpfile"
+            safe_install_file "$tmpfile" "$AGENT_DISCOVERY/$name" "$name" "$LEVEL"
+            agent_link_count=$((agent_link_count + 1))
+        done
+        ok "Agents: $agent_link_count compatible TOML files"
+    else
+        # Pre-clean existing agent symlinks (both with and without .md)
+        for agent in $DIRECT_AGENTS; do
+            rm -f "$AGENT_DISCOVERY/$agent" "$AGENT_DISCOVERY/$agent.md"
+        done
+        for agent in $DIRECT_AGENTS; do
+            src=$(resolve_agent_src "$agent")
+            [ -n "$src" ] || continue
+            link_name=$(basename "$src")
+            ln -sfn "$(realpath "$src")" "$AGENT_DISCOVERY/$link_name"
+            agent_link_count=$((agent_link_count + 1))
+        done
+        ok "Agents: $agent_link_count discovery symlinks"
+    fi
 fi
 echo ""
 
@@ -784,8 +838,15 @@ fi
 # --- Step 7: Generate manifest + Health check ---
 MANIFEST="$CONFIG_ROOT/cannbot-manifest.json"
 
-SKILLS_JSON=$(echo "$ALL_SKILLS" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
-AGENTS_JSON=$(echo "$DIRECT_AGENTS" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+SKILLS_JSON="[]"
+if [ -d "$SKILL_DISCOVERY_ROOT" ]; then
+  SKILLS_JSON=$(ls -d "$SKILL_DISCOVERY_ROOT"/*/ 2>/dev/null | while read d; do d="${d%/}"; echo "${d##*/}"; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+fi
+
+AGENTS_JSON="[]"
+if [ -d "$AGENT_DISCOVERY_ROOT" ]; then
+  AGENTS_JSON=$(ls -d "$AGENT_DISCOVERY_ROOT"/* 2>/dev/null | while read d; do echo "${d##*/}"; done | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null || echo "[]")
+fi
 
 cat > "$MANIFEST" << MANIFEST_EOF
 {
@@ -797,6 +858,8 @@ cat > "$MANIFEST" << MANIFEST_EOF
   "installed_skills": $SKILLS_JSON,
   "installed_agents": $AGENTS_JSON,
   "brand_dir": "$CONFIG_ROOT",
+  "skills_dir": "$SKILL_DISCOVERY_ROOT",
+  "agents_dir": "$AGENT_DISCOVERY_ROOT",
   "install_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 MANIFEST_EOF
@@ -806,8 +869,8 @@ step "[7/7] Running health check..."
 health_ok=true
 health_errors=""
 
-for sub in skills agents; do
-  target="$CANNBOT_DIR/$sub"
+for target in "$SKILL_DISCOVERY_ROOT" "$AGENT_DISCOVERY_ROOT"; do
+  sub=$(basename "$target")
   if [ -d "$target" ]; then
     count=$(ls -1A "$target" 2>/dev/null | wc -l)
     [ "$count" -eq 0 ] && { health_errors="${health_errors}\n  ${YELLOW}⚠${NC} $sub/ is empty"; }
@@ -880,20 +943,24 @@ echo -e "  ${GREEN}${BOLD}✓ Team $TEAM_NAME installed successfully!${NC}"
 echo -e "  ${DIM}Skills: $ALL_SKILL_COUNT | Agents: $DIRECT_AGENT_COUNT${NC}"
 echo ""
 echo -e "  ${BOLD}Quick Start:${NC}"
+REGISTRY_PROMPT='帮我开发一个 abs 算子，支持 float16 数据类型'
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}opencode${NC}"
-  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
+elif [ "$TOOL" = "codex" ]; then
+  echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}codex${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
 elif [ "$TOOL" = "trae" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CLI/IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 Cursor IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
 elif [ "$TOOL" = "codearts" ]; then
   echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
-  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"
-  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}帮我开发一个 abs 算子，支持 float16 数据类型${NC}"
+  echo -e "  ${CYAN}2.${NC} 告诉 CANNBot: ${GREEN}${BOLD}${REGISTRY_PROMPT}${NC}"
 fi
 echo ""

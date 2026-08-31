@@ -20,7 +20,7 @@ CANNBot 注册调用模式适用于**生产级自定义算子开发**场景，�
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### OpenCode（推荐）
 
@@ -74,6 +74,30 @@ bash init.sh global cursor      # 全局级
 </details>
 
 <details>
+<details>
+<summary>Codex</summary>
+
+Codex 的 Skill 与 Subagent 使用不同的发现目录：
+
+- 项目级 Skill：`.agents/skills/`
+- 项目级 Subagent：`.codex/agents/*.toml`
+- 全局 Skill：`~/.agents/skills/`
+- 全局 Subagent：`~/.codex/agents/*.toml`
+
+#### 项目级安装
+
+```bash
+bash init.sh project codex
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global codex
+```
+
+</details>
+
 <summary>Copilot</summary>
 
 ```bash

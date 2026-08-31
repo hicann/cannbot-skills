@@ -10,7 +10,7 @@
 
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 > `init.sh` 通过脚本自身路径定位插件根，**从任意目录调用均可**，下文统一用 `INIT=...` 变量指代脚本路径，无需 cd 进 `torch-compile/`。
 >

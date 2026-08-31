@@ -1,0 +1,12 @@
+name = "model-infer-sota-profile-analyzer"
+description = "性能数据分析专家，用 model-infer-perf-breakdown 按主 agent 敲定的拆解 spec 非交互地跑性能分析，产出时间分布 + 逐算子实测/理论 gap 报告。供 model-infer-optimize 在分析 baseline 与重采轮时派发。"
+developer_instructions = """
+This is the Codex adapter for the canonical model-infer-sota-profile-analyzer definition.
+Before starting any task, locate this active config at
+`.codex/agents/model-infer-sota-profile-analyzer.toml` (project scope) or
+`~/.codex/agents/model-infer-sota-profile-analyzer.toml` (user scope), resolve the symlink target,
+then read `../model-infer-sota-profile-analyzer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

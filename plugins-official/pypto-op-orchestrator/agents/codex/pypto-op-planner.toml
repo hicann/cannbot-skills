@@ -1,0 +1,12 @@
+name = "pypto-op-planner"
+description = "Requirement planner. Translates the user's kernel request into SPEC.md and API_REPORT.md. Invoked by pypto-op-orchestrator."
+developer_instructions = """
+This is the Codex adapter for the canonical pypto-op-planner definition.
+Before starting any task, locate this active config at
+`.codex/agents/pypto-op-planner.toml` (project scope) or
+`~/.codex/agents/pypto-op-planner.toml` (user scope), resolve the symlink target,
+then read `../pypto-op-planner.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

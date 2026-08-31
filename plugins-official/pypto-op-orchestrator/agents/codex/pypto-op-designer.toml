@@ -1,0 +1,12 @@
+name = "pypto-op-designer"
+description = "Module designer. Splits the kernel into semantic modules, defines module contracts, lays out staged files."
+developer_instructions = """
+This is the Codex adapter for the canonical pypto-op-designer definition.
+Before starting any task, locate this active config at
+`.codex/agents/pypto-op-designer.toml` (project scope) or
+`~/.codex/agents/pypto-op-designer.toml` (user scope), resolve the symlink target,
+then read `../pypto-op-designer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

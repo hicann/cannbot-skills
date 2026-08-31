@@ -22,7 +22,7 @@ CANNBot PyPTO 算子开发模式适用于通过 PyPTO 开发自定义算子。�
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已安装 PyPTO，版本需与 CANN 配套。通过 PyPI 安装时，CANN 与 PyPTO 版本对应关系查阅 [PyPI 安装](https://pypto.gitcode.com/install/build_and_install.html#pypi)；CANN 9.1.0 版本推荐使用源码编译安装，参阅 [源码编译安装](https://pypto.gitcode.com/install/build_and_install.html)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
 
 ### 通用安装方式（init.sh）
 
@@ -33,7 +33,7 @@ bash init.sh project <tool>   # 项目级（默认）
 bash init.sh global <tool>    # 全局级
 ```
 
-`<tool>` 可取 `opencode` / `claude` / `trae` / `cursor` / `copilot` / `codearts`，省略时取默认值 `opencode`。
+`<tool>` 可取 `opencode` / `claude` / `trae` / `cursor` / `codex` / `copilot` / `codearts`，省略时取默认值 `opencode`。
 
 ### 各工具安装说明
 
@@ -104,6 +104,30 @@ bash init.sh global cursor      # 全局级
 </details>
 
 <details>
+<details>
+<summary>Codex</summary>
+
+Codex 的 Skill 与 Subagent 使用不同的发现目录：
+
+- 项目级 Skill：`.agents/skills/`
+- 项目级 Subagent：`.codex/agents/*.toml`
+- 全局 Skill：`~/.agents/skills/`
+- 全局 Subagent：`~/.codex/agents/*.toml`
+
+#### 项目级安装
+
+```bash
+bash init.sh project codex
+```
+
+#### 全局安装
+
+```bash
+bash init.sh global codex
+```
+
+</details>
+
 <summary>Copilot</summary>
 
 ```bash
@@ -329,7 +353,7 @@ cd cannbot-skills/plugins-official/pypto-op-orchestrator && bash init.sh project
 ## 总结
 
 1. PyPTO 算子开发模式通过 7 阶段状态机实现端到端自动化
-2. 使用 `init.sh` 脚本一键安装（支持 OpenCode / Claude Code / TRAE / Cursor / Copilot / CodeArts），Claude Code 用户也可用 `/plugin install` 一键安装
-3. 各工具的 CLI 或 IDE 入口（如 `opencode`、`claude`，或 TRAE / Cursor / Copilot / CodeArts 的 IDE）即核心交互入口
+2. 使用 `init.sh` 脚本一键安装（支持 OpenCode / Claude Code / TRAE / Cursor / Codex / Copilot / CodeArts），Claude Code 用户也可用 `/plugin install` 一键安装
+3. 各工具的 CLI 或 IDE 入口（如 `opencode`、`claude`，或 TRAE / Cursor / Codex / Copilot / CodeArts 的 IDE）即核心交互入口
 4. 所有阶段通过门禁驱动，支持断点续跑与失败恢复
 5. 产出物包含完整的参考实现、设计文档、PyPTO 实现和测试入口

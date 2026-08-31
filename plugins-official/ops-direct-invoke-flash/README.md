@@ -16,6 +16,10 @@ Ascend C 算子开发工具 **CANNBot（Flash 版）**。从 CPU 函数、数学
 
 # 全局安装到 opencode（~/.config/opencode）
 ./init.sh global opencode
+
+# 安装到 codex（skill 装到 .agents/skills，subagent 装到 .codex/agents）
+./init.sh project codex
+./init.sh global codex
 ```
 
 ## 使用

@@ -1,0 +1,12 @@
+name = "ascendc-ops-spec-reviewer"
+description = "算子 spec.yaml 独立审查者 — 评审 spec.yaml，只评审不修改。"
+developer_instructions = """
+This is the Codex adapter for the canonical ascendc-ops-spec-reviewer definition.
+Before starting any task, locate this active config at
+`.codex/agents/ascendc-ops-spec-reviewer.toml` (project scope) or
+`~/.codex/agents/ascendc-ops-spec-reviewer.toml` (user scope), resolve the symlink target,
+then read `../ascendc-ops-spec-reviewer.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""
