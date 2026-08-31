@@ -1,0 +1,141 @@
+{
+  "skill_name": "ge-dynamic-shape-diagnose",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "标准三步定位流程：Shape unknown 不支持静态",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我用 atc 编译 resnet50 后运行时性能比预期差很多，怀疑触发了动态调度。ge_compiler.log 里有这些行：`SetGraphUnknownFlag: graph resnet50 marked as unknown` 和 `Mark node Reshape_1 unknown as shape unknown, and cannot support no tiling`。帮我定位根因和解决方案。",
+      "expected_output": "应确认图被标记为 unknown graph（动态调度已触发），按 GE 判定场景命中“Shape unknown 不支持静态”：根因算子 Reshape_1 的 Shape 含 -1/-2 且不支持 no tiling；解决方案应给出 --input_shape 指定具体 shape 或 --dynamic_batch_size/--dynamic_dims 配置多档位。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "no tiling"
+        },
+        {
+          "type": "contains",
+          "pattern": "input_shape"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "FE 设置场景追溯：DT_STRING 类型",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "bert 模型编译日志出现 `SetGraphUnknownFlag: graph bert_model marked as unknown`、`Collect node StringToNumber_1 as unknown as it was marked force unknown node forcibly` 和 `Op [StringToNumber_1], data_type is DT_STRING, set attr[_force_unknown_shape] success`。GE 判定和 GE 设置场景的关键字（cannot support no tiling / force unknown as dynamic tilingDependent 等）都没搜到。定位下根因场景。",
+      "expected_output": "应按层级判定：GE 判定、GE 设置无命中，FE 设置场景命中 marked force unknown node forcibly 后追溯 FE 关键词 DT_STRING，定位为“DT_STRING 类型”场景，根因算子 StringToNumber_1 输入/输出为 DT_STRING；解决方案应给出转 INT32 等可静态编译类型。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "DT_STRING"
+        },
+        {
+          "type": "contains",
+          "pattern": "INT32"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HostCpu 引擎算子场景",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "编译日志有 `mark graph subgraph_1 as unknown` 和 `Mark host cpu node NonMaxSuppression_1 unknown as host engine as it relies on the runtime scheduler for execution`，帮我看看为什么走了动态调度。",
+      "expected_output": "应确认图被标记 unknown 后，按 GE 判定场景命中“HostCpu 引擎算子”：根因算子 NonMaxSuppression_1 引擎为 DNN_VM_HOST_CPU，依赖运行时调度器执行，因此必须动态调度。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "HostCpu"
+        },
+        {
+          "type": "contains",
+          "pattern": "DNN_VM_HOST_CPU"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "HCCL 算子限制场景",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "分布式模型编译触发了动态调度，日志里有：`Collect node AllToAllV_1 as unknown as it was marked force unknown node forcibly` 和 `node [AllToAllV_1] op type [AllToAllV] unknown shape value is set`。定位根因并给建议。",
+      "expected_output": "应定位为 FE 设置场景中的“HCCL 算子限制”：AllToAllV_1 为 HCCL 通信算子，不支持动态 shape 下沉；解决方案应建议考虑 AllReduce 等替代算子。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "HCCL"
+        },
+        {
+          "type": "contains",
+          "pattern": "AllReduce"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "FE 总开关命中但子场景无法定位时如实降级",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "日志里有 `Collect node OpX as unknown as it was marked force unknown node forcibly`，但 DT_STRING、AllToAll、DVPP、ACLNN、TfOptimizer、memory size exceeds、taskNum 这些 FE 关键词全都搜不到。根因是什么？",
+      "expected_output": "应判定为 FE 设置场景但具体子场景未能定位，如实写明“FE 设置场景，具体子场景未能定位”，列出建议补采的日志（如提高日志级别重采、确认 FE 日志文件），不得编造具体场景或根因算子结论。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "未能定位"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "无日志证据时不得断言根因",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我的模型跑起来很慢，肯定是触发动态调度了，帮我分析根因。日志文件我还没拿到。",
+      "expected_output": "应说明没有日志证据不能定位根因场景，要求用户提供 ge_compiler 日志（至少 atc --log=info 级别）并给出第一步确认命令（grep SetGraphUnknownFlag 等），不得凭模型名或现象断言根因。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "日志"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "图级别场景：纯 Data+NetOutput 图",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "日志里没有命中任何算子级别的关键字，只有一行 `Graph xxx do not need dynamic shape partition, only has Data and NetOutput`。这是什么场景？",
+      "expected_output": "应定位为图级别场景“纯 Data+NetOutput 图”：图中只有 Data(-1) 和 NetOutput 节点，无中间算子；可补充说明该图形态导致不需要动态 shape 分区的原因。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "NetOutput"
+        }
+      ]
+    }
+  ]
+}
