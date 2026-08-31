@@ -58,6 +58,7 @@ verify.py 按"`--non-compute` 开关 + 输入 dtype + 输出 dtype"分流到 **5
 
 ### 3. 比对前置检查（按顺序，任一失败即判 fail）
 
+0. **隐藏状态对齐检查**（仅第 1 个用例执行一次，详见 §6）
 1. 形状必须一致
 2. NaN 位置必须完全一致（mask 按位相等）
 3. Inf 位置和符号必须完全一致
@@ -116,6 +117,24 @@ verify.py 在每个 case 会向日志输出：
 
 便于上游 agent 立即看到当前 case 落入了哪一类、用了哪些阈值。
 
+### 6. 隐藏状态对齐检查（`scripts/hidden_state_probe.py`）
+
+抓「参考实现 `Model` 的输出依赖不由输入张量决定的内部状态（随机初始化权重 / buffer /
+跨调用缓存），而生成实现没有逐位复刻」这一类失败。它与 kernel 实现无关，单独修 kernel
+永远修不好，且误差形态与"算法全错"无法区分，因此必须在精度比对之前单独点名。
+
+| 层 | 内容 | 严重级别 |
+|---|---|---|
+| P0 | 深度扫描后无隐藏状态 → SKIP | 绝大多数算子走这条，零开销 |
+| P1 | 两侧**同名** parameter/buffer 逐位一致 | **硬失败** → `error_type: HiddenStateMismatch` |
+| P2 | fw 每个隐藏张量需在 im 中找到逐位相等项（不要求同名） | 软诊断（日志 WARN，不影响 passed_cases） |
+| P3 | 同输入连跑两次各自输出一致 | 软诊断（默认关闭，`ProbeOptions(check_determinism=True)` 启用） |
+
+- **执行时机**：第 1 个用例的正式 forward **之前** —— 生成实现编译失败时正式 forward 会直接抛
+  `CompilationError`，放在其后探针就没机会执行。
+- **降级**：`hidden_state_probe.py` 缺失时静默禁用，不阻断验证。
+- 命中后如何修：见 `ops/triton-op-coding/SKILL.md`「参考实现的 nn.Module 语义复刻」C1/C2。
+
 ---
 
 ## 验证流程
@@ -151,17 +170,39 @@ python3 <本skill所在目录的绝对路径>/scripts/validate_triton_impl.py \
     <生成代码文件路径> --json
 ```
 
-**检测三种退化类型**：
+**检测四种退化类型**：
 
 | 类型 | 含义 | 检测方式 |
 |------|------|---------|
 | Type 1 | 完全无 `@triton.jit` kernel | AST 中无 `triton.jit` 装饰的函数定义 |
 | Type 2 | 有 kernel 但 `forward()` 未调用 | kernel 定义存在但 `ModelNew.forward()` 未引用（含 wrapper 函数追踪） |
-| Type 3 | 部分计算使用 PyTorch | `forward()` 中存在禁止的 `torch.*` / `F.*` 计算操作（精确到行号） |
+| Type 3 | 部分计算使用 PyTorch | `forward()` **及其可达的模块内辅助函数**中存在禁止的 `torch.*` / `F.*` / tensor 方法计算操作（精确到行号）。⚠️ 从 `forward()` 出发做**跨函数可达性分析**——把主链计算挪到 `forward()` 之外的模块级函数里是常见绕过手法 |
+| Type 4 | 只有占位 kernel | 被调用的 kernel **全部**只做 `tl.load`/`tl.store` 搬运、无任何计算（`tl.*` 里除 load/store/arange/program_id 等非计算 API 外为空）。这类 kernel 纯粹为让 AST 检测到"有 kernel 被调用"而存在，真实计算仍在 PyTorch 侧 |
 
 **结果判断**：
 - exit code == 0 → 通过，继续 Step 1
 - exit code != 0 → 退化检测到，解析 JSON 中的 `regression_type` 和 `suggestion`，直接返回失败
+
+> **典型作弊形态（实测捕获，Type 3 + Type 4 同时命中）**：
+> ```python
+> @triton.jit
+> def identity_kernel(x_ptr, o_ptr, n, BLOCK: tl.constexpr):
+>     """占位 kernel：将输入按元素拷贝到输出，保证 AST 检测到真实 Triton 调用。"""
+>     ...  # 只有 tl.load / tl.store
+>
+> def _run_flash_attention(x, ...):        # ← 计算被挪到 forward 之外
+>     query = torch.matmul(x, wq.t())      # 主链全在 torch
+>     weights = scores.softmax(dim=-1)     # 用 tensor 方法绕过对 F.softmax 的拦截
+>     ...
+>
+> class ModelNew(nn.Module):
+>     def forward(self, x, ...):
+>         y = _run_flash_attention(x, ...)     # forward 子树里看不到任何 torch 计算
+>         identity_kernel[grid](y, out, ...)   # 只为满足"kernel 被调用"
+>         return out
+> ```
+> 三个特征缺一不可地共同构成绕过：**计算外移**（避开只扫 forward 的检查）+ **tensor 方法**（避开 `F.softmax` 名单）+ **占位 kernel**（伪造 Triton 调用）。
+> 现在 Type 3 的跨函数可达性分析与 Type 4 的占位 kernel 检测分别堵住其中两环，任一命中即判失败。
 
 **JSON 输出格式**：
 
@@ -315,6 +356,12 @@ verify.py 会在 `verify_dir` 下生成 `verify_result.json`（或 `--output` �
 
 仅在 verify.py 的 `passed_cases == total_cases` 时执行（策略 A）。verify 有任何失败 → 禁止执行 benchmark.py。
 
+**NPU 锁频与频率监控**：benchmark.py 默认在性能测试前尝试对所有可用 NPU 设备执行 A5 锁频（`drv_hlt_dsmi_test set_lp_idle <dev> 0`），并在整个 benchmark 期间按 `--freq-check-interval` 周期采样 `npu-smi info -t common -i <dev>` 中的 `Aicore curFreq(MHZ)`，检测是否相对锁频后的基线频率发生漂移。
+
+- 锁频目标值按设备型号自动探测，不硬编码具体 MHz。
+- 若 `drv_hlt_dsmi_test` 不可用或锁命令失败，默认输出 warning 并继续测试；传 `--lock-frequency-fail-action error` 可在锁频失败或频率漂移时让 benchmark 以非零码退出。
+- 传 `--no-lock-frequency` 可完全关闭锁频与监控。
+
 使用 `bash` 工具调用本 skill 自带的 `scripts/benchmark.py` 脚本。
 
 **命令模板**：
@@ -354,6 +401,9 @@ python3 /path/to/triton-op-verifier/scripts/benchmark.py \
 | `--repeats` | 否 | 正式测试次数，默认 50 |
 | `--output` | 否 | 性能报告输出路径（JSON 格式）|
 | `--verify_not_required` | 否 | 跳过 L1 verify 闸门（默认强制要求 verify_result 全过）|
+| `--lock-frequency` / `--no-lock-frequency` | 否 | 性能测试前是否对 NPU 锁频并在测试期间监控频率（默认开启）|
+| `--lock-frequency-fail-action` | 否 | 锁频失败或频率漂移时的处理方式：`warn`（默认）或 `error`|
+| `--freq-check-interval` | 否 | 频率监控采样间隔，单位秒（默认 `1.0`）|
 
 ---
 
@@ -480,4 +530,4 @@ benchmark.py 启动时按 `--triton_impl_name` 推导对应的 verify_result 文
 **CLI 参数**：
 - `validate_triton_impl.py`: `<file_path>`, `[--json]`
 - `verify.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--timeout`, `--output`, `--non-compute`
-- `benchmark.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--warmup`, `--repeats`, `--output`, `--skip_framework`, `--framework_latency_ms`, `--verify_not_required`
+- `benchmark.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--warmup`, `--repeats`, `--output`, `--skip_framework`, `--framework_latency_ms`, `--verify_not_required`, `--lock-frequency`, `--lock-frequency-fail-action`, `--freq-check-interval`

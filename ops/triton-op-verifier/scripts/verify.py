@@ -64,6 +64,21 @@ class AccuracyError(AssertionError):
         self.metrics = metrics
 
 
+# 隐藏状态对齐探针（见 hidden_state_probe.py）。缺失时优雅降级，不阻断验证。
+try:
+    from hidden_state_probe import probe as _hidden_state_probe
+    from hidden_state_probe import scan_reference as _scan_reference
+    from hidden_state_probe import ProbeOptions as _ProbeOptions
+    from hidden_state_probe import HiddenStateMismatch
+except ImportError:  # pragma: no cover - 探针缺失时禁用该检查
+    _hidden_state_probe = None
+    _scan_reference = None
+    _ProbeOptions = None
+
+    class HiddenStateMismatch(AssertionError):
+        """占位：探针不可用时永不抛出。"""
+
+
 @dataclass
 class CaseContext:
     """单个测试用例在整体序列中的定位（1-based）。"""
@@ -865,6 +880,69 @@ def _check_accuracy_npu_benchmark(golden, actual, data_type):
     )
 
 
+_HIDDEN_STATE_PROBE_ARMED = False
+
+
+def _arm_hidden_state_probe(torch_py_path):
+    """AST 预筛门：只在参考实现的 Model 类体内含隐藏状态特征时才武装探针。
+
+    这一步是**成本门**，不是判定门 —— 未命中时探针完全不执行，
+    因此对绝大多数算子（630 归档 78/78 未命中）零开销、零副作用。
+    判定仍由运行时深度扫描负责。
+
+    注意必须限定在 Model 类体：benchmark 的 get_input_groups() 里必然有
+    torch.randn，用全文 grep 会 100% 假阳。
+    """
+    global _HIDDEN_STATE_PROBE_ARMED
+    _HIDDEN_STATE_PROBE_ARMED = False
+    if _hidden_state_probe is None or not os.path.isfile(torch_py_path):
+        return
+    try:
+        scan = _scan_reference(torch_py_path)
+    except Exception as e:
+        logger.warning("  [隐藏状态探针] AST 预筛失败，跳过: %s: %s", type(e).__name__, e)
+        return
+    if scan.get("tier") in ("RNG", "DET"):
+        _HIDDEN_STATE_PROBE_ARMED = True
+        logger.info("  [隐藏状态探针] 已武装 (tier=%s, hits=%s)",
+                    scan["tier"], scan.get("hits"))
+
+
+def _run_hidden_state_probe(models: ModelPair, case_ctx: CaseContext, sample_inputs=None):
+    """执行隐藏状态对齐检查。P1 不一致 → 抛 HiddenStateMismatch；P2/P3 只记日志。
+
+    该检查抓的是「参考实现的输出依赖不由输入张量决定的内部状态（随机初始化权重、
+    buffer 等），而生成实现没有逐位复刻」这一类失败。这类失败与 kernel 实现无关，
+    单独修 kernel 永远修不好，且在精度报告里长得和「算法全错」一模一样，
+    因此必须在精度比对之前单独点名。
+    """
+    try:
+        diag = _hidden_state_probe(
+            models.framework, models.impl,
+            sample_inputs=sample_inputs,
+            options=_ProbeOptions(
+                warmup=True,               # 物化懒构造的权重；内部吞异常，不阻断
+                check_determinism=False,   # P3 每侧额外 2 次 forward，默认关闭控开销
+            ),
+        )
+    except HiddenStateMismatch as e:
+        raise HiddenStateMismatch(
+            f"[用例 {case_ctx.case_idx}/{case_ctx.total_cases}] {str(e)}") from e
+    except Exception as e:  # 探针自身异常不得阻断验证
+        logger.warning("  [隐藏状态探针] 跳过（探针内部异常）: %s: %s", type(e).__name__, e)
+        return
+
+    status = diag.get("status")
+    if status == "SKIP":
+        logger.info("  [隐藏状态探针] SKIP — 参考实现不持有隐藏状态")
+        return
+    logger.info("  [隐藏状态探针] %s — framework=%d impl=%d compared=%d matched=%d",
+                status, diag.get("fw_state", 0), diag.get("im_state", 0),
+                diag.get("compared", 0), diag.get("matched", 0))
+    for w in diag.get("warnings", []):
+        logger.warning("  [隐藏状态探针] %s", w)
+
+
 def run_single_case(models: ModelPair, inputs, device, case_ctx: CaseContext, non_compute=False):
     """验证单组输入。失败时抛出 AssertionError / AccuracyError。"""
     import torch
@@ -878,6 +956,14 @@ def run_single_case(models: ModelPair, inputs, device, case_ctx: CaseContext, no
 
     inputs_for_impl = [_move_to_device(x, device) for x in inputs]
     inputs_for_framework = [_move_to_device(x, device) for x in inputs]
+
+    # 隐藏状态对齐检查：仅第 1 个用例执行一次。
+    # 必须放在正式 forward **之前** —— 生成实现编译失败时（CompilationError）
+    # 正式 forward 会直接抛异常，探针就再也没有机会执行。探针内部的 warmup
+    # 自带 try/except，可以在 kernel 跑不起来的情况下照样对拍权重。
+    # 对不持有隐藏状态的算子直接 SKIP（630 归档 77/77 全部 SKIP，误判率 0）。
+    if _HIDDEN_STATE_PROBE_ARMED and case_idx == 1:
+        _run_hidden_state_probe(models, case_ctx, inputs_for_framework)
 
     with torch.no_grad():
         impl_output = models.impl(*inputs_for_impl)
@@ -897,6 +983,11 @@ def run_single_case(models: ModelPair, inputs, device, case_ctx: CaseContext, no
     logger.info("  [输出概览] 共 %d 个输出，non_compute=%s", len(framework_output), non_compute)
 
     for i, (fw_out, impl_out) in enumerate(zip(framework_output, impl_output)):
+        if fw_out is None and impl_out is None:
+            # 可选输出契约：参考实现按开关（output_final_state / has_q 等）返回 None，
+            # 实现侧同样返回 None —— 语义一致，跳过该输出的比对。
+            logger.info("  [输出 %d] framework/impl 均为 None（可选输出未启用），跳过比对", i)
+            continue
         if fw_out is None or impl_out is None:
             raise AssertionError(
                 f"[用例 {case_idx}/{total_cases}] 输出 {i} 为 None: "
@@ -920,6 +1011,7 @@ def run_single_case(models: ModelPair, inputs, device, case_ctx: CaseContext, no
 def _load_verify_modules(op_name, verify_dir, triton_impl_name):
     """导入 framework / impl 模块并解析关键符号。"""
     sys.path.insert(0, verify_dir)
+    _arm_hidden_state_probe(os.path.join(verify_dir, f"{op_name}_torch.py"))
     torch_module = importlib.import_module(f"{op_name}_torch")
     impl_module = importlib.import_module(f"{op_name}_{triton_impl_name}")
     return {
