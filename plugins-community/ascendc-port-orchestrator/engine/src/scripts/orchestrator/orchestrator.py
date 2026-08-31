@@ -9,7 +9,7 @@
 # ----------------------------------------------------------------------------------------------------------
 """Scoped AscendC workflow engine.
 
-New customer work is admitted only through ``--port-a3`` (arch22 to arch35)
+New customer work is admitted only through ``--port-a3-ops`` (arch22 to arch35)
 or ``--backward``. Positional invocation is reserved for lifecycle operations
 on workspaces whose persisted mode was created by one of those two entries.
 
@@ -259,9 +259,6 @@ def run_single_op(
     if backend not in (None, "ascendc"):
         print("ERROR: this orchestrator supports only the AscendC kernel backend")
         return 2
-    if extra_lanes:
-        print("ERROR: multi-rank generation is outside this orchestrator's scope")
-        return 2
     if workspace is None:
         workspace = _resolve_workspace(op, backend="ascendc")
 
@@ -269,17 +266,68 @@ def run_single_op(
     if scoped_mode is None:
         print(
             f"ERROR: workspace {workspace} has no supported persisted mode; "
-            "start work with --port-a3 or --backward"
+            "start work with --port-a3-ops or --backward"
         )
         return 2
+    reference_provider = None
     if scoped_mode == "port_a3_to_a5":
-        valid_stage, stage_reason, _stage_manifest = verify_source_stage(workspace)
-        if not valid_stage:
-            print(
-                "ERROR: migration source-only snapshot validation failed before "
-                f"run: {stage_reason}"
-            )
+        try:
+            from reference_source import NPUBENCH, resolve_reference_source
+
+            reference_provider = resolve_reference_source(workspace)
+        except Exception as exc:
+            print(f"ERROR: migration reference binding is invalid: {exc}")
             return 2
+        if extra_lanes and reference_provider != NPUBENCH:
+            print("ERROR: multi-lane evaluation is currently reserved for npubench")
+            return 2
+    elif extra_lanes:
+        print("ERROR: multi-rank generation is outside this orchestrator's scope")
+        return 2
+    if scoped_mode == "port_a3_to_a5":
+        # The frozen NPUKernelBench task, not the arch22 source snapshot, is
+        # its functional provider.  O2.5 has a dedicated bundle preflight, so
+        # do not call the live-source-oriented stage verifier on this route.
+        if reference_provider != NPUBENCH:
+            valid_stage, stage_reason, _stage_manifest = verify_source_stage(workspace)
+            if not valid_stage:
+                print(
+                    "ERROR: migration source-only snapshot validation failed before "
+                    f"run: {stage_reason}"
+                )
+                return 2
+        else:
+            try:
+                persisted_state = json.loads((workspace / ".opgen_state.json").read_text())
+            except Exception as exc:
+                print(
+                    "ERROR: durable state is unreadable before source validation: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return 2
+            if (
+                isinstance(persisted_state, dict)
+                and isinstance(persisted_state.get("port_source"), dict)
+                and persisted_state["port_source"].get("kind") == "port-aclnn-tilelang2ascendc"
+            ):
+                try:
+                    from tilelang2ascendc_source import verify_tilelang2ascendc_source_stage
+
+                    valid_stage, stage_reason, _stage_manifest = verify_tilelang2ascendc_source_stage(
+                        workspace, persisted_state
+                    )
+                except Exception as exc:
+                    print(
+                        "ERROR: TileLang2AscendC migration source validation raised before run: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    return 2
+                if not valid_stage:
+                    print(
+                        "ERROR: TileLang2AscendC migration source snapshot validation failed before "
+                        f"run: {stage_reason}"
+                    )
+                    return 2
 
     # Per-invocation runtime_kwargs bag — passed through every
     # state_executor.next_state call so the generic `plugin_method` YAML

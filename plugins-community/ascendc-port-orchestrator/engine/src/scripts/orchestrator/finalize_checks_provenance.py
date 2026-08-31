@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Optional
 
 import perf_irm_provenance
+from npubench.npubench_finalize_contract import (
+    resolve_npubench_workspace,
+    validate_npubench_finalize_evidence,
+)
 
 from finalize_pipeline import _get_active_plugin
 
@@ -341,12 +345,28 @@ def _newest_delegation_source_mtime(workspace: Path) -> float:
     """Return the newest mtime used by the delegation-marker producer."""
     newest_mtime = 0.0
     source_suffixes = (".h", ".hpp", ".cpp", ".cc", ".cxx", ".py")
+    runtime_suffixes = (".log", ".stdout", ".stderr")
     for directory_name in _delegation_source_directory_names(workspace):
         kernel_dir = workspace / directory_name
         if not kernel_dir.is_dir():
             continue
         for source_file in kernel_dir.rglob("*"):
-            if source_file.is_file() and source_file.suffix in source_suffixes:
+            if not source_file.is_file():
+                continue
+            relative_parts = source_file.relative_to(workspace).parts
+            # Align with npubench_runner._candidate_excluded: harness build
+            # products (kernel/build, hidden dirs, caches, log files) are NOT
+            # candidate sources.  The O5 controlled build rewrites kernel/build
+            # every round; counting its generated .cpp files as "kernel
+            # source" made the marker STALE on each evaluation round (audit
+            # H2 — two different definitions of the same fact).
+            if "build" in relative_parts or "__pycache__" in relative_parts:
+                continue
+            if any(part.startswith(".") for part in relative_parts):
+                continue
+            if source_file.suffix in runtime_suffixes:
+                continue
+            if source_file.suffix in source_suffixes:
                 newest_mtime = max(newest_mtime, source_file.stat().st_mtime)
     for workspace_file in (
         workspace / "model_new_ascendc.py",
@@ -495,7 +515,19 @@ def _check_post_worker_audit(workspace: Path, vj: dict) -> Optional[str]:
     audit_error, audit_body = _post_worker_audit_content(workspace, status)
     if audit_error:
         return audit_error
-    if audit_body is None or not _post_worker_audit_allows_finalize(audit_body):
+    verdict = _post_worker_audit_verdict(audit_body) if audit_body is not None else None
+    if verdict is None:
+        # Harness-authored audit with an unparseable verdict wording — an
+        # ambiguous condition, not fraud (audit M4, 2026-08-22).  Warn and
+        # continue; the harness regenerates the doc via /aog-self-critic on
+        # the next pass.  Only explicit FAIL (or PARTIAL without waiver)
+        # blocks finalize.
+        logging.getLogger(__name__).warning(
+            "post-worker audit verdict unparseable (body=%s bytes); "
+            "treating as non-blocking — audit regenerates via /aog-self-critic",
+            len(audit_body or ""),
+        )
+    elif not _post_worker_audit_allows_finalize(audit_body):
         return (
             f"precision.status={status} but audit_self_critic_post_worker.md "
             "verdict is not PASS (and not PARTIAL+waiver) — "
@@ -508,6 +540,14 @@ def _check_post_worker_audit(workspace: Path, vj: dict) -> Optional[str]:
     pass_b_error = _check_post_worker_pass_b(precision, status)
     if pass_b_error:
         return pass_b_error
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if is_npubench:
+        if source_error:
+            return source_error
+        # Preserve the agent self-critic/delegation gates above, but make the
+        # independent, harness-owned runner report (not a generic worker IRM)
+        # the sole performance proof for this provider.
+        return validate_npubench_finalize_evidence(workspace, vj)
     return _check_perf_irm_provenance(vj, status)
 
 

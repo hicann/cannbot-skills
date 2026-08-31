@@ -35,11 +35,14 @@ patched calls (resolved at CALL time). No import-time cycle.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -52,7 +55,8 @@ from phase_o5_runner import (  # non-patched build/config helpers + project root
 )
 from phase_o5_helpers import (
     _find_verifier, _lane_aware_benchmark_root, _normalize_canonical_pass_a,
-    _normalize_port_a3_two_tier_pass_a, _normalize_verifier_output,
+    _normalize_port_a3_two_tier_pass_a,
+    _normalize_verifier_output,
     _resolve_extra_ld, _resolve_extra_pythonpath, _resolve_npu_python_bin,
     _resolve_ssh_key_opts,
     _shell_quote, _docker_sudo_enabled, _maybe_sudo_wrap_remote,
@@ -70,6 +74,81 @@ class _RemoteTarget:
     password: str
     container: str
     cann_path: str
+
+
+def _is_lower_sha256(value: object) -> bool:
+    """Return whether ``value`` is a canonical SHA-256 digest."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _regular_file_sha256(path: Path, label: str) -> str:
+    """Hash a local regular file without following a replacement symlink.
+
+    The controller must never unpickle a target-produced candidate capture:
+    target NPU tensor storage may be unavailable locally, and finalization only
+    needs an exact byte binding.  A no-follow descriptor makes that binding
+    robust against a local symlink replacement while the transfer is in flight.
+    """
+    try:
+        initial_mode = os.lstat(path).st_mode
+    except OSError as error:
+        raise OSError(f"{label} is missing or unreadable: {error}") from error
+    if not stat.S_ISREG(initial_mode):
+        raise OSError(f"{label} must be a regular non-symlink file")
+    # Read-only descriptor: ``os.open`` takes no meaningful permission ``mode``
+    # here because a mode only applies when the open creates the file
+    # (O_CREAT/O_TMPFILE).  O_NOFOLLOW and O_CLOEXEC are security properties of
+    # this binding and must be kept.
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise OSError(f"cannot open {label} without following links: {error}") from error
+    # The descriptor is owned here, so close it on every path including the
+    # regular-file rejection and any read error.
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(f"{label} must be a regular non-symlink file")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        os.close(descriptor)
+    return digest.hexdigest()
+
+
+def _reject_nonregular_local_destination(path: Path, label: str) -> None:
+    """Reject a stale link/special file before atomically replacing it."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(mode):
+        raise OSError(f"{label} must be a regular non-symlink file when present")
+
+
+def _scp_command(
+    target: _RemoteTarget, ssh_opts: list[str], remote_path: str, local_path: Path,
+) -> list[str]:
+    """Build the password- or key-auth SCP command used for an O5 receipt."""
+    remote_spec = f"{target.user}@{target.host}:{remote_path}"
+    if target.password:
+        return [
+            "sshpass", "-p", target.password, "scp", *ssh_opts,
+            remote_spec, str(local_path),
+        ]
+    return ["scp", *ssh_opts, remote_spec, str(local_path)]
 
 
 def _normalized_target(env: dict) -> str:
@@ -279,12 +358,13 @@ def _run_local_pass_a_fallback(
     return None
 
 
-def _local_measured_result(pass_a, pass_b) -> MeasuredResult:
+def _local_measured_result(pass_a, pass_b, perf=None) -> MeasuredResult:
     """Build the local verifier result without changing its normalization rules."""
     return MeasuredResult(
         pass_a=pass_a if isinstance(pass_a, dict) else None,
         pass_b=pass_b if isinstance(pass_b, dict) else None,
         determinism=None,
+        perf=perf if isinstance(perf, dict) else None,
     )
 
 
@@ -337,7 +417,7 @@ def _run_verifier_local(workspace: Path, op: str, env: dict, *, lane: int = 0) -
             if fallback_pass_a is not None:
                 pass_a = fallback_pass_a
 
-    return _local_measured_result(pass_a, pass_b)
+    return _local_measured_result(pass_a, pass_b, None)
 
 
 def _run_local_canonical_script(
@@ -417,11 +497,21 @@ def _run_canonical_pass_a_local(
     if not (workspace / "model_new_ascendc.py").exists():
         return f"canonical pass_a (local): workspace/{op}/model_new_ascendc.py missing"
 
-    canonical_basename = "precision_eval_port_a3_two_tier.py" if is_port_a3 else "precision_eval_two_tier.py"
+    canonical_basename = (
+        "precision_eval_port_a3_two_tier.py"
+        if is_port_a3
+        else "precision_eval_two_tier.py"
+    )
     canonical_script = _PROJECT_ROOT / "src" / "scripts" / canonical_basename
     if not canonical_script.exists():
         return f"canonical pass_a (local): canonical script not found at {canonical_script}"
-    return _run_local_canonical_script(workspace, op, canonical_script, lane, is_port_a3)
+    return _run_local_canonical_script(
+        workspace,
+        op,
+        canonical_script,
+        lane,
+        is_port_a3,
+    )
 
 
 def _gate_port_a3_two_tier(workspace: Path, pass_a) -> Optional[str]:
@@ -445,6 +535,10 @@ def _gate_port_a3_two_tier(workspace: Path, pass_a) -> Optional[str]:
     missing tier2_status).
     """
     if not getattr(phase_o5_runner, "_is_port_a3_mode")(workspace):
+        return None
+    from reference_source import uses_live_a3_reference
+
+    if not uses_live_a3_reference(workspace):
         return None
     if not isinstance(pass_a, dict):
         return None  # None or error string — surfaced elsewhere; not a masquerade
@@ -544,6 +638,7 @@ def _build_remote_verifier_command(
     benchmark_root: str,
     script_name: str,
     lane: int,
+    script_args: tuple[str, ...] = (),
 ) -> tuple[str, bool]:
     """Build the verifier command for either container or host-direct mode."""
     cann_setenv = f"source {target.cann_path}/set_env.sh"
@@ -553,10 +648,11 @@ def _build_remote_verifier_command(
     container_python, container_setup = _container_npu_python_setup(
         target.cann_path, npu_python, extra_ld, extra_pythonpath)
     visible_device = _resolve_visible_device(env, workspace, lane)
+    argument_suffix = "".join(f" {_shell_quote(argument)}" for argument in script_args)
     docker_cmd = (
         f"cd {benchmark_root}/current_task && "
         f"export ASCEND_RT_VISIBLE_DEVICES={visible_device} && "
-        f"{cann_setenv} && {container_setup}{container_python} {script_name}"
+        f"{cann_setenv} && {container_setup}{container_python} {script_name}{argument_suffix}"
     )
 
     host_mode = str(env.get("A5_HOST_MODE", "")).strip() in ("1", "true", "yes")
@@ -581,7 +677,7 @@ def _build_remote_verifier_command(
         f"export LD_LIBRARY_PATH={host_extra_ld}:${{LD_LIBRARY_PATH:-}}; "
         f"export PATH={os.path.dirname(host_python)}:$PATH; "
         f"export ASCEND_RT_VISIBLE_DEVICES={lane}; "
-        f"cd {benchmark_root}/current_task && {host_python} {script_name}"
+        f"cd {benchmark_root}/current_task && {host_python} {script_name}{argument_suffix}"
     )
     return host_cmd, host_mode
 
@@ -625,6 +721,7 @@ def _run_verifier(
     *,
     lane: int = 0,
     raw: bool = False,
+    script_args: tuple[str, ...] = (),
 ) -> dict | str:
     """Run a verifier script (run_pass_b.py / run_det_check.py / edge_verify.py)
     on A5 via SSH+docker exec. Captures stdout, parses last JSON object.
@@ -647,7 +744,7 @@ def _run_verifier(
         workspace, env, target=target, cann_path=cann_path)
     benchmark_root = _lane_aware_benchmark_root(env, lane)
     remote_cmd, host_mode = _build_remote_verifier_command(
-        workspace, env, remote_target, benchmark_root, script_name, lane)
+        workspace, env, remote_target, benchmark_root, script_name, lane, script_args)
     ssh_opts = _ssh_options(env, remote_target.name)
     ssh_cmd = _ssh_command(remote_target, ssh_opts, remote_cmd)
 
@@ -762,7 +859,8 @@ def _build_remote_canonical_command(
 
 
 def _normalize_remote_canonical_result(
-    result: subprocess.CompletedProcess, is_port_a3: bool,
+    result: subprocess.CompletedProcess,
+    is_port_a3: bool,
 ) -> dict | str:
     """Return the canonical Pass A result while retaining its failure text."""
     parsed = _try_parse_json_tail(result.stdout)
@@ -791,17 +889,14 @@ def _run_canonical_pass_a(
         str:  error message (caller falls back to worker pass_a_runner.py).
         None: canonical not applicable (e.g. T3-axis op — caller falls back).
     """
-    # The canonical script needs model.py + model_new_ascendc.py in the
-    # archive_dir. If either is missing, fall back to worker scripts.
-    if not (workspace / "model.py").exists():
-        return f"canonical pass_a skipped: workspace/{op}/model.py missing"
-    if not (workspace / "model_new_ascendc.py").exists():
-        return f"canonical pass_a skipped: workspace/{op}/model_new_ascendc.py missing"
-
     canonical_config = _canonical_pass_a_config(workspace)
     if isinstance(canonical_config, str):
         return canonical_config
     is_port_a3, canonical_script_name, precision_suffix = canonical_config
+    if not (workspace / "model.py").exists():
+        return f"canonical pass_a skipped: workspace/{op}/model.py missing"
+    if not (workspace / "model_new_ascendc.py").exists():
+        return f"canonical pass_a skipped: workspace/{op}/model_new_ascendc.py missing"
 
     target = _normalized_target(env)
     cann_path = _a5_build_cann_path(env, workspace, target)
@@ -825,4 +920,8 @@ def _run_canonical_pass_a(
     except FileNotFoundError as e:
         return f"canonical pass_a: tool missing ({e})"
 
-    return _normalize_remote_canonical_result(result, is_port_a3)
+    normalized = _normalize_remote_canonical_result(
+        result,
+        is_port_a3,
+    )
+    return normalized

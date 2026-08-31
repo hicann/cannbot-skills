@@ -10,7 +10,7 @@
 """orchestrator_cmds.py — CLI subcommand handlers (DEBT-201 god-function split).
 
 Extracted from orchestrator.py to shrink the orchestrator god-file below the
-<1000-line bar.  Only the two scoped start commands (`--port-a3` and
+<1000-line bar.  Only the two scoped start commands (`--port-a3-ops` and
 `--backward`) plus lifecycle handlers remain.
 (`_parse_bump_caps`).
 
@@ -31,6 +31,7 @@ import logging
 import datetime as _dt
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,22 @@ from typing import Optional
 import resume as resume_mod
 import state_executor
 from logging_config import get_logger
+from npubench.npubench_inputs import (
+    NpubenchInputError,
+    atomic_write_state,
+    bind_npubench_state,
+    stage_npubench_inputs,
+    validate_cli_npubench_args,
+)
+from reference_source import (
+    A3_LIVE,
+    CANNBENCH,
+    NPUBENCH,
+    VALID_REFERENCE_SOURCES,
+    explicit_a3_live_binding,
+    explicit_cannbench_binding,
+    resolve_reference_source,
+)
 from orchestrator_coldstart import _cold_start_reset_workspace
 from source_arch import (
     detect_source_arch,
@@ -46,8 +63,112 @@ from source_arch import (
     verify_source_stage,
 )
 from validation import _spec_has_backward_contract, _validate_a3_host_home_mount
+from a5_target_capability import a5_soc_version, is_limited_a5_soc, limited_a5_warning
 
 log = get_logger(__name__)
+
+
+TILELANG2ASCENDC_SOURCE_KIND = "port-aclnn-tilelang2ascendc"
+TILELANG2ASCENDC_SOURCE_KIND_ALIAS = "port_aclnn_tilelang2ascendc"
+TILELANG2ASCENDC_CANDIDATE_KIND = "tilelang2ascendc_custom_op"
+
+
+def _tilelang2ascendc_source_api():
+    """Return the independent TileLang2AscendC source adapter."""
+    try:
+        from tilelang2ascendc_source import (
+            detect_tilelang2ascendc_source,
+            logical_op_name,
+            stage_tilelang2ascendc_source_tree,
+            verify_tilelang2ascendc_source_stage,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "port-aclnn-tilelang2ascendc requires the tilelang2ascendc_source staging adapter"
+        ) from exc
+    return (
+        detect_tilelang2ascendc_source,
+        logical_op_name,
+        stage_tilelang2ascendc_source_tree,
+        verify_tilelang2ascendc_source_stage,
+    )
+
+
+_TILELANG2ASCENDC_REQUIRED_FIELDS = (
+    ("port_a3_source", "stage root"),
+    ("source_stage_manifest", "stage manifest"),
+    ("source_stage_digest", "stage digest"),
+    ("source_stage_file_count", "stage file count"),
+    ("graybox_source_dir", "graybox source bind"),
+)
+
+
+def _is_tilelang2ascendc_source_state(state: dict) -> bool:
+    """Return true when durable state declares the TileLang2AscendC route."""
+    kind = state.get("source_kind")
+    if kind in (TILELANG2ASCENDC_SOURCE_KIND, TILELANG2ASCENDC_SOURCE_KIND_ALIAS):
+        return True
+    port_source = state.get("port_source")
+    return isinstance(port_source, dict) and port_source.get("kind") == TILELANG2ASCENDC_SOURCE_KIND
+
+
+def _tilelang2ascendc_stage_binding_ok(port_source: dict, state: dict) -> bool:
+    """Compare the staged metadata with durable state as two flat mappings.
+
+    Expressed as one mapping equality rather than a long boolean chain: every
+    pair below was ANDed before, and none of the lookups has a side effect, so
+    the verdict is unchanged.
+    """
+    staged = {
+        "stage_root": port_source.get("stage_root"),
+        "manifest": port_source.get("manifest"),
+        "digest": port_source.get("digest"),
+        "file_count": port_source.get("file_count"),
+        "source_arch": port_source.get("source_arch"),
+        "target_arch": port_source.get("target_arch"),
+        "root_layout": port_source.get("root_layout"),
+        "graybox_bind": state.get("graybox_source_dir"),
+    }
+    durable = {
+        "stage_root": state.get("port_a3_source"),
+        "manifest": state.get("source_stage_manifest"),
+        "digest": state.get("source_stage_digest"),
+        "file_count": state.get("source_stage_file_count"),
+        "source_arch": "arch35",
+        "target_arch": "arch35",
+        "root_layout": "model_and_kernel",
+        "graybox_bind": state.get("port_a3_source"),
+    }
+    return staged == durable
+
+
+def _tilelang2ascendc_identity_error(state: dict) -> str | None:
+    """Return the first durable-identity defect, or None when the state binds."""
+    port_source = state.get("port_source")
+    if state.get("source_kind") != TILELANG2ASCENDC_SOURCE_KIND:
+        return "TileLang2AscendC source_kind is missing or mismatched"
+    if not isinstance(port_source, dict) or port_source.get("kind") != TILELANG2ASCENDC_SOURCE_KIND:
+        return "TileLang2AscendC port_source.kind is missing or mismatched"
+    if state.get("source_arch") != "arch35" or state.get("target_arch") != "arch35":
+        return "TileLang2AscendC route must persist source_arch=target_arch=arch35"
+    for field, label in _TILELANG2ASCENDC_REQUIRED_FIELDS:
+        if state.get(field) in (None, ""):
+            return f"TileLang2AscendC {label} is missing"
+    if not _tilelang2ascendc_stage_binding_ok(port_source, state):
+        return "TileLang2AscendC stage metadata disagrees with durable port_source"
+    return None
+
+
+def _verify_tilelang2ascendc_source_binding(workspace: Path, state: dict):
+    """Authenticate the immutable TileLang2AscendC source project."""
+    identity_error = _tilelang2ascendc_identity_error(state)
+    if identity_error is not None:
+        return False, identity_error, None
+    try:
+        _detect, _logical_op, _stage, verify = _tilelang2ascendc_source_api()
+        return verify(workspace, state)
+    except Exception as exc:
+        return False, f"TileLang2AscendC source-stage verifier unavailable or failed: {exc}", None
 
 
 # Sentinel attribute that identifies the orchestrator MODULE among candidate
@@ -98,7 +219,26 @@ def _workspace_mode(workspace: Path) -> Optional[str]:
     except Exception:
         return None
     if mode == "port_a3_to_a5":
-        valid, reason, _manifest = verify_source_stage(workspace, state)
+        try:
+            source = resolve_reference_source(state)
+        except Exception as exc:
+            log.error("migration workspace has no valid explicit reference: %s", exc)
+            return None
+        # The TileLang2AscendC explicit source kind carries its own arch35
+        # snapshot contract.  It is implementation context, not NPUKernelBench
+        # truth, but resume must still authenticate it before any agent can
+        # read it.  In particular this check is driven only by durable state,
+        # never by the one-shot CLI value that created the workspace.
+        if _is_tilelang2ascendc_source_state(state):
+            valid, reason, _manifest = _verify_tilelang2ascendc_source_binding(workspace, state)
+        # The benchmark providers' source of truth is their frozen bundle, not
+        # the legacy arch22 port-A3 source snapshot.  Keep the established
+        # behaviour unchanged.
+        elif source in {A3_LIVE}:
+            valid, reason, _manifest = verify_source_stage(workspace, state)
+        else:
+            valid = True
+            reason = "not required for frozen benchmark provider"
         if not valid:
             log.error("migration workspace rejected before resume: %s", reason)
             return None
@@ -319,6 +459,131 @@ def _cmd_backward(
 
 
 
+def _bind_explicit_reference(state_payload: dict, expected_reference: dict) -> bool:
+    """Bind an explicit truth-source reference into the workspace state payload.
+
+    Returns False (after printing the operator diagnostic) when the workspace
+    already carries a different or partial binding: changing the truth source
+    in place is refused, exactly as before this was factored out.
+    """
+    existing_reference = state_payload.get("reference")
+    if existing_reference is None:
+        state_payload["reference"] = expected_reference
+        return True
+    if existing_reference != expected_reference:
+        print(
+            "ERROR: workspace already has a different or partial reference binding; "
+            "use an explicit migration/cold start instead of changing truth source"
+        )
+        return False
+    return True
+
+
+def _a3_container_mount_gate(env) -> int:
+    """P129 runtime gate: A3_HOST_HOME must match the container's bind mount.
+
+    Catches the silent slice-vs-default-mount drift behind the 2026-05-16/17
+    P126->P129 incident (an a3 destroy/recreate with the default mount left
+    ``env.a3_host_home`` pointing at a slice path the container does not bind,
+    so scp pushed to the wrong host path and the runner's ``cd`` failed
+    mid-flight with a confusing message).  Hard-fail here instead.
+
+    Returns the CLI exit status; ``0`` means the gate passed or was skipped.
+    """
+    if os.environ.get("A3_HOST_MODE", "") == "1":
+        # A3_HOST_MODE (2026-06-11): host-direct A3 reference bypasses the
+        # npu-a3 container entirely (torch_npu runs on the host python, see
+        # phase_o25_a3_ref._default_run_remote).  The container mount is
+        # irrelevant in this mode - skip the P129 container-mount gate.
+        print("INFO: A3_HOST_MODE=1 - P129 container-mount gate skipped (host-direct A3 ref).")
+        return 0
+    if not env.a3_host_home:
+        print(
+            "WARN: A3_HOST_HOME not set in workspace/.ascendc_env. P129 mount gate "
+            "skipped. Run `setup_a3_isolated_container.sh` to regenerate env (it "
+            "emits A3_HOST_HOME + A3_HOST_BACKUP). Continuing - phase_o25_a3_ref "
+            "will fall back to legacy default path."
+        )
+        return 0
+    # container_home CONFIG-DRIVEN (genericize (2)): read A3_CONTAINER_HOME from
+    # .ascendc_env so a scrubbed / non-npu_user deployment inspects the right
+    # mount Destination.
+    import phase_o25_a3_ref
+
+    return _validate_a3_host_home_mount(
+        env.a3_host, env.a3_container, env.a3_host_home,
+        container_home=getattr(phase_o25_a3_ref, "_a3_container_home")())
+
+
+def _apply_prior_durable_state(
+    state_path: Path,
+    *,
+    cold_start: bool,
+    state_payload: dict,
+) -> tuple[dict, int]:
+    """Fold an existing durable state file into ``state_payload``.
+
+    Returns ``(prior_state, rc)``.  A nonzero ``rc`` is the CLI exit status the
+    caller must propagate; ``prior_state`` is empty unless a warm start found a
+    usable prior binding.
+    """
+    if not state_path.exists():
+        return {}, 0
+    try:
+        prior = json.loads(state_path.read_text())
+        if not isinstance(prior, dict):
+            raise ValueError("durable state is not a JSON object")
+        if cold_start:
+            survivor_keys = set(prior)
+            if not survivor_keys.issubset({"lifetime_spawn_count"}):
+                raise ValueError("cold-start reset left unexpected durable state fields")
+            lifetime_spawn_count = prior["lifetime_spawn_count"]
+            if (
+                isinstance(lifetime_spawn_count, bool)
+                or not isinstance(lifetime_spawn_count, int)
+                or lifetime_spawn_count < 0
+            ):
+                raise ValueError("cold-start lifetime_spawn_count is malformed")
+            state_payload["lifetime_spawn_count"] = lifetime_spawn_count
+            return {}, 0
+        if "reference" not in prior or prior.get("reference") is None:
+            print(
+                "ERROR: existing workspace has no explicit reference binding; "
+                "run an explicit a3_live migration or use --cold-start"
+            )
+            return {}, 2
+        if not isinstance(prior.get("reference"), dict):
+            print("ERROR: existing workspace reference binding is malformed")
+            return {}, 2
+        state_payload["started_ts"] = prior.get("started_ts", state_payload["started_ts"])
+        state_payload["invocation_count"] = int(prior.get("invocation_count", 0)) + 1
+        return prior, 0
+    except Exception as error:
+        print(f"ERROR: existing workspace state is unreadable: {error}")
+        return {}, 2
+
+
+def _bind_reference_source(state_payload: dict, source: str, reference_stage) -> int:
+    """Bind the resolved reference source into ``state_payload``.
+
+    Returns the CLI exit status; ``0`` means the binding was written.
+    """
+    if source == NPUBENCH:
+        try:
+            bind_npubench_state(state_payload, reference_stage)
+        except NpubenchInputError as exc:
+            print(f"ERROR: could not bind NPUKernelBench state: {exc}")
+            return 2
+        return 0
+    if source == A3_LIVE:
+        return 0 if _bind_explicit_reference(state_payload, explicit_a3_live_binding()) else 2
+    if source == CANNBENCH:
+        return 0 if _bind_explicit_reference(state_payload, explicit_cannbench_binding()) else 2
+    # Defensive: CLI source validation above is exhaustive.
+    print(f"ERROR: unsupported reference source: {source!r}")
+    return 2
+
+
 def _cmd_port_a3(
     *,
     port_a3_dir: Path,
@@ -327,6 +592,13 @@ def _cmd_port_a3(
     cold_start: bool,
     cap_bumps: dict[str, int],
     timing: bool = False,
+    reference_source: str | None = None,
+    npubench_task: Path | None = None,
+    npubench_root: Path | None = None,
+    extra_lanes: list[int] | None = None,
+    source_kind: str | None = None,
+    source_arch: str | None = None,
+    candidate_kind: str | None = None,
 ) -> int:
     """W1 (2026-05-12, ROADMAP §1.5): arch22→arch35 port-mode entry point.
 
@@ -341,6 +613,13 @@ def _cmd_port_a3(
         plan_only: --plan flag; print plan, exit 0 without invoking state machine.
         cold_start: --cold-start flag; reset workspace before run.
         cap_bumps: --bump-cap dict (orchestrator-only audit).
+        reference_source: Explicit reference provider override (npubench or
+            a3_live).  Required for new invocations: bare --port-a3-ops without it
+            is a hard error.
+        npubench_task: Original old-format NPUKernelBench task Python file.
+        npubench_root: Optional task source-root closure.
+        extra_lanes: Explicit extra target lanes used only by the npubench
+            evaluator for safe precision/performance parallelism.
 
     Returns:
         exit code (0 on success, non-zero on validation / state-machine error)
@@ -348,7 +627,9 @@ def _cmd_port_a3(
     Pre-conditions checked:
         - port_a3_dir exists and is a directory
         - Contains op_host/ and op_kernel/ subdirs (ops-nn shape)
-        - .ascendc_env has A3_HOST + A3_CONTAINER populated (A3 reference run needs them)
+        - .ascendc_env has an A5 build/verify configuration (except the
+          deliberately unsupported CannBench reservation)
+        - a3_live additionally requires A3_HOST + A3_CONTAINER
 
     The live path validates and captures the arch22 reference before an
     independently-authored arch35 implementation is built and verified, then
@@ -359,45 +640,86 @@ def _cmd_port_a3(
 
     # Validation
     if not port_a3_dir.exists():
-        print(f"ERROR: --port-a3 path does not exist: {port_a3_dir}")
+        print(f"ERROR: --port-a3-ops path does not exist: {port_a3_dir}")
         return 2
     if not port_a3_dir.is_dir():
-        print(f"ERROR: --port-a3 path is not a directory: {port_a3_dir}")
+        print(f"ERROR: --port-a3-ops path is not a directory: {port_a3_dir}")
         return 2
-    op_host_dir = port_a3_dir / "op_host"
-    op_kernel_dir = port_a3_dir / "op_kernel"
-    if not op_host_dir.is_dir() or not op_kernel_dir.is_dir():
+    if source_kind == TILELANG2ASCENDC_SOURCE_KIND_ALIAS:
+        source_kind = TILELANG2ASCENDC_SOURCE_KIND
+    tilelang_source = source_kind == TILELANG2ASCENDC_SOURCE_KIND
+    if source_kind not in (None, TILELANG2ASCENDC_SOURCE_KIND):
+        print(f"ERROR: unsupported --source-kind: {source_kind!r}")
+        return 2
+    if not tilelang_source and (source_arch is not None or candidate_kind is not None):
         print(
-            f"ERROR: --port-a3 path does not look like an ops-nn op dir "
-            f"(missing op_host/ or op_kernel/): {port_a3_dir}"
+            "ERROR: --source-arch and --candidate-kind require an explicit "
+            "--source-kind (port-aclnn-tilelang2ascendc)"
         )
         return 2
+    if tilelang_source:
+        if source_arch not in (None, "arch35"):
+            print("ERROR: port-aclnn-tilelang2ascendc accepts source architecture arch35 only")
+            return 2
+        if candidate_kind not in (None, TILELANG2ASCENDC_CANDIDATE_KIND):
+            print(
+                "ERROR: --candidate-kind tilelang2ascendc_custom_op is required "
+                "for port-aclnn-tilelang2ascendc"
+            )
+            return 2
+        try:
+            (
+                detect_tilelang_source,
+                logical_tilelang_op,
+                _stage_tilelang,
+                _verify_tilelang,
+            ) = _tilelang2ascendc_source_api()
+            source_detection = detect_tilelang_source(port_a3_dir)
+            op_name = logical_tilelang_op(port_a3_dir)
+        except Exception as exc:
+            print(f"ERROR: TILELANG2ASCENDC_SOURCE_DETECTION_FAILED: {exc}")
+            return 2
+    else:
+        op_host_dir = port_a3_dir / "op_host"
+        op_kernel_dir = port_a3_dir / "op_kernel"
+        if not op_host_dir.is_dir() or not op_kernel_dir.is_dir():
+            print(
+                f"ERROR: --port-a3-ops path does not look like an ops-nn op dir "
+                f"(missing op_host/ or op_kernel/): {port_a3_dir}"
+            )
+            return 2
+        op_name = port_a3_dir.name
 
-    op_name = port_a3_dir.name
-
-    source_detection = detect_source_arch(port_a3_dir)
-    if not source_detection.supported or source_detection.arch != "arch22":
-        print(
-            "ERROR: --port-a3 requires a detected arch22 source; "
-            f"method={source_detection.method} arch={source_detection.arch!r} "
-            f"confidence={source_detection.confidence}"
-        )
-        for evidence in source_detection.evidence:
-            print(f"  evidence: {evidence}")
+    try:
+        npubench_args = validate_cli_npubench_args(npubench_task, npubench_root)
+    except NpubenchInputError as exc:
+        print(f"ERROR: {exc}")
         return 2
+    if tilelang_source:
+        if not source_detection.supported or source_detection.arch != "arch35":
+            print(
+                "ERROR: --source-kind port-aclnn-tilelang2ascendc requires a detected "
+                "arch35 TileLang2AscendC project; "
+                f"method={source_detection.method} arch={source_detection.arch!r} "
+                f"confidence={source_detection.confidence}"
+            )
+            for evidence in source_detection.evidence:
+                print(f"  evidence: {evidence}")
+            return 2
+    else:
+        source_detection = detect_source_arch(port_a3_dir)
+        if not source_detection.supported or source_detection.arch != "arch22":
+            print(
+                "ERROR: --port-a3-ops requires a detected arch22 source; "
+                f"method={source_detection.method} arch={source_detection.arch!r} "
+                f"confidence={source_detection.confidence}"
+            )
+            for evidence in source_detection.evidence:
+                print(f"  evidence: {evidence}")
+            return 2
 
-    # P87+ (2026-05-15): cold-start reset MUST happen BEFORE workspace seeding.
-    # The reset backs up .opgen_state.json and op_classification.json; if we
-    # seed those first, the reset wipes them, and run_single_op then can't
-    # detect migration mode (and would otherwise fail closed as unsupported).
-    # Order: backup-and-reset → seed → run.
-    # Compute workspace path manually (don't use _resolve_workspace which
-    # scans existing dirs — workspace may not exist on first invocation).
-    workspace_dir_early = _orch().WORKSPACE_ROOT / op_name
-    if cold_start and workspace_dir_early.exists():
-        _cold_start_reset_workspace(workspace_dir_early)
-
-    # Env check: A3 reference run needs A3 connection info.
+    # Environment preflight.  Both reference paths need an A5 build/verify
+    # target; only the legacy a3_live path additionally needs A3 connectivity.
     # DEBT-101 (2026-05-28): `load_env()` no-arg now resolves
     # DEFAULT_ASCENDC_ENV at call time (sentinel default) + honors
     # `ASCENDC_ENV_PATH` env var for subprocess test overrides. The earlier
@@ -411,29 +733,100 @@ def _cmd_port_a3(
     except Exception as e:
         print(f"ERROR: failed to load .ascendc_env: {e!r}")
         return 2
-    if env.target != "a5":
+    if reference_source is None and npubench_args is not None:
         print(
-            f"WARN: TARGET={env.target} in .ascendc_env; port-a3 mode assumes TARGET=a5. "
-            f"Continuing — A5 codegen will use the active target."
-        )
-    if not env.a3_host or not env.a3_container:
-        print(
-            "ERROR: --port-a3 requires A3_HOST + A3_CONTAINER in workspace/.ascendc_env "
-            "for the A3-CANN reference run. Run this plugin's init.sh, then add the "
-            "A3 fields documented in workspace/.ascendc_env.template."
+            "ERROR: --npubench-task requires --reference-source npubench; "
+            "the benchmark provider must be selected explicitly."
         )
         return 2
-    # P135.HV (2026-05-20 DS): port_a3 needs BOTH A3 and A5 hosts.
-    # AscendCEnv resolves host/container from current target (a3-ds → A3_HOST),
-    # so env.host may be the A3 host. A separate A5 build host is available if
-    # EITHER an explicit A5_HOST is configured (task#24-item2: dedicated key, lets
-    # a TARGET=a3 agent point port_a3 at a separate A5 host without flipping
-    # TARGET) OR the active-target host already differs from a3_host (TARGET=a5
-    # agent — the original DS path).
-    a5_build_host = env.a5_host or (env.host if env.host != env.a3_host else "")
-    if not a5_build_host:
+    configured_source = reference_source or env.port_a3_reference_source
+    if not configured_source:
         print(
-            "ERROR: --port-a3 requires a separate A5 host for build/verify. "
+            "ERROR: --port-a3-ops requires an explicit reference provider: pass "
+            "--reference-source npubench --npubench-task TASK_PY for a frozen "
+            "NPUKernelBench task (preferred), or explicitly select "
+            "--reference-source a3_live for a fresh A3 CANN capture."
+        )
+        return 2
+    if configured_source not in VALID_REFERENCE_SOURCES:
+        allowed = ", ".join(sorted(VALID_REFERENCE_SOURCES))
+        print(
+            "ERROR: PORT_A3_REFERENCE_SOURCE/--reference-source must be one of "
+            f"{allowed}; got {configured_source!r}"
+        )
+        return 2
+    if tilelang_source and configured_source != NPUBENCH:
+        print(
+            "ERROR: UNSUPPORTED_SOURCE_REFERENCE_COMBINATION: "
+            "port-aclnn-tilelang2ascendc requires --reference-source npubench "
+            "so the frozen task remains the only oracle"
+        )
+        return 2
+    if configured_source == NPUBENCH and npubench_args is None:
+        print(
+            "ERROR: --reference-source npubench requires --npubench-task TASK_PY"
+        )
+        return 2
+    if configured_source != NPUBENCH and npubench_args is not None:
+        print(
+            "ERROR: --npubench-task/--npubench-root require "
+            "--reference-source npubench"
+        )
+        return 2
+    resolved_reference_source = configured_source
+    if extra_lanes and resolved_reference_source != NPUBENCH:
+        print("ERROR: --extra-lane is supported only with --reference-source npubench")
+        return 2
+    if env.target != "a5":
+        print(
+            f"WARN: TARGET={env.target} in .ascendc_env; port-a3-ops mode assumes TARGET=a5. "
+            f"Continuing — A5 codegen will use the active target."
+        )
+    # NPUKernelBench target validation requires an A5-capable SoC.  Ascend910
+    # remains useful for preflight and codegen, but the final target gate is
+    # deliberately terminal for the explicit TileLang2AscendC source kind.
+    if tilelang_source:
+        configured_a5_soc = a5_soc_version(
+            {
+                "A5_SOC_VERSION": env.a5_soc_version,
+                "SOC_VERSION": env.soc_version,
+            }
+        )
+        if is_limited_a5_soc(configured_a5_soc):
+            print(limited_a5_warning(configured_a5_soc))
+    # Staged external references need only the A5 endpoint.  The live-A3 path
+    # retains its separate-host guard.  CannBench is intentionally accepted to
+    # persist an explicit unsupported-provider result without pretending an A5
+    # evaluator exists yet.
+    local_external_reference_target = (
+        resolved_reference_source == NPUBENCH
+        and (env.a5_container or (env.container if env.target.startswith("a5") else ""))
+        .strip()
+        .lower()
+        == "local"
+    )
+    if resolved_reference_source == NPUBENCH:
+        a5_build_host = env.a5_host or (
+            env.host if env.target.startswith("a5") else ""
+        )
+    else:
+        a5_build_host = env.a5_host or (
+            env.host if env.host != env.a3_host else ""
+        )
+    if (
+        resolved_reference_source != CANNBENCH
+        and not a5_build_host
+        and not local_external_reference_target
+    ):
+        if resolved_reference_source == NPUBENCH:
+            print(
+                "ERROR: staged external reference requires an A5 host "
+                "for build/verify, unless A5_CONTAINER=local selects the controller "
+                "as the explicit A5 target. Add A5_HOST or configure the local target."
+            )
+            return 9
+        print(
+            "ERROR: --port-a3-ops requires a separate A5 host for build/verify. "
             "Both host ({h}) and a3_host point to the same machine, and no "
             "explicit A5_HOST is configured. Add A5_HOST + A5_CONTAINER to "
             "workspace/.ascendc_env or ask the main agent to run this "
@@ -441,58 +834,93 @@ def _cmd_port_a3(
         )
         return 9  # distinct exit code for "mode requires unavailable host"
 
-    # P129 (2026-05-17): runtime gate validating A3_HOST_HOME ↔ container
-    # mount alignment. Catches the silent slice-vs-default-mount drift that
-    # caused the 2026-05-16/17 P126→P129 incident (a3 destroy/recreate with
-    # default mount left env.a3_host_home pointing at a slice path that the
-    # container doesn't bind, so scp pushed to wrong host path → runner cd
-    # failed mid-flight with confusing message). Hard-fail here instead.
-    if os.environ.get("A3_HOST_MODE", "") == "1":
-        # A3_HOST_MODE (2026-06-11): host-direct A3 reference bypasses the
-        # npu-a3 container entirely (torch_npu runs on the host python, see
-        # phase_o25_a3_ref._default_run_remote). The container mount is
-        # irrelevant in this mode — skip the P129 container-mount gate.
-        print("INFO: A3_HOST_MODE=1 — P129 container-mount gate skipped (host-direct A3 ref).")
-    elif env.a3_host_home:
-        # container_home CONFIG-DRIVEN (genericize ②): read A3_CONTAINER_HOME from .ascendc_env
-        # so a scrubbed / non-npu_user deployment inspects the right mount Destination.
-        import phase_o25_a3_ref
-        rc = _validate_a3_host_home_mount(
-            env.a3_host, env.a3_container, env.a3_host_home,
-            container_home=getattr(phase_o25_a3_ref, "_a3_container_home")())
+    if resolved_reference_source == A3_LIVE:
+        if not env.a3_host or not env.a3_container:
+            print(
+                "ERROR: --port-a3-ops requires A3_HOST + A3_CONTAINER in workspace/.ascendc_env "
+                "for the A3-CANN reference run. Run this plugin's init.sh, then add the "
+                "A3 fields documented in workspace/.ascendc_env.template."
+            )
+            return 2
+        # P129 (2026-05-17): runtime gate validating A3_HOST_HOME <-> container
+        # mount alignment; see _a3_container_mount_gate for the incident it guards.
+        rc = _a3_container_mount_gate(env)
         if rc != 0:
             return rc
-    else:
-        print(
-            "WARN: A3_HOST_HOME not set in workspace/.ascendc_env. P129 mount gate "
-            "skipped. Run `setup_a3_isolated_container.sh` to regenerate env (it "
-            "emits A3_HOST_HOME + A3_HOST_BACKUP). Continuing — phase_o25_a3_ref "
-            "will fall back to legacy default path."
-        )
 
     # Surface the plan regardless of --plan flag (cheap, informational).
     archive_root = Path(env.local_project or ".") / "output" / "a3_to_a5_port"
     print("=" * 72)
-    print(f"arch22→arch35 PORT MODE — op: {op_name}")
+    route_label = (
+        "arch35 TileLang2AscendC"
+        if tilelang_source
+        else "arch22→arch35"
+    )
+    print(f"{route_label} PORT MODE — op: {op_name}")
     print("=" * 72)
     print(f"  source            : {port_a3_dir}")
-    print(f"  source architecture: arch22 ({source_detection.method}, "
-          f"confidence={source_detection.confidence})")
+    if tilelang_source:
+        print(
+            "  source architecture: arch35 (explicit port-aclnn-tilelang2ascendc; "
+            f"{source_detection.method}, confidence={source_detection.confidence})"
+        )
+    else:
+        print(f"  source architecture: arch22 ({source_detection.method}, "
+              f"confidence={source_detection.confidence})")
     print(f"  active target     : {env.target} (host={env.host}, container={env.container})")
-    print(f"  A3 reference host : {env.a3_host} (container={env.a3_container}, SOC={env.a3_soc_version})")
+    print(f"  reference source  : {resolved_reference_source}")
+    if resolved_reference_source == A3_LIVE:
+        print(f"  A3 reference host : {env.a3_host} (container={env.a3_container}, SOC={env.a3_soc_version})")
+    elif resolved_reference_source == NPUBENCH:
+        print(f"  npubench task     : {npubench_args.task_path}")
+        print(f"  npubench root     : {npubench_args.root_path}")
+        print("  npubench format   : original .py + same-stem JSON/JSONL sidecar")
+    else:
+        print("  CannBench         : provider interface reserved; evaluator unavailable")
     print(f"  A5 build lane     : NPU {lane}")
+    if extra_lanes:
+        print(f"  npubench perf lane: NPU {extra_lanes[0]} (leased if safe)")
     print("  opgen_mode        : port_a3_to_a5")
     print(f"  archive target    : {archive_root}/{op_name}/")
     print("  phases (planned)  :")
     print("    O0 preflight    : standard")
     print("    O1 config       : opgen_mode=port_a3_to_a5 propagated via AscendCEnv (W2)")
-    print("    O2 source sync  : fixed arch22 source stage prepared")
-    print("    O2.5 reference  : live arch22 reference capture")
+    print(
+        "    O2 source sync  : fixed arch35 TileLang2AscendC source stage prepared"
+        if tilelang_source else "    O2 source sync  : fixed arch22 source stage prepared"
+    )
+    if resolved_reference_source == A3_LIVE:
+        print("    O2.5 reference  : live arch22 reference capture")
+        print("    O5 verify       : truth = fresh live arch22 reference output")
+    elif resolved_reference_source == NPUBENCH:
+        print("    O2.5 reference  : immutable original NPUKernelBench task preflight")
+        print("    O5 verify       : truth = frozen NPUKernelBench task (no A3 truth)")
+    else:
+        print("    O2.5 reference  : persist UNSUPPORTED_REFERENCE_SOURCE")
+        print("    O5 verify       : unavailable until CannBench evaluator is implemented")
     print("    O3 PROGRESS     : standard")
-    print("    O4 kw spawn     : independent arch35 implementation from arch22 semantics")
-    print("    O5 verify       : truth = fresh live arch22 reference output")
-    print("    O6 archive      : ops-nn mirror layout writer")
+    print(
+        "    O4 kw spawn     : independent TileLang2AscendC project candidate"
+        if tilelang_source else "    O4 kw spawn     : independent arch35 implementation from arch22 semantics"
+    )
+    print(
+        "    O6 archive      : TileLang2AscendC kernel project layout writer"
+        if tilelang_source else "    O6 archive      : ops-nn mirror layout writer"
+    )
     print("=" * 72)
+
+    # A plan is validation and presentation only: no cold-start reset, no
+    # workspace creation, and no source/reference staging or state mutation.
+    if plan_only:
+        return 0
+
+    # P87+ (2026-05-15): cold-start reset MUST happen BEFORE workspace seeding.
+    # The reset backs up .opgen_state.json and op_classification.json; if we
+    # seed those first, the reset wipes them, and run_single_op then can't
+    # detect migration mode (and would otherwise fail closed as unsupported).
+    workspace_dir_early = _orch().WORKSPACE_ROOT / op_name
+    if cold_start and workspace_dir_early.exists():
+        _cold_start_reset_workspace(workspace_dir_early)
 
     # W12 (2026-05-12, ROADMAP §1.5): seed op_classification.json with the
     # a3_to_a5_port tag so kb_manifest_block auto-loads W8-W11 KB entries
@@ -503,11 +931,79 @@ def _cmd_port_a3(
     # and _resolve_workspace's iterdir-fallback errors on missing WORKSPACE_ROOT.
     workspace_dir = _orch().WORKSPACE_ROOT / op_name
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    state_path = workspace_dir / ".opgen_state.json"
+    # Explicit source-kind bindings are immutable for the lifetime of a
+    # workspace.  In particular, do this check before staging so a second CLI
+    # invocation cannot replace the previously bound snapshot and only then
+    # discover that it disagrees with durable state.  --resume uses durable
+    # state directly and never arrives through this constructor.
+    if state_path.exists() or state_path.is_symlink():
+        try:
+            metadata = state_path.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("durable state is not a regular file")
+            existing_pre_stage = json.loads(state_path.read_text(encoding="utf-8"))
+            if not isinstance(existing_pre_stage, dict):
+                raise ValueError("durable state is not a JSON object")
+        except Exception as exc:
+            print(f"ERROR: existing workspace state is unreadable: {exc}")
+            return 2
+        existing_port_source = existing_pre_stage.get("port_source")
+        existing_kind = (
+            existing_pre_stage.get("source_kind")
+            or (
+                existing_port_source.get("kind")
+                if isinstance(existing_port_source, dict) else None
+            )
+        )
+        # A source kind is not a mutable option.  In particular a legacy
+        # workspace cannot become TileLang2AscendC merely by repeating the
+        # start CLI, and a TileLang2AscendC workspace cannot fall back to a
+        # different route.  Cold-start has already archived the old durable
+        # state before this point and is the sole explicit reset mechanism.
+        if not cold_start and (
+            tilelang_source
+            or existing_kind in {
+                TILELANG2ASCENDC_SOURCE_KIND,
+                TILELANG2ASCENDC_SOURCE_KIND_ALIAS,
+            }
+        ):
+            conflict_code = "TILELANG2ASCENDC_SOURCE_STATE_CONFLICT"
+            print(
+                f"ERROR: {conflict_code}: existing workspace source binding is immutable; "
+                "use --resume or --cold-start"
+            )
+            return 2
     try:
-        source_stage = stage_source_tree(port_a3_dir, workspace_dir)
+        if tilelang_source:
+            (
+                _detect_tilelang_source,
+                _logical_tilelang_op,
+                stage_tilelang_source_tree,
+                _verify_tilelang,
+            ) = _tilelang2ascendc_source_api()
+            source_stage = stage_tilelang_source_tree(port_a3_dir, workspace_dir)
+        else:
+            source_stage = stage_source_tree(port_a3_dir, workspace_dir)
     except Exception as exc:
-        print(f"ERROR: could not create source-only arch22 snapshot: {exc}")
+        source_label = (
+            "arch35 TileLang2AscendC"
+            if tilelang_source
+            else "arch22"
+        )
+        print(f"ERROR: could not create source-only {source_label} snapshot: {exc}")
         return 2
+    reference_stage = None
+    if resolved_reference_source == NPUBENCH:
+        try:
+            reference_stage = stage_npubench_inputs(
+                workspace_dir,
+                npubench_task=npubench_args.task_path,
+                npubench_root=npubench_args.root_path,
+            )
+        except NpubenchInputError as exc:
+            print(f"ERROR: could not stage NPUKernelBench task: {exc}")
+            return 2
     source_detection = source_stage.detection
     print(
         f"  source snapshot   : {source_stage.root} "
@@ -536,6 +1032,13 @@ def _cmd_port_a3(
     # + cube-marker grep the gate uses; do NOT re-implement here). See
     # docs/design/PORT_A3_CUBE_CLASS_MIX_ENFORCEMENT_DESIGN.md + ROADMAP task#23.
     try:
+        if tilelang_source:
+            # TileLang2AscendC is a target-format custom-op project.  Keep its
+            # classification independent from the legacy arch22 source
+            # architecture gates.
+            op_class_tags = ["a3_to_a5_port", TILELANG2ASCENDC_SOURCE_KIND]
+            op_complexity = None
+            raise StopIteration
         import sys as _sys
         _checks_dir = str(Path(__file__).resolve().parent / "checks")
         if _checks_dir not in _sys.path:
@@ -546,6 +1049,8 @@ def _cmd_port_a3(
             raise RuntimeError("arch22 architecture class could not be verified")
         if _reference_arch == "cube-required":
             op_class_tags.append("CUBE_MIX")
+    except StopIteration:
+        pass
     except Exception as _cube_e:
         raise RuntimeError(
             f"arch22 architecture classification failed closed: {_cube_e}"
@@ -567,59 +1072,95 @@ def _cmd_port_a3(
     # to phase_o25_a3_ref instead of the stock check. The phase_o05.init_durable_state
     # called from run_single_op preserves the port_a3_to_a5 mode (see refined
     # 2026-05-12 guard — durable state never overwrites a scoped mode).
-    state_path = workspace_dir / ".opgen_state.json"
     state_payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "op": op_name,
         "target": env.target,
         "lane": lane,
         "opgen_mode": "port_a3_to_a5",
-        "port_a3_source": str(source_stage.root),
-        "source_stage_manifest": str(source_stage.manifest),
-        "source_stage_digest": source_stage.digest,
-        "source_stage_file_count": source_stage.file_count,
         "graybox_sandbox": True,
-        "graybox_arch22_dir": str(source_stage.root),
-        "source_arch": "arch22",
+        "source_arch": "arch35" if tilelang_source else "arch22",
         "target_arch": "arch35",
         "source_arch_detection": source_detection.state_payload(),
         "started_ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "last_seen_ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "invocation_count": 1,
     }
-    # If state file exists, preserve started_ts + invocation_count
-    if state_path.exists():
-        try:
-            prior = json.loads(state_path.read_text())
-            state_payload["started_ts"] = prior.get("started_ts", state_payload["started_ts"])
-            state_payload["invocation_count"] = int(prior.get("invocation_count", 0)) + 1
-        except Exception as error:
-            logging.getLogger(__name__).debug(
-                "Recoverable operation failed.", exc_info=error
-            )
-    state_path.write_text(json.dumps(state_payload, indent=2))
-    valid_stage, stage_reason, _stage_manifest = verify_source_stage(
-        workspace_dir, state_payload
+    if tilelang_source:
+        from tilelang2ascendc_source import tilelang2ascendc_state_block
+
+        state_payload.update({
+            "source_kind": TILELANG2ASCENDC_SOURCE_KIND,
+            "port_source": tilelang2ascendc_state_block(source_stage),
+            "source_format": "tilelang2ascendc_task",
+            "candidate": {
+                "kind": TILELANG2ASCENDC_CANDIDATE_KIND,
+                "target_arch": "arch35",
+            },
+            "port_a3_source": str(source_stage.root),
+            "source_stage_manifest": str(source_stage.manifest),
+            "source_stage_digest": source_stage.digest,
+            "source_stage_file_count": source_stage.file_count,
+            "graybox_source_dir": str(source_stage.root),
+        })
+    else:
+        state_payload.update({
+            "port_a3_source": str(source_stage.root),
+            "source_stage_manifest": str(source_stage.manifest),
+            "source_stage_digest": source_stage.digest,
+            "source_stage_file_count": source_stage.file_count,
+            "graybox_arch22_dir": str(source_stage.root),
+        })
+    # If state file exists, preserve started_ts + invocation_count.  A
+    # cold-start is deliberately different: `_cold_start_reset_workspace()`
+    # archives the complete durable state, then may leave a minimal survivor
+    # containing only `lifetime_spawn_count`.  That survivor is accounting
+    # metadata, not a previous source/reference binding; treating it as the
+    # latter would reject every cold-start with a nonzero prior spawn count.
+    # Never carry semantic fields from it into the fresh run.
+    prior_state, rc = _apply_prior_durable_state(
+        state_path, cold_start=cold_start, state_payload=state_payload
     )
-    if not valid_stage:
-        print(f"ERROR: source-only snapshot state validation failed: {stage_reason}")
-        return 2
+    if rc != 0:
+        return rc
+    prior_reference = prior_state.get("reference")
+    if isinstance(prior_reference, dict):
+        state_payload["reference"] = prior_reference
+    rc = _bind_reference_source(state_payload, resolved_reference_source, reference_stage)
+    if rc != 0:
+        return rc
     try:
-        record_port_a3_build_source(
-            workspace_dir,
-            port_a3_dir,
-            source_stage_digest=source_stage.digest,
-        )
-    except (OSError, ValueError) as exc:
-        print(f"ERROR: could not persist private build-source binding: {exc}")
+        atomic_write_state(workspace_dir, state_payload)
+    except NpubenchInputError as exc:
+        print(f"ERROR: could not atomically write reference state: {exc}")
         return 2
+    stage_reason = "not required for frozen benchmark provider"
+    if tilelang_source:
+        valid_stage, stage_reason, _stage_manifest = _verify_tilelang2ascendc_source_binding(
+            workspace_dir, state_payload
+        )
+        if not valid_stage:
+            print(f"ERROR: source-only snapshot state validation failed: {stage_reason}")
+            return 2
+    elif resolved_reference_source in {A3_LIVE}:
+        valid_stage, stage_reason, _stage_manifest = verify_source_stage(workspace_dir, state_payload)
+        if not valid_stage:
+            print(f"ERROR: source-only snapshot state validation failed: {stage_reason}")
+            return 2
+    if resolved_reference_source == A3_LIVE:
+        try:
+            record_port_a3_build_source(
+                workspace_dir,
+                port_a3_dir,
+                source_stage_digest=source_stage.digest,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: could not persist private build-source binding: {exc}")
+            return 2
     print(
         "  .opgen_state.json seeded with opgen_mode=port_a3_to_a5 + "
         f"verified source-only snapshot ({stage_reason})"
     )
-
-    if plan_only:
-        return 0
 
     # End-to-end live run (post-W14b + W15 wiring): invoke run_single_op
     # which dispatches through phase_o25_a3_ref + state machine + finalize.
@@ -629,6 +1170,21 @@ def _cmd_port_a3(
     # Keep the original checkout out of durable graybox state.  Phase O2.5
     # consumes this process-scoped value before any worker spawn and uses it
     # only when shipped-CANN dispatch proves a source package build is needed.
+    if resolved_reference_source != A3_LIVE:
+        print(
+            "\n=== entering run_single_op "
+            f"({resolved_reference_source} state-machine run) ==="
+        )
+        return _orch().run_single_op(
+            op_name,
+            workspace=workspace_dir,
+            lane=lane,
+            plan_only=False,
+            cap_bumps=cap_bumps,
+            timing=timing,
+            extra_lanes=list(extra_lanes or []),
+        )
+
     build_source_env = "CANNBOT_PORT_A3_BUILD_SOURCE"
     prior_build_source = os.environ.get(build_source_env)
     os.environ[build_source_env] = str(port_a3_dir)
@@ -640,6 +1196,7 @@ def _cmd_port_a3(
             plan_only=False,
             cap_bumps=cap_bumps,
             timing=timing,
+            extra_lanes=list(extra_lanes or []),
         )
     finally:
         if prior_build_source is None:

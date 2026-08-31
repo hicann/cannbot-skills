@@ -26,7 +26,7 @@ Schema: output/<project>/PROJECT.json
     "repo": "<source repo url / branch if applicable>",
     "commit": "<source commit sha if known>"
   },
-  "reference_baseline": "<a3_cann | cpu_fp64_autograd>",
+  "reference_baseline": "<a3_cann | npubench | cpu_fp64_autograd>",
   "target_chip": "<Ascend950PR | Ascend910_V220 | Ascend910b>",
   "cohort": {
     "size": <int>,
@@ -42,8 +42,9 @@ Purpose:
    presence of model_new_ascendc.py vs op_kernel/arch35/).
 2. **Reference baseline check**: finalize_pipeline can verify
    verification.json.truth_source matches the project's declared
-   reference_baseline (arch22→arch35 migration must reference its live A3
-   capture; backward generation must reference CPU/fp64 autograd).
+   reference_baseline (arch22→arch35 migration may reference its live A3
+   capture or a frozen NPUKernelBench task; backward generation
+   must reference CPU/fp64 autograd).
 3. **Cross-project audits**: gen_e2e_cost_report can scan all output
    projects, read their declared modes, and emit mode-broken-down stats.
 
@@ -73,6 +74,7 @@ VALID_OPGEN_MODES = frozenset({
 
 VALID_REFERENCE_BASELINES = frozenset({
     "a3_cann",      # port_a3_to_a5 default
+    "npubench",     # port_a3_to_a5 with frozen old-format NPUKernelBench task
     "cpu_fp64_autograd",  # backward-generation reference
 })
 

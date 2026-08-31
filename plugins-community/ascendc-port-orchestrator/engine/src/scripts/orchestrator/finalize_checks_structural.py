@@ -17,6 +17,7 @@ finalize_checks re-imports these (bottom import) so call sites + import
 paths (`from finalize_checks import ...`) are unaffected."""
 from __future__ import annotations
 import logging
+import math
 import ast as _ast
 import json
 import re
@@ -28,6 +29,10 @@ from typing import Optional
 from finalize_shared import _is_v220_ec41_output_pad_exempt  # DEBT-201: shared pure leaf
 from finalize_pipeline import (  # module-identity-sensitive constants (stay in parent)
     _HERE, _PROJECT_ROOT)
+from npubench.npubench_finalize_contract import (
+    resolve_npubench_workspace,
+    validate_npubench_finalize_evidence,
+)
 
 
 def _model_input_api_status(fpath: Path) -> tuple[bool, bool]:
@@ -63,6 +68,12 @@ def _model_shape_violation(filename: str) -> str:
 
 def _check_model_py_shape(workspace: Path) -> Optional[str]:
     """Enforce `get_input_groups()` when a legacy `get_inputs()` API exists."""
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if is_npubench:
+        # A frozen task is loaded under its real staged filename.  Any adapter
+        # called model.py is runner implementation detail, never workspace
+        # reference source that this legacy static check may reinterpret.
+        return source_error
     for filename in ("model.py", "model_cpu_truth.py"):
         fpath = workspace / filename
         if not fpath.exists():
@@ -128,6 +139,20 @@ def _check_source_reuse_metadata(status: str, prec: dict, vj: dict) -> Optional[
 
 def _check_canonical_entrypoint_files(workspace: Path, status: str) -> Optional[str]:
     """Require the mode-independent Python entry points for a PASS verdict."""
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if is_npubench:
+        if source_error:
+            return source_error
+        required = ("model_new_ascendc.py",)
+        missing = [name for name in required if not (workspace / name).is_file()]
+        if not missing:
+            return None
+        return (
+            f"precision.status={status} but workspace missing canonical "
+            f"NPUKernelBench candidate entry point: {missing}. The immutable "
+            "reference task remains under reference_inputs and must not be "
+            "copied or renamed to workspace/model.py."
+        )
     filenames = ("model_new_ascendc.py", "model.py")
     missing = [name for name in filenames if not (workspace / name).is_file()]
     if not missing:
@@ -145,14 +170,41 @@ def _check_canonical_entrypoint_files(workspace: Path, status: str) -> Optional[
     )
 
 
-def _check_pass_performance_metadata(status: str, vj: dict) -> Optional[str]:
+def _is_measured_perf_ratio(ratio: object) -> bool:
+    """Return whether a perf ratio is a finite, actually-measured number."""
+    if isinstance(ratio, (int, float)) and not isinstance(ratio, bool):
+        # nan/inf is not a measured number (2026-08-25): a non-finite
+        # ratio must fall through to the same hard fail as a missing one.
+        return math.isfinite(ratio)
+    if isinstance(ratio, str):
+        # Numeric-string ratio (worker/JSON formatting artifact) is a
+        # parseable measurement, not fraud (audit L5, 2026-08-22) —
+        # coerce and accept; non-numeric or non-finite strings
+        # ("NaN"/"inf"/"Infinity") keep the hard fail.
+        try:
+            return math.isfinite(float(ratio))
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _check_pass_performance_metadata(
+    status: str, vj: dict, workspace: Path | None = None,
+) -> Optional[str]:
     """Require an explicit measured or not-measurable performance verdict."""
     perf = vj.get("performance", {}) or {}
+
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if is_npubench:
+        if source_error:
+            return source_error
+        return validate_npubench_finalize_evidence(Path(workspace), vj)
+
     perf_status = perf.get("status")
     measured_statuses = ("PASS", "PASS_WITHIN_TOLERANCE", "FAIL", "BELOW_THRESHOLD")
     if perf_status in measured_statuses:
         ratio = perf.get("ratio")
-        if isinstance(ratio, (int, float)):
+        if _is_measured_perf_ratio(ratio):
             return None
         return (
             f"precision.status={status} + perf.status={perf_status} but "
@@ -203,7 +255,7 @@ def _check_universal_entrypoints(workspace: Path, vj: dict) -> Optional[str]:
     violation = _check_canonical_entrypoint_files(workspace, status)
     if violation:
         return violation
-    violation = _check_pass_performance_metadata(status, vj)
+    violation = _check_pass_performance_metadata(status, vj, workspace=workspace)
     if violation:
         return violation
     return None
@@ -281,6 +333,20 @@ def _check_arch35_wrap_cheat(workspace: Path) -> Optional[str]:
     active_plugin = _detect_plugin(workspace)
     if active_plugin is None or active_plugin.name != "port_a3_to_a5":
         return None
+    # An explicit TileLang2AscendC project is already an arch35 implementation
+    # context; the arch22-era ``#include arch35/...`` anti-wrapper rule is not
+    # the applicable contract.  Its source-stage digest/layout is checked by
+    # the TileLang2AscendC verifier, while candidate/source binding is checked
+    # by the target build path.
+    try:
+        state = json.loads((workspace / ".opgen_state.json").read_text())
+        source = state.get("port_source") if isinstance(state, dict) else None
+        if isinstance(source, dict) and source.get("kind") in {
+            "port-aclnn-tilelang2ascendc",
+        }:
+            return None
+    except (OSError, ValueError, TypeError):
+        pass
     if _os.environ.get("OPGEN_PRESTAGE_ARCH35", "0") not in ("0", "", "false", "False"):
         return None
     suspect_files = _collect_arch35_include_hits(workspace)
@@ -331,6 +397,23 @@ def _architecture_class_diagnostic(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _tilelang2ascendc_binding_violation(workspace: Path, state: dict) -> Optional[str]:
+    """Verify the TileLang2AscendC source + candidate binding for finalize."""
+    try:
+        from tilelang2ascendc_source import verify_tilelang2ascendc_source_stage
+        from npubench.npubench_target import _validate_candidate_for_controlled_build
+
+        valid, reason, _manifest = verify_tilelang2ascendc_source_stage(workspace, state)
+        if not valid:
+            return "TILELANG2ASCENDC_SOURCE_INVALID: " + reason
+        _validate_candidate_for_controlled_build(
+            workspace, "port-aclnn-tilelang2ascendc"
+        )
+    except Exception as exc:
+        return "TILELANG2ASCENDC_CANDIDATE_INVALID: " + str(exc)
+    return None
+
+
 def _check_architecture_class(workspace: Path) -> Optional[str]:
     """Fail closed if a migration cannot satisfy its source architecture class."""
     try:
@@ -348,6 +431,27 @@ def _check_architecture_class(workspace: Path) -> Optional[str]:
         )
     if not active_plugin.requires_source_architecture_gate():
         return None
+    # TileLang2AscendC sources intentionally do not claim the
+    # ops-nn family/class metadata required by the OL-188 classifier.  Their
+    # source/candidate binding and NPUKernelBench binding are verified by the
+    # TileLang2AscendC source and candidate gates instead; pretending the
+    # source were an ops-nn project would make the legacy classifier inspect
+    # an inapplicable layout.
+    state_path = workspace / ".opgen_state.json"
+    try:
+        state = json.loads(state_path.read_text())
+    except Exception as exc:
+        return (
+            "SOURCE_ARCH_UNVERIFIED (OL-188): durable migration state could not be "
+            f"read ({type(exc).__name__}); fail closed."
+        )
+    if not isinstance(state, dict):
+        return "SOURCE_ARCH_UNVERIFIED (OL-188): durable migration state is not a JSON object; fail closed."
+    if (
+        isinstance(state.get("port_source"), dict)
+        and state["port_source"].get("kind") == "port-aclnn-tilelang2ascendc"
+    ):
+        return _tilelang2ascendc_binding_violation(workspace, state)
     checker, violation = _load_architecture_class_checker()
     if violation:
         return violation
@@ -396,6 +500,19 @@ def _check_project_json_metadata(workspace: Path) -> Optional[str]:
     missing = [k for k in required if k not in data]
     if missing:
         return f"PROJECT.json missing required fields: {missing}"
+
+    # When provider metadata exists beside the task it must not silently
+    # relabel the frozen benchmark as the historic live-A3 baseline.
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if is_npubench:
+        if source_error:
+            return source_error
+        if data.get("reference_baseline") != "npubench":
+            return (
+                "PROJECT.json reference_baseline must be 'npubench' for "
+                "durable reference.source='npubench'; got "
+                f"{data.get('reference_baseline')!r}."
+            )
     return None
 
 

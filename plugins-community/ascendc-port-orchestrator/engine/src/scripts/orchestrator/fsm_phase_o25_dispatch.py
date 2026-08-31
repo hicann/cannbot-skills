@@ -13,35 +13,59 @@ Extracted VERBATIM from run_single_op's Phase O2.5 preamble block
 (orchestrator.py) as part of the god-function decomposition. This is the
 mode-dispatched reference-provider gate that runs BEFORE the FSM spawn loop:
 
-  - port_a3_to_a5 → phase_o25_a3_ref.provision_a3_reference (live A3 truth)
+  - port_a3_to_a5 + reference.source=a3_live →
+    phase_o25_a3_ref.provision_a3_reference (live A3 truth)
+  - port_a3_to_a5 + reference.source=npubench →
+    phase_o25_npubench.provision_npubench_reference (staged old-format task)
+  - port_a3_to_a5 + reference.source=cannbench → persisted UNSUPPORTED result
   - backward      → phase_o25_backward.provision_backward_reference
     (BACKWARD_E2E opt-out returns 98)
 
 DEPENDENCY CONTRACT: this slice references NO orchestrator-module-level names
-(no read-through needed) — only per-run inputs and the two mode-specific
-reference modules imported lazily. Sibling module objects are the SAME ones tests patch, so
+(no read-through needed) — only per-run inputs and the mode-specific reference
+modules imported lazily. Sibling module objects are the SAME ones tests patch, so
 `monkeypatch.setattr(<sibling>, ...)` bites directly.
 
 Returns an int EXIT CODE when the run must abort (missing source → 7, ref
 capture unrecoverable → 7, BACKWARD_E2E=0 opt-out → 98) and None when the O2.5
-gate passed and run_single_op should proceed to Phase O3. Body is byte-identical
-to the original modulo each `return N` staying `return N` and the block's
-`o25` / `_*_handled` locals living inside this function.
+gate passed and run_single_op should proceed to Phase O3.  Provider routing is
+resolved before reading A3-only state fields or importing A3-only helpers.
 """
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 import events
 from logging_config import get_logger
-from source_arch import load_port_a3_build_source, verify_source_stage
+from npubench.npubench_inputs import atomic_write_state
+from reference_source import (
+    A3_LIVE,
+    CANNBENCH,
+    NPUBENCH,
+    ReferenceSourceError,
+    load_durable_state,
+    resolve_reference_binding,
+)
 
 log = get_logger(__name__)
 
 _PORT_A3_BUILD_SOURCE_ENV = "CANNBOT_PORT_A3_BUILD_SOURCE"
+
+
+def load_port_a3_build_source(*args, **kwargs):
+    """Lazy compatibility seam for the live-A3-only source registry lookup."""
+    from source_arch import load_port_a3_build_source as _load
+
+    return _load(*args, **kwargs)
+
+
+def verify_source_stage(*args, **kwargs):
+    """Lazy compatibility seam; NPUBench/CannBench never call this function."""
+    from source_arch import verify_source_stage as _verify
+
+    return _verify(*args, **kwargs)
 
 
 def provision_reference(
@@ -56,24 +80,22 @@ def provision_reference(
 
     Returns an exit code to `return` from run_single_op, or None to proceed.
     """
-    # The original ops-nn checkout is trusted harness context needed only if
-    # live A3 dispatch proves the op is not shipped.  Consume it before any
-    # worker can spawn; durable state intentionally exposes only the fixed
-    # source-only snapshot to preserve graybox isolation.
-    _port_a3_build_source = os.environ.pop(_PORT_A3_BUILD_SOURCE_ENV, None)
     # W15 (2026-05-12, ROADMAP §1.5): Phase O2.5 dispatch on opgen_mode.
-    # port_a3_to_a5 mode uses the A3-CANN reference variant (phase_o25_a3_ref),
-    # which runs the existing A3 kernel via aclnn on real A3 hardware to
-    # capture ground-truth outputs.
-    _opgen_state_path = workspace / ".opgen_state.json"
+    # A migration may use either live A3-CANN truth or the frozen
+    # NPUKernelBench task/sidecar bundle.  The latter must not touch an A3
+    # environment or private original-source checkout.
     _opgen_mode_for_o25 = None
-    _port_a3_source = None
     _backward_forward_source = None
-    if _opgen_state_path.exists():
+    _opst: dict[str, Any] = {}
+    # Do not open the durable state with ``Path.read_text`` here.  A provider
+    # task controls other workspace files, so the one controller-owned state
+    # boundary must reject a symlink consistently with reference_source.
+    if (workspace / ".opgen_state.json").exists():
         try:
-            _opst = json.loads(_opgen_state_path.read_text())
+            _opst = dict(load_durable_state(workspace))
+            if not isinstance(_opst, dict):
+                raise ValueError("durable state is not a JSON object")
             _opgen_mode_for_o25 = _opst.get("opgen_mode")
-            _port_a3_source = _opst.get("port_a3_source")
             _backward_forward_source = _opst.get("backward_forward_source")
         except Exception as exc:
             log.info("phase O2.5: durable state is unreadable: %r", exc)
@@ -82,6 +104,53 @@ def provision_reference(
     # Only the two customer modes are accepted.  Unknown or missing state fails
     # closed even when this helper is called outside ``run_single_op``.
     if _opgen_mode_for_o25 == "port_a3_to_a5":
+        try:
+            reference_source, reference = _reference_for_o25(_opst)
+        except ReferenceSourceError as exc:
+            log.info("phase O2.5: durable reference selection rejected: %s", exc)
+            return 2
+
+        tilelang_claim = (
+            isinstance(_opst.get("port_source"), dict)
+            and _opst["port_source"].get("kind") == "port-aclnn-tilelang2ascendc"
+        )
+        if tilelang_claim and reference_source != NPUBENCH:
+            log.info(
+                "phase O2.5: TileLang2AscendC source requires reference.source=npubench; got %s",
+                reference_source,
+            )
+            return 7
+        if tilelang_claim:
+            try:
+                from tilelang2ascendc_source import verify_tilelang2ascendc_source_stage
+
+                valid_stage, stage_reason, _manifest = verify_tilelang2ascendc_source_stage(
+                    workspace, _opst
+                )
+            except Exception as exc:
+                log.info("phase O2.5: TileLang2AscendC source verification raised: %r", exc)
+                return 7
+            if not valid_stage:
+                log.info("phase O2.5: TileLang2AscendC source snapshot rejected: %s", stage_reason)
+                return 7
+
+        # These branches intentionally precede every source-stage check,
+        # port_a3_source field read, private build-source lookup, and A3 import.
+        # A frozen benchmark is functional truth; the migration source tree is
+        # only generation provenance and must not be consulted in this gate.
+        if reference_source == NPUBENCH:
+            return _provision_npubench(workspace, reference, lane)
+        if reference_source == CANNBENCH:
+            return _provision_cannbench(workspace, _opst, reference, lane)
+
+        # From here on the only remaining registered source is live A3.  It is
+        # the sole branch allowed to read A3-only fields or load A3 helpers.
+        if reference_source != A3_LIVE:  # Defensive even though registry validates.
+            log.info("phase O2.5: unsupported durable reference source=%r", reference_source)
+            return 2
+        _port_a3_source = _opst.get("port_a3_source")
+        _port_a3_build_source = os.environ.pop(_PORT_A3_BUILD_SOURCE_ENV, None)
+
         valid_stage, stage_reason, _stage_manifest = verify_source_stage(
             workspace, _opst
         )
@@ -91,6 +160,7 @@ def provision_reference(
                 stage_reason,
             )
             return 7
+
         try:
             registered_build_source = load_port_a3_build_source(
                 workspace,
@@ -136,6 +206,60 @@ def provision_reference(
     return 2
 
 
+def _reference_for_o25(
+    state: Mapping[str, Any],
+) -> tuple[str, Mapping[str, Any]]:
+    """Resolve only the registered explicit binding; never infer legacy A3."""
+    reference = resolve_reference_binding(state)
+    return str(reference["source"]), reference
+
+
+def _provision_npubench(
+    workspace: Path, reference: Mapping[str, Any], lane: int
+) -> Optional[int]:
+    """Dispatch the old-format NPUKernelBench preflight without A3 imports."""
+    try:
+        import phase_o25_npubench
+    except ImportError as exc:
+        log.info("phase O2.5 (npubench): provider module is unavailable: %s", exc)
+        return 7
+    return phase_o25_npubench.provision_npubench_reference(
+        workspace=workspace,
+        reference=reference,
+        lane=lane,
+    )
+
+
+def _provision_cannbench(
+    workspace: Path,
+    state: Mapping[str, Any],
+    reference: Mapping[str, Any],
+    lane: int,
+) -> int:
+    """Persist CannBench's reserved-but-unimplemented terminal provider state."""
+    updated = dict(state)
+    updated_reference = dict(reference)
+    updated_reference["provisioning_status"] = {
+        "verdict": "UNSUPPORTED_REFERENCE_SOURCE",
+        "source": CANNBENCH,
+        "retryable": False,
+    }
+    updated["reference"] = updated_reference
+    try:
+        atomic_write_state(workspace, updated)
+    except Exception as exc:
+        log.info("phase O2.5 (cannbench): could not persist unsupported result: %r", exc)
+        return 2
+    events.emit(
+        workspace,
+        "orchestrator.phase_o25_cannbench_block",
+        lane=lane,
+        data={"verdict": "UNSUPPORTED_REFERENCE_SOURCE", "retryable": False},
+    )
+    log.info("phase O2.5 (cannbench): UNSUPPORTED_REFERENCE_SOURCE")
+    return 7
+
+
 def _provision_port_a3(
     op: str,
     workspace: Path,
@@ -148,7 +272,7 @@ def _provision_port_a3(
         log.info(
             "phase O2.5 (port_a3_to_a5): port_a3_source missing "
             "from .opgen_state.json — cannot proceed. Re-invoke with "
-            "`python3 -m orchestrator --port-a3 <ops-nn-op-dir>`."
+            "`python3 -m orchestrator --port-a3-ops <ops-nn-op-dir>`."
         )
         events.emit(workspace, "orchestrator.phase_o25_port_a3_block", lane=lane,
                     data={"verdict": "MISSING_PORT_A3_SOURCE"})

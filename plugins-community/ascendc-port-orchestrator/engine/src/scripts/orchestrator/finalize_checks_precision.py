@@ -28,6 +28,22 @@ from typing import Optional
 
 from finalize_shared import (  # DEBT-201: shared pure leaves (breaks the finalize_pipeline cycle)
     _benchmark_case_count, _has_profiler_csv_method)
+from npubench.npubench_finalize_contract import (
+    resolve_npubench_workspace,
+    validate_npubench_finalize_evidence,
+)
+
+
+def _npubench_performance_violation(
+    workspace: Path | None, verification: dict,
+) -> tuple[bool, Optional[str]]:
+    """Validate the runner-owned NPUKernelBench evidence as a distinct mode."""
+    is_npubench, source_error = resolve_npubench_workspace(workspace)
+    if not is_npubench:
+        return False, None
+    if source_error:
+        return True, source_error
+    return True, validate_npubench_finalize_evidence(Path(workspace), verification)
 
 
 def _check_pass_a_coverage(workspace: Path, prec: dict) -> Optional[str]:
@@ -39,6 +55,21 @@ def _check_pass_a_coverage(workspace: Path, prec: dict) -> Optional[str]:
     precision.pass_a.skipped_cases with explicit per-case reason. Bare
     `total < benchmark_count` is silent coverage fraud.
     """
+    # npubench workspaces carry the frozen task sidecar under
+    # reference_inputs/, not a root <op>.json — the provider-owned finalize
+    # contract validates coverage against the runner fixture count instead.
+    # Early-return keeps this legacy root-JSON gate from ever misfiring on
+    # an unrelated root-level json (audit L4, 2026-08-22).
+    try:
+        is_npubench, _npubench_error = resolve_npubench_workspace(workspace)
+    except Exception:
+        # Deliberate suppression: this is a provider probe only.  An
+        # unreadable/malformed migration state must not turn the legacy
+        # coverage gate into a hard failure here — the provider-owned
+        # npubench finalize contract reports that same error on its own path.
+        is_npubench = False
+    if is_npubench:
+        return None
     bench_count = _benchmark_case_count(workspace)
     if bench_count is None:
         return None  # no benchmark JSON to compare against — can't enforce
@@ -94,6 +125,12 @@ def _check_port_a3_pass_b_schema(workspace: Path, vj: dict) -> Optional[str]:
 
     Returns None on pass, error string on fail.
     """
+    is_npubench, npubench_error = _npubench_performance_violation(workspace, vj)
+    if is_npubench:
+        # The provider has one harness-owned functional pass; it must not be
+        # forced into the historic live-source pass_b/edge-dataset schema.
+        return npubench_error
+
     mode = vj.get("mode") or vj.get("port_mode")
     if not mode or "port_a3" not in str(mode).lower():
         return None  # only applies to port_a3_to_a5 mode
@@ -277,6 +314,13 @@ def _check_perf_methodology(workspace: Path, vj: dict) -> Optional[str]:
 
     perf = vj.get("performance", {}) or {}
     perf_status = perf.get("status")
+
+    # NPUKernelBench uses an independent quick msprof contract, not a
+    # cross-generation timing baseline.  Validate it before any of the
+    # live-source methodology vocabulary is considered.
+    is_npubench, npubench_violation = _npubench_performance_violation(workspace, vj)
+    if is_npubench:
+        return npubench_violation
 
     # P146 gate extension (2026-05-17): in port_a3 mode with precision=PASS,
     # ALL retraction-equivalent perf statuses (N/A, SKIPPED, NA, None, AND
@@ -549,6 +593,11 @@ def _check_methodology_declaration(workspace: Path, vj: dict) -> Optional[str]:
 
     perf = vj.get("performance", {}) or {}
     perf_status = perf.get("status")
+
+    is_npubench, npubench_violation = _npubench_performance_violation(workspace, vj)
+    if is_npubench:
+        return npubench_violation
+
     if perf_status in ("N/A", "SKIPPED", "NA", None, "NOT_VERIFIED_SAME_METHOD"):
         return None  # P146 owns retraction-equivalent validation
 

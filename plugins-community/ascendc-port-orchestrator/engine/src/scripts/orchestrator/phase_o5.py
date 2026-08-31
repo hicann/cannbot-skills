@@ -35,7 +35,10 @@ from __future__ import annotations
 import logging
 
 import json
+import os
+import stat
 import sys as _sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -191,6 +194,11 @@ class MeasuredResult:
     # phase_o5_perf_capture path; only backward populates this so far). Mapped to
     # performance.independent_re_measure downstream (gate logic unchanged).
     perf: Optional[dict] = None
+    # Provider-owned evidence that does not fit the historical pass-count
+    # fields.  NPUKernelBench O5 uses this to carry immutable precision,
+    # performance, evaluation, and lease records into its dedicated
+    # reconciliation path; other runners leave it unset.
+    provider_evidence: Optional[dict] = None
     runner_error: Optional[str] = None  # set if runner couldn't execute
     # NODE-5 (2026-05-28): when `runner_error` is an infrastructure-class
     # failure (SCP timeout, oversized .pt, verifier env issue, JSON parse
@@ -208,6 +216,11 @@ class MeasuredResult:
     # is None — call sites can stay terse (`MeasuredResult(runner_error=msg)`)
     # and still get the right tag downstream.
     rollback_kind: Optional[str] = None  # None / "infra" / "algorithm"
+    # Provider-specific failure taxonomy. NPUKernelBench sets this from the
+    # controlled-build receipt so finalize can distinguish a worker-repairable
+    # candidate contract defect from a target/evaluator failure without parsing
+    # human-facing error text.
+    failure_kind: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.runner_error and self.rollback_kind is None:
@@ -367,6 +380,8 @@ class O5Report:
     # writes to state_transitions.jsonl; `iter_counts_from_log` skips
     # entries with rollback_kind=="infra".
     rollback_kind: Optional[str] = None
+    # Structured provider failure taxonomy propagated from MeasuredResult.
+    failure_kind: Optional[str] = None
     # DEBT-213(b) (2026-07-17): was the code that MEASURES this run
     # unmodified while it measured? O5 is the step that mints VERIFIED, so
     # the harness state at O5 time is the state of the instrument that
@@ -426,6 +441,21 @@ def expected_truth_source(workspace: Path) -> str:
     hard error: it must never fall back to a synthetic CPU truth source.
     """
     try:
+        # Only migration workspaces own a reference provider.  In particular,
+        # never ask the reference resolver about a backward workspace: an
+        # absent ``reference`` is correctly invalid for a new migration but is
+        # irrelevant to backward_autograd truth.
+        from reference_source import load_durable_state
+
+        state = load_durable_state(Path(workspace))
+        if not isinstance(state, dict):
+            raise ValueError("durable state is not a JSON object")
+        if state.get("opgen_mode") == "port_a3_to_a5":
+            from reference_source import A3_LIVE, resolve_reference_source
+
+            provider = resolve_reference_source(state)
+            if provider != A3_LIVE:
+                return provider
         from plugins import detect_plugin as _detect_plugin
         _active_plugin = _detect_plugin(workspace)
         if _active_plugin is not None:
@@ -456,6 +486,18 @@ class _PerfReMeasureContext:
 
 def _build_independent_re_measure(perf: dict, worker_ratio: object) -> dict:
     """Build the honest independent-measurement block for a runner result."""
+    if perf.get("status") == "MEASUREMENT_FAILED" or perf.get("outcome") == "INCOMPLETE_PERFORMANCE":
+        return {
+            "ran": False,
+            "status": "MEASUREMENT_FAILED",
+            "outcome": "INCOMPLETE_PERFORMANCE",
+            "reason": perf.get("reason")
+            or "orchestrator could not complete the performance re-measurement",
+            "source": (
+                "phase_o5 post_verify: orchestrator attempted the independent "
+                "performance re-measurement"
+            ),
+        }
     if perf.get("_remeasure_na"):
         return {
             "ran": False,
@@ -513,10 +555,11 @@ def _write_perf_independent_re_measure(context: _PerfReMeasureContext) -> None:
     unmeasured perf is N/A-with-reason, not a bare self-report PASS.
     """
     try:
-        perf_block = context.verification.get("performance")
-        if not isinstance(perf_block, dict):
-            perf_block = {}
-        kw_ratio = perf_block.get("ratio")  # worker self-reported ratio (for delta)
+        worker_perf = context.verification.get("performance")
+        if not isinstance(worker_perf, dict):
+            worker_perf = {}
+        kw_ratio = worker_perf.get("ratio")  # worker self-reported ratio (for delta)
+        perf_block = worker_perf
         irm = _build_independent_re_measure(context.measured.perf, kw_ratio)
         perf_block["independent_re_measure"] = irm
         context.verification["performance"] = perf_block
@@ -627,6 +670,7 @@ def _run_remeasurement(
         summary=f"runner reported error: {measured.runner_error}",
         truth_source=report.truth_source,
         rollback_kind=measured.rollback_kind,
+        failure_kind=measured.failure_kind,
     )
 
 
@@ -641,6 +685,401 @@ def _record_measured_passes(report: O5Report, measured: MeasuredResult) -> None:
                 for field_name in all_fields
                 if field_name in pass_result
             }
+
+
+_NPUBENCH_TRUTH_SOURCE = "npubench"
+
+
+def _npubench_measure_or_fail(
+    workspace: Path,
+    op: str,
+    lane: int,
+    runner: Optional[Callable[[Path, str, int], MeasuredResult]],
+) -> MeasuredResult | O5Report:
+    """Invoke the npubench runner, returning a RUNNER_FAILED report on any error."""
+    active_runner = runner or _default_runner
+    try:
+        measured = active_runner(workspace, op, lane)
+    except Exception as error:
+        return O5Report(
+            verdict="RUNNER_FAILED",
+            summary=f"npubench runner raised: {error}",
+            truth_source=_NPUBENCH_TRUTH_SOURCE,
+            rollback_kind="infra",
+        )
+    if measured.runner_error:
+        return O5Report(
+            verdict="RUNNER_FAILED",
+            summary=f"npubench runner reported error: {measured.runner_error}",
+            truth_source=_NPUBENCH_TRUTH_SOURCE,
+            rollback_kind=measured.rollback_kind,
+            failure_kind=measured.failure_kind,
+        )
+    return measured
+
+
+def _npubench_evidence_sections(
+    measured: MeasuredResult,
+) -> tuple[dict, dict, dict] | O5Report:
+    """Split provider evidence into its precision/performance/evaluate reports."""
+    evidence = measured.provider_evidence
+    if not isinstance(evidence, dict):
+        return O5Report(
+            verdict="RUNNER_FAILED",
+            summary="npubench runner returned no provider-owned evidence",
+            truth_source=_NPUBENCH_TRUTH_SOURCE,
+            rollback_kind="infra",
+        )
+    precision = evidence.get("precision")
+    performance = evidence.get("performance")
+    evaluate = evidence.get("evaluate")
+    if not all(isinstance(item, dict) for item in (precision, performance, evaluate)):
+        return O5Report(
+            verdict="RUNNER_FAILED",
+            summary="npubench runner evidence omits a structured precision/performance/evaluate report",
+            truth_source=_NPUBENCH_TRUTH_SOURCE,
+            rollback_kind="infra",
+        )
+    return precision, performance, evaluate
+
+
+def _npubench_o5_report(
+    workspace: Path,
+    op: str,
+    lane: int,
+    runner: Optional[Callable[[Path, str, int], MeasuredResult]],
+) -> O5Report:
+    """Run NPUKernelBench O5 independently of every worker self-claim.
+
+    The provider writes its own precision/performance evidence.  This path
+    deliberately does not inspect a worker-authored ``precision`` block before
+    invoking the runner: a missing or fabricated claim cannot suppress the
+    real evaluation.
+    """
+    measured = _npubench_measure_or_fail(workspace, op, lane, runner)
+    if isinstance(measured, O5Report):
+        return measured
+    sections = _npubench_evidence_sections(measured)
+    if isinstance(sections, O5Report):
+        return sections
+    precision, performance, evaluate = sections
+    evidence = measured.provider_evidence
+    pass_a = precision.get("pass_a")
+    if not isinstance(pass_a, dict):
+        pass_a = {}
+    mismatches = _npubench_evidence_violations(precision, performance, evaluate, pass_a)
+    report = O5Report(
+        verdict="MISMATCH" if mismatches else "VERIFIED",
+        measured={
+            "pass_a": dict(pass_a),
+            "precision": dict(precision),
+            "performance": dict(performance),
+        },
+        mismatches=mismatches,
+        truth_source=_NPUBENCH_TRUTH_SOURCE,
+    )
+    report.summary = (
+        "NPUKernelBench O5 evidence is complete and bound to the current candidate."
+        if not mismatches
+        else "NPUKernelBench O5 evidence rejected: " + "; ".join(mismatches)
+    )
+    _persist_npubench_verification(
+        workspace,
+        precision=precision,
+        performance=performance,
+        evaluate=evaluate,
+        evidence=evidence,
+        report=report,
+    )
+    return _apply_harness_pristine(report)
+
+
+def _npubench_binding_violations(precision: dict, performance: dict, evaluate: dict) -> list[str]:
+    """Require one well-formed candidate binding shared by all three reports."""
+    errors: list[str] = []
+    bindings = [
+        precision.get("binding_sha256"),
+        performance.get("binding_sha256"),
+        evaluate.get("binding_sha256"),
+    ]
+    if not all(isinstance(value, str) and len(value) == 64 for value in bindings):
+        errors.append("missing or malformed evaluation binding digest")
+    elif len(set(bindings)) != 1:
+        errors.append("precision/performance/evaluate binding digests differ")
+    return errors
+
+
+def _npubench_precision_violations(precision: dict, pass_a: dict) -> list[str]:
+    """Require a complete PASS precision report with a real pass/total pair."""
+    errors: list[str] = []
+    if precision.get("status") != "PASS":
+        errors.append(f"precision status is {precision.get('status')!r}, not PASS")
+    if pass_a.get("status") != "PASS":
+        errors.append(f"pass_a status is {pass_a.get('status')!r}, not PASS")
+    passed = pass_a.get("tier1_pass")
+    total = pass_a.get("total")
+    if not isinstance(passed, int) or not isinstance(total, int) or total <= 0:
+        errors.append("pass_a lacks a positive integer tier1_pass/total denominator")
+    elif passed != total:
+        errors.append(f"pass_a is incomplete ({passed}/{total})")
+    return errors
+
+
+def _npubench_deferred_performance_violations(performance: dict, precision: dict) -> list[str]:
+    """Accept a marked perf placeholder only when it is bound like precision."""
+    errors: list[str] = []
+    if performance.get("perf_deferred") is not True:
+        errors.append("performance DEFERRED without perf_deferred marker")
+    if performance.get("binding_sha256") != precision.get("binding_sha256"):
+        errors.append("deferred performance binding differs from precision")
+    return errors
+
+
+def _npubench_warmup_violations(performance: dict) -> list[str]:
+    """Require the fixed warm-up protocol under either public spelling."""
+    errors: list[str] = []
+    # The profile script's public JSON calls this ``warmup``.  The runner's
+    # provider contract also stamps ``warm_up``; accept either only when both
+    # present values agree with the fixed gate protocol.
+    for key in ("warm_up", "warmup"):
+        if key in performance and performance.get(key) != 3:
+            errors.append(f"performance {key} is {performance.get(key)!r}, not 3")
+    if "warm_up" not in performance and "warmup" not in performance:
+        errors.append("performance omits actual warm-up count")
+    return errors
+
+
+def _npubench_measured_performance_violations(performance: dict) -> list[str]:
+    """Require a measured PASS perf report with retained profiler artifacts."""
+    errors: list[str] = []
+    if performance.get("status") != "PASS":
+        errors.append(f"performance status is {performance.get('status')!r}, not PASS")
+    errors.extend(_npubench_warmup_violations(performance))
+    if performance.get("repeats") != 5:
+        errors.append(f"performance repeats is {performance.get('repeats')!r}, not 5")
+    if performance.get("keep_prof") is not True:
+        errors.append("performance evidence does not retain raw profiler artifacts")
+    archive = performance.get("profile_archive")
+    archive_digest = performance.get("profile_tree_sha256")
+    if not isinstance(archive, str) or not archive:
+        errors.append("performance omits profile archive path")
+    if not isinstance(archive_digest, str) or len(archive_digest) != 64:
+        errors.append("performance omits profile archive tree digest")
+    return errors
+
+
+def _npubench_evidence_violations(
+    precision: dict,
+    performance: dict,
+    evaluate: dict,
+    pass_a: dict,
+) -> list[str]:
+    """Validate the fixed O5 acceptance contract without trusting report labels."""
+    errors: list[str] = []
+    errors.extend(_npubench_binding_violations(precision, performance, evaluate))
+    errors.extend(_npubench_precision_violations(precision, pass_a))
+    if performance.get("status") == "DEFERRED":
+        # Precision-first mode, selected by the CANNBOT_NPUBENCH_SKIP_PERF
+        # environment variable, accepts the perf placeholder as long as it is
+        # marked and bound to the same candidate as precision.  Perf-specific
+        # gates such as W3, R5 and profile-archive retention are skipped; they
+        # are re-applied when perf is backfilled.
+        # NOTE: this branch runs AFTER the precision checks — a deferred perf
+        # must never mask a failing precision report.  An early return here
+        # once let a precision ERROR sail through as VERIFIED.
+        errors.extend(_npubench_deferred_performance_violations(performance, precision))
+        return errors
+    errors.extend(_npubench_measured_performance_violations(performance))
+    return errors
+
+
+def _npubench_precision_record(precision: dict) -> dict:
+    """Render the harness-owned precision block for one npubench candidate."""
+    return {
+        "status": precision.get("status"),
+        "pass_a": precision.get("pass_a"),
+        "pass_b": {
+            "status": "N/A",
+            "reason": "npubench provider has one harness-owned functional pass",
+            "method": "n/a — npubench pass_b not applicable",
+        },
+        "method": "npubench_runner precision contract",
+    }
+
+
+def _npubench_evidence_record(evaluate: dict, evidence: dict, report: O5Report) -> dict:
+    """Render the harness-owned npubench evidence pointer block."""
+    record = {
+        "binding_sha256": evaluate.get("binding_sha256"),
+        "precision_report": "npubench_evidence/precision_report.json",
+        "performance_report": "npubench_evidence/performance_report.json",
+        "evaluate_report": "npubench_evidence/evaluate_report.json",
+        "lease_manifest": evidence.get("lease_manifest"),
+        "parallelism": (evidence.get("leases") or {}).get("parallelism"),
+        "o5_verdict": report.verdict,
+    }
+    # The target transport publishes this only after its fixed result archive
+    # has been imported and rebound in the controller workspace.  Keep the
+    # pointer in harness-owned verification evidence, never in durable input
+    # state, so a resume cannot accidentally reuse a receipt for an old
+    # candidate snapshot.
+    target_receipt = evidence.get("target_receipt_path")
+    target_receipt_sha256 = evidence.get("target_receipt_sha256")
+    if target_receipt is not None or target_receipt_sha256 is not None:
+        record.update(
+            {
+                "target_execution_receipt": target_receipt,
+                "target_execution_receipt_sha256": target_receipt_sha256,
+            }
+        )
+    return record
+
+
+def _persist_npubench_verification(
+    workspace: Path,
+    *,
+    precision: dict,
+    performance: dict,
+    evaluate: dict,
+    evidence: dict,
+    report: O5Report,
+) -> None:
+    """Atomically publish the harness-owned NPUBench provider record.
+
+    The worker may have written a provisional ``verification.json`` before O5
+    starts.  It is input-only here: never follow a symlink or mutate its inode
+    in place.  Reading a regular single-link JSON object lets legacy unrelated
+    fields survive; publication always replaces the path with a parent-owned
+    file, so a worker cannot redirect the harness write through a link.
+    """
+    try:
+        workspace_root = _npubench_workspace_root(workspace)
+        path = workspace_root / "verification.json"
+        existing = _read_npubench_verification_input(path)
+    except (OSError, ValueError) as exc:
+        report.mismatches.append(
+            f"could not safely read existing npubench verification evidence: {exc}"
+        )
+        report.verdict = "RUNNER_FAILED"
+        report.rollback_kind = "infra"
+        report.summary = "NPUKernelBench evidence could not be safely published"
+        return
+    # This record replaces untrusted worker-owned verification fields.  In
+    # particular, never allow a worker to preseed a different mode and thereby
+    # redirect provider-specific finalize checks.
+    existing["mode"] = "port_a3_to_a5"
+    existing["truth_source"] = _NPUBENCH_TRUTH_SOURCE
+    existing["precision"] = _npubench_precision_record(precision)
+    existing["performance"] = dict(performance)
+    existing["npubench_evidence"] = _npubench_evidence_record(evaluate, evidence, report)
+    try:
+        _atomic_publish_npubench_verification(path, existing)
+    except (OSError, ValueError) as exc:
+        report.mismatches.append(f"could not persist npubench verification evidence: {exc}")
+        report.verdict = "RUNNER_FAILED"
+        report.rollback_kind = "infra"
+        report.summary = "NPUKernelBench evidence could not be persisted"
+
+
+def _npubench_workspace_root(workspace: Path) -> Path:
+    """Resolve the controller-owned workspace before publishing O5 evidence."""
+    try:
+        root = Path(workspace).resolve(strict=True)
+        metadata = root.lstat()
+    except OSError as exc:
+        raise OSError(f"workspace is unavailable for npubench evidence: {exc}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise OSError("workspace for npubench evidence must be a real directory")
+    return root
+
+
+def _read_npubench_verification_input(path: Path) -> dict:
+    """Read only a safe, worker-owned verification object for field carryover."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise OSError(f"cannot inspect verification.json: {exc}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise OSError("verification.json must be a regular non-symlink file")
+    if metadata.st_nlink != 1:
+        raise OSError("verification.json must not have external hard links")
+    # Read-only descriptor: a permission ``mode`` only applies when the open
+    # creates the file (O_CREAT/O_TMPFILE), so none is passed here.  O_NOFOLLOW
+    # and O_CLOEXEC are security properties and must be kept.
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise OSError(f"cannot safely open verification.json: {exc}") from exc
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise OSError("verification.json changed to an unsafe file while opening")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    try:
+        candidate = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # Malformed worker output is intentionally replaced, not treated as a
+        # reason to trust any partial state.
+        return {}
+    return candidate if isinstance(candidate, dict) else {}
+
+
+def _atomic_publish_npubench_verification(path: Path, payload: dict) -> None:
+    """Replace ``verification.json`` without following or mutating a link."""
+    parent = path.parent
+    metadata = parent.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise OSError("npubench verification parent must be a real directory")
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
+    fd, temporary = tempfile.mkstemp(prefix=".verification.json.", dir=parent)
+    temporary_path = Path(temporary)
+    try:
+        os.fchmod(fd, 0o600)
+        view = memoryview(encoded)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("short write while publishing verification.json")
+            view = view[written:]
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        # If an attacker races this path to a symlink, os.replace replaces the
+        # link itself rather than following it.  It never mutates the target.
+        os.replace(temporary_path, path)
+        # Directory descriptor opened only to fsync it; it creates nothing, so
+        # a permission ``mode`` would be a no-op.
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        if hasattr(os, "O_CLOEXEC"):
+            directory_flags |= os.O_CLOEXEC
+        directory_fd = os.open(parent, directory_flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def post_verify_for_finalize(
@@ -667,12 +1106,27 @@ def post_verify_for_finalize(
             etc.) — caller decides whether to allow finalize anyway
         SKIPPED: caller asked us not to run (test mode)
     """
+    truth_source = expected_truth_source(workspace)
+    if skip and truth_source == "npubench":
+        return O5Report(
+            verdict="RUNNER_FAILED",
+            summary="npubench O5 may not be skipped; provider evaluation is mandatory",
+            truth_source=truth_source,
+            rollback_kind="infra",
+        )
     if skip:
         return O5Report(
             verdict="SKIPPED",
             summary="post-verify skipped by caller",
-            truth_source=expected_truth_source(workspace),  # W6
+            truth_source=truth_source,  # W6
         )
+
+    # Unlike historical providers, NPUKernelBench has no worker-authorized
+    # self-claim.  Invoke the evaluator even if verification.json is absent,
+    # empty, or malformed, then replace only the provider-owned fields with
+    # the independent result.
+    if truth_source == "npubench":
+        return _npubench_o5_report(workspace, op, lane, runner)
 
     loaded_verification = _load_verification(workspace)
     if isinstance(loaded_verification, O5Report):
@@ -859,10 +1313,20 @@ def record_harness_state(workspace: Path, rep: O5Report) -> bool:
     in finalize_dispatch.py: never raise, never block finalize on the stamp.
     Returns True if the block was written.
     """
-    vp = workspace / "verification.json"
     try:
         import harness_pristine
-        v = json.loads(vp.read_text())
+
+        is_npubench = expected_truth_source(workspace) == "npubench"
+        if is_npubench:
+            # The NPUBench provider just atomically published this record in
+            # ``_persist_npubench_verification``.  Keep the subsequent generic
+            # harness stamp on that same no-symlink/replace-only path rather
+            # than reopening a worker-controlled link with ``write_text``.
+            vp = _npubench_workspace_root(workspace) / "verification.json"
+            v = _read_npubench_verification_input(vp)
+        else:
+            vp = workspace / "verification.json"
+            v = json.loads(vp.read_text())
         if not isinstance(v, dict):
             return False
         v["harness_pristine"] = {
@@ -878,7 +1342,10 @@ def record_harness_state(workspace: Path, rep: O5Report) -> bool:
                 "(recorded, does not downgrade)."
             ),
         }
-        vp.write_text(json.dumps(v, indent=2))
+        if is_npubench:
+            _atomic_publish_npubench_verification(vp, v)
+        else:
+            vp.write_text(json.dumps(v, indent=2))
         return True
     except Exception:
         return False  # fail-open: the audit stamp never blocks finalize

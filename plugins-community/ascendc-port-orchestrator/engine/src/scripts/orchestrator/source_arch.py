@@ -42,6 +42,30 @@ _IGNORED_DIRS = {
 }
 _TARGET_NAME_MARKERS = ("arch35", "ascend950", "dav_c310", "v351")
 _BINARY_SUFFIXES = {".a", ".bin", ".o", ".pyc", ".so"}
+# A frozen NPUKernelBench task is the only functional oracle.  The separately
+# staged arch22 tree is implementation provenance and must never smuggle an
+# old A3 capture/golden corpus into the worker sandbox.  Keep this deny list
+# narrow and auditable: it covers serialized tensor/dataset formats and known
+# capture/golden names.  Ordinary JSON configuration is common in an operator
+# source tree, so it is deliberately not rejected merely by suffix.
+_NPUBENCH_FORBIDDEN_PROVENANCE_SUFFIXES = frozenset(
+    {
+        ".npy",
+        ".npz",
+        ".pt",
+        ".pth",
+        ".pkl",
+        ".pickle",
+        ".safetensors",
+    }
+)
+_NPUBENCH_FORBIDDEN_PROVENANCE_NAME_TOKENS = (
+    "a3_output",
+    "a3_reference",
+    "edge_dataset",
+    "golden",
+    "reference_capture",
+)
 _BUILD_SOURCE_REGISTRY_DIR = ".port_a3_build_sources"
 _BUILD_SOURCE_REGISTRY_SCHEMA = "cannbot.port_a3_build_source/v1"
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
@@ -778,10 +802,54 @@ def load_port_a3_build_source(
     return source_root
 
 
-def verify_source_stage(
+def _generation_state_binding_error(
+    state: dict, expected_root: Path, expected_manifest: Path
+) -> str | None:
+    """Return the first durable-state defect of the staged source, else None."""
+    if state.get("opgen_mode") != "port_a3_to_a5":
+        return "workspace is not a migration run"
+    if state.get("port_a3_source") != str(expected_root):
+        return "port_a3_source is not the fixed source-only stage"
+    if state.get("source_stage_manifest") != str(expected_manifest):
+        return "source_stage_manifest does not name the fixed manifest"
+    if state.get("graybox_sandbox") is not True:
+        return "migration sandbox is not mandatory in durable state"
+    if state.get("graybox_arch22_dir") != str(expected_root):
+        return "graybox source bind is not the fixed source-only stage"
+    return None
+
+
+def _generation_manifest_error(
+    payload: dict, state: dict, entries: list, digest: str
+) -> str | None:
+    """Return the first manifest/inventory defect of the staged source, else None."""
+    if payload.get("schema") != SOURCE_STAGE_SCHEMA:
+        return "unsupported source-stage manifest schema"
+    manifest_op = payload.get("op")
+    if not is_safe_op_name(manifest_op):
+        return "source-stage manifest has an invalid op name"
+    if state.get("op") is not None and state.get("op") != manifest_op:
+        return "source-stage op binding mismatch"
+    if payload.get("files") != entries or payload.get("file_count") != len(entries):
+        return "source-stage file inventory/hash mismatch"
+    if payload.get("tree_sha256") != digest:
+        return "source-stage tree digest mismatch"
+    if state.get("source_stage_digest") != digest:
+        return "durable state source_stage_digest mismatch"
+    return None
+
+
+def verify_generation_source_stage(
     workspace: Path, state: dict | None = None
 ) -> tuple[bool, str, dict]:
-    """Validate the fixed source snapshot and its durable-state binding."""
+    """Validate static migration-source provenance without any A3 execution.
+
+    The staged arch22 tree remains mandatory implementation scope for the
+    ``--port-a3`` workflow, including when functional truth is a frozen
+    NPUKernelBench task.  This helper reads only the staged source manifest
+    and source bytes; it never imports an A3 evaluator, opens A3 artifacts,
+    or initializes an A3 runtime.
+    """
     workspace = workspace.expanduser().resolve()
     state_path = workspace / ".opgen_state.json"
     if state is None:
@@ -792,16 +860,9 @@ def verify_source_stage(
             return False, f"migration state unreadable: {type(exc).__name__}", {}
     expected_root = workspace / SOURCE_STAGE_DIR
     expected_manifest = expected_root / SOURCE_STAGE_MANIFEST
-    if state.get("opgen_mode") != "port_a3_to_a5":
-        return False, "workspace is not a migration run", {}
-    if state.get("port_a3_source") != str(expected_root):
-        return False, "port_a3_source is not the fixed source-only stage", {}
-    if state.get("source_stage_manifest") != str(expected_manifest):
-        return False, "source_stage_manifest does not name the fixed manifest", {}
-    if state.get("graybox_sandbox") is not True:
-        return False, "migration sandbox is not mandatory in durable state", {}
-    if state.get("graybox_arch22_dir") != str(expected_root):
-        return False, "graybox source bind is not the fixed source-only stage", {}
+    state_error = _generation_state_binding_error(state, expected_root, expected_manifest)
+    if state_error is not None:
+        return False, state_error, {}
     try:
         if expected_root.is_symlink() or not expected_root.is_dir():
             return False, "source-only stage is missing or is a symlink", {}
@@ -812,20 +873,55 @@ def verify_source_stage(
         digest = _tree_digest(entries)
     except Exception as exc:
         return False, f"source-only stage validation failed: {exc}", {}
-    if payload.get("schema") != SOURCE_STAGE_SCHEMA:
-        return False, "unsupported source-stage manifest schema", payload
-    manifest_op = payload.get("op")
-    if not is_safe_op_name(manifest_op):
-        return False, "source-stage manifest has an invalid op name", payload
-    if state.get("op") is not None and state.get("op") != manifest_op:
-        return False, "source-stage op binding mismatch", payload
-    if payload.get("files") != entries or payload.get("file_count") != len(entries):
-        return False, "source-stage file inventory/hash mismatch", payload
-    if payload.get("tree_sha256") != digest:
-        return False, "source-stage tree digest mismatch", payload
-    if state.get("source_stage_digest") != digest:
-        return False, "durable state source_stage_digest mismatch", payload
+    manifest_error = _generation_manifest_error(payload, state, entries, digest)
+    if manifest_error is not None:
+        return False, manifest_error, payload
     detection = detect_source_arch(expected_root)
     if not detection.supported or detection.arch != "arch22":
         return False, f"staged source is no longer arch22 ({detection.method})", payload
     return True, f"source-only stage verified ({len(entries)} files, sha256={digest[:12]})", payload
+
+
+def verify_npubench_generation_source_stage(
+    workspace: Path, state: dict | None = None
+) -> tuple[bool, str, dict]:
+    """Validate source provenance plus the NPUBench no-A3-truth boundary.
+
+    This is intentionally a filename/manifest policy only.  It does not open
+    or execute source data, and is separate from the NPUKernelBench bundle
+    verifier which owns functional truth.  A source checkout containing a
+    serialized dataset/golden must be cleaned or split before it can be
+    mounted into an NPUBench worker's implementation-provenance view.
+    """
+    valid, reason, manifest = verify_generation_source_stage(workspace, state)
+    if not valid:
+        return valid, reason, manifest
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, list):
+        return False, "source-stage manifest has no valid file inventory", manifest
+    blocked: list[str] = []
+    for entry in files:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            return False, "source-stage manifest has an invalid file entry", manifest
+        relative = Path(entry["path"])
+        lower_name = relative.name.lower()
+        if (
+            relative.suffix.lower() in _NPUBENCH_FORBIDDEN_PROVENANCE_SUFFIXES
+            or any(token in lower_name for token in _NPUBENCH_FORBIDDEN_PROVENANCE_NAME_TOKENS)
+        ):
+            blocked.append(relative.as_posix())
+    if blocked:
+        return (
+            False,
+            "npubench generation provenance contains forbidden A3/data artifact(s): "
+            + ", ".join(sorted(blocked)[:5]),
+            manifest,
+        )
+    return True, reason, manifest
+
+
+def verify_source_stage(
+    workspace: Path, state: dict | None = None
+) -> tuple[bool, str, dict]:
+    """Backward-compatible name for :func:`verify_generation_source_stage`."""
+    return verify_generation_source_stage(workspace, state)

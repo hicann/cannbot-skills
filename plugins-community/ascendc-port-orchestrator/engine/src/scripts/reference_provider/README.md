@@ -1,9 +1,12 @@
 # reference_provider — Phase O2.5 reference generation
 
-These scripts build deterministic PyTorch/CPU reference inputs and outputs for
-cross-generation operator migration and forward-to-backward generation. The
-resulting artifacts are consumed by the kernel worker's external-reference
-verification step.
+These scripts support deterministic reference inputs and outputs for
+cross-generation operator migration and forward-to-backward generation. For
+new migration tasks the authoritative reference is normally the frozen
+KernelBench-style task/sidecar bundle (task `.py` + same-stem `.json`/`.jsonl` sidecar pair); the
+legacy source-NPU provider is used only when durable state explicitly selects
+`reference.source=a3_live`. The resulting artifacts are consumed by the kernel
+worker's external-reference verification step.
 
 ## Main components
 
@@ -18,12 +21,17 @@ verification step.
 
 ## Workflow
 
-1. Generate deterministic inputs from the operator specification.
-2. Evaluate the PyTorch forward or autograd backward reference on CPU.
-3. Record integrity metadata and stage the reference dataset with the task.
-4. Validate the scoped reference through the migration or backward provider.
+1. For `npubench`, stage the supplied task/sidecar bundle by digest and preflight
+   it; for `a3_live`, generate deterministic
+   source inputs and capture the current arch22 source on its NPU.
+2. For backward generation, evaluate the supplied forward specification with
+   CPU/fp64 autograd.
+3. Record the selected reference source, integrity metadata, and staged
+   artifacts with the task.
+4. Validate the scoped reference through the selected migration or backward
+   provider.
 5. Use `verify.py` to compare the generated AscendC implementation with the
-   staged truth under the declared precision contract.
+   selected staged truth under the declared precision contract.
 
 Keep per-case tensors small enough for precision validation. Large production
 shapes belong in the later performance stage, not in the truth dataset.

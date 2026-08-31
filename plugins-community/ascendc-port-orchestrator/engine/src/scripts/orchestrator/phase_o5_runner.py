@@ -227,7 +227,14 @@ def _measure_ssh_verifiers(
     )
     if fallback_error:
         return fallback_error
-    gate_error = _gate_port_a3_two_tier(workspace, pass_a)
+    try:
+        gate_error = _gate_port_a3_two_tier(workspace, pass_a)
+    except Exception as exc:
+        # Fail closed: an unresolvable durable reference binding must surface
+        # as a runner_error, not as an uncaught exception.
+        return MeasuredResult(
+            runner_error=f"cannot resolve reference provider: {exc}"
+        )
     if gate_error:
         return MeasuredResult(runner_error=gate_error)
     det_script = _find_verifier(
@@ -257,6 +264,12 @@ def ssh_runner(workspace: Path, op: str, lane: int = 0) -> MeasuredResult:
     if not env:
         return MeasuredResult(runner_error="missing .ascendc_env")
     target, target_upper = _normalise_target(env)
+    container = (env.get(f"{target_upper}_CONTAINER") or env.get("A5_CONTAINER", "")).strip().lower()
+    # ``A5_CONTAINER=local`` is an explicit controller-as-target deployment.
+    # It has no SSH host by design, so select it before validating remote-host
+    # credentials.  All other paths retain the fail-closed host requirement.
+    if container == "local":
+        return _run_verifier_local(workspace, op, env, lane=lane)
     host_key = f"{target_upper}_HOST"
     if not env.get(host_key) and not env.get("A5_HOST"):
         return MeasuredResult(
@@ -266,9 +279,6 @@ def ssh_runner(workspace: Path, op: str, lane: int = 0) -> MeasuredResult:
     pass_b_script, script_error = _pass_b_script_or_error(workspace, op, plugin_skip)
     if script_error:
         return script_error
-    container = (env.get(f"{target_upper}_CONTAINER") or env.get("A5_CONTAINER", "")).strip().lower()
-    if container == "local":
-        return _run_verifier_local(workspace, op, env, lane=lane)
     sync_error = _resync_workspace_to_container(workspace, env, lane=lane)
     if sync_error:
         return MeasuredResult(runner_error=f"pre-O5 workspace sync failed: {sync_error}")
@@ -307,7 +317,8 @@ def _maybe_port_a3_perf_remeasure(
     perf gate LOGIC (accept/reject) is unchanged and owned elsewhere — this fix
     only feeds the field that gate already reads.
     """
-    # Scope strictly to port_a3. Reuse the same signal ssh_runner already uses
+    # Scope the legacy behavior strictly to live-A3 port_a3. Reuse the same
+    # signal ssh_runner already uses
     # to recognise a port_a3 op that claims pass_a (avoids a plugin-detect import
     # cycle and matches the existing gap-(b) detection).
     if not _port_a3_claims_pass_a(workspace):
@@ -448,6 +459,9 @@ def _resync_force_update_scripts() -> set[str]:
         "det_check.py", "run_det_check.py", "edge_verify.py", "verify_edge.py",
         "native_capture.pt", "a3_baseline_perf.json", "a3_capture_manifest.json",
         "run_a3_reference.py", ".opgen_state.json",
+        # O2.5 staged reference inputs are immutable but must replace any
+        # stale target-container copy before the independent O5 grader runs.
+        "reference_inputs",
     }
 
 
@@ -463,6 +477,12 @@ def _collect_resync_payload(workspace: Path) -> tuple[list[Path], set[str]]:
         "model.py", "model_new_ascendc.py", "verification.json", "manifest.json",
     )
     push_files = [workspace / name for name in payload_names if (workspace / name).exists()]
+    # Preserve the content-addressed staged reference-input bundle for the
+    # target-side instruments; its manifest/state binding remains part of the
+    # remote proof.
+    reference_inputs = workspace / "reference_inputs"
+    if reference_inputs.is_dir() and not reference_inputs.is_symlink():
+        push_files.append(reference_inputs)
     present_names = {path.name for path in push_files}
     forced_json: set[str] = set()
     for json_path in sorted(workspace.glob("*.json")):
@@ -500,6 +520,27 @@ def _resync_extra_scripts() -> list[Path]:
     )
     scripts_dir = _PROJECT_ROOT / "src" / "scripts"
     return [scripts_dir / name for name in script_names if (scripts_dir / name).exists()]
+
+
+def _resync_instrument_closures() -> tuple[tuple[Path, str], ...]:
+    """Return package-relative imports required by O5 grading instruments.
+
+    Most O5 instruments are intentionally staged as flat scripts.  The
+    packages below are imported by their bare module names from the remote
+    ``current_task`` directory.  Keep their archive paths explicit so a fresh
+    target container has the same import layout as the controller checkout.
+    """
+    scripts_dir = _PROJECT_ROOT / "src" / "scripts"
+    return (
+        (
+            scripts_dir / "orchestrator" / "precision" / "cannbench_grader",
+            "orchestrator/precision/cannbench_grader",
+        ),
+        (
+            scripts_dir / "reference_provider" / "verify.py",
+            "reference_provider/verify.py",
+        ),
+    )
 
 
 def _probe_resync_resident_files(
@@ -588,12 +629,7 @@ def _stage_resync_tar(push_files: list[Path], extra_scripts: list[Path]) -> tupl
         def no_pycache(member):
             return None if "__pycache__" in member.name or member.name.endswith(".pyc") else member
 
-        for source_path, archive_path in (
-            (_PROJECT_ROOT / "src" / "scripts" / "orchestrator" / "precision" / "cannbench_grader",
-             "orchestrator/precision/cannbench_grader"),
-            (_PROJECT_ROOT / "src" / "scripts" / "reference_provider" / "verify.py",
-             "reference_provider/verify.py"),
-        ):
+        for source_path, archive_path in _resync_instrument_closures():
             if source_path.exists():
                 tar.add(str(source_path), arcname=archive_path, filter=no_pycache)
                 (instrument_dirs if source_path.is_dir() else instrument_files).append(archive_path)
@@ -628,11 +664,15 @@ def _publish_resync_tar(
     result = subprocess.run(scp_command, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         return f"scp failed: {result.stderr[:200]}"
-    force_names = [
-        path.name for path in push_files
+    force_paths = [
+        path for path in push_files
         if path.name in force_update_scripts or path.name in forced_json
     ]
-    remove_force = ("rm -f " + " ".join(force_names) + " && ") if force_names else ""
+    remove_force_parts = [
+        f"rm -rf {path.name}" if path.is_dir() else f"rm -f {path.name}"
+        for path in force_paths
+    ]
+    remove_force = (" && ".join(remove_force_parts) + " && ") if remove_force_parts else ""
     remove_instruments = [
         f"rm -f {benchmark_root}/current_task/{path}" for path in instrument_files
     ] + [

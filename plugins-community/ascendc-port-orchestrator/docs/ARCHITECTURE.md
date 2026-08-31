@@ -81,10 +81,17 @@ cannbot 生态里「workflow」的官方定义（`docs/STANDARDS.md §目录结�
 
 ### 2.2 跨代际移植的参考来源
 
-`--port-a3` 是 `opgen_mode=port_a3_to_a5` 的唯一移植入口：它提供要分析和移植的 arch22 源算子。
-O2.5 必须在当次任务中采集来源 A3 的实时 CANN 输出，O5 使用该输出走既有 two-tier 精度验证；目标实现则在
-独立 A5 环境构建和测量。因此跨代移植需要可用的 A3 与 A5 配置，并将参考来源、输入及运行证据写入状态和报告。
-离线包或其它参考来源不属于当前实现，不能冒充实时 A3/A5 结果。
+`--port-a3-ops` 是 `opgen_mode=port_a3_to_a5` 的唯一移植入口：它提供要分析和移植的 arch22 源算子。
+用户和 agent 的推荐 golden 是显式选择的 `npubench`（KernelBench 风格 task + sidecar 文件对）：CLI 在创建 workspace 前内容寻址暂存原 task +
+同 stem sidecar，O2.5 预检该 immutable bundle，O5 走 npubench 原生精度/性能通路。由于裸调用无法推断
+具体 task 路径，`.ascendc_env` 的 `PORT_A3_REFERENCE_SOURCE` 默认留空：裸 `--port-a3-ops` 调用必须在命令中
+显式选择 provider，否则启动 fail closed。`a3_live` 是按需的
+显式参考来源，才会在当次任务中采集来源 A3 的 CANN 输出并要求独立 A3/A5 配置。各种来源均记录到 durable state 与报告，
+不能把模型参考指标冒充 A3/A5 ratio，也不能把离线 tensor 冒充 live A3 输出。
+
+**perf 对比基准差异**：`npubench` 路径报告的加速比 = 目标实现 vs golden 参考实现（同一 A5 环境 W3/R5 msprof 实测）；
+`a3_live` 路径的精度与加速比都对照当次来源 A3 实测（加速比 = 目标实现 vs A3 实现实测）。TileLang2AscendC 工程来源
+只支持 `npubench`（`orchestrator_cmds.py` 对该来源与 `a3_live` 的组合显式拒绝）。
 
 ## 3. 插件结构
 
@@ -195,7 +202,7 @@ plugins-community/ascendc-port-orchestrator/
 
 | 项 | 事实 |
 |---|---|
-| 启动命令 | `python3 -m orchestrator --port-a3 gelu --lane 0`（未带 `--perf-threshold=0`）→ 走默认，性能强制测量 |
+| 启动命令 | `python3 -m orchestrator --port-a3 gelu --lane 0`（未带 `--perf-threshold=0`）→ 走默认，性能强制测量（历史命令记录；当前裸 `--port-a3-ops` 不带 `--reference-source`/`--npubench-task` 会在启动时 fail closed） |
 | 环境 | 本次无 A3 device；参考侧 aclnn-pipeline 与目标侧 raw `ACLRT_LAUNCH_KERNEL` 测量路径不对称（P141，实为不同 op）；A3 侧仅有跨 session 的存档基线 |
 | 子 agent 行为 | 完成 A5 侧独立复测（同一 `.so`，md5 一致；10 warmup + 20 rep，实测 2.40×，快于自报 2.264×，无注水），**并在文档中透明披露上述三条使测量无效的限制**；但仍标 `performance.status=PASS` |
 | 门判定 | finalize 性能门正确拒绝：测量虽经独立复测且已披露，但 P141 op 不对称 + 跨 session A/B 使其无效，`PASS` 声明不成立 |
@@ -329,14 +336,16 @@ codex（read-only、喂了本文档 + cba_resolver/converter/coverage_gate + AGE
 | 钩子完整性 O0 | Primary(orch-shell) | 插件 hook 配置 | 完整性 verdict | hook 完整或自愈 |
 | 解析/配置 O1 | Primary(orch-shell) | 用户 NL 目标 + 源算子 | 任务配置(source/target/mode) | 目标可归一、源可识别 |
 | 分类 O1.5 | orchestrator | 源算子 | op-family + det-policy | 分类完成 |
-| 参考/真值 O2.5 | orchestrator | 移植源算子（实时 A3-CANN）/ 正向规格（反向） | reference / golden | 真值自洽、来源与 state 绑定 |
+| 参考/真值 O2.5 | orchestrator | 移植源算子 + 推荐 KernelBench 风格 task/sidecar（a3_live 按需显式，仅常规 ops-nn 来源）/ 正向规格（反向） | reference / golden | 真值自洽、来源与 state 绑定 |
 | **生成 O4（差异阶段）** | aog-kernel-worker | 配置 + 参考 | 目标 AscendC kernel | 编译通过 |
 | 构建 | build harness | kernel | .so + provenance | build green |
 | 精度验证 O5 | orchestrator + precision | kernel + 真值 | precision verdict(分层) | 达阈值 / 记录 ceiling |
 | 性能(可选) | aog-kernel-optimizer | kernel + profiling | perf ratio | ≥阈值 或 记录 |
 | 报告 O6 | aog-report-gen | 全产物 | REPORT + 复现指引 | 报告完整 |
 
-差异阶段 = 参考 O2.5 与生成 O4：cross-gen-port 走来源架构实时 A3-CANN 真值→目标 kernel；backward-gen 走 CPU/fp64 autograd 梯度真值→反向 kernel。其余阶段两模式共用。
+差异阶段 = 参考 O2.5 与生成 O4：cross-gen-port 推荐走 npubench 冻结 task/sidecar 真值→目标 kernel；
+也可按需显式走实时 A3-CANN；backward-gen 走 CPU/fp64 autograd 梯度真值→反向 kernel。
+其余阶段两模式共用。
 
 ### 13.1 模式 A：ascendc-cross-gen-port（跨代际算子移植）
 
@@ -344,10 +353,13 @@ codex（read-only、喂了本文档 + cba_resolver/converter/coverage_gate + AGE
 - **适用场景**：已有 arch22(910C/V220) 的 AscendC 算子、需在 arch35(950PR/V300) 上得到等价算子；用户能用自然语言指定目标。
 - **不适用场景**：源不是 AscendC（用其它 op-gen 模式）；目标架构超出当前支持（当前仅 arch22→arch35）；纯新算子无源参考（用直调/注册模式）。
 - **标准工作流**：见 §13.0，生成阶段走移植路径。
-- **参考输入**：当次在 A3 执行来源 CANN，捕获的输出作为 A5 目标算子的验证真值；离线 A3 tensor 包或其它参考来源不在本模式当前实现内。
+- **参考输入**：推荐 KernelBench 风格 task（task `.py` 加同 stem `.json`/`.jsonl`）作为原生 `npubench`
+  provider 原样执行；用户显式选择 `a3_live` 时，才在 A3 执行来源 CANN 并捕获输出（仅常规 ops-nn 来源；
+  TileLang2AscendC 工程来源只支持 `npubench`）。perf 加速比基准：`npubench` = 目标实现 vs golden 参考实现
+  （A5 同环境 W3/R5 msprof 实测）；`a3_live` = 目标实现 vs A3 实现实测。离线 A3 tensor 包仍不属于当前实现。
 - **Agent 设计**：Primary（AGENTS.md，orch-shell）= 解析 NL→canonical target、选 lane、调编排器、收口状态/报告，**不亲自逐阶段写 kernel**；Subagent = aog-kernel-worker（生成+构建+验证）、aog-kernel-optimizer（perf）、aog-precision-probe（精度卡壳）、aog-fused-optimizer（fused 升级）、aog-researcher（架构探索）、aog-determinism-analyzer（确定性）。触发条件见 §4。
 - **Skill 依赖（阶段级）**：入口 `ascendc-cross-gen-port`（O1）；KB resolver c>b>a（O2.5/O4 按需注入）；社区 skills a 层（O4 生成，如 ascendc-api-best-practices）；gates 安全网（O0/O5）；KB writer（O6 写回 c）。
-- **工件契约**：state（`workspace/{op}/.opgen_state.json`）、kernel（`workspace/{op}/kernel/*.{h,cpp}` + pybind11.cpp）、A3 reference provenance、build provenance、precision/perf report、user-KB 写回文件。消费者 = 后续阶段 + reviewer + 用户复现。
+- **工件契约**：state（`workspace/{op}/.opgen_state.json`）、内容寻址的 KernelBench 风格 task/sidecar bundle（推荐）或 A3 reference provenance、kernel（`workspace/{op}/kernel/*.{h,cpp}` + pybind11.cpp）、build provenance、precision/perf report、user-KB 写回文件。消费者 = 后续阶段 + reviewer + 用户复现。
 - **失败恢复**：可重试（编译/精度内层循环、`--optimize` 再入）；可回滚（状态机回退阶段）；保留现场（workspace 持久化、可中断恢复）；blocked（真值不可得/硬件不支持 → 升级 aog-researcher 或 await_user_decision）；用户需补充（目标歧义时回询）。
 - **用户入口示例**：`把这个算子移植到 arch35：<算子源/名称>`；`移植到 950PR / A5：<算子源/名称>`。
 

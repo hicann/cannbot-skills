@@ -56,8 +56,12 @@ assert_tracked_plugin_has_no_match() {
 
 # Keep the plugin scoped to AscendC migration/backward generation. These backends and workbenches
 # are unrelated even though AscendC target prior-art is intentionally retained below.
+# `tilelang` is boundary-scoped for the same reason tests/unit/test-ascendc-port-scope.sh scopes it:
+# the compound route name `tilelang2ascendc` names an AscendC source *format* the plugin consumes
+# (an already-lowered `model_new_ascendc.py` + `kernel/` custom-op project), not a foreign backend
+# the plugin can run. A bare `tilelang` token stays forbidden.
 assert_tracked_plugin_has_no_match \
-    'cuda|nvidia|ptx|triton|tilelang|mc2' \
+    'cuda|nvidia|ptx|triton|\btilelang\b|mc2' \
     "unrelated backend knowledge is present"
 assert_tracked_plugin_has_no_match \
     'port_tilelang|port_triton|opgen_mc2|port_mc2|port_pytorch|benchmark[-_ ]?mode|mode=benchmark' \

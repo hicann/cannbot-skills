@@ -69,23 +69,46 @@ import provenance_node as _provenance_node  # noqa: E402  (DEBT-203 S1)
 
 
 def _inject_migration_metadata(workspace: Path) -> None:
-    """Copy durable arch22-to-arch35 detection evidence into verification."""
+    """Copy durable migration-source evidence into ``verification.json``.
+
+    The legacy route is an arch22→arch35 migration.
+    ``port-aclnn-tilelang2ascendc`` is already a target-format implementation
+    context, so archived evidence must not claim an arch22 migration that
+    never happened.
+    """
     state_path = workspace / ".opgen_state.json"
     verification_path = workspace / "verification.json"
     try:
         state = json.loads(state_path.read_text())
         if state.get("opgen_mode") != "port_a3_to_a5":
             return
-        if state.get("source_arch") != "arch22" or state.get("target_arch") != "arch35":
-            return
+        source = state.get("port_source")
+        source_kind = (
+            source.get("kind") if isinstance(source, dict)
+            else state.get("source_kind")
+        )
+        if source_kind == "port-aclnn-tilelang2ascendc":
+            if state.get("source_arch") != "arch35" or state.get("target_arch") != "arch35":
+                return
+            migration = {
+                "source_kind": source_kind,
+                "source_arch": "arch35",
+                "target_arch": "arch35",
+                "source_arch_detection": state.get("source_arch_detection", {}),
+                "semantic": "tilelang2ascendc_project_context",
+            }
+        else:
+            if state.get("source_arch") != "arch22" or state.get("target_arch") != "arch35":
+                return
+            migration = {
+                "source_arch": "arch22",
+                "target_arch": "arch35",
+                "source_arch_detection": state.get("source_arch_detection", {}),
+            }
         verification = json.loads(verification_path.read_text())
         if not isinstance(verification, dict):
             return
-        verification["migration"] = {
-            "source_arch": "arch22",
-            "target_arch": "arch35",
-            "source_arch_detection": state.get("source_arch_detection", {}),
-        }
+        verification["migration"] = migration
         verification_path.write_text(json.dumps(verification, indent=2))
     except Exception as error:
         logging.getLogger(__name__).debug(
@@ -444,6 +467,31 @@ def _incomplete_precision_rollback(workspace: Path, status: str) -> dict:
     return _eligibility_rejection(GateID.PERSIST_EVIDENCE, reason)
 
 
+def _npubench_pending_rejection(workspace: Path, verification: dict) -> Optional[dict]:
+    """Return the provider-pending rejection when an O5 report is absent."""
+    try:
+        from npubench.npubench_finalize_contract import resolve_npubench_workspace
+
+        is_npubench, npu_err = resolve_npubench_workspace(workspace)
+        if is_npubench and not verification.get("npubench_evidence"):
+            return _eligibility_rejection(
+                GateID.NPUBENCH_EVALUATION_PENDING,
+                npu_err or (
+                    "NPUBENCH_EVALUATION_PENDING: O5 provider evaluation has not "
+                    "written npubench_evidence yet (O5 runs before eligibility; "
+                    "this line only fires on a reordered/invoked-early path)"
+                ),
+            )
+    except Exception as error:
+        # Non-NPUBench workspaces and optional-module friction keep the legacy
+        # eligibility path; retain the diagnostic without changing that path.
+        logging.getLogger(__name__).debug(
+            "NPUBench eligibility probe unavailable; using legacy checks: %s",
+            error,
+        )
+    return None
+
+
 def check_finalize_eligibility(workspace: Path) -> dict:
     """Determine whether `workspace` should finalize or return a rollback.
 
@@ -469,6 +517,9 @@ def check_finalize_eligibility(workspace: Path) -> dict:
             f"verification.json malformed: {error}",
         )
     prec = verification.get("precision", {}) or {}
+    pending_rejection = _npubench_pending_rejection(workspace, verification)
+    if pending_rejection is not None:
+        return pending_rejection
     structural_rejection = _check_eligibility_structure(
         workspace, prec, _check_model_py_shape, _check_pass_a_coverage,
     )
@@ -735,8 +786,78 @@ def _run_plugin_extra_finalize_checks(workspace: Path, v: dict):
     return None
 
 
+def _freeze_archive_view(plugin, workspace: Path, op: str):
+    """Capture a plugin-owned archive policy once per promotion.
+
+    Old plugins expose only per-path mapping hooks and retain that behavior.
+    A profile-sensitive plugin may opt into a frozen view so a mutable state
+    file cannot choose different archive rules while files are being copied.
+    """
+    freezer = getattr(plugin, "freeze_archive_view", None) if plugin else None
+    return freezer(workspace, op) if callable(freezer) else None
+
+
+def _archive_view_rejection(archive_view) -> Optional[str]:
+    if archive_view is None:
+        return None
+    reason = getattr(archive_view, "rejection_reason", None)
+    return reason if isinstance(reason, str) and reason else None
+
+
+def _archive_path_allowed(plugin, archive_view, workspace: Path, rel: str) -> bool:
+    if archive_view is not None:
+        return bool(archive_view.should_archive_path(rel))
+    archive_policy = getattr(plugin, "should_archive_path", None) if plugin else None
+    return not callable(archive_policy) or bool(archive_policy(workspace, rel))
+
+
+def _archive_path_rejection(archive_view, rel: str) -> Optional[str]:
+    """Return a profile-owned hard error for a path omitted by promotion.
+
+    Most plugins historically expose only a bool archive filter, where a
+    skipped runtime log is normal.  The direct-launch product has a stricter
+    source-delivery contract: an unknown file must fail rather than vanish.
+    Keep that richer result optional so every established plugin remains on
+    the prior bool-only behavior.
+    """
+    if archive_view is None:
+        return None
+    classifier = getattr(archive_view, "rejected_archive_path_reason", None)
+    if not callable(classifier):
+        return None
+    reason = classifier(rel)
+    return reason if isinstance(reason, str) and reason else None
+
+
+def _archive_target_rel(plugin, archive_view, workspace: Path, rel: str, op: str) -> str:
+    if archive_view is not None:
+        return archive_view.resolve_archive_target(rel, op)
+    workspace_mapper = getattr(plugin, "resolve_archive_target_for_workspace", None)
+    return (
+        workspace_mapper(workspace, rel, op)
+        if callable(workspace_mapper)
+        else plugin.resolve_archive_target(rel, op) if plugin else rel
+    )
+
+
+def _archive_requires_regular_files(archive_view) -> bool:
+    return bool(archive_view and getattr(archive_view, "requires_regular_files", False))
+
+
+def _regular_non_symlink_file(path: Path) -> bool:
+    """Check the delivery path itself, without following a task symlink."""
+    import stat
+
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode)
+
+
 def _finalize_with_plugin_layout(
     workspace: Path, archive_dir: Path, rep: "FinalizeReport", op: str,
+    archive_view=None,
 ) -> list[str]:
     """Promote workspace artifacts to archive_dir using the active
     plugin's archive layout (plugin.resolve_archive_target() per file).
@@ -753,22 +874,41 @@ def _finalize_with_plugin_layout(
     Updates rep.files_promoted / errors in place; returns skipped names.
     """
     plug = _get_active_plugin(workspace)
+    archive_view = archive_view or _freeze_archive_view(plug, workspace, op)
     skipped_names: list[str] = []
+    rejection = _archive_view_rejection(archive_view)
+    if rejection:
+        rep.errors.append(rejection)
+        return skipped_names
+    require_regular = _archive_requires_regular_files(archive_view)
     for entry in sorted(workspace.rglob("*")):
         if entry.is_dir():
             continue
         rel = entry.relative_to(workspace).as_posix()
+        rejection = _archive_path_rejection(archive_view, rel)
+        if rejection:
+            rep.errors.append(f"promote {rel}: {rejection}")
+            skipped_names.append(rel)
+            continue
         if _should_skip(entry.name):
+            skipped_names.append(rel)
+            continue
+        if not _archive_path_allowed(plug, archive_view, workspace, rel):
             skipped_names.append(rel)
             continue
         if any(part.startswith(".") for part in entry.relative_to(workspace).parts):
             skipped_names.append(rel)
             continue
+        if require_regular and not _regular_non_symlink_file(entry):
+            rep.errors.append(
+                f"promote {rel}: direct delivery permits only regular non-symlink files"
+            )
+            continue
         # Harness-internal → .harness/ subdir (preserves filename)
         if _is_harness_internal(rel):
             target_rel = f".harness/{rel}"
         else:
-            target_rel = plug.resolve_archive_target(rel, op) if plug else rel
+            target_rel = _archive_target_rel(plug, archive_view, workspace, rel, op)
         dst = archive_dir / target_rel
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -815,14 +955,79 @@ def _create_archive_dir(op: str, archive_root: Path) -> Path:
     return archive_dir
 
 
-def _finalize_with_flat_layout(
-    workspace: Path, archive_dir: Path, rep: FinalizeReport,
+@dataclass(frozen=True)
+class _PromotionRequest:
+    """Grouped workspace-to-archive promotion inputs.
+
+    The five values always travel together (they describe one promotion of one
+    workspace), so they are passed as a single request object rather than as a
+    long positional parameter list.
+    """
+
+    workspace: Path
+    archive_dir: Path
+    op: str
+    is_port_mode: bool
+    archive_view: Optional[object] = None
+
+
+def _flat_promote_direct_entries(
+    request: _PromotionRequest, rep: FinalizeReport, plugin, archive_view,
 ) -> list[str]:
-    """Merge non-port workspace entries into the archive directory."""
+    """Promote every nested entry under the strict direct-delivery policy.
+
+    Strict direct policies must apply to every nested item.  The legacy
+    _merge_copy_dir helper intentionally only understands scratch-name
+    filtering, so using it here would leak kernel/build/*.so and other
+    runtime artefacts after a top-level kernel/ decision passed.
+    """
+    workspace = request.workspace
+    skipped_names: list[str] = []
+    for entry in sorted(workspace.rglob("*")):
+        if entry.is_dir():
+            continue
+        rel = entry.relative_to(workspace).as_posix()
+        path_rejection = _archive_path_rejection(archive_view, rel)
+        if path_rejection:
+            rep.errors.append(f"promote {rel}: {path_rejection}")
+            skipped_names.append(rel)
+            continue
+        if _should_skip(entry.name) or not _archive_path_allowed(
+            plugin, archive_view, workspace, rel
+        ):
+            skipped_names.append(rel)
+            continue
+        if any(part.startswith(".") for part in entry.relative_to(workspace).parts):
+            skipped_names.append(rel)
+            continue
+        if not _regular_non_symlink_file(entry):
+            rep.errors.append(
+                f"promote {rel}: direct delivery permits only regular non-symlink files"
+            )
+            continue
+        try:
+            destination = request.archive_dir / rel
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry, destination)
+            rep.files_promoted.append(rel)
+        except Exception as error:
+            rep.errors.append(f"promote {rel}: {error}")
+    return skipped_names
+
+
+def _flat_promote_top_level_entries(
+    request: _PromotionRequest, rep: FinalizeReport, plugin, archive_view,
+) -> list[str]:
+    """Merge the workspace's top-level entries with legacy best-effort copies."""
+    workspace = request.workspace
+    archive_dir = request.archive_dir
     skipped_names: list[str] = []
     for entry in sorted(workspace.iterdir()):
         name = entry.name
         if _should_skip(name):
+            skipped_names.append(name)
+            continue
+        if not _archive_path_allowed(plugin, archive_view, workspace, name):
             skipped_names.append(name)
             continue
         try:
@@ -837,14 +1042,32 @@ def _finalize_with_flat_layout(
     return skipped_names
 
 
-def _promote_workspace(
-    workspace: Path, archive_dir: Path, rep: FinalizeReport, op: str, is_port_mode: bool,
-) -> None:
+def _finalize_with_flat_layout(
+    request: _PromotionRequest, rep: FinalizeReport,
+) -> list[str]:
+    """Merge non-port workspace entries into the archive directory."""
+    workspace = request.workspace
+    plugin = _get_active_plugin(workspace)
+    archive_view = request.archive_view or _freeze_archive_view(
+        plugin, workspace, workspace.name
+    )
+    rejection = _archive_view_rejection(archive_view)
+    if rejection:
+        rep.errors.append(rejection)
+        return []
+    if _archive_requires_regular_files(archive_view):
+        return _flat_promote_direct_entries(request, rep, plugin, archive_view)
+    return _flat_promote_top_level_entries(request, rep, plugin, archive_view)
+
+
+def _promote_workspace(request: _PromotionRequest, rep: FinalizeReport) -> None:
     """Promote workspace files through the port or flat layout writer."""
-    if is_port_mode:
-        rep.skipped_names = _finalize_with_plugin_layout(workspace, archive_dir, rep, op)
+    if request.is_port_mode:
+        rep.skipped_names = _finalize_with_plugin_layout(
+            request.workspace, request.archive_dir, rep, request.op, request.archive_view
+        )
         return
-    rep.skipped_names = _finalize_with_flat_layout(workspace, archive_dir, rep)
+    rep.skipped_names = _finalize_with_flat_layout(request, rep)
 
 
 def _copy_plugin_docs(workspace: Path, archive_dir: Path, rep: FinalizeReport) -> None:
@@ -941,14 +1164,34 @@ def finalize_op(
     """Finalize an eligible workspace using its plugin-owned archive layout."""
     plugin = _get_active_plugin(workspace)
     is_port_mode = bool(plugin and plugin.archive_layout_mapping(workspace))
+    archive_view = _freeze_archive_view(plugin, workspace, op)
     archive_root = _archive_root_for_plugin(plugin, archive_root)
     rep = FinalizeReport(op=op, workspace=workspace, archive_dir=None)
     if not _can_finalize_workspace(workspace, rep):
         return rep
+    rejection = _archive_view_rejection(archive_view)
+    if rejection:
+        rep.errors.append(rejection)
+        return rep
     _inject_finalize_metadata(op, workspace)
     archive_dir = _create_archive_dir(op, archive_root)
     rep.archive_dir = archive_dir
-    _promote_workspace(workspace, archive_dir, rep, op, is_port_mode)
+    _promote_workspace(
+        _PromotionRequest(
+            workspace=workspace,
+            archive_dir=archive_dir,
+            op=op,
+            is_port_mode=is_port_mode,
+            archive_view=archive_view,
+        ),
+        rep,
+    )
+    # The direct profile is an allow-listed source product.  A failed copy of
+    # any permitted entry must not be hidden by a finalized marker or a
+    # partially promoted archive; legacy profiles retain their historical
+    # best-effort promotion behavior.
+    if archive_view is not None and getattr(archive_view, "strict_delivery", False) and rep.errors:
+        return rep
     _promote_docs_and_readme(op, workspace, archive_dir, rep)
     _write_finalized_marker(op, workspace, archive_dir, rep)
     _auto_stage_archive(archive_dir, rep)
