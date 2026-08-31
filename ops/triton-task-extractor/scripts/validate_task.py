@@ -45,6 +45,13 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402
 
+VERIFIER_SCRIPTS = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "triton-op-verifier", "scripts")
+)
+if VERIFIER_SCRIPTS not in sys.path:
+    sys.path.insert(0, VERIFIER_SCRIPTS)
+from npu_preflight import load_preflight_options, run_preflight  # noqa: E402
+
 logger = logging.getLogger("triton_task_extractor.validate_task")
 
 
@@ -209,21 +216,19 @@ def _resolve_input_groups(namespace: dict, checks: list):
 
 
 def _make_npu_helpers():
-    """返回 (_to_npu_device, npu_available)；npu_available 为 False 时回退到 CPU。"""
+    """返回将输入迁移到 NPU 的 helper；NPU 不可用时拒绝 CPU fallback。"""
     import torch
+    import torch_npu
 
-    try:
-        import torch_npu
-        npu_available = torch_npu.npu.is_available()
-    except Exception:
-        npu_available = False
+    if not torch_npu.npu.is_available():
+        raise RuntimeError("NPU is unavailable after preflight")
 
     def _to_npu_device(x):
-        if npu_available and isinstance(x, torch.Tensor):
+        if isinstance(x, torch.Tensor):
             return x.npu()
         return x
 
-    return _to_npu_device, npu_available
+    return _to_npu_device, True
 
 
 def _check_tensor_nan_inf(t, name: str):
@@ -358,6 +363,18 @@ def check_runtime(code: str, file_path: str = None) -> dict:
     若仅提供 get_inputs()，按单 case 处理。
     """
     checks = []
+    preflight = run_preflight(**load_preflight_options())
+    if preflight["status"] != "ready":
+        return {
+            "passed": False,
+            "checks": checks,
+            "error": f"NPU preflight blocked task validation: {preflight['status']}",
+            "cases_tested": 0,
+            "cases_passed": 0,
+            "failure_class": "B",
+            "npu_preflight": preflight,
+        }
+
     namespace, err = _exec_user_code(code, file_path, checks)
     if err is not None:
         return err

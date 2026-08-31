@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
 from _common_utils import move_to_device  # noqa: E402
+from npu_preflight import load_preflight_options, run_preflight, write_preflight_result  # noqa: E402
 
 logger = logging.getLogger("triton_op_verifier.benchmark")
 
@@ -199,6 +200,8 @@ class BenchmarkResult:
     negative_indices: List[int] = field(default_factory=list)
     none_indices: List[int] = field(default_factory=list)
     per_shape_results: List[SingleShapeResult] = field(default_factory=list)
+    npu_preflight: Optional[Dict[str, Any]] = None
+    failure_class: Optional[str] = None
 
 
 @dataclass
@@ -791,20 +794,39 @@ def _run_shape_case(config, model_spec: BenchmarkModelSpec,
     )
 
 
-def benchmark_implementations(config: BenchmarkConfig) -> BenchmarkResult:
-    """执行完整的性能测试，支持多组输入。每个 shape 独立 try/except。"""
-    import torch
-    import torch_npu  # noqa: F401
+def _run_preflight_gate(config: BenchmarkConfig) -> Tuple[Dict[str, Any], Optional[BenchmarkResult]]:
+    """执行 NPU preflight 并落盘 npu_preflight.json。
 
-    device = torch.device("npu")
+    ready 时返回 (preflight, None)；未 ready 时返回 (preflight, 阻塞态 B 类 BenchmarkResult)。
+    """
+    preflight = run_preflight(**load_preflight_options())
+    write_preflight_result(preflight, os.path.join(config.verify_dir, "npu_preflight.json"))
+    if preflight["status"] == "ready":
+        return preflight, None
+    return preflight, BenchmarkResult(
+        op_name=config.op_name,
+        warmup=config.warmup,
+        repeats=config.repeats,
+        max_retries=config.max_retries,
+        framework=None,
+        implementation=None,
+        speedup_vs_torch=None,
+        total_cases=0,
+        failed_cases=0,
+        failure_class="B",
+        npu_preflight=preflight,
+    )
 
-    input_groups = resolve_inputs(config.op_name, config.verify_dir)
+
+def _benchmark_all_shapes(
+    config: BenchmarkConfig,
+    model_spec: BenchmarkModelSpec,
+    input_groups: List[List[Any]],
+    device: Any,
+) -> List[SingleShapeResult]:
+    """逐 shape 执行 benchmark，返回全量 per-shape 结果（含失败用例）。"""
     total_cases = len(input_groups)
-
-    framework_cls, impl_cls, get_init_inputs = _load_benchmark_modules(config)
-    model_spec = BenchmarkModelSpec(framework_cls, impl_cls, get_init_inputs)
-
-    per_shape_results: List[SingleShapeResult] = [
+    return [
         _run_shape_case(
             config, model_spec,
             inputs, device, CaseContext(case_idx=case_idx, total_cases=total_cases),
@@ -812,9 +834,15 @@ def benchmark_implementations(config: BenchmarkConfig) -> BenchmarkResult:
         for case_idx, inputs in enumerate(input_groups, start=1)
     ]
 
-    passed_cases = sum(1 for r in per_shape_results if r.status == "pass")
-    failed_cases = total_cases - passed_cases
 
+def _assemble_result(
+    config: BenchmarkConfig,
+    preflight: Dict[str, Any],
+    per_shape_results: List[SingleShapeResult],
+) -> BenchmarkResult:
+    """由 per-shape 结果聚合出完整 BenchmarkResult（几何平均 + 异常索引分类）。"""
+    total_cases = len(per_shape_results)
+    passed_cases = sum(1 for r in per_shape_results if r.status == "pass")
     overall = compute_overall(per_shape_results)
 
     return BenchmarkResult(
@@ -827,14 +855,33 @@ def benchmark_implementations(config: BenchmarkConfig) -> BenchmarkResult:
         speedup_vs_torch=overall.speedup_vs_torch,
         total_cases=total_cases,
         passed_cases=passed_cases,
-        failed_cases=failed_cases,
+        failed_cases=total_cases - passed_cases,
         nan_indices=overall.nan_indices,
         inf_indices=overall.inf_indices,
         zero_indices=overall.zero_indices,
         negative_indices=overall.negative_indices,
         none_indices=overall.none_indices,
         per_shape_results=per_shape_results,
+        npu_preflight=preflight,
     )
+
+
+def benchmark_implementations(config: BenchmarkConfig) -> BenchmarkResult:
+    """执行完整的性能测试，支持多组输入。每个 shape 独立 try/except。"""
+    preflight, blocked_result = _run_preflight_gate(config)
+    if blocked_result is not None:
+        return blocked_result
+
+    import torch
+    import torch_npu  # noqa: F401
+
+    device = torch.device("npu")
+
+    input_groups = resolve_inputs(config.op_name, config.verify_dir)
+    model_spec = BenchmarkModelSpec(*_load_benchmark_modules(config))
+
+    per_shape_results = _benchmark_all_shapes(config, model_spec, input_groups, device)
+    return _assemble_result(config, preflight, per_shape_results)
 
 
 def _perf_to_dict(p: Optional[PerformanceResult]) -> Optional[Dict[str, Any]]:
@@ -870,6 +917,8 @@ def result_to_dict(result: BenchmarkResult) -> Dict[str, Any]:
         "framework": _perf_to_dict(result.framework),
         "implementation": _perf_to_dict(result.implementation),
         "speedup_vs_torch": result.speedup_vs_torch,
+        "npu_preflight": result.npu_preflight,
+        "failure_class": result.failure_class,
     }
 
     # per_shape_results 保留全量（含失败用例），带 status 列；
@@ -1129,8 +1178,12 @@ def main():
     try:
         result = benchmark_implementations(config)
         result_dict = result_to_dict(result)
+        if result.failure_class == "B":
+            result_dict["status"] = "blocked"
         _emit_summary(result_dict)
         _save_or_print_result(result_dict, args.output)
+        if result.failure_class == "B":
+            sys.exit(1)
         # 只要脚本正常跑完就 exit 0（由 Agent 读 JSON 判断）
         sys.exit(0)
     except Exception as e:

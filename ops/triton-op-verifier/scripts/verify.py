@@ -104,6 +104,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
 from _common_utils import move_to_device as _move_to_device  # noqa: E402
+from npu_preflight import load_preflight_options, run_preflight, write_preflight_result  # noqa: E402
 
 logger = logging.getLogger("triton_op_verifier.verify")
 
@@ -989,6 +990,65 @@ def _write_verify_result(output_path, result):
         logger.warning("警告: 无法写入 verify_result.json: %s", e)
 
 
+def _run_preflight_gate(op_name, verify_dir, output_path):
+    """执行 NPU preflight 并落盘 npu_preflight.json。
+
+    ready 时返回 preflight dict；未 ready 时落盘 B 类 verify_result 并返回 None。
+    """
+    preflight = run_preflight(**load_preflight_options())
+    write_preflight_result(preflight, os.path.join(verify_dir, "npu_preflight.json"))
+    if preflight["status"] == "ready":
+        return preflight
+
+    failure = {
+        "case_idx": 0,
+        "input_desc": [],
+        "error_type": "NpuPreflightError",
+        "error_msg": f"NPU preflight blocked verification: {preflight['status']}",
+    }
+    result = {
+        "op_name": op_name,
+        "total_cases": 0,
+        "passed_cases": 0,
+        "failed_cases": 0,
+        "failures": [failure],
+        "failure_class": "B",
+        "npu_preflight": preflight,
+    }
+    _write_verify_result(output_path, result)
+    return None
+
+
+def _run_all_cases(modules, input_groups, total_cases, device, non_compute):
+    """逐 case 执行验证，返回 (passed_cases, failures)。"""
+    failures = []
+    passed_cases = 0
+    for case_idx, inputs in enumerate(input_groups, start=1):
+        ok, failure = _try_run_case(
+            modules, CaseContext(case_idx=case_idx, total_cases=total_cases),
+            inputs, device, non_compute=non_compute,
+        )
+        if ok:
+            passed_cases += 1
+        else:
+            failures.append(failure)
+    return passed_cases, failures
+
+
+def _log_verify_summary(passed_cases, total_cases, output_path):
+    failed_cases = total_cases - passed_cases
+    if failed_cases == 0:
+        logger.info("验证成功：共 %d 组测试用例全部通过", total_cases)
+    else:
+        logger.error(
+            "验证失败：%d/%d 组通过，%d 组失败（详见 %s）",
+            passed_cases,
+            total_cases,
+            failed_cases,
+            output_path,
+        )
+
+
 def verify_implementations(
     op_name, verify_dir, triton_impl_name="triton_ascend_impl",
     output_path=None, non_compute=False,
@@ -1003,15 +1063,20 @@ def verify_implementations(
     Returns:
         (passed_cases, total_cases)
     """
-    import torch
-    import torch_npu  # noqa: F401
-
     # Baseline gate: refuse to verify against a tampered baseline.
     # Exit 3 = anchor missing (Phase 1 freeze skipped); Exit 4 = baseline modified.
     if _check_baseline_integrity is not None:
         _check_baseline_integrity(verify_dir, op_name)
 
+    if output_path is None:
+        output_path = os.path.join(verify_dir, "verify_result.json")
+
+    preflight = _run_preflight_gate(op_name, verify_dir, output_path)
+    if preflight is None:
+        return 0, 0
+
     modules = _load_verify_modules(op_name, verify_dir, triton_impl_name)
+    import torch
 
     # 在获取输入之前设置种子，确保随机生成的输入可复现
     torch.manual_seed(0)
@@ -1020,41 +1085,18 @@ def verify_implementations(
     input_groups, total_cases = resolve_input_provider(modules["torch_module"])
     device = torch.device("npu")
 
-    failures = []
-    passed_cases = 0
-    for case_idx, inputs in enumerate(input_groups, start=1):
-        ok, failure = _try_run_case(
-            modules, CaseContext(case_idx=case_idx, total_cases=total_cases),
-            inputs, device, non_compute=non_compute,
-        )
-        if ok:
-            passed_cases += 1
-        else:
-            failures.append(failure)
+    passed_cases, failures = _run_all_cases(modules, input_groups, total_cases, device, non_compute)
 
-    failed_cases = total_cases - passed_cases
-
-    if output_path is None:
-        output_path = os.path.join(verify_dir, "verify_result.json")
     result = {
         "op_name": op_name,
         "total_cases": total_cases,
         "passed_cases": passed_cases,
-        "failed_cases": failed_cases,
+        "failed_cases": total_cases - passed_cases,
         "failures": failures,
+        "npu_preflight": preflight,
     }
     _write_verify_result(output_path, result)
-
-    if failed_cases == 0:
-        logger.info("验证成功：共 %d 组测试用例全部通过", total_cases)
-    else:
-        logger.error(
-            "验证失败：%d/%d 组通过，%d 组失败（详见 %s）",
-            passed_cases,
-            total_cases,
-            failed_cases,
-            output_path,
-        )
+    _log_verify_summary(passed_cases, total_cases, output_path)
 
     return passed_cases, total_cases
 
