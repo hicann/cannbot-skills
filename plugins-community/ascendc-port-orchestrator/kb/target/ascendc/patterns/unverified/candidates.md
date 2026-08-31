@@ -4786,7 +4786,7 @@ Until then, scope: AscendC ops where author manually runs the checklist before d
 
 **Adopt feasibility**: ~~**HIGH RISK** within current state~~ ~~**EMPIRICALLY FALSIFIED 2026-05-22 — Pattern C structurally blocked on V220.**~~ **STATUS REVISED 2026-05-23 — V220 Pattern C UNVERIFIED (probe was misdesigned); V351 Pattern A confirmed VIABLE.**
 
-The V220 KFC mixed-mode minefield (PB-34, PB-35) burned 5 iter on Pattern A. PR #117 originally claimed Pattern C also empirically falsified on V220 — that claim has been retracted (see [CAND-PA-V220-MIX-AIC-SYNC-INFRA-GAP](#CAND-PA-V220-MIX-AIC-SYNC-INFRA-GAP) status update 2026-05-23). My V220 probe used `SetFlag<HardEvent::MTE3_MTE2>` which is intra-core pipe-sync, NOT cross-core AIC↔AIV handoff — the hang was from probe-design defect, not real V220 architectural block.
+The V220 KFC mixed-mode minefield (PB-34, PB-35) burned 5 iter on Pattern A. PR #117 originally claimed Pattern C also empirically falsified on V220 — that claim has been retracted (see [CAND-PA-V220-MIX-AIC-SYNC-INFRA-GAP](#cand-pa-v220-mix-aic-sync-infra-gap-v220-kernel_type_mix_aic_1_2-cube-internal-pipe-sync-deadlocks-regardless-of-event-id-scheme--root-cause-deeper-than-event-id-allocation) status update 2026-05-23). My V220 probe used `SetFlag<HardEvent::MTE3_MTE2>` which is intra-core pipe-sync, NOT cross-core AIC↔AIV handoff — the hang was from probe-design defect, not real V220 architectural block.
 
 **Updated probe outcomes (2026-05-23)**:
 - **V220 Pattern A**: deadlocks (PB-34, 5-iter chain). **CONFIRMED.**

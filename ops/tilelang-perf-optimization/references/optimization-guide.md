@@ -16,7 +16,7 @@
   - [2.10 pass_configs 调优（最后手段）](#210-pass_configs-调优最后手段)
   - [2.11 UB 预算优化（Vector 核 tile size 首选方法）](#211-ub-预算优化vector-核-tile-size-首选方法)
   - [2.12 Host 侧预处理内化（消除 pad / contiguous）](#212-host-侧预处理内化消除-pad--contiguous)
-  - [2.12.1 Stride Buffer 归一化（消除非连续数据的 host 物理拷贝）](#2121-stride-buffer-归一化消除非连续数据的-host-物理拷贝)
+  - [2.12.1 Stride Buffer 归一化（消除非连续数据的 host 物理拷贝）](#2121-非连续数据归一化消除-host-侧-reshape-物理拷贝)
   - [2.13 多行 Tile 粒度扩展（Multi-row Tile Granularity）](#213-多行-tile-粒度扩展multi-row-tile-granularity)
   - [2.14 Host 侧 D2H 消除（输出后处理 NPU 化）](#214-host-侧-d2h-消除输出后处理-npu-化)
   - [2.15 正交轴向量化（Orthogonal Axis Vectorization）](#215-正交轴向量化orthogonal-axis-vectorization)

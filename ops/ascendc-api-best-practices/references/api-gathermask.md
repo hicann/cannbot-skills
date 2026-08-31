@@ -13,7 +13,7 @@
 - [模式二：用户自定义模式（custom Tensor mask）](#模式二用户自定义模式custom-tensor-mask)
 - [GatherMaskParams 结构](#gathermaskparams-结构)
 - [Normal vs Counter 选择](#normal-vs-counter-选择)
-- [tile 与循环结构约束](#tile-与循环结构约束)
+- [tile 与循环结构约束](#tile-与循环结构约束-实测经验非官方约束)
 - [常见错误](#常见错误)
 - [检查清单](#检查清单)
 - [适用性检测](#适用性检测)

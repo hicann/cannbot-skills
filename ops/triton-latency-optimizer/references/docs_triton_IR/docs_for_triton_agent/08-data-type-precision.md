@@ -87,7 +87,7 @@ def layernorm_kernel(X, Out, Mean, Rstd, M, N, eps, BLOCK_N: tl.constexpr):
 | `tl.max`/`tl.min` | bf16 | 否 | 编译器自动提升为 fp32 |
 | `tl.dot` 累加 | fp16/bf16 | 否 | 硬件默认 fp32 累加 |
 
-> 源码参考：[semantic.py](https://github.com/triton-lang/triton-ascend/tree/main/python/triton/language/semantic.py#L61-L100) 中 computation_type 规则；[03-reduction-ops.md](../docs_triton_ascend/02-Core-API/03-reduction-ops.md#L244) 中 bf16 自动提升说明
+> 源码参考：[semantic.py](https://github.com/triton-lang/triton-ascend/tree/main/python/triton/language/semantic.py#L61-L100) 中 computation_type 规则；[03-reduction-ops.md](../docs_triton_ascend/02-Core-API/03-reduction-ops.md#4-bfloat16-归约精度) 中 bf16 自动提升说明
 
 ---
 
@@ -194,7 +194,7 @@ def matmul_kernel(A, B, C, M, N, K,
 | 训练反向传播 | fp32 或 bf16 | 梯度计算需要足够精度 |
 | 对精度要求极高 | fp16 或 fp32 | fp16 尾数精度更高 |
 
-> 源码参考：[08-comparison-logical-ops.md](../docs_triton_ascend/02-Core-API/08-comparison-logical-ops.md#L226-L228) 中 bf16 比较操作说明；[11-libdevice.md](../docs_triton_ascend/03-Ascend-Extensions/11-libdevice.md#L596-L602) 中 bf16 限制
+> 源码参考：[08-comparison-logical-ops.md](../docs_triton_ascend/02-Core-API/08-comparison-logical-ops.md#1-bfloat16-比较操作的精度提升) 中 bf16 比较操作说明；[11-libdevice.md](../docs_triton_ascend/03-Ascend-Extensions/11-libdevice.md#npu-适配要点) 中 bf16 限制
 
 ---
 
@@ -345,7 +345,7 @@ def verify_kernel(kernel_fn, *args, dtype=torch.float16, **kwargs):
 └── Softmax 差异 → 检查减最大值和 exp 近似
 ```
 
-> 源码参考：[05-faq.md](../docs_triton_ascend/09-Reference/05-faq.md#L105-L116)
+> 源码参考：[05-faq.md](../docs_triton_ascend/09-Reference/05-faq.md#精度类问题)
 
 ---
 

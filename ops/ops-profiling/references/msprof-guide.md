@@ -94,7 +94,7 @@ python3 {skill_path}/scripts/msprof_perf_summary.py $GROUP_DIR ops/{operator_nam
 
 本节适用于 **`msprof` 经 Step 2～3 得到的归档目录**（`round_NNN/`）。判据与 `/ops-simulator` 流水图路径**同一套优先级表**，便于对接 `/ascendc-performance-optimization`。
 
-> MC² 多 rank 算子同样使用本节判定规则，但需额外注意 MTE2 污染问题（见 [MC² 特有分析](#mc-特有分析)）。
+> MC² 多 rank 算子同样使用本节判定规则，但需额外注意 MTE2 污染问题（见 [MC² 特有分析](#mc-注意事项)）。
 
 ### 输入与输出
 

@@ -14,7 +14,7 @@
   - [3.5 匹配约束 (match)](#35-匹配约束-match)
   - [3.6 存在性约束 (existential)](#36-存在性约束-existential)
   - [3.7 可转换约束 (convertible)](#37-可转换约束-convertible)
-  - [3.8 链式依赖约束 (inferable_filter)](#38-链式依赖约束-inferable_filter)
+  - [3.8 链式依赖约束 (inferable_filter)](#38-链式推导约束-inferable_filter)
   - [3.9 可推导约束 (inferable)](#39-可推导约束-inferable)
 - [4. 两步约束模式](#4-两步约束模式)
 - [5. 完整约束文件示例](#5-完整约束文件示例)

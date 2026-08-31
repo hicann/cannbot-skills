@@ -528,6 +528,7 @@ PASS_CONFIGS = {
     tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
     tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
     # 已通过生成代码确认误分核时，关闭不需要的 AUTO_CV_COMBINE
+```
 
 ## Wrapper 侧数据搬运（permute/contiguous/reshape）
 

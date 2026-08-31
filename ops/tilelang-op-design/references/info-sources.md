@@ -56,4 +56,6 @@ grep "T.Scope\|T.barrier" examples/{同类实现}  # 同步方式
 | 7 | `src/op/` + `src/target/` | lowering 与后端实现状态 | 实现验证 |
 
 
+## 5. 冲突处理原则
+
 **规则**：当信息源之间矛盾时，以 `examples/` 为准。若 `examples/` 未覆盖，以 `docs/` 为准。若 `docs/` 未覆盖，以 `tilelang/language/` 源码实际实现为准。
