@@ -952,13 +952,53 @@ class ModelNew(nn.Module):
 > 是 shell umask 为 `0002` 导致 `msprof_perf_summary.py` 的 `os.makedirs` 建出组可写（775）临时目录、
 > msprof 安全机制拒绝写入。**必须 `umask 022` 后重跑 msprof**，禁止以此为理由降级到 Event/墙钟计时。
 
+> **🛑 评测参考与标杆口径（三个角色分开，禁止混淆）**：
+>
+> **① 精度 golden = 永远是 `model.py`**（算子描述文件派生的 torch eager 参考实现，
+> 定义算子语义；`evaluate_ascendc.sh` / `verification_ascendc.py` 即以它为 ref）。
+> 官方融合算子（`torch_npu.*` / aclnn 内置算子，如 `torch_npu.npu_top_k_top_p`）
+> 只能做精度**交叉验证**，不能替代 golden；两者冲突时以 `model.py` 为准
+> （官方算子可能有 bug，如 `npu_top_k_top_p` p>1）。
+>
+> **② 性能标杆决策顺序**：
+> a. 官方融合算子存在 → **先核对语义契约等效**（dtype/shape/属性/特殊值/索引边界），
+>    等效才可用作标杆。等效官方算子同时有 in-place（`xxx_`，只写更新区）与
+>    out-of-place（`xxx`，内部含全量拷贝）两形态时：**out-of-place 版 = 公平标杆**
+>    （与"clone+更新"结构同口径，判定加速比），**in-place 版 = 上限标杆**
+>    （仅参考，展示去掉克隆成本后的理论天花板）；
+> b. 无官方融合算子 → `model.py` eager（NPU）是唯一可用标杆，合法；
+> c. 例外：`model.py` 含 host 侧 Python 循环（逐元素/逐切片赋值）时**禁止**作
+>    性能标杆（只能精度 golden）——此时无公平标杆，加速比仅记录并标注"标杆缺失"。
+>    用它得出的高加速比是假达标（实测：对 CPU Python 参考 18.2x"达标"，
+>    换 NPU 标杆立刻现形 0.25x）。
+>
+> **③ 标杆失真判据**：当 `model.py` 语义由多个独立 torch op 拼接（如
+> `sort→gather→masked_fill→softmax→cumsum→scatter_` 9 个 kernel）且存在官方融合
+> 算子时，eager 时间会把加速比拉虚高/失真——必须按 ②a 换用官方算子口径重新
+> 对比，并在 trace.md 记录标杆口径。
+>
+> **采样类输入约束（p/k 值域）**：top-k/top-p 采样类算子的 `p` 值域 **[0,1]**、`k` 值域
+> **[1, min(N,1024)]**。workload 生成时 p 若用默认 randn（标准正态）会大量超 [0,1]、
+> 官方算子 p>1 有 bug，评测无法对齐——**必须给 p 加 `range: [0,1]`（生成 uniform）**，
+> k 超值域（>N 或 >1024）会导致官方算子 aicore exception。
+>
+> **性能 artifact 纪律（Phase 5 产出必须满足）**：`performance.json` 必须记录
+> `timing_method`（只接受 msprof `Task_Duration`；torch Event/墙钟口径的结论直接判无效，
+> 禁止与 msprof 口径跨阶段混比）、用例集来源文件、每 case 的 ref/asc kernel 时间。
+> 同一 `performance.json` 禁止被不同用例集的运行覆盖（覆盖即 artifact 与 trace 不符，
+> 视为 Phase 5 未完成）。trace.md 的 a_retry/d_retry 计数必须与迭代行为记录逐条一致。
+
 **产出**：性能分析报告，`performance.json`，记录每个 case 的加速比；性能打屏日志，`performance.log`
 
 **Phase 5 强制检查（必须执行）**：
-Phase 5 完成后，必须验证 `{output_dir}/performance.json` 是否存在：
-- 存在 → 继续 Phase 6
-- 不存在 → 视为 Phase 5 执行失败，重新调用 ops-profiling skill 一次
-- 若仍失败，记录失败原因到 trace.md，继续 Phase 6（不阻塞）
+Phase 5 完成后，必须验证 `{output_dir}/performance.json`：
+- 不存在 → 视为 Phase 5 执行失败，重新调用 ops-profiling skill 一次；若仍失败，记录失败原因到 trace.md，继续 Phase 6（不阻塞）
+- 存在但 `timing_method` 不是 msprof `Task_Duration` → 结论无效，按计时红线重采（禁止 Event/墙钟口径），再检查
+- 存在且口径正确 → 继续 Phase 6
+- **转译保真锚点**：若 TileLang 基线（Phase 3 Step 4 final_report）与 AscendC 加速比出现
+  数量级级断崖（如 TileLang ≥0.9x 而 AscendC ≤0.3x），必须在 trace.md 归因——
+  断崖几乎必然是 Phase 4 残留的保守化项（见 translator SKILL.md 步骤 4-R），
+  不是转译本身的开销
 
 **Phase 5 → Phase 6 → Phase 7 流转规则（不可跳过）**：
 无论 Phase 5 结果如何（加速比达标/未达标），都必须执行 Phase 6 和 Phase 7：

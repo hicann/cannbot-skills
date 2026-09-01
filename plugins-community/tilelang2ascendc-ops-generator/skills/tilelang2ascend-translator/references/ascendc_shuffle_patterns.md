@@ -118,3 +118,6 @@ AIV block 分发存在 ~60-100ns/核的 ramp，小/中规模任务满核 launch 
 | 为覆盖 half+interleave 引入 **`Gather` + 手工 mask/sign 表的统一方案** | half 上崩溃/旋转失效（长时间排查根因） | mask 符号扩展产生垃圾、`Gather` srcOffset 越界、half 旋转输出恒等；`GatherMask` 指令与 `Gather`+mask 表是两回事 |
 | 为省同步删 V 管屏障 | 全阶梯差值 <±0.3µs（噪声内） | 屏障不是瓶颈，删了还引入正确性风险 |
 | 为少分配而合并 InitBuffer | 预期 <0.3µs（< 测量噪声） | 不值得代码复杂度 |
+| **克隆/搬运段微段化 + 段间 `PipeBarrier<PIPE_ALL>`**（如 512B 段 × 每段 2 次全屏障） | 等效带宽钉死 ~100GB/s（标杆 320~1556GB/s，10x 劣化） | 507035 的根因是 count 未 32B 对齐，与段长无关——微段化是误诊处方，每次全屏障都排空整条流水 |
+| **串行 `TQue` depth=1**（确定性修复后的过矫正） | ~40% 性能损失 | 确定性来自 TQue 生命周期管理而非 depth=1；搬入/搬出严格串行、零重叠 |
+| **同 stream 顺序 launch 间插 `stream.synchronize()`；host 侧 dtype 预处理 launch** | 小 case 地板翻倍（~22µs vs ~11µs）；设备侧 1.13x 被拖到端到端 0.83x | 同 stream 顺序 launch 天然有序，host sync 是纯开销；kernel 内可完成的 cast 外迁 = 白付 launch 固定开销 |

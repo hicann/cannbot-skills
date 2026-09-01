@@ -75,12 +75,14 @@ argument-hint: >
 
 ### 本 skill 自带设计模式参考
 
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/DesignPatternIndex.md` — 归约/重排类设计模式索引（(O,R,I) 路径路由、规律 pattern vs 建表、广播源行共享、按最终布局摆放、核数分档）
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/DesignPatternIndex.md` — 归约/重排/排序TopK/Norm 族/克隆搬运类设计模式索引（(O,R,I) 路径路由、规律 pattern vs 建表、广播源行共享、按最终布局摆放、核数分档、值域二分 vs 分段 sort 路由、组间独立归一化并行范式、克隆段独立 memcpy kernel 结构）
 - `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/reduce_design.md` — 归约族算子设计决策要点（设计阶段定，可 TileLang DSL 表达）
 - `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/shuffle_design.md` — 重排/搬运类算子设计决策要点
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/sort_topk_design.md` — 排序/TopK/采样类算子设计决策要点（TopK 主结构路由：值域二分 vs 分段 sort、tie 语义、p/k 输入约束）
+- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/norm_fusion_design.md` — Norm 族+激活融合算子设计决策要点（组间独立归一化并行范式、两遍中心化 + mean 修正、affine 融合、双缓冲流水）
 
 > 设计模式参考只含**设计阶段决策**；AscendC 实现细节见 translator references
-> （ascendc_reduce_patterns / ascendc_shuffle_patterns）。
+> （ascendc_reduce_patterns / ascendc_shuffle_patterns / ascendc_sort_topk_patterns / ascendc_norm_fusion_patterns）。
 
 ### 设计方法论（ops/tilelang-op-design 贡献，不复制、只引用）
 
@@ -172,7 +174,7 @@ argument-hint: >
 
 **门禁规则**：
 - 如果触发条件满足但 0.1-0.4 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
-- 如果触发条件不满足 → 跳过步骤 0，直接进入步骤 1
+- 如果触发条件不满足 → 跳过步骤 0，继续执行后续 0-A/0-B 门禁后进入步骤 1
 - 禁止凭记忆或经验跳过模式文档直接设计
 
 ---
@@ -199,19 +201,65 @@ argument-hint: >
 0-A.2 🛑 只读取命中的模式文档（渐进式披露，只读需要的）:
     - 归约族 → Read references/design-patterns/references/reduce_design.md
     - 重排/搬运类 → Read references/design-patterns/references/shuffle_design.md
-    （两族同命中 → 都读）
+    - Norm 族（含激活融合） → Read references/design-patterns/references/norm_fusion_design.md
+    （多族同命中 → 都读）
 
 0-A.3 🛑 在思考中确认:
     - 归约族：本算子落入 (O,R,I) 哪条路径（A 跨行 RA / B 多行批归约 / C 分块两级树），
       tile 内 pad 语义、累积精度、核数分档如何定
     - 重排/搬运类：重排走哪种结构（规律 pattern vs 建表）、广播源行如何共享、
       输出是否按最终布局摆放、核数分档档位
+    - Norm 族（含激活融合）：组间独立归一化并行范式（组作并行单元分核）、方差路线
+      （同趟 vs 两遍中心化 + mean 修正）、affine 融合与双缓冲流水如何落
     - 本算子的 block-level 设计骨架应与命中的设计模式对齐
 ```
 
 **门禁规则**：
 - 如果触发条件满足但 0-A.1-0-A.3 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
-- 如果触发条件不满足 → 跳过步骤 0-A，直接进入步骤 1
+- 如果触发条件不满足 → 跳过步骤 0-A，继续执行后续 0-B 门禁后进入步骤 1
+- 禁止凭记忆或经验跳过设计模式直接设计
+
+---
+
+### 🛑 步骤 0-B: 排序 / TopK / 采样类设计模式路由（命中特征时强制执行）
+
+```
+⚠️ 本步骤是硬性门禁。如果 model.py 是排序 / TopK / 采样类算子
+   （找第 k 大、排序列选、概率阈值过滤），必须逐个完成以下 checklist
+   后才能进入步骤 1。禁止跳过。
+```
+
+**触发条件**：`{output_dir}/model.py` 的 forward() 中包含以下任一特征：
+- `torch.sort` / `.sort(dim=..., descending=...)` / `topk` / `torch.topk`
+- `kthvalue` / 找第 k 大 / 按第 k 大值做 mask 过滤
+- top-k + top-p 组合过滤 / 采样（`npu_top_k_top_p` / `top_k_top_p_sample` 类）
+- 按阈值过滤 + 概率累加（cumsum）组合
+
+**强制执行清单**：
+
+```
+0-B.1 🛑 读取设计模式索引（必须，不可跳过）:
+    Read references/design-patterns/DesignPatternIndex.md
+
+0-B.2 🛑 读取排序/TopK 设计要点:
+    Read references/design-patterns/references/sort_topk_design.md
+
+0-B.3 🛑 在思考中确认:
+    - 输出形态（一票否决）：算子输出是有序值/有序索引（argsort 下标、gather 按序
+      消费，如 MoE gating）还是掩码/阈值过滤？前者值域二分不适用，必须排序路径
+    - TopK 主结构路由：本算子走「值域二分」还是「排序路径（整行/分段 sort）」？
+      按行/组实际键长判（单行交叉点 ≈8192；分组每组 ≤1024 一律排序路径）
+    - 已完成复杂度+硬件效率估算并写入设计文档：二分 iter×N×3op vs 排序单遍+归并
+      固定开销；k≤2 的 reduce-max 替代同样须估算，禁止默认更快
+    - tie 语义：参考实现是「值阈值」（保留所有 >= kth）还是「位置阈值」（恰好 k 个）？
+      值域二分天然对齐值阈值；分段 sort 需两步（求 kth → 重收集 >= kth）才能对齐
+    - 输入约束：p ∈ [0,1]、k ≤ min(N,1024) 是否已在设计/评测中定好
+    - 本算子的 block-level 设计骨架应与命中的设计模式对齐
+```
+
+**门禁规则**：
+- 如果触发条件满足但 0-B.1-0-B.3 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
+- 如果触发条件不满足 → 跳过步骤 0-B，直接进入步骤 1
 - 禁止凭记忆或经验跳过设计模式直接设计
 
 ---
@@ -450,5 +498,11 @@ bash msprof_profile_run.sh --warm-up=3 --output=./msprof_tl  -- python <tilelang
 | 合法跳过（4a） | `SKIPPED.md` |
 | 基线即达标（4b） | `baseline.json` + `optimization_log.md` + `final_report.md` |
 | 迭代完成/预算耗尽（4c→4d） | `baseline.json` + `optimization_log.md`（含 `[ORDER-PLAN]` 与逐项 `[RESULT-#N]`）+ `final_report.md`（含上限分析） |
+
+- **🛑 零迭代交付封堵**：基线 geomean < 0.6x 且 `optimization_log.md` 中无任何 `[RESULT-#N]`
+  迭代记录（p_retry=0）时，仅有 `baseline.json` + `final_report.md` **不算完成**——必须回到
+  4c 执行迭代，或按 4a 标准补齐 `SKIPPED.md`（结构性阻塞的对照实验证据 + Phase 4 缓解计划，
+  如"TileLang 无跨核同步原语 → Phase 4 双 kernel 拆分"）。实测违规案例：以 p_retry=0 +
+  仅上限分析交付 0.31x 基线，阻塞证据与缓解计划均缺失，下游被迫在 AscendC 阶段补课。
 
 性能迭代完成后，优化定稿的 `design/tile_level/` 与 `model_new_tilelang.py` 即为 Phase 4 转译输入；若迭代中修改了设计结构（如任务划分、tile 配置），同步更新 PERF_DESIGN.md 对应结论。

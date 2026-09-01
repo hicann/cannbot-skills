@@ -63,3 +63,15 @@
 
 > ⚠️ 术语区分：**`GatherMask` 专用指令（硬件 pattern）≠ `Gather` + 手工 mask 表（反模式）**。
 > 后者在 half 上会崩溃（mask 符号扩展垃圾、offset 构造错误、旋转失效），切勿混用。
+
+## 设计决策 7：克隆/全量搬运主导 = 独立 memcpy kernel（bulk copy）
+
+- `output = clone(input)` + 少量更新（量化 scatter / index_put / 部分行覆写）形态，
+  克隆:更新流量比 ≥100:1 时，**克隆段决定性能档位**——把它当独立 memcpy kernel 设计：
+  input 扁平化 1D、按 chunk（8~64KB 级）均分全部核、双缓冲流水让搬入搬出重叠
+- 更新段与克隆段存在跨核写依赖（互相覆盖）→ **拆双 kernel**（memcpy kernel + update
+  kernel），顺序 launch 天然有序，不在 kernel 内做跨核同步
+- TileLang 层若无法表达可靠的跨核写依赖时序（无跨核同步原语），不要硬撑单 kernel——
+  设计期直接定双 kernel 结构并写入 PERF_DESIGN 待验证清单，Phase 4 按双 kernel 落地
+- 微段化 + 全管线屏障是 memcpy 的头号反模式（实测 512B 段 × 段间全屏障把带宽钉死
+  一个数量级）；段长只受 count 32B 对齐约束，与"安全"无关

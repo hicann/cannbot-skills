@@ -30,6 +30,7 @@ argument-hint: >
 - **🛑 参考实现 ≠ 可复制代码**：`workflows/templates/archive_tasks/` 用于理解结构范式（目录组织、API 用法、EXEC_KERNEL_CMD 传参模式、缓冲规划），**禁止整体照抄其代码**。复用任何参考代码必须：① 按当前算子的 shape/dtype/归约路径/广播形态**逐行适配**；② 重新推导 tiling 与 UB 预算（不沿用 archive 的硬编码参数）；③ 全量验证通过。archive 中存在的缺陷不得被复制进新算子。
 - **🛑 同步机制强制门禁**: 涉及 MIX_AIC / CrossCore / WorkspaceQueue / 死锁 / 全零输出 时，必须先完成 **步骤 0-C** 的同步 checklist。详见下方步骤 0-C 章节。
 - **🛑 性能计时口径**：性能数据只接受 device 侧 kernel 时间（msprof Task_Duration，经 ops-profiling 采集）；禁止用 torch_npu Event / 墙钟计时作为性能结论——其读数包含 host 下发间隙与共享设备干扰，µs 级算子会出现数量级假数据（实测发生过参考侧虚高 ~100x 的事故）。
+- **🛑 评测参考与标杆口径（三个角色分开，禁止混淆）**：① 精度 golden 永远是 `model.py`（`verification_ascendc.py` 的 ref，定义算子语义）；官方融合算子（`torch_npu.*` / aclnn 内置算子）只能做精度**交叉验证**，两者冲突时以 `model.py` 为准（官方算子可能有 bug）。② 性能标杆决策顺序：官方融合算子存在时先核对语义契约等效（dtype/shape/属性/特殊值/索引边界），等效才可用——同时有 in-place（`xxx_`）与 out-of-place（`xxx`）两形态时 out-of-place 版=公平标杆（判定加速比）、in-place 版=上限标杆（仅参考）；无官方算子时 `model.py` eager（NPU）是唯一合法标杆；但 `model.py` 含 host 侧 Python 循环（逐元素/逐切片赋值）时禁止作性能标杆。③ 失真判据：`model.py` 语义由多个独立 torch op 拼接（如 TopKTopP eager 的 9 kernel）且存在官方融合算子时，eager 时间会把加速比拉虚高/失真——必须换官方算子口径并在 trace 中记录标杆口径。
 - **🛑 长时间性能测试防卡死**：执行耗时较长的性能测试 / 批量 benchmark（msprof 采集、逐 case 长跑等）时，必须对测试进程做**轮询 + 超时保护**——周期性检查其是否仍在推进（输出增长 / 进程存活 / 心跳），超时立即终止并上报，防止 kernel 挂死（hang / aicore timeout）导致无限等待、吞掉整个生成流程。
 
 ### 算子设计准则（必须遵守）
@@ -99,10 +100,13 @@ argument-hint: >
 - `.claude/skills/tilelang2ascend-translator/references/AscendCVerification.md` — AscendC 验证指南
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md` — 归约族算子实现指南（(O,R,I) 路由、补零/行距铁律、应避免的结构、精度与验证约定）
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
+- `.claude/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md` — 排序/TopK/采样类算子实现指南（值域二分 vs 分段 sort 双路径、GatherMask 对齐铁律、tie 语义对齐、p/k 评测约束）
+- `.claude/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md` — Norm 族+激活融合算子实现指南（双缓冲软流水、affine 融合预重排、两遍中心化 + mean 修正 + Kahan 补偿、swish 简洁形式、S_CHUNK 大空间维分片）
 - `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention）
 - `.claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md` — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）的转译/实现模式路由索引（tilelang-translation 映射、UB 管理、对齐守卫、精度模式、反向实现、grad-v2 落地踩坑、反模式）
 - `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
+- `.claude/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md` — 量化类算子实现指南（量化契约、scale/zero-point 广播、舍入/饱和/类型转换、量化数据流、索引写回融合、克隆+量化+scatter 结构范式和验证易错点）
 - 共享演进知识库（`$CANNBOT_KNOWLEDGE_ROOT` 的 `runbooks/`）— 历史走偏点与成功模式，**经 knowledge-query skill 检索（步骤 0-K 必读，命中即规避）**
 
 ### 🛑 官方文档目录（asc-devkit，强制查阅）
@@ -168,7 +172,7 @@ argument-hint: >
 
 **门禁规则**：
 - 如果触发条件满足但 0-A.1-0-A.4 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
-- 如果触发条件不满足 → 跳过步骤 0-A，直接进入步骤 0-B
+- 如果触发条件不满足 → 跳过步骤 0-A，继续执行后续 0-A2/0-A3/0-A4 门禁后进入步骤 0-B
 - 禁止凭记忆或经验跳过模式文档直接转译
 
 ### 🛑 步骤 0-A2: 归约 / 重排类算子实现指南路由（命中特征时强制执行）
@@ -187,19 +191,78 @@ argument-hint: >
 0-A2.1 🛑 只读取命中族的实现指南（渐进式披露，只读需要的）:
     - 归约族 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md
     - 重排/搬运类 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md
-    （两族同命中 → 都读）
+    - Norm 族（含激活融合） → Read .claude/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md
+    （多族同命中 → 都读）
 
 0-A2.2 🛑 在思考中确认:
     - 归约族：本算子落入 (O,R,I) 哪条路径（A 跨行 RA / B 多行批归约 / C 分块两级树），
       以及补零/行距、精度约定等铁律的落点
     - 重排/搬运类：本算子的重排结构走哪条硬件 pattern 路线，
       固定开销结构（launch 建表 / 广播物化 / strided 拼写回）是否全部规避
+    - Norm 族（含激活融合）：双缓冲软流水、affine 融合预重排、两遍中心化 + mean 修正、
+      S_CHUNK 大空间维分片等铁律的落点
     - 本算子的 AscendC 转译策略应与命中指南的结构规则对齐
 ```
 
 **门禁规则**：
 - 命中但 0-A2.1/0-A2.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
-- 未命中 → 跳过 0-A2，直接进入步骤 0-B
+- 未命中 → 跳过 0-A2，继续执行后续 0-A3/0-A4 门禁后进入步骤 0-B
+- 禁止凭记忆或经验跳过指南直接转译
+
+### 🛑 步骤 0-A3: 排序 / TopK / 采样类算子实现指南路由（命中特征时强制执行）
+
+**触发条件**（步骤 0-A 读取 model.py forward() 后一并检查）：
+- 排序/TopK 特征：`torch.sort` / `topk` / `kthvalue` / 找第 k 大 / 按第 k 大值 mask 过滤
+- 采样过滤特征：top-k + top-p 组合过滤 / 采样（`npu_top_k_top_p` / `top_k_top_p_sample` 类）、
+  阈值过滤 + 概率累加（cumsum）组合
+
+如果命中，必须完成以下 checklist：
+
+```
+0-A3.1 🛑 读取实现指南（必须，不可跳过）:
+    Read .claude/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md
+
+0-A3.2 🛑 在思考中确认:
+    - 输出形态（一票否决）：输出为有序值/有序索引（argsort 下标、gather 按序消费）时
+      值域二分不适用（只产阈值/掩码），必须排序路径——与设计层 §1.0 否决一致；
+      分组小 N（每组 ≤1024）同样一律排序路径
+    - TopK 主结构：本算子走「值域二分」还是「分段 sort」（按 N 阈值分野）？
+      选二分前确认设计层已完成复杂度+硬件效率估算（iter×N vs 单遍+归并）
+      buffer 分派与计算入口是否在最早处独立，避免两条路径互相污染
+    - GatherMask 约束：若用 mask 模式收集，src0 与 mask 是否分 buffer、dst 是否原地
+    - tie 语义：分段 sort 是否补做「重收集 >= kth_value」对齐参考的值阈值语义
+    - 评测约束：对比标杆是否为官方融合算子、p∈[0,1]、k≤min(N,1024)
+    - 本算子的 AscendC 转译策略应与命中指南的结构规则对齐
+```
+
+**门禁规则**：
+- 命中但 0-A3.1/0-A3.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 未命中 → 跳过 0-A3，继续执行后续 0-A4 门禁后进入步骤 0-B
+- 禁止凭记忆或经验跳过指南直接转译
+
+### 🛑 步骤 0-A4: 量化类算子实现指南路由（命中特征时强制执行）
+
+**触发条件**（步骤 0-A 读取 model.py forward() 后一并检查）：
+- 量化/反量化到整数或低比特类型（含 scale、zero-point、round、clamp、饱和转换）
+- 量化后按动态索引写回/重排（未更新区域需保留原值）
+
+如果命中，必须完成以下 checklist：
+
+```
+0-A4.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md
+
+0-A4.2 🛑 在思考中确认:
+    - 量化顺序、dtype 组合、广播轴、rounding、clamp、特殊值和 optional 参数语义
+    - 量化参数复用、转换 buffer 生命周期、尾块 mask、索引写回边界和写冲突处理
+    - 若为「克隆+量化+索引写回」融合形态（output=clone(input)+少量更新）：结构是否按
+      §4 范式（双 kernel / memcpy 铁律：大段 DataCopy(Pad)、TQue depth≥2、禁微段与
+      PIPE_ALL 风暴、禁 host sync 与 host 预处理）
+    - 量化主路径和 fallback 路径的精度、确定性和性能验证规划
+```
+
+**门禁规则**：
+- 命中但 0-A4.1/0-A4.2 未完成 → **禁止**进入步骤 1，**禁止**编写任何 kernel/ 代码
+- 未命中 → 跳过 0-A4，直接进入步骤 0-B
 - 禁止凭记忆或经验跳过指南直接转译
 
 ---
@@ -373,6 +436,17 @@ argument-hint: >
        - 是否可能跳过 Set/Wait 导致对方死等（如提前 return）
     ⑥ TQue BUFFER_NUM:
        - 是否 ≥ 循环中同时持有的 queue tensor 数量 + 1
+    ⑦ 非确定性/时序漂移类问题的诊断固定顺序（禁止跳步、禁止凭猜更换假设）:
+       - 第一步：`usedCoreNum=1` 单核强制复跑 —— 单核正确 ⇒ launch/tiling 模型正确，
+         问题锁定在 compute 侧数据竞争/生命周期（先排除核间因素。实测反例：未按此顺序，
+         连续 3 轮误判 Vector RAW / sub-block / 初始化门控，烧 16h）
+       - 第二步：sub-block 门控（GetSubBlockIdx 是否重复执行/漏执行）
+       - 第三步：GM-facing buffer 生命周期 —— 凡被 MTE2/MTE3 触碰的 buffer 必须用 TQue
+         管理（AllocTensor→DataCopy→EnQue→DeQue→FreeTensor），禁止裸 TBuf 跨
+         MTE2/V/MTE3 异步 pipe 使用（实测根因：裸 TBuf 在异步 pipe 下生命周期不可靠，
+         输出随机中间值）；纯 Vector 中间量可用 TBuf<VECCALC>
+       - 第四步：才轮到细粒度 pipe/barrier 组合排查
+       - 修复后强制确定性门禁：单核连续 10 次 + 多核连续 5 次逐位一致（max_abs_diff=0）
 
 0-C.3 🛑 如果存在 AIC↔AIV 交叉依赖（如 AIC 等 AIV 的 SIG_P_READY，AIV 同时等 AIC 的 SIG_O_READY）:
     - 画出信号时序图，确认不存在循环等待（A 等 B 设 X，B 同时等 A 设 Y）
@@ -498,9 +572,13 @@ Step 4: 决策
         └─ 算法相同但整体加速比仍 ≤ 0.8x → 进入 Step 5 微优化排查
 
 Step 5: 算法已最优但不达标 — 微优化排查
-        ├─ 检查 Step 0-D 性能因果链 5 项是否已全部应用：
+        ├─ 检查 Step 0-D 性能因果链 5 项 + 本步骤补充 ⑥⑦ 是否已全部应用：
         │  ① wrapper 零拷贝 ② 单次 DMA 传满 ③ tile 利用率≥80%
         │  ④ 双缓冲 BUFFER_NUM≥2 ⑤ 核利用率≥90%
+        │  ⑥ 同步粒度已回拨（无残留 PIPE_ALL 风暴 / 微段拷贝 / 串行 depth=1 TQue，
+        │     即步骤 4-R 保守化清单已清空或逐项有失败记录）
+        │  ⑦ host 侧零冗余（同 stream 顺序 launch 间无 stream.synchronize()，
+        │     无 host 侧 dtype 预处理/预转换 launch）
         ├─ 若有未应用项 → 应用后重新评估加速比（计入第一级迭代次数）
         └─ 全部已应用仍不达标 → 判定为"算法/硬件限制"
            记录上限分析（Roofline + Amdahl），第一级退出进入第二级
@@ -893,7 +971,10 @@ def run(x, dim=-1):
 | **编译错误: GlobalTensor/LocalTensor** | `asc-devkit/docs/api/SIMD-API/基础数据结构/` 下对应简介.md |
 | **运行时 vector core exception / UB 违例 / all-zero output** | ① 🛑 **优先执行步骤 0-C** 完成 sync checklist<br>② `asc-devkit/docs/guide/算子实践参考/.../TBuf的使用.md` 检查 buffer 大小<br>③ `workflows/templates/archive_tasks/rms_norm/` 对比 EXEC_KERNEL_CMD 传参模式<br>④ 检查是否有 struct 指针被传给 `EXEC_KERNEL_CMD`（常见根因） |
 | **运行时 hang/死锁 / 跨核数据不流通** | 🛑 **必须先执行步骤 0-C**（含读取 ascendc-sync-guide.md 全文 + 6 项 checkpoint），再逐项排查 |
-| **多核非确定性（单核正确/多核错，失败行随时序漂移）** | ① 用 `usedCoreNum=1` 单核强制复跑二分：单核对/多核错 ⇒ launch 模型正确、问题在 compute 侧数据竞争<br>② 查 Gather 源是否 alias TQue 队列 tensor（跨迭代 slot 复用，见 `references/ascendc_shuffle_patterns.md` §1.7）<br>③ 查输入/输出是否误用 TBuf（见步骤 0-C） |
+| **多核非确定性（单核正确/多核错，失败行随时序漂移）** | 🛑 按步骤 0-C.2⑦ 的固定顺序诊断：① 用 `usedCoreNum=1` 单核强制复跑二分：单核对/多核错 ⇒ launch 模型正确、问题在 compute 侧数据竞争<br>② 查 sub-block 门控<br>③ 查 GM-facing buffer 是否误用裸 TBuf（必须 TQue 生命周期，0-C.2⑦）<br>④ 查 Gather 源是否 alias TQue 队列 tensor（跨迭代 slot 复用，见 `references/ascendc_shuffle_patterns.md` §1.7）<br>⑤ 查输入/输出是否误用 TBuf（见步骤 0-C） |
+| **运行时 vector core exception (507035)，plog 报 VEC 指令 UB 地址未对齐** | 排序/TopK 收集类算子查 `GatherMask` mask 模式铁律：① `src0` 与 `src1Pattern`(mask) 是否同 buffer（必须分开）<br>② `dst` 是否原地（`dst=src0` 无偏移）——跨 block 偏移收集踩 `vreducev2` 对齐约束（见 `references/ascendc_sort_topk_patterns.md` §3） |
+| **运行时 vector core exception (507035)，DataCopy/DataCopyPad 搬运场景** | 🛑 **先做 count 对齐最小探针，禁止直接微段化**：DataCopy/DataCopyPad 的 count 必须 32B 对齐（int8 即 32 的倍数）——搬运场景 507035 最常见根因是 count 未对齐（如 count=2 仅 8B），正确修法是把 count 对齐到 32B，**与段长大小无因果关系**。实测误诊案例：把大段切成 512B 微段 × 每段 2 次 `PIPE_ALL`，带宽钉死 ~100GB/s（10x 劣化）——若修复期引入过微段化，精度 PASS 后必须按步骤 4-R 回拨 |
+| **排序/TopK 精度退化（kth_value 附近边界元素误收/漏收）** | 值域二分：检查二分迭代次数下界是否按「含 padding 的 range」算——`PAD_VALUE` 过大会撑大 range、把精度档位拉低导致误收集；用 eps 提前收敛替代固定次数（见 `references/ascendc_sort_topk_patterns.md` §0/§1）。分段 sort：检查是否补做「重收集 >= kth_value」对齐值阈值 tie 语义（§4） |
 | **运行时 vector core timeout (507034)** | 🛑 这是硬件级别的 core 挂起错误。按顺序排查:<br>① **work buffer 尺寸**: 检查所有 API 的 work buffer (ReduceSum/Cos/Sin/Broadcast) 是否通过 GetXxxMaxMinTmpSize 正确计算 — 硬编码不足是最常见根因<br>② **Buffer 总溢出**: 计算所有 InitBuffer 分配的总 UB 字节数，确认不超过 GetCoreMemSize(UB)<br>③ **PipeBarrier 配对**: 每个 GM→UB (MTE2) 后必须有 PIPE_MTE2 barrier; 每个 V 计算块结束后必须有 PIPE_V barrier; 每个 UB→GM (MTE3) 前必须有 PIPE_V barrier<br>④ **循环边界**: 检查所有循环的边界类型一致性 (int32_t vs int64_t)，确认不会因类型不匹配导致死循环<br>⑤ **隔离法**: 将 kernel 逐步简化为 identity copy，每次恢复一个操作，定位触发 timeout 的具体 API<br>⑥ **参考历史**: 查阅 workflows/templates/archive_tasks/ 中相似规模的融合算子，对比 work buffer 计算方式 |
 | **精度不匹配 (MERE/MARE 超标)** | 调用 `ascendc-precision-debug` skill（见步骤 4） |
 
@@ -930,6 +1011,51 @@ def run(x, dim=-1):
 
 4.7 如果所有步骤耗尽仍 FAIL → 报告当前状态，记录 trace
 ```
+
+---
+
+### 🛑 步骤 4-R: 保守化回拨协议（精度/确定性修复 PASS 后、进入 Phase 5 前强制执行）
+
+**触发条件**：本次开发中任一 A/D 类修复迭代引入过以下任一保守化改动：
+- 同步升级（细粒度 barrier/event → `PipeBarrier<PIPE_ALL>`、TQue depth 降为 1、buffer 串行化）
+- 拷贝段长缩减（大段 DataCopy/DataCopyPad → 小段/微段分批）
+- 计算外迁（kernel 内可完成的 cast/预处理搬到 host 侧、同 stream 两次 launch 间插入 `stream.synchronize()`）
+
+**背景（实测事故）**：修复期为拿到精度 PASS 常把同步/拷贝改成最保守形态。若 PASS 后不回拨，
+带宽可被钉死一个数量级（实测：512B 微段 × 每段 2 次 `PIPE_ALL` → 等效带宽 ~100GB/s，
+10x 劣化；串行 depth=1 TQue → ~40% 性能损失；host sync → 设备侧 1.13x 但端到端仅 0.83x）。
+更危险的是把过度保守误封为"平台限制"（实测：507035 根因是 count 未 32B 对齐，
+与段长无因果关系，微段化是误诊处方）。
+
+**强制执行清单**：
+
+```
+4-R.1 🛑 登记保守化清单（修复迭代中随手记，此处汇总）:
+    - 每项记录：改动内容、当时假设的根因、支持证据
+
+4-R.2 🛑 逐项回拨实验（每次只回拨一项，变量唯一）:
+    - 微段 → 大段（按 UB 预算撑满，count 满足 32B 对齐即可）
+    - PIPE_ALL → 细粒度同步（TQue EnQue/DeQue 内建 event、SetFlag/WaitFlag<HardEvent> 对）
+    - depth=1 串行 → depth=2 双缓冲
+    - host 预处理/host sync → 收回 kernel 内 / 删除（同 stream 顺序 launch 天然有序）
+    每项回拨后运行 evaluate_ascendc.sh + 确定性门禁：
+    单核连续 10 次 + 多核连续 5 次逐位一致（max_abs_diff=0）
+
+4-R.3 🛑 封盘禁令:
+    - 禁止以"平台限制 / AIV 必须 PIPE_ALL / 必须微段"等结论封盘，
+      除非附最小探针对照证据（单变量实验，证明根因变量确为该约束本身）
+    - 回拨失败的项：保留保守形态 + trace.md 记录回拨实验数据与失败现象
+
+4-R.4 🛑 转译保真锚点:
+    - 回拨完成后，将 AscendC 加速比与 TileLang 基线对比：
+      若出现数量级级断崖（如 TileLang 已达搬运上限 90% 而 AscendC 仅 0.2x），
+      必须归因并记录——断崖几乎必然是残留保守化项，不是转译本身的开销
+```
+
+**门禁规则**：
+- 触发条件满足但 4-R.1/4-R.2 未完成 → 禁止进入 Phase 5（保守形态下的性能数据无意义）
+- 回拨实验不计入 d_retry/a_retry，但每项最多 2 次尝试（防无限振荡）
+- 全部回拨失败 → 不阻塞 Phase 5，但 trace.md 必须列出保留的保守化项与理由
 
 ## 精度验证标准
 
