@@ -1,0 +1,93 @@
+# 工作流检视条款
+
+> 由 [design-constraints.md](design-constraints.md) 派生。每次修改工作流后逐条自查；条款不通过则回退修改。
+> 原件是设计意图，本清单是可执行的检查动作。
+
+## 一、结构约束（SOLID）
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| S1 | 每个 skill 是否只负责单一功能域？是否把不相关的知识（如把架构最佳实践塞进编码规范 skill）混了进来？ | 单一职责 S |
+| S2 | 扩展某步骤时，是否通过 override virtual skill（`repo-*` / `workflow-cp*`）实现，而**没有**改动基类编排流程？ | 开闭 O |
+| S3 | 子仓 override 后，逻辑名、输入输出格式、调用方式是否与基类完全一致？上层是否无需感知替换？ | 里氏替换 L |
+| S4 | 是否只 override 了需要的组件，没有强迫子仓为改一个组件而实现全部 virtual 组件？ | 接口隔离 I |
+| S5 | 编排是否只依赖抽象逻辑名（如 `repo-coding-rules`），而不依赖具体实现路径 / 章节结构？ | 依赖倒置 D |
+| S6 | **改基类时**：暴露的契约（逻辑名 / 输入输出格式 / 调用约定）是否只新增、未破坏？破坏性变更是否提供了迁移路径并通知已接入仓？ | 基类演进兼容 |
+
+## 二、层级感知
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| H1 | 下级模块是否**不感知**上级？（子 Agent 不知自己在工作流哪一步；skill 不提及被哪个 agent 调用） | 层级间单向感知 |
+| H2 | 同级模块是否互不了解对方内部逻辑？ | 层级内黑盒感知 |
+
+## 三、调度约束
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| D1 | 任务的执行方与验收方是否为不同 Agent 实例？ | 职责分离 |
+| D2 | 调度子 Agent 时是否只注入当前任务所需的最小信息，无无关全局上下文？ | 最小信息 |
+| D3 | 子 Agent 是否只被授予完成任务所需的最小写权限？（如开发角色不给 test 目录写权限） | 最小权限 |
+| D4 | 所有可能循环/重试的环节是否都声明了最大次数，超限暂停并报告，而非无限重试？ | 过程有界 |
+| D5 | 每个子环节是否有明确交付件与可判定的通过指标（评分/容差/用例全通过等）？ | 确定性交付 |
+| D6 | 每个阶段完成后是否把状态持久化到外部（如 `.cannbot/state.json`），不依赖会话记忆？ | 状态可观测 |
+| D7 | 暂停/失败是否落盘到可恢复状态点（已完成阶段+阻塞点+交付件），恢复时不重跑已通过阶段？ | 可恢复性 |
+| D8 | 执行角色是否严格遵循上游设计、发现问题回退给上游，而非自行改动上游决策（架构/Tiling/接口）？ | 修改不越权 |
+
+## 四、风格约束
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| F1 | SKILL.md 是否只做意图识别与路由分发，不内联知识细节？ | SKILL.md 只做路由 |
+| F2 | 能用 hook / 脚本 / 权限声明实现的约束，是否没有退化成 prompt 里的自然语言？ | 机制优于自然语言 |
+| F3 | 涉及仓库领域知识时，是否通过路径引导 agent 读原文，而非全文硬编码进 skill？ | 引用而非硬编码 |
+| F4 | 对开发者同样可见的知识（测试框架用法、编码规范）是否优先放仓内 doc，skill 只做引导？ | 开发者知识外置 |
+| F5 | 举例是否只用仓内已有知识或通用概念，没有引入需额外背景才懂的外部概念？ | 举例不引入外部概念 |
+| F6 | 运行时文档（AGENTS.md、编排 skill、agents/*.md、`repo-*`/`workflow-*` skill 正文）是否不含面向对象设计与机制 rationale 词汇（final / 基类 / 子类 / 子仓 / override / 覆写 / virtual / 继承 / 多态 / 逻辑名绑定 / 设计思想 / 最小权限等原则标签）？init 完成后机制对执行 agent 已屏蔽，这些只对设计工作流的人可见，落在运行时文档即无用上下文干扰；设计思想与定制方法只保留在 README 设计章节与本维护 skill | 新增（执行 agent 上下文纯净） |
+
+## 五、链接一致性（本工作流特有）
+
+| 编号 | 检查项 |
+|------|--------|
+| L1 | 新增/删除 skill 后，是否重新运行了 init 使软链接生效？ |
+| L2 | 子仓 override 的逻辑名（skill 目录名 / SKILL.md 的 `name:`）是否与基类一致，能被正确匹配？ |
+| L3 | 是否只改了源文件，没有直接改运行时目录（`.opencode/` / `.claude/` / `.dsh/` / `.trae/`）里的软链接目标？ |
+| L4 | 新增 skill 若需被某 agent 或 PM 使用，是否已加入对应 `agents/<name>.md` 或 `AGENTS.md` 的 `skills:` frontmatter，否则 init 收集不到？ |
+| L5 | 改动了流程（阶段 / CP / 回退关系）后，插件根 `README.md` 的「开发流程概览」表是否仍与 `ops-direct-invoke-workflow/SKILL.md` 的统一流程表一致（阶段、CP 编号、回退指向）？ |
+| L6 | 改动了 `init.sh` 的 CLI 参数（新增 / 删除 / 重命名 / 语义变更）或 override 展开逻辑后，`example/init.sh` 是否仍然兼容？该文件已分发到各子仓，若不兼容必须发问卷知会用户决策是否迁移 |
+| L7 | 改动 agent 文件后，检查其正文中是否有"用 `xxx` skill"、"加载 `xxx`"、"引用 `xxx`"等 skill 依赖声明——若有，该 skill 是否已全部列入 `skills:` frontmatter？漏掉的 skill 不会被 init 链接，运行时加载会失败 |
+| L8 | 修改 `skills/workflow-agent-permissions/hooks/*.js`（新增/删除角色文件、调整 categories/exts）后，是否同步更新了**各侧**内置默认值 `DEFAULT_RULES`（`hooks/opencode/`、`hooks/claude/`、`hooks/dsh/permission-guard.js`；trae 侧无 DEFAULT_RULES——角色写权限由 `.trae/agents/*.md` 的 `tools` 静态声明承担，改角色权限时需同步 init Step 3 的 `ROLE_TOOLS` 映射）？各侧互为兜底（skill 文件为真值源、hook 内置为防御兜底），不同步会导致「配置缺失时角色行为与预期不一致」 |
+
+## 六、插件约束（plugin-*）
+
+| 编号 | 检查项 | 派生自 |
+|------|--------|--------|
+| P1 | 插件 frontmatter 是否含合法的 `workflow-hook`（after\|before:<基类流程表编号>）与 `workflow-stages`，且 stages 与内部步骤表一致？ | 挂载点唯一 |
+| P2 | 插件是否自闭环：输入/输出契约、内部通过指标、回退有界、执行与验收不同实例？ | 插件自闭环 / D1 / D4 |
+| P3 | 基类流程表是否未引用具体插件（只保留 `.cannbot/settings.json` 的 plugins 注记）？插件缺席时基线流程是否仍可闭合？ | 基线不感知插件 |
+| P4 | 新增/删除/改名插件后是否重跑 init，`.cannbot/settings.json` 的 plugins 与 frontmatter、已链接插件三者一致（settings.plugins ⊆ installed）？ | L1 / L4 / L7 |
+| P5 | 子仓覆写 AGENTS.md 时是否保留 PM 入口语义与基类 `skills:` 登记基线？ | AGENTS.md 覆写保持入口语义 |
+| P6 | 插件 SKILL.md 与 references 是否无 override / virtual / 基类 / 逻辑名等机制词汇？ | F6 |
+
+## 七、工作流模式（静默）
+
+| 编号 | 检查项 |
+|------|--------|
+| M1 | `.cannbot/settings.json` 的生成（init Step 5.5）与读取（AGENTS.md / 编排 skill 通用约定）是否一致：`--mode` 写入 `mode`，未传参保留现有值，缺失按 `interactive`？ |
+| M2 | silent 下的行为是否只豁免「询问与进度输出」，未豁免过程有界 / 状态可观测 / 可恢复性等调度约束？ |
+| M3 | ⛔ 确认点（CP0/CP1/CP2.2）的静默默认决策是否落盘 `.reply.json`（`{"mode":"silent","decision":"accepted"}`），中断恢复表（task-prompts recovery）是否无需感知静默？ |
+| M4 | 静默例外清单是否完整且唯一（权限预检警告 / 任务完成总结），无其它隐含输出；插件内异步等待的告知是否归插件自身约定而非主工作流例外清单？ |
+| M5 | 修改 `--mode` 或 Step 5.5 后，`example/init.sh` 是否仍兼容（基类参数只增不破坏）？ |
+| M6 | 静默问卷拦截是否各侧同步（`hooks/opencode/permission-guard.js`、`hooks/claude/permission-guard.js`、`hooks/dsh/permission-guard.js` 与 `hooks/trae/permission-guard.js` 的 `SILENT_GUARDED_TOOLS` / `readSilentMode` 语义一致）？claude 的 PreToolUse matcher 是否含 `Question`（init 注册与已注册补充）？trae 的 hooks.json matcher 是否命中 `AskUserQuestion`（init 注册与已注册补充）？**`SILENT_GUARDED_TOOLS` 的取值是否与各 harness 的问卷工具真实名对得上**（claude 侧为 `AskUserQuestion`、dsh 侧为 `ask_user_question`、trae 侧为 `AskUserQuestion`，hook 内按子串匹配；只对 matcher 不对工具名，拦截会静默空转） |
+
+## 八、子仓兼容性（`example/init.sh` 分发契约）
+
+`example/init.sh` 是子类仓的派生构造模板，已**分发到各已接入子仓**（如 `ops-blas/agent/init.sh`），修改后无法自动回写。
+
+| 编号 | 检查项 |
+|------|--------|
+| C1 | 本次改动是否改变了 `init.sh` 的对外 CLI 契约（参数名、参数顺序、参数语义、位置参数数量）？ |
+| C2 | 若改变了 CLI 契约，`example/init.sh` 是否仍能用旧参数正确调用基类 init？ |
+| C3 | 若 `example/init.sh` 不再兼容，是否已**发问卷明确告知用户**：哪些子仓受影响、新旧用法对比、用户是否选择本次迁移？ |
+| C4 | 用户确认「暂不迁移」后，是否在基类保留了对旧参数的兼容（至少一个版本内向后兼容）？ |
+

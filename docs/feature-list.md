@@ -51,9 +51,12 @@
 | **ascendc-ops-developer** | 算子开发者，支持代码实现、编译测试和精度验证 |
 | **ascendc-ops-tester** | 算子测试者，支持ST/UT用例生成与执行 |
 | **ascendc-ops-reviewer** | 代码检视专家，支持快速检视和全功能检视两种模式 |
-| **ascendc-kernel-architect** | Kernel直调架构师，支持需求分析、API验证、方案设计 |
-| **ascendc-kernel-developer** | Kernel直调开发者，支持代码实现、编译测试、性能采集、文档编写 |
-| **ascendc-kernel-reviewer** | Kernel直调审查者，支持独立构建验证、7维度评分、精度验证 |
+| **architect** | 直调算子方案设计（ops-direct-invoke 工作流）：需求分析、开发方案与测试方案设计 |
+| **developer** | 直调算子综合开发（ops-direct-invoke 工作流）：跨代码、测试、文档的开发与修复 |
+| **developer-code** | 直调算子代码开发（ops-direct-invoke 工作流）：算子实现、编译验证、问题定位 |
+| **developer-test** | 直调算子测试开发（ops-direct-invoke 工作流）：golden、功能用例、性能采集框架、白盒补全 |
+| **developer-doc** | 直调算子文档编写（ops-direct-invoke 工作流）：算子文档、开发报告、经验总结 |
+| **qa** | 直调算子验收（ops-direct-invoke 工作流）：各 CP 点验收与用户确认问卷 |
 
 ## TileLang2AscendC 算子开发
 

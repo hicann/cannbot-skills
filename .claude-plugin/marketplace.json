@@ -36,7 +36,15 @@
         "./ascendc-tiling-design",
         "./ops-precision-standard",
         "./ops-profiling",
-        "./torch-ascendc-op-extension"
+        "./torch-ascendc-op-extension",
+        "./ascendc-st-design",
+        "./ascendc-simt-best-practices",
+        "./ascendc-perf-optimize",
+        "./ascendc-performance-best-practices",
+        "./ops-simulator",
+        "./ascendc-docs-gen",
+        "./ascendc-whitebox-design",
+        "./ascendc-ut-develop"
       ]
     },
     {
@@ -293,8 +301,8 @@
     {
       "name": "ops-direct-invoke",
       "source": "./plugins-official/ops-direct-invoke",
-      "description": "Ascend C Kernel 直调算子开发 Team。含完整工作流（设计→实现→审查→性能验收）、3 个专业 Agent 和工程模板。",
-      "version": "1.2.5",
+      "description": "skill 驱动的多角色直调算子开发工作流 Team。PM 调度 architect / developer(-code/-test/-doc) / qa 六角色，8 阶段 7 CP 全流程（需求→设计→开发→验收→上库），支持静默模式、可插拔流程插件与算子仓继承定制。",
+      "version": "2.0.0",
       "author": {
         "name": "CANNBot"
       },

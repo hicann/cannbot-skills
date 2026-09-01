@@ -72,7 +72,7 @@ cd plugins-official/ops-direct-invoke
 bash init.sh project opencode
 ```
 
-命令中的 `opencode` 可替换为 `claude` / `trae` / `cursor` / `copilot` / `codearts`。各插件的详细安装步骤见对应目录下的 `quickstart.md`，例如 [ops-direct-invoke 快速上手](../plugins-official/ops-direct-invoke/quickstart.md)。
+命令中的 `opencode` 可替换为目标工具名，各插件支持的工具集不同（本例 ops-direct-invoke 支持 `opencode` / `claude` / `codex` / `dsh` / `trae`，可用 `bash init.sh --list-tools` 查询）。各插件的详细安装步骤见对应目录下的 `quickstart.md`，例如 [ops-direct-invoke 快速上手](../plugins-official/ops-direct-invoke/quickstart.md)。
 
 ---
 

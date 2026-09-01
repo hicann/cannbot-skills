@@ -218,7 +218,7 @@ skills:
 ### 参考示例
 
 查看 `plugins-official/` 下各 Team 目录中的 Agent 实现：
-- `ops-direct-invoke/agents/` - 直调开发子 Agent（architect / developer / reviewer）
+- `ops-direct-invoke/agents/` - 直调开发子 Agent（architect / developer / developer-code / developer-test / developer-doc / qa，skill 驱动工作流）
 - `pypto-op-orchestrator/agents/` - PyPTO 开发子 Agent（planner / mathematician / architect / designer / coder / verifier / debugger / optimizer；编排者以 AGENTS.md 注入）
 - `ops-code-reviewer/agents/` - 代码检视子 Agent
 
@@ -228,13 +228,17 @@ skills:
 
 ### 示例：ops-direct-invoke
 
-**核心理念**：Spec-driven Development（规格驱动开发）
+**核心理念**：PM 调度的 skill 驱动团队协作工作流（只调度不执行、执行与验收分离、状态落盘可恢复）
 
-**四阶段工作流**：
-1. 设计阶段 - 需求分析 → 方案设计 → 测试设计
-2. 开发阶段 - 迭代式开发（骨架→整合→全量），算子代码 + ST用例 + UT
-3. 验收阶段 - 精度验收 → 性能验收
-4. 上库阶段 - 代码检视 → 开发总结
+**八阶段工作流**（7 个 CP 确认点）：
+1. 开发准备 - 环境检查（CP0 环境确认）
+2. 需求分析 - 需求文档与架构选型（CP1 需求确认）
+3. 方案设计 - 测试方案与开发方案设计（CP2.1 / CP2.2）
+4. 代码开发 - 算子开发、测试工程、白盒补全、联调（CP3 功能验收）
+5. 性能验收 - 性能采集与评估（CP4）
+6. 代码检视 - 多维度代码检视（CP5）
+7. 上库准备 - 文档补全
+8. 开发总结 - 开发报告与经验总结
 
 > 详细配置见 `plugins-official/ops-direct-invoke/AGENTS.md`
 

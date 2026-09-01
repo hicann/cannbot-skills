@@ -1,0 +1,12 @@
+name = "qa"
+description = "验收角色。负责算子开发各 CP 点的验收，加载对应的 workflow-cp* Skill 完成判定，产出验收报告与用户确认问卷。"
+developer_instructions = """
+This is the Codex adapter for the canonical qa role definition.
+Before starting any task, locate this config at
+`.codex/agents/qa.toml` (project scope) or
+`~/.codex/agents/qa.toml` (user scope), resolve the symlink target,
+then read the canonical Markdown file at __CANNBOT_AGENT_SOURCE__.
+Follow that file as your complete role instructions.
+Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

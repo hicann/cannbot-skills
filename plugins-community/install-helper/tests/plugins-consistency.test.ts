@@ -534,14 +534,17 @@ describe("plugins consistency — single source of truth", () => {
       return embedded.find((e) => e.id === pluginId);
     }
 
-    it("ops-direct-invoke: externalRepos include ops-tensor with depth=1 and recursive=true", () => {
+    it("ops-direct-invoke: no externalRepos — init.sh clones deps into the workspace", () => {
+      // skill 驱动工作流的 init.sh 接管依赖仓克隆（asc-devkit / cann-samples / ops-tensor
+      // 落工作区 .cannbot/），注册表不再声明 externalRepos
       const yml = readYml("ops-direct-invoke");
-      const repos = yml.externalRepos || [];
-      const opsTensor = repos.find((r: any) => r.url?.includes("ops-tensor"));
-      expect(opsTensor).toBeDefined();
-      expect(opsTensor.depth).toBe(1);
-      expect(opsTensor.recursive).toBe(true);
-      expect(opsTensor.dir).toContain("ops-tensor");
+      expect(yml.externalRepos ?? []).toHaveLength(0);
+      const init = readFileSync(
+        join(REPO_ROOT, "plugins-official", "ops-direct-invoke", "init.sh"),
+        "utf-8"
+      );
+      expect(init).toContain("asc-devkit");
+      expect(init).toContain("ops-tensor");
     });
 
     it("ops-registry-invoke: externalRepos include ops-tensor", () => {
@@ -561,22 +564,20 @@ describe("plugins consistency — single source of truth", () => {
       expect(ascDevkit.depth).toBe(1);
     });
 
-    it("ops-direct-invoke: asc-devkit dir does NOT use reference/cann path", () => {
+    it("ops-direct-invoke: delegation model — no installSkills, install runs init.sh", () => {
+      // init.sh 负责链接 skills/agents、部署权限 hook、生成 .cannbot/permissions 与
+      // settings.json——这些步骤 installViaManifest 无法覆盖，故注册表不声明 installSkills
       const yml = readYml("ops-direct-invoke");
-      const repos = yml.externalRepos || [];
-      const ascDevkit = repos.find((r: any) => r.url?.includes("asc-devkit"));
-      expect(ascDevkit).toBeDefined();
-      expect(ascDevkit.dir).not.toContain("reference/cann");
+      expect(yml.installSkills ?? []).toHaveLength(0);
+      expect(yml.skills).toBe(0);
+      expect(yml.script ?? "init.sh").toBe("init.sh");
     });
 
     it("embedded-plugins.json externalRepos match yml for ops-direct-invoke", () => {
       const yml = readYml("ops-direct-invoke");
       const ep = readEmbedded("ops-direct-invoke");
-      expect(ep.externalRepos).toBeDefined();
-      expect(ep.externalRepos.length).toBe(yml.externalRepos.length);
-      const epUrls = ep.externalRepos.map((r: any) => r.url).sort();
-      const ymlUrls = yml.externalRepos.map((r: any) => r.url).sort();
-      expect(epUrls).toEqual(ymlUrls);
+      // 两侧均无 externalRepos 时保持一致（委托 init.sh 模型）
+      expect(ep.externalRepos ?? []).toEqual(yml.externalRepos ?? []);
     });
 
     it("embedded-plugins.json externalRepos match yml for ops-registry-invoke", () => {
@@ -589,12 +590,14 @@ describe("plugins consistency — single source of truth", () => {
       expect(epUrls).toEqual(ymlUrls);
     });
 
-    it("embedded ops-tensor has depth and recursive for ops-direct-invoke", () => {
+    it("embedded ops-direct-invoke delegates: empty installSkills, agents from plugin.json", () => {
       const ep = readEmbedded("ops-direct-invoke");
-      const opsTensor = ep.externalRepos.find((r: any) => r.url?.includes("ops-tensor"));
-      expect(opsTensor).toBeDefined();
-      expect(opsTensor.depth).toBe(1);
-      expect(opsTensor.recursive).toBe(true);
+      expect(ep.installSkills ?? []).toHaveLength(0);
+      expect(ep.skills).toBe(0);
+      expect(ep.agents).toBe(6);
+      expect([...ep.installAgents].sort()).toEqual(
+        ["architect", "developer", "developer-code", "developer-doc", "developer-test", "qa"].sort()
+      );
     });
 
     it("ops-tensor and asc-devkit are NOT duplicated across plugins", () => {
@@ -613,12 +616,14 @@ describe("plugins consistency — single source of truth", () => {
   describe("yml skills count matches init.sh INCLUDED_SKILLS count", () => {
     const { parse } = require("yaml");
 
-    it("ops-direct-invoke: yml skills == init.sh INCLUDED_SKILLS count", () => {
+    it("ops-direct-invoke: dynamic skill collection — no static INCLUDED_SKILLS, yml skills 0", () => {
+      // init.sh 动态收集 skill（枚举 skills/ + 解析 AGENTS.md 与 agents frontmatter），
+      // 无静态 INCLUDED_SKILLS 变量；yml skills=0 表示 install-helper 不直接装 skill
       const yml = parse(readFileSync(join(INSTALL_HELPER_ROOT, "plugins.d", "ops-direct-invoke.yml"), "utf-8"));
       const init = readFileSync(join(REPO_ROOT, "plugins-official", "ops-direct-invoke", "init.sh"), "utf-8");
-      const m = init.match(/INCLUDED_SKILLS="([^"]*)"/);
-      const initCount = m![1].split(/\s+/).filter(Boolean).length;
-      expect(yml.skills).toBe(initCount);
+      expect(init).not.toMatch(/INCLUDED_SKILLS=/);
+      expect(yml.skills).toBe(0);
+      expect(yml.installSkills ?? []).toHaveLength(0);
     });
 
     it("ops-registry-invoke: yml skills == init.sh INCLUDED_SKILLS count", () => {

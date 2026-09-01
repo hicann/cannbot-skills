@@ -494,13 +494,36 @@ class DependencyValidator:
             return set()
         return {s for s in skills_list if isinstance(s, str)}
 
+    @staticmethod
+    def _resolve_skills_from_agent_frontmatter(team_dir: Path) -> set[str]:
+        """Collect skills declared in each agents/*.md frontmatter.
+
+        Teams whose init.sh derives the install set from agent frontmatter
+        (instead of a static INCLUDED_SKILLS list) declare their whitelist
+        there; without this the fallback would only see AGENTS.md.
+        """
+        agents_dir = team_dir / "agents"
+        if not agents_dir.is_dir():
+            return set()
+        declared: set[str] = set()
+        for agent_path in sorted(agents_dir.glob("*.md")):
+            fm, err = _parse_frontmatter(agent_path)
+            if err:
+                continue
+            skills_list = fm.get("skills", [])
+            if not isinstance(skills_list, list):
+                continue
+            declared.update(s for s in skills_list if isinstance(s, str))
+        return declared
+
     def validate_workflow_skill_refs(self) -> None:
         """DG-11: Skill references in workflow files must be in install whitelist.
 
         Scans all .md and .py files within each plugin directory for runtime
         skill references (backtick-quoted names, Skill() calls, provenance
         JSON).  Verifies every referenced known skill appears in the plugin's
-        init.sh INCLUDED_SKILLS (or AGENTS.md frontmatter as fallback).
+        init.sh INCLUDED_SKILLS, or — when the installer derives its skill set
+        dynamically — in the AGENTS.md / agents/*.md frontmatter fallback.
 
         This catches the blind spot where a skill is used by the workflow but
         never declared in the install whitelist, causing 'Unknown skill'
@@ -526,6 +549,7 @@ class DependencyValidator:
         if init_vars is not None and init_vars["skills"]:
             return init_vars["skills"], init_vars["script_name"]
         declared = self._resolve_skills_from_agents_md(team_dir)
+        declared |= self._resolve_skills_from_agent_frontmatter(team_dir)
         return declared, ""
 
     def _iter_team_files(self, team_dir: Path) -> list[Path]:
@@ -551,10 +575,15 @@ class DependencyValidator:
                 continue
             if skill_name in ctx.declared:
                 continue
+            source = (
+                f"{ctx.script_name} INCLUDED_SKILLS"
+                if ctx.script_name
+                else "install whitelist (AGENTS.md / agents/*.md frontmatter)"
+            )
             self._emit(
                 "error", "DG-11",
                 f"Skill '{skill_name}' referenced in workflow but missing from "
-                f"{ctx.script_name or 'init.sh'} INCLUDED_SKILLS (team '{ctx.team_name}')",
+                f"{source} (team '{ctx.team_name}')",
                 str(fpath.relative_to(self.repo_root)),
             )
 

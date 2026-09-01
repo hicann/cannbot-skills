@@ -2,23 +2,15 @@ id: ops-direct-invoke
 dir: plugins-official/ops-direct-invoke
 displayName: AscendC Kernel 直调
 aliases: [ops-direct, ascendc-direct, direct, kernel]
-skills: 21
-description: Ascend C 直调全流程：环境→设计→开发→审查→性能验收
+skills: 0
+description: skill 驱动多角色直调算子开发工作流：PM 调度 architect/developer/qa 团队，8 阶段 7 CP 全流程，支持静默模式与算子仓继承定制
 # version derived from plugin.json (single source of truth)
 configFile: AGENTS.md
 configRootConfigLink: false
-installSkills:
-  - dir: ops
-    skills: [ascendc-tiling-design, npu-arch, ascendc-api-best-practices, ascendc-regbase-best-practice, ascendc-blaze-best-practice, ascendc-blaze-migration, ascendc-mc2-best-practice, ops-precision-standard, ascendc-docs-search, ascendc-env-check, ascendc-precision-debug, ops-profiling, ascendc-direct-invoke-template, torch-ascendc-op-extension, ascendc-runtime-debug, ascendc-crash-debug, ascendc-code-review]
-  - dir: infra
-    skills: [gitcode-toolkit, gitcode-pr-handler, gitcode-issue-gen, gitcode-issue-handler]
-installAgents: [ascendc-kernel-architect, ascendc-kernel-design-reviewer, ascendc-kernel-developer, ascendc-kernel-reviewer]
-externalRepos:
-  - url: https://gitcode.com/cann/asc-devkit.git
-    dir: plugins-official/ops-direct-invoke/asc-devkit
-    configRootLink: false
-  - url: https://gitcode.com/cann/ops-tensor.git
-    dir: plugins-official/ops-direct-invoke/ops-tensor
-    depth: 1
-    recursive: true
-    configRootLink: false
+# 本插件由自带 init.sh 完成装配（.cannbot/permissions、权限 hook、
+# .cannbot/settings.json、依赖仓 clone 到 .cannbot/），不走 installViaManifest
+# 声明式路径。故此处不声明 installSkills / externalRepos——installer.ts:108
+# 的分支会因 installSkills 为空而回落到执行 init.sh [level] [tool] [install_path]。
+# skills 计数由 init.sh 生成的 cannbot-manifest.json 提供（installer.ts:205-212）。
+# installAgents 保留：V5 漂移检测要求它与 plugin.json agents 一致（Layer 3 fallback）。
+installAgents: [architect, developer, developer-code, developer-doc, developer-test, qa]
