@@ -32,6 +32,18 @@ _find_asys() {
     fi
 }
 
+# 从 asys 表格行 "| key | value |" 提取第二列（纯 bash 参数展开，不使用 awk）
+_asys_table_value() {
+    # $1 = 表格原始输出, $2 = key（行首匹配）
+    local line val
+    line=$(echo "$1" | grep "| $2" | head -1)
+    [ -z "$line" ] && return 0
+    val="${line#*|}"      # 去掉第一列（key）
+    val="${val#*\|}"      # 去掉第二列前的分隔符
+    val="${val%%|*}"      # 去掉第三列及之后
+    echo "${val}" | tr -s ' ' | sed 's/^ //;s/ $//'
+}
+
 _detect_npu_via_npu_smi() {
     command -v npu-smi &> /dev/null || return 1
     local output
@@ -121,8 +133,19 @@ for w in data.get('warnings', []):
     fi
 else
     echo -e "${BLUE}[2/4] 设备列表（asys）...${NC}"
-    device_count=$("$ASYS_CMD" health 2>/dev/null | grep -c "Device ID:" || echo "0")
+    # npu-smi 不可用回退 asys：设备清单 + 健康
+    device_count=$("$ASYS_CMD" health 2>/dev/null | grep -c "Device ID:" || true)
     echo -e "${GREEN}✓ 检测到 $device_count 个设备${NC}"
+    "$ASYS_CMD" health 2>/dev/null | grep -E "Device ID" | sed 's/^ *|/  /;s/ *|$//'
+    # 芯片型号：asys info -r=hardware 的 Chip Info（npu-smi Chip Name 作为 short-soc-version 不可信，issue #587）
+    # set -e 保护：asys 子命令失败时取空值降级，不让脚本静默退出
+    hw_output=$("$ASYS_CMD" info -r=hardware 2>/dev/null || true)
+    chip_info=$(_asys_table_value "$hw_output" "Chip Info")
+    if [ -n "$chip_info" ]; then
+        echo -e "${GREEN}  芯片型号: ${chip_info}${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ 无法获取芯片型号（asys info -r=hardware 失败）${NC}"
+    fi
 fi
 
 echo ""
@@ -144,7 +167,22 @@ for dev in data['devices']:
     print(f\"  NPU {dev['npu_id']}: 温度={temp}°C 功耗={power}W HBM={hbm_use}%({hbm_cap}MB) AICore={aicore}%\")
 "
 else
-    echo -e "${YELLOW}⚠ 结构化查询不可用${NC}"
+    # asys 模式：逐卡 asys info -r=status -d=N 取监控/HBM（纯 bash 解析，不使用 awk）
+    # set -e 保护：health/status 失败时取空值降级
+    dev_ids=$("$ASYS_CMD" health 2>/dev/null | grep -oE "Device ID: *[0-9]+" | grep -oE "[0-9]+" || true)
+    if [ -n "$dev_ids" ]; then
+        for dev_id in $dev_ids; do
+            status_output=$("$ASYS_CMD" info -r=status -d="$dev_id" 2>/dev/null || true)
+            temp=$(_asys_table_value "$status_output" "Temperature (C)")
+            power=$(_asys_table_value "$status_output" "Power (W)")
+            hbm_total=$(_asys_table_value "$status_output" "HBM Total")
+            hbm_used=$(_asys_table_value "$status_output" "HBM Used")
+            aicore=$(_asys_table_value "$status_output" "AI Core Usage")
+            echo "  NPU $dev_id: 温度=${temp:-?}°C 功耗=${power:-?}W HBM=${hbm_used:-?}/${hbm_total:-?}MB AICore=${aicore:-?}%"
+        done
+    else
+        echo -e "${YELLOW}⚠ 结构化查询不可用${NC}"
+    fi
 fi
 
 echo ""

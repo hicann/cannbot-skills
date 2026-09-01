@@ -36,6 +36,8 @@ NPU ID    Chip ID    Chip Logic ID    Chip Name
   5         0           0               Ascend 910B3
 ```
 
+> ⚠️ **Chip Name 作为 short-soc-version 不可信**（A3 机型误报 `Ascend910`，issue #587），禁止用于芯片型号识别。芯片型号使用 `get_npu_arch.py`（asys Chip Info 优先，DSMI 兜底）。
+
 ### 结构化查询（key:value 格式）
 
 ```bash

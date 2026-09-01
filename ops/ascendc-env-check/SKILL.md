@@ -67,17 +67,32 @@ bash scripts/check_env.sh
 
 ## NPU 架构检测
 
-通过 `libascend_hal.so` 查询当前设备 NPU 架构：
+**前置条件**：先 source CANN 安装目录下的 `set_env.sh`（asys 与 DSMI 库依赖其 PATH / LD_LIBRARY_PATH）。
+
+**重要**：npu-smi 的 Chip Name 作为 short-soc-version **不可信**（A3 机型误报 `Ascend910`，issue #587），禁止用于芯片型号识别。
 
 ```bash
-# 输出 dav-{NpuArch} 格式（如 dav-3510）
+# 人读报告（含用途注释与证据链）
 python3 scripts/get_npu_arch.py
 
-# 仅输出裸数值（如 3510）
+# 仅输出裸 NpuArch 数值（如 3510）
 python3 scripts/get_npu_arch.py --raw
+
+# 机器可读 JSON（键名：full_soc / full_soc_source / npu_arch / npu_arch_source / short_soc / ccec_aiv_version / variant_dir / ini_path / npu_count / warnings）
+python3 scripts/get_npu_arch.py --json
 ```
 
-**原理**：调用 `halGetChipInfo` 获取芯片型号 → 读取 `platform_config/{SocVersion}.ini` 的 `NpuArch` 字段 → 输出结果。
+**获取链**：
+
+| 获取项 | 优先来源 | 备选来源 |
+|---|---|---|
+| full-soc-version（如 `Ascend950PR_9579`） | asys `info -r=hardware` Chip Info | DSMI `dsmi_get_chip_info` |
+| NpuArch（如 `3510`） | asys Arch Info | ini 文件（full-soc-version 精确匹配） |
+| short-soc-version / CCE_AIV_version / variant_dir | ini 文件 | — |
+
+- short-soc-version（如 `Ascend950`）用于算子原型定义文件 `xxx算子_def.cpp` 的 `AddConfig()` 第一个参数（如 `this->AICore().AddConfig("ascend950", aicConfig)`）
+- variant_dir（如 `dav_c310`）决定读CANN安装目录下源码时只看 `**/dav_c310/` 下的文件
+- ini 匹配按 `SoC_version=` 字段精确匹配，禁止文件名/前缀模糊匹配
 
 **依赖**：Ascend driver 和 CANN toolkit。
 

@@ -43,6 +43,7 @@ Import:
 import argparse
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -432,44 +433,6 @@ def query_npu_smi_mapping() -> ParseResult:
     return ParseResult(sorted(npu_ids), confidence, warnings)
 
 
-def _parse_chip_name_from_line(line: str, target_npu_id: int) -> Optional[str]:
-    """Parse a single mapping line and return chip name if it matches target."""
-    parts = line.split()
-    if len(parts) < 4:
-        return None
-    try:
-        if int(parts[0]) != target_npu_id:
-            return None
-        if parts[2] == "-":
-            return None
-        return " ".join(parts[3:])
-    except ValueError:
-        return None
-
-
-def query_chip_name_from_mapping(npu_id: int) -> ParseResult:
-    """Get chip name for a specific NPU from mapping table.
-
-    Skips MCU chips (Chip Logic ID == "-").
-    """
-    warnings: List[str] = []
-    stdout, rc, stderr = _run_cmd(["npu-smi", "info", "-m"])
-    if rc != 0:
-        return ParseResult(
-            None, "low", [f"npu-smi info -m failed: {stderr.strip()}"]
-        )
-
-    lines = [l.rstrip() for l in stdout.split("\n") if l.strip()]
-    for line in lines[1:]:
-        chip_name = _parse_chip_name_from_line(line, npu_id)
-        if chip_name:
-            return ParseResult(chip_name, "high", warnings)
-
-    return ParseResult(
-        None, "low", warnings + [f"No non-MCU chip found for NPU {npu_id}"]
-    )
-
-
 # ---------------------------------------------------------------------------
 # High-level collector with common-cache
 # ---------------------------------------------------------------------------
@@ -498,6 +461,8 @@ class NpuInfoCollector:
         self._discovery = NpuSmiDiscovery()
         # Cache: npu_id -> raw output of -t common
         self._common_cache: Dict[int, str] = {}
+        # Cache: 芯片型号（asys/DSMI 探测，与 npu_id 无关，进程内缓存一次）
+        self._chip_name_cache: Optional[str] = None
 
     @property
     def discovery(self) -> NpuSmiDiscovery:
@@ -535,9 +500,24 @@ class NpuInfoCollector:
 
 
     def get_chip_name(self, npu_id: int) -> Optional[str]:
-        result = query_chip_name_from_mapping(npu_id)
-        self.warnings.extend(result.warnings)
-        return result.value
+        # npu-smi 的 Chip Name 作为 short-soc-version 不可信（issue #587），
+        # 芯片型号一律走 asys Chip Info -> DSMI 兜底（复用 get_npu_arch 探测链）。
+        # 设备 ID 清单仍来自 npu-smi（get_npu_ids）。
+        # 失败结果也缓存（哨兵空串），避免多卡场景重复探测与重复告警。
+        if self._chip_name_cache is None:
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import get_npu_arch
+                probed = get_npu_arch.probe_full_soc()
+                self._chip_name_cache = probed[0] if probed else ""
+                if not self._chip_name_cache:
+                    self.warnings.append(
+                        "chip_name: asys 与 DSMI 均未取到芯片型号"
+                    )
+            except Exception as e:
+                self.warnings.append(f"chip_name probe failed: {e}")
+                self._chip_name_cache = ""
+        return self._chip_name_cache or None
 
     def get_health(self, npu_id: int) -> Optional[str]:
         result = query_with_strategy(self._discovery, npu_id, "health")
@@ -707,7 +687,8 @@ def _output_json(collector: NpuInfoCollector, npu_ids: List[int]) -> int:
         "devices": [collector.get_all_info(i) for i in npu_ids],
         "warnings": collector.get_all_warnings(),
     }
-    _LOGGER.info("%s", json.dumps(data, indent=2, ensure_ascii=False))
+    # 输出到 stdout（管道友好：python3 _npu_info.py --json | jq 可直接工作）
+    print(json.dumps(data, indent=2, ensure_ascii=False))
     return 0
 
 

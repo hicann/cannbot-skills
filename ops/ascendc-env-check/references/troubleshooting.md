@@ -2,6 +2,16 @@
 
 ## NPU 设备问题
 
+### 0. npu-smi 的 Chip Name 型号误报（已知 bug）
+
+**症状**：`npu-smi info` 的 Chip Name 显示与实际芯片不符（如 A3 机型显示裸 `Ascend910`，实为 Ascend910_93 系列；issue #587）
+
+**影响范围**：仅 Chip Name 字段。设备数、健康、温度、功耗、HBM、进程等其余输出**不受影响**，可正常使用。
+
+**结论**：npu-smi 的 Chip Name 作为 short-soc-version **不可信**，禁止用于芯片型号识别。
+
+**正确做法**：芯片型号一律走 `scripts/get_npu_arch.py`（asys Chip Info 优先，DSMI `dsmi_get_chip_info` 兜底），NpuArch / short-soc-version / variant_dir 从 ini 精确匹配。
+
 ### 1. npu-smi 不可用
 
 **症状**：执行 `npu-smi` 提示命令未找到
