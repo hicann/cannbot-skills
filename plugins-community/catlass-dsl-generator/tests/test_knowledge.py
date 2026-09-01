@@ -111,7 +111,11 @@ def test_static_concepts_have_pinned_sources_and_footnotes():
         "https://gitcode.com/cann/catlass/blob/"
         "7b574fb3547e76bff47c8514b07741d123a2766b/",
         "https://gitcode.com/cann/catlass/blob/"
+        "81da64bca9da5c782f6589541b967456d4fdc4c7/",
+        "https://gitcode.com/cann/catlass/blob/"
         "6ccf88e89723b65461e9921047c7970a71b67b42/",
+        "https://gitcode.com/m0_53222058/catlass/blob/"
+        "e533d4e2aee145e5e5863c2933f95aaf66bab859/",
         "https://gitcode.com/Ascend/msdebug/blob/"
         "77f50d2388c58b3b73279da604fc953ebb21676b/",
         "https://gitcode.com/Ascend/msopprof/blob/"
@@ -192,7 +196,14 @@ def test_core_api_concept_covers_complete_fixed_revision_export_surface():
         "VectorSSA", "MaskSSA", "LocalmemAllocator",
     }
     assert not [name for name in sorted(exported) if "`{}`".format(name) not in text]
-    assert "当前 `core_api.py` 实现不接受这些关键字" in text
+    for marker in (
+        "compute_order=M_FIRST",
+        "hf32_mode=HF32_DISABLE",
+        "f8e4m3fn/f8e5m2",
+        "i8×i8 到 i32",
+        "get_capacity_in_bytes(mem_scope)",
+    ):
+        assert marker in text
 
 
 def test_device_printing_concept_has_executable_source_patterns():
@@ -219,17 +230,22 @@ def test_every_static_concept_is_offline_and_detail_complete():
     required_details = {
         "dsl/tensor-layout-memory.md": ("load(params=None)", "L0C", "resident_bytes"),
         "dsl/copy-and-sync.md": ("cross_flag", "CopyUbToGmParams", "local_mem_bar"),
-        "dsl/compile-and-runtime.md": ("from_dlpack", "executor(", "kernel_binary_path"),
+        "dsl/compile-and-runtime.md": ("from_dlpack", "JitExecutor", "kernel_binary_path"),
         "dsl/python-control-flow.md": ("range_constexpr", "loop-carried", "短路"),
         "dsl/dynamic-layout-and-dlpack.md": (
             "mark_layout_dynamic",
             "mark_compact_shape_dynamic",
-            "block_dim",
+            "block_num",
         ),
         "dsl/simt-and-scalar-access.md": (
             "thread_idx",
             "thread_block_dim",
             "tensor indexing",
+        ),
+        "dsl/extern-ascendc.md": (
+            "@tla.extern",
+            "tla.Pointer",
+            "tla.call_extern",
         ),
         "operator/vector/basic-vadd.md": ("def vadd", "update_mask", "torch.allclose"),
         "operator/vector/vector-ops.md": ("CastParams", "tla.gather", "ReductionOp.ADD"),
@@ -593,6 +609,8 @@ def test_operator_family_alias_is_a_hard_filter_and_never_matches_source_urls():
     assert report["results"]
     assert all(
         "/linear-attention/gdn/" in result["path"]
+        or result["path"]
+        == "operator/linear-attention/kda/chunk-gated-delta-rule-fwd-h.md"
         for result in report["results"]
     )
     assert not any("convolution" in result["path"] for result in report["results"])

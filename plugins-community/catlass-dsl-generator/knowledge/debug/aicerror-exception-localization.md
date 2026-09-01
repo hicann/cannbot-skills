@@ -7,10 +7,14 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-07-28T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-07-28T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: msdebug
     resource: https://gitcode.com/Ascend/msdebug/blob/77f50d2388c58b3b73279da604fc953ebb21676b/docs/zh/user_guide/msdebug_user_guide.md
     title: MindStudio Debugger 使用指南
+  - id: host-api
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/api/host_api_reference.md
+    title: CATLASS DSL Host compile and launch API
 operator_families: [elementwise, matmul]
 arch: [c310]
 ---
@@ -38,17 +42,17 @@ Host 首个失败同步点
 ## 1. 收窄复现边界
 
 在每个候选 kernel 后立即同步，记录首个失败的 kernel、shape、dtype、layout、
-block_dim、device、CATLASS/CANN 版本和编译产物路径：
+block_num、device、CATLASS/CANN 版本和编译产物路径：[^host-api]
 
 ```python
-executor(tla_x, tla_z, block_dim=block_count)
+compiled(tla_x, tla_z, block_num=block_count)
 try:
     torch.npu.synchronize()
 except RuntimeError as error:
     raise RuntimeError(
         "AICError candidate: kernel=vadd "
         f"shape={tuple(dev_x.shape)} dtype={dev_x.dtype} "
-        f"block_dim={block_count}"
+        f"block_num={block_count}"
     ) from error
 ```
 
@@ -159,7 +163,7 @@ Vector/Cube 计算类 stop reason
 同步或后续核失败
   -> set/wait 配对、pipe barrier、跨核 flag 生命周期
 ARGS/TILING_DATA 与预期不符
-  -> Host extent、block_dim、动态 shape 参数打包
+  -> Host extent、block_num、动态 shape 参数打包
 ```
 
 一次只修改一个候选根因；修复后先跑原始最小复现，再跑单 tile、非对称 shape、
@@ -211,3 +215,4 @@ python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
 Core。
 
 [^msdebug]: 固定提交的 msDebug 用户指南中“解析异常算子 dump 文件功能介绍”及相关命令说明。
+[^host-api]: 固定 CATLASS 提交的 Host launch 参数名与调用形式。

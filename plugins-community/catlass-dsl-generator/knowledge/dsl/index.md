@@ -7,3 +7,4 @@
 - [Python 语法与动态控制流](python-control-flow.md)
 - [动态 Layout 与 DLPack 绑定](dynamic-layout-and-dlpack.md)
 - [SIMT Vector Function 与 Tensor 标量访问](simt-and-scalar-access.md)
+- [用户提供的 Ascend C 外部函数](extern-ascendc.md)

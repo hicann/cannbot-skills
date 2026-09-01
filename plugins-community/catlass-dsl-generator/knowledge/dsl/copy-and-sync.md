@@ -7,18 +7,19 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: api
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/docs/api-reference.md
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/api/kernel_api_reference.md
     title: CATLASS DSL API Reference
   - id: vadd
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
     title: Basic VADD synchronization examples
   - id: core
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/core_api.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/core_api.py
     title: Synchronization implementation
   - id: params
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/params.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/params.py
     title: Copy and local-memory parameter types
 operator_families: [elementwise, matmul]
 arch: [c310]

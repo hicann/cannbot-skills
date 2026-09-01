@@ -7,18 +7,19 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: runtime
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/runtime.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/base_dsl/jit_executor.py
     title: CATLASS DSL runtime
   - id: dlpack
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/tests/test_dlpack_bridge.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/tests/test_dlpack_bridge.py
     title: DLPack bridge tests
   - id: dlpack-runtime
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/tla/runtime.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/tla/runtime.py
     title: DLPack bridge implementation
   - id: vadd
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
     title: VADD runtime and correctness harness
 operator_families: [elementwise, matmul]
 arch: [c310]
@@ -40,18 +41,12 @@ dev_z = torch.full_like(dev_x, float("nan"))
 tla_x = tla.from_dlpack(dev_x, layout_tag=tla.arch.RowMajor)
 tla_z = tla.from_dlpack(dev_z, layout_tag=tla.arch.RowMajor)
 
-tla.initialize(device=0)
-try:
-    executor = tla.compile(
-        kernel, tla_x, tla_z,
-        arch_scope="aiv.c310",
-        cache=True,
-        cache_dir="./artifacts/runtime-cache",
-    )
-    executor(tla_x, tla_z, block_dim=1)
-    torch.npu.synchronize()
-finally:
-    tla.finalize()
+compiled = tla.compile(
+    kernel, tla_x, tla_z,
+    options="--npu-arch 3510",
+)
+compiled(tla_x, tla_z, block_num=1)
+torch.npu.synchronize()
 ```
 
 # 代码模式
@@ -83,7 +78,8 @@ stride 或 tile coord。
 - device tensor 必须与 launch device 一致并在执行结束前存活。
 - 动态 shape 的标量 extent 必须与实际 allocation 一致。
 - oracle 必须覆盖 dtype 舍入、atomic 累加和 layout 的物理/逻辑解释。
-- DLPack 是 zero-copy，原始 device tensor 在 launch 和同步完成前不能释放。
+- DLPack 是 zero-copy；返回的 TLA tensor 保留 producer 强引用与 managed tensor 所有权，
+  但调用方仍应让 TLA tensor 存活到 launch 和同步结束。
 - CPU/NumPy DLPack producer 会被拒绝；device id 必须与 runtime 一致。
 
 # 失败表现
@@ -93,9 +89,10 @@ stride 或 tile coord。
 | `does not implement __dlpack__` | 输入对象类型 |
 | CPU/NumPy 不支持 | tensor 是否已搬到 NPU |
 | `null strides` / shape metadata 错误 | DLPack producer 与 layout |
-| `` `block_dim` must be an int `` | launch block 数不是整数 |
+| `` `block_num` must be an int `` | launch block 数不是整数 |
 | 非法地址 | device、pointer 生命周期、extent |
-| 全部仍为 sentinel | block_dim、GM 回写、同步 |
+| 全部仍为 sentinel | block_num、grid-stride、GM 回写、同步 |
+| DLPack capsule 已消费 | 同一 capsule 被二次绑定；重新向 producer 请求新 capsule |
 | 稳定转置/错位 | layout tag、stride、tile coord |
 | 偶发 mismatch | flag/barrier、host synchronize |
 

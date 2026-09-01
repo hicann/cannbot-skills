@@ -7,18 +7,19 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: scalar
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/debug_print/README.md
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/debug_print/README.md
     title: Scalar debug print guide
   - id: tensor
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/print_tensor/README.md
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/print_tensor/README.md
     title: Tensor print guide
   - id: scalar-code
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/debug_print/debug_print.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/debug_print/debug_print.py
     title: Scalar print executable example
   - id: tensor-code
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/print_tensor/print_tensor.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/print_tensor/print_tensor.py
     title: Tensor print executable example
 arch: [c310]
 ---
@@ -60,19 +61,13 @@ print(print_scalar.dump_mlir(type_args=type_args))
 具备本地 CANN/NPU 环境时，可以直接编译和启动 kernel，不依赖外部示例脚本：
 
 ```python
-tla.initialize(device=0)
-try:
-    value = tla.Int32(3)
-    executor = tla.compile(
-        print_scalar,
-        value,
-        arch_scope="aiv.c310",
-        cache=True,
-        cache_dir="./artifacts/runtime-cache",
-    )
-    executor(value, block_dim=1)
-finally:
-    tla.finalize()
+value = tla.Int32(3)
+compiled = tla.compile(
+    print_scalar,
+    value,
+    options="--npu-arch 3510",
+)
+compiled(value, block_num=1)
 ```
 
 标量输出应匹配 `x=<i32>` 或 `v=<f32>` 的原生 CANN frame；表达式用例应打印

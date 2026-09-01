@@ -7,12 +7,13 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: readme
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/README.md
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/README.md
     title: TLA DSL environment and build guide
   - id: build
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/build.sh
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/build.sh
     title: TLA DSL build script
 arch: [c310]
 ---
@@ -29,11 +30,11 @@ arch: [c310]
 | 项目 | 固定提交声明 |
 | --- | --- |
 | Python | `>=3.10,<3.14` |
-| CMake | `>=3.28` |
+| CANN | `>=9.1.0` |
+| CMake | `>=3.28,<4.0` |
 | Ninja | `>=1.12` |
-| lit/Clang | `19.1.7` |
-| NumPy | `<2` |
-| pybind11 | `2.13.6` |
+| Clang/Clang++ | `>=10`，推荐 19，需与 LLVM 工具配套 |
+| AscendNPU-IR | `feature/regbase@a07821269…` |
 
 必须记录并检查：
 
@@ -74,8 +75,9 @@ llvm-lit -sv csrc/mlir/build/tests/lit/tla-compile
 test -x csrc/mlir/build/tools/tla-compile/TlaCompile
 ```
 
-`build.sh` 会先用 `mlir-tblgen` 重新生成 Python binding，再构建
-`tla-compiler` 并尝试 editable install。[^build]
+`build.sh` 会先把工作目录切到脚本所在的 `python/tla_dsl`，因此可从任意目录调用。
+debug 模式原地构建扩展，再从项目外目录执行隔离的 editable install，避免 in-tree
+`*.egg-info` 遮蔽安装；`--release` 构建 wheel 到 `dist/`。[^build]
 
 # 约束
 
@@ -94,6 +96,8 @@ test -x csrc/mlir/build/tools/tla-compile/TlaCompile
 | 找不到 `MLIRConfig.cmake` | `TLA_DSL_PREBUILT_ASCENDNPU_IR/build/install` |
 | 找不到 dialect/pass | `TlaCompile` 是否重新构建、运行时库路径 |
 | `ASCEND_HOME_PATH` 为空 | CANN `set_env.sh` 未加载 |
+| 从其他目录调用时相对路径错误 | 确认使用当前 `build.sh`；旧脚本曾依赖调用目录 |
+| editable install 被源码 metadata 遮蔽 | 检查是否走脚本的项目外 `python -I -m pip install -e` |
 
 设备编译错误应在 Python import、TLAIR 和 lit 都通过后再归因到 CANN/HIVMC
 后端，并保留首个后端 stderr。

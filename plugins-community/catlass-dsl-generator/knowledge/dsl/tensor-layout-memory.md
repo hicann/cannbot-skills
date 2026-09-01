@@ -7,16 +7,20 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: address
     resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/address_space.py
     title: Address-space definitions
   - id: arch
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/base_dsl/arch.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/base_dsl/arch.py
     title: Architecture and local-memory metadata
   - id: tensor
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/tla/tensor.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/tla/tensor.py
     title: Tensor implementation
+  - id: core
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/core_api.py
+    title: Public layout and capacity query API
 operator_families: [elementwise, matmul]
 arch: [c310]
 ---
@@ -30,6 +34,10 @@ arch: [c310]
 指针地址空间是 `generic`、`gm`、`l1`、`l0a`、`l0b`、`l0c`、`ub`。[^address]
 C310 源码容量表给出 L1/cbuf 512 KiB、L0A 64 KiB、L0B 64 KiB、
 L0C 256 KiB、UB 248 KiB。[^arch]
+
+公共查询是 `tla.arch.get_capacity_in_bytes(tla.AddressSpace.<scope>)`；参数必须是
+`AddressSpace.l1/l0a/l0b/l0c/ub`，不能传旧式 `tla.arch.L1` pipe token。该函数在 Host
+直接返回 Python int，在 kernel 内于 trace 期折叠为编译期常量。[^arch][^core]
 
 # 用法
 
@@ -103,6 +111,8 @@ Packed Cube layout 使用 `tla.arch.zN`、`nZ`、`zZ`、`nN`、`zNUnAlign` 或
 - coord、stride 与 layout 必须描述同一物理存储，否则逻辑 shape 正确也会读错。
 - `make_tensor_like` 的 `dst_dtype` 已 deprecated；通过 typed pointer 指定 dtype。
 - `allocate` 不接受 `generic` 或 `gm`，alignment 必须是正整数。
+- 公共 layout 名严格为 `tla.arch.RowMajor` / `tla.arch.ColumnMajor`；不要使用旧式
+  `row_major` / `column_major`。
 
 # 失败表现
 
@@ -120,3 +130,4 @@ Packed Cube layout 使用 `tla.arch.zN`、`nZ`、`zZ`、`nN`、`zNUnAlign` 或
 [^address]: 固定提交中的 `AddressSpace` 枚举。
 [^arch]: 固定提交中的 C310 target 与 `LOCALMEM_CAPACITY_BYTES`。
 [^tensor]: 固定提交中的 tensor 类型与视图实现。
+[^core]: 固定提交中的公共 layout token 与 `arch.get_capacity_in_bytes` 参数检查。

@@ -7,15 +7,16 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: api
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/docs/api-reference.md
-    title: CATLASS DSL API Reference
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/api/kernel_api_reference.md
+    title: Generated CATLASS DSL Kernel API Reference
   - id: core
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/core_api.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/core_api.py
     title: CATLASS DSL Core API implementation
   - id: runtime
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/runtime.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/runtime.py
     title: CATLASS DSL runtime export surface
 operator_families: [elementwise, matmul, reduction]
 arch: [c310]
@@ -24,8 +25,8 @@ arch: [c310]
 # 接口与概念
 
 `catlass.core_api.__all__` 与 runtime 的 `_CORE_API_EXPORTS` 共同定义当前 Core
-API 面。生成版 `docs/api-reference.md` 只覆盖其中一部分，因此下面的完整清单以
-源码导出表和实际函数签名为准。[^api][^core][^runtime]
+API 面。生成版 Kernel API 文档解释公共接口；下面的清单以源码导出表、实际签名和
+参数检查为准。[^api][^core][^runtime]
 
 ## 完整 API 清单
 
@@ -78,10 +79,11 @@ mutex；`mutex_lock`/`mutex_unlock` 在 `core_api.__all__` 中，但不在顶层
 | `cube` | `cube()` | `with tla.cube():` Cube region |
 | `vector` | `vector()` | `with tla.vector():` Vector region |
 | `vec.func` | `vec.func(*, mode="simd", thread_block_dim=None)` | SIMD vector register 或 SIMT thread region |
-| `mmad` | `mmad(acc, lhs, rhs, init_c=None, unit_flag=None, acc_type=None, **extra_kwargs)` | L0A x L0B 累加到 L0C |
+| `mmad` | `mmad(acc, lhs, rhs, init_c=None, unit_flag=None, compute_order=M_FIRST, hf32_mode=HF32_DISABLE)` | L0A x L0B 累加到 L0C |
 
-`unit_flag` 仅接受 `0b00`、`0b10`、`0b11`；`acc_type` 支持 bf16/f16/f32
-契约中的类型。[^core]
+`unit_flag` 仅接受 `0b00`、`0b10`、`0b11`。支持同型 f16/bf16/f32 输入到 f32、任意
+f8e4m3fn/f8e5m2 配对到 f32，以及 i8×i8 到 i32；L0C dtype 由这条路由决定。
+`compute_order` 接受 `ComputeOrder`，`hf32_mode` 只为 f32 输入选择 HF32 舍入模式。[^core]
 
 ### Vector 构造与算术
 
@@ -90,7 +92,7 @@ mutex；`mutex_lock`/`mutex_unlock` 在 `core_api.__all__` 中，但不在顶层
 | `full` | `full(value, dtype)` |
 | `arange` | `arange(base=0, *, order="increase", dtype=...)` |
 | `add`, `sub`, `mul`, `max`, `min`, `div` | `(lhs, rhs, *, mask=None)`；支持 vector/vector 及受支持的 scalar 形式 |
-| `exp`, `log`, `sqrt`, `abs`, `neg` | `(operand, *, mask=None)` |
+| `exp`, `log`, `sqrt`, `abs`, `neg` | `(operand, *, mask=None)`；其中前四项支持受约束的 SIMT scalar 分派 |
 | `where` | `where(mask, x, y)` |
 | `squeeze` | `squeeze(src, mask)` |
 | `interleave`, `deinterleave` | `(src0, src1) -> (VectorSSA, VectorSSA)` |
@@ -118,12 +120,10 @@ mutex；`mutex_lock`/`mutex_unlock` 在 `core_api.__all__` 中，但不在顶层
 `arch` 当前公开成员为 `CUBE`、`VECTOR`、`FIX`、`SCALAR`、`MTE1`、`MTE2`、
 `MTE3`、`L1`、`L0A`、`L0B`、`L0C`、`UB`、`RowMajor`、`ColumnMajor`、
 `zN`、`nZ`、`zZ`、`nN`、`zNUnAlign`、`L0Clayout`、`block_idx()`、
-`sub_block_idx()`、`block_num()`、`thread_idx()` 和 `thread_block_dim()`。后两者只在
-SIMT `vec.func` 内有效，分别返回三维 thread index 和 thread-block extent。[^api][^core]
-
-注意：固定提交中的生成版 API 文档仍展示带 `unroll`、`prefetch_stages` 和
-`pipelining` 的旧 `range` 签名；当前 `core_api.py` 实现不接受这些关键字，因此
-本清单不把它们列为受支持接口。[^api][^core]
+`sub_block_idx()`、`block_num()`、`thread_idx()`、`sync_threads()`、
+`thread_block_dim()` 和 `get_capacity_in_bytes(mem_scope)`。thread 三项只在 SIMT
+`vec.func` 内有效；容量查询接受 `tla.AddressSpace.l1/l0a/l0b/l0c/ub`，在 Host 或
+kernel trace 期返回 Python 常量。[^api][^core]
 
 # 用法
 
@@ -167,7 +167,8 @@ with tla.cube():
         l0_c, l0_a, l0_b,
         init_c=(k_tile == 0),
         unit_flag=0b11 if is_last_k else 0b00,
-        acc_type=tla.Float32,
+        compute_order=tla.params.ComputeOrder.M_FIRST,
+        hf32_mode=tla.params.HF32Mode.HF32_DISABLE,
     )
 ```
 
@@ -188,7 +189,7 @@ Tail 循环应把 `update_mask` 返回的 remaining 作为 loop-carried 状态�
 - vector 操作必须位于 `tla.vec.func`；mask 的 dtype 决定 lane 数并必须匹配 vector。
 - `VectorSSA.to` 只支持有符号 i8/i16/i32/i64 与 f16/bf16/f32 目标类型，并要求
   `CastParams`。
-- `gather` 的 source 必须是 UB tensor，index vector dtype 受源码白名单约束。
+- `gather` 的 source 必须是 UB tensor，index vector 必须是 i32。
 - `mmad` 的 A/B/C tensor 地址空间、维度与 dtype 必须满足契约。
 - `print`、`allocate`、同步和 region API 都是 lowering-only，不能当普通 Python
   eager 函数使用。
@@ -210,6 +211,6 @@ Tail 循环应把 `update_mask` 返回的 remaining 作为 loop-carried 状态�
 `tests/test_core_api_preconditions.py`、vector pytest 和 lit lowering 用例。
 本文只完成固定提交源码核对，未运行 CATLASS DSL、CANN 或 NPU。
 
-[^api]: 固定提交中的 `docs/api-reference.md` API 清单。
+[^api]: 固定提交中生成的 Kernel API 清单。
 [^core]: 固定提交中的 `catlass/core_api.py` 参数检查与 lowering 实现。
 [^runtime]: 固定提交中的 `catlass/runtime.py` 顶层 Core API 转发清单。

@@ -7,15 +7,16 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: tensor-runtime
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/tla/runtime.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/tla/runtime.py
     title: Runtime tensor and DLPack implementation
   - id: abi-tests
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/tests/test_dynamic_gm_launch_abi.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/tests/test_dynamic_gm_launch_abi.py
     title: Dynamic GM launch ABI tests
   - id: batched
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
     title: Batched matmul dynamic-GM example
 operator_families: [elementwise, matmul, attention]
 arch: [c310]
@@ -36,8 +37,8 @@ ta = tla.from_dlpack(a, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
 tb = tla.from_dlpack(b, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
 tc = tla.from_dlpack(c, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
 
-artifact = tla.compile(kernel, ta, tb, tc, arch_scope="aic.c310")
-artifact(ta, tb, tc, block_dim=block_dim)
+artifact = tla.compile(kernel, ta, tb, tc, options="--npu-arch 3510")
+artifact(ta, tb, tc, block_num=block_num)
 ```
 
 若只有 batch/M 等某一维变化，可用 `mark_compact_shape_dynamic(0)` 缩小动态范围。
@@ -58,6 +59,8 @@ root.mark_compact_shape_dynamic(mode=0)
 # 约束
 
 - 仅支持 Ascend/NPU DLPack producer；buffer 生命周期必须覆盖 compile/launch。
+- `from_dlpack` 消费 capsule 后由返回的 TLA tensor 持有 managed tensor，并保留 producer
+  的强引用；释放 TLA tensor 时才调用 deleter。不要复用已消费 capsule。
 - 动态标记要求 root tensor 的 coord 全为 0，不能直接标记带 offset 的 tile view。
 - `leading_dim` 必须在 rank 范围内且对应 stride 为 1。
 - `stride_order` 若显式提供，必须是 `range(rank)` 的排列。
@@ -69,11 +72,13 @@ root.mark_compact_shape_dynamic(mode=0)
 - `leading_dim ... expected 1`：连续维选择与物理 layout 不符。
 - 相同逻辑 kernel 反复编译：动态 mode 未标记，具体 extent 仍进入 cache key/type。
 - 输出错位：host layout tag、stride/origin shape 与物理 storage 不一致。
+- `a DLPack capsule can only be consumed once`：producer 重放了已消费 capsule。
 
 # 验证方法
 
 用同一 artifact 连续 launch 至少两个不同 shape，核对 cache 命中、ABI metadata 和
-reference；同时测试 row-major、column-major、非法非零 coord 与错误 stride order。
+reference；同时测试 RowMajor、ColumnMajor、producer 提前失去调用方引用、capsule
+重放、非法非零 coord 与错误 stride order。
 动态复用不等于正确性证明，每个 shape 仍需过 oracle。[^abi-tests]
 
 [^tensor-runtime]: 固定提交 runtime tensor 的 DLPack、动态 shape 与 stride 规则。

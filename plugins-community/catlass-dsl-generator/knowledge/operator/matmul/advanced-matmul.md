@@ -7,12 +7,13 @@ status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
 verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: batched
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
     title: Batched matmul end-to-end example
   - id: grouped
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/grouped_matmul_slice_m/grouped_matmul_slice_m.py
+    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/grouped_matmul_slice_m/grouped_matmul_slice_m.py
     title: Grouped matmul slice-M example
 operator_families: [matmul]
 arch: [c310]
@@ -46,8 +47,8 @@ GM base offset、任务映射和动态 origin shape；A/B packed layout 与 Basi
 ta = tla.from_dlpack(a, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
 tb = tla.from_dlpack(b, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
 tc = tla.from_dlpack(c, layout_tag=tla.arch.RowMajor).mark_layout_dynamic()
-artifact = tla.compile(kernel, ta, tb, tc, arch_scope="aic.c310")
-artifact(ta, tb, tc, block_dim=block_dim)
+artifact = tla.compile(kernel, ta, tb, tc, options="--npu-arch 3510")
+artifact(ta, tb, tc, block_num=block_num)
 ```
 
 不要把两个例子视为可互换模板：batch flatten 与 group offsets 具有不同 ABI 和任务映射。

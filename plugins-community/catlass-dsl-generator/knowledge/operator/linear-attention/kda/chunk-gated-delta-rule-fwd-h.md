@@ -17,9 +17,6 @@ sources:
   - id: kernel
     resource: https://gitcode.com/m0_53222058/catlass/blob/e533d4e2aee145e5e5863c2933f95aaf66bab859/python/tla_dsl/examples/end_to_end/intracard_fwd_h/intracard_fwd_h_kernels.py
     title: kernel 入口、task-loop 任务分派与 AIC/AIV 流水
-  - id: workload
-    resource: /home/npu_user7/panhangzhen/attention-bench/KDA/intracard_fwd_h/workload.jsonl
-    title: 12 个 TND/BSND FP16/BF16 workload
 operator_families: [linear-attention, gated-delta-rule, kda]
 arch: [c310, ascend-950pr]
 ---
@@ -59,8 +56,7 @@ task_id = sequence_id * value_heads + value_head
 每个 block 通过 `range(block_idx, TASKS, block_dim)` 领取 task。一个 task 内遍历
 `CHUNKS_PER_SEQ` 个 64-token chunk，确保 state 依赖不跨 block；不同 task 可以并行。[^host][^kernel]
 
-因此并行度上限由 `sequence_count * HV` 决定，不由 token 数决定。12-case workload 的 task 数为
-`1/4/8/16/32`；其中 case 005 和 case 012 各有 32 个 task。[^workload]
+因此并行度上限由 `sequence_count * HV` 决定，不由 token 数决定。[^host][^kernel]
 
 ### block 负载诊断
 
@@ -181,7 +177,7 @@ MMAD、L0C、UB vector 中间结果和 recurrent state 为 FP32。输入 FP16/BF
 - `task_loop_*_ready0/1` 的 producer、consumer、buffer index 和 pipe 必须一一对应；不能用
   单组 flag 替代 ping-pong 版本。[^kernel]
 - task-major packing 与 H/V restore 是当前 ABI 的一部分；移除任一重排必须同步修改 GM stride、
-  task 映射、output 所有权和完整 12-case 精度验证。[^host][^workload]
+  task 映射、output 所有权和完整精度验证。[^host]
 
 # 失败表现
 
@@ -198,9 +194,9 @@ MMAD、L0C、UB vector 中间结果和 recurrent state 为 FP32。输入 FP16/BF
 
 # 验证方法
 
-正确性运行当前 12-case workload，覆盖 TND/BSND、FP16/BF16、H=1/2/4/8/16、1/2/4 sequence、
-`g`/`gk` 的有无、initial/final state、`save_new_value=false` 与 `state_v_first=true`。每轮修改
-必须同时比较 H、VNew 和 final state。[^workload][^host]
+正确性必须覆盖 Host 实际支持的 layout、dtype、head/sequence 边界、gate/state/output 组合；
+每轮修改必须同时比较 H、VNew 和 final state。具体矩阵应由项目内可访问的 workload 证据
+固定，不能从本条目推断。[^host]
 
 性能测试先固定 device、环境、workload 和 `block`，每 case 单独保存 `msprof` 输出；导出后读取
 `op_statistic_*.csv` 的目标 kernel 耗时。对 task 调度候选，还要检查 block-level 统计中的
@@ -210,4 +206,3 @@ AIC/AIV 时间和 Cube 指令数，而不是只看总平均。候选只有在完
 [^guide]: 算子目录 README 中的算法、接口、支持范围与实现状态。
 [^host]: 当前 host 源码中的快路径判定、task-major packing、gate materialization、state workspace、输出 restore、artifact cache 与 launch。
 [^kernel]: 当前 kernel 源码中的 task range、AIC/AIV 四阶段、L0C->UB、UB->L1、双缓冲、本地 flag 与 cross flag。
-[^workload]: 当前 workload 的 12 个 case shape、layout、sequence 边界、head 数、gate/state/output 组合。
