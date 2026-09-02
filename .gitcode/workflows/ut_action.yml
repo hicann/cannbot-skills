@@ -50,16 +50,6 @@ jobs:
           export GIT_TARGET_BRANCH=${{ env.TARGET_BRANCH }}
           bash ut.sh
       -
-        name: ut_cov
-        identifier: ut_cov
-        uses: cann/.gitcode/actions/ut-cov-report@master
-        with:
-          ut_process: ${{ steps.ut.outputs.ut_process }}
-          workspace: ${{ steps.process_checkout.outputs.path }}
-          ut_type: ops-transformer
-          target_branch: ${{ env.TARGET_BRANCH }}
-          git_token: ${{ secrets.GIT_TOKEN }}
-      -
         name: upload
         uses: obs-upload
         with:

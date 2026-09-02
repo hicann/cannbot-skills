@@ -1,4 +1,4 @@
-name: compile_action
+name: check_action
 
 on:
   workflow_call:
@@ -65,8 +65,8 @@ jobs:
             export MERGE_ID=${{ env.MERGE_ID }}
             export GIT_TARGET_BRANCH=${{ env.TARGET_BRANCH }}
             export OS_TYPE=${{ inputs.arch == 'arm64' && 'aarch64' || 'x86_64' }}
-            export cui_user=${{  secrets.cui_user }}
-            export cui_token=${{  secrets.cui_token }}
+            export ai_user=${{  secrets.ai_user }}
+            export ai_token=${{  secrets.ai_token }}
             export CANNBOT_API_KEY=${{ secrets.CANNBOT_API_KEY }}
             BuildAccelerate bash check.sh
           AC_SERVER_IP: ${{ vars.AC_SERVER_IP }}

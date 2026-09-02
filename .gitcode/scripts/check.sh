@@ -11,12 +11,12 @@ set -e
 export PATH="$PATH:/root/.opencode/bin"
 which opencode
 opencode --version
-git clone https://${cui_user}:${cui_token}@gitcode.com/Junren6415/cann_auto_reviewer.git -b cannbot_backend
+git clone https://${ai_user}:${ai_token}@gitcode.com/Junren6415/cann_auto_reviewer.git -b cannbot_backend
 cd cann_auto_reviewer
 cat > .env << 'EOF'
 export CANNBOT_API_KEY="${CANNBOT_API_KEY}"
-export GITCODE_TOKEN="${cui_token}"
-export GIT_USER_NAME="${cui_user}"
+export GITCODE_TOKEN="${ai_token}"
+export GIT_USER_NAME="${ai_user}"
 export CANNBOT_AUTH_URL="https://cannbot.hicann.cn/cannbot/api/auth/authenticate"
 EOF
 cd review_cannbot
