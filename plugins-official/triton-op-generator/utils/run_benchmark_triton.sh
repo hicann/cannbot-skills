@@ -34,6 +34,7 @@ NPU_LIST=""
 OUTPUT_DIR=""
 ARCH="ascend910b2"
 CLAUDE_PROJECT_DIR=""
+TARGET_SPEEDUP="2.0"
 
 # ── 参数解析 ──
 while [[ $# -gt 0 ]]; do
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         --output)        OUTPUT_DIR="$2"; shift 2 ;;
         --arch)          ARCH="$2"; shift 2 ;;
         --claude-project-dir) CLAUDE_PROJECT_DIR="$2"; shift 2 ;;
+        --target-speedup) TARGET_SPEEDUP="$2"; shift 2 ;;
         -h|--help)
             echo "用法: bash utils/run_benchmark_triton.sh --benchmark-dir <path> --level <N> [--range <start-end> | --ids <id_list>] [--npu <id> | --npu-list <list>] --output <path>"
             echo ""
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --output         输出目录 (必填)"
             echo "  --arch           目标设备架构，默认 ascend910b2"
             echo "  --claude-project-dir  Claude Code 项目目录，用于定位 .jsonl 会话文件"
+            echo "  --target-speedup Excel 性能达标阈值（speedup >= 该值视为达标），默认 2.0"
             echo ""
             echo "示例:"
             echo "  # 单 NPU 串行模式"
@@ -226,9 +229,37 @@ if [[ "$USE_PARALLEL" == true ]]; then
                     START_TIME=$(date +%s)
 
                     if [[ -f "$json_file" ]]; then
-                        PROMPT="生成一个基于 Triton-Ascend 框架的算子，参考${file}和${json_file}。目标设备架构为${ARCH}，使用NPU=${npu}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。"
+                        PROMPT=$(
+                            cat <<EOF
+生成一个基于 Triton-Ascend 框架的算子，参考${file}和${json_file}。目标设备架构为${ARCH}，使用NPU=${npu}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。禁止使用plan模式。
+硬性执行约束：
+1. 严禁调用 AskUserQuestion/question 工具。
+2. 严禁请求用户确认。
+3. 严禁以问题结尾。
+4. 任意 skill、流程、阶段若进入“用户确认/Step 5”，必须视为用户已经确认，并立即继续后续步骤。
+5. 完成的唯一判定标准是：Phase 4 已执行，且工作目录下已生成含 opt_iterations>=1 的 summary.json。
+6. 在满足第 5 条之前，不得停止执行、不得结束回复、不得声明完成；严禁以时间/token 约束为由跳过 Phase 4。
+7. Phase 1 完成提取与冻结后，必须无等待、无确认地立即进入 Phase 2/3 代码生成。
+8. 必须将生成的算子代码文件输出至${TARGET_OP_DIR}/目录下。
+9. 最终回复必须包含已生成文件概览，并确认 Phase 4 已执行、summary.json 已生成。
+EOF
+                        )
                     else
-                        PROMPT="生成一个基于 Triton-Ascend 框架的算子，参考${file}。目标设备架构为${ARCH}，使用NPU=${npu}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。"
+                        PROMPT=$(
+                            cat <<EOF
+生成一个基于 Triton-Ascend 框架的算子，参考${file}。目标设备架构为${ARCH}，使用NPU=${npu}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。禁止使用plan模式。
+硬性执行约束：
+1. 严禁调用 AskUserQuestion/question 工具。
+2. 严禁请求用户确认。
+3. 严禁以问题结尾。
+4. 任意 skill、流程、阶段若进入“用户确认/Step 5”，必须视为用户已经确认，并立即继续后续步骤。
+5. 完成的唯一判定标准是：Phase 4 已执行，且工作目录下已生成含 opt_iterations>=1 的 summary.json。
+6. 在满足第 5 条之前，不得停止执行、不得结束回复、不得声明完成；严禁以时间/token 约束为由跳过 Phase 4。
+7. Phase 1 完成提取与冻结后，必须无等待、无确认地立即进入 Phase 2/3 代码生成。
+8. 必须将生成的算子代码文件输出至${TARGET_OP_DIR}/目录下。
+9. 最终回复必须包含已生成文件概览，并确认 Phase 4 已执行、summary.json 已生成。
+EOF
+                        )
                     fi
 
                     if claude -p "$PROMPT" \
@@ -325,9 +356,37 @@ else
         SID=$(python3 -c 'import uuid;print(uuid.uuid4())')
 
         if [[ -f "$json_file" ]]; then
-            PROMPT="生成一个基于 Triton-Ascend 框架的算子，参考${file}和${json_file}。目标设备架构为${ARCH}，使用NPU=${NPU_ID}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。"
+            PROMPT=$(
+                cat <<EOF
+生成一个基于 Triton-Ascend 框架的算子，参考${file}和${json_file}。目标设备架构为${ARCH}，使用NPU=${NPU_ID}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。禁止使用plan模式。
+硬性执行约束：
+1. 严禁调用 AskUserQuestion/question 工具。
+2. 严禁请求用户确认。
+3. 严禁以问题结尾。
+4. 任意 skill、流程、阶段若进入“用户确认/Step 5”，必须视为用户已经确认，并立即继续后续步骤。
+5. 完成的唯一判定标准是：Phase 4 已执行，且工作目录下已生成含 opt_iterations>=1 的 summary.json。
+6. 在满足第 5 条之前，不得停止执行、不得结束回复、不得声明完成；严禁以时间/token 约束为由跳过 Phase 4。
+7. Phase 1 完成提取与冻结后，必须无等待、无确认地立即进入 Phase 2/3 代码生成。
+8. 必须将生成的算子代码文件输出至${TARGET_OP_DIR}/目录下。
+9. 最终回复必须包含已生成文件概览，并确认 Phase 4 已执行、summary.json 已生成。
+EOF
+            )
         else
-            PROMPT="生成一个基于 Triton-Ascend 框架的算子，参考${file}。目标设备架构为${ARCH}，使用NPU=${NPU_ID}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。"
+            PROMPT=$(
+                cat <<EOF
+生成一个基于 Triton-Ascend 框架的算子，参考${file}。目标设备架构为${ARCH}，使用NPU=${NPU_ID}，请将生成的代码文件输出至${TARGET_OP_DIR}/目录下。禁止使用plan模式。
+硬性执行约束：
+1. 严禁调用 AskUserQuestion/question 工具。
+2. 严禁请求用户确认。
+3. 严禁以问题结尾。
+4. 任意 skill、流程、阶段若进入“用户确认/Step 5”，必须视为用户已经确认，并立即继续后续步骤。
+5. 完成的唯一判定标准是：Phase 4 已执行，且工作目录下已生成含 opt_iterations>=1 的 summary.json。
+6. 在满足第 5 条之前，不得停止执行、不得结束回复、不得声明完成；严禁以时间/token 约束为由跳过 Phase 4。
+7. Phase 1 完成提取与冻结后，必须无等待、无确认地立即进入 Phase 2/3 代码生成。
+8. 必须将生成的算子代码文件输出至${TARGET_OP_DIR}/目录下。
+9. 最终回复必须包含已生成文件概览，并确认 Phase 4 已执行、summary.json 已生成。
+EOF
+            )
         fi
 
         if claude -p "$PROMPT" \
@@ -389,4 +448,24 @@ if [[ "$USE_PARALLEL" == true ]]; then
 fi
 echo "================================================================"
 
-
+# ── 生成 Excel 结果表 ──
+# 数据来源：优先各算子的 report.md，回退 summary.json + perf_result.json
+# 输出：与 batch_report.md 同级的 batch_report.xlsx（已存在时不覆盖，改为时间戳新文件）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GEN_EXCEL_PY="${SCRIPT_DIR}/gen_batch_excel.py"
+if [[ -f "$GEN_EXCEL_PY" ]]; then
+    echo "生成 Excel 结果表..."
+    if python3 "$GEN_EXCEL_PY" \
+        --output-dir "$OUTPUT_DIR" \
+        --benchmark-dir "$BENCHMARK_DIR" \
+        --level "$LEVEL" \
+        --arch "$ARCH" \
+        --target-speedup "$TARGET_SPEEDUP"; then
+        echo "Excel 结果表: ${OUTPUT_DIR}/batch_report*.xlsx"
+    else
+        echo "[WARN] Excel 结果表生成失败（不影响批跑结果）" >&2
+    fi
+else
+    echo "[WARN] 未找到 gen_batch_excel.py: ${GEN_EXCEL_PY}" >&2
+fi
+echo "================================================================"

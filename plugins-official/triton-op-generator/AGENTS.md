@@ -31,7 +31,7 @@ permission:
 - **framework**: `torch`
 - **dsl**: `triton_ascend`
 - **backend**: `ascend`
-- **target_speedup**: 目标几何平均加速比，读取自 `config.json` 的 `target_speedup` 字段。当前配置值为 `0.8`。
+- **target_speedup**: 目标几何平均加速比，运行时读取自 `config.json` 的 `target_speedup` 字段，以实际读取值为准，禁止在本文档写死数值。
 
 ---
 
@@ -185,7 +185,7 @@ python3 .claude/skills/triton-op-verifier/scripts/freeze_baseline.py \
 
 ## Phase 2: 算法设计
 
-本阶段按 `Step 1` → `Step 2`→ `Step 3` 顺序执行，**严禁跳过 Step 1 直接进入 Step 2**。
+本阶段按 `Step 1` → `Step 2` → `Step 3` 顺序执行，**严禁跳过 Step 1 直接进入 Step 2**。
 
 ### Step 1：前置检查（先执行，产出 precheck.json）
 
@@ -237,6 +237,7 @@ conductor_suggestion = ""
 while iteration < max_iterations:
     3.1 代码生成
     3.2 AST 预检查
+    3.2b 架构符合性判定（强制）
     3.3 功能验证
     3.4 Conductor 分析与决策
     3.5 性能测试（基线）
@@ -275,7 +276,34 @@ while iteration < max_iterations:
   - 设置 `verifier_error = "A-PyTorchFallback-Type{N}: ..."`
   - → 跳到 **3.4 Conductor**
 - **通过** (`exit code == 0`):
-  - → 继续 **3.3 功能验证**
+  - → 继续 **3.2b 架构符合性判定**
+
+---
+
+### 3.2b 架构符合性判定（强制）
+
+**执行者**：当前会话自身核对（非 Skill 调用，无需 NPU 运行时）。
+
+**输入**：`{工作目录}/sketch.txt` + `{工作目录}/output/iter_{iteration}/generated_code.py`
+
+**逐条核对**（读 `sketch.txt` 中明确列出的架构要素）：
+
+1. **kernel 完整性**：sketch 列出的每个 `@triton.jit` kernel（参见 sketch 的「Kernel 列表」章节），在 `generated_code.py` 中是否都有同名定义，且 `ModelNew.forward()` 中是否都通过 `kernel[grid](...)` 调用。
+2. **路径完整性**：sketch 若设计了多路径 host 门控分派（如优先级路径），`forward()` 中是否实现了同等数量的门控分支，且每条分支接入对应 kernel。
+3. **禁用项**：代码是否未出现 sketch「注意事项」中明确禁止的模式（如退化到 im2col+GEMM、运行时 if 包绕 tl.dot、单 kernel 展平等已知劣化架构）。
+
+**判定**：
+
+- **全部符合** → 进入 **3.3 功能验证**。
+- **任一不符**（kernel 缺失 / 路径缺失 / 出现禁用模式）→ 视为 **A 类「未遵循草图」错误**：
+  - 设置 `verifier_error = "A-SketchDeviation: <缺失的 kernel/路径清单 或 触发的禁用模式>"`
+  - 删除 `{工作目录}/output/generated_code.py`（如存在）
+  - 将不符项汇总为 `conductor_suggestion`，要求按 sketch 补齐架构而非调参
+  - → 跳到 **3.4 Conductor**，**禁止对架构不符的代码进入 3.3 精度验证**
+
+**连续上限**：`A-SketchDeviation` 连续 ≥ 3 次 → **C 类终止**，说明 sketch 设计超出当前代码生成能力，回退 Phase 2 简化草图后重跑。
+
+⚠️ **不享受「正确性优先豁免」**：即使代码精度更高或性能更优，只要架构未遵循 sketch，仍按 A 类处理——3.2b 在 3.3 之前执行，架构不符的代码根本不会进入精度验证。
 
 ---
 
@@ -324,6 +352,8 @@ while iteration < max_iterations:
 
 **执行者**：当前会话自身推理（非 Skill 调用）
 
+#### 步骤 1：错误分类（基于 verifier_error）
+
 **错误分类**：
 
 - **A 类**：代码逻辑/算法错误（可修复）
@@ -336,11 +366,11 @@ while iteration < max_iterations:
 - **B 类** → 终止，任务失败
 - **C 类** → 终止，任务失败
 - **A 类 且 `iteration < max_iterations`**:
-  - 生成 `conductor_suggestion`
+  - 生成 `conductor_suggestion`（包含错误分析 + 修复方向）
   - `history_attempts.append(本轮记录)`
   - 保存日志到 `iter_{iteration}/log.md`
   - `iteration++`
-  - → 回到 **3.1 代码生成**
+  - → 回到 **3.1 代码生成**（coding 会在模式 3/4 中自行调用 compile_error/precision_debug 检索）
 
 ---
 
@@ -431,6 +461,7 @@ while iteration < max_iterations:
 | Kernel 参数错误  | BLOCK_SIZE 不合理、grid 配置错误             |
 | DSL API 使用错误 | Triton API 参数错误、不支持的操作            |
 | 退化成 PyTorch   | 无 @triton.jit kernel，直接调用 PyTorch 算子 |
+| 未遵循草图       | 缺失 sketch 指定的 kernel/路径、门控分派不符、出现 sketch 禁止的架构模式（由 3.2b 产出 `A-SketchDeviation`） |
 
 ### B 类错误详细分类
 
@@ -472,7 +503,7 @@ improvement_made = false
 target_reached = false # 是否达到目标加速比
 
 # IR 多轮迭代相关变量
-# 优化点 29（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-28）单轮即过。
+# 优化点 31（IR 分析）允许跨多个 Phase 4 轮次重复命中；其他优化点（1-30）单轮即过。
 # ir_max_iterations 与 max_opt_iterations 独立计数，互不扣减。
 ir_iteration = 0
 ir_max_iterations = 20                              # IR 专属迭代上限
@@ -481,7 +512,7 @@ ir_has_more_suggestions = true                      # latency-optimizer 返回�
 current_iter_dir = ""                               # 本轮产物目录（普通轮 opt_iter_{n} / IR 轮 opt_iter_{n}_ir_{k} / simulator 轮 opt_iter_{n}）
 
 # simulator 采集驱动相关变量
-# latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）且仍未达 target 时，转入 simulator 采集优化。
+# latency-optimizer 优化耗尽（普通点 1-30 + IR 点 31 均耗尽）且仍未达 target 时，转入 simulator 采集优化。
 simulator_attempted = false                         # triton-simulator-optimizer 是否已被调用（4.6 退出前置门检查项）
 
 ```
@@ -548,9 +579,9 @@ while opt_iteration < max_opt_iterations:
 
 **分支**：
 
-> latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 30 时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
+> latency-optimizer 的返回信息中**必须包含字段 `ir_has_more_suggestions: bool`**（IR 分析器是否还能给出新优化建议，仅当本轮命中点为 32（IR 分析）时有意义，其他轮次置 `false`）。Phase 4 据此判断是否继续 IR 多轮迭代。
 
-- **存在普通优化点（1-28）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
+- **存在普通优化点（1-30）命中** → 走原流程重写代码，本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}`，`last_optimization_point = <命中点编号>`
 - **triton-latency-optimizer 报告无更多普通优化点**：
   - 若以下任一条件满足，**不终止**，要求 latency-optimizer 继续尝试对应优化点（这些仍属普通轮）：
     - `total_cases > 1` 且 `speedup_vs_torch < 0.5`：强制尝试 kernel 分裂（优化点 17）
@@ -559,8 +590,8 @@ while opt_iteration < max_opt_iterations:
       （见 `triton-latency-optimizer/references/Index.md` 的"算子类别与高频优化点"表）
   - **IR 多轮迭代分支**（普通优化点耗尽时）：
     - 若 `ir_has_more_suggestions == true` 且 `ir_iteration < ir_max_iterations`：
-      - **不终止**，强制走 IR 子流程（优化点 29），重新提取 `last_pass.mlir` 并分析
-      - `ir_iteration++`，`last_optimization_point = 29`
+      - **不终止**，强制走 IR 子流程（优化点 31），重新提取 `last_pass.mlir` 并分析
+      - `ir_iteration++`，`last_optimization_point = 31`
       - 本轮产物目录 `current_iter_dir = opt_iter_{opt_iteration}_ir_{ir_iteration}`（避免与普通轮目录冲突）
     - 否则（`ir_has_more_suggestions == false` 或 `ir_iteration >= ir_max_iterations`，即 latency-optimizer 优化已耗尽）：
       - 若 `optimized_speedup >= target_speedup`（target_reached）→ 可进入 **4.6 终局判定**
@@ -739,7 +770,7 @@ while opt_iteration < max_opt_iterations:
 
   满足该前提后，4.6 仅在以下任一条件满足时可进入：
   - (a) `opt_iteration >= max_opt_iterations`（全局兜底）；**或**
-  - (b) latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）**且** 满足以下之一：
+  - (b) latency-optimizer 优化耗尽（普通点 1-30 + IR 点 31 均耗尽）**且** 满足以下之一：
     - `target_reached == true`（`optimized_speedup >= target_speedup`）；**或**
     - `simulator_attempted == true` 且 `triton-simulator-optimizer` 已确认无更多 simulator 采集驱动改进
       （`MMAD` 实测 > 50% 且增大 tile / bf16 化均不可行）。
@@ -1078,7 +1109,7 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 | 工作目录基线冻结   | Phase 1 末尾必须调 `freeze_baseline.py` 落锚。锚文件 `{工作目录}/output/.baseline_anchor.json` 写入后，`{工作目录}/{op_name}.py` 禁止再被 Edit/Write。verify/benchmark 启动时校验 sha256，不匹配 exit 4 (C 类终止)                          |
 | GPU Kernel 模式    | `.pt` 必须与 `.py` 同名同目录；`gpu_perf.csv` 向上查找最多 3 级                                                                                                                                                                          |
 | Phase 3 最大迭代   | 5 次，禁止超出                                                                                                                                                                                                                           |
-| Phase 4 迭代策略   | max_opt_iterations = 50（上限），达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-28 + IR 点 29 均耗尽）则退出指令级循环                                                                                         |
+| Phase 4 迭代策略   | max_opt_iterations = triton-latency-optimizer 优化点个数 + 1，达到上限后，或者直到 latency-optimizer 优化耗尽（普通点 1-30 + IR 点 31 均耗尽）则退出指令级循环                                                                                         |
 | Phase 4 成功底线   | 性能不劣化（speedup_vs_baseline ≥ 1.0）                                                                                                                                                                                                  |
 | Phase 4 退出判定   | 有效果（speedup_vs_baseline ≥ 1.0）则成功；做完所有尝试后无效果则失败；latency-optimizer 耗尽且未达 target 时必须先走 simulator 采集分支（`simulator_attempted=true`）方可进 4.6，`optimized_speedup < target` 且 `simulator_attempted == false` 时禁止退出 |
 | Phase 4 基线复用   | 4.2/4.3 的基线侧 verify*result_baseline.json 和 baseline_perf_result.json 必须从 Phase 3 iter*{phase3_last_iter} 复制，禁止对基线代码重跑 verify.py 或 benchmark.py（基线代码与 Phase 3 generated_code.py 完全一致，重复执行只浪费时间） |
@@ -1088,6 +1119,7 @@ L1 闸门由 benchmark.py 在 Phase 3.5 / 4.3 启动时执行，不通过即 **e
 | 验证方式           | 必须调用 triton-op-verifier skill 的脚本，禁止自创测试                                                                                                                                                                                   |
 | 时间戳/随机数      | 必须通过 bash 获取，禁止 LLM 模拟                                                                                                                                                                                                        |
 | 性能数据真实性     | **严禁编造、估算、模拟 benchmark 性能数据**。所有性能数据必须从 benchmark.py 实际输出的 perf_result.json 文件中读取，任何未经验证的数值不得写入 summary.json / report.md                                                                 |
+| 语言 | 思考、分析、日志使用中文；代码、路径使用英文 |
 | Benchmark 超时降级 | benchmark.py 超时或被 kill 时，**必须**自动降低 --repeats 值重试（50 → 20 → 10 → 5），不可不经参数调整直接重试。所有降级值均超时则标记 B 类错误，任务失败                                                                                |
 
 ---

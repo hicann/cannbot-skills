@@ -1,6 +1,6 @@
 ---
 name: index-computation
-description: 索引计算类算子（Index / IndexPut / Gather / Scatter / EmbeddingDenseBackward / Sort）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
+description: 索引计算类算子（Index / IndexPut / Gather / Scatter / EmbeddingDenseBackward / Sort / TopK / LightningIndexer）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
 metadata:
   type: reference
 ---
@@ -12,7 +12,7 @@ metadata:
 - **§2 Index / Gather**（index-read，按索引读取）
 - **§3 IndexPut / Scatter**（index-write，按索引写入/累加）
 - **§4 EmbeddingDenseBackward**（index-accumulate，按索引累加）
-- **§5 Sort / TopK**（index-sort，排序/选择）
+- **§5 Sort / TopK / 选位**（index-sort / topk-select，排序/选择/top-K 选位；含 LightningIndexer）
 - **§6 常见陷阱**（按算子分小节）
 - **§7 参考算子列表**
 
@@ -26,6 +26,7 @@ metadata:
 | IndexPut / Scatter | `index-write` | 根据索引向输出写入或原子累加，存在写冲突风险 | 并行轴与连续访问对齐 + 向量 `tl.atomic_add` + 冲突处理 |
 | EmbeddingDenseBackward | `index-accumulate` | 按索引将梯度累加到 embedding 权重，尾维度宽且重复索引多 | 三阶段 kernel + 连续维向量 atomic + fp32 中间累加 |
 | Sort / TopK | `index-sort` | 基于比较重排并返回索引 | 排序网络/分桶 + 向量比较原语 + 注意索引 dtype 对齐 |
+| LightningIndexer | `topk-select` | 轻打分（score = Σ w·ReLU(q·k)）+ 重 top-K 选位 + gather 有序索引/值；select 成本 ≥ 打分成本 | 选位结构优先（sort-compaction 替代逐元素前缀和）+ `npu_sort_v2` 双角色 + score 链融合 |
 
 > ⚠️ **关键区分**：本类别的核心优化哲学是 **按维度特化分派 + 向量化读写/原子**。Gather/Index 读取类走 **UB 预载 + `tl.gather`**，Scatter/IndexPut/EmbeddingDenseBackward 写入累加类走 **连续维向量 `tl.atomic_add`**，Sort/TopK 排序选择类走 **排序网络/分桶**。生成时**禁止混用**其他类别经验（如不要在 Scatter 里套用 Gather 的 UB preload 技巧）。
 
@@ -505,15 +506,17 @@ def padding_zero_kernel(out_ptr, padding_idx, D, BLOCK_D: tl.constexpr):
 
 ---
 
-## §5 Sort / TopK 算子（index-sort）
+## §5 Sort / TopK / 选位算子（index-sort / topk-select）
 
-**算子类别**: `index-sort`（基于比较重排并返回索引；`sort` / `topk` / `argsort`）
-**典型特征**: 比较-选择模式，与 Gather/Scatter 的索引映射模式差异较大；需注意输出索引 `int64` 与数据类型的对齐
-**性能基准**: Level1 索引计算类算子中 8_Sort 当前 memory 目录无专项文档，建议走 sort-topk 专项模板
+**算子类别**: `index-sort`（基于比较重排并返回索引；`sort` / `topk` / `argsort`）＋ `topk-select`（轻打分 + 重 top-K 选位 + gather 有序索引/值；LightningIndexer）
+**典型特征**: 比较-选择模式，与 Gather/Scatter 的索引映射模式差异较大；需注意输出索引 `int64` 与数据类型的对齐；topk-select 形态含 score 打分（GEMM/点积）→ 选位（top-K）→ 索引输出，select 成本常 ≥ 打分成本
+**性能基准**: Level1 索引计算类算子中 8_Sort 当前 memory 目录无专项文档，建议走 sort-topk 专项模板；LightningIndexer 54/54 pass，几何平均 **3.9558x** vs torch（§5.5）
 
 ### §5.0 首次生成必读：为什么必须把主要框架写对
 
 Sort / TopK 是**比较-选择**模式，与 Gather/Scatter 的索引映射模式差异较大。问题规模差异大：小 `K` 可用 bitonic/odd-even 排序网络，大 `K` 需 reduce-split 或分桶 + 局部排序。**首次生成如果把框架写偏（例如大 K 用全排序网络、未注意 int64 索引对齐），性能和精度都很难救回**。
+
+> ⚠️ **topk-select 形态（LightningIndexer 类）首次生成必读**：主墙是 **top-K 选位**（torch 参考的 CPU sort 占 ~97%），不是打分。**首次生成就要用 sort-compaction 结构（§5.5 L1.1）**，不要先写一个能跑的 `tl.cumsum` 前缀链再指望 Phase 4 优化——串行 cumsum 在 S2=32768 实测 ~10ms（aiv_scalar=0.999），**参数扫描救不了标量链，只能换结构**（§5.4 S1）。
 
 ### §5.1 Layer 1: 设计约束（Agent 必须遵守，首次生成就要全部满足）
 
@@ -550,6 +553,139 @@ Sort / TopK 是**比较-选择**模式，与 Gather/Scatter 的索引映射模�
 1. Sort/TopK 与 Gather/Scatter 的索引映射模式差异较大，不要套用 Gather/Scatter 经验。
 2. 大 K 时不要使用全排序网络。
 3. 注意输出索引 `int64` 与数据类型的对齐。
+
+---
+
+### §5.4 选位家族通用经验（迁移自 cv-fusion.md §1 CV10/CV11/CV12）
+
+以下三条是检索/select 类（`topk-select`）**跨算子通用**经验，适用于所有"打分 → 选位 → 索引"形态的算子（LightningIndexer / MoeGatingTopKSoftmax / 各类 topk）。
+
+#### S1 ★ `tl.cumsum` 在 Ascend 上标量化（aiv_scalar≈0.99），select/前缀定位必须绕开
+
+- **必须**凡出现"选 K 位之前的计数→定位"（`tl.cumsum` 前缀链）且 profiling `aiv_scalar_ratio≈0.99`，立即**换结构**：排序压缩（§5.5 L1.1）或矩阵乘前缀和；**不要扫参，参数救不了标量链**。
+- **禁止**用 `torch.cumsum` host 前缀表（validator AST 白名单禁）。
+- **Why（实测）**：LightningIndexer 串行 chunk-scan + `tl.cumsum` 前缀在 S2=32768 时 **10.1ms**（aiv_scalar=0.999）；并行 scatter + 两次 int32 cumsum 仍 **4.2ms**（int32 走 vector 但跨 chunk 前缀仍串行，aiv_scalar=0.997）；改 sort-compaction 后 **0.112ms**——**同一 select 问题，结构选择差 90x+**。
+- **判别信号**：代码里 `tl.cumsum` 用于选位 / 紧凑化 ⇒ 预检直接标红，换结构而不是调 BLOCK。
+
+#### S2 ★ `npu_sort_v2` 走 NPU 侧，是 `aclnnSort`（AiCpu）的 40x+ 替代，且可复用双角色
+
+- **必须**需要"第 K 大的值" / "前 K 有序"时优先 `torch_npu.npu_sort_v2`（合法 `torch_npu.*` 命名空间，validator 放行），**喂 2D `[rows, N]` view**（1D 布局不可靠，踩坑）。
+- **必须**复用同一个 sort 调两用：① 升序取 `tau=sorted[N-K]` 当阈值 oracle（省全量 top-k）；② 对 masked 数组升序压缩（把"选中的 rank 位 + 未选中 LARGE2"紧凑到前 K 位）——**排序同时完成"选 K + 排序 + 去重"**。
+- **禁止**用 `torch.topk`（validator 禁，且是唯一已知快路径 ~17µs 但不可用）；**禁止** 纯 Triton 排序网络做 top-k（tl.sort 编译崩 / gather-bitonic ~1ms 地板）。
+- **Why**：torch 参考的 `aclnnSort_SortAiCpu_Sort` 单次 **1466µs**（CPU sort）是参考主墙；实现侧 `npu_sort_v2` 两次仅 **38µs**——结构差 40x。
+
+#### S3 ★ 检索/select 类算子：主墙在 select 不在打分；天花板估算先归零"可消除结构"
+
+- **必须**先做 profiling `operators` 分解，确定打分 vs select 各自占比，再定优化方向——本类打分核常已 cube-bound 很轻，**select 才是墙**（LightningIndexer：打分 38µs 占 impl 22%，select 相关两次 sort 38µs + build_masked 68µs 占 61%）。
+- **必须**天花板估算把**可消除的算法结构**（串行前缀和 / 逐元素定位）**先归零再算**——R1 曾推算 select ~1ms 上限，被 sort-compaction 证伪（select 侧几乎免费，只剩 sort 是真墙）。
+- **禁止**用打分核的优化套路（tile 放大、流水）去攻 select——select 是**结构问题**，不是参数问题。
+
+---
+
+### §5.5 LightningIndexer 算子（`topk-select`，检索/select 融合：轻打分 + 重 top-K 选位 + gather 有序索引/值）
+
+> 📌 本节迁移自 `cv-fusion.md §4`。op5 的运算形态是「score 打分 + top-K 选位 + 索引输出」，属索引计算家族的 `index-sort` / `topk-select`，故归位于本文件 §5。原 `cv-fusion.md §4` 已留指针。
+
+**算子类别**: `topk-select`（轻打分 GEMM + 重 top-K 选位 + gather 有序索引/值）
+**典型特征**: `q` bf16/fp16 `[B,S1,N1,D]` @ `k` `[B,S2,D]` + relu + `w` `[B,S1,N1]` head-sum → `score[B,S1,S2]`；`sparse_mode=3`（`j ≤ i + (as2-as1)`），`sparse_count=K=min(2048,S2)` **升序** top-K；输出 `out_idx[b,i,1,K]` int32 + `out_val` bf16（可选）
+**性能基准**: 54/54 verify pass，几何平均 **3.9558x** vs torch（相对 baseline **12.02x**，target 5x 达成）；历史审计 0.1603x → R1 0.3178x → **R2 3.9558x**
+
+#### L1.1 ★★★ top-K 选位禁用逐元素前缀和，用 sort-compaction（本算子最大的一笔，首次生成就要写对）
+
+- **必须**把"选 K 个并升序"变成 4 步：**count kernel**（`grid=(rows,nchunks)` 每 chunk 并行 gt/eq 计数）→ **build_masked**（score>tau 写全局 rank 位、score==tau 按 chunk 前缀补位、未选中写 LARGE2=2^21）→ **第二次 `npu_sort_v2` 升序压缩**（前 K 个即升序 top-K 索引）→ **finalize**（清无效行 + value 位提取）。
+- **禁止** `tl.cumsum` 前缀定位（AIV scalar 链，10.1ms）；**禁止** 并行 scatter + int32 cumsum（仍标量，4.2ms）；**禁止** `torch.cumsum` host 前缀表（validator 禁）。
+- **Why（实测）**：route-1 串行 chunk-scan 10.1ms（S2=32768，aiv_scalar=0.999）；route-3 并行 scatter + 两次 int32 cumsum 4.2ms（aiv_scalar=0.997）；sort-compaction **0.112ms**——**同一 select 三个方案差 90x**。排序同时完成"选 K + 排序 + 去重"，`aiv_scalar` 回到正常。
+- **LARGE2 取值**：必须大于 score 可达的 rank 上界（实测 `1<<21` 安全），未选中填 LARGE2 后升序压缩自然把选中项排到前 K；build_masked 的 rank 编码决定 tie-breaking 语义，必须与参考的 eq 前缀补位一致（见 L3.1）。
+
+#### L1.2 `npu_sort_v2` 必须喂 2D `[rows, S2]` view（见 §5.4 S2）
+
+- **必须** `score_buf.view(rows, S2)` 再调 `npu_sort_v2`；**禁止** 1D 布局（行为不确定）。
+- **必须**复用两次：K2 升序取 `tau = sorted[:, S2-K]`（阈值 oracle，省全量 top-k）；K3c 对 masked 升序压缩（选位 + 排序合并）。两次共 38µs，是 select 变快路径的代价而非墙。
+
+#### L1.3 score 打分链融合成单 kernel（轻但必要的地基）
+
+- **必须** `qk = tl.dot(q, tl.trans(kt))`（bf16/fp32-acc）+ `s = tl.sum(tl.maximum(qk, 0.0) * w[:, None], axis=0)` + `tl.where(valid, s, -inf)` **一核完成**（dot + relu + w head-sum + mask 全融合）。
+- **禁止**拆多 kernel / 逐 token 标量点积（融合是 0.2262 → 0.3178 的基础）。
+- `BLOCK_J=256`：**1024 编译失败**（UB hivm-plan-memory）——tile 上限先探再定（§1 G11）。`num_stages=2` 让 S2 分块的 MTE2 预取与 cube 重叠。
+
+#### L1.4 sparse_mode=3 mask 语义
+
+- `j <= i + (as2-as1)` 的 OOB 列注入 `-inf`；54/54 验证此语义（**别按完整三角写**）。
+
+#### L1.5 bf16 value 输出走 RNE 位模拟
+
+- `out_val` 用 `(vb + 32767 + lsb) & -65536`（bf16 round-to-nearest-even 位运算）与 CANN 参考对齐；`return_value=True` 时另出 `out_val`，否则只出 `out_idx`。
+
+#### L1.6 validator 白名单与命名空间
+
+- **禁止** `torch.cumsum` / `torch.topk` / `torch.cat` / `self.xxx`（AST 白名单禁）；`torch_npu.npu_sort_v2` 属合法 `torch_npu.*` 命名空间放行。
+- forward 内零 PyTorch 计算算子（仅 `empty`/`zeros`/`view` + kernel 发射 + `npu_sort_v2`）；host 侧无循环、无前缀表（count 并行算出）。
+
+#### L1.7 count kernel 并行度
+
+- **必须** `grid=(rows, nchunks)` 并行每 chunk 的 gt/eq 计数，**禁止** host 前缀表；rows×nchunks 超过核数时核内步长（§1 G11）。
+
+#### L2.1 Host 侧发射流程（K1 → K2 → K3a → K3b → K3c → K4）
+
+```python
+def forward(self, q, k, w, topk_val, sparse_count, sparse_mode, return_value, as1, as2):
+    B, S1, N1, D = q.shape; S2 = k.shape[1]
+    rows = B * S1; K = sparse_count
+    score_buf = torch.empty((B, S1, S2), dtype=torch.float32)     # 或 fp32 buffer
+    lightning_score_kernel[(rows,)](q, k, w, score_buf, ...,
+                                    BLOCK_J=256, num_stages=2, ...)          # K1 打分链（L1.3）
+    sorted_vals, _ = torch_npu.npu_sort_v2(score_buf.view(rows, S2))         # K2 阈值 oracle（2D view 必须）
+    tau = sorted_vals[:, S2 - K]                                             # 第 K 大
+    gt_cnt = torch.zeros((rows, NCHUNK), dtype=torch.int32)
+    eq_cnt = torch.zeros((rows, NCHUNK), dtype=torch.int32)
+    lightning_count_kernel[(rows, NCHUNK)](score_buf, tau, gt_cnt, eq_cnt, ...)   # K3a 并行 count（L1.7）
+    masked = torch.full((rows, S2), LARGE2, dtype=torch.int32)
+    lightning_build_masked_kernel[(rows,)](score_buf, gt_cnt, eq_cnt, tau, masked, ...)  # K3b rank 位 + LARGE2
+    sorted_masked, _ = torch_npu.npu_sort_v2(masked)                        # K3c 压缩排序（升序）
+    idx = sorted_masked[:, :K]                                              # 前 K 列 = 升序 top-K 索引
+    out_idx = torch.empty((B, S1, 1, K), dtype=torch.int32)
+    out_val = torch.empty((B, S1, 1, K), dtype=torch.bfloat16)
+    lightning_finalize_kernel[(rows,)](idx, score_buf, out_idx, out_val, ...)  # K4 清无效行 + value 提取
+    return out_idx, out_val
+```
+
+#### L2.2 K3b build_masked 骨架（次墙，首次生成就要写对）
+
+```python
+@triton.jit
+def lightning_build_masked_kernel(score_ptr, gt_cnt_ptr, eq_cnt_ptr, tau_ptr, masked_ptr,
+                                  S2, NCHUNK, BLOCK_J: tl.constexpr, ...):
+    pid = tl.program_id(0)                     # 每行一个 program
+    offs_j = tl.arange(0, BLOCK_J)
+    # 跨 chunk 的 gt/eq 前缀来自 K3a 的并行 count（无 host 前缀表）
+    # 选中（score > tau）：rank = 全行 gt 前缀 + chunk 内 gt 排名 → 写 rank 位
+    # 选中（score == tau）：rank = gt 前缀 + eq 前缀（chunk 间按序补位）
+    # 未选中：写 LARGE2（升序压缩后自动沉到尾部）
+```
+
+#### L3.1 sort-compaction 为什么能绕开 cumsum（本算子核心机理）
+
+把"选中的 j 的 rank 位" + "未选中填超大数"写成 masked 数组，**第二次升序排序后前 K 个天然就是升序 top-K 索引**——排序同时完成"选 K + 排序 + 去重"，不再需要逐元素前缀和。与"并行 cumsum"（route-3）的本质差异：cumsum 的**跨 chunk 前缀仍是串行标量**，排序是库级并行。这是"选位结构选择"比任何参数优化都值钱的最硬证据。
+
+#### L3.2 排序压缩 vs 并行 cumsum 的 37 倍实测对比
+
+route-2（sort-compaction）**0.112ms** vs route-3（并行 chunk-scatter + 两次 int32 cumsum）**4.2ms**——**同样绕过串行的两个方案差 37 倍**，区别只在 route-3 的 cumsum 仍是标量。
+
+#### L3.3 打分核与 select 的"双 sort"复用
+
+同一个 `npu_sort_v2` 调两次（阈值 oracle 22µs + 压缩 16µs）共 38µs，占 impl 22%——与参考的 CPU sort 1466µs 形成 40x 差距。**别想省第二次 sort**：它是把 select 从性能墙变快路径的代价。
+
+#### L3.4 剩余墙（留给后续优化）
+
+build_masked **68µs 占 impl 39%**（vector-bound 写入）是次墙；大 S2（16384/32768）tail 0.3–1.8ms 受第二次 sort 随 S2 线性增长拖累。若继续，可尝试 build_masked 位处理向量化、或对 S2 分块做 split-sort。
+
+#### L4.1 性能演进
+
+| 版本 | cases | geomean | 说明 |
+|------|-------|---------|------|
+| 历史审计（0811/5 镜像） | 54/54 | 0.1603x | 纯 Triton bitonic-topk（topk kernel ~3814µs 是墙） |
+| R1（fusion-search route-2） | 54/54 | 0.3178x | `npu_sort_v2` 阈值 oracle + score 链融合 |
+| **R2（sort-compaction 冠军）** | **54/54** | **3.9558x** | **sort-compaction select 消除串行 cumsum，impl 1.348ms → 0.1122ms（12.4x）** |
 
 ---
 
@@ -594,3 +730,14 @@ Sort / TopK 是**比较-选择**模式，与 Gather/Scatter 的索引映射模�
 | GPU 源通过 stride 交换实现 transpose | `ptr + col * stride[1] + row * stride[0]` | 使用 `order=(...)` 或显式 host 侧 `permute().contiguous()`（§1 G8） |
 | `int64` 索引未降级为 `int32` | 用 `int64` 做下标或保留 `torch.int64` 进 kernel | Vector 路径前 `.to(tl.int32)`；扁平偏移按需用 `int64`（§1 G4） |
 | 1D grid 超过 65535 | `grid = (total_blocks,)` | 使用 2D grid 或增大 BLOCK（§1 G11） |
+
+### §6.5 LightningIndexer / topk-select 陷阱
+
+| 陷阱 | 原因 | 避免方法 |
+|------|------|---------|
+| top-K 选位用 `tl.cumsum` 前缀链（S2 大时） | 标量链（aiv_scalar=0.999），参数扫描救不了 | §5.4 S1 + §5.5 L1.1：sort-compaction 结构 |
+| `npu_sort_v2` 喂 1D 布局 | 行为不确定，结果错 | §5.5 L1.2：2D `[rows,S2]` view |
+| 用 `torch.topk` / `torch.cumsum` 加速 select | validator AST 禁用 | 用 `npu_sort_v2` + count/build_masked 并行（§5.5 L1.1/L1.7） |
+| 打分核调参（tile/流水）攻 select 墙 | select 是结构问题不是参数问题 | §5.4 S3 + §5.5 L1.1：先归零"可消除结构" |
+| 大 K 用全排序网络 | 复杂度随 K 增长过快 | 按 K 规模选策略（§5.2 L1.1）；topk-select 用 sort-compaction |
+| 忽略输出索引 dtype 对齐 | 索引 dtype 不匹配导致下游错误 | int64 索引对齐 + `.to(tl.int32)`（§5.2 L1.2 / §1 G4） |
