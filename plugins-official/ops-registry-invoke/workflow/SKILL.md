@@ -99,8 +99,8 @@ graph TB
     A1[1.1 开发准备] --> A2[1.2 需求分析]
     A2 --> CP1{⛔ CP1<br/>用户确认}
     CP1 -->|通过| AS[1.2.5 spec 生成<br/>scene: spec-generation]
-    AS -.->|9-stage FAIL<br/>最多重试 2 次| AS
-    AS -->|9-stage PASS| ASR[1.2.5R spec 评审<br/>🟢 spec-reviewer<br/>13 条 SPEC-* 条款]
+    AS -.->|11-stage FAIL<br/>最多重试 2 次| AS
+    AS -->|11-stage PASS| ASR[1.2.5R spec 评审<br/>🟢 spec-reviewer<br/>17 条 SPEC-* 条款]
     ASR -.->|状态=❌<br/>最多重试 2 次| AS
     ASR -->|状态=✅ + 摘要| CP15{⛔ CP1.5<br/>人工 review<br/>评审摘要 + 语义判断}
     CP15 -->|modify| AS
@@ -132,9 +132,9 @@ graph TB
 1. **1.1 开发准备**：创建开发日志，记录需求
 2. **1.2 需求分析**：生成需求分析文档
 3. **⛔ CP1 用户确认**：需求分析摘要确认
-4. **1.2.5 spec 生成**（机器自动 9-stage 校验，FAIL 自动重试 ≤ 2 次）：由 `ascendc-ops-architect` (scene: spec-generation) 生成 `spec.yaml` 并跑 9-stage 校验
-5. **1.2.5R spec 评审**（必经、自动、不触达用户）：由 `ascendc-ops-spec-reviewer` 跑 **13 条 SPEC-\* 条款级评审**——逐项对照 spec ↔ REQUIREMENTS 中**机器可判**的项（芯片 / dtype / 接口 / 错误码 / 性能 / 资源 等），输出 `operators/{operator_name}/tmp/checks/SPEC_REVIEW.md` + 用户对照摘要；状态=❌ 自动回 1.2.5 修订并重跑，最多重试 2 次。详见 [1.2.5R spec 评审](#125r-spec-评审) 章节
-6. **⛔ CP1.5 用户确认**：人工审核 1.2.5R 输出的对照摘要——9-stage 只保证机器自洽、SPEC-\* 条款只覆盖机器可判项，**公式数学意图 / tolerance 数值合理性 / boundary case 业务覆盖性必须由人判断**。三种响应：`yes` 进入 1.3a；`modify` 触发 1.2.5 修订；`abort` 退回 1.2
+4. **1.2.5 spec 生成**（机器自动 11-stage 校验，FAIL 自动重试 ≤ 2 次）：由 `ascendc-ops-architect` (scene: spec-generation) 生成 `spec.yaml` 并跑 11-stage 校验
+5. **1.2.5R spec 评审**（必经、自动、不触达用户）：由 `ascendc-ops-spec-reviewer` 跑 **17 条 SPEC-\* 条款级评审**——逐项对照 spec ↔ REQUIREMENTS 中**机器可判**的项（芯片 / dtype / 接口 / 错误码 / 性能 / 资源 等），输出 `operators/{operator_name}/tmp/checks/SPEC_REVIEW.md` + 用户对照摘要；状态=❌ 自动回 1.2.5 修订并重跑，最多重试 2 次。详见 [1.2.5R spec 评审](#125r-spec-评审) 章节
+6. **⛔ CP1.5 用户确认**：人工审核 1.2.5R 输出的对照摘要——11-stage 只保证机器自洽、SPEC-\* 条款只覆盖机器可判项，**公式数学意图 / tolerance 数值合理性 / boundary case 业务覆盖性必须由人判断**。三种响应：`yes` 进入 1.3a；`modify` 触发 1.2.5 修订；`abort` 退回 1.2
 7. **1.3 方案设计**：以 spec.yaml 作为 dtype/shape/invariant 真值源。1.3 由主 Agent 编排四步：1.3a 设计准备（designer 产出 DESIGN_PREP.md）→ 1.3b 分段切片（主 Agent 脚本）→ 1.3c 并行分段生成（5× `ascendc-ops-designer` (scene: generate-section-*) 同响应发起）→ 1.3d 组装+校验（主 Agent 脚本）。1.3R 方案评审通过后进入 1.4
 8. **⛔ 1.3R 方案评审**（必经、自动、不触达用户）：由 `ascendc-ops-design-reviewer` (scene: design-review) 对 DESIGN.md 做条款级评审，输出 `operators/{operator_name}/tmp/checks/DESIGN_REVIEW.md`（状态=✅通过/❌失败）。状态=❌ 时由主 Agent 按 [1.3R「失败处理」](#13r-方案评审) 编排修复重跑（spec-owned 字段冲突直接终止上报，其余阻塞性缺陷分路修复后重评审，最多重试 2 次）；建议性问题（⚠）记录但不阻塞。状态=✅ 后进入 1.4
 9. **1.4 测试设计**：1.3R 方案评审 ✅ 后执行，以 spec.yaml 为真值源。调用 `ascendc-ops-tester` 产出 TEST.md 及测试用例
@@ -142,14 +142,14 @@ graph TB
 11. **⛔ CP2 用户确认**：仅当 1.3R 状态=✅ 且 1.4R 状态=✅ 时才触发
 
 **⚠️ 强制要求**：
-- 1.2.5 必须在 CP1 通过后立即触发，9-stage 全 PASS（stage 9 SKIP 视为通过）后才能进入 1.2.5R
+- 1.2.5 必须在 CP1 通过后立即触发，11-stage 全 PASS（stage 9 SKIP 视为通过）后才能进入 1.2.5R
 - **1.2.5R 必经，状态=✅ 后才能触发 CP1.5**——独立评审先把机器可判错误拦下来
 - **CP1.5 必须人工确认**——独立评审无法判断的语义层（公式意图 / tolerance 合理性 / boundary 业务覆盖）必须由人 review
 - 1.3c 的 5 个分段子任务必须在同一次响应中同时发起；1.3R 方案评审 ✅ 通过后 → 执行 1.4 测试设计；1.4 完成后必须先跑 1.4R 测试设计评审；1.3R 和 1.4R 均通过后才能触发 CP2
 
 **⚠️ 顺序任务日志更新**：1.3 和 1.4 顺序执行，各自完成后独立更新 LOG.md（更新状态表格 + 交付物清单 + 开发记录区追加 2-3 行摘要）。
 
-**说明**：需求分析确认后跑 spec 生成 + 评审两层把关，spec.yaml 9-stage PASS + 1.2.5R PASS + 用户 yes 后先执行 1.3 方案设计 → 1.3R 方案评审通过 → 再执行 1.4 测试设计 → 1.4R 测试设计评审（由 test-design-reviewer 独立执行）→ CP2。两者都以 spec.yaml 为共同真值源，顺序执行。
+**说明**：需求分析确认后跑 spec 生成 + 评审两层把关，spec.yaml 11-stage PASS + 1.2.5R PASS + 用户 yes 后先执行 1.3 方案设计 → 1.3R 方案评审通过 → 再执行 1.4 测试设计 → 1.4R 测试设计评审（由 test-design-reviewer 独立执行）→ CP2。两者都以 spec.yaml 为共同真值源，顺序执行。
 
 </details>
 
@@ -279,11 +279,11 @@ python3 workflow/resources/validate_checklist.py --stage requirements --operator
 **说明**：本阶段产出机器可校验的 L0 数学契约 `spec.yaml`，作为 1.3 设计与 1.4 测试的**共同真值源**。dtype 矩阵 / shape 约束 / invariant / boundary case / tolerance 全部在此机器化锁定，避免 1.3 / 1.4 双方各自解读 REQUIREMENTS 导致漂移。
 
 **Checklist**：
-- [ ] `python3 ops/ops-spec-gen/scripts/validate_spec.py operators/{operator_name}/docs/spec.yaml` **9-stage 全 PASS**（stage 9 SKIP 视为通过）
+- [ ] `python3 ops/ops-spec-gen/scripts/validate_spec.py operators/{operator_name}/docs/spec.yaml` **11-stage 全 PASS**（stage 9 SKIP 视为通过）
 - [ ] spec.yaml 字段值与 REQUIREMENTS.md 内容一致（dtype / shape / 平台 / 容差均可追溯）
 
 **失败处理**：
-- 9-stage 任一 stage FAIL → 主 Agent **自动**调用 `ascendc-ops-architect` (scene: spec-generation) 按 finding 修订 spec.yaml，修订后重跑 9-stage 校验
+- 11-stage 任一 stage FAIL → 主 Agent **自动**调用 `ascendc-ops-architect` (scene: spec-generation) 按 finding 修订 spec.yaml，修订后重跑 11-stage 校验
 - **最多重试 2 次**；超过后按 [通用检查项 → 拒绝恢复流程](#通用检查项) 归档 issue 并汇报用户
 - ⚠️ spec.yaml 未通过禁止进入 1.2.5R
 
@@ -291,20 +291,20 @@ python3 workflow/resources/validate_checklist.py --stage requirements --operator
 
 ## 1.2.5R spec 评审
 
-**进入条件**：1.2.5 完成（spec.yaml 9-stage 全 PASS）
+**进入条件**：1.2.5 完成（spec.yaml 11-stage 全 PASS）
 
 **Subagent**：`ascendc-ops-spec-reviewer` - [详细调用参数](resources/task-prompts.md#125r-spec-评审)
 
-**说明**：在用户人工 review 前，由独立 spec-reviewer Agent 做 **13 条 SPEC-\* 条款级评审**——逐项对照 spec ↔ REQUIREMENTS 中**机器可判**的项。把明显错误（dtype 漏一个、芯片不匹配、错误码缺漏、性能字段没填）先拦下来，避免拿一份"机器自洽但语义错"的 spec 去骚扰用户。
+**说明**：在用户人工 review 前，由独立 spec-reviewer Agent 做 **17 条 SPEC-\* 条款级评审**——逐项对照 spec ↔ REQUIREMENTS 中**机器可判**的项。把明显错误（dtype 漏一个、芯片不匹配、错误码缺漏、性能字段没填）先拦下来，避免拿一份"机器自洽但语义错"的 spec 去骚扰用户。
 
 > 评审条款定义、报告格式、强制规则详见 `ascendc-ops-spec-reviewer` Agent 定义。
 
 **Checklist**：
 - [ ] 评审报告 `operators/{operator_name}/tmp/checks/SPEC_REVIEW.md` 已生成，含 `**状态**:` 字段
-- [ ] **用户对照摘要**已输出（CP1.5 展示用）：列出 13 条条款逐项 ✓/⚠/❌ + 评审结论 + 给人工的"必看清单"
+- [ ] **用户对照摘要**已输出（CP1.5 展示用）：列出 17 条条款逐项 ✓/⚠/❌ + 评审结论 + 给人工的"必看清单"
 
 **失败处理**：
-- 状态=❌失败 → 主 Agent **自动**调用 `ascendc-ops-architect` (scene: spec-generation) 按 operators/{operator_name}/tmp/checks/SPEC_REVIEW.md 修订 spec.yaml，修订后**重跑 9-stage + 重跑 1.2.5R**
+- 状态=❌失败 → 主 Agent **自动**调用 `ascendc-ops-architect` (scene: spec-generation) 按 operators/{operator_name}/tmp/checks/SPEC_REVIEW.md 修订 spec.yaml，修订后**重跑 11-stage + 重跑 1.2.5R**
 - **最多重试 2 次**；超过后 L1-L3 降级人工确认（展示摘要 + 必看清单），L0 归档 issue 并汇报用户
 - ⚠️ 评审未通过禁止触发 CP1.5（L0）或降级前禁止自动放行（L1-L3）
 
@@ -312,7 +312,7 @@ python3 workflow/resources/validate_checklist.py --stage requirements --operator
 - **自动放行**（L1-L3，门控 PASS）：
   ```
   [AUTO_L{N}] CP1.5 PREVIEW:
-    SPEC_REVIEW: ✅ (13/13)
+    SPEC_REVIEW: ✅ (17/17)
     必看: formula ✓ | tolerance ✓ | boundary ✓
     → auto-passed, proceeding to 1.3a
   ```
@@ -321,7 +321,7 @@ python3 workflow/resources/validate_checklist.py --stage requirements --operator
 
 **CP1.5 三种响应**：
 - `yes` → 进入 1.3a
-- `modify: <字段>=<值>` → 主 Agent 调 (scene: spec-generation) 按用户指令修 spec → 重跑 9-stage → 重跑 1.2.5R → 重提 CP1.5
+- `modify: <字段>=<值>` → 主 Agent 调 (scene: spec-generation) 按用户指令修 spec → 重跑 11-stage → 重跑 1.2.5R → 重提 CP1.5
 - `abort` → 退回 1.2 修需求
 
 **Git 操作**：`python3 workflow/resources/git-checkpoint.py --operator {operator_name} --stage CP1.5`

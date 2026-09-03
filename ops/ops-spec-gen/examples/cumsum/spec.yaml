@@ -32,6 +32,7 @@ inputs:
     dtype_set: [float16, bfloat16, float32, float64, int32, int64]
     rank_range: [1, 8]
     layout: ND
+    data_distribution: normal
     shape:
       symbolic: ["...d"]
 
@@ -81,7 +82,8 @@ broadcast:
 math_semantics:
   formula_kind: numpy_expr
   formula: |
-    y = np.cumsum(x, axis=dim)
+    # +0.0 规整 -0.0 → +0.0，对齐 torch.cumsum 的零符号约定（避免 stage 10 zero_sign_divergence）
+    y = np.cumsum(x, axis=dim) + 0.0
 
   reference_oracle:
     framework: torch
@@ -111,7 +113,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute.md"
+  source: "ops-precision-standard/float_compute_community.md"
   per_dtype:
     float16:  {rtol: 2.0e-2, atol: 2.0e-2, metric: max_relative}    # 累加误差放宽
     bfloat16: {rtol: 3.0e-2, atol: 3.0e-2, metric: max_relative}
@@ -171,5 +173,4 @@ extreme_inputs:
 determinism:
   required: true
   accumulation_order: sequential              # Recurrence 范式核心约束
-  partition_constraint: "沿 dim 不可切分（inter-element 依赖）；batch / 其他维度可自由切"
   bitwise_reproducible: true                  # 顺序固定 + 同 dtype → 应 bitwise 一致

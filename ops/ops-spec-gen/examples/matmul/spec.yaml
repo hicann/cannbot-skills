@@ -141,7 +141,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute.md"
+  source: "ops-precision-standard/float_compute_community.md"
   per_dtype:
     float32:  {rtol: 1.0e-4, atol: 1.0e-4, metric: max_relative}
     float16:  {rtol: 1.0e-2, atol: 1.0e-2, metric: max_relative}    # K 大时累计误差需放宽
@@ -198,5 +198,4 @@ extreme_inputs:
 determinism:
   required: true
   accumulation_order: tree
-  partition_constraint: "K 切分后必须用固定顺序累加；批维与 M/N 切分天然确定"
   bitwise_reproducible: false                    # Cube 实例间累加顺序差异，fp 不可严格 bitwise

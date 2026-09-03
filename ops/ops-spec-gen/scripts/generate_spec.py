@@ -85,6 +85,7 @@ class TensorSpec:
     name: str
     dtype_set: list[str]
     rank_range: tuple[int, int] = (0, 8)
+    data_distribution: str = ""
     role: str | None = None
     optional: bool = False
     list_length: dict | None = None
@@ -793,9 +794,18 @@ def build_op_block(op_name: str, description: str, category: str,
     return "\n".join(parts)
 
 
+_ACCUMULATION_CATEGORIES = {
+    "Reduction", "ReductionComposite",
+    "Recurrence", "AtomicUpdate", "Histogram",
+}
+_INTEGER_DTYPES = {"int4", "int8", "int16", "int32", "int64",
+                   "uint1", "uint4", "uint8", "uint16", "uint32", "uint64", "bool"}
+
+
 def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category: str) -> str:
     lines = []
     is_pure_reduction = _is_pure_reduction(category, paradigms)
+    is_accumulation = category in _ACCUMULATION_CATEGORIES
     for i, inp in enumerate(inputs):
         # 折叠维名直接用 input 全名，避免多 input 同首字母冲突（e.g. xa/xb 都生成 "...x"）
         folded_name = inp.name.lower()
@@ -807,6 +817,13 @@ def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category:
         rank_min = max(inp.rank_range[0], 1) if is_pure_reduction and i == 0 else inp.rank_range[0]
         lines.append(f"    rank_range: [{rank_min}, {inp.rank_range[1]}]")
         lines.append(f"    layout: ND")
+        # 累加类算子的 tensor 数据输入（非整型索引/轴）自动注入 data_distribution: normal
+        # 整型 tensor（axis/index）和非累加类不注入
+        is_integer_tensor = role == "tensor" and set(inp.dtype_set).issubset(_INTEGER_DTYPES)
+        if is_accumulation and role == "tensor" and not is_integer_tensor:
+            lines.append(f"    data_distribution: normal")
+        elif inp.data_distribution:
+            lines.append(f"    data_distribution: {inp.data_distribution}")
         lines.append(f"    shape:")
         if is_pure_reduction and i == 0:
             lines.append(f'      symbolic: ["...{folded_name}", "R"]')
@@ -1029,9 +1046,17 @@ def _format_tol_value(v) -> str:
 
 def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str],
                                      promotion: str,
-                                     axis_source: str = "attribute") -> str:
+                                     axis_source: str = "attribute",
+                                     category: str = "",
+                                     op_name: str = "") -> str:
     """生成 numerical_tolerance.per_dtype，覆盖 supported_combinations 中所有出现的 output dtype。"""
     defaults = _load_tolerance_defaults()
+
+    reduction_categories = {"Reduction", "ReductionComposite"}
+    is_reduction = category in reduction_categories
+    is_exact_reduce = is_reduction and op_name.endswith(("max", "min"))
+
+    fp32_default = defaults.get("float32", {"rtol": 1.0e-5, "atol": 1.0e-5, "metric": "max_relative"})
     
     axis_input_names = set()
     if axis_source == "input_tensor":
@@ -1059,6 +1084,8 @@ def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str]
     lines = []
     for dtype in sorted(out_dtypes):
         entry = defaults.get(dtype) or {"rtol": 1.0e-5, "atol": 1.0e-5, "metric": "max_relative"}
+        if is_reduction and not is_exact_reduce and entry["metric"] == "bitwise_equal":
+            entry = dict(fp32_default)
         rtol = _format_tol_value(entry["rtol"])
         atol = _format_tol_value(entry["atol"])
         metric = entry["metric"]
@@ -1108,7 +1135,8 @@ _PARADIGM_BOUNDARY_TEMPLATES = {
     "Reduction": [
         '  - case: "reduce 轴长度为 1"\n    synthesize: { __FIRST_INPUT__.shape: "[1]" }\n    machine_check: {kind: matches_oracle}',
         '  - case: "rank=0 标量输入"\n    synthesize: { __FIRST_INPUT__.shape: "[]" }\n    machine_check: {kind: matches_oracle}',
-        '  - case: "空 Tensor"\n    synthesize: { __FIRST_INPUT__.shape: "[0, 4]" }\n    machine_check: {kind: returns_empty}',
+        '  - case: "空 Tensor（A 轴=0，输出为空）"\n    synthesize: { __FIRST_INPUT__.shape: "[0, 4]" }\n    machine_check: {kind: returns_empty}',
+        '  - case: "reduce 轴 R=0（归约轴为空，输出=A 轴 shape）"\n    synthesize: { __FIRST_INPUT__.shape: "[4, 0]" }\n    machine_check: {kind: matches_oracle}',
     ],
     "SlidingWindow": [
         '  - case: "stride > kernel"\n    synthesize: { __FIRST_INPUT__.shape: "[1, 1, 8, 8]" }\n    machine_check: {kind: matches_oracle}',
@@ -1151,9 +1179,12 @@ _PURE_REDUCTION_BOUNDARY_TEMPLATES = [
     '  - case: "reduce 轴长度为 1"\n'
     '    synthesize: { __FIRST_INPUT__.shape: "[1]", attr.dim: [-1], attr.keep_dims: false }\n'
     '    machine_check: {kind: matches_oracle}',
-    '  - case: "空 Tensor"\n'
+    '  - case: "空 Tensor（A 轴=0，输出为空）"\n'
     '    synthesize: { __FIRST_INPUT__.shape: "[0, 4]", attr.dim: [-1], attr.keep_dims: false }\n'
     '    machine_check: {kind: returns_empty}',
+    '  - case: "reduce 轴 R=0（归约轴为空，输出=A 轴 shape）"\n'
+    '    synthesize: { __FIRST_INPUT__.shape: "[4, 0]", attr.dim: [-1], attr.keep_dims: false }\n'
+    '    machine_check: {kind: matches_oracle}',
 ]
 
 
@@ -1403,7 +1434,7 @@ def render(gi: GenInput) -> str:
         "{{supported_combinations_block}}": build_supported_combinations_block(
             gi.inputs, output_names, gi.promotion, gi.axis_source),
         "{{per_dtype_tolerance_block}}": build_per_dtype_tolerance_block(
-            gi.inputs, output_names, gi.promotion, gi.axis_source),
+            gi.inputs, output_names, gi.promotion, gi.axis_source, gi.category, gi.op_name),
         "{{extra_boundary_cases}}": extra_boundary_cases,
         "{{extra_extreme_cases}}": extra_extreme_cases,
     }

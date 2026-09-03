@@ -358,6 +358,24 @@ def _iter_concrete_shape_cases(spec: dict, findings: list[dict] | None = None):
         }
 
 
+def _coerce_attr_value(value: Any) -> Any:
+    """Coerce synthesize attr values written as string literals (e.g. "[2,2]") into native types.
+
+    list-typed attrs (split_size/chunk_sizes...) are often quoted in YAML synthesize; without this
+    they reach the formula/shape_rule sandbox as the raw string and crash element access.
+
+    Only list/tuple literals are adopted — scalar/numeric-looking strings are left as-is to avoid
+    mis-coercing genuinely string-typed attrs (e.g. a string attr whose value happens to be "123").
+    """
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return value
+        return parsed if isinstance(parsed, (list, tuple)) else value
+    return value
+
+
 def _extract_synthesize_shapes_attrs(
     synth: dict,
     attr_names: set[str],
@@ -376,7 +394,7 @@ def _extract_synthesize_shapes_attrs(
     if isinstance(nested_attrs, dict):
         for name, value in nested_attrs.items():
             if name in attr_names:
-                attrs[str(name)] = value
+                attrs[str(name)] = _coerce_attr_value(value)
 
     for key, value in synth.items():
         if not isinstance(key, str):
@@ -387,10 +405,10 @@ def _extract_synthesize_shapes_attrs(
         if key.startswith("attr."):
             name = key[5:]
             if name in attr_names:
-                attrs[name] = value
+                attrs[name] = _coerce_attr_value(value)
             continue
         if key in attr_names:
-            attrs[key] = value
+            attrs[key] = _coerce_attr_value(value)
     return shapes, attrs
 
 
@@ -710,16 +728,18 @@ def stage_3(spec: dict) -> tuple[str, list[dict]]:
             paradigms = set((spec.get("op") or {}).get("paradigms") or [])
             category = (spec.get("op") or {}).get("category", "")
             _data_dependent_allowed_categories = {"VariableOutput", "Reduction", "ReductionComposite", "ArgReduce", "IndexGather"}
-            if "VariableOutput" not in paradigms and category not in _data_dependent_allowed_categories:
+            if ("VariableOutput" not in paradigms
+                    and "DynamicShape" not in paradigms
+                    and category not in _data_dependent_allowed_categories):
                 findings.append({
                     "severity": "error",
                     "rule_id": "shape_closure.data_dependent_requires_variable_output",
                     "field_path": f"{path}.shape_rule_kind",
-                    "message": "shape_rule_kind=data_dependent 仅允许用于 VariableOutput 范式"
+                    "message": "shape_rule_kind=data_dependent 仅允许用于 VariableOutput / DynamicShape 范式"
                                "或 Reduction/ReductionComposite/ArgReduce 类别；"
                                "仅依赖 input shape / attribute 的输出必须写 numpy_expr shape_rule",
                     "suggested_fix": "改为 shape_rule_kind: numpy_expr 并写可执行 shape_rule，"
-                                     "或确认算子确为 VariableOutput / Reduction 类",
+                                     "或确认算子确为 VariableOutput / DynamicShape / Reduction 类",
                 })
             _check_data_dependent_output(out, i, findings)
             continue

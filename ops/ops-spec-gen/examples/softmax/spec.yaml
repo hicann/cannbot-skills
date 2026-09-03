@@ -37,6 +37,7 @@ inputs:
     dtype_set: [float16, float32, bfloat16]
     rank_range: [0, 8]
     layout: ND
+    data_distribution: normal
     shape:
       symbolic: ["...d"]
     contiguous: optional
@@ -156,7 +157,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute.md"
+  source: "ops-precision-standard/float_compute_community.md"
   per_dtype:
     float32:  {rtol: 1.0e-4, atol: 1.0e-4, metric: max_relative}
     float16:  {rtol: 1.0e-3, atol: 1.0e-3, metric: max_relative}
@@ -226,6 +227,5 @@ extreme_inputs:
 
 determinism:
   required: true
-  accumulation_order: stable_in_axis            # reduce 范式禁止跨核切归约轴
-  partition_constraint: "禁止跨核 reduce 同一行；多核切分仅切非归约维"
+  accumulation_order: stable_in_axis
   bitwise_reproducible: true

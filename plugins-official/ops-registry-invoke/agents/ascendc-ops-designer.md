@@ -81,7 +81,7 @@ Ascend C 算子设计师，负责设计准备（路线决策 + API 验证）、D
 
 **必需前置输入**：
 - 需求分析文档（`operators/{operator_name}/docs/REQUIREMENTS.md`）
-- **L0 数学契约**（`operators/{operator_name}/docs/spec.yaml`，9-stage 全 PASS）
+- **L0 数学契约**（`operators/{operator_name}/docs/spec.yaml`，11-stage 全 PASS）
 
 **强制约束**（必须遵守）：
 - 严格执行「核心原则」，以下为本场景的具体执行要求：

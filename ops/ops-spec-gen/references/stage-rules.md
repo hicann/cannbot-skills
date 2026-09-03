@@ -1,4 +1,4 @@
-# 9-stage L0 校验规则详解
+# 11-stage L0 校验规则详解
 
 > 本文件是 `SKILL.md §4` 的详细参考。SKILL.md 只保留 stage 概述表，完整子规则、numpy 子集 API、代码示例在此处。
 
@@ -64,6 +64,8 @@
 | `interface_contract.layout_contract_ref_not_tensor` | layout_contract 引用的接口不是 role=tensor ⇒ ERR |
 | `interface_contract.layout_contract_duplicate_tensor_ref` | 同一 layout variant 中重复声明同一 Tensor ⇒ ERR |
 | `interface_contract.layout_contract_rank_mismatch` | 固定 rank input 的 logical_axes 数量不等于 rank ⇒ ERR |
+| `data_distribution.accumulation_requires_normal` | 累加类算子（Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram）的 tensor 输入未声明 `data_distribution: normal` ⇒ ERR |
+| `data_distribution.non_accumulation_must_omit` | 非累加类算子声明了 `data_distribution` ⇒ ERR |
 
 ### paradigm_groups 字段说明
 
@@ -107,7 +109,7 @@ paradigm_groups:
 按 `outputs[].shape_rule_kind` 分流：
 
 - **`numpy_expr`**（默认）— 在受限 AST 沙箱中执行 `outputs[].shape_rule`（numpy 子集表达式），求出每个输出的 SymbolicShape；若 `math_semantics.formula_kind=numpy_expr`，还会在正常边界样例上用具体 shape/attr 校验 formula 输出 shape，防止 `shape_rule` 写成简化/占位版本。
-- **`data_dependent`** — 用于输出 shape 由输入数据值决定的算子（nonzero / unique / masked_select 等，通常含 VariableOutput 范式）；不求解，但强制校验 `data_dependent_shape: true` + `shape_bounds.max_elements` + 建议配 `shape_rule_description`。只依赖 input shape / attribute 的输出必须写 `numpy_expr`。
+- **`data_dependent`** — 用于输出 shape 由输入数据值决定的算子（nonzero / unique / masked_select 等 VariableOutput，或 splitv 等 DynamicShape 的 value-driven 子场景）；不求解，但强制校验 `data_dependent_shape: true` + `shape_bounds.max_elements` + 建议配 `shape_rule_description`。只依赖 input shape / attribute 的输出（如 reshape / stridedslice 等 DynamicShape 的 attr-driven 子场景）必须写 `numpy_expr`。
 - **`textual_only`** — 用于输出 shape 因数据排布格式而异的算子（如 NCHW/NHWC 的 Channel 轴位置不同）；不求解，但要求 `math_semantics.format_variants` 存在且配 `shape_rule_description`。shape_rule 可含 `${format_variants[].channel_axis}` 等占位符。
 
 确定性 shape 规则必须完整写在 `shape_rule`：当输出 shape 同时依赖 input rank 和 attribute 时，不能只写默认分支再把完整语义放进 notes 或测试约束。纯 `Reduction` 算子不能把输出 shape 写成 `input.shape`，应按 `dim` / `keep_dims` 描述归约轴变化。
@@ -323,3 +325,116 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 - **占位符校验**与是否装框架**无关**，永远跑
 
 性能：torch 冷启动 1-3 秒；同进程内多次调用因 import 缓存而即时返回。pre-commit 用户若没装 torch，stage 9 走 SKIP 不影响 < 1s 体验。
+
+---
+
+## stage 10 — formula_oracle_equiv
+
+当 formula（numpy_expr）和 oracle（reachable）同时可用时，在**含特殊值（NaN / inf / 大数 / 带符号零 +0/-0）的输入**上同时执行 formula 和 oracle，比对输出。捕获 formula 使用了与框架实际实现**数学等价但计算不等价**形式的错误（如教科书合并形式 `m_new = β1·m + (1-β1)·grad` vs TF 增量形式 `m = m + (1-β1)·(grad-m)`，两者在 NaN/inf 传播、末位舍入、零符号上不一致）。
+
+### 子规则表
+
+| 子规则 | 检查内容 |
+|---|---|
+| `formula_oracle_equiv.skipped_non_numpy` | INFO — formula_kind != numpy_expr ⇒ stage 10 SKIP |
+| `formula_oracle_equiv.absent` | INFO — oracle.absent=true ⇒ stage 10 SKIP |
+| `formula_oracle_equiv.composition_not_supported` | INFO — oracle 使用 composition (DAG) 模式，值等价校验暂不支持 |
+| `formula_oracle_equiv.numpy_not_installed` | INFO — numpy 未安装 |
+| `formula_oracle_equiv.incomplete_oracle` | INFO — oracle framework 或 api 缺失 |
+| `formula_oracle_equiv.framework_not_installed` | INFO — oracle framework 未安装 |
+| `formula_oracle_equiv.api_unreachable` | INFO — oracle API 不可达（stage 9 已报错） |
+| `formula_oracle_equiv.no_combination` | INFO — 缺 supported_combinations |
+| `formula_oracle_equiv.oracle_call_failed` | INFO — 无法在测试输入上成功调用 oracle API |
+| `formula_oracle_equiv.shape_mismatch` | WARN — formula 输出 shape ≠ oracle 输出 shape，跳过值比较 |
+| `formula_oracle_equiv.nan_pattern_divergence` | **ERR** — formula 与 oracle 的 NaN 出现位置不一致（典型信号：公式形式差异导致 NaN 传播路径不同） |
+| `formula_oracle_equiv.inf_pattern_divergence` | **ERR** — formula 与 oracle 的 inf/-inf 出现位置不一致 |
+| `formula_oracle_equiv.zero_sign_divergence` | **ERR** — formula 与 oracle 的 +0/-0 符号模式不一致（IEEE 754 带符号零；符号差异暴露抵消/下溢路径上的计算形式差异） |
+| `formula_oracle_equiv.value_divergence` | **ERR** — formula 与 oracle 在有限值上发散超过容差 |
+
+### 测试输入生成
+
+对 spec 声明的输入生成 7 组测试张量：
+
+| 组 | 注入的特殊值 | 目的 |
+|---|---|---|
+| normal | 无（随机基线） | 验证基本语义一致 |
+| nan | 第一个元素 NaN | 检测 NaN 传播路径差异 |
+| inf | 第一个元素 +inf | 检测 inf 传播路径差异 |
+| ninf | 第一个元素 -inf | 检测 -inf 传播路径差异 |
+| large | 第一个元素 1e30 | 检测大数舍入差异 |
+| pos_zero | 第一个元素 +0.0（仅浮点 dtype） | 检测带符号零传播差异（IEEE 754 +0/-0） |
+| neg_zero | 第一个元素 -0.0（仅浮点 dtype） | 检测带符号零传播差异（IEEE 754 +0/-0） |
+
+### 比对策略
+
+1. **NaN 模式**：formula 和 oracle 输出的 NaN 位置必须一致。不一致 → ERR（公式形式差异的最强信号）
+2. **inf 模式**：在非 NaN 位置上，inf/-inf 出现位置必须一致。不一致 → ERR
+3. **零符号模式**：在两者均为有限值且为零的位置上，+0/-0 符号（`np.signbit`）必须一致。不一致 → ERR（仅浮点 dtype；符号差异暴露抵消/下溢路径上的计算形式差异）
+4. **有限值**：在两者均为有限值的位置上，atol=1e-5、rtol=1e-5 内视为等价。超出 → ERR
+
+### 设计要点
+
+- **降级策略**：formula_kind 非 numpy_expr / oracle absent / composition 模式 / framework 未装 / oracle 调用失败 → SKIP，不阻塞
+- **容差选择**：有限值用中等容差（1e-5），因为即使公式形式正确，求和顺序等差异也会产生末位不同；关键信号在 NaN/inf/零符号模式
+- **最小依赖**：复用 stage 8 的 formula 沙箱执行 + stage 9 的 oracle API 解析，不重复实现
+- **性能**：小 shape（默认 [2,3]）× 7 组测试输入，formula + oracle 各调用 7 次，总耗时 < 1s
+
+---
+
+## stage 11 — invariant_exec
+
+当 formula（numpy_expr）可用且 spec 声明了 `invariants[]` 时，在生成的正常输入上执行 formula，**校验输出是否满足其声明的数学性质**。与 stage 10（formula vs 框架 oracle）不同，stage 11 **无需外部 oracle**——它验证 formula 是否符合自身声明的数学不变量（softmax 行和=1、relu 非负、add 交换律、matmul/reduce 零吸收……）。
+
+**这是无 oracle 场景（absent / composition / oracle_call_failed）的关键机器校验**——stage 10 SKIP 时，stage 11 用 invariants 作为替代校验。设计动机：形式错的公式往往违反声明的数学性质（如未归一化的"softmax"行和≠1），stage 11 在 stage 10 失效时仍能抓到，打破了「最需要形式校验的场景恰好没有 oracle」的悖论。
+
+### 可执行的 kind
+
+| 组 | kind | 校验方式 |
+|---|---|---|
+| value | elementwise_ge / elementwise_le / elementwise_eq | 输出逐元素与阈值/常量比较 |
+| value | reduce_equals | 沿 axis 归约（sum/mean/max/min）后与常量比较 |
+| value | range_in | 输出 ∈ [lo, hi] |
+| value | produces_in_set | 输出取值 ∈ 离散集合 |
+| algebraic | equals_under_swap | 交换输入对，两次 formula 输出应一致 |
+| algebraic | equals_input_when_other_is_zero | 置零一侧，输出应 == 另一侧 |
+| algebraic | equals_when_input_is_zero | 置零任一数据输入，输出应 == value |
+
+暂不机器执行的 kind（发 info 跳过）：`idempotent` / `associative_along_batch` / `monotone_along`（需特殊输入）/ `equals_input_when_other_is_identity`（composition only）/ `equals_after_op`（需外部 op）/ structural 组（`shape_equals_macro` / `no_leak_intermediates` / `permutation_of_input`）。
+
+### 子规则表
+
+| 子规则 | 检查内容 |
+|---|---|
+| `invariant_exec.skipped_non_numpy` | INFO — formula_kind != numpy_expr ⇒ stage 11 SKIP |
+| `invariant_exec.no_invariants` | INFO — spec 未声明 invariants ⇒ SKIP |
+| `invariant_exec.numpy_not_installed` | INFO — numpy 未安装 |
+| `invariant_exec.no_combination` | INFO — 缺 supported_combinations |
+| `invariant_exec.no_inputs` | INFO — 无法生成测试输入 |
+| `invariant_exec.kind_not_executable` | INFO — 该 kind 暂不支持机器执行，跳过值校验 |
+| `invariant_exec.reduce_equals_unresolved` | INFO — reducer/axis/value 无法静态解析（axis 来自运行时输入） |
+| `invariant_exec.formula_no_output` | INFO — formula 未产出目标输出 |
+| `invariant_exec.elementwise_ge_violated` | **ERR** — 输出有元素 < value |
+| `invariant_exec.elementwise_le_violated` | **ERR** — 输出有元素 > value |
+| `invariant_exec.elementwise_eq_violated` | **ERR** — 输出未逐元素 == value |
+| `invariant_exec.reduce_equals_violated` | **ERR** — 沿 axis 归约后结果 ≠ value |
+| `invariant_exec.range_in_violated` | **ERR** — 输出有元素落在 [lo, hi] 外 |
+| `invariant_exec.produces_in_set_violated` | **ERR** — 输出取值不在声明集合内 |
+| `invariant_exec.equals_under_swap_violated` | **ERR** — 交换输入对后输出不一致（非交换 formula 被声明为交换律） |
+| `invariant_exec.equals_input_when_other_is_zero_violated` | **ERR** — 置零一侧后输出 ≠ 另一侧 |
+| `invariant_exec.equals_when_input_is_zero_violated` | **ERR** — 置零数据输入后输出 ≠ value |
+
+### 执行策略
+
+1. 生成正常随机输入（**每个输入用派生 seed**，避免多输入相同数据掩盖非交换性）
+2. 编译 formula（复用 stage 8 的 AST 沙箱），跑出输出
+3. 逐 invariant 按 kind 校验输出；algebraic 类按需多次跑 formula（交换/置零）
+4. **索引输入保护**：`axis`/`axes`/`dim`/`indices` 等整数张量不被置零（与 stage 5 broadcast 逻辑一致）
+5. **空输出保护**：IndexGather 类零输入→空输出时跳过值比较
+6. **容差**：`tolerance_inherit: true` 用 `numerical_tolerance.per_dtype`，否则用紧容差 1e-6
+
+### 设计要点
+
+- **打破悖论**：stage 10 在无 oracle 时 SKIP，stage 11 用 invariants 补位——最需要形式校验的场景（公式来自论文/模型知识）获得了机器校验
+- **invariants 是独立锚点**：不经过 formula 自反，能测出 formula 语义错（SPEC-ORACLE-1 已要求值级、formula 无关）
+- **最小依赖**：复用 stage 8 的 formula 沙箱执行，不依赖框架安装
+- **降级策略**：formula_kind 非 numpy_expr / 无 invariants / numpy 未装 ⇒ SKIP，不阻塞

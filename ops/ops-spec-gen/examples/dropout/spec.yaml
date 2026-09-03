@@ -112,7 +112,7 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute.md"
+  source: "ops-precision-standard/float_compute_community.md"
   per_dtype:
     float16:  {rtol: 1.0e-3, atol: 1.0e-3, metric: max_relative}
     bfloat16: {rtol: 4.0e-3, atol: 4.0e-3, metric: max_relative}
@@ -167,5 +167,4 @@ extreme_inputs:
 determinism:
   required: true
   accumulation_order: none                  # elementwise 无累加
-  partition_constraint: "seed 切分必须确定（按 thread_id 派生子 seed）"
   bitwise_reproducible: true                # 同 seed 同设备同 dtype 应 bitwise 一致

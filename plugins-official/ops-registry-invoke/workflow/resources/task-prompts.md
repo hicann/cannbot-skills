@@ -187,7 +187,7 @@ scene: requirement-analysis
 ```
 Task 调用参数：
 {
-  "description": "L0 数学契约 spec.yaml 生成与 9-stage 校验",
+  "description": "L0 数学契约 spec.yaml 生成与 11-stage 校验",
   "subagent_type": "ascendc-ops-architect",
   "prompt": "
 scene: spec-generation
@@ -199,7 +199,7 @@ scene: spec-generation
 - 算子名称：{operator_name}
 
 【输出】
-- L0 数学契约：operators/{operator_name}/docs/spec.yaml（9-stage 全 PASS）
+- L0 数学契约：operators/{operator_name}/docs/spec.yaml（11-stage 全 PASS）
 - 报告（格式见 ascendc-ops-architect 场景二报告模板）
 - 日志摘要：输出到响应末尾
   "
@@ -211,21 +211,21 @@ scene: spec-generation
 ```
 Task 调用参数：
 {
-  "description": "spec.yaml 评审（13 条 SPEC-* 条款）",
+  "description": "spec.yaml 评审（17 条 SPEC-* 条款）",
   "subagent_type": "ascendc-ops-spec-reviewer",
   "prompt": "
 执行 spec.yaml 评审任务（CP1.5 前置、不触达用户）。
 
-评审方法论、13 条 SPEC-* 条款定义、报告格式、强制规则详见 `ascendc-ops-spec-reviewer`
+评审方法论、17 条 SPEC-* 条款定义、报告格式、强制规则详见 `ascendc-ops-spec-reviewer`
 Agent 定义。
 
 【输入】
 - 需求分析文档：operators/{operator_name}/docs/REQUIREMENTS.md
-- L0 数学契约：operators/{operator_name}/docs/spec.yaml（9-stage 已 PASS）
+- L0 数学契约：operators/{operator_name}/docs/spec.yaml（11-stage 已 PASS）
 
 【输出】
 - 评审报告：operators/{operator_name}/tmp/checks/SPEC_REVIEW.md
-  - 13 条 SPEC-* 条款逐项 ✓/⚠/❌ + 证据
+  - 17 条 SPEC-* 条款逐项 ✓/⚠/❌ + 证据
   - 必看清单（CP1.5 展示用）：公式数学意图 / tolerance 合理性 / boundary 业务覆盖 / composition 拆分 / oracle 选择
   - 状态字段 = ✅通过 / ❌失败
 - 日志摘要：输出到响应末尾
@@ -239,7 +239,7 @@ Agent 定义。
 | 用户响应 | 主 Agent 动作 |
 |---------|-------------|
 | `yes` | 进入 1.3a |
-| `modify: <字段路径>=<新值>` | 调 (scene: spec-generation) 按用户指令改 spec → 重跑 9-stage → 重跑 1.2.5R → 重提 CP1.5 |
+| `modify: <字段路径>=<新值>` | 调 (scene: spec-generation) 按用户指令改 spec → 重跑 11-stage → 重跑 1.2.5R → 重提 CP1.5 |
 | `abort` | 退回 1.2 修需求 |
 
 ## 1.3 方案设计（主 Agent 编排）

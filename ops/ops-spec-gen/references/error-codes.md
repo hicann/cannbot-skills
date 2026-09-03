@@ -3,7 +3,7 @@
 > 由 `scripts/dump_rule_ids.py` 自动生成；改动 validator 后跑 `--write` 同步。CI 由
 > `tests/test_doc_drift.py` 守门：源文件中的 rule_id 与本文件不一致即 fail。
 
-本目录列出 9-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串
+本目录列出 11-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串
 登记到对应 stage；若是 evaluator（numpy AST 求值器）内部抛 `DslError`，code 会在 stages.py 拼成
 `<stage>.<code>`，所以**新增 evaluator 错误码必须同时拓宽 SKILL.md §4.x 表**。
 
@@ -141,9 +141,42 @@
 - `stage_skipped`
 - `synthesize_legacy_format`
 - `synthesize_pattern_unknown`
+- `data_distribution.accumulation_requires_normal`
+- `data_distribution.non_accumulation_must_omit`
 - `format_variants.oracle_kwargs_dim_mismatch`
 - `format_variants.reduction_axes_negative`
 - `format_variants.reduction_axes_out_of_rank`
+- `formula_oracle_equiv.absent`
+- `formula_oracle_equiv.api_unreachable`
+- `formula_oracle_equiv.composition_not_supported`
+- `formula_oracle_equiv.framework_import_error`
+- `formula_oracle_equiv.framework_not_installed`
+- `formula_oracle_equiv.incomplete_oracle`
+- `formula_oracle_equiv.inf_pattern_divergence`
+- `formula_oracle_equiv.nan_pattern_divergence`
+- `formula_oracle_equiv.no_combination`
+- `formula_oracle_equiv.no_test_inputs`
+- `formula_oracle_equiv.numpy_not_installed`
+- `formula_oracle_equiv.oracle_call_failed`
+- `formula_oracle_equiv.shape_mismatch`
+- `formula_oracle_equiv.skipped_non_numpy`
+- `formula_oracle_equiv.value_divergence`
+- `formula_oracle_equiv.zero_sign_divergence`
+- `invariant_exec.elementwise_eq_violated`
+- `invariant_exec.equals_input_when_other_is_zero_violated`
+- `invariant_exec.equals_under_swap_violated`
+- `invariant_exec.equals_when_input_is_zero_violated`
+- `invariant_exec.formula_no_output`
+- `invariant_exec.kind_not_executable`
+- `invariant_exec.no_combination`
+- `invariant_exec.no_inputs`
+- `invariant_exec.no_invariants`
+- `invariant_exec.numpy_not_installed`
+- `invariant_exec.produces_in_set_violated`
+- `invariant_exec.range_in_violated`
+- `invariant_exec.reduce_equals_unresolved`
+- `invariant_exec.reduce_equals_violated`
+- `invariant_exec.skipped_non_numpy`
 - `paradigm_groups.combination_missing_switch`
 - `paradigm_groups.combination_missing_when`
 - `paradigm_groups.combination_should_exist`

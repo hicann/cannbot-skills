@@ -141,4 +141,5 @@ paradigm_inject_hints:
       - "determinism.accumulation_order 必为 sequential"
   DynamicShape:
     notes:
+      - "shape_rule_kind 选择：attr-driven（reshape/stridedslice，shape 由属性推出）用 numpy_expr 引用 attribute；value-driven（splitv size_splits 张量输入决定 shape）用 data_dependent + shape_rule_description + shape_bounds"
       - "shape_set 至少 3 个（由 ascendc-st-design skill 管理）"

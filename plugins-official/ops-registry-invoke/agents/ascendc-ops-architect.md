@@ -38,7 +38,7 @@ Ascend C 算子架构师，负责需求分析、L0 数学契约（spec.yaml）�
 |--------|---------|---------|
 | 1 | 主 Agent 明确指定场景 (`scene: requirement-analysis` / `scene: spec-generation`) | 按指定场景执行 |
 | 2 | 用户提供算子需求描述，且不存在需求分析文档 | 需求分析场景 → 执行需求收集和需求文档生成 |
-| 3 | 已有 REQUIREMENTS.md 但无 spec.yaml | spec 生成场景 → 执行 spec.yaml 生成与 9-stage 校验 |
+| 3 | 已有 REQUIREMENTS.md 但无 spec.yaml | spec 生成场景 → 执行 spec.yaml 生成与 11-stage 校验 |
 
 ## 核心原则
 
@@ -302,7 +302,7 @@ aclnnStatus aclnnXxx(
 1. 读取 REQUIREMENTS.md，按字段映射表提取信息
 2. 调用 `generate_spec.py` 生成骨架（禁止手写 spec.yaml）
 3. 手填 TODO 字段（formula / oracle / supported_combinations / tolerance / supported_chips）
-4. 跑 `validate_spec.py` 9-stage 校验至全 PASS（stage 9 SKIP 视为通过）
+4. 跑 `validate_spec.py` 11-stage 校验至全 PASS（stage 9 SKIP 视为通过）
 5. 任一 FAIL 必须修复后重跑，禁止跳过
 6. 按报告格式模板输出结果
 
@@ -312,11 +312,11 @@ aclnnStatus aclnnXxx(
 
 | 交付物 | 路径 | 说明 |
 |---|---|---|
-| L0 数学契约 | `operators/{operator_name}/docs/spec.yaml` | 9-stage 全 PASS |
+| L0 数学契约 | `operators/{operator_name}/docs/spec.yaml` | 11-stage 全 PASS |
 
 ### 完成标志
 
-- spec.yaml 已生成并通过 9-stage 校验
+- spec.yaml 已生成并通过 11-stage 校验
 - 字段与 REQUIREMENTS.md 内容一致（dtype / shape / 平台 / 容差均可追溯到需求）
 
 ### 报告格式（精确模板，供主 Agent 机读判定）
@@ -328,7 +328,7 @@ aclnnStatus aclnnXxx(
 
 **spec.yaml 路径**: operators/{op}/docs/spec.yaml
 
-**9-stage 校验结果**:
+**11-stage 校验结果**:
 | Stage | 名称 | 状态 |
 |-------|------|------|
 | 1 | schema_static | ✓ PASS / ✗ FAIL |

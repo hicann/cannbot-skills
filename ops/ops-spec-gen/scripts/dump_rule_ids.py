@@ -101,7 +101,7 @@ def render(rule_ids: set[str], dsl_codes: set[str]) -> str:
         "> 由 `scripts/dump_rule_ids.py` 自动生成；改动 validator 后跑 `--write` 同步。CI 由",
         "> `tests/test_doc_drift.py` 守门：源文件中的 rule_id 与本文件不一致即 fail。",
         "",
-        "本目录列出 9-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串",
+        "本目录列出 11-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串",
         "登记到对应 stage；若是 evaluator（numpy AST 求值器）内部抛 `DslError`，code 会在 stages.py 拼成",
         "`<stage>.<code>`，所以**新增 evaluator 错误码必须同时拓宽 SKILL.md §4.x 表**。",
         "",

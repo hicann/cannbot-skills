@@ -212,4 +212,4 @@ paradigm_requirements:
       summary: "不可广播（两侧维度冲突）→ 报错"
       section: boundary_conditions
       match_any: ["不可广播", "non-broadcastable", "不能广播", "broadcast 冲突",
-                   "广播不合法", "广播不兼容", "K 维不匹配"]    # K 不匹配本质是 trailing 不可广播
+                   "广播不合法", "广播不兼容", "K 维不匹配"]

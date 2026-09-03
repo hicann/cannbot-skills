@@ -188,3 +188,26 @@ def test_semantic_case_and_layout_contract_valid_and_invalid_references():
     assert "interface_contract.semantic_case_invalid_guard" in rule_ids
     assert "interface_contract.semantic_case_unknown_member" in rule_ids
     assert "interface_contract.layout_contract_unknown_ref" in rule_ids
+
+
+class TestOutputCountDeterminedBy:
+    """VariableOutput + output_count_determined_by=attribute：豁免 nonzero 类 data_dependent_shape。"""
+
+    _SPLIT = (SKILL_ROOT / "examples" / "split" / "spec.yaml").read_text(encoding="utf-8")
+
+    def test_with_flag_no_variable_output_flag_error(self, tmp_path):
+        # split example 声明了 output_count_determined_by: attribute → 豁免 data_dependent_shape
+        rc, out = _run(self._SPLIT, tmp_path)
+        s2 = next(s for s in out["stages"] if s["stage_id"] == 2)
+        assert s2["status"] == "PASS"
+        assert not any("variable_output_flag" in f["rule_id"] for f in s2["findings"])
+
+    def test_without_flag_reports_variable_output_flag(self, tmp_path):
+        # 去掉 flag → 回到默认 data-determined，stage 2 应报 variable_output_flag
+        import re
+        bad = re.sub(r"(?m)^  output_count_determined_by:.*\n", "", self._SPLIT)
+        assert not re.search(r"(?m)^  output_count_determined_by:", bad)  # op 级声明已移除（注释提及不算）
+        rc, out = _run(bad, tmp_path)
+        s2 = next(s for s in out["stages"] if s["stage_id"] == 2)
+        assert s2["status"] == "FAIL"
+        assert any("variable_output_flag" in f["rule_id"] for f in s2["findings"])

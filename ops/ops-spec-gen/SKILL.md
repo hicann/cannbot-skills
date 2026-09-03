@@ -5,7 +5,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 
 # 算子 spec.yaml 生成与校验
 
-为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 9-stage L0 校验：
+为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 11-stage L0 校验：
 - **stage 1** schema_static — JSON Schema 字段静态校验
 - **stage 2** category_paradigm_consistency — category↔paradigm 一致性 + paradigm_groups + paradigm 内部约束
 - **stage 3** shape_closure — numpy_expr 求值 `outputs[].shape_rule`（含 `data_dependent` 分流）
@@ -15,6 +15,8 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 - **stage 7** tolerance_coverage — `numerical_tolerance.per_dtype` 覆盖输出 dtype + 紧度启发式
 - **stage 8** formula_smoke_eval — 把 formula 在小 shape (`[2,3]`) 上跑通，沙箱 numpy 执行
 - **stage 9** oracle_reachable — 真 import framework + getattr 链找 api + 占位符校验
+- **stage 10** formula_oracle_equiv — 在含特殊值（NaN/inf/大数/带符号零+0/-0）输入上比对 formula 与 oracle 输出，捕获公式形式差异
+- **stage 11** invariant_exec — 在生成输入上执行 invariants[] 校验 formula 输出，无需 oracle，是 stage 10 SKIP 时的替代机器校验
 
 ## 1. 何时使用
 
@@ -32,7 +34,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 | 入参（生成） | 算子名、category、paradigms[]、inputs（带 dtype_set）、outputs |
 | 出参（生成） | `<output_dir>/spec.yaml`（含 TODO 占位符，需手填 formula / oracle.api / supported_combinations / boundary cases） |
 | 入参（校验） | spec.yaml 路径 |
-| 出参（校验） | 9-stage findings；返回码 0=PASS / 1=FAIL（含 internal_error）/ 2=YAML 解析错；`--strict` 时 warning 也退 1 |
+| 出参（校验） | 11-stage findings；返回码 0=PASS / 1=FAIL（含 internal_error）/ 2=YAML 解析错；`--strict` 时 warning 也退 1 |
 
 ## 3. 生成 spec.yaml
 
@@ -108,6 +110,9 @@ python3 scripts/generate_spec.py \
   / `REQUIREMENTS.md` 里的文字不算机器可执行规则。
   若是 VariableOutput 范式的算子（shape 由输入值决定），改声明 `shape_rule_kind: data_dependent` +
   `shape_rule_description` + `shape_bounds.max_elements`，不写表达式。
+  DynamicShape 范式分两种：attr-driven（reshape / stridedslice，shape 由属性决定）用
+  `numpy_expr` 引用 attribute；value-driven（splitv 的 size_splits 张量输入决定 shape）用
+  `data_dependent` + `shape_rule_description` + `shape_bounds`。
 - `outputs[].dtype_rule` — numpy 子集表达式（如 `c.dtype = np.promote_types(a.dtype, b.dtype)`、
   `y.dtype = x.dtype`、`y.dtype = np.int32`）
 - `math_semantics.formula` — numpy 可 eval 的表达式
@@ -124,7 +129,7 @@ python3 scripts/generate_spec.py \
 ## 4. 校验 spec.yaml
 
 ```
-python3 scripts/validate_spec.py path/to/spec.yaml          # 文本输出，跑全 9 stage
+python3 scripts/validate_spec.py path/to/spec.yaml          # 文本输出，跑全 11 stage
 python3 scripts/validate_spec.py path/to/spec.yaml --json   # 机器可读
 python3 scripts/validate_spec.py path/to/spec.yaml --strict # 警告也 fail
 python3 scripts/validate_spec.py path/to/spec.yaml --quiet  # 仅打 FAIL 的 stage
@@ -142,6 +147,8 @@ python3 scripts/validate_spec.py path/to/spec.yaml --stage 1 --stage 2  # 仅跑
 | 7 | tolerance_coverage | per_dtype 容差覆盖输出 dtype + 紧度启发式 |
 | 8 | formula_smoke_eval | formula 小 shape 沙箱 numpy 执行 |
 | 9 | oracle_reachable | 真 import framework + getattr 链 + 占位符校验 |
+| 10 | formula_oracle_equiv | 含特殊值（NaN/inf/大数/带符号零）输入上 formula vs oracle 值等价比对 |
+| 11 | invariant_exec | 在生成输入上执行 invariants[] 校验 formula 输出（无需 oracle） |
 
 完整子规则表、numpy 子集 API 列表、代码示例见 [references/stage-rules.md](references/stage-rules.md)。
 
@@ -152,7 +159,7 @@ ops/ops-spec-gen/
 ├── SKILL.md                              # 本文件
 ├── references/
 │   ├── spec-cheatsheet.md                # 字段速查（按需阅读）
-│   ├── stage-rules.md                    # 9-stage 完整子规则 + numpy 子集 API
+│   ├── stage-rules.md                    # 11-stage 完整子规则 + numpy 子集 API
 │   ├── usage-scenarios.md                # 应用场景（场景二 + 场景五）
 │   └── error-codes.md                    # rule_id 全表（自动生成）
 ├── examples/                             # 11 个 PASS 校验的范例（教学 + CI fixture）
@@ -186,10 +193,10 @@ ops/ops-spec-gen/
 ├── templates/spec.yaml.tmpl              # spec.yaml 起手模板
 ├── scripts/
 │   ├── generate_spec.py                  # 生成器（交互/非交互）
-│   ├── validate_spec.py                  # 校验器主入口（完整 9 stage）
+│   ├── validate_spec.py                  # 校验器主入口（完整 11 stage）
 │   ├── check_registry_schema_sync.py     # registry↔schema 同步检查
 │   ├── dump_rule_ids.py                  # rule_id 全表生成
-│   └── evaluators/                       # numpy 子集 AST 求值器（stage 3-5/8/9 实现）
+│   └── evaluators/                       # numpy 子集 AST 求值器（stage 3-5/8/9/10 实现）
 │       ├── _ast_sandbox.py               #   AST 白名单 / dunder 拒绝 / timeout
 │       ├── types.py                      #   Dim / SymbolicShape / DslError
 │       ├── parser.py                     #   parse_shape_literal
@@ -199,7 +206,8 @@ ops/ops-spec-gen/
 │       ├── broadcast.py                  #   numpy / none / explicit 广播模拟
 │       ├── stages.py                     #   stage_3 / stage_4 / stage_5 入口
 │       ├── formula_eval.py               #   stage_8 numpy 沙箱
-│       └── oracle_check.py               #   stage_9 真 import + 占位符校验
+│       ├── oracle_check.py               #   stage_9 真 import + 占位符校验
+│       └── formula_oracle_equiv.py       #   stage_10 formula vs oracle 值等价
 └── tests/                                # 14 个测试文件
     ├── conftest.py
     ├── test_examples.py                  # pytest：所有 examples 必须 PASS
@@ -297,6 +305,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 | 16 | `extreme_inputs` | NaN / Inf / 全零等异常 case | ✓ | ✓ |
 | 17 | `determinism` | 确定性保证 | ✓ | ✓ |
 | 18 | `numerical_stability` | 数值稳定性技术 | ✓ | ✓ |
+| 19 | `inputs[].data_distribution` | 输入数据分布策略（累加类 Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram 必须 normal，非累加类不填；stage 2 强校验） | ✓ | ✓ |
 
 #### 字段职责分层
 
@@ -317,7 +326,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 - **上游**（提供）：Designer Agent 接收的算子需求 / REQUIREMENTS.md
 - **下游**（消费）：
-  - 9-stage L0 校验器以本 skill 输出的 spec.yaml 为输入
+  - 11-stage L0 校验器以本 skill 输出的 spec.yaml 为输入
   - `ascendc-st-design` skill 用 `boundary_conditions / extreme_inputs` 作为测试用例来源
   - Developer Agent 按 `numerical_stability.techniques.anti_pattern_id` 触发反模式审计
 
@@ -333,7 +342,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 | 场景 | 描述 |
 |------|------|
-| 从 REQUIREMENTS.md 生成 spec | 读取需求文档，调用生成器，手填 TODO，跑 9-stage 校验 |
-| spec 独立评审 | 14 条 SPEC-\* 条款逐项对照 spec ↔ REQUIREMENTS，输出评审报告 |
+| 从 REQUIREMENTS.md 生成 spec | 读取需求文档，调用生成器，手填 TODO，跑 11-stage 校验 |
+| spec 独立评审 | 17 条 SPEC-\* 条款逐项对照 spec ↔ REQUIREMENTS，输出评审报告 |
 
 详见 [references/usage-scenarios.md](references/usage-scenarios.md)。

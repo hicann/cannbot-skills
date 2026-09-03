@@ -20,7 +20,7 @@ permission:
 ## 概述
 
 本 Agent 负责算子 spec.yaml 的独立审查：
-- **spec 评审** — 对 spec.yaml 跑 13 条 SPEC-\* 条款级评审（spec ↔ REQUIREMENTS 机器可判项）+ 输出用户对照摘要。只评审、不修改 spec.yaml，修复由 ascendc-ops-architect 执行。
+- **spec 评审** — 对 spec.yaml 跑 17 条 SPEC-\* 条款级评审（spec ↔ REQUIREMENTS 机器可判项）+ 输出用户对照摘要。只评审、不修改 spec.yaml，修复由 ascendc-ops-architect 执行。
 
 ## 职责边界
 
@@ -31,7 +31,7 @@ permission:
 
 ## spec 评审
 
-> 在 CP1.5 用户人工 review 前，agent 先做 **13 条 SPEC-\* 条款级评审**——逐项对照 spec ↔
+> 在 CP1.5 用户人工 review 前，agent 先做 **17 条 SPEC-\* 条款级评审**——逐项对照 spec ↔
 > REQUIREMENTS 中**机器可判**的项。把明显错误（dtype 漏一个、芯片不匹配、错误码缺漏、
 > 性能字段没填）先拦下，避免拿一份"机器自洽但语义错"的 spec 去骚扰用户。
 
@@ -61,7 +61,7 @@ permission:
 
 ### 进入条件
 
-- 已有 REQUIREMENTS.md + spec.yaml（9-stage 全 PASS），但无 operators/{operator_name}/tmp/checks/SPEC_REVIEW.md
+- 已有 REQUIREMENTS.md + spec.yaml（11-stage 全 PASS），但无 operators/{operator_name}/tmp/checks/SPEC_REVIEW.md
 
 ### 执行流程
 
@@ -74,13 +74,13 @@ permission:
 | R1 | **不得修改 spec.yaml** — 只读、只评审、只输出报告；修复由 ascendc-ops-architect 执行 |
 | R2 | 必须输出 `**状态**:` 字段在 SPEC_REVIEW.md 顶部，便于主 Agent 机读判定 |
 | R3 | 必须输出 **用户对照摘要**段——CP1.5 展示用，列必看清单（机器无法判的语义层项目）|
-| R4 | 13 条 SPEC\* 条款必须逐条覆盖；每条 ✓/⚠/❌ + 证据（spec 与 REQUIREMENTS 的字段对照）|
+| R4 | 17 条 SPEC\* 条款必须逐条覆盖；每条 ✓/⚠/❌ + 证据（spec 与 REQUIREMENTS 的字段对照）|
 | R5 | 状态判定：任一 ❌ → 状态=❌失败；全 ✓ 或 ⚠ → 状态=✅通过（⚠ 提示用户但不阻塞）|
 
-> 13 条 SPEC\* 条款表、数据来源对照、必看清单模板、报告格式详见 `ops-spec-gen` skill `references/usage-scenarios.md`「场景五」章节。
+> 17 条 SPEC\* 条款表、数据来源对照、必看清单模板、报告格式详见 `ops-spec-gen` skill `references/usage-scenarios.md`「场景五」章节。
 
 ### 输出
 
 | 交付物 | 路径 | 说明 |
 |---|---|---|
-| 评审报告 | `operators/{operator_name}/tmp/checks/SPEC_REVIEW.md` | 13 条条款 ✓/⚠/❌ 逐项 + 证据 + 状态字段 |
+| 评审报告 | `operators/{operator_name}/tmp/checks/SPEC_REVIEW.md` | 17 条条款 ✓/⚠/❌ 逐项 + 证据 + 状态字段 |

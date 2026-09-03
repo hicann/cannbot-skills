@@ -58,7 +58,7 @@ STAGE_TABLE = {
     "1.2.5": {
         "commands": [
             ("git", "add", "operators/{op}/"),
-            ("git", "commit", "-m", "feat({op}): spec.yaml 生成与 9-stage 校验通过"),
+            ("git", "commit", "-m", "feat({op}): spec.yaml 生成与 11-stage 校验通过"),
         ],
     },
     "CP1.5": {

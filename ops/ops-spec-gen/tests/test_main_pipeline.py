@@ -128,6 +128,35 @@ class TestNegativeIntegration:
         assert any("data_dependent_requires_variable_output" in f["rule_id"]
                    for f in stage_3["findings"])
 
+    def test_data_dependent_allows_dynamic_shape_paradigm(self, tmp_path):
+        # DynamicShape paradigm 的 value-driven 子场景（如 splitv）允许 data_dependent。
+        good = (SKILL_ROOT / "examples" / "complex" / "spec.yaml").read_text(encoding="utf-8")
+        modified = good.replace(
+            "paradigms: [Broadcast, LayoutTransform]",
+            "paradigms: [Broadcast, LayoutTransform, DynamicShape]",
+        ).replace(
+            """    shape_rule_kind: numpy_expr
+    shape_rule: |
+      out.shape = np.broadcast_shapes(real.shape, imag.shape)
+""",
+            """    shape_rule_kind: data_dependent
+    data_dependent_shape: true
+    shape_rule_description: |
+      out.shape depends on runtime input values.
+    shape_bounds:
+      max_elements: "prod(real.shape)"
+""",
+        )
+
+        result = self._run(modified, tmp_path)
+
+        assert result.returncode == 0, result.stderr
+        out = json.loads(result.stdout)
+        stage_3 = next(s for s in out["stages"] if s["stage_id"] == 3)
+        assert not any("data_dependent_requires_variable_output" in f["rule_id"]
+                       for f in stage_3["findings"]), \
+            "DynamicShape paradigm 应允许 data_dependent"
+
     def test_numpy_expr_shape_rule_must_match_boundary_oracle(self, tmp_path):
         # shape_rule 不能只写默认/简化形状，再把完整广播语义留给 notes / formula。
         # 这里故意把 add 的输出 shape 写成 x.shape；标量 + tensor 的边界样例应触发 stage 3。
@@ -358,3 +387,33 @@ boundary_conditions:
         stage_2 = next(s for s in out["stages"] if s["stage_id"] == 2)
         assert stage_2["status"] == "FAIL"
         assert any("unknown_anti_pattern" in f["rule_id"] for f in stage_2["findings"])
+
+
+class TestOutputCountDeterminedBySchema:
+    """stage 1 schema 校验 output_count_determined_by 取值（enum: data/attribute）。
+    锁定"非法值被 stage 1 拦截"，避免拼错静默失效。"""
+
+    _SPLIT = (SKILL_ROOT / "examples" / "split" / "spec.yaml").read_text(encoding="utf-8")
+
+    def _run(self, spec_yaml: str, tmp_path: Path) -> tuple[int, dict]:
+        p = tmp_path / "spec.yaml"
+        p.write_text(spec_yaml, encoding="utf-8")
+        r = subprocess.run(
+            [sys.executable, str(VALIDATOR), str(p), "--json", "--stage", "1"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return r.returncode, json.loads(r.stdout) if r.stdout else {}
+
+    def test_valid_attribute_passes_stage1(self, tmp_path):
+        rc, out = self._run(self._SPLIT, tmp_path)
+        s1 = next(s for s in out["stages"] if s["stage_id"] == 1)
+        assert s1["status"] == "PASS"
+
+    def test_invalid_value_rejected_stage1(self, tmp_path):
+        import re
+        bad = re.sub(r"(?m)^  output_count_determined_by:.*",
+                     "  output_count_determined_by: attr", self._SPLIT)
+        rc, out = self._run(bad, tmp_path)
+        s1 = next(s for s in out["stages"] if s["stage_id"] == 1)
+        assert s1["status"] == "FAIL"
+        assert any("output_count_determined_by" in f.get("field_path", "") for f in s1["findings"])

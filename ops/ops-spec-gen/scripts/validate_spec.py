@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""spec.yaml validator — full 9-stage L0 校验.
+"""spec.yaml validator — full 11-stage L0 校验.
 
 Stage 1: jsonschema validation against schemas/op-spec.json.
 Stage 2: category ↔ paradigm consistency, mutual exclusion,
@@ -20,6 +20,7 @@ Stage 6: boundary_min_set — per-paradigm minimum case set.
 Stage 7: tolerance_coverage — per-dtype tolerance covers output dtypes + tightness.
 Stage 8: formula_smoke_eval — run formula on tiny tensors via numpy sandbox.
 Stage 9: oracle_reachable — real import framework + walk api attribute chain.
+Stage 10: formula_oracle_equiv — compare formula vs oracle outputs on special-value inputs (NaN/inf/large/signed-zero).
 
 Stage interface contract:
   - status ∈ {PASS, FAIL, SKIP}
@@ -115,6 +116,13 @@ def _load_schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+def _output_count_attr_determined(spec: dict) -> bool:
+    """True 当算子声明 op.output_count_determined_by=attribute（split/chunk/unbind 类：
+    输出个数由属性决定，非 data-dependent）。用于豁免 VariableOutput 的 data_dependent_shape
+    与 nonzero 类 boundary case。"""
+    return (spec.get("op") or {}).get("output_count_determined_by", "data") == "attribute"
+
+
 def stage_2(spec: dict, registries: dict) -> StageResult:
     """category ↔ paradigm consistency + paradigm internal constraints + whitelists.
 
@@ -140,6 +148,7 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
     _check_broadcast_paradigm_hint(spec, paradigms, res.findings)
     _check_format_variants(spec, res.findings)
     _check_interface_contracts(spec, res.findings)
+    _check_data_distribution(spec, cat, paradigms, res.findings)
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -855,15 +864,19 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
             ))
 
     if "VariableOutput" in paradigms:
-        for i, out in enumerate(spec.get("outputs", [])):
-            if not out.get("data_dependent_shape"):
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_constraint.variable_output_flag",
-                    field_path=f"outputs[{i}].data_dependent_shape",
-                    message="VariableOutput 输出必须配 data_dependent_shape: true",
-                    suggested_fix="在该 output 加 data_dependent_shape: true",
-                ))
+        # 属性决定输出个数（split/chunk/unbind 类）：输出个数与 shape 由属性决定，
+        # 非 data-dependent，豁免 data_dependent_shape 约束（仍走 attribute-driven shape_rule）。
+        _attr_determined = _output_count_attr_determined(spec)
+        if not _attr_determined:
+            for i, out in enumerate(spec.get("outputs", [])):
+                if not out.get("data_dependent_shape"):
+                    findings.append(Finding(
+                        severity="error",
+                        rule_id="paradigm_constraint.variable_output_flag",
+                        field_path=f"outputs[{i}].data_dependent_shape",
+                        message="VariableOutput 输出必须配 data_dependent_shape: true",
+                        suggested_fix="在该 output 加 data_dependent_shape: true，或若输出个数由属性决定则在 op 声明 output_count_determined_by: attribute",
+                    ))
 
     if "RandomSampling" in paradigms:
         attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
@@ -1413,6 +1426,68 @@ def _check_format_variants(spec, findings):
                     ))
 
 
+# 涉及累加的 category —— 这些算子的输入数据分布必须是正态分布（normal），
+# 因为均匀分布在累加链路上容易掩盖精度问题（值域窄、无大数吃小数），正态分布
+# 能暴露累加顺序敏感的精度缺陷。
+_ACCUMULATION_CATEGORIES = {
+    "Reduction", "ReductionComposite",
+    "Recurrence", "AtomicUpdate", "Histogram",
+}
+
+
+def _check_data_distribution(spec, cat, paradigms, findings):
+    """data_distribution 约束：
+      - 累加类算子（Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram）⇒
+        tensor role 的数据输入必须声明 data_distribution: normal
+        （dtype_set 全为整型的索引/轴输入跳过，不适用正态分布）
+        注：Contraction（matmul）不计入累加类——矩阵乘法精度取决于条件数而非累加顺序
+      - 非累加类算子 ⇒ 不应声明 data_distribution（留空 / 不写）
+    """
+    is_accum = cat in _ACCUMULATION_CATEGORIES
+    inputs = spec.get("inputs") or []
+    _integer_dtypes = {"int4", "int8", "int16", "int32", "int64",
+                       "uint1", "uint4", "uint8", "uint16", "uint32", "uint64", "bool"}
+
+    for i, inp in enumerate(inputs):
+        if not isinstance(inp, dict):
+            continue
+        # 只检查 tensor role 的输入（跳过 scalar / attribute_alias / state）
+        if inp.get("role") != "tensor":
+            continue
+        # 跳过整型索引/轴输入（如 axis/dim/axes/index）—— 正态分布不适用于索引值
+        dtype_set = set(inp.get("dtype_set") or [])
+        if dtype_set and dtype_set.issubset(_integer_dtypes):
+            continue
+        dist = inp.get("data_distribution")
+        prefix = f"inputs[{i}]({inp.get('name', '?')}).data_distribution"
+
+        if is_accum:
+            if dist != "normal":
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="data_distribution.accumulation_requires_normal",
+                    field_path=prefix,
+                    message=(
+                        f"category={cat} 属累加类算子，tensor 数据输入必须声明 "
+                        f"data_distribution: normal（当前为 {dist!r}）。"
+                        "正态分布能暴露累加顺序敏感的精度缺陷，均匀分布会掩盖"
+                    ),
+                    suggested_fix="添加 data_distribution: normal",
+                ))
+        else:
+            if dist is not None:
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="data_distribution.non_accumulation_must_omit",
+                    field_path=prefix,
+                    message=(
+                        f"category={cat} 非累加类算子，不应声明 data_distribution"
+                        f"（当前为 {dist!r}）。data_distribution 仅累加类算子填写"
+                    ),
+                    suggested_fix="删除该字段的 data_distribution",
+                ))
+
+
 def stage_6(spec: dict, registries: dict) -> StageResult:
     """boundary_min_set — 按 paradigms 检查 spec 是否覆盖各范式必含的最低 case 集。
 
@@ -1441,10 +1516,15 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
 
     broadcast_kind = (spec.get("broadcast") or {}).get("kind", "none")
 
+    _attr_determined_output = _output_count_attr_determined(spec)
     for paradigm in sorted(paradigms):
         # Broadcast paradigm 的 boundary cases 仅适用于输入间广播（kind != none）；
         # 单输入或内部计算广播（kind=none）不需要这些 case。
         if paradigm == "Broadcast" and broadcast_kind == "none":
+            continue
+        # 属性决定输出个数（split 类）：VariableOutput 的 empty/full/sparse case
+        # 是为 nonzero/where 这类数据决定输出个数的算子设计的，不适用于属性决定。
+        if paradigm == "VariableOutput" and _attr_determined_output:
             continue
 
         for req in requirements.get(paradigm, []) or []:
@@ -1592,26 +1672,26 @@ def _load_chip_registry() -> dict:
 
 
 def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
-    """Lazily import the evaluators package; if it fails, return five SKIP stages.
+    """Lazily import the evaluators package; if it fails, return SKIP stages.
 
-    Returns five StageResult objects in order: stage 3, 4, 5, 8, 9.
-    Stage 8 / 9 may individually SKIP based on env (numpy/framework not installed)
-    even when the evaluators package itself imports fine.
+    Returns seven StageResult objects in order: stage 3, 4, 5, 8, 9, 10, 11.
+    Stage 8 / 9 / 10 / 11 may individually SKIP based on env (numpy/framework not
+    installed) even when the evaluators package itself imports fine.
     """
     try:
         from evaluators import stages as eval_stages
-        from evaluators import formula_eval, oracle_check
+        from evaluators import formula_eval, oracle_check, formula_oracle_equiv, invariant_exec
     except ImportError as e:
         skip_finding = Finding(
             severity="info",
             rule_id="stage_skipped",
             field_path="<evaluators import>",
-            message=f"evaluators 子包不可用，stage 3-5/8/9 跳过：{e}",
+            message=f"evaluators 子包不可用，stage 3-5/8/9/10/11 跳过：{e}",
             suggested_fix="确认 scripts/evaluators/ 子包文件齐全",
         )
         return tuple(
             StageResult(stage_id=sid, status="SKIP", findings=[skip_finding])
-            for sid in (3, 4, 5, 8, 9)
+            for sid in (3, 4, 5, 8, 9, 10, 11)
         )
 
     pipeline = (
@@ -1620,6 +1700,8 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
         (5, eval_stages.stage_5),
         (8, formula_eval.stage_8),
         (9, oracle_check.stage_9),
+        (10, formula_oracle_equiv.stage_10),
+        (11, invariant_exec.stage_11),
     )
     results: list[StageResult] = []
     for stage_id, fn in pipeline:
@@ -1691,14 +1773,14 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 9-stage).")
+    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 11-stage).")
     ap.add_argument("spec_path")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of text")
     ap.add_argument("--strict", action="store_true",
                     help="Exit non-zero on warnings as well as errors")
-    ap.add_argument("--stage", action="append", type=int, choices=range(1, 10),
+    ap.add_argument("--stage", action="append", type=int, choices=range(1, 12),
                     metavar="N",
-                    help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 9 个")
+                    help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 11 个")
     ap.add_argument("--quiet", action="store_true",
                     help="只打 FAIL 的 stage（仍输出 overall 行）")
     args = ap.parse_args()
@@ -1726,11 +1808,11 @@ def main() -> int:
         stages.append(stage_1(spec))
     if selected is None or 2 in selected:
         stages.append(stage_2(spec, registries))
-    # stage 3/4/5/8/9 共享 DSL 子包 lazy import；选中其一即触发
-    dsl_needed = selected is None or selected & {3, 4, 5, 8, 9}
+    # stage 3/4/5/8/9/10/11 共享 DSL 子包 lazy import；选中其一即触发
+    dsl_needed = selected is None or selected & {3, 4, 5, 8, 9, 10, 11}
     if dsl_needed:
-        s3, s4, s5, s8, s9 = _run_eval_stages(spec)
-        for sid, sr in zip((3, 4, 5, 8, 9), (s3, s4, s5, s8, s9)):
+        s3, s4, s5, s8, s9, s10, s11 = _run_eval_stages(spec)
+        for sid, sr in zip((3, 4, 5, 8, 9, 10, 11), (s3, s4, s5, s8, s9, s10, s11)):
             if selected is None or sid in selected:
                 stages.append(sr)
     if selected is None or 6 in selected:
@@ -1738,7 +1820,7 @@ def main() -> int:
     if selected is None or 7 in selected:
         stages.append(stage_7(spec))
 
-    # 按 stage_id 排序，确保打印顺序与 1..9 一致
+    # 按 stage_id 排序，确保打印顺序与 1..10 一致
     stages.sort(key=lambda s: s.stage_id)
 
     if args.json:

@@ -328,5 +328,4 @@ extreme_inputs:
 determinism:
   required: true                             # CANN 文档：默认确定性实现
   accumulation_order: tree
-  partition_constraint: "K 切分后必须用固定顺序累加；scale/bias 是标量不影响分块；GeLU 元素级无累加"
   bitwise_reproducible: false                # fp32 累加顺序差异不可严格 bitwise

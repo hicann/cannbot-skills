@@ -65,6 +65,11 @@
             "AtomicUpdate", "Broadcast"
           ]
         },
+        "output_count_determined_by": {
+          "type": "string",
+          "enum": ["data", "attribute"],
+          "description": "输出个数决定方式：data=输入数据决定（nonzero/where，默认）；attribute=由属性决定（split/chunk/unbind 类，豁免 data_dependent_shape 与 nonzero 专属 boundary case）"
+        },
         "paradigms": {
           "type": "array",
           "minItems": 1,
@@ -663,7 +668,6 @@
         "accumulation_order": {
           "enum": ["stable_in_axis", "tree", "sequential", "none"]
         },
-        "partition_constraint": {"type": "string"},
         "bitwise_reproducible": {"type": "boolean"}
       }
     }

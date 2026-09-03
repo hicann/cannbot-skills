@@ -26,7 +26,7 @@ attributes: []             # 非张量参数，含 machine_constraint
 outputs: []                # 用 numpy 子集表达式描述 shape/dtype 推导规则
 semantic_cases: []         # 可选输入/输出的条件存在性；when 只允许 attr.<name>、input.<name>.dtype 或 input.<name>.is_present
 layout_contract: {}        # 可选逻辑布局变体：selector + 已声明 Tensor 的 logical_axes；不替代各 I/O 的 layout
-shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 9-stage 机器校验，见 §D.8）+ notes
+shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 11-stage 机器校验，见 §D.8）+ notes
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
 broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
 math_semantics: {}         # formula + reference_oracle + invariants + composition (FusedComposite 必填)
@@ -34,7 +34,7 @@ numerical_stability: {}    # required + techniques (含 anti_pattern_id)
 numerical_tolerance: {}    # per_dtype: {rtol, atol, metric}
 boundary_conditions: []    # 机器可断言的退化/越界 case（L0 语义）
 extreme_inputs: []         # NaN / Inf / 全零等异常 case（L0 语义）
-determinism: {}            # accumulation_order + bitwise_reproducible
+determinism: {}            # accumulation_order + bitwise_reproducible（语义详解见 [accumulation_order.md](accumulation_order.md)）
 # test_matrix 已移出，由 ascendc-st-design skill 独立管理
 ```
 
@@ -109,7 +109,7 @@ variable_output · spectral · histogram · atomic_update · broadcast
 | kind | 适用 | shape_rule 内容 |
 |---|---|---|
 | `numpy_expr` | 输出形状可静态从输入 shape + attribute 推出（绝大多数算子） | numpy 表达式 |
-| `data_dependent` | 输出形状由输入**值**决定（nonzero / unique / masked_select 等 VariableOutput） | 仅允许 `op.paradigms` 含 `VariableOutput`；不写表达式，写 `shape_rule_description` + `shape_bounds` |
+| `data_dependent` | 输出形状由输入**值**决定（nonzero / unique / masked_select 等 VariableOutput；splitv 等 DynamicShape value-driven） | 仅允许 `op.paradigms` 含 `VariableOutput` 或 `DynamicShape`；不写表达式，写 `shape_rule_description` + `shape_bounds` |
 | `textual_only` | 输出形状因数据排布**格式**而异（如 NCHW vs NHWC 的 Channel 轴位置不同） | 仅允许 `math_semantics.format_variants` 存在；可含 `${format_variants[].channel_axis}` 占位符；必须配 `shape_rule_description` |
 
 `inputs[].shape.symbolic` 列表元素三类：显式维（`"M"` 大写） / 折叠维（`"...d"` 小写，仅可作首元素） / 常量维（整数）。
@@ -211,7 +211,24 @@ layout_contract:
 
 `layout_contract` **不**添加 `physical_format`：物理/表示 format 仍唯一地由既有 `inputs[].layout` / `outputs[].layout` 声明。它也不重复声明 transpose/permutation 或 shape 公式；这些仍由 `math_semantics.formula` 与 `outputs[].shape_rule` 定义。固定 rank input 的 `logical_axes` 个数由 Stage 2 校验；输出没有 `rank_range`，不从其 shape rule 猜测 rank。
 
-### B5d. format_variants（数据排布格式变体）
+### B5d. data_distribution（输入数据分布策略）
+
+`inputs[].data_distribution` — 声明该输入的测试数据分布策略，供下游 `ascendc-st-design` 消费。利用 `inputs` 的 `additionalProperties: true`，无需改 schema。
+
+**填写规则（stage 2 强校验）**：
+
+| 算子类别 | data_distribution 值 | 说明 |
+|----------|----------------------|------|
+| **累加类**（Reduction / ReductionComposite / Recurrence / AtomicUpdate / Histogram） | **必须 `normal`** | 正态分布能暴露累加顺序敏感的精度缺陷（大数吃小数），均匀分布会掩盖 |
+| **非累加类**（其他所有 category） | **不填**（省略字段） | 非累加类算子不涉及累加精度，无需指定分布 |
+
+生成器对累加类 tensor 输入自动注入 `data_distribution: normal`，非累加类不注入。
+
+| 值 | 含义 |
+|---|---|
+| `normal` | 正态分布（累加类算子唯一合法值） |
+
+### B5e. format_variants（数据排布格式变体）
 
 当算子支持多种数据排布（如 NCHW/NHWC/NCDHW）且**归约轴或计算逻辑因格式而异**时，
 在 `math_semantics.format_variants` 中声明每种格式的具体参数：
@@ -310,7 +327,7 @@ math_semantics:
 
 ---
 
-## C. 9-stage L0 校验器（全景）
+## C. 11-stage L0 校验器（全景）
 
 | stage | 名称 | 范围 |
 |---|---|---|

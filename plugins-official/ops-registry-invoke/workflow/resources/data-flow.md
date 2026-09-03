@@ -13,7 +13,7 @@
 | **第一阶段：设计** | 1.1 开发准备 | - | 创建开发日志 | 用户描述 | LOG.md | `operators/{operator_name}/docs/` |
 | | 1.2 需求分析 | - | 收集算子需求信息 | 用户描述 | REQUIREMENTS.md | `operators/{operator_name}/docs/` |
 | | | | | | aclnn{OperatorName}.md | `operators/{operator_name}/docs/` |
-| | **1.2.5 spec 生成** | - | 生成机器可校验的 L0 数学契约（9-stage 全 PASS） | REQUIREMENTS.md | spec.yaml | `operators/{operator_name}/docs/` |
+| | **1.2.5 spec 生成** | - | 生成机器可校验的 L0 数学契约（11-stage 全 PASS） | REQUIREMENTS.md | spec.yaml | `operators/{operator_name}/docs/` |
 | | 1.2.5R spec 评审 | - | SPEC 条款级评审（CP1.5 前置，由 spec-reviewer 独立执行） | REQUIREMENTS.md + spec.yaml | SPEC_REVIEW.md | `operators/{operator_name}/tmp/checks/` |
 | | 1.3a 设计准备 | - | 路线决策 + 模板选型 + API 验证 | REQUIREMENTS.md + spec.yaml | DESIGN_PREP.md | `operators/{operator_name}/docs/` |
 | | 1.3b-d 分段生成与组装 | - | 切片（主 Agent）→ 5 分段 Agent 并行生成 → 组装+校验（主 Agent） | spec.yaml + REQUIREMENTS.md + DESIGN_PREP.md | DESIGN.md + PLAN.md | `operators/{operator_name}/docs/` |

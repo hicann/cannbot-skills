@@ -93,7 +93,7 @@
         "eval_mode": "text"
       },
       "prompt": "注册调用开发前会先产出 spec.yaml，它是什么？包含哪些内容？谁来生成、谁来评审？",
-      "expected_output": "回复应覆盖以下要点：\n1. spec.yaml 是算子的 L0 数学契约（数学定义、输入输出 dtype/shape、边界、容差、oracle 等）\n2. 由架构师（architect）生成并经 9-stage 校验\n3. 由 spec 评审 agent 按 13 条 SPEC-* 条款评审，评审通过后才进入设计阶段",
+      "expected_output": "回复应覆盖以下要点：\n1. spec.yaml 是算子的 L0 数学契约（数学定义、输入输出 dtype/shape、边界、容差、oracle 等）\n2. 由架构师（architect）生成并经 11-stage 校验\n3. 由 spec 评审 agent 按 17 条 SPEC-* 条款评审，评审通过后才进入设计阶段",
       "files": [],
       "expectations": [
         {

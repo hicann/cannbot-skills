@@ -168,6 +168,55 @@ def _is_dtype_standin_match(spec_dtype: str, runtime_dtype: str) -> bool:
     return (spec_dtype, runtime_dtype) in _DTYPE_STANDIN_PAIRS
 
 
+# ---------- formula execution (shared by stages 10 / 11) -------------------
+
+
+def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any]) -> dict[str, Any] | None:
+    """Run the spec formula in the AST sandbox; return {output_name: ndarray}.
+
+    Returns None on any compile / runtime error. Shared by stages that sample
+    the formula output: stage 10 (formula vs oracle) and stage 11 (invariants).
+    """
+    formula = (spec.get("math_semantics") or {}).get("formula", "")
+    if not formula.strip():
+        return None
+    try:
+        tree = ast.parse(formula, mode="exec")
+        _validate_ast(tree)
+        compiled = compile(tree, "<formula>", "exec")
+    except (SyntaxError, FormulaError):
+        return None
+
+    attr_values: dict[str, Any] = {}
+    for a in spec.get("attributes") or []:
+        if "default" in a:
+            attr_values[a["name"]] = a["default"]
+
+    g = _ast_sandbox.make_globals({"np": np_mod, "math": math})
+    g.update(input_tensors)
+    g.update(attr_values)
+
+    locals_dict: dict[str, Any] = {}
+    try:
+        with _timeout(5):
+            exec(compiled, g, locals_dict)
+    except Exception:
+        return None
+
+    outputs: dict[str, Any] = {}
+    for out in spec.get("outputs") or []:
+        name = out.get("name")
+        if name in locals_dict:
+            val = locals_dict[name]
+            if not isinstance(val, type(np_mod.zeros(0))):
+                try:
+                    val = np_mod.asarray(val)
+                except Exception:
+                    continue
+            outputs[name] = val
+    return outputs if outputs else None
+
+
 # ---------- main entry -----------------------------------------------------
 
 
