@@ -91,13 +91,14 @@ stages:
                 --pr-number "${{ env.MERGE_ID }}" \
                 --platforms A2 \
                 --password "${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}" \
+                --gitcode-repo cann/cannbot-skills \
                 --timeout 3600 \
                 --poll-interval 60 \
                 --strict
         if: "${{ default() }}"
         runs-on:
           - self-hosted
-          - runner_name=A5_skill_tester
+          - runner_name=A5_skill_tester_02
     pre:
     - type: auto
     fail-fast: false
