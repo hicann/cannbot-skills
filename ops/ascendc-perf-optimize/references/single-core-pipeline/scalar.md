@@ -21,6 +21,7 @@
 | **指令选择** | 使用高效 scalar 指令替代低效序列 | 缩短关键路径 |
 | **减少标量-向量转换** | 避免不必要的 Scalar ↔ Vector 数据搬移 | 减少搬移开销 |
 | **使用性能友好的API** | 使用set_flag和wait_flag代替Queue，使用LocalTensor代替Tbuffer，去除Tpipe | 减少封装带来的scalar |
+| **MatMul API 常量折叠** | Kernel 使用 Matmul API 且 `aic_scalar_ratio` ≥ 0.15、shape 可固化或可取上界 | 把 `TCubeTiling` 解析迁到编译期，降低 `aic_scalar_time`。 |
 
 ## Tiling 修正建议
 

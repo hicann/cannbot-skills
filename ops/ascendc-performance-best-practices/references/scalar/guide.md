@@ -27,4 +27,5 @@ Scalar 优化与算子族优化**正交**：算子族优化决定"做什么计�
 | 算子族 | 场景 | 核心思路 | 指南 |
 |--------|------|---------|------|
 | Conv | Depthwise、小 case（FMAP/Weight 全载 L1） | 固定循环轴 + 去除高层抽象 + TilingData 常量化 | [Conv Scalar 优化指南](conv_scalar.md) |
+| MatMul | Matmul API 运行时解析 `TCubeTiling`，`aic_scalar_ratio` 偏高 | 编译期 `MatmulApiStaticTiling` 常量折叠 | [constant_folding_design.md](../matmul/constant_folding_design.md) |
 | FA | — | 📋 规划中 | — |

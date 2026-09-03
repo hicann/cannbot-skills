@@ -132,6 +132,21 @@
       "expected_output": "回复应说明多核间同步算子对应 Step 3 核间流水优化：1) 适用条件为多核间同步算子（如跨核同步 Barrier/Event、核间数据依赖）；2) 分析核间任务依赖、同步开销与数据依赖，评估核间流水并行效率，输出核间流水仿真图分析、核间 profiling 数据报告、核间流水优化策略及对 Step 1 tiling 策略的修正建议；3) 当前 references/inter-core-pipeline 内容为空，实际执行时应返回「核间流水优化策略暂未收录，跳过核间流水分析」。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 9,
+      "title": "MatMul Scalar Bound 评估常量折叠",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在优化一个普通 MatMul 算子，msprof 显示 aic_scalar_ratio=0.42，aic_mte2_ratio=0.55，kernel 使用 AscendC::Matmul 并从 GM 加载 TCubeTiling。请按 ascendc-perf-optimize 的单核流水流程判断是否推荐 Matmul API 常量折叠，以及实施应去哪个技能。不需要执行任何工具调用。",
+      "expected_output": "回复应说明：1) 普通 MatMul 走 Step 1 后跳过 Step 2/3，进入 Step 4；2) aic_scalar_ratio>0.3 判定 Scalar Bound，且含 Matmul API，应加载 single-core-pipeline/matmul_constant_folding.md 并给出 Go；3) 常量折叠与 host buildTiling 正交；4) 实施细节在 ascendc-performance-best-practices 的 matmul constant_folding_design.md，不要把逐步改代码写进本技能流程本身。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-perf-optimize"

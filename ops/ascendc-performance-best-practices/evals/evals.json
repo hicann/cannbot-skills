@@ -117,6 +117,21 @@
       "expected_output": "回复应引用公共优化能力中的尾块处理指南（references/common/tail_block_design.md），说明对不能被 tile 大小整除的数据量采用双轨制 norm/tail 核分离、GatherMask 向量化处理尾块以及 32B/64B 对齐与 DataCopyPad 等策略，避免越界访问与负载不均衡。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 9,
+      "title": "MatMul API 常量折叠实施",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要把 Ascend C Matmul API 的运行时 TCubeTiling 改成编译期 MatmulApiStaticTiling 常量折叠，降低 aic_scalar_time。这个技能里 MatMul 族有对应的实施指南吗？改造时要注意哪些精度相关问题？可阅读该技能文档获取规范，但不要实际执行 profiling 或修改代码。",
+      "expected_output": "回复应引用 MatMul 族 constant_folding 策略（references/matmul/constant_folding_design.md），说明用 constexpr MatmulApiStaticTiling 作为第 5 个模板参数、Init/REGIST 传 nullptr 后再 SetOrgShape、调用点 shape 必须全程 constexpr；并强调 isTrans/BiasType/对象类型不可改、singleCore 填上界、SetOrgShape 不能放在 REGIST 之前，以及尾块维度不可常量化。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-performance-best-practices"

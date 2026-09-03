@@ -12,3 +12,4 @@
 | **fullload**（A-Full-Load / B-Full-Load） | 有"小侧矩阵"（一侧 ≤ L1/2）+ 对侧循环次数 `T ≥ 2` + 真 MTE2 bound | 小侧矩阵 + 随路 Scale 一次性驻留 L1，消除对侧循环中的重复 GM→L1 搬运 | [fullload_design.md](fullload_design.md) |
 | **scale_coalescing** | 假 MTE2 bound（MTE2 busy 高但带宽利用率 < 70%）+ 存在 < 20 KB 的 scale / bias / LUT 小块 | `scaleKL1 = SCALE_L1_BUFFER_NUM × kL1`，把 K 向 `baseK` 切碎的小块合并成一次大 MTE2 | [scale_coalescing_design.md](scale_coalescing_design.md) |
 | **mte2_preload** | pingpong 已开 + 各流水 busy ≤ 70%（准无 bound）+ 流水图可见 MTE2_PING/PONG 间 gap + `kL1TileNum ≥ 2` | Kernel 主循环改造为「段 1 首轮 PING / 段 2 预取 PONG / 段 3 消费」三段结构；零 TilingData 数值改动 | [mte2_preload_design.md](mte2_preload_design.md) |
+| **constant_folding** | Kernel 使用 Matmul API 且 `aic_scalar_ratio` 偏高（分析层 Go）；shape 可固化或可取上界 | 将 `TCubeTiling` 解析迁到编译期 `MatmulApiStaticTiling`，降低 `aic_scalar_time` | [constant_folding_design.md](constant_folding_design.md) |

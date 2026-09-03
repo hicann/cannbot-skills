@@ -43,7 +43,7 @@ description: Ascend C 算子性能优化最佳实践库。按算子族组织优�
 | 输入 | 必需 | 说明 |
 |------|------|------|
 | 算子名 | 是 | 如 `matmul` / `matmul_mxfp4` / `batch_matmul` |
-| 优化类型 | 否 | 如 `pingpong` / `swat` / `streamk` / `fullload` / `scale_coalescing` / `mte2_preload`；不提供则加载全部 |
+| 优化类型 | 否 | 如 `pingpong` / `swat` / `streamk` / `fullload` / `scale_coalescing` / `mte2_preload` / `constant_folding`；不提供则加载全部 |
 
 查询流程：**算子名 → 映射到算子族 → 定位 `references/<family>/` → 按优化类型筛选文档**。算子族映射规则：精确匹配族名直接命中；以族名为前缀或核心词（如 `matmul_mxfp4`、`batch_matmul`）归入该族；其他形态由调用方按功能显式指定。
 
