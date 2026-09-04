@@ -189,6 +189,19 @@ python3 .claude/skills/triton-op-verifier/scripts/freeze_baseline.py \
 
 ### Step 1：前置检查（先执行，产出 precheck.json）
 
+0. **先定 `category`（强制，禁止凭直觉）**。按以下判别表定，命中即固定，不得再落到更宽泛的类别：
+
+| 判别特征（满足任意一条） | `category` | `template_path` |
+|---|---|---|
+| 算子写法落在 attention 五大类之一：**一 标准类**（基准三段式，或只加 mask／改 head 索引／改分块流式）、**二 压缩类**（K/V 取数前插一段）、**三 稀疏类**（KV 循环前插「选哪些块」）、**四 线性类**（整个换掉，无 softmax）、**五 专用类**（换目标函数或数据组织） | **读 `.claude/template/attention_index.md` 定** | 同上 |
+
+> ⚠️ 按**写法**分（打开 kernel 看骨架），不按降本手段分——Longformer 按手段是稀疏，
+> 按写法只是三段式加 `masked_fill`，与 MHA 共用模板。第六大类「非注意力」不走本行。
+>
+> ⚠️ 命中本行后**必须以显式路径读该索引**，由它定细分、`category` 与 `template_path`；
+> `precheck.json` 增记 `index_path` 与 `writing_class`。跳过索引就拿不到 `category`，
+> Step 1 门禁不通过。**新增 attention 变体改索引，不改本表。**
+
 1. 检查 `.claude/template/{category}.md` 是否存在当前算子的 template 文档。**无论是否存在**，都必须产出 `{工作目录}/precheck.json`，记录 `category`、`template_path`、`template_exists`、`layer1_constraints_loaded`（存在时逐条原文摘录，不得为空）、`loaded_via`（只允许 `explicit_path`，**禁止自动发现**）。
 2. 若该文件存在，`precheck.json` 中记录的 Layer 1 约束视为本次草图设计的**硬性边界**；若不存在，标记 `new_category` 并在草图通过后新建该文件回填约束。
 
