@@ -28,6 +28,19 @@ extern "C"
         return fn(userData);
     }
 
+    static inline cudaError_t cudaCompatFuncGetHostFallbackAttributes(cudaFuncAttributes *attr)
+    {
+        if (!attr) {
+            return cudaErrorInvalidValue;
+        }
+#ifdef __cplusplus
+        *attr = cudaFuncAttributes();
+#else
+        *attr = (cudaFuncAttributes){0};
+#endif
+        return cudaSuccess;
+    }
+
 
     static inline cudaError_t cudaLaunchHostFunc(cudaStream_t stream,
                                                  cudaHostFn_t fn,

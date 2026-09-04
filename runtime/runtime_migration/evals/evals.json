@@ -44,7 +44,7 @@
     },
     {
       "id": 3,
-      "title": "迁移增量 Runtime/Driver API 并运行 apiRuntimeCoverage 回归",
+      "title": "迁移增量 Runtime/Driver API 并运行 CUDA apiRuntimeCoverage 覆盖样例",
       "config": {
         "max_tokens": 500000,
         "max_tokens_by_model": {
@@ -55,11 +55,11 @@
         ],
         "disabled": true
       },
-      "prompt": "请使用 runtime_migration skill 将附件 incremental_runtime_driver_cuda.cpp 迁移到 CANN Runtime，并同时使用附件 apiRuntimeCoverage.cpp 作为回归验证程序。要求迁移后样例和 apiRuntimeCoverage 都能在当前 CANN 环境编译运行。",
-      "expected_output": "应产出迁移后的 incremental_runtime_driver 源码、构建命令和运行结果，并额外编译运行 evals/inputs/apiRuntimeCoverage.cpp 作为兼容层回归验证。迁移后 incremental_runtime_driver 应通过 cudaEventRecordWithFlags default flag、cuCtxGetCurrent、cuCtxSetCurrent、cuDevicePrimaryCtxGetState、cuMemsetD32Async、cuStreamWriteValue32、cudaGetSymbolAddress/cudaMemcpyToSymbol invalid-input 检查，输出 `incremental_runtime_driver PASS`。cuDevicePrimaryCtxGetState 的底层 aclrtGetPrimaryCtxState flags 参数必须按 CANN 文档固定传 NULL，CUDA 侧 flags 输出置 0；cudaEventRecordWithFlags 应以 default flag 稳定验证普通 record 能力，不能用普通 stream 上的 external flag 失败来判断 910B 不支持。apiRuntimeCoverage 回归运行必须达到 `Failures = 0` 和 `Result = PASS`，新增接口不允许被长期 Optional/SKIP 掩盖。",
+      "prompt": "请使用 runtime_migration skill 将附件 incremental_runtime_driver_cuda.cpp 和 apiRuntimeCoverage_cuda.cu 从 CUDA 迁移到 CANN Runtime。要求产出可编译运行的迁移后源码和构建命令，并在当前 CANN 环境运行验证。转换前 CUDA 语义预期分别是输出 `incremental_runtime_driver PASS`，以及 apiRuntimeCoverage 运行结束时 `Failures = 0`、`Result = PASS`。",
+      "expected_output": "应产出迁移后的 incremental_runtime_driver 源码、apiRuntimeCoverage 源码、构建命令和运行结果。两份输入都是 CUDA 原始代码：应将 CUDA 头替换为 `cann_runtime_compat.h` 并链接 libcudacompat、acl_rt 和必要 CANN 库；apiRuntimeCoverage_cuda.cu 中的 `__global__ ApiRuntimeCoverageKernel` 和 `cudaLaunchKernel(...)` 不能声称已经迁移成 NPU kernel，也不能调用其他算子迁移 skill，应把等价写入逻辑隔离成 Host/CPU fallback，并通过 cudaCompatLaunchHostKernel 或等价兼容层 host fallback 调用维持 launch 流程。迁移后 incremental_runtime_driver 应通过 cudaEventRecordWithFlags default flag、cuCtxGetCurrent、cuCtxSetCurrent、cuDevicePrimaryCtxGetState、cuMemsetD32Async、cuStreamWriteValue32、cudaGetSymbolAddress/cudaMemcpyToSymbol invalid-input 检查，输出 `incremental_runtime_driver PASS`。cuDevicePrimaryCtxGetState 的底层 aclrtGetPrimaryCtxState flags 参数必须按 CANN 文档固定传 NULL，CUDA 侧 flags 输出置 0；cudaEventRecordWithFlags 应以 default flag 稳定验证普通 record 能力，不能用普通 stream 上的 external flag 失败来判断 910B 不支持。apiRuntimeCoverage 的 conditional graph 覆盖必须走真实路径：`cudaGraphConditionalHandleCreate` 创建 handle、`cudaGraphAddNode(cudaGraphNodeTypeConditional)` 添加条件节点、`cudaStreamBeginCaptureToGraph` 捕获 body graph、CUDA 侧 body kernel 调用 device-side `cudaGraphSetConditional` 退出 WHILE，CANN 侧通过兼容层转换为 `aclmdlRICondHandleCreate`、`aclmdlRIAddCondTask`、`aclmdlRICaptureToModelRIBegin` 和条件指针写入；不能用空 capture 或 null 参数错误返回作为验收。迁移后的 apiRuntimeCoverage 运行必须达到 `Failures = 0` 和 `Result = PASS`，报告中需明确 kernel 部分使用 Host/CPU fallback，不用于 NPU kernel 性能或设备侧正确性结论。",
       "files": [
         "evals/inputs/incremental_runtime_driver_cuda.cpp",
-        "evals/inputs/apiRuntimeCoverage.cpp"
+        "evals/inputs/apiRuntimeCoverage_cuda.cu"
       ],
       "expectations": []
     }

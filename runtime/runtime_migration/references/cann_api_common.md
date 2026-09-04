@@ -565,6 +565,14 @@ aclError aclmdlRICondHandleCreate(aclmdlRI modelRI, uint32_t defaultLaunchValue,
 - 约束：本接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
 - 返回：ACL_SUCCESS 或错误码
 
+### aclmdlRIAddCondTask
+```c
+aclError aclmdlRIAddCondTask(aclmdlRICondTaskParams params, aclrtStream stream, uint32_t flags);
+```
+- 功能：向 capture active 状态的 ACL graph stream 注册 IF/WHILE/SWITCH 条件任务，并输出子 Model RI
+- 约束：用于 `cudaGraphAddNode(cudaGraphNodeTypeConditional)` 特例映射；通用 CUDA Graph node 不按此接口映射
+- 返回：ACL_SUCCESS 或错误码
+
 ### aclmdlRIGetStreams / aclmdlRIGetTasksByStream
 ```c
 aclError aclmdlRIGetStreams(aclmdlRI modelRI, aclrtStream *streams, uint32_t *numStreams);
@@ -650,7 +658,6 @@ aclError aclmdlRICaptureToModelRIBegin(aclrtStream stream, aclmdlRI modelRI,
 | `aclrtGetSymbolAddress` | `cudaGetSymbolAddress` | 获取设备符号地址 |
 | `aclrtMemcpyToSymbol` | `cudaMemcpyToSymbol` | 向设备符号拷贝 |
 | `aclrtMemsetD32Async` | `cuMemsetD32Async` | D32 异步 memset |
-| `aclrtMemManagedAdvise` | `cudaMemAdvise` | Managed memory advise |
 | `aclrtGetFunctionAttribute` | `cudaFuncGetAttributes` | 查询 function 属性 |
 | `aclrtGetCurrentContext` | `cuCtxGetCurrent` | 获取当前 context |
 | `aclrtSetCurrentContext` | `cuCtxSetCurrent` | 设置当前 context |
@@ -694,4 +701,7 @@ aclError aclmdlRICaptureToModelRIBegin(aclrtStream stream, aclmdlRI modelRI,
 | cudaEventDisableTiming | 不设置 ACL_EVENT_TIME_LINE |
 | cudaEventInterprocess | ACL_EVENT_IPC |
 | cudaStreamNonBlocking | flag = 0 |
-| cudaHostRegisterDefault | ACL_HOST_MEM_REGISTER_DEFAULT
+| cudaHostRegisterDefault | ACL_HOST_REG_PINNED |
+| cudaHostRegisterMapped | ACL_HOST_REG_MAPPED + ACL_HOST_REG_PINNED |
+| cudaHostRegisterIoMemory | ACL_HOST_REG_IOMEMORY + ACL_HOST_REG_PINNED |
+| cudaHostRegisterReadOnly | ACL_HOST_REG_READONLY + ACL_HOST_REG_PINNED |

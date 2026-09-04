@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "acl/acl_rt.h"
 #include "cann_compat_device_types.h"
 #include "cann_compat_error_types.h"
@@ -28,6 +29,9 @@ extern "C"
 
 #define MOCK_CUDA_MAJOR_VERSION 13
 #define MOCK_CUDA_MINOR_VERSION 0
+#ifndef CUDART_VERSION
+#define CUDART_VERSION 13000
+#endif
 
 #define cudaStreamNonDefault    0x00
 #define cudaStreamNonBlocking   0x01
@@ -239,6 +243,15 @@ extern "C"
         cudaHostAllocWriteCombined = 4,
     } cudaHostAllocFlags;
 
+    typedef enum
+    {
+        cudaHostRegisterDefault = 0,
+        cudaHostRegisterPortable = 1,
+        cudaHostRegisterMapped = 2,
+        cudaHostRegisterIoMemory = 4,
+        cudaHostRegisterReadOnly = 8
+    } cudaHostRegisterFlags;
+
     typedef enum cudaMemcpySrcAccessOrder
     {
         cudaMemcpySrcAccessOrderInvalid = 0x0,
@@ -387,6 +400,112 @@ extern "C"
 
 #define cudaGraphCondAssignDefault 0x1U
 
+    typedef enum
+    {
+        cudaGraphNodeTypeKernel = 0,
+        cudaGraphNodeTypeMemcpy = 1,
+        cudaGraphNodeTypeMemset = 2,
+        cudaGraphNodeTypeHost = 3,
+        cudaGraphNodeTypeGraph = 4,
+        cudaGraphNodeTypeEmpty = 5,
+        cudaGraphNodeTypeWaitEvent = 6,
+        cudaGraphNodeTypeEventRecord = 7,
+        cudaGraphNodeTypeExtSemaphoreSignal = 8,
+        cudaGraphNodeTypeExtSemaphoreWait = 9,
+        cudaGraphNodeTypeMemAlloc = 10,
+        cudaGraphNodeTypeMemFree = 11,
+        cudaGraphNodeTypeBatchMemOp = 12,
+        cudaGraphNodeTypeConditional = 13
+    } cudaGraphNodeType;
+
+    typedef enum
+    {
+        cudaGraphCondTypeIf = 0,
+        cudaGraphCondTypeWhile = 1,
+        cudaGraphCondTypeSwitch = 2
+    } cudaGraphConditionalNodeType;
+
+    typedef struct
+    {
+        cudaGraphConditionalHandle handle;
+        cudaGraphConditionalNodeType type;
+        unsigned int size;
+        cudaGraph_t *phGraph_out;
+    } cudaGraphConditionalNodeParams;
+
+    typedef struct
+    {
+        cudaGraphNodeType type;
+        union
+        {
+            cudaGraphConditionalNodeParams conditional;
+        };
+    } cudaGraphNodeParams;
+
+    typedef struct cudaCompatGraphCaptureEntry_st
+    {
+        cudaGraph_t graph;
+        cudaStream_t stream;
+        struct cudaCompatGraphCaptureEntry_st *next;
+    } cudaCompatGraphCaptureEntry;
+
+    static inline cudaCompatGraphCaptureEntry **cudaCompatGraphCaptureRegistry(void)
+    {
+        static cudaCompatGraphCaptureEntry *head = NULL;
+        return &head;
+    }
+
+    static inline void cudaCompatRegisterGraphCaptureStream(cudaGraph_t graph, cudaStream_t stream)
+    {
+        if (!graph || !stream) {
+            return;
+        }
+        cudaCompatGraphCaptureEntry **head = cudaCompatGraphCaptureRegistry();
+        for (cudaCompatGraphCaptureEntry *entry = *head; entry; entry = entry->next) {
+            if (entry->graph == graph) {
+                entry->stream = stream;
+                return;
+            }
+        }
+        cudaCompatGraphCaptureEntry *entry = (cudaCompatGraphCaptureEntry *)malloc(sizeof(cudaCompatGraphCaptureEntry));
+        if (!entry) {
+            return;
+        }
+        entry->graph = graph;
+        entry->stream = stream;
+        entry->next = *head;
+        *head = entry;
+    }
+
+    static inline cudaStream_t cudaCompatFindGraphCaptureStream(cudaGraph_t graph)
+    {
+        cudaCompatGraphCaptureEntry **head = cudaCompatGraphCaptureRegistry();
+        for (cudaCompatGraphCaptureEntry *entry = *head; entry; entry = entry->next) {
+            if (entry->graph == graph) {
+                return entry->stream;
+            }
+        }
+        return NULL;
+    }
+
+    static inline void cudaCompatUnregisterGraphCaptureStream(cudaStream_t stream)
+    {
+        cudaCompatGraphCaptureEntry **head = cudaCompatGraphCaptureRegistry();
+        cudaCompatGraphCaptureEntry **link = head;
+        while (*link) {
+            cudaCompatGraphCaptureEntry *entry = *link;
+            if (entry->stream == stream) {
+                *link = entry->next;
+                free(entry);
+            } else {
+                link = &entry->next;
+            }
+        }
+    }
+
+#if !defined(__VECTOR_TYPES_H__) && !defined(CANN_COMPAT_DIM3_DEFINED) && \
+    (!defined(INC_EXTERNAL_ACL_ACL_RT_H_) || defined(__BISHENG_CCEC__))
+#define CANN_COMPAT_DIM3_DEFINED
     typedef struct dim3 {
         unsigned int x;
         unsigned int y;
@@ -395,6 +514,7 @@ extern "C"
         constexpr dim3(unsigned int vx = 1, unsigned int vy = 1, unsigned int vz = 1) : x(vx), y(vy), z(vz) {}
 #endif
     } dim3;
+#endif
 
 #define cudaGraphDebugDotFlagsVerbose 0x1
 #define cudaGraphDebugDotFlagsKernelNodeParams 0x4

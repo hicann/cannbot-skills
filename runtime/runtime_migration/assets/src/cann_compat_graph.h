@@ -30,6 +30,22 @@ extern "C"
         return cudaSuccess;
     }
 
+    static inline cudaError_t cudaGraphCreate(cudaGraph_t *pGraph,
+                                              unsigned int flags)
+    {
+        if (!pGraph) {
+            return cudaErrorInvalidValue;
+        }
+        aclmdlRI graph = NULL;
+        aclError ret = aclmdlRIBuildBegin(&graph, flags);
+        if (ret != ACL_SUCCESS) {
+            *pGraph = NULL;
+            return acl2cudaError(ret);
+        }
+        *pGraph = graph;
+        return cudaSuccess;
+    }
+
 
     static inline cudaError_t cudaGraphInstantiateWithFlags(cudaGraphExec_t *pGraphExec,
                                                             cudaGraph_t graph,
@@ -45,19 +61,80 @@ extern "C"
     }
 
 
+    static inline cudaError_t cudaCompatGraphCondType(cudaGraphConditionalNodeType cudaType,
+                                                      aclmdlRICondTaskType *cannType)
+    {
+        if (!cannType) {
+            return cudaErrorInvalidValue;
+        }
+        switch (cudaType) {
+        case cudaGraphCondTypeIf:
+            *cannType = ACL_MODEL_RI_COND_TYPE_IF;
+            return cudaSuccess;
+        case cudaGraphCondTypeWhile:
+            *cannType = ACL_MODEL_RI_COND_TYPE_WHILE;
+            return cudaSuccess;
+        case cudaGraphCondTypeSwitch:
+            *cannType = ACL_MODEL_RI_COND_TYPE_SWITCH;
+            return cudaSuccess;
+        default:
+            return cudaErrorInvalidValue;
+        }
+    }
+
     static inline cudaError_t cudaGraphAddNode(cudaGraphNode_t *pGraphNode,
                                                cudaGraph_t graph,
                                                const cudaGraphNode_t *dependencies,
-                                               size_t numDependencies)
+                                               size_t numDependencies,
+                                               cudaGraphNodeParams *nodeParams)
     {
-        (void)graph;
         (void)dependencies;
-        (void)numDependencies;
-        if (!pGraphNode) {
+        if (!pGraphNode || !graph || !nodeParams) {
             return cudaErrorInvalidValue;
         }
         *pGraphNode = NULL;
-        return cudaErrorNotSupported;
+        if (numDependencies != 0) {
+            return cudaErrorNotSupported;
+        }
+        if (nodeParams->type != cudaGraphNodeTypeConditional) {
+            return cudaErrorNotSupported;
+        }
+        if (!nodeParams->conditional.handle || nodeParams->conditional.size == 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        cudaGraph_t *subGraphs = (cudaGraph_t *)calloc(nodeParams->conditional.size, sizeof(cudaGraph_t));
+        if (!subGraphs) {
+            return cudaErrorMemoryAllocation;
+        }
+
+        aclmdlRICondTaskType cannType = ACL_MODEL_RI_COND_TYPE_IF;
+        cudaError_t typeRet = cudaCompatGraphCondType(nodeParams->conditional.type, &cannType);
+        if (typeRet != cudaSuccess) {
+            free(subGraphs);
+            return typeRet;
+        }
+
+        cudaStream_t stream = cudaCompatFindGraphCaptureStream(graph);
+        if (!stream) {
+            free(subGraphs);
+            return cudaErrorNotSupported;
+        }
+
+        aclmdlRICondTaskParams params;
+        params.handle = nodeParams->conditional.handle;
+        params.type = cannType;
+        params.size = nodeParams->conditional.size;
+        params.modelRIArray = (aclmdlRI *)subGraphs;
+        aclError ret = aclmdlRIAddCondTask(params, stream, 0);
+        if (ret != ACL_SUCCESS) {
+            free(subGraphs);
+            return acl2cudaError(ret);
+        }
+
+        nodeParams->conditional.phGraph_out = subGraphs;
+        *pGraphNode = (cudaGraphNode_t)nodeParams->conditional.handle;
+        return cudaSuccess;
     }
 
 
@@ -237,6 +314,16 @@ extern "C"
         return acl2cudaError(ret);
     }
 
+    static inline cudaError_t cudaCompatGraphConditionalHandleGetCondPtr(
+        cudaGraphConditionalHandle handle, uint64_t **ptr)
+    {
+        if (!handle || !ptr) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclmdlRICondHandleGetCondPtr(handle, ptr);
+        return acl2cudaError(ret);
+    }
+
 
     static inline cudaError_t cudaGraphDebugDotPrint(cudaGraph_t graph,
                                                      const char *path,
@@ -273,8 +360,11 @@ extern "C"
 
     static inline cudaError_t cudaGraphDestroy(cudaGraph_t graph)
     {
-        (void)graph;
-        return cudaErrorNotSupported;
+        if (!graph) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclmdlRIDestroy(graph);
+        return acl2cudaError(ret);
     }
 
 #ifdef __cplusplus

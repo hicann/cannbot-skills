@@ -9,6 +9,7 @@
 #define CUDA_COMPAT_MEMORY_H
 
 #include "cann_compat_types.h"
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -24,6 +25,67 @@ extern "C"
         size_t numBatches, aclrtMemcpyBatchAttr *attrs, size_t *attrsIndexes, size_t numAttrs, aclrtStream stream);
 
     __attribute__((weak)) aclError aclrtMallocHostAndRegister(void **ptr, size_t size, uint32_t flag);
+
+    static inline cudaError_t cudaCompatHostAllocFlagsToCann(unsigned int cudaFlags,
+                                                             uint32_t *cannFlags)
+    {
+        const unsigned int supportedFlags = cudaHostAllocPortable |
+                                            cudaHostAllocMapped |
+                                            cudaHostAllocWriteCombined;
+        if (!cannFlags || (cudaFlags & ~supportedFlags) != 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        uint32_t flags = ACL_HOST_REG_PINNED;
+        if ((cudaFlags & cudaHostAllocMapped) != 0) {
+            flags |= ACL_HOST_REG_MAPPED;
+        }
+
+        *cannFlags = flags;
+        return cudaSuccess;
+    }
+
+    typedef struct cudaCompatHostAllocRecord {
+        void *ptr;
+        size_t size;
+        int registered;
+    } cudaCompatHostAllocRecord;
+
+    static inline cudaCompatHostAllocRecord *cudaCompatHostAllocRecords(void)
+    {
+        static cudaCompatHostAllocRecord records[64];
+        return records;
+    }
+
+    static inline void cudaCompatRecordHostAlloc(void *ptr, size_t size, int registered)
+    {
+        cudaCompatHostAllocRecord *records = cudaCompatHostAllocRecords();
+        for (size_t i = 0; i < 64; ++i) {
+            if (!records[i].ptr) {
+                records[i].ptr = ptr;
+                records[i].size = size;
+                records[i].registered = registered;
+                return;
+            }
+        }
+    }
+
+    static inline int cudaCompatTakeHostAllocRecord(void *ptr, cudaCompatHostAllocRecord *record)
+    {
+        cudaCompatHostAllocRecord *records = cudaCompatHostAllocRecords();
+        for (size_t i = 0; i < 64; ++i) {
+            if (records[i].ptr == ptr) {
+                if (record) {
+                    *record = records[i];
+                }
+                records[i].ptr = NULL;
+                records[i].size = 0;
+                records[i].registered = 0;
+                return 1;
+            }
+        }
+        return 0;
+    }
 
     /* =================================================================
      * Memory Allocation/Deallocation
@@ -60,8 +122,35 @@ extern "C"
             return cudaErrorInvalidValue;
         }
         if (aclrtMallocHostAndRegister) {
-            aclError ret = aclrtMallocHostAndRegister(ptr, size, flags);
+            uint32_t cannFlags = 0;
+            cudaError_t mapRet = cudaCompatHostAllocFlagsToCann(flags, &cannFlags);
+            if (mapRet != cudaSuccess) {
+                return mapRet;
+            }
+            aclError ret = aclrtMallocHostAndRegister(ptr, size, cannFlags);
             return acl2cudaError(ret);
+        }
+        if ((flags & cudaHostAllocMapped) != 0) {
+            uint32_t cannFlags = 0;
+            cudaError_t mapRet = cudaCompatHostAllocFlagsToCann(flags, &cannFlags);
+            if (mapRet != cudaSuccess) {
+                return mapRet;
+            }
+
+            void *hostPtr = NULL;
+            if (posix_memalign(&hostPtr, 4096, size) != 0) {
+                return cudaErrorMemoryAllocation;
+            }
+
+            aclError ret = aclrtHostRegisterV2(hostPtr, size, cannFlags);
+            if (ret != ACL_SUCCESS) {
+                free(hostPtr);
+                return acl2cudaError(ret);
+            }
+
+            *ptr = hostPtr;
+            cudaCompatRecordHostAlloc(hostPtr, size, 1);
+            return cudaSuccess;
         }
         aclError ret = aclrtMallocHost(ptr, size);
         return acl2cudaError(ret);
@@ -70,18 +159,35 @@ extern "C"
 
     static inline cudaError_t cudaFreeHost(void *ptr)
     {
+        cudaCompatHostAllocRecord record;
+        if (cudaCompatTakeHostAllocRecord(ptr, &record)) {
+            if (record.registered) {
+                aclError unregRet = aclrtHostUnregister(ptr);
+                if (unregRet != ACL_SUCCESS) {
+                    return acl2cudaError(unregRet);
+                }
+            }
+            free(ptr);
+            return cudaSuccess;
+        }
         aclError ret = aclrtFreeHost(ptr);
         return acl2cudaError(ret);
     }
 
 
-    static inline cudaError_t cudaMallocManaged(void **devPtr, size_t size, unsigned int flags)
+    static inline cudaError_t cudaMallocManaged(void **devPtr, size_t size
+#ifdef __cplusplus
+                                                , unsigned int flags = cudaMemAttachGlobal
+#else
+                                                , unsigned int flags
+#endif
+    )
     {
-        (void)size;
-        (void)flags;
         if (!devPtr) {
             return cudaErrorInvalidValue;
         }
+        (void)size;
+        (void)flags;
         *devPtr = NULL;
         return cudaErrorNotSupported;
     }
@@ -230,71 +336,69 @@ extern "C"
     cudaError_t cudaPointerGetAttributes(cudaPointerAttributes *attributes,
                                          const void *ptr);
 
-    static inline cudaError_t cudaCompatMemAdviseToCann(cudaMemoryAdvise advice,
-                                                        aclrtMemManagedAdviseType *cannAdvice)
-    {
-        if (!cannAdvice) {
-            return cudaErrorInvalidValue;
-        }
-        switch (advice) {
-        case cudaMemAdviseSetReadMostly:
-            *cannAdvice = ACL_MEM_ADVISE_SET_READ_MOSTLY;
-            return cudaSuccess;
-        case cudaMemAdviseUnsetReadMostly:
-            *cannAdvice = ACL_MEM_ADVISE_UNSET_READ_MOSTLY;
-            return cudaSuccess;
-        case cudaMemAdviseSetPreferredLocation:
-            *cannAdvice = ACL_MEM_ADVISE_SET_PREFERRED_LOCATION;
-            return cudaSuccess;
-        case cudaMemAdviseUnsetPreferredLocation:
-            *cannAdvice = ACL_MEM_ADVISE_UNSET_PREFERRED_LOCATION;
-            return cudaSuccess;
-        case cudaMemAdviseSetAccessedBy:
-            *cannAdvice = ACL_MEM_ADVISE_SET_ACCESSED_BY;
-            return cudaSuccess;
-        case cudaMemAdviseUnsetAccessedBy:
-            *cannAdvice = ACL_MEM_ADVISE_UNSET_ACCESSED_BY;
-            return cudaSuccess;
-        default:
-            return cudaErrorInvalidValue;
-        }
-    }
-
     static inline cudaError_t cudaMemAdvise(const void *devPtr, size_t count,
                                             cudaMemoryAdvise advice, int device)
     {
-        if (!devPtr || count == 0) {
-            return cudaErrorInvalidValue;
-        }
-
-        aclrtMemManagedAdviseType cannAdvice;
-        cudaError_t mapRet = cudaCompatMemAdviseToCann(advice, &cannAdvice);
-        if (mapRet != cudaSuccess) {
-            return mapRet;
-        }
-
-        aclrtMemManagedLocation location;
-        location.type = ACL_MEM_LOCATIONTYPE_DEVICE;
-        location.id = device;
-        aclError ret = aclrtMemManagedAdvise(devPtr, (uint64_t)count, cannAdvice, location);
-        return acl2cudaError(ret);
+        (void)devPtr;
+        (void)count;
+        (void)advice;
+        (void)device;
+        return cudaErrorNotSupported;
     }
 
     /* =================================================================
      * Host Memory Registration
      * ================================================================= */
 
+    static inline cudaError_t cudaCompatHostRegisterFlagsToCann(unsigned int cudaFlags,
+                                                                uint32_t *cannFlags)
+    {
+        const unsigned int supportedFlags = cudaHostRegisterPortable |
+                                            cudaHostRegisterMapped |
+                                            cudaHostRegisterIoMemory |
+                                            cudaHostRegisterReadOnly;
+        if (!cannFlags || (cudaFlags & ~supportedFlags) != 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        uint32_t flags = ACL_HOST_REG_PINNED;
+        if ((cudaFlags & cudaHostRegisterMapped) != 0) {
+            flags |= ACL_HOST_REG_MAPPED;
+        }
+        if ((cudaFlags & cudaHostRegisterIoMemory) != 0) {
+            flags |= ACL_HOST_REG_IOMEMORY;
+        }
+        if ((cudaFlags & cudaHostRegisterReadOnly) != 0) {
+            flags |= ACL_HOST_REG_READONLY;
+        }
+
+        *cannFlags = flags;
+        return cudaSuccess;
+    }
 
     static inline cudaError_t cudaHostRegister(void *ptr, size_t size,
                                                unsigned int flags)
     {
-        aclError ret = aclrtHostRegisterV2(ptr, size, flags);
+        if (!ptr || size == 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        uint32_t cannFlags = 0;
+        cudaError_t mapRet = cudaCompatHostRegisterFlagsToCann(flags, &cannFlags);
+        if (mapRet != cudaSuccess) {
+            return mapRet;
+        }
+
+        aclError ret = aclrtHostRegisterV2(ptr, size, cannFlags);
         return acl2cudaError(ret);
     }
 
 
     static inline cudaError_t cudaHostUnregister(void *ptr)
     {
+        if (!ptr) {
+            return cudaErrorInvalidValue;
+        }
         aclError ret = aclrtHostUnregister(ptr);
         return acl2cudaError(ret);
     }
@@ -303,11 +407,32 @@ extern "C"
     static inline cudaError_t cudaHostGetDevicePointer(void **pDevice, void *pHost,
                                                        unsigned int flags)
     {
+        if (!pDevice || !pHost || flags != 0) {
+            return cudaErrorInvalidValue;
+        }
         aclError ret = aclrtHostGetDevicePointer(pHost, pDevice, flags);
         return acl2cudaError(ret);
     }
 
 #ifdef __cplusplus
+}
+
+template <typename T>
+static inline cudaError_t cudaMalloc(T **devPtr, size_t size)
+{
+    return cudaMalloc(reinterpret_cast<void **>(devPtr), size);
+}
+
+template <typename T>
+static inline cudaError_t cudaMallocHost(T **ptr, size_t size)
+{
+    return cudaMallocHost(reinterpret_cast<void **>(ptr), size);
+}
+
+template <typename T>
+static inline cudaError_t cudaHostAlloc(T **ptr, size_t size, unsigned int flags)
+{
+    return cudaHostAlloc(reinterpret_cast<void **>(ptr), size, flags);
 }
 #endif
 

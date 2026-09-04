@@ -32,7 +32,7 @@
 | `cudaFree()`                 | `aclrtFree()`                 |    ✅    | 设备内存释放           |
 | `cudaMallocPitch()`          | `aclrtMalloc()`               |    ✅    | 分配对齐内存           |
 | `cudaMallocHost()`           | `aclrtMallocHost()`           |    ✅    | 分配页锁定主机内存     |
-| `cudaHostAlloc()`            | `aclrtMallocHostAndRegister()` / `aclrtMallocHost()` |    ✅    | 分配 Host pinned 内存；新版 CANN 优先走分配并注册接口，旧版环境回退页锁定分配 |
+| `cudaHostAlloc()`            | `aclrtMallocHostAndRegister()` / `aclrtMallocHost()` + `aclrtHostRegisterV2()` |    ✅    | 分配 Host pinned 内存；mapped flag 会显式转换为 mapped+pinned，旧版缺少分配并注册接口时用 page-aligned host 内存加注册实现 |
 | `cudaFreeHost()`             | `aclrtFreeHost()`             |    ✅    | 释放页锁定主机内存     |
 | `cudaMemcpy()`               | `aclrtMemcpy()`               |    ✅    | 同步内存拷贝           |
 | `cudaMemcpyAsync()`          | `aclrtMemcpyAsync()`          |    ✅    | 异步内存拷贝           |
@@ -50,30 +50,50 @@
 | `cudaMemGetInfo()`           | `aclrtGetMemInfo()`           |    ✅    | 获取内存信息           |
 | `cudaPointerGetAttributes()` | `aclrtPointerGetAttributes()` |    ✅    | 获取指针属性           |
 | `cudaGetSymbolAddress()`     | `aclrtGetSymbolAddress()`     |    ✅    | 获取设备符号地址       |
-| `cudaMemAdvise()`            | `aclrtMemManagedAdvise()`     |    ✅    | UVM advise 映射；依赖 CANN managed memory 能力 |
-| `cudaHostRegister()`         | `aclrtHostRegister()` / `aclrtHostRegisterV2()` |    ✅    | 注册主机内存           |
-| `cudaHostUnregister()`       | `aclrtHostUnregister()`       |    ✅    | 取消注册主机内存       |
-| `cudaHostGetDevicePointer()` | `aclrtHostGetDevicePointer()` |    ✅    | 获取设备指针           |
+| `cudaHostRegister()`         | `aclrtHostRegisterV2()`       |    ✅    | 注册主机内存；显式转换 CUDA flags，default 走 pinned，mapped 走 mapped+pinned |
+| `cudaHostUnregister()`       | `aclrtHostUnregister()`       |    ✅    | 取消注册主机内存；已覆盖 default 和 mapped 注册后的成功路径 |
+| `cudaHostGetDevicePointer()` | `aclrtHostGetDevicePointer()` |    ✅    | 获取 mapped host 注册后的设备指针 |
 
-## 三、内存池管理 API
+## 三、SOMA/UVM 不支持 API
 
+以下接口当前不做 CUDA 到 CANN 映射，不进入转测验收；兼容层如保留同名入口，仅用于编译兼容并返回 not supported。
 
-| CUDA API                        | 实现状态 | 说明                       |
-| ------------------------------- | :-------: | -------------------------- |
-| `cudaMemPoolCreate()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPoolDestroy()`          | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPoolSetAttribute()`     | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPoolGetAttribute()`     | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPoolTrimTo()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPoolSetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaMemPoolGetAccess()`        | ⚠️ Mock | 返回 cudaErrorNotSupported |
-| `cudaDeviceGetDefaultMemPool()` | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaDeviceSetMemPool()`        | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaDeviceGetMemPool()`        | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMallocManaged()`           | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA UVM，返回 cudaErrorNotSupported |
-| `cudaMallocAsync()`             | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaFreeAsync()`               | ⚠️ Mock | CANN Runtime 当前未真实对标 CUDA SOMA，返回 cudaErrorNotSupported |
-| `cudaMemPrefetchAsync()`        | ⚠️ Mock | 当前未真实对标 CUDA UVM，返回 cudaErrorNotSupported |
+| CUDA API | 实现状态 | 说明 |
+| -------- | :------: | ---- |
+| `cudaMallocManaged()` | ❌ 不支持 | CUDA UVM，CANN Runtime 当前不对标 |
+| `cudaMemAdvise()` | ❌ 不支持 | CUDA UVM advise，CANN Runtime 当前不对标 |
+| `cudaMemPrefetchAsync()` | ❌ 不支持 | CUDA UVM prefetch，CANN Runtime 当前不对标 |
+| `cudaMemPrefetchAsync_v2()` | ❌ 不支持 | CUDA UVM prefetch v2，CANN Runtime 当前不对标 |
+| `cudaMemRangeGetAttribute()` | ❌ 不支持 | CUDA UVM range attribute，CANN Runtime 当前不对标 |
+| `cudaMemRangeGetAttributes()` | ❌ 不支持 | CUDA UVM range attributes，CANN Runtime 当前不对标 |
+| `cudaMemPrefetchBatchAsync()` | ❌ 不支持 | CUDA UVM batch prefetch，CANN Runtime 当前不对标 |
+| `cudaMemDiscardAndPrefetchBatchAsync()` | ❌ 不支持 | CUDA UVM discard/prefetch batch，CANN Runtime 当前不对标 |
+| `cudaMemDiscardBatchAsync()` | ❌ 不支持 | CUDA UVM discard batch，CANN Runtime 当前不对标 |
+| `cudaMallocAsync()` | ❌ 不支持 | CUDA SOMA，CANN Runtime 当前不对标 |
+| `cudaFreeAsync()` | ❌ 不支持 | CUDA SOMA，CANN Runtime 当前不对标 |
+| `cudaMemPoolCreate()` | ❌ 不支持 | CUDA SOMA mempool，CANN Runtime 当前不对标 |
+| `cudaMemPoolDestroy()` | ❌ 不支持 | CUDA SOMA mempool，CANN Runtime 当前不对标 |
+| `cudaMemPoolSetAttribute()` | ❌ 不支持 | CUDA SOMA mempool attribute，CANN Runtime 当前不对标 |
+| `cudaMemPoolsetAttribute()` | ❌ 不支持 | 同 `cudaMemPoolSetAttribute()`，CANN Runtime 当前不对标 |
+| `cudaMemPoolGetAttribute()` | ❌ 不支持 | CUDA SOMA mempool attribute，CANN Runtime 当前不对标 |
+| `cudaMemPoolTrimTo()` | ❌ 不支持 | CUDA SOMA mempool trim，CANN Runtime 当前不对标 |
+| `cudaMemPoolSetAccess()` | ❌ 不支持 | CUDA SOMA mempool access，CANN Runtime 当前不对标 |
+| `cudaMemPoolsetAccess()` | ❌ 不支持 | 同 `cudaMemPoolSetAccess()`，CANN Runtime 当前不对标 |
+| `cudaMemPoolGetAccess()` | ❌ 不支持 | CUDA SOMA mempool access，CANN Runtime 当前不对标 |
+| `cudaMemPoolExportPointer()` | ❌ 不支持 | CUDA SOMA mempool export，CANN Runtime 当前不对标 |
+| `cudaMemPoolExportToShareableHandle()` | ❌ 不支持 | CUDA SOMA mempool export，CANN Runtime 当前不对标 |
+| `cudaMemPoolImportFromShareableHandle()` | ❌ 不支持 | CUDA SOMA mempool import，CANN Runtime 当前不对标 |
+| `cudaMemPoolImportPointer()` | ❌ 不支持 | CUDA SOMA mempool import，CANN Runtime 当前不对标 |
+| `cudaDeviceGetDefaultMemPool()` | ❌ 不支持 | CUDA SOMA default mempool，CANN Runtime 当前不对标 |
+| `cudaDeviceGetMemPool()` | ❌ 不支持 | CUDA SOMA device mempool，CANN Runtime 当前不对标 |
+| `cudaDeviceSetMemPool()` | ❌ 不支持 | CUDA SOMA device mempool，CANN Runtime 当前不对标 |
+| `cudaMemGetDefaultMemPool()` | ❌ 不支持 | 同 default mempool 类接口，CANN Runtime 当前不对标 |
+| `cudaMemGetMemPool()` | ❌ 不支持 | 同 device mempool 类接口，CANN Runtime 当前不对标 |
+| `cudaMemSetMemPool()` | ❌ 不支持 | 同 device mempool 类接口，CANN Runtime 当前不对标 |
+| `cuMemDiscardAndPrefetchBatchAsync()` | ❌ 不支持 | CUDA Driver UVM discard/prefetch batch，CANN Runtime 当前不对标 |
+| `cuMemDiscardBatchAsync()` | ❌ 不支持 | CUDA Driver UVM discard batch，CANN Runtime 当前不对标 |
+| `cuPointerGetAttributes()` | ❌ 不支持 | CUDA Driver pointer attributes 批量查询，CANN Runtime 当前不对标 |
+| `cuPointerSetAttribute()` | ❌ 不支持 | CUDA Driver pointer attribute 设置，CANN Runtime 当前不对标 |
 
 ## 四、流管理 API
 
@@ -183,9 +203,10 @@
 | `cudaGraphDebugDotPrint()` | `aclmdlRIDebugJsonPrint()` |    ✅    | 导出 Graph/RI 调试信息 |
 | `cudaGraphExecDestroy()`   | `aclmdlRIDestroy()`        |    ✅    | 销毁 Graph 执行实例 |
 | `cudaGraphConditionalHandleCreate()` | `aclmdlRICondHandleCreate()` |    ✅*   | 创建条件 Graph handle；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
+| `cudaGraphAddNode()` (`cudaGraphNodeTypeConditional`) | `aclmdlRIAddCondTask()` |    ✅*   | 仅支持 conditional node 特例；`cudaGraphAddNode` 承载多种 task 类型，非 conditional node 不按此映射 |
 | `cudaGraphGetNodes()`      | `aclmdlRIGetStreams()` + `aclmdlRIGetTasksByStream()` |    ✅*   | 通过 RI stream/task 汇总节点；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
 | `cudaGraphLaunch()`        | `aclmdlRIExecuteAsync()`   |    ✅    | 异步执行 Graph/RI |
-| `cudaGraphSetConditional()` | `aclmdlRICondHandleGetCondPtr()` + `aclrtValueWrite()` |    ✅*   | 设置条件 handle 值；`aclmdlRICondHandleGetCondPtr` 为试验特性，后续版本可能变更，不支持应用于生产环境 |
+| `cudaGraphSetConditional()` | `aclmdlRICondHandleGetCondPtr()` |    ✅*   | 设备侧设置条件值；CANN 侧通过条件 handle 取得设备条件指针后写入，`aclmdlRICondHandleGetCondPtr` 为试验特性，后续版本可能变更，不支持应用于生产环境 |
 
 ## 十三、CUDA Driver VMM API
 
@@ -215,10 +236,7 @@
 
 | 不支持 API             | 替代方案                             |
 | ---------------------- | ------------------------------------ |
-| `cudaMallocAsync`      | 暂无真实对标，返回 cudaErrorNotSupported |
-| `cudaFreeAsync`        | 暂无真实对标，返回 cudaErrorNotSupported |
-| `cudaMemPoolCreate`    | 自定义内存池管理，或使用`cudaMalloc` |
-| `cudaMemPrefetchAsync` | CANN 自动管理，无需手动处理          |
+| SOMA/UVM API           | 当前不做映射、不进入转测；兼容层返回 not supported |
 | Texture/Surface API    | 使用普通内存 + 自定义纹理逻辑        |
 
 ## 其他不支持 API
@@ -231,7 +249,7 @@
 | `cuFuncSetCacheConfig()` | CUDA Driver | CANN Runtime 暂不支持，兼容层返回 `CUDA_ERROR_NOT_SUPPORTED` |
 | `cudaGetDriverEntryPoint()` | CUDA Runtime | CANN Runtime 暂不支持 CUDA Driver entry point 查询，兼容层返回 `cudaErrorNotSupported` |
 | `cudaGetDriverEntryPointByVersion()` | CUDA Runtime | CANN Runtime 暂不支持 CUDA Driver entry point 查询，兼容层返回 `cudaErrorNotSupported` |
-| `cudaGraphAddNode()` | CUDA Runtime Graph | CANN Runtime 暂不支持手工添加通用 Graph Node，兼容层返回 `cudaErrorNotSupported` |
+| `cudaGraphAddNode()` | CUDA Runtime Graph | CANN Runtime 暂不支持手工添加通用 Graph Node；仅 `cudaGraphNodeTypeConditional` 特例可映射到 `aclmdlRIAddCondTask()`，其他类型兼容层返回 `cudaErrorNotSupported` |
 | `cudaGraphAddNode_v2()` | CUDA Runtime Graph | CANN Runtime 暂不支持手工添加通用 Graph Node，兼容层返回 `cudaErrorNotSupported` |
 | `cudaGraphDestroy()` | CUDA Runtime Graph | CANN Runtime 暂不支持 CUDA Graph 对象销毁语义，兼容层返回 `cudaErrorNotSupported` |
 | `cudaGraphInstantiateWithFlags()` | CUDA Runtime Graph | CANN Runtime 暂不支持带 flags 的 Graph 实例化，兼容层返回 `cudaErrorNotSupported` |

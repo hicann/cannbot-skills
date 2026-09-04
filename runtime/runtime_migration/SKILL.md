@@ -74,7 +74,7 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 | API 类别            |  支持状态  | 说明                                                      |
 | ------------------- | :---------: | --------------------------------------------------------- |
 | **设备管理**        | ✅ 完全支持 | cudaGetDeviceCount, cudaSetDevice 等 16 个 API            |
-| **内存管理**        | ✅ 基本支持 | cudaMalloc, cudaMemcpy, cudaHostAlloc, cudaMemcpyToSymbol, cudaMemAdvise 等 API；CUDA SOMA 暂无真实对标 |
+| **内存管理**        | ✅ 基本支持 | cudaMalloc, cudaMemcpy, cudaHostAlloc, cudaMemcpyToSymbol 等 API；CUDA SOMA/UVM 暂无真实对标 |
 | **流管理**          | ✅ 完全支持 | cudaStreamCreate, cudaStreamSynchronize, capture info 等 API |
 | **事件管理**        | ✅ 完全支持 | cudaEventCreate, cudaEventRecord, cudaEventRecordWithFlags 等 API |
 | **IPC**             | ✅ 完全支持 | cudaIpcGetMemHandle 等 5 个 API (注意 key/opaque handle 约束) |
@@ -84,7 +84,7 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 | **Texture/Surface** |  ❌ 不支持  | 需额外适配层                                              |
 | **Driver VMM/Context** | ✅ 完全支持 | cuMemCreate, cuMemMap, cuCtxGetCurrent, cuCtxSetCurrent 等 API |
 
-具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。CUDA SOMA/UVM 不得误标为完整支持，相关内存池和异步分配接口保持 not supported；`cudaMemAdvise` 按 managed advise 能力单独处理。
+具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。`cudaGraphAddNode` 仅支持 `cudaGraphNodeTypeConditional` 特例并映射到 `aclmdlRIAddCondTask`，其他 node type 仍按不支持处理；`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies` 当前不支持。CUDA SOMA/UVM 不得误标为完整支持，相关内存池、异步分配、managed memory、advise 和 prefetch 接口保持 not supported，且不进入转测验收。
 
 #### 2.3 输出可行性分析报告
 
@@ -229,11 +229,33 @@ kernel<<<grid, block, shared_mem, stream>>>(args);
 - 不要把 fallback 计算直接散落在主流程里
 - 将 CUDA kernel body 的等价 Host fallback 隔离成独立函数
 - 通过 `cudaCompatLaunchHostKernel()` 调用该 fallback，保留主流程中的“launch”语义
+- 对 `cudaLaunchKernel(func, grid, block, args, ...)` 的 host fallback，按 CUDA 参数数组语义解析 `args`：`args[i]` 是第 i 个实参的地址，不能把 `args` 或 `args[i]` 本身直接当成设备指针写入。
+- 如果源代码对已迁移为 Host fallback 的 CUDA kernel 调用 `cudaFuncGetAttributes`，改为调用 `cudaCompatFuncGetHostFallbackAttributes(&attrs)`；不要把 Host fallback 函数指针强行传给 `aclrtGetFunctionAttribute`。
 - 在调用处添加注释，并在 README 或迁移报告中明确说明该路径在 Host/CPU 上执行，不是 NPU kernel 执行
 - 不使用 Host fallback 的结果声称已完成 NPU kernel 迁移、设备侧正确性验证或性能验证
 - 如需 NPU 设备侧实现，将其记录为本技能范围外事项，交由独立算子 skill 处理；本技能不得内部依赖或调用该 skill
 
-##### 4.1.5 IPC 适配注意事项
+##### 4.1.5 Device Symbol / PTX Module Host Fallback
+
+CUDA `__device__` symbol 和 PTX 文本都属于 CUDA 设备侧资产，不能在 Runtime skill 中伪装成 NPU kernel 或 CANN binary。兼容层方式迁移时按以下规则处理：
+
+- 源代码中的 `__device__ T symbol` 在迁移产物中改为普通 Host 变量 `T symbol`，保留变量名，便于 `cudaMemcpyToSymbol(symbol, ...)` 和 `cudaGetSymbolAddress(..., symbol)` 继续按 CUDA 写法编译。
+- `cudaMemcpyToSymbol(symbol, src, count, ...)`、`cudaGetSymbolAddress(&ptr, symbol)`、`cudaMemcpyFromSymbol(dst, symbol, ...)` 由兼容层 C++ 重载提供 device backing；这是 Host fallback 语义，用于验证 Runtime symbol API 流程，不代表完成 CANN 设备侧全局变量迁移。
+- 如果源代码内嵌 PTX 字符串或把 PTX 写入临时文件后调用 `cuModuleLoadData/cuModuleLoad/cuModuleGetFunction/cuModuleUnload`，兼容层识别 PTX 文本并创建 host fallback module handle，保持 Driver module API 流程可运行；真实 CANN ELF/二进制仍走 `aclrtBinaryLoadFromData/aclrtBinaryLoadFromFile`。
+- 不得把 PTX 文本直接传给 CANN binary loader 作为验收成功路径；如果用户要求真实 NPU kernel 执行，需要另行提供 CANN 可加载二进制或交由算子迁移流程处理。
+
+##### 4.1.6 Conditional Graph / Model RI 适配
+
+迁移 CUDA conditional graph 时使用兼容层实现，不要把 CANN RI 细节散落到业务代码中。规则如下：
+
+- `cudaGraphConditionalHandleCreate` 映射到 `aclmdlRICondHandleCreate`，要求 graph 来自 active stream capture 或兼容层可识别的 Model RI。
+- `cudaGraphAddNode` 只有 `cudaGraphNodeTypeConditional` 特例映射到 `aclmdlRIAddCondTask`；`cudaGraphCondTypeIf/While/Switch` 分别映射到 `ACL_MODEL_RI_COND_TYPE_IF/WHILE/SWITCH`。非 conditional node type 不得宣称支持。
+- `cudaStreamBeginCaptureToGraph` 映射到 `aclmdlRICaptureToModelRIBegin`，用于捕获 conditional node 输出的 body graph；不能用空 capture 作为能力验收。
+- `cudaStreamGetCaptureInfo` / `cudaStreamGetCaptureInfo_v3` 映射到 `aclmdlRICaptureGetInfo`，并由兼容层记录 graph 与 capture stream 的关联。
+- CUDA 侧 `cudaGraphSetConditional` 是 device-side 函数；迁移到 CANN Runtime 兼容层时，通过 `aclmdlRICondHandleGetCondPtr` 获取条件指针，再用 runtime 写入操作在 body capture 内更新条件值。验收用例必须通过输出结果证明 conditional body 真正执行。
+- `cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies`、`cudaStreamUpdateCaptureDependencies_v2` 当前没有 CANN 对标，迁移代码不能依赖这些接口完成验收；如输入依赖这些接口，应报告 not supported 或重构为不依赖 dependency update 的 capture 流程。
+
+##### 4.1.7 IPC 适配注意事项
 
 CANN IPC 使用 key/opaque handle 数据而非 POSIX fd：
 

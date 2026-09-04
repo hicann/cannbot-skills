@@ -14,12 +14,25 @@
 #include "cann_compat_types.h"
 #include "cann_compat_device.h"
 #include "cann_compat_memory.h"
+#include "cann_compat_symbol.h"
 #include "acl/acl_prof.h"
+#include "runtime/rt_external_kernel.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define CUDA_COMPAT_MAX_MEMCPY_BATCH_ATTRS 1024U
+
+cudaError_t cudaCompatRegisterSymbol(void *binHandle, const void *hostVar,
+                                     const char *deviceVarName, size_t size,
+                                     unsigned int flags)
+{
+    if (!binHandle || !hostVar || !deviceVarName || size == 0) {
+        return cudaErrorInvalidValue;
+    }
+    rtRegisterVariable(binHandle, hostVar, deviceVarName, size, (uint32_t)flags, NULL);
+    return cudaSuccess;
+}
 
 #ifdef CUDA_COMPAT_DEBUG_MODE
 #define CUDA_COMPAT_DEBUG_LOG(acl_err) \

@@ -8,6 +8,9 @@
 
 #include "cann_compat_cu_types.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -15,6 +18,83 @@ extern "C"
 #endif
 
     uint64_t get_elf_file_size(const void *elf_buf);
+
+    typedef struct cudaCompatPtxModule_st {
+        char magic[8];
+    } cudaCompatPtxModule;
+
+    typedef struct cudaCompatPtxFunction_st {
+        char magic[8];
+        CUmodule module;
+        const char *name;
+    } cudaCompatPtxFunction;
+
+    static inline int cudaCompatIsPtxText(const char *image)
+    {
+        return image != NULL &&
+               (strstr(image, ".version") != NULL || strstr(image, ".visible .entry") != NULL);
+    }
+
+    static inline int cudaCompatIsPtxModule(CUmodule module)
+    {
+        cudaCompatPtxModule *ptxModule = (cudaCompatPtxModule *)module;
+        return ptxModule != NULL && memcmp(ptxModule->magic, "PTXMOD", 7) == 0;
+    }
+
+    static inline void cudaCompatSetMagic(char *dst, const char *src, size_t count)
+    {
+        for (size_t i = 0; i < count; ++i) {
+            dst[i] = src[i];
+        }
+    }
+
+    static inline CUresult cudaCompatCreatePtxModule(CUmodule *module)
+    {
+        cudaCompatPtxModule *ptxModule = (cudaCompatPtxModule *)calloc(1, sizeof(cudaCompatPtxModule));
+        if (!ptxModule) {
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        }
+        cudaCompatSetMagic(ptxModule->magic, "PTXMOD", 7);
+        *module = (CUmodule)ptxModule;
+        return CUDA_SUCCESS;
+    }
+
+    static inline CUresult cuInit(unsigned int flags)
+    {
+        (void)flags;
+        return CUDA_SUCCESS;
+    }
+
+    static inline CUresult cuGetErrorName(CUresult error, const char **pStr)
+    {
+        if (!pStr) {
+            return CUDA_ERROR_INVALID_VALUE;
+        }
+        switch (error) {
+        case CUDA_SUCCESS:
+            *pStr = "CUDA_SUCCESS";
+            break;
+        case CUDA_ERROR_INVALID_VALUE:
+            *pStr = "CUDA_ERROR_INVALID_VALUE";
+            break;
+        case CUDA_ERROR_INVALID_IMAGE:
+            *pStr = "CUDA_ERROR_INVALID_IMAGE";
+            break;
+        case CUDA_ERROR_INVALID_HANDLE:
+            *pStr = "CUDA_ERROR_INVALID_HANDLE";
+            break;
+        case CUDA_ERROR_NOT_SUPPORTED:
+            *pStr = "CUDA_ERROR_NOT_SUPPORTED";
+            break;
+        case CUDA_ERROR_UNKNOWN:
+            *pStr = "CUDA_ERROR_UNKNOWN";
+            break;
+        default:
+            *pStr = "CUDA_ERROR_UNKNOWN";
+            break;
+        }
+        return CUDA_SUCCESS;
+    }
 
     static inline CUresult cuFuncSetCacheConfig(CUfunction hfunc, CUfunc_cache config)
     {
@@ -122,6 +202,16 @@ extern "C"
         if (!module || !fname) {
             return CUDA_ERROR_INVALID_VALUE;
         }
+        FILE *fp = fopen(fname, "rb");
+        if (fp) {
+            char probe[256];
+            size_t bytes = fread(probe, 1, sizeof(probe) - 1, fp);
+            fclose(fp);
+            probe[bytes] = '\0';
+            if (cudaCompatIsPtxText(probe)) {
+                return cudaCompatCreatePtxModule(module);
+            }
+        }
         aclError ret = aclrtBinaryLoadFromFile(fname, NULL, (aclrtBinHandle *)module);
         return acl2cuError(ret);
     }
@@ -130,6 +220,9 @@ extern "C"
     {
         if (!module || !image) {
             return CUDA_ERROR_INVALID_VALUE;
+        }
+        if (cudaCompatIsPtxText((const char *)image)) {
+            return cudaCompatCreatePtxModule(module);
         }
         uint64_t elfSize = get_elf_file_size(image);
         if (elfSize == 0) {
@@ -146,6 +239,17 @@ extern "C"
         if (!hfunc || !hmod || !name) {
             return CUDA_ERROR_INVALID_VALUE;
         }
+        if (cudaCompatIsPtxModule(hmod)) {
+            cudaCompatPtxFunction *func = (cudaCompatPtxFunction *)calloc(1, sizeof(cudaCompatPtxFunction));
+            if (!func) {
+                return CUDA_ERROR_OUT_OF_MEMORY;
+            }
+            cudaCompatSetMagic(func->magic, "PTXFUNC", 8);
+            func->module = hmod;
+            func->name = name;
+            *hfunc = (CUfunction)func;
+            return CUDA_SUCCESS;
+        }
         aclError ret = aclrtBinaryGetFunction((aclrtBinHandle)hmod, name,
                                               (aclrtFuncHandle *)hfunc);
         return acl2cuError(ret);
@@ -155,6 +259,10 @@ extern "C"
     {
         if (!hmod) {
             return CUDA_ERROR_INVALID_VALUE;
+        }
+        if (cudaCompatIsPtxModule(hmod)) {
+            free(hmod);
+            return CUDA_SUCCESS;
         }
         aclError ret = aclrtBinaryUnLoad((aclrtBinHandle)hmod);
         return acl2cuError(ret);

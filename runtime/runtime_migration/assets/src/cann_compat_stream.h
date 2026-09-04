@@ -156,6 +156,14 @@ static inline cudaError_t cudaStreamBeginCapture(cudaStream_t stream,
 )
 {
     aclError ret = aclmdlRICaptureBegin(stream, cudaCompatCaptureMode(mode));
+    if (ret == ACL_SUCCESS) {
+        aclmdlRICaptureStatus status = ACL_MODEL_RI_CAPTURE_STATUS_NONE;
+        aclmdlRI modelRI = NULL;
+        if (aclmdlRICaptureGetInfo(stream, &status, &modelRI) == ACL_SUCCESS &&
+            status == ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE) {
+            cudaCompatRegisterGraphCaptureStream(modelRI, stream);
+        }
+    }
     return acl2cudaError(ret);
 }
 
@@ -164,6 +172,9 @@ static inline cudaError_t cudaStreamBeginCapture(cudaStream_t stream,
 static inline cudaError_t cudaStreamEndCapture(cudaStream_t stream, cudaGraph_t *pGraph)
 {
     aclError ret = aclmdlRICaptureEnd(stream, (aclmdlRI *)pGraph);
+    if (ret == ACL_SUCCESS) {
+        cudaCompatUnregisterGraphCaptureStream(stream);
+    }
     return acl2cudaError(ret);
 }
 
@@ -191,16 +202,19 @@ static inline cudaError_t cudaStreamBeginCaptureToGraph(cudaStream_t stream,
      * production use.
      */
     aclError ret = aclmdlRICaptureToModelRIBegin(stream, graph, cudaCompatCaptureMode(mode));
+    if (ret == ACL_SUCCESS) {
+        cudaCompatRegisterGraphCaptureStream(graph, stream);
+    }
     return acl2cudaError(ret);
 }
 
-static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
-                                                   cudaStreamCaptureStatus *captureStatus_out,
-                                                   unsigned long long *id_out,
-                                                   cudaGraph_t *graph_out,
-                                                   const cudaGraphNode_t **dependencies_out,
-                                                   const cudaGraphEdgeData **edgeData_out,
-                                                   size_t *numDependencies_out)
+static inline cudaError_t cudaCompatStreamGetCaptureInfo(cudaStream_t stream,
+                                                         cudaStreamCaptureStatus *captureStatus_out,
+                                                         unsigned long long *id_out,
+                                                         cudaGraph_t *graph_out,
+                                                         const cudaGraphNode_t **dependencies_out,
+                                                         const cudaGraphEdgeData **edgeData_out,
+                                                         size_t *numDependencies_out)
 {
     if (!captureStatus_out) {
         return cudaErrorInvalidValue;
@@ -220,6 +234,9 @@ static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
     if (graph_out) {
         *graph_out = modelRI;
     }
+    if (status == ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE) {
+        cudaCompatRegisterGraphCaptureStream(modelRI, stream);
+    }
     if (dependencies_out) {
         *dependencies_out = NULL;
     }
@@ -232,6 +249,17 @@ static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
     return cudaSuccess;
 }
 
+static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
+                                                   cudaStreamCaptureStatus *captureStatus_out,
+                                                   unsigned long long *id_out,
+                                                   cudaGraph_t *graph_out,
+                                                   const cudaGraphNode_t **dependencies_out,
+                                                   size_t *numDependencies_out)
+{
+    return cudaCompatStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
+                                          dependencies_out, NULL, numDependencies_out);
+}
+
 static inline cudaError_t cudaStreamGetCaptureInfo_v3(cudaStream_t stream,
                                                       cudaStreamCaptureStatus *captureStatus_out,
                                                       unsigned long long *id_out,
@@ -240,8 +268,8 @@ static inline cudaError_t cudaStreamGetCaptureInfo_v3(cudaStream_t stream,
                                                       const cudaGraphEdgeData **edgeData_out,
                                                       size_t *numDependencies_out)
 {
-    return cudaStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
-                                    dependencies_out, edgeData_out, numDependencies_out);
+    return cudaCompatStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
+                                          dependencies_out, edgeData_out, numDependencies_out);
 }
 
 

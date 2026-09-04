@@ -125,9 +125,11 @@ extern "C"
 
 
     static inline CUresult cuMemCreate(CUmemGenericAllocationHandle *handle,
+                                       size_t size,
                                        const CUmemAllocationProp *prop,
-                                       size_t size)
+                                       unsigned long long flags)
     {
+        (void)flags;
         if (!handle || !prop)
         {
             return CUDA_ERROR_INVALID_VALUE;

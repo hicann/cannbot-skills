@@ -191,6 +191,7 @@ cudaError_t cudaHostRegister(void *ptr, size_t size, unsigned int flags);
 ```
 - 功能：注册主机内存为页锁定
 - 参数：flags - cudaHostRegisterDefault 等
+- 兼容层口径：`cudaHostRegisterDefault` 覆盖页锁定注册和 `cudaHostUnregister` 成功路径；需要 `cudaHostGetDevicePointer` 时使用 `cudaHostRegisterMapped`
 - 返回：cudaSuccess 或错误码
 
 ### cudaHostUnregister
@@ -199,6 +200,7 @@ cudaError_t cudaHostUnregister(void *ptr);
 ```
 - 功能：取消页锁定注册
 - 参数：ptr - 注册的指针
+- 兼容层口径：释放 `cudaHostRegister` 成功注册的主机内存；注册内存本身仍由调用者用原分配方式释放
 - 返回：cudaSuccess 或错误码
 
 ---
@@ -444,6 +446,15 @@ cudaError_t cudaMallocManaged(void **devPtr, size_t size, unsigned int flags);
 - 功能：申请统一内存
 - CANN 对标结论：当前未真实对标 CUDA UVM，兼容层返回 `cudaErrorNotSupported`
 
+### cudaMemAdvise / cudaMemPrefetchAsync / cudaMemRangeGetAttribute(s)
+```c
+cudaError_t cudaMemAdvise(const void *devPtr, size_t count, cudaMemoryAdvise advice, int device);
+cudaError_t cudaMemPrefetchAsync(const void *devPtr, size_t count, cudaMemLocation location, unsigned int flags,
+                                 cudaStream_t stream);
+```
+- 功能：CUDA UVM advise、prefetch 和 range attribute 查询
+- CANN 对标结论：当前不做 CUDA UVM 映射，不进入转测验收；兼容层返回 `cudaErrorNotSupported`
+
 ---
 
 ## Kernel Launch API
@@ -503,6 +514,19 @@ cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t *nodes, size_t 
 - 功能：查询 Graph 中的节点列表
 - 返回：cudaSuccess 或错误码
 
+### cudaGraphAddNode (conditional node only)
+```c
+cudaError_t cudaGraphAddNode(cudaGraphNode_t *pGraphNode,
+                             cudaGraph_t graph,
+                             const cudaGraphNode_t *dependencies,
+                             const cudaGraphEdgeData *dependencyData,
+                             size_t numDependencies,
+                             cudaGraphNodeParams *nodeParams);
+```
+- 功能：`nodeParams->type == cudaGraphNodeTypeConditional` 时创建条件 Graph 节点
+- 约束：仅 conditional node 特例映射到 CANN Model RI 条件任务；其他 node type 不属于当前 Runtime 兼容范围
+- 返回：cudaSuccess 或错误码
+
 ### cudaGraphSetConditional
 ```c
 cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned int value);
@@ -523,9 +547,9 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 | `cudaGetSymbolAddress` | 获取设备符号地址 |
 | `cudaMemcpyToSymbol` | 向设备符号拷贝数据 |
 | `cuMemsetD32Async` | Driver D32 异步 memset |
-| `cudaMemAdvise` | 设置/取消 managed memory advise |
 | `cudaFuncGetAttributes` | 查询 kernel/function 属性 |
 | `cudaGraphConditionalHandleCreate` | 创建条件 Graph handle |
+| `cudaGraphAddNode(cudaGraphNodeTypeConditional)` | 添加条件 Graph 节点 |
 | `cudaGraphGetNodes` | 查询 Graph 节点 |
 | `cudaGraphSetConditional` | 设置条件 handle 值 |
 | `cudaStreamBeginCaptureToGraph` | 将 stream capture 接入已有 Graph |
@@ -552,7 +576,7 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 - `cudaLaunchCooperativeKernel`
 - `cudaGetDriverEntryPoint`
 - `cudaGetDriverEntryPointByVersion`
-- `cudaGraphAddNode`
+- `cudaGraphAddNode` 非 conditional node 类型
 - `cudaGraphAddNode_v2`
 - `cudaGraphDestroy`
 - `cudaGraphInstantiateWithFlags`

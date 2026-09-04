@@ -32,6 +32,13 @@ endif()
 
 set(CANN_INCLUDE_DIR "${CANN_PATH}/include")
 set(CANN_LIB_DIR "${CANN_PATH}/lib64")
+set(CANN_PKG_INC_DIR "")
+foreach(CANN_ARCH_DIR aarch64-linux x86_64-linux)
+    if(EXISTS "${CANN_PATH}/${CANN_ARCH_DIR}/pkg_inc")
+        set(CANN_PKG_INC_DIR "${CANN_PATH}/${CANN_ARCH_DIR}/pkg_inc")
+        break()
+    endif()
+endforeach()
 
 # Export CANN paths to parent scope for tests and other components
 set(CANN_INCLUDE_DIR "${CANN_INCLUDE_DIR}" PARENT_SCOPE)
@@ -39,6 +46,9 @@ set(CANN_LIB_DIR "${CANN_LIB_DIR}" PARENT_SCOPE)
 
 # Include directories
 include_directories(${CANN_INCLUDE_DIR})
+if(CANN_PKG_INC_DIR)
+    include_directories(${CANN_PKG_INC_DIR})
+endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # Link directories
@@ -92,8 +102,8 @@ set_target_properties(cudacompat PROPERTIES
 find_package(Threads REQUIRED)
 
 # Link libraries
-target_link_libraries(cudacompat acl_rt msprofiler Threads::Threads)
-target_link_libraries(cudacompat_static acl_rt msprofiler Threads::Threads)
+target_link_libraries(cudacompat acl_rt runtime msprofiler Threads::Threads)
+target_link_libraries(cudacompat_static acl_rt runtime msprofiler Threads::Threads)
 
 # Installation
 install(TARGETS cudacompat cudacompat_static
