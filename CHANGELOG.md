@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-08-29】
+#### 文档更新 Documentation
+- 【治理规范】GOVERNANCE.md/CONTRIBUTING.md 补充 Committer 任命与退出规则:确立"贡献什么部分,管理什么部分"的责任田导向,沉淀 SIG 第 1/4/9/10 次会议关于晋级条件(3 个月 + 30 条审核意见 + 原创 Skill 或 10 个 PR)、晋升通道(常规/快速)与社区孵化贡献认定子场景、任命流程与退出机制的决议,并新增 Committer 申请 Issue 模板。
+
 ### 【2026-08-12】
 #### 架构重构 Architecture Refactoring
 - 【GitCode 协作】`gitcode-issue-handler` 保留公开名称与单 Issue 入口，内核升级为同时支持显式单 Issue 和当前仓库批量 Issue 的处理状态机，新增服务时钟、算子责任人路由、环境一致性与稳定复现门禁、受管 worktree、并行分组、严格报告和咨询 Issue 自动闭环；单 Issue 保留交互确认，批量默认 dry-run，直接推送始终单独确认。

@@ -117,6 +117,46 @@ Committer 清单见 [SIG CANNBot 社区页面](https://gitcode.com/cann/communit
 - 负责 Official plugin 准入评估
 - 负责争议升级到 SIG 之前的一级裁决
 
+#### 任命与退出
+
+**指导思想(责任田导向)**:Committer 按**"贡献什么部分,管理什么部分"**的导向任命——依据申请人的贡献方向划定其管理范围(责任田),权责与贡献对齐。Committer 在自身责任田内承担主要的检视、看护与一级裁决职责;责任田外的常规裁决仍按 [§1.2 判例法流程](#12-判例法设计决策讨论裁决)执行,不因身份扩大裁量范围。
+
+整体遵循 CANN 社区《[Committer/Maintainer 角色定义与晋升机制](https://gitcode.com/cann/community/blob/master/governance/role-definition-and-promotion-mechanism.md)》,CANNBot 变化点如下(依据 2026-04-08 第 1 次会议议题 3,经第 4、10 次会议细化):
+
+**晋级条件(需同时满足)**
+
+| 条件 | 要求 |
+|------|------|
+| 贡献时长 | 参与 CANN 项目贡献 ≥ 3 个月(与 CANN 社区基线一致,CANN 生态内其他仓库的贡献时长可计入) |
+| 审核投入 | 累计 ≥ 30 条有效审核意见(CANN 社区基线为 10 条) |
+| 实质贡献(满足其一) | ① ≥ 1 个原创、高质量、完整的 Skill/Plugin,在 CANN 社区中产生实际生产价值;② ≥ 10 个高质量、实质性的代码 PR |
+
+**晋升通道**
+
+| 通道 | 说明 |
+|------|------|
+| 常规通道 | 满足上述晋级条件后申请 |
+| 快速通道 | 某领域 Skill 原创性大规模提交者,经 SIG 投票同意后可直接申请(第 4 次会议议题 4;原创性需申请人自证) |
+
+**社区孵化场景(常规通道的子场景)**
+
+`plugins-community` 是社区实验孵化区,其中的贡献同样是晋级条件"实质贡献"的有效认定来源,不构成独立晋升通道(第 10 次会议议题 3):
+
+- 长期看护孵化插件、覆盖"生成、评测、优化、看护、安装"等完整链路的贡献,可认定为"原创、高质量、完整的 Skill/Plugin"性质的实质贡献
+- 实验性质的方案即使尚未被社区正式采纳为 official 能力,其看护者仍可依此场景申请成为 Committer,管理对应模块的更新与持续孵化;任命时同样按责任田导向明确管理范围
+
+**任命流程**
+
+1. 申请人在仓库提 Issue 申请,注明**贡献方向(即责任田)**、累计 PR 数/有效审核意见数及代表性 PR 链接(模板见 [CONTRIBUTING.md](CONTRIBUTING.md#申请成为-committer))
+2. 由现有 Committer 或 Maintainer 在 SIG 例会上发起提名
+3. 申请人须出席 SIG 会议并做贡献陈述(申请人未出席则延期审议,第 9 次会议议题 1)
+4. SIG 表决通过后列入 [Committer 清单](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot),并同步登记其责任田
+
+**退出机制**
+
+- 非活跃退出:连续 3 个月以上未参与代码审核、PR 提交或设计评审等活动(CANN 社区基线为 6 个月)
+- 会议参与度:Committer 应在 SIG 会议上积极发言,长期沉默者将被标注活跃度,作为责任田调整的依据(第 10 次会议议题 3)
+
 ### 3.2 Contributor
 
 - 提交 Skill / Agent / Team / Plugin 的提案和实现

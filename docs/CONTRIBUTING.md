@@ -178,6 +178,22 @@ PR 提交后 CI 自动执行:
 
 > 详细职责定义见 [治理规范 §三 角色与职责](GOVERNANCE.md#三角色与职责)。Committer 清单和 SIG 信息见 [SIG CANNBot 社区页面](https://gitcode.com/cann/community/tree/master/CANN/sigs/cannbot)。
 
+### 申请成为 Committer
+
+Committer 按**"贡献什么部分,管理什么部分"**的责任田导向任命:依据贡献方向划定管理范围,在自身责任田内承担主要的检视、看护与一级裁决职责。
+
+满足 [治理规范 §3.1 晋级条件](GOVERNANCE.md#31-committer)后,在本仓库提 Issue 申请,内容包含:
+
+| 项目 | 说明 |
+|------|------|
+| 贡献方向(责任田) | 按仓库领域目录划定,如:`ops`(算子开发)、`model`(模型推理优化)、`graph`(图编译)、`runtime`(运行时迁移)、`infra`(基础设施)、`tools`(工具链),或 `plugins-official` / `plugins-community` 中具体插件的看护 |
+| 累计贡献量 | PR 共 N 个 / 有效审核意见共 M 条 |
+| 代表性 PR 链接 | 3~5 个,各附一句贡献说明 |
+
+> **社区孵化说明**:`plugins-community` 中的实验方案即使尚未被社区正式采纳为 official 能力,其看护者同样可以申请成为 Committer,管理对应模块的更新与持续孵化;此类看护贡献计入晋级条件"实质贡献"的认定(见[治理规范 §3.1 社区孵化场景](GOVERNANCE.md#31-committer))。
+
+任命流程(提名 → SIG 例会陈述 → 表决)与退出机制见 [治理规范 §3.1](GOVERNANCE.md#31-committer)。
+
 ---
 
 ## 更多资源
