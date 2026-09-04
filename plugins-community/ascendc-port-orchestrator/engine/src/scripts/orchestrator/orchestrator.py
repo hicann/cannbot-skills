@@ -24,6 +24,7 @@ Architecture:
 from __future__ import annotations
 
 import datetime as _dt
+import fcntl
 import importlib
 import json
 import logging
@@ -51,6 +52,7 @@ except Exception as error:
 # Module-relative imports
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent))
+import engine_version
 
 # cv-agent-style centralized logger (owner direction 2026-05-27 00:12Z).
 # Module-level child of `a5_orchestrator` — handlers configured in main()
@@ -185,7 +187,12 @@ DEFAULT_AGENT_TIMEOUT_SEC = _DEFAULT_AGENT_TIMEOUT_SEC_A5  # safe default
 
 
 # Total cap on agents per single-op run (hard safety fuse).
-TOTAL_SPAWN_CAP_PER_OP = 12  # P0abe (2026-05-07): tightened from 20.
+# 2026-08-26 (review-55-57): env-overridable so a deliberate per-op continuation
+# (e.g. 57's phase-bisect campaign) can raise the budget via
+# AOG_TOTAL_SPAWN_CAP_PER_OP without changing the global default for other ops.
+TOTAL_SPAWN_CAP_PER_OP = int(
+    os.environ.get("AOG_TOTAL_SPAWN_CAP_PER_OP", "12")
+)  # P0abe (2026-05-07): tightened from 20.
 # Per-state caps sum to ~26 (kw=9 + probe=4 + ko=5 + fo=3 + ar=2 + da=2 + finalize=1)
 # but a healthy pipeline rarely exceeds 6-8 spawns. 12 is the soft ceiling: if
 # we cross it, something is wrong (loop, brief drift). Beyond cap, transition
@@ -228,6 +235,110 @@ def enforce_port_a3_target(opgen_mode: str, target: str):
 # ---------------------------------------------------------------------------
 # Single-op runner
 # ---------------------------------------------------------------------------
+
+_ORCHESTRATOR_LOCK_FILENAME = ".opgen_orchestrator.lock"
+
+
+def _high_spawn_cost_trigger(lifetime_spawn_count: int, same_signature_engine_count: int) -> Optional[str]:
+    """P2-5 (2026-08-28): lifetime-cost warning trigger, pure for testability.
+
+    Fires when lifetime spawns reach 15 (lowered from 30) OR when the P0-1
+    persistent same-signature counter shows >=2 consecutive identical
+    engine-class failures — a stuck engine loop is surfaced immediately
+    instead of waiting for the cumulative spawn count.
+    """
+    if lifetime_spawn_count >= 15:
+        return "lifetime_spawn_count>=15"
+    if same_signature_engine_count >= 2:
+        return "same_signature_engine>=2"
+    return None
+
+# The kernel releases an flock when the holding process dies, but only while
+# the fd stays open.  Keep every acquired fd here for the process lifetime so
+# GC never closes it early.
+_WORKSPACE_LOCK_FDS: list[int] = []
+
+
+def _lock_owner_pid(lock_path: Path) -> int | None:
+    """Best-effort parse of the pid recorded in the singleton lock file."""
+    try:
+        text = lock_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for token in text.split():
+        if token.startswith("pid="):
+            try:
+                return int(token[4:])
+            except ValueError:
+                return None
+    return None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _acquire_workspace_singleton_lock(workspace: Path) -> int:
+    """Take the per-workspace orchestrator singleton lock; 0 on success.
+
+    A second orchestrator process for the same workspace (double-resume race,
+    human + monitor overlap) used to run a concurrent FSM that raced lane
+    leases, rollbacks and candidate archival on shared durable state.  Take an
+    exclusive non-blocking flock on ``<workspace>/.opgen_orchestrator.lock``
+    instead: the loser exits 78 before touching any state, and because the
+    kernel drops the lock when the holder dies, a crashed orchestrator never
+    leaves a stale lock behind.  Returns 2 when the lock file itself is
+    unusable (fail closed -- running unlocked is how the race happened).
+
+    2026-08-29: a *killed* orchestrator can leave the flock pinned for a
+    while — a just-SIGTERM'd holder mid-teardown, or an fd inheritor (a
+    graybox worker child) that outlives it.  When the recorded owner pid is
+    already dead, wait briefly and retry once before refusing; the kernel
+    releases the flock as soon as the last fd closes.
+    """
+    lock_path = Path(workspace) / _ORCHESTRATOR_LOCK_FILENAME
+    for attempt in range(2):
+        try:
+            fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        except OSError as exc:
+            print(f"ERROR: orchestrator singleton lock {lock_path} is unusable: {exc}")
+            return 2
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            owner_pid = _lock_owner_pid(lock_path)
+            if (
+                attempt == 0
+                and owner_pid is not None
+                and not _pid_alive(owner_pid)
+            ):
+                print(
+                    f"WARNING: orchestrator lock {lock_path} is held but its "
+                    f"recorded owner pid={owner_pid} is dead (stale after kill "
+                    f"— fd inheritor or mid-teardown holder); retrying in 5s"
+                )
+                time.sleep(5)
+                continue
+            print(
+                f"ERROR: another orchestrator already runs workspace {workspace} "
+                f"(lock: {lock_path}); refusing a second FSM — exit 78"
+            )
+            return 78
+        os.ftruncate(fd, 0)
+        os.write(fd, f"pid={os.getpid()} op_workspace={workspace}\n".encode("utf-8"))
+        _WORKSPACE_LOCK_FDS.append(fd)
+        return 0
+    return 78  # unreachable — the loop either acquires or returns
+
+
+
 def run_single_op(
     op: str,
     *,
@@ -261,6 +372,10 @@ def run_single_op(
         return 2
     if workspace is None:
         workspace = _resolve_workspace(op, backend="ascendc")
+
+    lock_rc = _acquire_workspace_singleton_lock(workspace)
+    if lock_rc != 0:
+        return lock_rc
 
     scoped_mode = _read_scoped_opgen_mode(workspace)
     if scoped_mode is None:
@@ -539,9 +654,11 @@ def run_single_op(
     # spawn events vs cap=12 because each cold-start started fresh.
     #
     # Fix: read lifetime spawn count from .opgen_state.json (survives
-    # cold-start backup). Warn loudly when lifetime ≥ 30 so user/agent
-    # sees the accumulated cost. Don't hard-block (legitimate retry
-    # scenarios exist) but surface the hidden cost.
+    # cold-start backup). Warn loudly when lifetime ≥ 15 (P2-5, lowered
+    # from 30) or when the P0-1 persistent same-signature engine-class
+    # counter reaches 2, so user/agent sees the accumulated cost.
+    # Don't hard-block (legitimate retry scenarios exist) but surface
+    # the hidden cost.
     _lifetime_spawn_count = 0
     _state_fp = workspace / ".opgen_state.json"
     if _state_fp.is_file():
@@ -550,17 +667,30 @@ def run_single_op(
             _lifetime_spawn_count = int(_state_obj.get("lifetime_spawn_count", 0))
         except Exception:
             _lifetime_spawn_count = 0
-    if _lifetime_spawn_count >= 30:
+    # P2-5 (PR875 equiv review, 2026-08-28): warning threshold 30 → 15, and
+    # linked to the P0-1 same-signature counter — an engine-class stuck loop
+    # (>=2 consecutive identical engine failures, persistent across restarts)
+    # is surfaced immediately instead of waiting for the cumulative count.
+    _same_sig_engine_count = 0
+    try:
+        _same_sig_engine_count = state_executor.same_signature_count(workspace, "engine")
+    except Exception:
+        _same_sig_engine_count = 0
+    _cost_trigger = _high_spawn_cost_trigger(_lifetime_spawn_count, _same_sig_engine_count)
+    if _cost_trigger is not None:
         log.info(
-            f"⚠ HIGH LIFETIME SPAWN COST: this op has "
+            f"⚠ HIGH LIFETIME SPAWN COST ({_cost_trigger}): this op has "
             f"accumulated {_lifetime_spawn_count} spawns across all "
-            f"sessions/cold-starts. This may indicate an infra-blame-loop "
-            f"or persistent reward-hacking cycle (P94 attack-id "
-            f"INFRA-BLAME-LOOP). Hidden cost is visible — consider "
+            f"sessions/cold-starts (same-signature engine-class consecutive "
+            f"failures: {_same_sig_engine_count}). This may indicate an "
+            f"infra-blame-loop or persistent reward-hacking cycle (P94 "
+            f"attack-id INFRA-BLAME-LOOP). Hidden cost is visible — consider "
             f"investigating root cause before another cold-start."
         )
         events.emit(workspace, "orchestrator.high_lifetime_spawn_cost",
-                    lane=lane, data={"count": _lifetime_spawn_count})
+                    lane=lane, data={"count": _lifetime_spawn_count,
+                                     "same_signature_engine_count": _same_sig_engine_count,
+                                     "trigger": _cost_trigger})
 
     # DEBT-201 (dependency inversion): build the per-run OrchestratorContext.
     # STEP 1 introduces the abstraction only — the loop below still reads/writes
@@ -588,7 +718,46 @@ def run_single_op(
     # locals). The spawn + post-spawn cluster is extracted to
     # fsm_phase_spawn.handle_spawn, which reads+advances that ctx state; the
     # loop drives off ctx.spawn_count so the observable behavior is unchanged.
+    # Engine version drift guard (2026-08-27): this orchestrator is a
+    # long-running process, but per-round child processes (O5 runner, graybox
+    # staging) are spawned fresh from the worktree on disk. If the engine code
+    # moved on disk mid-session, parent and children would run different
+    # contract versions ('KeyError: binding_sha256' incident — 5 wasted O5
+    # rounds). Fail fast with a dedicated exit code; resume reloads the engine.
+    _engine_fp = engine_version.capture()
+    log.info(
+        "engine version: git=%s tree=%s files=%s",
+        _engine_fp.get("git_head") or "n/a",
+        str(_engine_fp.get("engine_tree_sha256"))[:12],
+        _engine_fp.get("file_count"),
+    )
+    try:
+        _engine_fp_path = workspace / ".engine_version.json"
+        _engine_fp_path.write_text(json.dumps(_engine_fp, indent=2))
+    except OSError:
+        pass
     while ctx.spawn_count < TOTAL_SPAWN_CAP_PER_OP:
+        _drifted, _drift_reason = engine_version.drift(_engine_fp)
+        if _drifted:
+            log.critical(
+                "ENGINE VERSION DRIFT: %s — this orchestrator loaded an older "
+                "engine than the one now on disk; per-round children would run "
+                "different contract code. Exiting %s: restart the orchestrator "
+                "(resume) to load the current engine.",
+                _drift_reason,
+                engine_version.EXIT_DRIFT,
+            )
+            events.emit(workspace, "orchestrator.engine_drift", lane=lane,
+                        data={"reason": _drift_reason})
+            try:
+                (workspace / ".engine_drift.json").write_text(json.dumps(
+                    {"reason": _drift_reason,
+                     "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
+                    indent=2,
+                ))
+            except OSError:
+                pass
+            return engine_version.EXIT_DRIFT
         snap = state_executor.snapshot(workspace)
         log.info(f"iter={ctx.spawn_count} state={snap.current_state}")
 

@@ -84,6 +84,12 @@ check_harness_deps() {
       fi
       if [ -z "$(js_runtime)" ]; then
         dep_ok=false; missing="${missing:+$missing, }node/bun runtime"
+      fi
+      # 2026-08-26 (flash_attention_score_oc): the opencode skill/glob tools
+      # exec ripgrep on every search ("ripgrep execution failed" on hosts
+      # without rg, CBA_MISSING_A_TIER cascade). Preflight it like the rest.
+      if ! command -v rg >/dev/null 2>&1; then
+        dep_ok=false; missing="${missing:+$missing, }ripgrep (rg)"
       fi ;;
   esac
   if [ "$dep_ok" = false ]; then
@@ -154,6 +160,12 @@ INCLUDED_AGENTS="aog-kernel-worker aog-precision-probe aog-kernel-optimizer aog-
 # explicit 9-agent closure above.
 INCLUDED_AGENT_PATTERN="aog-*"
 
+# These files are part of the plugin's executable safety contract, not optional
+# OKF content.  Phase O0 refuses to spawn workers without them, so report a
+# malformed marketplace payload during installation instead of claiming a
+# healthy install that can only fail on first use.
+REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md KB_INDEX.md target/ascendc/OPERATIONAL_KNOWLEDGE.md"
+
 LEVEL="project"; TOOL="claude"; STRICT_DEPS=0
 for arg in "${@:-}"; do
   case "$arg" in
@@ -174,6 +186,22 @@ SHARED_SKILL_ROOT="$PLUGIN_DIR/../../ops"
 # A checkout can link canonical shared Skills directly. A Claude marketplace copy has no
 # repository root and relies on the declared shared-skills dependency instead.
 if [ -d "$SHARED_SKILL_ROOT" ]; then DIRECT_CHECKOUT=1; else DIRECT_CHECKOUT=0; fi
+
+# `engine/.claude/` is a runtime-only direct-checkout artifact: direct installation
+# writes its safety-net settings there because the worker runs with engine/ as cwd.
+# It is intentionally gitignored.  A filesystem copy of a developer checkout can
+# nevertheless carry that artifact into a Claude marketplace cache.  Those settings
+# contain the source checkout's absolute hook paths, so letting Claude load them from
+# the cached engine would make every worker invoke hooks from the wrong machine.
+#
+# The marketplace cache is plugin-owned and must use its packaged hooks/hooks.json
+# (whose commands resolve through ${CLAUDE_PLUGIN_ROOT}) instead.  Remove the whole
+# runtime-only directory before any marketplace install work.  Do not do this for a
+# real checkout: direct-checkout mode deliberately creates and verifies this surface.
+if [ "$DIRECT_CHECKOUT" = "0" ] && [ -e "$PLUGIN_DIR/engine/.claude" ]; then
+  rm -rf -- "$PLUGIN_DIR/engine/.claude"
+  ok "removed stale checkout-local Claude settings from marketplace cache"
+fi
 
 # OpenCode intentionally never treats Claude Code's marketplace cache as a dependency source:
 # doing so would reintroduce a hidden ~/.claude read. The currently packaged OpenCode setup
@@ -223,6 +251,27 @@ else
     CONFIG_ROOT="$PWD/.cursor"
   else
     CONFIG_ROOT="$PWD/.claude"
+  fi
+fi
+
+# 2026-08-29 (port-run9 29/76 双线事故): a global install is
+# last-installer-wins — installing from worktree B silently repoints the
+# shared config root away from worktree A's running experiment.  Detect a
+# foreign existing install and warn loudly BEFORE overwriting, pointing at
+# the experiment-scoped isolation recipe.
+if [ "$LEVEL" = "global" ] && [ -f "$CONFIG_ROOT/cannbot-manifest.json" ]; then
+  EXISTING_ROOT=$(python3 -c "import json;print(json.load(open('$CONFIG_ROOT/cannbot-manifest.json')).get('plugin_root',''))" 2>/dev/null || true)
+  if [ -n "$EXISTING_ROOT" ] && [ "$EXISTING_ROOT" != "$PLUGIN_DIR" ]; then
+    echo "" >&2
+    echo "  ⚠️  WARNING: $CONFIG_ROOT currently belongs to a DIFFERENT install:" >&2
+    echo "      existing: $EXISTING_ROOT" >&2
+    echo "      now installing: $PLUGIN_DIR" >&2
+    echo "      Global installs are last-installer-wins — this will repoint shared" >&2
+    echo "      skills/entry commands and can silently hijack another experiment line." >&2
+    echo "      For parallel experiment lines prefer per-run isolation instead:" >&2
+    echo "        cd <run-dir> && bash $PLUGIN_DIR/init.sh project $TOOL --strict-deps" >&2
+    echo "        (+ export OPENCODE_USER_CONFIG=<run-dir>/.opencode for opencode)" >&2
+    echo "" >&2
   fi
 fi
 
@@ -454,9 +503,9 @@ echo ""
 # declaration and proves the output-read guard's deny/allow behavior.
 step "[1b/4] Registering safety-net hooks..."
 if [ "$TOOL" = "claude" ]; then
+  ENGINE_SETTINGS="$PLUGIN_DIR/engine/.claude/settings.json"
   if [ "$DIRECT_CHECKOUT" = "1" ]; then
     WF="$PLUGIN_DIR/engine/src/scripts/workflow"
-    ENGINE_SETTINGS="$PLUGIN_DIR/engine/.claude/settings.json"
     mkdir -p "$(dirname "$ENGINE_SETTINGS")"
     for SETTINGS in "$CONFIG_ROOT/settings.json" "$ENGINE_SETTINGS"; do
   ASCENDC_PORT_WF="$WF" python3 - "$SETTINGS" <<'PYHOOK'
@@ -522,6 +571,24 @@ else
 fi
 echo ""
 
+# --- Step 1.5: packaged KB safety contract ---
+# Marketplace payloads must carry the canonical guard/index files alongside the
+# generated OKF index.  Do not silently fall back to a checkout or user KB: that
+# would make the installed plugin non-reproducible and bypass the O0 contract.
+missing_packaged_kb=""
+for kb_rel in $REQUIRED_PACKAGED_KB; do
+  if [ ! -f "$PLUGIN_DIR/kb/$kb_rel" ]; then
+    missing_packaged_kb="${missing_packaged_kb}${missing_packaged_kb:+, }kb/$kb_rel"
+  fi
+done
+if [ -n "$missing_packaged_kb" ]; then
+  err "marketplace payload is incomplete; missing mandatory O0 KB file(s): $missing_packaged_kb"
+  err "reinstall the plugin from a complete marketplace package; do not start an operator run"
+  exit 1
+fi
+ok "mandatory O0 KB files present"
+echo ""
+
 # --- Step 2: user-side KB(c) root + index (ARCH §5.1/§5.3) ---
 step "[2/4] User KB (c-tier) root..."
 USER_KB="${ASCENDC_PORT_USER_KB:-$HOME/.ascendc-port/user_kb}"
@@ -544,6 +611,20 @@ echo ""
 OFFICIAL_OKF_ROOT="$PLUGIN_DIR/kb/okf"
 OFFICIAL_OKF_INDEX_READY=false
 if [ -d "$OFFICIAL_OKF_ROOT" ]; then
+  # macOS BSD tar may materialize AppleDouble resource-fork files when a
+  # checkout is copied to Linux.  They are binary `._*.md` companions, not
+  # knowledge cards; knowledge-query quite correctly treats real `.md` files
+  # as UTF-8 and would otherwise fail the install on their invalid bytes.
+  # The scope is limited to this plugin-owned packaged KB and never touches
+  # the user's KB or an external dependency.
+  apple_double_count=0
+  while IFS= read -r -d '' metadata_file; do
+    rm -f -- "$metadata_file"
+    apple_double_count=$((apple_double_count + 1))
+  done < <(find "$OFFICIAL_OKF_ROOT" -type f \( -name '._*' -o -name '.DS_Store' \) -print0)
+  if [ "$apple_double_count" -gt 0 ]; then
+    warn "removed $apple_double_count macOS metadata file(s) from packaged OKF before indexing"
+  fi
   QUERY_SCRIPT="$CONFIG_ROOT/skills/knowledge-query/scripts/knowledge_query.py"
   if [ ! -f "$QUERY_SCRIPT" ]; then
     err "knowledge-query script is unavailable; cannot build the official OKF index"
@@ -643,8 +724,9 @@ if [ "$TOOL" = "claude" ]; then
   else
     HOOK_DECLARATION="$PLUGIN_DIR/hooks/hooks.json"
   fi
-  python3 - "$HOOK_DECLARATION" <<'PYCHK' || hooks_check_ok=false
-import json, sys
+  HOOK_PLUGIN_ROOT="$PLUGIN_DIR" python3 - "$HOOK_DECLARATION" <<'PYCHK' || hooks_check_ok=false
+import json, os, re, sys
+from pathlib import Path
 try:
     h = json.load(open(sys.argv[1])).get("hooks", {})
 except Exception as e:
@@ -656,6 +738,21 @@ missing = [n for n in ("output_read_guard.py", "workflow_critic.py", "ship_claim
            if not any(n in c for c in cmds)]
 if missing:
     print(f"  safety-net hooks missing from {sys.argv[1]}: {missing}"); sys.exit(1)
+plugin_root = os.environ["HOOK_PLUGIN_ROOT"]
+unresolved = []
+for command in cmds:
+    expanded = (command
+                .replace("${CLAUDE_PLUGIN_ROOT}", plugin_root)
+                .replace("$CLAUDE_PLUGIN_ROOT", plugin_root))
+    match = re.search(r"(?:^|\s)python3\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))", expanded)
+    if not match:
+        continue
+    script = next(group for group in match.groups() if group is not None)
+    if not Path(script).is_file():
+        unresolved.append(script)
+if unresolved:
+    print("  hook command points to missing script(s): " + ", ".join(unresolved))
+    sys.exit(1)
 stop_cmds = [x.get("command", "") for m in h.get("SubagentStop", [])
              for x in m.get("hooks", [])]
 if not any("agent-gate-dispatch.py" in c and " stop" in c for c in stop_cmds):
@@ -892,15 +989,15 @@ esac
 echo ""
 if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${BOLD}Quick start (opencode):${NC}"
-  echo -e "  ${CYAN}1.${NC} fill ${GREEN}engine/workspace/.ascendc_env${NC} (A3/A5 host+container) — docs/USAGE.md"
+  echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"
   echo -e "  ${CYAN}2.${NC} launch ${GREEN}opencode${NC} in your project, then a customer entry command:"
-  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn op dir>${NC}   (→ orch --port-a3)"
+  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
   echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
 else
   echo -e "  ${BOLD}Quick start (Claude Code):${NC}"
-  echo -e "  ${CYAN}1.${NC} fill ${GREEN}engine/workspace/.ascendc_env${NC} (A3/A5 host+container) — docs/USAGE.md"
+  echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"
   echo -e "  ${CYAN}2.${NC} launch ${GREEN}claude${NC}, then a customer entry skill:"
-  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn op dir>${NC}   (→ orch --port-a3)"
+  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
   echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
 fi
 echo -e "  ${DIM}Pipeline logic lives entirely in engine/; the entry skills are thin NL front-ends.${NC}"

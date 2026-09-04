@@ -291,6 +291,17 @@ TILELANG_GE_OPHOST_DELIVERY_SUFFIXES = (
     "_tiling_common.h",
 )
 
+# GE registration subtree (op_host/config/<soc>/{<op>_binary.json,
+# <op>_simplified_key.ini}).  The kw brief has the worker emit these for the
+# GE op-registration flow, but the direct-launch (non-GE) delivery contract
+# does not consume them — the delivery is the model_new_ascendc.py + kernel/
+# direct-launch package, no GE op_host five-piece.  Promotion therefore omits
+# the whole subtree with a WARN instead of hard-failing on it (2026-08-29
+# 2_FFN_evo: a leftover *_simplified_key.ini blocked an otherwise-PASS
+# finalize with a bare exit 7).  Fail-closed stays reserved for genuinely
+# unknown file types outside this known GE-registration shape.
+DIRECT_LAUNCH_GE_REGISTRATION_SUBTREE = ("op_host", "config")
+
 
 RUNNER_BUILD_RECEIPT_FILENAMES: tuple[str, ...] = (
     "tilelang2ascendc_build_receipt.json",
@@ -510,6 +521,17 @@ def _delivery_path_rejection(
             f"{relative.as_posix()}"
         )
     if _delivery_path_is_retained(profile, workspace_rel_path):
+        return None
+    if parts[:2] == DIRECT_LAUNCH_GE_REGISTRATION_SUBTREE:
+        # Known GE-registration leftover (see the constant's comment): omit
+        # from the archive and record a WARN instead of erroring — the
+        # worker cannot be expected to un-emit what the brief asked for,
+        # and the direct-launch delivery never consumes this subtree.
+        logging.getLogger(__name__).warning(
+            "delivery promotion omits GE registration artifact (not part of "
+            "the direct-launch delivery contract): %s",
+            relative.as_posix(),
+        )
         return None
     return (
         f"{delivery_label} delivery contains an unrecognized file that would be omitted: "

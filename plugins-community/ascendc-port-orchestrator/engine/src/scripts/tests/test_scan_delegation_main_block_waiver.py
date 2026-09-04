@@ -87,6 +87,25 @@ class ModelNew(torch.nn.Module):
                for h in hits), f"Expected gather delegation flag, got {hits}"
 
 
+@pytest.mark.parametrize(
+    "expression",
+    ["torch.add(x, y)", "torch.sub(x, y)", "torch.mul(x, y)", "torch.div(x, y)", "x.add(y)"],
+)
+def test_elementwise_torch_delegation_in_forward_is_flagged(tmp_path, expression):
+    """Elementwise top-level and tensor-method shortcuts are still delegation."""
+    p = _write(tmp_path, "model_new_ascendc.py", f"""
+import torch
+
+class ModelNew(torch.nn.Module):
+    def forward(self, x, y):
+        return {expression}
+""")
+
+    hits = scan_python_wrapper(p)
+
+    assert hits, f"Expected elementwise delegation flag for {expression}, got {hits}"
+
+
 def test_torch_gather_in_forward_method_still_flagged(tmp_path):
     """Delegation in forward() body must still be flagged even if file
     contains an unrelated __main__ block elsewhere.

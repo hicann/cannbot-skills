@@ -36,6 +36,284 @@ from briefs.kw_brief_pa3_phases import (
     _pa3_phase_b,
     _pa3_phase_c,
 )
+from reference_source import uses_npubench_reference
+
+
+def _workspace_uses_npubench_reference(workspace: Path) -> bool:
+    """Return whether the brief must use a frozen old-format task contract."""
+    if not (Path(workspace) / ".opgen_state.json").exists():
+        return False
+    return uses_npubench_reference(workspace)
+
+
+_TILELANG2ASCENDC_SOURCE_BOUNDARY = """## TileLang2AscendC source boundary — implementation context only
+
+`source_kind` is the persisted **`port-aclnn-tilelang2ascendc`** route. The
+immutable TileLang2AscendC project mounted read-only at `{source_stage}` may be
+read for operator shape and kernel-generation context. It is never functional
+truth; the frozen NPUKernelBench bundle remains the only oracle.
+
+Author an independent candidate in the same project format: a
+`model_new_ascendc.py` entry point and a `kernel/` tree containing
+`CMakeLists.txt`, `register.cpp`, `op_host/`, and `op_kernel/` (plus any
+project headers or setup metadata required by that recipe). The model must
+call the newly registered `torch.ops.npu.<op>` custom op. `kernel/pybind11.cpp`
+is not required and is not the target ABI for this route. Do not byte-copy a
+staged source file, reference `{source_stage}` at runtime, or call ACLNN,
+`torch.ops.aten`, `torch.nn.functional`, NumPy, or a CPU fallback. The graybox
+has no CANN compiler/toolchain authority; do not compile or run a build script.
+Missing toolchain pieces in the sandbox are expected — never an infra
+violation, and never a `build stuck` / `INFRA_BASELINE_VIOLATED` handoff.
+The controlled target runner owns the authored CMake build and frozen
+NPUKernelBench evaluation after handoff. The target gate requires registered
+`TORCH_LIBRARY`/`TORCH_LIBRARY_IMPL` evidence, authored host launch evidence,
+and a real AscendC device TU with `__global__`, `__aicore__`, and `AscendC::`.
+`kernel/register.cpp` must also carry a `PYBIND11_MODULE(_<op>_ext, m)` entry
+point whose module name matches the CMake `OUTPUT_NAME` of the built extension;
+the module body may stay empty (`m.doc()` only) because `TORCH_LIBRARY` static
+registration runs at load, but without it the built `_<op>_ext<EXT_SUFFIX>.so`
+exports no `PyInit__<op>_ext` and the evaluator's `import _<op>_ext` fails.
+`model_new_ascendc.py` must bootstrap the import path itself before importing
+the extension, e.g.
+`sys.path.insert(0, str(Path(__file__).resolve().parent / "kernel" / "build"))`,
+because the evaluator stage does not add `kernel/build` to `sys.path`.
+In `kernel/op_kernel/`, do not include `<algorithm>` or call host STL
+`std::min`/`std::max` from an AICore function; use device-safe scalar logic.
+
+TARGET ARCHITECTURE IS aarch64 (2026-08-21 batch rule): several staged
+source CMakeLists hardcode `x86_64-linux` CANN paths (generated on x86
+hosts). NEVER copy that pattern into your `kernel/CMakeLists.txt` — the
+target build machine is aarch64 and any `x86_64-linux` path fails the
+controlled build. Write all CANN toolchain paths against
+`aarch64-linux` (e.g. `${{ASCEND_CANN_PACKAGE_PATH}}/aarch64-linux/asc/include`
+and `${{ASCEND_CANN_PACKAGE_PATH}}/aarch64-linux/lib64/...`), or better use the
+architecture-agnostic variables provided by the CANN cmake toolchain.
+
+CMake PATH PROBES MUST BE SILENT (2026-08-21 batch rule): when
+`execute_process` runs `import torch_npu` (or torch) to discover an include
+path, the import can print device/console-log noise to stdout in a
+container without full device init; that text is captured INTO the path
+variable and corrupts the generated flags.make ("missing separator").
+Silence stdout at the FD level during the import — the device-init noise
+is printed through C-level fd writes that `sys.stdout` redirection does NOT
+catch. Use
+`python3 -c "import os; _s=os.dup(1); os.dup2(os.open(os.devnull,
+os.O_WRONLY), 1); import torch_npu; os.dup2(_s, 1);
+print(os.path.dirname(torch_npu.__file__))"` — and apply the same to any
+`import torch` probe (backend autoload prints the same noise). Never
+capture raw import output into a path.
+"""
+
+
+def _tilelang2ascendc_npubench_worker_context(workspace: Path) -> str:
+    """Return the persisted TileLang2AscendC implementation contract."""
+    state_path = Path(workspace) / ".opgen_state.json"
+    if not state_path.exists():
+        return ""
+    try:
+        import json
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        # A malformed state is handled by the common durable-state gates.  Do
+        # not let this optional Tile context break brief building.
+        return ""
+    if not isinstance(state, dict):
+        return ""
+    if state.get("source_kind") != "port-aclnn-tilelang2ascendc":
+        return ""
+    port_source = state.get("port_source") if isinstance(state, dict) else None
+    if not (
+        isinstance(port_source, dict)
+        and port_source.get("kind") == "port-aclnn-tilelang2ascendc"
+    ):
+        raise RuntimeError("TileLang2AscendC durable state has no matching port_source binding")
+    source_stage = state.get("port_a3_source")
+    if not isinstance(source_stage, str) or not source_stage:
+        raise RuntimeError("TileLang2AscendC durable state has no source-stage path")
+    return _TILELANG2ASCENDC_SOURCE_BOUNDARY.format(source_stage=source_stage)
+
+
+_NPUBENCH_TL_PHASE_A_INTRO = (
+    """A.1. Read the frozen task only to understand its callable API and input-group
+semantics. Read the staged TileLang2AscendC project only as implementation
+context, then author an independent candidate in the same `model_new_ascendc.py`
+plus `kernel/` project format. Keep `register.cpp`, `kernel/op_host/`,
+`kernel/op_kernel/`, and the authored `kernel/CMakeLists.txt` coherent. The
+model must call a matching local `torch.ops.npu.<op>` registration. Do not
+byte-copy the staged project, call ACLNN or framework ATen operators, add a
+CPU/NumPy fallback, or point the model at the read-only source stage. The
+graybox has no CANN compiler/toolchain authority, so do not compile or run a
+build script; missing toolchain pieces there are expected, never an infra
+violation, and never a `build stuck` / `INFRA_BASELINE_VIOLATED` handoff. The
+controlled target runner owns build, candidate snapshot, and
+NPUKernelBench evaluation after handoff; exit with
+`→ orchestrator: build-ready — <one-line summary>`. This route does not require
+`kernel/pybind11.cpp`; it requires
+`TORCH_LIBRARY`/`TORCH_LIBRARY_IMPL`, host launch evidence, and real
+`__global__` + `__aicore__` + `AscendC::` device implementation evidence.
+Keep AICore code device-safe: do not include `<algorithm>` or call host STL
+`std::min`/`std::max` in `kernel/op_kernel/`; use scalar comparisons instead.
+Additionally, `kernel/register.cpp` must define a
+`PYBIND11_MODULE(_<op>_ext, m)` entry point matching the CMake `OUTPUT_NAME`
+of the built extension (an empty body with only `m.doc()` is enough; the
+`TORCH_LIBRARY` static registration completes at load). Without it the built
+`_<op>_ext<EXT_SUFFIX>.so` has no `PyInit__<op>_ext` symbol and the evaluator
+fails with "dynamic module does not define module export function".
+`model_new_ascendc.py` must add `kernel/build` to `sys.path` itself before
+importing the extension, e.g.
+`sys.path.insert(0, str(Path(__file__).resolve().parent / "kernel" / "build"))`;
+the isolated evaluator stage cannot find the module otherwise."""
+    + """ The runner-selected `ModelNew` (or compatibility
+fallback `Model`) in `model_new_ascendc.py` must subclass `torch.nn.Module`,
+`nn.Module`, or imported `Module`, because the harness moves it with `.to(device)`
+and calls `.eval()` before frozen evaluation."""
+)
+
+_NPUBENCH_TL_PHASE_A_HANDOFF = """A.3. Report static readiness and unsupported shapes honestly. Do not claim a
+build or functional PASS from the graybox. The target runner builds the
+authored TileLang2AscendC CMake project and evaluates it against the frozen
+NPUKernelBench bundle."""
+
+_NPUBENCH_PHASE_A_INTRO = (
+    """A.1. Read the frozen task only to understand its callable API and input-group
+semantics. Implement and build the target kernel in the current workspace. The
+candidate must be exposed through `model_new_ascendc.py` and invoke the newly
+built kernel directly. A framework dispatcher, CPU fallback, subprocess
+delegation, lookup table, or replayed reference tensor is not an implementation."""
+    + """ The runner-selected `ModelNew` (or compatibility
+fallback `Model`) in `model_new_ascendc.py` must subclass `torch.nn.Module`,
+`nn.Module`, or imported `Module`, because the harness moves it with
+`.to(device)` and calls `.eval()` before frozen evaluation."""
+)
+
+_NPUBENCH_PHASE_A_HANDOFF = """A.3. Build failures and unsupported callable shapes must be reported honestly
+in the handoff. Never mark a functional result PASS from a local self-report."""
+
+_NPUBENCH_PHASES_TEMPLATE = """# PHASES (NPUKernelBench port)
+
+## Reference contract — immutable original task bundle
+
+`reference.source` is **`npubench`**. Functional truth is the frozen,
+old-format NPUKernelBench task selected in `.opgen_state.json`: its real task
+Python path, same-stem JSON/JSONL sidecar, and bundle manifest. Do not
+translate it into the repository's generic model/test reference representation,
+rename it, rewrite it, regenerate inputs, or use a caller-supplied path after
+staging. The migration source tree is implementation context only; it is never
+a functional oracle.
+
+The orchestrator has already run the target-side NPUKernelBench preflight
+before this worker starts and records the immutable result in
+`npubench_evidence/preflight_target_receipt.json`. Inspect that receipt and
+preserve its binding. Do **not** run `python3 -m npubench_runner preflight`
+from the graybox worker: it has no A5 target dependencies and may overwrite
+the target evidence with a controller-side provider-installation error.
+
+The PROGRESS.md tail `## OPERATOR NOTE` entries / attachment area are the
+operator's injection channel — always read the tail on spawn.
+
+The task may rely on `__file__`, sibling imports, package-relative imports, and
+a `.json` file whose contents are JSONL. Preserve those semantics. Do not
+write inside `reference_inputs/`, replace runner adapter files, or cache task
+outputs as a candidate shortcut.
+
+## Phase A — author a real target candidate
+
+{phase_a_intro}
+
+For a compiled extension under the candidate's `kernel/build/`, make
+`model_new_ascendc.py` self-contained: it is loaded as a top-level frozen task,
+not as a Python package. Resolve the build directory from `__file__`, add it
+only when it exists, then use a normal extension import. Do **not** use
+`from .kernel.build import ...`, and do not rely on the orchestrator's current
+working directory or adapter paths. The candidate snapshot includes its own
+built extension artifacts.
+
+```python
+from pathlib import Path
+import sys
+
+_BUILD = Path(__file__).resolve().parent / "kernel" / "build"
+if _BUILD.is_dir():
+    sys.path.insert(0, str(_BUILD))
+import _<op>_ext
+```
+
+A.2. Preserve the task's callable and initialization compatibility. The
+harness seeds randomness, takes candidate `get_init_inputs()` when present
+(otherwise the reference provider), creates each reference input group once,
+and deep-copies it for comparison. It does not transfer reference state into
+the candidate; do not alter the task or substitute unrelated random inputs.
+
+{phase_a_handoff}
+
+## Phase B — harness-owned precision and performance
+
+B.1. The orchestrator owns final evaluation. After the candidate build is
+complete it invokes `npubench_runner evaluate`, applying the frozen precision
+contract and writing bound evidence. Do not author or overwrite
+`verification.json` precision counts, runner evidence, profiler reports, or a
+substitute grader.
+
+B.2. The final performance gate is a separate harness measurement using the
+repository quick profiler engine with warm-up 3, repeats 5, and retained raw
+profile artifacts. Do not substitute a timing method or claim a speedup from
+an unbound local run.
+
+B.3. Precision and performance must bind the same frozen bundle and candidate
+tree. Any source or candidate change invalidates prior evidence and requires a
+fresh orchestrator evaluation.
+
+## Phase C — provenance and handoff
+
+C.1. Preserve current-workspace build lineage in
+`verification.json.build_evidence.compiled_provenance` (workspace source,
+deployed source, object, shared library, and SHA256 values). Do not use an
+installed target tree as binary provenance.
+
+C.2. Write `knowledge_update.md` with `## Context`, `## Findings`,
+`## KB-promotable patterns`, `## Cited KB items`, and `## Anti-patterns avoided`.
+
+C.3. `iter_cap_remaining = {iter_cap_remaining}`. Hand off only after the
+candidate is buildable and its true entry point is available for the harness.
+Evaluation failures are feedback for a new implementation iteration, not a
+reason to weaken or replace the frozen task contract.
+"""
+
+
+def _npubench_phase_a_texts(has_tilelang_context: bool) -> tuple[str, str]:
+    """Return the Phase-A intro and handoff bodies for the two provider routes.
+
+    Extracted verbatim from ``_npubench_phase_instructions_block``; the two
+    routes stay byte-identical to the pre-extraction branches.
+    """
+    if has_tilelang_context:
+        return _NPUBENCH_TL_PHASE_A_INTRO, _NPUBENCH_TL_PHASE_A_HANDOFF
+    return _NPUBENCH_PHASE_A_INTRO, _NPUBENCH_PHASE_A_HANDOFF
+
+
+def _npubench_phase_instructions_block(
+    op: str,
+    workspace: Path,
+    iter_cap_remaining: int,
+    env: "AscendCEnv",
+) -> str:
+    """Worker contract for a frozen old-format NPUKernelBench provider.
+
+    This is self-contained because the old task is the functional oracle and
+    the migration source tree is implementation context only.
+    """
+    del env  # The provider has no source-runtime configuration dependency.
+    forced_block = _forced_architecture_block(workspace)
+    forced_prefix = (forced_block + "\n\n") if forced_block else ""
+    tilelang_source_context = _tilelang2ascendc_npubench_worker_context(Path(workspace))
+    tilelang_source_prefix = (tilelang_source_context + "\n") if tilelang_source_context else ""
+    phase_a_intro, phase_a_handoff = _npubench_phase_a_texts(bool(tilelang_source_context))
+    return forced_prefix + tilelang_source_prefix + _NPUBENCH_PHASES_TEMPLATE.format(
+        phase_a_intro=phase_a_intro,
+        phase_a_handoff=phase_a_handoff,
+        iter_cap_remaining=iter_cap_remaining,
+    )
 
 
 def _pa3_phase_d_1(
@@ -571,6 +849,13 @@ def _port_a3_phase_instructions_block(
       surgical router edits to route the current op on A5 (per KB W9
       cross-op router pattern)
     """
+    # Each non-live provider branches before loading live-capture metadata.
+    # This prevents its worker context from consuming source-runtime artifacts.
+    if _workspace_uses_npubench_reference(workspace):
+        return _npubench_phase_instructions_block(
+            op, workspace, iter_cap_remaining, env
+        )
+
     import json as _json
     port_source = env.port_a3_source or "(env.port_a3_source missing; orchestrator misconfig)"
     a3_runnable_path = workspace / "a3_reference_runnable.json"

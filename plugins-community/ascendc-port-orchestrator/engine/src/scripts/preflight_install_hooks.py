@@ -663,14 +663,21 @@ def check_current_registration() -> tuple[str, Path, list[str]]:
     return registration, declaration, errors
 
 
+class LegacyInstallerDisabled(RuntimeError):
+    """The obsolete hook writer was invoked; init.sh owns installation now."""
+
+
 def cmd_install(args) -> int:
     """Refuse the obsolete writer; current installs are owned by init.sh."""
     init_sh = PLUGIN_ROOT / "init.sh"
-    print(
-        "ERROR legacy hook installer is disabled for this community plugin; "
+    message = (
+        "legacy hook installer is disabled for this community plugin; "
         f"run `bash {init_sh} global claude`, then restart Claude Code"
     )
-    return 2
+    print(f"ERROR {message}")
+    # A library function must not terminate the interpreter; ``main`` is the
+    # only entry allowed to turn this into a process exit status.
+    raise LegacyInstallerDisabled(message)
 
 
 def cmd_check(args) -> int:
@@ -734,7 +741,11 @@ def main() -> int:
         return cmd_check(args)
     if args.uninstall:
         return cmd_uninstall(args)
-    return cmd_install(args)
+    try:
+        return cmd_install(args)
+    except LegacyInstallerDisabled:
+        # cmd_install already printed the operator-facing ERROR line.
+        return 2
 
 
 if __name__ == "__main__":

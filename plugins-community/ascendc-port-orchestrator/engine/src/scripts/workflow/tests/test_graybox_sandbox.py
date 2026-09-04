@@ -24,6 +24,7 @@ caller accidentally binding the answer in.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -123,6 +124,36 @@ def test_sandbox_denies_repo_output(tmp_path):
     assert "output reachable: False" in out.stdout, out.stdout + out.stderr
 
 
+def test_bwrap_runtime_provides_null_and_writable_tmp():
+    """The Linux runtime contract must support launcher redirection and scratch files.
+
+    ``--dev /dev`` supplies the standard null device while ``--tmpfs /tmp`` gives
+    Claude a private writable scratch area.  Keep this as an executable probe,
+    because an argv-only assertion would not catch a broken mount namespace.
+    """
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux bwrap runtime probe")
+    _bwrap_or_skip()
+    probe = [
+        "/bin/sh",
+        "-eu",
+        "-c",
+        (
+            "test -r /dev/null; test -w /dev/null; "
+            "printf ready >/tmp/graybox-runtime-probe; "
+            "test \"$(cat /tmp/graybox-runtime-probe)\" = ready; "
+            "echo BWRAP_RUNTIME_READY"
+        ),
+    ]
+    out = subprocess.run(
+        graybox_sandbox.build_bwrap_cmd(probe, share_net=True),
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "BWRAP_RUNTIME_READY" in out.stdout, out.stdout + out.stderr
+
+
 # ---------------------------------------------------------------------------
 # Construct-time backstop — assert_no_answer_paths
 # ---------------------------------------------------------------------------
@@ -199,6 +230,299 @@ def test_graybox_allow_set_rejects_cann_as_arch22(tmp_path):
         graybox_sandbox.graybox_allow_set(ws, kb_dir=_KB, arch22_dir=str(_CANN_ARCH35.parent))
 
 
+def test_graybox_allow_set_mounts_only_plugin_runtime_subtrees(tmp_path):
+    """Claude workers get --plugin-dir content without the plugin workspace/output tree."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    kb = tmp_path / "kb"
+    kb.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "scripts",
+        "workflows", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / "AGENTS.md").write_text("# test plugin\n")
+    (plugin / "engine/workspace").mkdir(parents=True)
+    (plugin / "engine/output").mkdir(parents=True)
+
+    ro, rw = graybox_sandbox.graybox_allow_set(
+        ws,
+        kb_dir=kb,
+        toolchain_dirs=[],
+        plugin_dir=plugin,
+    )
+    mount = graybox_sandbox.DEFAULT_PLUGIN_MOUNT
+    plugin_binds = [
+        (src, dst) for src, dst in ro
+        if dst.startswith(f"{mount}/")
+    ]
+    assert plugin_binds
+    assert {dst for _src, dst in plugin_binds} == {
+        f"{mount}/.claude-plugin",
+        f"{mount}/AGENTS.md",
+        f"{mount}/agents",
+        f"{mount}/skills",
+        f"{mount}/kb",
+        f"{mount}/hooks",
+        f"{mount}/scripts",
+        f"{mount}/workflows",
+        f"{mount}/engine/src/scripts",
+        f"{mount}/.graybox_dependency_manifest.json",
+    }
+    assert all(src != str(plugin.resolve()) for src, _dst in ro)
+    # The worker can write its entire workspace, so the per-spawn plugin
+    # snapshot must live outside it and cannot be reused after tampering.
+    assert all(
+        not Path(src).resolve().is_relative_to(ws.resolve())
+        for src, _dst in plugin_binds
+    )
+    assert all("engine/workspace" not in dst and "engine/output" not in dst for _src, dst in ro)
+    graybox_sandbox.assert_no_answer_paths(ro + rw)
+
+
+def test_graybox_allow_set_cleans_snapshot_when_answer_guard_fails(
+    tmp_path, monkeypatch
+):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "port"}\n')
+
+    staged_roots = []
+    original_stage = graybox_sandbox.stage_plugin_runtime
+
+    def _stage(*args, **kwargs):
+        staged = original_stage(*args, **kwargs)
+        staged_roots.append(staged)
+        return staged
+
+    def _reject(_allow):
+        raise ValueError("answer path")
+
+    monkeypatch.setattr(graybox_sandbox, "stage_plugin_runtime", _stage)
+    monkeypatch.setattr(graybox_sandbox, "assert_no_answer_paths", _reject)
+
+    with pytest.raises(ValueError, match="answer path"):
+        graybox_sandbox.graybox_allow_set(
+            ws, kb_dir=tmp_path / "kb", toolchain_dirs=[], plugin_dir=plugin
+        )
+
+    assert staged_roots
+    assert all(not root.exists() for root in staged_roots)
+
+
+def test_graybox_plugin_runtime_is_fresh_and_outside_workspace(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "test"}\n')
+    first = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    (first / "agents" / "tampered.md").write_text("bad\n")
+    second = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    assert first != second
+    assert not first.is_relative_to(ws.resolve())
+    assert not second.is_relative_to(ws.resolve())
+    assert not (second / "agents" / "tampered.md").exists()
+    # Tests own these externally staged temporary snapshots.
+    import shutil
+    shutil.rmtree(first)
+    shutil.rmtree(second)
+
+
+def _make_marketplace_plugin(tmp_path: Path, primary_skill: str):
+    """Build the marketplace plugin (+ declared dependency) tree shared by staging tests."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    marketplace = tmp_path / "cache" / "cannbot"
+    plugin = marketplace / "port" / "1.0.0"
+    dependency = marketplace / "shared" / "2.0.0"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "port", "dependencies": ["shared"]}\n'
+    )
+    (plugin / "skills" / primary_skill / "SKILL.md").parent.mkdir(parents=True)
+    (plugin / "skills" / primary_skill / "SKILL.md").write_text("# primary\n")
+    return ws, plugin, dependency
+
+
+def test_graybox_plugin_runtime_materializes_marketplace_dependency_skills(tmp_path):
+    """Graybox keeps marketplace dependency skills visible to Claude workers."""
+    ws, plugin, dependency = _make_marketplace_plugin(tmp_path, "primary")
+    (dependency / "ops-precision-standard").mkdir(parents=True)
+    (dependency / "ops-precision-standard" / "SKILL.md").write_text("# precision\n")
+    (dependency / "unrelated-runtime").mkdir()
+    (dependency / "unrelated-runtime" / "entrypoint.py").write_text("# not a skill\n")
+
+    staged = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    assert (staged / "skills" / "primary" / "SKILL.md").is_file()
+    assert (staged / "skills" / "ops-precision-standard" / "SKILL.md").read_text() == "# precision\n"
+    assert not (staged / "skills" / "unrelated-runtime").exists()
+    dependency_manifest = json.loads(
+        (staged / ".graybox_dependency_manifest.json").read_text()
+    )
+    assert dependency_manifest["unresolved"] == []
+    assert dependency_manifest["records"][0]["status"] == "resolved"
+    assert dependency_manifest["staged_tree_sha256"]
+
+    import shutil
+    shutil.rmtree(staged)
+
+
+def test_graybox_plugin_runtime_materializes_direct_checkout_dependency_skills(tmp_path):
+    """A repository checkout must expose declared shared skills in graybox."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    checkout = tmp_path / "checkout"
+    plugin = checkout / "plugins-community" / "ascendc-port-orchestrator"
+    ops = checkout / "ops" / "ops-precision-standard"
+    knowledge = checkout / "plugins-community" / "cannbot-knowledge" / "skills" / "knowledge-query"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "port", "dependencies": ['
+        '"ascendc-port-orchestrator-shared-skills", '
+        '"cannbot-knowledge-consumer-skills"]}\n'
+    )
+    ops.mkdir(parents=True)
+    (ops / "SKILL.md").write_text("# precision\n")
+    knowledge.mkdir(parents=True)
+    (knowledge / "SKILL.md").write_text("# knowledge\n")
+
+    staged = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    assert (staged / "skills" / "ops-precision-standard" / "SKILL.md").read_text() == "# precision\n"
+    assert (staged / "skills" / "knowledge-query" / "SKILL.md").read_text() == "# knowledge\n"
+    dependency_manifest = json.loads(
+        (staged / ".graybox_dependency_manifest.json").read_text()
+    )
+    assert [record["status"] for record in dependency_manifest["records"]] == [
+        "resolved",
+        "resolved",
+    ]
+
+    import shutil
+    shutil.rmtree(staged)
+
+
+def test_graybox_plugin_runtime_rejects_unresolved_declared_dependency(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "port", "dependencies": ["missing-shared-skills"]}\n'
+    )
+
+    with pytest.raises(RuntimeError, match="unresolved"):
+        graybox_sandbox.stage_plugin_runtime(plugin, ws)
+
+
+def test_construction_manifest_binds_dependency_resolution_proof(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    kb = tmp_path / "kb"
+    kb.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        '{"name": "port", "dependencies": []}\n'
+    )
+
+    allow_ro, allow_rw = graybox_sandbox.graybox_allow_set(
+        ws, kb_dir=kb, toolchain_dirs=[], plugin_dir=plugin
+    )
+    manifest_path = graybox_sandbox.write_construction_manifest(
+        ws, allow_ro, allow_rw, inner_cmd=["claude", "--plugin-dir"]
+    )
+    manifest = json.loads(manifest_path.read_text())
+
+    proof = manifest["plugin_runtime"]["dependency_manifests"]
+    assert len(proof) == 1
+    assert proof[0]["schema"] == "graybox_plugin_dependencies/v1"
+    assert proof[0]["unresolved"] == []
+    graybox_sandbox.cleanup_staged_plugin_runtimes(allow_ro)
+
+
+def test_graybox_plugin_runtime_cleanup_only_removes_owned_snapshot(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    plugin = tmp_path / "plugin"
+    for relative in (
+        ".claude-plugin", "agents", "skills", "kb", "hooks", "engine/src/scripts",
+    ):
+        (plugin / relative).mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "port"}\n')
+
+    staged = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    allow_ro = [
+        (str(staged / ".claude-plugin"), f"{graybox_sandbox.DEFAULT_PLUGIN_MOUNT}/.claude-plugin"),
+        (str(staged / "skills"), f"{graybox_sandbox.DEFAULT_PLUGIN_MOUNT}/skills"),
+        (str(plugin), "/unrelated-plugin"),
+    ]
+    assert graybox_sandbox.staged_plugin_runtime_roots(allow_ro) == (staged.resolve(),)
+    graybox_sandbox.cleanup_staged_plugin_runtimes(allow_ro)
+    assert not staged.exists()
+    assert plugin.exists()
+
+
+def test_graybox_plugin_runtime_preserves_primary_skill_on_dependency_collision(tmp_path):
+    ws, plugin, dependency = _make_marketplace_plugin(tmp_path, "same")
+    (dependency / "same").mkdir(parents=True)
+    (dependency / "same" / "SKILL.md").write_text("# dependency\n")
+
+    staged = graybox_sandbox.stage_plugin_runtime(plugin, ws)
+    assert (staged / "skills" / "same" / "SKILL.md").read_text() == "# primary\n"
+
+    import shutil
+    shutil.rmtree(staged)
+
+
+def test_plugin_dir_uses_real_staged_source_for_sandbox_exec(tmp_path):
+    staged = tmp_path / "runtime"
+    manifest = staged / ".claude-plugin"
+    manifest.mkdir(parents=True)
+    allow_ro = [(str(manifest), f"{graybox_sandbox.DEFAULT_PLUGIN_MOUNT}/.claude-plugin")]
+    assert graybox_sandbox.plugin_dir_for_isolation_backend(
+        allow_ro, backend="sandbox-exec"
+    ) == str(staged.resolve())
+    assert graybox_sandbox.plugin_dir_for_isolation_backend(
+        allow_ro, backend="bwrap"
+    ) == graybox_sandbox.DEFAULT_PLUGIN_MOUNT
+
+
+def test_bwrap_creates_dedicated_plugin_mount_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(graybox_sandbox, "_BWRAP", "/usr/bin/bwrap")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    plugin_root = graybox_sandbox.DEFAULT_PLUGIN_MOUNT
+    argv = graybox_sandbox.build_bwrap_cmd(
+        [],
+        allow_ro=[(str(tmp_path), f"{plugin_root}/agents")],
+        allow_rw=[(str(ws), str(ws))],
+    )
+    assert argv[argv.index("--dir") + 1] == "/usr"
+    assert ["--dir", plugin_root] in [argv[i:i + 2] for i in range(len(argv) - 1)]
+
+
 def test_curated_scan_allows_target_named_advisory_knowledge(tmp_path):
     root = tmp_path / "arch22"
     target = root / "arch35"
@@ -220,6 +544,56 @@ def test_curated_scan_rejects_source_inside_target_tree(tmp_path):
     target_sources, answer_files = getattr(graybox_sandbox, '_scan_curated_tree')(root)
     assert target_sources == 1
     assert answer_files == 0
+
+
+def test_curated_scan_allows_pybind_only_in_immutable_direct_source_stage(tmp_path):
+    source = tmp_path / ".port_source"
+    source.mkdir()
+    (source / "3_Add.cpp").write_text("// source kernel\n")
+    (source / "pybind11.cpp").write_text("// source binding\n")
+
+    target_sources, answer_files = getattr(graybox_sandbox, "_scan_curated_tree")(
+        source, allow_source_pybind=True
+    )
+    assert target_sources == 0
+    assert answer_files == 0
+
+    # The same file remains answer-bearing under the default candidate scan.
+    _, rejected_answers = getattr(graybox_sandbox, "_scan_curated_tree")(source)
+    assert rejected_answers == 1
+
+
+def test_workspace_scan_only_exempts_exact_port_source_tree(tmp_path):
+    ws = tmp_path / "workspace"
+    source = ws / ".port_source"
+    candidate = ws / "candidate" / "kernel"
+    ordinary = ws / "scratch"
+    source.mkdir(parents=True)
+    candidate.mkdir(parents=True)
+    ordinary.mkdir(parents=True)
+    (source / "pybind11.cpp").write_text("// frozen source binding\n")
+    (candidate / "pybind11.cpp").write_text("// candidate binding\n")
+    (ordinary / "pybind11.cpp").write_text("// workspace binding\n")
+
+    _, answer_files = getattr(graybox_sandbox, "_scan_curated_tree")(
+        ws, source_stage_root=source
+    )
+    assert answer_files == 2
+
+
+def test_workspace_scan_does_not_exempt_fake_port_source_tree(tmp_path):
+    ws = tmp_path / "workspace"
+    real_source = ws / ".port_source"
+    fake_source = ws / "nested" / ".port_source"
+    real_source.mkdir(parents=True)
+    fake_source.mkdir(parents=True)
+    (real_source / "pybind11.cpp").write_text("// frozen source binding\n")
+    (fake_source / "pybind11.cpp").write_text("// untrusted binding\n")
+
+    _, answer_files = getattr(graybox_sandbox, "_scan_curated_tree")(
+        ws, source_stage_root=real_source
+    )
+    assert answer_files == 1
 
 
 def test_assert_no_answer_paths_allows_pure_target_named_knowledge(tmp_path):
@@ -267,7 +641,6 @@ def test_manifest_asserts_airtight_and_scopes_scan(tmp_path):
     mpath = graybox_sandbox.write_construction_manifest(
         ws, ro, rw, inner_cmd=["claude", "--agent", "aog-kernel-worker"]
     )
-    import json
     m = json.loads(Path(mpath).read_text())
     assert m["assertions"]["airtight"] is True
     assert m["assertions"]["arch35_dirs_reachable"] == 0
@@ -279,6 +652,23 @@ def test_manifest_asserts_airtight_and_scopes_scan(tmp_path):
     tc = graybox_sandbox.default_toolchain_dirs()
     if tc:
         assert by_src[tc[0]]["deep_scanned"] is False
+
+
+def test_construction_manifest_seal_rejects_worker_mutation(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    kb = tmp_path / "kb"
+    kb.mkdir()
+    ro, rw = graybox_sandbox.graybox_allow_set(ws, kb_dir=kb)
+    mpath = graybox_sandbox.write_construction_manifest(
+        ws, ro, rw, inner_cmd=["claude", "--agent", "aog-kernel-worker"]
+    )
+    digest = graybox_sandbox.construction_manifest_sha256(mpath)
+    graybox_sandbox.verify_construction_manifest(mpath, digest)
+    mpath.write_text(mpath.read_text() + "\nworker mutation\n")
+
+    with pytest.raises(RuntimeError, match="changed during worker dispatch"):
+        graybox_sandbox.verify_construction_manifest(mpath, digest)
 
 
 def test_dispatch_prefix_pattern_is_airtight(tmp_path):
@@ -346,8 +736,35 @@ def test_bwrap_is_narrow_no_network_and_source_overlay_last(tmp_path, monkeypatc
     ws_bind = argv.index(str(ws), argv.index("--bind"))
     stage_bind = argv.index(str(stage), argv.index("--ro-bind"))
     assert ws_bind < stage_bind
-    with pytest.raises(ValueError, match="forbids network"):
-        graybox_sandbox.build_bwrap_cmd(["true"], share_net=True)
+    shared = graybox_sandbox.build_bwrap_cmd(["true"], share_net=True)
+    assert "--unshare-net" not in shared
+
+
+def test_bwrap_exposes_local_claude_runtime_but_not_cann(monkeypatch):
+    """A /usr/local/bin/claude symlink must resolve in the graybox namespace."""
+    monkeypatch.setattr(graybox_sandbox, "_BWRAP", "/usr/bin/bwrap")
+    argv = graybox_sandbox.build_bwrap_cmd(["true"])
+    ro_bind_sources = {
+        argv[i + 1]
+        for i, token in enumerate(argv[:-1])
+        if token == "--ro-bind"
+    }
+    assert "/usr/local/lib" in ro_bind_sources or not Path("/usr/local/lib").is_dir()
+    assert "/usr/local/Ascend" not in ro_bind_sources
+
+
+def test_bwrap_binds_resolver_config_when_present(monkeypatch):
+    """Network-enabled Kimi workers need DNS without broad /etc exposure."""
+    monkeypatch.setattr(graybox_sandbox, "_BWRAP", "/usr/bin/bwrap")
+    argv = graybox_sandbox.build_bwrap_cmd(["true"], share_net=True)
+    pairs = [argv[i:i + 3] for i in range(len(argv) - 2)]
+    # The implementation deliberately skips a top-level symlink: its target
+    # might not be present in the isolated mount namespace.  Containers such
+    # as cjm_cann2 provide a regular file, which is the supported DNS path.
+    if Path("/etc/resolv.conf").is_file() and not Path("/etc/resolv.conf").is_symlink():
+        assert ["--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf"] in pairs
+    else:
+        assert ["--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf"] not in pairs
 
 
 def test_macos_profile_denies_network_history_and_stage_writes(
@@ -371,6 +788,95 @@ def test_macos_profile_denies_network_history_and_stage_writes(
     assert os.path.expanduser("~/.claude") not in profile
     assert f'(allow file-write* (subpath "{ws}"))' in profile
     assert f'(deny file-write* (subpath "{stage}"))' in profile
+
+
+def test_macos_profile_allows_explicit_model_network_sharing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        graybox_sandbox, "_SANDBOX_EXEC", "/usr/bin/sandbox-exec"
+    )
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    argv = graybox_sandbox.build_sandbox_exec_cmd(
+        ["true"], allow_rw=[(str(ws), str(ws))], share_net=True
+    )
+    profile = argv[argv.index("-p") + 1]
+    assert "(allow network*)" in profile
+    assert "(deny network*)" not in profile
+
+
+@pytest.mark.parametrize(
+    ("share_net", "network", "enforcement"),
+    [
+        (False, "denied", "(deny network*)"),
+        (True, "shared", "(allow network*)"),
+    ],
+)
+def test_construction_manifest_records_effective_macos_network_policy(
+    tmp_path, monkeypatch, share_net, network, enforcement
+):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setattr(graybox_sandbox, "_BWRAP", None)
+    monkeypatch.setattr(graybox_sandbox, "_SANDBOX_EXEC", "/usr/bin/sandbox-exec")
+    monkeypatch.setattr(
+        graybox_sandbox, "isolation_backend", lambda platform=None: "sandbox-exec"
+    )
+
+    manifest = graybox_sandbox.write_construction_manifest(
+        ws,
+        [],
+        [(str(ws), str(ws))],
+        inner_cmd=["true"],
+        share_net=share_net,
+    )
+    payload = json.loads(manifest.read_text())
+    assert payload["network"] == network
+    assert payload["network_enforcement"] == enforcement
+
+
+def test_macos_profile_allows_runtime_tmp_alias_and_null_sink(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        graybox_sandbox, "_SANDBOX_EXEC", "/usr/bin/sandbox-exec"
+    )
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    argv = graybox_sandbox.build_sandbox_exec_cmd(
+        ["true"], allow_rw=[(str(ws), str(ws))]
+    )
+    profile = argv[argv.index("-p") + 1]
+    assert '(allow file-read* (subpath "/private/tmp"))' in profile
+    assert '(allow file-read* (subpath "/tmp"))' in profile
+    assert '(allow file-write* (subpath "/private/tmp"))' in profile
+    assert '(allow file-write* (subpath "/tmp"))' in profile
+    assert '(allow file-read* (literal "/dev/null"))' in profile
+    assert '(allow file-write* (literal "/dev/null"))' in profile
+
+
+def test_macos_profile_explicitly_denies_staged_plugin_runtime_writes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        graybox_sandbox, "_SANDBOX_EXEC", "/usr/bin/sandbox-exec"
+    )
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    argv = graybox_sandbox.build_sandbox_exec_cmd(
+        ["true"],
+        allow_ro=[
+            (
+                str(runtime),
+                f"{graybox_sandbox.DEFAULT_PLUGIN_MOUNT}/agents",
+            )
+        ],
+        allow_rw=[(str(ws), str(ws))],
+    )
+    profile = argv[argv.index("-p") + 1]
+    assert f'(allow file-read* (subpath "{runtime}"))' in profile
+    assert f'(deny file-write* (subpath "{runtime}"))' in profile
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox-exec only")

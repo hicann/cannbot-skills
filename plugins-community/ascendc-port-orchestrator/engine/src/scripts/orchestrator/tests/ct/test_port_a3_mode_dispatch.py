@@ -75,7 +75,7 @@ def test_workflow_critic_loads_yaml_with_port_a3_mode():
 def test_skill_md_mode_table_mentions_port_a3():
     """W3: SKILL.md mode-detection table includes --port-a3."""
     skill_md = (_PROJECT_ROOT / "src" / "skills" / "ascendc-op-gen" / "SKILL.md").read_text()
-    assert "--port-a3" in skill_md, "SKILL.md missing --port-a3 mention"
+    assert "--port-a3-ops" in skill_md, "SKILL.md missing --port-a3-ops mention"
     assert "port_a3_to_a5" in skill_md, "SKILL.md missing port_a3_to_a5 mode name"
     assert "ops-nn" in skill_md, "SKILL.md should reference ops-nn as source"
 

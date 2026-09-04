@@ -66,6 +66,8 @@ import logging
 
 import json
 import os
+import time
+from pathlib import Path
 from typing import Optional, Tuple
 
 import agent_dispatch
@@ -77,10 +79,28 @@ import state_executor
 from logging_config import get_logger
 from backends import base as _backend_base
 from backends.base import Envelope, StreamSilenceTimeout
+from backends.opencode_backend import CandidateTreeStallTimeout
 
 from fsm_context import HandlerResult, OrchestratorContext
 
 log = get_logger(__name__)
+
+# Budget for in-place respawns when a spawn fails at the backend/transport
+# level without producing any canonical handoff (see _post_spawn_transition).
+NOOP_FAILURE_RETRY_MAX = 4
+
+# A.5 (2026-08-30, 2_FFN_evo opencode line): provider/API-error spawn retry.
+# The retry decision trusts ONLY the structured Envelope.api_error_status
+# field — the one control-flow channel the Envelope contract
+# (backends/base.py) reserves for retry/quota decisions.  Error TEXT
+# ("Unexpected server error" etc.) is vendor-version-dependent and forgeable,
+# so it must never be a retry criterion.  Bounded: capped respawns, linear
+# backoff, an independent per-(state, status) counter, and budget exhaustion
+# escalates to the agent_died abort path.
+API_ERROR_RETRY_MAX_ENV = "AOG_API_ERROR_RETRY_MAX"
+API_ERROR_RETRY_MAX = 2
+API_ERROR_BACKOFF_SEC_ENV = "AOG_API_ERROR_BACKOFF_SEC"
+API_ERROR_BACKOFF_SEC = 30
 
 
 def _result_metrics(result) -> tuple[Optional[float], Optional[float]]:
@@ -325,6 +345,50 @@ def _prepare_and_spawn(
             logging.getLogger(__name__).debug(
                 "Recoverable operation failed.", exc_info=error
             )
+    except CandidateTreeStallTimeout as e:
+        # A.7 (2026-08-30, 2_FFN_evo close-out): the stream stayed alive but
+        # the candidate tree digest did not move for the whole stall window
+        # (default 45 min, AOG_TREE_STALL_TIMEOUT_SEC) — the worker is
+        # reading/planning in a loop without writing.  The backend already
+        # SIGTERMed the subprocess.  Complementary to the stream-silence
+        # watchdog.  The tree diff can be gamed, so this watchdog has NO
+        # independent parking surface: every firing feeds the P0-1
+        # same-signature family counter and escalation rides its threshold.
+        tree_sha = e.tree_sha256 or "unknown"
+        entry = state_executor.record_same_signature_failure(
+            workspace, "engine",
+            f"candidate-tree stall watchdog: digest unchanged for {e.stall_seconds:.0f}s",
+            tree_sha,
+        )
+        count = int(entry.get("count", 0))
+        threshold = state_executor.same_signature_park_threshold("engine")
+        _append_tree_stall_progress_note(workspace, agent_type, e, count, threshold)
+        events.emit(workspace, "orchestrator.spawn.tree_stall_killed", lane=ctx.lane,
+                    data={"agent_type": agent_type,
+                          "stall_seconds": e.stall_seconds,
+                          "tree_sha256": tree_sha,
+                          "same_signature_count": count,
+                          "park_threshold": threshold})
+        if count >= threshold:
+            log.info(
+                f"candidate-tree stall watchdog escalated: {count}/{threshold} "
+                f"consecutive stalls on the same tree; giving up. {e}"
+            )
+            ctx.mark_agent_died(
+                workspace, snap.current_state,
+                f"candidate-tree stall watchdog: {count} consecutive stalls "
+                f"(same-signature family threshold {threshold}); worker makes "
+                f"no candidate progress — needs a human",
+            )
+            events.emit(workspace, "orchestrator.spawn.failed", lane=ctx.lane,
+                        data={"agent_type": agent_type,
+                              "reason": "candidate-tree stall same-signature threshold reached"})
+            return spawn_index, None, HandlerResult.ret(3)
+        log.info(
+            f"candidate-tree stall watchdog fired on {agent_type} "
+            f"({count}/{threshold} consecutive): {e}. Respawning fresh."
+        )
+        return spawn_index, None, HandlerResult.cont()  # loop back — same state, fresh spawn
     except StreamSilenceTimeout as e:
         # P0aal-2 (2026-05-19): stdout silence detected mid-work.
         # Subprocess already SIGTERMed by transport. Respawn up to
@@ -512,6 +576,124 @@ def _record_optimizer_kernel_signature(workspace, spawn_index: int) -> None:
         log.warning(f"optimizer kernel-signature record (non-fatal): {_e!r}")
 
 
+def _is_noop_spawn_failure(ctx: OrchestratorContext, result) -> bool:
+    """Return whether a failed spawn produced no usable handoff."""
+    if result is None or (result.success and not result.is_error):
+        return False
+    return not ctx.extract_canonical_handoff(result.output_text or "")
+
+
+# ---------------------------------------------------------------------------
+# A.5 — structured api_error_status retry (see module header constants)
+# ---------------------------------------------------------------------------
+def api_error_status_retryable(status) -> bool:
+    """Whether a structured provider status is worth an in-place respawn.
+
+    Rate limits and server-side 5xx are transient by class; everything else
+    (4xx auth/contract, missing field, non-int) is NOT — the worker cannot
+    fix those by being re-run.
+    """
+    if isinstance(status, bool) or not isinstance(status, int):
+        return False
+    return status == 429 or 500 <= status <= 599
+
+
+def _api_error_retry_max() -> int:
+    raw = os.environ.get(API_ERROR_RETRY_MAX_ENV)
+    if raw is None:
+        return API_ERROR_RETRY_MAX
+    try:
+        return max(int(raw.strip()), 0)
+    except ValueError:
+        return API_ERROR_RETRY_MAX
+
+
+def _api_error_backoff_sec() -> int:
+    raw = os.environ.get(API_ERROR_BACKOFF_SEC_ENV)
+    if raw is None:
+        return API_ERROR_BACKOFF_SEC
+    try:
+        return max(int(raw.strip()), 0)
+    except ValueError:
+        return API_ERROR_BACKOFF_SEC
+
+
+def _sleep_backoff(seconds: float) -> None:
+    """Seam kept tiny on purpose: unit tests monkeypatch this, never time.sleep."""
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def _append_tree_stall_progress_note(workspace, agent_type: str,
+                                     exc: CandidateTreeStallTimeout,
+                                     count: int, threshold: int) -> None:
+    """A.7: leave the stall evidence where the respawned worker reads it.
+
+    PROGRESS.md is the durable worker-facing channel; the note tells the next
+    spawn that a no-edit turn will be killed again (and how close the
+    same-signature family is to parking).
+    """
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    note = (
+        f"\n\n## ORCHESTRATOR NOTE — candidate-tree stall watchdog ({stamp})\n"
+        f"- spawn of `{agent_type}` was SIGTERMed: candidate tree digest "
+        f"unchanged for {exc.stall_seconds:.0f}s (tree={exc.tree_sha256 or 'unknown'}).\n"
+        f"- same-signature family count {count}/{threshold}; at the threshold "
+        "the run parks for a user decision.\n"
+        "- You MUST change candidate source files this round — another "
+        "read/plan-only turn without tree changes will be killed again.\n"
+    )
+    try:
+        with open(Path(workspace) / "PROGRESS.md", "a", encoding="utf-8") as handle:
+            handle.write(note)
+    except OSError as error:
+        log.warning("cannot append tree-stall note to PROGRESS.md: %s", error)
+
+
+def _api_error_retry_decision(
+    ctx: OrchestratorContext, snap, agent_type: str, result,
+) -> Optional[HandlerResult]:
+    """HandlerResult for a retryable structured API error, else None.
+
+    Consumes ONLY ``result.api_error_status`` (A.5).  An errored result whose
+    text screams "Unexpected server error" but carries no structured status
+    falls through to the legacy no-op-failure path unchanged.
+    """
+    status = getattr(result, "api_error_status", None)
+    if not getattr(result, "is_error", False) or not api_error_status_retryable(status):
+        return None
+    workspace = ctx.workspace
+    retry_key = f"{snap.current_state}__api_error_{status}"
+    retries = ctx.load_silence_retry_count(workspace, retry_key)
+    max_retries = _api_error_retry_max()
+    if retries >= max_retries:
+        log.info(
+            f"api-error retry budget exhausted ({retries}/{max_retries}) for "
+            f"{agent_type} (status={status}); escalating to agent_died."
+        )
+        ctx.mark_agent_died(
+            workspace, snap.current_state,
+            f"provider API error status={status} persisted across "
+            f"{retries} retries; needs a human, not another respawn",
+        )
+        events.emit(workspace, "orchestrator.spawn.failed", lane=ctx.lane,
+                    data={"agent_type": agent_type,
+                          "reason": f"api-error status={status} retry budget exhausted"})
+        return HandlerResult.ret(3)
+    ctx.bump_silence_retry_count(workspace, retry_key)
+    backoff = _api_error_backoff_sec() * (retries + 1)
+    log.info(
+        f"{agent_type} spawn hit retryable provider API error status={status}; "
+        f"respawning in place ({retries + 1}/{max_retries}) after {backoff}s backoff."
+    )
+    events.emit(workspace, "orchestrator.spawn.api_error_retry", lane=ctx.lane,
+                data={"agent_type": agent_type, "api_error_status": status,
+                      "retry": retries + 1, "max_retries": max_retries,
+                      "backoff_sec": backoff})
+    _sleep_backoff(backoff)
+    return HandlerResult.cont()  # loop back — same state, fresh spawn
+
+
 def _post_spawn_transition(
     ctx: OrchestratorContext, snap, agent_type: str, result, spawn_index: int,
 ) -> HandlerResult:
@@ -523,6 +705,54 @@ def _post_spawn_transition(
     blocked = _stop_gate_blocked(ctx, agent_type, spawn_index)
     if blocked is not None:
         return blocked
+
+    # A.5: a retryable STRUCTURED provider error (api_error_status 429/5xx)
+    # gets its own bounded retry with backoff BEFORE the no-op-failure
+    # fallback below — the fallback has no backoff and cannot tell a
+    # transient 500 from a genuine empty turn.
+    api_retry = _api_error_retry_decision(ctx, snap, agent_type, result)
+    if api_retry is not None:
+        return api_retry
+
+    # 2026-08-27 (3_FusionAttention opencode line): a backend-level spawn
+    # failure that produced no canonical handoff in stdout (e.g. opencode
+    # "Cannot connect to API" — turn died on the first request) must NOT fall
+    # through to the PROGRESS.md-tail fallback below.  The post-spawn hook
+    # annotates PROGRESS.md ("did not log: no signed PROGRESS entry") on every
+    # such turn, which dirties the mtime-based staleness guard in
+    # _capture_canonical_handoff and lets a PRIOR turn's build-ready handoff
+    # route the unchanged candidate into a full O5 build+evaluation, burning
+    # one NPU eval cycle per retry forever.  Treat it like a silence-timeout:
+    # bounded in-place respawn, same state.  Successful turns keep the legacy
+    # PROGRESS.md fallback (rms_norm_quant gap) untouched.
+    if _is_noop_spawn_failure(ctx, result):
+        noop_key = f"{snap.current_state}__noop_failure"
+        noop_retries = ctx.load_silence_retry_count(workspace, noop_key)
+        if noop_retries >= NOOP_FAILURE_RETRY_MAX:
+            log.info(
+                f"no-op spawn failure retry budget exhausted "
+                f"({noop_retries}/{NOOP_FAILURE_RETRY_MAX}) for {agent_type}; giving up."
+            )
+            ctx.mark_agent_died(
+                workspace, snap.current_state,
+                f"backend spawn failed {noop_retries} times with no handoff "
+                f"(last: success={result.success} is_error={result.is_error})",
+            )
+            events.emit(workspace, "orchestrator.spawn.failed", lane=ctx.lane,
+                        data={"agent_type": agent_type,
+                              "reason": "no-op spawn failure retry budget exhausted"})
+            return HandlerResult.ret(3)
+        ctx.bump_silence_retry_count(workspace, noop_key)
+        log.info(
+            f"{agent_type} spawn failed with no usable handoff "
+            f"(success={result.success} is_error={result.is_error}); "
+            f"respawning in place ({noop_retries + 1}/{NOOP_FAILURE_RETRY_MAX}) "
+            f"instead of routing on a stale PROGRESS.md handoff."
+        )
+        events.emit(workspace, "orchestrator.spawn.noop_retry", lane=ctx.lane,
+                    data={"agent_type": agent_type, "spawn_index": spawn_index,
+                          "retry": noop_retries + 1, "max_retries": NOOP_FAILURE_RETRY_MAX})
+        return HandlerResult.cont()  # loop back — same state, fresh spawn
 
     # Zheng 2026-05-21: --kw-1-only stops after kernel-worker spawn 1.
     # Skip schema_norm + state transition + all downstream phases

@@ -22,13 +22,17 @@ Validates:
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent))
 from briefs import kw_brief  # noqa: E402
+from briefs.kw_brief import _port_a3_phase_instructions_block  # noqa: E402
 from briefs._common import AscendCEnv  # noqa: E402
+from npubench.npubench_inputs import stage_npubench_inputs  # noqa: E402
+from reference_source import explicit_a3_live_binding  # noqa: E402
 
 
 def make_env(opgen_mode: str = "port_a3_to_a5", **kwargs) -> AscendCEnv:
@@ -64,6 +68,30 @@ def make_workspace_with_a3_runnable(tmp_path: Path, payload: dict) -> Path:
     ws = tmp_path / "workspace" / "ctc_loss_v3"
     ws.mkdir(parents=True)
     (ws / "a3_reference_runnable.json").write_text(json.dumps(payload))
+    return ws
+
+
+def make_npubench_workspace(tmp_path: Path, op: str = "add") -> Path:
+    """Create one byte-preserved old-format NPUKernelBench binding."""
+    ws = tmp_path / "workspace" / op
+    ws.mkdir(parents=True)
+    task_root = tmp_path / "npu_benchmark" / "level1"
+    task_root.mkdir(parents=True)
+    task = task_root / "3_Add.py"
+    task.write_text(
+        "from pathlib import Path\n"
+        "def get_input_groups():\n"
+        "    return [Path(__file__).with_suffix('.json').read_bytes()]\n"
+    )
+    # Old NPUKernelBench accepts JSONL bytes despite a .json extension.
+    task.with_suffix(".json").write_bytes(b'{"shape": [8]}\n{"shape": [16]}\n')
+    reference = stage_npubench_inputs(
+        ws, npubench_task=task, npubench_root=task_root
+    ).state_block()
+    (ws / ".opgen_state.json").write_text(json.dumps({
+        "opgen_mode": "port_a3_to_a5",
+        "reference": reference,
+    }))
     return ws
 
 
@@ -128,6 +156,137 @@ def test_port_a3_brief_requires_live_capture_list_truth(tmp_path):
     assert "Reject any" in brief and "other top-level shape" in brief
     assert "Keep the capture-provenance checks active" in brief
     assert "CPU-canonical fallback" not in brief
+
+
+def test_npubench_brief_returns_before_live_outer_sections(tmp_path):
+    """Frozen tasks must not inherit live-source or worker-owned contracts."""
+    ws = make_npubench_workspace(tmp_path)
+    env = make_env(
+        opgen_mode="port_a3_to_a5",
+        a3_host="198.51.100.70",
+        a3_container="npu-a3",
+        a3_cann_path="/private/a3/cann",
+    )
+    brief = kw_brief.build_worker_brief(
+        op="add", workspace=ws, lane=2, spawn_index=1,
+        iter_cap_remaining=3, env=env,
+    )
+
+    assert "reference.source` is **`npubench`**" in brief
+    assert "same-stem JSON/JSONL sidecar" in brief
+    assert "preflight_target_receipt.json" in brief
+    assert "Do **not** run `python3 -m npubench_runner preflight`" in brief
+    assert "npubench_runner evaluate" in brief
+    assert "TARGET: a5" in brief
+    assert "LANE: 2" in brief
+    assert "NPUKERNELBENCH EVIDENCE OWNERSHIP" in brief
+    assert "candidate build is ready for NPUKernelBench harness evaluation" in brief
+    assert "mandatory for a final PASS" in brief
+    assert "torch.nn.Module" in brief
+    assert ".to(device)" in brief
+    assert "compiled_provenance" in brief
+    assert 'Path(__file__).resolve().parent / "kernel" / "build"' in brief
+    assert "sys.path.insert(0, str(_BUILD))" in brief
+    assert "import _<op>_ext" in brief
+    assert "from .kernel.build import _<op>_ext" not in brief
+    assert "Do **not** emit `→ orchestrator: await_user_decision`" in brief
+    assert "unavailable A5" in brief
+
+    # No generic live-source truth, legacy worker evaluator, or A3 config may
+    # leak into the specialized prompt even when the parent environment has it.
+    for forbidden in (
+        "fresh source-NPU capture remain the truth",
+        "a3_reference_runnable.json",
+        "edge_dataset",
+        "pass_a_runner.py",
+        "pass_b_runner.py",
+        "CANN ratio",
+        "A3_HOST",
+        "198.51.100.70",
+        "model.py + test.py",
+    ):
+        assert forbidden not in brief
+
+
+def test_npubench_brief_keeps_provider_boundary_when_directed(tmp_path):
+    """A retry directive cannot select the generic worker verification path."""
+    ws = make_npubench_workspace(tmp_path)
+    brief = kw_brief.build_worker_brief(
+        op="add", workspace=ws, lane=0, spawn_index=2,
+        iter_cap_remaining=2, env=make_env(),
+        directive_text="Fix the candidate tail handling.",
+    )
+
+    assert "Fix the candidate tail handling." in brief
+    assert "harness-owned evaluation" in brief
+    assert "npubench_runner evaluate" in brief
+    assert "pass_a_runner.py" not in brief
+    assert "pass_b_runner.py" not in brief
+
+
+def test_npubench_brief_surfaces_o5_candidate_repair(tmp_path):
+    """A durable O5 rollback must reach the next isolated worker prompt."""
+    ws = make_npubench_workspace(tmp_path)
+    (ws / ".rollback_history.jsonl").write_text(
+        json.dumps(
+            {
+                "gate": "phase_o5_npubench_candidate_contract",
+                "rollback_state": "await_worker",
+                "signature": "phase_o5_npubench_candidate_contract::await_worker",
+                "reason": (
+                    "P0aba.O5 NPUKernelBench candidate contract rejected before build: "
+                    "TileLang2AscendC candidate requires a regular kernel/CMakeLists.txt"
+                ),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    brief = kw_brief.build_worker_brief(
+        op="add", workspace=ws, lane=0, spawn_index=2,
+        iter_cap_remaining=2, env=make_env(),
+    )
+
+    assert "Previous NPUBench candidate rejected by finalize" in brief
+    assert "kernel/CMakeLists.txt" in brief
+    assert "Exact persisted reason" in brief
+    assert "precision.pass_a" not in brief
+    assert "precision.pass_b" not in brief
+    assert "pass_a_runner.py" not in brief
+    assert "pass_b_runner.py" not in brief
+
+
+def test_npubench_brief_keeps_non_direct_output_unchanged(tmp_path):
+    ws = make_npubench_workspace(tmp_path, op="ordinary_add")
+    brief = kw_brief.build_worker_brief(
+        op="ordinary_add", workspace=ws, lane=0, spawn_index=1,
+        iter_cap_remaining=3, env=make_env(),
+    )
+
+    assert "DIRECT-LAUNCH SOURCE CONTRACT" not in brief
+
+
+def test_explicit_live_reference_keeps_legacy_port_brief_byte_identical(tmp_path):
+    """The persisted live discriminator must not alter reviewed prompt text."""
+    payload = {
+        "verdict": "READY_PROBE_ONLY",
+        "aclnn_entry": "/cann/ops-nn/foo/examples/test_aclnn_foo.cpp",
+        "gen_data_source": None,
+        "peer_op_dependencies": [],
+    }
+    legacy_ws = make_workspace_with_a3_runnable(tmp_path / "legacy", payload)
+    explicit_live_ws = make_workspace_with_a3_runnable(tmp_path / "live", payload)
+    (explicit_live_ws / ".opgen_state.json").write_text(json.dumps({
+        "opgen_mode": "port_a3_to_a5",
+        "reference": explicit_a3_live_binding(),
+    }))
+    env = make_env(opgen_mode="port_a3_to_a5", port_a3_source="/cann/ops-nn/foo")
+
+    legacy = _port_a3_phase_instructions_block("foo", legacy_ws, 3, env)
+    explicit_live = _port_a3_phase_instructions_block("foo", explicit_live_ws, 3, env)
+
+    assert explicit_live == legacy
 
 
 def test_port_a3_brief_no_peer_deps_surfaces_none_marker(tmp_path):

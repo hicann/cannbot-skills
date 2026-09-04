@@ -168,7 +168,12 @@ Every KB filename below is a path under that root. Example: `ALWAYS_LOADED_RULES
    non-authoritative authoring aids; record every such read in
    `reference_manifest.jsonl`.
 2. Establish the independent truth before design:
-   - migration: the fresh source-architecture NPU capture in `edge_dataset.pt`;
+   - migration with `reference.source=npubench` (the preferred golden when supplied): the immutable KernelBench-style
+     task/sidecar bundle (task `.py` + same-stem `.json`/`.jsonl` sidecar pair) selected in `.opgen_state.json` and its bundle manifest. Preserve the task
+     contract; do not rewrite it, substitute model/test semantics, or read A3 artifacts as truth. The provider-owned
+     precision and W3/R5 performance paths evaluate it later;
+   - migration with `reference.source=a3_live`: the fresh source-architecture NPU capture in
+     `edge_dataset.pt` and its capture provenance;
    - backward generation: CPU/fp64 `torch.autograd.grad` output in
      `backward_cpu_truth.pt` / `backward_ref.json`.
 3. Classify: elementwise / reduction / scan / sort / data_movement / normalization / scatter / gather.
@@ -286,16 +291,17 @@ Write order:
 
 ### model.py and truth contract
 
-`model.py` is a semantic harness adapter; it is never allowed to replace the
-mode-specific independent truth. It MUST expose every deterministic input group
-from `edge_inputs.pt` / `manifest.json` (migration) or the forward specification
-(backward generation). A one-case fallback for a multi-case contract is coverage
-fraud.
+This section's `workspace/{op}/model.py` is a worker-owned semantic harness adapter. A one-case fallback
+for a multi-case contract is coverage fraud.
 
-- **Migration:** implement the semantics of the detected arch22 source, but grade
-  the target exclusively against the fresh source-architecture NPU outputs in
-  `edge_dataset.pt`. Do not reconstruct migration truth with a CPU implementation
-  or a target/archive candidate. Prior-art code remains advisory and provenance-bound.
+- **Migration / `npubench`:** use the immutable KernelBench-style task/sidecar bundle named by the durable
+  `reference` state and its provider-owned fixture/verifier contract. Do not reconstruct or replace that
+  truth through this worker-owned model, a target/archive candidate, model/test conversion, or A3 output.
+  The npubench provider performs its own precision and W3/R5 performance evaluation.
+- **Migration / `a3_live`:** implement the detected arch22 semantics, but grade the target exclusively
+  against the fresh source-architecture NPU outputs in `edge_dataset.pt`. Do not reconstruct that truth
+  with a CPU implementation or a target/archive candidate. Prior-art code remains advisory and
+  provenance-bound.
 - **Backward generation:** keep the supplied differentiable forward specification
   intact and grade gradients against `backward_cpu_truth.pt` produced by fp64
   autograd. The generated target kernel must not participate in truth generation.

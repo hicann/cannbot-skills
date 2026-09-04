@@ -36,8 +36,11 @@ __all__ = [
     "NATIVE_PERF_CASE_DIRNAME", "NATIVE_PERF_CASE_SCHEMA", "NATIVE_PERF_FIXTURE_FILENAME",
     "NATIVE_PERF_FIXTURE_SCHEMA", "NATIVE_PERF_MANIFEST_FILENAME", "NATIVE_PERF_MANIFEST_SCHEMA", "NPUBENCH_SOURCE",
     "NPU_LIMITS", "NpuBenchRunnerError", "PERFORMANCE_CONTRACT_VERSION", "PERFORMANCE_REPORT_FILENAME",
-    "PERF_SKIP_ENV", "PRECISION_CONTRACT_VERSION", "PRECISION_REPORT_FILENAME", "PRECISION_SEMANTICS_SOURCE",
-    "PREFLIGHT_REPORT_FILENAME", "REPEATS", "REQUIRED_MATCHED_RATIO", "RUNNER_CONTRACT_VERSION",
+    "PERF_SKIP_ENV", "PRECISION_BINDING_HISTORY_FILENAME", "PRECISION_CONTRACT_VERSION",
+    "PRECISION_REPORT_FILENAME", "PRECISION_REPEATS_DEFAULT", "PRECISION_REPEATS_ENV",
+    "PRECISION_SEMANTICS_SOURCE", "REFERENCE_OVERFLOW_INPUT_ABS_DEFAULT", "REFERENCE_OVERFLOW_INPUT_ABS_ENV",
+    "PREFLIGHT_REPORT_FILENAME", "REPEATS", "REPEAT_FINGERPRINT_CLASSES", "REQUIRED_MATCHED_RATIO",
+    "RUNNER_CONTRACT_VERSION",
     "RUNNER_MODULE_FILENAMES", "SIDECAR_DESCRIPTOR_ADAPTER", "SIDECAR_DESCRIPTOR_SCHEMA", "SNAPSHOT_DIRNAME",
     "StagedBundle", "TASK_EXECUTION_TIMEOUT_ENV", "TASK_EXECUTION_TIMEOUT_SECONDS", "WARM_UP",
     "_CANDIDATE_BUILD_RELATIVE", "_CANDIDATE_RUNTIME_SUFFIXES", "_CANDIDATE_RUNTIME_TOP_LEVEL", "_ExecutionContext",
@@ -50,7 +53,8 @@ __all__ = [
     "_assert_safe_child_name", "_assert_task_relative_imports", "_atomic_json", "_atomic_torch_fixture",
     "_base_report", "_benchmark_accuracy", "_build_execution_request", "_candidate_entry", "_candidate_excluded",
     "_candidate_root", "_candidate_tree_sha256", "_canonical_sha256", "_case_raw_profile_paths", "_check_nan_inf",
-    "_child_profiler_report", "_cleanup_execution_context", "_cleanup_frozen_native_fixture",
+    "_child_profiler_report", "_classify_repeat_fingerprint", "_cleanup_execution_context",
+    "_cleanup_frozen_native_fixture",
     "_cleanup_performance_lanes", "_cli_parser", "_clone_pythonish", "_clone_value", "_compare_complex_tensor",
     "_compare_finite_tensor", "_compare_float_tensor", "_compare_integer_tensor", "_compare_output_leaf",
     "_compare_output_mapping", "_compare_output_sequence", "_compare_tensor", "_configured_target_python_values",
@@ -65,43 +69,52 @@ __all__ = [
     "_frozen_native_fixture_slots", "_get_init_args", "_get_input_groups", "_identity_path", "_import_torch",
     "_in_process_base_report", "_in_process_measurement_fields", "_indexed_profile_cases",
     "_indexed_quick_profiler_rows", "_infer_input_type", "_input_adapter_binding", "_input_adapter_contract",
-    "_input_adapter_identity", "_input_provider_names_bound_by", "_install_package", "_install_synthetic_packages",
+    "_input_adapter_identity", "_input_max_abs", "_input_provider_names_bound_by", "_install_package",
+    "_install_synthetic_packages",
     "_internal_execute_request", "_invoke_model", "_is_a3_routing_variable", "_is_bool_dtype",
     "_is_floating_tensor", "_is_frozen_candidate_snapshot", "_is_int_like_dtype", "_is_integer_dtype",
-    "_is_torch_descriptor_type", "_json_safe_non_finite", "_kept_candidate_subdirectories", "_load_inputs_provider",
+    "_is_torch_descriptor_type", "_iter_output_tensors", "_json_safe_non_finite", "_kept_candidate_subdirectories",
+    "_load_inputs_provider",
     "_load_native_common_fixture", "_load_native_perf_manifest", "_load_quick_profiler_summary",
     "_make_tree_read_only", "_mask_any", "_materialize_native_perf_fixture", "_materialize_sidecar_case",
     "_move_model", "_move_value", "_native_case_records", "_native_fixture_realization",
     "_native_perf_manifest_document", "_native_quick_shim_header", "_native_quick_shim_model",
     "_native_quick_shim_targets", "_native_quick_sidecar_name", "_native_reject_tensor_aliases",
     "_native_restricted_mapping", "_native_restricted_tensor", "_native_restricted_tree",
-    "_native_tensor_storage_key", "_native_value_has_empty_tensor", "_output_tail", "_package_layout",
+    "_native_tensor_storage_key", "_native_value_has_empty_tensor", "_nonfinite_counts", "_observation_key",
+    "_output_tail", "_package_layout",
     "_parent_performance_command", "_parent_performance_report_fields", "_parse_child_report", "_parse_jsonl",
     "_parse_task_syntax", "_passed_native_profiler_report", "_perf_below_threshold", "_performance_adapter_path",
     "_performance_child_context", "_performance_contract", "_performance_error_report", "_positive_case_count",
-    "_precision_contract", "_precision_report", "_preflight_workspace_in_process", "_prepare_execution_root",
+    "_precision_contract", "_precision_observation", "_precision_report", "_preflight_workspace_in_process",
+    "_prepare_execution_root",
     "_prepare_native_quick_adapter", "_profile_archive_slots", "_publish_execution_request",
     "_quick_profiler_timings", "_raw_profile_paths", "_read_execution_request_payload", "_read_lease_manifest",
     "_read_native_perf_manifest", "_read_native_quick_adapter_manifest", "_read_quick_profiler_report",
-    "_read_state", "_request_bundle_document", "_request_candidate_document", "_request_fixture_document",
+    "_read_state", "_reference_nonfinite_mask_sha256", "_request_bundle_document", "_request_candidate_document",
+    "_request_fixture_document",
     "_request_scratch", "_require_allowed_profile_dir", "_require_parent_frozen_native_fixture",
     "_require_real_directory", "_require_real_read_only_tree", "_require_regular", "_require_snapshot",
     "_required_relative_path", "_resolve_child_run_id", "_resolve_configured_python", "_resolve_device",
     "_resolve_execution_request", "_resolve_input_groups", "_resolve_manifest_path", "_resolve_model_constructor",
+    "_resolve_precision_repeats", "_resolve_reference_overflow_threshold",
     "_resolve_request_bundle", "_resolve_request_candidate", "_resolve_request_fixture",
     "_resolve_request_manifest", "_resolve_request_task_paths", "_resolve_target_python",
     "_resolve_task_execution_timeout", "_resolve_under", "_run_child_process_group", "_run_evaluation_lanes",
     "_run_evaluation_lanes_in_parallel", "_run_evaluation_lanes_in_sequence", "_run_isolated_context",
     "_run_isolated_performance", "_run_native_fixture_phase", "_run_native_profiler_phase",
-    "_run_performance_workspace_in_process", "_run_precision", "_run_precision_cases",
-    "_run_precision_workspace_in_process", "_run_runner_child", "_runner_ascendc_env_path",
+    "_run_performance_workspace_in_process", "_run_precision", "_run_precision_case_tracked", "_run_precision_cases",
+    "_run_precision_cases_with_fingerprint", "_run_precision_workspace_in_process", "_run_runner_child",
+    "_runner_ascendc_env_path",
     "_safe_child_failure_reason", "_safe_prof_tag", "_sanitized_quick_profiler_row", "_scrubbed_task_environment",
     "_set_eval", "_sidecar_attr_descriptor", "_sidecar_attr_value_ok", "_sidecar_case_generator",
     "_sidecar_descriptor_fields_ok", "_sidecar_range_ok", "_sidecar_shape_ok", "_sidecar_tensor_descriptor",
     "_sidecar_tensor_extent", "_sidecar_torch_dtype", "_skipped_quick_profiler_row", "_stage_execution_inputs",
     "_stage_execution_runner_copy", "_stage_isolated_native_fixture", "_subreport_failure_reason",
+    "_precision_host_error_only", "_synthesized_skipped_performance",
     "_task_module_name", "_tensor_is_complex", "_tensor_sign", "_terminate_child_process_group",
-    "_try_write_report", "_valid_profile_case_indices", "_validate_native_case_fixture_payload",
+    "_try_write_report", "_update_precision_binding_history", "_valid_profile_case_indices",
+    "_validate_native_case_fixture_payload",
     "_validate_parallel_leases", "_validate_parent_published_child_report", "_validate_reference_api",
     "_validate_reported_profile_dir", "_validate_requested_lease", "_validate_sidecar_case",
     "_validate_sidecar_descriptors", "_validated_case_indices", "_validated_expected_valid_cases",
@@ -247,8 +260,10 @@ from npubench_core import (  # noqa: F401  re-exported runner surface
     _runner_ascendc_env_path,
     _safe_child_failure_reason,
     _safe_prof_tag,
+    _precision_host_error_only,
     _scrubbed_task_environment,
     _subreport_failure_reason,
+    _synthesized_skipped_performance,
     _terminate_child_process_group,
     _try_write_report,
     _validate_parent_published_child_report,
@@ -398,6 +413,41 @@ from npubench_profile import (  # noqa: F401  re-exported runner surface
 )
 
 
+from npubench_determinism import (  # re-exported runner surface
+    PRECISION_BINDING_HISTORY_FILENAME,
+    PRECISION_REPEATS_DEFAULT,
+    PRECISION_REPEATS_ENV,
+    REFERENCE_OVERFLOW_INPUT_ABS_DEFAULT,
+    REFERENCE_OVERFLOW_INPUT_ABS_ENV,
+    REPEAT_FINGERPRINT_CLASSES,
+    _PRECISION_BINDING_HISTORY_MAX_ENTRIES,
+    _PRECISION_BINDING_HISTORY_SCHEMA,
+    _PrecisionCaseContext,
+    _append_precision_binding_history,
+    _classify_repeat_fingerprint,
+    _clone_and_move_precision_input,
+    _emit_precision_determinism_event,
+    _input_max_abs,
+    _iter_output_tensors,
+    _mask_bytes,
+    _nonfinite_counts,
+    _observation_key,
+    _precision_case_context,
+    _precision_history_payload,
+    _precision_observation,
+    _precision_report,
+    _read_precision_binding_history,
+    _reference_nonfinite_mask_sha256,
+    _resolve_precision_repeats,
+    _resolve_reference_overflow_threshold,
+    _run_precision_case_comparison,
+    _run_precision_case_tracked,
+    _run_precision_cases_with_fingerprint,
+    _set_precision_determinism_alert,
+    _update_precision_binding_history,
+)
+
+
 # Every file the evaluator needs when it is copied out of the checkout: this
 # runner, the modules it is split across, and the immutable-stage verifier it
 # imports lazily.  ``_stage_execution_runner_copy`` copies exactly this list;
@@ -405,6 +455,7 @@ from npubench_profile import (  # noqa: F401  re-exported runner surface
 RUNNER_MODULE_FILENAMES: tuple[str, ...] = (
     "npubench_runner.py",
     "npubench_core.py",
+    "npubench_determinism.py",
     "npubench_fixture.py",
     "npubench_precision.py",
     "npubench_profile.py",
@@ -885,6 +936,7 @@ def run_precision_workspace(
     # before the report leaves this function: persistence uses allow_nan=False,
     # and finalize compares the returned report against the on-disk copy, so
     # the in-memory and persisted forms must already be identical here.
+    _update_precision_binding_history(workspace, result)
     result = _json_safe_non_finite(result)
     _try_write_report(workspace, PRECISION_REPORT_FILENAME, result)
     if context is not None:
@@ -950,8 +1002,16 @@ def _run_precision(
         torch, reference_ctor, candidate_ctor, init_args, device
     )
     case_count = len(groups)
-    case_reports = _run_precision_cases(
-        groups, torch, reference_model, candidate_model, device_value
+    repeats = _resolve_precision_repeats()
+    overflow_threshold = _resolve_reference_overflow_threshold()
+    case_reports, abort_reason = _run_precision_cases_with_fingerprint(
+        groups,
+        torch,
+        reference_model,
+        candidate_model,
+        device_value,
+        repeats=repeats,
+        overflow_threshold=overflow_threshold,
     )
 
     if _candidate_tree_sha256(candidate_root) != before_candidate_digest:
@@ -964,37 +1024,10 @@ def _run_precision(
         input_adapter=input_adapter,
         device_value=device_value,
         case_count=case_count,
+        repeats=repeats,
+        overflow_threshold=overflow_threshold,
+        abort_reason=abort_reason,
     )
-
-
-def _precision_report(
-    case_reports: list[dict[str, Any]],
-    binding: Mapping[str, Any],
-    *,
-    seed: int,
-    seed_events: Any,
-    input_adapter: Mapping[str, Any],
-    device_value: Any,
-    case_count: int,
-) -> dict[str, Any]:
-    """Aggregate per-case verdicts into the published precision report."""
-    passed_count = sum(case["status"] == "PASS" for case in case_reports)
-    status = "PASS" if passed_count == len(case_reports) else "FAIL"
-    result = _base_report("precision", status=status, binding=binding)
-    result.update(
-        {
-            "seed": seed,
-            "seed_events": seed_events,
-            "input_adapter": input_adapter,
-            "device": str(device_value),
-            "case_count": case_count,
-            "passed_case_count": passed_count,
-            "failed_case_count": len(case_reports) - passed_count,
-            "pass_a": {"status": status, "tier1_pass": passed_count, "total": case_count},
-            "cases": case_reports,
-        }
-    )
-    return result
 
 
 def _construct_precision_models(
@@ -1667,6 +1700,18 @@ def _run_evaluation_lanes_in_sequence(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run precision first, then either defer or run the performance lane."""
     precision = run_precision_workspace(workspace, candidate_dir, device=precision_device)
+    if not skip_perf and _precision_host_error_only(precision):
+        # Fail-fast (source-migration flow 2026-08-22): a candidate whose
+        # op is unregistered / import-broken fails EVERY precision case
+        # with a host-side error.  The msprof perf sweep on such a
+        # candidate hangs for tens of minutes without producing
+        # evidence — skip it and surface a synthetic performance
+        # report so finalize can route back to await_worker promptly.
+        performance = _synthesized_skipped_performance(
+            precision, workspace=workspace, run_id=run_id,
+            device=performance_device,
+        )
+        return precision, performance
     if not skip_perf:
         performance = run_performance_workspace(
             workspace,

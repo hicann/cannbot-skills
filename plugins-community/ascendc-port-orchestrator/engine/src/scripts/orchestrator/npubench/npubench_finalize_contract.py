@@ -21,7 +21,7 @@ import importlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from npubench.npubench_inputs import NPUBENCH_SOURCE, verify_npubench_stage
 from reference_source import (
@@ -348,12 +348,9 @@ def _recompute_runner_bindings(
         current = npubench_runner.build_evaluation_binding(workspace, workspace)
     except Exception as exc:
         return f"NPUBENCH_EVIDENCE_INVALID: cannot bind current candidate scope: {exc}"
-    for field in ("candidate_tree_sha256", "candidate_entry_sha256", "candidate_entry"):
-        if current.get(field) != binding.get(field):
-            return (
-                "NPUBENCH_EVIDENCE_INVALID: current candidate scope differs "
-                f"from the frozen evaluation snapshot ({field})"
-            )
+    mismatch = _scope_binding_mismatch(current, binding, snapshot, workspace, digest)
+    if mismatch:
+        return mismatch
     for verb, report in reports.items():
         valid, reason = npubench_runner.verify_evidence_report(
             workspace,
@@ -395,6 +392,89 @@ def _validate_candidate_digest_scheme(binding: Mapping[str, Any], current_scheme
         "re-freeze the snapshot with the current exclusion list and "
         "re-evaluate; do not route to await_worker"
     )
+
+
+def _scope_binding_mismatch(
+    current: Mapping[str, Any],
+    binding: Mapping[str, Any],
+    snapshot: Path,
+    workspace: Path,
+    digest: str,
+) -> Optional[str]:
+    """Report the first evaluation-binding field that drifted from the snapshot.
+
+    2026-08-26 (flash_attention_score_oc loop-break): report WHICH scope paths
+    differ so the loop is not blind. Snapshot still exists pre-rollback at
+    validation time.
+    """
+    for field in ("candidate_tree_sha256", "candidate_entry_sha256", "candidate_entry"):
+        if current.get(field) == binding.get(field):
+            continue
+        detail = _scope_diff_detail(field, snapshot, workspace, digest)
+        return (
+            "NPUBENCH_EVIDENCE_INVALID: current candidate scope differs "
+            f"from the frozen evaluation snapshot ({field})"
+            + (f" — differing paths: {detail}" if detail else "")
+        )
+    return None
+
+
+def _scope_diff_detail(field: str, snapshot: Path, workspace: Path, digest: str) -> str:
+    """Best-effort differing-path summary; only the tree digest can name paths."""
+    if field != "candidate_tree_sha256":
+        return ""
+    try:
+        return _scope_diff_paths(snapshot, workspace, digest)
+    except Exception:
+        return ""
+
+
+def _scope_diff_paths(snapshot: Path, workspace: Path, digest: str) -> str:
+    """List relative scope paths whose bytes differ between snapshot and workspace.
+
+    Both trees are digested with the same exclusion filter, so a digest
+    mismatch means at least one in-scope path changed after the freeze.
+    Returns a compact “path:size” summary (bounded).
+    """
+    try:
+        from npubench.npubench_runner import _candidate_excluded
+
+        snap_paths = _scope_head_bytes(Path(snapshot), _candidate_excluded)
+        ws_paths = _scope_head_bytes(Path(workspace), _candidate_excluded)
+        return ", ".join(sorted(_scope_diff_entries(snap_paths, ws_paths))[:10])
+    except Exception:
+        return ""
+
+
+def _scope_head_bytes(root: Path, exclude: Callable[[Path], bool]) -> dict[str, bytes]:
+    """Map every in-scope relative path under ``root`` to its first 64 KiB."""
+    heads: dict[str, bytes] = {}
+    for item in root.rglob("*"):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(root)
+        if exclude(rel):
+            continue
+        with item.open("rb") as handle:
+            heads[str(rel)] = handle.read(65536)
+    return heads
+
+
+def _scope_diff_entries(
+    snap_paths: Mapping[str, bytes],
+    ws_paths: Mapping[str, bytes],
+) -> list[str]:
+    """Mark workspace paths added/changed and snapshot-only paths removed."""
+    diff: list[str] = []
+    for rel, data in ws_paths.items():
+        if rel not in snap_paths:
+            diff.append(f"+{rel}")
+            continue
+        if snap_paths[rel] != data:
+            diff.append(f"~{rel}")
+    for missing in sorted(set(snap_paths) - set(ws_paths)):
+        diff.append(f"-{missing}")
+    return diff
 
 
 def _validate_candidate_snapshot(snapshot: Path, digest: str, workspace: Path) -> Optional[str]:

@@ -250,6 +250,19 @@ def _check_opencode_registration() -> tuple[str, Path, list[str]]:
     except Exception as exc:
         return "opencode", adapter, [f"cannot build opencode config: {exc!r}"]
 
+    # 2026-08-26 (37fa4889 / AOG_OPENCODE_ADAPTER): the adapter is an
+    # EXPLICIT opt-in because its guard execs host-baked projectRoot paths
+    # that do not exist inside the graybox (every tool call errored). When
+    # opted out, registration + canary checks are intentionally skipped: the
+    # orchestrator-side stop-gate + envelope checks still gate opencode
+    # spawns. The backend logs a warning for every dispatch in this mode.
+    if os.environ.get("AOG_OPENCODE_ADAPTER") != "1":
+        if (cfg.get("plugin") or []) and any(
+            isinstance(p, list) and p and str(p[0]).endswith("a5_ops_hooks.mjs")
+            for p in cfg.get("plugin") or []
+        ):
+            return "opencode", adapter, ["AOG_OPENCODE_ADAPTER != 1 but plugin registered — inconsistent opt-out"]
+        return "opencode", adapter, []
     errors = _opencode_plugin_registration_errors(cfg)
     errors.extend(_opencode_safety_net_errors(adapter))
     return "opencode", adapter, errors

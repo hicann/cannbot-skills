@@ -41,14 +41,28 @@ _platform_blame_doc_names = (
     "probe_report.md",
     "self_critic_report.md",
 )
+# orchestrator_events.jsonl is harness-authored audit output; scanning it as
+# a paper-over/retry gate input turned the orchestrator's own log wording into
+# hard failures the worker could never repair (audit M3).  Worker-authored
+# documents remain the gate inputs.
 _infra_paper_over_doc_names = (
     "PROGRESS.md",
-    "orchestrator_events.jsonl",
     "analysis.md",
     "knowledge_update.md",
     "self_critic_report.md",
+    # V3.8.5 operator decision: the await_user_decision pause routes through
+    # user_decision.md, which the orchestrator then CONSUMES and persists as
+    # kb_draft_from_user_decision.md (full content embedded).  The finalize
+    # gates run AFTER consumption, so the persistent draft is the record the
+    # P96 scan must read — the operator's INFRA_BASELINE_VIOLATED escalation
+    # there is part of the same formal escalation trail (2026-08-23 SDPA:
+    # worker stopped at await_user_decision but its handoff omitted the exact
+    # token; scanning the consumed user_decision.md alone found nothing and
+    # the gate looped 5x).
+    "user_decision.md",
+    "kb_draft_from_user_decision.md",
 )
-_infra_retry_doc_names = ("PROGRESS.md", "orchestrator_events.jsonl")
+_infra_retry_doc_names = ("PROGRESS.md",)
 _gate_own_markers = (
     "c-infra-baseline-paper-over",
     "infra_baseline_paper_over",
@@ -95,6 +109,16 @@ def _platform_blame_evidence(workspace: Path, documents: list[Path]) -> tuple[bo
         path.suffix == ".py" for path in (workspace / "probes").iterdir()
     )
     has_msprof = any(workspace.glob("*msprof*.json")) or any(workspace.glob("*.msprof.json"))
+    if not has_msprof:
+        # npubench/controller evidence trees keep msprof traces outside the
+        # workspace root (npubench_evidence/, .npubench_exec/) — the old
+        # root-only glob made the evidence gate unreachable for the npubench
+        # route (audit M2).
+        for evidence_dir in ("npubench_evidence", ".npubench_exec"):
+            base = workspace / evidence_dir
+            if base.is_dir() and any(base.rglob("*msprof*.json")):
+                has_msprof = True
+                break
     has_hw_citation = False
     has_pb_citation = False
     for document in documents:
@@ -156,9 +180,11 @@ def _check_platform_blame_backed(workspace: Path) -> Optional[str]:
         "c10 abi", "fp16 not supported", "no scalar half", "no half arithmetic",
         "cast intrinsic unavailable", "aicpu fallback expected",
         "pytorch dispatcher quirk", "torch_npu deprecated",
-        # Original C5 phrases (kept for symmetry)
-        "platform bug", "hardware limitation", "expected behavior",
-        "known limitation",
+        # Original C5 phrases (kept for symmetry).  "expected behavior" and
+        # "known limitation" were REMOVED (2026-08-22, audit M2): they are
+        # ordinary prose, and the bare-substring match hard-failed real
+        # finalizes without any platform attribution intent.
+        "platform bug", "hardware limitation",
     )
 
     documents = _workspace_documents(workspace, _platform_blame_doc_names)
@@ -221,6 +247,13 @@ def _find_paper_over_hits(documents: list[Path]) -> list[tuple[str, str]]:
     return hits
 
 
+def _is_digit_adjacent(text: str, start: int, end: int) -> bool:
+    """Return whether the ``text[start:end]`` token sits inside a longer digit run."""
+    if start > 0 and text[start - 1].isdigit():
+        return True
+    return end < len(text) and text[end].isdigit()
+
+
 def _contains_uncontextualized_baseline_error(text: str) -> bool:
     """Return whether a baseline error code lacks kernel-caused context."""
     for code in _NPU_BASELINE_ERROR_CODES:
@@ -229,9 +262,19 @@ def _contains_uncontextualized_baseline_error(text: str) -> bool:
             index = text.find(code, search_from)
             if index < 0:
                 break
-            if not _is_kernel_caused_context_window(text, index, index + len(code)):
+            start, end = index, index + len(code)
+            # 2026-08-22 (MUSE campaign): a citation must be a standalone
+            # numeric token.  msprof profile-dir timestamps such as
+            # PROF_000001_20260821205507033_... embed `507033` inside a longer
+            # digit run and are orchestrator audit noise, not NPU error
+            # citations.  Skip digit-adjacent hits instead of firing the
+            # paper-over gate on a false positive.
+            if _is_digit_adjacent(text, start, end):
+                search_from = end
+                continue
+            if not _is_kernel_caused_context_window(text, start, end):
                 return True
-            search_from = index + len(code)
+            search_from = end
     return False
 
 

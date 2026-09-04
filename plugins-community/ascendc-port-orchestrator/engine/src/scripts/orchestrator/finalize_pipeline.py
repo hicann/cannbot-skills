@@ -94,6 +94,10 @@ class GateID(str, enum.Enum):
     # P0dd 2026-05-23 (owner directive) — kernel TU / pybind shim `#include`s
     # upstream arch35 V351 source (not a V220→V351 port).
     ARCH35_WRAP_CHEAT = "arch35_wrap_cheat"
+    # 2026-08-26 (npubench provider contract): provider evaluation pending
+    # (verification.json without npubench_evidence) - clear verdict instead of
+    # the legacy UNKNOWN_PRECISION_STATUS misroute.
+    NPUBENCH_EVALUATION_PENDING = "npubench_evaluation_pending"
     # flash_attention_score-pbh-1 2026-06-11 (owner mandate) — port_a3 FA GE
     # op_host (def/infershape/tiling.cpp) byte-copied from CANN source OR
     # tiling.cpp doesn't use the KB shared `wfh::`/`wp_fa_host::` layer

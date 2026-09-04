@@ -15,6 +15,8 @@ Reads workspace state files to determine what state an op is in:
                                               if present, re-invoke orchestrator
   3. agent died (.agent_died_at_<state>)    → surface to user, NO auto-retry
                                               (codex C4)
+  3a. known NPUBench repair construction failure → archive marker, reset stale
+                                                  candidate outputs, re-invoke
   4. mid-flight (state_transitions.jsonl    → re-invoke orchestrator from
      last to_state non-terminal)              current state
 
@@ -33,13 +35,14 @@ import logging
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent))
@@ -47,6 +50,7 @@ sys.path.insert(0, str(_HERE.parent))
 import state_executor
 import events as event_emitter
 from source_arch import verify_source_stage
+from orchestrator_coldstart import _prepare_npubench_candidate_repair
 
 from logging_config import get_logger  # cv-agent style logger
 log = get_logger(__name__)
@@ -58,6 +62,7 @@ class ResumeAction(Enum):
     USER_DECISION_READY = "user_decision_ready"      # paused, user_decision.md present
     AGENT_DIED = "agent_died"                # surface to user, NO auto-retry (unknown failure)
     AUTO_RECOVERABLE = "auto_recoverable"    # FW-transient — clear marker + re-invoke (P0r 2026-05-05)
+    NPUBENCH_CANDIDATE_REPAIR = "npubench_candidate_repair"
     # spawn failed due to quota/usage limit; no auto-retry — wait for reset (2026-05-18)
     QUOTA_BACKOFF = "quota_backoff"
     # abort caused by parsing bug now fixed; replay routing (P0t 2026-05-05)
@@ -110,6 +115,75 @@ def _is_quota_reason(reason: str) -> bool:
     return any(p in low for p in _QUOTA_PATTERNS)
 
 
+def _is_regular_file(path: Path) -> bool:
+    """True only for a real file: a symlink is rejected even if it resolves."""
+    return path.is_file() and not path.is_symlink()
+
+
+def _is_npubench_candidate_repair_crash(
+    workspace: Path, died_state: str, reason: str
+) -> bool:
+    """Recognize the known graybox-respawn rejection after an O5 rollback.
+
+    A generic graybox construction error remains an agent-died condition. The
+    narrow exception is safe to recover because the durable rollback gate has
+    already classified the preceding O5 result as a worker-owned NPUBench
+    candidate defect; stale candidate output can be moved before respawn.
+    Both O5 rollback gates that keep/repair a worker candidate are accepted:
+    ``phase_o5_npubench_candidate_contract`` (pre-build contract rejection,
+    candidate archived at rollback time) and ``phase_o5_mismatch`` (post-run
+    evidence rejection; the candidate stays in the workspace for incremental
+    repair, so a deliverable-shaped candidate — e.g. the PR4778 apt mirror
+    ``op_kernel/arch35/*.h`` + ``kernel/pybind11.cpp`` of the port-a3-ops
+    route — trips the answer gate on the next spawn; 2026-08-27
+    flash_attention_score).
+    """
+    construction_errors = (
+        "graybox construction rejected target/answer-bearing curated input",
+        "graybox construction manifest changed during worker dispatch",
+    )
+    if died_state != "await_worker" or not any(
+        error in reason for error in construction_errors
+    ):
+        return False
+    state_path = workspace / ".opgen_state.json"
+    history_path = workspace / ".rollback_history.jsonl"
+    if not (_is_regular_file(state_path) and _is_regular_file(history_path)):
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        entries = [
+            json.loads(line)
+            for line in history_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+        return False
+    reference = state.get("reference") if isinstance(state, dict) else None
+    source = state.get("port_source") if isinstance(state, dict) else None
+    latest = entries[-1] if entries else None
+    return (
+        isinstance(state, dict)
+        and state.get("opgen_mode") == "port_a3_to_a5"
+        and isinstance(reference, dict)
+        and reference.get("source") == "npubench"
+        and (
+            # CANN ops-repo sources (port-a3-ops default route) record no
+            # port_source kind at all (2026-08-27 flash_attention_score).
+            source is None
+            or (
+                isinstance(source, dict)
+                and source.get("kind") in {"port-aclnn-tilelang2ascendc"}
+            )
+        )
+        and isinstance(latest, dict)
+        and latest.get("gate") in {
+            "phase_o5_npubench_candidate_contract",
+            "phase_o5_mismatch",
+        }
+    )
+
+
 @dataclass
 class ResumeStatus:
     op: str
@@ -120,6 +194,39 @@ class ResumeStatus:
     died_at_state: Optional[str] = None
     died_reason: Optional[str] = None
     summary: str = ""
+
+
+def _performance_is_deferred(workspace: Path) -> bool:
+    """Whether the harness-owned verification carries a deferred perf placeholder."""
+    path = workspace / "verification.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    performance = payload.get("performance")
+    return (
+        isinstance(performance, dict)
+        and performance.get("status") == "DEFERRED"
+        and performance.get("perf_deferred") is True
+    )
+
+
+def _record_perf_backfill_reentry(workspace: Path, op: str) -> None:
+    """Record the synthetic done→finalize transition for the perf backfill."""
+    state_executor.record_transition(
+        workspace,
+        state_executor.TransitionDecision(
+            next_state="finalize",
+            matched_transition_index=-1,
+            rationale=(
+                "perf backfill re-entry (CANNBOT_NPUBENCH_PERF_BACKFILL=1): "
+                "candidate unchanged; re-run O5 with SKIP_PERF=0 to append the "
+                "W3/R5 measurement to the existing evidence bundle"
+            ),
+            from_state="done",
+            handoff="",
+        ),
+    )
 
 
 def _resolve_workspace(op: str) -> Path:
@@ -192,12 +299,32 @@ def diagnose(op: str, *, workspace: Optional[Path] = None) -> ResumeStatus:
                 ),
             )
 
+        if _is_npubench_candidate_repair_crash(workspace, died_state, reason):
+            return ResumeStatus(
+                op=op,
+                workspace=workspace,
+                action=ResumeAction.NPUBENCH_CANDIDATE_REPAIR,
+                current_state=state_executor.current_state(workspace),
+                died_at_state=died_state,
+                died_reason=reason,
+                summary=(
+                    "known NPUBench candidate-repair graybox construction "
+                    "failure; stale candidate output will be archived before "
+                    "re-invoking await_worker"
+                ),
+            )
+
         # P0r (2026-05-05): classify FW-transient failures for auto-recovery.
         # Pattern lifted from agent_transport.py _FW_TRANSIENT_PATTERNS.
         is_fw_transient = any(p in reason for p in (
             "API returned an empty or malformed response",
             "check for a proxy or gateway intercepting the request",
             "claude (stream-json) exited 1",  # the wrapper-level form we see in marker
+            # 2026-08-26 (review-55-57): SIGTERM'd spawn + SDK model-window blip —
+            # same patterns as agent_transport._FW_TRANSIENT_PATTERNS; endpoint/model
+            # were healthy minutes later (55/57 both died 13:36, respawns OK 13:39).
+            "claude (stream-json) exited -15",
+            "unrecognized_model",
         ))
 
         retry_count = _get_retry_count(workspace, died_state)
@@ -254,6 +381,43 @@ def diagnose(op: str, *, workspace: Optional[Path] = None) -> ResumeStatus:
     # 2b) Terminal — nothing to resume (kept after P0t branch so non-recoverable
     # aborts still surface as NONE_TERMINAL, not as RESUMABLE)
     if state_executor.is_terminal(cur):
+        # 2b.5) Perf backfill (2026-08-23): a done op whose performance
+        # evidence is DEFERRED, because precision was delivered first,
+        # re-enters finalize to backfill the perf measurement when the
+        # backfill env flag is on and perf measurement is not skipped.  The
+        # candidate tree is unchanged, so the evaluation rebinds the same
+        # candidate and the perf evidence is appended to the existing bundle.
+        if (
+            os.environ.get("CANNBOT_NPUBENCH_PERF_BACKFILL", "0") == "1"
+            and _performance_is_deferred(workspace)
+        ):
+            # Fail closed (2026-08-25): with SKIP_PERF still set, the
+            # re-entered O5 would emit ANOTHER DEFERRED placeholder that
+            # finalize accepts — the op would stay 'done' with perf never
+            # measured.  Refuse the re-entry with an explicit diagnostic
+            # instead of silently no-op'ing.
+            if os.environ.get("CANNBOT_NPUBENCH_SKIP_PERF", "0") == "1":
+                return ResumeStatus(
+                    op=op,
+                    workspace=workspace,
+                    action=ResumeAction.NONE_TERMINAL,
+                    current_state=cur,
+                    summary=(
+                        "perf backfill refused: CANNBOT_NPUBENCH_SKIP_PERF=1 "
+                        "is still set, so O5 would only re-emit a DEFERRED "
+                        "perf placeholder. Unset CANNBOT_NPUBENCH_SKIP_PERF "
+                        "before running with CANNBOT_NPUBENCH_PERF_BACKFILL=1."
+                    ),
+                )
+            _record_perf_backfill_reentry(workspace, op)
+            return ResumeStatus(
+                op=op,
+                workspace=workspace,
+                action=ResumeAction.RESUMABLE,
+                current_state="finalize",
+                summary="perf backfill: performance evidence is DEFERRED; "
+                        "re-entering finalize for the W3/R5 measurement",
+            )
         return ResumeStatus(op=op, workspace=workspace,
                             action=ResumeAction.NONE_TERMINAL,
                             current_state=cur,
@@ -318,6 +482,21 @@ def _load_workspace_opgen_state(workspace: Path) -> dict:
         return {}
 
 
+def _verify_tilelang_source_stage(workspace: Path, state: Mapping[str, Any]):
+    """Lazy compatibility seam for the TileLang2AscendC source profile."""
+    try:
+        from tilelang2ascendc_source import verify_tilelang2ascendc_source_stage
+    except ImportError as exc:
+        return (
+            False,
+            "port-aclnn-tilelang2ascendc requires the tilelang2ascendc_source "
+            f"staging adapter: {exc}",
+            {},
+        )
+
+    return verify_tilelang2ascendc_source_stage(workspace, state)
+
+
 def execute(op: str, *, workspace: Optional[Path] = None,
             lane: int = 0, dry_run: bool = False,
             bump_cap: Optional[list[str]] = None) -> int:
@@ -342,16 +521,7 @@ def execute(op: str, *, workspace: Optional[Path] = None,
             state.get("opgen_mode"),
         )
         return 2
-    if state.get("opgen_mode") == "port_a3_to_a5":
-        valid_stage, stage_reason, _stage_manifest = verify_source_stage(
-            status.workspace, state
-        )
-        if not valid_stage:
-            log.error(
-                "[resume] migration source-only snapshot validation failed: %s",
-                stage_reason,
-            )
-            return 2
+    port_source = state.get("port_source")
     # P135.RL: prefer workspace's recorded lane over the function default.
     # The CLI passes lane only when --lane was explicitly set by user;
     # otherwise lane==0 here represents the function default which should
@@ -374,12 +544,12 @@ def execute(op: str, *, workspace: Optional[Path] = None,
         # (genuine finalize/abort) still surfaces to user.
         if status.action == ResumeAction.NONE_TERMINAL:
             mode_flag = (
-                "--port-a3" if state.get("opgen_mode") == "port_a3_to_a5"
+                "--port-a3-ops" if state.get("opgen_mode") == "port_a3_to_a5"
                 else "--backward"
             )
             source = (
                 state.get("port_a3_source")
-                if mode_flag == "--port-a3"
+                if mode_flag == "--port-a3-ops"
                 else state.get("backward_forward_source")
             )
             log.info(
@@ -391,9 +561,52 @@ def execute(op: str, *, workspace: Optional[Path] = None,
             )
         return 0 if status.action == ResumeAction.NONE_TERMINAL else 2
 
+    if state.get("opgen_mode") == "port_a3_to_a5":
+        verifier = (
+            _verify_tilelang_source_stage
+            if isinstance(port_source, dict)
+            and port_source.get("kind") == "port-aclnn-tilelang2ascendc"
+            else verify_source_stage
+        )
+        try:
+            valid_stage, stage_reason, _stage_manifest = verifier(
+                status.workspace, state
+            )
+        except Exception as exc:
+            log.error(
+                "[resume] migration source-only snapshot verifier failed: %s",
+                exc,
+            )
+            return 2
+        if not valid_stage:
+            log.error(
+                "[resume] migration source-only snapshot validation failed: %s",
+                stage_reason,
+            )
+            return 2
+
     if dry_run:
         log.info("[resume] dry-run: would re-invoke orchestrator")
         return 0
+
+    if status.action == ResumeAction.NPUBENCH_CANDIDATE_REPAIR:
+        died_state = status.died_at_state or "await_worker"
+        marker = status.workspace / f".agent_died_at_{died_state}"
+        if marker.exists():
+            archived = status.workspace / (
+                f".agent_died_at_{died_state}.cleaned-{int(time.time())}"
+            )
+            marker.rename(archived)
+            log.info("[resume] archived known NPUBench marker → %s", archived.name)
+        try:
+            _prepare_npubench_candidate_repair(status.workspace)
+        except Exception as exc:
+            log.error("[resume] NPUBench candidate repair reset failed: %s", exc)
+            return 2
+        log.info(
+            "[resume] NPUBENCH_CANDIDATE_REPAIR: stale candidate archived; "
+            "re-invoking orchestrator"
+        )
 
     # P0r (2026-05-05): AUTO_RECOVERABLE = FW-transient — clear marker and
     # increment retry counter before re-invoking, so a recurring transient
@@ -517,7 +730,7 @@ def _try_buggy_abort_recovery(workspace: Path) -> Optional[ResumeStatus]:
     # fallback "return full text when no prefix matched". Verify by checking
     # the result starts with one of the canonical prefixes.
     canonical_prefixes = (
-        "→ orchestrator: done", "→ orchestrator: PARTIAL_PERSIST",
+        "→ orchestrator: done", "→ orchestrator: build-ready", "→ orchestrator: PARTIAL_PERSIST",
         "→ orchestrator: await_user_decision",
         "→ orchestrator: research_done", "→ orchestrator: research_partial",
         "→ orchestrator: research_blocked",

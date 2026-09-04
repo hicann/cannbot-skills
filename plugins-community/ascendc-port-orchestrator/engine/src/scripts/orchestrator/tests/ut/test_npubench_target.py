@@ -108,6 +108,41 @@ def test_tilelang_build_contract_has_separate_receipt_and_error_schema() -> None
     )
 
 
+def test_generic_build_contract_shares_the_receipt_protocol() -> None:
+    """The source_kind=None generic route reuses the source-agnostic receipt protocol."""
+    contract = _build_contract(None)
+    assert contract["schema"] == target.TILELANG2ASCENDC_BUILD_RECEIPT_SCHEMA
+    assert contract["receipt_path"] == target.TILELANG2ASCENDC_BUILD_RECEIPT_PATH
+
+    payload = _candidate_build_error_payload(
+        contract,
+        None,
+        "compile failed",
+        target={"container": "local"},
+        candidate_digest="a" * 64,
+    )
+    assert payload["source_kind"] is None
+    assert payload.get("candidate_independence_gate") is None
+
+    with pytest.raises(target.TargetTransportError):
+        _build_contract("port-aclnn-unknown")
+
+
+def test_generic_source_stage_digest_falls_back_to_state_digest(tmp_path: Path) -> None:
+    """port_a3_to_a5 durable state has no port_source; the state digest is the identity."""
+    from npubench.npubench_target import _source_stage_digest
+
+    digest = "b" * 64
+    assert _source_stage_digest(tmp_path, {"source_stage_digest": digest}, None) == digest
+    with pytest.raises(target.TargetTransportError):
+        _source_stage_digest(tmp_path, {}, None)
+    with pytest.raises(target.TargetTransportError):
+        _source_stage_digest(tmp_path, {"source_stage_digest": "not-a-sha"}, None)
+    # A source-bound route still requires its own port_source selection.
+    with pytest.raises(target.TargetTransportError):
+        _source_stage_digest(tmp_path, {"source_stage_digest": digest}, "port-aclnn-unknown")
+
+
 def test_direct_build_timeout_terminates_its_process_group(tmp_path: Path, monkeypatch) -> None:
     calls: list[object] = []
     killed: list[tuple[int, signal.Signals]] = []

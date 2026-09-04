@@ -31,6 +31,19 @@ WS="$(find_active_workspace)"
 ERRORS=0
 MESSAGES=""
 
+# 2026-08-26 (flash_attention_score_oc, npubench route): several legacy
+# CC-era checks below encode the old worker-owned verification contract.
+# For NPUKernelBench workspaces the O5 runner owns precision/performance
+# verification.json fields and the worker's turn legitimately revisits
+# analysis.md AFTER kernel edits (phase A/B interleaved), so the mtime
+# ordering and the precision.status schema checks are wrong for them.
+# Detect the provider by the frozen bundle marker; these checks keep their
+# full weight for every other workspace.
+NPUBENCH_WS=""
+if [ -d "$WS/reference_inputs/npubench" ]; then
+    NPUBENCH_WS=1
+fi
+
 # --- Check 1: analysis.md (if present) ---
 ANALYSIS="$WS/analysis.md"
 if [ -f "$ANALYSIS" ]; then
@@ -44,7 +57,7 @@ if [ -f "$ANALYSIS" ]; then
     done
     for field in "algorithm_family:" "choice:" "dtypes:"; do
         if ! grep -qE "^- *$field" "$ANALYSIS" 2>/dev/null; then
-            MESSAGES="$MESSAGES\n  - analysis.md missing field: $field"
+            MESSAGES="$MESSAGES\n  - analysis.md missing field: $field  (expected bullet line form: \`- $field <value>\`; a \`## $field\` heading does NOT count)"
             ERRORS=$((ERRORS + 1))
         fi
     done
@@ -72,7 +85,9 @@ fi
 # Caught 2026-04-24 (moefinalize-kw-1 regression): earlier version concatenated a
 # `-newer "$ANALYSIS" -prune` find that emitted the (correct) newer-files list as
 # STALE, forcing workers to equalize all mtimes via explicit touch. Bug removed.
-if [ -f "$ANALYSIS" ] && [ -d "$KERNEL_DIR" ]; then
+# npubench workspace: skipped (worker turn revisits analysis.md legitimately;
+# kernel-exists-without-analysis is still enforced by Check 1b).
+if [ -z "$NPUBENCH_WS" ] && [ -f "$ANALYSIS" ] && [ -d "$KERNEL_DIR" ]; then
     ANALYSIS_MTIME=$(stat -c%Y "$ANALYSIS" 2>/dev/null || echo 0)
     STALE_KERNEL=$(find "$KERNEL_DIR" -maxdepth 2 \( -name "*.h" -o -name "*.cpp" -o -name "*.cc" \) 2>/dev/null \
                    | while read f; do
@@ -144,7 +159,7 @@ fi
 
 # --- Check 3: verification.json (if present) ---
 VJSON="$WS/verification.json"
-if [ -f "$VJSON" ]; then
+if [ -f "$VJSON" ] && [ -z "$NPUBENCH_WS" ]; then
     if ! VERR=$(python3 - "$VJSON" 2>&1 <<'PY'
 import json, sys
 p = sys.argv[1]

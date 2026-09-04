@@ -13,12 +13,16 @@ Run: python3 -m pytest src/scripts/orchestrator/tests/test_orchestrator.py -v
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent))
 import orchestrator as orch  # noqa: E402
+
+_acquire_workspace_singleton_lock = getattr(orch, "_acquire_workspace_singleton_lock")
+_ORCHESTRATOR_LOCK_FILENAME = getattr(orch, "_ORCHESTRATOR_LOCK_FILENAME")
 
 
 def test_extract_canonical_handoff_done_at_end():
@@ -159,10 +163,11 @@ def test_p0s_arrow_wrapper_with_inner_aog_returns_inner():
     The arrow wrapper is not a canonical arrow form (not done/PARTIAL_PERSIST/etc),
     but the inner @aog-X reference IS canonical — return it.
     """
-    text = """\
-some output...
-→ orchestrator: handoff to @aog-kernel-optimizer per V3.8.4 routing (precision PASS + det PASS + perf 0.19× < 0.6× threshold).
-"""
+    text = (
+        "some output...\n"
+        "→ orchestrator: handoff to @aog-kernel-optimizer per V3.8.4 routing "
+        "(precision PASS + det PASS + perf 0.19× < 0.6× threshold).\n"
+    )
     h = orch.extract_canonical_handoff(text)
     assert h.startswith("@aog-kernel-optimizer"), \
         f"Expected inner @aog-kernel-optimizer extracted, got {h!r}"
@@ -482,3 +487,22 @@ def test_p135lf_a2_fallback_unchanged(monkeypatch):
     from orchestrator import _detect_max_lane
     result = _detect_max_lane()
     assert result == 4, f"P135.LF: A2 fallback must remain 4, got {result}"
+
+
+def test_workspace_singleton_lock_rejects_second_holder(tmp_path):
+    """The first flock holder owns the workspace; a concurrent starter exits 78."""
+    assert _acquire_workspace_singleton_lock(tmp_path) == 0
+    # flock conflicts per-fd even within one process, so a second acquire on
+    # the same workspace simulates a competing orchestrator process.
+    assert _acquire_workspace_singleton_lock(tmp_path) == 78
+    lock = tmp_path / _ORCHESTRATOR_LOCK_FILENAME
+    assert lock.is_file()
+    assert f"pid={os.getpid()}" in lock.read_text(encoding="utf-8")
+
+
+def test_workspace_singleton_lock_is_per_workspace(tmp_path):
+    """Different workspaces never block each other."""
+    other = tmp_path / "other"
+    other.mkdir()
+    assert _acquire_workspace_singleton_lock(tmp_path) == 0
+    assert _acquire_workspace_singleton_lock(other) == 0

@@ -30,6 +30,12 @@ import pytest
 INIT = Path(__file__).resolve().parents[4] / "init.sh"
 _BASH = shutil.which("bash")
 _ENTRY_SKILLS = ("ascendc-cross-gen-port", "ascendc-backward-gen")
+# Harness/session variables the shared launcher must re-derive itself; a test
+# env inherits none of them from the developer's own shell.
+_INHERITED_HARNESS_ENV = frozenset({
+    "CLAUDE_CONFIG_DIR", "AOG_HARNESS_BACKEND", "OPENCODE", "OPENCODE_PID",
+    "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+})
 
 
 def _bash() -> str:
@@ -171,8 +177,8 @@ def test_health_check_accepts_installed_links_or_marketplace_dependencies():
     assert '[ -e "$CONFIG_ROOT/skills/$want" ] || marketplace_skill_present "$want"' in s
 
 
-def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, dict[str, str]]:
-    """Build a faithful cache layout that is deliberately outside a checkout."""
+def _copy_packaged_plugin(tmp: Path) -> Path:
+    """Copy the packaged plugin surface into a cache dir outside any checkout."""
     plugin = tmp / "cache" / "cannbot" / "ascendc-port-orchestrator" / "0.1.4"
     plugin.mkdir(parents=True)
     src = INIT.parent
@@ -186,25 +192,66 @@ def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, di
                 ignore=shutil.ignore_patterns("output", "__pycache__", "workspace"),
             )
 
+    # The O0 safety contract is part of the packaged plugin, not an optional
+    # checkout-only resource.  Keep the fixture representative of a complete
+    # marketplace payload while allowing a dedicated test below to remove one.
+    for rel in (
+        "kb/shared/ANTI_PRESSURE_PROTOCOLS.md",
+        "kb/KB_INDEX.md",
+        "kb/target/ascendc/OPERATIONAL_KNOWLEDGE.md",
+    ):
+        src_file = src / rel
+        dst_file = plugin / rel
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_file, dst_file)
+
     # workspace contains run artefacts, but its template is part of the product.
     ws = plugin / "engine" / "workspace"
     ws.mkdir(parents=True, exist_ok=True)
     tmpl = src / "engine" / "workspace" / ".ascendc_env.template"
     assert tmpl.is_file(), f"env template missing at {tmpl} — fixture cannot be faithful"
     shutil.copy2(tmpl, ws / ".ascendc_env.template")
+    return plugin
 
+
+def _seed_stale_direct_install_settings(plugin: Path) -> None:
+    """Simulate a checkout-local direct-install artifact left in the payload.
+
+    The real file contains absolute paths; the marketplace installer must
+    discard the entire runtime-only surface.
+    """
+    stale_settings = plugin / "engine" / ".claude" / "settings.json"
+    stale_settings.parent.mkdir(parents=True, exist_ok=True)
+    stale_settings.write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
+            "type": "command",
+            "command": "python3 /Users/junming/stale/workflow_critic.py",
+        }]}]}}),
+        encoding="utf-8",
+    )
+
+
+def _seed_dependency_packages(ccd: Path) -> None:
+    """Materialise the companion skill packages the installer depends on."""
+    packages = {
+        "ascendc-port-orchestrator-shared-skills": _whitelist("SHARED_SKILLS"),
+        "cannbot-knowledge-consumer-skills": _whitelist("KNOWLEDGE_SKILLS"),
+    }
+    for package, skills in packages.items():
+        comp = ccd / "plugins" / "cache" / "cannbot" / package / "1.0.0"
+        for name in skills:
+            skill_dir = comp / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+
+
+def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, dict[str, str]]:
+    """Build a faithful cache layout that is deliberately outside a checkout."""
+    plugin = _copy_packaged_plugin(tmp)
+    _seed_stale_direct_install_settings(plugin)
     ccd = tmp / "ccd"
     if with_dependencies:
-        packages = {
-            "ascendc-port-orchestrator-shared-skills": _whitelist("SHARED_SKILLS"),
-            "cannbot-knowledge-consumer-skills": _whitelist("KNOWLEDGE_SKILLS"),
-        }
-        for package, skills in packages.items():
-            comp = ccd / "plugins" / "cache" / "cannbot" / package / "1.0.0"
-            for name in skills:
-                skill_dir = comp / name
-                skill_dir.mkdir(parents=True, exist_ok=True)
-                (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+        _seed_dependency_packages(ccd)
     ccd.mkdir(parents=True, exist_ok=True)
     env = dict(
         os.environ,
@@ -242,6 +289,11 @@ def test_installer_completes_from_a_marketplace_layout():
             cache_root = Path(env["CLAUDE_CONFIG_DIR"]) / "plugins" / "cache"
             assert installed.resolve().is_relative_to(cache_root.resolve())
         assert (plugin / "engine" / "workspace" / ".ascendc_env").is_file()
+        # A copied developer checkout may carry the gitignored direct-checkout
+        # settings surface.  Marketplace installs must remove it so Claude does
+        # not load absolute hook paths from the source machine instead of the
+        # plugin-native ${CLAUDE_PLUGIN_ROOT} hooks.json.
+        assert not (plugin / "engine" / ".claude").exists()
         manifest = json.loads(
             (Path(env["CLAUDE_CONFIG_DIR"]) / "cannbot-manifest.json").read_text()
         )
@@ -264,6 +316,17 @@ def test_installer_completes_from_a_marketplace_layout():
             assert Path(resolved.stdout.strip()) == (plugin / "engine").resolve()
 
 
+def test_incomplete_marketplace_payload_fails_before_health_report():
+    """Missing O0 KB guards must fail at install time, not on first agent run."""
+    with tempfile.TemporaryDirectory() as t:
+        plugin, env = _fake_marketplace_tree(Path(t), with_dependencies=True)
+        (plugin / "kb" / "shared" / "ANTI_PRESSURE_PROTOCOLS.md").unlink()
+        r = _run(plugin, env)
+        assert r.returncode != 0
+        assert "mandatory O0 KB" in r.stdout
+        assert "kb/shared/ANTI_PRESSURE_PROTOCOLS.md" in r.stdout
+
+
 def test_opencode_marketplace_cache_fails_loudly_without_reading_claude_dependencies():
     """OpenCode's no-Claude contract is explicit until its own dependency bundle exists."""
     with tempfile.TemporaryDirectory() as t:
@@ -276,7 +339,7 @@ def test_opencode_marketplace_cache_fails_loudly_without_reading_claude_dependen
 
 @pytest.mark.parametrize(
     ("skill_name", "mode"),
-    (("ascendc-cross-gen-port", "port-a3"), ("ascendc-backward-gen", "backward")),
+    (("ascendc-cross-gen-port", "port-a3-ops"), ("ascendc-backward-gen", "backward")),
 )
 def test_entry_skill_delegates_to_the_shared_launcher(skill_name, mode):
     """The entry skill must hand off to the shared launcher, not re-derive the launch.
@@ -339,6 +402,7 @@ def _fake_launcher_tree(root: Path) -> tuple[Path, Path]:
         "import os, sys\n"
         "print('BACKEND=' + os.environ.get('AOG_HARNESS_BACKEND', ''))\n"
         "print('CCDIR=' + os.environ.get('CLAUDE_CONFIG_DIR', ''))\n"
+        "print('ENVFILE=' + os.environ.get('ASCENDC_ENV_PATH', ''))\n"
         "print('ARGV=' + ' '.join(sys.argv[1:]))\n"
     )
     scripts.mkdir(parents=True)
@@ -350,7 +414,13 @@ def _fake_launcher_tree(root: Path) -> tuple[Path, Path]:
     return plugin, engine
 
 
-def _run_launcher(plugin: Path, harness: str, home: Path) -> dict:
+def _run_launcher(
+    plugin: Path,
+    harness: str,
+    home: Path,
+    reference_args: list[str] | None = None,
+    resume_op: str | None = None,
+) -> dict:
     # Cleared so the launcher's own exports are the only source of these: an inherited
     # CLAUDE_CONFIG_DIR would make a launcher that never sets it look like one that does,
     # and inherited harness/host fingerprints would decide the backend for it.
@@ -358,11 +428,20 @@ def _run_launcher(plugin: Path, harness: str, home: Path) -> dict:
                 "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
     env = {k: v for k, v in os.environ.items() if k not in _cleared}
     env["HOME"] = str(home)
+    command = [
+        _bash(), str(plugin / "scripts" / "launch_orchestrator.sh"),
+        "--skill-base", str(plugin / "skills" / "ascendc-cross-gen-port"),
+        "--lane", "3",
+        "--harness", harness,
+    ]
+    if resume_op is None:
+        command.extend(["--mode", "port-a3-ops", "--source", "/tmp/src-op"])
+    else:
+        command.extend(["--resume", resume_op])
+    if reference_args:
+        command.extend(reference_args)
     proc = subprocess.run(
-        [_bash(), str(plugin / "scripts" / "launch_orchestrator.sh"),
-         "--skill-base", str(plugin / "skills" / "ascendc-cross-gen-port"),
-         "--mode", "port-a3", "--source", "/tmp/src-op", "--lane", "3",
-         "--harness", harness],
+        command,
         capture_output=True, text=True, env=env, timeout=120,
     )
     assert proc.returncode == 0, f"launcher failed: {proc.stdout}\n{proc.stderr}"
@@ -371,7 +450,7 @@ def _run_launcher(plugin: Path, harness: str, home: Path) -> dict:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        if key in ("BACKEND", "CCDIR", "ARGV"):
+        if key in ("BACKEND", "CCDIR", "ENVFILE", "ARGV"):
             observed[key] = value
     return observed
 
@@ -396,13 +475,139 @@ def test_shared_launcher_actually_exports_what_the_orchestrator_reads():
             "launcher did not export CLAUDE_CONFIG_DIR, so a spawned worker falls back to "
             f"whatever ~/.claude happens to hold: {cc['CCDIR']!r}"
         )
-        assert cc["ARGV"] == "--port-a3 /tmp/src-op --lane 3"
+        assert cc["ARGV"] == "--port-a3-ops /tmp/src-op --lane 3"
 
         oc = _run_launcher(plugin, "opencode", home)
         assert oc["BACKEND"] == "opencode", (
             "launcher did not export AOG_HARNESS_BACKEND=opencode; the dispatch sites bind "
             "the backend at import time and would silently spawn `claude` instead"
         )
+
+
+def test_shared_launcher_pins_plugin_workspace_env_over_stale_process_override():
+    """A stale host env file must not redirect a marketplace run to SSH."""
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t)
+        plugin, engine = _fake_launcher_tree(root)
+        home = root / "home"
+        (home / ".claude").mkdir(parents=True)
+        env = {k: v for k, v in os.environ.items() if k not in _INHERITED_HARNESS_ENV}
+        env.update({
+            "HOME": str(home),
+            "ASCENDC_ENV_PATH": "/tmp/stale-host-config",
+            "ASCENDC_ENV_FILE": "/tmp/stale-host-config",
+        })
+        proc = subprocess.run(
+            [
+                _bash(), str(plugin / "scripts" / "launch_orchestrator.sh"),
+                "--skill-base", str(plugin / "skills" / "ascendc-cross-gen-port"),
+                "--mode", "port-a3-ops", "--source", "/tmp/src-op", "--lane", "0",
+                "--harness", "claude_code",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+        assert proc.returncode == 0, f"launcher failed: {proc.stdout}\n{proc.stderr}"
+        env_lines = [line for line in proc.stdout.splitlines() if line.startswith("ENVFILE=")]
+        assert env_lines == [f"ENVFILE={engine / 'workspace' / '.ascendc_env'}"]
+
+
+def test_shared_launcher_passes_the_native_npubench_pair():
+    """Native old-format task/root flags must survive the common entry layer."""
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t)
+        plugin, _ = _fake_launcher_tree(root)
+        home = root / "home"
+        (home / ".claude").mkdir(parents=True)
+        task_root = root / "inputs" / "npu_benchmark"
+        task = task_root / "level1" / "3_Add.py"
+        observed = _run_launcher(
+            plugin,
+            "claude_code",
+            home,
+            [
+                "--reference-source", "npubench",
+                "--npubench-task", str(task),
+                "--npubench-root", str(task_root),
+            ],
+        )
+
+        assert observed["ARGV"] == (
+            "--port-a3-ops /tmp/src-op --lane 3 "
+            "--reference-source npubench "
+            f"--npubench-task {task} --npubench-root {task_root}"
+        )
+
+
+def test_shared_launcher_refuses_npubench_without_its_task_before_launch():
+    proc = subprocess.run(
+        [
+            _bash(), str(INIT.parent / "scripts" / "launch_orchestrator.sh"),
+            "--skill-base", "/tmp/irrelevant-skill-base",
+            "--mode", "port-a3-ops", "--source", "/tmp/irrelevant-source",
+            "--reference-source", "npubench",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2
+    assert "requires --npubench-task" in proc.stderr
+
+
+def test_shared_launcher_passes_resume_through_as_a_lifecycle_command():
+    """--resume is an engine lifecycle command, not a new-run modifier.
+
+    The engine CLI rejects ``--resume`` combined with ``--port-a3-ops`` (its operand
+    is the scoped workspace name, not the source path), so the launcher must
+    switch the invocation form instead of appending the flag to a new run.
+    """
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t)
+        plugin, _ = _fake_launcher_tree(root)
+        home = root / "home"
+        (home / ".claude").mkdir(parents=True)
+
+        observed = _run_launcher(plugin, "claude_code", home, resume_op="3_Add")
+
+        assert observed["ARGV"] == "--resume 3_Add --lane 3"
+
+
+def test_shared_launcher_refuses_resume_with_cold_start_before_launch():
+    """The engine treats --resume and --cold-start as mutually exclusive."""
+    proc = subprocess.run(
+        [
+            _bash(), str(INIT.parent / "scripts" / "launch_orchestrator.sh"),
+            "--skill-base", "/tmp/irrelevant-skill-base",
+            "--resume", "3_Add", "--cold-start",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2
+    assert "--resume and --cold-start are mutually exclusive" in proc.stderr
+
+
+def test_shared_launcher_refuses_resume_with_creation_arguments_before_launch():
+    """A resume must fail closed instead of silently dropping --mode/--source."""
+    proc = subprocess.run(
+        [
+            _bash(), str(INIT.parent / "scripts" / "launch_orchestrator.sh"),
+            "--skill-base", "/tmp/irrelevant-skill-base",
+            "--resume", "3_Add", "--mode", "port-a3-ops", "--source", "/tmp/src-op",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2
+    assert "--resume cannot be combined with" in proc.stderr
 
 
 def test_missing_marketplace_dependencies_fails_loudly():

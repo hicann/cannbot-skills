@@ -54,6 +54,21 @@ def _write_audit(ws: Path, body: str) -> None:
     (ws / "audit_self_critic_post_worker.md").write_text(body)
 
 
+def test_unparseable_verdict_is_non_blocking(tmp_path):
+    """Audit M4 (2026-08-22): an unparseable verdict wording is an
+    ambiguous harness-authored condition, not fraud — the gate warns and
+    continues instead of hard-failing a precision-PASS candidate.
+    """
+    ws = tmp_path / "op_m4"
+    _write_audit(ws, (
+        "# Post-Worker Self-Critic Audit\n\n"
+        "## Verdict\n\n**PASSED** — all checks green.\n\n"
+        "## Findings\n\n- none\n"
+    ))
+    err = getattr(fp, '_check_post_worker_audit')(ws, _vj())
+    assert _VERDICT_BLOCK not in (err or "")
+
+
 def test_partial_plus_waiver_bolded_passes(tmp_path):
     """THE OBSERVED BUG: the self-critic's real format — bolded
     "PARTIAL + waiver**". Pre-fix this was blocked; post-fix recognized.

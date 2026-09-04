@@ -75,9 +75,9 @@ PYTHON_WRAPPER_PATTERNS: list[tuple[str, str]] = [
     (
         r'\btorch\.(softmax|matmul|bmm|sort|topk|cumsum|histc|nonzero|gather|'
         r'scatter|scatter_add|scatter_reduce|argsort|nll_loss|cross_entropy|'
-        r'layer_norm|rms_norm)\s*\(',
+        r'layer_norm|rms_norm|add|sub|mul|div)\s*\(',
         "torch.<compute>() call (delegating to torch top-level)"),
-    (r'\.(softmax|matmul|bmm|sort|topk|cumsum|histc|nonzero|scatter_add|scatter_reduce)\s*\(',
+    (r'\.(softmax|matmul|bmm|sort|topk|cumsum|histc|nonzero|scatter_add|scatter_reduce|add|sub|mul|div)\s*\(',
         "tensor.<compute>() method (delegating computation)"),
     (r'subprocess\.(run|call|check_output|Popen)\s*\([^)]*aclnn',
         "subprocess invoking aclnn binary"),
@@ -101,7 +101,15 @@ CPP_PATTERNS: list[tuple[str, str]] = [
     (r'\.softmax\s*\(', "tensor.softmax()"),
     (r'\.matmul\s*\(', "tensor.matmul()"),
     (r'\.bmm\s*\(', "tensor.bmm()"),
-    # Top-level torch::* compute
+    # Host fallback: moving a result back to CPU in a generated C++ surface
+    # is a direct escape from the AscendC-kernel requirement.  Keep this
+    # narrow: ordinary `.to(device)` remains a legitimate placement operation.
+    (r'\.cpu\s*\(\s*\)', "tensor.cpu() host fallback in C++"),
+    (r'\.to\s*\(\s*(?:at|torch)::kCPU\b',
+        "tensor.to(...::kCPU) host fallback in C++"),
+    # Keep the historical explicit symbols too: the generic namespace-call
+    # guard below covers normal calls, while these still catch a function
+    # pointer/reference form such as `auto f = torch::sort; f(input)`.
     (r'\btorch::pow\b', "torch::pow"),
     (r'\btorch::matmul\b', "torch::matmul"),
     (r'\btorch::sum\b', "torch::sum"),
@@ -123,6 +131,27 @@ CPP_PATTERNS: list[tuple[str, str]] = [
     (r'\bacl_op_\w+\s*\(', "acl_op_* call"),
     (r'\baclrtLaunchKernel\s*\(', "aclrtLaunchKernel (launching pre-built CANN kernel)"),
 ]
+
+# A C++ wrapper legitimately needs allocations and tensor metadata while it
+# marshals arguments to a custom AscendC kernel.  Everything else in the
+# top-level `at::` / `torch::` function namespaces is treated as a likely
+# framework-compute delegation.  This is deliberately a small, explicit list:
+# adding a compute operator here would make the static gate silent again.
+CPP_ALLOWED_NAMESPACE_CALLS = frozenset({
+    "empty", "empty_like", "empty_strided",
+    "zeros", "zeros_like", "ones", "ones_like", "full", "full_like",
+    "from_blob",
+    "Tensor", "TensorOptions",
+    "device", "dtype", "scalar_type", "layout", "requires_grad",
+    "memory_format", "pinned_memory",
+})
+
+CPP_NAMESPACE_CALL_RE = re.compile(
+    r"\b(?P<namespace>at|torch)::(?P<name>[A-Za-z_]\w*)\s*\("
+)
+ATEN_OPS_INCLUDE_RE = re.compile(
+    r'^\s*#\s*include\s*[<"]ATen/ops/(?P<name>[A-Za-z_]\w*)\.h[>"]'
+)
 
 # Lines / files we exempt entirely
 EXEMPT_LINE_PREFIX = (
@@ -240,12 +269,44 @@ def scan_cpp(path: Path, is_pybind: bool) -> list[dict]:
             if "*/" in raw:
                 in_block_comment = False
             continue
+
+        # Preprocessor lines are normally exempt below, but an operator
+        # specific ATen header is itself strong evidence that this wrapper is
+        # delegating its core compute.  The anchored expression only accepts a
+        # real `#include`; comments and string literals cannot match it.
+        aten_include = ATEN_OPS_INCLUDE_RE.match(raw)
+        if aten_include:
+            name = aten_include.group("name")
+            if name not in CPP_ALLOWED_NAMESPACE_CALLS:
+                hits.append({
+                    "file": str(path),
+                    "line": lineno,
+                    "desc": f"ATen/ops/{name}.h include (framework compute delegation)",
+                    "text": raw.strip()[:160],
+                })
+            continue
         if _is_exempt(raw):
             continue
         if _has_allowlist_token(raw):
             continue
         cleaned = _strip_string_literals(raw)
         if not cleaned.strip():
+            continue
+
+        # Catch an unlisted top-level ATen/PyTorch operation rather than
+        # trying to maintain an inevitably incomplete operator blacklist.
+        # The explicit allowlist above admits only allocation/metadata calls
+        # required by a normal custom-kernel host bridge.
+        namespace_call = CPP_NAMESPACE_CALL_RE.search(cleaned)
+        if namespace_call and namespace_call.group("name") not in CPP_ALLOWED_NAMESPACE_CALLS:
+            namespace = namespace_call.group("namespace")
+            name = namespace_call.group("name")
+            hits.append({
+                "file": str(path),
+                "line": lineno,
+                "desc": f"{namespace}::{name}() call (framework compute delegation)",
+                "text": raw.strip()[:160],
+            })
             continue
         for pat, desc in CPP_PATTERNS:
             if re.search(pat, cleaned):
@@ -470,7 +531,12 @@ def scan_op_workspace(ws: Path) -> dict:
     # legacy path are unchanged.
     declared_cpp: tuple[str, ...] = ()
     if _plugin is not None:
-        declared_cpp = tuple(_plugin.kernel_cpp_dirs())
+        workspace_aware = getattr(_plugin, "kernel_cpp_dirs_for_workspace", None)
+        declared_cpp = tuple(
+            workspace_aware(ws)
+            if callable(workspace_aware)
+            else _plugin.kernel_cpp_dirs()
+        )
     # Dedup, preserve order; always include the historical `kernel/`.
     scan_dir_names = list(dict.fromkeys([*declared_cpp, "kernel"]))
 

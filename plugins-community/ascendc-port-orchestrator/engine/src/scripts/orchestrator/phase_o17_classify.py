@@ -126,7 +126,7 @@ def _read_cached(workspace: Path) -> Optional[OpClassification]:
             op=data.get("op", _strip_backend_suffix(workspace.name)),
             op_class_tags=data.get("op_class_tags", []),
             kb_recommendations=data.get("kb_recommendations", []),
-            rationale=data.get("rationale", "CLI flag --port-a3 classification"),
+            rationale=data.get("rationale", "CLI flag --port-a3-ops classification"),
             source_signatures_observed=data.get("source_signatures_observed", []),
             source_sha256=data.get("source_sha256", "cli_flag_port_a3"),
             schema_version=data.get("schema_version", 2),

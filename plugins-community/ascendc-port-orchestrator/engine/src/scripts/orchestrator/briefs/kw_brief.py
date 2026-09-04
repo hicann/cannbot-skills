@@ -36,6 +36,7 @@ The four FA backward symbols + the port_a3 orchestrator are re-imported below so
 refactor; golden-locked).
 """
 from __future__ import annotations
+import json
 import logging
 
 from pathlib import Path
@@ -71,10 +72,282 @@ from briefs.kw_brief_fa import (  # noqa: F401
     _fa_class_backward_multilaunch_block,
     _fa_ge_host_gen_block,
 )
-from briefs.kw_brief_port_a3 import _port_a3_phase_instructions_block  # noqa: F401
+from briefs.kw_brief_port_a3 import (  # noqa: F401
+    _npubench_phase_instructions_block,
+    _port_a3_phase_instructions_block,
+)
 # `_port_a3_cube_class_mix_block` is imported directly by
 # test_port_a3_cube_mix_brief.py — keep it on the public `briefs.kw_brief` surface.
 from briefs.kw_brief_pa3_phases import _port_a3_cube_class_mix_block  # noqa: F401
+
+
+def _workspace_uses_npubench_reference(workspace: Path) -> bool:
+    """Return whether this is an explicitly staged NPUKernelBench workspace.
+
+    A missing state remains a compatibility case for historical prompt tests.
+    Once a state exists, use the strict shared registry instead of falling back
+    to a live-provider prompt for a malformed source discriminator.
+    """
+    if not (Path(workspace) / ".opgen_state.json").exists():
+        return False
+    from reference_source import uses_npubench_reference
+    try:
+        return uses_npubench_reference(workspace)
+    except Exception:
+        # A legacy/backward fixture may carry only ``opgen_mode`` and no
+        # migration provider binding.  That is not an NPUBench workspace;
+        # keep the brief on the historical path while the strict resolver
+        # remains fail-closed for actual provider dispatch.
+        return False
+
+
+def _npubench_rollback_context_block(workspace: Path) -> str:
+    """Render only the NPUBench candidate-repair history for its next worker.
+
+    The generic rollback context contains historical pass_a/pass_b guidance
+    for legacy providers.  NPUBench must receive the exact persisted reason
+    without importing that ownership contract into its isolated brief.
+    """
+    history = Path(workspace) / ".rollback_history.jsonl"
+    if not history.is_file():
+        return ""
+    try:
+        entries = [
+            json.loads(line)
+            for line in history.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return ""
+    if not entries:
+        return ""
+    last = entries[-1]
+    if last.get("gate") != "phase_o5_npubench_candidate_contract":
+        return ""
+    reason = last.get("reason")
+    if not isinstance(reason, str) or not reason:
+        return ""
+    return f"""# CRITICAL: Previous NPUBench candidate rejected by finalize
+
+The prior controlled O5 build rejected the authored candidate. Repair the
+candidate source/build contract in this workspace, then hand off only when the
+candidate is ready for the harness-owned NPUBench evaluation.
+
+**Gate**: `{last.get('gate')}`
+**Signature**: `{last.get('signature', '?')}`
+**Exact persisted reason**:
+
+{reason}
+
+Do not create worker-owned precision, performance, or evaluator evidence; do
+not switch this provider to a legacy verification contract.
+"""
+
+
+def _user_decision_visibility_block(op: str, workspace: Path) -> str:
+    """Surface the owner's user decision to the kernel worker (P1-3, 2026-08-28).
+
+    user_decision.md is the owner's steering input routed via
+    await_user_decision.  Only the researcher brief referenced it, so a worker
+    whose repair mandate came from a user decision had to rediscover it from
+    engine source mtimes (flash_attention_score cc kw-16).  Visibility only:
+    the consumption semantics (rename to .user_decision_consumed.md on
+    route-apply, P0ff extract kb_draft_from_user_decision.md) are unchanged.
+    Returns "" when no decision artifact exists so briefs stay byte-identical.
+    """
+    if (Path(workspace) / "user_decision.md").is_file():
+        return (
+            "# USER DECISION (present — read first)\n\n"
+            f"`workspace/{op}/user_decision.md` exists — read it before planning. "
+            "It is the owner's explicit steering for this op (repair mandate, "
+            "budget, routing). Do not modify, rename, or delete it; the "
+            "orchestrator owns its consumption."
+        )
+    refs: list[str] = []
+    if (Path(workspace) / ".user_decision_consumed.md").is_file():
+        refs.append(
+            f"`workspace/{op}/.user_decision_consumed.md` — the consumed decision"
+        )
+    if (Path(workspace) / "kb_draft_from_user_decision.md").is_file():
+        refs.append(
+            f"`workspace/{op}/kb_draft_from_user_decision.md` — its P0ff "
+            "knowledge-draft extract"
+        )
+    if not refs:
+        return ""
+    return (
+        "# USER DECISION (consumed — read-only reference)\n\n"
+        "A user decision was applied earlier and consumed by the orchestrator. "
+        "Read-only context for your current mandate:\n"
+        + "\n".join(f"- {ref} (read-only)" for ref in refs)
+        + "\nDo not modify these files; consumption semantics are orchestrator-owned."
+    )
+
+
+def _npubench_replay_policy_block() -> str:
+    """Stream-log replay policy for repair respawns (P1-2, 2026-08-28).
+
+    DSH+v4pro §4.a 裁决: replaying bytes from the worker's OWN stream logs is
+    not an answer-gate bypass (those session records were never sealed), but
+    reading the sealed `.opgen_backups` archive remains forbidden.
+    """
+    return """# CANDIDATE RE-AUTHORING POLICY (answer gate)
+
+- A repair reset archives stale candidate outputs out of this workspace; the
+  `.opgen_backups` archive stays SEALED — never read or restore from it.
+- Replaying bytes from your OWN stream logs (including prior spawns of this
+  op, e.g. the `*_stream_log_aog-kernel-worker_*.jsonl` left in the workspace)
+  is ALLOWED — those are your own session records. Conditions: (i) declare the
+  replay source and scope in PROGRESS.md, (ii) re-verify the restored tree's
+  SHA-256 and record the match (e.g. "13/13 SHA256 MATCH") in PROGRESS.md,
+  (iii) the replayed tree still faces every structural / independence gate.
+"""
+
+
+def _npubench_handoff_schema_block() -> str:
+    """Worker-facing evidence boundary for the provider-owned O5 contract."""
+    return """# NPUKERNELBENCH EVIDENCE OWNERSHIP
+
+The worker owns the candidate implementation, build provenance, documentation,
+and truthful handoff. The orchestrator-owned `npubench_runner` owns final
+precision counts, performance results, profiler artifacts, and the provider
+fields in `verification.json`.
+
+- Do not create or overwrite NPUKernelBench precision/performance evidence.
+- Do not create a legacy worker-owned pass-runner substitute evaluator.
+- Keep `model_new_ascendc.py` and the built target artifacts current; a source
+  or candidate edit invalidates earlier runner evidence.
+- Before declaring the candidate build-ready, record current-workspace build
+  lineage in `verification.json.build_evidence.compiled_provenance`. This is
+  mandatory for a final PASS: include workspace source, deployed source,
+  object, shared library, and their SHA-256 values. Never assert a PASS
+  verdict yourself.
+"""
+
+
+def _npubench_exit_handoff_block() -> str:
+    """Avoid historical worker-owned verifier requirements for NPUBench."""
+    return """# EXIT HANDOFF OPTIONS (NPUKernelBench)
+
+Write the final handoff line to the PROGRESS.md tail only. Do not write
+`state_transitions.jsonl`.
+
+- `→ orchestrator: done — candidate build is ready for NPUKernelBench harness evaluation`
+  means only that the target candidate is ready; it is not a precision or
+  performance PASS claim.
+- `→ orchestrator: hold — <reason>` is the canonical handoff when your
+  mandate requires NO code change this spawn (e.g. you are waiting on
+  operator-supplied evidence or a pending external probe). Use this EXACT
+  prefix: the router prefix-matches the keyword, so variants like
+  `probe-pending hold` are not recognized. `hold` routes to
+  await_user_decision with your reason preserved.
+- `@aog-kernel-optimizer` is appropriate only after the harness feedback is
+  available and identifies a performance issue.
+- `@aog-precision-probe` is appropriate only after the harness feedback is
+  available and identifies a correctness issue.
+- Do **not** emit `→ orchestrator: await_user_decision` for an unavailable A5,
+  missing CANN toolchain, or target-side capability issue. The worker graybox
+  is not the target authority: report candidate readiness honestly, and let the
+  controlled target/O5 path persist the target failure and terminate or retry
+  according to the orchestrator policy. A worker must never turn an environment
+  limitation into a user-decision handoff.
+
+- **Never emit `→ orchestrator: build stuck` (or any INFRA_BASELINE_VIOLATED /
+  INFRA_TRANSIENT_RETRY_EXHAUSTED variant) for a graybox build attempt.** The
+  graybox has no CANN toolchain BY DESIGN — there is nothing to build there.
+  This is expected, never an infra violation, never a user-decision excuse.
+  Sandbox build authority = static checks only (e.g. the plugin AscendC static
+  check); the O5 target runner owns build, snapshot, and NPUKernelBench
+  evaluation. The ONLY correct readiness handoff is:
+  `→ orchestrator: build-ready — <op> candidate authored; static check N/N PASS; build owned by O5 target runner`
+
+The verdict line must be the last non-empty line and contain exactly one
+handoff token. The orchestrator records the routing transition.
+"""
+
+
+def _worker_brief_tail_sections(iter_cap_remaining: int) -> list[str]:
+    """Return the trailing G1-marker and iteration-budget sections.
+
+    Shared verbatim by the legacy and NPUKernelBench worker briefs so both
+    keep byte-identical tails.
+    """
+    return [
+        "",
+        "# G1 MARKER\n\n"
+        "Write `.kernel_worker_active` marker at workspace start; remove on exit.\n"
+        "This marker prevents concurrent kernel-edit conflicts when probe/optimizer "
+        "also spawn.\n",
+        "",
+        f"# ITER BUDGET\n\niter_cap_remaining = {iter_cap_remaining}. "
+        "If you exhaust this, exit with handoff to orchestrator "
+        "(NOT keep iterating).",
+    ]
+
+
+def _build_npubench_worker_brief(
+    op: str,
+    workspace: Path,
+    *,
+    lane: int,
+    slug: str,
+    iter_cap_remaining: int,
+    env: AscendCEnv,
+    directive_text: Optional[str],
+) -> str:
+    """Build the provider-isolated worker brief for an old-format task.
+
+    This must stay an early return from ``build_worker_brief``.  Adding the
+    ordinary port-A3 outer sections back around it would reintroduce a
+    conflicting live-source oracle, legacy runner artifacts, and worker-owned
+    performance claims.
+    """
+    directive_block = ""
+    if directive_text:
+        directive_block = (
+            "# PRIOR ITERATION DIRECTIVE\n\n"
+            f"{directive_text}\n\n"
+            "Treat this as candidate-implementation feedback only. It never "
+            "changes the frozen task, harness-owned evaluation, or evidence "
+            "ownership described below.\n"
+        )
+    rollback_block = _npubench_rollback_context_block(workspace)
+    user_decision_block = _user_decision_visibility_block(op, workspace)
+    sections = [
+        f"{slug} — kernel-worker spawn",
+        "",
+        "# EXECUTION CONTEXT (target only)",
+        "",
+        f"OP: {op}",
+        f"WORKSPACE: {workspace}",
+        f"TARGET: {env.target}",
+        f"SOC_VERSION: {env.soc_version}",
+        f"LANE: {lane} (assigned target NPU)",
+        f"TARGET_HOST: {env.host}",
+        f"TARGET_CONTAINER: {env.container}",
+        f"TARGET_CANN: {env.cann_path}",
+        "",
+        *([rollback_block, ""] if rollback_block else []),
+        *([directive_block, ""] if directive_block else []),
+        *([user_decision_block, ""] if user_decision_block else []),
+        kb_manifest_block(op, workspace=workspace, target=env.target),
+        "",
+        _npubench_phase_instructions_block(op, workspace, iter_cap_remaining, env),
+        "",
+        fixed_layout_block(),
+        "",
+        _npubench_handoff_schema_block(),
+        "",
+        _npubench_replay_policy_block(),
+        "",
+        self_introspection_block(),
+        "",
+        safety_block(env),
+        "",
+        _npubench_exit_handoff_block(),
+        *_worker_brief_tail_sections(iter_cap_remaining),
+    ]
+    return "\n".join(sections)
 
 
 def _branched_from_addendum(workspace: Path) -> str:
@@ -111,6 +384,46 @@ def _branched_from_addendum(workspace: Path) -> str:
         f"- Do not submit `{seed_dir}/` unchanged; ordinary precision, determinism, "
         "provenance, and finalization gates still apply.\n"
     )
+
+
+def _worker_brief_context_sections(
+    op: str,
+    workspace: Path,
+    *,
+    env: AscendCEnv,
+    lane: int,
+    slug: str,
+) -> list[str]:
+    """Return the leading rollback / environment / provenance sections.
+
+    Extracted from ``build_worker_brief`` verbatim; the section order and the
+    empty-string separators are golden-locked by the brief tests.
+    """
+    # P0abe (2026-05-07): if the prior spawn was rolled back by the finalize
+    # gate, surface the rollback reason at the TOP of the brief — before any
+    # other section the worker might fixate on. Empty when no rollback history
+    # (cold start path).
+    rb_ctx = rollback_context_block(workspace)
+    rb_block = rb_ctx + "\n" if rb_ctx else ""
+    branch_base = _branched_from_addendum(workspace)
+    user_decision_block = _user_decision_visibility_block(op, workspace)
+    return [
+        f"{slug} — kernel-worker spawn",
+        "",
+        *([branch_base, ""] if branch_base else []),
+        rb_block,
+        *([user_decision_block, ""] if user_decision_block else []),
+        env_block(env, lane=lane, op=op, workspace=workspace),
+        "",
+        env_quirks_block(env.target),
+        "",
+        hard_floors_block(workspace),
+        "",
+        _reference_provenance_block(op),
+        "",
+        kb_manifest_block(op, workspace=workspace, target=env.target),
+        "",
+    ]
 
 
 def build_worker_brief(
@@ -156,12 +469,21 @@ def build_worker_brief(
 
     slug = g7_slug(op, "aog-kernel-worker", spawn_index)
 
-    # P0abe (2026-05-07): if the prior spawn was rolled back by the finalize
-    # gate, surface the rollback reason at the TOP of the brief — before any
-    # other section the worker might fixate on. Empty when no rollback history
-    # (cold start path).
-    rb_ctx = rollback_context_block(workspace)
-    rb_block = rb_ctx + "\n" if rb_ctx else ""
+    # NPUKernelBench is a separate immutable provider, not a patch over the
+    # historic live-source flow.  Route before rollback history, branch-base,
+    # environment/provenance, hard-floor, schema, and generic phase sections:
+    # those sections tell workers to use a different truth source or author
+    # evidence that only the harness may publish on this provider.
+    if _workspace_uses_npubench_reference(workspace):
+        return _build_npubench_worker_brief(
+            op,
+            workspace,
+            lane=lane,
+            slug=slug,
+            iter_cap_remaining=iter_cap_remaining,
+            env=env,
+            directive_text=directive_text,
+        )
 
     # C2 backward-perf (OL-200) — op_class-driven. Surfaces the
     # MIX_AIC cube/vec software-pipelining whitebox-check for gradient ops
@@ -169,22 +491,8 @@ def build_worker_brief(
     # Empty for forward ops so their briefs stay byte-identical.
     bw_c2_block_str = _backward_perf_c2_block(workspace)
 
-    branch_base = _branched_from_addendum(workspace)
     sections = [
-        f"{slug} — kernel-worker spawn",
-        "",
-        *([branch_base, ""] if branch_base else []),
-        rb_block,
-        env_block(env, lane=lane, op=op, workspace=workspace),
-        "",
-        env_quirks_block(env.target),
-        "",
-        hard_floors_block(workspace),
-        "",
-        _reference_provenance_block(op),
-        "",
-        kb_manifest_block(op, workspace=workspace, target=env.target),
-        "",
+        *_worker_brief_context_sections(op, workspace, env=env, lane=lane, slug=slug),
         _phase_instructions_block(op, workspace, iter_cap_remaining, directive_text,
                                   handoff_from_prior_agent, env=env, backend=backend, plugin=plugin),
         "",
@@ -199,15 +507,7 @@ def build_worker_brief(
         safety_block(env),
         "",
         _exit_handoff_block(),
-        "",
-        "# G1 MARKER\n\n"
-        "Write `.kernel_worker_active` marker at workspace start; remove on exit.\n"
-        "This marker prevents concurrent kernel-edit conflicts when probe/optimizer "
-        "also spawn.\n",
-        "",
-        f"# ITER BUDGET\n\niter_cap_remaining = {iter_cap_remaining}. "
-        "If you exhaust this, exit with handoff to orchestrator "
-        "(NOT keep iterating).",
+        *_worker_brief_tail_sections(iter_cap_remaining),
     ]
     return "\n".join(sections)
 
@@ -430,19 +730,38 @@ def _phase_instructions_block(
     # (no prior directive). Order checked by W5 test
     # test_directive_text_overrides_port_mode.
     if directive_text:
-        return f"""# DIRECTIVE FROM PRIOR AGENT
+        # 2026-08-27 (cc-vs-opencode parity fix, F1): a prior-agent directive
+        # must NEVER replace the FA-class template-assembly recipe.  The
+        # directive is a TACTICAL overlay (“this round: fix X”); the recipe is
+        # the STRUCTURAL know-how (where the regbase MIX templates live, how to
+        # assemble them).  flash_attention_score oc line proved the failure
+        # mode: every respawn carried a directive, so every brief took the
+        # early-return above and the worker never saw the FA template block
+        # -> generated a Ladder-3 AIV-only candidate while the sibling
+        # directive-less line (same model, kimi-for-coding) assembled a full
+        # regbase MIX from the wholeport templates.  Emit the directive first,
+        # then the FA block (when applicable), then the phases.
+        _fa_dir_emit = _fa_class_template_assembly_block(
+            op, workspace, target=getattr(env, "target", None) or "a5"
+        )
+        _directive_head = f"""# DIRECTIVE FROM PRIOR AGENT
 
 {directive_text}
+
+{_fa_dir_emit or ""}
 
 # PHASES
 
 A. KB Manifest LOAD (per section above)
-B. Read prior PROGRESS.md / verification.json / probe_report.md (if any)
+B. Read prior PROGRESS.md / verification.json / probe_report.md (if any);
+   the PROGRESS.md tail `## OPERATOR NOTE` / attachment area is the
+   operator's injection channel — always read it on spawn
 C. Apply the directive above; build via deploy_to_npu_lane.sh; verify
    precision floors; measure perf
 D. If directive succeeds → exit `→ orchestrator: done — <one-line summary>`
    If directive infeasible → exit with REJECTED reason + actionable handoff
    If precision regresses → REVERT to prior baseline + log reason"""
+        return _directive_head
 
     # W5 (2026-05-12, ROADMAP §1.5): arch22→arch35 port mode brief. Reads
     # workspace/a3_reference_runnable.json (emitted by phase_o25_a3_ref W4)
@@ -505,6 +824,10 @@ Allowed (TL;DR — see GATE_CONTRACT.md):
   cross-core sync discipline} + ≥1 signal (pass_count baseline / ≥2 kernel
   files / ≥2 kernel phases / new tiling). E.g. FA fused-attention=yes;
   foreach_sqrt single-axis=NO stay PARTIAL_PERSIST.
+- `→ orchestrator: hold — <reason>` — no code change this spawn (e.g.
+  waiting on operator-supplied evidence). EXACT prefix required (the router
+  prefix-matches; variants like `probe-pending hold` are NOT recognized).
+  Routes to await_user_decision with the reason preserved.
 - `@aog-precision-probe` / `@aog-kernel-optimizer` / `@aog-fused-optimizer` / `@aog-determinism-analyzer`
 - `→ orchestrator: await_user_decision`
 

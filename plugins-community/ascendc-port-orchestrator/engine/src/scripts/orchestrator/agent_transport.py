@@ -172,6 +172,13 @@ _FW_TRANSIENT_PATTERNS = (
     # 2026-05-26 17:43:43Z) and any future variant carrying the proxy name.
     "corporate proxy Notification",
     "API Error",
+    # 2026-08-26 (review-55-57): at 13:36 both lanes died the same second with
+    # "claude (stream-json) exited -15" + stderr "[claude-code:unrecognized_model]
+    # deepseek-v4-flash". The endpoint/model were fine (curl + 3/3 spawn tests OK
+    # minutes later) — a transient SDK/model-window blip that claude surfaced as
+    # a non-fatal warning in every spawn but fatally on that window. Retry clears.
+    "claude (stream-json) exited -15",
+    "unrecognized_model",
     # Add other firewall/network-transient patterns as observed
 )
 DEFAULT_FW_RETRY_WAIT_SEC = 30  # was 120; corporate proxy errors clear fast

@@ -149,8 +149,11 @@ def _detect_max_lane() -> int:
             cmd = ["bash", "-lc", _smi]
 
     try:
+        # 2026-08-22: 30s→10s.  A healthy host's full listing answers in
+        # 1-3s; 30s only delays the (already bumped) fallback when a wedged
+        # card hangs the listing — every launch was burning two 30s stalls.
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
+            cmd, capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
             raise RuntimeError(f"npu-smi exit {result.returncode}: {result.stderr[:200]}")
@@ -164,9 +167,14 @@ def _detect_max_lane() -> int:
         # A5 container), the cap=2 falsely blocked lanes 3+4 from being
         # used. erfinv cold-start hit this when lanes 0-2 were busy with
         # foreach_sqrt / foreach_neg / 11_DequantSwigluQuant.
+        # 2026-08-22 A5 campaign: a5 fallback bumped 4→7 (8 Ascend950DT NPUs,
+        # 0-7).  The FULL npu-smi info listing hangs once one physical card
+        # dies (device 4 went Critical and its management path wedges), so the
+        # probe can fail while healthy lanes 5-7 remain usable — a stale cap
+        # of 4 then wrongly rejects those lanes.
         log.info(f"npu-smi probe failed ({e}); "
               f"falling back to default lane max for {target_base}")
-        return {"a5": 4, "a3": 2, "a2": 4}.get(target_base, 2)
+        return {"a5": 7, "a3": 2, "a2": 4}.get(target_base, 2)
 
     # Parse `npu-smi info` output. The device table prints one device per
     # two rows; the FIRST row carries the numeric NPU ID and the chip-model
@@ -199,7 +207,7 @@ def _detect_max_lane() -> int:
     if not npu_ids:
         log.info("npu-smi output parse yielded 0 NPUs; "
               "falling back to default lane max")
-        return {"a5": 4, "a3": 2, "a2": 4}.get(target_base, 2)
+        return {"a5": 7, "a3": 2, "a2": 4}.get(target_base, 2)
 
     max_lane = max(npu_ids)
     log.info(f"detected {len(npu_ids)} NPU(s) via npu-smi; max lane = {max_lane}")

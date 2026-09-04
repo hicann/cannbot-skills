@@ -221,7 +221,7 @@ def test_orchestrator_port_a3_plan_subprocess_exits_zero(
 
     result = subprocess.run(
         [sys.executable, "-m", "orchestrator",
-         "--port-a3", str(synthetic_ctc_loss_v3_dir), "--plan"],
+         "--port-a3-ops", str(synthetic_ctc_loss_v3_dir), "--plan"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_PROJECT_ROOT / "src" / "scripts" / "orchestrator"),
         env={

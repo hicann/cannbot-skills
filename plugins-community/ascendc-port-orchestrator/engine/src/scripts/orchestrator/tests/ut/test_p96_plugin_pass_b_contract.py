@@ -78,7 +78,8 @@ def test_port_a3_canonical_skipped_shape():
     assert shape.get("status") == "N/A"
     assert "port_a3_to_a5 mode" in shape.get("reason", "")
     assert "subsumed by pass_a" in shape.get("reason", "")
-    assert "edge_dataset" in shape.get("reason", "")
+    assert "edge_dataset" not in shape.get("reason", "")
+    assert "a3_outputs" not in shape.get("reason", "")
     assert "n/a" in shape.get("method", "").lower()
 
 

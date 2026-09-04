@@ -13,7 +13,7 @@ original_id: PB-21
 timestamp_inferred: true
 tags: [507015, ascendc, pb-21]
 created_at: 2026-07-09T16:00:00Z
-updated_at: 2026-07-09T16:00:00Z
+updated_at: 2026-08-26T12:50:00Z
 ---
 ## 条目正文（忠实搬运，含全部更正/佐证 bullet）
 
@@ -36,3 +36,11 @@ applies_to:
 - **Cross-reference**: F-P4 (PipeBarrier alignment) covers a different PipeBarrier failure mode (alignment); PB-21 is specifically the TBuf+PIPE_ALL combo. PB-9 (UB→UB DataCopy on V220) is another V220-only sync nuance. OL-94 has the broader "when to pick which sync mechanism" decision rule.
 
 <!-- 迁移自 porter kb/target/ascendc/（PB-21，convert_family_to_okf.py，M1，整档忠实搬运）。confidence/severity/reproduce_count 未升格。 -->
+
+## V351 实战补充（2026-08-26，55_OutlookAttention kw-5 沉淀）
+
+- **V351（A5/Ascend950DT）已确认受影响**：55 的 8 个 kernel 全是纯 `TBuf<VECCALC>` + 57 个 `PipeBarrier<PIPE_ALL>()`、**零** SetFlag/WaitFlag，正是本卡教科书形态。结果不是 V220 的崩溃而是**静默有限垃圾**（finite garbage）：全部 case MERE 133-338、matched_ratio ~1e-5、无 NaN（55 ledger 行 55-61）。
+- 同一代码在 A3(V220) 上能跑对，仅靠 V220 隐式跨 pipe 转发（ledger 行 63-64）。
+- 修复（ledger 行 64-68）：**逐 kernel** 在 Init 取一次事件 id，在每个跨 pipe 边界插显式 SetFlag/WaitFlag（V_MTE2 在覆盖读过 buffer 的 GM→UB 之前、MTE2_V 在 GM→UB 之后 VEC 读之前、V_MTE3 在 UB→GM 写回之前）；**57 个 PIPE_ALL 全部保留**——V→V 同 pipe drain 仍需要（EC-77）。**不是机械修复**：事件摆位必须按各 kernel 实际读写顺序逐个分析（55-kw5 与 57-D4 各烧一整轮才走完）。
+- 判别技巧（55-kw4 固化）：host 侧把输出预填 NaN 再评测——全 NaN = kernel 未执行、有限垃圾 = 执行了但算错（ledger 行 42-54）。
+- 相关（57-D2 同族前驱）：`PipeBarrier<PIPE_V>` 不足以排序 `Cast→FreeTensor→MTE2` 槽位复用（PB-47/EC-77/EC-81），7 个槽位复用点换 PIPE_ALL。

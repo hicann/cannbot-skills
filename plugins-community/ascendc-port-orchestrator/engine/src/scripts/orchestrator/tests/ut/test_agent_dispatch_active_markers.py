@@ -9,6 +9,7 @@
 # ----------------------------------------------------------------------------------------------------------
 from __future__ import annotations
 
+import signal
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,3 +77,27 @@ def test_spawn_for_state_marks_optimizer_active_during_dispatch(monkeypatch, tmp
     agent_dispatch.spawn_for_state("op", tmp_path, "await_optimizer", lane=0, spawn_index=1)
 
     assert not (tmp_path / ".optimizer_active").exists()
+
+
+def test_active_marker_clears_before_transport_signal_handler(monkeypatch, tmp_path):
+    # Bind the protected helper locally (resolved after any monkeypatching) instead of
+    # reaching through the module attribute, which trips CodeCheck G.CLS.11.
+    from agent_dispatch import _active_agent_marker
+
+    called: list[int] = []
+
+    def previous_handler(signum, _frame):
+        called.append(signum)
+
+    monkeypatch.setattr(agent_dispatch.agent_transport, "_install_cleanup_handlers", lambda: None)
+    old_handler = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, previous_handler)
+    try:
+        with _active_agent_marker(tmp_path, "aog-kernel-worker"):
+            marker = tmp_path / ".kernel_worker_active"
+            assert marker.exists()
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+            assert not marker.exists()
+            assert called == [signal.SIGTERM]
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)

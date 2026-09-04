@@ -1,13 +1,30 @@
 # ascendc-port-orchestrator runtime env (copy to .ascendc_env, fill values).
 # .ascendc_env itself is gitignored — NEVER commit credentials.
 TARGET=a5
+# Default target mode is local: run the launcher in the local A5 execution
+# environment. This path does not use SSH/SCP.
+# To use a remote target, explicitly replace A5_CONTAINER=local with the real
+# container name, fill A5_HOST, and follow the remote-target section in docs/USAGE.md.
 A5_HOST=
 A5_USER=root
 A5_PASSWORD=
-A5_CONTAINER=
+A5_CONTAINER=local
+# Optional evidence identity when A5_CONTAINER=local runs inside an outer
+# Docker container (for example cjm_cann2).  Leave empty for bare-host local runs.
+A5_LOCAL_RUNTIME_CONTAINER=
 A5_CANN_PATH=/usr/local/Ascend/cann-9.0.0
+# Required: fill the SoC reported by the target device.  Leave empty until
+# verified; an unset/unknown value deliberately stops direct A5 validation.
 A5_SOC_VERSION=
 A5_DEFAULT_NPU_ID=0
+# Required golden input is a KernelBench-style task + sidecar pair. Select it
+# per task with --reference-source npubench --npubench-task <task.py>; this file
+# cannot infer a task path. Set a3_live only when you explicitly want fresh A3
+# CANN truth. A bare --port-a3 invocation without --reference-source is a hard
+# error.
+PORT_A3_REFERENCE_SOURCE=
+
+# Required only when PORT_A3_REFERENCE_SOURCE=a3_live.
 A3_HOST=
 A3_USER=root
 A3_PASSWORD=

@@ -302,3 +302,47 @@ def test_release_lanes_refuses_wrong_op(root):
     lanes = lp.allocate_lanes("op_grouped", 2, root=root)
     with pytest.raises(ValueError, match="owned by"):
         lp.release_lanes(lanes, op="op_other", root=root)
+
+
+# ---------------------------------------------------------------------------
+# AOG_LANE_IDS override (8-NPU machines such as Ascend950DT)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def reload_lane_pool(monkeypatch):
+    """Reload lane_pool with a given AOG_LANE_IDS, restoring default after."""
+    import importlib
+
+    def _reload(env_value):
+        if env_value is None:
+            monkeypatch.delenv("AOG_LANE_IDS", raising=False)
+        else:
+            monkeypatch.setenv("AOG_LANE_IDS", env_value)
+        return importlib.reload(lp)
+
+    yield _reload
+    monkeypatch.delenv("AOG_LANE_IDS", raising=False)
+    importlib.reload(lp)
+
+
+def test_valid_lanes_default_is_three_npu_box(reload_lane_pool):
+    mod = reload_lane_pool(None)
+    assert mod.VALID_LANES == (0, 1, 2)
+
+
+def test_aog_lane_ids_widens_pool(reload_lane_pool, root):
+    mod = reload_lane_pool("0,1,2,3,4,5,6,7")
+    assert mod.VALID_LANES == tuple(range(8))
+    # A lane beyond the default set is now allocatable.
+    ln = mod.allocate_lane("op_a", idle_lanes=[7], root=root)
+    assert ln == 7
+    assert set(mod.list_lanes(root=root).keys()) == set(range(8))
+
+
+def test_aog_lane_ids_malformed_falls_back_to_default(reload_lane_pool):
+    assert reload_lane_pool("0,1,bogus").VALID_LANES == (0, 1, 2)
+    assert reload_lane_pool("").VALID_LANES == (0, 1, 2)
+    assert reload_lane_pool("0,-1").VALID_LANES == (0, 1, 2)
+
+
+def test_aog_lane_ids_dedupes_and_sorts(reload_lane_pool):
+    assert reload_lane_pool("2, 0, 2,1").VALID_LANES == (0, 1, 2)

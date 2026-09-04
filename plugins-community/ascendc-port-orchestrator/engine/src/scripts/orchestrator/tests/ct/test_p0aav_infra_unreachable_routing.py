@@ -34,19 +34,28 @@ def _load_await_worker_exit_transitions():
     return aw.get("exit_transitions", [])
 
 
+def _iter_handoff_matches(condition):
+    """Yield handoff_match values through nested all_of/any_of clauses."""
+    if not isinstance(condition, dict):
+        return
+    if "handoff_match" in condition:
+        yield condition["handoff_match"]
+    for key in ("all_of", "any_of"):
+        for child in condition.get(key, ()):
+            yield from _iter_handoff_matches(child)
+
+
 def _find_transition(transitions, handoff_substring, expected_goto):
     """Scan transitions in order, return (index, condition) for first match."""
+
     for i, t in enumerate(transitions):
-        cond = t.get("condition", {})
-        all_of = cond.get("all_of", [])
-        for clause in all_of:
-            if isinstance(clause, dict) and "handoff_match" in clause:
-                if handoff_substring in clause["handoff_match"]:
-                    assert t.get("goto") == expected_goto, (
-                        f"Transition {i} matched '{handoff_substring}' but "
-                        f"goto={t.get('goto')} expected={expected_goto}"
-                    )
-                    return i
+        for handoff_match in _iter_handoff_matches(t.get("condition", {})):
+            if handoff_substring in handoff_match:
+                assert t.get("goto") == expected_goto, (
+                    f"Transition {i} matched '{handoff_substring}' but "
+                    f"goto={t.get('goto')} expected={expected_goto}"
+                )
+                return i
     return None
 
 
@@ -98,12 +107,9 @@ def test_existing_orchestrator_build_stuck_still_routes_correctly():
     # Should route to abort (existing behavior with trajectory_sigs_stable=false)
     found_build_stuck = False
     for t in transitions:
-        cond = t.get("condition", {})
-        all_of = cond.get("all_of", [])
-        for clause in all_of:
-            if isinstance(clause, dict) and "handoff_match" in clause:
-                if "build stuck" in clause["handoff_match"]:
-                    found_build_stuck = True
+        for clause in _iter_handoff_matches(t.get("condition", {})):
+            if "build stuck" in clause:
+                found_build_stuck = True
     assert found_build_stuck, (
         "Existing '@orchestrator: build stuck' transition not found. "
         "P0aav must not have removed it."
@@ -124,17 +130,14 @@ def test_p0abk_catchall_routes_to_user_decision():
     found = False
     catchall_idx = None
     for i, t in enumerate(transitions):
-        cond = t.get("condition", {})
-        all_of = cond.get("all_of", [])
-        for clause in all_of:
-            if isinstance(clause, dict) and clause.get("handoff_match") == "@orchestrator:":
-                found = True
-                catchall_idx = i
-                assert t.get("goto") == "await_user_decision", (
-                    f"P0abk catch-all must route to await_user_decision, got "
-                    f"{t.get('goto')}"
-                )
-                break
+        matches = set(_iter_handoff_matches(t.get("condition", {})))
+        if "@orchestrator:" in matches:
+            found = True
+            catchall_idx = i
+            assert t.get("goto") == "await_user_decision", (
+                f"P0abk catch-all must route to await_user_decision, got "
+                f"{t.get('goto')}"
+            )
         if found:
             break
     assert found, "P0abk catch-all '@orchestrator:' transition not found"
@@ -152,6 +155,17 @@ def test_p0abk_catchall_routes_to_user_decision():
     )
 
 
+def test_p0abk_catchall_accepts_parser_normalized_arrow_form():
+    """The diagnostic catch-all also covers the parser's arrow normalization."""
+    transitions = _load_await_worker_exit_transitions()
+    matches = [
+        t for t in transitions
+        if "→ orchestrator:" in set(_iter_handoff_matches(t.get("condition", {})))
+    ]
+    assert matches, "P0abk arrow-form catch-all missing"
+    assert any(t.get("goto") == "await_user_decision" for t in matches)
+
+
 def test_p0abk_specific_patterns_still_present():
     """P0abk catch-all must NOT remove the specific P0aav patterns
     (infra unreachable / BLOCKED / build stuck) — they're more specific
@@ -162,13 +176,10 @@ def test_p0abk_specific_patterns_still_present():
     for keyword in expected_specific:
         found = False
         for t in transitions:
-            cond = t.get("condition", {})
-            all_of = cond.get("all_of", [])
-            for clause in all_of:
-                if isinstance(clause, dict) and "handoff_match" in clause:
-                    if keyword in clause["handoff_match"]:
-                        found = True
-                        break
+            for clause in _iter_handoff_matches(t.get("condition", {})):
+                if keyword in clause:
+                    found = True
+                    break
             if found:
                 break
         assert found, (

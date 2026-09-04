@@ -25,11 +25,27 @@ def test_schema_gap_waives_only_the_standard_input_recipe() -> None:
     phase = state_machine["phases"]["O2_5_reference_provider"]
     migration = phase["branches"]["port_a3_to_a5"]
     backward = phase["branches"]["backward"]
-    schema_gap = migration["exceptions"]["schema_gap"]
+    reference_sources = migration["reference_sources"]
+    a3_live = reference_sources["a3_live"]
+    schema_gap = a3_live["exceptions"]["schema_gap"]
 
     assert "no_edge_cases_flag" not in phase
     assert "critic_gate" not in migration
     assert "critic_gate" not in backward
+    assert migration["reference_source"] == {
+        "default_for_new_invocation": "npubench",
+        "persisted_field": "state.reference.source",
+        "legacy_missing_reference": "a3_live",
+        "accepted_values": ["npubench", "a3_live"],
+    }
+    assert set(reference_sources) == {"a3_live"}
+    a3_artifacts = {item["path"] for item in a3_live["required_artifacts"]}
+    assert "workspace/{op}/edge_dataset.pt" in a3_artifacts
+    assert "workspace/{op}/a3_capture_manifest.json" in a3_artifacts
+    assert any(
+        "fresh source-arch NPU capture" in invariant["description"]
+        for invariant in a3_live["invariants"]
+    )
     assert schema_gap["fallback_allows"] == [
         "reuse a provenance-recorded deterministic input recipe, or provide a custom recipe for the unsupported schema",
         "waive only the standard case_gen/SCHEMA input-recipe form",

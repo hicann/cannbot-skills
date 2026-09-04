@@ -1,6 +1,6 @@
 ---
 name: aog-prior-art-verify
-description: Use when an arch22→arch35 migration can reuse an existing arch35 candidate. Scan, provenance-stage, build, measure, and learn from it without replacing fresh arch22 truth capture or customer-facing verification.
+description: Use when an arch22→arch35 migration can reuse an existing arch35 candidate. Scan, provenance-stage, build, measure, and learn from it without replacing the selected independent truth or customer-facing verification.
 ---
 
 # Prior-art candidate verification
@@ -11,9 +11,11 @@ Use existing target, sibling, or archive implementations to accelerate authoring
 
 1. Run `scripts/scan_prior_art.py` to discover candidate implementations.
 2. Run `scripts/stage_candidate.py` to copy only the files explicitly authorized by the scan into `.prior_art_candidate/`. It aborts if any scan-time digest changed and writes `manifest.json` with source, build-overlay path, file digest, and a whole-candidate digest.
-3. Capture fresh arch22 source-NPU outputs for the current run. This step is mandatory even when an identical candidate was verified previously.
+3. Provision the selected independent truth for the current run: preferred `npubench` uses the immutable
+   KernelBench-style task/sidecar bundle (task `.py` + same-stem `.json`/`.jsonl` sidecar pair); explicit `a3_live` captures fresh arch22 source-NPU outputs. A cached capture
+   or candidate output never substitutes for any path.
 4. Run `scripts/build_candidate.py` against the staged candidate. It builds a SHA-checked overlay in a unique container-side checkout; it never builds or pulls artifacts from the pristine operator checkout.
-5. Provide `workspace/<op>/verify_prior_art_candidate.py`, an adapter that accepts the explicit candidate/truth arguments documented by `scripts/verify_candidate.py` and echoes the supplied binding in its JSON result. Then run `scripts/verify_candidate.py` against the current run's fresh source truth. A missing adapter or binding mismatch fails closed. Keep the result in `.prior_art_candidate/verification_prior_art.json`.
+5. Provide `workspace/<op>/verify_prior_art_candidate.py`, an adapter that accepts the explicit candidate/truth arguments documented by `scripts/verify_candidate.py` and echoes the supplied binding in its JSON result. Then run `scripts/verify_candidate.py` against the current run's selected truth. A missing adapter or binding mismatch fails closed. Keep the result in `.prior_art_candidate/verification_prior_art.json`.
 6. Run `scripts/classify.py`. Its `CANDIDATE_*` verdict describes only the candidate:
 
    | Verdict | Use by the standard workflow |
@@ -29,7 +31,9 @@ Use existing target, sibling, or archive implementations to accelerate authoring
 
 ## Hard invariants
 
-- A fresh arch22 source-NPU capture is always required. A cached capture or candidate output cannot replace it.
+- The selected independent truth is always required: `npubench` requires its immutable KernelBench-style task/sidecar
+  bundle and provider-owned verification; for explicit `a3_live`, a fresh arch22 source-NPU capture is always required. A cached capture or
+  candidate output cannot replace any of them.
 - A target, sibling, or archive candidate is prior art, never an independent truth source.
 - Target-tree files are eligible for staging only when the scan explicitly consulted that source; staging never rediscovers an unlisted file from disk.
 - Candidate evidence remains in `verification_prior_art.json`; never copy it to the customer-facing `verification.json`.
@@ -40,11 +44,11 @@ Use existing target, sibling, or archive implementations to accelerate authoring
 
 ## Orchestrator contract
 
-The orchestrator may cache discovery and staging when the recorded source digest still matches. It must rebuild, remeasure, and reclassify the candidate against the fresh capture in every workflow run.
+The orchestrator may cache discovery and staging when the recorded source digest still matches. It must rebuild, remeasure, and reclassify the candidate against the selected fresh capture in every workflow run.
 
 ```text
 candidate = scan_and_stage_with_provenance(op)
-source_truth = provision_fresh_arch22_reference(op)
+source_truth = provision_selected_reference(op)
 prior_art_advisory = build_measure_and_classify(candidate, source_truth)
 worker_result = run_standard_worker(op, source_truth, prior_art_advisory)
 return run_standard_customer_verification(worker_result, source_truth)

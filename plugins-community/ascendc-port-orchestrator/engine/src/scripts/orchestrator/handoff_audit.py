@@ -93,11 +93,22 @@ _ARROW_TO_AT_FORM = {
 # wrapper — strip the wrapper and recover the inner @aog-X form (P0s).
 _VALID_ARROW_KEYWORDS = (
     "done",
+    # NPUBench workers report candidate readiness only; Phase O5 owns the
+    # target build/evaluation after this provider-bound handoff.
+    "build-ready",
     "PARTIAL_PERSIST",
     "await_user_decision",
     "research_done",
     "research_partial",
     "research_blocked",
+    "PARTIAL_PERF_STRUCTURAL_CEILING",
+    "cann_learn_blocked",
+    "cann_learn_done",
+    "cann_learn_empty",
+    "pipeline_done",
+    "build stuck",
+    "infra unreachable",
+    "BLOCKED",
     # 2026-05-20 — structural-rewrite escalation sentinel.
     # S4 (PR #31) added kw_brief guidance for workers to emit
     # `→ orchestrator: structural_rewrite_needed — <reason>` when scope spans
@@ -109,6 +120,13 @@ _VALID_ARROW_KEYWORDS = (
     # the missing piece). S3c.2's await_worker route-in references handoff_match
     # on this canonical form, so recognition has to land here too.
     "structural_rewrite_needed",
+    # FOLLOWUPS v3.1 A.2 (2026-08-30, 2_FFN_evo lesson): a worker whose mandate
+    # requires NO code change (e.g. waiting on pending evidence the operator
+    # must supply) previously had no honest handoff — improvisations were
+    # rejected as malformed or misrouted. `hold` is the canonical no-change
+    # handoff: it matches no specific YAML rule and lands on the P0abk
+    # `→ orchestrator:` catch-all → await_user_decision, unchanged.
+    "hold",
 )
 
 _AOG_HANDOFF_PREFIXES = (
@@ -134,6 +152,14 @@ def _embedded_aog_handoff(tail: str) -> Optional[str]:
     return None
 
 
+def _keyword_prefix_matches(text: str, keyword: str) -> bool:
+    """Match a handoff keyword without accepting an alphanumeric suffix."""
+    if not text.startswith(keyword):
+        return False
+    suffix = text[len(keyword):]
+    return not suffix or bool(re.match(r"^[^\w-]", suffix))
+
+
 def _normalize_canonical_handoff(prefix: str, tail: str, line: str, prefix_idx: int) -> str:
     """Normalize one matched canonical handoff while retaining malformed forms.
     """
@@ -144,14 +170,17 @@ def _normalize_canonical_handoff(prefix: str, tail: str, line: str, prefix_idx: 
     if prefix == "@orchestrator:":
         if prefix_idx >= 2 and line[prefix_idx - 2:prefix_idx] == "→ ":
             return tail
-        return "→ orchestrator:" + tail[len(prefix):]
+        rest = tail[len(prefix):].lstrip()
+        if any(_keyword_prefix_matches(rest, keyword) for keyword in _VALID_ARROW_KEYWORDS):
+            return "→ orchestrator: " + rest
+        return tail
 
     if prefix != "→ orchestrator:":
         return tail
 
     rest = tail[len(prefix):].lstrip()
-    if any(rest.startswith(keyword) for keyword in _VALID_ARROW_KEYWORDS):
-        return tail
+    if any(_keyword_prefix_matches(rest, keyword) for keyword in _VALID_ARROW_KEYWORDS):
+        return "→ orchestrator: " + rest
     return _embedded_aog_handoff(tail) or tail
 
 
@@ -219,7 +248,13 @@ def delegation_cpp_dir_names(workspace: Path) -> list[str]:
         from plugins import detect_plugin
         plug = detect_plugin(workspace)
         if plug is not None:
-            return list(dict.fromkeys([*plug.kernel_cpp_dirs(), "kernel"]))
+            workspace_aware = getattr(plug, "kernel_cpp_dirs_for_workspace", None)
+            declared = (
+                workspace_aware(workspace)
+                if callable(workspace_aware)
+                else plug.kernel_cpp_dirs()
+            )
+            return list(dict.fromkeys([*declared, "kernel"]))
     except Exception:
         # This freshness helper is best-effort and conservatively scans the
         # union of every supported C++ directory when ownership cannot be

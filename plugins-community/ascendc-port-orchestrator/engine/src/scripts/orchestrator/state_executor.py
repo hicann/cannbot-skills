@@ -24,8 +24,12 @@ from __future__ import annotations
 import logging
 
 import datetime as _dt
+import hashlib
 import json
+import os
+import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -274,6 +278,20 @@ def next_state(
     if from_state is None:
         from_state = current_state(workspace)
 
+    # P1-4 (PR875 equiv review, 2026-08-28): a worker that has diagnosed an
+    # ENGINE-level blockage (not a candidate defect) may report it with the
+    # `→ orchestrator: engine-block...` diagnostic handoff.  The YAML knows no
+    # such verb; accept it here ONLY when the persistent same-signature
+    # counter shows >= SAME_SIGNATURE_PARK_THRESHOLD consecutive identical
+    # engine-class failures (otherwise the unknown handoff keeps its legacy
+    # no-match behavior).  Routing is await_user_decision — a human clears the
+    # engine gap; the worker is never asked to patch the engine.
+    override = _engine_block_handoff_decision(workspace, from_state, handoff)
+    if override is not None:
+        if not dry_run:
+            record_transition(workspace, override)
+        return override
+
     # Plugin resolution for the `plugin_method` YAML primitive (S3c).
     # Detection errors must propagate: treating an unreadable/ambiguous
     # supported workspace as plugin=None can bypass migration research
@@ -358,6 +376,222 @@ def validate_log(workspace: Path) -> tuple[bool, list[str]]:
             if v and v not in valid_states:
                 errors.append(f"line {i}: {field}={v!r} not in YAML phase_o4_states")
     return len(errors) == 0, errors
+
+
+# ---------------------------------------------------------------------------
+# P0-1 (PR875 equiv review, DSH ruling §4.b, 2026-08-28): same-signature
+# failure parking — per-op PERSISTENT layer.
+#
+# Per-process counters cannot see the loop: spawn_count resets on every
+# orchestrator restart and exit-77 engine-drift restarts were observed 7x on a
+# single op (oc FAS line).  The observation window therefore lives in a
+# workspace dotfile that survives exit 77 / resume / cold-start.
+#
+# The signature combines failure class, normalized reason, and candidate-tree
+# digest. Candidate MISMATCH is tracked separately from the repair loop; run
+# identifiers, timestamps, and binding hashes are normalized before hashing.
+# A changed candidate-tree digest therefore resets the consecutive count.
+# Consecutive-only: any different signature inserted resets the count, so
+# "different causes failing in turn" is never misread as a stuck loop.
+# ---------------------------------------------------------------------------
+SAME_SIGNATURE_STATE_FILE = ".opgen_same_signature.json"
+SAME_SIGNATURE_PARK_THRESHOLD = 3
+SAME_SIGNATURE_PARK_THRESHOLD_ENV = "AOG_SAME_SIGNATURE_PARK_THRESHOLD"
+# Device-class errors do not self-heal (2026-08-27 3FA: 507015 wedged device 3
+# for 95 minutes while the engine slept 4x600s).  Park earlier and never
+# backoff-wait on them.
+DEVICE_SIGNATURE_PARK_THRESHOLD = 2
+# candidate-class escalation ("改不动=卡死"): same candidate tree + same
+# per-case failure signature for this many O5 rounds → await_user_decision.
+CANDIDATE_CASE_PARK_THRESHOLD = 3
+
+_SAME_SIGNATURE_CLASSES = frozenset({"engine", "infra", "device"})
+
+_RUN_ID_RE = re.compile(r"\b(?:run|attempt|binding)[_-][A-Za-z0-9][A-Za-z0-9_.-]*\b")
+_HEX_DIGEST_RE = re.compile(r"\b[0-9a-fA-F]{12,64}\b")
+_ISO_TS_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"
+)
+_CLOCK_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b")
+_WS_RE = re.compile(r"\s+")
+
+
+def normalize_failure_reason(reason: object) -> str:
+    """Strip per-run identifiers (run ids, timestamps, binding hashes) so two
+    observations of the SAME failure produce the same signature input.
+    """
+    text = str(reason or "")
+    text = _ISO_TS_RE.sub("<ts>", text)
+    text = _CLOCK_RE.sub("<clock>", text)
+    text = _HEX_DIGEST_RE.sub("<hex>", text)
+    text = _RUN_ID_RE.sub("<run>", text)
+    return _WS_RE.sub(" ", text).strip()[:300]
+
+
+def same_failure_signature(failure_class: str, reason: object, tree_sha256: object) -> str:
+    """Canonical signature per DSH §4.b: class ‖ normalized reason ‖ tree."""
+    material = "\x1f".join(
+        [str(failure_class), normalize_failure_reason(reason), str(tree_sha256 or "unknown")]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def load_same_signature_state(workspace: Path) -> dict:
+    """Read the persistent same-signature record; {} when absent/unreadable."""
+    try:
+        data = json.loads((Path(workspace) / SAME_SIGNATURE_STATE_FILE).read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_same_signature_state(workspace: Path, state: dict) -> None:
+    path = Path(workspace) / SAME_SIGNATURE_STATE_FILE
+    try:
+        path.write_text(json.dumps(state, indent=1, sort_keys=True) + "\n")
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "cannot persist same-signature state (non-fatal): %s", exc
+        )
+
+
+def record_same_signature_failure(
+    workspace: Path, failure_class: str, reason: object, tree_sha256: object,
+) -> dict:
+    """Record one engine/infra/device-class failure; return the updated entry.
+
+    Consecutive identical signatures accumulate; any different signature
+    (including a candidate_tree change, which is part of the signature)
+    resets the count to 1.  Caller decides the parking threshold.
+    """
+    if failure_class not in _SAME_SIGNATURE_CLASSES:
+        raise ValueError(f"not a same-signature-parked failure class: {failure_class!r}")
+    state = load_same_signature_state(workspace)
+    signature = same_failure_signature(failure_class, reason, tree_sha256)
+    previous = state.get("same_signature")
+    count = 1
+    if isinstance(previous, dict) and previous.get("signature") == signature:
+        count = int(previous.get("count", 0)) + 1
+    entry = {
+        "signature": signature,
+        "failure_class": failure_class,
+        "count": count,
+        "reason_norm": normalize_failure_reason(reason),
+        "last_tree_sha256": str(tree_sha256 or "unknown"),
+        "last_ts": time.time(),
+    }
+    state["schema"] = "aog.same_signature_failures/v1"
+    state["same_signature"] = entry
+    _save_same_signature_state(workspace, state)
+    return entry
+
+
+def clear_same_signature_state(workspace: Path) -> None:
+    """Break the consecutive-failure chain (a successful O5 between failures,
+    or a candidate-class MISMATCH, is a different-signature insertion).
+    """
+    state = load_same_signature_state(workspace)
+    if "same_signature" in state:
+        state.pop("same_signature", None)
+        _save_same_signature_state(workspace, state)
+
+
+def same_signature_count(workspace: Path, failure_class: str) -> int:
+    """Current consecutive count for a class (0 when the chain is absent or
+    belongs to another class).  Used by the lifetime-cost warning linkage
+    (P2-5) and the engine-block handoff gate (P1-4).
+    """
+    entry = load_same_signature_state(workspace).get("same_signature")
+    if isinstance(entry, dict) and entry.get("failure_class") == failure_class:
+        try:
+            return int(entry.get("count", 0))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def same_signature_park_threshold(failure_class: str) -> int:
+    if failure_class == "device":
+        return DEVICE_SIGNATURE_PARK_THRESHOLD
+    raw = os.environ.get(SAME_SIGNATURE_PARK_THRESHOLD_ENV)
+    if raw is not None:
+        try:
+            return max(int(raw.strip()), 1)
+        except ValueError:
+            pass
+    return SAME_SIGNATURE_PARK_THRESHOLD
+
+
+def record_candidate_case_failure(
+    workspace: Path, tree_sha256: object, case_signature: object,
+) -> dict:
+    """Candidate-class escalation counter (DSH §4.b guardrail ②).
+
+    A genuine precision MISMATCH is the repair loop itself and must NOT feed
+    the same-signature parking counter — but "same candidate tree + same
+    per-case failure signature for N rounds" means the worker cannot move the
+    failure (FAS kw-17..21 fence whack-a-mole), which is a stuck loop of its
+    own.  Keyed on (tree, case signature); any change resets.
+    """
+    state = load_same_signature_state(workspace)
+    case_sig = hashlib.sha256(
+        ("\x1f".join([str(tree_sha256 or "unknown"), normalize_failure_reason(case_signature)]))
+        .encode("utf-8")
+    ).hexdigest()
+    previous = state.get("candidate_case")
+    count = 1
+    if isinstance(previous, dict) and previous.get("case_signature") == case_sig:
+        count = int(previous.get("count", 0)) + 1
+    entry = {
+        "case_signature": case_sig,
+        "count": count,
+        "last_tree_sha256": str(tree_sha256 or "unknown"),
+        "last_ts": time.time(),
+    }
+    state["schema"] = "aog.same_signature_failures/v1"
+    state["candidate_case"] = entry
+    _save_same_signature_state(workspace, state)
+    return entry
+
+
+def clear_candidate_case_state(workspace: Path) -> None:
+    state = load_same_signature_state(workspace)
+    if "candidate_case" in state:
+        state.pop("candidate_case", None)
+        _save_same_signature_state(workspace, state)
+
+
+# ---------------------------------------------------------------------------
+# P1-4 (PR875 equiv review, 2026-08-28): engine-block diagnostic handoff.
+# ---------------------------------------------------------------------------
+ENGINE_BLOCK_HANDOFF_PREFIX = "→ orchestrator: engine-block"
+
+
+def _engine_block_handoff_decision(
+    workspace: Path, from_state: str, handoff: str,
+) -> Optional["TransitionDecision"]:
+    """Accept a worker's engine-block diagnostic handoff only when the
+    persistent same-signature counter proves an engine-class stuck loop
+    (>= SAME_SIGNATURE_PARK_THRESHOLD consecutive identical engine failures);
+    route it to await_user_decision.  Returns None to keep legacy YAML routing.
+    """
+    if not handoff or not handoff.lstrip().startswith(ENGINE_BLOCK_HANDOFF_PREFIX):
+        return None
+    count = same_signature_count(workspace, "engine")
+    if count < same_signature_park_threshold("engine"):
+        return None
+    return TransitionDecision(
+        next_state="await_user_decision",
+        matched_transition_index=-1,
+        rationale=(
+            f"P1-4 engine-block handoff accepted: {count} consecutive identical "
+            f"engine-class failures (same-signature counter); worker diagnostic: "
+            f"{handoff.lstrip()[:300]}. Halting for user inspection — the engine "
+            "gap needs a human, not another worker respawn."
+        ),
+        from_state=from_state,
+        handoff=handoff,
+    )
 
 
 # ---------------------------------------------------------------------------

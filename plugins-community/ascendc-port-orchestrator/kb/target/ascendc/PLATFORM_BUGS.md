@@ -61,6 +61,9 @@ applies_to:
 - **Workaround**: Use TQue<VECIN,4> (depth 4 works correctly)
 - **Status**: OPEN
 - **Evidence**: hardware/target/ascend950pr.md, E13 test data
+- **V351 实证（2026-08-25，57_ParallelPolarizedSelfAttention_evo iter D1，Ascend950DT + CANN 9.2.0）**: A3 上验证过的 `TQue<...,2>` + InitBuffer depth-2 在 A5 上输出全零——O5 评测 45/50 FAIL 且 `matched_count==small_count`（57 ledger 行 9），57 是 PB-2 在 V351 的活实例。修复：3 个 TQue（xQue_/xOutQue_/wQue_）depth 2→4 + InitBuffer depth 参数同步 2→4。
+- **UB 预算联动（57 ledger 行 11，iter D3）**: depth 翻倍直接放大 UB 占用；57 升 depth-4 后 11 个冻结 shape 的 InitBuffer 总和越 A5 248KB 可用上限。**升 depth 后必须立即重算全部 InitBuffer 字节和**；越界就减容 / 转 TQue<VECIN,1> / 重排 buffer 顺序。
+- **判别注意（57-D3）**: 全 case mismatch 且输出全零时先确认 small_count>0，否则 `matched_count==small_count` 是伪迹。
 ### PB-3: NPU Device 0 Post-Reboot Failure
 
 ```yaml
@@ -384,7 +387,7 @@ applies_to:
 ```
 - **Severity**: CRITICAL
 - **Status**: OPEN (CANN 9.0.0)
-- **Affected hardware**: Atlas A3 (V220 / Ascend910_93) confirmed. A5 / Ascend950PR — UNVERIFIED (likely affected given V220→A5 inheritance of most VEC pipeline behavior; re-run a minimal repro on A5 before broadening this entry's scope).
+- **Affected hardware**: Atlas A3 (V220 / Ascend910_93) confirmed. A5 / Ascend950PR/950DT (V351) — **CONFIRMED**（2026-08-25，55_OutlookAttention kw-5，Ascend950DT + CANN 9.2.0；症状形态不同，见下）。
 - **Symptom**: kernel using a manual TBuf pipeline pattern (`TBuf<VECCALC> bufA_, bufB_;` + `DataCopyPad → PipeBarrier<PIPE_ALL>() → VEC compute`) crashes at runtime with `aclrtLaunchKernel` returning error code **507015**. No exception, no Python traceback — kernel silently terminates after launch and the host blocks at the next sync. aicpu / aiv logs show MTE2→V handoff aborted mid-pipeline.
 - **Trigger pattern**: TBuf (NOT TQue) pipeline mixed with `PipeBarrier<PIPE_ALL>()` as the synchronization primitive between MTE2 load and V compute. The bug fires reliably when ALL of:
   - All loads/computes run on a single `TBuf<VECCALC>` (no `TQue<VECIN>` queue rotation)
@@ -394,6 +397,7 @@ applies_to:
 - **Why it happens (hypothesis, unconfirmed)**: V220 `PipeBarrier<PIPE_ALL>()` semantics on TBuf (vs TQue) appear to skip MTE2→V completion guarantees. TQue `<VECIN, depth=2>` has hardware-managed queue rotation that includes the implicit barrier; TBuf does not. CANN docs do not call this out explicitly; CANN's own kernels using TBuf consistently use explicit event sync.
 - **Decision rule** (when to use TBuf+manual sync vs TQue auto-rotation): see OL-94.
 - **Evidence**: op#27 `27_MultiMaskAttentionAggregation` a3 V220 cold-start (2026-04-28) — worker initial impl used `TBuf + PipeBarrier<PIPE_ALL>()` per natural CANN-style port → silent crash 507015 across all cases. Five compile/precision iters wasted before probe identified the sync primitive as the culprit. Switched to explicit `SetFlag<HardEvent::MTE2_V>/WaitFlag<HardEvent::MTE2_V>` → 50/50 PASS, det 100/100. Probe report: `output/npukernelbench-a3/src/kernels/27_MultiMaskAttentionAggregation/probe_report.md` (a3 PR #2 v2 archive).
+- **V351 实证（2026-08-25，55_OutlookAttention iter kw-5，Ascend950DT + CANN 9.2.0）**: 55 的 8 个 kernel 全部是纯 `TBuf<VECCALC>` + `PipeBarrier<PIPE_ALL>()`（共 **57 个 PIPE_ALL 全错**、零 SetFlag/WaitFlag），本卡教科书形态（55 ledger 行 60-61）。V351 上症状**不是 V220 的 507015 崩溃，而是静默"有限垃圾"**（finite garbage）：V351 严格 pipe 分离（EC-81），PIPE_ALL 在 TBuf 上不排序 MTE2→V / V→MTE3 / V→MTE2，VEC 读 stale/partial UB，全部 case MERE 133-338、matched_ratio ~1e-5、无 NaN（ledger 行 55-58）。同代码在 A3(V220) 仅靠隐式跨 pipe 转发跑对（行 63-64）。修复（行 64-68）：逐 kernel 在 Init 取一次事件 id，在每个跨 pipe 边界插显式 SetFlag/WaitFlag（V_MTE2 在覆盖读过 buffer 的 GM→UB 之前、MTE2_V 在 GM→UB 之后 VEC 读之前、V_MTE3 在 UB→GM 写回之前）；**57 个 PIPE_ALL 全部保留**（V→V drain 仍需，EC-77），只加事件配对、不改算术。**非机械修复**：摆位须按各 kernel 实际读写顺序逐个分析（55-kw5 与 57-D4 各烧一整轮）。另注意：修完 kw-5 后 55 仍 all-cases-wrong（行 71）——事件配对修复是必要非充分。判别技巧（55-kw4）：host 侧输出预填 NaN——全 NaN=kernel 未执行、有限垃圾=执行了但算错。详见 `okf/runbooks/field-notes/precision/v351-pipe-all-tbuf-stale-001.md`。
 - **Cross-reference**: F-P4 (PipeBarrier alignment) covers a different PipeBarrier failure mode (alignment); PB-21 is specifically the TBuf+PIPE_ALL combo. PB-9 (UB→UB DataCopy on V220) is another V220-only sync nuance. OL-94 has the broader "when to pick which sync mechanism" decision rule.
 
 ---

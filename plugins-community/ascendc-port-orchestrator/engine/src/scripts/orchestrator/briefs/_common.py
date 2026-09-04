@@ -74,6 +74,10 @@ class AscendCEnv:
     # When opgen_mode=="port_a3_to_a5", path to the ops-nn op directory
     # (e.g. ~/workspace/cann/ops-nn/loss/ctc_loss_v3). Empty otherwise.
     port_a3_source: str = ""
+    # Reference selection for newly created port-a3 workspaces.  Empty means
+    # "no implicit default": new invocations must pass an explicit
+    # --reference-source (npubench, or a3_live for a live A3 capture).
+    port_a3_reference_source: str = ""
     # Per-target A3 reference-run config (used by phase_o25_a3_ref when
     # active target is a5 and reference baseline is A3-CANN).
     a3_host: str = ""
@@ -264,6 +268,7 @@ def _build_env_from_kv(kv: dict, target: str, backend: str, archive_project: str
         # Environment loading must not invent a default generation route.
         opgen_mode=env_mode,
         port_a3_source=kv.get("PORT_A3_SOURCE", ""),
+        port_a3_reference_source=kv.get("PORT_A3_REFERENCE_SOURCE", ""),
         a3_host=kv.get("A3_HOST", ""),
         a3_user=kv.get("A3_USER", "root"),
         a3_container=kv.get("A3_CONTAINER", ""),

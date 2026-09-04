@@ -110,3 +110,14 @@ def test_missing_torch_python_has_a_configure_time_error(tmp_path: Path):
     assert 'file(GLOB TORCH_PYTHON_LIBRARIES "${TORCH_PATH}/lib/libtorch_python.so*")' in cmake
     assert "if(NOT TORCH_PYTHON_LIBRARIES)" in cmake
     assert "the generated torch::Tensor binding cannot be linked" in cmake
+
+
+def test_pybind_headers_come_from_torch_not_an_optional_python_package(tmp_path: Path):
+    """Target CANN containers ship PyTorch's headers, not necessarily pybind11's CLI."""
+    cmake = _gen_cmake(tmp_path)
+
+    assert "python3 -m pybind11 --includes" not in cmake
+    assert "PYBIND11_INC" not in cmake
+    assert "sysconfig.get_path('include')" in cmake
+    assert "${PYTHON_INCLUDE_DIR}/Python.h" in cmake
+    assert "${PYTHON_INCLUDE_DIR}" in cmake

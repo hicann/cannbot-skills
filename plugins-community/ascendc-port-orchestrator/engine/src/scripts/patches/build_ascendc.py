@@ -280,14 +280,22 @@ target_include_directories(pybind11_lib PRIVATE
   ${{TORCH_PATH}}/include
   ${{TORCH_PATH}}/include/torch/csrc/api/include
 )
-execute_process(COMMAND python3 -m pybind11 --includes
+# PyTorch bundles the pybind11 headers consumed by <torch/extension.h>; a
+# separate Python `pybind11` package is not required on target containers.
+# Resolve only the Python C headers needed by those bundled headers.
+execute_process(COMMAND python3 -c "import sysconfig; print(sysconfig.get_path('include') or '')"
   OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE PYBIND11_INC
+  OUTPUT_VARIABLE PYTHON_INCLUDE_DIR
 )
-string(REPLACE " " ";" PYBIND11_INC ${{PYBIND11_INC}})
-target_compile_options(pybind11_lib PRIVATE
-  ${{PYBIND11_INC}}
-  -D_GLIBCXX_USE_CXX11_ABI=1
+if(NOT PYTHON_INCLUDE_DIR OR NOT EXISTS "${{PYTHON_INCLUDE_DIR}}/Python.h")
+  message(FATAL_ERROR
+    "Python development headers were not found; expected Python.h under ${{PYTHON_INCLUDE_DIR}}.")
+endif()
+target_include_directories(pybind11_lib PRIVATE
+  ${{PYTHON_INCLUDE_DIR}}
+)
+target_compile_definitions(pybind11_lib PRIVATE
+  _GLIBCXX_USE_CXX11_ABI=1
 )
 
 execute_process(COMMAND python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')"
@@ -307,27 +315,31 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str]) -> None:
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
-def build(task: str, soc_version: str, build_type: str, clean: bool) -> Path:
-    task_dir = _resolve_task_dir(task)
-
+def _validate_kernel_layout(task_dir: Path) -> tuple:
+    """Return ``(kernel_dir, pybind_path)``, failing loudly when either is absent."""
     kernel_dir = task_dir / "kernel"
     pybind_path = kernel_dir / "pybind11.cpp"
     if not kernel_dir.is_dir():
         raise FileNotFoundError(f"Kernel directory not found: {kernel_dir}")
     if not pybind_path.is_file():
         raise FileNotFoundError(f"Missing pybind11 entry: {pybind_path}")
+    return kernel_dir, pybind_path
 
-    sources = _find_kernel_sources(kernel_dir)
-    module_name = _extract_pybind_module_name(pybind_path)
-    build_dir = kernel_dir / "build"
-    cmake_dir = build_dir / "_autogen_cmake"
-    ascend_path = _detect_ascend_path()
 
-    # Build-capability extension (BUILD_CAPABILITY_EXTENSION_DESIGN.md §2B):
-    # fold the baseline contributions (DEBT-20/20.1 + DEBT-110) into one merged
-    # CMakeContribution, run any prebuild codegen steps BEFORE cmake configure,
-    # then generate. (STEP 2 layers declared named capabilities from
-    # build_overrides.json into this merge.)
+def _merge_build_contributions(
+    kernel_dir: Path,
+    sources: list,
+    ascend_path: Path,
+    soc_version: str,
+) -> CMakeContribution:
+    """Merge baseline + declared capability contributions and run prebuild codegen.
+
+    Build-capability extension (BUILD_CAPABILITY_EXTENSION_DESIGN.md §2B):
+    fold the baseline contributions (DEBT-20/20.1 + DEBT-110) into one merged
+    CMakeContribution, run any prebuild codegen steps BEFORE cmake configure,
+    then generate. (STEP 2 layers declared named capabilities from
+    build_overrides.json into this merge.)
+    """
     ctx = BuildContext(
         kernel_dir=kernel_dir,
         sources=tuple(sources),
@@ -346,6 +358,41 @@ def build(task: str, soc_version: str, build_type: str, clean: bool) -> Path:
     contribs = [registry.get(name)(ctx) for name in declared]
     merged = merge(baseline_contributions(ctx) + contribs)
     run_prebuild_steps(merged.prebuild_steps, ctx)
+    return merged
+
+
+def _cmake_env(ascend_path: Path) -> dict:
+    """Return the cmake subprocess environment with the ccec compiler on PATH."""
+    env = os.environ.copy()
+    env["ASCEND_HOME_PATH"] = str(ascend_path)
+
+    # NODE-19 (2026-05-28): CANN's extract_host_stub.py calls bare llvm-objdump
+    # which lives under ASCEND_HOME_PATH/<arch>/ccec_compiler/bin. Propagate this
+    # to PATH so cmake subprocesses find it without manual pre-export.
+    # Arch-adaptive: check both x86_64-linux and aarch64-linux.
+    for _arch in ("x86_64-linux", "aarch64-linux"):
+        _ccec_bin = ascend_path / _arch / "ccec_compiler" / "bin"
+        if _ccec_bin.is_dir():
+            env["PATH"] = str(_ccec_bin) + os.pathsep + env.get("PATH", "")
+            break
+    return env
+
+
+def build(
+    task: str,
+    soc_version: str,
+    build_type: str,
+    clean: bool,
+) -> Path:
+    task_dir = _resolve_task_dir(task)
+    kernel_dir, pybind_path = _validate_kernel_layout(task_dir)
+
+    sources = _find_kernel_sources(kernel_dir)
+    module_name = _extract_pybind_module_name(pybind_path)
+    build_dir = kernel_dir / "build"
+    cmake_dir = build_dir / "_autogen_cmake"
+    ascend_path = _detect_ascend_path()
+    merged = _merge_build_contributions(kernel_dir, sources, ascend_path, soc_version)
 
     if clean and build_dir.exists():
         shutil.rmtree(build_dir)
@@ -364,19 +411,7 @@ def build(task: str, soc_version: str, build_type: str, clean: bool) -> Path:
         encoding="utf-8",
     )
 
-    env = os.environ.copy()
-    env["ASCEND_HOME_PATH"] = str(ascend_path)
-
-    # NODE-19 (2026-05-28): CANN's extract_host_stub.py calls bare llvm-objdump
-    # which lives under ASCEND_HOME_PATH/<arch>/ccec_compiler/bin. Propagate this
-    # to PATH so cmake subprocesses find it without manual pre-export.
-    # Arch-adaptive: check both x86_64-linux and aarch64-linux.
-    for _arch in ("x86_64-linux", "aarch64-linux"):
-        _ccec_bin = ascend_path / _arch / "ccec_compiler" / "bin"
-        if _ccec_bin.is_dir():
-            env["PATH"] = str(_ccec_bin) + os.pathsep + env.get("PATH", "")
-            break
-
+    env = _cmake_env(ascend_path)
     cmake_configure = [
         "cmake",
         "-S",

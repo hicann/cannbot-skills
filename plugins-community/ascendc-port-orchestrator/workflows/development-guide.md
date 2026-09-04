@@ -8,7 +8,7 @@
 
 | skill | 用途 | 底层调用 |
 |---|---|---|
-| `ascendc-cross-gen-port` | 跨代际算子移植（arch22→arch35） | `PYTHONPATH=engine python3 -m orchestrator --port-a3 …` |
+| `ascendc-cross-gen-port` | 跨代际算子移植（arch22→arch35） | `PYTHONPATH=engine python3 -m orchestrator --port-a3-ops … --reference-source npubench --npubench-task <task.py>`（裸 `--port-a3-ops` 会 fail closed） |
 | `ascendc-backward-gen` | 正向→反向（梯度）算子生成 | `PYTHONPATH=engine python3 -m orchestrator --backward …` |
 
 两个 skill 都不含流水线逻辑；它们把用户意图翻成引擎参数，引擎跑确定性 FSM。

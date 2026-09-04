@@ -52,6 +52,8 @@ import finalize_pipeline  # noqa: E402
 from fsm_context import OrchestratorContext  # noqa: E402
 from phase_o5 import classify_runner_error  # noqa: E402
 
+_resolve_o5_report = getattr(F, "_resolve_o5_report")
+
 
 # ─────────────────────────── PART 1: classify_runner_error ───────────────────────────
 
@@ -124,6 +126,7 @@ def stub_common(monkeypatch):
     import importlib
     monkeypatch.setattr(importlib, "reload", lambda m: m)
     monkeypatch.setattr(events, "emit", lambda *a, **k: None)
+    monkeypatch.setattr(F, "_sleep", lambda seconds: None)  # no real backoff in ut
     monkeypatch.setattr(phase_o5, "expected_truth_source", lambda ws: "benchmark")
     monkeypatch.setattr(phase_o5, "format_block_message", lambda op, o5: "")
     monkeypatch.setattr(phase_o5, "record_harness_state", lambda ws, rep: True)
@@ -231,3 +234,114 @@ def test_infra_runner_failed_at_cap_still_exits_2(stub_common, monkeypatch, tmp_
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_host_transient_mismatch_retries_as_infra(stub_common, monkeypatch, tmp_path):
+    """MISMATCH caused by a host H2D copy fault re-attempts in place as infra
+    (2026-08-23 CoT) instead of rolling back to await_worker.
+
+    Note (P0-1, 2026-08-28): copy-fault reasons carrying a device error code
+    (5070xx/aivec) are now split into the device class (zero backoff,
+    same-signature parking) — covered in tests/ut/test_same_signature_parking.py.
+    """
+    calls = _seq_runner(monkeypatch, [
+        _O5(
+            "MISMATCH",
+            summary="precision status is 'ERROR', not PASS",
+            measured={
+                "precision": {
+                    "reason": (
+                        "RuntimeError: copy_between_host_and_device_opapi "
+                        "... host bus timeout, connection reset by peer"
+                    )
+                }
+            },
+        ),
+        _O5("VERIFIED", harness_git_state="CLEAN", summary="ok on re-attempt"),
+    ])
+    res = getattr(F, '_o5_post_verify')(_ctx(tmp_path), _Snap())
+    assert res is None, "transient copy-fault mismatch must retry in place, not roll back"
+    assert stub_common == [], "must NOT roll back to await_worker"
+    assert len(calls) == 2, "expected 1 initial + 1 infra re-attempt"
+
+
+# ─────────────── PART 3: host copy-fault escalation guard (2026-08-27, 42_CoTAttention) ───────────────
+# torch_npu launches asynchronously: a candidate device-kernel hard fault
+# (507035/507015, e.g. aivec error 340) surfaces at the NEXT host op — often an
+# H2D copy — so the measured `reason` carries the copy-fault markers even when
+# the candidate caused it.  42_CoTAttention looped 10+ identical O5 failures
+# classified "INFRA, do not edit the candidate" while cot_softmax_f32 was
+# deterministically wedging the device.  The guard counts copy-fault
+# classifications per candidate binding; past the cap it stops re-attempting
+# as infra and dispatches the MISMATCH with a deterministic-fault note.
+#
+# P0-1 (2026-08-28): reasons carrying a device error code (5070xx / aivec) are
+# now classified DEVICE before this host-transient branch and no longer reach
+# this guard — they park via the same-signature counter (threshold 2, zero
+# backoff; see tests/ut/test_same_signature_parking.py).  This guard still
+# covers copy-fault texts WITHOUT a device code, so its fixtures use one.
+
+
+def _copy_fault_o5(binding: str) -> _O5:
+    return _O5(
+        "MISMATCH",
+        summary="precision status is 'ERROR', not PASS",
+        measured={
+            "precision": {
+                "reason": (
+                    "RuntimeError: copy_between_host_and_device_opapi "
+                    "... host copy queue timeout"
+                ),
+                "binding_sha256": binding,
+            }
+        },
+    )
+
+
+def test_host_copy_fault_escalates_after_cap(stub_common, monkeypatch, tmp_path):
+    """Same candidate binding tripping the copy-fault marker past the cap is
+    reclassified as a DETERMINISTIC candidate fault: no infra re-attempt, and
+    the dispatched MISMATCH carries the debug-recipe note for the worker.
+    """
+    ctx = _ctx(tmp_path)
+    calls = _seq_runner(monkeypatch, [_copy_fault_o5("bindX")])
+
+    cap = getattr(F, "_host_copy_fault_max_transient")()
+    for fire in range(1, cap + 1):
+        o5 = _resolve_o5_report(ctx, None)
+        assert "NOT infra" not in o5.summary, (
+            f"fire {fire} (<= cap {cap}) must still get the infra re-attempt"
+        )
+        assert len(calls) == 2 * fire, (
+            "each sub-cap fire = 1 initial O5 + 1 infra re-attempt"
+        )
+
+    o5 = _resolve_o5_report(ctx, None)
+    assert len(calls) == 2 * cap + 1, "escalated fire must NOT re-attempt O5"
+    assert o5.verdict == "MISMATCH"
+    assert "NOT infra" in o5.summary
+    assert "ASCEND_LAUNCH_BLOCKING=1" in o5.summary, "worker debug recipe attached"
+
+    import json as _json
+    ledger = _json.loads(
+        (ctx.workspace / getattr(F, "_HOST_COPY_FAULT_ESCALATION_FILE")).read_text()
+    )
+    assert ledger["bindX"]["count"] == cap + 1
+
+
+def test_host_copy_fault_escalation_is_per_binding(stub_common, monkeypatch, tmp_path):
+    """A DIFFERENT candidate binding starts its own counter — a new candidate
+    must not inherit the previous one's escalation (the new candidate could be
+    hitting a genuine transient host window).
+    """
+    ctx = _ctx(tmp_path)
+    cap = getattr(F, "_host_copy_fault_max_transient")()
+    calls = _seq_runner(monkeypatch, [_copy_fault_o5("bindA")])
+    for _ in range(cap):
+        _resolve_o5_report(ctx, None)
+    assert len(calls) == 2 * cap
+
+    calls_b = _seq_runner(monkeypatch, [_copy_fault_o5("bindB")])
+    o5 = _resolve_o5_report(ctx, None)
+    assert "NOT infra" not in o5.summary, "fresh binding must not inherit escalation"
+    assert len(calls_b) == 2, "fresh binding still gets its infra re-attempt"

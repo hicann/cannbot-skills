@@ -18,7 +18,9 @@ import os
 import json
 import re
 import selectors
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -35,6 +37,122 @@ log = logging.getLogger(__name__)
 _OPENCODE_RUN_MARKERS = ("opencode run", "opencode  run")
 _OP_SLUG_RE = re.compile(r"\b([a-z][a-z0-9_]*)-(?:kw|pp|ko|fo|ar|da|bs|td|tt|tpo|cl)-\d+")
 
+# A.7 (2026-08-30, 2_FFN_evo close-out): candidate-tree stall watchdog.
+# Complements the stream-silence watchdog: the opencode stream can stay
+# chatty (read/plan tool calls) while the candidate tree never changes —
+# the worker is alive but making no progress.  When the candidate scope
+# digest (npubench_core.candidate_tree_sha256) has not moved for
+# AOG_TREE_STALL_TIMEOUT_SEC (default 45 min), the subprocess group is
+# SIGTERMed and CandidateTreeStallTimeout is raised so the FSM can respawn.
+# The tree diff can be gamed, so this watchdog deliberately has NO
+# independent parking surface: fsm_phase_spawn counts each firing into the
+# P0-1 same-signature family instead.
+TREE_STALL_TIMEOUT_ENV = "AOG_TREE_STALL_TIMEOUT_SEC"
+TREE_STALL_TIMEOUT_SEC_DEFAULT = 2700
+TREE_STALL_WORKSPACE_ENV = "AOG_TREE_STALL_WORKSPACE"
+# Hashing the candidate scope on every select() tick would dominate the
+# monitor loop; poll the digest at this cadence instead.
+TREE_STALL_CHECK_INTERVAL_ENV = "AOG_TREE_STALL_CHECK_INTERVAL_SEC"
+TREE_STALL_CHECK_INTERVAL_SEC_DEFAULT = 60
+
+
+class CandidateTreeStallTimeout(Exception):
+    """Raised when the candidate tree digest has not changed for the stall
+    window while an agent stream is running.  The subprocess has been
+    SIGTERMed by the time this exception is raised; the caller (orchestrator
+    FSM) catches this distinctly to respawn and feed the P0-1
+    same-signature counter.
+    """
+
+    def __init__(self, agent_type: str, stall_seconds: float,
+                 tree_sha256: Optional[str] = None, *,
+                 partial_output: str = "",
+                 raw_envelope: Optional[dict] = None):
+        self.agent_type = agent_type
+        self.stall_seconds = stall_seconds
+        self.tree_sha256 = tree_sha256
+        self.partial_output = partial_output
+        self.raw_envelope = raw_envelope or {}
+        super().__init__(
+            f"{agent_type}: candidate tree digest unchanged for "
+            f"{stall_seconds:.0f}s (tree={tree_sha256 or 'unknown'}); "
+            f"SIGTERMed subprocess"
+        )
+
+
+@dataclass
+class _TreeStallWatchdog:
+    """Digest-polling tracker for the candidate-tree stall watchdog (A.7).
+
+    Fail-open by construction: any error while resolving the workspace or
+    computing the digest disables the watchdog (``workspace=None``) rather
+    than killing healthy spawns.
+    """
+
+    timeout_sec: int
+    check_interval_sec: int
+    workspace: Optional[Path]
+    baseline_sha: Optional[str] = None
+    changed_at: float = 0.0
+    last_check_at: float = 0.0
+
+    @property
+    def armed(self) -> bool:
+        return self.workspace is not None and self.timeout_sec > 0
+
+    def prime(self, now: float) -> None:
+        """Capture the baseline digest at stream start."""
+        if not self.armed:
+            return
+        self.baseline_sha = self._safe_digest()
+        if self.baseline_sha is None:
+            self.workspace = None
+            return
+        self.changed_at = now
+        self.last_check_at = now
+
+    def poll(self, now: float) -> bool:
+        """Return True once the digest has been unchanged for timeout_sec."""
+        if not self.armed or self.baseline_sha is None:
+            return False
+        if now - self.last_check_at < self.check_interval_sec:
+            return False
+        self.last_check_at = now
+        digest = self._safe_digest()
+        if digest is None:
+            # Transient digest failure must not fire the watchdog.
+            return False
+        if digest != self.baseline_sha:
+            self.baseline_sha = digest
+            self.changed_at = now
+            return False
+        return now - self.changed_at >= self.timeout_sec
+
+    def _digest(self) -> Optional[str]:
+        if self.workspace is None:
+            return None
+        try:
+            from npubench.npubench_core import candidate_tree_sha256
+
+            return candidate_tree_sha256(self.workspace)
+        except Exception as error:
+            logging.getLogger(__name__).debug(
+                "tree-stall watchdog digest unavailable (watchdog disabled): %s",
+                error,
+            )
+            return None
+
+    def _safe_digest(self) -> Optional[str]:
+        """Digest that never raises — a failing observer must not kill spawns."""
+        try:
+            return self._digest()
+        except Exception as error:
+            logging.getLogger(__name__).debug(
+                "tree-stall watchdog digest raised (treated as unavailable): %s",
+                error,
+            )
+            return None
+
 
 @dataclass
 class _StreamState:
@@ -50,6 +168,23 @@ class _StreamState:
     invalid_tool_count: int = 0
     invalid_tool_event: bool = False
     pending: bytes = b""
+    # A.5: last structured provider error observed on the stream.  The
+    # Envelope contract reserves api_error_status as the ONLY retry control
+    # flow field — error text is telemetry, never a retry criterion.
+    error_name: str | None = None
+    api_error_status: int | None = None
+
+
+@dataclass(frozen=True)
+class _StreamLineOutcome:
+    """Fields extracted from one opencode stream line (G.FNM.05)."""
+
+    session_id: str | None = None
+    total_cost: float | None = None
+    num_turns: int | None = None
+    invalid_tool: bool = False
+    error_name: str | None = None
+    api_error_status: int | None = None
 
 
 @dataclass
@@ -108,6 +243,7 @@ class _StreamFinishContext:
     agent_type: str | None
     kind: str
     mode: str
+    tree_watchdog: Any = None
 
 
 @dataclass(frozen=True)
@@ -211,7 +347,26 @@ class OpencodeBackend(Backend):
         # unaddressable for it. The name is Claude-Code-flavoured but it is simply the
         # plugin-root contract the agent prompts are written against, so the opencode
         # backend must satisfy it too.
-        env.setdefault("CLAUDE_PLUGIN_ROOT", str(OpencodeBackend._plugin_root()))
+        # 2026-08-27 (F5): inside the graybox the plugin content lives at
+        # /usr/local/cannbot-port-plugin (agent_dispatch stages it there), NOT
+        # at the host plugin root.  ${CLAUDE_PLUGIN_ROOT} references in the
+        # agent bodies must resolve in-sandbox or the worker loses every
+        # plugin-root-relative KB/skill pointer; agent_dispatch sets the flag
+        # when the graybox bind-set is in force.
+        if os.environ.get("AOG_GRAYBOX_PLUGIN_ROOT") == "1":
+            env.setdefault("CLAUDE_PLUGIN_ROOT", "/usr/local/cannbot-port-plugin")
+        else:
+            env.setdefault("CLAUDE_PLUGIN_ROOT", str(OpencodeBackend._plugin_root()))
+        # 2026-08-26 (graybox + opencode): the user config tree at
+        # ~/.config/opencode is outside the bwrap bind-set AND carries npm
+        # symlinks the graybox scanner rejects.  Point opencode at the
+        # symlink-free runtime copy under engine/workspace/.opencode-runtime
+        # (prepared once; agent_dispatch binds it read-only for opencode
+        # spawns).  Without this the sandboxed opencode falls back to its
+        # built-in default provider and every model call 404s.
+        _oc_runtime = OpencodeBackend._engine_root() / "workspace" / ".opencode-runtime"
+        if _oc_runtime.is_dir():
+            env.setdefault("OPENCODE_CONFIG_DIR", str(_oc_runtime))
         # Regenerated unconditionally: an inherited OPENCODE_CONFIG_CONTENT is user input,
         # and it carries the safety-net adapter registration (cfg["plugin"]) for every
         # dispatch kind — trusting an inherited value would run sub-agents with the whole
@@ -237,6 +392,16 @@ class OpencodeBackend(Backend):
                 if not OpencodeBackend._agrees_with_dispatch(env.get(name), workspace):
                     env[name] = workspace
         return env
+
+    @staticmethod
+    def prepare_skills_runtime(repo_root: Path) -> Path:
+        """Prepare the symlink-free skills runtime for graybox dispatch."""
+        return OpencodeBackend._ensure_skills_runtime(repo_root)
+
+    @staticmethod
+    def prepare_opencode_runtime(repo_root: Path) -> Path:
+        """Prepare the symlink-free user OpenCode configuration for dispatch."""
+        return OpencodeBackend._ensure_opencode_runtime(repo_root)
 
     # Keep static transcript helpers before instance methods.  G.CLS.06 requires
     # one uniform static/instance ordering throughout this class.
@@ -473,6 +638,173 @@ class OpencodeBackend(Backend):
         if not candidate:
             return False
         return os.path.abspath(str(candidate)) == os.path.abspath(str(dispatch_workspace))
+
+    @staticmethod
+    def _latest_file_mtime(root: str, names: list[str]) -> float:
+        """Return the newest mtime among files reported for one directory."""
+        newest = 0.0
+        for name in names:
+            try:
+                newest = max(newest, os.stat(os.path.join(root, name)).st_mtime)
+            except OSError:
+                continue
+        return newest
+
+    @staticmethod
+    def _source_latest_mtime(source: Path) -> float:
+        """Return the newest mtime below one source directory."""
+        if not source.is_dir():
+            return 0.0
+        newest = 0.0
+        for root, _dirs, names in os.walk(str(source)):
+            newest = max(newest, OpencodeBackend._latest_file_mtime(root, names))
+        return newest
+
+    @staticmethod
+    def _latest_source_mtime(sources: tuple) -> float:
+        """Return the newest file mtime among source directories."""
+        newest = 0.0
+        for source in sources:
+            newest = max(newest, OpencodeBackend._source_latest_mtime(source))
+        return newest
+
+    @staticmethod
+    def _prune_pycache(root: Path) -> None:
+        """Remove Python bytecode directories from a staged runtime tree."""
+        for walk_root, dirs, _names in os.walk(str(root)):
+            for directory in list(dirs):
+                if directory == "__pycache__":
+                    shutil.rmtree(os.path.join(walk_root, directory), ignore_errors=True)
+                    dirs.remove(directory)
+
+    @staticmethod
+    def _promote_runtime_copy(tmp: Path, runtime_dir: Path) -> None:
+        """Prune and atomically replace one prepared runtime directory."""
+        OpencodeBackend._prune_pycache(tmp)
+        if runtime_dir.exists():
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        os.replace(str(tmp), str(runtime_dir))
+
+    @staticmethod
+    def _copy_deref_child(child: Path, tmp: Path) -> None:
+        """Copy one runtime child, retaining the historical best-effort skip."""
+        try:
+            shutil.copytree(child, tmp / child.name, symlinks=False)
+        except OSError:
+            return
+
+    @staticmethod
+    def _copy_skill_source(source: Path, tmp: Path, *, include_files: bool) -> None:
+        """Copy plugin skills or repo directories containing a SKILL.md."""
+        if not source.is_dir():
+            return
+        for child in source.iterdir():
+            if child.is_dir() and (include_files or (child / "SKILL.md").is_file()):
+                shutil.copytree(child, tmp / child.name, symlinks=False)
+            elif include_files and child.is_file():
+                shutil.copy2(child, tmp / child.name)
+
+    @staticmethod
+    def _copy_config_source(source: Path, tmp: Path) -> None:
+        """Copy user configuration entries while skipping unreadable children."""
+        for child in source.iterdir():
+            try:
+                if child.is_dir():
+                    shutil.copytree(child, tmp / child.name, symlinks=False)
+                elif child.is_file():
+                    shutil.copy2(child, tmp / child.name)
+            except OSError:
+                continue
+
+    @staticmethod
+    def _runtime_refresh_needed(runtime_dir: Path, marker: Path, sources: tuple) -> bool:
+        """True when the runtime copy is missing or any source is newer."""
+        if not runtime_dir.is_dir() or not marker.is_file():
+            return True
+        newest = OpencodeBackend._latest_source_mtime(sources)
+        try:
+            return float(marker.read_text().strip() or 0) < newest
+        except (OSError, ValueError):
+            return True
+
+    @staticmethod
+    def _copy_deref(src_dir: Path, dest_dir: Path) -> None:
+        """Copy src children dereferencing symlinks; prune pycache; atomic via tmp name."""
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix="oc-runtime-tmp-", dir=str(dest_dir.parent)))
+        try:
+            for child in src_dir.iterdir():
+                OpencodeBackend._copy_deref_child(child, tmp)
+            OpencodeBackend._promote_runtime_copy(tmp, dest_dir)
+        except Exception:
+            shutil.rmtree(str(tmp), ignore_errors=True)
+            raise
+
+    @staticmethod
+    def _ensure_skills_runtime(repo_root: Path) -> Path:
+        """Idempotently prepare the symlink-free skills runtime copy.
+
+        2026-08-26 (CBA_MISSING_A_TIER): the graybox cannot bind the live
+        plugin skills dir at its host path (it ships __pycache__ .pyc
+        binaries the scanner rejects) and the repo-level ops/ skills (e.g.
+        ops-precision-standard) live outside the plugin tree. The runtime copy
+        is prepared in code so fresh checkouts work.
+        """
+        # repo_root points at the ENGINE directory; derive both source trees
+        # from that stable anchor.
+        plugin_skills = repo_root.parent / "skills"
+        ops_root = repo_root.parents[2] / "ops"
+        runtime_dir = repo_root / "workspace" / ".opencode-skills-runtime"
+        marker = runtime_dir / ".prepared"
+        sources = tuple(p for p in (plugin_skills, ops_root) if p.is_dir())
+        if not OpencodeBackend._runtime_refresh_needed(runtime_dir, marker, sources):
+            return runtime_dir
+        # Rebuild: plugin skill dirs first, then repo ops/ skill dirs (SKILL.md).
+        runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix="oc-skills-tmp-", dir=str(runtime_dir.parent)))
+        try:
+            OpencodeBackend._copy_skill_source(plugin_skills, tmp, include_files=True)
+            OpencodeBackend._copy_skill_source(ops_root, tmp, include_files=False)
+            OpencodeBackend._promote_runtime_copy(tmp, runtime_dir)
+        except Exception:
+            shutil.rmtree(str(tmp), ignore_errors=True)
+            raise
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(OpencodeBackend._latest_source_mtime(sources)))
+        return runtime_dir
+
+    @staticmethod
+    def _ensure_opencode_runtime(repo_root: Path) -> Path:
+        """Idempotently prepare the symlink-free user opencode config copy.
+
+        2026-08-26 (kw-1 provider 404): the live ~/.config/opencode carries
+        npm symlinks the graybox scanner rejects; OPENCODE_CONFIG_DIR points
+        at this copy. Same refresh-by-marker discipline as the skills runtime
+        so a fresh checkout does not reproduce the 404.
+        """
+        src = Path(os.environ.get("OPENCODE_USER_CONFIG", str(Path.home() / ".config" / "opencode")))
+        runtime_dir = repo_root / "workspace" / ".opencode-runtime"
+        marker = runtime_dir / ".prepared"
+        if not src.is_dir():
+            return runtime_dir
+        sources = (src,)
+        # Missing key file (e.g. opencode.json) makes the copy useless even
+        # when the marker looks fresh — force a rebuild.
+        if runtime_dir.is_dir() and not (runtime_dir / "opencode.json").exists():
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        if not OpencodeBackend._runtime_refresh_needed(runtime_dir, marker, sources):
+            return runtime_dir
+        runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix="oc-runtime-tmp-", dir=str(runtime_dir.parent)))
+        try:
+            OpencodeBackend._copy_config_source(src, tmp)
+            OpencodeBackend._promote_runtime_copy(tmp, runtime_dir)
+        except Exception:
+            shutil.rmtree(str(tmp), ignore_errors=True)
+            raise
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(OpencodeBackend._latest_source_mtime(sources)))
+        return runtime_dir
 
     @staticmethod
     def _plugin_root() -> Path:
@@ -717,7 +1049,17 @@ class OpencodeBackend(Backend):
         """
         root = OpencodeBackend._plugin_root()
         agents_dir = root / "agents"
-        skills_dir = root / "skills"
+        # 2026-08-26 (CBA_MISSING_A_TIER): the plugin skills dir is NOT bound in
+        # the graybox at its host path (the runtime is staged under
+        # /usr/local/cannbot-port-plugin), so opencode's skills.paths resolved to
+        # a missing dir -> skill registry fell back to built-ins and every
+        # tier-a skill call (ops-precision-standard) failed.  Prefer the
+        # symlink-free runtime copy under engine/workspace/
+        # .opencode-skills-runtime (prepared once, bound read-only by
+        # agent_dispatch), falling back to the live plugin dir for non-graybox
+        # runs.
+        _skills_runtime = OpencodeBackend._engine_root() / "workspace" / ".opencode-skills-runtime"
+        skills_dir = _skills_runtime if _skills_runtime.is_dir() else root / "skills"
         # opencode expands `{file:...}` macros inside config STRINGS. An agent body that
         # merely mentions `{file:line, before/after}` (aog-precision-probe.md:285) makes the
         # whole config invalid and opencode refuses to start. Referencing the body as
@@ -755,14 +1097,20 @@ class OpencodeBackend(Backend):
             cfg["agent"] = agents
         if skills_dir.is_dir():
             cfg["skills"] = {"paths": [str(skills_dir)]}
-        # Safety-net adapter. Registering it here (rather than copying a file into the
-        # user's config dir) keeps the install footprint at zero: the tuple form delivers
-        # `options.projectRoot` to A5OpsHooksPlugin(ctx, options), which is how the adapter
-        # locates the canonical Python checkers under engine/src/scripts/workflow/.
+        # Register the optional safety-net adapter in memory; do not copy it
+        # into the user's configuration directory. Its project-root paths are
+        # host-specific and are not graybox-resolvable until staging is fixed.
         engine = OpencodeBackend._engine_root()
         adapter = engine / "src" / "opencode" / "a5_ops_hooks.mjs"
-        if adapter.is_file():
+        # Keep it disabled by default because it still depends on the host
+        # engine location; opt in only after accepting that contract.
+        if os.environ.get("AOG_OPENCODE_ADAPTER") == "1" and adapter.is_file():
             cfg["plugin"] = [[f"file://{adapter}", {"projectRoot": str(engine)}]]
+        elif adapter.is_file():
+            logging.getLogger(__name__).warning(
+                "opencode safety-net adapter disabled (AOG_OPENCODE_ADAPTER != 1); "
+                "graybox-incompatible host-baked projectRoot — see Bug#16"
+            )
         if not cfg:
             return None
         return json.dumps(cfg)
@@ -782,10 +1130,12 @@ class OpencodeBackend(Backend):
 
     @staticmethod
     def _stream_completed_without_failure(timed_out: bool, silence_timed_out: bool,
-                                          state: _StreamState) -> bool:
+                                          state: _StreamState, *, tree_stalled: bool = False) -> bool:
         if timed_out:
             return False
         if silence_timed_out:
+            return False
+        if tree_stalled:
             return False
         return not state.invalid_tool_event
 
@@ -913,6 +1263,78 @@ class OpencodeBackend(Backend):
     @staticmethod
     def _redacted_cmd(cmd: list) -> list:
         return [str(part) for part in cmd]
+
+    @staticmethod
+    def _extract_stream_error(event: dict) -> tuple[str | None, int | None]:
+        """Extract (error name, provider status) from an opencode error event.
+
+        Observed shape (2_FFN_evo abort, 2026-08-29)::
+
+            {"type": "error", "error": {"name": "UnknownError",
+             "data": {"message": "Unexpected server error. ...", "ref": ...}}}
+
+        Structured provider errors (APIError) carry the HTTP status in
+        ``error.data.statusCode`` (a few builds use ``status``/``code`` or
+        hoist it onto ``error`` itself).  Only those STRUCTURED fields are
+        read — never the message text.  An error event without a structured
+        status yields ``(name, None)`` and stays non-retryable.
+        """
+        if event.get("type") != "error":
+            return None, None
+        error = event.get("error") if isinstance(event.get("error"), dict) else {}
+        name = error.get("name")
+        data = error.get("data") if isinstance(error.get("data"), dict) else {}
+        status: int | None = None
+        for container in (data, error):
+            for key in ("statusCode", "status", "code"):
+                value = container.get(key)
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, int):
+                    status = value
+                    break
+                if isinstance(value, str) and value.isdigit():
+                    status = int(value)
+                    break
+            if status is not None:
+                break
+        return (str(name) if name is not None else None), status
+
+    @staticmethod
+    def _new_tree_stall_watchdog(kind: str, mode: str, tee_path,
+                                 started: float) -> _TreeStallWatchdog | None:
+        """Arm the A.7 candidate-tree stall watchdog for streaming agent work.
+
+        The watched workspace defaults to the tee directory (agent_dispatch
+        tees every streaming agent stream to ``<workspace>/.cc_stream_log_*``);
+        AOG_TREE_STALL_WORKSPACE overrides it.  Disabled (returns None) for
+        non-agent kinds, non-streaming modes, a non-positive timeout, or when
+        the baseline digest cannot be computed (fail-open — a watchdog that
+        cannot observe must never kill a healthy spawn).
+        """
+        if kind != "agent" or mode != "streaming":
+            return None
+        raw_timeout = os.environ.get(TREE_STALL_TIMEOUT_ENV)
+        try:
+            timeout_sec = int(raw_timeout) if raw_timeout else TREE_STALL_TIMEOUT_SEC_DEFAULT
+        except ValueError:
+            timeout_sec = TREE_STALL_TIMEOUT_SEC_DEFAULT
+        if timeout_sec <= 0:
+            return None
+        raw_interval = os.environ.get(TREE_STALL_CHECK_INTERVAL_ENV)
+        try:
+            interval_sec = max(1, int(raw_interval)) if raw_interval else TREE_STALL_CHECK_INTERVAL_SEC_DEFAULT
+        except ValueError:
+            interval_sec = TREE_STALL_CHECK_INTERVAL_SEC_DEFAULT
+        raw_workspace = os.environ.get(TREE_STALL_WORKSPACE_ENV)
+        workspace = Path(raw_workspace) if raw_workspace else (Path(tee_path).parent if tee_path else None)
+        watchdog = _TreeStallWatchdog(
+            timeout_sec=timeout_sec,
+            check_interval_sec=interval_sec,
+            workspace=workspace,
+        )
+        watchdog.prime(started)
+        return watchdog if watchdog.armed else None
 
     # ---- Backend interface ----
 
@@ -1127,6 +1549,7 @@ class OpencodeBackend(Backend):
         state, timeout_sec, deadline, silence_timeout_sec = self._new_stream_state(
             started, timeout, silence_timeout
         )
+        tree_watchdog = self._new_tree_stall_watchdog(kind, mode, tee_path, started)
         tee = None
         proc: subprocess.Popen | None = None
         sel: selectors.BaseSelector | None = None
@@ -1149,6 +1572,7 @@ class OpencodeBackend(Backend):
                     agent_type=agent_type,
                     kind=kind,
                     mode=mode,
+                    tree_watchdog=tree_watchdog,
                 )
             )
         except FileNotFoundError as e:
@@ -1161,14 +1585,16 @@ class OpencodeBackend(Backend):
             self._close_stream_resources(sel, tee)
 
     def _finish_stream(self, context: _StreamFinishContext) -> Envelope:
-        timed_out, silence_timed_out = self._monitor_stream(
+        timed_out, silence_timed_out, tree_stalled = self._monitor_stream(
             context.proc, context.selector, context.stdout_fd, context.state,
             deadline=context.deadline,
             silence_timeout_sec=context.silence_timeout_sec,
             tee=context.tee,
             progress_callback=context.progress_callback,
+            tree_watchdog=context.tree_watchdog,
         )
-        if self._stream_completed_without_failure(timed_out, silence_timed_out, context.state):
+        if self._stream_completed_without_failure(timed_out, silence_timed_out, context.state,
+                                                  tree_stalled=tree_stalled):
             return self._stream_success_envelope(
                 context.cmd, context.state, context.proc.wait(), context.started,
                 context.kind, context.mode,
@@ -1183,6 +1609,15 @@ class OpencodeBackend(Backend):
             mode=context.mode,
             tee=context.tee,
         )
+        if tree_stalled:
+            watchdog = context.tree_watchdog
+            raise CandidateTreeStallTimeout(
+                context.agent_type or self.name,
+                time.monotonic() - (watchdog.changed_at if watchdog is not None else context.started),
+                getattr(watchdog, "baseline_sha", None),
+                partial_output=failure.output_text,
+                raw_envelope=failure.raw_envelope,
+            )
         self._raise_stream_silence_timeout_if_needed(
             context, timed_out, silence_timed_out, failure,
         )
@@ -1222,19 +1657,23 @@ class OpencodeBackend(Backend):
 
     def _monitor_stream(self, proc: subprocess.Popen, selector: selectors.BaseSelector, stdout_fd: int,
                         state: _StreamState, *, deadline: float | None, silence_timeout_sec: int | None,
-                        tee, progress_callback) -> tuple[bool, bool]:
+                        tee, progress_callback, tree_watchdog=None) -> tuple[bool, bool, bool]:
         while True:
             # Drain first: select() may time out precisely while a child event is already
             # buffered in the pipe.  Classifying that state as silent loses the partial
             # result and raises a false retry signal.
             self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
             if state.invalid_tool_event:
-                return False, False
+                return False, False, False
             timed_out, silence_timed_out = self._stream_timeout_state(
                 state.last_output_at, deadline, silence_timeout_sec
             )
             if timed_out or silence_timed_out:
-                return timed_out, silence_timed_out
+                return timed_out, silence_timed_out, False
+            # A.7: the stream can stay chatty while the candidate tree never
+            # changes — poll the scope digest between the cheap timer checks.
+            if tree_watchdog is not None and tree_watchdog.poll(time.monotonic()):
+                return False, False, True
             if proc.poll() is not None:
                 self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
                 if state.pending and not state.invalid_tool_event:
@@ -1243,11 +1682,11 @@ class OpencodeBackend(Backend):
                         tee, progress_callback,
                     )
                     state.pending = b""
-                return False, False
+                return False, False, False
             if selector.select(self._stream_wait_interval(state.last_output_at, deadline, silence_timeout_sec)):
                 self._drain_stream_stdout(state, stdout_fd, tee, progress_callback)
                 if state.invalid_tool_event:
-                    return False, False
+                    return False, False, False
 
 
     def _drain_stream_stdout(self, state: _StreamState, stdout_fd: int, tee, progress_callback) -> None:
@@ -1277,13 +1716,17 @@ class OpencodeBackend(Backend):
 
     def _record_stream_line(self, state: _StreamState, line: str, tee, progress_callback) -> None:
         state.last_output_at = time.monotonic()
-        session_id, cost, turns, invalid = self._consume_stream_line(
+        outcome = self._consume_stream_line(
             line, state.raw_lines, state.text_parts, tee, progress_callback
         )
-        state.session_id = session_id or state.session_id
-        state.total_cost = cost if cost is not None else state.total_cost
-        state.num_turns = turns if turns is not None else state.num_turns
-        if invalid:
+        state.session_id = outcome.session_id or state.session_id
+        state.total_cost = outcome.total_cost if outcome.total_cost is not None else state.total_cost
+        state.num_turns = outcome.num_turns if outcome.num_turns is not None else state.num_turns
+        if outcome.error_name is not None:
+            state.error_name = outcome.error_name
+        if outcome.api_error_status is not None:
+            state.api_error_status = outcome.api_error_status
+        if outcome.invalid_tool:
             state.invalid_tool_count += 1
             state.invalid_tool_event = state.invalid_tool_count >= state.invalid_tool_limit
 
@@ -1308,6 +1751,7 @@ class OpencodeBackend(Backend):
             output_text=output_text,
             session_id=state.session_id,
             duration_ms=duration_ms,
+            api_error_status=state.api_error_status,
             raw_envelope={
                 "timed_out": True,
                 "timeout_sec": timeout_sec,
@@ -1320,6 +1764,8 @@ class OpencodeBackend(Backend):
                 "mode": mode,
                 "event_format": "json",
                 "returncode": proc.returncode,
+                "error_name": state.error_name,
+                "api_error_status": state.api_error_status,
                 "stdout_tail": raw_tail,
                 "cmd": self._redacted_cmd(cmd),
             },
@@ -1335,6 +1781,11 @@ class OpencodeBackend(Backend):
             total_cost_usd=state.total_cost,
             num_turns=state.num_turns,
             duration_ms=int((time.monotonic() - started) * 1000),
+            # A.5: a provider error event followed by a non-zero exit (the
+            # 2_FFN_evo "Unexpected server error" abort) must surface the
+            # structured status here — this is the envelope the FSM retry
+            # consumer actually sees.
+            api_error_status=state.api_error_status,
             raw_envelope={
                 "returncode": returncode,
                 "stdout_tail": "".join(state.raw_lines)[-4000:],
@@ -1342,12 +1793,14 @@ class OpencodeBackend(Backend):
                 "backend": self.name,
                 "mode": mode,
                 "event_format": "json",
+                "error_name": state.error_name,
+                "api_error_status": state.api_error_status,
                 "cmd": self._redacted_cmd(cmd),
             },
         )
 
     def _consume_stream_line(self, line: str, raw_lines: list[str], text_parts: list[str],
-                             tee, progress_callback) -> tuple[str | None, float | None, int | None, bool]:
+                             tee, progress_callback) -> _StreamLineOutcome:
         raw_lines.append(line)
         if len(raw_lines) > 1000:
             del raw_lines[: len(raw_lines) - 1000]
@@ -1360,8 +1813,9 @@ class OpencodeBackend(Backend):
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            return None, None, None, False
+            return _StreamLineOutcome()
         session_id = event.get("sessionID") or event.get("session_id")
+        error_name, api_error_status = self._extract_stream_error(event)
         part = event.get("part") if isinstance(event.get("part"), dict) else {}
         if event.get("type") == "text" or part.get("type") == "text":
             text = part.get("text") or event.get("text") or ""
@@ -1385,7 +1839,10 @@ class OpencodeBackend(Backend):
             tokens = part.get("tokens")
             if isinstance(tokens, dict) and isinstance(tokens.get("total"), int):
                 num_turns = tokens["total"]
-        return session_id, total_cost, num_turns, invalid_tool
+        return _StreamLineOutcome(
+            session_id=session_id, total_cost=total_cost, num_turns=num_turns,
+            invalid_tool=invalid_tool, error_name=error_name, api_error_status=api_error_status,
+        )
 
 
     def _format_prompt(self, target: str, prompt: str, *, kind: str) -> str:

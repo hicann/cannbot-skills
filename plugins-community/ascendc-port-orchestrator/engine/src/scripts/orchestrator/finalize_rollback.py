@@ -45,7 +45,12 @@ def _rollback_history_path(workspace: Path) -> Path:
 
 
 def record_rollback(
-    workspace: Path, *, rollback_state: str, reason: str, gate: str
+    workspace: Path,
+    *,
+    rollback_state: str,
+    reason: str,
+    gate: str,
+    reason_limit: int | None = 1000,
 ) -> dict:
     """Append a rollback entry to .rollback_history.jsonl and return it.
 
@@ -53,11 +58,12 @@ def record_rollback(
     `check_finalize_eligibility`. Signature is computed from (gate,
     rollback_state) — see `_rollback_signature`.
     """
+    persisted_reason = reason if reason_limit is None else reason[:reason_limit]
     entry = {
         "ts": _datetime.now(_timezone.utc).isoformat(),
         "gate": gate,
         "rollback_state": rollback_state,
-        "reason": reason[:1000],  # capped diagnostic
+        "reason": persisted_reason,
         "signature": _rollback_signature(gate, rollback_state),
     }
     path = _rollback_history_path(workspace)

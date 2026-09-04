@@ -334,10 +334,12 @@ def test_legacy_default_installer_is_fail_closed(tmp_path, monkeypatch, capsys):
     try:
         checker.cmd_install(SimpleNamespace())
     except BaseException as exc:
-        assert type(exc).__name__ == "SystemExit"
-        assert exc.code == 2
+        assert type(exc).__name__ == "LegacyInstallerDisabled"
     else:  # pragma: no cover
         raise AssertionError("legacy installer unexpectedly returned")
+    # The CLI entry, not the library function, owns the process exit status.
+    monkeypatch.setattr(checker.sys, "argv", ["preflight_install_hooks.py"])
+    assert checker.main() == 2
     output = capsys.readouterr().out
     assert str(plugin / "init.sh") in output
     assert "/aog-preflight" not in output

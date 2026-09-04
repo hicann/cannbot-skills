@@ -51,8 +51,10 @@ RUNNER_CONTRACT_VERSION = "npubench/v1"
 # under an older exclusion list" (harness digest-scheme drift — re-freeze and
 # re-evaluate) from genuine candidate-tree drift.  v1: original list;
 # v2: +5 finalize runtime markers (fix 11); v3: + GE op_host delivery trio
-# (fix 15).
-CANDIDATE_DIGEST_SCHEME = "npubench-candidate-scope/v3"
+# (fix 15); v4: + .opgen_same_signature.json / .kernel_worker_active —
+# controller/worker runtime markers written and removed inside the O5 freeze
+# window (2026-08-29 2_FFN_evo; see the exclusion-list comment).
+CANDIDATE_DIGEST_SCHEME = "npubench-candidate-scope/v4"
 PRECISION_CONTRACT_VERSION = "npubench-precision/v1"
 PERFORMANCE_CONTRACT_VERSION = "npubench-performance-quick/v1"
 EVIDENCE_DIRNAME = "npubench_evidence"
@@ -863,6 +865,59 @@ def _deferred_performance_report(
     return report
 
 
+def _precision_host_error_only(precision: Mapping[str, Any]) -> bool:
+    """True iff every precision case failed with a host-side invocation error.
+
+    Source-migration flow 2026-08-22: unregistered-op / import-broken
+    candidates fail 100% of cases with `candidate invocation failed`-style
+    reasons; numerical failures must NOT trigger the perf skip.
+    """
+    cases = precision.get("cases") or []
+    if not cases:
+        return False
+    if any(c.get("status") == "PASS" for c in cases):
+        return False
+    reasons = {str(c.get("reason", "")) for c in cases}
+    return bool(reasons) and all(
+        ("candidate invocation failed" in r)
+        or ("has no attribute" in r)
+        or ("AttributeError" in r)
+        or ("not registered" in r)
+        for r in reasons
+    )
+
+
+def _synthesized_skipped_performance(
+    precision: Mapping[str, Any], *, workspace: Path, run_id: str, device: int
+) -> dict[str, Any]:
+    """ERROR performance evidence when the perf sweep is skipped.
+
+    Mirrors the deferred-report persistence contract (stale-file fix
+    2026-08-22): the finalize contract reads performance_report.json from
+    disk, so the skipped path must write it too.
+    """
+    binding = precision.get("evaluation_binding") or {}
+    report = _base_report("performance", status="ERROR", binding=binding, run_id=run_id)
+    report.update({
+        "reason": (
+            "performance skipped: precision has zero passing cases "
+            "(candidate invocation failed)"
+        ),
+        "device": device,
+        "profiling_mode": "skipped",
+        "warm_up": 0,
+        "repeats": 0,
+        "keep_prof": False,
+        "native_fixture": {},
+        "profile_archive": None,
+        "profile_tree_sha256": None,
+        "profiler_summary": None,
+        "command": [],
+    })
+    _try_write_report(workspace, PERFORMANCE_REPORT_FILENAME, report)
+    return report
+
+
 def _evaluate_lane_verdict(
     precision: Mapping[str, Any], performance: Mapping[str, Any], binding_sha: Any
 ) -> tuple[str, str]:
@@ -1217,6 +1272,22 @@ _CANDIDATE_RUNTIME_TOP_LEVEL = frozenset(
         ".incoming",
         ".git",
         ".opgen_state.json",
+        # 2026-08-29 (2_FFN_evo, 53/53 PASS finalize rollback): both are
+        # controller/worker runtime markers written around the O5 freeze
+        # window — ``.opgen_same_signature.json`` is rewritten by the P0-1
+        # same-signature counter during O5 post-verify (after the freeze),
+        # and ``.kernel_worker_active`` is created/removed at worker spawn /
+        # exit.  Neither is candidate source; including them drifted the
+        # current-scope digest between O5 freeze and the finalize gates and
+        # failed all 7 provenance gates on a 53/53 PASS candidate.
+        ".opgen_same_signature.json",
+        ".kernel_worker_active",
+        # 2026-08-30 (A.8 compile-only contract gate): request/response
+        # channels are controller-owned runtime traffic written while a
+        # worker is active; including them would drift the scope digest and
+        # falsely re-arm the candidate-tree stall watchdog.
+        ".compile_requests",
+        ".compile_responses",
         # O5 publishes this controller-owned summary after the candidate has
         # been frozen.  It is evidence, not candidate source; including it
         # would make the current-scope digest drift before finalization.

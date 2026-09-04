@@ -58,6 +58,23 @@ def test_write_then_read_roundtrip(tmp_path):
     assert meta["schema_version"] == SCHEMA_VERSION
 
 
+def test_npubench_is_a_supported_project_baseline(tmp_path):
+    """A frozen old-format NPUKernelBench task has its own truth baseline."""
+    project = tmp_path / "npubench-proj"
+    fp = write_project_metadata(
+        project,
+        opgen_mode="port_a3_to_a5",
+        source_type="npukernelbench_task",
+        source_path="/inputs/3_Add.py",
+        reference_baseline="npubench",
+        target_chip="Ascend950PR",
+    )
+
+    assert "npubench" in VALID_REFERENCE_BASELINES
+    assert read_project_metadata(project)["reference_baseline"] == "npubench"
+    assert fp.is_file()
+
+
 def test_write_rejects_invalid_mode(tmp_path):
     project = tmp_path / "proj"
     try:

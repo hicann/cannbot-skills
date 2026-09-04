@@ -51,7 +51,7 @@ class NpubenchLeaseError(RuntimeError):
 
 def _authenticated_build_failure_kind(
     workspace: Path,
-    source_kind: str,
+    source_kind: str | None,
     build: Mapping[str, Any],
     *,
     lane: int,
@@ -157,7 +157,7 @@ def _authenticated_receipt(
 
 
 def _receipt_source_bindings_match(
-    workspace: Path, receipt: Mapping[str, Any], source_kind: str
+    workspace: Path, receipt: Mapping[str, Any], source_kind: str | None
 ) -> bool:
     """Bind the receipt to the workspace's durable source and authored inputs."""
     npubench_target = importlib.import_module("npubench.npubench_target")
@@ -424,6 +424,23 @@ _CONTROLLED_TARGET_BUILDS = {
     ),
 }
 
+_GENERIC_TARGET_BUILD = (
+    "build_generic_kernel_project_on_target",
+    "generic kernel project",
+)
+
+
+def _generic_kernel_project_present(workspace: Path) -> bool:
+    """Detect the generic authored kernel project the engine can build itself."""
+    cmake = workspace / "kernel" / "CMakeLists.txt"
+    entry = workspace / "model_new_ascendc.py"
+    return (
+        cmake.is_file()
+        and not cmake.is_symlink()
+        and entry.is_file()
+        and not entry.is_symlink()
+    )
+
 
 def _controlled_build_precheck(workspace: Path, lane: int):
     """Run the engine-controlled target build before any lane is leased.
@@ -446,8 +463,16 @@ def _controlled_build_precheck(workspace: Path, lane: int):
     port_source = durable_state.get("port_source")
     source_kind = port_source.get("kind") if isinstance(port_source, Mapping) else None
     controlled_build = _CONTROLLED_TARGET_BUILDS.get(source_kind)
+    build_source_kind = source_kind
     if controlled_build is None:
-        return None
+        # Unmapped/absent source kinds (opgen_mode=port_a3_to_a5 has no
+        # port_source binding) still need the controlled build when the
+        # workspace carries a generic authored kernel project; otherwise O5
+        # would evaluate a candidate snapshot with no built .so.
+        if not _generic_kernel_project_present(workspace):
+            return None
+        controlled_build = _GENERIC_TARGET_BUILD
+        build_source_kind = None
     limited_target_soc: str | None = None
     target_env = _read_ascendc_env(workspace)
     target_soc = a5_soc_version(target_env)
@@ -473,7 +498,7 @@ def _controlled_build_precheck(workspace: Path, lane: int):
             rollback_kind="infra",
             failure_kind=_authenticated_build_failure_kind(
                 workspace,
-                source_kind,
+                build_source_kind,
                 build,
                 lane=lane,
                 expected_attempt_id=build_attempt_id,

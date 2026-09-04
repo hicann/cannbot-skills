@@ -22,7 +22,10 @@ _ORCH_DIR = _HERE.parent.parent.parent.parent
 if str(_ORCH_DIR) not in sys.path:
     sys.path.insert(0, str(_ORCH_DIR))
 
-from plugins.port_a3 import PortA3Plugin  # noqa: E402
+from plugins.port_a3 import (  # noqa: E402
+    PortA3Plugin,
+    TILELANG_PROFILE_VALID,
+)
 
 
 @pytest.fixture
@@ -198,6 +201,50 @@ def test_archive_layout_mapping(plugin, tmp_path):
     assert result["kernel/arch35/"] == "op_kernel/arch35/"
     assert result["kernel/"] == "op_kernel/"
     assert result["op_host/"] == "op_host/"
+
+
+def test_verifier_accepts_one_expression_modelnew_call(tmp_path, plugin):
+    """Audit L1 (2026-08-22): `ModelNew()(inputs)` one-expression
+    instantiate+call is legitimate verifier usage, not decorative bypass.
+    """
+    ws = tmp_path / "op_l1"
+    ws.mkdir()
+    (ws / "pass_a_runner.py").write_text(
+        "import model_new_ascendc\n"
+        "out = model_new_ascendc.ModelNew()(inputs)\n"
+    )
+    result = plugin.check_verifier_uses_modelnew(ws, {"precision": {"status": "PASS"}})
+    assert result is None, result
+
+
+def test_tilelang_archive_retains_nested_host_and_device_sources(plugin):
+    # Bind the strict-delivery classifiers once instead of reaching into the
+    # plugin's protected attributes at every call site.
+    direct_path_is_retained = getattr(plugin, "_direct_path_is_retained")
+    archive_path_rejection = getattr(plugin, "_archive_path_rejection_for_profile")
+    for path in (
+        "model_new_ascendc.py",
+        "kernel/CMakeLists.txt",
+        "kernel/register.cpp",
+        "kernel/op_host/add.cpp",
+        "kernel/op_kernel/add.cpp",
+        "kernel/include/add.h",
+    ):
+        assert direct_path_is_retained(TILELANG_PROFILE_VALID, path), path
+        assert archive_path_rejection(TILELANG_PROFILE_VALID, path) is None, path
+    assert not direct_path_is_retained(
+        TILELANG_PROFILE_VALID, "kernel/build/libadd.so"
+    )
+
+
+def test_legacy_archive_policy_and_completeness_are_unchanged(tmp_path, plugin):
+    assert plugin.archive_layout_mapping(tmp_path)["kernel/"] == "op_kernel/"
+    assert plugin.resolve_archive_target_for_workspace(
+        tmp_path, "kernel/add.cpp", "add"
+    ) == "op_kernel/add.cpp"
+    # No direct state means the established PB-33 op_host check still runs.
+    assert plugin.check_op_host_completeness(tmp_path) is not None
+    assert plugin.should_archive_path(tmp_path, ".port_source/anything") is True
 
 
 def test_archive_target_resolution(plugin):

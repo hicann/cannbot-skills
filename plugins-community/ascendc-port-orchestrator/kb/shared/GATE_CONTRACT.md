@@ -20,9 +20,23 @@ update the brief callers in the same commit.
 
 ## §Phase D Verify Gate
 
+### 推荐 `npubench` 输入（KernelBench 风格 task golden）
+
+`reference_inputs/npubench/<bundle_sha256>/` 中的 task `.py`、同 stem `.json` / `.jsonl` sidecar
+和 bundle manifest 是原样冻结的 golden。它与 worker 在 `workspace/{op}/model.py` 维护的
+历史 benchmark adapter 不是同一个文件。
+
+- O2.5 必须验证 immutable bundle、state binding 与 target preflight；O5 必须使用 provider-owned 的 task
+  verifier、冻结 fixture 与 W3/R5 profile contract。worker/target 输出、候选实现、A3 runtime/capture 和 archive
+  不能替代这份 truth。
+- worker 不得重写 task、用 model/test 语义重构 task 的输入、或从 candidate/target 重新生成 golden。
+- bundle/fixture/profile binding 不完整或不一致时，`npubench` 路径必须 `FAIL_NO_INDEPENDENT_TRUTH`，不得回退
+  到 A3。
+
 ### model.py 接口铁规 (P0abg, 2026-05-08)
 
-任何 workspace 里的 `model.py` 和 `model_cpu_truth.py`（Path-A CPU truth 分离文件）
+以下规则只适用于 worker 生成的 workspace `model.py` 和 `model_cpu_truth.py`（Path-A CPU truth
+分离文件）：
 必须定义 `get_input_groups()`，**绝不允许**只定义 `get_inputs()`。这是 vendor
 benchmark 接口规范 —— vendor `benchmarks/NPUKernelBench/levelN/<op>.py`
 的全部 31+ 算子都用 `get_input_groups()`，没有一个用 `get_inputs()`。
@@ -50,17 +64,19 @@ worker 需要将性能/研究基线与终验 truth 分离，不能用 target NPU
 
 | 文件 | 角色 | 使用者 |
 |---|---|---|
+| `reference_inputs/npubench/<bundle>/task.py` + sidecar | 推荐迁移 golden 的 immutable KernelBench-style task bundle | O2.5 preflight + provider-owned O5；是 npubench 的终验 truth |
 | `model.py` | 可选 target prior-art / 性能研究基线 | `performance.py` 诊断性性能对比；不得作为终验 truth |
-| `model_cpu_truth.py` | CPU fp64/autograd 精度 oracle | 反向生成终验；迁移终验另用 selected arch22 source-arch NPU capture |
+| `model_cpu_truth.py` | CPU fp64/autograd 精度 oracle | 反向生成终验；迁移终验使用 npubench bundle 或显式 source-arch capture |
 
 规则：
 - `model.py` 可保留 target prior-art 的原始实现（调用 `torch_npu.*`），但只作研究/性能基线
 - 反向生成必须提供可追溯到前向契约的 `model_cpu_truth.py`（CPU fp64/autograd）
-- 迁移必须提供当前 selected arch22 source 的 source-arch NPU capture
-- 两个文件都必须定义 `get_input_groups()`
+- 选择 `npubench` 时必须提供暂存 task/sidecar bundle、provider-owned fixture/verifier 证据和完整 profile contract；
+  显式 `a3_live` 才必须提供 selected arch22 source 的 source-arch NPU capture
+- worker-owned `model.py` 与 `model_cpu_truth.py` 都必须定义 `get_input_groups()`
 - `performance.py` 可以 target prior-art 为对比基线，但必须标为 diagnostic/advisory
-- 缺少相应 source-arch capture 或 CPU fp64/autograd oracle 时，终验必须
-  `FAIL_NO_INDEPENDENT_TRUTH`，不得 fallback 到 `model.py`
+- 缺少所选 npubench bundle/provider evidence、显式 source-arch capture 或 CPU fp64/autograd
+  oracle 时，终验必须 `FAIL_NO_INDEPENDENT_TRUTH`，不得 fallback 到 worker/target `model.py`
 
 ### Workspace 必须有 `{op}.json` (P0abf, 2026-05-07)
 

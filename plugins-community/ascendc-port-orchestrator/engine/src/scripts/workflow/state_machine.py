@@ -58,6 +58,9 @@ Condition DSL (evaluated against workspace snapshot):
   so handoff_match (prefix-only) can never see it. (Added 2026-06-03; before this
   the YAML used `handoff_match: "KO_PERF_PLATEAU"` which silently never fired and
   let the plateau verdict fall through to redundant optimizer respawns.)
+- reference_source_is: str — exact match against the complete durable
+  `reference.source` binding (provider-specific routing; fails closed when the
+  binding is missing or malformed)
 - verification_precision_status_in / _not_in: [str, ...]
 - verification_det_policy_satisfied: bool
 - verification_perf_below_threshold: bool
@@ -121,6 +124,17 @@ _PROJECT_ROOT = _HERE.parents[3]  # engine/ (kept for any engine-relative use)
 YAML_PATH = _find_fsm_yaml(_HERE)
 
 TRANSITIONS_FILENAME = "state_transitions.jsonl"
+
+
+def _is_build_ready_handoff(handoff: str) -> bool:
+    """Return whether a handoff claims provider-owned candidate readiness."""
+    text = (handoff or "").lstrip()
+    return bool(
+        re.match(
+            r"^(?:@orchestrator:|→ orchestrator:)\s*build-ready(?:$|\s|[^\w-])",
+            text,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +246,7 @@ def snapshot(ws: pathlib.Path) -> dict:
     pr = ws / "probe_report.md"
     snap["probe_classification"] = None
     snap["probe_report_has_actionable_fix"] = False
+    snap["probe_next_directive"] = None
     if pres.exists():
         try:
             data = json.loads(pres.read_text())
@@ -241,6 +256,8 @@ def snapshot(ws: pathlib.Path) -> dict:
             # actionable fix = `next_directive` non-null/non-empty
             nd = data.get("next_directive")
             snap["probe_report_has_actionable_fix"] = bool(nd) and isinstance(nd, str) and len(nd.strip()) > 0
+            if isinstance(nd, str):
+                snap["probe_next_directive"] = nd
         except Exception:
             # malformed JSON — fall through to markdown parsing
             pass
@@ -275,6 +292,51 @@ def snapshot(ws: pathlib.Path) -> dict:
         m = re.search(r"(?im)^[\s\-\*]*next_state\s*:\s*([a-z_]+)\s*$", utxt)
         if m:
             snap["user_decision_target"] = m.group(1).lower()
+
+    # P0aay (2026-08-25): consecutive infra-blocked probe streak. Count the
+    # trailing run of probe verdicts — the just-finished probe_result.json plus
+    # the P0v stale archives `.pre-await_probe-<idx>-<ts>-probe_result.json`
+    # (newest first) — whose classification is "deferred" or whose
+    # next_directive declares INFRA-BLOCKED. Respawning an identical
+    # target-less probe sandbox burns the global spawn cap without progress
+    # (55_OutlookAttention 2026-08-24: 6 infra-blocked probes → spawn cap 12
+    # hit → rc=6). The await_probe YAML transitions escalate on this streak.
+    def _probe_infra_blocked(cls, directive) -> bool:
+        # Both non-terminal probe verdicts ("deferred" = infra blocked,
+        # "untested-cluster" = bisection incomplete — in a target-less sandbox
+        # this is also infra-blocked, e.g. 55_OutlookAttention pp-4/pp-5) keep
+        # the await_probe respawn loop alive. The literal directive marker
+        # catches infra-blocked verdicts filed under any other label.
+        if cls in ("deferred", "untested-cluster"):
+            return True
+        return isinstance(directive, str) and "INFRA-BLOCKED" in directive.upper()
+
+    if not _probe_infra_blocked(
+        snap["probe_classification"], snap.get("probe_next_directive")
+    ):
+        snap["probe_infra_block_streak"] = 0
+    else:
+        archived: list[tuple[int, str | None, str | None]] = []
+        for p in ws.glob(".pre-await_probe-*-probe_result.json"):
+            try:
+                data = json.loads(p.read_text())
+                cls = data.get("classification")
+                cls = cls.lower() if isinstance(cls, str) else None
+                directive = data.get("next_directive")
+                directive = directive if isinstance(directive, str) else None
+                # filename: .pre-await_probe-<idx>-<ts>-probe_result.json
+                ts_part = p.name.rsplit("-", 2)[1]
+                archived.append((int(ts_part), cls, directive))
+            # json.JSONDecodeError is a ValueError subclass — ValueError covers it.
+            except (OSError, ValueError):
+                continue
+        streak = 1  # the current probe_result.json verdict
+        for _ts, cls, directive in sorted(archived, reverse=True):
+            if _probe_infra_blocked(cls, directive):
+                streak += 1
+            else:
+                break
+        snap["probe_infra_block_streak"] = streak
 
     # 2026-05-20 (structural-rewrite escalation, S5 cold-start gap): surface op_class +
     # derived complexity so eval_condition's `plugin_method` primitive can resolve
@@ -388,11 +450,92 @@ def _persist_bootstrap_chain(
     })
 
 
+_EXIT_SECTION_PREFIXES = (
+    "### EXIT",
+    "## EXIT",
+    "# EXIT",
+    "**EXIT**",
+    "**Exit**",
+)
+
+_CANONICAL_HANDOFF_PREFIXES = (
+    "→ orchestrator:",
+    "@orchestrator:",
+    "@aog-precision-probe",
+    "@aog-kernel-optimizer",
+    "@aog-fused-optimizer",
+    "@aog-determinism-analyzer",
+    "@aog-researcher",
+)
+
+_ORCHESTRATOR_HANDOFF_PREFIXES = ("@orchestrator:", "→ orchestrator:")
+
+
+def _handoff_scope_start(lines: list[str]) -> int | None:
+    """Return the first index of the region that may hold a handoff line.
+
+    P0w (2026-05-05): scope the handoff search to the LAST "EXIT" /
+    "Exit handoff" section so historical canonical-shaped lines from earlier
+    session content (mid-document scaffolded examples or prior-session output)
+    cannot win.
+
+    Origin: op#28 multimodal_rope 2026-05-05 quota-resume. After --cold-start
+    cleared workspace state, kw-1 ran and wrote PROGRESS.md with a HISTORICAL
+    "→ orchestrator: done" line (template scaffold from a prior pre-T1/T2
+    session) plus a fresh Phase A entry. The worker died at quota mid-iter with
+    no fresh exit handoff, and P0o re-bootstrapped from the PROGRESS.md tail,
+    matched the historical "done", and routed to finalize incorrectly.
+
+    With no EXIT marker, only the LAST non-empty line is in scope — per worker
+    brief, "Write your handoff line to PROGRESS.md tail ONLY". That is stricter
+    than a last-N-lines window, which still risks a historical false match in
+    short files (the op#28 scenario). ``None`` = nothing in scope.
+    """
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if stripped.startswith(_EXIT_SECTION_PREFIXES) or stripped == "EXIT":
+            return i + 1
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip():
+            return i
+    return None
+
+
+def _canonical_handoff_line(line: str) -> str | None:
+    """Normalize one PROGRESS.md line to a canonical handoff, or return None.
+
+    Strips common markdown decoration first, then keeps only the canonical
+    exit-handoff forms, rewriting a bare ``@orchestrator:`` line to the arrow
+    form so bootstrap recovery uses the same ordered transitions as live
+    dispatch.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("- "):
+        stripped = stripped[2:].strip()
+    if stripped.startswith("**Exit handoff**:"):
+        stripped = stripped.split(":", 1)[1].strip().strip("`")
+    if not stripped.startswith(_CANONICAL_HANDOFF_PREFIXES):
+        return None
+    if stripped.startswith(_ORCHESTRATOR_HANDOFF_PREFIXES):
+        prefix = (
+            "@orchestrator:"
+            if stripped.startswith("@orchestrator:")
+            else "→ orchestrator:"
+        )
+        stripped = "→ orchestrator: " + stripped[len(prefix):].lstrip()
+    return stripped
+
+
 def _extract_handoff_from_progress(ws: pathlib.Path) -> str | None:
     """Read PROGRESS.md tail, find the most recent canonical handoff line.
 
-    Looks for lines starting with `→ orchestrator:` or `@aog-` that match
-    one of the canonical exit-handoff forms. Returns the full line, or None.
+    Looks for lines starting with `→ orchestrator:`, `@orchestrator:` or
+    `@aog-` that match one of the canonical exit-handoff forms. Normalizes a
+    bare `@orchestrator:` line to the arrow form before returning it, so
+    bootstrap recovery uses the same ordered transitions as live dispatch.
+    Returns the full line, or None.
     """
     progress = ws / "PROGRESS.md"
     if not progress.exists():
@@ -402,72 +545,76 @@ def _extract_handoff_from_progress(ws: pathlib.Path) -> str | None:
     except Exception:
         return None
 
-    # P0w (2026-05-05): scope handoff search to the LAST "EXIT" or
-    # "Exit handoff" section to avoid picking up historical canonical-shaped
-    # lines from earlier session content (e.g. mid-document scaffolded
-    # examples or prior-session output).
-    #
-    # Origin: op#28 multimodal_rope 2026-05-05 quota-resume. After
-    # --cold-start cleared workspace state, kw-1 ran and wrote PROGRESS.md
-    # with a HISTORICAL "→ orchestrator: done" line (template scaffold from
-    # prior pre-T1/T2 session) plus a fresh Phase A entry. Worker died at
-    # quota mid-iter with no fresh exit handoff. P0o re-bootstrapped from
-    # PROGRESS.md tail, matched the historical "done" via last-line-of-
-    # canonical-prefix logic, routed to finalize incorrectly.
-    #
-    # Fix: scope candidate search to lines AFTER the last "### EXIT" or
-    # "## EXIT" marker. If no EXIT marker, take only the last 30 lines
-    # (still respects "most recent wins" but limits historical false-match).
+    # Scoping and per-line normalization live in the two helpers above; see
+    # _handoff_scope_start for the op#28 false-match origin story.
     lines = text.splitlines()
-    scope_start = 0
-    for i in range(len(lines) - 1, -1, -1):
-        s = lines[i].strip()
-        if (s.startswith("### EXIT")
-                or s.startswith("## EXIT")
-                or s.startswith("# EXIT")
-                or s == "EXIT"
-                or s.startswith("**EXIT**")
-                or s.startswith("**Exit**")):
-            scope_start = i + 1
-            break
-    if scope_start == 0:
-        # No EXIT marker — per worker brief: "Write your handoff line to
-        # PROGRESS.md tail ONLY". Look ONLY at the last non-empty line.
-        # If it's canonical, take it. Otherwise return None (let orchestrator
-        # use phase_o4_initial_state fallback). This is stricter than a
-        # last-N-lines window which still risks historical false-match in
-        # short files (op#28 scenario).
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                scope_start = i
-                break
-        else:
-            return None  # all lines empty
+    scope_start = _handoff_scope_start(lines)
+    if scope_start is None:
+        return None  # all lines empty
 
     candidates = []
     for line in lines[scope_start:]:
-        s = line.strip()
-        if not s:
-            continue
-        # Strip common markdown decoration
-        if s.startswith("- "):
-            s = s[2:].strip()
-        if s.startswith("**Exit handoff**:"):
-            s = s.split(":", 1)[1].strip().strip("`")
-        # Match canonical exit-handoff forms
-        if (s.startswith("→ orchestrator:")
-                or s.startswith("@aog-precision-probe")
-                or s.startswith("@aog-kernel-optimizer")
-                or s.startswith("@aog-fused-optimizer")
-                or s.startswith("@aog-determinism-analyzer")
-                or s.startswith("@aog-researcher")):
-            candidates.append(s)
+        candidate = _canonical_handoff_line(line)
+        if candidate is not None:
+            candidates.append(candidate)
     return candidates[-1] if candidates else None
 
 
 # ---------------------------------------------------------------------------
 # Next-state decision
 # ---------------------------------------------------------------------------
+def _provider_binding_pause(exc: BaseException, ctx: dict) -> dict:
+    """Translate a provider-binding failure into a user-decision pause.
+
+    Only a provider-binding validation failure is recoverable this way.
+    Unexpected evaluator/runtime errors are re-raised so they stay visible
+    instead of being disguised as a normal pause.
+
+    A malformed provider binding must never fall through to a legacy
+    transition or crash the handoff path: preserve the worker handoff and
+    require a human decision before any provider build/evaluation can run,
+    including the `done` route.
+    """
+    from reference_source import ReferenceSourceError
+    if not isinstance(exc, ReferenceSourceError):
+        raise exc
+    return {
+        "next_state": "await_user_decision",
+        "matched_transition_index": -1,
+        "rationale": (
+            "provider binding validation failed; "
+            f"pause for user decision ({exc})"
+        ),
+        "from_state": ctx.get("current_state"),
+        "handoff": ctx.get("handoff"),
+        "iter_counts_snapshot": ctx.get("iter_counts"),
+    }
+
+
+def _matched_transition_result(trans: dict, idx: int, ctx: dict) -> dict:
+    """Build the decision dict for the transition that matched."""
+    target = trans.get("goto")
+    # V3.8.5 / DEBT-077 #59: __from_user_decision__ is a magic token —
+    # resolve from user_decision.md `next_state:` value at runtime.
+    if target == "__from_user_decision__":
+        target = (ctx.get("snapshot") or {}).get("user_decision_target")
+        if target is None:
+            return {
+                "error": "user_decision_target_in condition matched but "
+                         "user_decision_target is None — should not happen",
+                "next_state": None,
+                "from_state": ctx.get("current_state"),
+            }
+    return {
+        "next_state": target,
+        "matched_transition_index": idx,
+        "rationale": trans.get("rationale", "matched condition"),
+        "from_state": ctx.get("current_state"),
+        "handoff": ctx.get("handoff"),
+        "iter_counts_snapshot": ctx.get("iter_counts"),
+    }
+
+
 def next_state(
     ws: pathlib.Path,
     current_state: str,
@@ -507,27 +654,12 @@ def next_state(
 
     for idx, trans in enumerate(spec.get("exit_transitions", [])):
         cond = trans.get("condition", {})
-        if eval_condition(cond, ctx):
-            target = trans.get("goto")
-            # V3.8.5 / DEBT-077 #59: __from_user_decision__ is a magic token —
-            # resolve from user_decision.md `next_state:` value at runtime.
-            if target == "__from_user_decision__":
-                target = snap.get("user_decision_target")
-                if target is None:
-                    return {
-                        "error": "user_decision_target_in condition matched but "
-                                 "user_decision_target is None — should not happen",
-                        "next_state": None,
-                        "from_state": current_state,
-                    }
-            return {
-                "next_state": target,
-                "matched_transition_index": idx,
-                "rationale": trans.get("rationale", "matched condition"),
-                "from_state": current_state,
-                "handoff": handoff,
-                "iter_counts_snapshot": iter_counts,
-            }
+        try:
+            matched = eval_condition(cond, ctx)
+        except Exception as exc:
+            return _provider_binding_pause(exc, ctx)
+        if matched:
+            return _matched_transition_result(trans, idx, ctx)
 
     # No match — this is a contract violation (states should have always-true fallback)
     return {

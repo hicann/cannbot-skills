@@ -268,8 +268,9 @@ def test_fa_backward_multilaunch_block_points_at_gqa_sibling(tmp_path: Path):
 
 
 def test_phase_block_directive_text_wins_over_fa_class_recipe(tmp_path: Path):
-    """Re-spawn from probe/optimizer passes directive_text; BRANCH-5 must NOT
-    fire — directive_text takes precedence.
+    """Re-spawn from probe/optimizer passes directive_text; the directive leads
+    as an overlay, but the FA-class template block MUST still be emitted
+    (c341280d F1: directive used to early-return and silently drop it).
     """
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -287,5 +288,6 @@ def test_phase_block_directive_text_wins_over_fa_class_recipe(tmp_path: Path):
     # directive_text branch was taken
     assert "DIRECTIVE FROM PRIOR AGENT" in brief
     assert "fix BF16 cast" in brief
-    # The template-assembly recipe short-circuit did NOT fire
-    assert "wp_fa_regbase_impl" not in brief
+    # ...and the template-assembly recipe is STILL present (overlay, not
+    # short-circuit) — see test_directive_preserves_fa_template_block.py
+    assert "wp_fa_regbase_impl" in brief

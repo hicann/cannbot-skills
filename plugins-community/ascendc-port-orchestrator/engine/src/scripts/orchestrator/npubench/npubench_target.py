@@ -182,7 +182,7 @@ class _ControlledBuild:
 
     workspace: Path
     contract: dict[str, str]
-    source_kind: str
+    source_kind: str | None
     attempt: str
     state: Mapping[str, Any]
     target: _Target
@@ -262,11 +262,26 @@ def build_tilelang2ascendc_candidate_on_target(
     )
 
 
+def build_generic_kernel_project_on_target(
+    workspace: Path, lane: int, *, build_attempt_id: str | None = None
+) -> dict[str, Any]:
+    """Build a generic authored kernel project (``model_new_ascendc.py`` + ``kernel/``).
+
+    Used for routes whose durable state carries no ``port_source.kind``
+    binding (e.g. opgen_mode=port_a3_to_a5).  The build protocol, receipt
+    authentication, and build script are shared with the source-bound routes;
+    the payload's ``source_kind`` stays ``None`` to record the route taken.
+    """
+    return _build_controlled_candidate_on_target(
+        workspace, lane, source_kind=None, build_attempt_id=build_attempt_id
+    )
+
+
 def _build_controlled_candidate_on_target(
     workspace: Path,
     lane: int,
     *,
-    source_kind: str,
+    source_kind: str | None,
     build_attempt_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the one controlled CANN build protocol shared by supported sources."""
@@ -275,7 +290,9 @@ def _build_controlled_candidate_on_target(
     contract = {**_build_contract(source_kind), "build_attempt_id": attempt}
     state = _read_json(workspace / ".opgen_state.json", "durable state")
     source = state.get("port_source")
-    if not isinstance(source, Mapping) or source.get("kind") != source_kind:
+    if source_kind is not None and (
+        not isinstance(source, Mapping) or source.get("kind") != source_kind
+    ):
         return {
             "schema": _contract_value(contract, "schema"),
             "status": "SKIPPED",
@@ -348,7 +365,7 @@ def _require_known_controlled_soc(build: _ControlledBuild) -> None:
 
 def _controlled_build_script(build: _ControlledBuild) -> tuple[Path, str]:
     """Return the controlled build script plus its human-facing filename."""
-    if build.source_kind == TILELANG2ASCENDC_SOURCE_KIND:
+    if build.source_kind in (TILELANG2ASCENDC_SOURCE_KIND, None):
         script = Path(__file__).resolve().parents[2] / "patches" / "build_tilelang2ascendc.py"
         return script, "build_tilelang2ascendc.py"
     raise TargetTransportError(
@@ -622,9 +639,16 @@ def _controlled_build_success_payload(
 def _source_stage_digest(
     workspace: Path,
     state: Mapping[str, Any],
-    source_kind: str,
+    source_kind: str | None,
 ) -> str:
     """Return the immutable source-stage digest bound to this build route."""
+    if source_kind is None:
+        digest = state.get("source_stage_digest")
+        if not _sha_ok(digest):
+            raise TargetTransportError(
+                "generic durable state has no usable source-stage digest"
+            )
+        return str(digest)
     source = state.get("port_source")
     if not isinstance(source, Mapping) or source.get("kind") != source_kind:
         raise TargetTransportError(f"durable state does not select {source_kind}")

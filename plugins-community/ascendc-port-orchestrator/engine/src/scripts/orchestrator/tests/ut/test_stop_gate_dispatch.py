@@ -200,3 +200,58 @@ def test_clearing_an_absent_marker_is_not_an_error(tmp_path):
     """The normal case is no marker at all; it must not raise on the happy path."""
     _clear_stop_gate_marker(tmp_path, "aog-kernel-worker")
     _clear_stop_gate_marker(tmp_path / "nonexistent", "aog-kernel-worker")
+
+
+# ──────────────────────────────── FOLLOWUPS v3.1 A.6: rejection visibility
+#
+# 2_FFN_evo lesson: a stop-gate rejection (analysis.md missing the
+# `- algorithm_family:` bullet) stopped the run, but the respawned worker never
+# saw WHY — the marker file is FSM-facing, not worker-facing — and re-emitted
+# the same defect. The reason is now appended to PROGRESS.md AND injected into
+# the next brief for the same agent type.
+
+_mark_stop_gate_failure = getattr(agent_dispatch, "_mark_stop_gate_failure")
+_stop_gate_feedback_block = getattr(agent_dispatch, "_stop_gate_feedback_block")
+
+
+def test_failed_gate_appends_reason_to_progress_md(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent_dispatch, "_backend", _fake_backend("opencode"))
+    monkeypatch.setattr(
+        agent_dispatch.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(
+            returncode=2, stdout="",
+            stderr="analysis.md: missing `- algorithm_family:` bullet",
+        ),
+    )
+    (tmp_path / "PROGRESS.md").write_text("# PROGRESS\n")
+    _run_stop_gate(tmp_path, "aog-kernel-worker", _Envelope())
+    progress = (tmp_path / "PROGRESS.md").read_text()
+    assert "## STOP-GATE REJECTION (aog-kernel-worker)" in progress
+    assert "missing `- algorithm_family:` bullet" in progress
+
+
+def test_progress_append_survives_a_missing_progress_md(monkeypatch, tmp_path):
+    """Fail-open: no PROGRESS.md yet must not break the failure marking path."""
+    monkeypatch.setattr(agent_dispatch, "_backend", _fake_backend("opencode"))
+    monkeypatch.setattr(
+        agent_dispatch.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=2, stdout="", stderr="nope"),
+    )
+    env = _Envelope()
+    _run_stop_gate(tmp_path, "aog-kernel-worker", env)
+    assert env.is_error is True
+    assert "## STOP-GATE REJECTION" in (tmp_path / "PROGRESS.md").read_text()
+
+
+def test_feedback_block_surfaces_the_pending_rejection(tmp_path):
+    reason = "stop gate rejected aog-kernel-worker (rc=2): contract violation"
+    (tmp_path / f"{STOP_GATE_MARKER}_aog-kernel-worker").write_text(reason + "\n")
+    block = _stop_gate_feedback_block(tmp_path, "aog-kernel-worker")
+    assert "PREVIOUS SPAWN REJECTED BY STOP GATE" in block
+    assert "contract violation" in block
+    # Per-agent-type scoping: another agent's brief is not polluted.
+    assert _stop_gate_feedback_block(tmp_path, "aog-precision-probe") == ""
+
+
+def test_feedback_block_is_empty_without_a_pending_rejection(tmp_path):
+    assert _stop_gate_feedback_block(tmp_path, "aog-kernel-worker") == ""

@@ -341,6 +341,17 @@ def check_simt_vf_nonvoid(filepath: str, lines: List[str]) -> List[Violation]:
 #   This is a reward-hacking guardrail: generated kernels must implement actual
 #   computation logic, not forward to CANN built-in implementations.
 # ---------------------------------------------------------------------------
+# Sanctioned host-launch mechanism for the tilelang2ascendc route: the
+# authored host helper drives ACLRT_LAUNCH_KERNEL through
+# at_npu::native::OpCommand::RunOpApi on the current NPU stream.  Including
+# these two headers is launch plumbing, NOT compute delegation — flagging them
+# as CANN wrappers was a false positive (MUSEAttention 2026-08-22: a fully
+# precision-PASS candidate was blocked at the delivery static gate solely on
+# these two include lines).
+_RE_SANCTIONED_TORCH_NPU_INCLUDE = re.compile(
+    r'#\s*include\s*[<"]torch_npu/csrc/[^>"]+\.h[>"]'
+)
+
 _RE_CANN_WRAPPER_PATTERNS = [
     (re.compile(r'\baclnn[A-Z]\w*\s*\('), "aclnn* API call"),
     (re.compile(r'\baclop[A-Z]\w*\s*\('), "aclop* API call"),
@@ -366,6 +377,8 @@ def check_cann_wrapper_call(filepath: str, lines: List[str]) -> List[Violation]:
     for i, line in enumerate(lines, 1):
         stripped = line.lstrip()
         if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+            continue
+        if _RE_SANCTIONED_TORCH_NPU_INCLUDE.search(line):
             continue
         for pattern, desc in _RE_CANN_WRAPPER_PATTERNS:
             if pattern.search(line):
@@ -674,6 +687,58 @@ _MIN_SIMD_MARKERS = 3
 _MIN_SIMT_MARKERS = 3
 
 
+def _kernel_tree_root(filepath: str) -> str:
+    """Return the nearest enclosing ``kernel/`` directory, else the file's own dir."""
+    cur = os.path.dirname(os.path.abspath(filepath))
+    root = cur
+    while True:
+        if os.path.basename(cur) == "kernel":
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return root
+        cur = parent
+
+
+def _kernel_tree_sources(root: str) -> List[str]:
+    """List every ``.h``/``.cpp`` file under a kernel tree, in stable order."""
+    sources: List[str] = []
+    if not os.path.isdir(root):
+        return sources
+    for walk_root, _dirs, walk_files in os.walk(root):
+        for sib in sorted(walk_files):
+            if sib.endswith(".h") or sib.endswith(".cpp"):
+                sources.append(os.path.join(walk_root, sib))
+    return sources
+
+
+def _sibling_carries_computation(filepath: str, markers: Dict[str, "re.Pattern"], min_required: int) -> bool:
+    """Report whether a sibling kernel source carries the computation markers.
+
+    Helper-header carve-out (2026-06-10, FA workspace_queue.h/kernel_common.h false
+    positives): multi-file kernels legitimately split sync barriers / shared decls into
+    compute-free headers. Only flag when NO sibling kernel file carries the
+    computation — preserves stub-kernel detection, removes per-file FP.
+    2026-08-24 extension: scan the whole kernel tree, not just the same
+    directory — multi-dir projects (op_kernel/ + utils/) keep compute-free
+    tiling/ABI headers in separate directories (FusionAttention
+    utils/fa_tiling_data.h carries __aicore__ only in #ifdef host/device
+    guards and was false-flagged while computation lives in
+    ../op_kernel/fusion_attention.cpp).
+    """
+    for sib_path in _kernel_tree_sources(_kernel_tree_root(filepath)):
+        if os.path.abspath(sib_path) == os.path.abspath(filepath):
+            continue
+        try:
+            with open(sib_path, encoding="utf-8", errors="ignore") as sib_file:
+                sib_text = sib_file.read()
+        except OSError:
+            continue
+        if sum(1 for pat in markers.values() if pat.search(sib_text)) >= min_required:
+            return True
+    return False
+
+
 def check_kernel_has_computation(filepath: str, lines: List[str]) -> List[Violation]:
     """Verify kernel files contain actual AscendC computation, not trivial stubs.
     Distinguishes SIMD (TQue/DataCopy/VEC) from SIMT (raw GM pointers/scalar loops).
@@ -702,34 +767,17 @@ def check_kernel_has_computation(filepath: str, lines: List[str]) -> List[Violat
         if pat.search(full_text):
             found.add(name)
 
-    if len(found) < min_required:
-        # Helper-header carve-out (2026-06-10, FA workspace_queue.h/kernel_common.h false
-        # positives): multi-file kernels legitimately split sync barriers / shared decls into
-        # compute-free headers. Only flag when NO sibling kernel file in the same directory
-        # carries the computation — preserves stub-kernel detection, removes per-file FP.
-        import os as _os
-        d = _os.path.dirname(_os.path.abspath(filepath))
-        for sib in sorted(_os.listdir(d)) if _os.path.isdir(d) else []:
-            if not (sib.endswith(".h") or sib.endswith(".cpp")):
-                continue
-            sp = _os.path.join(d, sib)
-            if _os.path.abspath(sp) == _os.path.abspath(filepath):
-                continue
-            try:
-                st = open(sp, encoding="utf-8", errors="ignore").read()
-            except OSError:
-                continue
-            smark = sum(1 for p in markers.values() if p.search(st))
-            if smark >= min_required:
-                return []  # computation lives in a sibling; this file is a helper header
-        return [{
-            "file": filepath,
-            "line": 1,
-            "detail": f"{style} kernel has only {len(found)}/{min_required} "
-                      f"computation markers (found: {sorted(found)}). "
-                      f"This may be a trivial stub or CANN wrapper."
-        }]
-    return []
+    if len(found) >= min_required:
+        return []
+    if _sibling_carries_computation(filepath, markers, min_required):
+        return []  # computation lives in a sibling; this file is a helper header
+    return [{
+        "file": filepath,
+        "line": 1,
+        "detail": f"{style} kernel has only {len(found)}/{min_required} "
+                  f"computation markers (found: {sorted(found)}). "
+                  f"This may be a trivial stub or CANN wrapper."
+    }]
 
 
 # ---------------------------------------------------------------------------

@@ -136,7 +136,7 @@ global_invariants:
 
   - id: G2
     description: "Truth must be independent of the generated target implementation"
-    check: "migration uses a fresh source-arch NPU capture; backward uses CPU/fp64 autograd"
+    check: "migration uses either the content-addressed model.py/test.py capture on its resolved A5 target (default) or an explicit fresh source-arch NPU capture; backward uses CPU/fp64 autograd"
     rationale: "A reference reconstructed from the generated kernel is circular and cannot prove correctness."
 
   - id: G3
@@ -147,7 +147,7 @@ global_invariants:
 
   - id: G4
     description: "Prior-art inputs remain non-authoritative and provenance-bound"
-    check: "target, sibling and archive candidates are staged separately with source path and digest; migration truth still comes from the live source-arch NPU capture"
+    check: "target, sibling and archive candidates are staged separately with source path and digest; migration truth comes only from the selected independent reference source: frozen model.py/test.py by default or fresh live source-arch capture for a3_live"
     rationale: "Prior implementations may accelerate authoring, but cannot replace independent source truth or be reported as newly derived work."
     severity: BLOCKING
 
@@ -304,79 +304,91 @@ phases:
     preconditions: [O1_5_det_policy]
     branches:
 
-      # port_a3_to_a5: A3-CANN source reference
+      # port_a3_to_a5: a frozen NPUKernelBench task is the new-task default;
+      # live A3 source capture remains an explicit, independently verified
+      # fallback.
       port_a3_to_a5:
         condition: "MODE == port_a3_to_a5"
         preconditions: [O1_5_det_policy]
         required_actions:
           - "Stage the user-selected arch22 source with a content digest"
           - "Optionally prestage provenance-recorded target, sibling or archive candidates as non-authoritative authoring inputs"
-          - "Derive or reuse a deterministic input generator for the source contract"
-          - "Run phase_o25_a3_ref.provision_a3_reference live against the configured source-arch NPU environment"
-          - "Bind every captured output to the source digest, runner digest, capture id and source NPU identity"
-        required_artifacts:
-          - path: "workspace/{op}/input_gen.py"
-            must_exist: true
-            grep_must_contain:
-              - "from case_gen import"
-              - "SCHEMA"
-              - "COVERAGE_TIER"
-            grep_must_not_contain:
-              - '^def generate_cases\('   # must use engine not redefine
-          - path: "workspace/{op}/edge_inputs.pt"
-            must_exist: true
-          - path: "workspace/{op}/manifest.json"
-            must_exist: true
-            json_must_contain_keys: [op, data_sha256, n_cases, cases, coverage_tier]
-          - path: "workspace/{op}/edge_dataset.pt"
-            must_exist: true
-          - path: "workspace/{op}/a3_reference_runnable.json"
-            must_exist: true
-          - path: "workspace/{op}/a3_baseline_perf.json"
-            must_exist: true
-          - path: "workspace/{op}/a3_capture_manifest.json"
-            must_exist: true
-            json_must_contain_keys: [schema, capture_id, live_exec, capture_started_ts, capture_completed_ts, source_stage_digest, source_arch, device, n_total, n_captured, files]
-        invariants:
-          - id: O2_5_B1
-            description: "edge_inputs.pt and manifest.json must share data_sha256"
-            check: "torch.load(edge_inputs.pt)['data_sha256'] == json.load(manifest.json)['data_sha256']"
-          - id: O2_5_B2
-            description: "coverage_tier in [pilot, sign_off, production]"
-            check: "manifest.json ['coverage_tier'] in allowed list"
-          - id: O2_5_B3
-            description: "migration truth is a fresh source-arch NPU capture"
-            check: "a3_ref_validate.validate_a3_capture_provenance accepts a3_capture_manifest.json as schema a3_capture/v2 with live_exec=true, source_arch=arch22, an NPU device, current source_stage_digest, current artifact digests, complete captured cases and ordered per-run timestamps"
-        prohibited_actions:
-          - "Substituting a locally reconstructed reference for A3-CANN output (G2)"
-          - "Reusing a cached source capture as the current run's truth"
-          - "Using committed source-NPU outputs as the current run's truth"
-          - "Using 'edge_input_gen.py' as filename (must be 'input_gen.py' per template)"
-          - "Writing custom def generate_cases in input_gen.py (must import from case_gen)"
-        exceptions:
-          schema_gap:
-            description: "Op has inputs that case_gen cannot represent (for example variable-length input lists or index-dependent shapes)"
-            requires_file:
-              path: "workspace/{op}/.workflow_exception_O2_5"
-              must_exist: true
-              required_content:
-                - "phase: O2_5_reference_provider"
-                - "branch: port_a3_to_a5"
-                - "reason:"
-                - "user_signature:"
-                - "date:"
-              must_be_git_committed_by: "user (not orchestrator)"
-            fallback_allows:
-              - "reuse a provenance-recorded deterministic input recipe, or provide a custom recipe for the unsupported schema"
-              - "waive only the standard case_gen/SCHEMA input-recipe form"
-            still_requires:
-              - "execute the selected input recipe during the current run to materialize the inputs"
-              - "execute the staged arch22 source operator on a source NPU during the current run"
-              - "produce edge_dataset.pt, a3_baseline_perf.json and a3_capture_manifest.json from that fresh execution"
-              - "pass a3_ref_validate.validate_a3_capture_provenance before any target-kernel agent spawn"
-            does_not_allow:
-              - "cached, archived or committed source-NPU outputs"
-              - "skipping edge_dataset.pt or the fresh source-NPU execution"
+          - "Resolve reference.source from durable state; a new CLI invocation must select a provider explicitly (--reference-source npubench with --npubench-task is the default for new tasks), while a legacy state with no reference block remains a3_live for resume compatibility"
+        reference_source:
+          default_for_new_invocation: npubench
+          persisted_field: state.reference.source
+          legacy_missing_reference: a3_live
+          accepted_values: [npubench, a3_live]
+        reference_sources:
+          a3_live:
+            condition: "reference.source == a3_live"
+            required_actions:
+              - "Derive or reuse a deterministic input generator for the source contract"
+              - "Run phase_o25_a3_ref.provision_a3_reference live against the configured source-arch NPU environment"
+              - "Bind every captured output to the source digest, runner digest, capture id and source NPU identity"
+            required_artifacts:
+              - path: "workspace/{op}/input_gen.py"
+                must_exist: true
+                grep_must_contain:
+                  - "from case_gen import"
+                  - "SCHEMA"
+                  - "COVERAGE_TIER"
+                grep_must_not_contain:
+                  - '^def generate_cases\('   # must use engine not redefine
+              - path: "workspace/{op}/edge_inputs.pt"
+                must_exist: true
+              - path: "workspace/{op}/manifest.json"
+                must_exist: true
+                json_must_contain_keys: [op, data_sha256, n_cases, cases, coverage_tier]
+              - path: "workspace/{op}/edge_dataset.pt"
+                must_exist: true
+              - path: "workspace/{op}/a3_reference_runnable.json"
+                must_exist: true
+              - path: "workspace/{op}/a3_baseline_perf.json"
+                must_exist: true
+              - path: "workspace/{op}/a3_capture_manifest.json"
+                must_exist: true
+                json_must_contain_keys: [schema, capture_id, live_exec, capture_started_ts, capture_completed_ts, source_stage_digest, source_arch, device, n_total, n_captured, files]
+            invariants:
+              - id: O2_5_B1
+                description: "edge_inputs.pt and manifest.json must share data_sha256"
+                check: "torch.load(edge_inputs.pt)['data_sha256'] == json.load(manifest.json)['data_sha256']"
+              - id: O2_5_B2
+                description: "coverage_tier in [pilot, sign_off, production]"
+                check: "manifest.json ['coverage_tier'] in allowed list"
+              - id: O2_5_B3
+                description: "a3_live migration truth is a fresh source-arch NPU capture"
+                check: "a3_ref_validate.validate_a3_capture_provenance accepts a3_capture_manifest.json as schema a3_capture/v2 with live_exec=true, source_arch=arch22, an NPU device, current source_stage_digest, current artifact digests, complete captured cases and ordered per-run timestamps"
+            prohibited_actions:
+              - "Substituting a locally reconstructed reference for A3-CANN output (G2)"
+              - "Reusing a cached source capture as the current run's truth"
+              - "Using committed source-NPU outputs as the current run's truth"
+              - "Using 'edge_input_gen.py' as filename (must be 'input_gen.py' per template)"
+              - "Writing custom def generate_cases in input_gen.py (must import from case_gen)"
+            exceptions:
+              schema_gap:
+                description: "Op has inputs that case_gen cannot represent (for example variable-length input lists or index-dependent shapes)"
+                requires_file:
+                  path: "workspace/{op}/.workflow_exception_O2_5"
+                  must_exist: true
+                  required_content:
+                    - "phase: O2_5_reference_provider"
+                    - "branch: port_a3_to_a5"
+                    - "reason:"
+                    - "user_signature:"
+                    - "date:"
+                  must_be_git_committed_by: "user (not orchestrator)"
+                fallback_allows:
+                  - "reuse a provenance-recorded deterministic input recipe, or provide a custom recipe for the unsupported schema"
+                  - "waive only the standard case_gen/SCHEMA input-recipe form"
+                still_requires:
+                  - "execute the selected input recipe during the current run to materialize the inputs"
+                  - "execute the staged arch22 source operator on a source NPU during the current run"
+                  - "produce edge_dataset.pt, a3_baseline_perf.json and a3_capture_manifest.json from that fresh execution"
+                  - "pass a3_ref_validate.validate_a3_capture_provenance before any target-kernel agent spawn"
+                does_not_allow:
+                  - "cached, archived or committed source-NPU outputs"
+                  - "skipping edge_dataset.pt or the fresh source-NPU execution"
 
       # backward: CPU/fp64 autograd reference
       backward:
@@ -651,6 +663,7 @@ conditional_phases:
 #
 # Condition DSL primitives (aligned with conditional_phases):
 #   handoff_match: "<prefix>"                         # PROGRESS.md last handoff line prefix
+#   reference_source_is: "npubench"                    # complete durable provider binding
 #   verification_precision_status_in: [PASS, ...]
 #   verification_precision_status_not_in: [PASS, PASS_WITHIN_TOLERANCE]
 #   verification_det_policy_satisfied: true|false
@@ -678,13 +691,47 @@ phase_o4_states:
     #     rejected + kw-5 MrgSort prototype + kw-6 V3.7.11 ar-2-directive
     #     (Sort API swap + UB aliasing) + state-log normalization entries
     # Off-by-one critic counting fix still filed for V3.3.5.
-    iter_cap: 9
+    # 2026-08-27 PR875 e2e (3_FusionAttention oc 线): 9 -> 15 — 55/61 -> 58/61
+    # 后剩余 fp32 三案簇仍需迭代，cap=9 对 harness 验证场景过紧。
+    iter_cap: 15
     iter_counter: worker
     entry_required_artifacts:
       # First entry (initial): workspace scaffold exists
       # Respawn: prior phase's directive artifact exists (probe_report.md / optimization_directive.md)
       - "workspace/{op}/PROGRESS.md"
     exit_transitions:
+      # NPUKernelBench workers only produce a build-ready handoff. Precision
+      # and performance are harness-owned, so send a valid provider-bound
+      # candidate straight to finalize where Phase O5 invokes the NPUBench
+      # evaluator. This must precede the generic missing-precision probe rule.
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: done"
+            - reference_source_is: npubench
+        goto: finalize
+        rationale: "NPUBench contract: worker emits build-ready only; provider-owned O5 evaluation runs in finalize."
+      # NPUBench workers may use the explicit @orchestrator form for the same
+      # build-ready contract.  This is an internal provider handoff, not a
+      # request for a human decision: continue through the target runner and
+      # O5 finalization while keeping the broad diagnostic catch-all below for
+      # unrelated @orchestrator messages.
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: build-ready"
+            - reference_source_is: npubench
+        goto: finalize
+        rationale: "NPUBench build-ready handoff is provider-owned; auto-dispatch target runner and O5 finalization."
+      # Arrow form of the same build-ready handoff ("→ orchestrator:
+      # build-ready …").  Workers keep emitting this wording (CoT kw-1/kw-3,
+      # 2026-08-22) even though the brief sanctions "→ orchestrator: done";
+      # it is deterministic and unambiguous, so accept it instead of
+      # aborting a completed independent re-author (Option B).
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: build-ready"
+            - reference_source_is: npubench
+        goto: finalize
+        rationale: "NPUBench build-ready handoff (arrow form) is provider-owned; auto-dispatch target runner and O5 finalization."
       # Handoff "done" — precision + det gate, then forced-probe (O4 V3.3 rule)
       - condition:
           all_of:
@@ -847,7 +894,36 @@ phase_o4_states:
         goto: await_researcher
       - condition:
           all_of:
+            - handoff_match: "→ orchestrator: build stuck"
+            - trajectory_sigs_stable: true
+            - iter_below_cap: researcher
+        goto: await_researcher
+      # 2026-08-26 (npubench route): on provider-bound workspaces the worker
+      # graybox has no CANN by design, so a 'build stuck' handoff is almost
+      # always a misjudged toolchain absence (cd668f5c) — and reaching abort
+      # is terminal, destroying a completed candidate. Send it back to the
+      # worker as a repair directive instead (defense in depth under the
+      # brief-level ban). Non-npubench routes keep the historical abort.
+      - condition:
+          all_of:
             - handoff_match: "@orchestrator: build stuck"
+            - reference_source_is: npubench
+        goto: await_worker
+        rationale: "NPC: npubench build-stuck handoff → worker repair directive (graybox has no CANN by design)"
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: build stuck"
+            - reference_source_is: npubench
+        goto: await_worker
+        rationale: "NPC: npubench build-stuck handoff → worker repair directive (graybox has no CANN by design)"
+      - condition:
+          all_of:
+            - handoff_match: "@orchestrator: build stuck"
+        goto: abort
+        rationale: "Build stuck with stable signature after exhausting retries → ABORT"
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: build stuck"
         goto: abort
         rationale: "Build stuck with stable signature after exhausting retries → ABORT"
       # V3.8.5 / DEBT-077 #59 (2026-05-04): worker can request user decision
@@ -892,7 +968,17 @@ phase_o4_states:
         rationale: "P0aav: worker honestly reports infra unreachable → user_decision with diagnostic preserved"
       - condition:
           all_of:
+            - handoff_match: "→ orchestrator: infra unreachable"
+        goto: await_user_decision
+        rationale: "P0aav: worker honestly reports infra unreachable → user_decision with diagnostic preserved"
+      - condition:
+          all_of:
             - handoff_match: "@orchestrator: BLOCKED"
+        goto: await_user_decision
+        rationale: "P0aav: worker explicitly declared BLOCKED (infra/tooling/capacity) → user_decision"
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator: BLOCKED"
         goto: await_user_decision
         rationale: "P0aav: worker explicitly declared BLOCKED (infra/tooling/capacity) → user_decision"
       # P0abk (2026-05-09 DS-flagged): catch-all for any `@orchestrator:`-
@@ -910,7 +996,12 @@ phase_o4_states:
           all_of:
             - handoff_match: "@orchestrator:"
         goto: await_user_decision
-        rationale: "P0abk: any @orchestrator:-prefixed handoff (catch-all for honest diagnostics not matched by specific text patterns above) → user_decision with full diagnostic preserved"
+        rationale: "P0abk: @orchestrator diagnostic catch-all (honest diagnostics not matched by specific text patterns above) → user_decision with full diagnostic preserved"
+      - condition:
+          all_of:
+            - handoff_match: "→ orchestrator:"
+        goto: await_user_decision
+        rationale: "P0abk: normalized arrow orchestrator diagnostic catch-all (honest diagnostics not matched by specific text patterns above) → user_decision with full diagnostic preserved"
       # Fallback (no matched handoff) — worker contract violation
       - condition: { always: true }
         goto: abort
@@ -1018,6 +1109,26 @@ phase_o4_states:
             - iter_below_cap: worker
         goto: await_worker
         rationale: "probe verdict=bug — the standard AscendC worker applies the concrete next_directive."
+      # P0aay (2026-08-25): 3+ consecutive infra-blocked probe verdicts
+      # (deferred / INFRA-BLOCKED untested-cluster) — respawning an identical
+      # target-less probe sandbox burns the global spawn cap without progress
+      # (55_OutlookAttention 2026-08-24: 6 infra-blocked probes → cap 12 hit
+      # → rc=6). Escalate to the worker: it can re-run O5 evals (which DO
+      # reach the target) and apply the probe's next_directive (e.g. minimal
+      # single-kernel repro) instead of looping.
+      - condition:
+          all_of:
+            - probe_classification_in: ["deferred", "untested-cluster"]
+            - probe_infra_block_streak_ge: 3
+            - iter_below_cap: worker
+        goto: await_worker
+        rationale: "P0aay: 3+ consecutive infra-blocked probe verdicts — escalate to the O5-capable worker instead of re-spawning a target-less probe sandbox."
+      - condition:
+          all_of:
+            - probe_classification_in: ["deferred", "untested-cluster"]
+            - probe_infra_block_streak_ge: 3
+        goto: await_user_decision
+        rationale: "P0aay: 3+ consecutive infra-blocked probe verdicts AND worker iter budget exhausted — pause for user decision instead of re-spawning a target-less probe sandbox."
       - condition:
           all_of:
             - probe_classification_in: ["untested-cluster"]
@@ -1531,13 +1642,14 @@ phase_o4_initial_state_by_mode:
   # on the existing kernel (probe agent has Edit/Build/Verify in-context).
   aog-precision-probe: await_probe
   # W3 (2026-05-12, ROADMAP §1.5): arch22→arch35 migration mode. Triggered by
-  # `--port-a3 <ops-nn-op-dir>` flag in orchestrator main. Phase O2.5
-  # is replaced by `phase_o25_a3_ref.provision_a3_reference` (W4)
-  # which runs the existing A3-merged kernel inside the A3 container
-  # via aclnn API to capture ground-truth outputs (instead of
-  # CPU-PyTorch truth). Once O2.5 is complete, state machine enters
-  # `await_worker` like every other generation mode — kw spawns with
-  # the port_from_a3_ascendc brief variant (W5).
+  # `--port-a3 <ops-nn-op-dir>` in orchestrator main. Phase O2.5 dispatches
+  # from durable reference.source: new tasks use the frozen NPUKernelBench
+  # provider (phase_o25_npubench, selected explicitly with
+  # --reference-source npubench --npubench-task); the explicit a3_live
+  # compatibility path uses phase_o25_a3_ref.provision_a3_reference inside
+  # the source A3 container. Once O2.5 is complete, state machine enters
+  # `await_worker` like every other generation mode — kw spawns with the
+  # port_from_a3_ascendc brief variant (W5).
   port_a3_to_a5: await_worker
 
 # ---------------------------------------------------------------------------

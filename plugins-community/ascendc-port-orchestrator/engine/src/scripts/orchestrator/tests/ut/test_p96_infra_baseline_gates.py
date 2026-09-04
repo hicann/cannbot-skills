@@ -314,10 +314,11 @@ def test_p135sl_gate_catches_paper_over_outside_anti_pattern_section(tmp_path):
     assert result is not None, "Real paper-over outside anti-pattern section must still trigger"
 
 
-def test_p135sl_gate_catches_paper_over_in_non_rollback_events(tmp_path):
-    """Sanity: events.jsonl entries that are NOT the gate's own audit
-    trail (e.g., legitimate worker emit lines) still get scanned for
-    paper-over content.
+def test_p135sl_gate_ignores_orchestrator_events_jsonl(tmp_path):
+    """audit M3 (2026-08-22): orchestrator_events.jsonl is harness-authored
+    audit output, not worker documentation — the paper-over gate no longer
+    scans it, so its content cannot hard-fail a finalize the worker cannot
+    repair.  Worker-authored documents remain gate inputs.
     """
     (tmp_path / "orchestrator_events.jsonl").write_text(
         '{"ts": "2026-05-18T10:00Z", "event": "worker.action", "data": '
@@ -325,10 +326,15 @@ def test_p135sl_gate_catches_paper_over_in_non_rollback_events(tmp_path):
         '"source": "worker"}\n'
     )
     result = getattr(fp, '_check_infra_paper_over')(tmp_path)
-    assert result is not None, (
-        "Non-rollback events.jsonl entries with real paper-over content "
-        "must still trigger the gate"
+    assert result is None, (
+        "orchestrator_events.jsonl must not be a paper-over gate input"
     )
+    # The same content in a worker-authored document still triggers.
+    (tmp_path / "PROGRESS.md").write_text(
+        "iter 3 build error: replacing libophost_nn.so resolved it"
+    )
+    result = getattr(fp, '_check_infra_paper_over')(tmp_path)
+    assert result is not None, "worker documents must still trigger the gate"
 
 
 # ── P135.VC (2026-05-18 task #21): pass_b coverage silent-skip gate ──

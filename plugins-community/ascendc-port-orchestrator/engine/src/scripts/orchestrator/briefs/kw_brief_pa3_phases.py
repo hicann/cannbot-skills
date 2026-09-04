@@ -466,6 +466,13 @@ A.2. Write `workspace/{op}/analysis.md` covering:
     files to edit (e.g. `loss/ctc_loss_v2/op_api/ctc_loss_v2.cpp` lines
     around `IsregBaseAiCoreSupport`)
 
+  ⚠ **Stop-gate contract (check_worker.sh, rc=2 on violation)**: the three
+  fields `algorithm_family`, `choice`, `dtypes` MUST appear as BULLET LINES
+  with the exact prefixes `- algorithm_family: ...`, `- choice: ...`,
+  `- dtypes: ...` (hook greps `^- *<field>`). A `## algorithm_family` heading
+  or a `- **algorithm_family**:` bold line does NOT count and rejects the
+  worker. Example: `- algorithm_family: fused-attention (Softmax(QK^T)V)`.
+
 A.2.5. **Source-analysis-summary** (NEW 2026-05-13, closes Task #39).
   Write `workspace/{op}/<op>_source_summary.md` per the 8-section template
   below. This serves as authoritative input for Phase D precision test-case

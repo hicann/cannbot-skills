@@ -10,8 +10,9 @@
 
 """Lane pool — NPU lane allocation for parallel batch (DEBT-077 Track C #2).
 
-A "lane" is an NPU id (0/1/2 on A5). Each running orchestrator process owns
-one lane for its op's duration. The lane_pool:
+A "lane" is an NPU id (0/1/2 by default — the original 3-NPU A5 box). Each
+running orchestrator process owns one lane for its op's duration. The
+lane_pool:
 
   1. Probes which NPUs are physically idle via npu-smi over ssh
   2. Tracks logical lane ownership in workspace/.lanes/lane_N/state files
@@ -34,10 +35,12 @@ Codex C5: "lane release best-effort at exit (wrap in try/except; if
 lane_release.py not present, that's OK — orchestrator handles release on
 its side)". Implemented via Python finally: clauses in batch dispatcher.
 
-Phantom-lane policy (handover env-freeze): A5 has 3 NPUs (IDs 0/1/2 only).
-Lane 3 is forbidden — refuse to allocate / probe / list it. This is an
-explicit hardcoded constraint (the user's environment, not a generic NPU
-pool).
+Phantom-lane policy (handover env-freeze): only the ids in VALID_LANES are
+allocatable; anything else is refused for allocate / probe / list. The set
+defaults to (0, 1, 2) for the 3-NPU A5 box and can be widened for machines
+with more NPUs (e.g. an 8-NPU 950DT) via the AOG_LANE_IDS env var — a
+comma-separated id list such as "0,1,2,3,4,5,6,7". A malformed value falls
+back to the default rather than silently widening the pool.
 """
 from __future__ import annotations
 
@@ -51,7 +54,30 @@ from pathlib import Path
 from typing import Optional
 
 
-VALID_LANES = (0, 1, 2)
+DEFAULT_VALID_LANES = (0, 1, 2)
+
+
+def _parse_valid_lanes(raw: str) -> tuple[int, ...]:
+    """Parse the AOG_LANE_IDS override into the valid lane-id tuple.
+
+    Accepts a comma-separated list of non-negative ids. Any malformed token
+    or an empty result falls back to DEFAULT_VALID_LANES — never widen the
+    pool on a configuration typo.
+    """
+    lanes: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if not token.isdigit():
+            return DEFAULT_VALID_LANES
+        lane = int(token)
+        if lane not in lanes:
+            lanes.append(lane)
+    return tuple(sorted(lanes)) if lanes else DEFAULT_VALID_LANES
+
+
+VALID_LANES = _parse_valid_lanes(os.environ.get("AOG_LANE_IDS", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +195,7 @@ def fetch_npu_smi(host: str, user: str, password: str,
 # ---------------------------------------------------------------------------
 def _state_file(lane: int, root: Optional[Path] = None) -> Path:
     if lane not in VALID_LANES:
-        raise ValueError(f"lane {lane} not in {VALID_LANES} (A5 has 3 NPUs)")
+        raise ValueError(f"lane {lane} not in {VALID_LANES} (see AOG_LANE_IDS)")
     return pool_root(root) / f"lane_{lane}" / "state"
 
 

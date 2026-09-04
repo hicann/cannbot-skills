@@ -142,8 +142,10 @@ def _refuse_if_detached() -> None:
     print(
         "Correct invocation from an agent:\n"
         "  Bash(command='python3 src/scripts/orchestrator/orchestrator.py "
-        "--port-a3 <op_dir> --lane 0', run_in_background=True)\n"
-        "  — NO trailing `&`, NO `nohup`, NO shell `> log 2>&1` redirect.",
+        "--port-a3-ops <op_dir> --lane 0 --reference-source npubench "
+        "--npubench-task <task.py>', run_in_background=True)\n"
+        "  — NO trailing `&`, NO `nohup`, NO shell `> log 2>&1` redirect "
+        "(bare --port-a3-ops without an explicit reference source fails closed).",
         file=sys.stderr,
     )
     print(

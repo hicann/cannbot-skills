@@ -9,10 +9,14 @@ description: AscendC 算子从 arch22 源实现迁移到 arch35 的 L1+L2+L3 级
 
 目标侧归档、prior-art 实现和预置分支可以用于生成研究，并须记录来源；它们是
 advisory 输入，不能逐字复制目标实现后直接宣告生成成功。只有当前 selected arch22
-源码本身已带且契约可追溯的 pre-staged 分支，才可作为该源码的一部分复用。迁移终验以
-当前选定 arch22 源码的 source-arch NPU 捕获和声明契约为准；反向算子终验以梯度
-数学、保存张量契约和 CPU fp64 autograd 为准。目标侧实现或已安装算子的输出不能
-替代上述真值。
+源码本身已带且契约可追溯的 pre-staged 分支，才可作为该源码的一部分复用。新迁移的推荐 golden 是内容寻址
+暂存的 KernelBench 风格 task + 同 stem sidecar（`reference.source=npubench`，格式示例见
+examples/npukernelbench-native/）；其原始 task contract 和 provider-owned 评测为准。裸 `--port-a3-ops`
+调用必须在命令中显式选择 provider，否则启动 fail closed；只有显式 `reference.source=a3_live` 时
+才以当前选定 arch22 源码的 source-arch NPU 捕获为准（此模式下 perf 与精度都对照 A3 实现/实测输出；
+npubench 模式下 perf 加速比对照 golden 参考实现）。
+反向算子终验以梯度数学、保存张量契约和 CPU fp64 autograd 为准。目标侧实现或已安装
+算子的输出不能替代上述真值。
 
 ## 迁移层级决策树
 

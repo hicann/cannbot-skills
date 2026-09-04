@@ -154,6 +154,13 @@ def _dir_candidates() -> Iterator[Path]:
         yield from _emit(e.parent)     # …or at its skills/ dir
 
     pr = _plugin_root()
+    # Graybox merged layout (2026-08-26): the graybox staging merges declared
+    # dependency skills (incl. knowledge-query from cannbot-knowledge-consumer-skills)
+    # into THIS plugin's skills/ dir instead of keeping a sibling cannbot-knowledge
+    # plugin root. When that merged marker exists, treat the plugin root itself as
+    # the engine root so okf_kb.sh works inside the sandbox too.
+    if (pr / "skills" / "knowledge-query" / "scripts" / "knowledge_query.py").is_file():
+        yield from _emit(pr)
     cfg = os.environ.get("CLAUDE_CONFIG_DIR")
     plugin_bases = []
     if cfg:

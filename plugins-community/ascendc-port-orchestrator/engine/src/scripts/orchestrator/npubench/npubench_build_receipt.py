@@ -92,8 +92,11 @@ _BUILD_IDENTITY_PROCESS_KEYS = (
 )
 
 
-def _build_contract(source_kind: str) -> dict[str, str]:
-    if source_kind == TILELANG2ASCENDC_SOURCE_KIND:
+def _build_contract(source_kind: str | None) -> dict[str, str]:
+    # The receipt protocol (schema, identity binding, HMAC authentication) is
+    # source-agnostic; the generic authored-kernel route (source_kind=None)
+    # shares it, with the payload's ``source_kind`` field recording the route.
+    if source_kind in (TILELANG2ASCENDC_SOURCE_KIND, None):
         return {
             "schema": TILELANG2ASCENDC_BUILD_RECEIPT_SCHEMA,
             "identity_schema": TILELANG2ASCENDC_BUILD_IDENTITY_SCHEMA,
@@ -105,7 +108,7 @@ def _build_contract(source_kind: str) -> dict[str, str]:
 
 def _candidate_build_error_payload(
     contract: Mapping[str, str],
-    source_kind: str,
+    source_kind: str | None,
     reason: str,
     *,
     failure_kind: str = "target_build",
@@ -159,6 +162,14 @@ def _classify_controlled_compile_failure(stdout: str, stderr: str) -> str:
     worker repair path, but require a compiler diagnostic naming a file below
     the candidate ``kernel/`` tree so missing SDK/tool errors remain
     target-build failures.
+
+    A candidate can also break an SDK header transitively: an include chain
+    rooted below ``kernel/`` (for example a tiling header that pulls
+    ``tiling_api.h`` in the wrong compile pass) makes the compiler emit its
+    errors inside SDK headers, so no diagnostic names a candidate file even
+    though only the candidate can reorder the include.  Treat such cascades as
+    candidate failures too, but keep ``file not found`` cascades fail-closed:
+    a missing SDK header is a toolchain/target problem, not authored code.
     """
     diagnostics = f"{stdout}\n{stderr}"
     if re.search(
@@ -166,6 +177,20 @@ def _classify_controlled_compile_failure(stdout: str, stderr: str) -> str:
         diagnostics,
     ):
         return "candidate_contract"
+    candidate_rooted_cascade = re.search(
+        # clang prints one "In file included from <path>:N:" per chain entry;
+        # gcc folds the tail into indented "from <path>:N," continuation
+        # lines.  Both name the candidate file that rooted the chain.
+        r"(?m)(?:^In file included from |^\s+from )[^:\n]*/kernel/[^:\n]+:\d+",
+        diagnostics,
+    )
+    if candidate_rooted_cascade:
+        for match in re.finditer(
+            r"(?m)^[^:\n]+:\d+:\d+:\s*(?:fatal\s+)?error:\s*(?P<message>[^\n]*)",
+            diagnostics,
+        ):
+            if "file not found" not in match.group("message"):
+                return "candidate_contract"
     return "target_build"
 
 
@@ -173,7 +198,7 @@ def _build_receipt_reusable(
     receipt: Mapping[str, Any] | None,
     *,
     contract: Mapping[str, str],
-    source_kind: str,
+    source_kind: str | None,
     source_stage_digest: str,
     candidate_digest: str,
     authored_cmake_sha256: str,

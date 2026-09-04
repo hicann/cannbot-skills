@@ -10992,6 +10992,8 @@ Cross-ref: EC-30 (deploy script reads staged `current_task`, not arbitrary works
 
 **Cross-ref**: OL-112 (fp32 op-order is load-bearing — vec chains), OL-191 / §5.4 (fp32 near-ceiling summation-order cancellation = dtype-range edge → `PASS_WITHIN_TOLERANCE`), OL-275 (the cube that produced this — `AIC_ONLY` single-cube matmul), EC-59 (declare an INCLUSIVE `pass_a.status` so a T2-promoted fp32 matmul does not O5-rollback).
 
+**算子侧判定签名（判据不可满足家族 42/57/29，2026-08-29 29_FlashAttentionBwd 双路复盘）**: fp64 完美真值当候选打 NPU golden 严门仍 FAIL、且失败集 ⊇ 卡死 case 集（29: 18/50 FAIL ⊇ 14 卡死 case；候选换打 CPU golden 同样失败、候选离真值距离 ≈ CPU 参照离真值距离）⇒ 属判据不可满足家族——严门在近零相消位度量的是参照路径噪声而非正确性。**禁止再改 kernel**，走 waiver 通道收官（流程见 skill `port-orchestrator-ops` §5 / 用户 KB `npubench-near-zero-gate-unsatisfiable-001`）。
+
 ## OL-277: A verification script must be data-flow-independent of the verdict artifact it re-derives — emit diagnostics to stderr and ONE summary object to stdout; the caller (not the verifier) materializes the verdict file
 `applies_to: soc=all; cann=all; bisheng=n/a; op_class=all; mode=backward (harness-structural: the gate is a Python static scan in phase_o5, SoC/CANN-independent)`
 `verified_on: soc=Ascend950PR (selective_scan_full_grad kw-2 2026-06-18 / A5); the gate mechanism itself is SoC/CANN-independent`
@@ -11272,3 +11274,45 @@ For reporting, compute max/mean error only over finite, non-exact positions and 
 **Gate**: save the probe inputs, option values, outputs and framework/CANN versions. For optional-tensor-gated features, also vary presence/absence of the gating tensor (OL-202). For backward generation, differentiate the exact measured forward semantics; otherwise a forward option collapse can yield a mathematically coherent but fixture-incompatible gradient oracle. Cross-ref OL-89/OL-109 for dual-truth reporting and parity classification.
 
 **Evidence / provenance**: derived from historical card TR-OL-9. On A3 (2026-05-04, torch_npu 2.7.1/CANN 8.3), `gelu(approximate=none)` differed from the CPU/textbook erf form by 4.74e-4 but matched the tanh approximation within 4.77e-7; the two distinct option values were bit-identical on NPU while CPU distinguished them by 4.73e-4. These numbers are measured. The requirement to declare which truth authority controls the task is a process conclusion, not a claim that device parity always outranks mathematical truth.
+
+## OL-293: on dav_3510 the only Cast path INTO int8 is half->int8; int32->int8 and fp32->int8 silently compile to zero instructions
+
+`applies_to: soc=Ascend950PR/950DT (V3510/dav_3510/arch35); cann=9.2.0; op_class=quant int8 output / requant tail; backend=ascendc`
+
+**Principle**: the dav_3510 Cast dispatch table (`tools/tikcpp/tikcfw/impl/dav_3510/kernel_operator_vec_vconv_impl.h` L1370-1397, CANN 9.2.0) contains **no DST=int8 narrowing pair except `half -> int8`** (cast_round_all L1373 + using_cast_rint L1388). Both direct conversions a porter reaches for first are absent: `Cast(q_int8, q_int32, RoundMode::CAST_NONE)` (int32->int8) and `Cast(q_int8, x_fp32, ...)` (fp32->int8) — the kw-27 lesson is that fixing one missing leg by switching to the other misses that BOTH are missing. Unsupported pairs land in the `else { ASCENDC_ASSERT(false, ...) }` branch (L1455-1462), and under device compilation (`__NPU_DEVICE__`) `ASCENDC_ASSERT` is an **empty macro** (`aarch64-linux/asc/impl/basic_api/kernel_log.h` L66-71) — so the Cast compiles to ZERO instructions: no trap, no build error, run "succeeds", and the output tensor is never written. What the reader sees is **stale UB residue** from earlier launches (observed fingerprint: 0x3F/0xBF high-byte pairs = high bytes of positive bf16 values in [0.37, 1.0) left by a previous vec launch). The harness signature is **bimodal across repeats**: repeat 1 near-zero (freshly-zeroed UB), repeat 2+ garbage drifting with allocator/launch history.
+
+**Rule**: requant/quant int8 output on dav_3510 must use the chain `Cast(half, int32, CAST_NONE)` then `Cast(int8, half, CAST_RINT)`. After the fp32->int32 (CAST_RINT) step values are already integers; int32->half is exact for integers in [-128, 127]; half->int8 RINT adds no further rounding — **no double-rounding risk**. The alternative fp32->half->int8 skips the integer exactness argument and DOES carry double-rounding risk; do not use it. Before writing any Cast type pair on dav_3510, grep the dispatch table header for the exact `Tuple<DstT, SrcT>`.
+
+**Evidence / provenance**: 2_FFN_evo int8 quant cases 25/26 root-cause probe (2026-08-29, physical card 1, Ascend950DT_9582, CANN 9.2.0) — `port-run8/diag-2ffn/probe-int8/REPORT.md`. Stage-by-stage GM dump isolated the only broken stage: `Cast int32->int8 (CAST_NONE)` mismatched 1569318/1572864 (99.77%) while every other stage (gemm1 int8, dequant, act, fp32->int32 RINT) was 0/1572864. After switching to int32->half(NONE)->int8(RINT): case 25/26 max_abs_diff=0, MERE=0, matched=1.000000, allclose viol=0, 3 repeats bit-identical; full O5 53/53. This errata corrects the int32->int8 leg cited by P-P72 step (8).
+
+## OL-294: int8 cube L1->L0 load chain verified bit-exact on dav_3510 (LoadData2DParamsV2 2D-V2 + Mmad [16,32,16] + Fixpipe int32->int32)
+
+`applies_to: soc=Ascend950PR/950DT (V3510/dav_3510/arch35); cann=9.2.0; op_class=int8 cube GEMM; backend=ascendc`
+
+**Principle**: the int8 cube load/compute/store chain is NOT a suspect on dav_3510 — it is measured bit-exact: `LoadData2DParamsV2` (2D-V2 form) L1->L0 load + `Mmad` with [16,32,16] fractal (K-direction C0=32 for int8) + `Fixpipe` int32->int32 L0C->GM produced **0/1572864 mismatches** vs golden (M=512, K1=768, N1=3072 int8 x@w1 -> int32). kw-24..kw-31's standing suspicion of the int8 2D-V2 load form is REFUTED by device measurement; when an int8 quant pipeline misbehaves, look at the vec-side requant chain first (OL-293), not the cube load.
+
+**Caveats**: `LoadDataToL0AMx` does NOT exist in the CANN 9.2.0 tikcpp headers — do not reach for it when porting regbase MX-grouping code; regbase header comments describing MX grouping do not apply to this dav_3510 path. This card covers the 2D-V2 load form only, not legacy `LoadData2D` variants.
+
+**Evidence / provenance**: same probe as OL-293 (`port-run8/diag-2ffn/probe-int8/REPORT.md`, 2026-08-29): stage `ws1` (gemm1: int8 x@w1 -> int32 via 2D-V2 load + Mmad + Fixpipe int32->int32) 0/1572864 mismatch, and post-fix full-pipeline ws1/ws2/ws3 all 0 mismatch with deterministic repeats.
+
+## OL-295: quant-act kernels must replay the golden's bf16-domain per-op rounding when the golden is built from torch CPU bf16 ops
+
+`applies_to: soc=Ascend950PR/950DT (V3510/dav_3510/arch35); cann=9.2.0; op_class=fused activation+quant (quant-act) vs torch CPU bf16 golden; backend=ascendc`
+
+**Scope limit (do NOT generalize)**: this card applies ONLY when (a) the op is a quant-act scenario (activation followed by requant to int8) AND (b) the golden is composed of torch CPU **bf16** operators. It says nothing about fp16/fp32 goldens or non-quant activations.
+
+**Principle**: a torch CPU bf16 operator computes in fp32 opmath and rounds its output back to bf16 **once per op**. A kernel that evaluates the same activation purely in the fp32 domain and rounds only at the requant Cast diverges at requant boundary values: a ±1 int8 flip at the boundary is then amplified by the downstream GEMM (GEMM2), and a hard `max_error_cap` gate (allclose viol==0) cannot pass. Measured after the OL-293 fix alone: case 26 (fastgelu) viol=588, case 25 (silu) viol=12884. The per-op rounding count follows the golden's torch-op decomposition: `silu`/`gelu` = single ATen op -> round ONCE at the end; `fastgelu` = `x * sigmoid(1.7x)` = three torch ops (mul, sigmoid, mul) -> round THREE times, once after each op; `relu` is exact and needs none.
+
+**Rule**: implement a `RoundToBf16` helper (`Cast fp32->bf16 RINT` + `Cast bf16->fp32 NONE`) and apply it after each torch-op-equivalent step of the activation, matching the golden's op decomposition exactly. Validate the rounding schedule on CPU simulation against the golden BEFORE burning device runs.
+
+**Evidence / provenance**: same probe as OL-293 (`port-run8/diag-2ffn/probe-int8/REPORT.md` §P1 + `sim_act_domain.py` CPU simulation, 2026-08-29): simulated bf16-domain rounding produced 0 diff vs golden_task for both silu and fastgelu; device implementation of the same schedule closed case 25/26 to max_abs_diff=0 / viol=0, O5 53/53.
+
+## OL-296: execution-defect localization chain — read MERE/matched and repeat modality BEFORE hypothesizing algorithm bugs
+
+`applies_to: soc=all; cann=all; op_class=precision-failure triage / probe methodology; backend=ascendc`
+
+**Principle**: two harness signatures localize an EXECUTION defect (kernel never computed what you think) before any algorithm-level hypothesis is worth pursuing. (1) `MERE ≈ 1.0` with `matched ≈ 0` strongly suggests the output is ALL ZERO — a strong heuristic, not a proof: an all-NaN output presents identically, so confirm by dumping the actual output buffer. (2) A **bimodal repeat sequence** (repeat 1 near-zero, repeats 2+ garbage that drifts with launch history) indicates **uninitialized/stale memory** — the buffer was never written by this launch and you are reading leftover UB/GM content. Both signatures point at "some instruction silently did nothing" (e.g. OL-293's empty-`ASCENDC_ASSERT` Cast), not at numeric inaccuracy.
+
+**Method (level-by-level GM dump isolation)**: add debug dump stages that expose every pipeline level to GM (e.g. FFN: ws1 gemm1 -> act sub-stages -> ws2 store -> ws3 gemm2), plus a store-fidelity check (UB->GM store copies the dumped bytes verbatim). Compare each level against the golden chain independently; the FIRST mismatched level is the defect, and levels upstream of it are exonerated by measurement, not by argument. In the reference probe every stage measured 0/1572864 except exactly one Cast stage at 99.77% — 100% decisive localization with no algorithm hypothesizing. Pair with kernel-sim fidelity discipline (a bit-true simulator must first reproduce known-good cases before its diff verdicts are trusted).
+
+**Evidence / provenance**: 2_FFN_evo probe (2026-08-29, `port-run8/diag-2ffn/probe-int8/REPORT.md`): the bimodal repeat signature led to the stale-UB hypothesis, and the five-stage dump chain (ws1/dbgC1i/dbgDeq/dbgPre/dbgH8i all 0/1572864; dbgH8 = int32->int8 Cast 1569318/1572864) isolated OL-293's silent zero-instruction Cast in one pass.

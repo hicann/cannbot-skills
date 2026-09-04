@@ -24,6 +24,7 @@ from source_arch import (  # noqa: E402
     load_port_a3_build_source,
     record_port_a3_build_source,
     stage_source_tree,
+    verify_npubench_generation_source_stage,
     verify_source_stage,
 )
 from run_kw_graybox import _copy_arch22_tree  # noqa: E402
@@ -345,6 +346,38 @@ def test_source_stage_excludes_target_and_binds_hashes(tmp_path, monkeypatch):
     valid, reason, _manifest = verify_source_stage(workspace)
     assert valid is False
     assert "mismatch" in reason
+
+
+def test_npubench_generation_source_stage_rejects_serialized_truth_artifacts(tmp_path):
+    """The arch22 implementation view cannot carry an old A3/golden corpus."""
+    source = tmp_path / "customer-op"
+    workspace = tmp_path / "workspace" / "op"
+    _source(source, "op_kernel/arch22/op.h")
+    (source / "edge_dataset.pt").write_bytes(b"not-an-actual-tensor")
+    stage = stage_source_tree(source, workspace)
+    state = _stage_state(stage)
+
+    valid, reason, _manifest = verify_npubench_generation_source_stage(
+        workspace, state
+    )
+
+    assert valid is False
+    assert "forbidden A3/data artifact" in reason
+    assert "edge_dataset.pt" in reason
+
+
+def test_npubench_generation_source_stage_allows_ordinary_json_config(tmp_path):
+    source = tmp_path / "customer-op"
+    workspace = tmp_path / "workspace" / "op"
+    _source(source, "op_kernel/arch22/op.h")
+    _source(source, "config/operator.json", '{"tile": 32}\n')
+    stage = stage_source_tree(source, workspace)
+
+    valid, reason, _manifest = verify_npubench_generation_source_stage(
+        workspace, _stage_state(stage)
+    )
+
+    assert valid is True, reason
 
 
 def test_source_stage_rejects_manifest_op_state_mismatch(tmp_path):

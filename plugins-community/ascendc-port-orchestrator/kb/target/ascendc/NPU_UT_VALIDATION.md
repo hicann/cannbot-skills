@@ -8,8 +8,15 @@ reusable only when it is part of the selected arch22 source and remains traceabl
 
 ## Truth boundary
 
-- Migration ordinary truth: declared operator contract plus a capture produced from the current
-  user-selected arch22 source on the source-arch NPU.
+- Migration default truth: declared operator contract plus the immutable, content-addressed
+  KernelBench-style task/sidecar bundle (task `.py` + same-stem `.json`/`.jsonl` sidecar pair; `reference.source=npubench`); durable state must bind the bundle,
+  fixture, and provider-owned verification evidence by digest.
+- Migration `a3_live` truth: declared operator contract plus a capture produced during this run
+  from the current user-selected arch22 source on the source-arch NPU. It is an explicit fallback,
+  not a silent substitute for a missing npubench bundle.
+- Legacy `a3_live` source-capture wording: Migration ordinary truth: source-arch NPU. Here
+  “ordinary” is limited to this selected source-capture provider; an explicitly selected
+  npubench task/sidecar bundle remains its own immutable golden contract.
 - Backward truth: declared forward contract, saved-tensor contract, analytic gradient equations,
   and a CPU fp64 autograd oracle.
 - Target NPU execution validates the newly generated target; it is never an answer source.
@@ -39,7 +46,8 @@ current-generated-binary digest chain, and the truth authority used for final va
 3. Run a minimal target public-API launch probe.
 4. Run memory and exception controls.
 5. Confirm generated dispatch coverage.
-6. Compare results with source-arch capture or CPU fp64 autograd truth.
+6. Compare results with the selected migration reference (default frozen KernelBench-style task/sidecar bundle or explicit
+   source-arch capture) or CPU fp64 autograd truth.
 7. Exercise option and attribute branches.
 8. Run determinism and performance gates only after correctness.
 
@@ -65,7 +73,8 @@ only if the control succeeds and provenance proves the current generated binary 
 
 ## R3: value comparison with admissible truth
 
-For migration, compare with the same current arch22 source-arch capture and declared tolerance.
+For default migration, compare with the immutable npubench bundle evidence and its declared tolerance;
+for explicit `a3_live`, compare with the same current arch22 source-arch capture and declared tolerance.
 For backward generation, compare every gradient with CPU fp64 autograd after normalizing to the
 declared output dtype. Include near-zero, overflow, reduction, non-contiguous, optional-input, and
 saved-state cases.

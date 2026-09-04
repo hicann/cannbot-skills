@@ -544,11 +544,20 @@ def _validate_tilelang2ascendc_kernel_boundary(
 
 def _validate_candidate_for_controlled_build(
     workspace: Path,
-    source_kind: str,
+    source_kind: str | None,
     source_manifest: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any] | None:
     """Validate the route-specific authored candidate boundary before CANN."""
     workspace = Path(workspace)
+    if source_kind is None:
+        # Generic kernel projects carry no TileLang2AscendC independence
+        # contract; the shared build script only needs the two authored
+        # entry files, and there is no independence proof to return.
+        try:
+            _require_candidate_entry_files(workspace)
+        except TargetTransportError as exc:
+            raise CandidateContractError(str(exc)) from exc
+        return None
     if source_kind != TILELANG2ASCENDC_SOURCE_KIND:
         raise CandidateContractError(
             f"unsupported controlled candidate source kind: {source_kind!r}"

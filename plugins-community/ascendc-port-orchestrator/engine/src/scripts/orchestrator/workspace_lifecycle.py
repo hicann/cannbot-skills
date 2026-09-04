@@ -119,7 +119,12 @@ def _optimize_built_kernel_present(workspace: Path, plugin) -> bool:
     if plugin is None:
         kd = workspace / "kernel"
         return kd.is_dir() and any(kd.iterdir())
-    cpp_dirs = plugin.kernel_cpp_dirs()
+    workspace_aware = getattr(plugin, "kernel_cpp_dirs_for_workspace", None)
+    cpp_dirs = (
+        workspace_aware(workspace)
+        if callable(workspace_aware)
+        else plugin.kernel_cpp_dirs()
+    )
     return bool(cpp_dirs) and all(
         (workspace / d).is_dir() and any((workspace / d).iterdir())
         for d in cpp_dirs

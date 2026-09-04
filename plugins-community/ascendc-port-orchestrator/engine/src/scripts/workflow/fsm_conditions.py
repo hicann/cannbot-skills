@@ -33,7 +33,18 @@ from __future__ import annotations
 import pathlib
 import re  # noqa: F401  (used by the relocated helpers' regexes)
 import sys  # noqa: F401
+from collections.abc import Mapping
 from typing import Any
+
+
+def _handoff_match(handoff: str, arg: Any) -> bool:
+    """Prefix-match a handoff, with exact token boundaries for terminal routes."""
+    if not isinstance(arg, str) or not handoff.startswith(arg):
+        return False
+    if not arg.endswith((" done", " build-ready")):
+        return True
+    suffix = handoff[len(arg):]
+    return not suffix or bool(re.match(r"^[^\w-]", suffix))
 
 
 # ---------------------------------------------------------------------------
@@ -259,12 +270,42 @@ def eval_condition(cond: Any, ctx: dict) -> bool:
     # `→ orchestrator: done` (prefix) misses `: **done`.
     handoff_norm = handoff.replace("**", "")
     if kind == "handoff_match":
-        return handoff_norm.startswith(arg)
+        return _handoff_match(handoff_norm, arg)
     if kind == "handoff_contains":
         # Substring (not prefix). For verdict tokens that ride as a SUFFIX of the
         # canonical arrow handoff, e.g. `→ orchestrator: done — KO_PERF_PLATEAU`.
         # handoff_match (prefix-only) silently never matches those; this does.
         return arg in handoff_norm
+    if kind == "reference_source_is":
+        # Provider-owned routes use the complete durable binding rather than an
+        # opgen mode or a handoff token.  The resolver validates the binding and
+        # rejects missing, partial, or symlinked state.  A malformed provider
+        # binding must not become ``False`` for an NPUBench workspace:
+        # that would let the following legacy transition win.  The only
+        # compatibility fallback is a resolver failure for a state that still
+        # exposes a valid, non-NPUBench provider (the intentional legacy route).
+        if not isinstance(arg, str):
+            return False
+        if ws is None:
+            raise RuntimeError("reference source condition requires a workspace")
+        reference_source = _orchestrator_module("reference_source")
+        if reference_source is None:
+            raise RuntimeError("reference source resolver is unavailable")
+        try:
+            return reference_source.resolve_reference_source(ws) == arg
+        except Exception:
+            state = reference_source.load_durable_state(ws)
+            if not isinstance(state, Mapping):
+                raise
+            reference = state.get("reference")
+            source = reference.get("source") if isinstance(reference, Mapping) else None
+            valid_sources = getattr(reference_source, "VALID_REFERENCE_SOURCES", ())
+            if (
+                source in valid_sources
+                and source != "npubench"
+            ):
+                return False
+            raise
     if kind == "plugin_method":
         # Added 2026-05-20 as a generic paradigm-dispatch primitive.
         # Dispatches to a method on the active plugin (passed via
@@ -539,6 +580,13 @@ def eval_condition(cond: Any, ctx: dict) -> bool:
         # V3.3.1 (2026-04-25): match probe_report.md §Classification verdict
         # against an allowed-list. arg is a list of strings (e.g. ["requirement"]).
         return snap.get("probe_classification") in (arg or [])
+    if kind == "probe_infra_block_streak_ge":
+        # P0aay (2026-08-25): consecutive infra-blocked probe verdicts
+        # (deferred / INFRA-BLOCKED untested-cluster). arg is an int threshold.
+        try:
+            return int(snap.get("probe_infra_block_streak") or 0) >= int(arg)
+        except (TypeError, ValueError):
+            return False
     if kind == "det_report_decision_in":
         return snap.get("det_report_decision") in arg
     if kind == "trajectory_sigs_stable":

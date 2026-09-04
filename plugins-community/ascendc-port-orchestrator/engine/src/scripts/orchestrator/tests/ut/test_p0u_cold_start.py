@@ -241,3 +241,100 @@ def test_cold_start_migrates_empirical_backup_out_of_workspace(tmp_path, monkeyp
     assert (migrated[0] / "kernel" / "fa.h").exists(), "audit content preserved in migrated dir"
     # Phase O2.5 prep untouched
     assert (tmp_path / "model.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# Immutable source stages vs cold-start (2026-08-21)
+#
+# `.tilelang2ascendc_source` publishes
+# under a fail-closed "existing stage must not be replaced" rule.  Cold-start
+# is the sole explicit reset mechanism, so it must ARCHIVE a live stage —
+# otherwise the second --cold-start on the same op dies at source staging
+# (observed: TILELANG2ASCENDC_SOURCE_STAGE_EXISTS on the second run).
+# `reference_inputs/` is different: its bundles are content-addressed and
+# re-staging the same inputs is idempotent, so cold-start preserves it.
+# ---------------------------------------------------------------------------
+
+
+def _tilelang_project(root: Path) -> Path:
+    """Minimal TileLang2AscendC project accepted by tilelang2ascendc_source."""
+    source = root / "3_Add"
+    (source / "kernel" / "op_host").mkdir(parents=True)
+    (source / "kernel" / "op_kernel").mkdir(parents=True)
+    (source / "model_new_ascendc.py").write_text(
+        "class ModelNew(torch.nn.Module):\n"
+        "    def forward(self, x, y):\n"
+        "        output = torch.ops.npu.add(x, y)\n"
+        "        return output\n",
+        encoding="utf-8",
+    )
+    (source / "kernel" / "register.cpp").write_text(
+        'TORCH_LIBRARY_FRAGMENT(npu, m) { m.def("add(Tensor x, Tensor y) -> Tensor"); }\n'
+        'TORCH_LIBRARY_IMPL(npu, PrivateUse1, m) { m.impl("add", &Add); }\n',
+        encoding="utf-8",
+    )
+    (source / "kernel" / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.16)\n"
+        "add_library(add SHARED op_host/add.cpp op_kernel/add.cpp register.cpp)\n",
+        encoding="utf-8",
+    )
+    (source / "kernel" / "op_host" / "add.cpp").write_text(
+        "void Add() { EXEC_KERNEL_CMD(add_kernel); }\n", encoding="utf-8"
+    )
+    (source / "kernel" / "op_kernel" / "add.cpp").write_text(
+        "__global__ __aicore__ void add_kernel() { AscendC::DataCopy(); }\n",
+        encoding="utf-8",
+    )
+    return source
+
+
+def test_cold_start_archives_immutable_source_stages(tmp_path, monkeypatch):
+    """Cold-start archives `.tilelang2ascendc_source`: removed from the
+    workspace, preserved byte-for-byte in the outside-workspace backup.
+    `reference_inputs/` is content-addressed and idempotent on re-stage, so
+    it is NOT wiped.
+    """
+    monkeypatch.setenv("COLD_START_BACKUP_ROOT", str(tmp_path / ".bkp"))
+    ws = tmp_path / "op_ws"
+    (ws / ".tilelang2ascendc_source" / "kernel").mkdir(parents=True)
+    (ws / ".tilelang2ascendc_source" / "kernel" / "add.cpp").write_text("// staged tile")
+    bundle = ws / "reference_inputs" / "npubench" / ("ab" * 32)
+    bundle.mkdir(parents=True)
+    (bundle / "bundle_manifest.json").write_text("{}")
+
+    getattr(orch, '_cold_start_reset_workspace')(ws)
+
+    # Immutable stage gone from the worker-visible workspace
+    assert not (ws / ".tilelang2ascendc_source").exists()
+    # Archived (not deleted) in the outside-workspace backup
+    backups = list((tmp_path / ".bkp" / ws.name).glob("pre-cold-start-*"))
+    assert len(backups) == 1
+    assert (backups[0] / ".tilelang2ascendc_source" / "kernel" / "add.cpp").read_text() == "// staged tile"
+    # Content-addressed reference bundles survive (re-staging them is idempotent)
+    assert (bundle / "bundle_manifest.json").exists()
+
+
+def test_cold_start_twice_allows_tilelang_source_restage(tmp_path, monkeypatch):
+    """Repro: two consecutive --cold-start runs on the same TileLang2AscendC
+    source must not die at source staging on the second run.  The fail-closed
+    rule itself is preserved: a bare (non-cold-start) re-stage still refuses
+    to replace the live stage.
+    """
+    import tilelang2ascendc_source as tile_source
+
+    monkeypatch.setenv("COLD_START_BACKUP_ROOT", str(tmp_path / ".bkp"))
+    source = _tilelang_project(tmp_path)
+    ws = tmp_path / "workspace" / source.name
+
+    # First run stages the immutable source snapshot.
+    tile_source.stage_tilelang2ascendc_source_tree(source, ws)
+    # Cold-start #1 archives it; cold-start #2 must stage cleanly again.
+    getattr(orch, '_cold_start_reset_workspace')(ws)
+    stage = tile_source.stage_tilelang2ascendc_source_tree(source, ws)
+    assert stage.root == ws / ".tilelang2ascendc_source"
+
+    # Fail-closed semantics intact: without cold-start, re-staging refuses.
+    with pytest.raises(tile_source.Tilelang2AscendcSourceError, match="SOURCE_STAGE_EXISTS"):
+        tile_source.stage_tilelang2ascendc_source_tree(source, ws)
+
+
