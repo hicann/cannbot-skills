@@ -729,7 +729,7 @@ elif [ "${TOOL}" = "trae" ]; then
     # 仅内置 Agent 可调用。从 agents/*.md 生成 .trae/agents/{name}.md：
     #   保留 name/description 与正文，注入 tools（按角色静态限权，Trae 原生机制）；
     #   目录级写权限（.cannbot 等）Trae 不支持，由 prompt 约束兜底（同 codex 降级）。
-    agent_count=$(TRAE_AGENT_OUT="${AGENTS_LINK_DIR}" python3 - "${AGENT_FILES[@]}" << 'TRAE_AGENT_PY' 2>/dev/null)
+    agent_count=$(TRAE_AGENT_OUT="${AGENTS_LINK_DIR}" python3 - "${AGENT_FILES[@]}" << 'TRAE_AGENT_PY' 2>/dev/null
 import os, re, sys
 
 out_dir = os.environ["TRAE_AGENT_OUT"]
@@ -779,6 +779,7 @@ for f in sys.argv[1:]:
     count += 1
 print(count)
 TRAE_AGENT_PY
+    )
     ok "Agents: ${agent_count} trae Subagent files generated"
 else
     for f in "${AGENT_FILES[@]}"; do

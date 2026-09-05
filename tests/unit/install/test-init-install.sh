@@ -546,6 +546,34 @@ PYEOF
 done
 
 # =============================================================================
+# Check 5: init.sh parses cleanly (bash -n must be completely silent)
+# =============================================================================
+# Parse-time bash diagnostics (e.g. "unterminated here-document" from a heredoc
+# whose $( closing parenthesis sits on the heredoc start line) only warn on
+# new bash but are hard syntax errors on older bash. Assert bash -n emits
+# nothing so this class is caught on any bash version.
+# See https://gitcode.com/cann/cannbot-skills/issues/608.
+print_section_header "Check: init.sh parses cleanly (bash -n silent)"
+
+for team_dir in $(get_all_plugin_dirs); do
+    [ -d "$team_dir" ] || continue
+    team_name=$(basename "$team_dir")
+
+    for init_script in "$team_dir/init.sh" "$team_dir/example/init.sh"; do
+        [ -f "$init_script" ] || continue
+
+        err=$(bash -n "$init_script" 2>&1 || true)
+        if [ -n "$err" ]; then
+            print_fail "[$team_name] ${init_script#$team_dir/} bash -n diagnostics: $err"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        else
+            print_pass "[$team_name] ${init_script#$team_dir/} parses cleanly (bash -n silent)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        fi
+    done
+done
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""

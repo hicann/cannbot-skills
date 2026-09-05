@@ -198,6 +198,25 @@ run_check() {
     fi
 }
 
+# Negative assertion: init.sh output must not contain bash parse diagnostics.
+# Parse-time bash warnings (e.g. "unterminated here-document" from a heredoc
+# closed on the same line as its $( opening) only warn on new bash but are
+# hard syntax errors on older bash, so they must fail the test on any version
+# (see https://gitcode.com/cann/cannbot-skills/issues/608).
+assert_no_shell_warnings() {
+    local output="$1"
+    local hits
+    hits=$(echo "$output" | grep -E "warning: (command substitution|here-document)|syntax error" || true)
+    if [ -n "$hits" ]; then
+        print_fail "init.sh emitted bash parse diagnostics"
+        echo "$hits" | sed 's/^/        /'
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "init.sh output free of bash parse diagnostics"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+}
+
 # Verify every symlink under a directory points to an existing target
 verify_symlinks_valid() {
     local dir="$1"
@@ -641,6 +660,7 @@ scenario_project_opencode() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project opencode <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -715,6 +735,7 @@ scenario_global_opencode() {
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global opencode <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -857,6 +878,7 @@ scenario_project_claude() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project claude <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -932,6 +954,7 @@ scenario_global_claude() {
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global claude <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1013,6 +1036,7 @@ scenario_project_trae_ide() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1074,6 +1098,7 @@ scenario_project_trae_plugin() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1144,6 +1169,7 @@ scenario_project_trae_cli() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project trae <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1215,6 +1241,7 @@ scenario_global_trae_ide() {
     local output
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+    assert_no_shell_warnings "$output"
 
     # Teams that explicitly reject global + trae (design choice): assert exit 1
     # and no silent fall-through to ~/.claude, then skip install assertions.
@@ -1307,6 +1334,7 @@ scenario_global_trae_plugin() {
     local output
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+    assert_no_shell_warnings "$output"
 
     # Teams that explicitly reject global + trae (design choice): assert exit 1
     # and no silent fall-through to ~/.claude, then skip install assertions.
@@ -1399,6 +1427,7 @@ scenario_global_trae_cli() {
     local output
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+    assert_no_shell_warnings "$output"
 
     # Teams that explicitly reject global + trae (design choice): assert exit 1
     # and no silent fall-through to ~/.claude, then skip install assertions.
@@ -1495,6 +1524,7 @@ scenario_global_trae_unknown() {
     local output
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+    assert_no_shell_warnings "$output"
 
     # Teams that explicitly reject global + trae (design choice): assert exit 1
     # and no silent fall-through to ~/.claude, then skip install assertions.
@@ -1585,6 +1615,7 @@ scenario_global_trae_priority() {
     local output
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global trae <<< "y" 2>&1) || exit_code=$?
+    assert_no_shell_warnings "$output"
 
     # Teams that explicitly reject global + trae (design choice): assert exit 1
     # and no silent fall-through to ~/.claude, then skip install assertions.
@@ -1678,6 +1709,7 @@ scenario_project_codearts() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project codearts <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1767,6 +1799,7 @@ scenario_global_codearts() {
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global codearts <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1850,6 +1883,7 @@ scenario_project_cursor() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project cursor <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1906,6 +1940,7 @@ scenario_global_cursor() {
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global cursor <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -1955,6 +1990,7 @@ scenario_project_copilot() {
     local exit_code=0
     output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project copilot <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -2011,6 +2047,7 @@ scenario_global_copilot() {
     local exit_code=0
     output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global copilot <<< "y" 2>&1) || exit_code=$?
 
+    assert_no_shell_warnings "$output"
     if [ "$exit_code" -eq 0 ]; then
         print_pass "init.sh exited with code 0"
         PASS_COUNT=$((PASS_COUNT + 1))
