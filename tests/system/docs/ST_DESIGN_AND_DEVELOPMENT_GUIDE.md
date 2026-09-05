@@ -570,4 +570,4 @@ EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --
 
 ## 参考文档
 
-- [Skill Test Framework README](../README.md)
+- [Skill Test Framework README](../../README.md)

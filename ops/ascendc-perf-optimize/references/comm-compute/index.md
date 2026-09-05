@@ -190,4 +190,4 @@ Step 5 — 性能指标核算（必选输出）：
 | Bound 判定 | 三类 Bound 的诊断方法与判定标准 | [bound_diagnosis.md](bound_diagnosis.md) |
 | 流水配平 | 长短块排布 + AIC/AIV 架构 + 统一搜索算法（四条剪枝 + Top-N） | [pipeline_balancing.md](pipeline_balancing.md) |
 | 膨胀分析 | 切分膨胀对端到端性能的影响与最小化策略 | [expansion_analysis.md](expansion_analysis.md) |
-| matmul 计算效率优化（计算 Bound，最低优先级） | 参考 matmul 族优化策略提升单块 matmul 效率 | [matmul/guide.md](../../../ascendc-performance-best-practices/reference/matmul/guide.md) |
+| matmul 计算效率优化（计算 Bound，最低优先级） | 参考 matmul 族优化策略提升单块 matmul 效率 | [matmul/guide.md](../../../ascendc-performance-best-practices/references/matmul/guide.md) |

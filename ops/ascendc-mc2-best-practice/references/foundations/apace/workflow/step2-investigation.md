@@ -15,7 +15,7 @@
 | 编排形态 | `orchestration` | 严格分离 / 时分复用 | 严格分离（后 R 核通信 / 前核归约） |
 | dtype/shape/rankSize | `dtype` / `shape` / `rank_size` | 输入/累加/输出 dtype、逻辑 shape、rank 数 | FP8_E4M3 × FP8_E4M3 → BF16，M=2048，R=4 |
 
-> **四要素提取不到时必须澄清**：golden 语义的"每卡输入分布"无法从用户需求唯一确定时（典型：用户说"每卡有 M/rankSize"但未说明是输入切分还是输出分布），**必须回 [`requirement-analysis/grill-protocol.md`](../../requirement-analysis/grill-protocol.md) 维度 9 向用户追问**，禁止默认假设后直接进入源码核对。
+> **四要素提取不到时必须澄清**：golden 语义的"每卡输入分布"无法从用户需求唯一确定时（典型：用户说"每卡有 M/rankSize"但未说明是输入切分还是输出分布），**必须回 [`requirement-analysis/grill-protocol.md`](../../../requirement-analysis/grill-protocol.md) 维度 9 向用户追问**，禁止默认假设后直接进入源码核对。
 
 ## 2. 源码核对范围（只读）
 

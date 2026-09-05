@@ -131,7 +131,7 @@ Generate `{rule_id}_tags.json` in the following format:
 
 ### Phase 3.1: Tag Validation (Compliance Check)
 
-To maintain the rigor of the rule library, all tags used in `{rule_id}_tags.json` **MUST** exist in [tag_taxonony.md](../../references/standards/tag_taxonony.md).
+To maintain the rigor of the rule library, all tags used in `{rule_id}_tags.json` **MUST** exist in [tag_taxonony.md](../references/standards/tag_taxonony.md).
 
 1. Execute the validation script:
 ```bash
@@ -139,7 +139,7 @@ python scripts/analysis_engine/tag_validator.py <rule_id>
 ```
 2. If validation fails:
    - Check for typos in the tags.
-   - If the tag is necessary but genuinely new, update [tag_taxonony.md](../../references/standards/tag_taxonony.md) first, then re-run validation.
+   - If the tag is necessary but genuinely new, update [tag_taxonony.md](../references/standards/tag_taxonony.md) first, then re-run validation.
 
 ### Phase 3.5: Synchronized Rule Index Update (CLI, Mandatory)
 

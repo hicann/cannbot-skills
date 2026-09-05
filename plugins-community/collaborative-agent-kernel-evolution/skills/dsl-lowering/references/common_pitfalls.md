@@ -314,8 +314,8 @@ When results are incorrect:
 
 ## 📚 Related Documentation
 
-- [Manual Matmul Example](./matmul/manual_matmul_example.md)
-- [AscendC API Reference](../ascend_api/tl_asc_routing.md)
-- [Error Correction Examples](../error_correction/error_correction_examples.md)
-- [Multi-Dtype Guide](../multi_dtype/multi_dtype_guide.md)
-- [Multi-Dtype Reference Kernel](../multi_dtype/add_custom_reference.cpp)
+- [Manual Matmul Example](lowering_examples/matmul/manual_matmul_example.md)
+- [AscendC API Reference](ascend_api/tl_asc_routing.md)
+- [Error Correction Examples](error_correction/error_correction_examples.md)
+- [Multi-Dtype Guide](multi_dtype/multi_dtype_guide.md)
+- [Multi-Dtype Reference Kernel](multi_dtype/add_custom_reference.cpp)

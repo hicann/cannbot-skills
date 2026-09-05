@@ -83,7 +83,7 @@ pipe.InitBuffer(l0aQue, 2, l0aBytes);
 pipe.InitBuffer(l0bQue, 2, l0bBytes);
 ```
 
-> **Apply ONE buffer level per edit, in this order — never all at once.** AIC ping-pong is hand-managed `set_flag/wait_flag` + EVENT_ID + `%2`; read [`ascendc-performance-best-practices`](../../ascendc-performance-best-practices/reference/matmul/pingpong_design.md) (co-located in `ops/`) for the protocol, but its example is the *finished* kernel — **do not transcribe L1 + L0 + scale + UnitFlag in one pass**, that collides EVENT_IDs and produces `execute_set_flag already has same set_flag` (deadlock). Stage it: **(1) L1 ping-pong only → compile + precision-check + re-profile; (2) then L0; (3) every further optimization (scale double-buffer, UnitFlag, anything else) is its own separate edit + verify**. Each level: its own EVENT_IDs, exactly one `wait` per `set` before the next `set` on that id, and don't pre-set an id the loop re-sets. Adding everything in one edit **hangs** (unbalanced/duplicate `set`); reusing a buffer before MMAD consumed it or `cmatrixInitVal` not `k==0` **breaks precision**.
+> **Apply ONE buffer level per edit, in this order — never all at once.** AIC ping-pong is hand-managed `set_flag/wait_flag` + EVENT_ID + `%2`; read [`ascendc-performance-best-practices`](../../ascendc-performance-best-practices/references/matmul/pingpong_design.md) (co-located in `ops/`) for the protocol, but its example is the *finished* kernel — **do not transcribe L1 + L0 + scale + UnitFlag in one pass**, that collides EVENT_IDs and produces `execute_set_flag already has same set_flag` (deadlock). Stage it: **(1) L1 ping-pong only → compile + precision-check + re-profile; (2) then L0; (3) every further optimization (scale double-buffer, UnitFlag, anything else) is its own separate edit + verify**. Each level: its own EVENT_IDs, exactly one `wait` per `set` before the next `set` on that id, and don't pre-set an id the loop re-sets. Adding everything in one edit **hangs** (unbalanced/duplicate `set`); reusing a buffer before MMAD consumed it or `cmatrixInitVal` not `k==0` **breaks precision**.
 >
 > **L0-scale offset trap (recurring precision bug):** A/B **and their MX scale** must share one parity offset — `HALF_L0_SIZE * (idx & 1)` — scale rides the same half as its operand. Splitting scale into separate per-parity half-regions corrupts the MX scale (precision drifts). L1 single-L0 works fine; the bug appears exactly when L0 is doubled.
 
@@ -91,7 +91,7 @@ pipe.InitBuffer(l0bQue, 2, l0bBytes);
 
 GM → L1 data loading is not overlapping with CUBE. CUBE stalls waiting for L1 to be refilled.
 
-**Fix**: Enable double buffering on L1 input buffers. While CUBE processes L1[ping], MTE2 loads L1[pong]. Same caveat as §1.2 — the L1 ping-pong is a hand-managed `set_flag/wait_flag` handshake; implement it from [`ascendc-performance-best-practices`](../../ascendc-performance-best-practices/reference/matmul/pingpong_design.md), don't just raise `L1_BUFFER_NUM`. **One optimization per edit**: get L1 ping-pong compiling + precision-clean + re-profiled before adding L0 or any other change — never stack multiple buffer levels/optimizations in one pass (collides EVENT_IDs → `same set_flag` deadlock).
+**Fix**: Enable double buffering on L1 input buffers. While CUBE processes L1[ping], MTE2 loads L1[pong]. Same caveat as §1.2 — the L1 ping-pong is a hand-managed `set_flag/wait_flag` handshake; implement it from [`ascendc-performance-best-practices`](../../ascendc-performance-best-practices/references/matmul/pingpong_design.md), don't just raise `L1_BUFFER_NUM`. **One optimization per edit**: get L1 ping-pong compiling + precision-clean + re-profiled before adding L0 or any other change — never stack multiple buffer levels/optimizations in one pass (collides EVENT_IDs → `same set_flag` deadlock).
 
 > **Decision check before applying this fix**: grep the kernel source for `L1_BUFFER_NUM`, `PINGPONG_NUM`, or any explicit `InitBuffer(buf, 2, …)` on L1 tensors. If L1 pingpong is **already enabled** but overlap is still `< 0.30`, the root cause is not the buffer count — it is the multi-core tile scheduling pattern dispersing tiles across M-N in a way that defeats L1 reuse. Skip to **§2.2**.
 
@@ -164,7 +164,7 @@ for (int kIdx = 0; kIdx < K / baseK; ++kIdx) {
 
 **Fix C — NZ format**: If input is in ND format, the address mapping may cause many small non-contiguous transfers. Converting to NZ format aligns data for larger DMA requests and avoids format conversion overhead.
 
-📖 Best practice: [scale_coalescing_design](../../ascendc-performance-best-practices/reference/matmul/scale_coalescing_design.md) (co-located in `ops/`).
+📖 Best practice: [scale_coalescing_design](../../ascendc-performance-best-practices/references/matmul/scale_coalescing_design.md) (co-located in `ops/`).
 
 #### §2.2 Partial overlap with L1 pingpong already enabled — multi-core tile scheduling
 
@@ -187,7 +187,7 @@ Replace simple column-major `GetTileIdx()` with M-direction sliding window + N-d
 
 The change lives in the `BlockScheduler`, not the inner `BlockMmad`. The matmul data path (`GM → L1 → L0 → MMAD`) is unchanged.
 
-**Related skill**: tile scheduling / tiling partition strategy — [ascendc-tiling-design](https://gitcode.com/cann/cannbot-skills/blob/master/ops/ascendc-tiling-design/SKILL.md). SWAT design (co-located in `ops/`): [swat_design](../../ascendc-performance-best-practices/reference/matmul/swat_design.md).
+**Related skill**: tile scheduling / tiling partition strategy — [ascendc-tiling-design](https://gitcode.com/cann/cannbot-skills/blob/master/ops/ascendc-tiling-design/SKILL.md). SWAT design (co-located in `ops/`): [swat_design](../../ascendc-performance-best-practices/references/matmul/swat_design.md).
 
 **When NOT to apply**:
 - `imbalance_ratio > 1.3` → fix balance first (general §1); SWAT amplifies pre-existing imbalance.
@@ -228,7 +228,7 @@ Keep A (and its scale, for quant) L1-resident across the N-loop; stream only B /
 
 **Implementation note**: select the dedicated A-full-load kernel/policy (the one that keeps A resident) over the streaming/SWAT variant — they are separate binaries of the same recipe, differing only in a full-load mode flag. A simplified "fullload" demo that does not fully implement the tiling can regress; use a complete recipe implementation.
 
-📖 Best practice: [fullload_design](../../ascendc-performance-best-practices/reference/matmul/fullload_design.md) (co-located in `ops/`).
+📖 Best practice: [fullload_design](../../ascendc-performance-best-practices/references/matmul/fullload_design.md) (co-located in `ops/`).
 
 ### Profiling caveat — measure on real hardware, not npusim
 
@@ -266,7 +266,7 @@ pipe.InitBuffer(l0bQue, 2, l0bBufBytes);
 
 Also verify that the L0 buffer size is large enough to hold one full tile — if L0 is undersized, MTE1 must refill mid-computation.
 
-📖 Best practice (hand-managed L0 ping-pong handshake): [pingpong_design](../../ascendc-performance-best-practices/reference/matmul/pingpong_design.md), [mte2_preload_design](../../ascendc-performance-best-practices/reference/matmul/mte2_preload_design.md) (co-located in `ops/`).
+📖 Best practice (hand-managed L0 ping-pong handshake): [pingpong_design](../../ascendc-performance-best-practices/references/matmul/pingpong_design.md), [mte2_preload_design](../../ascendc-performance-best-practices/references/matmul/mte2_preload_design.md) (co-located in `ops/`).
 
 ---
 

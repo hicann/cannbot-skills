@@ -35,7 +35,7 @@
 |------|------|
 | 切分轴 | N 轴按 rank 切分，每 rank 持有 N/rankSize 段（输出 C 按 N 分布） |
 | A 数据 | 各 rank 持有完整 A `[M, K]`（**A 不切分**：C 按 N 切分需全 M 的 A） |
-| B 数据 | 各 rank 持有 B 的 N/rankSize 段 `[K, N/rankSize]`（**B 按 N 切分**，与输出 C 的 N 切分一致；见 [`../../../fundamentals/architecture.md`](../../../fundamentals/architecture.md) §4 GET 行"B N-split"） |
+| B 数据 | 各 rank 持有 B 的 N/rankSize 段 `[K, N/rankSize]`（**B 按 N 切分**，与输出 C 的 N 切分一致；见 [`../../../fundamentals/architecture.md`](../../fundamentals/architecture.md) §4 GET 行"B N-split"） |
 | C 输出 | 每 rank 写出 N/rankSize 段到 Win 区，AIV 拉回完整 C |
 
 > ⚠️ 本场景标注 not_found（原理推导，未经官方源码验证）：上述分布为按 AllGather+Matmul（GET、N-split 输出）的语义推导，实现前必须对照源码逐条验证钩子行为。
