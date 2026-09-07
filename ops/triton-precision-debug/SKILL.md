@@ -228,6 +228,8 @@ AST 校验器明确允许 `self._route()` 作为合法的 kernel dispatch 包装
 
 完整细节见 `references/divide-scale-calibration.md`。
 
+> **同根因的另一形态**：attention 类算子里，参考实现的 `aclnnDivs` 与设备 fp32 除法（Newton 迭代、非正确舍入）会让 `scores` 差 1 ulp，经 `exp` 放大成 ~0.8% 权重误差。解法不是查找表而是**整条算术路径逐位复刻**（host 侧 fp32 倒数乘法 + 三条配套契约），见 `references/attention-lowprec-contract.md`。
+
 ---
 
 ## 扩展检查清单
@@ -268,6 +270,7 @@ AST 校验器明确允许 `self._route()` 作为合法的 kernel dispatch 包装
 |------|------|
 | 完整调试案例（DynamicQuant） | `references/precision-alignment-guide.md` |
 | NPU 除法 scale 校正（坐标/权重查找表法） | `references/divide-scale-calibration.md` |
+| **Attention 低精度逐位契约**（FA/MHA/SDPA） | `references/attention-lowprec-contract.md` |
 
 ## 关键经验总结
 

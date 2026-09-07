@@ -106,3 +106,41 @@ code_exe top: L67 <cyc> calls=<n> → fixp_l0c2ub → 规则1 → 修复方向=�
 ```
 
 `code_exe` 行号指向 `kernel_meta/*_kernel.cpp`（需回溯 `.py`）或 line info 开启时直接 `.py`。定位：看 `code` 列路径后缀/目录判文件类型 → 读该行 ±5 行构造 → 查构造→规则表（msprof-simulator.md）→ 与 `instr_exe` 规则交叉验证 → 按文件类型回溯或直接编辑。**修复落地不在本 skill 完成**——诊断报告（含优化点编号 + 采集证据）交回编排器，由 latency-optimizer 命中该优化点产出代码。
+
+---
+
+## CV 异构核（FA / Attention 类）专用信号
+
+这类 kernel（含 softmax/elementwise + `tl.dot`）在 triton-ascend 下**必然编成 `MIX_AIC`**，
+瓶颈几乎总是 Cube↔Vector 跨核同步而非算力/访存。判读要点：
+
+| 信号 | 阈值 | 含义 | 修复方向 |
+|------|------|------|---------|
+| Vector 侧 `BAR` 单条 cycle | **~712 cyc/条**（普通向量指令仅 ~150 cyc） | 编译器几乎在每条向量算子后插一条 `pipe_barrier` ⇒ **减少一条循环内向量指令 = 省「指令 + 一条 BAR」，杠杆约 12 倍** | 优化点 **30** |
+| `WAIT_FLAG_DEVI` 单次 cycle | **~3400 cyc/次**（Cube 侧）、~2842 cyc/次（Vector 侧） | 跨核握手在等对方 | 优化点 **30** |
+| Vector 侧真实算术占比 | **< 10%**（`VSUB`+`VMAX`+`VEXP`+`VCADD`+`VCMAX` 合计 ~9%） | 算术根本不是瓶颈，砍指令条数无效 | 优化点 **30**，**不要**走优化点 5/6/17 |
+| Cube 侧 `CUBE`(MMAD) 占比 | **< 10%** 而 `FLOWCTRL` > 30% | Cube 三成时间在等 Vector | 优化点 **30** |
+
+**对照组（健康的纯 GEMM 长什么样）**：`MTE2 41.7% + CUBE 21.3% + MTE1 20.0%`，**`FLOWCTRL 0.0%`**、无向量核。
+把两者并排看，差距一目了然：**不在算力也不在访存，全在 Cube↔Vector 的握手。**
+
+### 每次迭代成本反推法（比 pipe 占比更快的一次性判别）
+
+```
+每次 KV 迭代成本 = kernel Duration / ceil(迭代总数 / 核数)
+```
+
+| 观测 | 判定 | 后续 |
+|------|------|------|
+| 成本**几乎与 BLOCK_Q / BLOCK_KV / BLOCK_D / dtype 无关**（实测恒在 4~10us） | **固定开销（跨核同步）主导** | 目标函数 = 最小化迭代数 ⇒ 优化点 **30** |
+| 成本随 tile 线性增长 | 算力/访存主导 | 走常规优化点（2 / 13 / 21） |
+
+"成本与 tile 大小无关"这一条**直接排除了算力瓶颈和访存瓶颈**，一次算完即可定性。
+
+### 小 shape 的固定地板
+
+`MIX_AIC` kernel 每次发射约 **4.5us** 固定成本（指令级构成：标量参数写入 `ST_XD_XN_IMM` 占 Cube 侧 34.2%
++ 进出核的 `WAIT_FLAG`/`BAR`，与实际计算量无关）。
+⇒ **小 shape 上诊断报告不应建议拆 kernel 做模块化**——每多一个 MIX kernel 就多 ~4.5us，
+而小 case 整个实现的时延也才 6~8us。改写数学表达（如去掉 `tl.dot` 想编成 `AI_VECTOR`）**改变不了这个分类**，
+实测小 case 子集反而 −33%。

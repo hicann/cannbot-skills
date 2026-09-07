@@ -1,5 +1,16 @@
 # Ascend CV 融合算子生成方法论 — Batch 流水线篇
 
+
+> ⛔ **平台适用性警示（实测，2026-08）**：910B2 + CANN 8.5.1 上本文所述的 `al.scope(core_mode="cube"/"vector")`
+> **双 scope 写法会崩编译器**——最简两段式 kernel（cube scope 一次 `tl.dot` + vector scope 一次乘法与 store）
+> 即触发 `bishengir-compile` LLVM stack dump；单 scope 对照组正常（maxdiff 7.6e-06）。
+> API 符号齐备（`scope` / `sync_block_set` / `copy_from_ub_to_l1` / `fixpipe` 都能 import）**但编译不过**；
+> 注意 extension 内有 `is_compile_on_910_95`，该特性很可能是 910_95 专属。
+> 配套的 `al.multibuffer(tensor, size)` 按张量开双缓冲实测**产生 NaN**（40/50，失败集合恰为全部多块 case）。
+>
+> 👉 **投入前先做 10 分钟门槛测试**：写一个最简两段 scope kernel 编一次。本次实测用 10 分钟关闭了一个原本要 1~2 天的方向。
+> FA 类算子的替代路径（压迭代数）见 [`flash-attention-optimization.md`](flash-attention-optimization.md)。
+
 > 基于 Sparse Flash Attention (SFA) 等 CV 融合算子优化实践总结
 > 适用范围：所有需要跨 step 隐藏 Load/Compute 延迟的 Triton-Ascend CV 融合算子
 

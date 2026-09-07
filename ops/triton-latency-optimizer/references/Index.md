@@ -13,6 +13,10 @@
 
 以下仅列出优化点索引，包含适用条件、命中条件及参考文档路径。**每个优化点的详细说明（典型代码特征、判断逻辑、优化方法、代码示例）请见对应参考文档。**
 
+## 优化点索引
+
+以下仅列出优化点索引，包含适用条件、命中条件及参考文档路径。**每个优化点的详细说明（典型代码特征、判断逻辑、优化方法、代码示例）请见对应参考文档。**
+
 | 序号 | 优化点 | 适用条件 | 命中条件 | 参考文档 |
 |------|--------|----------|----------|----------|
 | 1 | 入参静态化优化 | 存在可声明为 `tl.constexpr` 的固定参数 | 单次 kernel 启动后不变的参数未声明 `tl.constexpr` | `references/constexpr_parameters.md` |
@@ -43,9 +47,12 @@
 | 26 | Ascend Pooling 专用优化 | 算子类型为 MaxPool/AvgPool | 代码为 Pooling 类算子，存在 1D 扁平索引或布局/边界优化空间 | `references/ascend-pooling-optimization.md` |
 | 27 | Ascend Matmul Transpose 专用优化 | 算子类型为 MatmulBothTrans/MatmulTransA/MatmulTransB/BMM/Linear | 代码为矩阵乘法转置类算子，存在离散跨步 tile 或 Host 侧 transpose 开销 | `references/matmul-transpose.md` |
 | 28 | CV 融合优化 | CV 融合类算子（存在 Cube-Vector 混合计算，如 FlashAttention、Matmul+Bias+GELU 等） | 中间结果通过 GM 回退 或 存在多 scope 交替（>2 个 scope 切换）或 存在多 step 但未启用 Batch 流水线。**本优化点含 3 个子文档，命中后可依次加载 `references/operators/cv-fusion.md`（主流程）、`references/operators/cv-fusion-pingpong.md`（Batch 流水线）、`references/operators/cv-fusion-tiling.md`（Tiling 重评估），不受「一次只能参考一个文档」限制。** | `references/operators/cv-fusion.md` |
-| 29 | IR分析优化 | 所有算子类型 | 每轮作为最后一个优化点必须执行 | `references/IR_triton.md` |
-| 30 | Autotune 自动调优（终止步骤） | 存在可调 `tl.constexpr` 参数 | 存在可调参数且未使用 `@triton.autotune`；**BLOCK 由 host 侧按 shape 分档选择时视为不适用，不命中** | `references/autotune.md` |
-| 31 | Block Size Scaling（终止步骤，30 的 fallback） | 存在单维 BLOCK 参数（任意命名：`BLOCK`/`BLOCK_SIZE`/`XBLOCK`） | 优化点 30 未被采纳（失败或不适用），且 BLOCK 值可静态解析 | `references/block_size_scaling.md` |
+| 29 | Attention/FA 类算子专用优化 | FA 主链算子（`tl.dot(Q,Kᵀ) → softmax → tl.dot(P,V)` + online softmax 状态量 `m/l/acc`；含 MHA / SDPA / flash-attention / GQA-MQA） | 串行度 `(aic_time+aiv_time)/Duration > 1.5` 或 `aic_mac_ratio < 20%`，且 KV 循环迭代数可压缩（BLOCK 未开到 UB 上限 / mask 区间未收缩 / `kv_lo` 做了对齐 / mask 分支非 constexpr）。**本优化点是 #29 的 FA 子类细化，命中后可与 #29 的子文档一并加载，不受「一次只能参考一个文档」限制。** | `references/operators/flash-attention-optimization.md` |
+| 30 | Attention/MLA 类算子专用优化 | MLA 主链算子（矩阵吸收：`ckv` 同时作 K 与 V，`o = softmax(sm_scale·(q_nope·ckv + q_pe·kpe)) @ ckv`；含 BatchMLAPagedAttention / BatchDecodeMlaPaged / TRT-LLM MLA / DSV4 稀疏 MLA） | `BLOCK_QO` 未固定为 1（非仿射 store 逐元素化 / 间歇 aicore timeout）、KV 迭代数可压缩（`BLOCK_KV` 未开到 UB 上限 / 页表映射未 kernel 内做 / 16-bit 输入未做 `P_SPLIT`）。**本优化点是 #29/#30 的 MLA 子类细化，命中后可与 #29、#30 的子文档一并加载，不受「一次只能参考一个文档」限制。** | `references/operators/mla-paged-attention-optimization.md` |
+| 31 | IR分析优化 | 所有算子类型 | 每轮作为最后一个优化点必须执行 | `references/IR_triton.md` |
+| 32 | Autotune 自动调优（终止步骤） | 存在可调 `tl.constexpr` 参数 | 存在可调参数且未使用 `@triton.autotune`；**BLOCK 由 host 侧按 shape 分档选择时视为不适用，不命中** | `references/autotune.md` |
+| 33 | Block Size Scaling（终止步骤，30 的 fallback） | 存在单维 BLOCK 参数（任意命名：`BLOCK`/`BLOCK_SIZE`/`XBLOCK`） | 优化点 30 未被采纳（失败或不适用），且 BLOCK 值可静态解析 | `references/block_size_scaling.md` |
+
 
 
 **检查规则**：Agent 必须严格按照上述顺序逐一检查优化点，**每次只能尝试一个优化点，命中后才能加载对应参考文档；未命中则跳过，禁止加载参考文档。**
@@ -92,6 +99,7 @@
 | 循环不变量外提 | `references/loop-invariant-hoisting.md` | 嵌套循环内层 load 外提 |
 | Load 指令重排序 | `references/load-order.md` | 循环内 load/store 重排 |
 | Grid 形状与多路径特化 | `references/grid-dispatch-specialization.md` | 动态 dispatch 选择 kernel 路径 |
+| Autotune 自动调优 | `references/autotune.md` | 自动调参 |
 | 混合策略自动选择 | `references/mixed_strategy.md` | 按 shape/dtype 选择策略 |
 | 维度合并与大 BLOCK 累加 | `references/operators/dimension-merge-large-block.md` | 归一化算子专用 |
 | 连续拷贝聚合优化 | `references/operators/continuous-copy-aggregation.md` | Split/Chunk/Slice/Pad 等拷贝型算子 |
@@ -106,13 +114,17 @@
 | Ascend Pooling 优化 | `references/ascend-pooling-optimization.md` | Pooling 算子专用 |
 | Ascend Matmul Transpose 优化 | `references/matmul-transpose.md` | 矩阵乘法转置类算子专用 |
 | 代码规范检查 | `references/checklist.md` | 优化后必须通过的规范 |
+| Block Size Scaling | `references/block_size_scaling.md` | 最终 block size 调优 |
 | 算子特定经验 | `references/operators/adain.md` | AdaIN Backward 优化经验 |
 | 算子特定经验 | `references/operators/swiglu-quant.md` | SwiGLU 量化算子经验 |
+| 算子特定经验 | `references/operators/grouped-matmul-tile-merge.md` | Grouped MatMul/MoE 专家分组矩阵乘 expert 对齐 tile 合并经验 |
 | 算子特定经验 | `references/operators/permute-layout-transform.md` | Permute/Transpose/reshape-as-copy 布局变换算子优化 |
 | 通用辅助 | `references/operators/general-insights.md` | Triton-Ascend 通用优化洞察 |
 | 通用辅助 | `references/operators/workflow-and-debugging.md` | 验证与调试工作流 |
 | CV 融合方法论 | `references/operators/cv-fusion.md` | CV 融合算子 Cube-Vector 数据流水线、Scope 合并、同步信号设计 |
 | CV 融合-Batch 流水线 | `references/operators/cv-fusion-pingpong.md` | CV 融合算子 PIPE_STAGES 调度、T0-T5 逐拍交错、Buffer 分配策略 |
+| Attention/FA 专用优化 | `references/operators/flash-attention-optimization.md` | FA 类算子瓶颈判别、迭代数目标函数、有效方向与**证伪方向全表**、profiling 字段误导案例、天花板估算模板 |
+| Attention/MLA 专用优化 | `references/operators/mla-paged-attention-optimization.md` | MLA 类算子瓶颈判别、仿射 store 修复（`BLOCK_QO=1`）、`P_SPLIT` 精度补偿、KV 共享与 split-KV、**证伪方向全表** |
 | CV 融合-Tiling | `references/operators/cv-fusion-tiling.md` | CV 融合算子 On-Chip 容量估算、候选验证、Autotune 自动化搜索 |
 | IR分析优化 | `references/IR_triton.md` | IR分析优化 |
 | Histogram-like / Small-output-table 优化 | `references/histogram-like-table-reduction.md` | 小输出表规约类算子专用优化经验 |

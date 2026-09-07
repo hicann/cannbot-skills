@@ -37,6 +37,7 @@ argument-hint: >
 | tensor 方法计算     | `x.sum()`, `x.mean()`, `x.softmax(dim=-1)`, `x.relu()` | 必须在 @triton.jit kernel 中实现 |
 | tensor 运算符       | `x @ w`, `x + y`, `x * y`, `x / y`                     | 必须在 @triton.jit kernel 中实现 |
 | nn.Module 调用      | `self.conv(x)`, `self.linear(x)`, `self.layer(x)`      | 必须在 @triton.jit kernel 中实现 |
+| host 侧 D2H 同步    | `x.item()`, `int(x[i])`, `torch.nonzero(x)`            | 张量数值必须在 kernel 内消费；禁止数据依赖标量/constexpr 烘焙 |
 
 ### forward() 中允许的操作
 
@@ -93,6 +94,32 @@ class ModelNew(nn.Module):
 
 ---
 
+## 核心约束：参考实现的 nn.Module 语义复刻
+
+### C1 逐字复刻构造语句，禁止用等价公式重新实现初始化
+
+```python
+# ❌ 手工复刻初始化公式 + 在 NPU 上按目标 dtype 采样
+w = torch.empty(d, d, device='npu', dtype=torch.float16).uniform_(-bound, bound)
+
+# ✅ 照抄构造语句（含 .to() 出现在第几步）
+rng = torch.get_rng_state(); torch.manual_seed(42)
+ws = tuple(nn.Linear(d, d, bias=False).to(device=dev, dtype=dt).weight.detach()
+           for _ in range(4))
+torch.set_rng_state(rng)
+```
+
+四处必须对齐，缺一即全错：**构造 device**（CPU 与 NPU 是两条独立 RNG 流）、
+**采样 dtype**（先 fp32 再 cast ≠ 直接低精度采样）、**调用顺序与次数**、**RNG save/restore**。
+公式推导正确也没用 —— **抄语句，别抄公式**。违反时 verify 以 `HiddenStateMismatch` 上报。
+
+### C2 复刻出的权重还要用对布局
+
+`nn.Linear` 是 `y = x @ Wᵀ`（`weight` 形状 `[out, in]`），方阵下算成 `x @ W` 时
+shape 检查不会报错，只有数值会错。写法见 `@references/triton-ascend-matmul.md`。
+
+---
+
 ## 输入信息
 
 你将获得以下信息：
@@ -134,7 +161,8 @@ class ModelNew(nn.Module):
 | Element-wise | add/mul/relu/sigmoid/tanh/gelu/exp/log/silu 等逐元素操作          | `@references/triton-ascend-elementwise.md` |
 | MatMul       | matmul/bmm/linear/gemm 等矩阵乘法                                 | `@references/triton-ascend-matmul.md`      |
 | Reduce       | sum/mean/max/min/softmax/layernorm/logsoftmax/histc/bincount/scatter_reduce（小输出） 等归约操作 | `@references/triton-ascend-reduce.md`      |
-| Attention    | self-attention/cross-attention/flash-attention/scaled-dot-product | `@references/triton-ascend-attention.md`   |
+| Attention    | self-attention/cross-attention/scaled-dot-product（**不含 KV 分块**）             | `@references/triton-ascend-attention.md`   |
+| **Flash-Attention / FA** | KV 分块 + online softmax 状态量 `m`/`l`/`acc`，或带 causal/window/softcap 的 attention 主链（MHA / SDPA / flash-attn / GQA-MQA） | `@references/triton-ascend-attention.md` + `@../../plugins-official/triton-op-generator/template/flash_attention.md`（Layer 1/3 为硬性约束） |
 | Sort/Select  | nms 等排序选择操作                                                | `@references/triton-ascend-sort-select.md` |
 | Interpolate  | Interpolate等插值操作                                             | `@references/triton-ascend-interpolate.md` |
 | Layout-transform | permute / transpose / reshape-as-copy 等仅改变数据布局的算子 | `@references/triton-ascend-layout-transform.md` |

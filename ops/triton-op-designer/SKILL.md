@@ -71,6 +71,7 @@ argument-hint: >
 | **Index** | `@references/cases/index-histogram.md` | 大规模索引直方图：预排序 + 二分查找 |
 | | `@references/cases/histogram-small-bins.md` | 小 bins 直方图 / 小输出表规约：per-core local table + 二次归约 |
 | | `@references/cases/index-put.md` | 批量 load 索引到 UB、get_element 复用 |
+| **Attention / FA** | `@../../plugins-official/triton-op-generator/template/flash_attention.md` | FA 主链：先答 §0.2 形态识别四问；瓶颈是 CV 跨核同步，草图必须按「压 KV 迭代数」组织（区间收缩 / `kv_lo` 不对齐 / BLOCK 开到 UB 上限 / mask constexpr 特化），Layer 1 约束为硬性边界 |
 | **MatMul** | `@references/cases/matmul-swizzle2d.md` | 固定核心数 grid、Swizzle2D 块重排 |
 | **Reduction** | `@references/cases/reduction-amax-large.md` | M≪N：reduce 轴多核 + 原子 + 二次切分 |
 | | `@references/cases/reduction-amax-medium.md` | 中等规模：矩阵累加再归约 |

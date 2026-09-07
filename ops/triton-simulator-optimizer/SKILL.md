@@ -19,7 +19,7 @@ description: >
 
 你是 simulator 流水**采集与诊断**专家，与 `triton-latency-optimizer`（优化技术 owner）严格分工：
 
-- **latency-optimizer**：优化技术的**唯一** owner。25 个优化点（入参静态化 / tiling / 分核 / scalar→vector / pass 合并 / Cube-MTE3 解耦 / 物化解耦 / 循环不变外提 …）+ 参考文档全部在其 `references/` 下。
+- **latency-optimizer**：优化技术的**唯一** owner。31 个优化点（入参静态化 / tiling / 分核 / scalar→vector / pass 合并 / Cube-MTE3 解耦 / 物化解耦 / 循环不变外提 …）+ 参考文档全部在其 `references/` 下。
 - **本 skill（simulator-optimizer）**：**只采集 + 诊断**。用 `msprof op simulator` 拿到 per-instruction pipe 占比，判定瓶颈类型与热源码行，产出**诊断报告**，把修复方向映射到 latency-optimizer 的已有优化点编号，交回编排器/latency-optimizer 落地。**不在本 skill 定义任何优化技术、不维护第二个技术目录。**
 
 **核心原则：先测，再断。** 严禁在未拿到 simulator 采集证据前下"硬件极限不可优化"结论。

@@ -50,8 +50,8 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 
 - `hit_optimization_point: int | None` —— 从 `scan_from` 起**第一个**命中的编号。
   调用方据此推导 `[scan_from, hit-1]` 区间均未命中，**本 skill 无需逐条上报扫描记录**。
-  从 `scan_from` 扫到 29 均不命中时返回 `None`。
-- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 29（IR 分析）时该字段有意义；其他轮次（命中 1-28 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
+  从 `scan_from` 扫到 32 均不命中时返回 `None`。
+- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 29（IR 分析）时该字段有意义；其他轮次（命中 1-31 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
 
 ## 主流程（必须严格执行）
 
@@ -63,23 +63,23 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 
 ### 扫描与应用（唯一执行通道）
 
-1. **加载优化点索引**：**必须加载 `references/Index.md`**（共 31 个优化点）。
+1. **加载优化点索引**：**必须加载 `references/Index.md`**（共 33 个优化点）。
 2. **按序扫描**：从 `scan_from` 开始编号递增逐个判断命中；在 `exclude_points` 中的编号直接跳过。
 3. **首个命中即停**：命中第一个点 `P` 后，**必须加载 `Index.md` 中该点对应的参考文档**，
    应用该优化策略，**不再继续扫描后续编号，不回到步骤 1**。
 4. **代码规范检查**：**必须加载 `references/checklist.md`** 逐项检查，不满足则修改至满足。
 5. **写出并返回**：写 `output_path`，返回 `hit_optimization_point = P`；
-   从 `scan_from` 扫到 31 均不命中时写出原代码并返回 `None`。
+   从 `scan_from` 扫到 33 均不命中时写出原代码并返回 `None`。
 
-#### 终止步骤（编号 30 / 31）的特殊语义
+#### 终止步骤（编号 32 / 33）的特殊语义
 
-30 与 31 因编号最大，按序扫描时**必然在 1-29 全部判定完毕之后**才被检查，
+32 与 33 因编号最大，按序扫描时**必然在 1-31 全部判定完毕之后**才被检查，
 天然就是「优化点命中完的最后一步」，无需额外的调用模式。
 
-- **命中 30（Autotune）**：加载 `references/autotune.md`，对可调 `tl.constexpr` 参数
+- **命中 32（Autotune）**：加载 `references/autotune.md`，对可调 `tl.constexpr` 参数
   （含单维 BLOCK，任意命名）配置 `@triton.autotune`；若 BLOCK 由 host 侧按 shape 分档、
-  autotune 无法接管，则判定**不命中**并在返回信息注明理由，让扫描继续到 31。
-- **命中 31（Block Size Scaling）**：加载 `references/block_size_scaling.md`，
+  autotune 无法接管，则判定**不命中**并在返回信息注明理由，让扫描继续到 33。
+- **命中 33（Block Size Scaling）**：加载 `references/block_size_scaling.md`，
   识别单维 BLOCK 当前值 `B0`（host 侧分档时整个阶梯视为一组，**必须整档同步**），
   **产出候选阶梯计划**：
   ```
@@ -116,15 +116,15 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 ### 关键约束
 
 - ⚠️ **只能使用本 skill 规定的优化方式，禁止使用任何超出本 skill 之外的优化方式**。
-- ⚠️ **必须先命中优化点的「命中条件」，才能加载参考文档；未命中则跳过**。**例外：主流程步骤 6 / 7 / 7F 为终止步骤，无编号、无命中条件，按步骤定义无条件执行。**
+- ⚠️ **必须先命中优化点的「命中条件」，才能加载参考文档；未命中则跳过**。
 - ⚠️ **一次调用只应用一个优化点**，应用完立即返回；多轮由调用方驱动。
-- ⚠️ **优化点 29（IR 分析）支持多轮重复命中**：在 Phase 4 调用方（triton-op-generator AGENTS.md）开启的 "IR 多轮迭代模式" 下，IR 优化点可在多个 Phase 4 轮次中重复进入，每轮重新提取 `last_pass.mlir` 并分析；其他优化点单轮即过，命中后本轮不再重复。每次调用 latency-optimizer 仍只应用一个优化点。
+- ⚠️ **优化点 31（IR 分析）支持多轮重复命中**：在 Phase 4 调用方（triton-op-generator AGENTS.md）开启的 "IR 多轮迭代模式" 下，IR 优化点可在多个 Phase 4 轮次中重复进入，每轮重新提取 `last_pass.mlir` 并分析；其他优化点单轮即过，命中后本轮不再重复。每次调用 latency-optimizer 仍只应用一个优化点。
 - ⚠️ **一次只能参考一个文档**；参考文档仅用于当前命中优化点的子流程，完成后立即返回主流程。**例外：步骤 7 失败转 7F 时，允许在同一轮内先后加载 `autotune.md` 与 `block_size_scaling.md`。**
 - ⚠️ **扫描完整性由调用方判定**：调用方按 `[scan_from, hit-1]` 推导未命中区间，
   本 skill 不需要、也不应自行声称"已扫完"。
 - ⚠️ **命中即必须真实加载文档**：命中任一优化点后，必须用工具实际打开 `Index.md` 中该点
   对应的参考文档再动手改代码；**凭记忆或凭本文件的摘要改代码视为未执行该优化点**。
-  编号 30 / 31 同此规则——`autotune.md` 与 `block_size_scaling.md` 必须被真实加载。
+  编号 32 / 33 同此规则——`autotune.md` 与 `block_size_scaling.md` 必须被真实加载。
 - ⚠️ **终止步骤禁止以耗时为由裁剪**：7F 的候选阶梯必须完整产出（含向上与向下方向）。"预计不会更好"、"时间不够"、"UB 估算会超"均不构成跳过理由——7F 的停止条件只有两个：verify 失败，或 BLOCK > 65536。
 
 ## 优化验证规则
