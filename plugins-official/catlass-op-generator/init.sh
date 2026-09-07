@@ -108,7 +108,7 @@ INCLUDED_AGENT_PATTERN="catlass-op-*"
 # Detect TRAE variant by scanning global config directories.
 # Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
 detect_trae_variant() {
-    if [ -d "$HOME/.trae" ]; then
+    if [ -d "$HOME/.trae-cn" ]; then
         TRAE_VARIANT="ide"
     elif [ -d "$HOME/.marscode" ]; then
         TRAE_VARIANT="plugin"
@@ -299,7 +299,7 @@ echo ""
 if [ "$TOOL" = "trae" ]; then
     case "$TRAE_VARIANT" in
         ide)
-            info "Detected: TRAE IDE (.trae)"
+            info "Detected: TRAE IDE (.trae-cn / .trae)"
             ;;
         plugin)
             info "Detected: TRAE Plugin (.marscode)"

@@ -27,6 +27,8 @@
 #   XX-05: Quick Start section has tool branch (warn)
 #   XX-06: Help text mentions tool (warn)
 #   XX-07: .gitignore contains tool path (error)
+#   XX-08: TRAE detect_trae_variant probes .trae-cn/.marscode/.traecli
+#          (error for plugins-official, warn for plugins-community)
 # =============================================================================
 
 set -euo pipefail
@@ -322,6 +324,18 @@ check_07() {
 }
 
 # =============================================================================
+# XX-08: TRAE detect_trae_variant probes canonical global dirs
+# =============================================================================
+
+check_08() {
+    local init="$1"
+    grep -q 'detect_trae_variant' "$init" && \
+    grep -qF '[ -d "$HOME/.trae-cn" ]' "$init" && \
+    grep -qF '[ -d "$HOME/.marscode" ]' "$init" && \
+    grep -qF '[ -d "$HOME/.traecli" ]' "$init"
+}
+
+# =============================================================================
 # Check: Tool adaptation for every plugin with init.sh
 # =============================================================================
 print_section_header "Check: ${TOOL_LABEL} tool adaptation"
@@ -364,6 +378,16 @@ for base_dir in "$SKILLS_DIR/plugins-official" "$SKILLS_DIR/plugins-community"; 
 
         run_check "[$team_name] ${PREFIX}-07: .gitignore contains ${TOOL} path" \
             check_07 "$init_script" "$team_dir"
+
+        if [ "$TOOL" = "trae" ]; then
+            if [ "$(basename "$base_dir")" = "plugins-official" ]; then
+                run_check "[$team_name] TR-08: detect_trae_variant probes .trae-cn/.marscode/.traecli" \
+                    check_08 "$init_script"
+            else
+                run_warn "[$team_name] TR-08: detect_trae_variant probes .trae-cn/.marscode/.traecli" \
+                    check_08 "$init_script"
+            fi
+        fi
 
         echo ""
     done
