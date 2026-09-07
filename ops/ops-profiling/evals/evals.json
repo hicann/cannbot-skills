@@ -82,6 +82,10 @@
       "title": "MC² 多 Rank 算子禁止使用 msprof op",
       "config": {
         "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
         "ascend_platforms": [
           "A2"
         ],
@@ -97,6 +101,10 @@
       "title": "深度分析工具选择需探测环境",
       "config": {
         "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
         "ascend_platforms": [
           "A2"
         ],
@@ -112,6 +120,10 @@
       "title": "对比模式的用例加载优先级",
       "config": {
         "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
         "ascend_platforms": [
           "A2"
         ],
@@ -127,6 +139,10 @@
       "title": "Quick 与标准深度采集的用途不同",
       "config": {
         "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
         "ascend_platforms": [
           "A2"
         ],
@@ -142,6 +158,10 @@
       "title": "两套性能产物目录不能直接互喂",
       "config": {
         "max_tokens": 100000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 120000,
+          "glm-5": 110000
+        },
         "ascend_platforms": [
           "A2"
         ],

@@ -1352,6 +1352,49 @@ def _collect_kernels(rows):
     return kernels
 
 
+def _collect_compute_kernels(rows):
+    """Compute kernels only — exclude meta tasks AND data-movement (Memcpy/Rdma/H2D/D2D).
+
+    Used by _launch_wall_min so the launch wall reflects the compute kernel span, not the
+    per-call H2D tiling copies that some hosts issue before the kernel launch."""
+    out = []
+    for r in rows:
+        kt = r.get("kernel_type", "")
+        kn = (r.get("kernel_name", "") or "").strip()
+        if kt in _META_KERNEL_TYPES or not kn:
+            continue
+        if any(s in kn for s in ("Memcpy", "MEMCPY", "Rdma", "RDMA")):
+            continue
+        try:
+            dur = float(r.get("task_time(us)", "") or 0)
+            start = float((r.get("task_start(us)", "") or "0").strip())
+        except ValueError:
+            continue
+        if dur <= 0:
+            continue
+        out.append((start, kn, dur))
+    return out
+
+
+def _launch_wall_min(kernels, warmup: int, repeats: int, gap_us: float = 8.0):
+    """Per-launch wall time = max(end)-min(start) of the compute tasks in one launch, min over
+    the active (last `repeats`) launches. Robust to multi-task-per-launch kernels: clusters tasks
+    into launches by inter-task gap (within a launch tasks overlap/chain tightly; between launches
+    the gap exceeds gap_us). Returns None if no clusters."""
+    if not kernels:
+        return None
+    pts = sorted((st, st + du) for st, _, du in kernels)
+    clusters = [[pts[0]]]
+    for st, en in pts[1:]:
+        if st - clusters[-1][-1][1] > gap_us:
+            clusters.append([(st, en)])
+        else:
+            clusters[-1].append((st, en))
+    walls = sorted(max(en for _, en in c) - min(st for st, _ in c) for c in clusters)
+    active = walls[-repeats:] if (0 < repeats < len(walls)) else walls
+    return min(active) if active else None
+
+
 def _split_kernels_by_position(kernels, warmup: int, repeats: int):
     """按时间排序后做位置分片，丢弃前 warmup 份，返回单次迭代估算耗时。
 

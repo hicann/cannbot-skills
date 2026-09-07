@@ -7,6 +7,23 @@ description: NPU 性能采集与分析，融合 msprof 算子级瓶颈定位与 
 
 在真实 NPU 上采集算子性能数据，系统化解读指标文件，判定性能是否达标，定位瓶颈类型，并给出可操作的优化建议。
 
+## 高频问答速查（先查这里——本节答案即为权威结论，已与脚本实际行为对齐，无需再读源码验证）
+
+| 问题 | 答案 |
+|---|---|
+| compare 模式下用例文件加载优先级？ | ① `<op>_perf_cases.jsonl`（标准命名）→ ② 任意 `*.jsonl` → ③ 任意 `*.json`（非 `.bak`）→ ④ `model.py` 的 `get_input_groups()`。同时存在时**选①**（详见下文「用例加载优先级」） |
+| 怎么做加速比对比？ | `msprof_profile_run.sh --compare`（全量）/ `--quick`（1 轮快速），输出 `performance.json` + markdown 报告即完成，**不**走可视化子技能 |
+| MC² / 多 rank（fork）算子用什么采集？ | **必须 `msprof`**，禁止 `msprof op`（详见 msprof-guide.md「MC² 多 rank 算子采集」） |
+| 采集结果如何判定瓶颈？ | 用 `msprof_perf_summary.py` 解析 `PROF_GROUP_*`，输出瓶颈类型与各 pipe 占比，判定规则见 `references/msprof-guide.md` |
+
+### 阅读纪律（防上下文爆炸，必须遵守）
+
+- `scripts/msprof_perf_summary.py`（2400+ 行）与 `scripts/msprof_profile_run.sh` 是**可执行工具，不是文档**。需要确认某个行为时，只允许 `grep -n "<函数名/关键字>" scripts/msprof_perf_summary.py` 定位后**读命中处前后 ~30 行**；**禁止整文件通读**。
+- `references/` 下四份文档按文末「参考资源」表的"何时查阅"**按需加载**；回答本文件已写明的事实性问题时，不需要打开任何 reference 或 script。
+- 本 SKILL.md 覆盖全部使用决策；若与脚本实际行为发现不一致，以脚本行为为准并在本文件勘误。
+
+---
+
 本技能基于 **msprof** 工具链，统一入口为两个脚本：
 - **`msprof_profile_run.sh`** — 性能采集（标准采集 / 对比测试 / 批量并行）
 - **`msprof_perf_summary.py`** — 结果解析（瓶颈分析 / 对比报告 / 批量汇总）

@@ -69,7 +69,7 @@ Catlass 算子开发专家，负责根据 Architect 的设计方案实现 op_ker
 
 **FlashAttention 场景必须**：
 - 先读 `/catlass-op-develop` 的 `references/patterns/flash-attention.md`：BNSD 公开接口 + host 布局转换（Q→BSND、K/V→块格式、O→BNSD，bin 读入尺寸与 device 尺寸分离）、A2 固定 `PAGED=true` + 恒等 block_table、尾块 0 填充
-- kernel 用 `FAInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, ...>` 组件（**复用catlass `examples/23_flash_attention_infer/`，复用 catlass examples/23**），workspace 用独立 GM buffer 指针透传
+- kernel 用 `FAInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, ...>` 组件（**复用FA kernel 设计知识（develop skill §0），标准 FA 复用 FAInferKernel；FA 变体用高阶 API（develop skill §0.2）**），workspace 用独立 GM buffer 指针透传
 - 精度双口径：内部 golden + `aclnnFlashAttentionScore`（`npu_fusion_attention`）标杆对比（atol=0.02/rtol=0.1，max_abs<0.05）
 
 ### 输入边界

@@ -1,6 +1,6 @@
 # A2/A3 FlashAttention Stage 设计经验
 
-本文沉淀 FlashAttention（FA-2）算子在 A2/A3 上的 stage 设计经验。适用于同时包含 Cube/Vector 协作、KV 分块、online softmax 状态递推、跨 stage workspace 或性能流水调优的 Catlass FA 算子。参考实现：catlass `examples/23_flash_attention_infer/`（`FAInferKernel`）。
+本文沉淀 FlashAttention（FA-2）算子在 A2/A3 上的 stage 设计经验。适用于同时包含 Cube/Vector 协作、KV 分块、online softmax 状态递推、跨 stage workspace 或性能流水调优的 Catlass FA 算子（配套 [fa-kernel-handcraft.md](fa-kernel-handcraft.md) 手搓手册，stage 契约与 buffer 预算供 kernel 设计时核对）。
 
 ## 何时读取
 

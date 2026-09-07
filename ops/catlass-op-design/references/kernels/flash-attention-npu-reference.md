@@ -8,7 +8,7 @@
 |---|---|---|
 | `aclnnFlashAttentionScore` | CANN `op_api` 文档（ACL 单算子） | 底层标杆：语义 / dtype / layout / scale / mask 权威来源 |
 | `torch_npu.npu_fusion_attention` | torch_npu op-plugin（封装 `aclnnFlashAttentionScore`） | Python 标杆：可直接 NPU 实测逐元素对比 |
-| FA 内核资产 | catlass `examples/23_flash_attention_infer/`（`FAInferFp16`/`FAInferBf16` + `FAInferTiling`） | 生成 FA 算子复用的整经验证核函数 |
+| FA kernel 设计知识 | 本 skill `develop/patterns/flash-attention.md` §0.2（AIC/AIV 分工 + 在线 softmax + workspace + 同步协议） | FA kernel 开发指导（标准 FA 复用 FAInferKernel；FA 变体按原则自研）|
 
 > 本 skill 前向只对齐 `attention_out = softmax(scale·Q·Kᵀ + mask)·V`。训练侧 dropout / `softmax_max`/`softmax_sum` 反向中间量 / `pse` / `sink` / `inner_precise` 等 `npu_fusion_attention` 字段**不在本 skill 前向生成范围**，命中时按「用户 contract 优先」处理（见下）。
 
@@ -33,16 +33,17 @@
 | `2`(leftUpCausal) / `3`(rightDownCausal) — **下三角 causal**（Sq==Skv 时一致） | 因果/下三角 | **`MASK_CAUSUAL`(2)**（内核结构性跳过对角块以上整块 + 仅对角块读 mask，勿自实现 causal） |
 | `4`(band) / `5-8`(prefix/varlen外切) | 由 host 按 `pre_tockens`/`next_tockens` 预生成 `atten_mask` 后走 `MASK_SPEC` | `MASK_SPEC`(1) |
 
-mask 张量语义：内核 epilogue `ApplyMask = score += mask·(−3e38)` → **mask≠0 屏蔽、0 保留**（与 npu `atten_mask` 的 `1=不参与` 一致）。具体张量形状/stride/取值由内核 `LayoutMask` 与对角块索引决定，**以 `catlass/examples/23_flash_attention_infer/fai_kernel.cpp` 为准**（参考实现见 catlass example `83_fa_bnsd_causal`）。
+mask 张量语义：内核 epilogue `ApplyMask = score += mask·(−3e38)` → **mask≠0 屏蔽、0 保留**（与 npu `atten_mask` 的 `1=不参与` 一致）。具体张量形状/stride/取值由内核 `LayoutMask` 与对角块索引决定，**以 develop skill `patterns/flash-attention.md` §0.2.8 与 `a2-a3-flash-attention-stage-design.md` 为准**。
 
 > npu 标杆侧：`npu_fusion_attention` causal（sparse_mode 2/3）的 `atten_mask` 必须是压缩下三角 `[2048,2048]`（否则 tiling 报 `161001 "set atten_mask_shape to [2048,2048]"`）。
+> 自研 kernel 侧的 FAInfer 级内核（手搓手册 §1–9 骨架）causal 掩码张量 = **固定 `[1024,1024]` fp16**（`mask[q][k]=1 当 k>q`，host 一次预置常驻复用）——与标杆的 [2048,2048] 同约定不同尺寸，勿混用。
 
 ## 可继承 vs 不能直接继承
 
 | 来源 | 可继承 | 不能直接继承 |
 |---|---|---|
 | `aclnnFA`/`npu_fusion_attention` | 数学语义、`scale=1/√D`、mask 语义（`atten_mask 1=不参与`）、layout、head 映射、baseline 对齐口径 | 把 npu 的**累加** `actual_seq` 当内核 seqlen；把 dropout/`pse`/`sink`/`inner_precise` 等**本 skill 未支持**字段静默继承 |
-| catlass `examples/23_flash_attention_infer` | 核函数（`FAInferFp16`/`Bf16`）、`FAInferTiling` namespace、组件契约 | 自行改 kernel 内 CrossCoreFlag 时序 / 组件实例化（必跨核死锁） |
+| 本 skill §0.2 kernel 设计知识 | AIC/AIV 分工、在线 softmax 状态、workspace 槽位、同步协议、Tile 策略（FA 变体开发基础） | 标准 FA 手搓 catlass Block 组件（CrossCoreFlag 黑盒必死锁）|
 
 ## 生成契约：用户 prompt 优先
 

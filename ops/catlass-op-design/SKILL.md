@@ -79,7 +79,7 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 ## When to Use Each Source
 
 - **mmad + epilogue 最优选型（性能/精度决策）→ [references/mmad-epilogue-selection.md](references/mmad-epilogue-selection.md)**
-- **FlashAttention / MHA / GQA / fused attention 类算子设计路由 → [references/kernels/flash-attention.md](references/kernels/flash-attention.md)**
+- **FlashAttention / MHA / GQA / MLA / latent / paged attention 类算子设计路由 → [references/kernels/flash-attention.md](references/kernels/flash-attention.md)**
 - **A2/A3 FlashAttention stage 分层、workspace/flag、online softmax 状态 → [../catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md](../catlass-op-develop/references/patterns/a2-a3-flash-attention-stage-design.md)**
 - 理解分层架构 → `catlass/docs/zh/3_API/gemm_api.md`
 - DispatchPolicy 选型 → `catlass/docs/zh/2_Design/01_kernel_design/03_dispatch_policies.md`
@@ -98,7 +98,7 @@ rg "using MatmulKernel|using BlockMmad|BlockEpilogue|DispatchPolicy" catlass/exa
 ```
 先判断算子大类：
 ├── Attention / State Recurrence
-│   ├── 命中 FlashAttention / MHA / GQA / fused attention / QK^T-softmax-V
+│   ├── 命中 FlashAttention / MHA / GQA / fused attention / MLA / latent / paged attention / QK^T-softmax-V
 │   │   → 读取 [kernels/flash-attention.md](references/kernels/flash-attention.md)
 │   └── 命中 linear attention / GDN / KDA / retention / RWKV / state recurrence
 │       → 读取 [kernels/attention/linear-attention.md](references/kernels/attention/linear-attention.md)

@@ -1,6 +1,6 @@
 # Kernel 路由：FlashAttention 类算子
 
-> 本指南覆盖 FlashAttention（FA-2）前向算子的 catlass 设计入口，包括 MHA / GQA 两种 head 形态。它不替代普通 Matmul、Grouped Matmul 路由；只有需求命中 attention 融合特征时才启用。
+> 本指南覆盖 FlashAttention（FA-2）前向算子的 catlass 设计入口，包括 MHA / GQA 两种 head 形态与 MLA（multi-head latent，KV latent 压缩 + 分页）变体。它不替代普通 Matmul、Grouped Matmul 路由；只有需求命中 attention 融合特征时才启用。
 
 ---
 
@@ -8,14 +8,17 @@
 
 FlashAttention 类算子的共同特点是：Q/K/V 三输入，计算图为 **Q·K^T → softmax → ·V** 的两段矩阵乘 + 中间 softmax 的融合，且为了长 KV 序列采用**分块 + online softmax（FA-2）**，避免物化完整 `[Sq, Sk]` 分数矩阵。典型 I/O 维度是 `(B, H, Sq/Sk, D)`（BNSD）。
 
-触发信号包括：`flash attention`、`fused attention`、`attention`、`scaled_dot_product_attention`、`QK^T softmax V`、`MHA`、`GQA`、`multi-head attention`。
+触发信号包括：`flash attention`、`fused attention`、`attention`、`scaled_dot_product_attention`、`QK^T softmax V`、`MHA`、`GQA`、`multi-head attention`、`MLA`、`latent attention`、`paged attention`、`page attention`。
 
 > **命名约定（强制）**：本 skill 生成的 FA 算子统一命名为 `FA-<layout>[-<mode>]`，如 `FA-BNSD`（BNSD 全注意力）、`FA-BNSD-Causal`（BNSD 下三角 causal）、`FA-TND`（TND varlen）。设计 / 实现 / 验证全程使用同一算子名。
 
-> **FA 内核资产（catlass 自带，复用 catlass examples/23）**：
-> - `catlass/examples/23_flash_attention_infer/` —— `FAInferKernel` + `FAInferFp16`/`FAInferBf16` 入口 + `FAInferTiling`，整经验证（Paged/varlen/mask 全功能）。
+> **FA kernel 设计知识（本 skill 内化，不依赖外部样例）**：
+> - **标准 FA / FA-Paged / GQA / Causal（组件路径）按 [fa-paged-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-paged-handcraft-recipe.md) 逐行写出**（四文件端到端：kernel Step 1-7 + mask Step 8 + common/tiling/host Step 9-11；NO_MASK 闭卷实证 kv=128~204800 全 PASS，max_abs≤7.6e-06）；机制解读层为 [fa-kernel-handcraft.md](../../../catlass-op-develop/references/patterns/fa-kernel-handcraft.md) §1–9；备选 kfc 单 TU 直调路径见同配方册 §12.13
+> - **fa-sink（S1 模板）/ fa-varlen（TND）/ FFA 双 KV** 按 develop skill 逐行配方生成：sink=[fa-sink-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-sink-handcraft-recipe.md)（S1 模板逐步骤，sink=SoftmaxFlashV2 isUpdate 播种）、varlen=[fa-varlen-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-varlen-handcraft-recipe.md)（varlen kernel 逐步骤）、FFA=配方册 §12.5.14 终态配方 + [ffa-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/ffa-handcraft-recipe.md)（算子结构契约）；其余 FA 变体（FlashSoftmax 分片等）用 AscendC 高阶 API 按 develop skill §0.2 原则自行开发 kernel
+> - **kfc 单 TU 直调（`__mix__(1,2)` + `REGIST_MATMUL_OBJ` + userWs 独立参数）的 fa/fa-sink 完整配方见配方册 §12.13**（第三轮纯 skill 实证 geomean 0.693 vs npu_fusion_attention(sink=)，序列长至 458752）——含 +4GB 窗口坑/运行时 transB/每 chunk 单 IterateAll/SoftmaxFlashV2 正确用法/原子累加竞态/尾块 pad+mask 全套事实
+> - **MLA 手搓路径（已实测可一次跑通，配方见 [fa-mla-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-mla-handcraft-recipe.md)）**：内核形态 = 通用 MLA（H=16/32/64）+ H=128 特化（TP1）+ AMLA 特化，dispatch 固化 `MmadAtlasA2MLAQK`/`MmadAtlasA2MLAPV`；语义 `O=softmax(scale·(Q·c_kv+q_rope·k_rope))·V_latent`，`scale=1/√576`、`Dc=512/Dr=64/blockSize=128/V=latent`、`q∈[1,4]`、`kv≥128`（接口 gen_data 声明 ≤16384 为验证包络，实测可至 20万+）。host 契约见 develop skill [patterns/fa-mla-paged.md](../../../catlass-op-develop/references/patterns/fa-mla-paged.md) §1-4。**★手搓必读 recipe 的两条纠错**：①AIC/AIV 分流用 `#ifdef __DAV_CUBE__`/`#ifdef __DAV_VEC__`（非 `__mix__`+g_coreType）；②主循环 prologue+延迟 PV（非同块锁步），否则 CrossCoreFlag token 不平衡→死锁
 >
-> 这是 `FAInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, PAGED>` 的固化核函数。设计阶段把该目录作为内核来源，**复用 catlass examples/23 的 FAInferKernel、不引用外部 attention 仓库**。
+> FA kernel 设计经验（AIC/AIV 分工、在线 softmax 状态、workspace 槽位、同步协议、Tile 策略）已内化到 develop skill `patterns/flash-attention.md` §0.2，不依赖外部样例存在。
 
 ---
 
@@ -23,7 +26,7 @@ FlashAttention 类算子的共同特点是：Q/K/V 三输入，计算图为 **Q�
 
 命中本路由时，先读取 [flash-attention-npu-reference.md](flash-attention-npu-reference.md)。该文件锁定 FA 标杆接口（`aclnnFlashAttentionScore` / `torch_npu.npu_fusion_attention`），维护「标杆参数 → FA 内核参数」映射（layout / scale / `sparse_mode`↔`maskType` / seqlen 累加↔per-batch）、可继承/不可继承边界与生成契约。**不要要求用户在 prompt 中重复提供参考路径**；标杆是 CANN/torch_npu 内置 API（有文档），无需 clone 外部仓库。
 
-DESIGN.md 的 baseline/reference 章节必须写明：标杆来源（`aclnnFA` / `npu_fusion_attention`）、本次冻结的 contract（`input_layout`、`maskType`、`scale`、seqlen 约定），以及哪些语义来自标杆、哪些来自catlass `examples/23_flash_attention_infer`。
+DESIGN.md 的 baseline/reference 章节必须写明：标杆来源（`aclnnFA` / `npu_fusion_attention`）、本次冻结的 contract（`input_layout`、`maskType`、`scale`、seqlen 约定），以及哪些语义来自标杆、哪些来自本 skill kernel 设计知识。
 
 ---
 
@@ -45,13 +48,18 @@ DESIGN.md 的 baseline/reference 章节必须写明：标杆来源（`aclnnFA` /
 
 ---
 
-## Step 2: FA 内核来源与组件契约（复用 catlass examples/23 FAInferKernel）
+## Step 2: FA kernel 策略与组件契约
 
-FA 是 AIC/AIV 跨核协作的混合 kernel，**整经验证的核函数由本 skill 提供**：`catlass/examples/23_flash_attention_infer/fai_kernel.cpp`（入口 `FAInferFp16`/`FAInferBf16`，配套 `flash_attention_infer_common.hpp`、`flash_attention_infer_tiling.hpp`）。生成 FA 算子时把 `catlass/examples/23_flash_attention_infer/` 加入 include 路径，复用 catlass `examples/23_flash_attention_infer/` 的 `fai_kernel.cpp`/`fai.cpp`/`fai_tiling.cpp`/`kernel_common.hpp`，**只改 host 侧做公开接口**。**复用 catlass examples/23 的 FAInferKernel**，不改 catlass 架构 `include/`——组件选型已固化在内核模板里，host 不重选。
+FA 是 AIC/AIV 跨核协作的混合 kernel。**标准 FA（Q·Kᵀ→softmax→·V，单 KV）按 [fa-paged-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-paged-handcraft-recipe.md) 逐行写出**（四文件端到端逐步骤，NO_MASK 闭卷实证全 PASS；机制解读 = 手册 [fa-kernel-handcraft.md](../../../catlass-op-develop/references/patterns/fa-kernel-handcraft.md) §1-9；备选 §12.13 kfc 单 TU 直调）。**MLA 按 [fa-mla-handcraft-recipe.md](../../../catlass-op-develop/references/patterns/fa-mla-handcraft-recipe.md) 手搓**（MLAKernel 逐行配方，`#ifdef __DAV_CUBE__/__DAV_VEC__` 分流 + prologue+延迟 PV，已实证一次跑通）。**其余 FA 变体（FlashSoftmax 分片等）用 AscendC 高阶 API（MatMul/SoftmaxFlashV2）按 develop skill §0.2 原则自行开发**——高阶 API 用 Event 同步（非 CrossCoreFlag 黑盒），错误可观测可调试。
 
-> **★实现策略（最高优先级）**：必须复用本 skill 的 `FAInferKernel`。**禁止用 `BlockMmad + Epilogue` 从零拼装 FAKernel**（flag 时序无法对齐，必跨核死锁）。详见 develop skill `patterns/flash-attention.md` §0。
+> **★实现策略（最高优先级）**：FA 族一律按手搓手册/recipe 写 kernel（§1–9 / §12.13），host 侧按配方自写。
+> **FA/MLA 用 `BlockMmad + Epilogue + CrossCoreFlag` 从零拼装是可行的**（paged/MLA 两条 recipe 即此结构），
+> **前提**：①分流用 `#ifdef __DAV_CUBE__/__DAV_VEC__`（MLA）或 `operator()<AIC>/<AIV>` 特化（FA），
+> ②主循环 prologue+延迟 PV（非同块锁步），③HardEvent 预置/drain 按 §8.6 全表。
+> 缺任一即 CrossCoreFlag token 不平衡→死锁（本会话实测：`__mix__`+g_coreType+锁步→必死锁）。
+> 详见 develop skill `patterns/flash-attention.md` §0 与 `patterns/fa-mla-handcraft-recipe.md`。
 
-内核模板已固化的组件（见 `catlass/examples/23_flash_attention_infer/fai_kernel.cpp`，host 不重选，仅供理解/核验；组件名以核验结果为准）：
+标准 FA 内核固化的组件（仅供理解 FAInferKernel 的设计原理，FA 变体开发参考 develop skill §0.2）：
 
 | 组件 | 取值 | 说明 |
 |------|------|------|
@@ -61,7 +69,7 @@ FA 是 AIC/AIV 跨核协作的混合 kernel，**整经验证的核函数由本 s
 | BlockMmadQKTail/PVTail | `MmadAtlasA2FAITailQK` / `MmadAtlasA2FAITailPV` | KV 非 128 对齐时的 tail 处理 |
 | EpilogueOnlineSoftmax | `EpilogueAtlasA2OnlineSoftmax` | V1：online softmax + running max/sum |
 | EpilogueRescaleO | `EpilogueAtlasA2RescaleO` | V2：按 `exp(m_old − m_new)` rescale O |
-| Kernel | `FAInferKernel<...>`（AIC/AIV 双特化，catlass `examples/23_flash_attention_infer` 提供） | `operator()<AIC>` + `operator()<AIV>` |
+| Kernel | `FAInferKernel<...>`（AIC/AIV 双特化，复用 FAInferKernel） | `operator()<AIC>` + `operator()<AIV>` |
 | TileShape | `L1=L0=GemmShape<128,128,128>`（`L1TileShape::K==D`） | 内核固定，性能再迭代 |
 | PAGED_CACHE_FLAG | `true`（A2） | 恒等 block_table 等价非 Paged |
 
@@ -111,7 +119,7 @@ shape 来源写进 DESIGN/PLAN：用户实网规模、baseline 支持范围、cu
 | 优先级 | 基准 |
 |:---:|------|
 | 1 | 同语义 baseline（aclnnFA）实测 Task Duration |
-| 2 | catlass 参考 example（23/81）同 shape 实测 |
+| 2 | 本 skill 整经验证内核同 shape 实测 |
 | 3 | Cube/MTE/Vector 理论上限 |
 
 性能报告至少含：custom/baseline 时长、speedup、launch count、主导流水（Cube/MTE/Vector/同步等待）、cube_util、workspace peak、profiler 路径。
