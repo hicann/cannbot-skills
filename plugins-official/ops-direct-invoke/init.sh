@@ -50,6 +50,20 @@ validate_path() {
     fi
 }
 
+# Detect TRAE variant by scanning global config directories.
+# Sets global: TRAE_VARIANT=(ide|plugin|cli|unknown)
+detect_trae_variant() {
+    if [ -d "$HOME/.trae-cn" ]; then
+        TRAE_VARIANT="ide"
+    elif [ -d "$HOME/.marscode" ]; then
+        TRAE_VARIANT="plugin"
+    elif [ -d "$HOME/.traecli" ]; then
+        TRAE_VARIANT="cli"
+    else
+        TRAE_VARIANT="unknown"
+    fi
+}
+
 # Safe install config file with backup and conflict handling.
 # $1 = generated temp file path  $2 = target  $3 = display name  $4 = level
 safe_install_file() {
@@ -462,8 +476,14 @@ if [ "${LEVEL}" = "global" ]; then
         # （对齐 dsh-home-paths 的 resolveDshHome 优先级：显式配置 > $DSH_HOME > ~/.dsh）
         CONFIG_ROOT="${DSH_HOME:-${HOME}/.dsh}"
     elif [ "${TOOL}" = "trae" ]; then
-        # TraeCode 全局用户根：~/.trae-cn（含 user_rules / skills / agents / hooks.json）
-        CONFIG_ROOT="${HOME}/.trae-cn"
+        # TraeCode 全局用户根按变体探测（规范目录优先级 .trae-cn/.marscode/.traecli，
+        # 与 plugins-official 各 init.sh 保持一致，TR-08 看护）
+        detect_trae_variant
+        case "${TRAE_VARIANT}" in
+            plugin) CONFIG_ROOT="${HOME}/.marscode" ;;
+            cli)    CONFIG_ROOT="${HOME}/.traecli" ;;
+            *)      CONFIG_ROOT="${HOME}/.trae-cn" ;;
+        esac
     fi
     INSTALL_BASE="${HOME}"
 else

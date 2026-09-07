@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-07】
+#### 缺陷修复 Bug Fixes
+- 【ops-direct-invoke】init.sh 补齐 TRAE 变体探测 `detect_trae_variant`（按 `.trae-cn`/`.marscode`/`.traecli` 规范目录优先级选取全局用户根），修复 9413651e 新增的 TR-08 看护在 master 上必然失败的问题——此前 trae 分支硬编码 `~/.trae-cn`，导致所有 PR 的 `unit/install/test-init-tool.sh --tool trae` 门禁红灯。
+
 ### 【2026-08-29】
 #### 文档更新 Documentation
 - 【治理规范】GOVERNANCE.md/CONTRIBUTING.md 补充 Committer 任命与退出规则:确立"贡献什么部分,管理什么部分"的责任田导向,沉淀 SIG 第 1/4/9/10 次会议关于晋级条件(3 个月 + 30 条审核意见 + 原创 Skill 或 10 个 PR)、晋升通道(常规/快速)与社区孵化贡献认定子场景、任命流程与退出机制的决议,并新增 Committer 申请 Issue 模板。
