@@ -163,21 +163,27 @@ def _find_forward_in_class(class_node):
     return None
 
 
+def _find_class_by_name(tree, class_name):
+    """按名称查找类定义节点，未找到返回 None。
+
+    遍历全部节点取最后一个匹配（与旧版单次遍历的覆盖语义一致，
+    也符合 Python 运行时"后定义生效"）。
+    """
+    found = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            found = node
+    return found
+
+
 def find_model_forward(tree):
     """找到 ModelNew 或 Model 类的 forward 方法节点及其所属类。
 
     优先查找 ModelNew，若不存在则查找 Model。
     返回 (forward_node, class_name, class_node)。
     """
-    model_new_class = None
-    model_class = None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            if node.name == "ModelNew":
-                model_new_class = node
-            elif node.name == "Model":
-                model_class = node
+    model_new_class = _find_class_by_name(tree, "ModelNew")
+    model_class = _find_class_by_name(tree, "Model")
 
     if model_new_class:
         forward = _find_forward_in_class(model_new_class)
@@ -329,30 +335,117 @@ def _node_calls_ext(node, ext_names):
 
 
 def find_wrapper_functions(tree, ext_names):
-    """找到模块级别的辅助函数，这些函数内部调用了扩展模块。
+    """找到模块级别或类级别的辅助函数，这些函数内部调用了扩展模块。
 
     返回函数名集合。
     """
     wrappers = set()
-    for node in ast.iter_child_nodes(tree):
+    for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and _node_calls_ext(node, ext_names):
             wrappers.add(node.name)
     return wrappers
 
 
-def check_kernel_calls_in_forward(forward_node, ext_names, wrapper_names):
+def _call_leaf_name(call_node):
+    """取 Call 节点的叶子名：foo() -> foo；self.foo() -> foo；a.b.foo() -> foo。"""
+    f = call_node.func
+    if isinstance(f, ast.Name):
+        return f.id
+    if isinstance(f, ast.Attribute):
+        return f.attr
+    return None
+
+
+def _iter_new_callees(func_node, all_funcs, seen):
+    """遍历函数体，产出尚未记录的模块内被调函数 (name, FunctionDef)。"""
+    for node in ast.walk(func_node):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_leaf_name(node)
+        if name and name in all_funcs and name not in seen:
+            yield name, all_funcs[name]
+
+
+def collect_reachable_funcs(tree, forward_node, ext_names):
+    """从 forward() 出发沿模块内函数/方法调用做可达性分析。
+
+    返回 [(函数名, FunctionDef), ...]（不含 forward 自身）。
+    覆盖：模块级函数、类方法（self.helper() 经叶子名匹配）、
+    浅层别名（_kernel = ext.run / torch.ops.npu.op 赋值后的调用）。
+    """
+    all_funcs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            all_funcs.setdefault(node.name, node)
+
+    seen = set()
+    out = []
+    stack = [forward_node]
+    while stack:
+        cur = stack.pop()
+        for name, fn in _iter_new_callees(cur, all_funcs, seen):
+            seen.add(name)
+            if fn is not forward_node:
+                out.append((name, fn))
+                stack.append(fn)
+    return out
+
+
+def _register_ext_alias(aliases, node, ext_names):
+    """解析单条赋值语句，若右值限定名指向 kernel 入口则登记别名。"""
+    value = node.value
+    if not isinstance(value, ast.Attribute):
+        return
+    # 解析右值的限定名
+    quals, cur = [], value
+    while isinstance(cur, ast.Attribute):
+        quals.append(cur.attr)
+        cur = cur.value
+    if not isinstance(cur, ast.Name):
+        return
+    quals.append(cur.id)
+    qual = '.'.join(reversed(quals[1:])) if len(quals) > 1 else ''
+    if qual not in ext_names and not _is_allowed_npu_qual(qual):
+        return
+    tgt = node.targets[0]
+    if isinstance(tgt, ast.Name):
+        aliases[tgt.id] = f'{qual}.{quals[0]}'
+    elif isinstance(tgt, ast.Attribute) and isinstance(tgt.value, ast.Name) \
+            and tgt.value.id == 'self':
+        aliases[tgt.attr] = f'{qual}.{quals[0]}'
+
+
+def _collect_ext_aliases(tree, ext_names):
+    """收集指向 kernel 入口的别名：{_alias: 'ext.run' 或 'torch.ops.npu.op'}。
+
+    覆盖两种赋值形态：
+      _kernel = pool_ext.max_pool            # 模块级别名
+      self.selu = torch.ops.npu.selu         # __init__ 实例属性别名
+    """
+    aliases = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        _register_ext_alias(aliases, node, ext_names)
+    return aliases
+
+
+def check_kernel_calls_in_forward(forward_node, ext_names, wrapper_names, ext_aliases=None):
     """检查 forward 中是否调用了 AscendC 扩展模块的函数。
 
     检测模式：
     1. ext_module.function_name(...)  — 直接调用扩展模块方法
     2. wrapper_func(...)              — 通过 wrapper 函数调用
     3. self.wrapper_name(...)         — 通过类方法调用
+    4. alias(...) / self.alias(...)   — 通过别名调用（_kernel = ext.run 等）
 
     返回被调用信息列表 [{"call": str, "line": int}, ...]
     """
     called = []
     if forward_node is None:
         return called
+    if ext_aliases is None:
+        ext_aliases = {}
     for node in ast.walk(forward_node):
         if not isinstance(node, ast.Call):
             continue
@@ -369,6 +462,11 @@ def check_kernel_calls_in_forward(forward_node, ext_names, wrapper_names):
 
         if qual == "self" and attr in wrapper_names:
             called.append({"call": f"self.{attr}", "line": node.lineno})
+
+        # 别名调用：_kernel(...) / self.selu(...)
+        target = ext_aliases.get(attr)
+        if target and (qual is None or qual == "self"):
+            called.append({"call": f"{attr} -> {target}", "line": node.lineno})
     return called
 
 
@@ -399,6 +497,11 @@ def _check_call_violation(node, qual, attr):
     if qual is None and attr in ALLOWED_BUILTIN_FUNCS:
         return None
 
+    # 裸内建归约（sum(...) 等）不是 tensor 方法：host 侧对 int 尺寸求和
+    # （sum(t.numel() for t in ...)）是标准写法，只有 x.sum() 属性调用才算计算。
+    if qual is None and attr in ("sum", "prod") and attr in FORBIDDEN_TENSOR_METHODS:
+        return None
+
     if attr in FORBIDDEN_TENSOR_METHODS:
         if qual not in ("torch", "F", "functional", "torch.nn.functional", "nn.functional"):
             return {"line": node.lineno,
@@ -413,14 +516,24 @@ def _check_call_violation(node, qual, attr):
     return None
 
 
-def check_forbidden_torch_ops(forward_node):
+def check_forbidden_torch_ops(forward_node, known_class_methods=None, ext_aliases=None):
     """检查 forward 中是否使用了禁止的 torch 计算操作。
+
+    known_class_methods: ModelNew/Model 类内已定义的方法名集合。
+    self.<name>() 命中该集合时说明是本类的辅助方法（其函数体由
+    Type 2 的调用链分析覆盖），不再按"疑似 nn.Module 前向调用"误报。
+    ext_aliases: kernel 入口别名表（self.selu = torch.ops.npu.selu 等），
+    命中时同样交由 Type 2 判定。
 
     返回违规列表 [{"line": N, "call": str, "reason": str}, ...]
     """
     violations = []
     if forward_node is None:
         return violations
+    if known_class_methods is None:
+        known_class_methods = set()
+    if ext_aliases is None:
+        ext_aliases = {}
 
     for node in ast.walk(forward_node):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult):
@@ -434,7 +547,13 @@ def check_forbidden_torch_ops(forward_node):
         resolved = _resolve_call_name(node)
         if resolved is None:
             continue
-        violation = _check_call_violation(node, resolved[0], resolved[1])
+        qual, attr = resolved
+        if qual == "self" and (attr in known_class_methods
+                               or attr in ext_aliases):
+            # 本类辅助方法或 kernel 别名：交给 Type 2 的调用链/别名分析，
+            # 不按"疑似 nn.Module 前向调用"误报
+            continue
+        violation = _check_call_violation(node, qual, attr)
         if violation:
             violations.append(violation)
 
@@ -506,6 +625,9 @@ def _loop_has_tensor_indexing(for_node, loop_var):
 def _call_is_computation(qual, attr):
     """Return True if a resolved (qual, attr) call is a forbidden computation."""
     if qual is None and attr in ALLOWED_BUILTIN_FUNCS:
+        return False
+    # 裸内建 sum()/prod()（host 侧 ints 归约）不算计算，见 _check_call_violation 同款处理
+    if qual is None and attr in ("sum", "prod"):
         return False
     if attr in FORBIDDEN_TENSOR_METHODS and qual not in ("torch", "F", "functional",
                                                          "torch.nn.functional", "nn.functional"):
@@ -656,7 +778,22 @@ def _check_kernel_called(result, tree, valid_ext_names):
         return None, None
 
     wrapper_names = find_wrapper_functions(tree, valid_ext_names)
-    called = check_kernel_calls_in_forward(forward_node, valid_ext_names, wrapper_names)
+    ext_aliases = _collect_ext_aliases(tree, valid_ext_names)
+    called = check_kernel_calls_in_forward(
+        forward_node, valid_ext_names, wrapper_names, ext_aliases)
+
+    # 递归补扫：forward 字面范围内没有 kernel 调用时，沿调用链追进
+    # 可达函数（类方法 self.helper() / 模块级函数 / 嵌套调用）继续找，
+    # 避免把"kernel 封装在辅助方法里"的正常写法误判为未调用。
+    called_via_chain = []
+    if not called:
+        for fname, fnode in collect_reachable_funcs(tree, forward_node, valid_ext_names):
+            for hit in check_kernel_calls_in_forward(
+                    fnode, valid_ext_names, wrapper_names, ext_aliases):
+                hit["via"] = fname
+                called_via_chain.append(hit)
+        called = called_via_chain
+
     result["checks"]["kernel_called_from_forward"]["called"] = called
 
     if not called:
@@ -667,7 +804,7 @@ def _check_kernel_called(result, tree, valid_ext_names):
         result["regression_type"] = 2
         result["suggestion"] = (
             f"已加载 AscendC kernel 扩展 {list(valid_ext_names)} 但 "
-            f"{class_name}.forward() 中未调用。"
+            f"{class_name}.forward() 及其调用链上均未调用。"
             "forward() 必须通过 torch.ops.npu.<op_name>(...) 形式调用 kernel，"
             "或通过 ext_module.function_name(...) 调用。"
             f"{'也存在 wrapper 函数 ' + str(list(wrapper_names)) + ' 但 forward 也未调用它们。' if wrapper_names else ''}"
@@ -678,9 +815,21 @@ def _check_kernel_called(result, tree, valid_ext_names):
     return forward_node, class_name
 
 
-def _check_forbidden_ops(result, forward_node):
-    """Check 3: no forbidden torch ops. Returns True to continue."""
-    violations = check_forbidden_torch_ops(forward_node)
+def _check_forbidden_ops(result, forward_node, known_class_methods=None, ext_aliases=None,
+                          reachable_funcs=None):
+    """Check 3: no forbidden torch ops. Returns True to continue.
+
+    reachable_funcs: [(函数名, FunctionDef)]，从 forward 可达的辅助函数。
+    提供时对这些函数体同样做 torch 计算检查（跨函数作弊防护），
+    与旧版"只扫 forward 子树"相比堵住把主链计算挪进 helper 的绕过路径。
+    """
+    violations = check_forbidden_torch_ops(forward_node, known_class_methods, ext_aliases)
+    if reachable_funcs:
+        for fname, fnode in reachable_funcs:
+            violations.extend(
+                {"line": v.get("line"), "call": f"{fname}() -> {v.get('call')}",
+                 "reason": v.get("reason")}
+                for v in check_forbidden_torch_ops(fnode, known_class_methods, ext_aliases))
     result["checks"]["no_forbidden_torch_ops"]["violations"] = violations
 
     if violations:
@@ -722,6 +871,16 @@ def _check_scalar_loops(result, forward_node):
     return True
 
 
+def _collect_own_methods(tree):
+    """收集所有类定义中的方法名：self.<name>() 命中时由调用链分析兜底，不误报为 nn.Module。"""
+    own_methods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            own_methods.update(m.name for m in node.body
+                               if isinstance(m, ast.FunctionDef))
+    return own_methods
+
+
 def validate(code, filepath="<unknown>"):
     """对生成代码执行完整的退化检查。
 
@@ -745,7 +904,13 @@ def validate(code, filepath="<unknown>"):
     if forward_node is None:
         return result
 
-    if not _check_forbidden_ops(result, forward_node):
+    # 本类已定义的方法名：self.<name>() 命中时由调用链分析兜底，不误报为 nn.Module
+    _own_methods = _collect_own_methods(tree)
+    _ext_aliases = _collect_ext_aliases(tree, valid_ext_names)
+    _reachable = collect_reachable_funcs(tree, forward_node, valid_ext_names)
+
+    if not _check_forbidden_ops(result, forward_node, _own_methods, _ext_aliases,
+                                _reachable):
         return result
 
     if not _check_scalar_loops(result, forward_node):
