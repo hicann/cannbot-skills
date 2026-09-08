@@ -585,6 +585,7 @@ Sort / TopK 是**比较-选择**模式，与 Gather/Scatter 的索引映射模�
 ### §5.5 LightningIndexer 算子（`topk-select`，检索/select 融合：轻打分 + 重 top-K 选位 + gather 有序索引/值）
 
 > 📌 本节迁移自 `cv-fusion.md §4`。op5 的运算形态是「score 打分 + top-K 选位 + 索引输出」，属索引计算家族的 `index-sort` / `topk-select`，故归位于本文件 §5。原 `cv-fusion.md §4` 已留指针。
+> 📌 本节为路线 A（npu_sort_v2 sort-compaction，升序索引集合语义）。另一条路线 B（降序 top-K 语义 + `.sort` 稳定排序 + 大 shape 双路径拆分，适配 npu_sort_v2 不可用/被 validator 拦截的环境）见 `transformer-inference.md §6`。
 
 **算子类别**: `topk-select`（轻打分 GEMM + 重 top-K 选位 + gather 有序索引/值）
 **典型特征**: `q` bf16/fp16 `[B,S1,N1,D]` @ `k` `[B,S2,D]` + relu + `w` `[B,S1,N1]` head-sum → `score[B,S1,S2]`；`sparse_mode=3`（`j ≤ i + (as2-as1)`），`sparse_count=K=min(2048,S2)` **升序** top-K；输出 `out_idx[b,i,1,K]` int32 + `out_val` bf16（可选）

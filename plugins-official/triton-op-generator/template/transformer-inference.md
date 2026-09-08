@@ -1,19 +1,20 @@
 ---
 name: transformer-inference
-description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
+description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout / LightningIndexer）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
 metadata:
   type: reference
 ---
 
 # Transformer 推理类算子优化经验
 
-本文档合并了四类 Transformer 推理算子的优化经验。按以下结构组织：
+本文档合并了五类 Transformer 推理算子的优化经验。按以下结构组织：
 - **§1 通用经验**：跨算子重复的工程约束（已提取，各算子章节不再重复；与张量变换类共用的通用约束见 tensor-transform.md G1-G8）
 - **§2 RotaryMul**（rotarymul，RoPE 旋转位置编码）
 - **§3 MoeComputeExpertTokens**（indexing-gather / counting，MoE 专家 token 计数 + 前缀和）
 - **§4 MoeGatingTopKSoftmax**（sort-topk，门控 softmax + 迭代 top-k）
 - **§5 AttentionSoftmaxWithSoftcappingAndDropout**（reduce，softcapping + 行级 softmax 融合）
-- **§6 各算子常见陷阱**
+- **§6 LightningIndexer**（topk-select，稀疏注意力打分 + 降序 top-K 选位）
+- **§7 各算子常见陷阱**
 
 ---
 
@@ -25,18 +26,20 @@ metadata:
 | MoeComputeExpertTokens | `indexing-gather / counting` | expert 维度 token 计数（histogram）+ 小数组前缀和 | 两阶段分离：expert-parallel 无竞争计数 + 单 block 串行 prefix sum |
 | MoeGatingTopKSoftmax | `sort-topk` | softmax over last dim + 迭代 top-k 选择，per-row 独立 | 纯寄存器 top-k 路径（无 GM temp buffer）+ grid 钳制到 num_cores |
 | AttentionSoftmaxWithSoftcappingAndDropout | `reduce` | Gemma3 风格 softcapping `tanh(x/30)*30` + 行级 softmax，多 dtype 混合 | 4-kernel 分离强制中间舍入 + 分核优化（grid 钳制 + 循环处理多块） |
+| LightningIndexer | `topk-select` | QK^T 打分 + relu + 权重头归约 + 行内降序 top-K 选位（输出索引/值），大 KV 稀疏注意力的索引器 | 位级一致分数链 + 大 shape 双路径拆分（打分/头归约分核）+ `.sort` 稳定排序选位 |
 
-> ⚠️ **关键区分**：四类算子计算模式差异极大，优化哲学不可混用：
+> ⚠️ **关键区分**：五类算子计算模式差异极大，优化哲学不可混用：
 > - RotaryMul 关心 **per-position 向量化** 避免 flat-1D 标量退化
 > - MoeComputeExpertTokens 关心 **无竞争 expert-parallel 计数** 避免 atomic contention
 > - MoeGatingTopKSoftmax 关心 **寄存器内 top-k 路径** 避免 GM 往返导致 `tl.argmax` 不可靠
 > - AttentionSoftmaxWithSoftcappingAndDropout 关心 **多 kernel 分离强制 dtype 舍入** 匹配 PyTorch 中间物化行为
+> - LightningIndexer 关心 **位级一致分数链**（索引输出逐位比对，任何近似选位都会翻边失败）与 **大 shape 双路径拆分** 绕过融合核微 dot 的同步税
 
 ---
 
 ## §1 通用经验（跨算子，首次生成必须遵守）
 
-以下 6 条约束是四类 Transformer 推理算子**共有**且**未在 tensor-transform.md G1-G8 覆盖**的工程约束。tensor-transform.md 中已提取的 G1（动态 num_cores）/ G2（pow2 BLOCK）/ G3（多策略分派）/ G4（grid 不超核数）/ G5（int32 索引）/ G6（负载均衡）/ G7（contiguous）/ G8（坐标 float32 比较）此处不再重复，各算子章节引用时标注。
+以下 6 条约束是五类 Transformer 推理算子**共有**且**未在 tensor-transform.md G1-G8 覆盖**的工程约束。tensor-transform.md 中已提取的 G1（动态 num_cores）/ G2（pow2 BLOCK）/ G3（多策略分派）/ G4（grid 不超核数）/ G5（int32 索引）/ G6（负载均衡）/ G7（contiguous）/ G8（坐标 float32 比较）此处不再重复，各算子章节引用时标注。
 
 ### T1 grid_size 必须与 num_cores 严格匹配（grid = num_cores 或 grid ≤ num_cores）
 - **必须**令 `grid_size = min(batch_size/total_blocks, VEC_CORE_NUM)`，且 `num_cores` 入参 = `grid_size`。
@@ -808,9 +811,180 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 
 **关键结论**: 4-kernel 分离是精度必需（bf16/fp16 编译器融合问题），分核优化是性能关键（grid 钳制 + 循环处理多块，大 K 场景 +7.6%）。小 shape + fp32 场景因 4-kernel GM round-trip 开销仍有优化空间。
 
-## §6 常见陷阱与避免方法
+## §6 LightningIndexer 算子（topk-select）
 
-### §6.1 RotaryMul 陷阱
+### 算子背景与语义
+
+LightningIndexer 是 Transformer 大 KV cache 推理中**稀疏注意力的索引器**：对每个 query token，
+它先计算该 token 与所有 key token 的注意力分数（QK^T → ReLU → 按头权重归约），再选出分数最高的
+top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算。选位的成本通常不低于打分成本
+（`topk-select` 类算子的共同特征），因此本算子的优化重点在于**打分链与选位结构的整体设计**，
+而不是单纯把 GEMM 做快。
+
+本节记录的路线（下称**路线 B**）语义为：输出**按分数降序排列的 top-K 索引**（同分按下标升序，
+由稳定排序保证），`sparse_count` 之外的掩码位置填 `-1`/`-inf`。它与 `index-computation.md §5.5`
+的路线 A（npu_sort_v2 sort-compaction，升序索引集合语义）**并存不互斥**，选择依据是：
+
+- 路线 A：环境有 `npu_sort_v2` 且 validator 放行 `torch_npu.npu_*`；golden 只需"前 K 个索引的集合"（顺序无关）。
+- 路线 B（本节）：`npu_sort_v2` 已弃用/损坏或被 validator 拦截；golden 需要**完整降序 top-K**（顺序敏感），
+  此时选位只能依赖放行的 `.sort()` 稳定排序原语，并且分数必须与参考实现**位级一致**才能通过索引的逐位比对。
+
+**算子类别**: `topk-select`
+**典型特征**: fp16 QK^T（fp32 累加、fp16 量化输出）→ relu → 按头权重求和（fp32）→ causal mask（-inf）→ 稳定降序 top-K；输出 `int32` 索引 + 可选 `fp32` 分数
+**性能基准**: 任务 8-shape（verify 8/8）**5.0528x** vs torch；16-shape（work 0.1M~268M，mode3）vs ops-transformer AscendC 单融合 kernel 核级几何平均 **0.404x**、墙钟 0.325x
+**历史最佳版本**: opt_iter_16（初版 2.56x → 16 轮迭代）
+
+### §6.1 Layer 1: 设计约束（Agent 必须遵守）
+
+#### L1.1 分数链必须与参考实现位级一致（本路线唯一可靠的正确性路径）
+
+- **必须** 让实现计算出的 score 与 torch 参考**逐位相同**，而不是"在误差范围内近似"。
+  具体做法：① QK^T 用 `tl.dot`（fp16 输入、fp32 累加）后立即 `.to(tl.float16)`，
+  与参考 `torch.bmm` 的 fp16 输出位级一致（实测 65536 元素 0 个不匹配——两者共用同一 cube 硬件的 K 维归约序）；
+  ② 头归约用 cube dot（见 L1.2）；③ 选位用与参考同源的稳定排序（见 L1.4）。
+- **禁止** 任何"近似选位"：把分数转 fp16/bf16 键再排序、用 topk 的平局语义替代稳定排序、
+  降低累加精度——这些都会让两个分数接近的位置交换次序，导致输出索引与参考相差不止 1，
+  verify 的量化类判定（`|diff| <= 1`）立即失败。
+- **Why**：输出是整数索引，验证是**逐位**的。分数只要差 1 ulp，位于 top-K 边界附近的近等分就可能翻边；
+  大 K（如 2048）时边界密度高，任何"几乎一致"的方案都会以失败告终。位级一致则 `|diff| = 0`，天然通过。
+
+#### L1.2 头归约必须用 fp32 的块对角 cube dot，禁止向量 FMA 或 fp16 键
+
+- **必须** 用 `m1 [R, R*N]` 块对角矩阵与逐头分数 y 做 `tl.dot`（K = R*N），
+  其中 `m1[r, c] = w_all[c]`（当 `c // N == r`）否则为 0。结构零在 cube 的顺序累加中是精确 no-op
+  （`x + 0 = x`），因此该 dot 与参考 `torch.bmm([M,1,N],[M,N,S2])`（K=N=8）位级一致——
+  实测 K=8/16/32/64/128 五种配置全部 0 不匹配。
+- **禁止** ① 用向量 FMA 逐头累加（顺序与 cube 的 K=8 归约不同，实测差 ~1.5e-8，足以翻边）；
+  ② 用 fp16 键做 dot（fp16×fp16 乘积 22 bit 精确、无舍入，而参考是 fp32 乘积舍入，两者不一致）。
+- **Why**：参考的 K=8 归约顺序是硬件固定的，只有同一硬件的同型 cube dot 能复刻；
+  这是"位级一致"约束下不可讨价还价的一点。
+
+#### L1.3 编译器缺陷规避（triton-ascend 3.2.1 / 910B3 实测三处，务必绕开）
+
+- **必须** 避免 `tl.reshape` 作用于 3D tile 或偏移张量：实测产生 NaN 或编译崩溃
+  （`LLVM ERROR: unexpected op in rewrite` / `@malloc` 无法编译）。
+  R 行合并时改为**连续 flat 行加载**：行 r 的 head h 恰好位于 flat 行 `r*N+h`，
+  直接 `fr = pid*(R*N) + tl.arange(0, R*N)` 即可，无需 reshape。
+- **必须** 掩码保持 int 比较：fp32 派生的 bool 掩码用于 `tl.load`/`tl.store` 会得到错误结果
+  （本算子 3 处独立复现：finalize 的 km、score 的 store mask、valid 掩码）。
+  数值比较（分数 vs 阈值）才转 fp32；索引/边界比较保持 int。
+- **必须** 实测 BLOCK 阶梯而非凭 UB 估算：本算子 `BLOCK_J=512` 编译失败（需 334KB），
+  但 hsum_kernel 的 `y16→f32` 转换编译器会**分段搬运、边转换边送入 dot**（不需要在 UB 中一次性放下完整
+  fp32 副本），手工估算会高估占用、可能错杀可行配置。
+
+#### L1.4 选位原语与排序语义（环境约束下的唯一选择）
+
+- **必须** 用 tensor 方法 `x.sort(dim=-1, descending=True)` 完成选位。
+- **Why（三层原因叠加，缺一不可）**：
+  ① validator 的白名单禁止 `torch.topk` / `torch.cumsum` / `torch.cat` 等 torch 计算调用，
+  也禁止 `torch_npu.npu_*` 顶层调用（属"融合算子外包"拦截规则，`npu_sort_v2` 正是 `npu_` 前缀，会被直接标红）；
+  ② 本机 `torch_npu.npu_sort_v2` 本身已弃用且运行时损坏——调用会触发 AOE/TBE 初始化，因环境缺 `scipy`
+  报 `SetPrecisionMode ... 500001`，且当前版本只返回值、不返回排序索引，而路线 A 的 rank 恢复恰恰依赖该索引
+  （注意：npu_sort_v2 是 torch_npu/CANN 接口，与 triton-ascend 无关）；
+  ③ `.sort()` tensor 方法不在禁止名单、由设备侧 aclnnSort 执行、实测**稳定**（同分按下标升序，含 -inf 平局），
+  与参考 `torch.sort(stable=True, descending=True)` 语义一致。
+  三层叠加后，`.sort()` 是唯一放行且满足正确性要求的选位原语。
+- 排序输入喂 2D `[rows, S2P]`（`S2P = max(S2, sparse_count)`）；`S2 < sparse_count` 的补齐列由
+  `j >= ak` 条件注入 `-inf`，不要依赖 k 载入的零填充参与排序。
+
+#### L1.5 大 shape 必须双路径分派（拆分 vs 融合）
+
+- **必须** 按 `rows * S2P >= 4_000_000` 分派：大 shape 走拆分路径（qk_kernel 与 hsum_kernel 分核、
+  y16 中间缓冲），小 shape 保留单融合核。
+- **Why**：融合核里每个 tile 要做 2 个 dot。其中头归约 dot 的 M=8、只有 65K MAC（qk dot 的 1/32），
+  但每个 dot 都要付出固定的一次"指令发射 + cube↔vector 握手等待"开销——dot 很小、开销却与 dot 大小无关，
+  所以 tile 数大时这一税被放大（消融实测：去掉头归约 dot 省 63% 的 score 核时间）；拆分后头归约 dot 可 16 行合并、
+  tile 放大，大 shape 全流水 -9~15%。但拆分要额外一次 kernel 调度 + 一份 `[rows*N, S2P]` 中间缓冲，
+  小 shape 反而回退（任务 8-shape 4.39 vs 5.16），所以必须分派而不是一刀切。
+- R 行合并**必须**满足 `S1 % R == 0`（R 行必须同 batch，k 按 batch 共享），否则取错 key 数据。
+
+#### L1.6 结构参数边界（UB / grid）
+
+- qk_kernel 的 R 上限是 8：R=16 时 dot 的 fixpipe 输出 `[128, 256] fp32` 必须**一次性整块搬进 UB**
+  （没有分段搬运的余地），连同 q/k 载入共需 320KB > 192KB。hsum_kernel 可以 R=16（其 y16→f32 转换
+  由编译器分段搬运，216KB 可行）。
+- mix 算子 grid ≤ cube 核数（910B3 = 20）。
+
+### §6.2 Layer 2: 算法骨架
+
+```python
+# host 侧 forward 骨架
+rows, S2P = B * S1, max(S2, sparse_count)
+aq_dev = 实际长度 or torch.full((B,), S1, int32)     # None 时用常量张量, 禁止传 None 进 kernel
+ak_dev = 实际长度 or torch.full((B,), S2, int32)
+
+score_buf = torch.empty((rows, S2P), torch.float32)
+if rows * S2P >= 4_000_000:                          # L1.5 大 shape 拆分路径
+    y_buf = torch.empty((rows * N, S2P), torch.float16)   # y 值即 fp16, GM 往返无损
+    r_a = 8 if S1 % 8 == 0 else ...                  # L1.5 同批合并门控
+    qk_kernel[(cdiv(rows, r_a),)](q, k, y_buf, ..., BLOCK_J=256, R=r_a, multibuffer=True)
+    r_b = 16 if S1 % 16 == 0 else ...
+    hsum_kernel[(cdiv(rows, r_b),)](y_buf, w, score_buf, aq_dev, ak_dev, ..., BLOCK_J=256, R=r_b)
+else:                                                # 小 shape 融合路径
+    score_kernel[(cdiv(rows, 8),)](q, k, w, score_buf, aq_dev, ak_dev, ..., BLOCK_J=128, R=8)
+sv, si = score_buf.sort(dim=-1, descending=True)     # L1.4 唯一放行选位原语
+finalize_kernel[(rows,)](sv, si, out_idx, out_val, S2P, K, next_pow2(K))   # -inf -> -1/-inf, int64 -> int32
+```
+
+- **qk_kernel**：flat 行加载 q `[R*N, D]` → `tl.dot(q, tl.trans(k_tile))` → `.to(fp16)` → relu（fp16 域，与参考位级等价）→ 存 y16。
+- **hsum_kernel**：块对角 m1（循环不变量外提，见 L3.1）→ `tl.dot(m1, y16.to(fp32))` → causal mask（`s1>=aq | j>=ak | mode3: j >= ak-aq+s1+1`）→ 存 scores fp32。
+- **消融归因法（决定是否拆分的标准动作）**：对 score 核做"完整 / 无头归约 dot / 无 cast-relu / 无 qk dot"四变体实测
+  边际成本。本算子实测访存地板仅 6%（k 载入+scores 写回+mask），dot+逐元素流水占 94%——据此把资源投向流水结构而非访存。
+
+### §6.3 Layer 3: 关键技巧
+
+#### L3.1 连续 flat 行加载 + 块对角头归约（位级一致的实现载体）
+
+```python
+# q/w 按连续 flat 行加载: 行 r 的 head h 位于 flat 行 r*N+h (避开 tl.reshape 缺陷)
+fr = pid * (R * N) + tl.arange(0, R * N)
+q_tile = tl.load(q_ptr + fr[:, None] * D + dd[None, :],
+                 mask=valid_flat[:, None], other=0.0)          # [R*N, D] f16
+w_all = tl.load(w_ptr + fr, mask=valid_flat, other=0.0).to(tl.float32)
+
+# 块对角 m1 是循环不变量, 外提 tile 循环
+cc = tl.arange(0, R * N)
+m1 = tl.where((cc // N)[None, :] == tl.arange(0, R)[:, None], w_all[None, :], 0.0)
+acc2 = tl.dot(m1, y)                                           # [R, BJ] fp32, K=R*N 结构零精确 no-op
+```
+
+**可替代方向**：若 golden 不要求顺序敏感输出，可改用 index-computation.md §5.5 的 rank 编码路线，
+省去 fp32 头归约的精度约束。
+
+#### L3.2 causal mask 阈值外提（削减 tile 内向量工作）
+
+```python
+cond_row = s1f[:, None] >= aqf      # 行掩码与 j0 无关, 外提
+thr3 = (akf - aqf) + s1f + 1.0      # mode3 阈值同样外提
+# tile 循环内仅剩 j 维比较
+cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode3 时含第三项
+```
+
+**可替代方向**：每 tile 重算正确但略慢；若去掉外提需确认编译器 LICM 是否自动完成（本平台实测不自动）。
+
+#### L3.3 大 shape 拆分后的 tile 配置（探查驱动，勿凭估算）
+
+| kernel | 配置 | 单 tile 成本（B2,2048,16384 实测） | 说明 |
+|--------|------|------------------------------------|------|
+| qk_kernel | R=8 / BLOCK_J=256 | 67ns（2.1M MAC，63 TFLOPS） | R=16 需 320KB UB，锁死 |
+| hsum_kernel | R=16 / BLOCK_J=256 | 320ns（524K MAC fp32） | BJ 128→256 收益 -30%；multibuffer 开关中性 |
+
+**可替代方向**：hsum 的 320ns 由 fp32 dot 税 + K=128 结构零构成，是位级一致约束的固有成本；
+解除该约束（golden 允许近似）可换 fp16 键大幅提速，但本路线不可。
+
+### §6.4 性能演进
+
+| 版本 | 任务 8-shape | 16-shape vs op (核级) | 关键变更 |
+|------|------------|----------------------|---------|
+| iter_0（单行融合核 + .sort） | 2.56x | — | 基线 |
+| opt_1/3（#21 M 维合并 R=2→4） | 3.74 / 4.75x | — | 头归约块对角 + flat 行加载 |
+| opt_11（R=8 + grid≤核数） | 5.16x | 0.339x | checklist 规则 5 |
+| opt_14（拆分 + 双路径分派） | 5.12x | 0.362x | 大 shape 全流水 -9~11% |
+| **opt_16（hsum BLOCK_J 128→256）** | **5.05x** | **0.404x** | 变体探查 -30% |
+
+## §7 常见陷阱与避免方法
+
+### §7.1 RotaryMul 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -820,7 +994,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | fp16/bf16 精度不足 | kernel 内直接以 fp16 做乘加减，relative error 超标 | kernel 内升 fp32 计算，存回前转回原精度（T2/L1.4） |
 | Naive grid splitting 导致 idle core | `grid = (num_cores,)` + `for block in range(pid, num_blocks, num_cores)` 在 `num_blocks < num_cores` 时大量 core 空闲 | Uniform grid splitting（L2.2/L3.2）确保每个 core 处理连续且均匀的 block 范围 |
 
-### §6.2 MoeComputeExpertTokens 陷阱
+### §7.2 MoeComputeExpertTokens 陷阱
 
 | 陷阱 | 表现 | 避免方法 |
 |------|------|---------|
@@ -830,7 +1004,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | 动态 grid 计算 | 增加 host 侧开销、编译器优化受限 | grid 固定为 `(num_expert,)` 和 `(1,)`（L1.4） |
 | 跨 expert 循环计数 | 每个 block 做 64 次比较，指令膨胀 | grid 映射到 expert，每个 block 只比较一次（L1.3） |
 
-### §6.3 MoeGatingTopKSoftmax 陷阱
+### §7.3 MoeGatingTopKSoftmax 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -846,7 +1020,7 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | LLVM_ROOT 环境变量未设置导致编译失败 | `clang++: symbol lookup error: undefined symbol: _ZN4llvm24createAutotuningDumpPassEv` | 设置 `LLVM_ROOT` 指向包含完整 libLLVM-17.so 的路径 |
 | CANN 9.1.0 与 Triton 常量名不兼容 | `RT_LIMIT_TYPE_SIMT_WARP_STACK_SIZE` 在 CANN 9.1.0 中已重命名 | 修改 Triton 的 `npu_utils.cpp` 中的常量名为 `RT_LIMIT_TYPE_SIMT_DVG_WARP_STACK_SIZE`（一次性修复） |
 
-### §6.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
+### §7.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -856,4 +1030,14 @@ def _softmax_kernel(x_ptr, y_ptr, num_rows, K, stride_row, num_pids,
 | 循环引入后 UB overflow | 分核优化引入 `for block_id in range(pid, n_blocks, num_pids)` 循环后，大 K (BLOCK_N=1024) + ROW_TILE=16 触发 BiShengIR `ub over` 编译错误 | 收紧 UB budget 从 128KB 到 48KB，确保 `ROW_TILE * BLOCK_N * 4 <= 48KB`（L1.5） |
 | grid 远超核数导致串行调度 | 朴素模式 `grid = ceil(num_rows/ROW_TILE)`，num_rows=32768 时 grid=2048，远超 48 核，NPU 串行执行 | `grid_size = min(natural_blocks, num_cores)`，每个 program 循环处理多块（T1/L3.1） |
 | mask 元素污染归约 | padding 元素（load 时 other=0）参与 max/sum 导致结果错误 | max 前 `tl.where(mask, x, -inf)`，sum 前 `tl.where(mask, exp_val, 0.0)`（L1.4） |
+### §7.5 LightningIndexer 陷阱
+
+| 陷阱 | 现象 | 避免方法 |
+|------|------|---------|
+| 分数链非位级一致 | 索引 |diff|>1 大量失败（大 K 时边界翻边） | L1.1/L1.2：fp16 量化 + 块对角 fp32 头归约 + 同源稳定排序 |
+| 近似选位（fp16 键/topk 平局） | verify 量化类失败 | L1.4：只用 `.sort()` 稳定排序 |
+| R 行合并跨 batch | k 取错 batch、分数错乱 | L1.5：门控 `S1 % R == 0` |
+| 拆分路径只在小 shape 验证 | verify 8/8 全走融合路径，拆分路径未被验证 | 拆分路径单独做大 shape 位级复验（实测 0/8.4M 差异） |
+| 同名 kernel 混淆 profiling 归因 | qk/hsum 都显示 "kernel" | 归因用唯一 kernel 名，勿凭名字判断耗时 |
+| torch 参考大 shape OOM | `expand` 是零拷贝视图，`.reshape()` 触发真实拷贝，把 `[B,S1,D,S2]` 整体复制成 68GB 内存 | 基线缺陷不可改（freeze 锚定），报告标注 |
 

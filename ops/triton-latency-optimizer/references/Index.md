@@ -119,6 +119,7 @@
 | 算子特定经验 | `references/operators/swiglu-quant.md` | SwiGLU 量化算子经验 |
 | 算子特定经验 | `references/operators/grouped-matmul-tile-merge.md` | Grouped MatMul/MoE 专家分组矩阵乘 expert 对齐 tile 合并经验 |
 | 算子特定经验 | `references/operators/permute-layout-transform.md` | Permute/Transpose/reshape-as-copy 布局变换算子优化 |
+| 算子特定经验 | `references/operators/lightning-indexer.md` | LightningIndexer（topk-select）优化经验：profile 归因修正 + 变体探查 + tile 放大 |
 | 通用辅助 | `references/operators/general-insights.md` | Triton-Ascend 通用优化洞察 |
 | 通用辅助 | `references/operators/workflow-and-debugging.md` | 验证与调试工作流 |
 | CV 融合方法论 | `references/operators/cv-fusion.md` | CV 融合算子 Cube-Vector 数据流水线、Scope 合并、同步信号设计 |
