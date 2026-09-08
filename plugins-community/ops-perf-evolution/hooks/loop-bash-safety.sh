@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # loop-bash-safety.sh — PreToolUse(Bash) hook for Z-Search loop.
 #
-# Activated by .claude/settings.json. Receives Claude Code's hook JSON on stdin:
+# Activated by hooks/hooks.json. Receives Claude Code's hook JSON on stdin:
 #   { "session_id": ..., "tool_name": "Bash", "tool_input": { "command": "...", ... }, ... }
 #
 # Inspects the command for path-safety violations (B1: empty var as path; B2:

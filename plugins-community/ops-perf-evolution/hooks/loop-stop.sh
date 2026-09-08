@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # loop-stop.sh — Stop hook for Z-Search loop.
 #
-# Activated by .claude/settings.json. Triggered when the agent attempts to
+# Activated by hooks/hooks.json. Triggered when the agent attempts to
 # stop. Receives Claude Code's hook JSON on stdin (we mostly don't need it).
 #
 # Behavior:
@@ -92,7 +92,7 @@ if [[ -n "${all_violations}" ]]; then
     hook_block "Stop blocked due to invariant violations:
 ${reason}
 
-Hint: run 'python3 .claude/skills/evolution-world-model/scripts/state_ops.py read --evo-dir ${evo_dir}' to inspect current state, then resolve the issue (complete missing partials, run wm_ops.py refine, finalize-ledger, fix wm corruption, etc.) before retrying.
+Hint: run 'python3 \"${STATE_OPS_PY}\" read --evo-dir \"${evo_dir}\"' to inspect current state, then resolve the issue (complete missing partials, run wm_ops.py refine, finalize-ledger, fix wm corruption, etc.) before retrying.
 To bypass in emergency only: export LINGXI_LOOP_HOOK_DISABLE=1"
 fi
 

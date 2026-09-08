@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # paths.sh — path safety validators shared by Bash hook and Stop hook.
 #
-# Mirrors the "三档校验" rules from .claude/agents/lingxi-evo.md L35-47.
+# Mirrors the "三档校验" rules from agents/lingxi-evo.md L35-47.
 # Detects three classes of accidents commonly hit by LLM-generated bash:
 #   B1: command uses ${VAR}/* or ${VAR}/... as a path argument and VAR is empty
 #   B2: ${VAR} resolves to "/" or "$HOME"

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/.claude/hooks/loop-bash-safety.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/loop-bash-safety.sh",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/.claude/hooks/loop-stop.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/loop-stop.sh",
             "timeout": 60
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/.claude/hooks/loop-subagent-stop.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/loop-subagent-stop.sh",
             "timeout": 30
           }
         ]
