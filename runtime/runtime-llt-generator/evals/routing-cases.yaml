@@ -1,0 +1,74 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+schema_version: 1
+skill: runtime-llt-generator
+
+positive_cases:
+  - id: direct_symbol_generation
+    prompt: "给 TaskResManageDavid::GetPendingNum 写对应的 LLT。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "先查已有覆盖和准确 David target，再生成缺失用例，避免重复测试。"
+
+  - id: api_generation_without_skill_name
+    prompt: "帮 rtStreamCreateWithFlags 生成对应的单元测试，把参数校验和创建失败路径补上。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "根据接口要求建立成功、非法参数和依赖失败矩阵并落测试代码。"
+
+  - id: platform_branch_supplement
+    prompt: "XPU 的 AllocTaskInfo 失败分支还没覆盖，补充一下 LLT。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "使用 XPU 实现、fixture 和精确 target，不用其他平台旁证代替。"
+
+  - id: diff_driven_generation
+    prompt: "针对当前代码改动生成缺失的 LLT，必要时补 CMake 挂载。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "从 diff 建立变更行和行为矩阵，只修改必要测试及构建资产。"
+
+  - id: regression_generation
+    prompt: "为这个资源回收缺陷写一个回归用例，并确认变更代码覆盖率。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "先形成稳定 reproducer，再验证修复；未指定 coverage_threshold 时按明细检查默认 80% 覆盖率。"
+
+  - id: generation_with_coverage_threshold
+    prompt: "给 TaskResManageDavid::GetPendingNum 补充 LLT，coverage_threshold=90%。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "保留用户传入的 90% 请求门槛，解析仓库强制最低值后报告实际生效门槛，并按该门槛验证目标范围覆盖率。"
+
+  - id: generate_then_rerun
+    prompt: "覆盖率不足，补齐对应 LLT 并重跑。"
+    expected_route: runtime-llt-generator
+    expected_behavior: "补齐测试代码后构建准确 target，定向运行新增用例并核对目标范围覆盖率。"
+
+negative_cases:
+  - id: run_existing_llt
+    prompt: "运行一下当前改动相关的 LLT。"
+    expected_route: none
+    reason: "只筛选并运行已有 LLT，不需要生成测试代码。"
+
+  - id: generate_filter
+    prompt: "帮我生成这几个现有用例的 gtest_filter，然后复跑失败项。"
+    expected_route: none
+    reason: "过滤、复跑和执行报告不涉及生成或修改测试代码。"
+
+  - id: explain_existing_case
+    prompt: "逐行解读 TEST_F(DavidTaskRecycleTest, TestTaskRes)。"
+    expected_route: none
+    reason: "这是只读代码解读，不是生成或运行 LLT。"
+
+  - id: inspect_existing_coverage
+    prompt: "看下刚才 LLT 的覆盖率报告，哪些行没覆盖？"
+    expected_route: none
+    reason: "只分析已有运行产物，不修改测试代码。"
+
+  - id: review_test_quality
+    prompt: "审查我刚写的 LLT 是否存在无效断言，不要修改代码。"
+    expected_route: none
+    reason: "用户只要求只读审查，不授权生成或修改测试。"

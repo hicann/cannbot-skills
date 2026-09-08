@@ -1,0 +1,84 @@
+{
+  "skill_name": "runtime-llt-generator",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "按默认覆盖率门槛补充 Runtime LLT",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": true
+      },
+      "prompt": "请为 TaskResManageDavid::GetPendingNum 补充缺失的 LLT。没有指定覆盖率目标。",
+      "expected_output": "应先检查整个 Runtime UT 中是否已有同语义测试，并确认 David 平台的真实 fixture 和构建 target。确有独立缺口时再新增最小用例。coverage_threshold 未指定时请求门槛为 80%；仓库存在更高强制门槛时取较高值。完成前需运行准确 target，并从覆盖率明细核对目标范围的行覆盖率。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "80%",
+          "description": "使用默认覆盖率门槛"
+        },
+        {
+          "type": "contains",
+          "pattern": "target",
+          "description": "确认准确构建目标"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "按显式覆盖率门槛生成 Runtime LLT",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": true
+      },
+      "prompt": "给 rtStreamCreateWithFlags 补充参数校验和创建失败路径的 LLT，coverage_threshold=90%。",
+      "expected_output": "应把 90% 作为用户请求门槛，检查目标仓库是否还有更高的强制最低值，并报告实际生效门槛。用例应覆盖成功、非法参数和依赖失败行为，验证返回码、出参、资源清理及依赖调用，并按目标接口或本次生产代码改动统计覆盖率。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "90%",
+          "description": "保留用户指定的覆盖率门槛"
+        },
+        {
+          "type": "contains",
+          "pattern": "非法参数",
+          "description": "覆盖参数校验路径"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "先用 LLT 稳定复现 Runtime 缺陷",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "disabled": true
+      },
+      "prompt": "任务资源回收在环形队列回绕后 pending 数错误。请先写回归 LLT，暂时不要修改产品代码。",
+      "expected_output": "应先写能稳定复现问题的失败用例，保留首次失败结果，并区分产品缺陷、测试问题、构建挂载问题和环境故障。若用例稳定暴露产品缺陷，应停止并报告，不得修改产品代码、降低断言或吞掉错误。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "失败",
+          "description": "保留缺陷复现结果"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "修改产品代码使测试通过",
+          "description": "不越过用户限定的测试范围"
+        }
+      ]
+    }
+  ]
+}

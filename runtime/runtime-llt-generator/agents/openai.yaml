@@ -1,0 +1,14 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+interface:
+  display_name: "Runtime LLT Generator"
+  short_description: "为 Runtime 行为生成并补齐可验证的 LLT 用例"
+  default_prompt: "使用 $runtime-llt-generator 为指定 Runtime 行为生成并验证 LLT 用例；可通过 coverage_threshold 指定覆盖率门槛，未指定时默认 80%。"

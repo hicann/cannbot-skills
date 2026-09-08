@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-08】
+#### 新特性 New Features
+- 【Runtime】新增 `runtime-llt-generator` Skill，支持为 Runtime 接口、函数、分支和缺陷生成 LLT，并按可配置覆盖率门槛完成验证；未指定门槛时默认使用 80%。
+
 ### 【2026-09-07】
 #### 缺陷修复 Bug Fixes
 - 【ops-direct-invoke】init.sh 补齐 TRAE 变体探测 `detect_trae_variant`（按 `.trae-cn`/`.marscode`/`.traecli` 规范目录优先级选取全局用户根），修复 9413651e 新增的 TR-08 看护在 master 上必然失败的问题——此前 trae 分支硬编码 `~/.trae-cn`，导致所有 PR 的 `unit/install/test-init-tool.sh --tool trae` 门禁红灯。

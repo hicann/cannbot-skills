@@ -75,7 +75,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile](plugins-official/torch-compile/AGENTS.md) |
 | **GE** | 图模式相关问题定位 | [graph](graph/) |
 | **模型推理优化** | NPU 推理端到端优化 | [model-infer-optimize](plugins-official/model-infer-optimize/AGENTS.md) |
-| **Runtime** | Runtime 接口迁移 | — |
+| **Runtime** | Runtime LLT 开发与接口迁移 | [runtime](runtime/) |
 | **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | — |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | — |
 
