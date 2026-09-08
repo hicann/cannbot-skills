@@ -25,7 +25,6 @@
 | **ascendc-ut-develop** | UT 单元测试用例开发与覆盖率增强 | — |
 | **ascendc-st-design** | aclnn 接口测试用例设计、L0 / L1 测试用例生成 | — |
 | **ascendc-code-review** | 代码检视方法论、5 大类别规范 | [查看](skills-usage.md#ascendc-code-review) |
-| **ascendc-task-focus** | 任务聚焦，解决长任务"迷失在中间"的问题 | — |
 | **ascendc-whitebox-design** | 白盒测试用例设计与生成 | — |
 | **ascendc-registry-invoke-template** | 完整自定义算子工程模板，提供标准工程结构、代码模板、UT/ST 样例和多芯片架构参考 | — |
 | **ascendc-registry-invoke-to-direct-invoke** | 注册调用算子转 `<<<>>>` kernel 直调 | [查看](skills-usage.md#ascendc-registry-invoke-to-direct-invoke) |
