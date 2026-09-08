@@ -47,7 +47,7 @@
 | 时序 | 大 shape / 多轮（bufferCount 环形翻转 ≥ 2 圈）下无脏读、无"假通过" |
 | 同步 | flag idx 配对（AIV WaitFlag idx == AIC SetFlag idx）；末轮 final drain 经 DoFinalize 验证 |
 | 性能 | 真实大 shape × R=2/4 双档，与 mc2 融合算子 / hccl 分步路径对标归档（R15）；perf 每轮实调 L2 flush kernel（R20） |
-| 可靠性 | perRoundChunkBytes ≤ 512KB host 校验；所有 hcomm 调用返回值 assert |
+| 可靠性 | 单轮 PUT 大小按 case 复核（bring-up 期 ≤512KB 起步，非硬上限）；所有 hcomm 调用返回值 assert |
 
 ## 5. 合规映射（本场景重点 R 项）
 
@@ -59,7 +59,7 @@
 | R6 | UDMA 模式 `__gm__ CommContext*` |
 | R12 | commBuf/barrierBuf 与 TPipe 管理 buffer 物理隔离 |
 | R13 | 通信对象 `totalJobs=rankSize`（后 rankSize 核各负责 1 个 targetRank 并行 GET） |
-| R14 | Win 数据/元数据区分离，host/kernel 偏移同源；单轮 ≤ 512KB |
+| R14 | Win 数据/元数据区分离，host/kernel 偏移同源（硬红线）；单轮 PUT 大小按 case 复核（风险提示） |
 | R15/R20 | 投产级性能对标 + L2 flush 实接线 |
 | R7/R8 | 禁 `AscendC::Matmul` 高阶 API、禁 `Hccl::*` |
 

@@ -108,7 +108,7 @@ AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);  // V 侧等待后消费
 
 使用纪律：
 
-1. **Set/Wait 必须同 eventID 配对**，且**在同一迭代内配对**——跨迭代 Set-Set 无中间 Wait 在 950 实测挂死（`aclError:507014`）。**循环结束后必须消费残留事件**：最后一次/几次 Set 无对应 Wait 时需补 Wait；注意按实际 Set 次数守卫（如 pingpong 双 eventID 时，第二个 eventID 仅在迭代数 ≥ 2 时才被 Set 过，不可无条件 Wait——Wait 多于 Set 同样是未定义行为）
+1. **Set/Wait 必须同 eventID 配对**，且**在同一迭代内配对**——跨迭代 Set-Set 无中间 Wait 在 Ascend 950 实测挂死（`aclError:507014`）。**循环结束后必须消费残留事件**：最后一次/几次 Set 无对应 Wait 时需补 Wait；注意按实际 Set 次数守卫（如 pingpong 双 eventID 时，第二个 eventID 仅在迭代数 ≥ 2 时才被 Set 过，不可无条件 Wait——Wait 多于 Set 同样是未定义行为）
 2. **eventID 是有限共享资源**（TQue 与手动 SetFlag/WaitFlag 共用配额，典型 8 个/核）——手动事件与 TQue 混用时预算要合并计算
 3. V 内部的顺序依赖（Cast→Add）优先用 `PipeBarrier<PIPE_V>` 防御，省去 V→V 的 eventID 开销
 4. **跨 pipe 依赖必须用事件同步**：`PipeBarrier<PIPE_X>` 只保证同一 pipe 内的顺序，不保证跨 pipe 可见性——如 V 侧 Cast 写完的数据要经 MTE3 搬出时，必须 `SetFlag/WaitFlag<V_MTE3>`，仅 `PipeBarrier<PIPE_V>` 不足（生产踩坑：跨 pipe 缺事件同步导致搬出读到未写完的数据）

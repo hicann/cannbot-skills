@@ -21,9 +21,9 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 
 | 底座 | 支持的通信路径 | 支持的算子类型 | 支持芯片 | 知识目录 |
 |------|---------|---------|------|------|
-| **blaze-shmem** | AIV+URMA | collective-comm（AllToAll+Matmul、AllReduce+Matmul、TP/SP 融合） | dav-3510（Ascend 950） | [`references/foundations/blaze-shmem/`](references/foundations/blaze-shmem/) |
-| **apace** | AIV+URMA | collective-comm（AllToAll/AllGather + QuantMatmul 融合、compute-first 类） | dav-3510（Ascend 950） | [`references/foundations/apace/`](references/foundations/apace/) |
-| **ascendc-api** | AIV+UBMEM | moe（MoE Dispatch/Combine、专家并行 EP） | dav-3510（A5）+ dav-2201（A3）双平台 | [`references/foundations/ascendc-api/`](references/foundations/ascendc-api/) |
+| **blaze-shmem** | AIV+URMA | collective-comm（AllToAll+Matmul、AllReduce+Matmul、TP/SP 融合） | dav-3510（Ascend 950PR/950DT） | [`references/foundations/blaze-shmem/`](references/foundations/blaze-shmem/) |
+| **apace** | AIV+URMA | collective-comm（AllToAll/AllGather + QuantMatmul 融合、compute-first 类；AllReduce 类需先扩展通信组件，见 [`paradigm-mapping.md`](references/foundations/apace/operator-design/paradigm-mapping.md)） | dav-3510（Ascend 950PR/950DT） | [`references/foundations/apace/`](references/foundations/apace/) |
+| **ascendc-api** | AIV+UBMEM | moe（MoE Dispatch/Combine、专家并行 EP） | dav-3510（Ascend 950PR/950DT）+ dav-2201（Atlas A2/A3 系列）双平台 | [`references/foundations/ascendc-api/`](references/foundations/ascendc-api/) |
 
 > 三种底座抽象层级不同（blaze-shmem 是库+模板手工组装，apace 是模板框架，ascendc-api 是直接使用ascendc API），但在"选什么写代码"这个决策点上是并列选项。apace 模板库虽基于 Ascend C 基础 API 构建，但与 ascendc-api 路线约束集、工程边界、可修改范围完全不同——详见 §1/§2/§3 各路线特有约束。
 
@@ -38,7 +38,7 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 - 纯单卡 Matmul（无跨卡通信）→ `ascendc-blaze-best-practice`
 - Vector 类逐元素/归约算子（无 Cube、无跨卡通信）
 - 通用 Ascend C API 用法查询 → `ascendc-api-best-practices`
-- 非 3510 架构的 AIV+URMA 通算融合（MTE通信除外，支持 A3/A5）
+- 非 3510 架构的 AIV+URMA 通算融合（MTE通信除外，支持 dav-2201 + dav-3510 双平台）
 
 > 确切的支持组合（chip × 算子类型 × 调用形态 × 通信路径 × 编程抽象）以 [`references/capability-declaration.md`](references/capability-declaration.md) 路线登记表为准；表内同时登记**明确不支持**的组合及原因，命中否定行时直接答复用户不可用 + 替代建议。
 
@@ -53,12 +53,12 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 │      └─ 否则 → blaze-shmem 路线（下方§1）
 │
 ├─ MoE Dispatch / MoE Combine / mega_moe / 专家并行 EP？
-│   → MTE通信 → ascendc-api 路线（A3/A5 双平台，下方§3）
+│   → MTE通信 → ascendc-api 路线（dav-2201 + dav-3510 双平台，下方§3）
 │      ├─ 先阅读已有实现？→ references/foundations/ascendc-api/moe-dispatch-combine/reading/
 │      └─ 生成新算子或改造？→ references/foundations/ascendc-api/moe-dispatch-combine/samples/
 │
 └─ 不确定？
-    → 看通信路径：SHMEM API = AIV+URMA 路径（仅 dav-3510）；winContext/mc2Context = MTE通信（A3/A5）
+    → 看通信路径：SHMEM API = AIV+URMA 路径（仅 dav-3510）；winContext/mc2Context = MTE通信（dav-2201 + dav-3510 双平台）
 ```
 
 选定路线后：
@@ -134,7 +134,7 @@ SHMEM 通信库（cann/shmem，与 HCOMM 无关）驱动 AIV+URMA 跨卡搬运�
 
 APACE（Ascend PArallel Communication-compute Engine）是通算融合算子的架构底座，提供可复用的 block 层接口、kernel 层参考实现和 tiling 算法。APACE 自建通信基础 API（基于 HCOMM 通信基础库构建，与 HCCL 集合通信库无关）。apace 路线在 `kernel/<op>/` 下新建算子，复用稳定共享层 `block/` `tiling/`。
 
-> **apace 路线接口契约基准**：[cann/ops-transformer](https://gitcode.com/cann/ops-transformer) `mc2/common/op_kernel/apace/` 子树，以 pin 的已验证快照为结构基准。样例代码经 scripts/fetch_apace.sh 现取现读（支持 `--ref`/`APACE_PIN_REF` 锚定 commit）；⚠️ master 结构会演进（如目录迁移、新增算子），拉取 master 后必须与快照 diff 校验，文档引用失效时更新文档。
+> **apace 路线接口契约基准**：[cann/ops-transformer](https://gitcode.com/cann/ops-transformer) `mc2/common/op_kernel/apace/` 子树，以 pin 的已验证快照为结构基准。样例代码经 scripts/fetch_apace.sh 现取现读（支持 `--ref`/`APACE_PIN_REF` 锚定 commit）；⚠️ master 结构会演进（如目录迁移、新增算子），拉取 master 后必须与快照 diff 校验，文档引用失效时更新文档——**已知漂移登记（pin 之后 10 个提交：block/→core/ 迁移、ReduceScatter UBMEM 官方模板、hcomm dcci 等）见 [`references/foundations/apace/fundamentals/communication.md`](references/foundations/apace/fundamentals/communication.md) §8，核对 master 前必读**。
 >
 > **工程实现默认事实源**：CANN 内置 apace 框架（路径随 CANN 打包形态实测定位，Step 1 登记；两种已验证形态：`opp/built-in/op_impl/ai_core/tbe/impl/ops_transformer/ascendc/common/apace/`（cann-9.2.0）、`vendors/custom_transformer/op_impl/ai_core/tbe/custom_transformer_impl/ascendc/common/apace/`（cann-9.1.0）），**直调独立工程默认 CMake 直引该路径，禁止整包复制**。
 
@@ -149,6 +149,21 @@ APACE（Ascend PArallel Communication-compute Engine）是通算融合算子的�
 ### 计算执行原则
 
 通信与计算的流水编排、AIV-AIC 协同必须在 device 侧单次 launch 的融合 Kernel（MIX）中完成。host 侧只负责：数据准备与 buffer 分配、Tiling 计算、多 rank 启动与通信建链（rootInfo 交换、HCCL/Win 资源分配、跨 rank barrier）、Kernel launch（含 dtype dispatch）和结果搬运。不得将算子语义中的任何计算或通信步骤（如归约、数据搬移、状态同步）放到 host 侧执行；CPU golden 等精度验证基建不属于算子语义，不在此限。
+
+### 方法论速览（五阶段流程 + 六个决策点）
+
+任何 apace 算子开发遵循：**语义分析 → 路线决策 → 设计合同 → 实现组装 → 验证** 五阶段；设计合同必须对六个决策点逐项定值：
+
+| 决策点 | 问题 | 一句话判据 |
+|---|---|---|
+| D1 数据流方向 | 通信在前还是计算在前？ | 通信的输入是原始输入（前）还是计算产物（后） |
+| D2 切分轴与轮次 T | 沿哪个轴切、切几轮？ | 轴由数据分布语义定（非通信原语）；T 权衡同步开销 vs 流水粒度 |
+| D3 数据通路 | 连续 GM 还是 FragmentTensor？ | 通信后数据在 GM 上连续还是离散 |
+| D4 同步合同 | 谁通知谁、几次、在哪等？ | flag idx/次数严格配对；barrier totalJobs 按分核映射；SyncAll 在守卫外 |
+| D5 累加合同 | 部分和在哪累加？ | L0C 单次 fixpipe / AtomicAdd / DEFERRED_SYNC / staging+增量归约四选一 |
+| D6 入口合同 | 几个入口、怎么分发？ | 入口数 = dtype 组合数；MIX_AIC_1_1；tiling 按值 ABI |
+
+完整方法论（每阶段的产出/门禁/回退点、决策点取值示例、跨阶段纪律）：[`operator-design/dev-methodology.md`](references/foundations/apace/operator-design/dev-methodology.md)。新算子先在该文档 §5 找 D1-D6 取值最接近的实现作骨架参考。
 
 ### 四步流程
 
@@ -196,8 +211,8 @@ selected_scenario: <仅 apace_custom 填写>
 | R8 | 禁止 `Hccl::*` 高阶 API | 依赖框架注入上下文，直调拿不到 | comm_shmem §5 |
 | R11 | host 前置校验在 fork/建链前拒绝非法输入 | 非法输入进 kernel = 难查的死锁/精度问题（整除/对齐/核数/Win 容量等；compute-first 完整 9 项见场景文档） | development-guide §3.5 |
 | R12 | UB 静态通信区物理隔离 | 混用重叠 → 通信数据被踩踏 → 死锁；**`TPipe` 与 `MakeMemPtr` 必须二选一，禁止混用** → 507015 | communication 陷阱 #9；operator-anatomy §4.3 |
-| R13 | 通信 `totalJobs=rankSize` 多核并行 | 退化 totalJobs=1 → 通信时间放大 R 倍（已证伪臆造约束） | communication §2.2 |
-| R14 | Win 数据/元数据分离 + 单轮 PUT ≤ 512KB | 覆盖元数据 → "假通过"；超 512KB 间歇 FAIL（生产实测经验值） | communication 陷阱 #12/#13 |
+| R13 | 通信对象 `totalJobs=rankSize` 多核并行 | 退化 totalJobs=1 → 通信时间放大 R 倍（已证伪臆造约束）；TeamBarrier totalJobs 按分核映射取值（官方前 R 核 = rankSize；compute-first 后 R 核 = 1 + 显式 CrossDevice） | communication §2.2 |
+| R14 | Win 数据/元数据分离（硬红线）+ 单轮 PUT 大小（风险提示） | 覆盖元数据 → "假通过"；单轮 PUT 无官方硬上限（512KB 系 bring-up 经验，同平台生产实现 12.6MB 稳定），大单轮按 case 复核 | communication 陷阱 #12/#13 |
 | R15 | 投产级性能验证门槛 | 真实大 shape × R=2/4 双档 × 三路径对标；仅基线 = 未达标 | host-and-testing |
 | R20 | perf 模式 L2 flush 实接线 | 只分配 buffer 不调 kernel = 死代码 = MTE2 带宽虚高 | host-and-testing §4 |
 
@@ -205,10 +220,10 @@ selected_scenario: <仅 apace_custom 填写>
 
 | # | 适用场景 | 约束 | 详见 |
 |---|---------|------|------|
-| R9 | compute-first | flag 计数峰值 ≤ 15（T>1 时峰值 = T），host 强制校验 | fusion §6.2.3 |
-| R10 | compute-first | 通信轮次默认 `T \| mSeg` 无尾块；有尾块走策略 A（padding 32 对齐 + realFragmentSize + 多套 tiling） | fusion §6.2.7 |
+| R9 | compute-first | CrossCore flag Set/Wait 严格配对 + flagId ∈ [0, FLAG_ID_MAX)；计数器 0-15 衡量未消费积压（不构成 T 上限；T 上限按 case 实测），不设数值拒绝 | fusion §6.2.3 |
+| R10 | compute-first | T 派生优先 `T \| mSeg` 无尾块；单尾块 ≤ 头块（16 对齐）PUT 直传合法；多尾块/尾>头走策略 A padding | fusion §6.2.7 |
 | R16 | compute-first | mm 内核默认 FragmentTensor 消 R 循环；vendor R×T 子调用须论证 SCALAR 占比 | fusion §6.2.2 |
-| R21 | compute-first | **localLast 编排禁止移除**：移除后每轮 Set 双 flag → 峰值 2T（T≤7）+ 丧失通信提前启动；`cFragAddrs_` 顺序写错才是 A/C 错位根因，非 localLast 本身 | fusion §6.2.2 |
+| R21 | compute-first | **localLast 编排禁止移除**：以"每轮 Set 双 flag"替代 → flagId 用量翻倍 + 丧失通信提前启动；`cFragAddrs_` 顺序写错才是 A/C 错位根因，非 localLast 本身 | fusion §6.2.2 |
 | R17 | compute-first（含归约） | 归约 2D DataCopyPad 批量（blockCount=本批行数）；逐行归约 = 性能 FAIL | fusion §6.2.6 |
 | R18 | compute-first（含 BF16→FP32 归约） | 归约独立 srcFP32 双缓冲，禁止 in-place 加宽 Cast | fusion §6.2.6 |
 | R19 | compute-first（含归约） | 归约四类 HardEvent 同迭代配对 + 残留消费；Set 无配对 Wait = 挂死（507014） | fusion §6.2.6 |
@@ -233,9 +248,9 @@ selected_scenario: <仅 apace_custom 填写>
 | [`workflow_integration.md`](references/foundations/apace/workflow_integration.md) | **plugin 7 步流程 apace 映射（主要消费文档）**：设计/开发/审查/修复/验收各阶段的 apace 技术要点与门禁 |
 | [`review-checklist.md`](references/foundations/apace/review-checklist.md) | 逐项审查清单（全局红线 + 场景约束索引 + 操作化检查方法 + 常见 FAIL 原因） |
 | [`troubleshooting/failure-navigation.md`](references/foundations/apace/troubleshooting/failure-navigation.md) | 按现象定位排查方向 |
-| [`fundamentals/`](references/foundations/apace/fundamentals/) | 架构、通信、计算、融合组合模式基础知识 |
-| [`operator-design/`](references/foundations/apace/operator-design/) | DESIGN/PLAN 模板 + 算子解剖 + 开发指南 |
-| [`scenarios/`](references/foundations/apace/scenarios/) | 自定义扩展场景注册表（PUT/GET/compute-first 组合模式） |
+| [`fundamentals/`](references/foundations/apace/fundamentals/) | 架构、通信（含通信组件扩展指南/hcomm 未封装原语）、计算、融合组合模式基础知识 |
+| [`operator-design/`](references/foundations/apace/operator-design/) | **开发方法论**（[`dev-methodology.md`](references/foundations/apace/operator-design/dev-methodology.md)：五阶段流程 + D1-D6 决策点）+ DESIGN/PLAN 模板 + 算子解剖 + 开发指南 + **语义范式映射与架构差异**（需求存在注册形态既有实现时必读 [`paradigm-mapping.md`](references/foundations/apace/operator-design/paradigm-mapping.md)：算子族选型表、七维差异、可参考 vs 必须重写清单） |
+| [`scenarios/`](references/foundations/apace/scenarios/) | 自定义扩展场景注册表（PUT AllToAll / PUT AllGather 变体、GET 推导、compute-first 组合模式） |
 | [`references/shared/pipeline_tuning.md`](references/shared/pipeline_tuning.md) | 通算并行调优：tileCnt 两阶段策略（两路线共享） |
 | [`references/shared/profiling_mc2.md`](references/shared/profiling_mc2.md) | 性能采集：msprof + L2 flush + 多卡后处理（两路线共享） |
 
@@ -243,7 +258,7 @@ selected_scenario: <仅 apace_custom 填写>
 
 ## §3 ascendc-api 路线（MTE通信，MoE Dispatch/Combine）
 
-裸 Ascend C API 全自建（不经任何通信库/模板库）。通信路径为 MTE通信 = AIV+UBMEM（AIV 触发 MTE 执行跨卡搬运），host 侧经 HCCL 分配 window 资源——此处 HCCL 仅做资源分配，非 HCCL 集合通信库高阶 API。支持 A3（dav-2201）+ A5（Ascend 950/dav-3510）双平台，compat 层抹平两平台 window 地址结构差异。注意区别于 apace 路线——apace 模板库虽基于 Ascend C API 构建（其通信基础 API 基于 HCOMM），但属独立编码底座。
+裸 Ascend C API 全自建（不经任何通信库/模板库）。通信路径为 MTE通信 = AIV+UBMEM（AIV 触发 MTE 执行跨卡搬运），host 侧经 HCCL 分配 window 资源——此处 HCCL 仅做资源分配，非 HCCL 集合通信库高阶 API。支持 dav-2201（Atlas A2/A3 系列）+ dav-3510（Ascend 950PR/950DT）双平台，compat 层抹平两平台 window 地址结构差异（dav-2201/dav-3510 在 MoE SDK 工程代码中惯称 A3/A5，官方产品名以 Atlas A3 系列 / Ascend 950PR/950DT 为准）。注意区别于 apace 路线——apace 模板库虽基于 Ascend C API 构建（其通信基础 API 基于 HCOMM），但属独立编码底座。
 
 > **跨路径设计原则**：阅读或改造 `dispatch`、`combine` 任一侧时，都要同步核对另一侧的接口和状态语义；`expandIdx`、`epRecvCounts`、`epSendCounts` 等中间量必须成对理解；host 侧只传总核数，kernel 侧负责决定每阶段实际使用多少核以及如何切分。
 
@@ -255,7 +270,7 @@ MoE Dispatch/Combine 通过 host 侧 `HcclAllocComResourceByTiling` 创建通信
 
 #### ② window 地址必须走 compat 层，禁止直接硬编码平台结构体偏移
 
-`winContext`（`mc2Context`）按平台解释成 `HcclA3OpResParam` 或 `HcclA5OpResParam`，字段布局不同（A3 远端地址通过链表跳转，A5 状态区在前 1MB）。必须通过 compat 封装的 `GetBaseWindAddrByRankId()`、`GetBaseWindStateAddrByRankId()` 等统一接口访问，不要在主流程中手写平台分支。**注意**：`HcclA3OpResParam`/`HcclA5OpResParam` 是样例内的**精简定义**，仅用于工程内自建 context，不适用于解析真实 HCCL 返回的 context（真实解析须用 SDK 完整 `HcclOpResParam`，见 `mte-address-access.md` 重要警告）。
+`winContext`（`mc2Context`）按平台解释成 `HcclA3OpResParam` 或 `HcclA5OpResParam`，字段布局不同（dav-2201 侧远端地址通过链表跳转，dav-3510 侧状态区在前 1MB）。必须通过 compat 封装的 `GetBaseWindAddrByRankId()`、`GetBaseWindStateAddrByRankId()` 等统一接口访问，不要在主流程中手写平台分支。**注意**：`HcclA3OpResParam`/`HcclA5OpResParam` 是样例内的**精简定义**（A3/A5 为工程惯称命名），仅用于工程内自建 context，不适用于解析真实 HCCL 返回的 context（真实解析须用 SDK 完整 `HcclOpResParam`，见 `mte-address-access.md` 重要警告）。
 
 #### ③ 共享 GM/状态区走 DataCopyPad，禁止 GetValue/SetValue 直接访问
 

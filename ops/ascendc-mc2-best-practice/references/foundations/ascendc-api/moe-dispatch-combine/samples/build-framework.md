@@ -84,19 +84,19 @@ target_compile_definitions(test_moe_dispatch PRIVATE SOC_VERSION="${SOC_VERSION}
 
 ## 平台宏处理
 
-`moe_dispatch_base_compat.h` 通过 `__NPU_ARCH__` 在编译期选择 A3/A5 实现：
+`moe_dispatch_base_compat.h` 通过 `__NPU_ARCH__` 在编译期选择 dav-3510 / dav-2201 实现（对应样例结构名 `HcclA5OpResParam` / `HcclA3OpResParam`，A3/A5 为工程惯称）：
 
 ```c++
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     using HcclOpParam = HcclA5OpResParam;
-    // A5 地址实现
+    // dav-3510（Ascend 950PR/950DT）地址实现
 #else
     using HcclOpParam = HcclA3OpResParam;
-    // A3 地址实现（默认）
+    // dav-2201（Atlas A2/A3 系列）地址实现（默认）
 #endif
 ```
 
-**`SOC_VERSION` 控制 `__NPU_ARCH__`**，通过 `-DSOC_VERSION=` 传入编译器。目标 A3 系列芯片不需要特殊设置；A5（Atlas 950）需要确认 `SOC_VERSION` 正确。
+**`SOC_VERSION` 控制 `__NPU_ARCH__`**，通过 `-DSOC_VERSION=` 传入编译器。目标 dav-2201（Atlas A2/A3 系列，工程惯称 A3）芯片不需要特殊设置；dav-3510（Ascend 950PR/950DT，工程惯称 A5）需要确认 `SOC_VERSION` 正确。
 
 ## Host 侧通信资源创建（mc2 特需）
 

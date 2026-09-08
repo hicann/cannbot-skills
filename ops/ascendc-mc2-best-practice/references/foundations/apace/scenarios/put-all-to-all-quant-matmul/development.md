@@ -25,9 +25,9 @@ Step 4 不重新设计、不切换候选、不扩大支持域，仅按 PLAN §9.
 | `kernel/{op}_udma_impl.h` | 新建（改自参考 impl） | A1/A2 落地处；`localMatmul==1` 时 `RunLocalMatmul()` → `PipeBarrier<PIPE_ALL>()` → `RunMatmul()`（推荐修复，防 aclError:507015） |
 | `kernel/{op}_quant_matmul_mx_kernel.h` | 新建或直引 | A3 落地处；`LocalParams` 含 `localMatmul`/`matmulMode`/`splitKNum` |
 | `src/kernel_launcher.h` | 新建 | 4 个 dtype 变体入口（E4M3E4M3/E5M2E5M2/E4M3E5M2/E5M2E4M3），每个含 `KERNEL_TYPE_MIX_AIC_1_1` |
-| `src/main.cpp` | 新建（改自参考 ST） | 运行期 dtype dispatch（禁硬编码单入口）；显式 `localMatmul` 赋值；`splitKNum` 规则：localMatmul=1 → `rankSize-1`，0/2 → `rankSize`；host 前置校验在 fork/建链前 |
+| `src/main.cpp` | 新建（改自参考 ST） | 运行期 dtype dispatch（本 skill 新增红线/生产教训——⚠️ 官方参考 ST 本身**硬编码只 launch E4M3E4M3 入口**，4 变体定义未使用，照抄官方会被 R3 判 FAIL，须自行补 dispatch）；显式 `localMatmul` 赋值；`splitKNum` 规则：localMatmul=1 → `rankSize-1`，0/2 → `rankSize`；host 前置校验在 fork/建链前 |
 | `src/root_info_exchanger.h`、`src/utils.h` | copy_and_adapt | 从参考算子 ST 复制 |
-| `scripts/gen_data.py` / `verify_result.py` | 新建 | golden 语义先行（每卡输入/输出语义 + K 轴切分）；golden float32 高精度路径；固定种子；host 约束双侧校验 |
+| `scripts/gen_data.py` / `verify_result.py` | 新建 | golden 语义先行（输入 K 轴切分：每卡全 M 行 × 本卡 K 段 `[M_total, Ka]`；输出 M 轴分布 `[m, N]`，见 design.md §6）；golden float32 高精度路径；固定种子；host 约束双侧校验 |
 | `CMakeLists.txt` / `cases.csv` / `run.sh` | 新建 | `APACE_ROOT` 指 CANN 内置 apace；`hccl_fwk` 用 `--no-as-needed` 包裹；cases.csv 覆盖 T=1/T>1、小 rank、tail 非整除、tile 粒度扫描 |
 | apace 共享层（`block/` `tiling/` `basic/` `utils/`） | [REUSE] 只读 | 禁止复制/篡改，CMake `-I` 直引；算子目录出现共享层副本即 FAIL |
 
@@ -39,8 +39,8 @@ Step 4 不重新设计、不切换候选、不扩大支持域，仅按 PLAN §9.
 | localMatmul 三态 | 0 / 1 / 2 分支 | localMatmul=1 含 PipeBarrier；三态精度均过 |
 | dtype 覆盖 | 4 变体 | E4M3/E5M2 四组合各自 PASS（dispatch 错误特征：matched_ratio=0% + 误差 36-59%） |
 | 通信对象 | data + scale 双对象 | winOffset 同源；self rank 跳过 Drain 但 barrier 保留 |
-| 单轮 PUT 上限 | perRoundChunkBytes ≤ 512KB | host 强制校验，超出间歇 FAIL |
-| tileCnt 策略 | 精度调试期 tileCnt=1 串行基线 → 性能期扫 {1,2,4,8,16,32} | 切换 tileCnt 必须重调 `GetTilingData` |
+| 单轮 PUT 大小 | ⚠️ 风险提示（非硬上限） | bring-up 期先用小单轮跑通；放大后按 case 复核（无官方上限，边界未定） |
+| tileCnt 策略 | 精度调试期 tileCnt=1 串行基线 → 性能期扫 {1,2,4,8,16} | 切换 tileCnt 必须重调 `GetTilingData`；档位上限受 R9 口径约束（flagId=tid 时轮次索引 < 16 且避开 SyncAll 保留区 14 → 安全上界 13，见 design.md §3.3） |
 | 性能门槛（R15） | 真实大 shape × R=2/4 双档 × 三路径对标归档 | 仅 toy shape 基线 = FAIL |
 | 性能采集 | msprof + 每轮 L2 flush 实接线 | flush kernel 记录数 == 轮数 |
 
@@ -50,10 +50,10 @@ Step 4 不重新设计、不切换候选、不扩大支持域，仅按 PLAN §9.
 |:---|:---|:---|
 | 死锁 aclError:507015 | localMatmul=1 缺 PipeBarrier，或误加 schedmode | 补 `PipeBarrier<PIPE_ALL>()`；删调度属性 |
 | E5M2 变体 matched_ratio=0% | dispatch 硬编码 E4M3 入口，字节流被错误模板解释 | 4 变体入口 + host 运行期 dispatch 宏 |
-| 精度不收敛、golden 全错 | golden 切分轴/每卡语义写错（K 轴切分） | 先修 gen_data 再怀疑 kernel |
+| 精度不收敛、golden 全错 | golden 切分轴/每卡语义写错（输入 K 轴切分、输出 M 轴分布——勿把输出当完整 C） | 先修 gen_data 再怀疑 kernel |
 | 精度"假通过"、大 shape 紊乱 | PUT 数据覆盖 Win 区元数据/barrier 区 | 数据/元数据偏移同源（R14） |
-| 通信时间 ≈ R × 单 target | 通信被臆造约束退化为 totalJobs=1 串行 PUT | 改 totalJobs=rankSize（R13） |
-| 运行期间歇 FAIL | perRoundChunkBytes 超 512KB | host 校验拦截 + 调小 tile 粒度 |
+| 通信时间 ≈ R × 单 target | 通信被臆造约束退化为通信对象 totalJobs=1 串行 PUT | 通信对象改 totalJobs=rankSize（R13 前半） |
+| 运行期间歇 FAIL | 单轮 PUT 字节过大（经验阈值 ~512KB 量级，非硬上限） | 按 R14 风险提示复核单轮大小 + 调小 tile 粒度 |
 
 ## 5. 合规映射（本场景重点红线）
 
@@ -67,8 +67,8 @@ Step 4 不重新设计、不切换候选、不扩大支持域，仅按 PLAN §9.
 | R7/R8 | 禁 `AscendC::Matmul`、禁 `Hccl::*` 高阶 API |
 | R11 | host 前置校验（整除/对齐/核数下限/Win 容量/flag 峰值），main.cpp 与 gen_data.py 双侧 |
 | R12 | commBuf/barrierBuf 与 TPipe buffer 物理隔离（静态偏移） |
-| R13 | 通信对象 `totalJobs=rankSize` 多核并行 PUT；TeamBarrier `totalJobs=1` |
-| R14 | Win 数据/元数据偏移 host/kernel 同源；单轮 PUT ≤ 512KB |
+| R13 | 通信对象 `totalJobs=rankSize` 多核并行 PUT；TeamBarrier `totalJobs` 官方为 `rankSize`（`teamBarrier_.Init(buf, ctx, rankSize, GetBlockIdx())`，前 R 核映射下 CrossDevice 由 `Wait<BARRIER_DEVICE>` 内建触发）。compute-first 后 R 核映射的自研编排可采用 TeamBarrier totalJobs=1 + 显式 CrossDevice 替代，两种映射不得混用 |
+| R14 | Win 数据/元数据偏移 host/kernel 同源（硬红线）；单轮 PUT 大小按 case 复核（风险提示） |
 | R15/R20 | 投产级性能门槛 + L2 flush 实接线（见 §3 验证矩阵） |
 
 > 完整 R1-R20 与 FAIL 诊断见 [`review-checklist.md`](../../review-checklist.md)；改造食谱锚点见 [`development-guide.md`](../../operator-design/development-guide.md) §3.2/§3.3。

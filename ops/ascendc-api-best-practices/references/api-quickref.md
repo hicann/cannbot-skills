@@ -142,7 +142,7 @@ float → half → CAST_ROUND
 ```
 AIC 通知 AIV：AIC CrossCoreSetFlag<0x2, PIPE_FIX>(id) → AIV CrossCoreWaitFlag<0x2, PIPE_S>(id)
 AIV 回压 AIC：AIV CrossCoreSetFlag<0x2, PIPE_MTE3>(id) → AIC CrossCoreWaitFlag<0x2, PIPE_M>(id)
-注意：A3/910b 上 modeId/pipe 模板参数不生效；950 上模式 0/1/2 不支持 PIPE_S
+注意：A3/910b（Atlas A2/A3 系列，DAV_2201）上 modeId/pipe 模板参数不生效；950（Ascend 950PR/950DT，DAV_3510）上模式 0/1/2 不支持 PIPE_S
 详见 api-crosscore-sync.md
 ```
 

@@ -52,7 +52,7 @@ apace 算子的成熟过程遵循固定顺序，**不要跳级**（如在精度�
 
 | 现象（判据） | 手法 | 触发条件与注意事项 |
 |:---|:---|:---|
-| AIC 计算与 AIV 通信串行，总时长 ≈ 两者之和 | per-tile 流水重叠：AIC 逐 tile `CrossCoreSetFlag` / AIV 逐 tile `CrossCoreWaitFlag` + 通信 | 计数式 flag 的 Set/Wait 必须配对且**峰值 ≤ 15**；`tileCnt=1` 应自然退化为串行，便于回退对比 |
+| AIC 计算与 AIV 通信串行，总时长 ≈ 两者之和 | per-tile 流水重叠：AIC 逐 tile `CrossCoreSetFlag` / AIV 逐 tile `CrossCoreWaitFlag` + 通信 | 计数式 flag 的 Set/Wait 必须严格配对；计数器 0-15 衡量未消费积压、不构成 T 上限（R9 口径——不设数值拒绝）；`tileCnt=1` 应自然退化为串行，便于回退对比 |
 | tiles/core ≈ 1，cube_utilization 低，CUBE bound | 减小 baseM（如对 SWAT tiling 结果做减半后处理 256→128），增加 tile 数提升核间负载均衡 | 触发条件：SWAT 在 `blockNum ≥ aicNum` 时不触发 `AdjustBasicBlock()`、输出 `baseM==256` 且减半后满足 M 轴整除；⚠️ 副作用：DMA 次数随之增多（MTE2 上升），**仅 CUBE bound 时值得**；baseM 必须保持 CUBE_BLOCK(16) 整数倍；减半后须重置 M 尾块参数（`mTailTile=1, mBaseTailSplitCnt=1, mTailMain=0`）并验证 L1 buffer 安全（`stepK`/`scaleKL1`/`nBufferNum` 不变仍有效） |
 | 仅个别核干活，其余核空转（如后处理只跑 block 0） | 多核并行：按 blockIdx 均分任务 + 余数前摊 | 后处理类 AIV 工作默认应全核参与；先确认任务可分行/分块且无跨核依赖 |
 | 自研基础模块（如归约/拷贝）性能差 | **优先找同生态已验证的参考实现整体替换**，只适配语义差异，而不是继续微调自研版 | 这是历史上单轮收益最大的手法（2 倍以上）；替换后用同一基线量化验证 |
@@ -61,11 +61,11 @@ apace 算子的成熟过程遵循固定顺序，**不要跳级**（如在精度�
 | V 指令链路过长（如 低精度→Cast→Add→Cast回） | 去冗余 Cast：用硬件原生低精度运算直接累加 | ⚠️ 触发条件苛刻：**仅当目标平台硬件级低精度累加的精度已实测达标**才能去掉高精度中间累加；必须先用高精度版本保底（见 §4 精度排查模式）。另需先确认该模块未被流水掩盖——被掩盖模块降精度实测收益趋近于零，而精度风险随 rank/配置漂移，生产上曾因此回退 |
 | 固定 tile 粒度在小分片场景（如多 rank）效率低 | 自适应 tile 粒度：host 按 rank 数/shape 分档选择首 tile 大小 | 本质是"同步次数 vs 流水粒度"的权衡：分片小→减小 tile 让通信尽早启动；分片大→增大 tile 减少同步。**分档值只是起点**——异常 case（tileCnt 非最优、SyncAll 占比偏高、GM 带宽争抢特征）需 per-case 搜索首 tile 大小，判据用通信覆盖率与收益实测；具体分档阈值需按平台实测标定，不跨平台/case 复用单点数值 |
 | 通信核与计算核互等 | 角色错峰：通信核发通信时，其余核算上一 tile 的残留工作 | 需要跨核同步点（SyncAll）配合；同步次数不可裁剪（见 §4）。compute-first 下进阶形态：fragment 重排 [remote..., local] + 双 flag（remote done 提前启动通信），见 [`fusion.md`](../fundamentals/fusion.md) §6.2.3 双 flag 计数式 |
-| 通信与归约串行排队（时分复用），AIV 侧成为关键路径 | **通信/归约核严格分离（专职化）**：后 rankSize 核专职通信（totalJobs=rankSize，每核 1 个 target 并行 PUT）、前 (核数-R) 核专职归约，`AllToAll(t) ∥ Reduce(t-1)` 错位流水，无 Phase 2 | 生产实测收益稳定（R 越大越显著）：消除 Phase 2 串行的收益稳定大于归约算力减少 R 核的代价。⚠️ 反面教训：通信退化为单核 totalJobs=1（臆造"多核写同一 UBMEM flag 竞态"约束）会让 R 个 target 串行 PUT，通信时间放大 R 倍——该竞态约束不存在（TeamBarrier totalJobs=1 与通信 totalJobs=rankSize 是正交配置，见 [`communication.md`](../fundamentals/communication.md) §2.2） |
+| 通信与归约串行排队（时分复用），AIV 侧成为关键路径 | **通信/归约核严格分离（专职化）**：后 rankSize 核专职通信（通信对象 totalJobs=rankSize，每核 1 个 target 并行 PUT）、前 (核数-R) 核专职归约，`AllToAll(t) ∥ Reduce(t-1)` 错位流水，无 Phase 2 | 收益稳定（R 越大越显著）：消除 Phase 2 串行的收益大于归约算力减少 R 核的代价。⚠️ 反面教训：通信对象退化为单核（臆造"多核写同一 UBMEM flag 竞态"约束）会让 R 个 target 串行 PUT，通信时间放大 R 倍——该竞态约束不存在；TeamBarrier totalJobs 按分核映射取值（官方前 R 核映射 = rankSize；compute-first 后 R 核映射 = 1 + 显式 CrossDevice，见 [`communication.md`](../fundamentals/communication.md) §2.2） |
 | 通信等待含框架内建跨设备 rendezvous，与分核守卫耦合 | **BARRIER_NONE + 手动 CrossDevice**：`Wait<BARRIER_NONE>` 仅 Drain 本 block channel，SyncAll 后由 block 0 显式 `teamBarrier_.CrossDevice()`，再一次 SyncAll 放行 | 多核并行通信 + 严格分离编排的配套手段；同步点显式可控（见 [`fusion.md`](../fundamentals/fusion.md) §6.2.3） |
-| 归约（reduceSum）模块本身耗时高，逐行处理 flag 次数多 | **手动 UB + 多行批量归约**：LocalTensor 手动偏移布局（FP32 累加器单份 + src 双缓冲 pingpong + 输出 buffer），一次处理多行摊薄 flag 次数 | 生产实测归约模块显著加速；per-tile 高频调用场景避免 TPipe 重复 InitBuffer 耗尽 UB（归约 buffer 循环外一次性分配） |
+| 归约（reduceSum）模块本身耗时高，逐行处理 flag 次数多 | **手动 UB + 多行批量归约**：LocalTensor 手动偏移布局（FP32 累加器单份 + src 双缓冲 pingpong + 输出 buffer），一次处理多行摊薄 flag 次数 | 显著摊薄同步开销；per-tile 高频调用场景避免 TPipe 重复 InitBuffer 耗尽 UB（归约 buffer 循环外一次性分配） |
 | 归约 VEC 占比异常低但 flag/同步次数频繁 | **逐行归约（blockCount=1）**：flag/同步次数 = 行数 × N段数 × R | 改批量：2D DataCopyPad blockCount=本批行数（多行一次搬运），flag 次数除以 batchRows 摊薄——量化判据：逐行归约 = 性能 FAIL（见 [`fusion.md`](../fundamentals/fusion.md) §6.2.6） |
-| AIC SCALAR 占比异常高、CUBE 反而很低 | **R×T 子 mm 调用的 Params 重建开销**：检查是否每轮循环重建完整 Params | 改 FragmentTensor 一次调用消 R 循环，或减少 T（增大 tileM），或 Params 增量更新只改地址字段；小/中 shape 下 SCALAR 易成为主 bound（见 [`fusion.md`](../fundamentals/fusion.md) §6.2.2）。⚠️ 反向认知：小 R×T 时 FragmentTensor 与 R 循环性能持平（生产实测差异 <1%），其价值在代码统一与 per-fragment L1 隔离而非提速——SCALAR 红线针对大 R×T 才成立 |
+| AIC SCALAR 占比异常高、CUBE 反而很低 | **R×T 子 mm 调用的 Params 重建开销**：检查是否每轮循环重建完整 Params | 改 FragmentTensor 一次调用消 R 循环，或减少 T（增大 tileM），或 Params 增量更新只改地址字段；小/中 shape 下 SCALAR 易成为主 bound（见 [`fusion.md`](../fundamentals/fusion.md) §6.2.2）。⚠️ 反向认知：小 R×T 时两者性能持平，FragmentTensor 的价值在代码统一与 per-fragment L1 隔离——SCALAR 红线针对大 R×T 才成立 |
 | 重复构建地址/描述符 | 增量复用：按轮次索引递推偏移，而非每轮重建 | 适用于 FragmentTensor 地址表、GM 指针族 |
 | mac_ratio 高但 cube_utilization 低 | 瓶颈在**数据供给（MTE2 带宽）而非计算**：MAC 在等数据。优化搬运链路（双缓冲、L2 footprint、布局），不要再压计算侧 | 经典误判点：mac_ratio 高 ≠ 计算 bound；结合 cube_util 与 mte2_ratio 构建 GM→L1→L0→L0C→GM 搬运链路图定位 |
 | L2 footprint 超容量、cache 命中低（大 shape 明显） | **problem 维度拆分子调用**：tile 大小不变、只缩 problem M（如 R×T 子调用），L2 footprint 缩小 → cube 利用率提升，大 shape 实测显著收益 | ⚠️ 与"拆小 tile"严格区分：后者 MTE2 次数翻倍，已证伪（§3）。拆分不得增加单位数据的搬运次数 |
@@ -82,12 +82,13 @@ apace 算子的成熟过程遵循固定顺序，**不要跳级**（如在精度�
 | 增大 stepK（K 方向步进） | 无收益 | **当两条 pipe 已高度重叠（≥90%）时，减少任何一侧的次数都无收益**——先看重叠率再决定优化对象 |
 | 减小 baseN 提升 cube_util | 整体恶化 | fixpipe/DMA 的**固定开销随 tile 数线性放大**，cube_util 收益被抵消。减小 tile 前必须评估固定开销占比 |
 | 把框架通信原语的多核 work partition 直接套到语义不同的场景 | 大面积数据错误后回退 | 复用框架原语前必须核对**地址偏移语义**（work partition 按 targetRank 还是 sourceRank 切分）；语义不匹配就换优化维度，不要死磕框架 |
-| 通信退化为单核 totalJobs=1（仅 blockIdx==0 执行 Commit/Wait），理由"避免多核写同一 UBMEM flag 竞态" | R 个 target 串行 PUT，通信时间放大 R 倍，端到端显著劣化；且单核通信 + 真同步（winOffset 修正后）在 R≥4 会暴露死锁竞态 | **该竞态约束是臆造的、不存在**：TeamBarrier totalJobs=1（仅 jobIndex=0 触碰 CrossDevice flag）与通信对象 totalJobs=rankSize（各核写各自 target 槽位/channel）是正交配置；单核回退路径同样不可行。设计阶段引入"约束"前必须在 skill/官网代码中找到实证来源，找不到就按默认多核并行实现 |
+| 通信退化为单核（仅 blockIdx==0 执行 Commit/Wait），理由"避免多核写同一 UBMEM flag 竞态" | R 个 target 串行 PUT，通信时间放大 R 倍；R≥4 且真同步时暴露死锁竞态 | **该竞态约束是臆造的**：TeamBarrier 按 job 分槽写入，无共享 flag 竞态；TeamBarrier totalJobs 按分核映射取值（见 [`communication.md`](../fundamentals/communication.md) §2.2）。设计阶段引入"约束"前必须在 skill/官网代码中找到实证来源 |
 | 用 `SyncAll` 替代跨设备 fence | 接收方在远端 PUT 到达前读未初始化数据（大面积元素错） | **SyncAll 是本地核间同步，无跨设备能力**——跨设备可见性只能走框架 CrossDevice（TeamBarrier），本地同步加多少次都无效 |
 | 手动轮询远端 GM flag 做跨设备同步 | 死循环超时 | **MTE 跨设备 GM 写可见性无框架 fence 保证**（本端 MTE2 读看不到远端 MTE3 写）——手动跨设备轮询不可行，须用框架 CrossDevice |
 | PUT/GET 数据覆盖 Win 区内元数据/barrier 区 | 精度"假通过"（碰巧正确），同步机制已被破坏，大 shape/多轮时紊乱 | 数据区与元数据区分离：官网布局 barrier flag 在独立 BARRIER_BUF（Win 数据区从 0 可用）；共享布局按约定偏移跳过头部，host 预留与 kernel 读写偏移同源——此类"假通过"最危险：精度验证无法发现，必须靠设计红线拦截 |
-| 单轮 PUT 数据量 1MB | 处于 UDMA Drain 可靠性边界：T=4 一致 FAIL / 部分 dtype 间歇 FAIL | perRoundChunkBytes ≤ 512KB，超出则增大通信轮次 T；可靠性阈值与带宽高效区间是两回事，不要混用 |
+| 单轮 PUT 数据量过大 | bring-up 期过大单轮曾见间歇失败（边界未定，非普适上限；同平台亦有更大单轮稳定运行的工程实例） | 无官方上限，勿以经验阈值做 host 强制拒绝；放大单轮后按 case 复核（连续多轮精度 + 重复 launch 一致性）；可靠性边界与带宽高效区间是两回事，不要混用 |
 | 为增加通算重叠把 tile/K-window 数翻倍（拆小 tile） | MTE2 次数翻倍至饱和，负收益回退 | 重叠收益要靠**拆 problem 维度**（tile 大小不变）获得，不能靠增加单位数据的搬运次数；改之前先看 MTE2 余量 |
+| local 段前置/后置重排以期通信提前启动 | 通信被计算完全掩盖的算子收益 ≈ 0 | **重排类优化先 profiling 确认瓶颈归属**（AIV WaitFlag 占比高 ⇒ 跳过重排）；仅通信暴露场景有收益。注意：compute-first 的 localLast 编排因 flag 配对契约依赖仍须保留，此处针对"额外重排"类提议 |
 
 ---
 
@@ -118,7 +119,7 @@ apace 算子的成熟过程遵循固定顺序，**不要跳级**（如在精度�
 5. **失败也归档**：负收益尝试与成功尝试同等篇幅写进优化报告，防止后人重复踩坑（§3 即来源于此）
 6. **精度绑定**：每轮 perf 提交附带全量精度 PASS 证据
 7. **穷尽收尾**：确认无剩余空间时输出分析报告（含理论耗时对比、各路流水占比、已证伪方向清单），作为算子的性能档案
-8. **实证复核**：静态分析得出的"不可行/无收益"结论，在有争议或收益量级不明时，应设计最小实验复核——历史案例：mm 子调用拆分被静态分析判定"结构受限不采纳"，实测有显著收益（收益主因是 L2 footprint 效应，恰好是分析遗漏的维度）。汇报用"原假设 vs 实测结果"对照呈现，被推翻的假设是有价值的档案，不隐瞒
+8. **实证复核**：静态分析得出的"不可行/无收益"结论，在有争议或收益量级不明时应设计最小实验复核（典型：拆 problem 维度的收益主因常是 L2 footprint 效应，静态分析易遗漏）。被推翻的假设是有价值的档案，不隐瞒
 9. **选择性路由**：一个手法只对部分 case 有效、对其他 case 退化时，不做统一开关，按 case 特征（rank 数/tile 粒度/shape 规模/bound 类型）路由到不同方案，保留各方案的局部收益
 
 ---
@@ -128,7 +129,7 @@ apace 算子的成熟过程遵循固定顺序，**不要跳级**（如在精度�
 评审意见（尤其是重构类）的落地方式是**"语义等价的高性能实现 + 量化回退机制"**，不是字面执行：
 
 1. 逐条实现评审意见，每条用同一基线量化对比
-2. 字面实现性能退化时，**诚实回退并记录数据**，然后寻找满足评审意图的替代实现（历史案例：为消除循环，"一次 matmul 全覆盖"实测性能回退 → 回退 → 改用 FragmentTensor 打包分段地址实现同等意图且性能持平）
+2. 字面实现性能退化时，**诚实回退并记录数据**，然后寻找满足评审意图的替代实现（典型：为消除循环的"一次全覆盖"实现若实测回退，可改用 FragmentTensor 打包分段地址实现同等意图）
 3. 阻塞项（正确性/红线）修完即 PASS；建议项按收益排期
 4. 重构多发期主动做一次**设计文档 vs 代码的一致性核对**，防止文档腐化（文档与实现漂移会误导后续所有优化决策）
 

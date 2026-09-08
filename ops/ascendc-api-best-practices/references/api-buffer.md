@@ -294,8 +294,9 @@ __aicore__ inline void ProcessBatch()
 ### Host 侧 Tiling 计算
 
 ```cpp
-// A2/A3 UB = 192KB
-constexpr uint64_t UB_SIZE = 192 * 1024;
+// UB 容量示例值 192KB（Atlas A2/A3 系列）——生产代码按目标芯片实际 UB 容量动态获取
+// （device 侧 GetCoreMemSize(UB)），勿硬编码；芯片规格以 npu-arch skill 为唯一知识源
+constexpr uint64_t UB_SIZE = 192 * 1024;  // 示例值
 constexpr uint32_t MAX_BLOCK_COUNT = 4095;  // DataCopyPad blockCount 限制
 
 // bytesPerTileRow: double buffer (in*2 + out*2)

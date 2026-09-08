@@ -53,7 +53,7 @@
 | Rank 规模与启动 | rank_size、rank_id 获取方式、启动命令 | DESIGN §x |
 | Win 区分配 | 每 buffer 容量、偏移表（send/recv/workspace/flag 区） | DESIGN §x |
 | Flag 编排 | flag 数量、含义、置位/等待时序（AIC→AIV / AIV→AIC） | DESIGN §x |
-| 通信轮次 T 推导 | kernel 侧 `commTurn = splitAxisTileCnt + splitAxisTailCnt`（operator-anatomy.md §3）；compute-first 路线 host 派生默认 `T \| mSeg` 无尾块（PUT 钩子 src 偏移限制，其他路线按其语义推导），推导过程与取值依据 | DESIGN §x |
+| 通信轮次 T 推导 | kernel 侧 `commTurn = splitAxisTileCnt + splitAxisTailCnt`（operator-anatomy.md §3）；compute-first 路线 host 派生默认 `T \| mSeg` 无尾块、单尾块 ≤ 头块可直传（多尾块/尾>头走 padding 策略，其他路线按其语义推导），推导过程与取值依据 | DESIGN §x |
 | L2 flush 集成 | flush 时机（每轮 / 每 T 轮）、调用点 | DESIGN §x |
 | tileCnt 扫描策略 | 固定 / 二分扫描范围、选择判据 | DESIGN §x |
 | 精度标准 | 多 rank 精度矩阵对比阈值、非有限值门禁 | DESIGN §x |

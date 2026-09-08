@@ -215,7 +215,7 @@
       "id": 10,
       "title": "apace 按请求目的路由（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -230,7 +230,7 @@
       "id": 11,
       "title": "apace 路线模型判定（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -245,7 +245,7 @@
       "id": 12,
       "title": "apace 计算执行原则（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -260,7 +260,7 @@
       "id": 13,
       "title": "apace golden 切分轴错误必须先修 golden 再怀疑 kernel",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -275,7 +275,7 @@
       "id": 14,
       "title": "apace flag 计数峰值超限必须 host 强制校验",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -290,7 +290,7 @@
       "id": 15,
       "title": "apace 归约 in-place Cast 导致精度系统性错误",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -305,7 +305,7 @@
       "id": 16,
       "title": "apace L2 flush 死代码导致性能数据不可复现",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -320,7 +320,7 @@
       "id": 17,
       "title": "apace 场景唯一命中授权（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -335,7 +335,7 @@
       "id": 18,
       "title": "apace 问题记录格式（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],
@@ -350,7 +350,7 @@
       "id": 19,
       "title": "apace 四步流程边界（关键能力）",
       "config": {
-        "max_tokens": 100000,
+        "max_tokens": 500000,
         "ascend_platforms": [
           "A5"
         ],

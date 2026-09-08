@@ -173,7 +173,7 @@ AIV 侧（通信）与 AIC 侧（计算）的完整数据流向：GM → Win 区
 |-----|---------|---------|
 | 通信方向 | GET / PUT / compute-first | `<refs>` |
 | 集合通信原语与实现类 | `<如 CollectiveComm<AllToAll, PUT, AType, TeamBarrier>>` | `<refs>` |
-| 通信轮次 T 推导 | kernel 侧 `commTurn = splitAxisTileCnt + splitAxisTailCnt`；host 侧派生规则（compute-first 默认 `T \| mSeg` 无尾块） | `<refs>` |
+| 通信轮次 T 推导 | kernel 侧 `commTurn = splitAxisTileCnt + splitAxisTailCnt`；host 侧派生规则（compute-first 默认 `T \| mSeg` 无尾块；单尾块 ≤ 头块 16 对齐可直传） | `<refs>` |
 | rankSize 与组网 | `<rank 数、卡间拓扑、targetRank 映射（每通信核负责 1 个 targetRank 并行 PUT/GET）>` | `<refs>` |
 | self rank 跳过规则 | `<DoCommit/DoWait 对 targetRankId==rankId 的处理>` | `<refs>` |
 | Win 区预算 | 通信在前（多对象）：data 段 `rankSize × rankDataBytes` + scale 段 `rankSize × scaleKaSize × axisM`；compute-first（单通信对象）：`M × N × sizeof(CType)`；数据区偏移按 host 建链布局确定、host/kernel 同源 | `<refs>` |
@@ -196,7 +196,7 @@ Flag 编排（CrossCore flag 配对，门禁必查）：
 | 项目 | 设计结论 | 证据引用 |
 |-----|---------|---------|
 | 切分轴（按 rank） | M / N / K / 不切；`<每 rank 本地分片公式>` | `<refs>` |
-| `splitAxisTileCnt` 策略 | 两阶段：精度调试 `tileCnt=1` 串行基线；性能调优扫描 `{1,2,4,8,16,32}`（通信在前默认值；compute-first 受 `T ≤ 15` 且 `R×T ≤ 32` 联合约束） | `<refs>` |
+| `splitAxisTileCnt` 策略 | 两阶段：精度调试 `tileCnt=1` 串行基线；性能调优扫描 `{1,2,4,8,16,32}`（通信在前默认值；compute-first 计数式固定 flagId 下 T 上限按 case 实测确定，R≤32 为 FragmentTensor 容量约束） | `<refs>` |
 | 三层 tiling 结构 | `<算子级 tiling_data + CommTilingData + Blaze matmul tiling 的字段与 host 填充>` | `<refs>` |
 | tail 与空任务 | `<splitAxisTailCnt、尾部 tile、空分片行为>` | `<refs>` |
 

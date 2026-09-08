@@ -152,15 +152,21 @@ apace 通信方向由数据流决定：**GET = 计算→通信**（AIC 先算 C 
 
 > ⚠️ **术语消歧**：本节「切分轴 = K」指 **rank 级数据分布轴**（每 rank 持有 A 的 K/rankSize 段）；而 `CommTilingData.splitAxis*` 字段沿 **M** 轴推进（通信 tile 经 `headMSize` 沿 M 切分，`nonSplitAxisSize = ka`）。字段映射详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §3，填 tiling 字段时不要混用两个"切分轴"概念。
 
-### PUT 模式数据流（all_to_all_quant_matmul）
+### PUT 模式数据流（all_to_all_quant_matmul 实测语义）
 
 ```
-本 rank A(M×K) × B(K×N) = C(M×N)
-                                    ↓ AllToAll PUT 沿 K 轴
-                    AIV 把本 rank A/scaleA 推到各 rank Win 区
-                    AIC 从本 rank Win 区读全量 A，遍历 rank 乘对应 B 的 K 段
-                    L0C 累加部分和（localMatmul=1 时远端部分 AtomicAdd 落 C）
+全局逻辑 A 为 [M_total, K]，M_total = m × rankSize（m = 单卡输出行数）
+                                     ↓ 输入按 K 轴分布（每卡全 M 行 × 本卡 K 段）
+                     每卡持有 A 分片 [M_total, Ka]，Ka = K/rankSize
+                                     ↓ AllToAll PUT 沿 M 行块（通信 tile 沿 M 推进）
+                     AIV 把本卡 A/scaleA 的第 r 个 m 行块推给 rank r 的 Win 区
+                     AIC 从本卡 Win 区收齐 R 个 m 行块（拼成 [m, K]），遍历 rank 乘 B 对应 K 段
+                     L0C 累加部分和（localMatmul=1 时远端部分 AtomicAdd 落 C）
+                                     ↓ 输出按 M 轴分布
+                     每卡输出本卡 M 段 C = [m, N]（全局 [M_total, N]）
 ```
+
+> ⚠️ 三处易错点（均经官方 ST `gen_data.py`/`main.cpp` 实证）：① 每卡输入是**全部 M 行**的 K 段（不是本卡 M 段的 K 段）；② 每卡输出是 `[m, N]` M 段（不是完整 `[M, N]`）；③ B 全量复制且逻辑布局为 R 个 K 段拼接 `[K, N]`（DN 列主序存储）。
 
 ### 切分轴决策表
 
@@ -202,12 +208,12 @@ apace 通信方向由数据流决定：**GET = 计算→通信**（AIC 先算 C 
 | 约束 | 说明 |
 |:---|:---|
 | **baseM 整数倍** | 切分轴 tile 大小应取 Blaze base 块的整数倍，否则尾块处理复杂化 |
-| **单次传输字节数** | 单轮 PUT 数据量（perRoundChunkBytes）≤ 512KB（生产实测经验值，官方代码无显式约束；带宽高效区间与可靠性上限是两个独立概念）——唯一定义见 [`communication.md`](communication.md) 陷阱 #13 |
+| **单次传输字节数** | ⚠️ 风险提示（非硬上限）：无官方约束（bring-up 期过大单轮曾见间歇失败，边界未定）——大单轮 PUT 按 case 复核，不作 shape 拒绝依据；带宽高效区间与可靠性上限是两个独立概念——唯一定义见 [`communication.md`](communication.md) 陷阱 #13 |
 | **Win 区空间预算** | Win 区总需求不能超过容量（通常几十 MB） |
-| **通信 tile 总数 ≤ 32** | AIC 侧 `waitedMask` 为 `uint32_t`，超出静默出错（详见 [`fusion.md`](fusion.md) §4.2）；与 commTurn ≤ 16（flagId 上限，[`fusion.md`](fusion.md) §3.3）是两套机制的约束，取更严者 |
+| **通信 tile 总数 ≤ 32** | AIC 侧 `waitedMask` 为 `uint32_t`，超出静默出错（详见 [`fusion.md`](fusion.md) §4.2）；与轮次索引型 flagId 的轮次索引 < FLAG_ID_MAX(16) 且避开 SyncAll 保留区（[`fusion.md`](fusion.md) §3.3）是两套机制的约束，取更严者；计数式固定 flagId 不受轮次数限制 |
 
 **经验法则**：
-- `tileCnt` 扫描范围 {1, 2, 4, 8, 16, 32}（受上表两套上限约束：以轮次 tid 作 flagId 的编排下 commTurn ≤ 16，超出档位无意义）
+- `tileCnt` 扫描范围 {1, 2, 4, 8, 16}（受上表两套上限约束：以轮次 tid 作 flagId 的编排下轮次索引 < 16 且避开 SyncAll 保留区；计数式固定 flagId 编排下按 case 实测确定上限）
 - `tileCnt` 增大 → 通信粒度变细 → 通算重叠度提高，但同步开销增加
 
 ---
@@ -243,7 +249,7 @@ APACE 设计提出 6 大关键技术。以下为逐条索引：
 
 > 官网 `docs/` 目录当前仅有 .gitkeep 占位，无设计文档。以 `kernel/` 下的实际文件为准。
 >
-> **UB 容量**（技术 #6 相关）：DAV_3510（Ascend 950）硬件 UB = 256KB 物理 / 248KB 框架可用（`GetCoreMemSize(UB)` = 253952 = 256KB − 8KB 框架预留）。MC2 通算融合算子中 AIV 归约侧推荐预算 `TOTAL_UB = 192KB`，预留 headroom 给 guard 通信区与框架开销；实际可分配上限 `MAX_UB_BYTES = 180KB`（6-slot 归约布局下每元素 18B，`maxElements = MAX_UB_BYTES / perElemBytes`）。**禁止硬编码**——应以 `GetCoreMemSize(UB)` 运行时获取，上述数值仅为生产实测推荐预算。详见 [`communication.md`](communication.md) §4.1 UB 预算、[`fusion.md`](fusion.md) §6.2.6 归约 UB 布局、[`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.4。
+> **UB 容量**（技术 #6 相关）：DAV_3510（Ascend 950PR/950DT）硬件 UB = 256KB 物理 / 248KB 框架可用（`GetCoreMemSize(UB)` 运行时获取，示例值 253952 = 256KB − 8KB 框架预留）。MC2 通算融合算子中 AIV 归约侧推荐预算 `TOTAL_UB = 192KB`，预留 headroom 给 guard 通信区与框架开销；实际可分配上限 `MAX_UB_BYTES = 180KB`（6-slot 归约布局下每元素 18B，`maxElements = MAX_UB_BYTES / perElemBytes`）。**禁止硬编码**——应以 `GetCoreMemSize(UB)` 运行时获取，上述数值仅为工程参考预算；UB 容量等芯片规格的权威口径以 npu-arch skill 为唯一知识源。详见 [`communication.md`](communication.md) §4.1 UB 预算、[`fusion.md`](fusion.md) §6.2.6 归约 UB 布局、[`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.4。
 
 ---
 
@@ -265,7 +271,7 @@ PUT 逐 tile 流水编排（AIV Commit→Wait→SyncAll→SetFlag，AIC WaitTile
 AIC (生产者)                    AIV (消费者)
 ─────────────                   ─────────────
 tile 0: Matmul → C[0] 写 Win    │
-          SetFlag<0x2,PIPE_FIX>(0) ──→  WaitFlag<0x2,PIPE_S>(0)
+          SetFlag<0x2,PIPE_FIX>(0) ──→  WaitFlag<0x2,PIPE_FIX>(0)（消费侧按生产管线取 FIX；管线选择属原理推导，官方样例仅 MTE3→MTE2 一对）
                                        Commit(GET C[0] from remote Win)
                                        Wait(waitLast)
                                        SetFlag<0x2,PIPE_MTE3>(0) ──→ 回压
@@ -330,7 +336,7 @@ using Comm = Apace::AivComm::CollectiveComm<
 | **Blaze 集成** | 细粒度 tile 级手写编排 | 组合模式（自定义 matmul kernel + CommPolicy 注入） |
 | **通信引擎** | 仅 UDMA（SHMEM） | UDMA(Hcomm)；HCCL windows/CCU 仅限注册场景（§10 ④） |
 | **内存抽象** | 无（连续 GM + SHMEM Win 区） | FragmentTensor（离散内存虚拟重排，all_gather UDMA 已使用） |
-| **tiling 结构** | 分层类继承（base/common/swat 三层） | 扁平 struct 组合 + CommContext |
+| **tiling 结构** | 分层类继承（base/common/swat 三层） | host 侧同为分层类继承（`QuantMatmulTilingBase` → `QuantMatmulTilingSwat`）；差异在**下发契约**：kernel 侧消费扁平 struct 组合（`QuantMatmulTilingData` + `CommTilingData` + CommContext，POD 按值传参）而非注册形态的嵌套 tiling key 结构 |
 
 ### 何时用哪条路线
 

@@ -18,8 +18,8 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **LoadData / Cube 加载** | LoadData2D, LoadData2DV2, LoadData2DMx | [api-loaddata.md](references/api-loaddata.md) | L1 → L0 加载、Cube GEMM、MX 块量化格式 |
 | **Transpose / 重排** | TransDataTo5HD, Gather | [api-transpose.md](references/api-transpose.md) | 小通道 transpose、permute |
 | **数据过滤/解交织** | GatherMask | [api-gathermask.md](references/api-gathermask.md) | RoPE 奇偶拆分、列分量分离、非均匀间隔自定义 mask |
-| **Matmul 高阶 API（Cube）** | MatmulImpl, MatmulConfig, IterateAll | [api-matmul.md](references/api-matmul.md) | MatMul, BatchMatMul, MatMulBias；**限 A2/A3（DAV_2201）平台** |
-| **GMM 高阶 API** | GMMBaseParams, GMMArray, per-token dequant 管线 | [api-gmm.md](references/api-gmm.md) | GroupedMatmul, A8W8/A4W4 量化反量化；**限 A2/A3（DAV_2201）平台** |
+| **Matmul 高阶 API（Cube）** | MatmulImpl, MatmulConfig, IterateAll | [api-matmul.md](references/api-matmul.md) | MatMul, BatchMatMul, MatMulBias；**限 Atlas A2/A3 系列（DAV_2201）平台** |
+| **GMM 高阶 API** | GMMBaseParams, GMMArray, per-token dequant 管线 | [api-gmm.md](references/api-gmm.md) | GroupedMatmul, A8W8/A4W4 量化反量化；**限 Atlas A2/A3 系列（DAV_2201）平台** |
 | **Buffer 管理** | TBuf, TQue | [api-buffer.md](references/api-buffer.md) | Double Buffer、内存规划 |
 | **精度转换** | Cast | [api-precision.md](references/api-precision.md) | FP16/FP32 混合精度 |
 | **流水线同步** | EnQue, DeQue, SetFlag | [api-pipeline.md](references/api-pipeline.md) | 多级流水线、事件同步 |
@@ -40,8 +40,8 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 |---------|---------|---------|
 | **Softmax/LayerNorm** | [api-reduce.md](references/api-reduce.md), [api-reduce-pattern.md](references/api-reduce-pattern.md), [api-arithmetic.md](references/api-arithmetic.md) | 标量操作、广播优化、Buffer 复用 |
 | **逐行处理（AR 模板）** | [api-arithmetic.md](references/api-arithmetic.md) | Adds/Muls、节省 UB |
-| **MatMul/BatchMatMul（Ascend C 高阶 API，A2/A3）** | [api-matmul.md](references/api-matmul.md) | MatmulConfig 选择、enUnitFlag、IterateAll、TilingHeader stack 加载 |
-| **GroupedMatmul / GMM（Ascend C 高阶 API，A2/A3）** | [api-gmm.md](references/api-gmm.md) | GMMArray 分组索引、AIC/AIV 分职、per-token dequant 管线 |
+| **MatMul/BatchMatMul（Ascend C 高阶 API，Atlas A2/A3 系列）** | [api-matmul.md](references/api-matmul.md) | MatmulConfig 选择、enUnitFlag、IterateAll、TilingHeader stack 加载 |
+| **GroupedMatmul / GMM（Ascend C 高阶 API，Atlas A2/A3 系列）** | [api-gmm.md](references/api-gmm.md) | GMMArray 分组索引、AIC/AIV 分职、per-token dequant 管线 |
 | **Transpose / 重排** | [api-transpose.md](references/api-transpose.md) | 2维度 转置性能 |
 | **多行广播（ARA 模板）** | [api-arithmetic.md](references/api-arithmetic.md) | BinaryRepeatParams.src1RepStride=0、分批处理 |
 | **半精度加减法（FP16/BF16 Add/Sub）** | [api-arithmetic.md](references/api-arithmetic.md), [api-precision.md](references/api-precision.md) | 默认升精度（除非 spec 明确同量级）、in-place 复用 |
@@ -52,8 +52,8 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **遇到 API 限制** | [api-restrictions.md](references/api-restrictions.md) | 替代方案、避坑指南 |
 | **通算融合（MC2）** | [api-hcomm.md](references/api-hcomm.md), [api-crosscore-sync.md](references/api-crosscore-sync.md) | Hcomm/CrossCore 原语层 API；**编排层（核分工、flag 流水、UB 隔离、通信并行度）请参考对应框架/领域技能文档** |
 | **多卡通信** | [api-hccl-host.md](references/api-hccl-host.md) | HCCL 建链、engine ctx 下发、资源生命周期 |
-| **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 A2/A3（DAV_2201）平台** |
-| **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 A2/A3（DAV_2201）平台** |
+| **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 Atlas A2/A3 系列（DAV_2201）平台** |
+| **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 Atlas A2/A3 系列（DAV_2201）平台** |
 | **非均匀间隔自定义 mask** | [api-gathermask.md](references/api-gathermask.md) | 用户自定义 LocalTensor mask、类型匹配 |
 ---
 

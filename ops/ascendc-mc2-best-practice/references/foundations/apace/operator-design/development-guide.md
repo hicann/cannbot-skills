@@ -71,7 +71,7 @@ operators/{OpName}/            ← camelCase（对齐 CANN 算子注册名）
 |:---|:---|
 | 样例 | 官方 `kernel/` 已实现算子均为 PUT（通信在前）模式：AllToAll（K 轴切分）、AllGather（M 轴切分）。官网暂无 GET、compute-first 样例——GET 钩子存在于共享层 `block/aiv_comm/`（语义见 [`communication.md`](../fundamentals/communication.md)）；compute-first 设计契约见 [`fusion.md`](../fundamentals/fusion.md) §6.2 与本文 §3.5 |
 | PUT 3 文件模式 | `{op}_udma_impl.h`（Impl 编排：`Init`/`Run`/`RunAllToAll`/`RunMatmul`/`SetupParams`）+ `quant_matmul_mx_kernel.h`（Blaze `BlockMmad` + `BlockScheduler` 编排 kernel）+ `{op}_tiling_data.h`（tiling 结构 + `CommContext`=`CommUdmaContext`+`CommUbmemContext`）。同目录 `*_hcomm_impl.h` 为 HCCL windows 变体，直调场景不使用 |
-| include 双风格 | 官方头文件内部为 `../../block/...` 相对风格（CANN 内置树内自闭合，直引模式天然满足）；本算子源码用 `apace/...` 前缀 include（如 `#include "apace/block/aiv_comm/collective_comm_api.h"`），依赖 CMake `${OP_KERNEL_ROOT}` include 根（§4.1） |
+| include 双风格 | 官方头文件两种风格并存：impl 类文件用 `apace/...` 前缀（如 `#include "apace/block/aiv_comm/collective_comm_api.h"`），tiling_data 等用 `../../tiling/...` 相对路径（仓内自洽）。本算子源码统一用 `apace/...` 前缀 include，依赖 CMake `${OP_KERNEL_ROOT}` include 根（§4.1） |
 | 验收 | `apace/...` 前缀 include 必须解析到 CANN 内置路径（§4.1 验收项）；算子目录存在任何共享层副本即 FAIL（新旧混链风险） |
 
 ---
@@ -83,7 +83,15 @@ operators/{OpName}/            ← camelCase（对齐 CANN 算子注册名）
    - **golden 语义先行**：明确每张卡的输入/输出语义与切分轴（如 ReduceScatter 是"每卡完整 K、切 M"，写错切分轴则 golden 全错）；写入 DESIGN.md
    - **API 逐一验证**：每个选用 API 标注"验证来源（官方文件:行号）+ 在当前 CANN 版本的可用性验证状态"——生产教训：旧 CANN 版本存在符号缺失致链接失败的案例，设计阶段未发现则开发期返工
 3. **直引起手**：按 §1.2 推荐布局新建本算子文件（kernel/ 4 个头文件 + src/ 4 个 host 文件）；共享层与参考 kernel 经 CMake 直引 CANN 内置路径，**禁止从零写文件，也禁止复制共享层**。**mm 内核默认 FragmentTensor 消 R 循环**；vendor 复用官方 kernel 为例外（需 SCALAR 论证，见 [`fusion.md`](../fundamentals/fusion.md) §6.2.2）
-   > **跨路线差异开发**：若已有同算子语义的 SHMEM 版实现，apace 版只替换通信层（`aclshmemx_udma_*` → CollectiveComm 四段式 + CommChannelBuilder 建链），计算/tiling/host 框架整体复用——生产实证：迁移后首轮精度即通过且性能更优
+   > **已有实现迁移（通用方法，与来源底座无关）**：若目标算子已有非 apace 实现（本仓 SHMEM 版 / ops-transformer 注册版），apace 版**只替换通信层与 host 框架，计算与 golden 语义整体复用**：
+   > 1. **冻结 golden 语义**：先从旧实现的 gen_data/算子规格提取每卡输入/输出分布与切分轴（输入分布轴 ≠ 输出分布轴，分别记录），golden 数值应与旧实现对齐后再迁移；
+   > 2. **通信层替换**：注册版（HCCL CCU windows `GetHcclContext` / MTE）→ `CommChannelBuilder` 建链 + `CollectiveComm` 四段式 UDMA 直调；SHMEM 版（`aclshmemx_udma_*`）→ 同样替换为 CollectiveComm；
+   > 3. **host 框架替换**：注册版 op_host tiling → ST 直调 main.cpp（`GetTilingData` + CommTilingData 填充 + fork 多 rank + TCP rootInfo + 建链 + `<<<>>>` launch + dtype dispatch）；
+   > 4. **入口重写**：注册入口 → `__global__` dtype 变体（`KERNEL_TYPE_MIX_AIC_1_1`）；
+   > 5. **分层验收**：同 shape 与旧实现 golden 对拍 → 多 rank 精度矩阵 → 与旧路径性能对标归档（R15 三路径对标中旧实现路径天然是对标基线）。
+   > 工程验证：SHMEM→apace 迁移后首轮精度即通过且性能更优。
+   >
+   > ⚠️ **现状事实（迁移评估前提）**：ops-transformer 仓 mc2/ 下现有算子（`matmul_reduce_scatter_v2`、`quant_reduce_scatter`、`matmul_all_reduce`、`all_gather_matmul` 等）当前**均未使用 apace**（官方基准 grep 实证：用 HCCL CCU windows 或 MTE 通信，注册形态）——"以 apace 替代/优化已有算子"是目标态；已有算子仅作语义/golden/性能对标参考，不是 apace 路线代码起点。
 4. **定点改造**：按 §3 改造场景食谱逐项修改，每处改造对照验收条件自查
 5. **编译 + 冒烟**：编译无错误/警告后，单 rank 运行冒烟，输出非全 0。禁止跳过冒烟编译直接全量测试
 6. **分阶段 bring-up**：引入新链路（bias、新通信对象、新归约路径）时先退化对照（如 bias=0、T=1、rank=2）隔离验证，再逐步铺开——每步只放大一个变量，出问题域立即可定位
@@ -106,8 +114,8 @@ operators/{OpName}/            ← camelCase（对齐 CANN 算子注册名）
 | 改 localMatmul (PUT) | 无（`Run()` 已含 `RunLocalMatmul` 分支）；用 localMatmul=1 时加 PipeBarrier 补丁（推荐修复） | 无（LocalParams 已含 localMatmul） | 已有 localMatmul 字段 | 设 localMatmul=0/1/2 | 不动 | 不动 |
 | 加 bias | SetupParams 补 mmadParams.biasGmAddr + qbmmParams.isBias | 无（bias 通道已现成） | 加 bias 字段 | 加 bias GM 分配 + 传参 | 改 gen_data | 不动 |
 | 去 Scale (非 MX) | 改 DispatchPolicy | 去 scale 字段与 Tensor | 去 scale 字段 | 去 scale 参数 | 改 gen_data | 不动 |
-| 改流水深度 | 无 | 无 | 调 headMSize/tileCnt（CommTilingData 字段） | 调 headMSize/tileCnt（经 ST main.cpp 参数） | 不动 | 不动 |
-| 调通算并行 | 无 | 无 | 改 CommTilingData | 改 headMSize 参数（tileCnt 派生） | 不动 | 不动 |
+| 改流水深度 | 无 | 无 | 调 headMSize/tileCnt（CommTilingData 字段） | ⚠️ 官方 ST 的 headMSize 命令行参数为**死参数**（仅日志打印，tiling 用重算值 `headMSize = CeilDiv(usedCoreNum, nTile) × baseM`）；须先在 main.cpp 接线（用入参覆盖重算值）再可调 | 不动 | 不动 |
+| 调通算并行 | 无 | 无 | 改 CommTilingData | 同上：先接线 headMSize（tileCnt 派生） | 不动 | 不动 |
 | 换卡数 | 无 | 无 | 无 | 改 rankNum 参数 | 改 gen_data | 不动 |
 | **新增计算在前算子（示例：ReduceScatter，见 §3.5）** | 重写 Run：AIC 自研 FragmentTensor kernel 全量 mm（消 R 循环，T>1 按轮拆子区间）+ SetFlag；AIV 逐轮 WaitFlag 门控 + Commit/Wait + SyncAll + 增量归约 | 自研 FragmentTensor mm kernel（默认，fusion.md §6.2.2；vendor 复用为例外须 SCALAR 论证，且 `QuantMatmulMxKernel.cGmAddr` 为 `GM_ADDR` 类型与 FragmentTensor C 输出不兼容）；独立归约文件（手动 UB + guard TBuf 隔离通信区，fusion.md §6.2.6） | 单份完整 mm tiling + commTilingData + 通信派生字段（每卡行数/chunk 字节/tile 字节/staging 大小/归约粒度） | host 校验清单（§3.5 共 9 项）+ T 派生（T 整除每卡行数，无尾块）+ staging 分配（完整输出大小）+ dtype dispatch（4 变体入口） | 改 gen_data（golden 切分轴核对） | 不动 |
 
@@ -218,10 +226,12 @@ operators/{OpName}/            ← camelCase（对齐 CANN 算子注册名）
 | 3 | Impl Run 编排 | AIC 统一 `for t` 循环（无 if/else，T=1 自然退化），**每轮 problem M = `R × GetTileM(t)`，地址带 tile 偏移**（见下方 per-tile 契约）。AIV 严格分离（默认）——编排骨架、分核映射公式（`jobIndex = GetBlockNum()-1-GetBlockIdx()`）、`Wait<BARRIER_NONE>`+手动 CrossDevice 序列以 [`fusion.md`](../fundamentals/fusion.md) §6.2.1 为唯一事实源，本节不重复 |
 | 4 | 增量归约 | 独立文件 `reduce_sum_ref.h`；手动 UB 批量形态（6-slot 布局 + src 双缓冲 + FP32 中间累加 + N 分段 + T≤1 批量退化）以 [`fusion.md`](../fundamentals/fusion.md) §6.2.6 为唯一事实源；禁止 TPipe/TQue 逐行模型 |
 | 5 | host 侧 | **前置校验清单**（见下）→ T/headMSize 派生（默认 `T \| mSeg` 无尾块；自适应 headMSize 决策与 flag 峰值联合约束见 [`fusion.md`](../fundamentals/fusion.md) §6.2.7；策略 A padding + 多套 tiling 为合法替代）→ staging 分配（`M×N×sizeof(CType)`）→ **dtype dispatch**（见下）→ fork 多进程 + TCP rootInfo 交换 + 建链 |
-| 6 | flag 编排 | flagId 按 [`fusion.md`](../fundamentals/fusion.md) §3.3 规则选取（避开保留区）；T=1 单次 / T>1 逐轮配对，峰值 ≤15；零 tile 核无条件 Set；SyncAll 在分核守卫外 |
+| 6 | flag 编排 | flagId 按 [`fusion.md`](../fundamentals/fusion.md) §3.3 规则选取；T=1 单次 / T>1 逐轮配对（Set/Wait 严格配对，计数深度按 R9 口径不设数值拒绝）；零 tile 核无条件 Set；SyncAll 在分核守卫外 |
 | 7 | Win 区偏移 | compute-first 单通信对象 PUT：**winOffset 必须显式设置，禁止 0 偏移**——Win 数据区偏移按 host 建链布局确定、PUT 写入/归约读取/host 建链三处同源（布局规则与"假通过"失败案例以 [`fusion.md`](../fundamentals/fusion.md) §6.2.4 为唯一事实源——官方布局 barrier 在独立 BARRIER_BUF、数据区从 0 可用；共享布局须按约定偏移跳过头部，一种已验证实现为 96B→128） |
 
 **dtype dispatch（禁止硬编码单入口）**：
+
+> ⚠️ 官方 A2A ST `main.cpp` 当前硬编码调用 E4M3E4M3 入口（4 个 dtype 入口已定义但 host 无分派）——运行期 dispatch 是本 skill 生产纪律（R3），不是官方 ST 现状，禁止以"官方如此"为由照抄硬编码。
 
 dtype 合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 **4 个 dtype 变体入口**（E4M3E4M3/E5M2E5M2/E4M3E5M2/E5M2E4M3，见 [`operator-anatomy.md`](operator-anatomy.md) §7.2）；其他 dtype 合同按组合数覆盖入口。host 侧必须按 `dtypeA`/`dtypeB` 参数**运行期分派**到对应 `__global__` 入口，禁止硬编码单一入口——硬编码单入口时，异 dtype 字节流被错误模板解释（E4M3/E5M2 指数/尾数位宽与 bias 均不同），精度全元素不通过。**全元素不通过 + 误差量级稳定是"系统性解释错误"的特征信号，区别于精度累积问题**（后者误差不收敛但 matched_ratio 非零）。dispatch 宏模板（宏名按算子命名，勿残留旧算子名）：
 
@@ -241,7 +251,7 @@ dtype 合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 **4 个 dtype 变�
 
 代码模板见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.10；不变量如下：
 
-| # | 不变量 | 违反后果（生产实证） |
+| # | 不变量 | 违反后果（工程实证） |
 |---|--------|---------------------|
 | 1 | 每轮 mm 只算本轮子区间（`R × curTileM` 行），禁止每轮全量 `[M, N]` mm | 全量 mm 重复覆写 staging，T 次冗余 + AIV 读到未完成数据 → T>1 精度系统性失败（raw_max 达万级 ULP） |
 | 2 | 归约每轮只处理 `turn` 对应行区间 `[turn×tileM, (turn+1)×tileM)`，禁止 `(void)turn` 处理全量 mSeg | 中间轮读取未填充 Win 区 → 精度 FAIL |
@@ -256,7 +266,7 @@ dtype 合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 **4 个 dtype 变�
 | 3 | `usedCoreNum ≥ rankSize` | TeamBarrier rendezvous 永不齐 → 无超时挂死 |
 | 4 | Win 容量 ≤ `HcclGetHcclBuffer` 实测值 | 通信越界 |
 
-> **约束联合推导原则**：单条约束各自满足 ≠ 联合可行。上表 #5/#7/#8 联合作用派生出 shape 可行域——`tileM ≤ 512KB/(N×sizeof(CType))`（#7）与 `T = mSeg/tileM`，且 `T ≤ 15`（flag 峰值，#5）且 `R×T ≤ 32`（FragmentTensor，#8）联合推出 `M×N` 元素上限；T 派生必须以 `maxTileM`（#7 推导值）为搜索基准做双向搜索，而非仅按 headMSize 分档值派生。host 校验与 T 派生必须覆盖派生边界，cases.csv 必须包含约束边界用例（strided 场景 N>redUbN、T 边界、R 边界）——**硬件隐式上限类缺陷（静默丢零、无报错）只在边界用例下暴露**，缺失边界用例 = 缺陷逃逸到生产。
+> **约束联合推导原则**：单条约束各自满足 ≠ 联合可行。正确性类约束（m%R、scale 偶数、tailM 16 对齐、Win 容量、usedCoreNum≥R+1、`R ≤ 32` FragmentTensor 容量）联合作用派生出 shape 可行域；风险提示类数值（单轮 PUT 大小、flag 计数深度）不进强制拒绝清单，按 case 复核（详见场景文档 §3.1 修订版）。host 校验与 T 派生必须覆盖派生边界，cases.csv 必须包含约束边界用例（strided 场景 N>redUbN、尾块边界、R 边界）——**硬件隐式上限类缺陷（静默丢零、无报错）只在边界用例下暴露**，缺失边界用例 = 缺陷逃逸到生产。
 
 **验收清单**：compute-first 场景的逐项验收以 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §6 合规映射（本场景最易踩中项 → 落点）+ [`review-checklist.md`](../review-checklist.md) 场景约束表为唯一事实源，本节不重复。
 
@@ -278,7 +288,7 @@ dtype 合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 **4 个 dtype 变�
 | 编译选项 | 主仓统一 | `-xasc --npu-arch=dav-3510 -DASC_DEVKIT_MAJOR=9 -O3` |
 | hccl_fwk | 主仓链接 | `-Wl,--no-as-needed hccl_fwk -Wl,--as-needed` |
 
-**CMake 骨架（生产验证范式）**：
+**CMake 骨架（已验证范式）**：
 
 ```cmake
 set(ASCEND_DIR $ENV{ASCEND_HOME_PATH})
@@ -337,7 +347,7 @@ set(COMMON_LIBS dl platform tiling_api ascendcl runtime hccl stdc++)
 
 ### 4.4 run.sh / cases.csv [MODIFY]
 
-**验收条件**：cases.csv 中的 shape 和参数与新算子匹配。官网 cases.csv 列为 `m,k,n,rank_num,head_m_size`；run.sh 支持按行号/`all`/`--cli`/`--perf` 运行（`--perf` 模式产出经 `scripts/parse_prof.py` 解析）。
+**验收条件**：cases.csv 中的 shape 和参数与新算子匹配。官网两份 ST 列名不同：all_to_all 为 `m,k,n,rank_num,head_m_size`，all_gather 为 `m,k,n,rank_num`（无 head_m_size，tileM 固定 `min(m, 512)`）；run.sh 支持按行号/`all`/`--cli`/`--perf` 运行（`--perf` 模式产出经 `scripts/parse_prof.py` 解析）。
 
 ### 4.5 main.cpp [MODIFY]（`src/main.cpp`）
 
@@ -373,7 +383,7 @@ set(COMMON_LIBS dl platform tiling_api ascendcl runtime hccl stdc++)
 |:---|:---|
 | 同 shape × 不同 rankNum 对照 | 暴露通信切分与 rank 数相关问题 |
 | 通信 tile 粒度参数扫描（如 headMSize） | 覆盖流水深度边界（含 tileCnt=1 退化） |
-| **T=1 与 T>1 双路径** | 退化路径最容易藏布局/初始化 bug；**只测 T=1 会掩盖多 tile 问题**（生产实证：多 tile 下输出布局非 row-major 时 reducer 读错位，T=1 恰好 row-major 全部 PASS） |
+| **T=1 与 T>1 双路径** | 退化路径最容易藏布局/初始化 bug；**只测 T=1 会掩盖多 tile 问题**（典型形态：多 tile 下输出布局非 row-major 时 reducer 读错位，T=1 恰好 row-major 全部 PASS） |
 | 小 rank（如 rank=2） | 退化通信路径（self 合并、单 peer）单独验证 |
 | tail 非整除 shape | 暴露 tail tile 对齐/padding 问题（"仅非对齐 shape 失败"是 tail 路径的特征信号） |
 | 极小 shape | 覆盖退化路径（单 tile、零 tail） |

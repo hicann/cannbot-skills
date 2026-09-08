@@ -27,7 +27,7 @@
 |------|------|
 | 方向 | GET = 计算→通信：AIC 先算 C 写到 Win 区，AIV 从远端 Win 区拉回本 rank 的 C 段 |
 | 编排 | AIC 先 SetFlag → AIV WaitFlag |
-| 回压 | AIC WaitFlag<0x2, PIPE_M>(tid-bufCnt) 环形回压 |
+| 回压 | AIC `CrossCoreWaitFlag<0x2, PIPE_M>(tid-bufCnt)` 环形回压（原理推导：回压 gate AIC 计算主流水，pipe 选取见 `api-crosscore-sync.md` §4；与 [`fusion.md`](../../fundamentals/fusion.md) §3.4 契约一致；bufCnt 为深度参数） |
 
 ### 3.2 数据分布
 
@@ -45,7 +45,7 @@
 | 维度 | 合同 |
 |------|------|
 | 环形复用 | Win 槽位环形复用 + 回压（bufCnt 控制槽位数） |
-| 回压机制 | AIC WaitFlag<0x2, PIPE_M>(tid-bufCnt) 等待槽位可用 |
+| 回压机制 | AIC `CrossCoreWaitFlag<0x2, PIPE_M>(tid-bufCnt)` 等待槽位可用（原理推导，非官方样例） |
 | 数据/元数据 | 分离，host/kernel 偏移同源 |
 
 ### 3.4 通信轮次

@@ -54,7 +54,7 @@ __aicore__ inline void CrossCoreWaitFlag(uint16_t flagId);
 | 参数 | 类型 | 含义 |
 |:---|:---|:---|
 | `modeId` | `uint8_t` | 建议与 SetFlag 的 modeId 一致（A3/910b 上该模板参数不生效，实践中存在 Set 0x2 / Wait 默认 0 的配对） |
-| `pipe` | `pipe_t` | 等待 flag 的流水线阶段（平台约束见 §4） |
+| `pipe` | `pipe_t` | 等待 flag 的流水线阶段（平台约束见 §4；**模板/无模板形态的标量流阻塞差异见 §4.1**） |
 | `flagId` | `uint16_t` | 必须与 SetFlag 的 flagId 一致（截断后相同即可，见 §3） |
 
 ### 2.3 SyncAll
@@ -79,7 +79,7 @@ __aicore__ inline void SyncAll();
 - Mix 算子 `isAIVOnly=true` 只同步 Vector 核
 - block 数不得超过物理核数
 - 多流并发场景需 batchmode，否则死锁
-- SyncAll 硬同步内部占用 flagId [11-14]（见 §3），官方不建议与 CrossCoreSetFlag 混用
+- SyncAll 硬同步内部占用保留 flagId（`<true>` 仅占 14；`<false>` 占 11/12/13，见 §3），官方不建议与 CrossCoreSetFlag 混用
 
 **性能代价（多核流水场景必须知晓）**：SyncAll 是全 block 硬栅栏——所有参与核必须全部到达才能放行，会**打散不同角色核之间的时间线重叠、阻断流水**。使用纪律：
 
@@ -104,10 +104,12 @@ __aicore__ inline void WaitFlag(int32_t eventID);
 
 | modeId | 含义 | 平台 |
 |:---|:---|:---|
-| `0` | AI Core 核间同步（AIC 调用时同步所有 AIC；AIV 调用时同步所有 AIV） | 950/A3/A2 |
-| `1` | AI Core 内部两个 AIV 之间的同步 | 950/A3/A2 |
-| `2`（`0x2`） | 同核 AIC 与所有 AIV 之间的同步 | 950/A3/A2 |
+| `0` | AI Core 核间同步（AIC 调用时同步所有 AIC；AIV 调用时同步所有 AIV） | 950/A3/910b |
+| `1` | AI Core 内部两个 AIV 之间的同步 | 950/A3/910b |
+| `2`（`0x2`） | 同核 AIC 与所有 AIV 之间的同步 | 950/A3/910b |
 | `4`（`INTRA_MODE`） | AscendC Matmul 高阶 API 内部使用 | 仅 950，且要求 `KERNEL_TYPE_MIX_AIC_1_2` |
+
+> 平台标签为官方文档口径：`950` = Ascend 950PR/950DT（DAV_3510）、`A3` = Atlas A3 训练/推理系列产品、`910b` = Atlas A2 训练/推理系列产品（A3 与 910b 同为 DAV_2201）。
 
 > `CROSS_CORE_INNER_CUBE_VEC_SYNC`（=0x2）常量名常见于通算融合框架代码；asc-devkit 文档以数值 0x2 表述。
 
@@ -119,15 +121,15 @@ __aicore__ inline void WaitFlag(int32_t eventID);
 |:---|:---|
 | 数量上限 | 模式 0/1/2 每核仅 **16 个 flagId（0-15）**，超出**截断低 4bit** |
 | 截断风险 | 超出 15 的 flagId 会被截断低 4bit——**禁止**直接拿无界索引（如 tile id）当 flagId：截断后可能撞入保留区 [11,14] 与 SyncAll 冲突，且复用节奏不可控。正确做法：显式分配少量固定 flagId 做 ping-pong 轮转（见下方分配策略） |
-| 计数器语义 | 每个 flagId 对应一个计数器（0-15），Wait 消耗一次计数；Set/Wait 必须配对，否则未定义行为/异常中断；逐 tile 计数式配对时**峰值（Set 未被 Wait 消耗的次数）必须 ≤ 15**，host 侧强制校验 |
-| 保留区间 | **SyncAll 硬同步内部占用 flagId [11-14]**；Matmul 高阶 API 占用 flagId [0, 2N-1]（N = 高阶 API 内部使用的 flag 通道数，最多 4 个即 [0,7]；Blaze 模板 matmul 同样占用此区间） |
+| 配对语义 | Wait 消耗一次计数；Set/Wait 必须严格配对，否则未定义行为/异常中断——这是**唯一有实证的硬约束**。**计数器范围官方有据**：每个 flagId 对应计数器，计数范围 0-15，超限异常报错中断流程（官方 `CrossCoreWaitFlag` 文档）。该计数器衡量**未消费积压**（Set 完成递增、Wait 解除递减），紧邻配对编排（每轮 Set 后消费者立即 Wait）下积压 ≈ 1-2，远低于上限——因此计数器 0-15 **不构成轮次 T 的上限**：计数式固定 flagId（如 0/1）已生产验证 T=16（Set/Wait 各 16 次稳定，dav-3510/CANN 9.2.0 MC2 算子）。**禁止以"计数器范围 0-15"为由推导 T ≤ 15 类上限并做 host 强制校验**（历史误用案例：某工程据此压缩流水深度，官方实现 T=16 通过） |
+| 保留区间 | **SyncAll 硬同步内部占用保留 flagId：`<true>`（isAIVOnly=true）仅占 14，`<false>` 占 11/12/13**（官方 SyncAll 文档表3/表4；CANN 实现常量 `SYNC_AIC_FLAG=11`/`SYNC_AIV_FLAG=12`/`SYNC_AIC_AIV_FLAG=13`/`SYNC_AIV_ONLY_ALL=14`，`kernel_operator_sync_impl.h`）——与 SyncAll 组合使用时保守避让整个 **[11,14]**。**Matmul 高阶 API（mode 4，`AscendC::Matmul`）占用 flagId [0, 2N-1]**（N = 高阶 API 内部使用的 flag 通道数，最多 4 个即 [0,7]）。**Blaze 模板按变体区分**：`block_mmad_qbmm_mx` / `block_scheduler_qbmm` 系（qbmm_mx 系）只用核内 HardEvent、**不占 CrossCore flagId**（grep 零命中实证）；个别 Blaze 变体（如 `b_fullLoad_fixpipe_opti`、`weight_prologue_mx`）走 mode 4、占用 [0, 2N-1]。**确认方法**：对所用 Blaze 模板 grep `CrossCore`，零命中即不占 |
 | 混用风险 | 官方不建议同时使用 CrossCoreSetFlag 与 SyncAll 硬同步；组合使用时，自定义 flagId 落入 [11,14]（截断后）存在冲突风险 |
 | 发射顺序 | 同一核连续发出的 CrossCoreSetFlag，硬件**不保证执行顺序**——不要依赖 per-flag 的先后次序 |
 
-**flagId 分配策略（通道式流水场景）**：可用集合 = [0,15] − Matmul 保留区 [0, 2N-1] − SyncAll 保留区 [11,14]；按最保守估计（Matmul 占满 [0,7]）自定义可用仅剩 **[8, 9, 10, 15] 共 4 个**。设计原则：
+**flagId 分配策略（通道式流水场景）**：可用集合 = [0,15] − 实际存在的 mode 4 保留区 [0, 2N-1] − SyncAll 保留区 [11,14]；**保守集 [8, 9, 10, 15] 仅当 kernel 内确有 mode 4 使用方（`AscendC::Matmul` 高阶 API 或走 mode 4 的 Blaze 变体）时按此收缩**——Blaze qbmm_mx 系 kernel（无 mode 4）可直接用 [0,10]∪{15}（官方 MC2 算子即用 0/1）。设计原则：
 
-1. 从空闲区显式挑选固定 ID——**选值前必须确认同 kernel 内 matmul 实现的实际保留范围**（实际占用可能少于最保守的 [0,7]，空闲区会更大），不能仅凭"最多 [0,7]"假设选值
-2. 一条生产者→消费者通道用一个固定 ID 做计数式配对（T 次 Set ⇔ T 次 Wait，峰值 ≤ 15）
+1. 从空闲区显式挑选固定 ID——**选值前必须确认同 kernel 内 matmul 实现的实际保留范围**：先查所用模板是否走 mode 4（grep `CrossCore` 零命中即不占），不能仅凭"最多 [0,7]"假设选值
+2. 一条生产者→消费者通道用一个固定 ID 做计数式配对（T 次 Set ⇔ T 次 Wait，紧邻配对下计数自然平衡）
 3. 需要多条通道（如计算完成通知 + 回压）时各用一个固定 ID
 4. 与 SyncAll 同 kernel 使用时，再次确认自定义 ID 不在 [11,14]
 
@@ -137,17 +139,35 @@ __aicore__ inline void WaitFlag(int32_t eventID);
 
 | 平台 | modeId/pipe 模板参数 | pipe 约束 |
 |:---|:---|:---|
-| **A3 / 910b（DAV_2201）** | **不生效**——CrossCoreWaitFlag 阻塞全部流水 | 参数无实际作用 |
-| **950（DAV_3510）** | 生效 | 模式 0/1/2 **不支持 `PIPE_S`/`PIPE_ALL`**；`PIPE_S` 仅模式 4 支持 |
+| **A3 / 910b（DAV_2201，即 Atlas A2/A3 系列）** | **不生效**——CrossCoreWaitFlag 阻塞全部流水 | 参数无实际作用 |
+| **950（DAV_3510，即 Ascend 950PR/950DT）** | 生效 | 模板形态模式 0/1/2 **不支持显式 `PIPE_S`/`PIPE_ALL`**（无模板形态见 §4.1）；`PIPE_S` 仅模式 4 支持 |
 
-**移植要点**：在 A3 上能运行的 `CrossCoreWaitFlag<0x2, PIPE_S>(id)` 写法依赖"A3 参数不生效"的硬件行为；迁到 950 时模式 0/1/2 下 `PIPE_S` 违反官方约束，需改为合法 pipe。
+### 4.1 形态语义：模板形态 vs 无模板形态（950 关键差异）
+
+`CrossCoreWaitFlag` 的两种调用形态在 950 上语义不同，**选错形态 = 数据竞态**：
+
+| 形态 | 950 行为（Ascend 950PR/950DT） | A3/910b 行为（Atlas A2/A3 系列） |
+|:---|:---|:---|
+| 模板形态 `CrossCoreWaitFlag<mode, pipe>(id)` | 等待插入**指定 pipe 队列**，只阻塞该 pipe 的后续指令——**标量流不被 gate**（官方文档："阻塞指定流水的后续指令"；实现 `wait_flag_dev(pipe, flagId)`） | 模板参数不生效，阻塞**全部**流水 |
+| 无模板形态 `CrossCoreWaitFlag(id)`（默认 `<0, PIPE_S>`） | **阻塞本核指令流**（标量流）——官方示例注释："阻塞本AIV继续往下执行指令" | 同上（阻塞全部流水） |
+
+**官方惯用配对**：模板 Set（pipe 覆盖数据产出路径）⇔ **无模板 Wait**。注册版算子与 devkit 示例均为此形态：`attention/chunk_gated_delta_rule/op_kernel/arch35/chunk_gated_delta_rule_stage3.h:117-125`（`CrossCoreSetFlag<0x2, PIPE_FIX>(0x3)` ⇔ `CrossCoreWaitFlag(0x3)`）、`mc2/matmul_reduce_scatter_v2/op_kernel/arch35/matmul_reduce_scatter_fp16_bf16.h:142-143`（`CrossCoreSetFlag<0, PIPE_FIX>(3)` ⇔ `CrossCoreWaitFlag(3)`）。
+
+**竞态反例（生产实测，dav-3510）**：AIV 通信核用模板形态 `CrossCoreWaitFlag<0x2, PIPE_MTE2>(id)` 门控"等 AIC 写完 staging 再 PUT"——等待只挂 MTE2 队列，**标量流继续执行**，紧随其后的 `Hcomm` WriteNbi 下发（标量流操作）在 flag 生效前执行 → PUT 读到未写完的 staging → 对端 Win 槽头部数据为 0（间歇性精度失败）。修复 = 改无模板 Wait。注意：模板 Wait 之后若紧跟 `SyncAll<true>()`/`PipeBarrier<PIPE_ALL>()`（排空所有 pipe 含等待），会**恰好掩盖**该缺陷——掩盖不等于正确，编排顺序一变竞态即暴露。
+
+**选型规则**：
+- Wait 之后本核还有**标量流操作**依赖该数据就绪（如通信对象 `Commit`/WriteNbi 下发）→ **必须无模板形态**（或显式补标量流阻塞）
+- Wait 的目的是 gate 本核某条 pipe 上的数据消费（如 AIC 等 MTE2 装载完成再计算）→ 模板形态合法，pipe 覆盖消费路径
+- 官方张力说明：模式 0/1/2 不支持**显式** `PIPE_S`（§4 表），但无模板形态默认值恰为 `<0, PIPE_S>` 且为官方示例/注册版惯用——按官方示例口径，无模板形态在 950 上合法且阻塞标量流
+
+**移植要点**：A3 上模板参数不生效（任何形态都阻塞全部流水）；迁 950 后模板形态只 gate 指定 pipe、无模板形态 gate 标量流——迁移时必须按 §4.1 重新审视每处 Wait 的形态选择。
 
 **pipe 选择原则（数据可见性）**：pipe 参数的本质是"flag 挂在哪条流水线上生效"，选择规则：
 
 | 方向 | 规则 | 典型搭配 |
 |:---|:---|:---|
 | Set（通知方） | pipe 必须**覆盖数据产出路径**——数据经哪条 pipe 写出，Set 就挂哪条，保证 Set 生效时数据已物理落盘 | AIC fixpipe 写出计算结果 → `PIPE_FIX`；AIV MTE3 搬出/通信写出 → `PIPE_MTE3` |
-| Wait（消费方） | pipe 必须**覆盖数据消费路径**——消费方第一条触碰该数据的 pipe | AIV 随后用 MTE2 搬入数据 → `PIPE_MTE2`；AIC 复用 buffer 继续算 → `PIPE_M` |
+| Wait（消费方） | pipe 必须**覆盖数据消费路径**——消费方第一条触碰该数据的 pipe；**但模板形态只 gate 该 pipe 本身**：若消费动作由标量流发起（如通信对象 `Commit`/WriteNbi 下发），模板形态不阻塞标量流，须改无模板形态（§4.1） | AIV 随后用 MTE2 搬入数据 → `PIPE_MTE2`（仅当后续 MTE2 指令消费）；AIC 复用 buffer 继续算 → `PIPE_M` |
 
 配错 pipe 的后果：Set 挂的 pipe 先于数据写出完成 → 消费者读到脏数据（偶发、难复现）；A3 上因参数不生效不会暴露，迁 950 才发作。
 
@@ -166,7 +186,7 @@ if ASCEND_IS_AIC {
 
 // AIV 侧：等待 AIC 通知后消费数据
 if ASCEND_IS_AIV {
-    CrossCoreWaitFlag<0x2, PIPE_S>(flagId);   // A3 上 pipe 参数不生效
+    CrossCoreWaitFlag(flagId);              // 无模板形态：阻塞本核指令流（官方配对惯例，见 §4.1）
     // ... 消费数据 ...
     CrossCoreSetFlag<0x2, PIPE_MTE3>(flagId); // 回压：通知 AIC 可复用
 }
@@ -200,7 +220,8 @@ if ASCEND_IS_AIV {
 |:---|:---|:---|
 | Set/Wait 的 flagId 不配对 | 未定义行为/异常中断 | 双方 flagId 截断后必须相同；Set 几次就 Wait 几次 |
 | 自定义 flagId 落入 [11,14] | 与 SyncAll 内部 flag 冲突 | 组合使用 SyncAll 时避开保留区间 |
-| 950 上模式 0/1/2 使用 `PIPE_S` | 违反官方约束 | 950 上改用合法 pipe（PIPE_S 仅模式 4） |
+| 950 上模式 0/1/2 使用显式 `PIPE_S` | 违反官方约束 | 950 上改用合法 pipe 或无模板形态（PIPE_S 仅模式 4 显式支持） |
+| AIV 侧用模板 Wait 门控标量流操作（如 WriteNbi/Commit 下发） | 标量流不被 gate，操作提前执行 → 数据竞态（间歇精度错） | 改无模板形态 `CrossCoreWaitFlag(id)`，或显式补标量流阻塞（§4.1） |
 | 依赖连续 SetFlag 的执行顺序 | 偶发同步紊乱 | 硬件不保证顺序，用计数器配对语义而非次序假设 |
 | 纯 Vector 算子 `SyncAll<false>()` | 卡死 | 纯 Vector 必须 `isAIVOnly=true` |
 | 混用 HardEvent SetFlag 与 CrossCoreSetFlag 概念 | 同步层级错误 | HardEvent 是核内 pipe 间；CrossCore 是跨核 |
@@ -212,6 +233,7 @@ if ASCEND_IS_AIV {
 - [ ] Set/Wait flagId 配对（截断后相同，次数相等）
 - [ ] 自定义 flagId 避开 SyncAll 保留区间 [11,14] 与 Matmul 高阶 API 区间 [0, 2N-1]
 - [ ] 目标平台已确认 modeId/pipe 生效性与 pipe 约束（§4）
+- [ ] 每处 CrossCoreWaitFlag 形态已按 §4.1 核对：Wait 后有标量流依赖操作（如通信下发）时用无模板形态
 - [ ] SyncAll：纯 Vector 用 `isAIVOnly=true`；所有参与 block 都能到达
 - [ ] 未依赖连续 SetFlag 的执行顺序
 - [ ] 核内 pipe 同步用 `SetFlag<HardEvent>`，跨核用 CrossCoreSetFlag，未混用

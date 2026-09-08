@@ -68,13 +68,15 @@ AIC (MatmulProcess)                            AIV (AllToAllProcess)
 tile tid:
   [if ring: WaitFlag<0x2, PIPE_M>(tid-bufCnt)] ←── 回压
   RunMatmul(C → Win[tid % bufCnt])
-  SetFlag<0x2, PIPE_FIX>(tid)          ──→    WaitFlag<0x2, PIPE_S>(tid)
-                                               Commit(GET C[tid])
-                                               Wait(true)
+  SetFlag<0x2, PIPE_FIX>(tid)          ──→    WaitFlag(tid)   // 无模板：阻塞标量流
+                                                Commit(GET C[tid])
+                                                Wait(true)
   [if ring: ...]                        ←──   SetFlag<0x2, PIPE_MTE3>(tid)
 ```
 
 > GET 模式 `AllToAllProcess` 中不需要 `SyncAll`。同步完全由 CrossCore flag 负责。
+>
+> 以上为**契约级推导**（官网无 GET 样例）：AIV 侧 Wait 后紧随标量流 `Commit`（ReadNbi 下发），故用无模板形态（形态语义见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §4.1）；AIC 侧回压 Wait gate 计算主流水，用 `PIPE_M` 模板形态。实现前须对照钩子源码逐条验证（见 [`scenarios/get-all-gather-quant-matmul/development.md`](../scenarios/get-all-gather-quant-matmul/development.md)）。
 
 ### 3.2 PUT 编排不变量
 
@@ -96,20 +98,20 @@ round tid:
 
 ### 3.3 flagId 选择规则
 
-flagId 的硬件规则（16 通道截断、计数器硬上限 0-15、SyncAll 保留区 [11-14]、Matmul 保留区 [0, 2N-1]、发射顺序不保证、通道式分配策略）以 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` 为唯一事实源，本节只保留编排层推导：
+flagId 的硬件规则（16 通道截断、计数器 0-15 衡量未消费积压、发射顺序不保证）以 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` 为唯一事实源，本节只保留编排层推导：
 
-- 官网两个 PUT 算子均使用**轮次索引 `tid`/`round`** 作为 flagId（`CrossCoreSetFlag<0x2, PIPE_MTE3>(tid)`）。其能工作的硬件基础是 16 通道截断（Set/Wait 双方截断到同一 flag，配对保持）；但截断不等于安全——`tid % 16 ∈ [11,14]` 时会落入 SyncAll 保留区，存在冲突风险。因此实践约束为 **commTurn ≤ 16**（apace 官方定义 `FLAG_ID_MAX = 16`，`utils/constant.h:59`）：既保证 flagId 不超界，也不落入保留区；超限必须放大 tileM 降低轮次。移植到新平台需重新确认保留区范围
-- **计算在前 per-tile 流水算子** T>1 时为逐轮计数式配对，峰值 = T，host 侧必须强制校验 **T ≤ 15**（详见 §6.2.3）
-- 另有 `waitedMask` 为 uint32 位掩码 → 通信 tile 总数 ≤ 32（§4.2），与 commTurn ≤ 16 取更严者
+- 官网两个 PUT 算子均使用**轮次索引 `tid`/`round`** 作为 flagId（`CrossCoreSetFlag<0x2, PIPE_MTE3>(tid)`），硬件基础是 16 通道截断（Set/Wait 双方截断到同一 flag，配对保持）。实践约束：轮次索引式 flagId 时轮次索引 ∈ [0, FLAG_ID_MAX)（apace 官方定义于 `utils/constant.h:59`），**且须避开 SyncAll 保留区**——官方 PUT 算子每轮 `SyncAll<true>`（占用 flagId 14，见 `api-crosscore-sync.md` §3），轮次索引实际安全上界为 13；超限必须放大 tileM 降低轮次。**更优做法（compute-first 工程验证）**：改用**计数式固定 flagId（如 0/1）**——Set/Wait 各 T 次、计数自然平衡，不受轮次数影响，也不与保留区冲突
+- **计算在前 per-tile 流水算子** T>1 时为逐轮计数式配对，紧邻配对下积压小；flagId 数量 16 是硬事实；计数器 0-15 衡量**未消费积压**（紧邻配对下 ≈ 1-2，官方有据，详见 §6.2.3），不构成 T 上限，T 上限按 case 实测确定
+- 另有 `waitedMask` 为 uint32 位掩码 → 通信 tile 总数 ≤ 32（§4.2），与上述 flagId 约束取更严者
 
 **compute-first 算子的两种 flag 模式（均合法，按场景选型）**：
 
 | 模式 | 形式 | 优点 | 注意点 |
 |:---|:---|:---|:---|
-| **计数式 flag（推荐）** | flagId 恒定（如 0），AIC T 次 Set ↔ AIV T 次 Wait，计数器递推天然支持流水 | 简单、无需按轮次管理 flagId、单 flagId 避开保留区一次即可 | 峰值 = T ≤ 15（计数器硬上限）；Set/Wait 必须严格逐轮配对 |
-| **per-turn flag** | 每轮独立 flagId（`flagId + t`），AIC Set(flagId+t) ↔ AIV Wait(flagId+t) | 各轮 flag 独立可观测，调试时可按轮次定位配对缺失 | flagId 基值须避开 SyncAll 保留区 [11,14] 且 `flagId + T - 1` 不得落入保留区；峰值同样 ≤ 15 |
+| **计数式 flag（推荐）** | flagId 恒定（如 0），AIC T 次 Set ↔ AIV T 次 Wait，计数器递推天然支持流水 | 简单、无需按轮次管理 flagId、不与 SyncAll 保留区冲突 | Set/Wait 必须严格逐轮配对；计数器 0-15 衡量未消费积压，紧邻配对下不触顶（不构成 T 上限，R9 口径不设数值拒绝） |
+| **per-turn flag** | 每轮独立 flagId（`flagId + t`），AIC Set(flagId+t) ↔ AIV Wait(flagId+t) | 各轮 flag 独立可观测，调试时可按轮次定位配对缺失 | `flagId + T - 1` < 16 且避开 SyncAll 保留区 14（每轮 `SyncAll<true>` 时实际上界 13） |
 
-> 两模式在 16 通道截断与 15 计数上限上受同一硬件约束；选型不影响正确性，**推荐计数式**（实现更简，且 flagId 保留区冲突面最小）。
+> 两模式受同一硬件 flagId 数量上限（16 个通道）约束；选型不影响正确性，**推荐计数式**（实现更简）。
 
 ### 3.4 环形回压与 bufferCount
 
@@ -218,7 +220,7 @@ AIC 在 kernel 内经 `CommPolicy::WaitTile` 等待通信数据，策略类由�
 > - `splitKNum` 赋值见官方 AllToAll impl `SetupParams`：localMatmul==1 → `rankSize - 1`；localMatmul==0/2 → `rankSize`。
 > - mode 0 **不开启 AtomicAdd**：`isAtomicAdd_` 仅在 `matmulMode==REMOTE && localMatmul==1` 时置位（qbmm kernel `Init`）。
 > - ⚠️ 官网 ST 仅覆盖 `localMatmul = 0`（官方 AllToAll ST main.cpp 显式设置）；mode 1/2 在 kernel 分支中存在但无 ST 样例。
-> - ⚠️ **mode 2 仅 UDMA impl 可达**：`localMatmul==2` → `DEFERRED_SYNC` 的选择分支只存在于官方 AllToAll UDMA impl `RunMatmul()`。hcomm 变体（CCU 引擎）对任何 `localMatmul != 0` 都做 LOCAL 前置 + 恒 REMOTE（`splitKNum = rankDim - 1`、不开 AtomicAdd），而 kernel REMOTE 分支仅 `localMatmul==1` 才跳过 self → hcomm 下 `localMatmul==2` 的 self 被 LOCAL 前置与 REMOTE 各算一次、mmad 计数与 `splitKNum` 错配，**静默产生错误结果（无任何报错）**。使用 mode 2 必须确认走 UDMA impl。
+> - ⚠️ **mode 2 仅 UDMA impl 可达**：`localMatmul==2` → `DEFERRED_SYNC` 的选择分支只存在于官方 AllToAll UDMA impl `RunMatmul()`。hcomm 变体（CCU 引擎）对任何 `localMatmul != 0` 都做 LOCAL 前置 + 恒 REMOTE（`splitKNum = rankDim - 1`）；注意 hcomm 把 `tilingData_->localMatmul` 原样透传给共享 kernel，kernel 在 `matmulMode==REMOTE && localMatmul==1` 时置 `isAtomicAdd_` 并由 `Run` 包裹 `SetAtomicAdd/SetAtomicNone`——即 **hcomm mode 1 经共享 kernel 开启 AtomicAdd（且正是 splitKNum=rankDim-1 路径正确的前提）**；但 mode 2 时 kernel REMOTE 分支仅 `localMatmul==1` 才跳过 self → hcomm 下 `localMatmul==2` 的 self 被 LOCAL 前置与 REMOTE 各算一次、mmad 计数与 `splitKNum` 错配，**静默产生错误结果（无任何报错）**。使用 mode 2 必须确认走 UDMA impl。
 
 ### 5.2 模式选择决策树
 
@@ -253,7 +255,7 @@ AIC 在 kernel 内经 `CommPolicy::WaitTile` 等待通信数据，策略类由�
 
 ### 5.3 L0C 容量约束（DAV_3510）
 
-DAV_3510 的 L0C 容量为 **256 KB**。所有模式下，单个 tile 内各 rank 的部分和都**累加进同一块 L0C FP32 累加器**（mmad 第 8 参 `0` = reset、递增 = 累加、计满 `splitKNum` 触发单次 fixpipe；REMOTE 与 DEFERRED_SYNC 分支均如此，见官方 AllToAll qbmm kernel `ProcessSingleBatch` 及 Blaze `block_mmad_qbmm_mx.h`——Blaze 头文件来自 ops-tensor 仓，由 `cmake/third_party/ops-tensor.cmake` 按 pin 拉取，asc-devkit 安装内无 blaze 头文件），因此 L0C 需求**与 rankSize 无关、dtype 固定为 FP32，且对三种 localMatmul 模式完全相同**：
+DAV_3510 的 L0C 容量为 **256 KB**（芯片规格以 npu-arch skill 为唯一知识源，此处数值仅为约束推导参考，生产代码按目标芯片实际容量核算）。所有模式下，单个 tile 内各 rank 的部分和都**累加进同一块 L0C FP32 累加器**（mmad 第 8 参 `0` = reset、递增 = 累加、计满 `splitKNum` 触发单次 fixpipe；REMOTE 与 DEFERRED_SYNC 分支均如此，见官方 AllToAll qbmm kernel `ProcessSingleBatch` 及 Blaze `block_mmad_qbmm_mx.h`——Blaze 头文件来自 ops-tensor 仓，由 `cmake/third_party/ops-tensor.cmake` 按 pin 拉取，asc-devkit 安装内无 blaze 头文件），因此 L0C 需求**与 rankSize 无关、dtype 固定为 FP32，且对三种 localMatmul 模式完全相同**：
 
 ```
 L0C 需求 = baseM × baseN × 4B（FP32）
@@ -271,70 +273,11 @@ L0C 需求 = baseM × baseN × 4B（FP32）
 
 **该约束对三种模式一视同仁，mode 2 相对 mode 1 没有额外 L0C 负担** — REMOTE 阶段（mode 0/1）与 DEFERRED_SYNC（mode 2）都是把各 rank 部分和累加进同一块 L0C 累加器（首份 reset、末份触发 fixpipe）；mode 1 的 AtomicAdd 发生在 fixpipe 写 GM 时，并不改变 L0C 占用；mode 1 的 LOCAL 阶段单发 mmad（`splitKNum=1`）同样只占这一块累加器。L0C 容量不足时三种模式同样不可用，只能调小 `baseM`/`baseN`。
 
-### 5.4 MTE 异常修复方案（localMatmul=1 的关键修复）
+### 5.4 localMatmul=1 的流水屏障修复
 
-#### 5.4.1 问题现象
+无屏障时，LOCAL 阶段 fixpipe（MTE3 管线）尚未排空，REMOTE 阶段的 `SetAtomicAdd` + AtomicAdd fixpipe 在同一 MTE3 管线上做 read-modify-write 会读到未完全写入的旧值 → MTE 硬件异常/超时类错误。**修复**：在 `RunLocalMatmul()` 与 `RunMatmul()` 之间加 `PipeBarrier<PIPE_ALL>()`（强制等待所有 pipe 完成后再继续，API 详见 `ascendc-api-best-practices` skill `references/api-pipeline.md`）。
 
-localMatmul=1 模式下，RunLocalMatmul 和 RunMatmul 之间**如果没有 PipeBarrier**，可能触发：
-
-```
-aclError:507015 (timeout or trap error)
-MTE error info: 非零
-所有核心超时
-```
-
-> 注：`aclError:507015` 是泛化的 timeout/trap 错误码，多根因共用——除本节的 MTE 异常外，`__schedmode__(1)` 导致的 AIC/AIV 串行死锁也表现为该码（见 [`architecture.md`](architecture.md) §10①）。定位时须结合 MTE error info 与代码上下文区分。
-
-#### 5.4.2 根因分析
-
-```
-AIC 侧时序（无 PipeBarrier）：
-  RunLocalMatmul()
-    └─ Blaze BlockMmad → L0C → fixpipe → MTE3 → GM（首次写入 C）
-       ↑ MTE3 pipeline 仍在排空中...
-  SetAtomicAdd<CType>()    ← AtomicAdd 配置生效
-  RunMatmul()
-    └─ Blaze BlockMmad → L0C → fixpipe → MTE3 → GM（AtomicAdd 累加）
-       ↑ MTE3 pipeline 的 LOCAL fixpipe 尚未完成，
-         AtomicAdd 的 read-modify-write 读取了未完全写入的 GM 值
-         → MTE 硬件异常（aclError:507015）
-```
-
-**核心矛盾**：LOCAL 阶段的 fixpipe（MTE3 管线）和 REMOTE 阶段的 SetAtomicAdd + AtomicAdd fixpipe 共享同一 MTE3 管线，如果 LOCAL 的 MTE3 尚未排空，REMOTE 的 AtomicAdd 会在 GM 上做 read-modify-write 时读到未完全写入的旧值，触发 MTE 异常。
-
-#### 5.4.3 修复方案（推荐补丁，官网未合入）
-
-> ⚠️ **官网现状**：官方 AllToAll UDMA impl `Run()` 当前为 `RunLocalMatmul()` 直接接 `RunMatmul()`，**两者之间无 PipeBarrier**。以下为推荐修复方案，Developer 在使用 localMatmul=1 时应添加。
-
-在 `RunLocalMatmul()` 和 `RunMatmul()` 之间添加 `PipeBarrier<PIPE_ALL>()`：
-
-```cpp
-// 基于官网 Run() 结构的最小补丁（★ 行为新增）
-void Run() {
-    if ASCEND_IS_AIV {
-        RunAllToAll();
-    }
-
-    if ASCEND_IS_AIC {
-        if (tilingData_->localMatmul == 1) {
-            RunLocalMatmul();  // LOCAL: fixpipe → GM（无 AtomicAdd）
-
-            PipeBarrier<PIPE_ALL>();  // ★ 确保 LOCAL 阶段 MTE3 fixpipe 排空后再进 REMOTE
-
-            RunMatmul();      // REMOTE: AtomicAdd 累加
-        } else {
-            RunMatmul();
-        }
-    }
-}
-```
-
-> `PipeBarrier<PIPE_ALL>()` 是 AscendC API，强制等待所有 pipe（MTE2/MTE3/VEC/CUBE/FIX）的操作完成后再继续。
-> 详见 `ascendc-api-best-practices` skill `references/api-pipeline.md`。
-
-#### 5.4.4 修复验证
-
-生产实证：补 `PipeBarrier<PIPE_ALL>` 后 localMatmul=1 精度全部通过；回退 `localMatmul=2` 虽同样通过但 Task Duration 显著回退——"PipeBarrier 补丁 + localMatmul=1"为最优组合。
+> ⚠️ 官方 AllToAll UDMA impl `Run()` 当前**无**此屏障（`RunLocalMatmul()` 直连 `RunMatmul()`），使用 localMatmul=1 时 Developer 须自行添加。*工程提示：PipeBarrier 开销远小于通算并行收益，勿因加屏障直接回退 localMatmul=2。*
 
 ### 5.5 Host 侧 localMatmul 配置
 
@@ -379,9 +322,9 @@ void Run() {
 > ⑤ TransA/TransB 参数化（固定 → 不支持转置）；⑥ 批量归约（逐行 → flag 爆炸）。
 > 详细设计合同见各节。
 
-> **本节主体是通用模式**：适用于一切**计算在前**的算子（AIC 先算输出、AIV 再通信输出并聚合），ReduceScatter 语义算子（M 轴输出切分 + 跨 rank 求和）仅作为已生产验证的示例引用——其中出现的具体数值（flagId、bucket 大小、性能数字）均为示例实现的佐证，不是模式的一部分。
+> **本节主体是通用模式**：适用于一切**计算在前**的算子（AIC 先算输出、AIV 再通信输出并聚合），ReduceScatter 语义算子（M 轴输出切分 + 跨 rank 求和）仅作为已生产验证的示例引用——其中出现的具体数值均为示例实现的佐证，不是模式的一部分。
 >
-> **生产验证状态**：多代实现均已上板验证（精度容差 1e-2 内全量 PASS）。「FragmentTensor kernel + 严格分离编排 + 手动 UB 批量归约」与「vendor 复用 mm kernel + 时分复用 + TPipe 归约」两条路线均验证通过；选型判据见 §6.2.1/§6.2.2/§6.2.6。
+> **验证状态**：「FragmentTensor kernel + 严格分离编排 + 手动 UB 批量归约」与「vendor 复用 mm kernel + 时分复用 + TPipe 归约」两条路线均已工程验证；选型判据见 §6.2.1/§6.2.2/§6.2.6。
 
 #### 6.2.1 架构总览（计算在前 + per-tile 流水）
 
@@ -395,14 +338,14 @@ void Run() {
 
 | 方式 | 结构 | 适用 |
 |:---|:---|:---|
-| **严格分离（专职化，默认）** | 后 R 核专职通信、前 (核数-R) 核专职归约，`AllToAll(t) ∥ Reduce(t-1)` 错位流水 | 默认基线；生产实测收益稳定，R 越大越显著。通信对象 `totalJobs=rankSize`（每核 1 个 target 并行 PUT）；TeamBarrier `totalJobs=1`（仅 jobIndex=0 执行 CrossDevice）；**配 `Wait<BARRIER_NONE>`（仅 Drain）+ 手动 `teamBarrier_.CrossDevice()`**——严格分离下禁止 `Wait<BARRIER_DEVICE>`：其内建 CrossDevice 与分核守卫/手动 CrossDevice 序列叠加会打乱 rendezvous 配对，跨设备同步失效（生产实测出现大面积元素错误） |
+| **严格分离（专职化，默认）** | 后 R 核专职通信、前 (核数-R) 核专职归约，`AllToAll(t) ∥ Reduce(t-1)` 错位流水 | 默认基线，R 越大收益越显著。通信对象 `totalJobs=rankSize`（每核 1 个 target 并行 PUT）；TeamBarrier `totalJobs=1`（仅 jobIndex=0 执行 CrossDevice）；**配 `Wait<BARRIER_NONE>`（仅 Drain）+ 手动 `teamBarrier_.CrossDevice()`**——严格分离下禁止 `Wait<BARRIER_DEVICE>`：其内建 CrossDevice 与分核守卫/手动 CrossDevice 序列叠加会打乱 rendezvous 配对，跨设备同步失效（曾致大面积元素错误，机制见 communication.md §2.2） |
 | **时分复用（兜底）** | 全部 AIV 既通信又归约，每轮「WaitFlag 门控 → Commit → Wait → SyncAll → 归约本轮」串行推进、跨轮重叠 | 核数极少（核数-R 不足以摊薄归约）、归约工作量轻或调试定位期 |
 
 **严格分离逐轮操作序列**（compute-first 通用编排模式；T=1 自然退化为单轮）：
 
 | 阶段 | 通信核（后 R 核） | 归约核（前 核数-R 核） |
 |:---|:---|:---|
-| 门控 | `CrossCoreWaitFlag<0x2, PIPE_MTE2>(flagId)` | 同左（全 AIV 同序同次数，计数平衡） |
+| 门控 | `CrossCoreWaitFlag(flagId)`（无模板形态，见 §6.2.3） | 同左（全 AIV 同序同次数，计数平衡） |
 | 核间同步 | `SyncAll<true>()` | 同左 |
 | 通信/归约 | `Commit<BARRIER_NONE>()` → `Wait<BARRIER_NONE>()`（仅 Drain） | tile 0 无归约；tile t≥1 执行 `ReduceSum(t-1)` |
 | 核间同步 | `SyncAll<true>()` | 同左 |
@@ -430,25 +373,25 @@ AIC 计算不依赖通信，第 t+1 轮的 mm 与第 t 轮的通信+归约并行
 **默认推荐：FragmentTensor 自研 kernel（消 R 循环）**。当 A 数据全在本卡 GM 连续 `[m, k]`、各 rank 段按 `chunkM` 间距排列时（compute-first 算子的典型形态），用 FragmentTensor 打包 R 个 rank 段地址，**一次 matmul 调用覆盖 `R × curTileM` 行**：
 
 - Params 构建一次、调用开销最小；per-fragment L1 缓存隔离（tile 跨越 rank 边界时自动切换 fragment 地址，`QmmMxBlockMmadFragment`，详见 [`compute.md`](compute.md) §7）
-- 约束：`R×T ≤ 32`（MAX_FRAGMENT_COUNT）
+- 约束：`R ≤ 32`（`MAX_FRAGMENT_COUNT=32` 是 **FragmentTensor 单次构建的 fragment 数上限**，即 rank 数上限；与通信轮次 T 无关——每轮构建 R 个 fragment，T 轮各自独立构建。工程验证通过）
 
 **例外：vendor 复用官方 mm kernel（R×T 子调用）**。仅当 **R×T 很小且为大 shape**（CUBE 时间足够长、SCALAR 被淹没）时可选——选择时必须在 DESIGN.md 中论证 SCALAR 占比可接受，否则按 FragmentTensor 实现。优势：逻辑零修改、官方 kernel 演进可随共享层同步吸收。vendor 复用要点：LOCAL 模式 + rank 退化参数（`rankId=0 / rankSize=1 / splitKNum=1`）实例化，`isAtomicAdd` 恒 false。
 
-> ⚠️ **R×T 子调用的 SCALAR 风险（选型红线）**：R×T 循环每轮重建完整 Params（tiling 字段换算 + 地址偏移）+ BlockScheduler 重新初始化，SCALAR 指令占比随 R×T 线性放大。生产实证：R×T 较大时即使 CUBE/MTE2 流水占比接近饱和，cube_utilization 仍被 SCALAR 压到极低——pipe 高占比但利用率极低是 SCALAR 主 bound 的特征信号。规避：默认 FragmentTensor 一次调用；vendor 路径下或减少 T（增大 tileM）、或对 Params 做增量更新（只改地址字段）。
+> ⚠️ **R×T 子调用的 SCALAR 风险（选型红线）**：R×T 循环每轮重建完整 Params（tiling 字段换算 + 地址偏移）+ BlockScheduler 重新初始化，SCALAR 指令占比随 R×T 线性放大。特征：R×T 较大时即使 CUBE/MTE2 流水占比接近饱和，cube_utilization 仍被 SCALAR 压到极低——pipe 高占比但利用率极低是 SCALAR 主 bound 的特征信号。规避：默认 FragmentTensor 一次调用；vendor 路径下或减少 T（增大 tileM）、或对 Params 做增量更新（只改地址字段）。
 
 与 AllGather FragmentTensor 的对比（数据来源/打包/跨核同步/C 输出/dependId 预触发）以 [`compute.md`](compute.md) §7.2 为唯一事实源，本节不重复。
 
 **mm/comm 深度重叠的正确拆法**：T>1 时 AIC 把全量 mm 拆为按轮驱动的子区间（覆盖全 M），**tile 大小不变、只缩 problem M**——不增加 K-window 总数与 MTE2 次数，反而因子问题 L2 footprint 缩小提升 cache 命中与 cube 利用率（大 shape 实测显著收益）。FragmentTensor 路径下该拆分由 fragment 编排天然完成、无 R 循环；vendor 路径下才是 R×T 子调用（受上述 SCALAR 风险约束）。注意与"拆小 tile"路线区分：后者 MTE2 次数翻倍，已证伪（见 [`optimization-playbook.md`](../troubleshooting/optimization-playbook.md) §3）。
 
-**localLast 编排（compute-first 强制）**：FragmentTensor 打包时把本 rank 段排到 fragment 末尾（`[remote..., local]`），AIC 在 remote→local 边界处提前 `SetFlag(flagA)` 通知 AIV 启动通信、全部算完再 `SetFlag(flagB)`——**remote 段算完即启动 AllToAll，无需等本卡 local 段**，通信提前一拍进入流水。落地三条纪律（缺一不可）：① `cFragAddrs_` 必须保持**原始 rank 顺序**（mmadFrag 内部 L1 cache 管理依赖原始顺序，重排只作用于 A/ScaleA 的 addrList）；② 边界预计算 `localFragBoundary = headMainRows − fragM`，调度循环内 `mPos >= localFragBoundary` 首次满足时 Set flagA；③ 未跨边界核（无本卡 tile）必须**兜底补 Set flagA**，否则 AIV `WaitFlag(flagA)` 挂死。**移除 localLast = 阻塞级错误**：每轮 Set 双 flag 导致峰值 2T（T≤7）而非 T（T≤15），且丧失通信提前启动能力；Reviewer 不得以"A/C 片段错位"为由建议移除（错位根因是 cFragAddrs_ 顺序写错）。实现要点见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.11。
+**localLast 编排（compute-first 强制）**：FragmentTensor 打包时把本 rank 段排到 fragment 末尾（`[remote..., local]`），AIC 在 remote→local 边界处提前 `SetFlag(flagA)` 通知 AIV 启动通信、全部算完再 `SetFlag(flagB)`——**remote 段算完即启动 AllToAll，无需等本卡 local 段**，通信提前一拍进入流水。落地三条纪律（缺一不可）：① `cFragAddrs_` 必须保持**原始 rank 顺序**（mmadFrag 内部 L1 cache 管理依赖原始顺序，重排只作用于 A/ScaleA 的 addrList）；② 边界预计算 `localFragBoundary = headMainRows − fragM`，调度循环内 `mPos >= localFragBoundary` 首次满足时 Set flagA；③ 未跨边界核（无本卡 tile）必须**兜底补 Set flagA**，否则 AIV `WaitFlag(flagA)` 挂死。**移除 localLast = 阻塞级错误**：若改用"每轮末 Set 双 flag"替代，flagId 用量翻倍且丧失通信提前启动能力；Reviewer 不得以"A/C 片段错位"为由建议移除（错位根因是 cFragAddrs_ 顺序写错）。**收益边界（实测）**：通信提前启动的收益与瓶颈归属相关——AIC MTE2 主导（AIV 82% 时间在 WaitFlag）时重排收益 ≈ 0 但无害（低成本保险；静态分析曾误判"收益≈0 即无价值"，实测推翻的是"无价值"而非"无收益"）；通信暴露场景（小 shape/浅流水）收益显著。因 flagA/flagB 配对契约依赖此编排，**无论收益场景均不得移除**。实现要点见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.8。
 
 FragmentTensor 详见 [`compute.md`](compute.md) §7。
 
 #### 6.2.3 per-tile 流水编排
 
-**flag 编排**：AIC `CrossCoreSetFlag<0x2, PIPE_FIX>(flagId)` 与 AIV `CrossCoreWaitFlag<0x2, PIPE_MTE2>(flagId)` 配对，flagId 按 §3.3 规则选取（避开 SyncAll 保留区 [11,14] 与 Matmul 高阶 API 保留区 [0,2N-1]）。生产实测使用计数式 flag，event ID 0（flagA，remote 段算完提前通知）和 1（flagB，本轮全算完）：`CrossCoreSetFlag<0x2, PIPE_FIX>(0)` / `CrossCoreSetFlag<0x2, PIPE_FIX>(1)`。T=1 时循环外单次配对（计数器峰值 1）；T>1 时逐轮计数式配对（T 次 Set ⇔ T 次 Wait，峰值 = T）。**峰值必须 ≤ 15**（flagId 计数器范围 0-15），host 侧需强制校验（见 §6.2.10）。Set 用 `PIPE_FIX`（fixpipe 排空语义），Wait 用 `PIPE_MTE2`（生产实测：dav-3510 上模式 2 不支持 PIPE_S）。
+**flag 编排**：AIC `CrossCoreSetFlag<0x2, PIPE_FIX>(flagId)` ⇔ AIV **无模板** `CrossCoreWaitFlag(flagId)` 配对——官方配对惯例即"模板 Set + 无模板 Wait"（注册版 `chunk_gated_delta_rule_stage3.h`、`matmul_reduce_scatter_fp16_bf16.h` 均此形态，见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §4.1），flagId 按 §3.3 规则选取。工程验证形态：计数式 flag，event ID 0（flagA，remote 段算完提前通知）和 1（flagB，本轮全算完）。T=1 时循环外单次配对；T>1 时逐轮计数式配对（T 次 Set ⇔ T 次 Wait）。Set 用 `PIPE_FIX`（fixpipe 排空语义）；**AIV 侧 Wait 必须用无模板形态**：Wait 之后 AIV 紧随标量流操作（通信对象 `Commit`/WriteNbi 下发）——模板形态（如 `<0x2, PIPE_MTE2>`）只把等待插入指定 pipe 队列、**不阻塞标量流**，Commit 会在 flag 生效前执行 → PUT 读到未写完的 staging → 对端 Win 槽数据缺失（生产实测间歇精度失败，竞态反例见 `api-crosscore-sync.md` §4.1）。模板 Wait 之后若紧跟 `SyncAll<true>()`/`PipeBarrier<PIPE_ALL>()` 会**恰好掩盖**该缺陷——掩盖不等于正确，编排顺序一变竞态即暴露。**计数深度口径**：硬件事实为"每核 16 个 flagId（0-15）"与"Set/Wait 必须严格配对"；每个 flagId 计数器范围 0-15（官方有据），衡量**未消费积压**——紧邻配对编排下积压 ≈ 1-2 不触顶，不构成 T 上限。设计时以"flagId 数量 16 + Set/Wait 严格配对"为硬约束，T 上限按 case 实测确定而非套用固定数值。
 
-**双 flag 计数式（compute-first 默认，配合 §6.2.2 localLast）**：用两个 flagId 分工——`flagA`（AIC 在 remote→local 边界 Set，AIV 通信核 Wait 后启动 AllToAll）与 `flagB`（AIC 全 fragment 算完 Set，AIV 归约核 Wait 后启动 reduceSum）。每轮每核两个 flagId 各 Set 一次，**每 flagId 峰值仍 = T**（计数器约束不变），host 校验不变。两 flagId 都须避开保留区且互不冲突。
+**双 flag 计数式（compute-first 默认，配合 §6.2.2 localLast）**：用两个 flagId 分工——`flagA`（AIC 在 remote→local 边界 Set，AIV 通信核 Wait 后启动 AllToAll）与 `flagB`（AIC 全 fragment 算完 Set，AIV 归约核 Wait 后启动 reduceSum）。每轮每核两个 flagId 各 Set 一次，紧邻配对下两 flagId 计数各自平衡；两 flagId 互不冲突。
 
 **T=1 退化路径**：`T=1` 时循环执行 1 次，自然退化为单次全量 matmul + 单次通信 + 单次归约，无额外开销。统一 `for t` 循环路径，无 if/else 分支。
 
@@ -459,14 +402,14 @@ FragmentTensor 详见 [`compute.md`](compute.md) §7。
 | 机制 | 用途 | 说明 |
 |:---|:---|:---|
 | `CrossCoreSetFlag<0x2, PIPE_FIX>(flagId)` | AIC → AIV 通知 | 本轮 mm 完成（全核含零 tile 核） |
-| `CrossCoreWaitFlag<0x2, PIPE_MTE2>(flagId)` | AIV 等 AIC | 逐轮门控，T=1 单次 / T>1 计数式 |
+| `CrossCoreWaitFlag(flagId)`（AIV 侧无模板形态） | AIV 等 AIC | 逐轮门控，T=1 单次 / T>1 计数式；Wait 后有标量流通信下发，**禁止模板形态**（不阻塞标量流 → 竞态，见 §6.2.3 与 `api-crosscore-sync.md` §4.1） |
 | `SyncAll<true>()` | AIV 核间同步 | 门控后 + 归约前各一次；**放在分核守卫外**（全 AIV 同序同次数，计数平衡） |
 | `Wait<BARRIER_DEVICE>()` | 通信完成等待（入门基线） | 内建 Drain + CrossDevice 每轮 rendezvous（仅 `GetBlockIdx() < rankSize` 的核执行 Commit/Wait；self-target 核跳过 Drain 但仍执行 CrossDevice，计数天然平衡）。正确性优先、写法最简单 |
-| `Wait<BARRIER_NONE>()` + 手动 `teamBarrier_.CrossDevice()` | 通信完成等待（多核并行 + 严格分离时的默认） | Wait 仅 Drain 本 block channel，不做框架内建 CrossDevice；改由 `SyncAll<true>()` 后由 block 0（jobIndex=0）显式调用 `teamBarrier_.CrossDevice()` 完成跨设备 fence，再一次 `SyncAll<true>()` 放行。收益：通信等待与跨设备 rendezvous 解耦，同步点显式可控（该变体已生产验证） |
+| `Wait<BARRIER_NONE>()` + 手动 `teamBarrier_.CrossDevice()` | 通信完成等待（多核并行 + 严格分离时的默认） | Wait 仅 Drain 本 block channel，不做框架内建 CrossDevice；改由 `SyncAll<true>()` 后由 block 0（jobIndex=0）显式调用 `teamBarrier_.CrossDevice()` 完成跨设备 fence，再一次 `SyncAll<true>()` 放行。收益：通信等待与跨设备 rendezvous 解耦，同步点显式可控（该变体已工程验证） |
 
 > **通信轮次计数同源**：外部需要轮次计数时，不得调用早退核（`jobIndex >= totalJobs`，CollectiveCommBase::Init 早退）的通信对象访问器——其成员未初始化，读到 UB 会挂死。应读 impl 侧全核已初始化的 tilingData 字段（同一结构体按址传入，同源性等价）。
 
-> **实证注记（通信提前启动双 flag，compute-first 默认）**：本编排（§6.2.2 localLast + 本节双 flag 计数式，已列为 compute-first 默认）曾被静态分析判定"收益≈0"（通信已被计算掩盖时不改变关键路径），后在生产实现中默认启用——静态结论与实测分歧时以最小实验复核为准（方法论见 [`optimization-playbook.md`](../troubleshooting/optimization-playbook.md) §5）。5 点落地机制（fragment 重排 `[remote..., local]` / 双 flagId 分工 / AIV 两侧分等 / 未跨边界核兜底补 Set flagA / 峰值不变仍 =T）见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.11。
+> localLast + 双 flag 计数式（compute-first 默认编排）的完整落地机制见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.8。
 
 #### 6.2.4 staging 与 win 区布局
 
@@ -484,12 +427,12 @@ FragmentTensor 详见 [`compute.md`](compute.md) §7。
 
 #### 6.2.5 通信模式选型：PUT 优先
 
-GET 模式在 4+ rank 存在数据可见性问题（官网无 GET 算子样例），计算在前场景优先使用 PUT 模式。
+GET 模式 4+ rank 稳定性**未验证**（官网无 GET 算子样例；已知一次工程迭代 PUT→GET 回退但根因未定位——弱证据，非结论性否定），计算在前场景优先使用 PUT 模式。
 
 | 维度 | PUT（推荐） | GET |
 |:---|:---|:---|
 | 数据搬运 | 1×（推送） | 2×（拷贝 + 拉取，多 tile 场景） |
-| 稳定性 | 4+ rank 验证通过 | 4+ rank 不稳定 |
+| 稳定性 | 4+ rank 验证通过 | 4+ rank 未验证（无样例 + 一次未定位根因的回退） |
 | 官网样例 | 有（all_to_all / all_gather） | 无 |
 | 数据方向 | AIV 推 → 远端 win 区 | AIV 拉 ← 远端 win 区 |
 
@@ -503,7 +446,7 @@ GET 钩子基础设施已就绪（`AllToAllCommGetImpl`），但无算子使用�
 
 | 策略 | 要点 | 性能耦合判据 |
 |:---|:---|:---|
-| 手动 UB 静态偏移（**推荐，与官方算子一致**） | `MakeMemPtr<Location::UB>(offset)` / `LocalTensor` 字节偏移划分，无 TPipe 状态。布局组成要素：**FP32 累加器（单份，语义依赖）+ src 双缓冲（BF16 搬入 + FP32 Cast 目标，pingpong 交替）+ 输出 BF16 buffer**，按 float 大小对齐；多行批量归约（一次处理多行，行数按 UB 容量自适应）摊薄 flag 次数 | **批量归约的必要前提**——只有手动 UB 能用多行 LocalTensor 布局 + 2D DataCopyPad(blockCount=多行） 实现批量摊薄（生产实测归约模块显著加速） |
+| 手动 UB 静态偏移（**推荐，与官方算子一致**） | `MakeMemPtr<Location::UB>(offset)` / `LocalTensor` 字节偏移划分，无 TPipe 状态。布局组成要素：**FP32 累加器（单份，语义依赖）+ src 双缓冲（BF16 搬入 + FP32 Cast 目标，pingpong 交替）+ 输出 BF16 buffer**，按 float 大小对齐；多行批量归约（一次处理多行，行数按 UB 容量自适应）摊薄 flag 次数 | **批量归约的必要前提**——只有手动 UB 能用多行 LocalTensor 布局 + 2D DataCopyPad(blockCount=多行） 实现批量摊薄（显著摊薄同步开销） |
 | TPipe + guard TBuf | 先 `InitBuffer` 一个 guard TBuf（544B = commBuf 512B + barrierBuf 32B）占位静态通信区，TPipe 管理的归约 buffer 从其后分配，**物理消除与静态通信区的重叠**（[`communication.md`](communication.md) 陷阱 #9）；buffer 声明式分配 | ⚠️ **TQue 单 buffer 搬运（AllocTensor/EnQue/DeQue）天然倾向逐行**：每次搬运一行，无法满足纪律 5 的批量摊薄要求，flag/同步次数爆炸。仅归约逻辑极简单、单轮数据量小（flag 次数可忽略）时可接受；否则选手动 UB |
 
 > **互斥性红线**：`TPipe::InitBuffer` 与 `Te::MakeMemPtr<Te::Location::UB>` **必须二选一**，禁止混用——两套机制偏移空间不共享，混用导致地址重叠 → MTE2 UB out of bounds（507015）。通信区与归约区必须使用同一机制。官方 AllGather/AllToAll 算子均不建 TPipe，UB 用 `MakeMemPtr` 静态分配（`operator-anatomy.md` §4.3）。
@@ -527,23 +470,28 @@ GET 钩子基础设施已就绪（`AllToAllCommGetImpl`），但无算子使用�
 
 **共同纪律**（与策略无关，违反即出 bug 或性能劣化）：
 
-1. **事件链同迭代配对**：所有 Set/WaitFlag（HardEvent）必须在同一迭代内配对——跨迭代 Set-Set 无中间 Wait 在 950 实测挂死；V-V 依赖加 `PipeBarrier<PIPE_V>` 防御
+1. **事件链同迭代配对**：所有 Set/WaitFlag（HardEvent）必须在同一迭代内配对——跨迭代 Set-Set 无中间 Wait 在 Ascend 950（dav-3510）实测挂死；V-V 依赖加 `PipeBarrier<PIPE_V>` 防御
 2. **src 双缓冲**：srcBF16 双份 + 事件 ID 双份，使 MTE2(source i+1) 与 V(Cast+Add source i) 跨 pipe 重叠；**累加器等有语义依赖的 buffer 保持单份**，不能盲目复制。**禁止 in-place BF16→FP32 Cast**（API 级禁令见 `ascendc-api-best-practices` skill `references/api-precision.md`）：FP32 占 2× 空间，in-place Cast 的 FP32 输出会覆盖同 buffer 内尚未读完的 BF16 数据 → 精度系统性错误；必须使用独立的 srcFP32 双缓冲
 3. **DataCopyPad 2D + 64B pitch + 多行 blockCount**：归约搬入/输出必须用 2D DataCopyPad 且 `blockCount = 本批行数`（多行一次搬运）；**禁止 `blockCount=1` 逐行搬运**（性能反模式）；行距按 64B pitch 公式换算，UB 预算按 pitch 后元素数核算。**⚠️ strided 场景硬件隐式上限**（`srcStride > 0`，即 N > 单次搬运列宽 redUbN 时 blockCount 存在隐式上限、超出行静默丢零——API 级行为与防御三法见 `ascendc-api-best-practices` skill `references/api-datacopy.md`）：本场景的两条合法规避路径为**方案 A**——host 侧 UB 预算推导时限制 `redUbM ≤ 32`（N > redUbN 时）；**方案 B**——`gmStride > 0` 时退化 1D 逐行 DataCopyPad（blockCount=1 无 stride，绕开限制；仅在 strided 场景触发，非 strided 场景保留 2D 批量，flag 次数由批量事件管理摊薄不爆炸）
-4. **N 超限时按列分段**：单轮 `tileM × N` 超出 UB 预算时，按 N 维分段循环处理（`maxNPerSeg = UB预算 / 每元素字节数`，如 14B/elem 双缓冲布局下 180KB 预算 → N=12288 分 2 段）；分段数由 host 按 UB 预算推导，不要为固定 N 写死 UB 布局
-5. **多核并行归约（SplitToCore 函数级形态）**：归约核集合按 AIV 组织方式确定（时分复用 = 全 AIV；严格分离 = 前 核数-R 核），集合内按行块均分。落地用 `SplitToCore(tileM, rsCoreNum, GetBlockIdx(), startRowId, endRowId, rowNum)`——连续行块、余数前置核 +1，每核只处理 `[startRowId, endRowId)` 行；**禁止单核归约**（如 `GetBlockIdx()==0` 独立承担全量行：写竞争或归约耗时独占，= 性能 FAIL）；**单 tile 退化路径（T≤1）同样用批量归约**——退化路径 flag 次数占比更高
+4. **N 超限时按列分段**：单轮 `tileM × N` 超出 UB 预算时，按 N 维分段循环处理（`maxNPerSeg = UB预算 / 每元素字节数`，如 18B/elem——6-slot 全布局精确口径：2×2B src BF16 + 2×4B cast FP32 + 4B acc + 2B out（§5.4 同口径）；保守口径 24B（生产实现含 guard 预留）——双缓冲布局下 180KB 预算 → 精确口径 N=7680 一段）；分段数由 host 按 UB 预算推导，不要为固定 N 写死 UB 布局
+5. **多核并行归约**：归约核集合按 AIV 组织方式确定（时分复用 = 全 AIV；严格分离 = 前 核数-R 核），集合内按连续行块均分本轮 `tileM` 行（余数前置核 +1，每核只处理自己的 `[startRowId, endRowId)` 行区间；行块均分属算子内辅助逻辑，自行实现即可）；**禁止单核归约**（如 `GetBlockIdx()==0` 独立承担全量行：写竞争或归约耗时独占，= 性能 FAIL）；**单 tile 退化路径（T≤1）同样用批量归约**——退化路径 flag 次数占比更高
 6. **staging 可见性由 flag 配对保证，禁止加 dcci**：AIC 经 fixpipe（MTE3）写 staging、AIV 归约核经 MTE2（DataCopyPad）读 staging，其跨核可见性由 `CrossCoreSetFlag<PIPE_FIX>` ⇔ `CrossCoreWaitFlag<PIPE_MTE2>` 配对（含 SyncAll）提供内存序保证——**参考实现不依赖 dcci**。归约读到 staging 旧值/0 时，根因是 flag 配对缺失、多核写竞争或地址不同源，**禁止以"cache 一致性"为由对 staging 加 dcci**（属误诊，掩盖真根因）
 7. **TPipe 与静态通信区绝不混用**：通信对象 UB（commBuf/barrierBuf）用静态偏移顺序排布，归约 buffer 经 guard TBuf 或静态偏移与其物理隔离——混用重叠 = 通信数据被踩踏 → 死锁/精度错（[`communication.md`](communication.md) 陷阱 #9）
 
-**累加精度策略（生产基线：FP32 中间累加）**：BF16 → Cast float32 → Add → Cast 回 BF16（`CAST_RINT`）是生产验证的最终选择——BF16 直接 Add 在 rank 数多时累加误差放大超容差，FP32 中间累加可稳定收敛到容差内。
+**累加精度策略（生产基线：FP32 中间累加）**：BF16 → Cast float32 → Add → Cast 回 BF16（`CAST_RINT`）是工程验证基线——BF16 直接 Add 在 rank 数多时累加误差放大超容差，FP32 中间累加可稳定收敛到容差内。
 
-**归约降精度原则**：**先升精度保底；只有收益显著（未被 mm/通信流水掩盖）且全量配置精度实测达标时，才考虑降精度，且保留一键回退**——被掩盖的模块做激进降精度，收益≈0 而风险实在（rank 数增大时累加误差放大）。详见 [`optimization-playbook.md`](../troubleshooting/optimization-playbook.md) §4。
+**归约降精度原则**：**先升精度保底；只有收益显著（未被 mm/通信流水掩盖）且全量配置精度实测达标时，才考虑降精度，且保留一键回退**——被掩盖的模块做激进降精度，收益≈0 而风险实在（rank 数增大时累加误差放大）。实证案例：开发期曾提议"Ascend 950 支持 BF16 直加、省去两次 Cast"，最终保留 FP32 中间累加——降精度类提议未经全量精度实测（randn + 多 rank + 重复 launch）不得采纳。详见 [`optimization-playbook.md`](../troubleshooting/optimization-playbook.md) §4。
 
 #### 6.2.7 通信轮次 T 派生与 tail tile 处理
 
 **策略 B（默认）：host 派生 T 无尾块 + 单份 tiling 复用**
 
-PUT 钩子的源地址公式为 `src = localAddr + target×chunkBytes + tileIdx×tileMaxBytes`——**尾块会使 `tileIdx×tileMaxBytes` 偏移错位**，因此通信轮次必须无尾块。host 派生：
+PUT 钩子的源地址公式为 `src = localAddr + target×chunkBytes + tileIdx×tileMaxBytes`。**尾块偏移的精确条件**：源地址按 `tileIdx × tileMaxByteSize_`（头块尺寸）推进（地址计算在 `all_to_all_udma_put.h` DoCommit；`tileMaxByteSize_` 等游标推进由基类 `CollectiveCommBase::Commit()` 完成），而 host 侧 chunk 实际尺寸按"头块数×头块 + 尾块数×尾块"累加——**单尾块且尾块 ≤ 头块时**（`headTileCnt×tileMaxBytes` 恰等于尾块起点，尾块起点偏移精确），**偏移不错位，PUT 直传合法**（工程验证形态）；**多尾块或尾块 > 头块时**才发生 `tileIdx×tileMaxBytes` 偏移错位。因此：
+- **单尾块（≤头块、16 对齐）是合法形态**：`tailMSize = chunkM % headMSize` 如实填 `commTilingData.splitAxisTailSize`、`splitAxisTailCnt=1`，tail 轮用 tail tiling（`GetTilingData(rankSize×tailMSize, ...)`）
+- host 派生无尾块优先（策略 B，实现最简）；shape 天然带尾块时单尾块直传（工程验证形态）优于强切 padding
+- 仅当无法保证"单尾块 ≤ 头块"时才必须走策略 A（padding + realFragmentSize）
+
+host 派生（策略 B）：
 
 ```
 T0 = max(1, CeilDiv(mSeg, 目标 tile 行数))
@@ -561,7 +509,7 @@ T0 = max(1, CeilDiv(mSeg, 目标 tile 行数))
 2. `realFragmentSize = curTileM`（实际行数），用 `MakeFragParam(fragSize=padded, realFragSize=real, ...)` 限制实际读取范围
 3. 为不同子问题生成专用 tiling（全量 / head / tail 多套），`blockDim` 固定用全量 tiling 的 `usedCoreNum`——选择逻辑（per-tile 流水 + tail 处理的通用组织模式）：`T=1` 恒用全量 tiling；`T>1` 时 head tile 用 head 子问题 tiling（`GetTilingData(headMSize, n, k)`），tail tile 用 tail tiling（`GetTilingData(rankSize×tailMSize, n, k)`）；字段契约示例（C++ struct）见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.5
 
-**headMSize 自适应决策**（通用原则）：决策方向是"分片小→减小 tile 让通信尽早启动；分片大→增大 tile 减少同步次数"，并受联合约束 `headMSize ≥ ceil(mSeg / 15)`（flag 计数峰值上限）与 16 对齐约束。具体分档标定值随算子 shape/dtype 与流水深度目标 per-case 搜索确定，**不由本通用文档给出固定数值**——一种已验证实现的具体分档表与边界 case 标定过程见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.6（属示例实现，勿直接照搬）。
+**headMSize 自适应决策**（通用原则）：决策方向是"分片小→减小 tile 让通信尽早启动；分片大→增大 tile 减少同步次数"，受 16 对齐约束（flagId 上限约束见 §6.2.10）。具体分档标定值随算子 shape/dtype 与流水深度目标 per-case 搜索确定，**不由本通用文档给出固定数值**——已验证实现的分档规律（含 N 维度模型：tileMaxBytes = tileM×N×2 主导分档，小 N 大 tileM / 大 N 小 tileM 双向实测锚点）见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.6（属示例实现，勿直接照搬）。
 
 **tail 路径特征信号**：tail 行数非 32 对齐时 Blaze matmul 产出垃圾数据（根因：逻辑 M 不能被 baseM 整除产生非对齐 tail tile）——"仅非对齐 shape 精度 FAIL、其余全 PASS" 即指向 tail 路径。
 
@@ -579,15 +527,15 @@ SWAT tiling 在 `blockNum ≥ aicNum` 时 `baseM` 保持 256、tiles/core 过低
 
 | 限制项 | 上界 | 说明 |
 |:---|:---|:---|
-| flag 计数器峰值 | ≤ 15 | flagId 计数器范围 0-15（硬件规则见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §3）；T>1 逐轮配对时峰值 = T，host 强制校验 |
-| 通信轮次 T | `T | mSeg`（策略 B）且 `T ≤ 15` | PUT 钩子 src 偏移 `tileIdx×tileMaxBytes` 不支持尾块（见 §6.2.7）；T≤15 由 flag 计数峰值约束（见上）——**联合约束：`headMSize ≥ ceil(mSeg / 15)`**，目标 tile 行数（如分档值 128）导致 T>15 时必须上调 headMSize，不能为满足分档值而突破 flag 上限 |
-| `tailMSize`（策略 A） | 必须 16 对齐，padding 后 32 对齐 | Blaze matmul 最小行粒度，见 §6.2.7 |
+| flagId 数量 | 16 个（0-15） | 硬件事实；Set/Wait 必须严格配对（不配对 = 未定义行为/挂死）。计数器 0-15 衡量**未消费积压**（紧邻配对下 ≈ 1-2 不触顶，官方有据）——不构成 T 上限；计数式固定 flagId 配对已在多 tile 场景工程验证（T=16）。T 上限按 case 实测确定，不作 host 拒绝依据 |
+| 通信轮次 T | `T \| mSeg`（策略 B）；单尾块合法（见 §6.2.7） | **单尾块且尾块 ≤ 头块时 PUT 直传合法**（偏移精确）；多尾块或尾块>头块才错位（走策略 A）。轮次索引型 flagId 时轮次索引 < FLAG_ID_MAX(16) 且避开 SyncAll 保留区（`SyncAll<true>` 占 14 → 实际安全上界 13）；计数式固定 flagId 不受轮次数限制 |
+| `tailMSize` | 单尾块：16 对齐且 ≤ headMSize；策略 A：16 对齐，padding 后 32 对齐 | Blaze matmul 最小行粒度 16；单尾块直传形态见 §6.2.7，padding 形态见策略 A |
 | `CeilDiv(K_mm, 64)` | 必须为偶数 | MXFP8 scale 对齐（每组 64 元素，2 字节）；`K_mm` 指**单次 mm 调用的 K 长度**（K 被 rank 切分的语义下为 per-rank K；官方 ST 强制校验：`tests/st/all_to_all_quant_matmul/src/main.cpp`、`tests/st/all_gather_quant_matmul/src/main.cpp`） |
 | `m` | 必须被 `rankSize` 整除 | M 轴按 rankSize 切分 |
 | `usedCoreNum` | ≥ `rankSize` | 否则 TeamBarrier rendezvous 永不齐 → 无超时挂死；host 强制校验 |
 | Win 区容量 | `M×N×sizeof(CType)` ≤ `HcclGetHcclBuffer` 实测值 | host 前置校验，非法即拒绝 launch |
 | Win 区数据/元数据分离 | PUT/GET 数据不得覆盖 Win 区内元数据/barrier 区 | 官网布局 barrier flag 在独立 BARRIER_BUF（Win 数据区从 0 可用）；共享布局按约定偏移跳过，host/kernel 偏移同源（[`communication.md`](communication.md) 陷阱 #12） |
-| 单轮 PUT 数据量 | `perRoundChunkBytes ≤ 512KB` | 超出处于 UDMA Drain 可靠性边界，间歇 FAIL；host 强制校验，超出则增大 T（[`communication.md`](communication.md) 陷阱 #13） |
+| 单轮 PUT 数据量 | ⚠️ 风险提示（非硬红线） | 无官方上限（bring-up 期过大单轮曾见间歇失败，边界未定）；大单轮 PUT 按 case 复核（连续多轮精度+重复 launch 一致性），不作 host 强制拒绝依据（[`communication.md`](communication.md) 陷阱 #13） |
 | mm 段暴露 | 架构边界 | compute-first 下通信依赖完整 mm 输出，mm 段无法被通信掩盖；跨方案性能对比时须显式声明 |
 
 > 通用上限（commTurn ≤16、waitedMask tile 总数 ≤32、rankSize ≤64、AG 变体 ≤8、FragmentTensor ≤32 仅自研路径、每通信对象 UB 512B）见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §7.6，本表不重复。

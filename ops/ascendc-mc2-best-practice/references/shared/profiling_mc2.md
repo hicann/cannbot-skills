@@ -17,7 +17,7 @@ MC2 算子的 perf 模式跑多轮（默认 10 轮），每轮都会让主 kerne
 - 下一轮的 B 直接从 L2 命中，**MTE2 带宽指标虚高**；
 - 通信开销（UDMA）相对计算的占比也会失真。
 
-参考工程的解法：每轮主 kernel 前调用 `heavy_add_kernel` 扫一遍 256 MB bf16，把 B 挤出 L2。
+参考工程的解法：每轮主 kernel 前调用 `heavy_add_kernel` 扫一遍大于目标芯片 L2 容量的 bf16 buffer（参考工程示例值 256 MB），把 B 挤出 L2。
 
 > **为什么不用 `--warm-up`？**  `msprof op --warm-up=N` 跳过前 N 次采集，依赖 NPU 自然运行把 L2 填满稳定状态——但 MC2 算子的 B 矩阵驻留 L2 恰恰是要消除的干扰。我们改用 `heavy_add_kernel` 主动挤出 L2，所以不需要 warm-up。
 
@@ -34,8 +34,8 @@ __global__ __aicore__ __vector__ void heavy_exp_kernel(
     GM_ADDR x, GM_ADDR y, int64_t totalLength, int64_t blockLength)
 ```
 
-- 输入：10000×10000 bf16（200 MB）；
-- 操作：`y = exp(x)`，56 个 block 全核并行；
+- 输入：bf16 buffer（参考工程示例值 10000×10000 = 200 MB）；
+- 操作：`y = exp(x)`，全部 AIV 核并行（block 数按目标芯片实际 AIV 核数确定，参考工程示例值 56）；
 - 用途：**去 host bound**——上板首次运行受 host 启动开销影响，先跑 100 次 exp 把 host 端的异步任务队列填满，让 NPU 进入稳定状态。
 
 参考工程 `src/all_to_all_matmul.cpp` 注释掉了 boost 阶段（`heavy_exp_kernel` 调用被注释）；新算子按需启用。
@@ -47,9 +47,9 @@ __global__ __aicore__ __vector__ void heavy_add_kernel(
     GM_ADDR x, int64_t totalLength, int64_t blockLength)
 ```
 
-- 输入：128×1024×1024 bf16（256 MB）；
-- 操作：`x += 1`，56 个 block 全核并行；
-- 用途：**刷 L2 cache**——256 MB 远大于 950 的 L2 容量，扫描一遍把 B 矩阵挤出 L2。
+- 输入：bf16 flush buffer，大小按目标芯片实际 L2 容量动态确定、须大于 L2 容量（参考工程示例值 128×1024×1024 = 256 MB）；
+- 操作：`x += 1`，全部 AIV 核并行（block 数按目标芯片实际 AIV 核数确定，参考工程示例值 56）；
+- 用途：**刷 L2 cache**——flush buffer 大于目标芯片 L2 容量即可，扫描一遍把 B 矩阵挤出 L2（L2 容量等芯片规格以 npu-arch skill 为唯一知识源，本文档不复述数值）。
 
 参考工程 `src/all_to_all_matmul.cpp` 的 perf 主循环（`mode == "perf"` 分支）：
 
@@ -71,10 +71,10 @@ for (int i = 0; i < PERF_LOOP_COUNT; ++i) {
 ### 2.3 HEAVY_BLOCK_NUM 的选择
 
 ```cpp
-constexpr int64_t HEAVY_BLOCK_NUM = 56;
+constexpr int64_t HEAVY_BLOCK_NUM = 56;  // 示例值，按目标芯片实际 AIV 核数设置
 ```
 
-Ascend 950 单卡 AIV 核数典型为 48~56（具体看版本）。56 是为了让 heavy_add_kernel 占满所有 AIV 核，最大化 L2 flush 效果。新算子若核数不同，按实际 AIV 核数调整。
+HEAVY_BLOCK_NUM 取目标芯片的**实际 AIV 核数**（AIV 核数属芯片规格，以 npu-arch skill 为唯一知识源，本文档不复述典型值；运行时经 `npu-smi info` 或平台规格接口查询），让 heavy_add_kernel 占满所有 AIV 核，最大化 L2 flush 效果。
 
 ---
 
@@ -259,7 +259,7 @@ MC2 算子的理论耗时按"通信+计算取最大"估：
 | `op_summary_*.csv` 只有 heavy_add_kernel | 主 kernel 在 precision 路径 | 同上 |
 | PROF_xxx 子目录数量 < rankNum | 部分 rank fork 失败 / 提前退出 | 查 host stderr，确认所有子进程都跑完 |
 | 主 kernel 记录 < 5 条 | `PERF_LOOP_COUNT < 5` | 调大 `src/*.cpp` 中的 PERF_LOOP_COUNT |
-| L2 命中率 >80% | L2 flush 失效 | 检查 `heavy_add_kernel` 的 totalLength 是否够 256 MB |
+| L2 命中率 >80% | L2 flush 失效 | 检查 `heavy_add_kernel` 的 totalLength 是否大于目标芯片 L2 容量 |
 | perf 模式跑得极慢 | `aclrtSynchronizeStream` 在每轮都同步 | 参考工程已正确实现，新算子不要每轮 sync |
 | 某张卡的 avg 明显高于其他卡 | NPU 健康 / SHMEM 端口 / 核数问题 | §5.4 |
 | Task Duration 在后 5 轮仍波动大 | device 频率未稳定 / 数据依赖 | 增大 PERF_LOOP_COUNT 到 20，取最后 5 |

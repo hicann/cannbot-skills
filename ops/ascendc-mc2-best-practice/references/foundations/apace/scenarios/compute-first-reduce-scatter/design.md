@@ -9,7 +9,7 @@
 | 场景 ID | `compute-first-reduce-scatter` |
 | 支持范围 | compute-first 模式，ReduceScatter 语义 + QuantMatmul 融合，输出沿 M 轴按 rank 切分，UDMA 直调 |
 | 准入条件（语义判据） | **逻辑语义为 ReduceScatter**（每 rank 输出 M 轴分片、跨 rank 求和）；localMatmul 为 QuantMatmul；compute-first（先算后通信）；通信走 UDMA |
-| 状态 | 已实现（有生产实现：先本地计算、再 AllToAll PUT + 本地增量归约实现 ReduceScatter 语义——通信实现方式为本场景设计决策，非准入前提） |
+| 状态 | 已实现（有生产实现：先本地计算、再 AllToAll PUT + 本地增量归约实现 ReduceScatter 语义——通信实现方式为本场景设计决策，非准入前提）。⚠️ 官方 master 在 pin 快照之后已新增 **ReduceScatter UBMEM 路径模板**（`8fbd92b1d`，`kernel/fusions/quant_matmul_reduce_scatter/` 等 17 文件）——本场景仍定位 UDMA 直调路径的自研编排；设计前须按 [`communication.md`](../../fundamentals/communication.md) §8 漂移登记核对 master 是否已直接覆盖需求 |
 
 ## 2. Consumes
 
@@ -42,20 +42,20 @@
 
 | 项目 | 合同 |
 |:---|:---|
-| T 公式 | `T = mSeg / headMSize`，要求 **T \| mSeg（整除，无尾块）**——PUT 钩子 src 偏移 `tileIdx×tileMaxBytes` 不支持尾块 |
-| 上限 | `T ≤ 15`（flag 计数器峰值约束），联合约束：`headMSize ≥ ceil(mSeg / 15)`；目标 tile 行数导致 T>15 时必须上调 headMSize |
+| T 公式 | 优先 `T = mSeg / headMSize` 整除（无尾块，实现最简）；**单尾块合法**：`tailMSize = mSeg % headMSize`（16 对齐且 ≤ headMSize）时 PUT 直传（偏移精确，生产实证 m4032：3×512+480 与 7×128+112 均通过），tail 轮用 tail tiling（入参 m=R×tailMSize）；多尾块或尾块>头块才必须走 padding 策略 |
+| 上限 | 计数式固定 flagId 下 T 上限按 case 实测确定（计数器 0-15 衡量未消费积压，紧邻配对下 ≈1-2 不触顶，不构成 T 上限）；轮次索引型 flagId 时轮次索引 < FLAG_ID_MAX(16) 且避开 SyncAll 保留区（`SyncAll<true>` 占 14）。**不设 host 强制数值拒绝** |
 | 调试策略 | 两阶段：精度调试 `T=1` 串行基线；性能调优再扫描合法 T 取值 |
 
 ### 3.4 Flag 编排（compute-first）
 
 | 项目 | 合同 |
 |:---|:---|
-| 配对方向 | AIC `CrossCoreSetFlag<0x2, PIPE_FIX>(flagId)` → AIV `CrossCoreWaitFlag<0x2, PIPE_MTE2>(flagId)`；Set 用 `PIPE_FIX`（fixpipe 排空语义），Wait 用 `PIPE_MTE2` |
-| T=1 | 循环外单次配对，计数器峰值 1 |
-| T>1 | 逐轮计数式配对（T 次 Set ⇔ T 次 Wait），峰值 = T |
-| 峰值约束 | **峰值 ≤ 15**（flagId 计数器范围 0-15），host 侧强制校验 |
-| flagId 选取 | 避开 SyncAll 保留区 [11,14] 与 Matmul 高阶 API 保留区 [0,2N-1]；生产实测使用计数式 flag，event ID 0（flagA）和 1（flagB） |
-| 双 flag 编排（**强制**） | **compute-first 场景必须遵循** [`fusion.md`](../../fundamentals/fusion.md) §6.2.2/§6.2.3 localLast 双 flag 编排：fragment 重排 `[remote..., local]` + 两个 flagId 分工（flagA=remote 段算完提前启动 PUT、flagB=本轮全部算完），未跨边界核兜底 Set flagA；每轮每核 flag 计数翻倍但每 flagId 峰值仍 = T。**禁止以每轮 Set 两个 flag 替代 localLast 双 flag**——此替代导致峰值 2T（T≤7）而非 T（T≤15），且丧失通信提前启动能力。实现要点见 development.md §5.11 |
+| 配对方向 | AIC `CrossCoreSetFlag<0x2, PIPE_FIX>(flagId)` ⇔ AIV **无模板** `CrossCoreWaitFlag(flagId)`（官方配对惯例"模板 Set + 无模板 Wait"，见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §4.1）；Set 用 `PIPE_FIX`（fixpipe 排空语义），AIV 侧 Wait 后紧随标量流通信下发——模板形态（如 `<0x2, PIPE_MTE2>`）不阻塞标量流，Commit 会在 flag 生效前执行 → PUT 读未写完的 staging（生产实测间歇精度失败），**禁止** |
+| T=1 | 循环外单次配对 |
+| T>1 | 逐轮计数式配对（T 次 Set ⇔ T 次 Wait，紧邻配对下积压 ≈ 1-2） |
+| 硬约束 | **Set/Wait 严格配对**（不配对 = 未定义行为/挂死）+ flagId 数量 16（0-15）；计数器 0-15 衡量未消费积压（官方有据，紧邻配对下不触顶），不作 host 强制校验 |
+| flagId 选取 | flagId ∈ [0, FLAG_ID_MAX)；工程验证使用计数式 flag，event ID 0（flagA）和 1（flagB） |
+| 双 flag 编排（**强制**） | **compute-first 场景必须遵循** [`fusion.md`](../../fundamentals/fusion.md) §6.2.2/§6.2.3 localLast 双 flag 编排：fragment 重排 `[remote..., local]` + 两个 flagId 分工（flagA=remote 段算完提前启动 PUT、flagB=本轮全部算完），未跨边界核兜底 Set flagA。**禁止以每轮 Set 两个 flag 替代 localLast 双 flag**——此替代使 flagId 用量翻倍且丧失通信提前启动能力。实现要点见 development.md §5.8 |
 
 ### 3.5 增量归约
 
@@ -102,6 +102,6 @@
 |:---|:---|
 | golden 语义 | 逐 rank：本地完整 [M, N] mm 输出，聚合全部 rank 的本 rank M 段，FP32 求和后转输出 dtype；gen_data.py 依据切分轴=M 生成 golden |
 | 精度基线 | 先 `T=1` 串行基线全绿，再扫描合法 T；阈值按输出 dtype 精度标准 |
-| 边界矩阵 | rankSize 端点 × shape 对齐/非对齐 × T 各合法取值（均须满足 T \| mSeg 且 T ≤ 15） |
-| 红线用例 | Win 区 0 偏移元数据覆盖检测（共享布局下偏移同源校验）；flag 峰值 T>15 时 host 拒绝 |
+| 边界矩阵 | rankSize 端点 × shape 对齐/非对齐 × T 各合法取值（优先 `T \| mSeg` 无尾块；T 上限按 R9 口径 case 实测确定——计数式固定 flagId 0/1 生产验证 T=16，计数器 0-15 衡量未消费积压不触顶，不设 host 强制数值拒绝） |
+| 红线用例 | Win 区 0 偏移元数据覆盖检测（共享布局下偏移同源校验）；flagId ∈ [0,15] 硬件数量上限（`FLAG_ID_MAX=16`，计数式经 Set/Wait 严格配对规避溢出） |
 | 性能 | mm 段暴露为架构边界；性能采集须含 L2 flush 证据，与精度验证分离 |

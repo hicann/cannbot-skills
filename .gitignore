@@ -64,3 +64,6 @@ plugins-official/tilelang-op-orchestrator/tilelang-ascend/
 plugins-official/pypto-op-orchestrator/pypto/
 plugins-official/model-infer-optimize/cann-recipes-infer/
 
+
+# operator workspace (local-only deliverables, not tracked)
+plugins-official/ops-direct-invoke/operators/

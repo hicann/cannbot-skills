@@ -23,17 +23,20 @@
 
 ```
 apace/
-├── basic/          # 基础数据结构与抽象（fragment_tensor/）
-├── block/          # 接口层（blaze_ext/ aiv_comm/ aiv_compute/）
-│   └── aiv_comm/
-│       ├── collective_comm_api.h    # 四段式通信 API 契约
-│       ├── all_to_all/              # AllToAll GET/PUT 钩子
-│       └── all_gather/              # AllGather PUT 钩子
+├── basic/          # 基础数据结构与抽象（fragment_tensor/：FragmentTensor/MakeFragmentTensor/FragmentSliceCopy）
+├── block/          # 接口层
+│   ├── aiv_comm/
+│   │   ├── collective_comm_api.h    # 四段式通信 API 契约 + CommCollectiveOp/CommMode 分发
+│   │   ├── all_to_all/              # AllToAll GET/PUT 钩子
+│   │   ├── all_gather/              # AllGather PUT 钩子
+│   │   └── barrier/                 # TeamBarrier（barrier_ubmem.h）
+│   ├── blaze_ext/                   # Blaze 扩展（gemm/block/qmm_mx_block_mmad_fragment.h——FragmentTensor 路径的 MMAD 组件，AG 类算子必查）
+│   └── aiv_compute/                 # AIV 计算接口（⚠️ 空占位——量化/反量化/规约组件规划中，勿假定存在）
 ├── kernel/         # 官方算子实现（可直接调用或参考）
-│   ├── all_to_all_quant_matmul/     # PUT AllToAll + QuantMatmul
-│   └── all_gather_quant_matmul/     # PUT AllGather + QuantMatmul
-├── tiling/         # tiling 算法
-└── utils/          # 通用工具与常量
+│   ├── all_to_all_quant_matmul/     # PUT AllToAll + QuantMatmul（UDMA 版 + hcomm/CCU 注册形态版）
+│   └── all_gather_quant_matmul/     # PUT AllGather + QuantMatmul（FragmentTensor 三区）
+├── tiling/         # tiling 算法（quant_matmul_tiling_{base,common,data,swat}.h + comm_tiling_data.h）
+└── utils/          # 通用工具与常量（constant.h + host 侧 comm_channel_builder.h）
 ```
 
 可选：经 `scripts/fetch_apace.sh` 获取官网 master 最新代码核对契约，使用前必须与内置版本 diff 校验。
@@ -46,6 +49,7 @@ apace/
 | 通信接口事实 | `CollectiveComm` 四段式契约、GET/PUT 钩子职责、CommContext 字段、Win 区布局 | 同上 |
 | 入口 ABI 事实 | 入口函数签名、CommContext 传递方式、dtype 变体入口数 | 同上 |
 | 官方覆盖性 | 官方 kernel 可直接调用/复用的部分、未覆盖的需求项 | DESIGN.md §2.2 |
+| 注册形态原型事实（需求存在既有实现时） | 原型语义/算法骨架/验证基准三要素 + 可借鉴/必须重写边界判定（按 [`paradigm-mapping.md`](../operator-design/paradigm-mapping.md) §3 清单） | DESIGN.md §0.3 |
 
 每条事实必须带 `文件:行号` 证据引用；声明读取边界内未找到 ≠ 不支持，不得据此虚构接口或文件名（教训：AllGather GET 钩子在源码中不存在，仅 `all_to_all_udma_get.h` 有记录）。
 

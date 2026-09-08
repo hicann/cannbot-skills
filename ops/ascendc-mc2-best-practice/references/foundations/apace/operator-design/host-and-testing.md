@@ -69,7 +69,7 @@ fork rankNum 子进程（每进程一个 rank）
 | 分配方式 | `aclrtMalloc` 分配 GM，作为 kernel 入参（`GM_ADDR workspaceGM`）传入；mm 输出 staging 即 PUT 通信源（零重排，见 [`fusion.md`](../fundamentals/fusion.md) §6.2.4） |
 | 大小公式 | `stagingSize = M × N × sizeof(CType)`（= `rankSize × chunkBytes`），填进 tiling 结构体同名字段 |
 | T 派生 | 通信轮次 T 由 host 派生：`T0 = max(1, CeilDiv(mSeg, 目标tile行数))`，取最小满足 `T \| mSeg` 的 T（默认无尾块，PUT 钩子 src 偏移限制）；找不到回退 T=1（[`fusion.md`](../fundamentals/fusion.md) §6.2.7） |
-| **flag 峰值 ≤15 校验** | flagId 计数器范围 0-15（硬件规则见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §3）：T>1 时峰值 = T，超限拒绝 launch 并报错（含全参数 + 提示缩小 shape 或调大 tile）。校验位置：tiling 完成后、staging aclrtMalloc 之前 |
+| **flagId 范围校验** | flagId 数值范围 0-15（16 通道，超出截断低 4bit；硬件规则见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §3）：**计数式**（固定 flagId 递推计数）无 T 数值上限要求（R9 口径：每 flagId 计数器 0-15 衡量未消费积压，紧邻配对下 ≈1-2 不触顶，不设 host 强制数值拒绝）；**轮次索引式**（flagId=tid）须校验轮次索引 < FLAG_ID_MAX(16) 且避开 SyncAll 保留区（`SyncAll<true>` 占 14 → 实际安全上界 13），超限拒绝 launch 并报错（含全参数 + 提示缩小 shape 或调大 tile）。校验位置：tiling 完成后、staging aclrtMalloc 之前 |
 | Win 区容量校验 | 计算在前算子 Win 需求 = `M × N × sizeof(CType)` ≤ `HcclGetHcclBuffer` 实测值；通信在前算子 = rankSize ×（data 段 + scale 段）≤ HCCL 内置 buffer（见 operator-anatomy.md §3.5） |
 
 **资源生命周期**：builder 无清理接口，context 按 ctxTag 复用；释放路径与两份 ST 处置差异详见 [`communication.md`](../fundamentals/communication.md) §6。
@@ -120,6 +120,17 @@ main()
 | 4 | 输出写入 | 两份 ST 在 precision 与 perf 模式下均写 `npu_out.bin` |
 | 5 | 模式区分 | 两份 ST 均支持 `precision`（默认）/ `perf` 命令行模式 |
 
+### 3.1 多 rank 工程陷阱（生产实测，dav-3510 / CANN 9.2.0）
+
+| 陷阱 | 现象 | 缓解/修复 |
+|:---|:---|:---|
+| fork + TCP rootInfo 建链竞态 | msprof 包装后 fork 启动时序变化，非 0 rank 连不上 rank0 listen（10s 重试窗口耗尽）；残留半建链进程假"卡死" | `taskset -c 0` 钉核缓解；`fuser -k 8998/tcp` 清残留端口（run.sh 已内置）；根因（listen 就绪同步）未修，新工程应显式做 rank0 就绪同步 |
+| msprof 多设备同采 Task Duration 双峰 | 4-rank profiler 交叉采样开销，同一 case 出现两个量级（如 1.13/3.33ms） | 以 host 计时锚定口径，msprof 数据做 pipe 统计参考；双峰数据不直接进对比表 |
+| 采集脚本设备占用误判 | 设备探测逻辑误把 `npu-smi` 设备表行计为占用进程 → 恒判忙 → 采集恒超时 | 探测逻辑只解析进程表行；采集脚本的"环境探测"须单测后再上队列 |
+| CMakeCache/CPATH 环境污染 | 系统多版本 CANN 共存时，CMakeCache 缓存旧编译器路径（如 9.1.0 bisheng）→ 编译 `npu_arch_2201` 头缺失等错位报错 | 删 `CMakeCache.txt`/`CMakeFiles` 重 configure；run.sh `unset CPATH`；显式 `export ASCEND_HOME_PATH` |
+| 精度验收独立性 | 复用开发态构建/golden 会掩盖问题 | Reviewer 独立构建（校验 md5）、独立生成 golden、独立通信端口（避开开发态占用的 8998） |
+| 共享 NPU 队列纪律 | 本地直跑复现实验会与其他开发者任务冲突 | 所有 NPU 任务经 `qrun` 排队（含诊断实验）；一次排队内完成多版本对比（工程化二分开关：环境变量控制禁用 COMM/REDUCE/FLAGC，默认关闭） |
+
 ---
 
 ## 4. perf 模式
@@ -142,17 +153,17 @@ PUT ST（`runAllToAllMatmul` perf 分支）实测：
 | 3 | 同步 | flush 后 `aclrtSynchronizeStream` 确保完成 |
 | 4 | 资源释放 | flush buffer 在主循环后释放 |
 
-> ⚠️ L2 flush 为 **skill 侧方法论**，官网仓无 flush kernel 实体；官网 perf 分支的 cacheFlush buffer 是未接线死代码，不能当作已实现的 L2 flush 引用。**只分配 buffer 不调用 kernel = 死代码**（生产实证：cacheFlush buffer 分配后未接 kernel，flush 未生效导致 MTE2 带宽虚高）。
+> ⚠️ L2 flush 为 **skill 侧方法论**，官网仓无 flush kernel 实体；官网 perf 分支的 cacheFlush buffer 是未接线死代码，不能当作已实现的 L2 flush 引用。**只分配 buffer 不调用 kernel = 死代码**（flush 未生效会导致 MTE2 带宽虚高）。
 
-**heavy_add_kernel 实现模板**（生产验证形态，可直接复制改造）：
+**heavy_add_kernel 实现模板**（已验证形态，可直接复制改造）：
 
 ```cpp
 // heavy_kernels.h — AIV-only L2 flush kernel：对 > L2 容量的 buffer 做 x+=1 扫描，挤出前一轮热度
 #include "kernel_operator.h"
 
-constexpr int32_t HEAVY_BLOCK_NUM = 56;                           // AIV 核数（dav-3510 示例值，按目标芯片核数调整）
+constexpr int32_t HEAVY_BLOCK_NUM = 56;                           // AIV 核数示例值，按目标芯片实际 AIV 核数调整（规格以 npu-arch skill 为唯一知识源）
 constexpr int32_t HEAVY_TILE_SIZE = 32 * 1024;                    // 32KB per tile
-constexpr int64_t CACHE_FLUSH_ELEM_COUNT = 128L * 1024L * 1024L;  // 128M elements = 256MB（大于目标芯片 L2 容量即可）
+constexpr int64_t CACHE_FLUSH_ELEM_COUNT = 128L * 1024L * 1024L;  // 示例值 256MB——大小须大于目标芯片 L2 容量（规格以 npu-arch skill 为唯一知识源）
 
 __global__ __aicore__ __vector__ void heavy_add_kernel(GM_ADDR x, int64_t totalLength, int64_t blockLength)
 {
@@ -183,7 +194,7 @@ __global__ __aicore__ __vector__ void heavy_add_kernel(GM_ADDR x, int64_t totalL
 }
 ```
 
-> 模板要点：① flush buffer 必须**大于目标架构 L2 容量**（生产实测 dav-3510 取 256MB 足够；L2 确切容量以目标芯片规格为准）；② 每轮主 kernel 前调用 + `aclrtSynchronizeStream`；③ 尾部不足一个 tile 的部分直接忽略（flush 仅用于热度清除，无正确性语义）；`HEAVY_BLOCK_NUM` 按目标芯片 AIV 核数调整。
+> 模板要点：① flush buffer 必须**大于目标架构 L2 容量**（参考工程实测示例值 256MB 足够；L2 确切容量等芯片规格以 npu-arch skill 为唯一知识源）；② 每轮主 kernel 前调用 + `aclrtSynchronizeStream`；③ 尾部不足一个 tile 的部分直接忽略（flush 仅用于热度清除，无正确性语义）；`HEAVY_BLOCK_NUM` 按目标芯片 AIV 核数调整。
 
 perf 循环接入（每轮主 kernel 前调用）：
 
@@ -236,9 +247,11 @@ for (int iter = 0; iter < PERF_LOOP_COUNT; ++iter) {
 | ② hccl+mm 分步路径 | 组合调用单算子（如 `aclnnQuantMatmulV5` 本地 mm + `HcclReduceScatter` 或 `aclnnReduceScatter` 通信），串行执行无重叠 | 分步路径必须同 dtype/同 golden 语义；通信用 HCCL 高阶 API（此路径非直调 kernel，HCCL 可用） |
 | ③ 本算子 ST 直调路径 | 本工程 perf 模式（heavy_add_kernel + N 迭代计时） | 与 ①② 同 shape、同 L2 flush、同取值口径（warmup 3 + 去离群平均 × 跨 rank max，见 §6.1 #2） |
 
-**对标产出**：`profiling/comparison/` 下三路径 Task Duration 对比表与加速比；`profiling/ANALYSIS.md` 归档 pipe 级指标（mac/mte2/fixp 逐路径对比）与瓶颈归因。无 ①② 对标数据时 R15 判 FAIL（仅基线采集 = 未达投产门槛）；若因架构约束（如 PUT 512KB × R×T≤32 限制 M×N 上限）无法覆盖业务真实大 shape，须在 ANALYSIS.md 显式声明约束边界与适用范围。
+**对标产出**：`profiling/comparison/` 下三路径 Task Duration 对比表与加速比；`profiling/ANALYSIS.md` 归档 pipe 级指标（mac/mte2/fixp 逐路径对比）与瓶颈归因。无 ①② 对标数据时 R15 判 FAIL（仅基线采集 = 未达投产门槛）；若因架构约束（如 Win 容量限制 M×N 上限）无法覆盖业务真实大 shape，须在 ANALYSIS.md 显式声明约束边界与适用范围。
 
-### 6.1 profiling 目录范式（生产验证结构）
+> aclnn 对标算子的**调用契约坑**（CCU 引擎在 fork 直调场景不可行、FP8 必须带 scale、scale 形状校验、group 不可手动创建、libhccl 误链旧版本等生产试错记录）见 [`scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §4.1——对标是设计期活动，试错成本须在 PLAN 预算。
+
+### 6.1 profiling 目录范式（已验证结构）
 
 ```
 profiling/
@@ -254,8 +267,8 @@ profiling/
 
 | # | 项 | 规范 |
 |:---|:---|:---|
-| 1 | L2 flush | 每轮主 kernel 前执行 > L2 容量的 D2D copy（如 256MB，红线 R②）；perf 模式推荐**进程内内嵌**（cacheFlush buffer + boost kernel + N 迭代计时，可复现性优于外置脚本） |
-| 2 | 稳态取值 | **以官方 `parse_prof.py` 口径为准**：跳过前 3 轮 warmup（`WARMUP_SKIP=3`）→ 剔除 >1.2×min 离群（`OUTLIER_FACTOR=1.2`）→ 每卡取**平均**；cube_utilization 取中位数；**跨 rank 取 max**（木桶效应——最慢 rank 决定整体性能） |
+| 1 | L2 flush | 每轮主 kernel 前执行 > L2 容量的 D2D copy（参考工程示例值 256MB，红线 R②）；perf 模式推荐**进程内内嵌**（cacheFlush buffer + boost kernel + N 迭代计时，可复现性优于外置脚本） |
+| 2 | 稳态取值 | **官方脚本口径**（parse_prof.py）：跳过前 3 轮 warmup（`WARMUP_SKIP=3`）→ 剔除 >1.2×min 离群（`OUTLIER_FACTOR=1.2`）→ 每卡取**平均** → Overall = 各卡平均值的**平均**（横幅 "avg of card avgs"）；cube_utilization 取中位数。**skill 投产纪律（区别于官方口径，须分开归档）**：另报**跨 rank max**（木桶效应——最慢 rank 决定整体性能）。⚠️ [`profiling_mc2.md`](../../../shared/profiling_mc2.md) §4.4 的多卡后处理是另一套简化口径（每卡末 5 次平均 + 4 卡 max，无离群过滤）——正式投产验收以本表官方口径 + 跨 rank max 为准，两套口径不得混用 |
 | 3 | 采集污染检查 | warm-up/刷流水用 `torch.npu.current_stream().synchronize()`（仅同步当前流），禁止全局 flush 类操作（如大循环 `torch.exp` 会在 profiling trace 引入额外算子污染） |
 | 4 | 对标同 shape | 三路径必须同 shape 矩阵、同 L2 flush、同取值口径，否则加速比无效 |
 | 5 | 隔离测试形态 | COMM-only（仅通信，mm 输出用预填数据）与 COMPUTE-only（仅 mm+归约，通信跳过）分别采集，MTE2/CUBE 占比对比定位瓶颈侧 |

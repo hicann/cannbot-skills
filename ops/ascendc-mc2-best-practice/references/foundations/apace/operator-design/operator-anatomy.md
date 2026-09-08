@@ -44,7 +44,7 @@
   → scale 通信 Init（winOffset = data 段字节数：A2A 为 rankSize × rankDataBytes，AG 为 dataRegionBytes_）
 ```
 
-> AG 在 Init 末尾额外有一次 `SyncAll<true>()`；AG 的 `commTilingData_ / commTilingScale_` 是成员变量、在 Init 内由 `tilingData->commTile` 重推导后传给通信对象，A2A 则直接把 tiling 字段传给通信对象 Init。
+> AG 在 Init 末尾额外有一次 `SyncAll<true>()`；AG 的 `commTilingData_ / commTilingScale_` 是成员变量、在 Init 内由 `tilingData->commTile` 重推导后传给通信对象，A2A 则直接把 tiling 字段传给通信对象 Init。另注意 **Init 步骤顺序两算子不同**：A2A 先提取 ctx（rankId/rankSize）再 `InitBaseParams()`；AG 先 `InitBaseParams(tilingData)` 再提取 ctx，且 `dataRegionBytes_/scaleRegionBytes_` 在 ctx 提取之后于 Init 内计算（不在 InitBaseParams 中）——上面序列以 A2A 为基准展开，移植 AG 时以 `all_gather_mx_matmul_udma_impl.h::Init` 源码顺序为准。
 
 ### Run 编排
 
@@ -119,7 +119,7 @@ allToAllMatmulTilingData                 AllGatherMxMatmulUdmaTilingData
 └── uint32_t localMatmul
 ```
 
-> 官网 tiling/ 目录仅有 `comm_tiling_data.h`、`quant_matmul_tiling_{base,common,data,swat}.h`；**无 `comm_tiling_base.h`**（headMSize 推导逻辑内联在 ST main.cpp 中，见 §3.7）。
+> 官网 master 快照的 tiling/ 目录为 `comm_tiling_data.h`、`quant_matmul_tiling_{base,common,data,swat}.h`，无 `comm_tiling_base.h`（headMSize 推导内联在 ST main.cpp）；⚠️ CANN 9.1.0 内置版 tiling/ **另有** `comm_tiling_base.h`（`apace::CommTilingBase::GetCommTilingData`，将 headMSize 推导封装为基类）——两版本该文件存在差异，以 Step 1 实测登记的事实源为准（见 §3.7）。
 
 ### 3.2 CommTilingData（通信切分）
 
@@ -137,7 +137,7 @@ allToAllMatmulTilingData                 AllGatherMxMatmulUdmaTilingData
 
 **切分不变量**：`切分轴总元素数 = splitAxisTileSize × splitAxisTileCnt + splitAxisTailSize × splitAxisTailCnt`；每个 tile 字节大小 = `splitAxisTileSize × nonSplitAxisSize × sizeof(dtype)`。
 
-PUT 模式映射：A 按 K 轴切分（每 rank 持有 Ka = K/rankNum），通信沿 M 轴逐 tile 推送 A 与 ScaleA。host 侧填充见官方 AllToAll ST main.cpp `runAllToAllMatmul`：
+PUT 模式映射：A 按 K 轴切分（每 rank 持有**全部 M 行 × 本卡 Ka = K/rankNum 列段**，即 `[M_total, Ka]`），通信沿 M 轴逐 tile 推送 A 与 ScaleA（M 行块 r → rank r）。host 侧填充见官方 AllToAll ST main.cpp `runAllToAllMatmul`：
 
 | 字段 | PUT data 通道 | PUT scale 通道 |
 |:---|:---|:---|
@@ -481,6 +481,7 @@ PUT：4 变体入口（all_to_all_quant_matmul），定义在 `apace/tests/st/al
 - 输出类型恒为 `bfloat16_t`
 - 4 个入口的函数体**完全相同**，仅 Impl 模板类型参数不同
 - Impl 均为 `Apace::AllToAllMxQuantMatmulUdmaImpl<AType, BType, CType, false, true>`（TransA=false, TransB=true）
+- ⚠️ 官方 A2A ST `main.cpp` precision/perf 分支**硬编码调用 E4M3E4M3 入口**（无运行期 dtype dispatch）——4 个 dtype 入口虽已定义齐，但 host 按 dtype 运行期分派是本 skill 的生产纪律（R3），非官方 ST 现状，勿照抄官方硬编码写法
 
 AG：单入口（all_gather_quant_matmul），仅 1 个 `__global__` 入口 `AllGatherQuantMatmulKernel`，定义在 impl 头文件 `apace/kernel/all_gather_quant_matmul/all_gather_mx_matmul_udma_impl.h` 末尾：
 
@@ -611,6 +612,33 @@ UDMA 模式：`CommContext*` 为入口第一参数（`__gm__` 指针传递，Imp
 
 > `all_to_all_quant_matmul` 另有一个 HCCL CCU 变体（`all_to_all_mx_quant_matmul_hcomm_impl.h`），面向框架注册场景，**不支持直调**（依赖框架创建的 HCCL 上下文，直调模式下指针无效）。与 UDMA 变体共用同一个 `QuantMatmulMxKernel`，仅 `CommPolicy` 模板参数不同。详见 [`architecture.md`](../fundamentals/architecture.md) §10 ④。
 
+#### CCU/hcomm 注册形态模板（通往生产接入的桥梁）
+
+批量生成的算子最终要落注册形态时，按以下官方模板改造（全部锚点出自 `all_to_all_mx_quant_matmul_hcomm_impl.h`）：
+
+```cpp
+// ① tiling 聚合结构（含框架通信参数）——ccuAllToAllMatmulTilingData
+//    = Mc2InitTiling + Mc2CcTiling + CommTilingData + QuantMatmulTilingData + localMatmul
+//    （all_to_all_matmul_tiling_data.h:37-43；Mc2InitTiling/Mc2CcTiling 来自 highlevel_api/kernel_tiling.h）
+
+// ② Init（纯 AIC 内）：
+commState_.hccl_.InitV2(AscendC::GetHcclContext<0>(), &tilingData_->mc2InitTiling);       // :177
+commState_.hccl_.SetCcTilingV2(offsetof(TilingDataType, mc2CcTiling));                    // :178（用 offsetof 传偏移）
+rankId_ = commState_.hccl_.GetRankId();  rankDim_ = commState_.hccl_.GetRankDim();       // :179-180
+
+// ③ 批量下发（<true> = 立即 commit），三 handle：scale 一份 + data head/tail 各一份
+scaleHandle_   = hccl_.AlltoAll<true>(x1Scale_, dst, sendCount, FP8E8M0, strideCount, /*opCnt=*/1);        // :188-191
+dataHeadHandle_ = hccl_.AlltoAll<true>(x1_, dst, headSendCount, dtype, dataStrideCount, headTileCnt);     // :193-199（opCnt=tileCnt：轮次由 HCCL 侧批量下发）
+dataTailHandle_ = ...;                                                                                     // :201-209（尾块单独一份）
+
+// ④ WaitPolicy（逐 tile 等待映射）：tileIdx==0 等 scaleHandle；< headTileCnt 等 head，否则等 tail（:68-82）
+quantMatmulKernelImpl_.GetCommPolicy().state_ = &commState_;   // 绑定（:176）
+
+// ⑤ Run：local 前置（可选）→ REMOTE 计算（WaitTile → hccl_.Wait(handle)）→ SyncAll → hccl_.Finalize()（:217-225）
+```
+
+约束与差异（相对 UDMA 直调形态）：纯 AIC（cube-only）kernel，无 AIV/CrossCoreFlag；若混启 AIV 必须给全部 HCCL 调用与 SyncAll 加 `if ASCEND_IS_AIC` 守卫，否则 Prepare/Wait 失配死锁（文件头注释明示）；mode1 经共享 kernel 开启 AtomicAdd、mode2 存在 mmad 计数错配（详见 [`fusion.md`](../fundamentals/fusion.md) §5.1）；scale 的 workspace 须 512B 对齐（`x1ScaleLen` CeilDiv(512)×512，:169-171）。
+
 ---
 
 ## 7. 计算在前算子解剖（compute-first 直调模式）
@@ -634,7 +662,7 @@ src/
 
 ### 7.2 入口签名（9 参数）与 dtype 变体规则
 
-**dtype 变体入口数由算子 dtype 合同决定**：合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 4 个变体入口（E4M3E4M3/E5M2E5M2/E4M3E5M2/E5M2E4M3）；其他合同按组合数覆盖。host 侧按 dtype 参数运行期分派（dispatch 宏模板见 [`development-guide.md`](development-guide.md) §3.5）。硬编码单一入口 = 异 dtype 字节流被错误模板解释 → 精度系统性错误（生产实证 matched_ratio 为 0）。
+**dtype 变体入口数由算子 dtype 合同决定**：合同含 E4M3/E5M2 双组合的 FP8 量化算子需要 4 个变体入口（E4M3E4M3/E5M2E5M2/E4M3E5M2/E5M2E4M3）；其他合同按组合数覆盖。host 侧按 dtype 参数运行期分派（dispatch 宏模板见 [`development-guide.md`](development-guide.md) §3.5）。硬编码单一入口 = 异 dtype 字节流被错误模板解释 → 精度系统性错误（matched_ratio 为 0 的典型特征）。
 
 ```cpp
 __global__ __aicore__ void {Op}KernelE4M3E4M3_Udma(
@@ -661,7 +689,7 @@ AIC/AIV 编排骨架（统一 for-t 循环、严格分离错位流水、`Wait<BA
 
 - AIC `RunMatmul()`：统一 `for t { 本轮 mm 子区间（R × GetTileM(t)，地址带 tileMOffset 偏移，默认 FragmentTensor 一次调用）; SetFlag }`，T=1 自然退化
 - AIV：后 R 核通信（`jobIndex = GetBlockNum()-1-GetBlockIdx()`）、前 (核数-R) 核归约，错位流水 `AllToAll(t) ∥ Reduce(t-1)`，尾部补尾轮归约
-- **禁止 `Wait<BARRIER_DEVICE>`**：其内建 CrossDevice 在 totalJobs=rankSize 时 step=rankSize 不轮询 remote → 跨设备同步失效（生产实测出现大面积元素错误）
+- **禁止 `Wait<BARRIER_DEVICE>`**：本场景后 R 核映射下 TeamBarrier jobIndex 错位/守卫早退致内建 CrossDevice 失效 → 跨设备同步失败（机制见 [`communication.md`](../fundamentals/communication.md) CrossDevice 机制注）
 
 ### 7.4 tiling 结构体字段（host 填充）
 
@@ -671,13 +699,13 @@ compute-first 算子的 tiling 结构 = `CommTilingData`（单通信对象）+ �
 
 | 要点 | 结论 | 事实源 |
 |:---|:---|:---|
-| mm 内核 | 默认 FragmentTensor 自研消 R 循环（一次调用覆盖 R×curTileM 行，约束 R×T≤32）；vendor 复制官方 kernel 为例外，须 DESIGN.md 论证 SCALAR 占比 | [`fusion.md`](../fundamentals/fusion.md) §6.2.2 |
+| mm 内核 | 默认 FragmentTensor 自研消 R 循环（一次调用覆盖 R×curTileM 行，约束 R≤32 = MAX_FRAGMENT_COUNT 单次构建上限，与 T 无关）；vendor 复制官方 kernel 为例外，须 DESIGN.md 论证 SCALAR 占比 | [`fusion.md`](../fundamentals/fusion.md) §6.2.2 |
 | per-tile 子区间（AIC 红线） | 每轮 problem M = `R × GetTileM(t)`，A/C/ScaleA 地址带 `tileMOffset` 偏移；禁止全量 mm×T 与归约 `(void)turn`（T>1 精度失败的实证根因） | [`development-guide.md`](development-guide.md) §3.5 契约 |
 | AIV 组织 | 默认严格分离：后 R 核通信（`jobIndex = GetBlockNum()-1-GetBlockIdx()`）/ 前 (核数-R) 核归约；`Wait<BARRIER_NONE>` + 手动 `teamBarrier_.CrossDevice()` | [`fusion.md`](../fundamentals/fusion.md) §6.2.1 |
 | winOffset | Win 数据区与元数据区偏移按 host 建链布局确定、三处同源（共享 Win 区布局的一种已验证实现为 96B→128）；0 偏移覆盖元数据 → "假通过" | [`fusion.md`](../fundamentals/fusion.md) §6.2.4 / [`communication.md`](../fundamentals/communication.md) 陷阱 #12 |
 | staging 即 PUT 源 | mm 输出连续 [M,N]，rank 段即 chunk，零重排；self chunk 从 staging 直读（PUT self 槽闲置为已知取舍） | [`fusion.md`](../fundamentals/fusion.md) §6.2.4 |
 | 单通信对象 | 通信的是输出 C（CType），无 scale 对象；`CollectiveComm<AllToAll, PUT, CType, TeamBarrier>` 一个对象即可 | §7.2 入口签名 |
-| flag 编排 | flagId 避开保留区；T=1 单次 / T>1 逐轮计数配对，峰值 ≤15；零 tile 核无条件 Set；SyncAll 在分核守卫外 | [`fusion.md`](../fundamentals/fusion.md) §6.2.3 |
+| flag 编排 | flagId ∈ [0, FLAG_ID_MAX)；T=1 单次 / T>1 逐轮计数配对（Set/Wait 严格配对；计数深度按 R9 口径不设数值拒绝）；零 tile 核无条件 Set；SyncAll 在分核守卫外 | [`fusion.md`](../fundamentals/fusion.md) §6.2.3 |
 | 归约 | 手动 UB 批量形态（FP32 中间累加 + src 双缓冲 + 2D DataCopyPad blockCount=多行）；禁止 TQue 逐行模型（= 性能 FAIL） | [`fusion.md`](../fundamentals/fusion.md) §6.2.6 |
 | 无回压通道 | 通道仅"mm 完成"一条（AIC→AIV）；死锁论证简化为"AIC 必然完成 → AIV Wait 必然解除" | [`fusion.md`](../fundamentals/fusion.md) §6.2.1 |
 
@@ -685,7 +713,7 @@ compute-first 算子的 tiling 结构 = `CommTilingData`（单通信对象）+ �
 
 | 限制项 | 上限 | 出处 |
 |--------|------|------|
-| commTurn（PUT 轮次） | ≤ 16（flagId 直接取 tid） | `apace/utils/constant.h` FLAG_ID_MAX |
+| commTurn（PUT 轮次） | 轮次索引式 flagId：轮次索引 < 16 且避开 SyncAll 保留区（`SyncAll<true>` 占 14，实际安全上界 13）；计数式固定 flagId 不受轮次数限制 | `apace/utils/constant.h` FLAG_ID_MAX；`api-crosscore-sync.md` §3 |
 | waitedMask | uint32（tile 总数 ≤ 32） | `quant_matmul_mx_kernel.h` |
 | rankSize | ≤ 64（COMM_MAX_RANK_NUM） | `block/aiv_comm/collective_comm_context.h` |
 | AG 变体 rankSize | ≤ 8（cFragAddrs_ 固定数组，仅官网 AG kernel 实现形态） | `qmm_mx_kernel_ag_udma.h` |
@@ -693,9 +721,9 @@ compute-first 算子的 tiling 结构 = `CommTilingData`（单通信对象）+ �
 | 通信参与核 | rankSize ≤ AIV BlockNum | Commit/Wait 守卫 `GetBlockIdx() < rankSize` |
 | 每通信对象 UB | 512B（COMM_WORKSPACE_SIZE） | `collective_comm_context.h` |
 | Win 区数据/元数据分离 | PUT/GET 数据不得覆盖 Win 区内元数据/barrier 区（官方布局 barrier 在独立 BARRIER_BUF，数据区从 0 可用；共享布局按约定偏移跳过头部，实现形态见场景 design.md §3.6） | communication.md 陷阱 #12；fusion.md §6.2.4 |
-| 单轮 PUT 数据量 | perRoundChunkBytes ≤ 512KB（dav-3510 实测 UDMA 可靠传输阈值） | communication.md 陷阱 #13 |
+| 单轮 PUT 数据量 | ⚠️ 风险提示（非硬上限）：无官方上限（bring-up 期过大单轮曾见间歇失败，边界未定）；大单轮按 case 复核，不作 host 强制拒绝（R14 口径） | communication.md 陷阱 #13；review-checklist R14 |
 
-> 计算在前模式的硬限制（flag 计数峰值 ≤15、通信轮次尾块策略、对齐约束、Win 容量、mm 段暴露边界）见 [`fusion.md`](../fundamentals/fusion.md) §6.2.10，本节不重复。AG `rankSize ≤ 8` 是官网 AG kernel 固定数组的实现上限；自研 FragmentTensor kernel 不受此限，受 `R×T ≤ 32`（MAX_FRAGMENT_COUNT）约束。
+> 计算在前模式的硬限制（flagId ∈ [0,15] 硬件数量 + Set/Wait 配对纪律、通信轮次尾块策略、对齐约束、Win 容量、mm 段暴露边界）见 [`fusion.md`](../fundamentals/fusion.md) §6.2.10，本节不重复。AG `rankSize ≤ 8` 是官网 AG kernel 固定数组的实现上限；自研 FragmentTensor kernel 不受此限，受 `R ≤ 32`（MAX_FRAGMENT_COUNT 单次构建上限，与 T 无关）约束。
 
 ### 7.7 自研 FragmentTensor mm kernel 与 AIV 编排形态
 

@@ -27,7 +27,7 @@
 | 编译失败 / API 符号缺失 | 编译 | [`../operator-design/development-guide.md`](../operator-design/development-guide.md)（工程搭建与依赖）；核对 CANN 内置 apace 事实源版本 |
 | Blaze matmul 排错 | 编译 | [`../fundamentals/compute.md`](../fundamentals/compute.md) §8 排错速查；[`../review-checklist.md`](../review-checklist.md) R7（禁 `AscendC::Matmul` 高阶 API） |
 | 通信时序错误 | 通信时序 | [`../fundamentals/communication.md`](../fundamentals/communication.md) 陷阱表；[`../fundamentals/fusion.md`](../fundamentals/fusion.md) §3（GET/PUT flag 编排不变量） |
-| flagId 计数器溢出（硬件异常中断） | 同步 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §3.3/§6.2.3（峰值 ≤15）；[`../operator-design/host-and-testing.md`](../operator-design/host-and-testing.md)（host 侧 flag 峰值强制校验） |
+| flagId 计数器溢出（硬件异常中断） | 同步 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §3.3/§6.2.3（flagId ∈ [0,15] 硬件数量上限 + Set/Wait 严格配对规避；计数深度按 R9 口径不设数值拒绝）；[`../review-checklist.md`](../review-checklist.md) R9 |
 | tail tile 非对齐精度问题 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.7（尾块策略 A：padding 对齐 + realFragmentSize 限读）；[`optimization-playbook.md`](optimization-playbook.md) §4 |
 | 归约性能差 | 性能 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6（多行批量归约 + 2D DataCopyPad）；[`optimization-playbook.md`](optimization-playbook.md) §2 |
 | 死锁（aclError:507014，归约路径） | 同步 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 1 + [`../scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.3 事件模板（四类 HardEvent 同迭代配对 + 残留事件消费）；[`../review-checklist.md`](../review-checklist.md) R19 |
@@ -35,7 +35,7 @@
 | N>redUbN 时部分输出为零 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 3（2D DataCopyPad strided 隐式上限，redUbM ≤ 32 或 1D 退化） |
 | 归约结果系统性错误 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 2（禁 in-place BF16→FP32 Cast，独立 srcFP32 双缓冲）；[`../review-checklist.md`](../review-checklist.md) R18 |
 | perf 数据不可复现 / MTE2 带宽虚高 | 性能 | [`../operator-design/host-and-testing.md`](../operator-design/host-and-testing.md) §4（L2 flush 实接线模板）；[`../review-checklist.md`](../review-checklist.md) R20 |
-| 大 shape 无法运行 / 间歇 FAIL | ABI | [`../operator-design/development-guide.md`](../operator-design/development-guide.md) §3.5（host 前置校验：perRoundChunkBytes ≤ 512KB、R×T ≤ 32）；[`../fundamentals/communication.md`](../fundamentals/communication.md) 陷阱 #12/#13 |
+| 大 shape 无法运行 / 间歇 FAIL | ABI | [`../operator-design/development-guide.md`](../operator-design/development-guide.md) §3.5（host 前置校验：正确性类整除/对齐/核数/Win 容量；单轮 PUT 大小按 R14 风险提示复核，非强制拒绝；R ≤ 32 为 fragment 数上限，R×T 无硬约束）；[`../fundamentals/communication.md`](../fundamentals/communication.md) 陷阱 #12/#13 |
 | cube_utilization 低 | 性能 | [`optimization-playbook.md`](optimization-playbook.md) §2（CUBE bound 判据与手法）；[`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.2（R×T 子调用 SCALAR 主 bound 特征） |
 | GET 模式 4+rank 不稳定 | 通信时序 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §3.4/§6.2（GET 环形回压契约与 4+rank 数据可见性风险，计算在前场景优先 PUT）；[`../fundamentals/communication.md`](../fundamentals/communication.md) GET 契约 |
 | 仅非对齐 shape 精度 FAIL | 设备精度 | [`optimization-playbook.md`](optimization-playbook.md) §4（tail 路径排查模式）；[`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.7 |

@@ -437,6 +437,8 @@ AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h
 | 接口 | 语义 | 约束 |
 |:---|:---|:---|
 | `FragmentTensor<Dims, MaxCnt, LayoutFactory, T>` | 沿 split axis 拼接多个离散 GM 段的虚拟 Tensor；`Slice` 零搬运返回子视图 | `MaxCnt` 用 `Apace::Basic::MAX_FRAGMENT_COUNT` |
+| `MakeFragmentTensor<...>(fragParam, addrList)` | 创建入口（参数结构 + 地址表） | ⚠️ `addrList` 只存指针不拷贝——须在整个 FragmentTensor 生命周期内有效 |
+| `FragmentParam<Dims>` | `{assembleAxis, assembledShape[Dims], fragmentSize, realFragmentSize, fragmentCnt}` | `Validate()` 不变量：`assembledShape[assembleAxis] == fragmentSize × fragmentCnt`、`0 < realFragmentSize ≤ fragmentSize`、`fragmentCnt ≠ 0`——padding 用 `fragmentSize > realFragmentSize` 表达（AG 尾块 paddedTailM/tailM 即此用法） |
 | `GetFragment(idx)` / `GetFragmentAddr(idx)` / `GetFragmentCnt()` | 查询 fragment 段 | — |
 | `UpdateAddrList(addrList)` | 轮次推进时原地更新各段地址 | 更新前必须确保旧地址不再被读（先 wait） |
 | `Slice(coord, shape)` | 虚拟切片 | 跨 fragment 的 slice 由内部 `FragmentComposition` 解析 |
@@ -457,6 +459,24 @@ AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h
 - `CopyAInL1` 内用 `FragmentSliceCopy<false>`（gather）把离散 fragment 的 A/ScaleA 搬入 L1；C 写出用 `FragmentSliceCopy<true>`（scatter，L0C→GM fixpipe）
 - 架构门控：类定义整体位于 `#if __NPU_ARCH__ == 3510` 内，门外仅有前向声明——非 3510 目标实例化该类触发不完整类型编译错误（比空定义更安全的失败模式）
 
+#### operator() 完整调用契约（17 参，自研 kernel 照抄锚点）
+
+`Init(problemShape, l0TileShape{baseM,baseN,baseK,0}, l1Params{stepK*baseK, scaleKL1, nBufferNum}, isBias, dbL0c>1)` 后按以下顺序传参（`qmm_mx_kernel_ag_udma.h:403-406`）：
+
+```
+mmadFrag(blockA,              // FragmentTensor Slice（A，HEAD/MAIN/TAIL 区对应 frag）
+         gmBlockB,            // 普通 GM tensor（B 全卡共享）
+         blockScaleA,         // FragmentTensor Slice（scaleA）
+         gmBlockScaleB,       // 普通 GM tensor
+         gmBlockBias,         // 普通 GM tensor（可为 null tensor 空占位）
+         cFragAddrs,          // GM_ADDR* 各 rank 的 C 输出基址数组（AG 为 [8] 定长成员）
+         mPerRank, tileM, tileCnt, tailM,   // 区域划分参数
+         remoteRankCnt,       // 本 tile 参与的 rank 数（控制 L0C 累加/fixpipe 时机）
+         Ni,                  // C 行宽 N
+         singleShape, regionMPos, nPos,     // 调度形状与坐标
+         /*splitKIdx=*/0, blockC)           // blockC：FragmentTensor Slice（C 侧）
+```
+
 ### 约束与违反后果
 
 | # | 约束 | 违反后果 |
@@ -464,12 +484,15 @@ AllGather 算子（`apace/kernel/all_gather_quant_matmul/qmm_mx_kernel_ag_udma.h
 | 1 | wait 与 AIV set 的 dependTileIdx 序列必须一一对应（含末尾 drain） | 死锁或读脏数据 |
 | 2 | MAIN 轮次切换先 wait 再 `UpdateAddrList` | 地址更新后旧数据未消费完，精度错误 |
 | 3 | HEAD 区 dependId=0 由 AIV 循环前预触发；AIC 仍经统一位掩码去重路径 wait 一次 id 0（因已预触发而立即返回，不阻塞） | 特判跳过 id 0 会破坏位掩码/drain 的统一配对假设 |
+| 4 | AG 的 `SetL2Cache` 与 A2A 差异：无 isAtomicAdd 分支；gmB 按 DN 布局（transB）以 K 轴 128B 对齐判 streaming；scaleB 受 `fullMBlock && (N*scaleC0 与 baseN*scaleC0 均 128B 对齐)` **双 gate** | L2 命中率退化（大 B/scaleB 冲刷 cache） |
+
+> MatmulMode 三模式在共享 kernel `ProcessSingleBatch` 的分支行为（LOCAL 读 localAGmAddr_ 且 B 只取本 rank K 段 / REMOTE 遍历全部 rank、`localMatmul==0` 时 self 段改读本地 GM / DEFERRED_SYNC 三相 wait 夹逼）详见 [`fusion.md`](fusion.md) §5.1；本节只列 AG 路径差异（无 localMatmul 字段、单 REMOTE 编排 + 三区 FragmentTensor）。
 
 ### 7.2 计算在前场景（ReduceScatter 语义）
 
 > **选型提醒**：计算在前算子的 mm 内核**默认 FragmentTensor 自研 kernel**（消 R 循环），与 [`fusion.md`](fusion.md) §6.2.2 及 R16 红线一致；vendor 复用官方 `QuantMatmulMxKernel` 为例外路径（须 SCALAR 占比论证）。
 >
-> **vendor 复用不可行说明（类型不兼容）**：`QuantMatmulMxKernel` 的 `mmadParams.cGmAddr` 为 `GM_ADDR` 类型（单地址），**无法接受 FragmentTensor 对象**（多段地址数组）——C 输出无法 scatter 到 R 个 rank 段。只有 `QmmMxBlockMmadFragment` 配合自研 kernel 才支持 FragmentTensor C 输出（`operator()` 接受 `GM_ADDR* cFragAddrs` 数组 + `FragmentSliceScatter` 多段写）。此类型不兼容属设计阶段即可拦截的阻塞级选型错误。
+> **vendor 复用不可行说明（类型不兼容）**：`QuantMatmulMxKernel` 的 `mmadParams.cGmAddr` 为 `GM_ADDR` 类型（单地址），**无法接受 FragmentTensor 对象**（多段地址数组）——C 输出无法 scatter 到 R 个 rank 段。只有 `QmmMxBlockMmadFragment` 配合自研 kernel 才支持 FragmentTensor C 输出（`operator()` 接受 `GM_ADDR* cFragAddrs` 数组，内部经 `FragmentSliceCopy<true>` 多段 scatter 写出并按 `realFragmentSize` 截尾）。此类型不兼容属设计阶段即可拦截的阻塞级选型错误。
 
 FragmentTensor 的另一种应用：**计算在前**场景——A 数据全在本卡 GM 连续 `[m, k]`，各 rank 段天然连续排列，FragmentTensor 打包本卡 GM 地址（vs AllGather 打包 win 区离散地址）。
 

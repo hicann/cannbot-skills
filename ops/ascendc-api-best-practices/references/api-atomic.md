@@ -6,7 +6,9 @@
 
 ## 1. 概述
 
-DMA 原子操作控制**所有目的地址为 GM 的数据搬运**如何处理多核/多 rank 对同一 GM 地址的并发写入。官方原文："对后续目的地址为 GM 的数据搬运开启原子累加"——作用范围**不限于 Fixpipe（L0C→GM）**，还包括 DataCopy UB→GM（MTE3），A2/A3 上还含 L1→GM。
+DMA 原子操作控制**所有目的地址为 GM 的数据搬运**如何处理多核/多 rank 对同一 GM 地址的并发写入。官方原文："对后续目的地址为 GM 的数据搬运开启原子累加"——作用范围**不限于 Fixpipe（L0C→GM）**，还包括 DataCopy UB→GM（MTE3），Atlas A2/A3 系列（DAV_2201）上还含 L1→GM。
+
+> 平台标签口径：`950` = Ascend 950PR/950DT（DAV_3510）、`A3` = Atlas A3 系列、`A2` = Atlas A2 系列（910b）；A3 与 A2 同属 DAV_2201。
 
 **核心价值**：将 reduce 操作融入 DMA 写入，实现"计算即累加"，消除额外的通信或 host 侧 reduce 开销。典型场景：多 rank 计算同一输出的不同分段部分和（split-K / ReduceScatter / AllReduce）。
 
@@ -124,19 +126,19 @@ if (needAccumulate) {
 }
 ```
 
-### 5.2 支持的数据类型（A2/A3）
+### 5.2 支持的数据类型（Atlas A2/A3 系列）
 
 | dtype | SetAtomicAdd | 说明 |
 |:---|:---:|:---|
 | `float` | ✅ | FP32 累加 |
 | `half` | ✅ | FP16 累加 |
 | `bfloat16_t` | ✅ | BF16 累加 |
-| `int8_t` | ✅ | INT8 累加（A2/A3；部分更早平台不支持） |
+| `int8_t` | ✅ | INT8 累加（Atlas A2/A3 系列；部分更早平台不支持） |
 | `int16_t` | ✅ | INT16 累加 |
 | `int32_t` | ✅ | 整数累加 |
 | FP8 类型 | ❌ | 不支持，需先转 BF16/FP32 |
 
-> 平台差异：310b 无 int8/bf16；`SetAtomicMax`/`SetAtomicMin` 仅 950/A3/A2 支持（310b/310p/910 等更早产品不支持）。
+> 平台差异：Ascend310B 无 int8/bf16；`SetAtomicMax`/`SetAtomicMin` 仅 950/A3/A2 支持（Ascend310B/Ascend310P/Ascend910 等更早产品不支持）。
 
 ### 5.3 与 Matmul 流水的关系
 
