@@ -19,6 +19,7 @@
 
 用法:
     python verify.py --op_name <算子名> [--verify_dir <验证目录>] [--timeout <超时秒数>]
+                     [--fresh-cache [--keep-cache]]
 """
 import argparse
 import gc
@@ -26,8 +27,10 @@ import importlib
 import json
 import logging
 import os
+import shutil
 import sys
 import subprocess
+import tempfile
 import traceback
 from dataclasses import dataclass
 
@@ -110,6 +113,15 @@ class InputSpec:
     input_dtype: object = None
 
 
+@dataclass
+class VerifyOptions:
+    """verify_implementations 的可选开关，聚合成一个对象避免参数个数膨胀。"""
+    triton_impl_name: str = "triton_ascend_impl"
+    output_path: object = None
+    non_compute: bool = False
+    fresh_cache: bool = False
+
+
 # ---------------------------------------------------------------------------
 # 日志配置
 # ---------------------------------------------------------------------------
@@ -119,6 +131,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
 from _common_utils import move_to_device as _move_to_device  # noqa: E402
+from _common_utils import collect_environment as _collect_environment  # noqa: E402
+from _common_utils import detect_cache_override as _detect_cache_override  # noqa: E402
 from npu_preflight import load_preflight_options, run_preflight, write_preflight_result  # noqa: E402
 
 logger = logging.getLogger("triton_op_verifier.verify")
@@ -1082,21 +1096,31 @@ def _write_verify_result(output_path, result):
         logger.warning("警告: 无法写入 verify_result.json: %s", e)
 
 
-def _run_preflight_gate(op_name, verify_dir, output_path):
+def _collect_env_from(options):
+    """按本次运行的开关采集环境指纹。"""
+    return _collect_environment(
+        fresh=options.fresh_cache,
+        triton_impl_name=options.triton_impl_name,
+        non_compute=options.non_compute,
+    )
+
+
+def _run_preflight_gate(op_name, verify_dir, output_path, options):
     """执行 NPU preflight 并落盘 npu_preflight.json。
 
     ready 时返回 preflight dict；未 ready 时落盘 B 类 verify_result 并返回 None。
+    环境指纹只在拦截分支现采，保证 preflight 仍是第一个接触 NPU 的动作。
     """
     preflight = run_preflight(**load_preflight_options())
     write_preflight_result(preflight, os.path.join(verify_dir, "npu_preflight.json"))
-    if preflight["status"] == "ready":
+    if preflight.get("status") == "ready":
         return preflight
 
     failure = {
         "case_idx": 0,
         "input_desc": [],
         "error_type": "NpuPreflightError",
-        "error_msg": f"NPU preflight blocked verification: {preflight['status']}",
+        "error_msg": f"NPU preflight blocked verification: {preflight.get('status')}",
     }
     result = {
         "op_name": op_name,
@@ -1106,6 +1130,7 @@ def _run_preflight_gate(op_name, verify_dir, output_path):
         "failures": [failure],
         "failure_class": "B",
         "npu_preflight": preflight,
+        "environment": _collect_env_from(options),
     }
     _write_verify_result(output_path, result)
     return None
@@ -1141,33 +1166,33 @@ def _log_verify_summary(passed_cases, total_cases, output_path):
         )
 
 
-def verify_implementations(
-    op_name, verify_dir, triton_impl_name="triton_ascend_impl",
-    output_path=None, non_compute=False,
-):
+def verify_implementations(op_name, verify_dir, options=None):
     """验证框架实现和生成实现的结果一致性。
 
     每个 shape 独立 try/except，全部跑完后写 verify_result.json。
 
     Args:
-        non_compute: 若 True，所有 case 走"非计算类"二进制完全一致判定（搬移/Cast 等算子）
+        options: VerifyOptions，未给出时全部取默认值（计算类算子、默认实现模块名）
 
     Returns:
         (passed_cases, total_cases)
     """
+    if options is None:
+        options = VerifyOptions()
+    non_compute = options.non_compute
+
     # Baseline gate: refuse to verify against a tampered baseline.
     # Exit 3 = anchor missing (Phase 1 freeze skipped); Exit 4 = baseline modified.
     if _check_baseline_integrity is not None:
         _check_baseline_integrity(verify_dir, op_name)
 
-    if output_path is None:
-        output_path = os.path.join(verify_dir, "verify_result.json")
+    output_path = options.output_path or os.path.join(verify_dir, "verify_result.json")
 
-    preflight = _run_preflight_gate(op_name, verify_dir, output_path)
+    preflight = _run_preflight_gate(op_name, verify_dir, output_path, options)
     if preflight is None:
         return 0, 0
 
-    modules = _load_verify_modules(op_name, verify_dir, triton_impl_name)
+    modules = _load_verify_modules(op_name, verify_dir, options.triton_impl_name)
     import torch
 
     # 在获取输入之前设置种子，确保随机生成的输入可复现
@@ -1177,8 +1202,13 @@ def verify_implementations(
     input_groups, total_cases = resolve_input_provider(modules["torch_module"])
     device = torch.device("npu")
 
+    # 环境指纹在跑 case 之前采集一次，避免任何早退路径下结果文件缺字段。
+    environment = _collect_env_from(options)
+
     passed_cases, failures = _run_all_cases(modules, input_groups, total_cases, device, non_compute)
 
+    # 既有 5 个字段的名称、含义、顺序保持不变，environment 只作为新增的尾部字段，
+    # 以保证 benchmark.py 的 L1 verify 闸门等下游读取逻辑完全不受影响。
     result = {
         "op_name": op_name,
         "total_cases": total_cases,
@@ -1186,6 +1216,7 @@ def verify_implementations(
         "failed_cases": total_cases - passed_cases,
         "failures": failures,
         "npu_preflight": preflight,
+        "environment": environment,
     }
     _write_verify_result(output_path, result)
     _log_verify_summary(passed_cases, total_cases, output_path)
@@ -1193,8 +1224,131 @@ def verify_implementations(
     return passed_cases, total_cases
 
 
-if __name__ == "__main__":
-    _setup_logger()
+# ---------------------------------------------------------------------------
+# 独立 Triton 编译缓存（--fresh-cache）
+#
+# 隔离只能靠另起一个目录实现。不删用户全局缓存目录：那会破坏并发跑的其他算子 /
+# 其他会话的缓存，且不可回滚。也不用 TRITON_ALWAYS_COMPILE 强制重编：它的产物
+# 仍会写进全局缓存目录，不满足不触碰用户缓存的要求。
+# ---------------------------------------------------------------------------
+
+TRITON_CACHE_DIR_ENV = "TRITON_CACHE_DIR"
+FRESH_CACHE_DIR_PREFIX = "triton_verify_cache_"
+
+
+def _warn_if_cache_override():
+    """自定义 / 远端缓存后端会让 TRITON_CACHE_DIR 失效，此时必须告警而不是假装已隔离。"""
+    overridden = _detect_cache_override()
+    if not overridden:
+        return
+    logger.warning(
+        "警告: 已设置 %s，TRITON_CACHE_DIR 不生效，本次运行并未真正隔离缓存"
+        "（结果 JSON 中 environment.cache.fresh_effective=false）",
+        " / ".join(overridden),
+    )
+
+
+def _keep_fresh_cache_dir(cache_dir):
+    """放弃删除该临时目录，并把绝对路径打到 stderr，让调用者知道它还在。"""
+    logger.warning("Triton 缓存目录已保留: %s", os.path.abspath(cache_dir))
+
+
+def _build_subprocess_cmd(args, verify_dir):
+    """拼出子进程模式的命令行；--fresh-cache 只用于让子进程标记结果 JSON。"""
+    cmd = [
+        sys.executable, os.path.abspath(__file__),
+        "--op_name", args.op_name,
+        "--verify_dir", verify_dir,
+        "--triton_impl_name", args.triton_impl_name,
+        "--subprocess",
+    ]
+    if args.output:
+        cmd.extend(["--output", args.output])
+    if args.non_compute:
+        cmd.append("--non-compute")
+    if args.fresh_cache:
+        cmd.append("--fresh-cache")
+    return cmd
+
+
+def _run_verify_subprocess(cmd, timeout, env):
+    """拉起子进程执行验证并透传其 stdout/stderr，返回退出码（超时记为 1）。"""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        logger.error("验证超时（%d秒），已终止子进程", timeout)
+        return 1
+
+    sys.stdout.buffer.write(stdout)
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(stderr)
+    sys.stderr.buffer.flush()
+    return proc.returncode
+
+
+def _run_main_process(args, cmd):
+    """主进程模式：（可选）建独立缓存目录 → 拉子进程 → 用完即删。返回退出码。
+
+    建目录 / 注入 env / 删除都只在主进程做，子进程不重复建。除 TRITON_CACHE_DIR
+    外其余环境变量原样继承，否则会丢掉 ASCEND_HOME_PATH、LD_LIBRARY_PATH 等
+    CANN 变量。不传 --fresh-cache 时 env 为 None，行为与改动前完全一致。
+
+    临时目录在本函数内创建并销毁，只有两种情况故意不删（此时路径会打到 stderr，
+    交由使用者处置）：子进程失败时目录里的 *.ttir / *.ttadapter / *.npubin 与
+    metadata 是上报编译器缺陷的关键证据；以及使用者显式传了 --keep-cache。
+    """
+    if not args.fresh_cache:
+        return _run_verify_subprocess(cmd, args.timeout, None)
+
+    cache_dir = tempfile.mkdtemp(prefix=FRESH_CACHE_DIR_PREFIX)
+    logger.info("本次验证使用独立 Triton 缓存目录: %s", cache_dir)
+    _warn_if_cache_override()
+    try:
+        env = {**os.environ, TRITON_CACHE_DIR_ENV: cache_dir}
+        returncode = _run_verify_subprocess(cmd, args.timeout, env)
+    except BaseException:
+        # 异常路径同样不能让临时目录无人认领，先把路径喊出来再继续抛
+        _keep_fresh_cache_dir(cache_dir)
+        raise
+
+    if args.keep_cache or returncode != 0:
+        _keep_fresh_cache_dir(cache_dir)
+    else:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    return returncode
+
+
+def _run_subprocess_mode(args, verify_dir):
+    """子进程模式：直接执行验证逻辑，返回退出码。"""
+    options = VerifyOptions(
+        triton_impl_name=args.triton_impl_name,
+        output_path=args.output,
+        non_compute=args.non_compute,
+        fresh_cache=args.fresh_cache,
+    )
+    try:
+        passed, total = verify_implementations(args.op_name, verify_dir, options)
+    except BaselineGateError as e:
+        # 基线闸门未通过：以其约定退出码退出（3=锚缺失，4=被篡改）
+        return e.exit_code
+    except Exception as e:
+        logger.error("%s", e)
+        logger.error("%s", traceback.format_exc())
+        return 1
+    # 策略 A：passed < total → exit 1
+    return 0 if passed == total and total > 0 else 1
+
+
+def _build_arg_parser():
+    """构造命令行解析器。"""
     parser = argparse.ArgumentParser(description="算子验证脚本")
     parser.add_argument("--op_name", required=True, help="算子名称")
     parser.add_argument(
@@ -1215,61 +1369,37 @@ if __name__ == "__main__":
         help="非计算类算子（搬移 / Cast 等），所有 case 走二进制完全一致判定",
     )
     parser.add_argument(
+        "--fresh-cache", action="store_true",
+        help="本次运行使用独立临时 TRITON_CACHE_DIR，不使用也不修改全局 Triton 缓存",
+    )
+    parser.add_argument(
+        "--keep-cache", action="store_true",
+        help="与 --fresh-cache 配合：无论成败都保留临时缓存目录并打印路径",
+    )
+    parser.add_argument(
         "--subprocess", action="store_true",
         help=argparse.SUPPRESS,  # 内部参数：子进程模式，直接执行验证
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    """命令行入口：解析参数并按模式分派，返回值即进程退出码。"""
+    _setup_logger()
+    args = _build_arg_parser().parse_args()
 
     verify_dir = os.path.abspath(args.verify_dir)
     if not os.path.isdir(verify_dir):
         logger.error("错误: 验证目录不存在: %s", verify_dir)
         sys.exit(1)
 
+    if args.keep_cache and not args.fresh_cache:
+        logger.warning("警告: --keep-cache 需与 --fresh-cache 配合使用，本次无效")
+
     if args.subprocess:
-        # 子进程模式：直接执行验证逻辑
-        try:
-            passed, total = verify_implementations(
-                args.op_name, verify_dir, args.triton_impl_name, args.output,
-                non_compute=args.non_compute,
-            )
-        except BaselineGateError as e:
-            # 基线闸门未通过：以其约定退出码退出（3=锚缺失，4=被篡改）
-            sys.exit(e.exit_code)
-        except Exception as e:
-            logger.error("%s", e)
-            logger.error("%s", traceback.format_exc())
-            sys.exit(1)
-        # 策略 A：passed < total → exit 1
-        sys.exit(0 if passed == total and total > 0 else 1)
-    else:
-        # 主进程模式：启动子进程执行验证，超时后 kill 整个进程树
-        cmd = [
-            sys.executable, os.path.abspath(__file__),
-            "--op_name", args.op_name,
-            "--verify_dir", verify_dir,
-            "--triton_impl_name", args.triton_impl_name,
-            "--subprocess",
-        ]
-        if args.output:
-            cmd.extend(["--output", args.output])
-        if args.non_compute:
-            cmd.append("--non-compute")
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = proc.communicate(timeout=args.timeout)
+        sys.exit(_run_subprocess_mode(args, verify_dir))
+    sys.exit(_run_main_process(args, _build_subprocess_cmd(args, verify_dir)))
 
-            sys.stdout.buffer.write(stdout)
-            sys.stdout.buffer.flush()
-            sys.stderr.buffer.write(stderr)
-            sys.stderr.buffer.flush()
-            sys.exit(proc.returncode)
 
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            logger.error("验证超时（%d秒），已终止子进程", args.timeout)
-            sys.exit(1)
+if __name__ == "__main__":
+    main()

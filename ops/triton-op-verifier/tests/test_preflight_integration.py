@@ -77,3 +77,20 @@ def test_preflight_result_writer_creates_parent_directories(tmp_path):
 
     assert result_path.is_file()
     assert json.loads(result_path.read_text())["exit_code"] == 1
+
+
+def test_b_class_result_carries_environment_fingerprint(tmp_path, monkeypatch):
+    """preflight 拦截是一条早退路径，它落盘的 B 类结果同样要带环境指纹。
+
+    否则「NPU 没准备好」这类失败在结果文件里就查不到当时的 CANN / triton /
+    缓存目录状态，正是 environment 字段要堵的口子。
+    """
+    monkeypatch.setattr(verify, "_check_baseline_integrity", None)
+    monkeypatch.setattr(verify, "run_preflight", lambda **kwargs: BLOCKED_PREFLIGHT)
+
+    verify.verify_implementations("demo", str(tmp_path))
+
+    result = json.loads((tmp_path / "verify_result.json").read_text())
+    env = result.get("environment")
+    assert set(env) >= {"timestamp", "triton", "cache", "cann", "torch", "device", "cmdline"}
+    assert env.get("cache").get("fresh") is False

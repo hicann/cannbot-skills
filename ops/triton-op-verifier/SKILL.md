@@ -269,6 +269,8 @@ python3 /path/to/triton-op-verifier/scripts/verify.py \
 | `--timeout` | 否 | 超时秒数，默认 900 |
 | `--output` | 否 | 验证结果 JSON 输出路径，默认 `{verify_dir}/verify_result.json` |
 | `--non-compute` | 否 | 适用于非计算类算子（不做数值运算、只对张量进行形状变换、维度重排、切分拼接、索引、类型转换等数据重组操作的算子，常见如 Reshape、Transpose、Concat、Split、Gather、Cast、Pad 等），强制走二进制完全一致判定 |
+| `--fresh-cache` | 否 | 本次运行使用独立的临时 `TRITON_CACHE_DIR`，不使用也不修改用户全局 Triton 缓存（`~/.triton/cache`），跑完即清理。全量重编译在 Ascend 上是分钟级开销，因此**默认关闭**，仅在排查缓存嫌疑时开启（见下方「精度失败的归因禁令」）|
+| `--keep-cache` | 否 | 与 `--fresh-cache` 配合：无论成败都保留临时缓存目录并在 stderr 打印绝对路径。单独使用无效 |
 
 **超时设置**：默认 900 秒，复杂算子可适当增加。
 
@@ -278,6 +280,7 @@ python3 /path/to/triton-op-verifier/scripts/verify.py \
 - 禁止跳过此步骤直接报告验证结果
 - 禁止对计算类算子（含数值运算）传 `--non-compute`；该开关仅适用于不做数值运算、只做形状变换 / 维度重排 / 切分拼接 / 索引 / 类型转换等数据重组操作的算子（如 Reshape、Transpose、Concat、Split、Gather、Cast、Pad）。误用会强制走二进制完全一致判定，把正常的浮点舍入差异判为失败
 - 对非计算类算子（例如形状变换、维度重排、切分拼接、索引、类型转换等数据重组操作的算子）**一定要**传 `--non-compute`；漏传会让此类算子按浮点三项判定走，容许超出预期的差异，无法识别真正的位级不一致
+- 禁止用 `rm -rf ~/.triton/cache` 清缓存：会破坏并发跑的其他算子 / 其他会话的缓存，且不可回滚。需要空缓存一律走 `--fresh-cache`（靠独立目录隔离）
 
 ---
 
@@ -300,9 +303,55 @@ verify.py 会在 `verify_dir` 下生成 `verify_result.json`（或 `--output` �
       "error_type": "CompilationError",
       "error_msg": "..."
     }
-  ]
+  ],
+  "environment": {
+    "timestamp": "2026-09-03T14:22:01+08:00",
+    "triton": {
+      "version": "3.2.0",
+      "path": "/usr/local/python3.11.10/lib/python3.11/site-packages/triton",
+      "key_sha256": "9f2c..."
+    },
+    "cache": {
+      "dir": "/tmp/triton_verify_cache_ab12cd",
+      "fresh": true,
+      "fresh_effective": true,
+      "always_compile": false
+    },
+    "cann": {
+      "ascend_home_path": "/usr/local/Ascend/ascend-toolkit/latest",
+      "info_file": "/usr/local/Ascend/ascend-toolkit/latest/x86_64-linux/ascend_toolkit_install.info",
+      "info_sha256": "3a7e...",
+      "version": "8.0.RC3"
+    },
+    "torch": {"version": "2.1.0", "torch_npu_version": "2.1.0.post..."},
+    "device": {
+      "ASCEND_RT_VISIBLE_DEVICES": "3",
+      "current_device": 0,
+      "npu_name": "Ascend910B4"
+    },
+    "cmdline": {"triton_impl_name": "triton_ascend_impl", "non_compute": false}
+  }
 }
 ```
+
+**`environment` 字段（环境指纹）**：记录本次验证跑在什么环境上，让精度结论可以跨机器 / 跨时间 / 跨 agent 复核。前 5 个字段（`op_name` / `total_cases` / `passed_cases` / `failed_cases` / `failures`）的名称、含义、顺序全部不变，`environment` 只是新增的尾部字段，下游读取逻辑（含 benchmark.py 的 L1 verify 闸门）不受影响。
+
+| 字段 | 含义 |
+|------|------|
+| `triton.key_sha256` | `triton_key()` 的摘要，覆盖全部 triton python 文件 + `libtriton.so` + `backends/` 目录。**一个值就能判定两次跑的是不是同一个 triton 安装**，能抓住小版本编译默认值漂移 |
+| `cache.dir` | 本次实际使用的 Triton 编译缓存目录 |
+| `cache.fresh` | 本次是否传了 `--fresh-cache` |
+| `cache.fresh_effective` | `TRITON_CACHE_DIR` 是否真的决定缓存位置。设置了 `TRITON_CACHE_MANAGER` / `TRITON_REMOTE_CACHE_BACKEND` 时为 `false`，此时**隔离并未成立** |
+| `cache.always_compile` | `TRITON_ALWAYS_COMPILE` 是否设置（影响是否读缓存）|
+| `cann.info_sha256` | 与 Ascend backend `options.hash()` 用的是同一个哈希。两次跑该值不同 ⇒ cache key 必然不同，可直接用来解释缓存命中与否 |
+| `cann.error` | 采集失败原因。**非交互 shell 未 `source set_env.sh` 时 `ASCEND_HOME_PATH` 为空，此处会留下 `EnvironmentError`** —— 这是最有价值的诊断信息，见到它先修环境再谈精度 |
+| `device.ASCEND_RT_VISIBLE_DEVICES` | 只有这个变量对 torch_npu 生效（`ASCEND_DEVICE_ID` 无效），排查坏卡 / 卡占用时必需 |
+
+采集全程 try/except，任何一项失败只写成该分节下的 `{"error": "..."}`，不会影响验证本身的执行与退出码。
+
+**引用与上报约束**：
+- 报告精度结论时**必须连同 `environment` 一起给出**，只给 `58/60` 这类计数不构成可复核的结论。
+- 跨机器 / 跨版本引用历史 verify 结论前，先比对 `triton.key_sha256` 与 `cann.info_sha256`；**不一致则历史结论作废，必须重跑**。
 
 **精度失败时的 `metrics` 字段**：当 `error_type == "AccuracyError"`（浮点三项判定未通过）时，`failures[*]` 会带上结构化 `metrics`，便于下游分类失败原因（max_error_cap 违例 / 离群点过多 / 平均误差偏大）：
 
@@ -347,6 +396,28 @@ verify.py 会在 `verify_dir` 下生成 `verify_result.json`（或 `--output` �
 - 否则（`passed_cases < total_cases`，或 `total_cases == 0`）→ exit 1，`verifier_result = false`，`verifier_error` 应读取 `verify_result.json.failures` 的**全部条目**（不是第一个），汇总后提交给 Conductor。
 
 **超时**：脚本输出 `"验证超时"` 且退出码为 1 → `verifier_error = "验证超时（{timeout}秒）"`。
+
+### 精度失败的归因禁令（缓存 A/B）
+
+**不得在未做 `--fresh-cache` A/B 的前提下，把精度失败归因为"编译缓存里的坏二进制"。**
+
+出现精度失败且怀疑缓存时，唯一允许的排查动作是同一份代码再跑一遍空缓存：
+
+```bash
+python3 <本skill所在目录的绝对路径>/scripts/verify.py \
+    --op_name <算子名> --verify_dir <验证目录> --fresh-cache --keep-cache
+```
+
+判定规则：
+
+| A/B 结果 | 结论 | 允许的动作 |
+|----------|------|-----------|
+| 带与不带 `--fresh-cache` 两次结果**一致** | **真实精度缺陷** | 必须继续修代码，**不得以缓存为由放行** |
+| 两次结果**不一致** | 编译器缺陷嫌疑 | 必须用 `--keep-cache` 保留临时缓存目录（内含 `*.ttir` / `*.ttadapter` / `*.npubin` 与 metadata），连同两份 `verify_result.json` 的 `environment` 一起作为编译器缺陷上报 |
+
+背景：Triton 的 cache key 覆盖 kernel 源码 sha256、triton 安装指纹与 CANN 安装信息文件哈希，因此**改 kernel 源码必然使缓存失效**，"改了代码却命中旧二进制"这条因果链不成立。真实存在的陈旧缓存路径只有一条：原地替换 `bishengir-compile`（打补丁版 / 自编译版）而不动 `ascend_toolkit_install.info` —— `AscendBackend.hash()` 只含 `str(self.target)`，编译器版本不进 key。`--fresh-cache` 正是针对这条路径的排查手段。
+
+等价的手工排查手段（仅作了解，**不推荐**）：`TRITON_ALWAYS_COMPILE=1` 能强制重编，但产物仍写入全局缓存目录，会污染用户缓存，不满足"不触碰用户缓存"。
 
 ---
 
@@ -529,5 +600,5 @@ benchmark.py 启动时按 `--triton_impl_name` 推导对应的 verify_result 文
 
 **CLI 参数**：
 - `validate_triton_impl.py`: `<file_path>`, `[--json]`
-- `verify.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--timeout`, `--output`, `--non-compute`
+- `verify.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--timeout`, `--output`, `--non-compute`, `--fresh-cache`, `--keep-cache`
 - `benchmark.py`: `--op_name`, `--verify_dir`, `--triton_impl_name`, `--warmup`, `--repeats`, `--output`, `--skip_framework`, `--framework_latency_ms`, `--verify_not_required`, `--lock-frequency`, `--lock-frequency-fail-action`, `--freq-check-interval`
