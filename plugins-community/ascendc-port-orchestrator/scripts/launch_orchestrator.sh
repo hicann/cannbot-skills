@@ -209,6 +209,14 @@ resolve_harness() {
   # directions: a real opencode session (which sets neither) resolved to claude_code, and a
   # Claude Code session belonging to a user who exports OPENCODE_CONFIG in their shell
   # profile resolved to opencode.
+  # The CODEARTS fingerprint is a best-effort guess at the fork's own marker (NOT yet
+  # measured against a real CLI build); if it never fires, the explicit flag and the
+  # install manifest below still resolve codearts sessions correctly. It is checked
+  # BEFORE the OPENCODE marker so a fork session that inherits the parent marker is not
+  # misread as opencode.
+  if [ -n "${CODEARTS:-}${CODEARTS_PID:-}" ]; then
+    echo codearts; return
+  fi
   if [ -n "${OPENCODE:-}${OPENCODE_PID:-}" ]; then
     echo opencode; return
   fi
@@ -221,12 +229,14 @@ resolve_harness() {
   # so the historical default stays Claude Code.
   local manifest tool
   for manifest in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cannbot-manifest.json" \
-                  "$HOME/.config/opencode/cannbot-manifest.json"; do
+                  "$HOME/.config/opencode/cannbot-manifest.json" \
+                  "$HOME/.codeartsdoer/cannbot-manifest.json"; do
     [ -f "$manifest" ] || continue
     tool="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('tool',''))" \
             "$manifest" 2>/dev/null || true)"
     case "$tool" in
       opencode) echo opencode; return ;;
+      codearts) echo codearts; return ;;
       claude)   echo claude_code; return ;;
     esac
   done
@@ -235,6 +245,7 @@ resolve_harness() {
 
 case "$(resolve_harness)" in
   opencode|open_code|open-code) BACKEND="opencode" ;;
+  codearts|codearts_agent|codearts-agent) BACKEND="codearts" ;;
   codex|codex_cli|codex-cli)    BACKEND="codex" ;;
   *)                            BACKEND="claude_code" ;;
 esac

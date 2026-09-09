@@ -24,7 +24,7 @@ show_help() {
 SHMEM Ops 插件安装器
 
 用法：
-  init.sh [project|global] [opencode|claude|trae|cursor|copilot] [install_path]
+  init.sh [project|global] [opencode|claude|trae|cursor|copilot|codearts] [install_path]
 
 参数：
   project       项目级安装（默认）
@@ -42,7 +42,7 @@ for arg in "$@"; do
   case "$arg" in
     --help|-h) show_help; exit 0 ;;
     project|global) LEVEL="$arg" ;;
-    opencode|claude|trae|cursor|copilot) TOOL="$arg" ;;
+    opencode|claude|trae|cursor|copilot|codearts) TOOL="$arg" ;;
     *) INSTALL_PATH="$arg" ;;
   esac
 done
@@ -63,6 +63,8 @@ if [ "$LEVEL" = "global" ]; then
     CONFIG_ROOT="$HOME/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$HOME/.copilot"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$HOME/.codeartsdoer"
   fi
 else
   mkdir -p "$INSTALL_PATH"
@@ -77,6 +79,8 @@ else
     CONFIG_ROOT="$PROJECT_ROOT/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$PROJECT_ROOT/.github"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$PROJECT_ROOT/.codeartsdoer"
   fi
 fi
 

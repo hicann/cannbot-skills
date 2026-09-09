@@ -37,7 +37,7 @@ show_help() {
 cannbot-knowledge installer
 
 Usage:
-  init.sh [project|global] [opencode|claude|trae|cursor|copilot] [install_path] [options]
+  init.sh [project|global] [opencode|claude|trae|cursor|copilot|codearts] [install_path] [options]
 
 Options:
   --profile <name>   Install a predefined skill set: all, consumer, issue, contributor.
@@ -107,6 +107,7 @@ while [ $# -gt 0 ]; do
     trae) TOOL="$1" ;;
     cursor) TOOL="$1" ;;
     copilot) TOOL="$1" ;;
+    codearts) TOOL="$1" ;;
     *)
       INSTALL_PATH="$1"
       ;;
@@ -487,8 +488,8 @@ case "$LEVEL" in
 esac
 
 case "$TOOL" in
-  opencode|claude|trae|cursor|copilot) ;;
-  *) echo "tool must be opencode, claude, trae, cursor, or copilot" >&2; exit 2 ;;
+  opencode|claude|trae|cursor|copilot|codearts) ;;
+  *) echo "tool must be opencode, claude, trae, cursor, copilot, or codearts" >&2; exit 2 ;;
 esac
 
 if [ "$LEVEL" = "global" ]; then
@@ -505,6 +506,8 @@ if [ "$LEVEL" = "global" ]; then
     CONFIG_ROOT="$HOME/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$HOME/.copilot"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$HOME/.codeartsdoer"
   else
     CONFIG_ROOT="$HOME/.claude"
   fi
@@ -523,6 +526,8 @@ else
     CONFIG_ROOT="$INSTALL_PATH/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$INSTALL_PATH/.github"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$INSTALL_PATH/.codeartsdoer"
   else
     CONFIG_ROOT="$INSTALL_PATH/.claude"
   fi

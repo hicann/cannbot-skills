@@ -7,7 +7,7 @@ cd plugins-community/cannbot-knowledge
 bash init.sh project claude /path/to/project --knowledge-root /path/to/knowledge-base
 ```
 
-支持的工具参数：`claude`、`opencode`、`trae`、`cursor`、`copilot`。未指定时默认 project + opencode + 当前目录。
+支持的工具参数：`claude`、`opencode`、`trae`、`cursor`、`copilot`、`codearts`。未指定时默认 project + opencode + 当前目录。
 
 默认安装 `all` profile，即完整贡献者能力。也可以按用途安装部分 skill：
 

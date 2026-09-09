@@ -110,10 +110,36 @@ def test_opencode_fake_cli_skill_dispatch_e2e() -> None:
         check("opencode fake CLI returns stdout output", env.output_text.strip() == "FAKE_OPENCODE_SKILL_OK")
 
 
+def test_codearts_fake_cli_skill_dispatch_e2e() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        fake = Path(td) / "codearts"
+        _write_exe(
+            fake,
+            r'''
+            import sys
+
+            args = sys.argv[1:]
+            if args[:1] != ["run"]:
+                print(f"bad argv: {args!r}", file=sys.stderr)
+                raise SystemExit(2)
+            prompt = sys.stdin.read()
+            if "aog-op-classify/SKILL.md" not in prompt or "Return marker" not in prompt:
+                print("missing skill context or prompt", file=sys.stderr)
+                raise SystemExit(3)
+            print("FAKE_CODEARTS_SKILL_OK")
+            ''',
+        )
+        with patch.dict(os.environ, {"AOG_HARNESS_BACKEND": "codearts", "AOG_CODEARTS_BIN": str(fake)}, clear=False):
+            env = get_backend().dispatch("aog-op-classify", "Return marker", kind="skill", timeout=10)
+        check("codearts fake CLI dispatch succeeds", not env.is_error, str(env.raw_envelope))
+        check("codearts fake CLI returns stdout output", env.output_text.strip() == "FAKE_CODEARTS_SKILL_OK")
+
+
 if __name__ == "__main__":
     for test in [
         test_codex_fake_cli_skill_dispatch_e2e,
         test_opencode_fake_cli_skill_dispatch_e2e,
+        test_codearts_fake_cli_skill_dispatch_e2e,
     ]:
         LOGGER.info("%s:", test.__name__)
         test()

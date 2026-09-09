@@ -28,7 +28,7 @@
 
 - **编排器引擎打包进插件**：FSM + 安全网 + 迭代到绿 + 子 agent 调度的**完整编排器引擎随插件交付**（`plugins-community/ascendc-port-orchestrator/` 内自带 scripts + engine），**不依赖外部 a5_ops checkout**。
 - **入口 skill = 薄壳**：两个入口 skill 解析目标后**调用打包进来的编排器**；由编排器亲自驱动 FSM —— **不是**让 AGENTS.md 这个 primary agent 用自然语言临时编排各阶段。确定性（状态机/钩子/迭代上限）来自引擎，NL prose 复刻不了。
-- **运行时**：双 harness（Claude Code / opencode），引擎经 `backends/` 统一抽象拉起子 agent，`AOG_HARNESS_BACKEND` 切换、两套互不依赖（见 §8）。
+- **运行时**：多 harness（Claude Code / opencode / codearts），引擎经 `backends/` 统一抽象拉起子 agent，`AOG_HARNESS_BACKEND` 切换、互不依赖（见 §8）。
 - **引擎布局**：编排器保留平铺模块布局；harness 适配器位于 `engine/src/scripts/orchestrator/backends/`，不依赖目录重构。
 - **强制一致性**：`AGENTS.md` / `install.sh` / `plugin.json` 必须与本模型一致（编排器打包 + 入口调用编排器）。**若 AGENTS.md 出现「自包含 NL 方法论执行、不调用编排器（orch-less）」的描述 = 与本文档冲突，以本文档为准，须改回 orch-shell。** 任何改动先改本文档、再改实现（§11）。
 
@@ -220,14 +220,20 @@ plugins-community/ascendc-port-orchestrator/
 
 当前 arch22→arch35。新增目标架构/产品 = 加 NL→canonical-target 映射 + 该目标的 KB，**入口与流水线范式不变**。规划：更多目标 + 反向跨代际移植（如 910C→910A）。
 
-## 8. Harness 抽象（Claude Code / opencode）+ 安装面差异
+## 8. Harness 抽象（Claude Code / opencode / codearts）+ 安装面差异
 
 CANNBot 与底座 agent harness 不直接耦合：引擎经 `backends/` 的 `Backend` 抽象调度子 agent
-（`cc_backend` / `opencode_backend` / `codex_backend`），边界不变量是
+（`cc_backend` / `opencode_backend` / `codex_backend` / `codearts_backend`），边界不变量是
 **backend 只接线 harness、绝不自带语义规则**（规则在 canonical checker / KB）。
-`AOG_HARNESS_BACKEND=claude_code|opencode` 决定走哪条线，**两条线互不依赖**：
+`AOG_HARNESS_BACKEND=claude_code|opencode|codearts` 决定走哪条线，**各线互不依赖**：
 claude 模式不要求 opencode/node，opencode 模式完全不需要 claude 环境（含安装预检、
 运行时自检与进程清理，见 §8.2 与 `backends/opencode_runtime.py`）。
+
+**codearts backend**：CodeArts Agent CLI（华为云码道）是 OpenCode 的 fork（同名 `run`
+子命令、同样的 `OPENCODE_CONFIG_CONTENT` 注入与 JSON 事件流），`codearts_backend.CodeartsBackend`
+直接复用 `OpencodeBackend` 实现，仅改二进制（`codearts`，`AOG_CODEARTS_BIN` 可覆盖）、
+进程指纹与 hook 身份标签；运行时依赖（node/bun + rg）与安全网探针完全继承。graybox 需要
+provider 配置时显式 export `OPENCODE_USER_CONFIG`（见 codearts_backend.py 模块注释）。
 
 ### 8.1 两个 harness 的差异一览
 

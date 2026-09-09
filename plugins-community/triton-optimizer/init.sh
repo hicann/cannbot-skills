@@ -102,7 +102,7 @@ Usage: init.sh [level] [tool] [install_path]
 
 Arguments:
   level        - Installation level: "project" (default) or "global"
-  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", or "copilot"
+  tool         - Target tool: "opencode" (default), "claude", "trae", "cursor", "copilot", or "codearts"
   install_path - Project-level installation directory (default: current working directory)
 
 Examples:
@@ -125,7 +125,7 @@ for arg in "$@"; do
     case "$arg" in
         --help) show_help; exit 0 ;;
         global|project) LEVEL="$arg" ;;
-        opencode|claude|trae|cursor|copilot) TOOL="$arg" ;;
+        opencode|claude|trae|cursor|copilot|codearts) TOOL="$arg" ;;
         *)
             if [ -n "$INSTALL_PATH" ]; then
                 err "Unexpected argument: $arg"
@@ -171,6 +171,7 @@ if [ "$LEVEL" = "global" ]; then
             ;;
         cursor) CONFIG_ROOT="$HOME/.cursor" ;;    # "$TOOL" = "cursor"
         copilot) CONFIG_ROOT="$HOME/.copilot" ;;  # "$TOOL" = "copilot"
+        codearts) CONFIG_ROOT="$HOME/.codeartsdoer" ;;  # "$TOOL" = "codearts"
     esac
 else
     case "$TOOL" in
@@ -186,6 +187,7 @@ else
             ;;
         cursor) CONFIG_ROOT="$INSTALL_BASE/.cursor" ;;    # "$TOOL" = "cursor"
         copilot) CONFIG_ROOT="$INSTALL_BASE/.github" ;;   # "$TOOL" = "copilot"
+        codearts) CONFIG_ROOT="$INSTALL_BASE/.codeartsdoer" ;;  # "$TOOL" = "codearts"
     esac
 fi
 

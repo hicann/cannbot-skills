@@ -47,6 +47,7 @@ bash "$INIT" project opencode /path/to/project
 bash "$INIT" project trae /path/to/project
 bash "$INIT" project cursor /path/to/project
 bash "$INIT" project copilot /path/to/project
+bash "$INIT" project codearts /path/to/project
 ```
 
 ### 方式三：Claude Plugin Marketplace

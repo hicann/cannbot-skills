@@ -175,7 +175,7 @@ check_01() {
             grep -q 'TOOL="opencode"' "$init" || grep -qE 'opencode\).*TOOL' "$init"
             ;;
         codearts)
-            grep -qE 'codearts\).*TOOL="?\$arg' "$init"
+            grep -qE 'codearts\).*TOOL="?(\$arg|\$1|codearts)"?' "$init"
             ;;
         *)
             grep -qE "${TOOL}\).*TOOL" "$init" || grep -qE "${TOOL}.*TOOL=\"\\\$arg\"" "$init"
@@ -217,7 +217,7 @@ check_02() {
             ;;
         codearts)
             awk '
-                /"\$TOOL"[[:space:]]*=[[:space:]]*"codearts"/ { tool_line = NR }
+                /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codearts"/ { tool_line = NR }
                 tool_line && NR <= tool_line + 2 && /\.codeartsdoer/ && /HOME/ { found = 1 }
                 END { exit (found ? 0 : 1) }
             ' "$init"
@@ -257,7 +257,7 @@ check_03() {
             ;;
         codearts)
             awk '
-                /"\$TOOL"[[:space:]]*=[[:space:]]*"codearts"/ { tool_line = NR }
+                /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codearts"/ { tool_line = NR }
                 tool_line && NR <= tool_line + 2 && /\.codeartsdoer/ && !/HOME/ { found = 1 }
                 END { exit (found ? 0 : 1) }
             ' "$init"
@@ -286,7 +286,11 @@ check_05() {
     local init="$1"
     case "$TOOL" in
         codearts)
-            grep -qE '(elif|if).*"\$TOOL"[[:space:]]*=[[:space:]]*"codearts"' "$init"
+            awk '
+                /CONFIG_ROOT/ { last = NR }
+                /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codearts"/ { where = NR }
+                END { exit !(where && where > last) }
+            ' "$init"
             ;;
         *)
             grep -qE "TOOL.*=.*\"${TOOL}\"" "$init" || grep -q "$TOOL" "$init"

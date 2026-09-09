@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(_HERE))  # orchestrator/
 
 from backends import available_backends, get_backend  # noqa: E402
 from backends.cc_backend import CCBackend  # noqa: E402
+from backends.codearts_backend import CodeartsBackend  # noqa: E402
 from backends.codex_backend import CodexBackend  # noqa: E402
 from backends.opencode_backend import OpencodeBackend  # noqa: E402
 from backends.registry import BackendResolutionError  # noqa: E402
@@ -49,6 +50,9 @@ def test_default_and_alias_resolution():
         check(f"alias {alias!r} resolves to CCBackend", isinstance(get_backend(alias), CCBackend))
     check("codex resolves to CodexBackend", isinstance(get_backend("codex"), CodexBackend))
     check("opencode resolves to OpencodeBackend", isinstance(get_backend("opencode"), OpencodeBackend))
+    check("codearts resolves to CodeartsBackend", isinstance(get_backend("codearts"), CodeartsBackend))
+    check("codearts_agent alias resolves to CodeartsBackend",
+          isinstance(get_backend("codearts-agent"), CodeartsBackend))
 
 
 def test_env_resolution_and_errors():
@@ -68,6 +72,7 @@ def test_available_backends_are_canonical():
     check("available includes claude_code", "claude_code" in names)
     check("available includes codex", "codex" in names)
     check("available includes opencode", "opencode" in names)
+    check("available includes codearts", "codearts" in names)
 
 
 def test_codex_command_shape_and_prompt():
@@ -99,6 +104,21 @@ def test_opencode_command_shape_and_prompt():
     check("opencode wire_safety points to plugin", wiring["kind"] == "host-hook-plugin")
 
 
+def test_codearts_command_shape_and_prompt():
+    b = CodeartsBackend(opencode_bin="/tmp/codearts")
+    prompt = getattr(b, "_format_prompt")("aog-op-classify", "classify", kind="skill")
+    cmd = getattr(b, "_build_run_cmd")(prompt, session_id="ses_1", auto=True, cwd="/repo")
+    check("codearts command uses its own binary + run", cmd[:2] == ["/tmp/codearts", "run"])
+    check("codearts inherits opencode run flags", "--auto" in cmd and "--dir" in cmd)
+    check("codearts skill prompt includes local skill instructions", "aog-op-classify/SKILL.md" in prompt)
+    env = b.build_env("aog-op-classify")
+    check("codearts hook identity label uses backend name",
+          env.get("AOG_HOOK_AGENT_ID") == "codearts:aog-op-classify")
+    check("codearts identifies its own run processes", b.identify_cmd("/usr/local/bin/codearts run --agent x"))
+    check("codearts does not claim opencode processes",
+          not b.identify_cmd("/usr/bin/opencode run --agent x"))
+
+
 def test_skill_context_loader():
     ctx = load_skill_context("aog-op-classify")
     check("skill context loader finds repo skill", ctx is not None and "aog-op-classify/SKILL.md" in ctx)
@@ -113,6 +133,7 @@ if __name__ == "__main__":
         test_available_backends_are_canonical,
         test_codex_command_shape_and_prompt,
         test_opencode_command_shape_and_prompt,
+        test_codearts_command_shape_and_prompt,
         test_skill_context_loader,
     ]:
         LOGGER.info("%s:", test.__name__)

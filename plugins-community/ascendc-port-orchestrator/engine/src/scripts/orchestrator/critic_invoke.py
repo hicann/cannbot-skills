@@ -58,7 +58,7 @@ def _default_prespawn_critic_timeout_sec() -> int:
     explicit = os.environ.get("AOG_PRESPAWN_CRITIC_TIMEOUT_SEC")
     if explicit is not None:
         return int(explicit)
-    if getattr(_backend, "name", "") == "opencode":
+    if getattr(_backend, "name", "") in ("opencode", "codearts"):
         return int(os.environ.get("AOG_OPENCODE_PRESPAWN_CRITIC_TIMEOUT_SEC", "180"))
     return 1800
 

@@ -65,7 +65,7 @@ Usage: init.sh [level] [tool]
 
 Arguments:
   level   - Installation level: "project" (default) or "global"
-  tool    - Target tool: "opencode" (default), "claude", "trae", or "cursor"
+  tool    - Target tool: "opencode" (default), "claude", "trae", "cursor", or "codearts"
 
 Options:
   --help  - Show this help message
@@ -146,8 +146,8 @@ for arg in "$@"; do
     case "$arg" in
         --help)            show_help; exit 0 ;;
         global|project)    LEVEL="$arg" ;;
-        opencode|claude|trae|cursor)   TOOL="$arg" ;;
-        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, --help."
+        opencode|claude|trae|cursor|codearts)   TOOL="$arg" ;;
+        *)  echo "Error: Unknown argument '$arg'. Valid: global, project, opencode, claude, trae, cursor, codearts, --help."
             exit 1 ;;
     esac
 done
@@ -161,6 +161,8 @@ if [ "$LEVEL" = "global" ]; then
         exit 1
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$HOME/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$HOME/.codeartsdoer"
     else
         CONFIG_ROOT="$HOME/.claude"
     fi
@@ -171,6 +173,8 @@ else
         CONFIG_ROOT="$PLUGIN_ROOT/.trae"
     elif [ "$TOOL" = "cursor" ]; then
         CONFIG_ROOT="$PLUGIN_ROOT/.cursor"
+    elif [ "$TOOL" = "codearts" ]; then
+        CONFIG_ROOT="$PLUGIN_ROOT/.codeartsdoer"
     else
         CONFIG_ROOT="$PLUGIN_ROOT/.claude"
     fi
@@ -438,20 +442,20 @@ fi
 
 echo -e "${CYAN}配置文件：${NC}"
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$PWD/AGENTS.md"
     else
         config_target="$PWD/CLAUDE.md"
     fi
 else
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
     fi
 fi
 config_src="$PLUGIN_ROOT/AGENTS.md"
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
     echo -e "  ${GREEN}$(basename "$config_target")${NC} (已存在，无需操作)"
 elif [ -e "$config_target" ] || [ -L "$config_target" ]; then
     echo -e "  ${YELLOW}$(basename "$config_target")${NC} (将被替换)"
@@ -553,14 +557,14 @@ echo ""
 step "[2/4] Installing configuration..."
 
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$PWD/AGENTS.md"
     else
         config_target="$PWD/CLAUDE.md"
     fi
 else
     mkdir -p "$CONFIG_ROOT"
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         config_target="$CONFIG_ROOT/AGENTS.md"
     else
         config_target="$CONFIG_ROOT/CLAUDE.md"
@@ -569,7 +573,7 @@ fi
 
 config_src="$PLUGIN_ROOT/AGENTS.md"
 
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ] && [ "$PLUGIN_ROOT" = "$PWD" ]; then
     ok "$(basename "$config_target") already in current directory"
 else
     if [ "$LEVEL" = "global" ]; then
@@ -588,7 +592,7 @@ else
     fi
 fi
 
-if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; } && [ "$LEVEL" = "project" ]; then
+if { [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; } && [ "$LEVEL" = "project" ]; then
     if [ "$CONFIG_ROOT/AGENTS.md" != "$config_target" ]; then
         mkdir -p "$CONFIG_ROOT"
         ln -sf "$config_src" "$CONFIG_ROOT/AGENTS.md"
@@ -738,13 +742,13 @@ for sub in skills agents hooks; do
 done
 
 if [ "$LEVEL" = "project" ]; then
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$PWD/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing in current directory"; health_ok=false; }
     else
         [ -f "$PWD/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing in current directory"; health_ok=false; }
     fi
 else
-    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ]; then
+    if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "trae" ] || [ "$TOOL" = "cursor" ] || [ "$TOOL" = "codearts" ]; then
         [ -f "$CONFIG_ROOT/AGENTS.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} AGENTS.md missing"; health_ok=false; }
     else
         [ -f "$CONFIG_ROOT/CLAUDE.md" ] || { health_errors="${health_errors}\n  ${RED}✗${NC} CLAUDE.md missing"; health_ok=false; }
@@ -812,6 +816,9 @@ elif [ "$TOOL" = "trae" ]; then
   echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}对基线内核进行进化优化，npu=0，基线内核路径为 /path/to/baseline/kernel/，目标加速比 3x，进化轮数 3，并行数 5${NC}"
 elif [ "$TOOL" = "cursor" ]; then
   echo -e "  ${CYAN}1.${NC} 启动 Cursor IDE"
+  echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}对基线内核进行进化优化，npu=0，基线内核路径为 /path/to/baseline/kernel/，目标加速比 3x，进化轮数 3，并行数 5${NC}"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${CYAN}1.${NC} 通过 CodeArts CLI / IDE 启动${NC}"
   echo -e "  ${CYAN}2.${NC} 输入需求: ${GREEN}${BOLD}对基线内核进行进化优化，npu=0，基线内核路径为 /path/to/baseline/kernel/，目标加速比 3x，进化轮数 3，并行数 5${NC}"
 else
   echo -e "  ${CYAN}1.${NC} 启动 CLI: ${GREEN}claude${NC}"

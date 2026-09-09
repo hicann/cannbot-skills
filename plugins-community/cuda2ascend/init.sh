@@ -112,7 +112,7 @@ BRAND="cannbot"
 VERSION="1.0.0"
 # Supported target tools — single source of truth (modify-init.md 红线 1).
 # Subclass init.sh queries this via `--list-tools` instead of hardcoding.
-SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh" "trae")
+SUPPORTED_TOOLS=("opencode" "claude" "codex" "dsh" "trae" "codearts")
 
 # ============================================================
 # Third-party repository registry
@@ -303,6 +303,7 @@ Installation paths:
                 agents generated as TraeCode Subagent .md (frontmatter tools = static per-role
                 tool allowlist, native Trae mechanism; role dir-level writes rely on prompt);
                 PreToolUse hook registered in .trae/hooks.json (silent-question interception)
+  codearts: .codeartsdoer/{skills,agents}/       + AGENTS.md in project root (no permission hook)
 
 Intermediate directory:
   .cannbot/              workflow intermediate files & state
@@ -412,6 +413,7 @@ while [ $# -gt 0 ]; do
         codex)         TOOL="$arg"; shift; continue ;;
         dsh)           TOOL="$arg"; shift; continue ;;
         trae)          TOOL="$arg"; shift; continue ;;
+        codearts)      TOOL="$arg"; shift; continue ;;
         *)
             # 兜底：动态校验 SUPPORTED_TOOLS，支持未来新增工具
             if is_supported_tool "$1"; then
@@ -464,6 +466,9 @@ if [ "${LEVEL}" = "global" ]; then
     elif [ "${TOOL}" = "trae" ]; then
         # TraeCode 全局用户根：~/.trae-cn（含 user_rules / skills / agents / hooks.json）
         CONFIG_ROOT="${HOME}/.trae-cn"
+    elif [ "${TOOL}" = "codearts" ]; then
+        # CodeArts（华为云码道）全局用户根：~/.codeartsdoer
+        CONFIG_ROOT="${HOME}/.codeartsdoer"
     fi
     INSTALL_BASE="${HOME}"
 else
@@ -489,6 +494,10 @@ else
         # 其下的 skills/ 是 TraeCode 项目技能目录（自动发现，无需额外配置）；
         # agents/ 为 Subagent 定义目录；hooks.json 为 PreToolUse hook 注册。
         CONFIG_ROOT="${INSTALL_BASE}/.trae"
+    elif [ "${TOOL}" = "codearts" ]; then
+        # CodeArts 项目级配置根：<install>/.codeartsdoer。
+        # 其下的 skills/、agents/ 由 CodeArts CLI / IDE 自动发现，无需额外配置。
+        CONFIG_ROOT="${INSTALL_BASE}/.codeartsdoer"
     fi
 fi
 
@@ -1056,6 +1065,14 @@ TRAE_HOOKS_PY
     else
         warn "trae permission-guard.js not found, skipping"
     fi
+    echo ""
+elif [ "${TOOL}" = "codearts" ]; then
+    # CodeArts 无项目级 PreToolUse 拦截点，不部署 permission-guard hook。
+    # 角色写权限隔离由 AGENTS.md prompt 约束（非机制保证）。
+    echo -e "  ${YELLOW}${BOLD}⚠ WARNING: CodeArts does not support permission-guard hooks.${NC}"
+    echo -e "  ${DIM}Role-based write restrictions (PM only-schedule, developer-code code-only, etc.)${NC}"
+    echo -e "  ${DIM}are enforced by AGENTS.md prompt, NOT by a hard hook. Subagent directory${NC}"
+    echo -e "  ${DIM}isolation is best-effort, not guaranteed.${NC}"
     echo ""
 else
     OC_PLUGIN_SRC="${PLUGIN_ROOT}/hooks/opencode/permission-guard.js"

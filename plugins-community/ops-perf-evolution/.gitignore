@@ -4,7 +4,8 @@
 CLAUDE.md
 AGENTS.md
 
-# OpenCode / Cursor / Trae project-level generated configs
+# OpenCode / Cursor / Trae / CodeArts project-level generated configs
 .opencode/
 .cursor/
 .trae/
+.codeartsdoer/

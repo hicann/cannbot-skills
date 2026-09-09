@@ -296,6 +296,15 @@ verify_manifest() {
     # Check agent count
     local actual_agents
     actual_agents=$(python3 -c "import json; print(len(json.load(open(r'''$py_manifest''')).get('installed_agents', [])))" 2>/dev/null || echo 0)
+    # OC-like tools (opencode, codearts) convert ALL agents (whitelist + skill
+    # entries) into OPENCODE_CONFIG_CONTENT at dispatch time, so the manifest
+    # legitimately lists MORE than the INCLUDED_AGENT_PATTERN count — require
+    # coverage (>=) instead of an exact match there.
+    local dispatch_time_agents=0
+    if { [ "$tool" = "opencode" ] || [ "$tool" = "codearts" ]; } && \
+       grep -q 'provided at dispatch time' "$INIT_SCRIPT" 2>/dev/null; then
+        dispatch_time_agents=1
+    fi
     # Some plugins install an extra primary agent (PRIMARY_AGENT_NAME) in
     # opencode mode, so the actual count may be expected + 1.
     local agent_tolerance=0
@@ -305,6 +314,14 @@ verify_manifest() {
     if [ "$expected_agents" -eq -1 ]; then
         print_pass "manifest: installed_agents count = $actual_agents (dynamic, no INCLUDED_AGENT_PATTERN)"
         PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ "$dispatch_time_agents" -eq 1 ]; then
+        if [ "$actual_agents" -ge "$expected_agents" ]; then
+            print_pass "manifest: installed_agents count = $actual_agents (dispatch-time, covers expected $expected_agents)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "manifest: installed_agents count = $actual_agents (dispatch-time conversion must cover expected $expected_agents)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
     elif [ "$actual_agents" -eq "$expected_agents" ] || \
          [ "$actual_agents" -eq "$((expected_agents + agent_tolerance))" ]; then
         print_pass "manifest: installed_agents count = $actual_agents (expected $expected_agents, tolerance +$agent_tolerance)"
@@ -405,13 +422,27 @@ check_common_artifacts() {
 
     # 3. agents/ directory exists with expected count
     local agent_dir="$config_root/agents"
-    # Some plugins install an extra primary agent (PRIMARY_AGENT_NAME) in
-    # opencode mode, so the actual count may be expected + 1.
-    local agent_tolerance=0
-    if [ "$tool" = "opencode" ] && grep -q 'PRIMARY_AGENT_NAME=' "$INIT_SCRIPT" 2>/dev/null; then
-        agent_tolerance=1
+    # OC-like tools (opencode, codearts — OpenCode forks) receive agents at dispatch
+    # time via OPENCODE_CONFIG_CONTENT: agents/ must stay EMPTY on disk. A single
+    # Claude-format agent .md in there makes the whole CLI reject its config
+    # (PR#1010 review round 2), so when the installer declares dispatch-time
+    # agents, assert 0 files instead of the INCLUDED_AGENT_PATTERN count.
+    local dispatch_time_agents=0
+    if { [ "$tool" = "opencode" ] || [ "$tool" = "codearts" ]; } && \
+       grep -q 'provided at dispatch time' "$INIT_SCRIPT" 2>/dev/null; then
+        dispatch_time_agents=1
     fi
-    if [ "$EXPECTED_AGENT_COUNT" -eq -1 ]; then
+    if [ "$dispatch_time_agents" -eq 1 ]; then
+        local dt_agents
+        dt_agents=$(find "$agent_dir" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l)
+        if [ ! -d "$agent_dir" ] || [ "$dt_agents" -eq 0 ]; then
+            print_pass "agents/ empty (dispatch-time agents via OPENCODE_CONFIG_CONTENT, 0 Claude-format files)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "agents/ contains $dt_agents item(s) — Claude-format agent files MUST NOT be installed for $tool (breaks the whole CLI config)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    elif [ "$EXPECTED_AGENT_COUNT" -eq -1 ]; then
         if [ -d "$agent_dir" ]; then
             local actual_agents
             actual_agents=$(find "$agent_dir" -maxdepth 1 -mindepth 1 | wc -l)
@@ -427,6 +458,12 @@ check_common_artifacts() {
     elif [ -d "$agent_dir" ]; then
         local actual_agents
         actual_agents=$(find "$agent_dir" -maxdepth 1 -mindepth 1 | wc -l)
+        # Some plugins install an extra primary agent (PRIMARY_AGENT_NAME) in
+        # opencode mode, so the actual count may be expected + 1.
+        local agent_tolerance=0
+        if [ "$tool" = "opencode" ] && grep -q 'PRIMARY_AGENT_NAME=' "$INIT_SCRIPT" 2>/dev/null; then
+            agent_tolerance=1
+        fi
         if [ "$actual_agents" -eq "$EXPECTED_AGENT_COUNT" ] || \
            [ "$actual_agents" -eq "$((EXPECTED_AGENT_COUNT + agent_tolerance))" ]; then
             print_pass "agents/ contains $actual_agents item(s) (expected $EXPECTED_AGENT_COUNT, tolerance +$agent_tolerance)"
@@ -477,6 +514,16 @@ verify_opencode_cli_agents() {
     local scan_dir="${1:-$TEAM_DIR}"
     if ! command -v opencode &>/dev/null; then
         print_skip "opencode CLI not available, skipping CLI agent recognition check"
+        return 0
+    fi
+
+    # Dispatch-time agents (OC-like tools): agents are NOT files under
+    # .opencode/agents anymore — the backend injects them via
+    # OPENCODE_CONFIG_CONTENT and the installer's structural probe proves each
+    # one resolves as mode=primary. The on-disk symlink + `agent list` scan
+    # below only applies to the legacy file-based layout.
+    if grep -q 'provided at dispatch time' "$INIT_SCRIPT" 2>/dev/null; then
+        print_info "agents are dispatch-time (OPENCODE_CONFIG_CONTENT); recognition is proven by the installer's structural probe"
         return 0
     fi
 

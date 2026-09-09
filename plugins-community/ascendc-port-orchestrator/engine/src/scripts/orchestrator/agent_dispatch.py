@@ -679,7 +679,7 @@ def _opencode_graybox_binds(repo_root: Path) -> list[Path]:
 def _graybox_extra_ro(graybox_cfg: dict, repo_root: Path) -> list[Path]:
     """Extra read-only bind list for the graybox seal."""
     extra_ro: list[Path] = []
-    if os.environ.get("AOG_HARNESS_BACKEND", "") == "opencode":
+    if os.environ.get("AOG_HARNESS_BACKEND", "") in ("opencode", "codearts"):
         extra_ro.extend(_opencode_graybox_binds(repo_root))
     if graybox_cfg["npubench_bundle"] is not None:
         # It is intentionally a nested RO overlay after the workspace RW
@@ -802,7 +802,7 @@ def _graybox_allow_and_seal(
         # silently spawns no-network workers that die on the first API call
         # ("Cannot connect to API").  Key off the active backend instead.
         share_model_network = bool(os.environ.get("ANTHROPIC_BASE_URL", "").strip()) or (
-            getattr(_backend, "name", "") == "opencode"
+            getattr(_backend, "name", "") in ("opencode", "codearts")
         )
         plugin_arg = _graybox_plugin_arg(_gs, allow_ro)
         if plugin_arg:
@@ -1306,6 +1306,8 @@ def _backend_manifest_cmd(agent_type: str) -> list[str]:
         return [os.environ.get("AOG_CODEX_BIN", "codex"), "exec", f"agent:{agent_type}"]
     if backend_name == "opencode":
         return [os.environ.get("AOG_OPENCODE_BIN", "opencode"), "run", f"agent:{agent_type}"]
+    if backend_name == "codearts":
+        return [os.environ.get("AOG_CODEARTS_BIN", "codearts"), "run", f"agent:{agent_type}"]
     return [backend_name or "unknown-backend", f"agent:{agent_type}"]
 
 

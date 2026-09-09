@@ -20,7 +20,7 @@ AutoResearch 插件安装器
 参数：
   project       项目级安装（默认），复制完整运行时到目标项目。
   global        全局注册 Claude/OpenCode 使用指导；运行态仍由项目级安装创建。
-  claude        目标工具（支持 claude / opencode / trae / cursor / copilot）。
+  claude        目标工具（支持 claude / opencode / trae / cursor / copilot / codearts）。
   install_path  目标项目根目录，默认是当前目录。
 
 目标项目根会持有运行态：workspace/、ar_tasks/、.session_tasks/、
@@ -41,6 +41,7 @@ for arg in "$@"; do
     trae) TOOL="$arg" ;;
     cursor) TOOL="$arg" ;;
     copilot) TOOL="$arg" ;;
+    codearts) TOOL="$arg" ;;
     *) INSTALL_PATH="$arg" ;;
   esac
 done
@@ -98,6 +99,8 @@ if [ "$LEVEL" = "global" ]; then
     CONFIG_ROOT="$HOME/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$HOME/.copilot"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$HOME/.codeartsdoer"
   fi
 else
   mkdir -p "$INSTALL_PATH"
@@ -119,6 +122,8 @@ else
     CONFIG_ROOT="$PROJECT_ROOT/.cursor"
   elif [ "$TOOL" = "copilot" ]; then
     CONFIG_ROOT="$PROJECT_ROOT/.github"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$PROJECT_ROOT/.codeartsdoer"
   fi
 fi
 

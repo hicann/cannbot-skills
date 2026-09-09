@@ -69,6 +69,7 @@ trim_probe_output() {
 # Harness dependency preflight (G4). Each harness declares ONLY its own runtime deps:
 #   claude   → the claude CLI (honors CLAUDE_BIN)
 #   opencode → the opencode CLI + a JS runtime (node or bun)
+#   codearts → the codearts CLI (OpenCode fork, same dispatch protocol) + a JS runtime
 # Default is warn-only (exit 0); --strict-deps turns every miss into a hard error.
 # cursor/copilot config-only installs have no runtime dependency to check.
 check_harness_deps() {
@@ -91,6 +92,16 @@ check_harness_deps() {
       if ! command -v rg >/dev/null 2>&1; then
         dep_ok=false; missing="${missing:+$missing, }ripgrep (rg)"
       fi ;;
+    codearts)
+      if ! command -v "${AOG_CODEARTS_BIN:-codearts}" >/dev/null 2>&1; then
+        dep_ok=false; missing="${AOG_CODEARTS_BIN:-codearts} CLI"
+      fi
+      if [ -z "$(js_runtime)" ]; then
+        dep_ok=false; missing="${missing:+$missing, }node/bun runtime"
+      fi
+      if ! command -v rg >/dev/null 2>&1; then
+        dep_ok=false; missing="${missing:+$missing, }ripgrep (rg)"
+      fi ;;
   esac
   if [ "$dep_ok" = false ]; then
     if [ "$STRICT_DEPS" = 1 ]; then
@@ -103,7 +114,7 @@ check_harness_deps() {
     # non-zero here would trigger the top-level errexit and abort the installer.
     return 0
   fi
-  ok "harness deps for tool=$TOOL present ($(case "$TOOL" in claude) echo "${CLAUDE_BIN:-claude}";; opencode) echo "${AOG_OPENCODE_BIN:-opencode} + $(js_runtime)";; esac))"
+  ok "harness deps for tool=$TOOL present ($(case "$TOOL" in claude) echo "${CLAUDE_BIN:-claude}";; opencode) echo "${AOG_OPENCODE_BIN:-opencode} + $(js_runtime)";; codearts) echo "${AOG_CODEARTS_BIN:-codearts} + $(js_runtime)";; *) echo "config-only install, no runtime deps";; esac))"
   return 0
 }
 
@@ -169,15 +180,33 @@ REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md KB_INDEX.md target/ascen
 LEVEL="project"; TOOL="claude"; STRICT_DEPS=0
 for arg in "${@:-}"; do
   case "$arg" in
-    --help) echo "Usage: init.sh [project|global] [claude|opencode|cursor|copilot] [--strict-deps]  (Claude honors \$CLAUDE_CONFIG_DIR)"; exit 0 ;;
+    --help) echo "Usage: init.sh [project|global] [claude|opencode|cursor|copilot|codearts] [--strict-deps]  (Claude honors \$CLAUDE_CONFIG_DIR)"; exit 0 ;;
     global|project) LEVEL="$arg" ;;
     claude)   TOOL="claude" ;;
     opencode) TOOL="opencode" ;;
     cursor)   TOOL="cursor" ;;
     copilot)  TOOL="copilot" ;;
+    codearts) TOOL="codearts" ;;
     --strict-deps) STRICT_DEPS=1 ;;   # missing harness deps become hard errors instead of warnings
   esac
 done
+
+# OC_LIKE: tools that share the OpenCode install/dispatch shape (OpenCode forks).
+# They must NOT receive the Claude-format agent files on disk (their agent schema
+# wants a record-shaped `tools:` map — a Claude YAML list makes the whole CLI
+# reject its config and breaks EVERY invocation on that machine, not just this
+# plugin's). They get agents at dispatch time via OPENCODE_CONFIG_CONTENT and an
+# entry-command layer instead of agent symlinks, and their install-time probes
+# run against their own CLI binary.
+OC_LIKE=0
+case "$TOOL" in
+  opencode|codearts) OC_LIKE=1 ;;
+esac
+if [ "$TOOL" = "codearts" ]; then
+  OC_LIKE_BIN="${AOG_CODEARTS_BIN:-codearts}"
+else
+  OC_LIKE_BIN="${AOG_OPENCODE_BIN:-opencode}"
+fi
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_AGENT_ROOT="$PLUGIN_DIR/agents"
@@ -206,8 +235,8 @@ fi
 # OpenCode intentionally never treats Claude Code's marketplace cache as a dependency source:
 # doing so would reintroduce a hidden ~/.claude read. The currently packaged OpenCode setup
 # therefore requires a full repository checkout, where all canonical shared Skills are present.
-if [ "$TOOL" = "opencode" ] && [ "$DIRECT_CHECKOUT" != "1" ]; then
-  err "OpenCode setup requires a full cannbot-skills checkout (shared skills are not read from Claude marketplace cache)"
+if [ "$OC_LIKE" = "1" ] && [ "$DIRECT_CHECKOUT" != "1" ]; then
+  err "OpenCode-like setup ($TOOL) requires a full cannbot-skills checkout (shared skills are not read from Claude marketplace cache)"
   err "Run init.sh from the repository checkout, not from a Claude marketplace cache path."
   exit 1
 fi
@@ -218,7 +247,7 @@ marketplace_skill_path() {
   # OpenCode setup must be self-contained with respect to Claude Code: even a
   # best-effort cache lookup would read a user's ~/.claude tree. Direct checkout
   # dependencies remain usable; marketplace-only skills are reported normally.
-  [ "$TOOL" = "opencode" ] && return 1
+  [ "$OC_LIKE" = "1" ] && return 1
   cache_root="$(claude_root)/plugins/cache"
   [ -d "$cache_root" ] || return 1
   hit="$(find "$cache_root" -type f -path "*/$skill/SKILL.md" -print -quit 2>/dev/null || true)"
@@ -235,6 +264,8 @@ if [ "$LEVEL" = "global" ]; then
     CONFIG_ROOT="$HOME/.copilot"
   elif [ "$TOOL" = "cursor" ]; then
     CONFIG_ROOT="$HOME/.cursor"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$HOME/.codeartsdoer"
   else
     if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
       CONFIG_ROOT="$CLAUDE_CONFIG_DIR"
@@ -249,6 +280,8 @@ else
     CONFIG_ROOT="$PWD/.github"
   elif [ "$TOOL" = "cursor" ]; then
     CONFIG_ROOT="$PWD/.cursor"
+  elif [ "$TOOL" = "codearts" ]; then
+    CONFIG_ROOT="$PWD/.codeartsdoer"
   else
     CONFIG_ROOT="$PWD/.claude"
   fi
@@ -404,7 +437,7 @@ ac=0
 # fails, not just this plugin's. opencode gets its agents from the process-private
 # OPENCODE_CONFIG_CONTENT the backend injects at dispatch time (already converted to
 # `mode: primary` + a record-shaped tool map), so no install-time agent files are needed.
-if [ "$TOOL" = "opencode" ]; then
+if [ "$OC_LIKE" = "1" ]; then
   ok "agents: provided at dispatch time via OPENCODE_CONFIG_CONTENT (no agent files installed)"
   # Entry layer. opencode scans {command,commands}/**/*.md under its config dirs. The
   # shipped templates carry an @@PLUGIN_DIR@@ placeholder because a command file is a
@@ -425,7 +458,7 @@ if [ "$TOOL" = "opencode" ]; then
       # "project install" into the plugin's own source tree is not an install.
       if [ "$cmd_dst" -ef "$cmd_src" ]; then
         err "refusing to install into the plugin's own source tree ($cmd_dst)"
-        err "run 'init.sh project opencode' from YOUR project directory, or use 'global'"
+        err "run 'init.sh project $TOOL' from YOUR project directory, or use 'global'"
         cmd_fail=$((cmd_fail + 1))
         continue
       fi
@@ -455,7 +488,7 @@ if [ "$TOOL" = "opencode" ]; then
   if [ "$cc" -gt 0 ]; then
     ok "commands: $cc installed → $CONFIG_ROOT/command (entry layer)"
   else
-    warn "no opencode commands installed — users have no /ascendc-* entry point"
+    warn "no entry commands installed — users have no /ascendc-* entry point"
   fi
   # Fail loud if a placeholder survived: a command still saying @@PLUGIN_DIR@@ would tell
   # the agent to run a path that does not exist.
@@ -468,7 +501,7 @@ if [ "$TOOL" = "opencode" ]; then
     err "command install left an unsubstituted @@PLUGIN_DIR@@ placeholder"
     ENTRY_LAYER_OK=false
   elif [ "$cmd_fail" -gt 0 ]; then
-    err "failed to install $cmd_fail opencode command file(s) — entry layer incomplete"
+    err "failed to install $cmd_fail entry command file(s) — entry layer incomplete"
     ENTRY_LAYER_OK=false
   elif [ "$cc" -gt 0 ]; then
     ENTRY_LAYER_OK=true
@@ -667,11 +700,11 @@ for want in $INCLUDED_SKILLS; do
   health_ok=false
 done
 EFFECTIVE_AGENTS=""
-if [ "$TOOL" = "opencode" ] && [ "${ENTRY_LAYER_OK:-false}" != true ]; then
-  err "opencode entry layer not installed — users would have no /ascendc-* command"
+if [ "$OC_LIKE" = "1" ] && [ "${ENTRY_LAYER_OK:-false}" != true ]; then
+  err "entry layer not installed for tool=$TOOL — users would have no /ascendc-* command"
   health_ok=false
 fi
-if [ "$TOOL" = "opencode" ]; then
+if [ "$OC_LIKE" = "1" ]; then
   # opencode resolves agents from the backend's process-private OPENCODE_CONFIG_CONTENT,
   # not from files under CONFIG_ROOT. Prove the CONVERSION works rather than counting
   # files: every whitelisted agent must appear in the generated config as mode=primary
@@ -692,7 +725,7 @@ PYOC
     EFFECTIVE_AGENTS="$OPENCODE_AGENT_CHECK"
     ok "agents: $(echo "$EFFECTIVE_AGENTS" | wc -w | tr -d ' ') resolvable as mode=primary via OPENCODE_CONFIG_CONTENT"
   else
-    err "opencode agent config invalid: $OPENCODE_AGENT_CHECK"
+    err "agent config invalid for tool=$TOOL: $OPENCODE_AGENT_CHECK"
     health_ok=false
   fi
 else
@@ -799,11 +832,11 @@ fi
 # tool call. Phase O0 does not close that either — it drives the same entry point through node.
 # Only a real model turn shows it, which is what src/scripts/tests/test_opencode_e2e_live.py
 # does when an operator points AOG_E2E_OPENCODE_MODEL at a configured model.
-if [ "$TOOL" = "opencode" ]; then
+if [ "$OC_LIKE" = "1" ]; then
   oc_ok=true
-  OC_BIN="${AOG_OPENCODE_BIN:-opencode}"
+  OC_BIN="$OC_LIKE_BIN"
   if ! command -v "$OC_BIN" >/dev/null 2>&1; then
-    warn "opencode binary not found ($OC_BIN) — cannot verify the safety net"
+    warn "$OC_BIN binary not found — cannot verify the safety net"
     oc_ok=false
   else
     OC_CFG="$(cd "$PLUGIN_DIR/engine" && PYTHONPATH=src/scripts python3 -c "
@@ -818,10 +851,10 @@ sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
       # dependency resolution (a bun install) before any debug output: measured >90s
       # online, unbounded in the offline containers this plugin targets. Bound it and
       # say so — a probe that hangs forever is indistinguishable from a broken install.
-      step "probing opencode plugin resolution — first run can take 1-2 minutes..."
+      step "probing $OC_BIN plugin resolution — first run can take 1-2 minutes..."
       if ! _oc_timeout 180 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent aog-kernel-worker \
              >/dev/null 2>&1; then
-        err "opencode did not resolve agent aog-kernel-worker from the injected config (or the probe timed out)"
+        err "$OC_BIN did not resolve agent aog-kernel-worker from the injected config (or the probe timed out)"
         oc_ok=false
       fi
       # G4: assert the FULL aog-* agent closure, not just the first agent. A config
@@ -836,7 +869,7 @@ sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
           [ "$_agname" = "aog-kernel-worker" ] && continue
           if ! _oc_timeout 60 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent "$_agname" \
                  >/dev/null 2>&1; then
-            err "opencode did not resolve agent $_agname from the injected config (or the probe timed out)"
+            err "$OC_BIN did not resolve agent $_agname from the injected config (or the probe timed out)"
             oc_ok=false
             break
           fi
@@ -853,7 +886,7 @@ sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
       if [ "$oc_ok" = true ]; then
         OC_SKILLS="$(mktemp "${TMPDIR:-/tmp}/cannbot_oc_skills.XXXXXX")"
         if ! _oc_timeout 180 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug skill >"$OC_SKILLS" 2>/dev/null; then
-          err "opencode skill listing probe failed or timed out"
+          err "skill listing probe failed or timed out ($OC_BIN)"
           oc_ok=false
         fi
       fi
@@ -862,14 +895,14 @@ import json, sys
 try:
     data = json.load(open(sys.argv[1]))
 except Exception as exc:
-    print(f"  could not read opencode skill listing: {exc}"); sys.exit(1)
+    print(f"  could not read skill listing: {exc}"); sys.exit(1)
 names = {s.get("name") for s in data if isinstance(s, dict)}
 missing = [w for w in ("ascendc-cross-gen-port", "ascendc-backward-gen") if w not in names]
 if missing:
-    print(f"  opencode resolved {len(names)} skills but not: {missing}"); sys.exit(1)
+    print(f"  CLI resolved {len(names)} skills but not: {missing}"); sys.exit(1)
 PYSKILL
       then
-        err "opencode did not resolve the plugin entry skills from the injected config"
+        err "$OC_BIN did not resolve the plugin entry skills from the injected config"
         oc_ok=false
       fi
       [ -n "${OC_SKILLS:-}" ] && rm -f "$OC_SKILLS"
@@ -985,6 +1018,13 @@ case "$TOOL" in
     else
       echo -e "  ${DIM}harness deps: ${RED}opencode/js-runtime ✗ (engine dispatch will fail until installed)${NC}"
     fi ;;
+  codearts)
+    _js="$(js_runtime)" || _js=""
+    if command -v "${AOG_CODEARTS_BIN:-codearts}" >/dev/null 2>&1 && [ -n "$_js" ]; then
+      echo -e "  ${DIM}harness deps: ${GREEN}codearts ✓ + $_js ✓${NC}"
+    else
+      echo -e "  ${DIM}harness deps: ${RED}codearts/js-runtime ✗ (engine dispatch will fail until installed)${NC}"
+    fi ;;
 esac
 echo ""
 if [ "$TOOL" = "opencode" ]; then
@@ -993,6 +1033,15 @@ if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}2.${NC} launch ${GREEN}opencode${NC} in your project, then a customer entry command:"
   echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
   echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
+elif [ "$TOOL" = "codearts" ]; then
+  echo -e "  ${BOLD}Quick start (CodeArts):${NC}"
+  echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"
+  echo -e "  ${CYAN}2.${NC} launch ${GREEN}codearts${NC} in your project, then a customer entry command:"
+  echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
+  echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
+  echo -e "  ${DIM}note: codearts dispatch reuses the OpenCode run protocol (CodeArts CLI is an OpenCode fork); pipeline dispatch requires the codearts CLI + node/bun on PATH.${NC}"
+  echo -e "  ${DIM}note: CodeArts models come from the Huawei Cloud side — complete CLI auth first (CODEARTS_CLI_AK / CODEARTS_CLI_SK, apply at https://codearts.huaweicloud.com/portal/settings/cli-auth ), or the skill run fails with 模型列表获取失败.${NC}"
+  echo -e "  ${DIM}note: to use third-party models (GLM / DeepSeek / ...), configure them per the official custom-model guide: https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_00022.html${NC}"
 else
   echo -e "  ${BOLD}Quick start (Claude Code):${NC}"
   echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"

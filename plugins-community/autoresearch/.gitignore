@@ -14,6 +14,7 @@ ar_tasks/
 .traecli/cannbot-manifest.json
 .cursor/cannbot-manifest.json
 .github/cannbot-manifest.json
+.codeartsdoer/cannbot-manifest.json
 # opencode per-machine config (model / provider / key) — the .opencode analog of settings.local.json
 .opencode/opencode.json
 .opencode/opencode.jsonc

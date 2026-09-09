@@ -270,7 +270,7 @@ def _check_opencode_registration() -> tuple[str, Path, list[str]]:
 
 def _check_hook_registration() -> tuple[str, Path, list[str]]:
     """Load the cannbot registration checker from the engine script root."""
-    if _active_backend_name() == "opencode":
+    if _active_backend_name() in ("opencode", "codearts"):
         return _check_opencode_registration()
     checker_path = _PROJECT_ROOT / "src" / "scripts" / "preflight_install_hooks.py"
     spec = importlib.util.spec_from_file_location(

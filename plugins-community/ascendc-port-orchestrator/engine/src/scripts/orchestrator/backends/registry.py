@@ -22,6 +22,7 @@ from typing import Callable
 
 from .base import Backend
 from .cc_backend import CCBackend
+from .codearts_backend import CodeartsBackend
 from .codex_backend import CodexBackend
 from .opencode_backend import OpencodeBackend
 
@@ -34,6 +35,7 @@ _CANONICAL: dict[str, Callable[[], Backend]] = {
     "claude_code": CCBackend,
     "codex": CodexBackend,
     "opencode": OpencodeBackend,
+    "codearts": CodeartsBackend,
 }
 
 _ALIASES = {
@@ -47,6 +49,8 @@ _ALIASES = {
     "open_code": "opencode",
     "open-code": "opencode",
     "opencode": "opencode",
+    "codearts": "codearts",
+    "codearts_agent": "codearts",
 }
 
 

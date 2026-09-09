@@ -91,6 +91,26 @@ bash "$PLUGIN_DIR/init.sh" project opencode --strict-deps
 `opencode resolves injected agents + skills (structural)` 和 `✓ safety net ENFORCES`。`1.18.18` 是建议版本，
 不是硬性版本门；缺少 `opencode`、`node`/`bun` 或安全网检查失败才会阻断运行。
 
+## 2b. 安装到 CodeArts（华为云码道）
+
+CodeArts Agent CLI 是 OpenCode 的 fork，安装形态与 OpenCode 相同（必须从完整 checkout 安装）：
+
+```bash
+REPO_ROOT=/path/to/cannbot-skills
+PLUGIN_DIR="$REPO_ROOT/plugins-community/ascendc-port-orchestrator"
+cd /path/to/your-operator-project
+bash "$PLUGIN_DIR/init.sh" project codearts --strict-deps    # 或 global codearts
+```
+
+安装输出中必须同时出现 `resolves injected agents + skills (structural)` 和 `✓ safety net ENFORCES`。
+
+**模型来源（必读）**：CodeArts 的模型来自华为云侧，需先完成 CLI 鉴权（`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`，
+申请入口见 <https://codearts.huaweicloud.com/portal/settings/cli-auth>），否则入口技能运行时报
+「模型列表获取失败，请刷新重试」。如需接入第三方模型（如 GLM / DeepSeek），按官方自定义模型配置修改
+`~/.codeartsdoer/codearts_cli.json`：<https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_00022.html>，
+之后用 `codearts run --model <provider>/<model>` 指定（引擎侧经 `AOG_OPENCODE_MODEL` 透传 `--model`）。
+codearts CLI 必须与引擎同环境（Linux CLI 配 WSL/Linux 引擎，Windows CLI 配 Windows 引擎），不支持跨 WSL interop 调用。
+
 ## 3. 配置 NPU 环境
 
 安装器会在实际插件目录生成 `engine/workspace/.ascendc_env`（Claude Code 安装时即 §1 的
