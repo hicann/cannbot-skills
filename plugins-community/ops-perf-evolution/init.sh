@@ -248,7 +248,9 @@ if not fm_match:
 fm_raw = fm_match.group(1)
 body = fm_match.group(2)
 
-# Parse frontmatter preserving order.
+# Parse frontmatter preserving order. Nested mappings (e.g. lingxi-partial's
+# opencode-style `permission:` block) are collected as dicts so they survive
+# the round-trip; scalar lists stay lists.
 fm_items = []
 i = 0
 lines = fm_raw.split('\n')
@@ -263,16 +265,36 @@ while i < len(lines):
         key = key.strip()
         val = val.strip()
         if val == '':
-            list_items = []
+            block_items = []
             i += 1
-            while i < len(lines) and lines[i].strip().startswith('- '):
-                list_items.append(lines[i].strip()[2:])
-                i += 1
-            fm_items.append((key, list_items))
+            while i < len(lines):
+                sub = lines[i]
+                if not sub.strip():
+                    i += 1
+                    continue
+                if sub.strip().startswith('- '):
+                    block_items.append(sub.strip()[2:])
+                    i += 1
+                    continue
+                if sub.startswith((' ', '\t')) and ':' in sub:
+                    sk, sv = sub.strip().split(':', 1)
+                    block_items.append((sk.strip(), sv.strip()))
+                    i += 1
+                    continue
+                break
+            fm_items.append((key, block_items))
             continue
         else:
             fm_items.append((key, val))
     i += 1
+
+# opencode's agent schema rejects unknown permission keys (external_directory
+# is a CANNBot convention consumed by hooks, not by opencode) with
+# "Configuration is invalid" at startup — drop them during conversion.
+_OPENCODE_PERMISSION_KEYS = {
+    'read', 'write', 'edit', 'bash', 'glob', 'grep', 'webfetch',
+    'websearch', 'task', 'skill',
+}
 
 if tool == 'opencode':
     new_items = []
@@ -291,6 +313,12 @@ if tool == 'opencode':
             # Output as multi-line boolean map (OpenCode convention).
             sorted_tools = '\n'.join([f'  {k}: {v}' for k, v in sorted(tool_map.items())])
             new_items.append(('tools', sorted_tools))
+        elif key == 'permission' and isinstance(val, list):
+            filtered = [(k, v) for k, v in val
+                        if isinstance(k, str) and k in _OPENCODE_PERMISSION_KEYS]
+            if filtered:
+                block = '\n'.join(f'  {k}: {v}' for k, v in filtered)
+                new_items.append(('permission', block))
         elif key == 'permissionMode':
             if val == 'bypassPermissions':
                 new_items.append(('permission', 'allow'))
@@ -333,6 +361,9 @@ elif tool == 'trae':
                     seen_tools.add(t_norm)
                     trae_tools.append(t_norm)
             new_items.append(('tools', ', '.join(trae_tools)))
+        elif key == 'permission':
+            # Trae frontmatter has no permission concept.
+            continue
         elif key == 'permissionMode':
             # Trae frontmatter does not use permissionMode.
             continue
