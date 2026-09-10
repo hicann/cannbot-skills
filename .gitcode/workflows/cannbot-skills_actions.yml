@@ -73,13 +73,34 @@ stages:
   stage3:
     name: Test
     jobs:
+      # 安全门禁先于任何会执行 PR 代码的 UT/ST。这里只运行 Runner 上已部署的
+      # 受信任脚本，由 RDV 检出 PR 合并树并执行 Sift 基础扫描。
+      JOB_security_vet:
+        name: Security_Vet
+        steps:
+          - name: check_security_vet_script
+            run: |
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
+                || { echo "❌ runner 上未找到 ci-pr-security-vet.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+          - name: run_security_vet
+            run: |
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
+                --pr-number "${{ env.MERGE_ID }}" \
+                --password "${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}" \
+                --gitcode-repo cann/cannbot-skills \
+                --timeout 1800
+        runs-on:
+          - self-hosted
+          - runner_name=A5_skill_tester_02
       JOB_ut:
         name: UT_cannbot-skills
+        needs: JOB_security_vet
         uses: .gitcode/workflows/ut_action.yml
         with:
           image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
       JOB_st_test:
         name: ST_test
+        needs: JOB_security_vet
         steps:
           - name: check_script
             run: |
