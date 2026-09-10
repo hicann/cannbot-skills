@@ -299,4 +299,4 @@ per-token quant 的 reduce + 单值 scale 写出场景，`KERNEL_TYPE_MIX_AIC_1_
 | 类型转换 | `AscendC::Cast(dst, src, RoundMode, count)` |
 | GM↔UB 传输（任意 count） | `DataCopyPad`（封装为 `LoadGmToUb` / `StoreUbToGm`） |
 
-完整定义见 `asc-devkit/docs/api/README.md`。
+完整定义见 `asc-devkit/docs/zh/api/README.md`。

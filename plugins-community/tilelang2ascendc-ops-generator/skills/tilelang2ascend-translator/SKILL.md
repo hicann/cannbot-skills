@@ -115,13 +115,13 @@ argument-hint: >
 
 | 查阅入口 | 内容 | 何时查阅 |
 |----------|------|---------|
-| `asc-devkit/docs/api/Ascend-C-API列表.md` | API 分类总览与快速索引 | 每次代码生成前 |
-| `asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/类型转换/Cast.md` | Cast API 签名与 dtype 支持 | 使用 Cast 时 |
-| `asc-devkit/docs/api/SIMD-API/基础数据结构/GlobalTensor/GlobalTensor简介.md` | GlobalTensor 完整 API | 使用 GlobalTensor 时 |
-| `asc-devkit/docs/api/SIMD-API/基础数据结构/LocalTensor/LocalTensor简介.md` | LocalTensor 完整 API | 使用 LocalTensor 时 |
-| `asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/基础矢量算子.md` | CopyIn→Compute→CopyOut 标准范式 | 每次代码生成前 |
-| `asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/TBuf的使用.md` | UB 临时缓冲区管理 | 分配 TBuf 时 |
-| `asc-devkit/docs/guide/算子实践参考/SIMD算子实现/融合算子编程/` | 多步计算融合模式 | 融合算子时 |
+| `asc-devkit/docs/zh/api/api_list.md` | API 分类总览与快速索引 | 每次代码生成前 |
+| `asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/type_conversion/Cast.md` | Cast API 签名与 dtype 支持 | 使用 Cast 时 |
+| `asc-devkit/docs/zh/api/SIMD-API/basic_api/data_structures/GlobalTensor/GlobalTensor_intro.md` | GlobalTensor 完整 API | 使用 GlobalTensor 时 |
+| `asc-devkit/docs/zh/api/SIMD-API/basic_api/data_structures/LocalTensor/LocalTensor_intro.md` | LocalTensor 完整 API | 使用 LocalTensor 时 |
+| `asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/basic_vector_operator.md` | CopyIn→Compute→CopyOut 标准范式 | 每次代码生成前 |
+| `asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/tbuf_usage.md` | UB 临时缓冲区管理 | 分配 TBuf 时 |
+| `asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/fusion_operator_programming/` | 多步计算融合模式 | 融合算子时 |
 | `asc-devkit/examples/01_simd_cpp_api/` | 官方 SIMD C++ 示例 | API 用法不确定时 |
 | `workflows/templates/archive_tasks/rms_norm/` | EXEC_KERNEL_CMD 正确传参模式 | 编写 op_host 时 |
 
@@ -310,7 +310,7 @@ argument-hint: >
 
 ```
 0.1 阅读标准范式:
-    asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/基础矢量算子.md
+    asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/basic_vector_operator.md
     → 确认 CopyIn→Compute→CopyOut 的完整流水线模式
 
 0.2 阅读 EXEC_KERNEL_CMD 正确模式:
@@ -325,38 +325,38 @@ argument-hint: >
     **禁止凭记忆或猜测 API 签名**。
 
     ── 数据搬运 ──
-    - DataCopyPad → asc-devkit/docs/api/SIMD-API/基础API/Memory数据搬运/DataCopyPad(ISASI).md
+    - DataCopyPad → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/data_move/DataCopyPad_GMToUB.md（另有 DataCopyPad_UBToGM.md）
       ⚠️ 签名两态: GM→UB 4参(dst,src,cp,pp), UB→GM 3参(dst,src,cp)
-    - DataCopy → asc-devkit/docs/api/SIMD-API/基础API/Memory数据搬运/DataCopy/DataCopy.md
+    - DataCopy → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/data_move/（场景化文档：DataCopy_GMAndUB_continuous.md、DataCopy_GMAndUB_highdim_split.md 等，按搬运场景选择）
 
     ── 类型转换 ──
-    - Cast → asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/类型转换/Cast.md
+    - Cast → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/type_conversion/Cast.md
       ⚠️ 确认 bfloat16→float32 和 float32→bfloat16 的 RoundMode 参数
 
     ── 矢量计算 (Memory) ──
-    - Mul → asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/基础算术/Mul.md
-    - Add → asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/基础算术/Add.md
-    - Sub → asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/基础算术/Sub.md
-    - Rsqrt → asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/基础算术/Rsqrt.md
+    - Mul → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Mul.md
+    - Add → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Add.md
+    - Sub → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Sub.md
+    - Rsqrt → asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Rsqrt.md
 
     ── 标量计算 (Reg) ──
-    - Muls → asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Muls-27.md
-    - Adds → asc-devkit/docs/api/SIMD-API/基础API/Reg矢量计算/基础算术/Adds-28.md
+    - Muls → asc-devkit/docs/zh/api/SIMD-API/basic_api/reg_vector_compute/basic_arithmetic/Muls.md
+    - Adds → asc-devkit/docs/zh/api/SIMD-API/basic_api/reg_vector_compute/basic_arithmetic/Adds.md
     - Rsqrt (scalar) → 与矢量 Rsqrt 同族，查阅基础算术目录
 
     ── 高阶 API ──
-    - ReduceSum → asc-devkit/docs/api/SIMD-API/高阶API/归约操作/ReduceSum接口/ReduceSum-90.md
+    - ReduceSum → asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceSum_interface/ReduceSum.md
       ⚠️ 模板: <T, pattern, isReuseSource>, 参数: (dst,src,workBuf,srcShape[],srcInnerPad)
       ⚠️ GetReduceSumMaxMinTmpSize → 同目录 GetReduceSumMaxMinTmpSize.md
-    - Broadcast → asc-devkit/docs/api/SIMD-API/高阶API/张量变换/Broadcast.md
+    - Broadcast → asc-devkit/docs/zh/api/SIMD-API/adv_api/tensor_transform/Broadcast.md
       ⚠️ 模板: <T, dim, axis, isReuseSource>, dim∈{1,2}, axis∈{0,1}
-    - Cos → asc-devkit/docs/api/SIMD-API/高阶API/数学计算/Cos接口/Cos.md
+    - Cos → asc-devkit/docs/zh/api/SIMD-API/adv_api/math_compute/Cos_interface/Cos.md
       ⚠️ GetCosMaxMinTmpSize → 同目录 GetCosMaxMinTmpSize.md
-    - Sin → asc-devkit/docs/api/SIMD-API/高阶API/数学计算/Sin接口/Sin.md
+    - Sin → asc-devkit/docs/zh/api/SIMD-API/adv_api/math_compute/Sin_interface/Sin.md
       ⚠️ GetSinMaxMinTmpSize → 同目录 GetSinMaxMinTmpSize.md
 
     ── 同步控制 ──
-    - PipeBarrier → asc-devkit/docs/api/SIMD-API/基础API/同步控制/核内同步/PipeBarrier(ISASI).md
+    - PipeBarrier → asc-devkit/docs/zh/api/SIMD-API/basic_api/sync_control/intra_core_sync/PipeBarrier_ISASI.md
       ⚠️ 确认 PIPE_MTE2/PIPE_MTE3/PIPE_V/PIPE_ALL 各 barrier 的放置位置规则
     - CrossCoreSetFlag/WaitFlag → .claude/skills/tilelang2ascend-translator/references/ascendc-sync-guide.md
       ⚠️ 确认 mode2 下 Set/Wait 两侧 PIPE 参数完整且配对
@@ -372,22 +372,22 @@ argument-hint: >
     - dtype 约束
 
 0.4 查阅 TBuf 用法:
-    asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/TBuf的使用.md
+    asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/tbuf_usage.md
     → 确认 UB 临时缓冲区的正确分配模式
 
 0.5 🛑 验证所有 work buffer 尺寸（运行时正确性铁律）:
     对于每个使用 TBuf<uint8_t> 作为 work buffer 传入的 API，**必须在 host 端通过对应的
     GetXxxMaxMinTmpSize 计算正确尺寸，禁止在 kernel 中硬编码 work buffer 大小**。
 
-    │ Work Buffer 使用者 │ 尺寸获取 API (host 端调用) │ API 文档 │
-    │-------------------│---------------------------│---------│
-    │ ReduceSum         │ GetReduceSumMaxMinTmpSize │ asc-devkit/docs/api/SIMD-API/高阶API/归约操作/ReduceSum接口/GetReduceSumMaxMinTmpSize.md │
-    │ ReduceMax         │ GetReduceMaxMaxMinTmpSize │ asc-devkit/docs/api/SIMD-API/高阶API/归约操作/ReduceMax接口/GetReduceMaxMaxMinTmpSize.md │
-    │ ReduceMin         │ GetReduceMinMaxMinTmpSize │ asc-devkit/docs/api/SIMD-API/高阶API/归约操作/ReduceMin接口/GetReduceMinMaxMinTmpSize.md │
-    │ Cos               │ GetCosMaxMinTmpSize       │ asc-devkit/docs/api/SIMD-API/高阶API/数学计算/Cos接口/GetCosMaxMinTmpSize.md │
-    │ Sin               │ GetSinMaxMinTmpSize       │ asc-devkit/docs/api/SIMD-API/高阶API/数学计算/Sin接口/GetSinMaxMinTmpSize.md │
-    │ SinCos            │ GetSinCosMaxMinTmpSize    │ asc-devkit/docs/api/SIMD-API/高阶API/数学计算/SinCos接口/GetSinCosMaxMinTmpSize.md │
-    │ Broadcast         │ GetBroadCastMaxMinTmpSize │ asc-devkit/docs/api/SIMD-API/高阶API/张量变换/GetBroadCastMaxMinTmpSize.md │
+     │ Work Buffer 使用者 │ 尺寸获取 API (host 端调用) │ API 文档 │
+     │-------------------│---------------------------│---------│
+     │ ReduceSum         │ GetReduceSumMaxMinTmpSize │ asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceSum_interface/GetReduceSumMaxMinTmpSize.md │
+     │ ReduceMax         │ GetReduceMaxMaxMinTmpSize │ asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceMax_interface/GetReduceMaxMaxMinTmpSize.md │
+     │ ReduceMin         │ GetReduceMinMaxMinTmpSize │ asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceMin_interface/GetReduceMinMaxMinTmpSize.md │
+     │ Cos               │ GetCosMaxMinTmpSize       │ asc-devkit/docs/zh/api/SIMD-API/adv_api/math_compute/Cos_interface/GetCosMaxMinTmpSize.md │
+     │ Sin               │ GetSinMaxMinTmpSize       │ asc-devkit/docs/zh/api/SIMD-API/adv_api/math_compute/Sin_interface/GetSinMaxMinTmpSize.md │
+     │ SinCos            │ GetSinCosMaxMinTmpSize    │ asc-devkit/docs/zh/api/SIMD-API/adv_api/math_compute/SinCos_interface/GetSinCosMaxMinTmpSize.md │
+     │ Broadcast         │ GetBroadCastMaxMinTmpSize │ asc-devkit/docs/zh/api/SIMD-API/adv_api/tensor_transform/GetBroadCastMaxMinTmpSize.md │
 
     **验证步骤 (每次编写 kernel 前强制执行)**:
     a. 列出本算子所有使用 work buffer 的 API
@@ -553,7 +553,7 @@ Step 1: 识别自定义算子当前采用的算法
         └  记录算法名（如 MERGE_SORT / RADIX_SELECT / SEQUENTIAL_REDUCE / TREE_REDUCE）
 
 Step 2: 调研 CANN 内置实现的算法
-        ├─ 查阅 asc-devkit/docs/api/ 或 aclnn 文档，确定 CANN 标杆算子使用的算法
+        ├─ 查阅 asc-devkit/docs/zh/api/ 或 aclnn 文档，确定 CANN 标杆算子使用的算法
         └  记录标杆算法名
 
 Step 3: 对比算法代差
@@ -966,10 +966,10 @@ def run(x, dim=-1):
 
 | 错误类型 | 必须查阅 |
 |---------|---------|
-| **编译错误: API 签名不匹配** | `asc-devkit/docs/api/Ascend-C-API列表.md` → 定位 API → 查阅该 API 的独立 .md 文档确认正确签名 |
-| **编译错误: 类型不匹配** | `asc-devkit/docs/api/SIMD-API/基础API/Memory矢量计算/类型转换/Cast.md` 确认 dtype 支持矩阵 |
-| **编译错误: GlobalTensor/LocalTensor** | `asc-devkit/docs/api/SIMD-API/基础数据结构/` 下对应简介.md |
-| **运行时 vector core exception / UB 违例 / all-zero output** | ① 🛑 **优先执行步骤 0-C** 完成 sync checklist<br>② `asc-devkit/docs/guide/算子实践参考/.../TBuf的使用.md` 检查 buffer 大小<br>③ `workflows/templates/archive_tasks/rms_norm/` 对比 EXEC_KERNEL_CMD 传参模式<br>④ 检查是否有 struct 指针被传给 `EXEC_KERNEL_CMD`（常见根因） |
+| **编译错误: API 签名不匹配** | `asc-devkit/docs/zh/api/api_list.md` → 定位 API → 查阅该 API 的独立 .md 文档确认正确签名 |
+| **编译错误: 类型不匹配** | `asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/type_conversion/Cast.md` 确认 dtype 支持矩阵 |
+| **编译错误: GlobalTensor/LocalTensor** | `asc-devkit/docs/zh/api/SIMD-API/basic_api/data_structures/` 下对应 *_intro.md |
+| **运行时 vector core exception / UB 违例 / all-zero output** | ① 🛑 **优先执行步骤 0-C** 完成 sync checklist<br>② `asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/tbuf_usage.md` 检查 buffer 大小<br>③ `workflows/templates/archive_tasks/rms_norm/` 对比 EXEC_KERNEL_CMD 传参模式<br>④ 检查是否有 struct 指针被传给 `EXEC_KERNEL_CMD`（常见根因） |
 | **运行时 hang/死锁 / 跨核数据不流通** | 🛑 **必须先执行步骤 0-C**（含读取 ascendc-sync-guide.md 全文 + 6 项 checkpoint），再逐项排查 |
 | **多核非确定性（单核正确/多核错，失败行随时序漂移）** | 🛑 按步骤 0-C.2⑦ 的固定顺序诊断：① 用 `usedCoreNum=1` 单核强制复跑二分：单核对/多核错 ⇒ launch 模型正确、问题在 compute 侧数据竞争<br>② 查 sub-block 门控<br>③ 查 GM-facing buffer 是否误用裸 TBuf（必须 TQue 生命周期，0-C.2⑦）<br>④ 查 Gather 源是否 alias TQue 队列 tensor（跨迭代 slot 复用，见 `references/ascendc_shuffle_patterns.md` §1.7）<br>⑤ 查输入/输出是否误用 TBuf（见步骤 0-C） |
 | **运行时 vector core exception (507035)，plog 报 VEC 指令 UB 地址未对齐** | 排序/TopK 收集类算子查 `GatherMask` mask 模式铁律：① `src0` 与 `src1Pattern`(mask) 是否同 buffer（必须分开）<br>② `dst` 是否原地（`dst=src0` 无偏移）——跨 block 偏移收集踩 `vreducev2` 对齐约束（见 `references/ascendc_sort_topk_patterns.md` §3） |

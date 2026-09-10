@@ -247,13 +247,13 @@ pipe->InitBuffer(reduceBuf, reduceBufSize);
 
 ## API 文档查阅优先级
 
-1. ⭐⭐⭐ **官方 API 文档**：`asc-devkit/docs/api/context/ReduceMax.md`
-2. ⭐⭐⭐ **官方示例代码**：`asc-devkit/examples/03_libraries/05_reduce/`
+1. ⭐⭐⭐ **官方 API 文档**：`asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceMax_interface/ReduceMax.md`
+2. ⭐⭐⭐ **官方示例代码**：`asc-devkit/examples/01_simd_cpp_api/04_advanced_api/04_reduce/`
 3. Pattern 接口详解：[api-reduce-pattern.md](api-reduce-pattern.md)
 
 ---
 
 ## 参考示例
 
-- `asc-devkit/examples/03_libraries/05_reduce/reducemax/reducemax.asc` - Pattern 接口示例
-- `asc-devkit/docs/api/context/ReduceMax.md` - 官方 API 文档
+- `asc-devkit/examples/01_simd_cpp_api/04_advanced_api/04_reduce/reducemax/reducemax.asc` - Pattern 接口示例
+- `asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceMax_interface/ReduceMax.md` - 官方 API 文档

@@ -10,7 +10,7 @@
 $ASC_DEVKIT_DIR/docs/zh/api/  — Ascend C API 文档根目录
 ```
 
-> 子目录结构随 CANN 版本演进有变化（如 `context/` 扁平结构 → `SIMD-API/SIMT-API` 层级结构）。
+> 子目录结构随 CANN 版本演进有变化（如 `context/` 扁平结构 → `SIMD-API/SIMT-API` 层级结构 → 目录与文件名英文化：`基础API/`→`basic_api/`、`高阶API/`→`adv_api/`、`Ascend-C-API列表.md`→`docs/zh/api/api_list.md`）。
 > **不要假设具体的子目录名**，统一用 `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "{APIName}*.md"` 搜索。
 
 ---
@@ -103,23 +103,25 @@ $ASC_DEVKIT_DIR/docs/zh/api/  — Ascend C API 文档根目录
 
 ## 三、高阶 API
 
-> 实际目录 `docs/zh/api/SIMD-API/高阶API/` 下含 13 个子类，下表为索引。HCCL 通信类详见[第七章](#七hccl-通信-api)。
+> 实际目录 `docs/zh/api/SIMD-API/adv_api/` 子目录索引见下表。HCCL 通信类详见[第七章](#七hccl-通信-api)。
 
 | 子目录 | 类别 | 典型 API |
 |--------|------|---------|
-| `数学计算/` | 三角/双曲/位运算/类型转换 | `Acos`、`Acosh`、`Cos`、`Cast`、`BitwiseAnd`、`BitwiseOr`、`Addcdiv`、`Addsub` |
-| `量化操作/` | 量化/反量化 | 量化相关操作 |
-| `归约操作/` | 归约 | `ReduceMax`、`ReduceSum` |
-| `排序操作/` | 排序 | `Sort`、`TopK` |
-| `张量变换/` | 张量重排 | `Broadcast`、`Transpose` |
-| `归一化操作/` | 归一化 | `LayerNorm` 相关 |
-| `激活函数/` | 激活 | `Relu`、`Sigmoid`、`Gelu` |
-| `矩阵计算/` | 矩阵 | `Mmad` 相关 |
-| `卷积计算/` | 卷积 | 卷积相关 |
-| `索引计算/` | 索引 | 索引相关 |
-| `数据过滤/` | 过滤 | 数据过滤相关 |
-| `随机函数/` | 随机 | 随机数生成 |
-| `HCCL通信类/` | 集合通信 | 详见[第七章](#七hccl-通信-api) |
+| `math_compute/` | 三角/双曲/位运算/类型转换 | `Acos`、`Acosh`、`Cos`、`Cast`、`BitwiseAnd`、`BitwiseOr`、`Addcdiv`、`Addsub` |
+| `quantization/` | 量化/反量化 | 量化相关操作 |
+| `reduction_operations/` | 归约 | `ReduceMax`、`ReduceSum` |
+| `sort_operations/` | 排序 | `Sort`、`TopK` |
+| `tensor_transform/` | 张量重排 | `Broadcast`、`Transpose` |
+| `normalization/` | 归一化 | `LayerNorm` 相关 |
+| `activation_functions/` | 激活 | `Relu`、`Sigmoid`、`Gelu` |
+| `cube_compute/` | 矩阵 | `Mmad` 相关 |
+| `convolution_compute/` | 卷积 | 卷积相关 |
+| `index_compute/` | 索引 | 索引相关 |
+| `data_filter/` | 过滤 | 数据过滤相关 |
+| `random_functions/` | 随机 | 随机数生成 |
+| `data_structures/` | 高阶 API 数据结构 | `TensorShape`、`TensorDataType` |
+| `experimental/` | 实验性接口 | `BesselI0`、`Ndtri` 等 |
+| `HCCL_communication/` | 集合通信 | 详见[第七章](#七hccl-通信-api) |
 
 ---
 
@@ -142,28 +144,36 @@ $ASC_DEVKIT_DIR/docs/zh/api/  — Ascend C API 文档根目录
 | `atomic/` | 原子操作 C API |
 | `cache_ctrl/` | 缓存控制 C API |
 | `cube_compute/` | Cube 计算 C API |
+| `cube_datamove/` | Cube 数据搬运 C API |
 | `vector_compute/` | 矢量计算 C API |
+| `vector_datamove/` | 矢量数据搬运 C API |
+| `reg_compute/` | 寄存器矢量计算 C API |
+| `scalar_compute/` | 标量计算 C API |
+| `sync/` | 同步控制 C API |
+| `utils/` | 工具函数 C API（sys_init/sys_misc/sys_var） |
+| `defs/` | 常量/枚举/类型定义 |
+| `spr/` | 特殊寄存器访问 |
 
 ---
 
 ## 七、HCCL 通信 API
 
-HCCL（集合通信）API 文档位于 `docs/zh/api/SIMD-API/高阶API/HCCL通信类/`，分三个子目录：
+HCCL（集合通信）API 文档位于 `docs/zh/api/SIMD-API/adv_api/HCCL_communication/`（另有总览 `HCCL_communication.md`），子目录如下：
 
 | 子目录 | 内容 | 典型 API |
 |--------|------|---------|
-| `HCCL-Kernel侧接口/` | Kernel 侧通信原语 | `Hccl::InitV2`、`Hccl::AlltoAllV`、`Hccl::Wait`、`Hccl::Finalize` |
-| `HCCL-Tiling侧接口/` | Host 侧 Tiling 配置 | `Mc2CcTilingConfig`、`SetCcTilingV2` |
-| `HCCL-Context/` | 通信上下文 | `HcclCombineOpParam` |
+| `HCCL_Kernel/` | Kernel 侧通信原语 | `Hccl::InitV2`、`Hccl::AlltoAllV`、`Hccl::Wait`、`Hccl::Finalize` |
+| `HCCL_Tiling/` | Host 侧 Tiling 配置 | `Mc2CcTilingConfig`、`SetCcTilingV2` |
+| `HCCL-Context/` | 通信上下文 | `GetHcclContext`、`SetHcclContext` |
 
 **建议先读使用说明**，获取完整调用流程和代码示例，再按需查阅单个 API 文档：
-- `HCCL-Kernel侧接口/HCCL使用说明.md` — Kernel 侧 6 步调用流程（InitV2 → SetCcTilingV2 → Prepare → Commit → Wait → Finalize），含完整 Kernel 代码示例
-- `HCCL-Tiling侧接口/HCCL-Tiling使用说明.md` — Tiling 侧配置流程（创建 Mc2CcTilingConfig → Set 系列配置 → GetTiling），含代码示例
-- `HCCL-Context/HCCL-Context简介.md` — 通信上下文 GetHcclContext/SetHcclContext 说明
+- `HCCL_Kernel/HCCL_usage.md` — Kernel 侧标准调用流程（InitV2 → SetCcTilingV2 → Prepare → Commit → Wait → Finalize），含完整 Kernel 代码示例
+- `HCCL_Tiling/HCCL_Tiling_usage.md` — Tiling 侧配置流程（创建 Mc2CcTilingConfig → Set 系列配置 → GetTiling），含代码示例
+- `HCCL-Context/HCCL_Context_intro.md` — 通信上下文 GetHcclContext/SetHcclContext 说明
 
-查找命令（路径含中文，必须加引号）：
+查找命令：
 ```bash
-find "$ASC_DEVKIT_DIR/docs/zh/api/SIMD-API/高阶API/HCCL通信类/" -name "*.md"
+find "$ASC_DEVKIT_DIR/docs/zh/api/SIMD-API/adv_api/HCCL_communication/" -name "*.md"
 ```
 
 HCCL 头文件另见 `$ASC_DEVKIT_DIR/include/adv_api/hccl/`（`hccl.h`、`hccl_common.h`、`hccl_tiling.h`、`hccl_tilingdata.h`）。

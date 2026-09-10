@@ -59,26 +59,26 @@ DOC_SEGMENTS = ("/asc-devkit/docs/", "/asc-devkit/examples/")
 FOUNDATIONAL_CATEGORIES = {
     "矢量编程流水线指南": {
         "patterns": [
-            "/guide/算子实践参考/SIMD算子实现/矢量编程/",
+            "/guide/operator_practice/simd_operator_impl/vector_programming/",
         ],
         "desc": "CopyIn→Compute→CopyOut 正确流水线模式",
-        "example": "asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/基础矢量算子.md",
+        "example": "asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/basic_vector_operator.md",
     },
     "UB缓冲区/TBuf-TQue管理指南": {
         "patterns": [
-            "/guide/算子实践参考/SIMD算子实现/矢量编程/TBuf",
-            "/guide/编程指南/编程模型/AI-Core-SIMD编程/基于TPipe-TQue框架编程/",
+            "/guide/operator_practice/simd_operator_impl/vector_programming/tbuf_usage.md",
+            "/guide/programming_guide/programming_model/ai_core_simd_programming/tpipe_tque_programming/",
         ],
         "desc": "UB 临时缓冲区正确分配与 TQue/TBuf 使用模式",
-        "example": "asc-devkit/docs/guide/算子实践参考/SIMD算子实现/矢量编程/TBuf的使用.md",
+        "example": "asc-devkit/docs/zh/guide/operator_practice/simd_operator_impl/vector_programming/tbuf_usage.md",
     },
     "API参考文档": {
         "patterns": [
             "/api/SIMD-API/",
-            "/api/tensor_api/",
+            "/SIMD-API/tensor_api/",
         ],
         "desc": "所用 API 的完整签名、dtype 支持矩阵、参数约束",
-        "example": "asc-devkit/docs/api/SIMD-API/基础API/Memory数据搬运/DataCopyPad(ISASI).md",
+        "example": "asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/data_move/DataCopyPad_GMToUB.md",
     },
     "官方示例代码": {
         "patterns": [
@@ -86,8 +86,8 @@ FOUNDATIONAL_CATEGORIES = {
         ],
         "desc": "官方 CopyIn→Compute→CopyOut 完整 kernel 实现，验证 TQue 管道的正确用法",
         "example": (
-            "asc-devkit/examples/01_simd_cpp_api/02_features/00_compilation/"
-            "custom_op/op_kernel/add_custom/add_custom_kernel.cpp"
+            "asc-devkit/examples/01_simd_cpp_api/02_features/99_acl_based/"
+            "00_acl_compilation/parallel_ops_package/add_custom/add_custom_kernel.cpp"
         ),
     },
 }

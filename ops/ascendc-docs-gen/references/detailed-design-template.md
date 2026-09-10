@@ -251,11 +251,11 @@ __global__ __aicore__ void ${op_name}_template(
 #### 3.3.5 API 验证记录
 
 > ⚠️ **以下每个 API 必须已通过 `/ascendc-docs-search` skill 查阅 `{API名称}` API 文档验证。**
-> 验证方法: 使用 `/ascendc-docs-search` skill 搜索 API 名称，或在 `$ASC_DEVKIT_DIR` 下使用通配符搜索 `find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md" -type f`
+> 验证方法: 使用 `/ascendc-docs-search` skill 搜索 API 名称，或在 `$ASC_DEVKIT_DIR` 下使用通配符搜索 `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "{APIName}*.md" -type f`
 
 | API 名称 | 官方文档路径 | 通配符搜索结果 | 验证状态 | 备注 |
 |---------|-------------|---------------|---------|------|
-| {API名称} | docs/api/ 下的 API 文档（find 搜索） | {文件列表} | ✅ 已验证 / ❌ 不可用 / ⚠️ 有条件 | {说明} |
+| {API名称} | docs/zh/api/ 下的 API 文档（find 搜索） | {文件列表} | ✅ 已验证 / ❌ 不可用 / ⚠️ 有条件 | {说明} |
 
 **验证检查清单**：
 - [ ] 已用通配符搜索 API 所有变体文件

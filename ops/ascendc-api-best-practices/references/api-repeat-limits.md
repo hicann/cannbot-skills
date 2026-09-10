@@ -26,7 +26,7 @@
 ### 1. 查看函数原型中的参数类型
 
 ```cpp
-// Sub API 函数原型（find "$ASC_DEVKIT_DIR/docs/api/" -name "Sub*.md"）
+// Sub API 函数原型（find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "Sub*.md"）
 template <typename T, bool isSetMask = true>
 __aicore__ inline void Sub(
     const LocalTensor<T>& dst,

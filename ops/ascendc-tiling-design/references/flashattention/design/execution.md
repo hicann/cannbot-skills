@@ -335,7 +335,7 @@ task 环形缓冲区 slot:   cacheSlot     = loop  & (CACHE_SIZE-1)
 
 回答:**Fixpipe(L0C→UB/GM)使用什么参数结构体?**
 
-Fixpipe 参数结构体因平台而异(双目标分发 / 量化预处理 / 子块控制)。**设计阶段只需声明"是否需要双目标分发(dualDstCtl)"**;具体参数结构体(A5/DAV_3510 为 `FixpipeParamsArch3510`,见 asc-devkit `L0C到UB数据搬运（Fixpipe）.md`)与关键参数取值是实现层细节,见 [`implementation_ref.md` §4](../implementation_ref.md)。
+Fixpipe 参数结构体因平台而异(双目标分发 / 量化预处理 / 子块控制)。**设计阶段只需声明"是否需要双目标分发(dualDstCtl)"**;具体参数结构体(A5/DAV_3510 为 `FixpipeParamsArch3510`,见 asc-devkit `Fixpipe_L0CToUB.md`)与关键参数取值是实现层细节,见 [`implementation_ref.md` §4](../implementation_ref.md)。
 
 > ⚠️ **中间段落地位置(片上 L0C→UB vs L0C→GM)是结构决策,默认优选片上 L0C→UB。** 950PR 的 Fixpipe **支持** L0C→UB 片上握手(见 [`implementation_ref.md` §3.3/§4](../implementation_ref.md) 与 [`roofline.md` §2.3](../foundation/roofline.md)),优先走片上通路以省一趟 GM 往返。调用 L0C→UB 时**必须显式构造 `isToUB=true` 的 FixpipeConfig**——默认 `CFG_ROW_MAJOR`(`isToUB=false`)指向 GM 物理地址,用它写 UB 目的地会**静默出错**(编译过、结果错),极易被误诊为"硬件不支持 L0C→UB"而错误退到全程 L0C→GM。
 
@@ -392,9 +392,9 @@ Fixpipe 参数结构体因平台而异(双目标分发 / 量化预处理 / 子�
 **基线验证**(在写自定义 kernel 之前**必须**先执行):编译运行同 kernel 类型的至少一个参考示例,确认 `__mix__(N, M)` + TPipe 模式在当前 CANN 版本下可用。
 
 > **基线示例来源**:asc-devkit **没有完整 FA 示例**,但有可用的 `__mix__(1,2)` Cube-Vector 融合示例与 softmax building block,可作为基线:
-> - `examples/.../00_introduction/03_fusion_operation/matmul_leakyrelu_advanced_api/`(标准 `__mix__(1,2)` 融合)
-> - `examples/.../05_best_practices/03_fusion_compute/matmul_gelu_high_performance/`(mix 融合最佳实践)
-> - `examples/.../01_activation/softmaxflashv2/`(FA-2 softmax 变体 building block)
+> - `examples/01_simd_cpp_api/00_introduction/03_fusion_operation/matmul_leakyrelu_advanced_api/`(标准 `__mix__(1,2)` 融合)
+> - `examples/01_simd_cpp_api/05_best_practices/03_fusion_compute/matmul_gelu_high_performance/`(mix 融合最佳实践)
+> - `examples/01_simd_cpp_api/04_advanced_api/01_activation/softmaxflashv2/`(FA-2 softmax 变体 building block)
 >
 > 基线验证目标是确认 mix-mode 融合 + SoftmaxFlashV2 在当前环境可编译运行,不是提供完整 FA 参考。
 

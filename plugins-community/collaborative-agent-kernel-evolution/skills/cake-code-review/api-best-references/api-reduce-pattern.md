@@ -80,7 +80,7 @@ AscendC::GetReduceMaxMaxMinTmpSize(srcShape, sizeof(T), isReuse, maxSize, minSiz
 pipe->InitBuffer(tmpBuf, maxSize);
 ```
 
-参考文档：`asc-devkit/docs/api/context/GetReduceMaxMaxMinTmpSize.md`
+参考文档：`asc-devkit/docs/zh/api/SIMD-API/adv_api/reduction_operations/ReduceMax_interface/GetReduceMaxMaxMinTmpSize.md`
 
 ---
 

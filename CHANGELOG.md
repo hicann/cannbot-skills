@@ -1,4 +1,9 @@
 ## 🔥 更新日志
+### 【2026-09-10】
+#### 缺陷修复 Bug Fixes
+- 【ascendc-docs-search】适配 asc-devkit examples 目录按编程范式重组（01_simd_cpp_api 等）：重写 SKILL.md 示例索引与 example-catalog.md 目录树，同步修复 api-best-practices、tiling-design、torch-ascendc-op-extension、cake-docs-search 等关联 skill 的失效示例路径；并按评审意见移除示例/API 数量等硬编码统计与结构型计数（数字随 devkit 演进易漂移）。
+- 【文档索引】适配 asc-devkit docs 目录英文化重组（docs/zh/api/SIMD-API/{basic_api,adv_api}、guide/{programming_guide,operator_practice}）：修复 api-index.md、api-loaddata/api-repeat-limits、ascendc-simt-best-practices、docs-gen/precision-debug 模板、tiling-design、torch-ascendc-op-extension、tilelang2ascendc 插件（translator/AGENTS/kernel-generator）、ops-registry-invoke、catlass-op-generator、shmem-ops-design、cake-code-review 及 doc_gate.py 匹配模式中的失效 API 文档路径。
+
 ### 【2026-09-08】
 #### 新特性 New Features
 - 【Runtime】新增 `runtime-llt-generator` Skill，支持为 Runtime 接口、函数、分支和缺陷生成 LLT，并按可配置覆盖率门槛完成验证；未指定门槛时默认使用 80%。

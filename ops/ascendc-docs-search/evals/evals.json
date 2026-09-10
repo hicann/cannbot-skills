@@ -12,7 +12,7 @@
         "eval_mode": "text"
       },
       "prompt": "我在写一个用 ReduceMax 归约的算子，在 $ASC_DEVKIT_DIR/docs/zh/api/ 下发现可能存在多个带数字后缀的 ReduceMax 变体文档，每个变体的函数签名和功能可能都不同。我该怎么系统性地列出所有变体并逐一确认功能差异，才能选对版本？",
-      "expected_output": "回复应说明 Ascend C 存在 240+ 个带数字后缀的 API 变体（如 `ReduceMax.md`、`ReduceMax-35.md`、`ReduceMax-92.md`），不同变体的函数签名、参数和功能可能完全不同。应说明必须先用 `find \"$ASC_DEVKIT_DIR/docs/zh/api/\" -name \"ReduceMax*.md\"` 列出所有变体，然后逐一查阅每个变体的函数签名和参数说明确认功能差异，最后选择符合需求的版本。应强调禁止只读单个文件就下结论。",
+      "expected_output": "回复应说明 Ascend C 存在大量带数字后缀的 API 变体（如 `ReduceMax.md`、`ReduceMax-35.md`、`ReduceMax-92.md`），不同变体的函数签名、参数和功能可能完全不同。应说明必须先用 `find \"$ASC_DEVKIT_DIR/docs/zh/api/\" -name \"ReduceMax*.md\"` 列出所有变体，然后逐一查阅每个变体的函数签名和参数说明确认功能差异，最后选择符合需求的版本。应强调禁止只读单个文件就下结论。",
       "expectations": [],
       "files": []
     },
@@ -28,7 +28,7 @@
         "eval_mode": "text"
       },
       "prompt": "我想找一个双缓冲（double buffer）+ 流水线的 Ascend C 实现参考，应该去哪里找？",
-      "expected_output": "回复应推荐查看 `$ASC_DEVKIT_DIR/examples/00_introduction/01_add/basic_api_memory_allocator_add/` 目录，这是官方的高性能模板示例，包含双缓冲+流水线的标准实现。应说明该示例位于示例代码目录的 `00_introduction` 分类下，是入门高性能算子开发的推荐参考。",
+      "expected_output": "回复应推荐查看 `$ASC_DEVKIT_DIR/examples/01_simd_cpp_api/05_best_practices/00_vector_compute/add_high_performance/` 目录，这是官方的高性能模板示例，以加法为例展示多级性能调优路径，逐步引入双缓冲、L2Cache bypass、避免 Bank Conflict 等优化。应说明该示例位于示例代码目录的 `05_best_practices` 分类下，是入门高性能算子开发的推荐参考。",
       "expectations": [],
       "files": []
     },
@@ -95,7 +95,7 @@
         "eval_mode": "text"
       },
       "prompt": "我想在算子里调用 hccl.alltoallv，HCCL 通信类的 API 文档在哪个目录下？",
-      "expected_output": "回复应说明 HCCL 通信 API 文档位于 `$ASC_DEVKIT_DIR/docs/zh/api/SIMD-API/高阶API/HCCL通信类/`，分三个子目录：HCCL-Kernel侧接口、HCCL-Tiling侧接口、HCCL-Context。应建议先读 HCCL使用说明.md 和 HCCL-Tiling使用说明.md 获取完整调用流程和代码示例，再按需查阅单个 API 文档。应提供 find 命令示例。",
+      "expected_output": "回复应说明 HCCL 通信 API 文档位于 `$ASC_DEVKIT_DIR/docs/zh/api/SIMD-API/adv_api/HCCL_communication/`（总览 `HCCL_communication.md`），子目录如下：HCCL_Kernel、HCCL_Tiling、HCCL-Context。应建议先读使用说明获取完整调用流程和代码示例（Tiling 侧使用说明为 `HCCL_Tiling/HCCL_Tiling_usage.md`），再按需查阅单个 API 文档。应提供 find 命令示例。",
       "expectations": [],
       "files": []
     },
@@ -110,7 +110,7 @@
         "eval_mode": "text"
       },
       "prompt": "HCCL Kernel 侧的完整调用流程是什么？InitV2、SetCcTilingV2、AlltoAllV、Wait、Finalize 怎么配合使用？",
-      "expected_output": "回复应说明 HCCL Kernel 侧的 6 步调用流程：1. 创建 Hccl 对象并调用 InitV2 初始化；2. 调用 SetCcTilingV2 设置通信算法 Tiling 地址；3. 调用 AlltoAllV 等 Prepare 接口异步下发通信任务获取 handleId；4. 调用 Commit 通知服务端执行；5. 调用 Wait 等待通信完成；6. 调用 Finalize 通知服务端退出。应说明可以通过 GetHcclContext 获取通信上下文。应建议查阅 HCCL使用说明.md 获取完整代码示例。",
+      "expected_output": "回复应说明 HCCL Kernel 侧的标准调用流程：1. 创建 Hccl 对象并调用 InitV2 初始化；2. 调用 SetCcTilingV2 设置通信算法 Tiling 地址；3. 调用 AlltoAllV 等 Prepare 接口异步下发通信任务获取 handleId；4. 调用 Commit 通知服务端执行；5. 调用 Wait 等待通信完成；6. 调用 Finalize 通知服务端退出。应说明可以通过 GetHcclContext 获取通信上下文。应建议查阅 HCCL使用说明.md 获取完整代码示例。",
       "expectations": [],
       "files": []
     },
@@ -125,7 +125,7 @@
         "eval_mode": "text"
       },
       "prompt": "我要开发一个 Ascend C 算子，需要先定位某个 API（比如 Add）的完整文档、示例代码和实现参考，按照什么顺序去检索资料最合理？",
-      "expected_output": "回复应说明按本技能的「资料查找优先级」执行多级检索：0 先查 references/api-index.md 定位 API 所属大类和子目录路径；1 再到 $ASC_DEVKIT_DIR/docs/zh/api/ 下按定位的子目录用 find 搜索 .md 文档；2 找不到再到 $ASC_DEVKIT_DIR/examples/ 示例代码（587 个）中查找；3 仍找不到则到 $ASC_DEVKIT_DIR/impl/ 实现代码中查找；4 最后才用在线搜索（华为昇腾社区）兜底。应强调本地优先、在线兜底，先文档后示例再实现。",
+      "expected_output": "回复应说明按本技能的「资料查找优先级」执行多级检索：0 先查 references/api-index.md 定位 API 所属大类和子目录路径；1 再到 $ASC_DEVKIT_DIR/docs/zh/api/ 下按定位的子目录用 find 搜索 .md 文档；2 找不到再到 $ASC_DEVKIT_DIR/examples/ 示例代码中查找；3 仍找不到则到 $ASC_DEVKIT_DIR/impl/ 实现代码中查找；4 最后才用在线搜索（华为昇腾社区）兜底。应强调本地优先、在线兜底，先文档后示例再实现。",
       "expectations": [],
       "files": []
     },
@@ -171,7 +171,7 @@
         "eval_mode": "text"
       },
       "prompt": "我想在算子中参考官方示例，看看库函数（addcdiv）和矢量计算（vector add）怎么用，应该去哪个目录找？",
-      "expected_output": "回复应说明库函数示例位于 $ASC_DEVKIT_DIR/examples/03_libraries/00_math/addcdiv/addcdiv_custom.asc（库函数使用），矢量计算示例位于 $ASC_DEVKIT_DIR/examples/00_introduction/11_vectoradd/vector_add_custom.asc（矢量 API）。可参考 SKILL.md 的示例代码索引，还包括多输入加法 addn.asc、减法 sub_custom.asc、printf 调试、assert 断言等示例；更多内容可查阅 references/example-catalog.md。",
+      "expected_output": "回复应说明高阶 API 数学库示例位于 $ASC_DEVKIT_DIR/examples/01_simd_cpp_api/04_advanced_api/10_math/（acosh、axpy、exp、fma 等高阶 API 算子），矢量计算示例位于 $ASC_DEVKIT_DIR/examples/01_simd_cpp_api/03_basic_api/01_memory_vector_compute/（含 element_wise_arithmetic 基础算术、element_wise_compound_compute 复合计算等子示例）。可参考 SKILL.md 的示例代码索引，还包括 printf 调试、assert 断言等示例（位于 01_utilities/ 下）；更多内容可查阅 references/example-catalog.md。",
       "expectations": [],
       "files": []
     },

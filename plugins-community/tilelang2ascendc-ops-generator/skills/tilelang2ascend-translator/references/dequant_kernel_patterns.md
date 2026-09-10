@@ -271,4 +271,4 @@ input 里 `quant_scale` 可能是 fp16 / bf16 / fp32（取决于 case）。kerne
 | 同步 | `PipeBarrier<PIPE_V>` / `SetFlag / WaitFlag<HardEvent>` | 跨 pipe 用后者 |
 
 文档主索引在
-`asc-devkit/docs/api/README.md`。
+`asc-devkit/docs/zh/api/README.md`。

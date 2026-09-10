@@ -21,20 +21,20 @@ description: Ascend C 开发资源检索技能。通过本地 API 文档索引�
 
 | 资源类型 | 路径 | 说明 |
 |---------|------|------|
-| API 文档 | `asc-devkit/docs/api/context/` | 1022 个 API 文档 |
-| 高性能模板 | `asc-devkit/examples/00_introduction/01_add/basic_api_memory_allocator_add/` | 双缓冲+流水线标准实现 |
-| 各类示例 | `asc-devkit/examples/00_introduction/` | 加法、减法、多输入等 |
+| API 文档 | 通过 `find asc-devkit/docs/zh/api/ -name "*.md"` 智能搜索 | API 文档（不依赖具体子目录） |
+| 高性能模板 | `asc-devkit/examples/01_simd_cpp_api/05_best_practices/00_vector_compute/add_high_performance/` | Add 多级性能调优（双缓冲、L2Cache bypass、Bank Conflict 优化） |
+| 各类示例 | `asc-devkit/examples/01_simd_cpp_api/00_introduction/` | 入门示例（加法、矩阵乘法、融合算子等） |
 | 完整文档 | `asc-devkit/docs/` | 完整开发文档 |
 | Tiling 实现 | `asc-devkit/impl/adv_api/tiling/` | Tiling 参数配置参考 |
-| 矢量计算 | `asc-devkit/examples/00_introduction/11_vectoradd/` | 矢量 API 使用 |
-| 调试示例 | `asc-devkit/examples/01_utilities/00_printf/printf.asc` | printf 调试方法 |
+| 矢量计算 | `asc-devkit/examples/01_simd_cpp_api/03_basic_api/01_memory_vector_compute/` | 矢量 API 使用 |
+| 调试示例 | `asc-devkit/examples/01_simd_cpp_api/01_utilities/00_printf/simple_printf/printf.asc` | printf 调试方法 |
 
 ## 资料查找优先级
 
 ```
-1. asc-devkit/docs/api/context/ (本地 API 文档 - 1022 个)
+1. asc-devkit/docs/zh/api/ 下的所有 .md 文档（按定位的子目录 find 搜索）
          ↓ 找不到
-2. asc-devkit/examples/ (示例代码 - 587 个)
+2. asc-devkit/examples/ (示例代码)
          ↓ 找不到
 3. asc-devkit/impl/ (实现代码)
          ↓ 找不到
@@ -45,7 +45,7 @@ description: Ascend C 开发资源检索技能。通过本地 API 文档索引�
 
 ## ⚠️ API 变体搜索指南（重要）
 
-**问题**：Ascend C 存在 **240+ 个带数字后缀的 API 变体**（如 `Add-25.md`），同名 API 的不同变体功能可能完全不同。
+**问题**：Ascend C 存在**大量带数字后缀的 API 变体**（如 `Add-25.md`），同名 API 的不同变体功能可能完全不同。
 
 **典型案例**：
 - `Add.md` - 基础版本
@@ -56,7 +56,7 @@ description: Ascend C 开发资源检索技能。通过本地 API 文档索引�
 1. **列出所有变体**：
    ```bash
    # 搜索某个 API 的所有变体（将 APIName 替换为实际 API 名称）
-   ls asc-devkit/docs/api/context/ | grep -iE "^APIName"
+   find asc-devkit/docs/zh/api/ -name "APIName*.md"
 
    # 示例：
    # APIName.md        ← 基础版本
@@ -77,10 +77,10 @@ description: Ascend C 开发资源检索技能。通过本地 API 文档索引�
 
 ```bash
 # 查找某个 API 的所有变体（强制，将 APIName 替换为实际名称）
-ls asc-devkit/docs/api/context/ | grep -iE "^APIName"
+find asc-devkit/docs/zh/api/ -name "APIName*.md"
 
 # 在所有变体中搜索特定关键词
-grep -l "关键词" asc-devkit/docs/api/context/APIName*.md
+grep -rl "关键词" asc-devkit/docs/zh/api/ --include="*.md"
 ```
 
 ## 环境兼容性
@@ -113,13 +113,13 @@ grep -l "关键词" asc-devkit/docs/api/context/APIName*.md
 
 | 示例名称 | 路径 | 用途 |
 |---------|------|------|
-| 高性能模板 | `asc-devkit/examples/00_introduction/01_add/basic_api_memory_allocator_add/` | 双缓冲+流水线 |
-| 多输入加法 | `asc-devkit/examples/00_introduction/04_addn/addn.asc` | 多输入处理 |
-| 减法算子 | `asc-devkit/examples/00_introduction/07_sub/sub_custom.asc` | 减法实现 |
-| 调试打印 | `asc-devkit/examples/01_utilities/00_printf/printf.asc` | printf 调试 |
-| 断言使用 | `asc-devkit/examples/01_utilities/01_assert/assert.asc` | 断言示例 |
-| 库函数 | `asc-devkit/examples/03_libraries/00_math/addcdiv/addcdiv_custom.asc` | 库函数使用 |
-| 矢量计算 | `asc-devkit/examples/00_introduction/11_vectoradd/vector_add_custom.asc` | 矢量 API |
+| 高性能模板 | `asc-devkit/examples/01_simd_cpp_api/05_best_practices/00_vector_compute/add_high_performance/` | Add 多级性能调优（双缓冲、L2Cache bypass、Bank Conflict） |
+| 矢量计算 | `asc-devkit/examples/01_simd_cpp_api/03_basic_api/01_memory_vector_compute/` | Memory 矢量计算接口（reduce、sort、transpose 等） |
+| 复合计算 | `asc-devkit/examples/01_simd_cpp_api/03_basic_api/01_memory_vector_compute/element_wise_compound_compute/` | 复合计算接口（AddRelu/Axpy） |
+| 基础算术 | `asc-devkit/examples/01_simd_cpp_api/03_basic_api/01_memory_vector_compute/element_wise_arithmetic/` | 基础算术类接口（基于 LeakyRelu 演示） |
+| 调试打印 | `asc-devkit/examples/01_simd_cpp_api/01_utilities/00_printf/simple_printf/printf.asc` | printf 调试 |
+| 断言使用 | `asc-devkit/examples/01_simd_cpp_api/01_utilities/01_assert/assert.asc` | 断言示例 |
+| 高阶 API 数学库 | `asc-devkit/examples/01_simd_cpp_api/04_advanced_api/10_math/` | 高阶 API 数学算子（acosh、axpy、exp、fma 等） |
 
 ## 在线搜索
 

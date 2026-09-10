@@ -120,7 +120,7 @@ SHMEM 通过 RDMA 引擎实现跨节点或 P2P 不可达场景的远程访问。
 
 ### 4.1 核间同步
 
-- `AscendC::SyncAll`：同一 PE 内多 AIV 核间同步（纯 Vector 首选；见 asc-devkit [SyncAll](https://gitcode.com/cann/asc-devkit/blob/master/docs/api/SIMD-API/%E5%9F%BA%E7%A1%80API/%E5%90%8C%E6%AD%A5%E6%8E%A7%E5%88%B6/%E6%A0%B8%E9%97%B4%E5%90%8C%E6%AD%A5/SyncAll.md)）
+- `AscendC::SyncAll`：同一 PE 内多 AIV 核间同步（纯 Vector 首选；见 asc-devkit [SyncAll](https://gitcode.com/cann/asc-devkit/blob/master/docs/zh/api/SIMD-API/basic_api/sync_control/inter_core_sync/SyncAll.md)）
 - `AscendC::PipeBarrier<PIPE_*>`：单 AIV 内各流水线阶段同步
 - **禁止** custom-ops 新代码调用 internal `aclshmemi_barrier_core_soft`（无公开 API；legacy example 除外）
 

@@ -87,7 +87,7 @@ fi
 - `REQUIREMENTS.md` 只承接需求背景、运行环境、ACLNN 接口自然语言说明、性能目标和资源约束。
 - `DESIGN.md` 必须包含「spec.yaml 一致性映射」，逐项说明 spec 字段在设计中的承接位置。
 - `category: Broadcast` 表示算子计算需要对数据进行广播（数据复制/扩展），如 add、mul、where；纯 shape 重组织（expand、broadcast_to、tile）归入 `category: LayoutTransform`。设计时需区分"计算含广播"与"仅做广播"两种场景。
-- API 使用必须先查可信来源：CANN 官方文档、`reference/cann/asc-devkit/docs/api/context/`、CANN 安装路径或用户明确提供的资料。未验证 API 只能标为“待验证”，不能写成已支持。
+- API 使用必须先查可信来源：CANN 官方文档、`reference/cann/asc-devkit/docs/zh/api/`、CANN 安装路径或用户明确提供的资料。未验证 API 只能标为“待验证”，不能写成已支持。
 - `DESIGN.md` 必须包含 Tiling 策略、Kernel 模板划分、数据类型支持方案、API 映射、数据流设计、内存管理、API 验证记录、UB 容量验证和风险评估。
 - `PLAN.md` 必须包含 YAML frontmatter 和对应的 Markdown 正文。frontmatter schema（字段结构、取值约束）和正文生成规则（`<!-- BEGIN/END -->` 标记）均以 `templates/PLAN.md.templ` 为唯一权威源，禁止在此重复定义。
 - 对不确定或 spec 缺失的信息，明确写“待补充/需回到 spec-generation 修订”，不要编造。

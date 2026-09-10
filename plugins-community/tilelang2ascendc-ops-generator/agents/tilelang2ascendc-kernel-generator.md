@@ -136,7 +136,7 @@ Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md 
 当 Phase 4/5/6 出现争议（如 skill 修复建议与 archive 实现矛盾、API 用法不确定、性能分析结论有分歧）时，agent 作为仲裁者查阅以下资源：
 | 资源 | 路径 | 用途 |
 |------|------|------|
-| API 文档 | `asc-devkit/docs/api/` | 确认 API 签名、dtype 支持矩阵 |
+| API 文档 | `asc-devkit/docs/zh/api/` | 确认 API 签名、dtype 支持矩阵 |
 | 官方示例 | `asc-devkit/examples/` | 确认正确的编程模式和用法 |
 | 历史成功任务 | `workflows/templates/archive_tasks/` | 确认 host/kernel 的正确传参模式 |
 
@@ -473,7 +473,7 @@ elif op_type == "complex":
 #### 3-S.2 设计串讲
 
 1. 以 Developer 视角批判性审查 `DESIGN.md`，从以下维度评估：
-   - API 选择是否正确（查阅 `asc-devkit/docs/api/` 验证）
+   - API 选择是否正确（查阅 `asc-devkit/docs/zh/api/` 验证）
    - Tiling 策略是否合理（多核切分、UB 分配、流水线）
    - 精度策略是否充分（FP16/BF16 是否需要升精度）
    - 边界条件是否覆盖
@@ -789,7 +789,7 @@ D 类 → 进入 4.5D (D 类精度修复清单, 最多 12 次)
 
 ```
 [A1] 🛑 查阅 asc-devkit 对应 API 文档，确定错误根因。此步骤不可跳过。
-     如果是编译错误：查阅 asc-devkit/docs/api/ 中对应 API 的精确文档路径，确认签名、参数、dtype 支持矩阵。
+     如果是编译错误：查阅 asc-devkit/docs/zh/api/ 中对应 API 的精确文档路径，确认签名、参数、dtype 支持矩阵。
      如果是运行时崩溃/segfault：查阅 asc-devkit/examples/ 中对应模式的官方示例，确认正确的 API 使用模式。
      必须有明确的文档/示例查阅记录，记录查阅了哪个文件、确认了什么信息。
 

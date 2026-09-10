@@ -8,7 +8,7 @@ L1 → L0 数据加载的 API 字段、对齐约束、NZ Layout 与 dtype 相关
 
 1. [API 概览](#api-概览)
 2. [NZ Layout C0 大小随 dtype 变化](#nz-layout-c0-大小随-dtype-变化)
-3. [LoadData2DMx 系列（MX 块量化格式）](#loaddata2dmx-系列mx-块量化格式)
+3. [LoadData_2D_MX 系列（MX 块量化格式）](#loaddata_2d_mx-系列mx-块量化格式)
 4. [Multi-matrix 拼接到 L1 的 head offset 公式](#multi-matrix-拼接到-l1-的-head-offset-公式)
 5. [详细文档与示例位置](#详细文档与示例位置)
 
@@ -18,11 +18,11 @@ L1 → L0 数据加载的 API 字段、对齐约束、NZ Layout 与 dtype 相关
 
 | API 系列 | 用途 | 典型数据类型 |
 |---------|------|------------|
-| `LoadData2D` / `LoadData2DV2` | L1 → L0 加载，基础数据通路 | 整数 / 浮点 |
-| `LoadData2DMx` | L1 → L0 加载 MX 块量化格式数据（配套 scale 同步加载） | mxfp8 / mxfp4 等 |
-| `LoadData3D` | L1 → L0 加载，卷积 im2col 模式 | 卷积场景 |
+| `LoadData_2D` / `LoadData_2D_V2` | L1 → L0 加载，基础数据通路 | 整数 / 浮点 |
+| `LoadData_2D_MX` | L1 → L0 加载 MX 块量化格式数据（配套 scale 同步加载） | mxfp8 / mxfp4 等 |
+| `LoadData_3D` | L1 → L0 加载，卷积 im2col 模式 | 卷积场景 |
 
-> 同一 API 在不同平台 / CANN 版本可能有 `LoadData2DMx.md` / `LoadData2DMx-35.md` 等多个变体，功能略有差异。使用前用通配符搜 `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData*.md"` 列出全部变体。
+> 同一 API 在不同平台 / CANN 版本可能有 `LoadData_2D.md` / `LoadData_2D_MX.md` / `LoadData_2D_V2.md` / `LoadData_2D_BitMode.md` 等多个变体，功能略有差异。使用前用通配符搜 `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "LoadData*.md"` 列出全部变体。
 
 ---
 
@@ -86,9 +86,9 @@ constexpr uint32_t FP4_C0_ELEMS = 64;         // fp4 C0 元素数
 
 ---
 
-## LoadData2DMx 系列（MX 块量化格式）
+## LoadData_2D_MX 系列（MX 块量化格式）
 
-LoadData2DMx 用于 MX 块量化格式（mxfp8 / mxfp4 等）的 L1 → L0 加载，数据本体 + scale 一次加载到 L0_A_MX / L0_B_MX。
+LoadData_2D_MX 用于 MX 块量化格式（mxfp8 / mxfp4 等）的 L1 → L0 加载，数据本体 + scale 一次加载到 L0_A_MX / L0_B_MX。
 
 ### K_BASE 与 yStep 整除性
 
@@ -176,10 +176,10 @@ head_offset_scale = head_idx * mEff * scaleK_b16;      // scaleK_b16 = (K 维元
 
 | 资源 | 路径 |
 |------|------|
-| API 文档（用通配符列出所有变体） | `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData*.md"` |
-| LoadData2DParamsV2 字段对照 | `find "$ASC_DEVKIT_DIR/docs/api/" -name "LoadData2DParamsV2*.md"` |
-| Mmad 配套 API 文档 | `find "$ASC_DEVKIT_DIR/docs/api/" -name "Mmad*.md"` |
-| MX 路径 end-to-end 示例 | `asc-devkit/examples/.../load_data_2dmx_l12l0/` |
-| 平台同步基座示例 | `asc-devkit/examples/.../matmul_s4/`（A5 平台 mode=4 同步） |
+| API 文档（用通配符列出所有变体） | `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "LoadData_2D*.md"` |
+| LoadData2DParamsV2 字段对照 | `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "LoadData_2D_V2*.md"` |
+| Mmad 配套 API 文档 | `find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "Mmad*.md"` |
+| MX 路径 end-to-end 示例 | `asc-devkit/examples/01_simd_cpp_api/03_basic_api/03_matrix_compute/load_data_2dmx_l12l0/` |
+| 平台同步基座示例 | `asc-devkit/examples/01_simd_cpp_api/06_compatibility_guide/matmul_s4/`（A5 平台 mode=4 同步） |
 
 新增 LoadData 路径前必须查阅 API 文档 + 跑通对应 example，不要凭"和 fp16 一样"的假设直接照搬公式。

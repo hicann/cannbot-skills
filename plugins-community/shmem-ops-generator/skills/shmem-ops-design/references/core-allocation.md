@@ -359,7 +359,7 @@ commInterval * M0 * K0 * block_num < symmetric_buff_bytes / dtype_size / n_pes /
 | --- | --- | --- |
 | `signal_op` + `signal_wait_until` | 点对点 PE 同步 | 已知对端 PE、需要精确握手（如 kv_shuffle sender↔receiver） |
 | `aclshmem_barrier_all` | 全 PE 栅栏 | 所有 PE 数据一致后同步（**新算子首选**） |
-| `AscendC::SyncAll` | 同一 PE 内多 AIV 核间同步 | 纯 Vector kernel 阶段切换（如 allgather Step 1→Step 2）；见 [SyncAll](https://gitcode.com/cann/asc-devkit/blob/master/docs/api/SIMD-API/%E5%9F%BA%E7%A1%80API/%E5%90%8C%E6%AD%A5%E6%8E%A7%E5%88%B6/%E6%A0%B8%E9%97%B4%E5%90%8C%E6%AD%A5/SyncAll.md) |
+| `AscendC::SyncAll` | 同一 PE 内多 AIV 核间同步 | 纯 Vector kernel 阶段切换（如 allgather Step 1→Step 2）；见 [SyncAll](https://gitcode.com/cann/asc-devkit/blob/master/docs/zh/api/SIMD-API/basic_api/sync_control/inter_core_sync/SyncAll.md) |
 | `AscendC::PipeBarrier` | 单 AIV 内流水线同步 | 同一 core 内 MTE/Vector 等 pipe 之间的顺序与可见性 |
 | `aclshmem_quiet` | 等待本 PE 已发出的**全引擎** RMA 完成（MTE + SDMA + UDMA + RDMA） | 混合引擎或收尾阶段，需一次性 drain 所有在途传输 |
 | `aclshmemx_mte_quiet` | 等待本地 MTE 完成 | **仅** MTE put/get 后确保数据落地；勿用全局 `aclshmem_quiet` 代替 |

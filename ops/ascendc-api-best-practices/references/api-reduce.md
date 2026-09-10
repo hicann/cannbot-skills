@@ -271,12 +271,12 @@ pipe->InitBuffer(reduceBuf, reduceBufSize);
 ## API 文档查阅优先级
 
 1. ⭐⭐⭐ **官方 API 文档**：通过 `/ascendc-docs-search` skill 查阅 `ReduceMax` API 文档
-2. ⭐⭐⭐ **官方示例代码**：通过 `/ascendc-docs-search` skill 搜索 `$ASC_DEVKIT_DIR/examples/03_libraries/05_reduce/`
+2. ⭐⭐⭐ **官方示例代码**：通过 `/ascendc-docs-search` skill 搜索 `$ASC_DEVKIT_DIR/examples/01_simd_cpp_api/04_advanced_api/04_reduce/`
 3. Pattern 接口详解：[api-reduce-pattern.md](api-reduce-pattern.md)
 
 ---
 
 ## 参考示例
 
-- `$ASC_DEVKIT_DIR/examples/03_libraries/05_reduce/reducemax/reducemax.asc` - Pattern 接口示例
+- `$ASC_DEVKIT_DIR/examples/01_simd_cpp_api/04_advanced_api/04_reduce/reducemax/reducemax.asc` - Pattern 接口示例
 - ReduceMax API 文档（find 搜索）

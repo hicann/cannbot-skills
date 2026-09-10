@@ -5,7 +5,7 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 
 # AscendC SIMT 最佳实践
 
-> 本 skill 提供基于实际算子开发经验提炼的 SIMT 编程范式总结，以及 SIMT 专有 API 的分类索引和速查。SIMT 基础概念（核函数、线程架构、内存层级）请通过 `ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/guide/编程指南/编程模型/AI-Core-SIMT编程/`。
+> 本 skill 提供基于实际算子开发经验提炼的 SIMT 编程范式总结，以及 SIMT 专有 API 的分类索引和速查。SIMT 基础概念（核函数、线程架构、内存层级）请通过 `ascendc-docs-search` skill 查阅 `$ASC_DEVKIT_DIR/docs/zh/guide/programming_guide/programming_model/ai_core_simt_programming/`。
 
 ---
 
@@ -13,19 +13,19 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 
 | 类别 | $ASC_DEVKIT_DIR 目录 | 功能概述 | 头文件 |
 |------|-----------------|----------|--------|
-| 总览与核函数 | `SIMT-API/概述.md` | VF启动机制、头文件、混合编程辅助函数 | common_functions.h |
-| 同步与内存栅栏 | `SIMT-API/同步与内存栅栏/` | asc_syncthreads/asc_threadfence/asc_threadfence_block | device_sync_functions.h |
-| 数学函数 | `SIMT-API/数学函数/` | 三角/指数/对数/幂/误差/特殊/基础算术/整数工具 | math_functions.h |
-| 原子操作 | `SIMT-API/原子操作/` | add/sub/exch/max/min/inc/dec/cas/and/or/xor | device_atomic_functions.h |
-| Warp函数 | `SIMT-API/Warp函数/` | all/any/ballot/activemask/shfl/shfl_up/down/xor/reduce | device_warp_functions.h |
-| 地址空间谓词 | `SIMT-API/地址空间谓词函数/` | __isGlobal/__isShared/__isConstant/__isLocal | asc_simt.h |
-| 地址空间转换 | `SIMT-API/地址空间转换函数/` | __cast_to_xxx 地址空间转换 | asc_simt.h |
-| 访存函数 | `SIMT-API/访存函数/` | asc_ldcg/asc_ldca/asc_stcg/asc_stwt | device_functions.h |
-| 协作组 | `SIMT-API/协作组/` | 协作组编程模型 | asc_simt.h |
-| SIMT编程简介 | `SIMT-API/SIMT编程简介/` | SIMT编程概念和入门 | asc_simt.h |
-| 混合编程简介 | `SIMT-API/SIMD与SIMT混合编程简介/` | SIMD/SIMT混合编程指导 | asc_simt.h |
+| 总览与核函数 | `SIMT-API/overview.md` | VF启动机制、头文件、混合编程辅助函数 | common_functions.h |
+| 同步与内存栅栏 | `SIMT-API/sync_and_memory_fence/` | asc_syncthreads/asc_threadfence/asc_threadfence_block | device_sync_functions.h |
+| 数学函数 | `SIMT-API/math_functions/` | 三角/指数/对数/幂/误差/特殊/基础算术/整数工具 | math_functions.h |
+| 原子操作 | `SIMT-API/atomic_operations/` | add/sub/exch/max/min/inc/dec/cas/and/or/xor | device_atomic_functions.h |
+| Warp函数 | `SIMT-API/Warp_functions/` | all/any/ballot/activemask/shfl/shfl_up/down/xor/reduce | device_warp_functions.h |
+| 地址空间谓词 | `SIMT-API/address_space_predicate_functions/` | __isGlobal/__isShared/__isConstant/__isLocal | asc_simt.h |
+| 地址空间转换 | `SIMT-API/address_space_conversion_functions/` | __cast_to_xxx 地址空间转换 | asc_simt.h |
+| 访存函数 | `SIMT-API/memory_access_functions/` | asc_ldcg/asc_ldca/asc_stcg/asc_stwt | device_functions.h |
+| 协作组 | `SIMT-API/cooperative_groups/` | 协作组编程模型 | asc_simt.h |
+| SIMT编程简介 | `SIMT-API/SIMT_programming_intro/` | SIMT编程概念和入门 | asc_simt.h |
+| 混合编程简介 | `SIMT-API/SIMD_SIMT_hybrid_programming_intro/` | SIMD/SIMT混合编程指导 | asc_simt.h |
 
-> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill 查阅 SIMT API 官方文档（`find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md"`）。
+> **查阅完整 API 文档**：使用 `ascendc-docs-search` skill 查阅 SIMT API 官方文档（`find "$ASC_DEVKIT_DIR/docs/zh/api/SIMT-API/" -name "{APIName}*.md"`）。
 
 ---
 

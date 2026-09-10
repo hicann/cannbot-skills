@@ -34,13 +34,13 @@ AIC  set flagId 16-26 ↔  AIV1 wait flagId 0-10
 
 即 modeId=4 下 AIC 与两个 AIV 分别握手,AIC 侧针对 AIV1 的 flagId 需加 **16 偏移**。这与 modeId=2 的"广播式"(AIC 一次 set 通知所有 AIV)语义不同。
 
-> **来源**:`asc-devkit/docs/api/SIMD-API/基础API/同步控制/核间同步/CrossCoreSetFlag(ISASI).md`(modeId 语义、modeId 支持取值、flagId 取值范围)。
+> **来源**:`asc-devkit/docs/zh/api/SIMD-API/basic_api/sync_control/inter_core_sync/CrossCoreSetFlag_ISASI.md`(modeId 语义、modeId 支持取值、flagId 取值范围)。
 
 ---
 
 ## §2 flagId 冲突与 pipe 约束(asc-devkit 公开文档)
 
-> ⚠️ **flagId 冲突风险**(公开文档 `CrossCoreSetFlag(ISASI).md` 明确):
+> ⚠️ **flagId 冲突风险**(公开文档 `CrossCoreSetFlag_ISASI.md` 明确):
 > - **Matmul 高阶 API 内部使用 CrossCoreSetFlag**——不建议同时使用 CrossCoreSetFlag 与 Matmul 高阶 API,否则 flagId 冲突。Matmul 内部占用 flagId 范围 `[0, 2N-1]`(N=Matmul 对象数,最多 4 个 → 占用 `[0,7]`)。**此占用仅在实例化 Matmul 高阶对象(`matmul::Matmul<...>` / `REGIST_MATMUL_OBJ`)时成立;直接调用裸 `Mmad(...)` Cube 指令不占用任何 flagId**(裸指令无内部握手)。故 `[0,7]` 是否需规避,取决于本 kernel 用的是高阶 Matmul 对象还是裸 Mmad 指令。
 > - **SyncAll 硬件同步接口内部也使用 CrossCoreSetFlag**——占用 flagId `[11,14]`,**同样仅在实际调用 `SyncAll` 时成立**;未调用则该区间可用。
 >
@@ -50,14 +50,14 @@ AIC  set flagId 16-26 ↔  AIV1 wait flagId 0-10
 - modeId 0/1/2:`0-15`
 - modeId 4(950PR/950DT):见 §1 的 AIV0/AIV1 映射(0-10 与 16-26)
 
-> ⚠️ **不同生命周期事件必须用不同 flagId**。每个 flagId 对应一个**计数器**(set 加一 / wait 减一,见 §3 与 `CrossCoreSetFlag(ISASI).md`),不是电平。若把「跨 task 边界」事件与「loop 内 stage(如 V1 P-ready)」事件复用同一 flagId,边界 wait 会被**残留的 loop-stage token 提前满足** → task 间 workspace 提前复用 → **非确定性覆写**(高竞争 multi-task-per-core 场景才暴露,单 task 测不出)。规则:跨 task 边界 flag 与 loop 内 stage flag 分配**互不相同**的 flagId,且各自都避开 §2 上文**实际被占用**的区间(高阶 Matmul 对象 → [0,7];调用 SyncAll → [11,14];裸 Mmad 指令两区间均不占,可自由使用)。
+> ⚠️ **不同生命周期事件必须用不同 flagId**。每个 flagId 对应一个**计数器**(set 加一 / wait 减一,见 §3 与 `CrossCoreSetFlag_ISASI.md`),不是电平。若把「跨 task 边界」事件与「loop 内 stage(如 V1 P-ready)」事件复用同一 flagId,边界 wait 会被**残留的 loop-stage token 提前满足** → task 间 workspace 提前复用 → **非确定性覆写**(高竞争 multi-task-per-core 场景才暴露,单 task 测不出)。规则:跨 task 边界 flag 与 loop 内 stage flag 分配**互不相同**的 flagId,且各自都避开 §2 上文**实际被占用**的区间(高阶 Matmul 对象 → [0,7];调用 SyncAll → [11,14];裸 Mmad 指令两区间均不占,可自由使用)。
 
 **pipe 模板参数约束**(公开文档 `pipe支持的流水类型说明`):
 - **modeId 0/1/2**:支持 `PIPE_V / PIPE_M / PIPE_MTE1 / PIPE_MTE2 / PIPE_MTE3 / PIPE_FIX`;**不支持 `PIPE_ALL` / `PIPE_S`**。
 - **modeId 4(950PR/950DT)**:在上述基础上**额外支持 `PIPE_S`**;仅不支持 `PIPE_ALL`。
 - 950PR/950DT 上 modeId 与 pipe 模板参数**生效**,`CrossCoreWaitFlag` 阻塞**指定流水**的后续指令;上一代产品上二者不生效,阻塞**全部流水**。
 
-> **来源**:`asc-devkit/docs/api/SIMD-API/基础API/同步控制/核间同步/CrossCoreSetFlag(ISASI).md`、`CrossCoreWaitFlag(ISASI).md`。
+> **来源**:`asc-devkit/docs/zh/api/SIMD-API/basic_api/sync_control/inter_core_sync/CrossCoreSetFlag_ISASI.md`、`CrossCoreWaitFlag_ISASI.md`。
 
 ---
 
@@ -143,7 +143,7 @@ pipe 必须落在 §2 允许集合内(不含 `PIPE_ALL` / `PIPE_S`)。
 
 ## §4 Fixpipe 输出参数(承接 design/execution.md §3.5)
 
-Fixpipe(L0C→UB/GM)的参数结构体**因平台而异**(asc-devkit 公开文档 `L0C到UB数据搬运（Fixpipe）.md`):
+Fixpipe(L0C→UB/GM)的参数结构体**因平台而异**(asc-devkit 公开文档 `Fixpipe_L0CToUB.md`):
 
 | 平台 | 参数结构体 |
 |------|-----------|
@@ -156,7 +156,7 @@ Fixpipe(L0C→UB/GM)的参数结构体**因平台而异**(asc-devkit 公开文�
 - C1 的 S 矩阵、C2 的 PV 矩阵均需保持 **fp32** 输出到 UB(V1/V2 在 UB 上做 fp32 计算),**不使用随路 Cast**。
 - 若需把 Cube 输出分发到双 AIV,依平台参数结构体的相应字段配置(具体字段名以目标 CANN 版本 `FixpipeParamsArch3510` 文档为准)。
 
-> **来源**:`asc-devkit/docs/api/SIMD-API/基础API/矩阵计算（ISASI）/矩阵计算的搬出/L0C到UB数据搬运（Fixpipe）.md`;参数结构体字段见 `Fixpipe搬运参数（FixpipeParamsArch3510、FixpipeParamsM300）结构体说明`。
+> **来源**:`asc-devkit/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_store/Fixpipe_L0CToUB.md`;参数结构体字段见 `Fixpipe搬运参数（FixpipeParamsArch3510、FixpipeParamsM300）结构体说明`。
 
 ---
 
@@ -194,8 +194,8 @@ Fixpipe(L0C→UB/GM)的参数结构体**因平台而异**(asc-devkit 公开文�
 | 主题 | 入口 |
 |---|---|
 | 设计决策(WHAT)| [`design/execution.md`](./design/execution.md) §3 |
-| CrossCoreSetFlag/WaitFlag 公开文档 | `asc-devkit/docs/api/SIMD-API/基础API/同步控制/核间同步/` |
-| Fixpipe(L0C→UB)公开文档 | `asc-devkit/docs/api/SIMD-API/基础API/矩阵计算（ISASI）/矩阵计算的搬出/` |
+| CrossCoreSetFlag/WaitFlag 公开文档 | `asc-devkit/docs/zh/api/SIMD-API/basic_api/sync_control/inter_core_sync/` |
+| Fixpipe(L0C→UB)公开文档 | `asc-devkit/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_store/` |
 | 平台差异 / 架构基础 | `/npu-arch` |
 | Ascend C API 用法(Mmad / LoadData / Fixpipe / CrossCore)| `/ascendc-api-best-practices` |
 | 通用编码规范 / 入口属性 | `ops-direct-invoke` plugin `workflows/development-guide.md` |

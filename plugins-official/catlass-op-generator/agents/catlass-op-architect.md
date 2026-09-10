@@ -179,7 +179,7 @@ snake_case → CamelCase 类名一致映射（如 `catlass_matmul_add` → `Catl
 对**非 catlass 内置**的辅助 API（如自定义 Tile 中用到的 `Adds` / `DataCopyPad`），按 ops-direct-invoke 同款方法验证：
 
 ```bash
-find "$ASC_DEVKIT_DIR/docs/api/" -name "{APIName}*.md" -type f
+find "$ASC_DEVKIT_DIR/docs/zh/api/" -name "{APIName}*.md" -type f
 ```
 
 未通过验证的 API 禁止写入设计方案。

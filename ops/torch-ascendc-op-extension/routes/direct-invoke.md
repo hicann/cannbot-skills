@@ -270,6 +270,6 @@ compiled = torch.compile(model, backend="npugraph_ex", fullgraph=True)
 
 - aclnn 注册算子的 PTA 对接（另一条路线）：[aclnn-registry.md](aclnn-registry.md)
 - 官方 aclgraph + TORCH_LIBRARY 示例：`torchair/examples/_kernel_extension_aclgraph/torch_library/`
-- 官方 TORCH_LIBRARY 示例：`$ASC_DEVKIT_DIR/examples/02_features/01_triple_chevron_notation/torch_library/`
-- PyTorch 框架适配文档：`$ASC_DEVKIT_DIR/docs/guide/编程指南/附录/AI框架算子适配/PyTorch框架.md`
+- 官方 TORCH_LIBRARY 示例：`$ASC_DEVKIT_DIR/examples/01_simd_cpp_api/02_features/00_framework/00_pytorch/torch_library/`
+- PyTorch 框架适配文档：`$ASC_DEVKIT_DIR/docs/zh/guide/programming_guide/advanced_programming/ai_framework_adaptation/pytorch_framework.md`
 - PyTorch Custom Operators：https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html

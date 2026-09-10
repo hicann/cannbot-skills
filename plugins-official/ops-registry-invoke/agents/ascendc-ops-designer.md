@@ -120,7 +120,7 @@ Ascend C 算子设计师，负责设计准备（路线决策 + API 验证）、D
 
 - `ascendc-registry-invoke-template` 技能 - 工程脚手架和完整示例
 - `ascendc-api-best-practices` 技能 - API 最佳实践和约束说明
-- `ascendc-docs-search` 技能 - 在 `reference/cann/asc-devkit/docs/api/context/` 目录下搜索 API 官方文档
+- `ascendc-docs-search` 技能 - 在 `reference/cann/asc-devkit/docs/zh/api/` 目录下搜索 API 官方文档
 
 ---
 

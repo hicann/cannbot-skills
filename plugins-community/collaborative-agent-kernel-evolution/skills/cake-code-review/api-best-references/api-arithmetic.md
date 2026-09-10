@@ -325,8 +325,8 @@ for (uint32_t batch = 0; batch < totalBatches; batch++) {
 
 ## 参考资料
 
-- [BinaryRepeatParams 结构体](../../../asc-devkit/docs/api/context/BinaryRepeatParams.md)
-- [Adds API](../../../asc-devkit/docs/api/context/Adds.md)
-- [Muls API](../../../asc-devkit/docs/api/context/Muls.md)
-- [Sub API](../../../asc-devkit/docs/api/context/Sub.md)
-- [Div API](../../../asc-devkit/docs/api/context/Div.md)
+- [BinaryRepeatParams 结构体](../../../asc-devkit/docs/zh/api/SIMD-API/basic_api/aux_data_structures/BinaryRepeatParams.md)
+- [Adds API](../../../asc-devkit/docs/zh/api/SIMD-API/basic_api/reg_vector_compute/basic_arithmetic/Adds.md)
+- [Muls API](../../../asc-devkit/docs/zh/api/SIMD-API/basic_api/reg_vector_compute/basic_arithmetic/Muls.md)
+- [Sub API](../../../asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Sub.md)
+- [Div API](../../../asc-devkit/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/basic_arithmetic/Div.md)
