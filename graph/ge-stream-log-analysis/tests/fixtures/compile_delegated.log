@@ -1,0 +1,3 @@
+[INFO] Assign:[Assign][LogicalStream] At last, root graph: delegated, total stream num: 1, main stream num: 1, attached stream num: 0.
+[INFO] SetLogicStreamIdAttr:Op [conv] OpType [Conv2D] logic stream id is 0, logic attached stream id is -1.
+[INFO] Move split stream from ge to rts because PERSISTENT_STREAM_UNLIMITED_DEPTH is supported.

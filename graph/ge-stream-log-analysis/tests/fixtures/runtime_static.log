@@ -1,0 +1,8 @@
+[INFO] InitRuntimeParams:InitRuntimeParams: model_id=1, session_id:0, device_id:0, stream_num:2, notify_num:0, event_num:1, label_num:0.
+[INFO] CreateNewStream:Create new stream: 0x1, rt stream id: 10, rt model id: 20, priority: 0, stream flag: 1, task num: 3.
+[INFO] InitRuntimeResource:Logical stream index: 0, rtstream: 10, model: 1, stream flag: 1.
+[INFO] CreateNewStream:Create new stream: 0x2, rt stream id: 11, rt model id: 20, priority: 0, stream flag: 1, task num: 4.
+[INFO] InitRuntimeResource:Logical stream index: 1, rtstream: 11, model: 1, stream flag: 1.
+[INFO] Init:KernelTaskInfo Init Success, node :conv, logic stream id: 1, stream: 0x2.
+[INFO] CreateNewStream:Create new stream: 0x3, rt stream id: 12, rt model id: 20, priority: 0, stream flag: 16, task num: 0.
+[INFO] ConstructSqeForModelExecuteTask: ModelExecuteTask stream_id=13 task_id=0, model_id=20.

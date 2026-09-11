@@ -1,0 +1,170 @@
+{
+  "eval_mode": "text",
+  "skill_name": "ge-stream-log-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "title": "统一扫描静态编译与 V1 运行日志",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 180000,
+        "distractor_skills": [
+          "ge-fusion-pass-skill",
+          "torch-npugraph-ex-performance-diagnosis"
+        ]
+      },
+      "prompt": "我有一组 GE 的 INFO 编译日志和 ACL/GE 运行日志。请选择最匹配的 Skill，说明如何统一扫描日志，并给出逻辑流、模型流索引和 RT stream ID 的证据链。每个结论都要带文件路径、行号、日志级别和关键字；不要把 Create new stream 总数直接当成模型流数。",
+      "expected_output": "应激活 ge-stream-log-analysis，使用 INFO 证据按图关联编译和运行窗口，区分 logic_stream_id、model_stream_index 和 rt_stream_id，引用文件与行号，并说明辅助流不能直接计入模型流数。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-stream-log-analysis",
+          "description": "正确激活 GE 流日志分析 Skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "logic_stream_id",
+          "description": "区分编译期逻辑流 ID"
+        },
+        {
+          "type": "contains",
+          "pattern": "rt_stream_id",
+          "description": "区分运行期 RT 流 ID"
+        },
+        {
+          "type": "contains",
+          "pattern": "INFO",
+          "description": "声明 INFO 日志证据范围"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "动态 Shape 与动态 Batch 的路径判定",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 180000
+      },
+      "prompt": "日志同时出现 Begin to build unknown shape graph、AssignStreamsForDynamicShapeGraph、Found dynamic batch 和 Add batch graph[Batch_1]。请判断哪些行可以作为动态流分配成功证据，哪些只能作为场景标记，并说明动态 Batch 的已知 Shape 分支应采用哪种运行期路径。不要从 RefreshInfoOfDynamicShapeGraph 的 Root/Sub/Total 数字推断流数。",
+      "expected_output": "应区分动态图入口、AssignStreamsForDynamicShapeGraph 的带 Graph/stream num/event num 汇总和动态 Batch 场景标记；RefreshInfoOfDynamicShapeGraph 的 Root/Sub/Total 不作为流证据；动态 Batch 的 Batch_N known-shape 分支通常按 V1 DavinciModel 路径取证，而不是据此假定 V1 Hybrid 动态执行器。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-stream-log-analysis",
+          "description": "正确激活 GE 流日志分析 Skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "AssignStreamsForDynamicShapeGraph",
+          "description": "识别动态流汇总证据"
+        },
+        {
+          "type": "contains",
+          "pattern": "RefreshInfoOfDynamicShapeGraph",
+          "description": "明确忽略动态聚合伪证据"
+        },
+        {
+          "type": "contains",
+          "pattern": "V1",
+          "description": "说明动态 Batch 的 V1 运行路径"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "没有 GE 仓库上下文时的降级报告",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 160000
+      },
+      "prompt": "用户只提供了一个日志目录，没有 GE 源码仓库，也没有设备环境。请说明 ge-stream-log-analysis 应如何运行、报告上下文状态和处理缺失的编译入口或运行绑定证据。禁止声称已经完成源码校验、模型加载或设备验证。",
+      "expected_output": "应进入 log_only 模式，仅根据 GE 的 INFO 日志字段分析；应明确缺失的证据为 unknown 或 partial，没有流证据时为 no_stream_evidence；不得把 --repo-root 缺失说成源码已核验，也不得声称访问设备或加载模型。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-stream-log-analysis",
+          "description": "正确激活 GE 流日志分析 Skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "log_only",
+          "description": "无 GE 仓上下文时降级"
+        },
+        {
+          "type": "contains",
+          "pattern": "unknown",
+          "description": "缺失证据保持未知"
+        },
+        {
+          "type": "contains",
+          "pattern": "partial",
+          "description": "不完整证据标记为 partial"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "V2 资源摘要与旧 Kernel Trace 回退",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 180000
+      },
+      "prompt": "运行日志只有 Build RT2 executor、OccupyStreamResource/AcquireStreams 的 Collect rt2 stream，或者在旧版本中只有带后缀的 KernelTrace SplitRtStreams。请说明 V2 绑定证据的优先级、何时可以使用 fallback，以及没有 RT stream ID 时报告应该如何写。",
+      "expected_output": "应优先使用受控的 Collect rt2 stream GE INFO 日志，将 OccupyStreamResource 和 AcquireStreams 绑定按实际日志记录；只有新日志缺失时才使用 SplitRtStreams（含后缀）作为旧版本回退；缺少 RT stream ID 时输出 partial 或 unknown，不能套用 V1 映射。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-stream-log-analysis",
+          "description": "正确激活 GE 流日志分析 Skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "Collect rt2 stream",
+          "description": "优先使用 V2 资源绑定证据"
+        },
+        {
+          "type": "contains",
+          "pattern": "SplitRtStreams",
+          "description": "识别旧日志回退"
+        },
+        {
+          "type": "contains",
+          "pattern": "partial",
+          "description": "缺少 RT ID 时降级"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "调用栈问题的证据边界",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 160000
+      },
+      "prompt": "用户看到一行 time cost of AssignLogicalStreams，想知道是谁调用了这个函数。请说明日志分析 Skill 能够确认什么、不能确认什么，以及后续应使用什么只读手段核实调用关系。",
+      "expected_output": "应说明 timing 行和普通函数名只能作为阶段上下文，不能反推出调用栈；调用关系需通过 GE 源码搜索、IDE 查找引用或带符号调试器核实，并保留事实与推断的边界。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-stream-log-analysis",
+          "description": "正确激活 GE 流日志分析 Skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "调用栈",
+          "description": "明确调用栈证据边界"
+        },
+        {
+          "type": "contains",
+          "pattern": "源码",
+          "description": "建议通过源码核对调用关系"
+        }
+      ]
+    }
+  ]
+}

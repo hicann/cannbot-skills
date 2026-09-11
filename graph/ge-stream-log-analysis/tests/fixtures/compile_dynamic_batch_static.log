@@ -1,0 +1,4 @@
+# PID=100 GE_CONTEXT=2001; dynamic Batch control with known-shape compute graph.
+[INFO] GE(100,python3):2026-08-27-10:00:00.000 [graph_builder.cc:1]2001 Begin to build known shape graph[batch_root].
+[INFO] GE(100,python3):2026-08-27-10:00:00.010 [multi_batch_clone_pass.cc:1]2001 ascend_mbatch_shape_case ascend_mbatch_shape_data.
+[INFO] GE(100,python3):2026-08-27-10:00:00.020 [logical_stream_allocator.cc:1]2001 At last, root graph: batch_root, total stream num: 2, main stream num: 2, attached stream num: 0.

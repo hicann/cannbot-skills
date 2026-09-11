@@ -1,0 +1,7 @@
+# PID=100 GE_CONTEXT=2001; V2 direct stream, notify and event evidence.
+[INFO] GE(100,python3):2026-08-27-10:00:00.000 [model_v2_executor.cc:1]2001 ModelV2Executor AcquireStreams(stream_num=2)
+[INFO] GE(100,python3):2026-08-27-10:00:00.010 [stream.cc:55]2001 [KernelTrace][SplitRtStreams] Get rts stream 0x111 from logical stream 0, rts_stream_id: 41
+[INFO] GE(100,python3):2026-08-27-10:00:00.011 [stream.cc:55]2001 [KernelTrace][SplitRtStreams] Get rts stream 0x222 from logical stream 1, rts_stream_id: 42
+[INFO] GE(100,python3):2026-08-27-10:00:00.012 [notify.cc:47]2001 [KernelTrace][CreateNotifies] Get rts notify 0x333 from logical notify 2
+[INFO] GE(100,python3):2026-08-27-10:00:00.013 [event.cc:94]2001 [KernelTrace][CallRtsSendEvent] Sent event 3 RT event 0x444 from stream 4
+[INFO] GE(100,python3):2026-08-27-10:00:00.014 [event.cc:129]2001 [KernelTrace][CallRtsWaitEvent] Waited event 3 RT event 0x444 at stream 5

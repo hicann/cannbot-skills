@@ -1,0 +1,9 @@
+[INFO] Assign:[Assign][LogicalStream] At last, root graph: fixture, total stream num: 2, main stream num: 2, attached stream num: 0.
+[INFO] SetLogicStreamIdAttr:Op [data] OpType [Data] logic stream id is 0, logic attached stream id is -1.
+[INFO] SetLogicStreamIdAttr:Op [conv] OpType [Conv2D] logic stream id is 1, logic attached stream id is -1.
+[INFO] ReassignStreamByStreamLabel:[Assign][NewStreamId] 1 for label user_label (engine: AIcoreEngine)
+[INFO] Assign attached stream [2] for node {hccl HcomAllReduce} with main stream [1] successfully
+[INFO] node has user stream label:user_label
+[INFO] node ATTR_NAME_SEND_EVENT_IDS event id 0
+[INFO] SplitNodesToNewStream: Split nodes to new stream 2.
+[INFO] SplitStreamAndRefreshTaskDef:After SplitStreamAndRefreshTaskDef, graph:fixture, stream num:3, notify num:0, event num:2.

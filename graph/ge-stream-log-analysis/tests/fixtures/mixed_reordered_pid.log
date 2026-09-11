@@ -1,0 +1,6 @@
+[INFO] GE(100,python3):2026-08-27-10:00:00.000 [graph_builder.cc:1]2001 Begin to build known shape graph[g100].
+[INFO] GE(100,python3):2026-08-27-10:00:00.010 [stream_allocator.cc:1]2001 At last, root graph: g100, total stream num: 1, main stream num: 1, attached stream num: 0.
+[INFO] GE(200,python3):2026-08-27-10:01:00.000 [graph_builder.cc:1]2001 Begin to build known shape graph[g200].
+[INFO] GE(200,python3):2026-08-27-10:01:00.010 [stream_allocator.cc:1]2001 At last, root graph: g200, total stream num: 2, main stream num: 2, attached stream num: 0.
+[INFO] GE(200,python3):2026-08-27-10:01:00.020 [davinci_model.cc:1]2001 InitRuntimeParams:InitRuntimeParams: model_id=2, stream_num:2, notify_num:0, event_num:0, label_num:0.
+[INFO] GE(100,python3):2026-08-27-10:00:00.020 [davinci_model.cc:1]2001 InitRuntimeParams:InitRuntimeParams: model_id=1, stream_num:1, notify_num:0, event_num:0, label_num:0.

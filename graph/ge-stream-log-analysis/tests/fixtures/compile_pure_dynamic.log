@@ -1,0 +1,4 @@
+# PID=100 GE_CONTEXT=2001; pure unknown-shape root; dynamic allocator summary.
+[INFO] GE(100,python3):2026-08-27-10:00:00.000 [graph_builder.cc:1]2001 Begin to build unknown shape graph[dynamic_root].
+[INFO] GE(100,python3):2026-08-27-10:00:00.010 [dynamic_stream_allocator.cc:73]2001 AssignStreamsForDynamicShapeGraph:Graph: dynamic_root, stream num: 2, event num: 1.
+[INFO] GE(100,python3):2026-08-27-10:00:00.020 [graph_builder.cc:1]2001 RefreshInfoOfDynamicShapeGraph:Total stream num: 2, event num: 1, notify num: 0.

@@ -1,0 +1,6 @@
+# PID=100 GE_CONTEXT=2001; unknown root plus known static child.
+[INFO] GE(100,python3):2026-08-27-10:00:00.000 [graph_builder.cc:1]2001 Begin to build unknown shape graph[hybrid_root].
+[INFO] GE(100,python3):2026-08-27-10:00:00.010 [dynamic_stream_allocator.cc:73]2001 AssignStreamsForDynamicShapeGraph:Graph: hybrid_root, stream num: 2, event num: 1.
+[INFO] GE(100,python3):2026-08-27-10:00:00.020 [graph_builder.cc:1]2001 Begin to build known shape graph[While0_body].
+[INFO] GE(100,python3):2026-08-27-10:00:00.030 [logical_stream_allocator.cc:1]2001 At last, root graph: While0_body, total stream num: 1, main stream num: 1, attached stream num: 0.
+[INFO] GE(100,python3):2026-08-27-10:00:00.040 [graph_builder.cc:1]2001 RefreshInfoOfDynamicShapeGraph:Total stream num: 3, event num: 1, notify num: 0.

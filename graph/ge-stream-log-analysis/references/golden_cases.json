@@ -1,0 +1,64 @@
+{
+  "recommendation_static": {
+    "root_env": "GE_REPO_ROOT",
+    "compile": "examples/recommendation/build_920_20260805/ge_recommendation.log",
+    "runtime": "examples/recommendation/build_920_20260805/ge_recommendation.log",
+    "expected": {
+      "scenario_class": "static",
+      "shape_mode": "static_shape",
+      "graph_form": "single_graph",
+      "root_graph_class": "pure_static_shape",
+      "logical_stream_count": 9,
+      "final_model_stream_count": 9,
+      "event_count": 8
+    }
+  },
+  "resnet50_dynamic_batch": {
+    "root_env": "GE_REPO_ROOT",
+    "compile": "examples/acl/2_sample_resnet50_imagenet_classification_dynamic_batch/model/atc_mainstream2.log",
+    "runtime": "examples/acl/2_sample_resnet50_imagenet_classification_dynamic_batch/resnet50_runtime.log",
+    "expected": {
+      "scenario_class": "dynamic",
+      "shape_mode": "dynamic_shape",
+      "graph_form": "dynamic_batch_static_branches",
+      "root_graph_class": "pure_static_shape",
+      "logical_stream_count": 6,
+      "batch_mapping": {"batch_0": 5, "batch_1": 4, "batch_2": 3, "batch_3": 2},
+      "active_branch": "Batch_1"
+    }
+  },
+  "real_dynamic_models": {
+    "root_env": "GE_LOG_ROOT",
+    "compile": "2_动态图.txt",
+    "runtime": "2_动态图.txt",
+    "expected": {
+      "scenario_class": "hybrid",
+      "root_graph_class": "hybrid_dynamic_static_subgraph",
+      "models": [
+        {"graph": "ge_default_20260824202014", "model_id": 1, "correlation": "same_session"}
+      ],
+      "compile_subgraphs": [
+        {"prefix": "While0", "session_role": "compile_subgraph"},
+        {"prefix": "While1", "session_role": "compile_subgraph"}
+      ]
+    }
+  },
+  "real_dynamic_static_subgraphs": {
+    "root_env": "GE_LOG_ROOT",
+    "compile": "1_动态图静态子图.txt",
+    "runtime": "1_动态图静态子图.txt",
+    "expected": {
+      "scenario_class": "dynamic",
+      "root_graph_class": "pure_static_shape",
+      "graph_form": "dynamic_batch_static_branches",
+      "models": [
+        {"graph": "ge_default_20260824201530", "model_id": 2, "correlation": "same_session"}
+      ],
+      "compile_subgraphs": [
+        {"prefix": "ge_default_20260824201530_dynamic_sub_0_input", "session_role": "compile_subgraph"},
+        {"prefix": "ge_default_20260824201530_dynamic_sub_1_unknow", "session_role": "compile_subgraph"},
+        {"prefix": "Batch_0", "session_role": "compile_subgraph"}
+      ]
+    }
+  }
+}
