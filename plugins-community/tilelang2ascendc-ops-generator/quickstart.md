@@ -34,23 +34,14 @@ Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md 
 
 ### 前置条件
 
+- 已安装 Python 3.8 或更高版本
+- 已安装 PyTorch 2.0 或更高版本
+- 已安装 tilelang-ascend，具体安装方式请查阅 [tilelang-ascend readme](https://github.com/tile-ai/tilelang-ascend/blob/ascendc_pto/README.md#method-3-compile-and-install-from-source)
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
 
-### OpenCode（推荐）
-
-```bash
-git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
-bash init.sh project opencode   # 项目级（默认）
-bash init.sh global opencode    # 全局级
-```
-
-### 其他工具
-
-<details>
-<summary>Claude Code</summary>
+### Claude Code（推荐）
 
 **首选：Plugin Marketplace（一键安装）**
 
@@ -71,6 +62,18 @@ bash init.sh project claude     # 项目级
 bash init.sh global claude      # 全局级
 ```
 
+### 其他工具
+
+<details>
+<summary> OpenCode</summary>
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
+bash init.sh project opencode   # 项目级（默认）
+bash init.sh global opencode    # 全局级
+```
+
 </details>
 
 <details>
@@ -83,6 +86,34 @@ git clone https://gitcode.com/cann/cannbot-skills.git
 cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
 bash init.sh project trae
 ```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
+bash init.sh project cursor     # 项目级
+bash init.sh global cursor      # 全局级
+```
+
+安装后在项目根目录生成 `.cursor/` 目录（项目级）或 `~/.cursor/` 目录（全局级），包含 skills/、agents/ 和 AGENTS.md。
+
+</details>
+
+<details>
+<summary>Copilot</summary>
+
+```bash
+git clone https://gitcode.com/cann/cannbot-skills.git
+cd cannbot-skills/plugins-community/tilelang2ascendc-ops-generator
+bash init.sh project copilot    # 项目级
+bash init.sh global copilot     # 全局级
+```
+
+安装后在项目根目录生成 `.github/` 目录（项目级）或 `~/.copilot/` 目录（全局级），包含 skills/、agents/ 和 AGENTS.md。
 
 </details>
 
