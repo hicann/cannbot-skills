@@ -12,6 +12,8 @@ skills:
     - ops-precision-standard
     - ops-profiling
     - ascendc-precision-debug
+    - ascendc-mc2-best-practice
+    - ascendc-api-best-practices
 ---
 
 # 测试代码开发角色

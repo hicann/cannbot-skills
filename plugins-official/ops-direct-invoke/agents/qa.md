@@ -13,6 +13,8 @@ skills:
     - workflow-cp5
     - ops-precision-standard
     - ascendc-blaze-best-practice
+    - ascendc-mc2-best-practice
+    - ascendc-api-best-practices
     - ascendc-docs-search
 ---
 

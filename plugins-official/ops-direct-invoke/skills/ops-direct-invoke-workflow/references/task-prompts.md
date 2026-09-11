@@ -45,8 +45,8 @@
 - 【权限】你可写 `.cannbot/<算子名>/`；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
 - 【输入】对话上下文、仓库设计约束。
 - 【输出】需求文档，写入 `.cannbot/<算子名>/1.1-需求分析.md`；格式模板：`workflow-doc-templates/references/1.1-需求分析.md`。
-- 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`ascendc-regbase-best-practice`、`ascendc-simt-best-practices`；算子主计算形态为 Matmul 类（GEMM / BMM / 量化 matmul / matmul+bias 及其融合）且目标芯片为 ascend950 时，**必须**加载 `ascendc-blaze-best-practice` 判断 Cube 实现路径（Blaze/tensor_api 路线）的适用性。
-- 【验收标准】确认项无遗漏，用户原始需求逐条记录；架构选型候选为 SIMD 与 SIMT 两种——**Cube 属 SIMD 的一种实现形态**（矩阵计算单元，可单独或与 RegBase 混合使用，如 AIC Cube + AIV RegBase 的 mix 形态），不单独作为与 SIMD 并列的架构候选；SIMD 实现载体按目标芯片确定：ascend950 为 RegBase / Cube，其余低版本芯片为 MemBase；RegBase 与 MemBase 互斥（支持 RegBase 的芯片不使用 MemBase）；**Cube 实现路径可行性评估结论必须以 `ascendc-blaze-best-practice` 的查询结果为依据，禁止凭记忆或猜测**；只出推荐，不代替用户决定架构。
+- 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`ascendc-regbase-best-practice`、`ascendc-simt-best-practices`；算子主计算形态为 Matmul 类（GEMM / BMM / 量化 matmul / matmul+bias 及其融合）且目标芯片为 ascend950 时，**必须**加载 `ascendc-blaze-best-practice` 判断 Cube 实现路径（Blaze/tensor_api 路线）的适用性；需求涉及多卡协同的通算融合算子（AllToAll+Matmul、AllReduce+Matmul、MoE Dispatch/Combine、多卡 EP/TP/SP 融合）时，**必须**加载 `ascendc-mc2-best-practice` 判断通算融合路线适用性（通信路径 × 编程底座，以该 skill 的路线登记表为准）。
+- 【验收标准】确认项无遗漏，用户原始需求逐条记录；架构选型候选为 SIMD 与 SIMT 两种——**Cube 属 SIMD 的一种实现形态**（矩阵计算单元，可单独或与 RegBase 混合使用，如 AIC Cube + AIV RegBase 的 mix 形态），不单独作为与 SIMD 并列的架构候选；SIMD 实现载体按目标芯片确定：ascend950 为 RegBase / Cube，其余低版本芯片为 MemBase；RegBase 与 MemBase 互斥（支持 RegBase 的芯片不使用 MemBase）；**Cube 实现路径可行性评估结论必须以 `ascendc-blaze-best-practice` 的查询结果为依据，禁止凭记忆或猜测**；通算融合（MC2）场景下，路线可行性评估结论**必须以 `ascendc-mc2-best-practice` 的查询结果为依据，禁止凭记忆或猜测**；只出推荐，不代替用户决定架构。
 ```
 
 > **静默模式（`mode=silent`）**：PM 在本 prompt 末尾追加「【静默模式】代码架构选型候选仅 SIMD（实现载体按目标芯片确定：ascend950 为 RegBase / Cube、其余芯片为 MemBase），不评估 SIMT，推荐项直接取 SIMD」。
@@ -74,7 +74,7 @@
 - 【权限】你可写 `.cannbot/<算子名>/`；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
 - 【输入】需求文档 `.cannbot/<算子名>/1.1-需求分析.md`。
 - 【输出】测试方案文档，写入 `.cannbot/<算子名>/2.1-测试方案设计.md`；格式模板：`workflow-doc-templates/references/2.1-测试方案设计.md`。
-- 【skills】立即加载 `workflow-doc-templates`、`repo-test-develop`、`ascendc-st-design`。
+- 【skills】立即加载 `workflow-doc-templates`、`repo-test-develop`、`ascendc-st-design`；被测算子为通算融合（MC2）时，加载 `ascendc-mc2-best-practice`——golden 须明确每卡输入/输出契约与切分轴、聚合方式（切分轴写错则精度验证整体失效）。
 - 【验收标准】golden 方案可行，分级用例覆盖充分（正常/边界/异常/特殊值），覆盖矩阵齐备。
 ```
 
@@ -97,8 +97,8 @@
 - 【权限】你可写 `.cannbot/<算子名>/`；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
 - 【输入】需求文档 `.cannbot/<算子名>/1.1-需求分析.md`。
 - 【输出】开发方案文档，写入 `.cannbot/<算子名>/2.2-开发方案设计.md`；格式模板：`workflow-doc-templates/references/2.2-开发方案设计.md`。
-- 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`repo-op-templates`、`repo-build-guide`、`ascendc-tiling-design`；代码实现涉及 Cube（Blaze/tensor_api 路线）时，**必须**加载 `ascendc-blaze-best-practice`，以该 skill 为权威源验证参数签名、类型约束与模板参数，编程范式与设计资料同源获取；RegBase / MemBase / SIMT 路线需要 API 验证时加载 `ascendc-docs-search` 查阅官方文档（含同一 API 的所有变体）。
-- 【验收标准】代码架构与需求文档拍板结果一致，Tiling/切分策略可行，关键 API 已验证；不改选已拍板的代码架构。**API 验证按实现路径决策**：Cube 实现路径（Blaze 路线）的 API 必须经 `ascendc-blaze-best-practice` 确认才可写入方案；RegBase / MemBase / SIMT 路线的 API 须通过 `ascendc-docs-search` 查阅官方文档并核对同一 API 的所有变体后确认。
+- 【skills】立即加载 `workflow-doc-templates`、`repo-knowledge`、`repo-op-templates`、`repo-build-guide`、`ascendc-tiling-design`；代码实现涉及 Cube（Blaze/tensor_api 路线）时，**必须**加载 `ascendc-blaze-best-practice`，以该 skill 为权威源验证参数签名、类型约束与模板参数，编程范式与设计资料同源获取；RegBase / MemBase / SIMT 路线需要 API 验证时加载 `ascendc-docs-search` 查阅官方文档（含同一 API 的所有变体）；方案涉及通算融合（MC2）时，**必须**加载 `ascendc-mc2-best-practice`，以该 skill 为权威源完成路线决策、通信与通算流水编排设计与质量门禁核对。
+- 【验收标准】代码架构与需求文档拍板结果一致，Tiling/切分策略可行，关键 API 已验证；不改选已拍板的代码架构。**API 验证按实现路径决策**：Cube 实现路径（Blaze 路线）的 API 必须经 `ascendc-blaze-best-practice` 确认才可写入方案；RegBase / MemBase / SIMT 路线的 API 须通过 `ascendc-docs-search` 查阅官方文档并核对同一 API 的所有变体后确认；MC2 路线的通信/融合设计必须经 `ascendc-mc2-best-practice` 确认才可写入方案。
 - 【能力边界前置】方案依赖的硬件与编译器能力项（数据类型转换链及其舍入语义、搬运/广播/掩码接口的对齐与地址约束、编译器对手工指令收敛的调度行为、目标架构特有限制）须在本阶段核对出「支持 / 不支持 / 需绕行」结论并注明核对方式，不支持项给绕行方案；舍入语义与 golden 不等价的转换链等同不支持。不留「应该可以 / 待定」。
 - 【瓶颈预判可证伪】瓶颈维度预判须给出可核对的量化估算依据与证伪条件，并标注校准状态为「未实测」；不接受无推导的定性断言。实测数据与预判矛盾时以实测为准，回改本节。
 - 【优化项落地要求】性能优化项逐条标注落地要求（必落地 / 可选）与是否改变数值计算路径；「必落地」项只面向预判的瓶颈维度。
@@ -127,7 +127,7 @@
 - 【权限】你可写算子代码目录；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
 - 【输入】开发方案文档 `.cannbot/<算子名>/2.2-开发方案设计.md`；被打回时附结构化修改要求。
 - 【输出】算子代码：按开发方案实现，编译验证通过。
-- 【skills】立即加载 `repo-op-templates`、`repo-coding-rules`、`repo-build-guide`、`repo-knowledge`、`ascendc-direct-invoke-template`、`ascendc-api-best-practices`；代码实现涉及 Cube（Blaze/tensor_api 路线）时，**必须**加载 `ascendc-blaze-best-practice`，API 用法、参数签名与模板参数以该 skill 为权威源，不确定的 API 用法禁止凭记忆编写。
+- 【skills】立即加载 `repo-op-templates`、`repo-coding-rules`、`repo-build-guide`、`repo-knowledge`、`ascendc-direct-invoke-template`、`ascendc-api-best-practices`；代码实现涉及 Cube（Blaze/tensor_api 路线）时，**必须**加载 `ascendc-blaze-best-practice`，API 用法、参数签名与模板参数以该 skill 为权威源，不确定的 API 用法禁止凭记忆编写；代码实现涉及通算融合（MC2）时，**必须**加载 `ascendc-mc2-best-practice`，通信与融合编排的 API 用法以该 skill 为权威源，不确定的用法禁止凭记忆编写。
 - 【验收标准】编译通过，按方案实现；性能/正确性瓶颈定位后回退给调用方，不自行改 Tiling/切分/接口。
 - 【优化项逐项核对】交付前对开发方案「性能优化项」表逐条回填落地状态（已落地 / 未落地及原因 / 放弃及原因）；「必落地」项不得静默不做。回填结果随交付结论回传。
 - 【精度回归门】任何**改变数值计算路径**的改动（近似替换、中间精度降级、指令或数据类型转换链变更、归约顺序变更等）落盘后，必须跑测试工程的权威精度断言并附上指标实测值与阈值；不达标即回退该改动，**禁止以「自建容差内」放行**。无法自行执行断言时，在回传结论中明确标注该改动待精度门校验，不得默认通过。
@@ -196,8 +196,8 @@
 - 【权限】你可写 test 目录；临时产物写 `.cannbot/<算子名>/tmp/`。禁止写项目根之外的路径（含 `/tmp`），会被 hooks 拦截。
 - 【输入】算子代码（功能验收通过后的最终代码）。
 - 【输出】性能数据（各 shape/dtype 的耗时、带宽、利用率），落 test 目录采集输出。
-- 【skills】立即加载 `repo-test-develop`、`ops-profiling`。
-- 【验收标准】性能数据完整覆盖需求关注的 shape/dtype。
+- 【skills】立即加载 `repo-test-develop`、`ops-profiling`；被测算子为通算融合（MC2）时，加载 `ascendc-mc2-best-practice` 按其性能采集口径执行。
+- 【验收标准】性能数据完整覆盖需求关注的 shape/dtype；被测算子为通算融合（MC2）时，按 `ascendc-mc2-best-practice` 的性能采集口径执行——**每轮必须实际执行 L2 cache flush**（禁止只分配 buffer 不调 flush kernel）、多卡数据按官方口径后处理（跳 warmup、去离群、卡均值）。
 - 【瓶颈维度分解】每条用例除总耗时外，须给出计算 / 搬入 / 搬出 / 标量各自的占比或耗时——这组数据用于锁定实测瓶颈维度，缺失则性能数据判为不完整。
 - 【方差处理】跨轮波动跨越达标门槛的用例，做多轮稳态采集并记录中位数、min/max 与离散度；采集口径（预热剔除、设备空闲隔离、取值方式）随数据一并记录。以稳态中位数为准，不上报单次最优值。
 ```
