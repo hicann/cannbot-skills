@@ -1,20 +1,21 @@
 ---
 name: transformer-inference
-description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout / LightningIndexer）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
+description: Transformer 推理类算子（RotaryMul / MoeComputeExpertTokens / MoeGatingTopKSoftmax / AttentionSoftmaxWithSoftcappingAndDropout / LightningIndexer / FFN）的 Triton Ascend 优化经验合集，按算子分章节组织，含通用经验 + 各算子专属约束/骨架/kernel
 metadata:
   type: reference
 ---
 
 # Transformer 推理类算子优化经验
 
-本文档合并了五类 Transformer 推理算子的优化经验。按以下结构组织：
+本文档合并了六类 Transformer 推理算子的优化经验。按以下结构组织：
 - **§1 通用经验**：跨算子重复的工程约束（已提取，各算子章节不再重复；与张量变换类共用的通用约束见 tensor-transform.md G1-G8）
 - **§2 RotaryMul**（rotarymul，RoPE 旋转位置编码）
 - **§3 MoeComputeExpertTokens**（indexing-gather / counting，MoE 专家 token 计数 + 前缀和）
 - **§4 MoeGatingTopKSoftmax**（sort-topk，门控 softmax + 迭代 top-k）
 - **§5 AttentionSoftmaxWithSoftcappingAndDropout**（reduce，softcapping + 行级 softmax 融合）
 - **§6 LightningIndexer**（topk-select，稀疏注意力打分 + 降序 top-K 选位）
-- **§7 各算子常见陷阱**
+- **§7 FFN**（dual-gemm-activation，双 GEMM + 激活融合，含 GLU 变体与 MoE 分组）
+- **§8 各算子常见陷阱**
 
 ---
 
@@ -27,19 +28,21 @@ metadata:
 | MoeGatingTopKSoftmax | `sort-topk` | softmax over last dim + 迭代 top-k 选择，per-row 独立 | 纯寄存器 top-k 路径（无 GM temp buffer）+ grid 钳制到 num_cores |
 | AttentionSoftmaxWithSoftcappingAndDropout | `reduce` | Gemma3 风格 softcapping `tanh(x/30)*30` + 行级 softmax，多 dtype 混合 | 4-kernel 分离强制中间舍入 + 分核优化（grid 钳制 + 循环处理多块） |
 | LightningIndexer | `topk-select` | QK^T 打分 + relu + 权重头归约 + 行内降序 top-K 选位（输出索引/值），大 KV 稀疏注意力的索引器 | 位级一致分数链 + 大 shape 双路径拆分（打分/头归约分核）+ `.sort` 稳定排序选位 |
+| FFN | `dual-gemm-activation` | y = act(x@W1+b1)@W2+b2，两段 GEMM 串行 + 中间激活（7 种激活 / 3 种 GLU 变体），可选 MoE 专家分组 | 双 kernel 拆分 + GLU 双累加器 epilogue 融合 + GM 物化保舍入链 + 固定核数 Swizzle2D |
 
-> ⚠️ **关键区分**：五类算子计算模式差异极大，优化哲学不可混用：
+> ⚠️ **关键区分**：六类算子计算模式差异极大，优化哲学不可混用：
 > - RotaryMul 关心 **per-position 向量化** 避免 flat-1D 标量退化
 > - MoeComputeExpertTokens 关心 **无竞争 expert-parallel 计数** 避免 atomic contention
 > - MoeGatingTopKSoftmax 关心 **寄存器内 top-k 路径** 避免 GM 往返导致 `tl.argmax` 不可靠
 > - AttentionSoftmaxWithSoftcappingAndDropout 关心 **多 kernel 分离强制 dtype 舍入** 匹配 PyTorch 中间物化行为
 > - LightningIndexer 关心 **位级一致分数链**（索引输出逐位比对，任何近似选位都会翻边失败）与 **大 shape 双路径拆分** 绕过融合核微 dot 的同步税
+> - FFN 关心 **双 kernel 拆分**（GEMM2 全量依赖 GEMM1 输出，单 kernel 需栅格同步不可行）与 **epilogue GM 物化**（dot 累加器 cast 被编译器消除，舍入链丢失）
 
 ---
 
 ## §1 通用经验（跨算子，首次生成必须遵守）
 
-以下 6 条约束是五类 Transformer 推理算子**共有**且**未在 tensor-transform.md G1-G8 覆盖**的工程约束。tensor-transform.md 中已提取的 G1（动态 num_cores）/ G2（pow2 BLOCK）/ G3（多策略分派）/ G4（grid 不超核数）/ G5（int32 索引）/ G6（负载均衡）/ G7（contiguous）/ G8（坐标 float32 比较）此处不再重复，各算子章节引用时标注。
+以下 8 条约束是六类 Transformer 推理算子**共有**且**未在 tensor-transform.md G1-G8 覆盖**的工程约束。tensor-transform.md 中已提取的 G1（动态 num_cores）/ G2（pow2 BLOCK）/ G3（多策略分派）/ G4（grid 不超核数）/ G5（int32 索引）/ G6（负载均衡）/ G7（contiguous）/ G8（坐标 float32 比较）此处不再重复，各算子章节引用时标注。
 
 ### T1 grid_size 必须与 num_cores 严格匹配（grid = num_cores 或 grid ≤ num_cores）
 - **必须**令 `grid_size = min(batch_size/total_blocks, VEC_CORE_NUM)`，且 `num_cores` 入参 = `grid_size`。
@@ -74,6 +77,18 @@ metadata:
 - **禁止**盲目添加 `multibuffer=True, unit_flag=True` 期望提升内存密集型算子性能。
 - **Why:** 在含迭代标量循环（如 MoeGatingTopKSoftmax 的 top-k）的算子上，multibuffer 的流水线优化收益被迭代开销掩盖，实测可能劣化（MoeGatingTopKSoftmax v3: 0.8527x vs 基线 0.8836x，v10: 0.5720x vs 基线 0.8194x）。
 - **正确做法**：在 Phase 4 中实测验证后再决定是否启用。
+
+### T7 dot 累加器派生值的舍入必须用 GM 物化（store-reload），cast round-trip 会被编译器消除
+- **必须**当 `tl.dot` 的 fp32 累加器需先舍入到低精度 dtype 再参与后续逐元素运算（bias/激活链）时，用「store 到 GM → reload」物化舍入结果，再执行后续运算链。
+- **禁止**依赖 `acc.to(f16).to(f32)` 这类 round-trip cast 保留舍入——编译器判定其为 no-op **直接消除**；bitcast、`tl.where` 强制依赖、`tl.debug_barrier` 同样会被消除，勿再尝试。
+- **Why:** 逐 op「fp32 计算 → 落回输入 dtype」的舍入链是与参考实现对齐的关键；cast 被消除后后续运算实际作用在未舍入的 fp32 上，近零消输出误差可放大 2-3 个数量级。
+- **UB 联动**：store-reload 工作区若按全 tile 宽度物化可能超 192KB UB，需按子切片（如列宽 64）分批 reload，K 循环 tile 宽度与后续链宽度解耦。
+- 与 T5 的差异：T5 讲**跨 kernel** 拆分强制 GM round-trip；T7 讲**同一 kernel 内** dot 累加器派生值的 cast 消除问题。
+
+### T8 大偏移寻址必须 int64，host 侧小张量下传用 pinned 环形缓冲
+- **必须**多维大张量（E×K×N 类）按块基址偏移寻址时，偏移量先 `.to(tl.int64)` 再乘加，防 int32 溢出地址回绕。
+- **必须**每次前向需下传 host 计算的小张量（前缀和/索引表等）时，用 pinned memory 环形缓冲 + `copy_(..., non_blocking=True)` 异步上传；**禁止**每调用同步 H2D（实测每次 ~150us 开销）。
+- **可选扩展路径**：分支路径用 `tl.constexpr` 布尔标志隔离，非该路径输入传 dummy 指针，编译产物互不影响。
 
 ---
 
@@ -982,9 +997,245 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | opt_14（拆分 + 双路径分派） | 5.12x | 0.362x | 大 shape 全流水 -9~11% |
 | **opt_16（hsum BLOCK_J 128→256）** | **5.05x** | **0.404x** | 变体探查 -30% |
 
-## §7 常见陷阱与避免方法
+## §7 FFN 算子（dual-gemm-activation）
 
-### §7.1 RotaryMul 陷阱
+### 算子背景与语义
+
+FFN 是 Transformer 每层的前馈网络：`y = act(x@W1 + b1) @ W2 + b2`，两段 GEMM 串行、中间夹逐元素激活。
+GLU 变体（geglu/swiglu/reglu）中 W1 的输出列宽翻倍（N1 = 2*KH），左半过激活后与右半逐元素相乘。
+MoE 扩展中 W1/W2/b1/b2 带专家维 `[E, ...]`，`expert_tokens[E]` 给出每专家的 token 数，x 行按专家连续分段。
+
+本算子的优化重点不是单个 GEMM 的极限 tiling，而是**两段 GEMM 的拆分结构、激活/门控的 epilogue 融合位置、
+以及与参考实现逐 op 舍入语义的对齐**。
+
+**算子类别**: `dual-gemm-activation`
+**典型特征**: x[M,K1] fp16/bf16；7 种激活（gelu/fastgelu/relu/silu/geglu/swiglu/reglu）；b1/b2 可选；MoE 扩展（expert_tokens 分组，空专家需自然跳过）
+**性能基准**: dense 10-case 几何平均 **1.1615x** vs torch（benchmark 10/10，verify 8/10）；MoE 5 场景 vs CANN 内置 FFN 融合算子（inner_precise=1，msprof kernel Duration）几何平均 **0.83x**（0.72~0.95x），精度 6/6 全过（fp64 参考，含空专家/极不均衡/GLU+MoE——后者内置融合算子不支持）。第二轮性能优化（寄存器单 pass epilogue + 双 kernel tile 解耦 + MoE tile 双路径 + GM_EPI 大权重路径）后：dense **1.29x** / MoE **1.00x** / 全 15 case **1.18x** vs 内置
+**历史最佳版本**: opt_iter_8（初版 MoE 0.83x → 8 轮迭代 1.00x 追平内置，全部 15 行不劣于初版）
+
+### §7.1 Layer 1: 设计约束（Agent 必须遵守）
+
+#### L1.1 双 kernel 结构强制（GEMM1+act → H → GEMM2）
+- **必须**将两段 GEMM 拆为两个 kernel 串行 launch：Kernel1 产出中间量 H 落 GM，Kernel2 读 H 产出 Y。
+- **禁止**单 kernel 融合两段 GEMM（GEMM2 沿 K 轴完整依赖 GEMM1 全量输出，需要跨块栅格同步，Triton-Ascend 无高效原语）。
+- **Why:** 单 kernel 需 grid 级同步，退化为串行或 atomic 轮询，实测不可行；双 kernel 各自独立最优 tiling。
+
+#### L1.2 GLU 变体必须双累加器 epilogue 融合
+- **必须**对 geglu/swiglu/reglu 在 GEMM1 kernel 内用双累加器：K 循环同时累计左半（列 j）与右半（列 j+KH）两个 [BM,BN] fp32 累加器，共享同一 A tile，epilogue 做 `h = act(left) * right`。
+- **禁止**先算完整 g[M,N1] 落盘再启动第二个逐元素 kernel 做 split+act+mul（多两趟 GM 访存 + 一次额外 launch）。
+- **Why:** 双累加器方案 A tile 复用两次 dot（GM 中 A 流量减半），且消除 g 的落盘/回读。
+- 与 L1.1 的关系：L1.1 约束两段 GEMM **之间**必须拆；L1.2 约束 GEMM1 与激活**之间**必须融。
+
+#### L1.3 固定核数启动 + Swizzle2D + 自适应分组方向
+- **必须** `grid=(NUM_CORES,)`，kernel 内 `for block_idx in range(pid, NUM_BLOCKS, NUM_CORES)` 每核循环处理多块（继承 G1/G4/T1）。
+- **必须**块序 Swizzle2D 重排（GROUP_SIZE=4 起步，autotune [1,2,3,4,5,8]）；按 M/N 比例自适应方向：M≥N 行优先 `tl.swizzle2d`，M<N 列优先手动分组。
+- **Why:** 提升权重矩阵的 L2 局部性；权重是两段 GEMM 的最大重复访存源。
+
+#### L1.4 激活与控制参数编译期分派
+- **必须** ACT_TYPE / IS_GLU / HAS_B1 / HAS_B2 / HAS_EXPERT 全部 `tl.constexpr`，host 侧将激活字符串映射为枚举整数后传入。
+- **禁止**激活字符串或运行时分支进入 kernel（device 侧无字符串比较；运行时分支会拖累所有路径的编译产物）。
+
+#### L1.5 GLU 双累加器受 L0C 容量约束
+- **必须** GLU 路径满足 2 × BM × BN × 4B ≤ L0C（910B3/DAV_2201: 128KB，即 BM×BN ≤ 16384），建议 (128,128) 起步 autotune。
+- 非 GLU 路径单累加器，可沿用 (BM,BK,BN)=(128,256,256)（fp16/bf16）。
+- **Why:** tl.dot 累加器映射 L0C，双累加器超容 spill 到下一级存储，性能骤降。
+
+#### L1.6 维度约束 host 侧前置校验
+- **必须**在 wrapper 中校验：K1 == N2；GLU 时 N1 == 2*K2（KH = N1//2），非 GLU 时 N1 == K2（KH = N1）。不满足直接抛错，不进 kernel。
+- **Why:** 语义前提；错误维度进 kernel 产生越界读或静默错值。
+
+#### L1.7 中间量 H 精度与分配
+- **必须** H 由 host 侧 `torch.empty` 分配于 NPU，dtype 与输入一致；Kernel1 存储前 fp32→输入 dtype 舍入，Kernel2 以输入 dtype 读入（fp32 累加）。
+- **Why:** 遵循 T2/T5；H 落盘精度高于输入 dtype 无收益且浪费带宽。
+
+#### L1.8 Epilogue 舍入链必须 GM 物化（T7 的 GEMM epilogue 形态）
+- **必须**在 GEMM K 循环结束后，将 `round_dtype(acc)` 先 `tl.store` 到 GM（输出缓冲或 scratch），再 `tl.load` 回来做 bias/激活链；GEMM2 的 bias 同理（store → reload → +b2 → store）。
+- **禁止**依赖 `acc.to(DT).to(tl.float32)` round-trip cast 保留舍入——编译器将 dot 累加器派生值的有损 cast 判定为 no-op 直接消除（bitcast / `tl.where` 强制依赖 / `tl.debug_barrier` 拦截同样被消除，勿再尝试）。
+- 与 T5 的关系：T5 是逐元素链拆**独立 kernel**；FFN 双 kernel 结构下**无需再拆**，kernel 内 store-reload 到自身输出缓冲即可（T7 的共性约束，此处为 GEMM epilogue 具体形态）。
+- **性能变体（verify 口径不要求 bit-exact 时）**：epilogue 可改为寄存器单 pass（K 循环后直接在 fp32 累加器上做 bias+激活，单次舍入单次 store），移除 store-reload 三趟 GM 遍历（dense 几何平均 1.06→1.21x vs 内置）；此时 UB 活跃量按 ~4/5 单元（非 GLU/GLU）× BM×BN×4B 预算，(128,128) 溢出、非 GLU (64,128) / GLU (128,64) 通过；权重流量主导的大 K 路径（K1≥4096）则应保留 GM 物化形态以换取 BM=128（W1 只读一遍）。
+- **Why:** 逐 op 舍入链（fp32 opmath → 每步 round 回输入 dtype）是内置算子的语义；cast 被消除后激活作用在未舍入 fp32 上。实测 GM 物化后与参考 100% bit-exact。
+
+#### L1.9 Epilogue 激活链工作区受 UB 容量约束（BN_EPI 子切片）
+- **必须**保证 epilogue 逐 op 舍入链的活跃工作区（reload tile + 各中间量）≤ UB（910B3: 192KB）。erf/tanh 全链 + store-reload 在 [128,128] tile 下即超限。
+- **How to apply:** epilogue 按 BN_EPI（实测 64）对 BN 子切片循环 `for ns in range(0, BN, BN_EPI)`，工作区降为 BM×BN_EPI；K 循环 tile 宽度（L0C 约束）与 epilogue 宽度（UB 约束）解耦。
+
+#### L1.10 MoE 专家分组用前缀和 + device 侧扫描定位（T8 的 MoE 形态）
+- **必须** host 侧构建 `tokens_prefix[E+1]` 与 `blk_prefix[E+1]`（每专家 M-block 数前缀），kernel 内按全局 block_idx 扫描定位专家 e 与局部 block；权重/偏置按 `e.to(tl.int64) * K * N` 基址偏移寻址（int64 防大 E×K×N 溢出，T8）。
+- **必须**自适应 BM：最小化 `sum(ceil(tokens_e/BM))`（每 block 重读该专家全部权重，MoE 小 token 场景权重流量主导），平局取大 BM。
+- 前缀张量上传用 pinned 环形缓冲 + `non_blocking=True`（T8，避免每次调用同步 H2D ~150us）。
+- **Why:** x 行按专家连续分段时无需 gather/scatter，block 映射即可覆盖；空专家前缀不变自然跳过。
+
+#### L1.11 两个 kernel 的 tile 与前缀解耦（gemm2 无激活链，BM 可更大）
+- **必须** gemm2 使用独立于 gemm1 的 tile：gemm1 的激活 epilogue 把 UB 活跃量推到 ~4/5 单元（非 GLU/GLU，单元 = BM×BN×4B），BM 受限；gemm2 只有 acc+可选 bias 约 2 单元，dense 下 M%128==0 时 BM2=128 让 W2 只读一遍（MTE2 流量减半）。
+- **禁止** M 非 128 整数倍时放大 BM2（padding + L0A 满载反而劣化，M=320 实测回落）；禁止 MoE 下 gemm2 沿用 gemm1 的 BM——gemm1 用小 BM 压 padding 会导致 W2 按小 BM 多重读。
+- **How to apply:** MoE 下 host 侧为 gemm2 单独构建 blk2 前缀（BM 只影响 M-block 前缀，BN/BK 不影响），pinned 环形缓冲扩展携带两套前缀。
+
+### §7.2 Layer 2: 算法骨架（Agent 可参考架构）
+
+```python
+# host 分派骨架
+ACT_MAP = {"gelu":(0,0), "fastgelu":(1,0), "relu":(2,0), "silu":(3,0),
+           "geglu":(4,1), "swiglu":(5,1), "reglu":(6,1)}
+act_type, is_glu = ACT_MAP[activation]
+KH = N1 // 2 if is_glu else N1
+# 校验 K1==N2; is_glu ? N1==2*K2 : N1==K2（L1.6）
+# 常数按 dtype 分派: fp16 预舍入到 f16 再用; bf16 保持 fp32（L3.2）
+H = torch.empty((M, KH), dtype=x.dtype, device=x.device)
+# BM 自适应: M>64→128, M>32→64, else 32（MoE 按专家 token 分布取 argmin 总 block 数）
+# BN/BK 分派: MoE 大 KH 非 GLU → (256,128); 其余 → (128,256)（L3.3）
+ffn_gemm1_act[(NUM_CORES,)](x, W1, b1, H, G_scratch, M, K1, KH,
+                            tokens_t, blk_t, E, BM=BM, BN=BN, BK=BK,
+                            BN_EPI=64, GROUP_SIZE=4,
+                            ACT_TYPE=act_type, IS_GLU=is_glu, HAS_B1=has_b1,
+                            HAS_EXPERT=has_expert, C_SQRT2=..., C_A=..., C_B=...)
+ffn_gemm2[(NUM_CORES,)](H, W2, b2, Y, M, KH, N2,
+                        tokens_t, blk_t, E, BM=BM, BN=BN, BK=BK,
+                        GROUP_SIZE=4, HAS_B2=has_b2, HAS_EXPERT=has_expert)
+```
+
+MoE host 侧前缀构建：
+
+```python
+# expert_tokens: [E]，x 行按专家连续分段
+et = expert_tokens.tolist()               # 校验 sum(et)==M, 非负, weight1/2 为 3-D [E,K,N]
+BM = argmin_{cand in (32,64,128)} sum(ceil(t_e/cand))   # 平局取大 BM（L1.10）
+tok_prefix = [0]; blk_prefix = [0]
+for t in et:
+    tok_prefix.append(tok_prefix[-1] + t)
+    blk_prefix.append(blk_prefix[-1] + (t + BM - 1) // BM)
+# pinned 环形缓冲 non_blocking 上传 (E+1) int32 两个张量（L3.4）
+```
+
+Kernel 内 MoE block 定位（两个 kernel 同构）：
+
+```python
+if HAS_EXPERT:
+    HB = tl.cdiv(KH, BN)                  # 每专家的 N-block 数
+    NUM_BLOCKS = tl.load(blk_m_ptr + E) * HB
+    for block_idx in range(pid, NUM_BLOCKS, num_cores):
+        # 标量前缀扫描定位专家（实测比向量化 tl.sum 快 ~25%，可与 MTE1 流水重叠）
+        e = 0
+        for i in range(1, E + 1):
+            e += tl.where(block_idx >= tl.load(blk_m_ptr + i) * HB, 1, 0)
+        local = block_idx - tl.load(blk_m_ptr + e) * HB
+        bi0, bj0 = local // HB, local % HB
+        bi, bj = tl.swizzle2d(bi0, bj0, mb_e, HB, GROUP_SIZE)
+        w_base = e.to(tl.int64) * K1 * N1_cols   # int64 基址偏移（T8）
+        _tile(...)                                # 与非 MoE 共用 tile 函数
+```
+
+### §7.3 Layer 3: 关键技巧（可参考但不可直接复制）
+
+#### L3.1 GM 物化 epilogue（精度对齐核心）
+
+```python
+# K 循环结束后（acc 为 fp32 累加器）:
+DT = h_ptr.dtype.element_ty
+# 步骤1: round 后的值强制落 GM（真实 store 前的舍入不会被编译器消除）
+tl.store(h_ptr + rm[:, None] * KH + rn[None, :], acc_l.to(DT), mask=msk)
+if IS_GLU:  # 右半写 scratch，与左半同法物化
+    tl.store(g_scratch_ptr + ..., acc_r.to(DT), mask=msk)
+# 步骤2: BN_EPI 子切片 reload + bias + 激活链（逐 op: fp32 opmath → round 回 DT）
+for ns in range(0, BN, BN_EPI):
+    g = tl.load(h_ptr + ..., mask=msk_e, other=0.0)
+    if HAS_B1:
+        bl = tl.load(b1_ptr + b_base + rn_e, mask=mask_e, other=0.0)
+        g = (g.to(tl.float32) + bl.to(tl.float32)).to(DT)   # bias 先加并落 dtype
+    h = _act_chain(g, ACT_TYPE, C_SQRT2, C_A, C_B)          # 逐 op 舍入激活链
+    tl.store(h_ptr + ..., h, mask=msk_e)
+```
+
+**可替代方向**: 若未来编译器修复 cast 消除，可去掉 scratch 改回寄存器 round-trip；store-reload 的 GM 代价已实测被 BN_EPI 子切片摊薄。
+
+#### L3.2 逐 op 舍入激活链 + 常数 dtype 分派（微基准对齐内置算子语义）
+
+```python
+@triton.jit
+def _act_chain(g, ACT_TYPE: tl.constexpr, C_SQRT2: tl.constexpr, ...):
+    DT = g.dtype
+    x = g.to(tl.float32)
+    if ACT_TYPE == 0:  # gelu(erf): 每步 fp32 算完立即 round 回 DT
+        t = (x / C_SQRT2).to(DT)
+        e = tl.erf(t.to(tl.float32)).to(DT)
+        s = (1.0 + e.to(tl.float32)).to(DT)
+        p = (x * 0.5).to(DT)
+        y = (p.to(tl.float32) * s.to(tl.float32)).to(DT)
+    ...
+```
+
+常数 host 侧分派：fp16 用 `float(torch.tensor(c, dtype=torch.float16))` **预舍入**（内置算子在 fp16 下先把常数舍入到 f16 再参与运算）；bf16 保持 fp32 原值。
+
+**可替代方向**: silu 的 `1/(1+exp(-x))` 与 vendor sigmoid 实现等价（实测 bit-exact）；若对齐目标更换需重跑微基准。
+
+#### L3.3 MoE BN=256 dispatch（大 KH 权重流带宽）
+
+```python
+if has_expert and not is_glu and KH >= 2048:
+    BN, BK = 256, 128     # 权重流带宽显著提升: E16K4096 930→678us, E32K2048 837→590us
+else:
+    BN, BK = 128, 256     # 非 MoE 路径保持（bitwise 等价要求）
+```
+
+编译边界实测：BN=256 在 MoE 大 KH 非 GLU 通过；KH=1024 与 GLU 路径编译失败，需保持 (128,256)。
+
+**可替代方向**: E=64 场景剩余瓶颈为专家扫描（每 block O(E) 标量链），可改 device 侧二分查找（`tl.load` 前缀数组 + log2(E) 步）。
+
+#### L3.4 pinned 环形缓冲上传前缀张量
+
+```python
+ring = [(torch.empty(E+1, dtype=torch.int32, pin_memory=True),   # x2 (tok, blk)
+         torch.empty(E+1, dtype=torch.int32, device=x.device))   # x2
+        for _ in range(64)]            # 每专家数 E 一组，64 槽环形
+pin_tok.copy_(torch.tensor(tok_prefix, dtype=torch.int32))
+tokens_t.copy_(pin_tok, non_blocking=True)   # 避免每次调用同步 H2D (~150us)
+```
+
+### §7.4 性能基准
+
+> 以下两表为**初版（GM 物化 epilogue）**数据；第二轮优化（寄存器单 pass epilogue +
+> 双 kernel tile 解耦 + MoE tile 双路径 + GM_EPI）后的演进见本节末性能演进表。
+
+**dense 10-case**（几何平均 1.1615x vs torch，benchmark 10/10，verify 8/10）：
+
+| case | 配置 | verify | speedup |
+|---|---|---|---|
+| 1 | gelu fp16 M=128 K=1024 N1=1024 | pass | 1.1156 |
+| 2 | gelu fp16 M=320 K=1024 N1=1536 b1+b2 | pass | 1.0253 |
+| 3 | fastgelu fp16 M=256 K=2048 N1=2048 | pass | 1.3695 |
+| 4 | relu fp16 M=64 K=512 N1=512 b1+b2 | pass | 1.0619 |
+| 5 | silu fp16 M=128 K=4096 N1=4096 b1+b2 | fail | — |
+| 6 | geglu fp16 M=128 K=1024 N1=2048 | pass | 1.3410 |
+| 7 | swiglu fp16 M=256 K=2048 N1=4096 b1+b2 | fail | — |
+| 8 | reglu fp16 M=64 K=512 N1=1024 | pass | 1.0000 |
+| 9 | gelu bf16 M=128 K=1024 N1=1024 | pass | 1.0411 |
+| 10 | silu fp16 M=8 K=1024 N1=1024 b1+b2 | pass | 1.0256 |
+
+**MoE 扩展**（vs CANN 内置 FFN 融合算子 inner_precise=1，msprof kernel Duration）：
+
+| 场景 | 本实现 us | 内置算子 us | 加速比 |
+|---|---|---|---|
+| silu E=8 M=256 K=2048/1024 b1+b2 | 90.8 | 69.9 | 0.77x |
+| gelu E=16 M=1024 K=4096/2048 | 676.7 | 612.9 | 0.91x |
+| relu E=32 M=512 K=2048/2048 b1 | 589.2 | 559.3 | 0.95x |
+| silu E=64 M=1024 K=2048/1024 b2 | 851.9 | 613.5 | 0.72x |
+| gelu E=4 M=128 K=1024/512 b1+b2 | 34.1 | 28.1 | 0.82x |
+
+**性能演进**（vs CANN 内置 FFN 融合算子，msprof kernel Duration 几何平均）：
+
+| 版本 | dense 10-case | MoE 5 场景 | 关键变更 |
+|------|------------|----------------------|---------|
+| iter_5（初版，GM 物化 epilogue） | 1.06x | 0.84x | 基线（bit-exact 对齐逐 op 链） |
+| opt_iter_0（寄存器单 pass epilogue） | 1.21x | 0.81x | 移除 store-reload 三趟 GM 遍历 |
+| opt_iter_3（MoE tile 双路径） | 1.21x | 0.94x | M/E≤16 或 K1≥4096 → (32,256,128) |
+| ir_2（gemm2 tile 解耦 BM2=128） | 1.27x | 0.94x | 无激活链 kernel 的 UB 余量换大 BM |
+| ir_3（MoE gemm2 独立前缀） | 1.27x | 0.96x | W2 重读减半（case12 0.66→0.78x） |
+| **opt_iter_8（GM_EPI 大权重路径）** | **1.29x** | **1.00x** | 权重流量主导时回 GM 物化换 BM=128；全部 15 行 ≥ 初版 |
+
+---
+
+## §8 常见陷阱与避免方法
+
+### §8.1 RotaryMul 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -994,7 +1245,7 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | fp16/bf16 精度不足 | kernel 内直接以 fp16 做乘加减，relative error 超标 | kernel 内升 fp32 计算，存回前转回原精度（T2/L1.4） |
 | Naive grid splitting 导致 idle core | `grid = (num_cores,)` + `for block in range(pid, num_blocks, num_cores)` 在 `num_blocks < num_cores` 时大量 core 空闲 | Uniform grid splitting（L2.2/L3.2）确保每个 core 处理连续且均匀的 block 范围 |
 
-### §7.2 MoeComputeExpertTokens 陷阱
+### §8.2 MoeComputeExpertTokens 陷阱
 
 | 陷阱 | 表现 | 避免方法 |
 |------|------|---------|
@@ -1004,7 +1255,7 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | 动态 grid 计算 | 增加 host 侧开销、编译器优化受限 | grid 固定为 `(num_expert,)` 和 `(1,)`（L1.4） |
 | 跨 expert 循环计数 | 每个 block 做 64 次比较，指令膨胀 | grid 映射到 expert，每个 block 只比较一次（L1.3） |
 
-### §7.3 MoeGatingTopKSoftmax 陷阱
+### §8.3 MoeGatingTopKSoftmax 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -1020,7 +1271,7 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | LLVM_ROOT 环境变量未设置导致编译失败 | `clang++: symbol lookup error: undefined symbol: _ZN4llvm24createAutotuningDumpPassEv` | 设置 `LLVM_ROOT` 指向包含完整 libLLVM-17.so 的路径 |
 | CANN 9.1.0 与 Triton 常量名不兼容 | `RT_LIMIT_TYPE_SIMT_WARP_STACK_SIZE` 在 CANN 9.1.0 中已重命名 | 修改 Triton 的 `npu_utils.cpp` 中的常量名为 `RT_LIMIT_TYPE_SIMT_DVG_WARP_STACK_SIZE`（一次性修复） |
 
-### §7.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
+### §8.4 AttentionSoftmaxWithSoftcappingAndDropout 陷阱
 
 | 陷阱 | 原因 | 避免方法 |
 |------|------|---------|
@@ -1030,7 +1281,7 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | 循环引入后 UB overflow | 分核优化引入 `for block_id in range(pid, n_blocks, num_pids)` 循环后，大 K (BLOCK_N=1024) + ROW_TILE=16 触发 BiShengIR `ub over` 编译错误 | 收紧 UB budget 从 128KB 到 48KB，确保 `ROW_TILE * BLOCK_N * 4 <= 48KB`（L1.5） |
 | grid 远超核数导致串行调度 | 朴素模式 `grid = ceil(num_rows/ROW_TILE)`，num_rows=32768 时 grid=2048，远超 48 核，NPU 串行执行 | `grid_size = min(natural_blocks, num_cores)`，每个 program 循环处理多块（T1/L3.1） |
 | mask 元素污染归约 | padding 元素（load 时 other=0）参与 max/sum 导致结果错误 | max 前 `tl.where(mask, x, -inf)`，sum 前 `tl.where(mask, exp_val, 0.0)`（L1.4） |
-### §7.5 LightningIndexer 陷阱
+### §8.5 LightningIndexer 陷阱
 
 | 陷阱 | 现象 | 避免方法 |
 |------|------|---------|
@@ -1040,4 +1291,24 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | 拆分路径只在小 shape 验证 | verify 8/8 全走融合路径，拆分路径未被验证 | 拆分路径单独做大 shape 位级复验（实测 0/8.4M 差异） |
 | 同名 kernel 混淆 profiling 归因 | qk/hsum 都显示 "kernel" | 归因用唯一 kernel 名，勿凭名字判断耗时 |
 | torch 参考大 shape OOM | `expand` 是零拷贝视图，`.reshape()` 触发真实拷贝，把 `[B,S1,D,S2]` 整体复制成 68GB 内存 | 基线缺陷不可改（freeze 锚定），报告标注 |
+
+### §8.6 FFN 陷阱
+
+| 陷阱 | 原因 | 避免方法 |
+|------|------|---------|
+| 单 kernel 融合两段 GEMM | GEMM2 需全量 H，跨块同步不可用 | 双 kernel 拆分（L1.1） |
+| GLU 先落盘 g 再逐元素 kernel | 多两趟 GM 访存 + 额外 launch | 双累加器 epilogue 融合（L1.2） |
+| GLU 双累加器超 L0C | 2×BM×BN×4B > 128KB spill | BM×BN ≤ 16384（L1.5） |
+| 右半列偏移写成 bj*BN+KH 与 K2 混淆 | KH=N1//2 与 W2 的 K2 同值但语义不同源 | 统一用 KH 变量 |
+| 激活字符串传进 kernel | device 侧无字符串分支 | constexpr 枚举分派（L1.4） |
+| fastgelu 用错公式 | tanh 近似系数固定 0.7978845608028654/0.044715 | 对照公式表，与 gelu(erf) 严格区分 ACT_TYPE |
+| epilogue 用 round-trip cast 保留舍入 | dot 累加器派生值的有损 cast 被编译器消除，舍入链丢失 | GM 物化 store-reload（T7/L1.8/L3.1） |
+| epilogue 全宽 [BM,BN] 做 erf/tanh 链 | 激活链 + store-reload 工作区超 192KB UB | BN_EPI=64 子切片（L1.9） |
+| fp16 常数直接用 fp32 字面量 | 内置算子 fp16 路径先把常数舍入到 f16 再运算 | host 侧 `torch.tensor(c, dtype=f16)` 预舍入（L3.2） |
+| MoE 权重偏移用 int32 索引 | E×K×N 超 int32 上限地址回绕 | `e.to(tl.int64) * K * N` 基址（T8/L1.10） |
+| MoE 每次调用同步 H2D 上传前缀 | 每次前向 ~150us 同步开销 | pinned 环形缓冲 + non_blocking（T8/L3.4） |
+| gemm2 沿用 gemm1 的小 BM | gemm2 无激活链，UB 余量闲置；W2 按多 M-block 重读，MTE2 饱和 | 双 kernel tile 解耦，dense M%128==0 时 BM2=128，MoE 独立 BM2+blk2 前缀（L1.11） |
+| 寄存器 epilogue 配 (128,128) tile | 激活链活跃量 4/5 单元 × 64KB 超 192KB UB（实测需 256KB） | 非 GLU (64,128) / GLU (128,64)，按单元 = BM×BN×4B 预算活跃量 |
+| K 循环 mask 比较转 fp32 防标量降级 | 新增活跃缓冲打破 multibuffer 预算，实测 UB overflow 228KB | 不动热路径 mask，或与 tile 降档配套编译实测 |
+| MoE 大权重的 gemm1 强用寄存器 epilogue | UB 限 BM≤64，W1 读多遍，MTE2 饱和 | K1≥4096 回 GM 物化 epilogue + BM=128（§7.4 GM_EPI 路径） |
 

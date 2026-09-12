@@ -24,6 +24,7 @@ MERE/MARE 校验不通过时，按照系统化的五阶隔离法逐层排查，�
 - 42 case 多 shape 场景下大面积精度偏差
 - 已排除明显算法错误（shape mismatch、NaN/Inf 不一致），需定位隐蔽的编译器行为差异
 - 尤其适用于涉及常量除法、标量/向量浮点操作混合的量化类算子
+- GEMM 融合类算子 epilogue 精度偏差（round-trip cast 被编译器消除，逐 op 舍入链丢失，见模式 4）
 
 ## 排查方法论：五阶隔离法
 
@@ -230,6 +231,24 @@ AST 校验器明确允许 `self._route()` 作为合法的 kernel dispatch 包装
 
 > **同根因的另一形态**：attention 类算子里，参考实现的 `aclnnDivs` 与设备 fp32 除法（Newton 迭代、非正确舍入）会让 `scores` 差 1 ulp，经 `exp` 放大成 ~0.8% 权重误差。解法不是查找表而是**整条算术路径逐位复刻**（host 侧 fp32 倒数乘法 + 三条配套契约），见 `references/attention-lowprec-contract.md`。
 
+### 模式 4：Epilogue cast 消除导致舍入语义丢失（GEMM 融合类算子）
+
+**根因**：`tl.dot` 的 fp32 累加器若在 epilogue 中紧跟 round-trip cast
+（`acc.to(f16).to(f32)`），Triton-Ascend 编译器判定其为 no-op 直接消除，
+"每步运算前舍入到输入 dtype"的逐 op 舍入链不复存在，epilogue 后续
+运算实际作用在未舍入的 fp32 上。
+
+**无效拦截**（均被编译器消除，勿再尝试）：bitcast、`tl.where` 强制依赖、
+`tl.debug_barrier`。
+
+**修复方案**：GM 物化（store-reload）——将舍入后的累加器先落 GM 再读回：
+
+```python
+tl.store(h_ptr + ..., acc.to(DT), mask=msk)      # round 后的值强制落 GM
+g = tl.load(h_ptr + ..., mask=msk_e, other=0.0)  # 读回的已是 DT 舍入值
+# 此后 bias/激活链的逐 op 舍入语义成立
+```
+
 ---
 
 ## 扩展检查清单
@@ -261,6 +280,7 @@ AST 校验器明确允许 `self._route()` 作为合法的 kernel dispatch 包装
 - [ ] **BLOCK_SIZE=1 陷阱**：任何使用 `tl.arange(0, BLOCK_SIZE)` 的地方，若 BLOCK_SIZE=1，检查编译器日志确认未被优化为标量
 - [ ] **循环展开**：显式 `for` 循环中的标量操作 vs 向量化操作，对比结果
 - [ ] **grid=1 行为**：grid 数为 1 时是否触发了不同的调度或指令选择？
+- [ ] **cast 消除**：dot 累加器后的 `f32 -> f16 -> f32` round-trip cast 可能被编译器当 no-op 消除，舍入语义丢失；用 GM 物化（store-reload）强制落盘（模式 4）
 
 ---
 
@@ -279,3 +299,4 @@ AST 校验器明确允许 `self._route()` 作为合法的 kernel dispatch 包装
 3. **BLOCK_SIZE=1 在 Triton 中不等于向量操作**，编译器可能优化回标量；保守选择 BLOCK_SIZE >= 2
 4. **常量除法是量化类算子的高风险点**，`scale = max / constant` 这类操作应优先放入独立 kernel 并强制 vector 路径
 5. **多 kernel 场景用 `_route()` 包装**，既满足 AST 校验，又保持代码结构清晰
+6. **编译器会消除"看似有副作用"的 round-trip cast**，逐 op 舍入链必须通过 GM 物化（store-reload）强制生效
