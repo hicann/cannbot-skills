@@ -199,10 +199,10 @@ DEFAULT_TIMEOUT=60
 DEFAULT_PLATFORM="opencode"  # claude, opencode, or all
 
 # Test results tracking
-declare -g TEST_PASSED=0
-declare -g TEST_FAILED=0
-declare -g TEST_SKIPPED=0
-declare -g TEST_START_TIME=0
+TEST_PASSED=0
+TEST_FAILED=0
+TEST_SKIPPED=0
+TEST_START_TIME=0
 
 # =============================================================================
 # Platform Detection

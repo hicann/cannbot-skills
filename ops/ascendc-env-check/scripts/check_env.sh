@@ -137,8 +137,8 @@ fi
 echo ""
 
 _get_cann_version() {
-    declare -g CANN_VERSION=""
-    declare -g CANN_RUNTIME_REQ=""
+    CANN_VERSION=""
+    CANN_RUNTIME_REQ=""
     if [ -n "$CANN_TOOLKIT_PATH" ] && [ -f "$CANN_TOOLKIT_PATH/compiler/version.info" ]; then
         CANN_VERSION=$(grep '^Version=' "$CANN_TOOLKIT_PATH/compiler/version.info" | cut -d'=' -f2)
         CANN_RUNTIME_REQ=$(grep '^required_package_runtime_version=' "$CANN_TOOLKIT_PATH/compiler/version.info" | cut -d'=' -f2 | tr -d '"')

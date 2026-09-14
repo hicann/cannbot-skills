@@ -20,6 +20,14 @@
 
 set -euo pipefail
 
+# Require bash 4.2+ ('declare -gA' associative arrays are used; macOS default bash 3.2 is unsupported)
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 2))); then
+    echo "ERROR: bash >= 4.2 is required to run this script (got ${BASH_VERSION})." >&2
+    echo "macOS default bash 3.2 is not supported. Install a newer bash, e.g. 'brew install bash'," >&2
+    echo "then re-run with: \"\$(brew --prefix)/bin/bash $0\"" >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
