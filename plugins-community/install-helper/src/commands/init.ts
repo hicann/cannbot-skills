@@ -21,7 +21,7 @@ import { t } from "../utils/i18n.js";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { addInstalledPlugin } from "../utils/config.js";
-import { getConfigRoot } from "../utils/paths.js";
+import { getConfigRoot, getSkillsRoot } from "../utils/paths.js";
 import type { AITool, InstallLevel } from "../types/index.js";
 import { selectTheme } from "../ui/theme.js";
 import { BACK, CANCEL } from "../utils/constants.js";
@@ -263,11 +263,10 @@ async function skillInstallFlow(): Promise<"done" | "back"> {
           }
         }
 
-        const configRoot = getConfigRoot(tool, level);
         logger.blank();
         logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
         logger.blank();
-        logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
+        logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
         logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
         logger.blank();
         return "done";

@@ -17,20 +17,31 @@ const ROOT = path.join(__dirname, "..");
 const PLUGINS_DIR = path.join(ROOT, "plugins.d");
 const DEFAULTS_PATH = path.join(PLUGINS_DIR, "_defaults.yml");
 const OUT_PATH = path.join(ROOT, "src", "embedded-plugins.json");
+const CONFIG_OUT_PATH = path.join(ROOT, "src", "embedded-config.json");
 
-// scanDirs loaded from src/config/repository.yaml (single source of truth)
-function loadScanDirs() {
+// scanDirs/pluginDirs loaded from src/config/repository.yaml (single source of truth)
+function loadScanConfig() {
   try {
     const configPath = path.join(ROOT, "src", "config", "repository.yaml");
     const config = yaml.parse(fs.readFileSync(configPath, "utf-8"));
-    if (Array.isArray(config.scanDirs) && config.scanDirs.length > 0) {
-      return config.scanDirs;
-    }
+    return {
+      scanDirs: (Array.isArray(config.scanDirs) && config.scanDirs.length > 0)
+        ? config.scanDirs
+        : ["ops", "model", "graph", "infra", "runtime"],
+      pluginDirs: (Array.isArray(config.pluginDirs) && config.pluginDirs.length > 0)
+        ? config.pluginDirs
+        : ["plugins-official", "plugins-community"],
+      cacheTtlHours: config.scanCacheTtlHours || 24,
+    };
   } catch {}
-  return ["ops", "model", "graph", "infra", "runtime"];
+  return {
+    scanDirs: ["ops", "model", "graph", "infra", "runtime"],
+    pluginDirs: ["plugins-official", "plugins-community"],
+    cacheTtlHours: 24,
+  };
 }
 
-const SCAN_DIRS = loadScanDirs();
+const SCAN_DIRS = loadScanConfig().scanDirs;
 
 let defaults = {};
 try {
@@ -273,6 +284,13 @@ function run() {
 
   fs.writeFileSync(OUT_PATH, JSON.stringify(plugins, null, 2));
   console.log(`Generated embedded-plugins.json with ${plugins.length} plugins (metadata validated)`);
+
+  // Emit embedded-config.json so the bun-compiled native binary (which cannot
+  // read dist/config/repository.yaml at runtime) picks up the same scan/plugin
+  // directory configuration. tsup dist still prefers the shipped yaml file.
+  const scanConfig = loadScanConfig();
+  fs.writeFileSync(CONFIG_OUT_PATH, JSON.stringify(scanConfig, null, 2));
+  console.log(`Generated embedded-config.json (scanDirs: ${scanConfig.scanDirs.join(", ")}; pluginDirs: ${scanConfig.pluginDirs.join(", ")})`);
 }
 
 run();

@@ -15,7 +15,7 @@ import { select, checkbox, Separator, confirm } from "@inquirer/prompts";
 import { findPlugin } from "../core/registry.js";
 import { findSkill } from "../core/skill-registry.js";
 import { uninstallSkills, interactiveSkillUnselect } from "../core/skill-installer.js";
-import { readRecord, deleteRecord, getInstalledSkills, getLastBatchSkills, scanInstalledFiles } from "../core/record.js";
+import { readRecord, deleteRecord, getInstalledSkills, getLastBatchSkills, scanInstalledFiles, readSkillRecord } from "../core/record.js";
 import { removeInstalledPlugin } from "../utils/config.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
@@ -23,7 +23,7 @@ import { t } from "../utils/i18n.js";
 import type { AITool, InstallLevel, CannbotManifest } from "../types/index.js";
 import { findBackups, restoreBackup, deleteBackup } from "../core/backup.js";
 import { showRestorePrompt } from "../ui/backup-prompts.js";
-import { getConfigRoot, validateTool, validateLevel, VALID_TOOLS } from "../utils/paths.js";
+import { getConfigRoot, getSkillsRoot, validateTool, validateLevel, VALID_TOOLS } from "../utils/paths.js";
 import { scanInstalled } from "../core/manifest.js";
 import { selectTheme, checkboxTheme } from "../ui/theme.js";
 import { selectToolWithDetection } from "../ui/wizard.js";
@@ -70,11 +70,38 @@ export async function uninstallCommand(
       skills.push(skill.id);
       continue;
     }
+    // Skills absent from the static fallback list (newly added repo domains
+    // like tools/ drift from it) are still uninstalled by name when an
+    // install record exists — mirrors the record-driven plugin fallback.
+    if (isRecordedSkill(name)) {
+      skills.push(name);
+      continue;
+    }
+    // Community plugins are not in the embedded registry — allow uninstall
+    // by name when an install record exists (previously "not found").
+    if (readRecord(name)) {
+      plugins.push(name);
+      continue;
+    }
     logger.error(`${t("uninstall_not_found")}: ${name}`);
   }
 
   await uninstallPlugins(plugins, options.yes || false);
   await uninstallSkillsByName(skills, tool, level);
+}
+
+export function isRecordedSkill(skillId: string): boolean {
+  const record = readSkillRecord();
+  for (const toolName of Object.keys(record)) {
+    for (const levelName of Object.keys(record[toolName])) {
+      for (const installPath of Object.keys(record[toolName][levelName])) {
+        if (record[toolName][levelName][installPath].skills?.includes(skillId)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Promise<void> {
@@ -180,7 +207,7 @@ async function uninstallInteractive(
 
   // Check which tool×level combos have installed skills
   const toolsWithSkills = new Set<string>();
-  for (const toolName of ["opencode", "claude", "trae", "cursor", "copilot", "codearts"] as AITool[]) {
+  for (const toolName of VALID_TOOLS) {
     for (const lvl of ["project", "global"] as InstallLevel[]) {
       const ip = lvl === "project" ? process.cwd() : getConfigRoot(toolName, lvl);
       const skills = getInstalledSkills(toolName, lvl, ip);
@@ -364,7 +391,24 @@ async function uninstallPlugins(pluginIds: string[], batchMode: boolean): Promis
 }
 
 async function uninstallPluginById(pluginId: string, batchMode: boolean): Promise<void> {
-  const plugin = findPlugin(pluginId);
+  let plugin = findPlugin(pluginId);
+  if (!plugin) {
+    // Community plugin not in the embedded registry — recover display info
+    // from the install record so it can still be uninstalled by name.
+    const record = readRecord(pluginId);
+    if (record) {
+      plugin = {
+        id: pluginId,
+        dir: "",
+        displayName: record.displayName,
+        script: "init.sh",
+        aliases: [],
+        skills: 0,
+        agents: 0,
+        description: "",
+      };
+    }
+  }
   if (!plugin) return;
 
   let record = readRecord(plugin.id);
@@ -407,6 +451,11 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
 
   const configRoot = getConfigRoot(record.tool, record.level);
   const allowedBases = [resolve(configRoot), resolve(record.installPath)];
+  if (record.tool === "codex") {
+    // Codex skills live under .agents/skills which is outside the .codex
+    // config root — allow it explicitly so files there can be removed.
+    allowedBases.push(resolve(getSkillsRoot(record.tool, record.level, record.installPath)));
+  }
   const isSafePath = (p: string): boolean => {
     const resolved = resolve(p);
     return allowedBases.some(base => resolved === base || resolved.startsWith(base + sep));
@@ -457,6 +506,20 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
           logger.step(`  ${t("uninstall_clean_empty_dir")}: ${name}/`);
           removedDirs++;
         }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Codex skills live under .agents/skills — remove the empty .agents parent
+  if (record.tool === "codex") {
+    try {
+      const agentsRoot = resolve(getSkillsRoot(record.tool, record.level, record.installPath), "..");
+      if (existsSync(agentsRoot) && readdirSync(agentsRoot).length === 0) {
+        rmdirSync(agentsRoot);
+        logger.step(`  ${t("uninstall_clean_empty_dir")}: ${basename(agentsRoot)}/`);
+        removedDirs++;
       }
     } catch {
       // ignore

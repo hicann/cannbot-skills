@@ -16,7 +16,7 @@ import type {
   AITool,
   InstallLevel,
 } from "../types/index.js";
-import { getConfigRoot, getManifestPath, getAgentsFileName, VALID_TOOLS } from "../utils/paths.js";
+import { getConfigRoot, getManifestPath, getAgentsFileName, getSkillsRoot, VALID_TOOLS } from "../utils/paths.js";
 import { getAllPlugins } from "./registry.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 
@@ -105,7 +105,7 @@ export function scanInstalled(): InstalledPlugin[] {
 }
 
 function verifyPluginFilesExist(configRoot: string, manifest: CannbotManifest, tool: AITool, level: InstallLevel): boolean {
-  const skillsDir = join(configRoot, "skills");
+  const skillsDir = getSkillsRoot(tool, level);
   const agentsDir = join(configRoot, "agents");
   
   let hasAnyComponent = false;

@@ -12,6 +12,7 @@ import { readdirSync, existsSync } from "fs";
 import { join } from "path";
 import type { PluginEntry } from "../types/index.js";
 import { isDirectory } from "../utils/fs-helpers.js";
+import { getPluginDirs } from "./scanner.js";
 import embeddedPlugins from "../embedded-plugins.json" with { type: "json" };
 
 function loadPlugins(): PluginEntry[] {
@@ -24,15 +25,15 @@ function loadPlugins(): PluginEntry[] {
 
 export let PLUGIN_REGISTRY: PluginEntry[] = loadPlugins();
 
-const PLUGIN_DIRS = ["plugins-official", "plugins-community"];
-
 export function mergeDynamicPlugins(repoPath: string): void {
   if (!existsSync(repoPath)) return;
 
   const existingIds = new Set(PLUGIN_REGISTRY.map((p) => p.id));
   const dynamic: PluginEntry[] = [];
 
-  for (const pluginDir of PLUGIN_DIRS) {
+  // Plugin discovery scope follows repository.yaml pluginDirs (currently
+  // official plugins only — community plugins are not adapted yet).
+  for (const pluginDir of getPluginDirs()) {
     const parent = join(repoPath, pluginDir);
     if (!existsSync(parent)) continue;
 

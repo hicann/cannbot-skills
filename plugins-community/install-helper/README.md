@@ -99,7 +99,7 @@ install-helper install --list                            # 查看所有可用 Sk
 
 | 选项 | 说明 |
 |------|------|
-| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, copilot, codearts） |
+| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, codex, copilot, codearts） |
 | `--level <level>` | 安装级别（project, global），默认 project |
 | `--all` `-a` | 安装全部 Skills |
 | `--list` | 按类别列出所有可用 Skills |
@@ -163,7 +163,7 @@ install-helper uninstall --recent --yes
 
 | 选项 | 说明 |
 |------|------|
-| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, copilot, codearts） |
+| `--tool <tool>` | 指定 AI 工具（opencode, claude, trae, cursor, codex, copilot, codearts） |
 | `--level <level>` | 安装级别（project, global），默认 project |
 | `--yes` `-y` | 跳过确认提示 |
 | `--all` `-a` | 卸载全部已安装 Skills 和 Plugins |
@@ -198,10 +198,30 @@ install-helper lang set en_US      # 切换为英文
 | 9 | torch.compile 图模式 | torch-compile | torch, compile, graph |
 | 10 | 代码检视 | ops-code-reviewer | code-review, reviewer, review |
 
+## 适配范围
+
+- **当前仅适配官方插件**（`plugins-official/` 下 10 个插件，见上表）。社区插件（`plugins-community/`）迭代较快，暂不纳入 install-helper——`list`/`install` 不收录，社区插件请进入其目录按 quickstart.md 手动执行 `init.sh` 安装；待社区插件稳定后会在配置中恢复收录
+- **各插件支持的工具以其 `init.sh` 为准**（部分插件不支持全部工具，如 ops-direct-invoke 支持 dsh 但不支持 cursor/copilot）。install-helper 在执行安装脚本前会校验目标工具是否被插件适配，未适配时明确报错拦截，不会静默安装到默认目录
+
 ## 前置条件
 
-- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / GitHub Copilot / CodeArts）
+- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / Codex / GitHub Copilot / CodeArts）
 - Git（用于克隆 Skills 仓库）
+
+## Codex 安装说明
+
+Codex 的安装布局与其他工具不同（与其插件 `init.sh` 保持一致）：
+
+- **Skills**：项目级 `.agents/skills/`，全局 `~/.agents/skills/`
+- **Agents**：`.codex/agents/*.toml`（全局 `~/.codex/agents/`）。因 Codex 可能忽略软链的自定义 agent TOML（openai/codex#15345），agent 以**拷贝**方式安装，并将 `__CANNBOT_AGENT_SOURCE__` 解析为权威 `.md` 定义
+- **AGENTS.md**：项目根 + `.codex/AGENTS.md`
+
+```bash
+install-helper install torch-compile --tool codex        # 项目级
+install-helper install torch-compile --tool codex --level global  # 全局
+```
+
+> 注意：插件必须自带 `agents/codex/*.toml` 适配文件才能安装 agent；仅提供 init.sh 且未适配 codex 的社区插件会被明确拦截（避免误装到默认目录）。
 
 ## 开发
 

@@ -652,6 +652,19 @@ describe("plugins consistency — single source of truth", () => {
       expect(config.scanDirs).toContain("runtime");
     });
 
+    it("repository.yaml scanDirs includes tools (v1.1.15 domain sync)", () => {
+      const { parse } = require("yaml");
+      const config = parse(readFileSync(join(INSTALL_HELPER_ROOT, "src", "config", "repository.yaml"), "utf-8"));
+      expect(config.scanDirs).toContain("tools");
+    });
+
+    it("repository.yaml pluginDirs is scoped to official plugins (community not adapted)", () => {
+      const { parse } = require("yaml");
+      const config = parse(readFileSync(join(INSTALL_HELPER_ROOT, "src", "config", "repository.yaml"), "utf-8"));
+      expect(config.pluginDirs).toContain("plugins-official");
+      expect(config.pluginDirs).not.toContain("plugins-community");
+    });
+
     it("validate-plugins.cjs loadScanDirs reads from repository.yaml", () => {
       const validateModule = require("../scripts/validate-plugins.cjs");
       expect(validateModule).toBeDefined();

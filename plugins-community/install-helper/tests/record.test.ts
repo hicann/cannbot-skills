@@ -255,23 +255,46 @@ describe("record", () => {
     });
 
     it("backward compatible with old records without batches field", async () => {
-      const { readSkillRecord, writeSkillRecord, getLastBatchSkills, getRecordPath } = await import("../src/core/record.js");
+      const { readSkillRecord, writeSkillRecord, getLastBatchSkills, getRecordPath, removeSkillsFromRecord } = await import("../src/core/record.js");
       mkdirSync(join(getRecordPath("dummy"), ".."), { recursive: true });
-      const oldRecord = {
-        opencode: {
-          project: {
-            [testDir]: {
-              skills: ["skill-old"],
-              installTime: "2026-01-01T00:00:00.000Z",
-            },
-          },
-        },
-      };
-      writeSkillRecord(oldRecord);
+      // Merge the fixture under a unique key instead of replacing the whole
+      // file — other test files write skills.json in parallel and a
+      // whole-file write would clobber their state.
       const record = readSkillRecord();
-      expect(record.opencode.project[testDir].batches).toBeUndefined();
-      const lastBatch = getLastBatchSkills("opencode", "project", testDir);
-      expect(lastBatch).toBeNull();
+      record.opencode = record.opencode || {};
+      record.opencode.project = record.opencode.project || {};
+      record.opencode.project[testDir] = {
+        skills: ["skill-old"],
+        installTime: "2026-01-01T00:00:00.000Z",
+      };
+      writeSkillRecord(record);
+      try {
+        const updated = readSkillRecord();
+        expect(updated.opencode.project[testDir].batches).toBeUndefined();
+        const lastBatch = getLastBatchSkills("opencode", "project", testDir);
+        expect(lastBatch).toBeNull();
+      } finally {
+        removeSkillsFromRecord(["skill-old"], "opencode", "project", testDir);
+      }
     });
+  });
+});
+
+describe("scanInstalledFiles external repo fallback", () => {
+  it("fallback repo list includes ops-tensor and cann-samples symlinks", async () => {
+    const { scanInstalledFiles } = await import("../src/core/record.js");
+    const { symlinkSync, mkdirSync, rmSync } = await import("fs");
+
+    const opsTensorTarget = join(testDir, "ops-tensor-real");
+    mkdirSync(opsTensorTarget, { recursive: true });
+    symlinkSync(opsTensorTarget, join(testDir, "ops-tensor"));
+
+    const record = scanInstalledFiles(
+      "fb-plugin", "FB", "opencode", "project",
+      testDir, join(testDir, ".opencode"), null, undefined, undefined
+    );
+
+    expect(record.files).toContain(join(testDir, "ops-tensor"));
+    rmSync(join(testDir, "ops-tensor"));
   });
 });

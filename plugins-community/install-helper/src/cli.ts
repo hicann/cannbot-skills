@@ -100,7 +100,7 @@ export function createCLI(): Command {
   program
     .command("install [names...]")
     .description("Install plugins or skills (auto-detects type)")
-    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, copilot, codearts)")
+    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, codex, copilot, codearts)")
     .option("-l, --level <level>", "Install level (project, global)", "project")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("-a, --all", "Install ALL available skills")
@@ -112,7 +112,7 @@ export function createCLI(): Command {
   program
     .command("uninstall [names...]")
     .description("Uninstall plugins or skills (auto-detects type)")
-    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, copilot, codearts)")
+    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, codex, copilot, codearts)")
     .option("-l, --level <level>", "Install level (project, global)", "project")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("-a, --all", "Uninstall ALL installed skills and plugins")
@@ -124,7 +124,7 @@ export function createCLI(): Command {
   program
     .command("update [plugins...]")
     .description("Update installed plugins (git pull + reinstall)")
-    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, copilot, codearts)")
+    .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, codex, copilot, codearts)")
     .option("-l, --level <level>", "Install level (project, global)")
     .option("-y, --yes", "Skip confirmation prompts")
     .action(async (plugins: string[], options: { tool?: string; level?: string; yes?: boolean }) => {

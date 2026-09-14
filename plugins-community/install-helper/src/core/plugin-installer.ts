@@ -7,11 +7,11 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
-import { existsSync, mkdirSync, symlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, symlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join, basename } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, PluginEntry, PluginManifestExternalRepo, CannbotManifest } from "../types/index.js";
-import { getConfigRoot, getAgentsFileName } from "../utils/paths.js";
+import { getConfigRoot, getAgentsFileName, getSkillsRoot } from "../utils/paths.js";
 import { isSymlink, removePath } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
@@ -258,7 +258,7 @@ export async function installViaManifest(
   const pluginDir = join(repoPath, plugin.dir);
 
   try {
-    const skillsDir = join(configRoot, "skills");
+    const skillsDir = getSkillsRoot(tool, level, cwd);
     const agentsDir = join(configRoot, "agents");
     mkdirSync(skillsDir, { recursive: true });
     mkdirSync(agentsDir, { recursive: true });
@@ -293,6 +293,37 @@ export async function installViaManifest(
     }
 
     for (const agentName of plugin.installAgents || []) {
+      if (tool === "codex") {
+        // Codex custom agents use standalone TOML files and may ignore symlinks
+        // (openai/codex#15345). Install regular TOML files with the
+        // __CANNBOT_AGENT_SOURCE__ placeholder resolved to the canonical .md
+        // so multiple plugins can coexist in the same .codex/agents/ directory.
+        const baseName = agentName.replace(/\.md$/, "");
+        const tomlSource = join(pluginDir, "agents", "codex", `${baseName}.toml`);
+        if (!existsSync(tomlSource)) {
+          logger.warn(t("install_agent_codex_toml_missing").replace("{name}", baseName).replace("{path}", tomlSource));
+          continue;
+        }
+
+        const canonicalMd = join(pluginDir, "agents", `${baseName}.md`);
+        const canonicalPath = existsSync(canonicalMd) ? realpathSync(canonicalMd) : canonicalMd;
+        const targetPath = join(agentsDir, `${baseName}.toml`);
+
+        try {
+          const content = readFileSync(tomlSource, "utf-8")
+            .split("__CANNBOT_AGENT_SOURCE__")
+            .join(canonicalPath);
+          if (existsSync(targetPath) || isSymlink(targetPath)) {
+            removePath(targetPath);
+          }
+          writeFileSync(targetPath, content, "utf-8");
+          installedAgents.push(`${baseName}.toml`);
+        } catch {
+          logger.warn(t("install_agent_failed").replace("{name}", `${baseName}.toml`));
+        }
+        continue;
+      }
+
       const agentFile = agentName.endsWith(".md") ? agentName : `${agentName}.md`;
       const agentPath = join(pluginDir, "agents", agentFile);
       if (!existsSync(agentPath)) {

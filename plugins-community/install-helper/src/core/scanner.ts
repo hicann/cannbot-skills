@@ -15,6 +15,7 @@ import { parse as parseYaml } from "yaml";
 import { getCannbotConfigDir } from "../utils/paths.js";
 import { atomicWriteFileSync } from "../utils/fs.js";
 import { isDirectory } from "../utils/fs-helpers.js";
+import embeddedConfig from "../embedded-config.json" with { type: "json" };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -54,22 +55,45 @@ const EXCLUDE_DIRS = new Set([
 ]);
 
 function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[]; cacheTtlMs: number } {
-  const configPath = join(__dirname, "config", "repository.yaml");
-  try {
-    const config = parseYaml(readFileSync(configPath, "utf-8"));
-    const ttlHours = config.scanCacheTtlHours || 24;
+  // Resolution order:
+  //   1. repository.yaml on disk — runtime override, works for tsup dist
+  //      (dist/config/) and TS source (src/core → ../config/)
+  //   2. embedded-config.json — generated from repository.yaml at build time;
+  //      the only source available inside the bun-compiled native binary
+  //   3. hardcoded defaults (must not drift from repository.yaml)
+  const configCandidates = [
+    join(__dirname, "config", "repository.yaml"),
+    join(__dirname, "..", "config", "repository.yaml"),
+  ];
+  for (const configPath of configCandidates) {
+    try {
+      const config = parseYaml(readFileSync(configPath, "utf-8"));
+      if (!config) continue;
+      const ttlHours = config.scanCacheTtlHours || 24;
+      return {
+        skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "runtime"],
+        pluginDirs: config.pluginDirs || ["plugins-official", "plugins-community"],
+        cacheTtlMs: ttlHours * 60 * 60 * 1000,
+      };
+    } catch {
+      // try next candidate
+    }
+  }
+  const embedded = embeddedConfig as { scanDirs?: string[]; pluginDirs?: string[]; cacheTtlHours?: number };
+  if (Array.isArray(embedded.scanDirs) && embedded.scanDirs.length > 0) {
     return {
-      skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "runtime"],
-      pluginDirs: config.pluginDirs || ["plugins-official", "plugins-community"],
-      cacheTtlMs: ttlHours * 60 * 60 * 1000,
-    };
-  } catch {
-    return {
-      skillDirs: ["ops", "model", "graph", "infra", "runtime"],
-      pluginDirs: ["plugins-official", "plugins-community"],
-      cacheTtlMs: 24 * 60 * 60 * 1000,
+      skillDirs: embedded.scanDirs,
+      pluginDirs: Array.isArray(embedded.pluginDirs) && embedded.pluginDirs.length > 0
+        ? embedded.pluginDirs
+        : ["plugins-official", "plugins-community"],
+      cacheTtlMs: (embedded.cacheTtlHours || 24) * 60 * 60 * 1000,
     };
   }
+  return {
+    skillDirs: ["ops", "model", "graph", "infra", "runtime"],
+    pluginDirs: ["plugins-official", "plugins-community"],
+    cacheTtlMs: 24 * 60 * 60 * 1000,
+  };
 }
 
 const scanConfig = loadScanConfig();
@@ -78,6 +102,10 @@ const PLUGIN_SCAN_DIRS = scanConfig.pluginDirs;
 
 export function getScanDirs(): string[] {
   return [...SKILL_SCAN_DIRS];
+}
+
+export function getPluginDirs(): string[] {
+  return [...PLUGIN_SCAN_DIRS];
 }
 
 export function scanSkills(repoPath: string): ScannedSkill[] {

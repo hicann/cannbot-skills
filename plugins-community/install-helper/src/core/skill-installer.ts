@@ -9,12 +9,12 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, mkdirSync, symlinkSync, readdirSync, rmSync, realpathSync, readlinkSync, cpSync } from "fs";
-import { join, dirname, isAbsolute } from "path";
+import { join, dirname, basename, isAbsolute } from "path";
 import { select, checkbox, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
 import Table from "cli-table3";
 import type { AITool, InstallLevel } from "../types/index.js";
-import { getConfigRoot } from "../utils/paths.js";
+import { getConfigRoot, getSkillsRoot } from "../utils/paths.js";
 import { isSymlink, removePath } from "../utils/fs-helpers.js";
 import { BACK, CANCEL } from "../utils/constants.js";
 import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
@@ -43,7 +43,7 @@ export async function installSkills(
   repoPath: string
 ): Promise<SkillInstallResult[]> {
   const configRoot = getConfigRoot(tool, level);
-  const skillsDir = join(configRoot, "skills");
+  const skillsDir = getSkillsRoot(tool, level);
   const installPath = level === "project" ? process.cwd() : configRoot;
 
   if (!existsSync(skillsDir)) {
@@ -124,7 +124,7 @@ export async function uninstallSkills(
   level: InstallLevel
 ): Promise<SkillUninstallResult[]> {
   const configRoot = getConfigRoot(tool, level);
-  const skillsDir = join(configRoot, "skills");
+  const skillsDir = getSkillsRoot(tool, level);
   const installPath = level === "project" ? process.cwd() : configRoot;
 
   const results: SkillUninstallResult[] = [];
@@ -159,6 +159,18 @@ export async function uninstallSkills(
       if (entries.length === 0) {
         rmSync(skillsDir, { recursive: true });
         logger.step(`  ${t("uninstall_clean_empty_dir")}: skills/`);
+        // Codex skills live under .agents/skills — clean up the empty .agents parent too
+        if (tool === "codex") {
+          const agentsRoot = dirname(skillsDir);
+          try {
+            if (existsSync(agentsRoot) && readdirSync(agentsRoot).length === 0) {
+              rmSync(agentsRoot, { recursive: true });
+              logger.step(`  ${t("uninstall_clean_empty_dir")}: ${basename(agentsRoot)}/`);
+            }
+          } catch {
+            // ignore
+          }
+        }
       }
     } catch {
       // ignore

@@ -80,3 +80,29 @@ describe("registry", () => {
     expect(plugin).toBeUndefined();
   });
 });
+
+describe("mergeDynamicPlugins scope (official plugins only)", () => {
+  it("registers official plugins but skips community plugins", async () => {
+    const { mergeDynamicPlugins, findPlugin } = await import("../src/core/registry.js");
+    const { mkdirSync, writeFileSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const repo = join(tmpdir(), `ih-reg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      const official = join(repo, "plugins-official", "zz-fake-official-plugin");
+      mkdirSync(official, { recursive: true });
+      writeFileSync(join(official, "init.sh"), "#!/bin/bash\n");
+      const community = join(repo, "plugins-community", "zz-fake-community-plugin");
+      mkdirSync(community, { recursive: true });
+      writeFileSync(join(community, "init.sh"), "#!/bin/bash\n");
+
+      mergeDynamicPlugins(repo);
+
+      expect(findPlugin("zz-fake-official-plugin")).toBeDefined();
+      expect(findPlugin("zz-fake-community-plugin")).toBeUndefined();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});

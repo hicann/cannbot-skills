@@ -99,3 +99,46 @@ describe("parseFrontmatter", () => {
     unlinkSync(tmpFile);
   });
 });
+
+describe("scanDirs / pluginDirs configuration", () => {
+  it("getScanDirs includes the tools domain", async () => {
+    const { getScanDirs } = await import("../src/core/scanner.js");
+    const dirs = getScanDirs();
+    expect(dirs).toContain("tools");
+    for (const d of ["ops", "model", "graph", "infra", "runtime"]) {
+      expect(dirs).toContain(d);
+    }
+  });
+
+  it("getPluginDirs only includes official plugins (community not adapted)", async () => {
+    const { getPluginDirs } = await import("../src/core/scanner.js");
+    const dirs = getPluginDirs();
+    expect(dirs).toContain("plugins-official");
+    expect(dirs).not.toContain("plugins-community");
+  });
+
+  it("scanSkills discovers tools/ domain skills and skips community plugin skills", async () => {
+    const { scanSkills } = await import("../src/core/scanner.js");
+    const { mkdirSync, writeFileSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const repo = join(tmpdir(), `ih-scan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      mkdirSync(join(repo, "tools", "fake-tool-skill"), { recursive: true });
+      writeFileSync(join(repo, "tools", "fake-tool-skill", "SKILL.md"), "---\nname: fake-tool-skill\ndescription: tools domain\n---\n");
+      mkdirSync(join(repo, "plugins-official", "fake-official-plugin", "skills", "official-skill"), { recursive: true });
+      writeFileSync(join(repo, "plugins-official", "fake-official-plugin", "skills", "official-skill", "SKILL.md"), "---\nname: official-skill\ndescription: official\n---\n");
+      mkdirSync(join(repo, "plugins-community", "fake-community-plugin", "skills", "community-skill"), { recursive: true });
+      writeFileSync(join(repo, "plugins-community", "fake-community-plugin", "skills", "community-skill", "SKILL.md"), "---\nname: community-skill\ndescription: community\n---\n");
+
+      const skills = scanSkills(repo);
+      const ids = skills.map((s) => s.id);
+      expect(ids).toContain("fake-tool-skill");
+      expect(ids).toContain("official-skill");
+      expect(ids).not.toContain("community-skill");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});

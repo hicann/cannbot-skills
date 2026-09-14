@@ -8,7 +8,9 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 import { describe, it, expect } from "vitest";
-import { validateTool, validateLevel, getConfigRoot, getAgentsFileName } from "../src/utils/paths.js";
+import { validateTool, validateLevel, getConfigRoot, getAgentsFileName, getSkillsRoot } from "../src/utils/paths.js";
+import { homedir } from "os";
+import { join } from "path";
 
 describe("paths", () => {
   describe("validateTool", () => {
@@ -17,7 +19,9 @@ describe("paths", () => {
       expect(validateTool("claude")).toBe("claude");
       expect(validateTool("trae")).toBe("trae");
       expect(validateTool("cursor")).toBe("cursor");
+      expect(validateTool("codex")).toBe("codex");
       expect(validateTool("copilot")).toBe("copilot");
+      expect(validateTool("codearts")).toBe("codearts");
     });
 
     it("throws for invalid tool", () => {
@@ -52,6 +56,33 @@ describe("paths", () => {
     it("claude global uses .claude", () => {
       const root = getConfigRoot("claude", "global");
       expect(root).toContain(".claude");
+    });
+
+    it("codex project uses .codex under base", () => {
+      const root = getConfigRoot("codex", "project", "/tmp/proj");
+      expect(root).toBe(join("/tmp/proj", ".codex"));
+    });
+
+    it("codex global uses ~/.codex", () => {
+      const root = getConfigRoot("codex", "global");
+      expect(root).toBe(join(homedir(), ".codex"));
+    });
+  });
+
+  describe("getSkillsRoot", () => {
+    it("codex project uses .agents/skills under base", () => {
+      const root = getSkillsRoot("codex", "project", "/tmp/proj");
+      expect(root).toBe(join("/tmp/proj", ".agents", "skills"));
+    });
+
+    it("codex global uses ~/.agents/skills", () => {
+      const root = getSkillsRoot("codex", "global");
+      expect(root).toBe(join(homedir(), ".agents", "skills"));
+    });
+
+    it("non-codex tools use configRoot/skills", () => {
+      expect(getSkillsRoot("opencode", "project", "/tmp/proj")).toBe(join("/tmp/proj", ".opencode", "skills"));
+      expect(getSkillsRoot("claude", "global")).toBe(join(homedir(), ".claude", "skills"));
     });
   });
 

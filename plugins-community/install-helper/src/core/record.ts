@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs";
 import { join } from "path";
-import { getCannbotConfigDir, getConfigRoot } from "../utils/paths.js";
+import { getCannbotConfigDir, getSkillsRoot } from "../utils/paths.js";
 import { atomicWriteFileSync } from "../utils/fs.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
@@ -90,7 +90,7 @@ export function scanInstalledFiles(
   const directories: string[] = [];
 
   if (manifest) {
-    const skillsDir = join(configRoot, "skills");
+    const skillsDir = getSkillsRoot(tool, level, installPath);
     if (existsSync(skillsDir)) {
       directories.push(skillsDir);
       for (const skillName of manifest.installed_skills || []) {
@@ -148,7 +148,7 @@ export function scanInstalledFiles(
 
   const repoLinks = externalRepoNames && externalRepoNames.length > 0
     ? externalRepoNames
-    : ["asc-devkit", "pypto", "tilelang-ascend", "cann-recipes-infer", "cann-samples"];
+    : ["asc-devkit", "pypto", "tilelang-ascend", "cann-recipes-infer", "cann-samples", "ops-tensor"];
   for (const repoName of repoLinks) {
     const repoLinkPath = join(installPath, repoName);
     if (isSymlink(repoLinkPath)) {
@@ -289,8 +289,7 @@ export function getInstalledSkills(
   const record = readSkillRecord();
   const recordedSkills = record[tool]?.[level]?.[installPath]?.skills || [];
 
-  const configRoot = getConfigRoot(tool, level);
-  const skillsDir = join(configRoot, "skills");
+  const skillsDir = getSkillsRoot(tool, level);
 
   const fromRecord = recordedSkills.filter((skillId) => {
     const skillPath = join(skillsDir, skillId);
@@ -331,10 +330,7 @@ export function getLastBatchSkills(
     return null;
   }
   const lastBatch = entry.batches[entry.batches.length - 1];
-  const configRoot = level === "project"
-    ? getConfigRoot(tool, level, installPath)
-    : getConfigRoot(tool, level);
-  const skillsDir = join(configRoot, "skills");
+  const skillsDir = getSkillsRoot(tool, level, installPath);
   return lastBatch.skills.filter((skillId) => {
     const skillPath = join(skillsDir, skillId);
     return existsSync(skillPath) || isSymlink(skillPath);

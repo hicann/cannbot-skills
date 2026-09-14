@@ -1,5 +1,8 @@
 ## 🔥 更新日志
 ### 【2026-09-10】
+#### 新特性 New Features
+- 【安装部署】`install-helper`（v1.1.14 ~ v1.1.16，同一 PR 经 beta 试点全量验证后发布；v1.1.16 经 1.1.16-beta.0 验证）新增 `codex` 工具支持并与仓库内容对齐：Skills 安装至项目级 `.agents/skills/` 或全局 `~/.agents/skills/`，Agents 以拷贝方式安装 `.codex/agents/*.toml` 并将 `__CANNBOT_AGENT_SOURCE__` 解析为权威 `.md` 路径（规避 openai/codex#15345 软链被忽略），安装/卸载/更新/状态/健康检查全链路适配，布局与插件 `init.sh` 一致；脚本路径安装新增守卫，插件 `init.sh` 未适配目标工具时明确报错拦截、防止静默误装默认目录；`tools/` 技能域（asys-toolkit、msaicerr-toolkit、msnpureport-toolkit）纳入扫描；适配范围收敛为官方插件（`pluginDirs` 配置化，社区插件恢复收录仅需改一行配置）；修复社区插件与新增 Skills（tools 域等 23 个未同步进静态清单）按名卸载报"未找到"、codex 全局卸载 `~/.agents/skills/` 静默跳过、原生二进制无法运行时读取 `repository.yaml` 而静默回退默认配置（构建期内嵌 `embedded-config.json`）等问题，并补充对应看护用例（单元测试 278/278，7 工具 × 双级别 × 全命令 CLI 矩阵 196 断言）。
+
 #### 缺陷修复 Bug Fixes
 - 【ascendc-docs-search】适配 asc-devkit examples 目录按编程范式重组（01_simd_cpp_api 等）：重写 SKILL.md 示例索引与 example-catalog.md 目录树，同步修复 api-best-practices、tiling-design、torch-ascendc-op-extension、cake-docs-search 等关联 skill 的失效示例路径；并按评审意见移除示例/API 数量等硬编码统计与结构型计数（数字随 devkit 演进易漂移）。
 - 【文档索引】适配 asc-devkit docs 目录英文化重组（docs/zh/api/SIMD-API/{basic_api,adv_api}、guide/{programming_guide,operator_practice}）：修复 api-index.md、api-loaddata/api-repeat-limits、ascendc-simt-best-practices、docs-gen/precision-debug 模板、tiling-design、torch-ascendc-op-extension、tilelang2ascendc 插件（translator/AGENTS/kernel-generator）、ops-registry-invoke、catlass-op-generator、shmem-ops-design、cake-code-review 及 doc_gate.py 匹配模式中的失效 API 文档路径。

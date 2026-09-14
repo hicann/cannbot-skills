@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync, lstatSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -308,6 +308,91 @@ describe("plugin-installer", () => {
       } finally {
         process.chdir(origCwd);
       }
+    });
+
+    it("installs codex agents as copied TOML files with resolved source placeholder", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const repoPath = testDir;
+      const pluginDir = join(testDir, "my-plugin");
+      const skillsDir = join(pluginDir, "skills", "my-skill");
+      const agentsDir = join(pluginDir, "agents");
+      const codexAgentsDir = join(pluginDir, "agents", "codex");
+      const configRoot = join(testDir, ".codex");
+      mkdirSync(skillsDir, { recursive: true });
+      mkdirSync(codexAgentsDir, { recursive: true });
+      writeFileSync(join(skillsDir, "SKILL.md"), "---\nname: my-skill\n---\n# Content");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      writeFileSync(join(agentsDir, "my-agent.md"), "# Agent canonical definition");
+      writeFileSync(
+        join(codexAgentsDir, "my-agent.toml"),
+        'name = "my-agent"\ndeveloper_instructions = """\nRead __CANNBOT_AGENT_SOURCE__ for canonical instructions.\n"""\n'
+      );
+
+      const plugin = {
+        id: "my-plugin",
+        dir: "my-plugin",
+        displayName: "My Plugin",
+        script: "init.sh",
+        aliases: [],
+        skills: 0,
+        agents: 0,
+        description: "",
+        configFile: "AGENTS.md",
+        installSkills: [{ dir: "my-plugin/skills", skills: ["my-skill"] }],
+        installAgents: ["my-agent"],
+      };
+
+      const result = await installViaManifest(plugin, repoPath, "codex", "project", testDir);
+      expect(result.success).toBe(true);
+      expect(result.skillsCount).toBe(1);
+      expect(result.agentsCount).toBe(1);
+
+      // skills land in .agents/skills (not under .codex)
+      expect(existsSync(join(testDir, ".agents", "skills", "my-skill"))).toBe(true);
+      expect(existsSync(join(configRoot, "skills"))).toBe(false);
+
+      // agent TOML is a regular file (copy, not symlink) with the placeholder resolved
+      const tomlPath = join(configRoot, "agents", "my-agent.toml");
+      expect(existsSync(tomlPath)).toBe(true);
+      expect(lstatSync(tomlPath).isSymbolicLink()).toBe(false);
+      const tomlContent = readFileSync(tomlPath, "utf-8");
+      expect(tomlContent).not.toContain("__CANNBOT_AGENT_SOURCE__");
+      expect(tomlContent).toContain(join(pluginDir, "agents", "my-agent.md"));
+
+      // no .md symlink is created for codex
+      expect(existsSync(join(configRoot, "agents", "my-agent.md"))).toBe(false);
+
+      // AGENTS.md at project root + .codex/AGENTS.md
+      expect(existsSync(join(testDir, "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(configRoot, "AGENTS.md"))).toBe(true);
+    });
+
+    it("skips codex agent when TOML adapter is missing", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const pluginDir = join(testDir, "no-toml-plugin");
+      const agentsDir = join(pluginDir, "agents");
+      mkdirSync(agentsDir, { recursive: true });
+      writeFileSync(join(agentsDir, "my-agent.md"), "# Agent");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+
+      const plugin = {
+        id: "no-toml-plugin",
+        dir: "no-toml-plugin",
+        displayName: "No TOML Plugin",
+        script: "init.sh",
+        aliases: [],
+        skills: 0,
+        agents: 0,
+        description: "",
+        configFile: "AGENTS.md",
+        installSkills: [],
+        installAgents: ["my-agent"],
+      };
+
+      const result = await installViaManifest(plugin, testDir, "codex", "project", testDir);
+      expect(result.success).toBe(true);
+      expect(result.agentsCount).toBe(0);
+      expect(existsSync(join(testDir, ".codex", "agents", "my-agent.toml"))).toBe(false);
     });
 
     it("creates symlink even when git pull fails on existing external repo", async () => {

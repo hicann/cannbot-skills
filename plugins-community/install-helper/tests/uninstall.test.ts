@@ -62,6 +62,38 @@ describe("isSafePath (C2 fix verification)", () => {
   });
 });
 
+describe("codex uninstall safety (source verification)", () => {
+  it("uninstall.ts allows the codex skills root outside the .codex config root", async () => {
+    const { readFileSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(__dirname, "..", "src", "commands", "uninstall.ts"), "utf-8");
+    expect(src).toContain('record.tool === "codex"');
+    expect(src).toContain("getSkillsRoot(record.tool, record.level, record.installPath)");
+  });
+
+  it("interactive uninstall iterates all registered tools (no hardcoded list)", async () => {
+    const { readFileSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(__dirname, "..", "src", "commands", "uninstall.ts"), "utf-8");
+    expect(src).toContain("for (const toolName of VALID_TOOLS)");
+    expect(src).not.toContain('["opencode", "claude", "trae", "cursor", "copilot", "codearts"]');
+  });
+
+  it("falls back to install record for community plugins not in registry", async () => {
+    const { readFileSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(__dirname, "..", "src", "commands", "uninstall.ts"), "utf-8");
+    expect(src).toContain("if (readRecord(name))");
+    expect(src).toMatch(/const record = readRecord\(pluginId\);[\s\S]*?displayName: record\.displayName/);
+  });
+});
+
 describe("uninstall command options", () => {
   it("cli accepts --all flag", async () => {
     const { createCLI } = await import("../src/cli.js");
@@ -104,3 +136,135 @@ describe("uninstall command options", () => {
 function join(...parts: string[]): string {
   return parts.join(sep);
 }
+
+describe("skill uninstall by name via install record", () => {
+  // Seed pattern: append unique installPath keys instead of whole-file
+  // backup/restore — record.test.ts clobbers skills.json in a parallel file,
+  // and restore-writes would race with it (clobbering its state).
+
+  it("isRecordedSkill detects skills across tool/level/path records", async () => {
+    const { isRecordedSkill } = await import("../src/commands/uninstall.js");
+    const { addSkillsToRecord, removeSkillsFromRecord } = await import("../src/core/record.js");
+
+    const keyA = `/tmp/ih-rec-skill-${Date.now()}-a`;
+    const keyB = `/tmp/ih-rec-skill-${Date.now()}-b`;
+    try {
+      addSkillsToRecord(["zz-codex-project-skill"], "codex", "project", keyA);
+      addSkillsToRecord(["zz-claude-global-skill"], "claude", "global", keyB);
+
+      expect(isRecordedSkill("zz-codex-project-skill")).toBe(true);
+      expect(isRecordedSkill("zz-claude-global-skill")).toBe(true);
+      expect(isRecordedSkill("never-installed-skill")).toBe(false);
+    } finally {
+      removeSkillsFromRecord(["zz-codex-project-skill"], "codex", "project", keyA);
+      removeSkillsFromRecord(["zz-claude-global-skill"], "claude", "global", keyB);
+    }
+  });
+
+  it("plugin install record alone does not classify a name as skill", async () => {
+    const { isRecordedSkill } = await import("../src/commands/uninstall.js");
+    const { writeRecord, deleteRecord } = await import("../src/core/record.js");
+
+    writeRecord({
+      pluginId: "zz-plugin-only",
+      displayName: "ZZ",
+      tool: "opencode",
+      level: "project",
+      installPath: "/tmp/ih-plugin-only",
+      configRoot: "/tmp/ih-plugin-only/.opencode",
+      installTime: "2026-01-01T00:00:00.000Z",
+      files: [],
+      directories: [],
+    });
+    try {
+      expect(isRecordedSkill("zz-plugin-only")).toBe(false);
+    } finally {
+      deleteRecord("zz-plugin-only");
+    }
+  });
+
+  it("uninstallCommand removes a skill that is missing from the static list", async () => {
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const { addSkillsToRecord, readSkillRecord, removeSkillsFromRecord } = await import("../src/core/record.js");
+    const { mkdirSync, writeFileSync, existsSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const W = join(tmpdir(), `ih-unskill-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(W, ".opencode", "skills", "zz-static-missing-skill"), { recursive: true });
+    writeFileSync(join(W, ".opencode", "skills", "zz-static-missing-skill", "SKILL.md"), "---\nname: zz-static-missing-skill\n---\n");
+
+    const origCwd = process.cwd();
+    process.chdir(W);
+    try {
+      addSkillsToRecord(["zz-static-missing-skill"], "opencode", "project", W);
+      expect(existsSync(join(W, ".opencode", "skills", "zz-static-missing-skill"))).toBe(true);
+
+      await uninstallCommand(["zz-static-missing-skill"], { tool: "opencode", level: "project", yes: true });
+
+      expect(existsSync(join(W, ".opencode", "skills", "zz-static-missing-skill"))).toBe(false);
+      expect(readSkillRecord().opencode?.project?.[W]?.skills ?? []).not.toContain("zz-static-missing-skill");
+    } finally {
+      process.chdir(origCwd);
+      removeSkillsFromRecord(["zz-static-missing-skill"], "opencode", "project", W);
+      rmSync(W, { recursive: true, force: true });
+    }
+  });
+
+  it("uninstallCommand removes tools-domain skills by name (original repro: asys-toolkit + codex)", async () => {
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const { addSkillsToRecord, readSkillRecord, removeSkillsFromRecord } = await import("../src/core/record.js");
+    const { mkdirSync, writeFileSync, existsSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const W = join(tmpdir(), `ih-untools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(W, ".agents", "skills", "asys-toolkit"), { recursive: true });
+    writeFileSync(join(W, ".agents", "skills", "asys-toolkit", "SKILL.md"), "---\nname: asys-toolkit\n---\n");
+
+    const origCwd = process.cwd();
+    process.chdir(W);
+    try {
+      addSkillsToRecord(["asys-toolkit"], "codex", "project", W);
+
+      await uninstallCommand(["asys-toolkit"], { tool: "codex", level: "project", yes: true });
+
+      expect(existsSync(join(W, ".agents", "skills", "asys-toolkit"))).toBe(false);
+      expect(existsSync(join(W, ".agents"))).toBe(false);
+      expect(readSkillRecord().codex?.project?.[W]?.skills ?? []).not.toContain("asys-toolkit");
+    } finally {
+      process.chdir(origCwd);
+      removeSkillsFromRecord(["asys-toolkit"], "codex", "project", W);
+      rmSync(W, { recursive: true, force: true });
+    }
+  });
+
+  it("uninstallCommand handles mixed static-listed and record-only names in one call", async () => {
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const { addSkillsToRecord, removeSkillsFromRecord } = await import("../src/core/record.js");
+    const { mkdirSync, writeFileSync, existsSync, rmSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const W = join(tmpdir(), `ih-unmix-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    for (const s of ["npu-arch", "msnpureport-toolkit"]) {
+      mkdirSync(join(W, ".opencode", "skills", s), { recursive: true });
+      writeFileSync(join(W, ".opencode", "skills", s, "SKILL.md"), `---\nname: ${s}\n---\n`);
+    }
+
+    const origCwd = process.cwd();
+    process.chdir(W);
+    try {
+      addSkillsToRecord(["npu-arch", "msnpureport-toolkit"], "opencode", "project", W);
+
+      await uninstallCommand(["npu-arch", "msnpureport-toolkit"], { tool: "opencode", level: "project", yes: true });
+
+      expect(existsSync(join(W, ".opencode", "skills", "npu-arch"))).toBe(false);
+      expect(existsSync(join(W, ".opencode", "skills", "msnpureport-toolkit"))).toBe(false);
+    } finally {
+      process.chdir(origCwd);
+      removeSkillsFromRecord(["npu-arch", "msnpureport-toolkit"], "opencode", "project", W);
+      rmSync(W, { recursive: true, force: true });
+    }
+  });
+});

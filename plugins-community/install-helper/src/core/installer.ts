@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join, basename } from "path";
 import { execa, execaSync } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, BackupInfo } from "../types/index.js";
@@ -32,6 +32,16 @@ function findShell(): string | null {
     } catch {}
   }
   return null;
+}
+
+export function scriptSupportsTool(scriptPath: string, tool: AITool): boolean {
+  try {
+    const scriptContent = readFileSync(scriptPath, "utf-8");
+    return new RegExp(`\\b${tool}\\b`).test(scriptContent);
+  } catch {
+    // script unreadable — let execa surface the failure
+    return true;
+  }
 }
 
 export async function installPlugin(
@@ -170,6 +180,21 @@ export async function installPlugin(
       skillsCount: 0,
       agentsCount: 0,
       errors: [t("error_script_not_found").replace("{path}", scriptPath)],
+      warnings: [],
+    };
+  }
+
+  // Guard: the plugin's init.sh must actually support the target tool.
+  // Scripts that predate a tool (e.g. most community init.sh without codex)
+  // silently ignore the unknown arg and would mis-install into default
+  // .opencode directories — block that with an explicit error.
+  if (!scriptSupportsTool(scriptPath, opts.tool)) {
+    return {
+      success: false,
+      pluginId: opts.pluginId,
+      skillsCount: 0,
+      agentsCount: 0,
+      errors: [t("error_tool_not_supported").replace("{plugin}", plugin.displayName).replace("{tool}", opts.tool)],
       warnings: [],
     };
   }

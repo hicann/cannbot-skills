@@ -14,7 +14,7 @@ import { join } from "path";
 import { detectTools, getToolDisplayName, getAllTools } from "../core/detector.js";
 import { getAllPlugins } from "../core/registry.js";
 import { scanInstalled } from "../core/manifest.js";
-import { getConfigRoot, getSkillsDir, getAgentsDir, getConfigFileName } from "../utils/paths.js";
+import { getConfigRoot, getSkillsRoot, getAgentsDir, getConfigFileName } from "../utils/paths.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import type { AITool } from "../types/index.js";
@@ -81,8 +81,8 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
     configRootsToCheck.push({ configRoot, tool: primaryTool, level: "project" });
   }
 
-  for (const { configRoot } of configRootsToCheck) {
-    const skillsDir = getSkillsDir(configRoot);
+  for (const { configRoot, tool, level } of configRootsToCheck) {
+    const skillsDir = getSkillsRoot(tool, level);
     const agentsDir = getAgentsDir(configRoot);
 
     if (existsSync(skillsDir)) {

@@ -20,7 +20,7 @@ import { logger, createSpinner } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import { join } from "path";
 import { addInstalledPlugin } from "../utils/config.js";
-import { getConfigRoot, validateTool, validateLevel } from "../utils/paths.js";
+import { getConfigRoot, getSkillsRoot, validateTool, validateLevel } from "../utils/paths.js";
 import { confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import type { AITool, InstallLevel } from "../types/index.js";
@@ -103,11 +103,10 @@ export async function installCommand(
       else { logger.error(`${progress} ${result.skillId}: ${result.error}`); failCount++; }
     }
 
-    const configRoot = getConfigRoot(tool, level);
     logger.blank();
     logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
     logger.blank();
-    logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
+    logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
     logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
     logger.blank();
     return;
@@ -192,11 +191,10 @@ export async function installCommand(
             else { logger.error(`${progress} ${result.skillId}: ${result.error}`); failCount++; }
           }
 
-          const configRoot = getConfigRoot(tool, level);
           logger.blank();
           logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
           logger.blank();
-          logger.info(`${t("install_to")}: ${chalk.cyan(join(configRoot, "skills"))}`);
+          logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
           logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
           logger.blank();
           return;
@@ -368,7 +366,7 @@ export async function installCommand(
     logger.blank();
     logger.success(`${t("skill_install_done")}: ${chalk.green(t("result_success_format").replace("{count}", String(successCount)))}, ${failCount > 0 ? chalk.red(t("result_failed_format").replace("{count}", String(failCount))) : chalk.dim(t("result_failed_format").replace("{count}", String(failCount)))}`);
     logger.blank();
-    logger.info(`${t("install_to")}: ${chalk.cyan(join(getConfigRoot(tool, level), "skills"))}`);
+    logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
     logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
     logger.blank();
   }

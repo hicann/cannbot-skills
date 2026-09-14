@@ -14,7 +14,7 @@ import { existsSync } from "fs";
 import type { AITool, InstallLevel, TraeVariant } from "../types/index.js";
 import { t } from "./i18n.js";
 
-export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "copilot", "codearts"];
+export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "codex", "copilot", "codearts"];
 const VALID_LEVELS: InstallLevel[] = ["project", "global"];
 
 export function validateTool(tool: string): AITool {
@@ -73,6 +73,8 @@ export function getConfigRoot(
       }
       case "cursor":
         return join(home, ".cursor");
+      case "codex":
+        return join(home, ".codex");
       case "copilot":
         return join(home, ".copilot");
       case "codearts":
@@ -105,6 +107,8 @@ export function getConfigRoot(
     }
     case "cursor":
       return join(baseDir, ".cursor");
+    case "codex":
+      return join(baseDir, ".codex");
     case "copilot":
       return join(baseDir, ".github");
     case "codearts":
@@ -122,12 +126,18 @@ export function getConfigFileName(tool: AITool): string {
   return tool === "claude" ? "CLAUDE.md" : "AGENTS.md";
 }
 
-export function getAgentsFileName(tool: AITool): string {
-  return getConfigFileName(tool);
+export function getSkillsRoot(tool: AITool, level: InstallLevel, base?: string): string {
+  if (tool === "codex") {
+    if (level === "global") {
+      return join(homedir(), ".agents", "skills");
+    }
+    return join(base || process.cwd(), ".agents", "skills");
+  }
+  return join(getConfigRoot(tool, level, base), "skills");
 }
 
-export function getSkillsDir(configRoot: string): string {
-  return join(configRoot, "skills");
+export function getAgentsFileName(tool: AITool): string {
+  return getConfigFileName(tool);
 }
 
 export function getAgentsDir(configRoot: string): string {

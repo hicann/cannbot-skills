@@ -90,6 +90,21 @@ async function detectCursor(): Promise<DetectedTool | undefined> {
   return undefined;
 }
 
+async function detectCodex(): Promise<DetectedTool | undefined> {
+  const cmdPath = await getCommandPath("codex");
+  if (cmdPath) {
+    const version = await getCommandVersion("codex");
+    return { name: "codex", version, path: cmdPath };
+  }
+
+  const home = homedir();
+  const configDir = join(home, ".codex");
+  if (existsSync(configDir)) {
+    return { name: "codex", path: configDir };
+  }
+  return undefined;
+}
+
 async function detectCopilot(): Promise<DetectedTool | undefined> {
   const path = await getCommandPath("gh");
   if (!path) return undefined;
@@ -117,6 +132,7 @@ export async function detectTools(): Promise<DetectedTool[]> {
     detectClaude,
     detectTrae,
     detectCursor,
+    detectCodex,
     detectCopilot,
     detectCodeArts,
   ];
@@ -139,6 +155,7 @@ export function getToolDisplayName(tool: AITool): string {
     claude: "Claude Code",
     trae: "Trae",
     cursor: "Cursor",
+    codex: "Codex",
     copilot: "GitHub Copilot",
     codearts: "CodeArts",
   };

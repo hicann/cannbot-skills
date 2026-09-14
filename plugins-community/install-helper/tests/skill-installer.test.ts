@@ -289,6 +289,69 @@ describe("skill-installer", () => {
     });
   });
 
+  describe("codex skill install/uninstall", () => {
+    it("installs codex skills into .agents/skills and cleans up on uninstall", async () => {
+      const { installSkills, uninstallSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+
+      const skillDir = join(testDir, "repo", "ops", "codex-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: codex-skill\n---\n");
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        initFromScan([{
+          id: "codex-skill",
+          description: "test",
+          source: "ops",
+          filePath: join(skillDir, "SKILL.md"),
+        }]);
+
+        const results = await installSkills(["codex-skill"], "codex", "project", join(testDir, "repo"));
+        expect(results[0].success).toBe(true);
+        expect(existsSync(join(testDir, ".agents", "skills", "codex-skill", "SKILL.md"))).toBe(true);
+        expect(existsSync(join(testDir, ".codex", "skills"))).toBe(false);
+
+        const unresults = await uninstallSkills(["codex-skill"], "codex", "project");
+        expect(unresults[0].success).toBe(true);
+        expect(existsSync(join(testDir, ".agents", "skills", "codex-skill"))).toBe(false);
+        // empty .agents parent is cleaned up too
+        expect(existsSync(join(testDir, ".agents"))).toBe(false);
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
+
+    it("keeps .agents parent when it has other content", async () => {
+      const { installSkills, uninstallSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+
+      const skillDir = join(testDir, "repo", "ops", "codex-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: codex-skill\n---\n");
+      mkdirSync(join(testDir, ".agents", "other"), { recursive: true });
+      writeFileSync(join(testDir, ".agents", "other", "keep.txt"), "keep");
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        initFromScan([{
+          id: "codex-skill",
+          description: "test",
+          source: "ops",
+          filePath: join(skillDir, "SKILL.md"),
+        }]);
+
+        await installSkills(["codex-skill"], "codex", "project", join(testDir, "repo"));
+        await uninstallSkills(["codex-skill"], "codex", "project");
+        expect(existsSync(join(testDir, ".agents", "other", "keep.txt"))).toBe(true);
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
+  });
+
   describe("EPERM copy fallback", () => {
     it("source code includes cpSync EPERM fallback for Windows compatibility", async () => {
       const { readFileSync } = await import("fs");
