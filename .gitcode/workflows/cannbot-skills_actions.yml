@@ -83,12 +83,31 @@ stages:
               test -f /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
                 || { echo "❌ runner 上未找到 ci-pr-security-vet.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
           - name: run_security_vet
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
             run: |
               bash /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
                 --pr-number "${{ env.MERGE_ID }}" \
-                --password "${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}" \
                 --gitcode-repo cann/cannbot-skills \
                 --timeout 1800
+        runs-on:
+          - self-hosted
+          - runner_name=A5_skill_tester_02
+      JOB_content_critique:
+        name: Content_Critique
+        steps:
+          - name: check_content_critique_script
+            run: |
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-content-critique.sh \
+                || { echo "❌ runner 上未找到 ci-pr-content-critique.sh，请确认 cannbot-skills-rdv 已部署" >&2; exit 3; }
+          - name: run_content_critique
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+            run: |
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-content-critique.sh \
+                --pr-number "${{ env.MERGE_ID }}" \
+                --gitcode-repo cann/cannbot-skills \
+                --timeout 600
         runs-on:
           - self-hosted
           - runner_name=A5_skill_tester_02
