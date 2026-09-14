@@ -102,7 +102,7 @@ plugins-community/ascendc-port-orchestrator/
 ├── quickstart.md
 ├── init.sh                # 安装（建用户侧 KB(c) 根 + scaffold .ascendc_env）
 ├── agents/aog-*.md        # 11 个客户子 agent（plugin.json 注册）
-├── skills/                # 插件内置运行时 Skill（15 个，Claude 自动发现）
+├── skills/                # 插件内置运行时 Skill（11 个，Claude 自动发现）
 ├── hooks/                 # SessionStart 上下文注入（run-hook.cmd + session-start 脚本）
 ├── workflows/             # 描述性开发指南（真正驱动在 engine FSM，见 §2.1）
 ├── docs/ARCHITECTURE.md   # 本文档
@@ -111,6 +111,8 @@ plugins-community/ascendc-port-orchestrator/
 ```
 > 插件结构沿用 `agents/` 扁平 + `hooks/` + `init.sh` 约定；当前作为社区插件交付。`engine/` 打包是本插件独有的 bundle-orch 设计（§1.1）。
 两个具名入口 skill：`ascendc-cross-gen-port`（跨代际移植）、`ascendc-backward-gen`（正向→反向）；各自解析目标、调用同一编排能力（orch 保持完整）。
+
+轻量入口 skill：`ascendc-cross-gen-port-light`（与 `ascendc-cross-gen-port` 同级入口）——无 golden 场景的 910b/910_93→950/arch35 分阶段迁移，阶段门禁驱动、免人工确认，不经 engine FSM、不要求 KernelBench golden，由用户选择 `/ascendc-cross-gen-port-light` 入口进入。
 
 ## 4. Agent 角色
 

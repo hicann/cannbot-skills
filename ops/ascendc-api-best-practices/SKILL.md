@@ -12,6 +12,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | API 类别 | 涵盖 API | 核心文档 | 典型场景 |
 |---------|---------|---------|---------|
 | **算术运算** | Add, Sub, Mul, Div, Adds, Muls | [api-arithmetic.md](references/api-arithmetic.md) | Softmax, LayerNorm, 广播优化 |
+| **跨代际迁移（Subnormal 与超越函数）** | Exp, Ln, Sqrt, Rsqrt, Div, Reciprocal | [api-cross-gen-migration.md](references/api-cross-gen-migration.md) | DAV_2201→DAV_3510 迁移精度对齐、高精度/高性能模式选择 |
 | **归约操作** | ReduceMax, ReduceSum | [api-reduce.md](references/api-reduce.md), [api-reduce-pattern.md](references/api-reduce-pattern.md) | Softmax, LayerNorm, ReduceMean |
 | **归并排序** | Sort, Concat, MrgSort, Extract | [api-mrgsort.md](references/api-mrgsort.md) | Sort, ArgSort, TopK |
 | **数据搬运** | DataCopy, DataCopyPad | [api-datacopy.md](references/api-datacopy.md) | 非对齐处理、多维搬运 |
@@ -47,6 +48,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **半精度加减法（FP16/BF16 Add/Sub）** | [api-arithmetic.md](references/api-arithmetic.md), [api-precision.md](references/api-precision.md) | 默认升精度（除非 spec 明确同量级）、in-place 复用 |
 | **非对齐数据** | [api-datacopy.md](references/api-datacopy.md) | DataCopyPad、32 字节对齐 |
 | **混合精度** | [api-precision.md](references/api-precision.md) | FP16 输入 FP32 计算 |
+| **Subnormal 精度丢失（DAV_3510 跨代迁移）** | [api-cross-gen-migration.md](references/api-cross-gen-migration.md) | FTZ 语义、PRECISION_1ULP_FTZ_FALSE、eps 规避 |
 | **流水线优化** | [api-pipeline.md](references/api-pipeline.md), [api-buffer.md](references/api-buffer.md) | Double Buffer、事件同步 |
 | **性能调优** | [api-buffer.md](references/api-buffer.md), [api-repeat-limits.md](references/api-repeat-limits.md) | Double Buffer、repeatTimes 优化 |
 | **遇到 API 限制** | [api-restrictions.md](references/api-restrictions.md) | 替代方案、避坑指南 |

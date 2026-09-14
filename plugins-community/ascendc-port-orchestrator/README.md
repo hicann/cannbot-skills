@@ -4,6 +4,7 @@
 
 1. **`ascendc-cross-gen-port` — 跨代际移植**：把 arch22 源算子移植到 **arch35 / A5**（如 Ascend910C/V220 → Ascend950PR/V300）。目标架构用自然语言指定，来源架构由代码分析自动识别。
 2. **`ascendc-backward-gen` — 正向→反向生成**：由可微 PyTorch 正向规格生成并验证 AscendC 反向（梯度）算子。
+3. **`ascendc-cross-gen-port-light` — 轻量迁移**：`ascendc-cross-gen-port` 的轻量入口。无 KernelBench 风格的 golden 输入，或希望基于已有的 A2/A3 算子修改后快速迁移时使用：按阶段门禁完成 910b/910_93→950/arch35 算子迁移，全程免交互自动推进；精度标杆由 agent 逆向源码自合成并与 A5 实测双向互检。**不经上述编排流水线（设计如此）**。
 
 ## 输入：待移植实现 + golden（统一格式）
 

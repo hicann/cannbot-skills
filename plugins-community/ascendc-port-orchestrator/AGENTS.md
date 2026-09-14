@@ -22,6 +22,7 @@ permission:
 
 - **`ascendc-cross-gen-port`（跨代际移植）**：把一个 AscendC 算子从来源架构移植到用户指定的目标架构/产品。当前支持 **arch22 → arch35**（如 Ascend910C/V220 → Ascend950PR/V300）。
 - **`ascendc-backward-gen`（正向→反向生成）**：由一个正向算子，生成其反向（梯度）算子。
+- **`ascendc-cross-gen-port-light`（轻量迁移）**：`ascendc-cross-gen-port` 的轻量入口——用户无 KernelBench风格的 golden输入，或用户希望基于已有的A2/A3算子修改后快速迁移：agent 逆向源码自合成 CPU 标杆、与 A5 实测双向互检；阶段门禁驱动、不经引擎 FSM（设计如此，不视为绕过引擎）。
 
 ## 入口约定
 

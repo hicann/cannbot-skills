@@ -1,0 +1,84 @@
+#!/bin/bash
+# ============================================================================
+# build_and_install.sh —— <算子名> A2(910b) → A5(950) 迁移
+# 阶段 3: 编译 + 安装 + 验证安装
+# 依据: stages/stage_3_build.md（3.1.1 填充指引）
+# 用法: 将下方 {{VAR}} 占位符替换为阶段 0 记录的环境变量，填充后在对话中展示（留痕）并直接执行
+# ============================================================================
+set -e
+
+# ---- 阶段 0 记录的环境变量（填充区，{{VAR}} 见 stage_3 3.1.1 表） ----
+CANN_SET_ENV={{CANN_SET_ENV}}          # CANN set_env.sh 完整路径
+CONDA_ENV={{CONDA_ENV}}                # 阶段 0 Python 环境名
+SOC={{SOC}}                            # 目标 SoC，如 ascend950
+OP_NAME={{OP_NAME}}                    # 算子名（目录名，如 flash_attention_score）
+OP_DIR={{OP_DIR}}                      # 算子工程根目录（仓库根）
+VENDOR_NAME=custom_${OP_NAME}_$(date +%Y%m%d)   # vendor 名（install 目录名=此值_transformer）
+JOB_NUM=16                             # 并行编译核数
+
+log() { echo "[build_and_install] $1"; }
+
+# ---- Step 1: 加载环境 ----
+log "source CANN set_env: ${CANN_SET_ENV}"
+source ${CANN_SET_ENV}
+log "activate conda env: ${CONDA_ENV}"
+CONDA_BASE=$(dirname $(dirname $(which conda)))
+source ${CONDA_BASE}/etc/profile.d/conda.sh
+conda activate ${CONDA_ENV}
+
+log "ASCEND_HOME_PATH=${ASCEND_HOME_PATH}"
+log "ASCEND_OPP_PATH=${ASCEND_OPP_PATH}"
+
+# ---- Step 2: 编译（官方 build.sh, --pkg 含 kernel bin, 禁止自行拼编译命令） ----
+cd ${OP_DIR}
+# 经验（必须项）: --enable_host_tiling —— regbase 算子的 tiling 模板
+# (REGISTER_TILING_TEMPLATE_WITH_SOCVERSION) 需编译进 vendor 的 op_tiling 库；
+# 缺此选项时 run 包不含 tiling 注册, runtime 回退内置 tiling → 加载内置 kernel
+log "build: bash build.sh --pkg --soc=${SOC} --ops=${OP_NAME} --vendor_name=${VENDOR_NAME} --enable_host_tiling -j${JOB_NUM}"
+bash build.sh --pkg --soc=${SOC} --ops=${OP_NAME} --vendor_name=${VENDOR_NAME} --enable_host_tiling -j${JOB_NUM}
+
+# ---- Step 3: 安装（run 包安装到 ${ASCEND_OPP_PATH}/vendors/${VENDOR_NAME}_transformer） ----
+RUN_PKG=$(ls ${OP_DIR}/build_out/cann-ops-transformer-*.run 2>/dev/null | head -1)
+if [ -z "${RUN_PKG}" ]; then
+    log "[ERROR] build_out/ 下未找到 .run 安装包"
+    exit 1
+fi
+log "install run package: ${RUN_PKG}"
+# 经验（易错点）: RUN_PKG 是绝对路径，直接执行；禁止写成 ./${RUN_PKG}
+# —— ./ 前缀 + 绝对路径会拼成 .//home/... → "No such file or directory"
+# libopapi_math.so 为 open 构建框架自产 stub（common/stub/op_api），官方包缺失时
+# 需在安装校验阶段能被加载到，故把 build/ 加入 LD_LIBRARY_PATH
+LD_LIBRARY_PATH=${OP_DIR}/build:${LD_LIBRARY_PATH} ${RUN_PKG}
+
+# ---- Step 4: 验证安装 ----
+# 注意: install.sh 将 vendor 目录命名为 ${VENDOR_NAME}_transformer
+VENDOR_DIR=${ASCEND_OPP_PATH}/vendors/${VENDOR_NAME}_transformer
+if [ ! -f "${VENDOR_DIR}/op_api/lib/libcust_opapi.so" ]; then
+    log "[ERROR] libcust_opapi.so 未安装到 ${VENDOR_DIR}/op_api/lib"
+    exit 1
+fi
+log "installed: ${VENDOR_DIR}"
+
+# libopapi_math.so 是本构建自产 stub 库（common/stub/op_api），run 包打包遗漏，
+# 缺失会导致 libcust_opapi.so 运行时加载失败，手动补齐到 op_api/lib
+if [ ! -f "${VENDOR_DIR}/op_api/lib/libopapi_math.so" ]; then
+    log "补齐 libopapi_math.so (run 包打包遗漏的 stub 库)"
+    cp ${OP_DIR}/build/libopapi_math.so ${VENDOR_DIR}/op_api/lib/
+fi
+
+log "verify symbols:"
+nm -D ${VENDOR_DIR}/op_api/lib/libcust_opapi.so | grep -i "aclnn" | head -5
+
+# 经验: 验证 tiling 注册（模板 tiling 必须编入 op_tiling 库）
+# 注意: 符号为 -fvisibility=hidden 且链接时 -s strip, nm 不可见, 用 strings 判断注册类名
+# TILING_KEY = 本算子 tiling 注册类名关键词（替换为实际类名片段）
+TILING_KEY=Tiling
+TILING_LIB=${VENDOR_DIR}/op_impl/ai_core/tbe/op_tiling/lib/linux/x86_64/libcust_opmaster_rt2.0.so
+TILING_CNT=$(strings ${TILING_LIB} 2>/dev/null | grep -c "${TILING_KEY}" || true)
+log "verify tiling: ${TILING_LIB} 注册字符串 = ${TILING_CNT}"
+if [ "${TILING_CNT}" == "0" ]; then
+    log "[ERROR] tiling 库无注册, runtime 将回退内置 kernel"
+    exit 1
+fi
+
+log "build_and_install.sh 完成"

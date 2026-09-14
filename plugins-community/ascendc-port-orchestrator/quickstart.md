@@ -4,6 +4,7 @@
 
 - `ascendc-cross-gen-port`：将 **arch22** AscendC 算子移植到 **arch35 / A5**。
 - `ascendc-backward-gen`：由可微 PyTorch 正向规格生成反向 AscendC 算子。
+- `ascendc-cross-gen-port-light`：无 golden 时的轻量迁移入口——agent 逆向源码自合成标杆并与 A5 实测互检，免交互，不经引擎。
 
 可在 **Claude Code** 或 **OpenCode** 中运行；两者的入口名相同，但安装步骤不同。
 
