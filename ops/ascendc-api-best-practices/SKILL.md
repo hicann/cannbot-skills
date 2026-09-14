@@ -49,6 +49,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **非对齐数据** | [api-datacopy.md](references/api-datacopy.md) | DataCopyPad、32 字节对齐 |
 | **混合精度** | [api-precision.md](references/api-precision.md) | FP16 输入 FP32 计算 |
 | **Subnormal 精度丢失（DAV_3510 跨代迁移）** | [api-cross-gen-migration.md](references/api-cross-gen-migration.md) | FTZ 语义、PRECISION_1ULP_FTZ_FALSE、eps 规避 |
+| **Fixpipe 跨代参数（L0C 回写）** | [api-cross-gen-fixpipe.md](references/api-cross-gen-fixpipe.md) | DAV_2201→DAV_3510 回写参数切换：FixpipeParamsArch3510 字段与单位差异 |
 | **流水线优化** | [api-pipeline.md](references/api-pipeline.md), [api-buffer.md](references/api-buffer.md) | Double Buffer、事件同步 |
 | **性能调优** | [api-buffer.md](references/api-buffer.md), [api-repeat-limits.md](references/api-repeat-limits.md) | Double Buffer、repeatTimes 优化 |
 | **遇到 API 限制** | [api-restrictions.md](references/api-restrictions.md) | 替代方案、避坑指南 |

@@ -38,8 +38,33 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(512) inline void OpSimt(
 }
 ```
 
+**UB 空间限定符**：`__ubuf__ T*` 与 `__local_mem__ T*` 等价（同一 UB 地址空间，不同命名约定），VF 参数声明两种写法均可。
+
+**按索引写 UB 的完整示例**（每线程写不同地址，无竞争）：
+
+```cpp
+__simt_vf__ __aicore__ LAUNCH_BOUND(SIMT_THREAD_NUM) inline void ComputeExpertFirstIndexSimt(
+    int32_t elementNum, int32_t expertStart, int32_t expertEnd,
+    __gm__ int32_t *sortedExpertIdGmAddr,
+    __local_mem__ int32_t *expertFirstIndexLocalAddr)
+{
+    for (auto i = Simt::GetThreadIdx(); i < elementNum; i += Simt::GetThreadNum()) {
+        auto currExpertId = sortedExpertIdGmAddr[i];
+        if (currExpertId >= expertEnd) break;
+        auto prevExpertId = (i == 0 ? -1 : sortedExpertIdGmAddr[i - 1]);
+        if (currExpertId != prevExpertId) {
+            expertFirstIndexLocalAddr[currExpertId - expertStart] = i;  // 写 UB
+        }
+    }
+}
+```
+
+**线程间竞争**：写同一地址必须用原子操作，见「注意事项」；每线程写不同地址（如上例）则无竞争。
+
 ## 注意事项
 
-- 同地址并发写入需使用原子操作（`asc_atomic_add` 等）
+- 同地址并发写入需使用原子操作（`asc_atomic_add` 等）。`Simt::AtomicAdd` 的 dtype 注意事项：
+  - FP32 直接加；**FP16/BF16 需先转 float 再加**
+  - **INT8/UINT8/INT16 需先写到 workspace 再搬回**（原子加不支持窄整型直接累加）
 - 共享内存大小受 UB 可用空间限制
 - buffer 大小需在 tiling 侧预留（通过 `SetLocalMemorySize`）

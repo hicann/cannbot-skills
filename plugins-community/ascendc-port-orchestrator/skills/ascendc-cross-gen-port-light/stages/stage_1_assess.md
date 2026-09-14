@@ -7,6 +7,7 @@
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
 | 1 | `references/impl/api-diff-guide.md` | `[LOADED] api-diff-guide` |
+| 2 | `references/impl/cube-migration-guide.md`（**cube 类算子** MUST，见 Step 1.2） | `[LOADED] cube-migration-guide` |
 
 **★ 本文件 MUST 在算子源码读取前加载。** API 差异指南定义了精度/兼容性/性能三个维度的风险扫描清单。
 
@@ -26,8 +27,9 @@ MUST 读取以下文件：
 在判定迁移层级之前，如果需要了解算子的参考实现或 A5 新特性，按 `references/search-rules.md` 路由到全量仓：
 
 - **查看同类算子样例**：`$DEVKIT_PATH/examples/` 目录下按编程模型分类查找
-- **确认 A5 新特性**：读 `$DEVKIT_PATH/docs/asc_a5_feature_guide.md`
-- **查阅算子实践参考**：`$DEVKIT_PATH/docs/guide/算子实践参考/` 下查找同类算子的实现和优化案例
+- **确认 A5 新特性**：读 `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/instructions_for_new_features/3510_new_features.md`
+- **查阅算子实践参考**：`$DEVKIT_PATH/docs/zh/guide/operator_practice/` 下查找同类算子的实现和优化案例
+- **Cube 类算子**（Step 1.1 中发现 Mmad/LoadData/Fixpipe/DataCopyCO12DstParams 等 cube API）：MUST 先读 `references/impl/cube-migration-guide.md`（输出 `[LOADED] cube-migration-guide`），再按 search-rules 路由到全量仓兼容性样例（`06_compatibility_guide/` 下 data_copy_l1togm / pattern_transformation / matmul_s4 / fill / set_loaddata_boundary）
 
 读取全量仓文件后输出：`[LOADED] $DEVKIT_PATH/<相对路径>`
 
@@ -130,6 +132,19 @@ MUST 读取以下文件：
 | kernel 中有 `DataCopyPad` 非对齐存储 | 950 应替换为 DataCopyUnAlign |
 | FP32→INT8 量化 | 950 需三步量化 + Pack |
 
+### cube 类算子的 L2 语义（定级 L2 后 MUST）
+
+**L2 对 cube 算子 ≠ Vector 算子的 RegBase 整体重写**，而是三个独立判定 + 组合执行：
+
+1. **AIC 侧计算路径**：MUST 评估低阶直跑（LoadData2DParamsV2 / Fixpipe / Mmad，见 `cube-migration-guide.md` 改动 2/3/4），并给出"保留高阶 Matmul API / 弃用走低阶"的结论与理由——**禁止默认沿用高阶 API 不做评估**；
+2. **跨核同步协议**：按 `cube-migration-guide.md` 改动 6 全量重写（模式语义 / flagId / PIPE）；
+3. **AIV 侧 vector 计算**：评估 RegBase 重写（`l2-guide.md`）。**评估前置方法——查 VF 封装实现归属**：接口头 → `base_impl.h` 的 `__NPU_ARCH__` 分流，三类结论：
+   - 3510 有 regbase / 3510 专用实现（如 SoftmaxFlashV2 → `regbase/3510/softmax_flashv2_impl.h`、DropOut → `dropout_3510_impl.h`）→ **保留接口即可，自动获得 3510 实现，无需重写**——结论须写明"框架已提供 3510 实现"，禁止写成"保留 Memory 代码"；
+   - 3510 仅有 membase 实现 → 评估迁移；
+   - 3510 无实现 → 必须重写。
+
+三部分缺一不可。"论证了保留高阶 API 不死锁"只完成 ②，不等于完成 L2。
+
 ### L3 特有判定信号
 
 | 信号 | 说明 |
@@ -152,7 +167,7 @@ MUST 读取以下文件：
 | 原语 | CrossCoreSetFlag/WaitFlag、IBSet/IBWait、SyncAll 等 |
 | 模式号 | 如 `CrossCoreSetFlag<2, PIPE_MTE3>` 的模式 2 |
 | flagId 表达式 | 如 `SYNC_C1_V1_FLAG[(taskId + 1) & 1][blockIdx & 1]`——**含核身份索引（taskId/blockIdx/subblock 号参与索引）时重点标记** |
-| 调用方角色 | AIC / AIV / 核内 subblock 序号（`ASCEND_IS_AIC`/`ASCEND_IS_AIV` 分支）。无核类型分支的"全执行"结构（所有核无条件执行 bmm/vector/写输出）在 A2/A3 常见，950 分离模式下矩阵/矢量路径的执行核不同，需在迁移方案中说明各代码段的核归属 |
+| 调用方角色 | AIC / AIV / 核内 subblock 序号（`ASCEND_IS_AIC`/`ASCEND_IS_AIV` 分支）。无核类型分支的"全执行"结构（所有核无条件执行 bmm/vector/写输出）在 A2/A3 常见，950 分离模式下矩阵/矢量路径的执行核不同（见 `cube-migration-guide.md`「分离模式核能力模型」），需在迁移方案中说明各代码段的核归属；保留高阶 Matmul API 时必查双主模式约束（`cube-migration-guide.md`「保留高阶 Matmul API 的必查项」） |
 
 **② 推断参与集合假设**：写出每个同步点"谁等谁"的粒度——单对（AIC↔指定 AIV）/ 组内全集合（AIC↔全部 AIV）/ 全核（所有 AIC 或所有 AIV）。**flagId 含核身份索引的，即隐式假设了"flagId 级配对粒度"**（用不同 flagId 区分不同对端）。
 
@@ -160,7 +175,7 @@ MUST 读取以下文件：
 - 所用模式在目标平台的参与集合定义与 flagId 计数器驱动条件（模式 0 = 全核、模式 1 = 组内全部 AIV、模式 2 = AIC↔组内全部 AIV、模式 4 = AIC↔单个 AIV）
 - 型号支持范围（**模式 4 仅 950PR/950DT 支持**）
 - **模式号相同 ≠ 语义相同**：同一模式跨架构可能语义变化（如模式 2 从 flagId 级配对收紧为全集合），必须以目标平台文档为准，不得假设与旧平台一致
-- **参数写法按目标平台文档生效**：旧平台被忽略的参数在目标平台可能生效——无参调用（如裸 `CrossCoreWaitFlag(flagId)`）在 950 按默认模式 0（全核）执行，必须与配对 SetFlag 的模式号显式核对；"不写参数，语义也在变"（实战：910b 无参 WaitFlag 照常工作、950 上生效致模式错位死锁）
+- **参数写法按目标平台文档生效**：旧平台被忽略的参数在目标平台可能生效——无参调用（如裸 `CrossCoreWaitFlag(flagId)`）在 950 按默认模式 0（全核）执行，必须与配对 SetFlag 的模式号显式核对；"不写参数，语义也在变"（实战：910b 无参 WaitFlag 照常工作、950 上生效致模式错位死锁，见 `references/impl/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）
 - **参与集合恒定**：同一 flagId 的 Set/Wait 是否在所有参与核的**无条件路径**上执行——被 needExec/needPair/if 条件分支包裹、循环 0 次（分片边界）、空闲核都可能造成参与核缺 Set（同上，沿用决策规则第 4 条）
 
 **④ 处置决策**：每个同步点给出结论——
@@ -171,7 +186,7 @@ MUST 读取以下文件：
 | 禁用（走标准路径） | 4 项中任一项无法静态论证（如粒度 < 文档粒度、无参调用默认语义错位、Set 可能缺位）→ 死锁风险 |
 | 改用其他模式 | 需支持单对粒度时改用模式 4——但须核对型号支持范围（仅 950PR/DT） |
 
-**通用判定规则：假设集合粒度 < 目标平台文档定义的集合粒度 → 死锁风险 → 禁用该路径走标准流程，禁止原样移植。默认值反转：沿用是论证结论，不是赌注——4 项中任一项无法静态论证即禁用/降级走标准路径，禁止"沿用 + 运行时验证"式风险转移（死锁失败从方案阶段 1 次静态检查前移到运行时排查=成本后置）。**
+**通用判定规则：假设集合粒度 < 目标平台文档定义的集合粒度 → 死锁风险 → 禁用该路径走标准流程，禁止原样移植。默认值反转：沿用是论证结论，不是赌注——4 项中任一项无法静态论证即禁用/降级走标准路径，禁止"沿用 + 运行时验证"式风险转移（死锁失败从方案阶段 1 次静态检查前移到运行时排查=成本后置；完整前置判定框架（5 项静态论证 + 参与集合推导表）见 `references/impl/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）。**
 
 ## Step 1.6：生成算子源码分析摘要
 

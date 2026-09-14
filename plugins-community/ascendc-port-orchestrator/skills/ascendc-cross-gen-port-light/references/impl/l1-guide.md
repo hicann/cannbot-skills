@@ -1,6 +1,6 @@
 # L1 迁移实施详细指南
 
-> **适用对象**：vector 与 cube 类算子通用——本指南的 host 侧配置步骤（_def.cpp / config 目录 / 入口分发）不区分算子类别。
+> **适用对象**：vector 与 cube 类算子通用——本指南的 host 侧配置步骤（_def.cpp / config 目录 / 入口分发）不区分算子类别；cube 类算子 kernel 侧的 A5 差异（装载/回写/分形/同步）见 `cube-migration-guide.md`。
 
 ## 改动 1：_def.cpp 独立配置
 
@@ -240,10 +240,10 @@ grep -n "[Ee]rror" build.log
 
 ### 各算子 UB 预留合规状态
 
-| 算子 | Tiling 文件 | IsRegbaseSocVersion 判断 | SIMT_UB_SIZE_BYTE 预留 | 改造状态 | 合规性 |
-|------|------------|------------------------|----------------------|---------|--------|
-| MoeInitRouting | `moe_init_routing_tiling.cpp` | ✓ 有 | ✓ `ubSizePlatForm - SIMT_UB_SIZE_BYTE` | 已完成 | ✓ 合规 |
-| MoeGatingTopKSoftmax | `moe_gating_top_k_softmax_tiling_arch35.cpp` | ✓ 有 | ✗ 未预留 | 未改造 | ✗ 不合规 |
+| 算子 | Tiling 文件 | IsRegbaseSocVersion 判断 | SIMT_UB_SIZE_BYTE 预留 | 可用 UB（扣预留后） | 改造状态 | 合规性 |
+|------|------------|------------------------|----------------------|---------------|---------|--------|
+| MoeInitRouting | `moe_init_routing_tiling.cpp` | ✓ 有 | ✓ `ubSizePlatForm - SIMT_UB_SIZE_BYTE` | 216KB | 已完成 | ✓ 合规 |
+| MoeGatingTopKSoftmax | `moe_gating_top_k_softmax_tiling_arch35.cpp` | ✓ 有 | ✗ 未预留 | 256KB（未扣） | 未改造 | ✗ 不合规 |
 | DequantSwigluQuant | `dequant_swiglu_quant_tiling_arch35.cpp` | ✓ 有 | ✗ 使用 `UB_REVERSE`(1KB) | 部分改造 | △ 需确认 |
 | KvRmsnormRopeCache | `kv_rms_norm_rope_cache_base_tiling.cpp` | ✓ 有 | ✗ 使用 `UB_RESERVED_BYTE`(1KB) | 部分改造 | △ 需确认 |
 | GroupNormSwish | `group_norm_swish_tiling.cpp` | ✗ 无 | ✗ 未预留 | 未改造 | ✗ 不合规 |
@@ -254,17 +254,7 @@ grep -n "[Ee]rror" build.log
 
 ### UB 空间使用档案
 
-| 算子 | UB 总容量(950) | SIMT 预留 | 算子可用 UB | 主要 UB 用途 |
-|------|-------------|----------|-----------|------------|
-| MoeInitRouting | 256KB | 40KB | 216KB | 排序缓冲+Gather 缓冲+SrcToDst 缓冲 |
-| MoeGatingTopKSoftmax | 256KB | 0KB ✗ | 256KB | TopK 排序+Softmax 缓冲 |
-| DequantSwigluQuant | 256KB | UB_REVERSE | 256KB-UB_REVERSE | 反量化+SwiGLU+量化多缓冲 |
-| KvRmsnormRopeCache | 256KB | UB_RESERVED_BYTE | 256KB-UB_RESERVED | RMSNorm+RoPE+KVCache 多缓冲 |
-| GroupNormSwish | 256KB | 0KB ✗ | 256KB | GroupNorm 均值/方差+Swish 缓冲 |
-| MoeComputeExpertTokens | 256KB | 0KB ✗ | 256KB | 排序计数缓冲 |
-| SwigluQuant | 256KB | 0KB ✗ | 256KB | SwiGLU+量化多缓冲 |
-| MoeFinalizeRouting | 256KB | 0KB ✗ | 256KB | 融合乘加多缓冲 |
-| InterleaveRope | 256KB | 0KB ✗ | 256KB | RoPE 交错乘加缓冲 |
+各算子的 UB 容量 / SIMT 预留 / 可用 UB / 用途 → 见 `ub-budget-guide.md`「四、10 个典型算子 UB 用量参考卡」（UB 用量的唯一权威表，含数据来源）。
 
 ### 统一 UB 预留模板代码
 
@@ -375,18 +365,7 @@ arch35/ 代码与根目录代码逻辑完全一致，仅 include 路径不同。
 
 ### 模式 A：UB 容量 + SIMT 预留
 
-950 Tiling 中获取 UB 容量后，扣除 SIMT DCache 预留空间。
-
-```cpp
-const static int64_t SIMT_UB_SIZE_BYTE = 40960;
-
-uint64_t ubSizePlatForm;
-ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSizePlatForm);
-aicoreParams_.ubSize = ubSizePlatForm;
-if (Ops::Transformer::OpTiling::IsRegbaseSocVersion(context_)) {
-    aicoreParams_.ubSize = ubSizePlatForm - SIMT_UB_SIZE_BYTE;
-}
-```
+950 Tiling 中获取 UB 容量后，扣除 SIMT DCache 预留（`SIMT_UB_SIZE_BYTE` = 40KB）。模板与标准用法见上文「UB 预留规范 → 统一 UB 预留模板代码」，不重复。
 
 ### 模式 B：架构判断 + Tiling Key 分流
 
@@ -425,104 +404,21 @@ int64_t ubFlexible_ = ubSize_ - UB_RESERVED_BYTE - ...;
 
 ---
 
-## Subnormal 处理
+## Subnormal 处理（L1 视角：升级信号）
 
-### 351x 默认不支持 Subnormal
+**L1 阶段不改 kernel 代码，因此本阶段只需识别、不需适配**：算子若使用 `Exp / Ln / Reciprocal / Sqrt / Rsqrt / Div`，在 950 上存在 subnormal 精度差异——这是一个**升级信号**（见上文「L4 升级信号指引」），说明该算子不能停留在纯 L1，需按 stage_1 定级升级到 L2 处理。
 
-SubNormal 浮点数指的是指数位全为 0、尾数不为 0 的浮点数，用于表示比最小正常数更小的值，避免"下溢为 0"。351x 版本默认不支持 Subnormal，Subnormal 浮点数在计算中被视为 0。
-
-### 涉及 API
-
-以下基础 API 受 Subnormal 影响：
-
-| AscendC 基础 API | 兼容说明 |
-|-----------------|---------|
-| Exp、Ln、Reciprocal、Sqrt、Rsqrt、Div | 需通过 Config 结构体的 `algo` 参数配置 Subnormal 计算模式 |
-
-### Config 配置方式
-
-以 `Ln` 接口为例，通过 `LnConfig` 结构体的 `algo` 参数配置：
-
-| algo 取值 | 行为 |
-|-----------|------|
-| `LnAlgo::INTRINSIC` | 使用单指令计算，所有 Subnormal 被近似为 0（**默认值**） |
-| `LnAlgo::PRECISION_1ULP_FTZ_TRUE` | 使用单指令计算，所有 Subnormal 被近似为 0 |
-| `LnAlgo::PRECISION_1ULP_FTZ_FALSE` | 支持 Subnormal 数据计算（软件模拟，精度扩展） |
-
-默认配置：
-
-```cpp
-constexpr LnConfig DEFAULT_LN_CONFIG = { LnAlgo::INTRINSIC };
-```
-
-### 代码示例
-
-**220x 版本**（默认支持 Subnormal）：
-
-```cpp
-AscendC::Ln(dstLocal, srcLocal, count);
-```
-
-**351x 版本 — 支持 Subnormal**：
-
-```cpp
-constexpr AscendC::LnConfig CONFIG = {
-    AscendC::LnAlgo::PRECISION_1ULP_FTZ_FALSE
-};
-AscendC::Ln<T, CONFIG>(dstLocal, srcLocal, count);
-```
-
-**351x 版本 — 高性能模式**（Subnormal 视为 0）：
-
-```cpp
-constexpr AscendC::LnConfig CONFIG_FAST = {
-    AscendC::LnAlgo::INTRINSIC
-};
-AscendC::Ln<T, CONFIG_FAST>(dstLocal, srcLocal, count);
-```
-
-**完整示例**：
-
-```cpp
-constexpr AscendC::LnConfig CONFIG = {
-    AscendC::LnAlgo::PRECISION_1ULP_FTZ_FALSE
-};
-
-template <typename T>
-__aicore__ inline void Compute(GM_ADDR dst, GM_ADDR src, uint32_t count)
-{
-    AscendC::TPipe pipe;
-    AscendC::GlobalTensor<T> srcGlobal;
-    AscendC::GlobalTensor<T> dstGlobal;
-    srcGlobal.SetGlobalBuffer((__gm__ T*)src);
-    dstGlobal.SetGlobalBuffer((__gm__ T*)dst);
-    AscendC::TQue<AscendC::TPosition::VECIN, 1> inQueue;
-    AscendC::TQue<AscendC::TPosition::VECOUT, 1> outQueue;
-    pipe.InitBuffer(inQueue, 1, count * sizeof(T));
-    pipe.InitBuffer(outQueue, 1, count * sizeof(T));
-    AscendC::LocalTensor<T> dstLocal = outQueue.AllocTensor<T>();
-    AscendC::LocalTensor<T> srcLocal = inQueue.AllocTensor<T>();
-    AscendC::DataCopy(srcLocal, srcGlobal, count);
-    AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
-    AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
-    AscendC::Ln<T, CONFIG>(dstLocal, srcLocal, count);
-    AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID1);
-    AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID1);
-    AscendC::DataCopy(dstGlobal, dstLocal, count);
-    inQueue.FreeTensor(srcLocal);
-}
-```
-
-**其他 API 的 Config 类似**：`ExpConfig`、`SqrtConfig`、`RsqrtConfig`、`DivConfig`、`ReciprocalConfig` 等，均通过 `algo` 参数控制 Subnormal 处理模式。
-
----
+- **API 知识**（algo 参数取值含义、Config 结构体、2200x/3510 代码对比）：`cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-migration.md`
+- **L2 改造动作**（换 algo 模板参数 / Reg 路径用 `SpecificMode`）：`l2-guide.md`「补充 3：Subnormal 适配」
+- **扫描与适配策略**（策略 0 结构性排除、eps 可表示性检查、何时必须处理）：`api-diff-guide.md` §1
 
 ## 相关参考文档路径
 
-> 以下三个目录位于插件自带 KB 快照 `plugins-community/ascendc-port-orchestrator/kb/target/ascendc/migration/`（本方法论 2026-05 旧版存档），按此实际路径访问。
+> 下表中带「KB 快照」标注的目录位于插件自带 KB 快照 `plugins-community/ascendc-port-orchestrator/kb/target/ascendc/migration/`（本方法论 2026-05 旧版存档），按此实际路径访问。
 
 | 文档类别 | 路径 | 说明 |
 |---------|------|------|
 | 迁移相关官方文档 | KB 快照 `migration/` 子目录 | 220x→351x 架构迁移指导、基础/高阶 API 迁移指导、算子编译迁移指导、兼容性说明 |
 | Memory-based Vector 操作 | KB 快照 `memory-base-vector/` 子目录 | 传统 AscendC Vector 编程模式参考（TPipe/TQue/DataCopy 等） |
 | API 选型与概述 | KB 快照 `api-overview/` 子目录 | API 兼容性分层、高阶/基础/MicroAPI/SIMT 接口概述 |
+| Cube 类算子迁移 | `references/impl/cube-migration-guide.md` | Cube 数据通路/分形/跨核同步/Fixpipe 等 cube 专用迁移（含官方样例索引与踩坑速查） |

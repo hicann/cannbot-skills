@@ -28,7 +28,7 @@
 
 如需查阅具体 API 的精度约束或数据类型支持，按 `references/search-rules.md` 路由到全量仓：
 
-- **API 文档**：`$DEVKIT_PATH/docs/api/` 下查找对应 API 的精度说明和 `<cann-filter>` 标签确认 A5 支持情况
+- **API 文档**：`$DEVKIT_PATH/docs/zh/api/` 下查找对应 API 的精度说明和 `<cann-filter>` 标签确认 A5 支持情况
 - **头文件**：`$DEVKIT_PATH/include/` 下 grep 函数名确认接口声明
 
 读取全量仓文件后输出：`[LOADED] $DEVKIT_PATH/<相对路径>`
@@ -232,7 +232,9 @@ MERE/MARE 仅作为**分析指标**输出（误差定位用），不作为通过
 | **★ 仅极小值输入失败** | **未启用 `PRECISION_1ULP_FTZ_FALSE` 或 eps 规避** | **Phase 2 查 Subnormal 适配策略** |
 | **★ matched_ratio 未达标但超标元素极少（十万分之几）、MARE（分析指标）远超 rtol** | **denormal/near-zero 域相对误差放大或标杆精度不匹配（见 Step 4.6.3 判别流程）** | **Step 4.6.3 判别流程** |
 | **★ int4 量化 matmul 精度异常** | **Mmad 不支持 int4，未 cast 成 int8** | **Phase 2 查兼容性适配（`api-diff-guide.md` §2）** |
-| **卡死/超时（aicore timeout 507014），特定 shape/dtype 组合全部触发（如 fp16/bf16 卡、fp32 不卡）** | **跨核同步死锁：同步点集合粒度错配（flagId 配对假设单对、目标平台模式是全部 AIV）** | 查 Step 1.5 同步协议盘点与同步点，按处置决策禁用不可行路径复测 |
+| **卡死/超时（aicore timeout 507014），特定 shape/dtype 组合全部触发（如 fp16/bf16 卡、fp32 不卡）** | **跨核同步死锁：同步点集合粒度错配（flagId 配对假设单对、目标平台模式是全部 AIV）** | 查 Step 1.5 同步协议盘点与同步点，按处置决策禁用不可行路径复测；判别与定位方法见 `cube-debug-lessons.md` Part 1 |
+
+> cube 类算子的异常判别与定位方法（死锁/卡死、mask 与消费粒度、取证打印、路径级验证）见 `references/impl/cube-debug-lessons.md`——本文 Phase 1 速查表给出首因判断，详细排查手段在 cube-debug-lessons 对应 Part。
 
 > **注意**：死锁/卡死类问题（同步点集合粒度错配）插桩输出**无法到达**——卡在同步点前的核永远不会执行到插桩语句，即使执行到的核其 printf 也可能因卡死的核未释放流水而无法回传。此类问题不得依赖插桩定位，直接用"触发条件分析 + 禁用不可行路径复测"验证。
 
@@ -255,7 +257,7 @@ MERE/MARE 仅作为**分析指标**输出（误差定位用），不作为通过
 
 **如果不修复，MUST 在精度报告中记录上述 4 项，但不允许将 GATE-4 标记为 PASS——除非 N_FAIL == 0。**
 
-**Phase 2: 代码审查**——按上表检查清单逐项排查 Cast 路径/累加精度/中间精度
+**Phase 2: 代码审查**——按已加载的 `l2-guide.md` 中的检查清单排查
 
 **Phase 3: 实验隔离**——控制变量缩小范围
 - 实验 A: block_dim=1（多核隔离）

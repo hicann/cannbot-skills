@@ -155,13 +155,13 @@ PLUGIN="ascendc-port-orchestrator"
 # Reusable ops Skills keep a single canonical copy under repository ops/ and are
 # supplied by the ascendc-port-orchestrator-shared-skills marketplace dependency.
 LOCAL_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light"
-SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices"
+SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice"
 # OKF query is owned by plugins-community/cannbot-knowledge.
 KNOWLEDGE_SKILLS="knowledge-query"
 # Keep this literal union in sync with the three lists above: the repository's
 # dependency validator and third-party installers consume this declaration without
 # evaluating shell variable expansion.
-INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices knowledge-query"
+INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
 # Customer agents, kept CONSISTENT with plugin.json agents[] (9).
 # Both installer and manifest must expose the same set: a missing dispatched agent crashes,
 # while every advertised agent must have its customer Skill installed. The

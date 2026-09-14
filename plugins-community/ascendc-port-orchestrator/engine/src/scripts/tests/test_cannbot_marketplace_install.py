@@ -120,6 +120,7 @@ def test_checkout_detection_resolves_shared_skills_from_ops():
     assert set(_whitelist("SHARED_SKILLS")) == {
         "ops-precision-standard", "ascendc-docs-search",
         "ascendc-simt-best-practices", "ascendc-api-best-practices",
+        "ascendc-regbase-best-practice",
     }
     assert not set(_whitelist("SHARED_SKILLS")) & set(_whitelist("LOCAL_SKILLS"))
 
@@ -131,6 +132,7 @@ def test_only_product_owned_skills_use_the_plugin_local_linking_path():
     assert not {
         "ops-precision-standard", "ascendc-docs-search",
         "ascendc-simt-best-practices", "ascendc-api-best-practices",
+        "ascendc-regbase-best-practice",
     } & set(_whitelist("LOCAL_SKILLS"))
 
 

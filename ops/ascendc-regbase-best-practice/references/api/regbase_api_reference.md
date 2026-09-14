@@ -61,7 +61,8 @@ topic_type: api
 - scalar helpers：`Adds`、`Muls`
 - compare / select：`Compare`、`Compares`、`Select`
 - type conversion / packing：`Cast`、`Pack`、`UnPack`
-- VF 归约 helper：`Reduce`、`ReduceDataBlock`、`PairReduceElem`
+- VF 归约 helper：`Reduce`、`ReduceDataBlock`、`PairReduceElem`、`WelfordUpdate` / `WelfordFinalize`（A5 新增，一步 mean+var）
+- 寄存器内重排：`Sort`、`Interleave` / `DeInterleave`
 
 使用顺序是：先查 [[regbase_api_whitelist]]，再用本文件确认大类调用家族。特别要通过白名单判断当前路径需要普通 kernel 侧 API，还是 VF 函数安全的 `AscendC::Reg::*` API；源码中后者可能写作 `AscendC::MicroAPI::*`。
 
@@ -217,6 +218,7 @@ RegBase 直接调用路径也会用到少量 VF 侧 UB/寄存器数据搬运家�
 - `StoreUnAlign` / `StoreUnAlignPost`
 - `Load` / `Store`
 - `Gather` / `GatherB` / `Scatter`
+- 地址与掩码：`AddrReg`（`CreateAddrReg`，供带偏移的 Load/Store 使用）、mask 搬入/搬出（`LoadAlign(MaskReg&, …)` / `StoreAlign(MaskReg&)` / `MaskGenWithRegTensor` / `Move`）
 
 来源：`kernel_reg_compute_datacopy_intf.h`。
 
@@ -252,6 +254,11 @@ __simd_callee__ inline void Scatter(__ubuf__ T* baseAddr, S& srcReg, V& index, M
 ```
 
 GM/UB 搬运细节优先查 [[datacopy_best_practices]]，不要把 kernel 侧 `DataCopyPad` 与 VF 侧 UB/寄存器 load/store 混成同一层。
+
+## 系统变量与 SPR
+
+- 核 / 块号：`GetBlockIdx`、`GetBlockNum`、`GetCoreNum`
+- 溢出模式控制：`GetCtrlSpr` / `SetCtrlSpr`（SPR 为全局状态，修改后必须恢复；数值范围可控的算子关闭溢检测可提速）
 
 ## 非可编译结构示例
 

@@ -116,14 +116,28 @@ if torch.npu.is_available():
 
 ### 0.7.2 验证仓库完整性
 
+**★ 布局识别（MUST）**：asc-devkit 布局随版本演进（2026-09 起 `docs/zh|en/` + 英文目录名；更早 `docs/api|guide/` + 中文目录名）。先识别再校验，结果写入 `.env_info.md`：
+
 ```bash
-ls $DEVKIT_PATH/docs/api/ && \
+# 1) 识别布局与新鲜度
+git -C $DEVKIT_PATH log -1 --date=short --format='DEVKIT_COMMIT=%h DEVKIT_DATE=%ad'
+if [ -d "$DEVKIT_PATH/docs/zh/api" ]; then echo "DEVKIT_LAYOUT=new-zh";
+elif [ -d "$DEVKIT_PATH/docs/api" ]; then echo "DEVKIT_LAYOUT=legacy";
+else echo "DEVKIT_LAYOUT=unknown"; fi
+
+# 2) 校验（以 new-zh 为例；legacy/unknown 按下述规则换算）
+ls $DEVKIT_PATH/docs/zh/api/ && \
 ls $DEVKIT_PATH/impl/ && \
 ls $DEVKIT_PATH/include/ && \
 ls $DEVKIT_PATH/examples/
 ```
 
-**四个目录全部存在**才算验证通过。任一缺失 → 提示用户仓库不完整，重新 clone 或指定其他路径。
+- `new-zh` → 按 `docs/zh/…` 路径使用（实测映射表见 `references/devkit-path-map.md` 顶部「布局演进与定位协议」）
+- `legacy` → 旧版仓：提示本 skill 按最新布局编写，建议重新 clone
+- `unknown` → MUST 用 `ls $DEVKIT_PATH/docs/` + `find … -maxdepth 3 -type d` 现场推导映射，禁止按旧表硬拼
+- `DEVKIT_DATE` 距今超过 6 个月 → 提示布局可能再次演进，按 unknown 处理
+
+四个目标目录全部存在才算验证通过；任一缺失 → 提示仓库不完整，重新 clone 或指定其他路径。**禁止**在布局未识别时继续后续阶段。
 
 ### 0.7.3 记录全量仓信息
 

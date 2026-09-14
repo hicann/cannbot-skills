@@ -7,6 +7,7 @@
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
 | 1 | `references/impl/api-diff-guide.md` | `[LOADED] api-diff-guide` |
+| 2 | `references/impl/cube-migration-guide.md`（**cube 类算子** MUST，见 Step 2.1） | `[LOADED] cube-migration-guide` |
 
 **★ 本文件 MUST 在代码改造前加载。** 阶段 1 扫描出的 API 差异风险项，在此阶段逐项适配。
 
@@ -43,6 +44,8 @@ GATE-1 LEVEL 值
 **L1 适用条件**：纯 INT32 / 无浮点 / 无 DataCopyPad / UB 使用量小 / kernel 无 `__CCE_AICORE__ == 220` 条件分支。
 如果 kernel 中有 V220 guards 或有浮点计算，升级为标准 L1（见 `references/impl/l1-guide.md`）。
 
+**cube 类算子**（kernel 含 Mmad/LoadData/Fixpipe 等 cube API）：追加 MUST READ `references/impl/cube-migration-guide.md`，输出 `[LOADED] cube-migration-guide`——L1 对 cube 类算子的改造范围仅 host 侧（_def.cpp / config / 入口分发，见 cube-guide 改动 1/8），kernel 侧 A5 差异不在 L1 范围；若评估后需改 kernel，按 stage_1 定级升级到 L2。
+
 ### 标准 L1（有 V220 guards 时）
 
 | 步骤 | 文件 | 操作 |
@@ -70,9 +73,27 @@ GATE-1 LEVEL 值
 
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
-| 1 | `references/impl/api-mapping.md` | `[LOADED] api-mapping` |
+| 1 | `references/impl/l2-guide.md` | `[LOADED] l2-guide` |
+| 2 | `references/impl/api-mapping.md` | `[LOADED] api-mapping` |
+| 3 | `cannbot-skills/ops/ascendc-regbase-best-practice/references/regbase_development_guide.md` | `[LOADED] regbase_development_guide` |
+
+**cube 类算子追加必读**（kernel 含 Mmad/LoadData/Fixpipe/DataCopyCO12DstParams/CrossCoreSetFlag 等 cube API 时）：
+
+| 序号 | MUST READ 文件 | LOADED Token |
+|------|---------------|-------------|
+| 4 | `references/impl/cube-migration-guide.md` | `[LOADED] cube-migration-guide` |
+
+**按需加载**：
+
+| 文件 | LOADED Token | 何时需要 |
+|------|-------------|---------|
+| `references/impl/ub-budget-guide.md` | `[LOADED] ub-budget-guide` | 算子有归约操作或 UB 预算紧张时（cube 类算子 AIV 侧同样适用） |
+| `references/impl/multi-stage-guide.md` | `[LOADED] multi-stage-guide` | 算子有 2 个以上算法阶段（如 Sort + Softmax + Sampling） |
+| `references/impl/cube-debug-lessons.md` | `[LOADED] cube-debug-lessons` | cube 类算子测试/异常排查（阶段 4） |
 
 **所有要求的 LOADED Token 输出后，方可进入代码改造。**
+
+**cube 类算子的 L2 改造范围**：按 `cube-migration-guide.md`「性能关键 cube 算子的 L2 语义」三部分执行——① AIC 侧低阶直跑评估（改动 2/3/4，禁止默认沿用高阶 Matmul API，保留高阶时先核对双主模式约束）② 同步协议重写（改动 6）③ AIV 侧 Vector 路径评估/重写。第 ③ 部分使用本阶段的 l2-guide / api-mapping / regbase_development_guide（这些指南对 cube 类算子的适用边界见各自头部声明）；第 ①② 部分不使用本阶段 l2-guide 的改动内容。
 
 ### L2 改造步骤
 
@@ -95,10 +116,10 @@ GATE-1 LEVEL 值
 
 改造过程中如需查阅具体 API 的签名、参数、约束或示例，按 `references/search-rules.md` 路由到全量仓：
 
-- **API 文档**：`$DEVKIT_PATH/docs/api/SIMD-API/` 下按 API 类型查找对应子目录
+- **API 文档**：`$DEVKIT_PATH/docs/zh/api/SIMD-API/` 下按 API 类型查找对应子目录
 - **头文件声明**：`$DEVKIT_PATH/include/` 目录下 grep 函数名确认原型
 - **实现源码**：`$DEVKIT_PATH/impl/` 目录下 grep 函数名查看实现细节
-- **算子实践参考**：`$DEVKIT_PATH/docs/guide/算子实践参考/` 查找 DoubleBuffer、Tiling 策略等优化技巧
+- **算子实践参考**：`$DEVKIT_PATH/docs/zh/guide/operator_practice/` 查找 DoubleBuffer、Tiling 策略等优化技巧
 
 读取全量仓文件后输出：`[LOADED] $DEVKIT_PATH/<相对路径>`
 
@@ -116,6 +137,9 @@ GATE-1 LEVEL 值
 ---
 
 ## Step 2.3：L3 改造清单
+
+**MUST READ**：`references/impl/l3-guide.md`
+读取后输出：`[LOADED] l3-guide`
 
 ### L3 改造步骤
 
@@ -137,7 +161,7 @@ GATE-1 LEVEL 值
 
 - **跨核同步机制（CrossCoreSetFlag/WaitFlag、IBSet/IBWait、SyncAll、NotifyNextBlock/WaitPreBlock）按阶段 1 Step 1.5 盘点结果执行**：判定"沿用"的同步点原样保留；判定"禁用"的同步点**移除该路径，改用不依赖该同步的标准流程**。
 - **无法验证跨核机制在目标平台模式下成立时，禁用该路径走标准流程，禁止原样移植。**
-- 需新增 C/V 配对握手时，先核对目标平台模式语义与型号支持范围，再按参与集合配对写。
+- 需新增 C/V 配对握手时，先核对目标平台模式语义与型号支持范围（见 `cube-migration-guide.md` 改动 6），再按参与集合配对写。
 - 跨核同步机制不属于 RegBase 改造范围——它与 Memory/Register 编程模型正交，L2 的 `SetFlag/WaitFlag → LocalMemBar<MemType::UB>` 只改核内事件同步（MTE2/MTE1/V 等流水间），**不得把跨核 CrossCoreSetFlag/WaitFlag 一并替换掉**。
 
 ---
@@ -260,6 +284,8 @@ Cast(int8Tensor, int4Tensor, RoundMode::CAST_RINT, count);
 ## Gate 输出条件
 
 - [ ] 对应层级的实现指南已 LOADED
+- [ ] L2 时 regbase_development_guide 已 LOADED
+- [ ] cube 类算子时 cube-migration-guide 已 LOADED
 - [ ] **★ `api-diff-guide` 已 LOADED**
 - [ ] 所有改动文件已列出
 - [ ] 代码改造检查点全部通过（含跨核同步点处置：沿用/禁用，无遗漏）

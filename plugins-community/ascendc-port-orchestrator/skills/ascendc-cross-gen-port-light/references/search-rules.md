@@ -1,5 +1,6 @@
 # 文档查找规则与置信度评估
-> **⚠ 路径校正（2026-08 实测）**：asc-devkit 当前版本的文档实际位于 `docs/zh/api/` 与 `docs/zh/guide/`（多一层 `zh`），且 A5 特性导航文件名为 `docs/zh/asc_950_feature_guide.md`（非 `asc_a5_feature_guide.md`）。本文件中的 `docs/api/`、`docs/guide/` 路径访问时请自动补 `zh` 层。
+
+> **★ 外部仓布局与定位协议（MUST 先读）**：见 `references/devkit-path-map.md` 顶部——含 2026-09 实测的「主题 → 路径」映射表与三级定位协议（`ls` 确认语言层 → `find -iname` → `rg`）。**禁止**在不确认路径存在的情况下硬拼路径。
 
 
 > 本文件定义 agent 在迁移过程中查找技术文档的标准流程。
@@ -9,31 +10,14 @@
 
 ### Level 1：本地 Skill 文件（最高优先）
 
-以下主题**必须先查本地 skill 文件**，这些是 skill 独有的迁移工作流和实现指南：
-
-| 主题 | 本地路径 |
-|------|---------|
-| 迁移实现方案（L1） | `references/impl/l1-guide.md` |
-| API 映射表（L2 量化路径等） | `references/impl/api-mapping.md` |
-| 构建脚本模板 | `references/build_system/build_and_install.sh.template` |
-| 精度测试流程 | `references/precision-testing/` 下全部文件 |
-| 阶段工作流 | `stages/` 下对应 stage 文件 |
+本 skill 自带的迁移工作流与实现指南**必须先查**——完整清单见 `SKILL.md` 的「Reference 文件索引」（stages/ 阶段文件、impl/ 实现指南、build_system/ 构建模板、precision-testing/ 精度资产）。这些是 skill 独有内容，全量仓中没有对应物。
 
 ### Level 2：全量仓精确查找（按索引路由）
 
-以下主题**必须按 `knowledge-index.md` 路由到全量仓**（`$DEVKIT_PATH`）：
+按两个索引文件的**分工**路由，不在此重复列路径：
 
-| 主题 | 全量仓首选路径 |
-|------|-------------|
-| API 接口详情（函数签名、参数、约束、示例） | `$DEVKIT_PATH/docs/api/SIMD-API/` 下对应子目录 |
-| 迁移兼容性 / API 变更对照 | `$DEVKIT_PATH/docs/guide/跨代迁移兼容性指南/` |
-| A5 架构变更详情 | `$DEVKIT_PATH/docs/guide/跨代迁移兼容性指南/3510架构迁移指导/2201到3510架构变更.md` |
-| 编程模型（SIMD/SIMT/混合） | `$DEVKIT_PATH/docs/guide/编程指南/编程模型/` |
-| 硬件实现细节（NPU 3510 参数） | `$DEVKIT_PATH/docs/guide/编程指南/高级编程/硬件实现/` |
-| 算子实现参考与优化技巧 | `$DEVKIT_PATH/docs/guide/算子实践参考/` |
-| A5 新特性导航 | `$DEVKIT_PATH/docs/asc_a5_feature_guide.md` |
-| API 选择指南 | `$DEVKIT_PATH/docs/asc_how_to_choose_api.md` |
-| 语言扩展层 BuiltIn 关键字 | `$DEVKIT_PATH/docs/guide/编程指南/语言扩展层/` |
+- **不知道该去哪个目录** → `references/devkit-path-map.md`「快速定位表」（迁移场景 → 首选/备选目录）
+- **已知主题、要查具体文件** → `references/knowledge-index.md`（按 devkit 目录组织的全量详表：API 文档 / 编程指南 / 跨代迁移指南 / 算子实践 / 源码头文件）
 
 ### Level 3：全量仓探索查找（兜底）
 
@@ -80,28 +64,28 @@
 以下场景**必须主动去全量仓查找**，不能仅依赖本地 skill 文件：
 
 1. **算子实现参考**：迁移时需要参考同类算子的实现
-   → 查 `$DEVKIT_PATH/examples/` 和 `$DEVKIT_PATH/docs/guide/算子实践参考/`
+   → 查 `$DEVKIT_PATH/examples/` 和 `$DEVKIT_PATH/docs/zh/guide/operator_practice/`
 
 2. **API 函数签名验证**：确认 A5 上某 API 的确切原型和参数列表
    → 查 `$DEVKIT_PATH/include/` 头文件
 
 3. **性能优化技巧**：UB bank conflict、pipeline 优化、DoubleBuffer 等
-   → 查 `$DEVKIT_PATH/docs/guide/算子实践参考/SIMD算子性能优化/`
+   → 查 `$DEVKIT_PATH/docs/zh/guide/operator_practice/simd_operator_optimization/`
 
 4. **数据类型支持确认**：某 API 在 A5 上是否支持某 dtype
-   → 查 API 文档的 `<cann-filter>` 标签或 `$DEVKIT_PATH/docs/api/` 下对应文件
+   → 查 API 文档的 `<cann-filter>` 标签或 `$DEVKIT_PATH/docs/zh/api/` 下对应文件
 
 5. **架构特性细节**：NPU 3510 的具体硬件参数（UB 大小、bank 结构等）
-   → 查 `$DEVKIT_PATH/docs/guide/编程指南/高级编程/硬件实现/`
+   → 查 `$DEVKIT_PATH/docs/zh/guide/programming_guide/advanced_programming/hardware_implementation/`
 
 6. **编译构建问题**：CMake 配置、编译选项
    → 查 `$DEVKIT_PATH/cmake/` 和 `$DEVKIT_PATH/build.sh`
 
 7. **SIMT 编程细节**：线程架构、DCache、同步机制
-   → 查 `$DEVKIT_PATH/docs/guide/编程指南/编程模型/AI-Core-SIMT编程/`
+   → 查 `$DEVKIT_PATH/docs/zh/guide/programming_guide/programming_model/ai_core_simt_programming/`
 
 8. **高阶 API 用法**：Matmul/Softmax/ReduceSum 等高阶接口
-   → 查 `$DEVKIT_PATH/docs/api/SIMD-API/高阶API/`
+   → 查 `$DEVKIT_PATH/docs/zh/api/SIMD-API/adv_api/`
 
 ## LOADED 标记规范
 
@@ -113,6 +97,6 @@
 
 示例：
 ```
-[LOADED] $DEVKIT_PATH/docs/guide/跨代迁移兼容性指南/3510架构迁移指导/2201到3510架构变更.md
-[LOADED] $DEVKIT_PATH/docs/api/SIMD-API/C-API/Reg矢量计算/reg_vector/asc_abs.md
+[LOADED] $DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/3510_arch_migration/2201_to_3510_arch_changes.md
+[LOADED] $DEVKIT_PATH/docs/zh/api/SIMD-API/c_api/reg_compute/
 ```

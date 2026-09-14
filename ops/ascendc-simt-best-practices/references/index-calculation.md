@@ -8,6 +8,7 @@
 | `AscendC::Simt::GetThreadNum()` | uint64_t | 当前核的线程总数 |
 | `AscendC::Simt::GetBlockIdx()` | uint64_t | 当前核的全局索引 (0 ~ blockNum-1) |
 | `AscendC::Simt::GetBlockNum()` | uint64_t | 总核数 |
+| `AscendC::Simt::UintDiv(idx, m0, shift0)` | 同 idx 类型 | 快速整数除法（见下节） |
 
 ## 全局索引计算
 
@@ -17,6 +18,16 @@ uint64_t globalIdx = GetBlockIdx() * GetThreadNum() + GetThreadIdx();
 
 // 步进 stride（所有核所有线程总数）
 uint64_t stride = GetThreadNum() * GetBlockNum();
+```
+
+## Simt::UintDiv（快速整数除法）
+
+SIMT 线程内无硬件除法指令，使用预计算的乘数和移位替代：
+
+```cpp
+// 预计算 m0 和 shift0（在 Tiling 中完成）
+// m0 = ceil(2^32 / divisor)，shift0 = 32 + log2(divisor)
+INDEX_SIZE_T gatherI = Simt::UintDiv(yIndex, m0, shift0);  // 等价于 yIndex / innerSize
 ```
 
 ## 使用示例

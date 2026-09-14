@@ -843,7 +843,8 @@
         "./ops-precision-standard",
         "./ascendc-docs-search",
         "./ascendc-simt-best-practices",
-        "./ascendc-api-best-practices"
+        "./ascendc-api-best-practices",
+        "./ascendc-regbase-best-practice"
       ]
     },
     {

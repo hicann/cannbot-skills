@@ -1,7 +1,9 @@
 # Memory-based → Register-based API 映射表
 
 > L2 改造时 MUST READ。本文件是 Memory-based API 到 Register-based (MicroAPI) 的快速映射索引。
-> **适用对象**：vector 类算子整体；cube 类算子中 AIV 侧 Vector 路径（VF/vector 代码）的 Memory→Reg 改造同样适用本表。
+> 详细使用方法和完整示例见 `l2-guide.md`。
+> **适用对象**：vector 类算子整体；cube 类算子中 AIV 侧 Vector 路径（VF/vector 代码）的 Memory→Reg 改造同样适用本表，AIC 侧见 `cube-migration-guide.md`。
+> **与 RegBase 最佳实践的分工**：本表是**迁移期对照**（旧调用 → 新写法，含量化路径与 Subnormal 映射）；RegBase 技能（`cannbot-skills/ops/ascendc-regbase-best-practice`）的 `references/api/compute_api_membase_vs_regbase.md` 是**设计与审查视角**（名称相同但对象/签名不同的审查点）。写代码前以本表对照、以 SDK header 为准。
 
 ## 一、数据类型转换映射
 
@@ -156,16 +158,7 @@ FP32 → INT32 (ReinterpretCast + CAST_RINT)
 | Div | `Div(dst, s1, s2, count)` | `Div<T, DIV_CONFIG>(dst, s1, s2, count)` | 同 220x |
 | Reciprocal | `Reciprocal(dst, src, count)` | `Reciprocal<T, RCP_CONFIG>(dst, src, count)` | 同 220x |
 
-Config 定义（支持 Subnormal 时）：
-
-```cpp
-constexpr AscendC::ExpConfig EXP_CONFIG = { AscendC::ExpAlgo::PRECISION_1ULP_FTZ_FALSE };
-constexpr AscendC::LnConfig LN_CONFIG = { AscendC::LnAlgo::PRECISION_1ULP_FTZ_FALSE };
-constexpr AscendC::SqrtConfig SQRT_CONFIG = { AscendC::SqrtAlgo::PRECISION_1ULP_FTZ_FALSE };
-constexpr AscendC::RsqrtConfig RSQRT_CONFIG = { AscendC::RsqrtAlgo::PRECISION_1ULP_FTZ_FALSE };
-constexpr AscendC::DivConfig DIV_CONFIG = { AscendC::DivAlgo::PRECISION_1ULP_FTZ_FALSE };
-constexpr AscendC::ReciprocalConfig RCP_CONFIG = { AscendC::ReciprocalAlgo::PRECISION_1ULP_FTZ_FALSE };
-```
+> Config 结构体定义、algo 取值含义与完整示例见 `cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-migration.md`；Reg 路径的 subnormal 写法见 `l2-guide.md` 补充 3。
 
 ## 四、溢出模式控制（351x 独有）
 
@@ -191,11 +184,11 @@ AscendC::SetCtrlSpr<GLOBAL_OVERFLOW_MODE_CTRL, GLOBAL_OVERFLOW_MODE_CTRL>(saved)
 
 | 查阅需求 | 全量仓路径 |
 |---------|-----------|
-| C-API Reg 矢量计算 API | `$DEVKIT_PATH/docs/api/SIMD-API/C-API/Reg矢量计算/` |
-| C-API Memory 矢量计算 API | `$DEVKIT_PATH/docs/api/SIMD-API/C-API/Memory矢量计算/` |
-| 基础 API Memory 矢量计算 | `$DEVKIT_PATH/docs/api/SIMD-API/基础API/Memory矢量计算/` |
-| 基础 API Reg 矢量计算 | `$DEVKIT_PATH/docs/api/SIMD-API/基础API/Reg矢量计算/` |
+| C-API Reg 矢量计算 API | `$DEVKIT_PATH/docs/zh/api/SIMD-API/c_api/reg_compute/` |
+| C-API Memory 矢量计算 API | `$DEVKIT_PATH/docs/zh/api/SIMD-API/c_api/vector_compute/` |
+| 基础 API Memory 矢量计算 | `$DEVKIT_PATH/docs/zh/api/SIMD-API/basic_api/memory_vector_compute/` |
+| 基础 API Reg 矢量计算 | `$DEVKIT_PATH/docs/zh/api/SIMD-API/basic_api/reg_vector_compute/` |
 | API 头文件声明 | `$DEVKIT_PATH/include/` |
 | API 实现源码 | `$DEVKIT_PATH/impl/` |
-| 2201→3510 架构变更 | `$DEVKIT_PATH/docs/guide/跨代迁移兼容性指南/3510架构迁移指导/2201到3510架构变更.md` |
-| 基础 API 迁移指导 | `$DEVKIT_PATH/docs/guide/跨代迁移兼容性指南/3510架构迁移指导/2201迁移3510指导/基础API迁移指导.md` |
+| 2201→3510 架构变更 | `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/3510_arch_migration/2201_to_3510_arch_changes.md` |
+| 基础 API 迁移指导 | `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/3510_arch_migration/2201_to_3510_guide/` |
