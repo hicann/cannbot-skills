@@ -4,6 +4,7 @@
 语言: C++
 侧别: All, Host, Kernel
 领域: true
+触发: 必须触发
 默认启用: true
 
 适用场景: Ascend C 算子开发中实际高频出现的编码红线问题，来源于生产环境经验总结
@@ -624,6 +625,22 @@ int64_t offset = batchOffset * seqLen * headDim;
 **检视规则**
 
 表达式中有 2 个及以上维度相乘时，检查第一个操作数是否已显式转换为 `int64_t`。
+
+**专属检视方法**
+
+1. 枚举所有 GM 起始地址、GM 下标和 GM 搬运长度表达式：
+   - `SetGlobalBuffer((__gm__ T*)ptr + expr, size)`
+   - `GlobalTensor[expr]` / `xGm[gmBias]` / `yGm[progress]`
+   - `CopyIn(gmBias)` / `CopyOut(progress)` / `DataCopy*(gm[expr], ...)`
+   - 名称含 `gmBias`、`gm_bias`、`offset`、`progress`、`blockOffset` 的变量，以及 stride 类变量（`\w*[Ss]tride\w*`，如 `blockTablesStride`、`srcStride`、`dstStride`、`strideW`、`strideH`）
+2. 对每个表达式检查声明类型和右侧计算域。若表达式中存在 `blockIdx/indexOuter/i_o/mIdx/nIdx` 与 `blockFactor/rowFactor/numCol/num_col/tiling->n`、stride（`\w*[Ss]tride\w*`）等多因子相乘，必须在第一次乘法前显式提升到 `int64_t` 或 `uint64_t`。
+3. 不能只看最终变量类型。若 `uint64_t gmBias = i_o * rowFactor * numCol;` 中右侧操作数全是 32 位，仍按 32 位先回绕，判 FAIL。
+4. `SetGlobalBuffer` 的第二个 size 参数同样要检查。`rowWork * numCol`、`blockFactor * numCol` 等可能超过 32 位时，也必须先提升。
+5. 反推最大可能值：若合法 shape 或 tiling 使线性元素位置可能达到或超过 `2^32`，且乘法前未进入 64 位计算域，判 FAIL；无法确认上界但表达式用于 GM 偏移且全为 32 位操作数，至少判 SUSPICIOUS。
+
+**生产案例**
+
+- ops-nn issue #4494：910B2 `rms_norm` 在大 shape 下从位置 `4294969344` 附近开始输出全 0。修复方式是将 `blockIdx_ * blockFactor * numCol`、`gmBias`、`CopyIn/CopyOut` 的 GM 偏移链路改为 `uint64_t`，并在乘法前显式 `static_cast<uint64_t>`。
 
 ---
 

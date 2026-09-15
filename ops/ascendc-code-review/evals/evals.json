@@ -157,6 +157,21 @@
       "expected_output": "应说明假设检验驱动的检视流程（core/methodology.md）：代码段识别→建立原假设 H0（代码段安全）与备择假设 H1（存在风险，自信值初始 0%）→收集并评估证据：正向证据（规范违反 +40%、上下文防御缺失 +30%、PR 归属 +20%、调用链/数据流风险 +15%、领域关联 +10%）与负向证据（防御存在 -20%、上游校验 -15%、范围外 -50%）→判定结论；负向证据必须附可验证的代码引用（格式 [文件路径]:[行号] [具体代码行内容]），否则该条证据得分为 0。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 10,
+      "title": "GM 32位偏移溢出回归（ops-nn #4494）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "代码中存在 `xGm.SetGlobalBuffer((__gm__ T*)x + blockIdx_ * blockFactor * numCol, rowWork * numCol);`，并且大 shape 下线性位置可能超过 2^32。ascendc-code-review 应如何路由和检视这类问题？",
+      "expected_output": "应说明这是 Kernel 侧 GM 偏移/长度 32 位计算域溢出风险：命中 ascendc-red-line.md（触发:必须触发的红线）条例4（无符号整数不回绕）和条例9（gm内存偏移或大小必须用int64表示），无条件保留并优先检视；按条例9 专属检视方法枚举 GM 起始地址、GM 下标和 GM 搬运长度表达式（如 SetGlobalBuffer 的地址偏移 blockIdx_ * blockFactor * numCol 与 size 参数 rowWork * numCol），并检查声明类型与右侧计算域；检视时不能只看最终变量类型，必须确认第一次乘法前已显式提升到 int64_t/uint64_t，不能因来源是 TilingData 或硬件配置而跳过。",
+      "expectations": [],
+      "files": []
     }
   ]
 }
