@@ -6,7 +6,7 @@
     {
       "name": "catlass-dsl-generator",
       "description": "基于 Markdown 任务契约的精简 CATLASS DSL 算子开发优化工作流。",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "source": "./",
       "author": {"name": "CATLASS DSL contributors"}
     }

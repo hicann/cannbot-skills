@@ -10,7 +10,43 @@
 
 > 将 `<plugin-source>` 替换为本仓库的本地绝对路径、`owner/repo` 或 Git URL。安装前请确认来源可信。
 
-### Codex
+### 方式 A：init.sh 脚本安装（推荐）
+
+适用于 OpenCode、Claude Code、Trae（IDE/插件版/CLI）、Cursor、Codex、Copilot、CodeArts，
+通过软链把 5 个 Skill 和内置 OKF 知识库注册到工具的项目级/全局发现路径，并生成
+自动加载的工作流配置（`AGENTS.md` / `CLAUDE.md`）——新会话不依赖对话历史即可恢复工作流。
+
+```bash
+# 项目级安装（在目标项目根目录执行，tool 换成你在用的工具）
+bash <plugin-source>/init.sh project trae
+
+# 全局安装（Trae 仅支持项目级）
+bash <plugin-source>/init.sh global claude
+
+# 卸载（仅移除本插件安装的白名单内容；参数与安装时一致）
+bash <plugin-source>/init.sh --uninstall project trae
+```
+
+各工具的安装路径与差异：
+
+| Tool | Skills/知识库路径 | 配置文件 | 级别 |
+|:-----|:-----------------|:---------|:-----|
+| OpenCode | `.opencode/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
+| Claude Code | `.claude/{skills,knowledge}/` | `CLAUDE.md` | 项目/全局 |
+| Trae | `.trae/`（IDE，自动检测 `.marscode/`、`.traecli/` 变体） | `AGENTS.md` | 仅项目级 |
+| Cursor | `.cursor/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
+| Codex | `.agents/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
+| Copilot | `.github/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
+| CodeArts | `.codeartsdoer/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
+
+说明：
+- 全部为软链安装，插件仓库仍是唯一源，`git pull` 更新后自动生效。
+- 同一项目安装多个工具时，配置文件以最后一次安装为准。
+- 卸载只删除本插件的白名单内容，不影响项目里其他 skills。
+
+### 方式 B：工具原生插件市场
+
+#### Codex
 
 ```bash
 codex plugin marketplace add <plugin-source>
@@ -19,7 +55,7 @@ codex plugin add catlass-dsl-generator@catlass-dsl-generator-dev
 
 运行 `codex plugin list` 确认插件存在，然后新建会话以加载 Skill。
 
-### Claude Code
+#### Claude Code
 
 ```bash
 claude plugin marketplace add <plugin-source>
@@ -32,7 +68,7 @@ claude plugin install catlass-dsl-generator@catlass-dsl-generator-dev
 claude --plugin-dir <local-plugin-path>
 ```
 
-### Cursor
+#### Cursor
 
 将完整仓库放到 Cursor 的本地插件目录：
 
@@ -45,7 +81,7 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 
 > GitHub 仓库也可在 Cursor Agent 中使用 `/add-plugin <git-repository-url>` 导入。
 
-### OpenCode
+#### OpenCode
 
 在目标项目的 `opencode.json` 中添加：
 
