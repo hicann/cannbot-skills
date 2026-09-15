@@ -92,6 +92,11 @@ DEFAULT_SEED = 0
 WARM_UP = 3
 REPEATS = 5
 TASK_EXECUTION_TIMEOUT_SECONDS = 3600
+# Scaled-default components (2026-09-01): when the frozen fixture/sidecar case
+# count is known, the default task timeout is BASE + PER_CASE * n_cases; the
+# flat TASK_EXECUTION_TIMEOUT_SECONDS remains the fallback when it is not.
+TASK_EXECUTION_TIMEOUT_BASE_SECONDS = 900
+TASK_EXECUTION_TIMEOUT_PER_CASE_SECONDS = 90
 PERF_SKIP_ENV = "CANNBOT_NPUBENCH_SKIP_PERF"
 TASK_EXECUTION_TIMEOUT_ENV = "CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC"
 EXECUTION_DIRNAME = ".npubench_exec"
@@ -142,22 +147,41 @@ class NpuBenchRunnerError(RuntimeError):
     """A staged task, candidate, or evaluation contract is unsafe to use."""
 
 
-def _resolve_task_execution_timeout(timeout_seconds: int | None) -> int:
+def _resolve_task_execution_timeout(
+    timeout_seconds: int | None, n_cases: int | None = None
+) -> int:
     """Resolve one task timeout: explicit value, env override, then default.
 
-    ``CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC`` widens/narrows the 3600s default.
+    ``CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC`` widens/narrows the default.
     The default was raised from 300s (2026-08-22 A5 campaign): attention-op
     performance runs (W3 + R5 + msprof) legitimately take 35-60 minutes and
     the 300s cap silently killed every perf phase; 1800s was then tried and
-    also proved too tight, so the default is 3600s — a healthy card finishes
-    inside it while a wedged lane costs at most one hour.  An invalid value
-    is a configuration error and fails fast instead of being silently
-    ignored.
+    also proved too tight, so the default became a flat 3600s — a healthy card
+    finishes inside it while a wedged lane costs at most one hour.  That flat
+    cap in turn proved too tight for the 61-case two-sided msprof perf pass
+    measured at ~80 minutes (2026-09-01 A3→A5 migration re-review), so the
+    default now scales with the frozen fixture/sidecar case count when known:
+    ``base(900s) + per_case(90s) * n_cases``, floored at the flat 3600s.
+
+    The floor is load-bearing (added 2026-09-05): without it the scaled value is SMALLER
+    than the flat default for every n_cases < 30 — a single-case task resolves to 990s,
+    under the 1200s that ONE nested `msprof --quick` sub-call is itself allowed. The
+    scaling was introduced to lift the cap for a 61-case pass, so it must only ever
+    raise it. There is deliberately no upper cap: nothing measured here bounds how long
+    a legitimately large fixture takes, and capping would re-narrow exactly what the
+    scaling widened. An invalid env value is a configuration error and fails fast
+    instead of being silently ignored.
     """
     if timeout_seconds is not None:
         return timeout_seconds
     raw = os.environ.get(TASK_EXECUTION_TIMEOUT_ENV)
     if raw is None:
+        if isinstance(n_cases, int) and n_cases > 0:
+            scaled = (
+                TASK_EXECUTION_TIMEOUT_BASE_SECONDS
+                + TASK_EXECUTION_TIMEOUT_PER_CASE_SECONDS * n_cases
+            )
+            return max(scaled, TASK_EXECUTION_TIMEOUT_SECONDS)
         return TASK_EXECUTION_TIMEOUT_SECONDS
     value = raw.strip()
     if not value:
@@ -312,6 +336,7 @@ def materialize_candidate_snapshot(
     destination = snapshot_parent / source_digest
     if destination.exists():
         _require_snapshot(destination, source_digest)
+        _require_snapshot_build_artifacts(destination, source)
         return destination
     incoming_parent = _ensure_real_child_directory(
         snapshot_parent, ".incoming", "candidate snapshot incoming root"
@@ -325,6 +350,12 @@ def materialize_candidate_snapshot(
             raise NpuBenchRunnerError("candidate snapshot digest differs after copy")
         if _candidate_tree_sha256(source) != source_digest:
             raise NpuBenchRunnerError("candidate source changed while snapshot was copied")
+        if _candidate_build_artifact_manifest(incoming) != _candidate_build_artifact_manifest(source):
+            # kernel/build is digest-excluded, so the two checks above cannot
+            # catch a candidate (re)build landing mid-copy.
+            raise NpuBenchRunnerError(
+                "candidate source kernel/build artifacts changed while snapshot was copied"
+            )
         try:
             os.replace(incoming, destination)
         except FileExistsError:
@@ -371,6 +402,10 @@ def stage_workspace(
             "bundle_sha256": getattr(stage, "bundle_sha256", None),
             "manifest_sha256": getattr(stage, "manifest_sha256", None),
         }
+        if not (Path(workspace) / ".opgen_state.json").is_file():
+            # Stage only freezes inputs; durable state is written by a later
+            # phase, so flag its absence for CLI consumers.
+            payload["state_written"] = False
     except (NpuBenchRunnerError, OSError, ValueError) as exc:
         payload = _base_report("stage", status="ERROR")
         payload["reason"] = str(exc)
@@ -1447,6 +1482,38 @@ def _copy_candidate_build_directory(
         shutil.copyfile(item, destination / relative_dir / name)
 
 
+def _candidate_build_artifact_manifest(root: Path) -> tuple[str, ...]:
+    """List the built extension modules under ``kernel/build`` of one tree.
+
+    ``kernel/build`` stays out of the candidate scope digest on purpose (the
+    controlled build rewrote it every O5 round — see ``_candidate_excluded``),
+    so a scope-digest match alone cannot detect a snapshot frozen before the
+    candidate extension was (re)built.  This manifest is the independent
+    build-artifact inventory behind that check: same selection rules as
+    ``_copy_candidate_build_directory`` (``.so`` files at any depth, symlink
+    detritus pruned), keyed by root-relative POSIX path so the snapshot and
+    the live source compare directly.
+    """
+    root = Path(root)
+    build_root = root / _CANDIDATE_BUILD_RELATIVE
+    if build_root.is_symlink() or not build_root.is_dir():
+        return ()
+    artifacts: list[str] = []
+    for directory_text, dirs, files in os.walk(build_root, topdown=True, followlinks=False):
+        directory = Path(directory_text)
+        dirs[:] = [name for name in sorted(dirs) if not (directory / name).is_symlink()]
+        for name in sorted(files):
+            item = directory / name
+            if item.is_symlink() or item.suffix != ".so":
+                continue
+            if not item.is_file():
+                raise NpuBenchRunnerError(
+                    f"candidate build artifact is not a regular file: {item}"
+                )
+            artifacts.append(item.relative_to(root).as_posix())
+    return tuple(sorted(artifacts))
+
+
 def _kept_candidate_subdirectories(source: Path, directory: Path, dirs: list[str]) -> list[str]:
     """Return the subdirectory names that stay inside the candidate scope."""
     kept_dirs: list[str] = []
@@ -1507,6 +1574,26 @@ def _require_snapshot(path: Path, expected_digest: str) -> None:
             raise NpuBenchRunnerError("candidate snapshot contains symlink")
         if entry.stat().st_mode & 0o222:
             raise NpuBenchRunnerError("candidate snapshot must be read-only")
+
+
+def _require_snapshot_build_artifacts(snapshot: Path, source: Path) -> None:
+    """Fail closed when a reused snapshot's extension modules drifted from source.
+
+    ``_require_snapshot`` re-checks only the scope digest, which excludes
+    ``kernel/build`` by design; without this manifest parity check a snapshot
+    frozen before the extension was built is silently reused with missing or
+    stale ``.so`` files.
+    """
+    expected = _candidate_build_artifact_manifest(source)
+    actual = _candidate_build_artifact_manifest(snapshot)
+    if actual == expected:
+        return
+    raise NpuBenchRunnerError(
+        "candidate snapshot kernel/build extension modules do not match the "
+        f"candidate source (snapshot: {list(actual) or 'none'}, "
+        f"source: {list(expected) or 'none'}); 候选扩展未构建或快照已陈旧,"
+        f"请先构建 kernel/build/*.so,删除陈旧快照 {snapshot} 后重试"
+    )
 
 
 def _candidate_entry(candidate_dir: Path) -> Path:
@@ -1840,7 +1927,11 @@ def _run_isolated_context(
     the child exits.  A malicious same-UID program can still attempt runtime
     tampering; callers must not interpret this as adversarial OS isolation.
     """
-    timeout_seconds = _resolve_task_execution_timeout(timeout_seconds)
+    bundle = getattr(context, "bundle", None)
+    sidecar_cases = getattr(bundle, "sidecar_cases", None)
+    timeout_seconds = _resolve_task_execution_timeout(
+        timeout_seconds, n_cases=len(sidecar_cases) if sidecar_cases is not None else None
+    )
     if timeout_seconds <= 0:
         raise NpuBenchRunnerError("task execution timeout must be positive")
     internal = {
@@ -1901,7 +1992,10 @@ def _run_child_process_group(
     except subprocess.TimeoutExpired as exc:
         _terminate_child_process_group(process)
         stdout, stderr = process.communicate()
-        raise NpuBenchRunnerError(f"isolated task timed out after {timeout_seconds}s") from exc
+        raise NpuBenchRunnerError(
+            f"isolated task timed out after {timeout_seconds}s; if this phase "
+            f"legitimately needs longer, widen the cap via {TASK_EXECUTION_TIMEOUT_ENV}"
+        ) from exc
     # ``communicate`` reaps only the direct child.  If a normal descendant
     # inherited stdout/stderr it forces the timeout path above; otherwise
     # best-effort kill the fresh process group after the child exits.

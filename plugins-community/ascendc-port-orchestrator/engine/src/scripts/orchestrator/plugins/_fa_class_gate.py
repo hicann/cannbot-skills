@@ -305,11 +305,13 @@ def finalize_check_tile_size_consistency(workspace: Path, v: dict) -> Optional[s
     return None
 
 
-# FA-class shared asset paths (under <plugin_root>/kb/target/ascendc/fa_class/).
+# FA-class shared asset paths (under <plugin_root>/templates/fa_class/).
 # Used by mode plugins' kw_brief_phase_a / pp_brief_phase_block when op_class is FA.
-# 2026-07-05: KB relocated to <plugin_root>/kb/. _fa_class_gate.py lives at
+# OKF-only migration (2026-08-31): assets moved from kb/target/ascendc/fa_class/
+# to <plugin_root>/templates/fa_class/{op_kernel,op_host}/.
+# _fa_class_gate.py lives at
 # <plugin_root>/engine/src/scripts/orchestrator/plugins/, so parents[5] == plugin_root.
-_FA_CLASS_ASSETS = Path(__file__).resolve().parents[5] / "kb" / "target" / "ascendc" / "fa_class"
+_FA_CLASS_ASSETS = Path(__file__).resolve().parents[5] / "templates" / "fa_class"
 
 
 def fa_class_assets_root() -> Path:
@@ -319,15 +321,17 @@ def fa_class_assets_root() -> Path:
 
 def fa_class_brief_ascendc() -> str:
     """Standard FA-class kw_brief content directive — points kw at the shared
-    ascendc_agent.md prompt. Mode plugins return this from kw_brief_phase_a
-    when is_fa_class(op_class).
+    FA-class templates + runbook cards. Mode plugins return this from
+    kw_brief_phase_a when is_fa_class(op_class).
     """
     return (
         "FA-CLASS ASCENDC-AGENT DIRECTIVE (shared op-class brief, per "
         "src/scripts/orchestrator/plugins/_fa_class_gate.py): kw acts as "
         "cv-agent's ascendc-agent for FA-class ops. READ FIRST: "
-        "kb/target/ascendc/fa_class/ascendc_agent.md + "
-        "cv_lowering.md + cross_core_sync.md + api_mapping.md. Hard constraints "
+        "templates/fa_class/op_kernel/ + templates/fa_class/op_host/ (template "
+        "assembly: GE_HOST_TRANSFORM_RECIPE.md + flash_attention_score_* "
+        "skeletons) + kb/okf/runbooks/operator-optimization/"
+        "fa-cross-core-sync-workspacequeue.md + fa-cv-fused-init-process-lowering.md. Hard constraints "
         "(verified 16/16 on an independently authored V220 fixture): (1) cube.h/vec.h file split "
         "MANDATORY, no monolithic kernel; (2) KERNEL_TYPE_MIX_AIC_1_2 (Attention "
         "requirement); (3) in-loop T.set_cross_flag → WorkspaceQueue ring "
@@ -363,7 +367,7 @@ def fa_class_brief_debugger() -> str:
         "fixture are IMMUTABLE; (4) do NOT blame hardware / API "
         "without tensor-dump evidence + failed-fix attempt; (5) exit when "
         "PASS_T1 achieved OR no new failure information emerges (prevents "
-        "busywork). Reference: kb/target/ascendc/fa_class/"
-        "ascendc_agent.md (cube/vec split + WorkspaceQueue still apply during "
+        "busywork). Reference: templates/fa_class/op_kernel/ "
+        "(cube/vec split + WorkspaceQueue still apply during "
         "repair — never revert to monolithic + inline flag)."
     )

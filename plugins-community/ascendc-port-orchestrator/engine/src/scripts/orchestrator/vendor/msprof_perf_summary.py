@@ -9,6 +9,11 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 #
 # ----------------------------------------------------------------------------------------------------------
+# VENDORED RUNTIME COPY — 源文件: ops/ops-profiling/scripts/msprof_perf_summary.py
+# 本副本是 ascendc-port-orchestrator 的运行时权威版本(marketplace 安装只含插件目录,
+# 见 npubench_profile.py:_default_profiler_summary)。修复先落本文件,回流 ops 原件
+# 待后续 PR;ops 原件当前为上游状态,两侧存在分叉(即本文件的 vendor 侧修复)。
+# ----------------------------------------------------------------------------------------------------------
 # msprof 解析 & 归档 & 对比测试脚本（统一入口）
 #
 # 支持三种模式：

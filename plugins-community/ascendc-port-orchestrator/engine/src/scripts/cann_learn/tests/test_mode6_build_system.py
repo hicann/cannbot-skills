@@ -16,8 +16,8 @@ What Mode 6 changes:
   emits a brief whose Phase B scope is CMakeLists.txt + register_*.cpp +
   op_proto*.cpp + apt.cpp (NOT 2-5 kernel files like Mode 5).
 - spawn_cann_learner_agent: accepts extraction_mode kwarg, threads through.
-- Candidates dir routes to target/ascendc/build_system/candidates.md
-  (NOT patterns/unverified/candidates.md).
+- Candidates dir routes to runbooks/field-notes/build/candidates.md (OKF)
+  (NOT reference/patterns/unverified/candidates.md).
 - summary.json schema: extraction_mode optional field.
 
 These tests pin the routing without exercising the live agent spawn.
@@ -69,12 +69,12 @@ def test_mode5_default_brief_mentions_kernel_files(tmp_path: Path):
     """Without --extraction-mode flag, Mode 5 historical brief is rendered.
 
     The kernel_structural section explicitly says 'Read 2-5 files (header +
-    impl + tiling)' and routes candidates to patterns/unverified/candidates.md.
+    impl + tiling)' and routes candidates to reference/patterns/unverified/candidates.md.
     """
     brief = agent_spawn.build_cann_learner_brief(**_common_brief_args(tmp_path))
     assert "Mode 5: kernel_structural" in brief
     assert "Read 2-5 files (header + impl + tiling)" in brief
-    assert "patterns/unverified/candidates.md" in brief
+    assert "reference/patterns/unverified/candidates.md" in brief
     # Mode 6 specific content MUST NOT appear in Mode 5 brief
     assert "build_system" not in brief.lower() or "Mode 6" not in brief
     assert "per-source-file" not in brief.lower() or "Mode 6" not in brief
@@ -116,13 +116,13 @@ def test_mode6_brief_scope_is_build_system(tmp_path: Path):
 
 
 def test_mode6_brief_routes_to_build_system_kb_subdir(tmp_path: Path):
-    """Mode 6 candidates land in target/ascendc/build_system/, NOT patterns/unverified/."""
+    """Mode 6 candidates land in runbooks/field-notes/build/ (OKF), NOT reference/patterns/unverified/."""
     args = _common_brief_args(tmp_path)
     brief = agent_spawn.build_cann_learner_brief(
         extraction_mode="build_system",
         **args,
     )
-    expected_path = args["kb_root"].resolve() / "target" / "ascendc" / "build_system" / "candidates.md"
+    expected_path = args["kb_root"].resolve() / "runbooks" / "field-notes" / "build" / "candidates.md"
     assert str(expected_path) in brief
 
 

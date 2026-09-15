@@ -20,13 +20,12 @@ workspace/<op>/knowledge_update.md, this module:
 2. Admits reviewed entries through Arbiter into user-local c-tier only
 3. Drops `.kb_merged` only after deterministic persistence, then logs the run
 
-The plugin-bundled b-tier is release-owned and read-only at runtime. A before /
-after fingerprint makes accidental semantic-agent edits a visible failure.
+OKF-only 迁移（2026-08）：legacy b-tier（内置索引 provider）已摘除，user-kb（c-tier）是唯一
+可写 tier；bundled 知识即 kb/okf，release-owned，运行时只读。
 """
 from __future__ import annotations
 
 import datetime as _dt
-import hashlib
 import json
 import sys as _sys
 from pathlib import Path
@@ -46,35 +45,10 @@ from kb_tiering.interface import Arbiter, Entry, hard_key  # noqa: E402
 from workflow.kb_marker_verifier import verify_marker  # noqa: E402
 
 _CANDIDATE_FILENAME = ".kb_c_tier_candidates.json"
-_BUNDLED_KB_ROOT = Path(__file__).resolve().parents[4] / "kb"
+_PLUGIN_ROOT = Path(__file__).resolve().parents[4]
 _CANDIDATE_FIELDS = {
     "kind", "claim", "scope", "key", "evidence", "provenance", "meta",
 }
-
-
-def _bundled_kb_fingerprint() -> str:
-    """Content fingerprint for the release-owned b-tier.
-
-    The semantic reviewer may read this tree, but a runtime merge must never
-    mutate it.  Comparing before/after dispatch turns an accidental edit into
-    a visible merge failure instead of accepting a lying marker.
-    """
-    digest = hashlib.sha256()
-    if not _BUNDLED_KB_ROOT.is_dir():
-        return digest.hexdigest()
-    for path in sorted(_BUNDLED_KB_ROOT.rglob("*")):
-        if not path.is_file() and not path.is_symlink():
-            continue
-        rel = path.relative_to(_BUNDLED_KB_ROOT).as_posix().encode()
-        digest.update(len(rel).to_bytes(4, "big"))
-        digest.update(rel)
-        if path.is_symlink():
-            digest.update(b"L")
-            digest.update(path.readlink().as_posix().encode())
-        else:
-            digest.update(b"F")
-            digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 
 def _candidate_path(workspace: Path) -> Path:
@@ -82,19 +56,15 @@ def _candidate_path(workspace: Path) -> Path:
 
 
 def _build_c_tier_arbiter() -> tuple[Arbiter, Path]:
-    """Build the canonical write path, with c as the only writable tier."""
+    """Build the canonical write path, with c as the only tier.
+
+    OKF-only 后 b-tier 已摘除：tombstone/admission gate 上下文即 c 自身
+    （resurrection guard 不变），写路径始终指向 ``customer``。
+    """
     c_root = resolve_c_root()
     providers = []
     c_provider = make_cannbot_c(str(c_root), providers=providers)
     providers.append(c_provider)
-
-    # Include bundled b for cross-tier tombstone/admission context when the
-    # aggregate plugin is installed.  Its adapter rejects direct writes, and
-    # this function always targets ``customer`` below.
-    b_index = _BUNDLED_KB_ROOT / "KB_INDEX.md"
-    if b_index.is_file():
-        from kb_tiering.adapters.cannbot_b import make_cannbot_b
-        providers.append(make_cannbot_b(str(_BUNDLED_KB_ROOT)))
     return Arbiter(providers), c_root
 
 
@@ -201,8 +171,8 @@ def _runtime_prompt(workspace: Path) -> str:
         f"Run the aog-knowledge-maintain skill in Mode 1 for workspace `{workspace}`. "
         f"Read `{workspace}/knowledge_update.md` and perform the skill's semantic "
         f"generalization, evidence, scope, conflict, and dedup review. The bundled "
-        f"plugin KB is release-owned b-tier and MUST remain byte-for-byte read-only. "
-        f"Do not edit bundled KB markdown, KB_INDEX.md, promotion markers, or "
+        f"plugin KB (kb/okf) is release-owned and MUST remain byte-for-byte read-only. "
+        f"Do not edit bundled KB markdown, promotion markers, or "
         f"`.kb_merged`; do not write directly under the user KB root. Emit only "
         f"`{intake}` as JSON: {{\"schema_version\":1,\"entries\":[...]}}. Each "
         f"entry may contain only kind, claim, scope, key, evidence, provenance, and "
@@ -242,7 +212,7 @@ def _prepare_existing_marker(workspace: Path) -> bool:
     try:
         report = verify_marker(
             workspace,
-            _BUNDLED_KB_ROOT.parent,
+            _PLUGIN_ROOT,
             expected_c_root=resolve_c_root().resolve(),
         )
     except (OSError, ValueError):
@@ -304,25 +274,19 @@ def merge_one(workspace: Path, *, timeout_sec: int = 1200) -> dict:
     intake = _candidate_path(workspace)
     intake.unlink(missing_ok=True)
     prompt = _runtime_prompt(workspace)
-    bundled_before = _bundled_kb_fingerprint()
 
     # bypassPermissions per Day 4 finding (P0f). Invocation via Backend (harness-decoupling):
     # was a hardcoded `claude --print` cmd → now CCBackend.dispatch(kind="skill"). Behavior faithful.
     env = _backend.dispatch("aog-knowledge-maintain", prompt, kind="skill", timeout=timeout_sec)
     if env.raw_envelope.get("timed_out"):
-        bundled_changed = _bundled_kb_fingerprint() != bundled_before
         _quarantine_marker(workspace)
         return {
             "success": False, "timed_out": True,
             "stdout_tail": "", "stderr_tail": "(kb_invoke timed out)",
-            "bundled_b_tier_changed": bundled_changed,
         }
     success = not env.is_error
     error = ""
     persisted: dict = {}
-    if _bundled_kb_fingerprint() != bundled_before:
-        success = False
-        error = "aog-knowledge-maintain modified release-owned bundled b-tier"
     if success and _quarantine_marker(workspace) is not None:
         success = False
         error = "semantic reviewer wrote the orchestrator-owned completion marker"
@@ -384,9 +348,9 @@ def merge_batch(workspaces: list[Path], *, timeout_sec: int = 1800) -> dict:
     prompt = (
         f"Run aog-knowledge-maintain in Mode 1-batch (--scan-roots {workspace_root}). "
         f"Semantically review all pending knowledge_update.md files and apply "
-        f"cross-batch dedup. The bundled plugin KB is release-owned b-tier and "
+        f"cross-batch dedup. The bundled plugin KB (kb/okf) is release-owned and "
         f"MUST remain byte-for-byte read-only. Do not edit bundled KB files, "
-        f"KB_INDEX.md, promotion markers, `.kb_merged`, or the user KB directly. "
+        f"promotion markers, `.kb_merged`, or the user KB directly. "
         f"For each pending workspace emit its exact intake path from "
         f"{intake_contract!r} using the Mode 1 schema "
         f"{{\"schema_version\":1,\"entries\":[...]}}; emit an empty list when "
@@ -396,24 +360,13 @@ def merge_batch(workspaces: list[Path], *, timeout_sec: int = 1800) -> dict:
     )
 
     # bypassPermissions (P0f). Invocation via Backend (harness-decoupling), behavior faithful.
-    bundled_before = _bundled_kb_fingerprint()
     env = _backend.dispatch("aog-knowledge-maintain", prompt, kind="skill", timeout=timeout_sec)
     if env.raw_envelope.get("timed_out"):
-        bundled_changed = _bundled_kb_fingerprint() != bundled_before
         for ws in pending:
             _quarantine_marker(ws)
         return {
             "success": False, "timed_out": True,
             "stdout_tail": "", "stderr_tail": "(kb_invoke timed out)",
-            "bundled_b_tier_changed": bundled_changed,
-        }
-    if _bundled_kb_fingerprint() != bundled_before:
-        for ws in pending:
-            _quarantine_marker(ws)
-        return {
-            "success": False,
-            "n_pending": len(pending),
-            "error": "aog-knowledge-maintain modified release-owned bundled b-tier",
         }
     if env.is_error:
         for ws in pending:

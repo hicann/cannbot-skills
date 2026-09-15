@@ -95,7 +95,7 @@ Decision rule: if a `git diff master..FETCH_HEAD -- <op>/op_kernel/arch35/` reve
 ### Cross-ref
 
 - **W8** `ops_nn_layout/ops_nn_a5_artifact_layout.md` — what the arch35/<op>.h fits into
-- **W11** `hardware/target/ascend950pr.md §Reg-based intrinsics restrictions` — full ToFloat<> rule
+- **W11** `kb/okf/runbooks/hardware/target-ascend950pr.md §Reg-based intrinsics restrictions` — full ToFloat<> rule
 - **W9** OL-131 (cross-op router) — orthogonal host-side change for v2/v3-shared-aclnn ops
 
 <!-- 迁移自 porter kb/target/ascendc/patterns/domains/platform_compat.md（P-P90，convert_patterns_to_okf.py）。confidence 未升格。 -->

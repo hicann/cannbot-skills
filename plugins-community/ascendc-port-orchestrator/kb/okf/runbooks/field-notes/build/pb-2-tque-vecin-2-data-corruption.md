@@ -25,7 +25,7 @@ applies_to:
 - **Affected**: Ascend950PR, CANN 9.0.0
 - **Workaround**: Use TQue<VECIN,4> (depth 4 works correctly)
 - **Status**: OPEN
-- **Evidence**: hardware/target/ascend950pr.md, E13 test data
+- **Evidence**: kb/okf/runbooks/hardware/target-ascend950pr.md, E13 test data
 
 <!-- 迁移自 porter kb/target/ascendc/（PB-2，convert_family_to_okf.py，M1，整档忠实搬运）。confidence/severity/reproduce_count 未升格。 -->
 

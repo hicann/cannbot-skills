@@ -115,10 +115,12 @@ def _researcher_phase_block(
 ## Phase R-A: KB inventory + grep coverage map
 
 Before drafting any new pattern number (P-P-XXX, OL-XX, EC-XX), inventory KB:
-1. Glob `kb/**/*.md` and Read top-level files (KB_INDEX,
-   ALWAYS_LOADED_RULES, SIMT_VS_SIMD_DECISION, PLATFORM_BUGS, ASCENDC_API_CATALOG,
-   patterns/PATTERN_INDEX) plus relevant patterns/domains/*.md
-2. Grep across full KB for each concept your candidates touch
+1. Use the OKF cards already injected into this brief (the KB manifest block
+   above) as the primary knowledge base; when more depth is needed, Read the
+   OKF indexes — `kb/okf/index.md` plus the per-area indexes under
+   `kb/okf/runbooks/` — and the relevant cards under `kb/okf/reference/` and
+   `kb/okf/runbooks/`
+2. Grep across `kb/okf/` for each concept your candidates touch
 3. Verify proposed pattern slot is unused — find current highest, +1
 4. Check if equivalent pattern exists under different name → EXTEND existing entry
 

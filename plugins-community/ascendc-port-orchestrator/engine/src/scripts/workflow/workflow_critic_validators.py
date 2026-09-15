@@ -130,8 +130,8 @@ def check_target_simt_compat(ws: Path, rejections: list[Rejection]) -> None:
                     expected=f"kernel/* must NOT use {token} when TARGET={target}",
                     actual=f"{f.relative_to(ws)} contains '{token}' (outside comments)",
                     fix="rewrite using SIMD pattern (TPipe / TQue / DataCopy + UB-scratchpad reduction). "
-                        "See merged_skills/_kb/references/hardware/INDEX.md §Capability matrix and "
-                        "merged_skills/_kb/references/target/ascendc/patterns/domains/scatter_add.md §a3/a2 catalogue gap.",
+                        "See kb/okf/runbooks/hardware/target-<chip>.md capability sections and "
+                        "kb/okf/reference/porter/patterns/ (SIMD pattern cards; scatter_add a3/a2 catalogue gap).",
                 ))
                 break  # one rejection per file is enough
 
@@ -186,7 +186,7 @@ def check_taxonomy_coverage(ws: Path, rejections: list[Rejection]) -> None:
         - op_classification.error is missing (i.e. classification was never attempted,
           not just failed)
     Signal: Phase O1.7 didn't run, OR source files arrived after classification cache.
-    Worker brief will only get DEFAULT_KB_SECTIONS (less than full coverage).
+    Worker brief will only get default_kb_sections() (less than full coverage).
     """
     op = ws.name
     has_source = any([
@@ -211,7 +211,7 @@ def check_taxonomy_coverage(ws: Path, rejections: list[Rejection]) -> None:
              f"sys.path.insert(0, \"src/scripts/orchestrator\"); "
              f"import phase_o17_classify; "
              f"print(phase_o17_classify.classify(__import__(\"pathlib\").Path(\"{ws}\")))'. "
-             f"Without classification, worker brief gets DEFAULT_KB_SECTIONS only — "
+             f"Without classification, worker brief gets default_kb_sections() only — "
              f"silent KB-load regression (C34, P0aak)."),
     ))
 

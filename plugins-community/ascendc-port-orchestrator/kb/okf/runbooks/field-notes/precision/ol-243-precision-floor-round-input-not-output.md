@@ -31,5 +31,5 @@ Concrete anchor (SFA, sibling op): a truth-rounded `bf16_floor` (~3.8e-3) made c
 ## 证据
 - SFA precision reframe (2026-06-22): truth-rounded floor mis-calc -> false "rope bug"; input-cast floor -> case-0 at-ceiling, hypothesis falsified.
 - selective_scan_source_a5 (2)(3)(4) (2026-06-22, A5): all ceiling-vs-bug verdicts computed with the input-cast floor.
-- selective_scan_full_grad bwd 2.69x scan-vectorization (PR#37, `bda9cb3c`, 2026-06-22, A5): the post-opt 30/30 truth-backed precision verdict (fp32/fp16/bf16) was graded with the input-cast floor — the reverse-suffix Hillis-Steele rewrite (P-P106) is precision-NEUTRAL, so the at-ceiling verdict held before and after.
+- selective_scan_full_grad bwd 2.69x scan-vectorization (PR#37, `bda9cb3c`, 2026-06-22, A5): the post-opt 30/30 truth-backed precision verdict (fp32/fp16/bf16) was graded with the input-cast floor — the reverse-suffix Hillis-Steele rewrite (P-P106) is precision-NEUTRAL, so the at-ceiling verdict held before and after, confirming the floor methodology classifies a vectorization that does not move output as "no precision change".
 - Cross-ref: P-P88 / OL-103 (primitive precision floors — a different floor source: the primitive, not the input rounding).

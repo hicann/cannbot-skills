@@ -49,10 +49,11 @@ REQUIRED_FILES = (
 )
 
 # KB files (2026-07-05: relocated to <plugin_root>/kb/, resolved via kb_root()).
+# OKF-only 迁移（2026-08）：校验 shared 纪律文档 + OKF 索引卡目录入口存在；
+# legacy 旧索引与 target 目录已退役。
 REQUIRED_KB_FILES = (
     "shared/ANTI_PRESSURE_PROTOCOLS.md",
-    "KB_INDEX.md",
-    "target/ascendc/OPERATIONAL_KNOWLEDGE.md",
+    "okf/index.md",
 )
 
 # Workflow FSM (2026-07-05: relocated to <plugin_root>/workflows/ per cannbot convention —

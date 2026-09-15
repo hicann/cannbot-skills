@@ -18,9 +18,10 @@ External callers import these modules package-qualified, e.g.
 parent ``orchestrator/`` directory on ``sys.path`` (``__main__.py`` bootstrap,
 ``tests/conftest.py`` and friends), so no new path wiring is required.
 
-The six runner modules (``npubench_runner``/``npubench_core``/
-``npubench_fixture``/``npubench_precision``/``npubench_profile``/
-``npubench_inputs`` — see ``RUNNER_MODULE_FILENAMES``) are copied
+The seven runner modules (``npubench_runner``/``npubench_core``/
+``npubench_fixture``/``npubench_internal_exec``/``npubench_precision``/
+``npubench_profile``/``npubench_inputs`` — see
+``RUNNER_MODULE_FILENAMES``) are copied
 byte-identically into a FLAT staged directory and executed there as a plain
 script, and are also loaded by absolute path into the quick-profiler shim;
 neither context has a package layout.  Their mutual imports therefore stay

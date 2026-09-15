@@ -29,7 +29,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 _HERE = Path(__file__).resolve()
 _GIT = shutil.which("git")
@@ -41,18 +40,9 @@ import finalize_dispatch as fd  # noqa: E402
 # _PROJECT_ROOT by BARE NAME there. Patch _PROJECT_ROOT on finalize_dispatch
 # (the module that actually resolves the name), not the finalize_pipeline
 # re-export — otherwise the git-add path uses the real repo root, not tmp.
-
-
-@pytest.fixture(autouse=True)
-def _isolate_kb_auto_promote(monkeypatch):
-    """Same isolation as test_finalize_pipeline.py — prevent real KB codex spawns."""
-    from src.scripts.orchestrator import kb_auto_promote
-
-    def _noop_run(*args, **kwargs):
-        rpt = kb_auto_promote.PromotionBatchReport(markers_processed=0)
-        rpt.finished_ts = rpt.started_ts
-        return rpt
-    monkeypatch.setattr(kb_auto_promote, "run_auto_promote", _noop_run)
+# (OKF-only migration 2026-08-31: the kb_auto_promote isolation fixture was
+# dropped — the legacy promotion writer module was deleted and finalize no
+# longer invokes it.)
 
 
 def _seed_workspace(ws: Path):

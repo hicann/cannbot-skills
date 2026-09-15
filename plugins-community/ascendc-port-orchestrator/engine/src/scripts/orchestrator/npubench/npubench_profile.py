@@ -52,8 +52,10 @@ def _default_profiler_summary() -> Path:
     reuses the existing summary engine for the actual msprof W3/R5 collection
     and parsing, without changing the shared ``ops/`` implementation.  A
     Claude marketplace install contains only this plugin directory, so the
-    byte-identical runtime copy in the ``vendor/`` directory beside this
-    runner package is authoritative.  The
+    vendored runtime copy in the ``vendor/`` directory beside this
+    runner package is authoritative; fixes land there first, the
+    ``ops/`` backflow is pending a follow-up PR, and the two currently
+    diverge by the vendor-side fixes.  The
     checkout lookup is retained solely to support older package layouts while
     preserving the same invocation contract.
     """

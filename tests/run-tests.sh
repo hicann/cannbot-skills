@@ -583,8 +583,6 @@ get_tests_for_category() {
     case "$cat" in
         unit)
             echo "unit/test-line-endings.sh:fast"
-            echo "unit/test-ascendc-port-kb-scope-and-truth.sh:fast"
-            echo "unit/test-ascendc-port-scope.sh:fast"
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/test-markdown-anchors.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"

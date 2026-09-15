@@ -39,6 +39,7 @@ The a5_ops PASS-of-record archive for this exact op DEFAULTED its `model_new_asc
 ### Evidence
 
 - gelu-kw-2 (2026-07-01, Ascend950PR, CANN 9.0.0): erf-vs-tanh disambiguation via 3-order max_abs_diff separation on 29 fp32 cases; ported erf as erfc-direct, 29/29 T1 PASS.
+- gelu-kw-2 (2026-07-01, Ascend950PR / host REDACTED_IP / CANN 9.0.0): erf-vs-tanh disambiguation via 3-order max_abs_diff separation on 29 fp32 cases; ported erf, 29/29 T1 PASS (worst 5.44e-7 vs cpu64, 7.15e-7 vs a3 hw-erf). Spawn #1 correctly escalated the erf-vs-tanh conflict to `await_user_decision` rather than paper it over; owner decision (grounded in the a5_ops archive) confirmed the erf target. Derived from gelu/user_decision.md session 2026-07-01.
 
 ### Other instances (predicted)
 

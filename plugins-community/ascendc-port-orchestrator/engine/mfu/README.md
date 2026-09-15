@@ -1,6 +1,6 @@
 # MFU 求解器 (算子理论最大 MFU 模型) — v0
 
-数学口径见 [`../docs/design/OPERATOR_MFU_DEFINITION.md`](../docs/design/OPERATOR_MFU_DEFINITION.md)、硬件常数见 [`../docs/design/L0_HARDWARE_CONSTANTS.md`](../docs/design/L0_HARDWARE_CONSTANTS.md)。
+数学口径见 `../docs/design/OPERATOR_MFU_DEFINITION.md`、硬件常数见 `../docs/design/L0_HARDWARE_CONSTANTS.md`。
 
 ## 这是什么
 给定算子（FLOPs/访存/dtype/可选通信）+ 硬件目标，算出**理论最大 MFU**（roofline 上界 ∩ 完全通算掩盖）+ 瓶颈归因（compute/mem/comm-bound）。

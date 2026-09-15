@@ -38,18 +38,10 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent))
-from briefs import kw_brief, op_taxonomy  # noqa: E402
+from briefs import kw_brief  # noqa: E402
 from briefs._common import AscendCEnv  # noqa: E402
-
-
-@pytest.fixture(autouse=True)
-def _combined_pr_kb_boundary(monkeypatch):
-    """PR #609 is tested with the KB shell supplied by its companion PR."""
-    monkeypatch.setattr(op_taxonomy, "validate_manifest_paths", lambda sections: None)
 
 
 def _make_env(**kwargs) -> AscendCEnv:

@@ -61,7 +61,7 @@ V220_TARGETS = ["a3", "a2"]
 
 _PB34_HEADING = "### PB-34 — MIX cube+vec SILENT-HANG"
 _PB35_HEADING = "### PB-35 — the Pattern-A trap"
-_CCS_MD = "target/ascendc/fa_class/cross_core_sync.md"
+_CCS_MD = "okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md"
 
 
 def _fa_ws(tmp_path: Path) -> Path:
@@ -232,17 +232,17 @@ def test_path_a_bounds_are_not_stripped():
 def test_recipe_is_pointed_at_not_copied():
     """POINT, do not COPY — a copy drifts and a paraphrase strips the bounds."""
     a5 = _fa_assembly_deadlock_warning_block("a5")
-    assert "cross_core_sync.md` §4 (`:209`" in a5
+    assert "fa-cross-core-sync-workspacequeue.md` §4 (`:202`" in a5
     assert "READ §4 ITSELF — do not work from this summary" in a5
     # Not a transcription of §4's code block.
     assert "AIV1_FLAG_OFFSET = 16" not in a5
 
 
 def test_intra_aic_hand_roll_is_discouraged_on_both_socs_with_correct_anchors():
-    """V220 = UNSOLVED (PLATFORM_BUGS.md:934); V351 = non-deterministic (PB-45)."""
+    """V220 = UNSOLVED (PB-35's falsified "IDs ≥ 4" fix); V351 = non-deterministic (PB-45)."""
     v220 = _fa_assembly_deadlock_warning_block("a3")
     assert "UNSOLVED in canonical KB" in v220
-    assert "PLATFORM_BUGS.md:934" in v220
+    assert "pb-35-event-t-0-for-cube-internal-pipe-sync-mte1-m-m-fix.md" in v220
     a5 = _fa_assembly_deadlock_warning_block("a5")
     assert "### PB-45" in a5
     assert "non-deterministic" in a5
@@ -259,8 +259,8 @@ _SHIPPED_CUBE_HEADING = "### A non-KFC LIBRARY CUBE HAS SHIPPED ON V220"
 def test_v220_no_longer_says_the_cube_workflow_has_not_landed(target):
     """MUTATION PIN: the false "until the canonical V220 cube workflow lands" steer.
 
-    That trailer was false once DEBT-206 shipped (OL-275,
-    `OPERATIONAL_KNOWLEDGE.md:11016` — first SHIPPED verified_on:a3 cube op), and it
+    That trailer was false once DEBT-206 shipped (OL-275 — first SHIPPED
+    verified_on:a3 cube op), and it
     contradicted the PB-34 block's OWN `cube-only` bullet four lines above it. It was
     the clause written in plain imperative language, so it is the one a worker
     obeyed: an attention op went pure-vector because of it.
@@ -283,7 +283,7 @@ def test_v220_learns_a_non_kfc_cube_has_shipped_with_its_bounds(target):
     out = _fa_assembly_deadlock_warning_block(target)
     assert _SHIPPED_CUBE_HEADING in out
     # The route, cited to a real artifact.
-    assert "DEBT-206" in out and "OPERATIONAL_KNOWLEDGE.md:11016" in out
+    assert "DEBT-206" in out and "OL-275" in out
     assert "IterateAll<sync=true>" in out and "ASCEND_IS_AIC" in out
     assert "build_ascendc.py" in out
     # The bounds that must never be stripped.

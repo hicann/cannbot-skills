@@ -185,12 +185,22 @@ _FA_NOARG_GOLDENS = {
     # it was the trap. The V220 composition is byte-locked separately by
     # test_kw_brief_soc_scope_debt208.py, which also mutation-proves the predicate.
     # Content change is the point; re-pinned deliberately, not regenerated silently.
-    "_fa_assembly_deadlock_warning_block": "225851330cff475eb30134893486ec14f9018305a1003097ec64c1c8a17a90bd",
+    #
+    # Hash updated DELIBERATELY a FIFTH time 2026-08-31 (OKF-only 迁移): the block's
+    # KB pointers moved off the legacy layout — `target/ascendc/fa_class/cross_core_sync.md`
+    # → the OKF card `kb/okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md`
+    # (§4 line anchors re-based), `PLATFORM_BUGS.md`/`OPERATIONAL_KNOWLEDGE.md` file:line
+    # citations → pb-34/pb-35 card paths / the OL-275 entry id, and the a3 witness/example
+    # `src/skills/references/...` dead paths → `kb/okf/reference/porter/patterns/` +
+    # plugin `examples/a3_mix_fa_min/`. Same semantics, new canonical locations.
+    "_fa_assembly_deadlock_warning_block": "8b9be0b30bbc94de6c28767c9ca367c6507a72fa612fefb77b873a2d82eb6961",
     "_fa_assembly_compile_block": "0cdf20aa8b996c46fb2e0b9035db439e434aa984a0ec69bfbc4abc7d85c6b6d5",
     "_fa_assembly_verify_hard_block": "d9fe58d2c7e9af3d6a302a331527f4db5faafd7ad5dccf609ef01433d457b1a5",
     # cannbot re-pin (v3.13.0 re-sync): builder output == v3.13.0's with only
     # src/skills/references→kb/ relocation applied (proven reloc-equivalent, no other drift).
-    "_fa_ge_host_gen_block": "ec5e47f327960386cd95c183dfd880f77998037f160542f6c21e9f53e4ab62c6",
+    # Re-pinned 2026-08-31 (OKF-only 迁移): recipe pointer moved to plugin
+    # `templates/fa_class/op_host/` (was `kb/target/ascendc/patterns/domains/fa_class/templates/op_host/`).
+    "_fa_ge_host_gen_block": "69e763c303208bd09b64afde1124a8da83d3959e81a97e03f6e876b293008898",
 }
 
 
@@ -205,7 +215,12 @@ def test_fa_assembly_intro_byte_identical():
     from briefs import kw_brief_fa as fa
 
     got = _sha(getattr(fa, '_fa_assembly_intro_block')("flash_attention_score", "FA_CLASS ATTENTION"))
-    assert got == "2649ca3fc8c4ef35cab3e5b41c971df76502ed14ab08789ae45fa23dcce875c8"
+    # Re-pinned 2026-09-05 (reference/ 目录重组): 逐项在改动前后两棵树上生成字符串做 diff，
+    # _fa_assembly_intro_block 差 2 行 / _pa3_context 差 12 行 / _pa3_phase_a_1 差 2 行，
+    # 非路径行均为 0 —— 变化仅为 KB 路径改写。
+    # Re-pinned 2026-08-31 (OKF-only 迁移): P-P103 pointer now names
+    # `kb/okf/reference/porter/patterns/fa_class_template.md`.
+    assert got == "fdad3c01332ca3836daf92ada0822a6e36ca565b371df7de4bc393ac1ac071e0"
 
 
 def test_fa_predicates():
@@ -247,9 +262,16 @@ def test_forced_architecture_block():
 # ---------------------------------------------------------------------------
 
 _PA3_PHASE_GOLDENS = {
-    "_pa3_context": "0a6601b70b0eec5516b2d2f5ff42765e7563f4409b5beeec924f8ff6673687ed",
-    "_pa3_phase_a_1": "b8c6143f46af2094177df455519f4799d1dea08dd589c7dce3e2b163f042dd37",
-    "_pa3_phase_a_2": "7de3e2d152eceb32955486c5e802e9d265a97b5b4afe9a6a606271b7354965e3",
+    # Re-pinned 2026-08-31 (OKF-only 迁移): KB pointers moved to
+    # `kb/okf/reference/...` + plugin `templates/fa_class/op_host/`.
+    # `_pa3_phase_a_2`'s previous pin was already stale before this migration
+    # (baseline drift) — re-pinned to current content, no text change from OKF.
+    # Re-pinned 2026-09-02: `_pa3_phase_a_2` pin stale again on the 1358ec68
+    # baseline (baseline drift — baseline and HEAD emit byte-identical output,
+    # verified by diff); re-pinned to current content.
+    "_pa3_context": "82d838c7a4ea8cecd95873a02af0bc5ac55d8844218092620cedcb94ef69b768",
+    "_pa3_phase_a_1": "bbe5f1c047a32023c04abadd3f4af3a9bef77596ec3da5aeeeedfd864b7f648b",
+    "_pa3_phase_a_2": "b039e18ed322c08515f682efc96a476d5e2f3df62d1dd28715d4badb8740fddd",
     "_pa3_phase_a_3": "c5903dd6e58f8bac3f6dcee3c9dd0c2db3fcb4febdfd702a87992e68ac1f0d27",
     "_pa3_phase_b": "4d7022f4f05432c2db701d1a2eb62b3c7cc07ea010c2939f6c421313b6b3d2c5",
     "_pa3_phase_c": "40b46bd439f246e52b581c251ee55b3ec113c8a3d9e6a1db669a16d2196a7d25",
@@ -293,10 +315,20 @@ def test_pa3_orch_phase_builders_byte_identical(fn, sha):
 def test_pa3_helper_blocks_byte_identical():
     from briefs import kw_brief_pa3_phases as ph
 
+    # Re-pinned 2026-09-05 (reference/ 目录重组): 本函数下 3 个断言中的 2 个重钉——
+    # _migration_level_block（差 8 行，长度 863→1337，因 1 个子目录拆成 7 个）与
+    # _port_a3_cube_class_mix_block（差 1 行，cube_vector_fusion.md 路径）。两者
+    # 均在改动前后两棵树上生成同一字符串做 diff，非路径行为 0。
+    # _port_a3_complete_deliverable_block 未变（不含 KB 路径）。
+    # _migration_level_block 的 guides/extra_subdirs
+    # 改指新路径。diff 实测 8 行变化、非路径行 0；长度 863→1337 是因为旧的单个
+    # `migration/api-overview/` 子目录按上游分类拆成了 7 个新子目录。
+    # Re-pinned 2026-08-31 (OKF-only 迁移): `kb/target/ascendc/...` pointers →
+    # `kb/okf/reference/...` + plugin `templates/fa_class/op_host/`.
     ws = _ws(["a3_to_a5_port", "CUBE_MIX"])
     assert _sha(getattr(ph, '_migration_level_block')("mat_mul_v3", ws)) == \
-        "c1e7ef6163fabf4007d204efed373769b616d8d3d1032cda55a9986a3f46a712"
+        "2f8dc54c67394aea6bdee8dc36b537a985bf739dc92fbca533a9d868c2a87a4f"
     assert _sha(getattr(ph, '_port_a3_cube_class_mix_block')(ws)) == \
-        "f2f5598fef7c87eabb038f142e5f9a700fe386fffdf1e7bb9aa0c73513b0142e"
+        "3144d318ed6cc50f43993dd35af6914868f81cda65fcfae36084eeb9be172ee0"
     assert _sha(getattr(ph, '_port_a3_complete_deliverable_block')()) == \
-        "5ee9954105c35627358a4a5a9b9a9113c19a1f67c3b7a95cc6bba50ddccf8337"
+        "caa6ba76a1250f6e8365576e9181da972dd5b962871de5617070229509ff2425"

@@ -95,7 +95,7 @@ def _write_customer_marker(
 def test_marker_claims_entry_actually_in_file_ok(tmp_path) -> None:
     proj = _make_project(
         tmp_path,
-        kb_body_OL="# OL\n\n### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
+        kb_body_ol="# OL\n\n### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
     )
     ws = proj / "workspace" / "8_Sort__arch35"
     _write_marker(ws, (
@@ -125,7 +125,7 @@ def test_marker_claims_entry_not_in_file_blocks(tmp_path) -> None:
 
 def test_refinement_id_binds_to_existing_entry(tmp_path) -> None:
     """`TR-EC-4(refinement)` must bind to the canonical entry it refines."""
-    proj = _make_project(tmp_path, kb_body_EC="### TR-EC-4: existing\n")
+    proj = _make_project(tmp_path, kb_body_ec="### TR-EC-4: existing\n")
     ws = proj / "workspace" / "8_Sort__arch35"
     _write_marker(ws, (
         "merge_run=2026-05-17T22:08:11Z\n"
@@ -224,7 +224,7 @@ def test_mixed_found_and_missing_blocks(tmp_path) -> None:
     """Found entries reported, missing entries surfaced. Verdict is MISSING_ENTRIES."""
     proj = _make_project(
         tmp_path,
-        kb_body_OL="### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
+        kb_body_ol="### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
     )
     ws = proj / "workspace" / "8_Sort__arch35"
     _write_marker(ws, (
@@ -257,7 +257,7 @@ def test_bare_filename_resolves_via_rglob(tmp_path) -> None:
     """`OPERATIONAL_KNOWLEDGE.md` alone should resolve under refs/."""
     proj = _make_project(
         tmp_path,
-        kb_body_OL="### TR-OL-7: foo\nbody\n",
+        kb_body_ol="### TR-OL-7: foo\nbody\n",
     )
     ws = proj / "workspace" / "x"
     _write_marker(ws, (
@@ -423,7 +423,7 @@ def test_cli_exit_codes(tmp_path) -> None:
     """CLI must return 0 on OK / NO_MARKER, 2 on MISSING_ENTRIES."""
     proj = _make_project(
         tmp_path,
-        kb_body_OL="### TR-OL-9: bar\n",
+        kb_body_ol="### TR-OL-9: bar\n",
     )
     ws_ok = proj / "workspace" / "ok"
     _write_marker(ws_ok, (
@@ -476,7 +476,7 @@ def test_8_sort_post_salvage_audit_fixture(tmp_path) -> None:
     """
     proj = _make_project(
         tmp_path,
-        kb_body_OL="# OL\n\n### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
+        kb_body_ol="# OL\n\n### TR-OL-22: tl.sort BLOCK ceiling\nbody\n",
     )
     ws = proj / "workspace" / "8_Sort__arch35"
     _write_marker(ws, (

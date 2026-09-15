@@ -93,27 +93,27 @@ symptoms, and emit a manifest in `workspace/<op>/fused_analysis.md` front-matter
 ## KB Manifest
 ### LOADED (always — soft prompt, but workflow_critic V3.7.10 verifies presence in this block before allowing STRUCTURAL_CEILING verdict)
 - ALWAYS_LOADED_RULES.md §5 (precision iron law — applies to all edits)
-- KB_INDEX.md (specifically §By Symptom — see below)
-- OPERATIONAL_KNOWLEDGE.md (FULL load is too large; you MUST read at least: OL-54 reg-based SIMD if A5; OL-63 TQue depth; OL-83 cumsum boundary; AND any OL referenced by your symptom matches)
-- patterns/domains/memory_access.md (connection audit primitives: P-P28 ping-pong, P-P62 row-scalar multiply prerequisites, OL-46 alignment sweet-spots, UB↔L1 hard-channel note from 2026-04-21 probe)
-- patterns/domains/<domain matching sub-op> — one file per sub-op's domain
-- hardware/target/ascend950pr.md — **READ EACH SECTION OF THIS FILE, not just "load conceptually"**. Especially: Reg-based vs Mem-based SIMD section (lines ~458-540 — this section is THE A5-specific lever for scalar-pipe-bound ops)
-- PLATFORM_BUGS.md (PB-16 L1 scratch silent miscompile; PB-9 UB-to-UB DataCopy; PB-11 TBuf staleness)
-- hardware/probe_findings/2026-04-21_Q_scalar_broadcast.md (Brcb 25.3× measured — applicability clause in P-P62)
+- brief 下发的 OKF 卡片块（症状→卡入口见下；需要深挖时 `okf_kb.sh search --query "<symptom>"` 或 grep `kb/okf/runbooks/`）
+- OL 经验卡（原 OPERATIONAL_KNOWLEDGE 已卡片化到 `kb/okf/runbooks/`；A5 时必查 reg-based 相关卡 `grep -rln "Reg-based\|Reg::Select"`；`ol-63-elementwise-tile-first-queue-depth` 卡（TQue depth）；OL-83 cumsum boundary（域卡化后按 `grep -rn "OL-83\|1-ULP boundary"` 定位）；以及你的症状匹配到的任何 ol-* 卡）
+- memory_access 域卡（connection audit primitives：grep `memory access\|ping-pong\|row-scalar\|alignment` `kb/okf/runbooks/` —— 如 p-p28 ping-pong、p-p62 row-scalar multiply prerequisites、ol-46 alignment sweet-spots、UB↔L1 hard-channel note from 2026-04-21 probe）
+- 按子算子域关键词 grep `kb/okf/runbooks/` 命中的 p-*/f-* 卡 — one set per sub-op's domain
+- okf/runbooks/hardware/target-ascend950pr.md — **READ EACH SECTION OF THIS FILE, not just "load conceptually"**. Especially: Reg-based vs Mem-based SIMD section (lines ~458-540 — this section is THE A5-specific lever for scalar-pipe-bound ops)
+- 平台 bug 卡（原 PLATFORM_BUGS 已卡片化：pb-16 L1 scratch silent miscompile；pb-9 UB-to-UB DataCopy；pb-11 TBuf staleness —— 均在 `kb/okf/runbooks/field-notes/build/`）
+- okf/runbooks/hardware/probe-2026-04-21-q-scalar-broadcast.md (Brcb 25.3× measured — applicability clause in P-P62)
 
-### LOADED — symptom-keyed (MANDATORY when symptom matches; see KB_INDEX.md §By Symptom)
+### LOADED — symptom-keyed (MANDATORY when symptom matches; 用 OKF 症状检索定位卡片)
 After running msprof / collecting initial diagnostics, identify dominant symptom(s):
-- **scalar-pipe-bound on A5 (`aiv_scl_ratio > 0.3`, `target=a5`)** → MUST also load: OL-54 + P-REG-1 in patterns/unverified/candidates.md + ascend950pr.md §Reg-based
-- **fused-op merge bottleneck (Phase 1 chunked-merge dominates)** → MUST also load: ascend950pr.md §MrgSort + sort.md §P-P43 + OL-54
-- **bf16 perf differs from fp16/fp32** → MUST also load: ascend950pr.md §dtype matrix + precision.md + OL-65
-- **multi-step fusion candidate** → MUST also load: OL-54 + P-REG-1
-- **edge_dataset Pass A passes but Pass B regresses on a specific dtype** → MUST also load: OL-83 + KB_INDEX §By Symptom row for this case
+- **scalar-pipe-bound on A5 (`aiv_scl_ratio > 0.3`, `target=a5`)** → MUST also load: reg-based 相关卡（`grep -rln "Reg-based\|Reg::Select\|regbase" kb/okf/runbooks/`）+ ascend950pr.md §Reg-based
+- **fused-op merge bottleneck (Phase 1 chunked-merge dominates)** → MUST also load: ascend950pr.md §MrgSort + `p-p43-sort-algorithm-selection-decision-tree` 卡 + reg-based 卡
+- **bf16 perf differs from fp16/fp32** → MUST also load: ascend950pr.md §dtype matrix + precision 相关卡（grep `precision\|bf16`）+ `ol-65-fp16-cast-fp32-only-on-precision-fail` 卡
+- **multi-step fusion candidate** → MUST also load: reg-based 相关卡
+- **edge_dataset Pass A passes but Pass B regresses on a specific dtype** → MUST also load: OL-83 相关卡（grep `OL-83\|1-ULP`）+ 按该症状 grep `kb/okf/runbooks/` 命中的卡
 
-For each symptom-match, add ALL listed files to LOADED with a one-line citation of which §section was actually read. workflow_critic SC reads this block and enforces.
+For each symptom-match, add ALL matched cards to LOADED with a one-line citation of which card was actually read. workflow_critic SC reads this block and enforces.
 
 ### AVAILABLE (not loaded unless candidate triggers it)
-- ROOFLINE_MODEL.md (only if a sub-op gap can't be explained by existing candidates)
-- MSPROF_AGENT_GUIDE.md (only if fallback msprof mapping is needed)
+- `okf/reference/porter/handbook/roofline_model.md` (only if a sub-op gap can't be explained by existing candidates)
+- `okf/reference/porter/toolchain/msprof_agent_guide.md` (only if fallback msprof mapping is needed)
 ```
 
 **File-driven routing — V3.7.12 (2026-05-03)**:
@@ -288,14 +288,14 @@ Mirrors the aog-kernel-worker / aog-kernel-optimizer contracts, specialized for 
 **Trigger** (all must hold):
 - 2 consecutive iters with perf delta < +3% (no meaningful progress)
 - Same BOTTLENECK sub-op class (gap_vs_cann still highest on the same sub-op after 2 attempts to close it), OR same failing candidate class (e.g. 2 connection fixes in a row failed to shift the gap table)
-- You have NOT yet grep'd `output/npukernelbench/src/kernels/*/fused_analysis.md` / `/optimization_log.md` for prior fused ops with the same bottleneck sub-op family, nor scanned `patterns/domains/` beyond the ones loaded at Iter 0
+- You have NOT yet grep'd `output/npukernelbench/src/kernels/*/fused_analysis.md` / `/optimization_log.md` for prior fused ops with the same bottleneck sub-op family, nor grep'd `kb/okf/runbooks/` beyond the cards loaded at Iter 0
 
 **Protocol — mandatory at 2-iter plateau**:
 
 1. **Broaden KB + prior-art search** (not just the sub-op's domain file):
    ```bash
    # Symptom → KB grep
-   grep -rn "gap.*vs_cann\|connection.*round-trip" ${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/
+   grep -rn "gap.*vs_cann\|connection.*round-trip" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/
    grep -rn "<bottleneck_sub_op_keyword>" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
    # Prior fused ops — find any fused analysis that mentioned your stuck bottleneck
    grep -rn "<sub_op_family>" output/npukernelbench/src/kernels/*/fused_analysis.md 2>/dev/null | head -5

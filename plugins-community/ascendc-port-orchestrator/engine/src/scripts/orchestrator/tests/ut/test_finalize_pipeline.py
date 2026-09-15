@@ -28,31 +28,19 @@ sys.path.insert(0, str(_HERE.parent.parent))
 import finalize_pipeline as fp  # noqa: E402
 
 
-# P0acv (2026-05-10): finalize_op invokes kb_auto_promote.run_auto_promote against
-# the REAL src/skills/references KB. If that dir has any .kb_promotion_pending-*
-# markers staged, each test that calls finalize_op spawns N codex CLI subprocesses
-# (~30-60s each). With 20 markers staged from a batch, a single
-# test took 20+ min and hung the pre-commit hook. Auto-mock kb_auto_promote in
-# every finalize test so tests stay isolated from production KB state.
+# OKF-only migration (2026-08-31): the legacy kb_auto_promote writer module was
+# deleted; finalize no longer invokes any bundled KB promotion path. The autouse
+# fixture now only redirects finalize's KB root to a per-test tmp KB so tests
+# stay isolated from production KB state.
 @pytest.fixture(autouse=True)
-def _isolate_kb_auto_promote(monkeypatch, tmp_path):
-    """Ensure no test in this module spawns codex against the real KB.
-
-    Also redirect finalize's KB root to a per-test tmp KB (2026-07-05: KB
+def _isolate_kb_root(monkeypatch, tmp_path):
+    """Redirect finalize's KB root to a per-test tmp KB (2026-07-05: KB
     relocated to <plugin_root>/kb/; finalize reads candidates.md via _kb_root()).
     Tests seed their fake KB under project_root/kb/ and read it back through the
     same resolver."""
-    from src.scripts.orchestrator import kb_auto_promote
-
-    def _noop_run(*args, **kwargs):
-        rpt = kb_auto_promote.PromotionBatchReport(markers_processed=0)
-        rpt.finished_ts = rpt.started_ts
-        return rpt
-
     def _tmp_kb_root():
         return tmp_path / "project_root" / "kb"
 
-    monkeypatch.setattr(kb_auto_promote, "run_auto_promote", _noop_run)
     monkeypatch.setattr(fp, "_kb_root", _tmp_kb_root)
     # v3.13.0 decomposition moved candidate-scan (+ its _kb_root resolver) into
     # finalize_candidates; redirect that module's resolver too so verified_on
@@ -115,25 +103,6 @@ def test_promotes_all_real_artifacts(tmp_path):
     missing = expected_files - promoted_files
     assert not missing, f"missing critical files: {missing}"
     assert promoted_dirs == expected_dirs, f"dirs: got {promoted_dirs}, want {expected_dirs}"
-
-
-def test_finalize_never_auto_promotes_release_kb(tmp_path, monkeypatch):
-    """Operator finalize must not invoke the bundled b-tier promotion writer."""
-    from src.scripts.orchestrator import kb_auto_promote
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("runtime finalize attempted bundled KB promotion")
-
-    monkeypatch.setattr(kb_auto_promote, "run_auto_promote", forbidden)
-    ws = tmp_path / "test_op"
-    archive_root = tmp_path / "archive"
-    archive_root.mkdir()
-    _seed_workspace(ws)
-
-    rep = fp.finalize_op("test_op", ws, archive_root=archive_root)
-
-    assert rep.skipped is False
-    assert rep.kb_auto_promote is None
 
 
 def test_excludes_scratch_and_backups(tmp_path):

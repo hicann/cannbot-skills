@@ -13,8 +13,8 @@ Invocation:
     python3 -m cann_learn.mode5_runner --op 10_LayerNorm \
             --workspace workspace/10_layernorm \
             --module-path /data/cann_b103/cann-9.0.0/include/.../normalize \
-            --kb-root src/skills/references \
-            --api-catalog src/skills/references/target/ascendc/API_CATALOG.md
+            --kb-root kb/okf \
+            --api-catalog kb/okf/reference/porter/handbook/api_catalog.md
 
 Steps (per v2 design):
   0. Hook preflight (verify G11/G12/SC10 enforced; refuse if not)
@@ -35,14 +35,14 @@ Steps (per v2 design):
      - re-run scanners independently against same files (cross-check)
      - apply policy: leak/compile/copy_shape FAIL → reject
                      KB-overlap → metadata-fix proposal not new entry
-                     all clean → keep candidates with .kb_promotion_pending marker
-                     (kb_manager auto-promote picks them up; no user gate)
+                     all clean → keep candidates (sedimented to the user-local
+                     KB c-tier via the deterministic intake gate; no user gate)
   5. Release lease
 
 The agent itself only writes to:
   - workspace/{op}/.cann_learn_sealed_<run_id>/  (private, sealed)
   - workspace/{op}/cann_learn_summary.json       (public, JSON-only)
-  - patterns/unverified/candidates.md            (candidate KB entries)
+  - reference/patterns/unverified/candidates.md    (candidate KB entries)
 
 This module is INVOKED BY /aog-knowledge-maintain Mode 5. It IS the gate logic.
 """
@@ -527,27 +527,12 @@ def run_mode5(
         # Step 4b: archive sealed (cold storage), keep summary + candidates
         archive_sealed_dir(workspace, run_id)
 
-        # Step 4c: write .kb_promotion_pending markers for each new candidate.
-        # P0acl 2026-05-10: renamed from .kb_review_required (which implied
-        # user-review-as-gate, violating 0-interaction product design per
-        # self-critic C40). The new marker signals "ready for kb_manager
-        # auto-promote pipeline" — kb_manager picks these up, then applies
-        # the C36-C39 generalization, deduplication, conflict, and
-        # transferability gates plus the Codex review hook, then promotes (or
-        # BLOCKs with reason). NO user sign-off
-        # required.
-        kb_review_dir = kb_root / "patterns" / "unverified"
-        kb_review_dir.mkdir(parents=True, exist_ok=True)
-        for cand in candidate_paths:
-            cand_basename = Path(cand).stem
-            marker = kb_review_dir / f".kb_promotion_pending-{run_id}-{cand_basename}"
-            marker.write_text(json.dumps({
-                "run_id": run_id,
-                "op": op,
-                "candidate_id": cand_basename,
-                "ts": time.time(),
-                "next_action": "kb_manager auto-promote pipeline (C36-C39 gates + codex hook)",
-            }))
+        # Step 4c: (removed, OKF-only migration 2026-08-31) — this step used to
+        # write `.kb_promotion_pending-<run_id>-<cand>` markers under
+        # reference/patterns/unverified/ for the kb_auto_promote pipeline.
+        # kb_auto_promote is deleted and bundled KB is read-only at runtime;
+        # candidates now sediment to the user-local KB (c-tier) via the
+        # deterministic intake gate, so no marker is written here.
 
         return Mode5Result(
             run_id=run_id, op=op,
@@ -594,11 +579,11 @@ def main():
         default="kernel_structural",
         help="kernel_structural (default, Mode 5 historical) — read 2-5 "
              "kernel files; extract algorithm-structural patterns; "
-             "candidates → patterns/unverified/candidates.md. "
+             "candidates → reference/patterns/unverified/candidates.md (OKF). "
              "build_system (Mode 6, 2026-05-21) — read CMakeLists.txt + "
              "register_*.cpp + op_proto*.cpp + apt.cpp; extract per-source-"
              "file flag isolation + register glue + launch macro routing; "
-             "candidates → target/ascendc/build_system/candidates.md.",
+             "candidates → runbooks/field-notes/build/candidates.md (OKF).",
     )
     args = ap.parse_args()
 

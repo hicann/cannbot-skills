@@ -1409,8 +1409,12 @@ phase_o4_states:
       research_blocked / research_partial AND active plugin opts in via
       should_auto_cann_learn_on_gap(). Runs the existing cann_learner
       carve-out (mode5_runner.spawn_aog_cann_learner + sealed scanner gates
-      C34a-C35). Output: 0+ candidates land in
-      patterns/unverified/candidates.md with .kb_promotion_pending marker.
+      C34a-C35). Output: 0+ candidates are appended to the c-tier KB
+      reference/patterns/unverified/candidates.md and sediment to c-tier
+      via the deterministic intake gate (kb_invoke) — no
+      .kb_promotion_pending markers (kb_auto_promote deleted); migrated
+      legacy candidates live as cand-* cards under
+      kb/okf/runbooks/field-notes/inferred/.
 
       iter_cap=1 — one-shot per op-gen run (it's expensive).
       Insertion semantics: cann_learn iter does NOT consume a researcher
@@ -1429,7 +1433,7 @@ phase_o4_states:
         rationale: "cann_learner found no extractable patterns (CANN op missing OR all candidates rejected by scanners). KB is now complete-as-it-can-be; ship PARTIAL."
       - condition: { handoff_match: "→ orchestrator: cann_learn_blocked" }
         goto: finalize
-        rationale: "cann_learner gated by preconditions (CANN not better than ours; ref_runnable not RUNNABLE; .candidates.md.lock held by concurrent run; etc.). Ship PARTIAL with cann_learner gate-failure as evidence in archive."
+        rationale: "cann_learner gated by preconditions (CANN not better than ours; ref_runnable not RUNNABLE; .cann_learn_active lease held by concurrent run; etc.). Ship PARTIAL with cann_learner gate-failure as evidence in archive."
       - condition: { always: true }
         goto: finalize
         rationale: "Catch-all: cann_learner emitted an unrecognized handoff; ship PARTIAL rather than loop. Forensic in workspace/{op}/cann_learn_envelope_log.jsonl."

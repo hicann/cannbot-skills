@@ -28,8 +28,9 @@ Checks:
   - precision.pass_b is either:
       {tier1_pass: int, total: int} OR {status: "N/A", reason: <str>}
 
-P0cc dual-count rationale: src/skills/references/shared/GATE_CONTRACT.md §P0cc
-EC-59 (incident codification): src/skills/references/target/ascendc/ERROR_CORRECTIONS.md
+P0cc dual-count rationale: kb/shared/GATE_CONTRACT.md §P0cc
+EC-59 (incident codification):
+  kb/okf/runbooks/field-notes/build/ec-59-phase-o5-re-measurement-disagrees-with-worker-pass.md
 Memory: feedback_no_patch_fix_harness_for_next_customer.md
 """
 
@@ -66,7 +67,7 @@ def check(vp: Path) -> tuple[bool, str]:
                 f"P0cc: precision.pass_a.status='{pa_status}' requires "
                 f"integer tier1_pass_inclusive field "
                 f"(T1_BIT_EXACT + T2_PASS_WITHIN_TOLERANCE count). "
-                f"See src/skills/references/shared/GATE_CONTRACT.md §P0cc."
+                f"See kb/shared/GATE_CONTRACT.md §P0cc."
             )
     # task#82 (2026-06-14): port_a3 native two-tier verdict. When the pass_a block
     # carries the native tier2 fields (emitted by precision_eval_port_a3_two_tier),

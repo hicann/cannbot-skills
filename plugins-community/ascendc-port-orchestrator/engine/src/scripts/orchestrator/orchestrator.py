@@ -537,7 +537,8 @@ def run_single_op(
     # (P0aai/P0aaj retired). Runs `/aog-op-classify` skill in isolated
     # subprocess, writes workspace/<op>/op_classification.json. Cached
     # via source content SHA256. Failure mode graceful: brief falls back
-    # to DEFAULT_KB_SECTIONS-only if classification missing/errored.
+    # to default_kb_sections()-only (OKF discipline docs + target hw spec)
+    # if classification missing/errored.
     #
     # B3.3b (2026-05-31, live-e2e fix): backward mode SKIPS the O1.7 skill.
     # `_cmd_backward` ALREADY seeds op_classification.json (source=

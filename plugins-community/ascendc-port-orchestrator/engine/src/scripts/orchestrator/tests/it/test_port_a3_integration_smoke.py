@@ -8,12 +8,10 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-"""W12+W13 (2026-05-12, ROADMAP §1.5) — taxonomy tag + integration smoke test.
+"""W13 (2026-05-12, ROADMAP §1.5) — --port-a3 integration smoke test.
 
-W12 — `a3_to_a5_port` op-class tag in `TAG_KB_SECTIONS`:
-- Tag registered with 4 KB section references (W8, W9 OL-131, W10 P-P90, W11)
-- Tag → KB-sections lookup returns all 4 entries
-- Cross-check: every referenced KB path resolves to an existing file on disk
+（W12 的 taxonomy tag 用例已随 `TAG_KB_SECTIONS` / `OP_TAGS` 一起删除：
+b-tier 唯一路径是 OKF 检索，标签不再由 Python 字典产出。）
 
 W13 — end-to-end integration smoke:
 - `python -m orchestrator --port-a3 <ops-nn-dir> --plan` exits 0
@@ -37,57 +35,8 @@ import _reorg_paths  # reorg ut/it/ct: stable data-path anchors
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent))
 import orchestrator as orch  # noqa: E402
-from briefs import op_taxonomy  # noqa: E402
 
 _PROJECT_ROOT = _reorg_paths.REPO_ROOT
-_REFERENCES_ROOT = _PROJECT_ROOT.parent / "kb"
-
-
-# ---------------------------------------------------------------------------
-# W12: taxonomy tag registration
-# ---------------------------------------------------------------------------
-def test_a3_to_a5_port_tag_registered():
-    """W12: tag 'a3_to_a5_port' exists in TAG_KB_SECTIONS."""
-    assert "a3_to_a5_port" in op_taxonomy.TAG_KB_SECTIONS, (
-        f"a3_to_a5_port tag missing; present tags: "
-        f"{sorted(op_taxonomy.TAG_KB_SECTIONS.keys())}"
-    )
-
-
-def test_a3_to_a5_port_tag_references_all_4_kb_entries():
-    """W12: tag's KB sections list includes all 4 W8-W11 entries."""
-    sections = op_taxonomy.TAG_KB_SECTIONS["a3_to_a5_port"]
-    assert len(sections) == 4, (
-        f"a3_to_a5_port should reference 4 KB entries (W8/W9/W10/W11), "
-        f"got {len(sections)}: {sections}"
-    )
-    # W8: artifact layout
-    assert any("ops_nn_layout/ops_nn_a5_artifact_layout.md" in s for s in sections)
-    # W9: OL-131 cross-op router
-    assert any("OL-131" in s for s in sections)
-    # W10: P-P90 platform compat
-    assert any("P-P90" in s for s in sections)
-    # W11: ascend950pr hardware reference
-    assert any("ascend950pr.md" in s for s in sections)
-
-
-def test_a3_to_a5_port_kb_paths_resolve_to_files():
-    """W12 disk-cross-check: every KB path referenced (sans #anchor) exists.
-
-    P88 (2026-05-15) KB reorg: legacy bare names resolve to new layout
-    via op_taxonomy.resolve_legacy_kb_path.
-    """
-    sections = op_taxonomy.TAG_KB_SECTIONS["a3_to_a5_port"]
-    missing = []
-    for s in sections:
-        path = s.split("#", 1)[0]  # strip #anchor
-        resolved = op_taxonomy.resolve_legacy_kb_path(path)
-        if not (_REFERENCES_ROOT / resolved).is_file():
-            missing.append(path)
-    assert not missing, (
-        f"a3_to_a5_port references missing KB files: {missing} "
-        f"(under {_REFERENCES_ROOT})"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,12 +86,21 @@ def fake_env_with_a3(tmp_path, monkeypatch):
 def test_port_a3_writes_op_classification_with_tag(
     synthetic_ctc_loss_v3_dir, fake_env_with_a3, tmp_path, monkeypatch, capsys
 ):
-    """W12 ↔ W13: --port-a3 path writes op_classification.json with the tag."""
+    """W12 ↔ W13: --port-a3 path writes op_classification.json with the tag.
+
+    OKF-only 迁移适配（2026-08-31）：裸 `--port-a3-ops` 现在 fail-closed（必须
+    显式 `--reference-source`），且 `--plan` 只打印不落盘（"no workspace
+    creation, no state mutation"）。因此本用例改为：显式 a3_live + 非 plan
+    调用，并 stub `run_single_op` 在状态机入口前截停——只验证 W12 播种语义，
+    不进入完整流水线。
+    """
     # Redirect workspace root to tmp
     monkeypatch.setattr(orch, "WORKSPACE_ROOT", tmp_path / "workspace")
+    monkeypatch.setattr(orch, "run_single_op", lambda *a, **k: 0)
     rc = orch._cmd_port_a3(
         port_a3_dir=synthetic_ctc_loss_v3_dir,
-        lane=0, plan_only=True, cold_start=False, cap_bumps={},
+        lane=0, plan_only=False, cold_start=False, cap_bumps={},
+        reference_source="a3_live",
     )
     assert rc == 0
     ws = tmp_path / "workspace" / "ctc_loss_v3"
@@ -150,7 +108,7 @@ def test_port_a3_writes_op_classification_with_tag(
     assert cls_file.is_file(), "op_classification.json not written"
     payload = json.loads(cls_file.read_text())
     assert payload["op"] == "ctc_loss_v3"
-    assert payload["op_class_tags"] == ["a3_to_a5_port"]
+    assert "a3_to_a5_port" in payload["op_class_tags"]
     assert payload["source"] == "cli_flag_port_a3"
 
 
@@ -162,6 +120,7 @@ def test_port_a3_plan_full_phase_shape(
     rc = orch._cmd_port_a3(
         port_a3_dir=synthetic_ctc_loss_v3_dir,
         lane=1, plan_only=True, cold_start=False, cap_bumps={},
+        reference_source="a3_live",
     )
     assert rc == 0
     out = capsys.readouterr().out
@@ -221,7 +180,8 @@ def test_orchestrator_port_a3_plan_subprocess_exits_zero(
 
     result = subprocess.run(
         [sys.executable, "-m", "orchestrator",
-         "--port-a3-ops", str(synthetic_ctc_loss_v3_dir), "--plan"],
+         "--port-a3-ops", str(synthetic_ctc_loss_v3_dir), "--plan",
+         "--reference-source", "a3_live"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_PROJECT_ROOT / "src" / "scripts" / "orchestrator"),
         env={

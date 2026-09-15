@@ -56,11 +56,6 @@
   },
   {
     "check": "GOD_FUNCTION",
-    "file": "src/scripts/orchestrator/kb_auto_promote.py",
-    "func": "run_auto_promote"
-  },
-  {
-    "check": "GOD_FUNCTION",
     "file": "src/scripts/orchestrator/orchestrator.py",
     "func": "run_single_op"
   },

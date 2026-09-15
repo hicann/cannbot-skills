@@ -6,7 +6,7 @@
 > 本文件管"代码层规则"，那个文件管"在压力下我会绕过哪些规则"。两份都要。**
 >
 > 这里收录的是**跨 op 通用的 process rule 和 universal trap** —— 不是 op-specific 的技术细节。
-> Op-specific 的经验仍在 `OPERATIONAL_KNOWLEDGE.md`，通过 KB_INDEX 按 tag 选择性加载。
+> Op-specific 的经验已迁入 OKF 卡片（`kb/okf/runbooks/` 下的 `ol-*`/`pb-*`/`ec-*` 卡），通过 OKF 检索按 tag/症状选择性加载。
 >
 > 为什么这些 OL 要无条件加载：**它们都是"如果不在下笔前知道，后面再查也晚了"的规则**。
 > tag-based 加载假设 worker 知道自己需要什么；但幻觉式错误（如 OL-80）的特征恰恰是 worker
@@ -45,7 +45,7 @@ grep -i "Divs\|scalar div" src/skills/references/target/ascendc/API_CATALOG.md
    - 必须用 playwright MCP 工具:
      - `mcp__plugin_playwright_playwright__browser_navigate(url=<atlas_ascendc_*.html>)`
      - `mcp__plugin_playwright_playwright__browser_evaluate(function="() => document.querySelector('article').innerText")` 拿渲染后正文
-   - 起点 URL 列表: `src/skills/references/hardware/HIASCEND_DOC_URLS.md`（已在 Tier-1 manifest）。先 grep 找最相关页面，再 playwright 拉正文。
+   - 起点 URL 列表: `kb/shared/HIASCEND_DOC_URLS.md`（已在 Tier-1 manifest）。先 grep 找最相关页面，再 playwright 拉正文。
    - **当问题是"如何从 Python 调用我们自己生成的 kernel binary" / "pybind wrapper 怎么写" / "ACLRT_LAUNCH_KERNEL 宏怎么用" / "需不需要 vendor opp install"** → 必读 `atlas_ascendc_10_0057.html` ("Pybind调用") 和 `atlas_ascendc_10_0056.html` ("Kernel直调") 再写代码。
    - **P140 (2026-05-17)**: a5 agent 9h 错路径 — 试图用 aclnn-direct + vendor opp install 调用 unshipped op，未读 AscendC 文档。文档明说自定义算子用 ACLRT_LAUNCH_KERNEL 宏 + pybind 直接绑定 kernel，不走 aclnn 注册。所有 spawned agent (kw/pp/ko/fo/ar/da) 同款盲区，因为 HIASCEND_DOC_URLS.md 之前没在 manifest Tier-1。
 4. **声明 "API missing"** in `knowledge_update.md` —— 只有前三步都没找到才走这步。

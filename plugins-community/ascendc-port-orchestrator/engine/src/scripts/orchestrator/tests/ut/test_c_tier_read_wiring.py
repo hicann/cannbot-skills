@@ -8,13 +8,16 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""c>b>a read-path wiring: _c_tier_lessons_block is config-gated (default-b byte-unchanged)."""
+"""c>b>a read-path wiring: _c_tier_lessons_block stays empty when the c-tier has nothing
+to inject (post OKF-only migration the bundled b-tier is gone and `kb_write_root()` is
+always "customer", so the empty block comes from an empty/absent user_kb, not a tier gate).
+"""
 import os
 import tempfile
 from pathlib import Path
 
 
-def test_default_b_block_empty_when_no_user_kb(monkeypatch):
+def test_block_empty_when_no_user_kb(monkeypatch):
     """No c-tier user_kb → block is empty → kb_manifest_block stays byte-unchanged."""
     monkeypatch.delenv("ASCENDC_PORT_USER_KB", raising=False)
     # point the default c-root probe at a nonexistent dir so a stray real ~/.ascendc-port doesn't leak in

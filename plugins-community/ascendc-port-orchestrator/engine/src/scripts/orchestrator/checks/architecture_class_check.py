@@ -58,7 +58,7 @@ CUBE_MARKER_RE = re.compile("|".join(CUBE_MARKER_PATTERNS))
 VEC_ONLY_DECL_RE = re.compile(r"KERNEL_TASK_TYPE_DEFAULT\s*\(\s*KERNEL_TYPE_AIV_ONLY")
 
 # Cube-required op-family directory prefixes (from CANN 2026-05-25 grep,
-# canonical list in src/skills/references/target/ascendc/cann_classification/
+# canonical list in kb/okf/runbooks/operator-optimization/
 # cube_required_ops.txt). When port_source is under one of these prefixes,
 # the op is cube-required by classification regardless of grep result.
 CUBE_REQUIRED_FAMILIES_STRICT = {

@@ -105,7 +105,7 @@ AND after the measurement set.
 
 ## Recommendation for orchestrator
 
-1. **KB entry** (hardware/ascend950pr.md §"Sort/Reduce cycle data, bisheng 2026-03-21 / CANN 9.0.0"):
+1. **KB entry** (`runbooks/hardware/target-ascend950pr.md` §"Sort/Reduce cycle data, bisheng 2026-03-21 / CANN 9.0.0"):
    record the table above. Tag version-stamp; **not** cross-version portable.
 2. **Op-gen heuristic for reductions over ≤ 64 fp32**: a single WholeReduceMax /
    BlockReduceMax is ≈ 100 cyc. Do not chunk below this size; cost is amortized

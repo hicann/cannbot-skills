@@ -180,7 +180,8 @@ def test_run_mode5_gate_failure_short_circuits(tmp_path):
 
 def test_run_mode5_with_mock_agent_and_clean_output(tmp_path):
     """Full mocked run: agent produces clean candidates + valid summary →
-    Mode 5 archives sealed, drops .kb_promotion_pending markers.
+    Mode 5 archives sealed and succeeds (no promotion markers — that writer was
+    removed with kb_auto_promote in the OKF-only migration).
     """
     _seed_minimal_workspace(tmp_path)
     # API catalog
@@ -240,9 +241,11 @@ def test_run_mode5_with_mock_agent_and_clean_output(tmp_path):
     assert result.self_review_passed, f"failure: {result.failure_reason}"
     assert result.candidates_appended == 1
 
-    # .kb_promotion_pending marker dropped (P0acl 2026-05-10 rename from .kb_review_required)
-    markers = list((kb_root / "patterns" / "unverified").glob(".kb_promotion_pending-*"))
-    assert len(markers) == 1
+    # OKF-only migration (2026-08-31): .kb_promotion_pending markers are gone —
+    # their only consumer (kb_auto_promote) was deleted; Mode 5 no longer writes
+    # anything under kb_root for promotion.
+    markers = list(kb_root.rglob(".kb_promotion_pending-*"))
+    assert markers == []
 
 
 def test_run_mode5_with_mock_agent_leaky_output_rejected(tmp_path):

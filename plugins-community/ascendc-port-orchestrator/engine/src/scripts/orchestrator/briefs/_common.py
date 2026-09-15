@@ -35,14 +35,12 @@ from pathlib import Path
 from typing import Optional
 
 from briefs.brief_kb import (  # re-export: KB cluster moved to brief_kb (behavior-neutral, 2026-07-05)
-    KBEntry, kb_inject_filtered, _target_for_opgen_mode, _parse_kb_index_rows,
     _detect_forced_architecture, kb_manifest_block, _FORCED_ARCH_TAGS,
     # cannbot c>b>a blocks (re-exported so `from briefs._common import ...` stays stable
     # for the c-tier read-wiring test + any cannbot caller after the 2026-07-05 decomposition).
     _cba_tier_a_routes_block, _c_tier_lessons_block,
-    # Keep the local OKF-default contract stable; remote resyncs must not
-    # silently replace it with the legacy KB manifest format.
-    _okf_reference_block, _okf_enabled, _kb_discipline_scaffold,
+    # OKF-only (2026-08): OKF 检索是唯一 b-tier 路径; legacy 注入/开关/逃生门已移除。
+    _okf_reference_block, _kb_discipline_scaffold,
 )
 
 

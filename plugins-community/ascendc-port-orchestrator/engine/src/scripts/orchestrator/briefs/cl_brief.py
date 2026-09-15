@@ -14,7 +14,9 @@ Thin string-adapter — delegates ALL spawn config + gate enforcement to
 This file holds NO business logic: no precondition checks (mode5_runner
 gate_check_preconditions owns those), no scanner re-validation
 (revalidate_post_agent owns), no sealed-dir setup (setup_sealed_dir
-owns), no .kb_promotion_pending marker writing (run_mode5 owns).
+owns), no promotion-marker writing (markers were removed in the OKF-only
+migration; candidates sediment to the user-local c-tier KB via the
+deterministic intake gate in kb_invoke).
 
 Per design doc KB_DESIGN_NOTES.md#cann-learn-on-research-gap-design-2026-05-20 §3.5:
 > `cl_brief.py` is a thin string-adapter that delegates spawn config
@@ -130,8 +132,11 @@ set up your sealed working dir. Your job:
 4. Write public summary to `workspace/{op}/cann_learn_summary.json` (JSON-only,
    no prose, no identifiers, no paths — schema in `cann_learn/summary_schema.py`).
 5. After return, orchestrator-side scanners re-validate (C34a identifier denylist,
-   C34b compile-gate, C34c copy-shape, C35 KB-overlap). Candidates that pass land
-   in `patterns/unverified/candidates.md` with `.kb_promotion_pending` marker.
+   C34b compile-gate, C34c copy-shape, C35 KB-overlap). Candidates that pass are
+   appended to the c-tier KB `reference/patterns/unverified/candidates.md` and
+   sediment to c-tier via the deterministic intake gate (kb_invoke) — no
+   `.kb_promotion_pending` markers (kb_auto_promote is deleted). Migrated legacy
+   candidates live as cand-* cards in kb/okf/runbooks/field-notes/inferred/.
 
 ## Strict rules (enforced by hooks G11/G12/SC10 — your writes will be REJECTED
 if you violate)
@@ -139,9 +144,10 @@ if you violate)
 - Sealed dir `workspace/{op}/.cann_learn_sealed_<run_id>/` is your ONLY writable
   area for CANN-derived content
 - Public artifacts you MAY produce: `cann_learn_summary.json` (JSON only, no
-  prose), `patterns/unverified/candidates.md` (append only)
+  prose), `reference/patterns/unverified/candidates.md` under the c-tier KB
+  root (append only)
 - Forbidden writes: anywhere else in workspace, ANY source file in src/, ANY
-  `.md` outside `patterns/unverified/`
+  `.md` outside `reference/patterns/unverified/`
 - Forbidden tools: nohup, Agent (no sub-spawn), direct network egress
 
 ## Output contract
@@ -158,8 +164,8 @@ def _cl_output_block(op: str) -> str:
 - `sealed_files: list[Path]` — every file you wrote under
   `workspace/{op}/.cann_learn_sealed_<run_id>/`
 - `summary_path: Path` — pointer to `workspace/{op}/cann_learn_summary.json`
-- `candidate_paths: list[Path]` — new entries appended to
-  `patterns/unverified/candidates.md` (one path per candidate)
+- `candidate_paths: list[Path]` — new entries appended to the c-tier
+  `reference/patterns/unverified/candidates.md` (one path per candidate)
 - `cann_files_read: list[Path]` — every CANN source file you read (scanner
   cross-checks these against the identifier denylist; transparency is the gate)
 - `metadata_fix_proposals_count: int` (optional) — count of existing KB entries
@@ -174,7 +180,7 @@ def _cl_output_block(op: str) -> str:
   missing OR all candidates rejected by C34/C35 scanners). State machine
   routes to finalize PARTIAL.
 - `→ orchestrator: cann_learn_blocked` — gated by precondition failure
-  (CANN not better than ours / ref not RUNNABLE / .candidates.md.lock held).
+  (CANN not better than ours / ref not RUNNABLE / .cann_learn_active lease held).
   State machine routes to finalize PARTIAL with gate-failure as evidence.
 
 DO NOT improvise free-form handoffs (`done` / `pattern_found` / etc.) —

@@ -56,7 +56,7 @@ A5_TARGETS = ["a5"]  # 351x
 
 _A3_SKELETON_HEADING = "### a3 FA-CLASS STARTING SKELETON — P-P116"
 _PB55_HEADING = "#### PB-55 — the REVERSE (AIV→AIC) handshake is per-subblock-COUNTED"
-_A3_TEMPLATE_MD = "target/ascendc/patterns/domains/fa_class_a3_mix_template.md"
+_A3_TEMPLATE_MD = "okf/reference/porter/patterns/fa_class_a3_mix_template.md"
 
 
 def _fa_ws(tmp_path: Path) -> Path:
@@ -160,7 +160,7 @@ def test_a3_brief_points_at_compilable_mix_reference(target):
     # STAGE 2 — BUILD + RUN the SYNC-WITNESS: it demonstrates the AIC↔AIV handshake
     # closing deadlock-free; its compute is a PLACEHOLDER, so it is NOT a copyable op.
     assert _A3_COMPILABLE_EXAMPLE_PATH in out
-    assert "src/skills/references/target/ascendc/examples/a3_mix_fa_min/" in out
+    assert "examples/a3_mix_fa_min/` (plugin `examples/` dir)" in out
     assert "**BUILD + RUN the SYNC-WITNESS**" in out
     assert "close\n" in out and "**deadlock-free** on device" in out
     assert "**PLACEHOLDER**" in out

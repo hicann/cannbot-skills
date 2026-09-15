@@ -207,7 +207,9 @@ Pick ONE:
 
 When PROBE_REPORT.md is written, your job is done. The skill:
 1. Reads PROBE_REPORT.md
-2. Copies it to `kb/hardware/probe_findings/<date>_<template_id>.md`
+2. Copies it to the **c-tier** user KB —— `${ASCENDC_PORT_USER_KB:-$HOME/.ascendc-port/user_kb}/probe_findings/<date>_<template_id>.md`（创建缺失目录）。
+   **不要写进 `kb/`**：那是随插件分发的 b 层，只读——写进去的内容会在下次插件升级时被覆盖丢失。
+   既有的历史 probe 卡在 `kb/okf/runbooks/hardware/probe-*.md`（只读，供检索/引用）。
 3. Updates KB if verdict ∈ {ACCEPT_CORRECT, ACCEPT_MISCOMPILE, COMPILE_ERROR}
 4. Returns verdict summary to the caller that invoked `/aog-hardware-probe`
 

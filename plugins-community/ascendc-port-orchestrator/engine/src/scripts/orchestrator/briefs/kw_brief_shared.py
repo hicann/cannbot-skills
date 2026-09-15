@@ -68,7 +68,7 @@ def _forced_architecture_block(workspace: Optional[Path]) -> str:
         f"- **Implement {forced} as specified.** Author the kernel in the fixed "
         "architecture and bring it to precision.\n"
         "- **Do NOT run the SIMT_VS_SIMD decision tree** "
-        "(`target/ascendc/SIMT_VS_SIMD_DECISION.md`). The choice is already made; "
+        "(`kb/okf/reference/porter/handbook/simt_vs_simd_decision.md`). The choice is already made; "
         "re-deriving it is overreach. Do NOT re-classify the op (recurrence→SIMD, "
         "scatter→SIMT, etc.) to second-guess the forced choice.\n"
         f"- **Do NOT override to a different architecture.** Switching {forced} to "

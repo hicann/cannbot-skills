@@ -343,27 +343,6 @@ def test_merge_one_rejects_missing_semantic_intake(ws, tmp_path, monkeypatch):
     assert not (ws / ".kb_merged").exists()
 
 
-def test_merge_one_blocks_bundled_kb_mutation(ws, tmp_path, monkeypatch):
-    """A semantic agent touching release b-tier fails before c-tier admission."""
-    (ws / "knowledge_update.md").write_text("# finding\n" + "x" * 200)
-    monkeypatch.setenv("ASCENDC_PORT_USER_KB", str(tmp_path / "user-kb"))
-    fingerprints = iter(["before", "after"])
-    monkeypatch.setattr(kb_invoke, "_bundled_kb_fingerprint", lambda: next(fingerprints))
-
-    def fake_run(*args, **kwargs):
-        (ws / getattr(kb_invoke, "_CANDIDATE_FILENAME")).write_text(
-            '{"schema_version": 1, "entries": []}'
-        )
-        return MagicMock(returncode=0, stdout="done", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    result = kb_invoke.merge_one(ws)
-
-    assert result["success"] is False
-    assert "bundled b-tier" in result["error"]
-    assert not (ws / ".kb_merged").exists()
-
-
 def test_merge_batch_persists_each_workspace_to_c_tier(tmp_path, monkeypatch):
     root = tmp_path / "workspaces"
     workspaces = [root / "op_a", root / "op_b"]

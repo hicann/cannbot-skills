@@ -259,6 +259,29 @@ if [ "$BACKEND" = "claude_code" ]; then
   # If an upstream layer dropped it, the worker would silently fall back to ~/.claude and
   # could pick up a different operator-generation suite.
   export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  # Running as root: claude refuses --dangerously-skip-permissions without
+  # IS_SANDBOX=1 in the real process env (the settings.json env block is not
+  # consulted for this guard). Export so graybox worker spawns inherit it.
+  export IS_SANDBOX="${IS_SANDBOX:-1}"
+  # Graybox workers run under bwrap without a ~/.claude bind, so the spawned
+  # claude cannot read settings.json's env block (endpoint/key) or "model".
+  # Re-export them from that settings file so workers inherit a working login.
+  if [ -f "$CLAUDE_CONFIG_DIR/settings.json" ]; then
+    eval "$(python3 - "$CLAUDE_CONFIG_DIR/settings.json" <<'PY'
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    cfg = {}
+env = cfg.get("env", {}) if isinstance(cfg, dict) else {}
+pairs = [(k, env.get(k)) for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY")]
+pairs.append(("ANTHROPIC_MODEL", cfg.get("model") if isinstance(cfg, dict) else None))
+for k, v in pairs:
+    if v:
+        print(f'export {k}="${{{k}:-{v}}}"')
+PY
+)"
+  fi
   # Anthropic-compatible endpoints (including Kimi Coding) do not use the
   # interactive Claude login flow.  Fail before O2/O4 if the private key was
   # not injected, instead of letting a graybox worker report a late and

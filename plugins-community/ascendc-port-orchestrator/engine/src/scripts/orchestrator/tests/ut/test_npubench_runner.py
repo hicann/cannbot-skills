@@ -490,6 +490,94 @@ def test_candidate_snapshot_stays_finalizer_bindable_after_o5_publish(
     assert snapshot.stat().st_mode & 0o222 == 0
 
 
+def _candidate_workspace(tmp_path: Path, *, with_extension: bool = False) -> Path:
+    """Minimal candidate-as-workspace tree for snapshot materialization tests."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "model_new_ascendc.py").write_text("VALUE = 1\n", encoding="utf-8")
+    if with_extension:
+        _build_extension(workspace, "_op_ext.so")
+    return workspace
+
+
+def _build_extension(workspace: Path, name: str) -> Path:
+    build = workspace / "kernel" / "build"
+    build.mkdir(parents=True, exist_ok=True)
+    artifact = build / name
+    artifact.write_bytes(b"\x7fELF fake extension")
+    return artifact
+
+
+def test_candidate_snapshot_carries_build_extension_modules(tmp_path: Path) -> None:
+    workspace = _candidate_workspace(tmp_path, with_extension=True)
+
+    snapshot = runner.materialize_candidate_snapshot(workspace)
+
+    assert (snapshot / "kernel" / "build" / "_op_ext.so").is_file()
+    # The frozen snapshot's build artifacts mirror the source exactly.
+    assert runner.candidate_build_artifact_manifest(snapshot) == (
+        "kernel/build/_op_ext.so",
+    )
+    # A same-source re-materialization reuses the consistent snapshot.
+    assert runner.materialize_candidate_snapshot(workspace) == snapshot
+
+
+def test_candidate_snapshot_reuse_rejects_extension_built_after_freeze(tmp_path: Path) -> None:
+    """kernel/build is digest-excluded, so a post-freeze build reuses the address."""
+    workspace = _candidate_workspace(tmp_path)
+    runner.materialize_candidate_snapshot(workspace)
+    _build_extension(workspace, "_op_ext.so")
+
+    with pytest.raises(runner.NpuBenchRunnerError) as exc_info:
+        runner.materialize_candidate_snapshot(workspace)
+
+    message = str(exc_info.value)
+    assert "kernel/build extension modules do not match" in message
+    assert "候选扩展未构建" in message
+    assert "请先构建 kernel/build/*.so" in message
+
+
+def test_candidate_snapshot_reuse_rejects_renamed_extension(tmp_path: Path) -> None:
+    workspace = _candidate_workspace(tmp_path, with_extension=True)
+    snapshot = runner.materialize_candidate_snapshot(workspace)
+    (workspace / "kernel" / "build" / "_op_ext.so").unlink()
+    _build_extension(workspace, "_op_ext_v2.so")
+
+    with pytest.raises(runner.NpuBenchRunnerError) as exc_info:
+        runner.materialize_candidate_snapshot(workspace)
+
+    message = str(exc_info.value)
+    assert "kernel/build extension modules do not match" in message
+    assert str(snapshot) in message
+
+
+def test_stage_payload_flags_missing_durable_state(tmp_path: Path, monkeypatch) -> None:
+    from npubench import npubench_core as core
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    task = tmp_path / "task.py"
+    task.write_text("# stub\n", encoding="utf-8")
+    provider = types.SimpleNamespace(
+        stage_npubench_inputs=lambda ws, npubench_task, npubench_root: types.SimpleNamespace(
+            root=ws, bundle_sha256="b" * 64, manifest_sha256="c" * 64
+        )
+    )
+    monkeypatch.setattr(core, "_load_inputs_provider", lambda: provider)
+
+    payload = core.stage_workspace(workspace, task_path=task)
+
+    assert payload["status"] == "PASS"
+    assert payload["state_written"] is False
+
+    (workspace / ".opgen_state.json").write_text("{}\n", encoding="utf-8")
+
+    payload = core.stage_workspace(workspace, task_path=task)
+
+    assert payload["status"] == "PASS"
+    assert "state_written" not in payload
+
+
 def test_performance_plan_is_quick_w3_r5_keep_prof(tmp_path: Path) -> None:
     script = tmp_path / "msprof_perf_summary.py"
     script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
@@ -1725,6 +1813,48 @@ def test_task_execution_timeout_rejects_invalid_env(monkeypatch, raw: str) -> No
         _resolve_task_execution_timeout(None)
 
 
+def test_task_execution_timeout_scales_with_case_count(monkeypatch) -> None:
+    """Default = max(3600s, base 900s + 90s * n_cases). No upper cap.
+
+    The floor matters: the scaling was added to LIFT the cap for a 61-case pass, but
+    `900 + 90n` is smaller than the flat 3600s for every n < 30 — a 1-case task would
+    resolve to 990s, under the 1200s that a single nested `msprof --quick` sub-call is
+    itself allowed. Scaling may only ever raise the cap, never lower it.
+    """
+    from npubench.npubench_runner import _resolve_task_execution_timeout
+
+    monkeypatch.delenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", raising=False)
+    # below the crossover: the flat default still wins
+    assert _resolve_task_execution_timeout(None, n_cases=1) == 3600
+    # at and above it: scaling takes over
+    assert _resolve_task_execution_timeout(None, n_cases=61) == 900 + 90 * 61
+    # unbounded above: 71 cases is the first count whose scaled value clears the 7200s
+    # cap this function used to apply, so this point is what fails if a cap comes back
+    assert _resolve_task_execution_timeout(None, n_cases=71) == 900 + 90 * 71
+    # unknown / zero case count falls back to the flat default
+    assert _resolve_task_execution_timeout(None, n_cases=0) == 3600
+    assert _resolve_task_execution_timeout(None, n_cases=None) == 3600
+
+
+def test_task_execution_timeout_env_wins_over_scaled_default(monkeypatch) -> None:
+    from npubench.npubench_runner import _resolve_task_execution_timeout
+    monkeypatch.setenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", "1200")
+    assert _resolve_task_execution_timeout(None, n_cases=61) == 1200
+
+
+def test_task_execution_timeout_explicit_wins_over_scaled_default(monkeypatch) -> None:
+    from npubench.npubench_runner import _resolve_task_execution_timeout
+    monkeypatch.delenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", raising=False)
+    assert _resolve_task_execution_timeout(7, n_cases=61) == 7
+
+
+def test_task_execution_timeout_rejects_invalid_env_with_case_count(monkeypatch) -> None:
+    from npubench.npubench_runner import _resolve_task_execution_timeout
+    monkeypatch.setenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", "abc")
+    with pytest.raises(runner.NpuBenchRunnerError, match="CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC"):
+        _resolve_task_execution_timeout(None, n_cases=61)
+
+
 def test_isolated_context_uses_env_timeout_for_child_process(tmp_path: Path, monkeypatch) -> None:
     from npubench.npubench_runner import _run_isolated_context
     monkeypatch.setenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", "1200")
@@ -1754,6 +1884,86 @@ def test_isolated_context_default_timeout_is_3600(tmp_path: Path, monkeypatch) -
     _run_isolated_context(context, subprocess_run=fake_run)
 
     assert captured["timeout"] == 3600
+
+
+def test_isolated_context_scales_default_timeout_with_bundle_cases(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from npubench.npubench_runner import _run_isolated_context
+    monkeypatch.delenv("CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC", raising=False)
+    context = _timeout_probe_context(tmp_path)
+    context.bundle = types.SimpleNamespace(sidecar_cases=({},) * 10)
+    captured: dict = {}
+
+    def fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(returncode=0, stdout='{"status": "PASS"}', stderr="")
+
+    _run_isolated_context(context, subprocess_run=fake_run)
+
+    assert captured["timeout"] == 3600  # 10 cases is under the crossover; floor wins
+
+
+def test_precision_workspace_scales_timeout_with_sidecar_cases(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The entry point derives n_cases from the staged bundle (2-case sidecar)."""
+    from npubench.npubench_runner import _base_report
+    workspace, _, _ = _workspace(tmp_path, monkeypatch)
+    candidate = _candidate(tmp_path)
+    captured: dict = {}
+
+    def fake_run(context, **kwargs):
+        captured.update(kwargs)
+        return _base_report(
+            context.verb, status="PASS", binding=context.binding, run_id=context.run_id
+        )
+
+    monkeypatch.setattr(runner, "_run_isolated_context", fake_run)
+
+    report = runner.run_precision_workspace(workspace, candidate, device=0)
+
+    assert report["status"] == "PASS"
+    assert captured["timeout_seconds"] == 3600  # 2 cases is under the crossover
+
+
+def test_child_timeout_error_mentions_env_override(tmp_path: Path, monkeypatch) -> None:
+    from npubench import npubench_core as core
+
+    class _FakeProcess:
+        pid = 0
+        returncode = -9
+
+        def __init__(self, *args, **kwargs) -> None:
+            self._calls = 0
+
+        def communicate(self, timeout=None):
+            self._calls += 1
+            if self._calls == 1:
+                raise subprocess.TimeoutExpired(cmd=["fake"], timeout=timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self) -> None:
+            pass
+
+    def _dead_killpg(pgid, sig) -> None:
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(core.subprocess, "Popen", _FakeProcess)
+    monkeypatch.setattr(core.os, "killpg", _dead_killpg)
+
+    with pytest.raises(runner.NpuBenchRunnerError) as exc_info:
+        runner.run_child_process_group(
+            ["fake"], cwd=tmp_path, env={}, timeout_seconds=5,
+            subprocess_run=subprocess.run,
+        )
+
+    message = str(exc_info.value)
+    assert "timed out after 5s" in message
+    assert "CANNBOT_NPUBENCH_TASK_TIMEOUT_SEC" in message
 
 
 def test_evaluate_skip_perf_produces_deferred_report(tmp_path: Path, monkeypatch) -> None:

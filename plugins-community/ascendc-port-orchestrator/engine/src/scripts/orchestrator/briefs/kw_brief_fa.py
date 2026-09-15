@@ -175,7 +175,7 @@ def _fa_class_template_assembly_block(
         + _fa_assembly_compile_block()
         + _fa_assembly_verify_hard_block()
         + _fa_ge_host_gen_block()
-        + "Reference: `kb/target/ascendc/patterns/domains/fa_class_template.md`\n"
+        + "Reference: `kb/okf/reference/porter/patterns/fa_class_template.md`\n"
         "(P-P103) + design doc §9/§14/§15."
     )
 
@@ -202,7 +202,7 @@ def _fa_assembly_intro_block(op: str, op_class: str) -> str:
         "  (dtype/shape/head_num/layout). [The arch22 source is provided/bind-mounted\n"
         "  in graybox mode — read it where it is staged; in port_a3 it is the upstream\n"
         "  arch22 source and remains the migration truth.]\n"
-        "- **codified KB**: P-P103 `patterns/domains/fa_class_template.md` (skeleton +\n"
+        "- **codified KB**: P-P103 `kb/okf/reference/porter/patterns/fa_class_template.md` (skeleton +\n"
         "  FA+X delta table + block inventory + host-tiling logic) + design doc §9/§14.\n"
         "\n"
         "A target archive, `.prior_art_scan.json`, DEBT203 branch base, or SHA-verified\n"
@@ -328,8 +328,8 @@ def _fa_assembly_deadlock_warning_block(target: str = "a5") -> str:
     """
     parts = [_fa_mix_sync_intro_block(target)]
     # A5 recipe — anchored on the two entries that carry it: OL-220 (the light-port
-    # build recipe = Path B) and cross_core_sync.md §4 (the runnable handshake =
-    # Path A). Both are `soc=Ascend950PR`, so this is the A5 route selector.
+    # build recipe = Path B) and fa-cross-core-sync-workspacequeue.md §4 (the runnable
+    # handshake = Path A). Both are `soc=Ascend950PR`, so this is the A5 route selector.
     if _mix_sync_a5_recipe_applies(target):
         parts.append(_fa_mix_two_paths_block())
     # a3 positive recipe (DEBT-222 delivery): the device-proven a3 FA-class STARTING
@@ -353,23 +353,25 @@ def _fa_assembly_deadlock_warning_block(target: str = "a5") -> str:
     return "".join(parts)
 
 
-# `cross_core_sync.md` §4 — the RUNNABLE A5 handshake. Path A's anchor; its
+# OKF card `fa-cross-core-sync-workspacequeue.md` §4 — the RUNNABLE A5 handshake.
+# Path A's anchor; its
 # `applies_to: soc=Ascend950PR (V351 / A5, Ascend950PR_9579)` is what scopes the
 # A5 recipe below.
-_CROSS_CORE_SYNC_MD = "target/ascendc/fa_class/cross_core_sync.md"
+_CROSS_CORE_SYNC_MD = "okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md"
 
 # P-P116 — the a3/arch22 hand-authored cube+vector MIX attention STARTING SKELETON.
 # Its own header `applies_to: soc=Ascend910_9382` (a3/a2 → 220x) + `unverified_on:
 # soc=Ascend950PR` is what scopes the a3 delivery block below to a3 only.
-_A3_MIX_TEMPLATE_MD = "target/ascendc/patterns/domains/fa_class_a3_mix_template.md"
+_A3_MIX_TEMPLATE_MD = "okf/reference/porter/patterns/fa_class_a3_mix_template.md"
 
 
 def _mix_sync_a5_recipe_applies(target: str) -> bool:
     """Does the A5 two-path recipe apply to `target`? Read from the KB entries.
 
     Path B is anchored on OL-220 (`soc=Ascend950PR` — the GDN light-port build
-    recipe, 122/122) and Path A on `cross_core_sync.md` §4 (`soc=Ascend950PR` —
-    the PUBLIC-API-runnable handshake). Both must apply for the two-path choice to
+    recipe, 122/122) and Path A on the OKF card `fa-cross-core-sync-workspacequeue.md`
+    §4 (`soc=Ascend950PR` — the PUBLIC-API-runnable handshake). Both must apply for
+    the two-path choice to
     be a real choice, so this is an AND, not an OR: surfacing one path without its
     exclusive alternative is what produced the blend this block exists to stop.
     """
@@ -393,7 +395,8 @@ def _fa_mix_sync_intro_block(target: str) -> str:
 def _fa_mix_two_paths_block() -> str:
     """The A5 MIX cube↔vec recipe: TWO MUTUALLY EXCLUSIVE proven paths.
 
-    Scoped by `_mix_sync_a5_recipe_applies` (OL-220 ∧ cross_core_sync.md §4, both
+    Scoped by `_mix_sync_a5_recipe_applies` (OL-220 ∧ the OKF card
+    `fa-cross-core-sync-workspacequeue.md` §4, both
     `soc=Ascend950PR`). Presented as an exclusive CHOICE because PB-34's Fix
     section defines Pattern A and Pattern B as exclusive and BLENDING THEM IS THE
     BUG: `3_FusionAttention`'s `fa_fused_mixed_fp16` pairs `MatmulImpl<>` with
@@ -424,13 +427,14 @@ def _fa_mix_two_paths_block() -> str:
         "- **Witness (full-op, not a micro-probe)**: GDN `chunk_gated_delta_rule` light-port —\n"
         "  8 `matmul::MatmulImpl<>` instances ×3 cube stages + `MIX_AIC_1_2`, compiled first-try on\n"
         "  bisheng dav-c310, no hang, **122/122 T1 PASS** (A5, CANN 9.1.T500). This is PB-34's own\n"
-        "  `verified_does_not_reproduce_on (FULL-OP scale)` bullet — read it in `PLATFORM_BUGS.md`.\n"
+        "  `verified_does_not_reproduce_on (FULL-OP scale)` bullet — read it in the PB-34 card\n"
+        "  (`kb/okf/runbooks/field-notes/build/pb-34-matmulimpl-with-manual-crosscoresetflag-waitflag-m.md`).\n"
         "- **This is what PB-34 tells an A5 worker to do**: 'for a V220 cube-MIX fused op, the\n"
         "  DEFAULT A5 route is a LIGHT PORT (keep `MatmulImpl<>` + the manual flag chain; adapt only\n"
         "  the ACLRT_LAUNCH entry + host tiling), NOT a hand-rolled tile-Mmad rewrite.'\n"
         "- **Build recipe: OL-220** (`ascendc_library` cube+vec MIX — non-empty `CMAKE_BUILD_TYPE`,\n"
         "  post-`ascendc_library` include scoping, where `MultiCoreMatmulTiling` lives).\n"
-        "- **`cross_core_sync.md` §4 DOES NOT APPLY TO THIS PATH. Do NOT add it.** §4 is the\n"
+        "- **`fa-cross-core-sync-workspacequeue.md` §4 DOES NOT APPLY TO THIS PATH. Do NOT add it.** §4 is the\n"
         "  hand-rolled handshake; bolting it onto a KFC cube re-creates the PB-34 blend above.\n"
         "\n"
         "#### PATH A — non-KFC library cube + the §4 manual handshake\n"
@@ -439,24 +443,25 @@ def _fa_mix_two_paths_block() -> str:
         "layout-parameterized `RunGemm` helper; design + working single-chunk GDN in\n"
         "`docs/design/FA_CLASS_DESIGN_NOTES.md#gdn-catlass-composable-primitives-design`). No KFC\n"
         "means no FFTS-slot contention, which is what makes manual flags SAFE here.\n"
-        "- **Then take the handshake from `target/ascendc/fa_class/cross_core_sync.md` §4 (`:209`,\n"
-        "  verdict PUBLIC-API-runnable)** — **(A)** SYNC MODE 4, not mode 2 (`:226`); **(B)** disjoint\n"
+        "- **Then take the handshake from the OKF card\n"
+        "  `kb/okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md` §4 (`:202`,\n"
+        "  verdict PUBLIC-API-runnable)** — **(A)** SYNC MODE 4, not mode 2 (`:219`); **(B)** disjoint\n"
         "  per-sub-block flag ids `id` / `id+16`, and **BOTH must be Set** — sending one leaves the\n"
-        "  second AIV with no happens-before (`:233`); **(C)** the consumer `Wait`s on **`PIPE_V`**, NOT\n"
-        "  the producer's `PIPE_FIX` (`:243`).\n"
+        "  second AIV with no happens-before (`:226`); **(C)** the consumer `Wait`s on **`PIPE_V`**, NOT\n"
+        "  the producer's `PIPE_FIX` (`:236`).\n"
         "- **READ §4 ITSELF — do not work from this summary. Two bounds a paraphrase strips:**\n"
         "  1. §4's `verified_on` 64/64 reference achieves the handshake via the BaseApi\n"
         "     **`Buffer<CROSS_CORE_SYNC_FORWARD>` abstraction, NOT a hand-roll**; the hand-rolled form\n"
         "     is public-API-runnable ONLY WITH (C). **Prefer the abstraction** — it picks the pipe +\n"
         "     managed id for you, which is why it is bit-exact and deadlock-free.\n"
         "  2. **(C) is bounded**: `PIPE_V` is correct only for a **UB-RESIDENT** result. cube→vec\n"
-        "     **via GM** needs more (`:317`, kw-gb5): `PIPE_V` gates the AIV vector pipe but leaves the\n"
+        "     **via GM** needs more (`:314`, kw-gb5): `PIPE_V` gates the AIV vector pipe but leaves the\n"
         "     MTE2 GM-read un-ordered vs the cube's Fixpipe retire → reads GM too early (init data) or\n"
         "     mid-write (`507015` aivec OOB). Cleanest fix: route the result Fixpipe L0C→**UB**.\n"
         "- **Witness**: `workspace/gdn_catlass/` single-chunk GDN — A5/CANN-9.1.T500, 3/3 vs fp64\n"
         "  oracle @4e-2, **deterministic ×3**. Sync discipline = `AscendC::SyncAll` (single-chunk) or\n"
         "  CrossCore **mode-4** flag rotation over a static collision-free flag-id space.\n"
-        "- **Determinism must be tested fresh-PROCESS ×≥3** (`:329`) — warm in-process re-runs mask the\n"
+        "- **Determinism must be tested fresh-PROCESS ×≥3** (`:322`) — warm in-process re-runs mask the\n"
         "  race; the first launch fixes a scheduling path that repeats within that process.\n"
     )
 
@@ -508,7 +513,7 @@ def _fa_a3_mix_skeleton_block() -> str:
         "(`fa_class_a3_mix_template.md`): START HERE, do NOT author from scratch\n"
         "For a **220x / a3** (`Ascend910_9382`, arch22) cube+vector MIX attention op the KB now carries a\n"
         "**device-proven hand-authored starting skeleton — P-P116**\n"
-        "(`src/skills/references/target/ascendc/patterns/domains/fa_class_a3_mix_template.md`;\n"
+        "(`kb/okf/reference/porter/patterns/fa_class_a3_mix_template.md`;\n"
         "`verified_on: Ascend910_9382; cann=9.0.0; DS famix (single-head) + famix_mh (multi-head)`). It is the a3\n"
         "COUNTERPART of the a5-only P-P103 `fa_class_template.md` / P-P102 `cube_vector_fusion.md` — **use P-P116\n"
         "for a3, NOT the a5 templates** (their arch35 §4 mode-4 sync / MicroAPI regbase softmax are WRONG on a3).\n"
@@ -526,7 +531,7 @@ def _fa_a3_mix_skeleton_block() -> str:
         "GENERATE yourself, do NOT lift**. The\n"
         "   template POINTS at the pattern; it holds NO liftable op body.\n"
         "2. **BUILD + RUN the SYNC-WITNESS** "
-        "`src/skills/references/target/ascendc/examples/a3_mix_fa_min/` on YOUR a3\n"
+        "`examples/a3_mix_fa_min/` (plugin `examples/` dir) on YOUR a3\n"
         "   container — watch `torch.npu.synchronize()` RETURN (not hang) and witness the AIC↔AIV MIX handshake close\n"
         "   **deadlock-free** on device (the empirically-decisive see-it-work step; "
         "PB-55's both-AIV-set reverse handshake\n"
@@ -624,7 +629,8 @@ def _fa_mix_pb34_v220_block() -> str:
         "**Intra-AIC cube pipe sync on V220 — do NOT hand-roll it.** Pattern A with user-owned\n"
         "cube-internal pipe sync remains **UNSOLVED in canonical KB** on V220: the 'use event ids ≥ 4'\n"
         "fix was **empirically falsified** (3 distinct schemes — raw `event_t(2..7)`, canonical\n"
-        "`GetTPipePtr()->FetchEventID()` — ALL reproduce the same silent hang; `PLATFORM_BUGS.md:934`).\n"
+        "`GetTPipePtr()->FetchEventID()` — ALL reproduce the same silent hang; PB-35 evidence,\n"
+        "  card `kb/okf/runbooks/field-notes/build/pb-35-event-t-0-for-cube-internal-pipe-sync-mte1-m-m-fix.md`).\n"
         "**Use a LIBRARY cube.** This paragraph bounds the **hand-rolled** intra-AIC pipe sync ONLY —\n"
         "do NOT read it as 'cube is impossible on V220, fall back to vector'. A non-KFC library cube\n"
         "has ALREADY SHIPPED here (DEBT-206); the next section is that route and its bounds.\n"
@@ -642,7 +648,7 @@ def _fa_mix_v220_shipped_cube_block() -> str:
     imperative language, so a V220 FA worker read the section as "cube is
     unavailable here, go vector", which is how an attention op ended up pure-vector.
     Two facts refute the trailer, BOTH already in the KB this brief cites:
-      - **OL-275 carries the DEBT-206 witness** (`OPERATIONAL_KNOWLEDGE.md:11016`):
+      - **OL-275 carries the DEBT-206 witness** (KB entry `OL-275`):
         the FIRST SHIPPED `verified_on:a3` cube op — a real archived end-to-end
         deliverable on the standalone `build_ascendc.py`, not a micro-probe.
       - **The vector fallback it offered is a SHIP-BLOCKED state.** For a
@@ -655,7 +661,8 @@ def _fa_mix_v220_shipped_cube_block() -> str:
     Gated on **OL-275's own** `applies_to: soc=Ascend910_V220` — the entry that
     carries the DEBT-206 witness — per the DEBT-208 rule that each sub-block is
     emitted iff the KB entry it carries covers `target`. This widens NO A5 scope:
-    the A5 recipe stays anchored on OL-220 ∧ `cross_core_sync.md` §4, and OL-275 is
+    the A5 recipe stays anchored on OL-220 ∧ the OKF card
+    `fa-cross-core-sync-workspacequeue.md` §4, and OL-275 is
     already in the V220 fix-card trailer, so the a5 brief is byte-unchanged.
 
     Deliberately NOT written here: a catlass/`BlockMmadTla` V220 recipe. The vendor
@@ -667,7 +674,7 @@ def _fa_mix_v220_shipped_cube_block() -> str:
     return (
         "\n"
         "### A non-KFC LIBRARY CUBE HAS SHIPPED ON V220 — 'cube is impossible, use vector' is FALSE\n"
-        "**The V220 cube workflow HAS landed** — OL-275 (`OPERATIONAL_KNOWLEDGE.md:11016`):\n"
+        "**The V220 cube workflow HAS landed** — KB entry OL-275:\n"
         "`1_BatchMatmul` (DEBT-206, 2026-07-13, Ascend910_9382 / **CANN 9.1.0**) is the **first\n"
         "SHIPPED `verified_on:a3` cube op**, a real archived end-to-end deliverable — NOT a probe:\n"
         "- direct `MatmulImpl<>` with **NON-KFC synchronous `IterateAll<sync=true>` + `End()`** — no\n"
@@ -721,7 +728,8 @@ def _fa_mix_pb35_pattern_a_block() -> str:
     """
     return (
         "\n"
-        "### PB-35 — the Pattern-A trap (`PLATFORM_BUGS.md:883`; applies to V220 **and** V351/A5)\n"
+        "### PB-35 — the Pattern-A trap (OKF card `pb-35-event-t-0-for-cube-internal-pipe-sync-mte1-m-m-fix.md`;\n"
+        "applies to V220 **and** V351/A5)\n"
         "`applies_to: op_class=mixed_aic_aiv_pattern_a_tile_mmad` — this card attacks **Pattern A\n"
         "itself**, and it is **`confirmed_on: Ascend950PR_9579` (V351/A5)**: a user-owned-Mmad +\n"
         "hand-rolled-cross-core-flag cube-MIX FA **DEADLOCKED on A5** (kw-gb2 hermetic graybox\n"
@@ -742,7 +750,7 @@ def _fa_mix_pb45_library_cube_block() -> str:
 
     Emitted iff PB-45's `applies_to: soc=Ascend950PR (V351/A5)` covers the target.
     Carries the A5 half of "do not hand-roll intra-AIC cube pipe sync" (the V220
-    half rides in the PB-34 block, from `PLATFORM_BUGS.md:934`).
+    half rides in the PB-34 block, from PB-35's falsified "use IDs ≥ 4" evidence).
     """
     return (
         "\n"
@@ -939,7 +947,7 @@ def _fa_class_backward_stitch_block(op: str, op_class: str) -> str:
         "copying source blocks or lines.\n"
         "\n"
         "## THE GUIDE — read FIRST, follow EXACTLY:\n"
-        "`kb/target/ascendc/patterns/domains/fa_class_template.md`\n"
+        "`kb/okf/reference/porter/patterns/fa_class_template.md`\n"
         "→ **BACKWARD section** ('the FA-grad stitch recipe', the §after the FA+X table) +\n"
         "`CAND-FA-TEMPLATE-GEN-BWD-1` (candidates.md). The recipe = 6 stitch steps + the\n"
         "splitAxis DECISION RULE + the 14-fix build-drift checklist + the host-tiling field\n"
@@ -1075,7 +1083,7 @@ def _fa_class_backward_stitch_block(op: str, op_class: str) -> str:
         "with tier1_pass/total/status + performance block) is in the backward-mode brief that\n"
         "composes around this block — honor it.\n"
         "\n"
-        "Reference: `kb/target/ascendc/patterns/domains/fa_class_template.md`\n"
+        "Reference: `kb/okf/reference/porter/patterns/fa_class_template.md`\n"
         "(P-P103 BACKWARD section) + `CAND-FA-TEMPLATE-GEN-BWD-1` + `CAND-FA-GQA-BWD-1` (the\n"
         "FA-2-backward MATH reference / oracle) + OL-200 (MIX pipeline) + OL-201 (perf caveat)."
     )
@@ -1169,7 +1177,7 @@ def _fa_ge_host_gen_block() -> str:
         "`_tiling.cpp`), you MUST GENERATE it by FOLLOWING the recipe — do NOT byte-copy CANN\n"
         "arch35 source (the 13-archive regression: byte-identical GE op_host → customer with no\n"
         "CANN source can't reproduce). Recipe:\n"
-        "`kb/target/ascendc/patterns/domains/fa_class/templates/op_host/`\n"
+        "`templates/fa_class/op_host/`\n"
         "→ `GE_HOST_TRANSFORM_RECIPE.md` (the arch22→arch35 per-file assembler) + `GE_HOST_TEMPLATE.md`\n"
         "+ skeletons (`flash_attention_score_{def,infershape,tiling}.cpp`) + `wp_fa_host_tiling.h`\n"
         "(the shared `wfh::`/`wp_fa_host::` arch35 tiling logic) + `ge_host_shim.h` (Tier-1 shell).\n"

@@ -182,10 +182,14 @@ def _is_within(path: pathlib.Path, root: pathlib.Path) -> bool:
 def _resolve_kb_files(claimed: str, project_root: pathlib.Path) -> list[pathlib.Path]:
     """Resolve a `merged_into=` token to one or more absolute KB-file paths.
 
-    Historical skill output uses several conventions:
-      - `src/skills/references/target/ascendc/OPERATIONAL_KNOWLEDGE.md`
-      - `target/ascendc/OPERATIONAL_KNOWLEDGE.md` (no legacy-root prefix)
-      - `OPERATIONAL_KNOWLEDGE.md` (bare filename — ambiguous)
+    Marker output uses several conventions:
+      - `kb/okf/runbooks/<section>/<card>.md` (OKF card path)
+      - `okf/runbooks/<section>/<card>.md` (no `kb/` prefix)
+      - `<card>.md` (bare filename — ambiguous)
+
+    Legacy `src/skills/references/target/ascendc/...` / `target/ascendc/...`
+    claims from pre-OKF workspaces remain resolvable via the
+    prefix-stripping + candidate-roots logic below.
 
     For bare filenames, rglob may find multiple candidates. Return ALL of them
     and let the caller grep each; finding the entry in any allowed KB root is

@@ -16,6 +16,8 @@ tags: [ascendc, ol-220, mix-aic-aiv, ascendc-library, cmake, matmul-tiling]
 created_at: 2026-07-12T16:00:00Z
 updated_at: 2026-07-12T16:00:00Z
 ---
+`applies_to: soc=Ascend950PR; cann=9.1.T500; bisheng=n/a; phase=build; kernel_type=MIX_AIC_AIV`
+
 ## 现象 / 触发
 
 Ascend950PR / CANN 9.1.T500, MIX_AIC_AIV kernel. Verified on chunk_gated_delta_rule (GDN) light-port, 2026-06-15 (built clean, 122/122 T1 PASS, perf ~89–121µs). Building a MIX (cube+vec) AscendC kernel through the CMake `ascendc_library` flow on this CANN version has three non-obvious requirements that each abort the build silently or with a misleading message if missed.

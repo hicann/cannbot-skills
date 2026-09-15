@@ -45,3 +45,7 @@ If `B ≥ TOTAL_AIV` (e.g. B=640, TOTAL_AIV=56) every AIV is already busy on dif
 - `B < TOTAL_AIV / P_target` → `P = P_target` (full partition gain)
 - `TOTAL_AIV / P_target ≤ B < TOTAL_AIV` → `P = floor(TOTAL_AIV / B)` (partial, degenerate gain)
 - `B ≥ TOTAL_AIV` → `P = 1` (single-AIV path; partition won't fire)
+
+## 证据
+- 9_TopKTopP kw-2 (2026-05-03 Ascend950PR_9579, Mechanism A): all bf16 N=65536 hot harness cases have `B ≥ 640` (case 17 [B=768], 26 [B=640], 35 [B=896], 44 [B=1152]). With `TOTAL_AIV=56`, every AIV does 12-21 rows serially — partition path correctly falls back to P=1 single-AIV. Result: hard gates preserved (Pass A 16/16, Pass B 47/50, Det 50/50), perf neutral 0.388× vs ko-1 baseline 0.397× (within measurement noise). Multi-AIV partition machinery is correct but doesn't activate on this harness — architecturally forward-compatible.
+- 10_LayerNorm kw-2 (2026-05-03 Ascend950PR_9579, Mechanism B): test set `min(rows/56) = 1.79`, `median = 9.14`, `max = 292.57` — every AIV already saturated at baseline. K_ROWS_PER_AIV outer-loop fusion (K=1/2/4 adaptive) implemented + verified bit-exact (Pass A 60/60 + Pass B 16/16 + Det 60/60), but perf flat 0.18× vs ko-1 baseline 0.16-0.20× (within noise). Mechanism algebraically inert when inner per-row `for r=0..my_rows_` already iterates K rows per launch. Iter 1 sufficient to confirm structural ceiling per directive's exit clause; iters 2-4 not consumed.

@@ -55,8 +55,8 @@ GOD_FUNCTION (function length) already covers the dispatch functions it would fl
 and the widened CORE_MODE_LEAK catches the per-branch literals directly. A separate
 chain-length metric would double-count the same lines without catching anything new.
 
-Default is REPORT-ONLY (exit 0) so it can be adopted incrementally — like
-kb_index_audit.py --report-only. Pass --strict to fail (for pre-commit / CI once the
+Default is REPORT-ONLY (exit 0) so it can be adopted incrementally — warnings
+only, no build breakage. Pass --strict to fail (for pre-commit / CI once the
 known baseline is burned down). A --baseline file allows grandfathering known findings
 while preventing NEW ones.
 

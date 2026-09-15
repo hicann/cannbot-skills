@@ -58,8 +58,10 @@ directive) can apply a surgical fix.
    - `DET_POLICY`: `required` (only policy under which you're spawned)
    - `trigger`: `"Phase D det-check failed"` OR `"optimizer introduced non-det at iter N"`
    - `observed`: summary of verification.json det field
-6. KB root: `${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/determinism.md` (P-P61 positive,
-   A-P61 anti-pattern catalog — you classify against this)
+6. KB root: determinism 域已卡片化 —— `grep -rn "P-P61\|A-P61" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`
+   定位 P-P61 positive / A-P61 anti-pattern 卡（如
+   `kb/okf/runbooks/operator-optimization/p-p61-determinism-preserving-patterns-*.md`），
+   你按这套卡做分类
 
 ## Workflow — bisection for non-determinism
 
@@ -74,7 +76,7 @@ directive) can apply a surgical fix.
 
 ### Step 2: Hypothesis enumeration (against A-P61 catalog)
 
-Enumerate hypotheses keyed to the anti-pattern taxonomy in determinism.md:
+Enumerate hypotheses keyed to the anti-pattern taxonomy in the determinism cards:
 
 | Hypothesis | Check |
 |------------|-------|
@@ -109,7 +111,7 @@ Map to one A-P61 class (or "novel"). Include:
 
 ### Step 5: Candidate fix proposal (analysis only, no Edit)
 
-For each A-P61 class there's a canonical fix pattern in determinism.md §P-P61. Specify:
+For each A-P61 class there's a canonical fix pattern in the determinism cards' §P-P61. Specify:
 
 - **File + line**: where to change
 - **Before / After** code snippet (illustrative; fixer agent will apply)
@@ -203,7 +205,7 @@ aog-determinism-analyzer is analyzer-only (no Edit/Write on kernel; can't be "st
 1. **Broaden KB + prior-analyzer search**:
    ```bash
    # A-P61 and P-P61 catalog beyond the initial load
-   grep -rn "A-P61\.\|P-P61\." ${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/determinism.md
+   grep -rn "A-P61\.\|P-P61\." ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/
    # Prior determinism_reports from other ops
    grep -rn "root.*cause\|CONFIRMED" output/npukernelbench/src/kernels/*/determinism_report.md 2>/dev/null | head -10
    # Check for novel patterns (not in A-P61 catalog) — those become KB candidates

@@ -127,7 +127,10 @@ def _platform_blame_evidence(workspace: Path, documents: list[Path]) -> tuple[bo
             continue
         has_hw_citation = has_hw_citation or ("hardware/" in text and ".md" in text)
         has_pb_citation = has_pb_citation or (
-            "PLATFORM_BUGS.md" in text or bool(re.search(r"\bPB-\d+\b", text))
+            # OKF-only: PB-N incidents are runbook cards
+            # kb/okf/runbooks/field-notes/build/pb-<n>-*.md; also tolerate
+            # legacy PLATFORM_BUGS.md citations during the transition.
+            "PLATFORM_BUGS.md" in text or bool(re.search(r"\bPB-\d+\b", text, re.IGNORECASE))
         )
     return has_probe, has_msprof, has_hw_citation, has_pb_citation
 
@@ -141,8 +144,9 @@ def _platform_blame_failure(hits: list[tuple[str, str]], evidence: tuple[bool, b
         f"(at least ONE of): "
         f"(a) workspace/probes/*.py empirical probe script, "
         f"(b) workspace/*msprof*.json hardware-counter trace, "
-        f"(c) doc-level citation of references/hardware/<chip>.md, "
-        f"(d) doc-level citation of PLATFORM_BUGS.md / PB-<N>. "
+        f"(c) doc-level citation of kb/okf/runbooks/hardware/target-<chip>.md, "
+        f"(d) doc-level citation of a PB-<N> runbook card "
+        f"(kb/okf/runbooks/field-notes/build/pb-<n>-*.md). "
         f"Found: probe={has_probe}, msprof={has_msprof}, "
         f"hw_citation={has_hw_citation}, pb_citation={has_pb_citation}. "
         f"Platform-blame WITHOUT evidence is reward-hacking via "
@@ -168,8 +172,8 @@ def _check_platform_blame_backed(workspace: Path) -> Optional[str]:
     If found, requires evidence in same workspace:
     - workspace/probes/*.py (empirical probe script), OR
     - workspace/*.msprof.json or workspace/msprof_*.json, OR
-    - explicit citation of references/hardware/<chip>.md or
-      references/target/ascendc/PLATFORM_BUGS.md (PB-N) in the doc.
+    - explicit citation of kb/okf/runbooks/hardware/target-<chip>.md or a
+      PB-<N> runbook card under kb/okf/runbooks/field-notes/ in the doc.
 
     Returns None on pass, error string on fail.
     """

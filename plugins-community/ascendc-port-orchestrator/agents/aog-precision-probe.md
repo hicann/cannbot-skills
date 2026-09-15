@@ -50,7 +50,7 @@ Orchestrator passes `DET_POLICY ∈ {required, best_effort, n/a}` in your brief.
 - `DET_POLICY=best_effort`: non-det is expected (atomicAdd-class ops); don't chase.
 - `DET_POLICY=n/a`: skip det-related hypotheses entirely.
 
-When your root-cause classification matches an A-P61 anti-pattern from `${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/determinism.md` (concurrent atomicAdd / unordered merge / uninitialized scratch / data-dependent reduction order / missing pipe barrier), include cross-reference in probe_report.md and signal orchestrator that a follow-up aog-determinism-analyzer spawn may be warranted.
+When your root-cause classification matches an A-P61 anti-pattern from the determinism cards (`grep -rn "A-P61\|determinism" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/` — concurrent atomicAdd / unordered merge / uninitialized scratch / data-dependent reduction order / missing pipe barrier), include cross-reference in probe_report.md and signal orchestrator that a follow-up aog-determinism-analyzer spawn may be warranted.
 
 ## Inputs
 
@@ -83,7 +83,7 @@ Before Step 1, internalize this rule: your task is to find a **logic-level fix**
 
 If you find yourself composing such a patch, stop and exit `@orchestrator: OL-83 confirmed with no logic-level fix available`. That's legitimate. Forcing a closure via if/else hacks is reward-hacking and will be rejected.
 
-See OL-85 in OPERATIONAL_KNOWLEDGE.md for full rule + examples of good vs bad fixes.
+See OL-85（已随 OL 卡片化迁入 `kb/okf/runbooks/`，按 `grep -rn "OL-85" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/` 定位）for full rule + examples of good vs bad fixes.
 
 ### Step 1: Read context (~5min)
 - verification.json (which cases fail, signature)
@@ -324,15 +324,15 @@ Mirrors aog-kernel-worker / aog-kernel-optimizer contracts, specialized for bise
 
 **Trigger** (all must hold):
 - 3 consecutive iters with no narrowing of root-cause space (same candidate class neither confirmed nor falsified, or hypotheses ranked the same after each iter)
-- You have NOT yet grep'd `output/npukernelbench/src/kernels/*/probe_report.md` for prior probes with the same max_abs_diff signature / dtype / op-family, nor scanned `patterns/domains/precision.md` P-P50..P-P58 beyond the ones loaded at bisect-start
+- You have NOT yet grep'd `output/npukernelbench/src/kernels/*/probe_report.md` for prior probes with the same max_abs_diff signature / dtype / op-family, nor grep'd the precision cards in `kb/okf/runbooks/` (P-P50..P-P58) beyond the ones loaded at bisect-start
 
 **Protocol — mandatory at 3-iter stuck**:
 
 1. **Broaden KB + prior-probe search**:
    ```bash
    # Symptom → KB grep (by signature)
-   grep -rn "max_abs_diff.*<your_magnitude>\|<dtype>.*intermediate" ${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/precision.md
-   grep -rn "P-P5[0-8]" ${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/precision.md | head -20
+   grep -rn "max_abs_diff.*<your_magnitude>\|<dtype>.*intermediate" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/
+   grep -rn "P-P5[0-8]" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/ | head -20
    # Prior probes with same signature — strongest evidence
    grep -rn "<dtype>" output/npukernelbench/src/kernels/*/probe_report.md 2>/dev/null | head -10
    ```

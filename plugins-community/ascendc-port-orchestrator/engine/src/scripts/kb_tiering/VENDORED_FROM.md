@@ -9,12 +9,11 @@ main (a5_ops), who keeps the a5ops / autoport / cannbot adapters consistent. Thi
 "retirement-clean interim" of design §9: when a5_ops-core lands its wiring, cannbot re-syncs as a
 code-swap, not a data-migration.
 
-`adapter_a5ops.py` is ALSO vendored byte-identical from a5_ops
-`origin/main:src/scripts/kb_tiering/adapter_a5ops.py` — it is the b-tier reader over the
-`references/` KB_INDEX + OL/EC/PB format, which cannbot bundles verbatim. Same do-not-edit rule;
-re-sync is a code-swap. `adapters/cannbot_b.py` is a thin cannbot factory pointing it at the
-bundled `src/skills/references/`.
+~~`adapter_a5ops.py`~~（曾 vendored byte-identical 自 a5_ops，b-tier KB_INDEX 读取器）与
+~~`adapters/cannbot_b.py`~~（指向 bundled `kb/KB_INDEX.md` 的工厂）已随 **OKF-only 迁移
+（2026-08）删除**：bundled 知识即 kb/okf，不再有 KB_INDEX provider，b-tier 的存在基础消失。
+`demo/`、`poc/`（legacy b-tier 演示代码）同批删除。
 
 cannbot-local pieces (NOT vendored — cannbot's own): `adapters/cannbot_c.py` (Markdown user_kb →
-Entry) + `adapters/cannbot_b.py` (factory over the vendored a5ops reader) + the read/write wiring
-into the engine. See notes CANNBOT_KB_TIERING_GAPMAP.md.
+Entry) + the read/write wiring into the engine (`read_bridge.py` 现为 c-only 组装).
+See notes CANNBOT_KB_TIERING_GAPMAP.md.

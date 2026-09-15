@@ -106,7 +106,7 @@ eval "EXTRA_LD_LIBRARY_PATH=\${${UPPER}_EXTRA_LD_LIBRARY_PATH:-\${EXTRA_LD_LIBRA
 eval "SSH_KEY=\${${UPPER}_SSH_KEY:-\${SSH_KEY:-}}"
 
 # Capability derivation — single source of truth for chip-arch facts.
-# Update this block (and references/hardware/INDEX.md) if a new SOC family is added.
+# Update this block (and kb/okf/runbooks/hardware/index.md) if a new SOC family is added.
 case "$TARGET" in
     a5)
         PLATFORM_SIMT=true

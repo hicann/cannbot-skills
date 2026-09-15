@@ -528,12 +528,14 @@ def mode_pre_agent_spawn(agent_type: str | None, agent_name: str | None = None) 
                     f"but NONE of the reg-based citations were found"
                 ),
                 fix=(
-                    f"1. Re-read KB_INDEX.md §By Symptom row for 'scalar-pipe-bound on A5'\n"
-                    f"2. Read OPERATIONAL_KNOWLEDGE.md §OL-54 (reg-based SIMD VERIFIED on A5)\n"
-                    f"3. Read patterns/unverified/candidates.md §P-REG-1\n"
-                    f"4. Read hardware/target/ascend950pr.md §Reg-based vs Mem-based SIMD\n"
+                    f"1. Query the OKF KB (kb/okf/) for 'scalar-pipe-bound on A5' runbook cards\n"
+                    f"2. Read kb/okf/runbooks/operator-optimization/ol-196-membase-vs-regbase-simd-vf-selection.md "
+                    f"(reg-based SIMD VERIFIED on A5; legacy OL-54)\n"
+                    f"3. Read kb/okf/runbooks/field-notes/inferred/ cand-* reg-based candidates "
+                    f"(legacy P-REG-1 lineage)\n"
+                    f"4. Read kb/okf/runbooks/hardware/target-ascend950pr.md §Reg-based vs Mem-based SIMD\n"
                     f"5. Add 'Reg-based applicable: yes/no/needs_probe' line to {fname} "
-                    f"with rationale referencing OL-54 + ascend950pr.md\n"
+                    f"with rationale referencing the OL-196 card + target-ascend950pr.md\n"
                     f"6. If reg-based IS applicable, write optimization_directive_<next>.md\n"
                     f"   for reg-based rewrite path BEFORE accepting the ceiling verdict"
                 ),

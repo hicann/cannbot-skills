@@ -199,8 +199,8 @@ def _copy_packaged_plugin(tmp: Path) -> Path:
     # marketplace payload while allowing a dedicated test below to remove one.
     for rel in (
         "kb/shared/ANTI_PRESSURE_PROTOCOLS.md",
-        "kb/KB_INDEX.md",
-        "kb/target/ascendc/OPERATIONAL_KNOWLEDGE.md",
+        "kb/okf/index.md",
+        "kb/okf/reference/index.md",
     ):
         src_file = src / rel
         dst_file = plugin / rel
@@ -245,6 +245,23 @@ def _seed_dependency_packages(ccd: Path) -> None:
             skill_dir = comp / name
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+            if name == "knowledge-query":
+                # init.sh builds the packaged OKF index via this script at
+                # install time and fails closed when it is missing.  The real
+                # engine ships with the cannbot-knowledge plugin; the fixture
+                # provides a minimal faithful stand-in for `build`.
+                script = skill_dir / "scripts" / "knowledge_query.py"
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text(
+                    "import json, sys\n"
+                    "root = sys.argv[sys.argv.index('--knowledge-root') + 1]\n"
+                    "if 'build' in sys.argv:\n"
+                    "    import os\n"
+                    "    os.makedirs(os.path.join(root, 'search'), exist_ok=True)\n"
+                    "    with open(os.path.join(root, 'search', 'okf.index.json'), 'w') as f:\n"
+                    "        json.dump({'cards': []}, f)\n",
+                    encoding="utf-8",
+                )
 
 
 def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, dict[str, str]]:

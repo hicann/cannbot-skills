@@ -8,10 +8,14 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-"""Validate every tag→KB path cited in SKILL.md §Step 2 tables exists in plugin kb/.
+"""Validate every tag→KB reference cited in SKILL.md §Step 2 tables exists in plugin kb/okf/.
+
+OKF-only 布局：OL/PB/EC/P-P/CAND 引用按三级解析（卡文件名前缀 → frontmatter
+`original_id:` → 正文并入提及）；裸路径相对 kb/ 校验。legacy `kb/target/ascendc/`
+布局已退役，残留的 `patterns/...` 引用会被判 FAIL。
 
 Run after SKILL.md edits to ensure the curated tables don't reference dead anchors.
-Exit 0 if all paths exist, 2 if any missing.
+Exit 0 if all references resolve, 2 if any missing.
 
 Usage:
     python3 skills/aog-op-classify/validate_kb_paths.py
@@ -25,82 +29,102 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()
 _PLUGIN_ROOT = _HERE.parents[2]
 _REFS = _PLUGIN_ROOT / "kb"
-# P88 (2026-05-15) KB reorg: all AscendC KB files moved under target/ascendc/.
-# This mirrors the canonical resolution in
-# src/scripts/orchestrator/briefs/op_taxonomy.py (_CANONICAL_KB_PATHS).
-_ASCENDC = _REFS / "target" / "ascendc"
+# OKF-only 迁移 (2026-08): legacy `kb/target/ascendc/` 布局已退役（OL/PB/EC 卡片化到
+# kb/okf/runbooks/，domains 卡片化到 runbooks/operator-optimization/，未转卡 patterns
+# 移到 kb/okf/reference/porter/patterns/）。校验以 kb/okf/ 为唯一真值。
+_OKF = _REFS / "okf"
 _SKILL_MD = _HERE.parent / "SKILL.md"
+
+# ID prefix → OKF 卡文件名前缀（ol-114-two-pass-....md / p-p61-....md / cand-pp79-....md）
+_ID_PREFIX = {"OL-": "ol", "PB-": "pb", "EC-": "ec", "P-P": "p-p", "CAND-": "cand"}
 
 
 def extract_kb_paths(skill_md_text: str) -> list[str]:
-    """Pull every `OL-XXX` / `PB-XXX` / `EC-XXX` / `P-PXX` / `CAND-PPXX` reference
+    """Pull every `OL-XXX` / `PB-XXX` / `EC-XXX` / `P-PXX` / `CAND-*` reference
     out of the SKILL.md tag→KB tables. Also pull bare path references like
-    `patterns/domains/memory_access.md`.
+    `okf/runbooks/.../foo.md` (and legacy `patterns/...` stragglers, which now FAIL).
     """
     paths: set[str] = set()
-    # OL/PB/EC/P-P/CAND-PP anchor refs
-    for m in re.finditer(r"(OL-\d+|PB-\d+|EC-\d+|P-P\d+|CAND-PP\d+)", skill_md_text):
+    # OL/PB/EC/P-P/CAND-* anchor refs
+    for m in re.finditer(r"(OL-\d+|PB-\d+|EC-\d+|P-P\d+|CAND-[A-Z0-9]+)", skill_md_text):
         paths.add(m.group(1))
-    # Bare relative paths (foo/bar.md)
-    for m in re.finditer(r"`(patterns/[a-zA-Z0-9_/.\-]+\.md(?:#[A-Z0-9\-]+)?)`", skill_md_text):
+    # Bare relative paths (foo/bar.md) — okf/ paths validate against kb/;
+    # legacy patterns/ paths are extracted so they fail loudly instead of being ignored
+    for m in re.finditer(r"`((?:okf|patterns)/[a-zA-Z0-9_/.\-]+\.md(?:#[A-Z0-9\-]+)?)`", skill_md_text):
         paths.add(m.group(1))
     return sorted(paths)
 
 
-def verify_anchor_exists(anchor: str) -> tuple[bool, str]:
-    """For OL-XXX → grep OPERATIONAL_KNOWLEDGE.md.
-    For PB-XXX → grep PLATFORM_BUGS.md.
-    For EC-XXX → grep ERROR_CORRECTIONS.md.
-    For P-PXX → grep patterns/PATTERN_INDEX.md.
-    For CAND-PPXX → grep patterns/unverified/candidates.md.
-    For bare paths (patterns/...) → check file exists; if anchor present, grep file for #anchor.
+def _okf_corpus() -> dict[str, str]:
+    """path → text for every card under kb/okf (read once, reused per anchor)."""
+    corpus: dict[str, str] = {}
+    if _OKF.is_dir():
+        for p in sorted(_OKF.rglob("*.md")):
+            try:
+                corpus[str(p)] = p.read_text(errors="replace")
+            except OSError:
+                continue
+    return corpus
+
+
+def verify_anchor_exists(anchor: str, corpus: dict[str, str]) -> tuple[bool, str]:
+    """OKF 布局校验：
+    - Level 1: 存在 `<id 小写>-*.md` 卡（文件名前缀匹配）。
+    - Level 2: 某卡 frontmatter `original_id: <ID>` 匹配（改名/换 slug 的卡）。
+    - Level 3: ID 在 kb/okf 正文出现（旧条目被并入他卡 —— 知识仍在，但无独立卡）。
+    三级皆无 → FAIL（死引用，需改 SKILL.md 或补卡）。
+    - 裸路径（okf/...）→ 相对 kb/ 校验文件存在；带 #anchor 时查文件内容。
     """
-    if anchor.startswith("OL-"):
-        target = _ASCENDC / "OPERATIONAL_KNOWLEDGE.md"
-        pattern = f"## {anchor}"
-    elif anchor.startswith("PB-"):
-        target = _ASCENDC / "PLATFORM_BUGS.md"
-        pattern = f"### {anchor}"
-    elif anchor.startswith("EC-"):
-        target = _ASCENDC / "ERROR_CORRECTIONS.md"
-        pattern = f"### {anchor}"
-    elif anchor.startswith("P-P"):
-        target = _ASCENDC / "patterns" / "PATTERN_INDEX.md"
-        pattern = f"| {anchor} "
-    elif anchor.startswith("CAND-PP"):
-        target = _ASCENDC / "patterns" / "unverified" / "candidates.md"
-        pattern = anchor
-    elif "/" in anchor:  # bare path like patterns/domains/foo.md
-        path_part, _, _ = anchor.partition("#")
-        # SKILL.md cites bare paths relative to the AscendC KB root
-        # (e.g. `patterns/domains/sort.md`); some rows cite repo-relative
-        # paths already prefixed with target/ascendc/. Try both.
-        for base in (_ASCENDC, _REFS):
-            target = base / path_part
-            if target.exists():
-                return True, str(target)
-        return False, f"file not found under target/ascendc or plugin kb/: {path_part}"
+    if "/" in anchor:  # bare path like okf/runbooks/.../foo.md
+        path_part, _, frag = anchor.partition("#")
+        target = _REFS / path_part
+        if not target.exists():
+            return False, (
+                f"file not found under plugin kb/: {path_part} "
+                f"(legacy patterns/... 路径已退役 — 域文件卡片化到 kb/okf/runbooks/，"
+                f"未转卡 pattern 移到 kb/okf/reference/porter/patterns/)"
+            )
+        if frag and frag not in target.read_text(errors="replace"):
+            return False, f"anchor `#{frag}` not found in {target.name}"
+        return True, str(target)
+
+    for prefix, _ in _ID_PREFIX.items():
+        if anchor.startswith(prefix):
+            break
     else:
         return False, f"unrecognized anchor format: {anchor}"
 
-    if not target.exists():
-        return False, f"target file missing: {target}"
-    text = target.read_text()
-    if pattern in text:
-        return True, str(target)
-    return False, f"anchor `{pattern}` not found in {target.name}"
+    # Level 1: filename prefix
+    stem = anchor.lower()
+    for p in corpus:
+        if Path(p).name.startswith(stem + "-") or Path(p).name == stem + ".md":
+            return True, p
+    # Level 2: frontmatter original_id
+    marker = f"original_id: {anchor}"
+    for p, text in corpus.items():
+        if marker in text:
+            return True, f"{p} (via original_id)"
+    # Level 3: content mention (条目并入他卡)
+    for p, text in corpus.items():
+        if anchor in text:
+            return True, f"merged — no dedicated card; mentioned in {Path(p).name}"
+    return False, f"no OKF card, original_id, or content mention for {anchor}"
 
 
 def main() -> int:
     if not _SKILL_MD.exists():
         print(f"ERROR: SKILL.md not found at {_SKILL_MD}", file=sys.stderr)
         return 2
+    if not _OKF.is_dir():
+        print(f"ERROR: OKF KB root not found at {_OKF}", file=sys.stderr)
+        return 2
     text = _SKILL_MD.read_text()
     anchors = extract_kb_paths(text)
+    corpus = _okf_corpus()
     print(f"Found {len(anchors)} unique KB references in SKILL.md")
     failures: list[tuple[str, str]] = []
     for anchor in anchors:
-        ok, detail = verify_anchor_exists(anchor)
+        ok, detail = verify_anchor_exists(anchor, corpus)
         marker = "✓" if ok else "✗"
         print(f"  {marker} {anchor:<25} {detail}")
         if not ok:

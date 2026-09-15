@@ -20,27 +20,41 @@ just decides WHICH KB section the lessons land in:
   VERDICT=CANDIDATE_BUILD_GAP     → build-failure counterexamples
 
 Mechanical extraction (no LLM): diff signal counts only (lines added/removed,
-key API surface mentions, structural-feature flags). Promotion to canonical
-PATTERN_INDEX.md / OL goes through `aog-knowledge-maintain` Mode 1 — this
-module only WRITES candidates to `patterns/unverified/candidates.md`.
+key API surface mentions, structural-feature flags). Cross-op validation and
+promotion go through `aog-knowledge-maintain` Mode 1 — this module only
+WRITES candidates to the c-tier intake file.
 
 Outputs:
 - `workspace/<op>/prior_art_learn.md` — human-readable extracted lessons
-- Append to `patterns/unverified/candidates.md` — auto-tagged candidates
+- Append to c-tier `reference/patterns/unverified/candidates.md` — auto-tagged
+  candidates
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[3]
-_CANDIDATES_PATH = (_PLUGIN_ROOT / "kb" / "target" / "ascendc"
-                    / "patterns" / "unverified" / "candidates.md")
+
+def _default_candidates_path() -> Path:
+    """c-tier intake target, resolved at call time (OKF-only migration
+    2026-08-31).
+
+    The bundled legacy KB (`kb/target/…`, `kb/KB_INDEX.md`) is deleted and
+    bundled `kb/okf` is read-only at runtime; migrated legacy candidates live
+    as cand-* cards under `kb/okf/runbooks/field-notes/inferred/`. New
+    candidates sediment to the user-local c-tier KB
+    (`$ASCENDC_PORT_USER_KB` or `~/.ascendc-port/user_kb`), same convention as
+    the cann_learn carve-out.
+    """
+    root = os.environ.get("ASCENDC_PORT_USER_KB") or str(
+        Path.home() / ".ascendc-port" / "user_kb")
+    return Path(root) / "reference" / "patterns" / "unverified" / "candidates.md"
 
 
 @dataclass
@@ -225,11 +239,12 @@ def extract(op: str, workspace: Path) -> LearnReport:
 
 def append_candidates(rep: LearnReport,
                       candidates_path: Optional[Path] = None) -> bool:
-    """Append extracted deltas to patterns/unverified/candidates.md as a
-    single CAND-PRIOR-ART block (one block per op, listing all signals)."""
+    """Append extracted deltas to the c-tier
+    `reference/patterns/unverified/candidates.md` as a single CAND-PRIOR-ART
+    block (one block per op, listing all signals)."""
     if not rep.deltas_extracted:
         return False
-    target = candidates_path or _CANDIDATES_PATH
+    target = candidates_path or _default_candidates_path()
     if not target.parent.is_dir():
         # Test envs may not have the canonical path; bail silently
         return False
@@ -272,7 +287,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--op", required=True)
     p.add_argument("--workspace", required=True, type=Path)
     p.add_argument("--no-append", action="store_true",
-                   help="don't append to patterns/unverified/candidates.md")
+                   help="don't append to the c-tier candidates.md intake")
     args = p.parse_args(argv)
     rep = extract(args.op, args.workspace)
     if not args.no_append:

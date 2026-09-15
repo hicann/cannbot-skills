@@ -341,7 +341,7 @@ Robust alternative to hand-rolling all three: use the BaseApi
 **Evidence**: V351 FA whole-port reference (arch35-class, runs 64/64) implements
 exactly this handshake; the four specifics were extracted by cann-learn Mode 5
 (2026-06-03) and cross-checked against the public CrossCoreSetFlag spec in
-`hardware/target/ascend950pr.md` (flagId 0–10, mode-4 = 1:1 AIV0/AIV1 individually
+`kb/okf/runbooks/hardware/target-ascend950pr.md` (flagId 0–10, mode-4 = 1:1 AIV0/AIV1 individually
 triggerable). The deadlocking counter-example is the kw-gb2 hand-roll (PB-35
 `confirmed_on` 2026-06-03).
 

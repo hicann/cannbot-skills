@@ -26,7 +26,8 @@ updated_at: 2026-07-12T16:00:00Z
 > Verified data on 192.0.2.210 container `npu-a3` (CANN 9.0.0_beta.2).
 > Many memory/atomic numbers below are inherited from CANN source +
 > public references and **need empirical confirmation on actual A3 hardware**
-> (probe queue: `references/hardware/INTERNAL_QUERY_QUEUE.md`).
+> (probe queue tracked out-of-band; run `aog-hardware-probe` to add findings under
+> `kb/okf/runbooks/hardware/`).
 
 ## SOC version reference
 

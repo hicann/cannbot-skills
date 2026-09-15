@@ -27,19 +27,24 @@ context: inline
 
 ## Scope
 
-The bundled files below are the **read-only b-tier baseline** used for semantic
+**BEFORE ANY KB EDIT — read `${CLAUDE_PLUGIN_ROOT}/kb/CONVENTIONS.md` first.**
+It is the normative rulebook for `kb/` (read-only b-tier, corpus scope, ≤3 dir depth,
+bundle-name rule tables, the 9-value `kind` vocabulary, required frontmatter, mandatory gates).
+Each rule cites the exact lint/retrieval line that enforces it. Violating it produces
+blockers that no CI currently catches.
+
+The bundled cards below are the **read-only b-tier baseline** used for semantic
 review and dedup. They are not runtime write targets:
 
-| File | Entry format | ID prefix |
+| Location | Card naming | ID prefix |
 |------|-------------|-----------|
-| `ERROR_CORRECTIONS.md` | `### EC-N: title` | EC- |
-| `OPERATIONAL_KNOWLEDGE.md` | `## OL-N: title` | OL- |
-| `PLATFORM_BUGS.md` | `### PB-N: title` | PB- |
-| `patterns/PATTERN_INDEX.md` | Table row with ID | P-P |
-| `patterns/unverified/candidates.md` | Candidate patterns | P-CAT-N etc |
+| `okf/runbooks/field-notes/{build,precision,perf}/` | `ec-N-*` / `pb-N-*` / 现象类 `ol-N-*` 卡（frontmatter `original_id:` 保留旧 ID） | EC- / PB- / OL- |
+| `okf/runbooks/operator-optimization/` | `p-pN-*` / `f-*` / 优化类 `ol-N-*` 卡 | P-P / F-* / OL- |
+| `okf/runbooks/field-notes/inferred/` | `cand-*` 候选卡 | CAND- |
 
 Do NOT modify any file under `${CLAUDE_PLUGIN_ROOT}/kb/` in an installed
-workflow, including KB_INDEX.md, promotion markers, or the files above.
+workflow, including the OKF 卡与索引（`kb/okf/**`）, promotion markers, or the
+cards above.
 
 ### Runtime persistence contract (mandatory; overrides historical examples below)
 
@@ -146,7 +151,9 @@ in the workspace for owner re-distillation.
    one or two named-op references) that anchor the abstraction. **Anchor pieces,
    not full code listings** — do NOT paste a whole kernel.h or pybind.cpp file
    into an OL/P-P body. Record a release-review recommendation for full
-   templates rather than moving them into bundled `patterns/domains/<domain>.md`.
+   templates rather than moving them into bundled OKF cards (`kb/okf/**`);
+   full code templates belong to `kb/okf/reference/porter/patterns/` as a
+   release-review proposal, not a runtime edit.
 
    Layered shape for an OL/P-P entry:
    - **Title** — principle-first. No op-class colon-scoping (`<Op>:`), no
@@ -227,7 +234,8 @@ in the workspace for owner re-distillation.
                   the generic policy"
                   (then in body: "**Cube-unit instance**: `MatmulApiStaticTiling`
                   wraps `MatmulConfig`. Code template + cube-specific gotchas live in
-                  `patterns/domains/platform_compat.md §P-P68`.")
+                  the p-p68-* card in `kb/okf/runbooks/operator-optimization/`
+                  plus its code template in `kb/okf/reference/porter/patterns/`.")
        - Title contains a specific op-name (`Cat`, `BatchMatmul`, `SwigluQuant`, etc.)
          in a way that scopes the lesson to that op — REJECT. (Containing the word in
          a general sentence is fine — e.g. "Algorithm selection: when Sort vs Reduce
@@ -237,7 +245,7 @@ in the workspace for owner re-distillation.
      anti-pattern abstractly; body has the principle in prose plus small concrete
      pieces (snippets/signatures/named-op evidence) that pin it down. Full code
      template placement is a release-review proposal for
-     `patterns/domains/<domain>.md`, not a runtime edit.
+     `kb/okf/reference/porter/patterns/`, not a runtime edit.
 
      E.g.:
        Original case (op#X surfaced this): "Cat V2 fixed alignment bug by overlapping tail write"
@@ -253,9 +261,10 @@ in the workspace for owner re-distillation.
 
    - **Patterns (P-)**: MUST be general — describe the technique, not the specific op.
      Same reject pattern as OL applies. A release review may place op-specific
-     code templates in `patterns/domains/<domain>.md`; runtime Mode 1 only
+     code templates in `kb/okf/reference/porter/patterns/`; runtime Mode 1 only
      records that proposal. Op-specific
-     entries in the top-level `patterns/PATTERN_INDEX.md` are NOT allowed.
+     cards in `kb/okf/runbooks/operator-optimization/` (`p-pN-*` / `f-*`) are
+     NOT allowed.
 
      Example to reject:
        BAD:  "P-PN: For torch.cat on fp16 [4096,8192] dim=1, use Adds(dst,src,0.0f)"
@@ -266,7 +275,7 @@ in the workspace for owner re-distillation.
      1. Rewrite the title to lead with the principle (the rule, technique, or
         anti-pattern), not the op class.
      2. Propose moving full code templates / extensive tiling field maps /
-        4-corner-lattice tables to `patterns/domains/<domain>.md` in the
+        4-corner-lattice tables to `kb/okf/reference/porter/patterns/` in the
         workspace audit; do not perform the bundled-file move.
      3. Keep the op-specific instance under `## Evidence` (op name + date + concrete
         result) AND embed a small 3–5 line snippet in the body as concrete anchor —
@@ -493,7 +502,7 @@ in the workspace for owner re-distillation.
    for obvious duplicates.
 4.5. **Index sync**.
 
-   Do not edit bundled `KB_INDEX.md`. `CannbotCProvider.reindex()` rebuilds the
+   Do not edit bundled OKF 索引或卡片（`kb/okf/**`）。 `CannbotCProvider.reindex()` rebuilds the
    user-local `INDEX.md` after each admitted c-tier entry.
 
 5. **Do not drop `.kb_merged`.** The orchestrator writes a `tier=customer`
@@ -682,7 +691,7 @@ For each conflict found:
 
 For each entry with a testable claim, verify against current A5:
 
-**ERROR_CORRECTIONS** — reproduce the compile error:
+**ec-\* cards** (`kb/okf/runbooks/field-notes/`, compile-error class) — reproduce the compile error:
 ```
 1. Write minimal .cpp triggering the error pattern described in the entry
 2. Deploy to A5: write to current_task/kernel/, build via build_ascendc.py
@@ -692,37 +701,41 @@ For each entry with a testable claim, verify against current A5:
    - Error no longer occurs → mark POSSIBLY_FIXED, flag for user
 ```
 
-**PLATFORM_BUGS** — reproduce the bug:
+**pb-\* cards** (`kb/okf/runbooks/field-notes/`, platform-bug class) — reproduce the bug:
 ```
 1. If repro test exists (tests/repro/): run on A5
 2. If no repro but symptom is described: try to reproduce
 3. Results: VALIDATED / POSSIBLY_FIXED / UNTESTABLE
 ```
 
-**OPERATIONAL_KNOWLEDGE** — check references still exist:
+**ol-\* cards** (`kb/okf/runbooks/field-notes/` + `kb/okf/runbooks/operator-optimization/`, operational-knowledge class) — check references still exist:
 ```
 1. If entry references a file/function: grep/glob for it
 2. If entry references a tool/process: check it exists
 3. Results: VALIDATED / REFERENCE_MOVED / OBSOLETE
 ```
 
-**PATTERN_INDEX** — check domain files present:
+**p-\* / f-\* cards** (`kb/okf/runbooks/operator-optimization/`) — check referenced templates present:
 ```
-1. For each pattern: check referenced domain file exists
+1. For each card: check any referenced `kb/okf/reference/porter/patterns/` template still exists
 2. Check trigger conditions still match current codebase
+3. After any release-side card change, re-validate with
+   `engine/src/scripts/okf/okf_kb.sh build` + `engine/src/scripts/okf/okf_kb.sh lint`
 ```
 
 ### Step 4: Candidate Promotion Audit
 
 **Required output**: Add promotion decisions to `workspace/kb_scan/validation_results.md`.
 
-Check `patterns/unverified/candidates.md`:
+Check `cand-*` candidate cards (`kb/okf/runbooks/field-notes/inferred/`) and
+user-kb (c-tier) intake candidates:
 - **Recommend promotion** if ALL of:
   - Validated on **2+ operators** with independent evidence (different ops, not same session)
-  - Does NOT duplicate an existing pattern in PATTERN_INDEX (check by trigger + technique)
+  - Does NOT duplicate an existing card in `kb/okf/runbooks/**` (check by trigger + technique)
   - Validation evidence includes actual test data (not just "should work")
-  → Propose a release-owned move to `patterns/domains/*.md` and a future
-  PATTERN_INDEX ID; do not perform either edit
+  → Propose a release-owned conversion into a new OKF card under
+  `kb/okf/runbooks/**` with the next available ID (re-validate at release time
+  with `engine/src/scripts/okf/okf_kb.sh build` + `lint`); do not perform the edit
 - **Recommend keeping as candidate** if only 1 op validated
 - **Recommend archive** if contradicted by evidence or superseded by a verified pattern
 
@@ -833,7 +846,7 @@ may only inspect pending candidate metadata, apply the C36–C40 review criteria
 review), and write a recommendation report under the active workspace.
 
 It MUST NOT rename or move bundled candidate blocks, allocate canonical IDs,
-edit canonical entries or KB_INDEX.md, create promotion/block markers, invoke a
+edit canonical OKF 卡或索引（`kb/okf/**`）, create promotion/block markers, invoke a
 release promotion implementation, or create `.kb_merged`. Operator finalize
 never calls this mode. A release maintainer may use the report in a separate,
 reviewed release process outside the installed generation workflow.
@@ -854,7 +867,7 @@ plugin** (not WebFetch) via `mcp__plugin_playwright_playwright__browser_navigate
 
 Before scraping fresh from hiascend.com, consult these sources in order:
 
-1. **Packaged KB** — search `${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/` and `${CLAUDE_PLUGIN_ROOT}/kb/okf/` first.
+1. **Packaged KB** — search `${CLAUDE_PLUGIN_ROOT}/kb/okf/`（reference + runbooks，可经 `engine/src/scripts/okf/okf_kb.sh search --query`）first.
 2. **Public hiascend.com CANN documentation (browser-rendered)** — URL slugs:
    - CANN 9.0.0 commercial: `https://www.hiascend.com/document/detail/zh/canncommercial/900/API/ascendcopapi/atlasascendc_api_07_XXXX.html`
    - CANN 9.1.0-beta.1 community (newer, has SIMT API): replace `canncommercial/900` → `CANNCommunityEdition/910beta1`
@@ -1017,7 +1030,7 @@ Knowledge Base Learn Report
 ```
 → Mode 4: scrape official AscendC best practices, extract patterns, check for A5 reg-based opportunities. Run when KB coverage feels insufficient, or after major CANN version updates.
 
-`--hw-spec` sub-flag: targets the **hardware architecture spec pages** instead of best-practices pages. Scrapes the architecture version page for the current target chip (default: 351x) and stages sourced c-tier findings plus a workspace audit; it never updates bundled `hardware/target/ascend950pr.md`. Key URLs:
+`--hw-spec` sub-flag: targets the **hardware architecture spec pages** instead of best-practices pages. Scrapes the architecture version page for the current target chip (default: 351x) and stages sourced c-tier findings plus a workspace audit; it never updates bundled `kb/okf/runbooks/hardware/target-ascend950pr.md`. Key URLs:
 - 351x arch spec: `https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/opdevg/Ascendcopdevg/atlas_ascendc_10_00065.html`
 - Best practices (default): `https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/opdevg/Ascendcopdevg/atlas_ascendc_best_practices_10_00010.html`
 

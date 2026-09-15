@@ -68,7 +68,7 @@ def _port_a3_cube_class_mix_block(workspace: Optional[Path]) -> str:
         "block ship (PR #316). You MUST emit a MIX (cube + vector) kernel.\n"
         "\n"
         "**Concrete MIX scaffold** (the worked-example pattern lives in KB "
-        "`kb/target/ascendc/patterns/domains/cube_vector_fusion.md` — "
+        "`kb/okf/reference/porter/patterns/cube_vector_fusion.md` — "
         "read it; any prior-archive observation must be provenance-logged, advisory only, "
         "and independently reconstructed and reverified):\n"
         "- **File split**: `<op>_cube.h` (cube class) + `<op>_vec.h` (vec class) + "
@@ -148,7 +148,7 @@ def _port_a3_complete_deliverable_block() -> str:
         "customer with no CANN source can't reproduce it; that is the anti-copy red line).\n"
         "Recipe (op-CLASS-general — the CARRY / CARRY+PATCH / REPLACE-HOOK rule applies\n"
         "to every port_a3 op; only the op-specific *specifics* differ):\n"
-        "`kb/target/ascendc/patterns/domains/fa_class/templates/op_host/`\n"
+        "`templates/fa_class/op_host/`\n"
         "→ `GE_HOST_TRANSFORM_RECIPE.md`. The three transform classes (derive from YOUR\n"
         "op's A3 (arch22) op_host source at `<port_source>/op_host/`, which IS available):\n"
         "1. **`<op>_infershape.cpp` = CARRY** — if the A3 infershape has 0 arch refs\n"
@@ -195,7 +195,7 @@ def _migration_level_block(op: str, workspace: Path) -> str:
     Per Zheng 2026-05-16: plugin form, no if-else. Heuristic dispatch lives
     in migration_level.py; this block just consumes the LevelDecision and
     formats it as worker-facing KB ref list. Migration KB content lives in
-    kb/target/ascendc/migration/ (imported from PR #103
+    kb/okf/reference/{asc-devkit-vendored,porter}/ (imported from PR #103
     `ascendc-operator-A5-migration` skill — P113).
     """
     import json as _json
@@ -223,9 +223,9 @@ def _migration_level_block(op: str, workspace: Path) -> str:
 
     d = decide_migration_level(op_meta)
 
-    guides_md = "\n".join(f"  - `kb/target/ascendc/migration/{g}`"
+    guides_md = "\n".join(f"  - `kb/okf/reference/{g}`"
                          for g in d.guides)
-    subdirs_md = "\n".join(f"  - `kb/target/ascendc/migration/{s}` (whole subdir)"
+    subdirs_md = "\n".join(f"  - `kb/okf/reference/{s}` (whole subdir)"
                           for s in d.extra_subdirs) if d.extra_subdirs else "  (none)"
     escalation = (
         "\n\n**⚠ ESCALATION SIGNAL**: this op matched an L4 heuristic. "
@@ -361,7 +361,7 @@ A.1.4. **MANDATORY architecture-class classification** (NEW 2026-05-25, OL-188, 
   **Decision** — two-signal combine:
 
   1. **Op-family signal**: check if `<port_source>` path matches any
-     cube-required family in `kb/target/ascendc/cann_classification/cube_required_ops.txt`
+     cube-required family in `kb/okf/runbooks/operator-optimization/cube_required_ops.txt`
      (109 ops batch-learned from CANN 2026-05-25). Families:
      - `ops-transformer/attention` (30 ops) — FA / MLA / sparse / quant
      - `ops-nn/matmul` (14) — batch_mat_mul_v3 / quant_batch_matmul_v3 / etc.

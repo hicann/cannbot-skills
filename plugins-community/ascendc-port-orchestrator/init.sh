@@ -177,7 +177,7 @@ INCLUDED_AGENT_PATTERN="aog-*"
 # OKF content.  Phase O0 refuses to spawn workers without them, so report a
 # malformed marketplace payload during installation instead of claiming a
 # healthy install that can only fail on first use.
-REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md KB_INDEX.md target/ascendc/OPERATIONAL_KNOWLEDGE.md"
+REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md okf/index.md"
 
 LEVEL="project"; TOOL="claude"; STRICT_DEPS=0
 for arg in "${@:-}"; do

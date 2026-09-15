@@ -551,8 +551,9 @@ def _check_pp88_compliance(workspace: Path) -> Optional[str]:
     if rep.verdict == "FAIL":
         return (
             "P0abi P-P88 compliance gate: " + rep.rationale +
-            "  Reference: kb/target/ascendc/patterns/PATTERN_INDEX.md "
-            "P-P88 (sigmoid-form remediation, MANDATORY-on-match for "
+            "  Reference: kb/okf/runbooks/field-notes/build/"
+            "pb-26-ascendc-tanh-fp32-primitive-bimodal-precision-floo.md "
+            "(P-P88 legacy card: sigmoid-form remediation, MANDATORY-on-match for "
             "transcendental ops using AscendC::Tanh / Sigmoid). Either "
             "(a) rewrite the risky primitive call to sigmoid-form (Exp + "
             "Reciprocal + Add per vendor-source evidence in P-P88) and "

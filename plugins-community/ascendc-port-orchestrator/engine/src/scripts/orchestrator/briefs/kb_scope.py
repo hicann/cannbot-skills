@@ -28,11 +28,10 @@ applies to the target it is briefing for, and the answer is read from the KB
 entry itself. Adding a SoC bound to a KB entry is then enough to bound every
 composer that cites it — no composer edit, no per-entry `if PB-34` patch.
 
-Reused, NOT reimplemented — the SoC parsing comes from `kb_index_audit`
-(`_applies_to_socs` / `_soc_family` / `_ANY_ENTRY_HEAD_RE` / `_APPLIES_FIELD_RE`).
-That module's hard-failing `confirmed_on ⊆ applies_to` lint is the OTHER half of
-this feature (it is what keeps an entry's declared scope honest, so honoring the
-scope is safe), and it already solved the two hard parts:
+SoC 解析逻辑（`_soc_family` / `_applies_to_socs` / `_ANY_ENTRY_HEAD_RE` /
+`_APPLIES_FIELD_RE`）**内联自 `src/scripts/kb_index_audit.py`**（OKF-only
+迁移，2026-08-31 摘掉对该模块的懒加载依赖——该模块随 legacy KB 一起退役；
+实现原样拷贝）。它解决了两个难点：
 
   - **arch-family granularity** — the KB spells two families ~20 ways
     (`Ascend910_9382` / `Ascend910C` / `V220`; `Ascend950PR` / `Ascend950PR_9579`
@@ -41,34 +40,31 @@ scope is safe), and it already solved the two hard parts:
   - **identifying-position reads** — a naive prose scan red-flags `V220→A5 port`
     DIRECTIONS and cross-ref IDs.
 
-A second, subtly-different parser here would be its own rot: the two would drift
-and the lint would stop describing what the composers actually do.
+条目来源：OKF 卡片（`kb/okf/**`，frontmatter `original_id: PB-34` +
+`description:`/正文里的 `applies_to: soc=`）。OKF-only 迁移（2026-08-31）
+前还覆盖 legacy `kb/target/**` 的 `## PB-34` 标题条目，该树已删除。
+读不到时 FAIL-OPEN。
 
 FAIL-OPEN by construction (`kb_applies_to_target`): an injection is suppressed
 ONLY on a positive, machine-readable exclusion — the entry declares a `soc=`
 scope, the target's family is known, and the family is not in the scope.
 Unknown entry / unparseable scope / `soc=all` / unknown target all keep the
 injection, so this can only ever narrow an over-block, never create a new
-under-block. The `applies_to`-vs-`confirmed_on` contradiction that PB-35 carried
-until 2026-07-17 (declared V220-only, CONFIRMED on A5) is the shape that WOULD
-turn this into an under-block; `kb_index_audit.check_soc_scope` now fails hard on
-that shape, which is why honoring `applies_to` is safe to do mechanically.
+under-block.
 """
 from __future__ import annotations
 import logging
 
 import re
-import sys
 from pathlib import Path
 from typing import Optional
 
 from kb_paths import kb_root
 
 _HERE = Path(__file__).resolve()
-_PROJECT_ROOT = _HERE.parent.parent.parent.parent.parent  # → repo root
 
 # Target name (env.target / `TARGET=`) → coarse SoC arch family, the granularity
-# `kb_index_audit._soc_family` normalizes to. Mirrors op_taxonomy.TARGET_HW_SPEC_MAP
+# `_soc_family` normalizes to. Mirrors op_taxonomy.TARGET_HW_SPEC_MAP
 # (a5 → ascend950pr = V351 / arch35; a3 → ascend910c and a2 → ascend910b, both
 # V220 single-die), which is the established target→hardware mapping here.
 SOC_FAMILY_BY_TARGET: dict[str, str] = {
@@ -81,23 +77,52 @@ SOC_FAMILY_BY_TARGET: dict[str, str] = {
 # carry their own `applies_to:` line but no EC/PB/OL-style entry id.
 _SECTION_HEAD_RE = re.compile(r"^#{2,4}\s+(\d+)\.\s")
 
+# ── Inlined SoC parsing (copied from kb_index_audit, 2026-08-31; see module note) ──
 
-def _kb_index_audit():
-    """Import `kb_index_audit` (lives in src/scripts/, not under orchestrator/).
+# Any SoC-naming token: Ascend9xx family names, or the V220/V351 arch shorthands.
+_SOC_TOKEN_RE = re.compile(r"\b(Ascend9\d{2}[A-Za-z0-9_]*|V220|V351)\b")
 
-    Lazy + sys.path-on-demand, matching the established cross-package precedent
-    in `finalize_checks_structural._pp88_gate`. Returns None if unavailable so
-    callers fail OPEN rather than dropping an injection on an importer error.
+_APPLIES_FIELD_RE = re.compile(r"^`?applies_to\s*:\s*(.*?)`?\s*$")
+
+# Entry headings across every supported KB file class (legacy layout).
+_ANY_ENTRY_HEAD_RE = re.compile(
+    r"^#{2,4}\s+((?:EC|PB|OL|P-P|F-P|F-AP|CAND)[-A-Za-z0-9_]*)\b"
+)
+
+# OKF 卡片形态：frontmatter `original_id: PB-34` 携带 legacy 条目 id（卡片没有
+# `## PB-34` 标题）；`applies_to` 常嵌在 `description:` 行内。
+_OKF_ORIGINAL_ID_RE = re.compile(r"^original_id:\s*([A-Za-z0-9_-]+)\s*$")
+_OKF_DESC_APPLIES_RE = re.compile(r'^description:\s*"?\s*applies_to\s*:\s*(.*?)"?\s*$')
+
+
+def _soc_family(token: str) -> Optional[str]:
+    """Normalize a SoC token to its coarse arch family (`V220` / `V351`)."""
+    t = token.lower()
+    if "950" in t or "v351" in t:
+        return "V351"
+    if "910" in t or "v220" in t:
+        return "V220"
+    return None
+
+
+def _families_in(text: str) -> set[str]:
+    """Every SoC family named anywhere in `text`."""
+    return {f for f in (_soc_family(t) for t in _SOC_TOKEN_RE.findall(text)) if f}
+
+
+def _applies_to_socs(value: str) -> tuple[Optional[set[str]], Optional[str]]:
+    """Parse the `soc=` clause of an applies_to line into a family set.
+
+    Returns `({"*"}, raw)` for `soc=all` / `soc=any` (universal), `(None, None)`
+    when no `soc=` clause or no recognizable SoC token is present (unscoped).
     """
-    try:
-        scripts_dir = _PROJECT_ROOT / "src" / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-        import kb_index_audit as _audit  # type: ignore
-
-        return _audit
-    except Exception:
-        return None
+    m = re.search(r"soc\s*=\s*([^;`]*)", value)
+    if not m:
+        return None, None
+    raw = m.group(1).strip()
+    if re.match(r"^(all|any)\b", raw, re.IGNORECASE):
+        return {"*"}, raw
+    return (_families_in(raw) or None), raw
 
 
 def soc_family_for_target(target: Optional[str]) -> Optional[str]:
@@ -107,22 +132,29 @@ def soc_family_for_target(target: Optional[str]) -> Optional[str]:
     return SOC_FAMILY_BY_TARGET.get(str(target).strip().lower())
 
 
-def _iter_kb_files(audit) -> list[Path]:
-    """Every canonical KB markdown file, across backends."""
+# 条目扫描目录（相对 kb_root）：OKF-only 迁移（2026-08-31）后仅扫 OKF 卡片树；
+# legacy target 树已删除。
+_KB_SCAN_DIRS = ("okf",)
+
+
+def _iter_kb_files() -> list[Path]:
+    """Every canonical KB markdown file (OKF cards and reference docs)."""
+    root = kb_root()
     out: list[Path] = []
-    for kb_dir in audit.KB_DIRS.values():
+    for sub in _KB_SCAN_DIRS:
+        kb_dir = root / sub
         if kb_dir.is_dir():
             out.extend(sorted(kb_dir.rglob("*.md")))
     return out
 
 
-def _applies_line_for(lines: list[str], start: int, end: int, audit):
+def _applies_line_for(lines: list[str], start: int, end: int) -> Optional[set[str]]:
     """First `applies_to:` line inside [start, end) → family set (or None)."""
     for line in lines[start:end]:
-        applies_field_re = getattr(audit, "_APPLIES_FIELD_RE")
-        m = applies_field_re.match(line.strip())
+        s = line.strip()
+        m = _APPLIES_FIELD_RE.match(s) or _OKF_DESC_APPLIES_RE.match(s)
         if m:
-            families, _raw = getattr(audit, "_applies_to_socs")(m.group(1))
+            families, _raw = _applies_to_socs(m.group(1))
             return families
     return None
 
@@ -133,10 +165,7 @@ def kb_entry_soc_families(entry_id: str) -> Optional[set[str]]:
     Returns the family set (`{"V220"}`), `{"*"}` for `soc=all`, or None when the
     entry is not found or declares no recognizable `soc=` scope.
     """
-    audit = _kb_index_audit()
-    if audit is None:
-        return None
-    for path in _iter_kb_files(audit):
+    for path in _iter_kb_files():
         skip_current_item = False
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -147,13 +176,19 @@ def kb_entry_soc_families(entry_id: str) -> Optional[set[str]]:
             skip_current_item = True
         if skip_current_item:
             continue
-        entry_head_re = getattr(audit, "_ANY_ENTRY_HEAD_RE")
-        heads = [i for i, line in enumerate(lines) if entry_head_re.match(line)]
+        # OKF card `original_id: PB-34` frontmatter lines (`_ANY_ENTRY_HEAD_RE`
+        # is retained for pre-migration heading forms inside migrated bodies).
+        heads = [
+            i for i, line in enumerate(lines)
+            if _ANY_ENTRY_HEAD_RE.match(line) or _OKF_ORIGINAL_ID_RE.match(line)
+        ]
         for n, start in enumerate(heads):
-            if entry_head_re.match(lines[start]).group(1) != entry_id:
+            head = lines[start]
+            m = _ANY_ENTRY_HEAD_RE.match(head) or _OKF_ORIGINAL_ID_RE.match(head)
+            if m.group(1) != entry_id:
                 continue
             end = heads[n + 1] if n + 1 < len(heads) else len(lines)
-            return _applies_line_for(lines, start, end, audit)
+            return _applies_line_for(lines, start, end)
     return None
 
 
@@ -166,48 +201,50 @@ def kb_section_soc_families(rel_path: str, section_no: str) -> Optional[set[str]
     handshake an A5 recipe.
 
     Args:
-        rel_path: path under `src/skills/references/`, e.g.
-            `target/ascendc/fa_class/cross_core_sync.md`.
+        rel_path: path under `kb/`, e.g.
+            `okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md`.
         section_no: the section number as written, e.g. `"4"`.
     """
-    audit = _kb_index_audit()
-    if audit is None:
-        return None
     path = kb_root() / rel_path
     if not path.is_file():
         return None
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
+        # KNOWN FAIL-OPEN: the caller reads None as "no declared scope" and keeps the
+        # card. The file exists (checked above), so this is an unreadable or non-UTF-8
+        # card — rare, and narrowing the except at least stops unrelated bugs from being
+        # swallowed into a scope decision.
         return None
     heads = [i for i, l in enumerate(lines) if _SECTION_HEAD_RE.match(l)]
     for n, start in enumerate(heads):
         if _SECTION_HEAD_RE.match(lines[start]).group(1) != section_no:
             continue
         end = heads[n + 1] if n + 1 < len(heads) else len(lines)
-        return _applies_line_for(lines, start, end, audit)
+        return _applies_line_for(lines, start, end)
     return None
 
 
 # Header zone of a domain-template file — where a prominent `applies_to:` lives
-# (frontmatter or a top blockquote). Mirrors kb_index_audit._TEMPLATE_SCOPE_HEAD_LINES.
-_TEMPLATE_HEADER_LINES = 20
+# (frontmatter or a top blockquote). Formerly kb_index_audit._TEMPLATE_SCOPE_HEAD_LINES.
+_TEMPLATE_HEADER_LINES = 20      # body lines scanned, counted AFTER frontmatter
+_FRONTMATTER_MAX_LINES = 60      # cap the closing-`---` search so a stray `---` cannot run away
 
 
 def _resolve_domain_template_path(rel_path: str):
     """Resolve ANY path form the compose path can produce to the on-disk file.
 
-    The brief manifest can name a domain template several ways depending on what
-    the classifier emitted and whether `resolve_legacy_kb_path` normalized it:
-      - `target/ascendc/patterns/domains/X.md`  (legacy-rewritten / canonical)
-      - `patterns/domains/X.md`                 (raw classifier recommendation)
-      - `domains/X.md`                          (bare, un-rewritten)
-      - `src/skills/references/target/ascendc/patterns/domains/X.md` (full/abs)
+    The brief compose path can name a pattern/domain template several ways:
+      - `okf/reference/porter/patterns/X.md`        (OKF canonical)
+      - `patterns/domains/X.md` / `domains/X.md`   (raw classifier recommendation)
+      - `src/skills/references/…/X.md`             (full/abs prefix form)
     A filter that resolved only the canonical form would be inert for the others
-    (wired but never firing — theater one layer deeper). All domain templates
-    live at `target/ascendc/patterns/domains/<name>.md`, so any `…/domains/<name>.md`
-    (or bare `domains/<name>.md`) is resolved by canonical basename. Returns a
-    Path (may not exist) or None if `rel_path` names no domain-template file.
+    (wired but never firing — theater one layer deeper). OKF-only 迁移后，未转卡的
+    patterns 归一到 `kb/okf/reference/porter/patterns/<name>.md`（2026-09-05 目录重组后位于 porter bundle 下）（legacy 的
+    `target/ascendc/patterns/domains/X.md` 形态已随 kb/target 删除）；已转卡（不在
+    reference/patterns 下）或尚未搬迁的条目解析不到文件时返回 None，由调用方
+    FAIL-OPEN（不因文件不存在而硬失败）。Returns a Path (may not exist) or None
+    if `rel_path` names no domain-template file.
     """
     refs = kb_root()
     rel = rel_path.strip()
@@ -217,16 +254,41 @@ def _resolve_domain_template_path(rel_path: str):
     direct = refs / rel
     if direct.is_file():
         return direct
-    m = re.search(r"(?:^|/)domains/([^/]+\.md)$", rel)
+    m = re.search(r"(?:^|/)(?:patterns|domains)/([^/]+\.md)$", rel)
     if m:
-        cand = refs / "target" / "ascendc" / "patterns" / "domains" / m.group(1)
+        cand = refs / "okf" / "reference" / "porter" / "patterns" / m.group(1)
         if cand.is_file():
             return cand
     return None
 
 
+def _header_zone(lines: list[str]) -> list[str]:
+    """The first `_TEMPLATE_HEADER_LINES` lines of BODY, i.e. after any YAML frontmatter.
+
+    WHY the skip (2026-09-05). Making these cards OKF-compliant gave each ~12 lines of
+    frontmatter, which pushes the machine-readable `applies_to: soc=` line further down.
+    A plain `lines[:20]` window then reads past nothing and returns None, and the caller
+    treats None as "no declared scope" — a SILENT fail-open (no lint error, no test
+    failure). Measured over the shipped KB: 161 of 1326 cards parse differently before
+    and after this change, every one of them in that direction.
+
+    Scope of the claim, because the earlier version of this comment overstated it: the
+    one card a composer actually gates today (`fa_class_a3_mix_template.md`, via
+    `kw_brief_fa.py:341`) was NOT broken by the reorg — its tag sits at line 14, six
+    lines inside the old window. So this is hardening against a real and measured
+    fragility, not the repair of an observed mis-delivery.
+    """
+    start = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, min(len(lines), _FRONTMATTER_MAX_LINES)):
+            if lines[i].strip() == "---":
+                start = i + 1
+                break
+    return lines[start:start + _TEMPLATE_HEADER_LINES]
+
+
 def kb_file_soc_families(rel_path: str) -> Optional[set[str]]:
-    """SoC families a whole domain-TEMPLATE file (`patterns/domains/*.md`) is scoped to.
+    """SoC families a whole domain-TEMPLATE file is scoped to.
 
     Reads the file's header-zone `applies_to: soc=` line, tolerating a leading
     blockquote `>` (the FA / GMM template convention keeps the tag inside a top
@@ -237,15 +299,12 @@ def kb_file_soc_families(rel_path: str) -> Optional[set[str]]:
 
     `rel_path` is accepted in ANY of the path forms the compose path can emit
     (see `_resolve_domain_template_path`), NOT only the canonical
-    `target/ascendc/patterns/domains/X.md` — a form-sensitive resolver would make
+    `okf/reference/porter/patterns/X.md` — a form-sensitive resolver would make
     the whole filter inert for the un-normalized forms.
 
     Returns the family set (`{"V351"}`), `{"*"}` for `soc=all`, or None when the
     file is absent or declares no machine-readable header `applies_to: soc=`.
     """
-    audit = _kb_index_audit()
-    if audit is None:
-        return None
     path = _resolve_domain_template_path(rel_path)
     if path is None or not path.is_file():
         return None
@@ -253,14 +312,13 @@ def kb_file_soc_families(rel_path: str) -> Optional[set[str]]:
         lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
         return None
-    for raw in lines[:_TEMPLATE_HEADER_LINES]:
+    for raw in _header_zone(lines):
         s = raw.strip()
         if s.startswith(">"):
             s = s[1:].strip()  # see through a top-of-file blockquote
-        applies_field_re = getattr(audit, "_APPLIES_FIELD_RE")
-        m = applies_field_re.match(s)
+        m = _APPLIES_FIELD_RE.match(s)
         if m:
-            families, _raw = getattr(audit, "_applies_to_socs")(m.group(1))
+            families, _raw = _applies_to_socs(m.group(1))
             return families
     return None
 
@@ -271,8 +329,10 @@ def kb_file_applies_to_target(rel_path: str, target: Optional[str]) -> bool:
     True (inject) unless the template declares a concrete header `soc=` scope,
     the target's family is known, and that family is outside the scope. An
     untagged template, a `soc=all` template, or an unknown target all keep the
-    template — this can only ever narrow an over-delivery (an a5-only template
-    handed to a 220x/a3 worker), never invent a new under-delivery.
+    template — this can only ever narrow an over-delivery, never invent a new
+    under-delivery. (The direction depends on the card: the only template a composer
+    gates today, `fa_class_a3_mix_template.md`, is a3-only, so here the over-delivery
+    being narrowed is an a3 template reaching an a5 worker.)
     """
     return applies_to_target(kb_file_soc_families(rel_path), target)
 

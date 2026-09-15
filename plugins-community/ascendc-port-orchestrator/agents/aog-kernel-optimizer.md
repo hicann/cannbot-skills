@@ -58,7 +58,7 @@ Orchestrator passes `DET_POLICY ∈ {required, best_effort, n/a}` + `DET_CONSTRA
 - `DET_POLICY=best_effort` → `K=moderate`
 - `DET_POLICY=n/a` → `K=0` (skip det check entirely)
 
-**Read** `${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/determinism.md` before proposing changes if `DET_POLICY != n/a`. Perf optimizations commonly risk breaking determinism (atomicAdd replacing sequential reduction, multi-core merge, queue depth>1, concurrent scatter). P-P61 / A-P61 catalog guides which classes of change are safe.
+**Load determinism cards** before proposing changes if `DET_POLICY != n/a` — determinism 域已卡片化：`grep -rln "determinism\|P-P61\|A-P61" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`（如 `p-p61-determinism-preserving-patterns` 卡）。Perf optimizations commonly risk breaking determinism (atomicAdd replacing sequential reduction, multi-core merge, queue depth>1, concurrent scatter). P-P61 / A-P61 catalog guides which classes of change are safe.
 
 ## Anti-overfitting rule (OL-85, CRITICAL)
 
@@ -73,7 +73,7 @@ See OL-85 for full rule. Orchestrator anti-cheat-scans kernel diffs.
 
 ## Workflow
 
-1. Run msprof: see `${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/MSPROF_AGENT_GUIDE.md`.
+1. Run msprof: see `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/toolchain/msprof_agent_guide.md`.
    Identify dominant pipeline (MTE2 / VEC / MTE3 / S). Record baseline metrics.
    **MFU absolute-ceiling signal (V3.6, 2026-07-01 — now MECHANICAL, not opt-in)**:
    `workspace/{op}/verification.json` carries an auto-injected **`mfu_ceiling`** block
@@ -186,20 +186,22 @@ precision status = PASS.
 ## KB Manifest — symptom-keyed loading (V3.7.10, 2026-05-03)
 
 At Iter 0, after running msprof on the current kernel, identify the dominant
-symptom from `KB_INDEX.md §By Symptom` and add the listed files to your
+symptom and query OKF by symptom keywords
+(`engine/src/scripts/okf/okf_kb.sh search --query "<symptom> <target>"` 或直接
+grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`), and add the matched cards to your
 `optimization_log.md` `## KB Manifest LOADED` block. Most relevant for
 incremental tuning:
 
-- **`aiv_scl_ratio > 0.3` AND `target=a5`** → load `OPERATIONAL_KNOWLEDGE.md §OL-54` (reg-based SIMD VERIFIED on A5) + `patterns/unverified/candidates.md §P-REG-1` + `hardware/target/ascend950pr.md §Reg-based vs Mem-based SIMD`. **The reg-based path is the A5-specific lever for scalar-pipe-bound kernels** — Mem-based scalar GetValue/SetValue chains can be replaced with `Reg::Compare + Reg::Select` keeping intermediates in registers.
-- **fused-op merge bottleneck** → load `ascend950pr.md §MrgSort` + `sort.md §P-P43` + `OL-54`
-- **bf16 perf differs from fp16/fp32** → load `ascend950pr.md §dtype matrix` + `precision.md` + `OL-65`
+- **`aiv_scl_ratio > 0.3` AND `target=a5`** → grep `Reg-based\|Reg::Select\|regbase` `kb/okf/runbooks/`（reg-based SIMD 内容已卡片化，集中在 `kb/okf/runbooks/hardware/target-ascend950pr.md` §Reg-based vs Mem-based 及相关 ol-*/cand-* 卡）+ `kb/okf/runbooks/hardware/target-ascend950pr.md §Reg-based vs Mem-based SIMD`. **The reg-based path is the A5-specific lever for scalar-pipe-bound kernels** — Mem-based scalar GetValue/SetValue chains can be replaced with `Reg::Compare + Reg::Select` keeping intermediates in registers.
+- **fused-op merge bottleneck** → load `ascend950pr.md §MrgSort` + sort 相关卡（grep `P-P43\|sort` `kb/okf/runbooks/`，如 `p-p43-sort-algorithm-selection-decision-tree`）+ reg-based 卡
+- **bf16 perf differs from fp16/fp32** → load `ascend950pr.md §dtype matrix` + precision 相关卡（grep `precision\|bf16` `kb/okf/runbooks/`，含原 OL-65 对应的 `ol-65-fp16-cast-fp32-only-on-precision-fail` 卡）
 
 ## Vendor-strategy researcher escalation — V3.7.11 (2026-05-03)
 
 Before writing `optimization_directive.md` (Outcome B), ask: **"Do I have a concrete algorithmic-strategy hypothesis for why the vendor reference is faster?"**
 
 - If `verification.json.performance.median_ratio >= 0.5`: directive can proceed without researcher
-- If perf < 0.5× vendor AND your `optimization_log.md` doesn't cite a vendor-strategy hypothesis: **you MUST recommend `@aog-researcher` BEFORE writing a Kind-2 directive** — researcher's bounded structural search (msprof symbol decomposition, public adv_api header grep, hiascend.com docs, KB §By Symptom row "vendor reference perf is N× faster") produces `cann_strategy_inference.md` which informs whether the directive should target a different algorithm class
+- If perf < 0.5× vendor AND your `optimization_log.md` doesn't cite a vendor-strategy hypothesis: **you MUST recommend `@aog-researcher` BEFORE writing a Kind-2 directive** — researcher's bounded structural search (msprof symbol decomposition, public adv_api header grep, hiascend.com docs, OKF 症状检索 "vendor reference perf is N× faster") produces `cann_strategy_inference.md` which informs whether the directive should target a different algorithm class
 - "Algorithmic-strategy citation" = *"vendor uses X (cited evidence)"* — NOT *"vendor is faster because it's vec-bound"* (symptom not strategy)
 
 This was added because op#9 (2026-05-03) had ZERO aog-researcher spawns across 24h + 8 agent iterations even though "why is CANN 3.35× faster" was the load-bearing unanswered question.
@@ -282,7 +284,7 @@ Mirrors the aog-kernel-worker self-challenge contract, specialized for perf opti
 1. **Broaden KB search — don't stay on brief-listed domain file only**:
    ```bash
    # Symptom → KB grep
-   grep -rn "MTE2\|mte2_ratio\|bandwidth" ${CLAUDE_PLUGIN_ROOT}/kb/target/ascendc/patterns/domains/ | head -10
+   grep -rn "MTE2\|mte2_ratio\|bandwidth" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/ | head -10
    grep -rn "VEC bound\|vec_ratio" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
    ```
 2. **Scan other DONE ops that were optimized against the same bottleneck**:

@@ -6,6 +6,7 @@ source_family: curated
 title: "Reduction-tree fail-floor invariant — swapping per-stage reduction shape only moves which cases fail, not the total"
 description: "When the reference does cross-row aggregation on-NPU and the kernel decomposes it as a 2-stage SIMD reduction, swapping the per-stage shape (linear/tree/Kahan) shifts which cases fail MARE, not the total fail count."
 phenomenon: precision_issue
+paradigm: ascendc
 signal:
   - "Kernel writes Y = f(X).sum(dim=...) (fp32 many-element accumulation); reference is Model.forward returning torch_npu.<op> whose backend evaluates the same reduction on-NPU; verifier metric is MARE with threshold ~1e-3"
 confidence: single_run

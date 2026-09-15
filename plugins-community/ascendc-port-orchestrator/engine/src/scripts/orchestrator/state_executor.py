@@ -404,6 +404,13 @@ DEVICE_SIGNATURE_PARK_THRESHOLD = 2
 # candidate-class escalation ("改不动=卡死"): same candidate tree + same
 # per-case failure signature for this many O5 rounds → await_user_decision.
 CANDIDATE_CASE_PARK_THRESHOLD = 3
+# Tree-agnostic zero-progress parking (2026-09-01, A3→A5 remeasure review):
+# the candidate-case counter above is keyed on (tree, case signature), so a
+# worker that re-authors every round resets it even when the METRICS never
+# move (churn non-convergence).  This counter is keyed on the failing-case-set
+# fingerprint only: N consecutive O5 candidate MISMATCH rounds with an
+# unchanged failing set AND no tier1_pass net growth → await_user_decision.
+ZERO_PROGRESS_PARK_THRESHOLD = 3
 
 _SAME_SIGNATURE_CLASSES = frozenset({"engine", "infra", "device"})
 
@@ -558,6 +565,54 @@ def clear_candidate_case_state(workspace: Path) -> None:
     state = load_same_signature_state(workspace)
     if "candidate_case" in state:
         state.pop("candidate_case", None)
+        _save_same_signature_state(workspace, state)
+
+
+def record_zero_progress_round(
+    workspace: Path, failing_case_indices: list, tier1_pass: Optional[int],
+) -> dict:
+    """Tree-agnostic zero-progress counter (churn guard).
+
+    Keyed on the SORTED failing-case-index set only — the candidate tree
+    digest is deliberately excluded, so a worker that re-authors every round
+    without moving the metrics still accumulates.  A round extends the chain
+    only when the failing set is identical to the previous round's AND the
+    tier1 pass count shows no net growth (an unknown count fails closed as
+    no-growth); any pass growth or failing-set change restarts the chain at
+    1 with the current round as anchor.  engine/infra-class failures never
+    reach this function (they feed the same-signature counter instead), so
+    repair-reset re-entries neither increment nor reset this chain.
+    """
+    state = load_same_signature_state(workspace)
+    failing = sorted(str(idx) for idx in failing_case_indices)
+    fingerprint = hashlib.sha256("\x1f".join(failing).encode("utf-8")).hexdigest()
+    previous = state.get("zero_progress")
+    count = 1
+    if isinstance(previous, dict) and previous.get("case_set_fingerprint") == fingerprint:
+        growth: Optional[int] = None
+        prev_pass = previous.get("last_tier1_pass")
+        if isinstance(prev_pass, int) and isinstance(tier1_pass, int):
+            growth = tier1_pass - prev_pass
+        if growth is None or growth <= 0:
+            count = int(previous.get("count", 0)) + 1
+    entry = {
+        "case_set_fingerprint": fingerprint,
+        "failing_cases": failing,
+        "count": count,
+        "last_tier1_pass": tier1_pass,
+        "last_ts": time.time(),
+    }
+    state["schema"] = "aog.same_signature_failures/v1"
+    state["zero_progress"] = entry
+    _save_same_signature_state(workspace, state)
+    return entry
+
+
+def clear_zero_progress_state(workspace: Path) -> None:
+    """Break the zero-progress chain (a successful O5 is progress by definition)."""
+    state = load_same_signature_state(workspace)
+    if "zero_progress" in state:
+        state.pop("zero_progress", None)
         _save_same_signature_state(workspace, state)
 
 

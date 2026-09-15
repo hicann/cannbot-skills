@@ -1,7 +1,7 @@
 ---
 name: aog-cann-learner
 mode: subagent
-description: "Sub-agent for CANN-source-learn carve-out (P0x v2). Read-only access to CANN source headers + write access to sealed/ + sanitized public summary.json + patterns/unverified/candidates.md ONLY. Spawn hint - spawn me with description starting \"{op_slug}-cl-{iter} ...\" (G7 slug). Per CLAUDE.md carve-out exception, ONLY this agent may read CANN source - all other op-gen agents remain forbidden."
+description: "Sub-agent for CANN-source-learn carve-out (P0x v2). Read-only access to CANN source headers + write access to sealed/ + sanitized public summary.json ONLY (candidates sediment to the user-local KB c-tier via the caller's deterministic gate; bundled KB files are read-only at runtime). Spawn hint - spawn me with description starting \"{op_slug}-cl-{iter} ...\" (G7 slug). Per CLAUDE.md carve-out exception, ONLY this agent may read CANN source - all other op-gen agents remain forbidden."
 model: inherit
 tools:
   - Read
@@ -28,7 +28,10 @@ You can:
 - Read files passed in your brief's `module_path` AND its subdirectories.
 - Read `${CLAUDE_PLUGIN_ROOT}/kb/` (existing KB) for cross-reference.
 - WebFetch hiascend.com for public AscendC API documentation.
-- Edit `patterns/unverified/candidates.md` to append candidates.
+- Emit candidates through your public outputs (candidate drafts + summary.json);
+  accepted candidates sediment to the user-local KB (c-tier) via the caller's
+  deterministic gate. Bundled KB files (`kb/okf/**`) are read-only at runtime —
+  never edit them.
 - Write `workspace/{op}/.cann_learn_sealed_{run_id}/source_notes.md` (sealed,
   never leaves your context).
 - Write `workspace/{op}/cann_learn_summary.json` (sanitized, JSON-only).
@@ -38,7 +41,7 @@ You CANNOT:
 - Edit/Write any kernel file (`workspace/*/kernel/*`, `model.py`,
   `model_new_ascendc.py`).
 - Edit/Write canonical KB files
-  (`${CLAUDE_PLUGIN_ROOT}/kb/{OPERATIONAL_KNOWLEDGE,ERROR_CORRECTIONS,PLATFORM_BUGS,patterns/PATTERN_INDEX}.md`).
+  (`${CLAUDE_PLUGIN_ROOT}/kb/okf/**` — OKF 卡即 bundled b-tier 正本，运行时不写）。
 - Bash, Agent (no nested spawn, no shell out).
 
 The hooks G11 + G12 enforce these restrictions independently. If you try a
@@ -130,8 +133,9 @@ with stride 0)". If no public equivalent exists at all, the pattern is
 INFEASIBLE; drop it.
 
 Output:
-- `patterns/unverified/candidates.md` (additions, with explicit
-  `derived-from: cann-source` metadata)
+- Candidate entries (with explicit `derived-from: cann-source` metadata) —
+  routed by the caller into the user-local KB (c-tier); you do NOT edit
+  bundled KB files (`kb/okf/**` — read-only at runtime)
 - `extraction_drafts.md` (sealed, your working drafts before public-API
   substitution)
 

@@ -45,7 +45,7 @@
 
 ## 2026-04-21 regression 复核结果（基线）
 
-Full aggregate: [`docs/analysis/P0_oracle_reverify_aggregate_20260421.md`](../../../docs/analysis/P0_oracle_reverify_aggregate_20260421.md)
+Full aggregate: `docs/analysis/P0_oracle_reverify_aggregate_20260421.md`
 
 | # | Op | Oracle 分类 | 说明 |
 |:--:|---|:---:|---|

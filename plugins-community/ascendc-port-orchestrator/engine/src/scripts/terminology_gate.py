@@ -29,7 +29,8 @@ Per the vendor docs on disk
     write names someone else's chip. "V220" is at best a phantom fourth vocabulary.
 
 The error is self-reproducing: it lives in files re-injected into every agent every
-session (CLAUDE.md, KB_INDEX.md), while the owner's chat corrections evaporate at each
+session (CLAUDE.md; formerly also the legacy KB_INDEX.md, removed in the OKF-only
+migration), while the owner's chat corrections evaporate at each
 compaction. This gate stops the BLEEDING — it fails a commit that ADDS a new bare
 `V220`/`V300`. It deliberately does NOT police the ~3.7k pre-existing sites (a
 whole-tree gate would fail every commit and get disabled within a day); those are a

@@ -49,8 +49,8 @@ def _seed_workspace(tmp_path: Path, op: str = "TestOp") -> dict:
 
     kb_root = tmp_path / "kb"
     kb_root.mkdir()
-    (kb_root / "patterns" / "unverified").mkdir(parents=True)
-    (kb_root / "patterns" / "unverified" / "candidates.md").write_text(
+    (kb_root / "reference" / "patterns" / "unverified").mkdir(parents=True)
+    (kb_root / "reference" / "patterns" / "unverified" / "candidates.md").write_text(
         "# candidates\n\n## P-CAND-1\nexisting candidate\n"
     )
 
@@ -101,7 +101,7 @@ def test_build_brief_includes_required_sections(tmp_path):
 
 def test_list_unverified_candidates_excludes_markers_and_appendable(tmp_path):
     kb_root = tmp_path / "kb"
-    p = kb_root / "patterns" / "unverified"
+    p = kb_root / "reference" / "patterns" / "unverified"
     p.mkdir(parents=True)
     (p / "candidates.md").write_text("appendable")
     (p / "extra_candidate.md").write_text("# extra")
@@ -157,7 +157,7 @@ def test_spawn_returns_mode5_contract_dict(tmp_path):
             "metadata_fix_proposals": 0,
         }))
         # Append to candidates.md
-        candidates_md = args["kb_root"] / "patterns" / "unverified" / "candidates.md"
+        candidates_md = args["kb_root"] / "reference" / "patterns" / "unverified" / "candidates.md"
         candidates_md.write_text(
             candidates_md.read_text() + "\n## P-CAND-2 (new)\nfresh from cann learn\n"
         )

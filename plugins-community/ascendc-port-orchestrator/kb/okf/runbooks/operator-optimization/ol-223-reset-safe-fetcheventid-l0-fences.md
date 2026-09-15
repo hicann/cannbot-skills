@@ -13,6 +13,9 @@ tags: [sync-correctness, optimization, ol-223, fetcheventid, reset, user-cube, m
 created_at: 2026-07-12T16:00:00Z
 updated_at: 2026-07-12T16:00:00Z
 ---
+`applies_to: soc=Ascend950PR (V351/A5); cann=9.1.T500; bisheng=n/a; arch=arch35; op_class=multi_stage_mix_aic_aiv_user_cube`
+`unverified_on: soc=Ascend910_V220 (on V220 PB-35's evidence shows even FetchEventID-allocated intra-AIC fences still hung — the V220 intra-AIC user-cube MIX case remains open; this OL is the V351/arch35 resolution)`
+
 ## 优化点 / 选型
 
 **Applies to**: Ascend950PR (V351/A5, arch35) / CANN 9.1.T500 / multi-stage MIX AIC+AIV user-cube. Verified on Ascend950PR_957b. On V220 the intra-AIC user-cube MIX case remains open (PB-35 shows even FetchEventID-allocated intra-AIC fences still hung there); this OL is the V351/arch35 resolution.

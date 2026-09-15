@@ -58,7 +58,7 @@ def test_blocked_when_critical_missing(tmp_path, monkeypatch):
     rep = phase_o0.check_hook_integrity()
     assert rep.verdict == "BLOCKED"
     # Should list missing files
-    assert any("KB_INDEX.md" in f or "ANTI_PRESSURE_PROTOCOLS.md" in f
+    assert any("okf/index.md" in f or "ANTI_PRESSURE_PROTOCOLS.md" in f
                or "workflow_critic.py" in f for f in rep.missing_files)
 
 

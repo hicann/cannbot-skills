@@ -18,16 +18,15 @@ It now lives at ``<plugin_root>/kb/`` (sibling to ``engine/``, ``agents/``,
 for modules that cannot cleanly import this helper), so the path stays correct
 regardless of the current working directory.
 
-Layout reminder::
+Layout reminder (OKF-only, 2026-08-31: kb/target + KB_INDEX.md removed)::
 
     <plugin_root>/
       engine/
         src/scripts/orchestrator/kb_paths.py   <- this file
-      kb/                                       <- the relocated KB
-        KB_INDEX.md
-        target/ascendc/OPERATIONAL_KNOWLEDGE.md
-        shared/{GATE_CONTRACT,ANTI_PRESSURE_PROTOCOLS}.md
-        hardware/ ...
+      kb/                                       <- the relocated KB (OKF layout)
+        okf/
+          runbooks/          # operator-optimization / field-notes / hardware cards
+          reference/         # top-level references, patterns/, migration/
 """
 from __future__ import annotations
 

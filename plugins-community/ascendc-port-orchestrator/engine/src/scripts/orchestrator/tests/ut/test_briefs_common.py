@@ -239,11 +239,33 @@ def test_hard_floors_with_baseline_reads_verification(tmp_path):
     assert "1.15" in block
 
 
-def test_kb_manifest_block_uses_taxonomy(tmp_path):
-    """When workspace/op_classification.json declares tags + KB paths,
-    kb_manifest_block surfaces them in the brief. Mirrors the v3 lookup
-    contract (P0aak, 2026-05-07): brief is driven by classification JSON,
-    not by hardcoded OP_TAGS dict.
+def _capture_okf_query(monkeypatch):
+    """Force the OKF read-path to the (mocked) subprocess and capture its argv.
+
+    与 test_okf_reference_block._force_okf_ready 相同的前置伪装（query 脚本 +
+    索引存在），但把 subprocess.run 换成 argv 捕获，返回空 hits。
+    """
+    import subprocess as _sub
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setenv("CANNBOT_OKF_ENGINE_ROOT", "/fake/cannbot-knowledge")
+    captured: dict = {}
+
+    class _CP:
+        returncode = 0
+        stdout = '{"hits": []}'
+
+    def _run(*a, **k):
+        captured["argv"] = list(a[0]) if a else list(k.get("args", []))
+        return _CP()
+
+    monkeypatch.setattr(_sub, "run", _run)
+    return captured
+
+
+def test_kb_manifest_block_classification_tags_reach_okf_query(tmp_path, monkeypatch):
+    """v3 lookup 契约的 OKF 形态：classification JSON 的 tags 作为检索查询词
+    进入 knowledge-query。legacy manifest 的 "Op-class tags" 渲染行已随
+    OKF-only 迁移退役（2026-08），tags 的消费点只剩 OKF 检索。
     """
     import json as _json
     workspace = tmp_path / "22_Nonzero"
@@ -255,24 +277,33 @@ def test_kb_manifest_block_uses_taxonomy(tmp_path):
             {"path": "OPERATIONAL_KNOWLEDGE.md#OL-67"},
         ],
     }))
-    block = bc.kb_manifest_block(
-        "22_Nonzero", workspace=workspace, force_legacy_kb=True,
-    )
-    assert "scatter-gather" in block
-    assert "reduction" in block
-    assert "OL-110" in block
-    assert "OL-67" in block
-    # Always-loaded defaults
-    assert "KB_INDEX.md" in block
+    captured = _capture_okf_query(monkeypatch)
+    block = bc.kb_manifest_block("22_Nonzero", workspace=workspace)
+    argv = captured.get("argv") or []
+    assert argv, "knowledge-query subprocess was not reached"
+    query = argv[argv.index("--query") + 1]
+    assert "22 Nonzero" in query
+    assert "scatter-gather" in query
+    assert "reduction" in query
+    # 空 hits → 响亮标记；legacy manifest 永不出现；硬件规格路由保留
+    assert "OKF 检索无返回" in block
+    assert "# KB MANIFEST" not in block
     assert "ascend950pr.md" in block
 
 
-def test_kb_manifest_untagged_op_says_so(tmp_path):
-    block = bc.kb_manifest_block("nonexistent_op_xyz", force_legacy_kb=True)
-    assert "UNTAGGED" in block
-    # Still has default safe set
-    assert "KB_INDEX.md" in block
-    assert "OPERATIONAL_KNOWLEDGE.md" in block
+def test_kb_manifest_untagged_op_fails_loud_without_kb(tmp_path, monkeypatch):
+    """未分类算子（无 classification）：OKF 查询词退化为算子名；检索为空时
+    输出响亮标记（fail-loud），不回退 legacy manifest，纪律 scaffold 仍在。
+    """
+    captured = _capture_okf_query(monkeypatch)
+    block = bc.kb_manifest_block("nonexistent_op_xyz")
+    argv = captured.get("argv") or []
+    assert argv, "knowledge-query subprocess was not reached"
+    query = argv[argv.index("--query") + 1]
+    assert "nonexistent op xyz" in query
+    assert "OKF 检索无返回" in block
+    assert "# KB MANIFEST" not in block
+    assert "shared/ALWAYS_LOADED_RULES.md" in block
 
 
 def test_schema_contract_block_warns_against_aliases():
@@ -293,8 +324,8 @@ def test_safety_block_mentions_3_npu_constraint(fake_env):
 # kw_brief integration — full brief assembly
 # ---------------------------------------------------------------------------
 def test_kw_brief_cold_start_has_all_sections(tmp_path, fake_env, monkeypatch):
-    """Brief assembly with a workspace classification JSON injects the
-    LLM-classified tags into the KB MANIFEST section.
+    """Brief assembly with a workspace classification JSON composes the OKF
+    read-path (唯一 b-tier) into the brief.
     """
     import json as _json
     workspace = tmp_path / "22_Nonzero"
@@ -306,9 +337,9 @@ def test_kw_brief_cold_start_has_all_sections(tmp_path, fake_env, monkeypatch):
             {"path": "OPERATIONAL_KNOWLEDGE.md#OL-67"},
         ],
     }))
-    # This test pins the explicit legacy-manifest escape hatch; OKF remains
-    # the production default and is covered by the dedicated OKF tests.
-    monkeypatch.setenv("ASCENDC_PORT_OKF", "0")
+    # OKF-only: force the read-path to the mocked subprocess (empty hits →
+    # loud marker), keeping the assembly test independent of the real index.
+    _capture_okf_query(monkeypatch)
     scoped_env = replace(
         fake_env,
         opgen_mode="port_a3_to_a5",
@@ -327,8 +358,10 @@ def test_kw_brief_cold_start_has_all_sections(tmp_path, fake_env, monkeypatch):
     # All sections present
     assert "OP: 22_Nonzero" in brief
     assert "PASS A" in brief.upper() or "Pass A" in brief
-    assert "KB MANIFEST" in brief
-    assert "scatter-gather" in brief  # from classification JSON
+    # OKF 是唯一 b-tier：空检索 → 响亮标记 + 纪律 scaffold；legacy manifest 不出现
+    assert "OKF 检索无返回" in brief
+    assert "# KB MANIFEST" not in brief
+    assert "ANTI-PRESSURE CHECKPOINT" in brief
     assert "OUTPUT SCHEMA CONTRACT" in brief
     assert "NO torch_npu" in brief
     assert "G1 MARKER" in brief

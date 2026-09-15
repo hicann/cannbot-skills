@@ -1,0 +1,28 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "AscendC 算子迁移编排流程",
+      "config": {
+        "max_tokens": 300000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "ascendc-port-orchestrator 团队是做什么的？请介绍它的 AscendC 算子迁移编排流程和主要阶段。",
+      "expected_output": "回复应覆盖以下要点：\n1. ascendc-port-orchestrator 是 AscendC 算子迁移的端到端编排团队，面向 A5 等目标平台做算子移植\n2. 流程按阶段状态机推进（O0 环境/源码准备 → O1 分类与方案 → O2 实现 → O3 精度验证 → O4 性能优化 → O5 收官），支持失败回退与断点恢复\n3. 通过 Subagent 分工执行（分类、kernel 实现、精度、性能等角色），编排器负责调度与门禁判定\n4. 精度与性能均设有门禁，不达标不进入下一阶段",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "ascendc",
+          "description": "回复中提到了 AscendC"
+        }
+      ]
+    }
+  ],
+  "team_name": "ascendc-port-orchestrator"
+}

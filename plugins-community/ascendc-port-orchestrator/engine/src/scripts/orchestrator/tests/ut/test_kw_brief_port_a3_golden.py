@@ -44,15 +44,27 @@ def _ws(tags):
 
 
 # (op, op_class_tags, iter_cap_remaining) -> sha256(output)
+# Re-pinned 2026-08-31 (OKF-only 迁移): composed brief text now points at
+# `kb/okf/**` + plugin `templates/fa_class/` (the previous pins were already
+# stale from the A-core OKF 切换; this re-pin covers both).
+# Re-pinned 2026-09-02 (issue #559 OKF-only 落地到 engine): the 2026-08-31 pins
+# went stale again — on the 1358ec68 baseline the builders still emitted the
+# legacy `kb/target/ascendc/**` paths. The OKF-only refactor (a4e3c03a) moved
+# the engine pointers to `kb/okf/reference/**` + plugin `templates/fa_class/`;
+# baseline-vs-HEAD output diff verified to be exactly that path relocation
+# (all new paths exist in the plugin tree). Content change is the point.
+# 2026-09-05 重钉：kb/okf/reference/ 目录重组后 brief 里的 KB 路径变化。
+# 重钉前逐 case 在改动前后两棵树上生成 brief 做 diff 验证：4 个 case 差异 12–14 行，
+# **非路径行为 0** —— 即变化仅为 KB 路径改写，无语义内容变动。
 _GOLDEN = [
     ("mat_mul_v3", ["a3_to_a5_port", "CUBE_MIX"], 3,
-     "c002c2061ea1edc980a51c144f05b55562e3cab7d4c438616c4eb392b4f9ead2"),
+     "a7faf9b28eca9026f647bca3e24ae7e4050e0fe08ae48f28ed2b1d786af33575"),
     ("some_vec_op", ["a3_to_a5_port"], 3,
-     "fb7ed33096c420e9dd49fab76c36f9fa3b388af9b27908898e7fc96f2eadfe3b"),
+     "09eb85eebc87d29dc5c34b856691e91721de3e166d10038958b0a9655c45df9b"),
     ("flash_attention_score", ["a3_to_a5_port", "FA_CLASS"], 2,
-     "c2cc0c0db9b380d2c7f733d1dcc9c109534cc559a74dc2b15fb1565f9bcf5b21"),
+     "acf35f5734b2577835bab9e78731e91f690614b29b85ac9382809bfe0a7d9be2"),
     ("abs", ["a3_to_a5_port"], 1,
-     "39f70626a398f40662538b862cac8e56c92f293080e67b0077f50f4f95101cbc"),
+     "4a17d3982f8d632a4acd18fb37a298b588e4f28cbaf9fdab6cf4596aa855b79d"),
 ]
 
 

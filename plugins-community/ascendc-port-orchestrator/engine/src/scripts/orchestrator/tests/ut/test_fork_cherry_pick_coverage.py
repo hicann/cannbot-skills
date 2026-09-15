@@ -40,7 +40,6 @@ import pytest
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent))
 import orchestrator as orch  # noqa: E402
-from briefs._common import kb_manifest_block  # noqa: E402
 import phase_o5_runner  # noqa: E402
 
 _PROJECT_ROOT = _reorg_paths.REPO_ROOT
@@ -145,30 +144,10 @@ def test_generate_timing_report_subprocess_failure(tmp_path, caplog, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# P0abq: 2-tier KB manifest split
+# P0abq: 2-tier KB manifest split — REMOVED 2026-08 (OKF-only 迁移):
+# legacy manifest 渲染（two-tier split）随 `force_legacy_kb` 分支一起退役，
+# 原两个用例（two_tier_separates_large_file / anchored_ol_in_tier2）删除。
 # ---------------------------------------------------------------------------
-def test_kb_manifest_two_tier_separates_large_file():
-    """kb_manifest_block puts OPERATIONAL_KNOWLEDGE.md in Tier 2 (grep-only),
-    not bulk-loaded as Tier 1.
-    """
-    block = kb_manifest_block(
-        "13_Cat", workspace=None, target="a5", force_legacy_kb=True,
-    )
-    assert "two-tier loading" in block
-    assert "OPERATIONAL_KNOWLEDGE.md" in block
-    # Tier-2 grep hints present
-    assert "grep -n" in block
-    # Tier-1 small files
-    assert "KB_INDEX.md" in block or "PLATFORM_BUGS.md" in block
-
-
-def test_kb_manifest_anchored_ol_in_tier2():
-    """OL anchors land in Tier-2 grep hints, not Tier-1 full-load."""
-    block = kb_manifest_block(
-        "13_Cat", workspace=None, target="a5", force_legacy_kb=True,
-    )
-    if "OL-" in block:
-        assert "grep -n" in block
 
 
 # ---------------------------------------------------------------------------

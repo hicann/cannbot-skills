@@ -107,7 +107,10 @@ plugins-community/ascendc-port-orchestrator/
 ├── workflows/             # 描述性开发指南（真正驱动在 engine FSM，见 §2.1）
 ├── docs/ARCHITECTURE.md   # 本文档
 ├── engine/                # bundle-orch：编排引擎（FSM + gates + KB + scripts + 子 agent 定义源）
-└── kb/                    # 插件自带 b 层 KB（含保留的 OKF 结构）
+├── templates/             # 工程模板（fa_class / precision-testing，随 OKF-only 迁移自 kb 迁出）
+├── examples/              # 示例工程（a3_mix_fa_min 等）
+└── kb/                    # 插件自带 b 层 KB（OKF-only：kb/okf/ = runbooks 卡 + reference 参考文档；
+                           # kb/shared 保留（kb/hardware 与 kb/plugin-scope 已并入 okf）；kb/target 与 KB_INDEX 已于 OKF-only 迁移移除）
 ```
 > 插件结构沿用 `agents/` 扁平 + `hooks/` + `init.sh` 约定；当前作为社区插件交付。`engine/` 打包是本插件独有的 bundle-orch 设计（§1.1）。
 两个具名入口 skill：`ascendc-cross-gen-port`（跨代际移植）、`ascendc-backward-gen`（正向→反向）；各自解析目标、调用同一编排能力（orch 保持完整）。
@@ -134,7 +137,7 @@ plugins-community/ascendc-port-orchestrator/
 
 原 a5_ops 单体 KB 经导出被**切成三部分**（converter + coverage gate 保证无损、可证）：
 - **被删的一部分（→ 不进插件）**：与 cannbot 已有 skills **重合**的知识，dedup 后**从插件 KB 删除**——因为 cannbot skills（下面的 a 层）已经提供；保留=重复。判据：`coverage_gate.py` 用一张 **curated 映射表**（unit → 对应 cannbot skill 名 + TRIM 处置）+ 校验该 **skill 文件存在**（`cannbot_skill_exists`）。⚠️ **已知弱点（codex 审出）**：现 gate 证的是「映射的 cannbot skill **存在**」，**不是**「被删知识的**内容**真被该 skill 覆盖（主题词共现）」——存在 ≠ 实质覆盖。**待修**：把删除判据升级为内容级覆盖证明（复用 resolver 的主题词共现判定）。注：**主题词共现是 `cba_resolver.py` 的运行时取知识判定**（§5.2），与本静态 gate 是两个机制，先前文档把二者混为一谈、已更正。
-- **(b) 插件自带 KB**：a5-unique **减去** cannbot 已覆盖的部分 = 插件真正要带的硬件/编译/平台经验（OL/EC/PB/P-P/hardware/fa-class，skill 格式 + 路由）。
+- **(b) 插件自带 KB**：a5-unique **减去** cannbot 已覆盖的部分 = 插件真正要带的硬件/编译/平台经验。**OKF-only 现状（2026-08 迁移后）**：b 层 = `kb/okf/`——`runbooks/`（OL/EC/PB/P-P/fa-class 等条目全部转为 okf.v1 卡）+ `reference/`（API/指南/迁移方法论参考文档）+ `ops/`；原「skill 格式散文档 + `kb/KB_INDEX.md` 路由 + `kb/target/ascendc/` 载体」已于 OKF-only 迁移移除。
 - **(c) 用户本地 KB**：用户侧修正/增量。
 
 运行期三源、优先级 **c > b > a**（仅同主题冲突时按优先级裁，否则叠加）：
@@ -144,18 +147,19 @@ plugins-community/ascendc-port-orchestrator/
 
 ### 5.1 用户侧 KB 格式 / 存放 / 索引（本期设计）
 - **格式**：每条目 = 一个带 frontmatter 的小文件（`id` / `topic`(canonical-topic-key) / `applies_to`(架构·算子族 scope) / `provenance`(用户手写 | 流水线沉淀+时间戳) / 正文）。
-- **存放位置**：用户主目录下、**与插件交付物分离**的固定路径（如 `~/.ascendc-port/user_kb/`，运行时可写；插件目录 `references/` 只读、不写）。位置可由 env 覆盖。
+- **存放位置**：用户主目录下、**与插件交付物分离**的固定路径（如 `~/.ascendc-port/user_kb/`，运行时可写；插件目录 `kb/okf/`（b 层）只读、不写）。位置可由 env 覆盖。
 - **索引**：目录内维护一个 `INDEX.md`（canonical-topic → 条目文件 的路由表），新条目按 topic 归位 + 自动更新 INDEX 行；resolver 按 topic 查 INDEX 命中条目。
 - **维护**：运行时由流水线「生成后沉淀」追加/更新（见 §5.3）；用户可手工增删改。
 
 ### 5.2 三源取知识机制（READ）
+- **b 层载体（OKF-only 现状）**：b 层 = `kb/okf/`（`runbooks/` okf.v1 卡 + `reference/` 参考文档），引擎经 `engine/src/scripts/okf/okf_kb.sh` 以 `--knowledge-root kb/okf` 检索并注入 brief；legacy manifest 渲染、`ASCENDC_PORT_OKF` 开关、`force_legacy_kb` 逃生门与 `kb/target`/`KB_INDEX` 读取路径已于 OKF-only 迁移（2026-08）全部删除，OKF 检索是唯一 b-tier 来源。
 - **resolver**：`cba_resolver.py`（已实现+单测）按 canonical-topic 在三源里判覆盖（distinctive 主题词**共现**=实质覆盖，非偶然提及），返回**最高优先且覆盖该 topic 的层**（c→b→a），或 NOT_FOUND。
 - **注入子 agent**：编排器据 op 分类把相关 topic 的命中知识**注入子 agent 的 brief**；同时 install 把 cannbot skills + 插件 KB 装成 CC skills，**子 agent（编排器拉起的）天然能 invoke 已装的 cannbot skill**（skill registry 对 sub-agent 可见——已实测）。即：b/c 经 brief 注入，a 经 CC skill registry 可达。
 - **provenance 校验**：子 agent transcript 记录 invoke 了哪个 cannbot skill / 读了哪条 KB（用于验证三源真被用，见 §6 + differential A/B）。
 
 ### 5.3 写回机制（WRITE）—— 只写用户 KB(c)、不改插件 KB(b)
 - **触发**：生成闭合（精度 PASS）后，「生成后沉淀」阶段把本次新经验（新 EC/OL 类条目）写入**用户本地 KB(c)**。
-- **去向唯一**：写**只**落在 §5.1 的用户 KB 路径；**插件目录 `references/`（b 层）运行时绝不被写**（只读挂载/路径隔离 + 写入函数硬编码用户 KB 根）。这是「更新用户侧、不动插件侧」的硬保证。
+- **去向唯一**：写**只**落在 §5.1 的用户 KB 路径；**插件目录 `kb/okf/`（b 层）运行时绝不被写**（只读挂载/路径隔离 + 写入函数硬编码用户 KB 根）。这是「更新用户侧、不动插件侧」的硬保证。
 - **索引同步**：写条目的同时更新用户 KB 的 `INDEX.md`（topic 路由行）。
 - **冲突**：同 topic 已存在则按 c>b>a 以用户本地为准（新沉淀标 provenance + 时间戳，便于回溯/人工裁决）。
 - **状态（实现）**：见 §5.5（本 session 诚实修正）。
@@ -168,9 +172,9 @@ plugins-community/ascendc-port-orchestrator/
 - **Namespace / ID（核心不变量）**：c = `customer:{硬key哈希}`（内容哈希、同教训同 ID 幂等）；b = 引擎序号 `OL-N/EC-N/PB-N/P-Pxx`（我方发版控制、客户只读）。**c/b 不同 namespace + 客户只写 c → 升级不撞**。
 - **准入 gate（写入端，≠优先级）**：`correctness` 需 `trust=verified` 才进 c；`site_config`/`experience` 自由进 c。
 - **硬 key/去重**：signature = 错误码 `\d{5,6}` + snake_case 符号；dedup = 硬 key jaccard ≥ 0.6；写策略 = 泛化 + 写前去重。
-- **Merge c→b**：工具 + owner-gated + 发版时；硬 key 语义去重；**重分配 ID（c 哈希→b 序号，别塞哈希进 b KB_INDEX）**；再验证 + 墓碑 + 迁移防悬空。
+- **Merge c→b**：工具 + owner-gated + 发版时；硬 key 语义去重；**重分配 ID（c 哈希→b 序号，别塞哈希进 b KB_INDEX）**；再验证 + 墓碑 + 迁移防悬空。（注：b 层 KB_INDEX 机制已于 OKF-only 迁移移除，b 层现由 `kb/okf/` 各板块 `index.md` 自索引。）
 - **读路径**：c>b>a；c 影子盖 b 同-key；`reset-to-official` 跳 c。
-- **KB_INDEX 跨-tier 不变量**：c/b 各自 namespace+index，orphan-free 每 tier 各自成立；merge/b 升级时迁移 c→b 引用防跨-tier 悬空。
+- **KB_INDEX 跨-tier 不变量**：c/b 各自 namespace+index，orphan-free 每 tier 各自成立；merge/b 升级时迁移 c→b 引用防跨-tier 悬空。（同上：KB_INDEX 作为现行机制已移除，本条仅作历史设计记录。）
 
 ### 5.5 实现状态（2026-07-02 诚实修正 — impl≠design gap 本 session 查出）
 
@@ -179,6 +183,7 @@ plugins-community/ascendc-port-orchestrator/
 - **后果**：分发式升级盖用户学习 + 序号撞（= §5.4 要解、= main 的 DEBT-178）。
 - **修复（3 处）**：① `aog-knowledge-maintain` 写 c（`kb_invoke` prompt 注 c-root）② `kb_auto_promote --kb-root` config-driven（`kb_write_root()`）③ KB-load 读 c>b>a + KB_INDEX 跨-tier。
 - **归属（owner 2026-07-02）**：并入 **main 主持的统一 KB 设计**；cannbot 消费统一 outbound，并负责 `kb_write_root()`、插件激活语义与 outbound 消费。
+- **OKF-only 迁移（2026-08）**：本节所述 b-tier 写路径（`kb_auto_promote`、打包 b 层散文档、KB_INDEX 跨-tier）已随 legacy 模块一并删除，b 层收敛为 `kb/okf/`（OKF-only，见 §5.2）；以上条目保留作历史记录。
 
 ## 6. 安全网（gates）
 
@@ -285,14 +290,14 @@ opencode 首次安装需一次性拉插件依赖（npm registry）。完全离�
 
 ## 9. 待定（依赖社区）
 
-- **插件自带 KB(b) 的格式/接口**：采用社区认可的 OKF 格式，载荷由 #611 交付。
+- **插件自带 KB(b) 的格式/接口**：采用社区认可的 OKF 格式，载荷由 #611 交付。**（已落地）** OKF-only 迁移（2026-08）后 b 层 = `kb/okf/`（okf.v1 卡 + 参考文档），运行时 OKF 检索为唯一 b-tier 来源（§5.2）。
 - 插件激活（plugin.json + skills 列表填充）在 KB 就绪后进行。
 
 ## 10. 集成与装配（bundle-orch wiring）
 
 把 §2 流水线 / §5 三源 / §6 安全网串成一个**自包含、可运行**的插件：
 
-1. **装配**：编排器引擎（FSM + 子 agent 调度）+ aog-* 子 agent 定义 + scripts + `references/`(b 层 KB) **打包进插件目录**；install 把 cannbot skills（a）+ 插件 KB（b）装成 CC skills、并建用户 KB（c）根目录 + INDEX。
+1. **装配**：编排器引擎（FSM + 子 agent 调度）+ aog-* 子 agent 定义 + scripts + `kb/okf/`(b 层 KB) **打包进插件目录**；install 把 cannbot skills（a）+ 插件 KB（b）装成 CC skills、并建用户 KB（c）根目录 + INDEX。
 2. **入口→编排器**：两个入口 skill 解析 NL 目标 → 调打包进来的编排器（`python -m orchestrator …` 形态）。
 3. **每阶段 wiring**：Parse→分类→参考/真值→**生成**（编排器据分类用 `cba_resolver`(§5.2) 取三源 → 注入子 agent brief → 子 agent 生成 + 内层修复循环）→构建→精度→（性能）→报告→**沉淀写回用户 KB(c)**(§5.3)。
 4. **gate 边界**(§6.1)：生成前钩子/前置门；阶段边界 provenance/自检/精度门；fail-closed 只拦交付。

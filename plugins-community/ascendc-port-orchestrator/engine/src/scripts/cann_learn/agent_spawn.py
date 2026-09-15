@@ -26,10 +26,10 @@ Non-trivial structural choices:
 
 1. **Brief is mostly cited path lists** (per agent's SKILL.md scope) —
    not free-form prompt. The agent reads `module_path`, writes sealed
-   notes + public summary.json + appends to `patterns/unverified/candidates.md`.
+   notes + public summary.json + appends to `reference/patterns/unverified/candidates.md`.
 
 2. **The agent reports candidate filenames in handoff line** so we can
-   collect them; we also do a directory diff (kb_root/patterns/unverified/
+   collect them; we also do a directory diff (kb_root/reference/patterns/unverified/
    listing before/after) as defense in depth.
 
 3. **cann_files_read is reconstructed** from the agent's `cann_learn_summary.json`
@@ -88,7 +88,7 @@ def build_cann_learner_brief(
 
     cann_strategy_path = workspace_abs / "cann_strategy_inference.md"
     summary_path = workspace_abs / "cann_learn_summary.json"
-    candidates_path = kb_root_abs / "patterns" / "unverified" / "candidates.md"
+    candidates_path = kb_root_abs / "reference" / "patterns" / "unverified" / "candidates.md"
 
     return f"""{slug} — cann_learn spawn
 
@@ -100,7 +100,7 @@ KB_ROOT (existing KB for cross-reference, READ): {kb_root_abs}
 API_CATALOG (public AscendC API allowlist, READ): {api_catalog_abs}
 
 # Required reading (mandatory, before Phase A)
-- src/skills/references/shared/ANTI_PRESSURE_PROTOCOLS.md   # P1-P8 catalog
+- {kb_root_abs.parent / 'shared' / 'ANTI_PRESSURE_PROTOCOLS.md'}   # P1-P8 catalog (kb/shared/)
 - {cann_strategy_path}   # researcher's strategy_inference for this op
   (this is the "what KB already inferred" baseline — use to seed Phase A
    pre-scan + C35 reason-code matcher)
@@ -159,13 +159,13 @@ def _mode_specific_section(op: str, extraction_mode: str, kb_root_abs: Path, can
 
     Mode 5 (kernel_structural) — DEFAULT, the historical scope. Read 2-5
     kernel files (header + impl + tiling). Extract algorithm structure +
-    public-API equivalents. Candidates → patterns/unverified/candidates.md
+    public-API equivalents. Candidates → reference/patterns/unverified/candidates.md
     with prefix CAND-* / promotion path to P-P canonical.
 
     Mode 6 (build_system) NEW (2026-05-21) — read CMakeLists.txt + register
     + op_proto + apt.cpp files. Extract build-system-level recipes
     (per-source-file compile flag isolation; multi-target binary registration;
-    launch macro routing). Candidates → target/ascendc/build_system/candidates.md
+    launch macro routing). Candidates → runbooks/field-notes/build/candidates.md
     with prefix CAND-BSP-* / promotion path to BSP-N canonical.
 
     Origin: FA Pattern A iter 1-5 (~$53 spend) empirically falsified all
@@ -176,7 +176,7 @@ def _mode_specific_section(op: str, extraction_mode: str, kb_root_abs: Path, can
     info needed wasn't reachable. Mode 6 extends scope to address this.
     """
     if extraction_mode == "build_system":
-        bs_candidates = kb_root_abs / "target" / "ascendc" / "build_system" / "candidates.md"
+        bs_candidates = kb_root_abs / "runbooks" / "field-notes" / "build" / "candidates.md"
         return f"""# Specific extraction questions for this op (Mode 6: build_system)
 
 {op} extraction in Mode 6 is BUILD-SYSTEM-FOCUSED — the kernel structural
@@ -214,11 +214,11 @@ DO NOT read internal `common/*` headers, shared utility headers, or recurse.
 
 ## Output path (Mode 6 specific)
 
-Candidates → `{bs_candidates}` (NOT the patterns/unverified/candidates.md
+Candidates → `{bs_candidates}` (NOT the reference/patterns/unverified/candidates.md
 that Mode 5 uses — that's reserved for kernel-structural).
 
 Use prefix `CAND-BSP-*` for candidates (CANN Build-System Pattern), promotable
-to canonical `BSP-N` entries in `target/ascendc/build_system/PRINCIPLES.md`.
+to canonical `BSP-N` cards under kb/okf/runbooks/ (build-system-pattern-*).
 
 ## Generality requirement (Mode 6)
 
@@ -256,19 +256,19 @@ beyond passed scope. Keep notes on:
 
 ## Output path (Mode 5 default)
 
-Candidates → `{candidates_path}` (patterns/unverified/candidates.md)"""
+Candidates → `{candidates_path}` (reference/patterns/unverified/candidates.md)"""
 
 
 def _list_unverified_candidates(kb_root: Path) -> set[Path]:
-    """Snapshot of candidate files in patterns/unverified/ (excluding markers)."""
-    return _list_unverified_candidates_at(kb_root / "patterns" / "unverified")
+    """Snapshot of candidate files in reference/patterns/unverified/ (excluding markers)."""
+    return _list_unverified_candidates_at(kb_root / "reference" / "patterns" / "unverified")
 
 
 def _list_unverified_candidates_at(dir_path: Path) -> set[Path]:
     """Snapshot of candidate files in `dir_path` (excluding markers).
 
-    Mode 6 (build_system) uses `target/ascendc/build_system/` as the
-    candidates dir; Mode 5 uses `patterns/unverified/`. Shared listing
+    Mode 6 (build_system) uses `runbooks/field-notes/build/` as the
+    candidates dir; Mode 5 uses `reference/patterns/unverified/`. Shared listing
     logic factored here.
     """
     if not dir_path.exists():
@@ -336,15 +336,15 @@ def spawn_cann_learner_agent(
     )
 
     # Snapshot candidates dir before spawn (for diff after).
-    # Mode 6 routes candidates to target/ascendc/build_system/candidates.md
-    # instead of patterns/unverified/candidates.md.
+    # Mode 6 routes candidates to runbooks/field-notes/build/candidates.md
+    # instead of reference/patterns/unverified/candidates.md (OKF layout).
     if extraction_mode == "build_system":
-        candidates_dir = kb_root / "target" / "ascendc" / "build_system"
+        candidates_dir = kb_root / "runbooks" / "field-notes" / "build"
         candidates_md = candidates_dir / "candidates.md"
         candidates_dir.mkdir(parents=True, exist_ok=True)  # may not exist yet
         cands_before = _list_unverified_candidates_at(candidates_dir)
     else:
-        candidates_dir = kb_root / "patterns" / "unverified"
+        candidates_dir = kb_root / "reference" / "patterns" / "unverified"
         candidates_md = candidates_dir / "candidates.md"
         cands_before = _list_unverified_candidates(kb_root)
     cands_md_size_before = candidates_md.stat().st_size if candidates_md.exists() else 0

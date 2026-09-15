@@ -1,0 +1,38 @@
+---
+schema_version: okf.v1
+kind: operator_optimization
+type: optimization_runbook
+source_family: curated
+title: "Reg-based SIMD — register-level vector compute API (officially confirmed)"
+description: "paradigm: ascendc"
+phenomenon: perf_regression
+signal:
+  - "multi-step fused compute scenarios (e.g. cast→mul→abs→reduce) where frequent UB movement of intermediate results becomes the bottleneck"
+confidence: single_run
+classified_by: fallback-whole-body
+original_id: OL-54
+timestamp_inferred: true
+tags: [507015, ascendc, ol-54]
+created_at: 2026-08-30T16:00:00Z
+updated_at: 2026-08-30T16:00:00Z
+---
+## 条目正文（忠实搬运，含全部更正/佐证 bullet）
+
+```yaml
+applies_to:
+  paradigm: ascendc
+```
+- **Category**: optimization_technique
+- **Loaded by**: Generator, Optimizer, Researcher
+- **Trigger**: multi-step fused compute scenarios (e.g. cast→mul→abs→reduce) where frequent UB movement of intermediate results becomes the bottleneck
+- **Lesson**: CANN 9.0 offers a Reg vector compute API (`AscendC::MicroAPI::` namespace; older `AscendC::Reg::` name does NOT exist in 9.0.0 — hw-probe verified 2026-05-28) where operands are `RegTensor` (registers) rather than `LocalTensor` (UB memory). Intermediate results stay in registers, eliminating UB load/store overhead. Programming model: `__simd_vf__` function + `__VEC_SCOPE__ { ... }` block invocation + `LoadAlign/StoreAlign` transfers + `MicroAPI::Add` etc. computation. Each call processes VL (Vector Length) elements, requiring manual loops with `uint16_t` induction variable (bisheng compile-time constraint per EC-67). Key difference vs Mem-based: Mem-based processes an entire LocalTensor in one call, Reg-based must loop over VL-sized chunks. Applicable to: multi-step fusion (reduce UB transfers), unaligned access (UnalignReg optimization), reducing UB bank conflicts.
+- **Source**: hiascend.com CANN 9.0 beta2 — Reg vector compute programming (captured 2026-04-12)
+- **Status**: **VERIFIED-COMPILE** (only the canonical Reg::Add + Reg::LoadAlign + Reg::StoreAlign + Reg::CreateAddrReg subset, via tests/repro/regbase_minimal.cpp on CANN 9.0.0 + bisheng, A5, 2026-04-12). Runtime precision + perf verification pending.
+- **Reg API surface caveat (op#12 ko-1 evidence, 2026-05-03)**: future directives that name a specific Reg primitive (e.g. "use Reg::Rsqrt") MUST first verify the symbol exists in the target SDK's public headers. The published Reg unary surface on CANN B103 / Ascend950PR is exactly: `{Abs, Relu, Exp, Sqrt, Ln, Log, Log2, Log10, Neg, Not}`. The published Reg broadcast surface is exactly: `{Duplicate, Interleave, DeInterleave}`. **`Reg::Rsqrt`, `Reg::Reciprocal`, `Reg::Brcb` are NOT published** — they must be synthesized from the published primitives (e.g. `1/sqrt(x)` ≡ `Reg::Sqrt + Reg::Duplicate(1.0f) + Reg::Div`, costs 3 Reg ops + 1 register held), which changes the ROI estimate vs the original "1-primitive replacement" claim. fo / ko prompts now require pre-edit symbol-existence audit before applying any directive that names a specific Reg primitive.
+  - **Evidence**: op#12 KvRmsnormRopeCache ko-1 (2026-05-03): fo-1 wrote `optimization_directive_ko_1.md` recommending CB-2 = scalar Rsqrt → Reg::Rsqrt + Reg::Brcb. ko-1 ran symbol-existence grep on `/data/cann_b103/cann-9.0.0/x86_64-linux/asc/include/`, found neither symbol exists; refused edit; verdict KO_REVERT_DIRECTIVE_API_SURFACE_FALSIFIED. All floors preserved. Net good outcome for the harness — V3.7.12 file-driven routing worked exactly as intended (agent receives directive → verifies before applying → refuses cleanly when invalid).
+- **adv_api impl-header path caveat (op#10 LayerNorm kw-2-this-session 2026-05-05)**: vendor regbase impls for adv_api primitives (Normalize / LayerNorm / Softmax / etc.) ship under `$ASCEND_HOME_PATH/asc/impl/adv_api/detail/<category>/<name>/<name>_c310_impl.h`, NOT under `$ASCEND_HOME_PATH/asc/include/`. The public adv_api header (`asc/include/adv_api/<category>/<name>.h`) contains only declarations + a relative `#include "../../../impl/adv_api/detail/.../<name>_c310_impl.h"`. cmake `CMakeASCInformation.cmake` adds `-isystem $ASCEND_HOME_PATH/asc/impl/adv_api` so the relative include resolves cleanly. **Audit lesson**: when verifying vendor primitive availability, search BOTH `cann*/x86_64-linux/asc/include/` AND `cann*/x86_64-linux/asc/impl/`. Use `find /data/cann_b103/cann-9.0.0 -name '*c310_impl.h' -o -path '*adv_api*' -name '*.h'`. Prior op#10 kw-2-respawn audit (2026-05-04) searched only `include/` and concluded "c310 impl not shipped" — that audit was wrong; the impl IS shipped, just under `impl/`.
+- **adv_api docstring-vs-static_assert caveat (op#10 LayerNorm kw-2-this-session 2026-05-05)**: vendor adv_api header docstrings can be incomplete or stale. Source of truth is the `c310_impl.h` `SupportType<T, ...>()` static_assert, NOT the public header's `\note support data type:` comment. Example: `normalize.h` docstring claims `support data type: half and float`, but `normalize_c310_impl.h:297` has `static_assert(SupportType<T, half, float, bfloat16_t>(), ...)` — bf16 IS supported despite docstring saying otherwise. **Audit step before primitive substitution**: read the c310_impl.h SupportType list, not just the header `\note`. Empirically validated: `Normalize<bfloat16_t, bfloat16_t>` builds clean and runs correctly on CANN 9.0.0 b103 / Ascend950PR_9579 / `__NPU_ARCH__==5102` (5/5 bf16 LayerNorm cases PASS).
+- **Vendor primitive substitution: perf gate (op#10 LayerNorm kw-2-this-session 2026-05-05)** — substituting `AscendC::Normalize<U,T>` for hand-rolled per-row affine at 3 single-pass sites (A=1 per call, inside K_ROWS_PER_AIV outer loop) yielded **precision-positive but perf-flat**: Pass A 60/60 preserved, Pass B 10/16 → 16/16 BIT-EXACT (Normalize regbase output bit-identical to PyTorch CPU truth fp32), Det 60/60 preserved, Perf 0.19× = baseline (no improvement). Root cause: vendor c310 regbase impls (e.g. `normalize_c310_impl.h`) use `Reg::LoadAlign<DIST_BRC_B32>` to broadcast scalars across A rows in ONE call — at A=1 the broadcast happens once per call → no amortization. The vendor's perf advantage materializes only when A>1. **Decision rule for substitution proposals**: (a) for pure precision improvement (CPU-truth alignment), A=1 substitution is net-positive; (b) for perf gain, FIRST verify the dispatch shape can supply A>1 per call — if outer loop is per-row (A=1), the substitution is NOT a perf lever, needs upstream restructure (load K rows into one buffer, batch the call). See P-P87 for the cross-vendor-primitive generalization.
+- **Runtime-clean for the TRIVIAL elementwise subset (FA-A5 path-B, 2026-05-31)** — the `Status: VERIFIED-COMPILE ... Runtime ... pending` line above is upgraded for the trivial register elementwise path only: `tests/repro/regbase_minimal.cpp` (MicroAPI register AddVF-class elementwise) was RUN at runtime on A5 Ascend950PR_9579 / CANN 9.0.0 and produced bit-exact output → the MicroAPI register-compute infrastructure works at runtime for simple elementwise. **Scope: TRIVIAL elementwise ONLY.** This does NOT extend to register-based REDUCTION inside a FA kernel — that path hit a FA-specific runtime `507015` that remains un-root-caused (see `patterns/unverified/candidates.md` CAND-FA-MICROAPI-REG-507015). Do NOT infer FA register-reduction is runtime-safe from this elementwise result; the de-scalarize win that WAS verified uses the mem-based VEC path (P-P101), not registers.
+
+<!-- 迁移自 porter OPERATIONAL_KNOWLEDGE.md OL-54（category=optimization_technique，convert_ol_to_okf.py --faithful-fallback，B2 整档忠实搬运）。confidence/severity/reproduce_count 未升格。 -->

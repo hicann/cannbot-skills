@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **102 个 Skill + 18 个 Team**，共 **865 个评测用例**（仅统计已启用用例，截止 2026-08-29）。
+当前 ST 框架覆盖 **102 个 Skill + 18 个 Team**，共 **866 个评测用例**（仅统计已启用用例，截止 2026-09-11）。
 
 > **统计口径**：统计代码仓内所有符合结构要求的 Skill（`skill_dirs` 下含 `SKILL.md`）与 Team（`team_dirs` 下含 `AGENTS.md` + `.claude-plugin/plugin.json`），与是否携带 `evals/evals.json` 无关——无 evals 的实体用例数计 0。
 
@@ -165,11 +165,11 @@
 | torch-compile | 1 |   |   | √ |   | √ |
 | triton-op-generator | 0 |   |   |   |   |   |
 
-### plugins-community/（8 Teams，共 0 个用例）
+### plugins-community/（8 Teams，共 1 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| ascendc-port-orchestrator | 0 |   |   |   |   |   |
+| ascendc-port-orchestrator | 1 |   |   | √ |   | √ |
 | autoresearch | 0 |   |   |   |   |   |
 | cannbot-knowledge | 0 |   |   |   |   |   |
 | ops-perf-evolution | 0 |   |   |   |   |   |

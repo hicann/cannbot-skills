@@ -14,6 +14,7 @@ Run: PYTHONPATH=<engine> python3 src/scripts/kb_tiering/tests/test_cannbot_c.py
  or: pytest this file.
 """
 import logging
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -133,6 +134,23 @@ def test_arbiter_two_tier_c_over_b():
         r = arb.resolve(full_sig("target host ip for deployment"))
         assert r.status == "RESOLVED" and r.tier == "customer"   # local c overrides b (experience, silent)
         assert "REDACTED_IP" in r.entry.claim
+
+
+def test_kb_write_root_always_customer():
+    """OKF-only migration (2026-08): the bundled b-tier is gone, so the resolver
+    always returns "customer" — with no user_kb configured, writes fall back to
+    the default c-root (`~/.ascendc-port/user_kb`, created on demand).
+    """
+    from kb_tiering.adapters.cannbot_c import kb_write_root
+    old = os.environ.pop("ASCENDC_PORT_USER_KB", None)
+    try:
+        assert kb_write_root() == "customer"          # nothing configured → default c-root
+        os.environ["ASCENDC_PORT_USER_KB"] = tempfile.mkdtemp()
+        assert kb_write_root() == "customer"          # explicit user_kb
+    finally:
+        os.environ.pop("ASCENDC_PORT_USER_KB", None)
+        if old is not None:
+            os.environ["ASCENDC_PORT_USER_KB"] = old
 
 
 def _run():

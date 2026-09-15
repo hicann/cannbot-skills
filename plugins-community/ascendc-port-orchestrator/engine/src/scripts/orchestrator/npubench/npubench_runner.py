@@ -42,7 +42,8 @@ __all__ = [
     "PREFLIGHT_REPORT_FILENAME", "REPEATS", "REPEAT_FINGERPRINT_CLASSES", "REQUIRED_MATCHED_RATIO",
     "RUNNER_CONTRACT_VERSION",
     "RUNNER_MODULE_FILENAMES", "SIDECAR_DESCRIPTOR_ADAPTER", "SIDECAR_DESCRIPTOR_SCHEMA", "SNAPSHOT_DIRNAME",
-    "StagedBundle", "TASK_EXECUTION_TIMEOUT_ENV", "TASK_EXECUTION_TIMEOUT_SECONDS", "WARM_UP",
+    "StagedBundle", "TASK_EXECUTION_TIMEOUT_BASE_SECONDS", "TASK_EXECUTION_TIMEOUT_ENV",
+    "TASK_EXECUTION_TIMEOUT_PER_CASE_SECONDS", "TASK_EXECUTION_TIMEOUT_SECONDS", "WARM_UP",
     "_CANDIDATE_BUILD_RELATIVE", "_CANDIDATE_RUNTIME_SUFFIXES", "_CANDIDATE_RUNTIME_TOP_LEVEL", "_ExecutionContext",
     "_NATIVE_PRIMITIVE_TYPES", "_NATIVE_QUICK_SHIM_HELPERS",
     "_NATIVE_QUICK_SHIM_INPUTS", "_PerformanceLanes", "_SIDECAR_DTYPE_ALIASES", "_SIDECAR_DTYPE_ITEMSIZE",
@@ -51,7 +52,8 @@ __all__ = [
     "_apply_assigned_device", "_archive_retained_profiles", "_assert_evaluate_devices", "_assert_input_adapter_api",
     "_assert_input_adapter_binding", "_assert_repository_profiler_script", "_assert_request_binding",
     "_assert_safe_child_name", "_assert_task_relative_imports", "_atomic_json", "_atomic_torch_fixture",
-    "_base_report", "_benchmark_accuracy", "_build_execution_request", "_candidate_entry", "_candidate_excluded",
+    "_base_report", "_benchmark_accuracy", "_build_execution_request", "_candidate_build_artifact_manifest",
+    "_candidate_entry", "_candidate_excluded",
     "_candidate_root", "_candidate_tree_sha256", "_canonical_sha256", "_case_raw_profile_paths", "_check_nan_inf",
     "_child_profiler_report", "_classify_repeat_fingerprint", "_cleanup_execution_context",
     "_cleanup_frozen_native_fixture",
@@ -95,7 +97,8 @@ __all__ = [
     "_request_fixture_document",
     "_request_scratch", "_require_allowed_profile_dir", "_require_parent_frozen_native_fixture",
     "_require_real_directory", "_require_real_read_only_tree", "_require_regular", "_require_snapshot",
-    "_required_relative_path", "_resolve_child_run_id", "_resolve_configured_python", "_resolve_device",
+    "_require_snapshot_build_artifacts", "_required_relative_path", "_resolve_child_run_id",
+    "_resolve_configured_python", "_resolve_device",
     "_resolve_execution_request", "_resolve_input_groups", "_resolve_manifest_path", "_resolve_model_constructor",
     "_resolve_precision_repeats", "_resolve_reference_overflow_threshold",
     "_resolve_request_bundle", "_resolve_request_candidate", "_resolve_request_fixture",
@@ -122,10 +125,11 @@ __all__ = [
     "_validated_native_case_record", "_verify_parent_binding_unchanged", "_workspace_runtime_directory",
     "_write_adapter_proxy", "_write_native_common_fixture", "_write_native_quick_case_index",
     "_write_native_quick_model_shim", "build_evaluation_binding", "build_performance_command",
-    "candidate_tree_sha256", "compare_outputs", "evaluate_workspace", "load_task_module", "main",
-    "materialize_candidate_snapshot", "parse_sidecar", "preflight_workspace", "prepare_adapter_view",
-    "profile_tree_sha256", "resolve_staged_bundle", "run_performance_workspace", "run_precision_workspace",
-    "runner_module_path", "seed_everything", "stage_workspace", "tree_sha256", "verify_evidence_report",
+    "candidate_build_artifact_manifest", "candidate_tree_sha256", "compare_outputs", "evaluate_workspace",
+    "load_task_module", "main", "materialize_candidate_snapshot", "parse_sidecar", "preflight_workspace",
+    "prepare_adapter_view", "profile_tree_sha256", "resolve_staged_bundle", "run_child_process_group",
+    "run_performance_workspace", "run_precision_workspace", "runner_module_path", "seed_everything",
+    "stage_workspace", "tree_sha256", "verify_evidence_report",
 ]
 
 import concurrent.futures
@@ -177,7 +181,9 @@ from npubench_core import (  # noqa: F401  re-exported runner surface
     SIDECAR_DESCRIPTOR_SCHEMA,
     SNAPSHOT_DIRNAME,
     StagedBundle,
+    TASK_EXECUTION_TIMEOUT_BASE_SECONDS,
     TASK_EXECUTION_TIMEOUT_ENV,
+    TASK_EXECUTION_TIMEOUT_PER_CASE_SECONDS,
     TASK_EXECUTION_TIMEOUT_SECONDS,
     WARM_UP,
     _CANDIDATE_BUILD_RELATIVE,
@@ -197,6 +203,7 @@ from npubench_core import (  # noqa: F401  re-exported runner surface
     _assert_safe_child_name,
     _atomic_json,
     _base_report,
+    _candidate_build_artifact_manifest,
     _candidate_entry,
     _candidate_excluded,
     _candidate_root,
@@ -242,6 +249,7 @@ from npubench_core import (  # noqa: F401  re-exported runner surface
     _require_real_read_only_tree,
     _require_regular,
     _require_snapshot,
+    _require_snapshot_build_artifacts,
     _required_relative_path,
     _resolve_configured_python,
     _resolve_execution_request,
@@ -412,6 +420,20 @@ from npubench_profile import (  # noqa: F401  re-exported runner surface
     _validated_expected_valid_cases,
 )
 
+from npubench_internal_exec import (  # noqa: F401  re-exported runner surface
+    _apply_assigned_device,
+    _child_profiler_report,
+    _dispatch_execution_verb,
+    _execute_fixture_verb,
+    _execute_performance_verb,
+    _execute_precision_verb,
+    _execute_preflight_verb,
+    _internal_execute_request,
+    _preflight_workspace_in_process,
+    _resolve_child_run_id,
+    build_performance_command,
+)
+
 
 from npubench_determinism import (  # re-exported runner surface
     PRECISION_BINDING_HISTORY_FILENAME,
@@ -457,10 +479,17 @@ RUNNER_MODULE_FILENAMES: tuple[str, ...] = (
     "npubench_core.py",
     "npubench_determinism.py",
     "npubench_fixture.py",
+    "npubench_internal_exec.py",
     "npubench_precision.py",
     "npubench_profile.py",
     "npubench_inputs.py",
 )
+
+
+# Public handles for the two helpers the hermetic UT suite drives directly, so
+# tests no longer reach through the protected underscore names.
+candidate_build_artifact_manifest = _candidate_build_artifact_manifest
+run_child_process_group = _run_child_process_group
 
 
 def preflight_workspace(
@@ -476,11 +505,13 @@ def preflight_workspace(
     throwing into O2.5.  A successful report contains the binding digest which
     O5/finalize can bind to later candidate evidence.
     """
-    timeout_seconds = _resolve_task_execution_timeout(timeout_seconds)
     context: _ExecutionContext | None = None
     try:
         if isolated:
             bundle = resolve_staged_bundle(Path(workspace))
+            timeout_seconds = _resolve_task_execution_timeout(
+                timeout_seconds, n_cases=len(bundle.sidecar_cases)
+            )
             binding = build_evaluation_binding(Path(workspace), bundle=bundle)
             context = _create_execution_context(
                 Path(workspace), bundle=bundle, candidate_dir=None, binding=binding, verb="preflight"
@@ -509,262 +540,6 @@ def preflight_workspace(
     if context is not None:
         _cleanup_execution_context(context)
     return result
-
-
-def _preflight_workspace_in_process(workspace: Path) -> dict[str, Any]:
-    """Internal child-only implementation that imports the untrusted task."""
-    try:
-        bundle = resolve_staged_bundle(workspace)
-        module = load_task_module(bundle.task_path, bundle.root, role="reference")
-        api = _validate_reference_api(module)
-        binding = build_evaluation_binding(workspace, bundle=bundle)
-        _assert_input_adapter_api(api, binding)
-        if api.get("input_provider") == "sidecar_descriptor":
-            _validate_sidecar_descriptors(bundle.sidecar_cases)
-        result = _base_report("preflight", status="PASS", binding=binding)
-        result.update(
-            {
-                "task_path": str(bundle.task_path),
-                "sidecar_path": str(bundle.sidecar_path),
-                "sidecar_encoding": bundle.sidecar_encoding,
-                "case_count": len(bundle.sidecar_cases),
-                "task_api": api,
-            }
-        )
-    except (NpuBenchRunnerError, OSError, ValueError, SyntaxError, ImportError) as exc:
-        result = _base_report("preflight", status="ERROR")
-        result["reason"] = str(exc)
-    return result
-
-
-def _apply_assigned_device(request: dict[str, Any]) -> None:
-    """Pin the child to its ONE assigned NPU before any torch/torch_npu import.
-
-    Full 8-card visibility makes torch_npu negotiate an HCCL collective world
-    at first device use; on shared-mode cards that init faults with acl error
-    507035 (2026-08-22 BAM/SDPA/CoT on lanes 1-3, while single-card
-    ASCEND_RT_VISIBLE_DEVICES runs work fine — stack traceback shows
-    libhccl.so during the first tensor move).
-    """
-    assigned_device = request.get("device")
-    if isinstance(assigned_device, int) and assigned_device >= 0:
-        os.environ["ASCEND_RT_VISIBLE_DEVICES"] = str(assigned_device)
-        request["device"] = 0
-
-
-def _execute_preflight_verb(
-    bundle: StagedBundle, binding: Mapping[str, Any], run_id: str | None
-) -> dict[str, Any]:
-    """Child-side ``preflight``: import the task and validate its input API."""
-    module = load_task_module(bundle.task_path, bundle.root, role="reference")
-    api = _validate_reference_api(module)
-    _assert_input_adapter_api(api, binding)
-    if api.get("input_provider") == "sidecar_descriptor":
-        _validate_sidecar_descriptors(bundle.sidecar_cases)
-    result = _base_report("preflight", status="PASS", binding=binding, run_id=run_id)
-    result.update(
-        {
-            "sidecar_encoding": bundle.sidecar_encoding,
-            "case_count": len(bundle.sidecar_cases),
-            "task_api": api,
-        }
-    )
-    return result
-
-
-def _execute_precision_verb(
-    bundle: StagedBundle,
-    candidate: Path | None,
-    binding: Mapping[str, Any],
-    request: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Child-side ``precision``: run the three checks against the candidate."""
-    if candidate is None:
-        raise NpuBenchRunnerError("isolated precision execution requires a candidate snapshot")
-    result = _run_precision(
-        bundle,
-        candidate,
-        device=request.get("device"),
-        seed=int(request.get("seed", DEFAULT_SEED)),
-        binding=binding,
-    )
-    result["run_id"] = str(request.get("run_id") or result.get("run_id"))
-    return result
-
-
-def _execute_fixture_verb(
-    bundle: StagedBundle,
-    candidate: Path | None,
-    binding: Mapping[str, Any],
-    request: Mapping[str, Any],
-    run_id: str,
-) -> dict[str, Any]:
-    """Child-side ``fixture``: materialize the shared native perf fixture."""
-    if candidate is None:
-        raise NpuBenchRunnerError("isolated native fixture requires a candidate snapshot")
-    fixture_dir = _request_scratch(request) / "native_fixture"
-    if fixture_dir.exists():
-        raise NpuBenchRunnerError("isolated native fixture output already exists")
-    fixture_dir.mkdir(mode=0o700)
-    native_manifest = _materialize_native_perf_fixture(
-        fixture_dir,
-        bundle,
-        candidate,
-        binding=binding,
-        seed=int(request.get("seed", DEFAULT_SEED)),
-        write_adapter_manifest=False,
-    )
-    result = _base_report("fixture", status="PASS", binding=binding, run_id=run_id)
-    result.update(
-        {
-            "fixture_relative": "native_fixture",
-            "fixture_sha256": native_manifest["fixture_sha256"],
-            "case_count": native_manifest["case_count"],
-        }
-    )
-    return result
-
-
-def _execute_performance_verb(
-    bundle: StagedBundle,
-    candidate: Path | None,
-    binding: Mapping[str, Any],
-    request: Mapping[str, Any],
-    *,
-    fixture_root: Path | None,
-    run_id: str,
-) -> dict[str, Any]:
-    """Child-side ``performance``: drive the bundled quick profiler once."""
-    if candidate is None:
-        raise NpuBenchRunnerError("isolated performance execution requires a candidate snapshot")
-    if fixture_root is None:
-        raise NpuBenchRunnerError("isolated performance requires a parent-frozen native fixture")
-    scratch = _request_scratch(request)
-    adapter = prepare_adapter_view(
-        scratch,
-        candidate,
-        bundle=bundle,
-        binding=binding,
-        run_id=run_id,
-        allow_existing_native_fixture=True,
-    )
-    device = request.get("device")
-    if isinstance(device, bool) or not isinstance(device, int):
-        raise NpuBenchRunnerError("isolated performance request has invalid device")
-    native = _prepare_native_quick_adapter(
-        adapter,
-        fixture_root,
-        binding=binding,
-    )
-    return _child_profiler_report(
-        adapter,
-        scratch,
-        binding,
-        native,
-        device=device,
-        run_id=run_id,
-        profiler_script=Path(str(request.get("profiler_script", ""))),
-    )
-
-
-def _child_profiler_report(
-    adapter: Path,
-    scratch: Path,
-    binding: Mapping[str, Any],
-    native: Mapping[str, Any],
-    *,
-    device: int,
-    run_id: str,
-    profiler_script: Path,
-) -> dict[str, Any]:
-    """Invoke the repository quick profiler once and report what it returned."""
-    command = build_performance_command(
-        adapter,
-        device=device,
-        run_id=run_id,
-        profiler_script=profiler_script,
-    )
-    completed = subprocess.run(command, cwd=str(adapter), text=True, capture_output=True, check=False)
-    result = _base_report(
-        "performance",
-        status="PASS" if completed.returncode == 0 else "FAIL",
-        binding=binding,
-        run_id=run_id,
-    )
-    result.update(
-        {
-            "returncode": int(completed.returncode),
-            "command": command,
-            "adapter_relative": str(adapter.relative_to(scratch)),
-            "native_fixture_sha256": native["fixture_sha256"],
-            "stdout_tail": _output_tail(completed.stdout),
-            "stderr_tail": _output_tail(completed.stderr),
-        }
-    )
-    return result
-
-
-def _resolve_child_run_id(request: Mapping[str, Any], verb: str) -> str:
-    """Return the run id this child reports under, generating one when allowed."""
-    if verb in {"fixture", "performance"}:
-        return str(request.get("run_id") or uuid.uuid4().hex)
-    return str(request.get("run_id") or None)
-
-
-def _dispatch_execution_verb(
-    verb: str,
-    bundle: StagedBundle,
-    candidate: Path | None,
-    binding: Mapping[str, Any],
-    request: dict[str, Any],
-    *,
-    fixture_root: Path | None,
-    run_id: str,
-) -> dict[str, Any]:
-    """Route one already-verified request to its child-side verb handler."""
-    _apply_assigned_device(request)
-    if verb == "preflight":
-        return _execute_preflight_verb(bundle, binding, run_id)
-    if verb == "precision":
-        return _execute_precision_verb(bundle, candidate, binding, request)
-    if verb == "fixture":
-        return _execute_fixture_verb(bundle, candidate, binding, request, run_id)
-    if verb == "performance":
-        return _execute_performance_verb(
-            bundle, candidate, binding, request, fixture_root=fixture_root, run_id=run_id
-        )
-    raise NpuBenchRunnerError(f"unsupported internal execution verb: {verb}")
-
-
-def _internal_execute_request(request_path: Path, *, verb: str) -> dict[str, Any]:
-    """Child-only task/candidate executor; it never opens state or evidence."""
-    binding: Mapping[str, Any] | None = None
-    run_id: str | None = None
-    try:
-        bundle, candidate, binding, request, fixture_root = _resolve_execution_request(request_path)
-        run_id = _resolve_child_run_id(request, verb)
-        return _dispatch_execution_verb(
-            verb, bundle, candidate, binding, dict(request), fixture_root=fixture_root, run_id=run_id
-        )
-    except Exception as exc:
-        # A task import/fixture error is still a response to one verified
-        # parent request.  Preserve that binding when it is already available
-        # so the parent can surface the actionable child reason rather than
-        # reporting a misleading "binding differs" infrastructure failure.
-        # The catch is deliberately ``Exception`` and not ``BaseException``:
-        # the interpreter's own shutdown signals are not task failures and
-        # must escape this catch-all unchanged, which they do by not being
-        # ``Exception`` subclasses.
-        # 2026-08-22 (BAM 507035): candidate kernels can FAULT the NPU device
-        # (acl error 507035) and torch surfaces that as RuntimeError — outside
-        # the historical catch tuple — so the child died with a bare traceback
-        # and the parent reported "no machine-readable report", classifying a
-        # worker-fixable kernel fault as infra-terminal.  Catch EVERYTHING and
-        # emit an ERROR report: the parent then records a measured FAIL and
-        # the FSM routes the fix back to the worker.
-        result = _base_report(verb, status="ERROR", binding=binding, run_id=run_id)
-        result["reason"] = f"{type(exc).__name__}: {exc}"
-        return result
 
 
 def _materialize_native_perf_fixture(
@@ -901,11 +676,13 @@ def run_precision_workspace(
 ) -> dict[str, Any]:
     """Run precision in a scrubbed child process and write durable evidence."""
     workspace = Path(workspace)
-    timeout_seconds = _resolve_task_execution_timeout(timeout_seconds)
     context: _ExecutionContext | None = None
     try:
         if isolated:
             bundle = resolve_staged_bundle(workspace)
+            timeout_seconds = _resolve_task_execution_timeout(
+                timeout_seconds, n_cases=len(bundle.sidecar_cases)
+            )
             binding = build_evaluation_binding(workspace, candidate_dir, bundle=bundle)
             context = _create_execution_context(
                 workspace,
@@ -1049,46 +826,6 @@ def _construct_precision_models(
     return reference_model, candidate_model, device_value
 
 
-def build_performance_command(
-    adapter_dir: Path,
-    *,
-    device: int,
-    run_id: str,
-    profiler_script: Path | None = None,
-) -> list[str]:
-    """Build the fixed quick W3/R5/keep-profile command without executing it.
-
-    The NPUKernelBench adapter supplies frozen inputs through generated local
-    shims, then delegates timing and CSV parsing to the existing repository
-    quick profiler engine.  The generic shell launcher is intentionally not
-    used here: its current quick branch drops ``--keep-prof`` before it
-    reaches that engine.
-    """
-    if isinstance(device, bool) or not isinstance(device, int) or device < 0:
-        raise NpuBenchRunnerError("performance device must be a non-negative integer")
-    if not _safe_prof_tag(run_id):
-        raise NpuBenchRunnerError("run_id is not safe for --prof-tag")
-    script = Path(profiler_script) if profiler_script is not None else _default_profiler_summary()
-    _require_regular(script, "msprof profiler summary script")
-    command = [
-        str(sys.executable),
-        str(script),
-        "--quick",
-        "--warmup",
-        str(WARM_UP),
-        "--device",
-        str(device),
-        "--keep-prof",
-        "--repeats",
-        str(REPEATS),
-        "--output-dir",
-        str(Path(adapter_dir)),
-        "--prof-tag",
-        run_id,
-    ]
-    return command
-
-
 def run_performance_workspace(
     workspace: Path,
     candidate_dir: Path,
@@ -1111,10 +848,12 @@ def run_performance_workspace(
     adversarial same-UID sandbox guarantee.
     """
     workspace = Path(workspace)
-    timeout_seconds = _resolve_task_execution_timeout(timeout_seconds)
     lanes = _PerformanceLanes(run_id=uuid.uuid4().hex)
     try:
         bundle = resolve_staged_bundle(workspace)
+        timeout_seconds = _resolve_task_execution_timeout(
+            timeout_seconds, n_cases=len(bundle.sidecar_cases)
+        )
         binding = build_evaluation_binding(workspace, candidate_dir, bundle=bundle)
         _validate_requested_lease(lease_manifest, role="performance", device=device)
         if isolated:

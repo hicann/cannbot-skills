@@ -712,9 +712,6 @@ class FinalizeReport:
     skipped_names: list[str] = field(default_factory=list)
     finalized_marker: Optional[Path] = None
     errors: list[str] = field(default_factory=list)
-    # P0acp 2026-05-10: KB auto-promote pipeline result (None if no pending
-    # markers were found at finalize time)
-    kb_auto_promote: Optional[dict] = None
     # DEBT-100 (2026-05-20): True if finalize successfully ran `git add` on the
     # archive directory; False if git-add was skipped (e.g. not a repo) or
     # failed; None if not attempted yet (e.g. early-skip path).

@@ -113,9 +113,7 @@ python3 src/scripts/precision_eval_two_tier.py current_task --json /tmp/p2t.json
 在 verification.json `precision.pass_a.case_detail[i]` 加字段
 `smallval_rule_fired: true` + `smallval_evidence`，并把这些 case
 算进 `tier1_pass`。规则参考：
-`src/skills/references/target/ascendc/PRECISION_STANDARD_v2.1.md` §4.5.3。
-KB 索引：`src/skills/references/KB_INDEX.md` "Vendor-authoritative
-Standards" 区块。
+`kb/okf/reference/porter/precision/precision_standard_v2_1.md` §4.5.3。
 
 ### Pass A / Pass B / Det / Perf checklist
 

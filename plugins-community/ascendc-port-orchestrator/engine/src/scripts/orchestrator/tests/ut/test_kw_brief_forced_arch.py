@@ -14,11 +14,14 @@ forced-SIMD marker in op_classification.json), the kw_brief phase block MUST:
   - emit an "ARCHITECTURE IS FIXED" instruction block telling kw to implement
     the forced architecture, NOT run the SIMT_VS_SIMD decision tree, NOT
     override to another architecture, and that architecture-change is a
-    ko-stage (post-precision, performance-driven) decision;
-  - NOT point kw at the SIMT_VS_SIMD decision tree (KB manifest suppression).
+    ko-stage (post-precision, performance-driven) decision.
 
 Non-forced ops are UNCHANGED — they still get the cold-start phases without the
 forced block (the SIMT_VS_SIMD decision tree remains available to them).
+
+（2026-08 OKF-only 迁移注：原先「KB manifest 中抑制 SIMT_VS_SIMD_DECISION 指针」
+的负向措施随 legacy manifest 渲染一起退役；正向指令块 `_forced_architecture_block`
+保留，b-tier 知识指针由 OKF 检索产出。）
 
 Root cause: kw was given a forced-SIMT classification, but during Phase A ran
 the SIMT_VS_SIMD decision tree itself, re-classified selective_scan
@@ -43,7 +46,6 @@ from briefs.kw_brief import (  # noqa: E402
     _forced_architecture_block,
     _phase_instructions_block,
 )
-from briefs._common import kb_manifest_block  # noqa: E402
 
 
 # --- marker detection ------------------------------------------------------
@@ -173,32 +175,3 @@ def test_phase_block_nonforced_unchanged(tmp_path):
     assert "ARCHITECTURE IS FIXED" not in a
     assert "ARCHITECTURE IS FIXED" not in b
     assert a == b  # forced-block injection is the ONLY difference, and it's absent
-
-
-def test_kb_manifest_suppresses_decision_tree_for_forced(tmp_path):
-    """KB manifest for a forced-arch op does NOT load SIMT_VS_SIMD_DECISION."""
-    ws = _ws(tmp_path, {
-        "op_class_tags": ["SIMT", "migration"],
-        "force_simt": True,
-        "kb_recommendations": [
-            {"path": "target/ascendc/SIMT_VS_SIMD_DECISION.md"},
-        ],
-    })
-    manifest = kb_manifest_block(
-        "selective_scan", workspace=ws, target="a5", force_legacy_kb=True,
-    )
-    assert "SIMT_VS_SIMD_DECISION" not in manifest
-
-
-def test_kb_manifest_keeps_decision_tree_for_nonforced(tmp_path):
-    """Non-forced op still gets the SIMT_VS_SIMD decision tree if recommended."""
-    ws = _ws(tmp_path, {
-        "op_class_tags": ["scatter-gather"],
-        "kb_recommendations": [
-            {"path": "target/ascendc/SIMT_VS_SIMD_DECISION.md"},
-        ],
-    })
-    manifest = kb_manifest_block(
-        "some_scatter_op", workspace=ws, target="a5", force_legacy_kb=True,
-    )
-    assert "SIMT_VS_SIMD_DECISION" in manifest

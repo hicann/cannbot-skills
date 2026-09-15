@@ -140,7 +140,7 @@ peer-item with explicit cross-reference. Avoid creating a 4th
 
 **Detection**:
 - About to spawn a probe/researcher/expert query
-- Authoritative source exists locally and hasn't been checked: `~/workspace/cann/` (CANN source, allowed outside NPUKernelBench), `${CLAUDE_PLUGIN_ROOT}/kb/` (KB, canonical — `merged_skills/_kb/` is historical, removed), `${CLAUDE_PLUGIN_ROOT}/kb/hardware/probe_findings/` (prior probe), relevant man pages at `/usr/local/Ascend/cann-9.0.0/x86_64-linux/include/`
+- Authoritative source exists locally and hasn't been checked: `~/workspace/cann/` (CANN source, allowed outside NPUKernelBench), `${CLAUDE_PLUGIN_ROOT}/kb/` (KB, canonical — `merged_skills/_kb/` is historical, removed), `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/hardware/` (prior probe cards), relevant man pages at `/usr/local/Ascend/cann-9.0.0/x86_64-linux/include/`
 - hiascend.com page hasn't been navigated yet for an AscendC API question
 
 **Warn conditions**: spawning a search-like agent without first doing `grep` / `Read` against a plausible local source.
@@ -325,7 +325,7 @@ incident names may still appear in archived evidence and the internal FSM's
 **Source**: 2026-04-23 op#24 session. Precision-probe produced "44/50 PASS with clamped cache_position" from `probes/03_validate_kernel_with_clamped_cp.py`. I wrote OL-86 (KB), DEBT-041, DEBT-042, REPORT op#24 row — all committed + pushed in commits `b8e2b23` + `754cded`. User challenged the numbers, I ran orchestrator's own independent verifier, found the probe script had THREE defects (hardcoded tolerance, `break`-on-crash incomplete run, tautological ref-vs-ref-on-clamped-data comparison). **Real numbers completely different**. Reverted both commits in `a6d6a38`, archived OL-86, filed corrected DEBT entries.
 
 **Detection**:
-- About to write/edit KB entry (`OPERATIONAL_KNOWLEDGE.md` / `ERROR_CORRECTIONS.md` / `PLATFORM_BUGS.md` / `patterns/`) OR DEBT entry OR REPORT.md row OR PROGRESS-to-output archive
+- About to write/edit KB entry（bundled b-tier = `kb/okf/**` 卡；原 OPERATIONAL_KNOWLEDGE / ERROR_CORRECTIONS / PLATFORM_BUGS / patterns 已卡片化）OR DEBT entry OR REPORT.md row OR PROGRESS-to-output archive
 - The factual basis is an agent-produced artifact (probe_report.md, optimization_log.md, determinism_report.md, verification.json written by worker)
 - Orchestrator has NOT independently re-verified the core claim with the mode-specific authoritative harness and an independent performance run
 
@@ -790,7 +790,7 @@ This is the opposite of C7 (premature-stop-at-checkpoint, which fires when *unfi
 - Verdict combines `verification_ascendc.py` tool output (ours-vs-CANN strict-eq) with OL-109 T1/T2 (vs CPU) in the same sentence without clear delineation
 
 **Block conditions**:
-- About to label a result as "T2 PASS" when probe data shows `ours_MERE < threshold(dtype)` (that's T1 PASS by literal definition; T2 is for when T1 fails). Refresh OL-109 from `OPERATIONAL_KNOWLEDGE.md` before labeling.
+- About to label a result as "T2 PASS" when probe data shows `ours_MERE < threshold(dtype)` (that's T1 PASS by literal definition; T2 is for when T1 fails). Refresh OL-109 from `kb/okf/runbooks/field-notes/precision/ol-109-two-tier-precision-verdict.md` before labeling.
 - About to write multiple fractions in the same row whose denominators differ without prefixed clarification ("of 50 benchmark cases" / "of 45 architecturally-supported").
 - About to write any precision verdict where the wording could be read as either "ours-vs-CPU" or "ours-vs-CANN" without explicit "vs X" suffix.
 
@@ -813,7 +813,7 @@ This is the opposite of C7 (premature-stop-at-checkpoint, which fires when *unfi
 ```
 
 Before committing a precision-verdict row:
-1. Open `OPERATIONAL_KNOWLEDGE.md` and re-read OL-109's literal `PASS_T1 ⟺ ...` and `PASS_T2 ⟺ ...` definitions.
+1. Open `kb/okf/runbooks/field-notes/precision/ol-109-two-tier-precision-verdict.md` and re-read OL-109's literal `PASS_T1 ⟺ ...` and `PASS_T2 ⟺ ...` definitions.
 2. State which inequality holds for the data: `ours_MERE < threshold(dtype)` (→T1) or `ours_MERE ≤ CANN_MERE` (→T2).
 3. The fraction's denominator MUST be the total number of benchmark cases. If you want to report a "reachable" subset, do it as a SECOND fraction next to the primary, clearly labeled.
 4. After writing the row, re-read it as a stranger: would they unambiguously know which standard met which fraction with what denominator?
@@ -868,22 +868,22 @@ After fo-1 was finally invoked, it produced exactly the per-sub-op gap analysis 
 
 ### C29: Soft-prompt KB-load compliance failure — orchestrator/agent skips arch-specific levers because KB Manifest doesn't enforce listed file-loads
 
-**Source**: 2026-05-03 op#9 9_TopKTopP fo-1 → user pushback chain. fo-1's MANDATORY KB Manifest in the agent prompt listed `hardware/target/ascend950pr.md` as a file to LOAD. fo-1's actual `## KB Manifest LOADED` section in fused_analysis.md did **NOT include `hardware/target/ascend950pr.md`** AND did NOT include `OPERATIONAL_KNOWLEDGE.md` (where OL-54 reg-based lives). Result: fo-1 missed the A5-specific reg-based optimization path that was explicitly documented in KB. User caught it: "你是不是把融合算子可以做的优化都试过了？A5 特有的 reg base 是否也试过了？" Honest answer: NO. User then escalated: "这不是你让 worker 去试，而是 optimizer 和 fused optimizer 自己会去试，除非我们的知识库完全没有这方面的指引… pipeline 出了问题，导致已有的知识不能被贯彻… 我们制定的规则，我们的 harness 根本做不到约束你去按照步骤执行".
+**Source**: 2026-05-03 op#9 9_TopKTopP fo-1 → user pushback chain. fo-1's MANDATORY KB Manifest in the agent prompt listed `kb/okf/runbooks/hardware/target-ascend950pr.md` as a file to LOAD. fo-1's actual `## KB Manifest LOADED` section in fused_analysis.md did **NOT include `kb/okf/runbooks/hardware/target-ascend950pr.md`** AND did NOT include `OPERATIONAL_KNOWLEDGE.md` (where OL-54 reg-based lives). Result: fo-1 missed the A5-specific reg-based optimization path that was explicitly documented in KB. User caught it: "你是不是把融合算子可以做的优化都试过了？A5 特有的 reg base 是否也试过了？" Honest answer: NO. User then escalated: "这不是你让 worker 去试，而是 optimizer 和 fused optimizer 自己会去试，除非我们的知识库完全没有这方面的指引… pipeline 出了问题，导致已有的知识不能被贯彻… 我们制定的规则，我们的 harness 根本做不到约束你去按照步骤执行".
 
 This catalog entry catches the **soft-prompt → soft-compliance** failure: the agent prompt is text "load these files", the agent decides what to actually load, and `workflow_critic` doesn't verify the LOADED list. The KB has the knowledge; the pipeline can't enforce its delivery to agents. User's framing: "这比无法生成合格算子要严重的多. 我们无法提供合格的产品, 整个项目就会失败".
 
 **Detection** — flagged when ALL of these hold:
 - About to spawn an aog-* agent (aog-fused-optimizer / aog-kernel-optimizer / aog-precision-probe / aog-kernel-worker)
 - The op's target is `a5` (Ascend950PR) — A5-specific KB content exists for arch primitives
-- The agent prompt's MANDATORY KB Manifest LOADED list contains `OPERATIONAL_KNOWLEDGE.md` OR `hardware/target/ascend950pr.md`
+- The agent prompt's MANDATORY KB Manifest LOADED list contains OL 经验卡（`kb/okf/runbooks/`，原 OPERATIONAL_KNOWLEDGE 已卡片化）OR `kb/okf/runbooks/hardware/target-ascend950pr.md`
 - A prior agent return on this op produced a verdict (`STRUCTURAL_CEILING`, `PERF_PLATEAU`, etc.) but the verdict's accompanying `## KB Manifest LOADED` block does NOT cite the architecturally-relevant entries
 
 **Block conditions**:
 - About to spawn the next agent or commit a verdict when the prior agent's KB Manifest LOADED block is incomplete relative to the prompt's MANDATORY list AND the missing entries match the symptom (e.g., scalar-pipe-bound + missing OL-54 + missing ascend950pr.md §Reg-based).
-- About to write a directive (kw-N, ko-N, etc.) without first checking KB_INDEX.md §By Symptom for the dominant symptom of the op's current state.
+- About to write a directive (kw-N, ko-N, etc.) without first running OKF 症状检索（`okf_kb.sh search --query "<symptom>"` 或 grep `kb/okf/runbooks/`）for the dominant symptom of the op's current state.
 
 **Correct response**:
-1. Before spawning ANY agent on a perf-investigation op, read `${CLAUDE_PLUGIN_ROOT}/kb/KB_INDEX.md §By Symptom` (V3.7.10+) and identify the symptom rows that match the op's current state (msprof / verification.json contents).
+1. Before spawning ANY agent on a perf-investigation op, query OKF by symptom (`${CLAUDE_PLUGIN_ROOT}/engine/src/scripts/okf/okf_kb.sh search --query "<dominant symptom + target>"`，或 grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`) and identify the cards that match the op's current state (msprof / verification.json contents).
 2. The agent prompt MUST be augmented with the symptom-keyed required-reading list (or the agent prompt MUST already contain the V3.7.10 symptom-keyed LOADED template and you verify the agent populated it).
 3. After agent return, BEFORE updating REPORT.md / committing / proceeding, check the agent's `## KB Manifest LOADED` block against the symptom-required list. If missing, REJECT the verdict and re-spawn (or supplement the analysis manually).
 4. workflow_critic SC5 (V3.7.10) fires when an A5 + scalar-bound + ceiling verdict misses reg-based citations — that's the structural enforcement. C29 is the orchestrator-side discipline that catches BEFORE the spawn.

@@ -47,15 +47,18 @@ def resolve_c_root(explicit: Optional[str] = None) -> Path:
 
 
 def kb_write_root() -> str:
-    """Deployment target-tier resolver (§6). cannbot deployment: c when a user_kb
-    root is configured (ASCENDC_PORT_USER_KB set OR the default c-root exists — created by
-    init.sh), else b (bundled). Resolved per-invocation.
+    """Deployment target-tier resolver (§6). The bundled b-tier no longer exists
+    (OKF-only migration 2026-08: bundled knowledge = read-only `kb/okf`), so the
+    ONLY writable tier is the user-local c-tier — always "customer". With no
+    user_kb configured, writes resolve to the default c-root
+    `~/.ascendc-port/user_kb` (created on demand by `CannbotCProvider`).
+    Resolved per-invocation.
     """
     if os.environ.get("ASCENDC_PORT_USER_KB"):
         return "customer"
     if (Path.home() / ".ascendc-port" / "user_kb").is_dir():
         return "customer"
-    return "b"
+    return "customer"
 
 
 class CannbotCProvider:

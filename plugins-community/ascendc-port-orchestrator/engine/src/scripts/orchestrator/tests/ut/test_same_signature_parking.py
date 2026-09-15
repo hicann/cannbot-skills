@@ -32,6 +32,7 @@ import datetime as _dt
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -427,6 +428,13 @@ def _candidate_mismatch(tree: str) -> _O5:
     )
 
 
+def _candidate_mismatch_with_pass(tree: str) -> _O5:
+    """Variant with one more PASS case — a genuine tier1 pass-count growth."""
+    report = _candidate_mismatch(tree)
+    report.measured["precision"]["cases"].append({"case_idx": 2, "status": "PASS"})
+    return report
+
+
 def test_candidate_case_escalation_parks_at_three(stub_common, monkeypatch, tmp_path):
     recorded, _ = stub_common
     ctx = _ctx(tmp_path)
@@ -445,8 +453,12 @@ def test_candidate_case_counter_resets_on_new_tree(stub_common, monkeypatch, tmp
     _seq_runner(monkeypatch, [_candidate_mismatch("a" * 64)])
     _module_attr(F, "_o5_post_verify")(ctx, _Snap())
     _module_attr(F, "_o5_post_verify")(ctx, _Snap())
-    # Worker changed something (new tree) → progress signal → count restarts.
-    _seq_runner(monkeypatch, [_candidate_mismatch("b" * 64)])
+    # Worker changed something (new tree) AND moved the metrics (a new PASS
+    # case) → progress signal → the per-tree count restarts.  (A new tree
+    # alone is no longer progress: the 2026-09-01 zero-progress guard parks a
+    # churn loop whose failing set and tier1 pass count never move — see
+    # test_zero_progress_park_catches_tree_churn.)
+    _seq_runner(monkeypatch, [_candidate_mismatch_with_pass("b" * 64)])
     _module_attr(F, "_o5_post_verify")(ctx, _Snap())
     assert recorded == ["await_worker"] * 3
     state = state_executor.load_same_signature_state(ctx.workspace)
@@ -454,6 +466,159 @@ def test_candidate_case_counter_resets_on_new_tree(stub_common, monkeypatch, tmp
     assert state["candidate_case"]["last_tree_sha256"] == "b" * 64
     _module_attr(F, "_o5_post_verify")(ctx, _Snap())
     assert recorded == ["await_worker"] * 4, "one round after reset must not park"
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-01 (A3→A5 remeasure review): npubench 'case' key + tree-agnostic
+# zero-progress parking (churn guard).
+# ---------------------------------------------------------------------------
+
+
+def test_case_failure_signature_prefers_npubench_case_key():
+    """npubench precision_report cases key the index as "case" (not case_idx)."""
+    sig = _module_attr(F, "_candidate_case_failure_signature")(
+        {"case": 7, "status": "FAIL", "reason": "MERE 1.2"}
+    )
+    assert sig is not None and sig.startswith("7:FAIL:")
+    # Legacy keys still resolve when "case" is absent.
+    legacy = _module_attr(F, "_candidate_case_failure_signature")(
+        {"case_idx": 3, "status": "FAIL"}
+    )
+    assert legacy is not None and legacy.startswith("3:FAIL:")
+
+
+def test_zero_progress_counter_semantics(tmp_path):
+    e1 = state_executor.record_zero_progress_round(tmp_path, [1, 3], 5)
+    # Set membership is order-insensitive; no pass growth → accumulate.
+    e2 = state_executor.record_zero_progress_round(tmp_path, [3, 1], 5)
+    assert (e1["count"], e2["count"]) == (1, 2)
+    # tier1_pass net growth > 0 → progress → restart at 1.
+    e3 = state_executor.record_zero_progress_round(tmp_path, [1, 3], 6)
+    assert e3["count"] == 1
+    e4 = state_executor.record_zero_progress_round(tmp_path, [1, 3], 6)
+    assert e4["count"] == 2
+    # Failing-set change → restart at 1.
+    e5 = state_executor.record_zero_progress_round(tmp_path, [1], 6)
+    assert e5["count"] == 1
+    # File-backed, co-located with the same-signature state.
+    payload = json.loads((tmp_path / state_executor.SAME_SIGNATURE_STATE_FILE).read_text())
+    assert payload["zero_progress"]["failing_cases"] == ["1"]
+    state_executor.clear_zero_progress_state(tmp_path)
+    e6 = state_executor.record_zero_progress_round(tmp_path, [1], 6)
+    assert e6["count"] == 1
+
+
+def test_zero_progress_unknown_pass_count_fails_closed(tmp_path):
+    state_executor.record_zero_progress_round(tmp_path, [2], None)
+    entry = state_executor.record_zero_progress_round(tmp_path, [2], None)
+    assert entry["count"] == 2, "an unknown pass count must not masquerade as progress"
+
+
+def _churn_mismatch(tree: str, extra_pass: bool = False) -> _O5:
+    """npubench-shaped candidate MISMATCH: same failing case, fresh tree."""
+    cases = [
+        {"case": 0, "status": "PASS"},
+        {"case": 1, "status": "FAIL", "reason": "MERE 1.0372304916381836"},
+    ]
+    if extra_pass:
+        cases.append({"case": 2, "status": "PASS"})
+    passed = sum(1 for case in cases if case["status"] == "PASS")
+    return _O5(
+        "MISMATCH",
+        mismatches=[1],
+        summary="precision FAIL: case 1 MERE over gate",
+        measured={
+            "precision": {
+                "reason": "case 1: MERE 1.0372304916381836 over frozen gate",
+                "passed_case_count": passed,
+                "cases": cases,
+            },
+            "performance": {"evaluation_binding": {"candidate_tree_sha256": tree}},
+        },
+    )
+
+
+def test_zero_progress_park_catches_tree_churn(stub_common, monkeypatch, tmp_path):
+    """Every round re-authors (new tree) so the per-tree counter never
+    accumulates; the failing set + pass count never move → park at round 3.
+    """
+    recorded, _ = stub_common
+    emitted = []
+    monkeypatch.setattr(events, "emit", lambda ws, name, **kw: emitted.append((name, kw)))
+    ctx = _ctx(tmp_path)
+    _seq_runner(monkeypatch, [
+        _churn_mismatch("a" * 64),
+        _churn_mismatch("b" * 64),
+        _churn_mismatch("c" * 64),
+    ])
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert recorded == ["await_worker"] * 2
+    state = state_executor.load_same_signature_state(ctx.workspace)
+    assert state["candidate_case"]["count"] == 1, "per-tree counter resets on re-author"
+    assert state["zero_progress"]["count"] == 2
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert recorded == ["await_worker"] * 2 + ["await_user_decision"]
+    park = next(kw for n, kw in emitted if n == "orchestrator.zero_progress_park")
+    assert park["data"]["failure_class"] == "candidate"
+    assert park["data"]["count"] == 3
+
+
+def test_zero_progress_resets_on_pass_growth(stub_common, monkeypatch, tmp_path):
+    recorded, _ = stub_common
+    ctx = _ctx(tmp_path)
+    _seq_runner(monkeypatch, [
+        _churn_mismatch("a" * 64),
+        _churn_mismatch("b" * 64, extra_pass=True),  # tier1 1→2: real progress
+        _churn_mismatch("c" * 64, extra_pass=True),
+        _churn_mismatch("d" * 64, extra_pass=True),
+    ])
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    state = state_executor.load_same_signature_state(ctx.workspace)
+    assert state["zero_progress"]["count"] == 1, "pass growth restarts the chain"
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert recorded == ["await_worker"] * 3
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert recorded == ["await_worker"] * 3 + ["await_user_decision"]
+
+
+def test_zero_progress_untouched_by_engine_infra_rounds(stub_common, monkeypatch, tmp_path):
+    """216e326e repair-reset synergy: an engine/infra-class round neither
+    increments nor resets the churn chain — it is not a candidate measurement.
+    """
+    recorded, _ = stub_common
+    ctx = _ctx(tmp_path)
+    _seq_runner(monkeypatch, [
+        _churn_mismatch("a" * 64),
+        _churn_mismatch("b" * 64),
+        _engine_o5(),
+        _churn_mismatch("c" * 64),
+    ])
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert state_executor.load_same_signature_state(ctx.workspace)["zero_progress"]["count"] == 2
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())  # engine-class round
+    assert state_executor.load_same_signature_state(ctx.workspace)["zero_progress"]["count"] == 2
+    assert recorded == ["await_worker"] * 3
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert recorded == ["await_worker"] * 3 + ["await_user_decision"]
+
+
+def test_zero_progress_cleared_on_success(stub_common, monkeypatch, tmp_path):
+    recorded, _ = stub_common
+    ctx = _ctx(tmp_path)
+    _seq_runner(monkeypatch, [
+        _churn_mismatch("a" * 64),
+        _churn_mismatch("b" * 64),
+        _O5("VERIFIED", harness_git_state="CLEAN", summary="ok"),
+    ])
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert state_executor.load_same_signature_state(ctx.workspace)["zero_progress"]["count"] == 2
+    res = _module_attr(F, "_o5_post_verify")(ctx, _Snap())
+    assert res is None, "VERIFIED proceeds"
+    assert "zero_progress" not in state_executor.load_same_signature_state(ctx.workspace)
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +841,37 @@ def test_engine_crash_contract_schema_message_whitelisted(monkeypatch, tmp_path)
     assert len(calls) == 1 + _module_attr(agent_dispatch, "_ENGINE_CRASH_RESPAWN_MAX"), (
         "contract-schema message markers are whitelisted even on non-NameError/KeyError types"
     )
+
+
+# ---------------------------------------------------------------------------
+# a3_live / backward shape: the guard must ABSTAIN, not park (2026-09-05)
+# ---------------------------------------------------------------------------
+def test_zero_progress_abstains_when_precision_block_absent():
+    """Only npubench writes `measured["precision"]`; a3_live/backward key by pass name.
+
+    Every zero-progress case above builds its report through `_churn_mismatch()`, which
+    always emits a `precision` block — so none of them exercised the routes that do not.
+    On those routes both reset conditions are unreadable: the failing-case set is always
+    empty (constant fingerprint) and `tier1_pass` is always None, which counts as "no
+    growth". The guard therefore incremented every round and parked after N regardless of
+    real progress. This pins the abstention.
+    """
+    observable = _module_attr(F, "_candidate_precision_signal_observable")
+    park = _module_attr(F, "_maybe_zero_progress_park")
+
+    a3_live_shaped = SimpleNamespace(
+        measured={"pass_a": {"tier1_pass": 30, "tier1_total": 50}},
+        summary="pass_a tier1 30/50",
+    )
+    assert observable(a3_live_shaped) is False
+    assert park(None, a3_live_shaped, None) is None
+
+    # ...and the npubench shape must still be observable, or the guard is off everywhere.
+    npubench_shaped = SimpleNamespace(
+        measured={"precision": {"cases": [{"case": 0, "status": "MISMATCH"}]}},
+        summary="1 mismatch",
+    )
+    assert observable(npubench_shaped) is True
 
 
 if __name__ == "__main__":

@@ -77,8 +77,8 @@ def _check_a5_verify_path_provenance(workspace: Path, vj: dict) -> Optional[str]
 
 _GE_OPHOST_RECIPE_REFERENCE = (
     "Fix: GENERATE the GE op_host by following "
-    "`kb/target/ascendc/patterns/domains/fa_class/"
-    "templates/op_host/GE_HOST_TRANSFORM_RECIPE.md` — CARRY def/infershape "
+    "`templates/fa_class/op_host/GE_HOST_TRANSFORM_RECIPE.md` — CARRY "
+    "def/infershape "
     "from the A3 (arch22) input, REPLACE-HOOK tiling.cpp onto the KB shared "
     "layer (`#include \"wp_fa_host_tiling.h\"` + call `wfh::Calc*` /\n"
     "`wp_fa_host::Calc*`). Prior target implementations may be consulted "

@@ -1122,7 +1122,9 @@ def _candidate_case_failure_signature(case: dict) -> Optional[str]:
     status = str(case.get("status") or case.get("verdict") or "")
     if status.upper() in ("PASS", "SKIPPED"):
         return None
-    idx = case.get("case_idx", case.get("index", "?"))
+    # npubench precision_report cases key the index as "case"; the two-tier
+    # evaluators use "case_idx"/"index".
+    idx = case.get("case", case.get("case_idx", case.get("index", "?")))
     reason = state_executor.normalize_failure_reason(
         case.get("reason") or case.get("MERE") or ""
     )
@@ -1141,8 +1143,55 @@ def _candidate_case_signature(o5) -> str:
     return str(getattr(o5, "summary", "") or "")
 
 
+def _candidate_failing_case_indices(o5) -> list[str]:
+    """Identity of the failing precision-case set — tree-agnostic by design.
+
+    Shares the status filter and the index key chain ("case" first, npubench
+    precision_report shape) with `_candidate_case_failure_signature`, so the
+    zero-progress fingerprint and the per-tree signature see the same set.
+    """
+    indices: list[str] = []
+    for case in _candidate_precision_cases(o5):
+        status = str(case.get("status") or case.get("verdict") or "")
+        if status.upper() in ("PASS", "SKIPPED"):
+            continue
+        indices.append(str(case.get("case", case.get("case_idx", case.get("index", "?")))))
+    return indices
+
+
+def _candidate_tier1_pass_count(o5) -> Optional[int]:
+    """Net-progress probe: tier1 pass count from one O5 report, None if unknown."""
+    measured = getattr(o5, "measured", None)
+    if not isinstance(measured, dict):
+        return None
+    precision = measured.get("precision")
+    if not isinstance(precision, dict):
+        return None
+    pass_a = precision.get("pass_a")
+    candidates = [
+        precision.get("passed_case_count"),
+        pass_a.get("tier1_pass") if isinstance(pass_a, dict) else None,
+        precision.get("tier1_pass"),
+    ]
+    for raw in candidates:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    cases = _candidate_precision_cases(o5)
+    if cases:
+        passed = 0
+        for case in cases:
+            if str(case.get("status") or "").upper() == "PASS" or case.get("tier1_pass") is True:
+                passed += 1
+        return passed
+    return None
+
+
 def _route_await_user_decision_park(
     ctx: OrchestratorContext, o5, *, failure_class: str, count: int, detail: str,
+    guard: str = "P0-1 same-signature",
+    event: str = "orchestrator.same_signature_park",
 ) -> HandlerResult:
     """Park at await_user_decision (never hard-stop) with the class advisory."""
     advisory = ""
@@ -1160,7 +1209,7 @@ def _route_await_user_decision_park(
             "different lane."
         )
     rationale = (
-        f"P0-1 same-signature parking: {count} consecutive identical "
+        f"{guard} parking: {count} consecutive identical "
         f"{failure_class}-class O5 failures (persistent counter, survives "
         f"exit 77/restart). {detail[:600]}{advisory} Halting at "
         "await_user_decision — write user_decision.md to cap-bump, switch "
@@ -1179,7 +1228,7 @@ def _route_await_user_decision_park(
     )
     events.emit(
         ctx.workspace,
-        "orchestrator.same_signature_park",
+        event,
         lane=ctx.lane,
         data={
             "failure_class": failure_class,
@@ -1188,6 +1237,63 @@ def _route_await_user_decision_park(
         },
     )
     return HandlerResult.cont()
+
+
+def _candidate_precision_signal_observable(o5) -> bool:
+    """Does this O5 report carry the per-case precision block the guard reads?
+
+    Only the npubench route writes `measured["precision"]`
+    (`phase_o5._npubench_o5_report`). a3_live and backward go through
+    `phase_o5._record_measured_passes`, which keys `measured` by PASS name
+    (`pass_a` / `pass_b`) and never produces a `precision` key.
+
+    Both of the guard's reset conditions read that block, so without it the guard
+    has no signal at all and degrades into a plain round counter. A guard whose
+    inputs are unobservable must abstain rather than fail closed; the per-tree
+    counter still covers these routes.
+    """
+    measured = getattr(o5, "measured", None)
+    return isinstance(measured, dict) and isinstance(measured.get("precision"), dict)
+
+
+def _maybe_zero_progress_park(ctx: OrchestratorContext, o5, workspace) -> Optional[HandlerResult]:
+    """Park when the failing-case set is unchanged with no tier1 net growth.
+
+    Tree-agnostic churn guard (2026-09-01, A3→A5 remeasure review): the
+    per-tree counter resets whenever the worker re-authors, so a churn loop
+    (small edits every round, metrics never move) escapes it.  This counter
+    keys on the failing-case SET only and parks when the set is unchanged for
+    N rounds with no tier1_pass net growth.
+
+    Abstains entirely when the precision block it reads is absent — see
+    `_candidate_precision_signal_observable`.
+    """
+    if not _candidate_precision_signal_observable(o5):
+        return None
+    zero = state_executor.record_zero_progress_round(
+        workspace,
+        _candidate_failing_case_indices(o5),
+        _candidate_tier1_pass_count(o5),
+    )
+    if zero["count"] < state_executor.ZERO_PROGRESS_PARK_THRESHOLD:
+        return None
+    return _route_await_user_decision_park(
+        ctx,
+        o5,
+        failure_class="candidate",
+        count=zero["count"],
+        detail=(
+            "Same failing case set "
+            f"{zero['failing_cases']} for {zero['count']} consecutive "
+            "O5 candidate rounds with no tier1_pass net growth — the "
+            "worker re-authors every round but the metrics never move "
+            "(churn non-convergence; the per-tree case counter resets "
+            "on every re-author and cannot see this). Mismatch: "
+            + str(getattr(o5, "summary", "") or "")[:200]
+        ),
+        guard="zero-progress",
+        event="orchestrator.zero_progress_park",
+    )
 
 
 def _same_signature_park_route(ctx: OrchestratorContext, o5) -> Optional[HandlerResult]:
@@ -1202,6 +1308,7 @@ def _same_signature_park_route(ctx: OrchestratorContext, o5) -> Optional[Handler
     if verdict in ("VERIFIED", "PROVISIONAL"):
         state_executor.clear_same_signature_state(workspace)
         state_executor.clear_candidate_case_state(workspace)
+        state_executor.clear_zero_progress_state(workspace)
         return None
     classified = _o5_failure_signature_input(o5)
     if classified is None:
@@ -1228,6 +1335,9 @@ def _same_signature_park_route(ctx: OrchestratorContext, o5) -> Optional[Handler
                     "precedent). Mismatch: " + str(getattr(o5, "summary", "") or "")[:200]
                 ),
             )
+        zero_progress_park = _maybe_zero_progress_park(ctx, o5, workspace)
+        if zero_progress_park is not None:
+            return zero_progress_park
         return None
     entry = state_executor.record_same_signature_failure(
         workspace, failure_class, reason, tree_key

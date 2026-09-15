@@ -13,7 +13,8 @@
 Maps `op_meta` → `MigrationLevel ∈ {L1, L2, L3, L4}` per PR #103
 `ascendc-operator-A5-migration` decision tree. Drives kw_brief KB-reference
 injection: each level pulls a different set of guides from
-`src/skills/references/target/ascendc/migration/`.
+`kb/okf/reference/{asc-devkit-vendored,porter}/` (2026-09-05 目录重组后；formerly
+`src/skills/references/target/ascendc/migration/`).
 
 Per Zheng directive 2026-05-16 17:42Z: plugin form, NO if-else outside.
 Heuristics inside this plugin, not scattered across briefs.
@@ -40,8 +41,11 @@ class MigrationLevel(str, enum.Enum):
 class LevelDecision:
     level: MigrationLevel
     rationale: str
-    guides: tuple[str, ...]                     # relative paths under migration/
-    extra_subdirs: tuple[str, ...] = ()         # e.g. ("simt/", "cube/") to inject wholesale
+    guides: tuple[str, ...]                     # relative paths under kb/okf/reference/
+    # 目录下的整棵子树，随 brief 整体注入。2026-09-05 目录重组后，旧的
+    # `migration/<porter 分组>/` 已按上游分类拆入 asc-devkit-vendored/{api,guide}/，
+    # 所以这里是一组新路径而非单个旧目录。
+    extra_subdirs: tuple[str, ...] = ()         # 相对 kb/okf/reference/
     needs_escalation: bool = False              # True iff L4 — caller surfaces
 
 
@@ -118,7 +122,7 @@ class L4TilingIsRegbase:
                     "(softmax/attention) → architectural tiling rework needed "
                     "(OL-159 L4 path)"
                 ),
-                guides=("l4-simt-optimization-guide.md",),
+                guides=("porter/playbook/l4_simt_optimization.md",),
                 needs_escalation=True,
             )
         # OL-185 escape-hatch: non-FA-forward op with IsRegbase tiling → L2 anchor=flat_quant
@@ -129,9 +133,15 @@ class L4TilingIsRegbase:
                 "(gemm/gather/scatter/reduce class per OL-185) → L2 RegBase rewrite "
                 "with flat_quant calibration anchor, NOT L4 escalation"
             ),
-            guides=("l1-implementation-guide.md", "l2-register-based-guide.md",
-                    "l1-l2-implementation-guide.md"),
-            extra_subdirs=("api-overview/",),
+            guides=("porter/playbook/l1_implementation.md", "porter/playbook/l2_register_based.md",
+                    "porter/playbook/l1_l2_implementation.md"),
+            extra_subdirs=("asc-devkit-vendored/api/tensor_layout/",
+                           "asc-devkit-vendored/api/tensor_pointer/",
+                           "asc-devkit-vendored/api/tensor_atom/",
+                           "asc-devkit-vendored/api/tensor_tile/",
+                           "asc-devkit-vendored/api/tensor_struct/",
+                           "asc-devkit-vendored/api/tensor_coord/",
+                           "asc-devkit-vendored/guide/api_overview/",),
         )
 
 
@@ -146,7 +156,7 @@ class L4UbShortage:
             return LevelDecision(
                 level=MigrationLevel.L4,
                 rationale=f"UB budget {ub_kb}KB < 40KB SIMT DCache reserve",
-                guides=("l4-simt-optimization-guide.md",),
+                guides=("porter/playbook/l4_simt_optimization.md",),
                 needs_escalation=True,
             )
         return None
@@ -175,8 +185,14 @@ class L3ScatterGatherSimt:
                         "scatter/gather op with simple indexing + high parallelism "
                         "→ L3 SIMT kernel alongside L1 base"
                     ),
-                    guides=("l1-implementation-guide.md", "l3-simt-optimization-guide.md"),
-                    extra_subdirs=("simt/",),
+                    guides=("porter/playbook/l1_implementation.md", "porter/playbook/l3_simt_optimization.md"),
+                    extra_subdirs=("asc-devkit-vendored/api/sys_var/",
+                                   "asc-devkit-vendored/api/sync/",
+                                   "asc-devkit-vendored/api/scalar_compute/",
+                                   "asc-devkit-vendored/api/simd_atomic/",
+                                   "asc-devkit-vendored/api/cache_ctrl/",
+                                   "asc-devkit-vendored/api/misc/",
+                                   "asc-devkit-vendored/guide/programming_model/",),
                 )
         return None
 
@@ -214,9 +230,12 @@ class L2RegBaseRewrite:
             return LevelDecision(
                 level=MigrationLevel.L2,
                 rationale="; ".join(reasons),
-                guides=("l1-implementation-guide.md", "l2-register-based-guide.md",
-                        "l1-l2-implementation-guide.md"),
-                extra_subdirs=("reg-base-vector/", "memory-base-vector/"),
+                guides=("porter/playbook/l1_implementation.md", "porter/playbook/l2_register_based.md",
+                        "porter/playbook/l1_l2_implementation.md"),
+                extra_subdirs=("asc-devkit-vendored/api/reg_vector/",
+                               "asc-devkit-vendored/api/reg_load/",
+                               "asc-devkit-vendored/api/reg_store/", "asc-devkit-vendored/api/class_api/",
+                               "asc-devkit-vendored/guide/api_overview/"),
             )
         return None
 
@@ -230,8 +249,14 @@ class L1Default:
         return LevelDecision(
             level=MigrationLevel.L1,
             rationale="default — no L2/L3/L4 signals matched",
-            guides=("l1-implementation-guide.md",),
-            extra_subdirs=("api-overview/",),
+            guides=("porter/playbook/l1_implementation.md",),
+            extra_subdirs=("asc-devkit-vendored/api/tensor_layout/",
+                           "asc-devkit-vendored/api/tensor_pointer/",
+                           "asc-devkit-vendored/api/tensor_atom/",
+                           "asc-devkit-vendored/api/tensor_tile/",
+                           "asc-devkit-vendored/api/tensor_struct/",
+                           "asc-devkit-vendored/api/tensor_coord/",
+                           "asc-devkit-vendored/guide/api_overview/",),
         )
 
 
