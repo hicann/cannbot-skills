@@ -92,7 +92,7 @@ cleanup_team_artifacts() {
     if [ -z "$dir" ] || [ "$dir" = "$TEAM_DIR" ]; then
         return 0
     fi
-    rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli" "$dir/.codeartsdoer" "$dir/.cursor" "$dir/.github" "$dir/.copilot"
+    rm -rf "$dir/.opencode" "$dir/.claude" "$dir/.trae" "$dir/.marscode" "$dir/.traecli" "$dir/.codeartsdoer" "$dir/.codex" "$dir/.agents" "$dir/.cursor" "$dir/.github" "$dir/.copilot"
 }
 
 get_expected_skill_count() {
@@ -156,6 +156,7 @@ resolve_project_config_root() {
         claude)   tool_dir_name=".claude" ;;
         trae)     tool_dir_name=".trae" ;;
         codearts) tool_dir_name=".codeartsdoer" ;;
+        codex)    tool_dir_name=".codex" ;;
         cursor)   tool_dir_name=".cursor" ;;
         copilot)  tool_dir_name=".github" ;;
         *)        tool_dir_name=".$tool" ;;
@@ -1907,6 +1908,311 @@ scenario_global_codearts() {
 }
 
 # =============================================================================
+# Codex shared verification helpers
+# =============================================================================
+
+# Source dir of the plugin's codex agent TOML adapters (two shapes exist:
+# agents/codex for most plugins, hooks/codex for the workflow base plugins).
+codex_toml_source_dir() {
+    if [ -d "$TEAM_DIR/agents/codex" ]; then
+        echo "$TEAM_DIR/agents/codex"
+    elif [ -d "$TEAM_DIR/hooks/codex" ]; then
+        echo "$TEAM_DIR/hooks/codex"
+    fi
+}
+
+# Codex agents are standalone TOML adapters installed into .codex/agents/.
+# They must be REGULAR FILES (Codex ignores symlinked TOMLs, openai/codex#15345)
+# and each must point back to its canonical agent .md via __CANNBOT_AGENT_SOURCE__,
+# so Codex executes the same role instructions as Claude Code.
+verify_codex_agent_tomls() {
+    local config_root="$1"
+    local src
+    src="$(codex_toml_source_dir)"
+    if [ -z "$src" ]; then
+        # Agentless plugins (e.g. skill-only triton-op-generator) install no
+        # codex agents at all — nothing to guard here.
+        print_pass "no codex agent TOMLs (agentless plugin, .codex/agents not expected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+        return 0
+    fi
+    local dest="$config_root/agents"
+    if [ ! -d "$dest" ]; then
+        print_fail ".codex/agents/ not created"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+    local expected actual
+    expected=$(find "$src" -maxdepth 1 -name '*.toml' | wc -l)
+    actual=$(find "$dest" -maxdepth 1 -name '*.toml' | wc -l)
+    if [ "$actual" -eq "$expected" ]; then
+        print_pass ".codex/agents/ contains $actual TOML file(s) (expected $expected)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".codex/agents/ contains $actual TOML file(s) (expected $expected)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    local toml symlinks=0 bad_ref=0
+    for toml in "$dest"/*.toml; do
+        [ -f "$toml" ] || continue
+        if [ -L "$toml" ]; then
+            symlinks=$((symlinks + 1))
+        fi
+        # The adapter must reference its canonical agent .md: either the raw
+        # marker (copied verbatim) or the marker resolved at install time to an
+        # absolute path inside the plugin checkout.
+        if ! grep -q '__CANNBOT_AGENT_SOURCE__' "$toml" 2>/dev/null && \
+           ! grep -q "$TEAM_DIR" "$toml" 2>/dev/null; then
+            bad_ref=$((bad_ref + 1))
+        fi
+    done
+    if [ "$symlinks" -eq 0 ]; then
+        print_pass "codex agent TOMLs are regular files (not symlinks, openai/codex#15345)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "$symlinks codex agent TOML(s) are symlinks (Codex ignores symlinked TOMLs)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    if [ "$bad_ref" -eq 0 ]; then
+        print_pass "codex agent TOMLs reference canonical agent md (marker or resolved path)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "$bad_ref codex agent TOML(s) reference neither __CANNBOT_AGENT_SOURCE__ nor the plugin checkout"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+}
+
+# Codex discovers skills from .agents/skills/ (NOT .codex/skills/) — verify the
+# discovery root was created with resolvable per-skill symlinks.
+verify_codex_skill_discovery() {
+    local skills_root="$1"
+    # Nothing to install for skillless plugins (no INCLUDED_SKILLS, no skills/ dir).
+    if [ "$EXPECTED_SKILL_COUNT" -eq 0 ] || \
+       { [ "$EXPECTED_SKILL_COUNT" -eq -1 ] && [ ! -d "$TEAM_DIR/skills" ]; }; then
+        print_pass ".agents/skills/ not required (plugin installs no skills)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+        return 0
+    fi
+    if [ ! -d "$skills_root" ]; then
+        print_fail ".agents/skills/ not created (Codex discovers skills from .agents/skills/, not .codex/skills/)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+    local n
+    n=$(find "$skills_root" -maxdepth 1 -mindepth 1 | wc -l)
+    if [ "$n" -gt 0 ]; then
+        print_pass ".agents/skills/ contains $n item(s)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail ".agents/skills/ is empty"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+    verify_symlinks_valid "$skills_root" ".agents/skills/"
+}
+
+# Manifest lives in .codex/ for both install levels; the tool field must say codex.
+verify_codex_manifest() {
+    local config_root="$1"
+    local manifest="$config_root/cannbot-manifest.json"
+    if [ ! -f "$manifest" ]; then
+        print_fail "codex manifest not found: $manifest"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+    print_pass "manifest exists in .codex (codex branch reached)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+    local py_manifest
+    py_manifest=$(py_path "$manifest")
+    if python3 -c "import json; json.load(open(r'''$py_manifest'''))" 2>/dev/null; then
+        print_pass "manifest is valid JSON"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "manifest is invalid JSON"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+    local tool_val
+    tool_val=$(python3 -c "import json; print(json.load(open(r'''$py_manifest''')).get('tool',''))" 2>/dev/null || true)
+    if [ "$tool_val" = "codex" ]; then
+        print_pass "manifest: tool = codex"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "manifest: tool = '$tool_val' (expected codex)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+}
+
+# =============================================================================
+# Scenario 15: Project + Codex
+# =============================================================================
+scenario_project_codex() {
+    print_section_header "Scenario: project + codex"
+
+    if ! supports_tool "codex"; then
+        print_info "Skipping: init.sh does not support 'codex' tool"
+        return 0
+    fi
+
+    local tmp_home tmp_pwd
+    tmp_home=$(mktemp -d)
+    tmp_pwd=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home' '$tmp_pwd'; cleanup_team_artifacts '$tmp_pwd'" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts "$tmp_pwd"
+
+    local output
+    local exit_code=0
+    output=$(cd "$tmp_pwd" && HOME="$tmp_home" bash "$INIT_SCRIPT" project codex <<< "y" 2>&1) || exit_code=$?
+
+    assert_no_shell_warnings "$output"
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$(resolve_project_config_root "codex" "$tmp_pwd")"
+
+    # Project Codex: .codex/{agents,manifest} + .agents/skills + AGENTS.md in PWD
+    run_check "CONFIG_ROOT exists: $config_root" test -d "$config_root"
+    verify_codex_agent_tomls "$config_root"
+    verify_codex_skill_discovery "$tmp_pwd/.agents/skills"
+    verify_codex_manifest "$config_root"
+
+    # Project Codex AGENTS.md: most plugins put it in PWD, skill-only plugins
+    # (e.g. triton-op-generator) put it in .codex/ — accept either shape.
+    if [ -f "$tmp_pwd/AGENTS.md" ] || [ -L "$tmp_pwd/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists in project root (codex uses AGENTS.md)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    elif [ -f "$config_root/AGENTS.md" ] || [ -L "$config_root/AGENTS.md" ]; then
+        print_pass "AGENTS.md exists in .codex/ (skill-only plugin shape)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "AGENTS.md is missing (not in PWD or .codex/)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Codex must NOT create CLAUDE.md
+    if [ -e "$tmp_pwd/CLAUDE.md" ]; then
+        print_fail "CLAUDE.md created (codex should use AGENTS.md)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "CLAUDE.md not created (codex uses AGENTS.md)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Codex must NOT create ~/.claude
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (codex should use ~/.codex)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (codex branch reached correctly)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Repos should NOT be symlinked into CONFIG_ROOT in project mode
+    local repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        if [ ! -e "$config_root/$repo" ]; then
+            print_pass "$repo not symlinked into CONFIG_ROOT (project mode, correct)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "$repo unexpectedly present in CONFIG_ROOT (project mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(get_git_repo_names "$INIT_SCRIPT")
+
+    rm -rf "$tmp_home" "$tmp_pwd"
+    cleanup_team_artifacts "$tmp_pwd"
+    trap - EXIT
+}
+
+# =============================================================================
+# Scenario 16: Global + Codex
+# =============================================================================
+scenario_global_codex() {
+    print_section_header "Scenario: global + codex"
+
+    if ! supports_tool "codex"; then
+        print_info "Skipping: init.sh does not support 'codex' tool"
+        return 0
+    fi
+
+    local tmp_home
+    tmp_home=$(mktemp -d)
+
+    trap "rm -rf '$tmp_home'; cleanup_team_artifacts" EXIT
+
+    setup_fake_repos "$TEAM_DIR"
+    cleanup_team_artifacts
+
+    local output
+    local exit_code=0
+    output=$(HOME="$tmp_home" bash "$INIT_SCRIPT" global codex <<< "y" 2>&1) || exit_code=$?
+
+    assert_no_shell_warnings "$output"
+    if [ "$exit_code" -eq 0 ]; then
+        print_pass "init.sh exited with code 0"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        print_fail "init.sh exited with code $exit_code"
+        echo "$output" | tail -20
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    local config_root="$tmp_home/.codex"
+
+    # Global Codex: ~/.codex/{agents,AGENTS.md,manifest} + ~/.agents/skills
+    run_check "CONFIG_ROOT exists: $config_root" test -d "$config_root"
+    verify_codex_agent_tomls "$config_root"
+    verify_codex_skill_discovery "$tmp_home/.agents/skills"
+    verify_codex_manifest "$config_root"
+
+    if grep -q 'ESCAPED_ROOT' "$INIT_SCRIPT" 2>/dev/null; then
+        local config_file="$config_root/AGENTS.md"
+        if [ -f "$config_file" ] && [ ! -L "$config_file" ]; then
+            print_pass "AGENTS.md is a regular file in ~/.codex (global mode copy, not symlink)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "AGENTS.md is missing or is a symlink in ~/.codex (expected regular file in global mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    fi
+
+    # Codex must NOT create ~/.claude
+    if [ -d "$tmp_home/.claude" ]; then
+        print_fail "~/.claude created (codex should use ~/.codex)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        print_pass "~/.claude not created (codex uses ~/.codex)"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+
+    # Repos SHOULD be symlinked into CONFIG_ROOT in global mode
+    local repo
+    while IFS= read -r repo; do
+        [ -n "$repo" ] || continue
+        if [ -L "$config_root/$repo" ]; then
+            print_pass "$repo symlinked into CONFIG_ROOT (global mode, correct)"
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            print_fail "$repo NOT symlinked into CONFIG_ROOT (global mode)"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done < <(get_git_repo_names "$INIT_SCRIPT")
+
+    rm -rf "$tmp_home"
+    cleanup_team_artifacts
+    trap - EXIT
+}
+
+# =============================================================================
 # Scenario 15: Project + Cursor
 # =============================================================================
 scenario_project_cursor() {
@@ -2216,6 +2522,9 @@ main() {
 
         scenario_project_codearts
         scenario_global_codearts
+
+        scenario_project_codex
+        scenario_global_codex
 
         scenario_project_cursor
         scenario_global_cursor

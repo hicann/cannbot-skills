@@ -29,6 +29,10 @@
 #   XX-07: .gitignore contains tool path (error)
 #   XX-08: TRAE detect_trae_variant probes .trae-cn/.marscode/.traecli
 #          (error for plugins-official, warn for plugins-community)
+#   XX-09: Codex agent TOMLs installed to .codex/agents, each pointing back to
+#          its canonical agent .md via __CANNBOT_AGENT_SOURCE__ (only for
+#          plugins that ship codex agent TOMLs; agentless plugins skip)
+#          (error for plugins-official, warn for plugins-community)
 # =============================================================================
 
 set -euo pipefail
@@ -53,7 +57,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ALL_TOOLS=(opencode claude trae cursor copilot codearts)
+ALL_TOOLS=(opencode claude trae cursor copilot codearts codex)
 
 if $RUN_ALL; then
     PASS_TOTAL=0
@@ -131,6 +135,12 @@ case "$TOOL" in
         GITIGNORE_PATTERN='codeartsdoer'
         USES_CLAUDE_MD=false
         ;;
+    codex)
+        PREFIX="CX"
+        TOOL_LABEL="Codex"
+        GITIGNORE_PATTERN='\.codex|\.agents'
+        USES_CLAUDE_MD=false
+        ;;
     *)
         echo "Unknown tool: $TOOL"
         echo "Supported: ${ALL_TOOLS[*]}"
@@ -177,6 +187,12 @@ check_01() {
         codearts)
             grep -qE 'codearts\).*TOOL="?(\$arg|\$1|codearts)"?' "$init"
             ;;
+        codex)
+            # Two shapes exist: a dedicated `codex) TOOL=...` branch and the
+            # combined `opencode|claude|...|codex|...|codearts) TOOL="$arg"` one.
+            grep -qE 'codex\).*TOOL="?(\$arg|\$1|codex)"?' "$init" || \
+            grep -qE 'codex[^)]*\)[[:space:]]*TOOL="\$arg"' "$init"
+            ;;
         *)
             grep -qE "${TOOL}\).*TOOL" "$init" || grep -qE "${TOOL}.*TOOL=\"\\\$arg\"" "$init"
             ;;
@@ -222,6 +238,13 @@ check_02() {
                 END { exit (found ? 0 : 1) }
             ' "$init"
             ;;
+        codex)
+            awk '
+                /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codex"/ { tool_line = NR }
+                tool_line && NR <= tool_line + 2 && /\.codex/ && /HOME/ { found = 1 }
+                END { exit (found ? 0 : 1) }
+            ' "$init"
+            ;;
     esac
 }
 
@@ -259,6 +282,13 @@ check_03() {
             awk '
                 /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codearts"/ { tool_line = NR }
                 tool_line && NR <= tool_line + 2 && /\.codeartsdoer/ && !/HOME/ { found = 1 }
+                END { exit (found ? 0 : 1) }
+            ' "$init"
+            ;;
+        codex)
+            awk '
+                /"\$\{?TOOL\}?"[[:space:]]*=[[:space:]]*"codex"/ { tool_line = NR }
+                tool_line && NR <= tool_line + 2 && /\.codex/ && !/HOME/ { found = 1 }
                 END { exit (found ? 0 : 1) }
             ' "$init"
             ;;
@@ -340,6 +370,39 @@ check_08() {
 }
 
 # =============================================================================
+# XX-09: Codex agent TOMLs installed to .codex/agents, each pointing back to
+#        its canonical agent .md via __CANNBOT_AGENT_SOURCE__
+# =============================================================================
+
+check_09() {
+    local init="$1"; local dir="$2"
+    # Source TOMLs live under agents/codex (group A) or hooks/codex (group B).
+    local toml_dir=""
+    local cand
+    for cand in "$dir/agents/codex" "$dir/hooks/codex"; do
+        if [ -d "$cand" ]; then
+            toml_dir="$cand"
+            break
+        fi
+    done
+    # Agentless plugins (e.g. skill-only triton-op-generator) install no codex
+    # agents at all — nothing to guard here.
+    [ -n "$toml_dir" ] || return 0
+    # The installer must target Codex's agent discovery dir (.codex/agents/) and
+    # must handle the provenance marker (copy verbatim or resolve it at install).
+    grep -qE '\.codex/agents' "$init" || return 1
+    grep -q '__CANNBOT_AGENT_SOURCE__' "$init" || return 1
+    # Every TOML is a thin adapter: it must point back to the canonical .md so
+    # Codex executes the same role instructions as Claude Code.
+    local toml
+    for toml in "$toml_dir"/*.toml; do
+        [ -f "$toml" ] || return 1
+        grep -q '__CANNBOT_AGENT_SOURCE__' "$toml" || return 1
+    done
+    return 0
+}
+
+# =============================================================================
 # Check: Tool adaptation for every plugin with init.sh
 # =============================================================================
 print_section_header "Check: ${TOOL_LABEL} tool adaptation"
@@ -390,6 +453,16 @@ for base_dir in "$SKILLS_DIR/plugins-official" "$SKILLS_DIR/plugins-community"; 
             else
                 run_warn "[$team_name] TR-08: detect_trae_variant probes .trae-cn/.marscode/.traecli" \
                     check_08 "$init_script"
+            fi
+        fi
+
+        if [ "$TOOL" = "codex" ]; then
+            if [ "$(basename "$base_dir")" = "plugins-official" ]; then
+                run_check "[$team_name] CX-09: codex TOMLs target .codex/agents and point back to canonical md" \
+                    check_09 "$init_script" "$team_dir"
+            else
+                run_warn "[$team_name] CX-09: codex TOMLs target .codex/agents and point back to canonical md" \
+                    check_09 "$init_script" "$team_dir"
             fi
         fi
 
