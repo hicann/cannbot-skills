@@ -23,6 +23,7 @@ attention_index 行 12：**无 softmax**，改为状态递推或结合律重排�
 | 算子 | 子类标签 | 计算特征 | 优化哲学 |
 |------|---------|---------|---------|
 | FusedRecurrentGatedDeltaRule | `linear-recurrent` | 门控衰减（g/gk/gv 三种 gate 组合）+ delta rule rank-1 状态修正 `S = decay∘S + k⊗((v−Sᵀk)·β)`，每 `(b, vh)` 一套 `[K,V]` fp32 状态，T 步串行递推 | 单融合 persistent kernel：状态驻留 UB + flag constexpr 特化 + device 内串行 t 循环 |
+| intracard_fwd_h（KDA chunk 级递推，2026-09-09 实证） | `linear-recurrent` | 逐 token 递推的 chunk 化变体：每 chunk `S = exp2(gk_last)∘S + kᵀ@(u − w@S)`，varlen BT 对齐边界，状态 `[K,V]` fp32 驻留，BT∈{64,128} | 同上（grid=N*HV，chunk 粒度 t 循环）；L1.10 block ptr 32-bit 红线首次实证 |
 | Mamba/SSM、RetNet 等状态递推变体 | `linear-recurrent`（待验证） | 状态递推同构（`S = a·S + k⊗v` 族） | 可复用 §1；首验先小规模 |
 | 结合律重排（无递推） | 待归档 | `(QKᵀ)V → Q(KᵀV)` 型重排 | 本卡递推约束不适用，勿混用 |
 
@@ -70,6 +71,12 @@ attention_index 行 12：**无 softmax**，改为状态递推或结合律重排�
 - **症状**: 未设该变量时 torch 双 npu 后端注册冲突，报 `RuntimeError: Two accelerators cannot be used at the same time in PyTorch: npu and npu`。若发生在 impl/框架加载或运行期，会产生**大面积伪失败**——包括看似真实的数值错位（3/616 违例、1e3 量级脏值）、NaN、乃至整组 case 报错，极易被误判为代码 bug（2026-08-24 实例：同一份 50/50 正确的代码被误判为 41/50 失败）。
 - **必须**: 所有 verify/benchmark 运行环境显式 `export TORCH_DEVICE_BACKEND_AUTOLOAD=0`（本模板 L1.6 的 `torch.npu.synchronize()` 路径同样依赖它）；配套 `LD_LIBRARY_PATH` 指向实际使用的 torch/torch_npu 构建。
 - **教训**: 排查"数值失败"前先确认环境变量，再做代码归因；跨会话采纳/复核代码时双方必须对齐环境配方。
+
+### L1.10 ⚠️ `tl.make_block_ptr` 仅支持 32-bit offsets/shapes（Ascend 编译红线，2026-09-09 intracard_fwd_h 实证）
+- **症状**: `AssertionError('Block pointers only support 32 bit offsets/block_shape, add a .to(tl.int32) ...')`，11/11 case 全部 CompilationError。
+- **根因**: ① pid 先 `.to(tl.int64)` 再乘 BT 作 block ptr offset；② varlen 场景从 cu_seqlens（i64）load 出的 `T = eos - bos` 是 int64，直接作 shape。
+- **规避**: block ptr 的 offset/shape 全链路 int32（`T = (eos - bos).to(tl.int32)`；pid 不转 i64）；指针算术（`ptr += base`）仍可 int64 无碍。简单填充/搬运类 kernel 直接用常规索引 store（int64 指针算术 + mask）彻底规避 block ptr。
+- **适用范围注**: 该断言来自 Triton 编译器 frontend 语义层（架构无关），预计跨 910B/950PR 均有效（950PR + Triton 3.2.0 实证）；Triton 升级（≥3.3）后可能解除，届时以实际编译结果为准。
 
 ---
 
@@ -129,6 +136,27 @@ m_k = offs_k.to(tl.float32) < K.to(tl.float32)
 sp  = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))   # F.softplus(threshold=20)
 ```
 
+**L1.10 规避示例：块对角单位阵单 kernel 填充（替代 T 次 Python 循环）**
+```python
+# A: [1, T, HV, BT]; A[0, t, h, i] = 1 iff i == t % BT（varlen 边界 BT 对齐时成立）
+# 用常规索引 store 规避 block ptr 32-bit 限制；pid 保持 int32
+pid = tl.program_id(0)                 # grid = (NT * HV,)
+i_h, i_c = pid % HV, pid // HV
+t_rows = i_c * BT + tl.arange(0, BT)
+ptrs = A + t_rows[:, None].to(tl.int64) * (HV * BT) + i_h * BT + tl.arange(0, BT)[None, :]
+tl.store(ptrs, (tl.arange(0, BT)[:, None] == tl.arange(0, BT)[None, :]).to(A.dtype.element_ty),
+         mask=(t_rows[:, None] < T))
+```
+> 注：此处 `t_rows < T` 是整数比较，形式上违反 L1.4 的 fp32 向量比较规则。实证（950PR + Triton 3.2.0）该一次性填充 kernel 未观测到标量降级问题（T 为 host 传入 python int，会被 specialize）；但**计算热点路径仍应遵守 L1.4**——两代硬件上整数 mask 的退化行为差异未系统验证，勿以本片段为由在主递推 kernel 中使用整数边界比较。
+
+**varlen 串行 chunk 递推骨架（intracard_fwd_h 实证，1D grid=(N*HV,)）**
+```python
+bos = tl.load(cu_seqlens + i_n).to(tl.int64); eos = tl.load(cu_seqlens + i_n + 1).to(tl.int64)
+T = (eos - bos).to(tl.int32)            # L1.10: block ptr shape 必须 int32
+NT = tl.cdiv(T, BT); boh = bos // BT    # 边界 BT 对齐 → chunk 全局号 = bos//BT + c
+# 每 chunk: 存 h[c]（1D flat 布局）→ w@S → vn = u - w@S → v_new → S *= exp2(gk_last) → S += k^T @ vn
+```
+
 ---
 
 ## 性能可达性
@@ -137,6 +165,7 @@ sp  = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))   # F.softplus(threshold=20
 - 原声明不可复现的根因：其测量的 framework 基线逐 case 慢 ~3-12×（case 5 报 0.4897ms，其余所有口径均为 0.038~0.040ms）；impl 耗时复测一致（case 1: 0.0079 vs 0.0070ms）。**加速比数字必须用 framework 绝对延迟做口径交叉校验**（见 §5.1）。
 - 单融合 persistent kernel（状态驻留 UB + flag constexpr 特化 + device 内串行 t 循环）仍是本类形态的正确**架构方向**——精度 50/50 可达、结构合理；但架构正确 ≠ 性能达标：本实现 kernel 体（逐 token 标量 load + rank-1 更新）在大多数 case 上仍慢于优化过的 torch eager 参考实现，性能优化空间仍大（对照：同一 benchmark 上另一会话 13 轮迭代的最优实现为 1.3231×）。
 - host 侧清理类微调（输入 contiguous 化精简等）无额外收益（见 §5），不值得做。
+- **intracard_fwd_h（2026-09-09，Ascend950PR 卡 5，Triton 3.2.0）**: 11/11 精度通过，**vs 官方固定基线表**（0.46~7.7ms，优化过的参考实现）算数平均 **1.6816×**（目标 1.216，v1 一次达标，opt_iterations=0）。逐 case：2.24 / 0.95 / 1.77 / 2.05 / 1.12 / 1.04 / 2.18 / 2.75 / 1.47 / 1.86 / 1.09。要点：① 串行 chunk 递推 kernel（grid=N*HV，状态 [64,64] fp32 驻留，BT∈{64,128}）本身效率足以支撑 1.68×——收益来自递推 kernel 架构而非框架侧浪费；② 另一口径 **vs torch eager 框架参考**（benchmark.py framework 侧，平均 230.68ms）为 318.74×，该参考的后腿是 host Python 循环派生的 aclnn BroadcastTo(71.8ms)/ViewCopy(96.7ms)/Fill(79.7ms)，用一个 34µs 的小 Triton kernel 替代循环填表即可消灭——**此口径仅说明框架参考慢，与官方基线表口径无关，勿混淆**；③ few-head(T=32k, HV=1) 与 h16 大 T case 是弱项（0.95~1.09×），主因 pre_scan/merge 式并行未启用——后续同类算子若需更高加速比，优先做子序列切分两级并行。
 
 ---
 
@@ -155,6 +184,7 @@ sp  = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))   # F.softplus(threshold=20
 | state_v_first 初态/末态错位 | 布局 `[V,K]` vs `[K,V]` 索引交换遗漏 | 加载与写回两侧都按 flag 交换（Layer 2 骨架注） |
 | "Two accelerators: npu and npu" 大面积伪失败（含数值脏值/NaN） | 未设 `TORCH_DEVICE_BACKEND_AUTOLOAD=0`，双 npu 后端注册冲突 | L1.9 环境红线；归因代码前先查环境 |
 | speedup 声明虚高（如 5.75×） | framework 基线测量被拉慢（频率锁定异常/卡忙/计时段污染），impl 实际更慢 | framework 绝对延迟与历史口径交叉校验（§5.1）；同口径复测后再声明 |
+| `make_block_ptr` 编译断言（64-bit offset/shape） | pid 转 int64 后乘 stride 作 offset；varlen T 从 i64 cu_seqlens 派生未 cast | L1.10：offset/shape 全链路 int32；填充类 kernel 用常规索引 store |
 
 ---
 
