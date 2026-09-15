@@ -37,6 +37,20 @@ AscendC::Cast<half, float>(yHalf, xFloat, AscendC::RoundMode::CAST_ROUND, count)
 
 > ⚠️ **禁止向更宽类型做 in-place Cast**（如 BF16→FP32 in-place）：目标类型占 2× 空间，Cast 输出会覆盖同 buffer 内**尚未读取的源数据** → 系统性精度错误。向更宽类型 Cast 时必须使用独立目标 buffer（双缓冲场景配双份目标 buffer）。
 
+### Scatter/累加场景补充铁律（950PR 实测）
+
+- **Cast 的 dst/src 不可重叠/别名**：向量指令并行读写竞争 → NaN；`Compare` 的 dst
+  与 src1/src2 重叠同样会损坏输出（需独立零缓冲）
+- **升精度误用 `CAST_RINT` 的症状特征**：T→float 用了 `CAST_RINT` 会导致
+  "有贡献但值错"（matched_ratio≈0.005 级），而非"全零"——注意与越界/未同步类全零
+  症状区分
+- **SIMT 内 `static_cast<float>(bf16)` 不可靠**（可能被编译器折叠回 bf16 运算）；
+  fp16 的 static_cast 可靠。bf16 参与元素级运算前必须在向量阶段先 Cast 到 fp32
+  workspace，SIMT 内只碰 fp32
+- **fp16/bf16 累加的 acc_type 语义**：CPU golden 对重复 index 的 add 在 fp32 精确
+  累加后一次舍入；kernel 若逐次低精度舍入会差 1 ULP——整批向量 Cast 到 fp32 →
+  累加 → 向量 Cast 回（降精度用 CAST_RINT）
+
 ---
 
 ## 混合精度计算模式（FP16 输入）

@@ -238,6 +238,19 @@ if ASCEND_IS_AIV {
 - [ ] 未依赖连续 SetFlag 的执行顺序
 - [ ] 核内 pipe 同步用 `SetFlag<HardEvent>`，跨核用 CrossCoreSetFlag，未混用
 
+## Scatter/累加类多核场景的同步陷阱（950PR 实测）
+
+- **无参 `SyncAll()` 在 Kernel 直调模式静默失效**，且同一 kernel 内第二次调用因
+  flag 残留/重入会立即通过——不能作为核间同步原语；替代：计数式软同步
+  （每核写各自 flag 槽 + MTE2 轮询），或按行值域/三分支切分天然免同步
+- **官方软同步实现的轮询循环每轮内嵌 `PipeBarrier<PIPE_ALL>`**，等待期间累计
+  ~2.4ms 量级——需要自写轻量计数同步，禁止直接套用长等待轮询模板
+- **核间软屏障的固定成本必须预算**（详见 ascendc-tiling-design「Scatter 累加散射类」
+  §3.3）：两次屏障级 ~300-400us 的方案会把中小 case 锁死在地板值，应改多 kernel
+  发射（launch 边界即硬件级同步）
+- **跨 kernel workspace 陈旧**：前 kernel MTE3 写、后 kernel MTE2 读回旧值
+  （CACHELINE_ALL/独立新张量 H2D 均可能无效）——规避：单 kernel 合并或 host 桥接
+
 ---
 
 ## 相关文档

@@ -335,6 +335,26 @@ copyParams.dstStride  = (paddedCols - cols) * sizeof(T) / 32;      // UB 行间�
 
 > 连带纪律：批量（多行）处理后**一批数据一次 SetFlag/WaitFlag**（MTE2/V/MTE3 FIFO 特性），不要逐行配对事件——flag 次数是搬运-计算流水的主要隐藏开销。
 
+## 逐 chunk 循环中的 DataCopy 快路径（DataCopyPad 开销规避）
+
+逐块循环处理的算子（scatter/归约/前缀类）中，全量使用 `DataCopyPad` 会把 pad 逻辑
+固定开销逐 chunk 放大（实测整类算子 geomean 差 ~32%）：
+
+- **全对齐 chunk 用 `DataCopy`，仅尾部残差用 `DataCopyPad`**：保持 `CHUNK` 为 32 的
+  倍数、`offset` 为 `CHUNK` 倍数 → 源/目的地址天然 32B 对齐，主体循环走无 pad 开销
+  的快路径；仅最后一chunk 任意长度走 `DataCopyPad`
+- **`DataCopy` 3 参重载仅 `__NPU_ARCH__ == 3510`（950PR/910C）可用**：编译必须
+  `export SOC_VERSION=ascend950pr_9579`（npu-smi Chip Name 精确拼接；setup.py 默认
+  回退 `Ascend910B2` 须显式覆盖，否则 3510 分支构造/重载缺失编译失败）
+
+```cpp
+if (nRaw == CHUNK) {   // 全 chunk：天然 32B 对齐
+    DataCopy(local_, gm_[offset], CHUNK);
+} else {               // 仅尾部残差
+    DataCopyPad(local_, gm_[offset], cp, pp);
+}
+```
+
 ---
 
 ## 常见错误与调试

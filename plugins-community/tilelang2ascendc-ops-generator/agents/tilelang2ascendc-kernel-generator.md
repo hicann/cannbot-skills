@@ -115,6 +115,12 @@ Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md 
 ├─ 简单算子 → 走 ops-direct-invoke 工作流 (Architect 设计 → Developer 实现 → Reviewer 审查)
 │   └─ 仅限以下算子:
 │       Index, IndexPut, Gather, Nonzero, RepeatInterleave, EmbeddingDenseBackward
+│       以及 index 散射类（MaskedScatter / ScatterNdAdd / ScatterElementsV2 /
+│       ScatterAdd / scatter_reduce / GatherElements / InplaceIndexAdd，或
+│       forward() 含 index_put_ / scatter_* / masked_scatter / gather_elements /
+│       accumulate=True 语义）——一律走简单算子路径；设计期按
+│       ascendc-tiling-design「Scatter 累加散射类」与 ascendc-api-best-practices
+│       相关章节执行设计与检查
 └─ 复杂算子 → 走 TileLang 设计表达路径
     ├─ Elementwise / 激活函数 / 双输入逐元素:
     │   ReLU, Sigmoid, SiLU, GELU, SwiGLU, Add, Sub, Mul, Div 等

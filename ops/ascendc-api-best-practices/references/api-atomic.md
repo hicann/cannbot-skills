@@ -153,6 +153,26 @@ Matmul 流水：
 
 ---
 
+## Scatter 场景补充：SetAtomicAdd 与 SIMT `asc_atomic_add` 的 dtype 边界
+
+两者是**不同硬件机制**，dtype 支持不同，禁止混用结论：
+
+| 机制 | dtype 支持 | 适用 |
+|:---|:---|:---|
+| **MTE3 `SetAtomicAdd<T>()`**（DMA 原子，本指南） | fp32 / fp16 / bf16 / int32（bool 用 `SetAtomicMax<int8_t>`） | 行散射累加写：updates 按**行组织、行内连续**时逐行原子写出，不读 self |
+| **SIMT `asc_atomic_add`**（VF 指令级原子） | **仅 fp32 / int32**（fp16/bf16 无 GM 原生支持） | 元素级随机散射（index 完全随机、updates 无行结构） |
+
+- 行散射累加类（index_add_ / inplace_index_add / scatter 沿 dim 维累加）**首选
+  MTE3 SetAtomicAdd 行写**：流量 = updates 读 1 + 原子写 1，对比元素级 RMW 实测吞吐
+  差 5-10 倍（架构详见 ascendc-tiling-design「Scatter 累加散射类」）
+- fp16/bf16 元素级散射（无行结构）且需原子时：向量化 Cast 到 fp32 workspace 做原子
+  再 Cast 回（拆分多 kernel 发射，禁止单 kernel 内核间软屏障三段式），或行级单属主 RMW
+- **unique（无重复 index）场景禁止 RMW（读改写）**：atomic 写与普通写等价，RMW 多付
+  1 倍行读流量；仅确定性要求或重复 index 场景才考虑排序/单属主路径
+- MTE3 原子写的行首须 32B 对齐（afterAxisFactor 取 32 元素倍数）
+
+---
+
 ## 检查清单
 
 - [ ] 多核/多 rank 写同一 GM 地址时已开启 `SetAtomicAdd<T>()`
