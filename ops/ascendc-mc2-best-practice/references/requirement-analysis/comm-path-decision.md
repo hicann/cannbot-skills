@@ -6,7 +6,7 @@
 - **通信协议**：跨卡互连协议——URMA（UDMA 为其同义称呼）、UBMEM（UB 内存域，超节点内全互联）
 - **通信库**（编程接口层，屏蔽引擎/协议差异，归属 L2 编程抽象）：HCOMM 通信基础库（最底层；HCCL 集合通信库与 APACE 通信基础 API 均基于它构建）、SHMEM（独立通信库，与 HCOMM 无关，驱动 UDMA/URMA）
 
-> 通信路径选定后，可用的编程抽象底座（blaze-shmem / apace / ascendc-api）与已验证路线组合（chip × op_type × 调用形态）见 [`../capability-declaration.md`](../capability-declaration.md)。
+> 通信路径选定后，可用的编程抽象底座（blaze-shmem / apace / ascendc-api / hccl-matmul）与已验证路线组合（chip × op_type × 调用形态）见 [`../capability-declaration.md`](../capability-declaration.md)。
 
 ## 通信路径选项
 
@@ -22,6 +22,8 @@
 ### HCCL 高阶集合通信
 - **接口文档**：https://hiascend.com/document/redirect/CannCommunityHcclCppApi
 - **定位**：HCCL 集合通信库是 Ascend C 高阶 API 的一部分，基于 HCOMM 通信基础库构建
+- **开发约束**：仅注册 / aclnn；通信走 `Hccl<HCCL_SERVER_TYPE_AICPU>` V2（`InitV2`+`SetCcTilingV2`），Matmul 走 `AscendC::Matmul`；禁止 SHMEM/Blaze。A2 仅 FullMesh，不支持 `AlltoAllV`/`Finalize<false>`。详见 `references/foundations/hccl-matmul/`
+- **已验证芯片**：Ascend 910B（A2 / dav-2201）；A3（910_93）不在本期范围
 
 ### AIV+URMA
 - **文档**：https://shmem-doc.pages.dev/

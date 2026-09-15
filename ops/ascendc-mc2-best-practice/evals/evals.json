@@ -160,7 +160,7 @@
         ]
       },
       "prompt": "我的服务器是 Ascend 910B（dav-2201），想用 SHMEM-UDMA 写一个 AllToAll+Matmul 通算融合直调算子，可以做吗？",
-      "expected_output": "回复应查询 capability-declaration.md 否定行，明确答复不可用：dav-2201 × UDMA 为 unsupported（UDMA 路径仅 dav-3510 已验证），并给出替代建议（更换目标架构为 Ascend 950，或评估其他通信路径）。不得含糊应答或直接开始开发。",
+      "expected_output": "回复应查询 capability-declaration.md 否定行，明确答复不可用：dav-2201 × UDMA 为 unsupported（UDMA 路径仅 dav-3510 已验证）。替代建议：910B 上集合通信+Matmul 走 hccl-matmul 注册路线（HCCL 高阶 + AscendC::Matmul，aclnn），或更换目标架构为 Ascend 950 再走 blaze-shmem/apace 直调。不得含糊应答或直接按 SHMEM 开始开发。",
       "files": [],
       "expectations": [
         {
@@ -358,6 +358,21 @@
       },
       "prompt": "apace 四步流程中，Step 2（Framework Investigation）和 Step 3（Design）各自的边界是什么？Step 2 可以推荐实现路线吗？Step 3 可以写实现代码吗？",
       "expected_output": "应说明：Step 2 是设计前核对——只读核对 apace 框架的接口事实（matmul 链路/通信接口/入口 ABI/官方覆盖性），事实默认内联于 DESIGN.md §0.3，不做方案推荐、不匹配场景、不选择路线、不编译或运行设备；Step 3 依据需求和核对事实完成路线决策，生成冻结的 DESIGN 和 PLAN，不复制文件、不写实现、不构建项目。每个步骤都有明确的边界声明。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 20,
+      "title": "910B HCCL 高阶注册路线（hccl-matmul）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要在 Ascend 910B（dav-2201 / A2）上开发 AllGather+Matmul 通算融合算子，用 HCCL 高阶 API 和 AscendC::Matmul，通过 aclnn 单算子调用。应该走哪条路线？通信和计算有哪些红线？PTA 怎么接？",
+      "expected_output": "应查询 capability-declaration.md，命中 dav-2201 × collective-comm × 注册 × HCCL 高阶 × hccl-matmul 为 supported，路由到 references/foundations/hccl-matmul/，参考实现 all_gather_matmul。红线：仅注册禁止 <<<>>> 直调；通信走 Hccl<HCCL_SERVER_TYPE_AICPU> V2（InitV2/SetCcTilingV2），禁止 SHMEM/Blaze；AIC-only + Finalize 前 CrossCore 同步；无 quant。PTA 不在本路线重做，走 torch-ascendc-op-extension 路线 B（aclnn 注册）。",
       "expectations": [],
       "files": []
     }

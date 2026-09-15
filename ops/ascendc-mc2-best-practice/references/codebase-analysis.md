@@ -20,7 +20,7 @@ Brownfield 模式下，从已有算子代码推断其命中 [`capability-declara
 | `aclshmem*` / `aclshmemx_udma_*` + 独立 CMake 工程 | UDMA | blaze-shmem |
 | `CollectiveComm<...>` + `block/` `tiling/` 共享层 | UDMA（直调）/ HCCL windows（注册） | apace |
 | `winContext` / `mc2Context` / `HcclAllocComResourceByTiling` + window 地址搬运 | MTE通信（AIV+UBMEM） | ascendc-api |
-| `Hccl::*` 高阶 API | 非通算融合直调（HCCL 官方路径） | HCCL 高阶 + Matmul 高阶 |
+| `Hccl::*` 高阶 API | HCCL 高阶（仅注册） | hccl-matmul |
 
 ### 算子类型推断
 

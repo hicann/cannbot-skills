@@ -1,6 +1,6 @@
 # 集合通信类算子设计模式
 
-> 跨框架共性的集合通信类算子设计知识。框架无关的通信语义、轴切分、通算流水模式。框架具体实现见 `references/foundations/blaze-shmem/` 和 `references/foundations/apace/`。
+> 跨框架共性的集合通信类算子设计知识。框架无关的通信语义、轴切分、通算流水模式。框架具体实现见 `references/foundations/blaze-shmem/`、`references/foundations/apace/` 和 `references/foundations/hccl-matmul/`。
 
 ## 通信原语与典型算子
 
@@ -33,7 +33,7 @@
    - 各 rank 只需自己负责的 M 段 C（如 TP 反向）→ ReduceScatter（散射输出）
 3. **验证流水可行性**：确认通信方向（PUT/GET）与计算侧（AIC Matmul）可逐 tile 重叠，掩盖条件为每 tile 计算耗时 ≥ 通信耗时。
 
-> **约束**：四种原语在 Kernel 直调场景下均不走 HCCL 高阶 API（`Hccl::*`），而是通过 SHMEM（blaze-shmem 路线）或 CollectiveComm 四段式 API（apace 路线）实现。ReduceScatter 原语在 apace block 层未直接实现，其语义可通过 AllToAll PUT + AtomicAdd 模式替代（详见 [`../foundations/apace/fusion.md`](../foundations/apace/fundamentals/fusion.md) §6）。
+> **约束**：四种原语在 **Kernel 直调**场景下均不走 HCCL 高阶 API（`Hccl::*`），而是通过 SHMEM（blaze-shmem 路线）或 CollectiveComm 四段式 API（apace 路线）实现。ReduceScatter 原语在 apace block 层未直接实现，其语义可通过 AllToAll PUT + AtomicAdd 模式替代（详见 [`../foundations/apace/fusion.md`](../foundations/apace/fundamentals/fusion.md) §6）。**注册 / aclnn** 形态下四种原语走 HCCL 高阶（hccl-matmul 路线，910B 已验证），见 [`../foundations/hccl-matmul/`](../foundations/hccl-matmul/)。
 
 ## 切分轴语义
 
@@ -123,21 +123,23 @@ AIV↔AIC 跨核同步是通算流水的核心：
 
 ## 框架映射
 
-| 概念 | blaze-shmem 路线 | apace 路线 |
-|------|-----------|-----------|
-| 通信 API | `aclshmemx_udma_*` | `CollectiveComm<Op,Mode,T,Barrier>` 四段式 |
-| 跨核同步 | `CrossCoreSetFlag/WaitFlag` | 同左 + `TeamBarrier` |
-| 工程组织 | 独立 CMake 工程 | `kernel/<op>/` 复用 `block/` `tiling/` |
-| 流水模式 | 4-buffer 流水 + M 轴切分 | localMatmul 0/1/2 + flag 编排 |
-| 参考文档 | `references/foundations/blaze-shmem/mc2_architecture.md` | `references/foundations/apace/fundamentals/fusion.md` |
+| 概念 | blaze-shmem 路线 | apace 路线 | hccl-matmul 路线 |
+|------|-----------|-----------|------------------|
+| 通信 API | `aclshmemx_udma_*` | `CollectiveComm<Op,Mode,T,Barrier>` 四段式 | `Hccl<HCCL_SERVER_TYPE_AICPU>` 高阶 V2 |
+| 跨核同步 | `CrossCoreSetFlag/WaitFlag` | 同左 + `TeamBarrier` | Finalize 前 `CrossCoreSetFlag/WaitFlag` |
+| 工程组织 | 独立 CMake 直调工程 | `kernel/<op>/` 复用 `block/` `tiling/` | aclnn 注册工程（`op_host`+`op_kernel`+`.run`） |
+| 流水模式 | 4-buffer 流水 + M 轴切分 | localMatmul 0/1/2 + flag 编排 | prepare 全部 → 逐 tile Wait + M 轴 `tileCnt` |
+| 参考文档 | `references/foundations/blaze-shmem/mc2_architecture.md` | `references/foundations/apace/fundamentals/fusion.md` | `references/foundations/hccl-matmul/mc2_architecture.md` |
 
 ## 约束共性
 
-两种框架的集合通信类算子共享以下约束：
+AIV+URMA 直调两条框架（blaze-shmem / apace）的集合通信类算子共享以下约束：
 
 1. **Matmul 走 Blaze 模板** — 禁止 asc-devkit `AscendC::Matmul` 黑盒 API
 2. **禁止 HCCL 高阶 API** — 禁止 `Hccl::*`（服务端调度，无法通算融合）
 3. **架构白名单** — 仅 dav-3510（Ascend 950）已验证
 4. **性能采集必须刷 L2 cache** — 前一轮热度污染本轮指标
+
+hccl-matmul 路线（注册 / 910B）约束相反：必须走 HCCL 高阶 + `AscendC::Matmul`，无需 L2 flush。详见 [`../foundations/hccl-matmul/review-checklist.md`](../foundations/hccl-matmul/review-checklist.md)。
 
 > 路线特有约束与逐项审查条件：blaze-shmem 路线见 [`../foundations/blaze-shmem/review-checklist.md`](../foundations/blaze-shmem/review-checklist.md)（HCCL 禁止清单见 [`../foundations/blaze-shmem/comm_shmem.md`](../foundations/blaze-shmem/comm_shmem.md) §5）；apace 路线见 [`../foundations/apace/review-checklist.md`](../foundations/apace/review-checklist.md)（基础约束论述见 [`../foundations/apace/architecture.md`](../foundations/apace/fundamentals/architecture.md) §10）。

@@ -24,4 +24,4 @@
 | 基本概念索引 | https://gitcode.com/cann/ops-transformer/blob/master/docs/zh/context/basic_concept.md | 数据类型/格式/推导关系 |
 | HCCL API (C) 文档 | https://hiascend.com/document/redirect/CannCommunityHcclCppApi | HCCL 接口定义、通信域管理 |
 | SHMEM 文档 | https://shmem-doc.pages.dev/ | SHMEM/UDMA API、用法 |
-| 本地 MC2 开发最佳实践 | `ops/ascendc-mc2-best-practice/` | SHMEM + Blaze 开发约束、架构设计 |
+| 本地 MC2 开发最佳实践 | `ops/ascendc-mc2-best-practice/` | 各底座开发约束与架构：SHMEM+Blaze、apace、MTE/MoE、HCCL+Matmul（910B） |

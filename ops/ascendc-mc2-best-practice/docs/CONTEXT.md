@@ -14,7 +14,7 @@ MC2（Matrix Computation & Communication）算子生成能力域的领域术语�
 
 - **L0 需求层**：做什么、在哪跑、怎么被调用。算子类型 × 芯片 × 调用形态。这是输入而非选择。
 - **L1 通信路径层**：数据怎么跨卡搬（引擎 + 协议）。取值：UDMA（URMA 协议的同义称呼，大块搬运，计算密集型）/ MTE通信（AIV+UBMEM，细粒度 + 状态位协议，路由通信密集型）/ CCU（CCU+URMA，尚无直调参考工程）/ HCCL 高阶集合通信（服务端调度黑盒，仅注册场景）。
-- **L2 编程抽象层**：用什么写（buy vs build）。取值即**编码底座**：blaze-shmem（SHMEM 通信库 + Blaze 计算模板，手工组装）/ apace（APACE 模板库，通信+计算+工程组织全包）/ ascendc-api（裸 Ascend C API 全自建，如 MTE通信场景的 compat 层）/ HCCL 高阶 + Matmul 高阶（官方路径，仅注册，无底座目录）。L1 与 L2 多对多：UDMA 上可用 blaze-shmem 或 apace 底座；apace 底座可跑 UDMA（直调）或 HCCL windows（注册）。
+- **L2 编程抽象层**：用什么写（buy vs build）。取值即**编码底座**：blaze-shmem（SHMEM 通信库 + Blaze 计算模板，手工组装）/ apace（APACE 模板库，通信+计算+工程组织全包）/ ascendc-api（裸 Ascend C API 全自建，如 MTE通信场景的 compat 层）/ hccl-matmul（HCCL 高阶 + `AscendC::Matmul` 高阶，官方路径，仅注册，知识目录 `references/foundations/hccl-matmul/`）。L1 与 L2 多对多：UDMA 上可用 blaze-shmem 或 apace 底座；apace 底座可跑 UDMA（直调）或 HCCL windows（注册）。
 - **L3 工程组织层**：代码怎么摆。独立 CMake 工程 / 框架共享层 `kernel/<op>/` / 样例工程 + compat 分层。基本被 L2 选定。
 - **L4 流水编排层**：通信与计算怎么重叠。GET/PUT、flag 编排、tileCnt、localMatmul 模式。部分被 L2 给定。
 
@@ -41,7 +41,7 @@ _Avoid_: "HCCL 的通信基础库"（HCOMM 与 HCCL 集合通信库是两个东�
 
 ### 编码底座（Foundation）
 
-L2 编程抽象层的实体——编码时立于其上的技术底座。当前三个：`blaze-shmem`、`apace`、`ascendc-api`，知识库中对应 `references/foundations/{底座名}/` 目录。注意三者不是并列的软件层：apace 是基于 Ascend C 基础 API 构建的模板库（其通信基础 API 基于 HCOMM，与 HCCL 集合通信库无关），ascendc-api 就是裸基础 API 本身，blaze-shmem 是"SHMEM 通信库 + Blaze 计算模板"的手工组装（SHMEM 与 HCOMM 无关）——它们抽象层级不同，但在"选什么写代码"这个决策点上是并列选项。
+L2 编程抽象层的实体——编码时立于其上的技术底座。当前四个：`blaze-shmem`、`apace`、`ascendc-api`、`hccl-matmul`，知识库中对应 `references/foundations/{底座名}/` 目录。注意它们不是并列的软件层：apace 是基于 Ascend C 基础 API 构建的模板库（其通信基础 API 基于 HCOMM，与 HCCL 集合通信库无关），ascendc-api 就是裸基础 API 本身，blaze-shmem 是"SHMEM 通信库 + Blaze 计算模板"的手工组装（SHMEM 与 HCOMM 无关），hccl-matmul 是官方 HCCL 高阶集合通信 + `AscendC::Matmul` 高阶（仅注册）——它们抽象层级不同，但在"选什么写代码"这个决策点上是并列选项。
 
 ### Ascend C API
 
@@ -49,7 +49,7 @@ L2 编程抽象层的实体——编码时立于其上的技术底座。当前�
 
 ### 路线（Route）
 
-决策栈上的一条**一致路线**（L0→L1→L2 的具体组合 + 对应 L3/L4 形态），是知识库的组织单元。**路线按底座命名**。当前三条 supported 路线：blaze-shmem 路线（AIV+URMA × blaze-shmem 底座 → `references/foundations/blaze-shmem/`）、apace 路线（AIV+URMA × apace 底座 → `references/foundations/apace/`）、ascendc-api 路线（HCCL window+MTE × ascendc-api 底座 → `references/foundations/ascendc-api/moe-dispatch-combine/`）。注意 ascendc-api 路线特指"裸 Ascend C API 全自建"——apace 模板库虽基于 Ascend C API 构建，但属独立底座，两条路线不混。
+决策栈上的一条**一致路线**（L0→L1→L2 的具体组合 + 对应 L3/L4 形态），是知识库的组织单元。**路线按底座命名**。当前四条 supported 路线：blaze-shmem 路线（AIV+URMA × blaze-shmem 底座 → `references/foundations/blaze-shmem/`）、apace 路线（AIV+URMA × apace 底座 → `references/foundations/apace/`）、ascendc-api 路线（HCCL window+MTE × ascendc-api 底座 → `references/foundations/ascendc-api/moe-dispatch-combine/`）、hccl-matmul 路线（HCCL 高阶 × hccl-matmul 底座 → `references/foundations/hccl-matmul/`，仅注册）。注意 ascendc-api 路线特指"裸 Ascend C API 全自建"——apace 模板库虽基于 Ascend C API 构建，但属独立底座，与 hccl-matmul（官方高阶 API 组合）也不混。
 _Avoid_: 把"MTE通信"当路线名（它是 L1 通信路径名；该路线按底座命名为 ascendc-api 路线）
 
 ### 能力声明（路线登记表）

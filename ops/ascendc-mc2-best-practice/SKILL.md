@@ -1,6 +1,6 @@
 ---
 name: ascendc-mc2-best-practice
-description: Ascend C MC2 通算融合算子（多卡通信+计算融合）开发最佳实践。当用户需要设计、实现、调试、移植或优化通算融合算子，或提及"MC2"、"SHMEM"、"APACE"、"通算融合"、"多卡通信直调"、"UDMA"、"URMA"、"AllToAll+Matmul"、"CollectiveComm"、"MoE Dispatch"、"MoE Combine"、"专家并行"、"EP"、"mega_moe"、"MTE通信"、"MTE window"、"token 路由分发"时使用。
+description: Ascend C MC2 通算融合算子（多卡通信+计算融合）开发最佳实践。当用户需要设计、实现、调试、移植或优化通算融合算子，或提及"MC2"、"SHMEM"、"APACE"、"通算融合"、"多卡通信直调"、"UDMA"、"URMA"、"AllToAll+Matmul"、"CollectiveComm"、"MoE Dispatch"、"MoE Combine"、"专家并行"、"EP"、"mega_moe"、"MTE通信"、"MTE window"、"token 路由分发"、"HCCL"、"aclnn 通算融合"时使用。
 ---
 
 # Ascend C MC2 通算融合算子开发最佳实践
@@ -17,25 +17,26 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 
 > 下层技能不引用本 skill；本 skill 文档中凡 API 级事实（签名、限制、硬件行为）均指向下层锚点，正文只保留 MC2 场景应用与编排规则。
 
-本 skill 覆盖三种编码底座，每个底座支持特定的通信路径、算子类型与芯片组合（确切组合以 [`capability-declaration.md`](references/capability-declaration.md) 路径登记表为准）：
+本 skill 覆盖四种编码底座，每个底座支持特定的通信路径、算子类型与芯片组合（确切组合以 [`capability-declaration.md`](references/capability-declaration.md) 路径登记表为准）：
 
 | 底座 | 支持的通信路径 | 支持的算子类型 | 支持芯片 | 知识目录 |
 |------|---------|---------|------|------|
 | **blaze-shmem** | AIV+URMA | collective-comm（AllToAll+Matmul、AllReduce+Matmul、TP/SP 融合） | dav-3510（Ascend 950PR/950DT） | [`references/foundations/blaze-shmem/`](references/foundations/blaze-shmem/) |
 | **apace** | AIV+URMA | collective-comm（AllToAll/AllGather + QuantMatmul 融合、compute-first 类；AllReduce 类需先扩展通信组件，见 [`paradigm-mapping.md`](references/foundations/apace/operator-design/paradigm-mapping.md)） | dav-3510（Ascend 950PR/950DT） | [`references/foundations/apace/`](references/foundations/apace/) |
 | **ascendc-api** | AIV+UBMEM | moe（MoE Dispatch/Combine、专家并行 EP） | dav-3510（Ascend 950PR/950DT）+ dav-2201（Atlas A2/A3 系列）双平台 | [`references/foundations/ascendc-api/`](references/foundations/ascendc-api/) |
+| **hccl-matmul** | HCCL 高阶 | collective-comm（AllGather+Matmul、AllReduce+Matmul 等，aclnn 注册） | dav-2201（Atlas A2/A3 系列） | [`references/foundations/hccl-matmul/`](references/foundations/hccl-matmul/) |
 
-> 三种底座抽象层级不同（blaze-shmem 是库+模板手工组装，apace 是模板框架，ascendc-api 是直接使用ascendc API），但在"选什么写代码"这个决策点上是并列选项。apace 模板库虽基于 Ascend C 基础 API 构建，但与 ascendc-api 路线约束集、工程边界、可修改范围完全不同——详见 §1/§2/§3 各路线特有约束。
+> 四种底座抽象层级不同（blaze-shmem 是库+模板手工组装，apace 是模板框架，ascendc-api 是直接使用ascendc API，hccl-matmul 是官方 HCCL 高阶 + `AscendC::Matmul` 高阶、仅注册），但在"选什么写代码"这个决策点上是并列选项。apace 模板库虽基于 Ascend C 基础 API 构建，但与 ascendc-api / hccl-matmul 路线约束集、工程边界、可修改范围完全不同——详见 §1/§2/§3/§4 各路线特有约束。
 
 ## 何时使用 / 不适用
 
 **使用信号**（任一即可）：
 - 场景：多卡协同的通算融合算子（AllToAll+Matmul、AllReduce+Matmul、MoE Dispatch/Combine、多卡 EP/TP/SP 融合 Kernel）
-- 关键词："MC2"、"SHMEM"、"APACE"、"apace"、"通算融合"、"多卡通信直调"、"UDMA"、"URMA"、"AllToAll+Matmul"、"CollectiveComm"、"MoE Dispatch"、"MoE Combine"、"专家并行"、"EP"、"mega_moe"、"MTE通信"、"MTE window"、"token 路由分发"
-- 代码：现有工程同时出现通信 API（`shmem.h`/`aclshmem*` 或 `collective_comm_api.h`/`CollectiveComm`）与 `blaze/gemm/` 模板（blaze-shmem/apace 路线），或出现 `winContext`/`mc2Context`/`HcclOpParam` 与 MTE 通信窗口结构（MTE通信 → ascendc-api 路线）
+- 关键词："MC2"、"SHMEM"、"APACE"、"apace"、"通算融合"、"多卡通信直调"、"UDMA"、"URMA"、"AllToAll+Matmul"、"CollectiveComm"、"MoE Dispatch"、"MoE Combine"、"专家并行"、"EP"、"mega_moe"、"MTE通信"、"MTE window"、"token 路由分发"、"910B"、"HCCL"、"aclnn 通算融合"
+- 代码：现有工程同时出现通信 API（`shmem.h`/`aclshmem*` 或 `collective_comm_api.h`/`CollectiveComm`）与 `blaze/gemm/` 模板（blaze-shmem/apace 路线），或出现 `winContext`/`mc2Context`/`HcclOpParam` 与 MTE 通信窗口结构（MTE通信 → ascendc-api 路线），或出现 `Hccl<HCCL_SERVER_TYPE_AICPU>` 与 `AscendC::Matmul`（HCCL 高阶 → hccl-matmul 路线）
 
 **不适用**（走其他 skill）：
-- 纯单卡 Matmul（无跨卡通信）→ `ascendc-blaze-best-practice`
+- 纯单卡 Matmul（无跨卡通信）→ `ascendc-blaze-best-practice`（950）或 `ascendc-api-best-practices` 的 `api-matmul.md`（910B）
 - Vector 类逐元素/归约算子（无 Cube、无跨卡通信）
 - 通用 Ascend C API 用法查询 → `ascendc-api-best-practices`
 - 非 3510 架构的 AIV+URMA 通算融合（MTE通信除外，支持 dav-2201 + dav-3510 双平台）
@@ -47,7 +48,10 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 ```
 用户要做通算融合算子
 │
-├─ AllToAll+Matmul / AllReduce+Matmul / TP/SP 通算融合？
+├─ 目标芯片 910B / dav-2201 / A2，且是集合通信+Matmul（AllGather/AllReduce/ReduceScatter/AlltoAll）？
+│   → HCCL 高阶路径（仅注册 / aclnn，禁止 <<<>>> 直调）→ hccl-matmul 路线（下方§4）
+│
+├─ AllToAll+Matmul / AllReduce+Matmul / TP/SP 通算融合？（950）
 │   → AIV+URMA 路径（仅 dav-3510 / Ascend 950）
 │      ├─ 提到"apace"/"CollectiveComm"或代码在 ops-transformer/apace/ 下？→ apace 路线（下方§2）
 │      └─ 否则 → blaze-shmem 路线（下方§1）
@@ -58,18 +62,19 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 │      └─ 生成新算子或改造？→ references/foundations/ascendc-api/moe-dispatch-combine/samples/
 │
 └─ 不确定？
-    → 看通信路径：SHMEM API = AIV+URMA 路径（仅 dav-3510）；winContext/mc2Context = MTE通信（dav-2201 + dav-3510 双平台）
+    → 看通信路径：SHMEM API = AIV+URMA 路径（仅 dav-3510）；winContext/mc2Context = MTE通信（dav-2201 + dav-3510 双平台）；
+       Hccl<HCCL_SERVER_TYPE_AICPU> / InitV2 / aclnn*Matmul = hccl-matmul（dav-2201 注册）
 ```
 
 选定路线后：
 
 1. 查 [`capability-declaration.md`](references/capability-declaration.md)，确认 chip × 算子类型 × 调用形态组合命中 `supported` 行（命中否定行或无行 → 答复用户不可用 + 原因）
 2. 进入需求分析（下节），输出 REQUIREMENTS.md
-3. 按 §1/§2/§3 进入对应路线的 references
+3. 按 §1/§2/§3/§4 进入对应路线的 references
 
 ## 需求分析（全路线共享）
 
-> **MC2 特有需求维度**：除算子名/数学定义/dtype/shape 外，需求收集时还需明确通信路径（AIV+URMA 或 MTE通信）与编程抽象底座（blaze-shmem / apace / ascendc-api）。
+> **MC2 特有需求维度**：除算子名/数学定义/dtype/shape 外，需求收集时还需明确通信路径（AIV+URMA / MTE通信 / HCCL 高阶）与编程抽象底座（blaze-shmem / apace / ascendc-api / hccl-matmul）。
 
 | 文档 | 何时读 |
 |------|--------|
@@ -87,13 +92,13 @@ MC2（Matrix Computation & Communication）= 多卡间集合通信 + 单卡内 B
 | # | 红线 | 一句话理由 | 详见 |
 |---|------|-----------|------|
 | ① | 架构白名单以路线登记表为准 | 未验证组合（如 dav-2201 × AIV+URMA）禁止使用 | [`capability-declaration.md`](references/capability-declaration.md) |
-| ② | 性能采集必须刷 L2 cache | 前一轮热度会污染本轮指标 | [`shared/profiling_mc2.md`](references/shared/profiling_mc2.md) |
+| ② | AIV+URMA 路径性能采集必须刷 L2 cache | SHMEM B 矩阵驻留会污染下一轮带宽；**hccl-matmul（AICPU）无需 flush** | [`shared/profiling_mc2.md`](references/shared/profiling_mc2.md) |
 
-> 以下两条是 **AIV+URMA 路径下 blaze-shmem / apace 底座的选择性约束**，不是全路线共性——若未来在 ascendc-api 底座上构建集合通信类通算融合，HCCL 高阶 API 和 `AscendC::Matmul` 高阶 API 恰是可用路径：
+> 以下两条是 **AIV+URMA 路径下 blaze-shmem / apace 底座的选择性约束**，不是全路线共性。集合通信类通算融合在 **注册 / aclnn** 形态下走 §4 hccl-matmul 路线，此时 HCCL 高阶 API 与 `AscendC::Matmul` 高阶 API 恰是必选路径：
 > - 禁止 HCCL 高阶 API（`Hccl::*`）—— HCCL 集合通信库依赖框架注入上下文，AIV+URMA 直调场景拿不到（详见 [`blaze-shmem/comm_shmem.md`](references/foundations/blaze-shmem/comm_shmem.md) §5，7 类 18 个 API 清单）
 > - Matmul 走 Blaze 模板，禁止 `AscendC::Matmul` 高阶 API —— 同理（详见 [`blaze-shmem/matmul_blaze.md`](references/foundations/blaze-shmem/matmul_blaze.md) / [`apace/fundamentals/compute.md`](references/foundations/apace/fundamentals/compute.md)）
 
-各底座特有约束与逐项审查清单见 §1/§2/§3。
+各底座特有约束与逐项审查清单见 §1/§2/§3/§4。
 
 ---
 
@@ -325,3 +330,41 @@ MoE Dispatch/Combine 通过 host 侧 `HcclAllocComResourceByTiling` 创建通信
 | `references/foundations/ascendc-api/moe-dispatch-combine/samples/` | 规格补齐、工程组织参考、编译链路、接口语义和文件落点 |
 | `references/foundations/ascendc-api/moe-dispatch-combine/api-rules/` | MoE 特有的 window 地址获取、DataCopyPad 规则、同步可见性、状态协议、接口契约 |
 | `references/foundations/ascendc-api/moe-dispatch-combine/tiling-scheme/` | window 物理布局、工作量公式、各阶段分核方案、双缓冲轮转协议 |
+
+---
+
+## §4 hccl-matmul 路线（910B / HCCL 高阶 + AscendC::Matmul，仅注册）
+
+910B（A2，`dav-2201`）上的集合通信类通算融合走官方路径：通信用 HCCL in-kernel 高阶 API（`Hccl<HCCL_SERVER_TYPE_AICPU>`，AICPU 引擎），计算用 `AscendC::Matmul`，工程形态为 **aclnn 单算子注册**（`build.sh` → `.run` + `libcust_opapi.so`）。通算融合**不支持 `<<<>>>` 直调与 GE 入图**（官方通算融合指南）。本期仅覆盖 A2，不涉及 A3（910_93）/950，不支持 quant。
+
+> **与其他路线的边界**：910B 硬件不支持 SHMEM/UDMA，Blaze 为 950 专属；§1/§2 的"禁止 HCCL / 禁止 `AscendC::Matmul`"只约束 AIV+URMA 直调，本路线正好相反。MoE 的 MTE 窗口搬运仍走 §3，不要用 `Hccl::AlltoAll` 替代 token 级路由。
+
+### 红线 / 约束
+
+| # | 约束 | 说明 | 详见 |
+|---|------|------|------|
+| R1 | 架构=910B(A2) | `ascend910b` / `dav-2201`；无 A3/910_93/950 | 全路线共性红线 ① |
+| R2 | 通信走 HCCL 高阶 V2 | `Hccl<HCCL_SERVER_TYPE_AICPU>` + `InitV2`/`SetCcTilingV2`；禁 SHMEM/HCOMM/窗口手动 MTE/RAC | [`comm_hccl.md`](references/foundations/hccl-matmul/comm_hccl.md) |
+| R3 | Matmul 走 `AscendC::Matmul` | 头 `lib/matmul/matmul_intf.h`；禁 Blaze；不调 `SetLocalWorkspace` | [`matmul_fusion.md`](references/foundations/hccl-matmul/matmul_fusion.md) |
+| R4 | AIC-only + Finalize 前跨核同步 | Prepare/Wait/Finalize 在 `ASCEND_IS_AIC` 内；Finalize 前 `CrossCoreSetFlag`/`CrossCoreWaitFlag` | [`mc2_architecture.md`](references/foundations/hccl-matmul/mc2_architecture.md) |
+| R5 | 仅注册 / aclnn | 禁止 `<<<>>>` 直调；host 须 `MC2().HcclGroup("group")` | [`op_architecture.md`](references/foundations/hccl-matmul/op_architecture.md) |
+| R6 | 无 quant | 不引入 `SetQuant*` / `qbmm_mx` / int8 通信路径 | — |
+| R7 | PTA 不在本路线重做 | 算子可跑通后走 `torch-ascendc-op-extension` **路线 B**（aclnn 注册） | 该 skill `routes/aclnn-registry.md` |
+
+**逐项审查清单**：[`review-checklist.md`](references/foundations/hccl-matmul/review-checklist.md)（违反红线项 = FAIL）。
+
+精度判据须与融合方向匹配：先通后算（AllGather+MM）可用逐元素 `np.isclose` + 误差元素比例；先算后通（MM+ReduceScatter/AllReduce）须用整体相对误差 `‖y_npu−y_fp32‖₂/‖y_fp32‖₂ ≤ 4ε`，scatter 类须逐 rank 校验。详见 [`workflow_integration.md`](references/foundations/hccl-matmul/workflow_integration.md) §1.4.1。
+
+### References
+
+| 文档 | 何时读 |
+|------|--------|
+| [`workflow_integration.md`](references/foundations/hccl-matmul/workflow_integration.md) | 设计/开发/验收各阶段的 910B MC2 动作与门禁 |
+| [`mc2_architecture.md`](references/foundations/hccl-matmul/mc2_architecture.md) | 第一次接触：AIC-only、prepare→Wait 两层流水、M 轴切分 |
+| [`comm_hccl.md`](references/foundations/hccl-matmul/comm_hccl.md) | 写/审通信层：HCCL 高阶 API、V2 生命周期、窗口优化 |
+| [`matmul_fusion.md`](references/foundations/hccl-matmul/matmul_fusion.md) | 写/审计算层与 HCCL 的耦合（API 签名一律引用 `ascendc-api-best-practices` 的 `api-matmul.md`） |
+| [`op_architecture.md`](references/foundations/hccl-matmul/op_architecture.md) | aclnn 注册模型与可复用 `mc2_common` |
+| [`codebase_map.md`](references/foundations/hccl-matmul/codebase_map.md) | 从蓝本 `cp -r` 起手按 `[REUSE]/[MODIFY]` 定点改造 |
+| [`pipeline_tuning.md`](references/foundations/hccl-matmul/pipeline_tuning.md) | 本路线 tileCnt 约束与公式化 tiling 系数；两阶段策略复用 [`shared/pipeline_tuning.md`](references/shared/pipeline_tuning.md) |
+| [`references/shared/profiling_mc2.md`](references/shared/profiling_mc2.md) | msprof task-based + 多卡 last-N 取 max（本路线 **无需** 950 的 L2 flush） |
+| `references/foundations/hccl-matmul/all_gather_matmul/` | 已验证参考实现（AllGather+Matmul，910B/HCCL/AICPU，aclnn）——`cp -r` 起手；**勿改蓝本** |
