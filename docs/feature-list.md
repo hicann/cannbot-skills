@@ -262,6 +262,16 @@
 | **gitcode-issue-handler** | GitCode 单 Issue/批量 Issue 状态机：分诊、责任人路由、稳定复现、最小修复、测试、经确认的 PR/回评与报告；批量默认 dry-run | [查看](skills-usage.md#gitcode-issue-handler) |
 | **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | [查看](skills-usage.md#gitcode-toolkit) |
 
+## CANN 工具链
+
+> 以下 Skill 位于 `tools/` 目录，提供 CANN 维测工具使用指导（仅 Ascend EP 形态，RC 形态不支持）。
+
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **asys-toolkit** | asys 一键式故障信息收集：collect/launch/info/health/diagnose/analyze（trace/coredump/stackcore/coretrace/UB/AI Core Error 六类文件解析）/config/profiling | — |
+| **msaicerr-toolkit** | msaicerr 故障分析：AI Core Error 问题定位（info.txt）、Dump 文件解析为 .bin/.npy、bin 转 npy 类型转换、内置算子样例环境检查 | — |
+| **msnpureport-toolkit** | msnpureport Device 侧日志导出（单次/常驻连续）、维测配置查询与设置（日志级别/Coremask/加速器复位/singlecommit）、导出目录结构解读 | — |
+
 ## 社区 Plugins
 
 > 以下 Plugin 位于 `plugins-community/` 目录，属社区维护，可能存在平台或能力限制。
