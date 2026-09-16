@@ -49,6 +49,18 @@ def remove(path):
         shutil.rmtree(path)
 
 
+def atc_data_dir():
+    """ATC/CANN scratch directory for the invoking user.
+
+    CANN writes `atc_data` under the invoking user's home directory, so a
+    hardcoded absolute path is correct only for whichever user it names.
+    `ASCEND_WORK_PATH` relocates the directory when set
+    (see tools/asys-toolkit/references/constraints.md).
+    """
+    base = os.environ.get("ASCEND_WORK_PATH")
+    return str((Path(base) if base else Path.home()) / "atc_data")
+
+
 class ProfilingContext:
     """Profiling上下文管理器"""
 
@@ -413,7 +425,7 @@ class MsprofProfiler:
         num_trials: int = 20,
     ):
         """Profile a model and return (op_summary_path, total_task_duration_us)."""
-        remove("/root/atc_data")
+        remove(atc_data_dir())
 
         profile_root = Path(profile_root).resolve()
         profile_root.mkdir(parents=True, exist_ok=True)
@@ -502,7 +514,7 @@ class AdvancedPerformanceEngine:
         Returns:
             tuple: (耗时中位数us, 性能数据列表)
         """
-        remove("/root/atc_data")
+        remove(atc_data_dir())
 
         profile_root = Path(profile_root).resolve()
         profile_root.mkdir(parents=True, exist_ok=True)

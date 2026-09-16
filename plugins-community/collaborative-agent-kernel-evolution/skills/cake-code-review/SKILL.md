@@ -161,6 +161,24 @@ API 合规预检完成后，先进入结构/安全审查阶段；算法完整性
 | P2 - 中等 | 影响稳定性 | 1周内 |
 | P3 - 低 | 代码可维护性 | 2周内 |
 
+## CV 算子专项检查（自动触发）
+
+在 Review 阶段扫描源代码后，执行以下检测：
+
+```
+if 源代码含 ASCEND_IS_AIC 或 ASCEND_IS_AIV 或 BlockMmad:
+    额外读取并执行 cv_checklist.md
+    将 CV 专项检查结果追加到整改报告末尾
+```
+
+**CV 专项检查覆盖**（详见 `cv_checklist.md`）：
+- CV-P0：ASCEND_IS_AIV 守卫、AIV 侧 PIPE_ALL 禁用、PIPE_FIX BlockMmad 前置、KERNEL_TASK_TYPE_DEFAULT 宏、Resource 多 Phase 生命周期
+- CV-P1：bf16 enableUnitFlag、uint64_t 专家偏移、VECIN TQue、Reduce tmpBuffer 类型、BlockMmad N≤256
+- CV-P2：group_list host 预处理、UB 预算 ≤ 192KB
+
+> API 规则（TBuf/TQue、Reduce、DataCopy 约束）引用自
+> `skills/cake-code-review/api-best-references/`，不在本 checklist 重复维护。
+
 ## 文件索引
 
 **子技能**：
@@ -168,6 +186,7 @@ API 合规预检完成后，先进入结构/安全审查阶段；算法完整性
 - `ascendc-algorithm-check.md` — 算法正确性检查
 - `ascendc-fix.md` — 标准修复模式应用
 - `ascendc-verify.md` — 编译和测试验证
+- `cv_checklist.md` — CV（Cube+Vector）算子专项检查清单，由源码含 `ASCEND_IS_AIC` / `ASCEND_IS_AIV` / `BlockMmad` 触发
 
 **API 参考**：
 - `ascendc-api-check.md` — API 最佳实践参考索引（`api-best-references/` 目录导航入口，含 API 类别索引、场景索引和黑名单入口）

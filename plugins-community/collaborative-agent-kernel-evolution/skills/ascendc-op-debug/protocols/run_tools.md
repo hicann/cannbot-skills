@@ -277,20 +277,24 @@ DataCopy(buf, gm[offset], copySize);
 # 检查 dump 文件是否存在
 ls ~/ascend/log/dump/
 
-# 使用 msaicerr-helper skill（CAKE2 项目独立 skill）
-# skills/msaicerr-helper/SKILL.md
-
-# 步骤1：解析 AI Core 错误报告
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/msaicerr-helper/scripts/msaicerr.py \
-    --input ~/ascend/log/dump/ --output error_report/
+# 步骤1：解析 AI Core 错误报告 —— 用仓内 tools/msaicerr-toolkit 技能
+# 该技能封装 CANN Toolkit 自带的 msaicerr.py（{install_path}/tools/msaicerr/msaicerr.py），
+# 注意参数是 -p / -out，不是 --input / --output
+python3 msaicerr.py -p ~/ascend/log/dump/ -out error_report/
 
 # 步骤2：解析 tiling 数据（如有）
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/msaicerr-helper/scripts/parse_tiling.py \
-    --input tiling.bin --output tiling_parse/
+# 仓内没有 tiling 解析工具。tiling.bin 是 TilingData 结构体的原始字节，
+# 按算子 op_host/<op>_custom_tiling.h 里 BEGIN_TILING_DATA_DEF /
+# TILING_DATA_FIELD_DEF 的字段顺序与类型逐字段读出即可（与 kernel 侧
+# GET_TILING_DATA 得到的是同一份布局）：
+python3 -c "
+import struct
+# 字段顺序与类型照抄 <op>_custom_tiling.h，示例：三个 uint32_t
+print(struct.unpack_from('<III', open('tiling.bin','rb').read(), 0))
+"
 
-# 步骤3：单算子测试
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/msaicerr-helper/scripts/test_single_op.py \
-    --op_name {op_name} --shape {shape}
+# 步骤3：单算子测试 —— 用 ascendc-evaluation 技能的 scripts/evaluate.py
+# （本技能不另带单算子执行入口）
 ```
 
 **错误码对照（plog 速查）**：

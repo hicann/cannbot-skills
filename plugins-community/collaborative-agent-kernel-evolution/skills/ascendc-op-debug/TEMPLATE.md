@@ -14,7 +14,7 @@ when: {TAXONOMY.md when 合法值}
 root_cause: {TAXONOMY.md root_cause 合法值}
 evidence: {TAXONOMY.md evidence 合法值}
 escalate_to: {null | mssanitizer | msaicerr}
-source: {ascendc-debug.md | mssanitizer-helper | msaicerr-helper | retro/日期}
+source: {ascendc-debug.md | mssanitizer | msaicerr-toolkit | retro/日期}
 ---
 ```
 

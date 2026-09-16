@@ -6,7 +6,7 @@ when: intermittent
 root_cause: sync_missing
 evidence: tool_sanitizer
 escalate_to: mssanitizer
-source: mssanitizer-helper
+source: mssanitizer
 ---
 
 ## triggers

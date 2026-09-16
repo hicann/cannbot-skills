@@ -46,6 +46,7 @@ The sub-agent reads all reference files, generates the DSL, verifies the checkli
    |---|---|---|
    | element-wise (unary/binary) | `leaky_relu` (+ `leaky_relu_unalign` for non-aligned tail) | |
    | reduction (sum/max over a dim) | `sum_reduction_over_a_dimension`, `reduce_sum` | accumulate across ALL tiles |
+   | **global reduction → 0-dim `{}` scalar** (global sum/norm, single-tensor `mse_loss`) | **`reduce_sum_single_core`** | default to single-core; see mandatory notes below |
    | normalization | `rms_norm`, `layer_norm`, `softmax` | |
    | scan / prefix | `cumsum` | |
    | matmul-like | `matmul` | Vector path only; Cube+Vector uses the -cv skills |
@@ -152,6 +153,13 @@ You MUST implement the COMPLETE algorithm from module_fn. This is NOT a baseline
 - ✅ Implement ALL loops (tile loops, reduction loops, etc.)
 - ✅ Use proper AscendC APIs (reduce_sum, vexp, vsqrt, etc.) - do NOT use Python math functions
 - ✅ Accumulate across ALL tiles for reductions (not just last tile)
+- ✅ For **global `{}` scalar reductions**: default to single-core streaming — accumulate ALL tiles into one
+  fp32 scalar (`references/output_example/reduce_sum_single_core.py`), **no workspace / no SyncAll**, which
+  passes precision without the cross-core partial defects. Lowering **must** add p-norm branches (L2 → Sqrt,
+  Linf → Max); sum-only is wrong for L2. The multi-core variant (per-core partial → `partial_gm[pid]` →
+  core-0 final reduce, `references/output_example/reduce_sum.py`) is a **performance** step applied only
+  after precision passes, never the first attempt. Never force elementwise or per-row-reduction operators
+  single-core.
 - ✅ Apply ALL activations and transformations correctly
 - ✅ Handle ALL edge cases (boundary conditions, special values)
 

@@ -585,6 +585,7 @@ get_tests_for_category() {
             echo "unit/test-line-endings.sh:fast"
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/test-markdown-anchors.sh:fast"
+            echo "unit/test-cake-absolute-paths.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"

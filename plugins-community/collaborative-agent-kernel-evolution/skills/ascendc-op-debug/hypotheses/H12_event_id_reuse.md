@@ -6,7 +6,7 @@ when: multicore_only
 root_cause: event_id_reuse
 evidence: tool_sanitizer
 escalate_to: mssanitizer
-source: mssanitizer-helper
+source: mssanitizer
 ---
 
 ## triggers

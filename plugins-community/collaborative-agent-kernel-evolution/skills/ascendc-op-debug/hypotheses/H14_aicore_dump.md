@@ -6,7 +6,7 @@ when: always
 root_cause: aicore_dump_analysis
 evidence: tool_msaicerr
 escalate_to: msaicerr
-source: msaicerr-helper
+source: msaicerr-toolkit
 ---
 
 ## triggers
@@ -30,14 +30,13 @@ source: msaicerr-helper
 
 ## fix_template
 ```bash
-# 使用 msaicerr-helper skill 中的工具
-# 步骤1：解析 AI Core 错误报告
-python ${CLAUDE_PLUGIN_ROOT}/skills/msaicerr-helper/scripts/msaicerr.py \
-    --input ~/ascend/log/dump/ --output error_report/
+# 步骤1：解析 AI Core 错误报告 —— 用仓内 tools/msaicerr-toolkit 技能，
+# 它封装 CANN Toolkit 自带的 msaicerr.py（参数为 -p / -out）
+python3 msaicerr.py -p ~/ascend/log/dump/ -out error_report/
 
-# 步骤2：解析 tiling 数据（如有）
-python ${CLAUDE_PLUGIN_ROOT}/skills/msaicerr-helper/scripts/parse_tiling.py \
-    --input tiling.bin --output tiling_parse/
+# 步骤2：解析 tiling 数据（如有）—— 仓内无此工具，按
+# op_host/<op>_custom_tiling.h 的字段顺序与类型直接 struct.unpack tiling.bin
+# （详见 protocols/run_tools.md 的同名步骤）
 
 # 步骤3：对照 error_report 中的地址，查 kernel 源码对应位置
 ```

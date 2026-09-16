@@ -27,9 +27,15 @@
 #### 缺陷修复 Bug Fixes
 - 【ops-direct-invoke】init.sh 补齐 TRAE 变体探测 `detect_trae_variant`（按 `.trae-cn`/`.marscode`/`.traecli` 规范目录优先级选取全局用户根），修复 9413651e 新增的 TR-08 看护在 master 上必然失败的问题——此前 trae 分支硬编码 `~/.trae-cn`，导致所有 PR 的 `unit/install/test-init-tool.sh --tool trae` 门禁红灯。
 - 【安装部署】补齐 `codearts` 安装参数与实际实现的一致性：为社区插件 triton-optimizer、shmem-ops-generator、autoresearch、cannbot-knowledge、ops-perf-evolution、ascendc-port-orchestrator 的 `init.sh` 新增 `codearts` 参数（安装至 `.codeartsdoer/`，含 quickstart/gitignore 配套更新）；为基类工作流插件 ops-direct-invoke、cuda2ascend 的 `SUPPORTED_TOOLS` 新增 `codearts`
+- 【cake】恢复两处随插件合入（`3f9bcb4f`）一并消失的能力：`cake-code-review/cv_checklist.md`（CV 算子专项检查清单，219 行，含 CV-P0/P1/P2 共十二项）与 `dsl-baseline-generation/references/output_example/reduce_sum_single_core.py`（0 维标量 reduce 的单核默认基线，103 行）。二者在上游 CAKE2 都有明确调用方，而下游把调用它们的正文也一并删除，因此不留悬空引用、既有门禁无法发现。恢复后分别在两个技能的 `SKILL.md` 接回调用：前者补「CV 算子专项检查（自动触发）」一节与文件索引，后者补示例选择表条目、单核默认规则与 p-norm 分支要求（L2 → Sqrt、Linf → Max）。
+- 【cake】`ascendc-evaluation/scripts/ascend_performance_test.py` 的 `atc_data` 清理目录不再写死 `/root`。CANN 把 `atc_data` 写在调用者的 home 下，原路径只在以 root 运行时成立，其他用户下两处清理静默无效；改为 `ASCEND_WORK_PATH` 优先、否则 `Path.home()/"atc_data"`，与 `ops/ascendc-runtime-debug/references/kernel_binary_debug.md` 和 `tools/asys-toolkit/references/constraints.md` 的既有约定一致。
+- 【cake】`ascendc-op-debug` 消除 8 处悬空技能引用：`msaicerr-helper` 5 处改指仓内 `tools/msaicerr-toolkit`（该技能封装 CANN Toolkit 自带的 `msaicerr.py`，参数为 `-p` / `-out`；其不覆盖 tiling 解析，该步改为按 `op_host/<op>_custom_tiling.h` 的字段序自行解析；单算子测试改指 `ascendc-evaluation/scripts/evaluate.py`），`mssanitizer-helper` 3 处改为 CANN 自带工具名 `mssanitizer`。两个被引技能名在上游与本仓均不存在。
 
 #### 新特性 New Features
 - 【GE 图编译】新增 `ge-stream-log-analysis`，支持 GELOGI 编译/运行流证据分析、静态/动态场景识别、V1/V2 运行流绑定及逻辑流到 RT 流映射。
+
+#### 测试框架 Test Framework
+- 【测试框架】新增 `tests/unit/test-cake-absolute-paths.sh` 并在 `run-tests.sh` 登记：拒绝 cake 插件内的开发者个人绝对路径（`/data0/<用户>/`、`/root/`、`/home/<用户>/`），放行 `/usr/local/Ascend`、`/home/developer`（hdspace 容器固定用户名）、`$HOME` 与 `/data0/*/` 一类通配。作用域限于 cake 插件——其余插件带有数百处同类路径，全仓判定会在本次改动不拥有的内容上失败，扩大作用域另作全仓卫生提案。
 
 ### 【2026-08-29】
 #### 文档更新 Documentation
