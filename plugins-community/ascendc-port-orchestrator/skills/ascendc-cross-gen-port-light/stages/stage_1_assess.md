@@ -138,10 +138,7 @@ MUST 读取以下文件：
 
 1. **AIC 侧计算路径**：MUST 评估低阶直跑（LoadData2DParamsV2 / Fixpipe / Mmad，见 `cube-migration-guide.md` 改动 2/3/4），并给出"保留高阶 Matmul API / 弃用走低阶"的结论与理由——**禁止默认沿用高阶 API 不做评估**；
 2. **跨核同步协议**：按 `cube-migration-guide.md` 改动 6 全量重写（模式语义 / flagId / PIPE）；
-3. **AIV 侧 vector 计算**：评估 RegBase 重写（`l2-guide.md`）。**评估前置方法——查 VF 封装实现归属**：接口头 → `base_impl.h` 的 `__NPU_ARCH__` 分流，三类结论：
-   - 3510 有 regbase / 3510 专用实现（如 SoftmaxFlashV2 → `regbase/3510/softmax_flashv2_impl.h`、DropOut → `dropout_3510_impl.h`）→ **保留接口即可，自动获得 3510 实现，无需重写**——结论须写明"框架已提供 3510 实现"，禁止写成"保留 Memory 代码"；
-   - 3510 仅有 membase 实现 → 评估迁移；
-   - 3510 无实现 → 必须重写。
+3. **AIV 侧 vector 计算**：按 `l2-guide.md` 评估并落地 RegBase 重写。**评估对象是算子自身的 vector 计算路径**（数据搬运、mask 组织、布局、流水安排）——框架高阶接口（如 `SoftmaxFlashV2` → `regbase/3510/softmax_flashv2_impl.h`、`DropOut` → `dropout_3510_impl.h`）已按 `base_impl.h` 的 `__NPU_ARCH__` 分流到 3510 实现，照常调用即可；但**该事实只说明接口层面已有 3510 实现，不构成该路径免 RegBase 评估、免重写的依据**——算子自身代码仍为 MemBase 写法时，MUST 按 `l2-guide.md` 改造。
 
 三部分缺一不可。"论证了保留高阶 API 不死锁"只完成 ②，不等于完成 L2。
 
