@@ -3,6 +3,10 @@
 #### 文档更新 Documentation
 - 【文档索引】`docs/feature-list.md` 补充 `tools/` 域 CANN 工具链 Skill 清单：新增「CANN 工具链」章节，收录 asys-toolkit（一键式故障信息收集）、msaicerr-toolkit（AI Core Error 分析与 Dump 解析）、msnpureport-toolkit（Device 侧日志导出与维测配置）三个维测工具 Skill，补齐功能清单入口缺失。
 
+### 【2026-09-11】
+#### 新特性 New Features
+- 【GE 图编译】新增 `ge-memory-analysis`：Device 显存归因、Host 内存泄漏排查、算子下发地址调试、内存寻优、踩内存问题分析（五类根因排查 + dump watch 模式定位）五大场景，配套 3 个脚本与 9 条 evals。
+
 ### 【2026-09-10】
 #### 新特性 New Features
 - 【安装部署】`install-helper`（v1.1.14 ~ v1.1.16，同一 PR 经 beta 试点全量验证后发布；v1.1.16 经 1.1.16-beta.0 验证）新增 `codex` 工具支持并与仓库内容对齐：Skills 安装至项目级 `.agents/skills/` 或全局 `~/.agents/skills/`，Agents 以拷贝方式安装 `.codex/agents/*.toml` 并将 `__CANNBOT_AGENT_SOURCE__` 解析为权威 `.md` 路径（规避 openai/codex#15345 软链被忽略），安装/卸载/更新/状态/健康检查全链路适配，布局与插件 `init.sh` 一致；脚本路径安装新增守卫，插件 `init.sh` 未适配目标工具时明确报错拦截、防止静默误装默认目录；`tools/` 技能域（asys-toolkit、msaicerr-toolkit、msnpureport-toolkit）纳入扫描；适配范围收敛为官方插件（`pluginDirs` 配置化，社区插件恢复收录仅需改一行配置）；修复社区插件与新增 Skills（tools 域等 23 个未同步进静态清单）按名卸载报"未找到"、codex 全局卸载 `~/.agents/skills/` 静默跳过、原生二进制无法运行时读取 `repository.yaml` 而静默回退默认配置（构建期内嵌 `embedded-config.json`）等问题，并补充对应看护用例（单元测试 278/278，7 工具 × 双级别 × 全命令 CLI 矩阵 196 断言）。

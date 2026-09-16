@@ -1,0 +1,191 @@
+{
+  "skill_name": "ge-memory-analysis",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "分诊先行：未指明内存类型时先询问",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我的模型内存占用太高了，帮我看看哪里的问题。",
+      "expected_output": "应先做入口澄清：询问是 Device 显存（npu-smi info 可见、NPU/HBM）还是 Host 内存（top/ps 进程 RSS），两者分析路径完全不同；不得未分诊就直接进入某个分析路径或给出结论。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "显存"
+        },
+        {
+          "type": "contains",
+          "pattern": "Host"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "静态图归因：复用已最优时定位到图结构而非算法",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "分析一下这个静态图的内存。devmm 统计 GE 模块 MEM_DEV_HUGE_HBM allocated_peak_size=274726912 是大头；imas total 显示 Used total 394.61M：GE 260.03M（StaticGraph 256.03M/Variable 2M/davinci_model_load 2M）、APP 128M、HCCL 6.57M。imas_mem_graph.csv summary：memory_size 268470272(256.03M), reuse rate:0%, reach_theory_rate:100.00, io:134218752(128.00M), no_reuse:134218752, atomic:0, continuous:0, streams:3。怎么优化？",
+      "expected_output": "应判定为静态图（GE-StaticGraph 大头）。reach_theory_rate=100% 说明复用算法已最优、无算法优化空间；reuse rate 0% 根因在图结构——4 个 64M 大块生命周期持续到模型结束互相重叠无法共享 offset；io=128M 为两个零拷贝块（设计如此不可复用）。优化方向应指向图结构/零拷贝配置而非改 topo 或复用算法参数。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "reach_theory_rate"
+        },
+        {
+          "type": "contains",
+          "pattern": "图结构"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "动态 shape 内存池：区分粒度台阶与碎片",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "动态 shape 图（RT2.0）日志，imas total 显示 GE-MemoryPool 50331648(48.00M)，ge_2 allocator：reuse_rate 77.68% reach_theory_rate 83.33% total 215.04M after_reuse 48.00M theory_min 40.00M。日志里 MallocPhysicalPage 记录 21 次 × 8388608。按 lb/le 错峰模拟峰值活跃是 160.25M@t=9（另一轮次数据同构）。为啥和理论最小值有差距，是不是碎片没消除？",
+      "expected_output": "应判定动态 shape 图（GE-MemoryPool）。差距 8M 是 ExpandableActiveMemoryAllocator 的 8M 最小申请粒度取整台阶而非碎片：峰值活跃 40.25M 超出 5×8M 仅 0.25M 即需第 6 个 8M 单元（48M），物理申请 21×8M 与 imas 报告吻合；块明细层无空洞。不应建议继续消除碎片。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "8M"
+        },
+        {
+          "type": "contains",
+          "pattern": "粒度"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "内存寻优结果解读：给出推荐配置",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "mem_tuning.sh 跑完 4 topo × 2 内存策略，StableRDFS 两种策略都是 57739776 (55.06M) 最小，BFS default 86903808 (82.88M)。帮我总结寻优结论。",
+      "expected_output": "应按展示规则输出对比表（从小到大、同大小 default 在前）并给最优组合：topo=3(StableRDFS)、内存策略 default、复用后 57739776 (55.06M)，推荐配置 ge.topoSortingMode=\"3\"；并注明离线重放结论需重新编译真实验证。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "StableRDFS"
+        },
+        {
+          "type": "contains",
+          "pattern": "topoSortingMode"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Host 内存泄漏：TMT 首选",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "ge_controller 进程跑几天后 RSS 持续增长，从 2G 涨到 8G，怀疑内存泄漏，怎么排查？",
+      "expected_output": "应判定 Host 内存泄漏（进程 RSS 增长，top/ps 可见），走通用排查方法：TMT 首选（免编译 LD_PRELOAD、动态开关 tmt clear/start/dump、泄漏栈定位），备选 ASan/valgrind；统计点从稳定运行第 2 次迭代开始避免初始化误报。不得用 imas/devmm 排查 host 泄漏。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "TMT"
+        },
+        {
+          "type": "contains",
+          "pattern": "LD_PRELOAD"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "静态图算子下发地址：零拷贝槽区分 logical_addr 与 user_addr",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "静态图（V1 task sink）日志已开 GE_DAVINCI_MODEL_PROFILING=2。MatMulV2 的 [Args][Init] 显示 logical_addr[0]:0x12c04124f000 id:3 refreshable:1、logical_addr[1]:0x12c041251200 id:1。日志有 ConstructZeroCopyIoActiveBaseAddrs:[Input] index:2, user_addr:0x12c041241200 和 index:0, user_addr:0x12c041200000。Model 1 need 16896/317952 for feature-map without zero-copyable memory。MatMulV2 的实际下发地址是什么？",
+      "expected_output": "应给出：input_0 实际下发 0x12c041241200（= user_addr [Input] index:2，用户输入 buffer），input_1 实际下发 0x12c041200000（= user_addr [Input] index:0）；两个 logical_addr（0x12c04124f000/0x12c041251200）为零拷贝占位、未实际分配（F 区实际申请 16896）；output_0 为 GE 已分配中间内存。必须区分 logical_addr 占位与 user_addr 实际地址，不得把 logical_addr 当实际下发地址。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "0x12c041241200"
+        },
+        {
+          "type": "contains",
+          "pattern": "user_addr"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "RT2 动态执行算子地址：按 step 轮次提取",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "RT2.0 动态 shape 日志里有 [KernelTrace][LaunchKernelWithHandle_Add_1_325]Input/Output addresses: 0x12df37ff0000 0x12c180000800 0x12df35fe0000 , Input/Output sizes: 33619968 65568 33619968，同算子 5 次执行（32M/8M/16M/4M/32M 档位）。Add_1 的实际下发地址是多少？",
+      "expected_output": "应说明 input_0=0x12df37ff0000（32M 档，x_141 图输入）、input_1=0x12c180000800（V 区常量，四档恒定）、output_0=0x12df35fe0000（32M 档）；并按执行轮次列出其余档位地址组（8M/16M/4M 各一组），同档多轮地址一致说明池分配无漂移。地址切分依据 ArgsInputsAddr/ArgsOutputsAddr 的 length/8。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "0x12df37ff0000"
+        },
+        {
+          "type": "contains",
+          "pattern": "0x12c180000800"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "纪律负例：dfx 开关未开启时提示重跑而非编造地址",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "静态图日志里搜 Init davinci_model profiler flag 显示 get device model args table flag:0，也没搜到 Print model args host table。帮我提取算子实际下发的 device 地址。",
+      "expected_output": "应判定 dfx 开关未开启（取值 2 才有 args 表打印，0/1 无），提示用户 export GE_DAVINCI_MODEL_PROFILING=2 和 ASCEND_GLOBAL_LOG_LEVEL=1 后重新运行取新日志再分析；不得在无 dfx 表数据时凭 logical_addr 或推测编造实际下发地址。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GE_DAVINCI_MODEL_PROFILING"
+        },
+        {
+          "type": "contains",
+          "pattern": "重新"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "纪律负例：无日志证据时不得断言内存根因",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我们模型显存占用特别高，肯定是 GE 泄漏了，帮我定位下根因。日志现在还没有。",
+      "expected_output": "应说明无日志证据不能定位根因，要求用户提供 run 阶段 plog（devmm 统计）和 debug 阶段 plog（imas 解析），无日志时给出日志开关（ASCEND_GLOBAL_LOG_LEVEL=1，atc 加 --log=info）重新采集的指引；不得凭现象直接断言 GE 泄漏或给出根因结论。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "日志"
+        }
+      ]
+    }
+  ]
+}
