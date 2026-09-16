@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-16】
+#### 下线治理 Deprecation
+- 【cannbot-insight】插件已迁移至独立仓库维护，从本仓移除 `plugins-community/cannbot-insight/` 全部内容。
+
 ### 【2026-09-15】
 #### 文档更新 Documentation
 - 【文档索引】`docs/feature-list.md` 补充 `tools/` 域 CANN 工具链 Skill 清单：新增「CANN 工具链」章节，收录 asys-toolkit（一键式故障信息收集）、msaicerr-toolkit（AI Core Error 分析与 Dump 解析）、msnpureport-toolkit（Device 侧日志导出与维测配置）三个维测工具 Skill，补齐功能清单入口缺失。
