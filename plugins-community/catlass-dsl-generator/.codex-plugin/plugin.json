@@ -1,6 +1,6 @@
 {
   "name": "catlass-dsl-generator",
-  "version": "0.2.0+codex.20260812091621",
+  "version": "0.2.0+codex.20260911074518",
   "description": "\u57fa\u4e8e Markdown \u4efb\u52a1\u5951\u7ea6\u7684\u7cbe\u7b80 CATLASS DSL \u5f00\u53d1\u4e0e\u77e5\u8bc6\u5de5\u4f5c\u6d41\u3002",
   "author": {
     "name": "CATLASS DSL contributors"
