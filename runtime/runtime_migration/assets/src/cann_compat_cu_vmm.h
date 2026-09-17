@@ -9,6 +9,7 @@
 #define CUDA_COMPAT_CU_VMM_H
 
 #include "cann_compat_cu_types.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -171,6 +172,23 @@ extern "C"
             return shareRet;
         }
 
+        if (handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)
+        {
+            uint64_t cannHandle = 0;
+            aclError ret = aclrtMemExportToShareableHandleV2(handle, ACL_RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION,
+                                                             shareType, &cannHandle);
+            if (ret != ACL_SUCCESS)
+            {
+                return acl2cuError(ret);
+            }
+            if (cannHandle > (uint64_t)INT_MAX)
+            {
+                return CUDA_ERROR_NOT_SUPPORTED;
+            }
+            *(int *)shareableHandle = (int)cannHandle;
+            return CUDA_SUCCESS;
+        }
+
         aclError ret = aclrtMemExportToShareableHandleV2(handle, ACL_RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION,
                                                          shareType, shareableHandle);
         return acl2cuError(ret);
@@ -250,7 +268,12 @@ extern "C"
         }
         aclError ret = aclrtMemSetAccess((void *)ptr, size, cannDesc, count);
         free(cannDesc);
-        return acl2cuError(ret);
+        CUresult result = acl2cuError(ret);
+        if (result == CUDA_ERROR_UNKNOWN)
+        {
+            return CUDA_ERROR_NOT_SUPPORTED;
+        }
+        return result;
     }
 
 
@@ -368,6 +391,13 @@ extern "C"
         if (shareRet != CUDA_SUCCESS)
         {
             return shareRet;
+        }
+
+        if (shHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)
+        {
+            uint64_t cannHandle = (uint64_t)(uintptr_t)osHandle;
+            aclError ret = aclrtMemImportFromShareableHandleV2(&cannHandle, shareType, 0, handle);
+            return acl2cuError(ret);
         }
 
         aclError ret = aclrtMemImportFromShareableHandleV2(osHandle, shareType, 0, handle);

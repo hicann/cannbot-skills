@@ -60,10 +60,11 @@ aclError aclrtResetDeviceForce(int32_t deviceId);
 
 ### aclrtDeviceEnablePeerAccess
 ```c
-aclError aclrtDeviceEnablePeerAccess(int32_t peerDeviceId);
+aclError aclrtDeviceEnablePeerAccess(int32_t peerDeviceId, uint32_t flags);
 ```
-- 功能：启用对 peerDevice 的直接访问
-- 参数：peerDeviceId - 目标设备 ID
+- 功能：启用当前 Device 到 peerDevice 的单向数据交互
+- 参数：peerDeviceId - 目标设备 ID，不能与当前 Device 相同；flags - 保留参数，当前必须为 0
+- 说明：双向访问需要分别在两个 Device 上调用；可先用 `aclrtDeviceCanAccessPeer` 查询能力，支持范围受产品和拓扑限制
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclrtDeviceCanAccessPeer
@@ -72,7 +73,7 @@ aclError aclrtDeviceCanAccessPeer(int32_t *canAccess, int32_t deviceId,
                                    int32_t peerDeviceId);
 ```
 - 功能：检查设备间直接访问能力
-- 参数：canAccess - 结果输出 (1/0)
+- 参数：canAccess - 结果输出 (1/0)，deviceId 与 peerDeviceId 不能相同
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclrtDeviceGetStreamPriorityRange
@@ -83,6 +84,37 @@ aclError aclrtDeviceGetStreamPriorityRange(int32_t *leastPriority,
 - 功能：获取流优先级范围
 - 参数：leastPriority - 最低优先级(数值大)，greatestPriority - 最高优先级(数值小)
 - 返回：ACL_SUCCESS 或错误码
+
+### aclrtDeviceSetLimit / aclrtDeviceGetLimit
+```c
+aclError aclrtDeviceSetLimit(aclrtDeviceLimit limit, size_t value);
+aclError aclrtDeviceGetLimit(aclrtDeviceLimit limit, size_t *value);
+```
+- 功能：设置或查询设备运行时资源限制
+- 兼容层映射：`cudaLimitStackSize` 使用 `ACL_RT_DEV_LIMIT_SIMD_STACK_SIZE`；`cudaLimitPrintfFifoSize` 使用 `ACL_RT_DEV_LIMIT_SIMD_PRINTF_FIFO_SIZE_PER_CORE`
+- 限制：CANN limit 类型与 CUDA 不完全等价；heap、device runtime sync depth、pending launch count、L2 fetch/persisting 等 CUDA limit 当前无等价 Runtime 映射，兼容层返回 `cudaErrorUnsupportedLimit`
+
+### aclrtDeviceGetHostAtomicCapabilities
+```c
+aclError aclrtDeviceGetHostAtomicCapabilities(uint32_t *capabilities,
+                                              const aclrtAtomicOperation *operations,
+                                              uint32_t count,
+                                              int32_t deviceId);
+```
+- 功能：查询 Host atomic operation 能力
+- 兼容层映射：CUDA operation 0-12 映射到 CANN 对应 operation；CANN capability bit 转换为 CUDA capability bit
+- 限制：CANN 的 scalar8/scalar16 能力没有 CUDA Runtime bit 位，兼容层不向上暴露
+
+### aclrtDeviceGetP2PAtomicCapabilities
+```c
+aclError aclrtDeviceGetP2PAtomicCapabilities(uint32_t *capabilities,
+                                             const aclrtAtomicOperation *operations,
+                                             uint32_t count,
+                                             int32_t srcDeviceId,
+                                             int32_t dstDeviceId);
+```
+- 功能：查询两个设备之间的 P2P atomic operation 能力
+- 说明：成功路径依赖产品、设备数量和拓扑；兼容层先按 CUDA 语义拦截同设备 src/dst，返回 `cudaErrorInvalidDevice`
 
 ---
 
@@ -153,7 +185,11 @@ aclError aclrtMemcpyAsync(void *dst, size_t destMax, const void *src,
 ```
 - 功能：异步内存拷贝
 - 参数：同 aclrtMemcpy，增加 stream
-- 返回：ACL_SUCCESS（立即返回）
+- 返回：ACL_SUCCESS 或错误码；接口成功只表示任务下发成功，需同步 stream/device 后确认完成
+- 说明：`ACL_MEMCPY_DEVICE_TO_DEVICE` 可表示同 Device 或跨 Device 复制；跨 Device 复制需先查询并启用 peer access，当前兼容层仅按同一个 PCIe Switch 内 Device 间复制进行条件支持。跨 Device P2P 验证时，应在分配 P2P 源/目的 device buffer 前，分别切到源 Device 和目的 Device 开启双向 peer access，并设置 `CUDA_COMPAT_DEVICE_MALLOC_POLICY=p2p`，使兼容层 `cudaMalloc` 使用 `ACL_MEM_MALLOC_HUGE_FIRST_P2P` 分配策略；复制应在目的 Device 上创建的 stream 中下发。若只开启单向访问或在普通内存分配后才 enable，可能在 stream 同步阶段返回设备/驱动不匹配错误。
+
+### aclrtMemSetAccess
+- 兼容层口径：用于 `cuMemSetAccess` 的 VMM 映射访问权限设置。部分产品或驱动组合可能返回未映射的 VMM access 错误；兼容层在该接口内把未映射错误收敛为 `CUDA_ERROR_NOT_SUPPORTED`，转测用例按条件 `SKIP` 处理，而不是暴露含糊的 `CUDA_ERROR_UNKNOWN`。
 
 ### aclrtMemcpy2d
 ```c
@@ -507,6 +543,7 @@ aclError aclrtLaunchKernelWithArgsArray(void *func, uint32_t numBlocks,
                                         void **args);
 ```
 - 功能：使用 Host 参数数组启动 Kernel
+- 约束：`func` 必须是 CANN Runtime 可识别的 kernel/function handle；`args` 中每个元素指向 Host 侧参数数据，顺序需与 kernel 参数顺序一致
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclrtLaunchSIMTKernelWithArgsArray
@@ -516,6 +553,7 @@ aclError aclrtLaunchSIMTKernelWithArgsArray(void *func, dim3 gridDim, dim3 block
                                             aclrtLaunchKernelCfg *cfg, void **args);
 ```
 - 功能：使用参数数组启动 SIMT Kernel
+- 约束：本地 CANN 文档显示 SIMT launch 仅在部分产品支持；兼容层通过弱符号检查该接口是否由当前运行库导出，缺失时退回非 SIMT launch 路径
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclrtLaunchSIMTKernelWithHostArgs
@@ -528,6 +566,15 @@ aclError aclrtLaunchSIMTKernelWithHostArgs(void *func, dim3 gridDim, dim3 blockD
                                            size_t placeHolderNum);
 ```
 - 功能：使用 Host 连续参数启动 SIMT Kernel
+- 约束：本地 CANN 文档显示 SIMT launch 仅在部分产品支持；当前 `cudaLaunchKernel` 兼容入口优先使用参数数组方式
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtLaunchHostFunc
+```c
+aclError aclrtLaunchHostFunc(aclrtStream stream, aclrtHostFunc fn, void *args);
+```
+- 功能：在 stream 任务队列中插入 Host 回调任务，回调会阻塞本 stream 后续任务执行
+- 约束：同一 stream 上不应混用 `aclrtLaunchHostFunc` 与 `aclrtLaunchCallback`；回调函数内不应执行资源申请/释放、同步或任务下发等可能导致死锁的操作
 - 返回：ACL_SUCCESS 或错误码
 
 ---
@@ -539,6 +586,7 @@ aclError aclrtLaunchSIMTKernelWithHostArgs(void *func, dim3 gridDim, dim3 blockD
 aclError aclmdlRIDebugJsonPrint(aclmdlRI modelRI, const char *path, uint32_t flags);
 ```
 - 功能：导出模型运行实例调试信息
+- 约束：Model RI/ACL Graph 场景接口，主要用于维测和转测；输出格式为 JSON，不是 CUDA DOT 格式的完全等价输出
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRIDestroy
@@ -546,6 +594,7 @@ aclError aclmdlRIDebugJsonPrint(aclmdlRI modelRI, const char *path, uint32_t fla
 aclError aclmdlRIDestroy(aclmdlRI modelRI);
 ```
 - 功能：销毁模型运行实例
+- 约束：用于释放 capture/build 得到的 Model RI；需与 capture/build 生命周期配对
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRIExecuteAsync
@@ -553,6 +602,7 @@ aclError aclmdlRIDestroy(aclmdlRI modelRI);
 aclError aclmdlRIExecuteAsync(aclmdlRI modelRI, aclrtStream stream);
 ```
 - 功能：异步执行模型运行实例
+- 约束：执行 capture/build 得到的 Model RI；需通过 stream/device 同步确认任务完成
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRICondHandleCreate
@@ -607,6 +657,7 @@ aclError aclmdlRICaptureBegin(aclrtStream stream, aclmdlRICaptureMode mode);
 ```
 - 功能：开始流捕获
 - 参数：mode - ACL_MODEL_RI_CAPTURE_MODE_GLOBAL/THREAD_LOCAL/RELAXED
+- 约束：CANN 文档说明捕获期间对 Stream、Event、Device、Context 的同步或查询可能导致捕获失败；默认 stream 不建议用于 capture
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRICaptureEnd
@@ -625,6 +676,7 @@ aclError aclmdlRICaptureGetInfo(aclrtStream stream,
 ```
 - 功能：获取捕获信息
 - 参数：status - 状态输出
+- 约束：CANN 错误信息示例中说明 `status` 与 `modelRI` 不能同时为空；兼容层 `cudaStreamIsCapturing` 至少传入 status 输出
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRICaptureStatus

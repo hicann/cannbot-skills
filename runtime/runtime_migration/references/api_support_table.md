@@ -14,14 +14,16 @@
 | `cudaDeviceReset()`                  | `aclrtResetDeviceForce()`             |    ✅    | 重置设备                          |
 | `cudaSetDeviceFlags()`               | 内部存储                              |    ✅    | 设置设备标志                      |
 | `cudaGetDeviceFlags()`               | 内部存储                              |    ✅    | 获取设备标志                      |
-| `cudaDeviceSetLimit()`               | 内部存储                              |    ✅    | 设置设备限制                      |
-| `cudaDeviceGetLimit()`               | Mock 实现                             |    ✅    | 获取设备限制                      |
+| `cudaDeviceSetLimit()`               | `aclrtDeviceSetLimit()`               |    ✅    | 设置设备限制；当前映射 stack size 和 printf FIFO，其它 CUDA limit 返回 `cudaErrorUnsupportedLimit` |
+| `cudaDeviceGetLimit()`               | `aclrtDeviceGetLimit()`               |    ✅    | 获取设备限制；当前映射 stack size 和 printf FIFO，其它 CUDA limit 返回 `cudaErrorUnsupportedLimit` |
+| `cudaDeviceGetHostAtomicCapabilities()` | `aclrtDeviceGetHostAtomicCapabilities()` |    ✅    | 查询 Host atomic 能力；入参空指针、count 为 0、非法 operation 返回 `cudaErrorInvalidValue` |
+| `cudaDeviceGetP2PAtomicCapabilities()` | `aclrtDeviceGetP2PAtomicCapabilities()` |    ✅    | 查询 P2P atomic 能力；同设备 src/dst 预校验返回 `cudaErrorInvalidDevice`，跨设备成功路径受设备数量和拓扑限制 |
 | `cudaDeviceGetCacheConfig()`         | Mock 实现                             |    ✅    | 获取缓存配置                      |
 | `cudaDeviceSetCacheConfig()`         | 内部存储                              |    ✅    | 设置缓存配置                      |
 | `cudaDeviceGetStreamPriorityRange()` | `aclrtDeviceGetStreamPriorityRange()` |    ✅    | 获取流优先级范围                  |
-| `cudaDeviceEnablePeerAccess()`       | `aclrtDeviceEnablePeerAccess()`       |    ✅    | 启用点对点访问                    |
+| `cudaDeviceEnablePeerAccess()`       | `aclrtDeviceEnablePeerAccess()`       |    ✅    | 启用当前设备到 peer 设备的单向访问；flags 非 0 返回 `cudaErrorInvalidValue`，CANN 支持范围受产品和拓扑限制 |
 | `cudaDeviceDisablePeerAccess()`      | `aclrtDeviceDisablePeerAccess()`      |    ✅    | 禁用点对点访问                    |
-| `cudaDeviceCanAccessPeer()`          | `aclrtDeviceCanAccessPeer()`          |    ✅    | 检查点对点访问能力                |
+| `cudaDeviceCanAccessPeer()`          | `aclrtDeviceCanAccessPeer()`          |    ✅    | 检查点对点访问能力；空输出指针返回 `cudaErrorInvalidValue`，CANN 支持范围受产品和拓扑限制 |
 
 ## 二、内存管理 API
 
@@ -110,13 +112,13 @@
 | `cudaStreamGetId()`                     | `aclrtStreamGetId()`                  |    ✅    | 获取流 ID          |
 | `cudaStreamGetPriority()`               | `aclrtStreamGetPriority()`            |    ✅    | 获取流优先级       |
 | `cudaStreamGetFlags()`                  | `aclrtStreamGetFlags()`               |    ✅    | 获取流标志         |
-| `cudaStreamBeginCapture()`              | `aclmdlRICaptureBegin()`              |    ✅    | 开始流捕获         |
+| `cudaStreamBeginCapture()`              | `aclmdlRICaptureBegin()`              |    ✅*   | 开始流捕获；目标 CANN Model RI 接口为试验特性，非法 capture mode 先返回 `cudaErrorInvalidValue` |
 | `cudaStreamBeginCaptureToGraph()`       | `aclmdlRICaptureToModelRIBegin()`     |    ✅*   | 开始捕获到已有 Model RI；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
-| `cudaStreamEndCapture()`                | `aclmdlRICaptureEnd()`                |    ✅    | 结束流捕获         |
+| `cudaStreamEndCapture()`                | `aclmdlRICaptureEnd()`                |    ✅*   | 结束流捕获；目标 CANN Model RI 接口为试验特性 |
 | `cudaStreamCaptureStatus`               | `aclmdlRICaptureStatus`               |    ✅    | Stream capture 状态枚举显式映射：None/Active/Invalidated |
 | `cudaStreamGetCaptureInfo()`            | `aclmdlRICaptureGetInfo()`            |    ✅    | 查询 capture 状态与 graph |
 | `cudaStreamGetCaptureInfo_v3()`         | `aclmdlRICaptureGetInfo()`            |    ✅    | v3 查询接口兼容到 CANN capture info |
-| `cudaStreamIsCapturing()`               | `aclmdlRICaptureGetInfo()`            |    ✅    | 查询流捕获状态     |
+| `cudaStreamIsCapturing()`               | `aclmdlRICaptureGetInfo()`            |    ✅*   | 查询流捕获状态；目标 CANN Model RI 接口为试验特性 |
 | `cudaThreadExchangeStreamCaptureMode()` | `aclmdlRICaptureThreadExchangeMode()` |    ✅    | 交换流捕获模式     |
 
 ## 五、事件管理 API
@@ -138,9 +140,9 @@
 
 | CUDA API                   | CANN API                                | 实现状态 | 说明              |
 | -------------------------- | --------------------------------------- | :------: | ----------------- |
-| `cudaIpcGetMemHandle()`    | `aclrtIpcMemGetExportKey()`            |    ✅    | 获取 IPC 内存 key |
-| `cudaIpcOpenMemHandle()`   | `aclrtIpcMemImportByKey()`             |    ✅    | 通过 IPC key 导入共享内存 |
-| `cudaIpcCloseMemHandle()`  | `aclrtIpcMemClose()`                   |    ✅    | 关闭 IPC 共享内存 |
+| `cudaIpcGetMemHandle()`    | `aclrtIpcMemGetExportKey()`            |    ✅    | 获取 IPC 内存 key；CANN 侧验证需使用页对齐共享内存范围，部分产品可能返回不支持 |
+| `cudaIpcOpenMemHandle()`   | `aclrtIpcMemImportByKey()`             |    ✅    | 通过 IPC key 导入共享内存；验收应使用 exec 子进程，避免 fork 后继承 CUDA/CANN 上下文 |
+| `cudaIpcCloseMemHandle()`  | `aclrtIpcMemClose()`                   |    ✅    | 关闭 IPC 共享内存；导入进程先 close，导出进程后释放内存 |
 | `cudaIpcGetEventHandle()`  | `aclrtIpcGetEventHandle()`              |    ✅    | 获取 IPC 事件句柄 |
 | `cudaIpcOpenEventHandle()` | `aclrtIpcOpenEventHandle()`             |    ✅    | 打开 IPC 事件句柄 |
 
@@ -166,9 +168,9 @@
 
 | CUDA API               | CANN API                | 实现状态 | 说明         |
 | ---------------------- | ----------------------- | :------: | ------------ |
-| `cudaLaunchHostFunc()` | `aclrtLaunchHostFunc()` |    ✅    | 主机函数回调 |
+| `cudaLaunchHostFunc()` | `aclrtLaunchHostFunc()` |    ✅    | 主机函数回调；空回调函数按 CUDA baseline 作为 no-op 返回 `cudaSuccess` |
 | `cudaFuncGetAttributes()` | `aclrtGetFunctionAttribute()` |    ✅    | 查询 CANN function 属性并填充 CUDA 属性结构 |
-| `cudaLaunchKernel()`   | `aclrtLaunchKernelWithHostArgs()` / `aclrtLaunchKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithHostArgs()` |    ✅    | Kernel 启动；兼容层默认使用参数数组方式下发 |
+| `cudaLaunchKernel()`   | `aclrtLaunchKernelWithHostArgs()` / `aclrtLaunchKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithArgsArray()` / `aclrtLaunchSIMTKernelWithHostArgs()` |    ✅*   | Kernel 启动；兼容层默认使用参数数组方式下发，仅适用于 CANN 可识别的 kernel/function handle；CUDA `<<<>>>` kernel 迁移按 Host fallback 处理 |
 
 ## 九、性能分析 API
 
@@ -185,7 +187,7 @@
 | ----------------------- | ------------------------ | :------: | -------------- |
 | `cudaGetLastError()`    | `aclrtGetLastError()`    |    ✅    | 获取最后的错误 |
 | `cudaPeekAtLastError()` | `aclrtPeekAtLastError()` |    ✅    | 查看最后的错误 |
-| `cudaGetErrorName()`    | 内部实现                 |    ✅    | 获取错误名称   |
+| `cudaGetErrorName()`    | 内部错误表 / `aclGetRecentErrMsg()` fallback |    ✅    | 已知 CUDA 错误码返回 CUDA 错误名称；未知错误码尝试返回最近一次 ACL 错误描述，否则返回 `cudaErrorUnknown` |
 | `cudaGetErrorString()`  | `aclGetRecentErrMsg()`  |    ✅    | 获取最近一次 ACL 错误描述；必要时结合本地错误文本包装完成 CUDA 错误字符串映射 |
 
 ## 十一、版本管理 API
@@ -200,12 +202,12 @@
 
 | CUDA API                   | CANN API                   | 实现状态 | 说明                |
 | -------------------------- | -------------------------- | :------: | ------------------- |
-| `cudaGraphDebugDotPrint()` | `aclmdlRIDebugJsonPrint()` |    ✅    | 导出 Graph/RI 调试信息 |
-| `cudaGraphExecDestroy()`   | `aclmdlRIDestroy()`        |    ✅    | 销毁 Graph 执行实例 |
+| `cudaGraphDebugDotPrint()` | `aclmdlRIDebugJsonPrint()` |    ✅*   | 导出 Graph/RI JSON 调试信息；目标 CANN Model RI 接口为试验特性 |
+| `cudaGraphExecDestroy()`   | `aclmdlRIDestroy()`        |    ✅*   | 销毁 Graph 执行实例；目标 CANN Model RI 接口为试验特性 |
 | `cudaGraphConditionalHandleCreate()` | `aclmdlRICondHandleCreate()` |    ✅*   | 创建条件 Graph handle；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
 | `cudaGraphAddNode()` (`cudaGraphNodeTypeConditional`) | `aclmdlRIAddCondTask()` |    ✅*   | 仅支持 conditional node 特例；`cudaGraphAddNode` 承载多种 task 类型，非 conditional node 不按此映射 |
 | `cudaGraphGetNodes()`      | `aclmdlRIGetStreams()` + `aclmdlRIGetTasksByStream()` |    ✅*   | 通过 RI stream/task 汇总节点；目标 CANN 接口为试验特性，后续版本可能变更，不支持应用于生产环境 |
-| `cudaGraphLaunch()`        | `aclmdlRIExecuteAsync()`   |    ✅    | 异步执行 Graph/RI |
+| `cudaGraphLaunch()`        | `aclmdlRIExecuteAsync()`   |    ✅*   | 异步执行 Graph/RI；目标 CANN Model RI 接口为试验特性 |
 | `cudaGraphSetConditional()` | `aclmdlRICondHandleGetCondPtr()` |    ✅*   | 设备侧设置条件值；CANN 侧通过条件 handle 取得设备条件指针后写入，`aclmdlRICondHandleGetCondPtr` 为试验特性，后续版本可能变更，不支持应用于生产环境 |
 
 ## 十三、CUDA Driver VMM API
@@ -217,11 +219,11 @@
 | `cuMemAddressFree()`               | `aclrtReleaseMemAddress()`              |    ✅    | 释放虚拟地址范围 |
 | `cuMemCreate()`                    | `aclrtMallocPhysical()`                 |    ✅    | 创建物理内存     |
 | `cuMemRelease()`                   | `aclrtFreePhysical()`                   |    ✅    | 释放物理内存     |
-| `cuMemExportToShareableHandle()`   | `aclrtMemExportToShareableHandleV2()`   |    ✅    | 导出可共享句柄   |
+| `cuMemExportToShareableHandle()`   | `aclrtMemExportToShareableHandleV2()`   |    ✅    | 导出可共享句柄；POSIX FD 路径需在 CUDA `int fd` 与 CANN `uint64_t` 句柄表示之间转换 |
 | `cuMemGetAccess()`                 | `aclrtMemGetAccess()`                   |    ✅    | 获取访问权限     |
-| `cuMemSetAccess()`                 | `aclrtMemSetAccess()`                   |    ✅    | 设置访问权限     |
+| `cuMemSetAccess()`                 | `aclrtMemSetAccess()`                   |    ✅*   | 设置访问权限；产品不支持或返回未映射 VMM access 错误时按 `CUDA_ERROR_NOT_SUPPORTED` 条件跳过 |
 | `cuMemGetAllocationGranularity()`  | `aclrtMemGetAllocationGranularity()`    |    ✅    | 获取分配粒度     |
-| `cuMemImportFromShareableHandle()` | `aclrtMemImportFromShareableHandleV2()` |    ✅    | 导入可共享句柄   |
+| `cuMemImportFromShareableHandle()` | `aclrtMemImportFromShareableHandleV2()` |    ✅    | 导入可共享句柄；CANN V2 不支持同进程 export/import 组合，验收应使用 exec 子进程 |
 | `cuMemMap()`                       | `aclrtMapMem()`                         |    ✅    | 映射物理内存     |
 | `cuMemUnmap()`                     | `aclrtUnmapMem()`                       |    ✅    | 取消映射         |
 | `cuMemRetainAllocationHandle()`    | `aclrtMemRetainAllocationHandle()`      |    ✅    | 保留分配句柄     |

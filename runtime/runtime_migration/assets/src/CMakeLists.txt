@@ -64,6 +64,7 @@ set(CUDACOMPAT_SOURCES
 # Header files for installation
 set(CUDACOMPAT_HEADERS
     cann_runtime_compat.h
+    cann_compat_device_prop_types.h
     cann_compat_error_types.h
     cann_compat_types.h
     cann_compat_device_types.h

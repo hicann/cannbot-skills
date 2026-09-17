@@ -133,6 +133,13 @@ static inline aclmdlRICaptureMode cudaCompatCaptureMode(cudaStreamCaptureMode mo
     }
 }
 
+static inline int cudaCompatCaptureModeValid(cudaStreamCaptureMode mode)
+{
+    return mode == cudaStreamCaptureModeGlobal ||
+           mode == cudaStreamCaptureModeThreadLocal ||
+           mode == cudaStreamCaptureModeRelaxed;
+}
+
 static inline cudaStreamCaptureStatus cudaCompatCaptureStatus(aclmdlRICaptureStatus status)
 {
     switch (status) {
@@ -155,6 +162,9 @@ static inline cudaError_t cudaStreamBeginCapture(cudaStream_t stream,
 #endif
 )
 {
+    if (!cudaCompatCaptureModeValid(mode)) {
+        return cudaErrorInvalidValue;
+    }
     aclError ret = aclmdlRICaptureBegin(stream, cudaCompatCaptureMode(mode));
     if (ret == ACL_SUCCESS) {
         aclmdlRICaptureStatus status = ACL_MODEL_RI_CAPTURE_STATUS_NONE;
@@ -194,6 +204,9 @@ static inline cudaError_t cudaStreamBeginCaptureToGraph(cudaStream_t stream,
     (void)dependencyData;
     (void)numDependencies;
     if (!graph) {
+        return cudaErrorInvalidValue;
+    }
+    if (!cudaCompatCaptureModeValid(mode)) {
         return cudaErrorInvalidValue;
     }
     /*

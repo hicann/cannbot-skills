@@ -5,11 +5,16 @@
 
 
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #ifndef CUDA_COMPAT_MEMORY_H
 #define CUDA_COMPAT_MEMORY_H
 
 #include "cann_compat_types.h"
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -91,10 +96,54 @@ extern "C"
      * Memory Allocation/Deallocation
      * ================================================================= */
 
+    static inline const char *cudaCompatSecureGetenv(const char *name)
+    {
+#if defined(__GLIBC__) && defined(__USE_GNU)
+        return secure_getenv(name);
+#else
+        (void)name;
+        return NULL;
+#endif
+    }
+
+    static inline aclrtMemMallocPolicy cudaCompatGetDeviceMallocPolicy(void)
+    {
+        const char *policy = cudaCompatSecureGetenv("CUDA_COMPAT_DEVICE_MALLOC_POLICY");
+        if (policy != NULL && (strcmp(policy, "p2p") == 0 || strcmp(policy, "P2P") == 0)) {
+            return ACL_MEM_MALLOC_HUGE_FIRST_P2P;
+        }
+        return ACL_MEM_MALLOC_HUGE_FIRST;
+    }
+
+    static inline cudaError_t cudaCompatEnsureMemoryDevice(void)
+    {
+        int currentDevice = 0;
+        aclError ret = aclrtGetDevice(&currentDevice);
+        if (ret == ACL_SUCCESS) {
+            return cudaSuccess;
+        }
+
+        uint32_t deviceCount = 0;
+        aclError countRet = aclrtGetDeviceCount(&deviceCount);
+        if (countRet != ACL_SUCCESS) {
+            return acl2cudaError(countRet);
+        }
+        if (deviceCount == 0) {
+            return cudaErrorNoDevice;
+        }
+
+        ret = aclrtSetDevice(0);
+        return acl2cudaError(ret);
+    }
+
 
     static inline cudaError_t cudaMalloc(void **devPtr, size_t size)
     {
-        aclError ret = aclrtMalloc(devPtr, size, ACL_MEM_MALLOC_HUGE_FIRST);
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
+        }
+        aclError ret = aclrtMalloc(devPtr, size, cudaCompatGetDeviceMallocPolicy());
         return acl2cudaError(ret);
     }
 
@@ -112,6 +161,10 @@ extern "C"
 
     static inline cudaError_t cudaMallocHost(void **ptr, size_t size)
     {
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
+        }
         aclError ret = aclrtMallocHost(ptr, size);
         return acl2cudaError(ret);
     }
@@ -120,6 +173,10 @@ extern "C"
     {
         if (!ptr) {
             return cudaErrorInvalidValue;
+        }
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
         }
         if (aclrtMallocHostAndRegister) {
             uint32_t cannFlags = 0;
@@ -159,6 +216,10 @@ extern "C"
 
     static inline cudaError_t cudaFreeHost(void *ptr)
     {
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
+        }
         cudaCompatHostAllocRecord record;
         if (cudaCompatTakeHostAllocRecord(ptr, &record)) {
             if (record.registered) {
@@ -389,6 +450,11 @@ extern "C"
             return mapRet;
         }
 
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
+        }
+
         aclError ret = aclrtHostRegisterV2(ptr, size, cannFlags);
         return acl2cudaError(ret);
     }
@@ -398,6 +464,10 @@ extern "C"
     {
         if (!ptr) {
             return cudaErrorInvalidValue;
+        }
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
         }
         aclError ret = aclrtHostUnregister(ptr);
         return acl2cudaError(ret);
@@ -409,6 +479,10 @@ extern "C"
     {
         if (!pDevice || !pHost || flags != 0) {
             return cudaErrorInvalidValue;
+        }
+        cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+        if (deviceRet != cudaSuccess) {
+            return deviceRet;
         }
         aclError ret = aclrtHostGetDevicePointer(pHost, pDevice, flags);
         return acl2cudaError(ret);

@@ -198,6 +198,8 @@ int main() {
 }
 ```
 
+内存、Host register、stream/event 等依赖 CANN Runtime context 的 API 应确保有当前 device。兼容层会在内存类 API 首次调用时尝试补齐默认 `aclrtSetDevice(0)`，以贴近 CUDA Runtime 的隐式默认设备行为；迁移独立验证程序或样例时仍建议在 `main` 开始显式调用 `cudaSetDevice(0)` 或按用户指定设备调用 `cudaSetDevice(device)`，这样坏卡、多卡可见性和 `ASCEND_RT_VISIBLE_DEVICES` 场景更容易定位。
+
 ##### 4.1.3 错误处理适配
 
 ```c
@@ -255,7 +257,28 @@ CUDA `__device__` symbol 和 PTX 文本都属于 CUDA 设备侧资产，不能�
 - CUDA 侧 `cudaGraphSetConditional` 是 device-side 函数；迁移到 CANN Runtime 兼容层时，通过 `aclmdlRICondHandleGetCondPtr` 获取条件指针，再用 runtime 写入操作在 body capture 内更新条件值。验收用例必须通过输出结果证明 conditional body 真正执行。
 - `cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies`、`cudaStreamUpdateCaptureDependencies_v2` 当前没有 CANN 对标，迁移代码不能依赖这些接口完成验收；如输入依赖这些接口，应报告 not supported 或重构为不依赖 dependency update 的 capture 流程。
 
-##### 4.1.7 IPC 适配注意事项
+##### 4.1.7 Host Register / Zero-Copy 适配
+
+迁移包含 `cudaHostRegister`、`cudaHostGetDevicePointer`、`cudaHostUnregister` 或 CUDA Samples `simpleZeroCopy` 的用例时，按以下规则处理：
+
+- `cudaHostRegister` 映射到 `aclrtHostRegisterV2`，`cudaHostGetDevicePointer` 映射到 `aclrtHostGetDevicePointer`，`cudaHostUnregister` 映射到 `aclrtHostUnregister`；调用前保留 CUDA 侧空指针、zero size 和 flags 校验。
+- `cudaHostRegisterMapped` 需要转换为 `ACL_HOST_REG_MAPPED | ACL_HOST_REG_PINNED`；若源内存已由 `cudaMallocHost` / `aclrtMallocHost` 得到，可只做 mapped 注册验证；若源内存来自 `malloc`/`posix_memalign`，仍按 CUDA 原语义注册为 pinned+mapped。
+- CANN Host register/get pointer 依赖当前 device/context。兼容层内存入口会自动补默认 device，但生成独立样例时应优先在 `main` 入口显式 `cudaSetDevice(0)`，并允许用户通过 `ASCEND_RT_VISIBLE_DEVICES` 控制实际设备。
+- `simpleZeroCopy.cu` 的 `vectorAddGPU<<<...>>>` 不属于 Runtime API 迁移范围。迁移该样例用于验证 Host register 能力时，应把 kernel 结果校验改为独立 Host fallback，并明确记录它只验证 Runtime wrapper、不是 NPU kernel 执行。
+
+##### 4.1.8 Device Limit / Atomic Capability 适配
+
+迁移包含 `cudaDeviceSetLimit`、`cudaDeviceGetLimit`、`cudaDeviceGetHostAtomicCapabilities`、`cudaDeviceGetP2PAtomicCapabilities` 的用例时，按以下规则处理：
+
+- `cudaDeviceSetLimit` 映射到 `aclrtDeviceSetLimit`，`cudaDeviceGetLimit` 映射到 `aclrtDeviceGetLimit`。当前只把 `cudaLimitStackSize` 转换为 `ACL_RT_DEV_LIMIT_SIMD_STACK_SIZE`，把 `cudaLimitPrintfFifoSize` 转换为 `ACL_RT_DEV_LIMIT_SIMD_PRINTF_FIFO_SIZE_PER_CORE`。
+- `cudaLimitMallocHeapSize`、`cudaLimitDevRuntimeSyncDepth`、`cudaLimitDevRuntimePendingLaunchCount`、`cudaLimitMaxL2FetchGranularity`、`cudaLimitPersistingL2CacheSize` 当前没有等价 CANN Runtime limit，兼容层返回 `cudaErrorUnsupportedLimit`；迁移用例不能把这些 limit 写成成功验收。
+- `cudaDeviceGetLimit` 的输出指针为空时必须先返回 `cudaErrorInvalidValue`，不能把空指针透传给 ACL。
+- `cudaDeviceGetHostAtomicCapabilities` 映射到 `aclrtDeviceGetHostAtomicCapabilities`，`cudaDeviceGetP2PAtomicCapabilities` 映射到 `aclrtDeviceGetP2PAtomicCapabilities`。CUDA operation 0-12 与 CANN SIMT atomic operation 数值一致，可逐项转换；非法 operation 返回 `cudaErrorInvalidValue`。
+- CUDA atomic capability bit 与 CANN bit 不完全一致。迁移时必须将 `ACL_RT_ATOMIC_CAPABILITY_SIGNED/UNSIGNED/REDUCTION/SCALAR32/SCALAR64/SCALAR128/VECTOR32X4` 转换为对应 CUDA bit；CANN 独有 `SCALAR8/SCALAR16` 不向上暴露为 CUDA bit。
+- `cudaDeviceGetP2PAtomicCapabilities` 的 src/dst 设备相同应按 CUDA 语义返回 `cudaErrorInvalidDevice`。跨设备正向查询需要至少 2 张可见设备；单卡环境用例应 `SKIP` 跨设备成功路径，但仍验证同设备错误路径。
+- CUDA Samples `1_Utilities/apiRuntimeCoverage` 可用于 `cudaDeviceSetLimit` / `cudaDeviceGetLimit` 的 stack limit 直转验收；本地 CUDA Samples 不包含 atomic capability 两个接口时，应使用自研 `apiRuntimeCoverage_cuda.cu::CheckAtomicCapabilityApis` 补充验收。
+
+##### 4.1.9 IPC 适配注意事项
 
 CANN IPC 使用 key/opaque handle 数据而非 POSIX fd：
 
@@ -279,6 +302,17 @@ cudaIpcMemHandle_t handle;
 memcpy(&handle, shm_ptr, sizeof(cudaIpcMemHandle_t));
 cudaIpcOpenMemHandle(&d_ptr, handle, cudaIpcMemLazyEnablePeerAccess);
 ```
+
+##### 4.1.10 P2P / cudaMemcpyPeerAsync 适配注意事项
+
+迁移包含 `cudaMemcpyPeerAsync`、`cudaMemcpyPeer`、`cudaDeviceCanAccessPeer`、`cudaDeviceEnablePeerAccess` 的 CUDA 用例或应用时，不能只做头文件替换后沿用 CUDA 原始双卡顺序。CANN 跨 Device P2P 复制对 enable 方向、内存分配策略和 stream 所属 Device 更敏感，转换后的 CANN 兼容层用例必须按以下流程生成：
+
+- 先用 `cudaDeviceCanAccessPeer(&canAccessPeer, srcDevice, dstDevice)` 查询能力；若返回 0，跨 Device copy 成功路径应 `SKIP`，不能继续当作失败。
+- 在任何 P2P device 内存分配前，分别切到两张卡开启双向 peer access：`cudaSetDevice(srcDevice); cudaDeviceEnablePeerAccess(dstDevice, 0);`，再 `cudaSetDevice(dstDevice); cudaDeviceEnablePeerAccess(srcDevice, 0);`。只开启单向访问容易在 `cudaStreamSynchronize` 暴露 `cudaErrorSystemDriverMismatch`。
+- 设置 `CUDA_COMPAT_DEVICE_MALLOC_POLICY=p2p`，让兼容层 `cudaMalloc` 使用 `ACL_MEM_MALLOC_HUGE_FIRST_P2P`；P2P 源、目的 device buffer 必须在 peer access 开启之后再分配。
+- Device 0 到 Device 1 的最小验证流程：切到 Device 0 分配并写入源 buffer；切到 Device 1 分配目的 buffer、创建属于 Device 1 的 stream；调用 `cudaMemcpyPeerAsync(dstOn1, 1, srcOn0, 0, bytes, streamOn1)`；随后同步同一个 Device 1 stream 并把目的 buffer 拷回 Host 校验数据。
+- 如果转换产物里同时有同设备 `cudaMemcpyPeerAsync(dst, 0, src, 0, ...)` 和跨设备 `0->1`，同设备路径可作为单卡基础验证；跨设备路径必须按上述 CANN P2P 流程生成，不能复用单卡 stream 或在分配内存后才 enable peer access。
+- 清理时分别切回对应 Device 释放各自 buffer 和 stream，并尽量关闭两端 peer access；关闭失败可按环境限制记录为 `SKIP`，不要影响已完成的数据校验结论。
 
 #### 4.2 直接迁移方式改写步骤
 
@@ -454,6 +488,7 @@ cmake .. -DCUDA_COMPAT_DEBUG=ON && make
 - `references/cann_api_common.md` - 常用 CANN API 参考
 - `references/error_mapping.md` - 错误码映射表
 - `references/api_support_table.md` - API 支持状态表
+- `references/p2p_migration_patterns.md` - P2P / peer copy 迁移验证模板
 
 ### 项目代码参考
 

@@ -9,11 +9,15 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 __global__ void ApiRuntimeCoverageKernel(int *out)
 {
@@ -39,6 +43,11 @@ namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+
+struct IpcPayload {
+    cudaIpcMemHandle_t memHandle;
+    cudaIpcEventHandle_t eventHandle;
+};
 
 void PrintResult(const char *name, const char *state, const char *detail = "")
 {
@@ -231,6 +240,12 @@ void CheckDeviceStateApis()
     OptionalSuccess("cudaDeviceSetLimit", cudaDeviceSetLimit(cudaLimitStackSize, 4096));
     size_t limitValue = 0;
     OptionalSuccess("cudaDeviceGetLimit", cudaDeviceGetLimit(&limitValue, cudaLimitStackSize));
+    ExpectError("cudaDeviceGetLimit null output",
+                cudaDeviceGetLimit(nullptr, cudaLimitStackSize), cudaErrorInvalidValue);
+    OptionalSuccess("cudaDeviceSetLimit heap",
+                    cudaDeviceSetLimit(cudaLimitMallocHeapSize, 8 * 1024 * 1024));
+    OptionalSuccess("cudaDeviceGetLimit heap",
+                    cudaDeviceGetLimit(&limitValue, cudaLimitMallocHeapSize));
 
     cudaFuncCache cacheConfig = cudaFuncCachePreferNone;
     OptionalSuccess("cudaDeviceSetCacheConfig", cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
@@ -240,6 +255,128 @@ void CheckDeviceStateApis()
     int greatestPriority = 0;
     OptionalSuccess("cudaDeviceGetStreamPriorityRange",
                     cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+}
+
+void CheckAtomicCapabilityApis(int deviceCount)
+{
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    cudaAtomicOperation operations[] = {
+        cudaAtomicOperationIntegerAdd,
+        cudaAtomicOperationCAS,
+        cudaAtomicOperationFloatAdd
+    };
+    unsigned int capabilities[3] = {};
+
+    OptionalSuccess("cudaDeviceGetHostAtomicCapabilities",
+                    cudaDeviceGetHostAtomicCapabilities(capabilities, operations, 3, 0));
+    ExpectError("cudaDeviceGetHostAtomicCapabilities null caps",
+                cudaDeviceGetHostAtomicCapabilities(nullptr, operations, 3, 0), cudaErrorInvalidValue);
+    ExpectError("cudaDeviceGetHostAtomicCapabilities zero count",
+                cudaDeviceGetHostAtomicCapabilities(capabilities, operations, 0, 0), cudaErrorInvalidValue);
+    cudaAtomicOperation invalidOperations[] = {static_cast<cudaAtomicOperation>(999)};
+    ExpectError("cudaDeviceGetHostAtomicCapabilities bad op",
+                cudaDeviceGetHostAtomicCapabilities(capabilities, invalidOperations, 1, 0), cudaErrorInvalidValue);
+
+    if (deviceCount < 2) {
+        Skip("cudaDeviceGetP2PAtomicCapabilities", "requires at least two visible devices");
+    } else {
+        OptionalSuccess("cudaDeviceGetP2PAtomicCapabilities",
+                        cudaDeviceGetP2PAtomicCapabilities(capabilities, operations, 3, 0, 1));
+    }
+    ExpectError("cudaDeviceGetP2PAtomicCapabilities same device",
+                cudaDeviceGetP2PAtomicCapabilities(capabilities, operations, 3, 0, 0), cudaErrorInvalidDevice);
+#else
+    (void)deviceCount;
+    Skip("cudaDeviceGetHostAtomicCapabilities", "requires CUDA 13.x headers");
+    Skip("cudaDeviceGetP2PAtomicCapabilities", "requires CUDA 13.x headers");
+#endif
+}
+
+void CheckPeerAccessCapability(int deviceCount)
+{
+    ExpectError("cudaDeviceCanAccessPeer null output",
+                cudaDeviceCanAccessPeer(nullptr, 0, 0), cudaErrorInvalidValue);
+
+    if (deviceCount < 2) {
+        Skip("cudaDeviceCanAccessPeer 0->1", "requires at least two visible devices");
+        return;
+    }
+
+    int canAccessPeer = 0;
+    if (ExpectSuccess("cudaDeviceCanAccessPeer 0->1",
+                      cudaDeviceCanAccessPeer(&canAccessPeer, 0, 1))) {
+        ++g_checks;
+        if (canAccessPeer == 0 || canAccessPeer == 1) {
+            PrintResult("cudaDeviceCanAccessPeer result range", "PASS",
+                        canAccessPeer ? "can access" : "cannot access");
+        } else {
+            ++g_failures;
+            PrintResult("cudaDeviceCanAccessPeer result range", "FAIL", "expected 0 or 1");
+        }
+    }
+}
+
+void CheckPeerEnableAndMemcpyAsyncApis(int deviceCount)
+{
+    constexpr size_t bytes = 128;
+    std::vector<unsigned char> hostIn(bytes);
+    std::vector<unsigned char> hostOut(bytes, 0);
+    for (size_t i = 0; i < bytes; ++i) {
+        hostIn[i] = static_cast<unsigned char>(0x30U + (i % 64U));
+    }
+
+    void *src = nullptr;
+    void *dst = nullptr;
+    if (ExpectSuccess("peer async src cudaMalloc", cudaMalloc(&src, bytes)) &&
+        ExpectSuccess("peer async dst cudaMalloc", cudaMalloc(&dst, bytes))) {
+        ExpectSuccess("seed peer async src", cudaMemcpy(src, hostIn.data(), bytes, cudaMemcpyHostToDevice));
+
+        cudaStream_t stream = nullptr;
+        if (ExpectSuccess("stream for cudaMemcpyPeerAsync", cudaStreamCreate(&stream))) {
+            ExpectSuccess("cudaMemcpyPeerAsync same device", cudaMemcpyPeerAsync(dst, 0, src, 0, bytes, stream));
+            ExpectSuccess("sync cudaMemcpyPeerAsync", cudaStreamSynchronize(stream));
+            ExpectSuccess("copy peer async dst back", cudaMemcpy(hostOut.data(), dst, bytes, cudaMemcpyDeviceToHost));
+            ++g_checks;
+            if (hostOut == hostIn) {
+                PrintResult("cudaMemcpyPeerAsync same device data", "PASS");
+            } else {
+                ++g_failures;
+                PrintResult("cudaMemcpyPeerAsync same device data", "FAIL", "data mismatch");
+            }
+            ExpectSuccess("destroy peer async stream", cudaStreamDestroy(stream));
+        }
+    }
+    if (src != nullptr) {
+        ExpectSuccess("free peer async src", cudaFree(src));
+    }
+    if (dst != nullptr) {
+        ExpectSuccess("free peer async dst", cudaFree(dst));
+    }
+
+    if (deviceCount < 2) {
+        Skip("cudaDeviceEnablePeerAccess", "requires at least two visible devices");
+        return;
+    }
+
+    int canAccessPeer = 0;
+    if (!ExpectSuccess("cudaDeviceCanAccessPeer before enable",
+                       cudaDeviceCanAccessPeer(&canAccessPeer, 0, 1)) || canAccessPeer == 0) {
+        Skip("cudaDeviceEnablePeerAccess", "device 0 cannot access device 1");
+        return;
+    }
+
+    ExpectSuccess("cudaSetDevice for peer enable", cudaSetDevice(0));
+    ExpectError("cudaDeviceEnablePeerAccess nonzero flags",
+                cudaDeviceEnablePeerAccess(1, 1), cudaErrorInvalidValue);
+
+    cudaError_t enableErr = cudaDeviceEnablePeerAccess(1, 0);
+    if (enableErr == cudaSuccess || enableErr == cudaErrorPeerAccessAlreadyEnabled) {
+        ++g_checks;
+        PrintResult("cudaDeviceEnablePeerAccess 0->1", "PASS", cudaGetErrorName(enableErr));
+        OptionalSuccess("cudaDeviceDisablePeerAccess 0->1", cudaDeviceDisablePeerAccess(1));
+    } else {
+        Skip("cudaDeviceEnablePeerAccess 0->1", cudaGetErrorString(enableErr));
+    }
 }
 
 void CheckMemoryApis()
@@ -438,8 +575,51 @@ void CheckHostRegistrationApis()
     std::free(hostPtr);
 }
 
+void HostCallback(void *userData)
+{
+    int *value = static_cast<int *>(userData);
+    *value = 1234;
+}
+
+void CheckLaunchHostFuncApi()
+{
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("stream for cudaLaunchHostFunc", cudaStreamCreate(&stream))) {
+        return;
+    }
+
+    ExpectSuccess("cudaLaunchHostFunc null fn", cudaLaunchHostFunc(stream, nullptr, nullptr));
+
+    int callbackValue = 0;
+    if (OptionalSuccess("cudaLaunchHostFunc", cudaLaunchHostFunc(stream, HostCallback, &callbackValue))) {
+        ExpectSuccess("sync cudaLaunchHostFunc", cudaStreamSynchronize(stream));
+        ++g_checks;
+        if (callbackValue == 1234) {
+            PrintResult("cudaLaunchHostFunc callback", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaLaunchHostFunc callback", "FAIL", "callback did not run");
+        }
+    }
+
+    ExpectSuccess("destroy host func stream", cudaStreamDestroy(stream));
+}
+
 void CheckLaunchKernelApi()
 {
+    void *invalidArgs[] = {nullptr};
+    ExpectError("cudaLaunchKernel null func",
+                cudaLaunchKernel(nullptr, dim3(1), dim3(1), invalidArgs, 0, nullptr),
+                cudaErrorInvalidDeviceFunction);
+    ExpectError("cudaLaunchKernel zero grid",
+                cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
+                                 dim3(0), dim3(1), invalidArgs, 0, nullptr),
+                cudaErrorInvalidConfiguration);
+    ExpectError("cudaLaunchKernel zero block",
+                cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
+                                 dim3(1), dim3(0), invalidArgs, 0, nullptr),
+                cudaErrorInvalidConfiguration);
+
     int *deviceValue = nullptr;
     int hostValue = 0;
     if (!ExpectSuccess("cudaMalloc launch kernel value", cudaMalloc(&deviceValue, sizeof(int)))) {
@@ -466,6 +646,190 @@ void CheckLaunchKernelApi()
     }
 
     ExpectSuccess("free cudaLaunchKernel value", cudaFree(deviceValue));
+}
+
+int RunIpcChild(const char *payloadPath)
+{
+    FILE *fp = std::fopen(payloadPath, "rb");
+    if (fp == nullptr) {
+        std::printf("  child open IPC payload                  FAIL\n");
+        return EXIT_FAILURE;
+    }
+
+    IpcPayload payload{};
+    const size_t readItems = std::fread(&payload, sizeof(payload), 1, fp);
+    std::fclose(fp);
+    if (readItems != 1) {
+        std::printf("  child read IPC payload                  FAIL\n");
+        return EXIT_FAILURE;
+    }
+
+    int failures = 0;
+    auto childCheck = [&failures](const char *name, cudaError_t err) -> bool {
+        if (err == cudaSuccess) {
+            std::printf("  %-34s PASS\n", name);
+            return true;
+        }
+        ++failures;
+        std::printf("  %-34s FAIL - %s\n", name, cudaGetErrorString(err));
+        return false;
+    };
+
+    childCheck("child cudaSetDevice", cudaSetDevice(0));
+
+    void *remotePtr = nullptr;
+    cudaEvent_t remoteEvent = nullptr;
+    cudaStream_t stream = nullptr;
+    int observed = 0;
+    bool openedMem = childCheck("child cudaIpcOpenMemHandle",
+                                cudaIpcOpenMemHandle(&remotePtr, payload.memHandle,
+                                                     cudaIpcMemLazyEnablePeerAccess));
+    bool openedEvent = childCheck("child cudaIpcOpenEventHandle",
+                                  cudaIpcOpenEventHandle(&remoteEvent, payload.eventHandle));
+    bool streamReady = childCheck("child cudaStreamCreate", cudaStreamCreate(&stream));
+
+    if (openedMem && openedEvent && streamReady) {
+        childCheck("child cudaStreamWaitEvent", cudaStreamWaitEvent(stream, remoteEvent, 0));
+        childCheck("child cudaMemcpyAsync",
+                   cudaMemcpyAsync(&observed, remotePtr, sizeof(observed),
+                                   cudaMemcpyDeviceToHost, stream));
+        childCheck("child cudaStreamSynchronize", cudaStreamSynchronize(stream));
+        if (observed == 20260910) {
+            std::printf("  %-34s PASS - value=%d\n", "child ipc value", observed);
+        } else {
+            ++failures;
+            std::printf("  %-34s FAIL - value=%d\n", "child ipc value", observed);
+        }
+    }
+
+    if (openedMem) {
+        childCheck("child cudaIpcCloseMemHandle", cudaIpcCloseMemHandle(remotePtr));
+    }
+    if (stream != nullptr) {
+        childCheck("child cudaStreamDestroy", cudaStreamDestroy(stream));
+    }
+
+    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+int RunVmmImportChild(const char *fdText)
+{
+    const int fd = std::atoi(fdText);
+    int failures = 0;
+
+    auto childCudaCheck = [&failures](const char *name, cudaError_t err) -> bool {
+        if (err == cudaSuccess) {
+            std::printf("  %-34s PASS\n", name);
+            return true;
+        }
+        ++failures;
+        std::printf("  %-34s FAIL - %s\n", name, cudaGetErrorName(err));
+        return false;
+    };
+
+    auto childCheck = [&failures](const char *name, CUresult result) -> bool {
+        if (result == CUDA_SUCCESS) {
+            std::printf("  %-34s PASS\n", name);
+            return true;
+        }
+        ++failures;
+        std::string detail = CuResultDetail(result);
+        std::printf("  %-34s FAIL - %s\n", name, detail.c_str());
+        return false;
+    };
+
+    childCudaCheck("child cudaSetDevice vmm", cudaSetDevice(0));
+    CUmemGenericAllocationHandle importedHandle = 0;
+    if (childCheck("child cuMemImportFromShareableHandle",
+                   cuMemImportFromShareableHandle(&importedHandle,
+                                                  reinterpret_cast<void *>(static_cast<intptr_t>(fd)),
+                                                  CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR))) {
+        childCheck("child cuMemRelease imported", cuMemRelease(importedHandle));
+    }
+
+    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+void CheckThreadExchangeStreamCaptureModeApi()
+{
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    if (ExpectSuccess("cudaThreadExchangeStreamCaptureMode",
+                      cudaThreadExchangeStreamCaptureMode(&mode))) {
+        ++g_checks;
+        if (mode == cudaStreamCaptureModeGlobal ||
+            mode == cudaStreamCaptureModeThreadLocal ||
+            mode == cudaStreamCaptureModeRelaxed) {
+            PrintResult("thread capture mode range", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("thread capture mode range", "FAIL", "unexpected previous mode");
+        }
+        ExpectSuccess("restore thread capture mode",
+                      cudaThreadExchangeStreamCaptureMode(&mode));
+    }
+}
+
+void CheckBasicGraphCaptureApis()
+{
+    int *deviceValue = nullptr;
+    int hostValue = 0;
+    if (!ExpectSuccess("basic graph output malloc",
+                       cudaMalloc(reinterpret_cast<void **>(&deviceValue), sizeof(int)))) {
+        return;
+    }
+
+    cudaStream_t stream = nullptr;
+    cudaGraph_t graph = nullptr;
+    cudaGraphExec_t graphExec = nullptr;
+    if (ExpectSuccess("basic graph stream", cudaStreamCreate(&stream))) {
+        cudaStreamCaptureStatus status = cudaStreamCaptureStatusInvalidated;
+        ExpectError("cudaStreamIsCapturing null output",
+                    cudaStreamIsCapturing(stream, nullptr), cudaErrorInvalidValue);
+        if (ExpectSuccess("cudaStreamIsCapturing none", cudaStreamIsCapturing(stream, &status))) {
+            ++g_checks;
+            if (status == cudaStreamCaptureStatusNone) {
+                PrintResult("cudaStreamIsCapturing none status", "PASS");
+            } else {
+                ++g_failures;
+                PrintResult("cudaStreamIsCapturing none status", "FAIL", "unexpected status");
+            }
+        }
+
+        if (ExpectSuccess("basic cudaStreamBeginCapture",
+                          cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal))) {
+            ExpectSuccess("cudaStreamIsCapturing active", cudaStreamIsCapturing(stream, &status));
+            ApiRuntimeCoverageKernel<<<1, 1, 0, stream>>>(deviceValue);
+            if (ExpectSuccess("basic cudaStreamEndCapture", cudaStreamEndCapture(stream, &graph)) &&
+                graph != nullptr &&
+                ExpectSuccess("cudaGraphDebugDotPrint",
+                              cudaGraphDebugDotPrint(graph, "/tmp/apiRuntimeCoverage_cuda_graph.dot", 0)) &&
+                ExpectSuccess("basic cudaGraphInstantiate",
+                              cudaGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))) {
+                ExpectSuccess("basic cudaGraphLaunch", cudaGraphLaunch(graphExec, stream));
+                ExpectSuccess("sync basic cudaGraphLaunch", cudaStreamSynchronize(stream));
+                ExpectSuccess("copy basic graph result",
+                              cudaMemcpy(&hostValue, deviceValue, sizeof(hostValue), cudaMemcpyDeviceToHost));
+                ++g_checks;
+                if (hostValue == 42) {
+                    PrintResult("basic cudaGraphLaunch result", "PASS");
+                } else {
+                    ++g_failures;
+                    PrintResult("basic cudaGraphLaunch result", "FAIL", "unexpected value");
+                }
+                ExpectSuccess("basic cudaGraphExecDestroy", cudaGraphExecDestroy(graphExec));
+                graphExec = nullptr;
+            }
+        }
+        if (graphExec != nullptr) {
+            ExpectSuccess("cleanup basic cudaGraphExecDestroy", cudaGraphExecDestroy(graphExec));
+        }
+        if (graph != nullptr) {
+            ExpectSuccess("cleanup basic cudaGraphDestroy", cudaGraphDestroy(graph));
+        }
+        ExpectSuccess("destroy basic graph stream", cudaStreamDestroy(stream));
+    }
+
+    ExpectSuccess("free basic graph output", cudaFree(deviceValue));
 }
 
 void CheckIncrementalHostAlloc(size_t bytes)
@@ -635,6 +999,87 @@ void CheckIncrementalCaptureInfo()
     }
 }
 
+void CheckIpcApis(const char *selfPath)
+{
+    constexpr int expectedValue = 20260910;
+    constexpr size_t ipcBytes = 4096;
+    char payloadPath[256];
+    std::snprintf(payloadPath, sizeof(payloadPath), "/tmp/apiRuntimeCoverage_ipc_%ld.bin",
+                  static_cast<long>(getpid()));
+
+    int *deviceValue = nullptr;
+    cudaEvent_t event = nullptr;
+    IpcPayload payload{};
+    bool memReady = false;
+    bool eventReady = false;
+
+    if (ExpectSuccess("ipc cudaMalloc", cudaMalloc(&deviceValue, ipcBytes)) &&
+        ExpectSuccess("ipc seed value",
+                      cudaMemcpy(deviceValue, &expectedValue, sizeof(expectedValue),
+                                 cudaMemcpyHostToDevice))) {
+        memReady = ExpectSuccess("cudaIpcGetMemHandle",
+                                 cudaIpcGetMemHandle(&payload.memHandle, deviceValue));
+    }
+
+    if (ExpectSuccess("ipc event create",
+                      cudaEventCreateWithFlags(&event, cudaEventDisableTiming | cudaEventInterprocess))) {
+        eventReady = ExpectSuccess("cudaIpcGetEventHandle",
+                                   cudaIpcGetEventHandle(&payload.eventHandle, event));
+        ExpectSuccess("ipc event record", cudaEventRecord(event, nullptr));
+        ExpectSuccess("ipc event sync before child", cudaEventSynchronize(event));
+    }
+
+    if (memReady && eventReady) {
+        FILE *fp = std::fopen(payloadPath, "wb");
+        if (fp != nullptr) {
+            bool wrote = std::fwrite(&payload, sizeof(payload), 1, fp) == 1;
+            std::fclose(fp);
+            if (wrote) {
+                PrintResult("write IPC payload", "PASS");
+                ++g_checks;
+
+                pid_t pid = fork();
+                if (pid == 0) {
+                    execl(selfPath, selfPath, "--ipc-child", payloadPath, static_cast<char *>(nullptr));
+                    _exit(127);
+                } else if (pid > 0) {
+                    int status = 0;
+                    if (waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                        PrintResult("cudaIpcOpen/Close child", "PASS", "exit=0");
+                        ++g_checks;
+                    } else {
+                        PrintResult("cudaIpcOpen/Close child", "FAIL");
+                        ++g_checks;
+                        ++g_failures;
+                    }
+                } else {
+                    PrintResult("fork IPC child", "FAIL");
+                    ++g_checks;
+                    ++g_failures;
+                }
+            } else {
+                PrintResult("write IPC payload", "FAIL");
+                ++g_checks;
+                ++g_failures;
+            }
+        } else {
+            PrintResult("open IPC payload", "FAIL");
+            ++g_checks;
+            ++g_failures;
+        }
+        std::remove(payloadPath);
+    } else {
+        Skip("cudaIpcOpen/Close child", "IPC handle export did not succeed");
+    }
+
+    if (event != nullptr) {
+        ExpectSuccess("ipc event destroy", cudaEventDestroy(event));
+    }
+    if (deviceValue != nullptr) {
+        ExpectSuccess("ipc cudaFree", cudaFree(deviceValue));
+    }
+}
+
 void CheckIncrementalContext(int device)
 {
     CUcontext context = nullptr;
@@ -698,7 +1143,7 @@ void CheckIncrementalModuleApis()
     }
 }
 
-void CheckIncrementalApiSurface(int device)
+void CheckIncrementalApiSurface(int device, const char *selfPath)
 {
     constexpr size_t bytes = 4096;
     CheckIncrementalHostAlloc(bytes);
@@ -706,12 +1151,14 @@ void CheckIncrementalApiSurface(int device)
     CheckIncrementalFunctionAndGraphApis();
     CheckIncrementalSymbolApis();
     CheckIncrementalCaptureInfo();
+    CheckThreadExchangeStreamCaptureModeApi();
+    CheckIpcApis(selfPath);
     CheckIncrementalContext(device);
     CheckIncrementalDriverWrites(bytes);
     CheckIncrementalModuleApis();
 }
 
-void CheckDriverVmmApis(int device)
+void CheckDriverVmmApis(int device, const char *selfPath)
 {
     CUresult init = cuInit(0);
     if (!OptionalCuSuccess("cuInit", init)) {
@@ -762,12 +1209,64 @@ void CheckDriverVmmApis(int device)
         OptionalCuSuccess("cuMemRelease", cuMemRelease(handle));
     }
     OptionalCuSuccess("cuMemAddressFree", cuMemAddressFree(address, granularity));
+
+    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+    CUmemGenericAllocationHandle exportHandle = 0;
+    if (OptionalCuSuccess("cuMemCreate export", cuMemCreate(&exportHandle, granularity, &prop, 0))) {
+        int fd = -1;
+        if (OptionalCuSuccess("cuMemExportToShareableHandle",
+                              cuMemExportToShareableHandle(&fd, exportHandle,
+                                                           CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0))) {
+#if defined(__CUDACC__)
+            CUmemGenericAllocationHandle importedHandle = 0;
+            if (OptionalCuSuccess("cuMemImportFromShareableHandle",
+                                  cuMemImportFromShareableHandle(&importedHandle,
+                                                                 reinterpret_cast<void *>(static_cast<intptr_t>(fd)),
+                                                                 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR))) {
+                OptionalCuSuccess("cuMemRelease imported", cuMemRelease(importedHandle));
+            }
+#else
+            char fdText[32];
+            std::snprintf(fdText, sizeof(fdText), "%d", fd);
+            pid_t pid = fork();
+            if (pid == 0) {
+                execl(selfPath, selfPath, "--vmm-import-child", fdText, static_cast<char *>(nullptr));
+                _exit(127);
+            } else if (pid > 0) {
+                int status = 0;
+                if (waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                    ++g_checks;
+                    PrintResult("cuMemImportFromShareableHandle child", "PASS", "exit=0");
+                } else {
+                    ++g_checks;
+                    ++g_failures;
+                    PrintResult("cuMemImportFromShareableHandle child", "FAIL");
+                }
+            } else {
+                ++g_checks;
+                ++g_failures;
+                PrintResult("fork VMM import child", "FAIL");
+            }
+#endif
+            if (fd >= 0) {
+                close(fd);
+            }
+        }
+        OptionalCuSuccess("cuMemRelease export", cuMemRelease(exportHandle));
+    }
 }
 
 }  // namespace
 
 int main(int argc, char **argv)
 {
+    if (argc == 3 && std::strcmp(argv[1], "--ipc-child") == 0) {
+        return RunIpcChild(argv[2]);
+    }
+    if (argc == 3 && std::strcmp(argv[1], "--vmm-import-child") == 0) {
+        return RunVmmImportChild(argv[2]);
+    }
+
     std::printf("%s Starting...\n\n", argv[0]);
     std::printf(" Native CUDA Runtime API Coverage\n\n");
 
@@ -784,13 +1283,18 @@ int main(int argc, char **argv)
     CheckDeviceApis(device);
     CheckErrorApis();
     CheckDeviceStateApis();
+    CheckAtomicCapabilityApis(deviceCount);
+    CheckPeerAccessCapability(deviceCount);
+    CheckPeerEnableAndMemcpyAsyncApis(deviceCount);
     CheckMemoryApis();
     CheckStreamApis();
     CheckEventApis();
     CheckHostRegistrationApis();
+    CheckLaunchHostFuncApi();
     CheckLaunchKernelApi();
-    CheckIncrementalApiSurface(device);
-    CheckDriverVmmApis(device);
+    CheckBasicGraphCaptureApis();
+    CheckIncrementalApiSurface(device, argv[0]);
+    CheckDriverVmmApis(device, argv[0]);
 
     ExpectSuccess("cudaDeviceSynchronize", cudaDeviceSynchronize());
     ExpectSuccess("cudaDeviceReset", cudaDeviceReset());

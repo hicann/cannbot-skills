@@ -46,6 +46,9 @@ extern "C"
                                                  cudaHostFn_t fn,
                                                  void *userData)
     {
+        if (!fn) {
+            return cudaSuccess;
+        }
         aclError ret = aclrtLaunchHostFunc(stream, (aclrtHostFunc)fn, userData);
         return acl2cudaError(ret);
     }
@@ -55,6 +58,9 @@ extern "C"
                                                     void *userData,
                                                     unsigned int syncMode)
     {
+        if (!fn) {
+            return cudaSuccess;
+        }
         (void)syncMode; // CANN does not support different sync modes for host functions
         aclError ret = aclrtLaunchHostFunc(stream, (aclrtHostFunc)fn, userData);
         return acl2cudaError(ret);
@@ -107,6 +113,11 @@ extern "C"
         return (uint32_t)blocks;
     }
 
+    static inline int cudaCompatBlockDimValid(dim3 blockDim)
+    {
+        return blockDim.x != 0 && blockDim.y != 0 && blockDim.z != 0;
+    }
+
     __attribute__((weak)) aclError aclrtLaunchSIMTKernelWithArgsArray(
         void *func, dim3 gridDim, dim3 blockDim, size_t dynUbufSize,
         aclrtStream stream, aclrtLaunchKernelCfg *cfg, void **args);
@@ -122,7 +133,7 @@ extern "C"
             return cudaErrorInvalidDeviceFunction;
         }
         uint32_t numBlocks = cudaCompatGridBlocks(gridDim);
-        if (numBlocks == 0) {
+        if (numBlocks == 0 || !cudaCompatBlockDimValid(blockDim)) {
             return cudaErrorInvalidConfiguration;
         }
         if ((blockDim.x > 1 || blockDim.y > 1 || blockDim.z > 1) && aclrtLaunchSIMTKernelWithArgsArray) {

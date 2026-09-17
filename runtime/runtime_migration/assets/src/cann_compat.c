@@ -342,28 +342,18 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attr, int device)
 
 cudaError_t cudaDeviceGetLimit(size_t *pValue, cudaLimit limit)
 {
-    if (!pValue)
-    {
+    if (pValue == NULL) {
         return cudaErrorInvalidValue;
     }
 
-    // Return default values
-    switch (limit)
-    {
-    case cudaLimitStackSize:
-        *pValue = 1024;
-        break;
-    case cudaLimitMallocHeapSize:
-        *pValue = 8 * 1024 * 1024;
-        break;
-    case cudaLimitPrintfFifoSize:
-        *pValue = 1024 * 1024;
-        break;
-    default:
-        *pValue = 0;
-        break;
+    aclrtDeviceLimit aclLimit;
+    cudaError_t err = cudaCompatLimitToAcl(limit, &aclLimit);
+    if (err != cudaSuccess) {
+        return err;
     }
-    return cudaSuccess;
+
+    aclError ret = aclrtDeviceGetLimit(aclLimit, pValue);
+    return cudaCompatLimitAclResult(ret);
 }
 
 /* =================================================================
@@ -822,6 +812,11 @@ const char *cudaGetErrorName(cudaError_t error)
     if (info != NULL)
     {
         return info->name;
+    }
+    const char *recentErrMsg = aclGetRecentErrMsg();
+    if (recentErrMsg != NULL && recentErrMsg[0] != '\0')
+    {
+        return recentErrMsg;
     }
     return "cudaErrorUnknown";
 }

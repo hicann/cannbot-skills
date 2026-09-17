@@ -62,15 +62,58 @@ cudaError_t cudaDeviceEnablePeerAccess(int peerDevice, unsigned int flags);
 ```
 - 功能：启用当前设备对 peerDevice 的直接访问
 - 参数：peerDevice - 目标设备，flags - 目前必须为 0
-- 返回：cudaSuccess 或错误码
+- 返回：cudaSuccess 或错误码，flags 非 0 时返回 `cudaErrorInvalidValue`
 
 ### cudaDeviceCanAccessPeer
 ```c
 cudaError_t cudaDeviceCanAccessPeer(int *canAccessPeer, int device, int peerDevice);
 ```
 - 功能：检查 device 是否可以直接访问 peerDevice 内存
-- 参数：canAccessPeer - 结果输出 (1=可访问, 0=不可)
+- 参数：canAccessPeer - 结果输出 (1=可访问, 0=不可)，为空时返回 `cudaErrorInvalidValue`
 - 返回：cudaSuccess 或错误码
+
+### cudaDeviceSetLimit
+```c
+cudaError_t cudaDeviceSetLimit(cudaLimit limit, size_t value);
+```
+- 功能：设置设备运行时资源限制
+- 参数：limit - 资源限制枚举，value - 目标大小或数量
+- 返回：cudaSuccess 或错误码；不支持的 limit 返回 `cudaErrorUnsupportedLimit`
+- 兼容层口径：当前映射 `cudaLimitStackSize` 和 `cudaLimitPrintfFifoSize`，其余 CUDA limit 因 CANN 无等价 Runtime limit 返回 `cudaErrorUnsupportedLimit`
+
+### cudaDeviceGetLimit
+```c
+cudaError_t cudaDeviceGetLimit(size_t *pValue, cudaLimit limit);
+```
+- 功能：查询设备运行时资源限制
+- 参数：pValue - 输出指针，limit - 资源限制枚举
+- 返回：cudaSuccess 或错误码；pValue 为空返回 `cudaErrorInvalidValue`
+- 兼容层口径：当前映射 `cudaLimitStackSize` 和 `cudaLimitPrintfFifoSize`，其余 CUDA limit 返回 `cudaErrorUnsupportedLimit`
+
+### cudaDeviceGetHostAtomicCapabilities
+```c
+cudaError_t cudaDeviceGetHostAtomicCapabilities(unsigned int *capabilities,
+                                                const cudaAtomicOperation *operations,
+                                                unsigned int count,
+                                                int device);
+```
+- 功能：查询指定设备对 host atomic 操作的能力
+- 参数：capabilities - 输出数组，operations - atomic operation 输入数组，count - 数组长度，device - 设备 ID
+- 返回：cudaSuccess 或错误码；空指针、count 为 0、非法 operation 返回 `cudaErrorInvalidValue`
+- 兼容层口径：operation 与 CANN SIMT atomic operation 数值一致；capability bit 需从 CANN 枚举转换为 CUDA 枚举，CANN 独有 scalar8/scalar16 能力不暴露为 CUDA bit
+
+### cudaDeviceGetP2PAtomicCapabilities
+```c
+cudaError_t cudaDeviceGetP2PAtomicCapabilities(unsigned int *capabilities,
+                                               const cudaAtomicOperation *operations,
+                                               unsigned int count,
+                                               int srcDevice,
+                                               int dstDevice);
+```
+- 功能：查询 srcDevice 到 dstDevice 的 P2P atomic 能力
+- 参数：capabilities - 输出数组，operations - atomic operation 输入数组，count - 数组长度，srcDevice/dstDevice - 源/目的设备 ID
+- 返回：cudaSuccess 或错误码；空指针、count 为 0、非法 operation 返回 `cudaErrorInvalidValue`，srcDevice 与 dstDevice 相同返回 `cudaErrorInvalidDevice`
+- 说明：跨设备成功路径依赖设备数量、产品和拓扑能力
 
 ---
 
@@ -150,6 +193,16 @@ cudaError_t cudaMemcpyPeer(void *dst, int dstDevice, const void *src,
 - 功能：设备间内存拷贝（同步）
 - 参数：dstDevice/srcDevice - 设备 ID
 - 返回：cudaSuccess 或错误码
+
+### cudaMemcpyPeerAsync
+```c
+cudaError_t cudaMemcpyPeerAsync(void *dst, int dstDevice, const void *src,
+                                int srcDevice, size_t count, cudaStream_t stream);
+```
+- 功能：设备间内存拷贝（异步）
+- 参数：dstDevice/srcDevice - 设备 ID，stream - 下发异步拷贝任务的流
+- 返回：cudaSuccess 或错误码
+- 说明：跨设备复制前通常需要确认 P2P 能力并启用对应方向的 peer access。迁移到 CANN 兼容层跨 Device 验证时，需要按 CANN P2P 约束调整用例顺序：先查询互通能力，再在两端 Device 双向 enable peer access，然后设置 `CUDA_COMPAT_DEVICE_MALLOC_POLICY=p2p` 并分配 P2P 源/目的内存，最后在目的 Device 的 stream 上执行 `cudaMemcpyPeerAsync` 并同步校验。普通同设备场景不设置该变量时仍使用默认设备内存策略。
 
 ### cudaMemset
 ```c
@@ -263,6 +316,29 @@ cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event,
 - 功能：让流等待事件完成
 - 参数：flags - 通常为 0
 - 返回：cudaSuccess 或错误码
+
+### cudaStreamBeginCapture
+```c
+cudaError_t cudaStreamBeginCapture(cudaStream_t stream, cudaStreamCaptureMode mode);
+```
+- 功能：开始捕获指定 stream 上的后续任务
+- 参数：mode 支持 `cudaStreamCaptureModeGlobal`、`cudaStreamCaptureModeThreadLocal`、`cudaStreamCaptureModeRelaxed`
+- 兼容层口径：非法 mode 先返回 `cudaErrorInvalidValue`；CANN 侧基于 Model RI capture，默认 stream 和捕获期间同步/查询操作受 CANN 约束限制
+
+### cudaStreamEndCapture
+```c
+cudaError_t cudaStreamEndCapture(cudaStream_t stream, cudaGraph_t *pGraph);
+```
+- 功能：结束 stream capture，并通过 `pGraph` 返回捕获得到的 graph
+- 兼容层口径：映射到 CANN Model RI；用于 `cudaStreamBeginCaptureToGraph` 的子图结束场景时允许按 CANN 语义传入空输出
+
+### cudaStreamIsCapturing
+```c
+cudaError_t cudaStreamIsCapturing(cudaStream_t stream, cudaStreamCaptureStatus *pCaptureStatus);
+```
+- 功能：查询 stream 当前是否处于 capture 状态
+- 参数：`pCaptureStatus` 为空时返回 `cudaErrorInvalidValue`
+- 兼容层口径：通过 CANN capture info 显式映射 None/Active/Invalidated 三种状态
 
 ---
 
@@ -467,6 +543,15 @@ cudaError_t cudaLaunchKernel(const void *func, dim3 gridDim, dim3 blockDim,
 - 功能：启动 CUDA kernel
 - 参数：func - kernel 入口，gridDim/blockDim - 网格与线程块维度，args - 参数数组，sharedMem - 动态共享内存大小，stream - 执行流
 - 返回：cudaSuccess 或错误码
+- 兼容层口径：空 `func` 返回 `cudaErrorInvalidDeviceFunction`，gridDim 或 blockDim 任一维度为 0 返回 `cudaErrorInvalidConfiguration`；CANN 侧只能启动其可识别的 kernel/function handle。普通 CUDA 源码中的 `kernel<<<...>>>` 迁移不代表 NPU device 侧执行，应按 `runtime_migration` 的 Host fallback 规则处理并在报告中标注。
+
+### cudaLaunchHostFunc
+```c
+cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn, void *userData);
+```
+- 功能：在 stream 中插入 Host 回调任务
+- 参数：`fn` 为空时按已验证 CUDA baseline 作为 no-op 返回 `cudaSuccess`
+- 兼容层口径：映射到 CANN `aclrtLaunchHostFunc`；回调函数不要做资源申请/释放、stream/device 同步或继续下发任务，避免死锁或运行期错误
 
 ---
 
@@ -480,6 +565,7 @@ cudaError_t cudaGraphDebugDotPrint(cudaGraph_t graph, const char *path,
 - 功能：导出 Graph 调试信息
 - 参数：graph - Graph 对象，path - 输出路径，flags - 调试输出标志
 - 返回：cudaSuccess 或错误码
+- 兼容层口径：映射到 CANN `aclmdlRIDebugJsonPrint`，实际导出为 Model RI JSON 调试信息；空 graph 或 path 返回 `cudaErrorInvalidValue`
 
 ### cudaGraphExecDestroy
 ```c
@@ -488,6 +574,7 @@ cudaError_t cudaGraphExecDestroy(cudaGraphExec_t graphExec);
 - 功能：销毁 Graph 执行实例
 - 参数：graphExec - Graph 执行实例
 - 返回：cudaSuccess 或错误码
+- 兼容层口径：映射到 CANN `aclmdlRIDestroy`；空执行实例返回 `cudaErrorInvalidValue`
 
 ### cudaGraphLaunch
 ```c
@@ -496,6 +583,7 @@ cudaError_t cudaGraphLaunch(cudaGraphExec_t graphExec, cudaStream_t stream);
 - 功能：在指定流上启动 Graph 执行实例
 - 参数：graphExec - Graph 执行实例，stream - 执行流
 - 返回：cudaSuccess 或错误码
+- 兼容层口径：映射到 CANN `aclmdlRIExecuteAsync`；空执行实例返回 `cudaErrorInvalidValue`
 
 ### cudaGraphConditionalHandleCreate
 ```c
@@ -638,4 +726,4 @@ const char *cudaGetErrorName(cudaError_t error);
 ```
 - 功能：获取错误名称字符串
 - 参数：error - 错误码
-- 返回：错误名称字符串
+- 返回：错误名称字符串；兼容层对未知错误码会尝试返回最近一次 ACL 错误描述，否则返回 `cudaErrorUnknown`
