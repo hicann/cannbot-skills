@@ -93,6 +93,46 @@ stages:
         runs-on:
           - self-hosted
           - runner_name=A5_skill_tester_02
+      # 第二道静态门禁：SkillSpector 风险分（与 Sift 差分正交）。同样只运行 Runner 上
+      # 已部署的受信任脚本，由 RDV 检出合并树并执行纯静态扫描（--no-llm）。
+      JOB_skillspector_vet:
+        name: Skillspector_Vet
+        steps:
+          - name: check_skillspector_script
+            run: |
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-skillspector.sh \
+                || { echo "❌ runner 上未找到 ci-pr-skillspector.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+          - name: run_skillspector_vet
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+            run: |
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-skillspector.sh \
+                --pr-number "${{ env.MERGE_ID }}" \
+                --gitcode-repo cann/cannbot-skills \
+                --timeout 1800
+        runs-on:
+          - self-hosted
+          - runner_name=A5_skill_tester_02
+      # 第三道静态门禁：Bandit Python 扫描（绝对阈值，HIGH 阻断 / MEDIUM 告警）。只扫 PR
+      # 改动的 .py 文件；同样只运行 Runner 上已部署的受信任脚本，由 RDV 检出合并树执行。
+      JOB_bandit_vet:
+        name: Bandit_Vet
+        steps:
+          - name: check_bandit_script
+            run: |
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-bandit.sh \
+                || { echo "❌ runner 上未找到 ci-pr-bandit.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+          - name: run_bandit_vet
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+            run: |
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-bandit.sh \
+                --pr-number "${{ env.MERGE_ID }}" \
+                --gitcode-repo cann/cannbot-skills \
+                --timeout 1800
+        runs-on:
+          - self-hosted
+          - runner_name=A5_skill_tester_02
       JOB_content_critique:
         name: Content_Critique
         steps:
@@ -113,13 +153,13 @@ stages:
           - runner_name=A5_skill_tester_02
       JOB_ut:
         name: UT_cannbot-skills
-        needs: JOB_security_vet
+        needs: [JOB_security_vet, JOB_skillspector_vet, JOB_bandit_vet]
         uses: .gitcode/workflows/ut_action.yml
         with:
           image_version: ${{ jobs.JOB_image.outputs.UT_Test }}
       JOB_st_test:
         name: ST_test
-        needs: JOB_security_vet
+        needs: [JOB_security_vet, JOB_skillspector_vet, JOB_bandit_vet]
         steps:
           - name: check_script
             run: |
