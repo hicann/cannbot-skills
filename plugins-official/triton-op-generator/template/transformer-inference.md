@@ -846,8 +846,8 @@ top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算
 
 **算子类别**: `topk-select`
 **典型特征**: fp16 QK^T（fp32 累加、fp16 量化输出）→ relu → 按头权重求和（fp32）→ causal mask（-inf）→ 稳定降序 top-K；输出 `int32` 索引 + 可选 `fp32` 分数
-**性能基准**: 任务 8-shape（verify 8/8）**5.0528x** vs torch；16-shape（work 0.1M~268M，mode3）vs ops-transformer AscendC 单融合 kernel 核级几何平均 **0.404x**、墙钟 0.325x
-**历史最佳版本**: opt_iter_16（初版 2.56x → 16 轮迭代）
+**性能基准**: 任务 8-shape（verify 8/8）**5.6291x** vs torch；16-shape（work 0.1M~268M，mode3）vs ops-transformer AscendC 单融合 kernel 核级几何平均 **0.421x**、墙钟 0.334x
+**历史最佳版本**: opt_iter_17（初版 2.56x → 17 轮迭代）
 
 ### §6.1 Layer 1: 设计约束（Agent 必须遵守）
 
@@ -918,7 +918,8 @@ top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算
 - qk_kernel 的 R 上限是 8：R=16 时 dot 的 fixpipe 输出 `[128, 256] fp32` 必须**一次性整块搬进 UB**
   （没有分段搬运的余地），连同 q/k 载入共需 320KB > 192KB。hsum_kernel 可以 R=16（其 y16→f32 转换
   由编译器分段搬运，216KB 可行）。
-- mix 算子 grid ≤ cube 核数（910B3 = 20）。
+- mix 算子 grid ≤ cube 核数（910B3 = 20）；finalize 行合并 R=4（R=8 时 `[8,2048]` 的 int64 载入组合
+  需约 320KB，超过 192KB 上限——编译报错 `requires 2621696 bits`，R=4 为可行边界）。
 
 ### §6.2 Layer 2: 算法骨架
 
@@ -938,7 +939,7 @@ if rows * S2P >= 4_000_000:                          # L1.5 大 shape 拆分路�
 else:                                                # 小 shape 融合路径
     score_kernel[(cdiv(rows, 8),)](q, k, w, score_buf, aq_dev, ak_dev, ..., BLOCK_J=128, R=8)
 sv, si = score_buf.sort(dim=-1, descending=True)     # L1.4 唯一放行选位原语
-finalize_kernel[(rows,)](sv, si, out_idx, out_val, S2P, K, next_pow2(K))   # -inf -> -1/-inf, int64 -> int32
+finalize_kernel[(cdiv(rows, 4),)](sv, si, out_idx, out_val, S2P, K, rows, next_pow2(K), R=4)  # 行合并, 见 L3.4
 ```
 
 - **qk_kernel**：flat 行加载 q `[R*N, D]` → `tl.dot(q, tl.trans(k_tile))` → `.to(fp16)` → relu（fp16 域，与参考位级等价）→ 存 y16。
@@ -987,6 +988,21 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 **可替代方向**：hsum 的 320ns 由 fp32 dot 税 + K=128 结构零构成，是位级一致约束的固有成本；
 解除该约束（golden 允许近似）可换 fp16 键大幅提速，但本路线不可。
 
+#### L3.4 finalize 行合并（削减 program 开销，小 shape 收益明显）
+
+```python
+# R=4 行合并: program 数 ÷4; R=8 时 [8,2048] 的 int64 载入 262KB 会 UB 溢出 (L1.6)
+row_vec = pid * R + tl.arange(0, R)
+v = tl.load(v_ptr + row_vec[:, None] * S2P + kn[None, :], mask=..., other=-inf)
+i = tl.load(i_ptr + row_vec[:, None] * S2P + kn[None, :], mask=..., other=-1)
+oi = tl.where(v > float("-inf"), i.to(tl.int32), -1)   # 必须全位置写回 -1/-inf
+tl.store(oi_ptr + row_vec[:, None] * K + kn[None, :], oi, mask=wmask)
+```
+
+**可替代方向**：单行一 program 正确但 program 数 ×4（大 shape finalize 占 2.4ms 时值得合并）；
+**禁止** masked-store 只写有效位——输出是 `torch.empty`，未写的位置会残留脏值（本算子实测导致 3/8 case 失败），
+必须用 `tl.where` 把 -1/-inf 也写进去。
+
 ### §6.4 性能演进
 
 | 版本 | 任务 8-shape | 16-shape vs op (核级) | 关键变更 |
@@ -995,7 +1011,8 @@ cond = cond_row | (jf[None, :] >= akf) | (jf[None, :] >= thr3[:, None])   # mode
 | opt_1/3（#21 M 维合并 R=2→4） | 3.74 / 4.75x | — | 头归约块对角 + flat 行加载 |
 | opt_11（R=8 + grid≤核数） | 5.16x | 0.339x | checklist 规则 5 |
 | opt_14（拆分 + 双路径分派） | 5.12x | 0.362x | 大 shape 全流水 -9~11% |
-| **opt_16（hsum BLOCK_J 128→256）** | **5.05x** | **0.404x** | 变体探查 -30% |
+| opt_16（hsum BLOCK_J 128→256） | 5.05x | 0.404x | 变体探查 -30% |
+| **opt_17（finalize R=4 行合并）** | **5.63x** | **0.421x** | 小 shape 的 finalize 占比高，同步受益 |
 
 ## §7 FFN 算子（dual-gemm-activation）
 
@@ -1291,6 +1308,7 @@ tokens_t.copy_(pin_tok, non_blocking=True)   # 避免每次调用同步 H2D (~15
 | 拆分路径只在小 shape 验证 | verify 8/8 全走融合路径，拆分路径未被验证 | 拆分路径单独做大 shape 位级复验（实测 0/8.4M 差异） |
 | 同名 kernel 混淆 profiling 归因 | qk/hsum 都显示 "kernel" | 归因用唯一 kernel 名，勿凭名字判断耗时 |
 | torch 参考大 shape OOM | `expand` 是零拷贝视图，`.reshape()` 触发真实拷贝，把 `[B,S1,D,S2]` 整体复制成 68GB 内存 | 基线缺陷不可改（freeze 锚定），报告标注 |
+| masked-store finalize | 输出残留脏 int32（3/8 case 失败） | L3.4：全位置 `tl.where` 写回 -1/-inf |
 
 ### §8.6 FFN 陷阱
 

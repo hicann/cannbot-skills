@@ -27,7 +27,8 @@ metadata:
 > `BlockSparseAttnFwd`（varlen 打包 + dense/blocksparse/streaming 三类头，**2.73 → 71.63**）、
 > `BlockSparseAttnBwd`（同掩码语义的反向，dq/dk/dv 三 kernel，**5.32**）、
 > `MsaSparseAttnFwd`（paged KV + CSR 逆推 topK 选块）、
-> `SlaFwd`（pooled 打分 + topk 选块 + 并行的线性 attention 分支）。
+> `SlaFwd`（pooled 打分 + topk 选块 + 并行的线性 attention 分支）、
+> `SparseFlashAttentionFwd`（`sp-index-given` 形态，16 case，vs ops-transformer 核时比值 **0.131 → 0.585**，见 L1.10~L1.13 / §3.4 / §4.6-4.7 / §6.4）。
 >
 > ⚠️ **核心优化哲学**：这类算子的头号问题**不是稀疏本身，而是"稀疏被写成了逐 token 的 program"**。
 > 掩码是块粒度的（通常 128×128），program 却按 token 发 —— 同一个掩码块里的 128 个 query
@@ -46,6 +47,7 @@ metadata:
 | `sp-paged-topk` | KV 经 `block_table` 分页寻址，且给的是 **k→q 方向**的 CSR（`indptr`/`indices`），需反推每个 query 的选中块 | 表用**无 dot 的 Triton kernel** 在 device 侧建；⚠️ 不要做跨 program 原子归约（§5.2） |
 | `sp-pooled-topk` | 无现成掩码，参考实现先把 Q/K 沿序列维池化成打分矩阵再 `torch.topk(...)` + `scatter_` | top-k 自己实现；⚠️ **紧致化不能用 `tl.cumsum`**（§4.3） |
 | `sp-bwd` | 入参含 `softmax_max` / `softmax_sum` / 前向输出，出 `dq`/`dk`/`dv`；掩码语义与前向同一套 | m/l/O 预给 → 不需要 online softmax；需要**转置的选择表** |
+| `sp-index-given` | 选择表 **sparse_indices 直接是算子输入**（上游 lightning_indexer 的 top-k 产物，行内下标或 `-1` 填充），KV_N=1 全部 Q 头共享同一稀疏集合；常见 token-wise（sparse_block_size=1） | 无 device 侧建表（bsa-L1.2 不适用）；**连续索引段检测 + 仿射快路径**是最大收益（L1.10/§3.4）；gather 路径的 UB 瓶颈是地址张量（L1.11） |
 
 ### §0.1 判别特征（决定用不用本文件）
 
@@ -271,6 +273,96 @@ q = tl.load(q_ptr + t * (Hq*D) + hqs[:, None]*D + offs_d[None, :], mask=gvalid[:
 `NEG = -3.0e38` 要写成 `NEG: tl.constexpr = -3.0e38`，否则报
 `Cannot access global variable ... from within @jit'ed function`。
 
+### L1.10 ★★★ 连续索引段必须被检测并分派到「仿射快路径」，禁止永远走 gather
+
+- **必须** 用一个**无 dot 的检查 kernel** 在 device 侧逐行校验选择表行是否等于
+  `arange(K)`（连续索引段），写 flag（每行一个 int32）；主 kernel 按 flag 做
+  `if contig == 0:` 运行时标量分派 FAST / SLOW 两条路径。
+- **禁止** host 侧 `.cpu()/.item()/torch.equal` 判等（违反 L1.2 的 host 禁令）；
+  device 侧检查完全合规（无 D2H、无 host 建表）。
+- **禁止** 把检测结论复用成"下次还连续"的缓存——每次 forward 必须重新检测。
+- **Why（实测）**：连续索引（`arange(K)`，lightning_indexer 官方 bench 同款模式）下，
+  稀疏 gather 在数学上就是一段连续块搬运。CANN SFA 对此做 stride 合并搬运，
+  而通用 gather 路径每行都要算 `[BN,D]` 的间接地址。改成仿射地址
+  `(k0 + k_offs)[:, None] * D + d[None, :]` 后：载荷变连续 DMA、sel 读入/掩码比较/
+  地址张量全部消失，单段 D 下 BLOCK_KV 从 32 直接开到 128（实测 256 也可编译）。
+  整体 16 case 核时提速 **4.46×**（vs CANN 核时比值 0.131 → 0.585）。
+- **Why（实测）**：仿射路径的 UB 预算与 gather 路径是两套——路径一变，
+  **BLOCK 必须重扫**，旧 tile 结论作废（见 L1.11 的阶梯表）。
+- **How to apply**：快慢两路径算术必须**同构**（同 dot 结构、同 online softmax 公式），
+  否则 verify 会因两路径数值不一致而在非连续 case 上翻车；检测 kernel 的写法见 §3.4。
+
+### L1.11 ★★ gather 的隐藏 UB 大项是 `[BN,D]` int32 地址张量 → D 拆半或仿射化
+
+- **必须** 对 gather 类 kernel 的 ub overflow，先用消融定位主因
+  （删掉一个 gather 负载再编译，读 overflow 数字的变化量），再决定砍什么。
+- **Why（实测）**：朴素 tile 估算只到 ~122KB，实际 overflow 需要 225~282KB——
+  差额就是按行间接寻址物化的 int32 地址张量（与 BN×D 成正比）。把 D 拆半（2×256）
+  加载 k_v/q、QK 变 3 个 dot（lo+hi+rope）、acc 拆 lo/hi、末尾两段 store 后，
+  BLOCK_KV 32 → 64，收益 = KV 迭代数减半 ≈ **+59%**（31.57 → 49.25）。
+  D 拆半纯 tiling、算术顺序不变，数值与单段一致。
+- **实测阶梯**（单段 D、multibuffer=False）：gather BN=32 ✓ / 40/48/64 ✗ overflow；
+  gather+D 拆半 BN=64 ✓、96/128 ✗；**仿射 BN=128 ✓、256 ✓**——地址张量一消失，UB 墙整体平移。
+
+### L1.12 ★ fp32 化的 load 掩码 + 第二处 masked load 组合禁止（bishengir 非确定性缺陷）
+
+- **禁止** 同时出现：① `tl.arange` 派生的 fp32 化掩码（如 `valid_h = h.to(tl.float32) < QN`）
+  用于一个 masked load；② 同 kernel 里另一个带 mask 的 load（如 gather 的 `mask=kv_valid`）。
+- **Why（复核实测，最小复现逐级消融）**：
+  - 单要素均不复现：纯 load/store（A 级）、单任务 dot 循环（B 级）、
+    fp32 掩码 + 无 mask 的 gather（C3 级）——全部确定性；
+  - **组合才复现**：fp32 掩码 + 带 mask 的 gather load（C3+maskedKV / C4 级）→
+    同输入 4 次运行 self-diff = 5.12e+02、偶发 NaN；
+  - int32 掩码在任意组合下 self-diff = 0（A~C4 级全部确定性）；
+  - `tl.load` 读入值（sel）的 fp32 化比较安全（v18 实证）。
+- **How to apply**：与 latency-optimizer checklist「比较转 fp32」冲突时以正确性优先，
+  掩码比较保持 int32 并在注释标注；判别信号 = verify 同 case 时过时挂 / self-diff 非零。
+- **验证方法**：判据 = 目标 kernel 同输入连续运行 4 次、两两 self-diff 必须为 0；
+  非零时逐级消融（去掉第二处 masked load / 改回 int32 掩码）确认诱因。核心复现骨架：
+
+```python
+@triton.jit
+def mask_probe(q_ptr, kv_ptr, idx_ptr, out_ptr, BQS, K, KVS, QN,
+               USE_FP32: tl.constexpr, NUM_CORES: tl.constexpr,
+               BLOCK_KV: tl.constexpr, D: tl.constexpr):
+    pid = tl.program_id(0)
+    for t in range(pid, BQS, NUM_CORES):            # 多任务步长循环（复现需要该结构）
+        h = tl.arange(0, 16)
+        d = tl.arange(0, D)
+        if USE_FP32:
+            valid_h = h.to(tl.float32) < QN        # 变体 A: fp32 化 arange 掩码（复现缺陷）
+        else:
+            valid_h = h < QN                        # 变体 B: int32 掩码（确定性）
+        hc = tl.minimum(h, QN - 1)
+        q = tl.load(q_ptr + t * QN * D + hc[:, None] * D + d[None, :],
+                    mask=valid_h[:, None], other=0.0).to(tl.float16)
+        q_t = tl.trans(q)
+        acc = tl.zeros((16, D), tl.float32)
+        for k0 in range(0, K, BLOCK_KV):
+            k_offs = k0 + tl.arange(0, BLOCK_KV)
+            sel = tl.load(idx_ptr + t * K + k0 + tl.arange(0, BLOCK_KV))
+            kv_ok = (sel >= 0) & (sel < KVS) & (k_offs < K)
+            selc = tl.minimum(tl.maximum(sel, 0), KVS - 1)
+            k_v = tl.load(kv_ptr + selc[:, None] * D + d[None, :],
+                          mask=kv_ok[:, None], other=0.0).to(tl.float16)  # 第二处 masked load
+            s = tl.trans(tl.dot(k_v, q_t))          # [16, BN] fp32
+            p = tl.exp(s - tl.max(s, axis=1)[:, None]).to(tl.float16)
+            acc = acc + tl.dot(p, k_v)
+        tl.store(out_ptr + t * QN * D + h[:, None] * D + d[None, :],
+                 acc.to(tl.float16), mask=valid_h[:, None])
+```
+
+每变体跑 4 次取 pairwise max self-diff：变体 A 非零（实测 2.04e+01~2.21e+01，单任务 grid=1 时不复现）、
+变体 B 为 0 即复现；逐级消融（去掉 `k_v` 的 mask / 去掉 rope dot / 改回 int32）确认诱因。
+
+### L1.13 双路径分派下，两分支的局部变量禁止同名
+
+- **必须** FAST/SLOW 两分支的局部变量分别命名（如 `f_`/`s_` 前缀），只共享分支前定义的值。
+- **Why（实测）**：同名不同形的变量（`k_offs` [128] vs [32]）触发
+  `AssertionError('Mismatched type for k_offs between then block and else block')`，
+  一眼像语义错误实则命名冲突。
+- **How to apply**：双路径写完先做一次空 shape 编译冒烟，再进 verify。
+
 ---
 
 ## §3 Layer 2: 算法骨架
@@ -332,6 +424,41 @@ dk/dv 的 kernel 需要**转置的选择表**（每个 (b, k_block, h) 对应哪
 把 q 主序表转置一遍。做法与 q 主序表完全对称——同一份块级判据 `_blk_keep`，
 只是把 `(b, q_tile, h)` 的任务分解换成 `(b, k_tile, h)`，判据本身一行都不用改；
 两张表各发一个 kernel，合计几十 µs 量级。
+### §3.4 连续索引段的「检测 + 双路径分派」骨架（L1.10 的落地形态）
+
+检测 kernel（无 dot、无 atomic，grid 与主 kernel 同构，每个任务一个 int32 flag）：
+
+```python
+@triton.jit
+def contig_check_kernel(idx_ptr, flag_ptr, BQS, K,
+                        NUM_CORES: tl.constexpr, CHK: tl.constexpr):
+    pid = tl.program_id(0)
+    for t in range(pid, BQS, NUM_CORES):
+        offs = tl.arange(0, CHK)
+        bad = 0
+        for k0 in range(0, K, CHK):
+            m = (k0 + offs) < K
+            sel = tl.load(idx_ptr + t * K + k0 + offs, mask=m, other=-1)
+            neq = tl.sum(tl.where(m & (sel != (k0 + offs)), 1, 0))
+            if neq != 0:
+                bad = 1
+        tl.store(flag_ptr + t, bad)
+```
+
+主 kernel 分派（两条路径算术同构，q 加载在分支外共享；分支局部变量按 L1.13 分别命名）：
+
+```
+if flag[t] == 0:                       # FAST: 仿射连续加载, 无 sel/无掩码/无地址张量
+    for k0 in range(0, K, BLOCK_KV_F):                 # 单段 D, BLOCK_KV_F 可开到 128
+        k_v = load(kv + (b*KVS + k0 + k_offs) * D + d) # 连续块搬运
+        s_t = dot(k_v, q_nope_t) + dot(k_r, q_rope_t)  # [BN,16] → trans → [16,BN]
+        online softmax + PV（hi+lo, 与 SLOW 同一公式）
+else:                                  # SLOW: D 拆半 gather（L1.11）, 任意索引兜底
+    for k0 in range(0, K, BLOCK_KV_S):
+        sel = load(idx_row + k0 + k_offs); selc = clamp(sel, 0, KVS-1)   # L1.6
+        k_v_lo/hi, k_r = gather by selc（mask=kv_valid）
+        3 个 QK dot（lo+hi+rope）+ online softmax + PV（hi+lo）
+```
 
 ---
 
@@ -449,9 +576,29 @@ lo = tl.where(take, mid, lo);  hi = tl.where(take, hi, mid)
 
 ---
 
+### §4.6 Q 转置 dot 形式省每迭代转置缓冲
+
+```python
+# ✅ 每迭代只转 [BN,16] 的小块; k_v 行主序加载同时复用为 PV 的 B 操作数
+s_t = tl.dot(k_v, q_nope_t)      # [BN,512] @ [512,16] -> [BN,16]
+s   = tl.trans(s_t)              # [16,BN]
+# ❌ 每迭代物化 [512,BN] 的转置缓冲（BN=64 时 64KB, 是 UB overflow 主因之一）
+s = tl.dot(q_nope, tl.trans(k_v))
+```
+q 的转置在 KV 循环外 hoist（每 program 仅 2 次），代价几乎为零。
+
+### §4.7 「转置直接加载」比「自然布局加载 + 寄存器 trans」更费 UB
+
+q 按 `[D,16]` 布局直接加载（列=头、行=d 连续）看似省一次 trans，实测单段 D BN=32
+时反而 +24KB 溢出——两者 UB 行为与直觉相反，**只有实测能定**；默认用
+「自然布局加载 + `tl.trans`」，UB 溢出时再试另一侧。
+
+---
+
 ## §5 Phase 4 优化点清单
 
 ### §5.1 按收益排序（★ = 高收益）
+
 
 | # | 方向 | 实测增益 | 适用条件 |
 |---|---|---|---|
@@ -518,6 +665,11 @@ lo = tl.where(take, mid, lo);  hi = tl.where(take, hi, mid)
 某算子最终输出全错，但把 `m` / `l` / `acc` 三个中间量单独 dump 出来跟 torch 复算比，
 立刻看到 **`m` 完全正确、`l` 完全正确、只有 `acc` 恒 0** —— 一眼锁定是 PV 那一步，
 省掉在 tiling / 精度上的全部无效搜索。
+### §6.4 双路径实现的分支验证盲区
+
+benchmark 若全为连续索引，SLOW 路径一次都不会被执行——它上面的 bug 会静默逃逸。
+交付前必须用最小复现脚本（非 arange 索引）单独跑一遍 SLOW 路径的 golden 对比与
+确定性检查（同输入 3~4 次运行 self-diff 必须为 0）。
 
 ---
 
@@ -551,6 +703,9 @@ lo = tl.where(take, mid, lo);  hi = tl.where(take, hi, mid)
 | 编译报 `Unknown command line argument '--enable-...'` | 编译器版本不支持该开关 | S5，先确认编译器来自 pip 包还是 PATH |
 | 精度全过但 speedup 反而变好 | 12 个 case 编译失败被排除在几何平均之外 | 看 speedup 前先看 `passed_cases == total_cases` |
 | `aic_scalar_ratio` 很高 | **不一定**是标量运算多，常常是同步等待被计进标量管线 | 下结论前先 dump IR 确认 |
+| 同输入多次运行结果漂移（self-diff 非零）/ 偶发 NaN | load 掩码比较被 fp32 化（`h.to(fp32)<QN`）触发 bishengir 非确定性缺陷 | L1.12，掩码比较保持 int32 |
+| 双路径 kernel 报 `Mismatched type ... between then block and else block` | 两分支定义了同名的不同形状局部变量 | L1.13，分支局部变量分别命名 |
+| gather 类 kernel 的 UB overflow 数字远超朴素 tile 估算 | 按行间接寻址物化的 int32 地址张量（∝ BN×D） | L1.11，D 拆半或仿射化 |
 
 ---
 
@@ -565,3 +720,5 @@ lo = tl.where(take, mid, lo);  hi = tl.where(take, hi, mid)
 | `flash_attention.md` | 一 标准类全部三个细分（基础三段式 / 分块流式 / 空间 token 版），含极小 `S` 的朴素一次性 attention |
 
 冲突时以本文件为准（本文件结论均在稀疏形态上实测）。
+
+---

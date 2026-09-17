@@ -65,6 +65,19 @@ for i in range(NUM_BLOCK):
 ### 8. 控制流规范
 - [ ] 禁止在 triton 代码中使用 `continue` 和 `break` 语句
 
+### 规则 2 的例外（正确性优先，实测平台缺陷）
+
+- ⚠️ **fp32 化的 load 掩码 + 带 mask 的 load 组合禁止**：`tl.arange` 派生的掩码
+  （如 `valid_h = h.to(tl.float32) < QN`）用于一个 masked load，且同 kernel 里存在
+  另一个带 mask 的 load（如 gather 的 `mask=kv_valid`）时，在 910B（bishengir）上
+  触发编译器非确定性缺陷——同输入多次运行 self-diff 非零（实测 0~5.1e+02）、偶发 NaN。
+  - 单一要素均安全：fp32 掩码本身（无第二处 masked load）、int32 掩码（任意组合）、
+    `tl.load` 读入值的 fp32 化比较。
+  - 判别信号：verify 同 case 时过时挂 / 同输入 self-diff 非零 → 先查掩码比较 dtype。
+  - **验证方法**（最小复现，见 `template/block_sparse_attention.md` L1.12）：
+    取目标 kernel，同输入连续运行 4 次，两两 self-diff 必须为 0；
+    逐级消融（去掉第二处 masked load / 改回 int32 掩码）确认诱因后，保持 int32 掩码。
+
 ## 检查流程
 
 1. 加载本文件（checklist.md）

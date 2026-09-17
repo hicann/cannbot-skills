@@ -1,10 +1,10 @@
-# LightningIndexer 优化经验（拆分路径 + profile-driven tile 放大）
+# LightningIndexer 优化经验（拆分路径 + profile-driven tile 放大 + program 开销削减）
 
-**以 LightningIndexer（topk-select 稀疏注意力索引器）大 shape 拆分路径为典型案例，提炼"先归因、再探查、后放大"的 tile 优化方法与可复用于同类 dot+逐元素混合 kernel 的判据。**
+**以 LightningIndexer（topk-select 稀疏注意力索引器）大 shape 拆分路径为典型案例，提炼"先归因、再探查、后放大"的 tile 优化方法与 finalize 类小 kernel 的 program 合并技巧。**
 
 **算子类别**: `topk-select`（QK^T 打分 + relu + 权重头归约 + 行内降序 top-K 选位，输出 int32 索引 + 可选 fp32 分数）
 **典型特征**: 大 shape（`rows * S2P >= 4M`）走拆分路径——`qk_kernel`（QK^T + fp16 量化 + relu，产出 y16 中间缓冲）与 `hsum_kernel`（fp32 块对角头归约 + causal mask，产出 scores）；选位由 `.sort()` 稳定排序完成（环境约束：`torch.topk`/`npu_sort_v2` 均被 validator 拦截，`.sort()` 是唯一放行原语，详见 transformer-inference.md §6 L1.4）
-**性能基准**: 本技巧（hsum_kernel BLOCK_J 128→256）单 kernel **-30%**（B2,2048,16384：7365→5169µs）；16-shape（work 0.1M~268M）vs ops-transformer AscendC 核级几何平均 **0.362 → 0.404**；输出与 torch 参考位级一致（大 shape 复验索引 |diff|>1 = 0/8.4M 元素）
+**性能基准**: hsum_kernel BLOCK_J 128→256（opt_16）单 kernel **-30%**（B2,2048,16384：7365→5169µs）；finalize 4 行合并（opt_17）单 kernel **-43~47%**（case16 2399→1267µs）；16-shape（work 0.1M~268M）vs ops-transformer AscendC 核级几何平均 **0.362 → 0.421**；输出与 torch 参考位级一致（大 shape 复验索引 |diff|>1 = 0/8.4M 元素）
 
 ---
 
@@ -39,6 +39,17 @@
 - **How to apply**: 结构改动后做大 shape 位级复验（与 torch 参考逐元素比对索引 |diff|<=1、分数按 fp32 容差），而不只依赖小 shape 的 verify（小 shape 可能走的是另一条分派路径）。
 
 ---
+
+### L1.5 finalize 类小 kernel 的行合并必须全位置写回，禁止 masked-store
+
+- **必须** 行合并（每 program 处理 R 行）时用 `tl.where` 把有效值与默认值（-1/-inf）**一起写满全部位置**。
+- **禁止** 用 `mask=valid` 只写有效位置：输出是 `torch.empty` 分配，未写的位置会残留脏值——
+  本算子实测该写法导致 3/8 case 失败（输出出现未初始化的垃圾 int32）。
+- **Why**：逐行单 program 时 small shape 的 finalize 占整算子 5% 以上（大行数时 2.4ms），
+  program 数削减有实利；但"只写有效位"看似省指令，实则会破坏"输出全位置有定义"的隐含契约，
+  除非 host 侧先 `torch.full` 预填默认值（实测预填+masked-store 的收益为负，不如 where 写回）。
+- **How to apply**: 见 L3.4；R=4 是 UB 边界（R=8 时 `[8, 2048]` 的 int64 载入组合需约 320KB > 192KB，
+  编译报错 `requires 2621696 bits`）。
 
 ## Layer 2: 算法骨架（Agent 可参考架构）
 
@@ -115,6 +126,32 @@ assert ( (vv[fin] - rv[fin]).abs() > 1e-3 + 1.22e-4 * rv[fin].abs() ).sum().item
 
 **可替代方向**: 仅依赖小 shape verify 也可以，但会漏掉大 shape 分派路径的结构改动。
 
+### L3.4 finalize 行合并模板（program 数 ÷R，小 shape 受益放大）
+
+```python
+# R=4 (UB 边界见 L1.5); 逐行版 program 数 ×4, 大行数时 finalize 达 2.4ms
+@triton.jit
+def finalize_kernel(v_ptr, i_ptr, oi_ptr, ov_ptr, S2P, K, ROWS,
+                    BLOCK_K: tl.constexpr, R: tl.constexpr):
+    pid = tl.program_id(0)
+    row_vec = pid * R + tl.arange(0, R)
+    valid_row = row_vec < ROWS
+    kn = tl.arange(0, BLOCK_K)
+    km = kn < K
+    off = row_vec[:, None] * S2P + kn[None, :]
+    v = tl.load(v_ptr + off, mask=valid_row[:, None] & km[None, :], other=float("-inf"))
+    i = tl.load(i_ptr + off, mask=valid_row[:, None] & km[None, :], other=-1)
+    oi = tl.where(v > float("-inf"), i.to(tl.int32), -1)          # 全位置写回 (L1.5)
+    ov = tl.where(v > float("-inf"), v, float("-inf"))
+    wmask = valid_row[:, None] & km[None, :]
+    o_off = row_vec[:, None] * K + kn[None, :]
+    tl.store(oi_ptr + o_off, oi, mask=wmask)
+    tl.store(ov_ptr + o_off, ov, mask=wmask)
+```
+
+**可替代方向**: 逐行单 program（正确、无脏值风险，但 program 开销 ×4）；host 预填 + masked-store
+（实测收益为负）。实测数据：case16 2399→1267µs、case12 309→176µs、case11 164→90µs。
+
 ---
 
 ## 性能基准
@@ -122,9 +159,12 @@ assert ( (vv[fin] - rv[fin]).abs() > 1e-3 + 1.22e-4 * rv[fin].abs() ).sum().item
 | 版本 | hsum 配置 | 16-shape vs op（核级几何平均） | 说明 |
 |------|-----------|------------------------------|------|
 | opt_iter_14（拆分 + 双路径分派） | R16/BJ128 | 0.362 | 大 shape 拆分路径建立 |
-| **opt_iter_16（本技巧）** | **R16/BJ256** | **0.404** | profile 探查 + tile 放大，单 kernel -30% |
+| opt_iter_16（tile 放大） | R16/BJ256 | 0.404 | profile 探查 + tile 放大，单 kernel -30% |
+| **opt_iter_17（finalize 行合并）** | 同上 + finalize R=4 | **0.421** | program 数 ÷4，单 kernel -43~47% |
 
 关键结论：
 1. 先归因（唯一 kernel 名）、再探查（变体矩阵 + 消融边际成本）、后放大（实测 UB 边界）是 dot+逐元素混合 kernel 的正确优化顺序，任何一步顺序颠倒都可能打错目标。
 2. "载入→转换→dot"链的转换可分段搬运，UB 估算偏保守；"dot→后处理"链不可，估算即真实上限——两类行为必须实测区分。
 3. tile 放大前先论证位级不变性（只动 N 维不动 K 归约），放大后做大 shape 位级复验。
+4. 收尾类小 kernel（finalize/cast/fill）在 small shape 占比可达 5%+，行合并削减 program 数是最后一批
+   可稳定兑现的收益；但合并后必须维持"输出全位置有定义"的契约（tl.where 全写回，勿 masked-store）。
