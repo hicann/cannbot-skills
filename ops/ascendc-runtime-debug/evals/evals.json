@@ -36,7 +36,7 @@
         "eval_mode": "text"
       },
       "prompt": "在算子运行时出现 507035 错误码是什么意思？可能的原因有哪些？我该如何诊断和修复这个问题？可以加载技能，不需要执行其他外部工具调用。",
-      "expected_output": "回复应说明 507035 错误码的含义、可能的原因以及诊断和修复方法。",
+      "expected_output": "回复应说明 507035 是向量核异常：含义（向量核执行期间硬件异常，通过 aclrtStreamSynchronize() 报告）、可能原因（UB 端地址非 32B 对齐，含 DataCopy/DataCopyPad 的 UB 侧起始地址、VEC 计算指令如 Add/Muls/Duplicate 的操作数地址；GM→UB 方向 DataCopyPad 的 leftPadding/rightPadding 超过 32B，注意 padParams 仅 GM→UB 有效、UB→GM 只有 3 个参数；UB 溢出/Buffer 越界）以及诊断修复方法（检查清单逐项排查）。注意：DataCopyPad 的 blockLen 无 32B 对齐要求（支持非对齐搬运，只需为 sizeof(T) 的整数倍、单位为字节），32B 对齐约束在地址上，回复不应声称 blockLen 必须 32B 对齐。",
       "expectations": [],
       "files": []
     },

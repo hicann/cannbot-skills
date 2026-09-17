@@ -25,7 +25,7 @@ description: Ascend C 算子运行时错误调试技能。用于处理算子运�
 
 | 错误码 | 类型 | 排查方向 | 详细方案 |
 |-------|------|---------|---------|
-| 507035 | 向量核异常 | 检查 DataCopyPad 32B对齐 / UB溢出 | [debug_workflow.md](references/debug_workflow.md#507035-向量核异常) |
+| 507035 | 向量核异常 | 检查 UB 端地址 32B 对齐（含 VEC 指令操作数）/ GM→UB padParams 违规 / UB 溢出 | [debug_workflow.md](references/debug_workflow.md#507035-向量核异常) |
 | 161xxx | 参数错误 | 检查 dtype/shape/nullptr | [debug_workflow.md](references/debug_workflow.md#161xxx---参数错误) |
 | 561002 | Tiling错误 | 检查 TilingKey/TilingFunc | [debug_workflow.md](references/debug_workflow.md#561002---tiling错误) |
 | 561003 | Kernel未找到 | 检查算子安装/环境配置 | [debug_workflow.md](references/debug_workflow.md#561003---kernel查找失败) |
