@@ -176,7 +176,7 @@ extreme_inputs:
       shapes: {a: "[4, 4]", b: "[4, 4]"}
       patterns:
         - {pattern: inject_nan_one_element, target: a}
-    machine_check: {kind: produces_nan, scope: "整张量"}
+    machine_check: {kind: nan_propagates}   # NaN 沿行/列传播，非整张量
 
   - case: "全零（验证 zero_propagation invariant）"
     synthesize:

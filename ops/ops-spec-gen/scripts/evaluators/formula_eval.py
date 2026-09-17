@@ -171,11 +171,16 @@ def _is_dtype_standin_match(spec_dtype: str, runtime_dtype: str) -> bool:
 # ---------- formula execution (shared by stages 10 / 11) -------------------
 
 
-def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any]) -> dict[str, Any] | None:
+def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any],
+                attr_overrides: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Run the spec formula in the AST sandbox; return {output_name: ndarray}.
 
     Returns None on any compile / runtime error. Shared by stages that sample
-    the formula output: stage 10 (formula vs oracle) and stage 11 (invariants).
+    the formula output: stage 10 (formula vs oracle), stage 11 (invariants)
+    and stage 12 (extreme_inputs joint check).
+
+    attr_overrides：条目级属性覆盖（如 extreme_inputs[].synthesize.attrs），
+    在 attributes[].default 之上合并，供同一 formula 按不同属性取值求值。
     """
     formula = (spec.get("math_semantics") or {}).get("formula", "")
     if not formula.strip():
@@ -191,6 +196,8 @@ def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any]) -> dict[str, 
     for a in spec.get("attributes") or []:
         if "default" in a:
             attr_values[a["name"]] = a["default"]
+    if attr_overrides:
+        attr_values.update(attr_overrides)
 
     g = _ast_sandbox.make_globals({"np": np_mod, "math": math})
     g.update(input_tensors)
@@ -203,16 +210,28 @@ def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any]) -> dict[str, 
     except Exception:
         return None
 
+    return _collect_outputs(np_mod, spec, locals_dict)
+
+
+def _coerce_ndarray(np_mod, val):
+    """非 ndarray 结果尽量转 ndarray；不可转换返回 None。"""
+    if isinstance(val, type(np_mod.zeros(0))):
+        return val
+    try:
+        return np_mod.asarray(val)
+    except Exception:
+        return None
+
+
+def _collect_outputs(np_mod, spec: dict, locals_dict: dict[str, Any]) -> dict[str, Any] | None:
+    """从 formula 命名空间收集输出变量；一个都没有则返回 None。"""
     outputs: dict[str, Any] = {}
     for out in spec.get("outputs") or []:
         name = out.get("name")
-        if name in locals_dict:
-            val = locals_dict[name]
-            if not isinstance(val, type(np_mod.zeros(0))):
-                try:
-                    val = np_mod.asarray(val)
-                except Exception:
-                    continue
+        if name not in locals_dict:
+            continue
+        val = _coerce_ndarray(np_mod, locals_dict[name])
+        if val is not None:
             outputs[name] = val
     return outputs if outputs else None
 

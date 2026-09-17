@@ -12,7 +12,7 @@
 | ID | 规则 |
 |----|------|
 | S1 | 必须使用 `scripts/generate_spec.py` 生成骨架，**禁止手写 spec.yaml** |
-| S2 | 生成完成后必须跑 `scripts/validate_spec.py spec.yaml` 11-stage 校验全 PASS（stage 9/10/11 SKIP 视为通过） |
+| S2 | 生成完成后必须跑 `scripts/validate_spec.py spec.yaml` 12-stage 校验全 PASS（stage 9/10/11/12 SKIP 视为通过） |
 | S3 | （建议）`scripts/compute_spec_hash.py` 工具链尚未交付，v1 不要求锁 spec_hash；待工具与 schema 字段就绪后启用 |
 | S4 | 字段值必须**与 REQUIREMENTS.md 一致**——dtype / shape 约束 / 平台限制 / 容差由 REQUIREMENTS 推导，不允许凭空添加 |
 | S5 | numerical_stability.techniques.anti_pattern_id 引用必须在 `registries/anti_pattern_registry.yaml` 中已注册（如未来 schema 加 enum） |

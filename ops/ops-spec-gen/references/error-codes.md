@@ -143,6 +143,8 @@
 - `synthesize_pattern_unknown`
 - `data_distribution.accumulation_requires_normal`
 - `data_distribution.non_accumulation_must_omit`
+- `extreme_check.nan_propagates_violated`
+- `extreme_check.produces_nan_conflict`
 - `format_variants.oracle_kwargs_dim_mismatch`
 - `format_variants.reduction_axes_negative`
 - `format_variants.reduction_axes_out_of_rank`

@@ -76,9 +76,12 @@ broadcast:
 math_semantics:
   formula_kind: numpy_expr
   formula: |
-    # 先 broadcast 再构造 complex；同 dtype real+imag 时 out dtype 是 fp32→c64 / fp64→c128
+    # 先 broadcast 再构造 complex；用分量赋值避免 1j*inf 触发 0*inf=NaN（与 torch.complex 分歧）
     r, i = np.broadcast_arrays(real, imag)
-    out = (r + 1j * i).astype(np.complex64 if r.dtype == np.float32 else np.complex128)
+    dt = np.complex64 if r.dtype == np.float32 else np.complex128
+    out = np.zeros(r.shape, dtype=dt)
+    out.real = r
+    out.imag = i
 
   reference_oracle:
     framework: torch
@@ -130,7 +133,7 @@ extreme_inputs:
       shapes: {real: "[8]", imag: "[8]"}
       patterns:
         - {pattern: inject_nan_one_element, target: real}
-    machine_check: {kind: produces_nan, scope: "整张量"}
+    machine_check: {kind: nan_propagates}   # NaN 按位置传播，非整张量
   - case: "imag 含 +inf"
     synthesize:
       shapes: {real: "[1]", imag: "[1]"}

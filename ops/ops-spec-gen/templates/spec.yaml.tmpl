@@ -83,12 +83,15 @@ boundary_conditions:
 
 extreme_inputs:
   # TODO: 至少补充: 含 NaN / 含 +inf / 全零 / fp16 上溢边界（若涉及 fp16）
+  # 注意：期望按 formula 的 IEEE 754 实际传播路径推导，不得照搬其他算子模板；
+  # 单元素注入的位置传播用 nan_propagates；仅全量注入（如 inf-inf、inf*0、all_pos_inf）
+  # 才可声明 produces_nan + scope: "整张量"，且须显式固定影响输出的全部自由输入
   - case: "含 NaN"
     synthesize:
       shapes: { {{first_input}}: "[8]" }
       patterns:
         - {pattern: inject_nan_one_element, target: {{first_input}}}
-    machine_check: {kind: produces_nan, scope: "整张量"}
+    machine_check: {kind: nan_propagates}
 {{extra_extreme_cases}}
 
 determinism:

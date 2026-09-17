@@ -26,7 +26,7 @@ attributes: []             # 非张量参数，含 machine_constraint
 outputs: []                # 用 numpy 子集表达式描述 shape/dtype 推导规则
 semantic_cases: []         # 可选输入/输出的条件存在性；when 只允许 attr.<name>、input.<name>.dtype 或 input.<name>.is_present
 layout_contract: {}        # 可选逻辑布局变体：selector + 已声明 Tensor 的 logical_axes；不替代各 I/O 的 layout
-shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 11-stage 机器校验，见 §D.8）+ notes
+shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 12-stage 机器校验，见 §D.8）+ notes
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
 broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
 math_semantics: {}         # formula + reference_oracle + invariants + composition (FusedComposite 必填)
@@ -327,7 +327,7 @@ math_semantics:
 
 ---
 
-## C. 11-stage L0 校验器（全景）
+## C. 12-stage L0 校验器（全景）
 
 | stage | 名称 | 范围 |
 |---|---|---|

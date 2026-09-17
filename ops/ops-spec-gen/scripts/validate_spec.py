@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""spec.yaml validator — full 11-stage L0 校验.
+"""spec.yaml validator — full 12-stage L0 校验.
 
 Stage 1: jsonschema validation against schemas/op-spec.json.
 Stage 2: category ↔ paradigm consistency, mutual exclusion,
@@ -1674,24 +1674,25 @@ def _load_chip_registry() -> dict:
 def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
     """Lazily import the evaluators package; if it fails, return SKIP stages.
 
-    Returns seven StageResult objects in order: stage 3, 4, 5, 8, 9, 10, 11.
-    Stage 8 / 9 / 10 / 11 may individually SKIP based on env (numpy/framework not
+    Returns eight StageResult objects in order: stage 3, 4, 5, 8, 9, 10, 11, 12.
+    Stage 8 / 9 / 10 / 11 / 12 may individually SKIP based on env (numpy/framework not
     installed) even when the evaluators package itself imports fine.
     """
     try:
         from evaluators import stages as eval_stages
-        from evaluators import formula_eval, oracle_check, formula_oracle_equiv, invariant_exec
+        from evaluators import (formula_eval, oracle_check, formula_oracle_equiv,
+                                invariant_exec, extreme_inputs_check)
     except ImportError as e:
         skip_finding = Finding(
             severity="info",
             rule_id="stage_skipped",
             field_path="<evaluators import>",
-            message=f"evaluators 子包不可用，stage 3-5/8/9/10/11 跳过：{e}",
+            message=f"evaluators 子包不可用，stage 3-5/8/9/10/11/12 跳过：{e}",
             suggested_fix="确认 scripts/evaluators/ 子包文件齐全",
         )
         return tuple(
             StageResult(stage_id=sid, status="SKIP", findings=[skip_finding])
-            for sid in (3, 4, 5, 8, 9, 10, 11)
+            for sid in (3, 4, 5, 8, 9, 10, 11, 12)
         )
 
     pipeline = (
@@ -1702,6 +1703,7 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
         (9, oracle_check.stage_9),
         (10, formula_oracle_equiv.stage_10),
         (11, invariant_exec.stage_11),
+        (12, extreme_inputs_check.stage_12),
     )
     results: list[StageResult] = []
     for stage_id, fn in pipeline:
@@ -1773,14 +1775,14 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 11-stage).")
+    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 12-stage).")
     ap.add_argument("spec_path")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of text")
     ap.add_argument("--strict", action="store_true",
                     help="Exit non-zero on warnings as well as errors")
-    ap.add_argument("--stage", action="append", type=int, choices=range(1, 12),
+    ap.add_argument("--stage", action="append", type=int, choices=range(1, 13),
                     metavar="N",
-                    help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 11 个")
+                    help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 12 个")
     ap.add_argument("--quiet", action="store_true",
                     help="只打 FAIL 的 stage（仍输出 overall 行）")
     args = ap.parse_args()
@@ -1809,10 +1811,10 @@ def main() -> int:
     if selected is None or 2 in selected:
         stages.append(stage_2(spec, registries))
     # stage 3/4/5/8/9/10/11 共享 DSL 子包 lazy import；选中其一即触发
-    dsl_needed = selected is None or selected & {3, 4, 5, 8, 9, 10, 11}
+    dsl_needed = selected is None or selected & {3, 4, 5, 8, 9, 10, 11, 12}
     if dsl_needed:
-        s3, s4, s5, s8, s9, s10, s11 = _run_eval_stages(spec)
-        for sid, sr in zip((3, 4, 5, 8, 9, 10, 11), (s3, s4, s5, s8, s9, s10, s11)):
+        eval_srs = _run_eval_stages(spec)
+        for sid, sr in zip((3, 4, 5, 8, 9, 10, 11, 12), eval_srs):
             if selected is None or sid in selected:
                 stages.append(sr)
     if selected is None or 6 in selected:

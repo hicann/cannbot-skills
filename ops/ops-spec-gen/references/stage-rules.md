@@ -1,4 +1,4 @@
-# 11-stage L0 校验规则详解
+# 12-stage L0 校验规则详解
 
 > 本文件是 `SKILL.md §4` 的详细参考。SKILL.md 只保留 stage 概述表，完整子规则、numpy 子集 API、代码示例在此处。
 
@@ -438,3 +438,39 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 - **invariants 是独立锚点**：不经过 formula 自反，能测出 formula 语义错（SPEC-ORACLE-1 已要求值级、formula 无关）
 - **最小依赖**：复用 stage 8 的 formula 沙箱执行，不依赖框架安装
 - **降级策略**：formula_kind 非 numpy_expr / 无 invariants / numpy 未装 ⇒ SKIP，不阻塞
+
+## stage 12 — extreme_inputs 联合校验（extreme_check）
+
+**解决的问题**：stage 2 仅做 `machine_check.kind` / pattern 白名单静态校验，
+不检查"声明的期望"与"formula 在该 pattern 输入下的实际输出"是否一致。典型逃逸缺陷：
+减法算子照抄加法模板，把 `predict=+inf、label=-inf` 断言为 `produces_nan`——按 IEEE 754
+异号无穷相减应为 `+inf`，仅同号 `inf−inf` 与 `inf×0` 产生 NaN。
+
+**执行流程**：对每条 extreme_inputs[] 条目——
+
+1. 按 `synthesize.shapes + patterns + dtype` 合成输入张量（registry 语义：
+   `single_pos_inf`/`single_neg_inf` 首元素注入、`all_same(v)` 全量填充、
+   `inject_nan_one_element` 首元素 NaN、`all_pos_inf`/`all_neg_inf`/`all_zero`/
+   `subnormal_only`/`min_max_alternate`/`denormal_boundary` 同理）；
+2. `synthesize.attrs` 覆盖 `attributes[].default` 后在 AST sandbox 执行 formula；
+3. 实际输出模式与声明 kind 比对：
+
+| kind | 判定 |
+| --- | --- |
+| produces_nan（scope: 整张量） | 所有输出逐元素 NaN |
+| produces_nan（无 scope） | 至少一个输出位置 NaN |
+| nan_propagates | 至少一个输出位置 NaN |
+| matches_oracle | formula 与 reference_oracle 同输入下 NaN/inf/有限值模式一致（oracle 不可达或条目级 attrs 影响 oracle kwargs 时 INFO 跳过对拍） |
+| 其余 kind | INFO 跳过，不判 FAIL |
+
+**主要 rule_id**：
+- `extreme_check.produces_nan_conflict`（ERR）——声明 NaN 但实际非 NaN/覆盖不全
+- `extreme_check.nan_pattern_divergence` / `extreme_check.inf_pattern_divergence`（ERR）——matches_oracle 条目 formula 与 oracle 模式分歧
+- `extreme_check.nan_propagates_violated`（ERR）
+- `extreme_check.unsynthesizable`（WARN）——pattern 无法机器合成（如无参 all_same）
+- `extreme_check.oracle_skipped_attr_override`（INFO）
+
+**作者侧要求**：特殊值条目必须（a）显式固定影响输出的全部自由输入（含属性与标量输入，
+用 `attrs:` + `all_same(v)`）；（b）期望按 IEEE 754 语义与 formula 真实传播路径推导，
+不得照搬其他算子模板；（c）位置传播语义用 `nan_propagates`，仅在全量注入时声明
+`produces_nan + scope: 整张量`。

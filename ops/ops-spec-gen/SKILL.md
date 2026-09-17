@@ -5,7 +5,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 
 # 算子 spec.yaml 生成与校验
 
-为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 11-stage L0 校验：
+为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 12-stage L0 校验：
 - **stage 1** schema_static — JSON Schema 字段静态校验
 - **stage 2** category_paradigm_consistency — category↔paradigm 一致性 + paradigm_groups + paradigm 内部约束
 - **stage 3** shape_closure — numpy_expr 求值 `outputs[].shape_rule`（含 `data_dependent` 分流）
@@ -17,6 +17,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 - **stage 9** oracle_reachable — 真 import framework + getattr 链找 api + 占位符校验
 - **stage 10** formula_oracle_equiv — 在含特殊值（NaN/inf/大数/带符号零+0/-0）输入上比对 formula 与 oracle 输出，捕获公式形式差异
 - **stage 11** invariant_exec — 在生成输入上执行 invariants[] 校验 formula 输出，无需 oracle，是 stage 10 SKIP 时的替代机器校验
+- **stage 12** extreme_check — extreme_inputs × formula × machine_check 联合校验：按 pattern 合成输入执行 formula，核对声明期望（produces_nan/nan_propagates/matches_oracle）与实际 NaN/±inf 模式一致，拦截"异号无穷相减误判 NaN"类的特殊值断言错误
 
 ## 1. 何时使用
 
@@ -34,7 +35,7 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 | 入参（生成） | 算子名、category、paradigms[]、inputs（带 dtype_set）、outputs |
 | 出参（生成） | `<output_dir>/spec.yaml`（含 TODO 占位符，需手填 formula / oracle.api / supported_combinations / boundary cases） |
 | 入参（校验） | spec.yaml 路径 |
-| 出参（校验） | 11-stage findings；返回码 0=PASS / 1=FAIL（含 internal_error）/ 2=YAML 解析错；`--strict` 时 warning 也退 1 |
+| 出参（校验） | 12-stage findings；返回码 0=PASS / 1=FAIL（含 internal_error）/ 2=YAML 解析错；`--strict` 时 warning 也退 1 |
 
 ## 3. 生成 spec.yaml
 
@@ -149,6 +150,7 @@ python3 scripts/validate_spec.py path/to/spec.yaml --stage 1 --stage 2  # 仅跑
 | 9 | oracle_reachable | 真 import framework + getattr 链 + 占位符校验 |
 | 10 | formula_oracle_equiv | 含特殊值（NaN/inf/大数/带符号零）输入上 formula vs oracle 值等价比对 |
 | 11 | invariant_exec | 在生成输入上执行 invariants[] 校验 formula 输出（无需 oracle） |
+| 12 | extreme_check | extreme_inputs 条目按 pattern 合成输入执行 formula，machine_check 声明与实际 NaN/±inf 模式联合校验 |
 
 完整子规则表、numpy 子集 API 列表、代码示例见 [references/stage-rules.md](references/stage-rules.md)。
 
@@ -159,7 +161,7 @@ ops/ops-spec-gen/
 ├── SKILL.md                              # 本文件
 ├── references/
 │   ├── spec-cheatsheet.md                # 字段速查（按需阅读）
-│   ├── stage-rules.md                    # 11-stage 完整子规则 + numpy 子集 API
+│   ├── stage-rules.md                    # 12-stage 完整子规则 + numpy 子集 API
 │   ├── usage-scenarios.md                # 应用场景（场景二 + 场景五）
 │   └── error-codes.md                    # rule_id 全表（自动生成）
 ├── examples/                             # 11 个 PASS 校验的范例（教学 + CI fixture）
@@ -193,7 +195,7 @@ ops/ops-spec-gen/
 ├── templates/spec.yaml.tmpl              # spec.yaml 起手模板
 ├── scripts/
 │   ├── generate_spec.py                  # 生成器（交互/非交互）
-│   ├── validate_spec.py                  # 校验器主入口（完整 11 stage）
+│   ├── validate_spec.py                  # 校验器主入口（完整 12 stage）
 │   ├── check_registry_schema_sync.py     # registry↔schema 同步检查
 │   ├── dump_rule_ids.py                  # rule_id 全表生成
 │   └── evaluators/                       # numpy 子集 AST 求值器（stage 3-5/8/9/10 实现）
@@ -326,7 +328,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 - **上游**（提供）：Designer Agent 接收的算子需求 / REQUIREMENTS.md
 - **下游**（消费）：
-  - 11-stage L0 校验器以本 skill 输出的 spec.yaml 为输入
+  - 12-stage L0 校验器以本 skill 输出的 spec.yaml 为输入
   - `ascendc-st-design` skill 用 `boundary_conditions / extreme_inputs` 作为测试用例来源
   - Developer Agent 按 `numerical_stability.techniques.anti_pattern_id` 触发反模式审计
 
@@ -342,7 +344,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 | 场景 | 描述 |
 |------|------|
-| 从 REQUIREMENTS.md 生成 spec | 读取需求文档，调用生成器，手填 TODO，跑 11-stage 校验 |
+| 从 REQUIREMENTS.md 生成 spec | 读取需求文档，调用生成器，手填 TODO，跑 12-stage 校验 |
 | spec 独立评审 | 17 条 SPEC-\* 条款逐项对照 spec ↔ REQUIREMENTS，输出评审报告 |
 
 详见 [references/usage-scenarios.md](references/usage-scenarios.md)。
