@@ -40,14 +40,25 @@ L1 NZ Layout 中 C0 维度按字节宽度对齐（典型 32 字节 = 1 个 C0 da
 
 ### 影响
 
-LoadData2DParamsV2 / LoadData2DMxParams 中以下字段以"datablock = C0 字节单元 = 32 字节"为单位，而不是元素单位：
+**两套参数结构体的字段单位不同，不要混用**（MX 路径下 `loadDataParams`（`LoadData2DParamsV2`）与 `loadMxDataParams`（`LoadData2DMxParams`）并列传入）：
+
+**`LoadData2DParamsV2`**（官方接口 `LoadData_2D_V2`）：
 
 | 字段 | 单位 | 含义 |
 |------|------|------|
-| `kStep` | datablock（32 字节） | K 方向步进，等于 `K 维元素数 / C0_elements_for_dtype` |
-| `kStartPosition` | datablock（32 字节） | K 方向起始偏移，等于 `K_offset / C0_elements_for_dtype` |
-| `mStep` | M-fractal（16 行，与 dtype 无关） | M 方向步进 |
-| `srcStride` / `dstStride` | 16 字节（L1 / L0 fractal stride） | 与 dtype 无关 |
+| `mStartPosition` / `mStep` | **16 个元素**（与 dtype 无关） | M 轴起始位置 / 搬运长度；取值范围 [0, 255]，`mStep=0` 为 NOP |
+| `kStartPosition` / `kStep` | **32 字节** | K 轴起始位置 / 搬运长度，等于 `K 维元素数 / C0_elements_for_dtype`；取值范围 [0, 255]，`kStep=0` 为 NOP |
+| `srcStride` / `dstStride` | **512 字节**（= 一个数据分形，与 dtype 无关） | K 方向相邻分形起始地址的间隔。**注意不是 32 字节的 C0 单位** |
+
+**`LoadData2DMxParams`**（官方接口 `LoadData_2D_MX`，仅 MX 量化路径）：
+
+| 字段 | 单位 | 含义 |
+|------|------|------|
+| `xStartPosition` / `xStep` | **1 个分形 = 32 字节** | X（M）轴起始位置 / 搬运长度；取值范围 [0, 255] |
+| `yStartPosition` / `yStep` | **32 字节** | Y（K）轴起始位置 / 搬运长度；`yStep=0` 为 NOP |
+| `srcStride` / `dstStride` | **32 字节** | X 方向相邻分形起始地址的间隔 |
+
+> **为什么 stride 单位是 512 字节**：数据分形大小恒为 512 字节、与 dtype 无关（b16 为 16×16、b8 为 16×32、b4 为 16×64、b32 为 16×8，元素宽度不同但乘积都是 512B），故 `LoadData2DParamsV2` 的 stride 以 512 字节为单位；MX 路径则以 32 字节分形为单位。
 
 ### 典型踩坑
 

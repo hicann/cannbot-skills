@@ -156,6 +156,51 @@
       "expected_output": "应说明 TBuf 直接分配/释放缓冲区、TQue 通过队列化管理多级 Buffer 并配合 EnQue/DeQue 配对实现流水线，以及双缓冲在搬运-计算重叠中的原理。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 11,
+      "title": "LoadData2DParamsV2 的 mStep 单位（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在 Ascend C 算子里用 LoadData 做 2D 矩阵装载，设置 mStep=2 想搬运 2 个元素，但搬运结果长度不对。LoadData2DParamsV2 的 mStep 到底按什么单位算？",
+      "expected_output": "回复应指出 LoadData2DParamsV2 的 mStep 单位是 16 个元素（与 dtype 无关，不是 1 个元素也不是字节），故 mStep=2 表示搬运 32 个元素。mStep 取值范围 [0,255]，且 mStep=0 表示不执行搬运（NOP）。应给出正确换算公式：`mStep = ceil(M / 16)`（M 轴元素数 ÷ 16）；当数据类型为 b32 且开启 `ifTranspose` 时，`kStep` 须为 2 的倍数。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 12,
+      "title": "LoadData2DParamsV2 的 srcStride/dstStride 单位（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "算子迁移到 950 后，我给 LoadData 的 srcStride 填了 16，以为是 16 字节间隔，结果装载地址全错位。LoadData2DParamsV2 的 srcStride 单位到底是多少？",
+      "expected_output": "回复应指出 LoadData2DParamsV2 的 srcStride/dstStride 单位是 512 字节（一个数据分形，与 dtype 无关），不是 16 字节。应说明数据分形大小恒为 512 字节（b16 为 16×16、b8 为 16×32、b4 为 16×64、b32 为 16×8），因此该单位与 dtype 无关。可提醒这与 MX 量化路径的 LoadData2DMxParams 的 32 字节单位不同，不要混用；官方依据见 asc-devkit 文档 LoadData_2D_V2.md（示例：srcStride=5 表示间隔 5×512=2560 字节）。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 13,
+      "title": "LoadData2DMxParams 的参数名与单位（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在写 MX 量化 matmul，照搬 LoadData2DParamsV2 的写法给 loadMxDataParams 填了 mStep 和 kStep，编译报错字段不存在。LoadData2DMxParams 的字段到底叫什么、单位是什么？",
+      "expected_output": "回复应指出 LoadData2DMxParams 的字段是 xStartPosition / xStep / yStartPosition / yStep（不是 mStep / kStep）——LoadData2DMxParams 是 MX 量化矩阵搬运（Ascend 950 专属）的独立结构体。应说明其单位：xStartPosition / xStep 以 1 个分形（32 字节）为单位，yStartPosition / yStep 以 32 字节为单位，srcStride / dstStride 以 32 字节为单位。应给出正确做法：MX 场景必须使用 `LoadData_2D_MX` 接口与 `LoadData2DMxParams` 结构体，不要照搬 `LoadData_2D_V2` 的字段名；`xStep=0` 或 `yStep=0` 表示 NOP（不执行搬运）。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-api-best-practices"
