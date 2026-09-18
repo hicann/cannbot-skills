@@ -26,6 +26,7 @@ WORKTREES_DIR = RUNTIME_ROOT / "worktrees"
 
 CLASSIFY_CONFIG = CONFIG_DIR / "classify_config.yaml"
 OPERATOR_OWNERS_CONFIG = CONFIG_DIR / "operator_owners.yaml"
+SETUP_STATE = CONFIG_DIR / "setup-state.json"
 ISSUES_DATA = DATA_DIR / "issues.json"
 GROUPS_DATA = DATA_DIR / "groups.json"
 LAST_CHECK_STATE = DATA_DIR / "last_check.json"

@@ -247,6 +247,30 @@
       "prompt": "只模拟普通问题、无新追问：A无回复/负责人/PR；B仅assign自己；C仅assign他人；D只有同作者有效PR；E只有他人有效PR；F已assign且有同作者有效PR、无文字回复；G已assign且有他人有效PR、无文字回复；H已assign、有有效PR及实质文字回复；I的负责人就是提出者，但有效PR由其他人提交，尚无文字回复。说明attention和动作。",
       "expected_output": "A需首响，可能进入auto-assign；B自提no_attention；C首响；D need_attention仅补同作者assign；E need_attention先概述PR做法首响，再补PR作者assign；F no_attention；G need_attention，首响简述PR方案、保留负责人；H no_attention；I满足负责人同作者条件，仍为自提no_attention，不因PR作者不同补首响。PR作者分配在response阶段完成，不受auto-assign关闭限制；已有负责人不覆盖。",
       "files": []
+    },
+    {
+      "id": 24,
+      "title": "首次配置兼容缺失文件与安装器预置模板",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 120000,
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "请使用 gitcode-issue-handler，只模拟配置引导，不执行命令或访问 API。A 仓由旧安装器安装，完全没有 .cannbot/gitcode-issue-handler；B 仓由新安装器生成了模板，repo 已自动填好，但用户还没配置；C 仓有用户自定义责任范围；D 仓上次明确选择保留默认设置。现在只要配置，不处理 Issue，也没有 Token。分别说明如何进入引导、需要问哪些常用参数、怎样避免下次重复问；如果用户没有回答，或以后主动要求调整，分别怎样处理？",
+      "expected_output": "只配置不要求 Token/CANN，不拉取 Issue。A 补齐缺失配置，B 仍需引导，不能以文件或 repo 存在认定用户已配置；C 沿用自定义设置，D 不重复询问。先展示责任范围与两开关，再询问是否调整或保留；模板范围为公共组件及 A5/arch35，开关默认均 false，auto-assign 不能单独开启。常用项包括 repo、责任范围和响应方式；只编辑用户选择的字段，保留其他值和注释。通过 setup_config.py 准备和校验，仅收到明确选择后 --complete 或 --keep，未回答保持 pending；主动调整用 --reconfigure。配置状态存于目标仓配置目录，安装器版本不参与判断。",
+      "files": []
+    },
+    {
+      "id": 25,
+      "title": "只补文件与配置规则咨询不扩大执行范围",
+      "config": {
+        "eval_mode": "text",
+        "max_tokens": 120000,
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "请使用 gitcode-issue-handler，仅解释两个请求的处理方式，不要真的执行：一是用户问‘首次使用会不会创建配置，我已经配置过还会问吗’，二是用户要求‘只补齐当前仓库缺失的配置文件，不改参数，不做问答，不处理 Issue’。这两种情况分别应该做什么，是否需要 Token、配置问卷和完成标记？",
+      "expected_output": "第一个是 policy_query，只解释首次初始化与已有设置复用，不预检环境、不建目录、不启动问卷。第二个属于明确限定的补文件请求，调用 init_config.py --repository-root 指向目标仓，仅补缺失并保留已有设置，需要 Python 3.10+ 和 PyYAML，不要求 Token 或 CANN、不访问 API、不处理 Issue。两种都不记录配置完成；仅创建模板不代表用户确认，以后首次真实使用仍按引导状态判断。",
+      "files": []
     }
   ],
   "skill_name": "gitcode-issue-handler"

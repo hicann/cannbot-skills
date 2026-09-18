@@ -2,12 +2,12 @@
 
 ## 读取时机
 
-真实执行在步骤 -1 与 [runtime-state.md](runtime-state.md) 一起读取本文件；能力文档仅在对应操作前读取；`policy_query` 不读取执行 reference。能力检查完成前不得执行依赖该能力的 API、Git、临时落盘或提交操作。
+真实处理在步骤 -1 与 [runtime-state.md](runtime-state.md) 一起读取本文件；仅配置时读 [configuration-setup.md](configuration-setup.md)，需要推导目标时再读本文相应部分。能力文档仅在对应操作前读取；`policy_query` 不读取执行 reference。能力检查完成前不得执行依赖该能力的 API、Git、临时落盘或提交操作。
 
 ## 安装与运行目录
 
 - `gitcode-issue-handler` 与 `gitcode-toolkit` 必须安装到同一 `skills/` 根目录；不要另建 toolkit 副本。按当前 Skill 绝对路径得到 `ISSUE_HANDLER_SKILL_ROOT`，并令 `GITCODE_TOOLKIT_ROOT="$(dirname "$ISSUE_HANDLER_SKILL_ROOT")/gitcode-toolkit"`；后者不存在即报告安装不完整。
-- Python、Git、临时目录和 git author 都是按操作触发的能力，不是 Skill 加载条件；首次运行 Python handler 脚本时还要按 `requirements.txt` 验证可导入 `requests` 与 `yaml`（PyYAML）。
+- Python、Git、临时目录和 git author 都是按操作触发的能力，不是 Skill 加载条件；仅运行本地配置脚本时需要 Python 3.10+ 与 `yaml`（PyYAML），首次运行依赖 API 的 Python handler 脚本时再按 `requirements.txt` 验证可导入 `requests`。
 - 配置模板来自本 Skill 的 `assets/`，运行配置只写目标仓库；不改 Skill 安装目录、仓库级 `AGENTS.md`/`CLAUDE.md`，不写 Token。配置和运行树按需创建，空 `repo` 在目标确认后保存。
 - 进入仓库操作后始终以已解析仓库根为命令工作目录。依赖 Git 的操作先完成 Git 检查，写产物前确认父目录可写，再非覆盖地创建 `.cannbot/gitcode-issue-handler/{config,data,reports,logs,cache,images,repro,worktrees,tmp}`。仅在 `.git/info/exclude` 精确查重并追加 `/.cannbot/gitcode-issue-handler/`，不改 `.gitignore`。
 
@@ -32,7 +32,9 @@ python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/resolve_repository.py" --repository-r
 
 ## 配置合并与默认值
 
-首次真实处理（非 Marketplace/install-helper 自动实例化时）运行 `init_config.py --repository-root .`；只创建缺失文件，旧仓根配置优先迁移且原文件保留。除上节 `repo` 冲突须确认外，默认值、仓库配置、命令行参数按此顺序覆盖：字典逐项合并，列表和显式空容器整体替换；默认文件缺失用模板，显式指定文件缺失或格式错误报错。责任人映射缺失/模板不阻塞初始化，但识别出算子后须按 `issue-routing.md` 请求责任人或由用户决定 `direct`，禁止静默自修。
+进入已确定的目标仓库后，按 [configuration-setup.md](configuration-setup.md) 调用 `setup_config.py --repository-root .`。它复用现有初始化逻辑补齐缺失文件，再区分模板、已有用户配置和已完成引导；Marketplace/install-helper 已创建配置时也执行该检查。只在首次需要引导或用户主动要求时询问常用参数，已明确选择保留设置的不重复询问；原缺 Token 等待点优先于配置问卷。旧仓根配置优先迁移且原文件保留。
+
+除上节 `repo` 冲突须确认外，默认值、仓库配置、命令行参数按此顺序覆盖：字典逐项合并，列表和显式空容器整体替换；默认文件缺失用模板，显式指定文件缺失或格式错误报错。责任人映射缺失/模板不阻塞初始化，但识别出算子后须按 `issue-routing.md` 请求责任人或由用户决定 `direct`，禁止静默自修。
 
 默认交付 `pr`，基线/目标分支 `master`。目标 remote 优先匹配 Issue URL 或 canonical `repo`；`origin` 仅在匹配或仅有一个 remote 时使用。
 

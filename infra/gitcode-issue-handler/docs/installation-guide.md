@@ -1,6 +1,6 @@
 # GitCode Issue Handler 安装与配置指南
 
-本文档说明 `gitcode-issue-handler` 的安装依赖、常用触发方式、可选批量配置、更新和卸载，并提供可直接复制的使用示例。仓库级安装方式总览见 [CANNBot Skills 安装指南](../../../docs/installation-guide.md)，所有 Skill 的使用总览见 [CANNBot Skills 使用样例](../../../docs/skills-usage.md)。
+本文档说明 `gitcode-issue-handler` 的安装依赖、常用触发方式、可选批量配置、更新和卸载，并提供可直接复制的使用示例。初次使用可先看 [快速上手](../README.md)；两份文档使用相同的首选安装命令，本文补充全局安装、备选方式和完整配置。仓库级安装方式总览见 [CANNBot Skills 安装指南](../../../docs/installation-guide.md)，所有 Skill 的使用总览见 [CANNBot Skills 使用样例](../../../docs/skills-usage.md)。
 
 ## 按客户端安装
 
@@ -11,10 +11,12 @@ Claude Code 的 `infra-skills` 包已包含两项；OpenCode 和 Codex 命令则
 
 | 场景/客户端 | 首选方式 | 首选安装命令 |
 |---|---|---|
-| Claude Code | Plugin Marketplace | `/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`，再执行 `/plugin install infra-skills@cannbot` |
+| Claude Code | Plugin Marketplace | `/plugin marketplace add https://gitcode.com/cann/cannbot-skills.git`，再执行 `/plugin install infra-skills@cannbot` 和 `/reload-plugins` |
 | OpenCode | install-helper | `npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit --tool opencode --level project` |
-| Codex | skills CLI | `npx skills add https://gitcode.com/cann/cannbot-skills.git --skill gitcode-issue-handler --skill gitcode-toolkit --agent codex` |
+| Codex | install-helper | `npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit --tool codex --level project` |
 | 本地已有源码仓 | 让 Agent 安装 | 在 `cannbot-skills` 仓库中告诉 Agent 目标目录、客户端和 project/global 级别 |
+
+安装后可在目标仓库中让 Agent 初始化并引导配置，也可以在首次处理 Issue 时完成。安装器是否预先创建了 `.cannbot/gitcode-issue-handler/config/` 不影响这一步；已有自定义配置会保留。详见[配置初始化方式](#配置初始化方式)。
 
 ### Claude Code
 
@@ -67,7 +69,20 @@ npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit \
 
 ### Codex
 
-推荐使用 [skills CLI](https://github.com/vercel-labs/skills)；默认安装到当前项目，增加 `--global` 后可供该用户的所有项目使用：
+与 OpenCode 一样，推荐使用 install-helper，要求 Node.js 20+：
+
+```bash
+# 目标仓项目级（写入 <target-repository>/.agents/skills/）
+cd /path/to/target-repository
+npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit \
+  --tool codex --level project
+
+# 当前用户全局（写入 ~/.agents/skills/，可在任意目录执行）
+npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit \
+  --tool codex --level global
+```
+
+也可以使用 [skills CLI](https://github.com/vercel-labs/skills) 作为备选；默认安装到当前项目，增加 `--global` 后可供该用户的所有项目使用：
 
 ```bash
 # 目标仓项目级
@@ -88,16 +103,20 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git \
 例如：
 
 ```text
-请把当前 cannbot-skills 仓库中的 gitcode-issue-handler 和 gitcode-toolkit
-以 project 级安装到 /path/to/target-repository，目标客户端是 Codex，
-使用本仓最新源码并完成必要的项目配置。
+请把当前 cannbot-skills 仓库中的 gitcode-issue-handler 和 gitcode-toolkit，以 project 级安装到 /path/to/target-repository，目标客户端是 Codex。使用本仓最新源码，保留已有配置，并引导我确认处理范围和自动响应方式；本次不处理 Issue。
 ```
 
-将目标目录、客户端名称和安装级别替换为实际值。Agent 应使用当前仓库内容完成安装；项目级安装还应初始化目标仓库的 `.cannbot/gitcode-issue-handler/config/`，并保留已有配置。
+将目标目录、客户端名称和安装级别替换为实际值。Agent 应使用当前仓库内容完成安装；项目级安装还应补齐目标仓库配置，并按 [首次配置引导](../references/configuration-setup.md) 询问常用设置。全局安装只安装 Skill，配置在各目标仓库中分别初始化。
 
 ## Python 依赖
 
-脚本需要 Python 3.10+、`requests` 和 PyYAML。无法导入 `requests` 或 `yaml` 时，使用完整仓库 checkout 执行：
+脚本需要 Python 3.10+、`requests` 和 PyYAML。无法导入 `requests` 或 `yaml` 时，可按快速上手中的命令直接安装：
+
+```bash
+python3 -m pip install "requests>=2.28.0" "PyYAML>=6.0"
+```
+
+本地已有完整 `cannbot-skills` 源码仓时，也可以从依赖文件安装同样的依赖：
 
 ```bash
 python3 -m pip install -r \
@@ -105,6 +124,7 @@ python3 -m pip install -r \
 ```
 
 安装机制不会保存 `GITCODE_TOKEN`，也不会替换目标仓库的 `AGENTS.md` / `CLAUDE.md`。
+仅初始化或调整本地配置时需要 Python 3.10+ 和 PyYAML，不要求 Token 或 CANN 环境，也不访问 GitCode。`requests` 和 Token 在实际访问 API 前检查。
 运行时不在启动阶段统一检查全部环境，而是在相关操作前按需检查：首次调用 GitCode API 前检查 API 客户端和 Token；首次同步仓库、读取 Git 历史或创建 worktree 前检查 Git、目标仓库、 remote 和所需工作目录；仅在准备 commit 前检查 git author；仅当代码任务确实需要编译、运行、复现或测试时，才在这些操作前检查 CANN 版本与环境一致性。纯规则咨询不做环境预检；某项缺失只阻塞依赖它的操作，不阻塞无关分析。Token 只在当前会话使用。
 
 ## 使用示例
@@ -135,6 +155,7 @@ python3 -m pip install -r \
 
 | 场景 | 任务描述 |
 |---|---|
+| 只初始化并配置，不处理 Issue | `为当前仓库初始化并配置 gitcode-issue-handler，帮我确认处理范围和自动响应方式，配置完成后先不要处理 Issue` |
 | 显式单 Issue 完整处理 | `完整处理 https://gitcode.com/cann/ops-math/issues/1511` |
 | 只回复或答疑，不修改代码 | `只回复 https://gitcode.com/cann/ops-math/issues/456，不改代码` |
 | 当前仓库批量分诊和处理 | `分诊并处理当前仓库需要关注的 Issue` |
@@ -149,28 +170,35 @@ python3 -m pip install -r \
 
 ### 配置初始化方式
 
-- 使用 install-helper **项目级安装**包含 `gitcode-issue-handler` 时，安装成功后会自动将两个模板初始化到目标仓库的 `.cannbot/gitcode-issue-handler/config/`。已有配置和仓根旧配置均会保留，不会被模板覆盖。
-- Claude Marketplace 和第三方 `npx skills` 没有项目安装钩子；首次在目标仓库真实运行 handler 时，Skill 会自动调用同一初始化脚本并只创建缺失配置。如果需要在首次运行前预先编辑开关，可手工执行：
+- 支持安装后初始化的 install-helper 在**项目级安装**包含 `gitcode-issue-handler` 时，会自动准备两个配置文件，保留已有配置和仓根旧配置；不支持该功能的安装器由 Skill 在首次使用时补齐。
+- Claude Marketplace 和第三方 `npx skills` 没有 handler 的项目配置初始化钩子；进入目标仓库后由 Skill 补齐缺失配置。
+- **全局安装**没有绑定的目标仓库，配置在各仓库首次使用时分别初始化，不写入全局安装目录。
 
-  ```bash
-  python /path/to/gitcode-issue-handler/scripts/init_config.py \
-    --repository-root "$PWD"
-  ```
+无论配置文件是在安装时还是首次运行时创建，Skill 都会区分“只有模板”和“已有用户设置”。只有模板时，Agent 展示当前责任范围和自动开关，询问是否调整；已有自定义或仓根旧配置直接沿用，不强制重新配置。用户明确完成配置或选择保留当前设置后，记录在目标仓库的 `.cannbot/gitcode-issue-handler/config/setup-state.json`，以后不重复询问。未回答不记作确认；用户仍可随时要求修改配置。
 
-- **全局安装**没有绑定的目标仓库，因此安装阶段不会初始化项目配置；进入目标仓库后首次真实运行 handler 时自动初始化，也可提前执行上面的命令。
+**让 Agent 初始化并配置：**
 
-批量模式以当前启动目录为工作仓库。流程优先读取已配置的 `repo`，为空时再推导；分类器可通过 `classify_issues.py --repo owner/repo` 显式指定，获取器则接收由仓库标识派生出的 `fetch_issues.py --url https://gitcode.com/owner/repo`。因此 `classify_config.yaml` 不是安装前置条件。希望固定批量策略时，可从已加载 Skill 的 `assets/` 复制模板到统一配置目录：
+在目标仓库中启动 Agent，输入：
+
+```text
+请为当前仓库初始化并配置 gitcode-issue-handler，帮我确认处理范围和自动响应方式，配置完成后先不要处理 Issue。
+```
+
+常用项为 `repo`、`responsibility`、`auto-response` 和 `auto-assign`。目标仓库能唯一推导时自动填写；责任范围用自然语言说明。模板默认处理公共组件和 A5/arch35 相关问题，其他芯片的算子问题仅列举，不能直接理解为处理全部 Issue。两个自动开关默认关闭；开启 `auto-assign` 要求同时开启 `auto-response`，含义与授权边界见 [自动响应](../references/automation.md)。仅配置不拉取或处理 Issue，真实处理中的缺 Token 等待点仍按原规则优先执行。
+
+**手工补齐文件（可选）：**
 
 ```bash
-# 配置和运行数据应写入目标仓
 cd /path/to/target-repository
-HANDLER_ROOT=/path/to/cannbot-skills/infra/gitcode-issue-handler
-mkdir -p .cannbot/gitcode-issue-handler/config
-cp -n "$HANDLER_ROOT/assets/classify_config.yaml.template" \
-  .cannbot/gitcode-issue-handler/config/classify_config.yaml
-cp -n "$HANDLER_ROOT/assets/operator_owners.yaml.template" \
-  .cannbot/gitcode-issue-handler/config/operator_owners.yaml
+python3 /path/to/gitcode-issue-handler/scripts/init_config.py \
+  --repository-root "$PWD"
 ```
+
+将 `/path/to/gitcode-issue-handler` 替换为已安装 Skill 的实际目录；完整源码仓中的路径是 `/path/to/cannbot-skills/infra/gitcode-issue-handler`。目标始终是要处理 Issue 的仓库，不能因为脚本位于源码仓或全局安装目录，就把配置写到那里。
+
+初始化脚本只创建缺失配置，重复执行不会覆盖已有文件；发现仓根旧配置时会沿用其设置并保留原文件。它不记录用户的配置选择；手工生成模板后，首次使用时仍会提供引导。若用户只要求“补齐文件”，Agent 执行此命令即可，不自行调整参数。交互引导的脚本入口和状态规则见 [首次配置引导](../references/configuration-setup.md)。
+
+批量模式以当前启动目录为工作仓库。流程优先读取已配置的 `repo`，为空时再推导；分类器可通过 `classify_issues.py --repo owner/repo` 显式指定，获取器则接收由仓库标识派生出的 `fetch_issues.py --url https://gitcode.com/owner/repo`。因此 `classify_config.yaml` 不是安装前置条件。希望固定批量策略时，先用上述方式初始化，再编辑对应配置：
 
 - `classify_config.yaml`：可固定 `repo`、增量状态、follow-up watch、缓存和自动闭环参数；
 - `classify_config.yaml` 的 `responsibility`：`handle` 正常处理、`list-only` 仅列举一行、`ignore` 忽略；Agent 核查源码证据后交给分类脚本路由。旧 `responsibility_scope.md` 不再读取。
@@ -189,7 +217,7 @@ cp -n "$HANDLER_ROOT/assets/operator_owners.yaml.template" \
 
 ## 更新与卸载
 
-使用与安装时相同的客户端和级别。
+使用与安装时相同的安装工具、客户端和级别；已有安装继续用原工具维护，不需要为了采用本文的首选方式重新安装。
 
 ### Claude Code
 
@@ -223,6 +251,23 @@ npx @cannbot-ai/install-helper uninstall gitcode-issue-handler gitcode-toolkit \
 全局安装时把两条命令的 `project` 同时改为 `global`，可在任意目录执行。卸载只删除对应的 Skill。
 
 ### Codex
+
+通过 install-helper 安装时：
+
+```bash
+# 更新
+cd /path/to/target-repository
+npx @cannbot-ai/install-helper install gitcode-issue-handler gitcode-toolkit \
+  --tool codex --level project
+
+# 卸载
+npx @cannbot-ai/install-helper uninstall gitcode-issue-handler gitcode-toolkit \
+  --tool codex --level project
+```
+
+全局安装时把 `project` 改为 `global`。
+
+如果原来使用的是 [skills CLI](https://github.com/vercel-labs/skills#skills-update)，则继续用它更新和卸载：
 
 ```bash
 # 目标仓项目级（remove 不加 --global 时默认为项目级）

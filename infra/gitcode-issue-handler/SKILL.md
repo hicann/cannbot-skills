@@ -3,7 +3,7 @@ name: gitcode-issue-handler
 description: >-
   处理 GitCode 单个或批量 Issue：分诊、首响答疑、算子责任人转交、再次回复跟踪、
   环境核对、复现修复、PR 交付和结果报告。支持仅回复、不改代码，以及已答复咨询的自动闭环。
-  触发：用户要求处理、回复、跟进仓库 Issue，或从 Issue 修复并创建 PR。
+  触发：用户要求处理、回复、跟进仓库 Issue，从 Issue 修复并创建 PR，或初始化、调整本 Skill 的项目配置。
 license: CANN-2.0
 ---
 
@@ -11,7 +11,8 @@ license: CANN-2.0
 
 ## 入口与边界
 
-- **步骤 -1：区分 policy_query 与真实执行**。只询问规则时直接回答，不建运行树、不检查 Token/Git/CANN、不访问 API。真实处理才加载下表对应路径。
+- **步骤 -1：区分 policy_query 与真实执行**。只询问规则时直接回答，不建运行树、不检查 Token/Git/CANN、不访问 API。实际处理或配置时才加载下表对应路径。
+- `configure`：用户明确要求初始化或调整项目配置，按 [configuration-setup.md](references/configuration-setup.md) 补齐文件并引导常用设置，不拉取或处理 Issue；首次真实使用也检查配置引导状态，不以目录存在代替用户已配置。
 - `single`：显式 Issue URL，只处理该项；不受批量时间窗或原 `no_attention` 限制，但仍先过滤核心 closed，再核查责任范围、已有解决证据和重复动作。
 - `batch`：当前目标仓库批量分诊，只推进核心 open 且责任范围内的 `need_attention`。
 - 批量响应先判断内容性质：纯路线图/规划汇总不进入响应。现任负责人或任一有效关联 PR 作者与 Issue 作者同账号，即按自提处理；需求与缺陷使用相同判定。已有实质回复和责任人、无新跟进时也不纳入本轮，不为历史状态/watch 补录重新激活。
@@ -42,6 +43,7 @@ license: CANN-2.0
 
 | 当前动作 | 读取内容 |
 | --- | --- |
+| 首次配置、主动调整常用参数 | [configuration-setup.md](references/configuration-setup.md)，仅本地初始化与引导 |
 | 初始化、目标选择 | [runtime-setup.md](references/runtime-setup.md)、[runtime-state.md](references/runtime-state.md)；schema 仅在补对应字段时读取 |
 | 首响自动发送、候选临时指派或人工审核 | [automation.md](references/automation.md)；首次真实处理读取 |
 | 首个 API/Git/tmp/author 操作或能力故障 | [runtime-capability-checks.md](references/runtime-capability-checks.md) 中相应检查点 |
