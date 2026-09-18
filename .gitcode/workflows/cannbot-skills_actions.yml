@@ -72,7 +72,7 @@ stages:
     - type: auto
     fail-fast: false
   stage3:
-    name: "Security&content Scan"
+    name: Security_content_Scan
     jobs:
       # 安全门禁先于任何会执行 PR 代码的 UT/ST。这里只运行 Runner 上已部署的
       # 受信任脚本，由 RDV 检出 PR 合并树并执行 Sift 基础扫描。
@@ -162,7 +162,7 @@ stages:
     fail-fast: false
   # ST 动态评测单独成 stage，最后执行（stage 串行保证其晚于 stage3 的三道门禁与 UT）。
   stage4:
-    name: "Skill Test"
+    name: Skill_Test
     jobs:
       JOB_st_test:
         name: ST_test
