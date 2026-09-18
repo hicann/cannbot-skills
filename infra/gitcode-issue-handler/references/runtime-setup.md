@@ -1,144 +1,50 @@
 # 运行时：初始化、路径与基线同步
 
-## 目录
-
-1. [读取时机](#读取时机)
-2. [前置条件](#前置条件)
-3. [旧路径兼容](#旧路径兼容)
-4. [Skill 路径](#skill-路径)
-5. [目标仓库解析](#目标仓库解析)
-6. [默认配置](#默认配置)
-7. [步骤 -1：请求分流与运行能力检查](#步骤--1请求分流与运行能力检查)
-8. [步骤 0：安全获取基线](#步骤-0安全获取基线)
-9. [发布目标](#发布目标)
-10. [输出](#输出)
-
 ## 读取时机
 
-仅真实执行请求在步骤 -1 与 `runtime-state.md`、`runtime-capability-checks.md` 一起完整
-读取本文件；`policy_query` 不得读取这些执行 reference。完成对应能力检查前不要执行
-依赖该能力的 API、Git、临时落盘或提交操作。
+真实执行在步骤 -1 与 [runtime-state.md](runtime-state.md) 一起读取本文件；能力文档仅在对应操作前读取；`policy_query` 不读取执行 reference。能力检查完成前不得执行依赖该能力的 API、Git、临时落盘或提交操作。
 
-## 前置条件
+## 安装与运行目录
 
-- `gitcode-issue-handler` 与 `gitcode-toolkit` 已通过 CANNBot Marketplace、
-  `install-helper` 或 `npx skills` 安装到同一 `skills/` 根目录；不要另建 toolkit 副本。
-- 进入仓库操作后，始终把已解析的目标仓库根目录作为命令工作目录。
-- Python、Git、临时目录和 git author 都是 handler 按操作触发的能力，不是 Skill
-  加载条件。只按 `runtime-capability-checks.md` 在首次相关操作紧前检查。首次运行 Python handler 脚本时，
-  还要按 `requirements.txt` 验证可导入 `requests` 和 `yaml`（PyYAML）。
-- 仓库地址来自 Issue URL、`--url` 或 `GITCODE_URL`。Token 来自 `--token`
-  或 `GITCODE_TOKEN`，但只在即将访问 GitCode API 时检查；Token 规则以
-  `gitcode-toolkit` Skill 的 `references/token-config.md` 为准。
-- `.cannbot/gitcode-issue-handler/config/operator_owners.yaml` 是运行期责任人映射；
-  缺失、为空或仍是模板时不阻塞运行初始化，
-  但步骤 2c 识别出明确算子后必须按 `issue-routing.md` 请求责任人或 `direct`
-  决定，禁止静默回退到 Agent 自行处理。
-- 配置模板位于本 Skill 的 `assets/`；运行配置属于目标仓库，不写回 Skill 安装目录。
-  单 Issue 不需要配置文件；批量模式缺少配置时可使用当前仓库 remote / `--repo`，运行
-  目录由流程按需创建。
-
-只有真实执行请求才准备运行树。解析目标仓库后，先完成 Git 能力检查；写入运行产物前
-再验证目标父目录可写，然后非覆盖地准备统一运行树。`policy_query` 不执行以下命令：
-
-```bash
-ISSUE_HANDLER_RUNTIME_ROOT=".cannbot/gitcode-issue-handler"
-mkdir -p "$ISSUE_HANDLER_RUNTIME_ROOT"/{config,data,reports,logs,cache,images,repro,tmp,worktrees}
-issue_handler_exclude="$(git rev-parse --git-path info/exclude)"
-mkdir -p "$(dirname "$issue_handler_exclude")"
-if ! grep -Fqx '/.cannbot/gitcode-issue-handler/' "$issue_handler_exclude" 2>/dev/null; then
-  printf '/.cannbot/gitcode-issue-handler/\n' >> "$issue_handler_exclude"
-fi
-```
-
-排除规则只在当前仓库的 `.git/info/exclude` 中精确查重并追加，不创建或覆盖工作树里的
-`.gitignore`。统一目录树为：
-
-```text
-.cannbot/gitcode-issue-handler/
-├── config/      # classify_config.yaml、operator_owners.yaml
-├── data/        # issues.json、groups.json、last_check.json
-├── reports/     # 分类报告、历史处理报告和 latest.md
-├── logs/        # 需要保留的运行日志
-├── cache/       # Issue/PR 和知识构建缓存
-├── images/      # Issue 图片
-├── repro/       # 复现证据
-├── worktrees/   # 受管 worktree manifest
-└── tmp/         # 可删除临时文件
-```
-
-这只准备本地配置、缓存和报告目录，不安装 Skill、不修改仓库级 `AGENTS.md` /
-`CLAUDE.md`，也不写入 Token。
+- `gitcode-issue-handler` 与 `gitcode-toolkit` 必须安装到同一 `skills/` 根目录；不要另建 toolkit 副本。按当前 Skill 绝对路径得到 `ISSUE_HANDLER_SKILL_ROOT`，并令 `GITCODE_TOOLKIT_ROOT="$(dirname "$ISSUE_HANDLER_SKILL_ROOT")/gitcode-toolkit"`；后者不存在即报告安装不完整。
+- Python、Git、临时目录和 git author 都是按操作触发的能力，不是 Skill 加载条件；首次运行 Python handler 脚本时还要按 `requirements.txt` 验证可导入 `requests` 与 `yaml`（PyYAML）。
+- 配置模板来自本 Skill 的 `assets/`，运行配置只写目标仓库；不改 Skill 安装目录、仓库级 `AGENTS.md`/`CLAUDE.md`，不写 Token。配置和运行树按需创建，空 `repo` 在目标确认后保存。
+- 进入仓库操作后始终以已解析仓库根为命令工作目录。依赖 Git 的操作先完成 Git 检查，写产物前确认父目录可写，再非覆盖地创建 `.cannbot/gitcode-issue-handler/{config,data,reports,logs,cache,images,repro,worktrees,tmp}`。仅在 `.git/info/exclude` 精确查重并追加 `/.cannbot/gitcode-issue-handler/`，不改 `.gitignore`。
 
 ## 旧路径兼容
 
-- 新路径和仓根同名配置同时存在时，始终优先读取
-  `.cannbot/gitcode-issue-handler/config/`，不合并、不覆盖任何一份。
-- 新配置缺失时，分类器和责任人工具可只读回退到仓根的
-  `classify_config.yaml` / `operator_owners.yaml`。责任人工具更新映射时会把完整内容写入
-  新路径，不改写旧文件。
-- 旧分类配置中恰好等于原默认值的 `last_check_file` / `report_file` /
-  `cache_dir` 会在内存中转换到新目录；其他用户自定义路径仍保持权威。
-- 旧 `issue_analysis_data/` 和仓根 YAML 不会自动移动或删除。完成新目录验证后，
-  再由用户手工归档；所有新默认产物只写入统一目录。
-
-## Skill 路径
-
-根据当前已加载的 `SKILL.md` 绝对路径确定根目录，不要假定 Skill 被复制到目标仓库根：
-
-```bash
-ISSUE_HANDLER_SKILL_ROOT="<gitcode-issue-handler 的绝对目录>"
-GITCODE_TOOLKIT_ROOT="$(dirname "$ISSUE_HANDLER_SKILL_ROOT")/gitcode-toolkit"
-```
-
-通过 `$ISSUE_HANDLER_SKILL_ROOT/scripts/` 调用主 Skill 脚本和内嵌知识检索；
-`$GITCODE_TOOLKIT_ROOT` 不存在时立即报告安装不完整，不猜测其他路径。
+新路径与仓根同名配置并存时优先读取 `.cannbot/gitcode-issue-handler/config/`，不合并、不覆盖。新配置缺失时，分类器和责任人工具可只读回退仓根 `classify_config.yaml`/`operator_owners.yaml`；责任人更新只把完整内容写新路径。旧分类配置中恰为原默认值的 `last_check_file`、`report_file`、`cache_dir` 在内存转换到新目录，其他自定义路径保持权威；旧 `issue_analysis_data/` 与仓根 YAML 不自动移动或删除。
 
 ## 目标仓库解析
 
-- `batch`：启动目录必须是 Git 仓库；仓库标识从匹配的 remote 推导。
-- `single`：先从 Issue URL 解析 `owner/repo/iid`。当前目录的任一 remote 匹配
-  `owner/repo` 时可作为目标仓库；否则先执行临时目录能力检查，再在选定根中 clone canonical
-  仓库。仅回评模式可使用该只读 clone；需要修改时再配置可推送 fork remote。
-- 单 Issue 不需要 `.cannbot/gitcode-issue-handler/config/classify_config.yaml`；
-  获取器把 `repository` 写入输入元数据。
-  批量模式可从 `assets/classify_config.yaml.example` 复制配置到目标仓库，
-  或使用 `classify_issues.py --repo owner/repo`。
-
-## 默认配置
-
-- 交付模式：`pr`
-- 本地基线分支：`master`
-- 目标分支名：`master`
-- 目标 remote：优先匹配 Issue URL 或有效 `classify_config.yaml.repo` 指向的 canonical 仓库；
-  `origin` 只在它确实指向 canonical 仓库或仓库只有一个 remote 时作为默认值。
-- 仅当用户在当前任务中明确指定其他值时覆盖上述值。
-
-## 步骤 -1：请求分流与运行能力检查
-
-1. 先仅根据用户文本区分 `policy_query` 和真实执行。`policy_query` 在主 Skill
-   直接回答并结束；不建运行树、不读取执行阶段 reference、不运行任何环境检查。
-2. 真实执行只初始化状态和解析 Issue URL/当前仓库；解析纯文本 URL 不要求
-   Token、Git、临时目录或 git author。
-3. 每项能力检查按 `runtime-capability-checks.md`，只在它保护的第一个真实操作紧前执行；
-   统一调用本 Skill 的脚本，不把业务路由参数传给 toolkit：
+仓库地址来自 Issue URL、`--url` 或 `GITCODE_URL`；Token 来自 `--token` 或 `GITCODE_TOKEN`，只在即将访问 API 时按能力门禁检查。 `repo` 非空直接使用，不因 remote 名称或分支变化改选。
 
 ```bash
-bash "$ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh" --checks api
-bash "$ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh" --checks git --work-dir "$PWD"
-bash "$ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh" --checks tmp --work-dir "$PWD"
-bash "$ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh" \
-  --checks author --work-dir "<group-worktree>"
+python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/resolve_repository.py" --repository-root .
+# 显式目标再附加：--target <Issue-URL 或 owner/repo>
 ```
 
-Token 已由用户保存在当前会话而未放入环境变量时，`api` 调用追加
-`--token-available`。临时目录的 handler 私有 fallback、git author 的 local → global
-顺序、`needs_user` / `blockers` 路由和失败恢复都以 `runtime-capability-checks.md` 为准。
-能力就绪不构成 GitCode 写入或交付授权。
+返回 `resolved` 后使用脚本返回的 `repo` 和 `config_path`；只更新顶层 `repo`，保留其他配置与注释。
+
+缺失/为空时，有显式目标使用显式目标；否则解析 GitCode remote 的 `owner/repo`，归一化 HTTPS/SSH 和 `.git` 后缀并去重。只有一个候选自动保存；多个返回 `needs_selection`，Agent 优先用可用问卷工具（如 `request_user_input_async`），不可用才直接询问，发一次仓库问卷（列出候选并允许自由输入；无候选直接询问 `owner/repo`），收到选择后用 `--select` 重跑。未收到答复不得选定，也不得访问 Issue API。
+
+配置与显式目标不一致同样问卷确认，不静默覆盖。若选择配置仓库而原 Issue URL 属于其他仓库，要求用户改为批量处理或提供对应 Issue，不能移植 IID。`batch` 根为启动 Git 仓库；`single` 从 URL 得到 `owner/repo/iid`。目标与当前 remote 不匹配时，经临时目录检查后 clone，在目标工作目录保存配置；不未经确认修改原仓库配置。解析歧义由脚本以 `needs_selection` 和退出码 2 返回。
+
+## 配置合并与默认值
+
+首次真实处理（非 Marketplace/install-helper 自动实例化时）运行 `init_config.py --repository-root .`；只创建缺失文件，旧仓根配置优先迁移且原文件保留。除上节 `repo` 冲突须确认外，默认值、仓库配置、命令行参数按此顺序覆盖：字典逐项合并，列表和显式空容器整体替换；默认文件缺失用模板，显式指定文件缺失或格式错误报错。责任人映射缺失/模板不阻塞初始化，但识别出算子后须按 `issue-routing.md` 请求责任人或由用户决定 `direct`，禁止静默自修。
+
+默认交付 `pr`，基线/目标分支 `master`。目标 remote 优先匹配 Issue URL 或 canonical `repo`；`origin` 仅在匹配或仅有一个 remote 时使用。
+
+首响和临时指派的两开关及依赖校验见 [automation.md](automation.md)。关闭自动分配不关闭候选调查；单次会话覆盖不修改配置。
+
+## 步骤 -1：分流与基线前置
+
+真实执行只初始化状态并解析目标；能力检查严格按 [runtime-capability-checks.md](runtime-capability-checks.md) 在首个相关操作紧前调用。未确定认证 API 前不索取 Token。
 
 ## 步骤 0：安全获取基线
 
-本次运行只执行一次：
+只有诊断需要源码基线或进入修复时执行，本轮只同步一次；API 答疑可跳过：
 
 ```bash
 git fetch --all --prune
@@ -146,53 +52,23 @@ git branch -r
 git rev-parse --verify <canonical-remote>/master^{commit}
 ```
 
-按以下规则执行：
+只更新远程跟踪引用，不切换分支、pull 或修改工作区/本地 `master`。canonical remote 依次取用户指定、匹配 Issue/config 的 URL、唯一 `<remote>/master`、唯一 remote；同名 fork 优先 URL owner 不同且凭据可推送的 remote。多个完全等价候选只在依赖 remote 的 Git 操作前询问一次。记录不可变 `base_ref`/`base_commit`，PR worktree 全从该 commit 创建；direct-push 多组按 `code-worktree.md` 串行刷新目标分支。fetch 或基线缺失有界诊断并重试一次，仍失败报告 blocker；不得 stash、merge、rebase、reset 或强制切换。
 
-1. 只更新远程跟踪引用，不切换分支、不执行 pull，不修改用户当前工作区和本地
-   `master`。
-2. 按以下顺序确定 canonical remote，不发起选择问题：用户显式指定；remote URL 精确
-   匹配 Issue URL / `classify_config.yaml.repo` 的 owner/repo；唯一的 `<remote>/master`；
-   只有一个 remote 时使用它。fork remote 则优先选择 URL owner 与 canonical owner
-   不同、repo 名相同且当前凭据可推送的 remote，通常为 `origin`。
-3. 若仍有多个完全等价候选，只在即将执行依赖 remote 的 Git 操作前请求一次选择；
-   不得在启动时预问，也不要拖到步骤 8 才询问。
-4. 记录基线为不可变的 `base_ref` 和 `base_commit`。PR 模式下本次运行的全部 worktree
-   从该 commit 创建，避免并行组读取不同基线。direct-push 多组模式按
-   `code-worktree.md` 串行刷新目标分支。
-5. fetch 失败或基线引用不存在时先做有界诊断并重试一次；仍失败则报告明确 blocker。
-6. 不得使用 stash、merge、rebase、reset、强制切换或其他方式规避失败。
-
-## 发布目标
-
-列出远程分支后确定 `delivery_mode` 和 `target_remote_branch`：
-
-- `pr`：目标值是 PR 的目标远程分支。
-- `direct-push`：目标值是确切推送目标。
-
-推导值或用户指定值必须以 `<remote>/<branch>` 表示，并且能在远程分支列表中找到；
-否则停止并报告证据。不要使用仓库名不匹配的 `origin` 作为静默兜底。
-
-步骤 0 不创建功能分支。步骤 2e 分组完成后按
-`code-worktree.md` 从 `base_commit` 创建组分支和 worktree。随后按
-`runtime-knowledge.md` 完成步骤 0a，再进入步骤 1。
+`target_remote_branch` 在 `pr` 模式表示 PR base，在 `direct-push` 模式表示确切推送目标。
+列出远程分支后确定 `target_remote_branch`，必须用 `<remote>/<branch>` 且存在于列表；不存在停止，不静默使用不匹配的 `origin`。步骤 0 不建功能分支，步骤 2e 后按 `code-worktree.md` 创建。
 
 ## 输出
 
-更新运行状态：
+仅实际同步成功后记录 `sync_completed: true`、`base_branch`、`base_ref`、`base_commit`、`delivery_mode`、`target_remote_branch` 与 `remote_branches`；完整字段见 [runtime-state-schema.md](runtime-state-schema.md)。
 
-```yaml
-capability_checks:
-  api: not_started | ready | blocked
-  git: ready
-  tmp: not_started | ready | blocked
-  author: not_started | ready | blocked
-sync_completed: true
-base_branch: master
-base_ref: <remote>/master
-base_commit: <full-sha>
-delivery_mode: pr | direct-push
-target_remote_branch: <remote>/<branch>
-remote_branches: []
+首次知识检索按 [runtime-knowledge.md](runtime-knowledge.md) 复用受审卡和已有历史快照；知识维护独立显式执行，不作为首响前置步骤。
+
+首次落盘可使用以下幂等命令（先检查父目录可写）；单 Issue 不需要预先建全套目录：
+```bash
+ISSUE_HANDLER_RUNTIME_ROOT=".cannbot/gitcode-issue-handler"
+mkdir -p "$ISSUE_HANDLER_RUNTIME_ROOT"/{config,data,reports,logs,cache,images,repro,tmp,worktrees}
+ISSUE_HANDLER_EXCLUDE="$(git rev-parse --git-path info/exclude)"
+mkdir -p "$(dirname "$ISSUE_HANDLER_EXCLUDE")"
+grep -Fqx '/.cannbot/gitcode-issue-handler/' "$ISSUE_HANDLER_EXCLUDE" 2>/dev/null || printf '/.cannbot/gitcode-issue-handler/\n' >> "$ISSUE_HANDLER_EXCLUDE"
 ```
-
-完成后进入步骤 0a。
+Marketplace/install-helper 与 `npx skills` 安装方式见 [安装指南](../docs/installation-guide.md)。

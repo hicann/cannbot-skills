@@ -245,6 +245,12 @@ git push -u origin ${branch_name}
 git ls-remote --heads origin ${branch_name}
 ```
 
+push 返回成功后，必须检查只读回查结果：
+
+- 返回的引用为目标分支 `refs/heads/${branch_name}`，且远端 SHA 与本次已确认的本地 commit SHA 一致，才可标记推送完成并进入 Step 7。
+- 查询失败、结果为空、分支或 SHA 不匹配时，保留未完成状态并报告原因，不继续创建 PR；结果未知时先只读回查。
+- 沿用已确认的 remote 和分支，不得为绕过验证失败而自动改换目标。
+
 ---
 
 ## Step 7: 创建 PR

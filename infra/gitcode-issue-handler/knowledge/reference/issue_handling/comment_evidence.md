@@ -4,16 +4,16 @@ kind: guide
 type: programming_guide
 source_family: curated
 title: Issue 评论答复的证据要求
-description: 评论路径要用代码、文档、版本历史或明确的未知边界支撑结论，并在发布前回查正文。
+description: 评论路径要用代码、文档、版本历史或明确的未知边界支撑结论，并按自动响应策略发布和回查。
 tags: [issue_comment, evidence, git_history, boundary]
-resource: https://gitcode.com/cann/cannbot-skills/blob/9e349d56a7af729be6f2c66ba8b74b295c77ecbf/infra/gitcode-issue-handler/references/comment-path.md
+resource: https://gitcode.com/cann/cannbot-skills/blob/71a7828f8ee71d4f90295b6d8d93cf6d69638bb6/infra/gitcode-issue-handler/references/automation.md
 sources:
   - role: primary
-    url: https://gitcode.com/cann/cannbot-skills/blob/9e349d56a7af729be6f2c66ba8b74b295c77ecbf/infra/gitcode-issue-handler/references/comment-path.md
+    url: https://gitcode.com/cann/cannbot-skills/blob/71a7828f8ee71d4f90295b6d8d93cf6d69638bb6/infra/gitcode-issue-handler/references/automation.md
 status: verified
 confidence: verified
 created_at: '2026-08-03T00:00:00Z'
-updated_at: '2026-08-03T00:00:00Z'
+updated_at: '2026-09-16T00:00:00Z'
 ---
 
 # Issue 评论答复的证据要求
@@ -25,9 +25,9 @@ updated_at: '2026-08-03T00:00:00Z'
 - “如何使用”：给最小可执行示例和必要前置，不复制整段 README。
 - 现有材料没有规约：明确写未知范围和建议确认对象，不编造结论。
 
-答复至少包含一句话结论、可定位依据、适用边界和下一步。若调查发现需要改代码，停止起草 patch 式评论，转代码变更路径。
+答复至少包含一句话结论、可定位依据、适用边界和下一步。若调查发现需要改代码，先完成有证据的首响，再按当前责任人规则转交或进入代码路径，不让修复阻塞首响。
 
-发布评论属于外部写操作，应先展示正文、获得授权，再 POST；提交后 GET 回查内容，不能只依据 HTTP 成功码认定写入完整。
+发布评论属于外部写操作，应记录准确正文并核对授权：`auto-response: true` 与当前处理请求可授权范围内首响，当前会话明确授权也直接复用，其余情况先取得授权再 POST；提交后 GET 回查内容，不能只依据 HTTP 成功码认定写入完整。配置不授权新追问、关闭 Issue 或代码交付。
 
 <!-- okf:related:start -->
 

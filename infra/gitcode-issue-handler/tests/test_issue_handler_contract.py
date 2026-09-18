@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 HANDLER_ROOT = Path(__file__).resolve().parents[1]
 TOOLKIT_ROOT = HANDLER_ROOT.parent / "gitcode-toolkit"
 REPO_ROOT = HANDLER_ROOT.parents[1]
@@ -34,51 +36,54 @@ def _read_interaction_documents() -> dict[str, str]:
         "authorization": handler_references / "authorization-contract.md",
         "evals": HANDLER_ROOT / "evals" / "evals.json",
     }
-    return {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
+    documents = {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
+    # Validate the full contract, including its conditionally loaded schema.
+    documents["state"] += (handler_references / "runtime-state-schema.md").read_text(encoding="utf-8")
+    return documents
 
 
 def _assert_handler_interaction_contract(documents: dict[str, str]) -> None:
     skill = documents["skill"]
     policy = documents["policy"]
     assert "步骤 -1：区分 policy_query 与真实执行" in skill
-    assert "`policy_query`" in skill
-    assert "不运行任何环境检查" in documents["setup"]
+    assert "policy_query" in skill
+    assert "不检查 Token/Git/CANN" in skill
     assert "runtime-capability-checks.md" in skill
-    assert 'ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh' in documents["setup"]
+    assert 'ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh' in documents["capability"]
     assert 'GITCODE_TOOLKIT_ROOT/scripts/preflight.sh' not in documents["setup"]
-    assert "--checks api" in documents["setup"]
-    assert "--checks git" in documents["setup"]
-    assert "--checks tmp" in documents["setup"]
-    assert "--checks author" in documents["setup"]
+    assert "--checks api" in documents["capability"]
+    assert "--checks git" in documents["capability"]
+    assert "--checks tmp" in documents["capability"]
+    assert "--checks author" in documents["capability"]
     assert "缺失算子责任人请求最多 1 次" in policy
-    assert "配置责任人并指派（推荐）" in policy
+    assert "候选表随 summary" in policy
     assert "不能静默回退到 Agent 正常处理" in policy
     assert "统一执行预览前" in policy
-    assert "这次方案选择不构成执行批准" in policy
+    assert "候选调查不延迟回复，本身不授权 assign 或 direct" in policy
     assert "need_attention / operator_routing_required" in documents["intake"]
     assert "authorization_mode: interactive | approved_batch" in documents["state"]
-    assert "`single` 和 `batch` 都从 `interactive` 开始" in documents["execution"]
-    assert "本检查点不授权实际 push" in documents["execution"]
-    assert "`single` 和 `batch` 共用一个分析后统一执行检查点" in policy
-    assert "初始“处理/自动处理/auto apply”请求不是批准" in policy
+    assert "`single`、`batch` 均从 `interactive` 开始" in documents["execution"]
+    assert "但不授权实际 push" in documents["execution"]
+    assert "`single` 和 `batch` 共用回复与交付两种检查点" in policy
+    assert "初始“处理/自动处理/auto apply”请求不是代码交付批准" in policy
     assert "Issue 处理请求已授权常规交付写操作" not in documents["evals"]
-    assert "选择 `direct` 时只授权当前 Issue" in policy
+    assert "确认具体账号或当前 Issue 的 `direct`" in policy
     assert "generate_summary_report.py" in documents["reporting"]
     assert "--strict" in documents["reporting"]
-    assert "历史报告不可覆盖其他 `run_id`" in documents["reporting"]
-    assert "`issues` 只保存和展示本轮**实际处理**的 Issue" in documents["reporting"]
-    assert "最终 diff 和验证结果" in documents["execution"]
-    assert "确认前禁止" in documents["execution"]
+    assert "不可覆盖其他 run" in documents["reporting"]
+    assert "`issues` 只保存本轮实际处理" in documents["reporting"]
+    assert "changed files/diff" in documents["execution"]
+    assert "禁止未经对应授权的 Issue" in documents["execution"]
 
     authorization = documents["authorization"]
     comment_workflow = documents["comment_workflow"]
     assert "| `interactive` |" in authorization
     assert "| `approved_batch` |" in authorization
     assert "精确 Issue 清单" in authorization
-    assert "`auto-close-stale` 是独立维护路径" in authorization
+    assert "`auto-close-stale` 独立于 `approved_batch`" in authorization
     assert "算子转交" in comment_workflow
-    assert "等待责任人的 Issue 不参与" in comment_workflow
-    assert "Handler 限流与日志" in comment_workflow
+    assert "等待期间不静默关闭" in comment_workflow
+    assert "默认 45 次/60 秒" in comment_workflow
 
 
 def test_issue_workflow_documents_keep_business_contracts_in_handler():
@@ -126,8 +131,8 @@ def test_environment_checks_are_deferred_until_the_protected_operation():
     assert "credential_ready" not in documents["state"]
     assert "步骤 -1：一次性启动预检" not in combined
     assert "git author 必须在步骤 -1" not in combined
-    assert "--checks api" in documents["setup"]
-    assert "--checks author" in documents["setup"]
+    assert "--checks api" in documents["capability"]
+    assert "--checks author" in documents["capability"]
     assert "ISSUE_HANDLER_TMP_DIR" in documents["capability"]
     assert ".cannbot/gitcode-issue-handler/tmp" in documents["capability"]
 
@@ -145,14 +150,14 @@ def test_missing_token_creates_one_resumable_wait_and_stops_the_turn():
     assert "api: not_started | ready | waiting_for_input" in state
     assert "input_id: gitcode_token" in state
     assert "request_count: 1" in state
-    assert "resume_from:" in state
-    assert "立即停止本轮" in capability
-    assert "不得重复询问" in capability
-    assert "测试框架读取" in capability
-    assert "从保存的 `resume_from` 继续" in capability
+    assert "`resume_from`" in state
+    assert "暂停整轮" in capability
+    assert "保存唯一输入" in capability
+    assert "测试读取" in capability
+    assert "恢复时只重跑失败的 `api` 组" in capability
 
 
-def test_unified_execution_gate_precedes_every_external_or_publish_write():
+def test_response_and_delivery_gates_cover_external_or_publish_writes():
     skill = (HANDLER_ROOT / "SKILL.md").read_text(encoding="utf-8")
     execution = (HANDLER_ROOT / "references" / "delivery-confirmation.md").read_text(
         encoding="utf-8"
@@ -170,26 +175,27 @@ def test_unified_execution_gate_precedes_every_external_or_publish_write():
         encoding="utf-8"
     )
 
-    assert "初始“处理/自动处理/auto apply”请求不是批准" in policy
-    assert "任何 GitCode 写入或发布动作前" in execution
-    assert "POST/PUT/PATCH/DELETE Issue" in execution
-    assert "暂存、commit、push、创建 PR 或触发 CI" in execution
-    assert "Issue 评论" in execution
+    assert "初始“处理/自动处理/auto apply”请求不是代码交付批准" in policy
+    assert "任何 GitCode 写入、暂存、提交、推送、PR 或 CI 前" in execution
+    assert "Issue/评论/指派/标签/状态 POST/PUT/PATCH/DELETE" in execution
+    assert "暂存、commit、push、PR 和 CI" in execution
+    assert "评论" in execution
     assert "指派" in execution
-    assert "实际 changed files/diff 摘要" in execution
-    assert "commit message" in execution
-    assert "功能分支 push" in execution
-    assert "标题和完整正文" in execution
+    assert "changed files/diff" in execution
+    assert "message" in execution
+    assert "目标功能分支" in execution
+    assert "标题、完整正文" in execution
     assert "首次 CI" in execution
     assert (
         "execution_confirmation_status: not_required | pending | approved | rejected | invalidated"
         in execution
     )
-    assert "POST 后 GET" in execution
-    assert "不在这里再次询问" in delivery
-    assert "完整正文加入统一执行预览，禁止发送" in diagnosis
+    assert "POST/GET" in execution
+    assert "按授权契约校验" in delivery
+    assert "operator-handoff.md" in diagnosis
+    assert "完整正文加入回复执行预览，禁止发送未经授权的正文" in (HANDLER_ROOT / "references/operator-handoff.md").read_text(encoding="utf-8")
     assert "本次 intake 固定传 `interactive`" in intake
-    assert "禁止在分类阶段传" in intake
+    assert "分类器不执行外部写入" in intake
     assert "plan_confirmation_status" not in skill
     assert "delivery_confirmation_status" not in skill
 
@@ -202,9 +208,9 @@ def test_direct_push_remains_outside_the_unified_confirmation():
         encoding="utf-8"
     )
 
-    assert "本次不授权；commit 形成后凭 SHA 独立确认" in execution
-    assert "该强确认不能被 `approved_batch` 或统一执行" in execution
-    assert "仍按步骤 8B 独立确认" in delivery
+    assert "commit 后需独立确认" in execution
+    assert "该确认不能被统一批准吞并" in execution
+    assert "commit 后独立展示并确认" in delivery
 
 
 def test_auto_close_apply_requires_its_own_exact_preview_confirmation():
@@ -215,7 +221,7 @@ def test_auto_close_apply_requires_its_own_exact_preview_confirmation():
 
     assert "默认 dry-run" in skill
     assert "完整固定评论和关闭操作" in maintenance
-    assert "初始“自动\n处理 / auto apply”请求不是这次批准" in maintenance
+    assert "初始“自动处理 / auto apply”请求不是这次批准" in maintenance
     assert "单独记录的部署授权" in maintenance
 
 
@@ -234,17 +240,20 @@ def test_followup_state_is_fetched_routed_and_authorized_end_to_end():
     ).read_text(encoding="utf-8")
     api = (TOOLKIT_ROOT / "references" / "gitcode-api.md").read_text(encoding="utf-8")
 
-    assert "自定义状态迁移到`挂起`" in (
+    assert "挂起回查" in (
         HANDLER_ROOT / "references" / "policy-error-handling.md"
     ).read_text(encoding="utf-8")
     assert "updated_at` 增量" in intake
-    assert "watchlist 不受核心 open/closed" in intake
+    assert "显式 single、增量更新和 watchlist 均不能绕过此过滤" in intake
     assert "`reporter_followup`" in intake
-    assert "`awaiting_assignee_setup`" in intake
+    assert "classification-categories.md" in intake
+    assert "`awaiting_assignee_setup`" in (
+        HANDLER_ROOT / "references/classification-categories.md"
+    ).read_text(encoding="utf-8")
     assert "`assignee_followup`" in intake
     assert "失败时停止，不改状态、不写 watch" in followup
     assert "--waiting-on assignee" in followup
-    assert "等待责任人的 Issue 不参与" in comment_workflow
+    assert "等待期间不静默关闭" in comment_workflow
     assert "普通受理、进展" in comment_workflow
     assert "issue_state_change" in execution
     assert "状态 ID 会随组配置变化" in api
@@ -269,9 +278,9 @@ def test_skill_documents_use_repository_installation_contract():
     assert "git rev-parse --git-path info/exclude" in setup
     assert "grep -Fqx '/.cannbot/gitcode-issue-handler/'" in setup
     assert "printf '/.cannbot/gitcode-issue-handler/\\n'" in setup
-    assert "始终优先读取" in setup
-    assert "不会自动移动或删除" in setup
-    assert "不创建或覆盖工作树里的\n`.gitignore`" in setup
+    assert "优先读取" in setup
+    assert "不自动移动或删除" in setup
+    assert "不改 `.gitignore`" in setup
 
 
 def test_skill_entrypoint_stays_concise_and_routes_detailed_contracts():
@@ -282,7 +291,7 @@ def test_skill_entrypoint_stays_concise_and_routes_detailed_contracts():
     assert "## 授权模型与卡点" not in skill
     assert "## 运行状态" not in skill
     assert "authorization_mode: interactive | approved_batch" not in skill
-    assert "# 运行时：授权与状态契约" in (
+    assert "# 运行时：最小授权与状态契约" in (
         HANDLER_ROOT / "references" / "runtime-state.md"
     ).read_text(encoding="utf-8")
 
@@ -290,12 +299,22 @@ def test_skill_entrypoint_stays_concise_and_routes_detailed_contracts():
 def test_reference_layout_stays_flat_and_grouped_by_concern():
     references = HANDLER_ROOT / "references"
     expected = {
+            "batch-analysis.md",
+            "automation.md",
             "runtime-setup.md",
             "runtime-state.md",
+            "runtime-state-schema.md",
+            "classification-categories.md",
+            "operator-handoff.md",
+            "response-quality-rubric.md",
             "runtime-capability-checks.md",
             "runtime-knowledge.md",
+            "knowledge-maintenance.md",
+            "responsibility-scope.md",
+            "response-writing.md",
         "issue-intake.md",
         "issue-routing.md",
+        "operator-owner-candidates.md",
         "issue-followup.md",
         "issue-comment-workflow.md",
         "authorization-contract.md",
@@ -398,7 +417,7 @@ def test_renamed_knowledge_query_verifies_bundled_knowledge():
     assert payload["findings"] == []
 
 
-def test_runtime_knowledge_refresh_is_wired_before_first_query():
+def test_runtime_knowledge_query_is_not_blocked_by_refresh():
     skill = (HANDLER_ROOT / "SKILL.md").read_text(encoding="utf-8")
     setup = (HANDLER_ROOT / "references" / "runtime-setup.md").read_text(
         encoding="utf-8"
@@ -410,15 +429,18 @@ def test_runtime_knowledge_refresh_is_wired_before_first_query():
         encoding="utf-8"
     )
 
-    assert "步骤 0a：刷新运行时历史证据" in skill
+    assert "复用已有快照和受审卡" in skill
+    assert "knowledge-maintenance.md" in skill
+    maintenance = (HANDLER_ROOT / "references/knowledge-maintenance.md").read_text(encoding="utf-8")
+    assert "knowledge-maintenance.md" in lifecycle
     assert "runtime-knowledge.md" in setup
     assert "refresh_issue_knowledge.py" in lifecycle
-    assert "knowledge_refresh_status" in lifecycle
-    assert "未记录时返回" in diagnosis
+    assert "knowledge_refresh_status" in maintenance
+    assert "不要求本轮已执行 refresh" in diagnosis
     assert '--repository-root "$ISSUE_HANDLER_REPOSITORY_ROOT"' in diagnosis
-    assert "首次全量，日常增量，周期校准" in lifecycle
+    assert "快照缺失、过期或无命中均不阻塞首响" in lifecycle
     assert "provisional/low" in lifecycle
-    assert "stale_fallback" in lifecycle
+    assert "stale_fallback" in maintenance
 
 
 def test_runtime_defaults_are_confined_to_the_canonical_tree():
@@ -437,7 +459,7 @@ def test_runtime_defaults_are_confined_to_the_canonical_tree():
         encoding="utf-8"
     )
     assert 'ISSUE_HANDLER_RUNTIME_ROOT=".cannbot/gitcode-issue-handler"' in setup
-    assert "└── tmp/" in setup
+    assert "repro,tmp,worktrees" in setup
     assert "issue_analysis_data/tmp" not in setup
 
     help_result = subprocess.run(
@@ -454,3 +476,123 @@ def test_runtime_defaults_are_confined_to_the_canonical_tree():
     compact_help = "".join(help_result.stdout.split())
     assert ".cannbot/gitcode-issue-handler/data/issue-history.json" in compact_help
     assert ".cannbot/gitcode-issue-handler/reports/knowledge-corpus.md" in compact_help
+
+
+def test_conditional_references_remain_reachable_and_local_links_resolve():
+    documents = [HANDLER_ROOT / "SKILL.md", *sorted((HANDLER_ROOT / "references").glob("*.md"))]
+    targets = set()
+    for path in documents:
+        for target in re.findall(r"\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
+            if "://" in target or target.startswith("#"):
+                continue
+            resolved = (path.parent / target.split("#", 1)[0]).resolve()
+            assert resolved.exists(), (path, target)
+            targets.add(resolved)
+    names = (
+        "runtime-state-schema.md",
+        "classification-categories.md",
+        "operator-handoff.md",
+        "response-quality-rubric.md",
+    )
+    for name in names:
+        assert (HANDLER_ROOT / "references" / name).resolve() in targets
+
+
+def test_scope_and_candidate_reviews_require_matching_evidence():
+    intake = (HANDLER_ROOT / "references/responsibility-scope.md").read_text(encoding="utf-8")
+    owners = (HANDLER_ROOT / "references/operator-owner-candidates.md").read_text(encoding="utf-8")
+    assert "问题版本 + 完整故障文件路径 + 实际入口/构建选择" in intake
+    assert "不能用当前 master 替代问题版本" in intake
+    assert "本算子核心行为补丁" in owners
+    assert "该补丁作者到 login 的映射" in owners
+    assert "README、UT 或局部防御性修补" in owners
+    assert "不能进入候选表" in owners
+
+
+def test_reply_quality_rubric_is_conditional_and_keeps_all_score_bands():
+    workflow = (HANDLER_ROOT / "references/response-writing.md").read_text(encoding="utf-8")
+    rubric = (HANDLER_ROOT / "references/response-quality-rubric.md").read_text(encoding="utf-8")
+    assert "正式评分或上述检查发现质量不足时" in workflow
+    assert "| 分数 |" not in workflow
+    for score in (100, 80, 60, 40, 20, 0):
+        assert f"| {score} |" in rubric
+    for category in ("漏洞", "缺陷", "需求", "文档", "咨询", "任务", "审查", "其他"):
+        assert category in rubric
+    assert "github.com" not in rubric
+    assert "https://gitcode.com/xujiachen8/cannbot-skills/issues/1" in rubric
+
+
+def test_reply_workflow_avoids_unsupported_commitments():
+    workflow = (HANDLER_ROOT / "references/response-writing.md").read_text(encoding="utf-8")
+    rubric = (HANDLER_ROOT / "references/response-quality-rubric.md").read_text(encoding="utf-8")
+    assert "不轻易承诺未来动作或结果" in workflow
+    assert "我们将修复/补充/完成/推进/上线/在某版本支持" in workflow
+    assert "一个可行的解决" in workflow
+    assert "持续跟踪" in workflow
+    assert "承诺检查" in workflow
+    assert "先区分错误与工程选择" in workflow
+    assert "不一边倒赞同" in workflow
+    assert "实现与维护成本" in workflow
+    assert "兼容性/迁移风险" in workflow
+    assert "我们将继续评估该方案及其影响" in workflow
+    assert "不为追求“明确下一步”承诺" in rubric
+    assert "可行/潜在方案" in rubric
+    assert "不等于赞同提出者方案或承诺采纳" in rubric
+
+
+def test_auto_response_can_link_reviewed_covering_pr_before_temporary_assignment():
+    skill = (HANDLER_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    automation = (HANDLER_ROOT / "references/automation.md").read_text(encoding="utf-8")
+    workflow = (HANDLER_ROOT / "references/issue-comment-workflow.md").read_text(encoding="utf-8")
+
+    assert "associate_issue_pr.py" in automation
+    assert "coverage_verified: true" in automation
+    assert "additional_risk_reviewed: true" in automation
+    assert "unresolved_risks" in automation
+    assert "PR→Issue" in automation and "Issue→PR" in automation
+    assert "duplicate_cross_reference" in automation
+    assert "一个 PR 只能关联一个 Issue" in automation
+    assert "PR 关联必须先于" in workflow
+    assert "自动关联" in skill and "临时指派 PR 作者" in skill
+
+
+def test_assignment_commands_use_state_not_exact_comment_body():
+    handoff = (HANDLER_ROOT / "references/operator-handoff.md").read_text(encoding="utf-8")
+    generic = (TOOLKIT_ROOT / "references/issue-comment-workflow.md").read_text(encoding="utf-8")
+    api = (TOOLKIT_ROOT / "references/gitcode-api.md").read_text(encoding="utf-8")
+    assert "平台可能将 mention 改写为 Markdown" in handoff
+    assert "成功依据是 assignee login" in handoff
+    assert "仅授权发送评论时不能扩大为原生指派" in handoff
+    assert 'PATCH `{"assignee":"<owner>"}`' in handoff
+    assert "不能用完整正文相等判定成功" in generic
+    assert '单数字段 `{"assignee":"<login>"}`' in api
+
+
+def test_runtime_schema_preserves_established_fields_enums_and_defaults():
+    # Frozen public state contract; do not derive expectations from the edited docs.
+    contract = json.loads((Path(__file__).parent / "fixtures/runtime_state_contract.json").read_text(encoding="utf-8"))
+    text = (HANDLER_ROOT / "references/runtime-state-schema.md").read_text(encoding="utf-8")
+    schema = {}
+    for block in re.findall(r"```yaml\n(.*?)```", text, re.S):
+        schema.update(yaml.safe_load(block))
+
+    def flatten(value, prefix=""):
+        if isinstance(value, dict):
+            result = {}
+            for key, child in value.items():
+                result.update(flatten(child, f"{prefix}.{key}" if prefix else key))
+            return result
+        if isinstance(value, list) and value:
+            return flatten(value[0], prefix + "[]")
+        return {prefix: value}
+
+    authorization_text = (HANDLER_ROOT / "references/authorization-contract.md").read_text(encoding="utf-8")
+    authorization = yaml.safe_load(re.search(r"```yaml\n(.*?)```", authorization_text, re.S).group(1))
+    actual = {**flatten(schema), **flatten(authorization)}
+    expected_fields = {**contract["fields"], **contract["authorization_fields"]}
+    for field, expected in expected_fields.items():
+        assert field in actual, f"Missing established state field: {field}"
+        if isinstance(expected, str) and " | " in expected:
+            assert set(expected.split(" | ")) <= set(actual.get(field, "").split(" | ")), field
+        elif expected is not None:
+            assert actual.get(field) == expected, field

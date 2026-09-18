@@ -30,9 +30,6 @@
 
 - 同一概念增强已有卡，不按每个 Issue 重复造卡。
 - 新增或修改卡片时同步逐层 `index.md`，并通过人工复核和代码评审保留变更证据。
-- `reference/` 和 `runbooks/` 是受审知识卡，只能通过人工复核和代码评审更新；运行时刷新
-  不得写入这些目录。
-- 历史证据由 `scripts/refresh_issue_knowledge.py` 首次全量、日常增量并周期全量校准；原始
-  corpus 只存放在目标仓库 `.cannbot/gitcode-issue-handler/`。卡片只吸收复核后的稳定模式
-  和代表案例。
+- `reference/` 和 `runbooks/` 是受审知识卡，只能通过人工复核和代码评审更新；运行时刷新不得写入这些目录。
+- 历史证据由 `scripts/refresh_issue_knowledge.py` 首次全量、日常增量并周期全量校准；原始 corpus 只存放在目标仓库 `.cannbot/gitcode-issue-handler/`。卡片只吸收复核后的稳定模式和代表案例。
 - 不在卡片中保存 Token、私有路径、不可公开日志或大段原文。

@@ -5,15 +5,15 @@
 Fetch issues from GitCode.
 
 This is the GitCode adaptation of the original CodeHub fetch_issues.py.
-The CLI interface and JSON output contract are kept identical so the
-surrounding skill (issue resolver) works unchanged.
+Normal CLI intake accepts open Issues only; low-level list operations
+retain explicit all-state access for maintenance and knowledge building.
 
 Shared HTTP / token / URL utilities are imported from gitcode-toolkit's
 gitcode_client module; this script only contains issue-specific business
 logic (pagination, normalisation, time filtering).
 
 Usage:
-    # Fetch open issues plus all-state/watchlist follow-up candidates
+    # Fetch open issues plus open-state/watchlist follow-up candidates
     python fetch_issues.py --url https://gitcode.com/cann/ops-math --token <token>
 
     # Use environment variables instead of CLI args
@@ -33,7 +33,7 @@ Usage:
     # Fetch a full comment snapshot (classification normally fetches on demand)
     python fetch_issues.py --with-comments
 
-    # Fetch a single issue by URL (comments included by default)
+    # Fetch a single issue by URL (open Issue comments included by default)
     python fetch_issues.py --issue https://gitcode.com/cann/ops-math/issues/2170
 
     # Single issue without comments
@@ -89,12 +89,18 @@ from followup_state import (  # noqa: E402
     advance_updated_cursor,
     load_followup_config,
     load_followup_state,
+    resolve_issue,
 )
 from cli_output import write_stdout  # noqa: E402
 
+from handler_config import load_handler_config, load_template  # noqa: E402
+from resolve_repository import resolve_repository  # noqa: E402
+
 DEFAULT_CACHE_DIR = path_text(FETCH_CACHE)
-DEFAULT_FOLLOWUP_LOOKBACK_DAYS = 30
-DEFAULT_FOLLOWUP_FETCH_PAGES = 10
+
+_DEFAULT_FOLLOWUP = load_template()["follow_up"]
+DEFAULT_FOLLOWUP_LOOKBACK_DAYS = _DEFAULT_FOLLOWUP["lookback_days"]
+DEFAULT_FOLLOWUP_FETCH_PAGES = _DEFAULT_FOLLOWUP["fetch_pages"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -182,10 +188,10 @@ def get_updated_issues(
     *,
     max_pages: int = DEFAULT_FOLLOWUP_FETCH_PAGES,
 ):
-    """Fetch all-state Issues updated since a cursor.
+    """Fetch open Issues updated since a cursor.
 
     The cursor is advanced only when this scan is complete. This catches old
-    or closed Issues whose reporter or awaited assignee added a new comment.
+    open Issues whose reporter or awaited assignee added a new comment.
     """
     url = f"{api.api_base}/repos/{api.owner}/{api.repo}/issues"
     issues = []
@@ -194,10 +200,11 @@ def get_updated_issues(
         "pages_requested": 0,
         "boundary": updated_since.isoformat(),
         "warnings": [],
+        "closed": [],
     }
     for page in range(1, max_pages + 1):
         params = {
-            "state": "all",
+            "state": "open",
             "page": page,
             "per_page": 100,
             "sort": "updated",
@@ -221,13 +228,9 @@ def get_updated_issues(
         batch = data
         if not batch:
             break
-        reached_boundary = False
-        for issue in batch:
-            updated_at = parse_iso(issue.get("updated_at", ""))
-            if updated_at is not None and updated_at < updated_since:
-                reached_boundary = True
-                continue
-            issues.append(issue)
+        reached_boundary = _collect_updated_batch(
+            batch, updated_since, issues, diagnostics
+        )
         if reached_boundary or len(batch) < 100:
             break
     else:
@@ -238,26 +241,67 @@ def get_updated_issues(
     return issues, diagnostics
 
 
-def get_watched_issues(api: RepoApiContext, watched: dict):
-    """Refresh every watched Issue directly, regardless of core state."""
-    issues = []
-    diagnostics = {"complete": True, "requested": 0, "errors": []}
-    for number in sorted(watched, key=str):
-        diagnostics["requested"] += 1
-        try:
-            issue = get_single_issue(api, number)
-        except requests.RequestException as exc:
-            diagnostics["complete"] = False
-            diagnostics["errors"].append(
-                {"issue_number": number, "error": type(exc).__name__}
-            )
-            continue
+def _collect_updated_batch(batch, updated_since, issues, diagnostics):
+    reached_boundary = False
+    for issue in batch:
         if not isinstance(issue, dict):
             diagnostics["complete"] = False
+            diagnostics["warnings"].append("updated Issue has an invalid response shape")
+            continue
+        updated_at = parse_iso(issue.get("updated_at", ""))
+        if updated_at is not None and updated_at < updated_since:
+            reached_boundary = True
+            continue
+        core_state = str(issue.get("state") or "").casefold()
+        if core_state == "closed":
+            diagnostics["closed"].append(str(issue.get("number") or issue.get("iid")))
+        elif core_state in {"open", "opened"}:
+            issues.append(issue)
+        else:
+            diagnostics["complete"] = False
+            diagnostics["warnings"].append("updated Issue has an invalid core state")
+    return reached_boundary
+
+
+def get_watched_issues(api: RepoApiContext, watched: dict, *, current_issues=()):
+    """Refresh watches, reusing only core-state snapshots fetched this run."""
+    current = {
+        str(item.get("number") or item.get("iid")): item
+        for item in current_issues
+        if str(item.get("state") or "").casefold() in {"open", "opened", "closed"}
+    }
+    issues = []
+    diagnostics = {
+        "complete": True, "requested": 0, "reused": 0, "closed": [], "errors": []
+    }
+    for number in sorted(watched, key=str):
+        issue = current.get(str(number))
+        if issue is not None:
+            diagnostics["reused"] += 1
+        else:
+            diagnostics["requested"] += 1
+            try:
+                issue = get_single_issue(api, number)
+            except requests.RequestException as exc:
+                diagnostics["complete"] = False
+                diagnostics["errors"].append(
+                    {"issue_number": number, "error": type(exc).__name__}
+                )
+                continue
+        core_state = (
+            str(issue.get("state") or "").casefold()
+            if isinstance(issue, dict) else ""
+        )
+        if core_state not in {"open", "opened", "closed"}:
+            diagnostics["complete"] = False
             diagnostics["errors"].append(
-                {"issue_number": number, "error": "invalid_response_shape"}
+                {"issue_number": number, "error": "invalid_response_state"}
             )
             continue
+        if core_state == "closed":
+            diagnostics["closed"].append(str(number))
+            continue
+        issue = dict(issue)
         issue["followup_watch"] = watched[number]
         issues.append(issue)
     return issues, diagnostics
@@ -535,7 +579,8 @@ def _add_connection_args(parser):
         default=None,
         metavar="URL",
         help="Single-issue URL (e.g. https://gitcode.com/owner/repo/issues/123). "
-        "Mutually exclusive with --url; bypasses list/state/time filtering.",
+        "Mutually exclusive with --url; bypasses list/time filtering. "
+        "Closed Issues are returned without comments.",
     )
     conn.add_argument(
         "--token",
@@ -554,8 +599,8 @@ def _add_filter_args(parser):
     parser.add_argument(
         "--state",
         default="opened",
-        choices=["opened", "closed", "all"],
-        help="Issue state filter. 'opened' is mapped to GitCode 'open' internally.",
+        choices=["opened"],
+        help="Normal intake only accepts opened (GitCode open).",
     )
     time_group = parser.add_argument_group("time filters")
     time_group.add_argument(
@@ -595,7 +640,7 @@ def _add_comment_args(parser):
     cache_group = parser.add_argument_group("cache")
     cache_group.add_argument(
         "--cache-dir",
-        default=DEFAULT_CACHE_DIR,
+        default=None,
         help=f"Durable fetch cache directory (default: {DEFAULT_CACHE_DIR})",
     )
     cache_group.add_argument(
@@ -623,7 +668,7 @@ def _add_followup_args(parser):
     group.add_argument(
         "--no-follow-up",
         action="store_true",
-        help="Disable all-state updated scanning and watchlist refresh",
+        help="Disable open-state updated scanning and watchlist refresh",
     )
     group.add_argument(
         "--follow-up-state-file",
@@ -634,13 +679,13 @@ def _add_followup_args(parser):
         "--follow-up-lookback-days",
         type=int,
         default=None,
-        help="Initial all-state updated-at lookback when no cursor exists",
+        help="Initial open-state updated-at lookback when no cursor exists",
     )
     group.add_argument(
         "--follow-up-fetch-pages",
         type=int,
         default=None,
-        help="Safety limit for all-state updated-at scanning",
+        help="Safety limit for open-state updated-at scanning",
     )
 
 
@@ -655,6 +700,23 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def _open_issue_comment_gate(issue):
+    return (
+        str(issue.get("state") or "").casefold() in {"open", "opened"},
+        "issue_not_open",
+    )
+
+
+def _enrich_open_comments(args, api, issues):
+    return enrich_issues_with_comments(
+        api,
+        issues,
+        cache_dir=None if args.no_cache else args.cache_dir,
+        refresh=args.refresh_comments,
+        should_fetch=_open_issue_comment_gate,
+    )
+
+
 def _single_issue_output(args, token):
     owner, repo, issue_number = parse_issue_url(args.issue)
     api_base = resolve_api_base(args.api_base, args.issue)
@@ -663,12 +725,7 @@ def _single_issue_output(args, token):
     issues = [normalize_issue(get_single_issue(api, issue_number))]
     comment_fetch = None
     if not args.no_comments:
-        comment_fetch = enrich_issues_with_comments(
-            api,
-            issues,
-            cache_dir=None if args.no_cache else args.cache_dir,
-            refresh=args.refresh_comments,
-        )
+        comment_fetch = _enrich_open_comments(args, api, issues)
     output = {
         "total": 1,
         "filters": {
@@ -724,6 +781,19 @@ def _followup_options(args):
     return str(state_file), lookback_days, fetch_pages
 
 
+def _followup_cursor(state, scan_started, lookback_days):
+    cursor = parse_iso(state.get("updated_cursor"))
+    return cursor or scan_started - timedelta(days=lookback_days)
+
+
+def _watch_refresh_input(primary_issues, updated_issues, updated_diagnostics):
+    closed = (
+        {"number": number, "state": "closed"}
+        for number in updated_diagnostics.get("closed", [])
+    )
+    return [*primary_issues, *updated_issues, *closed]
+
+
 def _collect_followup_sources(args, api, repository, primary_issues):
     """Merge updated/watchlist sources and persist a complete scan cursor."""
     diagnostics = {
@@ -738,20 +808,29 @@ def _collect_followup_sources(args, api, repository, primary_issues):
     state_file, lookback_days, fetch_pages = _followup_options(args)
     state = load_followup_state(state_file, repository)
     scan_started = datetime.now(TZ_CHINA)
-    cursor = parse_iso(state.get("updated_cursor"))
-    if cursor is None:
-        cursor = scan_started - timedelta(days=lookback_days)
+    cursor = _followup_cursor(state, scan_started, lookback_days)
     updated_issues, updated_diagnostics = get_updated_issues(
         api, cursor, max_pages=fetch_pages
     )
     watched_issues, watch_diagnostics = get_watched_issues(
-        api, state.get("issues") or {}
+        api, state.get("issues") or {},
+        current_issues=_watch_refresh_input(
+            primary_issues, updated_issues, updated_diagnostics,
+        ),
     )
+    closed_watches = set(watch_diagnostics.get("closed") or [])
+    for number in closed_watches:
+        resolve_issue(state_file, repository, number)
     raw_issues = merge_issue_sources(
         ("primary", primary_issues),
         ("updated", updated_issues),
         ("watchlist", watched_issues),
     )
+    closed_numbers = closed_watches | set(updated_diagnostics.get("closed") or [])
+    raw_issues = [
+        item for item in raw_issues
+        if str(item.get("number") or item.get("iid")) not in closed_numbers
+    ]
     diagnostics.update(
         {
             "updated_scan": updated_diagnostics,
@@ -770,6 +849,8 @@ def _collect_followup_sources(args, api, repository, primary_issues):
 
 
 def _batch_output(args, token):
+    if args.state != "opened":
+        raise ValueError("Error: normal Issue intake only supports opened Issues")
     repo_url = resolve_url(args.url)
     api_base = resolve_api_base(args.api_base, repo_url)
     owner, repo = parse_repo_path(repo_url)
@@ -786,18 +867,17 @@ def _batch_output(args, token):
     raw_issues, followup_diagnostics = _collect_followup_sources(
         args, api, repository, primary_issues
     )
+    raw_issues = [
+        item for item in raw_issues
+        if str(item.get("state") or "").casefold() in {"open", "opened"}
+    ]
     issues = [normalize_issue(item) for item in raw_issues]
     issues = filter_issues_by_time(issues, since=since_dt, until=until_dt)
     if args.exclude_self_assigned:
         issues = filter_issues_by_self_assigned(issues)
     comment_fetch = None
     if args.with_comments:
-        comment_fetch = enrich_issues_with_comments(
-            api,
-            issues,
-            cache_dir=None if args.no_cache else args.cache_dir,
-            refresh=args.refresh_comments,
-        )
+        comment_fetch = _enrich_open_comments(args, api, issues)
     output = {
         "total": len(issues),
         "filters": {
@@ -822,13 +902,20 @@ def main(argv=None):
     if args.issue and args.url:
         LOGGER.error("Error: --issue and --url are mutually exclusive.")
         return 1
-    if not args.issue and not args.url:
-        LOGGER.error(
-            "Error: provide --url <repo-url> or --issue <issue-url> "
-            "(or set GITCODE_URL)."
-        )
-        return 1
     try:
+        selection = resolve_repository(
+            os.getcwd(),
+            target=args.issue or args.url or os.environ.get("GITCODE_URL"),
+            config_path=args.config
+        )
+        if selection["status"] != "resolved":
+            _write_stdout(json.dumps(selection, ensure_ascii=False))
+            return 2
+        args.config = selection["config_path"]
+        if not args.issue:
+            args.url = f"https://gitcode.com/{selection['repo']}"
+        if args.cache_dir is None:
+            args.cache_dir = load_handler_config(args.config)["cache_dir"]
         token = resolve_token(args.token)
         output = (
             _single_issue_output(args, token)

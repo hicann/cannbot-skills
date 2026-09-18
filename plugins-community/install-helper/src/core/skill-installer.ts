@@ -21,6 +21,7 @@ import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import { getAllCategories, findSkill, getAllSkills } from "./skill-registry.js";
 import { addSkillsToRecord, removeSkillsFromRecord, getInstalledSkills } from "./record.js";
+import { instantiateIssueHandlerConfig, shouldInitializeIssueHandlerConfig } from "./plugin-installer.js";
 import { selectTheme, checkboxTheme } from "../ui/theme.js";
 import { confirm } from "@inquirer/prompts";
 
@@ -113,6 +114,9 @@ export async function installSkills(
 
   if (installedIds.length > 0) {
     addSkillsToRecord(installedIds, tool, level, installPath);
+    if (shouldInitializeIssueHandlerConfig(level, installedIds)) {
+      instantiateIssueHandlerConfig(repoPath, installPath);
+    }
   }
 
   return results;

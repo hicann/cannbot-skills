@@ -274,8 +274,8 @@
         },
         "eval_mode": "text"
       },
-      "prompt": "PR 创建流程已执行 git push -u origin feature-x，命令返回成功。gitcode-toolkit 应该仅根据 push 退出码就认定远程分支已就绪吗？",
-      "expected_output": "应说明 push 成功后还要用 git ls-remote --heads <remote> <branch> 只读回查远程分支，并校验远程 SHA 与已确认的本地 commit SHA 一致。回查缺失、分支或 SHA 不匹配时不得标记完成，也不得自动改换 remote/分支。",
+      "prompt": "只说明流程，不执行 Git 操作：已获确认的提交通过 git push -u origin feature-x 推送，命令返回成功。请依据 gitcode-toolkit 的 PR 创建流程，说明能否据此认定远程分支已就绪、还需要哪些只读验证、满足什么条件才算完成，以及验证失败或不匹配时如何处理。",
+      "expected_output": "1. 不能仅凭 push 退出码认定远程分支已就绪；应使用 git ls-remote --heads origin feature-x 或等价的只读查询核对指定远端分支。2. 校验远端分支的 SHA 与本次已确认的本地 commit SHA 一致，不能只确认分支存在。3. 回查失败、结果为空、分支或 SHA 不匹配时不得标记完成或继续创建 PR。4. 沿用已确认的 remote 和分支，不得为绕过验证失败而自动改换目标。",
       "expectations": [],
       "files": []
     },

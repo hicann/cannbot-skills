@@ -228,10 +228,10 @@ python infra/gitcode-toolkit/scripts/fetch_pr_context.py --repo cann/ops-math --
 使用统一状态机处理 GitCode Issue，公开名称和单 Issue 入口保持不变，同时支持：
 
 - **显式单 Issue**：从 URL 推导目标仓库，不受批量时间窗或 `no_attention` 过滤。已有回复、责任人或 PR 作为诊断证据，用于避免重复动作。
-- **当前仓库批量处理**：默认只对 `need_attention` 做获取、分类、诊断并生成动作预览；用户批准当前仓库、Issue 清单和动作范围后，才执行评论、指派或代码交付。
+- **当前仓库批量处理**：只推进责任范围内的 `need_attention`；默认保存首响草稿供审核，也可通过仓库配置开启自动首响和负责人转交。代码交付仍须基于最终方案和验证结果单独确认。
 - **只回复**：用户明确说“只回复 / 答疑 / 不改代码”时，仅做有证据的文字诊断、回评与 GET 回查，不创建分支、commit、push 或 PR。
 
-代码修复在受管 worktree 内执行，且必须通过环境一致性、稳定复现、最终根因、最小方案和测试门禁。单 Issue 的 PR 路径有三类业务确认点：修改前确认根因与方案；每条外部评论展示目标和完整正文后确认；验证完成后，用一次聚合确认覆盖精确暂存、commit、功能分支 push、创建 PR 和首次触发 CI。直接推送上游不包含在这三类授权中，commit 形成后还要单独确认 exact remote、目标分支和 commit SHA。PR 只创建、不自动合并。每次运行最后生成可审计的精简 Markdown 报告。
+代码修复在受管 worktree 内执行，且必须通过环境一致性、稳定复现、最终根因、最小方案和测试门禁。`auto-response` 控制首响及明确负责人转交，`auto-assign` 进一步允许临时指派最可能的候选；两者默认关闭，且都不授权新追问、关闭 Issue、修改代码或交付 PR。验证完成后，用一次聚合确认覆盖精确暂存、commit、功能分支 push、创建 PR 和首次触发 CI。直接推送上游仍需在 commit 形成后单独确认 exact remote、目标分支和 commit SHA。PR 只创建、不自动合并。每次运行最后生成可审计的精简 Markdown 报告。
 
 仓库特定配置、分类数据、缓存、复现证据和处理报告统一放在目标仓库的
 `.cannbot/gitcode-issue-handler/`；最新报告为 `reports/latest.md`。新配置优先，仓根旧配置

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ SPEC = importlib.util.spec_from_file_location("auto_close_stale_issues", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 AUTO_CLOSE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUTO_CLOSE)
+from responsibility import policy_digest
 
 NOW = datetime(2026, 8, 11, 8, 0, tzinfo=timezone.utc)
 POLICY = AUTO_CLOSE.ClosePolicy(now=NOW, inactive_hours=48)
@@ -230,6 +232,50 @@ class TestEligibility:
 
         assert result["eligible"] is True
 
+    def test_local_review_is_required_and_api_review_is_not_trusted(self, tmp_path) -> None:
+        issue = question_issue([], responsibility_review={
+            "level": "handle", "summary": "api supplied", "evidence": ["api"]
+        })
+        policy = {"handle": ["question"], "list-only": [], "ignore": []}
+
+        without_local = AUTO_CLOSE._apply_local_responsibility_review(issue, {})
+        decisions, candidates = AUTO_CLOSE._evaluate_issues(
+            [without_local], POLICY, {}, policy
+        )
+        assert decisions["42"]["reason"] == "responsibility_pending"
+        assert candidates == []
+
+        review = {
+            "level": "handle",
+            "summary": "人工确认属于本仓职责",
+            "evidence": ["reviewed locally"],
+            "policy_digest": policy_digest(policy),
+        }
+        review_file = tmp_path / "reviews.json"
+        review_file.write_text(json.dumps([{
+            "iid": 42, "responsibility_review": review,
+        }]), encoding="utf-8")
+        reviews = AUTO_CLOSE._load_responsibility_reviews(str(review_file))
+        reviewed = AUTO_CLOSE._apply_local_responsibility_review(issue, reviews)
+        assert reviewed["responsibility_review"] == review
+        assert AUTO_CLOSE._evaluate_issues([reviewed], POLICY, {}, policy)[1] == []
+
+    def test_only_handle_review_can_be_candidate(self) -> None:
+        policy = {"handle": ["question"], "list-only": ["docs"], "ignore": ["spam"]}
+        def reviewed(level):
+            return {
+                "level": level, "summary": "人工审查", "evidence": ["local"],
+                "policy_digest": policy_digest(policy),
+            }
+        issues = [
+            question_issue([], iid=1, responsibility_review=reviewed("list-only")),
+            question_issue([], iid=2, responsibility_review=reviewed("ignore")),
+        ]
+        decisions, candidates = AUTO_CLOSE._evaluate_issues(issues, POLICY, {}, policy)
+        assert decisions["1"]["reason"] == "responsibility_list-only"
+        assert decisions["2"]["reason"] == "responsibility_ignore"
+        assert candidates == []
+
     def test_direct_pr_link_is_detected(self) -> None:
         issue = question_issue(
             [],
@@ -309,6 +355,7 @@ class TestCloseWorkflow:
         assert result["status"] == "closed"
         api_post.assert_called_once()
         api_patch.assert_called_once()
+        assert api_patch.call_args.kwargs["json_data"] == {"state": "close"}
 
     def test_failed_comment_verification_prevents_close(self) -> None:
         old_reply = comment("maintainer", "这是预期行为。", NOW - timedelta(hours=72))

@@ -430,5 +430,89 @@ describe("plugin-installer", () => {
       // project-level symlink must be created even when pull fails
       expect(existsSync(join(testDir, "ext-repo"))).toBe(true);
     });
+
+    it("instantiates issue-handler config templates only after successful install", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const skillDir = join(testDir, "infra", "gitcode-issue-handler");
+      const assetsDir = join(skillDir, "assets");
+      mkdirSync(assetsDir, { recursive: true });
+      writeFileSync(join(assetsDir, "classify_config.yaml.template"), "classify: default\n");
+      writeFileSync(join(assetsDir, "operator_owners.yaml.template"), "owners: {}\n");
+      mkdirSync(join(skillDir, "scripts"), { recursive: true });
+      writeFileSync(join(skillDir, "scripts", "SKILL.md"), "# Issue handler");
+
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const plugin = {
+        id: "my-plugin", dir: "my-plugin", displayName: "My Plugin", script: "init.sh",
+        aliases: [], skills: 1, agents: 0, description: "", configFile: "AGENTS.md",
+        installSkills: [{ dir: "infra/gitcode-issue-handler", skills: [{ name: "scripts", as: "gitcode-issue-handler" }] }],
+        installAgents: [],
+      };
+
+      const result = await installViaManifest(plugin, testDir, "opencode", "project", testDir);
+      expect(result.success).toBe(true);
+      expect(readFileSync(join(testDir, ".cannbot/gitcode-issue-handler/config/classify_config.yaml"), "utf-8"))
+        .toBe("classify: default\n");
+      expect(readFileSync(join(testDir, ".cannbot/gitcode-issue-handler/config/operator_owners.yaml"), "utf-8"))
+        .toBe("owners: {}\n");
+    });
+
+    it("preserves canonical and legacy issue-handler config on repeat install", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const assetsDir = join(testDir, "infra", "gitcode-issue-handler", "assets");
+      mkdirSync(assetsDir, { recursive: true });
+      writeFileSync(join(assetsDir, "classify_config.yaml.template"), "template\n");
+      writeFileSync(join(assetsDir, "operator_owners.yaml.template"), "template\n");
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(join(pluginDir, "skills", "gitcode-issue-handler"), { recursive: true });
+      writeFileSync(join(pluginDir, "skills", "gitcode-issue-handler", "SKILL.md"), "# Issue handler");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const plugin = {
+        id: "my-plugin", dir: "my-plugin", displayName: "My Plugin", script: "init.sh",
+        aliases: [], skills: 1, agents: 0, description: "", configFile: "AGENTS.md",
+        installSkills: [{ dir: "my-plugin/skills", skills: ["gitcode-issue-handler"] }], installAgents: [],
+      };
+      const canonicalDir = join(testDir, ".cannbot/gitcode-issue-handler/config");
+      mkdirSync(canonicalDir, { recursive: true });
+      writeFileSync(join(canonicalDir, "classify_config.yaml"), "user canonical\n");
+      writeFileSync(join(testDir, "operator_owners.yaml"), "legacy user\n");
+
+      await installViaManifest(plugin, testDir, "opencode", "project", testDir);
+      expect(readFileSync(join(canonicalDir, "classify_config.yaml"), "utf-8")).toBe("user canonical\n");
+      expect(readFileSync(join(canonicalDir, "operator_owners.yaml"), "utf-8")).toBe("legacy user\n");
+      expect(readFileSync(join(testDir, "operator_owners.yaml"), "utf-8")).toBe("legacy user\n");
+
+      writeFileSync(join(assetsDir, "classify_config.yaml.template"), "new template\n");
+      await installViaManifest(plugin, testDir, "opencode", "project", testDir);
+      expect(readFileSync(join(canonicalDir, "classify_config.yaml"), "utf-8")).toBe("user canonical\n");
+    });
+
+    it("does not create issue-handler config for unrelated skills", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const assetsDir = join(testDir, "infra", "gitcode-issue-handler", "assets");
+      mkdirSync(assetsDir, { recursive: true });
+      writeFileSync(join(assetsDir, "classify_config.yaml.template"), "template\n");
+      writeFileSync(join(assetsDir, "operator_owners.yaml.template"), "template\n");
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(join(pluginDir, "skills", "other-skill"), { recursive: true });
+      writeFileSync(join(pluginDir, "skills", "other-skill", "SKILL.md"), "# Other");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const plugin = {
+        id: "my-plugin", dir: "my-plugin", displayName: "My Plugin", script: "init.sh",
+        aliases: [], skills: 1, agents: 0, description: "", configFile: "AGENTS.md",
+        installSkills: [{ dir: "my-plugin/skills", skills: ["other-skill"] }], installAgents: [],
+      };
+      await installViaManifest(plugin, testDir, "opencode", "project", testDir);
+      expect(existsSync(join(testDir, ".cannbot/gitcode-issue-handler"))).toBe(false);
+    });
+
+    it("does not initialize repository config for global installs", async () => {
+      const { shouldInitializeIssueHandlerConfig } = await import("../src/core/plugin-installer.js");
+      expect(shouldInitializeIssueHandlerConfig("global", ["gitcode-issue-handler"])).toBe(false);
+      expect(shouldInitializeIssueHandlerConfig("project", ["gitcode-issue-handler"])).toBe(true);
+      expect(shouldInitializeIssueHandlerConfig("project", ["other-skill"])).toBe(false);
+    });
   });
 });

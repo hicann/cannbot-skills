@@ -103,6 +103,40 @@ describe("skill-installer", () => {
       expect(results[0].success).toBe(false);
     });
 
+    it("initializes issue-handler config after project-level skill install", async () => {
+      const { installSkills } = await import("../src/core/skill-installer.js");
+      const { initFromScan } = await import("../src/core/skill-registry.js");
+      const { removeSkillsFromRecord } = await import("../src/core/record.js");
+      const repoPath = join(testDir, "repo");
+      const skillDir = join(repoPath, "infra", "gitcode-issue-handler");
+      mkdirSync(join(skillDir, "assets"), { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "---\nname: gitcode-issue-handler\n---\n");
+      writeFileSync(join(skillDir, "assets", "classify_config.yaml.template"), "auto-response: false\n");
+      writeFileSync(join(skillDir, "assets", "operator_owners.yaml.template"), "operators: {}\n");
+
+      initFromScan([{
+        id: "gitcode-issue-handler",
+        description: "test",
+        source: "infra",
+        filePath: join(skillDir, "SKILL.md"),
+      }]);
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        const results = await installSkills(["gitcode-issue-handler"], "opencode", "project", repoPath);
+        expect(results).toEqual([{ skillId: "gitcode-issue-handler", success: true }]);
+        const configDir = join(testDir, ".cannbot", "gitcode-issue-handler", "config");
+        expect(readFileSync(join(configDir, "classify_config.yaml"), "utf-8"))
+          .toBe("auto-response: false\n");
+        expect(readFileSync(join(configDir, "operator_owners.yaml"), "utf-8"))
+          .toBe("operators: {}\n");
+      } finally {
+        removeSkillsFromRecord(["gitcode-issue-handler"], "opencode", "project", testDir);
+        process.chdir(origCwd);
+      }
+    });
+
     it("S2: does not delete existing symlink when source path is broken", async () => {
       const { installSkills } = await import("../src/core/skill-installer.js");
       const { initFromScan } = await import("../src/core/skill-registry.js");

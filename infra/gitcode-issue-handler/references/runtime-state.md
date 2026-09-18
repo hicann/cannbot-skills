@@ -1,179 +1,31 @@
-# 运行时：授权与状态契约
+# 运行时：最小授权与状态契约
 
 ## 读取时机
 
-仅真实执行请求在步骤 -1 与 `runtime-setup.md` 一起完整读取本文件。`policy_query` 不建立
-运行状态。执行模式开始时建立唯一运行状态，各阶段 reference 只更新自己负责的字段，
-不另建平行口径；条件字段不适用时可以省略，但不得用虚假值补齐。
+真实执行请求在步骤 -1 初始化唯一运行状态时读取本文件；`policy_query` 不建立状态，也不读取执行阶段 reference。完整字段、枚举和兼容字段见 [runtime-state-schema.md](runtime-state-schema.md)，只有当前阶段需要的字段才按需读取。
 
-## 初始化授权模式
+## 初始化
 
-在首次真实操作前记录授权模式，但不要把任一能力检查结果当成写操作授权：
+- `single`、`batch` 均从 `authorization_mode: interactive` 开始。用户说“处理 Issue”“自动执行”不产生批次交付批准；首响、关联与指派可按 [automation.md](automation.md) 的配置及会话授权执行。
+- 创建一个 `run_id`，记录 `mode`、时间、`overall_status: running`、`capability_checks`、目标仓库和后续阶段待填字段；不为补齐 schema 执行环境探测；不得用虚假值补齐条件字段。
+- 真实操作按阶段更新同一状态，不另建平行口径；条件字段不适用时省略。每次分类、诊断、复现、修改、验证、授权、发布、回查或状态转换后立即写入结果和证据。
+- 各阶段只更新自己负责的字段。未进入的能力保持 `not_started`，终态可记 `not_required`；能力状态仅在对应真实操作紧前更新，能力就绪不等于业务写入授权。外部写入必须记录稳定 `operation_id`、授权证据、结果和回查证据。
 
-- `single` 和 `batch` 始终先设置 `authorization_mode: interactive`。用户最初要求
-  “处理 Issue”“批量自动执行/auto apply”或类似目标只授权分析，不得在初始化时设置
-  `approved_batch`。
-- 完成实际 Issue 的诊断，并在受管 worktree 中形成稳定复现、未提交 diff 和本地验证
-  结果后，按 `delivery-confirmation.md` 展示当前仓库、Issue 清单和全部实际适用操作。
-  只有用户基于该精确预览明确批准，`batch` 才切换为 `approved_batch`；`single` 保持
-  `interactive` 并记录统一检查点证据。
-- `approved_batch` 的状态必须同时记录 `authorization_source: explicit_user_approval`、
-  `execution_confirmation_source: post_analysis_user_approval`、仓库、Issue 范围、operation
-  IDs、交付模式、预览摘要和当前会话批准证据。缺任一项都回退到 `interactive`。
-- `direct-push` 不得写入批次授权范围；它始终在 commit 形成后单独确认。
+## 授权与回复
 
-完整字段和检查点复用规则见本 Skill 的
-[authorization-contract.md](authorization-contract.md)。
+授权模型、回复检查点、批次批准失效条件和 direct-push 独立确认统一以 [authorization-contract.md](authorization-contract.md) 为准；本文件不重复其操作表。
 
-## 状态结构
+`response_status` 独立于首响 SLA 和解决状态。新增追问会使本轮响应重新待处理，旧评论不能自动通过门禁；`verified/reused` 必须有本轮适用的 GET 证据，`waived_by_user` 留用户原话。`exempt_self_authored_pr` 只用于已核验同作者 PR 的免首响路径，不计首响成功；由 assignee 与作者同账号确立的 `self_assigned/no_attention` 仅保留分类证据，不伪造评论结果或本轮处理记录。历史失效自提且已有负责人时保留豁免及未闭环状态。
+每个后续 operation 的 `depends_on` 引用该回复或适用的历史/豁免证据。
 
-```yaml
-run:
-  run_id:
-  mode: single | batch
-  started_at:
-  completed_at:
-  overall_status: running | waiting_for_input | completed | partial | blocked | no_issues
-  authorization_mode: interactive | approved_batch
-  authorization_source: default | explicit_user_approval
-  authorization_scope: {}
-  authorization_evidence: {}
-  execution_confirmation_status: not_required | pending | approved | rejected | invalidated
-  execution_preview_path:
-  execution_preview_digest:
-  execution_approved_at:
-  execution_confirmation_source: post_analysis_user_approval
-  direct_push_confirmation_status: not_required | pending | approved | rejected
-  capability_checks:
-    api: not_started | ready | waiting_for_input | blocked | not_required
-    git: not_started | ready | blocked | not_required
-    tmp: not_started | ready | blocked | not_required
-    author: not_started | ready | blocked | not_required
-  pending_user_inputs:
-    - input_id: gitcode_token
-      capability: api
-      reason: authenticated_gitcode_write
-      status: requested | resolved
-      request_count: 1
-      requested_at:
-      resume_from:
-  deferred_operator_owner_requests: []
-  operator_owner_request_status: collecting | ready | requested | resolved | not_needed
-  sync_completed: false
-  knowledge_refresh_status: not_started | fresh | refreshed | stale_fallback | unavailable
-  knowledge_refresh_mode: none | skip | full | incremental
-  knowledge_snapshot_usable: false
-  knowledge_corpus_path:
-  repository:
-  repository_root:
-  base_branch: master
-  base_ref: origin/master
-  base_commit:
-  delivery_mode: pr | direct-push
-  target_remote_branch: origin/master
-  worktree_root:
-  worktree_manifest:
-  time_scope:
-  issues_scanned_total: 0
-  issues_total: 0
-  report_path:
-  report_generated: false
+## 能力失败与恢复
 
-issues:
-  - iid:
-    handled_in_run: true
-    url:
-    title:
-    author:
-    bucket:
-    category:
-    reason:
-    problem_summary:
-    issue_age_days:
-    first_response_sla:
-    conversation_state: awaiting_maintainer | maintainer_replied | awaiting_reporter | awaiting_assignee | reporter_followup | assignee_followup | reopened_followup
-    waiting_on: maintainer | reporter | assignee
-    latest_reporter_comment_id:
-    latest_maintainer_comment_id:
-    followup_pending_since:
-    followup_sla: pending | at_risk | breached | unknown
-    reopen_required: false
-    activate_required: false
-    resolution_status:
-    resolution_metric_reason:
-    signals: []
-    required_environment: {}
-    environment_check: {}
-    root_cause_hypothesis:
-    proposed_solution_type:
-    evidence: []
-    operator_name:
-    operator_owner:
-    operator_owner_source: config | user | none
-    operator_handling_decision: delegate | direct | pending
-    assignment_status: not_started | verified | failed | not_applicable
-    reproduction_status:
-    final_root_cause:
-    solution_plan:
-    operation_authorizations: []
-    group_id:
-    handling_status:
-    result_summary:
-    process_log: []
-    reproduction_attempts: []
-    comments: []
-    blockers: []
-    remaining_risks: []
-    next_action:
+能力检查的选择、顺序和失败路由以 [runtime-capability-checks.md](runtime-capability-checks.md) 为准。一般失败只阻断依赖该能力的操作；缺少 Token 且后续已确定需要认证写操作时，按以下契约暂停整轮：
 
-groups:
-  - group_id:
-    members: []
-    theme:
-    branch:
-    planned_paths: []
-    exclusive_resources: []
-    conflicts_with: []
-    execution_wave:
-    worktree_path:
-    lifecycle_status: planned | active | blocked | published | no_changes | cancelled_clean | cleaned
-    changed_files: []
-    tests: []
-    validation_status:
-    commit_sha:
-    pr_url:
-    ci_status:
+1. 保存元数据，将 `overall_status` 和 `capability_checks.api` 设为 `waiting_for_input`，创建或复用唯一 `pending_user_inputs` 项 `input_id: gitcode_token`，记录 `request_count: 1` 与准确 `resume_from`，不保存 Token 明文。
+2. 只询问一次并停止 API、Issue 拉取、知识刷新、代码诊断和测试读取。未解决项存在时不重复询问或重新初始化。
+3. 用户补充 Token 后标记输入 `resolved`，重跑 `api` 检查；通过后恢复 `running`/`ready`，从 `resume_from` 继续，不重复已完成阶段。
 
-external_operations:
-  - operation_id:
-    kind: issue_comment | issue_assignment | issue_state_change | prepared_source_change | commit | branch_push | pr_create | first_ci | direct_push
-    issue_iids: []
-    target:
-    summary:
-    body:
-    planned_files: []
-    depends_on: []
-    status: prepared | planned | approved | executed | skipped | failed
-    authorization_evidence:
+## 状态骨架
 
-metrics: {}
-internal_blockers: []
-validation_boundaries: []
-cleanup: {}
-artifacts: {}
-```
-
-## 更新规则
-
-每次分类、诊断、复现、修改、验证、授权、发布、回评或状态转换后立即追加必要结果和证据，
-不得在步骤 9 凭记忆重建过程。字段的阶段性写入规则以对应 reference 为准。
-
-能力状态只在对应真实操作紧前更新。未进入该路径时保持 `not_started` 或在运行终态记为
-`not_required`，不得为了补齐状态而执行环境探测。API Token 只保存在当前会话，不写入状态。
-
-缺 Token 时只保存元数据，不保存 Token 明文：把 `overall_status` 和
-`capability_checks.api` 设为 `waiting_for_input`，追加或复用唯一
-`input_id: gitcode_token`，并把下一条尚未执行的操作写入 `resume_from`。同一未解决输入的
-`request_count` 固定为 `1`；它存在时不得再次询问。用户补充 Token 后把该项标为
-`resolved`，API 检查通过后恢复 `overall_status: running`、`capability_checks.api: ready`，
-从 `resume_from` 继续，不重新初始化、不重复已完成阶段。
+初始化至少包含 `run`、`issues`、`groups`、`external_operations`、`internal_blockers`；按需填充 schema 中字段。实际处理项在 `issues` 中标记 `handled_in_run`，仅列举项放入顶层 `listed_issues`，报告生成不得丢失后者。

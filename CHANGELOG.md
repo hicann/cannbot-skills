@@ -1,7 +1,11 @@
 ## 🔥 更新日志
 ### 【2026-09-16】
+#### 新特性 New Features
+- 【GitCode 协作】`gitcode-issue-handler` 新增 `auto-response` 与 `auto-assign` 配置：可在当前处理请求范围内自动首响、转交明确负责人，并可选临时指派最可能的候选人；分类器保持只读，跟进、关闭 Issue 和代码交付仍需独立授权。Claude Marketplace `infra-skills` 升级为 `1.2.0`。
+
 #### 缺陷修复 Bug Fixes
 - 【ascendc-runtime-debug】依据 asc-devkit 官方 API 文档修正 507035 小节的对齐规则（issue #185）：DataCopyPad 的 blockLen 无 32B 对齐要求（支持非对齐搬运，只需为 sizeof(T) 的整数倍、单位为字节、传有效长度，禁止向上对齐），真正的 32B 约束在 UB 端起始地址（GM→UB 为 dst、UB→GM 为 src）；根因树高置信度改为"UB 端地址非 32B 对齐（含 VEC 计算指令操作数）"与"GM→UB padParams 违规（leftPadding/rightPadding ≤ 32B）"，补齐 issue 指出的两个缺失根因；Step 2 示例修正 blockLen 单位错误（原示例传元素个数）并区分 GM→UB（4 参数含 padParams）/UB→GM（3 参数）两个方向及 stride 单位差异（GM 侧字节、UB 侧 dataBlock）；同步修正 SKILL.md 速查表与 error_codes.md 表述；evals.json 的 507035 用例补充防回归锚点（不应声称 blockLen 必须 32B 对齐）。仅收录有实证或官方明文触发向量核异常的根因，数据正确性类问题（静默截断/NOP/地址重叠）不列入 507035 排查路径。
+- 【安装部署】install-helper `v1.1.17` 修复以独立 Skill 方式安装 `gitcode-issue-handler` 时未初始化项目配置的问题；项目级安装现与 Plugin 安装一致，保留既有配置并仅补齐缺失模板。
 
 #### 下线治理 Deprecation
 - 【cannbot-insight】插件已迁移至独立仓库维护，从本仓移除 `plugins-community/cannbot-insight/` 全部内容。

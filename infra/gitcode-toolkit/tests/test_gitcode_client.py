@@ -298,3 +298,23 @@ class TestPost:
             "body": "text",
             "access_token": "secret-token",
         }
+
+    @staticmethod
+    def test_post_json_preserves_top_level_array_and_uses_query_token() -> None:
+        session = FakeSession(SimpleNamespace(status_code=200))
+
+        response = CLIENT.api_post_json(
+            session,
+            "https://api.example.test/pulls/7/issues",
+            "secret-token",
+            json_data=[42],
+        )
+
+        assert response.status_code == 200
+        _, kwargs = session.calls[0]
+        assert kwargs["params"] == {"access_token": "secret-token"}
+        assert kwargs["headers"] == {
+            "PRIVATE-TOKEN": "secret-token",
+            "Accept": "application/json",
+        }
+        assert kwargs["json"] == [42]

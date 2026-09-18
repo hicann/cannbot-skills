@@ -1,33 +1,33 @@
 # Issue Handler 聚合授权契约
 
-## 读取时机
+## 读取时机与边界
 
-初始化运行状态时读取本文件；生成统一执行预览、复用批准证据或执行自动闭环前再次核对。
-GitCode 写入的通用安全边界仍以同级 `gitcode-toolkit` 的
-[通用授权边界](../../gitcode-toolkit/references/authorization-contract.md) 为准，本文只定义
-Issue Handler 的业务授权模型。
+初始化状态时读取；生成统一执行预览、复用批准证据或执行自动闭环前再次核对。本文只定义 Issue Handler 业务授权；GitCode 写入通用边界仍以同级 `gitcode-toolkit/references/authorization-contract.md` 为准。
 
-## 授权模式
+能力检查、运行平台工具审批和仅提供责任人 login 的方案选择都不是业务写入授权。用户明确要求对准确 Issue 执行具体指派等操作时，保存并复用该操作授权。
 
-| 模式 | 适用范围 | 默认行为 |
+首响、安全门禁通过的 PR 关联、明确 owner/有效 PR 作者转交、候选临时指派按 [automation.md](automation.md) 的配置策略执行：当前处理请求限定目标，开启的开关限定操作；记录 `authorization_source: config_policy`、配置快照、Issue 和 operation IDs，保持 `interactive`。其余操作仍遵循下述批准流程。
+
+## 模式与批准
+
+| 模式 | 范围 | 行为 |
 | --- | --- | --- |
-| `interactive` | 单 Issue，以及尚未取得分析后统一批准的批处理 | 只分析和生成预览；写前必须有覆盖当前 operation 的明确确认 |
-| `approved_batch` | 用户明确批准过精确 Issue 清单和完整操作预览的批量处理 | 仅执行批准清单内的 operation，不逐项重复确认 |
+| `interactive` | 单 Issue，或未获分析后批准的批处理 | 分析和预览；已有覆盖当前 operation 的明确授权即可执行并回查 |
+| `approved_batch` | 用户批准精确 Issue 清单和完整操作预览的批处理 | 只执行批准清单内 operation，不逐项重复确认 |
 
-`single` 和 `batch` 都从 `interactive` 开始。初始“处理 Issue”“自动处理”或配置文件声明
-不能产生 `approved_batch`。只有用户基于实际 Issue、最终 diff、验证结果和完整操作预览明确
-批准，`batch` 才能切换为 `approved_batch`；`single` 保持 `interactive`，复用该次确认的
-operation 证据。
+`single`、`batch` 都从 `interactive` 开始；初始“处理/自动处理”或配置声明不能切换模式；两开关授权的首响/指派无需切换。只有基于实际 Issue、最终 diff、验证结果和完整预览的明确批准，`batch` 才切换为 `approved_batch`；`single` 保持 interactive 并复用该检查点证据。批准必须记录 `authorization_source: explicit_user_approval`、`execution_confirmation_source: post_analysis_user_approval`、仓库、Issue 范围、operation IDs、交付模式、预览摘要和会话证据，缺任一项回退 interactive。Issue 集合、文件、正文、状态目标、commit、分支、PR 内容或交付模式变化会使未执行部分失效。
 
-模式未知、批准证据缺失、目标或操作超出作用域时，一律停止尚未执行写入并回到统一预览，
-不得静默扩大批准范围。`approved_batch` 不适用于单 Issue。
+模式未知、批准证据缺失、目标或操作超出 scope 时，停止尚未执行写入并回到统一预览；`approved_batch` 不适用于单 Issue。授权记录至少包括 `mode`、`source`、`scope.repository`、`scope.issue_iids`、`scope.operation_ids`、`scope.delivery_mode`、`approved_at`、检查点和预览摘要。
 
-## 必需上下文
+### 子流程授权上下文
+
+传给子流程的结构如下；从同一运行状态的对应回复/交付检查点派生，不另建平行授权口径。
+`mode/source/scope` 对应 `run.authorization_mode/authorization_source/authorization_scope`；批准时间和证据取实际覆盖该 operation 的检查点，回复批准不能冒充交付批准。
 
 ```yaml
 authorization:
   mode: interactive | approved_batch
-  source: default | explicit_user_approval
+  source: default | explicit_user_approval | config_policy
   scope:
     repository: owner/repo
     issue_iids: []
@@ -39,44 +39,16 @@ authorization:
     preview_digest:
 ```
 
-- `approved_batch` 必须记录当前会话中的明确批准、仓库、精确 Issue 清单、operation IDs、
-  交付模式、批准时间和完整预览摘要。
-- Issue 集合、changed files、评论正文、状态目标、commit、分支、PR 内容或交付模式变化时，
-  未执行 operation 的原批准失效。
-- Token/环境能力检查、算子责任人方案选择和运行平台工具审批都不是业务写入授权。
-- 用户要求“不评论”或缩小范围时，从清单删除对应 operation，并同步缩小批准作用域。
+统一预览可合并已就绪操作，但每项仍是独立 operation：评论（准确 Issue 与完整正文）、指派（Issue/login/操作）、状态迁移（当前与目标状态）及交付（文件、commit、分支、PR 与首次 CI）。评论批准不隐含指派、状态、commit、push 或 PR 批准。用户要求不评论或缩小范围时删除 operation 并同步缩小 scope。正文、目标或依赖实质变化须重新确认尚未执行部分。
 
-## 聚合检查点
+回复检查点按 [delivery-confirmation.md](delivery-confirmation.md) 执行：文字诊断后先完成必要回复，不等待 owner 或代码验证；批次可合并当前就绪回复，不能为交付预览拖延首响。已有合法授权不重问。
 
-分析后统一执行检查点可以覆盖预览中明确列出的多项 operation：
+## Direct-push 与自动闭环
 
-- Issue 评论：精确 Issue 和完整正文；
-- 指派：目标 Issue、目标 login 和用于指派的具体操作；
-- Issue 状态迁移：当前/目标状态名称，以及是否 reopen 核心 state；
-- 交付：精确 changed files、commit message、功能分支 push、PR 标题与完整正文、首次 CI；
-- 批次：上述每项 operation 所属的 Issue 或修复组及其执行顺序。
+`direct-push` 不属于统一执行确认或 `approved_batch`。commit 形成后单独展示 remote URL、目标分支、SHA、保护/共享分支提示和非快进检查，确认前保留本地 commit，不自动改走 PR。
 
-评论获批不隐含指派或状态迁移获批；它们可以放在同一预览中，但必须是独立 operation。
-子流程只执行检查点覆盖的准确 operation，已有合法证据时不重复询问。正文、目标或依赖关系
-实质变化时更新预览摘要并重新确认尚未执行的部分。
+`auto-close-stale` 独立于 `approved_batch`：交互运行逐 Issue 展示固定评论和关闭操作，确认后才 `--apply`；无 `--apply` 保持 dry-run。部署模式仅接受独立记录、覆盖精确仓库和闭环策略的授权，不继承普通处理授权。
 
-## 直接推送
+## 写后回查
 
-direct push 不属于统一执行确认或 `approved_batch`。commit 形成后必须独立展示 remote
-名称与 URL、目标分支、commit SHA、共享/保护分支提示和非快进检查结果，再取得确认。
-没有确认时保留本地 commit，记录 `delivery_waiting_confirmation`，不得自动改走 PR。
-
-## 自动闭环
-
-`auto-close-stale` 是独立维护路径，不继承 `approved_batch`。交互运行时逐 Issue 展示完整
-固定评论和关闭操作，确认后才传 `--apply`；部署模式只接受单独记录、精确约束仓库和策略的
-部署授权。无 `--apply` 时必须保持 dry-run。
-
-## 写后证据
-
-- 评论、指派和 Issue 状态变更后执行 GET 回查；
-- push 后执行 `git ls-remote` 回查；
-- PR 创建后回查源/目标分支和 opened 状态；
-- 回查失败时不得标记 operation 完成，结果未知的非幂等写入先查后重试。
-
-每项外部写入在运行状态中记录 operation ID、授权证据、执行结果和回查证据。
+评论、指派、状态变更后 GET 回查；push 后 `git ls-remote` 回查；PR 创建后回查源/目标分支及 opened 状态。回查失败不得标记完成；结果未知的非幂等写入只做回查，未查清不得重试。每项外部写入写入状态的 `external_operations`，包括 operation ID、授权、执行和回查证据。

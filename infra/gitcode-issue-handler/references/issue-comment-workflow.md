@@ -1,118 +1,50 @@
 # Issue Handler 评论编排
 
-## 读取时机
+## 读取与边界
 
-步骤 2c–2e 形成评论草案、统一执行预览加入评论 operation，或步骤 9 发布最终回评时完整
-读取本文件。GitCode 目标解析、评论 POST/GET、幂等、Token 安全与通用错误处理使用
-`gitcode-toolkit` 的
-[评论通用工作流](../../gitcode-toolkit/references/issue-comment-workflow.md)；本文只定义
-Issue Handler 的业务内容和后续状态编排。
+协调者在步骤 2c–2e 复用、预览、发布评论或步骤 9 发布最终回评时读取本文；只起草正文读 [response-writing.md](response-writing.md)。GitCode 目标解析、评论 POST/GET、幂等、Token 安全、限流和通用错误处理遵循 [gitcode-toolkit 评论工作流](../../gitcode-toolkit/references/issue-comment-workflow.md)。本文只规定 Issue Handler 的业务内容、授权和后续状态编排。
 
-## 内容原则
+首响是否需要发布以 `issue-intake.md` 的账号关系和决策表为准。纯规划汇总不响应；assignee 或任一有效关联 PR 作者与 Issue 作者同账号即自提免首响，需求与缺陷一致，不因另有他人 PR 而取消豁免。自提无负责人只补必要指派；非自提无实质回复时补首响并简述适用 PR 方案。`/assign`、仅 @ 提醒和提出者自己的评论不算维护侧回复，自提豁免也不记为已发布首响。已有负责人且所有 PR 已失效时，按 intake 保留已核验的历史自提豁免。已有准确回复且没有新问题时不得重发；责任人已落实则不为补状态/watch 重新纳入批量响应。需要复用首响执行后续动作时才 GET 核对并记为 `reused`；提出者或责任人有新评论时按跟进顺序回应。用户明确要求回复、删除或重发时，仅执行准确范围。`no_attention` 不批量刷评论。
 
-1. 一句话说明当前状态或下一步，不粘贴长日志、完整堆栈或大段代码。
-2. 结论必须可追溯；涉及 PR/commit 时附链接或编号。
-3. 只写提出者能够理解或采取行动的信息。
-4. 维护侧环境、权限、CI/基础设施失败、内部重试和工具状态只进入内部处理报告。
-5. 评论不得包含 Token、绝对路径、运行目录中的具体文件或其他凭据。
+首响是否直接发送先按 [automation.md](automation.md) 读取两开关；关闭自动首响时保存草稿，审核或明确发送授权后再执行。自动首响不扩展为后续追问的自动回复。
 
-若阻塞原因只是维护侧环境不匹配、依赖或硬件缺失，不发送 Issue 评论。把 Issue 目标
-CANN/源码/SoC 与当前激活环境的对比写入给 Skill 使用者的处理报告。Issue 未声明继续定位
-所需的目标字段时，只询问缺失字段，不披露维护侧环境。
+## 正文与审核
 
-## 业务场景
+起草、复用或审核正文按 [response-writing.md](response-writing.md) 执行；保留完整 `response_review`，质量不足或正式评分再读取其链接的评分表。调查者仅拟稿时无需加载本文的发布流程。
 
-### 处理结果
+## 每轮门禁与依赖
 
-```markdown
-## 处理结论
-<已修复 / 无需代码变更 / 已有解决证据 / 等待补充信息>
+1. 对 `single` 或 `batch/need_attention` 的本轮负责项读取完整问题、最新相关评论和证据，判断未回答诉求；豁免已有响应必须记录 `not_applicable_existing` 及具体依据。
+2. 为每个需新回复的 Issue 写一条与问题相称的完整正文；纯答疑不拆成“已收到”再答复。显式关联 PR 先读描述、状态和相关 diff，对外只概述相关方案、进展与必要适用边界；测试缺口、实现不足等评审意见保留内部。没有显式关联时不搜索、展示潜在修复 PR，给出大致处理方向。正文/评论已明确互引但尚未原生关联的 PR，只有满足 `automation.md` 门禁后才能准备关联；标题相似或历史其他 Issue 的链接本身不够。
+3. 按 [delivery-confirmation.md](delivery-confirmation.md) 回复检查点核对当前会话的准确授权。已授权则复用，不再请求；缺失时展示准确 URL、完整正文、operation ID 和依赖，只确认当前就绪评论，不等待未知 owner、PR、commit、修复或测试。可并行准备独立 Issue。
+4. 首响和新追问回复取得授权后，使用本 Skill 的 `post_triage_comment.py`（`--analysis-file` 可传本项简短分析），由它核对分类结果并复用 toolkit POST/GET；最终结果回评、用户明确指定的额外评论仍用 toolkit `post_issue_comment.py`。核对目标、正文、comment ID 和时间。只有实际成功记 `verified`；预览、POST 成功码、纯 `/assign`、系统消息和仅 @owner 不算完成。失败记 `comment_failed`，保留恢复点并停止该 Issue 的依赖操作，其他独立 Issue 继续。
+5. 非自提指派和其他首响依赖操作须有 `verified` 或当前适用证据充分的 `reused`。有效自提 PR 的补分配例外：无需评论结果，由 `assign_issue.py` 实时核验同作者和关联后直接分配；豁免记 `exempt_self_authored_pr`，不伪造 verified/reused。PR 关联必须先于基于该 PR 作者的临时指派，且两项分别回查。创建前再次 GET；非幂等 POST 结果未知时先回查，禁止盲目重发。回复失败或本轮必需回复失败时，停止该 Issue 的代码/PR 流程。
 
-## 说明
-<一两句话说明根因或结论依据>
+首响/新追问发送命令（不带 `--apply` 仅预览）：
 
-## 变更
-<PR/commit 链接；无代码变更则省略>
-
-## 下一步
-<仅列出提出者可执行的动作；已完成时写“无需进一步操作”>
+```bash
+python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/post_triage_comment.py" \
+  --config <classify_config.yaml> --classification <二次分类输出.json> \
+  --issue-url <准确Issue-URL> \
+  --body-file <本条回复.md> --result-file <本条发送结果.json> --apply
 ```
 
-### 算子转交
+关闭自动首响或回复后续追问时，用户明确批准后附加 `--reply-approved`；`--apply` 本身不表示批准。
 
-没有维护侧有效回复时，先准备有效首响；责任人确定后准备问题摘要和独立指派命令：
+门禁失败回到 intake 补证据、重跑分类；不得改用通用执行器绕过。该检查不替代授权和内容核实。
 
-```markdown
-@<owner> 该 Issue 涉及 `<算子名>` 算子，麻烦您看下。
+用户明确不评论时记录 `waived_by_user` 和原话，按明确范围缩小授权；不能从缺 Token、失败、owner 未知或已有 PR 推导豁免。正常 single/batch 发现核心 closed 即停止该项，不为评论 reopen；核心 open 的状态迁移顺序沿用 `issue-followup.md`。
 
-**问题现象**：<一句话>
-**触发条件**：<最小复现路径>
-**关联文件**：<报错栈或文件路径>
-```
+## 场景状态顺序
 
-```text
-/assign @<owner>
-```
+- **算子转交**：有效首响回查后才 `/assign`；回查 assignee login 与目标 owner 一致才算成功。assignee 回查只证明转交，不证明解决。等待责任人时将 `<当前状态> -> 挂起` 与 assignee watch 纳入预览；责任人新评论先恢复`进行中`再跟进，等待期间不静默关闭。
+- **索要上下文**：评论 GET 成功后才切`挂起`并写 reporter watch；普通受理、进展同步或正在排查不挂起。提出者新评论时，即使已有维护侧回复也在核心仍为 open 时先获授权恢复`进行中`并回查，再处理新内容；新维护响应和下一状态形成后才更新/删除旧 watch。
+- **根因/答疑**：答疑直接回答；根因评论写现象、根因、可确认引入点和下一步，但不冒充最终解决。
 
-`@owner` 只通知用户，不等于指派；纯 `/assign` 不计为有效首响。评论、`/assign` 和 assignee
-回查是相互依赖但独立记录的 operation。只有 assignee login 与目标 owner 大小写无关地
-一致时才算转交成功。
+## 授权、记录与顺序
 
-assignee 回查成功只证明转交完成，不证明 Issue 已解决。仍等待责任人处理时，把自定义状态
-`<当前状态> -> 挂起`和 assignee watch 放入统一预览；获批后按“状态迁移并回查 → watch
-落盘”执行。责任人新增评论时重新进入处理并先恢复`进行中`。等待责任人的 Issue 不参与
-静默自动关闭。
+每条评论是独立 operation，进入回复或交付预览，并必须展示目标 Issue 与完整正文：`single` 使用覆盖当前 operation 的 `interactive` 证据；`approved_batch` 只执行精确 Issue 清单和批准的 operation IDs；`batch/interactive` 缺授权只预览，回复检查点已授权可 POST/GET，无需切换 `approved_batch`。正文或目标实质变化使未执行批准失效；用户不评论则删除该 operation 并缩小范围。
 
-### 索要上下文
+后续操作用 `depends_on` 引用已回查回复或 `reused`/`waived_by_user` 证据；自提仅分配引用已核验的自提豁免。评论回查→指派/状态/watch 回查；责任人或提出者再回复沿同样顺序；commit→push→功能分支回查→PR→首次 CI。依赖失败标记 `skipped`，不得改走未预览替代动作。正文文件和结果文件放本轮运行目录并在恢复时复用；日志/报告记录 Issue、operation ID、comment ID、时间、状态和脱敏摘要，不记录 Token、完整敏感正文或维护侧环境。
 
-```markdown
-## 需要补充的信息
-
-为继续定位，麻烦补充：
-
-- **复现步骤**：触发问题的最小操作序列
-- **版本号**：相关框架、CANN 和算子库版本
-- **环境**：OS 和 NPU 型号
-- **完整日志**：报错堆栈或必要日志片段
-
-## 已确认
-<只列公开且有助于补充信息的验证结论>
-```
-
-只有下一步确实依赖提出者时才进入等待。统一预览同时列出完整评论和自定义状态
-`<当前状态> -> 挂起`，状态操作依赖评论 GET 回查成功。随后按“评论回查 → 状态迁移回查
-→ reporter watch 落盘”执行。普通受理、进展同步或当前处理人正在排查不挂起。
-
-提出者新增评论时不得因已有维护侧回复而跳过。把恢复`进行中`加入统一预览；核心 Issue
-已关闭时还包括 reopen。获批并回查状态后再处理新评论，旧 watch 只在新的维护侧响应成功
-并形成下一状态后更新或删除。
-
-### 答疑与根因同步
-
-答疑只解释经当前代码、文档或可信历史证据确认的行为和正确用法。根因同步应包含现象、
-根因、可确认的引入点和下一步，但不贴完整堆栈或大段代码。根因评论是进展同步，不是最终
-解决结论；修复完成后另发处理结果。
-
-## 授权与执行
-
-所有评论都按 [authorization-contract.md](authorization-contract.md) 作为独立 operation
-进入分析后统一执行预览。每条必须展示目标 Issue 和完整正文：
-
-- `single` 使用覆盖当前 operation 的 `interactive` 检查点证据；
-- `approved_batch` 只执行精确 Issue 清单和批准 operation IDs 内的评论；
-- `batch/interactive` 只生成预览，不 POST；
-- 正文或目标实质变化时，使未执行批准失效并更新预览；
-- 用户明确要求不评论时删除评论 operation 并缩小授权范围。
-
-POST 后按 toolkit 通用流程 GET 回查，不重复询问。回查成功后才能执行依赖该评论的指派、
-状态迁移或 watch 写入；最终失败标记 `comment_failed`，停止依赖操作但不阻断其他独立 Issue
-或代码/PR 流程。
-
-## Handler 限流与日志
-
-所有 handler API attempt 使用目标仓运行缓存中的共享滚动窗口：默认 45 次/60 秒、突发 1。
-状态按 API host 与 Token 的不可逆摘要隔离，只记录请求时间和 429 cooldown，不记录 Token。
-fetch、classify 和后续写入必须复用同一运行缓存。
-
-日志和最终报告记录 Issue、operation ID、评论 ID、时间、状态和脱敏摘要；不得记录 Token、
-完整敏感正文或维护侧环境。
+Handler API attempt 共用目标仓运行缓存的滚动窗口，默认 45 次/60 秒、突发 1；按 API host 和 Token 不可逆摘要隔离，只记录请求时间与 429 cooldown，fetch/classify/写入复用同一缓存。

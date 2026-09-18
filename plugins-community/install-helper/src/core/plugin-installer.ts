@@ -7,7 +7,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
-import { existsSync, mkdirSync, symlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, symlinkSync, realpathSync, readlinkSync, copyFileSync, cpSync, writeFileSync, rmSync, readFileSync, constants as fsConstants } from "fs";
 import { join, basename } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, PluginEntry, PluginManifestExternalRepo, CannbotManifest } from "../types/index.js";
@@ -22,6 +22,59 @@ export interface ManifestInstallResult {
   agentsCount: number;
   errors: string[];
   manifest: CannbotManifest | null;
+}
+
+const ISSUE_HANDLER_ID = "gitcode-issue-handler";
+const ISSUE_HANDLER_CONFIG_FILES = ["classify_config.yaml", "operator_owners.yaml"] as const;
+
+export function shouldInitializeIssueHandlerConfig(level: InstallLevel, installedSkills: string[]): boolean {
+  return level === "project" && installedSkills.includes(ISSUE_HANDLER_ID);
+}
+
+/**
+ * Seed the issue handler's repository-local configuration after a successful
+ * install.  Configuration is deliberately separate from the tool config root:
+ * the same project config must work with every supported AI tool.
+ *
+ * Existing canonical files win.  A former repository-root config is copied to
+ * the canonical location (while retaining the original) before the packaged
+ * template is considered, so an upgrade cannot replace user configuration.
+ */
+export function instantiateIssueHandlerConfig(repoPath: string, targetRepoPath: string): void {
+  const configDir = join(targetRepoPath, ".cannbot", ISSUE_HANDLER_ID, "config");
+  const legacyConfigDir = targetRepoPath;
+
+  try {
+    mkdirSync(configDir, { recursive: true });
+  } catch (error) {
+    logger.warn(`issue-handler config directory creation failed: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  for (const fileName of ISSUE_HANDLER_CONFIG_FILES) {
+    const targetPath = join(configDir, fileName);
+    // existsSync intentionally does not cover a dangling symlink.
+    if (existsSync(targetPath) || isSymlink(targetPath)) continue;
+
+    const legacyPath = join(legacyConfigDir, fileName);
+    const templatePath = join(repoPath, "infra", ISSUE_HANDLER_ID, "assets", `${fileName}.template`);
+    const sourcePath = existsSync(legacyPath) ? legacyPath : templatePath;
+
+    if (!existsSync(sourcePath)) {
+      logger.warn(`issue-handler config source not found: ${sourcePath}`);
+      continue;
+    }
+
+    try {
+      // COPYFILE_EXCL makes the missing-file check safe if another installer
+      // creates the file between the check and the copy.
+      copyFileSync(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") {
+        logger.warn(`issue-handler config install failed for ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
 }
 
 function installLink(source: string, target: string): "symlink" | "copy" | "skipped" | "failed" {
@@ -355,6 +408,10 @@ export async function installViaManifest(
       installedSkills,
       installedAgents
     );
+
+    if (shouldInitializeIssueHandlerConfig(level, installedSkills)) {
+      instantiateIssueHandlerConfig(repoPath, cwd);
+    }
 
     return {
       success: true,

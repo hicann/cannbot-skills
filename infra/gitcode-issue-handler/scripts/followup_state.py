@@ -34,6 +34,7 @@ from gitcode_client import (  # noqa: E402
 
 sys.path.insert(0, str(_HERE))
 from cli_output import write_stdout  # noqa: E402
+from handler_config import ConfigError as HandlerConfigError, load_handler_config, load_template  # noqa: E402
 from runtime_paths import (  # noqa: E402
     CLASSIFY_CONFIG,
     FETCH_CACHE,
@@ -44,10 +45,11 @@ from runtime_paths import (  # noqa: E402
 
 SCHEMA_VERSION = "issue-followup.v1"
 DEFAULT_STATE_FILE = path_text(FOLLOWUP_WATCH_STATE)
-DEFAULT_WAITING_STATUS = "挂起"
-DEFAULT_ACTIVE_STATUS = "进行中"
-DEFAULT_POLL_HOURS = 24
-DEFAULT_STALE_HOURS = 48
+_DEFAULT_FOLLOWUP = load_template()["follow_up"]
+DEFAULT_WAITING_STATUS = _DEFAULT_FOLLOWUP["waiting_status"]
+DEFAULT_ACTIVE_STATUS = _DEFAULT_FOLLOWUP["active_status"]
+DEFAULT_POLL_HOURS = _DEFAULT_FOLLOWUP["poll_hours"]
+DEFAULT_STALE_HOURS = _DEFAULT_FOLLOWUP["stale_hours"]
 WAITING_TARGETS = {"reporter", "assignee"}
 LOGGER = logging.getLogger(__name__)
 
@@ -95,21 +97,10 @@ def _read_json(path: Path) -> dict:
 
 def load_followup_config(path: str | Path | None = None) -> dict:
     """Load only the shared follow_up settings without importing classifier logic."""
-    config_path = Path(path) if path else CLASSIFY_CONFIG
-    if not config_path.exists():
-        if path:
-            raise ValueError(f"Error: config file does not exist: {config_path}")
-        return {}
     try:
-        import yaml
-
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except ImportError as exc:
-        raise ValueError("Error: PyYAML is required to read follow-up config") from exc
-    except (OSError, ValueError) as exc:
+        raw = load_handler_config(path)
+    except HandlerConfigError as exc:
         raise ValueError(f"Error: cannot read follow-up config — {exc}") from exc
-    if not isinstance(raw, dict):
-        raise ValueError("Error: follow-up config must contain a YAML object")
     followup = raw.get("follow_up") or {}
     if not isinstance(followup, dict):
         raise ValueError("Error: follow_up config must be an object")

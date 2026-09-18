@@ -27,6 +27,7 @@ sys.path.insert(0, str(_HERE))
 import classify_issues as classifier  # noqa: E402
 import fetch_issues as issue_api  # noqa: E402
 import followup_state  # noqa: E402
+from responsibility import review_responsibility  # noqa: E402
 from cli_output import write_stdout  # noqa: E402
 
 from gitcode_client import (  # noqa: E402
@@ -37,19 +38,11 @@ from gitcode_client import (  # noqa: E402
 )
 from runtime_paths import rate_limit_path  # noqa: E402
 
-DEFAULT_INACTIVE_HOURS = 48.0
-DEFAULT_COMMENT = (
-    "您好，当前问题已经解决，我们计划关闭此issue，后续您如果还有疑问，"
-    "欢迎重新给我们提issue，我们会继续提供问题支撑"
-)
-DEFAULT_QUESTION_LABELS = ("question", "问题咨询", "咨询")
-DEFAULT_QUESTION_TITLE_MARKERS = (
-    "[question|",
-    "[question]",
-    "问题咨询",
-    "咨询",
-    "请问",
-)
+_DEFAULT_AUTO_CLOSE = classifier.load_template("classify_config")["auto_close"]
+DEFAULT_INACTIVE_HOURS = _DEFAULT_AUTO_CLOSE["inactive_hours"]
+DEFAULT_COMMENT = _DEFAULT_AUTO_CLOSE["comment"]
+DEFAULT_QUESTION_LABELS = tuple(_DEFAULT_AUTO_CLOSE["question_labels"])
+DEFAULT_QUESTION_TITLE_MARKERS = tuple(_DEFAULT_AUTO_CLOSE["question_title_markers"])
 PR_URL_RE = re.compile(
     r"https?://gitcode\.com/[^\s)]+/(?:pull|pulls|merge_requests)/\d+",
     re.IGNORECASE,
@@ -89,6 +82,12 @@ class IssueApiContext(NamedTuple):
     token: str
 
 
+class CloseContext(NamedTuple):
+    followup_watch: dict | None = None
+    responsibility_policy: dict | None = None
+    responsibility_review: dict | None = None
+
+
 class RuntimeConfig(NamedTuple):
     """Validated command configuration."""
 
@@ -100,6 +99,8 @@ class RuntimeConfig(NamedTuple):
     apply_changes: bool
     followup_state_file: str
     followup_watches: dict
+    responsibility_policy: dict
+    responsibility_reviews: dict
 
 
 def _write_stdout(text: str) -> None:
@@ -110,19 +111,8 @@ def _write_stdout(text: str) -> None:
 def load_settings(path: str | None, *, allow_legacy: bool = True) -> dict:
     """Load shared repository settings and optional auto_close overrides."""
     cfg = classifier.load_config(path, allow_legacy=allow_legacy)
-    config_path = classifier.resolve_config_path(path, allow_legacy=allow_legacy)
-    raw = {}
-    try:
-        import yaml
-
-        with config_path.open("r", encoding="utf-8") as stream:
-            raw = yaml.safe_load(stream) or {}
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"Error: cannot read auto_close config — {exc}") from exc
-    auto_close = raw.get("auto_close") or {}
-    if not isinstance(auto_close, dict):
+    if not isinstance(cfg.get("auto_close"), dict):
         raise ValueError("Error: 'auto_close' config must be an object")
-    cfg["auto_close"] = auto_close
     return cfg
 
 
@@ -342,23 +332,41 @@ def _comment_exists(comments: list[dict], body: str) -> bool:
     return any(str(comment.get("body") or "").strip() == body for comment in comments)
 
 
+def _refreshed_issue(api, issue, policy, context):
+    number = issue.get("iid") or issue.get("number")
+    fresh = issue_api.normalize_issue(issue_api.get_single_issue(api, number))
+    if context.responsibility_policy is not None:
+        fresh.pop("responsibility_review", None)
+        if context.responsibility_review is not None:
+            fresh["responsibility_review"] = context.responsibility_review
+        responsibility = review_responsibility(fresh, context.responsibility_policy)
+        if responsibility["level"] != "handle":
+            return None, {
+                "status": "skipped_after_refresh",
+                "reason": f"responsibility_{responsibility['level']}",
+            }
+    fresh["comments"] = issue_api.get_issue_comments(api, number)
+    decision = evaluate_issue(fresh, policy, context.followup_watch)
+    if not decision["eligible"]:
+        return None, {"status": "skipped_after_refresh", "reason": decision["reason"]}
+    return fresh, None
+
+
 def close_issue(
     api: IssueApiContext,
     issue: dict,
     policy: ClosePolicy,
-    followup_watch: dict | None = None,
+    context: CloseContext | None = None,
 ) -> dict:
     """Refresh, comment, verify, close, and verify one previously selected Issue."""
+    context = context or CloseContext()
+    followup_watch = context.followup_watch
     number = issue.get("iid") or issue.get("number")
     issue_url = f"{api.api_base}/repos/{api.owner}/{api.repo}/issues/{number}"
     comments_url = f"{issue_url}/comments"
-
-    fresh_raw = issue_api.get_single_issue(api, number)
-    fresh = issue_api.normalize_issue(fresh_raw)
-    fresh["comments"] = issue_api.get_issue_comments(api, number)
-    decision = evaluate_issue(fresh, policy, followup_watch)
-    if not decision["eligible"]:
-        return {"status": "skipped_after_refresh", "reason": decision["reason"]}
+    fresh, skipped = _refreshed_issue(api, issue, policy, context)
+    if skipped:
+        return skipped
 
     if not _comment_exists(fresh["comments"], policy.closure_comment):
         response = api_post(
@@ -380,7 +388,7 @@ def close_issue(
         return {"status": "skipped_before_close", "reason": race_check["reason"]}
 
     response = api_patch(
-        api.session, issue_url, api.token, json_data={"state": "closed"}
+        api.session, issue_url, api.token, json_data={"state": "close"}
     )
     if response.status_code >= 400:
         return {"status": "close_failed", "http_status": response.status_code}
@@ -421,7 +429,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--comment", default=None, help="Override the closure comment")
     parser.add_argument("--pr-fetch-pages", type=int, default=None)
     parser.add_argument("--pr-linkage-api-budget", type=int, default=None)
+    parser.add_argument(
+        "--responsibility-reviews",
+        default=None,
+        help="Local JSON file containing Agent-reviewed responsibility_review fields",
+    )
     return parser.parse_args(argv)
+
+
+def _load_responsibility_reviews(path: str | None) -> dict[str, dict]:
+    """Load explicit local reviews; never use a review returned by the API."""
+    if not path:
+        return {}
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Error: cannot read responsibility reviews: {exc}") from exc
+    entries = raw.get("issues") if isinstance(raw, dict) else raw
+    if not isinstance(entries, list):
+        raise ValueError("Error: responsibility reviews JSON must contain an issues list")
+    reviews = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        number = entry.get("iid") or entry.get("number")
+        review = entry.get("responsibility_review")
+        if number is not None and isinstance(review, dict):
+            reviews[str(number)] = review
+    return reviews
 
 
 def _close_policy(args, auto_cfg) -> ClosePolicy:
@@ -483,6 +518,7 @@ def _build_runtime(args: argparse.Namespace) -> RuntimeConfig:
     followup_cfg = cfg["follow_up"]
     followup_state_file = str(followup_cfg["state_file"])
     state = followup_state.load_followup_state(followup_state_file, repo_path)
+    responsibility_reviews = _load_responsibility_reviews(args.responsibility_reviews)
     return RuntimeConfig(
         api,
         repo_path,
@@ -492,16 +528,42 @@ def _build_runtime(args: argparse.Namespace) -> RuntimeConfig:
         args.apply,
         followup_state_file,
         state["issues"],
+        cfg.get("responsibility", {}),
+        responsibility_reviews,
     )
 
 
+def _apply_local_responsibility_review(issue: dict, reviews: dict[str, dict]) -> dict:
+    """Replace any untrusted API review with the explicitly supplied local one."""
+    issue = dict(issue)
+    issue.pop("responsibility_review", None)
+    number = issue.get("iid") or issue.get("number")
+    if number is not None and str(number) in reviews:
+        issue["responsibility_review"] = reviews[str(number)]
+    return issue
+
+
 def _evaluate_issues(
-    issues: list[dict], policy: ClosePolicy, watches: dict
+    issues: list[dict],
+    policy: ClosePolicy,
+    watches: dict,
+    responsibility_policy: dict | None = None,
 ) -> tuple[dict[str, dict], list[dict]]:
     decisions = {}
     candidates = []
     for issue in issues:
-        decision = evaluate_issue(issue, policy, watches.get(str(issue.get("iid"))))
+        responsibility = (
+            review_responsibility(issue, responsibility_policy)
+            if responsibility_policy is not None
+            else {"level": "handle"}
+        )
+        if responsibility["level"] != "handle":
+            decision = {
+                "eligible": False,
+                "reason": f"responsibility_{responsibility['level']}",
+            }
+        else:
+            decision = evaluate_issue(issue, policy, watches.get(str(issue.get("iid"))))
         decisions[str(issue.get("iid"))] = decision
         if decision["eligible"]:
             candidates.append(issue)
@@ -578,7 +640,16 @@ def _handle_issue(
         return result
     try:
         watch = runtime.followup_watches.get(str(number))
-        action = close_issue(runtime.api, issue, runtime.policy, watch)
+        action = close_issue(
+            runtime.api,
+            issue,
+            runtime.policy,
+            CloseContext(
+                watch,
+                runtime.responsibility_policy,
+                runtime.responsibility_reviews.get(str(number)),
+            ),
+        )
     except requests.RequestException as exc:
         action = {
             "status": "action_failed",
@@ -623,36 +694,45 @@ def _build_summary(
     }
 
 
+def _run(args) -> int:
+    selection = classifier.resolve_repository(Path.cwd(), config_path=args.config)
+    if selection["status"] != "resolved":
+        _write_stdout(json.dumps(selection, ensure_ascii=False))
+        return 2
+    args.config = selection["config_path"]
+    runtime = _build_runtime(args)
+    raw_issues = issue_api.get_issues(runtime.api, state="opened")
+    issues = [
+        _apply_local_responsibility_review(
+            issue_api.normalize_issue(item), runtime.responsibility_reviews
+        )
+        for item in raw_issues
+    ]
+    # Pending, list-only, and ignore routes must not enter the normal close flow.
+    handle_issues = [
+        issue for issue in issues
+        if review_responsibility(issue, runtime.responsibility_policy)["level"] == "handle"
+    ]
+    issue_api.enrich_issues_with_comments(runtime.api, handle_issues)
+    decisions, candidates = _evaluate_issues(
+        issues, runtime.policy, runtime.followup_watches, runtime.responsibility_policy,
+    )
+    issue_pr_map, complete, association_scan = _scan_associations(candidates, runtime)
+    results = [
+        _handle_issue(
+            issue, decisions[str(issue.get("iid"))], issue_pr_map, complete, runtime,
+        )
+        for issue in issues
+    ]
+    summary = _build_summary(issues, results, runtime, association_scan)
+    _write_stdout(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 1 if summary["failed"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-
     try:
-        runtime = _build_runtime(args)
-        raw_issues = issue_api.get_issues(runtime.api, state="opened")
-        issues = [issue_api.normalize_issue(item) for item in raw_issues]
-        issue_api.enrich_issues_with_comments(
-            runtime.api,
-            issues,
-        )
-        decisions, candidates = _evaluate_issues(
-            issues, runtime.policy, runtime.followup_watches
-        )
-        issue_pr_map, complete, association_scan = _scan_associations(
-            candidates, runtime
-        )
-        results = [
-            _handle_issue(
-                issue,
-                decisions[str(issue.get("iid"))],
-                issue_pr_map,
-                complete,
-                runtime,
-            )
-            for issue in issues
-        ]
-        summary = _build_summary(issues, results, runtime, association_scan)
-        _write_stdout(json.dumps(summary, ensure_ascii=False, indent=2))
-        return 1 if summary["failed"] else 0
+        return _run(args)
     except ValueError as exc:
         LOGGER.error("%s", exc)
         return 1

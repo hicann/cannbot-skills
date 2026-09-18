@@ -36,7 +36,7 @@ Usage (from an upper-layer script):
     from gitcode_client import (
         resolve_token, parse_repo_path, parse_issue_url, resolve_api_base,
         SharedRateLimiter, make_session, rate_limit_metrics,
-        api_get, api_post, api_put, api_patch, redact_token, safe_error_text,
+        api_get, api_post, api_post_json, api_put, api_patch, redact_token, safe_error_text,
         parse_iso, DEFAULT_GITCODE_API_BASE, TZ_CHINA, STATE_MAP,
     )
 """
@@ -570,6 +570,28 @@ def api_post(session, url, token, *, data=None, timeout=30):
         limiter=limiter,
         url=url,
         token=effective_token,
+    )
+
+
+def api_post_json(session, url, token, *, json_data=None, timeout=30):
+    """POST a JSON body with the token in the query string.
+
+    GitCode's PR-to-Issue association endpoint expects a top-level JSON array,
+    so unlike :func:`api_post` this helper deliberately preserves arbitrary
+    JSON values instead of coercing them to a form-data mapping.  Retry and
+    non-retryable client-error behavior match the other write helpers.
+    """
+    params = {"access_token": token}
+    headers = {"PRIVATE-TOKEN": token, "Accept": "application/json"}
+    limiter = getattr(session, "gitcode_rate_limiter", None)
+    return _request_with_retry(
+        lambda: session.post(
+            url, params=params, headers=headers, json=json_data, timeout=timeout
+        ),
+        return_client_errors=True,
+        limiter=limiter,
+        url=url,
+        token=token,
     )
 
 

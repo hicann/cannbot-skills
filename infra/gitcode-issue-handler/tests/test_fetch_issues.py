@@ -172,7 +172,7 @@ def test_zero_comment_issue_never_calls_api():
     )
 
 
-def test_updated_scan_includes_closed_issue_and_uses_updated_order() -> None:
+def test_updated_scan_excludes_closed_issue_and_uses_updated_order() -> None:
     boundary = datetime(2026, 8, 10, tzinfo=FETCHER.TZ_CHINA)
     page = [
         {
@@ -185,10 +185,10 @@ def test_updated_scan_includes_closed_issue_and_uses_updated_order() -> None:
     with patch.object(FETCHER, "api_get", return_value=page) as api_get:
         issues, diagnostics = FETCHER.get_updated_issues(API, boundary)
 
-    assert [item["number"] for item in issues] == [2535]
+    assert issues == []
     assert diagnostics["complete"] is True
     params = api_get.call_args.kwargs["params"]
-    assert params["state"] == "all"
+    assert params["state"] == "open"
     assert params["sort"] == "updated"
     assert params["direction"] == "desc"
 
@@ -198,6 +198,7 @@ def test_updated_scan_does_not_claim_completion_at_page_limit() -> None:
     full_page = [
         {
             "number": number,
+            "state": "open",
             "updated_at": "2026-08-13T09:00:00+08:00",
         }
         for number in range(100)
@@ -328,3 +329,203 @@ def test_followup_fetch_options_use_config_and_allow_cli_override(
     assert state_file == "custom/watch.json"
     assert lookback == 45
     assert pages == 3
+
+
+def test_fetch_conflicting_target_stops_before_api(tmp_path, monkeypatch):
+    import json
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text("repo: cann/math\n")
+    with patch.object(FETCHER, "_write_stdout") as output, patch.object(FETCHER, "resolve_token") as token:
+        code = FETCHER.main(["--config", str(config), "--url", "https://gitcode.com/user/math"])
+    assert code == 2
+    assert json.loads(output.call_args.args[0])["status"] == "needs_selection"
+    token.assert_not_called()
+    assert config.read_text() == "repo: cann/math\n"
+
+
+def test_fetch_uses_configured_repo_without_url(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITCODE_URL", raising=False)
+    config = tmp_path / "config.yaml"
+    config.write_text("repo: cann/math\n")
+    with patch.object(FETCHER, "_write_stdout"), patch.object(FETCHER, "resolve_token", return_value="test"), patch.object(FETCHER, "_batch_output", return_value={}) as fetch:
+        code = FETCHER.main(["--config", str(config)])
+    assert code == 0
+    assert fetch.call_args.args[0].url == "https://gitcode.com/cann/math"
+
+
+def test_fetch_discovers_remote_and_persists_before_fetch(tmp_path, monkeypatch):
+    import subprocess
+    import yaml
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITCODE_URL", raising=False)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "remote", "add", "custom-name", "git@gitcode.com:team/math.git"], check=True)
+    with patch.object(FETCHER, "_write_stdout"), patch.object(FETCHER, "resolve_token", return_value="test"), patch.object(FETCHER, "_batch_output", return_value={}) as fetch:
+        code = FETCHER.main([])
+    assert code == 0
+    args = fetch.call_args.args[0]
+    assert args.url == "https://gitcode.com/team/math"
+    assert yaml.safe_load(Path(args.config).read_text())["repo"] == "team/math"
+
+
+def test_environment_target_conflict_requires_selection(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITCODE_URL", "https://gitcode.com/other/math")
+    config = tmp_path / "config.yaml"
+    config.write_text("repo: team/math\n")
+    with patch.object(FETCHER, "_write_stdout"), patch.object(FETCHER, "resolve_token") as token:
+        assert FETCHER.main(["--config", str(config)]) == 2
+    token.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["all", "closed"])
+def test_normal_intake_rejects_non_open_state(state):
+    with pytest.raises(SystemExit):
+        FETCHER.parse_args(["--state", state])
+
+
+def test_low_level_all_state_fetch_remains_available():
+    raw = [{"number": 1, "state": "closed"}]
+    with patch.object(FETCHER, "api_get", return_value=raw) as get:
+        assert FETCHER.get_issues(API, state="all") == raw
+    assert get.call_args.kwargs["params"]["state"] == "all"
+
+
+def test_single_closed_issue_skips_comments_even_with_refresh(tmp_path):
+    args = FETCHER.parse_args([
+        "--issue", "https://gitcode.com/owner/repo/issues/42",
+        "--refresh-comments", "--cache-dir", str(tmp_path),
+    ])
+    with (
+        patch.object(FETCHER, "make_session", return_value=object()),
+        patch.object(FETCHER, "get_single_issue", return_value={
+            "number": 42, "state": "closed", "comments": 5,
+        }),
+        patch.object(FETCHER, "get_issue_comments") as comments,
+        patch.object(FETCHER, "load_comments") as cache,
+    ):
+        output = FETCHER._single_issue_output(args, "token")
+    comments.assert_not_called()
+    cache.assert_not_called()
+    assert output["issues"][0]["comments_fetch"] == {
+        "status": "skipped", "reason": "issue_not_open",
+    }
+
+
+def test_watch_refresh_reuses_current_state_but_checks_missing_state():
+    watched = {str(n): {"waiting_on": "reporter"} for n in (1, 2, 3, 4)}
+    current = [
+        {"number": 1, "state": "open"},
+        {"number": 2, "state": "closed"},
+        {"number": 3},
+    ]
+    with patch.object(FETCHER, "get_single_issue", side_effect=[
+        {"number": 3, "state": "closed"},
+        {"number": 4, "state": "open"},
+    ]) as get:
+        issues, diagnostics = FETCHER.get_watched_issues(
+            API, watched, current_issues=current,
+        )
+    assert [call.args[1] for call in get.call_args_list] == ["3", "4"]
+    assert [item["number"] for item in issues] == [1, 4]
+    assert diagnostics["reused"] == 2
+    assert diagnostics["closed"] == ["2", "3"]
+    assert "followup_watch" not in current[0]
+
+
+def test_closed_watch_is_removed_even_when_updated_scan_is_incomplete(tmp_path):
+    import followup_state
+    state_file = tmp_path / "watch.json"
+    followup_state.watch_issue(
+        state_file, "owner/repo", "42", reporter="reporter",
+        maintainer_comment_at="2026-08-10T00:00:00Z",
+    )
+    followup_state.advance_updated_cursor(state_file, "owner/repo", "2026-08-10T00:00:00Z")
+    args = FETCHER.parse_args(["--follow-up-state-file", str(state_file)])
+    with (
+        patch.object(FETCHER, "get_updated_issues", return_value=([], {"complete": False})),
+        patch.object(FETCHER, "get_single_issue", return_value={"number": 42, "state": "closed"}),
+    ):
+        issues, diagnostics = FETCHER._collect_followup_sources(args, API, "owner/repo", [])
+    saved = followup_state.load_followup_state(state_file, "owner/repo")
+    assert issues == []
+    assert saved["issues"] == {}
+    assert saved["updated_cursor"] == "2026-08-10T00:00:00Z"
+    assert diagnostics["cursor_advanced"] is False
+
+
+def test_invalid_watch_state_keeps_watch_for_retry(tmp_path):
+    import followup_state
+    state_file = tmp_path / "watch.json"
+    followup_state.watch_issue(
+        state_file, "owner/repo", "42", reporter="reporter",
+        maintainer_comment_at="2026-08-10T00:00:00Z",
+    )
+    args = FETCHER.parse_args(["--follow-up-state-file", str(state_file)])
+    with (
+        patch.object(FETCHER, "get_updated_issues", return_value=([], {"complete": True})),
+        patch.object(FETCHER, "get_single_issue", return_value={"number": 42}),
+    ):
+        issues, diagnostics = FETCHER._collect_followup_sources(args, API, "owner/repo", [])
+    assert issues == []
+    assert "42" in followup_state.load_followup_state(state_file, "owner/repo")["issues"]
+    assert diagnostics["watchlist_refresh"]["complete"] is False
+
+
+def test_batch_default_uses_open_for_both_scans_and_reuses_watch(tmp_path):
+    import followup_state
+    state_file = tmp_path / "watch.json"
+    followup_state.watch_issue(
+        state_file, "owner/repo", "42", reporter="reporter",
+        maintainer_comment_at="2026-08-10T00:00:00Z",
+    )
+    args = FETCHER.parse_args([
+        "--url", "https://gitcode.com/owner/repo",
+        "--follow-up-state-file", str(state_file),
+    ])
+    raw = {"number": 42, "state": "open", "updated_at": "2099-08-10T00:00:00Z"}
+    with (
+        patch.object(FETCHER, "make_session", return_value=object()),
+        patch.object(FETCHER, "api_get", return_value=[raw]) as get,
+        patch.object(FETCHER, "get_single_issue") as single,
+    ):
+        output = FETCHER._batch_output(args, "token")
+    assert get.call_count == 2
+    assert [c.kwargs["params"]["state"] for c in get.call_args_list] == ["open", "open"]
+    single.assert_not_called()
+    assert output["total"] == 1
+    assert output["issues"][0]["fetch_sources"] == ["primary", "updated", "watchlist"]
+    assert output["filters"]["follow_up"]["cursor_advanced"] is True
+
+
+def test_closed_updated_snapshot_overrides_primary_open_watch(tmp_path):
+    import followup_state
+    state_file = tmp_path / "watch.json"
+    followup_state.watch_issue(
+        state_file, "owner/repo", "42", reporter="reporter",
+        maintainer_comment_at="2026-08-10T00:00:00Z",
+    )
+    args = FETCHER.parse_args(["--follow-up-state-file", str(state_file)])
+    closed = {"number": 42, "state": "closed", "updated_at": "2099-08-10T00:00:00Z"}
+    with (
+        patch.object(FETCHER, "api_get", return_value=[closed]),
+        patch.object(FETCHER, "get_single_issue") as single,
+    ):
+        issues, diagnostics = FETCHER._collect_followup_sources(
+            args, API, "owner/repo", [{"number": 42, "state": "open"}],
+        )
+    assert issues == []
+    assert followup_state.load_followup_state(state_file, "owner/repo")["issues"] == {}
+    single.assert_not_called()
+    assert diagnostics["watchlist_refresh"]["closed"] == ["42"]
+
+
+@pytest.mark.parametrize("row", [{"number": 42}, "invalid"])
+def test_updated_scan_invalid_row_never_advances_cursor(row):
+    boundary = datetime(2026, 8, 10, tzinfo=FETCHER.TZ_CHINA)
+    with patch.object(FETCHER, "api_get", return_value=[row]):
+        issues, diagnostics = FETCHER.get_updated_issues(API, boundary)
+    assert issues == []
+    assert diagnostics["complete"] is False

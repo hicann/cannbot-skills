@@ -8,6 +8,40 @@ GET 回查、Token 安全和错误处理。评论正文的业务模板、指派�
 > [token-config.md](token-config.md)，外部写入的通用授权边界见
 > [authorization-contract.md](authorization-contract.md)。
 
+## 确定性执行入口
+
+通用评论优先使用 `scripts/post_issue_comment.py`。Agent 负责选择目标、判断是否回复、
+起草正文并确认当前会话授权；脚本只执行去重、发送、回查和结果保存，不决定后续业务流程。
+正文通过 UTF-8 文件传入，不在 shell 中拼接。
+
+此入口用于普通回复；`/assign` 等平台指令可能被服务端改写，不能用完整正文相等判定成功。
+指令由调用方单次 POST 后回查对应业务状态；未知结果不重复发送。
+
+```bash
+# 本地预览，不访问 API、不发送评论
+python3 "$GITCODE_TOOLKIT_ROOT/scripts/post_issue_comment.py" \
+  --issue "https://gitcode.com/<owner>/<repo>/issues/<iid>" \
+  --body-file reply.md --result-file comment-result.json
+
+# 当前会话已经授权准确目标和正文后执行；已有授权不重复询问
+python3 "$GITCODE_TOOLKIT_ROOT/scripts/post_issue_comment.py" \
+  --issue "https://gitcode.com/<owner>/<repo>/issues/<iid>" \
+  --body-file reply.md --result-file comment-result.json --apply
+```
+
+每项评论使用独立且固定的 `result-file`；恢复执行必须复用该文件。脚本核对当前账号、
+完整正文和评论 ID，输出机器可读结果。只有回查成功或确认已有同账号同正文评论才算完成；
+Agent 将返回的评论 ID、URL 和结果文件位置记入自己的运行状态。
+
+返回 `preview`、`verified` 或 `reused` 时退出码为 0；结果未知或回查失败时非零退出，
+不能只看到 HTTP 成功就继续依赖操作。GitCode 未返回评论专属 URL 时，结果提供 Issue URL
+和 comment ID；不用猜测评论锚点。发送窗口优先使用服务端 HTTP Date，避免本机时钟偏差。
+
+POST 最多发起一次；超时、服务端错误或成功但无法回查时记录结果未知，后续调用先回查，
+不自动重发。不得更换结果文件来绕过未知结果。评论分页未读完时不发送。
+同一结果文件绑定目标和正文摘要，修改目标或正文应作为新的操作，由 Agent 判断是否获授权。
+工具只保证同一结果文件的并发互斥，不宣称平台具有跨客户端的原子去重能力。
+
 ## 1. 解析目标
 
 评论目标必须包含 `owner`、`repo` 和 `issue_number`。输入为 Issue URL 时使用共享解析器：

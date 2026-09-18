@@ -74,7 +74,7 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 | Token | 获取优先级：用户消息 → `GITCODE_TOKEN` → 询问 | [token-config.md](references/token-config.md) | — |
 | URL | 解析 PR/Issue 链接：`/pull/{n}`, `/issues/{n}`, `/merge_requests/{n}` | [url-parsing.md](references/url-parsing.md) | `python scripts/parse_gitcode_url.py "<url>"` |
 | API | PR/Issue/仓库 API + 错误码处理 | [gitcode-api.md](references/gitcode-api.md) | — |
-| Issue 评论 | 目标解析、评论 POST/GET 回查、幂等与安全 | [issue-comment-workflow.md](references/issue-comment-workflow.md) | `gitcode_client.py` |
+| Issue 评论 | 目标解析、评论 POST/GET 回查、幂等与安全 | [issue-comment-workflow.md](references/issue-comment-workflow.md) | `post_issue_comment.py` |
 | 写操作授权 | 写前精确确认、内容变化失效与写后回查 | [authorization-contract.md](references/authorization-contract.md) | — |
 
 ### 建议流程（SHOULD）
@@ -108,8 +108,7 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 2. 复核：按 [authorization-contract.md](references/authorization-contract.md) 校验证据；
    证据缺失、目标或内容变化时停在写操作前，不得扩大作用域。
 3. 执行：只执行检查点覆盖的 API 或 Git 命令，不自动合并，不改换目标。
-4. 验证：评论/PR 使用 GET 回查，push 使用 `git ls-remote` 回查；失败时按具体工作流
-   重试、降级或返回 blocker，不用 HTTP 成功码代替最终验证。
+4. 验证：评论/PR 使用 GET 回查；push 使用 `git ls-remote --heads <remote> <branch>` 回查指定分支，并核对远端 SHA 与本次已确认的本地 commit SHA 一致。失败时按具体工作流重试、降级或返回 blocker，不用命令退出码或 HTTP 成功码代替最终验证。
 
 在依赖它们的具体操作前发现 Token、git author 或 remote 缺失时返回对应门禁；
 这类凭据恢复不能替代用户确认。

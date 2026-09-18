@@ -1,103 +1,40 @@
 # 交付：分析后统一执行确认
 
-## 读取时机
+## 读取时机与回复检查点
 
-完成目标 Issue 或批次的获取、分类和文字诊断后执行本检查点；代码路径还要先完成受管
-worktree 稳定复现、最小本地实现和验证。执行任何 GitCode 写入或发布动作前，必须完整
-读取本文件。能力输入请求、算子责任人等方案输入请求不属于执行确认，不能替代本检查点。
+完成获取、分类和文字诊断后先做回复检查点；稳定复现、最小实现和验证后再做代码交付检查点。任何 GitCode 写入、暂存、提交、推送、PR 或 CI 前完整读取本文。能力输入和算子责任人请求是方案输入，不等于执行确认。首响规则以 `issue-intake.md` 和 [issue-comment-workflow.md](issue-comment-workflow.md) 为准；已有 PR/指派不能代替实质回复，自提豁免须同账号，已有响应不重发、不因补首响重新指派，`not_applicable_existing` 要有依据。
 
-## 核心规则
+回复检查点保存准确 URL、适用的完整正文或 `/assign` 稿、operation ID、依赖和摘要，逐项文件路径按 batch-analysis；批次可另建 `response-preview.md` 索引。它只需文字诊断证据，不等未知 owner、修复或测试；与交付预览共用授权契约但分别留证。按 [automation.md](automation.md) 开启自动首响，或当前会话已明确授权时，保存草稿后直接执行，不再询问；缺失时一次展示当前就绪回复的完整预览并取得授权，可继续独立只读分析。批准后 POST/GET，成功才开放后续操作；失败或未批准停止依赖该回复的指派、关联 PR 或 worktree。有效自提 PR 的仅分配路径按 automation 免首响，预览准确 Issue/login 后由 auto-response 或当前明确分配授权执行。明示不评论按门禁豁免记录。纯答疑完成即结束本轮，无空的代码确认。
 
-`single` 和 `batch` 都从 `interactive` 开始。用户最初要求“处理 Issue”“自动处理”或
-“auto apply”之类宽泛目标，只授权 Agent 进行只读分析，并在 manifest 管理的隔离
-worktree 中准备可丢弃的未提交修复与验证证据，**不构成执行批准**。必须让用户看到基于
-实际 Issue、最终 diff 和验证结果的完整操作清单并在当前会话明确确认后，才能产生任何
-GitCode/发布写入。
+使用 `response_confirmation_status`、`response_preview_path/digest` 和每项的 `authorization_evidence`（兼容 `post_analysis_execution_confirmation`，并标 `phase: response`）。
 
-确认前允许：
+## 统一执行范围
 
-- 在对应真实操作前执行最小能力检查、凭据验证、fetch、GitCode GET、知识检索和代码只读分析；
-- 生成运行状态、缓存、报告草稿、冲突计划和执行预览；
-- 在受管 worktree 中执行环境检查、稳定复现、最小源码修改和本地验证，以形成准确根因、
-  changed files、diff 和测试结果；这些改动不得暂存或 commit，也不得出现在原始工作区。
+`single`、`batch` 均从 `interactive` 开始。除 [automation.md](automation.md) 开关授权的首响和临时指派外，宽泛的“处理/自动处理”只授权只读分析，以及在受管隔离 worktree 准备未提交、可丢弃的修改和验证证据；不授权写入。确认前可做能力/凭据检查、fetch、GET、知识检索、代码分析、环境检查、稳定复现、最小修改和本地验证，但不得暂存、commit，且修改不得进入原工作区。禁止未经对应授权的 Issue/评论/指派/标签/状态 POST/PUT/PATCH/DELETE，禁止暂存、commit、push、PR 和 CI；Token、工具审批、宽泛请求和旧会话批准不构成当前准确授权。
 
-确认前禁止：
+若只有只读结论且无待执行操作，设 `execution_confirmation_status: not_required`。预览含 commit 时先对相关 worktree 做 `author` 检查（纯回评、无改动、只读不检查）。
 
-- POST/PUT/PATCH/DELETE Issue、评论、指派、标签、状态或其他远端资源；
-- 暂存、commit、push、创建 PR 或触发 CI；
-- 把 Token、初始请求、工具权限审批或旧会话批准当作本检查点证据。
+方案输入必须先确定：未知算子 owner 按 [operator-owner-candidates.md](operator-owner-candidates.md) 逐算子列候选账号和贡献，保留 `awaiting_offline_confirmation`；候选不是已指派/已解决。配置/会话授权的候选临时指派走 `automation.md`；正常转交仍需用户确认 login 或对确切 Issue 选 `direct` 后才能补预览；不能把未知 owner 纳入批准范围，不能默认 direct。其他改变操作清单的用户选择同样先收齐，方案与执行批准分开。
 
-如果本轮只有只读结论且没有待执行操作，设置
-`execution_confirmation_status: not_required`，不向用户制造空确认。
+## 预览与批准
 
-若预览将包含 commit，在生成预览前对每个相关 worktree 执行 `author` 能力检查；纯回评、
-无修改或只读结论不检查 git author。该检查只证明提交身份可用，不授权暂存或 commit。
+将完整预览持久化为 `.cannbot/gitcode-issue-handler/reports/<run_id>/execution-preview.md`，摘要写入运行状态。先列仓库、Issue、交付模式、批准边界，再列实际操作：
 
-## 先补齐方案输入
+| 操作 | 必须展示 |
+|---|---|
+| 评论 | IID/URL、完整正文；多条逐条列出 |
+| 指派 | IID/URL、登录名、`/assign` |
+| 状态 | IID/URL、是否 reopen、当前/目标自定义状态 |
+| 源码/验证 | 修复组、根因、策略、changed files/diff、风险；已运行及待运行验证和边界 |
+| commit/push | 精确文件、message；remote、源分支、目标功能分支 |
+| PR/CI | head/base、标题、完整正文；目标、触发方式/命令 |
+| direct push | remote/目标分支，并标明 commit 后需独立确认 |
 
-操作目标必须确定后才能确认。若明确算子缺少责任人，在生成统一预览前，把本轮缺失映射
-合并成一次方案输入请求，让用户提供 `<算子名>: <GitCode 登录名>` 或为确切 Issue 选择
-`#<IID>: direct`。这次请求只决定拟执行方案，不授权评论、指派或发布动作。用户未回复时
-保持 `pending_operator_owner`，不能生成含未知指派目标的执行批准，也不能默认 `direct`。
+每项按 `runtime-state.md` 的 `external_operations` 写稳定 `operation_id`；`kind` 为 `issue_comment | issue_assignment | issue_state_change | prepared_source_change | commit | branch_push | pr_create | first_ci | direct_push`。 `body` 仅评论/PR 要完整正文。禁止 Token、环境变量、绝对路径、敏感信息和 `<PR URL>` 等未知占位符。需要新 PR URL 的回评须在 PR 创建后新增 operation、更新预览并重新确认；首次 CI 可依赖获批的 `pr_create` operation ID。
 
-其他只能由用户确定且会改变操作清单的选择也先合并收齐。不要把方案输入与执行批准混成
-一句含糊的“是否继续”；方案确定后仍需展示下述完整预览。
+依赖顺序必须写 `depends_on`：回复回查→指派/状态/watch；责任人或提出者再回复先恢复`进行中`（必要时 reopen）并回查；commit→push→分支回查→PR→首次 CI。共享修复组须满足所有成员回复门禁；失败的后续项标 `skipped`，不改走未预览替代动作。
 
-## 统一执行预览
-
-把预览持久化到
-`.cannbot/gitcode-issue-handler/reports/<run_id>/execution-preview.md`，计算内容摘要并写入
-运行状态。预览先列仓库、Issue 清单、交付模式和批准边界，然后只列本轮实际适用的操作，
-不使用空占位项。
-
-至少按以下契约展示：
-
-| 操作类型 | 必须展示的内容 |
-| --- | --- |
-| Issue 评论 | Issue IID/URL 和**完整正文**；多条评论逐条列出 |
-| 指派 | Issue IID/URL、目标 GitCode 登录名，以及将发送的 `/assign` |
-| Issue 状态 | Issue IID/URL、核心 state 是否 reopen、自定义状态的当前名称与目标名称；状态 ID 运行时解析 |
-| 本地源码改动 | Issue/修复组、最终根因、变更策略、实际 changed files/diff 摘要、兼容风险 |
-| 验证 | 已运行的相关测试/构建、结果与降级边界；另列批准后仍需执行的验证（如适用） |
-| commit | 修复组、精确拟暂存文件和 commit message |
-| 功能分支 push | remote、源分支和目标功能分支 |
-| PR | head/base、标题和完整正文 |
-| 首次 CI | 目标 PR、触发方式或命令；不把后续未知重试冒充为已批准 |
-| direct push | remote 与目标分支，并标明“本次不授权；commit 形成后凭 SHA 独立确认” |
-
-每项操作按 `runtime-state.md` 的 `external_operations` 契约写入稳定 `operation_id`。`kind`
-使用 `issue_comment | issue_assignment | issue_state_change | prepared_source_change | commit |
-branch_push | pr_create | first_ci | direct_push`；`body` 只用于评论或 PR 等必须展示完整正文的
-动作，其他操作省略。预览和状态均不得包含 Token、环境变量、维护侧绝对路径或其他敏感
-信息。
-
-评论和 PR 正文禁止保留 `<PR URL>` 等发布后才能确定的占位符。为了保持正常路径只有一次
-确认，优先把正文写成不依赖未知 ID 的最终版本，并用 `depends_on` 关联后续操作；若业务
-确实要求把新 PR URL 回评到 Issue，则 PR 创建后把该评论作为新增 operation 更新预览，
-明确确认后再发送。首次 CI 可以用被批准的 `pr_create` operation ID 表示目标。
-
-用 `depends_on` 保留执行顺序，例如有效首响回查成功后才能指派；索要信息的评论回查成功后
-才能切`挂起`并写 reporter watch；责任人指派和 assignee 回查成功后才能切`挂起`并写
-assignee watch。提出者或责任人再回复后，恢复`进行中`（提出者在关闭 Issue 回复时还需
-reopen）成功后再发布本轮跟进评论。commit 成功后才能 push，
-功能分支回查成功后才能创建 PR，PR 创建成功后才能首次触发 CI。依赖失败时把后续项标记
-`skipped`，不得擅自改走未预览的替代动作。
-
-## 取得批准
-
-展示预览后发起本轮一次统一执行确认，问题明确说明：批准只覆盖列出的仓库、Issue、正文、
-owner、源码范围、分支和交付动作；未列出的操作不执行。只接受用户基于当前预览的明确
-“批准执行”或清楚的批准子集：
-
-- 批准全部：记录 `execution_confirmation_status: approved`。`batch` 随后才切换为
-  `approved_batch`；`single` 保持 `interactive`，但把同一检查点证据传给每个已列操作。
-- 批准子集：删除或标记未批准项，重新计算批准 scope；有依赖的后续动作一并移除，例如
-  不批准 push 时不能创建依赖该分支的 PR。
-- 要求调整：修改预览并重新展示；旧摘要失效。
-- 拒绝或未回复：设置 `rejected | pending`，保留分析、未提交 worktree 和预览，不执行
-  任何待确认写操作。用户明确要求丢弃时再按 worktree 安全清理契约处理。
-
-批准状态至少记录：
+展示预览后复核已有会话授权，只对未覆盖项确认。批准全部记 `execution_confirmation_status: approved`；`batch` 才转 `approved_batch`，`single` 保持 `interactive` 并将证据传给各操作。批准子集删除/标记其余项并移除依赖项；要求调整则更新摘要并重新展示；拒绝/未回复为 `rejected | pending`，不执行待确认写入。批准至少记录：
 
 ```yaml
 execution_confirmation_status: not_required | pending | approved | rejected | invalidated
@@ -116,26 +53,10 @@ authorization_evidence:
   preview_digest:
 ```
 
-工具包子流程需要单评论或交付证据时，从这一次批准为对应 `operation_id` 派生证据；不得
-再次询问已逐字展示且未变化的评论、commit、功能分支 push、PR 或首次 CI。POST 后 GET
-回查、push 后远端回查也不再询问。
+工具包从同一批准派生 operation 证据；已逐字展示且未变化的操作不重复询问，POST/GET、push/远端回查同理。
 
-## 失效与重新确认
+## 失效与 direct push
 
-发生以下任一实质变化时，把状态设为 `invalidated`，停止尚未执行的外部/发布动作，更新
-完整预览并重新确认：
+仓库/Issue 集合、评论或 PR 正文、owner、根因/策略、文件范围/commit、remote/分支、交付模式、PR head/base/标题/首次 CI 方式发生实质变化，或 CI 修复新增源码/commit/push/正文/触发时，设 `invalidated`，停止未执行写入，更新完整预览并重新确认。缩小范围或独立失败不扩大授权、不重问未变化项。
 
-- 仓库或 Issue 集合扩大；评论或 PR 正文实质变化；owner 改变；
-- 根因/策略改变，修改文件超出展示路径，或新增 commit；
-- remote、分支、交付模式、PR head/base、标题或首次 CI 触发方式改变；
-- CI 修复需要新的源码修改、push 或再次触发 CI。
-
-缩小动作范围或某项执行失败不自动扩大授权，也不要求重问已批准且未变化的独立操作。
-每个操作执行后记录结果和回查证据。
-
-## direct push 例外
-
-统一预览必须提前披露 direct push 目标，但本检查点不授权实际 push。commit 形成后，按
-`delivery-publish.md` 独立展示 exact remote URL/名称、目标分支、commit SHA、共享/保护分支提示
-和非快进检查结果，再取得第二次明确确认。该强确认不能被 `approved_batch` 或统一执行
-批准吞并。
+统一预览可披露 direct push，但不授权实际 push。commit 后按 [delivery-publish.md](delivery-publish.md) 展示 exact remote URL/名称、目标分支、commit SHA、共享/保护提示和 fetch 后非快进结果，再取得第二次明确确认；该确认不能被统一批准吞并。

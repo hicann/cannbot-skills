@@ -163,7 +163,7 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls" \
   -d "base=master"
 ```
 
-> **head 参数格式**：从 fork 仓库向上游创建 PR 时，必须使用 `{fork用户名}:{分支名}` 格式。
+> **head 参数格式**：同仓 PR 使用裸分支名 `branch`；仅跨仓 PR 使用 `{fork用户名}:{分支名}`。向 fork 自身创建 PR 时也用裸分支，误用带用户名格式可能把目标选成上游。创建后核对返回的 `web_url` 和 `target_project` 与授权目标一致，再继续关联或评论。详见 [创建 PR 参数](https://docs.gitcode.com/docs/apis/post-api-v-5-repos-owner-repo-pulls/)。
 
 ### 获取已有 PR 列表
 
@@ -172,6 +172,34 @@ GET /repos/{owner}/{repo}/pulls
 
 curl "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/pulls?state=opened&source_branch=${branch_name}&access_token=${token}"
 ```
+
+### 读取和新增 PR 关联 Issue
+
+读取现有关联：
+
+```bash
+GET /repos/{owner}/{repo}/pulls/{number}/issues
+```
+
+新增关联时，请求体是 Issue 序号组成的顶层 JSON 数组：
+
+```bash
+POST /repos/{owner}/{repo}/pulls/{number}/issues
+
+curl -X POST \
+  "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}/issues?access_token={token}" \
+  -H 'Content-Type: application/json' \
+  -d '[42]'
+```
+
+关联属于外部写操作。POST 前先 GET 防重，POST 后同时回查 PR 的关联 Issue 列表和目标
+Issue 的关联 PR 列表；只有两侧均出现目标关系才记为成功。非幂等 POST 结果未知时只回查，
+不得盲目重试。官方接口说明：[关联 Issue](https://docs.gitcode.com/docs/apis/post-api-v-5-repos-owner-repo-pulls-number-linked-issues/)、
+[读取关联 Issue](https://docs.gitcode.com/docs/apis/get-api-v-5-repos-owner-repo-pulls-number-issues/)。
+
+实测当 PR 已关联一个 Issue 时，再关联第二个会返回 HTTP 400：
+`A pull request can only related to one issue`。调用方应在 POST 前检查非目标关联，不得自动
+删除或替换原关系；重复 Issue 的安全交叉引用策略由上层 Issue Handler 决定。
 
 ### 批量提交评论脚本
 
@@ -280,6 +308,11 @@ curl -X PATCH 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues/{numbe
 }'
 ```
 
+更新负责人使用单数字段 `{"assignee":"<login>"}`，不要把创建接口的 `assignees`
+照搬到 PATCH。更新后 GET 核对 `assignee.login`/`assignees[].login`。
+依据：[Issue API 更新参数](https://docs.gitcode.com/v1-docs/docs/openapi/repos/issues/)；
+已在 `xujiachen8/ops-math` 实测该字段。
+
 ### 关闭 Issue
 
 ```bash
@@ -287,8 +320,10 @@ PATCH /repos/{owner}/{repo}/issues/{number}
 
 curl -X PATCH 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues/{number}?access_token={token}' \
 -H 'Content-Type: application/json' \
--d '{"state": "closed"}'
+-d '{"state": "close"}'
 ```
+
+关闭请求传 `state: close`，GET 返回的状态为 `closed`；不要将读回状态值直接用于写入。
 
 ### 读取与更新自定义 Issue 状态
 

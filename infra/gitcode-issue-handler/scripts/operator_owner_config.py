@@ -28,6 +28,11 @@ from runtime_paths import (  # noqa: E402
     path_text,
 )
 from cli_output import write_stdout  # noqa: E402
+from handler_config import (  # noqa: E402
+    ConfigError as HandlerConfigError,
+    load_named_config,
+    load_template,
+)
 
 OWNER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -74,17 +79,14 @@ def normalize_owner(value: str) -> str:
 
 
 def load_document(path: Path) -> dict[str, Any]:
+    # Direct library callers historically use a missing path as an empty mapping;
+    # CLI explicit paths are checked in ``main`` so they fail loudly.
     if not path.exists():
-        return {"operators": {}}
-    yaml = _yaml_module()
+        return load_template("operator_owners")
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise ConfigError(f"cannot read {path}: {exc}") from exc
-    if raw is None:
-        raw = {}
-    if not isinstance(raw, dict):
-        raise ConfigError("operator owner config must be a YAML mapping")
+        raw = load_named_config("operator_owners", path)
+    except HandlerConfigError as exc:
+        raise ConfigError(str(exc)) from exc
     operators = raw.setdefault("operators", {})
     if operators is None:
         raw["operators"] = {}
