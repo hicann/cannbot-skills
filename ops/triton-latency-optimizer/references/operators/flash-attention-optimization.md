@@ -355,6 +355,23 @@ else:
 | grid 收缩到 `min(核数, tasks)` + 核内步长循环 | +0.5% | 基础写法而非优化项；多一层 `scf.for` 的代价几乎把省下的抵消 |
 | 删除 host 端 permute/contiguous/pad | +16%（保守值） | 见 §5.2 口径说明；profiling 时间归属里出现 `Transpose`/`ViewCopy`/`ZerosLike`/`Slice` 就直接删，不用扫参 |
 
+### 2.13 ★ 长序列大 S（S ≥ 32k）专项 【条件性：KV 迭代数 ≥ ~256 且 `aic_scalar_ratio > 0.7`】
+
+**判型先行**：msprof `--aic-metrics=PipeUtilization`，若 `aic_scalar_ratio`/`aiv_scalar_ratio` > 0.7 而 `aic_mac_ratio` < 0.3，则瓶颈是**每 KV 迭代的固定标量/同步开销**（scalar_ratio 的真实构成含同步等待，见 §6.2），优化方向 = 摊薄每迭代固定成本，不是提高算力利用率。完整收益栈与边界条件详见 triton-op-generator 插件的 `template/flash_attention.md` §5.5（本表为速查摘要）。
+
+| 改法（按落地顺序） | 结果 | 边界（**本表为 template §5.5 收益栈的速查副本，数字以 §5.5 为准**） |
+|------|------|------|
+| PV dot 降 16-bit：`tl.dot(p.to(in_dtype), v)` | **+33%** | 与 template L1.5 冲突，任务契约允许 16-bit 中间态时采用 |
+| KV 加载 pair 共享（GQA head-pair / MHA qblock-pair） | MHA **+79%**、GQA +7.5% | 双 acc+q ⇒ BQ 减半；TND GQA 须 BKV=256 后再开（顺序敏感，−8%→+39%） |
+| pair 之后 `BLOCK_KV` 128→256 | 再 **+27~46%** | UB 手算只能当否决依据，不能当精确边界（实测超限可编） |
+| raw 域追踪 m：`p = exp2((s−m)*(scale·log2e))` | **+4%** 全 case 一致 | 与「scale 折进 q」（−14~39%，template §5.2 证伪表）机制不同 |
+
+**最终分派**（host 决策树；本节数字为 §5.5 栈口径，**不含** §5.7 TND 专项——36 case geomean 0.1913x → 0.4401x、自身提速 2.29x）：16-bit GQA → head-pair（BQ=32/64，BKV=256）；16-bit MHA → qblock-pair（BQ=64，BKV=256）；fp32 → 单头原路径。
+
+**因果无关性（causal 8 case 实测）**：本节全栈在 causal（下三角，template §3.2 区间折叠 `kv_hi=min(kv_len_b,row0+BLOCK_Q)`）场景增益同量级——PV dot 16-bit +37%、pair 栈 +59%（前者需核对 template L1.5），causal 基线 0.1814x → 0.3958x（8 case geomean vs `npu_fusion_attention` sparse_mode=2 压缩 mask）。causal 适配仅两处：pair 折叠上界覆盖双 tile 最大行（`row1+BLOCK_Q`）；causal where 兼职尾块排除（load mask 只防越界，免 MASK_KV 分档）。fusion causal 正确调用方式见 template §5.6（裸 sparse_mode 静默退化为无掩码）。
+
+**TND/varlen 专项（详 template §5.7）**：多段 TND 的三项专属开销各有 kernel 侧修复（host 零数据读取）——① 精确任务枚举（padding 空任务 −2x，游标 while 前进）；② device 侧 KV repack 解长 S 访存崖（MQA 探针定性：崖因 = head 交错布局）；③ 尾块运行时拆分消除恒掩码税（主循环整除段免掩码 + 尾块单迭代掩码，非 template §5.2 双大循环前科）。叠加后 TND 反超 BNSD 水位，**全栈（§5.5 栈 + §5.7 三件套）36 case geomean 0.5111x（自身提速 2.64x）**。
+
 ---
 
 ## 3. 无增益 / 负收益 / 编译器阻塞的方向（**这一节比第 2 节更值钱**）

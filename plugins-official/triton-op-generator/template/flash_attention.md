@@ -814,6 +814,10 @@ else:
 | 11 | 低精度 `p` 二段拆分 | **+2.7%** | 仅 fp16/bf16 |
 | 12 | fp32 张量除法 → host 侧倒数 | −36% / 打平 | **仅当 `aiv_vec_ratio ≳ 0.35`** |
 | 13 | K 直接读成转置态 | +0.7% | 机理假设已被 IR 证伪，收益来自 load 路径 |
+| 14 | ★ 大 S：PV dot 降 16-bit（`p.to(in_dtype)`） | **+33%** | 仅 S≥32k；⚠️ 与 L1.5 冲突，任务契约允许 16-bit 中间态时采用（详 §5.5 #1） |
+| 15 | ★ 大 S：KV 加载 pair 共享（GQA 双头 / MHA 双 q 块） | MHA **+79%**、GQA +7~39% | 仅 S≥32k 且 `aic_scalar_ratio>0.7`（详 §5.5 #2/#5） |
+| 16 | ★ 大 S：`BLOCK_KV` 128→256（迭代数减半） | **+27~46%** | 与 15 叠加；UB 临界实测可编（详 §5.5 #3） |
+| 17 | 大 S：raw 域追踪 m，`scale*log2e` 折进 exp2 指数 | **+4%**（全 case 一致） | 与「scale 折进 q」（§5.2 证伪）机制不同（详 §5.5 #4） |
 
 ### §5.2 ⛔ 证伪方向全表（**这一节比 §5.1 更值钱，不要重跑这些死路**）
 
@@ -847,6 +851,10 @@ else:
 | 按 head 分组共享 K/V（`HG=2`） | 不值得做：`HG=2, BLOCK_SQ=64` 与 `HG=1, BLOCK_SQ=128` 的 K/V 扫描遍数**完全相同**、UB 也相同，是同一个杠杆的两种写法 |
 | 把 sq tile 拆散做三维并行 `(B,H,S-tile)` | **回归**。K/V 跨 sq 的复用消失、访存随遍数倍增。⚠️ 与 L1.13 是同一个量的两个方向：**每次 K/V 加载服务多少 query 行** |
 | 非融合三段式（QK → softmax kernel → PV） | **访存账否决**：物化 `[B*H,S_Q,S_K]` fp32 = 370MB，4 趟 ≈ 1.5GB ≈ 900us，而当前整个 kernel 才 400us |
+| 大 S：load 地址指针递增进环（`k_ptrs += BLOCK_KV*stride`） | **−5%**（编译器已 hoist 地址计算，手工 += 反引入循环携带依赖） |
+| 大 S：`dot(p, v, acc=acc)` 链式累加替代 `acc*alpha + dot(...)` | **no-op**（编译器已把加法融进 cube 累加器） |
+| 大 S：TND 布局的 GQA pair 共享（head-pair 或 qblock-pair）@ `BLOCK_KV=128` | **−8%**（BKV=256 后才翻正为 +39%；tile 不满时 pair 的 BQ 减半损失 > 共享收益） |
+| 大 S：手动 load 双缓冲错位流水（预取下一块 K/V） | **UB 否决未上板**：BKV=256 时 K/V 双缓冲需 256KB > UB 192KB；降 BKV=128 丢的收益（+27~46%）大于流水预期收益 |
 
 ### §5.3 ⛔ 结构性下限：小 shape 上**绝不要**拆 kernel
 
@@ -861,6 +869,69 @@ else:
 | `aic_scalar_ratio` 高 | ❌ **不是标量算术过多**。三个算子上五次改法全落空。真实构成是 113 条同步指令（`set_flag`/`wait_flag`/`pipe_barrier`/`sync_block`）的等待被计入标量管线。**先 dump IR 数同步指令，不要直接改标量代码** |
 | `cube_utilization(%)` | ❌ **名字骗人**。同一行 `cube_utilization=88.383%` 与 `aic_mac_ratio=0.084` 并存。判断 Cube 忙不忙**一律用 `aic_mac_ratio`** |
 | `aiv_vec_ratio` 高 | ⚠️ **半对**。判据是「这条指令值多少拍」不是「有几条指令」：去掉 1 条 fp32 `vdiv` = −36%，去掉 8 条掩码指令 = 0% |
+
+### §5.5 ★ 长序列大 S 专项（S ≥ 32k，compute-bound 区间）
+
+**适用边界（先判再套用）**：本节全部结论来自 S=32k~256k、BNSD/TND、fp16/bf16、MHA-D64/GQA-D128 的 36 case 实测（对标 `npu_fusion_attention`；本节收益栈落地后几何平均 0.1913x → 0.4401x、自身提速 2.29x，**不含** §5.7 TND 专项——叠加后全栈 0.5111x / 2.64x，见 §5.7）。小 shape（S≤1024）latency-bound 区间的结论**不适用**（如 §5.2 已证伪的「head 分组共享 K/V 不值得做」在小 shape 成立、在大 S 翻正——边界条件就是**每 task 的 KV 迭代数 ≥ ~256 且 `aic_scalar_ratio > 0.7`**）。
+
+**诊断入口（先判型再优化）**：msprof `--aic-metrics=PipeUtilization`，看 `aic_scalar_ratio` / `aiv_scalar_ratio`：
+- 实测基线 scalar pipe **77.5%/78.5%**（AIC/AIV 双高），而 `aic_mac_ratio` 仅 22%、mte 11~16% ⇒ **瓶颈是每迭代的固定标量/同步开销，不是算力、不是带宽**。
+- ⚠️ 与 §5.4 的警示交叉阅读：scalar_ratio 高的真实构成是**同步指令等待**（set/wait_flag 计入标量管线）——减少迭代数同时减少发射数与同步数，两种解释收敛到同一处方：「**摊薄每 KV 迭代的固定开销**」。
+
+**收益栈（全部实测，按落地顺序）**：
+
+| # | 改动 | 增益 | 机理 |
+|---|------|------|------|
+| 1 | PV dot 降 16-bit（`p.to(in_dtype)`） | **+33%** | Cube 16-bit 吞吐 2× fp32 + 省 v→fp32 物化。⚠️ **与 L1.5 冲突**——仅当任务契约允许 16-bit 中间态时采用，采用前须核对 L1.5；精度实测 fp16 ~3.2e-4 / bf16 ~2.5e-3 |
+| 2 | KV 加载 pair 共享：GQA 同组 2 q 头 / MHA 同头相邻 2 q 块共用一次 K/V load | MHA **+79%**、GQA +7.5% | 每迭代 FLOP 翻倍、标量密度减半；双份 acc/q 的 UB 代价 = BQ 减半 |
+| 3 | `BLOCK_KV` 128→256 | MHA **+27%**、GQA **+46%** | 迭代数减半；UB 临界（pair+D128 手算 ~208KB 超 192KB 但**实测可编**——UB 手算模型再次预测失败，与 §5.2「手工 buffer 复用」条互证） |
+| 4 | raw 域追踪 m：`s=tl.dot(q,kT)` 不乘 scale，`p=exp2((s−m)*(scale·log2e))` | **+4%**（全 case 一致） | 省每迭代一趟全 tile 乘；**与 §5.2 证伪的「scale 折进 q」是不同机制**（那个 −14~39%），差别在乘法落在指数域且被 exp2 融合 |
+| 5 | TND 布局 GQA 也开 pair（在 #3 之后） | **+39%** | ⚠️ 顺序敏感：BKV=128 时 TND pair 是 **−8%**（先 #3 后 #5，不可颠倒） |
+
+**最终分派（host 侧决策树）**：16-bit GQA（BNSD+TND）→ head-pair；16-bit MHA → qblock-pair；pair 档 `BQ = 64(D≤64)/32(D=128)`、`BKV=256`；fp32 → 单头原路径（pair 的 UB 收益不成立）。⚠️ tile 具体值基于 UB=192KB 机型实测；其他 UB 容量的机型按 L1.13 面积预算等比例重定（**比例关系是可迁移的**：pair 换 BQ 减半、BKV 尽量翻倍），不要照抄数值。
+
+**对标内置 AscendC 实现的结论**（开源算子仓库 ops-transformer 的 `attention/flash_attention_score`，其 arch22 目录——arch22 = 910B/DAV_2201 代际目录名，代号定义见 npu-arch——`npu_fusion_attention` 的真身）：其 CV 并行是**手写的**——MIX_AIC_1_2 分工 + GM workspace 乒乓中转 + `SetFlag/WaitFlag<MTE3_MTE2>` 跨核握手 + taskId 错位 2 拍的 5 级 task 流水 + SoftmaxFlashV2 融合指令（一次调用完成 max/exp/sum/校正系数）。**这些机制在 Triton 层面全部不可表达**。⇒ **Triton FA 在大 S 对 fusion 存在结构性天花板**（该数为 §5.5 栈状态；§5.7 的 TND 专项后 36 case 几何平均 0.5111x，天花板结论不变）；继续追平只能在 AscendC 层重写或等编译器开放 CV 均衡。写报告时必须把这个天花板连同证据一起写明，不要把「未到 1x」当成迭代失败。
+
+### §5.6 下三角 causal 专项（BNSD/TND，段内下三角）
+
+**① 对标 `npu_fusion_attention` causal 的正确调用（对标前必读，静默坑）**：
+- **裸传 `sparse_mode=2/3`（leftUpCausal/rightDownCausal）不生效**（实测版本行为，**以 §6.1 语义探针为准**——后续 CANN 版本可能让裸传直接生效）——输出与无掩码**逐位相同**（实测 rel=0.0 vs 非 causal），不报错、不告警；配合 `pre_tockens`/`next_tockens` 的 18 种组合也全部无效。
+- **正确姿势**（本地 docstring 实证 + golden 对齐）：`sparse_mode=2` + 压缩下三角 mask
+  `atten_mask = torch.triu(torch.ones(2048, 2048, dtype=torch.bool), diagonal=1)`（上三角 True=遮蔽，下三角 False=有效；**极性反了 rel=1.64**）。仅 4MB，任意 S 通用；TND varlen 段内 causal 用同一份压缩 mask + `actual_seq_qlen/kvlen`。
+- 全量 `S×S` mask 也能对齐 golden（rel≈2.6e-4）但 S=128k 时 16GB 不可行——大 S 只用压缩 mask 路径。
+
+**② causal 区间折叠的预期管理**：折叠（`kv_hi = min(kv_len_b, row0+BLOCK_Q)`，§3.2）使基线即获 FLOPs/时间双减半（S=32k MHA 89.6→47.8ms），**但比值不升**（fusion causal 压缩 mask 路径同样快 ~2x：13.5→7.4ms）——折叠是必做结构，不是比值杠杆。
+
+**③ 大 S 优化栈（§5.5 收益栈）因果无关，可直接叠加**：pair 共享+BKV=256+scale 折叠在 causal 场景贡献 +59%（与无掩码版同量级；PV dot 降 16-bit 档同前述、需先核对 L1.5）。causal 适配点仅两处：
+- pair 路径折叠上界须覆盖**双 tile 最大行**：`kv_end = min(kv_len_b, row1 + BLOCK_Q)`（qblock-pair 的 `row1 = row0 + BLOCK_Q`）
+- causal where（`kv_col <= row_glb`）**兼职尾块排除**（tail col > row ⇒ NEG ⇒ exp 下溢 0），load mask 只需防越界——无需非 causal 版的 MASK_KV 分档，实现更简
+
+**④ 基线即正确**：designer 草图带上 §3.2 折叠后，coding 直出的基线 verify 10/10 一次通过（含 fp32 严格契约全 case），小 shape 官方 benchmark 6.31x（causal 使 torch 侧 mask 物化变慢，高于无掩码版 3.07x）。
+
+### §5.7 TND/varlen 大 S 专项（三件实测修复，多段/长 S 的 TND 专属开销）
+
+TND（varlen 打包）在大 S 有三项 BNSD 没有的专属开销，逐项有实测证据链与修复（全部满足「host 零张量数据读取」约束——只用 `cu.shape` 这类 shape 量，数据判定全部在 kernel 内完成）：
+
+**① 上界 padding 空任务（多段 TND 的最大单一开销，实测 −2x）**
+- 问题：任务空间按 `n_batch × heads × ceil(T_total/tile)` 上界分配，多段时按「总 token/段」严重高估（B4 等长段实测 32768 任务 / 仅 8192 真实 = **75% 空转**）；空迭代不只是跳过——每迭代带 ~20us 级管道开销（步长循环迭代成本），总量直接翻倍。
+- 解法（kernel 内精确枚举，host 零数据）：每 program 启始走一遍 cu 求 `total_real = Σ ceil(qlen_b/tile)×n_heads`（nb 次标量 load，L2 命中）；任务游标 `while task >= 段边界: 前进一段` 随步长循环单调前进（摊销 O(1)），空任务归零。`while` + 循环携带标量游标可用（**先跑最小编译探针确认**再动手）。
+- 证据链（逐假设证伪，勿跳过直接改）：关掩码仅 +5~8%（掩码非主因）→ cu 标量缓存无效（975≈980ms）→ 精确任务空间 debug 翻倍（980→492ms 实锤）。
+- 效果：TND-B4-MHA 0.255x → 0.53x。
+
+**② 长 S 访存崖（TND head 交错布局，单张量 >~335MB 断崖）**
+- 现象：TND-GQA S≤131072 平直 47.8 TFLOPS，196608 断崖 37.1；BNSD 同配置全程平直；fusion 线性无崖。
+- 定性（MQA 探针，廉价且决定性）：Nkv=1（K/V 行天然连续）全程平直 48.8 ⇒ **崖因 = head 交错布局本身**，非 footprint；纯 load 探针无崖（交错恒定 ~1.2x）⇒ 只在计算-访存交叠时爆发；减核（NUM_PROG 20→10）更差 ⇒ 崖点仍吃算力，非并发流过多。
+- 解法：device 侧 `kv_repack_kernel` 把 K/V 从 `[T,N,D]` 交错搬成 `[N,T,D]` per-head 连续 workspace（纯搬运位级无损；成本 = 2×KV 流量，秒级 kernel 下 <0.1%），view 回原形状喂既有 kernel；Q **不**重排（探针证明 Q 侧无税）。分派阈值 KV>8MB（纯 shape；小 case 不触发）。
+- 效果：TND-GQA-256k 36.9→48.8 TFLOPS（回到连续档水位，0.31x→0.42x）；崖下交错税顺带回收（TND-MHA-256k +28%）。
+
+**③ 恒掩码税（varlen 段长 host 不可知 → 全程 masked load + 每迭代 where，~7-9%）**
+- 解法（尾块运行时拆分）：`kv_main_end = kv_len_b − kv_len_b % BLOCK_KV`；主循环跑整除主体（无掩码 load、无 where），尾块（≤1 次迭代）单独走掩码。段长来自 ① 的 kernel 内游标。
+- ⚠️ 与 §5.2 前科的边界：「KV 循环拆两段编译失败（UB 翻倍）」是**双大循环**（causal 对角块场景）；尾块仅单迭代、不触发。
+- 效果：TND-GQA-32k 48.6→55.2 TFLOPS（**反超 BNSD 53.2**）；全部 TND case 受益。
+
+**叠加后总账**：36 case geomean 0.4401x（§5.5 栈）→ **0.5111x**；<0.4x 清零（最低 0.416x）。
+
+**⚠️ 测量纪律（实测踩坑）**：全量对比必须**同窗口连跑双方**——单跑一侧时若 fusion 侧被其他会话抢占，耗时膨胀会让 geomean 虚高（实测一次 0.4983 vs 干净 0.4744，且夹带单行 triton 侧假回退）。机器繁忙期先 `torch.npu.mem_get_info` 看各卡空闲度再选卡。
 
 ---
 
