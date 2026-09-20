@@ -14,7 +14,7 @@
 - **必须**把 M 维按 group_list 切分为 per-expert 行区间 `[start_e, end_e)`，BLOCK_M tile 只在区间内切分，`mask_m = offs_m < end_e`。
 - **禁止**按全局 M 均匀切 tile——跨边界的 tile 内不同行属于不同 expert，权重选择错误且引入写竞争。
 - **Why**: grouped matmul 每行按边界映射唯一 expert；tile 越界行若不被 mask，会用错误 expert 的 weight 计算并以 row_max/workspace 污染下一 expert 的行。
-- **How to apply**: kernel 内标量 E 循环累计边界与 tile 数，`tl.where(hit, ...)` 选出当前 m_tile 的 expert_id / row_base / end_sel / m_local（E ≤ 8，开销可忽略；E 为运行时值时循环不展开，不受 checklist 规范 7 约束）。
+- **How to apply**: E 很小时可用 kernel 内标量 E 循环累计边界与 tile 数；当扫描链被每个 M/N tile 重复执行时，即使 E=8 也不能直接假定开销可忽略。必须同时测试“直接 expert×N-tile 映射”，每个任务只读取本 expert 的起止边界并在 expert 内遍历 M tile。两条路径按 E、M 和平均 expert 行数做 host shape 特化。
 
 ### L1.2 禁止 host 侧读取 group_list（D2H 同步禁令）
 - **必须**只在 kernel 内消费 group_list（`tl.load(offsets_ptr + e)`）；host 侧 tile 规划只允许用 M/K/N/E 等 shape 元数据。
@@ -54,6 +54,24 @@
 - **Why**: `get_input_groups()` 按 `__file__` 同目录读同名 .json；缺 .json 报 FileNotFoundError，torch 模块缺 `_torch` 后缀报 ModuleNotFoundError。
 - **How to apply**: 复制任务 .py 时同时复制 .json，并给参考副本加 `_torch` 后缀。
 
+### L1.9 K 对齐与 BLOCK_K 选择必须解耦
+- **必须**先明确逻辑 K 与物理 padding K；Cube 微块要求按 16 对齐，但 `BLOCK_K` 是 tiling 参数，不要求整除逻辑 K。
+- **禁止**使用 `256 if K % 256 == 0 else ... else 16` 一类“最大整除因子”策略。它会让 `K=4112` 退化为 `BLOCK_K=16`，产生 257 次 K 循环；`BLOCK_K=256` 只需 17 次。
+- **How to apply**: `K_ALIGNED = cdiv(K, 16) * 16` 仅用于 host 选择 tile；kernel 尾块仍以 `offs_k < K` mask，masked load 的 `other=0`。只有输入物理存储明确带零 padding 时才能用物理 K 作边界。
+- **UB 边界**: int8 dot + 后置 scale 路径优先实测 256/512；需要物化 fp16 tile 的预缩放路径仍遵守 L1.6 的 `BLOCK_K <= 256`。
+
+### L1.10 BLOCK_N 必须同时平衡 dot 开销与 Cube 占用率
+- **必须**允许 N 尾块 mask，不得因 `N % BLOCK_N != 0` 自动退回较小 tile。
+- **必须**检查静态任务数 `E * ceil(N / BLOCK_N)`。若小于 Cube 核数，减小 BLOCK_N 增加并行任务；若多 expert 且平均行数很小，可在 UB 允许时增大 BLOCK_N，减少小 M dot 的固定 issue/同步次数。
+- **How to apply**: 从大到小选择能填满 Cube 核的 tile；若所有候选均不足，保留一个较小 fallback。对 tiny-expert 分支额外测试更宽 tile，例如 `BLOCK_N=512`，但必须先核算 `acc + x + weight + 临时量` 峰值。
+- **禁止**只优化 tile 数或只优化占用率。`E=1,N=544` 固定用 256 只产生 3 个任务，会显著欠并行；而 `E=7,M/E≈2,N≈8K` 使用更宽 N tile 可摊薄大量低利用率 dot。
+
+### L1.11 完整 workspace + Vector two-pass 只能作为跨 N 逐行归约 epilogue 的条件分支
+- **必须**保留原 partial-max 骨架作为基线路径。只有 epilogue 需要跨完整 N 维计算逐行统计量、完整中间结果 workspace 可承受，并且同 shape 实测 two-pass 稳定获益时，才能增加完整 workspace + Vector two-pass 分支。
+- **禁止**把该分支写成所有 grouped matmul 的强制骨架，也禁止因某一类 shape 获益而删除或覆盖原 partial-max 路径。
+- **Why**: partial-max 路径只物化每个 N tile 的行统计量，额外空间小，适合 workspace 紧张或大 M×N 场景；完整 workspace 能让 Vector program 独占完整行并消除跨 N tile 的 partial 归约，但会增加中间结果写回、再次读取和 epilogue 重算，收益取决于 shape 与归约开销占比。
+- **How to apply**: host 先用 M/N/E、dtype 与可用 workspace 估算完整中间结果大小；候选分支由 Cube 写完整中间结果，Vector 第一遍跨 N 计算 epilogue 和逐行统计量，第二遍重算 epilogue 并按统计量写最终输出。两条路径逐 shape 使用相同精度口径和设备侧 benchmark 比较；只有稳定获益的 shape 才按 shape 元数据分派到 two-pass，其余 shape 回退 partial-max 基线。
+
 ---
 
 ## Layer 2: 算法骨架（Agent 可参考架构）
@@ -85,6 +103,18 @@ for flat in range(pid, total_m_tiles * NUM_N_TILES, NUM_CORES):
 - 每个 program 处理**同一 expert 内连续 BLOCK_M 行 × 单个 n_tile**，权重加载被 BLOCK_M 行摊销。
 - 两遍 E 循环均为运行时界标量循环（不展开），累计器写法合法（checklist 规范 7 仅约束 constexpr 展开循环）。
 
+#### 大 E/重复扫描场景的直接 expert 映射候选
+
+当每个输出 tile 扫描全部 E 个 expert，且耗时随 E 或 tile 数明显增长时，使用一维
+持久化 grid 遍历 `E * NUM_N_TILES`。`expert = task // NUM_N_TILES`，任务只读取
+`group_list[expert-1:expert+1]`，再在 `[row_lo,row_hi)` 内遍历 BLOCK_M。
+该路径消除每 tile 的 E 次边界加载与 `tl.where` 选择链。必须与前缀扫描路径逐 shape
+实测，不能假定任一路径恒优；host 只允许使用 shape 元数据做分派。
+
+对直接映射路径，`M // E` 可作为平均 expert 行数的静态近似，用来选择 BLOCK_M。
+本次 A8W8 模型验证中，`M=128, E=16/8` 分别选择 BLOCK_M=16/32；相对前缀扫描路径，
+Triton 设备耗时分别下降约 32%/29%，说明“小 E 扫描开销可忽略”不是可靠规则。
+
 ### L2.2 Pass2（量化）骨架：partial max 归约 + per-token 量化
 
 ```python
@@ -115,8 +145,43 @@ BLOCK_M_PASS1 = (
 )
 ```
 
-判据：取最大的 BM 使粗估 tile 总数 `(M // BM) * num_n_tiles` 仍能填满 aicore——大 shape 拿满权重摊销，小 shape 保住并行度。
-BLOCK_K 分档：`512 if (dequant 走 int8 dot 且 K % 512 == 0) else 256`。
+判据：取最大的 BM 使粗估 tile 总数 `(M // BM) * num_n_tiles` 仍能填满 aicore——大 shape 拿满权重摊销，小 shape 保住并行度。若 `M` 略大于一个 BM（如 M=37/BM=32），还需实测上调一档以消除第二个低覆盖率 M tile。
+
+### L2.4 BLOCK_K 分档不得依赖整除性
+
+以下代码仅作为**缺少已验证 BLOCK_K 分派时的保守初始候选**：适用于逻辑 K 按 16 对齐、kernel 能用逻辑 K mask 处理尾块，且 64/128/256 候选均满足当前数据路径 UB 约束的场景。若原实现已有 shape 特化或 autotune 结果，应保留原策略，只补充非整除候选并逐 shape 实测，不得用本示例覆盖。已明确为 int8 dot + 后置 scale 的路径可继续测试 512；需要物化 fp16 tile 的预缩放路径仍遵守 L1.6 的 `BLOCK_K <= 256`。
+
+```python
+K_ALIGNED = triton.cdiv(K, 16) * 16
+BLOCK_K_CANDIDATE = 256 if K_ALIGNED >= 256 else 128 if K_ALIGNED >= 128 else 64
+# kernel: mask_k = offs_k < K, masked load other=0
+# 仅在逐 shape benchmark 稳定获益后采用；否则保留原 BLOCK_K 分派
+```
+
+### L2.5 BLOCK_N：兼顾 tiny-expert 宽 tile 与 Cube 核占用率
+
+以下代码仅作为**直接 segment/expert × N-tile 映射的初始候选**：此时静态任务数才可用 `E * ceil(N / BLOCK_N)` 近似。若采用 `(M-tile, N-tile)` 扁平映射，必须改用实际 M tile 数计算任务数，不能直接套用本公式。候选 BLOCK_N 必须先满足 accumulator、weight、输入和临时量的 UB 容量约束，并支持逻辑 N 尾块 mask。`M // E < 16` 只是 host 侧判断 tiny segment 的平均值启发式，`BLOCK_N=512` 仅用于测试减少低 M dot 固定开销是否获益；不得据此覆盖已有 shape 特化或 autotune 分派。任务数不足以填满 Cube 核时优先测试更小 BLOCK_N，tiny segment 且 N 较宽时再额外测试更大 BLOCK_N，最终只保留逐 shape 实测稳定获益的分支。
+
+```python
+BLOCK_N_CANDIDATE = (
+    512
+    if E > 1
+    and M // E < 16
+    and E * triton.cdiv(N, 512) >= cube_cores
+    else
+    256 if E * triton.cdiv(N, 256) >= cube_cores else
+    128 if E * triton.cdiv(N, 128) >= cube_cores else
+    64 if E * triton.cdiv(N, 64) >= cube_cores else 32
+)
+# 仅在逐 shape benchmark 稳定获益后采用；否则保留原 BLOCK_N 分派
+```
+
+### L2.6 跨 N 逐行归约 epilogue 的双骨架分派
+
+1. **默认骨架**：沿用 L2.1/L2.2 的 per-N-tile partial-max + 二阶段归约，不改变已验证实现。
+2. **候选骨架**：Cube 将完整中间结果写入 `[M, N]`（或等价的左右分支布局）workspace；Vector program 负责完整行块，第一遍遍历 N 计算激活及逐行统计量，第二遍重新计算激活并完成量化/写回。
+3. **容量门槛**：按实际中间 dtype 和分支数计算 workspace 字节数，同时核算单个 Vector program 的行块及临时量；超过预算时不得进入候选骨架。
+4. **收益门槛**：候选骨架必须与 partial-max 基线逐 shape 实测。只有两遍读取和重算的成本低于 partial 写回、读取及归约成本时才建立 shape 分支；否则保留默认骨架。
 
 ---
 
@@ -156,6 +221,10 @@ found = tl.where(hit, 1, found)           # 禁 break/continue，用 flag 收敛
 | verify_dir 缺 .json / 缺 _torch 后缀 | FileNotFoundError / ModuleNotFoundError | 三件套齐备（L1.8） |
 | BM=128 继续放大 | acc 2×128×128×4=128KB 必溢出 | BM 上限 64（UB 核算，L1.4 注意） |
 | 粗略 python 计时判断优化效果 | 结论被 host 开销淹没 | 只信 benchmark.py 的 profiler 数据 |
+| BLOCK_K 按 K 的最大整除因子选择 | `K=4096+16` 落到 BK=16，K 循环暴增 | K 仅按 16 对齐；BK 按 UB/循环次数选，尾块 mask 补零 |
+| N 非整除就回退小 BLOCK_N | N tile 数和 dot 次数无谓翻倍 | 保持大 tile，尾块用 `mask_n` |
+| 只追求大 BLOCK_N | 小 E、窄 N 时 Cube 严重欠并行 | 用 `E*ceil(N/BN)` 检查任务数，不足则减小 BN |
+| tiny expert 仍固定 BN=128/256 | 大量 M<16 的 dot 固定开销占主导 | UB 允许时实测 BN=512，按平均 expert 行数分派 |
 
 ---
 
@@ -170,6 +239,15 @@ found = tl.where(hit, 1, found)           # 禁 break/continue，用 flag 收敛
 | opt_iter_4 | int8 dot 路径 BK 256→512 | **0.7738x** |
 
 **收益递减判据（何时停）**：BM 轴 +599%→+19%→+4.4%，BK 轴 +12%；当某轴收益 <5% 或被 UB 硬锁（L1.6）时停止，剩余差距标注结构性来源。
+
+### A8W8 GMM + SwiGLU + Quant 补充实测（Ascend 910B，12 case）
+
+| 版本 | 核心变化 | Triton 自身几何平均提速 | CANN/Triton 几何比 | ≥0.48 case |
+|------|----------|-------------------------|--------------------|------------|
+| 旧版 | BK 取 K 的最大整除因子；N 非整除回退 BN=128 | 1.000x | 0.2456 | 4/12 |
+| 新版 | K 16 对齐后独立选 BK；N occupancy 分派；tiny-expert BN=512；BM 阈值特化 | **1.9625x** | **0.4820** | **7/12** |
+
+关键单点：`K=4112` 从 BK=16 改为 BK=256 后，典型用例减少 240 次 K 循环；窄 N/大 K 用例通过 N occupancy 分派避免只启动 3 个 Cube 任务；多 expert、平均约 1-2 行的用例用 BN=512 摊薄低 M dot 固定开销。以上数据均来自 5 次预热、20 次采样，且 12/12 精度通过。
 
 ## 与 latency-optimizer 优化点的对应关系
 
