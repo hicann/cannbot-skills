@@ -134,6 +134,27 @@ stages:
         runs-on:
           - self-hosted
           - runner_name=A5_skill_tester_02
+      # 第四道静态门禁：Semgrep Bash 扫描（本地规则库绝对阈值，WARNING→MEDIUM 告警）。
+      # 只扫 PR 改动的 .sh 文件；同样只运行 Runner 上已部署的受信任脚本，
+      # 由 RDV 检出合并树并调用本地规则库执行。
+      JOB_semgrep_vet:
+        name: Semgrep_Vet
+        steps:
+          - name: check_semgrep_script
+            run: |
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-semgrep.sh \
+                || { echo "❌ runner 上未找到 ci-pr-semgrep.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+          - name: run_semgrep_vet
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+            run: |
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-semgrep.sh \
+                --pr-number "${{ env.MERGE_ID }}" \
+                --gitcode-repo cann/cannbot-skills \
+                --timeout 1800
+        runs-on:
+          - self-hosted
+          - runner_name=A5_skill_tester_02
       JOB_content_critique:
         name: Content_Critique
         steps:
@@ -160,7 +181,7 @@ stages:
     pre:
     - type: auto
     fail-fast: false
-  # ST 动态评测单独成 stage，最后执行（stage 串行保证其晚于 stage3 的三道门禁与 UT）。
+  # ST 动态评测单独成 stage，最后执行（stage 串行保证其晚于 stage3 的四道门禁与 UT）。
   stage4:
     name: Skill_Test
     jobs:
