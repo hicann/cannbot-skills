@@ -13,3 +13,4 @@
 | **scale_coalescing** | 假 MTE2 bound（MTE2 busy 高但带宽利用率 < 70%）+ 存在 < 20 KB 的 scale / bias / LUT 小块 | `scaleKL1 = SCALE_L1_BUFFER_NUM × kL1`，把 K 向 `baseK` 切碎的小块合并成一次大 MTE2 | [scale_coalescing_design.md](scale_coalescing_design.md) |
 | **mte2_preload** | pingpong 已开 + 各流水 busy ≤ 70%（准无 bound）+ 流水图可见 MTE2_PING/PONG 间 gap + `kL1TileNum ≥ 2` | Kernel 主循环改造为「段 1 首轮 PING / 段 2 预取 PONG / 段 3 消费」三段结构；零 TilingData 数值改动 | [mte2_preload_design.md](mte2_preload_design.md) |
 | **constant_folding** | Kernel 使用 Matmul API 且 `aic_scalar_ratio` 偏高（分析层 Go）；shape 可固化或可取上界 | 将 `TCubeTiling` 解析迁到编译期 `MatmulApiStaticTiling`，降低 `aic_scalar_time` | [constant_folding_design.md](constant_folding_design.md) |
+| **small_m_wide_n_pipeline** | 小 M、长 K / 宽 N 的 Matmul、BatchMatmul、GMM；存在 A 重复加载瓶颈，且 N 加宽后仍有足够多核并行度（MX FP8×FP4 GMM 已验证） | 在尽量不增加 B 载入次数的前提下，缩 baseM、扩 baseN，减少 A 的重复载入；配套调整缓冲容量、L1 权重分段与双槽流水、任务映射 | [small_m_wide_n_pipeline_design.md](small_m_wide_n_pipeline_design.md) |
