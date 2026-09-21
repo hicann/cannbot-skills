@@ -156,6 +156,79 @@
           "description": "技能 model-recommend-analysis 被激活"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "推荐模型训练场景识别",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "如何判断profiling是推荐模型训练场景还是推荐模型推理场景？",
+      "expected_output": "回复应说明唯一判断依据：是否存在反向/梯度相关算子。训练场景的 op_statistic/op_summary 含 *Backward*、*Grad*、EmbeddingDenseGrad* 等反向算子，trace_view.json 含 backward/autograd/loss.backward 事件；推理场景无任何反向算子。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "反向",
+          "description": "回复中提到了反向算子"
+        },
+        {
+          "type": "contains",
+          "pattern": "Backward",
+          "description": "回复中提到了 Backward 算子"
+        },
+        {
+          "type": "contains",
+          "pattern": "Grad",
+          "description": "回复中提到了 Grad 算子"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "推荐模型训练关键流程梳理",
+      "config": {
+        "max_tokens": 150000,
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "推荐模型训练场景的关键流程包含哪些阶段？",
+      "expected_output": "回复应说明训练单步迭代的 6 个标准阶段：数据预处理、Embedding拉取、前向计算、反向计算、更新Embedding、更新Dense。并说明两对天然可异步的阶段：数据预处理↔Embedding拉取、更新Embedding↔更新Dense。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "数据预处理",
+          "description": "回复中提到了数据预处理"
+        },
+        {
+          "type": "contains",
+          "pattern": "更新Embedding",
+          "description": "回复中提到了更新Embedding"
+        },
+        {
+          "type": "contains",
+          "pattern": "更新Dense",
+          "description": "回复中提到了更新Dense"
+        },
+        {
+          "type": "contains",
+          "pattern": "异步",
+          "description": "回复中提到了异步并行机会"
+        },
+        {
+          "type": "skill_activated",
+          "pattern": "model-recommend-analysis",
+          "description": "技能 model-recommend-analysis 被激活"
+        }
+      ]
     }
   ],
   "skill_name": "model-recommend-analysis"
