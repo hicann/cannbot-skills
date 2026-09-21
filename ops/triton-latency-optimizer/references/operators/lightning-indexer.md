@@ -3,8 +3,8 @@
 **以 LightningIndexer（topk-select 稀疏注意力索引器）大 shape 拆分路径为典型案例，提炼"先归因、再探查、后放大"的 tile 优化方法与 finalize 类小 kernel 的 program 合并技巧。**
 
 **算子类别**: `topk-select`（QK^T 打分 + relu + 权重头归约 + 行内降序 top-K 选位，输出 int32 索引 + 可选 fp32 分数）
-**典型特征**: 大 shape（`rows * S2P >= 4M`）走拆分路径——`qk_kernel`（QK^T + fp16 量化 + relu，产出 y16 中间缓冲）与 `hsum_kernel`（fp32 块对角头归约 + causal mask，产出 scores）；选位由 `.sort()` 稳定排序完成（环境约束：`torch.topk`/`npu_sort_v2` 均被 validator 拦截，`.sort()` 是唯一放行原语，详见 transformer-inference.md §6 L1.4）
-**性能基准**: hsum_kernel BLOCK_J 128→256（opt_16）单 kernel **-30%**（B2,2048,16384：7365→5169µs）；finalize 4 行合并（opt_17）单 kernel **-43~47%**（case16 2399→1267µs）；16-shape（work 0.1M~268M）vs ops-transformer AscendC 核级几何平均 **0.362 → 0.421**；输出与 torch 参考位级一致（大 shape 复验索引 |diff|>1 = 0/8.4M 元素）
+**典型特征**: 满足形状感知分派条件（`rows >= 256 且 rows*S2P >= 1M`）的 shape 走拆分路径——`qk_kernel`（QK^T + fp16 量化 + relu，产出 y16 中间缓冲）与 `hsum_kernel`（fp32 块对角头归约 + causal mask，产出 scores）；其余保留单融合核；选位由 `.sort()` 稳定排序完成（环境约束：`torch.topk`/`npu_sort_v2` 均被 validator 拦截，`.sort()` 是唯一放行原语，详见 transformer-inference.md §6 L1.4）
+**性能基准**: hsum_kernel BLOCK_J 128→256（opt_16）单 kernel **-30%**（B2,2048,16384：7365→5169µs）；finalize 4 行合并（opt_17）单 kernel **-43~47%**（case16 2399→1267µs）；形状感知分派阈值 A/B 定档（opt_18）使弱 shape 0.367→0.48、任务 8-shape 5.63→5.75×；16-shape（work 0.1M~268M）vs ops-transformer AscendC 核级几何平均 **0.362 → 0.433 → 0.516 → 0.526（opt_20，全部 16 shape 严格 >0.41）**；输出与 torch 参考位级一致（大 shape 复验索引 |diff|>1 = 0/8.4M 元素）
 
 ---
 
@@ -52,6 +52,17 @@
   编译报错 `requires 2621696 bits`）。
 
 ## Layer 2: 算法骨架（Agent 可参考架构）
+
+### L1.6 双路径分派阈值必须同会话 A/B 实测定档，且规则需形状感知
+
+- **必须** 对"融合 vs 拆分"做同会话 A/B 交叉点扫描（同一进程、同一 profiler 设置），而不是拍一个 work 阈值。
+- **必须** 在 work 之外纳入行数维度：本项目实测同一 work（1.05M）下，`rows=512` 拆分优 +31%，
+  而 `rows=128` 的长 KV 形态融合优 -13%（拆分后 qk/hsum 的 program 数太少、串行 tile 过长）。
+  最终定档规则：`rows >= 256 且 rows * S2P >= 1M` 走拆分。
+- **Why**：拆分收益 = 微 dot 合并省下的同步税 − 额外一次调度与 `[rows*N, S2P]` 中间缓冲的代价；
+  前者随 tile 数增长、后者是固定税，交叉点必须实测；只按 work 拍阈值会在低行数长 KV 形态上误伤。
+- **How to apply**: A/B 脚本对候选 shape 各测融合与拆分（同会话各 warmup 3 + repeats 6+），
+  取交叉点；实测数据见"性能基准"表 opt_18 行。
 
 ### L2.1 profile 变体探查流程
 
@@ -160,7 +171,10 @@ def finalize_kernel(v_ptr, i_ptr, oi_ptr, ov_ptr, S2P, K, ROWS,
 |------|-----------|------------------------------|------|
 | opt_iter_14（拆分 + 双路径分派） | R16/BJ128 | 0.362 | 大 shape 拆分路径建立 |
 | opt_iter_16（tile 放大） | R16/BJ256 | 0.404 | profile 探查 + tile 放大，单 kernel -30% |
-| **opt_iter_17（finalize 行合并）** | 同上 + finalize R=4 | **0.421** | program 数 ÷4，单 kernel -43~47% |
+| opt_iter_17（finalize 行合并） | 同上 + finalize R=4 | 0.421 | program 数 ÷4，单 kernel -43~47% |
+| **opt_iter_18（形状感知分派）** | 分派：rows≥256 且 work≥1M | **0.433** | 阈值 A/B 定档；#4 0.401→0.49、#5 0.367→0.48；任务 5.63→5.75× |
+| **opt_iter_19（因果掩码三段 tile 切分）** | 同上 + j 循环三段化 + qk 父块对齐 | **0.516（全 ≥0.40）** | hsum 19.1→6.3ms(#16)；#11 0.35→0.42、#16 0.26→0.40；任务 5.72× |
+| **opt_iter_20（两级排序 + L2 组调度）** | 同上 + A 组 4096 窄排 + batch 对齐组 | **0.526（全严格 >0.41）** | sort 16.9→11.4ms(#16)；#16 0.398→0.487；任务 5.71× |
 
 关键结论：
 1. 先归因（唯一 kernel 名）、再探查（变体矩阵 + 消融边际成本）、后放大（实测 UB 边界）是 dot+逐元素混合 kernel 的正确优化顺序，任何一步顺序颠倒都可能打错目标。
@@ -168,3 +182,14 @@ def finalize_kernel(v_ptr, i_ptr, oi_ptr, ov_ptr, S2P, K, ROWS,
 3. tile 放大前先论证位级不变性（只动 N 维不动 K 归约），放大后做大 shape 位级复验。
 4. 收尾类小 kernel（finalize/cast/fill）在 small shape 占比可达 5%+，行合并削减 program 数是最后一批
    可稳定兑现的收益；但合并后必须维持"输出全位置有定义"的契约（tl.where 全写回，勿 masked-store）。
+5. profile 归因要用精确 per-kernel 分解复核"不可达"结论：opt_18 判 #11/#16 不可达的依据
+   "sort 锁定 38-40%"被证伪——hsum（39.5%）才是第一大开销；因果掩码的有效列前缀结构
+   （三段 tile 切分）是算术逐位不变的大 lever（L1.7 @ transformer-inference.md §6）。
+6. 两个新陷阱（实测复现）：循环上界依赖 device load 会让编译器放弃预取流水（qk 反慢 39%，
+   用 UNIFORM_LEN 标量算术上界修复）；0×NaN=NaN 穿透块对角 m1 结构零（跳过写区垃圾
+   进入邻 kernel dot → 整 tile 污染，非确定性；用父块对齐写入上界修复，勿用 fp32 广播
+   load 掩码——UB 溢出 304KB>192KB）。
+7. sort 侧最后一块肉（opt_20）：aclnnSort 有 4096 宽甜点（耗时 0.37×/元素，实测）；
+   参考 isfinite 掩码使 -inf 槽位列序无关 → eff≤W 的行只排 [0,W) 逐位一致；
+   host 双 sort + 分部 finalize 落地（in-kernel 分裂布局 UB 溢出放弃）。
+   多流重叠对"kernel 时长求和"考核零收益——L2 局部性（同 stream batch 对齐组调度）才有效。

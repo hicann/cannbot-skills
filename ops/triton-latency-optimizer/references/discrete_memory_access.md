@@ -87,6 +87,28 @@ val = tl.load(src_ptr + index, mask=mask)  # 直接从global中离散访问取�
 	)
 ```
 
+### 随机读的三条路径与选型（含 gather→dot 缺陷说明）
+
+当随机读结果**用于 `tl.dot`**（典型：稀疏注意力的 K/V gather、MLA-absorb）时，除 `gather_out_to_ub`
+外还有两条路径。选型判据：
+
+| 路径 | 结构 | 适用条件 | 实测边界（SparseFlashAttention, Ascend910B3） |
+|---|---|---|---|
+| ① `gather_out_to_ub` | 单 kernel，gather 到 UB 直接参与计算 | 采集结果可放 UB 且不需要 `tl.dot`（或后端 lowering 支持） | 硬件接口能力见上文；本文不展开 |
+| ② **内核内 gather 连续化暂存** | 单 kernel：`unmasked gather → store 到 per-core scratch（L2 驻留）→ barrier → 全仿射 load + dot` | 单 pass；per-core working set（`核数 × K × (D+DR) × 2B`）可驻留 L2 | SFA 主路径：随机访存 vs CANN 0.070→0.4110（5.9×）；本例 scratch 11.5MB/核 |
+| ③ Device-side gather（独立 kernel + 全局 workspace） | 两 kernel：gather→GM workspace→仿射消费 | per-core working set 放不进 L2，或 gather 跨多 pass 重复（workspace 可复用） | SFA 实测**劣化 27%~49%**（workspace HBM 往返 + 无阶段重叠），详见 `device-side-gather.md`「反例与适用边界」 |
+
+⚠️ **为什么 ② 需要 `store→load` 绕行（编译器 lowering 缺陷记录）**：
+- **unmasked 2D gather 直喂 `tl.dot`**：产出错值（±512 级垃圾值）；极简形态还会编译失败
+  （`Unknown core type: llvm.func @malloc`）；
+- **masked gather 直喂 `tl.dot`**：数值正确，但有**每迭代 ~12µs 固定开销**（与 BN 无关），
+  小 K 场景会退化为 20ms 级；
+- 纯 gather→store（无 dot 参与）则**数值正确且跑满带宽**（~1.4TB/s，含写）。
+→ 结论：把 gather 结果先落到连续 buffer（scratch 或 workspace），再以**仿射 load** 消费，
+是本编译器下唯一的正确高速路径。该约束已同步归档到生成期 template
+（block_sparse_attention.md L1.14），算子级实测与证伪清单见
+`operators/sparse-flash-attention-optimization.md`。
+
 ### 随机写优化方法
 
 随机写可以尝试使用`scatter_ub_to_out`接口替换，该接口功能为：将统一缓冲区（Unified Buffer, UB） 中的数值张量（value）根据索引张量（index）沿目标张量的指定维度（dim），分散存储到全局内存（Global Memory, GM）的目标张量（ptr）中。该函数输入：

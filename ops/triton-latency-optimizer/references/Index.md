@@ -22,7 +22,7 @@
 | 1 | 入参静态化优化 | 存在可声明为 `tl.constexpr` 的固定参数 | 单次 kernel 启动后不变的参数未声明 `tl.constexpr` | `references/constexpr_parameters.md` |
 | 2 | Tiling 优化 | 多维张量规约/归一化算子，规约轴非最连续轴 | 分块策略导致跨步访存 | `references/tiling_optimization.md` |
 | 3 | 分核优化 | Grid 设置不合理或未充分利用 NPU 资源 | Grid 与物理核数严重偏离，或每个 program 处理数据量过小 | `references/vector_core_partition.md` |
-| 4 | 离散访存优化 | 通过随机/不可预测索引访问全局内存 | 索引来源于 `tl.load` 加载值或 kernel 入参 | `references/discrete_memory_access.md` |
+| 4 | 离散访存优化 | 通过随机/不可预测索引访问全局内存 | 索引来源于 `tl.load` 加载值或 kernel 入参；**当随机读结果要喂 `tl.dot` 时**，三条路径（`gather_out_to_ub` / 内核内 gather 连续化暂存 / device-side gather）的选型判据与 gather→dot lowering 缺陷记录见文档内「随机读的三条路径与选型」 | `references/discrete_memory_access.md` |
 | 5 | Scalar 转 Vector 优化 | 存在可转换为向量操作的标量操作 | 存在标量广播、标量规约、标量控制流、`int` 比较/除法/取余、`atomic_*` 标量操作 | `references/scalar_to_vector.md` |
 | 6 | 避免向量 API 标量降级 | 向量操作可能被编译器降级为标量循环 | 算术/比较/扩展乘法/cumsum/cumprod/reduce 满足降级条件 | `references/avoid_scalar_lowering.md` |
 | 7 | Pass 消除合并优化 | 多次遍历相同数据计算不同统计量 | 可通过自适应 `BLOCK_SIZE` 消除循环，或可合并多次遍历 | `references/pass-merge.md` |
@@ -40,7 +40,7 @@
 | 19 | Host 侧张量维度拼接优化 | 算子内存在复合点积 `a·c + b·d`（多次 `tl.dot` + 中间累加），各分段为同一对象连续维度 | 各分段独立存储、内存连续可 `concat`，且拼接后不溢出 UB | `references/host-tensor-concat.md` |
 | 20 | Workspace 物化解耦优化 | 多输出 kernel 输出间循环遍历顺序冲突（UB 放不下常驻累加器且 atomic 太贵），存在可物化复用的共享中间量 | 多 pass 重复 gather + 重算共享中间量，且 pass 间循环顺序 genuine 冲突无法合并 | `references/workspace-decoupling.md` |
 | 21 | Latency-Bound 循环维度 Tile 合并 | kernel 处于 latency-bound（算力利用率极低，dot 固定 issue/同步开销主导），存在外层循环每迭代发起一组 dot，且 dot 某维（常 M）小于 cube 微块可放大 | profiling 算力利用率 <5% 且带宽未饱和但 dot 调用频繁，外层循环放大 dot 维度可减迭代数，放大后连续单 tile 在 UB/CC 内 | `references/latency-bound-tile-merge.md` |
-| 22 | Device-side Gather 连续化 | 算子内部存在按随机索引重复 gather，离散 gather 限制大 tile 使用 | 可拆分为 device gather kernel + 连续 workspace + 后续 compute kernel | `references/device-side-gather.md` |
+| 22 | Device-side Gather 连续化 | 算子内部存在按随机索引重复 gather，离散 gather 限制大 tile 使用；**且单 pass 时 per-core working set 放不进 L2（或 gather 跨多 pass 重复、workspace 可复用）** —— 若可驻留 L2，应改用内核内 gather 连续化暂存（优化点 4 文档内路径②） | 可拆分为 device gather kernel + 连续 workspace + 后续 compute kernel；拆分后两 kernel 串行无阶段重叠，需计入 workspace HBM 往返 | `references/device-side-gather.md` |
 | 23 | Matmul 链中间 buffer dtype 优化 | 两段及以上串联 matmul，中间 buffer 被下一段 matmul 读取 | 中间 buffer 声明为 fp32 或 `tl.dot` 前显式 `.to(tl.float32)`，导致无法走 Ascend Cube 低精度高吞吐路径 | `references/chained-matmul-buffer-dtype.md` |
 | 24 | 输出预初始化 | 输出中存在大量默认值位置（常见为 0），kernel 内用 `if`/`tl.where` 判断填充或先做 host 预 padding | 输出位置进行默认值的判断与填充 | `references/preinitialized-output-optimization.md` |
 | 25 | Ascend Interpolate 专用优化 | 算子类型为 interpolate/upsample_* | 代码为 Interpolate 类算子，存在坐标/权重运行时计算或离散访存 | `references/ascend-interpolate-optimization.md` |
@@ -68,6 +68,7 @@
 | **Multi-kernel** | stats + apply 双 kernel（BatchNorm/LayerNorm/GroupNorm/InstanceNorm/RMSNorm 等归一化算子） | 5, 7, 8, 14, 17 | 继承 Tiled Reduction 全部瓶颈 + kernel 分裂 |
 | **Broadcast EW** | `add/sub/mul/div` 逐元素操作，存在 shape 不等需广播 | 1, 2, 8, 12 | 入参静态化、tiling、多路径调度是关键 |
 | **Scatter/Gather** | 通过随机/不可预测索引访问全局内存 | 4, 5 | 离散访存和 scatter-add 并行轴选择 |
+| **Sparse Attention (SFA/BSA)** | sparse_indices 作为算子输入（上游 topk，行内随机/升序），KV 全 Q 头共享（KV_N=1），MLA-absorb 语义（`q_nope@K̃_nope^T + q_rope@K̃_rope^T → softmax → @K̃_nope`） | 4, 22, 2 | 随机访存为主场景，无块规则可跳过；**先做 stage/consume 阶段拆解**（stage=带宽地板，consume=trans/PV 布局转换地板）；主路径=内核内 gather 连续化暂存；device-side workspace 方案已实测劣化 27%~49%；multibuffer/双缓冲无效。详见 `references/operators/sparse-flash-attention-optimization.md` |
 | **Histogram-like / Small-output-table** | histc / bincount / scatter_reduce 等小输出表规约 | 3, 29, 1 | 核数扩展优先；禁止全局 atomic；IR 诊断 match-matrix 标量降级 |
 | **MatMul** | 矩阵乘法 | 2, 25 | tiling；转置 matmul 需检查专用优化（autotune 由主流程终止步骤 7 统一执行） |
 | **Memory-bound Copy** | Split/Concat/Pad/Chunk 等纯访存算子 | 15 | 连续拷贝聚合 |
@@ -126,6 +127,7 @@
 | CV 融合-Batch 流水线 | `references/operators/cv-fusion-pingpong.md` | CV 融合算子 PIPE_STAGES 调度、T0-T5 逐拍交错、Buffer 分配策略 |
 | Attention/FA 专用优化 | `references/operators/flash-attention-optimization.md` | FA 类算子瓶颈判别、迭代数目标函数、有效方向与**证伪方向全表**、profiling 字段误导案例、天花板估算模板 |
 | Attention/MLA 专用优化 | `references/operators/mla-paged-attention-optimization.md` | MLA 类算子瓶颈判别、仿射 store 修复（`BLOCK_QO=1`）、`P_SPLIT` 精度补偿、KV 共享与 split-KV、**证伪方向全表** |
+| Attention/SFA 专用优化 | `references/operators/sparse-flash-attention-optimization.md` | SparseFlashAttention（随机 topk 索引）阶段拆解、内核内 gather 连续化暂存主路径、有效方向与**证伪方向全表**、天花板估算模板 |
 | CV 融合-Tiling | `references/operators/cv-fusion-tiling.md` | CV 融合算子 On-Chip 容量估算、候选验证、Autotune 自动化搜索 |
 | IR分析优化 | `references/IR_triton.md` | IR分析优化 |
 | Histogram-like / Small-output-table 优化 | `references/histogram-like-table-reduction.md` | 小输出表规约类算子专用优化经验 |

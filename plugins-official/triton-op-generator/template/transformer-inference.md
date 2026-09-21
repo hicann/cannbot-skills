@@ -846,8 +846,8 @@ top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算
 
 **算子类别**: `topk-select`
 **典型特征**: fp16 QK^T（fp32 累加、fp16 量化输出）→ relu → 按头权重求和（fp32）→ causal mask（-inf）→ 稳定降序 top-K；输出 `int32` 索引 + 可选 `fp32` 分数
-**性能基准**: 任务 8-shape（verify 8/8）**5.6291x** vs torch；16-shape（work 0.1M~268M，mode3）vs ops-transformer AscendC 单融合 kernel 核级几何平均 **0.421x**、墙钟 0.334x
-**历史最佳版本**: opt_iter_17（初版 2.56x → 17 轮迭代）
+**性能基准**: 任务 8-shape（verify 8/8）**5.7126x** vs torch；16-shape（work 0.1M~268M，mode3）vs ops-transformer AscendC 单融合 kernel 核级几何平均 **0.526x（全部 16 shape 严格 >0.41）**、墙钟 0.377x
+**历史最佳版本**: opt_iter_20（初版 2.56x → 20 轮迭代）
 
 ### §6.1 Layer 1: 设计约束（Agent 必须遵守）
 
@@ -899,18 +899,29 @@ top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算
   ③ `.sort()` tensor 方法不在禁止名单、由设备侧 aclnnSort 执行、实测**稳定**（同分按下标升序，含 -inf 平局），
   与参考 `torch.sort(stable=True, descending=True)` 语义一致。
   三层叠加后，`.sort()` 是唯一放行且满足正确性要求的选位原语。
+- **为什么不用 `tl.sort` 自研排序（实测证据）**：本平台 triton-ascend 3.2.1 的 `tl.sort` 不可用——
+  ① 小尺寸（如 [1,8]）可编译但**输出错误**（乱序，实测 `[0,4,6,7,5,3,2,1]` vs 正确 `[7,6,5,4,3,2,1,0]`）；
+  ② UB 开销约 **570 字节/元素**（fp32 的 ~140 倍），M8×N64 即需 262KB（>192KB），[16,128] 需 1.14MB，
+  与真实 S2（8192~32768）差两个数量级；
+  ③ 无 `tl.argsort`（`tl.sort` 只返回值），选 top-K 索引还需额外的 (值,索引) key 编码与解码。
+  注意：910B 硬件与 CANN 本身支持排序（`aclnnSort`/SortAiCore 正常执行，`torch.sort` 即走此路），
+  这是 **triton 编译器侧的成熟度问题，不是设备能力问题**。
 - 排序输入喂 2D `[rows, S2P]`（`S2P = max(S2, sparse_count)`）；`S2 < sparse_count` 的补齐列由
   `j >= ak` 条件注入 `-inf`，不要依赖 k 载入的零填充参与排序。
 
 #### L1.5 大 shape 必须双路径分派（拆分 vs 融合）
 
-- **必须** 按 `rows * S2P >= 4_000_000` 分派：大 shape 走拆分路径（qk_kernel 与 hsum_kernel 分核、
-  y16 中间缓冲），小 shape 保留单融合核。
+- **必须** 按**形状感知规则**分派：`rows >= 256 且 rows * S2P >= 1_000_000` 走拆分路径
+  （qk_kernel 与 hsum_kernel 分核、y16 中间缓冲），否则保留单融合核。
+  阈值不得拍脑袋——必须用同会话 A/B 交叉点扫描实测定档（本项目实测：0.52M 处融合仍优 -20%，
+  1.05M 起拆分领先 +31~35%；且 **同一 work 下形状结构会翻转偏好**：`rows=128` 的长 KV 形态
+  （如 2×64×8192）因拆分后 program 数太少、串行 tile 过长，融合反而优 13%）。
 - **Why**：融合核里每个 tile 要做 2 个 dot。其中头归约 dot 的 M=8、只有 65K MAC（qk dot 的 1/32），
   但每个 dot 都要付出固定的一次"指令发射 + cube↔vector 握手等待"开销——dot 很小、开销却与 dot 大小无关，
   所以 tile 数大时这一税被放大（消融实测：去掉头归约 dot 省 63% 的 score 核时间）；拆分后头归约 dot 可 16 行合并、
-  tile 放大，大 shape 全流水 -9~15%。但拆分要额外一次 kernel 调度 + 一份 `[rows*N, S2P]` 中间缓冲，
-  小 shape 反而回退（任务 8-shape 4.39 vs 5.16），所以必须分派而不是一刀切。
+  tile 放大，满足分派条件的 shape 全流水 -9~15%（扫描实测 #4 0.401→0.49、#5 0.367→0.48）。
+  但拆分要额外一次 kernel 调度 + 一份 `[rows*N, S2P]` 中间缓冲，小 shape / 低行数长 KV 反而回退，
+  所以必须按实测交叉点分派而不是一刀切。
 - R 行合并**必须**满足 `S1 % R == 0`（R 行必须同 batch，k 按 batch 共享），否则取错 key 数据。
 
 #### L1.6 结构参数边界（UB / grid）
@@ -921,6 +932,52 @@ top-K 个 key 位置，供后续稀疏注意力只在这些位置做真实计算
 - mix 算子 grid ≤ cube 核数（910B3 = 20）；finalize 行合并 R=4（R=8 时 `[8,2048]` 的 int64 载入组合
   需约 320KB，超过 192KB 上限——编译报错 `requires 2621696 bits`，R=4 为可行边界）。
 
+#### L1.7 mode3 因果掩码：三段 tile 切分 + 父块对齐跳过（opt_19，全 shape ≥0.4 的关键）
+
+- **适用**：拆分路径（L1.5 条件满足）且 mode3。每行有效列是前缀 `[0, eff_r)`，
+  `eff_r = min(ak, (ak-aq)+s1+1)`（非 mode3 时 `eff_r = ak`；`s1 >= aq` 的整行 eff=0）。
+  按行块 `min/max eff` 把 j 循环分三段（**算术逐位不变**，不是近似）：
+  - 全有效段 `[0, lo)`：**去掉 cond/where**，纯 load+dot+store（acc2 直存 == 原 `cond=false` 分支逐位一致）
+  - 边界段 `[lo, hi)`：保留原完整掩码逻辑
+  - 全掩码段 `[hi, S2P)`：只写 -inf 常量；qk 侧整段**跳过** k-load/dot/store
+- **Why**：精确 profile 显示大 shape 的第一大开销是 hsum（#16: 19.1ms=39.5%），不是 sort（34.8%）；
+  旧归因"sort 锁定"是错的。因果掩码下 #16 平均有效列仅 ~50%，三段化后 hsum 19.1→6.3ms、
+  16-shape 几何平均 0.433→0.516、#16 0.26→0.40、#11 0.35→0.42。
+- **禁止把同样三段切分搬进融合核（小 shape）**：固定 min/max 归约 + 三循环结构在
+  rows≤128 的小 shape 上产生 ~7% 回退（实测任务 8 case 全部变慢），融合路径保持单循环。
+- **坑 A（loop 上界禁止依赖 device load）**：`tl.load(aq/ak)` 后计算循环上界会让编译器
+  放弃多缓冲预取流水（实测 qk 在 #11 反慢 39%）。修复：`UNIFORM_LEN` 编译期分支——
+  actual_seq_lengths 未传（benchmark 常态）时用上界**纯标量/pid 算术**（`eff` 对 s1 仿射）；
+  传了实际长度才走 load 路径。
+- **坑 B（0×NaN=NaN 穿透块对角 m1 结构零，位级炸弹）**：qk 跳过写入的区域若被 hsum
+  边界段读到，未初始化垃圾进入 dot；垃圾含 NaN/±Inf 时 `0×NaN=NaN`，m1 的块对角结构零
+  **不构成隔离**，整个 [R,BJ] 输出 tile 被污染（实测 256/256 NaN；排序中 NaN 降序最优先 →
+  首元素被挤掉、finalize 输出 -1/-inf）。且非确定性（垃圾有限时结果偶然正确，隔离复跑可能"通过"）。
+  修复（父块对齐）：**qk 按父块（hsum 的 r_b 行块，经 `PARENT_R` 传入）上界写入**，
+  与 hsum 的 hi_i 同源同值，hsum 因此只读到真实写入的有限 relu 值；勿在 hsum 加
+  `[R*N,BJ]` fp32 广播比较做 load 掩码（UB 溢出 304KB>192KB 实测）。
+- **fp16-dot 证伪**（补充 L1.2）：fp16 输入 + `out_dtype=fp32` 的 dot 理论上乘积精确
+  （11+11 bit），实测 verify 6/8——fp16 cube dot 与 fp32 dot lowering 的 K 归约结构不同，
+  近平局 ULP 翻转不可挽救。位级墙下**不要**再尝试任何替换 fp32 块对角 dot 的归约实现。
+
+#### L1.8 sort 侧优化：两级窄排 + batch 对齐 L2 组调度（opt_20，消除 #16 临界）
+
+- **aclnnSort 宽度甜点（实测）**：`[16384,4096]` 排序耗时仅为 `[16384,8192]` 的 0.37×
+  （行减半 0.50×、宽减半 0.37×，远超 bitonic log²n 预测的 0.85×）——4096 宽大概率单 pass。
+  设计排序结构时优先向 4096 宽靠拢。
+- **两级窄排的位级一致性依据**：参考实现 `fin = torch.isfinite(topv)` 把 top-K 中 -inf 槽位
+  统一输出为 -1/-inf，**与槽位原始列号无关**；mode3 下 `eff_r ≤ W`（W ≥ K）的行其有限项全在
+  前缀 `[0, W)`，只排 `[0, W)` 与全宽排 top-K 逐位一致（有限项相对顺序不变，-inf 槽位殊途同归）。
+- **host 侧落地（推荐）**：按 batch 切片双 sort（A `[T, WA]` 列切片 + B 全宽行切片）+ 分部
+  finalize（out 视图寻址）；门控 `uniform_len and mode3 and 拆分路径 and 16 ≤ T ≤ S1-16 and WA < S2P`，
+  `T = (WA-(S2-S1))//16*16`。仅 S1≈S2 的大因果形状命中（如 #16: sort 16.9→11.4ms）。
+  ⚠️ **不要走 in-kernel 分裂布局**（hsum 直接写分裂 buffer 省 Slice 拷贝）：R=16/BJ=256 的 hsum
+  本在 216KB UB 边缘，分裂偏移逻辑实测 225KB>192KB 溢出。
+- **batch 对齐 L2 组调度**：拆分路径且 S1≥4096 时，qk/hsum 按 batch 组交替启动
+  （kernel 加 row0/cnt 行偏移，**同 stream 无需多流**——考核指标是 kernel 时长求和，
+  多流重叠对指标零收益；L2 局部性才是真杠杆），A/B 三次重复稳定 -0.84ms（#16）。
+  更小组/非对齐组均亏损（启动开销 + 组足迹超 L2）。
+
 ### §6.2 Layer 2: 算法骨架
 
 ```python
@@ -930,7 +987,7 @@ aq_dev = 实际长度 or torch.full((B,), S1, int32)     # None 时用常量张�
 ak_dev = 实际长度 or torch.full((B,), S2, int32)
 
 score_buf = torch.empty((rows, S2P), torch.float32)
-if rows * S2P >= 4_000_000:                          # L1.5 大 shape 拆分路径
+if rows >= 256 and rows * S2P >= 1_000_000:          # L1.5 形状感知分派（A/B 实测定档）
     y_buf = torch.empty((rows * N, S2P), torch.float16)   # y 值即 fp16, GM 往返无损
     r_a = 8 if S1 % 8 == 0 else ...                  # L1.5 同批合并门控
     qk_kernel[(cdiv(rows, r_a),)](q, k, y_buf, ..., BLOCK_J=256, R=r_a, multibuffer=True)
@@ -1012,7 +1069,10 @@ tl.store(oi_ptr + row_vec[:, None] * K + kn[None, :], oi, mask=wmask)
 | opt_11（R=8 + grid≤核数） | 5.16x | 0.339x | checklist 规则 5 |
 | opt_14（拆分 + 双路径分派） | 5.12x | 0.362x | 大 shape 全流水 -9~11% |
 | opt_16（hsum BLOCK_J 128→256） | 5.05x | 0.404x | 变体探查 -30% |
-| **opt_17（finalize R=4 行合并）** | **5.63x** | **0.421x** | 小 shape 的 finalize 占比高，同步受益 |
+| opt_17（finalize R=4 行合并） | 5.63x | 0.421x | 小 shape 的 finalize 占比高，同步受益 |
+| **opt_18（形状感知分派）** | **5.75x** | **0.433x** | 阈值 A/B 定档（rows≥256 且 work≥1M），弱 shape #4/#5 → 0.49/0.48 |
+| **opt_19（因果掩码三段 tile 切分）** | **5.72x** | **0.516x（全 ≥0.40）** | hsum/qk j 循环三段化（全有效/边界/全掩码），#11 0.35→0.42、#16 0.26→0.40 |
+| **opt_20（两级排序 + L2 组调度）** | **5.71x** | **0.526x（全严格 >0.41）** | A 组行 4096 窄排（isfinite 语义 + aclnnSort 宽度甜点），#16 0.398→0.487 |
 
 ## §7 FFN 算子（dual-gemm-activation）
 
@@ -1309,6 +1369,12 @@ tokens_t.copy_(pin_tok, non_blocking=True)   # 避免每次调用同步 H2D (~15
 | 同名 kernel 混淆 profiling 归因 | qk/hsum 都显示 "kernel" | 归因用唯一 kernel 名，勿凭名字判断耗时 |
 | torch 参考大 shape OOM | `expand` 是零拷贝视图，`.reshape()` 触发真实拷贝，把 `[B,S1,D,S2]` 整体复制成 68GB 内存 | 基线缺陷不可改（freeze 锚定），报告标注 |
 | masked-store finalize | 输出残留脏 int32（3/8 case 失败） | L3.4：全位置 `tl.where` 写回 -1/-inf |
+| 循环上界依赖 device load | 编译器放弃预取流水，qk 反慢 39% | L1.7 坑 A：`UNIFORM_LEN` 编译期分支，上界纯标量/pid 算术 |
+| 跳过写区被邻 kernel 读到 | 垃圾 NaN 经 `0×NaN` 穿透块对角 m1，整个 dot tile 污染（非确定性，隔离复跑可"通过"） | L1.7 坑 B：父块对齐（写入上界 == 读取上界同源），勿用 fp32 广播 load 掩码（UB 溢出） |
+| fp16 dot 替代 fp32 块对角 dot | verify 6/8，近平局 ULP 翻转 | L1.2/L1.7：归约结构不同，位级墙不可替换 |
+| 全宽排序一视同仁 | sort 占大 shape 60%+ 时无法下降 | L1.8：isfinite 语义 + 4096 宽甜点，A 组窄排（host 双 sort） |
+| 多流重叠刷指标 | kernel 时长求和口径下零收益 | L1.8：考核是时长求和不是墙钟；真杠杆是 L2 局部性（同 stream 组调度） |
+| in-kernel 分裂布局写排序 buffer | UB 225KB>192KB 编译失败 | L1.8：host 侧切片双 sort + 分部 finalize（out 视图） |
 
 ### §8.6 FFN 陷阱
 

@@ -52,6 +52,15 @@ kernel[grid](..., BLOCK_SIZE=BLOCK_SIZE, multibuffer=True)
 - **kernel 内有复杂的跨迭代依赖**：编译器无法安全调度 load 提前。
 - **瓶颈是 atomic/CUBE 利用率/标量循环**：multibuffer 不触及这些瓶颈。
 - **条件 prefetch**：在某些偶数 shape 下会 miscompile。
+- **瓶颈是「逐行小事务的 MTE2 指令流」而非流水缺失**：典型为离散 gather 型 kernel（如 SFA 的
+  选中行 gather）。事务数量 = 任务数 × K 行 × 张量数，是结构性固定量；加缓冲/双缓冲只改排序、
+  不减事务数，反而挤占 UB/L1 余量。**实测（SparseFlashAttention，Ascend910B3）**：
+  ① `CONSUME_BN=256 + multibuffer=True` 直接 L1 溢出（requires 5013504 / available 4194304 bits）；
+  ② `BN=128 + multibuffer=True` 7.75ms，劣于关闭时的 7.23ms；
+  ③ 任务级双缓冲软件流水（stage(t+1) ∥ consume(t)）7.44ms，劣于基线 7.20ms；
+  ④ stage 循环 unroll×2 亦更差。判别依据：`tl.load` 地址来自随行索引向量（逐行 1KB 级事务）
+  且 profiling 显示 MTE2 占比高但带宽未打满 → 先考虑**减少事务/流量**（D 拆半换大 BLOCK、
+  删机会性分支、内核内暂存），而不是加缓冲。
 
 ---
 
@@ -143,6 +152,9 @@ def kernel(input_ptr, output_ptr, N, BLOCK: tl.constexpr):
 kernel 有 load→compute→store 流水线？
 ├── 否 → multibuffer 不适用
 └── 是
+    ├── 瓶颈是「离散 gather 的逐行小事务指令流」？（地址来自索引向量 + MTE2 高占比 + 带宽未打满）
+    │   ├── 是 → 加缓冲无效；转「减少事务/流量」：D 拆半换大 BLOCK、删机会性分支、内核内暂存
+    │   └── 否 ↓
     ├── 自动 multibuffer=True 通过 verify？
     │   ├── 是 → benchmark；有提升则保留
     │   └── 否 → 手动无条件 clamped prefetch

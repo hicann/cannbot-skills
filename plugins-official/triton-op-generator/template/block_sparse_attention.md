@@ -28,7 +28,7 @@ metadata:
 > `BlockSparseAttnBwd`（同掩码语义的反向，dq/dk/dv 三 kernel，**5.32**）、
 > `MsaSparseAttnFwd`（paged KV + CSR 逆推 topK 选块）、
 > `SlaFwd`（pooled 打分 + topk 选块 + 并行的线性 attention 分支）、
-> `SparseFlashAttentionFwd`（`sp-index-given` 形态，16 case，vs ops-transformer 核时比值 **0.131 → 0.585**，见 L1.10~L1.13 / §3.4 / §4.6-4.7 / §6.4）。
+> `SparseFlashAttentionFwd`（`sp-index-given` 形态；**真实场景 = lightning_indexer topk 随机索引（无重复、升序）**：16 case 随机访存核时比 **0.070 → 0.4110（实际分布）/ 0.4095（压力对照）**；arange 顺序索引只是历史 bench 特例、非常规，见 L1.10~L1.15 / §3.4 / §4.6-4.7 / §6.4）。
 >
 > ⚠️ **核心优化哲学**：这类算子的头号问题**不是稀疏本身，而是"稀疏被写成了逐 token 的 program"**。
 > 掩码是块粒度的（通常 128×128），program 却按 token 发 —— 同一个掩码块里的 128 个 query
@@ -47,7 +47,7 @@ metadata:
 | `sp-paged-topk` | KV 经 `block_table` 分页寻址，且给的是 **k→q 方向**的 CSR（`indptr`/`indices`），需反推每个 query 的选中块 | 表用**无 dot 的 Triton kernel** 在 device 侧建；⚠️ 不要做跨 program 原子归约（§5.2） |
 | `sp-pooled-topk` | 无现成掩码，参考实现先把 Q/K 沿序列维池化成打分矩阵再 `torch.topk(...)` + `scatter_` | top-k 自己实现；⚠️ **紧致化不能用 `tl.cumsum`**（§4.3） |
 | `sp-bwd` | 入参含 `softmax_max` / `softmax_sum` / 前向输出，出 `dq`/`dk`/`dv`；掩码语义与前向同一套 | m/l/O 预给 → 不需要 online softmax；需要**转置的选择表** |
-| `sp-index-given` | 选择表 **sparse_indices 直接是算子输入**（上游 lightning_indexer 的 top-k 产物，行内下标或 `-1` 填充），KV_N=1 全部 Q 头共享同一稀疏集合；常见 token-wise（sparse_block_size=1） | 无 device 侧建表（bsa-L1.2 不适用）；**连续索引段检测 + 仿射快路径**是最大收益（L1.10/§3.4）；gather 路径的 UB 瓶颈是地址张量（L1.11） |
+| `sp-index-given` | 选择表 **sparse_indices 直接是算子输入**（上游 lightning_indexer 的 top-k 产物，行内下标或 `-1` 填充），KV_N=1 全部 Q 头共享同一稀疏集合；常见 token-wise（sparse_block_size=1） | 无 device 侧建表（bsa-L1.2 不适用）；**随机访存是默认场景，主路径 = gather 连续化暂存**（L1.10/L1.14/§3.4）；gather 路径的 UB 瓶颈是地址张量（L1.11） |
 
 ### §0.1 判别特征（决定用不用本文件）
 
@@ -273,24 +273,20 @@ q = tl.load(q_ptr + t * (Hq*D) + hqs[:, None]*D + offs_d[None, :], mask=gvalid[:
 `NEG = -3.0e38` 要写成 `NEG: tl.constexpr = -3.0e38`，否则报
 `Cannot access global variable ... from within @jit'ed function`。
 
-### L1.10 ★★★ 连续索引段必须被检测并分派到「仿射快路径」，禁止永远走 gather
+### L1.10 ★★★ 稀疏索引的主路径必须按「随机访存」设计——顺序（arange）索引不是常规场景
 
-- **必须** 用一个**无 dot 的检查 kernel** 在 device 侧逐行校验选择表行是否等于
-  `arange(K)`（连续索引段），写 flag（每行一个 int32）；主 kernel 按 flag 做
-  `if contig == 0:` 运行时标量分派 FAST / SLOW 两条路径。
-- **禁止** host 侧 `.cpu()/.item()/torch.equal` 判等（违反 L1.2 的 host 禁令）；
-  device 侧检查完全合规（无 D2H、无 host 建表）。
-- **禁止** 把检测结论复用成"下次还连续"的缓存——每次 forward 必须重新检测。
-- **Why（实测）**：连续索引（`arange(K)`，lightning_indexer 官方 bench 同款模式）下，
-  稀疏 gather 在数学上就是一段连续块搬运。CANN SFA 对此做 stride 合并搬运，
-  而通用 gather 路径每行都要算 `[BN,D]` 的间接地址。改成仿射地址
-  `(k0 + k_offs)[:, None] * D + d[None, :]` 后：载荷变连续 DMA、sel 读入/掩码比较/
-  地址张量全部消失，单段 D 下 BLOCK_KV 从 32 直接开到 128（实测 256 也可编译）。
-  整体 16 case 核时提速 **4.46×**（vs CANN 核时比值 0.131 → 0.585）。
-- **Why（实测）**：仿射路径的 UB 预算与 gather 路径是两套——路径一变，
+- **必须** 把 gather（慢）路径当作**主路径**设计：真实选择表来自上游 topk 算子
+  （下标无重复、升序、分布随机），逐行随机 gather 是常态，不是边角 case。
+- **禁止** 用 arange 连续索引的 bench 结果代表算子性能——"索引恰好连续"只是特例；
+  专项 bench 必须用随机索引（真实分布生成法见 §7 的 `randtopk_sorted`）。
+- **主路径结构 = L1.14 的「gather 连续化暂存」**（骨架见 §3.4）：
+  unmasked gather→store（满带宽）→ per-core scratch → 全仿射 flash 消费。
+- **历史注记**：早期版本曾按「检测连续段 → 仿射快路径」做双路径分派
+  （arange bench 核时比 0.585→0.836）；该模式对真实随机索引零收益，
+  属于机会性优化而非常规主线，已从 skill 主路径删除（生产 kernel 中保留该分支
+  仅作兼容兜底，新生成的同类算子**不必**复制此模式）。
+- **Why（实测）**：仿射/连续路径的 UB 预算与 gather 路径是两套——路径一变，
   **BLOCK 必须重扫**，旧 tile 结论作废（见 L1.11 的阶梯表）。
-- **How to apply**：快慢两路径算术必须**同构**（同 dot 结构、同 online softmax 公式），
-  否则 verify 会因两路径数值不一致而在非连续 case 上翻车；检测 kernel 的写法见 §3.4。
 
 ### L1.11 ★★ gather 的隐藏 UB 大项是 `[BN,D]` int32 地址张量 → D 拆半或仿射化
 
@@ -303,6 +299,8 @@ q = tl.load(q_ptr + t * (Hq*D) + hqs[:, None]*D + offs_d[None, :], mask=gvalid[:
   D 拆半纯 tiling、算术顺序不变，数值与单段一致。
 - **实测阶梯**（单段 D、multibuffer=False）：gather BN=32 ✓ / 40/48/64 ✗ overflow；
   gather+D 拆半 BN=64 ✓、96/128 ✗；**仿射 BN=128 ✓、256 ✓**——地址张量一消失，UB 墙整体平移。
+  ⚠️ 仿射 BN=256 + multibuffer=True 会顶到 **L1 上限**（requires 5013504/4194304 bits = 512KB L1，
+  与 UB 192KB 是两套容量），multibuffer 保持关闭。
 
 ### L1.12 ★ fp32 化的 load 掩码 + 第二处 masked load 组合禁止（bishengir 非确定性缺陷）
 
@@ -362,6 +360,67 @@ def mask_probe(q_ptr, kv_ptr, idx_ptr, out_ptr, BQS, K, KVS, QN,
   `AssertionError('Mismatched type for k_offs between then block and else block')`，
   一眼像语义错误实则命名冲突。
 - **How to apply**：双路径写完先做一次空 shape 编译冒烟，再进 verify。
+
+
+### L1.14 ★★★ unmasked 2D gather 直接喂 `tl.dot` 产出错值 → 慢路径用「连续化暂存」结构
+
+- **禁止** 把无 mask 的 2D 按行间接寻址 `tl.load`（gather）的结果直接喂 `tl.dot`：
+  本编译器版本（bishengir 0.1.0 系）该 lowering **编译能过但数值是垃圾**
+  （输出出现 ±512 级原始值；最小复现：gather→store 数值正确、gather→dot 报错/错值，
+  极简 gather+dot 还会编译失败 `Unknown core type: llvm.func @malloc`）。
+- **masked gather 喂 dot 正确**（bsa-L1.6 clamp + score 层 where 屏蔽语义不变），
+  但每迭代有 ~12us 固定开销（与 BN 无关，BN 32→64 总耗时严格减半）。
+- **为什么可以绕（实测）**：纯 gather→store 拷贝 kernel（无 dot）unmasked 数值**完全正确**
+  且跑满带宽 ~1.4TB/s（BN=128, 含写）；把 gather 地址换成仿射地址耗时**不变**——
+  即离散访存本身不是瓶颈，瓶颈是「masked gather 喂 dot」这条 lowering 路径。
+- **How to apply（SLOW 路径骨架，实测随机访存 vs CANN 0.138→0.4075）**：
+  ```python
+  # phase1: 每核一块全局 scratch (NUM_CORES*K*(D+DR) fp16, 可驻留 L2)
+  for k0 in range(0, K, STAGE_BN):            # STAGE_BN=64
+      selc = clamp(load(idx_row + k0 + s_offs, mask=tail), 0, KVS-1)
+      store(scr_v + (k0+s_offs)[:,None]*D + d, load(kv + (base+selc)[:,None]*D + d))  # unmasked
+      store(scr_r + (k0+s_offs)[:,None]*DR + dr, load(kr + (base+selc)[:,None]*DR + dr))
+  tl.debug_barrier()                            # store->load 可见性
+  # phase2: 与 FAST 完全同构的 affine flash (CONSUME_BN=256, 含 pl 二段拆分)
+  for k0 in range(0, K, CONSUME_BN):            # 从 scratch 仿射载入 + 重读 idx 重建 kv_valid
+      ...
+  ```
+- **代价**：多读+多写各一遍（约 +2/3 流量），换来 dot 路径全仿射化；scratch 用
+  `torch.empty` per-call 分配（caching allocator 摊销）。
+- **simulator 证据（case16 瓶颈定位）**：stage 相 gather 载入占 vector 核 MTE2 的 41%cycles；逐行小事务（1KB/行）的 MTE2 发起开销主导，cube MMAD≈0 空等 40%——小 K case 的 stage:consume 迭代比越大越吃亏；不要在此类瓶颈上试 multibuffer/ping-pong（均实测证伪），那是流水问题而本瓶颈是事务指令流。
+
+### L1.15 ★★ 快慢双路径必须留在**同一 kernel** 的 if/else 分支内，禁止拆成两个独立 kernel
+
+- **Why（实测证伪）**：把 FAST/SLOW 拆成两个 kernel（各自按 flag 跳过对方任务、慢 kernel
+  获得独立 UB 预算可开 BN=64）——随机路径如期 2×，但**同一文本的 FAST 代码独立成 kernel
+  后从 6.9ms 退化到 10.1ms**（arange 16 case 核时比 0.8362→0.6044）；逐 kernel profile
+  确认退化全部发生在 fast kernel 本体（与 flag 检查、early-exit、launch 开销均无关，
+  已逐项消融）。合并回单 kernel if/else 后 FAST 恢复 6.87ms（0.8390）。
+  编译器对「组合 kernel 内分支」与「独立 kernel」生成不同调度，方向无法预测。
+- **How to apply**：双路径分派一律单 kernel `if flag==0: FAST else: SLOW`；
+  需要改 UB 预算时只能在分支内调 BLOCK/结构（如 SLOW 的 STAGE_BN/CONSUME_BN），
+  不得以"独立预算"为由拆 kernel。
+
+### L1.16 ★★ 随机访存为主场景时：**删掉 FAST 分支本身**比保留双路径更快（-4.4%）
+
+- **场景前提**：评测/生产输入是 lightning_indexer topk 随机索引（`sp-index-given` 形态），
+  arange 连续索引不在基线内。
+- **实测（910B3, case16 B=64/QS=64/K=512, msprof 核时）**：
+  - 双路径组合 kernel（`if flag==0: FAST else: SLOW` + contig_check 建 flag）：
+    7.6404ms = check 0.157 + sfa 7.483（前序会话归档产物, 与本次单路径同脚本同设备口径）；
+  - **同 SLOW 代码文本、仅删 FAST 分支与 contig_check（单路径 slow-only）**：
+    **7.1966ms（-5.8%）**，随机 16 case 几何平均 0.4110 → **0.4228**（vs CANN）。
+  - 反事实对照（同会话内最可靠对照）：把 flag 强制置 1 走双路径 kernel 的 SLOW，7.53ms；单路径 7.20ms。
+- **Why**：同 L1.15 —— 本编译器（bishengir 0.1.0 系）对分支组合的调度方向不可预测；
+  分支存在本身即改变 SLOW 路径的指令调度（不是 flag 检查的运行时开销）。
+- **How to apply**：当评测/部署输入确定为随机 topk 索引时，**不要**为机会性的 arange
+  快路径保留 `contig_check` + 双分支；直接交付单路径通用 gather kernel（对任意索引
+  语义正确，代价仅是 arange 场景失去仿射快路径优化）。若必须兼顾 arange 基线，
+  则按 L1.15 保留同 kernel 双分支，不要拆 kernel。
+- **顺带实测（同场景否决清单）**：PV 单段（去 pl）MERE 1.4e-3 超 2^-10 阈值（max_abs
+  仅 6e-5，是 MERE 卡阈值）；softmax 改在 [BN,16] 上做 axis=0 归约 + 转置 f16
+  4.66→9.87ms；p 存 scratch 转置往返 6.72ms；kr 独立循环 / 更大 BLOCK 7.69~7.89ms；
+  任务级双缓冲流水 7.44ms（均不优于现行 stage/consume 交错结构）。
 
 ---
 
@@ -424,41 +483,35 @@ dk/dv 的 kernel 需要**转置的选择表**（每个 (b, k_block, h) 对应哪
 把 q 主序表转置一遍。做法与 q 主序表完全对称——同一份块级判据 `_blk_keep`，
 只是把 `(b, q_tile, h)` 的任务分解换成 `(b, k_tile, h)`，判据本身一行都不用改；
 两张表各发一个 kernel，合计几十 µs 量级。
-### §3.4 连续索引段的「检测 + 双路径分派」骨架（L1.10 的落地形态）
+### §3.4 随机访存主路径的「gather 连续化暂存」骨架（L1.14 的落地形态）
 
-检测 kernel（无 dot、无 atomic，grid 与主 kernel 同构，每个任务一个 int32 flag）：
+动机（L1.14 实测）：unmasked gather 直喂 `tl.dot` 产出错值、masked gather 直喂 dot
+每迭代 ~12us 固定开销；但 unmasked gather→store 拷贝路径**正确且满带宽 ~1.4TB/s**。
+故把"选中行"先连续化到 per-core 全局 scratch，再以全仿射结构消费——用 +2/3 流量
+换 dot 路径全仿射化：
 
 ```python
-@triton.jit
-def contig_check_kernel(idx_ptr, flag_ptr, BQS, K,
-                        NUM_CORES: tl.constexpr, CHK: tl.constexpr):
-    pid = tl.program_id(0)
-    for t in range(pid, BQS, NUM_CORES):
-        offs = tl.arange(0, CHK)
-        bad = 0
-        for k0 in range(0, K, CHK):
-            m = (k0 + offs) < K
-            sel = tl.load(idx_ptr + t * K + k0 + offs, mask=m, other=-1)
-            neq = tl.sum(tl.where(m & (sel != (k0 + offs)), 1, 0))
-            if neq != 0:
-                bad = 1
-        tl.store(flag_ptr + t, bad)
+# 每 program 处理一个 (b, s1) 任务 (bsa-L1.1); scratch = torch.empty(NUM_CORES*K*(D+DR), fp16)
+scr_v = scratch_ptr + pid * K * D
+scr_r = scratch_ptr + NUM_CORES * K * D + pid * K * DR
+for k0 in range(0, K, STAGE_BN):                 # 阶段1: gather→store 连续化, STAGE_BN=64
+    sel = tl.load(idx_row + k0 + s_offs, mask=(k0 + s_offs) < K, other=0)
+    selc = tl.minimum(tl.maximum(sel, 0), KVS - 1)          # L1.6: clamp 保证地址在界
+    tl.store(scr_v + (k0+s_offs)[:, None]*D + d[None, :],
+             tl.load(kv_ptr + (b*KVS + selc)[:, None]*D + d[None, :]))        # 无 mask 拷贝路径
+    tl.store(scr_r + (k0+s_offs)[:, None]*DR + dr[None, :],
+             tl.load(kr_ptr + (b*KVS + selc)[:, None]*DR + dr[None, :]))
+tl.debug_barrier()                               # 同核 store→load 可见性(实测零成本)
+for k0 in range(0, K, CONSUME_BN):               # 阶段2: 仿射 flash 消费, CONSUME_BN=256
+    k_v = tl.load(scr_v + (k0+c_offs)[:, None]*D + d[None, :])      # 仿射, 大描述符 DMA
+    k_r = tl.load(scr_r + (k0+c_offs)[:, None]*DR + dr[None, :])
+    sel2 = tl.load(idx_row + k0 + c_offs, ...)   # 重读 idx 重建 kv_valid, score 层屏蔽无效行
+    ... online softmax + PV(hi+lo 二段拆分, fa-L1.5 不可省)  # 与任意 flash 骨架同构
 ```
 
-主 kernel 分派（两条路径算术同构，q 加载在分支外共享；分支局部变量按 L1.13 分别命名）：
-
-```
-if flag[t] == 0:                       # FAST: 仿射连续加载, 无 sel/无掩码/无地址张量
-    for k0 in range(0, K, BLOCK_KV_F):                 # 单段 D, BLOCK_KV_F 可开到 128
-        k_v = load(kv + (b*KVS + k0 + k_offs) * D + d) # 连续块搬运
-        s_t = dot(k_v, q_nope_t) + dot(k_r, q_rope_t)  # [BN,16] → trans → [16,BN]
-        online softmax + PV（hi+lo, 与 SLOW 同一公式）
-else:                                  # SLOW: D 拆半 gather（L1.11）, 任意索引兜底
-    for k0 in range(0, K, BLOCK_KV_S):
-        sel = load(idx_row + k0 + k_offs); selc = clamp(sel, 0, KVS-1)   # L1.6
-        k_v_lo/hi, k_r = gather by selc（mask=kv_valid）
-        3 个 QK dot（lo+hi+rope）+ online softmax + PV（hi+lo）
-```
+实测：随机访存 16 case 核时比 vs CANN **0.070 → 0.4110（实际分布）/ 0.4095（压力对照）**
+（5.9× 于首版 gather 直喂）；瓶颈残留 = gather 逐行小事务的 MTE2 发起开销
+（simulator 实测 stage 相占 vector 核 68~86%，小 K case 最敏感，结构性下限）。
 
 ---
 
@@ -625,6 +678,16 @@ q 按 `[D,16]` 布局直接加载（列=头、行=d 连续）看似省一次 tra
 | `tl.atomic_add` 抢占式紧致化（替代 cumsum） | 语义**正确**（cnt 与集合都对），但同址 lane 高度竞争，**触发 Vector core 看门狗**，不可用 |
 | `enable_ubuf_saving` 编译开关 | 在 bishengir **0.1.0 上根本不可用**（`Unknown command line argument`，编译直接失败）；1.2.0 上可用，且是 128×128 能编过的前提。**开关的可用性先于收益** |
 | `BM=BN=128` 用于 paged topK 形态 | ⛔ `ub overflow`（编译器已自动关掉 code-motion 和 multi-buffer 重试仍失败）。同一个 128×128 在 `sp-blockmask` 形态上却能编过 ⇒ **可编域是"形态 × 编译器"的函数，不能跨算子照抄** |
+| SLOW gather 路径开 `multibuffer=True` | ⛔ **无收益且易顶 L1**（BN=16~64 全扫过，±0.3%；组合 kernel 内直接 L1 overflow 5013504/4194304）。gather 慢路径瓶颈不在流水 |
+| `tl.max_contiguous` / `tl.multiple_of` 列连续提示 | ⛔ **不改变 gather lowering**，地址张量照样物化、耗时不动（BN=32/64/128 实测逐一相同） |
+| 快慢路径拆成两个独立 kernel（各自 flag 门控） | ⛔ **FAST 路径莫名回退 44%**（6.9→10.1ms，同代码文本；arange 0.8362→0.6044）。见 L1.15 |
+| SLOW 路径去掉 PV 的 hi+lo 二段拆分 | ⛔ **精度闸门翻车**：MERE 1.3e-6 → 1.3e-3（阈值 9.77e-4）。随机索引下 softmax 近均匀、输出近零，相对误差极敏感，pl 不可省 |
+| ping-pong 双缓冲重叠 stage/consume（无 barrier） | ⛔ **无收益**（14.5ms vs 串行 13.3ms），编译器对同 base 指针保守序化，叠加子步 staging 的循环开销反而更慢 |
+| 暂存慢路径的微修剪（NO_TAIL_S 去尾 mask / QN_FULL 去 Q mask / CHK 自适应） | ⛔ **更差**（case16 7.49→7.62ms，case1 13.9→14.5ms）。编译器对这些谓词已最优，多出的分支反伤调度 |
+| 小 K case 去掉 per-task `tl.debug_barrier` | ⛔ **零成本**（7.611 vs 7.605ms），barrier 不是开销项；store→load 同址依赖编译器本已插同步 |
+| 小 K 退化为 dense 全表注意力（免 gather） | ⛔ **计算浪费 8×**（case16 估算 27ms vs 7.5ms），稀疏度 12.5% 时 dense 永远亏 |
+| stage 循环手工 unroll×2（增多 MTE2 在飞事务） | ⛔ **更差**（case16 7.09→7.26ms、case1 13.27→13.59ms）。simulator 证据：MTE2 队列已饱和（283 cyc/条×14336 条=57% vector cycles），瓶颈是事务**数量**而非在飞度；事务数=任务数×K 行×2 张量，结构性固定 |
+| 由 simulator 诊断驱动的小 K 优化 | ⛔ case16（K=512）地板 = stage 3.45ms(满带宽拷贝) + consume 3.44ms ≈ 6.9ms vs 0.4 目标线 7.43ms；实测 7.49ms。**源码层无解**，需编译器修 gather→dot lowering（L1.14） |
 
 ### §5.3 天花板估算：先算账再动手
 
@@ -689,6 +752,13 @@ benchmark 若全为连续索引，SLOW 路径一次都不会被执行——它�
   这不是优化，是口径不对等 —— 见 L1.2，索引/掩码准备必须在 device 侧。
 - 环境探针：torch 参考实现代码恒定，其 `framework.avg_latency_ms` 就是天然的环境探针，
   设一个基准带，超出即判该次测量无效、自动重测。**比值型指标不能自证有效**。
+- ⚠️ **随机索引的分布必须模拟真实场景，禁止用均匀 `randint` 偷懒**：真实 lightning_indexer
+  topk 产物**无重复且升序**；均匀 `randint` 有重复（K=2048/KVS=32768 时每行约 64 个重复下标）
+  且无序，只是压力下限。正确生成（分块控内存）：`sc=rand(rows,KVS); sc.topk(K).indices.sort()`
+  ——实现记为 `randtopk_sorted`。两个分布都应测量并同时报告（实测 SFA 16 case 两分布
+  核时比 0.4110 vs 0.4095，几乎一致 = 鲁棒性证据）。精度 golden 用 fp32 torch（CANN 自身
+  MERE(CANN,fp32)=1.6e-3 不宜作精度标杆），性能对照用 CANN 实测延迟经
+  `benchmark.py --skip_framework --framework_latency_ms` 注入（逐 case 跑再合并）。
 
 ---
 
@@ -706,6 +776,9 @@ benchmark 若全为连续索引，SLOW 路径一次都不会被执行——它�
 | 同输入多次运行结果漂移（self-diff 非零）/ 偶发 NaN | load 掩码比较被 fp32 化（`h.to(fp32)<QN`）触发 bishengir 非确定性缺陷 | L1.12，掩码比较保持 int32 |
 | 双路径 kernel 报 `Mismatched type ... between then block and else block` | 两分支定义了同名的不同形状局部变量 | L1.13，分支局部变量分别命名 |
 | gather 类 kernel 的 UB overflow 数字远超朴素 tile 估算 | 按行间接寻址物化的 int32 地址张量（∝ BN×D） | L1.11，D 拆半或仿射化 |
+| gather 后接 `tl.dot` 输出 ±512 级垃圾值 / 极简复现编译报 `Unknown core type: malloc` | unmasked 2D gather 喂 dot 的 lowering 缺陷 | L1.14，改 masked gather 或「连续化暂存」 |
+| 双路径算子拆 kernel 后主路径变慢 40%+ | 编译器对组合分支 vs 独立 kernel 调度不同 | L1.15，保持单 kernel if/else |
+| 随机索引 case 精度 MERE 卡在阈值 1.3 倍处 | 省略了 PV hi+lo 拆分；近零输出对 fp16 舍入敏感 | L1.14 骨架保留 pl |
 
 ---
 

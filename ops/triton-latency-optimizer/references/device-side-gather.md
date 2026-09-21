@@ -29,7 +29,12 @@ Fused 方案需要同时保留：
 2. 计算输出累加器（`BLOCK_G × D`）
 3. 中间结果 tile（score、P、partial sum 等）
 
-在 Ascend 有限的 UB（如 192KB）下，三者叠加经常溢出。与其勉强 fused 并使用极小的 tile，不如**拆成 gather kernel + compute kernel**，用 GM workspace 桥接，让两个 kernel 各自按自己的 UB 约束取最优 tile。
+在 Ascend 有限的 UB（如 192KB）下，三者叠加经常溢出。此时有**两条路**：
+
+1. **拆成 gather kernel + compute kernel**（本文方案），用 GM workspace 桥接，让两个 kernel 各自按自己的 UB 约束取最优 tile；
+2. **内核内 gather 连续化暂存**：仍在一个 kernel 内，把 gather 结果先 `tl.store` 到 **per-core scratch**（尺寸 `NUM_CORES × K × (D+DR) × 2B`，随任务覆盖复用，**可驻留 L2**），`tl.debug_barrier()` 后以**全仿射** load 消费。
+   该路线没有 workspace 的 HBM 往返，且保留单 kernel 内的阶段重叠；**当 per-core working set 能驻留 L2 时优先选它**（详见「反例与适用边界」）。
+   ⚠️ 注意：该路线要求「unmasked 2D gather 直喂 `tl.dot`」可用；若该 lowering 有缺陷（错值/编译失败）或 masked gather 直喂 dot 有每迭代 ~12µs 固定开销，则必须经 store→load 绕行，**这正是路线 2 存在的理由**。
 
 ### Step 1：Device-side gather kernel（通用模板）
 
@@ -258,9 +263,34 @@ Gather kernel 需要把 `idx_valid` 存下来，供 compute kernel 判断哪些 
 | ⚠️ 注意 | 通常需要拆成独立 gather kernel + compute kernel；fused 方案 UB 一般不够 |
 | ⚠️ 注意 | Workspace 需 `empty` 而非 `zeros`，并做缓存，否则首次调用会退化 |
 | ⚠️ 注意 | Gather kernel 的 tile 需按自身 UB 约束单独设计，不能简单复用 compute kernel 的 BLOCK_K |
+| ⚠️ 注意 | 两 kernel 串行无重叠，需计入 workspace 的 HBM 读+写两遍流量；单 kernel 内「暂存→消费」通常有 10~15% 的自然重叠 |
 | ❌ 不适用 | 索引范围很小，gather 开销低于 workspace 管理开销 |
 | ❌ 不适用 | Gather 数据量过大，device 内存放不下 workspace |
 | ❌ 不适用 | 输入 shape 每次调用都变，cache key 失效，缓存收益为负 |
+| ❌ 不适用 | **单 pass 且 per-core working set 可驻留 L2**：应改用内核内 gather 连续化暂存（见下方实测反例） |
+
+## 反例与适用边界（SparseFlashAttention 实测，Ascend910B3）
+
+在 SFA（topk 随机索引 + MLA-absorb）上对两条路线做同设备、同输入、msprof 核时对照
+（两方案输出 bitequal；compute 侧数学完全同构）：
+
+| 场景 | 内核内暂存（单 kernel，per-core scratch 驻留 L2） | workspace 方案 G+A（两 kernel 串行） | 差异 |
+|---|---|---|---|
+| B=64/QS=64/K=512（workspace 2.25GB） | **7.198 ms** | G 3.67~3.76 + A 5.42~6.06 = 9.13~9.87 ms | **+27%~+37% 劣化** |
+| B=1/QS=2048/K=2048（workspace 4.50GB） | **13.366 ms** | G 7.83 + A 10.14~10.99 = 19.2~19.9 ms | **+44%~+49% 劣化** |
+
+归因：
+1. gather kernel 的写目标从 L2 驻留 scratch 变为 HBM workspace（GB 级），写带宽与读同样计入；
+2. attention kernel 读回同样走 HBM（较 L2 读慢约 +1.3ms/例）；
+3. 两 kernel 串行**无阶段重叠**（单 kernel 方案有 ~1.0ms 重叠）。
+
+**反模式**：compute kernel 用 `grid=(tasks,)`（每 program 一任务、非持久化）时观测到 **11976 ms**——
+小任务 program 派发开销爆炸；持久化 grid=核数 是唯一可用形态。
+
+**适用边界结论**：本优化点在「**单 kernel 方案不可行**」时才占优——即
+per-core working set 放不进 L2（超大 K/超多任务）、或同一输入需被多 pass 重复 gather
+（workspace 可复用多次）。单 pass 且 working set 可驻留 L2 的形态（如 SFA 的 11.5MB/核）
+应使用内核内暂存。
 
 ## 常见错误
 
