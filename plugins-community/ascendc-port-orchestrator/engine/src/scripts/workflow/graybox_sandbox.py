@@ -618,7 +618,7 @@ _PLUGIN_BIND_PARTS = (
     "AGENTS.md",
     "agents",
     "skills",
-    "kb",
+    "kb/shared",
     "hooks",
     "scripts",
     "workflows",
@@ -670,9 +670,10 @@ def graybox_allow_set(
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Build the (allow_ro, allow_rw) bind-set for a graybox agent spawn.
 
-    Reads (ro): the codified KB (with the template-asset), the copied-in arch22 spec,
-    any extra legal inputs, the agent's runtime toolchain dirs, and (when requested) the
-    minimal declarative/runtime subtrees of the plugin used with Claude's ``--plugin-dir``.
+    Reads (ro): packaged ``kb/shared`` orchestration rules, the separately mounted
+    external knowledge cards, the copied-in arch22 spec, other legal inputs, the
+    agent's runtime toolchain dirs, and (when requested) the minimal
+    declarative/runtime subtrees of the plugin used with Claude's ``--plugin-dir``.
     Writes (rw): only the agent's own isolated workspace. cann + output/ are NEVER listed
     → absent from the sandbox = airtight. Ordinary binds are dst==src (identity); the
     plugin is mounted at a dedicated alternate path so its host checkout is never exposed.
@@ -731,7 +732,7 @@ _PLUGIN_RUNTIME_PARTS = (
     ".claude-plugin",
     "agents",
     "hooks",
-    "kb",
+    "kb/shared",
     "skills",
     "engine/src/scripts",
 )

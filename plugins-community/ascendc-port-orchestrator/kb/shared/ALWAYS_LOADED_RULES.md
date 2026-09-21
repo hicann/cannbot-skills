@@ -6,7 +6,7 @@
 > 本文件管"代码层规则"，那个文件管"在压力下我会绕过哪些规则"。两份都要。**
 >
 > 这里收录的是**跨 op 通用的 process rule 和 universal trap** —— 不是 op-specific 的技术细节。
-> Op-specific 的经验已迁入 OKF 卡片（`kb/okf/runbooks/` 下的 `ol-*`/`pb-*`/`ec-*` 卡），通过 OKF 检索按 tag/症状选择性加载。
+> Op-specific 经验由外部 cannbot-knowledge 提供，通过 knowledge-query 按 tag/症状选择性加载。
 >
 > 为什么这些 OL 要无条件加载：**它们都是"如果不在下笔前知道，后面再查也晚了"的规则**。
 > tag-based 加载假设 worker 知道自己需要什么；但幻觉式错误（如 OL-80）的特征恰恰是 worker
@@ -16,26 +16,24 @@
 
 ## 1. Meta 规则（防止幻觉式错误）
 
-### OL-80: API 存在性必须先查 catalog，禁止凭记忆/推测发明 workaround
+### OL-80: API 存在性必须先查证，禁止凭记忆/推测发明 workaround
 
-**前置步骤**：写任何 VEC op 之前，grep `ASCENDC_API_CATALOG.md`。
-
-```bash
-# 想到"每元素 / 标量" → 立刻查
-grep -i "Divs\|scalar div" src/skills/references/target/ascendc/API_CATALOG.md
-```
+**前置步骤**：写任何 VEC op 之前，调用已安装的
+`ascendc-api-knowledge-query` skill，传入准确 API 名和当前平台，全文读取
+选中卡片。只有能力描述而没有 API 名时，才使用 text 查询。
 
 反例：以为 AscendC 没有 `Divs` → 自己写 `Muls(x, 1/scalar)` workaround → 精度不匹配 → 多轮失败。
-实际 catalog 第 54 行明确有 `Divs`。
+实际应通过 API 卡和当前 SDK header 确认 `Divs`。
 
-如果 catalog 没找到 → `python3 src/scripts/fetch_ascendc_doc.py <ApiName>` 查官方文档。
-两者都没有 → 才考虑 workaround，且必须在 `knowledge_update.md` 里标注"缺失 API"。
+稳定 API 精确名查询零命中时，按 skill 规则独立补查未定位 draft；
+再按需核对当前 SDK header 或官方文档。都无法证实后才考虑 workaround，
+且必须在 `knowledge_update.md` 里标注具体证据缺口。
 
-### OL-130: API 存在性 lookup chain — catalog → SDK header → docs（先 fall through 再放弃）
+### OL-130: API 存在性 lookup chain — API query → SDK header → docs
 
 **规则（P0aau, 2026-05-07）**：当你不确定 AscendC primitive 的 signature / template params / overloads / dtype constraints 时，**lookup 优先级**严格如下：
 
-1. **`ASCENDC_API_CATALOG.md`** — curated 一行 summary，第一站。但**它是手工维护的**，对复杂 primitive (尤其 adv_api 模板类如 `Matmul<>`、`Normalize<>`、`LayerNorm<>`) 经常 under-specifies。
+1. **`ascendc-api-knowledge-query`** — 按准确 API 名、当前平台返回受治理的 API 卡。
 2. **SDK 头文件 `$CANN_PATH/include/ascendc/...`** —— 例如 `/data/cann_b103/cann-9.0.0/include/ascendc/`。**这是权威源**，是 AscendC primitives 的实际 API 声明。**Reading SDK headers IS ALLOWED** —— 它们是 **SDK 分发的公开 header**，不是 op-impl 源代码 (后者在 `~/workspace/cann/` 是禁区)。区别清楚：
    - ✅ `/data/cann_b103/cann-9.0.0/include/ascendc/lib/matmul/matmul.h` — SDK header, 公开 API 声明，**允许读**
    - ❌ `~/workspace/cann/ops-nn/...` / `ops-transformer/...` — op-impl 源代码，**禁止读**（NPUKernelBench scope rule，CLAUDE.md）
@@ -48,11 +46,10 @@ grep -i "Divs\|scalar div" src/skills/references/target/ascendc/API_CATALOG.md
    - 起点 URL 列表: `kb/shared/HIASCEND_DOC_URLS.md`（已在 Tier-1 manifest）。先 grep 找最相关页面，再 playwright 拉正文。
    - **当问题是"如何从 Python 调用我们自己生成的 kernel binary" / "pybind wrapper 怎么写" / "ACLRT_LAUNCH_KERNEL 宏怎么用" / "需不需要 vendor opp install"** → 必读 `atlas_ascendc_10_0057.html` ("Pybind调用") 和 `atlas_ascendc_10_0056.html` ("Kernel直调") 再写代码。
    - **P140 (2026-05-17)**: a5 agent 9h 错路径 — 试图用 aclnn-direct + vendor opp install 调用 unshipped op，未读 AscendC 文档。文档明说自定义算子用 ACLRT_LAUNCH_KERNEL 宏 + pybind 直接绑定 kernel，不走 aclnn 注册。所有 spawned agent (kw/pp/ko/fo/ar/da) 同款盲区，因为 HIASCEND_DOC_URLS.md 之前没在 manifest Tier-1。
-4. **声明 "API missing"** in `knowledge_update.md` —— 只有前三步都没找到才走这步。
+4. **声明 "API evidence missing"** in `knowledge_update.md` —— 只有前三步都没找到才走这步。
 
-**为什么强调**：OL-80 说 "grep API_CATALOG before code"，但**不要止步于 catalog**。
-catalog 是 cliff notes; SDK header 是 ground truth。对 6_QuantMatmul 这种依赖
-adv_api `Matmul<>` 的复杂 op，catalog 的一行说明完全不够 — kw 必须读
+**为什么强调**：API 卡负责召回和受治理摘要；SDK header 是当前安装版本的声明真值。对 6_QuantMatmul 这种依赖
+adv_api `Matmul<>` 的复杂 op，API 卡不替代声明核对 — kw 必须读
 `/data/cann_b103/cann-9.0.0/include/ascendc/lib/matmul/...` 头文件去看
 template params (M_, K_, N_, A_TYPE, B_TYPE, BIAS_TYPE, etc.)。
 
@@ -391,7 +388,7 @@ fp16 Div / Mul / Pow 在 NPU 上的行为**bit-level 匹配 PyTorch**。
 
 ## 快速自检（写代码前）
 
-- [ ] 我想用的每个 VEC op 都在 `ASCENDC_API_CATALOG.md` 里 grep 过了吗？（OL-80）
+- [ ] 我想用的每个 VEC API 都经 `ascendc-api-knowledge-query` 和必要的 SDK header 核验了吗？（OL-80）
 - [ ] pybind 里没有任何 torch/CANN 计算委托吗？（OL-36）
 - [ ] 基础设施问题（部署/代理/编译）都先查了已有 skill 吗？（OL-13）
 - [ ] TQue depth 是 4 吗？（OL-63, 仅 elementwise）

@@ -17,7 +17,8 @@ a5_ops ships `src/scripts/tests/test_skill_scope_boundary.py`, which asserts tha
 `src/deploy.sh` partitions `src/skills/*/SKILL.md` by their `scope: customer|dev-ops`
 frontmatter. cannbot installs through `init.sh` instead: product-owned runtime
 skills live in this community plugin's `skills/`, reusable ops Skills stay in
-repository `ops/`, and `knowledge-query` is owned by the sibling knowledge plugin.
+repository `ops/`, and cannbot-knowledge is installed independently into the
+target project.
 
 Excluding it WITHOUT a replacement would drop mechanical coverage of a security-adjacent
 property ("a dev-ops skill must not ship to customers"). This file restores that coverage
@@ -41,7 +42,6 @@ REPO_ROOT = PLUGIN_ROOT.parents[1]      # cannbot repo root
 INIT_SH = PLUGIN_ROOT / "init.sh"
 OPS_ROOT = REPO_ROOT / "ops"
 LOCAL_ROOT = PLUGIN_ROOT / "skills"
-KNOWLEDGE_ROOT = REPO_ROOT / "plugins-community" / "cannbot-knowledge" / "skills"
 
 
 def _whitelist(var: str) -> list[str]:
@@ -68,8 +68,6 @@ def _skill_md(name: str) -> Path:
         return LOCAL_ROOT / name / "SKILL.md"
     if name in _whitelist("SHARED_SKILLS"):
         return OPS_ROOT / name / "SKILL.md"
-    if name in _whitelist("KNOWLEDGE_SKILLS"):
-        return KNOWLEDGE_ROOT / name / "SKILL.md"
     raise AssertionError(f"{name} is not assigned to a skill ownership tier")
 
 
@@ -78,7 +76,6 @@ def test_init_sh_and_skill_roots_exist():
     assert INIT_SH.is_file(), f"init.sh missing at {INIT_SH}"
     assert LOCAL_ROOT.is_dir(), f"plugin-local skills/ missing at {LOCAL_ROOT}"
     assert OPS_ROOT.is_dir(), f"provenance ops/ missing at {OPS_ROOT}"
-    assert KNOWLEDGE_ROOT.is_dir(), f"knowledge plugin skills/ missing at {KNOWLEDGE_ROOT}"
 
 
 def test_included_skills_is_the_literal_tier_union():
@@ -86,7 +83,6 @@ def test_included_skills_is_the_literal_tier_union():
     tiered = (
         _whitelist("LOCAL_SKILLS")
         + _whitelist("SHARED_SKILLS")
-        + _whitelist("KNOWLEDGE_SKILLS")
     )
     assert _whitelist("INCLUDED_SKILLS") == tiered
 
@@ -143,6 +139,7 @@ def test_report_gen_remains_a_customer_capability():
     assert "aog-report-gen" in _whitelist("LOCAL_SKILLS")
     assert "aog-report-gen" in _whitelist("INCLUDED_SKILLS")
     assert not (LOCAL_ROOT / "knowledge-query").exists()
+    assert "knowledge-query" not in _whitelist("INCLUDED_SKILLS")
     assert not (PLUGIN_ROOT / "maintainer").exists()
 
 

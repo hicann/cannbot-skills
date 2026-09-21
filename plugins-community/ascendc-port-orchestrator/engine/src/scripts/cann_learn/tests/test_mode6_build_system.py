@@ -47,8 +47,8 @@ def _common_brief_args(tmp_path: Path) -> dict:
     sealed_dir.mkdir()
     kb_root = tmp_path / "kb"
     kb_root.mkdir()
-    api_catalog = tmp_path / "api.md"
-    api_catalog.write_text("")
+    api_reference = tmp_path / "api.md"
+    api_reference.write_text("")
     return dict(
         op="flash_attention_score",
         workspace=workspace,
@@ -56,7 +56,7 @@ def _common_brief_args(tmp_path: Path) -> dict:
         sealed_dir=sealed_dir,
         run_id="test1234",
         kb_root=kb_root,
-        api_catalog_path=api_catalog,
+        api_reference_path=api_reference,
     )
 
 
@@ -141,13 +141,13 @@ def test_mode6_brief_lists_5_extraction_topics(tmp_path: Path):
 
 
 def test_mode6_brief_uses_bsp_prefix(tmp_path: Path):
-    """Mode 6 candidates use CAND-BSP-* prefix, promotable to BSP-N canonical."""
+    """Mode 6 candidates use CAND-BSP-* and point at the external anchor."""
     brief = agent_spawn.build_cann_learner_brief(
         extraction_mode="build_system",
         **_common_brief_args(tmp_path),
     )
     assert "CAND-BSP-" in brief
-    assert "BSP-N" in brief
+    assert "knowledge/ops/ascendc/optimizations/build_system_pattern_bsp_subdir.md" in brief
 
 
 def test_mode6_brief_requires_extraction_mode_in_summary(tmp_path: Path):
@@ -243,8 +243,8 @@ def test_cli_extraction_mode_flag_accepts_valid_choices(tmp_path: Path, monkeypa
     module_path.mkdir()
     kb_root = tmp_path / "kb"
     kb_root.mkdir()
-    api_catalog = tmp_path / "api.md"
-    api_catalog.write_text("")
+    api_reference = tmp_path / "api.md"
+    api_reference.write_text("")
 
     test_argv = [
         "mode5_runner.py",
@@ -252,7 +252,7 @@ def test_cli_extraction_mode_flag_accepts_valid_choices(tmp_path: Path, monkeypa
         "--workspace", str(workspace),
         "--module-path", str(module_path),
         "--kb-root", str(kb_root),
-        "--api-catalog", str(api_catalog),
+        "--api-reference", str(api_reference),
         "--dry-run",
         "--extraction-mode", "build_system",
         "--skip-hook-preflight",
@@ -331,13 +331,13 @@ def test_revalidate_logs_dropped_candidates_for_mode2_visibility(tmp_path: Path)
     cand_file = tmp_path / "candidate.md"
     cand_file.write_text(common_text + " extra unique tail words")
 
-    api_catalog = tmp_path / "api.md"
-    api_catalog.write_text("")
+    api_reference = tmp_path / "api.md"
+    api_reference.write_text("")
     valid_mode6, failures_mode6 = mode5_runner.revalidate_post_agent(
         workspace, summary_path,
         cann_files_read=[src_file],
         candidate_paths=[cand_file],
-        api_catalog_path=api_catalog,
+        api_reference_path=api_reference,
         extraction_mode="build_system",
     )
     # Verbatim copy MUST trigger copy_shape failure at 0.30 threshold
@@ -361,8 +361,8 @@ def test_cli_extraction_mode_rejects_invalid_value(tmp_path: Path, monkeypatch):
     module_path.mkdir()
     kb_root = tmp_path / "kb"
     kb_root.mkdir()
-    api_catalog = tmp_path / "api.md"
-    api_catalog.write_text("")
+    api_reference = tmp_path / "api.md"
+    api_reference.write_text("")
 
     test_argv = [
         "mode5_runner.py",
@@ -370,7 +370,7 @@ def test_cli_extraction_mode_rejects_invalid_value(tmp_path: Path, monkeypatch):
         "--workspace", str(workspace),
         "--module-path", str(module_path),
         "--kb-root", str(kb_root),
-        "--api-catalog", str(api_catalog),
+        "--api-reference", str(api_reference),
         "--extraction-mode", "nonsense_mode",
     ]
     monkeypatch.setattr(sys, "argv", test_argv)

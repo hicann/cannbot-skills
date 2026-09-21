@@ -266,16 +266,30 @@ if [ "$BACKEND" = "claude_code" ]; then
   # Graybox workers run under bwrap without a ~/.claude bind, so the spawned
   # claude cannot read settings.json's env block (endpoint/key) or "model".
   # Re-export them from that settings file so workers inherit a working login.
-  if [ -f "$CLAUDE_CONFIG_DIR/settings.json" ]; then
-    eval "$(python3 - "$CLAUDE_CONFIG_DIR/settings.json" <<'PY'
+  # Anthropic-compatible endpoints may carry the credential as either
+  # ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, and the model either as
+  # top-level "model" or env ANTHROPIC_MODEL — honor both spellings.
+  # settings.local.json overrides settings.json, mirroring Claude Code's own
+  # precedence, so a private local file (e.g. a GLM endpoint config) works.
+  if [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || [ -f "$CLAUDE_CONFIG_DIR/settings.local.json" ]; then
+    eval "$(python3 - "$CLAUDE_CONFIG_DIR/settings.json" "$CLAUDE_CONFIG_DIR/settings.local.json" <<'PY'
 import json, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-except Exception:
-    cfg = {}
+cfg = {}
+for path in sys.argv[1:]:
+    try:
+        data = json.load(open(path))
+    except Exception:
+        continue
+    if not isinstance(data, dict):
+        continue
+    merged_env = dict(cfg.get("env", {}))
+    merged_env.update(data.get("env", {}) if isinstance(data.get("env"), dict) else {})
+    cfg.update(data)
+    cfg["env"] = merged_env
 env = cfg.get("env", {}) if isinstance(cfg, dict) else {}
-pairs = [(k, env.get(k)) for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY")]
-pairs.append(("ANTHROPIC_MODEL", cfg.get("model") if isinstance(cfg, dict) else None))
+pairs = [(k, env.get(k)) for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")]
+model = cfg.get("model") if isinstance(cfg, dict) else None
+pairs.append(("ANTHROPIC_MODEL", model or env.get("ANTHROPIC_MODEL")))
 for k, v in pairs:
     if v:
         print(f'export {k}="${{{k}:-{v}}}"')
@@ -287,8 +301,8 @@ PY
   # not injected, instead of letting a graybox worker report a late and
   # ambiguous "Not logged in" error.  Ordinary Claude deployments without an
   # explicit endpoint retain their existing login behavior.
-  if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "launch_orchestrator: ANTHROPIC_BASE_URL is set but ANTHROPIC_API_KEY is empty; inject the key through private environment management" >&2
+  if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+    echo "launch_orchestrator: ANTHROPIC_BASE_URL is set but neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is present; inject the key through private environment management" >&2
     exit 2
   fi
 fi
@@ -297,6 +311,11 @@ case "$MODE" in
   port-a3-ops) FLAG="--port-a3-ops" ;;
   backward)    FLAG="--backward" ;;
 esac
+
+# Preserve the caller project before entering the bundled engine.  The
+# cannbot-knowledge installer writes `.cannbot/knowledge.env` into this project;
+# the runtime resolver uses this anchor after the launcher changes cwd.
+export CANNBOT_PROJECT_ROOT="$(pwd)"
 
 # Resolve --source against the CALLER's cwd before cd: a relative --source would
 # otherwise be interpreted relative to the engine dir, sending the orchestrator at a

@@ -23,13 +23,13 @@ from migration_level import (
 def test_l1_default_when_no_signals():
     d = decide_migration_level({"op_name": "elementwise_add", "op_class": "elementwise"})
     assert d.level == MigrationLevel.L1
-    assert "l1-implementation-guide.md" in d.guides
+    assert "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l1_implementation.md" in d.guides
 
 
 def test_l2_rmsnorm():
     d = decide_migration_level({"op_name": "RmsNorm", "op_class": "rmsnorm"})
     assert d.level == MigrationLevel.L2
-    assert "l2-register-based-guide.md" in d.guides
+    assert "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l2_register_based.md" in d.guides
 
 
 def test_l2_fp8_dtype():
@@ -44,8 +44,8 @@ def test_l3_scatter_gather_simt():
         "index_complexity": "simple", "numel_typical": 2_000_000,
     })
     assert d.level == MigrationLevel.L3
-    assert "l3-simt-optimization-guide.md" in d.guides
-    assert "simt/" in d.extra_subdirs
+    assert "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l3_simt_optimization.md" in d.guides
+    assert any("SIMT" in query for query in d.knowledge_queries)
 
 
 def test_l3_not_when_index_complex():
@@ -93,9 +93,9 @@ def test_l4_tiling_isregbase_non_fa_downgrades_to_l2():
     assert d.needs_escalation is False
     assert "non-FA" in d.rationale or "OL-185" in d.rationale or "flat_quant" in d.rationale
     assert d.guides == (
-        "l1-implementation-guide.md",
-        "l2-register-based-guide.md",
-        "l1-l2-implementation-guide.md",
+        "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l1_implementation.md",
+        "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l2_register_based.md",
+        "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l1_l2_implementation.md",
     )
 
 

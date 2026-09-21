@@ -39,49 +39,78 @@ _NEUTRAL_TEMPLATE = "hkv_patterns.md"
 
 
 @pytest.mark.parametrize("form", [
-    "okf/reference/porter/patterns/gmm_swiglu_quant_a8w8_class_template.md",   # OKF canonical
+    "knowledge/ops/ascendc/examples/gmm_swiglu_quant_a8w8_class_template.md",   # OKF canonical
     "patterns/domains/gmm_swiglu_quant_a8w8_class_template.md",         # raw classifier recommendation
     "domains/gmm_swiglu_quant_a8w8_class_template.md",                  # bare form
     "src/skills/references/target/ascendc/patterns/domains/gmm_swiglu_quant_a8w8_class_template.md",  # full/abs
 ])
-def test_kb_file_applies_to_target_form_agnostic(form):
+def test_kb_file_applies_to_target_form_agnostic(form, external_kb_fixture):
     """kb_file_applies_to_target resolves an a5-only template in EVERY path form
     the compose path could produce — not just the canonical one. A form-sensitive
     resolver would make the filter inert (theater) for the un-normalized forms.
+
+    Post-223ee980 the card lives in the EXTERNAL cannbot-knowledge repo
+    (OKF v0.2, `ops/ascendc/examples/`); `external_kb_fixture` stages it there.
     """
     assert kb_file_applies_to_target(form, "a5") is True     # a5 keeps
     assert kb_file_applies_to_target(form, "a3") is False    # a3 drops (a5-only)
 
 
-def test_kb_file_applies_to_target_fail_open():
+@pytest.mark.parametrize("form", [
+    "knowledge/ops/ascendc/examples/gmm_swiglu_quant_a8w8_class_template.md",
+    "patterns/domains/gmm_swiglu_quant_a8w8_class_template.md",
+])
+def test_kb_file_applies_to_target_fail_open_without_external_repo(form, no_external_kb):
+    """未配置外部知识仓时迁移卡解析不到 → FAIL-OPEN（保留注入），绝不静默丢卡。"""
+    assert kb_file_applies_to_target(form, "a3") is True
+    assert kb_file_applies_to_target(form, "a5") is True
+
+
+def test_kb_file_applies_to_target_fail_open(no_external_kb):
     # untagged / unknown file → keep (fail-open)
-    assert kb_file_applies_to_target("okf/reference/porter/patterns/does_not_exist.md", "a3") is True
+    assert kb_file_applies_to_target("knowledge/ops/ascendc/examples/does_not_exist.md", "a3") is True
     # 已转卡、不在 reference/patterns 下的旧 domain 名 → 解析不到文件 → keep
     assert kb_file_applies_to_target("patterns/domains/sort.md", "a3") is True
     # neutral template（header 无 applies_to）→ kept for a3
     assert kb_file_applies_to_target(f"patterns/{_NEUTRAL_TEMPLATE}", "a3") is True
     # unknown target → keep (never silently drop)
-    assert kb_file_applies_to_target(f"okf/reference/porter/patterns/{_A5_ONLY_TEMPLATE}", "whoknows") is True
+    assert kb_file_applies_to_target(f"knowledge/ops/ascendc/examples/{_A5_ONLY_TEMPLATE}", "whoknows") is True
 
 
-def test_kb_entry_soc_families_reads_okf_cards(monkeypatch):
+def test_kb_file_neutral_template_kept_for_all_targets(external_kb_fixture):
+    """外部仓中的中性模板（header 无 applies_to）对两个 SoC 家族都保留。"""
+    assert kb_file_applies_to_target(f"patterns/{_NEUTRAL_TEMPLATE}", "a3") is True
+    assert kb_file_applies_to_target(f"patterns/{_NEUTRAL_TEMPLATE}", "a5") is True
+
+
+def test_kb_entry_soc_families_reads_okf_cards(monkeypatch, external_kb_fixture):
     """条目 scope 在 legacy target 树删除后仍可读：OKF 卡片以前文
     `original_id: PB-34` + `description:`/正文中的 `applies_to: soc=` 提供
     同样的机器可读 scope。把扫描目录限到 okf 子树，模拟 legacy 删除后的形态。
-    """
-    import briefs.kb_scope as ks
 
-    monkeypatch.setattr(ks, "_KB_SCAN_DIRS", ("okf",))
+    Post-223ee980：PB-34 卡已迁至外部知识仓（OKF v0.2），条目级 scope 由
+    `kb_scope._external_entry_scopes` 从外部卡 frontmatter `aliases`/`platforms`
+    补齐；`external_kb_fixture` 按新布局摆了该卡。
+    """
+    import briefs.kb_scope as ks  # noqa: F401  (entry scope resolves via the external repo)
+
     assert kb_entry_soc_families("PB-34") == {"V220"}
     # 未命中条目 → None（上游 fail-open 保留注入）
     assert kb_entry_soc_families("PB-99999") is None
+
+
+def test_kb_entry_soc_families_fail_open_without_external_repo(monkeypatch, no_external_kb):
+    """未配置外部知识仓：迁移卡条目读不到 → None（fail-open），不编造 scope。"""
+    import briefs.kb_scope as ks  # noqa: F401  (unconfigured → fail-open None)
+
+    assert kb_entry_soc_families("PB-34") is None
 
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
 
-def test_applies_to_survives_frontmatter_that_pushes_it_past_the_window():
+def test_applies_to_survives_frontmatter_that_pushes_it_past_the_window(external_kb_fixture):
     """REGRESSION (2026-09-05): frontmatter must not push `applies_to` out of the scan.
 
     `fa_class_template.md` is an A5-only template whose own body says handing it to a
@@ -94,8 +123,12 @@ def test_applies_to_survives_frontmatter_that_pushes_it_past_the_window():
     The fixture is deliberately THIS file (not a synthetic one and not a sibling whose
     `applies_to` happens to sit higher) because the bug only shows on a card whose
     frontmatter actually pushes the field past the window.
+
+    Post-223ee980 the card lives in the EXTERNAL cannbot-knowledge repo
+    (`ops/ascendc/examples/fa_class_template.md`); `external_kb_fixture` stages it
+    there with the same frontmatter-pushes-`applies_to`-past-line-20 shape.
     """
-    rel = "okf/reference/porter/patterns/fa_class_template.md"
+    rel = "knowledge/ops/ascendc/examples/fa_class_template.md"
     assert kb_file_soc_families(rel) == {"V351"}, (
         "fa_class_template declares soc=Ascend950PR; None here means the header scan "
         "lost it (most likely frontmatter grew past the window) and the SoC filter "

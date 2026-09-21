@@ -24,8 +24,7 @@ forced-arch 块在用，与知识来源无关）。
 from __future__ import annotations
 import json
 import re
-import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Optional
 
 _HERE = Path(__file__).resolve()
@@ -117,12 +116,31 @@ def kb_manifest_block(
     # silently falls back, otherwise a broken external knowledge dependency
     # looks healthy.
     okf = _okf_reference_block(op, workspace, target)
-    okf_body = okf if okf else (
-        "# ⚠️ OKF 检索无返回——索引未 build / 无命中 / 检索失败。\n"
-        "# 本次简报无 b 层知识，且**无回退**（旧知识体系已退役）。"
-        "请先 `engine/src/scripts/okf/okf_kb.sh build`\n"
-        "# 并确认检索命中后再重跑。\n\n"
-    )
+    if okf:
+        okf_body = okf
+    else:
+        try:
+            from briefs import external_kb as _ext
+
+            _ext_configured = _ext.external_kb_root() is not None
+        except Exception:
+            _ext_configured = False
+        if _ext_configured:
+            okf_body = (
+                "# ⚠️ OKF 检索无返回——外部知识仓索引未 build / 无命中 / 检索失败。\n"
+                "# 本次简报无 b 层知识，且**无回退**。请先在外部知识仓执行\n"
+                "# `python3 .agents/skills/knowledge-query/scripts/knowledge_index.py "
+                "--knowledge-root $CANNBOT_KNOWLEDGE_ROOT build`\n"
+                "# 并确认检索命中后再重跑。\n\n"
+            )
+        else:
+            okf_body = (
+                "# ⚠️ cannbot-knowledge 未安装或项目配置无效。\n"
+                "# 本次简报无 b 层知识，且**无插件内回退**。请先执行\n"
+                "# `bash /path/to/cannbot-knowledge/install.sh <claude|opencode> "
+                "<operator-project> consumer`\n"
+                "# 并从包含 `.cannbot/knowledge.env` 的算子项目重新启动。\n\n"
+            )
     b_tier = okf_body + _kb_discipline_scaffold(target)
     return (
         _c_tier_lessons_block(op, workspace, target)
@@ -133,7 +151,7 @@ def kb_manifest_block(
 
 # ── §5.2 CBA tier-a routing (codex design) ──────────────────────────────────
 # Topics whose authoritative source is a cannbot community skill (tier-a), NOT the
-# plugin's bundled b-tier. When an op REQUIRES such a topic, the worker brief emits a
+# external official b-tier. When an op REQUIRES such a topic, the worker brief emits a
 # MANDATORY route: invoke the named cannbot Skill + write a provenance marker; the
 # CBA route gate (validation/cba_route_gate.py) fails the run if the Skill wasn't invoked.
 # Per-op required routes are declared in workspace/{op}/.cba_required_routes.json
@@ -211,8 +229,9 @@ def _c_tier_lessons_block(op: str, workspace: Optional[Path] = None, target: str
     """c-tier (user-local KB) lessons, injected AHEAD of the b-tier manifest (c>b>a precedence).
 
     The READ side of the c>b>a feedback loop: surfaces deployment-local lessons the running
-    agent/user sedimented into the c-tier, at highest precedence. Post OKF-only migration the
-    bundled b-tier is gone, so `kb_write_root()` is always "customer"; the block still returns ""
+    agent/user sedimented into the c-tier, at highest precedence. After external-knowledge
+    migration, official b-tier is read-only and `kb_write_root()` is always "customer";
+    the block still returns ""
     whenever the c-tier has no matching entries (empty/absent user_kb → byte-unchanged brief).
     Uses the read-bridge (multi-row keyword filter, NOT single resolve — the keyword→signature bridge).
     """
@@ -247,18 +266,20 @@ def _c_tier_lessons_block(op: str, workspace: Optional[Path] = None, target: str
 
 def _kb_discipline_scaffold(target: str = "a5") -> str:
     """Rules and target facts that stay mandatory for either knowledge format."""
+    from briefs import external_kb as _ext
     from briefs.op_taxonomy import TARGET_HW_SPEC_MAP
 
     norm = (target or "a5").lower()
     if norm.endswith("-ds"):
         norm = norm[:-3]
     hw = TARGET_HW_SPEC_MAP.get(norm, TARGET_HW_SPEC_MAP["a5"])
-    return f"""## 必读(与知识来源无关,OKF/legacy 都要 — 编排纪律 + 本 target 硬件事实)
-Paths relative to kb/:
+    hw_display = _ext.kb_ref_display(hw)
+    return f"""## 必读（编排纪律 + 本 target 硬件事实）
+插件纪律仅位于 kb/shared（下列路径相对 kb/）；硬件规格卡来自外部 cannbot-knowledge：
   - shared/ALWAYS_LOADED_RULES.md       # MANDATORY — 开发必读规则(无条件加载)
   - shared/ANTI_PRESSURE_PROTOCOLS.md   # MANDATORY — 决策前必读
   - shared/HIASCEND_DOC_URLS.md         # MANDATORY — vendor docs URL 表(playwright-fetch)
-  - {hw}   # MANDATORY — 本 target({target})芯片规格(target 路由,OKF 不保证命中)
+  - {hw_display}   # MANDATORY — 本 target({target})芯片规格(target 路由,OKF 不保证命中)
 
 # ANTI-PRESSURE CHECKPOINT (cite at decision points)
 Before emitting any handoff line, re-read the relevant Px from `ANTI_PRESSURE_PROTOCOLS.md`:
@@ -271,89 +292,52 @@ Before emitting any handoff line, re-read the relevant Px from `ANTI_PRESSURE_PR
 """
 
 
-# knowledge-query reports a card's `path` relative to its CONTENT ROOT, and the roots are
-# not uniform: `runbooks/...` is already okf-root-relative, but `reference/` cards come back
-# bundle-relative (`porter/...`, `asc-devkit-vendored/...`). Concatenating "kb/okf/" verbatim
-# therefore names a file that does not exist for every reference card. Measured 2026-09-05
-# over 8 sampled queries x top-5: 7/40 slots pointed at nothing, and all 7 resolved once the
-# `reference/` root was tried. Pre-existing, but this reorg gave those 546 cards frontmatter
-# (description w2.0 / tags w2.5), which raised how often they reach the top 5.
-_Path = Path
-_PurePosixPath = PurePosixPath
-# knowledge-query reports `runbooks/`/`ops/` paths relative to the okf root, but a
-# `reference/` card relative to its BUNDLE. The first segment says which.
-_OKF_ROOT_RELATIVE_TREES = ("runbooks", "ops")
-
-
-def _local_path_card(local, root, rel):
-    """The `kb/okf/...` name for an engine-resolved `local_path`, or None if it is not one.
-
-    The whole `path` must be a suffix of `local_path`, not merely the basename:
-    `porter/A/foo.md` and `reference/porter/B/foo.md` share a basename but are different
-    cards, and swapping one for the other feeds the worker the wrong knowledge while every
-    existence check still passes.
-    """
+def _okf_query_text(op: str, workspace: Optional[Path], target: str) -> str:
+    """检索词：op 名 + 分类 tags。"""
     try:
-        cand = _Path(str(local)).resolve()
-        under = cand.relative_to(root).as_posix()
-        if cand.is_file() and (under == rel or under.endswith("/" + rel)):
-            return "kb/okf/%s" % under
-    except (ValueError, OSError, RuntimeError, TypeError):
-        return None      # outside kb/okf, unreadable, or a symlink loop
-    return None
+        from briefs.op_taxonomy import lookup as _lookup
+
+        taxonomy = _lookup(op, workspace=workspace, target=target)
+        return " ".join(
+            [op.replace("_", " ")] + list(getattr(taxonomy, "tags", []))[:6]
+        )
+    except Exception:
+        return op.replace("_", " ")
 
 
-def _okf_hit_path(kb_root, hit: dict):
-    """The plugin-root-relative path of a knowledge-query hit, or None if unverifiable.
+def _okf_reference_block_external(
+    op: str,
+    workspace: Optional[Path],
+    target: str,
+) -> str:
+    """b-tier 检索走外部 cannbot-knowledge 知识仓（OKF v0.2，knowledge-search.v5）。
 
-    Every returned path is a confirmed existing FILE inside `kb/okf`, and it is the card
-    the hit actually names. A brief line is an instruction to open a file, so both halves
-    matter: a path that does not exist wastes the worker's turn, and a path that exists
-    but belongs to a DIFFERENT card silently feeds it the wrong knowledge.
-
-    Order (shape checks first — they must not be bypassable by a `local_path`):
-      1. reject an absolute `path`, or one containing `..`. `Path("/a") / "/etc/x"` is
-         silently `/etc/x`, and `..` escapes `kb/okf`.
-      2. `hit["local_path"]` — the absolute path the ENGINE resolved. Used only when it is
-         an existing file under `kb/okf` AND its basename matches `path`'s, so a stale or
-         mismatched index entry cannot substitute one card for another.
-      3. probe `kb/okf/reference/<rel>` then `kb/okf/<rel>` — `reference` first because a
-         hit whose first segment is not a content root is bundle-relative, and only that
-         order picks the right card when the same name exists under both.
-      4. None. The caller says so rather than printing a guess.
+    使用显式 `CANNBOT_KNOWLEDGE_ROOT` 或项目 `.cannbot/knowledge.env`；
+    检索/核验失败返回 ""，由调用方输出响亮标记。
     """
-    rel = str(hit.get("path") or "").strip()
-    try:
-        root = _Path(kb_root).resolve()
-    except (OSError, TypeError, ValueError):
-        return None
-    unsafe_rel = (
-        rel.startswith("/")
-        or "\\" in rel
-        or ".." in _PurePosixPath(rel).parts
-    )
-    if not rel or unsafe_rel:
-        return None
+    from briefs import external_kb as _ext
 
-    local = hit.get("local_path")
-    if local:
-        # A `local_path` that is outside kb/okf, unreadable, or a symlink loop is not an
-        # error here — it just means this shortcut does not apply and the probe below
-        # decides. `_local_path_card()` returns None for all of those.
-        resolved = _local_path_card(local, root, rel)
-        if resolved:
-            return resolved
-
-    first = _PurePosixPath(rel).parts[0] if _PurePosixPath(rel).parts else ""
-    bases = ("", "reference") if first in _OKF_ROOT_RELATIVE_TREES else ("reference", "")
-    for base in bases:
-        cand = (root / base / rel) if base else (root / rel)
-        try:
-            if cand.is_file() and cand.resolve().relative_to(root):
-                return "kb/okf/%s%s" % (base + "/" if base else "", rel)
-        except (ValueError, OSError, RuntimeError):
-            continue  # escapes kb/okf via a symlink, or the stat failed
-    return None
+    query = _okf_query_text(op, workspace, target)
+    hits = [
+        hit
+        for hit in _ext.search_external_cards(query, target=target)
+        if not _is_archived_okf_hit(hit)
+    ][:5]
+    if not hits:
+        return ""
+    lines = [
+        "# OKF 知识卡片（knowledge-query 检索 — b 层知识来源,独占；外部 cannbot-knowledge 知识仓）",
+        "knowledge-query 已按相关度排好序,直接读下列卡,不要全库扫描：",
+        "",
+    ]
+    for hit in hits:
+        local = str(hit.get("local_path") or "")
+        lines.append(
+            "  - %s  # %s (kind=%s)"
+            % (local, hit.get("title", ""), hit.get("type", ""))
+        )
+    lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def _okf_reference_block(
@@ -363,70 +347,11 @@ def _okf_reference_block(
 ) -> str:
     """Retrieve the ranked OKF cards used as the exclusive default b-tier.
 
-    The retrieval engine is owned by the external ``cannbot-knowledge`` plugin.
+    The retrieval engine is owned by the external ``cannbot-knowledge`` checkout.
     This adapter never raises; its caller turns an empty result into a loud
-    marker instead of silently changing formats.
+    marker. There is no in-plugin knowledge fallback.
     """
-    import importlib.util as _ilu
-    import json as _json
-    import subprocess as _sub
-    from pathlib import Path as _Path
-
     try:
-        plugin_root = _Path(__file__).resolve().parents[5]
-        kb_root = plugin_root / "kb" / "okf"
-        index = kb_root / "search" / "okf.index.json"
-        engine_file = plugin_root / "engine" / "src" / "scripts" / "okf" / "okf_engine.py"
-        spec = _ilu.spec_from_file_location("okf_engine", str(engine_file))
-        if spec is None or spec.loader is None:
-            return ""
-        engine = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(engine)
-        knowledge_query = engine.knowledge_query_script()
-        if knowledge_query is None or not (_Path(str(knowledge_query)).is_file() and index.is_file()):
-            return ""
-        try:
-            from briefs.op_taxonomy import lookup as _lookup
-
-            taxonomy = _lookup(op, workspace=workspace, target=target)
-            query = " ".join(
-                [op.replace("_", " ")] + list(getattr(taxonomy, "tags", []))[:6]
-            )
-        except Exception:
-            query = op.replace("_", " ")
-        result = _sub.run(
-            [
-                sys.executable, str(knowledge_query), "pipeline",
-                "--recall", "bm25,tagtype", "--rerank", "bm25f",
-                "--query", query, "--knowledge-root", str(kb_root),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return ""
-        parsed = _json.loads(result.stdout)
-        raw = parsed.get("hits", []) if isinstance(parsed, dict) else []
-        hits = [hit for hit in raw if isinstance(hit, dict)] if isinstance(raw, list) else []
-        # 先过滤已归档/废弃卡再截断 top-5：废弃卡只占位不提供有效指导，
-        # 且不应把在役卡挤出注入位。全部被滤掉时走既有的响亮空标记路径。
-        hits = [hit for hit in hits if not _is_archived_okf_hit(hit)][:5]
+        return _okf_reference_block_external(op, workspace, target)
     except Exception:
         return ""
-    if not hits:
-        return ""
-    lines = [
-        "# OKF 知识卡片（knowledge-query 检索 — b 层知识来源,独占）",
-        "knowledge-query 已按相关度排好序,直接读下列卡,不要全库扫描：",
-        "",
-    ]
-    for hit in hits:
-        shown = _okf_hit_path(kb_root, hit)
-        lines.append(
-            "  - %s  # %s (kind=%s)"
-            % (shown or "(此条路径无法核实,已省略——不要打开任何文件来顶替它)",
-               hit.get("title", ""), hit.get("kind", ""))
-        )
-    lines.append("")
-    return "\n".join(lines) + "\n"

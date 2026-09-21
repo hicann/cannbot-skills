@@ -173,5 +173,6 @@ __aicore__ inline void MoeSrcToDstSimtOp::Process()
 ## 相关参考文档路径
 
 - **SIMT 语法 / API / 用法**：`cannbot-skills/ops/ascendc-simt-best-practices/`（overview / vf-declaration / vf-call / thread-stride-pattern / index-calculation / intra-core-shared / data-transfer / multi-core-sync）
-- KB 快照 `simt/`：SIMT 编程模型、API 参考（位于 `kb/target/ascendc/migration/`，本方法论 2026-05 旧版存档）
-- KB 快照 `migration/`：A2/A3 → A5 迁移方案、API 兼容性、架构差异
+- **SIMT 编程模型 / 概念卡**：调用 `knowledge-query`，查询 `SIMT 编程模型 线程步进 目标平台`
+- **SIMT API 参考**：调用 `ascendc-api-knowledge-query`，按实际 API 名查询
+- **A2/A3 → A5 迁移**：调用 `knowledge-query`，查询平台对、API 兼容性与架构差异

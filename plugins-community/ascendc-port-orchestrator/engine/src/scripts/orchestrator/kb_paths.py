@@ -8,25 +8,21 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Canonical KB-root resolver (2026-07-05 skills/ → plugin-root refactor).
+"""Canonical packaged orchestration-rule root resolver.
 
 The knowledge base used to live at ``engine/src/skills/references/`` and was
 resolved throughout the engine as ``<engine_root>/src/skills/references``.
-It now lives at ``<plugin_root>/kb/`` (sibling to ``engine/``, ``agents/``,
-``hooks/``). Every engine site that needs the KB should resolve it through
-``kb_root()`` (or the equivalent ``Path(__file__)...parents[N] / "kb"`` form
-for modules that cannot cleanly import this helper), so the path stays correct
-regardless of the current working directory.
+Official b-tier knowledge is consumed from cannbot-knowledge through
+``briefs.external_kb``. The only knowledge-adjacent content resolved here is
+the plugin's packaged ``kb/shared`` orchestration discipline.
 
-Layout reminder (OKF-only, 2026-08-31: kb/target + KB_INDEX.md removed)::
+Layout reminder::
 
     <plugin_root>/
       engine/
         src/scripts/orchestrator/kb_paths.py   <- this file
-      kb/                                       <- the relocated KB (OKF layout)
-        okf/
-          runbooks/          # operator-optimization / field-notes / hardware cards
-          reference/         # top-level references, patterns/, migration/
+      kb/                                       <- plugin runtime assets only
+        shared/              # orchestration discipline, not domain knowledge
 """
 from __future__ import annotations
 
@@ -43,6 +39,6 @@ def plugin_root() -> Path:
     return _PLUGIN_ROOT
 
 
-def kb_root() -> Path:
-    """Absolute path to the relocated knowledge base (``<plugin_root>/kb``)."""
-    return _PLUGIN_ROOT / "kb"
+def shared_kb_root() -> Path:
+    """Absolute path to packaged, non-domain ``<plugin_root>/kb/shared`` rules."""
+    return _PLUGIN_ROOT / "kb" / "shared"

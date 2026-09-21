@@ -10,8 +10,8 @@
 """The installer must work both from a checkout and a marketplace cache.
 
 Product-owned Skills are bundled below ``<plugin>/skills``. Reusable ops Skills
-and ``knowledge-query`` stay in their canonical packages and are resolved from
-the repository checkout or declared marketplace dependencies.
+stay in their canonical package. cannbot-knowledge is installed independently
+into the target project and is not linked or indexed by this installer.
 """
 from __future__ import annotations
 
@@ -199,8 +199,6 @@ def _copy_packaged_plugin(tmp: Path) -> Path:
     # marketplace payload while allowing a dedicated test below to remove one.
     for rel in (
         "kb/shared/ANTI_PRESSURE_PROTOCOLS.md",
-        "kb/okf/index.md",
-        "kb/okf/reference/index.md",
     ):
         src_file = src / rel
         dst_file = plugin / rel
@@ -237,7 +235,6 @@ def _seed_dependency_packages(ccd: Path) -> None:
     """Materialise the companion skill packages the installer depends on."""
     packages = {
         "ascendc-port-orchestrator-shared-skills": _whitelist("SHARED_SKILLS"),
-        "cannbot-knowledge-consumer-skills": _whitelist("KNOWLEDGE_SKILLS"),
     }
     for package, skills in packages.items():
         comp = ccd / "plugins" / "cache" / "cannbot" / package / "1.0.0"
@@ -245,23 +242,6 @@ def _seed_dependency_packages(ccd: Path) -> None:
             skill_dir = comp / name
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
-            if name == "knowledge-query":
-                # init.sh builds the packaged OKF index via this script at
-                # install time and fails closed when it is missing.  The real
-                # engine ships with the cannbot-knowledge plugin; the fixture
-                # provides a minimal faithful stand-in for `build`.
-                script = skill_dir / "scripts" / "knowledge_query.py"
-                script.parent.mkdir(parents=True, exist_ok=True)
-                script.write_text(
-                    "import json, sys\n"
-                    "root = sys.argv[sys.argv.index('--knowledge-root') + 1]\n"
-                    "if 'build' in sys.argv:\n"
-                    "    import os\n"
-                    "    os.makedirs(os.path.join(root, 'search'), exist_ok=True)\n"
-                    "    with open(os.path.join(root, 'search', 'okf.index.json'), 'w') as f:\n"
-                    "        json.dump({'cards': []}, f)\n",
-                    encoding="utf-8",
-                )
 
 
 def _fake_marketplace_tree(tmp: Path, with_dependencies: bool) -> tuple[Path, dict[str, str]]:
@@ -301,12 +281,16 @@ def test_installer_completes_from_a_marketplace_layout():
         )
         for name in _whitelist("LOCAL_SKILLS"):
             assert (Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / name).is_symlink()
-        for name in _whitelist("SHARED_SKILLS") + _whitelist("KNOWLEDGE_SKILLS"):
+        for name in _whitelist("SHARED_SKILLS"):
             installed = Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / name
             assert installed.is_symlink()
             assert (installed / "SKILL.md").is_file()
             cache_root = Path(env["CLAUDE_CONFIG_DIR"]) / "plugins" / "cache"
             assert installed.resolve().is_relative_to(cache_root.resolve())
+        assert not (
+            Path(env["CLAUDE_CONFIG_DIR"]) / "skills" / "knowledge-query"
+        ).exists()
+        assert not (plugin / "kb" / "okf" / "search" / "okf.index.json").exists()
         assert (plugin / "engine" / "workspace" / ".ascendc_env").is_file()
         # A copied developer checkout may carry the gitignored direct-checkout
         # settings surface.  Marketplace installs must remove it so Claude does

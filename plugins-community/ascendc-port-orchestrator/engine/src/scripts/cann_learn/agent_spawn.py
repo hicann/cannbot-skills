@@ -12,7 +12,7 @@
 Provides `spawn_cann_learner_agent` matching the contract Mode 5 expects:
 
     callable(op, workspace, module_path, sealed_dir, run_id, kb_root,
-             api_catalog_path) → dict with keys:
+             api_reference_path) → dict with keys:
       - sealed_files: list[Path]
       - summary_path: Path
       - candidate_paths: list[Path]
@@ -45,6 +45,7 @@ import time
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
+_PLUGIN_ROOT = _HERE.parents[4]
 # Add src/scripts/orchestrator to path so agent_transport imports work.
 sys.path.insert(0, str(_HERE.parents[1] / "orchestrator"))
 
@@ -69,7 +70,7 @@ def build_cann_learner_brief(
     sealed_dir: Path,
     run_id: str,
     kb_root: Path,
-    api_catalog_path: Path,
+    api_reference_path: Path,
     extraction_mode: str = "kernel_structural",
 ) -> str:
     """Construct the brief that aog-cann-learner agent receives.
@@ -84,7 +85,8 @@ def build_cann_learner_brief(
     workspace_abs = workspace.resolve()
     module_abs = module_path.resolve()
     kb_root_abs = kb_root.resolve()
-    api_catalog_abs = api_catalog_path.resolve()
+    api_reference_abs = api_reference_path.resolve()
+    shared_rules = _PLUGIN_ROOT / "kb" / "shared" / "ANTI_PRESSURE_PROTOCOLS.md"
 
     cann_strategy_path = workspace_abs / "cann_strategy_inference.md"
     summary_path = workspace_abs / "cann_learn_summary.json"
@@ -96,11 +98,11 @@ OP: {op}
 RUN_ID: {run_id}
 WORKSPACE (absolute): {workspace_abs}
 MODULE_PATH (CANN source root, read-only — your scope): {module_abs}
-KB_ROOT (existing KB for cross-reference, READ): {kb_root_abs}
-API_CATALOG (public AscendC API allowlist, READ): {api_catalog_abs}
+USER_C_TIER_ROOT (candidate intake; deployment-local): {kb_root_abs}
+API_REFERENCE (knowledge-query selected API card, READ): {api_reference_abs}
 
 # Required reading (mandatory, before Phase A)
-- {kb_root_abs.parent / 'shared' / 'ANTI_PRESSURE_PROTOCOLS.md'}   # P1-P8 catalog (kb/shared/)
+- {shared_rules}   # packaged P1-P8 orchestration rules
 - {cann_strategy_path}   # researcher's strategy_inference for this op
   (this is the "what KB already inferred" baseline — use to seed Phase A
    pre-scan + C35 reason-code matcher)
@@ -115,8 +117,10 @@ API_CATALOG (public AscendC API allowlist, READ): {api_catalog_abs}
     {candidates_path}
 
 # Phases
-A. KB pre-scan against {kb_root_abs} for op-class keywords from
-   cann_strategy_inference.md. Build "what KB already knows" list.
+A. Invoke the installed `knowledge-query` skill for op-class keywords from
+   cann_strategy_inference.md and read only the selected external cards. Also
+   inspect relevant entries already present in USER_C_TIER_ROOT. Do not scan
+   the external knowledge tree. Build a "what KB already knows" list.
    Output to sealed/source_notes.md §pre_scan.
 B. Read 2-5 files within {module_abs} (header + impl + tiling).
    Capture algorithm structure + public-API equivalents + internal-only
@@ -218,7 +222,9 @@ Candidates → `{bs_candidates}` (NOT the reference/patterns/unverified/candidat
 that Mode 5 uses — that's reserved for kernel-structural).
 
 Use prefix `CAND-BSP-*` for candidates (CANN Build-System Pattern), promotable
-to canonical `BSP-N` cards under kb/okf/runbooks/ (build-system-pattern-*).
+through cannbot-knowledge governance. Query the external knowledge first; the
+current canonical anchor is
+`knowledge/ops/ascendc/optimizations/build_system_pattern_bsp_subdir.md`.
 
 ## Generality requirement (Mode 6)
 
@@ -314,7 +320,7 @@ def spawn_cann_learner_agent(
     sealed_dir: Path,
     run_id: str,
     kb_root: Path,
-    api_catalog_path: Path,
+    api_reference_path: Path,
     timeout_sec: int = DEFAULT_TIMEOUT_SEC,
     extraction_mode: str = "kernel_structural",
 ) -> dict:
@@ -331,7 +337,7 @@ def spawn_cann_learner_agent(
     brief = build_cann_learner_brief(
         op=op, workspace=workspace, module_path=module_path,
         sealed_dir=sealed_dir, run_id=run_id, kb_root=kb_root,
-        api_catalog_path=api_catalog_path,
+        api_reference_path=api_reference_path,
         extraction_mode=extraction_mode,
     )
 

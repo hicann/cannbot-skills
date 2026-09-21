@@ -8,17 +8,14 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""OKF-only migration (2026-08-31) regression pins.
+"""External cannbot-knowledge migration regression pins.
 
-The legacy bundled KB layout (`kb/target/` + `kb/KB_INDEX.md`) was physically
-deleted; the bundled b-tier is OKF cards under `kb/okf/**` and nothing else.
-These tests pin the migration's observable contract:
+These tests pin the runtime migration's observable contract:
 
-  a. OKF-only startup — all seven brief builders (kw/pp/ko/ar/fo/da/cl) render
-     with no legacy tree on disk and raise no file-not-found.
-  b. No brief text references the removed layout (`kb/target`, `KB_INDEX`,
-     `target/ascendc`).
-  c. OKF retrieval failure is FAIL-LOUD — an empty/failed retrieval produces a
+  a. All seven brief builders (kw/pp/ko/ar/fo/da/cl) render without relying on
+     plugin-local official knowledge.
+  b. Removed legacy layout tokens do not appear in rendered briefs.
+  c. External retrieval failure is FAIL-LOUD — an empty/failed retrieval produces a
      loud warning marker in the brief, never a silent legacy fallback.
   d. The user-local c-tier (write / read / tombstone) is unaffected.
   e. Template/example asset paths exist and are non-empty.
@@ -43,7 +40,7 @@ _SCRIPTS = _HERE.parent.parent.parent         # engine/src/scripts/
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from kb_paths import kb_root, plugin_root  # noqa: E402
+from kb_paths import plugin_root  # noqa: E402
 from reference_source import explicit_a3_live_binding  # noqa: E402
 from briefs import _common as bc  # noqa: E402
 from briefs import brief_kb  # noqa: E402
@@ -69,9 +66,9 @@ _BUILDERS = {
 # migration — each names a piece of the deleted legacy layout.
 _LEGACY_LAYOUT_TOKENS = ("kb/target", "KB_INDEX", "target/ascendc")
 
-# The loud marker `kb_manifest_block` emits when OKF retrieval returns empty
-# (index not built / no hits / retrieval error) — the fail-loud contract.
-_FAIL_LOUD_MARKER = "⚠️ OKF 检索无返回"
+# Loud markers distinguish a missing project install from a configured search
+# that returned no cards.
+_MISSING_INSTALL_MARKER = "⚠️ cannbot-knowledge 未安装或项目配置无效"
 
 
 def _seed_env(tmp_path: Path) -> bc.AscendCEnv:
@@ -107,26 +104,7 @@ def _seed_workspace(tmp_path: Path, op: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Layout pin: the legacy tree is physically gone, the OKF tree is real.
-# ---------------------------------------------------------------------------
-
-
-def test_legacy_kb_layout_is_physically_removed():
-    root = kb_root()
-    assert root.is_dir(), f"kb root missing: {root}"
-    assert not (root / "target").exists(), "legacy kb/target tree reappeared"
-    assert not (root / "KB_INDEX.md").exists(), "legacy kb/KB_INDEX.md reappeared"
-
-
-def test_okf_layout_is_present_and_non_empty():
-    for sub in ("okf/runbooks", "okf/reference"):
-        directory = kb_root() / sub
-        assert directory.is_dir(), f"OKF knowledge directory missing: {directory}"
-        assert any(directory.rglob("*.md")), f"OKF knowledge directory empty: {directory}"
-
-
-# ---------------------------------------------------------------------------
-# (a) OKF-only startup: every brief builder renders without file-not-found.
+# (a) External-knowledge startup: every brief builder renders without file-not-found.
 # (b) No brief references the deleted legacy layout.
 # ---------------------------------------------------------------------------
 
@@ -173,8 +151,8 @@ def test_okf_retrieval_failure_is_fail_loud(monkeypatch):
     """
     monkeypatch.setattr(brief_kb, "_okf_reference_block", lambda *a, **k: "")
     out = brief_kb.kb_manifest_block("5_Cumsum", workspace=None, target="a5")
-    assert _FAIL_LOUD_MARKER in out
-    assert "无回退" in out
+    assert _MISSING_INSTALL_MARKER in out
+    assert "无插件内回退" in out
     for token in _LEGACY_LAYOUT_TOKENS:
         assert token not in out, f"fail-loud block silently fell back to {token!r}"
 
@@ -189,7 +167,7 @@ def test_okf_retrieval_failure_reaches_worker_brief(tmp_path, monkeypatch):
         lane=0, spawn_index=1, iter_cap_remaining=15,
         env=env,
     )
-    assert _FAIL_LOUD_MARKER in brief
+    assert _MISSING_INSTALL_MARKER in brief
     for token in _LEGACY_LAYOUT_TOKENS:
         assert token not in brief
 

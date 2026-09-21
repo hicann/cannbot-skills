@@ -682,9 +682,22 @@ _RE_SIMT_MARKERS = {
     "arithmetic": re.compile(r'[+\-*/]=|[+\-*/]\s'),
 }
 
+# Cube (MAD vector-unit) kernels drive computation through the MatmulImpl
+# recipe instead of TQue/DataCopy/VEC ops; the SIMD marker set alone flags
+# genuine pure-Cube kernels as "trivial stubs" (2026-09-18 2_GroupedMatmul
+# finalize static gate FP: 4x MatmulType< + REGIST_MATMUL_OBJ +
+# MatmulImpl counted only global_tensor under the SIMD vocabulary).
+_RE_CUBE_MARKERS = {
+    "matmul_type": re.compile(r'\bMatmulType\s*<'),
+    "regist_matmul": re.compile(r'\bREGIST_MATMUL_OBJ\b'),
+    "matmul_impl": re.compile(r'\bMatmulImpl\b'),
+    "mm_call": re.compile(r'\bmm\.(?:Init|SetTensor|SetOrgShape|Iterate|End)\b'),
+}
+
 # Minimum markers for each style
 _MIN_SIMD_MARKERS = 3
 _MIN_SIMT_MARKERS = 3
+_MIN_CUBE_MARKERS = 2
 
 
 def _kernel_tree_root(filepath: str) -> str:
@@ -757,6 +770,13 @@ def check_kernel_has_computation(filepath: str, lines: List[str]) -> List[Violat
         markers = _RE_SIMT_MARKERS
         min_required = _MIN_SIMT_MARKERS
         style = "SIMT"
+    elif sum(1 for pat in _RE_CUBE_MARKERS.values() if pat.search(full_text)) >= 1:
+        # Cube-route kernels (MatmulImpl recipe): validate against the cube
+        # marker vocabulary so pure-Cube implementations are not flagged as
+        # SIMD stubs (2026-09-18 2_GroupedMatmul finalize-gate FP).
+        markers = _RE_CUBE_MARKERS
+        min_required = _MIN_CUBE_MARKERS
+        style = "Cube"
     else:
         markers = _RE_SIMD_MARKERS
         min_required = _MIN_SIMD_MARKERS

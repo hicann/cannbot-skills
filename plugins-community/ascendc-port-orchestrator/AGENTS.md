@@ -68,7 +68,7 @@ PYTHONPATH="<plugin>/engine/src/scripts" python3 -m orchestrator \
 
 - **引擎 = `engine/src/scripts/orchestrator/`**（FSM + 安全网 + 迭代到绿 + 子 agent 调度）；FSM 权威契约 = `workflows/opgen_state_machine.yaml` + `engine/src/scripts/workflow/state_machine.py`。
 - **构建** = `engine/src/scripts/patches/build_ascendc.py`；**子 agent** = `agents/aog-*.md`（插件根扁平约定 / plugin.json 注册；引擎经 `backends/` 统一抽象拉起 kernel-worker/optimizer/probe 等，`AOG_HARNESS_BACKEND` 切换 `claude_code`/`opencode`/`codearts`）。
-- **知识** = `references/`（b 层）+ 用户本地 KB（c 层）+ cannbot skills（a 层）；引擎按 c>b>a 注入子 agent brief（见 docs/ARCHITECTURE.md §5.2）。
+- **知识** = 外部 cannbot-knowledge（b 层）+ 用户本地 KB（c 层）+ cannbot skills（a 层）；引擎按 c>b>a 注入子 agent brief（见 docs/ARCHITECTURE.md §5.2）。b 层 OKF 卡已迁移至独立 cannbot-knowledge 仓（OKF v0.2）：先用该仓统一 `install.sh` 以 consumer 模式安装到算子项目，port 从项目 `.cannbot/knowledge.env`（或单次显式环境变量 `CANNBOT_KNOWLEDGE_ROOT`）解析完整 checkout，再通过 `briefs/external_kb.py` 检索、解析卡片引用并向 graybox 只读挂载。未安装、配置无效、索引缺失或检索失败时 fail-closed，不回退插件内旧知识。
 - **你的职责**：① 入口意图解析 + 目标归一 ② 选空闲 NPU lane ③ 调引擎 ④ 回传引擎的状态/报告。**不要自己逐阶段写 kernel、不要绕过引擎**——确定性（状态机/钩子/迭代上限）来自引擎，你 NL 复刻不了。
 
 ## 确定性流水线（FSM，由引擎驱动）
@@ -85,7 +85,7 @@ aog-kernel-worker，含内层编译/精度修复循环）→ 构建 → 精度�
 ## 双层 KB 反馈环 + 社区 skills 知识源
 
 - **(c) 用户本地 KB**：用户修正/增量，运行时可写，最高优先（同主题冲突时覆盖）。
-- **(b) 插件自带官方 KB**：随 #611 以 OKF 格式交付的 arch/编译/平台经验。
+- **(b) 官方 OKF 知识卡**：由独立 cannbot-knowledge 仓安装、建索引并通过项目 `.cannbot/knowledge.env` 接入；port 不安装、不更新、不复制知识正文，也不把插件内旧知识作为回退来源。插件内 `shared/` 仅承载编排纪律等运行时资产。
 - **(a) 社区 skills**：CANNBot 现有方法论 skills。
 双层 KB 内部优先级为用户本地 > 插件自带；社区 skills 作为额外知识源按需调用。生成后把新经验沉淀回**用户本地 KB**（官方 KB 运行时不被写）。
 

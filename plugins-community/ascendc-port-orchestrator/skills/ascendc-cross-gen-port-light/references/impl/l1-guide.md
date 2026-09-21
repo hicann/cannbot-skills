@@ -408,17 +408,19 @@ int64_t ubFlexible_ = ubSize_ - UB_RESERVED_BYTE - ...;
 
 **L1 阶段不改 kernel 代码，因此本阶段只需识别、不需适配**：算子若使用 `Exp / Ln / Reciprocal / Sqrt / Rsqrt / Div`，在 950 上存在 subnormal 精度差异——这是一个**升级信号**（见上文「L4 升级信号指引」），说明该算子不能停留在纯 L1，需按 stage_1 定级升级到 L2 处理。
 
-- **API 知识**（algo 参数取值含义、Config 结构体、2200x/3510 代码对比）：`cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-migration.md`
+- **API 知识**（algo 参数取值含义、Config 结构体、2200x/3510 代码对比）：使用 `ascendc-api-knowledge-query` 按 API 名与目标平台查询
 - **L2 改造动作**（换 algo 模板参数 / Reg 路径用 `SpecificMode`）：`l2-guide.md`「补充 3：Subnormal 适配」
 - **扫描与适配策略**（策略 0 结构性排除、eps 可表示性检查、何时必须处理）：`api-diff-guide.md` §1
 
 ## 相关参考文档路径
 
-> 下表中带「KB 快照」标注的目录位于插件自带 KB 快照 `plugins-community/ascendc-port-orchestrator/kb/target/ascendc/migration/`（本方法论 2026-05 旧版存档），按此实际路径访问。
+> 下表为外部知识查询主题，不是插件内目录。使用已安装的
+> `knowledge-query` 查询迁移指南/概念卡，或使用 `ascendc-api-knowledge-query`
+> 查询精确 API；带上源/目标平台和实际原语。
 
 | 文档类别 | 路径 | 说明 |
 |---------|------|------|
-| 迁移相关官方文档 | KB 快照 `migration/` 子目录 | 220x→351x 架构迁移指导、基础/高阶 API 迁移指导、算子编译迁移指导、兼容性说明 |
-| Memory-based Vector 操作 | KB 快照 `memory-base-vector/` 子目录 | 传统 AscendC Vector 编程模式参考（TPipe/TQue/DataCopy 等） |
-| API 选型与概述 | KB 快照 `api-overview/` 子目录 | API 兼容性分层、高阶/基础/MicroAPI/SIMT 接口概述 |
+| 迁移相关官方文档 | `knowledge-query`: `220x 351x 架构 API 编译迁移` | 架构迁移、基础/高阶 API 迁移、算子编译迁移、兼容性说明 |
+| Memory-based Vector 操作 | `ascendc-api-knowledge-query`: `TPipe TQue DataCopy` | 传统 AscendC Vector 编程模式参考 |
+| API 选型与概述 | `knowledge-query`: `API 兼容性分层 MicroAPI SIMT` | 高阶/基础/MicroAPI/SIMT 接口概述 |
 | Cube 类算子迁移 | `references/impl/cube-migration-guide.md` | Cube 数据通路/分形/跨核同步/Fixpipe 等 cube 专用迁移（含官方样例索引与踩坑速查） |

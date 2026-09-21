@@ -15,6 +15,9 @@ A5_LOCAL_RUNTIME_CONTAINER=
 A5_CANN_PATH=/usr/local/Ascend/cann-9.0.0
 # Required: fill the SoC reported by the target device.  Leave empty until
 # verified; an unset/unknown value deliberately stops direct A5 validation.
+# Kernel builds pass this verbatim to the CANN tikcpp toolchain, which only
+# accepts full SKU spellings (e.g. Ascend950DT_9582), not the bare board name
+# shown by npu-smi (e.g. Ascend950DT).
 A5_SOC_VERSION=
 A5_DEFAULT_NPU_ID=0
 # Required golden input is a KernelBench-style task + sidecar pair. Select it
@@ -42,3 +45,12 @@ NPU_PYTHON_BIN=
 # different from your compile toolkit (torch_npu load error "libhccl.so: cannot open
 # shared object file"), set the runtime lib64 here. Target-specific wins over generic.
 # A5_EXTRA_LD_LIBRARY_PATH=/usr/local/Ascend/<runtime-cann>/x86_64-linux/lib64
+
+# REQUIRED for port runs — cannbot-knowledge root (b-tier OKF knowledge source).
+# O0 preflight blocks startup when this is unset or does not point at a full
+# checkout (the layout with knowledge/, governance/ and
+# .agents/skills/knowledge-query/, plus artifacts/indexes/knowledge.sqlite3).
+# Resolution order: explicit process env CANNBOT_KNOWLEDGE_ROOT (single-run
+# override) > this variable > <operator-project>/.cannbot/knowledge.env
+# (written by the cannbot-knowledge unified installer).
+CANNBOT_KNOWLEDGE_ROOT=

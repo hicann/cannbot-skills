@@ -340,18 +340,16 @@ class OpencodeBackend(Backend):
         # Without this the child discovers config from the orchestrator's cwd (engine/).
         if cwd:
             env["PWD"] = str(cwd)
-        # The agent definitions address the knowledge base as ${CLAUDE_PLUGIN_ROOT}/kb/...
-        # (agents/aog-kernel-worker.md). Claude Code sets that variable; opencode does not,
-        # so without this the worker receives an UNEXPANDED literal and the entire KB — the
-        # always-loaded rules, the kernel-authoring guards, the error catalogue — is
-        # unaddressable for it. The name is Claude-Code-flavoured but it is simply the
-        # plugin-root contract the agent prompts are written against, so the opencode
-        # backend must satisfy it too.
+        # Agent definitions address packaged runtime assets (for example kb/shared rules
+        # and templates) through ${CLAUDE_PLUGIN_ROOT}. Official domain knowledge is
+        # resolved separately by the installed external knowledge-query skills. Claude
+        # Code sets this variable; opencode does not, so the backend must satisfy the
+        # plugin-root contract for those packaged assets.
         # 2026-08-27 (F5): inside the graybox the plugin content lives at
         # /usr/local/cannbot-port-plugin (agent_dispatch stages it there), NOT
         # at the host plugin root.  ${CLAUDE_PLUGIN_ROOT} references in the
         # agent bodies must resolve in-sandbox or the worker loses every
-        # plugin-root-relative KB/skill pointer; agent_dispatch sets the flag
+        # plugin-root-relative shared-asset/skill pointer; agent_dispatch sets the flag
         # when the graybox bind-set is in force.
         if os.environ.get("AOG_GRAYBOX_PLUGIN_ROOT") == "1":
             env.setdefault("CLAUDE_PLUGIN_ROOT", "/usr/local/cannbot-port-plugin")
@@ -942,12 +940,11 @@ class OpencodeBackend(Backend):
     def _agent_prompt_value(root, bodies_dir, name: str, body: str) -> str:
         """Materialise an agent body and return the value to put in `prompt`.
 
-        The bodies address the KB as ${CLAUDE_PLUGIN_ROOT}/kb/... . That is PROMPT TEXT, not
-        shell: the model passes it to the read tool verbatim and opencode does not expand
-        environment variables in tool arguments, so the worker tries to open a literal
-        "${CLAUDE_PLUGIN_ROOT}/kb/..." and gives up (measured: READ_OK=no on the very first
-        mandatory KB file). Exporting the variable to the child does NOT help, for the same
-        reason. Expand it while materialising instead.
+        The bodies address packaged runtime assets as ${CLAUDE_PLUGIN_ROOT}/... . That is
+        prompt text, not shell: the model passes it to the read tool verbatim and opencode
+        does not expand environment variables in tool arguments, so the worker would try
+        to open a literal path and give up. Exporting the variable to the child does not
+        help for the same reason. Expand it while materialising instead.
         """
         body = body.replace("${CLAUDE_PLUGIN_ROOT}", str(root))
         body = body.replace("$CLAUDE_PLUGIN_ROOT", str(root))

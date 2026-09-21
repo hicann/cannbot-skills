@@ -61,7 +61,7 @@ V220_TARGETS = ["a3", "a2"]
 
 _PB34_HEADING = "### PB-34 — MIX cube+vec SILENT-HANG"
 _PB35_HEADING = "### PB-35 — the Pattern-A trap"
-_CCS_MD = "okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md"
+_CCS_MD = "knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md"
 
 
 def _fa_ws(tmp_path: Path) -> Path:
@@ -78,13 +78,16 @@ def _fa_ws(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_real_kb_entries_parse_to_expected_families():
+def test_real_kb_entries_parse_to_expected_families(external_kb_fixture):
     """The predicate reads real `applies_to: soc=` lines, in the KB's own spellings.
 
     These are the four spellings that matter here, and they are all different:
     `soc=Ascend910_9382 (V220 A2/A3 single-die)` / `soc=Ascend910_9382,Ascend950PR_9579`
     / `soc=Ascend950PR (V351/A5)` / `soc=Ascend950PR`. If this test breaks, a KB
     entry's declared scope changed — check the entry before touching the parser.
+
+    Post-223ee980 the cards live in the EXTERNAL cannbot-knowledge repo (OKF v0.2);
+    `external_kb_fixture` stages them there with the same declared scopes.
     """
     assert kb_entry_soc_families("PB-34") == {"V220"}
     assert kb_entry_soc_families("PB-35") == {"V220", "V351"}
@@ -119,11 +122,12 @@ def test_soc_family_map_covers_both_families():
 
 
 @pytest.mark.parametrize("target", V351_TARGETS)
-def test_pb34_warning_absent_on_v351(target):
+def test_pb34_warning_absent_on_v351(target, external_kb_fixture):
     """V351/A5 → the V220-only warning is ABSENT.
 
     Dies if the `if kb_entry_applies_to_target("PB-34", target)` predicate is
     removed (unconditional injection = the DEBT-208 defect restored).
+    The scope is read from the external-repo card staged by external_kb_fixture.
     """
     out = _fa_assembly_deadlock_warning_block(target)
     assert _PB34_HEADING not in out
@@ -182,7 +186,7 @@ def test_a5_worker_is_not_left_without_cross_core_guidance():
 # ---------------------------------------------------------------------------
 
 
-def test_two_paths_surfaced_on_a5_and_scoped_off_v220():
+def test_two_paths_surfaced_on_a5_and_scoped_off_v220(external_kb_fixture):
     a5 = _fa_assembly_deadlock_warning_block("a5")
     assert "#### PATH B — library cube + KFC-IMPLICIT sync" in a5
     assert "#### PATH A — non-KFC library cube + the §4 manual handshake" in a5
@@ -229,10 +233,12 @@ def test_path_a_bounds_are_not_stripped():
     assert "event_t(0)" in a5
 
 
-def test_recipe_is_pointed_at_not_copied():
+def test_recipe_is_pointed_at_not_copied(external_kb_fixture):
     """POINT, do not COPY — a copy drifts and a paraphrase strips the bounds."""
     a5 = _fa_assembly_deadlock_warning_block("a5")
-    assert "fa-cross-core-sync-workspacequeue.md` §4 (`:202`" in a5
+    # Post-223ee980 the card resolves through the external repo (OKF v0.2) to its
+    # snake_case absolute path under $CANNBOT_KNOWLEDGE_ROOT/knowledge/.
+    assert "fa_cross_core_sync_workspacequeue.md` §4 (`:202`" in a5
     assert "READ §4 ITSELF — do not work from this summary" in a5
     # Not a transcription of §4's code block.
     assert "AIV1_FLAG_OFFSET = 16" not in a5
@@ -322,7 +328,7 @@ def test_catlass_v220_is_labelled_unproven_not_recommended(target):
     assert "no V220 execution witness" in out
 
 
-def test_shipped_cube_block_is_scoped_off_a5():
+def test_shipped_cube_block_is_scoped_off_a5(external_kb_fixture):
     """OL-275 is `soc=Ascend910_V220` → the block must not leak into the A5 brief.
 
     The A5 recipe is anchored on OL-220 ∧ cross_core_sync.md §4 and stays that way;
@@ -338,7 +344,7 @@ def test_shipped_cube_block_is_scoped_off_a5():
 # ---------------------------------------------------------------------------
 
 
-def test_fix_cards_filtered_by_each_cards_own_scope():
+def test_fix_cards_filtered_by_each_cards_own_scope(external_kb_fixture):
     """Each card in the trailer is filtered by its OWN applies_to, not one flag.
 
     OL-275 is `soc=Ascend910_V220` and its own `unverified_on` says "do not assume
@@ -361,7 +367,7 @@ def test_fix_cards_filtered_by_each_cards_own_scope():
 # ---------------------------------------------------------------------------
 
 
-def test_template_assembly_block_threads_target(tmp_path: Path):
+def test_template_assembly_block_threads_target(tmp_path: Path, external_kb_fixture):
     ws = _fa_ws(tmp_path)
     a5 = _fa_class_template_assembly_block("3_FusionAttention", ws, target="a5")
     v220 = _fa_class_template_assembly_block("3_FusionAttention", ws, target="a3")
@@ -381,7 +387,7 @@ def test_template_assembly_block_defaults_to_a5(tmp_path: Path):
     ) == _fa_class_template_assembly_block("3_FusionAttention", ws, target="a5")
 
 
-def test_build_worker_brief_passes_env_target(tmp_path: Path):
+def test_build_worker_brief_passes_env_target(tmp_path: Path, external_kb_fixture):
     """The wiring that makes this real: `env.target` reaches the FA composer."""
     from briefs.kw_brief import _phase_instructions_block
 

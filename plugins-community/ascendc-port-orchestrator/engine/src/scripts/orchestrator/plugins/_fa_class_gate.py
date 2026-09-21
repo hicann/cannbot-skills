@@ -307,8 +307,8 @@ def finalize_check_tile_size_consistency(workspace: Path, v: dict) -> Optional[s
 
 # FA-class shared asset paths (under <plugin_root>/templates/fa_class/).
 # Used by mode plugins' kw_brief_phase_a / pp_brief_phase_block when op_class is FA.
-# OKF-only migration (2026-08-31): assets moved from kb/target/ascendc/fa_class/
-# to <plugin_root>/templates/fa_class/{op_kernel,op_host}/.
+# Knowledge migration (2026-08-31): executable assets moved from the removed
+# plugin knowledge tree to <plugin_root>/templates/fa_class/{op_kernel,op_host}/.
 # _fa_class_gate.py lives at
 # <plugin_root>/engine/src/scripts/orchestrator/plugins/, so parents[5] == plugin_root.
 _FA_CLASS_ASSETS = Path(__file__).resolve().parents[5] / "templates" / "fa_class"
@@ -324,14 +324,25 @@ def fa_class_brief_ascendc() -> str:
     FA-class templates + runbook cards. Mode plugins return this from
     kw_brief_phase_a when is_fa_class(op_class).
     """
+    # Lazy import: this module is also imported with only plugins/ on
+    # sys.path (test_fa_class_upstream_port_gate), where `briefs` is not
+    # importable — keep the legacy literal in that context.
+    try:
+        from briefs import external_kb as _ext_kb
+        _sync_card = _ext_kb.kb_ref_display(
+            "knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md")
+        _init_card = _ext_kb.kb_ref_display(
+            "knowledge/ops/ascendc/optimizations/fa_cv_fused_init_process_lowering.md")
+    except Exception:
+        _sync_card = "knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md"
+        _init_card = "knowledge/ops/ascendc/optimizations/fa_cv_fused_init_process_lowering.md"
     return (
         "FA-CLASS ASCENDC-AGENT DIRECTIVE (shared op-class brief, per "
         "src/scripts/orchestrator/plugins/_fa_class_gate.py): kw acts as "
         "cv-agent's ascendc-agent for FA-class ops. READ FIRST: "
         "templates/fa_class/op_kernel/ + templates/fa_class/op_host/ (template "
         "assembly: GE_HOST_TRANSFORM_RECIPE.md + flash_attention_score_* "
-        "skeletons) + kb/okf/runbooks/operator-optimization/"
-        "fa-cross-core-sync-workspacequeue.md + fa-cv-fused-init-process-lowering.md. Hard constraints "
+        f"skeletons) + {_sync_card} + {_init_card}. Hard constraints "
         "(verified 16/16 on an independently authored V220 fixture): (1) cube.h/vec.h file split "
         "MANDATORY, no monolithic kernel; (2) KERNEL_TYPE_MIX_AIC_1_2 (Attention "
         "requirement); (3) in-loop T.set_cross_flag → WorkspaceQueue ring "

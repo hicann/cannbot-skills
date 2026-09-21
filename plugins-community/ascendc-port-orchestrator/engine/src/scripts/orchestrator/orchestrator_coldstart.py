@@ -43,6 +43,7 @@ _NPUBENCH_REPAIR_OUTPUT_NAMES = (
     "probes",
     "branched_from_kernel",
     ".npubench_candidate",
+    ".replay_extract",
     "output",
 )
 

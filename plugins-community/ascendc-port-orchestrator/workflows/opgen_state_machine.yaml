@@ -498,7 +498,7 @@ phases:
     required_actions:
       - "Copy the generated target, its source/truth provenance, verification.json and knowledge_update.md to output/{ARCHIVE_PROJECT}/src/kernels/{op}/"
       - "Update output/{ARCHIVE_PROJECT}/docs/REPORT.md L2 row for {N}"
-      - "If knowledge_update.md exists: invoke /aog-knowledge-maintain — MANDATORY when knowledge_update.md has new entries (V3.3.10, 2026-04-28). The skill performs semantic review only; the orchestrator admits accepted entries through Arbiter into the installer-recorded user c-tier KB root (manifest user_kb_c / $ASCENDC_PORT_USER_KB), while bundled ${CLAUDE_PLUGIN_ROOT}/kb/ remains read-only at runtime. Only after that admission succeeds does the orchestrator drop .kb_merged in the archive. Without this marker workflow_critic SC2 rejects the commit. EXCEPTION (V3.4.0, 2026-04-29): when --no-kb-merge flag is active (set by /aog-op-batch), this step is SKIPPED. The archive instead carries a .kb_merge_pending marker; workflow_critic SC2 reads .kb_merge_pending and relaxes the .kb_merged check. The batch layer's Phase B5 invokes /aog-knowledge-maintain --batch ONCE for all ops in the batch, after which the orchestrator converts .kb_merge_pending → .kb_merged."
+      - "If knowledge_update.md exists: invoke /aog-knowledge-maintain — MANDATORY when knowledge_update.md has new entries (V3.3.10, 2026-04-28). The skill performs semantic review only; the orchestrator admits accepted entries through Arbiter into the installer-recorded user c-tier KB root (manifest user_kb_c / $ASCENDC_PORT_USER_KB). External cannbot-knowledge and packaged ${CLAUDE_PLUGIN_ROOT}/kb/shared/ rules remain read-only at runtime. Only after that admission succeeds does the orchestrator drop .kb_merged in the archive. Without this marker workflow_critic SC2 rejects the commit. EXCEPTION (V3.4.0, 2026-04-29): when --no-kb-merge flag is active (set by /aog-op-batch), this step is SKIPPED. The archive instead carries a .kb_merge_pending marker; workflow_critic SC2 reads .kb_merge_pending and relaxes the .kb_merged check. The batch layer's Phase B5 invokes /aog-knowledge-maintain --batch ONCE for all ops in the batch, after which the orchestrator converts .kb_merge_pending → .kb_merged."
       - "git add, commit with descriptive message, push"
     required_artifacts:
       - path: "output/{ARCHIVE_PROJECT}/src/kernels/{op}/kernel/"
@@ -519,7 +519,7 @@ phases:
         description: "git push success (no uncommitted archive-scope changes)"
         check: "git status --porcelain output/{ARCHIVE_PROJECT}/src/kernels/{op}/ is empty AND HEAD is pushed"
       - id: O6_I3
-        description: "V3.3.10 (2026-04-28): if knowledge_update.md has new entries (OL-/EC-/P-P/Candidate/hit-counter/Evidence triggers), they must be merged into the user c-tier KB (never the bundled b-tier), and .kb_merged must be present in the archive — enforced by workflow_critic SC2 at git commit time. V3.4.0 (2026-04-29): satisfied EITHER by .kb_merged OR by .kb_merge_pending (the latter set under --no-kb-merge during a /aog-op-batch run; converted to .kb_merged by the batch layer's Phase B5)."
+        description: "V3.3.10 (2026-04-28): if knowledge_update.md has new entries (OL-/EC-/P-P/Candidate/hit-counter/Evidence triggers), they must be merged into the user c-tier KB (never external official b-tier or packaged shared rules), and .kb_merged must be present in the archive — enforced by workflow_critic SC2 at git commit time. V3.4.0 (2026-04-29): satisfied EITHER by .kb_merged OR by .kb_merge_pending (the latter set under --no-kb-merge during a /aog-op-batch run; converted to .kb_merged by the batch layer's Phase B5)."
         check: "(test -f output/{ARCHIVE_PROJECT}/src/kernels/{op}/.kb_merged OR test -f output/{ARCHIVE_PROJECT}/src/kernels/{op}/.kb_merge_pending) when knowledge_update.md is non-trivial"
     prohibited_actions: []
     next: [DONE]
@@ -1412,9 +1412,9 @@ phase_o4_states:
       C34a-C35). Output: 0+ candidates are appended to the c-tier KB
       reference/patterns/unverified/candidates.md and sediment to c-tier
       via the deterministic intake gate (kb_invoke) — no
-      .kb_promotion_pending markers (kb_auto_promote deleted); migrated
-      legacy candidates live as cand-* cards under
-      kb/okf/runbooks/field-notes/inferred/.
+      .kb_promotion_pending markers (kb_auto_promote deleted). The legacy
+      inferred CAND stub set was intentionally not migrated; current candidates
+      exist only in c-tier until governed external ingestion.
 
       iter_cap=1 — one-shot per op-gen run (it's expensive).
       Insertion semantics: cann_learn iter does NOT consume a researcher

@@ -322,8 +322,8 @@ def test_merge_one_persists_only_user_c_tier(ws, tmp_path, monkeypatch):
     marker = (ws / ".kb_merged").read_text()
     assert "tier=customer" in marker
     assert "entries=customer:" in marker
-    assert "byte-for-byte read-only" in captured["prompt"]
-    assert "Do not edit bundled KB" in captured["prompt"]
+    assert "external cannbot-knowledge checkout is official b-tier" in captured["prompt"]
+    assert "Do not edit external knowledge markdown/indexes" in captured["prompt"]
 
 
 def test_merge_one_rejects_missing_semantic_intake(ws, tmp_path, monkeypatch):

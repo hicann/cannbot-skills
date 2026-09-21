@@ -170,10 +170,36 @@ def _classify_controlled_compile_failure(stdout: str, stderr: str) -> str:
     though only the candidate can reorder the include.  Treat such cascades as
     candidate failures too, but keep ``file not found`` cascades fail-closed:
     a missing SDK header is a toolchain/target problem, not authored code.
+
+    CMake configure-stage errors are treated the same way by file identity:
+    this controlled build always runs ``cmake -S <workspace>/kernel``, so a
+    ``CMake Error at CMakeLists.txt:NN`` diagnostic (bare relative name, or an
+    explicit ``kernel/CMakeLists.txt``) names the candidate-delivered
+    ``kernel/CMakeLists.txt`` itself — an authoring defect the source-only
+    worker must repair (2026-09-18 5_MatmulTransB: worker-authored torch-probe
+    ``list(GET)`` on an unsplit OUTPUT_VARIABLE was misclassified as
+    ``target_build`` and parked the lane as "manual target diagnostics").
+    Toolchain failures keep naming absolute ``*.cmake`` paths under the CANN
+    package (e.g. ``/usr/local/Ascend/.../host_config.cmake:48``), which do
+    not match and stay target-build failures.
+
+    Link-stage failures (``ld``/``collect2`` diagnostics: ``cannot find -l...``,
+    ``undefined reference``, ``ld returned``) are likewise candidate-owned:
+    by this stage the toolchain and CANN libs have already compiled the
+    candidate's translation units, so a failed link of the candidate's own
+    extension target is its authored build recipe (wrong ``-L``/lib order,
+    empty probe variable), which the worker can repair from the receipt
+    diagnostics (2026-09-18 5_MatmulTransB kw-4: ``cannot find -ltorch_npu``
+    after the CMakeLists rewrite dropped the probe's ``lib`` suffix).
     """
     diagnostics = f"{stdout}\n{stderr}"
     if re.search(
         r"(?m)\bkernel/[^:\n]+:\d+:\d+:\s*(?:fatal\s+)?error:",
+        diagnostics,
+    ):
+        return "candidate_contract"
+    if re.search(
+        r"(?m)CMake Error at (?:kernel/)?CMakeLists\.txt:\d+",
         diagnostics,
     ):
         return "candidate_contract"
@@ -191,6 +217,8 @@ def _classify_controlled_compile_failure(stdout: str, stderr: str) -> str:
         ):
             if "file not found" not in match.group("message"):
                 return "candidate_contract"
+    if re.search(r"(?m)/usr/bin/ld: |collect2: error: ld returned", diagnostics):
+        return "candidate_contract"
     return "target_build"
 
 

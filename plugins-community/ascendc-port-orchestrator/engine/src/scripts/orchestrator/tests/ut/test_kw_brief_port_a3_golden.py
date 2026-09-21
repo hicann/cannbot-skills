@@ -44,32 +44,28 @@ def _ws(tags):
 
 
 # (op, op_class_tags, iter_cap_remaining) -> sha256(output)
-# Re-pinned 2026-08-31 (OKF-only 迁移): composed brief text now points at
-# `kb/okf/**` + plugin `templates/fa_class/` (the previous pins were already
-# stale from the A-core OKF 切换; this re-pin covers both).
-# Re-pinned 2026-09-02 (issue #559 OKF-only 落地到 engine): the 2026-08-31 pins
-# went stale again — on the 1358ec68 baseline the builders still emitted the
-# legacy `kb/target/ascendc/**` paths. The OKF-only refactor (a4e3c03a) moved
-# the engine pointers to `kb/okf/reference/**` + plugin `templates/fa_class/`;
-# baseline-vs-HEAD output diff verified to be exactly that path relocation
-# (all new paths exist in the plugin tree). Content change is the point.
-# 2026-09-05 重钉：kb/okf/reference/ 目录重组后 brief 里的 KB 路径变化。
-# 重钉前逐 case 在改动前后两棵树上生成 brief 做 diff 验证：4 个 case 差异 12–14 行，
-# **非路径行为 0** —— 即变化仅为 KB 路径改写，无语义内容变动。
+# Re-pinned 2026-09-17 (去双轨模式, bb167473): 未配置外部仓时迁移卡引用不再回退插件内
+# 旧知识，`kb_ref_display` 的 fail-loud 标记文案改为「cannbot-knowledge 未安装、配置无效
+# 或未收录」。
+# Re-pinned 2026-09-17 (外部知识仓适配, OKF v0.2): 迁移卡片的 KB 指针改经
+# `external_kb.kb_ref_display` 输出，brief 文本随外部仓配置与否变化；本表 pin 的是
+# **未配置外部仓**的确定性形态。测试经 `no_external_kb` fixture 显式隔离，保证在配置了
+# CANNBOT_KNOWLEDGE_ROOT 的机器上也复现同一形态。配置模式的解析行为由
+# test_kw_brief_decomposition_modules.py 的 external-repo 模式测试覆盖。
 _GOLDEN = [
     ("mat_mul_v3", ["a3_to_a5_port", "CUBE_MIX"], 3,
-     "a7faf9b28eca9026f647bca3e24ae7e4050e0fe08ae48f28ed2b1d786af33575"),
+     "75bfb8342af0d8b9ed282068acb5946f96d2a0d28c978e82e9772bac3ec8ad59"),
     ("some_vec_op", ["a3_to_a5_port"], 3,
-     "09eb85eebc87d29dc5c34b856691e91721de3e166d10038958b0a9655c45df9b"),
+     "0af777d076ac20745ff4a9fbdb14833e9b759c0f327571d10db46ec3e119e26d"),
     ("flash_attention_score", ["a3_to_a5_port", "FA_CLASS"], 2,
-     "acf35f5734b2577835bab9e78731e91f690614b29b85ac9382809bfe0a7d9be2"),
+     "83bb26244def7d9468e6ab7c569132cabd4d53a6f63aebad188b5af0f7da14dc"),
     ("abs", ["a3_to_a5_port"], 1,
-     "4a17d3982f8d632a4acd18fb37a298b588e4f28cbaf9fdab6cf4596aa855b79d"),
+     "a6d5b07f15651774f5018fd56e9ca1c018b69c31c0aa6dc491dc31705d3afeb3"),
 ]
 
 
 @pytest.mark.parametrize("op,tags,iter_cap,expected_sha", _GOLDEN)
-def test_port_a3_phase_brief_byte_identical(op, tags, iter_cap, expected_sha):
+def test_port_a3_phase_brief_byte_identical(op, tags, iter_cap, expected_sha, no_external_kb):
     from briefs.kw_brief import _port_a3_phase_instructions_block  # type: ignore
 
     out = _port_a3_phase_instructions_block(

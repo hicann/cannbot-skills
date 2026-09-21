@@ -16,7 +16,7 @@ returns MISS. So the bridge lives HERE (adapter/Arbiter side — NOT the frozen 
 brief injection consumes each tier's `index_rows()` + a keyword filter, earlier tiers shadowing
 later ones on the same hard-key (canonical-conflict still surfaces via the Arbiter separately).
 
-OKF-only 迁移（2026-08）：legacy b-tier（内置索引 provider）已摘除，bundled 知识即 kb/okf；
+外部知识迁移后，legacy b-tier（内置索引 provider）已摘除；
 `build_arbiter` 现在只组装 user-kb（c-tier），a-tier = 社区 skills 仍由引擎 CBA 路由单独注入。
 `inject_for_brief` 是 brief 需要的 multi-row read。Hot-path integration into
 `briefs/_common.py::kb_inject_filtered` is config-gated (only when a c-tier user_kb is active).

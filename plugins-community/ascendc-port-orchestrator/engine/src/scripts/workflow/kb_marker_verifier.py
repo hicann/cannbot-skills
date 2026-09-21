@@ -15,7 +15,7 @@ Background
 
 `/aog-knowledge-maintain` is a markdown-defined semantic reviewer. Runtime
 entries are persisted by the orchestrator to user-local c-tier; release-owned
-bundled KB files are read-only. The completion marker records the c-tier entry
+external official knowledge and packaged shared rules are read-only. The completion marker records the c-tier entry
 IDs and resolved c-root. Historical bundled-file markers remain supported for
 existing workspaces.
 
@@ -182,10 +182,9 @@ def _is_within(path: pathlib.Path, root: pathlib.Path) -> bool:
 def _resolve_kb_files(claimed: str, project_root: pathlib.Path) -> list[pathlib.Path]:
     """Resolve a `merged_into=` token to one or more absolute KB-file paths.
 
-    Marker output uses several conventions:
-      - `kb/okf/runbooks/<section>/<card>.md` (OKF card path)
-      - `okf/runbooks/<section>/<card>.md` (no `kb/` prefix)
-      - `<card>.md` (bare filename — ambiguous)
+    Current marker output uses the canonical external form
+    `knowledge/<domain>/.../<card>.md`. Old `kb/okf/...`, `okf/...`, and bare
+    filenames are accepted only as persisted-workspace compatibility inputs.
 
     Legacy `src/skills/references/target/ascendc/...` / `target/ascendc/...`
     claims from pre-OKF workspaces remain resolvable via the
@@ -194,25 +193,35 @@ def _resolve_kb_files(claimed: str, project_root: pathlib.Path) -> list[pathlib.
     For bare filenames, rglob may find multiple candidates. Return ALL of them
     and let the caller grep each; finding the entry in any allowed KB root is
     sufficient.
+
+    Cards migrated to the external cannbot-knowledge repo (OKF v0.2) resolve
+    through `briefs.external_kb.resolve_kb_ref` when CANNBOT_KNOWLEDGE_ROOT is
+    configured; unconfigured/unimportable → no external candidate (the legacy
+    missing-file diagnostic is unchanged).
     """
-    # Candidate KB roots, in priority order. project_root-relative roots win over
-    # the real relocated plugin kb/ so that (a) test fixtures resolve to their own
-    # tmp KB rather than the real one, and (b) a workspace-local KB shadows the
-    # global one. The real <plugin_root>/kb/ (parents[4] == plugin_root after the
-    # 2026-07-05 relocation) is the final runtime fallback.
-    plugin_kb = pathlib.Path(__file__).resolve().parents[4] / "kb"
+    # Project-relative roots exist only for legacy workspaces/test fixtures.
+    # Runtime b-tier must never fall back to plugin-local cards.
     candidate_roots = [
         project_root / "src" / "skills" / "references",  # legacy layout + test fixtures
-        project_root / "kb",                             # KB relocated inside the tree
-        plugin_kb,                                        # real relocated plugin kb/ (runtime)
+        project_root / "kb",                             # legacy workspace-local layout
     ]
-    # Normalize claimed: strip a leading known KB-root prefix if present, so a token
-    # like `src/skills/references/target/...` or `kb/target/...` resolves under any root.
+    # Normalize claimed: strip a leading legacy KB-root prefix if present so markers
+    # persisted by older workspaces still resolve under either compatibility root.
     norm = claimed
     for prefix in ("src/skills/references/", "kb/"):
         if norm.startswith(prefix):
             norm = norm[len(prefix):]
             break
+
+    # Canonical path and mapped legacy paths resolve through the configured
+    # external checkout before any workspace-compatibility lookup.
+    try:
+        from briefs import external_kb as _ext_kb
+        ext = _ext_kb.resolve_kb_ref(claimed)
+    except Exception:
+        ext = None
+    if ext is not None:
+        return [ext]
 
     p = pathlib.Path(claimed)
     if p.is_absolute():
@@ -398,8 +407,8 @@ def verify_marker(workspace_dir: pathlib.Path,
                 try:
                     rep.found[eid] = str(f.relative_to(project_root))
                 except ValueError:
-                    # Resolved KB file lives outside project_root (e.g. the real
-                    # relocated <plugin_root>/kb/ when project_root == engine/).
+                    # Resolved card lives outside project_root (external official
+                    # knowledge or a deployment-local c-tier workspace).
                     rep.found[eid] = str(f)
                 break
         else:

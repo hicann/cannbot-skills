@@ -56,7 +56,7 @@ A5_TARGETS = ["a5"]  # 351x
 
 _A3_SKELETON_HEADING = "### a3 FA-CLASS STARTING SKELETON — P-P116"
 _PB55_HEADING = "#### PB-55 — the REVERSE (AIV→AIC) handshake is per-subblock-COUNTED"
-_A3_TEMPLATE_MD = "okf/reference/porter/patterns/fa_class_a3_mix_template.md"
+_A3_TEMPLATE_MD = "knowledge/ops/ascendc/examples/fa_class_a3_mix_template.md"
 
 
 def _fa_ws(tmp_path: Path) -> Path:
@@ -73,12 +73,15 @@ def _fa_ws(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_p116_and_pb55_scope_to_a3_only_from_the_kb():
+def test_p116_and_pb55_scope_to_a3_only_from_the_kb(external_kb_fixture):
     """P-P116 file + PB-55 entry both declare `soc=Ascend910_9382` → a3, not a5.
 
     If this breaks, the KB artifact's declared scope changed — check the entry
     before the composer. This is what makes the delivery a3-only STRUCTURAL, not a
     prose "do not over-apply".
+
+    Post-223ee980 both artifacts live in the EXTERNAL cannbot-knowledge repo
+    (OKF v0.2); `external_kb_fixture` stages them there with the same scopes.
     """
     for t in A3_TARGETS:
         assert kb_file_applies_to_target(_A3_TEMPLATE_MD, t) is True
@@ -180,7 +183,7 @@ def test_a3_brief_points_at_compilable_mix_reference(target):
 
 
 @pytest.mark.parametrize("target", A5_TARGETS)
-def test_a5_brief_does_not_gain_compilable_mix_reference(target):
+def test_a5_brief_does_not_gain_compilable_mix_reference(target, external_kb_fixture):
     """The compilable MIX example is a3-only — it must NOT leak into the a5 brief.
 
     The reference is `arch22`/`Ascend910_9382` and makes NO claim on a5; it rides the
@@ -213,7 +216,7 @@ def test_a3_brief_carries_p116_honest_scope(target):
 
 
 @pytest.mark.parametrize("target", A5_TARGETS)
-def test_a5_brief_does_not_gain_p116_or_pb55(target):
+def test_a5_brief_does_not_gain_p116_or_pb55(target, external_kb_fixture):
     """P-P116 / PB-55 are `unverified_on: Ascend950PR` → ABSENT on a5.
 
     Dies if the a3 skeleton block is composed unconditionally (the DEBT-208 defect
@@ -227,7 +230,7 @@ def test_a5_brief_does_not_gain_p116_or_pb55(target):
     assert "PB-55 (" not in out
 
 
-def test_a5_brief_keeps_its_own_p103_route_unchanged():
+def test_a5_brief_keeps_its_own_p103_route_unchanged(external_kb_fixture):
     """The a5 branch still references P-P103 / its two-paths recipe — no regression."""
     a5 = _fa_class_template_assembly_block  # composed full brief below
     ws_tags = {"op_class_tags": ["ATTENTION", "FUSED", "SOFTMAX"]}
@@ -248,7 +251,7 @@ def test_a5_brief_keeps_its_own_p103_route_unchanged():
 # ---------------------------------------------------------------------------
 
 
-def test_composed_a3_brief_delivers_p116_pb55_end_to_end(tmp_path: Path):
+def test_composed_a3_brief_delivers_p116_pb55_end_to_end(tmp_path: Path, external_kb_fixture):
     """`_fa_class_template_assembly_block(op, ws, target='a3')` — the real path."""
     ws = _fa_ws(tmp_path)
     a3 = _fa_class_template_assembly_block("3_FusionAttention", ws, target="a3")

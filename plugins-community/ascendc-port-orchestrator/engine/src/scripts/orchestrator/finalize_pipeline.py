@@ -117,16 +117,6 @@ class GateID(str, enum.Enum):
 _HERE = Path(__file__).resolve()
 _PROJECT_ROOT = _HERE.parent.parent.parent.parent  # repo root (engine/)
 
-# cannbot KB-relocation adaptation (KB lives at <plugin_root>/kb/, not
-# src/skills/references). Re-exported here so callers + tests that reference
-# finalize_pipeline._kb_root keep resolving to the relocated KB after the
-# v3.13.0 finalize decomposition displaced the original definition.
-try:
-    from kb_paths import kb_root as _kb_root
-except ImportError:  # pragma: no cover — fallback if orchestrator/ not on sys.path
-    def _kb_root():  # type: ignore
-        return _PROJECT_ROOT.parent / "kb"
-
 # P96 (2026-05-15): capture the mtime of this module at process startup.
 # Used to detect "orchestrator running against stale finalize_pipeline" —
 # if the on-disk file's mtime > the cached value, new gates landed AFTER
@@ -479,7 +469,7 @@ from finalize_ge_ophost import (  # noqa: E402,F401  re-export: keep call sites 
 from finalize_candidates import (  # noqa: E402,F401  re-export: keep call sites + import paths stable
     _resolve_archive_op_name, _scan_workspace_for_candidate_refs, _patch_evidence_prose,
     _append_verified_on, update_verified_on_for_consumed_candidates,
-    _CAND_TOKEN_RE, _PROSE_PATCH_PATTERNS,
+    _CAND_TOKEN_RE, _PROSE_PATCH_PATTERNS, _kb_root,
 )
 
 # --- rollback/loop-break extracted to finalize_rollback.py (behavior-neutral, 2026-07-05) ---

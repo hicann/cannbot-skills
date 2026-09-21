@@ -165,7 +165,8 @@ def test_p0acw_verified_on_hook_appends_when_pass_and_cited(tmp_path):
     """
     # Seed a minimal fake project_root with candidates.md
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -212,7 +213,8 @@ def test_p0acz_refuted_on_blocks_verified_on_same_op(tmp_path):
     verified_on:3_FusionAttention:case_ad1de4ec creating the contradiction.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -244,7 +246,8 @@ def test_p0acz_refuted_on_different_op_allows_verified_on(tmp_path):
     The block is op-specific.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -275,7 +278,8 @@ def test_p0acw_round2_patches_unverified_prose_line(tmp_path):
     metadata/prose contradiction.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -305,7 +309,8 @@ def test_p0acw_round2_patches_promote_when_line(tmp_path):
     'a5_ops evidence recorded; remaining criteria — ...'
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -327,7 +332,8 @@ def test_p0acw_round2_patches_promote_when_line(tmp_path):
 def test_p0acw_round2_idempotent_on_already_patched_prose(tmp_path):
     """P0acw round-2: re-running hook on already-patched prose is a no-op."""
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -357,7 +363,8 @@ def test_p0acw_verified_on_hook_accepts_partial_with_positive_tier1(tmp_path):
     probe_report.md. That's evidence.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -385,7 +392,8 @@ def test_p0acw_verified_on_hook_accepts_partial_with_positive_tier1(tmp_path):
 def test_p0acw_verified_on_hook_rejects_partial_with_zero_tier1(tmp_path):
     """P0acw: PARTIAL with NO positive cases is just failure — skip."""
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -408,7 +416,8 @@ def test_p0acw_verified_on_hook_skips_when_precision_fail(tmp_path):
     a failed kernel citing a candidate is NOT evidence.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -430,7 +439,8 @@ def test_p0acw_verified_on_hook_skips_when_precision_fail(tmp_path):
 def test_p0acw_verified_on_hook_idempotent(tmp_path):
     """P0acw: re-running the hook should NOT duplicate the verified_on line."""
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(
@@ -457,7 +467,8 @@ def test_p0acw_verified_on_scans_multiple_artifacts(tmp_path):
     knowledge_update.md, fused_analysis.md — all valid citation surfaces.
     """
     project_root = tmp_path / "project_root"
-    kb = project_root / "kb" / "patterns" / "unverified"
+    # c-tier layout (post-94970b65): candidates.md lives under reference/.
+    kb = project_root / "kb" / "reference" / "patterns" / "unverified"
     kb.mkdir(parents=True)
     candidates_md = kb / "candidates.md"
     candidates_md.write_text(

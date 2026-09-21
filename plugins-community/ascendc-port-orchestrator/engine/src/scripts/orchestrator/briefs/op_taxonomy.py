@@ -62,9 +62,9 @@ _DEFAULT_KB_SECTIONS_BASE: list[str] = [
 # atomics, register file all wrong for V220). DS-flagged when reviewing
 # whether ascend950pr.md could be removed.
 TARGET_HW_SPEC_MAP: dict[str, str] = {
-    "a5": "okf/runbooks/hardware/target-ascend950pr.md",   # Ascend950PR — V351 / arch35
-    "a3": "okf/runbooks/hardware/target-ascend910c.md",    # Ascend910 V220 single-die (910C)
-    "a2": "okf/runbooks/hardware/target-ascend910b.md",    # Ascend910 V220 single-die (910B)
+    "a5": "knowledge/common/platforms/concepts/target_ascend950pr.md",  # V351 / arch35
+    "a3": "knowledge/common/platforms/concepts/target_ascend910c.md",   # V220 / 910C
+    "a2": "knowledge/common/platforms/concepts/target_ascend910b.md",   # V220 / 910B
 }
 
 
@@ -120,7 +120,7 @@ def lookup(
     written by `phase_o17_classify.classify()`.
 
     P0abj (2026-05-08): target-aware hardware-spec dispatch — `target` arg
-    selects `okf/runbooks/hardware/target-<chip>.md` from TARGET_HW_SPEC_MAP. Pre-fix the
+    selects `knowledge/common/platforms/concepts/target_<chip>.md` from TARGET_HW_SPEC_MAP. Pre-fix the
     default was hardcoded to `ascend950pr.md`, so A3/A2 op-gen loaded A5
     hw specs (wrong UB size, AIV count, atomics info). Defaults to "a5" for
     callers that haven't been updated yet.
@@ -133,15 +133,15 @@ def lookup(
 
     `_SOURCE_SCAN_SIGNATURES` is NOT consulted. (`OP_TAGS` / `TAG_KB_SECTIONS`
     used to sit here too, kept "for emergency rollback"; they were removed on
-    2026-09-05 — 9 of the 10 KB paths they named had been deleted with the legacy
-    `kb/target/` tree, so the rollback they promised was no longer possible.)
+    2026-09-05 — 9 of the 10 paths they named had been deleted with the legacy
+    plugin knowledge tree, so the rollback they promised was no longer possible.)
 
     Args:
         op: op name / workspace dir name
         workspace: path to op's workspace dir; if None, falls through to
             untagged-fallback (no classification possible)
         target: "a5" | "a3" | "a2" (case-insensitive; -ds suffix stripped).
-            Selects okf/runbooks/hardware/target-<chip>.md.
+            Selects knowledge/common/platforms/concepts/target_<chip>.md.
 
     Returns:
         OpTaxonomy. `tags` are descriptive labels from classification JSON.

@@ -152,25 +152,11 @@ class PluginProtocol(Protocol):
         ...
 
     def kb_subdirs(self) -> list[str]:
-        """KB subdirectory paths (relative to the bundled KB root, ``kb/``)
-        that this plugin's worker briefs should load.
+        """Knowledge subdirectory selectors for future scoped loading.
 
-        Phase 1 (today): all plugins return ["."] (whole-KB load)
-        — additive hook with no functional change. A future KB reorganization
-        may populate scoped lists such as (OKF-only layout, 2026-08-31):
-        - okf/reference/                (target-agnostic + plugin-agnostic)
-        - okf/runbooks/                 (operator-optimization / field-notes cards)
-        - plugin-scope/<plugin_name>/   (per-plugin learned lessons)
-
-        Possible per-plugin returns:
-        - port_a3: ["okf/", "plugin-scope/port_a3/"]
-        - backward: ["okf/", "plugin-scope/backward/"]
-
-        NOTE (2026-09-05): kb/plugin-scope/ currently does not exist. Its single
-        document was converted into a proper OKF card
-        (kb/okf/reference/porter/playbook/ops_nn_a5_artifact_layout.md) so it
-        enters the retrieval corpus. The scoping design below is unchanged and
-        still applies -- recreate the directory when Phase 2 is implemented.
+        Phase 1 returns ["."] and therefore keeps whole-root loading. External
+        knowledge queries currently own content scoping; a future implementation
+        may return provider-relative selectors per plugin.
 
         See docs/design/KB_DESIGN_NOTES.md#kb-reorganization-design.
         """

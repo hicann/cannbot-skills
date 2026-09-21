@@ -353,6 +353,64 @@ def test_compile_failure_classifier_routes_candidate_rooted_include_cascade() ->
     )
 
 
+def test_compile_failure_classifier_routes_candidate_cmake_configure_error() -> None:
+    """A cmake configure error in the candidate's own kernel/CMakeLists.txt.
+
+    The controlled build runs ``cmake -S <workspace>/kernel``, so a bare
+    ``CMake Error at CMakeLists.txt:NN`` names the candidate-delivered file
+    (5_MatmulTransB 2026-09-18: worker-authored torch-probe ``list(GET)`` on an
+    unsplit OUTPUT_VARIABLE parked the lane as "manual target diagnostics"
+    when it was misclassified as target_build).  Toolchain cmake errors keep
+    naming absolute ``*.cmake`` paths under the CANN package.
+    """
+    from npubench.npubench_build_receipt import _classify_controlled_compile_failure
+
+    configure_stderr = (
+        "CMake Error at CMakeLists.txt:48 (list):\n"
+        "  list index: 1 out of range (-1, 0)\n"
+        "\n"
+        "CMake Error at CMakeLists.txt:49 (list):\n"
+        "  list index: 2 out of range (-1, 0)\n"
+        "\n"
+        "CMake Error at CMakeLists.txt:83 (ascendc_library):\n"
+        '  Unknown CMake command "ascendc_library".\n'
+    )
+    assert (
+        _classify_controlled_compile_failure("", configure_stderr)
+        == "candidate_contract"
+    )
+    prefixed = (
+        "CMake Error at kernel/CMakeLists.txt:48 (list):\n"
+        "  list index: 1 out of range (-1, 0)\n"
+    )
+    assert (
+        _classify_controlled_compile_failure("", prefixed)
+        == "candidate_contract"
+    )
+    # Toolchain cmake failure: absolute CANN path, stays a target failure.
+    toolchain_cmake = (
+        "CMake Error at /usr/local/Ascend/cann-9.2.0/tools/tikcpp/"
+        "ascendc_kernel_cmake/legacy_modules/host_config.cmake:48 (message):\n"
+        "  SOC_VERSION Ascend950DT does not support, the support list is ...\n"
+    )
+    assert (
+        _classify_controlled_compile_failure("", toolchain_cmake)
+        == "target_build"
+    )
+    # Link-stage failure of the candidate's own extension target: the worker's
+    # authored build recipe lost the torch_npu lib dir (5_MatmulTransB kw-4).
+    link_stderr = (
+        "/usr/bin/ld: cannot find -ltorch_npu: No such file or directory\n"
+        "collect2: error: ld returned 1 exit status\n"
+        "gmake[2]: *** [CMakeFiles/matmul_trans_b_ext.dir/build.make:117: "
+        "matmul_trans_b_ext.cpython-311-aarch64-linux-gnu.so] Error 1\n"
+    )
+    assert (
+        _classify_controlled_compile_failure("", link_stderr)
+        == "candidate_contract"
+    )
+
+
 def _real_receipt_workspace(tmp_path, monkeypatch) -> Path:
     """Materialize the on-disk workspace the real receipt writer/reader path needs."""
     workspace = tmp_path / "workspace"

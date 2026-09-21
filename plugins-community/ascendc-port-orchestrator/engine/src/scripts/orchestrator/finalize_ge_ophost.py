@@ -29,11 +29,11 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
-# OKF-only migration (2026-08-31) moved these assets from
-# kb/target/ascendc/patterns/domains/fa_class/templates/ to <plugin_root>/templates/,
-# but left this constant on the old path (the twin `_fa_class_gate._FA_CLASS_ASSETS`
-# was updated). A missing dir makes the assembler return `ran=False` silently, so the
-# op_host/ delivery went to zero files with nothing reporting it.
+# The 2026-08-31 knowledge migration moved FA-class executable templates out of
+# the removed plugin knowledge tree and into <plugin_root>/templates/. Keep this
+# runtime asset lookup independent from the external, read-only knowledge repository.
+# A missing dir makes the assembler return `ran=False` silently, so the op_host/
+# delivery would otherwise go to zero files with nothing reporting it.
 _FA_GE_OPHOST_TEMPLATE_DIR = (
     _PROJECT_ROOT.parent / "templates" / "fa_class" / "op_host"
 )

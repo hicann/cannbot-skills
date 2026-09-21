@@ -93,27 +93,27 @@ symptoms, and emit a manifest in `workspace/<op>/fused_analysis.md` front-matter
 ## KB Manifest
 ### LOADED (always — soft prompt, but workflow_critic V3.7.10 verifies presence in this block before allowing STRUCTURAL_CEILING verdict)
 - ALWAYS_LOADED_RULES.md §5 (precision iron law — applies to all edits)
-- brief 下发的 OKF 卡片块（症状→卡入口见下；需要深挖时 `okf_kb.sh search --query "<symptom>"` 或 grep `kb/okf/runbooks/`）
-- OL 经验卡（原 OPERATIONAL_KNOWLEDGE 已卡片化到 `kb/okf/runbooks/`；A5 时必查 reg-based 相关卡 `grep -rln "Reg-based\|Reg::Select"`；`ol-63-elementwise-tile-first-queue-depth` 卡（TQue depth）；OL-83 cumsum boundary（域卡化后按 `grep -rn "OL-83\|1-ULP boundary"` 定位）；以及你的症状匹配到的任何 ol-* 卡）
-- memory_access 域卡（connection audit primitives：grep `memory access\|ping-pong\|row-scalar\|alignment` `kb/okf/runbooks/` —— 如 p-p28 ping-pong、p-p62 row-scalar multiply prerequisites、ol-46 alignment sweet-spots、UB↔L1 hard-channel note from 2026-04-21 probe）
-- 按子算子域关键词 grep `kb/okf/runbooks/` 命中的 p-*/f-* 卡 — one set per sub-op's domain
-- okf/runbooks/hardware/target-ascend950pr.md — **READ EACH SECTION OF THIS FILE, not just "load conceptually"**. Especially: Reg-based vs Mem-based SIMD section (lines ~458-540 — this section is THE A5-specific lever for scalar-pipe-bound ops)
-- 平台 bug 卡（原 PLATFORM_BUGS 已卡片化：pb-16 L1 scratch silent miscompile；pb-9 UB-to-UB DataCopy；pb-11 TBuf staleness —— 均在 `kb/okf/runbooks/field-notes/build/`）
-- okf/runbooks/hardware/probe-2026-04-21-q-scalar-broadcast.md (Brcb 25.3× measured — applicability clause in P-P62)
+- brief 下发的 OKF 卡片块；需要深挖时用 `knowledge-query` 按症状和当前平台补查
+- OL 经验卡：A5 时查询 `Reg-based Reg::Select`；按需查询 `elementwise tile queue depth`、`OL-83 1-ULP boundary` 及其他当前症状
+- memory_access 域卡：查询 `memory access ping-pong row-scalar alignment`
+- 为每个子算子域执行一个聚焦的 `knowledge-query`
+- `$CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_ascend950pr.md` — **READ EACH SECTION OF THIS FILE, not just "load conceptually"**. Especially: Reg-based vs Mem-based SIMD section (lines ~458-540 — this section is THE A5-specific lever for scalar-pipe-bound ops)
+- 平台 bug 卡（原 PLATFORM_BUGS 已卡片化：pb-16 L1 scratch silent miscompile；pb-9 UB-to-UB DataCopy；pb-11 TBuf staleness —— 均在外部知识仓 `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/runbooks/compilation/`）
+- `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/concepts/scalar_broadcast_sync_bypass.md` (Brcb 25.3× measured — applicability clause in P-P62)
 
 ### LOADED — symptom-keyed (MANDATORY when symptom matches; 用 OKF 症状检索定位卡片)
 After running msprof / collecting initial diagnostics, identify dominant symptom(s):
-- **scalar-pipe-bound on A5 (`aiv_scl_ratio > 0.3`, `target=a5`)** → MUST also load: reg-based 相关卡（`grep -rln "Reg-based\|Reg::Select\|regbase" kb/okf/runbooks/`）+ ascend950pr.md §Reg-based
-- **fused-op merge bottleneck (Phase 1 chunked-merge dominates)** → MUST also load: ascend950pr.md §MrgSort + `p-p43-sort-algorithm-selection-decision-tree` 卡 + reg-based 卡
-- **bf16 perf differs from fp16/fp32** → MUST also load: ascend950pr.md §dtype matrix + precision 相关卡（grep `precision\|bf16`）+ `ol-65-fp16-cast-fp32-only-on-precision-fail` 卡
+- **scalar-pipe-bound on A5 (`aiv_scl_ratio > 0.3`, `target=a5`)** → MUST also query `Reg-based Reg::Select regbase` for platform `950` + target_ascend950pr.md §Reg-based
+- **fused-op merge bottleneck (Phase 1 chunked-merge dominates)** → MUST also load: target_ascend950pr.md §MrgSort + `p_p43_sort_algorithm_selection_decision_tree` 卡 + reg-based 卡
+- **bf16 perf differs from fp16/fp32** → MUST also load: target_ascend950pr.md §dtype matrix + precision 相关卡（grep `precision\|bf16`）+ `ol_65_fp16_cast_fp32_only_on_precision_fail` 卡
 - **multi-step fusion candidate** → MUST also load: reg-based 相关卡
-- **edge_dataset Pass A passes but Pass B regresses on a specific dtype** → MUST also load: OL-83 相关卡（grep `OL-83\|1-ULP`）+ 按该症状 grep `kb/okf/runbooks/` 命中的卡
+- **edge_dataset Pass A passes but Pass B regresses on a specific dtype** → MUST also query `OL-83 1-ULP <dtype regression symptom>`
 
 For each symptom-match, add ALL matched cards to LOADED with a one-line citation of which card was actually read. workflow_critic SC reads this block and enforces.
 
 ### AVAILABLE (not loaded unless candidate triggers it)
-- `okf/reference/porter/handbook/roofline_model.md` (only if a sub-op gap can't be explained by existing candidates)
-- `okf/reference/porter/toolchain/msprof_agent_guide.md` (only if fallback msprof mapping is needed)
+- `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/concepts/roofline_model.md` (only if a sub-op gap can't be explained by existing candidates)
+- `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/guides/msprof_agent_guide.md` (only if fallback msprof mapping is needed)
 ```
 
 **File-driven routing — V3.7.12 (2026-05-03)**:
@@ -148,8 +148,8 @@ Before producing ANY of these verdicts (`CONFIRM_STRUCTURAL_CEILING`,
 the verdict statement MUST explicitly cite:
 
 1. **What primitive search was run** (`find /data/cann_b103/cann-9.0.0 -name "*.h" | xargs grep ...` for relevant API keywords) — if you didn't run a primitive search, you can NOT declare a ceiling
-2. **Whether reg-based applicability was evaluated** when target=a5 AND scalar-pipe is the dominant pipe — explicit "Reg-based applicable: yes/no/needs_probe" line in the verdict, with rationale referencing OL-54 + ascend950pr.md
-3. **Whether MrgSort / MrgSort4 / vec-merge-sort family** was evaluated when the bottleneck involves a merge step — explicit citation of ascend950pr.md §MrgSort cycle data
+2. **Whether reg-based applicability was evaluated** when target=a5 AND scalar-pipe is the dominant pipe — explicit "Reg-based applicable: yes/no/needs_probe" line in the verdict, with rationale referencing OL-54 + target_ascend950pr.md
+3. **Whether MrgSort / MrgSort4 / vec-merge-sort family** was evaluated when the bottleneck involves a merge step — explicit citation of target_ascend950pr.md §MrgSort cycle data
 4. **What measured msprof was used** (NOT analytical estimates with ±2× uncertainty) — fresh msprof on current kernel state required, not reuse from prior iter
 
 If any of (1)-(4) is missing, the verdict is INSUFFICIENT and workflow_critic
@@ -288,15 +288,13 @@ Mirrors the aog-kernel-worker / aog-kernel-optimizer contracts, specialized for 
 **Trigger** (all must hold):
 - 2 consecutive iters with perf delta < +3% (no meaningful progress)
 - Same BOTTLENECK sub-op class (gap_vs_cann still highest on the same sub-op after 2 attempts to close it), OR same failing candidate class (e.g. 2 connection fixes in a row failed to shift the gap table)
-- You have NOT yet grep'd `output/npukernelbench/src/kernels/*/fused_analysis.md` / `/optimization_log.md` for prior fused ops with the same bottleneck sub-op family, nor grep'd `kb/okf/runbooks/` beyond the cards loaded at Iter 0
+- You have NOT yet searched local prior fused analyses for the same bottleneck sub-op family, nor run a broader focused `knowledge-query` beyond the cards loaded at Iter 0
 
 **Protocol — mandatory at 2-iter plateau**:
 
 1. **Broaden KB + prior-art search** (not just the sub-op's domain file):
    ```bash
-   # Symptom → KB grep
-   grep -rn "gap.*vs_cann\|connection.*round-trip" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/
-   grep -rn "<bottleneck_sub_op_keyword>" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
+   # Symptom → invoke knowledge-query for "gap vs_cann connection round-trip <bottleneck_sub_op>"
    # Prior fused ops — find any fused analysis that mentioned your stuck bottleneck
    grep -rn "<sub_op_family>" output/npukernelbench/src/kernels/*/fused_analysis.md 2>/dev/null | head -5
    # Standalone DONE ops of the same sub-op family

@@ -10,8 +10,7 @@
 
 """§4.5.3 Small-Value-Threshold rule wired into precision_eval_two_tier.
 
-Vendor 昇腾算子精度标准 2.1 §4.5.3 (mirror at
-kb/okf/reference/porter/precision/precision_standard_v2_1.md): when the
+Vendor 昇腾算子精度标准 2.1 §4.5.3: when the
 ground-truth magnitude is below `SMALL_VALUE_THRESHOLDS[dtype]`, the
 relative-error metric (MARE/MERE) is unstable — division-by-near-zero
 amplifies a 1-ULP absolute error into a large relative error. The

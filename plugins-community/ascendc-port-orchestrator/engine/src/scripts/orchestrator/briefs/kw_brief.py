@@ -644,6 +644,22 @@ def _general_simd_regbase_block(
             "Recoverable operation failed.", exc_info=error
         )
 
+    from briefs import external_kb as _ext
+    _ref_simd_dev = _ext.kb_ref_display(
+        "knowledge/ops/ascendc/guides/simd_development_reference.md"
+    )
+    _ref_reg_vec = ", ".join(
+        _ext.query_ref_displays(
+            "register vector compute APIs", target="a5", card_type="apis", limit=3
+        )
+    )
+    _ref_l2 = _ext.kb_ref_display(
+        "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l2_register_based.md"
+    )
+    _ref_l5 = _ext.kb_ref_display(
+        "knowledge/ops/ascendc/guides/cross_gen_migration_guide/l5_register_based.md"
+    )
+
     return (
         "# arch35 (A5) SIMD: CONSIDER Regbase over Membase — decision rule (OL-245)\n"
         "\n"
@@ -677,11 +693,11 @@ def _general_simd_regbase_block(
         "A5 path, AND (per the rule above) **fine-grained many-small-shallow-VF-call chains** "
         "where the ~0.42µs/call regbase overhead would dominate.\n"
         "\n"
-        "Read FIRST: `kb/okf/reference/porter/handbook/simd_development_reference.md` "
+        f"Read FIRST: `{_ref_simd_dev}` "
         "**§0** (the MicroAPI shape + the Membase-vs-Regbase rationale) and the full guides "
-        "`kb/okf/reference/asc-devkit-vendored/guide/programming_model/reg_vector_compute.md`, "
-        "`kb/okf/reference/porter/playbook/l2_register_based.md`, "
-        "`kb/okf/reference/porter/playbook/l5_register_based.md`.\n"
+        f"`{_ref_reg_vec}`, "
+        f"`{_ref_l2}`, "
+        f"`{_ref_l5}`.\n"
         "\n"
         "(NOT an architecture override — this is the SIMD *authoring style* within the SIMD "
         "architecture, not a SIMT-vs-SIMD decision. If the architecture is FORCED above, "

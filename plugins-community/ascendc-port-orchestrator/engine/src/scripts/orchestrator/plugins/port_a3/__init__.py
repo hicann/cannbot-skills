@@ -636,6 +636,32 @@ class PortA3Plugin(BasePlugin):
         return state if isinstance(state, Mapping) else None
 
     @staticmethod
+    def _resolve_source_from_workspace_source_entries(
+        cp: Mapping[str, Any], root: Path
+    ) -> Optional[Path]:
+        """Resolve ONE real workspace source from deliverable list entries.
+
+        5_MatmulTransB emitted the plural ``workspace_sources`` spelling, so
+        accept both; translation units (.cpp) are preferred.
+        """
+        entries = cp.get("workspace_source")
+        if not isinstance(entries, list):
+            entries = cp.get("workspace_sources")
+        if not isinstance(entries, list):
+            return None
+        candidates = [
+            entry.get("path")
+            for entry in entries
+            if isinstance(entry, Mapping) and isinstance(entry.get("path"), str)
+        ]
+        cpp = [p for p in candidates if str(p).endswith(".cpp")]
+        for raw in (cpp or candidates):
+            source_resolved = _resolved_workspace_file(root, raw)
+            if source_resolved is not None:
+                return source_resolved
+        return None
+
+    @staticmethod
     def _reconcile_runner_built_provenance(
         root: Path, cp: Mapping[str, Any]
     ) -> Optional[dict[str, Any]]:
@@ -659,6 +685,18 @@ class PortA3Plugin(BasePlugin):
         if not build_dir.is_dir():
             return None
         source_resolved = _resolved_workspace_file(root, cp.get("source"))
+        if source_resolved is None:
+            # 2026-09-18 (2_GroupedMatmul / 4_MatmulTransA): workers often
+            # emit the deliverable list schema (`workspace_source` as a list of
+            # {path, sha256} entries) without the single-file `source` field.
+            # The reconcile path only needs ONE real workspace source to
+            # attest against the runner-built artifacts, so accept the first
+            # resolvable entry — preferring translation units (.cpp) — as the
+            # attested source instead of parking a full worker repair cycle on
+            # the schema mismatch.
+            source_resolved = (
+                PortA3Plugin._resolve_source_from_workspace_source_entries(cp, root)
+            )
         if source_resolved is None:
             return None
         object_path = _built_object_path(root, build_dir, cp, source_resolved)

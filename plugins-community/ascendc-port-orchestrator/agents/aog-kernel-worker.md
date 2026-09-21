@@ -50,12 +50,12 @@ If your Phase A design satisfies ALL four properties:
 Then **det is satisfied by construction**. You can ignore A-P61/P-P61 in Phase A/B and focus entirely on precision + perf. This is the case for almost all pure-functional reference ops (sort, topk, reduction, softmax, norm, activation, pointwise, reshape) — scan the reference for `atomicAdd`/`scatter_add`/`index_add`; if none, you're in this bucket.
 
 **Only deviate when**:
-- Reference uses atomicAdd / scatter_add → design must be careful about det ordering (see determinism 卡：grep "determinism\|P-P61\|A-P61" `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`)
+- Reference uses atomicAdd / scatter_add → design must be careful about det ordering (invoke `knowledge-query` for `determinism P-P61 A-P61` on the current platform)
 - Reference has complex multi-core reduction semantics where order affects bit-exactness
 - You're already triggering A-P61 patterns in an earlier design and need to review
 
 Policy-specific behavior:
-- `DET_POLICY=required`: if your design satisfies the by-construction rule above, treat Phase A/B normally and skip pulling determinism cards in full. Phase D step 6a will verify. If you must rely on A-P61 pattern (rare — e.g., intentional multi-core merge for perf), grep the determinism cards in `kb/okf/runbooks/` for mitigation strategies.
+- `DET_POLICY=required`: if your design satisfies the by-construction rule above, treat Phase A/B normally and skip pulling determinism cards in full. Phase D step 6a will verify. If you must rely on an A-P61 pattern (rare — e.g., intentional multi-core merge for perf), query and read the determinism cards for mitigation strategies.
 - `DET_POLICY=best_effort`: non-det acceptable (reference itself is non-det). Phase A/B normal. Phase D step 6a runs but observed outcome doesn't fail the worker.
 - `DET_POLICY=n/a`: skip Phase D step 6a entirely.
 
@@ -101,7 +101,7 @@ ARCH_CODE={arch35|arch22}
 NPU_ARCH={3510|2201}
 UB_PER_AIV_KB={256|192}
 L0C_KB={256|128}
-HARDWARE_REF=${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/hardware/target-{ascend950pr|ascend910c|ascend910b}.md
+HARDWARE_REF=$CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_{ascend950pr|ascend910c|ascend910b}.md
 HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
 ```
 
@@ -111,7 +111,7 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
    - TARGET=a5 → load patterns with `chip_scope: all` or `a5-only`
    - TARGET=a3 / a2 → load `all` or `v220-common` ONLY; **do NOT** load `a5-only`
      patterns (they reference SIMT primitives that won't compile on V220).
-   See `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/hardware/index.md`.
+   Read the target card named by `HARDWARE_REF`; do not infer another chip's facts.
 
 2. **SIMT-rejection (when PLATFORM_SIMT=false)** — if the source you're porting OR
    any pattern you're considering uses ANY of:
@@ -121,7 +121,7 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
    ```
    @orchestrator: SIMT not supported on TARGET={target} (V220 / arch22).
    Source uses {pattern}. Needs SIMD rewrite. Reference: scatter_add 域已卡片化 ——
-   grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/` 关键词 "scatter" / "SIMT" 定位相关卡
+   use the installed `knowledge-query` skill with "scatter SIMT" and the current platform
    （含 a3/a2 catalogue gap 说明）。
    ```
    Do NOT attempt to "stub out" SIMT calls — the build will fail anyway, you'll
@@ -152,13 +152,13 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
    `bash src/scripts/deploy_to_npu.sh --build`  (it sources resolve_target.sh internally)
 
 5. **Hardware reference** to consult is `$HARDWARE_REF` (per-chip), not a fixed
-   `ascend950pr.md`. Each chip's UB / L0C / atomicAdd-support / pipeline notes differ.
+   `target_ascend950pr.md`. Each chip's UB / L0C / atomicAdd-support / pipeline notes differ.
 
 ## Phase A: Analyze (read source + KB, write analysis.md)
 
-**KB root**: `${CLAUDE_PLUGIN_ROOT}/kb/` (absolute via Claude Code's plugin-root environment variable; independent of the current working directory).
-Every KB filename below is a path under that root. Example: `ALWAYS_LOADED_RULES.md` means
-`${CLAUDE_PLUGIN_ROOT}/kb/shared/ALWAYS_LOADED_RULES.md`.
+**Knowledge roots**: packaged orchestration rules live under
+`${CLAUDE_PLUGIN_ROOT}/kb/shared/`; official b-tier cards come only from the
+project-installed cannbot-knowledge checkout through `knowledge-query`.
 
 **Scripts root**: `src/scripts/` — `fetch_ascendc_doc.py`, `ascendc_static_check.py`, `deploy_to_npu.sh` (V3.4 multi-target; legacy `deploy_to_a5.sh` is now a thin compat wrapper that forces TARGET=a5).
 
@@ -184,20 +184,20 @@ Every KB filename below is a path under that root. Example: `ALWAYS_LOADED_RULES
    **Unconditional (ALWAYS load these — they are why a new agent can't skip this step)**:
    - `${CLAUDE_PLUGIN_ROOT}/kb/shared/ALWAYS_LOADED_RULES.md` — process + meta rules + iron law §5 (fp precision)
    - **brief 中的 OKF 知识卡片块**（orchestrator 经 knowledge-query 下发的 top-5 卡 + fail-loud 警告）— 这就是 OKF-only 模式下的 b-tier 索引入口，逐张读完
-   - `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/simt_vs_simd_decision.md` — decision tree
-   - 平台 bug 已卡片化（原 PLATFORM_BUGS.md → `kb/okf/runbooks/` pb-* 卡）：先查 brief OKF 卡；需要全覆盖时 `grep -rln "<你的算子/原语关键词>" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/` 或 `${CLAUDE_PLUGIN_ROOT}/engine/src/scripts/okf/okf_kb.sh search --query "<op 族 + 症状>"`
+   - `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/concepts/simt_vs_simd_decision.md` — decision tree
+   - 平台 bug 已卡片化（原 PLATFORM_BUGS.md → 外部知识仓 `pb_*` 卡）：先查 brief OKF 卡；需要补查时调用已安装的 `knowledge-query` skill，查询 "<op 族 + 症状>"，平台使用当前 target。
 
-   **Filtered (pick 1-2 keyword sets based on algorithm family — 域文件已卡片化为 `kb/okf/runbooks/` 下 p-*/f-*/ol-* 卡，按关键词 grep 定位；brief OKF 卡优先)**:
-   - elementwise → grep "precision\|dtype\|platform" `kb/okf/runbooks/`
-   - reduction → grep "reduction\|quant\|precision" `kb/okf/runbooks/`
-   - scatter/sort → grep "scatter\|sort" `kb/okf/runbooks/`
-   - data movement → grep "memory access\|DataCopy\|MTE2" `kb/okf/runbooks/`
-   - normalization → grep "normalization\|precision\|reduction" `kb/okf/runbooks/`
+   **Filtered (pick 1-2 knowledge-query queries based on algorithm family; brief cards first)**:
+   - elementwise → `precision dtype platform`
+   - reduction → `reduction quant precision`
+   - scatter/sort → `scatter sort`
+   - data movement → `memory access DataCopy MTE2`
+   - normalization → `normalization precision reduction`
 
    **DEFERRED — load only when needed**:
-   - Compile error → EC 卡（`kb/okf/runbooks/field-notes/build/ec-*.md`）：`okf_kb.sh search --query "<报错符号> build <target>"` 或直接 grep
-   - API signature guess → `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/api_catalog.md` (grep first, then `fetch_ascendc_doc.py`)
-   - Perf tuning → `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/roofline_model.md` + `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/toolchain/msprof_agent_guide.md`
+   - Compile error → 用 `knowledge-query` 查询 `"<报错符号> build"`，指定当前平台，读完返回的 EC/runbook 卡
+   - API signature guess → 调用已安装的 `ascendc-api-knowledge-query` skill，按准确 API 名和当前平台检索，再按需核对当前 CANN header
+   - Perf tuning → `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/concepts/roofline_model.md` + `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/guides/msprof_agent_guide.md`
 
    **Why loading matters**: OL-80 says "write any VEC op → grep API catalog first" —
    if you skip reading KB, you'll invent workarounds (like the op#14 bug where worker
@@ -246,7 +246,7 @@ Every KB filename below is a path under that root. Example: `ALWAYS_LOADED_RULES
 - (files read with key OL/PP IDs applied)
 
 ### AVAILABLE (not loaded — used when problems occur)
-- ec-* 卡 (`kb/okf/runbooks/field-notes/build/`), `kb/okf/reference/porter/handbook/roofline_model.md`, `kb/okf/reference/porter/toolchain/msprof_agent_guide.md`, {其余 grep 命中的 runbooks 卡}
+- ec_* 编译卡、`knowledge/ops/ascendc/concepts/roofline_model.md`、`knowledge/ops/ascendc/guides/msprof_agent_guide.md`、{其余 `knowledge-query` 选中的 runbooks 卡}
 
 ## Precision traps (pre-flight warnings)
 - [ ] pow(x,-n): use Power VEC API (OL-82, P-P55)
@@ -261,15 +261,16 @@ Every KB filename below is a path under that root. Example: `ALWAYS_LOADED_RULES
 
 Pre-code checklist (MANDATORY — run before any file write):
 - [ ] Re-read `${CLAUDE_PLUGIN_ROOT}/kb/shared/ALWAYS_LOADED_RULES.md` §5 (fp precision iron law)
-- [ ] For every VEC op planned: grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/api_catalog.md` for signature.
-      OL-80: no guessing. Command:
-      `grep -nA 5 "^## <ApiName>" ${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/api_catalog.md`
+- [ ] For every VEC op planned: invoke `ascendc-api-knowledge-query` with the exact
+      API name and current platform, read the selected card fully, and inspect the
+      active CANN header when the declaration/overload still needs confirmation.
+      OL-80: no guessing.
 - [ ] For every simple-count `DataCopy(dst, src, count)` overload, `count` is an
       **element/operand count**, never a byte count. Do not pass a `*Bytes`
       variable or multiply an element count by `sizeof(T)`. On V220,
       `DataCopyParams.blockCount` is the DMA burst count and `blockLen` is
       measured in 32-byte blocks; use it only for genuine multi-block/strided
-      copies. Ground the selected overload in `API_CATALOG.md` or the installed
+      copies. Ground the selected overload in the API card and/or the installed
       CANN header instead of inferring units. For a non-32-byte-aligned tail,
       consult EC-23/P-P98 and the target SDK before using target-supported
       `DataCopyPad` with byte-based `DataCopyExtParams.blockLen`.
@@ -345,13 +346,12 @@ Hook greps at Stop — any hit → exit 2 → you see stderr → fix pybind → 
 4. On compile error (max 5 internal retries):
    a. **API signature mismatch** ("no matching function", "requires N args"):
       - FIRST: `grep -rn "ApiName" output/npukernelbench/src/kernels/*/kernel/*.h | head -5`
-      - SECOND: `grep -A 20 "ApiName" ${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/handbook/api_catalog.md`
+      - SECOND: invoke `ascendc-api-knowledge-query` for the exact API and platform
       - THIRD: `python3 src/scripts/fetch_ascendc_doc.py <ApiName>`
-   b. **Other compile errors**: query OKF — run
-      `${CLAUDE_PLUGIN_ROOT}/engine/src/scripts/okf/okf_kb.sh search --query
-      "<exact compiler/linker symbol + build phase + target>"` and read the
-      returned cards (EC 卡集中在 `kb/okf/runbooks/field-notes/build/ec-*.md`,
-      也可直接 grep 该目录); do not stop at EC-27. If the OKF
+   b. **Other compile errors**: invoke `knowledge-query` with
+      `"<exact compiler/linker symbol + build phase>"`, the current platform,
+      `domain=ops`, and `technology=ascendc`; read the returned cards fully and
+      do not stop at EC-27. If the external query
       engine is unavailable, report that dependency failure instead of silently
       changing knowledge routes.
    c. Edit the specific kernel file (do NOT rewrite from scratch)
@@ -412,14 +412,9 @@ NOT a compile error. Halting Phase C without Edit kernel.
 
 **Protocol — mandatory when you've stuck ≥ 3 iters on the same error signature**:
 
-1. **Broaden KB search — don't stay on MANDATORY loads list**:
-   ```bash
-   # Symptom → KB grep
-   grep -rn "error code = <N>" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
-   grep -rn "<specific_error_keyword>" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
-   # E.g., worker SHOULD have done:
-   grep -rn "GM out of range\|error code = 95\|SetGlobalBuffer" ${CLAUDE_PLUGIN_ROOT}/kb/
-   ```
+1. **Broaden KB search — don't stay on MANDATORY loads list**: invoke
+   `knowledge-query` with the exact error code/symbol plus phase and current
+   platform. For example: `GM out of range error code 95 SetGlobalBuffer`.
 2. **Scan ALL prior DONE ops, not just brief-listed ones**:
    ```bash
    # Find any op whose kernel uses the same primitive / pattern you're stuck on
@@ -433,7 +428,7 @@ NOT a compile error. Halting Phase C without Edit kernel.
 
 **Entry condition for this protocol** (all must hold):
 - Same error class (build error code / runtime error code / precision max_diff signature) for ≥ 3 iters
-- You haven't yet run `grep -rn` on KB or prior-art for your error symptom
+- You haven't yet run a focused knowledge query or prior-art search for your error symptom
 - You are not already in the escalate handoff path (probe/researcher already being called)
 
 **V3.3 extension (DEBT-046, 2026-04-23) — self-challenge also fires on non-error silent-work**:
@@ -460,7 +455,7 @@ Log the broaden-search in PROGRESS:
 ```
 ### [HH:MM] aog-kernel-worker (self-challenge iter N)
 Stuck 3 iters on error <signature>. Broadened search:
-- `grep -rn "<error>" ${CLAUDE_PLUGIN_ROOT}/kb/` → <hits or "no match">
+- `knowledge-query "<error>" platform=<target>` → <selected cards or "no match">
 - `grep -rn "<primitive>" output/npukernelbench/src/kernels/*/kernel/` → <hits or "no match">
 Adopted pattern from: <path> OR No KB match, escalating.
 ```
@@ -491,15 +486,15 @@ See OL-85 for full rule + examples.
    - import/link/runtime error or 507xxx: query OKF before editing generated
      files, with the exact symbol or error plus phase, target, and trace
      context; for example, `507035 Slice H2D <32B runtime arch35`, rather than
-     the code alone. EC/PB/OL 现象已卡片化 —— 除 `okf_kb.sh search` 外可直接
-     grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/field-notes/`。Record the
+     the code alone. Invoke `knowledge-query` with this symptom and the current
+     platform; do not scan the external tree. Record the
      matched card in the Phase-D diagnostic.
 4. On precision FAIL (max 5 internal fix iterations):
    a0. **(MANDATORY on iter 1, only once per session)** The precision domain file
        is cardized — if the brief's OKF cards don't already cover precision
-       (P-P50..P-P58, F-P1..F-AP2), grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`
-       NOW (`grep -rln "P-P5[0-8]\|F-P1\|F-AP2\|precision"` ) and READ all matching
-       cards. All precision-related patterns
+       (P-P50..P-P58, F-P1..F-AP2), invoke `knowledge-query` NOW for
+       `precision P-P50 P-P58 F-P1 F-AP2` and READ the selected matching cards.
+       All precision-related patterns
        must be in your context BEFORE deciding any fix —
        otherwise you'll guess from partial knowledge. After loading, append a marker to
        PROGRESS: `### [HH:MM] aog-kernel-worker (Phase D iter 1) precision cards loaded` so
@@ -712,7 +707,7 @@ Hook (`check_worker.sh`) 验证：
 
 - You modify `model.py` only to express the source contract and harness interface;
   you never use it to replace fresh migration truth or fp64-autograd backward truth.
-- You do NOT touch KB files directly (`${CLAUDE_PLUGIN_ROOT}/kb/`) — learnings go to
+- You do NOT touch external knowledge or packaged shared rules directly — learnings go to
   `workspace/{op}/knowledge_update.md` at exit (orchestrator invokes knowledge-maintain)
 - You do NOT call CANN APIs (aclnn*/aclop*). All compute in AscendC (OL-36)
 - You do NOT write `.sum()` or similar compute in pybind (hook-enforced)

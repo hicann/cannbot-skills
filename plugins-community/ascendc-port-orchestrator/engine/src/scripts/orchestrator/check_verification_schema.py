@@ -29,8 +29,9 @@ Checks:
       {tier1_pass: int, total: int} OR {status: "N/A", reason: <str>}
 
 P0cc dual-count rationale: kb/shared/GATE_CONTRACT.md §P0cc
-EC-59 (incident codification):
-  kb/okf/runbooks/field-notes/build/ec-59-phase-o5-re-measurement-disagrees-with-worker-pass.md
+EC-59 (incident codification, migrated to the external cannbot-knowledge repo):
+  $CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/runbooks/compilation/
+  ec_59_phase_o5_re_measurement_disagrees_with_worker_pass.md
 Memory: feedback_no_patch_fix_harness_for_next_customer.md
 """
 

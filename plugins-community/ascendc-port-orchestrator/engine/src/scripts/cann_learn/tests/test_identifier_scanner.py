@@ -107,8 +107,8 @@ class NormalizeVFImpl {
 # ---------------------------------------------------------------------------
 # Allowlist (from API catalog)
 # ---------------------------------------------------------------------------
-def test_parse_api_catalog(tmp_path):
-    cat = tmp_path / "ASCENDC_API_CATALOG.md"
+def test_parse_api_reference(tmp_path):
+    cat = tmp_path / "ASCENDC_API_REFERENCE.md"
     cat.write_text("""
 # AscendC API Catalog
 
@@ -124,7 +124,7 @@ def test_parse_api_catalog(tmp_path):
 
 `AscendC::Sin(x)` returns sin.
 """)
-    allow = ids.parse_ascendc_api_catalog(cat)
+    allow = ids.parse_api_reference(cat)
     assert "DataCopy" in allow
     assert "WholeReduceSum" in allow
     assert "AscendC" in allow
@@ -143,7 +143,7 @@ namespace c310_impl {
 class NormalizeVFImpl { void privateDispatch(); };
 }
 """)
-    cat = tmp_path / "ASCENDC_API_CATALOG.md"
+    cat = tmp_path / "ASCENDC_API_REFERENCE.md"
     cat.write_text("DataCopy, Adds, Mul are public.\n")
 
     cand = tmp_path / "candidate.md"
@@ -155,7 +155,7 @@ Use `DataCopy` to load N rows then `WholeReduceSum` per row.
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     assert res.passed
     assert res.leak_count == 0
@@ -168,7 +168,7 @@ namespace c310_impl {
 class NormalizeVFImpl { };
 }
 """)
-    cat = tmp_path / "ASCENDC_API_CATALOG.md"
+    cat = tmp_path / "ASCENDC_API_REFERENCE.md"
     cat.write_text("DataCopy is public.\n")
 
     cand = tmp_path / "candidate.md"
@@ -178,7 +178,7 @@ class NormalizeVFImpl { };
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     assert not res.passed
     leaked_tokens = {tok for _, tok in res.leaks}
@@ -198,7 +198,7 @@ def test_scan_macro_leak_detected(tmp_path):
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     assert not res.passed
     leaked_tokens = {tok for _, tok in res.leaks}
@@ -218,7 +218,7 @@ def test_scan_include_path_component_leak(tmp_path):
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     assert not res.passed
     leaked = {tok for _, tok in res.leaks}
@@ -244,7 +244,7 @@ namespace internal_mod {
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     assert res.passed, f"public-API use must not flag, got leaks={res.leaks}"
 
@@ -270,7 +270,7 @@ def test_scan_includes_public_headers_dir(tmp_path):
     res = ids.scan(
         cann_files_read=[cann_internal],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
         public_include_dir=public_dir,
     )
     assert res.passed
@@ -296,7 +296,7 @@ def test_scan_includes_public_headers_excludes_internal_subdir(tmp_path):
     res = ids.scan(
         cann_files_read=[cann_internal_file],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
         public_include_dir=public_dir,
     )
     # Symbol IS in public_dir but inside `internal/` subdir — excluded from
@@ -320,7 +320,7 @@ def test_scan_keyword_collision_not_flagged(tmp_path):
     res = ids.scan(
         cann_files_read=[cann],
         candidate_output_paths=[cand],
-        api_catalog_path=cat,
+        api_reference_path=cat,
     )
     # `i`, `n`, `x` all in _CPP_KEYWORDS allowlist → not flagged
     assert res.passed

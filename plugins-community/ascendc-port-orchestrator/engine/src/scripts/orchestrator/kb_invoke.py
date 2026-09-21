@@ -20,8 +20,8 @@ workspace/<op>/knowledge_update.md, this module:
 2. Admits reviewed entries through Arbiter into user-local c-tier only
 3. Drops `.kb_merged` only after deterministic persistence, then logs the run
 
-OKF-only 迁移（2026-08）：legacy b-tier（内置索引 provider）已摘除，user-kb（c-tier）是唯一
-可写 tier；bundled 知识即 kb/okf，release-owned，运行时只读。
+外部知识迁移后，legacy b-tier（内置索引 provider）已摘除，user-kb（c-tier）是唯一
+可写 tier；官方 cannbot-knowledge 在运行时只读。
 """
 from __future__ import annotations
 
@@ -170,9 +170,9 @@ def _runtime_prompt(workspace: Path) -> str:
     return (
         f"Run the aog-knowledge-maintain skill in Mode 1 for workspace `{workspace}`. "
         f"Read `{workspace}/knowledge_update.md` and perform the skill's semantic "
-        f"generalization, evidence, scope, conflict, and dedup review. The bundled "
-        f"plugin KB (kb/okf) is release-owned and MUST remain byte-for-byte read-only. "
-        f"Do not edit bundled KB markdown, promotion markers, or "
+        f"generalization, evidence, scope, conflict, and dedup review. The external "
+        f"cannbot-knowledge checkout is official b-tier and MUST remain read-only. "
+        f"Do not edit external knowledge markdown/indexes, promotion markers, or "
         f"`.kb_merged`; do not write directly under the user KB root. Emit only "
         f"`{intake}` as JSON: {{\"schema_version\":1,\"entries\":[...]}}. Each "
         f"entry may contain only kind, claim, scope, key, evidence, provenance, and "
@@ -348,8 +348,8 @@ def merge_batch(workspaces: list[Path], *, timeout_sec: int = 1800) -> dict:
     prompt = (
         f"Run aog-knowledge-maintain in Mode 1-batch (--scan-roots {workspace_root}). "
         f"Semantically review all pending knowledge_update.md files and apply "
-        f"cross-batch dedup. The bundled plugin KB (kb/okf) is release-owned and "
-        f"MUST remain byte-for-byte read-only. Do not edit bundled KB files, "
+        f"cross-batch dedup. The external cannbot-knowledge checkout is official "
+        f"b-tier and MUST remain read-only. Do not edit its cards or indexes, "
         f"promotion markers, `.kb_merged`, or the user KB directly. "
         f"For each pending workspace emit its exact intake path from "
         f"{intake_contract!r} using the Mode 1 schema "

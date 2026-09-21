@@ -240,25 +240,19 @@ def test_hard_floors_with_baseline_reads_verification(tmp_path):
 
 
 def _capture_okf_query(monkeypatch):
-    """Force the OKF read-path to the (mocked) subprocess and capture its argv.
+    """Capture the query handed to the external knowledge adapter."""
+    from briefs import external_kb as _ext
 
-    与 test_okf_reference_block._force_okf_ready 相同的前置伪装（query 脚本 +
-    索引存在），但把 subprocess.run 换成 argv 捕获，返回空 hits。
-    """
-    import subprocess as _sub
-    monkeypatch.setattr(Path, "is_file", lambda self: True)
-    monkeypatch.setenv("CANNBOT_OKF_ENGINE_ROOT", "/fake/cannbot-knowledge")
     captured: dict = {}
 
-    class _CP:
-        returncode = 0
-        stdout = '{"hits": []}'
+    def _search(query, target="a5", per_platform_k=10, card_type=None):
+        captured["query"] = query
+        captured["target"] = target
+        captured["card_type"] = card_type
+        return []
 
-    def _run(*a, **k):
-        captured["argv"] = list(a[0]) if a else list(k.get("args", []))
-        return _CP()
-
-    monkeypatch.setattr(_sub, "run", _run)
+    monkeypatch.setattr(_ext, "search_external_cards", _search)
+    monkeypatch.setattr(_ext, "external_kb_root", lambda: Path("/fake/cannbot-knowledge"))
     return captured
 
 
@@ -279,9 +273,8 @@ def test_kb_manifest_block_classification_tags_reach_okf_query(tmp_path, monkeyp
     }))
     captured = _capture_okf_query(monkeypatch)
     block = bc.kb_manifest_block("22_Nonzero", workspace=workspace)
-    argv = captured.get("argv") or []
-    assert argv, "knowledge-query subprocess was not reached"
-    query = argv[argv.index("--query") + 1]
+    query = captured.get("query") or ""
+    assert query, "external knowledge adapter was not reached"
     assert "22 Nonzero" in query
     assert "scatter-gather" in query
     assert "reduction" in query
@@ -297,9 +290,8 @@ def test_kb_manifest_untagged_op_fails_loud_without_kb(tmp_path, monkeypatch):
     """
     captured = _capture_okf_query(monkeypatch)
     block = bc.kb_manifest_block("nonexistent_op_xyz")
-    argv = captured.get("argv") or []
-    assert argv, "knowledge-query subprocess was not reached"
-    query = argv[argv.index("--query") + 1]
+    query = captured.get("query") or ""
+    assert query, "external knowledge adapter was not reached"
     assert "nonexistent op xyz" in query
     assert "OKF 检索无返回" in block
     assert "# KB MANIFEST" not in block

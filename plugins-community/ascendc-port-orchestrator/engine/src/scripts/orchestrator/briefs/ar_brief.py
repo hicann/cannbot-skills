@@ -116,11 +116,11 @@ def _researcher_phase_block(
 
 Before drafting any new pattern number (P-P-XXX, OL-XX, EC-XX), inventory KB:
 1. Use the OKF cards already injected into this brief (the KB manifest block
-   above) as the primary knowledge base; when more depth is needed, Read the
-   OKF indexes — `kb/okf/index.md` plus the per-area indexes under
-   `kb/okf/runbooks/` — and the relevant cards under `kb/okf/reference/` and
-   `kb/okf/runbooks/`
-2. Grep across `kb/okf/` for each concept your candidates touch
+   above) as the primary knowledge base; when more depth is needed, use the
+   installed `knowledge-query` against `$CANNBOT_KNOWLEDGE_ROOT`, then read the
+   returned `local_path` cards in full
+2. Run a focused query for each concept your candidates touch; do not scan the
+   external knowledge tree or substitute removed plugin-local knowledge content
 3. Verify proposed pattern slot is unused — find current highest, +1
 4. Check if equivalent pattern exists under different name → EXTEND existing entry
 
@@ -201,7 +201,7 @@ Mandatory: `workspace/{op}/cann_strategy_inference.md` with:
 Optional: `workspace/{op}/optimization_directive.md` with:
 - Mandatory KB reads (Phase A) for kw-N+1
 - Algorithm sketch (pseudocode + UB layout)
-- Primitive list (every API verified in ASCENDC_API_CATALOG.md)
+- Primitive list (every API verified through `ascendc-api-knowledge-query` and, when needed, the active CANN header)
 - Vectorization plan
 - Expected perf range
 - Anti-cheating gates the verifier must enforce

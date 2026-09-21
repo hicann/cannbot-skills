@@ -133,24 +133,24 @@ def test_default_kb_sections_okf_only_no_legacy_entries():
 def test_default_kb_sections_a5_includes_ascend950pr():
     """A5 target → manifest includes ascend950pr.md (back-compat default)."""
     sections = ot.default_kb_sections("a5")
-    assert "okf/runbooks/hardware/target-ascend950pr.md" in sections
-    assert "okf/runbooks/hardware/target-ascend910b.md" not in sections
-    assert "okf/runbooks/hardware/target-ascend910c.md" not in sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" in sections
+    assert "knowledge/common/platforms/concepts/target_ascend910b.md" not in sections
+    assert "knowledge/common/platforms/concepts/target_ascend910c.md" not in sections
 
 
 def test_default_kb_sections_a3_includes_ascend910c():
     """A3 target → manifest includes ascend910c.md (V220 single-die)."""
     sections = ot.default_kb_sections("a3")
-    assert "okf/runbooks/hardware/target-ascend910c.md" in sections
-    assert "okf/runbooks/hardware/target-ascend950pr.md" not in sections
-    assert "okf/runbooks/hardware/target-ascend910b.md" not in sections
+    assert "knowledge/common/platforms/concepts/target_ascend910c.md" in sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" not in sections
+    assert "knowledge/common/platforms/concepts/target_ascend910b.md" not in sections
 
 
 def test_default_kb_sections_a2_includes_ascend910b():
     """A2 target → manifest includes ascend910b.md (V220 single-die)."""
     sections = ot.default_kb_sections("a2")
-    assert "okf/runbooks/hardware/target-ascend910b.md" in sections
-    assert "okf/runbooks/hardware/target-ascend950pr.md" not in sections
+    assert "knowledge/common/platforms/concepts/target_ascend910b.md" in sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" not in sections
 
 
 def test_default_kb_sections_ds_suffix_normalized():
@@ -163,7 +163,7 @@ def test_default_kb_sections_ds_suffix_normalized():
         f"a3-ds should resolve to same sections as a3; got "
         f"a3-ds={a3_ds} vs a3={a3}"
     )
-    assert "okf/runbooks/hardware/target-ascend910c.md" in a3_ds
+    assert "knowledge/common/platforms/concepts/target_ascend910c.md" in a3_ds
 
 
 def test_default_kb_sections_unknown_target_falls_back_to_a5():
@@ -171,7 +171,7 @@ def test_default_kb_sections_unknown_target_falls_back_to_a5():
     keeps op-gen on a brand-new chip workable).
     """
     sections = ot.default_kb_sections("zz_future_chip")
-    assert "okf/runbooks/hardware/target-ascend950pr.md" in sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" in sections
 
 
 def test_default_kb_sections_case_insensitive():
@@ -190,9 +190,9 @@ def test_lookup_target_dispatch(tmp_path):
     workspace.mkdir()
     res_a5 = ot.lookup("test_op", workspace=workspace, target="a5")
     res_a3 = ot.lookup("test_op", workspace=workspace, target="a3")
-    assert "okf/runbooks/hardware/target-ascend950pr.md" in res_a5.kb_sections
-    assert "okf/runbooks/hardware/target-ascend910c.md" in res_a3.kb_sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" in res_a5.kb_sections
+    assert "knowledge/common/platforms/concepts/target_ascend910c.md" in res_a3.kb_sections
     # a3 must NOT include the A5 spec
-    assert "okf/runbooks/hardware/target-ascend950pr.md" not in res_a3.kb_sections
+    assert "knowledge/common/platforms/concepts/target_ascend950pr.md" not in res_a3.kb_sections
 
 

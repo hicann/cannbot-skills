@@ -1,9 +1,6 @@
 # porter
 
-本插件自产的参考材料，无上游文档。
+本插件自产的参考材料，无上游文档。**playbook / patterns / precision / toolchain 及 handbook 的 4 张共 33 张卡已迁移至 cannbot-knowledge 仓**（guides/cross_gen_migration_guide/、examples/、concepts/、guides/precision/、runbooks/validations/，delete-knowledge 分支删除）；仅 handbook 的 api_catalog、language_reference 2 张（官方文档目录/镜像性质）保留。
 
-* [patterns](patterns/index.md) — 代码模板与实测记录（FA 类、GMM SwiGLU、a3 多核），11 张
-* [playbook](playbook/index.md) — arch22→arch35 迁移方法论 L1–L5 + ops-nn A5 产物布局，9 张
-* [precision](precision/index.md) — 精度标准与测试流程，7 张
-* [handbook](handbook/index.md) — API 目录 / 语言参考 / Roofline / SIMD-SIMT 决策，6 张
-* [toolchain](toolchain/index.md) — msprof / NPU UT 工具指南，2 张
+* [handbook](handbook/index.md) — api_catalog / language_reference 2 张保留；roofline_model、simt_vs_simd_decision、simt_patterns、simd_development_reference 已迁移
+* patterns/ — 卡片已迁移，仅保留非卡片资产 `fa_a3_multicore_mc_{verify,perf}.json`（pb-56 实测数据）

@@ -2,7 +2,8 @@
 
 > **适用范围**: A5 (Ascend 950PR) Vector 算子，UB = 256 KB/AIV；**cube 类算子中 AIV 侧 Vector 路径（UB 由 AIV 核承载）同样适用**——cube 算子的 AIC 侧存储（L0A/L0B/L0C/L1）预算见 `cube-migration-guide.md` 改动 5「片上缓冲容量对照」
 > **何时使用**: 编译通过但运行时 507035 / error 340 / "UB out-of-range"；设计 tile 大小时；多 buffer 场景下估算 UB 占用
-> **代号说明**: 文中 `P-P*` / `OL-*` 为插件 KB 模式库代号，见 `kb/target/ascendc/patterns/PATTERN_INDEX.md`
+> **代号说明**: 文中 `P-P*` / `OL-*` 为历史卡片代号；使用 `knowledge-query`
+> 按代号或具体原语/症状查询当前外部知识卡。
 
 ---
 
@@ -37,7 +38,7 @@ uint32_t tileRows = ubSize / (alignedCols * sizeof(T) * bufferCount);
 //   bufferCount = 2+2+1+1 = 6
 ```
 
-### 1.3 SIMT DCache 预留（参考插件 KB `kb/target/ascendc/migration/l1-l2-implementation-guide.md`）
+### 1.3 SIMT DCache 预留（参考外部卡 `knowledge/ops/ascendc/guides/cross_gen_migration_guide/l1_l2_implementation.md`）
 
 ```cpp
 namespace Ops { namespace Common {

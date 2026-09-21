@@ -28,7 +28,7 @@ applies to the target it is briefing for, and the answer is read from the KB
 entry itself. Adding a SoC bound to a KB entry is then enough to bound every
 composer that cites it — no composer edit, no per-entry `if PB-34` patch.
 
-SoC 解析逻辑（`_soc_family` / `_applies_to_socs` / `_ANY_ENTRY_HEAD_RE` /
+SoC 解析逻辑（`_soc_family` / `_applies_to_socs` /
 `_APPLIES_FIELD_RE`）**内联自 `src/scripts/kb_index_audit.py`**（OKF-only
 迁移，2026-08-31 摘掉对该模块的懒加载依赖——该模块随 legacy KB 一起退役；
 实现原样拷贝）。它解决了两个难点：
@@ -40,9 +40,8 @@ SoC 解析逻辑（`_soc_family` / `_applies_to_socs` / `_ANY_ENTRY_HEAD_RE` /
   - **identifying-position reads** — a naive prose scan red-flags `V220→A5 port`
     DIRECTIONS and cross-ref IDs.
 
-条目来源：OKF 卡片（`kb/okf/**`，frontmatter `original_id: PB-34` +
-`description:`/正文里的 `applies_to: soc=`）。OKF-only 迁移（2026-08-31）
-前还覆盖 legacy `kb/target/**` 的 `## PB-34` 标题条目，该树已删除。
+条目来源：外部知识卡片（frontmatter `original_id: PB-34` +
+`description:`/正文里的 `applies_to: soc=`）。
 读不到时 FAIL-OPEN。
 
 FAIL-OPEN by construction (`kb_applies_to_target`): an injection is suppressed
@@ -54,12 +53,11 @@ under-block.
 """
 from __future__ import annotations
 import logging
-
 import re
 from pathlib import Path
 from typing import Optional
 
-from kb_paths import kb_root
+_LOG = logging.getLogger(__name__)
 
 _HERE = Path(__file__).resolve()
 
@@ -84,14 +82,7 @@ _SOC_TOKEN_RE = re.compile(r"\b(Ascend9\d{2}[A-Za-z0-9_]*|V220|V351)\b")
 
 _APPLIES_FIELD_RE = re.compile(r"^`?applies_to\s*:\s*(.*?)`?\s*$")
 
-# Entry headings across every supported KB file class (legacy layout).
-_ANY_ENTRY_HEAD_RE = re.compile(
-    r"^#{2,4}\s+((?:EC|PB|OL|P-P|F-P|F-AP|CAND)[-A-Za-z0-9_]*)\b"
-)
-
-# OKF 卡片形态：frontmatter `original_id: PB-34` 携带 legacy 条目 id（卡片没有
-# `## PB-34` 标题）；`applies_to` 常嵌在 `description:` 行内。
-_OKF_ORIGINAL_ID_RE = re.compile(r"^original_id:\s*([A-Za-z0-9_-]+)\s*$")
+# `applies_to` may be embedded in a migrated card's `description:` line.
 _OKF_DESC_APPLIES_RE = re.compile(r'^description:\s*"?\s*applies_to\s*:\s*(.*?)"?\s*$')
 
 
@@ -132,20 +123,192 @@ def soc_family_for_target(target: Optional[str]) -> Optional[str]:
     return SOC_FAMILY_BY_TARGET.get(str(target).strip().lower())
 
 
-# 条目扫描目录（相对 kb_root）：OKF-only 迁移（2026-08-31）后仅扫 OKF 卡片树；
-# legacy target 树已删除。
-_KB_SCAN_DIRS = ("okf",)
+_OKF_V02_PROVENANCE_RE = re.compile(r"原 OKF v1 卡号：\*\*([A-Za-z0-9_-]+)\*\*")
+_OKF_V02_ALIASES_INLINE_RE = re.compile(r"^aliases:\s*\[([^\]]*)\]")
+_OKF_V02_ALIAS_ITEM_RE = re.compile(r"^\s*-\s*((?:EC|PB|OL|P-P|F-P|F-AP|CAND)[-A-Za-z0-9_]*)\s*$")
+_OKF_V02_PLATFORMS_INLINE_RE = re.compile(r"^platforms:\s*\[([^\]]*)\]")
+_OKF_V02_PLATFORMS_ITEM_RE = re.compile(r"^\s*-\s*([A-Za-z0-9_\"']+)\s*$")
+_ENTRY_ID_RE = re.compile(r"^(?:EC|PB|OL|P-P|F-P|F-AP|CAND)[-A-Za-z0-9_]*$")
+
+# 知识仓平台注册值 → SoC family（与 SOC_FAMILY_BY_TARGET 同粒度：
+# a3/a2/910* → V220；950（含 950PR/A5）→ V351；agnostic → 全平台通配）。
+_FAMILY_BY_PLATFORM = {
+    "a2": "V220",
+    "a3": "V220",
+    "910": "V220",
+    "950": "V351",
+}
 
 
-def _iter_kb_files() -> list[Path]:
-    """Every canonical KB markdown file (OKF cards and reference docs)."""
-    root = kb_root()
-    out: list[Path] = []
-    for sub in _KB_SCAN_DIRS:
-        kb_dir = root / sub
-        if kb_dir.is_dir():
-            out.extend(sorted(kb_dir.rglob("*.md")))
-    return out
+def _families_from_platforms(platforms: list[str]) -> Optional[set[str]]:
+    """OKF v0.2 frontmatter `platforms:` → SoC family 集合；空/未声明 → None。"""
+    families: set[str] = set()
+    for raw in platforms:
+        p = str(raw).strip().strip('"').strip("'").lower()
+        if not p:
+            continue
+        if p == "agnostic":
+            return {"*"}
+        fam = _FAMILY_BY_PLATFORM.get(p)
+        if fam:
+            families.add(fam)
+    return families or None
+
+
+_EXTERNAL_SCOPES_CACHE: dict[str, Optional[set[str]]] = {}
+
+
+def _alias_items_from_head(head: str) -> list[str]:
+    """`- ` alias items under an `aliases:` frontmatter block."""
+    found: list[str] = []
+    in_aliases = False
+    for line in head.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("aliases:"):
+            in_aliases = True
+            continue
+        if not in_aliases:
+            continue
+        if not stripped.startswith("-"):
+            in_aliases = False
+            continue
+        alias_match = _OKF_V02_ALIAS_ITEM_RE.match(line)
+        if alias_match:
+            found.append(alias_match.group(1))
+    return found
+
+
+def _card_ids_from_head(head: str) -> list[str]:
+    """Legacy entry ids from one card head (provenance line + aliases)."""
+    ids: list[str] = []
+    match = _OKF_V02_PROVENANCE_RE.search(head)
+    if match:
+        ids.append(match.group(1))
+    match = _OKF_V02_ALIASES_INLINE_RE.search(head)
+    if match:
+        ids.extend(
+            alias.strip().strip('"').strip("'")
+            for alias in match.group(1).split(",")
+        )
+    ids.extend(_alias_items_from_head(head))
+    return [entry_id for entry_id in dict.fromkeys(ids) if _ENTRY_ID_RE.match(entry_id)]
+
+
+def _platform_items_from_head(head: str) -> list[str]:
+    """`- ` platform items under a `platforms:` frontmatter block."""
+    found: list[str] = []
+    in_platforms = False
+    for line in head.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("platforms:"):
+            in_platforms = True
+            continue
+        if not in_platforms:
+            continue
+        if not stripped.startswith("-"):
+            in_platforms = False
+            continue
+        item_match = _OKF_V02_PLATFORMS_ITEM_RE.match(line)
+        if item_match:
+            found.append(item_match.group(1))
+    return found
+
+
+def _card_platforms_from_head(head: str) -> list[str]:
+    """Frontmatter platforms from one card head (inline list or `- ` items)."""
+    platforms: list[str] = []
+    platform_match = _OKF_V02_PLATFORMS_INLINE_RE.search(head)
+    if platform_match:
+        platforms.extend(item.strip() for item in platform_match.group(1).split(","))
+        return platforms
+    return _platform_items_from_head(head)
+
+
+def _card_families_from_head(head: str, platforms: list[str]) -> Optional[set[str]]:
+    """SoC families from platforms, falling back to an applies_to line."""
+    families = _families_from_platforms(platforms)
+    if families is not None:
+        return families
+    for line in head.splitlines():
+        stripped = line.strip()
+        applies_match = (
+            _APPLIES_FIELD_RE.match(stripped)
+            or _OKF_DESC_APPLIES_RE.match(stripped)
+        )
+        if applies_match:
+            return _applies_to_socs(applies_match.group(1))[0]
+    return None
+
+
+def _ids_and_scope_from_card(path: Path) -> tuple[list[str], Optional[set[str]]]:
+    """Read legacy IDs and SoC scope from one query-selected external card."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            head = fh.read(8192)
+    except (OSError, UnicodeDecodeError):
+        return [], None
+    ids = _card_ids_from_head(head)
+    families = _card_families_from_head(head, _card_platforms_from_head(head))
+    return ids, families
+
+
+
+def _collect_entry_hits(entry_id: str) -> list[dict]:
+    """Query both architecture families and dedup hits by local_path.
+
+    Platform filtering must not hide a V220-only card while deciding whether
+    it applies to V351, or vice versa.
+    """
+    from briefs.external_kb import search_external_cards
+
+    hits: list[dict] = []
+    seen_paths: set[str] = set()
+    for query_target in ("a5", "a3"):
+        for hit in search_external_cards(
+            entry_id, target=query_target, per_platform_k=10
+        ):
+            path_key = str(hit.get("local_path") or "")
+            if path_key and path_key not in seen_paths:
+                seen_paths.add(path_key)
+                hits.append(hit)
+    return hits
+
+
+def _external_entry_scope(entry_id: str) -> Optional[set[str]]:
+    """Resolve one entry through knowledge-query; never scan plugin/local trees."""
+    if entry_id in _EXTERNAL_SCOPES_CACHE:
+        return _EXTERNAL_SCOPES_CACHE[entry_id]
+    try:
+        hits = _collect_entry_hits(entry_id)
+        for hit in hits:
+            local_path = hit.get("local_path")
+            if not local_path:
+                continue
+            ids, families = _ids_and_scope_from_card(Path(str(local_path)))
+            for found_id in ids:
+                _EXTERNAL_SCOPES_CACHE.setdefault(found_id, families)
+            if entry_id in ids:
+                return families
+    except Exception as exc:
+        _LOG.debug("external entry scope lookup failed: %s err=%s", entry_id, exc)
+    _EXTERNAL_SCOPES_CACHE[entry_id] = None
+    return None
+
+
+def reset_external_scopes_cache() -> None:
+    """Clear the external entry-scope cache (ut test-isolation hook).
+
+    Clear, never rebind to None: `_external_entry_scope` does
+    `entry_id in _EXTERNAL_SCOPES_CACHE` before its try block, so a None
+    cache raised TypeError on every soc-scope lookup and failed the
+    branch's own kw_brief soc-scope/decomposition suites (65 ut
+    regressions vs the merge-base). Rebind to a fresh dict when a
+    previous botched reset left a non-dict behind.
+    """
+    global _EXTERNAL_SCOPES_CACHE
+    if not isinstance(_EXTERNAL_SCOPES_CACHE, dict):
+        _EXTERNAL_SCOPES_CACHE = {}
+    _EXTERNAL_SCOPES_CACHE.clear()
 
 
 def _applies_line_for(lines: list[str], start: int, end: int) -> Optional[set[str]]:
@@ -165,31 +328,7 @@ def kb_entry_soc_families(entry_id: str) -> Optional[set[str]]:
     Returns the family set (`{"V220"}`), `{"*"}` for `soc=all`, or None when the
     entry is not found or declares no recognizable `soc=` scope.
     """
-    for path in _iter_kb_files():
-        skip_current_item = False
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception as error:
-            logging.getLogger(__name__).debug(
-                "Recoverable operation failed.", exc_info=error
-            )
-            skip_current_item = True
-        if skip_current_item:
-            continue
-        # OKF card `original_id: PB-34` frontmatter lines (`_ANY_ENTRY_HEAD_RE`
-        # is retained for pre-migration heading forms inside migrated bodies).
-        heads = [
-            i for i, line in enumerate(lines)
-            if _ANY_ENTRY_HEAD_RE.match(line) or _OKF_ORIGINAL_ID_RE.match(line)
-        ]
-        for n, start in enumerate(heads):
-            head = lines[start]
-            m = _ANY_ENTRY_HEAD_RE.match(head) or _OKF_ORIGINAL_ID_RE.match(head)
-            if m.group(1) != entry_id:
-                continue
-            end = heads[n + 1] if n + 1 < len(heads) else len(lines)
-            return _applies_line_for(lines, start, end)
-    return None
+    return _external_entry_scope(entry_id)
 
 
 def kb_section_soc_families(rel_path: str, section_no: str) -> Optional[set[str]]:
@@ -201,11 +340,17 @@ def kb_section_soc_families(rel_path: str, section_no: str) -> Optional[set[str]
     handshake an A5 recipe.
 
     Args:
-        rel_path: path under `kb/`, e.g.
-            `okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md`.
+        rel_path: canonical external knowledge path, e.g.
+            `knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md`.
         section_no: the section number as written, e.g. `"4"`.
     """
-    path = kb_root() / rel_path
+    try:
+        from briefs import external_kb as _ext
+        path = _ext.resolve_kb_ref(rel_path)
+    except Exception:
+        path = None
+    if path is None:
+        return None
     if not path.is_file():
         return None
     try:
@@ -235,30 +380,39 @@ def _resolve_domain_template_path(rel_path: str):
     """Resolve ANY path form the compose path can produce to the on-disk file.
 
     The brief compose path can name a pattern/domain template several ways:
-      - `okf/reference/porter/patterns/X.md`        (OKF canonical)
+      - provider-relative porter pattern paths
       - `patterns/domains/X.md` / `domains/X.md`   (raw classifier recommendation)
       - `src/skills/references/…/X.md`             (full/abs prefix form)
-    A filter that resolved only the canonical form would be inert for the others
-    (wired but never firing — theater one layer deeper). OKF-only 迁移后，未转卡的
-    patterns 归一到 `kb/okf/reference/porter/patterns/<name>.md`（2026-09-05 目录重组后位于 porter bundle 下）（legacy 的
-    `target/ascendc/patterns/domains/X.md` 形态已随 kb/target 删除）；已转卡（不在
+    A filter that resolved only one form would be inert for the others
+    (wired but never firing — theater one layer deeper). 未转卡的 patterns 归一到
+    provider 的 porter patterns 目录；已转卡（不在
     reference/patterns 下）或尚未搬迁的条目解析不到文件时返回 None，由调用方
     FAIL-OPEN（不因文件不存在而硬失败）。Returns a Path (may not exist) or None
     if `rel_path` names no domain-template file.
     """
-    refs = kb_root()
     rel = rel_path.strip()
     marker = "src/skills/references/"
     if marker in rel:  # strip an absolute / repo-rooted prefix
         rel = rel[rel.rindex(marker) + len(marker):]
-    direct = refs / rel
-    if direct.is_file():
-        return direct
+    try:
+        from briefs import external_kb as _ext
+        resolved = _ext.resolve_kb_ref(rel)
+    except Exception:
+        resolved = None
+    if resolved is not None and resolved.is_file():
+        return resolved
     m = re.search(r"(?:^|/)(?:patterns|domains)/([^/]+\.md)$", rel)
     if m:
-        cand = refs / "okf" / "reference" / "porter" / "patterns" / m.group(1)
-        if cand.is_file():
-            return cand
+        # 外部知识仓（OKF v0.2）：porter patterns 已迁至 ops/ascendc/examples/。
+        try:
+            from briefs import external_kb as _ext
+            resolved = _ext.resolve_kb_ref(
+                "knowledge/ops/ascendc/examples/" + m.group(1).replace("-", "_")
+            )
+        except Exception:
+            resolved = None
+        if resolved is not None and resolved.is_file():
+            return resolved
     return None
 
 
@@ -299,7 +453,7 @@ def kb_file_soc_families(rel_path: str) -> Optional[set[str]]:
 
     `rel_path` is accepted in ANY of the path forms the compose path can emit
     (see `_resolve_domain_template_path`), NOT only the canonical
-    `okf/reference/porter/patterns/X.md` — a form-sensitive resolver would make
+    `knowledge/ops/ascendc/examples/X.md` — a form-sensitive resolver would make
     the whole filter inert for the un-normalized forms.
 
     Returns the family set (`{"V351"}`), `{"*"}` for `soc=all`, or None when the

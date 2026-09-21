@@ -128,3 +128,43 @@ def test_installed_cann_hashes_are_not_admissible(tmp_path):
 
 def test_gate_id_value_stable():
     assert fp.GateID.BINARY_PROVENANCE.value == "binary_provenance"
+
+
+def test_workspace_source_list_reconciles_to_runner_build(tmp_path):
+    """Workers emitting the deliverable list schema reconcile (2026-09-18).
+
+    2_GroupedMatmul / 4_MatmulTransA wrote `compiled_provenance.workspace_source`
+    as a list of {path, sha256} entries without the single-file `source` field;
+    the reconcile path only needs one real workspace source to attest against
+    the runner-built artifacts, so it must accept the first resolvable .cpp
+    entry instead of parking a full worker repair cycle on the schema gap.
+    """
+    workspace = _workspace(tmp_path)
+    source = workspace / "kernel" / "test_op.cpp"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("void test_op() {}\n")
+    build = workspace / "kernel" / "build"
+    object_file = build / "test_op.cpp.o"
+    shared_lib = build / "_test_op_ext.so"
+    for path in (object_file, shared_lib):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"built")
+    evidence = workspace / "npubench_evidence"
+    evidence.mkdir()
+    (evidence / "tilelang2ascendc_build_receipt.json").write_text(
+        json.dumps({"status": "PASS"})
+    )
+    source_digest = _sha256(source)
+    verification = {
+        "precision": {"status": "PASS"},
+        "build_evidence": {
+            "compiled_provenance": {
+                # plural spelling seen from 5_MatmulTransB kw-5
+                "workspace_sources": [
+                    {"path": "kernel/CMakeLists.txt", "sha256": "a" * 64},
+                    {"path": "kernel/test_op.cpp", "sha256": source_digest},
+                ],
+            }
+        },
+    }
+    assert getattr(fp, '_check_binary_provenance')(workspace, verification) is None

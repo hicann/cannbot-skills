@@ -13,8 +13,8 @@ Invocation:
     python3 -m cann_learn.mode5_runner --op 10_LayerNorm \
             --workspace workspace/10_layernorm \
             --module-path /data/cann_b103/cann-9.0.0/include/.../normalize \
-            --kb-root kb/okf \
-            --api-catalog kb/okf/reference/porter/handbook/api_catalog.md
+            --kb-root /path/to/user-c-tier \
+            --api-reference /path/from/knowledge-query/api-card.md
 
 Steps (per v2 design):
   0. Hook preflight (verify G11/G12/SC10 enforced; refuse if not)
@@ -287,7 +287,7 @@ def revalidate_post_agent(
     *,
     cann_files_read: list[Path],
     candidate_paths: list[Path],
-    api_catalog_path: Path,
+    api_reference_path: Path,
     extraction_mode: str = "kernel_structural",
 ) -> tuple[bool, list[str]]:
     """Independently run scanners after agent return; cross-check vs agent's
@@ -310,7 +310,7 @@ def revalidate_post_agent(
     id_res = identifier_scanner.scan(
         cann_files_read=cann_files_read,
         candidate_output_paths=candidate_paths,
-        api_catalog_path=api_catalog_path,
+        api_reference_path=api_reference_path,
     )
     if not id_res.passed:
         failures.append(
@@ -399,7 +399,7 @@ def run_mode5(
     workspace: Path,
     module_path: Path,
     kb_root: Path,
-    api_catalog_path: Path,
+    api_reference_path: Path,
     skip_hook_preflight: bool = False,
     skip_compare: bool = False,
     allow_finalized_without_researcher_iter: bool = False,
@@ -469,7 +469,7 @@ def run_mode5(
                 sealed_dir=sealed_dir,
                 run_id=run_id,
                 kb_root=kb_root,
-                api_catalog_path=api_catalog_path,
+                api_reference_path=api_reference_path,
             )
             try:
                 spawn_result = spawn_agent_func(
@@ -512,7 +512,7 @@ def run_mode5(
             Path(summary_path),
             cann_files_read=[Path(p) for p in cann_files_read],
             candidate_paths=[Path(p) for p in candidate_paths],
-            api_catalog_path=api_catalog_path,
+            api_reference_path=api_reference_path,
             extraction_mode=extraction_mode,
         )
         if not valid:
@@ -530,7 +530,7 @@ def run_mode5(
         # Step 4c: (removed, OKF-only migration 2026-08-31) — this step used to
         # write `.kb_promotion_pending-<run_id>-<cand>` markers under
         # reference/patterns/unverified/ for the kb_auto_promote pipeline.
-        # kb_auto_promote is deleted and bundled KB is read-only at runtime;
+        # kb_auto_promote is deleted; official external knowledge is read-only;
         # candidates now sediment to the user-local KB (c-tier) via the
         # deterministic intake gate, so no marker is written here.
 
@@ -553,8 +553,18 @@ def main():
     ap.add_argument("--op", required=True)
     ap.add_argument("--workspace", required=True, type=Path)
     ap.add_argument("--module-path", required=True, type=Path)
-    ap.add_argument("--kb-root", required=True, type=Path)
-    ap.add_argument("--api-catalog", required=True, type=Path)
+    ap.add_argument(
+        "--kb-root",
+        required=True,
+        type=Path,
+        help="deployment-local user c-tier root; official knowledge is selected through knowledge-query",
+    )
+    ap.add_argument(
+        "--api-reference",
+        required=True,
+        type=Path,
+        help="query-selected cannbot-knowledge API card used for the C34a public-symbol allowlist",
+    )
     ap.add_argument("--skip-hook-preflight", action="store_true")
     ap.add_argument("--skip-compare", action="store_true")
     ap.add_argument(
@@ -598,7 +608,7 @@ def main():
         workspace=args.workspace,
         module_path=args.module_path,
         kb_root=args.kb_root,
-        api_catalog_path=args.api_catalog,
+        api_reference_path=args.api_reference,
         skip_hook_preflight=args.skip_hook_preflight,
         skip_compare=args.skip_compare,
         allow_finalized_without_researcher_iter=args.allow_finalized_without_researcher_iter,

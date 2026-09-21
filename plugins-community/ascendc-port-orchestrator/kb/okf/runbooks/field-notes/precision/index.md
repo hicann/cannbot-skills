@@ -1,2 +1,2 @@
 # field-notes / precision
-精度相关现象卡（现象→根因→配方）。从 porter OL(precision) 家族迁入。
+85 张精度现象卡已迁移至 cannbot-knowledge 仓 `knowledge/ops/ascendc/runbooks/precision/`（delete-knowledge 分支删除）。

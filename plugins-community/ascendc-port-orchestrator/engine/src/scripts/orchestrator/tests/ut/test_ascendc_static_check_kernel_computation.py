@@ -104,3 +104,42 @@ def test_header_without_kernel_ancestor_falls_back_to_same_dir_scan(tmp_path):
     _write(src / "fusion_attention.cpp", KERNEL_CPP)
 
     assert chk.check_kernel_has_computation(str(header), TILING_HEADER.splitlines(keepends=True)) == []
+
+
+# A pure-Cube kernel (MatmulImpl recipe): no TQue/DataCopy/VEC ops, but real
+# computation via MatmulType/REGIST_MATMUL_OBJ (2_GroupedMatmul 2026-09-18
+# finalize static-gate FP under the SIMD vocabulary).
+CUBE_KERNEL_HEADER = """\
+#pragma once
+#include "kernel_operator.h"
+using namespace AscendC;
+
+template <typename T>
+class GroupedMatmulEvoKernel {
+public:
+    using AType = MatmulType<TPosition::GM, CubeFormat::ND, T>;
+    using BType = MatmulType<TPosition::GM, CubeFormat::ND, T>;
+    using CType = MatmulType<TPosition::GM, CubeFormat::ND, T>;
+    __aicore__ inline void Process() {
+        MatmulImpl<AType, BType, CType> mm;
+        mm.Init(&mm_tiling);
+        mm.SetTensor(a, b);
+        mm.Iterate();
+    }
+private:
+    MatmulImpl<AType, BType, CType>::Tiling mm_tiling;
+};
+"""
+
+
+def test_pure_cube_kernel_not_flagged_as_simd_stub(tmp_path):
+    kernel = tmp_path / "kernel"
+    header = kernel / "op_kernel" / "grouped_matmul_evo_kernel.h"
+    _write(header, CUBE_KERNEL_HEADER)
+    # whole tree is cube-style: no sibling carries SIMD markers either
+    _write(kernel / "op_kernel" / "grouped_matmul_evo_bf16.cpp",
+           "#include \"grouped_matmul_evo_kernel.h\"\nREGIST_MATMUL_OBJ(A);\n")
+
+    assert chk.check_kernel_has_computation(
+        str(header), CUBE_KERNEL_HEADER.splitlines(keepends=True)
+    ) == []

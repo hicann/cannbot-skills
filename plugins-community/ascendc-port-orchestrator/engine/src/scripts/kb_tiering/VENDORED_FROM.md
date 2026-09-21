@@ -10,8 +10,8 @@ main (a5_ops), who keeps the a5ops / autoport / cannbot adapters consistent. Thi
 code-swap, not a data-migration.
 
 ~~`adapter_a5ops.py`~~（曾 vendored byte-identical 自 a5_ops，b-tier KB_INDEX 读取器）与
-~~`adapters/cannbot_b.py`~~（指向 bundled `kb/KB_INDEX.md` 的工厂）已随 **OKF-only 迁移
-（2026-08）删除**：bundled 知识即 kb/okf，不再有 KB_INDEX provider，b-tier 的存在基础消失。
+~~`adapters/cannbot_b.py`~~（旧的插件内 b-tier 工厂）已随外部知识迁移删除：官方知识由
+cannbot-knowledge 提供，不再有插件内 KB_INDEX provider。
 `demo/`、`poc/`（legacy b-tier 演示代码）同批删除。
 
 cannbot-local pieces (NOT vendored — cannbot's own): `adapters/cannbot_c.py` (Markdown user_kb →

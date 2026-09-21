@@ -25,19 +25,27 @@ import logging
 
 import json
 import re
+import sys
 from pathlib import Path
 
 from finalize_shared import _verification_hash
 
-# cannbot KB-relocation adaptation: candidates.md lives under <plugin_root>/kb/,
-# resolved via kb_paths.kb_root(). Imported here (NOT from finalize_pipeline) to
-# keep this module off the finalize_pipeline import cycle. Tests redirect the KB
-# root by monkeypatching finalize_candidates._kb_root.
+# Candidate evidence is deployment-local state and must never mutate the
+# packaged plugin or the read-only external cannbot-knowledge checkout. Resolve
+# the user c-tier at runtime; keep the small `_kb_root` wrapper for callers that
+# monkeypatch the historical seam.
 try:
-    from kb_paths import kb_root as _kb_root
+    from kb_tiering.adapters.cannbot_c import resolve_c_root
 except ImportError:  # pragma: no cover — fallback if orchestrator/ not on sys.path
-    def _kb_root():  # type: ignore
-        return Path(__file__).resolve().parent.parent.parent.parent.parent / "kb"
+    _SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
+    if str(_SCRIPTS_ROOT) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_ROOT))
+    from kb_tiering.adapters.cannbot_c import resolve_c_root
+
+
+def _kb_root() -> Path:
+    """Compatibility name for the runtime user c-tier root."""
+    return resolve_c_root()
 
 
 _CAND_TOKEN_RE = re.compile(r"\bCAND-[A-Z0-9][A-Z0-9-]*\b")
@@ -343,7 +351,7 @@ def update_verified_on_for_consumed_candidates(
     workspace: Path, op: str, project_root: Path
 ) -> dict[str, bool]:
     """Scan workspace artifacts for CAND-X citations; for each cited
-    candidate that exists in patterns/unverified/candidates.md, append a
+    candidate that exists in the c-tier candidate intake, append a
     `verified_on: a5_ops:{op}:case_<hash>` marker.
 
     Gate: ONLY fires when verification.json precision.status == "PASS"
@@ -385,6 +393,7 @@ def update_verified_on_for_consumed_candidates(
 
     candidates_md = (
         _kb_root()
+        / "reference"
         / "patterns" / "unverified" / "candidates.md"
     )
     if not candidates_md.exists():

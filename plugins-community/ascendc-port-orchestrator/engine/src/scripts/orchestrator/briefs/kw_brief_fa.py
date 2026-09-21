@@ -33,6 +33,7 @@ from briefs.kb_scope import (
     kb_file_applies_to_target,
     kb_section_applies_to_target,
 )
+from briefs import external_kb as _ext_kb
 
 
 def _is_fa_class_backward(op: str, op_class: str, workspace: Optional[Path]) -> bool:
@@ -175,7 +176,7 @@ def _fa_class_template_assembly_block(
         + _fa_assembly_compile_block()
         + _fa_assembly_verify_hard_block()
         + _fa_ge_host_gen_block()
-        + "Reference: `kb/okf/reference/porter/patterns/fa_class_template.md`\n"
+        + f"Reference: `{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_template.md')}`\n"
         "(P-P103) + design doc §9/§14/§15."
     )
 
@@ -202,7 +203,9 @@ def _fa_assembly_intro_block(op: str, op_class: str) -> str:
         "  (dtype/shape/head_num/layout). [The arch22 source is provided/bind-mounted\n"
         "  in graybox mode — read it where it is staged; in port_a3 it is the upstream\n"
         "  arch22 source and remains the migration truth.]\n"
-        "- **codified KB**: P-P103 `kb/okf/reference/porter/patterns/fa_class_template.md` (skeleton +\n"
+        f"- **codified KB**: P-P103 "
+        f"`{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_template.md')}`"
+        " (skeleton +\n"
         "  FA+X delta table + block inventory + host-tiling logic) + design doc §9/§14.\n"
         "\n"
         "A target archive, `.prior_art_scan.json`, DEBT203 branch base, or SHA-verified\n"
@@ -357,12 +360,12 @@ def _fa_assembly_deadlock_warning_block(target: str = "a5") -> str:
 # Path A's anchor; its
 # `applies_to: soc=Ascend950PR (V351 / A5, Ascend950PR_9579)` is what scopes the
 # A5 recipe below.
-_CROSS_CORE_SYNC_MD = "okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md"
+_CROSS_CORE_SYNC_MD = "knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md"
 
 # P-P116 — the a3/arch22 hand-authored cube+vector MIX attention STARTING SKELETON.
 # Its own header `applies_to: soc=Ascend910_9382` (a3/a2 → 220x) + `unverified_on:
 # soc=Ascend950PR` is what scopes the a3 delivery block below to a3 only.
-_A3_MIX_TEMPLATE_MD = "okf/reference/porter/patterns/fa_class_a3_mix_template.md"
+_A3_MIX_TEMPLATE_MD = "knowledge/ops/ascendc/examples/fa_class_a3_mix_template.md"
 
 
 def _mix_sync_a5_recipe_applies(target: str) -> bool:
@@ -428,7 +431,12 @@ def _fa_mix_two_paths_block() -> str:
         "  8 `matmul::MatmulImpl<>` instances ×3 cube stages + `MIX_AIC_1_2`, compiled first-try on\n"
         "  bisheng dav-c310, no hang, **122/122 T1 PASS** (A5, CANN 9.1.T500). This is PB-34's own\n"
         "  `verified_does_not_reproduce_on (FULL-OP scale)` bullet — read it in the PB-34 card\n"
-        "  (`kb/okf/runbooks/field-notes/build/pb-34-matmulimpl-with-manual-crosscoresetflag-waitflag-m.md`).\n"
+        "  (`"
+        + _ext_kb.kb_ref_display(
+            "knowledge/ops/ascendc/runbooks/compilation/"
+            "pb_34_matmulimpl_with_manual_crosscoresetflag_waitflag_m.md"
+        )
+        + "`).\n"
         "- **This is what PB-34 tells an A5 worker to do**: 'for a V220 cube-MIX fused op, the\n"
         "  DEFAULT A5 route is a LIGHT PORT (keep `MatmulImpl<>` + the manual flag chain; adapt only\n"
         "  the ACLRT_LAUNCH entry + host tiling), NOT a hand-rolled tile-Mmad rewrite.'\n"
@@ -444,7 +452,9 @@ def _fa_mix_two_paths_block() -> str:
         "`docs/design/FA_CLASS_DESIGN_NOTES.md#gdn-catlass-composable-primitives-design`). No KFC\n"
         "means no FFTS-slot contention, which is what makes manual flags SAFE here.\n"
         "- **Then take the handshake from the OKF card\n"
-        "  `kb/okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md` §4 (`:202`,\n"
+        "  `"
+        f"{_ext_kb.kb_ref_display('knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md')}"
+        "` §4 (`:202`,\n"
         "  verdict PUBLIC-API-runnable)** — **(A)** SYNC MODE 4, not mode 2 (`:219`); **(B)** disjoint\n"
         "  per-sub-block flag ids `id` / `id+16`, and **BOTH must be Set** — sending one leaves the\n"
         "  second AIV with no happens-before (`:226`); **(C)** the consumer `Wait`s on **`PIPE_V`**, NOT\n"
@@ -513,7 +523,7 @@ def _fa_a3_mix_skeleton_block() -> str:
         "(`fa_class_a3_mix_template.md`): START HERE, do NOT author from scratch\n"
         "For a **220x / a3** (`Ascend910_9382`, arch22) cube+vector MIX attention op the KB now carries a\n"
         "**device-proven hand-authored starting skeleton — P-P116**\n"
-        "(`kb/okf/reference/porter/patterns/fa_class_a3_mix_template.md`;\n"
+        f"(`{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_a3_mix_template.md')}`;\n"
         "`verified_on: Ascend910_9382; cann=9.0.0; DS famix (single-head) + famix_mh (multi-head)`). It is the a3\n"
         "COUNTERPART of the a5-only P-P103 `fa_class_template.md` / P-P102 `cube_vector_fusion.md` — **use P-P116\n"
         "for a3, NOT the a5 templates** (their arch35 §4 mode-4 sync / MicroAPI regbase softmax are WRONG on a3).\n"
@@ -630,7 +640,12 @@ def _fa_mix_pb34_v220_block() -> str:
         "cube-internal pipe sync remains **UNSOLVED in canonical KB** on V220: the 'use event ids ≥ 4'\n"
         "fix was **empirically falsified** (3 distinct schemes — raw `event_t(2..7)`, canonical\n"
         "`GetTPipePtr()->FetchEventID()` — ALL reproduce the same silent hang; PB-35 evidence,\n"
-        "  card `kb/okf/runbooks/field-notes/build/pb-35-event-t-0-for-cube-internal-pipe-sync-mte1-m-m-fix.md`).\n"
+        "  card `"
+        + _ext_kb.kb_ref_display(
+            "knowledge/ops/ascendc/runbooks/compilation/"
+            "pb_35_event_t_0_for_cube_internal_pipe_sync_mte1_m_m_fix.md"
+        )
+        + "`).\n"
         "**Use a LIBRARY cube.** This paragraph bounds the **hand-rolled** intra-AIC pipe sync ONLY —\n"
         "do NOT read it as 'cube is impossible on V220, fall back to vector'. A non-KFC library cube\n"
         "has ALREADY SHIPPED here (DEBT-206); the next section is that route and its bounds.\n"
@@ -947,9 +962,10 @@ def _fa_class_backward_stitch_block(op: str, op_class: str) -> str:
         "copying source blocks or lines.\n"
         "\n"
         "## THE GUIDE — read FIRST, follow EXACTLY:\n"
-        "`kb/okf/reference/porter/patterns/fa_class_template.md`\n"
+        f"`{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_template.md')}`\n"
         "→ **BACKWARD section** ('the FA-grad stitch recipe', the §after the FA+X table) +\n"
-        "`CAND-FA-TEMPLATE-GEN-BWD-1` (candidates.md). The recipe = 6 stitch steps + the\n"
+        "its CAND-FA-TEMPLATE-GEN-BWD-1 lineage subsection in that same external card. "
+        "The recipe = 6 stitch steps + the\n"
         "splitAxis DECISION RULE + the 14-fix build-drift checklist + the host-tiling field\n"
         "math + the REUSABLE-vs-GAP honesty table. It is a semantic recipe, not copy authority.\n"
         "\n"
@@ -1083,7 +1099,7 @@ def _fa_class_backward_stitch_block(op: str, op_class: str) -> str:
         "with tier1_pass/total/status + performance block) is in the backward-mode brief that\n"
         "composes around this block — honor it.\n"
         "\n"
-        "Reference: `kb/okf/reference/porter/patterns/fa_class_template.md`\n"
+        f"Reference: `{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_template.md')}`\n"
         "(P-P103 BACKWARD section) + `CAND-FA-TEMPLATE-GEN-BWD-1` + `CAND-FA-GQA-BWD-1` (the\n"
         "FA-2-backward MATH reference / oracle) + OL-200 (MIX pipeline) + OL-201 (perf caveat)."
     )
@@ -1116,7 +1132,9 @@ def _fa_class_backward_multilaunch_block(op: str, op_class: str) -> str:
         "stitch is opt-in only (`.opgen_state.json fa_backward_arch=\"fused\"` / `fa_backward_large_s`).\n"
         "\n"
         "## THE GUIDE — read FIRST:\n"
-        "`CAND-FA-GQA-BWD-1` (candidates.md — the validated FA-2-backward MATH reference: AIC-only\n"
+        f"`{_ext_kb.kb_ref_display('knowledge/ops/ascendc/examples/fa_class_template.md')}` "
+        "BACKWARD section, including the CAND-FA-GQA-BWD-1 lineage (the validated "
+        "FA-2-backward MATH reference: AIC-only\n"
         "cube `MatmulImpl` GEMMs + AIV-only vec, GM-staged, multi-launch host-serialized; sidesteps\n"
         "the MIX cross-core-sync PB-34/35) + **OL-200** (the MIX_AIC cube/vec software-pipelining\n"
         "perf knowledge, in the C2 backward-perf block below) + the repository's backward\n"

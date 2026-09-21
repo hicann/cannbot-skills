@@ -36,11 +36,11 @@ _HERE = Path(__file__).resolve()
 _PROJECT_ROOT = _HERE.parent.parent.parent.parent
 
 try:
-    from kb_paths import kb_root as _kb_root
+    from kb_paths import shared_kb_root as _shared_kb_root
 except ImportError:  # pragma: no cover — fallback if orchestrator/ not on sys.path
 
-    def _kb_root() -> Path:
-        return _PROJECT_ROOT.parent / "kb"
+    def _shared_kb_root() -> Path:
+        return _PROJECT_ROOT.parent / "kb" / "shared"
 
 # Engine-relative infra files (resolved against _PROJECT_ROOT == engine/).
 REQUIRED_FILES = (
@@ -48,12 +48,10 @@ REQUIRED_FILES = (
     "src/scripts/workflow/state_machine.py",
 )
 
-# KB files (2026-07-05: relocated to <plugin_root>/kb/, resolved via kb_root()).
-# OKF-only 迁移（2026-08）：校验 shared 纪律文档 + OKF 索引卡目录入口存在；
-# legacy 旧索引与 target 目录已退役。
+# Plugin-owned runtime discipline. Official b-tier knowledge is validated
+# separately through the cannbot-knowledge project installation.
 REQUIRED_KB_FILES = (
-    "shared/ANTI_PRESSURE_PROTOCOLS.md",
-    "okf/index.md",
+    "ANTI_PRESSURE_PROTOCOLS.md",
 )
 
 # Workflow FSM (2026-07-05: relocated to <plugin_root>/workflows/ per cannbot convention —
@@ -76,6 +74,29 @@ class O0Report:
     hook_errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     summary: str = ""
+
+
+def _external_knowledge_errors() -> list[str]:
+    """Validate the separately installed official knowledge dependency."""
+    try:
+        from briefs.external_kb import external_index_file, external_kb_root
+
+        knowledge_root = external_kb_root()
+        if knowledge_root is None:
+            return [
+                "cannbot-knowledge root "
+                "(fill CANNBOT_KNOWLEDGE_ROOT in .ascendc_env, or provide "
+                ".cannbot/knowledge.env)"
+            ]
+        knowledge_index = external_index_file()
+        if knowledge_index is None or not knowledge_index.is_file():
+            return [
+                "cannbot-knowledge index "
+                f"({knowledge_root}/artifacts/indexes/knowledge.sqlite3)"
+            ]
+        return []
+    except Exception as exc:
+        return [f"cannbot-knowledge preflight ({exc})"]
 
 
 def _active_backend_name() -> str:
@@ -300,10 +321,12 @@ def check_hook_integrity(workspace: Path = None) -> O0Report:
         if not (_PROJECT_ROOT / rel).exists():
             rep.missing_files.append(rel)
 
-    _kb = _kb_root()
+    _kb = _shared_kb_root()
     for rel in REQUIRED_KB_FILES:
         if not (_kb / rel).exists():
-            rep.missing_files.append(f"kb/{rel}")
+            rep.missing_files.append(f"kb/shared/{rel}")
+
+    rep.missing_files.extend(_external_knowledge_errors())
 
     _wf = _PROJECT_ROOT.parent / "workflows"
     for rel in REQUIRED_WORKFLOW_FILES:

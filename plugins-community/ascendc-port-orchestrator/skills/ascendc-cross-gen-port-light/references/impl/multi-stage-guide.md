@@ -1,7 +1,9 @@
 # 多阶段算子迁移指南
 
 > **适用场景**: 单个 kernel 需要 2+ 个算法阶段（如 LayerNorm 的 mean→var→norm，或 FusedAttention 的 softmax→scoring→TopK），阶段间需要共享 UB、传递 workspace
-> **核心模式来源**: 插件 KB 模式库。文中 `P-P*` / `OL-*` 代号见 `plugins-community/ascendc-port-orchestrator/kb/target/ascendc/patterns/PATTERN_INDEX.md`（按代号路由到 domains/ 详情文件）；`CAND-*` 见同目录 `unverified/candidates.md`。
+> **核心模式来源**: 外部知识卡。文中 `P-P*` / `OL-*` 为历史卡片代号，
+> 使用 `knowledge-query` 按代号或实际原语/症状获取当前卡片。`CAND-*` 仅表示历史候选线索，
+> 不当作可解析的官方外部卡；落地前必须用查询命中的稳定卡或用户 c-tier 证据重新验证。
 > **何时加载**: 算子有 ≥2 个顺序阶段，且阶段间 peak UB 需求不同
 
 ---
@@ -349,10 +351,10 @@ private:
 
 ### 2.4 GM workspace slot rotation（跨 core 管道 — 本文档不展开）
 
-**来源**: CAND-FA3, `candidates.md`（插件 KB `kb/target/ascendc/patterns/unverified/`）
+**来源**: 历史候选线索 CAND-FA3（无可直接解析的外部卡）
 **适用**: 多个 core 之间通过 GM workspace 传递中间结果，需要 module-(MAX_LAG+1) slot 轮转
 **使用条件**: MAX_LAG 可预先确定、每 slot 只有单一 producer、consumer 通过 CAND-FA1 跨 core flag 门控
-**本文档范围外**，详见 `candidates.md` 的 CAND-FA1（跨核 flag 门控）+ CAND-FA3；跨核 workspace 轮转的落地方案另见 `cube-migration-guide.md` 改动 6（跨核同步）与改动 8（workspace 规划）。
+**本文档范围外**。使用 `knowledge-query` 查询“跨核 flag 门控、GM workspace slot rotation”并以返回的稳定卡为证据；跨核 workspace 轮转的本 skill 落地说明见 `cube-migration-guide.md` 改动 6（跨核同步）与改动 8（workspace 规划）。
 
 ---
 

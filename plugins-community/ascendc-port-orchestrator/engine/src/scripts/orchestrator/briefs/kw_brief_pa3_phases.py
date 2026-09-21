@@ -29,6 +29,45 @@ from pathlib import Path
 from typing import Optional
 
 
+_CUBE_CLASS_MIX_TEMPLATE = (
+    "## CUBE-CLASS MIX (MANDATORY — OL-188, finalize gate REJECTS pure-VEC)\n"
+    "\n"
+    "This op is **cube-class** (`op_classification.json` carries `CUBE_MIX`, derived "
+    "from the CANN reference family/markers at classify-time). A pure-VEC kernel for a "
+    "cube-required op is a **HACK** (same anti-cheat tier as CPU fallback, OL-188): the "
+    "finalize gate `_check_architecture_class` will return **ARCHITECTURAL_HACK** and "
+    "block ship (PR #316). You MUST emit a MIX (cube + vector) kernel.\n"
+    "\n"
+    "**Concrete MIX scaffold** (the worked-example pattern lives in KB "
+    "`{_ref_cube_fusion}` — "
+    "read it; any prior-archive observation must be provenance-logged, advisory only, "
+    "and independently reconstructed and reverified):\n"
+    "- **File split**: `<op>_cube.h` (cube class) + `<op>_vec.h` (vec class) + "
+    "`<op>_kernel.h`/`.cpp` orchestrator; class names contain literal `Cube`/`Vec`.\n"
+    "- **Cube primitive**: manual `AscendC::Mmad` (FA-verified; `matmul::Matmul<>` was "
+    "numerically wrong ~500× on V220, so the verified A5 path picks `Mmad`).\n"
+    "- **Vec epilogue**: the op's vector reduction/activation (FA: `SoftmaxFlashV2`).\n"
+    "- **Cross-core sync**: `WorkspaceQueue<T, RING_SLOTS=3>` ring buffer, ONE per "
+    "producer↔consumer direction, paired flag IDs, raw `PIPE_FIX`/`PIPE_MTE3`/`PIPE_MTE2` "
+    "literals (CANN 9.0.0 forbids templated `pipe_t`). NOT inline `CrossCoreSetFlag` in "
+    "the loop (Antipattern A → 507015).\n"
+    "- **Task type**: `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)` (V220-native, "
+    "PB-28 FALSIFIED 2026-05-25 — do NOT arch-guard it out).\n"
+    "\n"
+    "**Generation methodology — understand→KB→research→regenerate** (NOT line-port / "
+    "NOT pure-vec fallback):\n"
+    "1. **Understand**: read the A3/V220 algorithm source (`op_kernel/*.h` + `op_host/*.h`) "
+    "for WHAT cube op + epilogue + dataflow. Do NOT line-port.\n"
+    "2. **KB**: consult `cube_vector_fusion.md` (§3.4) + L-tier RegBase MicroAPI (OL-143/144) "
+    "for the A5 mapping.\n"
+    "3. **Research (only if you cannot generate)**: consult trusted public API documentation "
+    "and interface-level KB evidence; target/prior artifacts remain advisory only.\n"
+    "4. **Generate from understanding** using the scaffold above.\n"
+    "5. **Regenerate** on gate rejection / precision-perf gap by looping back to "
+    "understand/KB/research — **NEVER** to a pure-VEC fallback (the gate will reject it)."
+)
+
+
 def _port_a3_cube_class_mix_block(workspace: Optional[Path]) -> str:
     """Layer 2 forcing-function (design `PORT_A3_CUBE_CLASS_MIX_ENFORCEMENT_DESIGN.md`
     §3.2), injected when the port_a3 op carries the `CUBE_MIX` tag in
@@ -58,43 +97,11 @@ def _port_a3_cube_class_mix_block(workspace: Optional[Path]) -> str:
         return ""
     if "CUBE_MIX" not in tags:
         return ""
-    return (
-        "## CUBE-CLASS MIX (MANDATORY — OL-188, finalize gate REJECTS pure-VEC)\n"
-        "\n"
-        "This op is **cube-class** (`op_classification.json` carries `CUBE_MIX`, derived "
-        "from the CANN reference family/markers at classify-time). A pure-VEC kernel for a "
-        "cube-required op is a **HACK** (same anti-cheat tier as CPU fallback, OL-188): the "
-        "finalize gate `_check_architecture_class` will return **ARCHITECTURAL_HACK** and "
-        "block ship (PR #316). You MUST emit a MIX (cube + vector) kernel.\n"
-        "\n"
-        "**Concrete MIX scaffold** (the worked-example pattern lives in KB "
-        "`kb/okf/reference/porter/patterns/cube_vector_fusion.md` — "
-        "read it; any prior-archive observation must be provenance-logged, advisory only, "
-        "and independently reconstructed and reverified):\n"
-        "- **File split**: `<op>_cube.h` (cube class) + `<op>_vec.h` (vec class) + "
-        "`<op>_kernel.h`/`.cpp` orchestrator; class names contain literal `Cube`/`Vec`.\n"
-        "- **Cube primitive**: manual `AscendC::Mmad` (FA-verified; `matmul::Matmul<>` was "
-        "numerically wrong ~500× on V220, so the verified A5 path picks `Mmad`).\n"
-        "- **Vec epilogue**: the op's vector reduction/activation (FA: `SoftmaxFlashV2`).\n"
-        "- **Cross-core sync**: `WorkspaceQueue<T, RING_SLOTS=3>` ring buffer, ONE per "
-        "producer↔consumer direction, paired flag IDs, raw `PIPE_FIX`/`PIPE_MTE3`/`PIPE_MTE2` "
-        "literals (CANN 9.0.0 forbids templated `pipe_t`). NOT inline `CrossCoreSetFlag` in "
-        "the loop (Antipattern A → 507015).\n"
-        "- **Task type**: `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)` (V220-native, "
-        "PB-28 FALSIFIED 2026-05-25 — do NOT arch-guard it out).\n"
-        "\n"
-        "**Generation methodology — understand→KB→research→regenerate** (NOT line-port / "
-        "NOT pure-vec fallback):\n"
-        "1. **Understand**: read the A3/V220 algorithm source (`op_kernel/*.h` + `op_host/*.h`) "
-        "for WHAT cube op + epilogue + dataflow. Do NOT line-port.\n"
-        "2. **KB**: consult `cube_vector_fusion.md` (§3.4) + L-tier RegBase MicroAPI (OL-143/144) "
-        "for the A5 mapping.\n"
-        "3. **Research (only if you cannot generate)**: consult trusted public API documentation "
-        "and interface-level KB evidence; target/prior artifacts remain advisory only.\n"
-        "4. **Generate from understanding** using the scaffold above.\n"
-        "5. **Regenerate** on gate rejection / precision-perf gap by looping back to "
-        "understand/KB/research — **NEVER** to a pure-VEC fallback (the gate will reject it)."
+    from briefs import external_kb as _ext
+    _ref_cube_fusion = _ext.kb_ref_display(
+        "knowledge/ops/ascendc/examples/cube_vector_fusion.md"
     )
+    return _CUBE_CLASS_MIX_TEMPLATE.format(_ref_cube_fusion=_ref_cube_fusion)
 
 
 def _port_a3_complete_deliverable_block() -> str:
@@ -189,14 +196,35 @@ def _port_a3_complete_deliverable_block() -> str:
     )
 
 
+_MIGRATION_LEVEL_TEMPLATE = """## MIGRATION LEVEL (per P114 migration_level plugin)
+
+Per PR #103 `ascendc-operator-A5-migration` decision tree:
+- **Resolved level**: **{level}**
+- **Rationale**: {rationale}
+
+**MUST-READ guides for this level**:
+{guides_md}
+
+**MUST-READ API cards returned by knowledge-query**:
+{query_md}
+
+L1 = mechanical port (all ops). L2 = RegBase MicroAPI rewrite (perf-critical /
+quant Cast / overflow / FP8). L3 = SIMT (Scatter/Gather + simple-index +
+high-parallel). L4 = escalate (tiling needs IsRegbaseSocVersion / UB shortage).
+
+**If your op's actual characteristics differ from the resolved level** (e.g.
+the heuristic missed a signal), document the mismatch in `analysis.md
+§Migration level audit` and the orchestrator will retry with corrected
+op_meta on next iteration.{escalation}
+"""
+
+
 def _migration_level_block(op: str, workspace: Path) -> str:
     """P114: invoke migration_level plugin → emit per-level KB references.
 
     Per Zheng 2026-05-16: plugin form, no if-else. Heuristic dispatch lives
     in migration_level.py; this block just consumes the LevelDecision and
-    formats it as worker-facing KB ref list. Migration KB content lives in
-    kb/okf/reference/{asc-devkit-vendored,porter}/ (imported from PR #103
-    `ascendc-operator-A5-migration` skill — P113).
+    formats it as a worker-facing guide list resolved through cannbot-knowledge.
     """
     import json as _json
     import sys as _sys
@@ -223,37 +251,32 @@ def _migration_level_block(op: str, workspace: Path) -> str:
 
     d = decide_migration_level(op_meta)
 
-    guides_md = "\n".join(f"  - `kb/okf/reference/{g}`"
-                         for g in d.guides)
-    subdirs_md = "\n".join(f"  - `kb/okf/reference/{s}` (whole subdir)"
-                          for s in d.extra_subdirs) if d.extra_subdirs else "  (none)"
+    from briefs import external_kb as _ext
+    guides_md = "\n".join(
+        f"  - `{_ext.kb_ref_display(guide)}`" for guide in d.guides
+    )
+    query_paths = []
+    for query in d.knowledge_queries:
+        query_paths.extend(
+            _ext.query_ref_displays(query, target="a5", card_type="apis", limit=3)
+        )
+    query_md = (
+        "\n".join(f"  - `{path}`" for path in dict.fromkeys(query_paths))
+        if query_paths else "  (none)"
+    )
     escalation = (
         "\n\n**⚠ ESCALATION SIGNAL**: this op matched an L4 heuristic. "
         "L4 is OUT OF SCOPE for the standard port_a3 worker path — escalate "
         "to architectural-tiling researcher path (TBD)."
         if d.needs_escalation else ""
     )
-    return f"""## MIGRATION LEVEL (per P114 migration_level plugin)
-
-Per PR #103 `ascendc-operator-A5-migration` decision tree:
-- **Resolved level**: **{d.level.value}**
-- **Rationale**: {d.rationale}
-
-**MUST-READ guides for this level**:
-{guides_md}
-
-**MUST-READ KB subdirs**:
-{subdirs_md}
-
-L1 = mechanical port (all ops). L2 = RegBase MicroAPI rewrite (perf-critical /
-quant Cast / overflow / FP8). L3 = SIMT (Scatter/Gather + simple-index +
-high-parallel). L4 = escalate (tiling needs IsRegbaseSocVersion / UB shortage).
-
-**If your op's actual characteristics differ from the resolved level** (e.g.
-the heuristic missed a signal), document the mismatch in `analysis.md
-§Migration level audit` and the orchestrator will retry with corrected
-op_meta on next iteration.{escalation}
-"""
+    return _MIGRATION_LEVEL_TEMPLATE.format(
+        level=d.level.value,
+        rationale=d.rationale,
+        guides_md=guides_md,
+        query_md=query_md,
+        escalation=escalation,
+    )
 
 
 def _pa3_context(
@@ -361,7 +384,7 @@ A.1.4. **MANDATORY architecture-class classification** (NEW 2026-05-25, OL-188, 
   **Decision** — two-signal combine:
 
   1. **Op-family signal**: check if `<port_source>` path matches any
-     cube-required family in `kb/okf/runbooks/operator-optimization/cube_required_ops.txt`
+     the cube-required classification produced by Phase O1.7
      (109 ops batch-learned from CANN 2026-05-25). Families:
      - `ops-transformer/attention` (30 ops) — FA / MLA / sparse / quant
      - `ops-nn/matmul` (14) — batch_mat_mul_v3 / quant_batch_matmul_v3 / etc.

@@ -45,10 +45,9 @@ def _default_candidates_path() -> Path:
     """c-tier intake target, resolved at call time (OKF-only migration
     2026-08-31).
 
-    The bundled legacy KB (`kb/target/…`, `kb/KB_INDEX.md`) is deleted and
-    bundled `kb/okf` is read-only at runtime; migrated legacy candidates live
-    as cand-* cards under `kb/okf/runbooks/field-notes/inferred/`. New
-    candidates sediment to the user-local c-tier KB
+    The plugin-local legacy KB is deleted; official b-tier is the read-only
+    external cannbot-knowledge checkout. The legacy inferred CAND stub set was
+    intentionally not migrated. New candidates sediment to the user-local c-tier KB
     (`$ASCENDC_PORT_USER_KB` or `~/.ascendc-port/user_kb`), same convention as
     the cann_learn carve-out.
     """

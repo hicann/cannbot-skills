@@ -475,11 +475,11 @@ L2 重写时，若算子使用 **Exp / Ln / Sqrt / Rsqrt / Div / Reciprocal**，
 
 | 文档类别 | 路径 | 说明 |
 |---------|------|------|
-| Register-based Vector / MicroAPI | KB 快照 `reg-base-vector/` | Reg 矢量计算编程指南 |
-| Memory-based Vector 操作 | KB 快照 `memory-base-vector/` | 掩码操作、归约计算、高维切分、连续计算 API |
-| 迁移相关官方文档 | KB 快照 `migration/` | 220x→351x 架构变更、基础/高阶 API 迁移指导、算子编译迁移、兼容性说明 |
-| SIMD 编程参考 | KB 快照 `simd/` | SIMD BuiltIn 关键字、语言扩展层 C API |
-| SIMT 编程参考 | KB 快照 `simt/` | SIMT 线程架构、同步机制、AI Core SIMT 编程 |
-| API 概述 | KB 快照 `api-overview/` | 编程接口概述、高阶/基础 API 概述 |
+| Register-based Vector / MicroAPI | `knowledge-query`: `Register-based Vector MicroAPI RegBase` | Reg 矢量计算编程指南 |
+| Memory-based Vector 操作 | `ascendc-api-knowledge-query`: 实际 API 名 | 掩码操作、归约计算、高维切分、连续计算 API |
+| 迁移相关官方文档 | `knowledge-query`: `220x 351x 架构 API 编译迁移` | 架构变更、API/编译迁移、兼容性说明 |
+| SIMD 编程参考 | `knowledge-query`: `SIMD BuiltIn C API` | SIMD BuiltIn 关键字、语言扩展层 C API |
+| SIMT 编程参考 | `knowledge-query`: `SIMT 线程 同步 AI Core` | SIMT 线程架构、同步机制、AI Core SIMT 编程 |
+| API 概述 | `ascendc-api-knowledge-query`: 实际 API 名 | 编程接口、高阶/基础 API 概述 |
 
-> 上表"KB 快照"路径位于 `cannbot-skills/plugins-community/ascendc-port-orchestrator/kb/target/ascendc/migration/`（本方法论 2026-05 旧版存档）。
+> 上表均通过已安装的外部知识查询 skill 解析；不扫描知识树。

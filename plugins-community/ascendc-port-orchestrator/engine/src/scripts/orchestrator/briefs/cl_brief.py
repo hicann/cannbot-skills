@@ -135,8 +135,9 @@ set up your sealed working dir. Your job:
    C34b compile-gate, C34c copy-shape, C35 KB-overlap). Candidates that pass are
    appended to the c-tier KB `reference/patterns/unverified/candidates.md` and
    sediment to c-tier via the deterministic intake gate (kb_invoke) — no
-   `.kb_promotion_pending` markers (kb_auto_promote is deleted). Migrated legacy
-   candidates live as cand-* cards in kb/okf/runbooks/field-notes/inferred/.
+   `.kb_promotion_pending` markers (kb_auto_promote is deleted). The legacy
+   inferred CAND stub set was intentionally not migrated; current candidates
+   remain in c-tier until governed external ingestion.
 
 ## Strict rules (enforced by hooks G11/G12/SC10 — your writes will be REJECTED
 if you violate)

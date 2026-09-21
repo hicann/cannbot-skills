@@ -186,14 +186,14 @@ _FA_NOARG_GOLDENS = {
     # test_kw_brief_soc_scope_debt208.py, which also mutation-proves the predicate.
     # Content change is the point; re-pinned deliberately, not regenerated silently.
     #
-    # Hash updated DELIBERATELY a FIFTH time 2026-08-31 (OKF-only 迁移): the block's
-    # KB pointers moved off the legacy layout — `target/ascendc/fa_class/cross_core_sync.md`
-    # → the OKF card `kb/okf/runbooks/operator-optimization/fa-cross-core-sync-workspacequeue.md`
-    # (§4 line anchors re-based), `PLATFORM_BUGS.md`/`OPERATIONAL_KNOWLEDGE.md` file:line
-    # citations → pb-34/pb-35 card paths / the OL-275 entry id, and the a3 witness/example
-    # `src/skills/references/...` dead paths → `kb/okf/reference/porter/patterns/` +
-    # plugin `examples/a3_mix_fa_min/`. Same semantics, new canonical locations.
-    "_fa_assembly_deadlock_warning_block": "8b9be0b30bbc94de6c28767c9ca367c6507a72fa612fefb77b873a2d82eb6961",
+    # Hash updated deliberately after the external-knowledge migration. The configured
+    # composition is asserted separately because it embeds the fixture's tmpdir.
+    # Updated again after removing the plugin-local fallback:
+    # unconfigured mode no longer falls back to plugin-local cards, and the marker
+    # text changed to 「cannbot-knowledge 未安装、配置无效或未收录」. Re-pinned after
+    # diffing bb0bec32-vs-HEAD generated blocks: 4 changed lines, all carrying the
+    # ⚠️ marker; non-marker lines 0.
+    "_fa_assembly_deadlock_warning_block": "f5600c3f7a0c4d19f83d51aef95339585af98e7c0ea3c7fd7b8b4ee54e9e8692",
     "_fa_assembly_compile_block": "0cdf20aa8b996c46fb2e0b9035db439e434aa984a0ec69bfbc4abc7d85c6b6d5",
     "_fa_assembly_verify_hard_block": "d9fe58d2c7e9af3d6a302a331527f4db5faafd7ad5dccf609ef01433d457b1a5",
     # cannbot re-pin (v3.13.0 re-sync): builder output == v3.13.0's with only
@@ -205,22 +205,51 @@ _FA_NOARG_GOLDENS = {
 
 
 @pytest.mark.parametrize("fn,sha", sorted(_FA_NOARG_GOLDENS.items()))
-def test_fa_noarg_builders_byte_identical(fn, sha):
+def test_fa_noarg_builders_byte_identical(fn, sha, no_external_kb):
+    """Byte-lock the FA leaf builders with the external KB UNCONFIGURED.
+
+    The deterministic mode — see the `_fa_assembly_deadlock_warning_block`
+    re-pin note). Configured-mode behaviour is covered by
+    `test_fa_builders_external_repo_mode`.
+    """
     from briefs import kw_brief_fa as fa
 
     assert _sha(getattr(fa, fn)()) == sha, f"{fn} emitted string drifted"
 
 
-def test_fa_assembly_intro_byte_identical():
+def test_fa_builders_external_repo_mode(external_kb_fixture):
+    """配置外部知识仓后：迁移卡的引用解析为外部仓绝对路径。
+
+    且 scope 谓词恢复（a5 组合里 PB-34 缺席、§4 卡以 snake 名绝对路径出现）。
+    """
+    from briefs import kw_brief_fa as fa
+    from briefs.kw_brief_fa import (
+        _fa_assembly_deadlock_warning_block,
+        _fa_assembly_intro_block,
+    )
+
+    ext = str(external_kb_fixture)
+    intro = _fa_assembly_intro_block("flash_attention_score", "FA_CLASS ATTENTION")
+    assert ext + "/knowledge/ops/ascendc/examples/fa_class_template.md" in intro
+
+    block = _fa_assembly_deadlock_warning_block("a5")
+    assert "### PB-34 — MIX cube+vec SILENT-HANG" not in block        # scope restored
+    assert ext + "/knowledge/ops/ascendc/optimizations/fa_cross_core_sync_workspacequeue.md" in block
+    assert "⚠️ 未找到" not in block                                    # every reference resolved
+
+
+def test_fa_assembly_intro_byte_identical(no_external_kb):
     from briefs import kw_brief_fa as fa
 
     got = _sha(getattr(fa, '_fa_assembly_intro_block')("flash_attention_score", "FA_CLASS ATTENTION"))
-    # Re-pinned 2026-09-05 (reference/ 目录重组): 逐项在改动前后两棵树上生成字符串做 diff，
-    # _fa_assembly_intro_block 差 2 行 / _pa3_context 差 12 行 / _pa3_phase_a_1 差 2 行，
-    # 非路径行均为 0 —— 变化仅为 KB 路径改写。
-    # Re-pinned 2026-08-31 (OKF-only 迁移): P-P103 pointer now names
-    # `kb/okf/reference/porter/patterns/fa_class_template.md`.
-    assert got == "fdad3c01332ca3836daf92ada0822a6e36ca565b371df7de4bc393ac1ac071e0"
+    # Re-pinned 2026-09-17 (去双轨模式, bb167473): marker text changed to
+    # 「cannbot-knowledge 未安装、配置无效或未收录」; bb0bec32-vs-HEAD diff = 1 line
+    # (the P-P103 pointer's ⚠️ marker), non-marker lines 0.
+    # Re-pinned 2026-09-17 (外部知识仓适配): the P-P103 pointer now goes through
+    # `external_kb.kb_ref_display`; pinned here with the external repo
+    # UNCONFIGURED (deterministic ⚠️-marker form). Configured-mode assertion in
+    # `test_fa_builders_external_repo_mode`.
+    assert got == "4a8e4feb99f4eb480ce4a28c4f78a05f0d2b075f222d94724f462f336a6f2ab5"
 
 
 def test_fa_predicates():
@@ -262,15 +291,20 @@ def test_forced_architecture_block():
 # ---------------------------------------------------------------------------
 
 _PA3_PHASE_GOLDENS = {
-    # Re-pinned 2026-08-31 (OKF-only 迁移): KB pointers moved to
-    # `kb/okf/reference/...` + plugin `templates/fa_class/op_host/`.
+    # Re-pinned 2026-09-17 (去双轨模式, bb167473): `_pa3_context` 内嵌的
+    # `_migration_level_block`/`_port_a3_cube_class_mix_block` 的 ⚠️ 标记文案改为
+    # 「cannbot-knowledge 未安装、配置无效或未收录」。
+    # Re-pinned 2026-09-17 (外部知识仓适配): `_pa3_context` 内嵌的
+    # `_migration_level_block`/`_port_a3_cube_class_mix_block` 经 `kb_ref_display`
+    # 输出；本 pin 为未配置外部仓的确定性形态（⚠️ 未找到 标记）。配置模式见
+    # `test_pa3_blocks_external_repo_mode`。
     # `_pa3_phase_a_2`'s previous pin was already stale before this migration
     # (baseline drift) — re-pinned to current content, no text change from OKF.
     # Re-pinned 2026-09-02: `_pa3_phase_a_2` pin stale again on the 1358ec68
     # baseline (baseline drift — baseline and HEAD emit byte-identical output,
     # verified by diff); re-pinned to current content.
-    "_pa3_context": "82d838c7a4ea8cecd95873a02af0bc5ac55d8844218092620cedcb94ef69b768",
-    "_pa3_phase_a_1": "bbe5f1c047a32023c04abadd3f4af3a9bef77596ec3da5aeeeedfd864b7f648b",
+    "_pa3_context": "4537c979a98825f20ee4401fa2c25f3cf596dfedad287c42453cf045ec0ad97f",
+    "_pa3_phase_a_1": "7a882d3c4b5b78080aa59f4f6e7193cbf8ee87f81984e8f7146d21e51c510e65",
     "_pa3_phase_a_2": "b039e18ed322c08515f682efc96a476d5e2f3df62d1dd28715d4badb8740fddd",
     "_pa3_phase_a_3": "c5903dd6e58f8bac3f6dcee3c9dd0c2db3fcb4febdfd702a87992e68ac1f0d27",
     "_pa3_phase_b": "4d7022f4f05432c2db701d1a2eb62b3c7cc07ea010c2939f6c421313b6b3d2c5",
@@ -299,36 +333,51 @@ def _pa3_kw():
 
 
 @pytest.mark.parametrize("fn,sha", sorted(_PA3_PHASE_GOLDENS.items()))
-def test_pa3_phase_builders_byte_identical(fn, sha):
+def test_pa3_phase_builders_byte_identical(fn, sha, no_external_kb):
     from briefs import kw_brief_pa3_phases as ph
 
     assert _sha(getattr(ph, fn)(**_pa3_kw())) == sha, f"{fn} emitted string drifted"
 
 
 @pytest.mark.parametrize("fn,sha", sorted(_PA3_ORCH_GOLDENS.items()))
-def test_pa3_orch_phase_builders_byte_identical(fn, sha):
+def test_pa3_orch_phase_builders_byte_identical(fn, sha, no_external_kb):
     from briefs import kw_brief_port_a3 as po
 
     assert _sha(getattr(po, fn)(**_pa3_kw())) == sha, f"{fn} emitted string drifted"
 
 
-def test_pa3_helper_blocks_byte_identical():
+def test_pa3_helper_blocks_byte_identical(no_external_kb):
     from briefs import kw_brief_pa3_phases as ph
 
-    # Re-pinned 2026-09-05 (reference/ 目录重组): 本函数下 3 个断言中的 2 个重钉——
-    # _migration_level_block（差 8 行，长度 863→1337，因 1 个子目录拆成 7 个）与
-    # _port_a3_cube_class_mix_block（差 1 行，cube_vector_fusion.md 路径）。两者
-    # 均在改动前后两棵树上生成同一字符串做 diff，非路径行为 0。
-    # _port_a3_complete_deliverable_block 未变（不含 KB 路径）。
-    # _migration_level_block 的 guides/extra_subdirs
-    # 改指新路径。diff 实测 8 行变化、非路径行 0；长度 863→1337 是因为旧的单个
-    # `migration/api-overview/` 子目录按上游分类拆成了 7 个新子目录。
-    # Re-pinned 2026-08-31 (OKF-only 迁移): `kb/target/ascendc/...` pointers →
-    # `kb/okf/reference/...` + plugin `templates/fa_class/op_host/`.
+    # Re-pinned 2026-09-17 (去双轨模式, bb167473): 本函数下 3 个断言中的 2 个重钉——
+    # `_migration_level_block` 与 `_port_a3_cube_class_mix_block` 的标记文案变化。
+    # `_port_a3_complete_deliverable_block` 未变（不含 KB 路径），hash 保持。
+    # bb0bec32-vs-HEAD 两棵树生成同一字符串做 diff 验证：差异全部落在 ⚠️ 标记行。
+    # Re-pinned 2026-09-17 (外部知识仓适配): `_migration_level_block` 的
+    # guides/subdirs 与 `_port_a3_cube_class_mix_block` 的 cube_vector_fusion
+    # 指引改经 `kb_ref_display` 输出；本 pin 为未配置外部仓的确定性形态
+    # （⚠️ 未找到 标记）。
     ws = _ws(["a3_to_a5_port", "CUBE_MIX"])
     assert _sha(getattr(ph, '_migration_level_block')("mat_mul_v3", ws)) == \
-        "2f8dc54c67394aea6bdee8dc36b537a985bf739dc92fbca533a9d868c2a87a4f"
+        "2efd53f64ff389235df515706da450d9615bc081deca865d804fe9e44101ea6e"
     assert _sha(getattr(ph, '_port_a3_cube_class_mix_block')(ws)) == \
-        "3144d318ed6cc50f43993dd35af6914868f81cda65fcfae36084eeb9be172ee0"
+        "6e49e7136c256935a143dd1c3fcdf1ad728f3fbe099200e85893c9507103bcbf"
     assert _sha(getattr(ph, '_port_a3_complete_deliverable_block')()) == \
         "caa6ba76a1250f6e8365576e9181da972dd5b962871de5617070229509ff2425"
+
+
+def test_pa3_blocks_external_repo_mode(external_kb_fixture):
+    """配置外部知识仓后，playbook guides 与模板解析为外部仓绝对路径。"""
+    from briefs import kw_brief_pa3_phases as ph
+    from briefs.kw_brief_pa3_phases import (
+        _migration_level_block,
+        _port_a3_cube_class_mix_block,
+    )
+
+    ext = str(external_kb_fixture)
+    ws = _ws(["a3_to_a5_port", "CUBE_MIX"])
+    ml = _migration_level_block("mat_mul_v3", ws)
+    assert ext + "/knowledge/ops/ascendc/guides/cross_gen_migration_guide/l1_implementation.md" in ml
+    assert "asc-devkit-vendored" not in ml
+    mix = _port_a3_cube_class_mix_block(ws)
+    assert ext + "/knowledge/ops/ascendc/examples/cube_vector_fusion.md" in mix

@@ -40,10 +40,21 @@ from reference_source import uses_npubench_reference
 
 
 def _workspace_uses_npubench_reference(workspace: Path) -> bool:
-    """Return whether the brief must use a frozen old-format task contract."""
+    """Return whether the brief must use a frozen old-format task contract.
+
+    A workspace whose durable state has no explicit reference binding simply
+    is not npubench-bound (e.g. pre-O2.5 fixtures and smoke workspaces):
+    ``ReferenceSourceError`` must not crash brief rendering for those: the
+    question here is a boolean discriminator, not a binding validation gate
+    (2026-09-20: 21 ut regressions vs the merge-base after the W5 port-mode
+    dispatch started routing these briefs through this helper).
+    """
     if not (Path(workspace) / ".opgen_state.json").exists():
         return False
-    return uses_npubench_reference(workspace)
+    try:
+        return uses_npubench_reference(workspace)
+    except Exception:
+        return False
 
 
 _TILELANG2ASCENDC_SOURCE_BOUNDARY = """## TileLang2AscendC source boundary — implementation context only

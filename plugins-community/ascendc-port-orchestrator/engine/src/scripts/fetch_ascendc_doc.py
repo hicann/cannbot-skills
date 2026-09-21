@@ -96,7 +96,10 @@ def fetch_api_by_name(api_name: str) -> str:
                 }""", api_name)
 
             if not links:
-                return f"ERROR: API '{api_name}' not found in catalog. Check ASCENDC_API_CATALOG.md for valid names."
+                return (
+                    f"ERROR: API '{api_name}' not found on the selected official catalog page. "
+                    "Use ascendc-api-knowledge-query and the active CANN header to verify the name."
+                )
 
             # Use first match (SIMD version preferred over Reg version)
             target = links[0]

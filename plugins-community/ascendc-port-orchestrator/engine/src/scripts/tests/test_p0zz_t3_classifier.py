@@ -12,8 +12,8 @@
 undefined, kernel is judged against CANN-on-NPU reference under T1-equivalent
 thresholds (loosened only when reference itself is non-deterministic).
 
-Spec: kb/okf/runbooks/field-notes/precision/ol-109-two-tier-precision-verdict.md §T3
-(legacy OPERATIONAL_KNOWLEDGE OL-109; commits 4ad4829 + 46b675e). Trigger requires BOTH:
+Spec: external knowledge card OL-109, two-tier precision verdict, §T3
+(commits 4ad4829 + 46b675e). Trigger requires BOTH:
   1. CPU truth structurally undefined (cpu_model.forward raised torch_npu err)
   2. Reference IS non-deterministic on test inputs (3× ref-run check)
 

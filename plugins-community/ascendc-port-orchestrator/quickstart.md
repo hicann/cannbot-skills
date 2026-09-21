@@ -112,6 +112,22 @@ bash "$PLUGIN_DIR/init.sh" project codearts --strict-deps    # 或 global codear
 之后用 `codearts run --model <provider>/<model>` 指定（引擎侧经 `AOG_OPENCODE_MODEL` 透传 `--model`）。
 codearts CLI 必须与引擎同环境（Linux CLI 配 WSL/Linux 引擎，Windows CLI 配 Windows 引擎），不支持跨 WSL interop 调用。
 
+## 2c. 安装官方知识库（Claude/OpenCode 必需）
+
+port 不安装、复制或索引官方知识。对实际算子项目运行独立知识仓的统一安装器：
+
+```bash
+git clone https://gitcode.com/cann/cannbot-knowledge.git /path/to/cannbot-knowledge
+bash /path/to/cannbot-knowledge/install.sh claude /path/to/your-operator-project consumer
+# OpenCode 使用：
+bash /path/to/cannbot-knowledge/install.sh opencode /path/to/your-operator-project consumer
+```
+
+安装器会准备完整知识仓和索引，并写入
+`/path/to/your-operator-project/.cannbot/knowledge.env`。必须从该项目（或其子目录）启动 port；
+也可为单次运行显式导出 `CANNBOT_KNOWLEDGE_ROOT`。缺少有效知识根或索引时，Phase O0 会 fail-closed，
+不会回退插件内旧知识。
+
 ## 3. 配置 NPU 环境
 
 安装器会在实际插件目录生成 `engine/workspace/.ascendc_env`（Claude Code 安装时即 §1 的

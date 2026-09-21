@@ -40,6 +40,7 @@ def test_ready_in_real_repo_when_registration_is_armed(monkeypatch):
         "_check_hook_registration",
         lambda: ("plugin", Path("hooks/hooks.json"), []),
     )
+    monkeypatch.setattr(phase_o0, "_external_knowledge_errors", lambda: [])
     rep = phase_o0.check_hook_integrity()
     assert rep.verdict == "READY"
     assert not rep.missing_files
@@ -55,10 +56,11 @@ def test_blocked_when_critical_missing(tmp_path, monkeypatch):
         "_check_hook_registration",
         lambda: ("plugin", Path("hooks/hooks.json"), []),
     )
+    monkeypatch.setattr(phase_o0, "_external_knowledge_errors", lambda: [])
     rep = phase_o0.check_hook_integrity()
     assert rep.verdict == "BLOCKED"
     # Should list missing files
-    assert any("okf/index.md" in f or "ANTI_PRESSURE_PROTOCOLS.md" in f
+    assert any("ANTI_PRESSURE_PROTOCOLS.md" in f
                or "workflow_critic.py" in f for f in rep.missing_files)
 
 
@@ -71,12 +73,15 @@ def test_degraded_when_deploy_missing_only(tmp_path, monkeypatch):
     """
     engine = tmp_path / "engine"
     monkeypatch.setattr(phase_o0, "_PROJECT_ROOT", engine)
-    monkeypatch.setattr(phase_o0, "_kb_root", lambda: tmp_path / "kb")
+    # 94970b65 renamed the module-level helper to `_shared_kb_root`; keep
+    # pointing the KB root at the tmp tree under its current name.
+    monkeypatch.setattr(phase_o0, "_shared_kb_root", lambda: tmp_path / "kb")
     monkeypatch.setattr(
         phase_o0,
         "_check_hook_registration",
         lambda: ("plugin", Path("hooks/hooks.json"), []),
     )
+    monkeypatch.setattr(phase_o0, "_external_knowledge_errors", lambda: [])
     # Engine-relative critical hook files
     for rel in phase_o0.REQUIRED_FILES:
         full = engine / rel
@@ -96,6 +101,24 @@ def test_degraded_when_deploy_missing_only(tmp_path, monkeypatch):
     rep = phase_o0.check_hook_integrity()
     assert rep.verdict == "DEGRADED", rep
     assert rep.missing_scripts
+
+
+def test_missing_external_knowledge_blocks_before_spawn(monkeypatch):
+    monkeypatch.setattr(
+        phase_o0,
+        "_check_hook_registration",
+        lambda: ("plugin", Path("hooks/hooks.json"), []),
+    )
+    monkeypatch.setattr(
+        phase_o0,
+        "_external_knowledge_errors",
+        lambda: ["cannbot-knowledge root (.cannbot/knowledge.env)"],
+    )
+    rep = phase_o0.check_hook_integrity()
+    assert rep.verdict == "BLOCKED"
+    assert rep.missing_files == [
+        "cannbot-knowledge root (.cannbot/knowledge.env)"
+    ]
 
 
 def test_format_block_message_lists_files():

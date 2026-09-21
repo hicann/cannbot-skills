@@ -29,6 +29,7 @@ from typing import Optional
 from finalize_shared import _is_v220_ec41_output_pad_exempt  # DEBT-201: shared pure leaf
 from finalize_pipeline import (  # module-identity-sensitive constants (stay in parent)
     _HERE, _PROJECT_ROOT)
+from briefs import external_kb as _ext_kb
 from npubench.npubench_finalize_contract import (
     resolve_npubench_workspace,
     validate_npubench_finalize_evidence,
@@ -551,8 +552,9 @@ def _check_pp88_compliance(workspace: Path) -> Optional[str]:
     if rep.verdict == "FAIL":
         return (
             "P0abi P-P88 compliance gate: " + rep.rationale +
-            "  Reference: kb/okf/runbooks/field-notes/build/"
-            "pb-26-ascendc-tanh-fp32-primitive-bimodal-precision-floo.md "
+            "  Reference: " + _ext_kb.kb_ref_display(
+                "knowledge/ops/ascendc/runbooks/compilation/pb_26_ascendc_tanh_fp32_primitive_bimodal_precision_floo.md"
+            ) + " "
             "(P-P88 legacy card: sigmoid-form remediation, MANDATORY-on-match for "
             "transcendental ops using AscendC::Tanh / Sigmoid). Either "
             "(a) rewrite the risky primitive call to sigmoid-form (Exp + "

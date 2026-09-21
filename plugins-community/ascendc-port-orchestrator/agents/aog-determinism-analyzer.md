@@ -58,9 +58,9 @@ directive) can apply a surgical fix.
    - `DET_POLICY`: `required` (only policy under which you're spawned)
    - `trigger`: `"Phase D det-check failed"` OR `"optimizer introduced non-det at iter N"`
    - `observed`: summary of verification.json det field
-6. KB root: determinism 域已卡片化 —— `grep -rn "P-P61\|A-P61" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`
+6. KB source: invoke `knowledge-query` for `determinism P-P61 A-P61` with the current platform
    定位 P-P61 positive / A-P61 anti-pattern 卡（如
-   `kb/okf/runbooks/operator-optimization/p-p61-determinism-preserving-patterns-*.md`），
+   `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/optimizations/p_p61_determinism_preserving_patterns_*.md`），
    你按这套卡做分类
 
 ## Workflow — bisection for non-determinism
@@ -205,11 +205,10 @@ aog-determinism-analyzer is analyzer-only (no Edit/Write on kernel; can't be "st
 1. **Broaden KB + prior-analyzer search**:
    ```bash
    # A-P61 and P-P61 catalog beyond the initial load
-   grep -rn "A-P61\.\|P-P61\." ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/
+   # invoke knowledge-query: query="determinism P-P61 A-P61", platform=<target>
    # Prior determinism_reports from other ops
    grep -rn "root.*cause\|CONFIRMED" output/npukernelbench/src/kernels/*/determinism_report.md 2>/dev/null | head -10
-   # Check for novel patterns (not in A-P61 catalog) — those become KB candidates
-   grep -rn "KB candidate\|novel.*non-det" ${CLAUDE_PLUGIN_ROOT}/kb/ 2>/dev/null
+   # Check c-tier findings and query "novel non-determinism"; new evidence becomes a c-tier candidate
    ```
 2. **Challenge your bisection granularity**: was "phase" the right unit? Maybe non-det lives in a cross-phase sync (e.g., Phase 1 output buffer read by Phase 2 without proper barrier = barrier-missing, which is A-P61.5 but hides between phases, not within). Refine bisection to cross-phase boundaries.
 3. Append to `determinism_report.md`:

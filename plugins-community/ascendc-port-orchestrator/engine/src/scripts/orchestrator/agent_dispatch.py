@@ -676,6 +676,44 @@ def _opencode_graybox_binds(repo_root: Path) -> list[Path]:
     return extra_ro
 
 
+def _external_kb_governance_binds(_kb_root: Optional[Path]) -> list:
+    """Read-only binds for the external KB governance schemas (best-effort)."""
+    binds: list[Path] = []
+    if _kb_root is None:
+        return binds
+    try:
+        for _gov_name in ("registries.yaml", "profiles.yaml"):
+            _gov = _kb_root / "governance" / "schemas" / _gov_name
+            if _gov.is_file():
+                binds.append(_gov)
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "external-kb governance bind resolution skipped: %s", exc
+        )
+    return binds
+
+
+def _external_kb_readonly_binds(_ext_kb) -> list:
+    """Read-only binds for the external KB index + governance schemas.
+
+    Best-effort: any failure keeps the binds resolved so far (the
+    knowledge/ card subtree itself is bound by the caller).
+    """
+    binds: list[Path] = []
+    try:
+        _kb_root = _ext_kb.external_kb_root()
+        _kb_index = _ext_kb.external_index_file()
+        if _kb_index is not None and _kb_index.is_file():
+            binds.append(_kb_index)
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "external-kb readonly bind resolution skipped: %s", exc
+        )
+        return binds
+    binds.extend(_external_kb_governance_binds(_kb_root))
+    return binds
+
+
 def _graybox_extra_ro(graybox_cfg: dict, repo_root: Path) -> list[Path]:
     """Extra read-only bind list for the graybox seal."""
     extra_ro: list[Path] = []
@@ -687,6 +725,24 @@ def _graybox_extra_ro(graybox_cfg: dict, repo_root: Path) -> list[Path]:
         # worker runs as the same UID and could chmod the staged files.
         extra_ro.append(graybox_cfg["npubench_bundle"])
         extra_ro.append(graybox_cfg["npubench_state"])
+    # OKF v0.2 适配（2026-09-17）：配置 CANNBOT_KNOWLEDGE_ROOT 时，外部知识仓是
+    # brief/卡片引用的实际载体——graybox 工作者必须能只读访问它，否则 brief 中
+    # 解析出的绝对路径在沙箱内不可读，b-tier 知识注入在 worker 侧静默失效。
+    # 只绑定 knowledge/ 卡片子树（75MB）：cann-*-raw 源码与 artifacts/ 索引与
+    # worker 无关，绑定会把它们卷进 manifest 深扫描拖慢每次 spawn。
+    try:
+        from briefs import external_kb as _ext_kb
+
+        _ext_knowledge = _ext_kb.external_knowledge_dir()
+    except Exception:
+        _ext_knowledge = None
+    if _ext_knowledge is not None:
+        extra_ro.append(_ext_knowledge)
+        # 2026-09-18：沙箱内 staged 的 knowledge-query（新版）补查还需要
+        # sqlite 索引与 governance schemas，按 host 相同绝对路径只读绑定。
+        # 索引为 302MB 单文件，绝不能进构造 manifest 深扫描——
+        # _graybox_scan_srcs 已同步加入扫描豁免。
+        extra_ro.extend(_external_kb_readonly_binds(_ext_kb))
     return extra_ro
 
 
@@ -701,6 +757,36 @@ def _graybox_plugin_arg(_gs, allow_ro) -> list[str]:
             backend=_gs.isolation_backend(),
         ),
     ]
+
+
+def _external_kb_scan_exempt() -> set:
+    """Resolved external-KB paths exempt from the construction-manifest scan.
+
+    Best-effort by design: the exempt set only shrinks the curated deep
+    scan, so any resolution failure must never fail the spawn.
+    """
+    try:
+        from briefs import external_kb as _ext_kb
+
+        _ext_knowledge = _ext_kb.external_knowledge_dir()
+        if _ext_knowledge is None:
+            return set()
+        exempt = {_ext_knowledge.resolve()}
+        _kb_index = _ext_kb.external_index_file()
+        if _kb_index is not None:
+            exempt.add(_kb_index.resolve())
+        _kb_root = _ext_kb.external_kb_root()
+        if _kb_root is not None:
+            for _gov_name in ("registries.yaml", "profiles.yaml"):
+                exempt.add(
+                    (_kb_root / "governance" / "schemas" / _gov_name).resolve()
+                )
+        return exempt
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "external-kb scan-exempt resolution skipped (best-effort): %s", exc
+        )
+        return set()
 
 
 def _graybox_scan_srcs(
@@ -724,6 +810,9 @@ def _graybox_scan_srcs(
         (repo_root / "workspace" / ".opencode-skills-runtime").resolve(),
         (repo_root / "workspace" / ".seeds").resolve(),
     }
+    # OKF v0.2 适配（2026-09-17）：外部知识仓 knowledge/ 是公共知识（非 task 答案），
+    # 卡片正文含算子代码片段，深扫描既慢（5662 文件/spawn）又会误判 answer-bearing。
+    _oc_scan_exempt.update(_external_kb_scan_exempt())
     for _srcc in extra_ro:
         if Path(_srcc).resolve() not in _oc_scan_exempt:
             _scan_srcs.append(_srcc)
@@ -872,8 +961,9 @@ def _build_graybox_seal(
             "sandbox-exec) — refusing to spawn unsandboxed"
         )
     repo_root = Path(__file__).resolve().parents[3]  # engine/
-    # 2026-07-05: KB relocated to <plugin_root>/kb/ (repo_root.parent == plugin_root).
-    kb_dir = repo_root.parent / "kb"
+    # Only packaged orchestration discipline is plugin-owned. Official domain
+    # knowledge is mounted separately from cannbot-knowledge by _graybox_extra_ro.
+    kb_dir = repo_root.parent / "kb" / "shared"
     extra_ro = _graybox_extra_ro(graybox_cfg, repo_root)
     return _graybox_allow_and_seal(
         _gs, workspace, agent_type, graybox_cfg,

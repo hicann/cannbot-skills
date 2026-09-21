@@ -141,17 +141,33 @@ npm registry。安装输出必须包含 `opencode resolves injected agents + ski
 `AOG_OPENCODE_STREAM_SILENCE_TIMEOUT_SEC` 单独覆盖。`AOG_OPENCODE_SKIP_RUNTIME_CHECK=1` 仅限测试或短时排障，
 不能作为常规配置。
 
+### 1.3b cannbot-knowledge 安装（两种 harness 都必需）
+
+port 不负责取得、更新、安装或索引官方知识。使用独立知识仓 master 的统一安装器，把 consumer 能力安装到
+实际算子项目：
+
+```bash
+git clone https://gitcode.com/cann/cannbot-knowledge.git /path/to/cannbot-knowledge
+bash /path/to/cannbot-knowledge/install.sh claude /path/to/your-operator-project consumer
+# 或
+bash /path/to/cannbot-knowledge/install.sh opencode /path/to/your-operator-project consumer
+```
+
+安装器写入 `<operator-project>/.cannbot/knowledge.env` 并准备索引。port 从启动目录向上定位该项目配置；
+显式环境变量 `CANNBOT_KNOWLEDGE_ROOT` 只作为单次覆盖。不要把 knowledge root 重复写进
+`engine/workspace/.ascendc_env`。根或索引无效时 Phase O0 阻断，不回退插件内旧知识。
+
 ### 1.4 离线或受限网络
 
 OpenCode 首次安装需要一次性拉取 npm 依赖。完全离线时，先在联网机器运行 `init.sh … opencode` 并触发一次
 `opencode run`，再将生成的 `$CONFIG_ROOT/{node_modules,package.json,package-lock.json}` 复制到目标机器；或预置
 npm 镜像。无论哪种方式，仍须完成上面的 structural 和 safety-net 验证。
 
-`init.sh` 对两种 harness 都会创建用户本地 KB、构建官方 OKF 索引，并从模板 scaffold
-`engine/workspace/.ascendc_env`。
+port 的 `init.sh` 对两种 harness 都只创建用户本地 KB 并从模板 scaffold
+`engine/workspace/.ascendc_env`；官方知识 checkout、Skill 与索引由上一节的 knowledge 安装器管理。
 
 如果把 macOS 工作区手工打包复制到 Linux/NPU 容器，建议使用 Git checkout 或在打包前设置
-`COPYFILE_DISABLE=1`，避免 AppleDouble `._*` 资源叉文件混入 `kb/okf`。
+`COPYFILE_DISABLE=1`，避免 AppleDouble `._*` 资源叉文件混入插件包。
 
 ### 1.5 环境前置依赖清单（Dependencies）
 

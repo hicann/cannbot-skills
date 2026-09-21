@@ -47,9 +47,9 @@ def resolve_c_root(explicit: Optional[str] = None) -> Path:
 
 
 def kb_write_root() -> str:
-    """Deployment target-tier resolver (§6). The bundled b-tier no longer exists
-    (OKF-only migration 2026-08: bundled knowledge = read-only `kb/okf`), so the
-    ONLY writable tier is the user-local c-tier — always "customer". With no
+    """Deployment target-tier resolver (§6). Official knowledge is external and
+    read-only, so the ONLY writable tier is the user-local c-tier — always
+    "customer". With no
     user_kb configured, writes resolve to the default c-root
     `~/.ascendc-port/user_kb` (created on demand by `CannbotCProvider`).
     Resolved per-invocation.

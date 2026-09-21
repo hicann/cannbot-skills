@@ -49,6 +49,7 @@ TileLang2AscendC 工程来源只支持 `npubench` golden。
 `cmake`/`g++` 与 Python 开发头文件；目标环境需要 CANN、`torch`/`torch_npu` 与可用的 `npu-smi`，并在启动前
 `source` CANN 的 `set_env.sh`。完整依赖清单与检查命令见 [`docs/USAGE.md`](docs/USAGE.md) §1.5。
 NPU 主机/容器、CANN 路径、SoC 等配置写入 `engine/workspace/.ascendc_env`（可能含凭证，已 gitignore，绝不能提交）。
+官方 b 层知识必须先由独立 `cannbot-knowledge` 仓的 `install.sh` 以 `consumer` 模式安装到算子项目；它负责准备完整 checkout、索引、查询 Skill 和项目 `.cannbot/knowledge.env`。port 只消费该安装结果，缺失时 fail-closed。
 
 ## 文档导航
 
@@ -59,7 +60,7 @@ NPU 主机/容器、CANN 路径、SoC 等配置写入 `engine/workspace/.ascendc
 
 ## 知识库
 
-运行时知识优先级为用户本地 KB（c）> 插件自带 KB（b）> 社区 Skills（a）。用户 KB 默认位于
-`~/.ascendc-port/user_kb/`，可用 `ASCENDC_PORT_USER_KB` 覆盖；插件自带 KB 位于 `kb/`，运行时只读。
+运行时知识优先级为用户本地 KB（c）> 外部 cannbot-knowledge（b）> 社区 Skills（a）。用户 KB 默认位于
+`~/.ascendc-port/user_kb/`，可用 `ASCENDC_PORT_USER_KB` 覆盖；官方 b 层只从项目 `.cannbot/knowledge.env` 指向的完整知识仓读取，不回退插件内旧卡。
 
 本插件处于社区维护阶段，源码位于 `plugins-community/ascendc-port-orchestrator/`。

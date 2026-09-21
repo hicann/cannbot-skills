@@ -150,7 +150,7 @@ def test_run_mode5_no_spawn_func_returns_skeleton_failure(tmp_path):
         workspace=tmp_path,
         module_path=tmp_path,  # dummy
         kb_root=tmp_path / "references",
-        api_catalog_path=tmp_path / "catalog.md",
+        api_reference_path=tmp_path / "catalog.md",
         skip_hook_preflight=True,
     )
     assert result.gate_passed
@@ -170,7 +170,7 @@ def test_run_mode5_gate_failure_short_circuits(tmp_path):
         workspace=tmp_path,  # empty workspace, gate will fail
         module_path=tmp_path,
         kb_root=tmp_path / "references",
-        api_catalog_path=tmp_path / "catalog.md",
+        api_reference_path=tmp_path / "catalog.md",
         skip_hook_preflight=True,
         spawn_agent_func=fake_spawn,
     )
@@ -191,7 +191,7 @@ def test_run_mode5_with_mock_agent_and_clean_output(tmp_path):
     kb_root.mkdir()
 
     def fake_spawn(*, op, workspace, module_path, sealed_dir, run_id,
-                   kb_root, api_catalog_path):
+                   kb_root, api_reference_path):
         # Agent writes a candidate using only public APIs
         cand = workspace / f"candidate_{run_id}.md"
         cand.write_text(
@@ -233,7 +233,7 @@ def test_run_mode5_with_mock_agent_and_clean_output(tmp_path):
         workspace=tmp_path,
         module_path=tmp_path,
         kb_root=kb_root,
-        api_catalog_path=catalog,
+        api_reference_path=catalog,
         skip_hook_preflight=True,
         spawn_agent_func=fake_spawn,
     )
@@ -298,7 +298,7 @@ def test_run_mode5_with_mock_agent_leaky_output_rejected(tmp_path):
         workspace=tmp_path,
         module_path=tmp_path,
         kb_root=kb_root,
-        api_catalog_path=catalog,
+        api_reference_path=catalog,
         skip_hook_preflight=True,
         spawn_agent_func=fake_spawn,
     )

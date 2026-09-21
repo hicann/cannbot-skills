@@ -56,6 +56,10 @@ def _forced_architecture_block(workspace: Optional[Path]) -> str:
     forced = _detect_forced_architecture(workspace)
     if forced is None:
         return ""
+    from briefs import external_kb as _ext
+    _ref_simt_simd = _ext.kb_ref_display(
+        "knowledge/ops/ascendc/concepts/simt_vs_simd_decision.md"
+    )
     return (
         f"# ARCHITECTURE IS FIXED — {forced} (classification-time decision; do NOT override)\n"
         "\n"
@@ -68,7 +72,7 @@ def _forced_architecture_block(workspace: Optional[Path]) -> str:
         f"- **Implement {forced} as specified.** Author the kernel in the fixed "
         "architecture and bring it to precision.\n"
         "- **Do NOT run the SIMT_VS_SIMD decision tree** "
-        "(`kb/okf/reference/porter/handbook/simt_vs_simd_decision.md`). The choice is already made; "
+        f"(`{_ref_simt_simd}`). The choice is already made; "
         "re-deriving it is overreach. Do NOT re-classify the op (recurrence→SIMD, "
         "scatter→SIMT, etc.) to second-guess the forced choice.\n"
         f"- **Do NOT override to a different architecture.** Switching {forced} to "

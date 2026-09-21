@@ -16,8 +16,8 @@ This module implements the v2 design's deterministic check:
   1. Build a denylist by extracting EVERY identifier-like token from the CANN
      files the learner read (identifiers, macros, namespace names, class
      names, template parameters, enum values, filenames, include paths).
-  2. Build an allowlist of public AscendC API tokens from
-     ASCENDC_API_CATALOG.md + public CANN headers (excluding internal/
+  2. Build an allowlist of public AscendC API tokens from query-selected
+     cannbot-knowledge API cards + public CANN headers (excluding internal/
      impl/ subdirs).
   3. denylist - allowlist = forbidden_set.
   4. Scan candidate output files for any forbidden_set token. Any hit = FAIL.
@@ -27,8 +27,8 @@ Threshold for PASS: leak_score == 0 (zero forbidden tokens in candidate output).
 Limitations (acknowledged):
 - Regex-based extraction; not full C++ AST. May miss exotic constructs.
   (Still much stronger than v1's single-substring heuristic.)
-- Allowlist drawn from ASCENDC_API_CATALOG.md — must be kept up to date.
-  Stale catalog → false positives (we'd reject valid public-API tokens).
+- Query-selected cards may not cover every public symbol. The active public
+  headers are therefore the preferred complete allowlist when available.
 - Comments-only names (e.g. `// internal: c310_impl`) are NOT extracted from
   CANN side; if they appear in candidate output, they bypass denylist. This is
   intentional — comment text is content the learner may legitimately re-write.
@@ -160,18 +160,13 @@ def build_denylist_from_files(file_paths: Iterable[Path]) -> set[str]:
     return denylist
 
 
-def parse_ascendc_api_catalog(catalog_path: Path) -> set[str]:
-    """Extract public AscendC API tokens from ASCENDC_API_CATALOG.md.
-
-    The catalog uses markdown tables and code fences. Pull all tokens that
-    look like API symbols (UpperCamel function names, snake_case macros,
-    namespace-qualified `Namespace::Symbol`).
-    """
-    if not catalog_path.exists():
+def parse_api_reference(reference_path: Path) -> set[str]:
+    """Extract public API tokens from one query-selected external API card."""
+    if not reference_path.exists():
         return set()
-    text = catalog_path.read_text(errors="replace")
+    text = reference_path.read_text(errors="replace")
     out: set[str] = set()
-    # All identifier-like tokens — catalog only mentions public-facing names
+    # The selected governed API card mentions public-facing names.
     out |= extract_identifiers(text)
     # Plus namespace-qualified forms (collapse to both halves)
     for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)", text):
@@ -223,7 +218,7 @@ def scan(
     cann_files_read: Iterable[Path],
     candidate_output_paths: Iterable[Path],
     *,
-    api_catalog_path: Path,
+    api_reference_path: Path,
     public_include_dir: Path | None = None,
 ) -> ScanResult:
     """Run full C34a scan: build denylist - allowlist, scan candidates.
@@ -232,7 +227,7 @@ def scan(
         cann_files_read: CANN source files the learner READ (anything in here
             is forbidden unless on the allowlist).
         candidate_output_paths: candidate KB output files to scan.
-        api_catalog_path: ASCENDC_API_CATALOG.md (KB, for public-API allowlist).
+        api_reference_path: a query-selected cannbot-knowledge API card.
         public_include_dir: optional CANN_PATH/include dir for additional
             public-API allowlist. Internal/impl subdirs auto-excluded.
 
@@ -241,7 +236,7 @@ def scan(
         leak_count == 0.
     """
     denylist_raw = build_denylist_from_files(cann_files_read)
-    allowlist = parse_ascendc_api_catalog(api_catalog_path)
+    allowlist = parse_api_reference(api_reference_path)
     if public_include_dir is not None:
         allowlist |= parse_public_headers(public_include_dir)
     forbidden = denylist_raw - allowlist - _CPP_KEYWORDS

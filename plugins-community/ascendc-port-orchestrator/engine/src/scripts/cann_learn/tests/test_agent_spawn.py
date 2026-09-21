@@ -54,8 +54,8 @@ def _seed_workspace(tmp_path: Path, op: str = "TestOp") -> dict:
         "# candidates\n\n## P-CAND-1\nexisting candidate\n"
     )
 
-    api_catalog = tmp_path / "api_catalog.md"
-    api_catalog.write_text("# api allowlist\nDataCopy\nReduceSum\n")
+    api_reference = tmp_path / "api_reference.md"
+    api_reference.write_text("# api allowlist\nDataCopy\nReduceSum\n")
 
     sealed = ws / ".cann_learn_sealed_test123"
     sealed.mkdir()
@@ -67,7 +67,7 @@ def _seed_workspace(tmp_path: Path, op: str = "TestOp") -> dict:
         "sealed_dir": sealed,
         "run_id": "test123",
         "kb_root": kb_root,
-        "api_catalog_path": api_catalog,
+        "api_reference_path": api_reference,
     }
 
 

@@ -58,7 +58,7 @@ Orchestrator passes `DET_POLICY ∈ {required, best_effort, n/a}` + `DET_CONSTRA
 - `DET_POLICY=best_effort` → `K=moderate`
 - `DET_POLICY=n/a` → `K=0` (skip det check entirely)
 
-**Load determinism cards** before proposing changes if `DET_POLICY != n/a` — determinism 域已卡片化：`grep -rln "determinism\|P-P61\|A-P61" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`（如 `p-p61-determinism-preserving-patterns` 卡）。Perf optimizations commonly risk breaking determinism (atomicAdd replacing sequential reduction, multi-core merge, queue depth>1, concurrent scatter). P-P61 / A-P61 catalog guides which classes of change are safe.
+**Load determinism cards** before proposing changes if `DET_POLICY != n/a` — invoke `knowledge-query` for `determinism P-P61 A-P61` with the current platform. Perf optimizations commonly risk breaking determinism (atomicAdd replacing sequential reduction, multi-core merge, queue depth>1, concurrent scatter). P-P61 / A-P61 catalog guides which classes of change are safe.
 
 ## Anti-overfitting rule (OL-85, CRITICAL)
 
@@ -73,7 +73,7 @@ See OL-85 for full rule. Orchestrator anti-cheat-scans kernel diffs.
 
 ## Workflow
 
-1. Run msprof: see `${CLAUDE_PLUGIN_ROOT}/kb/okf/reference/porter/toolchain/msprof_agent_guide.md`.
+1. Run msprof: see `$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/guides/msprof_agent_guide.md`.
    Identify dominant pipeline (MTE2 / VEC / MTE3 / S). Record baseline metrics.
    **MFU absolute-ceiling signal (V3.6, 2026-07-01 — now MECHANICAL, not opt-in)**:
    `workspace/{op}/verification.json` carries an auto-injected **`mfu_ceiling`** block
@@ -187,14 +187,14 @@ precision status = PASS.
 
 At Iter 0, after running msprof on the current kernel, identify the dominant
 symptom and query OKF by symptom keywords
-(`engine/src/scripts/okf/okf_kb.sh search --query "<symptom> <target>"` 或直接
-grep `${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/`), and add the matched cards to your
+(调用已安装的 `knowledge-query` skill，传入当前平台和
+`"<symptom>"`), and add the matched cards to your
 `optimization_log.md` `## KB Manifest LOADED` block. Most relevant for
 incremental tuning:
 
-- **`aiv_scl_ratio > 0.3` AND `target=a5`** → grep `Reg-based\|Reg::Select\|regbase` `kb/okf/runbooks/`（reg-based SIMD 内容已卡片化，集中在 `kb/okf/runbooks/hardware/target-ascend950pr.md` §Reg-based vs Mem-based 及相关 ol-*/cand-* 卡）+ `kb/okf/runbooks/hardware/target-ascend950pr.md §Reg-based vs Mem-based SIMD`. **The reg-based path is the A5-specific lever for scalar-pipe-bound kernels** — Mem-based scalar GetValue/SetValue chains can be replaced with `Reg::Compare + Reg::Select` keeping intermediates in registers.
-- **fused-op merge bottleneck** → load `ascend950pr.md §MrgSort` + sort 相关卡（grep `P-P43\|sort` `kb/okf/runbooks/`，如 `p-p43-sort-algorithm-selection-decision-tree`）+ reg-based 卡
-- **bf16 perf differs from fp16/fp32** → load `ascend950pr.md §dtype matrix` + precision 相关卡（grep `precision\|bf16` `kb/okf/runbooks/`，含原 OL-65 对应的 `ol-65-fp16-cast-fp32-only-on-precision-fail` 卡）
+- **`aiv_scl_ratio > 0.3` AND `target=a5`** → query `Reg-based Reg::Select regbase` for platform `950`, plus `$CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_ascend950pr.md §Reg-based vs Mem-based SIMD`. **The reg-based path is the A5-specific lever for scalar-pipe-bound kernels** — Mem-based scalar GetValue/SetValue chains can be replaced with `Reg::Compare + Reg::Select` keeping intermediates in registers.
+- **fused-op merge bottleneck** → load `target_ascend950pr.md §MrgSort` + query `sort algorithm selection` + reg-based cards
+- **bf16 perf differs from fp16/fp32** → load `target_ascend950pr.md §dtype matrix` + query `precision bf16 cast fp32`
 
 ## Vendor-strategy researcher escalation — V3.7.11 (2026-05-03)
 
@@ -213,7 +213,7 @@ Before producing ANY of these verdicts (`PERF_PLATEAU`,
 the `optimization_log.md` MUST explicitly cite:
 
 1. **Fresh msprof on current kernel state** (not reused from prior iter) with `aiv_*_ratio` values
-2. **Reg-based applicability evaluation** when `target=a5` AND scalar-pipe is the dominant pipe — explicit "Reg-based applicable: yes/no/needs_probe" line, with rationale referencing OL-54 + ascend950pr.md §Reg-based
+2. **Reg-based applicability evaluation** when `target=a5` AND scalar-pipe is the dominant pipe — explicit "Reg-based applicable: yes/no/needs_probe" line, with rationale referencing OL-54 + target_ascend950pr.md §Reg-based
 3. **Vec-pipe primitive search results** for the bottleneck pipe — what was tried, what's available, what's been verified linkable
 
 Missing any of the above = workflow_critic V3.7.10 REJECTS the verdict commit.
@@ -283,9 +283,7 @@ Mirrors the aog-kernel-worker self-challenge contract, specialized for perf opti
 
 1. **Broaden KB search — don't stay on brief-listed domain file only**:
    ```bash
-   # Symptom → KB grep
-   grep -rn "MTE2\|mte2_ratio\|bandwidth" ${CLAUDE_PLUGIN_ROOT}/kb/okf/runbooks/ | head -10
-   grep -rn "VEC bound\|vec_ratio" ${CLAUDE_PLUGIN_ROOT}/kb/ | head -10
+   # Invoke knowledge-query for "MTE2 mte2_ratio bandwidth" and "VEC bound vec_ratio"
    ```
 2. **Scan other DONE ops that were optimized against the same bottleneck**:
    ```bash
@@ -297,7 +295,7 @@ Mirrors the aog-kernel-worker self-challenge contract, specialized for perf opti
    ```
    ## Opt{N} — self-challenge
    Stalled 2 iters at {ratio} with dominant {bottleneck}. Broadened search:
-   - `grep -rn "<bottleneck>" ${CLAUDE_PLUGIN_ROOT}/kb/` → <hits or "no match">
+   - `knowledge-query "<bottleneck>" platform=<target>` → <selected cards or "no match">
    - prior ops hitting same bottleneck: <list or "no match">
    Adopted pattern from: <path> OR No KB match found, escalating to Outcome B directive.
    ```

@@ -130,8 +130,10 @@ def check_target_simt_compat(ws: Path, rejections: list[Rejection]) -> None:
                     expected=f"kernel/* must NOT use {token} when TARGET={target}",
                     actual=f"{f.relative_to(ws)} contains '{token}' (outside comments)",
                     fix="rewrite using SIMD pattern (TPipe / TQue / DataCopy + UB-scratchpad reduction). "
-                        "See kb/okf/runbooks/hardware/target-<chip>.md capability sections and "
-                        "kb/okf/reference/porter/patterns/ (SIMD pattern cards; scatter_add a3/a2 catalogue gap).",
+                        "See $CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/"
+                        "target_<chip>.md capability sections and "
+                        "$CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/examples/ "
+                        "(SIMD pattern cards; scatter_add a3/a2 catalogue gap).",
                 ))
                 break  # one rejection per file is enough
 

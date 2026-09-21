@@ -26,8 +26,8 @@ Two demos: (a) plain GEMM 4096^3 fp16 sanity check, (b) FlashAttention
 dense B1/H8/S2048/D128 fp16 causal with a measured vendor-relative point.
 
 EVERY hardware number below is sourced from
-  kb/okf/runbooks/hardware/target-ascend950pr.md   (spec)
-  kb/okf/reference/porter/handbook/roofline_model.md               (VEC roofline)
+  $CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_ascend950pr.md  (spec)
+  $CANNBOT_KNOWLEDGE_ROOT/knowledge/ops/ascendc/concepts/roofline_model.md           (VEC roofline)
   src/scripts/orchestrator/roofline_eval.py        (A3 empirical calib)
 Numbers NOT in the spec are marked ASSUMPTION with the derivation shown.
 """

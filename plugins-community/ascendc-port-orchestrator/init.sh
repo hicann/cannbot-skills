@@ -12,8 +12,9 @@
 #
 # Mirrors the cannbot per-plugin install convention (cf. catlass-op-generator/init.sh):
 #   - Product-owned Skills come from this plugin's local `skills/` directory.
-#   - Shared ops Skills and community `knowledge-query` stay in their canonical
-#     packages and are resolved from the checkout or marketplace dependencies.
+#   - Shared ops Skills stay in their canonical packages. cannbot-knowledge has
+#     its own installer and is consumed through the target project's
+#     `.cannbot/knowledge.env`; this installer does not manage it.
 #   - AGENTS come from this plugin's local `agents/`, filtered by INCLUDED_AGENT_PATTERN.
 #   - Both installed as per-item symlinks under <CONFIG_ROOT>/{skills,agents}.
 # Differences from catlass:
@@ -155,10 +156,8 @@ PLUGIN="ascendc-port-orchestrator"
 # Reusable ops Skills keep a single canonical copy under repository ops/ and are
 # supplied by the ascendc-port-orchestrator-shared-skills marketplace dependency.
 LOCAL_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light"
-SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice"
-# OKF query is owned by plugins-community/cannbot-knowledge.
-KNOWLEDGE_SKILLS="knowledge-query"
-# Keep this literal union in sync with the three lists above: the repository's
+SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
+# Keep this literal union in sync with the two lists above: the repository's
 # dependency validator and third-party installers consume this declaration without
 # evaluating shell variable expansion.
 INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
@@ -177,7 +176,7 @@ INCLUDED_AGENT_PATTERN="aog-*"
 # OKF content.  Phase O0 refuses to spawn workers without them, so report a
 # malformed marketplace payload during installation instead of claiming a
 # healthy install that can only fail on first use.
-REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md okf/index.md"
+REQUIRED_PACKAGED_KB="shared/ANTI_PRESSURE_PROTOCOLS.md"
 
 LEVEL="project"; TOOL="claude"; STRICT_DEPS=0
 for arg in "${@:-}"; do
@@ -214,6 +213,11 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_AGENT_ROOT="$PLUGIN_DIR/agents"
 LOCAL_SKILL_ROOT="$PLUGIN_DIR/skills"
 SHARED_SKILL_ROOT="$PLUGIN_DIR/../../ops"
+# cannbot-knowledge consumer package (plugin.json dependency): the same
+# direct-checkout sibling the engine's graybox dependency resolver maps
+# (`_direct_checkout_dependency_roots` → plugins-community/cannbot-knowledge).
+# knowledge-query installs from here on repo checkouts.
+KNOWLEDGE_SKILL_ROOT="$PLUGIN_DIR/../cannbot-knowledge/skills"
 # A checkout can link canonical shared Skills directly. A Claude marketplace copy has no
 # repository root and relies on the declared shared-skills dependency instead.
 if [ -d "$SHARED_SKILL_ROOT" ]; then DIRECT_CHECKOUT=1; else DIRECT_CHECKOUT=0; fi
@@ -359,9 +363,19 @@ for skill_dir in "$LOCAL_SKILL_ROOT"/*/; do
 done
 
 for want in $SHARED_SKILLS; do
-  if [ "$DIRECT_CHECKOUT" = "1" ] && [ -d "$SHARED_SKILL_ROOT/$want" ]; then
-    shared_source="$(realpath "$SHARED_SKILL_ROOT/$want")"
-    if safe_link "$shared_source" "$CONFIG_ROOT/skills/$want" "$(realpath "$SHARED_SKILL_ROOT")"; then
+  shared_source=""
+  link_base=""
+  if [ "$DIRECT_CHECKOUT" = "1" ]; then
+    if [ -d "$SHARED_SKILL_ROOT/$want" ]; then
+      shared_source="$(realpath "$SHARED_SKILL_ROOT/$want")"
+      link_base="$(realpath "$SHARED_SKILL_ROOT")"
+    elif [ -d "$KNOWLEDGE_SKILL_ROOT/$want" ]; then
+      shared_source="$(realpath "$KNOWLEDGE_SKILL_ROOT/$want")"
+      link_base="$(realpath "$KNOWLEDGE_SKILL_ROOT")"
+    fi
+  fi
+  if [ -n "$shared_source" ]; then
+    if safe_link "$shared_source" "$CONFIG_ROOT/skills/$want" "$link_base"; then
       sc=$((sc + 1))
     fi
   elif shared_source="$(marketplace_skill_path "$want")"; then
@@ -376,27 +390,6 @@ for want in $SHARED_SKILLS; do
     warn "$want is not locally resolvable; marketplace dependency must provide it"
   fi
 done
-
-KNOWLEDGE_CHECKOUT_ROOT="$PLUGIN_DIR/../cannbot-knowledge/skills"
-if [ -d "$KNOWLEDGE_CHECKOUT_ROOT/knowledge-query" ]; then
-  knowledge_source="$(realpath "$KNOWLEDGE_CHECKOUT_ROOT/knowledge-query")"
-  # Normalise ourroot too: safe_link compares it against readlink -f output, and a
-  # ../-bearing root would make our own prior links look like foreign collisions on
-  # every idempotent re-run.
-  if safe_link "$knowledge_source" "$CONFIG_ROOT/skills/knowledge-query" "$(realpath "$KNOWLEDGE_CHECKOUT_ROOT")"; then
-    sc=$((sc + 1))
-  fi
-elif knowledge_source="$(marketplace_skill_path knowledge-query)"; then
-  # The consumer bundle can be present in the cache but rejected as a plugin by
-  # stricter Claude manifest validation.  The canonical Skill itself remains a
-  # valid dependency, so expose it through the normal config-root load path.
-  if safe_link "$(realpath "$knowledge_source")" "$CONFIG_ROOT/skills/knowledge-query" \
-      "$(realpath "$(dirname "$knowledge_source")")"; then
-    sc=$((sc + 1))
-  fi
-elif [ ! -e "$CONFIG_ROOT/skills/knowledge-query" ]; then
-  warn "knowledge-query is not locally resolvable; marketplace dependency must provide it"
-fi
 
 # --- a-tier route dependency resolution (§5.2 c>b>a) ---
 # The engine ships a route config (cba_routes.json) declaring the COMMUNITY (tier-a)
@@ -639,44 +632,6 @@ else
 fi
 echo ""
 
-# Build the packaged b-tier OKF index during installation.  The index is a
-# generated cache and is intentionally not committed, but the deterministic
-# orchestrator reads it directly; leaving it absent makes a clean install look
-# healthy while every official-KB query returns no evidence.
-OFFICIAL_OKF_ROOT="$PLUGIN_DIR/kb/okf"
-OFFICIAL_OKF_INDEX_READY=false
-if [ -d "$OFFICIAL_OKF_ROOT" ]; then
-  # macOS BSD tar may materialize AppleDouble resource-fork files when a
-  # checkout is copied to Linux.  They are binary `._*.md` companions, not
-  # knowledge cards; knowledge-query quite correctly treats real `.md` files
-  # as UTF-8 and would otherwise fail the install on their invalid bytes.
-  # The scope is limited to this plugin-owned packaged KB and never touches
-  # the user's KB or an external dependency.
-  apple_double_count=0
-  while IFS= read -r -d '' metadata_file; do
-    rm -f -- "$metadata_file"
-    apple_double_count=$((apple_double_count + 1))
-  done < <(find "$OFFICIAL_OKF_ROOT" -type f \( -name '._*' -o -name '.DS_Store' \) -print0)
-  if [ "$apple_double_count" -gt 0 ]; then
-    warn "removed $apple_double_count macOS metadata file(s) from packaged OKF before indexing"
-  fi
-  QUERY_SCRIPT="$CONFIG_ROOT/skills/knowledge-query/scripts/knowledge_query.py"
-  if [ ! -f "$QUERY_SCRIPT" ]; then
-    err "knowledge-query script is unavailable; cannot build the official OKF index"
-    exit 1
-  fi
-  if python3 "$QUERY_SCRIPT" --knowledge-root "$OFFICIAL_OKF_ROOT" build >/dev/null; then
-    OFFICIAL_OKF_INDEX_READY=true
-    ok "official OKF index built: $OFFICIAL_OKF_ROOT/search/okf.index.json"
-  else
-    err "failed to build official OKF index under $OFFICIAL_OKF_ROOT"
-    exit 1
-  fi
-else
-  warn "official OKF root is not present in this checkout; aggregate package must provide kb/okf"
-fi
-echo ""
-
 # --- Step 3: scaffold engine/workspace/.ascendc_env (NPU host/container/mode single source) ---
 step "[3/4] NPU env scaffold..."
 ENV_TEMPLATE="$PLUGIN_DIR/engine/workspace/.ascendc_env.template"
@@ -867,9 +822,12 @@ sys.stdout.write(B._opencode_config_content() or '')" 2>/dev/null || true)"
           [ -e "$_ag" ] || continue
           _agname="$(basename "$_ag" .md)"
           # The structural probe above already checked this first agent.  Do not
-          # spend a second 60-second timeout budget on the same resolution.
+          # spend a second timeout budget on the same resolution.
           [ "$_agname" = "aog-kernel-worker" ] && continue
-          if ! _oc_timeout 60 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent "$_agname" \
+          # Cold shared CI runners (A5_skill_tester) can need ~60s PER AGENT even after
+          # the first probe warmed the plugin cache — 60s fails a different random agent
+          # on every run (2026-09-21 ST_Test_A5). 120s keeps the bound meaningful.
+          if ! _oc_timeout 120 env OPENCODE_CONFIG_CONTENT="$OC_CFG" "$OC_BIN" debug agent "$_agname" \
                  >/dev/null 2>&1; then
             err "$OC_BIN did not resolve agent $_agname from the injected config (or the probe timed out)"
             oc_ok=false
@@ -984,8 +942,7 @@ cat > "$MANIFEST" <<MANIFEST_EOF
   "effective_skills_count": $(printf '%s\n' $EFFECTIVE_SKILLS | sed '/^$/d' | sort -u | wc -l | tr -d ' '),
   "installed_agents_count": $ac,
   "user_kb_c": "$USER_KB",
-  "official_kb_b": "$OFFICIAL_OKF_ROOT",
-  "official_okf_index_ready": $OFFICIAL_OKF_INDEX_READY,
+  "official_kb_b": "external-cannbot-knowledge",
   "hooks_registration": "$HOOK_REGISTRATION",
   "hooks_settings_engine": "$HOOK_SETTINGS_ENGINE",
   "hooks_verified_live": $( [ "${hooks_live:-false}" = true ] && echo true || echo false ),

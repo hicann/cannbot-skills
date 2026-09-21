@@ -90,7 +90,7 @@ INT_LSB_TOLERANCE = {
 # precision floor. Vendor's rule swaps to an absolute-error count for those
 # cases and compares against the declared independent reference's count.
 #
-# Source: kb/okf/reference/porter/precision/precision_standard_v2_1.md §4.5.3
+# Source: external cannbot-knowledge precision standard 2.1, §4.5.3
 # Threshold table (verified against vendor wiki 2026-05-08):
 #   dtype          | small_value_thresh | error_thresh
 #   FLOAT16        | 2^-11              | 2^-16
