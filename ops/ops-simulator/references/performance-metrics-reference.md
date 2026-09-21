@@ -1,6 +1,6 @@
 # npusim Performance Metrics Reference
 
-Data source: `summary.json` (located at `sim_output/npusim_*/report/summary.json`)
+Data source: `summary.json` (located at `<npusim_output>/report/results/kernel_*_reports/summary.json`)
 
 Read and interpret all non-empty sections before drawing conclusions.
 
@@ -31,6 +31,7 @@ Read and interpret all non-empty sections before drawing conclusions.
 | `ai_core_active` | Number of AI cores whose profiling data is available for analysis (see note below) |
 | `kernel_total_clocks` | Wall-clock duration of the kernel in ticks — **primary optimization target: minimize** |
 | `kernel_instructions_executed` | Total instructions across all cores — secondary optimization signal |
+| `frequency_ghz` | Core frequency in GHz. Use `kernel_total_clocks / frequency_ghz` to convert ticks to microseconds (μs) for cross-tool comparison (e.g., with msprof `Task Duration`). |
 
 **Optimization targets**:
 - `kernel_total_clocks` — the direct measure of kernel latency. Every optimization should be validated against this number. Lower is always better.
@@ -333,3 +334,17 @@ After each fix, re-run `npusim record --gen-report` and verify `kernel_total_clo
 > **Shape-dependent effect size**: the magnitude of any fix's win on `kernel_total_clocks` is a function of the kernel shape (`m`, `n`, `k`, batch dimensions, loop counts), not just the fix itself. Two shapes where the *same* bottleneck dominates can show very different speedups for the same fix: small shapes amortize startup overhead poorly, large shapes spread per-iteration savings across more iterations. A small measured win (e.g. ~5%) does not invalidate the fix — it may just mean the test shape under-represents production. Re-verify direction (which metric moved which way) rather than magnitude. If a fix's direction is wrong, the diagnosis was wrong; if direction is right but magnitude is small, try a more representative shape before discarding the fix.
 
 > **Optimizations are not always additive — an earlier one can block a later one.** When a fix doesn't improve (or regresses) `kernel_total_clocks`, the cause may not be the fix itself but a **prior** optimization that conflicts with it — and not necessarily the immediately preceding one; it can be any earlier step. To find it: identify what the new fix needs to **remove or restructure** to pay off (a buffer, a data layout/format, a loop or scheduling structure), then trace **which earlier step introduced that thing**. That step is the blocker, even if it sped the kernel up in isolation — a weaker optimization is often **superseded** by a stronger one that targets the same region more fundamentally (e.g. a small algebraic/scalar tweak vs. a full register-resident rewrite). Decision: **revert the conflicting earlier step** and re-derive the later fix from the clean base, rather than stacking the new fix on top of the old structure; then re-profile. This is only practical if each optimization is kept as a **separate, revertible revision** (commit / file) — so do that, and treat "roll back step M, re-apply step N" as a normal move, not a rewrite.
+
+---
+
+## Derived Metrics
+
+Cross-section calculations that combine fields from multiple `summary.json` sections for deeper diagnosis:
+
+| Derived metric | Formula | Diagnostic use |
+|----------------|---------|----------------|
+| Absolute busy time | `pipe_utilization.pipeline_util_summary.<pipe>.mean × kernel_info.kernel_total_clocks` | Converts utilization ratio to absolute ticks. Use to compare pipe busy time across kernels with different `kernel_total_clocks`. |
+| Effective compute ratio | `<compute_pipe>.mean / top_level_diagnosis.dominant_pipeline_util` | If dominant pipe is MTE2 but `AIC_CUBE.mean / dominant_pipeline_util` is high, compute is being diluted by data movement. |
+| Double-buffer vs source code | `pipeline_overlap.<pair>` compared with `bufNum` in kernel source | overlap < 0.30 **and** `bufNum >= 2` in source → not a buffer count issue, it's a scheduling/tile-order issue (e.g., SWAT needed). overlap < 0.30 **and** `bufNum == 1` → enable double buffer. |
+| Bandwidth vs pipeline utilization | `bandwidth.<path>.bandwidth_utilization` vs `pipe_utilization.<pipe>.mean` | bandwidth saturated (< 0.70) but pipe idle → bandwidth-bound; pipe busy (> 0.50) but bandwidth low → compute-bound (data movement not the bottleneck). |
+| Per-core spread | `max(pipe_utilization.<pipe>.per_core) - min(...)` | Quick imbalance signal without reading `aicore_utilization.json`. If spread > 0.15, locate the outlier core. |

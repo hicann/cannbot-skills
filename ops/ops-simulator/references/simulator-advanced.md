@@ -60,9 +60,14 @@ npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -u "--shape 1024,
 **默认输出**（不指定 `-o`）：
 ```
 ./npusim_Ascend950_<timestamp>/
-├── npusim.log           # 仿真日志
-└── report/               # 性能报告（需 --gen-report）
-    └── trace_core0.json  # 指令流水图
+├── npusim.log                         # 仿真日志
+├── record/                            # 仿真原始数据
+└── report/
+    └── results/
+        └── kernel_*_reports/
+            ├── summary.json           # 结构化性能汇总
+            ├── trace_core0.json       # 指令流水图
+            └── ...
 ```
 
 **指定输出目录**：
@@ -74,8 +79,13 @@ npusim record ./ascendc_kernels_bbit -s Ascend950 --gen-report -o ./output
 ```
 ./output/
 ├── npusim.log
+├── record/
 └── report/
-    └── trace_core0.json
+    └── results/
+        └── kernel_*_reports/
+            ├── summary.json
+            ├── trace_core0.json
+            └── ...
 ```
 
 ### 命令返回值

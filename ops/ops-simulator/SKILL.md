@@ -79,10 +79,14 @@ npusim report -e ./npusim_Ascend950_* -n all       # 查看所有 core
 
 ```
 npusim_output/
-├── npusim.log               # 仿真执行日志
+├── npusim.log                         # 仿真执行日志
+├── record/                            # 仿真原始数据
 └── report/
-    ├── trace_core0.json      # 指令流水图文件
-    └── ...
+    └── results/
+        └── kernel_*_reports/
+            ├── summary.json           # ★ 结构化性能汇总（核心指标源）
+            ├── trace_core0.json       # 指令流水图（Chrome Tracing）
+            └── ...
 ```
 
 ### 4. 性能瓶颈定位（Trace 空泡分析）
@@ -176,7 +180,7 @@ npusim report -e ./npusim_Ascend950_* -n all -o ./report_output
 ### 分析工作流
 
 1. **生成报告** — 执行 `npusim record --gen-report` 或 `npusim report`
-2. **读取 `summary.json`** — 位于 `sim_output/npusim_*/report/summary.json`
+2. **读取 `summary.json`** — 位于 `<npusim_output>/report/results/kernel_*_reports/summary.json`
 3. **检查 `top_level_diagnosis`** — 读取 `dominant_pipeline` 和 `imbalance_ratio` 获得初步判断
 4. **识别瓶颈类型** — 按下方快速诊断表定位，然后查阅对应的 reference
 5. **推荐优化方案** — 从对应 issue reference 中提取具体修复动作
@@ -184,14 +188,14 @@ npusim report -e ./npusim_Ascend950_* -n all -o ./report_output
 
 ### summary.json 结构
 
-`summary.json` 包含 8 个段落；其中 6 个始终存在，另外 2 个（`cache`、`bandwidth`）可能缺失。完整的字段定义、阈值和标准的"分析优先级"排序见 [performance-metrics-reference.md](references/performance-metrics-reference.md)（唯一可信源）。
+`summary.json` 包含 9 个段落；其中 7 个始终存在，另外 2 个（`cache`、`bandwidth`）可能缺失，`simd_vf_metrics` 始终存在但可能为空 `{}`。完整的字段定义、阈值和标准的"分析优先级"排序见 [performance-metrics-reference.md](references/performance-metrics-reference.md)（唯一可信源）。
 
 ### 快速诊断（Quick Diagnosis）
 
 **Step 0 — 核数检查**：检查 `kernel_info.ai_core_active`。如果在多核芯片上 `== 1`，先确认确实是单核运行：用 `blockDim` 或 `per_core` 数组长度核对——若 `blockDim > 1` 但仅采到一个核的数据，则属于 profiler 采样假象（kernel 实为多核，`imbalance_ratio` 仍为 1.0、`per_core` 缺失，真实不均衡仍可能存在），此时不要给出"开满核"的结论，应按多核不均衡走结构化检查。确认确为单核后 — 让所有核都参与计算是最优先的修复，优先级高于下方所有瓶颈类型规则。此时 `imbalance_ratio` 会是 `1.0`（只追踪了一个核），**不应**被理解为"负载均衡"；所有接近零的 overlap 都是单核运行的假象，不是双缓冲问题。请跳转到 [通用问题 §1.1](references/performance-issues-general.md)，在 kernel 变为多核运行之前不要继续执行下方瓶颈类型表。
 
 **Step 1 — 多核负载均衡**：检查 `top_level_diagnosis.imbalance_ratio`
-- `> 1.3` → 需要做负载均衡 tiling
+- `> 1.3` → 需要做负载均衡 tiling，按 [通用问题 §1](references/performance-issues-general.md) 的 "Locating the slow core" 流程用 `per_core[]` 定位慢核；也可查看 `aicore_utilization.json` 获取逐核活跃时段和利用率百分比
 - `> 2.0` → 严重不均衡，应在处理其他问题前优先解决此问题
 
 **Step 1.5 — Kernel 利用率合理性检查**：如果 `dominant_pipeline_util < 0.50` **且** 所有 `pipeline_overlap.*` 接近零 **且** 计算流水空闲 — 对于 **Cube** 型 kernel `AIC_CUBE.mean < 0.10`，对于 **纯 Vector** 型 kernel `AIVx_SIMD.mean` **与** `AIVx_SIMT.mean` 均 `< 0.05` — 说明 kernel 工作量不足以支撑分析（可能是 `blockDim` 对 shape 而言过大，或 shape 本身太小）。`imbalance_ratio` **不**是必要条件（均衡但 shape 过小同样适用）。请跳转到 [通用问题 §2 Kernel 利用率不足](references/performance-issues-general.md)；不要继续执行 Step 2 — 瓶颈类型规则会误判。

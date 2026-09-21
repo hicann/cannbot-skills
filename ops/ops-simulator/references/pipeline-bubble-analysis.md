@@ -1,6 +1,6 @@
 # 流水线空泡分析（Simulator Trace）
 
-读取 simulator 产出的 trace.json（Chrome Trace Format），按以下标准自主判定流水空泡类型和根因。
+读取 simulator 产出的 `trace_core*.json`（Chrome Trace Format），按以下标准自主判定流水空泡类型和根因。
 
 **定位**：trace 分析回答"主 pipeline（VECTOR/CUBE）为什么 idle"（WHY）。
 
@@ -45,6 +45,16 @@ python3 {skill_path}/scripts/trace_bubble_analyzer.py ./npusim_Ascend950_*/repor
 空泡 = 主 pipeline（veccore: VECTOR / cubecore: CUBE）的 duration 事件之间的 idle 时间（`ph="X"` 事件，gap = next.ts - current.end_ts）。
 
 对每个空泡查看**同一时间段内其他 pipeline 的状态**，按以下标准分类。
+
+### Flow 事件辅助因果归因
+
+除 `ph="X"` 事件外，trace 中还包含 Flow 事件（`ph="s"` start / `ph="f"` finish），表示管线间的 flag 依赖关系。每对 s/f 通过 `id` 字段配对，`name` 描述阻塞原因（如 `"MTE1 awaiting CUBE flag, pipe is blocked."`）。
+
+**使用方式**：在空泡窗口内查找 Flow 事件，直接定位"谁等谁的 flag"：
+- `name` 包含 `awaiting <PIPE> flag` → 当前管线在等待 `<PIPE>` 完成后才能继续
+- 配合 `pid`（管线号）和 `tid`（slot 号）定位具体阻塞源
+
+> Flow 事件比"查看同期 busy pipeline"更精确——它直接记录了 flag 因果链，而非间接推断。
 
 ### 一级分类
 
