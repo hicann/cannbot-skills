@@ -59,7 +59,8 @@ O = P @ V                               # GEMM-2
 | 10b | **CV-Attn-空间自注意力 · 卷积-块化窗口 transformer 型**：输入 NCHW 先过 k×k conv＋1×1 conv 局部表示，再按 patch 展开成 token（`reshape(b,nh,ph,nw,pw,D).permute(0,2,4,1,3,5)` 类 NCHW→(b,p,n,D) 块化布局变换＋对称 fold），窗口 n=nh·nw 常在数百内做**稠密**多头 attention（无跨窗口交互、无 KV 下采样），transformer 块 ×depth（LN+qkv/out 投影+残差+LN+FFN），尾部 `conv(cat([x,y]))` 双输入 k×k 融合卷积（MobileViT 系） | 一·3 空间 token 版·块化窗口细分 | **`patch_window_attention`** | `.claude/template/patch_window_attention.md`（复合点积双 B 指针禁令 / 拼接缓冲紧凑布局 / im2col NHWC 一次转置 / attn 按 n 单块特化 / GEMM 变体同档档位 / GEMM 搬运瓶颈诊断）**＋** `.claude/template/mha.md`（§2.5 M1~M4 + §4.1 投影段）**＋** `.claude/template/flash_attention.md`（attention 主链 L1.1/L1.12/L1.13）——⚠️ **交叉行：三份的 Layer 1 都必须摘录** |
 | 10c | **CV 空间 token · 无投影双分支**：特征图 flatten token 化的自注意力，**无 `nn.Linear` Q/K/V 投影**——`S=Y·Yᵀ`、`O=P·Y`，Q=K=V 为同一 Y（conv 输出直接充当）；每分支前置**分辨率保持的 k×k conv**（`nn.Conv2d(C,C,k,padding=k//2)`）代替投影段；**position/channel 对偶双分支**并行——position 分支 token=空间位置（T=N=H·W, D=C, scale=C^-0.5, 布局 (B,N,C)）、channel 分支 token=通道（T=C, D=N, scale=N^-0.5, 布局 (B,C,N)），`out=out_pos+out_ch` 残差相加；golden 分支内 `.float()` 全 fp32、分支末尾 `.to(dtype)` 后 dtype 相加；conv 权重常在 forward 内 lazy 创建（`manual_seed(hash(...))`+`_cache`，DAModule/DANet 系写法） | 一·3 空间 token 版·无投影双分支变体 | **`position_channel_attention`** | `.claude/template/position_channel_attention.md`（双分支统一物理布局 L1.1 / PV 二段拆分 L1.2 / conv implicit GEMM+RNG 复刻 L1.3-L1.4 / 双路径分派 L1.6，实测 geomean 2.4313、50 case 全过）**＋** `.claude/template/flash_attention.md`（attention 主链 Layer 1）——⚠️ **交叉行：两份的 Layer 1 都必须摘录** |
 | 11 | 纯基准三段式，不含 KV 分块 | 一·1 基础三段式 | `flash_attention` | `.claude/template/flash_attention.md` |
-| 12 | **无 softmax**，改为状态递推（`state = a*state + k⊗v`）或结合律重排 | 四 线性类 | **`linear-recurrent`**（状态递推细分；结合律重排细分仍 `new_category`） | `.claude/template/linear-recurrent.md`（状态递推细分，op92 实证 5.75×；结合律重排细分暂无专属，见下） |
+| 12 | **无 softmax**，改为状态递推（`state = a*state + k⊗v` / fused-recurrent / 1D persistent `for t in range(T)`）——⚠️ 结合律重排 / chunk WY 不走本行，见 12b | 四 线性类·状态递推 | **`linear-recurrent`** | `.claude/template/linear-recurrent.md`（op92 实证；L1.1 强制 1D persistent，**不可**套到 chunk 反向） |
+| 12b | **无 softmax**，chunk 结合律重排 / WY 反向：chunk 内 GEMM + 下三角 `A` + 门控 `exp2(g)`，按 chunk 二维（或等价）分派，fused 出 dq/dk/dA（可含 dv2/db/dg）；**不是**时间轴 persistent 串行 | 四 线性类·结合律重排 | **`chunk-linear-attn-bwd`** | `.claude/template/chunk-linear-attn-bwd.md`（禁 persistent；比较链 `i_t` int32；`A` 转置语义；`make_block_ptr`/tile 在 L2 不进 L1） |
 | 13a | 特征图门控**双分支加性融合**（通道 softmax-over-N 分支 + 空间 GAP/softmax-over-C2 分支，`out = x·(S+T)`，无 softmax(QKᵀ) 主链；op57 落地） | 五 专用类 | **`polarized_attention`** | `.claude/template/polarized_attention.md`（结合律消除 [B,C2,N] 物化 + 任务循环/档位化/双路径融合，2.3237） |
 | 13b | 去归一化（无 softmax 但保留 QK/PV 结构）、或其他特征图门控（乘性融合/单分支） | 五 专用类 | `new_category` | **无可复用 template**，见下 |
 | 14 | **CV 特征聚合-分发**：输入经**变换聚合**（`Linear` / `conv1x1` / 通道扩展 / spatial shift / mean 归约）→ **轻量 attention 加权**（KV 维极小或特殊：`k=3` 分支、逐通道权重、softmax-over-hw 空间维——**不是**序列 attention）→ **聚合回空间**（再经 `Linear`/卷积/加权求和还原）；算子操作 `[B,C,H,W]`/`[B,N,C]` 特征图而非 token 序列，attention 用于**特征门控/通道注意力**而非 token 间关系——§0.2 三形态：形态 (a) 通道扩展-分支分发 = S2Attention(op59)、形态 (b) 空间-通道双 attention = CoTAttention(op42)、形态 (c) conv 特征-双 softmax 汇聚 = DoubleAttention(op47) | 五·专用类·特征门控聚合-分发 | **`cv_attn_agg`** | `.claude/template/cv_attn_agg.md`（聚合-分发结构轴 §0.2 / C1 RNE 逐 conv 舍入 / C2 Kahan / C5 主成本在投影 GEMM / C6 路由含 cube tile 深度 / C7 结合律重排配精度门控） |
@@ -77,6 +78,10 @@ O = P @ V                               # GEMM-2
 
 ## 叠加与优先级
 
+- **行 12 与 12b 的分界是「1D persistent 时间串行」vs「chunk 2D 分派」**。两者都无 softmax。
+  有 `for t in range(T)` / fused-recurrent / 状态驻留 UB 的走行 12（`linear-recurrent.md`，L1.1）。
+  有 `grid=(NT, B*HV)`（或等价 2D）、chunk 内 GEMM、下三角 `A`、WY 反向出 dq/dk/dA 的走行 12b。
+  **禁止**把 12 的 L1.1 套到 12b；**禁止**把 GPU FLA 的 `i_t` int64 写进 12b 比较链。
 - **行 1 与行 1b 的分界是"主链有没有 `kv_head = q_head // group`"**。两者都属三·2，
   但行 1 是交叉写法：选择层与取数层替换同时存在，**主 `category` 取块跳过**（循环范围改写会
   重塑整个 kernel 骨架，取数层替换只是几行索引），GQA 侧的任务划分、页内布局与 tile/UB 预算
@@ -231,8 +236,8 @@ O = P @ V                               # GEMM-2
 
 ## 无 template 的子类怎么办
 
-行 5/6（latent 投影、量化）、行 12 的**结合律重排**细分、行 13（专用类，除 13a 外）尚无专属 template
-（行 12 的**状态递推**细分已归档 `linear-recurrent.md`）。
+行 5/6（latent 投影、量化）、行 13（专用类，除 13a 外）尚无专属 template
+（行 12 的**状态递推**细分已归档 `linear-recurrent.md`；行 12b **结合律重排 / chunk WY 反向**已归档 `chunk-linear-attn-bwd.md`）。
 按 Step 1 的既有机制处理：
 标 `new_category`，先回落到表中给出的 `template_path`（没有则不加载 Layer 1 约束），
 **草图通过后新建 `.claude/template/{category}.md` 并回填 Layer 1**。

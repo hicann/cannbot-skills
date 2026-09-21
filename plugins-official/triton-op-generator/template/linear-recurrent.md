@@ -18,14 +18,14 @@ metadata:
 
 ## §0 适用范围与算子分类
 
-attention_index 行 12：**无 softmax**，改为状态递推或结合律重排。本卡先落**状态递推**细分；**结合律重排**细分尚无实证，待归档。
+attention_index 行 12：**无 softmax** 的**状态递推**细分（fused-recurrent / 1D persistent）。**结合律重排 / chunk WY 反向**走行 12b，专属卡 `chunk-linear-attn-bwd.md`——本卡 L1.1 强制时间串行，**禁止**套到 chunk 反向。
 
 | 算子 | 子类标签 | 计算特征 | 优化哲学 |
 |------|---------|---------|---------|
 | FusedRecurrentGatedDeltaRule | `linear-recurrent` | 门控衰减（g/gk/gv 三种 gate 组合）+ delta rule rank-1 状态修正 `S = decay∘S + k⊗((v−Sᵀk)·β)`，每 `(b, vh)` 一套 `[K,V]` fp32 状态，T 步串行递推 | 单融合 persistent kernel：状态驻留 UB + flag constexpr 特化 + device 内串行 t 循环 |
 | intracard_fwd_h（KDA chunk 级递推，2026-09-09 实证） | `linear-recurrent` | 逐 token 递推的 chunk 化变体：每 chunk `S = exp2(gk_last)∘S + kᵀ@(u − w@S)`，varlen BT 对齐边界，状态 `[K,V]` fp32 驻留，BT∈{64,128} | 同上（grid=N*HV，chunk 粒度 t 循环）；L1.10 block ptr 32-bit 红线首次实证 |
 | Mamba/SSM、RetNet 等状态递推变体 | `linear-recurrent`（待验证） | 状态递推同构（`S = a·S + k⊗v` 族） | 可复用 §1；首验先小规模 |
-| 结合律重排（无递推） | 待归档 | `(QKᵀ)V → Q(KᵀV)` 型重排 | 本卡递推约束不适用，勿混用 |
+| 结合律重排 / chunk WY（无递推） | **`chunk-linear-attn-bwd`**（行 12b） | chunk 内 GEMM + 下三角 `A`，按 chunk 二维分派 | 本卡递推约束不适用；比较链 int32 见专属卡 L1，block_ptr 见其 L2 |
 
 > ⚠️ **与 `recurrent-neural-network.md`（LSTM/GRU/RNN）的分工**：那张卡的哲学是 **host-loop 单步 kernel**——其状态是 `[B,H]` 向量、无大 tile 可驻留；本卡状态是 `[BK,BV]` 矩阵（fp32 ≤32KB）可整块驻留 UB，因此**单融合 persistent kernel + device 内 t 循环**更优（5.75× 实证）。两卡「时间维串行、program 持完整状态」结论一致，分歧仅在发射粒度。
 > ⚠️ **禁止套用 `flash_attention.md` 的 online softmax / KV 分块**——本类无 softmax，状态递推是唯一主链，FA 的滚动 `m/l` 约束整套不适用。

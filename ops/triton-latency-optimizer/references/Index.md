@@ -24,7 +24,7 @@
 | 3 | 分核优化 | Grid 设置不合理或未充分利用 NPU 资源 | Grid 与物理核数严重偏离，或每个 program 处理数据量过小 | `references/vector_core_partition.md` |
 | 4 | 离散访存优化 | 通过随机/不可预测索引访问全局内存 | 索引来源于 `tl.load` 加载值或 kernel 入参；**当随机读结果要喂 `tl.dot` 时**，三条路径（`gather_out_to_ub` / 内核内 gather 连续化暂存 / device-side gather）的选型判据与 gather→dot lowering 缺陷记录见文档内「随机读的三条路径与选型」 | `references/discrete_memory_access.md` |
 | 5 | Scalar 转 Vector 优化 | 存在可转换为向量操作的标量操作 | 存在标量广播、标量规约、标量控制流、`int` 比较/除法/取余、`atomic_*` 标量操作 | `references/scalar_to_vector.md` |
-| 6 | 避免向量 API 标量降级 | 向量操作可能被编译器降级为标量循环 | 算术/比较/扩展乘法/cumsum/cumprod/reduce 满足降级条件 | `references/avoid_scalar_lowering.md` |
+| 6 | 避免向量 API 标量降级 | 向量操作可能被编译器降级为标量循环 | 算术/比较/扩展乘法/cumsum/cumprod/reduce 满足降级条件；或 int64 下标向量比较作 mask | `references/avoid_scalar_lowering.md` |
 | 7 | Pass 消除合并优化 | 多次遍历相同数据计算不同统计量 | 可通过自适应 `BLOCK_SIZE` 消除循环，或可合并多次遍历 | `references/pass-merge.md` |
 | 8 | 维度合并优化 | 多层嵌套循环处理连续维度且维度间无依赖 | 存在 3 层及以上连续维度嵌套循环可合并 | `references/dimension-merge.md` |
 | 9 | Libdevice 函数使用 | 手动实现数学函数而 libdevice 已有优化版本 | 存在手动实现的 math 函数且 libdevice 有对应版本 | `references/libdevice-usage.md` |

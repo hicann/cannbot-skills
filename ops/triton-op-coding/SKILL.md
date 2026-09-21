@@ -140,6 +140,7 @@ shape 检查不会报错，只有数值会错。写法见 `@references/triton-as
 - **注意 API 差异**：GPU Triton 中可用的某些 API 或参数在 Ascend 上可能不支持（如特定 atomic 操作、`tl.dot` 的转置参数等），以 Ascend 参考文档为准
 - **剔除 GPU 特有参数**：`num_warps`、`num_stages`、`num_ctas` 等 GPU 独有参数在 NPU 上不生效，生成代码时必须删除，改用 Ascend 的配置方式（如 `num_cores`）
 - **禁止直接移植**：不能简单复制 GPU kernel 并替换 import，必须基于 sketch 和 Ascend 最佳实践重新实现
+- **下标 dtype**：GPU FLA 常见 `program_id().to(tl.int64)` 不得原样流进 `o_t` 一类 **mask 比较链**（改 `.to(tl.int32)`）。`bos`/`eos`/`i_tg`、`base + bos * stride` 等 **指针基址保持 int64**，不要凡整数都改 int32。
 
 ## 知识加载规则
 

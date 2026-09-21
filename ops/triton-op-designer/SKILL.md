@@ -44,6 +44,7 @@ argument-hint: >
 - **参考 tiling 策略**：BLOCK_SIZE 选择、维度切分方式可作参考起点，但需适配 Ascend UB 容量和对齐要求
 - **注意 API 差异**：GPU Triton 的部分 API（如 `tl.dot` 的参数、atomics 行为）可能与 Ascend 不同，草图设计应以 Ascend 文档为准
 - **剔除 GPU 特有参数**：GPU kernel 中的 `num_warps`、`num_stages`、`num_ctas` 等参数在 NPU 上不生效，草图设计时直接忽略，使用 Ascend 的配置方式（如 `num_cores`）
+- **下标 dtype**：FLA/GPU 的 `program_id().to(tl.int64)` 不要写进 `o_t` 等 **mask 比较链**（草图标 int32）；`bos`/`i_tg` 等 **指针基址标 int64**。
 
 ## 知识加载规则
 
@@ -72,6 +73,7 @@ argument-hint: >
 | | `@references/cases/histogram-small-bins.md` | 小 bins 直方图 / 小输出表规约：per-core local table + 二次归约 |
 | | `@references/cases/index-put.md` | 批量 load 索引到 UB、get_element 复用 |
 | **Attention / FA** | `@../../plugins-official/triton-op-generator/template/flash_attention.md` | FA 主链：先答 §0.2 形态识别四问；瓶颈是 CV 跨核同步，草图必须按「压 KV 迭代数」组织（区间收缩 / `kv_lo` 不对齐 / BLOCK 开到 UB 上限 / mask constexpr 特化），Layer 1 约束为硬性边界 |
+| | `@../../plugins-official/triton-op-generator/template/chunk-linear-attn-bwd.md` | 四·结合律重排 / chunk WY 反向：禁 1D persistent；比较链 `i_t` int32；地址 int64；`A` 转置语义。block_ptr/tile 是 L2 默认姿势 |
 | **MatMul** | `@references/cases/matmul-swizzle2d.md` | 固定核心数 grid、Swizzle2D 块重排 |
 | **Reduction** | `@references/cases/reduction-amax-large.md` | M≪N：reduce 轴多核 + 原子 + 二次切分 |
 | | `@references/cases/reduction-amax-medium.md` | 中等规模：矩阵累加再归约 |
