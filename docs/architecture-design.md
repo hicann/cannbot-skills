@@ -11,7 +11,7 @@
 ```
 cannbot-skills/
 ├── ops/                             # 算子 Skills
-├── model/                           # 模型推理优化 Skills
+├── model/                           # 模型推理与训练 Skills
 ├── graph/                           # 图模式 Skills
 ├── runtime/                         # Runtime Skills
 ├── plugins-official/                # 官方应用 Plugins
@@ -225,6 +225,13 @@ cannbot-skills/
 ### NPU 模型推理优化
 
 `model-infer-optimize` 插件编排 NPU 推理端到端优化流程。Plugin 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三个 Agent，分别负责模型分析与方案设计、代码改造与调试修复、精度验证与性能对比。详见插件目录下的 `AGENTS.md`。
+
+### NPU 模型训练精度诊断
+
+`model-train-precision-diagnose` 插件编排 NPU 训练精度端到端诊断流程。Primary 负责信息收集、症状路由和环境预检，Scope Reducer
+负责缩小复现范围；症状 Agent 分别调用 `model-train-precision-numerical-mismatch`、`model-train-precision-nonfinite`、
+`model-train-precision-determinism` 三个独立 Skill，定位精度有限值首差异、首个 NaN/Inf/Overflow 和受控确定性重复运行结构不一致，最后由 Reviewer 复核证据闭环。详见
+[`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) 插件目录。
 
 ### Runtime
 

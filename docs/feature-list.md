@@ -243,6 +243,20 @@
 | **model-infer-sota-implementer** | 按 Plan 用单点技术 skill 实施单个优化并保留 enable 开关、自验证（model-infer-optimize） |
 | **model-infer-sota-reviewer** | 只复核不改码，验证 Plan 是否真实生效、精度/性能是否达验收口径（model-infer-optimize） |
 
+## NPU 模型训练精度诊断
+
+### Skills
+
+| Skill | 功能 |
+|-------|------|
+| **model-train-precision-numerical-mismatch** | E01 正向、E02 反向有限值偏差的首差异定位与标杆对齐 |
+| **model-train-precision-nonfinite** | E04 前向、反向及 Optimizer/Scaler 边界的 NaN/Inf/Overflow 定位 |
+| **model-train-precision-determinism** | E08 固定输入、权重、Seed 和确定性配置后的重复运行不一致定位 |
+
+端到端诊断可使用
+[`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) Plugin，
+通过 `plugin-sources.json` 组合上述 Skills。
+
 ## Skill 治理工具
 
 ### Skills

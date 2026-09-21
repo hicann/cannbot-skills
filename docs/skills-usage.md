@@ -129,6 +129,50 @@ python3 ops/ascendc-sync-audit/scripts/sync_audit.py cube.cpp vec.cpp --check pa
 
 ---
 
+## NPU 模型训练精度诊断
+
+### model-train-precision-numerical-mismatch
+
+定位 PyTorch on Ascend NPU 训练与标杆之间的正向或反向有限值首差异。
+
+```
+请使用 model-train-precision-numerical-mismatch 诊断训练有限值偏差。
+项目路径：<绝对路径>
+偏差方向：<正向 / 反向 / 待确认>
+目标运行证据：<日志或 dump 绝对路径>
+标杆运行证据：<日志或 dump 绝对路径>
+复现条件：<Step、Rank、输入及关键配置>
+```
+
+### model-train-precision-nonfinite
+
+定位训练过程中首个 NaN、Inf 或 Overflow，并区分异常产生与后续传播位置。
+
+```
+请使用 model-train-precision-nonfinite 诊断训练中的非有限值。
+项目路径：<绝对路径>
+异常现象：<NaN / Inf / Overflow，以及已知出现阶段>
+日志或 dump：<绝对路径>
+复现条件：<Step、Rank、输入及关键配置>
+```
+
+### model-train-precision-determinism
+
+定位固定输入、权重、随机性和确定性配置后，两次受控训练仍不一致的首个位置。
+
+```
+请使用 model-train-precision-determinism 诊断训练重复运行不一致。
+项目路径：<绝对路径>
+A/B 运行证据：<两次运行的日志或 dump 绝对路径>
+已固定条件：<输入、权重、Seed、确定性配置和并行拓扑>
+首次已知差异：<Step、Rank、Module/API/Tensor；未知则写无>
+```
+
+有限值偏差诊断必须提供可比标杆；路径尽量使用绝对路径。若尚不能判断症状类型或需要完整诊断流程，可使用
+[`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) Plugin。
+
+---
+
 ## Skill 治理工具
 
 ### cannbot-skill-reviewer

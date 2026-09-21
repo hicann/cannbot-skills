@@ -31,7 +31,7 @@ description: "用于诊断 PyTorch on NPU 大模型训练中的 NPU OOM（Out of
 
 ## 不适用场景
 
-- 精度问题（loss 偏离、NaN/Inf）→ 使用 `model-train-accuracy-debug` 技能。
+- 精度问题（loss 有限值偏差、NaN/Inf/Overflow、重复运行不一致）→ 使用 `model-train-precision-diagnose` Plugin，由其路由到对应精度 Skill。
 - 纯性能瓶颈（训练慢但不 OOM）。
 - 非 NPU 设备的内存问题。
 

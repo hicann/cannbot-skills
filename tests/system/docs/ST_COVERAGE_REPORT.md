@@ -1,6 +1,6 @@
 # ST 测试覆盖率报告
 
-当前 ST 框架覆盖 **102 个 Skill + 18 个 Team**，共 **866 个评测用例**（仅统计已启用用例，截止 2026-09-11）。
+当前 ST 框架覆盖 **110 个 Skill + 19 个 Team**，共 **919 个评测用例**（仅统计已启用用例，截止 2026-09-21）。
 
 > **统计口径**：统计代码仓内所有符合结构要求的 Skill（`skill_dirs` 下含 `SKILL.md`）与 Team（`team_dirs` 下含 `AGENTS.md` + `.claude-plugin/plugin.json`），与是否携带 `evals/evals.json` 无关——无 evals 的实体用例数计 0。
 
@@ -21,24 +21,24 @@
 
 按域分组统计：
 
-### ops/（70 Skills，共 555 个用例）
+### ops/（70 Skills，共 534 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
 | aiss-tiling-solver | 5 |   |   | √ |   | √ |
 | ascendc-api-best-practices | 10 | √ |   | √ |   | √ |
-| ascendc-blaze-best-practice | 39 |   |   | √ |   | √ |
+| ascendc-blaze-best-practice | 15 |   |   | √ |   | √ |
 | ascendc-blaze-migration | 10 |   |   | √ | √ | √ |
-| ascendc-code-review | 7 | √ |   | √ |   | √ |
+| ascendc-code-review | 8 | √ |   | √ |   | √ |
 | ascendc-crash-debug | 7 | √ |   | √ |   | √ |
 | ascendc-direct-invoke-template | 7 | √ |   | √ |   | √ |
 | ascendc-direct-invoke-to-registry-invoke | 8 |   |   | √ |   | √ |
 | ascendc-docs-gen | 11 |   |   | √ |   | √ |
 | ascendc-docs-search | 9 | √ |   | √ |   | √ |
 | ascendc-env-check | 11 | √ |   | √ |   | √ |
-| ascendc-mc2-best-practice | 19 | √ |   | √ | √ | √ |
-| ascendc-perf-optimize | 8 |   |   | √ |   | √ |
-| ascendc-performance-best-practices | 7 | √ |   | √ |   | √ |
+| ascendc-mc2-best-practice | 20 | √ |   | √ | √ | √ |
+| ascendc-perf-optimize | 9 |   |   | √ |   | √ |
+| ascendc-performance-best-practices | 8 | √ |   | √ |   | √ |
 | ascendc-precision-debug | 9 | √ |   | √ |   | √ |
 | ascendc-regbase-best-practice | 7 |   |   | √ |   | √ |
 | ascendc-registry-invoke-template | 14 | √ |   | √ |   | √ |
@@ -86,7 +86,7 @@
 | tilelang-programming-model-guide | 7 |   |   | √ |   | √ |
 | tilelang-review | 7 |   |   | √ |   | √ |
 | tilelang-submodule-pull | 6 |   |   | √ |   | √ |
-| torch-ascendc-op-extension | 7 |   |   | √ |   | √ |
+| torch-ascendc-op-extension | 6 |   |   | √ |   | √ |
 | torch-ops-profiler | 2 |   |   | √ |   | √ |
 | triton-latency-optimizer | 7 |   |   | √ |   | √ |
 | triton-op-coding | 7 |   |   | √ |   | √ |
@@ -96,11 +96,15 @@
 | triton-simulator-optimizer | 10 |   |   | √ |   | √ |
 | triton-task-extractor | 7 |   |   | √ |   | √ |
 
-### graph/（8 Skills，共 66 个用例）
+### graph/（12 Skills，共 96 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| ge-coredump-diagnose | 9 |   |   | √ |   | √ |
+| ge-dynamic-shape-diagnose | 7 |   |   | √ |   | √ |
 | ge-fusion-pass-skill | 5 | √ |   | √ | √ | √ |
+| ge-memory-analysis | 9 |   |   | √ |   | √ |
+| ge-stream-log-analysis | 5 | √ |   | √ | √ | √ |
 | torch-custom-ops-guide | 10 | √ |   | √ | √ | √ |
 | torch-npugraph-ex-compile-error-diagnosis | 8 | √ |   | √ | √ | √ |
 | torch-npugraph-ex-dfx-triage | 9 | √ |   | √ | √ | √ |
@@ -109,7 +113,7 @@
 | torch-npugraph-ex-runtime-error-diagnosis | 9 | √ |   | √ | √ | √ |
 | torch-npugraph-ex-template | 7 |   |   | √ | √ | √ |
 
-### model/（18 Skills，共 169 个用例）
+### model/（21 Skills，共 215 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
@@ -128,9 +132,12 @@
 | model-infer-quantization | 11 | √ |   | √ | √ | √ |
 | model-infer-runtime-debug | 11 | √ |   | √ | √ | √ |
 | model-infer-superkernel | 11 | √ |   | √ | √ | √ |
-| model-train-accuracy-debug | 6 | √ |   | √ | √ | √ |
+| model-recommend-analysis | 4 |   |   | √ | √ | √ |
 | model-train-log-visualization | 5 | √ |   | √ | √ | √ |
 | model-train-oom-analysis | 6 | √ |   | √ | √ | √ |
+| model-train-precision-determinism | 14 | √ | √ | √ | √ | √ |
+| model-train-precision-nonfinite | 16 | √ | √ | √ | √ | √ |
+| model-train-precision-numerical-mismatch | 18 | √ | √ | √ | √ | √ |
 
 ### infra/（5 Skills，共 34 个用例）
 
@@ -142,22 +149,23 @@
 | gitcode-pr-handler | 9 |   |   | √ |   | √ |
 | gitcode-toolkit | 12 | √ |   | √ | √ | √ |
 
-### runtime/（1 Skills，共 0 个用例）
+### runtime/（2 Skills，共 0 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| runtime-llt-generator | 0 |   |   |   |   |   |
 | runtime_migration | 0 |   |   |   |   |   |
 
 ## 3. Team 覆盖率
 
-### plugins-official/（10 Teams，共 41 个用例）
+### plugins-official/（10 Teams，共 39 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
 | catlass-op-generator | 0 |   |   |   |   |   |
 | model-infer-optimize | 7 | √ |   | √ |   | √ |
 | ops-code-reviewer | 3 | √ |   | √ |   | √ |
-| ops-direct-invoke | 2 |   |   | √ |   | √ |
+| ops-direct-invoke | 0 |   |   |   |   |   |
 | ops-direct-invoke-flash | 9 | √ |   | √ |   | √ |
 | ops-registry-invoke | 13 | √ |   | √ | √ | √ |
 | pypto-op-orchestrator | 3 | √ |   | √ |   | √ |
@@ -165,13 +173,14 @@
 | torch-compile | 1 |   |   | √ |   | √ |
 | triton-op-generator | 0 |   |   |   |   |   |
 
-### plugins-community/（8 Teams，共 1 个用例）
+### plugins-community/（9 Teams，共 1 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
 | ascendc-port-orchestrator | 1 |   |   | √ |   | √ |
 | autoresearch | 0 |   |   |   |   |   |
 | cannbot-knowledge | 0 |   |   |   |   |   |
+| catlass-dsl-generator | 0 |   |   |   |   |   |
 | ops-perf-evolution | 0 |   |   |   |   |   |
 | ops-perf-optimize | 0 |   |   |   |   |   |
 | shmem-ops-generator | 0 |   |   |   |   |   |

@@ -15,6 +15,11 @@
 #### 文档更新 Documentation
 - 【文档索引】`docs/feature-list.md` 补充 `tools/` 域 CANN 工具链 Skill 清单：新增「CANN 工具链」章节，收录 asys-toolkit（一键式故障信息收集）、msaicerr-toolkit（AI Core Error 分析与 Dump 解析）、msnpureport-toolkit（Device 侧日志导出与维测配置）三个维测工具 Skill，补齐功能清单入口缺失。
 
+### 【2026-09-14】
+#### 架构重构 Architecture Refactoring
+- 【模型训练精度诊断】重构训练精度异常诊断能力，新增 `model-train-precision-numerical-mismatch`、`model-train-precision-nonfinite`、`model-train-precision-determinism` 三个独立 Skill，分别面向有限值偏差、NaN/Inf/Overflow 与受控确定性重复运行不一致；以“复现与可比性确认 → 首差异/首异常定位 → 单变量修复与回退验证”形成统一证据闭环，并补充 msProbe 配置、实验分析参考和评测用例。
+- 【模型训练精度诊断】日落并移除 `model-train-accuracy-debug`，不保留别名、兼容入口。
+
 ### 【2026-09-11】
 #### 新特性 New Features
 - 【GE 图编译】新增 `ge-memory-analysis`：Device 显存归因、Host 内存泄漏排查、算子下发地址调试、内存寻优、踩内存问题分析（五类根因排查 + dump watch 模式定位）五大场景，配套 3 个脚本与 9 条 evals。

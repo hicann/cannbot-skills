@@ -93,7 +93,8 @@
       "config": {
         "max_tokens": 150000,
         "distractor_skills": [
-          "model-train-accuracy-debug",
+          "model-train-precision-nonfinite",
+          "model-train-precision-numerical-mismatch",
           "model-infer-kvcache",
           "model-infer-runtime-debug"
         ],
@@ -120,7 +121,7 @@
         "eval_mode": "text"
       },
       "prompt": "我的训练 loss 偏离基线了，帮我用 OOM 分析 skill 修一下精度。",
-      "expected_output": "回复应说明本 skill 只诊断 OOM/内存问题，loss 偏离/NaN 等精度问题不在范围，应建议改用 model-train-accuracy-debug",
+      "expected_output": "回复应说明本 skill 只诊断 OOM/内存问题，loss 偏离/NaN 等精度问题不在范围，应建议改用 model-train-precision-diagnose",
       "files": [],
       "expectations": [
         {

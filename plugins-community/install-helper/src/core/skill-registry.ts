@@ -169,7 +169,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
   },
   {
     id: "model",
-    name: "模型推理优化",
+    name: "模型推理与训练",
     skills: [
       { id: "model-infer-migrator", description: "框架适配与部署基线", source: "model" },
       { id: "model-infer-parallel-analysis", description: "并行策略分析（TP/EP/DP）", source: "model" },
@@ -183,7 +183,9 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "model-infer-precision-debug", description: "NPU 推理精度诊断", source: "model" },
       { id: "model-infer-runtime-debug", description: "NPU 推理运行时错误诊断", source: "model" },
       { id: "model-infer-harmony", description: "端侧鸿蒙 ASR 量化转换与打包", source: "model" },
-      { id: "model-train-accuracy-debug", description: "PyTorch on NPU 大模型训练精度异常定位", source: "model" },
+      { id: "model-train-precision-numerical-mismatch", description: "PyTorch on NPU 训练正向/反向有限值偏差诊断", source: "model" },
+      { id: "model-train-precision-nonfinite", description: "PyTorch on NPU 训练 NaN/Inf/Overflow 诊断", source: "model" },
+      { id: "model-train-precision-determinism", description: "PyTorch on NPU 训练非确定性诊断", source: "model" },
       { id: "model-train-log-visualization", description: "NPU 大模型训练日志可视化与对比", source: "model" },
       { id: "model-train-oom-analysis", description: "PyTorch on NPU 训练 OOM 内存诊断与优化", source: "model" },
       { id: "science-model-npu-migration", description: "NPU 代码级迁移（环境门禁/脚本适配/精度性能对比）", source: "plugins-community/science-model-npu-migration", filePath: "plugins-community/science-model-npu-migration/SKILL.md" },
