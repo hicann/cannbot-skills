@@ -285,6 +285,7 @@
 | **asys-toolkit** | asys 一键式故障信息收集：collect/launch/info/health/diagnose/analyze（trace/coredump/stackcore/coretrace/UB/AI Core Error 六类文件解析）/config/profiling | — |
 | **msaicerr-toolkit** | msaicerr 故障分析：AI Core Error 问题定位（info.txt）、Dump 文件解析为 .bin/.npy、bin 转 npy 类型转换、内置算子样例环境检查 | — |
 | **msnpureport-toolkit** | msnpureport Device 侧日志导出（单次/常驻连续）、维测配置查询与设置（日志级别/Coremask/加速器复位/singlecommit）、导出目录结构解读 | — |
+| **tool-npu-compute** | 使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包 `.npu-rep`，并分析带宽、流水线、存储访问、缓存和资源冲突等数据；支持由多个采集项组成的指标集合（Set）和可单独选择的采集项（Section） | [查看](skills-usage.md#tool-npu-compute) |
 | **tool-npu-check** | `memcheck` 设备全局内存（GM）访问检查、`synccheck` 同步操作配对检查、命令执行及检查报告解读 | — |
 
 ## 社区 Plugins

@@ -129,6 +129,36 @@ python3 ops/ascendc-sync-audit/scripts/sync_audit.py cube.cpp vec.cpp --check pa
 
 ---
 
+## CANN 工具链
+
+### tool-npu-compute
+
+使用 npu-compute 选择和采集 NPU 性能指标、确认采集是否成功、解包报告并解释结果，可用于定位带宽、流水线利用率、存储访问、缓存和资源冲突等性能问题。Set 是由多个采集项组成的指标集合，Section 是可单独选择、生成一类独立结果的采集项。明确需要使用工具、采集 NPU 性能指标或解释已有采集结果时适用；只要求一般性能分析或算子优化时不会自动加载。
+
+**生成采集命令：**
+
+```text
+使用 npu-compute 为 ./add_custom 采集常用性能指标，只告诉我命令，不要执行。
+```
+
+**执行采集并分析报告：**
+
+```text
+在 examples/add-case 运行 npu-compute --set full -- ./add_custom --input input.bin，
+解包生成的 .npu-rep，并分析访存带宽、流水线利用率和资源冲突指标。
+```
+
+**分析已有结果：**
+
+```text
+这是 npu-compute 解包目录 unpacked-results/npu-compute-import-123，
+请检查其中的 summary.jsonl、PipeTrace.json 和 Section CSV 并给出结论。
+```
+
+报告分析以实际文件为准；加载 Skill 不代表已经获得启动目标程序或执行采集的授权。
+
+---
+
 ## NPU 模型训练精度诊断
 
 ### model-train-precision-numerical-mismatch

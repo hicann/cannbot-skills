@@ -11,7 +11,7 @@
 
 ## 📢 项目概述
 
-**CANNBot** 是面向 CANN 开发的系列智能体，本仓库提供可复用的 Agent Skills 模块，覆盖 Ascend C / Catlass / PyPTO / TileLang / Triton 算子开发、torch.compile 图模式优化、NPU 模型推理端到端优化、Runtime 开发适配等场景。
+**CANNBot** 是面向 CANN 开发的系列智能体，本仓库提供可复用的 Agent Skills 模块，覆盖 Ascend C / Catlass / PyPTO / TileLang / Triton 算子开发、torch.compile 图模式优化、NPU 模型推理端到端优化、Runtime 开发适配和 CANN 工具使用等场景。
 
 **面向用户**：CANN / 昇腾 NPU 各领域开发者（算子开发、图模式、模型推理、Runtime 等），同时欢迎社区开发者共建 Skills 和 Agents。
 
@@ -77,6 +77,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **模型推理优化** | NPU 推理端到端优化 | [model-infer-optimize](plugins-official/model-infer-optimize/AGENTS.md) |
 | **模型训练精度诊断** | PyTorch on Ascend NPU 的有限值偏差、非有限值和确定性异常诊断 | [cannbot 社区 Plugin](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) |
 | **Runtime** | Runtime LLT 开发与接口迁移 | [runtime](runtime/) |
+| **CANN 工具链** | 故障信息收集、Device 日志导出、AI Core Error 分析、npu-compute 性能采集与报告分析 | [tools](tools/) |
 | **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | — |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | — |
 
@@ -91,7 +92,7 @@ cannbot-skills/
 ├── graph/                # 图模式 Skills
 ├── runtime/              # Runtime Skills
 ├── infra/                # 基础设施 Skills（治理 / GitCode 协作）
-├── tools/                # CANN 工具链 Skills（asys / msaicerr / msnpureport / npu-check）
+├── tools/                # CANN 工具链 Skills（asys / msaicerr / msnpureport / npu-compute / npu-check）
 ├── plugins-official/     # 官方 Plugins（开发路径入口，含 Agents/Workflows）
 ├── plugins-community/    # 社区 Plugins
 ├── docs/                 # 项目文档

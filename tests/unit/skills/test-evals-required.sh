@@ -21,7 +21,7 @@
 #   A "skill_name" mismatch against the directory name is a warning only.
 #
 # This is a full-repo check: it iterates ALL one-level skills under
-# ops/ model/ graph/ runtime/ infra/ regardless of incremental mode,
+# ops/ model/ graph/ runtime/ infra/ tools/ regardless of incremental mode,
 # mirroring test-dependency-graph.sh.
 # =============================================================================
 
@@ -38,7 +38,7 @@ echo "Run time: ~5 seconds (no CLI needed)"
 echo ""
 
 # Domain dirs containing one-level skills (mirrors ST skill_dirs, plus runtime/)
-DOMAIN_DIRS=(ops model graph runtime infra)
+DOMAIN_DIRS=(ops model graph runtime infra tools)
 
 total_skills=0
 pass_count=0

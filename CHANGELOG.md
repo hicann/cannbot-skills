@@ -7,6 +7,13 @@
 #### 缺陷修复 Bug Fixes
 - 【ascendc-mc2-best-practice】修复 mc2 参考实现中 `MC2HcomTopology::GetInstance` 的悬垂指针缺陷（issue #707）：原代码 `static const char *libPath = GetLibPath().c_str()` 将按值返回的临时 `std::string` 的 `c_str()` 指针存入静态指针，临时对象在该完整表达式结束时析构，`libPath` 成为悬垂指针并被传入构造函数执行 `dlopen`，属可触发的 use-after-free。修复为 `static const std::string libPath = GetLibPath()`（延长持有缓冲区的 string 对象的生命周期至进程结束，裸指针不比所有者长寿，符合 C++ Core Guidelines ES.30），构造函数 `const char*` 签名与行为不变。
 
+### 【2026-09-20】
+#### 新特性 New Features
+- 【CANN 工具链】新增 `tool-npu-compute` Skill，用于选择和采集 NPU 性能指标、确认采集是否成功、解包 `.npu-rep` 报告，并分析带宽、流水线利用率、存储访问、缓存和资源冲突等数据以定位性能问题。Skill 支持指标集合（Set，由多个采集项组成）和单类采集项（Section，生成一类独立结果），提供字段说明和只读检查脚本；仅要求一般性能分析或算子优化时不触发。
+
+#### 文档更新 Documentation
+- 【文档索引】同步更新 README、功能清单、使用样例和工具域开发规范，将 `tool-npu-compute` 纳入 `tools/` 正式技能目录。
+
 ### 【2026-09-16】
 #### 新特性 New Features
 - 【GitCode 协作】`gitcode-issue-handler` 新增 `auto-response` 与 `auto-assign` 配置：可在当前处理请求范围内自动首响、转交明确负责人，并可选临时指派最可能的候选人；分类器保持只读，跟进、关闭 Issue 和代码交付仍需独立授权。Claude Marketplace `infra-skills` 升级为 `1.2.0`。
