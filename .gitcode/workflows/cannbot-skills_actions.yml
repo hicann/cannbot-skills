@@ -190,11 +190,11 @@ stages:
         steps:
           - name: check_script
             run: |
-              test -f /home/w00617363/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
                 || { echo "❌ runner 上未找到 ci-pr-verify.sh，请确认 cannbot-skills-rdv 已部署" >&2; exit 3; }
           - name: run_st_test
             run: |
-              bash /home/w00617363/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
                 --pr-number "${{ env.MERGE_ID }}" \
                 --platforms A2 \
                 --password "${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}" \
