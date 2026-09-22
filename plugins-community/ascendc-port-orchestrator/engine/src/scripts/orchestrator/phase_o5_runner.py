@@ -105,33 +105,91 @@ def _port_a3_claims_pass_a(workspace: Path) -> bool:
     return pa.get("tier1_pass") is not None or pa.get("total") is not None
 
 
+def _port_destination_prefix(target_prefix: str) -> bool:
+    """True when the env-key PREFIX names a port DESTINATION chip.
+
+    `target` arrives at the `_a5_build_*` resolvers as the PREFIX from
+    `_normalise_target` (A5 / A3 / A2 / ASCEND310P). Membership is decided
+    against `a3_ref_common.PORT_DESTINATIONS` through the canonical prefix map,
+    so this predicate and `orchestrator.enforce_port_a3_target` can never
+    disagree (the guard admits a destination ⇔ the resolver follows it).
+    """
+    from a3_ref_common import PORT_DESTINATIONS
+    from briefs._common import TARGET_ENV_PREFIXES
+    return target_prefix in {TARGET_ENV_PREFIXES.get(d) for d in PORT_DESTINATIONS}
+
+
 def _a5_build_host(env: dict, workspace: Path, target: str) -> str:
-    """A5 build/verify host. In port_a3 mode prefer the explicit A5_HOST (split
-    A3-ref-host / A5-build-host); otherwise the legacy `{target}_HOST or A5_HOST`
-    (no-op for TARGET=a5 agents where {target}==A5)."""
-    if _is_port_a3_mode(workspace) and env.get("A5_HOST"):
-        return env["A5_HOST"]
+    """Port build/verify host. In port_a3 mode the build site belongs to the
+    DESTINATION chip: a destination target reads its own keys (for 310p that is
+    ASCEND310P_HOST — NEVER an A5_* fallback, the silent-wrong-chip class), and
+    the split A3-ref-host / A5-build-host case (TARGET=a3 agent, the port's
+    SOURCE) keeps the explicit A5_HOST precedence from task#24-item2. Outside
+    port_a3 the legacy `{target}_HOST or A5_HOST` is byte-identical."""
+    if _is_port_a3_mode(workspace):
+        if _port_destination_prefix(target):
+            dest = env.get(f"{target}_HOST")
+            if dest:
+                return dest
+            if target == "A5":
+                return env.get("A5_HOST", "")  # a5: its own prefix IS A5_
+            return ""  # non-a5 destination unconfigured: fail loud, never A5
+        if env.get("A5_HOST"):
+            return env["A5_HOST"]
     return env.get(f"{target}_HOST") or env.get("A5_HOST", "")
 
 
 def _a5_build_container(env: dict, workspace: Path, target: str) -> str:
-    if _is_port_a3_mode(workspace) and env.get("A5_CONTAINER"):
-        return env["A5_CONTAINER"]
+    if _is_port_a3_mode(workspace):
+        if _port_destination_prefix(target):
+            dest = env.get(f"{target}_CONTAINER")
+            if dest:
+                return dest
+            if target == "A5":
+                return env.get("A5_CONTAINER", "npu_dev3")
+            return ""
+        if env.get("A5_CONTAINER"):
+            return env["A5_CONTAINER"]
     return env.get(f"{target}_CONTAINER") or env.get("A5_CONTAINER", "npu_dev3")
 
 
 def _a5_build_cann_path(env: dict, workspace: Path, target: str) -> str:
-    if _is_port_a3_mode(workspace) and env.get("A5_CANN_PATH"):
-        return env["A5_CANN_PATH"]
+    if _is_port_a3_mode(workspace):
+        if _port_destination_prefix(target):
+            dest = env.get(f"{target}_CANN_PATH")
+            if dest:
+                return dest
+            if target == "A5":
+                return env.get("A5_CANN_PATH") or env.get("CANN_PATH", "/usr/local/Ascend/cann")
+            return ""
+        if env.get("A5_CANN_PATH"):
+            return env["A5_CANN_PATH"]
     return env.get(f"{target}_CANN_PATH") or env.get("CANN_PATH", "/usr/local/Ascend/cann")
 
 
 def _normalise_target(env: dict) -> tuple[str, str]:
-    """Return the configured target and its environment-variable prefix."""
+    """Return the configured target and its environment-variable PREFIX.
+
+    The prefix comes from the explicit map in briefs._common.TARGET_ENV_PREFIXES
+    (lazy import — briefs must not be pulled into phase_o5's import cycle).
+    It must NEVER be `target.upper()`: for TARGET=310p that yields the illegal
+    digit-led key `310P_*` which no parser ever populates, so every
+    `{prefix}_HOST` lookup silently misses and falls back to A5_* — the O5-layer
+    instance of the DEBT-336 bug class (fixed in resolve_target.sh,
+    deploy_to_npu_lane.sh, deploy_to_npu.sh, and briefs/_common.py).
+    For a5/a3/a2 the map still returns the exact upper() value, so legacy
+    behavior is byte-identical. An unknown target falls back to upper() and is
+    rejected downstream by the shell resolver's whitelist / prefix map.
+    """
     target = (env.get("TARGET") or "a5").lower()
     if target.endswith("-ds"):
         target = target[:-3]
-    return target, target.upper()
+    from briefs._common import target_env_prefix
+    try:
+        prefix = target_env_prefix(target)
+    except ValueError:
+        prefix = target.upper()
+    return target, prefix
 
 
 def _plugin_pass_b_skip(workspace: Path) -> Optional[dict]:

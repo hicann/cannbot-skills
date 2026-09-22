@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from npubench import npubench_runner
-from a5_target_capability import a5_soc_version
+from a5_target_capability import soc_version_for_target
 from a5_target_transport import _Target
 from npubench.npubench_candidate_contract import (
     TILELANG2ASCENDC_CANDIDATE_INDEPENDENCE_SCHEMA,
@@ -335,7 +335,7 @@ def _target_identity(target: _Target) -> dict[str, Any]:
         "cann_path": target.cann_path,
         "benchmark_root": target.benchmark_root,
         "visible_device": target.visible_device,
-        "configured_soc": a5_soc_version(target.env),
+        "configured_soc": soc_version_for_target(target.env, target.name),
     }
     runtime_container = _local_runtime_container(target)
     if runtime_container is not None:

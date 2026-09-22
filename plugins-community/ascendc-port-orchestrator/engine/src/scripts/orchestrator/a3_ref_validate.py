@@ -1160,10 +1160,16 @@ def _write_a3_reference_runnable_json(workspace: Path, rep: O25A3Report) -> Path
     }
     try:
         state = json.loads((workspace / ".opgen_state.json").read_text())
-        if state.get("source_arch") == "arch22" and state.get("target_arch") == "arch35":
+        # Destination-derived expectation (a5→arch35, 310p→arch20): the
+        # informational migration block must never claim arch35 for a 310P
+        # port run (wrong-chip provenance; see a5_target_capability).
+        from a5_target_capability import arch_for_target
+
+        expected_arch = arch_for_target(state.get("target"))
+        if state.get("source_arch") == "arch22" and state.get("target_arch") == expected_arch:
             payload["migration"] = {
                 "source_arch": "arch22",
-                "target_arch": "arch35",
+                "target_arch": expected_arch,
                 "source_arch_detection": state.get("source_arch_detection", {}),
             }
     except Exception as error:

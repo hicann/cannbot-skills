@@ -98,11 +98,17 @@ def _inject_migration_metadata(workspace: Path) -> None:
                 "semantic": "tilelang2ascendc_project_context",
             }
         else:
-            if state.get("source_arch") != "arch22" or state.get("target_arch") != "arch35":
+            # Destination-derived expectation (a5→arch35, 310p→arch20):
+            # injecting a literal "arch35" migration block into a 310P port's
+            # customer-visible verification.json would be wrong-chip provenance.
+            from a5_target_capability import arch_for_target
+
+            expected_arch = arch_for_target(state.get("target"))
+            if state.get("source_arch") != "arch22" or state.get("target_arch") != expected_arch:
                 return
             migration = {
                 "source_arch": "arch22",
-                "target_arch": "arch35",
+                "target_arch": expected_arch,
                 "source_arch_detection": state.get("source_arch_detection", {}),
             }
         verification = json.loads(verification_path.read_text())
@@ -916,10 +922,21 @@ def _finalize_with_plugin_layout(
     return skipped_names
 
 
-def _archive_root_for_plugin(plugin, archive_root: Optional[Path]) -> Path:
-    """Resolve the default archive root without changing plugin ownership."""
+def _archive_root_for_plugin(
+    plugin, archive_root: Optional[Path], archive_project: Optional[str] = None
+) -> Path:
+    """Resolve the default archive root without changing plugin ownership.
+
+    ``archive_project`` (optional, from the RUN's resolved env — never the
+    global env file at finalize time) names the destination-aware project
+    (briefs._common target-aware map: a3_to_a5_port / a3_to_310p_port /
+    backward_ops). When absent (CLI callers, legacy paths) the plugin's static
+    default applies, byte-identical to the previous behavior.
+    """
     if archive_root is not None:
         return archive_root
+    if archive_project:
+        return _PROJECT_ROOT / "output" / archive_project / "src" / "kernels"
     subdir = (plugin.archive_project_subdir() if plugin else None) or "generated_ops"
     return _PROJECT_ROOT / "output" / subdir / "src" / "kernels"
 
@@ -1157,12 +1174,13 @@ def finalize_op(
     workspace: Path,
     *,
     archive_root: Optional[Path] = None,
+    archive_project: Optional[str] = None,
 ) -> FinalizeReport:
     """Finalize an eligible workspace using its plugin-owned archive layout."""
     plugin = _get_active_plugin(workspace)
     is_port_mode = bool(plugin and plugin.archive_layout_mapping(workspace))
     archive_view = _freeze_archive_view(plugin, workspace, op)
-    archive_root = _archive_root_for_plugin(plugin, archive_root)
+    archive_root = _archive_root_for_plugin(plugin, archive_root, archive_project)
     rep = FinalizeReport(op=op, workspace=workspace, archive_dir=None)
     if not _can_finalize_workspace(workspace, rep):
         return rep

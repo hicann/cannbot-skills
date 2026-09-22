@@ -1,6 +1,6 @@
 {
   "name": "ascendc-port-orchestrator",
-  "description": "跨代际 AscendC 算子移植插件。两项能力：① 跨代际算子移植（当前 arch22→arch35）, 包含使用编排器引擎和直接skill驱动的两个版本。② 正向→反向算子生成。三个入口 skill（ascendc-cross-gen-port / ascendc-cross-gen-port-light / ascendc-backward-gen）作 orch-shell。支持 Claude Code 与 opencode 两种 agent harness（安装面差异见 docs/USAGE.md §1，实现见 docs/ARCHITECTURE.md §8）。安装见 init.sh。",
+  "description": "跨代际 AscendC 算子移植插件。两项能力：① 跨代际算子移植（支持 arch22→arch35、arch22→arch20（Atlas 300I Duo / Ascend310P3）），包含使用编排器引擎和直接skill驱动的两个版本。② 正向→反向算子生成。三个入口 skill（ascendc-cross-gen-port / ascendc-cross-gen-port-light / ascendc-backward-gen）作 orch-shell。支持 Claude Code 与 opencode 两种 agent harness（安装面差异见 docs/USAGE.md §1，实现见 docs/ARCHITECTURE.md §8）。安装见 init.sh。",
   "version": "0.1.4",
   "author": {
     "name": "CANNBot"

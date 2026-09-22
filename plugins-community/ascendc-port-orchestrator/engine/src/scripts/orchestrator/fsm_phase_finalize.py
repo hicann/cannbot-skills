@@ -2472,7 +2472,21 @@ def _promote_and_route(ctx: OrchestratorContext) -> HandlerResult:
     static_result = _check_delivery_static_safety(ctx.workspace, ctx.lane)
     if static_result is not None:
         return static_result
-    finalize_report = finalize_pipeline.finalize_op(ctx.op, ctx.workspace)
+    # Destination-aware archive namespace: pass the RUN's resolved
+    # archive_project (briefs target-aware map — a3_to_a5_port stays for a5,
+    # a3_to_310p_port for 310p) so finalize routes
+    # the op into the destination's own output project instead of the plugin's
+    # static a5-destination default. Never read the global env file here: the
+    # run context is the authority (a stale global TARGET must not re-route a
+    # finalize). Resolution failure falls back to the plugin default.
+    try:
+        _env = ctx.resolve_env()
+    except Exception:
+        _env = None
+    _archive_project = getattr(_env, "archive_project", None) if _env else None
+    finalize_report = finalize_pipeline.finalize_op(
+        ctx.op, ctx.workspace, archive_project=_archive_project
+    )
     _log_finalize_promotion(finalize_report)
     if finalize_report.errors:
         return _route_finalize_to_done(

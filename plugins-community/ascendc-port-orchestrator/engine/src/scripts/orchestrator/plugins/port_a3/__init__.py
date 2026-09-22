@@ -363,6 +363,41 @@ def _resolved_workspace_file(root: Path, raw: Any) -> Optional[Path]:
     return resolved
 
 
+def _manifest_kernel_source(
+    root: Path, cp: Mapping[str, Any], build_dir: Path
+) -> Optional[Path]:
+    """Resolve the candidate kernel TU from an NPUBench sources manifest.
+
+    The NPUBench authoring lane records ``compiled_provenance`` as
+    ``{"sources": [{path, sha256, role}...]}`` — a multi-file manifest with
+    free-text roles — instead of one ``source`` path.  The TU is the ``.cpp``
+    entry whose declared digest matches the workspace bytes AND whose
+    compiled ``<name>.o`` exists in the runner's build directory, so the
+    reconciled lineage stays tied to what the runner actually built rather
+    than to the role string.  ``kernel/kernels.cpp`` (the lane's fixed
+    candidate entry) wins ties; an otherwise-unique match is accepted.
+    """
+    entries = cp.get("sources")
+    if not isinstance(entries, list):
+        return None
+    fallback: list[Path] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        resolved = _resolved_workspace_file(root, entry.get("path"))
+        if resolved is None or resolved.suffix != ".cpp":
+            continue
+        declared = entry.get("sha256")
+        if not isinstance(declared, str) or declared.lower() != _sha256_file(resolved):
+            continue
+        if not any(item.is_file() for item in build_dir.rglob(resolved.name + ".o")):
+            continue
+        if resolved == root / "kernel" / "kernels.cpp":
+            return resolved
+        fallback.append(resolved)
+    return fallback[0] if len(fallback) == 1 else None
+
+
 def _declared_build_artifact(root: Path, raw: Any) -> Optional[Path]:
     """Return a declared build artifact path when it is a workspace file."""
     if not isinstance(raw, str) or not raw.strip():
@@ -686,17 +721,25 @@ class PortA3Plugin(BasePlugin):
             return None
         source_resolved = _resolved_workspace_file(root, cp.get("source"))
         if source_resolved is None:
-            # 2026-09-18 (2_GroupedMatmul / 4_MatmulTransA): workers often
-            # emit the deliverable list schema (`workspace_source` as a list of
-            # {path, sha256} entries) without the single-file `source` field.
-            # The reconcile path only needs ONE real workspace source to
-            # attest against the runner-built artifacts, so accept the first
-            # resolvable entry — preferring translation units (.cpp) — as the
-            # attested source instead of parking a full worker repair cycle on
-            # the schema mismatch.
-            source_resolved = (
-                PortA3Plugin._resolve_source_from_workspace_source_entries(cp, root)
-            )
+            # Two distinct schema shapes can leave the single-file ``source``
+            # field empty over a PASS runner build receipt, each with its own
+            # real failure case:
+            #   1) NPUBench candidates carry a multi-file sources manifest
+            #      (no single ``source`` field): resolve the TU from the
+            #      manifest and the runner's own build artifacts
+            #      (interleave_rope: reconcile silently declined and the
+            #      provenance gate failed on empty single-file fields).
+            #   2) 2026-09-18 (2_GroupedMatmul / 4_MatmulTransA): workers emit
+            #      the deliverable list schema (`workspace_source` as a list of
+            #      {path, sha256} entries) without the single-file `source`
+            #      field. Accept the first resolvable entry — preferring
+            #      translation units (.cpp) — as the attested source.
+            # Chain both fallbacks so neither lane regresses.
+            source_resolved = _manifest_kernel_source(root, cp, build_dir)
+            if source_resolved is None:
+                source_resolved = (
+                    PortA3Plugin._resolve_source_from_workspace_source_entries(cp, root)
+                )
         if source_resolved is None:
             return None
         object_path = _built_object_path(root, build_dir, cp, source_resolved)
@@ -935,6 +978,20 @@ class PortA3Plugin(BasePlugin):
         """
         tile_status, _tile_reason = self._tilelang2ascendc_profile_status(workspace)
         if tile_status in {TILELANG_PROFILE_VALID, TILELANG_PROFILE_INVALID}:
+            return ("kernel",)
+        # NPUBench-reference workspaces (ops-nn source + npubench golden) also
+        # author the candidate C++ under ``kernel/``: the runner's candidate
+        # contract — adapter view, candidate snapshot, ``model_new_ascendc.py``
+        # entry — is keyed on that flat layout, never on ``op_host``/``op_kernel``
+        # (those exist only in the frozen source archive). Declaring the ops-nn
+        # roots for them re-creates DEBT-211 in mirror image: the real compute
+        # is covered only by the backward-compat ``kernel/`` walk while the
+        # fail-loud gate sees its declared roots absent and blocks finalize
+        # (interleave_rope: the only scan finding was the coverage gap
+        # itself, over an actually-scanned 3-file ``kernel/`` tree).
+        state = self._load_durable_state(Path(workspace))
+        reference = state.get("reference") if isinstance(state, Mapping) else None
+        if isinstance(reference, Mapping) and reference.get("source") == "npubench":
             return ("kernel",)
         return self.kernel_cpp_dirs()
 
@@ -1230,6 +1287,23 @@ class PortA3Plugin(BasePlugin):
     # ── Archive layout (migrated from finalize_pipeline.py phase 2) ────
     def archive_project_subdir(self) -> Optional[str]:
         return "a3_to_a5_port"
+
+    def archive_project_claim(self, env) -> Optional[str]:
+        """Destination-scoped claim on the archive project namespace.
+
+        The a3_to_a5_port namespace is the A5-destination contract only. For
+        any other declared destination (310p) the env-derived target-aware
+        project in briefs._common.load_env decides (a3_to_310p_port) —
+        claiming the a5 project for a 310p port would archive the op under a
+        namespace that says "ported for A5", which is a wrong-chip record no
+        downstream consumer can detect. Returns None for non-a5 destinations.
+        """
+        target = (getattr(env, "target", "a5") or "").strip().lower()
+        if target.endswith("-ds"):
+            target = target[:-3]
+        if target != "a5":
+            return None
+        return self.archive_project_subdir()
 
     def archive_layout_mapping(self, workspace: Path) -> dict[str, str]:
         """Returns path-prefix mapping. Caller uses this dict OR

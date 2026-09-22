@@ -70,7 +70,7 @@ def _detect_max_lane() -> int:
 
     Local targets (host=localhost or empty): run directly.
     Remote targets: SSH + `npu-smi info`; if SSH fails, fall back to
-    per-target default based on known hardware (a5=2, a3=2, a2=4).
+    per-target default based on known hardware (a5=7, a3=2, a2=4, 310p=2).
     """
     try:
         from briefs._common import load_env as _env_loader
@@ -174,7 +174,10 @@ def _detect_max_lane() -> int:
         # of 4 then wrongly rejects those lanes.
         log.info(f"npu-smi probe failed ({e}); "
               f"falling back to default lane max for {target_base}")
-        return {"a5": 7, "a3": 2, "a2": 4}.get(target_base, 2)
+        # 310p deliberately conservative: under-claiming lanes on a 6-device
+        # 310P host is recoverable (the npu-smi probe above supplies the real
+        # count when it can run); over-claiming on a smaller box wedges lanes.
+        return {"a5": 7, "a3": 2, "a2": 4, "310p": 2}.get(target_base, 2)
 
     # Parse `npu-smi info` output. The device table prints one device per
     # two rows; the FIRST row carries the numeric NPU ID and the chip-model
@@ -207,7 +210,10 @@ def _detect_max_lane() -> int:
     if not npu_ids:
         log.info("npu-smi output parse yielded 0 NPUs; "
               "falling back to default lane max")
-        return {"a5": 7, "a3": 2, "a2": 4}.get(target_base, 2)
+        # 310p deliberately conservative: under-claiming lanes on a 6-device
+        # 310P host is recoverable (the npu-smi probe above supplies the real
+        # count when it can run); over-claiming on a smaller box wedges lanes.
+        return {"a5": 7, "a3": 2, "a2": 4, "310p": 2}.get(target_base, 2)
 
     max_lane = max(npu_ids)
     log.info(f"detected {len(npu_ids)} NPU(s) via npu-smi; max lane = {max_lane}")

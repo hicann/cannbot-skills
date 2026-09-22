@@ -45,6 +45,10 @@ from a5_target_capability import (
     a5_soc_version,
     is_known_a5_soc,
     limited_a5_validation_error,
+    is_destination_target_name,
+    is_known_soc_for_target,
+    limited_target_validation_error,
+    soc_version_for_target,
 )
 from a5_target_transport import (
     _Target,
@@ -129,6 +133,7 @@ from npubench.npubench_target_base import (  # noqa: F401
     _unlink,
 )
 from npubench.npubench_target_toolchain import (  # noqa: F401
+    _bash_binary,
     _direct_build_preflight,
     _npu_smi_command,
     _positive_timeout_from_env,
@@ -358,9 +363,17 @@ def _require_local_controlled_target(build: _ControlledBuild) -> None:
 
 
 def _require_known_controlled_soc(build: _ControlledBuild) -> None:
-    build.soc = a5_soc_version(build.target.env)
-    if not is_known_a5_soc(build.soc):
-        _abort_controlled_build(limited_a5_validation_error(build.soc), **_soc_fields(build))
+    # Target-parametric: the gate reads the ACTIVE target's SoC (a5 →
+    # A5_SOC_VERSION, 310p → ASCEND310P_SOC_VERSION via the canonical prefix
+    # map — `310P_*` is an illegal key no parser populates) and judges it
+    # against that target's family. Legacy a5 runs
+    # resolve identically to the previous a5_soc_version/is_known_a5_soc pair.
+    build.soc = soc_version_for_target(build.target.env, build.target.name)
+    if not is_known_soc_for_target(build.soc, build.target.name):
+        _abort_controlled_build(
+            limited_target_validation_error(build.soc, build.target.name),
+            **_soc_fields(build),
+        )
 
 
 def _controlled_build_script(build: _ControlledBuild) -> tuple[Path, str]:
@@ -848,6 +861,61 @@ def _check_receipt_profile(
     _profile(workspace, performance)
 
 
+_LOCAL_CANN_ENV_APPLIED = False
+# Shell-internal variables a `source` + `env` probe re-emits but must never be
+# assigned back into the orchestrator process environment.
+_ENV_PROBE_SKIP_KEYS = frozenset({"_", "SHLVL", "PWD", "OLDPWD"})
+
+
+def _ensure_local_cann_environment(target: _Target) -> None:
+    """Carry the target CANN environment into in-process local runs.
+
+    The SSH/container branches source the CANN env script inside the remote
+    shell before ``npubench_runner.py`` starts, so GE's compiler python module
+    (``tbe``) and the CANN libraries resolve there.  The container=local
+    branch calls the runner in-process instead: when the orchestrator itself
+    was started without sourcing CANN, torch_npu init dies with
+    ``AclSetCompileopt ... error code 500001`` and ``No module named 'tbe'``
+    (EC0010) — observed on the 310P direct-launch target.  Source
+    the active script once in a probe shell that inherits this process, then
+    merge its exported delta (PYTHONPATH/LD_LIBRARY_PATH/PATH/ASCEND_*) back
+    into ``os.environ`` so the runner and its scrubbed children see exactly
+    what the remote shell would have provided.  Fail-soft: a failed probe
+    leaves the environment unchanged (the run then fails the way it did
+    before, instead of a new failure mode).
+    """
+    global _LOCAL_CANN_ENV_APPLIED
+    if _LOCAL_CANN_ENV_APPLIED:
+        return
+    _LOCAL_CANN_ENV_APPLIED = True
+    set_env = _resolve_cann_set_env(Path(target.cann_path).expanduser())
+    if set_env is None:
+        return
+    try:
+        probe = subprocess.run(
+            [
+                _bash_binary(),
+                "-c",
+                f"source {shlex.quote(str(set_env))} >/dev/null 2>&1; /usr/bin/env -0",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_positive_timeout_from_env("CANNBOT_LOCAL_ENV_PROBE_TIMEOUT_SEC", 30),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return
+    if probe.returncode != 0:
+        return
+    for entry in probe.stdout.split("\0"):
+        if not entry or "=" not in entry:
+            continue
+        key, _, value = entry.partition("=")
+        if key in _ENV_PROBE_SKIP_KEYS:
+            continue
+        os.environ[key] = value
+
+
 def _execute(
     workspace: Path,
     reference: Mapping[str, Any],
@@ -865,6 +933,7 @@ def _execute(
         candidate = _snapshot(workspace, candidate)
     target = _target(workspace, lane)
     if target.container.lower() == "local":
+        _ensure_local_cann_environment(target)
         returned = (
             npubench_runner.preflight_workspace(workspace)
             if verb == "preflight"
@@ -1526,7 +1595,10 @@ def _receipt_basics(receipt: Mapping[str, Any], reference: Mapping[str, Any]) ->
     if not isinstance(target, Mapping):
         raise TargetTransportError("target receipt identity is invalid")
     ssh_without_host = receipt.get("transport") == "ssh_target" and not target.get("host")
-    if str(target.get("name", "")).upper() != "A5" or ssh_without_host:
+    # Destination names are the env-prefix spellings of the ARCH_BY_TARGET
+    # destination set ("A5", "ASCEND310P"); a3/a2 are port sources and can
+    # never be the endpoint that produced this evidence.
+    if not is_destination_target_name(str(target.get("name", ""))) or ssh_without_host:
         raise TargetTransportError("target receipt identity is invalid")
     _device(target.get("lane"), "target lane")
     _device(target.get("visible_device"), "target visible device")

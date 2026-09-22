@@ -11,6 +11,49 @@
 > 为什么这些 OL 要无条件加载：**它们都是"如果不在下笔前知道，后面再查也晚了"的规则**。
 > tag-based 加载假设 worker 知道自己需要什么；但幻觉式错误（如 OL-80）的特征恰恰是 worker
 > 不知道自己在犯错，所以不会主动去加载相关 KB。
+>
+> **编号约定**：本文件的 OL 编号是**自包含命名空间**——每条规则全文内联在本文件，编号不指向 OKF 卡。
+> OKF 卡（`kb/okf/runbooks/`）里存在同号但主题不同的卡（如 `ol-127` / `ol-130`），
+> **不要按编号去 OKF 检索本文件的规则**。
+>
+> **Harness 约定**：文中工具写法以 Claude Code harness 为例（`Bash(run_in_background=true)`、
+> `Monitor` tool、playwright MCP 工具名）；opencode / codearts 会话用各自 harness 的
+> 等价后台任务与浏览器工具执行同一规则。
+
+---
+
+## 0. 算子开发三条铁律（owner 指令 2026-09-08——最高优先级，所有 op 类、所有 target）
+
+> **三条都不接受"精度 PASS"作为豁免理由。精度过了只说明结果对，不说明用了硬件。**
+> 违反任何一条 = `ARCHITECTURAL_HACK`，与 OL-36 的委托作弊（CPU fallback / CANN 委托）同级：
+> 拿到了对的结果，但交付物不是一个真 NPU kernel 的合格形态。
+> 本节与 OL-127（单核禁终态）、OL-690（vector routing）、OL-188（cube 路径定性）同源，
+> 统一为跨 op 类、跨 target 的无条件规则。
+
+### 铁律①：不接受单核
+
+- **默认多核**：形状可分时 blockDim 必须 >1，行/块分配到多个 core。单核（`nblk=1` / block 只用 0 号 core）仅两种豁免，且必须在该 op 的 verification 记录中声明 regime（豁免类别 + A/B 证据路径）：
+  - (a) 无可分形（如 M==1 单行——没有第二个可并行维度）；
+  - (b) 同设备、背靠背 A/B 实测证明该 exact shape 单核更快（证据入该 op 的 verification 记录，同 OL-690 豁免判据）。
+- "精度通过所以先这样" 不是理由（OL-690 §3 同样禁止）。
+
+### 铁律②：不接受标量搬运和标量计算
+
+- **主数据通路（bulk 数据的搬进、搬出、计算）必须 block 化**：`DataCopy` 对齐块搬运 + VEC 指令批量计算。禁止用 `GetValue`/`SetValue` 逐元素循环承担主数据通路的搬运或计算。
+- 标量只有两个合法位置，且必须注明边界、不得泛化：
+  - (a) **sub-64 residue tail**（pad-to-64-and-discard 或 scalar tail）——只允许尾部的 residue lanes，不允许把整条通路降级成 scalar（"aVec loads are scalar" 式写法即违规）；
+  - (b) **索引/元数据小量 load**（如 int64 索引逐个读）——索引不是 bulk 数据通路。
+- **dav-m200 锚点**：`DataCopyPad` 在 dav-m200 不可用**不是标量执照**——正确解法是对齐块搬运（32B/256B 量子，按构造对齐）+ in-kernel 对齐 tail，不是把 ragged 部分整体交给标量。
+
+### 铁律③：CV 融合算子不接受纯 AIV
+
+- **cube 类算子**（matmul / conv / attention / gmm / rnn-mc 家族——凡 reference 主计算是矩阵乘）的**主计算必须走 cube 路径**。用纯 AIV 的 `Mul`+`Add` FMA 循环实现 cube 类算子 = 违反本铁律（OL-188 同样定性：pure-VEC for cube-required op = HACK）。**Owner 2026-08-30 已裁定（joint_attention user_decision）："CV 融合是绝对可行的……恢复纯 VEC 不予接受"**——本条是该裁定的成文化。
+- **310P/dav-m200 上 cube 路线按 launch 方式二选一**（同芯片、同 CANN 9.0.0 实证）：
+  1. **raw-launch lane（npubench / ACLRT_LAUNCH_KERNEL）：必须走 bare `Mmad` 路线**（raw `Mmad` 配方：`Mmad` + `LoadData3DParamsV2Pro` + `BLOCK_MODE_MATRIX` 读出，GM→UB→L1(A1/B1)→L0A/L0B→Mmad→L0C→UB→GM）——20/20 seeds bit-exact、grouped_matmul 35/35。**不要用 highlevel `matmul::Matmul<>`**：任何 include `matmul/matmul_intf.h` 的 TU 在 raw ACLRT launch 下同步段错误（5 轮探针隔离，2026-09-08；bisheng 对 dav-m200 无 `-cce-aicore-stack-size` 旋钮，其他假设已逐一排除）；`MatmulImpl<>` 低层模板在 `__NPU_ARCH__==2002` 被 arch gate；Fixpipe/LoadData2D/非 Pro LoadData3D 无条件 NOT_SUPPORT。
+  2. **op-host executor lane（vendor op / ops-math 风格）：highlevel `matmul::Matmul<>` + host `matmul_tiling::MatmulApiTiling::GetTiling`**。operands 以 **TSCM/NZ fractal staging 进 L1**（`MatmulType<TPosition::TSCM, CubeFormat::NZ, half>` + `SetTensorA(LocalTensor)`，kernel 自 GM→L1 staging，不依赖 launch workspace）。已知陷阱：GM-ND 直输路线多块数值损坏 + `enVecND2NZ=true` 无声必开。
+- **已知陷阱（设备实测 2026-08-26）**：highlevel 路线在**超过单个 16×16×16 fractal 的多块编排下数值损坏**（row-0 复制进所有行，A-load 行索引卡 0）；且 fuse 芯片上 `isVecND2NZ=true`（`GetNormalConfig` 第 3 参）是**无声必开开关**——不开则 ND2NZ 默认路径 A 行 stride 为 0。多块需求按 MatmulApiTiling 派生走，不要自创 tiling。
+- **310P 是 fuse 芯片（cube+vec 同核），跨管道同步是纪律不是选项**：event flag 严格 Set/Wait 配对；M(cube)→V 与 V→M 之间显式 event / PipeBarrier 正确组合；L0C→UB 的 `BLOCK_MODE_MATRIX` 读出前后要 FIX-pipe 同步；**禁止**无差别 `PipeBarrier<PIPE_ALL>`（实测 9/9 全挂）。同步模板照 vendor `swin_attention_score_quant`（发货在 ascend310p）的 event 配对抄，不要自己发明 barrier 组合。fp16 精度配方：hi/lo split + fp16 Mmad + L0C fp32 累加 + fp32 读出（3 次 Mmad：hi·hi / hi·lo / lo·hi）。
+- 若怀疑撞结构性硅片问题：**必须给出最小复现探针**（对照 bare `Mmad` 最小配方 16×16×16 也挂才算硅片问题），否则不许回退 VEC。若某 target 的 cube 路径经实证确实不可用：**escalate 给 owner 决策**，禁止静默降级成纯 AIV 交付（2026-09-08 level3 批跑 6 个 matmul/conv kernel 全部纯 AIV 交付即为本铁律的违例样本：fp16 大 shape 最差 0.011x，90 倍慢于 CANN cube）。
 
 ---
 
@@ -58,22 +101,66 @@ template params (M_, K_, N_, A_TYPE, B_TYPE, BIAS_TYPE, etc.)。
 不是真正的 AscendC `Matmul<>` 实现。**先看 SDK header 再决定 pattern source**。
 
 **Evidence**：2026-05-07 6_QuantMatmul cold-start, kw 读了 `1_BatchMatmul`
-作为 pattern reference 但**完全没有读** `/data/cann_b103/cann-9.0.0/include/ascendc/`，
+作为 pattern reference 但**完全没有读** `$CANN_PATH/include/ascendc/`，
 导致对 `npu_quant_matmul` 的 AscendC adv_api 替代品判断不充分。
 
 ### OL-13: 发明 workaround 前必须搜索已有 skill / 工具
 
 遇到问题（网络、部署、认证、编译环境）先查：
-- `src/skills/` 下所有 skill 的 SKILL.md
+- `skills/` 下所有 skill 的 SKILL.md
 - `docs/` 目录的设计文档
-- `src/scripts/` 下的工具脚本
+- `engine/src/scripts/` 下的工具脚本
 
-反例：花 30 分钟手动 scp+tar 部署，实际 `deploy_to_a5.sh` 已存在；花 1 小时写 proxy workaround，实际 `--proxy` flag 早已在 a5_op skill 文档里。
+反例：花 30 分钟手动 scp+tar 部署，实际 `deploy_to_a5.sh` 已存在；花 1 小时写 proxy workaround，实际 `--proxy` flag 早已在 skill 文档里。
 
 ### OL-23: 不能把"平台特性坏掉"作为永久标签 — 必须定期重新验证
 
 平台 bug 会随 CANN 版本修复（如 OL-4: TQue 在 CANN 9.0.0 已修复）。
 引用 PB/OL 时检查发布日期，对超过 1 个月的结论做 sanity check。
+
+### OL-321: 一个"让人安心的结果"必须先证明它测的范围 >= 你要下的结论的范围
+
+`applies_to: all backends, all op_class -- 这是判据层规则，不是 kernel 层`
+`verified_on: 2026-08-01，5 个 agent 各自独立撞上 >=7 次`
+- **Category**: verification_methodology / meta
+- **Loaded by**: Worker / Optimizer / Orchestrator（无条件）
+
+**原则**：**检查的范围比结论的范围窄时，它的输出和"真的没问题"【逐字节相同】。**
+所以看到一个绿的 / 空的 / 0 的结果，第一问不是"它说什么"，而是
+**"它到底测了什么？这个范围够不够撑我要说的那句话？"**
+
+**为什么特别难自查**：失败模式不是"命令报错"，而是 **命令成功执行、输出看起来像答案**。
+没有任何东西会提醒你 —— 提醒需要一个知道正确答案的东西，而那正是你在找的。
+
+**已实证的载体（每一条都真实发生过，不是假想）**：
+
+| 载体 | 假结果长什么样 | 判据 |
+|---|---|---|
+| 脚本 exit code 没传播 | stage2 FAIL 而脚本 `exit 0` | 故意让被测项失败一次，看退出码变不变 |
+| 空集合上的全称量词 | `git log --branches --not --remotes` 在 0 个本地分支时返回 0 | 先确认集合非空，否则这个 0 恒真 |
+| 过期的基线 | `ahead=3`（本地 main 落后 22 个 commit） | 先 `fetch`；`branch -d` 比的是**当前分支**不是 `origin/main` |
+| 站错目录 / 仓根检测失败 | 整棵树 `NO_SEED`，与真-无-seed 无法区分 | 工具必须**显式失败**，禁止降级成某个正常判决 |
+| 过度 specific 的字面搜索 | grep 带日期 => 0 命中 => 读成"不存在" | 先用宽 pattern 确认能命中，再收窄 |
+| 检查范围窄于结论范围 | `git log @{u}..HEAD` 返回 0 => 断言"整个目录都推了" | 说清 0 是**哪个范围**的 0 |
+| 看不见的那一层 | `git status` 默认不显示 ignored => 37G 被报成"干净" | 加 `--ignored`；ref 类工具看不见非 git 目录 |
+| 走到门口 != 完成门后的事 | "只借 PyYAML 就能跑到 O2.5 门" => 断言"控制面只需要它"，实际 CPU-truth 还要 torch | 推到**终态**再下范围结论 |
+
+**必做的两个动作**：
+1. **阳性对照**：先证明这个检查**能**给出正例。一个恒绿的门和一个真的通过了的门，长得一样；
+   一个恒拒的门和一个正确拒绝的门，也一样。
+2. **报出立足点**：任何分诊/扫描类工具，输出判决时必须同时输出
+   **它站在哪、跟了哪些路径**（`followed=[...]`）。2026-08-01 有两个 agent 各自拿到同一个
+   假读数、各自准备去指认一个**正确的**修复；是这个字段让他们 10 分钟内定位到是自己的锅。
+
+⚠️ **最贵的一种**：假结果被用来**指控别人**。先验仪器，再信那个会指向同事的读数。
+
+**两条补充(back 2026-08-01,均来自它复核自己的工作)**:
+- **借来的清单不是覆盖面**。照着别人点名的项目去核,核到的是【对方看见的】,不是全部。
+  back 报"逐条核了"时列了 4 项,工具显示当时有 8 类在风险里(含一个整文件消失)。
+  结论碰巧对 —— 但那是 merge 的功劳,不是核查的功劳。
+- **0 命中 = 未定,不是否**,直到有对照。`head -40` 截断 129 个 ref、连字符 pattern 对下划线标题、
+  半角标点对全角标点 —— 三次都产出"不存在",而三次都只是【没查到】。⇒ 每个 0 都欠一个阳性对照。
+- ⭐ **用坏判据得出正确结论,比得出错误结论更危险** —— 它会赢得它不配的信任,然后被复用。
 
 ---
 
@@ -85,7 +172,7 @@ template params (M_, K_, N_, A_TYPE, B_TYPE, BIAS_TYPE, etc.)。
 
 ### OL-36: 任何 PyTorch/CANN 委托都是 cheating（benchmark 模式硬性禁止）
 
-在 benchmark 模式（NPUKernelBench）下：
+在 benchmark 模式（npubench）下：
 - pybind11.cpp 里调用 `torch.xxx()` 做计算 → cheating
 - kernel 通过 `aclnn*` / `aclop*` API 调用 CANN op → cheating
 - CPU fallback → cheating
@@ -123,7 +210,7 @@ CANN 和 AscendC 用**完全相同的硬件**。如果 kernel 比 CANN 慢，是
 
 ### OL-31: 性能评测用 benchmark 框架的标准工具
 
-NPUKernelBench 用 `performance.py`，不要自己写测速代码（结果不可比）。
+性能评测用本插件 harness 的标准流程（W3/R5 msprof 实测，见 `ascendc-cross-gen-port` SKILL.md），不要自己写测速代码（结果不可比）。
 
 ### OL-10: README 驱动的文档更新
 
@@ -161,6 +248,22 @@ __global__ __aicore__ __launch_bounds__(1) void my_kernel(...) { ... }
 
 **Evidence**：ops where this trap was hit and reverted — see knowledge_update.md across multiple ops where worker submitted 单线程 SIMT 当 final state、被 self-critic 或 user pushback 退回。
 
+### OL-690: Vector-op 性能为准 routing standard —— 默认 vectorized + multi-core；scalar/单核只在"实测更快"才允许（2026-09-03 owner mandate，regime 声明义务）
+
+**规则（dav-m200/310P 及其他 target 的 AscendC VECTOR 类算子）**：
+
+1. **默认**：每个 case 都必须走 **vector + multi-core**（bulk 计算在 VEC pipe，行分到 >1 core）。
+2. **豁免的唯一判据 = 实测性能**：某 case 想走 scalar 和/或单核，必须给出**同设备、背靠背 A/B 测量**证明 scalar/单核路径在该 exact shape 上**更快**，并把证据写进 archive。**没有固定的 numel/宽度阈值可当"小 shape"捷径。**
+3. **禁止**：
+   - scalar-because-精度通过（precision PASS 不是 scalar 的理由）；
+   - 用 `E%64` / alignment / "未验证的硬件 bug" 之类把**非豁免** case 路由到 scalar/单核来绕 vector bug（dav-m200 tail-lanes 的 scalar fallback 已被此规则判非法）；
+   - 整个 op 默认全 scalar/单核（= OL-127 在 dav-m200 的扩展：`nblk=1`/单核 scalar 终态同样禁止）。
+4. **"无法向量化"不是 scalar 执照**：vector 路径对某个 shape 做不出来 = root-cause blocker，必须修 vector 路径；不准降级 scalar 了事。
+5. **M==1 单行**只豁免 multi-core（无行可分）；该行仍须 vector 化，除非 A/B 证明 scalar 更快。
+6. **落地**：该 op 的 verification 记录必须带 per-case `regime` 声明（vectorized?/cores/entry），任何非 vector 或 `cores<=1` 的 case 必须附 `scalar_ab`（scalar 更快）证据。引擎当前不对 regime 做硬门校验，声明与证据的真实性由 finalize 时的 self-check 与人工复核负责。
+
+**反例（owner 2026-09-03 抓出）**：swi_glu_quant `E%64!=0` 路由单核 scalar（含 320k 元素 `[400,800]`）；dequant_swiglu_quant 全 29 case 单核 scalar（~0.2s/case）。
+
 ### OL-125: 后台命令禁止接 `| tail -N` / `head` / `wc` / `sort`（任何 EOF-only 过滤器）
 
 **规则（P0aam, 2026-05-07）**：当用 `Bash(run_in_background=true)` 跑长任务（build / ref_preflight / msprof / orchestrator cold-start / 任何超过 30s 的命令），**禁止把输出 pipe 进 `tail` / `head` / `wc` / `sort`**。
@@ -184,6 +287,7 @@ python3 long_script.py        # stdout 已被 harness capture，不需要 redire
 **正确的 live-filter 方式**：用 `Monitor` tool + `grep --line-buffered`（不是 Bash + tail）。
 
 **Evidence**：8_WeightQuantBatchmatmul ref_preflight 2026-05-07，5+ 分钟"无输出" 完全是 `2>&1 | tail -40` 造成的——容器内 progress.log 其实有诊断数据，只是 orchestrator 端看不见。
+- 3_MatmulBothTrans 310p perf iter-1b (2026-09-07): perf launch ran `2>&1 | tail -25` under timeout 590 — the pipe hid the timeout SIGTERM that killed the run at case ~32 (output file empty the whole time, run looked alive but was dead); relaunched unfiltered per OL-125/OL-126. Compounding effect: the unfiltered relaunch was what made the flaky kernel_details.csv capture retries diagnosable mid-run at all.
 
 ### OL-126: 长任务必须用 `Bash(run_in_background=true)`，禁止用 `nohup`
 
@@ -203,18 +307,18 @@ Bash(command="python3 batch.py", run_in_background=true)
 
 ## 4. Universal design traps（任何 kernel 都会踩）
 
-### OL-63: Elementwise kernel 必须用 `TQue<VECIN, 4>`（depth=4）
+### OL-63: Elementwise kernel 必须双缓冲以上（`TQue<VECIN, N≥2>`；depth=1 禁止）
 
 ```cpp
-// ❌ 错误：depth=1 或 2 → pipeline 只能单 buffer，带宽利用率低
+// ❌ 错误：depth=1 → pipeline 单 buffer，MTE/VEC 无法重叠，带宽利用率低
 TQue<QuePosition::VECIN, 1> inQueue_;
 
-// ✅ 正确：depth=4 → MTE2 + VEC + MTE3 三级流水能并行 4 个 tile
-TQue<QuePosition::VECIN, 4> inQueue_;
+// ✅ 正确：depth≥2 → MTE2 预取下一 tile，与 VEC 计算重叠
+TQue<QuePosition::VECIN, 2> inQueue_;   // depth 2-vs-4 取舍按 OKF 卡 ol-258 决策表
 ```
 
-elementwise ops（没有 reduction / 状态）的 HBM 带宽瓶颈，depth=4 是必须的，不是"可选优化"。
-depth=1 会导致 perf ~0.3-0.5x。
+elementwise ops（没有 reduction / 状态）撞 HBM 带宽瓶颈，双缓冲以上是必须的，不是"可选优化"。
+depth=1 会导致 perf ~0.3-0.5x。a5 elementwise 实证 depth=4 是安全选择；具体 depth 数值与 TQue/TBuf 选型按 OKF 卡 `ol-258-tque-qbuf-depth-2-default-simd` 的决策表（≥2 GM reads 且 buffer < UB/4 → depth=2 MUST；单输入 → TBuf OK），两者不冲突：本规则管"至少双缓冲"，ol-258 管"2 还是 4"。
 
 ### OL-66: `torch::zeros` on NPU 不与 custom kernel stream-ordered
 
@@ -388,10 +492,13 @@ fp16 Div / Mul / Pow 在 NPU 上的行为**bit-level 匹配 PyTorch**。
 
 ## 快速自检（写代码前）
 
+- [ ] **blockDim > 1 吗（形状可分时）？单核豁免有 A/B 证据或无可分形声明吗？（铁律①/OL-127/OL-690）**
+- [ ] **主数据通路全 block 化吗？GetValue/SetValue 只出现在 sub-64 tail 和索引 load 吗？（铁律②/OL-690）**
+- [ ] **op 是 cube 类吗（reference 主计算是矩阵乘）？主计算走 cube 路径而不是 AIV FMA 循环吗？（a5: Matmul API/MIX；310P raw-launch: bare `Mmad`，见铁律③）**
 - [ ] 我想用的每个 VEC API 都经 `ascendc-api-knowledge-query` 和必要的 SDK header 核验了吗？（OL-80）
 - [ ] pybind 里没有任何 torch/CANN 计算委托吗？（OL-36）
 - [ ] 基础设施问题（部署/代理/编译）都先查了已有 skill 吗？（OL-13）
-- [ ] TQue depth 是 4 吗？（OL-63, 仅 elementwise）
+- [ ] TQue depth ≥ 2 吗？（OL-63, 仅 elementwise；2-vs-4 按 ol-258 决策表）
 - [ ] pybind 的 zeros 是否可能和 kernel 有 stream 顺序问题？（OL-66）
 
 ## 快速自检（测试和声明前）
@@ -400,6 +507,7 @@ fp16 Div / Mul / Pow 在 NPU 上的行为**bit-level 匹配 PyTorch**。
 - [ ] 性能数字是同条件 A/B 测出来的吗？（OL-27）
 - [ ] 同类 kernel 的同样问题检查过了吗？（OL-24）
 - [ ] 专家反馈 / 用户纠正都改到代码里了吗？（OL-1）
+- [ ] 我那个"绿/空/0"的结果，测的范围够撑我要下的结论吗？做过阳性对照吗？（OL-321）
 
 ## Kernel-authoring guards
 

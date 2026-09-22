@@ -1,5 +1,5 @@
 ---
-description: 跨代际 AscendC 算子移植入口（arch22→arch35）。参数包括：1） 必选。待port的arch22算子实现目录 2) 推荐。KernelBench风格 (model.py 和test_case.json) 的算子golden与测试集合。
+description: 跨代际 AscendC 算子移植入口（arch22→arch35，arch22→arch20）。参数包括：1） 必选。待port的arch22算子实现目录 2) 推荐。KernelBench风格 (model.py 和test_case.json) 的算子golden与测试集合。
 subtask: false
 ---
 
@@ -22,12 +22,16 @@ command。这里只负责：把用户的话翻成引擎的 `--port-a3-ops` mode 
    该输入原样冻结为真值，不做任何格式转换；输入尚非该格式时，请用户先由输入提供方准备为该格式并复核语义。
    常规 ops-nn 来源下为**推荐**（可显式改选 `a3_live`）；TileLang2AscendC 工程来源下为**必需**（唯一真值）。
 
-目标架构可用自然语言一并给出（`arch35` / `950PR` / `A5` / SoC 编号皆可）；来源架构由代码分析自动识别，无需指定。
+目标架构可用自然语言一并给出（`arch35` / `950PR` / `A5` / `arch20` / `310P` / `310P3` / `200x` / `dav-m200` /
+SoC 编号皆可）；来源架构由代码分析自动识别，无需指定。
 
 ## 你要做的（三步）
 
 1. **归一目标**：把自然语言目标归一为 canonical target（arch35/950PR/A5/V300 → `a5`；
-   arch22/910C/A3/V220 → `a3`）。只归一目标，不猜引擎路径。
+   arch22/910C/A3/V220 → `a3`；arch20/310P/310P3/200x/dav-m200/Atlas 300I Duo → `310p`）。只归一目标，
+   不猜引擎路径。目标写入 `engine/workspace/.ascendc_env` 的 `TARGET=`：`a5` 用 `A5_*` 键；
+   `310p`（下移植，fuse chip、无 bf16/fp64 硬件，见 `kb/hardware/target/ascend310p.md`）用
+   `ASCEND310P_*` 键（如 `CONTAINER=local`、`SOC_VERSION=Ascend310P3`），**不得**沿用 A5_* 键。
 
 2. **启动引擎**（`--port-a3-ops` mode，op 名自动取来源目录 basename）：
 
@@ -57,8 +61,9 @@ command。这里只负责：把用户的话翻成引擎的 `--port-a3-ops` mode 
      --reference-source a3_live
    ```
 
-   **perf 对比基准差异**：npubench golden 模式下报告的加速比 = 目标实现 vs golden 参考实现（A5 上
-   W3/R5 msprof 实测）；a3_live 模式下精度对照当次 A3 实测输出，加速比 = 目标实现 vs A3 实现实测。
+   **perf 对比基准差异**：npubench golden 模式下报告的加速比 = 目标实现 vs golden 参考实现（目标机
+   W3/R5 msprof 实测，A5 或 310P 取决于 `TARGET`）；a3_live 模式下精度对照当次 A3 实测输出，加速比 =
+   目标实现 vs A3 实现实测。
    两种模式的加速比基准不同，数值不可直接横向比较。
 
    启动器会解析引擎根、校验 `engine/workspace/.ascendc_env`、探测 harness 并导出
@@ -77,7 +82,7 @@ command。这里只负责：把用户的话翻成引擎的 `--port-a3-ops` mode 
 ## 流水线（引擎负责，此处仅供你理解进度）
 
 O0 就绪门 → O1 解析 → O1.7 分类 → **O2.5 参考采集**（推荐冻结 KernelBench 风格 task bundle；
-仅显式 a3_live 才在来源 NPU 采集 A3-CANN）→ O4 移植 → 构建（A5）→ 精度验证 →
+仅显式 a3_live 才在来源 NPU 采集 A3-CANN）→ O4 移植 → 构建（A5 或 310P）→ 精度验证 →
 [性能优化] → 归档。
 全程经安全网校验，按双层 KB 反馈环（c>b>a）注入/沉淀。
 

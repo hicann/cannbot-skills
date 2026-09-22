@@ -784,7 +784,7 @@ def test_success_order_o5_critic_static_promotion_then_merge(monkeypatch, tmp_pa
 
     monkeypatch.setattr(F, "_run_delivery_static_check", checked)
 
-    def promote(op, workspace):
+    def promote(op, workspace, archive_project=None):
         order.append("promotion")
         return finalize_pipeline.FinalizeReport(
             op=op, workspace=workspace, archive_dir=workspace / "archive"
@@ -824,7 +824,7 @@ def test_finalize_promotion_errors_block_merge_and_done(monkeypatch, tmp_path):
     monkeypatch.setattr(
         finalize_pipeline,
         "finalize_op",
-        lambda op, workspace: finalize_pipeline.FinalizeReport(
+        lambda op, workspace, archive_project=None: finalize_pipeline.FinalizeReport(
             op=op,
             workspace=workspace,
             archive_dir=workspace / "archive",
@@ -855,7 +855,7 @@ def test_finalize_does_not_trust_entries_token_marker(monkeypatch, tmp_path):
     monkeypatch.setattr(
         finalize_pipeline,
         "finalize_op",
-        lambda op, workspace: finalize_pipeline.FinalizeReport(
+        lambda op, workspace, archive_project=None: finalize_pipeline.FinalizeReport(
             op=op,
             workspace=workspace,
             archive_dir=workspace / "archive",

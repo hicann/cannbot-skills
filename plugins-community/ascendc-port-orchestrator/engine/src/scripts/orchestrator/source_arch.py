@@ -564,12 +564,17 @@ def _validate_build_source_digest(source_root: Path, expected_digest: str) -> No
         )
 
 
-def stage_source_tree(source_root: Path, workspace: Path) -> SourceStage:
+def stage_source_tree(
+    source_root: Path, workspace: Path, target_arch: str = "arch35"
+) -> SourceStage:
     """Create a deterministic source-only snapshot below ``workspace``.
 
     Target/generated names are rejected by name before filesystem predicates;
     symlinks and compiled artifacts fail closed.  The durable state must point
     only at the returned snapshot, never at the original customer checkout.
+    ``target_arch`` records the INTENDED destination generation in the stage
+    manifest (a5→"arch35", 310p→"arch20" — see a5_target_capability.
+    ARCH_BY_TARGET); the default keeps legacy callers byte-identical.
     """
     source_root = source_root.expanduser().resolve(strict=True)
     op_name = require_safe_op_name(source_root.name)
@@ -585,28 +590,7 @@ def stage_source_tree(source_root: Path, workspace: Path) -> SourceStage:
     tmp_root = workspace / f"{SOURCE_STAGE_DIR}.tmp-{uuid.uuid4().hex}"
     tmp_root.mkdir(mode=0o700)
     try:
-        pending: list[tuple[Path, Path]] = [(source_root, tmp_root)]
-        while pending:
-            src_dir, dst_dir = pending.pop()
-            for item in sorted(src_dir.iterdir()):
-                if _is_forbidden_name(item.name):
-                    continue
-                if item.is_symlink():
-                    raise ValueError(
-                        f"source input contains symlink: {item.relative_to(source_root)}"
-                    )
-                destination = dst_dir / item.name
-                if item.is_dir():
-                    destination.mkdir()
-                    pending.append((item, destination))
-                elif item.is_file():
-                    if item.suffix.lower() in _BINARY_SUFFIXES:
-                        continue
-                    shutil.copy2(item, destination)
-                else:
-                    raise ValueError(
-                        f"source input contains non-regular file: {item.relative_to(source_root)}"
-                    )
+        _copy_source_tree(source_root, tmp_root)
         staged_detection = detect_source_arch(tmp_root)
         if not staged_detection.supported or staged_detection.arch != "arch22":
             raise ValueError(
@@ -614,19 +598,9 @@ def stage_source_tree(source_root: Path, workspace: Path) -> SourceStage:
                 f"{staged_detection.method}"
             )
         entries = _snapshot_entries(tmp_root)
-        tree_sha256 = _tree_digest(entries)
-        manifest_payload = {
-            "schema": SOURCE_STAGE_SCHEMA,
-            "op": op_name,
-            "source_arch": "arch22",
-            "target_arch": "arch35",
-            "tree_sha256": tree_sha256,
-            "file_count": len(entries),
-            "files": entries,
-            "source_arch_detection": staged_detection.state_payload(),
-        }
-        manifest = tmp_root / SOURCE_STAGE_MANIFEST
-        manifest.write_text(json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n")
+        tree_sha256 = _write_stage_manifest(
+            tmp_root, op_name, target_arch, entries, staged_detection
+        )
         if stage_root.exists():
             if stage_root.is_symlink() or not stage_root.is_dir():
                 raise ValueError(f"refusing to replace unsafe source stage path: {stage_root}")
@@ -642,6 +616,61 @@ def stage_source_tree(source_root: Path, workspace: Path) -> SourceStage:
         file_count=len(entries),
         detection=staged_detection,
     )
+
+
+def _copy_source_tree(source_root: Path, tmp_root: Path) -> None:
+    """Copy the source tree into the stage tmp dir, failing closed.
+
+    Symlinks and non-regular files abort the staging — the durable state must
+    never point at paths outside the snapshot. Compiled/binary artifacts are
+    skipped (the stage is a source-only snapshot).
+    """
+    pending: list[tuple[Path, Path]] = [(source_root, tmp_root)]
+    while pending:
+        src_dir, dst_dir = pending.pop()
+        for item in sorted(src_dir.iterdir()):
+            if _is_forbidden_name(item.name):
+                continue
+            if item.is_symlink():
+                raise ValueError(
+                    f"source input contains symlink: {item.relative_to(source_root)}"
+                )
+            destination = dst_dir / item.name
+            if item.is_dir():
+                destination.mkdir()
+                pending.append((item, destination))
+                continue
+            if not item.is_file():
+                raise ValueError(
+                    f"source input contains non-regular file: {item.relative_to(source_root)}"
+                )
+            if item.suffix.lower() in _BINARY_SUFFIXES:
+                continue
+            shutil.copy2(item, destination)
+
+
+def _write_stage_manifest(
+    tmp_root: Path,
+    op_name: str,
+    target_arch: str,
+    entries: list[dict],
+    staged_detection,
+) -> str:
+    """Persist the source-stage manifest inside the tmp dir; return the digest."""
+    tree_sha256 = _tree_digest(entries)
+    manifest_payload = {
+        "schema": SOURCE_STAGE_SCHEMA,
+        "op": op_name,
+        "source_arch": "arch22",
+        "target_arch": target_arch,
+        "tree_sha256": tree_sha256,
+        "file_count": len(entries),
+        "files": entries,
+        "source_arch_detection": staged_detection.state_payload(),
+    }
+    manifest = tmp_root / SOURCE_STAGE_MANIFEST
+    manifest.write_text(json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n")
+    return tree_sha256
 
 
 def _build_source_record_path(workspace: Path) -> Path:

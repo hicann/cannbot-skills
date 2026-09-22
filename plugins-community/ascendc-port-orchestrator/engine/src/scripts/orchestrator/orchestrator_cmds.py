@@ -63,7 +63,9 @@ from source_arch import (
     verify_source_stage,
 )
 from validation import _spec_has_backward_contract, _validate_a3_host_home_mount
-from a5_target_capability import a5_soc_version, is_limited_a5_soc, limited_a5_warning
+# a5_target_capability imports were folded into the destination-aware call
+# sites (is_limited_soc / limited_target_warning, imported call-time next to
+# the port-destination gate) — see a3_ref_common.PORT_DESTINATIONS.
 
 log = get_logger(__name__)
 
@@ -584,6 +586,85 @@ def _bind_reference_source(state_payload: dict, source: str, reference_stage) ->
     return 2
 
 
+def _staged_reference_endpoint(env, reference_source: str) -> tuple[bool, str]:
+    """npubench staged-golden gate: a build/verify endpoint must exist for the
+    ACTIVE destination.
+
+    The predicate is PORT_DESTINATIONS membership (a5 | 310p), NOT an "a5"
+    string prefix: ``env.host`` / ``env.container`` are already prefix-resolved
+    at load time (TARGET=310p → ASCEND310P_HOST / ASCEND310P_CONTAINER), so a
+    310p port with ASCEND310P_CONTAINER=local is an explicit local endpoint
+    exactly like A5_CONTAINER=local. Fail-closed semantics are unchanged: a
+    destination with neither a host nor an explicit local container is rejected.
+    The non-npubench (a3_live) branch keeps its legacy separate-host guard.
+
+    Returns (endpoint_ok, build_host).
+    """
+    from a3_ref_common import PORT_DESTINATIONS
+
+    _dest = (env.target or "").strip().lower()
+    if _dest.endswith("-ds"):
+        _dest = _dest[:-3]
+    build_on_destination = _dest in PORT_DESTINATIONS
+    local_endpoint = (
+        reference_source == NPUBENCH
+        and (env.a5_container or (env.container if build_on_destination else ""))
+        .strip()
+        .lower()
+        == "local"
+    )
+    if reference_source == NPUBENCH:
+        build_host = env.a5_host or (env.host if build_on_destination else "")
+    else:
+        build_host = env.a5_host or (
+            env.host if env.host != env.a3_host else ""
+        )
+    return bool(build_host or local_endpoint), build_host
+
+
+def _staged_reference_endpoint_gate(env, reference_source: str) -> int:
+    """Fail-closed gate for the staged external reference endpoint.
+
+    Extracted from ``_cmd_port_a3`` to keep that entry point within the
+    nesting-depth budget; message text and exit codes (0 / 9) are unchanged.
+    See ``_staged_reference_endpoint`` for the predicate semantics.
+    """
+    if reference_source == CANNBENCH:
+        return 0
+    from a3_ref_common import PORT_DESTINATIONS
+
+    endpoint_ok, _build_host = _staged_reference_endpoint(env, reference_source)
+    if endpoint_ok:
+        return 0
+    if reference_source == NPUBENCH:
+        from briefs._common import target_env_prefix
+
+        _dest = (env.target or "").strip().lower()
+        _dest = _dest[:-3] if _dest.endswith("-ds") else _dest
+        if _dest in PORT_DESTINATIONS:
+            prefix = target_env_prefix(env.target)
+            hint = (
+                f"set {prefix}_HOST, or {prefix}_CONTAINER=local to "
+                f"select the controller as the explicit target"
+            )
+        else:
+            hint = "add A5_HOST or configure the local target"
+        print(
+            "ERROR: staged external reference requires a build/verify "
+            f"endpoint for the active destination (TARGET={env.target}): "
+            f"{hint}."
+        )
+        return 9
+    print(
+        "ERROR: --port-a3-ops requires a separate A5 host for build/verify. "
+        "Both host ({h}) and a3_host point to the same machine, and no "
+        "explicit A5_HOST is configured. Add A5_HOST + A5_CONTAINER to "
+        "workspace/.ascendc_env or ask the main agent to run this "
+        "op.".format(h=env.host)
+    )
+    return 9  # distinct exit code for "mode requires unavailable host"
+
+
 def _cmd_port_a3(
     *,
     port_a3_dir: Path,
@@ -777,62 +858,56 @@ def _cmd_port_a3(
     if extra_lanes and resolved_reference_source != NPUBENCH:
         print("ERROR: --extra-lane is supported only with --reference-source npubench")
         return 2
-    if env.target != "a5":
-        print(
-            f"WARN: TARGET={env.target} in .ascendc_env; port-a3-ops mode assumes TARGET=a5. "
-            f"Continuing — A5 codegen will use the active target."
-        )
-    # NPUKernelBench target validation requires an A5-capable SoC.  Ascend910
-    # remains useful for preflight and codegen, but the final target gate is
-    # deliberately terminal for the explicit TileLang2AscendC source kind.
-    if tilelang_source:
-        configured_a5_soc = a5_soc_version(
-            {
-                "A5_SOC_VERSION": env.a5_soc_version,
-                "SOC_VERSION": env.soc_version,
-            }
-        )
-        if is_limited_a5_soc(configured_a5_soc):
-            print(limited_a5_warning(configured_a5_soc))
-    # Staged external references need only the A5 endpoint.  The live-A3 path
-    # retains its separate-host guard.  CannBench is intentionally accepted to
-    # persist an explicit unsupported-provider result without pretending an A5
-    # evaluator exists yet.
-    local_external_reference_target = (
-        resolved_reference_source == NPUBENCH
-        and (env.a5_container or (env.container if env.target.startswith("a5") else ""))
-        .strip()
-        .lower()
-        == "local"
-    )
-    if resolved_reference_source == NPUBENCH:
-        a5_build_host = env.a5_host or (
-            env.host if env.target.startswith("a5") else ""
-        )
-    else:
-        a5_build_host = env.a5_host or (
-            env.host if env.host != env.a3_host else ""
-        )
-    if (
-        resolved_reference_source != CANNBENCH
-        and not a5_build_host
-        and not local_external_reference_target
-    ):
-        if resolved_reference_source == NPUBENCH:
-            print(
-                "ERROR: staged external reference requires an A5 host "
-                "for build/verify, unless A5_CONTAINER=local selects the controller "
-                "as the explicit A5 target. Add A5_HOST or configure the local target."
+    # Target dtype policy at reference-binding time (fail-closed):
+    # Ascend310P has no bf16 hardware — a bfloat16-bearing frozen sidecar must
+    # stop HERE with an actionable reason, not surface 5 worker-spawns later
+    # as an inscrutable compile/precision failure on the 310P box.
+    _dest_target = (env.target or "").strip().lower()
+    if _dest_target.endswith("-ds"):
+        _dest_target = _dest_target[:-3]
+    if npubench_args is not None and _dest_target == "310p":
+        from npubench.npubench_inputs import assert_sidecar_dtype_supported
+
+        try:
+            assert_sidecar_dtype_supported(
+                npubench_args,
+                frozenset({"bfloat16"}),
+                "Ascend310P (dav-m200) has no bf16 hardware (compiler-measured; "
+                "kb ascend310p.md). Use an fp16/fp32 task or a different destination.",
             )
-            return 9
+        except Exception as exc:
+            print(f"ERROR: {exc}")
+            return 2
+    # Port destinations: a5 and 310p are legal build targets for
+    # port-a3-ops; anything else (a2/a3 — a3 is the port SOURCE) keeps the loud
+    # warning. Must agree with a3_ref_common.PORT_DESTINATIONS / enforce_port_a3_target.
+    from a3_ref_common import PORT_DESTINATIONS
+
+    if env.target not in PORT_DESTINATIONS:
         print(
-            "ERROR: --port-a3-ops requires a separate A5 host for build/verify. "
-            "Both host ({h}) and a3_host point to the same machine, and no "
-            "explicit A5_HOST is configured. Add A5_HOST + A5_CONTAINER to "
-            "workspace/.ascendc_env or ask the main agent to run this "
-            "op.".format(h=env.host)
+            f"WARN: TARGET={env.target} in .ascendc_env; port-a3-ops mode targets one "
+            f"of {sorted(PORT_DESTINATIONS)}. Continuing — destination codegen will "
+            f"use the active target."
         )
-        return 9  # distinct exit code for "mode requires unavailable host"
+    # NPUKernelBench target validation requires a validation-capable SoC on the
+    # ACTIVE destination.  Ascend910 remains useful for preflight and codegen on
+    # the a5 gate, but the final target gate is deliberately terminal for the
+    # explicit TileLang2AscendC source kind; the 310p gate accepts the
+    # Ascend310P family (full on-device validation destination).
+    if tilelang_source:
+        from a5_target_capability import is_limited_soc, limited_target_warning
+
+        configured_soc = env.soc_version  # prefix-resolved (310p → ASCEND310P_*)
+        if is_limited_soc(configured_soc, env.target):
+            print(limited_target_warning(configured_soc, env.target))
+    # Staged external references need only the ACTIVE destination endpoint
+    # (a5 → A5_*; 310p → the prefix-resolved ASCEND310P_* block). The live-A3
+    # path retains its separate-host guard. CannBench is intentionally accepted
+    # to persist an explicit unsupported-provider result without pretending an
+    # evaluator exists yet.
+    rc = _staged_reference_endpoint_gate(env, resolved_reference_source)
+    if rc:
+        return rc
 
     if resolved_reference_source == A3_LIVE:
         if not env.a3_host or not env.a3_container:
@@ -849,12 +924,18 @@ def _cmd_port_a3(
             return rc
 
     # Surface the plan regardless of --plan flag (cheap, informational).
-    archive_root = Path(env.local_project or ".") / "output" / "a3_to_a5_port"
+    # Display must match the RUN's actual routing (env.archive_project +
+    # arch_for_target), not the historical a5 literals — a 310p run printing
+    # "arch22→arch35 / output/a3_to_a5_port/" is wrong-chip log provenance.
+    from a5_target_capability import arch_for_target as _plan_arch
+
+    dest_arch = _plan_arch(env.target)
+    archive_root = Path(env.local_project or ".") / "output" / env.archive_project
     print("=" * 72)
     route_label = (
         "arch35 TileLang2AscendC"
         if tilelang_source
-        else "arch22→arch35"
+        else f"arch22→{dest_arch}"
     )
     print(f"{route_label} PORT MODE — op: {op_name}")
     print("=" * 72)
@@ -877,7 +958,7 @@ def _cmd_port_a3(
         print("  npubench format   : original .py + same-stem JSON/JSONL sidecar")
     else:
         print("  CannBench         : provider interface reserved; evaluator unavailable")
-    print(f"  A5 build lane     : NPU {lane}")
+    print(f"  {env.target} build lane: NPU {lane}")
     if extra_lanes:
         print(f"  npubench perf lane: NPU {extra_lanes[0]} (leased if safe)")
     print("  opgen_mode        : port_a3_to_a5")
@@ -901,7 +982,7 @@ def _cmd_port_a3(
     print("    O3 PROGRESS     : standard")
     print(
         "    O4 kw spawn     : independent TileLang2AscendC project candidate"
-        if tilelang_source else "    O4 kw spawn     : independent arch35 implementation from arch22 semantics"
+        if tilelang_source else f"    O4 kw spawn     : independent {dest_arch} implementation from arch22 semantics"
     )
     print(
         "    O6 archive      : TileLang2AscendC kernel project layout writer"
@@ -984,7 +1065,12 @@ def _cmd_port_a3(
             ) = _tilelang2ascendc_source_api()
             source_stage = stage_tilelang_source_tree(port_a3_dir, workspace_dir)
         else:
-            source_stage = stage_source_tree(port_a3_dir, workspace_dir)
+            from a5_target_capability import arch_for_target
+
+            source_stage = stage_source_tree(
+                port_a3_dir, workspace_dir,
+                target_arch=arch_for_target(env.target),
+            )
     except Exception as exc:
         source_label = (
             "arch35 TileLang2AscendC"
@@ -1080,7 +1166,10 @@ def _cmd_port_a3(
         "opgen_mode": "port_a3_to_a5",
         "graybox_sandbox": True,
         "source_arch": "arch35" if tilelang_source else "arch22",
-        "target_arch": "arch35",
+        # Destination-derived (a5→arch35, 310p→arch20): persisting a literal
+        # "arch35" here would stamp wrong-chip metadata into a 310P port's
+        # durable state and, via _inject_migration_metadata, verification.json.
+        "target_arch": "arch35" if tilelang_source else arch_for_target(env.target),
         "source_arch_detection": source_detection.state_payload(),
         "started_ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "last_seen_ts": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),

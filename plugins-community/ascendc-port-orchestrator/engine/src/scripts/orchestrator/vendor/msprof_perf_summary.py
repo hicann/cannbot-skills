@@ -893,13 +893,21 @@ import inspect
 import logging
 import os
 import sys
+
+# Pin the visible device BEFORE torch import: CANN re-reads this variable at
+# first device touch, so setting it after ``import torch`` contradicts the
+# RawDriver the engine already bound and faults with 507033 / "Operation not
+# permitted" (empty stderr, silent wrapper exit).  setdefault never overrides
+# an exec-time pin the engine applied for its physical lane; standalone use
+# (no pin) still gets the --device value here.
+os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "{device_id}")
+
 import torch
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 
 out_dir = Path("{out_dir}")
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "{device_id}"
 sys.path.insert(0, str(out_dir / "kernel" / "build"))
 sys.path.insert(0, str(out_dir))
 

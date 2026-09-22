@@ -216,6 +216,39 @@ def validate_cli_npubench_args(
     )
 
 
+def assert_sidecar_dtype_supported(
+    args: NormalizedNpubenchArgs, unsupported: frozenset[str], reason: str
+) -> None:
+    """Fail closed when the frozen sidecar declares a dtype the target lacks.
+
+    310p destination policy: Ascend310P has NO bf16 hardware
+    (compiler-measured — a passing fp16 control and a dav-NOSUCH negative
+    control; see cannbot-knowledge target_ascend310p.md). A
+    bfloat16-bearing sidecar must be rejected AT BINDING TIME with an explicit
+    reason, not discovered 5 worker-spawns later as an inscrutable
+    compile/precision failure. The sidecar is the case authority for the
+    frozen fixture (the evaluator materializes inputs from its descriptors),
+    so a byte-scan of
+    the declared dtype tokens is the honest, complete check.
+    """
+    if not unsupported:
+        return
+    try:
+        raw = args.sidecar_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise NpubenchInputError(
+            f"cannot read NPUKernelBench sidecar for dtype policy: {exc}"
+        ) from exc
+    hits = sorted(
+        token for token in unsupported if f'"{token}"' in raw
+    )
+    if hits:
+        raise NpubenchInputError(
+            f"NPUKernelBench sidecar {args.sidecar_relative_path} declares "
+            f"unsupported dtype(s) {hits} for this target: {reason}"
+        )
+
+
 def _npubench_source_inventory(args: NormalizedNpubenchArgs) -> list[tuple[Path, Path]]:
     """Collect the source closure and reject a root that cannot be staged."""
     inventory = _collect_source_inventory(args.root_path)

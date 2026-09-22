@@ -94,14 +94,14 @@ respect them throughout. They come from `src/scripts/resolve_target.sh` which re
 `workspace/.ascendc_env`'s active `TARGET`.
 
 ```
-TARGET={a5|a3|a2}
-SOC_VERSION={Ascend950PR_9589 | Ascend910_9382 | Ascend910B3 | …}
-PLATFORM_SIMT={true|false}     # true only for a5; false for a3/a2 (V220, no SIMT path)
-ARCH_CODE={arch35|arch22}
-NPU_ARCH={3510|2201}
-UB_PER_AIV_KB={256|192}
-L0C_KB={256|128}
-HARDWARE_REF=$CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_{ascend950pr|ascend910c|ascend910b}.md
+TARGET={a5|a3|a2|310p}
+SOC_VERSION={Ascend950PR_9589 | Ascend910_9382 | Ascend910B3 | Ascend310P3 | …}
+PLATFORM_SIMT={true|false}     # true only for a5; false for a3/a2 (V220, no SIMT path) and 310p (dav-m200, no SIMT)
+ARCH_CODE={arch35|arch22|arch20}
+NPU_ARCH={3510|2201|2002}
+UB_PER_AIV_KB={256|192|256}
+L0C_KB={256|128|256}
+HARDWARE_REF=$CANNBOT_KNOWLEDGE_ROOT/knowledge/common/platforms/concepts/target_{ascend950pr|ascend910c|ascend910b|ascend310p}.md
 HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
 ```
 
@@ -111,6 +111,10 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
    - TARGET=a5 → load patterns with `chip_scope: all` or `a5-only`
    - TARGET=a3 / a2 → load `all` or `v220-common` ONLY; **do NOT** load `a5-only`
      patterns (they reference SIMT primitives that won't compile on V220).
+   - TARGET=310p → load `all` ONLY. **Do NOT** load `a5-only` (SIMT primitives
+     won't compile — 310P/dav-m200 has no SIMT path) and **do NOT** load
+     `v220-common` (those entries are V220-chip-specific quirks, not 310P).
+     310P facts live in `$HARDWARE_REF` (target_ascend310p.md in cannbot-knowledge).
    Read the target card named by `HARDWARE_REF`; do not infer another chip's facts.
 
 2. **SIMT-rejection (when PLATFORM_SIMT=false)** — if the source you're porting OR
@@ -119,15 +123,15 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
    `LAUNCH_BOUND`, `__syncthreads`, `threadIdx.`, `blockDim.`, `gridDim.`
    then **HARD-EXIT Phase A** with handoff:
    ```
-   @orchestrator: SIMT not supported on TARGET={target} (V220 / arch22).
+   @orchestrator: SIMT not supported on TARGET={target} ({arch} — no SIMT path).
    Source uses {pattern}. Needs SIMD rewrite. Reference: scatter_add 域已卡片化 ——
    use the installed `knowledge-query` skill with "scatter SIMT" and the current platform
-   （含 a3/a2 catalogue gap 说明）。
+   （含 a3/a2 catalogue gap 说明；310p 同样适用——dav-m200 无 SIMT 通路）。
    ```
    Do NOT attempt to "stub out" SIMT calls — the build will fail anyway, you'll
    waste 5 compile-fix iters.
 
-2b. **`KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY)` is arch35-only — DO NOT emit on a3/a2** (added 2026-04-25
+2b. **`KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY)` is arch35-only — DO NOT emit on a3/a2/310p** (added 2026-04-25
     after 13_Cat investigation). The macro emits arch35-specific binary metadata that V220 runtime rejects with
     `ACL_ERROR_RT_PARAM_INVALID = 107000` at `RegisterAscendBinary` time (i.e. at python `import _ext` time, BEFORE
     the kernel ever runs). Symptom signature: build OK + `.so` produced + symbols look right + 99% precision
@@ -146,7 +150,9 @@ HOST=… USER=… PASSWORD=… CONTAINER=… CANN_PATH=…
 3. **Tile-size math** uses `UB_PER_AIV_KB` from context, not a hardcoded 256. If
    you're porting an A5 kernel that has `constexpr int TILE_BYTES = 256 * 1024;`,
    on a3/a2 that's 192*1024 — but better: derive from `GetUBSizeInBytes()` at
-   runtime so the kernel is portable.
+   runtime so the kernel is portable. On 310p the context value is a verified
+   256 KB (see `$HARDWARE_REF`), but runtime derivation is still recommended
+   so the same kernel body ports across 351x/2201/2002.
 
 4. **Build SOC string** is `$SOC_VERSION` from context — pass to deploy/build via:
    `bash src/scripts/deploy_to_npu.sh --build`  (it sources resolve_target.sh internally)

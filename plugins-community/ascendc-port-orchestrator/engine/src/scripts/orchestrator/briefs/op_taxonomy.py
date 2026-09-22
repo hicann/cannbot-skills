@@ -65,14 +65,20 @@ TARGET_HW_SPEC_MAP: dict[str, str] = {
     "a5": "knowledge/common/platforms/concepts/target_ascend950pr.md",  # V351 / arch35
     "a3": "knowledge/common/platforms/concepts/target_ascend910c.md",   # V220 / 910C
     "a2": "knowledge/common/platforms/concepts/target_ascend910b.md",   # V220 / 910B
+    # 310p routes to its own spec page in cannbot-knowledge (card contributed
+    # separately; until it lands, kb_ref_display fails loud with a missing-card
+    # marker). Falling back to the a5 page is forbidden: 950pr core counts /
+    # UB / atomics describe a chip whose cube+vec share one core and which has
+    # no MIX mode — a wrong page that loads cleanly is worse than a missing one.
+    "310p": "knowledge/common/platforms/concepts/target_ascend310p.md",  # Ascend310P3 — 200x / dav-m200
 }
 
 
 def default_kb_sections(target: str = "a5") -> list[str]:
     """Return the default KB-manifest list for the given target chip.
 
-    target: "a5" | "a3" | "a2" (case-insensitive). DS-env variants like
-    "a3-ds" / "a2-ds" normalize via `.rstrip("-ds")` per AscendCEnv
+    target: "a5" | "a3" | "a2" | "310p" (case-insensitive). DS-env variants
+    like "a3-ds" / "a2-ds" normalize via `.rstrip("-ds")` per AscendCEnv
     convention (DS isolation suffix doesn't change hardware family).
 
     Falls back to A5 for unknown targets (warn-don't-error policy:

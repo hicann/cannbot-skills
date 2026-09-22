@@ -26,7 +26,13 @@ import sys
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from a5_target_capability import a5_soc_version, parse_npu_smi_soc, soc_product_family
+from a5_target_capability import (
+    a5_soc_version,
+    parse_npu_smi_mapping_soc,
+    parse_npu_smi_soc,
+    soc_product_family,
+    soc_version_for_target,
+)
 from a5_target_transport import _Target
 from npubench.npubench_target_base import TargetTransportError, _DirectBuildTimeout
 
@@ -184,6 +190,25 @@ def _soc_probe_argv(target: _Target, set_env: Path | None) -> list[str]:
     return [_bash_binary(), "-lc", command]
 
 
+def _mapping_probe_argv(target: _Target, set_env: Path | None) -> list[str]:
+    """Build the ``npu-smi info -m`` argv under the same safety rules.
+
+    Multi-chip npu-smi generations (26.2.rc1, e.g. the 310P Atlas 300I Duo
+    topology: 3 cards x 2 AI chips) reject ``-t board -i <logic device id>``
+    because ``-i`` means CARD id there, and even the valid per-card board
+    listing carries no per-chip model.  The mapping table is the only surface
+    that maps a Chip Logic ID (= ASCEND_RT device index) to its chip name, so
+    it is the fallback probe for those generations.  No interpolated device
+    value at all; the set_env sourcing case mirrors :func:`_soc_probe_argv`.
+    """
+    npu_smi = _npu_smi_command(target)
+    if set_env is None:
+        return [npu_smi, "info", "-m"]
+    command = f"{shlex.quote(npu_smi)} info -m"
+    command = f"source {shlex.quote(str(set_env))} >/dev/null 2>&1 && {command}"
+    return [_bash_binary(), "-lc", command]
+
+
 def _run_soc_probe(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         list(argv),
@@ -213,7 +238,7 @@ def _soc_probe_result(
     try:
         return _run_soc_probe(argv)
     except (OSError, subprocess.SubprocessError) as exc:
-        configured = a5_soc_version(target.env)
+        configured = soc_version_for_target(target.env, target.name)
         if configured:
             logging.getLogger(__name__).warning(
                 "direct-launch SoC probe timed out twice under contention; "
@@ -242,38 +267,71 @@ def _chip_name_from_board_output(output: str) -> str:
     return ""
 
 
+def _soc_from_mapping_table(target: _Target, set_env: Path | None) -> str:
+    """Fallback: read the chip model from the ``info -m`` mapping table.
+
+    Returns "" when the table is unavailable or has no row for the device —
+    a closed-gate signal, not an exception: this probe only runs AFTER the
+    primary board probe already failed to identify a model, and the caller's
+    family checks surface the combined failure with the board rc attached.
+    """
+    try:
+        completed = _soc_probe_result(target, _mapping_probe_argv(target, set_env))
+    except TargetTransportError:
+        return ""
+    if completed is None or completed.returncode != 0:
+        return ""
+    return parse_npu_smi_mapping_soc(completed.stdout or "", target.visible_device)
+
+
 def _probe_target_soc(target: _Target, set_env: Path | None) -> str:
     """Bind configured SoC policy to the target device's reported model."""
-    # Per-device board query.  The FULL npu-smi info listing iterates
+    # Per-device board query first.  The FULL npu-smi info listing iterates
     # every physical device and hangs as soon as one unrelated card wedges
     # its management path (2026-08-22 A5 campaign: device 4 died Critical
     # and froze the whole listing; lanes 1/2/3 were healthy but every
     # full-listing probe timed out at 30s).  The per-device query stays
-    # responsive for healthy devices.
+    # responsive for healthy devices.  Multi-chip generations where the
+    # board query cannot work at all (no per-chip model in the listing;
+    # -i means CARD id) fall through to the mapping-table probe below.
     completed = _soc_probe_result(target, _soc_probe_argv(target, set_env))
     if completed is None:
-        return a5_soc_version(target.env)
-    if completed.returncode != 0:
+        # Target-aware configured-SoC read (a5 → A5_SOC_VERSION,
+        # 310p → ASCEND310P_SOC_VERSION via the canonical prefix map).
+        return soc_version_for_target(target.env, target.name)
+    output = completed.stdout or ""
+    observed = ""
+    if completed.returncode == 0:
+        observed = parse_npu_smi_soc(output, target.visible_device)
+        if not observed:
+            observed = _chip_name_from_board_output(output)
+    if not observed:
+        # 26.2.rc1 multi-chip topology (a 6-chip 310P box: 3 cards x 2 chips,
+        # Chip Logic IDs 0-5 are the ASCEND_RT devices): the board
+        # query rejects the logic device id with a usage error (rc=215) and
+        # the valid per-card listing carries no per-chip model.  The mapping
+        # table resolves Chip Logic ID → chip name.  It is a full-system
+        # query, but it only runs after the board probe already failed fast,
+        # so the wedged-card hang scenario above still terminates through
+        # the timeout → configured-SoC trust path in _soc_probe_result.
+        observed = _soc_from_mapping_table(target, set_env)
+    configured_family = soc_product_family(
+        soc_version_for_target(target.env, target.name)
+    )
+    observed_family = soc_product_family(observed)
+    if not observed or observed_family is None:
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
         suffix = detail[-1] if detail else "no diagnostic"
         raise TargetTransportError(
-            f"direct-launch target SoC probe failed (rc={completed.returncode}): {suffix}"
-        )
-    output = completed.stdout or ""
-    observed = parse_npu_smi_soc(output, target.visible_device)
-    if not observed:
-        observed = _chip_name_from_board_output(output)
-    configured_family = soc_product_family(a5_soc_version(target.env))
-    observed_family = soc_product_family(observed)
-    if not observed or observed_family is None:
-        raise TargetTransportError(
             "direct-launch target SoC probe returned no recognized model for "
-            f"device {target.visible_device}"
+            f"device {target.visible_device} "
+            f"(board rc={completed.returncode}: {suffix})"
         )
     if configured_family != observed_family:
         raise TargetTransportError(
             "direct-launch target SoC does not match configuration: "
-            f"configured={a5_soc_version(target.env)!r}, observed={observed!r}, "
+            f"configured={soc_version_for_target(target.env, target.name)!r}, "
+            f"observed={observed!r}, "
             f"device={target.visible_device}"
         )
     return observed

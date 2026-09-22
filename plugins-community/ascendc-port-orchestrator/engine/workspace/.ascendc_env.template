@@ -54,3 +54,21 @@ NPU_PYTHON_BIN=
 # override) > this variable > <operator-project>/.cannbot/knowledge.env
 # (written by the cannbot-knowledge unified installer).
 CANNBOT_KNOWLEDGE_ROOT=
+
+# ─── 310P port destination (TARGET=310p) ─────────────────────────────────────
+# Ascend310P3 (Atlas 300I Duo, 200x / dav-m200). Unlike the A5 block above,
+# these keys NEVER fall back to A5_* or generic keys — a 310p env must be
+# self-contained. Note the prefix is ASCEND310P_* (NOT 310P_* — keys starting
+# with a digit are illegal shell identifiers and are rejected at parse time).
+# To target 310P: set TARGET=310p and fill this block. Typical shape is the
+# local mode below (the 310P box runs the build itself; no SSH/container):
+# TARGET=310p
+# ASCEND310P_HOST=localhost
+# ASCEND310P_USER=root
+# ASCEND310P_PASSWORD=
+# ASCEND310P_CONTAINER=local
+# ASCEND310P_CANN_PATH=/usr/local/Ascend/cann
+# Required: SoC reported by the target device, must be Ascend310P* family
+# (on-target: acl soc enum 202 = Ascend310P3).
+# ASCEND310P_SOC_VERSION=Ascend310P3
+# ASCEND310P_NPU_PYTHON_BIN=/usr/local/python3.11.10/bin

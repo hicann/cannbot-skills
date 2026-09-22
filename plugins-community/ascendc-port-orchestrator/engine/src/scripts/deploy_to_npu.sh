@@ -281,6 +281,16 @@ case "$_DEPLOY_TARGET" in
         DEPLOY_STAGE_HOST=${A3_DEPLOY_STAGE_HOST:-${A3_HOST_HOME:-/home/npu_user}}/${DEPLOY_STAGE_DIR}
         DEPLOY_STAGE_CONTAINER=${A3_DEPLOY_STAGE_CONTAINER:-/home/npu_user}/${DEPLOY_STAGE_DIR}
         ;;
+    310p)
+        # Ascend310P target. Currently always provisioned as local-mode
+        # (ASCEND310P_HOST=localhost + ASCEND310P_CONTAINER=local): the build
+        # runs on the 310P box itself via the local fast path below, so these
+        # stage roots are only consulted by that path. Defaults still defined
+        # so a future SSH-provisioned 310p host has an override point via
+        # ASCEND310P_DEPLOY_STAGE_HOST/_CONTAINER.
+        DEPLOY_STAGE_HOST=${ASCEND310P_DEPLOY_STAGE_HOST:-/tmp}/${DEPLOY_STAGE_DIR}
+        DEPLOY_STAGE_CONTAINER=${ASCEND310P_DEPLOY_STAGE_CONTAINER:-/tmp}/${DEPLOY_STAGE_DIR}
+        ;;
     *)
         echo "ERROR: unknown TARGET='$TARGET' for deploy_to_npu.sh" >&2
         exit 2
@@ -308,8 +318,16 @@ fi
 # "A3-DS_DOCKER_SUDO" hard-errors ("invalid variable name") under set -u and
 # aborts deploy. Map any non-alnum char to '_' first. Non-hyphen targets
 # (a5/a3/a2) are byte-identical to the prior behavior.
-_TDS_VAR="${TARGET^^}_DOCKER_SUDO"
-_TDS_VAR="${_TDS_VAR//[^A-Z0-9_]/_}"
+# 310p needs the EXPLICIT prefix, never "${TARGET^^}": "310P_DOCKER_SUDO" is
+# digit-led (illegal bash identifier) and the indirect expansion ${!_TDS_VAR}
+# below hard-errors "invalid variable name" under set -u — aborts EVERY 310p
+# deploy before the local fast path (same DEBT-336 class as
+# resolve_target.sh / deploy_to_npu_lane.sh).
+case "$TARGET" in
+    310p) _TDS_VAR="ASCEND310P_DOCKER_SUDO" ;;
+    *)    _TDS_VAR="${TARGET^^}_DOCKER_SUDO"
+          _TDS_VAR="${_TDS_VAR//[^A-Z0-9_]/_}" ;;
+esac
 _DOCKER_SUDO_FLAG="${!_TDS_VAR:-${A5_DOCKER_SUDO:-}}"
 _docker_sudo_on() {
     case "$_DOCKER_SUDO_FLAG" in 1|true|yes|on|TRUE|Yes|YES|On) return 0 ;; *) return 1 ;; esac

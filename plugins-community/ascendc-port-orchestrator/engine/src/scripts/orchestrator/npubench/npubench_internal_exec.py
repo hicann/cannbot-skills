@@ -126,6 +126,11 @@ def _apply_assigned_device(request: dict[str, Any]) -> None:
     if isinstance(assigned_device, int) and assigned_device >= 0:
         os.environ["ASCEND_RT_VISIBLE_DEVICES"] = str(assigned_device)
         request["device"] = 0
+        # Keep the original physical id for consumers that re-export it into a
+        # child environment (the performance verb's profiler argv): the quick
+        # profiler's ``--device`` selects a PHYSICAL device via the wrapper's
+        # ASCEND_RT_VISIBLE_DEVICES, so it must never receive this logical 0.
+        request["assigned_physical_device"] = assigned_device
 
 
 def _execute_preflight_verb(
@@ -227,6 +232,13 @@ def _execute_performance_verb(
     device = request.get("device")
     if isinstance(device, bool) or not isinstance(device, int):
         raise NpuBenchRunnerError("isolated performance request has invalid device")
+    # The quick profiler's ``--device`` is a PHYSICAL device id (the wrapper
+    # pins ASCEND_RT_VISIBLE_DEVICES with it); ``request["device"]`` was
+    # remapped to logical 0 by ``_apply_assigned_device`` when the env pin was
+    # applied, so prefer the recorded physical id it saved.
+    physical = request.get("assigned_physical_device")
+    if isinstance(physical, int) and not isinstance(physical, bool) and physical >= 0:
+        device = physical
     native = _prepare_native_quick_adapter(
         adapter,
         fixture_root,

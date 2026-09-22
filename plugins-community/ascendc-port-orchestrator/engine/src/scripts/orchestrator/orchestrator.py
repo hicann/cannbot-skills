@@ -205,28 +205,51 @@ TOTAL_SPAWN_CAP_PER_OP = int(
 # DEBT-PORT-A3-TARGET-ENFORCE (2026-06-05)
 # ---------------------------------------------------------------------------
 def enforce_port_a3_target(opgen_mode: str, target: str):
-    """The arch22 to arch35 migration structurally builds on the A5 target.
+    """port_a3_to_a5 mode ports FROM arch22 TO a supported destination chip.
 
-    If `.ascendc_env` says a non-a5 target in port_a3 mode, that is a
+    If `.ascendc_env` names a target that is NOT a port destination, that is a
     contradictory config that SILENTLY splits the worker build-host (which
-    follows `{target}_HOST`) from the O5 verify-host
-    (`phase_o5_runner._a5_build_host` returns `A5_HOST` in port_a3 mode
-    REGARDLESS of target). The kernel builds on one host, O5 verifies on
-    another where the `.so` does not exist → every case ImportErrors → 0/N
-    FAIL, mis-read by O5 as a precision MISMATCH. This cost the FA-A5 gate-a
-    sprint hours (2026-06-05). Force `a5` + return a LOUD warning so the run
-    proceeds correctly (build+verify on the same A5 host) and the user is told
-    to fix their `.ascendc_env target=` line.
+    follows `{target}_HOST`) from the O5 verify-host. The kernel builds on one
+    host, O5 verifies on another where the `.so` does not exist → every case
+    ImportErrors → 0/N FAIL, mis-read by O5 as a precision MISMATCH. This cost
+    the FA-A5 gate-a sprint hours (2026-06-05). Force `a5` + return a LOUD
+    warning so the run proceeds correctly (build+verify on the same host) and
+    the user is told to fix their `.ascendc_env target=` line.
+
+    The canonical case is `target=a3`: a3 is the port's SOURCE, so routing the
+    build there is the original bug verbatim.
+
+    The destination test is membership in `a3_ref_common.PORT_DESTINATIONS`
+    ({a5, 310p}): the historical `target != "a5"` form conflated "is a
+    supported destination" with "is A5" and made 310P unreachable through the
+    port path — the user's target was discarded before the brief was built, so
+    a 310P port would silently run on A5. The
+    `phase_o5_runner._a5_build_*` resolvers follow the destination in the same
+    way — widening this test alone would build a 310P port on A5 hardware and
+    call it a pass.
 
     Pure function (no side effects) for unit-testability. Returns
     `(effective_target, warning_or_None)`.
     """
-    if opgen_mode == "port_a3_to_a5" and target != "a5":
+    from a3_ref_common import PORT_DESTINATIONS
+
+    # Case-normalise: `target` arrives both ways across the codebase (`.ascendc_env`
+    # readers lower it, several call sites pass "A3"/"A5" verbatim). If this test were
+    # case-sensitive while the `phase_o5_runner._a5_build_*` resolvers are not, "310P"
+    # would be forced back to a5 here and the destination support would silently not
+    # apply — the two must decide identically or the whitelist means nothing.
+    normalized = (target or "").lower()
+    if opgen_mode == "port_a3_to_a5" and normalized in PORT_DESTINATIONS:
+        return normalized, None
+
+    if opgen_mode == "port_a3_to_a5":
         return "a5", (
-            f"DEBT-PORT-A3-TARGET-ENFORCE: port_a3_to_a5 mode implies TARGET=a5, "
-            f"but .ascendc_env target={target!r} — overriding to 'a5'. "
-            f"(target!=a5 in port_a3 silently splits the build-host from the O5 "
-            f"verify-host → 0/N ImportError mis-read as precision FAIL. Fix your "
+            f"DEBT-PORT-A3-TARGET-ENFORCE: port_a3_to_a5 mode targets one of "
+            f"{sorted(PORT_DESTINATIONS)}, but .ascendc_env target={target!r} — "
+            f"overriding to 'a5'. "
+            f"(a non-destination target in port_a3 silently splits the build-host "
+            f"from the O5 verify-host → 0/N ImportError mis-read as precision FAIL. "
+            f"a3 is the port SOURCE, not a destination. Fix your "
             f".ascendc_env target= line to silence this.)"
         )
     return target, None

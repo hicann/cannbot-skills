@@ -111,7 +111,14 @@ _IS_LOCAL=false
 _ENV_FILE="$SCRIPT_DIR/../../workspace/.ascendc_env"
 if [ -f "$_ENV_FILE" ]; then
     _TARGET=$(grep "^TARGET=" "$_ENV_FILE" | cut -d= -f2)
-    _TARGET_UPPER=$(echo "${_TARGET:-a5}" | tr '[:lower:]' '[:upper:]')
+    # Env-key prefix — explicit case, never tr-derived: TARGET=310p must
+    # resolve to ASCEND310P_HOST, never the illegal "310P_HOST" (a digit-led
+    # identifier that grep can never match → local mode silently never
+    # fired). DEBT-336 class.
+    case "${_TARGET:-a5}" in
+        310p) _TARGET_UPPER="ASCEND310P" ;;
+        *) _TARGET_UPPER=$(echo "${_TARGET:-a5}" | tr '[:lower:]' '[:upper:]') ;;
+    esac
     _HOST=$(grep "^${_TARGET_UPPER}_HOST=" "$_ENV_FILE" | cut -d= -f2)
     _CONTAINER=$(grep "^${_TARGET_UPPER}_CONTAINER=" "$_ENV_FILE" | cut -d= -f2)
     if [ "$_HOST" = "localhost" ] && [ "$_CONTAINER" = "local" ]; then

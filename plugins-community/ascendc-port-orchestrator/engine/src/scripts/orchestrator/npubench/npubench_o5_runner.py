@@ -206,7 +206,9 @@ def _receipt_target_state(
     # the receipt's own SoC to reconstruct the expected identity: a signed
     # receipt remains stale when the target configuration changes between
     # build and O5 classification (for example, Ascend950PR -> Ascend910).
-    current_soc = npubench_target.a5_soc_version(current_target.env)
+    current_soc = npubench_target.soc_version_for_target(
+        current_target.env, current_target.name
+    )
     if receipt.get("soc") != current_soc:
         return None
     current_observed_soc = None
@@ -451,12 +453,12 @@ def _controlled_build_precheck(workspace: Path, lane: int):
     to lease acquisition.
     """
     from a5_target_capability import (
-        is_limited_a5_soc,
-        limited_a5_validation_error,
-        a5_soc_version,
+        is_limited_soc,
+        limited_target_validation_error,
+        soc_version_for_target,
     )
     from phase_o5 import MeasuredResult
-    from phase_o5_runner import _read_ascendc_env
+    from phase_o5_runner import _normalise_target, _read_ascendc_env
     from reference_source import load_durable_state
 
     durable_state = load_durable_state(workspace)
@@ -475,8 +477,16 @@ def _controlled_build_precheck(workspace: Path, lane: int):
         build_source_kind = None
     limited_target_soc: str | None = None
     target_env = _read_ascendc_env(workspace)
-    target_soc = a5_soc_version(target_env)
-    if is_limited_a5_soc(target_soc):
+    # Target-parametric capability stop: read the SoC through the ACTIVE
+    # target's prefix (a5 → A5_SOC_VERSION, 310p → ASCEND310P_SOC_VERSION) and
+    # judge "limited" per target family. The a5
+    # branch is byte-identical to the previous is_limited_a5_soc call; 310p is
+    # a FULL on-device validation destination (D1=A), so a recognized
+    # Ascend310P-family SoC opens precision/perf acceptance instead of
+    # stopping at the codegen smoke check.
+    target_id = _normalise_target(target_env)[1]  # env-key prefix (A5/ASCEND310P)
+    target_soc = soc_version_for_target(target_env, target_id)
+    if is_limited_soc(target_soc, target_id):
         # Ascend910 may compile a candidate as a code-generation smoke
         # check.  Stop only after that target-side build and before
         # snapshot/precision/performance acceptance evaluation.
@@ -507,7 +517,7 @@ def _controlled_build_precheck(workspace: Path, lane: int):
     if limited_target_soc is None:
         return None
     return MeasuredResult(
-        runner_error=limited_a5_validation_error(limited_target_soc),
+        runner_error=limited_target_validation_error(limited_target_soc, target_id),
         rollback_kind="target_capability",
     )
 

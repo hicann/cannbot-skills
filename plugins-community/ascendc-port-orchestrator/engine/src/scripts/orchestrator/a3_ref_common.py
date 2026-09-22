@@ -35,6 +35,25 @@ RunRemote = Callable[[str], tuple[int, str, str]]
 _A3_CONTAINER_HOME_DEFAULT = "/home/npu_user"
 # A5 sliced-container fallback; override via A3_CONTAINER_HOME in .ascendc_env.
 
+# Chips the port capability can port *to. Lives in this leaf (stdlib-only, no sibling
+# imports) because BOTH `orchestrator.enforce_port_a3_target` and the
+# `phase_o5_runner._a5_build_*` resolvers must agree on it, and they are in modules that
+# cannot import each other. Splitting it into two literals would drift silently and in
+# the worst direction: a target the guard admits but the resolver does not recognise
+# gets built on A5 hardware and reported as a success.
+#
+# ⚠️ `a3` is deliberately absent — it is the port's SOURCE. Admitting it routes the build
+# to the A3 reference host while O5 verifies on the destination, so every case
+# ImportErrors and 0/N reads as a precision MISMATCH (DEBT-PORT-A3-TARGET-ENFORCE,
+# 2026-06-05). The invariant is "the target is a supported DESTINATION", of which the
+# original `target != "a5"` test was the one-element stand-in.
+#
+# `310p` (Ascend310P3 / 200x / dav-m200): unlike a5 it
+# does NOT require an A3 reference capture or a distinct A5 build host — the port runs
+# local-mode on the 310P box (ASCEND310P_* keys; never A5_* fallback). The set is named
+# PORT_DESTINATIONS to match a5_ops.
+PORT_DESTINATIONS = frozenset({"a5", "310p"})
+
 
 def _ascendc_env_path() -> Path:
     """Resolve the canonical `.ascendc_env` path — single source of truth.

@@ -42,6 +42,10 @@ from briefs.brief_kb import (  # re-export: KB cluster moved to brief_kb (behavi
     # OKF-only (2026-08): OKF 检索是唯一 b-tier 路径; legacy 注入/开关/逃生门已移除。
     _okf_reference_block, _kb_discipline_scaffold,
 )
+# Single source of truth for the target → env-key prefix map (see
+# briefs/target_env_map.py). Imported name stays re-exported so
+# `from briefs._common import TARGET_ENV_PREFIXES` remains valid.
+from briefs.target_env_map import TARGET_ENV_PREFIXES
 
 
 _HERE = Path(__file__).resolve()
@@ -54,7 +58,7 @@ DEFAULT_ASCENDC_ENV = _PROJECT_ROOT / "workspace" / ".ascendc_env"
 # ---------------------------------------------------------------------------
 @dataclass
 class AscendCEnv:
-    target: str                # "a5" | "a3" | "a2"
+    target: str                # "a5" | "a3" | "a2" | "310p"
     host: str
     user: str
     password: str
@@ -126,6 +130,43 @@ class AscendCEnv:
         return self.subagent_settings.get(key)
 
 
+# Targets allowed to fall back to generic keys (SOC_VERSION/CANN_PATH) and to
+# the legacy A5_* block when their own prefix keys are absent. 310p is
+# deliberately absent: a 310p env must carry ASCEND310P_* keys — inheriting an
+# A5 environment by accident names the WRONG chip (build/verify would target
+# 950PR silicon with a 200x toolchain assumption).
+_GENERIC_COMPAT_TARGETS = frozenset(("a5", "a3", "a2"))
+
+# Sentinel fallback key that can never exist in a parsed env — used to
+# suppress generic/A5 fallback for non-compat targets (310p) without
+# special-casing _resolve_target_first's signature.
+_NO_KEY = "__NO_SUCH_KEY__"
+
+
+def target_env_prefix(target: str) -> str:
+    """Return the canonical env-key prefix for `target` ("310p" → "ASCEND310P").
+
+    Case-insensitive; "-ds" backend-isolation suffix stripped (it selects a
+    harness instance, not a different chip family). Unknown targets raise —
+    failing loud here beats resolving against A5_* keys nobody configured.
+    """
+    normalized = (target or "").strip().lower()
+    if normalized.endswith("-ds"):
+        normalized = normalized[:-3]
+    try:
+        return TARGET_ENV_PREFIXES[normalized]
+    except KeyError as error:
+        raise ValueError(
+            f"unknown TARGET {target!r}: supported targets are "
+            f"{sorted(TARGET_ENV_PREFIXES)} (case-insensitive, optional -ds suffix)"
+        ) from error
+
+
+def target_env_key(target: str, suffix: str) -> str:
+    """Return the canonical `<PREFIX>_<SUFFIX>` env key for `target`."""
+    return f"{target_env_prefix(target)}_{suffix}"
+
+
 def load_env(env_file: Optional[Path] = None) -> AscendCEnv:
     """Parse workspace/.ascendc_env (shell-style KEY=VALUE).
 
@@ -155,6 +196,17 @@ def load_env(env_file: Optional[Path] = None) -> AscendCEnv:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        # Fail loud on the legacy illegal-key spelling for 310p. Must run
+        # BEFORE the KEY regex below: "310P_*" starts with a digit, so it can
+        # never match `^([A-Z_]...)` — without this check the line is
+        # SILENTLY SKIPPED, the value disappears, and the resolver proceeds
+        # with an empty ASCEND310P_* block (the shell-side source fails on
+        # such lines, the Python side must fail equally loud).
+        if re.match(r"^310P_[A-Za-z0-9_]*=", line):
+            raise ValueError(
+                f"LEGACY_310P_ENV_KEYS at {env_file}: '310P_*' keys are not "
+                "legal; use ASCEND310P_*"
+            )
         m = re.match(r"^([A-Z_][A-Z0-9_]*)=(.*)$", line)
         if not m:
             continue
@@ -168,14 +220,22 @@ def load_env(env_file: Optional[Path] = None) -> AscendCEnv:
 
     target = kv.get("TARGET", "a5")
     backend = resolve_backend_from_env(kv.get("BACKEND", "ascendc"), None)
+    # Archive namespace is DESTINATION-aware: a 310p port archives under its
+    # own project (a3_to_310p_port) so the a5 namespace stays the a5-destination contract — mixing destinations in one
+    # output tree makes "which chip was this ported for" unanswerable from the
+    # archive layout. Must agree with a3_ref_common.PORT_DESTINATIONS and the
+    # port_a3 plugin's archive_project_claim.
+    _dest = (target or "").strip().lower()
+    if _dest.endswith("-ds"):
+        _dest = _dest[:-3]
     archive_project = {
-        "port_a3_to_a5": "a3_to_a5_port",
+        "port_a3_to_a5": "a3_to_310p_port" if _dest == "310p" else "a3_to_a5_port",
         "backward": "backward_ops",
     }.get(kv.get("OPGEN_MODE", ""), "generated_ops")
 
-    # Resolve per-target keys (TARGET=a3 → try A3_HOST, A3_SOC_VERSION, etc.)
-    _tp = target.upper().replace("-", "_")  # a3 → A3, a3-ds → A3_DS
-    _tp_base = _tp.split("_")[0]  # A3_DS → A3
+    # Resolve per-target keys (TARGET=a3 → A3_HOST, TARGET=310p → ASCEND310P_HOST).
+    # Explicit prefix map — never derived by uppercasing (see TARGET_ENV_PREFIXES).
+    _tp_base = target_env_prefix(target)  # a3 → A3, a3-ds → A3, 310p → ASCEND310P
 
     return _build_env_from_kv(kv, target, backend, archive_project, _tp_base)
 
@@ -237,6 +297,23 @@ def _resolve_target_first(kv: dict, target_key: str, generic_key: str,
     return target_val or generic_val or kv.get(fallback_key, "")
 
 
+def _legacy_a5_fallback(kv: dict, target: str):
+    """Return (enabled, getter) for the legacy A5_* fallback block.
+
+    Only the legacy compat targets (a5/a3/a2) may fall back to A5_*/generic
+    keys — their envs historically populate just the A5 block. 310p must NOT
+    inherit A5_*: an empty 310p field means "misconfigured", not "use the A5
+    host" (an accidental A5 inherit names the WRONG chip — 950PR silicon with
+    a 200x toolchain assumption).
+    """
+    target_norm = (target or "").strip().lower()
+    if target_norm.endswith("-ds"):
+        target_norm = target_norm[:-3]
+    if target_norm in _GENERIC_COMPAT_TARGETS:
+        return True, (lambda key, default="": kv.get(f"A5_{key}", default))
+    return False, (lambda key, default="": default)
+
+
 def _build_env_from_kv(kv: dict, target: str, backend: str, archive_project: str, _tp_base: str):
     """Internal helper: construct AscendCEnv from parsed key-value dict."""
     env_mode = kv.get("OPGEN_MODE", "")
@@ -245,18 +322,25 @@ def _build_env_from_kv(kv: dict, target: str, backend: str, archive_project: str
             "OPGEN_MODE may only be port_a3_to_a5 or backward; "
             f"got {env_mode!r}"
         )
+    # A5_* fallback only for the legacy compat targets (a5/a3/a2); 310p must
+    # NOT inherit A5_* (rationale: _legacy_a5_fallback).
+    _legacy_fallback, _a5 = _legacy_a5_fallback(kv, target)
     return AscendCEnv(
         target=target,
-        host=kv.get(f"{_tp_base}_HOST") or kv.get("A5_HOST", ""),
-        user=kv.get(f"{_tp_base}_USER") or kv.get("A5_USER", "root"),
-        password=kv.get(f"{_tp_base}_PASSWORD") or kv.get("A5_PASSWORD", ""),
-        container=kv.get(f"{_tp_base}_CONTAINER") or kv.get("A5_CONTAINER", ""),
+        host=kv.get(f"{_tp_base}_HOST") or _a5("HOST"),
+        user=kv.get(f"{_tp_base}_USER") or _a5("USER", "root"),
+        password=kv.get(f"{_tp_base}_PASSWORD") or _a5("PASSWORD"),
+        container=kv.get(f"{_tp_base}_CONTAINER") or _a5("CONTAINER"),
         # DEBT-227: TARGET-SPECIFIC wins over generic (was already correct for
         # cann_path; soc_version had the generic-first bug — now unified).
         cann_path=_resolve_target_first(
-            kv, f"{_tp_base}_CANN_PATH", "CANN_PATH", "A5_CANN_PATH", target),
+            kv, f"{_tp_base}_CANN_PATH",
+            "CANN_PATH" if _legacy_fallback else _NO_KEY,
+            "A5_CANN_PATH" if _legacy_fallback else _NO_KEY, target),
         soc_version=_resolve_target_first(
-            kv, f"{_tp_base}_SOC_VERSION", "SOC_VERSION", "A5_SOC_VERSION", target),
+            kv, f"{_tp_base}_SOC_VERSION",
+            "SOC_VERSION" if _legacy_fallback else _NO_KEY,
+            "A5_SOC_VERSION" if _legacy_fallback else _NO_KEY, target),
         benchmark_root=kv.get("BENCHMARK_ROOT", ""),
         local_benchmark=kv.get("LOCAL_BENCHMARK", ""),
         local_project=kv.get("LOCAL_PROJECT", ""),

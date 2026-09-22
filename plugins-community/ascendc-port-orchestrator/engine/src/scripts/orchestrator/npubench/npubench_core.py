@@ -2067,11 +2067,36 @@ def _run_runner_child(
 
 
 def _parse_child_report(stdout: Any) -> dict[str, Any] | None:
-    for line in reversed(str(stdout or "").splitlines()):
+    """Return the child's machine-readable report dict, or None.
+
+    Two-pass protocol. Pass 1: strict line-based scan — the child prints
+    exactly one JSON report line on stdout. Pass 2: glued-noise recovery —
+    a cold GE/tbe initialization prints progress dots to stdout without a
+    newline, so the report line can arrive as ``..{...}``; without recovery
+    the parent would classify a completed, measured FAIL child as "no
+    machine-readable report" and O5 would route a real kernel defect into
+    the infra-retry lane. Recovery scans every ``{`` right-to-left and
+    accepts the first candidate whose ``raw_decode`` consumes the whole
+    remainder (trailing whitespace allowed). Fail-closed: non-whitespace
+    trailing garbage, or a document that is not a JSON object, returns None.
+    """
+    text = str(stdout or "")
+    for line in reversed(text.splitlines()):
         try:
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(value, dict):
+            return value
+    decoder = json.JSONDecoder()
+    brace_indices = [i for i, ch in enumerate(text) if ch == "{"]
+    for idx in reversed(brace_indices):
+        try:
+            value, end = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            continue
+        if text[end:].strip():
+            continue  # document does not extend to the end -- inner object
         if isinstance(value, dict):
             return value
     return None
