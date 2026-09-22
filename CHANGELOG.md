@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-22】
+#### 新特性 New Features
+- 【CANN 工具链】新增 npu-check 运行时正确性检查 Skill，支持算子设备全局内存（GM）访问和同步操作配对检查。
+
 ### 【2026-09-21】
 #### 缺陷修复 Bug Fixes
 - 【ascendc-mc2-best-practice】修复 mc2 参考实现中 `MC2HcomTopology::GetInstance` 的悬垂指针缺陷（issue #707）：原代码 `static const char *libPath = GetLibPath().c_str()` 将按值返回的临时 `std::string` 的 `c_str()` 指针存入静态指针，临时对象在该完整表达式结束时析构，`libPath` 成为悬垂指针并被传入构造函数执行 `dlopen`，属可触发的 use-after-free。修复为 `static const std::string libPath = GetLibPath()`（延长持有缓冲区的 string 对象的生命周期至进程结束，裸指针不比所有者长寿，符合 C++ Core Guidelines ES.30），构造函数 `const char*` 签名与行为不变。
@@ -498,7 +502,7 @@
 #### 特性增强 Feature Enhancement
 - 增强 ascendc-precision-debug 和ascendc-runtime-debug 的调试能力。
 
-### 【2026-04-24】 
+### 【2026-04-24】
 #### 新特性 New Features
 - 新增 Ascend C 性能调优知识货架。
 
@@ -555,7 +559,7 @@
 - 【aclnn 接口测试用例设计，ascendc-st-design】新增支持aclIntArray / aclFloatArray / aclBoolArray / aclScalarList / aclIntArray类型接口生成ST用例。
 #### 问题修复 Bug Fix
 - 【算子直调，ops-direct-invoke】修改verify_environment.sh脚本，返回environment.json 固定为1的bug，应该按实际设备的npu count返回。
-    
+
 ### 【2026-04-13】
 #### 新特性 New Features
 - 【Team调度】支持team级代码条例全量检视，review team 派发条例给代码检视。支持子agent 并行检视、验证，提升检视效果，降低上下文的压力。
@@ -584,7 +588,7 @@
 - 【Ascend C】【代码检视，ascendc-ops-reviewer】ascendc-ops-reviewer Agent支持GitCode PR的代码检视。
 - 【Ascend C】【Kernel 架构】新增 Agent：ascendc-kernel-architect，<<<>>>直调支持多agent协同。
 - 【Ascend C】【Kernel 架构】新增 Skill：ascendc-direct-invoke-template。
- 
+
 ### 【2026-04-02】
 #### 文档 Documentation
 - 【开发规范】新增  CANNBot 开发规范，包含：Skill、Agents、Teams。
