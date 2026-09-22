@@ -164,8 +164,8 @@ MC2HcomTopology::MC2HcomTopology(const char *libPath)
 
 MC2HcomTopology &MC2HcomTopology::GetInstance()
 {
-    static const char *libPath = GetLibPath().c_str();
-    static MC2HcomTopology loader(libPath);
+    static const std::string libPath = GetLibPath();
+    static MC2HcomTopology loader(libPath.c_str());
     return loader;
 }
 
