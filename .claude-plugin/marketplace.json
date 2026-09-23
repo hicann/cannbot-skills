@@ -278,7 +278,7 @@
     },
     {
       "name": "cann-tools-skills",
-      "description": "CANN 工具 Skills（5 个）。覆盖 asys 故障信息收集与解析、msaicerr AI Core Error 分析与 Dump 转换、msnpureport Device 侧日志导出与维测配置、npu-check 算子设备全局内存（GM）访问与同步操作配对检查，以及使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包报告并定位带宽、流水线、存储访问和资源冲突问题。",
+      "description": "CANN 工具 Skills（6 个）。覆盖 asys 故障信息收集与解析、msaicerr AI Core Error 分析与 Dump 转换、msnpureport Device 侧日志导出与维测配置、npu-check 算子设备全局内存（GM）访问与同步操作配对检查、使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包报告并定位带宽、流水线、存储访问和资源冲突问题，以及 npu-objdump 算子编译产物元数据查看、device ELF 提取与 Ascend AICore 指令反汇编。",
       "source": "./tools",
       "strict": false,
       "version": "1.0.0",
@@ -293,6 +293,7 @@
         "npu-compute",
         "profiling",
         "npu-check",
+        "npu-objdump",
         "troubleshooting",
         "skills"
       ],
@@ -302,7 +303,8 @@
         "./msaicerr-toolkit",
         "./msnpureport-toolkit",
         "./tool-npu-compute",
-        "./tool-npu-check"
+        "./tool-npu-check",
+        "./npu-objdump-toolkit"
       ]
     },
     {
@@ -790,7 +792,12 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "skills", "evolution", "perf-optimize"],
+      "keywords": [
+        "ascendc",
+        "skills",
+        "evolution",
+        "perf-optimize"
+      ],
       "category": "skills",
       "skills": [
         "./evolution-knowledge",
@@ -809,7 +816,12 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "skills", "npu-arch", "profiling"],
+      "keywords": [
+        "ascendc",
+        "skills",
+        "npu-arch",
+        "profiling"
+      ],
       "category": "skills",
       "skills": [
         "./npu-arch",
@@ -824,7 +836,13 @@
       "author": {
         "name": "CANNBot"
       },
-      "keywords": ["ascendc", "evolution", "perf-optimize", "kernel", "operator"],
+      "keywords": [
+        "ascendc",
+        "evolution",
+        "perf-optimize",
+        "kernel",
+        "operator"
+      ],
       "category": "development",
       "dependencies": [
         "ops-perf-evolution-skills",

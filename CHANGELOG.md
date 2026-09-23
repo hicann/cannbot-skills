@@ -2,6 +2,7 @@
 ### 【2026-09-22】
 #### 新特性 New Features
 - 【CANN 工具链】新增 npu-check 运行时正确性检查 Skill，支持算子设备全局内存（GM）访问和同步操作配对检查。
+- 【npu-objdump-toolkit】新增 Ascend 算子编译产物分析 Skill，支持查看 kernel 元数据与完整 ELF 信息、列出或提取内嵌 device ELF、使用 `--sass` 反汇编 Ascend AICore 指令，并提供 msobjdump/npu-objdump 接口自检与故障定位指导。
 
 #### 缺陷修复 Bug Fixes
 - 【文档格式】修复两个 SKILL.md 表格分隔行/表头列数与数据行不符导致的渲染列错位（issue #710）：`ops/pypto-intent-understand/SKILL.md:266` 表头与数据为 6 列、分隔行仅 5 段，补齐缺失段；`ops/pypto-op-perf-tune/tune-orchestrator/SKILL.md:615` 迭代轮次记录示例表头 9 列配 10 列数据，按同文件既有 10 列表头先例（轮次/外循环/阶段/…）补"外循环"列，数据行逐列语义验证对齐。issue 提及的 pypto-gym 仓 vendored 副本建议由该仓同步。
