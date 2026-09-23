@@ -1,0 +1,245 @@
+{
+  "skill_name": "ge-symbolic-op-development",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "正确区分符号推导和符号计算",
+      "config": {
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "我想给 GE 中的 Reshape 算子补符号能力。请先解释符号推导和符号计算的职责区别，以及分别应该修改什么目录、使用什么注册宏。只做说明，不写代码。",
+      "expected_output": "应激活 ge-symbolic-op-development，并明确符号推导负责输出 SymbolShape，符号计算负责基于 SymbolicValue 生成输出值表达式；分别指向 infer_symbolic_shape/infer 和 symbolic_kernel，分别使用 IMPL_OP_INFER_SYMBOL_SHAPE_INNER 与 REGISTER_SYMBOLIC_KERNEL。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-symbolic-op-development",
+          "description": "正确激活符号算子开发 skill"
+        },
+        {
+          "type": "contains",
+          "pattern": "SymbolShape",
+          "description": "说明符号推导输出 Shape"
+        },
+        {
+          "type": "contains",
+          "pattern": "REGISTER_SYMBOLIC_KERNEL",
+          "description": "说明符号计算注册宏"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "数据依赖和动态维度边界",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我的符号计算需要读取动态 shape 输入中的 perm，并用它重排 SymbolicValue。如果 perm 没有 data dependency，或者输入 Shape 不是常量，应该怎么处理？",
+      "expected_output": "应说明 perm 需要 data dependency 才能保证有 SymbolicValue；缺少参数值时返回 UNSUPPORTED。需要线性索引的计算必须先用 GetConstInputDims 验证 Shape 可确定，不能把动态 Expression 强转为整数。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "data dependency",
+          "description": "说明参数值依赖声明"
+        },
+        {
+          "type": "contains",
+          "pattern": "UNSUPPORTED",
+          "description": "说明信息不足时的返回状态"
+        },
+        {
+          "type": "contains",
+          "pattern": "GetConstInputDims",
+          "description": "说明计算 Shape 常量要求"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "参考资料按需拆分",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "只想了解如何实现符号推导，不需要符号计算细节。应该优先读取这个 skill 的哪些参考资料？",
+      "expected_output": "应只推荐 references/symbolic-shape-inference.md，并说明其中包含符号推导调用链、上下文 API、Expression 约束、数据依赖和测试要点；不应要求先读取符号计算参考。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "symbolic-shape-inference.md",
+          "description": "推荐符号推导专用 reference"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "优先复用同类算子实现",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我要为一个已有算子补符号推导和符号计算。请说明源码组织时应先做什么，什么时候才新增 .cc 文件？",
+      "expected_output": "应先分析已有实现中的同类算子，并判断能否合并到已有 infer/*.cc 或 symbolic_kernel/*.cc；语义、上下文和测试形态相近时优先合并，只有职责明显不同或合并影响可维护性时才新增文件。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "同类算子",
+          "description": "要求分析同类算子"
+        },
+        {
+          "type": "contains",
+          "pattern": "优先合并",
+          "description": "优先复用已有文件"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "UT ST 批量设计和执行确认",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我只要求实现符号推导并补充测试，没有明确授权运行测试。请说明应该生成哪些测试，以及当前能否直接执行 UT/ST。",
+      "expected_output": "应同时设计符号推导 UT 和 ST：UT 验证注册函数、Expression 和边界，ST 验证真实图传播；没有用户明确确认时只能生成测试或做静态检查，不得执行 UT、ST、tests/run_test.sh 或测试二进制，并应标记为未运行。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "UT"
+        },
+        {
+          "type": "contains",
+          "pattern": "ST"
+        },
+        {
+          "type": "contains",
+          "pattern": "未运行"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "test_ops 原型和 ES 生成接口",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我要新增一个算子的符号推导 ST。test_ops.h 里还没有这个算子原型，ST 想调用 es:: 接口并使用 Symbolize。实现前后应该检查和执行哪些步骤？",
+      "expected_output": "应先在 test_ops.h 补充与实际输入输出参数一致的原型，再重新生成 ES 测试接口，阅读生成头文件确认真实函数签名和输出字段；Data 描述 Shape rank 要与实际 GeTensor 一致，之后调用 SymbolicShapeSymbolizer::Symbolize 和 SymbolicShapeInference::Infer。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "test_ops.h"
+        },
+        {
+          "type": "contains",
+          "pattern": "重新生成"
+        },
+        {
+          "type": "contains",
+          "pattern": "Symbolize"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "符号推导实现前证据门禁",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我要给一个新算子补符号推导。目前只找到了同类算子的实现，还没找到目标算子的 ops REG_OP 和 IMPL_OP_INFERSHAPE。可以先照同类算子写代码和 UT 吗？",
+      "expected_output": "应拒绝开始编码，要求先完成 references/symbolic-shape-inference.md 中的实现前证据门禁：定位 ops 仓 REG_OP/OpDef、普通 Shape 推导注册及对应实现函数（现代 gert 风格 IMPL_OP_INFERSHAPE(...).InferShape(Func)，或旧式 AICPU 风格 IMPLEMT_INFERFUNC/INFER_FUNC_REG，二者同为有效证据），逐输出整理 Shape 映射和特殊输出，并核对 test_ops.h、测试运行桩和 add_op_impl.cc 数据依赖配置。同类算子只能用于骨架和风格，不能替代目标算子语义证据。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "不得"
+        },
+        {
+          "type": "contains",
+          "pattern": "IMPL_OP_INFERSHAPE"
+        },
+        {
+          "type": "contains",
+          "pattern": "输出映射"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "符号计算实现前证据门禁",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我要给一个算子补符号计算。目前只找到了同类 symbolic kernel，还没定位目标算子的 REGISTER_SYMBOLIC_KERNEL 注册和对应函数。可以先照同类实现写代码和 UT 吗？",
+      "expected_output": "应拒绝开始编码，要求先完成 references/symbolic-kernel-compute.md 中的实现前证据门禁：定位 ops 仓 REG_OP/OpDef、目标算子的 REGISTER_SYMBOLIC_KERNEL 注册及对应 Func，逐输出整理 Shape 来源和 SymbolicValue 的表达式、数量、顺序以及特殊输出，并核对 test_ops.h、测试运行桩和 add_op_impl.cc 数据依赖配置。同类 symbolic kernel 只能用于骨架和风格，不能替代目标算子计算语义证据。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "不得"
+        },
+        {
+          "type": "contains",
+          "pattern": "REGISTER_SYMBOLIC_KERNEL"
+        },
+        {
+          "type": "contains",
+          "pattern": "SymbolicValue"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "支持传入 infershape 代码片段或文字描述",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "我没有在 ops 仓里找到算子的普通 InferShape 源码，但我可以直接给你一段 InferShape 的代码片段，或者用文字描述它的核心 Shape 推导逻辑。你可以据此实现符号推导吗？",
+      "expected_output": "应说明可以直接使用使用者提供的普通 InferShape 代码片段或文字描述核心逻辑，其作用等价于定位到的 ops 仓 InferShape，可作为语义基线和证据门禁的输入；但仍需据此补全输入输出 index、属性 index、data dependency 和边界条件，不能只凭片段或描述跳过校验。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "代码片段"
+        },
+        {
+          "type": "contains",
+          "pattern": "data dependency"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "guard 生成优先使用封装与/或接口",
+      "config": {
+        "max_tokens": 100000,
+        "eval_mode": "text"
+      },
+      "prompt": "符号推导里需要组合多个符号约束生成 guard，我可以直接用 C++ 的原生 && 和 || 运算符吗？",
+      "expected_output": "应说明生成 guard/符号约束时应优先使用 EXPECT_SYMBOL_AND、EXPECT_SYMBOL_OR 等封装接口组合多个表达式，避免直接使用原生 &&、|| 运算符；原生运算符会短路，导致短路分支之后的条件不参与 guard 生成、无法得到完备的宏，封装接口会一次性将所有子表达式纳入 LogicalAnd/LogicalOr。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "EXPECT_SYMBOL_AND"
+        },
+        {
+          "type": "contains",
+          "pattern": "短路"
+        }
+      ]
+    }
+  ]
+}
