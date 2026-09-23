@@ -30,3 +30,7 @@ bash "$ISSUE_HANDLER_SKILL_ROOT/scripts/preflight.sh" --checks <groups>
 报告的 `results`/`summary.total` 只统计实际选中的检查项：`api` 为 3 项，`git,tmp` 为 2 项，`author` 为 2 项。输出目录不是通用检查组，仅在即将落盘时确认父目录存在且可写。
 
 `git` 检查不检查 Token、临时目录或 author；`author` 按项目 local → global → 用户输入读取身份，用户补充时只写工作目录 local 配置，不能猜测身份、修改全局配置或用 inline 参数绕过检查。
+
+## 阶段约束
+
+确定需要认证写操作而缺 Token 时，只汇总询问一次并停止本轮，保存恢复点；等待期间不继续 API 探测、真实 Issue 拉取或测试框架读取。其他能力在首个依赖操作前检查，失败只阻断依赖它的路径；详见 `runtime-capability-checks.md`。

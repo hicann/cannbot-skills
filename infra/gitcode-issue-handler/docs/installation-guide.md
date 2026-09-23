@@ -174,7 +174,7 @@ python3 -m pip install -r \
 - Claude Marketplace 和第三方 `npx skills` 没有 handler 的项目配置初始化钩子；进入目标仓库后由 Skill 补齐缺失配置。
 - **全局安装**没有绑定的目标仓库，配置在各仓库首次使用时分别初始化，不写入全局安装目录。
 
-无论配置文件是在安装时还是首次运行时创建，Skill 都会区分“只有模板”和“已有用户设置”。只有模板时，Agent 展示当前责任范围和自动开关，询问是否调整；已有自定义或仓根旧配置直接沿用，不强制重新配置。用户明确完成配置或选择保留当前设置后，记录在目标仓库的 `.cannbot/gitcode-issue-handler/config/setup-state.json`，以后不重复询问。未回答不记作确认；用户仍可随时要求修改配置。
+无论配置文件是在安装时还是首次运行时创建，Skill 都会区分“只有模板”和“已有用户设置”。只有模板时，Agent 分别询问仓库、范围和响应方式，可提供默认选项；已有自定义或仓根旧配置直接沿用，不强制重新配置。用户明确完成配置或选择保留当前设置后，记录在目标仓库的 `.cannbot/gitcode-issue-handler/config/setup-state.json`，以后不重复询问。未回答不记作确认；用户仍可随时要求修改配置。
 
 **让 Agent 初始化并配置：**
 
@@ -184,7 +184,7 @@ python3 -m pip install -r \
 请为当前仓库初始化并配置 gitcode-issue-handler，帮我确认处理范围和自动响应方式，配置完成后先不要处理 Issue。
 ```
 
-常用项为 `repo`、`responsibility`、`auto-response` 和 `auto-assign`。目标仓库能唯一推导时自动填写；责任范围用自然语言说明。模板默认处理公共组件和 A5/arch35 相关问题，其他芯片的算子问题仅列举，不能直接理解为处理全部 Issue。两个自动开关默认关闭；开启 `auto-assign` 要求同时开启 `auto-response`，含义与授权边界见 [自动响应](../references/automation.md)。仅配置不拉取或处理 Issue，真实处理中的缺 Token 等待点仍按原规则优先执行。
+常用项为 `repo`、`responsibility`、`auto-response` 和 `auto-assign`。初始化引导必须分别询问仓库、范围和响应；唯一推导的仓库也作为候选确认，当前会话已明确的答案不重复询问。模板默认处理所有非 Roadmap 等纯规划类的 open Issue，纯规划类忽略，仅列举范围为空。自定义范围依次分三段询问需要处理、仅统计列出和忽略的范围。响应默认两个自动开关关闭；自定义时先询问 `auto-response`（默认 false），仅在其为 true 时再询问 `auto-assign`（默认 false），含义与授权边界见 [自动响应](../references/automation.md)。仅配置不拉取或处理 Issue，真实处理中的缺 Token 等待点仍按原规则优先执行。
 
 **手工补齐文件（可选）：**
 
@@ -210,7 +210,7 @@ python3 /path/to/gitcode-issue-handler/scripts/init_config.py \
 常规批量处理先复核责任范围，再按 Issue 类型准备实质首响；回复获授权且 GET 回查成功后才执行分派、PR 关联或代码修复。已有 PR、指派或响应时沿用原策略；分类器只读；首响和已明确负责人转交由 `auto-response` 控制，不明确时的候选临时指派由 `auto-assign` 控制，默认均关闭。详见 [自动响应](../references/automation.md)。
 纯答疑直接融合在一次回复中；首响评分和样例见 `references/issue-comment-workflow.md`。
 
-`auto-close-stale` 使用 `classify_config.yaml` 中的 `auto_close` 策略；只有实际启用该维护路径时才需要从模板准备并复核这些设置。它默认 dry-run，仍须显式 `--apply` 才写入。
+`auto-close-stale` 使用项目 `classify_config.yaml` 下部的 `auto_close` 策略；只有实际启用该维护路径时才需要复核这些设置。完整模板为 `assets/classify_config.yaml.template`，省略字段时从该模板补齐。它默认 dry-run，仍须显式 `--apply` 才写入。
 日常批量获取默认维护 `data/followup-watch.json`：首次回看近期开启状态的更新，之后用游标增量扫描，并定点刷新等待提出者或责任人的 Issue；核心 closed 按 [intake 入口规则](../references/issue-intake.md) 跳过。该文件按仓库隔离，不应跨仓库复用。
 
 配置和运行数据始终属于目标仓库，不写入全局工具配置根。多仓场景由各仓分别维护配置和运行证据。

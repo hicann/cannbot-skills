@@ -165,3 +165,7 @@ git -C "<retained-worktree-path>" status --short
 ```
 
 保留项由后续运行继续处理。只有确认本地内容已提交/发布或不再需要后，才更新终态并再次执行 cleanup。
+
+## 阶段约束
+
+修改前核对 CANN/源码/SoC，稳定复现并确认根因；只在 manifest 管理的独立 worktree 做最小修复，执行相关测试和 NPU 门禁，缺失验证如实记录。不覆盖用户工作区、不自动合并 PR，不用破坏性 Git 恢复/force push/强删 worktree，也不 `git add -A` 或 `git add .`。

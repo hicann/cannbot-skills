@@ -53,6 +53,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
@@ -62,9 +63,7 @@ import requests
 # Import shared GitCode API client from gitcode-toolkit
 # --------------------------------------------------------------------------- #
 _HERE = os.path.dirname(os.path.realpath(__file__))
-_TOOLKIT_SCRIPTS = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "gitcode-toolkit", "scripts")
-)
+_TOOLKIT_SCRIPTS = os.path.normpath(os.path.join(_HERE, "..", "..", "gitcode-toolkit", "scripts"))
 sys.path.insert(0, _TOOLKIT_SCRIPTS)
 from gitcode_client import (  # noqa: E402
     GitCodeClientError,
@@ -119,6 +118,35 @@ def _write_stdout(text):
     write_stdout(text)
 
 
+def _write_output(output, path=None):
+    """Publish a complete JSON snapshot before emitting the stdout protocol."""
+    text = json.dumps(output, indent=2, ensure_ascii=False)
+    if path:
+        destination = os.path.abspath(path)
+        directory = os.path.dirname(destination)
+        os.makedirs(directory, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=directory,
+                prefix=".issues-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = stream.name
+                stream.write(text + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+            temporary = None
+        finally:
+            if temporary is not None:
+                os.unlink(temporary)
+    _write_stdout(text)
+
+
 # --------------------------------------------------------------------------- #
 # CLI URL resolution (fetch_issues-specific, not a shared utility)
 # --------------------------------------------------------------------------- #
@@ -126,8 +154,7 @@ def resolve_url(cli_url):
     url = cli_url or os.environ.get("GITCODE_URL")
     if not url:
         raise ValueError(
-            "Error: Repository URL not provided.\n"
-            "Pass --url <url> or set the GITCODE_URL environment variable."
+            "Error: Repository URL not provided.\nPass --url <url> or set the GITCODE_URL environment variable."
         )
     return url
 
@@ -135,11 +162,41 @@ def resolve_url(cli_url):
 # --------------------------------------------------------------------------- #
 # Domain operations
 # --------------------------------------------------------------------------- #
+def _filter_issue_page(batch, scan, created_since, created_until_exclusive):
+    reached_since_boundary = False
+    all_issues = []
+    for issue in batch:
+        if not isinstance(issue, dict) or not (issue.get("number") or issue.get("iid")):
+            scan["complete"] = False
+            scan["warnings"].append("primary Issue has an invalid response shape")
+            continue
+        if str(issue.get("state") or "").casefold() not in {
+            "open",
+            "opened",
+            "closed",
+        }:
+            scan["complete"] = False
+            scan["warnings"].append("primary Issue has an invalid core state")
+        created_at = parse_iso(issue.get("created_at", ""))
+        if created_at is None:
+            all_issues.append(issue)
+            continue
+        if created_since and created_at < created_since:
+            reached_since_boundary = True
+            continue
+        if created_until_exclusive and created_at >= created_until_exclusive:
+            continue
+        all_issues.append(issue)
+    return all_issues, reached_since_boundary
+
+
 def get_issues(
     api: RepoApiContext,
     state="opened",
     created_since=None,
     created_until_exclusive=None,
+    *,
+    diagnostics=None,
 ):
     """Fetch all issues with pagination.
 
@@ -149,6 +206,8 @@ def get_issues(
     gc_state = STATE_MAP.get(state, state)
     url = f"{api.api_base}/repos/{api.owner}/{api.repo}/issues"
     all_issues = []
+    scan = diagnostics if diagnostics is not None else {}
+    scan.update(complete=True, pages_requested=0, warnings=[])
     page = 1
     while True:
         params = {
@@ -158,22 +217,22 @@ def get_issues(
             "sort": "created",
             "direction": "desc",
         }
-        data = api_get(api.session, url, api.token, params=params)
-        batch = data if isinstance(data, list) else []
+        scan["pages_requested"] += 1
+        try:
+            data = api_get(api.session, url, api.token, params=params)
+            if not isinstance(data, list):
+                raise ValueError("invalid response shape")
+        except (requests.RequestException, ValueError) as exc:
+            if diagnostics is None:
+                raise
+            scan["complete"] = False
+            scan["warnings"].append(f"primary Issue page {page} failed: {type(exc).__name__}")
+            break
+        batch = data
         if not batch:
             break
-        reached_since_boundary = False
-        for issue in batch:
-            created_at = parse_iso(issue.get("created_at", ""))
-            if created_at is None:
-                all_issues.append(issue)
-                continue
-            if created_since and created_at < created_since:
-                reached_since_boundary = True
-                continue
-            if created_until_exclusive and created_at >= created_until_exclusive:
-                continue
-            all_issues.append(issue)
+        selected, reached_since_boundary = _filter_issue_page(batch, scan, created_since, created_until_exclusive)
+        all_issues.extend(selected)
         if reached_since_boundary:
             break
         if len(batch) < 100:
@@ -214,30 +273,22 @@ def get_updated_issues(
             data = api_get(api.session, url, api.token, params=params)
         except requests.RequestException as exc:
             diagnostics["complete"] = False
-            diagnostics["warnings"].append(
-                f"updated Issue page {page} failed: {type(exc).__name__}"
-            )
+            diagnostics["warnings"].append(f"updated Issue page {page} failed: {type(exc).__name__}")
             break
         diagnostics["pages_requested"] += 1
         if not isinstance(data, list):
             diagnostics["complete"] = False
-            diagnostics["warnings"].append(
-                f"updated Issue page {page} returned an invalid response shape"
-            )
+            diagnostics["warnings"].append(f"updated Issue page {page} returned an invalid response shape")
             break
         batch = data
         if not batch:
             break
-        reached_boundary = _collect_updated_batch(
-            batch, updated_since, issues, diagnostics
-        )
+        reached_boundary = _collect_updated_batch(batch, updated_since, issues, diagnostics)
         if reached_boundary or len(batch) < 100:
             break
     else:
         diagnostics["complete"] = False
-        diagnostics["warnings"].append(
-            f"updated Issue scan reached page limit ({max_pages})"
-        )
+        diagnostics["warnings"].append(f"updated Issue scan reached page limit ({max_pages})")
     return issues, diagnostics
 
 
@@ -271,9 +322,7 @@ def get_watched_issues(api: RepoApiContext, watched: dict, *, current_issues=())
         if str(item.get("state") or "").casefold() in {"open", "opened", "closed"}
     }
     issues = []
-    diagnostics = {
-        "complete": True, "requested": 0, "reused": 0, "closed": [], "errors": []
-    }
+    diagnostics = {"complete": True, "requested": 0, "reused": 0, "closed": [], "errors": []}
     for number in sorted(watched, key=str):
         issue = current.get(str(number))
         if issue is not None:
@@ -284,19 +333,12 @@ def get_watched_issues(api: RepoApiContext, watched: dict, *, current_issues=())
                 issue = get_single_issue(api, number)
             except requests.RequestException as exc:
                 diagnostics["complete"] = False
-                diagnostics["errors"].append(
-                    {"issue_number": number, "error": type(exc).__name__}
-                )
+                diagnostics["errors"].append({"issue_number": number, "error": type(exc).__name__})
                 continue
-        core_state = (
-            str(issue.get("state") or "").casefold()
-            if isinstance(issue, dict) else ""
-        )
+        core_state = str(issue.get("state") or "").casefold() if isinstance(issue, dict) else ""
         if core_state not in {"open", "opened", "closed"}:
             diagnostics["complete"] = False
-            diagnostics["errors"].append(
-                {"issue_number": number, "error": "invalid_response_state"}
-            )
+            diagnostics["errors"].append({"issue_number": number, "error": "invalid_response_state"})
             continue
         if core_state == "closed":
             diagnostics["closed"].append(str(number))
@@ -359,9 +401,7 @@ def get_issue_comments(api: RepoApiContext, issue_number, *, page_diagnostics=No
     return [
         {
             "id": c.get("id"),
-            "author": (c.get("user") or {}).get("login")
-            or (c.get("author") or {}).get("login")
-            or "unknown",
+            "author": (c.get("user") or {}).get("login") or (c.get("author") or {}).get("login") or "unknown",
             "body": c.get("body", ""),
             "created_at": c.get("created_at", ""),
             "updated_at": c.get("updated_at", ""),
@@ -390,11 +430,7 @@ def normalize_issue(raw):
     assignee_login = assignee.get("login") if isinstance(assignee, dict) else None
     if not assignee_login:
         assignees_raw = raw.get("assignees") or []
-        if (
-            isinstance(assignees_raw, list)
-            and assignees_raw
-            and isinstance(assignees_raw[0], dict)
-        ):
+        if isinstance(assignees_raw, list) and assignees_raw and isinstance(assignees_raw[0], dict):
             assignee_login = assignees_raw[0].get("login")
 
     user = raw.get("user") or {}
@@ -449,9 +485,7 @@ def _reuse_or_skip_comments(issue, diagnostics, refresh, should_fetch):
     if should_fetch is None:
         return False
     decision = should_fetch(issue)
-    fetch_required, reason = (
-        decision if isinstance(decision, tuple) else (bool(decision), "not_required")
-    )
+    fetch_required, reason = decision if isinstance(decision, tuple) else (bool(decision), "not_required")
     if fetch_required:
         return False
     _mark_skipped(issue, diagnostics, reason)
@@ -504,9 +538,7 @@ def enrich_issues_with_comments(
                 "error": type(exc).__name__,
             }
             diagnostics["complete"] = False
-            diagnostics["errors"].append(
-                {"issue_number": num, "error": type(exc).__name__}
-            )
+            diagnostics["errors"].append({"issue_number": num, "error": type(exc).__name__})
             continue
         issue["comments"] = comments
         issue["comments_fetch"] = {"status": "api"}
@@ -521,9 +553,7 @@ def parse_date(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError as exc:
-        raise ValueError(
-            f"Error: invalid date format '{date_str}', expected YYYY-MM-DD"
-        ) from exc
+        raise ValueError(f"Error: invalid date format '{date_str}', expected YYYY-MM-DD") from exc
     return dt.replace(tzinfo=TZ_CHINA)
 
 
@@ -571,8 +601,7 @@ def _add_connection_args(parser):
     conn.add_argument(
         "--url",
         default=None,
-        help="GitCode repository URL (or set GITCODE_URL env var). "
-        "Use --issue for single-issue mode.",
+        help="GitCode repository URL (or set GITCODE_URL env var). Use --issue for single-issue mode.",
     )
     conn.add_argument(
         "--issue",
@@ -590,8 +619,7 @@ def _add_connection_args(parser):
     conn.add_argument(
         "--api-base",
         default=None,
-        help="Override API base URL, e.g. https://api.gitcode.com/api/v5 "
-        "(or set GITCODE_API_BASE env var)",
+        help="Override API base URL, e.g. https://api.gitcode.com/api/v5 (or set GITCODE_API_BASE env var)",
     )
 
 
@@ -606,8 +634,7 @@ def _add_filter_args(parser):
     time_group.add_argument(
         "--today",
         action="store_true",
-        help="Only show issues created today (local timezone +08:00). "
-        "Overrides --since/--until.",
+        help="Only show issues created today (local timezone +08:00). Overrides --since/--until.",
     )
     time_group.add_argument(
         "--since",
@@ -658,12 +685,19 @@ def _add_comment_args(parser):
 def _add_followup_args(parser):
     group = parser.add_argument_group("follow-up tracking")
     group.add_argument(
+        "--defer-cursor",
+        action="store_true",
+        help="Return proposed cursor/watch changes without saving follow-up state",
+    )
+    group.add_argument(
+        "--updated-since",
+        metavar="ISO_TIMESTAMP",
+        help="Incremental updated/watchlist intake from this timestamp; skip primary list",
+    )
+    group.add_argument(
         "--config",
         default=None,
-        help=(
-            "Optional classify config; defaults to the canonical config when "
-            "that file exists"
-        ),
+        help=("Optional classify config; defaults to the canonical config when that file exists"),
     )
     group.add_argument(
         "--no-follow-up",
@@ -690,14 +724,25 @@ def _add_followup_args(parser):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        description="GitCode issue fetcher (adapted from the CodeHub version)"
-    )
+    parser = argparse.ArgumentParser(description="GitCode issue fetcher (adapted from the CodeHub version)")
     _add_connection_args(parser)
     _add_filter_args(parser)
     _add_comment_args(parser)
     _add_followup_args(parser)
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Atomically save JSON (also emitted to stdout)",
+    )
+    args = parser.parse_args(argv)
+    if args.updated_since:
+        boundary = parse_iso(args.updated_since)
+        if boundary is None or boundary.tzinfo is None:
+            parser.error("--updated-since requires an ISO timestamp with timezone")
+        conflicting_options = (args.no_follow_up, args.issue, args.today, args.since, args.until)
+        if any(conflicting_options):
+            parser.error("--updated-since cannot be combined with single, creation-time, or no-follow-up options")
+    return args
 
 
 def _open_issue_comment_gate(issue):
@@ -746,9 +791,7 @@ def _single_issue_output(args, token):
 
 def _date_range(args):
     if args.today:
-        today = datetime.now(TZ_CHINA).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today = datetime.now(TZ_CHINA).replace(hour=0, minute=0, second=0, microsecond=0)
         return today, today
     since = parse_date(args.since) if args.since else None
     until = parse_date(args.until) if args.until else None
@@ -759,11 +802,7 @@ def _followup_options(args):
     """Resolve follow-up fetch settings from CLI, config, then defaults."""
     followup_cfg = load_followup_config(args.config)
 
-    state_file = (
-        args.follow_up_state_file
-        or followup_cfg.get("state_file")
-        or DEFAULT_STATE_FILE
-    )
+    state_file = args.follow_up_state_file or followup_cfg.get("state_file") or DEFAULT_STATE_FILE
     lookback_days = int(
         args.follow_up_lookback_days
         if args.follow_up_lookback_days is not None
@@ -775,9 +814,7 @@ def _followup_options(args):
         else followup_cfg.get("fetch_pages", DEFAULT_FOLLOWUP_FETCH_PAGES)
     )
     if lookback_days <= 0 or fetch_pages <= 0:
-        raise ValueError(
-            "Error: follow-up lookback days and fetch pages must be greater than zero"
-        )
+        raise ValueError("Error: follow-up lookback days and fetch pages must be greater than zero")
     return str(state_file), lookback_days, fetch_pages
 
 
@@ -787,64 +824,108 @@ def _followup_cursor(state, scan_started, lookback_days):
 
 
 def _watch_refresh_input(primary_issues, updated_issues, updated_diagnostics):
-    closed = (
-        {"number": number, "state": "closed"}
-        for number in updated_diagnostics.get("closed", [])
-    )
+    closed = ({"number": number, "state": "closed"} for number in updated_diagnostics.get("closed", []))
     return [*primary_issues, *updated_issues, *closed]
 
 
-def _collect_followup_sources(args, api, repository, primary_issues):
-    """Merge updated/watchlist sources and persist a complete scan cursor."""
-    diagnostics = {
+def _finish_followup_scan(args, diagnostics, scan):
+    updated_diagnostics = scan["updated_diagnostics"]
+    watch_diagnostics = scan["watch_diagnostics"]
+    scan_started = scan["scan_started"]
+    state_file = scan["state_file"]
+    repository = scan["repository"]
+    diagnostics.update(
+        {
+            "updated_scan": updated_diagnostics,
+            "watchlist_refresh": watch_diagnostics,
+            "cursor_before": scan["cursor"].isoformat(),
+            "state_file": state_file,
+            "lookback_days": scan["lookback_days"],
+            "fetch_pages": scan["fetch_pages"],
+        }
+    )
+    complete = bool(updated_diagnostics.get("complete")) and bool(watch_diagnostics.get("complete"))
+    diagnostics["complete"] = complete
+    if updated_diagnostics.get("complete") and (not args.defer_cursor or complete):
+        diagnostics["cursor_proposed"] = scan_started.isoformat()
+        if not args.defer_cursor:
+            advance_updated_cursor(state_file, repository, scan_started.isoformat())
+            diagnostics["cursor_advanced"] = True
+            diagnostics["cursor_after"] = scan_started.isoformat()
+
+
+def _batch_filters(args, repository, since_dt, until_dt, followup_diagnostics):
+    return {
+        "mode": "batch",
+        "repository": repository,
+        "state": args.state,
+        "since": since_dt.strftime("%Y-%m-%d") if since_dt else None,
+        "until": until_dt.strftime("%Y-%m-%d") if until_dt else None,
+        "exclude_self_assigned": args.exclude_self_assigned,
+        "follow_up": followup_diagnostics,
+    }
+
+
+def _followup_diagnostics(args):
+    return {
         "enabled": not args.no_follow_up,
         "updated_scan": None,
         "watchlist_refresh": None,
         "cursor_advanced": False,
+        "cursor_deferred": args.defer_cursor,
+        "cursor_proposed": None,
+        "closed_watches": [],
     }
+
+
+def _collect_followup_sources(args, api, repository, primary_issues):
+    """Merge follow-up sources, optionally deferring state changes to intake."""
+    diagnostics = _followup_diagnostics(args)
     if args.no_follow_up:
         return primary_issues, diagnostics
 
     state_file, lookback_days, fetch_pages = _followup_options(args)
     state = load_followup_state(state_file, repository)
     scan_started = datetime.now(TZ_CHINA)
-    cursor = _followup_cursor(state, scan_started, lookback_days)
-    updated_issues, updated_diagnostics = get_updated_issues(
-        api, cursor, max_pages=fetch_pages
+    cursor = (
+        parse_iso(args.updated_since) if args.updated_since else _followup_cursor(state, scan_started, lookback_days)
     )
+    updated_issues, updated_diagnostics = get_updated_issues(api, cursor, max_pages=fetch_pages)
     watched_issues, watch_diagnostics = get_watched_issues(
-        api, state.get("issues") or {},
+        api,
+        state.get("issues") or {},
         current_issues=_watch_refresh_input(
-            primary_issues, updated_issues, updated_diagnostics,
+            primary_issues,
+            updated_issues,
+            updated_diagnostics,
         ),
     )
     closed_watches = set(watch_diagnostics.get("closed") or [])
-    for number in closed_watches:
-        resolve_issue(state_file, repository, number)
+    diagnostics["closed_watches"] = sorted(closed_watches, key=str)
+    if not args.defer_cursor:
+        for number in closed_watches:
+            resolve_issue(state_file, repository, number)
     raw_issues = merge_issue_sources(
         ("primary", primary_issues),
         ("updated", updated_issues),
         ("watchlist", watched_issues),
     )
     closed_numbers = closed_watches | set(updated_diagnostics.get("closed") or [])
-    raw_issues = [
-        item for item in raw_issues
-        if str(item.get("number") or item.get("iid")) not in closed_numbers
-    ]
-    diagnostics.update(
-        {
-            "updated_scan": updated_diagnostics,
-            "watchlist_refresh": watch_diagnostics,
-            "cursor_before": cursor.isoformat(),
-            "state_file": state_file,
-            "lookback_days": lookback_days,
-            "fetch_pages": fetch_pages,
-        }
+    raw_issues = [item for item in raw_issues if str(item.get("number") or item.get("iid")) not in closed_numbers]
+    _finish_followup_scan(
+        args,
+        diagnostics,
+        dict(
+            updated_diagnostics=updated_diagnostics,
+            watch_diagnostics=watch_diagnostics,
+            scan_started=scan_started,
+            state_file=state_file,
+            repository=repository,
+            cursor=cursor,
+            lookback_days=lookback_days,
+            fetch_pages=fetch_pages,
+        ),
     )
-    if updated_diagnostics.get("complete"):
-        advance_updated_cursor(state_file, repository, scan_started.isoformat())
-        diagnostics["cursor_advanced"] = True
-        diagnostics["cursor_after"] = scan_started.isoformat()
     return raw_issues, diagnostics
 
 
@@ -858,19 +939,25 @@ def _batch_output(args, token):
     api = RepoApiContext(session, api_base, owner, repo, token)
     repository = f"{owner}/{repo}"
     since_dt, until_dt = _date_range(args)
-    primary_issues = get_issues(
-        api,
-        state=args.state,
-        created_since=since_dt,
-        created_until_exclusive=(until_dt + timedelta(days=1) if until_dt else None),
-    )
-    raw_issues, followup_diagnostics = _collect_followup_sources(
-        args, api, repository, primary_issues
-    )
-    raw_issues = [
-        item for item in raw_issues
-        if str(item.get("state") or "").casefold() in {"open", "opened"}
-    ]
+    primary_diagnostics = {
+        "complete": True,
+        "pages_requested": 0,
+        "warnings": [],
+        "skipped": bool(args.updated_since),
+    }
+    primary_issues = []
+    if not args.updated_since:
+        primary_issues = get_issues(
+            api,
+            state=args.state,
+            created_since=since_dt,
+            created_until_exclusive=(until_dt + timedelta(days=1) if until_dt else None),
+            diagnostics=primary_diagnostics,
+        )
+    raw_issues, followup_diagnostics = _collect_followup_sources(args, api, repository, primary_issues)
+    if args.defer_cursor and not primary_diagnostics["complete"]:
+        followup_diagnostics["cursor_proposed"] = None
+    raw_issues = [item for item in raw_issues if str(item.get("state") or "").casefold() in {"open", "opened"}]
     issues = [normalize_issue(item) for item in raw_issues]
     issues = filter_issues_by_time(issues, since=since_dt, until=until_dt)
     if args.exclude_self_assigned:
@@ -880,15 +967,8 @@ def _batch_output(args, token):
         comment_fetch = _enrich_open_comments(args, api, issues)
     output = {
         "total": len(issues),
-        "filters": {
-            "mode": "batch",
-            "repository": repository,
-            "state": args.state,
-            "since": since_dt.strftime("%Y-%m-%d") if since_dt else None,
-            "until": until_dt.strftime("%Y-%m-%d") if until_dt else None,
-            "exclude_self_assigned": args.exclude_self_assigned,
-            "follow_up": followup_diagnostics,
-        },
+        "primary_scan": primary_diagnostics,
+        "filters": _batch_filters(args, repository, since_dt, until_dt, followup_diagnostics),
         "issues": issues,
     }
     if comment_fetch is not None:
@@ -904,9 +984,7 @@ def main(argv=None):
         return 1
     try:
         selection = resolve_repository(
-            os.getcwd(),
-            target=args.issue or args.url or os.environ.get("GITCODE_URL"),
-            config_path=args.config
+            os.getcwd(), target=args.issue or args.url or os.environ.get("GITCODE_URL"), config_path=args.config
         )
         if selection["status"] != "resolved":
             _write_stdout(json.dumps(selection, ensure_ascii=False))
@@ -917,13 +995,12 @@ def main(argv=None):
         if args.cache_dir is None:
             args.cache_dir = load_handler_config(args.config)["cache_dir"]
         token = resolve_token(args.token)
-        output = (
-            _single_issue_output(args, token)
-            if args.issue
-            else _batch_output(args, token)
-        )
-        _write_stdout(json.dumps(output, indent=2, ensure_ascii=False))
+        output = _single_issue_output(args, token) if args.issue else _batch_output(args, token)
+        _write_output(output, args.output)
         return 0
+    except OSError as exc:
+        LOGGER.error("Error: snapshot output failed: %s", exc)
+        return 1
     except GitCodeClientError as exc:
         LOGGER.error("%s", exc)
         return 1

@@ -51,6 +51,28 @@ def test_old_installer_without_config_enters_pending_setup(setup, tmp_path):
     assert set(snapshot(tmp_path)) == {"classify_config.yaml", "operator_owners.yaml"}
 
 
+def test_new_scope_and_previous_explicit_scope_survive_setup(setup, tmp_path):
+    """Use broad scope for new projects without migrating an existing team's policy."""
+    result = setup.prepare_setup(tmp_path)
+    scope = result["settings"]["responsibility"]
+    assert scope["handle"] == ["所有非 Roadmap、路线图、规划汇总等纯规划类的 open Issue"]
+    assert scope["list-only"] == []
+    assert scope["ignore"] == ["Roadmap、路线图、规划汇总等纯规划类 Issue"]
+    path = configuration(tmp_path)
+    path.write_text(
+        "# previous scope\nrepo: team/math\n"
+        "responsibility:\n  handle: [A5 kernels]\n"
+        "  list-only: [other chips]\n  ignore: []\n",
+        encoding="utf-8",
+    )
+    before = snapshot(tmp_path)
+    reopened = setup.prepare_setup(tmp_path, reconfigure=True)
+    assert reopened["settings"]["responsibility"] == {
+        "handle": ["A5 kernels"], "list-only": ["other chips"], "ignore": []
+    }
+    assert snapshot(tmp_path) == before
+
+
 def test_new_installer_templates_still_need_user_choice(setup, tmp_path):
     """Preinstalled templates do not prove that the user has chosen settings."""
     setup.initialize_config(tmp_path)

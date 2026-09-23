@@ -10,6 +10,8 @@
 ```bash
 git add <具体文件>
 ```
+若本仓配置了 pre-commit（如 `.pre-commit-config.yaml`），按仓库约定启用当前 worktree 的提交钩子，确保本次 commit 实际触发并通过 pre-commit 检查，记录执行结果。检查失败先修复再提交；自动修改文件后核对 diff、重新暂存明确文件并重试。不得用 `--no-verify`、`SKIP` 或禁用钩子绕过检查。
+
 无仓库约定时使用 Conventional Commit：
 ```text
 <type>(<scope>): <description>

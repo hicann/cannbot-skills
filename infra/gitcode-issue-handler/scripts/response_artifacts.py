@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from report_runs import RUN_NAME
 
 from fetch_cache import _atomic_write_json, _read_json
 from gitcode_client import parse_issue_url
@@ -22,8 +23,14 @@ def save_response_artifacts(result_file, issue_url, analysis, *, reply=None, own
     _, _, number = parse_issue_url(issue_url)
     parent = Path(result_file).parent
     directory = parent if parent.name == f"issue-{number}" else parent / "issues" / f"issue-{number}"
+    run_directory = next((p for p in (parent, *parent.parents)
+                          if RUN_NAME.fullmatch(p.name) and (p / 'run.json').is_file()), None)
+    if run_directory:
+        directory = run_directory / 'issues' / f'issue-{number}'
+        manifest_path = run_directory / '_internal/issues' / f'issue-{number}' / 'response-artifacts.json'
+    else:
+        manifest_path = directory / "response-artifacts.json"
     directory.mkdir(parents=True, exist_ok=True)
-    manifest_path = directory / "response-artifacts.json"
     manifest = _read_json(manifest_path) or {"issue_url": issue_url, "analysis": {}, "files": {}}
     if manifest.get("issue_url") != issue_url:
         raise ValueError("response artifact directory belongs to another Issue")
@@ -42,6 +49,17 @@ def save_response_artifacts(result_file, issue_url, analysis, *, reply=None, own
         drafts["reply.md"] = reply
     if owner:
         drafts["assign.md"] = f"/assign @{owner}\n"
+    if run_directory and any((directory / name).is_file() and
+                             (directory / name).read_text(encoding='utf-8') != body
+                             for name, body in drafts.items()):
+        history = directory / 'history'
+        revision = 1
+        while (history / f'revision-{revision}').exists():
+            revision += 1
+        archive = history / f'revision-{revision}'
+        archive.mkdir(parents=True)
+        for existing in directory.glob('*.md'):
+            (archive / existing.name).write_text(existing.read_text(encoding='utf-8'), encoding='utf-8')
     for name, body in drafts.items():
         path = directory / name
         path.write_text(body, encoding="utf-8")

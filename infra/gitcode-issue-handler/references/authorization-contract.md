@@ -52,3 +52,21 @@ authorization:
 ## 写后回查
 
 评论、指派、状态变更后 GET 回查；push 后 `git ls-remote` 回查；PR 创建后回查源/目标分支及 opened 状态。回查失败不得标记完成；结果未知的非幂等写入只做回查，未查清不得重试。每项外部写入写入状态的 `external_operations`，包括 operation ID、授权、执行和回查证据。
+
+## 阶段约束
+
+首响、安全 PR 关联与临时指派按 [automation.md](automation.md) 的两开关执行，默认均关闭；开启配置与当前处理请求共同授权对应操作，明确会话指令可单次覆盖。复用准确授权，不重复询问；Token、能力检查不是授权。
+   `single`/`batch` 从 `interactive` 开始；回复与交付分开确认，只有精确批次交付批准才进入 `approved_batch`。direct push 在 commit 后按确切目标和 SHA 单独确认。
+
+## 流水线操作登记与回查
+
+在首次可能写入前登记稳定操作标识：
+
+```bash
+python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/issue_pipeline.py" record-operation \
+  --operation-id comment-296-first-response --iid 296
+```
+
+登记会保存 unknown 恢复点，不产生写入授权。回查后保存审核凭据 JSON（`operation_id`、`verified: true`、非空 `evidence`，其中引用真实执行器结果和 GET 证据），用 `verify-operation --operation-id ... --result-file ...` 登记。它仅登记核验结论，不执行 GET；未知结果恢复必须先沿原执行器回查，不能手写 verified 跳过核验。损坏恢复的 `audit-recovery --result-file ...` 同样需要实际审计保留记录的证据，不以状态文件可读代替操作核查。
+
+发布或外部状态更新后 `resume --refresh`，从真实远端重新分类；未决操作独立保留，即使 Issue 已变成 no_attention 也不能静默丢弃。代码、提交、PR、CI 等后续阶段继续现有受管 worktree 与交付门禁。

@@ -1342,6 +1342,8 @@ def _add_input_args(parser):
 
 
 def _add_run_policy_args(parser):
+    parser.add_argument("--include-observations", action="store_true",
+                        help="Include internal non-handled routing records for durable queue reconciliation")
     parser.add_argument(
         "--authorization-mode",
         choices=("interactive", "approved_batch"),
@@ -1556,6 +1558,8 @@ def _active_issues(runtime):
     cache_hits = 0
     for issue in runtime.issues:
         issue.pop("_cached_classification", None)
+        if _explicitly_ignored(issue, runtime.cfg):
+            continue
         if not runtime.single_mode and _response_exemption(issue):
             continue
         if not runtime.single_mode and not runtime.args.no_cache and not runtime.args.refresh_comments:
@@ -1734,6 +1738,12 @@ def attention_sort_key(item):
     return rank, created or datetime.max.replace(tzinfo=TZ_CHINA)
 
 
+def _explicitly_ignored(issue, config):
+    return str(issue.get("iid") or issue.get("number")) in {
+        str(i) for i in config.get("ignored_issue_ids", [])
+    }
+
+
 def classify_with_responsibility(issue, options, policy, single_mode=False):
     review = review_responsibility(issue, policy)
     level = review["level"]
@@ -1787,9 +1797,16 @@ def _classify_all(runtime, issue_pr_map, pr_diagnostics, linkage_diagnostics):
             comment_scan_complete=comments_status != "error",
             automation_policy=runtime.automation_policy,
         )
-        routed = classify_with_responsibility(
-            issue, options, runtime.cfg["responsibility"], runtime.single_mode
-        )
+        if _explicitly_ignored(issue, runtime.cfg):
+            routed = apply_processing_mode(_classification_result(
+                "no_attention", "responsibility_ignore", "明确编号忽略规则"
+            ), False)
+            routed.update(responsibility="ignore", responsibility_summary="明确编号忽略规则",
+                          responsibility_evidence=["配置 ignored_issue_ids 精确匹配"])
+        else:
+            routed = classify_with_responsibility(
+                issue, options, runtime.cfg["responsibility"], runtime.single_mode
+            )
         target = (
             need_attention if routed["bucket"] == "need_attention" else no_attention
         )
@@ -1852,6 +1869,8 @@ def _run_output(runtime, classified, diagnostics):
         "ignored_count": len(ignored),
         "issues": need_attention + visible,
     }
+    if getattr(runtime.args, "include_observations", False):
+        output["observations"] = no_attention
     return output, listed, visible
 
 

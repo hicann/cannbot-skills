@@ -152,6 +152,8 @@ def _response_target(response: dict[str, Any], target: dict[str, str]) -> None:
 
 
 def _check_config_target(config: dict[str, Any], target: dict[str, str]) -> None:
+    if target["issue_number"] in {str(i) for i in config.get("ignored_issue_ids", [])}:
+        raise AssociationError("Issue is explicitly ignored by the current configuration")
     configured = config.get("repo")
     if configured in (None, ""):
         return

@@ -529,3 +529,154 @@ def test_updated_scan_invalid_row_never_advances_cursor(row):
         issues, diagnostics = FETCHER.get_updated_issues(API, boundary)
     assert issues == []
     assert diagnostics["complete"] is False
+
+
+@pytest.mark.parametrize("failure", [requests.HTTPError("unavailable"), {"error": "invalid"}])
+def test_primary_scan_preserves_partial_results_and_reports_failure(failure):
+    page = [{"number": n, "state": "open"} for n in range(1, 101)]
+    diagnostics = {}
+    with patch.object(FETCHER, "api_get", side_effect=[page, failure]):
+        issues = FETCHER.get_issues(API, diagnostics=diagnostics)
+    assert issues == page
+    assert diagnostics["complete"] is False
+    assert diagnostics["pages_requested"] == 2
+    assert diagnostics["warnings"]
+
+
+def test_primary_scan_full_page_requires_next_page_before_completion():
+    page = [{"number": n, "state": "open"} for n in range(1, 101)]
+    diagnostics = {}
+    with patch.object(FETCHER, "api_get", side_effect=[page, []]):
+        assert FETCHER.get_issues(API, diagnostics=diagnostics) == page
+    assert diagnostics["complete"] is True
+    assert diagnostics["pages_requested"] == 2
+
+
+@pytest.mark.parametrize("row", ["invalid", {"state": "open"}, {"number": 42}])
+def test_primary_scan_invalid_row_is_incomplete(row):
+    diagnostics = {}
+    with patch.object(FETCHER, "api_get", return_value=[row]):
+        FETCHER.get_issues(API, diagnostics=diagnostics)
+    assert diagnostics["complete"] is False
+
+
+def test_defer_cursor_preserves_watch_file_and_proposes_changes(tmp_path):
+    import followup_state
+    state_file = tmp_path / "watch.json"
+    followup_state.watch_issue(
+        state_file, "owner/repo", "42", reporter="reporter",
+        maintainer_comment_at="2026-08-10T00:00:00Z",
+    )
+    before = state_file.read_bytes()
+    args = FETCHER.parse_args(["--defer-cursor", "--follow-up-state-file", str(state_file)])
+    with (
+        patch.object(FETCHER, "get_updated_issues", return_value=([], {"complete": True})),
+        patch.object(FETCHER, "get_single_issue", return_value={"number": 42, "state": "closed"}),
+        patch.object(FETCHER, "advance_updated_cursor") as advance,
+        patch.object(FETCHER, "resolve_issue") as resolve,
+    ):
+        _, diagnostics = FETCHER._collect_followup_sources(args, API, "owner/repo", [])
+    assert diagnostics["cursor_deferred"] is True
+    assert diagnostics["cursor_advanced"] is False
+    assert diagnostics["cursor_proposed"]
+    assert diagnostics["closed_watches"] == ["42"]
+    assert diagnostics["complete"] is True
+    assert state_file.read_bytes() == before
+    advance.assert_not_called()
+    resolve.assert_not_called()
+
+
+@pytest.mark.parametrize("updated_complete,watch_complete", [(False, True), (True, False)])
+def test_defer_cursor_does_not_propose_after_incomplete_followup(updated_complete, watch_complete):
+    args = FETCHER.parse_args(["--defer-cursor"])
+    with (
+        patch.object(FETCHER, "load_followup_state", return_value={}),
+        patch.object(FETCHER, "get_updated_issues", return_value=([], {"complete": updated_complete})),
+        patch.object(FETCHER, "get_watched_issues", return_value=([], {"complete": watch_complete})),
+        patch.object(FETCHER, "advance_updated_cursor") as advance,
+    ):
+        _, diagnostics = FETCHER._collect_followup_sources(args, API, "owner/repo", [])
+    assert diagnostics["complete"] is False
+    assert diagnostics["cursor_proposed"] is None
+    advance.assert_not_called()
+
+
+def test_incremental_boundary_skips_primary_and_overrides_legacy_cursor():
+    args = FETCHER.parse_args([
+        "--url", "https://gitcode.com/owner/repo", "--defer-cursor",
+        "--updated-since", "2026-08-01T00:00:00Z",
+    ])
+    with (
+        patch.object(FETCHER, "make_session", return_value=object()),
+        patch.object(FETCHER, "get_issues") as primary,
+        patch.object(FETCHER, "load_followup_state", return_value={"updated_cursor": "2026-09-01T00:00:00Z"}),
+        patch.object(FETCHER, "get_updated_issues", return_value=([], {"complete": True})) as updated,
+        patch.object(FETCHER, "get_watched_issues", return_value=([], {"complete": True})),
+    ):
+        output = FETCHER._batch_output(args, "token")
+    primary.assert_not_called()
+    assert updated.call_args.args[1] == FETCHER.parse_iso(args.updated_since)
+    assert output["primary_scan"]["skipped"] is True
+    assert output["filters"]["follow_up"]["cursor_proposed"]
+
+
+def test_incomplete_primary_prevents_deferred_cursor_proposal():
+    args = FETCHER.parse_args(["--url", "https://gitcode.com/owner/repo", "--defer-cursor"])
+    with (
+        patch.object(FETCHER, "make_session", return_value=object()),
+        patch.object(FETCHER, "api_get", side_effect=requests.HTTPError("failed")),
+        patch.object(FETCHER, "_collect_followup_sources", return_value=([], {"cursor_proposed": "later"})),
+    ):
+        output = FETCHER._batch_output(args, "token")
+    assert output["primary_scan"]["complete"] is False
+    assert output["filters"]["follow_up"]["cursor_proposed"] is None
+
+
+def test_atomic_output_replaces_snapshot_and_preserves_stdout(tmp_path):
+    import json
+    destination = tmp_path / "nested" / "issues.json"
+    output = {"issues": [{"iid": 42, "title": "测试"}]}
+    with patch.object(FETCHER, "_write_stdout") as stdout:
+        FETCHER._write_output(output, str(destination))
+    assert json.loads(destination.read_text()) == output
+    assert json.loads(stdout.call_args.args[0]) == output
+    assert list(destination.parent.iterdir()) == [destination]
+
+
+def test_atomic_output_failure_preserves_existing_snapshot(tmp_path):
+    destination = tmp_path / "issues.json"
+    destination.write_text('{"old": true}')
+    with (
+        patch.object(FETCHER.os, "replace", side_effect=OSError("write failed")),
+        patch.object(FETCHER, "_write_stdout") as stdout,
+        pytest.raises(OSError),
+    ):
+        FETCHER._write_output({"new": True}, str(destination))
+    assert destination.read_text() == '{"old": true}'
+    assert list(tmp_path.iterdir()) == [destination]
+    stdout.assert_not_called()
+
+
+@pytest.mark.parametrize("timestamp", ["invalid", "2026-08-01", "2026-08-01T00:00:00"])
+def test_updated_boundary_requires_timezone(timestamp):
+    with pytest.raises(SystemExit):
+        FETCHER.parse_args(["--updated-since", timestamp])
+
+
+def test_main_saves_output_snapshot(tmp_path, monkeypatch):
+    import json
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text("repo: owner/repo\n")
+    snapshot = tmp_path / "snapshot.json"
+    output = {"total": 0, "issues": [], "primary_scan": {"complete": True}}
+    with (
+        patch.object(FETCHER, "resolve_token", return_value="test"),
+        patch.object(FETCHER, "_batch_output", return_value=output),
+        patch.object(FETCHER, "_write_stdout"),
+    ):
+        result = FETCHER.main([
+            "--config", str(config), "--output", str(snapshot), "--defer-cursor",
+        ])
+    assert result == 0
+    assert json.loads(snapshot.read_text()) == output

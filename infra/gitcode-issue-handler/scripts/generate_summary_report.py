@@ -17,6 +17,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from runtime_paths import LATEST_REPORT, REPORTS_DIR, path_text  # noqa: E402
+from report_runs import create_run, save_run, RUN_NAME
 from cli_output import write_stdout  # noqa: E402
 
 SENSITIVE_KEYS = {
@@ -107,11 +108,7 @@ SUBSTANTIVE_STAGES = {
 
 
 def process_stages(issue: dict[str, Any]) -> set[str]:
-    return {
-        str(entry.get("stage", ""))
-        for entry in items(issue.get("process_log"))
-        if isinstance(entry, dict)
-    }
+    return {str(entry.get("stage", "")) for entry in items(issue.get("process_log")) if isinstance(entry, dict)}
 
 
 def should_report_issue(issue: Any) -> bool:
@@ -215,9 +212,7 @@ REQUIRED_LOG_FIELDS = ("time", "stage", "action", "result", "evidence")
 def _validate_process_log(issue: dict[str, Any], label: str):
     process_log = issue.get("process_log")
     if not isinstance(process_log, list) or not process_log:
-        return [
-            f"{label}.process_log must contain at least the classification action"
-        ], set()
+        return [f"{label}.process_log must contain at least the classification action"], set()
     errors = []
     stages = set()
     for index, entry in enumerate(process_log):
@@ -227,10 +222,7 @@ def _validate_process_log(issue: dict[str, Any], label: str):
         for field in REQUIRED_LOG_FIELDS:
             missing_value = field != "evidence" and not present(entry.get(field))
             if field not in entry or missing_value:
-                errors.append(
-                    f"{label}.process_log[{index}].{field} is required; "
-                    "use 'unknown' when unavailable"
-                )
+                errors.append(f"{label}.process_log[{index}].{field} is required; use 'unknown' when unavailable")
         stages.add(str(entry.get("stage", "")))
     return errors, stages
 
@@ -246,10 +238,7 @@ def _expected_stages(issue: dict[str, Any], group: dict[str, Any]) -> set[str]:
     if present(issue.get("tests")) or present(group.get("tests")):
         expected.add("validate")
     delivery_fields = ("commit_sha", "pr_url", "published_branch")
-    if any(
-        present(issue.get(field)) or present(group.get(field))
-        for field in delivery_fields
-    ):
+    if any(present(issue.get(field)) or present(group.get(field)) for field in delivery_fields):
         expected.add("deliver")
     return expected
 
@@ -307,7 +296,11 @@ def _validate_candidate_analysis(analysis, label, errors):
     per_operator = _candidate_map(candidates, label, errors)
     if analysis.get("operators") is not None:
         _validate_analysis_operators(
-            analysis, analysis["operators"], per_operator, label, errors,
+            analysis,
+            analysis["operators"],
+            per_operator,
+            label,
+            errors,
         )
 
 
@@ -322,9 +315,7 @@ def _validate_issue(issue: Any, index: int, group_by_id: dict[str, Any]):
     ]
     responsibility = issue.get("responsibility")
     if present(responsibility) and responsibility not in RESPONSIBILITIES:
-        errors.append(
-            f"{label}.responsibility must be one of: {', '.join(sorted(RESPONSIBILITIES))}"
-        )
+        errors.append(f"{label}.responsibility must be one of: {', '.join(sorted(RESPONSIBILITIES))}")
     _validate_candidate_analysis(issue.get("owner_candidate_analysis"), label, errors)
     log_errors, stages = _validate_process_log(issue, label)
     errors.extend(log_errors)
@@ -333,9 +324,7 @@ def _validate_issue(issue: Any, index: int, group_by_id: dict[str, Any]):
     group = group_by_id.get(str(issue.get("group_id")), {})
     missing_stages = sorted(_expected_stages(issue, group) - stages)
     if missing_stages:
-        errors.append(
-            f"{label}.process_log missing stages: {', '.join(missing_stages)}"
-        )
+        errors.append(f"{label}.process_log missing stages: {', '.join(missing_stages)}")
     return errors
 
 
@@ -365,10 +354,7 @@ def validate_state(state: dict[str, Any]) -> list[str]:
     if not isinstance(issues, list):
         return errors + ["issues must be a list"]
     if run.get("issues_total") != len(issues):
-        errors.append(
-            f"run.issues_total ({run.get('issues_total')!r}) must equal "
-            f"issues length ({len(issues)})"
-        )
+        errors.append(f"run.issues_total ({run.get('issues_total')!r}) must equal issues length ({len(issues)})")
     groups = state.get("groups") if isinstance(state.get("groups"), list) else []
     group_by_id = {
         str(group.get("group_id")): group
@@ -395,11 +381,7 @@ def render_process_log(log: Any) -> list[str]:
     entries = items(log)
     if not entries:
         return []
-    meaningful = [
-        entry
-        for entry in entries
-        if isinstance(entry, dict) and entry.get("stage") != "triage"
-    ]
+    meaningful = [entry for entry in entries if isinstance(entry, dict) and entry.get("stage") != "triage"]
     if not meaningful:
         meaningful = [entry for entry in entries if isinstance(entry, dict)]
     lines = [
@@ -471,6 +453,21 @@ def _render_delivery(issue: dict[str, Any], group: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _render_response_artifacts(issue):
+    lines = []
+    if issue.get("response_status") == "exempt_self_authored_pr":
+        lines.append("- 首响：自提免首响，本轮仅补齐负责人。")
+    for name, artifact in (issue.get("response_artifacts") or {}).items():
+        if isinstance(artifact, dict) and artifact.get("path"):
+            path = str(artifact["path"])
+            marker = "/issues/issue-"
+            if marker in path:
+                path = "issues/issue-" + path.rsplit(marker, 1)[1]
+            lines.append(f"- 响应材料：[{inline(name)}](<{path}>)")
+
+    return lines
+
+
 def render_issue(issue: dict[str, Any], group: dict[str, Any] | None) -> list[str]:
     iid = scalar(issue.get("iid"))
     title = scalar(issue.get("title"))
@@ -484,6 +481,14 @@ def render_issue(issue: dict[str, Any], group: dict[str, Any] | None) -> list[st
             f"- 链接：{scalar(issue.get('url'))}",
         ]
     )
+
+    for code in items(issue.get("related_code")):
+        if isinstance(code, dict) and code.get("path") and code.get("url"):
+            kind = "目录" if code.get("kind") == "directory" else "文件"
+            revision = f"（版本：{inline(code['revision'])}）" if code.get("revision") else ""
+            lines.append(f"- 关联代码（{kind}）：[{inline(code['path'])}](<{code['url']}>){revision}")
+    if present(issue.get("related_code_note")):
+        lines.append(f"- 关联代码说明：{scalar(issue['related_code_note'])}")
 
     root_cause = scalar(issue.get("final_root_cause"), "")
     if root_cause and not root_cause.startswith(("不适用", "unknown")):
@@ -499,15 +504,7 @@ def render_issue(issue: dict[str, Any], group: dict[str, Any] | None) -> list[st
         else:
             lines.append(f"- 临时指派：@{candidate} 尚未回查成功，不能视为已指派。")
 
-    if issue.get("response_status") == "exempt_self_authored_pr":
-        lines.append("- 首响：自提免首响，本轮仅补齐负责人。")
-    for name, artifact in (issue.get("response_artifacts") or {}).items():
-        if isinstance(artifact, dict) and artifact.get("path"):
-            path = str(artifact["path"])
-            marker = "/issues/issue-"
-            if marker in path:
-                path = "issues/issue-" + path.rsplit(marker, 1)[1]
-            lines.append(f"- 响应材料：[{inline(name)}](<{path}>)")
+    lines.extend(_render_response_artifacts(issue))
 
     lines.extend(render_owner_candidates(issue.get("owner_candidate_analysis")))
 
@@ -599,12 +596,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=path_text(LATEST_REPORT),
         help=f"Latest-report path (default: {path_text(LATEST_REPORT)})",
     )
-    parser.add_argument(
-        "--no-latest", action="store_true", help="Do not update latest.md"
-    )
-    parser.add_argument(
-        "--strict", action="store_true", help="Reject incomplete per-Issue state"
-    )
+    parser.add_argument("--no-latest", action="store_true", help="Do not update latest.md")
+    parser.add_argument("--strict", action="store_true", help="Reject incomplete per-Issue state")
     return parser.parse_args(argv)
 
 
@@ -621,29 +614,41 @@ def _load_state(args):
     excluded_observations = normalize_report_scope(state)
     errors = validate_state(state) if args.strict else []
     if errors:
-        raise ValueError(
-            "Error: summary report state is incomplete:\n"
-            + "\n".join(f"- {error}" for error in errors)
-        )
+        raise ValueError("Error: summary report state is incomplete:\n" + "\n".join(f"- {error}" for error in errors))
     return state, excluded_observations
 
 
 def _write_report_artifacts(state, args, excluded_observations):
     run = state.setdefault("run", {})
-    run_id = safe_run_id(run.get("run_id"))
-    output_path = (
-        Path(args.output)
-        if args.output
-        else REPORTS_DIR / run_id / "summary.md"
-    )
-    canonical_state_path = output_path.parent / "run_state.json"
+    if args.output:
+        output_path = Path(args.output)
+    elif run.get("report_directory"):
+        output_path = Path(run["report_directory"]) / "summary.md"
+    elif RUN_NAME.fullmatch(str(run.get("run_id", ""))) and (REPORTS_DIR / run["run_id"] / "run.json").is_file():
+        output_path = REPORTS_DIR / run["run_id"] / "summary.md"
+    else:
+        # Legacy state stays readable; new default output always uses a dated round.
+        started = run.get("started_at")
+        try:
+            parsed = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            timestamp = parsed.replace(tzinfo=timezone.utc).timestamp() if parsed.tzinfo is None else parsed.timestamp()
+        except ValueError:
+            timestamp = None
+        metadata = create_run(REPORTS_DIR, run.get("repository", ""), run.get("mode", "single"), timestamp)
+        run["legacy_run_id"] = run.get("run_id")
+        metadata["legacy_run_id"] = run.get("run_id")
+        save_run(REPORTS_DIR, metadata)
+        run["run_id"] = metadata["run_id"]
+        output_path = REPORTS_DIR / metadata["run_id"] / "summary.md"
+    managed = (output_path.parent / "run.json").is_file()
+    canonical_state_path = output_path.parent / ("_internal/run_state.json" if managed else "run_state.json")
+    if managed:
+        run["report_directory"] = output_path.parent.as_posix()
     run["report_generated"] = True
     run["report_path"] = output_path.as_posix()
     report = render_report(state, canonical_state_path, output_path)
 
-    write_text(
-        canonical_state_path, json.dumps(state, ensure_ascii=False, indent=2) + "\n"
-    )
+    write_text(canonical_state_path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
     write_text(output_path, report)
     latest_path = None
     if not args.no_latest:

@@ -575,3 +575,38 @@ def test_response_stage_assignment_only_is_reported(tmp_path):
     assert "已补齐PR作者分配" in report
     assert "自提免首响" in report
     assert "[assign.md](<issues/issue-101/assign.md>)" in report
+
+
+@pytest.mark.parametrize("kind, path", [("directory", "Samples/story"), ("file", "src/shared.cpp")])
+def test_related_code_links_and_unlocated_reason_reach_reports(tmp_path, kind, path):
+    state = complete_state()
+    route = "tree" if kind == "directory" else "blob"
+    url = f"https://gitcode.com/cann/cann-samples/{route}/abc123/{path}"
+    state["issues"][0]["related_code"] = [
+        {"path": path, "url": url, "kind": kind, "revision": "abc123"}
+    ]
+    state["issues"][1]["related_code_note"] = "缺少问题版本，尚未定位代码"
+    result = run_report(tmp_path, state)
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    report = (tmp_path / payload["report_path"]).read_text(encoding="utf-8")
+    assert f"[{path}](<{url}>)" in report
+    assert "版本：abc123" in report
+    assert "缺少问题版本，尚未定位代码" in report
+    assert (tmp_path / payload["latest_path"]).read_text(encoding="utf-8") == report
+
+
+def test_default_report_uses_dated_round_metadata_and_internal_state(tmp_path):
+    result = run_report(tmp_path, complete_state())
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    folder = (tmp_path / payload['report_path']).parent
+    assert folder.name == '20260811-090000-P0800'
+    metadata = json.loads((folder / 'run.json').read_text())
+    assert metadata['legacy_run_id'] == COMPLETE_STATE['run']['run_id']
+    assert metadata['internal_run_id'] and metadata['timezone'] == 'Asia/Shanghai'
+    assert Path(payload['run_state_path']).parent.name == '_internal'
+    saved = json.loads((tmp_path / payload['run_state_path']).read_text())
+    repeated = run_report(tmp_path, saved)
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)['report_path'] == payload['report_path']

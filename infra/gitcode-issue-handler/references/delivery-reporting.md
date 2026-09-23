@@ -2,7 +2,9 @@
 
 ## 读取时机与产物
 
-所有 Issue/分组到达终止或等待状态后、步骤 9 前完整读取。每次运行必须生成内容相同的：
+普通 batch 的准备材料和严格报告由 pipeline 的 resume/accept 自动生成，使用返回的 delivery_report；失败时执行 report 恢复。无需读取本篇或重新手写 run_state。
+
+以下用于 single 及后续实际发布、代码交付：所有 Issue/分组到达终止或等待状态后、步骤 9 前读取，生成内容相同的：
 
 - 历史：`.cannbot/gitcode-issue-handler/reports/<run_id>/summary.md`（不可覆盖其他 run）
 - 最新：`.cannbot/gitcode-issue-handler/reports/latest.md`
@@ -13,15 +15,17 @@
 2. 回查回复及已批准执行的外部操作，记录授权、写入和 GET 结果；未批准只保留预览。
 3. 按 `code-worktree.md` 安全清理并回写结果。
 4. 未知 owner 按 `operator-owner-candidates.md` 逐算子给候选账号与贡献（每算子最多 5 人，整单可超过）；无候选写“待确认”，可留 `awaiting_offline_confirmation`，候选不等于已确认负责人/解决。临时指派成功时另写“已临时指派 @账号，请确认真正负责人”，保留逐算子候选，不冒充正式 owner。兜底指派按 `assignment_source: fallback_user` 标明“无候选、兜底接收人”，不将其加入候选表。
-5. 按 [逐项响应材料](batch-analysis.md#逐项响应材料) 核对本轮每条 `need_attention` 的分析、适用草稿和 `response_artifacts`；关闭自动响应不免除落盘，受阻缺稿须有具体原因，未完成子任务须有恢复点。设置 `completed_at`/`overall_status`，写 `run_state.json`。
+5. 按 [逐项响应材料](delivery-reporting.md#逐项响应材料) 核对本轮每条 `need_attention` 的分析、适用草稿和 `response_artifacts`；关闭自动响应不免除落盘，受阻缺稿须有具体原因，未完成子任务须有恢复点。设置 `completed_at`/`overall_status`，写 `_internal/run_state.json`。
 6. 在目标仓根执行：
    ```bash
    python "$ISSUE_HANDLER_SKILL_ROOT/scripts/generate_summary_report.py" \
-     --state ".cannbot/gitcode-issue-handler/reports/<run_id>/run_state.json" --strict
+     --state ".cannbot/gitcode-issue-handler/reports/<run_id>/_internal/run_state.json" --strict
    ```
 7. 回读 `summary.md`：逐项只含 `handle`，数量等于 `issues_total`；`list-only` 只在“仅列举”中一行展示编号链接和 `responsibility_summary`，不展示候选、过程或外部操作；`ignore`、仅观察到的 `self_assigned` 和既有 `/assign` 不出现；本轮 response 阶段实际补分配的 `needs_pr_owner_handoff` 必须保留。失败先修状态重试，不用对话摘要替代报告，也不因单 Issue 失败跳过整批。
-   同时核对每项结果和下一步是否具体、候选是否实际渲染；`--strict` 通过不代表内容合格，不能用全批相同的“已回复、维护侧承接”替代调查结论。
+   同时按 [关联代码链接](delivery-reporting.md#关联代码链接) 核对逐项分析和汇总是否展示关联目录/文件链接；无链接时须说明原因。核对每项结果和下一步是否具体、候选是否实际渲染；`--strict` 通过不代表内容合格，不能用全批相同的“已回复、维护侧承接”替代调查结论。
 8. 写 `report_generated: true`、`report_path`；最终答复给简短结论和历史报告路径。
+
+`run_id` 由脚本统一创建为 `YYYYMMDD-HHMMSS-P0800`，同秒冲突追加序号；`run.json` 是用户可读元信息，内部 UUID 与目录名独立。当前分析、回复、分配稿在 `issues/issue-IID/`，历史修订归入其 `history/`，分类与执行器结果等记录放 `_internal/`。旧 ID/路径保持读取兼容，新增轮次采用上述结构。
 
 ## 逐项契约与字段
 
@@ -48,3 +52,27 @@
 - 报告列已清理 group/worktree；因 active、blocked、不干净或 manifest 失败而保留的项及下一步；不得 force 或直接删目录。清理不删分支、远程分支、commit、PR、证据或 manifest。附件结束后仅可删除本流程生成的 `.cannbot/gitcode-issue-handler/tmp/downloaded-attachments`。
 
 完成条件：每个 `need_attention` 有真实状态、责任人或下一步；发布可核验；历史 summary、run_state、latest 均可读；`--strict` 成功；`issues`/`listed_issues` 数量与计数一致、覆盖所有 `handle`，且无 `ignore`、仅观察到的 `self_assigned`、既有纯 `/assign` 或观察到的 `no_attention` 明细。若实际处理为 0，终端和最终回复只写“本次未实际处理任何 Issue”及报告链接，不把扫描范围冒充整体指标。
+
+## 逐项响应材料
+
+每个 `need_attention` Issue 在 `.cannbot/gitcode-issue-handler/reports/<run_id>/issues/issue-<iid>/` 单独保存 `analysis.md` 和适用的 `reply.md`、`assign.md`。进入响应准备时先保存已知分析，随调查更新；分析简写实际判定依据、相关 PR 与选择理由、计划动作和阻塞。`reply.md` 是完整可发布草稿；只需分配时分析两三行即可，`assign.md` 只写 `/assign @login`，不生成无必要的文字首响。回复和分配都需要时保存两份稿件。
+
+### 关联代码链接
+
+单个和批量 Issue 的 `analysis.md` 都须列出与问题关联、实际核查过的代码链接，并同步到该 Issue 的 `related_code`，供汇总报告展示：
+
+- 问题位于相对独立的算子、样例 Story 或其他模块目录时，优先附该目录的仓库网页链接，标签使用仓库相对路径；跨多个独立模块时分别列出，不用仓库根目录代替。
+- 无合适独立目录时附具体文件链接；目录链接不足以支撑关键结论时可另附关键文件及已核实的行号链接。
+- 链接对应实际核查的仓库与版本，优先固定 commit；使用分支或 tag 时标明版本。采用平台返回或实际核实的网页 URL，不把本地绝对路径、猜测路径或未经确认的行号当远端链接。目录与文件必须在该版本存在；本地未发布代码只能说明本地路径和未发布状态。
+- 尚未定位关联代码、缺少版本或纯流程问题无代码关联时，在分析和 `related_code_note` 写明具体原因，不编造链接，也不为补链接越过已有能力门禁。
+
+`related_code` 为对象列表，每项含 `path`、`url`、`kind`（`directory` 或 `file`）和 `revision`。调查者交回这些链接与依据，协调者在报告前核对；`list-only` 和 `ignore` 的原有精简规则不变，不为它们额外展开代码调查。
+
+自动响应开启时先落盘再执行，关闭时同样保存材料并列出待用户指令的动作。受阻项也须保存分析和能确定的草稿；尚不能形成稿件时记录具体缺口，不编造回复或分配对象。调查笔记不替代最终材料，由协调者审核并归入上述目录，在本项 `response_artifacts` 记录可读文件路径。
+
+将评论和分配的 `--result-file` 放在本轮 `_internal/issues/issue-<iid>/`。日期时间目录下，执行器自动将用户 Markdown 写入 `issues/issue-<iid>/`，JSON 索引留在 `_internal/`。旧目录兼容以下规则：两个执行器预览时就会保存分析与草稿，`response-artifacts.json` 汇总路径及正文摘要；若结果文件放在运行根，则自动写到其旁的 `issues/issue-<iid>/`。Agent 在 `analysis.md` 补充实际分析，将分配结果的 artifacts 或 `response-artifacts.json` 的 files 映射到本项 `response_artifacts`，其他执行状态继续写唯一 run_state。分配实际使用原生 PATCH，`assign.md` 是用户可读的分配稿，不重复发布为评论。
+
+response 阶段将首响和 PR 作者分配作为独立 operation，一次准备并按依赖完成；首响已完成而分配失败时只恢复分配，不等下轮重新分类才补动作。写前刷新必要评论、PR 和负责人证据，变化后重算剩余动作；写入结果未知先回查。只需分配的项目在分配回查成功后才完成本阶段，不要求文字回复文件。
+
+
+指标目标：解决率 >90%、平均解决时长 <7 个自然日、1 个工作日内有效响应；只据真实证据计算。

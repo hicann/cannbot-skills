@@ -2,7 +2,7 @@
 
 ## 读取时机
 
-真实处理在步骤 -1 与 [runtime-state.md](runtime-state.md) 一起读取本文件；仅配置时读 [configuration-setup.md](configuration-setup.md)，需要推导目标时再读本文相应部分。能力文档仅在对应操作前读取；`policy_query` 不读取执行 reference。能力检查完成前不得执行依赖该能力的 API、Git、临时落盘或提交操作。
+已配置 batch 的新一轮处理先读 [pipeline.md](pipeline.md)，配置和所需能力就绪后运行 `python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/issue_pipeline.py" resume --new-run --repository-root .` 并按 `next_action` 续跑；不默认加载本文及全部旧 references。初始化、目标或路径需要处理时，再与 [runtime-state.md](runtime-state.md) 一起读取本文相应部分；single 保留原入口；仅配置时读 [configuration-setup.md](configuration-setup.md)，需要推导目标时再读本文相应部分。能力文档仅在对应操作前读取；`policy_query` 不读取执行 reference。能力检查完成前不得执行依赖该能力的 API、Git、临时落盘或提交操作。
 
 ## 安装与运行目录
 
@@ -16,6 +16,8 @@
 新路径与仓根同名配置并存时优先读取 `.cannbot/gitcode-issue-handler/config/`，不合并、不覆盖。新配置缺失时，分类器和责任人工具可只读回退仓根 `classify_config.yaml`/`operator_owners.yaml`；责任人更新只把完整内容写新路径。旧分类配置中恰为原默认值的 `last_check_file`、`report_file`、`cache_dir` 在内存转换到新目录，其他自定义路径保持权威；旧 `issue_analysis_data/` 与仓根 YAML 不自动移动或删除。
 
 ## 目标仓库解析
+
+以下是运行时解析规则；进入初始化问卷时，推导结果仅作为仓库题候选，仍按 [configuration-setup.md](configuration-setup.md) 获取明确回答。
 
 仓库地址来自 Issue URL、`--url` 或 `GITCODE_URL`；Token 来自 `--token` 或 `GITCODE_TOKEN`，只在即将访问 API 时按能力门禁检查。 `repo` 非空直接使用，不因 remote 名称或分支变化改选。
 
@@ -42,7 +44,7 @@ python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/resolve_repository.py" --repository-r
 
 ## 步骤 -1：分流与基线前置
 
-真实执行只初始化状态并解析目标；能力检查严格按 [runtime-capability-checks.md](runtime-capability-checks.md) 在首个相关操作紧前调用。未确定认证 API 前不索取 Token。
+batch 配置就绪后由 pipeline 复用持久状态、范围缓存和未完成队列，不重建已完成工作；single、配置、知识维护和咨询闭环仍使用各自原路径。新入口不扩展发布权限，closed、责任范围及授权门禁不变。能力检查严格按 [runtime-capability-checks.md](runtime-capability-checks.md) 在首个相关操作紧前调用。未确定认证 API 前不索取 Token。
 
 ## 步骤 0：安全获取基线
 

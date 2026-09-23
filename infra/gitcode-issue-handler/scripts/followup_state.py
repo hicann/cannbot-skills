@@ -46,8 +46,6 @@ from runtime_paths import (  # noqa: E402
 SCHEMA_VERSION = "issue-followup.v1"
 DEFAULT_STATE_FILE = path_text(FOLLOWUP_WATCH_STATE)
 _DEFAULT_FOLLOWUP = load_template()["follow_up"]
-DEFAULT_WAITING_STATUS = _DEFAULT_FOLLOWUP["waiting_status"]
-DEFAULT_ACTIVE_STATUS = _DEFAULT_FOLLOWUP["active_status"]
 DEFAULT_POLL_HOURS = _DEFAULT_FOLLOWUP["poll_hours"]
 DEFAULT_STALE_HOURS = _DEFAULT_FOLLOWUP["stale_hours"]
 WAITING_TARGETS = {"reporter", "assignee"}

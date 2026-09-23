@@ -41,3 +41,9 @@ owner 不明且启用 `auto-assign` 或用户单次明确要求自动选择候�
 收到完整回复后，从每个待决 Issue 的步骤 2d 检查点恢复：owner 分支只确定配置写入、转交和回查计划；`direct` 分支才进入常规分派并形成必要的代码计划。不得重新执行已通过的能力检查、Issue 获取、已完成的算子识别或其他 Issue 的处理。全部 owner 聚合项都有确定方案后仅移除对应 owner 输入项，不清空其他待输入项；更新 `run.pending_user_inputs`，设置 `operator_owner_request_status: resolved`，把所有适用动作纳入 `delivery-confirmation.md` 的统一预览；尚未批准前不得执行评论、指派、暂存、commit 或发布。明确选择 `direct` 的代码 Issue 可先在受管 worktree 中完成未提交实现和验证，再进入统一预览。
 
 已验证指派后记录 Issue、算子、owner、首响评论、assignee 与`挂起`回查证据，标记 `resolution_pending`，写 assignee watch 后跳过该 Issue 的代码处理并继续下一项。转交和 `挂起`都不等于 Issue 已解决。
+
+## 阶段约束
+
+算子问题默认转交已确认 owner，未知时不能自行修复。仍有维护动作且无已确认 owner/有效 assignee、也无有效关联 PR 时，起草首响并按涉及的每个算子分析核心贡献候选，每算子最多 5 人；summary 只写可指派账号及简述，供用户线下确认。
+   候选不等于 owner，不公开候选列表 @，不延迟首响；用户对当前 Issue 明确 `direct` 才自行处理。
+   纯答疑已完整解决且无剩余维护动作时不额外收集 owner。

@@ -13,7 +13,7 @@
 
 ## 读取时机
 
-目标仓库确定后、执行获取和分类前读取；只做 API 答疑不以 Git 同步为前提。
+single、兼容旧 CLI 获取分类或需要解释分类规则时读取；已配置 batch 先读 [pipeline.md](pipeline.md)，新一轮执行 `issue_pipeline.py resume --new-run --repository-root .`，恢复同一轮使用普通 `resume`，按 `next_action` 按需加载规则。范围缓存、未完成队列及必要重分类由脚本维护，不要求先手工首次分类再调查全批。只做 API 答疑不以 Git 同步为前提。
 
 ## 输入
 
@@ -22,7 +22,11 @@
 - `GITCODE_TOKEN`。
 - 批量模式下的 `.cannbot/gitcode-issue-handler/config/classify_config.yaml` 或 `--repo owner/repo`；缺失配置会自动初始化，目标确认后保存 `repo`。
 
+single 每次新触发先按 [runtime-state.md](runtime-state.md#初始化) 创建日期时间报告目录，再获取该 Issue；中断续跑使用原目录和状态。
+
 ## 步骤 1：获取 Issue
+
+以下 CLI 继续支持 single、诊断及兼容场景；正常 batch 优先走 pipeline，避免另行维护同一批输入与任务状态。入口变化不绕过以下过滤、责任或授权规则。
 
 正常 `single`/`batch` 只处理核心 open Issue。先获取元数据并过滤 closed，再做责任范围核查、PR 关联及评论获取；显式 single、增量更新和 watchlist 均不能绕过此过滤。closed 只保留跳过结果，不跟进、不自动 reopen。
 
@@ -72,7 +76,7 @@ fetch 与 classify 的真实 HTTP attempt 共用 `.cannbot/gitcode-issue-handler
 
 ## 责任范围
 
-首次分类出现多项 `pending / responsibility_review_required` 时，在逐项核查前按 [batch-analysis.md](batch-analysis.md) 检查分工，不等范围核查全部结束才委派。调查者按 [responsibility-scope.md](responsibility-scope.md) 核查实际实现与配置，协调者统一写回 `responsibility_review` 后再分类。仅调查范围的子 agent 无需加载本文的获取、游标和排序细节。
+pipeline 优先复用仍有效的范围证据，仅为缺失或失效项生成核查任务；`pending / responsibility_review_required` 不是发送清单。简单核查由主会话批量完成，复杂独立调查按 [batch-analysis.md](batch-analysis.md) 委派，逐项提交和审核，不等所有范围核查结束。调查者按 [responsibility-scope.md](responsibility-scope.md) 核查实际实现与配置；兼容旧 CLI 时由协调者写回 `responsibility_review` 后对子集重分类。仅调查范围的子 agent 无需加载本文的获取、游标和排序细节。
 
 ## 步骤 2a：固定规则分类
 
@@ -165,11 +169,11 @@ python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/classify_issues.py" \
 4. 未解决且 `issue_age_days >= 5`
 5. 其他 `need_attention`
 
-同级按创建时间从早到晚。中间状态仍需记录责任人、阻塞原因、下一步和更新时间。
+持久任务队列在同一优先级内先处理预计工作量较大的任务，再按创建时间排序；旧分类列表保持创建时间从早到晚。中间状态仍需记录责任人、阻塞原因、下一步和更新时间。
 
 ## 步骤 2b：补齐详情
 
-处理 `batch/need_attention` 和显式 `single` 目标。分类后按 [batch-analysis.md](batch-analysis.md) 再检查独立调查与拟稿任务，并为每条 `need_attention` 先保存已知分析，补齐适用草稿和阻塞原因；自动响应关闭也执行。步骤 1 数据已足够时直接复用；需要刷新时按 `gitcode-toolkit` 的 Issue API 规则重新获取。
+处理 `batch/need_attention` 和显式 `single` 目标。pipeline 按就绪任务逐项推进，复杂独立调查与拟稿按 [batch-analysis.md](batch-analysis.md) 分工，并为每条 `need_attention` 先保存已知分析，补齐适用草稿和阻塞原因；自动响应关闭也执行。步骤 1 数据已足够时直接复用；需要刷新时按 `gitcode-toolkit` 的 Issue API 规则重新获取。
 
 获取脚本的完整正文在 `description` 字段（原生 API 可能为 `body`）。先读完整正文及代码块，不能仅以标题或截断列表做范围判定、起草或索要信息。
 
@@ -186,7 +190,7 @@ python3 "$ISSUE_HANDLER_SKILL_ROOT/scripts/classify_issues.py" \
 
 ## 并行边界
 
-范围待核查和分类后响应准备均按 [batch-analysis.md](batch-analysis.md) 分工；同一项的拟稿等待必要证据，不阻塞其他独立任务。
+范围待核查和分类后响应准备按动态队列推进，简单项主会话处理、复杂项按 [batch-analysis.md](batch-analysis.md) 分工；逐项 `claim/submit/accept`，空闲补位，不等全批返回。同一项拟稿等待必要证据，外部等待用 `hold` 释放名额，不阻塞其他独立任务。
 单项回复证据和授权就绪即发布回查，不等全批或 owner 查询；2e 只等待当前代码组的依赖和冲突核查。调查任务不得修改代码或运行复现命令。
 
 ## 输出
@@ -208,3 +212,7 @@ required_environment: {}
 其中只有进入实际处理流程的 Issue 才写入最终 `issues` 状态；`batch` 的 `no_attention` 仅进入分类器输出和聚合计数，禁止为生成报告补齐大段“不适用”字段。
 
 仅需处理的范围内项目进入 `issue-routing.md`；其余按责任级别汇总。
+
+## 批量内容筛选
+
+纯路线图/规划汇总不进入响应。现任负责人或任一有效关联 PR 作者与 Issue 作者同账号，即按自提处理；需求与缺陷使用相同判定。已有实质回复和责任人、无新跟进时也不纳入本轮，不为历史状态/watch 补录重新激活。

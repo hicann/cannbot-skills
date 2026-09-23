@@ -53,6 +53,9 @@ def _signature(issue, config, revision):
     # does not mean a changed local routing decision can be reused.
     values = {key: issue.get(key) for key in _ISSUE_SIGNATURE_FIELDS}
     values["policy"] = {key: config.get(key) for key in _POLICY_SIGNATURE_FIELDS}
+    values["explicitly_ignored"] = str(issue.get("iid") or issue.get("number")) in {
+        str(i) for i in config.get("ignored_issue_ids", [])
+    }
     values["revision"] = revision
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

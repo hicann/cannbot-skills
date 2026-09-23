@@ -78,6 +78,8 @@ issues:
     response_comment_id:
     response_comment_at:
     response_review: {}
+    related_code: [] # 已核实关联代码：每项含 path、url、kind（directory/file）、revision；独立模块优先目录链接
+    related_code_note: # 无法定位或无代码关联时说明原因
     response_artifacts: {} # analysis.md、适用的 reply.md/assign.md 的路径与 digest
     auto_action: {} # 沿用分类器的 response 阶段指派计划；不构成外部写入授权
     response_evidence: []

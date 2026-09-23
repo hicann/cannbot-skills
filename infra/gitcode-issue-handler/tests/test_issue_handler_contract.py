@@ -45,7 +45,7 @@ def _read_interaction_documents() -> dict[str, str]:
 def _assert_handler_interaction_contract(documents: dict[str, str]) -> None:
     skill = documents["skill"]
     policy = documents["policy"]
-    assert "步骤 -1：区分 policy_query 与真实执行" in skill
+    assert "只询问规则（policy_query）" in skill
     assert "policy_query" in skill
     assert "不检查 Token/Git/CANN" in skill
     assert "runtime-capability-checks.md" in skill
@@ -143,9 +143,9 @@ def test_missing_token_creates_one_resumable_wait_and_stops_the_turn():
     capability = documents["capability"]
     state = documents["state"]
 
-    assert "只汇总询问一次并停止本轮" in skill
+    assert "只汇总询问一次并停止本轮" in capability
     for forbidden_progress in ("API 探测", "真实 Issue 拉取", "测试框架读取"):
-        assert forbidden_progress in skill
+        assert forbidden_progress in capability
     assert "overall_status: running | waiting_for_input" in state
     assert "api: not_started | ready | waiting_for_input" in state
     assert "input_id: gitcode_token" in state
@@ -287,7 +287,7 @@ def test_skill_entrypoint_stays_concise_and_routes_detailed_contracts():
     skill = (HANDLER_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
     assert len(skill.splitlines()) <= 200
-    assert "## Reference 读取路由" in skill
+    assert "## 按需读取" in skill
     assert "## 授权模型与卡点" not in skill
     assert "## 运行状态" not in skill
     assert "authorization_mode: interactive | approved_batch" not in skill
@@ -299,6 +299,7 @@ def test_skill_entrypoint_stays_concise_and_routes_detailed_contracts():
 def test_reference_layout_stays_flat_and_grouped_by_concern():
     references = HANDLER_ROOT / "references"
     expected = {
+        "pipeline.md",
         "batch-analysis.md",
         "automation.md",
         "runtime-setup.md",
@@ -430,7 +431,7 @@ def test_runtime_knowledge_query_is_not_blocked_by_refresh():
         encoding="utf-8"
     )
 
-    assert "复用已有快照和受审卡" in skill
+    assert "复用" in lifecycle and "快照" in lifecycle and "受审" in lifecycle
     assert "knowledge-maintenance.md" in skill
     maintenance = (HANDLER_ROOT / "references/knowledge-maintenance.md").read_text(encoding="utf-8")
     assert "knowledge-maintenance.md" in lifecycle
@@ -554,7 +555,8 @@ def test_auto_response_can_link_reviewed_covering_pr_before_temporary_assignment
     assert "duplicate_cross_reference" in automation
     assert "一个 PR 只能关联一个 Issue" in automation
     assert "PR 关联必须先于" in workflow
-    assert "自动关联" in skill and "临时指派 PR 作者" in skill
+    response = (HANDLER_ROOT / "references/response-writing.md").read_text(encoding="utf-8")
+    assert "自动关联" in response and "临时指派 PR 作者" in response
 
 
 def test_assignment_commands_use_state_not_exact_comment_body():

@@ -125,6 +125,8 @@ def validate_classification(classification, issue_url):
 
 
 def _check_config_target(config, issue_url):
+    if issue_identity(issue_url)[-1] in {str(i) for i in config.get("ignored_issue_ids", [])}:
+        raise ValueError("Issue is explicitly ignored by the current configuration")
     configured_repo = str(config.get("repo") or "").strip().casefold()
     if not configured_repo:
         return
