@@ -1,6 +1,8 @@
 ## 🔥 更新日志
 ### 【2026-09-22】
 #### 新特性 New Features
+- 【tools】新增 tool-exception-dump 技能：基于 msaicerr/asys 的 AI Core Error 系统化诊断工作流（34 步：场景判定/报错行定位/错误类型解码/单算子复现/证据链汇聚），与 msaicerr-toolkit/asys-toolkit 分工协作(#709)
+- 【tools】tool-exception-dump 新增评测对比脚本 scripts/eval_compare.py：带/不带技能双轮评测并输出四维核心指标（触发与路由/参数提取/工具调用与流程遵从/最终交付质量）对比报告
 - 【CANN 工具链】新增 npu-check 运行时正确性检查 Skill，支持算子设备全局内存（GM）访问和同步操作配对检查。
 - 【npu-objdump-toolkit】新增 Ascend 算子编译产物分析 Skill，支持查看 kernel 元数据与完整 ELF 信息、列出或提取内嵌 device ELF、使用 `--sass` 反汇编 Ascend AICore 指令，并提供 msobjdump/npu-objdump 接口自检与故障定位指导。
 

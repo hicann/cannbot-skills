@@ -278,10 +278,10 @@
     },
     {
       "name": "cann-tools-skills",
-      "description": "CANN 工具 Skills（6 个）。覆盖 asys 故障信息收集与解析、msaicerr AI Core Error 分析与 Dump 转换、msnpureport Device 侧日志导出与维测配置、npu-check 算子设备全局内存（GM）访问与同步操作配对检查、使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包报告并定位带宽、流水线、存储访问和资源冲突问题，以及 npu-objdump 算子编译产物元数据查看、device ELF 提取与 Ascend AICore 指令反汇编。",
+      "description": "CANN 工具 Skills（7 个）。覆盖 asys 故障信息收集与解析、msaicerr AI Core Error 分析与 Dump 转换、msnpureport Device 侧日志导出与维测配置、npu-check 算子设备全局内存（GM）访问与同步操作配对检查、使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包报告并定位带宽、流水线、存储访问和资源冲突问题，以及 tool-exception-dump AI Core Error 系统化诊断工作流和 npu-objdump 算子编译产物元数据查看、device ELF 提取与 Ascend AICore 指令反汇编。",
       "source": "./tools",
       "strict": false,
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": {
         "name": "CANNBot"
       },
@@ -302,6 +302,7 @@
         "./asys-toolkit",
         "./msaicerr-toolkit",
         "./msnpureport-toolkit",
+        "./tool-exception-dump",
         "./tool-npu-compute",
         "./tool-npu-check",
         "./npu-objdump-toolkit"
