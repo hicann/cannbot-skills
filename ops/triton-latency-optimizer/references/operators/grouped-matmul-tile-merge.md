@@ -61,10 +61,11 @@
 - **UB 边界**: int8 dot + 后置 scale 路径优先实测 256/512；需要物化 fp16 tile 的预缩放路径仍遵守 L1.6 的 `BLOCK_K <= 256`。
 
 ### L1.10 BLOCK_N 必须同时平衡 dot 开销与 Cube 占用率
-- **必须**允许 N 尾块 mask，不得因 `N % BLOCK_N != 0` 自动退回较小 tile。
-- **必须**检查静态任务数 `E * ceil(N / BLOCK_N)`。若小于 Cube 核数，减小 BLOCK_N 增加并行任务；若多 expert 且平均行数很小，可在 UB 允许时增大 BLOCK_N，减少小 M dot 的固定 issue/同步次数。
-- **How to apply**: 从大到小选择能填满 Cube 核的 tile；若所有候选均不足，保留一个较小 fallback。对 tiny-expert 分支额外测试更宽 tile，例如 `BLOCK_N=512`，但必须先核算 `acc + x + weight + 临时量` 峰值。
-- **禁止**只优化 tile 数或只优化占用率。`E=1,N=544` 固定用 256 只产生 3 个任务，会显著欠并行；而 `E=7,M/E≈2,N≈8K` 使用更宽 N tile 可摊薄大量低利用率 dot。
+- **必须**允许 N 尾块 mask，不得因 `N % BLOCK_N != 0` 自动退回较小 tile；同时检查每段行数、N tile 数、静态任务数和 UB 活跃集。
+- **必须**把“填满 Cube 核”和“减少低利用率 dot 次数”作为两个候选方向。任务数明显不足时通常减小 BLOCK_N；每段只有少量 Cube M 微块、且宽 tile 后任务数仍与 Cube 核数接近时，必须额外测试更宽 BLOCK_N。
+- **Why**: 填满 Cube 核只是启发式，不是硬门槛。行数少时，dot 固定 issue/同步开销可能占主导，减少 N tile 数的收益可超过轻微欠占用；但宽 tile 使任务数大幅低于 Cube 核数时，欠并行会反过来主导。
+- **How to apply**: 先按任务数选择 occupancy 候选；再计算宽 tile 的任务数和 N tile 缩减幅度。若平均段行数仅覆盖少量 Cube M 微块、宽 tile 仍保留接近 Cube 核数的任务，并能明显减少 N tile，则把宽 tile 加入 benchmark 候选集。候选必须满足 `acc + x + weight + 临时量` 容量约束，并与原分派逐 shape 比较；未稳定获益则回退。
+- **禁止**只优化 tile 数或只优化占用率，也禁止把少量已验证 shape 固化为 E/M/N 的绝对阈值，或把一种 expert 分布的结论直接外推到另一种分布。
 
 ### L1.11 完整 workspace + Vector two-pass 只能作为跨 N 逐行归约 epilogue 的条件分支
 - **必须**保留原 partial-max 骨架作为基线路径。只有 epilogue 需要跨完整 N 维计算逐行统计量、完整中间结果 workspace 可承受，并且同 shape 实测 two-pass 稳定获益时，才能增加完整 workspace + Vector two-pass 分支。
@@ -158,22 +159,26 @@ BLOCK_K_CANDIDATE = 256 if K_ALIGNED >= 256 else 128 if K_ALIGNED >= 128 else 64
 # 仅在逐 shape benchmark 稳定获益后采用；否则保留原 BLOCK_K 分派
 ```
 
-### L2.5 BLOCK_N：兼顾 tiny-expert 宽 tile 与 Cube 核占用率
+### L2.5 BLOCK_N 基线分派与宽 tile 补充候选
 
-以下代码仅作为**直接 segment/expert × N-tile 映射的初始候选**：此时静态任务数才可用 `E * ceil(N / BLOCK_N)` 近似。若采用 `(M-tile, N-tile)` 扁平映射，必须改用实际 M tile 数计算任务数，不能直接套用本公式。候选 BLOCK_N 必须先满足 accumulator、weight、输入和临时量的 UB 容量约束，并支持逻辑 N 尾块 mask。`M // E < 16` 只是 host 侧判断 tiny segment 的平均值启发式，`BLOCK_N=512` 仅用于测试减少低 M dot 固定开销是否获益；不得据此覆盖已有 shape 特化或 autotune 分派。任务数不足以填满 Cube 核时优先测试更小 BLOCK_N，tiny segment 且 N 较宽时再额外测试更大 BLOCK_N，最终只保留逐 shape 实测稳定获益的分支。
+以下代码保留**直接 segment/expert × N-tile 映射的原有基线分派**：tiny segment 在任务数足以维持 Cube 占用率时使用宽 tile，其余 shape 从大到小选择能填满 Cube 核的 tile。若采用 `(M-tile, N-tile)` 扁平映射，必须改用实际 M tile 数计算任务数，不能套用 `E * ceil(N / BLOCK_N)`。在基线之外，仅当平均段行数少、宽 tile 后任务数没有严重不足且 N tile 数明显下降时，才把宽 tile 作为补充候选；这些派生特征用于触发实测，不应展开成固定 E/M/N 阈值。
 
 ```python
-BLOCK_N_CANDIDATE = (
+AVG_ROWS = M // E
+BLOCK_N_BASELINE = (
     512
-    if E > 1
-    and M // E < 16
-    and E * triton.cdiv(N, 512) >= cube_cores
-    else
-    256 if E * triton.cdiv(N, 256) >= cube_cores else
+    if AVG_ROWS < 16 and E * triton.cdiv(N, 512) >= cube_cores
+    else 256 if E * triton.cdiv(N, 256) >= cube_cores else
     128 if E * triton.cdiv(N, 128) >= cube_cores else
     64 if E * triton.cdiv(N, 64) >= cube_cores else 32
 )
-# 仅在逐 shape benchmark 稳定获益后采用；否则保留原 BLOCK_N 分派
+
+BLOCK_N_WIDE_CANDIDATE = 512
+WIDE_TASKS = E * triton.cdiv(N, BLOCK_N_WIDE_CANDIDATE)
+WIDE_NUM_N_TILES = triton.cdiv(N, BLOCK_N_WIDE_CANDIDATE)
+BASE_NUM_N_TILES = triton.cdiv(N, BLOCK_N_BASELINE)
+# 结合 AVG_ROWS、WIDE_TASKS/cube_cores 和 N tile 缩减幅度决定是否追加宽 tile；
+# 只有逐 shape benchmark 稳定获益才建立新分支，否则继续使用 BLOCK_N_BASELINE。
 ```
 
 ### L2.6 跨 N 逐行归约 epilogue 的双骨架分派
