@@ -29,7 +29,7 @@ JUDGE_POLICY = "relevance"
 
 
 def _key(query, hits):
-    h = hashlib.sha1()
+    h = hashlib.sha1(usedforsecurity=False)
     h.update(("v=%s;policy=%s;q=%s;" % (PROMPT_VERSION, JUDGE_POLICY, query or "")).encode("utf-8"))
     for p in sorted(x["path"] for x in hits):
         h.update((p + "\n").encode("utf-8"))

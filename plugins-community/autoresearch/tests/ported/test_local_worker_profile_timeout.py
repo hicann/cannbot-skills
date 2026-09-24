@@ -172,5 +172,7 @@ def test_run_msprof_uses_shell_free_argv(monkeypatch, tmp_path):
 
     assert ok is True and error == "" and report == "/tmp/prof"
     assert seen["cmd"] == ["msprof", f"--application=python {script}"]
-    assert seen["options"].shell is False
+    # shell 选项已从 CommandCaptureOptions 移除（固定 shell=False，见 process_utils），
+    # 此处断言字段确不存在，防止回归 reintroduce
+    assert not hasattr(seen["options"], "shell")
     assert seen["options"].timeout == 7

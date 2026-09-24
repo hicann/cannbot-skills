@@ -108,7 +108,7 @@ class HashingEmbedding(EmbeddingBackend):
                 feats.append(t[i:i + 2])
         v = {}
         for f in feats:
-            hh = int(hashlib.md5(f.encode("utf-8")).hexdigest(), 16)
+            hh = int(hashlib.md5(f.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
             idx = hh % self.dim
             sign = 1.0 if (hh >> 1) & 1 else -1.0
             v[idx] = v.get(idx, 0.0) + sign

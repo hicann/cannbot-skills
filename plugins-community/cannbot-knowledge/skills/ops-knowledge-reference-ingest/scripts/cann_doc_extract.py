@@ -139,7 +139,7 @@ def slug(name):
 
 
 def hash6(s):
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:6]
+    return hashlib.sha1(s.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
 
 
 def md_rel(p):

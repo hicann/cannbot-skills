@@ -51,7 +51,7 @@ class Entry:
         NOT false-collide on put/tombstone. Idempotency = "same lesson + same scope → same hash".
         """
         norm = f"{self.claim.strip().lower()}|{self.key}|{sorted(self.scope.items())}"
-        return hashlib.sha1(norm.encode()).hexdigest()[:12]
+        return hashlib.sha1(norm.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 # ── signature helpers: DEDUP (narrow hard-key) vs RESOLVE (wide full-sig) are SEPARATE (scan①) ──

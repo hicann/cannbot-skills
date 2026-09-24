@@ -112,7 +112,7 @@ def compute_kernel_md5(workspace: Path) -> Optional[str]:
         files.extend(kernel_dir.glob(pat))
     if not files:
         return None
-    h = hashlib.md5()
+    h = hashlib.md5(usedforsecurity=False)
     # Sort by name so the digest is independent of filesystem enumeration order.
     for f in sorted(files, key=lambda p: p.name):
         # Include the name so a rename that swaps two files' contents still

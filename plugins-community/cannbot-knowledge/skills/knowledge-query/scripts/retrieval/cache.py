@@ -28,7 +28,7 @@ def fingerprint(parts):
     care about candidate order must canonicalize before passing).
     """
     blob = json.dumps(parts, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+    return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 class DiskCache:

@@ -202,7 +202,8 @@ remote "
 # (binary blobs are OK, hence -I flag to grep). Wider denylist than the old
 # single-CANN_SOURCE check: catches the (a) bug from above where ancestor
 # paths slipped through.
-RESIDUAL_PATTERN=$(IFS='|'; echo "${ALL_STRANGER_PATHS[*]}")
+RESIDUAL_PATTERN=$(printf '%s|' "${ALL_STRANGER_PATHS[@]}")
+RESIDUAL_PATTERN=${RESIDUAL_PATTERN%|}
 RESIDUAL_TEXT=$(remote "grep -rIlE '${RESIDUAL_PATTERN}' ${SLICE_CANN}/ 2>/dev/null | wc -l" || echo "1")
 [[ "$RESIDUAL_TEXT" -gt 0 ]] && fail 13 "P130 sed rewrite incomplete: ${RESIDUAL_TEXT} text files still reference one of: ${ALL_STRANGER_PATHS[*]}"
 

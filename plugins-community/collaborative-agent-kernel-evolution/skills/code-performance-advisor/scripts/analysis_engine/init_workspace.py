@@ -132,7 +132,7 @@ def log_error(msg: str):
 
 def compute_dir_hash(path: Path) -> str:
     """计算目录内容的 MD5 哈希（用于检测代码变更）"""
-    hasher = hashlib.md5()
+    hasher = hashlib.md5(usedforsecurity=False)
 
     for root, _, files in sorted(os.walk(path)):
         for file_name in sorted(files):

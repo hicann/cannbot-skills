@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import statistics
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -370,7 +371,14 @@ def _render_errors(out: list[str], cases: dict) -> None:
 
 
 def clear_screen() -> None:
-    os.system("cls" if sys.platform == "win32" else "clear")
+    # 直接 exec 固定命令数组，不经 shell 解析（B605：os.system 会无条件过 shell）。
+    # cls 是 cmd.exe 内建命令而非可执行文件，须经 `cmd /c` 调起；子进程缺失
+    # （极简容器无 clear 等）时退回 ANSI 清屏转义，保证刷新循环不崩。
+    cmd = ["cmd", "/c", "cls"] if sys.platform == "win32" else ["clear"]
+    try:
+        subprocess.run(cmd, check=False)
+    except OSError:
+        emit("\x1b[2J\x1b[H", flush=True)
 
 
 def main() -> int:

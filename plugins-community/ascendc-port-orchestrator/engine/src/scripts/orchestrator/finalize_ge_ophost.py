@@ -52,7 +52,7 @@ _FA_GE_SHARED_HEADERS = (
 
 
 def _md5_bytes(b: bytes) -> str:
-    return hashlib.md5(b).hexdigest()
+    return hashlib.md5(b, usedforsecurity=False).hexdigest()
 
 
 def _cann_md5_index_for_basenames(basenames: set) -> dict:

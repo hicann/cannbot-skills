@@ -170,12 +170,21 @@ class SuggestionGenerator:
 
         # Try to use Jinja2 template
         try:
-            from jinja2 import Environment, FileSystemLoader
+            from jinja2 import Environment, FileSystemLoader, select_autoescape
             from datetime import datetime, timezone
 
             # Setup Jinja2 environment
+            # 渲染目标是 Markdown 文件（suggestion.md，非 HTML）：只对 HTML 模板启用
+            # 自动转义——既保持既有 Markdown 渲染结果逐字节不变，也避免将来新增
+            # HTML 模板时静默关闭转义（B701）。
             template_dir = Path(__file__).parent / "templates"
-            env = Environment(loader=FileSystemLoader(str(template_dir)))
+            env = Environment(
+                loader=FileSystemLoader(str(template_dir)),
+                autoescape=select_autoescape(
+                    enabled_extensions=("html", "htm", "xml"),
+                    default=False,
+                ),
+            )
             template = env.get_template("suggestion.md.jinja2")
 
             # Render template

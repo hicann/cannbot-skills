@@ -38,9 +38,13 @@ _registry_lock = threading.Lock()
 
 @dataclass(frozen=True)
 class CommandCaptureOptions:
-    """Execution controls for :func:`run_command_capture`."""
+    """Execution controls for :func:`run_command_capture`.
 
-    shell: bool = False
+    ``cmd`` is always executed as an argv list with ``shell=False`` — the option
+    to enable a shell was removed on purpose: every caller in this repo passes a
+    list, and a shell would turn any interpolated path/arg into an injection sink.
+    """
+
     env: Optional[Dict[str, str]] = None
     timeout: Optional[float] = None
     cwd: Optional[str] = None
@@ -428,7 +432,7 @@ def run_command_capture(cmd, options: Optional[CommandCaptureOptions] = None):
     options = options or CommandCaptureOptions()
     process = subprocess.Popen(
         cmd,
-        shell=options.shell,
+        shell=False,  # 固定关闭：cmd 是 argv 数组，不经 shell 解析（无注入面）
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

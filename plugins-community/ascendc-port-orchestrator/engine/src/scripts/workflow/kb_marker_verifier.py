@@ -147,7 +147,7 @@ def _verify_c_tier_entries(rep: VerifyReport, entries: list[str]) -> VerifyRepor
             rep.diagnostics.append(f"c-tier entry content fields invalid: {entry_file}")
             continue
         normalized = f"{claim.strip().lower()}|{key}|{sorted(scope.items())}"
-        computed_hash = hashlib.sha1(normalized.encode()).hexdigest()[:12]
+        computed_hash = hashlib.sha1(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
         claimed_hash = eid.partition(":")[2]
         if (
             payload.get("id") != eid

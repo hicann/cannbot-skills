@@ -1222,7 +1222,7 @@ class WorkflowEngine:
         """
         import hashlib
         code_dir = self.pm.get_input_dir(self.op_name) / "code"
-        hasher = hashlib.md5()
+        hasher = hashlib.md5(usedforsecurity=False)
         if code_dir.exists():
             cpp_files = sorted(code_dir.rglob("*.cpp"))
             h_files = sorted(code_dir.rglob("*.h"))

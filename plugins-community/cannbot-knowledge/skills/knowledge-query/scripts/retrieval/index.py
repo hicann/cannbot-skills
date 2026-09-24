@@ -70,6 +70,18 @@ def _record_aliases(state, aliases, base):
         state["aliases"].setdefault(alias, set()).update(item for item in group if item != alias)
 
 
+def _card_fingerprint(fp_text):
+    return hashlib.sha1(fp_text.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _aggregate_fingerprint(rows):
+    """rows 须为按 path 排序的 (path, digest) 列表，返回聚合内容指纹。"""
+    return hashlib.sha1(
+        "\n".join("%s\t%s" % row for row in rows).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
+
+
 def _index_card(state, doc_id, path):
     with open(id_to_path(path), encoding="utf-8") as card_file:
         raw = card_file.read()
@@ -114,7 +126,7 @@ def _index_card(state, doc_id, path):
         "status": frontmatter.get("status", ""), "quality_score": _quality_score(frontmatter),
     })
     fingerprint_text = path + "\0" + _front_block(raw) + "\0" + body
-    digest = hashlib.sha1(fingerprint_text.encode("utf-8")).hexdigest()
+    digest = _card_fingerprint(fingerprint_text)
     state["fingerprints"].append((path, digest))
 
 
@@ -123,9 +135,7 @@ def _assembled_index(state):
     count = len(docs)
     postings = {term: sorted(values) for term, values in state["postings"].items()}
     state["fingerprints"].sort()
-    fingerprint = hashlib.sha1(
-        "\n".join("%s\t%s" % row for row in state["fingerprints"]).encode("utf-8")
-    ).hexdigest()
+    fingerprint = _aggregate_fingerprint(state["fingerprints"])
     bundles = sorted({doc["bundle"] for doc in docs})
     global_tags = sorted({
         tag for (bundle, tag), tag_count in state["bundle_tag_count"].items()
@@ -279,11 +289,9 @@ def _recompute_fingerprint(paths):
         _, body = _parse_front(raw)
         body = strip_related(body)
         fp_text = path + "\0" + _front_block(raw) + "\0" + body
-        rows.append((path, hashlib.sha1(fp_text.encode("utf-8")).hexdigest()))
+        rows.append((path, _card_fingerprint(fp_text)))
     rows.sort()
-    return hashlib.sha1(
-        "\n".join("%s\t%s" % (p, h) for p, h in rows).encode("utf-8")
-    ).hexdigest()
+    return _aggregate_fingerprint(rows)
 
 
 def _schema_errors(corpus):

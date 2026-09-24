@@ -159,7 +159,7 @@ def _structural_ge_ophost_offenders(
 def _md5(path: Path) -> Optional[str]:
     """Return a file MD5 digest, or None when the source cannot be read."""
     try:
-        return hashlib.md5(path.read_bytes()).hexdigest()
+        return hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
     except OSError:
         return None
 

@@ -609,12 +609,12 @@ def merge_edges(raw):
 
 
 def fingerprint(nodes):
-    h = hashlib.sha1()
+    h = hashlib.sha1(usedforsecurity=False)
     for nid in sorted(nodes):
         with open(nodes[nid]["path"], encoding="utf-8", errors="replace") as card_file:
             raw = strip_managed(card_file.read())
         h.update(nid.encode())
-        h.update(hashlib.sha1(raw.encode("utf-8")).digest())
+        h.update(hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).digest())
     return h.hexdigest()
 
 
@@ -876,7 +876,7 @@ def judgment_fingerprint(node):
     cleanup) should not force a full LLM re-judge when the card body is unchanged.
     """
     body = re.sub(r"\n{3,}", "\n\n", node["body"].strip())
-    return hashlib.sha1(body.encode("utf-8")).hexdigest()
+    return hashlib.sha1(body.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def card_fp_map(nodes):

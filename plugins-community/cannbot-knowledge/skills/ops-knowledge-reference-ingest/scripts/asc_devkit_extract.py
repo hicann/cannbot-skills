@@ -110,7 +110,7 @@ def slug(name):
 
 
 def hash6(s):
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:6]
+    return hashlib.sha1(s.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
 
 
 def read(relpath):
@@ -1245,7 +1245,7 @@ def cmd_finalize_version_bump():
 
 def _file_sha1(path):
     with open(path, "rb") as source_file:
-        return hashlib.sha1(source_file.read()).hexdigest()
+        return hashlib.sha1(source_file.read(), usedforsecurity=False).hexdigest()
 
 
 def _tree_file_hashes(tree_root, sub):

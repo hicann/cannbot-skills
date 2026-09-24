@@ -101,7 +101,9 @@ def _emit_metric_event_buffered(ctx: CheckContext, finding: Finding,
                                 run_meta: _RunMeta, duration_ms: float) -> None:
     if finding.status == "SKIP" and not _LOG_SKIP:
         return
-    message_hash = hashlib.sha1(finding.message.encode("utf-8")).hexdigest()[:12]
+    message_hash = hashlib.sha1(
+        finding.message.encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:12]
     _metrics_batch.append({
         "ts": int(time.time()),
         "invocation_id": run_meta.invocation_id,
