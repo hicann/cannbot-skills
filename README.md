@@ -11,7 +11,11 @@
 
 ## 📢 项目概述
 
-**CANNBot** 是面向 CANN 开发的系列智能体，本仓库提供可复用的 Agent Skills 模块，覆盖 Ascend C / Catlass / PyPTO / TileLang / Triton 算子开发、torch.compile 图模式优化、NPU 模型推理端到端优化、Runtime 开发适配和 CANN 工具使用等场景。
+CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体层，用 Agent 完成 AscendC/PyPTO/TileLang/Triton 等各类语言的算子开发、模型迁移与推理优化，并延伸至图模式、Runtime 等更多 CANN 开发场景。
+
+本仓（cannbot-skills）是其技能仓，提供可复用的 Agent Skills 模块；仓群还包括 [cannbot](https://gitcode.com/cann/cannbot)、[cannbot-knowledge](https://gitcode.com/cann/cannbot-knowledge)、[cannbot-dsl](https://gitcode.com/cann/cannbot-dsl)、[cann-bench](https://gitcode.com/cann/cann-bench)、[cannbot-sentry](https://gitcode.com/cann/cannbot-sentry) 等仓库，结构如下。
+
+![CANNBot 仓群结构](docs/figures/cannbot-repo-map.png)
 
 **面向用户**：CANN / 昇腾 NPU 各领域开发者（算子开发、图模式、模型推理、Runtime 等），同时欢迎社区开发者共建 Skills 和 Agents。
 
