@@ -50,7 +50,7 @@ batch 以命令的 `required_references` 为当前阶段清单；同会话已读
 | 已确认算子维护动作、需要责任人 | [operator-handoff.md](references/operator-handoff.md)、[operator-owner-candidates.md](references/operator-owner-candidates.md) |
 | 发送、跟进回复 | [issue-comment-workflow.md](references/issue-comment-workflow.md)、[issue-followup.md](references/issue-followup.md) |
 | 复现根因、实施验证 | [code-root-cause.md](references/code-root-cause.md)、[code-validation.md](references/code-validation.md) |
-| 交付确认、提交/PR/CI | [delivery-confirmation.md](references/delivery-confirmation.md)、[delivery-publish.md](references/delivery-publish.md) |
+| 交付确认、提交/PR/CI | [delivery-confirmation.md](references/delivery-confirmation.md)、[delivery-publish.md](references/delivery-publish.md)；pre-commit 钩子失败按 [gitcode-toolkit/references/pre-commit.md](../gitcode-toolkit/references/pre-commit.md) 处置 |
 | 发布或代码交付后补报告 | [delivery-reporting.md](references/delivery-reporting.md) |
 | 恢复异常、能力或阶段故障 | [runtime-state.md](references/runtime-state.md)、[runtime-capability-checks.md](references/runtime-capability-checks.md)、[policy-error-handling.md](references/policy-error-handling.md) 对应条目 |
 | 知识检索；显式知识维护 | [runtime-knowledge.md](references/runtime-knowledge.md)；[knowledge-maintenance.md](references/knowledge-maintenance.md) |

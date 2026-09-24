@@ -1,0 +1,72 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+# Usage:
+#   Using clang-format to reformat a file:
+#     clang-format -i -style=file <file>
+
+BasedOnStyle: Google
+ColumnLimit: 120
+AccessModifierOffset: -4
+SortIncludes: false
+SortUsingDeclarations: false
+BreakBeforeBraces:  Custom
+
+# 大括号换行配置
+BraceWrapping:
+    AfterCaseLabel: false
+    AfterClass: false
+    AfterControlStatement: false
+    # AfterEnum: false (紧凑模式，左大括号和enum同行, enum Color {...), AfterEnum: true (左大括号和enum换行).
+    AfterEnum: false
+    AfterFunction: true
+    AfterNamespace: false
+    AfterStruct: false
+    AfterUnion: false
+    AfterExternBlock: false
+    BeforeCatch: false
+    BeforeElse: false
+    IndentBraces: false
+    SplitEmptyFunction: false
+    SplitEmptyRecord: true
+    SplitEmptyNamespace: true
+
+# Align
+AlignAfterOpenBracket: Align
+PenaltyBreakAssignment: 2
+AlignEscapedNewlines: DontAlign
+AlignOperands: true
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AlwaysBreakBeforeMultilineStrings: false
+AlwaysBreakTemplateDeclarations: true
+
+BinPackArguments: true
+BreakBeforeTernaryOperators: false
+SpacesBeforeTrailingComments: 1
+PackConstructorInitializers: Never
+
+# pointer aligment
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# single line layout
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+# tab space
+UseTab: Never
+IndentWidth: 4
+TabWidth: 4

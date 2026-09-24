@@ -180,3 +180,4 @@ GitCode API、Token、HTTP 状态码错误处理统一详见：
 
 - [gitcode-toolkit/SKILL.md](../gitcode-toolkit/SKILL.md) — Git 克隆/分支检出、merge-base、diff/log 等共享操作
 - [gitcode-toolkit/references/gitcode-api.md](../gitcode-toolkit/references/gitcode-api.md) — GitCode PR API 详细文档
+- [gitcode-toolkit/references/pre-commit.md](../gitcode-toolkit/references/pre-commit.md) — pre-commit 使用前提与钩子失败处置（commit 环节钩子失败按此处置）

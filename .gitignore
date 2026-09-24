@@ -67,3 +67,4 @@ plugins-official/model-infer-optimize/cann-recipes-infer/
 
 # operator workspace (local-only deliverables, not tracked)
 plugins-official/ops-direct-invoke/operators/
+pre-commit_reports/

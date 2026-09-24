@@ -82,6 +82,7 @@ Token 获取优先级：用户直接在消息中提供 → 环境变量 `GITCODE
 | 步骤 | 内容 | 详细文档 | 脚本支持 |
 |------|------|----------|----------|
 | 克隆+检出 | PR 分支检出、base 分支确定、merge-base | [clone-and-checkout.md](references/clone-and-checkout.md) | — |
+| pre-commit | 使用前提（新克隆先装钩子）与钩子失败处置（失败分类/两笔提交/收敛判定） | [pre-commit.md](references/pre-commit.md) | — |
 | Diff+变更 | 变更统计（merge-base / triple-dot 模式） | [diff-and-changes.md](references/diff-and-changes.md) | — |
 | Log+文件 | commit 元信息提取、文件读取 | [log-and-show.md](references/log-and-show.md) | — |
 | Remote+分支 | remote 管理、分支查询、推送 | [remote-and-branch.md](references/remote-and-branch.md) | — |
