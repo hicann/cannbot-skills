@@ -25,6 +25,8 @@ env:
   TARGET_BRANCH: ${{ atomgit.base_ref }}
   SOURCE_BRANCH: ${{ atomgit.head_ref }}
   obs_path: "${{ env.org_name }}/${{ env.repo_name }}/ci/package/${{ env.MERGE_ID }}"
+  # RDV 报告（md）本地暂存根目录：每个 Job 一个子目录（见各 Job 的 CI_REPORT_DIR）
+  ci_report_dir: "/tmp/cannbot-ci-reports/${{ env.MERGE_ID }}"
   online: ${{ vars.APPLY_LABEL }}
 
 stages:
@@ -74,102 +76,39 @@ stages:
   stage3:
     name: Security_content_Scan
     jobs:
-      # 安全门禁先于任何会执行 PR 代码的 UT/ST。这里只运行 Runner 上已部署的
-      # 受信任脚本，由 RDV 检出 PR 合并树并执行 Sift 基础扫描。
-      JOB_security_vet:
-        name: Security_Vet
+      # 聚合静态门禁：一次请求跑完（Security_Vet / Skillspector_Vet / Bandit_Vet / Semgrep_Vet /Content_Critique
+      JOB_static_vet:
+        name: Static_Vet
         steps:
-          - name: check_security_vet_script
+          - name: check_static_vet_script
             run: |
-              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
-                || { echo "❌ runner 上未找到 ci-pr-security-vet.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
-          - name: run_security_vet
+              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-vet.sh \
+                || { echo "❌ runner 上未找到 ci-pr-vet.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+              # Step Summary 共享库：缺失时摘要与 md 报告落盘会**静默失效**（退出码不变、
+              # 日志只有 command not found），所以与主脚本一样前置 fail-closed 拦下。
+              test -f /opt/cannbot-skills-rdv/scripts/lib/ci-summary.sh \
+                || { echo "❌ runner 上未找到 lib/ci-summary.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
+          - name: run_static_vet
             env:
               ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+              CI_REPORT_DIR: "${{ env.ci_report_dir }}/static-vet"
             run: |
-              bash /opt/cannbot-skills-rdv/scripts/ci-pr-security-vet.sh \
+              bash /opt/cannbot-skills-rdv/scripts/ci-pr-vet.sh \
                 --pr-number "${{ env.MERGE_ID }}" \
                 --gitcode-repo cann/cannbot-skills \
                 --timeout 1800
-        runs-on:
-          - self-hosted
-          - runner_name=A5_skill_tester_02
-      # 第二道静态门禁：SkillSpector 风险分（与 Sift 差分正交）。同样只运行 Runner 上
-      # 已部署的受信任脚本，由 RDV 检出合并树并执行纯静态扫描（--no-llm）。
-      JOB_skillspector_vet:
-        name: Skillspector_Vet
-        steps:
-          - name: check_skillspector_script
-            run: |
-              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-skillspector.sh \
-                || { echo "❌ runner 上未找到 ci-pr-skillspector.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
-          - name: run_skillspector_vet
-            env:
-              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
-            run: |
-              bash /opt/cannbot-skills-rdv/scripts/ci-pr-skillspector.sh \
-                --pr-number "${{ env.MERGE_ID }}" \
-                --gitcode-repo cann/cannbot-skills \
-                --timeout 1800
-        runs-on:
-          - self-hosted
-          - runner_name=A5_skill_tester_02
-      # 第三道静态门禁：Bandit Python 扫描（绝对阈值，HIGH 阻断 / MEDIUM 告警）。只扫 PR
-      # 改动的 .py 文件；同样只运行 Runner 上已部署的受信任脚本，由 RDV 检出合并树执行。
-      JOB_bandit_vet:
-        name: Bandit_Vet
-        steps:
-          - name: check_bandit_script
-            run: |
-              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-bandit.sh \
-                || { echo "❌ runner 上未找到 ci-pr-bandit.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
-          - name: run_bandit_vet
-            env:
-              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
-            run: |
-              bash /opt/cannbot-skills-rdv/scripts/ci-pr-bandit.sh \
-                --pr-number "${{ env.MERGE_ID }}" \
-                --gitcode-repo cann/cannbot-skills \
-                --timeout 1800
-        runs-on:
-          - self-hosted
-          - runner_name=A5_skill_tester_02
-      # 第四道静态门禁：Semgrep Bash 扫描（本地规则库绝对阈值，WARNING→MEDIUM 告警）。
-      # 只扫 PR 改动的 .sh 文件；同样只运行 Runner 上已部署的受信任脚本，
-      # 由 RDV 检出合并树并调用本地规则库执行。
-      JOB_semgrep_vet:
-        name: Semgrep_Vet
-        steps:
-          - name: check_semgrep_script
-            run: |
-              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-semgrep.sh \
-                || { echo "❌ runner 上未找到 ci-pr-semgrep.sh，请先部署 cannbot-skills-rdv" >&2; exit 3; }
-          - name: run_semgrep_vet
-            env:
-              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
-            run: |
-              bash /opt/cannbot-skills-rdv/scripts/ci-pr-semgrep.sh \
-                --pr-number "${{ env.MERGE_ID }}" \
-                --gitcode-repo cann/cannbot-skills \
-                --timeout 1800
-        runs-on:
-          - self-hosted
-          - runner_name=A5_skill_tester_02
-      JOB_content_critique:
-        name: Content_Critique
-        steps:
-          - name: check_content_critique_script
-            run: |
-              test -f /opt/cannbot-skills-rdv/scripts/ci-pr-content-critique.sh \
-                || { echo "❌ runner 上未找到 ci-pr-content-critique.sh，请确认 cannbot-skills-rdv 已部署" >&2; exit 3; }
-          - name: run_content_critique
-            env:
-              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
-            run: |
-              bash /opt/cannbot-skills-rdv/scripts/ci-pr-content-critique.sh \
-                --pr-number "${{ env.MERGE_ID }}" \
-                --gitcode-repo cann/cannbot-skills \
-                --timeout 600
+          # 完整 md 报告上传 OBS（`always()`：门禁未通过也上传；`continue-on-error`：上传异常不染红）
+          - name: upload_static_vet_report
+            if: ${{ always() }}
+            continue-on-error: true
+            uses: obs-upload
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              access-key: ${{ secrets.AK }}
+              secret-key: ${{ secrets.SK }}
+              artifact-path: "${{ env.ci_report_dir }}/static-vet/*.md"
+              object-prefix: ${{ env.obs_path }}/
         runs-on:
           - self-hosted
           - runner_name=A5_skill_tester_02
@@ -193,15 +132,29 @@ stages:
               test -f /opt/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
                 || { echo "❌ runner 上未找到 ci-pr-verify.sh，请确认 cannbot-skills-rdv 已部署" >&2; exit 3; }
           - name: run_st_test
+            env:
+              ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
+              CI_REPORT_DIR: "${{ env.ci_report_dir }}/st"
             run: |
               bash /opt/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
                 --pr-number "${{ env.MERGE_ID }}" \
                 --platforms A2 \
-                --password "${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}" \
                 --gitcode-repo cann/cannbot-skills \
                 --timeout 3600 \
                 --poll-interval 60 \
                 --strict
+          # 完整 md 报告上传 OBS：ST 失败/超时/取消时同样上传（`if: always()`），
+          - name: upload_st_report
+            if: ${{ always() }}
+            continue-on-error: true
+            uses: obs-upload
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              access-key: ${{ secrets.AK }}
+              secret-key: ${{ secrets.SK }}
+              artifact-path: "${{ env.ci_report_dir }}/st/*.md"
+              object-prefix: ${{ env.obs_path }}/
         if: "${{ default() }}"
         runs-on:
           - self-hosted
