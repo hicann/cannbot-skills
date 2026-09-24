@@ -16,7 +16,9 @@
 at::Tensor average_pooling_2d_custom_impl_npu(const at::Tensor& input, int64_t kernel_size) {
     // bf16 variant: input/output tensors are bfloat16
     // The kernel handles bf16↔f32 casting internally
-    int64_t actual_stride = kernel_size ;
+    TORCH_CHECK(kernel_size > 0,
+                "average_pooling_2d_custom: kernel_size must be positive, got ", kernel_size);
+    int64_t actual_stride = kernel_size;
     
     // --------------------------------------------------
     // Input tensor layout (NHWC):

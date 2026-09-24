@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-24】
+#### 缺陷修复 Bug Fixes
+- 【cake】`ascend-call-generation/references/average_pooling2d/average_pooling2d.cpp` 补 `kernel_size > 0` 的 `TORCH_CHECK`（issue #706）。该函数经 `TORCH_LIBRARY_IMPL` 与 `PYBIND11_MODULE` 两个入口注册为对外接口，`kernel_size` 原样赋给 `actual_stride` 后作为 `height / actual_stride`、`width / actual_stride` 的除数，调用方传 0 时在主机侧触发整数除零（SIGFPE）。本文件是生成 PyTorch 调用层的参考样例，校验缺失会随样例被复制进生成结果。
+
 ### 【2026-09-22】
 #### 新特性 New Features
 - 【tools】新增 tool-exception-dump 技能：基于 msaicerr/asys 的 AI Core Error 系统化诊断工作流（34 步：场景判定/报错行定位/错误类型解码/单算子复现/证据链汇聚），与 msaicerr-toolkit/asys-toolkit 分工协作(#709)
