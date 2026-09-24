@@ -1,6 +1,6 @@
 ---
 name: model-recommend-analysis
-description: 推荐模型昇腾NPU性能分析与优化，根据Profiling（必选）和Dump图（可选），分析瓶颈点及图结构中的相似结构，找到融合算子和pass机会；并给出优化建议。触发场景：推荐模型在昇腾NPU上性能不达标，需要分析MindStudio Profiler输出定位瓶颈并给出优化建议，或客户推荐业务迁移到昇腾需要调优吞吐和时延。支持推荐的推理和训练场景。
+description: 推荐模型昇腾NPU性能分析与优化，分析瓶颈点及图结构中的相似结构，找到融合算子和pass机会；并给出优化建议。触发场景：推荐模型在昇腾NPU上性能不达标或客户推荐业务迁移到昇腾需要调优吞吐和时延。支持推荐的推理和训练场景。
 ---
 
 # 推荐优化 Skill
@@ -11,6 +11,7 @@ description: 推荐模型昇腾NPU性能分析与优化，根据Profiling（必�
 - 需要分析MindStudio Profiler输出，定位瓶颈并给出优化建议
 - 客户推荐业务迁移到昇腾，需要调优吞吐和时延
 - **若提供了GE build图(pbtxt)或 PyTorch fxgraph，可识别Top相似结构，给出融合pass/融合算子优化建议**
+- **若提供了自定义融合pass案例库，给出融合pass建议前，优先访问该案例库去对比，命中则直接推荐**
 
 ## 2. 核心指标
 
@@ -69,9 +70,11 @@ description: 推荐模型昇腾NPU性能分析与优化，根据Profiling（必�
   - **训练场景额外分析：** 关键流程梳理（6 阶段调用链树状呈现）、aten IR 调用分析（合并树状呈现）、阶段异步与预取分析、通信未掩盖分析
 - **步骤3（可选）：** 若提供了 Dump 图，执行图分析脚本，分析 Top 重复子图结构，给出融合 pass/融合算子优化建议
   - 若未提供 Dump 图，则仅基于 Profiling 分析结果给出优化建议，跳过重复子图分析
-- **步骤4：** 汇总输出 Markdown 分析报告
-- **步骤5：** 校验报告（数据对齐 + 优化措施可实施可验证，详见"优化建议校验规则"）
-- **步骤6：** 校验通过后，删除临时文件（如 profiling_report.md 和 dump_report.md）
+- **步骤4（可选）：** 若提供了 自定义融合pass案例库，在给出融合pass优化建议之前，优先去匹配案例库中是否有匹配的pass，若有命中，则给出 Pass 名称、使用场景和限制；
+  - 若未提供 自定义融合pass案例库，则跳过该步骤
+- **步骤5：** 汇总输出 Markdown 分析报告
+- **步骤6：** 校验报告（数据对齐 + 优化措施可实施可验证，详见"优化建议校验规则"）
+- **步骤7：** 校验通过后，删除临时文件（如 profiling_report.md 和 dump_report.md）
 
 ## 4. 优化建议校验规则
 
@@ -126,6 +129,15 @@ description: 推荐模型昇腾NPU性能分析与优化，根据Profiling（必�
 1. **降级为方向性建议**：不给具体参数，改为"建议查阅 [文档链接] 获取最新的环境变量配置"
 2. **标注未验证**：在建议后标注 `(参数需查阅官方文档确认)`
 3. **禁止臆造**：绝对不可编造环境变量名或参数值
+
+### 规则6：若提供自定义融合pass案例库，融合类建议优先基于自定义融合pass案例库查验
+
+报告中需要提供算子融合Pass的建议时，优先核对 自定义融合pass案例库 中是否有匹配的案例：
+
+1. **匹配**：列出命中的 Pass 名称、使用场景和限制；
+2. **排除**：列出已排查但不匹配的 Pass 名称及排除原因（约束不满足的具体条款）
+
+> 访问方式：webfetch 链接页（若内容不全则 `git clone --depth 1` 后逐个查看 Pass 的 README.md 融合模式与算子约束）
 
 ## 5. 输入文件格式
 
@@ -386,7 +398,7 @@ python scripts/graph_analyzer.py <graph_file> -o dump_report.md
 #### NN计算优化
 
 - 措施1：算子自动融合。适用场景：vector占比大，算子数多，算子平均耗时短。预期收益：减少MTE搬运，减少调度次数。**约束：GE/ATC 图模式通过 `export AUTOFUSE_FLAGS="--enable_autofuse=true"` 开启；`--autofuse_enable_pass` 的可用值必须以 AutoFuse 官方文档为准（常见值：`reduce`、`concat`、`matmul`、`split`、`gather`、`transpose`、`scatter`、`slice`，910系列只支持reduce/concat，950系列往后支持所有参数值），**严禁臆造 pass 名**；PyTorch 场景通过 `torch.compile(model)` 开启 Inductor 编译，并通过环境变量 `export TORCHINDUCTOR_NPU_BACKEND=ascendc` 选择高性能 AscendC 后端（必须在 `torch.compile()` 调用之前设置）；其他可选后端：`default`（Triton 模式）、`mlir`、`dvm`；Eager 模式无法直接开启，需先转图模式；训练场景反向算子也会自动融合；参考：[AutoFuse]、[TORCHINDUCTOR_NPU_BACKEND]**
-- 措施2：手写融合算子和Pass。适用场景：重复结构且耗时较大。预期收益：需要实测。**约束：GE 图模式通过自定义 Pass 注册（GE REGISTER_PASS）；AscendC 算子通过 Ascend C API 开发融合算子；需 CANN 算子开发能力。参考：[图Pass开发]**
+- 措施2：手写融合算子和Pass。适用场景：重复结构且耗时较大。预期收益：需要实测。**约束：GE 图模式通过自定义 Pass 注册（GE REGISTER_PASS）；AscendC 算子通过 Ascend C API 开发融合算子；需 CANN 算子开发能力。参考：[图Pass开发]。生成此措施建议前，先确认是否存在可选输入 自定义融合pass案例库 ，若存在优先逐一核对（逐个 Pass 比对其 README 中的融合模式与本例图结构/算子序列，含约束条件如 shape 维度、dtype、静态/动态），命中则直接推荐现成 Pass（含构建部署步骤），未命中才走自行开发路径；核对结论（匹配/排除及原因）必须写入报告**
 - 措施3：单算子tiling key优化。适用场景：op_summary*.csv中的算子的aic_scalar_ratio 或 aiv_scalar_ratio 占比超过30%。预期收益：算子性能提升，显著降低scalar耗时占比。**约束：需联系算子开发团队修改 tiling 策略，非用户侧可配置；可通过 AscendC 修改算子的 tiling key 选择逻辑**
 - 措施4：静态图下沉。适用场景：动态shape可有限分档或shape不变场景。预期收益：需要实测，提升会很大。**约束：GE 图模式通过 `ge.exec.dynamicImageSize` 或 `--dynamic_dims` (ATC) 配置分档；PyTorch 通过 `torch.compile(model, dynamic=False)` 转静态图；需确认 shape 确实可分档或固定**
 - 措施5：多线程并行调度。适用场景：动态图执行场景。预期收益：减少host调度开销。**约束：环境变量 `export MAX_RUNTIME_CORE_NUMBER=3` 仅对图模式生效；TorchNPU，通过TASK_QUEUE_ENABLE=1，开启流水调度；配置后需配合绑核使用。参考：[多线程调度]**
