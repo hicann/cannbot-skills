@@ -74,17 +74,17 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 | API 类别            |  支持状态  | 说明                                                      |
 | ------------------- | :---------: | --------------------------------------------------------- |
 | **设备管理**        | ✅ 完全支持 | cudaGetDeviceCount, cudaSetDevice 等 16 个 API            |
-| **内存管理**        | ✅ 基本支持 | cudaMalloc, cudaMemcpy, cudaHostAlloc, cudaMemcpyToSymbol 等 API；CUDA SOMA/UVM 暂无真实对标 |
+| **内存管理**        | ✅ 基本支持 | cudaMalloc, cudaMemcpy, cudaHostAlloc, cudaMemcpyToSymbol 等 API；Managed Memory 基础接口按 CANN UVM 产品能力条件支持 |
 | **流管理**          | ✅ 完全支持 | cudaStreamCreate, cudaStreamSynchronize, capture info 等 API |
 | **事件管理**        | ✅ 完全支持 | cudaEventCreate, cudaEventRecord, cudaEventRecordWithFlags 等 API |
 | **IPC**             | ✅ 完全支持 | cudaIpcGetMemHandle 等 5 个 API (注意 key/opaque handle 约束) |
 | **库/模块管理**     | ✅ 完全支持 | cudaLibraryLoadFromFile、cuModuleLoad、cuModuleGetFunction 等 API |
-| **内存池/UVM**        | ⚠️ 不支持 | CUDA SOMA/UVM 相关 API 返回 cudaErrorNotSupported |
+| **内存池/UVM**        | ⚠️ 部分支持 | CUDA Managed Memory 基础分配、advise、prefetch、range attribute 查询按 CANN UVM 产品能力条件支持；CUDA SOMA 和 discard batch 类 UVM 扩展仍返回 cudaErrorNotSupported |
 | **Occupancy/Cooperative/高级 Graph/Driver JIT/Green Context/Multicast/Tensor Map** | ⚠️ 不支持 | 返回 cudaErrorNotSupported 或 CUDA_ERROR_NOT_SUPPORTED |
 | **Texture/Surface** |  ❌ 不支持  | 需额外适配层                                              |
 | **Driver VMM/Context** | ✅ 完全支持 | cuMemCreate, cuMemMap, cuCtxGetCurrent, cuCtxSetCurrent 等 API |
 
-具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。`cudaGraphAddNode` 仅支持 `cudaGraphNodeTypeConditional` 特例并映射到 `aclmdlRIAddCondTask`，其他 node type 仍按不支持处理；`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies` 当前不支持。CUDA SOMA/UVM 不得误标为完整支持，相关内存池、异步分配、managed memory、advise 和 prefetch 接口保持 not supported，且不进入转测验收。
+具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。`cudaGraphAddNode` 仅支持 `cudaGraphNodeTypeConditional` 特例并映射到 `aclmdlRIAddCondTask`，其他 node type 仍按不支持处理；`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies` 当前不支持。CUDA SOMA/UVM 不得误标为完整支持；Managed Memory 基础接口只能按 CANN UVM 产品能力条件支持并允许明确 `SKIP`，内存池、异步分配和 discard batch 类 UVM 扩展保持 not supported，且不进入转测验收。
 
 #### 2.3 输出可行性分析报告
 
@@ -237,6 +237,8 @@ kernel<<<grid, block, shared_mem, stream>>>(args);
 - 不使用 Host fallback 的结果声称已完成 NPU kernel 迁移、设备侧正确性验证或性能验证
 - 如需 NPU 设备侧实现，将其记录为本技能范围外事项，交由独立算子 skill 处理；本技能不得内部依赖或调用该 skill
 
+当只验证 CUDA 版本升级引入的少量 Runtime API 签名、返回码或参数约束时，不要把完整 `apiRuntimeCoverage_cuda.cu` 直接作为 CANN 转测产物。应按本轮接口范围生成最小 CANN smoke，只保留目标 API 的基本成功/错误路径和数据校验；`cudaLaunchKernelEx`、`cudaFuncGet*`、`cudaLaunchHostFunc*` 等依赖真实 CANN function handle 或 host callback 同步/销毁语义的专项路径，除非本轮目标正是验证这些能力，否则不要混入 batch copy、managed memory、capture info 等接口的基本场景验收，避免无关挂死遮蔽真正结论。
+
 ##### 4.1.5 Device Symbol / PTX Module Host Fallback
 
 CUDA `__device__` symbol 和 PTX 文本都属于 CUDA 设备侧资产，不能在 Runtime skill 中伪装成 NPU kernel 或 CANN binary。兼容层方式迁移时按以下规则处理：
@@ -326,8 +328,11 @@ cudaIpcOpenMemHandle(&d_ptr, handle, cudaIpcMemLazyEnablePeerAccess);
 | `cudaMemcpy`            | `aclrtMemcpy`                 | 增加 count 参数（dstSize, srcSize）  |
 | `cudaMemcpyAsync`       | `aclrtMemcpyAsync`            | 同上 + stream                        |
 | `cudaStreamCreate`      | `aclrtCreateStream`           | 直接映射                             |
+| `cudaStreamSetAttribute` / `cudaStreamGetAttribute` | `aclrtSetStreamAttribute` / `aclrtGetStreamAttribute` | 兼容层按 CANN stream attr/value 直通 |
 | `cudaEventCreate`       | `aclrtCreateEvent`            | 直接映射                             |
 | `cudaLaunchKernel`      | `aclrtLaunchKernelWithArgsArray` / `aclrtLaunchKernelWithHostArgs` / SIMT Launch 系列 | 根据参数组织方式选择 |
+| `cudaLaunchKernelEx`    | `aclrtLaunchKernelWithHostArgs` | 查询 CANN function 参数布局后打包 HostArgs |
+| `cudaFuncGetName` / `cudaFuncGetParamCount` / `cudaFuncGetParamInfo` | `aclrtGetFunctionName` / `aclrtFunctionGetParamCount` / `aclrtFunctionGetParamInfo` | CANN function handle 查询 |
 | `cudaGraphDebugDotPrint` | `aclmdlRIDebugJsonPrint`     | Graph 调试信息导出                   |
 | `cudaGraphExecDestroy`  | `aclmdlRIDestroy`             | 销毁 Graph/RI 实例                   |
 | `cudaGraphLaunch`       | `aclmdlRIExecuteAsync`        | 异步执行 Graph/RI                    |

@@ -101,31 +101,6 @@ extern "C"
     }
 
 
-    static inline cudaError_t cudaStreamGetCaptureInfo_v2(
-        cudaStream_t stream, cudaStreamCaptureStatus *captureStatus,
-        unsigned long long *id, cudaGraph_t *graph,
-        const cudaGraphNode_t **dependencies, size_t *numDependencies)
-    {
-        (void)stream;
-        if (captureStatus) {
-            *captureStatus = cudaStreamCaptureStatusNone;
-        }
-        if (id) {
-            *id = 0;
-        }
-        if (graph) {
-            *graph = NULL;
-        }
-        if (dependencies) {
-            *dependencies = NULL;
-        }
-        if (numDependencies) {
-            *numDependencies = 0;
-        }
-        return cudaErrorNotSupported;
-    }
-
-
     static inline cudaError_t cudaStreamUpdateCaptureDependencies(
         cudaStream_t stream, cudaGraphNode_t *dependencies,
         size_t numDependencies, unsigned int flags)

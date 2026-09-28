@@ -31,6 +31,10 @@
 #include "cann_compat_exec.h"
 #include "cann_compat_unsupported.h"
 
+#ifdef __cplusplus
+#include <stdexcept>
+#endif
+
 /* =================================================================
  * Convenience Macros for Common Operations
  * ================================================================= */
@@ -152,14 +156,7 @@ extern "C"
                                                    cudaMemLocation location, unsigned int flags,
                                                    cudaStream_t stream)
     {
-        // CANN handles data migration automatically
-        // For now, this is a no-op
-        (void)(devPtr);
-        (void)(count);
-        (void)(location);
-        (void)(flags);
-        (void)(stream);
-        return cudaErrorNotSupported;
+        return cudaMemPrefetchAsync_v2(devPtr, count, location, flags, stream);
     }
 
     /* =================================================================
@@ -186,9 +183,18 @@ extern "C"
 
 /* =================================================================
  * C++ Specific Extensions
- * ==================================================================
+ * ================================================================= */
 
 #ifdef __cplusplus
+
+static inline cudaError_t cudaMemPrefetchAsync(const void *devPtr, size_t count,
+                                               int dstDevice, cudaStream_t stream)
+{
+    cudaMemLocation location;
+    location.type = (dstDevice < 0) ? cudaMemLocationTypeHost : cudaMemLocationTypeDevice;
+    location.id = (dstDevice < 0) ? 0 : dstDevice;
+    return cudaMemPrefetchAsync_v2(devPtr, count, location, 0, stream);
+}
 
 namespace cuda {
 
@@ -207,7 +213,7 @@ private:
 
 // Check and throw on error
 inline void check(cudaError_t e) {
-    if (e != CUDASuccess) {
+    if (e != cudaSuccess) {
         throw error(e);
     }
 }

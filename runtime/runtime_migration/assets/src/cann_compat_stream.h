@@ -115,6 +115,28 @@ static inline cudaError_t cudaStreamGetFlags(cudaStream_t hStream, unsigned int 
     return acl2cudaError(ret);
 }
 
+static inline cudaError_t cudaStreamSetAttribute(cudaStream_t stream,
+                                                 cudaStreamAttrID attr,
+                                                 const cudaStreamAttrValue *value)
+{
+    if (!value) {
+        return cudaErrorInvalidValue;
+    }
+    aclError ret = aclrtSetStreamAttribute(stream, (aclrtStreamAttr)attr, (aclrtStreamAttrValue *)value);
+    return acl2cudaError(ret);
+}
+
+static inline cudaError_t cudaStreamGetAttribute(cudaStream_t stream,
+                                                 cudaStreamAttrID attr,
+                                                 cudaStreamAttrValue *value)
+{
+    if (!value) {
+        return cudaErrorInvalidValue;
+    }
+    aclError ret = aclrtGetStreamAttribute(stream, (aclrtStreamAttr)attr, (aclrtStreamAttrValue *)value);
+    return acl2cudaError(ret);
+}
+
 /* =================================================================
  * Stream Capture
  * ================================================================= */
@@ -262,12 +284,12 @@ static inline cudaError_t cudaCompatStreamGetCaptureInfo(cudaStream_t stream,
     return cudaSuccess;
 }
 
-static inline cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream,
-                                                   cudaStreamCaptureStatus *captureStatus_out,
-                                                   unsigned long long *id_out,
-                                                   cudaGraph_t *graph_out,
-                                                   const cudaGraphNode_t **dependencies_out,
-                                                   size_t *numDependencies_out)
+static inline cudaError_t cudaStreamGetCaptureInfo_v2(cudaStream_t stream,
+                                                      cudaStreamCaptureStatus *captureStatus_out,
+                                                      unsigned long long *id_out,
+                                                      cudaGraph_t *graph_out,
+                                                      const cudaGraphNode_t **dependencies_out,
+                                                      size_t *numDependencies_out)
 {
     return cudaCompatStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
                                           dependencies_out, NULL, numDependencies_out);
@@ -284,6 +306,10 @@ static inline cudaError_t cudaStreamGetCaptureInfo_v3(cudaStream_t stream,
     return cudaCompatStreamGetCaptureInfo(stream, captureStatus_out, id_out, graph_out,
                                           dependencies_out, edgeData_out, numDependencies_out);
 }
+
+#define CUDA_COMPAT_GET_CAPTURE_INFO_SELECT(_1, _2, _3, _4, _5, _6, _7, NAME, ...) NAME
+#define cudaStreamGetCaptureInfo(...) \
+    CUDA_COMPAT_GET_CAPTURE_INFO_SELECT(__VA_ARGS__, cudaStreamGetCaptureInfo_v3, cudaStreamGetCaptureInfo_v2)(__VA_ARGS__)
 
 
 

@@ -24,6 +24,11 @@ __global__ void ApiRuntimeCoverageKernel(int *out)
     *out = 42;
 }
 
+__global__ void ApiRuntimeCoverageKernelWithValue(int *out, int value)
+{
+    *out = value;
+}
+
 __device__ int g_apiRuntimeCoverageSymbol = 0;
 
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
@@ -43,6 +48,36 @@ namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+
+cudaError_t GetStreamCaptureInfoCompat(cudaStream_t stream,
+                                       cudaStreamCaptureStatus *status,
+                                       unsigned long long *id,
+                                       cudaGraph_t *graph,
+                                       const cudaGraphNode_t **deps,
+                                       size_t *depCount)
+{
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    const cudaGraphEdgeData *edgeData = nullptr;
+    return cudaStreamGetCaptureInfo(stream, status, id, graph, deps, &edgeData, depCount);
+#else
+    return cudaStreamGetCaptureInfo(stream, status, id, graph, deps, depCount);
+#endif
+}
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+cudaError_t GraphAddNodeCompat(cudaGraphNode_t *node,
+                               cudaGraph_t graph,
+                               const cudaGraphNode_t *deps,
+                               size_t depCount,
+                               cudaGraphNodeParams *params)
+{
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    return cudaGraphAddNode(node, graph, deps, nullptr, depCount, params);
+#else
+    return cudaGraphAddNode(node, graph, deps, depCount, params);
+#endif
+}
+#endif
 
 struct IpcPayload {
     cudaIpcMemHandle_t memHandle;
@@ -331,6 +366,17 @@ void CheckPeerEnableAndMemcpyAsyncApis(int deviceCount)
         ExpectSuccess("peer async dst cudaMalloc", cudaMalloc(&dst, bytes))) {
         ExpectSuccess("seed peer async src", cudaMemcpy(src, hostIn.data(), bytes, cudaMemcpyHostToDevice));
 
+        ExpectSuccess("cudaMemcpyPeer same device", cudaMemcpyPeer(dst, 0, src, 0, bytes));
+        ExpectSuccess("copy cudaMemcpyPeer dst back", cudaMemcpy(hostOut.data(), dst, bytes, cudaMemcpyDeviceToHost));
+        ++g_checks;
+        if (hostOut == hostIn) {
+            PrintResult("cudaMemcpyPeer same device data", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaMemcpyPeer same device data", "FAIL", "data mismatch");
+        }
+        std::fill(hostOut.begin(), hostOut.end(), 0);
+
         cudaStream_t stream = nullptr;
         if (ExpectSuccess("stream for cudaMemcpyPeerAsync", cudaStreamCreate(&stream))) {
             ExpectSuccess("cudaMemcpyPeerAsync same device", cudaMemcpyPeerAsync(dst, 0, src, 0, bytes, stream));
@@ -345,6 +391,49 @@ void CheckPeerEnableAndMemcpyAsyncApis(int deviceCount)
             }
             ExpectSuccess("destroy peer async stream", cudaStreamDestroy(stream));
         }
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13020
+        unsigned char *batchDstA = nullptr;
+        unsigned char *batchDstB = nullptr;
+        if (ExpectSuccess("cudaMalloc batch dst A", cudaMalloc(&batchDstA, bytes / 2)) &&
+            ExpectSuccess("cudaMalloc batch dst B", cudaMalloc(&batchDstB, bytes / 2))) {
+            void *dsts[2] = {batchDstA, batchDstB};
+            const auto *srcBytes = static_cast<const unsigned char *>(src);
+            const void *srcs[2] = {srcBytes, srcBytes + bytes / 2};
+            size_t sizes[2] = {bytes / 2, bytes / 2};
+            cudaMemcpyAttributes attrs[1]{};
+            attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+            size_t attrsIdxs[2] = {0, 0};
+            if (ExpectSuccess("stream for cudaMemcpyBatchAsync", cudaStreamCreate(&stream))) {
+                if (ExpectSuccess("cudaMemcpyBatchAsync",
+                                  cudaMemcpyBatchAsync(dsts, srcs, sizes, 2, attrs, attrsIdxs, 1, stream))) {
+                    if (ExpectSuccess("sync cudaMemcpyBatchAsync", cudaStreamSynchronize(stream))) {
+                        ExpectSuccess("copy batch dst A back",
+                                      cudaMemcpy(hostOut.data(), batchDstA, bytes / 2, cudaMemcpyDeviceToHost));
+                        ExpectSuccess("copy batch dst B back",
+                                      cudaMemcpy(hostOut.data() + bytes / 2, batchDstB, bytes / 2,
+                                                 cudaMemcpyDeviceToHost));
+                        ++g_checks;
+                        if (hostOut == hostIn) {
+                            PrintResult("cudaMemcpyBatchAsync data", "PASS");
+                        } else {
+                            ++g_failures;
+                            PrintResult("cudaMemcpyBatchAsync data", "FAIL", "data mismatch");
+                        }
+                    }
+                }
+                ExpectSuccess("destroy cudaMemcpyBatchAsync stream", cudaStreamDestroy(stream));
+            }
+        }
+        if (batchDstA != nullptr) {
+            ExpectSuccess("free batch dst A", cudaFree(batchDstA));
+        }
+        if (batchDstB != nullptr) {
+            ExpectSuccess("free batch dst B", cudaFree(batchDstB));
+        }
+#else
+        Skip("cudaMemcpyBatchAsync", "requires CUDA Runtime 13.2+");
+#endif
     }
     if (src != nullptr) {
         ExpectSuccess("free peer async src", cudaFree(src));
@@ -465,6 +554,280 @@ void CheckMemoryApis()
     ExpectSuccess("cudaFree deviceB", cudaFree(deviceB));
     ExpectSuccess("cudaFreeHost hostIn", cudaFreeHost(hostIn));
     ExpectSuccess("cudaFreeHost hostOut", cudaFreeHost(hostOut));
+}
+
+void Check3DMemoryApis()
+{
+    constexpr size_t width = 16;
+    constexpr size_t height = 4;
+    constexpr size_t depth = 3;
+    constexpr size_t pitch = 32;
+    constexpr size_t total = pitch * height * depth;
+
+    std::vector<unsigned char> src(total, 0);
+    std::vector<unsigned char> dst(total, 0);
+    std::vector<unsigned char> out(total, 0);
+    for (size_t z = 0; z < depth; ++z) {
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                src[z * pitch * height + y * pitch + x] =
+                    static_cast<unsigned char>(1 + z * 17 + y * 5 + x);
+            }
+        }
+    }
+
+    cudaMemcpy3DParms copy{};
+    copy.srcPtr = make_cudaPitchedPtr(src.data(), pitch, pitch, height);
+    copy.dstPtr = make_cudaPitchedPtr(dst.data(), pitch, pitch, height);
+    copy.extent = make_cudaExtent(width, height, depth);
+    copy.kind = cudaMemcpyHostToHost;
+
+    if (ExpectSuccess("cudaMemcpy3D H2H", cudaMemcpy3D(&copy))) {
+        ++g_checks;
+        if (dst == src) {
+            PrintResult("cudaMemcpy3D data", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaMemcpy3D data", "FAIL", "data mismatch");
+        }
+    }
+
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("stream for 3D memory", cudaStreamCreate(&stream))) {
+        return;
+    }
+
+    std::fill(dst.begin(), dst.end(), 0);
+    ExpectSuccess("cudaMemcpy3DAsync H2H", cudaMemcpy3DAsync(&copy, stream));
+    ExpectSuccess("sync cudaMemcpy3DAsync", cudaStreamSynchronize(stream));
+
+    unsigned char *deviceMem = nullptr;
+    if (ExpectSuccess("cudaMalloc 3D memset buffer", cudaMalloc(&deviceMem, total))) {
+        cudaPitchedPtr memsetPtr = make_cudaPitchedPtr(deviceMem, pitch, pitch, height);
+        ExpectSuccess("cudaMemset3D", cudaMemset3D(memsetPtr, 0x5a, make_cudaExtent(width, height, depth)));
+        ExpectSuccess("copy cudaMemset3D data", cudaMemcpy(out.data(), deviceMem, total, cudaMemcpyDeviceToHost));
+        bool memsetOk = true;
+        for (size_t z = 0; z < depth; ++z) {
+            for (size_t y = 0; y < height; ++y) {
+                for (size_t x = 0; x < width; ++x) {
+                    memsetOk = memsetOk && out[z * pitch * height + y * pitch + x] == 0x5a;
+                }
+            }
+        }
+        ++g_checks;
+        PrintResult("cudaMemset3D data", memsetOk ? "PASS" : "FAIL");
+        if (!memsetOk) {
+            ++g_failures;
+        }
+
+        ExpectSuccess("cudaMemset3DAsync",
+                      cudaMemset3DAsync(memsetPtr, 0xa5, make_cudaExtent(width, height, depth), stream));
+        ExpectSuccess("sync cudaMemset3DAsync", cudaStreamSynchronize(stream));
+        ExpectSuccess("copy cudaMemset3DAsync data",
+                      cudaMemcpy(out.data(), deviceMem, total, cudaMemcpyDeviceToHost));
+        ExpectSuccess("cudaFree 3D memset buffer", cudaFree(deviceMem));
+    }
+
+    unsigned char *peerSrc = nullptr;
+    unsigned char *peerDst = nullptr;
+    if (ExpectSuccess("cudaMalloc 3D peer src", cudaMalloc(&peerSrc, total)) &&
+        ExpectSuccess("cudaMalloc 3D peer dst", cudaMalloc(&peerDst, total))) {
+        ExpectSuccess("seed cudaMemcpy3DPeer src",
+                      cudaMemcpy(peerSrc, src.data(), total, cudaMemcpyHostToDevice));
+
+        cudaMemcpy3DPeerParms peer{};
+        peer.srcPtr = make_cudaPitchedPtr(peerSrc, pitch, pitch, height);
+        peer.srcDevice = 0;
+        peer.dstPtr = make_cudaPitchedPtr(peerDst, pitch, pitch, height);
+        peer.dstDevice = 0;
+        peer.extent = make_cudaExtent(width, height, depth);
+
+        ExpectSuccess("cudaMemcpy3DPeer same device", cudaMemcpy3DPeer(&peer));
+        ExpectSuccess("copy cudaMemcpy3DPeer dst",
+                      cudaMemcpy(out.data(), peerDst, total, cudaMemcpyDeviceToHost));
+        ++g_checks;
+        if (out == src) {
+            PrintResult("cudaMemcpy3DPeer data", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaMemcpy3DPeer data", "FAIL", "data mismatch");
+        }
+
+        std::fill(out.begin(), out.end(), 0);
+        ExpectSuccess("clear cudaMemcpy3DPeerAsync dst", cudaMemset(peerDst, 0, total));
+        ExpectSuccess("cudaMemcpy3DPeerAsync same device", cudaMemcpy3DPeerAsync(&peer, stream));
+        ExpectSuccess("sync cudaMemcpy3DPeerAsync", cudaStreamSynchronize(stream));
+        ExpectSuccess("copy cudaMemcpy3DPeerAsync dst",
+                      cudaMemcpy(out.data(), peerDst, total, cudaMemcpyDeviceToHost));
+        ++g_checks;
+        if (out == src) {
+            PrintResult("cudaMemcpy3DPeerAsync data", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaMemcpy3DPeerAsync data", "FAIL", "data mismatch");
+        }
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13020
+        std::fill(out.begin(), out.end(), 0);
+        ExpectSuccess("clear cudaMemcpy3DBatchAsync dst", cudaMemset(peerDst, 0, total));
+        cudaMemcpy3DBatchOp batchOp{};
+        batchOp.src.type = cudaMemcpyOperandTypePointer;
+        batchOp.src.op.ptr.ptr = peerSrc;
+        batchOp.src.op.ptr.rowLength = pitch;
+        batchOp.src.op.ptr.layerHeight = height;
+        batchOp.dst.type = cudaMemcpyOperandTypePointer;
+        batchOp.dst.op.ptr.ptr = peerDst;
+        batchOp.dst.op.ptr.rowLength = pitch;
+        batchOp.dst.op.ptr.layerHeight = height;
+        batchOp.extent = make_cudaExtent(width, height, depth);
+        batchOp.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+        if (ExpectSuccess("cudaMemcpy3DBatchAsync",
+                          cudaMemcpy3DBatchAsync(1, &batchOp, 0, stream))) {
+            if (ExpectSuccess("sync cudaMemcpy3DBatchAsync", cudaStreamSynchronize(stream))) {
+                ExpectSuccess("copy cudaMemcpy3DBatchAsync dst",
+                              cudaMemcpy(out.data(), peerDst, total, cudaMemcpyDeviceToHost));
+                ++g_checks;
+                if (out == src) {
+                    PrintResult("cudaMemcpy3DBatchAsync data", "PASS");
+                } else {
+                    ++g_failures;
+                    PrintResult("cudaMemcpy3DBatchAsync data", "FAIL", "data mismatch");
+                }
+            }
+        }
+#else
+        Skip("cudaMemcpy3DBatchAsync", "requires CUDA Runtime 13.2+");
+#endif
+    }
+    if (peerSrc != nullptr) {
+        ExpectSuccess("free cudaMemcpy3DPeer src", cudaFree(peerSrc));
+    }
+    if (peerDst != nullptr) {
+        ExpectSuccess("free cudaMemcpy3DPeer dst", cudaFree(peerDst));
+    }
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13020
+    cudaMemcpyAttributes attrs{};
+    attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+    std::fill(dst.begin(), dst.end(), 0);
+    if (ExpectSuccess("cudaMemcpyWithAttributesAsync",
+                      cudaMemcpyWithAttributesAsync(dst.data(), src.data(), width, &attrs, stream))) {
+        if (ExpectSuccess("sync cudaMemcpyWithAttributesAsync", cudaStreamSynchronize(stream))) {
+            ++g_checks;
+            if (std::equal(src.begin(), src.begin() + width, dst.begin())) {
+                PrintResult("cudaMemcpyWithAttributesAsync data", "PASS");
+            } else {
+                ++g_failures;
+                PrintResult("cudaMemcpyWithAttributesAsync data", "FAIL", "data mismatch");
+            }
+        }
+    }
+
+    std::fill(out.begin(), out.end(), 0);
+    cudaMemcpy3DBatchOp op{};
+    op.src.type = cudaMemcpyOperandTypePointer;
+    op.src.op.ptr.ptr = src.data();
+    op.src.op.ptr.rowLength = pitch;
+    op.src.op.ptr.layerHeight = height;
+    op.dst.type = cudaMemcpyOperandTypePointer;
+    op.dst.op.ptr.ptr = out.data();
+    op.dst.op.ptr.rowLength = pitch;
+    op.dst.op.ptr.layerHeight = height;
+    op.extent = make_cudaExtent(width, height, depth);
+    op.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+    if (ExpectSuccess("cudaMemcpy3DWithAttributesAsync",
+                      cudaMemcpy3DWithAttributesAsync(&op, 0, stream))) {
+        if (ExpectSuccess("sync cudaMemcpy3DWithAttrs", cudaStreamSynchronize(stream))) {
+            ++g_checks;
+            if (out == src) {
+                PrintResult("cudaMemcpy3DWithAttributesAsync data", "PASS");
+            } else {
+                ++g_failures;
+                PrintResult("cudaMemcpy3DWithAttributesAsync data", "FAIL", "data mismatch");
+            }
+        }
+    }
+#else
+    Skip("cudaMemcpyWithAttributesAsync", "requires CUDA Runtime 13.2+");
+    Skip("cudaMemcpy3DWithAttributesAsync", "requires CUDA Runtime 13.2+");
+#endif
+
+    ExpectSuccess("destroy 3D memory stream", cudaStreamDestroy(stream));
+}
+
+void CheckManagedMemoryApis(int device)
+{
+    constexpr size_t bytes = 4096;
+    int *managed = nullptr;
+    cudaError_t allocErr = cudaMallocManaged(&managed, bytes, cudaMemAttachGlobal);
+    if (allocErr != cudaSuccess) {
+        Skip("cudaMallocManaged", cudaGetErrorString(allocErr));
+        return;
+    }
+    PrintResult("cudaMallocManaged", "PASS");
+
+    managed[0] = 7;
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    cudaMemLocation location{};
+    location.type = cudaMemLocationTypeDevice;
+    location.id = device;
+    OptionalSuccess("cudaMemPrefetchAsync_v2",
+                    cudaMemPrefetchAsync(managed, bytes, location, 0, nullptr));
+    const void *prefetchPtrs[] = {managed};
+    size_t prefetchSizes[] = {bytes};
+    size_t locationIdxs[] = {0};
+    OptionalSuccess("cudaMemPrefetchBatchAsync",
+                    cudaMemPrefetchBatchAsync(prefetchPtrs, prefetchSizes, 1,
+                                              &location, locationIdxs, 1, 0, nullptr));
+#else
+    OptionalSuccess("cudaMemPrefetchAsync", cudaMemPrefetchAsync(managed, bytes, device, nullptr));
+    Skip("cudaMemPrefetchBatchAsync", "requires CUDA Runtime 13.x+");
+#endif
+    OptionalSuccess("sync after managed prefetch", cudaDeviceSynchronize());
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    OptionalSuccess("cudaMemAdvise read mostly",
+                    cudaMemAdvise(managed, bytes, cudaMemAdviseSetReadMostly, location));
+#else
+    OptionalSuccess("cudaMemAdvise read mostly",
+                    cudaMemAdvise(managed, bytes, cudaMemAdviseSetReadMostly, device));
+#endif
+
+    int readMostly = 0;
+    if (OptionalSuccess("cudaMemRangeGetAttribute read mostly",
+                        cudaMemRangeGetAttribute(&readMostly, sizeof(readMostly),
+                                                 cudaMemRangeAttributeReadMostly, managed, bytes))) {
+        ++g_checks;
+        if (readMostly == 0 || readMostly == 1) {
+            PrintResult("cudaMemRangeGetAttribute value", "PASS",
+                        readMostly ? "readMostly=1" : "readMostly=0");
+        } else {
+            ++g_failures;
+            PrintResult("cudaMemRangeGetAttribute value", "FAIL", "expected boolean value");
+        }
+    }
+
+    int readMostlyBatch = 0;
+    void *rangeData[] = {&readMostlyBatch};
+    size_t rangeDataSizes[] = {sizeof(readMostlyBatch)};
+    cudaMemRangeAttribute rangeAttrs[] = {cudaMemRangeAttributeReadMostly};
+    OptionalSuccess("cudaMemRangeGetAttributes read mostly",
+                    cudaMemRangeGetAttributes(rangeData, rangeDataSizes, rangeAttrs, 1, managed, bytes));
+
+    void *hostPtr = nullptr;
+    if (OptionalSuccess("cudaHostAlloc for flags",
+                        cudaHostAlloc(&hostPtr, bytes, cudaHostAllocDefault))) {
+        unsigned int hostFlags = 0;
+        if (OptionalSuccess("cudaHostGetFlags", cudaHostGetFlags(&hostFlags, hostPtr))) {
+            char detail[64];
+            std::snprintf(detail, sizeof(detail), "flags=%u", hostFlags);
+            PrintResult("cudaHostGetFlags value", "PASS", detail);
+        }
+        ExpectSuccess("cudaFreeHost managed flags host", cudaFreeHost(hostPtr));
+    }
+
+    ExpectSuccess("cudaFree managed", cudaFree(managed));
 }
 
 void CheckStreamApis()
@@ -611,14 +974,14 @@ void CheckLaunchKernelApi()
     ExpectError("cudaLaunchKernel null func",
                 cudaLaunchKernel(nullptr, dim3(1), dim3(1), invalidArgs, 0, nullptr),
                 cudaErrorInvalidDeviceFunction);
-    ExpectError("cudaLaunchKernel zero grid",
-                cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
-                                 dim3(0), dim3(1), invalidArgs, 0, nullptr),
-                cudaErrorInvalidConfiguration);
-    ExpectError("cudaLaunchKernel zero block",
-                cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
-                                 dim3(1), dim3(0), invalidArgs, 0, nullptr),
-                cudaErrorInvalidConfiguration);
+    ExpectErrorAny("cudaLaunchKernel zero grid",
+                   cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
+                                    dim3(0), dim3(1), invalidArgs, 0, nullptr),
+                   cudaErrorInvalidConfiguration, cudaErrorInvalidValue);
+    ExpectErrorAny("cudaLaunchKernel zero block",
+                   cudaLaunchKernel(reinterpret_cast<const void *>(ApiRuntimeCoverageKernel),
+                                    dim3(1), dim3(0), invalidArgs, 0, nullptr),
+                   cudaErrorInvalidConfiguration, cudaErrorInvalidValue);
 
     int *deviceValue = nullptr;
     int hostValue = 0;
@@ -854,6 +1217,187 @@ void CheckIncrementalEventRecord()
     }
 }
 
+void CheckStreamAttributeApis()
+{
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("stream attribute stream", cudaStreamCreate(&stream))) {
+        return;
+    }
+
+    cudaStreamAttrValue setValue{};
+    cudaStreamAttrValue getValue{};
+
+#if defined(__CUDACC__)
+    if (std::getenv("CUDA_MAPPING_RUN_STREAM_ATTRIBUTE") == nullptr) {
+        Skip("cudaStreamSetAttribute", "set CUDA_MAPPING_RUN_STREAM_ATTRIBUTE=1 to run CUDA access-policy path");
+        Skip("cudaStreamGetAttribute", "set CUDA_MAPPING_RUN_STREAM_ATTRIBUTE=1 to run CUDA access-policy path");
+    } else {
+        setValue.accessPolicyWindow.base_ptr = nullptr;
+        setValue.accessPolicyWindow.num_bytes = 0;
+        setValue.accessPolicyWindow.hitRatio = 0.0;
+        setValue.accessPolicyWindow.hitProp = cudaAccessPropertyNormal;
+        setValue.accessPolicyWindow.missProp = cudaAccessPropertyNormal;
+        if (OptionalSuccess("cudaStreamSetAttribute",
+                            cudaStreamSetAttribute(stream, cudaStreamAttributeAccessPolicyWindow, &setValue))) {
+            OptionalSuccess("cudaStreamGetAttribute",
+                            cudaStreamGetAttribute(stream, cudaStreamAttributeAccessPolicyWindow, &getValue));
+        }
+    }
+#else
+    setValue.userCustomTag = 2026U;
+    if (OptionalSuccess("cudaStreamSetAttribute",
+                        cudaStreamSetAttribute(stream,
+                                               static_cast<cudaStreamAttrID>(ACL_STREAM_ATTR_USER_CUSTOM_TAG),
+                                               &setValue))) {
+        OptionalSuccess("cudaStreamGetAttribute",
+                        cudaStreamGetAttribute(stream,
+                                               static_cast<cudaStreamAttrID>(ACL_STREAM_ATTR_USER_CUSTOM_TAG),
+                                               &getValue));
+    }
+#endif
+
+    ExpectSuccess("destroy stream attribute stream", cudaStreamDestroy(stream));
+}
+
+void CheckFunctionQueryApis()
+{
+    const char *funcName = nullptr;
+    if (OptionalSuccess("cudaFuncGetName",
+                        cudaFuncGetName(&funcName,
+                                        reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue)))) {
+        ++g_checks;
+        if (funcName != nullptr && funcName[0] != '\0') {
+            PrintResult("cudaFuncGetName non-empty", "PASS", funcName);
+        } else {
+            ++g_failures;
+            PrintResult("cudaFuncGetName non-empty", "FAIL", "empty name");
+        }
+    }
+
+    size_t dynamicSmem = 0;
+    if (OptionalSuccess("cudaOccupancyAvailableDynamicSMemPerBlock",
+                        cudaOccupancyAvailableDynamicSMemPerBlock(&dynamicSmem,
+                                                                  ApiRuntimeCoverageKernel,
+                                                                  1,
+                                                                  64))) {
+        ++g_checks;
+        if (dynamicSmem > 0) {
+            char detail[96];
+            std::snprintf(detail, sizeof(detail), "bytes=%zu", dynamicSmem);
+            PrintResult("occupancy dynamic smem value", "PASS", detail);
+        } else {
+            ++g_failures;
+            PrintResult("occupancy dynamic smem value", "FAIL", "expected nonzero bytes");
+        }
+    }
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    size_t paramCount = 0;
+    if (OptionalSuccess("cudaFuncGetParamCount",
+                        cudaFuncGetParamCount(reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue),
+                                              &paramCount))) {
+        char detail[96];
+        std::snprintf(detail, sizeof(detail), "paramCount=%zu", paramCount);
+        PrintResult("cudaFuncGetParamCount value", "PASS", detail);
+        if (paramCount > 0) {
+            size_t offset = 0;
+            size_t size = 0;
+            ExpectSuccess("cudaFuncGetParamInfo first param",
+                          cudaFuncGetParamInfo(reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue),
+                                               0, &offset, &size));
+        } else {
+            Skip("cudaFuncGetParamInfo first param", "kernel reports zero params");
+        }
+    }
+    ExpectError("cudaFuncGetParamCount null count",
+                cudaFuncGetParamCount(reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue), nullptr),
+                cudaErrorInvalidValue);
+    ExpectError("cudaFuncGetParamInfo both outputs null",
+                cudaFuncGetParamInfo(reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue),
+                                     0, nullptr, nullptr),
+                cudaErrorInvalidValue);
+#else
+    Skip("cudaFuncGetParamCount", "requires CUDA headers that declare cudaFuncGetParamCount");
+    Skip("cudaFuncGetParamInfo", "requires CUDA headers that declare cudaFuncGetParamInfo");
+#endif
+}
+
+void CheckLaunchHostFuncV2Api()
+{
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("stream for cudaLaunchHostFunc_v2", cudaStreamCreate(&stream))) {
+        return;
+    }
+
+    ExpectSuccess("cudaLaunchHostFunc_v2 null fn",
+                  cudaLaunchHostFunc_v2(stream, nullptr, nullptr, 0));
+
+    int callbackValue = 0;
+    if (OptionalSuccess("cudaLaunchHostFunc_v2",
+                        cudaLaunchHostFunc_v2(stream, HostCallback, &callbackValue, 0))) {
+        ExpectSuccess("sync cudaLaunchHostFunc_v2", cudaStreamSynchronize(stream));
+        ++g_checks;
+        if (callbackValue == 1234) {
+            PrintResult("cudaLaunchHostFunc_v2 callback", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("cudaLaunchHostFunc_v2 callback", "FAIL", "callback did not run");
+        }
+    }
+
+    ExpectSuccess("destroy host func v2 stream", cudaStreamDestroy(stream));
+#else
+    Skip("cudaLaunchHostFunc_v2", "requires CUDA headers that declare cudaLaunchHostFunc_v2");
+#endif
+}
+
+void CheckLaunchKernelExApi()
+{
+    int *deviceValue = nullptr;
+    int hostValue = 0;
+    constexpr int expectedValue = 2026;
+    if (!ExpectSuccess("cudaMalloc launch kernel ex value", cudaMalloc(&deviceValue, sizeof(int)))) {
+        return;
+    }
+
+    cudaStream_t stream = nullptr;
+    if (ExpectSuccess("stream for cudaLaunchKernelEx", cudaStreamCreate(&stream))) {
+        cudaLaunchConfig_t config{};
+        config.gridDim = dim3(1, 1, 1);
+        config.blockDim = dim3(32, 1, 1);
+        config.dynamicSmemBytes = 0;
+        config.stream = stream;
+        config.attrs = nullptr;
+        config.numAttrs = 0;
+
+#if defined(__CUDACC__)
+        cudaError_t launchErr = cudaLaunchKernelEx(&config, ApiRuntimeCoverageKernelWithValue,
+                                                   deviceValue, expectedValue);
+#else
+        void *args[] = {&deviceValue, const_cast<int *>(&expectedValue)};
+        cudaError_t launchErr = cudaLaunchKernelEx(&config,
+                                                   reinterpret_cast<const void *>(ApiRuntimeCoverageKernelWithValue),
+                                                   args);
+#endif
+        if (ExpectSuccess("cudaLaunchKernelEx", launchErr)) {
+            ExpectSuccess("sync cudaLaunchKernelEx", cudaStreamSynchronize(stream));
+            ExpectSuccess("copy cudaLaunchKernelEx result",
+                          cudaMemcpy(&hostValue, deviceValue, sizeof(hostValue), cudaMemcpyDeviceToHost));
+            ++g_checks;
+            if (hostValue == expectedValue) {
+                PrintResult("cudaLaunchKernelEx result", "PASS");
+            } else {
+                ++g_failures;
+                PrintResult("cudaLaunchKernelEx result", "FAIL", "unexpected value");
+            }
+        }
+        ExpectSuccess("destroy cudaLaunchKernelEx stream", cudaStreamDestroy(stream));
+    }
+
+    ExpectSuccess("free cudaLaunchKernelEx value", cudaFree(deviceValue));
+}
+
 void CheckIncrementalFunctionAndGraphApis()
 {
     cudaFuncAttributes attrs{};
@@ -885,8 +1429,8 @@ void CheckIncrementalFunctionAndGraphApis()
             const cudaGraphNode_t *deps = nullptr;
             size_t depCount = 0;
             if (ExpectSuccess("cudaStreamGetCaptureInfo conditional",
-                              cudaStreamGetCaptureInfo(parentStream, &status, nullptr, &conditionalGraph,
-                                                       &deps, &depCount)) &&
+                              GetStreamCaptureInfoCompat(parentStream, &status, nullptr, &conditionalGraph,
+                                                         &deps, &depCount)) &&
                 ExpectSuccess("cudaGraphConditionalHandleCreate",
                               cudaGraphConditionalHandleCreate(&handle, conditionalGraph, 1,
                                                                cudaGraphCondAssignDefault))) {
@@ -897,8 +1441,8 @@ void CheckIncrementalFunctionAndGraphApis()
                 conditionalParams.conditional.type = cudaGraphCondTypeWhile;
                 conditionalParams.conditional.size = 1;
                 if (ExpectSuccess("cudaGraphAddNode conditional",
-                                  cudaGraphAddNode(&conditionalNode, conditionalGraph, nullptr, 0,
-                                                   &conditionalParams))) {
+                                  GraphAddNodeCompat(&conditionalNode, conditionalGraph, nullptr, 0,
+                                                     &conditionalParams))) {
                     cudaGraph_t bodyGraph = conditionalParams.conditional.phGraph_out[0];
                     if (ExpectSuccess("cudaStreamBeginCaptureToGraph",
                                       cudaStreamBeginCaptureToGraph(bodyStream, bodyGraph, nullptr,
@@ -974,6 +1518,56 @@ void CheckIncrementalSymbolApis()
             PrintResult("cudaGetSymbolAddress value", "FAIL", "unexpected symbol value");
         }
     }
+
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("symbol async stream", cudaStreamCreate(&stream))) {
+        return;
+    }
+
+    value = 2026;
+    ExpectSuccess("cudaMemcpyToSymbolAsync",
+                  cudaMemcpyToSymbolAsync(g_apiRuntimeCoverageSymbol, &value, sizeof(value),
+                                          0, cudaMemcpyHostToDevice, stream));
+    ExpectSuccess("sync cudaMemcpyToSymbolAsync", cudaStreamSynchronize(stream));
+
+    int asyncObserved = 0;
+    ExpectSuccess("cudaMemcpyFromSymbol",
+                  cudaMemcpyFromSymbol(&asyncObserved, g_apiRuntimeCoverageSymbol,
+                                       sizeof(asyncObserved), 0, cudaMemcpyDeviceToHost));
+    ++g_checks;
+    if (asyncObserved == value) {
+        PrintResult("cudaMemcpyFromSymbol data", "PASS");
+    } else {
+        ++g_failures;
+        PrintResult("cudaMemcpyFromSymbol data", "FAIL", "unexpected symbol value");
+    }
+
+    asyncObserved = 0;
+    ExpectSuccess("cudaMemcpyFromSymbolAsync",
+                  cudaMemcpyFromSymbolAsync(&asyncObserved, g_apiRuntimeCoverageSymbol,
+                                            sizeof(asyncObserved), 0, cudaMemcpyDeviceToHost, stream));
+    ExpectSuccess("sync cudaMemcpyFromSymbolAsync", cudaStreamSynchronize(stream));
+    ++g_checks;
+    if (asyncObserved == value) {
+        PrintResult("cudaMemcpyFromSymbolAsync data", "PASS");
+    } else {
+        ++g_failures;
+        PrintResult("cudaMemcpyFromSymbolAsync data", "FAIL", "unexpected symbol value");
+    }
+
+    size_t symbolSize = 0;
+    ExpectSuccess("cudaGetSymbolSize", cudaGetSymbolSize(&symbolSize, g_apiRuntimeCoverageSymbol));
+    ++g_checks;
+    if (symbolSize >= sizeof(value)) {
+        char detail[96];
+        std::snprintf(detail, sizeof(detail), "size=%zu", symbolSize);
+        PrintResult("cudaGetSymbolSize value", "PASS", detail);
+    } else {
+        ++g_failures;
+        PrintResult("cudaGetSymbolSize value", "FAIL", "smaller than copied symbol");
+    }
+
+    ExpectSuccess("destroy symbol async stream", cudaStreamDestroy(stream));
 }
 
 void CheckIncrementalCaptureInfo()
@@ -985,8 +1579,11 @@ void CheckIncrementalCaptureInfo()
         const cudaGraphNode_t *deps = nullptr;
         size_t depCount = 0;
         ExpectSuccess("cudaStreamGetCaptureInfo",
-                      cudaStreamGetCaptureInfo(captureStream, &status, nullptr, &graph, &deps, &depCount));
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+                      GetStreamCaptureInfoCompat(captureStream, &status, nullptr, &graph, &deps, &depCount));
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+        ExpectSuccess("cudaStreamGetCaptureInfo edge data",
+                      GetStreamCaptureInfoCompat(captureStream, &status, nullptr, &graph, &deps, &depCount));
+#elif defined(CUDART_VERSION) && CUDART_VERSION >= 12030
         ExpectSuccess("cudaStreamGetCaptureInfo_v3",
                       cudaStreamGetCaptureInfo_v3(captureStream, &status, nullptr, &graph, &deps, nullptr, &depCount));
 #elif defined(CUDART_VERSION) && CUDART_VERSION >= 11030
@@ -1148,6 +1745,10 @@ void CheckIncrementalApiSurface(int device, const char *selfPath)
     constexpr size_t bytes = 4096;
     CheckIncrementalHostAlloc(bytes);
     CheckIncrementalEventRecord();
+    CheckStreamAttributeApis();
+    CheckFunctionQueryApis();
+    CheckLaunchHostFuncV2Api();
+    CheckLaunchKernelExApi();
     CheckIncrementalFunctionAndGraphApis();
     CheckIncrementalSymbolApis();
     CheckIncrementalCaptureInfo();
@@ -1287,6 +1888,8 @@ int main(int argc, char **argv)
     CheckPeerAccessCapability(deviceCount);
     CheckPeerEnableAndMemcpyAsyncApis(deviceCount);
     CheckMemoryApis();
+    Check3DMemoryApis();
+    CheckManagedMemoryApis(device);
     CheckStreamApis();
     CheckEventApis();
     CheckHostRegistrationApis();

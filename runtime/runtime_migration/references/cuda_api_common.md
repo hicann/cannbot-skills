@@ -317,6 +317,17 @@ cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event,
 - 参数：flags - 通常为 0
 - 返回：cudaSuccess 或错误码
 
+### cudaStreamSetAttribute / cudaStreamGetAttribute
+```c
+cudaError_t cudaStreamSetAttribute(cudaStream_t stream, cudaStreamAttrID attr,
+                                   const cudaStreamAttrValue *value);
+cudaError_t cudaStreamGetAttribute(cudaStream_t stream, cudaStreamAttrID attr,
+                                   cudaStreamAttrValue *value);
+```
+- 功能：设置或查询 stream 属性。
+- 兼容层口径：`cudaStreamAttrID` 和 `cudaStreamAttrValue` 复用 CANN `aclrtStreamAttr` / `aclrtStreamAttrValue`，直接映射到 `aclrtSetStreamAttribute` / `aclrtGetStreamAttribute`；属性枚举语义以 CANN Runtime 为准。
+- 参数：`value` 为空时返回 `cudaErrorInvalidValue`。
+
 ### cudaStreamBeginCapture
 ```c
 cudaError_t cudaStreamBeginCapture(cudaStream_t stream, cudaStreamCaptureMode mode);
@@ -520,16 +531,57 @@ cudaError_t cudaMemPoolTrimTo(cudaMemPool_t memPool, size_t minBytesToKeep);
 cudaError_t cudaMallocManaged(void **devPtr, size_t size, unsigned int flags);
 ```
 - 功能：申请统一内存
-- CANN 对标结论：当前未真实对标 CUDA UVM，兼容层返回 `cudaErrorNotSupported`
+- CANN 对标结论：映射到 `aclrtMemAllocManaged`，当前仅接受 `cudaMemAttachGlobal`。CANN UVM 能力受产品限制；本地 CANN 缺少接口符号或产品不支持时返回对应 CUDA 错误，不把环境/产品不支持写成通用通过。
 
 ### cudaMemAdvise / cudaMemPrefetchAsync / cudaMemRangeGetAttribute(s)
 ```c
 cudaError_t cudaMemAdvise(const void *devPtr, size_t count, cudaMemoryAdvise advice, int device);
 cudaError_t cudaMemPrefetchAsync(const void *devPtr, size_t count, cudaMemLocation location, unsigned int flags,
                                  cudaStream_t stream);
+cudaError_t cudaMemPrefetchAsync_v2(const void *devPtr, size_t count, cudaMemLocation location, unsigned int flags,
+                                    cudaStream_t stream);
 ```
 - 功能：CUDA UVM advise、prefetch 和 range attribute 查询
-- CANN 对标结论：当前不做 CUDA UVM 映射，不进入转测验收；兼容层返回 `cudaErrorNotSupported`
+- CANN 对标结论：分别映射到 `aclrtMemManagedAdvise`、`aclrtMemManagedPrefetchAsync`、`aclrtMemManagedGetAttr(s)`。`cudaMemPrefetchAsync` 的 C++ device-id 形态会转换为 `cudaMemLocation` 后复用 v2 包装；prefetch flags 当前仅支持 0。range attribute 仅声明并映射 read-mostly、preferred-location、accessed-by、last-prefetch-location 基础枚举。
+
+### cudaHostGetFlags
+```c
+cudaError_t cudaHostGetFlags(unsigned int *pFlags, void *pHost);
+```
+- 功能：查询 Host 注册/分配指针对应 flags
+- CANN 对标结论：CANN `aclrtPointerGetAttributes` 可确认 Host 指针属性，但不保留 CUDA 原始注册/分配 flags；兼容层成功识别 Host 指针时返回 `cudaHostAllocDefault`，非法指针或非 Host 指针返回错误。
+
+### cudaMemcpy3D / cudaMemcpy3DAsync / cudaMemcpy3DPeer / cudaMemcpy3DPeerAsync
+```c
+cudaError_t cudaMemcpy3D(const cudaMemcpy3DParms *p);
+cudaError_t cudaMemcpy3DAsync(const cudaMemcpy3DParms *p, cudaStream_t stream);
+cudaError_t cudaMemcpy3DPeer(const cudaMemcpy3DPeerParms *p);
+cudaError_t cudaMemcpy3DPeerAsync(const cudaMemcpy3DPeerParms *p, cudaStream_t stream);
+```
+- 功能：3D pitched memory copy
+- 兼容层口径：当前支持 `cudaPitchedPtr` linear memory 形态，按 depth 逐 slice 调用 `aclrtMemcpy2d` / `aclrtMemcpy2dAsync`；`cudaArray_t` / texture array 形态返回 `cudaErrorNotSupported`。
+- P2P 限制：peer 形态按 device-to-device copy 处理；跨 Device 成功路径仍受 CANN P2P 能力、拓扑和分配策略限制。
+
+### cudaMemset3D / cudaMemset3DAsync
+```c
+cudaError_t cudaMemset3D(cudaPitchedPtr pitchedDevPtr, int value, cudaExtent extent);
+cudaError_t cudaMemset3DAsync(cudaPitchedPtr pitchedDevPtr, int value, cudaExtent extent, cudaStream_t stream);
+```
+- 功能：3D pitched memory set
+- 兼容层口径：当前支持 linear pitched pointer，按 depth/height 逐 slice/逐行调用 `aclrtMemset` / `aclrtMemsetAsync`。
+
+### cudaMemcpyWithAttributesAsync / cudaMemcpy3DBatchAsync / cudaMemcpy3DWithAttributesAsync
+```c
+cudaError_t cudaMemcpyWithAttributesAsync(void *dst, const void *src, size_t count,
+                                          cudaMemcpyAttributes *attrs, cudaStream_t stream);
+cudaError_t cudaMemcpy3DBatchAsync(size_t numOps, cudaMemcpy3DBatchOp *opList,
+                                   unsigned long long flags, cudaStream_t stream);
+cudaError_t cudaMemcpy3DWithAttributesAsync(cudaMemcpy3DBatchOp *op,
+                                            unsigned long long flags, cudaStream_t stream);
+```
+- 功能：带属性 hint 的异步 copy
+- 兼容层口径：当前保留编译和基本 copy 能力，忽略 CUDA access-order/location hint。1D 形态映射到 `aclrtMemcpyAsync(ACL_MEMCPY_DEFAULT)`；3D batch op 仅支持 pointer operand，按 op 和 depth 逐项下发 2D async copy，flags 仅支持 0。
+- `cudaMemcpyBatchAsync` 为 CUDA Runtime 13.2+ 接口，兼容层映射到 `aclrtMemcpyBatchAsyncV2`。CANN batch 成功路径受 src/dst location hint 和 copy 形态限制；不支持的形态应返回明确错误或在用例中记录为条件 SKIP。
 
 ---
 
@@ -552,6 +604,34 @@ cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn, void *userD
 - 功能：在 stream 中插入 Host 回调任务
 - 参数：`fn` 为空时按已验证 CUDA baseline 作为 no-op 返回 `cudaSuccess`
 - 兼容层口径：映射到 CANN `aclrtLaunchHostFunc`；回调函数不要做资源申请/释放、stream/device 同步或继续下发任务，避免死锁或运行期错误
+
+### cudaLaunchHostFunc_v2
+```c
+cudaError_t cudaLaunchHostFunc_v2(cudaStream_t stream, cudaHostFn_t fn,
+                                  void *userData, unsigned int syncMode);
+```
+- 功能：v2 Host 回调入口。
+- 兼容层口径：映射到 `aclrtLaunchHostFunc`；`syncMode` 当前无 CANN 等价差异，兼容层忽略该参数；空回调作为 no-op 返回 `cudaSuccess`。
+
+### cudaFuncGetName / cudaFuncGetParamCount / cudaFuncGetParamInfo
+```c
+cudaError_t cudaFuncGetName(const char **name, const void *func);
+cudaError_t cudaFuncGetParamCount(const void *func, size_t *paramCount);
+cudaError_t cudaFuncGetParamInfo(const void *func, size_t paramIndex,
+                                 size_t *paramOffset, size_t *paramSize);
+```
+- 功能：查询 CANN function handle 的名称、参数个数以及参数 offset/size。
+- 兼容层口径：分别映射到 `aclrtGetFunctionName`、`aclrtFunctionGetParamCount`、`aclrtFunctionGetParamInfo`；`cudaFuncGetName` 返回兼容层内部静态缓冲区指针。
+- 限制：`func` 必须是 CANN Runtime 可识别的 function handle，不支持普通 CUDA `__global__` 函数指针作为 NPU 成功路径。
+
+### cudaLaunchKernelEx
+```c
+cudaError_t cudaLaunchKernelEx(const cudaLaunchConfig_t *config,
+                               const void *func, void **args);
+```
+- 功能：使用扩展配置启动 kernel。
+- 兼容层口径：通过 `aclrtFunctionGetParamCount` 和 `aclrtFunctionGetParamInfo` 查询参数布局，将 `void **args` 打包成 Host 连续参数区后调用 `aclrtLaunchKernelWithHostArgs`。
+- 限制：仅适用于 CANN Runtime 可识别的 function handle；普通 CUDA kernel 指针仍按 Host fallback 或错误边界处理。
 
 ---
 
@@ -634,6 +714,10 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 | `cudaHostAlloc` | 分配 Host pinned 内存 |
 | `cudaGetSymbolAddress` | 获取设备符号地址 |
 | `cudaMemcpyToSymbol` | 向设备符号拷贝数据 |
+| `cudaMemcpyToSymbolAsync` | 异步向设备符号拷贝数据；C++ host fallback symbol 立即完成 |
+| `cudaMemcpyFromSymbol` | 从设备符号拷贝数据 |
+| `cudaMemcpyFromSymbolAsync` | 异步从设备符号拷贝数据；C++ host fallback symbol 立即完成 |
+| `cudaGetSymbolSize` | 查询设备符号大小；C++ host fallback symbol 返回兼容层 backing size |
 | `cuMemsetD32Async` | Driver D32 异步 memset |
 | `cudaFuncGetAttributes` | 查询 kernel/function 属性 |
 | `cudaGraphConditionalHandleCreate` | 创建条件 Graph handle |
@@ -652,6 +736,7 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 | `cuModuleLoadData` | 从内存加载 module |
 | `cuModuleUnload` | 卸载 module |
 | `cuStreamWriteValue32` | 在 stream 上写入 32-bit value |
+| `cudaOccupancyAvailableDynamicSMemPerBlock` | 查询 CANN function 每 block 可用动态 UBuf；仅对真实 CANN function handle 有意义 |
 
 ## 不支持 API 摘要
 

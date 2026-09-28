@@ -8,7 +8,7 @@
 #ifndef CUDA_COMPAT_EXEC_H
 #define CUDA_COMPAT_EXEC_H
 
-#include "cann_compat_types.h"
+#include "cann_compat_safe.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -103,6 +103,53 @@ extern "C"
         return cudaSuccess;
     }
 
+    static inline cudaError_t cudaFuncGetName(const char **name, const void *func)
+    {
+        static char funcName[256];
+        if (!name || !func) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclrtGetFunctionName((aclrtFuncHandle)func, (uint32_t)sizeof(funcName), funcName);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        *name = funcName;
+        return cudaSuccess;
+    }
+
+    static inline cudaError_t cudaFuncGetParamCount(const void *func, size_t *paramCount)
+    {
+        if (!func || !paramCount) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclrtFunctionGetParamCount(func, paramCount);
+        return acl2cudaError(ret);
+    }
+
+    static inline cudaError_t cudaFuncGetParamInfo(const void *func,
+                                                   size_t paramIndex,
+                                                   size_t *paramOffset,
+                                                   size_t *paramSize)
+    {
+        if (!func || (!paramOffset && !paramSize)) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclrtFunctionGetParamInfo(func, paramIndex, paramOffset, paramSize);
+        return acl2cudaError(ret);
+    }
+
+    static inline cudaError_t cudaOccupancyAvailableDynamicSMemPerBlock(size_t *dynamicSmemSize,
+                                                                        const void *func,
+                                                                        int numBlocks,
+                                                                        int blockSize)
+    {
+        if (!dynamicSmemSize || !func || numBlocks <= 0 || blockSize <= 0) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclrtFunctionGetAvailDynUbufPerBlock((void *)func, 0, dynamicSmemSize);
+        return acl2cudaError(ret);
+    }
+
 
     static inline uint32_t cudaCompatGridBlocks(dim3 gridDim)
     {
@@ -141,6 +188,126 @@ extern "C"
             return acl2cudaError(ret);
         }
         aclError ret = aclrtLaunchKernelWithArgsArray((void *)func, numBlocks, stream, NULL, args);
+        return acl2cudaError(ret);
+    }
+
+    static inline cudaError_t cudaCompatKernelHostArgsSize(const void *func,
+                                                           void **args,
+                                                           size_t paramCount,
+                                                           size_t *totalSize)
+    {
+        if (!args) {
+            return cudaErrorInvalidValue;
+        }
+        *totalSize = 0;
+        for (size_t i = 0; i < paramCount; ++i) {
+            size_t offset = 0;
+            size_t size = 0;
+            aclError ret = aclrtFunctionGetParamInfo(func, i, &offset, &size);
+            if (ret != ACL_SUCCESS) {
+                return acl2cudaError(ret);
+            }
+            if (!args[i]) {
+                return cudaErrorInvalidValue;
+            }
+            size_t end = offset + size;
+            if (end < offset) {
+                return cudaErrorInvalidValue;
+            }
+            if (end > *totalSize) {
+                *totalSize = end;
+            }
+        }
+        return cudaSuccess;
+    }
+
+    static inline cudaError_t cudaCompatCopyKernelHostArgs(const void *func,
+                                                           void **args,
+                                                           size_t paramCount,
+                                                           void *packed,
+                                                           size_t totalSize)
+    {
+        for (size_t i = 0; i < paramCount; ++i) {
+            size_t offset = 0;
+            size_t size = 0;
+            aclError ret = aclrtFunctionGetParamInfo(func, i, &offset, &size);
+            if (ret != ACL_SUCCESS) {
+                return acl2cudaError(ret);
+            }
+            if (offset > totalSize || size > totalSize - offset) {
+                return cudaErrorInvalidValue;
+            }
+            cudaError_t copyRet = cudaCompatMemcpyChecked((char *)packed + offset,
+                                                          totalSize - offset,
+                                                          args[i], size);
+            if (copyRet != cudaSuccess) {
+                return copyRet;
+            }
+        }
+        return cudaSuccess;
+    }
+
+    static inline cudaError_t cudaCompatPackKernelHostArgs(const void *func,
+                                                           void **args,
+                                                           void **hostArgs,
+                                                           size_t *argsSize)
+    {
+        size_t paramCount = 0;
+        aclError ret = aclrtFunctionGetParamCount(func, &paramCount);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (paramCount == 0) {
+            *hostArgs = NULL;
+            *argsSize = 0;
+            return cudaSuccess;
+        }
+
+        size_t totalSize = 0;
+        cudaError_t sizeRet = cudaCompatKernelHostArgsSize(func, args, paramCount, &totalSize);
+        if (sizeRet != cudaSuccess) {
+            return sizeRet;
+        }
+        void *packed = calloc(1, totalSize);
+        if (!packed) {
+            return cudaErrorMemoryAllocation;
+        }
+        cudaError_t copyRet = cudaCompatCopyKernelHostArgs(func, args, paramCount, packed, totalSize);
+        if (copyRet != cudaSuccess) {
+            free(packed);
+            return copyRet;
+        }
+        *hostArgs = packed;
+        *argsSize = totalSize;
+        return cudaSuccess;
+    }
+
+    static inline cudaError_t cudaLaunchKernelEx(const cudaLaunchConfig_t *config,
+                                                 const void *func,
+                                                 void **args)
+    {
+        if (!config || !func) {
+            return cudaErrorInvalidValue;
+        }
+        uint32_t numBlocks = cudaCompatGridBlocks(config->gridDim);
+        if (numBlocks == 0 || !cudaCompatBlockDimValid(config->blockDim)) {
+            return cudaErrorInvalidConfiguration;
+        }
+
+        void *hostArgs = NULL;
+        size_t argsSize = 0;
+        cudaError_t packRet = cudaCompatPackKernelHostArgs(func, args, &hostArgs, &argsSize);
+        if (packRet != cudaSuccess) {
+            return packRet;
+        }
+
+        aclrtLaunchKernelCfg cfg;
+        cfg.attrs = (aclrtLaunchKernelAttr *)config->attrs;
+        cfg.numAttrs = (size_t)config->numAttrs;
+        aclError ret = aclrtLaunchKernelWithHostArgs((aclrtFuncHandle)func, numBlocks, config->stream,
+                                                     config->numAttrs > 0 ? &cfg : NULL,
+                                                     hostArgs, argsSize, NULL, 0);
+        free(hostArgs);
         return acl2cudaError(ret);
     }
 

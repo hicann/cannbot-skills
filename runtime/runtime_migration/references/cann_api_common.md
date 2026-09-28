@@ -211,15 +211,30 @@ aclError aclrtMemcpy2dAsync(void *dst, size_t dpitch, const void *src,
 - 参数：同 aclrtMemcpy2d，增加 stream
 - 返回：ACL_SUCCESS
 
+### 3D pitched memory compatibility
+
+CUDA `cudaMemcpy3D*` 和 `cudaMemset3D*` 的 linear pitched pointer 形态在兼容层中拆分为 CANN 2D copy/set 任务：
+
+- 同步 copy：逐 depth slice 调用 `aclrtMemcpy2d`。
+- 异步 copy：逐 depth slice 调用 `aclrtMemcpy2dAsync`，保留同一 stream。
+- 同步 set：逐 slice/row 调用 `aclrtMemset`。
+- 异步 set：逐 slice/row 调用 `aclrtMemsetAsync`，保留同一 stream。
+
+CUDA array、texture、surface 相关 3D copy 不属于当前兼容层支持范围，返回 CUDA not supported 错误。
+
 ### aclrtMemcpyBatchAsync
 ```c
-aclError aclrtMemcpyBatchAsync(void **dsts, void **srcs, size_t *sizes,
-                                size_t count, aclrtMemcpyKind kind,
-                                aclrtStream stream);
+aclError aclrtMemcpyBatchAsyncV2(void **dsts, size_t *destMaxs,
+                                  void **srcs, size_t *sizes,
+                                  size_t numBatches,
+                                  aclrtMemcpyBatchAttr *attrs,
+                                  size_t *attrsIndexes,
+                                  size_t numAttrs,
+                                  aclrtStream stream);
 ```
 - 功能：批量异步内存拷贝
-- 参数：dsts/srcs - 地址数组，sizes - 大小数组，count - 数量
-- 返回：ACL_SUCCESS
+- 参数：`dsts/srcs` 为地址数组，`destMaxs/sizes` 为大小数组，`attrs/attrsIndexes` 描述每段拷贝的 src/dst location。
+- 迁移注意：CUDA `cudaMemcpyBatchAsync` 为 CUDA Runtime 13.2+ 接口；CANN batch 成功路径受 copy 形态和 location hint 限制，不支持形态需记录为条件 `SKIP` 或返回明确错误。
 
 ### aclrtMemset
 ```c
@@ -249,12 +264,44 @@ aclError aclrtGetMemInfo(aclrtMemAttr attr, size_t *free, size_t *total);
 
 ### aclrtPointerGetAttributes
 ```c
-aclError aclrtPointerGetAttributes(size_t size, aclrtPointerAttributes *attributes,
-                                    const void *ptr);
+aclError aclrtPointerGetAttributes(const void *ptr, aclrtPtrAttributes *attributes);
 ```
 - 功能：获取指针属性
-- 参数：size - 查询范围，attributes - 属性输出，ptr - 指针
+- 参数：ptr - 待查询指针，attributes - 属性输出
 - 返回：ACL_SUCCESS 或错误码
+
+### aclrtMemAllocManaged
+```c
+aclError aclrtMemAllocManaged(void **ptr, uint64_t size, uint32_t flag);
+```
+- 功能：申请 UVM 统一虚拟内存，释放使用 `aclrtFree`
+- 参数：flag 当前仅支持 `ACL_RT_MEM_ATTACH_GLOBAL`
+- 限制：CANN 文档标注该能力仅部分 Atlas A2 系列产品支持；其它产品返回不支持或相关错误，兼容层按错误映射处理
+
+### aclrtMemManagedAdvise / aclrtMemManagedPrefetchAsync
+```c
+aclError aclrtMemManagedAdvise(const void *const ptr, uint64_t size,
+                               aclrtMemManagedAdviseType advise,
+                               aclrtMemManagedLocation location);
+aclError aclrtMemManagedPrefetchAsync(const void *ptr, size_t size,
+                                      aclrtMemManagedLocation location,
+                                      uint32_t flags, aclrtStream stream);
+```
+- 功能：设置 UVM 访问建议和异步预取
+- 参数：`aclrtMemManagedLocation` 使用 `ACL_MEM_LOCATIONTYPE_DEVICE/HOST/HOST_NUMA/HOST_NUMA_CURRENT`；prefetch flags 当前固定 0
+- 限制：操作对象必须是 managed memory；prefetch 成功仅表示任务下发，需同步 stream 确认完成
+
+### aclrtMemManagedGetAttr(s)
+```c
+aclError aclrtMemManagedGetAttr(aclrtMemManagedRangeAttribute attribute,
+                                const void *ptr, size_t size,
+                                void *data, size_t dataSize);
+aclError aclrtMemManagedGetAttrs(aclrtMemManagedRangeAttribute *attributes,
+                                 size_t numAttributes, const void *ptr,
+                                 size_t size, void **data, size_t *dataSizes);
+```
+- 功能：查询 UVM range attribute
+- 兼容层映射：当前覆盖 read-mostly、preferred-location、accessed-by、last-prefetch-location 基础属性
 
 ### aclrtHostRegisterV2
 ```c
@@ -525,6 +572,24 @@ aclError aclsysGetVersionNum(char *pkgName, int32_t *versionNum);
 
 ## Kernel Launch API
 
+### aclrtGetFunctionName
+```c
+aclError aclrtGetFunctionName(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name);
+```
+- 功能：根据 CANN function handle 获取 kernel/function 名称
+- 约束：`name` 由调用方提供缓冲区；兼容层为 `cudaFuncGetName` 使用内部静态缓冲区承接
+- 返回：ACL_SUCCESS 或错误码
+
+### aclrtFunctionGetParamCount / aclrtFunctionGetParamInfo
+```c
+aclError aclrtFunctionGetParamCount(const void *func, size_t *paramCount);
+aclError aclrtFunctionGetParamInfo(const void *func, size_t paramIndex,
+                                   size_t *paramOffset, size_t *paramSize);
+```
+- 功能：查询 CANN function handle 的参数个数以及指定参数的 offset/size
+- 约束：`aclrtFunctionGetParamInfo` 的两个输出指针不能同时为空；兼容层用该布局为 `cudaLaunchKernelEx` 打包 HostArgs
+- 返回：ACL_SUCCESS 或错误码
+
 ### aclrtLaunchKernelWithHostArgs
 ```c
 aclError aclrtLaunchKernelWithHostArgs(aclrtFuncHandle funcHandle, uint32_t numBlocks,
@@ -575,6 +640,21 @@ aclError aclrtLaunchHostFunc(aclrtStream stream, aclrtHostFunc fn, void *args);
 ```
 - 功能：在 stream 任务队列中插入 Host 回调任务，回调会阻塞本 stream 后续任务执行
 - 约束：同一 stream 上不应混用 `aclrtLaunchHostFunc` 与 `aclrtLaunchCallback`；回调函数内不应执行资源申请/释放、同步或任务下发等可能导致死锁的操作
+- 返回：ACL_SUCCESS 或错误码
+
+---
+
+## Stream Attribute API
+
+### aclrtSetStreamAttribute / aclrtGetStreamAttribute
+```c
+aclError aclrtSetStreamAttribute(aclrtStream stream, aclrtStreamAttr stmAttrType,
+                                 aclrtStreamAttrValue *value);
+aclError aclrtGetStreamAttribute(aclrtStream stream, aclrtStreamAttr stmAttrType,
+                                 aclrtStreamAttrValue *value);
+```
+- 功能：设置或查询 CANN stream 属性，例如 failure mode、float overflow check、user custom tag、cache op info、priority 等
+- 约束：属性枚举和值 union 使用 CANN Runtime 语义；兼容层 `cudaStreamSetAttribute` / `cudaStreamGetAttribute` 直通这些类型和值
 - 返回：ACL_SUCCESS 或错误码
 
 ---
@@ -709,8 +789,13 @@ aclError aclmdlRICaptureToModelRIBegin(aclrtStream stream, aclmdlRI modelRI,
 | `aclrtMallocHostAndRegister` / `aclrtMallocHost` | `cudaHostAlloc` | Host pinned 内存分配 |
 | `aclrtGetSymbolAddress` | `cudaGetSymbolAddress` | 获取设备符号地址 |
 | `aclrtMemcpyToSymbol` | `cudaMemcpyToSymbol` | 向设备符号拷贝 |
+| `aclrtMemcpyToSymbolAsync` | `cudaMemcpyToSymbolAsync` | 异步向设备符号拷贝 |
+| `aclrtMemcpyFromSymbol` | `cudaMemcpyFromSymbol` | 从设备符号拷贝 |
+| `aclrtMemcpyFromSymbolAsync` | `cudaMemcpyFromSymbolAsync` | 异步从设备符号拷贝 |
+| `aclrtGetSymbolSize` | `cudaGetSymbolSize` | 查询设备符号大小 |
 | `aclrtMemsetD32Async` | `cuMemsetD32Async` | D32 异步 memset |
 | `aclrtGetFunctionAttribute` | `cudaFuncGetAttributes` | 查询 function 属性 |
+| `aclrtFunctionGetAvailDynUbufPerBlock` | `cudaOccupancyAvailableDynamicSMemPerBlock` | 查询 CANN function 每 block 可用动态 UBuf |
 | `aclrtGetCurrentContext` | `cuCtxGetCurrent` | 获取当前 context |
 | `aclrtSetCurrentContext` | `cuCtxSetCurrent` | 设置当前 context |
 | `aclrtGetPrimaryCtxState` | `cuDevicePrimaryCtxGetState` | 查询 primary context |

@@ -46,6 +46,39 @@ static inline cudaError_t cudaMemcpyFromSymbol(void *dst, const void *symbol,
     return acl2cudaError(ret);
 }
 
+static inline cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const void *symbol,
+                                                    size_t count, size_t offset,
+                                                    cudaMemcpyKind kind, cudaStream_t stream)
+{
+    if (!dst || !symbol) {
+        return cudaErrorInvalidValue;
+    }
+    aclError ret = aclrtMemcpyFromSymbolAsync(dst, count, symbol, count, offset,
+                                              (aclrtMemcpyKind)kind, stream);
+    return acl2cudaError(ret);
+}
+
+static inline cudaError_t cudaMemcpyToSymbolAsync(const void *symbol, const void *src,
+                                                  size_t count, size_t offset,
+                                                  cudaMemcpyKind kind, cudaStream_t stream)
+{
+    if (!symbol || !src) {
+        return cudaErrorInvalidValue;
+    }
+    aclError ret = aclrtMemcpyToSymbolAsync(symbol, src, count, offset,
+                                            (aclrtMemcpyKind)kind, stream);
+    return acl2cudaError(ret);
+}
+
+static inline cudaError_t cudaGetSymbolSize(size_t *size, const void *symbol)
+{
+    if (!size || !symbol) {
+        return cudaErrorInvalidValue;
+    }
+    aclError ret = aclrtGetSymbolSize(symbol, size);
+    return acl2cudaError(ret);
+}
+
 cudaError_t cudaCompatRegisterSymbol(void *binHandle, const void *hostVar,
                                      const char *deviceVarName, size_t size,
                                      unsigned int flags);
@@ -142,6 +175,55 @@ static inline cudaError_t cudaMemcpyFromSymbol(void *dst, const T &symbol,
         return addrRet;
     }
     return cudaMemcpy(dst, static_cast<uint8_t *>(devicePtr) + offset, count, kind);
+}
+
+template <typename T>
+static inline cudaError_t cudaMemcpyToSymbolAsync(const T &symbol, const void *src,
+                                                  size_t count, size_t offset = 0,
+                                                  cudaMemcpyKind kind = cudaMemcpyHostToDevice,
+                                                  cudaStream_t stream = nullptr)
+{
+    if (!src || kind != cudaMemcpyHostToDevice) {
+        return cudaMemcpyToSymbolAsync(reinterpret_cast<const void *>(&symbol), src, count, offset, kind, stream);
+    }
+    cudaError_t copyRet = cudaMemcpyToSymbol(symbol, src, count, offset, kind);
+    if (copyRet != cudaSuccess) {
+        return copyRet;
+    }
+    (void)stream;
+    return cudaSuccess;
+}
+
+template <typename T>
+static inline cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const T &symbol,
+                                                    size_t count, size_t offset = 0,
+                                                    cudaMemcpyKind kind = cudaMemcpyDeviceToHost,
+                                                    cudaStream_t stream = nullptr)
+{
+    if (!dst || kind != cudaMemcpyDeviceToHost) {
+        return cudaMemcpyFromSymbolAsync(dst, reinterpret_cast<const void *>(&symbol), count, offset, kind, stream);
+    }
+    cudaError_t copyRet = cudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
+    if (copyRet != cudaSuccess) {
+        return copyRet;
+    }
+    (void)stream;
+    return cudaSuccess;
+}
+
+template <typename T>
+static inline cudaError_t cudaGetSymbolSize(size_t *size, const T &symbol)
+{
+    if (!size) {
+        return cudaErrorInvalidValue;
+    }
+    const void *hostSymbol = reinterpret_cast<const void *>(&symbol);
+    cudaCompatSymbolRecord *record = cudaCompatFindSymbolRecord(hostSymbol, 0);
+    if (record && record->devicePtr) {
+        *size = record->size;
+        return cudaSuccess;
+    }
+    return cudaGetSymbolSize(size, hostSymbol);
 }
 #endif
 

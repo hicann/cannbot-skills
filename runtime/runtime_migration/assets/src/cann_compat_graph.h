@@ -82,11 +82,11 @@ extern "C"
         }
     }
 
-    static inline cudaError_t cudaGraphAddNode(cudaGraphNode_t *pGraphNode,
-                                               cudaGraph_t graph,
-                                               const cudaGraphNode_t *dependencies,
-                                               size_t numDependencies,
-                                               cudaGraphNodeParams *nodeParams)
+    static inline cudaError_t cudaGraphAddNode_v1(cudaGraphNode_t *pGraphNode,
+                                                  cudaGraph_t graph,
+                                                  const cudaGraphNode_t *dependencies,
+                                                  size_t numDependencies,
+                                                  cudaGraphNodeParams *nodeParams)
     {
         (void)dependencies;
         if (!pGraphNode || !graph || !nodeParams) {
@@ -154,6 +154,21 @@ extern "C"
         *pGraphNode = NULL;
         return cudaErrorNotSupported;
     }
+
+    static inline cudaError_t cudaGraphAddNode_v3(cudaGraphNode_t *pGraphNode,
+                                                  cudaGraph_t graph,
+                                                  const cudaGraphNode_t *dependencies,
+                                                  const cudaGraphEdgeData *dependencyData,
+                                                  size_t numDependencies,
+                                                  cudaGraphNodeParams *nodeParams)
+    {
+        (void)dependencyData;
+        return cudaGraphAddNode_v1(pGraphNode, graph, dependencies, numDependencies, nodeParams);
+    }
+
+#define CUDA_COMPAT_GRAPH_ADD_NODE_SELECT(_1, _2, _3, _4, _5, _6, NAME, ...) NAME
+#define cudaGraphAddNode(...) \
+    CUDA_COMPAT_GRAPH_ADD_NODE_SELECT(__VA_ARGS__, cudaGraphAddNode_v3, cudaGraphAddNode_v1)(__VA_ARGS__)
 
 
     static inline cudaError_t cudaGraphNodeGetDependencies(cudaGraphNode_t node,

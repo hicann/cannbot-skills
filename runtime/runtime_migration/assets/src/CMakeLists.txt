@@ -33,16 +33,25 @@ endif()
 set(CANN_INCLUDE_DIR "${CANN_PATH}/include")
 set(CANN_LIB_DIR "${CANN_PATH}/lib64")
 set(CANN_PKG_INC_DIR "")
-foreach(CANN_ARCH_DIR aarch64-linux x86_64-linux)
-    if(EXISTS "${CANN_PATH}/${CANN_ARCH_DIR}/pkg_inc")
-        set(CANN_PKG_INC_DIR "${CANN_PATH}/${CANN_ARCH_DIR}/pkg_inc")
+set(SKILL_PKG_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../pkg_inc")
+set(RUNTIME_ORIGIN_PKG_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime-origin-code/pkg_inc")
+foreach(CANDIDATE_PKG_INC
+        "${CANN_PATH}/pkg_inc"
+        "${CANN_PATH}/aarch64-linux/pkg_inc"
+        "${CANN_PATH}/x86_64-linux/pkg_inc"
+        "${SKILL_PKG_INC_DIR}"
+        "${RUNTIME_ORIGIN_PKG_INC_DIR}")
+    if(EXISTS "${CANDIDATE_PKG_INC}")
+        set(CANN_PKG_INC_DIR "${CANDIDATE_PKG_INC}")
         break()
     endif()
 endforeach()
 
-# Export CANN paths to parent scope for tests and other components
-set(CANN_INCLUDE_DIR "${CANN_INCLUDE_DIR}" PARENT_SCOPE)
-set(CANN_LIB_DIR "${CANN_LIB_DIR}" PARENT_SCOPE)
+# Export CANN paths to parent scope for tests and other components.
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CANN_INCLUDE_DIR "${CANN_INCLUDE_DIR}" PARENT_SCOPE)
+    set(CANN_LIB_DIR "${CANN_LIB_DIR}" PARENT_SCOPE)
+endif()
 
 # Include directories
 include_directories(${CANN_INCLUDE_DIR})
@@ -67,10 +76,16 @@ set(CUDACOMPAT_HEADERS
     cann_compat_device_prop_types.h
     cann_compat_error_types.h
     cann_compat_types.h
+    cann_compat_memory_types.h
+    cann_compat_graph_mempool_types.h
     cann_compat_device_types.h
     cann_compat_device.h
     cann_compat_memory.h
+    cann_compat_memory_core.h
+    cann_compat_memory_copy.h
+    cann_compat_memory_query_host.h
     cann_compat_mempool.h
+    cann_compat_safe.h
     cann_compat_stream.h
     cann_compat_event.h
     cann_compat_ipc.h
