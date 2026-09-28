@@ -257,6 +257,43 @@ def setup_environment(work_dir: Path):
             os.environ["LD_LIBRARY_PATH"] = str(op_api_lib_path)
 
 
+def normalize_output_triple(
+    custom_output: Any,
+    ref_output: Any,
+    golden_output: Any,
+) -> Tuple[List[Any], List[Any], List[Any], Optional[str]]:
+    """Normalize one case's three outputs to lists and check their counts agree.
+
+    Each output is normalized on its own: a tuple/list becomes a list of its
+    elements, anything else (a single tensor) becomes a one-element list.
+    Normalizing the three together off the custom output's type would turn a
+    single reference tensor into `list(tensor)`, i.e. a split along dim 0, and
+    report a count that never existed.
+
+    Returns (custom_outputs, ref_outputs, golden_outputs, mismatch_reason).
+    mismatch_reason is None when the three counts agree; otherwise it names the
+    three counts and the case must fail, because zip() would stop at the
+    shortest list and leave the surplus outputs unchecked.
+    """
+    def _to_list(output: Any) -> List[Any]:
+        if isinstance(output, (tuple, list)):
+            return list(output)
+        return [output]
+
+    custom_outputs = _to_list(custom_output)
+    ref_outputs = _to_list(ref_output)
+    golden_outputs = _to_list(golden_output)
+
+    if len(custom_outputs) == len(ref_outputs) == len(golden_outputs):
+        return custom_outputs, ref_outputs, golden_outputs, None
+
+    reason = (
+        f"Output count mismatch: custom={len(custom_outputs)}, "
+        f"ref={len(ref_outputs)}, golden={len(golden_outputs)}"
+    )
+    return custom_outputs, ref_outputs, golden_outputs, reason
+
+
 def evaluate_multi_case(
     op_name: str,
     work_dir: Path,
@@ -403,14 +440,24 @@ def evaluate_multi_case(
 
             # Move all outputs to CPU for comparison
             # Normalize outputs to list for uniform handling (single tensor or tuple)
-            if isinstance(custom_output, (tuple, list)):
-                custom_outputs = list(custom_output)
-                ref_outputs = list(ref_output)
-                golden_outputs = list(golden_output)
-            else:
-                custom_outputs = [custom_output]
-                ref_outputs = [ref_output]
-                golden_outputs = [golden_output]
+            custom_outputs, ref_outputs, golden_outputs, count_mismatch = normalize_output_triple(
+                custom_output, ref_output, golden_output
+            )
+
+            if count_mismatch is not None:
+                logging.warning(f"  ❌ Precision FAILED: {count_mismatch}")
+                # Always print failures (even in quiet mode) — critical for debugging
+                if quiet:
+                    print(f"[{idx+1}/{len(cases)}] {case_name:20s} ❌ FAIL  {count_mismatch}", flush=True)
+                all_passed = False
+                results.append({
+                    "case_id": case_id,
+                    "case_name": case_name,
+                    "status": "FAIL",
+                    "reason": count_mismatch,
+                    "speedup": 0.0,
+                })
+                continue
 
             precision_passed = True
             precision_diagnosis = []

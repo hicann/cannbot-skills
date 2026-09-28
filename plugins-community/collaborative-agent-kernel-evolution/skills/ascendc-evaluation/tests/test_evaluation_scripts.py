@@ -407,3 +407,73 @@ class TestSuites:
         result = smoke_test("multi", MultiOut, (inp,))
         assert result["passed"]
         assert result["n_outputs"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Multi-output count check (evaluate.normalize_output_triple)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeOutputTriple:
+    """Custom / reference / golden output counts must agree before comparison."""
+
+    @staticmethod
+    def test_single_tensor_outputs_agree():
+        import torch
+        from evaluate import normalize_output_triple
+
+        t = torch.tensor([1.0])
+        custom, ref, golden, reason = normalize_output_triple(t, t, t)
+        assert reason is None
+        assert len(custom) == len(ref) == len(golden) == 1
+
+    @staticmethod
+    def test_matching_tuple_outputs_agree():
+        import torch
+        from evaluate import normalize_output_triple
+
+        triple = (torch.tensor([1.0]), torch.tensor([2.0]))
+        custom, ref, golden, reason = normalize_output_triple(triple, triple, triple)
+        assert reason is None
+        assert len(custom) == len(ref) == len(golden) == 2
+
+    @staticmethod
+    def test_custom_returns_extra_output():
+        """Surplus custom output must fail instead of being dropped by zip()."""
+        import torch
+        from evaluate import normalize_output_triple
+
+        custom_output = (torch.tensor([1.0]), torch.tensor([999.0]))
+        ref_output = (torch.tensor([1.0]),)
+        _, _, _, reason = normalize_output_triple(custom_output, ref_output, ref_output)
+        assert reason is not None
+        assert "custom=2" in reason
+        assert "ref=1" in reason
+        assert "golden=1" in reason
+
+    @staticmethod
+    def test_custom_returns_missing_output():
+        """Missing custom output must fail instead of being dropped by zip()."""
+        import torch
+        from evaluate import normalize_output_triple
+
+        custom_output = (torch.tensor([1.0]),)
+        ref_output = (torch.tensor([1.0]), torch.tensor([2.0]))
+        _, _, _, reason = normalize_output_triple(custom_output, ref_output, ref_output)
+        assert reason is not None
+        assert "custom=1" in reason
+        assert "ref=2" in reason
+        assert "golden=2" in reason
+
+    @staticmethod
+    def test_single_reference_tensor_is_not_split_along_dim0():
+        """A bare reference tensor counts as one output, not one per row."""
+        import torch
+        from evaluate import normalize_output_triple
+
+        custom_output = (torch.tensor([1.0]), torch.tensor([2.0]))
+        ref_output = torch.tensor([[1.0], [2.0]])
+        _, ref, _, reason = normalize_output_triple(custom_output, ref_output, ref_output)
+        assert len(ref) == 1
+        assert reason is not None
+        assert "custom=2" in reason
+        assert "ref=1" in reason
