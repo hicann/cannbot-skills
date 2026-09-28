@@ -201,6 +201,36 @@
       "expected_output": "回复应区分：metadata 不匹配或重复 self 参数是语义安全要求下的正确跳过；mutate program inputs 会交给 reinplace_input_mutated_ops 处理，本身不等于性能损失。真正值得继续查的是多流检查失败、used-later、missed opportunities N>0 或输入 copy_ 最终残留，并给出文件/日志证据。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 10,
+      "title": "Case 5-Compressor 脚本复制与 Reinplace 误判",
+      "config": {
+        "max_tokens": 180000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 210000,
+          "glm-5": 195000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "DeepSeek decode 的 Profiling 里 compressor 后紧跟 TensorMove，图尾又有 62 个 state cache copy_。最终 FX 图 clone=0，auto_functionalized 汇总是 0 bytes，但 reinplace 日志对 getitem/reshape 报 cannot find an inplace op。使用的 compressor wrapper 里还有 state_cache.detach().clone() 和 state_cache.copy_(new_state_cache)。这是 reinplace 失败吗？",
+      "expected_output": "回复应命中 CASE-005，指出最上游根因是 Compressor Python wrapper 的显式复制，不应把现象归结为 Reinplace 实现回退。应解释 detach().clone() 对应 compressor 后的 TensorMove，copy_ 经 Functionalize 形成 functional aten.copy 与尾部 copy_，remove_noop_ops 旁路中间 copy 后尾部副作用 copy_ 保留；reinplace 仅因为源是 getitem/reshape 而无法继续折叠。应建议升级或回合 ops-transformer 修复提交 f764787，并区分带 dtype 的 _to_copy Cast。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "state_cache.copy_",
+          "description": "回复定位到 Compressor wrapper 的显式 State Cache 写回"
+        },
+        {
+          "type": "contains",
+          "pattern": "f764787",
+          "description": "回复给出已确认的上游修复提交"
+        }
+      ]
     }
   ],
   "skill_name": "torch-npugraph-ex-performance-diagnosis"

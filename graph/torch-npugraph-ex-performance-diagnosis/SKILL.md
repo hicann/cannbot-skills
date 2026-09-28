@@ -1,6 +1,6 @@
 ---
 name: torch-npugraph-ex-performance-diagnosis
-description: "PyTorch 昇腾 NPU npugraph_ex 性能诊断（FX 图静态审计，聚焦 reinplace 未命中导致的冗余 tensor move）。处理「5 step 全部通过、但推理慢/Device 利用率低」阶段：基于 TORCH_COMPILE_DEBUG=1 产出的 FX 图序列与 debug.log，定位图里冗余的 tensor move——重点是 reinplace_inplaceable_ops_pass（out-of-place→in-place）与 reinplace_input_mutated_ops（折叠输入侧 copy_）回填未完成留下的 copy_/clone/out-of-place 冗余，按成因分类区分输入侧 copy_ epilogue、auto_functionalized 物化 clone、多流校验失败三类。本 skill 由 dfx-triage 路由进入；**不**处理 graph break / recompile / guard failure（归 compile-error-diagnosis）。触发：当用户报告 npugraph_ex 推理慢、性能回退、怀疑图里有多余搬运/拷贝、reinplace 没生效时加载。关键词：性能、慢、tensormove、tensor move、reinplace、functionalize、copy_、clone、auto_functionalized、multi_stream、can_inplace、missed reinplacing、inplace_pass、input_inplace_pass、clone_input、TORCH_COMPILE_DEBUG。"
+description: "PyTorch 昇腾 NPU npugraph_ex 性能诊断（FX 图静态审计，聚焦冗余 tensor move 与疑似 reinplace 未命中）。处理「5 step 全部通过、但推理慢/Device 利用率低」阶段：基于 TORCH_COMPILE_DEBUG=1 产出的 FX 图序列与 debug.log，定位 reinplace_inplaceable_ops_pass（out-of-place→in-place）与 reinplace_input_mutated_ops（折叠输入侧 copy_）回填未完成留下的 copy_/clone/out-of-place 冗余，并识别 Compressor 等 Python wrapper 显式 clone/copy_ 经 Functionalize 后伪装成 reinplace 失败的版本型问题。本 skill 由 dfx-triage 路由进入；**不**处理 graph break / recompile / guard failure（归 compile-error-diagnosis）。触发：当用户报告 npugraph_ex 推理慢、性能回退、怀疑图里有多余搬运/拷贝、reinplace 没生效时加载。关键词：性能、慢、tensormove、tensor move、reinplace、functionalize、copy_、clone、auto_functionalized、compressor、remove_noop_ops、multi_stream、can_inplace、missed reinplacing、inplace_pass、input_inplace_pass、clone_input、TORCH_COMPILE_DEBUG。"
 ---
 
 # npugraph_ex 性能诊断（reinplace 回填未完成所致的冗余 tensor move）
@@ -21,7 +21,7 @@ description: "PyTorch 昇腾 NPU npugraph_ex 性能诊断（FX 图静态审计�
 ## 总原则
 
 1. **别只盯 `copy_`**：输入侧 `copy_` 是 functionalize 的写回 epilogue（正常产物、是判据而非缺陷）；reinplace 回填未完成才会留下三类冗余 tensor move 信号——输入侧未折叠的 `copy_`、`auto_functionalized` 物化出的 `clone`(+写回 `copy_`)、原样保留的 out-of-place 算子（无 move 节点）。审计时三类信号都要看：末图里同时 grep `copy_` **和** `clone`，再配合 `debug.log` 的 `missed opportunities` 日志定位无 move 节点的那类。详见「reinplace 与 functionalize 的真实关系」。
-2. **先完成成因分类与定位**：先按「冗余 tensor move 的成因分类与定位」把成因一/二/三走完。
+2. **先做来源分流，再做 Reinplace 分类**：若 Profiling 同时出现“自定义算子后紧跟 TensorMove”和“图尾批量 TensorMove”，先核对该算子的 Python wrapper 是否显式调用 `clone` / `_to_copy` / `copy_`，并按版本提交追溯；不能只凭尾部 `copy_` 和 `cannot find an inplace op` 就判为 reinplace 实现回退（参见 CASE-005）。没有脚本显式复制证据时，再按「冗余 tensor move 的成因分类与定位」把成因一/二/三走完。
 3. **证据分两类附带**：日志 / FX 图结论必须附 `文件名` + 关键片段（`debug.log` 行或 FX txt 片段）；源码归因必须附 repo-relative path。找不到证据就标"待确认"，不猜。
 4. **碰到分类外信号立刻转走**：在 `torchdynamo/debug.log` 看到 `graph break` / `Restarting analysis` / `guard failure` → 停止，转 `torch-npugraph-ex-compile-error-diagnosis`。
 5. **不主动执行用户脚本**：只给 `TORCH_COMPILE_DEBUG=1` 命令模板让用户自跑，再回到本 skill 做静态审计。
@@ -106,6 +106,7 @@ eliminate_self_copy                 ← 清扫 copy_(x, x) self-copy
    grep -n "aten\.copy_\.default(\|aten\.clone\.default(" *_after_eliminate_self_copy.txt
    ```
 2. **看产物特征**，据此归入下列某一成因：
+   - Profiling 中自定义算子后紧跟 TensorMove，且图尾 `copy_` 的源能追到该自定义算子的输出 → **先查 Python wrapper 的显式复制与历史版本**（CASE-005），不要强行归为 Reinplace 成因
    - `copy_` 第一参是 `placeholder` / `get_attr` → **成因一**
    - `*_after_decompose_auto_functionalized.txt` 里出现 `as_strided→clone→as_strided→自定义 in-place 算子`，且末尾有非同源的 `copy_(input, 结果)` → **成因二**
    - out-of-place / `*_functional` 算子在 `*_after_reinplace_inplaceable_ops_pass.txt` 里原样保留、且其输出后续没被用 → **成因三**
@@ -279,6 +280,8 @@ check_reinplace_streams (见上文 `utils.py` 路径约定)
 
 历史案例只作为当前证据的补充，不替代对本次 Profiling、FX 图、日志和版本信息的核对。
 
+CASE-006 的 `select_scatter → copy_` 算子实现链有源码依据；现场 TensorMove 的逐项对应仍须补齐 FX 图和 Profiling，不能据此跳过上述前置条件。
+
 匹配规则：
 
 1. 先确认实际后端，再匹配算子名、FX 结构和日志关键词。
@@ -292,6 +295,8 @@ check_reinplace_streams (见上文 `utils.py` 路径约定)
 | [CASE-002](references/case-002-deepseek-v4-view-cast-format.md) | npugraph_ex | `auto_functionalized_v2` 的 mutable base 是跨 dtype View；展开后出现 `clone + copy_` | 跨 dtype Cache View 阻断 Reinplace |
 | [CASE-003](references/case-003-mla-prolog-v3-cache-tensormove.md) | GE / Ascend IR 后端边界案例 | 实际后端为 GE/Ascend IR；`MlaPrologV3` 前存在 Cache `TensorMove` | Legacy Functional Converter 搬运 |
 | [CASE-004](references/case-004-kimi-k3-state-writeback-clone.md) | Kimi K3 / npugraph_ex | KDA State 尾部批量 `copy_`，或 ShortConv 冻结权重重复产生 `clone` | State 写回与显式连续化 |
+| [CASE-005](references/case-005-deepseek-compressor-script-copy.md) | DeepSeek SFA Compressor / npugraph_ex | Compressor 后紧跟 TensorMove，且图尾残留批量 State Cache `copy_`；对应 wrapper 含 `state_cache.detach().clone()` 与 `state_cache.copy_(new_state_cache)` | 脚本显式复制经 Functionalize / remove-noop 后伪装成 Reinplace 失败 |
+| [CASE-006](references/case-006-dspark-select-scatter-tensormove.md) | DeepSeek V4.1 DSpark / npugraph_ex | Markov Head 的 `output_ids`、`logits` 按步写回形成 `select_scatter`；现场报告大量 TensorMove | `select_scatter` 的复合实现或 Reinplace 改写依赖 `copy_`；现场次数待核验 |
 
 ## 兜底文档
 
