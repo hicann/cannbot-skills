@@ -19,7 +19,12 @@ description: Ascend C 算子 Tiling 设计指南。提供算子分类体系和 T
 | Convolution 卷积类 | 空间卷积，滑动窗口计算 | Conv2D, DepthwiseConv | 📋 规划中 |
 | FlashAttention 类 | 注意力计算 | FlashAttention, GQA, MHA, MLA（可叠加量化/稀疏 trait） | ✅ [场景路由](references/flashattention/patterns.md)（⚠️ 必须先读） |
 | Scatter 累加散射类 | 按 index 散射写入/累加，updates 按行组织 | MaskedScatter, ScatterNdAdd, ScatterElementsV2, ScatterAdd, InplaceIndexAdd, scatter_reduce | ✅ [场景路由](references/scatter/patterns.md)（⚠️ 必须先读） |
+| **Index 索引类**（A2/A3） | 以索引为核心访问数据，存在跨元素寻址 | Gather, GatherElements, IndexSelect, IndexAdd, RepeatInterleave, Take, Scatter, ScatterElements | ✅ [场景路由](references/index/patterns.md)（⚠️ 必须先读，按 P1~P7 分流到各 Pattern 文档） |
 | NN 神经网络类(其它)| 神经网络专用，多种操作组合 | GroupNorm 等非 attention | 📋 规划中 |
+
+> **芯片代际说明**：`references/index/` 下的文档面向 **A2/A3 代际**（910B / 910C，`arch22`，`dav_c220` / `DAV_2201`，单核 UB 192KB）；
+> 其中 `index/scatter.md` 为 A2/A3 的 UB 内标量散写方案，与面向 **A5 代际**（950，`arch35`，`DAV_3510`）的 `references/scatter/patterns.md` 分属两代，按目标芯片选用。
+> 两代在 UB 容量与可用指令上存在实质差异（A2/A3 无硬件 Scatter 指令、只能走标量方案），Tiling 结论不可跨代照搬。
 
 ## 通用设计要素（所有类别必须）
 
