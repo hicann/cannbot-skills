@@ -167,7 +167,7 @@ Edit 调用方、dispatch 或 planner 前，再写 `[KERNEL-REUSE-AUDIT]` 复核
 
 每个优化点后执行：精度验证 → `msprof op` → 记录 → 对比基线。精度失败时保持优化调试，不撤销。
 
-调试手段：`T.printf`、`T.dump_tensor`、`get_kernel_source()`，详见 [Programming Guide](../../../docs/TileLang-Ascend%20Programming%20Guide.md)。
+调试手段：`T.printf`、`T.dump_tensor`、`get_kernel_source()`，详见[调试工具说明](../tilelang-api-best-practices/references/api-schedule-sync.md)和[生成代码检查](../tilelang-api-best-practices/references/api-compute.md)。
 
 迭代终止：达到目标或连续 3 次无提升则中断上报。
 

@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-26】
+#### 缺陷修复 Bug Fixes
+- 【TileLang】修复 `ops/tilelang-perf-optimization/SKILL.md` 效果验证步骤中的失效调试指南链接，改为仓内已有的 API 调试说明和生成代码检查指南。
+
 ### 【2026-09-24】
 #### 缺陷修复 Bug Fixes
 - 【cake】`ascend-call-generation/references/average_pooling2d/average_pooling2d.cpp` 补 `kernel_size > 0` 的 `TORCH_CHECK`（issue #706）。该函数经 `TORCH_LIBRARY_IMPL` 与 `PYBIND11_MODULE` 两个入口注册为对外接口，`kernel_size` 原样赋给 `actual_stride` 后作为 `height / actual_stride`、`width / actual_stride` 的除数，调用方传 0 时在主机侧触发整数除零（SIGFPE）。本文件是生成 PyTorch 调用层的参考样例，校验缺失会随样例被复制进生成结果。
