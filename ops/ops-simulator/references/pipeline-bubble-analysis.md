@@ -23,6 +23,7 @@ python3 {skill_path}/scripts/trace_bubble_analyzer.py ./npusim_Ascend950_*/repor
 
 # 输出 JSON 供进一步分析
 python3 {skill_path}/scripts/trace_bubble_analyzer.py ./npusim_Ascend950_*/report/ --json -o bubble_report.json
+
 ```
 ---
 

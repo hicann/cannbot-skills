@@ -108,6 +108,20 @@
       "expected_output": "回复应先用 summary.json 的聚合指标做快速诊断；只有 summary 已指出瓶颈类型但尚不能定位具体原因，例如 overlap 偏低而源码已开启双缓冲或需要追踪具体阻塞指令时，才下钻 trace 做空泡分类、因果归因、周期性和重叠度分析。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 8,
+      "title": "PC 地址映射的前置条件与容器格式处理",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "npusim trace_core0.json 中有阻塞指令的 PC 地址，我想把 PC 映射回 AscendC 源码行。手头只有 aicore_binary 容器文件，且不确定 load base。应该怎么做？",
+      "expected_output": "回复应说明必须使用与这次仿真一致的、带 debug/line info 且未 strip 的 ELF；aicore_binary 需先用 msobjdump --extract-elf 抽取内嵌设备 ELF；runtime PC 需减去 load base 得到 object offset，base 优先取仿真器或 trace 记录，其次 map/linker 信息，仅在可验证页对齐时推断。解析失败应保留 unresolved，不能伪造源码匹配。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ops-simulator"

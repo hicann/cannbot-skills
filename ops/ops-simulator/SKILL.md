@@ -102,6 +102,9 @@ npusim 生成的 `trace_core*.json` 是 Chrome Trace Format，包含每个 core 
 2. **因果归因**：检查"主 pipeline idle 时谁在 busy"，追踪具体阻塞源
 3. **周期性模式检测**：判断空泡是系统性（每个 tile 重复）还是偶发
 4. **重叠度判定**：验证双缓冲是否生效（MTE2 与 VECTOR/CUBE 时间重叠比例）
+5. **源码定位**：对 trace 中的 PC 执行地址→源码行映射，将阻塞指令关联到 AscendC 源码。先确认前置条件：仿真时使用 `-g` 保留 debug/line info、未 strip，且映射 ELF 与仿真运行产物一致
+
+> PC 映射要求：保留 `-g` / line info、不 strip、使用与仿真运行一致的 ELF；`.aicore_binary` 需先用 `msobjdump --extract-elf` 抽取内嵌设备 ELF。详见 [references/pc-source-mapping.md](references/pc-source-mapping.md)。
 
 ## 命令参考
 
@@ -163,11 +166,13 @@ npusim report -e ./npusim_Ascend950_* -n all -o ./report_output
 | `references/troubleshooting.md` | 问题排查指南 | 仿真失败或报告未生成时 |
 | `references/pipeline-bubble-analysis.md` | 指令流水空泡分类、因果归因、周期性模式检测 | 生成 trace 后，定位性能瓶颈根因时 |
 | `scripts/trace_bubble_analyzer.py` | 自动化空泡分析脚本（兼容 msprof/npusim 双格式） | 批量分析多核 trace 或获取预分析报告时 |
+| `references/pc-source-mapping.md` | PC 地址→AscendC 源码行映射的前置条件、命令和输出解读 | trace 中已有 PC，需要定位阻塞指令源码时 |
 | `references/performance-metrics-reference.md` | summary.json 字段、阈值、Analysis Priority | 分析 summary.json 时 |
 | `references/performance-issues-general.md` | 多核负载不均衡 + Kernel 利用率不足 | 分析 summary.json 时 |
 | `references/performance-issues-aic.md` | AIC: CUBE/MTE2/MTE1/FIXPIPE/SCALAR + L0C→UB | 分析 summary.json 时 |
 | `references/performance-issues-aiv.md` | AIV: VECTOR/MTE2/MTE3/SCALAR + SIMT + SIMD VF Code-Shape (§6) | 分析 summary.json 时 |
 | `references/performance-issues-template.md` | 新增 issue 条目的规范 | 维护 |
+| `scripts/map_pc_to_source.py` | PC→源码行映射脚本，封装 `llvm-symbolizer` | trace 中已有 PC，需要定位阻塞指令源码时 |
 
 ---
 
