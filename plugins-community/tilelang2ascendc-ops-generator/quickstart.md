@@ -36,10 +36,44 @@ Phase 7: Trace 记录 + 知识演进  (tilelang2ascend-trace-recorder: trace.md 
 
 - 已安装 Python 3.8 或更高版本
 - 已安装 PyTorch 2.0 或更高版本
-- 已安装 tilelang-ascend，具体安装方式请查阅 [tilelang-ascend readme](https://github.com/tile-ai/tilelang-ascend/blob/ascendc_pto/README.md#method-3-compile-and-install-from-source)
+- 已安装 TileLang-Ascend 编译器
 - 已安装 CANN Toolkit（建议 ≥ 9.0.0），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
 - 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
 - 已安装 OpenCode、Claude Code、TRAE、Cursor、Copilot、CodeArts 等受支持的 AI 编程工具
+
+### 安装 TileLang-Ascend 编译器
+
+```bash
+git clone https://github.com/tile-ai/tilelang-ascend.git
+cd tilelang-ascend
+git checkout 585ad8c3b5fae175f1d1661059d347645f1f9536
+prs=(
+  1573  # atomic-add
+  1754  # active dimensions
+  1755  # scope-kill
+  1756  # 2D subregion copy
+  1757  # FloorDiv/FloorMod
+  1758  # BF16 scalar cast
+  1759  # im2col
+  1760  # FP32 GEMM
+  1761  # 多维 scalar offset
+  1770  # ring clear
+  1772  # BF16 transpose
+  1774  # copy alignment
+  1776  # GM→L1 coalesce
+  1821  # flat UB slice
+  1822  # SiLU
+)
+for pr in "${prs[@]}"; do
+  git fetch origin "refs/pull/${pr}/merge"
+  git cherry-pick -m 1 FETCH_HEAD
+done
+git submodule update --init --depth 1 3rdparty/catlass 3rdparty/pto-isa 3rdparty/shmem
+git submodule update --init --depth 1 --recursive 3rdparty/tvm
+bash install_ascend.sh
+source set_env.sh
+python -c 'import tilelang, torch, torch_npu; print(tilelang.__file__)'
+```
 
 ### Claude Code（推荐）
 
