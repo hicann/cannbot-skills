@@ -150,17 +150,17 @@ BRAND="cannbot"
 VERSION="0.1.4"                 # keep in sync with plugin.json
 PLUGIN="ascendc-port-orchestrator"
 
-# Self-contained customer implementation: 2 customer entries + 8 aog-* Skills
-# + 1 standalone A5-migration methodology Skill (ascendc-cross-gen-port-light;
-# stage-gated A2/A3→A5 porting methodology, independent of the engine FSM).
+# Self-contained customer implementation: 2 customer entries + 8 aog-* Skills.
+# The standalone A5-migration methodology Skill ascendc-cross-gen-port-light has
+# moved to the repository-level ops/ skills and is installed independently.
 # Reusable ops Skills keep a single canonical copy under repository ops/ and are
 # supplied by the ascendc-port-orchestrator-shared-skills marketplace dependency.
-LOCAL_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light"
+LOCAL_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen"
 SHARED_SKILLS="ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
 # Keep this literal union in sync with the two lists above: the repository's
 # dependency validator and third-party installers consume this declaration without
 # evaluating shell variable expansion.
-INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ascendc-cross-gen-port-light ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
+INCLUDED_SKILLS="ascendc-cross-gen-port ascendc-backward-gen aog-op-classify aog-input-gen-builder aog-knowledge-maintain aog-perf-eval aog-self-critic aog-a3-author aog-prior-art-verify aog-report-gen ops-precision-standard ascendc-docs-search ascendc-simt-best-practices ascendc-api-best-practices ascendc-regbase-best-practice knowledge-query"
 # Customer agents, kept CONSISTENT with plugin.json agents[] (9).
 # Both installer and manifest must expose the same set: a missing dispatched agent crashes,
 # while every advertised agent must have its customer Skill installed. The
@@ -991,14 +991,12 @@ if [ "$TOOL" = "opencode" ]; then
   echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"
   echo -e "  ${CYAN}2.${NC} launch ${GREEN}opencode${NC} in your project, then a customer entry command:"
   echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
-  echo -e "       ${GREEN}/ascendc-cross-gen-port-light <ops-nn source>${NC}   (无 golden 轻量迁移，不经引擎)"
   echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
 elif [ "$TOOL" = "codearts" ]; then
   echo -e "  ${BOLD}Quick start (CodeArts):${NC}"
   echo -e "  ${CYAN}1.${NC} use local generation/validation with ${GREEN}A5_CONTAINER=local${NC} (remote A5 host+container is explicit opt-in) — docs/USAGE.md"
   echo -e "  ${CYAN}2.${NC} launch ${GREEN}codearts${NC} in your project, then a customer entry command:"
   echo -e "       ${GREEN}/ascendc-cross-gen-port <ops-nn source + golden task>${NC}   (→ orch --port-a3-ops, needs --reference-source/--npubench-task)"
-  echo -e "       ${GREEN}/ascendc-cross-gen-port-light <ops-nn source>${NC}   (无 golden 轻量迁移，不经引擎)"
   echo -e "       ${GREEN}/ascendc-backward-gen <forward spec>${NC}      (→ orch --backward)"
   echo -e "  ${DIM}note: codearts dispatch reuses the OpenCode run protocol (CodeArts CLI is an OpenCode fork); pipeline dispatch requires the codearts CLI + node/bun on PATH.${NC}"
   echo -e "  ${DIM}note: CodeArts models come from the Huawei Cloud side — complete CLI auth first (CODEARTS_CLI_AK / CODEARTS_CLI_SK, apply at https://codearts.huaweicloud.com/portal/settings/cli-auth ), or the skill run fails with 模型列表获取失败.${NC}"

@@ -1,6 +1,6 @@
 # L3：SIMT 优化（多线程替代 Scatter/Gather）
 
-> **本指南只讲 L3 的迁移动作**。SIMT 的语法与 API 用法（`__simt_vf__` / `LAUNCH_BOUND` / `Simt::VF_CALL` / 线程索引循环 / 线程数取值 / `AtomicAdd` / `UintDiv` / `__local_mem__`）见 SIMT 最佳实践技能 `cannbot-skills/ops/ascendc-simt-best-practices/`，此处不重复维护。
+> **本指南只讲 L3 的迁移动作**。SIMT 的语法与 API 用法（`__simt_vf__` / `LAUNCH_BOUND` / `Simt::VF_CALL` / 线程索引循环 / 线程数取值 / `AtomicAdd` / `UintDiv` / `__local_mem__`）见 SIMT 最佳实践技能 `ascendc-simt-best-practices`，此处不重复维护。
 
 ## 触发条件（全部满足）
 
@@ -172,7 +172,7 @@ __aicore__ inline void MoeSrcToDstSimtOp::Process()
 
 ## 相关参考文档路径
 
-- **SIMT 语法 / API / 用法**：`cannbot-skills/ops/ascendc-simt-best-practices/`（overview / vf-declaration / vf-call / thread-stride-pattern / index-calculation / intra-core-shared / data-transfer / multi-core-sync）
+- **SIMT 语法 / API / 用法**：`ascendc-simt-best-practices`（overview / vf-declaration / vf-call / thread-stride-pattern / index-calculation / intra-core-shared / data-transfer / multi-core-sync）
 - **SIMT 编程模型 / 概念卡**：调用 `knowledge-query`，查询 `SIMT 编程模型 线程步进 目标平台`
-- **SIMT API 参考**：调用 `ascendc-api-knowledge-query`，按实际 API 名查询
+- **SIMT API 参考**：调用 `knowledge-query`（API/语义查证），按实际 API 名查询
 - **A2/A3 → A5 迁移**：调用 `knowledge-query`，查询平台对、API 兼容性与架构差异

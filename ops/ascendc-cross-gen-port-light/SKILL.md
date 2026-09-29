@@ -1,11 +1,26 @@
 ---
 name: ascendc-cross-gen-port-light
-description: AscendC 算子轻量迁移 skill（ascendc-cross-gen-port 的无 golden 轻量入口）：把已有 DAV_2201（arch22）平台的 AscendC 算子工程按 Stage 0-5 阶段门禁改造迁移到 DAV_3510（arch35）平台，覆盖 L1 基础适配 / L2 RegBase MicroAPI 重写（含 AIC 低阶直跑评估）/ L3 SIMT 优化三层级判定与 Cube 类算子迁移（分形 ZZ→NZ、跨核同步协议），精度标杆由 agent 逆向源码自合成并与 A5 实测双向互检，不经编排引擎。当用户无 KernelBench golden 输入、或希望基于已有 910b/910_93 算子修改后快速迁移到 950/arch35 时使用；需引擎驱动的端到端自动移植（自动构建/精度/性能闭环与报告）请改用 ascendc-cross-gen-port。
-version: 3.3
-date: 2026-08-18
+description: 当用户希望将已有 A2/A3（910b/910_93、DAV_2201）AscendC 算子工程迁移到 A5（950、DAV_3510）时使用。按 Stage 0–5 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与 A5 实测双向互检。
+metadata:
+  version: "3.3"
+  date: "2026-08-18"
 ---
 
 # AscendC 算子跨架构迁移（DAV_2201 → DAV_3510，含 API 差异适配）
+
+## 安装与知识依赖
+
+本目录可作为独立 skill 使用。按所选层级安装下表中的知识 skill（按 Skill 名称单向依赖，不依赖相对路径；安装方式见各 skill 自身的安装说明）：
+
+| 知识入口 | 使用时机 |
+|---|---|
+| `knowledge-query` | 迁移指南、概念与经验卡检索，以及精确 API/语义查证 |
+| `ascendc-api-best-practices` | 跨代 API 差异、参数与签名 |
+| `ascendc-regbase-best-practice` | L2 RegBase 改造 |
+| `ascendc-simt-best-practices` | L3 SIMT 改造 |
+| `ops-precision-standard` | 迁移后的精度验证标准 |
+
+`knowledge-query` 按当前工具的已安装 Skill 列表定位，先读取其 `SKILL.md`，再使用该 Skill 目录下的 `scripts/knowledge_query.py`。知识库通过 `--knowledge-root <知识库根目录>` 或 `CANNBOT_KNOWLEDGE_ROOT` 配置；精确 API 查询使用其 API/语义查证路线，带上实际 API 名和源/目标平台。多个 skill 按需组合，安装本 skill 不会自动安装其他 skill。
 
 本 Skill 是**路由器**，不包含实现细节。所有细节在 `stages/` 和 `references/` 中。
 
@@ -153,7 +168,7 @@ date: 2026-08-18
 
 | 属性 | 值 |
 |------|-----|
-| **路径** | `cannbot-skills/ops/ascendc-regbase-best-practice/SKILL.md` |
+| **Skill** | `ascendc-regbase-best-practice` |
 | **入口文件** | `references/regbase_development_guide.md`（四层模型） |
 | **按需查阅** | `references/api/`（白名单、MemBase 对照、同步）、`references/pitfalls/`（精度陷阱）、`references/dev-experience/`（编程经验） |
 
@@ -161,11 +176,11 @@ date: 2026-08-18
 
 ### 外部 Sub-Skill：API 最佳实践（跨代迁移 API 知识）
 
-API 用法知识（参数语义/签名/模式表）沉淀于 `cannbot-skills/ops/ascendc-api-best-practices/references/`：
+API 用法知识（参数语义/签名/模式表）沉淀于 `ascendc-api-best-practices` 的 `references/`：
 - `api-cross-gen-migration.md` — Subnormal 与超越函数差异（阶段 1/2 API 差异适配的 API 知识真源）
 - `api-cross-gen-fixpipe.md` — FixpipeParamsArch3510 字段与单位差异（L0C 回写参数真源）
 
-SIMT 侧（L3）：`cannbot-skills/ops/ascendc-simt-best-practices/`（含本 skill 沉淀的 AtomicAdd / UintDiv / __local_mem__）。
+SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 AtomicAdd / UintDiv / __local_mem__）。
 
 ## Gate 协议
 

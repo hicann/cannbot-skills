@@ -75,7 +75,7 @@ GATE-1 LEVEL 值
 |------|---------------|-------------|
 | 1 | `references/impl/l2-guide.md` | `[LOADED] l2-guide` |
 | 2 | `references/impl/api-mapping.md` | `[LOADED] api-mapping` |
-| 3 | `cannbot-skills/ops/ascendc-regbase-best-practice/references/regbase_development_guide.md` | `[LOADED] regbase_development_guide` |
+| 3 | `ascendc-regbase-best-practice` 的 `references/regbase_development_guide.md` | `[LOADED] regbase_development_guide` |
 
 **cube 类算子追加必读**（kernel 含 Mmad/LoadData/Fixpipe/DataCopyCO12DstParams/CrossCoreSetFlag 等 cube API 时）：
 

@@ -256,8 +256,8 @@ LocalTensor<half> auxIn = allUb.GetWithOffset<half>(rows2 * auxLen, off);
 | UB 总量 (A5) | 256 KB = 262144 B | DavidV100 手册 |
 | SIMT DCache 预留 | 40 KB = 40960 B | PR 103 / l1-l2-guide |
 | Host 获取 UB 接口 | `platform.GetCoreMemSize(CoreMemType::UB, ubSize)` | AscendC platform API（`platform_ascendc`） |
-| InitBuffer 自动对齐 | len 不足 32B 自动补齐 | `cannbot-skills/ops/ascendc-api-best-practices/references/api-buffer.md` |
+| InitBuffer 自动对齐 | len 不足 32B 自动补齐 | `ascendc-api-best-practices` 的 `references/api-buffer.md` |
 | Buffer 总数上限 | 64 | 硬件约束（A5） |
-| DataCopyPad blockCount 上限 | 4095 | `cannbot-skills/ops/ascendc-api-best-practices/references/api-datacopy.md` |
+| DataCopyPad blockCount 上限 | 4095 | `ascendc-api-best-practices` 的 `references/api-datacopy.md` |
 | DataCopy GM 最小搬运 | 32 B = 8×fp32 | PB-11 / EC-41 |
-| 32B 对齐要求 | fp32: %8==0, fp16/bf16: %16==0 | `cannbot-skills/ops/ascendc-api-best-practices/references/api-datacopy.md` |
+| 32B 对齐要求 | fp32: %8==0, fp16/bf16: %16==0 | `ascendc-api-best-practices` 的 `references/api-datacopy.md` |

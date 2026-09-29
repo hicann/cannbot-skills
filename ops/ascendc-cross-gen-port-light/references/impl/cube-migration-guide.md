@@ -20,7 +20,7 @@ cube 迁移**不是只读本文件**——以下环节必须配套使用 skill �
 | 迁移环节 | 配套经验文件 | 加载时机 |
 |---------|-------------|---------|
 | AIV 侧 Vector 路径评估/重写（L2 语义 ③、VF 归属判断） | `l2-guide.md`、`api-mapping.md` | L2 改造前 |
-| AIV 侧 RegBase 最佳实践（白名单/四层模型/陷阱/参考算子） | `cannbot-skills/ops/ascendc-regbase-best-practice/references/regbase_development_guide.md`（外部 Sub-Skill，见 SKILL.md） | AIV 侧写 RegBase 代码前 |
+| AIV 侧 RegBase 最佳实践（白名单/四层模型/陷阱/参考算子） | `ascendc-regbase-best-practice` 的 `references/regbase_development_guide.md`（外部 Sub-Skill，见 SKILL.md） | AIV 侧写 RegBase 代码前 |
 | Host 侧 tiling/配置（L1 适配范围） | `l1-guide.md`（host 侧步骤通用） | L1/L2 改造前 |
 | 测试与 debug 排查 | `cube-debug-lessons.md` | 阶段 4（迁移后测试） |
 
@@ -109,7 +109,7 @@ cube 迁移**不是只读本文件**——以下环节必须配套使用 skill �
 
 参数单位是本 API 的最大易错点，速记：**mStep=16 个元素、kStep=32 字节、srcStride/dstStride=512 字节（一个数据分形）**、`mStep/kStep=0` 为 NOP。注意 stride 的 512 字节是**分形大小**——b4/b8/b16/b32 的一个分形都是 512 字节（分别为 16×64 / 16×32 / 16×16 / 16×8），故该单位与 dtype 无关。`ifTranspose` 仅 L1→L0A/L0B 通路可开，且开启时需满足：**b4 需 mStep 为 4 的倍数、b8 为 2 的倍数、b16 无额外约束、b32 需 kStep 为 2 的倍数**；float 数据 L0B 装载 `dstStride` 需减半。
 
-**完整参数表与通路约束**见 API 最佳实践 `cannbot-skills/ops/ascendc-api-best-practices/references/api-loaddata.md`（LoadData2DParamsV2 字段单位节）。
+**完整参数表与通路约束**见 API 最佳实践 `ascendc-api-best-practices` 的 `references/api-loaddata.md`（LoadData2DParamsV2 字段单位节）。
 
 
 ### 标准用法（M×K 左矩阵，参考官方样例 data_copy_l1togm）
@@ -163,7 +163,7 @@ LoadData<Q_T, LOAD3D_CONFIG>(a2, a1, loadData3dParams);
 
 `FixpipeConfig{format, isToUB}`：`format`=NZ（保持）/ ROW_MAJOR（NZ2ND）/ COLUMN_MAJOR（950 新增 NZ2DN）；`isToUB=true` 走 L0C→UB 新通路（配 `dualDstCtl`/`subBlockId`）。
 
-**FixpipeParamsArch3510 完整字段表（nSize 16 倍数、srcStride 单位 C0_SIZE、dstStride 单位 element ≠ V220 的 datablock 等差异点）**见 API 最佳实践 `cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-fixpipe.md`。
+**FixpipeParamsArch3510 完整字段表（nSize 16 倍数、srcStride 单位 C0_SIZE、dstStride 单位 element ≠ V220 的 datablock 等差异点）**见 API 最佳实践 `ascendc-api-best-practices` 的 `references/api-cross-gen-fixpipe.md`。
 
 
 ### 标准用法（L0C→GM 普通 NZ2NZ 搬运）
@@ -262,7 +262,7 @@ __aicore__ inline void CrossCoreWaitFlag(...);
 
 **该 API 在 2201/3510 均存在，但模式集合与参与集合语义随架构不同——迁移时以目标平台文档为准，不得假设与旧平台一致（模式号相同 ≠ 语义相同）。**
 
-**模式参与集合语义**（官方定义；跨核同步 API 的完整规则见 `cannbot-skills/ops/ascendc-api-best-practices/references/api-crosscore-sync.md`）：
+**模式参与集合语义**（官方定义；跨核同步 API 的完整规则见 `ascendc-api-best-practices` 的 `references/api-crosscore-sync.md`）：
 
 | 模式 | 参与集合 |
 |---|---|

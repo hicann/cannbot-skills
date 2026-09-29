@@ -1,4 +1,8 @@
 ## 🔥 更新日志
+### 【2026-09-28】
+#### 变更 Changes
+- 【AscendC 迁移】`ascendc-cross-gen-port-light` 旧分发副本从 `plugins-community/ascendc-port-orchestrator/skills/` 移除（31 个文件），唯一权威副本为 `ops/ascendc-cross-gen-port-light`；插件 init.sh 安装清单、plugin.json 描述与文档入口同步更新。该 skill 的跨 skill 引用改为仅按名称单向依赖，不再使用相对路径链接。
+
 ### 【2026-09-26】
 #### 缺陷修复 Bug Fixes
 - 【TileLang】修复 `ops/tilelang-perf-optimization/SKILL.md` 效果验证步骤中的失效调试指南链接，改为仓内已有的 API 调试说明和生成代码检查指南。

@@ -158,7 +158,7 @@ ${PYTHON_PATH} -m pytest test_op_name_precision.py -v --tb=short
 
 ## Step 4.5：精度标准
 
-**判定标准**（混合容差 + 双门限，真源 `cannbot-skills/ops/ops-precision-standard/SKILL.md`）：逐元素 `|actual - golden| ≤ atol + rtol × |golden|` **且** `matched_ratio ≥ 0.99` **且** `max_abs_error ≤ max_abs_error_limit`。各 dtype 阈值表见 `references/precision-testing/OPS_PRECISION_STANDARDS.md`。
+**判定标准**（混合容差 + 双门限，真源 `ops-precision-standard` 的 `SKILL.md`）：逐元素 `|actual - golden| ≤ atol + rtol × |golden|` **且** `matched_ratio ≥ 0.99` **且** `max_abs_error ≤ max_abs_error_limit`。各 dtype 阈值表见 `references/precision-testing/OPS_PRECISION_STANDARDS.md`。
 
 | 输出类型 | 判定标准 |
 |---------|---------|

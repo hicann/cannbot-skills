@@ -15,7 +15,7 @@
 
 ## API 速览与知识真源
 
-> **完整 API 知识不在本 skill**：RegBase API 的家族级签名地图、白名单、同步约定由 RegBase 最佳实践技能承载（`cannbot-skills/ops/ascendc-regbase-best-practice/`）。下表是 L2 改造最常用的对照速览，细节一律回该技能与 SDK header 确认。
+> **完整 API 知识不在本 skill**：RegBase API 的家族级签名地图、白名单、同步约定由 RegBase 最佳实践技能承载（`ascendc-regbase-best-practice`）。下表是 L2 改造最常用的对照速览，细节一律回该技能与 SDK header 确认。
 
 ## 迁移视角速览（L2 改造最常用）
 
@@ -58,7 +58,7 @@ constexpr static uint32_t VL_FP32 =
 
 950 中类型转换不再使用 `RoundMode` 枚举，改用 `CastTrait` 结构体（四要素：RegLayout / SatMode / MaskMergeMode / RoundMode）。
 
-**CastTrait 完整定义、预定义快捷常量与全部转换方向速查表已沉淀至 RegBase 最佳实践**：`cannbot-skills/ops/ascendc-regbase-best-practice/references/api/regbase_api_reference.md`（CastTrait 家族条目）+ SDK header（`basic_api/reg_compute/`）。
+**CastTrait 完整定义、预定义快捷常量与全部转换方向速查表已沉淀至 RegBase 最佳实践**：`ascendc-regbase-best-practice` 的 `references/api/regbase_api_reference.md`（CastTrait 家族条目）+ SDK header（`basic_api/reg_compute/`）。
 
 迁移决策速记（详见上表）：
 
@@ -443,7 +443,7 @@ L2 重写时，若算子使用 **Exp / Ln / Sqrt / Rsqrt / Div / Reciprocal**，
 | 高精度（软件模拟，支持 subnormal，**性能影响大**） | 传 algo Config：`Ln<T, LN_CONFIG>(dst, src, count)` | 传 `LnSpecificMode` 指针：`Reg::Ln<float, &LN_SUBNORMAL_MODE>(dst, src, mask)` |
 
 - **优先级**：能保持默认就保持默认（迁移方案判定存在结构性排除时）；确需高精度时再按 tiling 参数/属性开分支，不要默认全开
-- **完整 API 知识**（六类 API 的 Config 结构、algo 取值含义、220x/351x 代码对比、SpecificMode 定义与示例）见 API 最佳实践：`cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-migration.md`
+- **完整 API 知识**（六类 API 的 Config 结构、algo 取值含义、220x/351x 代码对比、SpecificMode 定义与示例）见 API 最佳实践：`ascendc-api-best-practices` 的 `references/api-cross-gen-migration.md`
 - **策略选择与证据要求**（何时可用策略 0 结构性排除、eps 可检查性）见 `api-diff-guide.md` §1
 
 ## 补充 4：架构差异全景表（220x vs 351x 完整对照）
@@ -476,10 +476,10 @@ L2 重写时，若算子使用 **Exp / Ln / Sqrt / Rsqrt / Div / Reciprocal**，
 | 文档类别 | 路径 | 说明 |
 |---------|------|------|
 | Register-based Vector / MicroAPI | `knowledge-query`: `Register-based Vector MicroAPI RegBase` | Reg 矢量计算编程指南 |
-| Memory-based Vector 操作 | `ascendc-api-knowledge-query`: 实际 API 名 | 掩码操作、归约计算、高维切分、连续计算 API |
+| Memory-based Vector 操作 | `knowledge-query`（API/语义查证）: 实际 API 名 | 掩码操作、归约计算、高维切分、连续计算 API |
 | 迁移相关官方文档 | `knowledge-query`: `220x 351x 架构 API 编译迁移` | 架构变更、API/编译迁移、兼容性说明 |
 | SIMD 编程参考 | `knowledge-query`: `SIMD BuiltIn C API` | SIMD BuiltIn 关键字、语言扩展层 C API |
 | SIMT 编程参考 | `knowledge-query`: `SIMT 线程 同步 AI Core` | SIMT 线程架构、同步机制、AI Core SIMT 编程 |
-| API 概述 | `ascendc-api-knowledge-query`: 实际 API 名 | 编程接口、高阶/基础 API 概述 |
+| API 概述 | `knowledge-query`（API/语义查证）: 实际 API 名 | 编程接口、高阶/基础 API 概述 |
 
 > 上表均通过已安装的外部知识查询 skill 解析；不扫描知识树。

@@ -6,7 +6,7 @@
 **调用接口**: torch.ops.npu（{{NPU_CALL_EXPR}}）
 **参考基线**: PyTorch CPU `{{CPU_REF_EXPR}}` (float32 计算后转目标 dtype)
 **支持的 dtype**: {{SUPPORTED_DTYPES_STR}}
-**精度标准**: 生态算子开源精度标准（混合容差 rtol/atol + 双门限，来源 cannbot-skills/ops/ops-precision-standard）
+**精度标准**: 生态算子开源精度标准（混合容差 rtol/atol + 双门限，来源：已安装的 ops-precision-standard skill）
 **测试时间**: {{DATE}}
 
 ## 总览

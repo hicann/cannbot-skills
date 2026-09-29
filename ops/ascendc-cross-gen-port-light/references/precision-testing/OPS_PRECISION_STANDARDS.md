@@ -1,6 +1,6 @@
 # 生态算子精度标准（迁移场景接入）
 
-> **判定标准真源**：`cannbot-skills/ops/ops-precision-standard/SKILL.md`（混合容差体系；本文件不复制阈值表，以真源为准）。
+> **判定标准真源**：`ops-precision-standard` 的 `SKILL.md`（混合容差体系；本文件不复制阈值表，以真源为准）。
 
 ## 通过判定（混合容差 + 双门限）
 

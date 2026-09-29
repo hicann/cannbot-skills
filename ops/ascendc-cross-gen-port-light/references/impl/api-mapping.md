@@ -3,7 +3,7 @@
 > L2 改造时 MUST READ。本文件是 Memory-based API 到 Register-based (MicroAPI) 的快速映射索引。
 > 详细使用方法和完整示例见 `l2-guide.md`。
 > **适用对象**：vector 类算子整体；cube 类算子中 AIV 侧 Vector 路径（VF/vector 代码）的 Memory→Reg 改造同样适用本表，AIC 侧见 `cube-migration-guide.md`。
-> **与 RegBase 最佳实践的分工**：本表是**迁移期对照**（旧调用 → 新写法，含量化路径与 Subnormal 映射）；RegBase 技能（`cannbot-skills/ops/ascendc-regbase-best-practice`）的 `references/api/compute_api_membase_vs_regbase.md` 是**设计与审查视角**（名称相同但对象/签名不同的审查点）。写代码前以本表对照、以 SDK header 为准。
+> **与 RegBase 最佳实践的分工**：本表是**迁移期对照**（旧调用 → 新写法，含量化路径与 Subnormal 映射）；RegBase 技能（`ascendc-regbase-best-practice`）的 `references/api/compute_api_membase_vs_regbase.md` 是**设计与审查视角**（名称相同但对象/签名不同的审查点）。写代码前以本表对照、以 SDK header 为准。
 
 ## 一、数据类型转换映射
 
@@ -158,7 +158,7 @@ FP32 → INT32 (ReinterpretCast + CAST_RINT)
 | Div | `Div(dst, s1, s2, count)` | `Div<T, DIV_CONFIG>(dst, s1, s2, count)` | 同 220x |
 | Reciprocal | `Reciprocal(dst, src, count)` | `Reciprocal<T, RCP_CONFIG>(dst, src, count)` | 同 220x |
 
-> Config 结构体定义、algo 取值含义与完整示例见 `cannbot-skills/ops/ascendc-api-best-practices/references/api-cross-gen-migration.md`；Reg 路径的 subnormal 写法见 `l2-guide.md` 补充 3。
+> Config 结构体定义、algo 取值含义与完整示例见 `ascendc-api-best-practices` 的 `references/api-cross-gen-migration.md`；Reg 路径的 subnormal 写法见 `l2-guide.md` 补充 3。
 
 ## 四、溢出模式控制（351x 独有）
 

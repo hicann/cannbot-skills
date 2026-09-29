@@ -1,0 +1,133 @@
+{
+  "skill_name": "ascendc-cross-gen-port-light",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "无外部 golden 的源码迁移流程",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A2",
+          "A3",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一个已在 A2/A3 使用的 AscendC 算子工程，没有外部 golden，想按 port-light 迁移到 A5。请说明这个入口是否适用，并按 Stage 0 到 Stage 5 列出工作顺序、各阶段主要产物及 Gate 的作用。精度参考从哪里来，是否需要启动编排引擎？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
+      "expected_output": "1. 该轻量入口适用于已有 A2/A3 源码且无外部 golden 的迁移，不启动编排引擎。2. 顺序为 Stage 0 环境验证、Stage 1 评估定级、Stage 2 代码改造、Stage 3 编译安装、Stage 4 精度验证、Stage 5 性能验证；每阶段先读对应 stage，满足证据和前序 Gate 才继续。3. GATE-0 对应已确认的 CANN/Python/NPU 与 asc-devkit 环境，Stage 1 输出源码分析摘要与 L1/L2/L3 迁移方案；后续提供改造文件、编译安装产物、精度报告及真实性能采集证据，GATE-5 对应性能证据齐备。4. CPU 参考标杆由源码逆向合成，并与 A5 实测双向互检；编译通过不等于迁移完成。这里只说明流程，不输出已通过的 Gate。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GATE-0",
+          "description": "应说明先完成环境验证。"
+        },
+        {
+          "type": "contains",
+          "pattern": "GATE-5",
+          "description": "应覆盖性能阶段及其证据。"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "L1 L2 L3 分流与 Cube 迁移边界",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A2",
+          "A3",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "请依据 port-light 的决策树比较三类任务：普通非性能关键 Vector 算子；性能关键 Matmul/Attention；仅做简单索引 Scatter/Gather、无需 UB 中转且线程并行度高的算子。分别如何判定 L1/L2/L3？有人认为 Cube 算子定为 L2 就要照搬 Vector 的整套 RegBase 重写，只需确认不死锁便算完成，这种理解是否正确？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
+      "expected_output": "1. 无 L2/L3 触发条件的普通 Vector 算子走 L1 基础适配；性能关键 Matmul/Attention 同样触发 L2；在无优先 L2 触发条件且满足全部索引条件时，Scatter/Gather 可走 L3 SIMT 优化。2. 所有层级均须执行 API 差异风险扫描与适配。3. Cube 的 L2 由 AIC 低阶直跑评估、跨核同步协议处理和 AIV 自身 Vector 路径的 RegBase 评估改造三部分组成；必须给出保留高阶 Matmul 或采用低阶路径的理由，不能仅证明不死锁就宣称完成。4. Cube 迁移还须结合 cube-migration-guide 的数据通路、ZZ 到 NZ 分形和同步语义；该指南不替代对应层级指南，不能把 Cube 的 L2 等同于 Vector 整体重写。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "L1",
+          "description": "说明基础适配层级。"
+        },
+        {
+          "type": "contains",
+          "pattern": "L2",
+          "description": "说明性能关键路径触发 L2。"
+        },
+        {
+          "type": "contains",
+          "pattern": "L3",
+          "description": "说明 SIMT 适用条件。"
+        },
+        {
+          "type": "contains",
+          "pattern": "AIC",
+          "description": "说明 Cube 与 Vector 的处理边界。"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "缺少设备与执行证据不能宣称验收通过",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A2",
+          "A3",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "当前拿不到 A5 设备，也没有有效的 CANN 环境和实际编译、精度测试、profiler 输出。只是读过源码并认为迁移应该没问题，是否可以输出 GATE-3、GATE-4 通过和 GATE-5 性能已采集？请说明当前应记录的状态以及后续缺少哪些证据；CANN 环境路径未知时应如何处理？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
+      "expected_output": "1. 静态分析、待办完成或预计正确都不能替代实际证据，不能宣称 GATE-3 编译安装通过、GATE-4 精度通过或 GATE-5 性能已采集。2. 缺证据时保持 NOT VERIFIED、NOT PASSED 或 BLOCKED，准确说明尚未进行真机验证；Stage 0 未确认时不执行后续编译、安装与测试。3. 需补齐有效环境、真实编译安装产物、全部计划精度用例的实际输出及性能阶段要求的采集数据和报告，之后才按各 Gate 条件判断。4. CANN 环境变量无法提供有效路径时应向用户询问，不自行扫描文件系统或猜路径；本题不伪造硬件数据或加速比。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GATE-4",
+          "description": "说明精度 Gate 必须有实测依据。"
+        },
+        {
+          "type": "contains",
+          "pattern": "GATE-5",
+          "description": "说明性能 Gate 必须有真实采集证据。"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "逆向标杆双向互检与条件接受边界",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A2",
+          "A3",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "这个无 golden 的迁移任务应怎样从原 A2/A3 源码准备精度参考并检验它？如果 A5 输出与自合成标杆有少量差异，能否直接认定算子有错、放宽阈值或删掉失败用例？根因分析后若确认是 dtype 表示粒度等非缺陷小差异，原流程允许怎样由用户决定是否接受，Gate 和报告应如何表示？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
+      "expected_output": "1. 先从原源码逆向接口、计算逻辑、dtype/转换点和边界条件，合成 CPU 参考，再与 A5 输出双向互检；有差异不能默认算子或标杆一定错误，应先核验标杆精度对齐等问题。2. 按原流程设计至少30条精度用例、每条不超过200K元素，覆盖支持的 dtype、排布及适用的 subnormal 场景；被测迁移算子通过 EXEC_NPU_CMD 绑定的 torch.ops.npu 调用，不能拿 PyTorch 同名算子替代被测实现。3. 不得通过放宽阈值、跳过 case、修改输入范围或缩减 dtype 来把失败伪装为全过；失败须分析根因并如实记录。4. 已完成根因分析并归类的非缺陷小差异，应呈现超标元素、占比、绝对误差和归类依据，询问用户是否接受；接受后输出 CONDITIONAL 和 USER_ACCEPTED，保留实际通过数及豁免明细，不冒充全量 PASS；未接受则按原流程修复、升级或停止报告。5. 根因未定的 NaN/Inf、公式错误或正常值域真实精度缺陷不能进入该接受通道。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "CONDITIONAL",
+          "description": "保留原流程的条件接受通道。"
+        },
+        {
+          "type": "contains",
+          "pattern": "USER_ACCEPTED",
+          "description": "条件接受必须来自用户并记录。"
+        },
+        {
+          "type": "contains",
+          "pattern": "torch.ops.npu",
+          "description": "测试必须调用实际迁移算子绑定。"
+        }
+      ]
+    }
+  ]
+}
