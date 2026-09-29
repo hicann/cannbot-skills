@@ -1,4 +1,4 @@
-﻿# hccl-matmul 通算并行调优（tileCnt，910B / A2）
+# hccl-matmul 通算并行调优（tileCnt，910B / A2）
 
 两阶段策略（`tileCnt=1` 串行基线 → 扫描找最优）与 `headMSize = M / tileCnt` 概念复用 [`../../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md)，**本文不重复**。下文只写本路线差异。
 

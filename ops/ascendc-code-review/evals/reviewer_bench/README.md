@@ -37,7 +37,7 @@ reports/                 输出目录
 - `deterministic_routing.py` — 确定性条例路由：扫 references `<适用>` 头做声明式匹配 → 路由计划
 - `normalize_report.py` — AI 报告归一化：提取 findings（yaml/markdown）+ 行号 re-tracking + 保守过滤
 - `run_eval.py` — 端到端评测：4 阶段匹配（path→side→line→semantic）→ 召回率/精确率/F1
-- `gen_leaderboard.py` — 聚合 eval 结果 → leaderboard.json
+- `gen_leaderboard.py` — 聚合评测结果 → leaderboard.json
 
 ## 流水线
 

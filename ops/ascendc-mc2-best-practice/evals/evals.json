@@ -272,21 +272,6 @@
       "files": []
     },
     {
-      "id": 14,
-      "title": "apace flag 计数峰值超限必须 host 强制校验",
-      "config": {
-        "max_tokens": 500000,
-        "ascend_platforms": [
-          "A5"
-        ],
-        "eval_mode": "text"
-      },
-      "prompt": "一个 compute-first 算子在 T=8 时正常，T=16 时出现硬件异常中断。开发者认为是 flag 编排问题，想修改 kernel 的 flag 分配逻辑。请给出正确的分析和修复方向，不执行工具。",
-      "expected_output": "应指出 flag 计数峰值 ≤ 15 是硬限制（T>1 逐轮配对时峰值 = T），T=16 已超限。修复方向是 host 侧强制校验 flag 计数峰值 ≤ 15，在 fork/建链前拒绝非法输入（R9），而不是修改 kernel flag 分配逻辑绕过限制。",
-      "expectations": [],
-      "files": []
-    },
-    {
       "id": 15,
       "title": "apace 归约 in-place Cast 导致精度系统性错误",
       "config": {

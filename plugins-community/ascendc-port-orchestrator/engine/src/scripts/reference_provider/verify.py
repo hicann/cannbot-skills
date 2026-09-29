@@ -221,7 +221,7 @@ def main():
         print(f"torch_npu not available: {e}", file=sys.stderr)
         sys.exit(3)
 
-    ref = torch.load(ref_path, weights_only=False)
+    ref = torch.load(ref_path, weights_only=True)
     print(f"reference: {ref['reference_source']['platform']} {ref['reference_source']['device']} "
           f"(torch={ref['reference_source']['torch_version']})", flush=True)
     print(f"kernel_dir: {kd}", flush=True)

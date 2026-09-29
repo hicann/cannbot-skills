@@ -1,4 +1,4 @@
-﻿# 910B（A2）MC2 架构心智模型
+# 910B（A2）MC2 架构心智模型
 
 本文档承载 910B MC2 skill 的"架构心智子能力"。面向第一次接触 910B MC2 的 Architect/Developer，建立通信方案选择、AIV/AIC 分工、HCCL AIC-only 下发、通算两层流水、M 轴切分并行的整体心智模型。读完应能回答：910B 有哪些通信方案、为何选 HCCL 高阶 API？Matmul 跑在哪个核？HCCL 该怎么下发？tileCnt 调什么？
 

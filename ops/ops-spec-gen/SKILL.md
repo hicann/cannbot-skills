@@ -116,7 +116,7 @@ python3 scripts/generate_spec.py \
   `data_dependent` + `shape_rule_description` + `shape_bounds`。
 - `outputs[].dtype_rule` — numpy 子集表达式（如 `c.dtype = np.promote_types(a.dtype, b.dtype)`、
   `y.dtype = x.dtype`、`y.dtype = np.int32`）
-- `math_semantics.formula` — numpy 可 eval 的表达式
+- `math_semantics.formula` — numpy 可求值的表达式
 - `math_semantics.reference_oracle.api` — 真实的 torch/numpy/scipy API 全限定名
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
 - `numerical_tolerance.per_dtype` — 覆盖 supported_combinations 中所有 output dtype

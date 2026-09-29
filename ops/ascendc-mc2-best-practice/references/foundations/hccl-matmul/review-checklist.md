@@ -1,4 +1,4 @@
-﻿# hccl-matmul 路线代码审查验收条件
+# hccl-matmul 路线代码审查验收条件
 
 > Reviewer 在设计评审与阶段三验收逐项检查。违反任意红线项 = FAIL。本路线仅覆盖 Ascend 910B（A2 / dav-2201）。
 

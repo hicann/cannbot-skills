@@ -751,11 +751,11 @@ def _load_case_lists(
     a5_capture_path: Path, edge_dataset_path: Path, cpu_truth_path: Path
 ) -> tuple[list, list, list]:
     """Load target, source-NPU, and optional CPU diagnostic case sequences."""
-    ours_list = _to_tensor_list(torch.load(a5_capture_path, weights_only=False))
-    edge_blob = torch.load(edge_dataset_path, weights_only=False)
+    ours_list = _to_tensor_list(torch.load(a5_capture_path, weights_only=True))
+    edge_blob = torch.load(edge_dataset_path, weights_only=True)
     a3_list = _to_tensor_list(edge_blob)
     if cpu_truth_path.is_file():
-        cpu_list = _to_tensor_list(torch.load(cpu_truth_path, weights_only=False))
+        cpu_list = _to_tensor_list(torch.load(cpu_truth_path, weights_only=True))
     else:
         cpu_list = []
     return ours_list, a3_list, cpu_list
@@ -765,7 +765,7 @@ def _load_native_diagnostic(
     native_path: Path,
 ) -> tuple[bool, Any, bool, Optional[list]]:
     """Load only the whitelisted native capture used for CPU diagnostics."""
-    native_blob = torch.load(native_path, weights_only=False) if native_path.is_file() else None
+    native_blob = torch.load(native_path, weights_only=True) if native_path.is_file() else None
     native_file_present = native_blob is not None
     native_kind = (
         native_blob.get("native_kind")

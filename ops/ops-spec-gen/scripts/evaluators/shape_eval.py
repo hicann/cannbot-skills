@@ -22,7 +22,7 @@
   任何懂 numpy 的 agent 都能读、能跑（替换 SymbolicShape → 真 ndarray.shape 即可）。
 
 实现方式：
-  在受限 AST 沙箱里 exec 表达式，把每个输入 input 暴露为 _ShapeProxy，其 .shape
+  在受限 AST 沙箱里执行表达式，把每个输入 input 暴露为 _ShapeProxy，其 .shape
   返回一个支持切片 / 负索引 / `+` 拼接的 _ShapeTuple。numpy namespace 只暴露
   broadcast_shapes（复用 broadcast.py 的 numpy_broadcast_n）。
 """

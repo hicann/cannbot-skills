@@ -446,7 +446,7 @@ def create_fix_pr(repo_path: Path, title: str, token: str,
     if fork_path:
         data["fork_path"] = fork_path
     
-    resp = requests.post(url, json=data)
+    resp = requests.post(url, json=data, timeout=30)
     
     if resp.status_code != 201:
         raise Exception(f"PR 创建失败: {resp.status_code} - {resp.text}")

@@ -1,4 +1,4 @@
-﻿# 通信层：HCCL in-kernel 高阶 API（A2/910B）
+# 通信层：HCCL in-kernel 高阶 API（A2/910B）
 
 本文档承载 910B（A2）MC2 skill 的"通信子能力"。涵盖：HCCL 高阶 API 目录（A2）、V2 生命周期、AllGather/AllReduce 两条蓝本、algConfig、窗口优化、禁用非高阶方式清单、host 侧配置、排错速查。
 

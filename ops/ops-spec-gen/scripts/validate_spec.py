@@ -913,7 +913,7 @@ def _check_paradigm_groups(spec, paradigms, findings):
     # ── 通用信号检测：模式切换属性 ────────────────────────────────────────
     # string_in 和 enum_in 语义等价，都表示属性在多个离散值之间切换。
     # int_in_range 且 lower_inclusive=0 也视为模式切换信号（0 值通常对应
-    # none/identity/passthrough，如 reduction=0→none, mode=0→eval 等）。
+    # none/identity/passthrough，如 reduction=0→none, mode=0→求值 等）。
     _MODE_SWITCH_KINDS = {"string_in", "enum_in"}
     attrs = spec.get("attributes") or []
     mode_switch_attr = next(

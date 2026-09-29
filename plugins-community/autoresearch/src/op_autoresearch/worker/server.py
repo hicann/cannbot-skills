@@ -448,21 +448,28 @@ async def health():
 def start_server(host: Optional[str] = None, port: Optional[int] = None):
     """
     启动 OP_AUTORESEARCH Worker Service。
-    
+
     Args:
         host: 监听地址。可从环境变量 WORKER_HOST 设置。
-              - IPv4: "0.0.0.0" (所有接口), "127.0.0.1" (本地)
-              - IPv6: "::" (所有接口，双栈), "::1" (本地)
-              默认: "0.0.0.0"
+              - IPv4: "127.0.0.1" (本地，默认), "0.0.0.0" (所有接口)
+              - IPv6: "::1" (本地), "::" (所有接口，双栈)
+              默认: "127.0.0.1"（仅本机可达）
         port: 监听端口。可从环境变量 WORKER_PORT 设置。
               默认: 9001
     """
-    host = host or os.environ.get("WORKER_HOST", "0.0.0.0")
+    host = host or os.environ.get("WORKER_HOST", "127.0.0.1")
     port = (
         port
         if port is not None
         else int(os.environ.get("WORKER_PORT", "9001"))
     )
+
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        logger.warning(
+            'Worker Service 绑定到 %s：该端口没有请求鉴权，任何能访问到它的客户端都可以'
+            '提交评测任务。请改回 127.0.0.1（远端场景经隧道访问，如 remote_dispatch 那样），'
+            '或用防火墙限制来源。', host,
+        )
 
     logger.info('Starting Worker Service on %s:%s', host, port)
     uvicorn.run(app, host=host, port=port)

@@ -88,7 +88,8 @@ def compare_remote_result_files(
 
 
 def _load_result_payload(path: str | Path) -> object:
-    return torch.load(Path(path), map_location="cpu")
+    # weights_only=True：只允许张量与基础容器，避免加载不可信 .pt 时触发任意对象构造
+    return torch.load(Path(path), map_location="cpu", weights_only=True)
 
 
 if __name__ == "__main__":

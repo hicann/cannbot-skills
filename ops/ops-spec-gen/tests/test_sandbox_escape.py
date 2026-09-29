@@ -8,7 +8,7 @@
 
 """沙箱逃逸回归测试。
 
-历史漏洞：`__builtins__["__import__"]("os").system(...)` 在 exec 模式下能绕过
+历史漏洞：`__builtins__["__import__"]("os").system(...)` 在执行模式下能绕过
 Name 黑名单（`__builtins__` 当时只查 _BANNED_NAMES 列表，未拦 dunder Name）。
 修复方式：validate_ast 增加全量 dunder Name 拒绝。本测试锁死这条契约。
 """

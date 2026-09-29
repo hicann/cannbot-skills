@@ -1,4 +1,4 @@
-﻿# CANNBot 工作流在 910B（A2）MC2 场景的具体化
+# CANNBot 工作流在 910B（A2）MC2 场景的具体化
 
 本文档把 hccl-matmul 路线（910B / A2 / dav-2201，HCCL 高阶 API V2 + `AscendC::Matmul`，aclnn 单算子，无 quant）的设计/开发/验收门禁具体化。本路线仅覆盖 A2，不涉及 A3（910_93）。流程编排归属 plugin 层；本文只补充本路线技术要点。
 

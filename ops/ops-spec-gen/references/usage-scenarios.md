@@ -93,7 +93,7 @@ python3 ops/ops-spec-gen/scripts/generate_spec.py \
 注：交互式向导用法见 SKILL.md §3.1。
 
 **Step 3: 手填 TODO 字段**（生成器只给骨架，详见 SKILL.md §3.4）：
-- `math_semantics.formula` — numpy 可 eval 的表达式
+- `math_semantics.formula` — numpy 可求值的表达式
 - `math_semantics.reference_oracle` — 单 callable api，或填 absent=true + governance 签字
 - `math_semantics.invariants` — **≥1 条值级、formula 无关**的语义不变量（保范/单位元/对称/代数恒等/极限退化，源自 REQUIREMENTS 数学；**非** shape 结构断言、**非** formula 自反重述）。**SPEC-ORACLE-1 硬性要求**，`reference_oracle.absent=true` 时强制
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes

@@ -1,4 +1,4 @@
-﻿# 计算层：AscendC::Matmul 与 HCCL 流水耦合（910B / A2）
+# 计算层：AscendC::Matmul 与 HCCL 流水耦合（910B / A2）
 
 本文只补 hccl-matmul 路线特有的融合用法。`AscendC::Matmul` 的 API 签名、dtype、Tiling 类、A2 限制一律引用 `ascendc-api-best-practices` 的 [`api-matmul.md`](../../../../ascendc-api-best-practices/references/api-matmul.md)，**本文件不复述**。
 

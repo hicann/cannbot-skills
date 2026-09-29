@@ -105,9 +105,9 @@ clang-format --version
 如未安装，**自动安装**：
 
 ```bash
-# 检测并安装 ruff（使用独立二进制安装，安装到系统路径）
+# 检测并安装 ruff（钉版本，经包管理器安装）
 if ! command -v ruff &>/dev/null; then
-    curl -LsSf https://astral.sh/ruff/install.sh | sh
+    python3 -m pip install "ruff==0.16.8"
 fi
 
 # 检测并安装 clang-format
@@ -122,7 +122,7 @@ fi
 
 | 工具 | 自动安装命令 | 说明 |
 |------|-------------|------|
-| ruff | `curl -LsSf https://astral.sh/ruff/install.sh \| sh` | 下载独立二进制文件，安装到 `~/.local/bin` |
+| ruff | `python3 -m pip install "ruff==0.16.8"` | 包管理器安装并钉版本（替代「下载脚本后直接执行」的安装方式） |
 | clang-format | `sudo apt-get install clang-format-18` | 系统包管理器安装 |
 
 ## 步骤 2: 运行检查脚本

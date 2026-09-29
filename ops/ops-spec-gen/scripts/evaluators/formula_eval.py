@@ -271,7 +271,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
             "rule_id": "formula_smoke_eval.empty_formula",
             "field_path": "math_semantics.formula",
             "message": "formula 为空但 formula_kind=numpy_expr",
-            "suggested_fix": "填写 numpy 可 eval 的表达式或把 formula_kind 改为 textual_only",
+            "suggested_fix": "填写 numpy 可求值的表达式或把 formula_kind 改为 textual_only",
         })
         return "FAIL", findings
 

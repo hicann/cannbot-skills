@@ -76,7 +76,7 @@ def _build_opencode_command(
     if target.model:
         cmd.extend(["-m", target.model])
     
-    # 设置 --dir：有 path 用 path，无 path（如 eval 任务）用 output_dir
+    # 设置 --dir：有 path 用 path，无 path（如评测任务）用 output_dir
     if target.path:
         dir_path = Path(target.path).resolve()
     else:

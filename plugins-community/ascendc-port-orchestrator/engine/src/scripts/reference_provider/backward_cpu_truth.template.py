@@ -141,7 +141,7 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args(argv)
 
-    data = torch.load(args.edge, map_location="cpu", weights_only=False)
+    data = torch.load(args.edge, map_location="cpu", weights_only=True)
     cases = data["cases"]
     if args.limit is not None:
         cases = cases[: args.limit]

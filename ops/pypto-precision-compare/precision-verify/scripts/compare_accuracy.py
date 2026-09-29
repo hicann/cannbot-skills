@@ -164,7 +164,7 @@ def read_jit_data(filename):
 
 def read_golden_data(filename, dtype):
     """读取 golden 数据文件（仅支持 .pt 格式）"""
-    golden_tensor = torch.load(filename, map_location='cpu')
+    golden_tensor = torch.load(filename, map_location='cpu', weights_only=True)
     return golden_tensor
 
 

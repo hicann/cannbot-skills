@@ -638,8 +638,8 @@ def compare_outputs_per_shape(baseline_dir: str, evolved_dir: str,
             out[name] = (False, f"Evolved output not found: {evolved_path}")
             continue
 
-        baseline_out = torch.load(baseline_path, weights_only=False, map_location="cpu")
-        evolved_out = torch.load(evolved_path, weights_only=False, map_location="cpu")
+        baseline_out = torch.load(baseline_path, weights_only=True, map_location="cpu")
+        evolved_out = torch.load(evolved_path, weights_only=True, map_location="cpu")
 
         if isinstance(baseline_out, torch.Tensor):
             baseline_out = [baseline_out]

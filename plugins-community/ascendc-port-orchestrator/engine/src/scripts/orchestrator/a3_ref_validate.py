@@ -77,7 +77,7 @@ def _try_generate_edge_inputs(
 def _read_capture_cases(torch, edge_inputs: Path, capture_name: str):
     """Load the accepted edge-input schemas, retaining their established diagnostics."""
     try:
-        blob = torch.load(edge_inputs, weights_only=False)  # type: ignore[arg-type]
+        blob = torch.load(edge_inputs, weights_only=True)  # type: ignore[arg-type]
     except Exception as error:
         return None, f"{capture_name}: torch.load(edge_inputs.pt) failed: {error!r}"
     if isinstance(blob, list):
@@ -501,7 +501,7 @@ def _load_first_edge_case(edge_inputs: Path):
     try:
         import torch
 
-        blob = torch.load(edge_inputs, weights_only=False)
+        blob = torch.load(edge_inputs, weights_only=True)
     except Exception as error:
         return None, f"edge_inputs.pt unreadable: {error!r}"
     if isinstance(blob, list):
@@ -767,7 +767,7 @@ def _diagnose_output_shape(workspace: Path, out):
         return None
     try:
         import torch
-        ds = torch.load(edge_dataset, weights_only=False)
+        ds = torch.load(edge_dataset, weights_only=True)
     except Exception:
         return None
     ds = _coerce_case_list(ds)
@@ -891,7 +891,7 @@ def _validate_a3_capture(workspace: Path) -> tuple[bool, str]:
 
     try:
         import torch  # lazy: producer host has torch, but keep import local
-        ds = torch.load(edge, weights_only=False)
+        ds = torch.load(edge, weights_only=True)
     except Exception as e:  # noqa: BLE001
         return False, f"edge_dataset.pt unreadable for capture validation: {e!r}"
     n_cap, n_total = _count_a3_outputs(ds)
@@ -951,7 +951,7 @@ def _capture_dataset_counts(dataset_path: Path, error_template: str):
     try:
         import torch
 
-        dataset = torch.load(dataset_path, weights_only=False)
+        dataset = torch.load(dataset_path, weights_only=True)
         return _count_a3_outputs(dataset), None
     except Exception as error:
         return None, error_template.format(error=error)

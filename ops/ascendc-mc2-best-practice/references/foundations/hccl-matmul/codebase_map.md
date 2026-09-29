@@ -1,4 +1,4 @@
-﻿# 参考工程（all_gather_matmul/）改造食谱
+# 参考工程（all_gather_matmul/）改造食谱
 
 本文档是 Agent 在阶段二（开发）的实操指南：从已验证功能正常的基底工程 [`all_gather_matmul/`](all_gather_matmul) 复制起手，按 `[REUSE]` / `[MODIFY]` 标记定点改造为新的 910B（A2）MC2 算子（HCCL 高阶 API + `AscendC::Matmul`，aclnn 单算子 API，无 quant）。
 

@@ -49,7 +49,7 @@ def test_generated_pure_reduction_stage3_passes_after_formula_is_filled():
         )
     )
     spec = spec.replace(
-        "    # TODO: 用 numpy 可 eval 的表达式描述算子语义\n    y = x",
+        "    # TODO: 用 numpy 可求值的表达式描述算子语义\n    y = x",
         "    y = np.sum(x, axis=tuple(dim) if dim else None, keepdims=keep_dims)",
     )
 

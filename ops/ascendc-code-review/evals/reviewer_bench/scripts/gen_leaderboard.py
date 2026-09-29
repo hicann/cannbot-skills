@@ -8,14 +8,14 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 #
-"""聚合 eval 结果 → leaderboard.json（供前端 index.html 加载）
+"""聚合评测结果 → leaderboard.json（供前端 index.html 加载）
 
 扫描 eval-reports/run_xxx/ 下的 eval_result.md + batch_result.json，
-解析每个 eval target 的 TP/FP/FN/召回率/检出率/耗时，
+解析每个评测目标的 TP/FP/FN/召回率/检出率/耗时，
 输出 docs/reports/leaderboard.json。
 
 用法:
-    python scripts/gen_leaderboard.py                          # 自动找最新 eval run
+    python scripts/gen_leaderboard.py                          # 自动找最新评测 run
     python scripts/gen_leaderboard.py --eval-dir eval-reports/run_xxx
     python scripts/gen_leaderboard.py --review-dir reports/run_xxx  # 同时聚合检视阶段耗时
 """
@@ -207,7 +207,7 @@ def build_entry(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="聚合 eval 结果 → leaderboard.json")
+    parser = argparse.ArgumentParser(description="聚合评测结果 → leaderboard.json")
     parser.add_argument("--eval-dir", default=None, help="eval-reports/run_xxx 目录（默认自动找最新）")
     parser.add_argument("--review-dir", default=None, help="检视阶段 run 目录（用于补充耗时）")
     parser.add_argument("--manifest", default="manifest.json", help="manifest.json 路径")
@@ -218,9 +218,9 @@ def main():
 
     eval_dir = Path(args.eval_dir) if args.eval_dir else find_latest_eval_dir(base / "eval-reports")
     if not eval_dir or not eval_dir.exists():
-        logging.error(f"错误：eval 目录不存在: {eval_dir}")
+        logging.error(f"错误：评测目录不存在: {eval_dir}")
         sys.exit(1)
-    logging.info(f"eval 目录: {eval_dir}")
+    logging.info(f"评测目录: {eval_dir}")
 
     batch_result_path = eval_dir / "batch_result.json"
     if not batch_result_path.exists():
