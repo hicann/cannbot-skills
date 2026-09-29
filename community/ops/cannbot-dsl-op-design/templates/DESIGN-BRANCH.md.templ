@@ -1,0 +1,103 @@
+# {OP} · 分支 {BRANCH_ID} 设计
+
+本文件描述 `TemplatePartition.md` 中一条真实执行路径。分支 ID 只用于设计引用；单路径也生成一份。本文件填写该路径的具体公式、资源和验证，公共语义引用全局文件。
+
+## 0. 分支定位
+| 项目 | 本分支内容 |
+|---|---|
+| 必要且充分的进入条件 | |
+| 覆盖的 spec dtype 组合与 shape/layout | |
+| 静态配置和运行时参数 | |
+| 与其他分支的算法/数据通路/同步差异 | |
+| 端到端 Case ID | |
+
+## 1. 配置和 Launch 参数
+| 字段/参数 | 值或计算公式 | 来源 | Kernel 消费点 | 合法边界 |
+|---|---|---|---|---|
+| | | | | |
+
+仅展开本分支在 `LaunchData.md` 中已定义的字段与参数。说明配置选择为何落入本分支，以及资源验证失败时怎样处置；不创建第二套通用 ABI。
+
+## 2. Tile 与 block 计算
+定义总任务数、block 数、每 block 任务范围、tile 大小、主块和尾块有效元素的公式。由资源预算反推 tile 上限，代入至少一个正常和一个边界输入。证明输入地址合法、输出覆盖完整且各 block 写入不重叠。
+
+| 量 | 公式与单位 | 边界值 | 与资源/接口的关系 |
+|---|---|---|---|
+| | | | |
+
+## 3. 阶段与数据流
+按执行顺序列 Init → CopyIn → Compute → CopyOut 的实际步骤及必要同步；无数据搬运或空输入短路时写明被省略的阶段和原因。多阶段 Launch 给 Workspace 初值、发布/读取时点和失败路径。
+
+| 阶段 | producer→consumer | 输入有效范围 | 输出/状态更新 | 完成条件 |
+|---|---|---|---|---|
+| | | | | |
+
+## 4. Buffer、Channel 与 Workspace
+| 资源 | MemLoc | shape/dtype/深度 | 字节数公式 | 活跃阶段 | producer/consumer | 同步与复用 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+给每个实际内存池的阶段峰值与目标容量不等式，列出 double buffer、padding、共享资源和互斥对象；数值与 `API.md` 和 `LaunchData.md` 一致。
+
+## 5. DSL 计算链
+
+### 5.1 Init
+写本分支配置读取、Tensor 绑定、状态初值、Channel/Buffer 初始化及其有效范围。无资源的部分明确省略理由。
+
+### 5.2 CopyIn
+写 tile 坐标到 GM 的 offset/stride、尾块 mask、padding 和经核实的搬运 API，以及何时可供计算消费。
+
+### 5.3 Compute
+从 `Overview.md` 的公式逐步写有序操作链，明确输入、输出、dtype、Cast、累计状态、特殊值处理和 DSL API。需要 `with vf(...)` 计算区或矩阵阶段时，给出操作与数据依赖；未知 API 标待验证。
+
+| 顺序 | 对应公式 | 输入→输出 | dtype/状态 | DSL 操作 | 边界条件 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+### 5.4 CopyOut
+写地址、有效长度、尾块、别名/inplace 读写顺序、Workspace partial 归并，以及输出可见时点。
+
+### 5.5 Pipeline 与同步
+列 warmup、steady、drain 的生产/消费次序，通知与等待配对、Channel 深度和 Buffer 复用屏障；没有流水时说明顺序执行原因。
+
+## 6. 属性与动态值
+| 值 | Host/Launch/Kernel 获取位置 | 影响的公式/阶段 | 合法性与同步 |
+|---|---|---|---|
+| | | | |
+
+## 7. 精度与确定性
+对本分支说明累计精度、Cast/舍入、NaN/Inf/±0、顺序和可能的近似误差；与全局 `Validation.md` 阈值逐项对应。
+
+## 8. 分支验证
+| Case ID | 触发输入与边界 | 独立 Golden 结果 | 数值断言 | 结构/资源证据 |
+|---|---|---|---|---|
+| | | | | |
+
+至少有主路径和本分支独有边界的可执行用例；Case ID 在全局矩阵中可查。未闭合的 API、资源、精度或性能事实列出具体补证动作。
+
+
+## 9. 本分支可复用伪代码的实例化
+
+先从 `Kernel.md` 的流式骨架复制**适用部分**，再在本节换成真实变量和 DSL 调用。下面的坐标代码只是推导框架，必须把 `task_to_coords` 和物理 stride 展开到本分支具体公式。
+
+```python
+# 设计伪代码：该分支的 block/task/tile 映射。
+block = get_block_idx()
+blocks = get_block_num()
+for task in range(block, total_tasks, blocks):
+    logical_coord = task_to_coords(task, logical_shape)
+    tile_start = coord_to_offset(logical_coord, input_strides)
+    valid = valid_extent(logical_coord, logical_shape, tile_shape)
+    # CopyIn: GM 地址、stride、padding 和读完成条件
+    # Compute: 公式步骤、累计状态、dtype/Cast 和特殊值
+    # CopyOut: 输出物理地址、mask 与写入所有权
+```
+
+将每个注释展开成上文 §5 的 DSL 阶段方法。若是规约、扫描或递推，补充状态跨 tile 的初值、更新顺序和最终写回；若是多输出，分别给写入所有权。若本分支使用不同 pipeline 深度或跨核阶段，画时序并证明每个 produce 有消费、每个复用前有完成条件。
+
+## 10. 本分支反例与资源代入
+选一个最小输入、一个尾块/边界输入和一个最大资源输入，将 §2 的坐标公式、§4 的峰值公式逐项代入。列出若省略 mask、同步或字段校验会产生的错误，以及哪个 Case/trace 能发现它。
+
+| 输入 | task/block/tile 推导 | 有效读写范围 | 峰值与容量 | 检测越界/竞态的证据 |
+|---|---|---|---|---|
+| | | | | |

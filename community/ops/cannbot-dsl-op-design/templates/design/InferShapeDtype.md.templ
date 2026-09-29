@@ -1,0 +1,48 @@
+# Shape 与 DataType 推导
+
+本文件给公开入口分配输出、构造 DSL Tensor 视图所需的推导规则；输出公式以 `spec.yaml` 为准。
+
+## 逐输出 Shape 推导
+| 输出 | 依赖的输入 shape/属性/值 | 逐维公式及索引域 | 标量/空维/动态边界 | Host 可得的依据 |
+|---|---|---|---|---|
+| | | | | |
+
+对 broadcast 写出从尾轴或指定轴对齐的逐维合法条件；对 reshape、slice、ragged 等写出输出维度的计算和溢出检查。值依赖 shape 必须指出 metadata 由谁在何时产生、如何同步或分阶段取得；未知时标待确认。
+
+## dtype 推导与计算精度
+| 输出 | 输入 dtype 组合 ID | 输出 dtype 规则 | 中间/累计 dtype | Cast 与舍入位置 |
+|---|---|---|---|---|
+| | | | | |
+
+逐行对照 `Interface.md` 的受支持组合；非法组合给出报错条件。多输出分别推导，不能以一个“同输入”概括不相同的规则。
+
+## 布局与物理视图
+| 对象 | 逻辑 shape | 物理 stride/布局来源 | view 或 DSL 搬运 | 地址/容量约束 |
+|---|---|---|---|---|
+| | | | | |
+
+说明 transpose、permute、reshape、contiguous 等操作是否引发设备 copy。Host 只采用已证明的零拷贝 view；需要搬运或布局重排的工作在 Kernel 计算路径中记账。
+
+## 边界推导示例
+选至少一个常规、一个边界输入，将实际维度与 dtype 代入公式，算出每个输出的 shape/dtype，并核对接口分配及 Kernel 有效范围。
+
+
+## 可替换的推导伪代码
+
+下面的写法分别对应纯元数据 shape、值依赖 shape；选择与本算子相符的一种并写成具体公式。`flash_kda.py` 用 Host 元数据决定输出和 padded workspace 的尺寸，公共输出只暴露有效范围。
+
+```python
+# 纯元数据：每个输出逐维推导。
+logical_shape = infer_from_shapes_and_attrs(input_shapes, attrs)
+physical_shape = align_for_kernel(logical_shape, tile_requirements)
+out_storage = allocate(physical_shape, inferred_output_dtype)
+public_out = zero_copy_view(out_storage, logical_shape)
+# 证明 public_out 的 stride、偏移和有效区间，不把 padding 暴露为有效值。
+
+# 值依赖：设备阶段先产生尺寸/前缀信息。
+shape_meta = produce_shape_metadata_on_device(inputs)
+synchronize_or_split_launch(shape_meta)
+logical_shape = read_or_consume_metadata_under_supported_contract(shape_meta)
+```
+
+若运行环境不允许读取设备产生的尺寸到 Host，说明固定容量输出、显式长度返回或多阶段设备消费的接口选择。不能把“值依赖”伪装成纯 Host shape 推导。

@@ -1,0 +1,55 @@
+# 端到端验证
+
+本文件定义整个算子的验收口径；每条路径特有的 tile、同步和资源边界用例写在对应分支文件，汇总矩阵引用这些用例。
+
+## 独立 Golden
+从 `spec.yaml` 与 `Overview.md` 的数学语义给出 CPU/PyTorch 参考实现的输入输出、计算精度、特殊值和异常规则。Golden 不能调用被测 DSL Kernel、复用其内部中间结果或采用相同的未证实近似公式。
+
+| 输出/场景 | Golden 公式或步骤 | dtype 与舍入 | 特殊值/错误判定 | 语义依据 |
+|---|---|---|---|---|
+| | | | | |
+
+## 端到端用例矩阵
+| Case ID | shape/layout/stride | dtype 组合 | 属性/可选输入 | 分支 ID | 预期输出或错误 | 断言 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+至少覆盖每个 spec dtype 组合、每个可达分支、正常与极端 shape、非对齐/尾块、空输入、特殊值、可选输入和错误路径。动态输出至少选择多个能产生不同输出 shape 的输入，核对 `InferShapeDtype.md`。不支持的情况使用错误断言。
+
+## 精度与确定性
+| dtype/场景 | rtol | atol | NaN/Inf/±0 判定 | 重复运行与顺序要求 | 依据 |
+|---|---:|---:|---|---|---|
+| | | | | | |
+
+阈值和允许的累计顺序来自 spec 或明确批准的目标；不得沿用样例数值。说明比较前是否 Cast、逐点/聚合度量，以及多输出各自的判定。确定性要求给重复次数和比较方式。
+
+## 结构、资源与入口验收
+列可执行证据：输出有效元素全部写入、不同 block 无写冲突、Workspace 无未初始化读、Channel producer/consumer 配对、各配置满足容量、Host 无额外设备算子代算结果。每项指向测试、探针、trace 或编译/设备运行产物；无法观测的义务写明补证方法。
+
+## 性能目标与测量
+| Case ID | shape/layout/dtype | 分支 ID | 目标值及单位 | 来源与产物 | 测量口径 | bound/说明 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+关键点与上面的真实用例对齐，逐分支登记覆盖。目标来自适用的竞品实测或经验证的设备性能评估，注明 backend、实现类型、统计方式和噪声范围；没有可靠来源写“无目标值”并说明待采集证据。
+
+
+## 可复用的验证构造
+
+从 `Interface.md` 的合法域和 `TemplatePartition.md` 的路由条件枚举 Case，不直接从实现内部生成期望值。以下伪代码只表达用例组织；设备调用、误差比较和异常断言按实际测试框架实现。
+
+```python
+for dtype_combo in spec_supported_combinations:
+    for path in reachable_paths(dtype_combo):
+        case = choose_public_input_that_hits(path)
+        expected = independent_cpu_golden(case)
+        actual = public_op_on_device(case)
+        assert_shape_dtype_layout(actual, expected, case)
+        assert_numeric(actual, expected, tolerance_for(dtype_combo))
+        assert_path_evidence(path, case)  # 结构 trace/探针，不能由 Golden 自证
+
+for invalid_case in interface_error_cases:
+    assert_public_error(invalid_case, expected_error(invalid_case))
+```
+
+对 pipeline 和 workspace 另外设计“最小块、尾块、最大块、连续两次调用、配置切换”用例，检查旧数据复用、未初始化读取和同步遗漏。多次 Launch 或动态 shape 需要至少两个不同尺寸且不同任务分配的 Case，确保不是偶然通过。

@@ -1,0 +1,105 @@
+# DSL Kernel 计算方案
+
+从 `Overview.md` 公式和 `TemplatePartition.md` 路径推导实现。`flash_attn.py` 仅供参考 `@kernel`、`@jit`、`with vf(...)`、Channel/Buffer 和阶段组织；实际 API 与设备限制以调用方提供的资料及验证为准。
+
+## 1. Kernel 入口与实例
+列 `@kernel` 类/函数、构造配置、`__call__` 参数顺序、输入输出 Tensor、Launch 维度。区分编译期参数、运行时标量、设备 Tensor 和 Workspace，并与 `LaunchData.md` 对齐。
+
+| 参数 | 来源 | DSL 类型/shape/dtype | 静态或运行时 | 首次消费阶段 |
+|---|---|---|---|---|
+| | | | | |
+
+## 2. 阶段图与数据所有权
+按真实算法画 producer→consumer 图，列每阶段输入、输出、执行角色、有效元素和前后不变量。只有需要时才拆 Cube/Vector、跨核通信或多次 Launch。
+
+| 阶段 | 输入与持有者 | 计算/搬运 | 输出与下一消费者 | 同步条件 |
+|---|---|---|---|---|
+| | | | | |
+
+## 3. 坐标和边界公式
+写 `block_id`、task、tile、局部坐标到每个输入和输出逻辑/物理地址的公式。分别证明覆盖完整、写入不重叠、尾块 mask 正确、空输入无非法访问；与 Host 的 block 数一致。
+
+## 4. Init 与资源
+逐一列实际 Channel、Buffer、MemLoc、shape、dtype、深度、生产者、消费者和存活区间。给初始化值和谁负责释放/复用。每阶段同时存活量对应 `LaunchData.md` 的峰值。
+
+## 5. CopyIn
+写读地址、stride/broadcast、有效范围、padding、搬运 API 和搬运完成同步。区分 Host 零拷贝 view 与 Kernel 真正的数据搬运；无 CopyIn 的路径说明理由。
+
+## 6. Compute
+将公式拆成有序操作链：每一步的输入、输出、dtype、Cast、累计状态、特殊值处理和采用的 DSL API。列可核验的 `with vf(...)` 计算区及辅助阶段方法，以及状态初始化、更新、收尾；未知 API 标待验证而不伪造可运行代码。
+
+| 顺序 | 对应公式 | 输入→输出 | dtype/精度 | DSL 调用 | 状态/边界 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+## 7. CopyOut
+写有效输出地址、尾块 mask、别名/inplace 的读写顺序、Workspace partial 的最终归并和未写区域处理。明确写回完成后何时对调用方可见。
+
+## 8. Pipeline 与同步
+按 producer/consumer 列 Channel 深度、warmup/steady/drain、跨角色/跨核事件、等待与通知的配对，以及 Buffer 何时可复用。无需流水时说明单阶段顺序和理由。
+
+## 9. 分支代码落点
+公共阶段与公式留在本文；每条路径在 `branches/DESIGN-BRANCH-<id>.md` 给具体 tile、坐标、资源和操作链。只给足以支撑实现的 Python/CANNBotDSL 草图；已有 API 经核实才写为确定调用。
+
+
+## 单路径流式 Kernel 伪代码
+
+这是把 `flash_attn.py` 的 `@kernel` 类、`flash_kda.py` 的 block 任务循环与两者的 Channel/Buffer 用法抽象后的**设计骨架**，不是可直接执行的算子。`formula_step` 必须换成 `Overview.md` 的真实逐步 DSL 操作；TILE、dtype、资源深度和 copy 方式由本算子证明。输出设计应给真实签名和阶段方法，未用的 Channel/Buffer 删去。
+
+```python
+@kernel
+class OperatorKernel:
+    def __init__(self, tile_elems, input_dtype, output_dtype):
+        self.tile_elems = tile_elems
+        self.input_ch = Channel(
+            MemLoc.UB, shape=(tile_elems,), dtype=input_dtype, depth=2
+        )
+        self.output_ch = Channel(
+            MemLoc.UB, shape=(tile_elems,), dtype=output_dtype, depth=2
+        )
+        self.acc = Buffer(MemLoc.UB, (tile_elems,), accumulator_dtype)
+
+    @jit
+    def copy_in(self, gm_input, start, valid):
+        gm_tile = tile_slice(gm_input, (self.tile_elems,), (start,))
+        # 写明 valid < tile_elems 时采用的合法 mask/padding 方式。
+        mem_copy(self.input_ch.produce(), gm_tile)
+
+    @jit
+    def compute(self, valid, attr):
+        source = self.input_ch.consume()
+        target = self.output_ch.produce()
+        # formula_step(target, source, self.acc, valid, attr)
+        # 按数学公式展开 Cast、状态更新、特殊值和同步。
+
+    @jit
+    def copy_out(self, gm_output, start, valid):
+        gm_tile = tile_slice(gm_output, (self.tile_elems,), (start,))
+        # 写明尾块仅 valid 个元素可写、别名读写次序。
+        mem_copy(gm_tile, self.output_ch.consume())
+
+    def __call__(self, gm_input: Tensor, gm_output: Tensor, n: int, attr: int):
+        block = get_block_idx()
+        blocks = get_block_num()
+        total_tiles = (n + self.tile_elems - 1) // self.tile_elems
+        for tile_id in range(block, total_tiles, blocks):
+            start = tile_id * self.tile_elems
+            valid = min(self.tile_elems, n - start)
+            self.copy_in(gm_input, start, valid)
+            self.compute(valid, attr)
+            self.copy_out(gm_output, start, valid)
+```
+
+上例只示意数据所有权和顺序。`min`、动态 `tile_slice`、尾块 `mem_copy` 的可编译性与设备语义必须由目标 DSL 能力资料验证；未验证时在设计中保留抽象操作，不把伪代码伪装成可运行代码。Buffer 用于持久或临时状态，Channel 的 `produce()`/`consume()` 配对必须和深度、复用时点一致。
+
+## 多阶段或跨核路径（仅适用时）
+
+`flash_kda.py` 在阶段间使用 workspace 与同步，`flash_attn.py` 也有分阶段计算和部分结果归并。需要时给出**实际**阶段及全局可见性证明：
+
+```text
+阶段 A: block 范围 A → 写 workspace[每个任务的唯一槽]
+边界: 所有生产者完成 → 设备可见性/屏障或单独 Launch
+阶段 B: block 范围 B → 读已初始化槽 → 归并 → 写最终输出
+```
+
+在同一 Kernel 内跨 block 屏障时，证明 launch block 数不超过可同时驻留的同步参与者，列同步 API、参与角色、flag 命名空间和 arrive/wait 配对；无法证明时用独立 Launch 边界。`channel_rewind` 等重用操作只有在相关 Channel 无在途数据、所有参与者已完成阶段后才可设计。

@@ -1,0 +1,60 @@
+# 开发视图
+
+## 交付文件与职责
+按实际算子仓库布局给出目录树，标注公开入口、Host 配置与 Launcher、`@host`/`@kernel`/`@jit`/`with vf(...)`、Golden、测试和必要的探针。可单文件或多文件，不预设 AscendC 的 C++ 目录或文件名。
+
+```text
+<算子目录>/
+  <公开入口与 DSL 实现文件>
+  <独立 Golden 与测试文件>
+```
+
+| 文件/对象 | 所有者与职责 | 输入 | 输出 | 对应设计 |
+|---|---|---|---|---|
+| | | | | |
+
+## 调用与数据流
+从调用者到公开函数、配置选择、Launcher、Kernel 阶段、输出返回画调用链；每个边标明传递的是 Host 元数据、Tensor 句柄、设备数据还是 Workspace。多次 Launch 的先后与同步点单独标示。
+
+```mermaid
+flowchart LR
+    Caller[调用者] --> Entry[公开入口]
+    Entry --> Factory[DSL 显式编译]
+    Factory --> Program[ProviderCallable]
+    Program --> Launcher[host 入口]
+    Launcher --> Kernel[DSL Kernel]
+    Kernel --> Output[输出]
+```
+
+## 共享逻辑与分支落点
+| 实现对象 | 所有分支共享的部分 | 分支特有的部分 | 分支设计文件 |
+|---|---|---|---|
+| | | | |
+
+与 `TemplatePartition.md` 的真实执行路径一一对应。样例 `flash_attn.py` 可用于理解配置、Launcher 与阶段方法的职责，不采用其注意力算法、ASC metadata 或资源常数。
+
+## 开发与验证入口
+写明如何从公开函数运行独立 Golden、按分支选测试用例、采集设备证据；测试依赖实际交付路径，不把测试专用逻辑混入算子入口。
+
+
+## 两种可选代码组织
+
+`flash_attn.py` 将配置/资源计划、Launcher、Kernel 阶段对象放在同一 Python 模块；`flash_kda.py` 还包含编译规格构造、公共 Host 包装和可选的图执行注册。下面只表达职责，不要求生成这些目录或注册接口：
+
+```text
+公开函数
+  ├─ 输入元数据校验与输出/Workspace 分配
+  ├─ 配置选择 + ResourcePlan（适用时）
+  ├─ 显式构建 → cannbotdsl.compile(@host 入口, specs...)
+  ├─ ProviderCallable(本次 Tensor 与运行时参数)
+  │    └─ Program.run @host
+  │         └─ @kernel __call__: block→task→tile
+  │              ├─ CopyIn: GM→Channel/Buffer
+  │              ├─ Compute: @jit 阶段 / 可选 VF、matmul
+  │              └─ CopyOut: Channel/Buffer→GM
+  └─ 返回输出
+
+独立 Golden / 黑盒、白盒、结构测试 → 只通过公开函数观察行为
+```
+
+选定单模块或多模块后，把真实类/函数名填入上文文件表。运行与必备导出入口共用编译参数构造逻辑，分别明确运行程序与收集产物的所有权；显式持有程序时，说明复用范围与最后一次使用后的释放位置。图注册和 metadata 生产器按实际需求加入，并说明初始化与生命周期。

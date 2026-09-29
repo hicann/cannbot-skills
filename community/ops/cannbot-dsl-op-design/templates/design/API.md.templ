@@ -1,0 +1,63 @@
+# DSL API、验证与内存管理
+
+从 `Kernel.md`、分支文件和 `HostLaunch.md` 提取实际调用点。每个调用的签名、dtype、架构和同步语义依据所提供的 DSL 能力资料核实；“可导入”“可编译”“设备行为正确”分开记录。
+
+## API 映射
+| 阶段/步骤 | DSL API 或 Python 调用 | 输入、输出与关键参数 | dtype/布局/架构限制 | 依据 | 设计状态 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+覆盖实际使用的 `@host`/`@jit`/`@kernel`/`with vf(...)`、Tensor 视图、tiler、搬运、计算、Channel/Buffer 与同步。未使用的类别不必占位；公开入口中的框架调用另见 Host 审计。
+
+## 验证证据与未决 API
+| 调用点 | 导入/签名核对 | 编译证据 | 目标设备语义证据 | 适用边界 | 结论 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+结论写已验证、待验证或不适用，并附可定位的资料或试验产物。API 不可用或语义不符时记录受影响的阶段、替代方案和必须重算的资源预算；不把导入成功等同设备正确。
+
+## 数据流与同步
+按实际路径画 GM、使用到的本地内存池、Channel 与 Workspace 的 producer→consumer 图。每条边标搬运/计算操作、数据 shape/dtype、通知和等待；跨 Launch 的可见性边单独标注。
+
+```mermaid
+flowchart LR
+    Input[GM 输入] --> Stage[DSL 阶段]
+    Stage --> Output[GM 输出]
+```
+
+## Buffer 生命周期与峰值
+| 分支/阶段 | 资源 | MemLoc | shape/dtype/深度 | 字节数公式 | 活跃区间 | 复用屏障 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+对每个内存池逐阶段求同时存活字节和峰值，代入目标平台可用容量并给出不等式、数值和余量。互斥分支分别核算；double buffer、对齐填充和 Workspace 单独记账。与 `LaunchData.md` 的资源计划和各分支文件一致。
+
+## Host 设备工作审计
+| 公开入口或辅助函数调用 | 元数据/分配/零拷贝 view/设备工作 | 证据 | 保留或迁入 DSL 的处置 |
+|---|---|---|---|
+| | | | |
+
+沿实际调用链审计框架操作。公开入口允许元数据读取、分配和已证实的零拷贝 view；算子语义所需的设备计算在 DSL 路径中实现。
+
+
+## DSL 操作族的核对示例
+
+下面是从两个样例抽出的**调用形态**，只用于检查本算子是否需要相同的能力。把实际使用的操作填回 API 映射表，并核实其 dtype、layout、对齐、目标设备和同步语义。
+
+```python
+# 设计伪代码：按本算子选择，不要求全部使用。
+source = tile_slice(gm_input, tile_shape, origin)
+mem_copy(input_channel.produce(), source, engine=verified_copy_engine)
+local_input = input_channel.consume()
+
+# 需要矩阵阶段时：先记录 L1/L0A/L0B 的真实形状、转置和 Channel 深度，
+# 再以已验证的 matmul 参数替换下面抽象运算。
+# result = verified_matmul(left_l0a.consume(), right_l0b.consume())
+
+# 需要寄存器向量链时：列 VF 签名、mask、读写宽度与 tail 处理。
+# @jit / with vf(mode="raw") 的具体写法参考目标 DSL 能力资料。
+
+mem_copy(gm_output_tile, output_channel.consume())
+```
+
+`make_copy_engine`/`CopyBlockMapping` 仅用于真正需要的格式变换或分块映射；`reinterpret`/`permute`/`tile_slice` 必须核对物理 stride 与容量；`matmul`、`vf` 和跨核同步只在算法需要时出现。对于每个被采用的调用，记录“为什么这个 API 能表达本步骤”和一个可执行的最小验证场景。

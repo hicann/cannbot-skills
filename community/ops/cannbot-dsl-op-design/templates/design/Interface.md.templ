@@ -1,0 +1,53 @@
+# Interface
+
+## 公开 Python 接口
+根据 `spec.yaml` 给完整函数签名草图。保留真实参数顺序、必选/可选关系和默认值；输入相关的设备值计算留给 DSL Kernel。签名中的名称、返回形态和异常语义与 spec 对齐。
+
+```python
+# def <op>(...): ...  按实际接口填写；不要把示例参数当作默认接口
+```
+
+| 顺序 | 名称与类别 | shape/dtype/layout 语义 | 默认值/可选条件 | spec 路径 |
+|---|---|---|---|---|
+| | | | | |
+
+## dtype 组合
+一行对应 spec 中一个完整的支持组合，列出全部输入和输出。需要提升、累计或写回转换时同时写明发生位置；独立 dtype 集合不构成自动笛卡尔积。
+
+| 组合 ID | 输入 dtype（按签名顺序） | 输出 dtype（按返回顺序） | 累计/转换规则 | 目标设备约束 |
+|---|---|---|---|---|
+| | | | | |
+
+## shape、layout 与 stride
+| 对象 | rank/维度/shape 规则 | layout 与 stride | 对齐及零拷贝 view 条件 | 不满足时的行为 |
+|---|---|---|---|---|
+| | | | | |
+
+逐项覆盖标量、空维、广播、动态 shape、非连续输入和输出布局。若输出 shape 依赖设备数据，说明所需 metadata 的生产方式和公开接口如何取得最终 shape；不能把隐式 copy 当作零拷贝 view。
+
+## 属性、别名与错误
+| 条件 | 合法域 | 校验位置（入口/Launch/Kernel） | 非法输入的错误语义 |
+|---|---|---|---|
+| | | | |
+
+写明输出是入口分配还是调用者提供，是否允许输入输出别名/inplace、workspace 对调用方是否可见，以及异常发生时哪些对象已分配。入口负责可由 Host 元数据判定的条件；设备值相关条件由明确的设备路径处理。
+
+## 接口到实现的对应
+列出每个公开输入/输出/属性到 `HostLaunch.md` 的 Launch 参数或 `LaunchData.md` metadata 字段的映射。没有传递的对象须说明为何可在 Kernel 中重建。
+
+
+## 入口校验伪代码
+
+`flash_kda.py` 的公开包装展示了用 shape、dtype、device、contiguous/stride 和属性做 Host 判定的做法。下面是类别示意，不是该算子的默认限制；实际允许域必须逐项从 spec 填入上表。
+
+```python
+def validate_public_inputs(x, y, attr):
+    require_rank(x, allowed_ranks)
+    require_dtype_pair(x.dtype, y.dtype, supported_combinations)
+    require_same_device(x, y)
+    require_layout_stride(x.shape, x.stride(), allowed_layouts)
+    require_attr(attr, allowed_attr_domain)
+    # 只检查 Host 可取得的元数据；设备 Tensor 值的约束交给设备路径。
+```
+
+输出分配后，按签名顺序给一张“公开参数 → Launcher 参数 → Kernel 参数”的映射表；对于可选 Tensor 写明 absent 路径在编译规格和 Kernel 分支中的表示。异常要有可观察的类型/错误码，不以 `assert` 文本代替公开错误契约。

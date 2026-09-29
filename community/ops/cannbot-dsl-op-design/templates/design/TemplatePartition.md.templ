@@ -1,0 +1,60 @@
+# 模板与执行路径划分
+
+本文描述 DSL 静态特化和真正不同的执行路径。分支 ID 仅为设计引用；配置值、运行时参数或 dtype 差异只有改变算法、搬运、资源或同步路径时才需要新分支。
+
+## 特化输入与配置候选
+| 维度 | 来源与合法域 | 编译期 `const_expr` 或运行时 | 改变的阶段/资源 | 合并或独立的理由 |
+|---|---|---|---|---|
+| | | | | |
+
+列出 dtype、shape 类别、layout、对齐、可选输入、属性、设备能力中真正参与选择的量。配置对象可采用 `TileConfig` 或等价不可变数据，但字段和值来自本算子推导。每个配置须有 `LaunchData.md` 中的资源计算和不满足条件时的处置。
+
+## 执行路径表
+| 分支 ID | 必要且充分的进入条件 | 静态配置 | 算法/数据通路/同步差异 | 分支文件 |
+|---|---|---|---|---|
+| B0 | | | | `branches/DESIGN-BRANCH-B0.md` |
+
+为每条真实路径生成一份分支设计，单路径使用 B0。相同 Kernel 代码仅随 tile 大小、dtype 或运行时标量变化时合并到一条路径，并在表中列出参数范围。
+
+## 判定顺序与覆盖证明
+用伪码或决策图写出入口、Launcher、Kernel 各自判断的条件与顺序，标明优先级、非法输入报错和兜底。逐对检查分支条件互斥；证明 `Interface.md` 的全部支持域至少命中一次，且不会命中两条路径。
+
+```text
+输入合法性检查 → 配置候选过滤 → 资源校验 → 路径选择 → Launch
+```
+
+| 边界输入 | 命中条件 | 预期分支/错误 | 互斥与覆盖依据 |
+|---|---|---|---|
+| | | | |
+
+## 场景覆盖矩阵
+| spec dtype 组合 | shape/layout/stride 类别 | 空输入/尾块/属性边界 | 分支 ID | 验证 Case ID |
+|---|---|---|---|---|
+| | | | | |
+
+覆盖每个 dtype 组合及每个可达路径；未支持的场景写错误语义。若分支超过 8 条，逐条说明为什么不能用同一 Kernel 的参数化、静态特化或运行时条件合并。
+
+
+## 路径选择伪代码
+
+把 `flash_attn.py` 的配置选择和 `flash_kda.py` 的静态编译参数区分开。`choose_path` 只使用公开输入的合法元数据；若条件依赖设备 Tensor 值，设计 Kernel 内分支或明确的设备阶段。
+
+```python
+def choose_path(meta, limits):
+    validate_supported_domain(meta)                 # Interface 的合法域
+    candidates = candidate_configs(meta)            # 不等于分支数
+    for config in candidates:
+        plan = estimate_resources(config, meta)     # LaunchData 的公式
+        if not fits_all_used_pools(plan, limits):
+            continue
+        if requires_different_dataflow(config, meta):
+            return "B_special", config, plan
+        return "B_main", config, plan
+    raise UnsupportedConfiguration(meta)
+```
+
+在正式设计中用真实条件替换两个分支名，写出判定顺序和互斥证明。`requires_different_dataflow` 应描述实质不同的阶段、搬运或同步；只变 tile 尺寸时返回同一分支的不同配置。
+
+| 边界条件 | 候选配置 | 资源筛选结果 | 唯一路径 | 不拆分/拆分的依据 |
+|---|---|---|---|---|
+| | | | | |

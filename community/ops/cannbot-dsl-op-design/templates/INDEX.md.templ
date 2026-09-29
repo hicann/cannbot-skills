@@ -1,0 +1,34 @@
+# {OP} 设计索引
+
+## 文件目录
+
+在此用 text 代码块列出实际输出目录树，包含本索引、主题文件和 branches/ 下的真实分支；仅在存在时列出 DESIGN.md 及上游资料。每个文件标注一句职责。
+
+以下章节给出设计阅读与汇总顺序。按实际文档标题替换链接文字，分支占位项展开为本次所有真实路径；生成后删除填写说明和未替换的占位项。
+
+## 1. 语义与接口
+
+- [算子概览](Overview.md)
+- [公开接口](Interface.md)
+- [Shape 与 DType 推导](InferShapeDtype.md)
+
+## 2. 执行路径与分支
+
+- [路径划分](TemplatePartition.md)
+- [{分支 ID 与职责}](branches/DESIGN-BRANCH-{id}.md)
+
+## 3. 执行与资源
+
+- [Launch 配置与元数据](LaunchData.md)
+- [Host 调度](HostLaunch.md)
+- [Kernel 计算与同步](Kernel.md)
+- [API 与内存管理](API.md)
+
+## 4. 验证与开发
+
+- [验证方案](Validation.md)
+- [开发视图](DevView.md)
+
+## 参考资料（按需保留）
+
+链接实际使用的 spec、需求或环境资料，注明其作用。它们作为设计依据独立引用，不列入上述设计正文的汇总章节。

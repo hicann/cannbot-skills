@@ -1,0 +1,39 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+# routes.yaml — 范式路由表
+#
+# 根据 spec.yaml 的 op.paradigms 注入范式参考材料。
+# 路径相对于 ops-design-common skill 根目录。
+#
+# 匹配规则：
+#   op.paradigms 列表逐项匹配，结果自动去重。
+#
+# 加载粒度：每条路由仅加载对应范式的 patterns.md（入口索引）。
+# 其他细节文件在 patterns.md 中按需引用，由阅读者按需打开。
+#
+# 兜底机制：当 op.paradigms 在本表中没有任何匹配时，自动注入
+# Ascend C 使用 references/paradigms/general-methodology.md；DSL 使用 references/paradigms/general-methodology-dsl.md。
+#
+# 未配置路由的 paradigm（按 fallback 走通用方法论）：
+#   Padding, IndexGather, ScatterUpdate, AtomicUpdate, Interpolation,
+#   SortSelect, Histogram, SlidingWindow, ControlFlow,
+#   Spectral, RandomSampling,
+#   Sparse, CollectiveCommunication, FusedComposite,
+#   以及 Elementwise, ReductionComposite, ArgReduce, Contraction,
+#   LayoutTransform, Quantization, Recurrence, NumericalStable, DynamicShape,
+#   VariableOutput, MaskPredicate, Stateful
+
+routes:
+  paradigms:
+    Broadcast:
+      - references/paradigms/broadcast/patterns.md
+    Reduction:
+      - references/paradigms/reduction/patterns.md

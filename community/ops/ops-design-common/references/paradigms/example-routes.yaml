@@ -1,0 +1,31 @@
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
+
+# example-routes.yaml — 范式 → 参考实现路由表（按语言维度）
+#
+# 根据 op.paradigms + op.language 路由到对应语言适配层的参考实现示例代码。
+# 路径相对于 ops-design-common skill 根目录。
+#
+# 匹配规则：
+#   op.paradigms 列表逐项匹配，结果自动去重；
+#   每个范式条目为 {语言: [路径]} 映射，按 op.language 选择
+#   （语言缺失或未知时不选择适配层）；
+#   兼容旧扁平格式（范式条目直接为路径列表，视为 ascendc 专属）。
+#
+# 兜底机制：
+#   当 op.paradigms 在本表中没有任何匹配时，返回空，不强制注入通用示例；
+#   语言已注册但该语言暂无参考实现时，同样返回空并提示，
+#   不回退其他语言的参考实现（语言适配层互斥）。
+
+routes:
+  paradigms:
+    Broadcast:
+      ascendc:
+        - references/paradigms/broadcast/adapters/ascendc/example/xdivy_custom_package
