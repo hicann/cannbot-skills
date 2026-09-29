@@ -75,7 +75,7 @@
 | **Pooling** | MaxPool/AvgPool | 19 | 1D 扁平索引或布局/边界优化 |
 | **Interpolate** | interpolate/upsample | 18 | 坐标/权重运行时计算或离散访存 |
 | **Permute/Layout-transform** | permute/transpose/reshape-as-copy | 1, 2, 8, 12, 13, 15 | 模式特化、连续维度合并、view 短路；专用 kernel 内部必须是 tile-based 连续访存，禁止 element-wise gather 冒充特化，详见 `references/operators/permute-layout-transform.md` |
-| **CV 融合** | Cube-Vector 异构算子（存在 `tl.dot` + element-wise 后处理，如 FlashAttention、Matmul+Bias+GELU 等） | 28, 2 | scope 合并、fixpipe/copy 数据通路、Batch 流水线（PIPE_STAGES=2）、T0–T5 逐拍交错；tiling 因 Batch 流水线需重新评估，详见 `references/operators/cv-fusion.md`。与 `references/multibuffer-and-double-buffering.md` 的分工：multibuffer 面向标准 compute kernel 的 load-compute 重叠（编译器自动或手写 prefetch），CV 融合 Batch 流水线面向 Cube-Vector 异构核间的 phase 级交错（手写 sync 信号 + PIPE_STAGES 调度），两者适用场景和实现机制不同，不可互相替代。 |
+| **CV 融合** | Cube-Vector 异构算子（存在 `tl.dot` + element-wise 后处理，如 FlashAttention、Matmul+Bias+GELU 等） | 28, 2 | scope 合并、fixpipe/copy 数据通路、Batch 流水线（PIPE_STAGES=2）、T0–T5 逐拍交错；tiling 因 Batch 流水线需重新评估，详见 `references/operators/cv-fusion.md`。与 `references/multibuffer-and-double-buffering.md` 的分工：multibuffer 面向标准 compute kernel 的 load-compute 重叠（编译器自动或手写 prefetch），CV 融合 Batch 流水线面向 Cube-Vector 异构核间的 phase 级交错（手写 sync 信号 + PIPE_STAGES 调度），两者适用场景和实现机制不同，不可互相替代。tile 大小候选与容量估算（估算为保守上界，公式不否决候选）详见 `references/operators/cv-fusion-tiling.md`。 |
 
 > **Permute/Layout-transform 补充**：若常见模式专用 kernel 内部仍使用逐元素 `div`/`mod` 或 `tl.where` 链进行 gather/scatter，或未通过 `view` 合并连续维度，则优化点 2（Tiling）和 8（维度合并）**必须检查**，不得跳过。
 

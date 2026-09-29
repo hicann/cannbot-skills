@@ -41,6 +41,8 @@ l1_c    = dtype_size * BLOCK_M * BLOCK_N
 
 具体算子按实际 buffer 数量和映射求和。引入双缓冲 / Batch 流水线后，上述结果需再乘以 ~2。
 
+> ⚠️ 此估算是**保守上界**：按所有 buffer 最坏同时驻留求和，未计编译器对生命周期不重叠 buffer 的复用，实际可容纳的 tile 可能更大。公式判溢出不应直接否决候选——以"编译 + 边界 verify"实测为准（实证：HSTU attention fwd 公式判 BM=64 封顶，实测 BM=128 可行，load-bound 下 +7.8%~12.8%）。
+
 ## 5. DMA / MTE 吞吐原则
 
 - 搬运长度尽量是 16 或 32 的倍数
@@ -104,6 +106,7 @@ l1_c    = dtype_size * BLOCK_M * BLOCK_N
 | UB / L1 overflow | tile 过大 + Batch 流水线 buffer doubling | 减小 tile，或减少 buffer 数量，或共享 buffer |
 | 编译器断言失败 | tile 超出平台支持范围 | 退回更小 tile，验证编译 |
 | 性能随 tile 增大反而下降 | DMA shape 变瘦 / 内存压力过大 | 使用 msprof 逐 candidate 实测，不盲目放大 |
+| 误信容量估算而放弃大 tile 候选 | 估算为保守上界，未计编译器 buffer 复用 | 公式不否决候选，按 §6 流程以编译 + verify 实测裁决 |
 
 ---
 

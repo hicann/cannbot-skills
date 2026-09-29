@@ -123,3 +123,17 @@ Autotune 只能调那些**不影响输出语义和内存布局**的参数：
 - 每次优化后必须跑完整 `verify.py`，读取 `verify_result.json` 的 `passed_cases == total_cases`。
 - Phase 4 与 Phase 3 基线对比时，使用几何平均 `speedup_vs_torch`；基线 verify 结果直接复用，不必重跑。
 - 失败时先分类（A/B/C），A 类可修复后重试，B/C 类及时止损。
+
+---
+
+## 12. 多维 tile 放大：UB 容量公式是保守界，33 号不覆盖多维
+
+**缺位机制**：多维分块 kernel（`BLOCK_M`/`BLOCK_N`）的 tile 放大在扫描链上缺位——32（Autotune）对 host 侧按 shape 分档的 BLOCK 视为不适用，33（Block Size Scaling）单维限定、多维跳过；若生成期 UB 公式把 tile 封在偏小档，优化期无人再质疑。
+
+**为什么公式会偏小**：容量估算按所有中间张量最坏同时驻留求和，忽略编译器对生命周期不重叠 buffer 的复用，是**保守可行界而非真实上界**（实证：HSTU attention fwd 公式判 BM=64 封顶，实测 BM=128 可编译可运行）。
+
+**证据门控（何时值得放大）**：profiler 显示 load-bound（`aic_mte2_ratio` 高、`aic_mac_ratio` 低）且 tile 低于常规档。**mac-bound 时禁止**——放大实测 ±0.8%（噪声级），已证伪。
+
+**做法**：以"编译 + 边界 verify"实测为准，公式不否决候选；单 case 探针 BM ×2，任一失败即回退原值不重试；host 侧按 shape 分档时整档同步放大。**实证**：hstu fwd（denorm 家族）BM 64→128，D=128 五 shape +7.4~13.7%（10 shape geomean +4.3~5.1%，四次独立窗口复测；未动档位 ±0.5% 零回归）。
+
+> 容量估算模板与候选验证流程见 `references/operators/cv-fusion-tiling.md` §4/§6。

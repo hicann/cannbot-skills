@@ -35,7 +35,7 @@ O = P @ V                               # GEMM-2
 
 ## 判别表
 
-按**从上到下**匹配，**命中即停**。同时命中多行时以先命中者为准（见下方"叠加与优先级"）。
+按**从上到下**匹配，**命中即停**。⚠️ **前置判别：主链无 `softmax(QKᵀ)` 行归一化的算子，跳过大类一/二/三、直接从行 12 起扫描**（依据与实测见下方"叠加与优先级"首条）。同时命中多行时以先命中者为准（见下方"叠加与优先级"）。
 
 | # | 写法特征（打开 kernel 看骨架） | 写法类 | `category` | `template_path` |
 |---|---|---|---|---|
@@ -62,7 +62,7 @@ O = P @ V                               # GEMM-2
 | 12 | **无 softmax**，改为状态递推（`state = a*state + k⊗v` / fused-recurrent / 1D persistent `for t in range(T)`）——⚠️ 结合律重排 / chunk WY 不走本行，见 12b | 四 线性类·状态递推 | **`linear-recurrent`** | `.claude/template/linear-recurrent.md`（op92 实证；L1.1 强制 1D persistent，**不可**套到 chunk 反向） |
 | 12b | **无 softmax**，chunk 结合律重排 / WY 反向：chunk 内 GEMM + 下三角 `A` + 门控 `exp2(g)`，按 chunk 二维（或等价）分派，fused 出 dq/dk/dA（可含 dv2/db/dg）；**不是**时间轴 persistent 串行 | 四 线性类·结合律重排 | **`chunk-linear-attn-bwd`** | `.claude/template/chunk-linear-attn-bwd.md`（禁 persistent；比较链 `i_t` int32；`A` 转置语义；`make_block_ptr`/tile 在 L2 不进 L1） |
 | 13a | 特征图门控**双分支加性融合**（通道 softmax-over-N 分支 + 空间 GAP/softmax-over-C2 分支，`out = x·(S+T)`，无 softmax(QKᵀ) 主链；op57 落地） | 五 专用类 | **`polarized_attention`** | `.claude/template/polarized_attention.md`（结合律消除 [B,C2,N] 物化 + 任务循环/档位化/双路径融合，2.3237） |
-| 13b | 去归一化（无 softmax 但保留 QK/PV 结构）、或其他特征图门控（乘性融合/单分支） | 五 专用类 | `new_category` | **无可复用 template**，见下 |
+| 13b | 去归一化（无 softmax 但保留 QK/PV 结构，silu 等逐元素激活替代 + 常见 `1/max_seq_len` 全局缩放 + 因果掩码 + jagged 布局，代表 HSTU attention）；其他特征图门控（乘性融合/单分支）仍走 `new_category`。⚠️ **vs 行 7 分界**：本类带因果掩码 + KV 分块循环，从上到下扫描会字面命中行 7 的「causal mask」弱子句——但行 7 预设 softmax 基准（`m`/`l`/`acc` 滚动状态），**「无 softmax」是先于掩码判别的硬前提**：先以无 softmax 排除行 7/8/6b 再落本行。误入行 7 会把 F1 幽灵列 / F2 `-inf` 替代等 online softmax 约束套到无 softmax 骨架上——denorm 卡 D3 已证不适用（本类掩码是精确置 0、padding 列激活自零，非 `-inf` 门控） | 五 专用类 | **`denorm_attention`** | `.claude/template/denorm_attention.md`（hstu fwd/bwd 全流程 + 手写对照实证；fp16 分档路线、tile 探针标定、bwd 双 kernel 结构详见卡片） |
 | 14 | **CV 特征聚合-分发**：输入经**变换聚合**（`Linear` / `conv1x1` / 通道扩展 / spatial shift / mean 归约）→ **轻量 attention 加权**（KV 维极小或特殊：`k=3` 分支、逐通道权重、softmax-over-hw 空间维——**不是**序列 attention）→ **聚合回空间**（再经 `Linear`/卷积/加权求和还原）；算子操作 `[B,C,H,W]`/`[B,N,C]` 特征图而非 token 序列，attention 用于**特征门控/通道注意力**而非 token 间关系——§0.2 三形态：形态 (a) 通道扩展-分支分发 = S2Attention(op59)、形态 (b) 空间-通道双 attention = CoTAttention(op42)、形态 (c) conv 特征-双 softmax 汇聚 = DoubleAttention(op47) | 五·专用类·特征门控聚合-分发 | **`cv_attn_agg`** | `.claude/template/cv_attn_agg.md`（聚合-分发结构轴 §0.2 / C1 RNE 逐 conv 舍入 / C2 Kahan / C5 主成本在投影 GEMM / C6 路由含 cube tile 深度 / C7 结合律重排配精度门控） |
 
 ## ⚠️ 最重要的一条警示：掩码填充是 golden，不是生成目标
@@ -78,6 +78,15 @@ O = P @ V                               # GEMM-2
 
 ## 叠加与优先级
 
+- **前置判别（无 softmax 家族先于行序判别）**：主链无 `softmax(QKᵀ)` 行归一化（四/五类特征）的算子，
+  扫描起点直接跳到行 12——大类一/二/三全部预设 softmax 基准（见上方大类定义表），但其特征列的
+  「causal mask」（行 7）、「块选择」（行 1/1b）、「页表寻址」（行 2）等弱子句**不内嵌该前提**，
+  无 softmax 骨架字面命中会被误路由并加载整套 online softmax 约束。实测事故路径：HSTU 同时满足
+  行 7 的 KV 分块/causal mask/acc 滚动弱子句，严格"命中即停"下必停在行 7（13b ⚠️ 分界句与本节
+  末"无 template 的子类怎么办"警告均属事后拦截，依赖 agent 理解；本条把该不变量下沉为扫描前置，
+  同类机制先例：latency-optimizer SKILL 的 `scan_from` 扫描起点跳转）。措辞用「softmax(QKᵀ) 行
+  归一化」而非「无 softmax」：13a 分支含 softmax-over-N、行 14 含门控 softmax，缺的只是 QKᵀ 后的
+  行归一化主链。行 12 起扫描至表尾均不中时回落 `new_category`（见"无 template 的子类怎么办"）。
 - **行 12 与 12b 的分界是「1D persistent 时间串行」vs「chunk 2D 分派」**。两者都无 softmax。
   有 `for t in range(T)` / fused-recurrent / 状态驻留 UB 的走行 12（`linear-recurrent.md`，L1.1）。
   有 `grid=(NT, B*HV)`（或等价 2D）、chunk 内 GEMM、下三角 `A`、WY 反向出 dq/dk/dA 的走行 12b。
@@ -236,8 +245,9 @@ O = P @ V                               # GEMM-2
 
 ## 无 template 的子类怎么办
 
-行 5/6（latent 投影、量化）、行 13（专用类，除 13a 外）尚无专属 template
-（行 12 的**状态递推**细分已归档 `linear-recurrent.md`；行 12b **结合律重排 / chunk WY 反向**已归档 `chunk-linear-attn-bwd.md`）。
+行 5/6（latent 投影、量化）、行 13（专用类，除 13a/13b 去归一化外）尚无专属 template
+（行 12 的**状态递推**细分已归档 `linear-recurrent.md`；行 12b **结合律重排 / chunk WY 反向**已归档
+`chunk-linear-attn-bwd.md`；行 13b **去归一化**已归档 `denorm_attention.md`）。
 按 Step 1 的既有机制处理：
 标 `new_category`，先回落到表中给出的 `template_path`（没有则不加载 Layer 1 约束），
 **草图通过后新建 `.claude/template/{category}.md` 并回填 Layer 1**。
