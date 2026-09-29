@@ -99,7 +99,7 @@ if grep -q 'AscendC::Reg::' "$FILE_PATH" 2>/dev/null; then
   fi
   # 可选的 VF 融合上限：仅当环境变量 VF_FUSION_LIMIT 设为正整数时才生效。
   # 未设置时不检查任何上限（默认）。统计每个 __simd_vf__ ... { ... } 块内的
-  # AscendC::Reg::{Add,Adds,Sub,Mul,Muls,Div,Max,Exp,Sqrt,Reduce,Cast,Duplicate} 调用；
+  # AscendC::Reg::{Add,Adds,Sub,Mul,Muls,Div,Max,Abs,Exp,Sqrt,Reduce,Cast,Duplicate} 调用；
   # load/store/掩码辅助函数不计入。
   if [ -n "${VF_FUSION_LIMIT:-}" ] && [ "${VF_FUSION_LIMIT}" -gt 0 ] 2>/dev/null; then
     OVER_FUSION=$(awk -v limit="$VF_FUSION_LIMIT" '
@@ -110,7 +110,7 @@ if grep -q 'AscendC::Reg::' "$FILE_PATH" 2>/dev/null; then
         s = $0
         while ((p = index(s, "}")) > 0) { depth--; s = substr(s, p + 1) }
         s = $0
-        while (match(s, /AscendC::Reg::(Add|Adds|Sub|Mul|Muls|Div|Max|Exp|Sqrt|Reduce|Cast|Duplicate)[^A-Za-z0-9_]/)) {
+        while (match(s, /AscendC::Reg::(Add|Adds|Sub|Mul|Muls|Div|Max|Abs|Exp|Sqrt|Reduce|Cast|Duplicate)[^A-Za-z0-9_]/)) {
           count++
           s = substr(s, RSTART + RLENGTH)
         }

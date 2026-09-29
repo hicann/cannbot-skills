@@ -49,7 +49,7 @@ for (uint32_t chunk = 0; chunk < chunkCount; ++chunk) {
 - 类型：`AscendC::Reg::RegTensor<T>`、`AscendC::Reg::MaskReg`、`AscendC::Reg::CastTrait`。
 - 掩码：`AscendC::Reg::CreateMask`、`AscendC::Reg::UpdateMask`。
 - Load/store：`LoadAlign`、`LoadUnAlignPre`、`LoadUnAlign`、`StoreAlign`。
-- 计算：`Duplicate`、`Add`、`Adds`、`Sub`、`Mul`、`Muls`、`Div`、`Max`、`Exp`、`Sqrt`。
+- 计算：`Duplicate`、`Add`、`Adds`、`Sub`、`Mul`、`Muls`、`Div`、`Max`、`Abs`、`Exp`、`Sqrt`。
 - 规约：`AscendC::Reg::Reduce<AscendC::Reg::ReduceType::SUM, ...>`。
 - 类型转换（Cast）：`AscendC::Reg::Cast<dst_t, src_t, trait>`。
 
