@@ -229,4 +229,104 @@ actually invoke the required evaluation/build scripts. Inspect transcript at:
 To bypass in emergency only: export LINGXI_LOOP_HOOK_DISABLE=1"
 fi
 
+# ── Case-set integrity guard (lingxi-partial only) ──────────────────────
+# Subagents have truncated <op>.json to a handful of cases to speed up
+# evaluation, producing invalid "pass" results — including the
+# "truncate → evaluate → restore" pattern that hides the truncation.
+# Two checks:
+#   1. Content hash: case json sha256 must equal its .json.bak backup
+#      (catches content swaps that keep the line count).
+#   2. Evaluation-time evidence: verification_ascendc.py prints
+#      "[case-selection] ... total=N" every run; N must equal the FULL
+#      case count. This lives in the transcript, so restoring the file
+#      afterwards cannot hide it.
+if [[ "${agent_type}" == "lingxi-partial" ]]; then
+    case_guard_output="$(python3 - "${agent_transcript}" "${cwd_field:-${PWD}}" <<'PYEOF' 2>/dev/null
+import glob, hashlib, json, os, re, shutil, sys
+
+transcript, cwd = sys.argv[1], sys.argv[2]
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+# Collect candidate parallel dirs from Bash --output / --output-dir args,
+# plus evaluation-time evidence from raw transcript text.
+dirs = []
+selection_last = None   # (selection, selected, total) of LAST case-selection line
+sel_re = re.compile(r"\[case-selection\] selection=(\w+) start=\d+ limit=\S+ selected=(\d+) total=(\d+)")
+try:
+    with open(transcript, "r", encoding="utf-8") as f:
+        for line in f:
+            m = sel_re.search(line)
+            if m:
+                selection_last = (m.group(1), int(m.group(2)), int(m.group(3)))
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            msg = rec.get("message") or {}
+            for block in (msg.get("content") or []):
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                if block.get("name") != "Bash":
+                    continue
+                cmd = (block.get("input") or {}).get("command") or ""
+                for m2 in re.finditer(r"--output(?:-dir)?[=\s]+([\"']?)([^\s\"']+)\1", cmd):
+                    p = m2.group(2)
+                    if not os.path.isabs(p):
+                        p = os.path.join(cwd, p)
+                    d = p if os.path.isdir(p) else os.path.dirname(p)
+                    if os.path.basename(d).startswith("parallel_"):
+                        dirs.append(d)
+except OSError:
+    pass
+
+parallel_dir = next((d for d in dirs if os.path.isdir(d)), "")
+restored = []
+expected = None
+if parallel_dir:
+    bak_counts = []
+    for bak in sorted(glob.glob(os.path.join(parallel_dir, "*.json.bak"))):
+        json_path = bak[: -len(".bak")]
+        with open(bak, "rb") as f:
+            bak_counts.append(sum(1 for _ in f))
+        if not os.path.isfile(json_path):
+            continue
+        if sha256(json_path) != sha256(bak):
+            shutil.copyfile(bak, json_path)
+            restored.append(f"{os.path.basename(json_path)}: content hash differed, restored from .bak")
+    expected = max(bak_counts) if bak_counts else None
+
+if restored:
+    print("CASE_SUBSET_RESTORED")
+    for r in restored:
+        print(r)
+    print(f"dir: {parallel_dir}")
+
+if expected and selection_last and selection_last[2] != expected:
+    print("CASE_SELECTION_MISMATCH")
+    print(f"verification ran with total={selection_last[2]} cases "
+          f"(selection={selection_last[0]}, selected={selection_last[1]}), "
+          f"full case set = {expected}")
+PYEOF
+)"
+    if [[ "${case_guard_output}" == *CASE_SUBSET_RESTORED* || \
+          "${case_guard_output}" == *CASE_SELECTION_MISMATCH* ]]; then
+        hook_block "CASE-SET INTEGRITY VIOLATION (lingxi-partial):
+${case_guard_output}
+
+Red-line rule #7: 禁止修改/截断/抽样测试用例 json。评估耗时来自 case 数量是预期成本。
+You MUST re-run the full evaluation now on the FULL case set:
+  1. bash ops-lab/tilelang-to-ascendc/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh <parallel_dir>
+  2. bash ops/ops-profiling/scripts/msprof_profile_run.sh --quick --output-dir=<parallel_dir> ...
+  3. Rewrite evaluation_results.json from the full-case results.
+Results measured on a case subset are invalid and will be discarded by refine.
+To bypass in emergency only: export LINGXI_LOOP_HOOK_DISABLE=1"
+    fi
+fi
+
 hook_allow

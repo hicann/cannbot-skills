@@ -116,6 +116,7 @@ Mode: {mode}
 4. [禁止] 禁止缓存/记忆化输入输出（如检测到相同输入直接返回缓存结果）
 5. [禁止] 禁止降低计算精度来换取速度（如将 fp32 计算改为 fp16 计算，除非原始实现就是 fp16）
 6. [禁止] 禁止删除或跳过 padding/alignment 处理（会导致非对齐 shape 结果错误）
+7. [禁止] 禁止修改/截断/抽样 `<op_name>.json` 测试用例（包括另建子集文件替代、head 截取、评估后恢复等任何形式）。评估耗时来自 case 数量是**预期成本**，禁止以减少 case 加速评估。case 文件被改动 = 评估结果无效（SubagentStop hook 会从 `.json.bak` 恢复并阻塞退出，主 agent 的 refine 会将 `n_cases_total` 不符或缺失的节点直接记为 failed）
 
 ### pybind11.cpp 允许的修改（WHITE LIST）
 - [允许] 优化 tiling 参数计算（blockDim、usedCoreNum、tasksPerCore 等）
@@ -137,6 +138,8 @@ Mode: {mode}
 
 ### 验证原则
 修改 pybind11.cpp 或 model_new_ascendc.py 后，必须通过全量 case 验证。验证失败 = 修改无效，不计入性能评测。
+
+**全量 case 的定义**: `<op_name>.json` 中的全部用例，行数必须与 `<op_name>.json.bak` 一致。基于 case 子集得出的 precision_passed / speedup 一律无效。
 
 ## 工作流程
 

@@ -145,6 +145,20 @@ python3 plugins-community/ops-perf-evolution/skills/evolution-world-model/script
 
 #### 步骤3B.3: 评估基线内核性能（在进化开始前必须执行）
 
+0. **全量 case 守卫（必须先于基线评估执行）**: 基线项目若继承自生成管线的精简态（`*.json.bak` 行数 > 对应 `.json` 行数），必须先用备份恢复全量，否则 baseline 与后续变体的 case 集不一致、所有加速比不可比：
+
+   ```bash
+   for bak in {baseline_kernel_path}/*.json.bak; do
+       json_file="${bak%.bak}"
+       [ -f "$json_file" ] || continue
+       bak_n=$(wc -l < "$bak"); json_n=$(wc -l < "$json_file")
+       if [ "$bak_n" -gt "$json_n" ]; then
+           cp "$bak" "$json_file"
+           echo "[全量恢复] $json_file: $json_n -> $bak_n cases"
+       fi
+   done
+   ```
+
 1. **使用 `ops-profiling` skill 的对比模式评估基线性能**（确保目录包含 `model.py` PyTorch参考实现、`model_new_ascendc.py` AscendC实现、测试用例 `*.json`/`*.jsonl`）:
 
    ```bash
@@ -193,7 +207,21 @@ cp -r {baseline_kernel_path}/* output/{op_name}_evo_{timestamp}/shared/
 
 ---
 
-完成后，`shared/` 目录应包含: `model.py`（算子描述 PyTorch Model）、`<op_name>.json`（测试用例，精简后）、`<op_name>.json.bak`（原始备份）、`call_spec.json`（测试用例参数规格，供 evolution-report 提取输入参数）、`design/block_level/` 与 `design/tile_level/`（设计文件）、`kernel/`（[基线模式] 基线 AscendC 内核源码，用于生成代码 diff）。
+完成后，`shared/` 目录应包含: `model.py`（算子描述 PyTorch Model）、`<op_name>.json`（测试用例，**全量**）、`<op_name>.json.bak`（全量备份，用于完整性校验）、`call_spec.json`（测试用例参数规格，供 evolution-report 提取输入参数）、`design/block_level/` 与 `design/tile_level/`（设计文件）、`kernel/`（[基线模式] 基线 AscendC 内核源码，用于生成代码 diff）。
+
+**[注意] 全量 case 守卫（必须执行）**: lingxi-evo 全流程**禁止精简测试用例**——所有轮次、所有变体的编译/精度/性能评估都必须基于全量 case（baseline 与变体的 case 集必须一致，否则加速比与精度结论不可比、无效）。若从生成管线继承了精简态（`.json.bak` 行数 > `.json` 行数），必须先用备份恢复全量：
+
+```bash
+for bak in "$EVO_DIR"/shared/*.json.bak; do
+    json_file="${bak%.bak}"
+    [ -f "$json_file" ] || continue
+    bak_n=$(wc -l < "$bak"); json_n=$(wc -l < "$json_file")
+    if [ "$bak_n" -gt "$json_n" ]; then
+        cp "$bak" "$json_file"
+        echo "[全量恢复] $json_file: $json_n -> $bak_n cases"
+    fi
+done
+```
 
 **生成 call_spec.json**（在 shared/ 准备完成后执行，供 evolution-report 读取测试用例）:
 ```bash
@@ -884,6 +912,20 @@ python3 plugins-community/ops-perf-evolution/skills/evolution-world-model/script
 
 若校验失败（非零退出码），**立即停止摘要生成**，向用户报告归属错误。
 
+**[注意] 全量 case 交付门禁（必须执行，在生成任何摘要前）**:
+
+在向用户展示最终结果前，必须确认最优变体的精度结论基于**全量 case**——这是防止"精简 case 假 pass"交付给用户的最后一道闸：
+
+1. 定位全局最优变体目录 `best_dir = $EVO_DIR/{best_node.solution_ref}`
+2. 校验 case 文件完整性：`best_dir` 下每个 `*.json.bak` 与对应 `.json` 行数必须一致；不一致则用 `.bak` 恢复
+3. 若最优变体的 `evaluation_results.json` 中 `n_cases_total` **等于** shared 全量 case 数 → 门禁通过
+4. 否则（case 数不符或字段缺失）→ 在 `best_dir` 下基于全量 case 重新执行精度验证：
+   ```bash
+   bash ops-lab/tilelang-to-ascendc/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh "$best_dir"
+   ```
+   - 验证通过 → 更新该变体 `evaluation_results.json` 后继续
+   - 验证失败 → **不得**向用户宣称该变体成功；改取次优变体重走本门禁；所有 passed 变体均不通过时，向用户如实汇报"进化产出的变体在全量 case 下精度不通过"
+
 **终止透明性（必须声明）**: 读取 world_model.json 中的 `session.actual_rounds_completed` 和 `session.requested_rounds`：若 `actual_rounds_completed < requested_rounds`，**必须**在摘要开头明确标注实际完成轮数。**严禁**用历史目录的数据填充当前摘要。
 
 进化完成后: 显示前3个实现及其指标（按 speedup 降序）；保存最佳实现路径到输出目录；提供进化摘要和统计信息；保存世界模型最终快照 `cp "$EVO_DIR/world_model.json" "$EVO_DIR/world_model_final.json"`；向用户展示世界模型探索路径（最优路径从根节点到最高得分节点的策略演进）。
@@ -966,7 +1008,7 @@ output/{op_name}_evo_{timestamp}/
 ├── baseline_evaluation.json         # 基线评估（步骤3B.3生成，evolution-report 必需）
 ├── shared/                          # 共享文件 (只生成一次)
 │   ├── model.py                     # 算子描述（PyTorch Model）
-│   ├── <op_name>.json / .json.bak   # 测试用例（精简后 / 原始备份）
+│   ├── <op_name>.json / .json.bak   # 测试用例（全量 / 全量备份，全流程禁止精简）
 │   ├── call_spec.json               # 测试用例参数规格（evolution-report 提取用例参数）
 │   ├── design/{block_level,tile_level}/  # TileLang 设计
 │   └── kernel/                      # [基线模式] 基线 AscendC 内核代码（供 diff 对比）

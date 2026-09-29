@@ -54,7 +54,7 @@ Steps:
    **R12 hard block 会硬检查**：缺文件或 < 100 字符 → SubagentStop hook 阻塞退出，工作不算完成；ledger 也会读它做事后追溯。
    自由 narrative 即可，不强制 ## Strategy / ### Step 格式。
 
-[WARNING] ANTI-TRICK POLICY: Do NOT modify model.py. Do NOT skip/simplify computation in model_new_ascendc.py. Do NOT hardcode test shapes. Violations = invalid variant.
+[WARNING] ANTI-TRICK POLICY: Do NOT modify model.py. Do NOT skip/simplify computation in model_new_ascendc.py. Do NOT hardcode test shapes. Do NOT reduce/sample/truncate the test-case JSON or substitute a subset — evaluation MUST run on the FULL case set (content hash equal to <op_name>.json.bak). Violations = invalid variant.
 
 [Optimization Approach]
 If Mode=open_exploration:

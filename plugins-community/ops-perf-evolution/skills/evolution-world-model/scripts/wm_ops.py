@@ -25,6 +25,7 @@ CLI subcommands:
 """
 
 import argparse
+import glob
 import json
 import logging
 import math
@@ -1476,6 +1477,48 @@ class _RefineContext:
     round_failed: int = 0
     round_best_speedup: float = 0.0
     worst_quality: str = "good"
+    expected_cases: int | None = None
+
+
+def _expected_case_count(results_dir: str) -> int | None:
+    """全量 case 数（refine 的 case 子集守卫基准）。
+
+    从 results_dir 的兄弟目录 shared/ 推导：取每个 *.json.bak 备份对中
+    .bak 与 .json 行数的较大值之和；无 .bak 时退化为 shared/*.json
+    （排除 call_spec.json）。无法确定时返回 None（守卫跳过）。
+    """
+    shared = os.path.join(os.path.dirname(os.path.abspath(results_dir)), "shared")
+    if not os.path.isdir(shared):
+        return None
+
+    def _lines(path: str) -> int:
+        try:
+            with open(path, "rb") as f:
+                return sum(1 for _ in f)
+        except OSError:
+            return 0
+
+    total = 0
+    baks = sorted(glob.glob(os.path.join(shared, "*.json.bak")))
+    if baks:
+        for bak in baks:
+            total += max(_lines(bak), _lines(bak[: -len(".bak")]))
+    else:
+        for sj in sorted(glob.glob(os.path.join(shared, "*.json"))):
+            if os.path.basename(sj) == "call_spec.json":
+                continue
+            total += _lines(sj)
+    return total or None
+
+
+def _variant_case_count(eval_result: dict) -> int | None:
+    """变体实际评估的 case 数（缺失/非法返回 None）。"""
+    comp = eval_result.get("comparison", {}) if isinstance(eval_result, dict) else {}
+    for src in (eval_result, comp):
+        n = src.get("n_cases_total") if isinstance(src, dict) else None
+        if isinstance(n, int) and n > 0:
+            return n
+    return None
 
 
 def _reset_stale_in_progress(nodes: dict, current_node_ids: set) -> list:
@@ -1872,6 +1915,75 @@ def _process_failed_variant(node: dict, node_id: str, p_idx: int,
     )
 
 
+def _detect_case_violation(eval_result: dict, ctx: _RefineContext) -> tuple:
+    """Case 子集守卫检测：返回 (违规消息或 None, n_cases_total 或 None)。
+
+    子 agent 曾将 1728 case 截断为 18 以加速评估，导致"假 pass"进入世界模型；
+    也有变体干脆不写 n_cases_total（自造指标），缺失同样视为无效。
+    """
+    if not ctx.expected_cases:
+        return None, None
+    n_cases = _variant_case_count(eval_result)
+    if n_cases is None:
+        violation = (
+            f"case_evidence_missing: evaluation_results.json 缺少 "
+            f"n_cases_total，无法证明在全量 {ctx.expected_cases} case 上评估"
+        )
+    elif n_cases < ctx.expected_cases:
+        violation = (
+            f"case_subset_evaluation: n_cases_total={n_cases} < "
+            f"full={ctx.expected_cases}"
+        )
+    else:
+        violation = None
+    return violation, n_cases
+
+
+@dataclass
+class _CaseViolationInfo:
+    """case 违规详情（_fail_on_case_violation 的输入封装）。"""
+    violation: str
+    n_cases: int | None
+    compilation_ok: bool
+    precision_ok: bool
+
+
+def _fail_on_case_violation(node: dict, node_id: str, p_idx: int,
+                            ctx: _RefineContext, info: _CaseViolationInfo):
+    """Case 违规处理：标 failed、记 pending_diagnosis、输出摘要。"""
+    node["status"] = "failed"
+    node["failure_reason"] = info.violation
+    ctx.round_failed += 1
+    ctx.pending_diagnosis.append({
+        "node_id": node_id,
+        "parallel_index": p_idx,
+        "compilation_success": info.compilation_ok,
+        "precision_passed": info.precision_ok,
+        "error": info.violation,
+        "implementation_note_path": os.path.join(
+            ctx.results_dir, f"parallel_{p_idx}", "implementation_note.txt"
+        ),
+    })
+    ctx.summary_lines.append(
+        f"  p{p_idx} [{node_id}]: FAIL ({info.violation.split(':')[0]}"
+        + (f" {info.n_cases}/{ctx.expected_cases}" if info.n_cases else "") + ")"
+    )
+
+
+def _apply_multi_shape_speedup(eval_result: dict, speedup: float) -> float:
+    """Multi-shape pipeline: prefer new fields when present."""
+    if not _is_multi_shape_eval(eval_result):
+        return speedup
+    ms_aggregate = eval_result.get("aggregate")
+    if not isinstance(ms_aggregate, dict):
+        return speedup
+    # Use min(target speedups) as the node's effective speedup
+    ms_min = ms_aggregate.get("target_min_speedup")
+    if isinstance(ms_min, (int, float)) and ms_min > 0:
+        return ms_min
+    return speedup
+
+
 def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
     """处理单个变体：SKIP / no-results / PASS / FAIL 分发。"""
     p_idx = int(p_idx_str)
@@ -1905,14 +2017,14 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
     if _QUALITY_RANK.get(mq, 0) > _QUALITY_RANK.get(ctx.worst_quality, 0):
         ctx.worst_quality = mq
 
-    # ── Multi-shape pipeline: prefer new fields when present ──
-    ms_active = _is_multi_shape_eval(eval_result)
-    ms_aggregate = eval_result.get("aggregate") if ms_active else None
-    if ms_active and isinstance(ms_aggregate, dict):
-        # Use min(target speedups) as the node's effective speedup
-        ms_min = ms_aggregate.get("target_min_speedup")
-        if isinstance(ms_min, (int, float)) and ms_min > 0:
-            speedup = ms_min
+    # ── Case 子集守卫：基于精简 case 的评估一律无效，记 failed ──
+    case_violation, n_cases = _detect_case_violation(eval_result, ctx)
+    if case_violation:
+        _fail_on_case_violation(node, node_id, p_idx, ctx, _CaseViolationInfo(
+            case_violation, n_cases, compilation_ok, precision_ok))
+        return
+
+    speedup = _apply_multi_shape_speedup(eval_result, speedup)
 
     if compilation_ok and precision_ok and speedup > 0:
         _process_passed_variant(
@@ -1996,6 +2108,7 @@ def refine(
         results_dir=results_dir,
         summary_lines=[],
         pending_diagnosis=[],
+        expected_cases=_expected_case_count(results_dir),
     )
     round_total = len(parallel_map)
 
