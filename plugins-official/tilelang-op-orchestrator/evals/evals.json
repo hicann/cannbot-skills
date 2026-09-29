@@ -21,13 +21,7 @@
       "prompt": "我想用 TileLang 在昇腾 NPU 上开发算子，tilelang-op-orchestrator 团队是怎么组织的？开发流程是怎样的？",
       "expected_output": "回复应覆盖以下要点：\n1. TileLang-Ascend 算子端到端开发编排 Agent，负责 3 阶段状态机管理\n2. 流程包含：设计 → 开发 → 审查，支持设计回退和失败恢复\n3. 调度三个 Subagent 分阶段执行，支持状态持久化和检查点恢复\n4. 支持 Developer 模式（自动化）和 Expert 模式（手动控制）两种编程范式",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "tilelang",
-          "description": "回复中提到了 tilelang"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,

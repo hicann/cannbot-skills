@@ -15,8 +15,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请介绍 ascendc-perf-optimize 技能中 Ascend C 算子的性能优化工作流程是什么？需要经过哪些步骤？每一步分别关注什么？不需要执行任何工具调用。",
-      "expected_output": "回复应描述 4 步分层流水：1) Step 1 Tiling 理论建模，确定理想 tiling data；2) Step 2 卡间流水优化，仅适用通信类算子，关注通算演算与卡间通信瓶颈；3) Step 3 核间流水优化，仅适用多核间同步算子；4) Step 4 单核流水优化，适用所有算子，关注核内流水与 bound 诊断。Step 2/3 按算子类型选择性执行，不可将流程简化为 3 步。",
+      "prompt": "请先加载 ascendc-perf-optimize 技能并阅读其 SKILL.md 后回答（不需要实际执行 profiling 或修改代码）：该技能中 Ascend C 算子的性能优化工作流程一共分几步？每一步的名称、适用条件和关注点分别是什么？哪些步骤是所有算子必选、哪些按算子类型选择性执行、非适用算子如何处理？请说明该技能的 4 步分层流程与「简化为 3 步」的区别。",
+      "expected_output": "1. 回复应说明该技能定义的是 4 步分层流水（Step 1 Tiling 理论建模 → Step 2 卡间流水优化 → Step 3 核间流水优化 → Step 4 单核流水优化），而不是简化的 3 步流程。\n2. 回复应逐条给出各步的适用条件与关注点：Step 1 适用所有算子、确定理想 tiling data；Step 2 仅适用通信类算子、关注通算演算与卡间通信瓶颈；Step 3 仅适用多核间同步算子、关注核间并行效率与同步开销；Step 4 适用所有算子、关注核内流水与 bound 诊断。\n3. 回复应说明 Step 2/3 按算子类型选择性执行、非适用算子跳过，Step 1 与 Step 4 为所有算子必选，并指出不得将 Step 2/3/4 合并为单一的「流水分析」步骤。",
       "expectations": [],
       "files": []
     },
@@ -99,7 +99,7 @@
         "eval_mode": "text"
       },
       "prompt": "我的一个 Ascend C Vec 算子性能不达标，profiling 报告显示 Vector 单元利用率很高、向量指令是主要瓶颈，访存带宽充足。请按 ascendc-perf-optimize 技能的单核流水优化流程诊断瓶颈并给出优化思路。不需要执行任何工具调用。",
-      "expected_output": "回复应说明 Step 4 单核流水优化适用于所有算子：1) 基于仿真图或 profiling 数据判定 bound 类型，本例 Vector 单元利用率高且向量指令为主要限制，判定为 Vec Bound；2) 按 bound 类型路由到对应优化策略（Scalar/访存/Vec/无 Bound）；3) 输出核内流水仿真图分析、核内 profiling 数据报告（bound 诊断结论）与核内流水优化策略；4) 给出对 Step 1 tiling 策略的修正建议并汇总最终优化方案。",
+      "expected_output": "1. 回复应说明 Step 4 单核流水优化适用于所有算子，并说明该步通过仿真图或 profiling 数据判定 bound 类型；结合本例「Vector 单元利用率高、向量指令为主要限制、访存带宽充足」判定为 Vec Bound。\n2. 回复应给出按 bound 类型路由的判定链：Scalar Bound/小 case、访存 Bound、Vec Bound、无 Bound 四类，并说明本例因访存带宽充足而排除访存 Bound、命中 Vec Bound 并对应 VEC Bound 优化策略。\n3. 回复应给出核内流水优化策略（如 UB 融合、减少 Cast/类型转换、VMULA/VMULS/VMADD 等融合指令、深度 VEC Bound 时用 LUT+插值减少计算量、检查 DoubleBuffer）以及对该算子 tiling 参数的修正建议（如增大 tile 尺寸减少循环次数、使能 DoubleBuffer 时可用 UB 需除以 2 重算）。",
       "expectations": [],
       "files": []
     },
@@ -143,8 +143,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "我在优化一个普通 MatMul 算子，msprof 显示 aic_scalar_ratio=0.42，aic_mte2_ratio=0.55，kernel 使用 AscendC::Matmul 并从 GM 加载 TCubeTiling。请按 ascendc-perf-optimize 的单核流水流程判断是否推荐 Matmul API 常量折叠，以及实施应去哪个技能。不需要执行任何工具调用。",
-      "expected_output": "回复应说明：1) 普通 MatMul 走 Step 1 后跳过 Step 2/3，进入 Step 4；2) aic_scalar_ratio>0.3 判定 Scalar Bound，且含 Matmul API，应加载 single-core-pipeline/matmul_constant_folding.md 并给出 Go；3) 常量折叠与 host buildTiling 正交；4) 实施细节在 ascendc-performance-best-practices 的 matmul constant_folding_design.md，不要把逐步改代码写进本技能流程本身。",
+      "prompt": "我在优化一个普通 MatMul 算子，msprof 显示 aic_scalar_ratio=0.42，aic_mte2_ratio=0.55，kernel 使用 AscendC::Matmul 并从 GM 加载 TCubeTiling。请先加载 ascendc-perf-optimize 技能并阅读其 SKILL.md 与 references/single-core-pipeline/ 下的文档后回答（不需要实际执行 profiling 或修改代码）：1）这个普通 MatMul 在技能的 4 步流程中依次执行哪些步骤、跳过哪些步骤？2）按 references/single-core-pipeline/scalar.md 的策略表，Matmul API 常量折叠属于哪一类策略、适用条件是什么、本例是否满足、应给出什么结论？3）该策略的手段是什么，逐步改代码的实施应参考哪个技能？",
+      "expected_output": "1. 回复应说明普通 MatMul（非通信类、非多核间同步）在 4 步流程中的路径：执行 Step 1 Tiling 理论建模后跳过 Step 2 与 Step 3，进入 Step 4 单核流水优化。\n2. 回复应指出 Matmul API 常量折叠是本技能 `references/single-core-pipeline/scalar.md`（Scalar Bound / 小 case）中的优化策略，适用条件为 Kernel 使用 Matmul API 且 `aic_scalar_ratio` ≥ 0.15、shape 可固化或可取上界；本例使用 `AscendC::Matmul` 且 0.42 ≥ 0.15，应给出推荐实施（Go）的结论。\n3. 回复应说明常量折叠的手段是把 `TCubeTiling` 解析迁移到编译期以降低 `aic_scalar_time`，并指出本技能负责策略与 tiling 修正建议、逐步改代码的实施细节需参考 `ascendc-performance-best-practices` 的 matmul 族优化指南。",
       "expectations": [],
       "files": []
     }

@@ -105,8 +105,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "本地缓存装配失败了。我能否从 pypto 文档站同时下载 API 文档、生产算子参考实现和 golden？",
-      "expected_output": "回复应说明无法装配时可按索引得到确定文档路径，再从 pypto.gitcode.com/_sources/<sub>.md.txt 获取文档；算子参考实现和 golden 没有文档站形态，只能在本地缓存存在时检索，不能声称在线站点也能提供。",
+      "prompt": "如果本地缓存无法装配（离线受限），我能否从 pypto 文档站同时下载 API 文档、生产算子参考实现和 golden？",
+      "expected_output": "1. 回复应说明无法装配（离线受限）时，按入口键查 references/ 下的索引（如 api-index.md、doc-index.md）得到确定文档路径，再用 WebFetch 从 pypto.gitcode.com/_sources/<sub>.md.txt 取文档。\n2. 回复应指出算子参考实现（ops）与 golden（tests）没有文档站形态，不能从文档站下载，只能在本地缓存存在时检索。\n3. 回复应说明文档站不能远程检索，只能按确定路径取文档，不能在线批量下载整棵文档树。",
       "expectations": [],
       "files": []
     },
@@ -120,7 +120,7 @@
         "eval_mode": "text"
       },
       "prompt": "我要找 attention 能力相关的全部 PyPTO 生产实现和 golden，不是读取一个已知文件。该怎样组织检索？",
-      "expected_output": "回复应将其视为跨目录、多角度发现任务，派 Explore subagent 并明确目标与范围，在 $PYPTO_DEVKIT_DIR/ops 搜生产实现、在 tests 搜 golden，遍历候选后逐个读取相关文件；不是走已知路径的单点 Read。",
+      "expected_output": "1. 回复应把该需求判定为跨目录、多角度的大范围发现任务，而不是已知路径的单点 Read。\n2. 回复应说明这类大范围检索要派 Explore subagent 并给出明确目标与范围（例如在 $PYPTO_DEVKIT_DIR/ops 找 attention 的实现）。\n3. 回复应说明在 $PYPTO_DEVKIT_DIR/ops 检索生产实现、在 $PYPTO_DEVKIT_DIR/tests 检索 golden，命中后 Read 全文。",
       "expectations": [],
       "files": []
     }

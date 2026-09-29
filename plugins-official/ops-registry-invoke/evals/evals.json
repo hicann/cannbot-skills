@@ -20,18 +20,7 @@
       "prompt": "我想开发一个自定义 Ascend C 算子并注册到算子库中，ops-registry-invoke 团队能做什么？开发流程是怎样的？",
       "expected_output": "回复应覆盖以下要点：\n1. ops-registry-invoke 管理自定义算子的完整开发生命周期：设计 → 开发 → 验证 → 上库\n2.  最终产出可注册到算子库的自定义算子工程",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "ops-registry-invoke-workflow",
-          "description": "首次响应加载了工作流技能"
-        },
-        {
-          "type": "contains",
-          "pattern": "registry-invoke",
-          "description": "回复中提到了 registry-invoke"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -95,13 +84,7 @@
       "prompt": "注册调用开发前会先产出 spec.yaml，它是什么？包含哪些内容？谁来生成、谁来评审？",
       "expected_output": "回复应覆盖以下要点：\n1. spec.yaml 是算子的 L0 数学契约（数学定义、输入输出 dtype/shape、边界、容差、oracle 等）\n2. 由架构师（architect）生成并经 11-stage 校验\n3. 由 spec 评审 agent 按 17 条 SPEC-* 条款评审，评审通过后才进入设计阶段",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "spec.yaml",
-          "description": "回复中提到了 spec.yaml"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
@@ -117,13 +100,7 @@
       "prompt": "注册调用模式的自定义算子工程是什么样的目录结构？算子是怎么通过 aclnn 接入的？",
       "expected_output": "回复应覆盖以下要点：\n1. 标准算子仓结构 operators/{op}/：op_host（算子定义/infershape/REG_OP 图模式注册）与 op_kernel（Kernel 实现）分离，含 CMakeLists.txt 与 tests（ut/st）\n2. 通过 aclnn 两段式接口（GetWorkspaceSize + Execute）接入\n3. 与 Kernel 直调工程（单文件独立工程）的结构差异",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "op_host",
-          "description": "回复中提到了 op_host"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 7,
@@ -155,13 +132,7 @@
       "prompt": "我想把自定义算子接入 torch.compile 图模式做推理优化，ops-registry-invoke 团队能帮我做吗？",
       "expected_output": "回复应覆盖以下要点：\n1. torch.compile 入图不在注册调用团队的默认支持范围（注册调用默认支持 aclnn 调用与 GE IR 构图，不支持 torch.compile 入图）\n2. 此类需求应路由到 torch-compile 插件或 torch-custom-ops-guide 技能\n3. 不应误启动注册调用开发工作流",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "torch.compile",
-          "description": "回复中提到了 torch.compile"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 9,
@@ -223,7 +194,7 @@
         "eval_mode": "text"
       },
       "prompt": "PLAN.md 配了多个开发迭代时，每个迭代的 Wave 1 和 Wave 2 如何启动？A1-Main 还没编译通过时能否提前启动 A2？",
-      "expected_output": "回复应说明 iteration_count 只能取 1、2、3；每个迭代先并行启动 Wave 1 的 A1-Main、可选 A1-P 和 B，等待 A1-Main 编译通过后才并行启动 Wave 2 的 A2 与可选 A1-P-Retry，因此不能提前启动 A2。",
+      "expected_output": "1. 回复应说明每个迭代先并行启动 Wave 1 的 A1-Main、可选 A1-P 和 B（必须在同一次响应中同时发起），等待 A1-Main 编译通过后才并行启动 Wave 2。\n2. 回复应明确 A1-Main 未编译通过时不能提前启动 A2，因为 A2 的进入条件是 A1-Main 编译通过。\n3. 回复应说明 iteration_count 只能取 1、2、3，且 Wave 2 除 A2 外还包含可选的 A1-P-Retry（失败穿刺重试）。",
       "expectations": [],
       "files": []
     },

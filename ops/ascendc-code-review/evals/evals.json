@@ -93,7 +93,7 @@
         "eval_mode": "text"
       },
       "prompt": "我负责的算子仓提交了一个 PR，想用 ascendc-code-review 对它做全量检视。PR 检视是怎么做的？从获取 diff 到出具报告要经过哪些阶段？检视时怎么判断代码侧别？",
-      "expected_output": "应说明走 pr-review 工作流：提取 PR 链接并判断托管平台，派发子 Agent 获取 diff 与完整源码（code-fetch），按变更文件数与行数判断是否切换大型 PR 流程，并行派发代码概要/API 预研（仅 Kernel 侧）/设计文档探测，产出检视计划（通用分组+专项清单+跳过清单），按波次逐条检视，行号校对，撰写报告；PR 检视时优先从完整 URL 推断 gitcode.com/cann 下常用算子仓（ops-transformer/ops-math/ops-nn/ops-cv）的 repo 名。",
+      "expected_output": "1. 回复应说明 PR 检视走 pr-review 工作流，并给出从获取 diff 到报告的阶段顺序：提取 PR 链接并判断托管平台 → code-fetch 子 Agent 获取 diff 与完整源码 → 并行派发代码概要、API 预研（仅 Kernel 侧）、设计文档探测 → 产出检视计划（通用分组+专项清单+跳过清单）→ 按波次逐条检视 → 行号校对 → 撰写报告。\n2. 回复应说明按变更文件数与行数决定检视模式（minimal / compact / standard）以及是否切换大型 PR 流程，并说明代码侧别判定依据（Kernel 侧看 op_kernel 与 __aicore__ / AscendC:: 特征，Tiling 侧看 op_host 与 gert::TilingContext / TilingData 特征）。\n3. 回复应说明 PR 检视时优先从完整 URL 推断 gitcode.com/cann 下常用算子仓（ops-transformer / ops-math / ops-nn / ops-cv）的 repo 名。",
       "expectations": [],
       "files": []
     },

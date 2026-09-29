@@ -15,8 +15,8 @@
         ],
         "disabled": false
       },
-      "prompt": "检查 custom/myop/ 目录下的算子文件是否合格，重点看哪些结构要求？",
-      "expected_output": "按 layout/structure 要求逐项核对：三件套（custom/myop/test_myop.py 与 impl、golden 并存）；所有测试断言走 assert_allclose 或 detailed_tensor_compare，不用手写容差循环；阶段化命名（*_module<k>_impl.py + *_golden.py + test_*）；host wrapper 不用 Python for-range 驱动 kernel；JIT 内迭代只用 pypto.loop / pypto.loop_unroll / range，无 while 或非 range for；pypto.view 的 shape/offsets/valid_shape 秩一致；set_cube_tile_shapes 每个 m/k/n 传 [L0, L1] 且 0<L0<=L1、L1%L0==0。",
+      "prompt": "沙箱内没有算子工程，不需要实际执行命令或检查真实文件。请先加载并使用 pypto-op-review 技能（可 Read SKILL.md 与 references/CI.md），说明一个 custom/<算子名>/ 目录下的算子文件在 layout/structure 上必须满足哪些要求、review 时应重点核对哪些项？",
+      "expected_output": "1. 应列出目录级三件套与阶段化命名要求：custom/<op>/test_<op>.py 与 impl、golden 并存；每个激活阶段都有 *_module<k>_impl.py + *_golden.py + test_* 的模块三件套。\n2. 应列出代码级要求：所有测试断言走 assert_allclose 或 detailed_tensor_compare、不用手写容差循环；host wrapper 不用 Python for-range 驱动 kernel；JIT 内迭代只用 pypto.loop / pypto.loop_unroll / range，无 while 或非 range for。\n3. 应列出 API 契约要求：pypto.view 的 shape/offsets/valid_shape 秩一致；set_cube_tile_shapes 每个 m/k/n 传 [L0, L1] 且 0<L0<=L1、L1%L0==0；并说明违规项要修复后才认定完成。",
       "files": [],
       "expectations": []
     },
@@ -67,8 +67,8 @@
           "A2"
         ]
       },
-      "prompt": "我 review custom/myop/ 目录，应该按什么顺序检查结构要求？",
-      "expected_output": "按 layout/structure 要求逐项核对：三件套是否并存、断言是否走比较助手、阶段化命名、host wrapper 是否用 Python for 驱动 kernel、pypto.view 形状秩一致、set_cube_tile_shapes 的 m/k/n 是否传 [L0,L1] 且 0 小于 L0 小于等于 L1、L1 取模 L0 为 0；任何一项违规都应在修复后再认定完成。",
+      "prompt": "沙箱内没有算子工程，不需要实际执行命令或检查真实文件。请先加载并使用 pypto-op-review 技能（可 Read SKILL.md 与 references/CI.md），说明 review 一个 custom/<算子名>/ 目录时，应按什么顺序逐项检查 layout/structure 要求、哪些项要留到最后复核？",
+      "expected_output": "1. 应给出检查顺序：先做只能目录级判断的跨文件项（三件套是否并存、阶段化命名 trio），再下钻到文件级——host wrapper 是否用 Python for-range 驱动 kernel，以及 JIT graph 内部的迭代方式、动态轴、pypto.view 秩与 set_cube_tile_shapes。\n2. 应说明 JIT 内迭代只用 pypto.loop / pypto.loop_unroll / range、无 while 或非 range for；pypto.view 的 shape/offsets/valid_shape 秩一致；set_cube_tile_shapes 的 m/k/n 各传 [L0,L1] 且 0<L0<=L1、L1%L0==0。\n3. 应说明测试文件最后核对断言是否统一走 assert_allclose 或 detailed_tensor_compare；并说明每次写完文件后按适用项复查、每个 phase / stage 边界重查整个要求集合。",
       "files": [],
       "expectations": []
     },

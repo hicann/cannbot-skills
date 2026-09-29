@@ -50,8 +50,8 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "我的 MIX 算子分成 cube kernel 和 vec kernel 两个文件，想快速检查两边的 CrossCoreSetFlag 和 CrossCoreWaitFlag 个数是否一致、EVENT_ID 是否匹配。该怎么查？不需要执行任何工具调用。",
-      "expected_output": "回复应说明配对快查方法：\n- cube 和 vec 两个文件需同时传给 sync_audit.py（跨核配对需要两侧信息），用 --check pair 模式\n- 脚本按 EVENT_ID/flag 变量分组统计 Set/Wait 数量、顺序与匹配关系\n- 核间同步需检查 AIC/AIV 侧别对称性（一侧 Set 对应另一侧 Wait）\n- 发现不配对候选按编号列出修改方案，等用户选择后执行",
+      "prompt": "我的 MIX 算子分成 cube kernel 和 vec kernel 两个文件，想快速检查两边的 CrossCoreSetFlag 和 CrossCoreWaitFlag 个数是否一致、EVENT_ID 是否匹配。请加载并使用 ascendc-sync-audit 技能回答（可阅读该技能文档，但不要实际运行脚本或修改代码）：(1) 这类跨核配对快查对应哪个 workflow、应该怎么调用脚本（两个内核文件怎么传、用哪个 --check 选项）；(2) 脚本按什么分组，会统计和检查哪些项；(3) 脚本给出候选后应如何呈报与处理（是否筛选/否决、是立即改源码还是等用户选择）。",
+      "expected_output": "1. 回复应说明跨核配对快查走 pair-check 工作流：把 cube 和 vec 两个内核文件同时传给脚本，执行 python3 scripts/sync_audit.py cube_kernel.cpp vec_kernel.cpp --check pair（跨核配对需要两侧信息）。\n2. 回复应说明脚本按 EVENT_ID / flag 变量分组，统计 Set/Wait 的数量、顺序与 EVENT_ID 匹配关系，并检查核间同步对称性（AIC 侧 Set 对应 AIV 侧 Wait）。\n3. 回复应说明脚本候选不筛选不否决，按编号列出修改方案（文件名 + 精确行号 + diff 修改前后对比），列出后等用户选择编号再执行修改，不立即修改源码。",
       "expectations": [],
       "files": []
     },

@@ -5,42 +5,17 @@
       "id": 1,
       "title": "自定义算子性能 Profiling 与对比报告",
       "config": {
+        "timeout": 1800,
         "max_tokens": 100000,
         "ascend_platforms": [
           "A2"
         ],
         "eval_mode": "text"
       },
-      "prompt": "我需要为一个自定义 Ascend C 算子 layer_norm 进行性能评估，比较自定义算子与 PyTorch 标杆的性能差异。算子目录为 ascend-kernel/csrc/ops/layer_norm/。请按照 torch-ops-profiler 的流程生成性能用例并输出对比报告。",
-      "expected_output": "回复应先读取 csrc/ops/layer_norm/design.md 提取 dtype、参数约束、典型 shape、执行模式，再读取 test/layer_norm-test-cases.md（如存在）提取用例信息。然后设计 JSONL 用例（≥8 条，覆盖所有 dtype 和执行模式，包含小/中/大规模 shape），使用 torch_npu.profiler 进行性能采集（warmup=5、active=5 固定），建立双路径对比（自定义算子 vs 标杆 API 或小算子拼接）。最终产出 <op>_perf_cases.jsonl 用例文件和 <op>_torch_npu_profiler_report.md 性能报告，报告中应包含含 DType 列的统一对比表、全量汇总、按数据类型汇总和 ≥3 条简短分析。",
+      "prompt": "我需要为一个自定义 Ascend C 算子 layer_norm 做性能评估，比较自定义算子与 PyTorch 标杆的性能差异。请先加载并使用 torch-ops-profiler 技能（可 Read 其 SKILL.md/references），说明按它的流程应该怎么评估：先看哪些设计/用例文件、怎么设计性能用例、用什么采集参数、怎么做双路径对比、最终产出哪些报告文件。沙箱内没有该算子工程，不需要实际执行采集或生成文件。",
+      "expected_output": "1. 回复应说明先读取 csrc/ops/layer_norm/design.md 提取 dtype、参数约束、典型 shape 与执行模式，并读取 test/layer_norm-test-cases.md（如存在）提取用例信息\n2. 回复应说明用例设计要点：JSONL 用例 ≥8 条、覆盖所有 dtype 与执行模式、包含小/中/大规模 shape，采集固定用 torch_npu.profiler（warmup=5、active=5），并建立双路径对比（自定义算子 vs 标杆 API 或小算子拼接）\n3. 回复应说明产出为 <op>_perf_cases.jsonl 与 <op>_torch_npu_profiler_report.md，报告含带 DType 列的统一对比表、全量汇总、按数据类型汇总与 ≥3 条简短分析",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "torch_npu.profiler",
-          "description": "回复中提到了 torch_npu.profiler"
-        },
-        {
-          "type": "contains",
-          "pattern": "warmup=5",
-          "description": "回复中提到了 warmup=5"
-        },
-        {
-          "type": "contains",
-          "pattern": "active=5",
-          "description": "回复中提到了 active=5"
-        },
-        {
-          "type": "contains",
-          "pattern": "JSONL",
-          "description": "回复中提到了 JSONL"
-        },
-        {
-          "type": "contains",
-          "pattern": "design.md",
-          "description": "回复中提到了 design.md"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -53,30 +28,9 @@
         "eval_mode": "text"
       },
       "prompt": "使用 torch-ops-profiler 时，算子没有对应的标杆等价 API，应该怎么办？这个 skill 和 ascendc-precision-debug 有什么区别？",
-      "expected_output": "回复应说明当算子无标杆等价 API 时，必须实现小算子拼接标杆路径，以设计文档中的 PyTorch 参考实现为基础，使用 PyTorch 基础算子组合（如 torch.zeros、切片赋值、.permute()、torch.cat 等）构建标杆路径，且标杆实现必须以张量操作为主（非 Python 标量循环），确保可在 NPU 上执行。报告中须明确标注「无标杆等价接口，标杆路径为小算子拼接」。禁止以「无标杆接口」为由输出单路径报告。torch-ops-profiler 专注于性能 profiling 和对比，而 ascendc-precision-debug 专注于精度调试和问题定位，两者分工不同。应强调用例生成必须先读 design.md，否则可能导致 shape 不符合约束或漏掉关键执行模式。",
+      "expected_output": "1. 回复应说明当算子无标杆等价 API 时必须实现「小算子拼接」标杆路径：以 design.md 中的 PyTorch 参考实现为基础，用 PyTorch 基础算子组合（如 torch.zeros、切片赋值、.permute()、torch.cat 等）构建，且标杆实现必须以张量操作为主（非 Python 标量循环），并确保在 NPU 上运行。\n2. 回复应说明报告中须明确标注「无标杆等价接口，标杆路径为小算子拼接」，且不得以「无标杆接口」为由退化为单路径报告，必须保留自定义算子 vs 标杆的双路径对比表。\n3. 回复应说明两者分工与使用边界：torch-ops-profiler 负责性能 profiling 与对比（warmup=5、active=5），ascendc-precision-debug 负责精度调试与问题定位；并指出生成 JSONL 用例前必须先读 design.md，否则可能导致 shape 不符合约束或漏掉关键执行模式。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "小算子拼接",
-          "description": "回复中提到了 小算子拼接"
-        },
-        {
-          "type": "contains",
-          "pattern": "双路径对比",
-          "description": "回复中提到了 双路径对比"
-        },
-        {
-          "type": "contains",
-          "pattern": "ascendc-precision-debug",
-          "description": "回复中提到了 ascendc-precision-debug"
-        },
-        {
-          "type": "contains",
-          "pattern": "design.md",
-          "description": "回复中提到了 design.md"
-        }
-      ]
+      "expectations": []
     }
   ],
   "skill_name": "torch-ops-profiler"

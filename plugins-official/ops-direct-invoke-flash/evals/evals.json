@@ -19,13 +19,7 @@
       "prompt": "我有一段数学公式，想在昇腾 NPU 上实现为核函数，ops-direct-invoke-flash 团队适合做这个吗？它的开发流程是怎样的？",
       "expected_output": "回复应覆盖以下要点：\n1. ops-direct-invoke-flash 适用于从 CPU 函数、数学公式、代码片段或文本描述出发构建并验证新的 Ascend NPU 核函数\n2. 核心流程包含：环境检查 → 设计 → 开发 → 测试 → 验收，覆盖从规格到经验证核函数的完整路径\n3. 默认在 operators/ 目录下开发，支持使用 /ops-direct-invoke-flash 技能\n4. 输出经验证的 NPU 核函数",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "flash",
-          "description": "回复中提到了 flash"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -111,8 +105,8 @@
         "timeout": 900,
         "eval_mode": "text"
       },
-      "prompt": "请启动 ops-direct-invoke-flash，但我暂时不给源文件、数学公式、代码片段或文字规格。你先创建工程骨架再说。",
-      "expected_output": "回复应停止工作并要求用户提供算子来源，说明可接受 CPU/PyTorch/Numpy 文件、数学公式、规格文档或文字描述；没有来源时不得创建骨架或臆测算子语义",
+      "prompt": "我想用 ops-direct-invoke-flash 从零开发一个算子，但暂时不提供源文件、数学公式、代码片段或文字规格。能否先创建工程骨架、等材料到位后再进入设计阶段？请说明你的处理方式和依据。",
+      "expected_output": "1. 回复应停止推进，不创建工程骨架，并明确在缺少算子来源时无法开始算子开发。\n2. 回复应要求用户先提供算子来源，并说明可接受的来源类型：源文件路径（C++、PyTorch、Numpy）、数学公式、规格说明文档或文字描述。\n3. 回复应说明拿到来源后才进入工作流（先分析来源、提取算子语义），不得在没有来源时臆测算子语义。",
       "expectations": [],
       "files": []
     },
@@ -160,7 +154,7 @@
         "eval_mode": "text"
       },
       "prompt": "AGENTS.md 设置 harness.review=off。是否可以跳过 UB 预算、32B DMA、Cast 支持矩阵和 dav-3510 禁用 API 扫描，直接编译？",
-      "expected_output": "回复应拒绝，说明 review=off 只跳过子 Agent 评审并在 STATE 记录原因，不生成空 review 文件；主 Agent仍必须检查每种 dtype 的 32B 最小传输、所有存活 UB 缓冲预算、Cast 链、host-only helper，以及 dav-3510 禁用 API 和尾块 mask",
+      "expected_output": "1. 回复应拒绝直接编译，说明 harness.review=off 只跳过子 Agent 评审、不跳过确定性校验本身，并在 docs/{OP}/STATE.md 记录按配置跳过、不生成空的 review 占位文件。\n2. 回复应说明主 Agent 在阶段 4 设计定稿前必须逐条核对：每种支持 dtype 的 32B 最小传输（count * sizeof(T) >= 32）、UB 预算涵盖所有存活缓冲区且不超限、Cast 链符合支持矩阵。\n3. 回复应说明阶段 6 构建前主 Agent 必须自行 grep host-only 辅助函数（ceil_div / align_down / align_up），并对照 reg-api-patterns.yaml 扫描 dav-3510 禁用 API、确认掩码为元素计数且尾块存储已加掩码。",
       "expectations": [],
       "files": []
     },

@@ -16,7 +16,7 @@
         "disabled": false
       },
       "prompt": "端到端 benchmark 慢，但不知道瓶颈在 dot / 逐元素变换 / 访存 / 同步哪一项，怎么定位？",
-      "expected_output": "应先采集再断：过全 kernel 采集覆盖门禁——用 scripts/enumerate_kernels.py 枚举全部 @triton.jit kernel，对每个算子 kernel 用 msprof op simulator 采集（--kernel-name + --launch-count=1），产出覆盖表（kernel_name/是否采集/Cube top pipe/Vector top pipe/热源码行）；再解析 instr_exe.csv 与 code_exe.csv 交叉验证 pipe 占比与热源码行，综合全部 kernel 判定瓶颈；严禁在未采集前下\"硬件极限/不可优化\"结论，修复方向一律映射到 triton-latency-optimizer 的优化点编号。",
+      "expected_output": "1. 回复应说明端到端 benchmark 时间无法区分瓶颈项，必须先采集再断：用 msprof op simulator 采集 per-instruction pipe 占比来判定瓶颈类型，严禁在未采集前下「硬件极限/不可优化」结论。\n2. 回复应给出全 kernel 采集覆盖门禁流程：用 scripts/enumerate_kernels.py 枚举全部 @triton.jit kernel，对每个算子 kernel 各跑一次 msprof op simulator（--kernel-name + --launch-count=1），并由 scripts/parse_prof.py 汇总产出每个 kernel 一行的覆盖表（kernel_name / 是否采集 / Cube top pipe / Vector top pipe / 热源码行）。\n3. 回复应说明每个 kernel 需同时查看 Cube 与 Vector 核各自的 instr_exe.csv（瓶颈类型）与 code_exe.csv（热源码位置）四张表，用 pipe 占比与热源码行交叉验证，并把修复方向映射到 triton-latency-optimizer 的优化点编号。",
       "files": [],
       "expectations": []
     },
@@ -85,7 +85,7 @@
         ]
       },
       "prompt": "simulator 诊断出瓶颈后，我可以同时应用好几个优化点来加速吗？",
-      "expected_output": "不可以。一次循环只指向一个 triton-latency-optimizer 优化点，重新采集确认瓶颈转移后再应用下一个；多点叠加会模糊因果，且本 skill 只采集加诊断，修复落地交回 latency-optimizer。",
+      "expected_output": "1. 回复应明确回答不可以同时应用多个优化点：一次循环只指向一个 triton-latency-optimizer 优化点，多点叠加会模糊因果。\n2. 回复应说明每应用一个优化点后必须重新采集，确认瓶颈是否转移，再决定下一个优化点。\n3. 回复应说明本 skill 只负责采集与诊断、不直接落修复，修复代码交回 triton-latency-optimizer 产出。",
       "files": [],
       "expectations": []
     },
@@ -111,7 +111,7 @@
         "eval_mode": "text"
       },
       "prompt": "只看 Cube 核 instr_exe.csv 里 MMAD 占比就能判断源代码哪一行慢吗？",
-      "expected_output": "回复应说明不够；每个 kernel 需同时查看 Cube 与 Vector 核各自的 instr_exe 和 code_exe 四张表，用 pipe 占比与热源码行交叉验证，再由 parse_prof.py 汇总覆盖表，不能用单张表推断全局瓶颈。",
+      "expected_output": "1. 回复应说明不够：MMAD 占比只反映执行到的指令分布，回答不了「时间花在哪一行」，不能用单张表或单一占比推断瓶颈。\n2. 回复应说明每个 kernel 需同时查看 Cube 与 Vector 核各自的 instr_exe.csv（瓶颈类型）与 code_exe.csv（热源码位置）四张表，用 pipe 占比与热源码行交叉验证。\n3. 回复应说明由 scripts/parse_prof.py 汇总各核 pipe 占比与热源码行、产出覆盖表后再综合判定。",
       "expectations": [],
       "files": []
     },
@@ -124,7 +124,7 @@
         "eval_mode": "text"
       },
       "prompt": "Vector 核 SCALAR pipe 超过 30%，热点是大量 CMPN/ADD，调用次数接近 tile 元素数。这说明什么？",
-      "expected_output": "回复应将证据诊断为 i32 比较或边界计算发生标量降级，并从 latency-optimizer 的既有点 6、5、17 中选择一个最匹配的单点方向交接；一次循环只选一个，优化后重新采集确认瓶颈是否转移。",
+      "expected_output": "1. 回复应将该信号诊断为 i32 比较（或边界/索引计算）标量降级：Vector 核 SCALAR pipe > 30% 且 CMPN/ADD 的 call_count ≈ tile 元素数，说明 i32 比较被编译成逐元素标量循环、未向量化，属可优化问题而非硬件极限。\n2. 回复应说明修复方向对应 triton-latency-optimizer 的既有点 6（避免标量降级）/ 5（Scalar→Vector）/ 17（消除冗余边界运算），并把修复落地交回 latency-optimizer、本 skill 不改代码。\n3. 回复应说明一次循环只交接一个优化点，修复后重新采集确认 SCALAR 占比与瓶颈是否转移。",
       "expectations": [],
       "files": []
     },
@@ -137,7 +137,7 @@
         "eval_mode": "text"
       },
       "prompt": "枚举到 4 个 kernel，覆盖表只有 3 行，第 4 个没有记录。前三个证据很一致，可以先下全局结论吗？",
-      "expected_output": "回复应说明不能；覆盖表必须每个枚举 kernel 一行，并把状态标为已采集、失败或未触发之一。任一 kernel 缺失且未标注就未通过硬门禁，禁止诊断或“无更多改进”结论。",
+      "expected_output": "1. 回复应说明不能先下全局结论：缺失 kernel 的采集结果未知，3/4 一致只能支撑覆盖范围内的阶段性结论，不能据此下全局结论。\n2. 回复应说明覆盖表必须每个枚举到的 kernel 各占一行，并把「是否采集」标为已采集（✓）、采集失败（附原因）或未触发之一，不得静默跳过。\n3. 回复应说明任一 kernel 缺失且未标注即未通过全 kernel 采集覆盖硬门禁，此时禁止给出诊断、禁止下「无更多改进/硬件极限」结论，应先补采或标注该 kernel 状态。",
       "expectations": [],
       "files": []
     },

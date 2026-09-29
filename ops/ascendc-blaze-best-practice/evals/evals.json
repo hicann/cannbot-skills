@@ -27,8 +27,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "一个 Blaze MIX kernel 在 O3 下总是停在 Fixpipe，O0 或 -fno-strict-aliasing 下可完成。Host Tiling 打印正常。Device 端把 TilingData 地址转成 uint32_t*，逐 word 写入含 uint64_t、float 成员的 local TilingData，再读取成员。请给出定位顺序、根因成立所需证据和正式修复边界，不执行工具。",
-      "expected_output": "应先验证实际产物和设备侧解码后的本地 Tiling 字段，再建立字段到 producer/consumer 次数的因果链；识别不兼容 uint32_t 指针写入 typed POD 的别名风险，要求 entry 使用当前项目生成的 GET_TILING_DATA_WITH_STRUCT/GET_TILING_DATA_MEMBER 或同一工具链已证明的 typed loader，再把本地 POD 传给 Kernel；公共 Kernel 不得持有 raw tiling GM_ADDR 或逐字段复制。O0 和 -fno-strict-aliasing 只能作为诊断，不能作为最终修复；不得因终端等待点直接归因 Fixpipe。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：一个 Blaze MIX kernel 在 O3 下总是停在 Fixpipe，O0 或 -fno-strict-aliasing 下可完成；Host Tiling 打印正常；Device 端把 TilingData 地址转成 uint32_t*，逐 word 写入含 uint64_t、float 成员的 local TilingData，再读取成员。请按该技能「优化构建运行时挂起与数据损坏排查」中的运行时控制数据取证与 producer/consumer 因果闭合要求，以及 TilingData 类型化装载与编译边界要求，说明定位顺序、根因成立所需证据和正式修复边界。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应说明先核对实际执行的构建产物与设备侧 Tiling 装载后的本地字段快照（M/N/K、base shape、控制 producer 次数的字段），并与 Host 序列化字节逐项对照，再建立 `runtime field -> loop bound -> producer count -> consumer count -> terminal wait` 的因果链，不应因终端等待点在 Fixpipe 就直接归因 Fixpipe。\n2. 回复应指出用不兼容的 `uint32_t*` 逐 word 写入后再按 `uint64_t`/`float` 成员读取构成类型别名违规，并说明 O0 与 `-fno-strict-aliasing` 只能作为诊断探针、不能作为最终修复。\n3. 回复应给出正式修复边界：entry 用当前项目生成的 `GET_TILING_DATA_WITH_STRUCT`/`GET_TILING_DATA_MEMBER` 或同一工具链已证明的 typed loader 解包，再把本地 POD 传给 Kernel，公共 Kernel 不直接持有 raw tiling `GM_ADDR`、逐字段复制或用 `reinterpret_cast` 掩盖。",
       "expectations": [],
       "files": []
     },
@@ -42,8 +42,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "Host tiling 使用 baseM=min(M,preferredBaseM)。两个被标为 K-tail 和 N-tail 的失败 case 共享同一个小 M，且这个 M 小于当前 Block/Copy 已证明的硬件粒度；把 M 提升到合法粒度后对应 case 通过。开发者仍认为分别是 K 和 N tail 问题。请审查这个结论并给出设计和验证要求，不执行工具。",
-      "expected_output": "应指出两个失败 case 的共同变量是小 M，不能按 case 标签归因；区分满足 Block/Copy 约束的硬件 base shape 与 Scheduler 表达的逻辑 cur/tail，禁止把 base 缩成非法 tail；具体对齐必须来自当前源码或 capability witness，不能把样例常数推广；验证至少覆盖小于粒度、等于粒度、base+1、multi-M/N/K，Grouped 时覆盖空分组。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：Host tiling 使用 baseM=min(M,preferredBaseM)。两个被标为 K-tail 和 N-tail 的失败 case 共享同一个小 M，且这个 M 小于当前 Block/Copy 已证明的硬件粒度；把 M 提升到合法粒度后对应 case 通过。开发者仍认为分别是 K 和 N tail 问题。请按该技能「Tiling 选择与 Scheduler Params 合同」中「硬件 base shape 与逻辑 tail」小节审查这个结论，并按该文档「PLAN 接线与验证」小节的验证矩阵给出设计和验证要求。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应指出两个失败 case 的共同变量是小 M、不能按 K-tail/N-tail 标签分别归因，并区分满足 Block/Copy 粒度与对齐约束的硬件 base shape 与 Scheduler/`curM/curN/curK` 表达的逻辑 tail，禁止用 `min(logical_shape, preferred_base)` 把硬件 base 缩成不合法的小 tail。\n2. 回复应说明具体对齐/粒度值不能从单个算子样例的常数推广，必须来自本次选定的 Block/Copy/Scheduler 源码或 capability witness，并在 DESIGN 中记录 consumer 与合法谓词。\n3. 回复应给出验证要求：对每个有硬件粒度约束的轴至少覆盖小于粒度、恰好等于粒度、`base+1` 和 multi-tile；若目标为 Grouped 场景，还应覆盖空分组。",
       "expectations": [],
       "files": []
     },
@@ -72,8 +72,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "Full 结果只差一个接近 INT8 half-tie 的值，但 workspace 和 yScale 尚未对比。开发者要求替换等价 GELU 公式或全局放宽误差阈值。应如何处理？不要执行工具。",
-      "expected_output": "保留锁定的 Golden、GELU 公式和 dtype 路径，不能用等价式或全局阈值掩盖问题。先用同一输入、Tiling 和同一份 elementwise 源比较 FP workspace、归一化值、yScale 与 y，并确认 mismatch 是 RNE half-tie 而非地址、stride、padding、同步或前级误差；只有正式合同批准后才能改变验收，tie 规则不能成为未授权的全局 Skill 默认值。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：Full 结果只差一个接近 INT8 half-tie 的值，但 device workspace 和 yScale 尚未对比。开发者要求替换等价 GELU 公式或全局放宽误差阈值。请按该技能中 GLU 的公式与参数语义冻结要求（等价实现替换的授权条件），以及 per-token quant 的 RNE 边界分阶段诊断与同源 normalized 资产要求（含验收合同边界），说明应如何处理。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应说明保留锁定的 Golden、GELU 公式和 dtype 路径，不接受用替换等价 GELU 公式或全局放宽误差阈值来消除该 mismatch；等价实现只有在用户合同允许且已证明 dtype 顺序与特殊值行为一致时才能替换，不能用放宽容差掩盖问题。\n2. 回复应要求先在相同输入、Tiling 和同一份 Golden 源下比较 device FP workspace、同源归一化值（normalized = activated / scale）、yScale 与 y，据此把 mismatch 归因到 MatMul/workspace、absmax/scale 或 device division/RNE/cast 路径，并先排除布局、地址/stride 与同步等非舍入根因。\n3. 回复应说明按 half-tie 归类有界 mismatch 必须以正式验收合同允许为前提；mismatch 比例、half 距离和 scale 阈值属于目标算子验收合同，不得写成通用 Skill 或可复用资产默认值。",
       "expectations": [],
       "files": []
     },
@@ -87,8 +87,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "设备上 GM 的 x_scale 明确非零，但经过 MTE2 搬入 UB 后，VF 先执行 ZeroUb，最终 yScale 落到 floor；小 shape 偶尔通过。请定位最早失败边界并给出修复边界，不要修改 GELU、Golden 或放宽误差。不要执行工具。",
-      "expected_output": "应先归因到 UB staging slot 的写者/生命周期竞态：ZeroUb 或其他 VF store 也是写者，不能与正在进行的 MTE2 写入并发。修复必须为旧写者建立 V->MTE2 回收等待、为 MTE2->V 建立读取前正向等待，并按 slot 记录首轮预发、复用和尾轮 drain；MTE3->V 只能等待上一轮或 Init 已发出的事件，不能插入没有 producer 的首轮同轮 wait。不能用 PipeBarrier、单次通过或数值 floor 掩盖。还应保留同一设备的非零 scale、边界和重复运行证据。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：设备上 GM 的 x_scale 明确非零，但经过 MTE2 搬入 UB 后，VF 先执行 ZeroUb，最终 yScale 落到 floor；小 shape 偶尔通过。请按该技能「Blaze 同步模式」中「每个 UB staging slot 的写者都必须参加生命周期」「epilogue 循环中的正确 barrier 位置」和「交付前同步闭合检查」的要求，定位最早失败边界并给出修复边界，不要修改 GELU、Golden 或放宽误差。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应把根因归到 UB staging slot 的写者/生命周期竞态：`ZeroUb` 或其他 VF store 也是该 slot 的真实写入者，不能与正在进行的 MTE2 写入并发。\n2. 回复应给出修复边界：按 slot 先等待旧 Vector 写者完成再发起 MTE2 写入（V→MTE2 回收反向依赖），MTE2 完成后再建立 V 读取前的正向交接，并为循环复用记录首轮预发、复用等待和尾轮 drain；`MTE3→V` 只能等待上一轮或 Init 已发出的 `SetFlag`，不能在首轮插入没有 producer 的同轮 wait。\n3. 回复应说明不能用 `PipeBarrier`、单次通过或数值 floor 掩盖该竞态，并应指出需保留同一设备上已确认的非零 scale、首个稳定失败边界与重复运行结果作为可核验证据。",
       "expectations": [],
       "files": []
     },
@@ -97,13 +97,14 @@
       "title": "MIX AIV 索引必须按 task ratio 归一化",
       "config": {
         "max_tokens": 100000,
+        "timeout": 900,
         "ascend_platforms": [
           "A2"
         ],
         "eval_mode": "text"
       },
-      "prompt": "AIC 与 AIV 分开编译但由同一 MIX binding 启动；AIV 直接用 `GetBlockIdx()` 作为逻辑 AIC tile，导致它与 AIC 看到的 tile 不一致。请说明何时可用 `GetBlockIdx()/GetTaskRation()`，何时还需要 `GetSubBlockIdx()`，以及 `GetBlockNum()` 应如何确认。不要执行工具。",
-      "expected_output": "只有在当前源码/编译 witness 证明 AIC/AIV 使用相同物理任务排列时，AIV 才用 `GetBlockIdx()/GetTaskRation()` 恢复与 AIC 一致的逻辑 tile；这不自动产生唯一 Vector rank，需要时再结合已证明的 `GetSubBlockIdx()`。`GetBlockNum()` 的总量语义必须由当前源码或最小 probe 证明并写入 DESIGN/PLAN，不能按命名或历史 entry 猜测；验证应覆盖 AIC/AIV 对照、ratio 边界、sub-block 和空任务。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：AIC 与 AIV 分开编译但由同一 MIX binding 启动；AIV 直接用 `GetBlockIdx()` 作为逻辑 AIC tile，导致它与 AIC 看到的 tile 不一致。请按该技能中 MIX 参与者行 ownership 与物理 index 语义冻结的要求，说明何时可用 `GetBlockIdx()/GetTaskRation()`，何时还需要 `GetSubBlockIdx()`，`GetBlockNum()` 的总量/分区语义应如何确认，以及应覆盖哪些验证组合。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应说明只有在当前源码/编译 witness 证明 AIC 与 AIV 使用相同的物理任务排列时，AIV 才能用 `GetBlockIdx()/GetTaskRation()` 恢复与 AIC 相同的逻辑 tile 索引，且这只完成 AIC tile 的归一化、不代表 Vector rank 唯一。\n2. 回复应说明需要唯一 Vector rank 时要结合当前 entry 已证明的 `GetSubBlockIdx()` 语义，且 `GetBlockNum()` 的总量/分区语义必须由当前源码或最小 probe 证明并记录在 DESIGN/PLAN 中，不能按命名或历史实现猜测。\n3. 回复应给出验证要求，覆盖 AIC/AIV 对照、ratio 边界（含 R=1 等取值）与 sub-block 组合，并覆盖空任务或 inactive lane。",
       "expectations": [],
       "files": []
     },
@@ -132,8 +133,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "直接按二进制名称查找 Kernel 成功，但设备运行随后出现指令异常；批处理脚本返回 0，却没有保存本 case 的 verifier 返回码。开发者想把符号查找和脚本返回码作为 PASS。应给出正确的 ABI 穿刺和交付证据，不执行工具。",
-      "expected_output": "符号 lookup 成功只能证明名称可查找，不能证明 typed entry 的修饰符、GM 参数顺序、TilingData 按值/指针/引用传递、POD 布局或设备路径；必须用同版本 ASC witness 编译最小 typed launch，并以 device-visible 运行闭合首个 ABI/设备边界，修复后 clean rebuild。每个 case 还必须独立保留 launch RC、verifier RC、输入、raw output、日志和超时状态；没有 verifier 结果是 `incomplete` 而不是 PASS，批处理的零返回码不能覆盖缺失或旧目录证据。",
+      "prompt": "请加载并使用 ascendc-blaze-best-practice 技能回答。假设场景：直接按二进制名称查找 Kernel 成功，但设备运行随后出现指令异常；批处理脚本返回 0，却没有保存本 case 的 verifier 返回码。开发者想把符号查找和脚本返回码作为 PASS。请按该技能中「启动 ABI 的最小穿刺」与「Launch 与 verifier 的证据隔离」的要求，给出正确的 ABI 穿刺和交付证据。沙箱内没有对应的算子工程、测试数据或运行环境，不需要执行命令或运行测试。",
+      "expected_output": "1. 回复应指出符号 lookup 成功只能证明名称可查找，不能证明类型化 entry 的入口修饰符、GM 参数顺序、TilingData 按值/指针/引用传递、POD 布局或设备指令路径；批处理脚本的零返回码也不能作为 PASS 依据。\n2. 回复应给出 ABI 穿刺：用同一版本 ASC witness 编译最小 typed launch 并完成一次 device-visible 运行以闭合首个 ABI/设备边界，修复后 clean rebuild，并在 execution_record 保留实际 entry、命令、目标架构、CANN 版本和返回码。\n3. 回复应要求每个 case 独立保留 launch RC、verifier RC、输入、raw output、stdout/stderr 和超时/终止状态；没有 verifier 结果或 verifier 未执行时状态是 `incomplete` 而不是 PASS，批处理零返回码不能补旧目录输出或历史 verifier 证据。",
       "expectations": [],
       "files": []
     },
@@ -142,13 +143,14 @@
       "title": "逻辑到物理 paired buffer 必须有独立 witness",
       "config": {
         "max_tokens": 100000,
+        "timeout": 1800,
         "ascend_platforms": [
           "A2"
         ],
         "eval_mode": "text"
       },
       "prompt": "用户合同暴露逻辑 [K,N] weight 和 scale，但 MX GLU 的设备输入需要 act/gate paired、对齐和 padding 的物理 buffer。开发者想让 gen_data.py 直接写一份 physical 文件，Launcher 只按文件名 H2D，并把逻辑 Golden 作为精度依据。请给出 Skill 级的 ABI、Golden 和启动门禁，不要执行工具。",
-      "expected_output": "必须保持逻辑 weight/scale 为外部 ABI，并在 abi_crosswalk 中记录逻辑到物理的 shape、byte span、offset/stride、padding 和设备消费者。应由独立于 Launcher adapter 的 data path 生成 physical witness，Launcher 从本 case 逻辑输入重新生成待 H2D buffer，在启动前检查 shape、字节数和逐字节一致性；不一致时在 Host ABI/I/O 边界阻断，不能启动 Kernel。Golden 必须从实际 H2D physical bytes 解码，不能只使用逻辑或量化前输入；若没有逻辑到物理转换，则逻辑 bytes 可直接作为 physical fact source，不应伪造 witness。具体 paired 宽度、tile、padding 值和 hash 只能留在项目 DESIGN/PLAN。",
+      "expected_output": "1. 回复应保持逻辑 weight/scale 为外部 ABI，并在 `abi_crosswalk` 中记录逻辑到物理转换的 shape、byte span、offset/stride、padding 和首个设备消费者，不能把预生成的 physical 文件直接当作逻辑合同。\n2. 回复应由独立于 Launcher adapter 的 data path 生成 physical witness，并要求 Launcher 在启动 Kernel 前按冻结转换从本 case 逻辑输入重新生成待 H2D buffer、执行 shape/size 与逐字节一致性检查，不一致时在 Host ABI/I/O 边界阻断。\n3. 回复应说明 Golden 必须使用最终实际 H2D 的 physical bytes 解码，不能只使用逻辑或量化前输入（没有逻辑到物理转换时逻辑 bytes 本身就是事实源、不额外伪造 witness）；具体 pack 公式、tile、padding 值和 hash 保留在项目 DESIGN/PLAN。",
       "expectations": [],
       "files": []
     },
@@ -162,8 +164,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "用户要求 FP16 GMM + SwiGLU，`group_list` 是 cumsum，包含一个空 expert。Golden 在循环内覆盖 `mm = x[s:e] @ weight[g]`，循环结束后才 split/计算 SwiGLU；旧签名还带有没有参与公式的 `x_scale/weight_scale`。请给出修复后的 Golden 合同和审查结论，不要执行工具。",
-      "expected_output": "必须先校验 cumsum 非递减、末值等于 M，并用 `start_i=0 if i==0 else group_list[i-1]`、`end_i=group_list[i]`；相邻端点相等是合法空组。Golden 应为每个非空 expert 立即计算 FP32 `x[s:e] @ weight[i]`，按全局 N/2 切 act/gate，并写回 `y[s:e]`，最后返回一个 FP32 Tensor；不能只处理最后一个 mm。签名中未进入冻结公式的 scale 参数不得隐式触发 dequant/quant，具体 dtype、非有限值和公式顺序写入 DESIGN/PLAN。",
+      "prompt": "用户要求 FP16 GMM + SwiGLU，`group_list` 是长度为 E 的 cumsum 端点数组（`group_list[i]` 为第 i 组末端点），包含一个空 expert。Golden 在循环内覆盖 `mm = x[s:e] @ weight[g]`，循环结束后才 split/计算 SwiGLU；旧签名还带有没有参与公式的 `x_scale/weight_scale`。请给出修复后的 Golden 合同和审查结论，不要执行工具。",
+      "expected_output": "1. 回复应校验 `group_list` 的 cumsum 编码（长度 E 的端点数组，`group_list[i]` 为第 i 组末端点）：非递减、首值非负、末值等于 M，并用 `start_i = 0 if i == 0 else group_list[i-1]`、`end_i = group_list[i]` 取区间端点，说明相邻端点相等表示合法空 group（跳过该组、不创建 MM tile）。\n2. 回复应为每个非空 group 立即计算并写回 `y[start_i:end_i]`，不能只在循环内复用一个局部 `mm` 导致只保留最后一个 group，并按全局 N/2 切分 act/gate。\n3. 回复应给出 Golden 合同：`x[start_i:end_i]` 与 `weight[g]` 以 FP32 计算并返回 FP32 Tensor（如 `torch.matmul(x[s:e].float(), weight[g].float())`、输出 `dtype=torch.float32`）；签名中未进入冻结公式的 `x_scale/weight_scale` 不得隐式引入 dequant/quant；Golden 后端、累加 dtype、非有限值分类和公式顺序必须与 DESIGN/PLAN 的语义合同一致。",
       "expectations": [],
       "files": []
     },
@@ -172,13 +174,14 @@
       "title": "生产 GMM 不得绕过 source-backed BlockMmad assembly",
       "config": {
         "max_tokens": 100000,
+        "timeout": 900,
         "ascend_platforms": [
           "A2"
         ],
         "eval_mode": "text"
       },
       "prompt": "一个手写的 MIX 入口只调用 BlockMmad，设备在 aclrtSynchronizeStream 挂起；同版本 Blaze 的 GemmUniversal、Scheduler 和 ownership wrapper 尚未接入。开发者想保留这个入口作为正式实现，并认为 BlockMmad 能编译就是 ABI 已闭合。请给出 Skill 级判断，不要执行工具。",
-      "expected_output": "必须把手写 BlockMmad 入口归为隔离诊断而不是生产路线：它绕过 source-backed dispatch、Scheduler、Block/Epilogue 生命周期和 AIC/AIV 参与者协议，编译或单次返回不能证明 ABI 闭合。正式实现必须恢复当前 Investigation 绑定的完整 assembly；MIX 还要证明每个逻辑 tile/输出行的唯一 writer、物理 block/task-ratio/sub-block 映射和完成通知。",
+      "expected_output": "1. 回复应判定「BlockMmad 能编译 = ABI 已闭合」不成立：编译只证明接口存在，不能证明运行期 ABI 与调用前提已闭合，`aclrtSynchronizeStream` 挂起即为 ABI 未闭合的运行期证据，单次 launch 返回也不能反推已闭合。\n2. 回复应把手写 BlockMmad 入口归为隔离诊断而不是生产路线：它绕过 source-backed dispatch、Scheduler、Block/Epilogue 生命周期和 AIC/AIV 参与者协议。\n3. 回复应说明正式实现必须恢复当前 Investigation 绑定的完整 assembly（`GemmUniversal`/Scheduler/ownership wrapper）；MIX 还要说明每个逻辑 tile/输出行的唯一 writer、物理 block/task-ratio/sub-block 映射和完成通知。",
       "expectations": [],
       "files": []
     },

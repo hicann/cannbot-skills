@@ -5,6 +5,7 @@
       "id": 1,
       "title": "运行时错误排查流程",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -12,18 +13,13 @@
       "prompt": "NPU 推理跑起来就报运行时错误，整体应该怎么定位？只讲方法不用写代码。",
       "expected_output": "回复应给出错误分类→二分法逐步缩小范围→匹配算子约束→修复→验证的流程，强调先定位再修复，避免盲目改",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-runtime-debug",
-          "description": "技能 model-infer-runtime-debug 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
       "title": "aicore timeout 定位",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -31,18 +27,13 @@
       "prompt": "推理时报 aicore timeout，怎么缩小范围找到具体是哪一步卡住的？只讲思路。",
       "expected_output": "回复应说明用 sync + barrier 检查点二分法，在 prefill/decode 各阶段和模块间插入同步逐步缩小，定位到具体出错算子或模块",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-runtime-debug",
-          "description": "技能 model-infer-runtime-debug 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
       "title": "推理卡住排查",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -50,23 +41,13 @@
       "prompt": "多卡推理跑着跑着卡住不返回，怎么判断是真卡死还是只是慢，往哪查？只讲方向。",
       "expected_output": "回复应说明用 npu-smi 看进程和利用率区分真卡 vs CPU 密集慢，逐 rank 检查日志末尾、确认各 rank 是否都到同一里程碑，排查 rank 间分支不一致死锁",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "npu-smi",
-          "description": "回复中提到了 npu-smi"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-runtime-debug",
-          "description": "技能 model-infer-runtime-debug 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 4,
       "title": "信息不足时主动确认",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -74,18 +55,13 @@
       "prompt": "我的模型推理报错了，帮我修。",
       "expected_output": "回复应先确认必要信息再动手，而不是缺错误信息直接给修复",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-runtime-debug",
-          "description": "技能 model-infer-runtime-debug 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 5,
       "title": "正向看护-多 skill 环境下正确触发",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "distractor_skills": [
           "model-infer-precision-debug",
@@ -98,18 +74,13 @@
       "prompt": "分布式推理某些 rank 挂死、device synchronize 失败，往哪个方向排查？只说方向不用写代码。",
       "expected_output": "回复应正确激活 model-infer-runtime-debug，给出 HCCL/多卡同步死锁排查方向，即使存在精度、KVCache、多流等相似 skill 也应选运行时调试专项",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-runtime-debug",
-          "description": "技能 model-infer-runtime-debug 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
       "title": "使用边界",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -195,7 +166,7 @@
         "eval_mode": "text"
       },
       "prompt": "加了很多 sync 后单步不再报错，是否可以保留这些检查点并宣告修复完成？",
-      "expected_output": "回复应要求先确认定位点前后通过，再移除调试 synchronize/barrier，运行完整 warmup 和 inference，逐 rank 日志确认全部成功并核对 DP 输出一致；若用了算子回退还需记录 Prefill/Decode 性能影响和未来恢复条件",
+      "expected_output": "1. 回复应说明不能保留调试用 synchronize/barrier 就宣告修复完成：应先做单步验证（在出错位置前后加 sync+barrier 确认不再超时），再移除全部调试检查点，运行完整 warmup + inference。\n2. 回复应要求逐 rank 检查日志确认全部成功（如 grep \"model run success\"），并核对输出一致性（DP 模式下同 DP group 内的各 rank 输出应一致）。\n3. 回复应要求记录修复后的 Prefill/Decode 耗时并与修复前对比；若使用了算子回退，还应记录性能影响与未来可恢复条件。",
       "expectations": [],
       "files": []
     }

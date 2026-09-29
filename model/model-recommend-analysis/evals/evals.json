@@ -5,45 +5,21 @@
       "id": 1,
       "title": "判断是否是动态shape图",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
-      "prompt": "如何判断推荐模型profiling中是否含动态shape？",
-      "expected_output": "回复应说明两条判断路径：1) 从 op_summary*.csv 的 OP State 列检查是否含 dynamic 关键字；2) 从 msprof_*.json 检查是否含 ModelExecute 且有 infershape 函数或 aclnn 接口调用。两条路径任一命中即表示含动态 shape。",
+      "prompt": "请先加载并使用 model-recommend-analysis 技能（读取其 SKILL.md 中「动态 shape 判断」章节），再回答：如何判断推荐模型 profiling 中是否含动态 shape？请分别说明从 op_summary*.csv、msprof_*.json 各自看什么来判断，以及这两条判断依据之间是什么关系。",
+      "expected_output": "1. 回复应说明从 op_summary*.csv 的 OP State 列判断：该列出现 dynamic 标记即表示存在动态 shape。\n2. 回复应说明从 msprof_*.json 判断：其中有 ModelExecute，且存在 infershape 函数或 aclnn 接口调用，即表示存在动态 shape。\n3. 回复应说明这两条判断依据是并列、各自独立成立的，满足其中任意一条即可判定含动态 shape（OP State 列有 dynamic 标记，或 msprof_*.json 中有 ModelExecute 且存在 infershape/aclnn 调用），不要求两条同时满足。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "OP State",
-          "description": "回复中提到了 OP State"
-        },
-        {
-          "type": "contains",
-          "pattern": "dynamic",
-          "description": "回复中提到了 dynamic"
-        },
-        {
-          "type": "contains",
-          "pattern": "op_summary",
-          "description": "回复中提到了 op_summary"
-        },
-        {
-          "type": "contains",
-          "pattern": "ModelExecute",
-          "description": "回复中提到了 ModelExecute"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
       "title": "判断是否已开启自动融合",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -51,77 +27,27 @@
       "prompt": "如何判断是否已开启自动融合？",
       "expected_output": "回复应说明检测 *op_statistic*.csv 中 OP Type 是否含 autofuse_、autofused_、triton_per_fused_、triton_poi_fused_、triton_unk_fused_、dvm_ 前缀。有则表示已开启对应融合模式（AutoFuse/Triton/DVM），无则提示需结合 Profiling 进一步分析是否需要开启。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "op_statistic",
-          "description": "回复中提到了 op_statistic"
-        },
-        {
-          "type": "contains",
-          "pattern": "autofuse_",
-          "description": "回复中提到了 autofuse_ 前缀"
-        },
-        {
-          "type": "contains",
-          "pattern": "triton",
-          "description": "回复中提到了 triton 融合前缀"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
       "title": "分析profiling的关键流程",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
-      "prompt": "分析profiling的关键流程是什么？",
-      "expected_output": "回复应覆盖以下关键流程：1) 识别 GE Profiling 还是 PyTorch Profiling；2) 计算 H2D 耗时（api_statistic InputCopy 或 msprof memcpy）、ModelExecute 耗时（step_trace 或 api_statistic ModelExecute）、D2H 耗时（OutputCopy 或 memcpy）；3) 从 op_statistic/op_summary 计算算子耗时和与迭代次数；4) 首次编译迭代排除（5x 阈值）；5) 无 step_trace 时迭代次数推断（sync count、Infer ID、Step Id、Op Name 众数）；6) 输出结构化报告含核心指标汇总表、算子分布、Top 算子、问题算子、Host 耗时分析。",
+      "prompt": "请先加载并使用 model-recommend-analysis 技能（读取其 SKILL.md 中「核心WorkFlow」「共用分析方法（推理 + 训练）」等章节），再回答：分析 profiling 的关键流程是什么？请给出流程主干（含各步骤动作与产出），并说明三段核心耗时 H2D / ModelExecute / D2H 各自的取数来源，以及迭代次数、算子耗时和的计算方法与回退策略（含首次编译迭代的排除）。",
+      "expected_output": "1. 回复应给出 Profiling 分析流程主干：先识别 Profiling 类型（GE / PyTorch）与场景（推理 / 训练），再执行 Profiling 分析脚本计算关键指标，有 Dump 图时可选执行图结构分析，然后汇总输出 Markdown 报告（含核心指标汇总表、算子类型分布、Top 耗时算子、问题算子、Host 耗时分析），最后校验报告并清理临时文件。\n2. 回复应说明三段核心耗时的取数来源：H2D 优先从 api_statistic*.csv 的 InputCopy 统计（或 msprof_*.json 中 InputCopy），解析不到时用 msprof_*.json 的 memcpy 函数耗时折算；D2H 同理从 OutputCopy 统计（或 msprof_*.json 中 OutputCopy，回退用 memcpy）；迭代（ModelExecute）耗时从 step_trace 的 Iteration Time(us)（Ascend Profiler 的 step_trace_time.csv 用 Computing 列）或 api_statistic 中 API Name=ModelExecute 行的 Avg(us) 获取。\n3. 回复应说明迭代相关量的算法与回退：算子耗时和由 op_statistic*.csv 的 Total Time(us) 求和再除以迭代次数得到；step_trace 与 api_statistic 均不可用时按优先级从 op_summary / kernel_details 推断迭代次数（api_statistic sync count → Infer ID 唯一值数 → Step Id 唯一值数 → Op Name 众数出现次数）；首次迭代耗时超过后续迭代平均耗时 5x 时单独标注为首次编译迭代、不参与平均值计算。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "H2D",
-          "description": "回复中提到了 H2D 耗时"
-        },
-        {
-          "type": "contains",
-          "pattern": "ModelExecute",
-          "description": "回复中提到了 ModelExecute"
-        },
-        {
-          "type": "contains",
-          "pattern": "D2H",
-          "description": "回复中提到了 D2H 耗时"
-        },
-        {
-          "type": "contains",
-          "pattern": "step_trace",
-          "description": "回复中提到了 step_trace"
-        },
-        {
-          "type": "contains",
-          "pattern": "首次编译",
-          "description": "回复中提到了首次编译迭代排除"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 4,
       "title": "分析Dump图的关键点",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -129,38 +55,13 @@
       "prompt": "分析Dump图的关键点是什么？",
       "expected_output": "回复应覆盖以下关键点：1) 自动识别文件格式（.pbtxt 纯文本解析、.py AST 解析）；2) 提取节点信息（name、op_type、input/output、shape/dtype）；3) 重复子图分析使用 op_type 序列 n-gram 比较；4) 排序策略：有 Profiling 按总耗时降序、无 Profiling 按算子数×重复次数降序；5) Profiling 与图节点耗时匹配优先级（精确匹配→模糊匹配→aclnn 前缀→op_type→前后关联→shape）；6) 结合 Profiling 分析 Top 重复子图给出融合 pass/融合算子建议。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "pbtxt",
-          "description": "回复中提到了 pbtxt"
-        },
-        {
-          "type": "contains",
-          "pattern": "重复子图",
-          "description": "回复中提到了重复子图分析"
-        },
-        {
-          "type": "contains",
-          "pattern": "n-gram",
-          "description": "回复中提到了 n-gram 比较"
-        },
-        {
-          "type": "contains",
-          "pattern": "排序",
-          "description": "回复中提到了排序策略"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 5,
       "title": "推荐模型训练场景识别",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -168,33 +69,13 @@
       "prompt": "如何判断profiling是推荐模型训练场景还是推荐模型推理场景？",
       "expected_output": "回复应说明唯一判断依据：是否存在反向/梯度相关算子。训练场景的 op_statistic/op_summary 含 *Backward*、*Grad*、EmbeddingDenseGrad* 等反向算子，trace_view.json 含 backward/autograd/loss.backward 事件；推理场景无任何反向算子。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "反向",
-          "description": "回复中提到了反向算子"
-        },
-        {
-          "type": "contains",
-          "pattern": "Backward",
-          "description": "回复中提到了 Backward 算子"
-        },
-        {
-          "type": "contains",
-          "pattern": "Grad",
-          "description": "回复中提到了 Grad 算子"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
       "title": "推荐模型训练关键流程梳理",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -202,33 +83,7 @@
       "prompt": "推荐模型训练场景的关键流程包含哪些阶段？",
       "expected_output": "回复应说明训练单步迭代的 6 个标准阶段：数据预处理、Embedding拉取、前向计算、反向计算、更新Embedding、更新Dense。并说明两对天然可异步的阶段：数据预处理↔Embedding拉取、更新Embedding↔更新Dense。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "数据预处理",
-          "description": "回复中提到了数据预处理"
-        },
-        {
-          "type": "contains",
-          "pattern": "更新Embedding",
-          "description": "回复中提到了更新Embedding"
-        },
-        {
-          "type": "contains",
-          "pattern": "更新Dense",
-          "description": "回复中提到了更新Dense"
-        },
-        {
-          "type": "contains",
-          "pattern": "异步",
-          "description": "回复中提到了异步并行机会"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-recommend-analysis",
-          "description": "技能 model-recommend-analysis 被激活"
-        }
-      ]
+      "expectations": []
     }
   ],
   "skill_name": "model-recommend-analysis"

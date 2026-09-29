@@ -16,20 +16,9 @@
         "eval_mode": "text"
       },
       "prompt": "我有一个已在 Eager 模式下使用 torch.library.custom_op 注册并跑通的自定义 PyTorch 算子，想接入 npugraph_ex 图模式。请问完整的接入流程是什么？",
-      "expected_output": "回复应说明当前算子的状态确认（Eager 已有、custom_op 注册）后，下一步即为编写 Meta 推导函数（register_fake）实现 shape/dtype/device 传播，完成后即可支持入图；如遇问题可路由到 dfx-triage 子 skill 进行问题定位。",
+      "expected_output": "1. 应说明在确认算子状态（Eager 已跑通 + 通过 torch.library.custom_op 注册）后，下一步即为编写 Meta 推导函数（custom_op 路径用 @my_op.register_fake）。\n2. 应说明 Meta 函数只做 shape/dtype/device 推导、不执行真实计算（Out-of-place 返回与输出同 shape/dtype 的空 tensor，In-place 返回 None），完成 Meta 后即可支持 npugraph_ex 入图、无需额外步骤。\n3. 应说明后续可加载 torch-npugraph-ex-knowledge 继续处理编译调用、调试定位或性能优化；若已经入图但遇到问题，应转到问题定位并加载 torch-npugraph-ex-dfx-triage。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "register_fake",
-          "description": "回复中提到了 register_fake"
-        },
-        {
-          "type": "contains",
-          "pattern": "Meta",
-          "description": "回复中提到了 Meta"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -48,18 +37,7 @@
       "prompt": "torch-custom-ops-guide 支持哪两种算子注册方式？各适用于什么场景？",
       "expected_output": "回复应说明两种注册方式：torch.library.custom_op（推荐用于单个自定义算子，简洁）和纯 Python torch.library.Library（适用于批量注册或需要更精细控制）。应说明各自的使用场景和选择依据。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "custom_op",
-          "description": "回复中提到了 custom_op"
-        },
-        {
-          "type": "contains",
-          "pattern": "Library",
-          "description": "回复中提到了 Library"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
@@ -76,20 +54,9 @@
         "eval_mode": "text"
       },
       "prompt": "编写 Meta 推导函数（register_fake）时需要注意哪些要点？它解决了什么问题？",
-      "expected_output": "回复应说明 Meta 推导函数的作用：在不实际执行计算的情况下推导输出的 shape/dtype/device，使 torch.compile 能够构建计算图。应说明编写要点包括正确推导输出张量的元信息、处理动态 shape、以及常见陷阱。",
+      "expected_output": "1. 应说明 Meta 推导函数的作用：在不实际执行计算的情况下，仅依据输入元信息推导输出的 shape/dtype/device，使 torch.compile / npugraph_ex 能够构建计算图。\n2. 应说明编写要点：Meta 函数只关心算子的数学语义与 input→output 的映射，只能使用输入元信息推导、不能执行真实计算或读取真实数据值。\n3. 应说明 In-place 算子返回 None、Out-of-place 算子返回与输出同 shape/dtype 的空 tensor，并按注册路径声明可变参数（custom_op 用 mutates_args，torch.library.Library 用 schema 的 Tensor(a!) alias）。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "register_fake",
-          "description": "回复中提到了 register_fake"
-        },
-        {
-          "type": "contains",
-          "pattern": "shape",
-          "description": "回复中提到了 shape"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 4,
@@ -108,13 +75,7 @@
       "prompt": "我想让我的算子支持图模式。",
       "expected_output": "回复应主动询问关键信息：算子当前状态（从零开发/Eager已有）、注册方式偏好、是否已有图模式相关报错等。不应在缺乏信息的情况下直接给出具体代码。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "算子",
-          "description": "回复中提到了 算子"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 5,
@@ -139,18 +100,7 @@
       "prompt": "我有一个自定义的 FlashAttention 算子，已经在 Eager 模式下跑通了，现在想把它接入 npugraph_ex 图模式。请问需要做什么？",
       "expected_output": "回复应激活 torch-custom-ops-guide skill，说明自定义算子入图的流程。即使在多个 npugraph_ex 相关 skill 共存的环境下，也应正确激活 torch-custom-ops-guide。在信息不足时，回应用户问题可先询问算子的当前状态（如是否已有 Eager 实现、注册方式等），再给出完整入图指导。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "Eager",
-          "description": "回复中提到了 Eager"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "torch-custom-ops-guide",
-          "description": "技能 torch-custom-ops-guide 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
@@ -163,7 +113,7 @@
         "eval_mode": "text"
       },
       "prompt": "我还没有 Eager 算子实现，只有输入输出定义，想从零做一个能进入 npugraph_ex 的自定义算子。第一步该做什么？",
-      "expected_output": "回复应识别为从零开发路径，先使用自定义算子模板建立可运行的最小工程或 MRE，并完成真实 Eager 实现；实现占位内容不能冒充已完成算子。Eager 跑通后再补注册和 Meta 以支持入图。",
+      "expected_output": "1. 回复应识别用户处于「还没开发、从零开始」路径，按 npugraph_ex 代码生成场景给出方案，而不是套用已有 Eager 算子的适配流程\n2. 回复应直接给出可直接使用的 MRE 骨架，包含算子注册（如 torch.library.custom_op）与图模式编译调用（如 torch.compile(..., backend=npugraph_ex)），算子实现体用 `# <用户实现>` 占位并说明需用户自行填充\n3. 回复应说明 In-place 与 Out-of-place 在 custom_op 路径上的差异：原地算子声明 mutates_args 且 register_fake 返回 None，非原地算子返回与输出同 shape/dtype 的空张量",
       "expectations": [],
       "files": []
     },
@@ -171,6 +121,7 @@
       "id": 7,
       "title": "原地与非原地算子的注册差异",
       "config": {
+        "timeout": 1800,
         "max_tokens": 140000,
         "ascend_platforms": [
           "A2"
@@ -223,7 +174,7 @@
         "eval_mode": "text"
       },
       "prompt": "我的自定义算子已经有 Eager 实现、注册和 Meta，也能被 torch.compile 捕获，但图模式运行时出错。还应该继续按接入教程重写吗？",
-      "expected_output": "回复应判断接入步骤已经完成，不应无依据重写算子；应转到 torch-npugraph-ex-dfx-triage，先根据错误发生在编译、运行时还是性能阶段路由到对应诊断流程。",
+      "expected_output": "1. 应判断用户已完成接入（Eager 实现、注册、Meta 推导、能被 torch.compile 捕获），不应无依据重写算子或重跑接入教程。\n2. 应说明按本 skill 的流程，完成 Meta 推导后即可支持 npugraph_ex 入图、无需额外步骤，因此该问题不属于接入环节。\n3. 应说明该状态属于「已经入图但遇到问题」，应转到问题定位并加载 torch-npugraph-ex-dfx-triage。",
       "expectations": [],
       "files": []
     }

@@ -63,7 +63,7 @@
         "eval_mode": "text"
       },
       "prompt": "generate_spec.py 已经生成 spec.yaml，是否可以不修改直接交给下游？哪些核心字段必须由算子 owner 手工补全？",
-      "expected_output": "回复应说明生成器只产骨架，不能直接视为真值；至少要手填输出 shape_rule 或 data_dependent 描述、dtype_rule、可执行 formula、真实 reference oracle API、supported_combinations，以及覆盖所有输出 dtype 的 per_dtype tolerance，并结合需求校核边界和极端输入。",
+      "expected_output": "1. 回复应说明生成器只产骨架、其中描述真实数学语义的字段仍是 TODO 占位，必须由算子 owner 手工补全后才能交给下游，不能直接视为真值。\n2. 回复应指出必须手工补全的核心字段至少包含 outputs[].shape_rule（VariableOutput/DynamicShape 改声明 data_dependent 描述）、outputs[].dtype_rule、math_semantics.formula、math_semantics.reference_oracle.api、dtype_policy.supported_combinations，并结合需求校核 boundary_conditions/extreme_inputs 等自动注入的占位描述。\n3. 回复应指出 numerical_tolerance.per_dtype 必须覆盖 supported_combinations 中出现的所有输出 dtype。",
       "expectations": [],
       "files": []
     },

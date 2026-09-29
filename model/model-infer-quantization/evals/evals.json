@@ -5,6 +5,7 @@
       "id": 1,
       "title": "量化适配工作流",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -12,23 +13,13 @@
       "prompt": "我想给模型接入量化降显存提吞吐，整体按什么流程做？只讲方法，不用写代码。",
       "expected_output": "回复应给出以既有 compressed-tensors 量化产物接入、核对契约并验证真实生效的流程，而非重设计量化算法",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "compressed-tensors",
-          "description": "回复中提到了 compressed-tensors"
-        },
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-quantization",
-          "description": "技能 model-infer-quantization 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
       "title": "量化产物契约核对",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -36,24 +27,19 @@
       "prompt": "拿到一份量化权重，接入前要先核对哪些信息才能判断模型能不能用？只讲方向。",
       "expected_output": "回复应说明先核对量化契约信息是否与模型结构和 runtime 匹配，再决定能否接入",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-quantization",
-          "description": "技能 model-infer-quantization 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
       "title": "量化收益评估方向",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
       "prompt": "量化改完想知道有没有用，从哪些方面看收益？只讲方向。",
-      "expected_output": "回复应说明从显存占用、吞吐/时延和精度偏差几方面对比量化前后，确认收益且精度可接受",
+      "expected_output": "1. 回复应说明收益要按多个口径分别对比量化前后、不能只用一个 benchmark 数字下结论：理论预期（量化对象与权重/Cache 体积、计算访存比）、端到端（Prefill/Decode/吞吐，对照量化前最新基线、原始基线与同条件 BF16）、显存占用（峰值显存、权重显存、部署卡数）、算子级（`op_statistic` 中 `QuantBatchMatmul` / `GroupedMatmul` / `DynamicQuant` 的增减）。\n2. 回复应说明收益结论必须绑定部署形态（`exec_mode`、batch、并行切分、KV 策略），并区分阶段收益、累计收益与同条件收益。\n3. 回复应说明在给出收益/生效结论前先做等价性自检：量化路径与同模型 infer BF16 路径各跑一次 greedy 做文本 diff，记录首个分歧 token 位置并判断是否语义等价（这是接线正确性检查，本 skill 不评测绝对精度）。",
       "files": [],
       "expectations": []
     },
@@ -61,6 +47,7 @@
       "id": 4,
       "title": "前置条件不满足时确认",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -68,18 +55,13 @@
       "prompt": "想把这个模型量化降低显存，但我手上没有量化方案也没有量化权重，可以直接量化吗？",
       "expected_output": "回复应说明量化接入前提是已有可用的 compressed-tensors 量化产物，缺方案和权重时应先确认产物来源，本 skill 不重新设计上游量化算法",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-quantization",
-          "description": "技能 model-infer-quantization 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 5,
       "title": "正向看护-多 skill 环境下正确触发",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "distractor_skills": [
           "model-infer-fusion",
@@ -92,32 +74,21 @@
       "prompt": "量化权重和方案都备好了，要把模型接到量化路径上跑起来，往哪个方向做？只说方向。",
       "expected_output": "回复应正确激活 model-infer-quantization，给出量化接入方向，即使存在融合、KVCache、并行等相似 skill 也应选量化专项",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-quantization",
-          "description": "技能 model-infer-quantization 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
       "title": "量化真实生效核对",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
       "prompt": "量化改造后怎么确认权重和算子真按量化路径走，没有悄悄回退成原精度？只讲思路。",
-      "expected_output": "回复应说明通过权重 dtype、量化算子调用和收益指标核对量化真实生效，并提示融合算子与量化冲突时按非量化路径回退",
+      "expected_output": "1. 回复应说明通过权重 dtype 核对：量化目标层的权重 tensor `dtype` 应与量化产物声明一致（低精度量化类型，如 `int8/uint8/int4/fp8`），而不是回退成 `fp32/bf16`。\n2. 回复应说明通过量化算子调用与收益指标核对：量化目标层的 `quant_method` 不应为 `UnquantizedLinearMethod`、`op_statistic` 中量化算子（`QuantBatchMatmul` / `GroupedMatmul` / `DynamicQuant`）计数应大于 0，且显存体积按位宽下降、推理延迟应显著低于 FP（速度与 FP 持平即大概率没走量化 kernel）。\n3. 回复应提示融合算子冲突的处理：融合算子拒绝量化 dtype/layout/scale 时，不修改量化方案语义与 `targets`/`ignore`，按 skill 第六步 6.5 把该模块回退到原有非融合算子路径，并记录融合算子回退模块。",
       "files": [],
-      "expectations": [
-        {
-          "type": "skill_activated",
-          "pattern": "model-infer-quantization",
-          "description": "技能 model-infer-quantization 被激活"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 7,

@@ -5,6 +5,7 @@
       "id": 1,
       "title": "端到端推理优化流程编排（基础流程）",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 200000,
         "distractor_skills": [
           "model-infer-kvcache",
@@ -15,21 +16,16 @@
         "timeout": 900,
         "eval_mode": "text"
       },
-      "prompt": "我想对一个 PyTorch LLM 在昇腾 NPU 上的离线推理做端到端性能优化，模型还没跑通、也没有 baseline。请描述完整的优化流程：分哪些阶段、每阶段做什么、各阶段如何衔接和验证。不需要立即动手，先给出整体方案。",
-      "expected_output": "回复应给出从零优化的分阶段编排：阶段 0 模型分析与建立 baseline（单卡跑通后再优化），之后并行化 → KVCache/FA → 融合算子 → 图模式 → 优化总结；每阶段遵循 分析→确认→实施→验证、达标才进下一阶段，由 analyzer/implementer/reviewer 分工执行",
+      "prompt": "我想对一个 PyTorch LLM 在昇腾 NPU 上的离线推理做端到端性能优化，模型还没跑通、也没有 baseline。请先加载并使用 model-infer-optimize 技能（可 Read AGENTS.md 与 workflows/optimize-workflow.md），按其基础流程逐条回答：这个端到端优化分哪几个阶段、从阶段 0 到收尾的固定推进顺序是什么（阶段 0 先做什么，之后各优化阶段依次是什么）；每个阶段做什么；各阶段如何衔接、每个阶段内部遵循什么流程，验证通过后才能进入下一阶段吗、可以跳过或并行吗；该流程由哪几类 subagent 分工执行，主 agent 的职责边界是什么。沙箱内没有对应模型工程，不需要实际执行优化或运行测试，只给整体方案。",
+      "expected_output": "1. 回复应给出从零适配到 baseline 的固定阶段编排：阶段 0 模型分析与建立基线（先跑通并建立可复现精度的 baseline），之后依次推进并行化（多卡部署时）→ KVCache + FA → 融合算子 → 量化适配（启用时）→ 图模式适配 → 优化总结。\n2. 回复应说明每个阶段遵循「分析 → 方案确认 → 实施 → 验证 → 阶段总结」流程，验证通过后才进入下一阶段，不可跳过或并行。\n3. 回复应说明该流程由分析、实施、验证三类 subagent（model-infer-analyzer / model-infer-implementer / model-infer-reviewer）分工执行，主 agent 只做流程编排与用户确认，不直接改代码。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "KVCache",
-          "description": "回复中提到了 KVCache"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
       "title": "适用边界识别",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -43,6 +39,7 @@
       "id": 3,
       "title": "信息不足时主动确认",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
@@ -56,6 +53,7 @@
       "id": 4,
       "title": "baseline 之上的探索式优化编排（探索流程）",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 200000,
         "distractor_skills": [
           "model-infer-multi-stream",
@@ -67,64 +65,49 @@
         "eval_mode": "text"
       },
       "prompt": "我有一个已经能跑通、精度可复现的 PyTorch NPU 推理 baseline，想在它之上继续做 profiling 驱动的多方向性能优化。整体流程怎么编排？先给方案不用动手。",
-      "expected_output": "回复应给出 baseline 之上的探索式编排：确认场景与目标 → 跑通精度基线 → 采集 baseline profiling → 分析 → 多来源并行发现候选 → 初始化 Plan Dashboard → Plan 实施/review/派生循环 → 最终验收；强调 Plan/round 自循环、性能以 perf-breakdown 报告的 Δ% 为准、只编排不替工、具体优化下沉调用单点 skill。",
+      "expected_output": "1. 回复应给出 baseline 之上的探索式编排主干：确认推理场景与精度口径 → 采集并分析 baseline profiling → 多来源并行发现候选 → Plan 实施/review/派生循环（按需重采 profiling）→ 最终验收。\n2. 回复应说明主 agent 只编排不替工（负责阶段推进、用户交互、Dashboard 维护与验收裁决），具体优化下沉到单点 skill 由 implementer 实施、reviewer 复核。\n3. 回复应说明性能判定以 model-infer-perf-breakdown / profile-analyzer 的分析报告（时间分布、逐算子 gap、与 baseline 的 Δ%）为权威口径，并在候选发现完成后初始化 Plan Dashboard 归并候选、状态与验收口径。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "profiling",
-          "description": "回复中提到了 profiling"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 5,
       "title": "无 baseline 时的入口分流",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
       "prompt": "我的模型还没适配进推理框架、也没有 baseline，想在 baseline 之上做 profiling 驱动的探索式优化，能直接开始吗？只回答能不能并说明原因。",
-      "expected_output": "回复应说明探索流程的前置是已有可运行、可复现精度的 baseline，没有 baseline 时不能直接进探索式；入口会分流到基础流程（optimize-workflow 阶段 0：框架适配 + 建立 baseline）或 model-infer-migrator 先建立 baseline，再回到探索流程。两条流程以 baseline 为界、前后衔接。",
+      "expected_output": "1. 回复应说明不能直接开始：探索式优化的前置是已有可运行、可复现精度的 baseline，没有 baseline 就无法判定优化的收益与精度是否达标。\n2. 回复应说明无 baseline 时应先走基础流程的阶段 0（框架适配 + 建立 baseline），或先用 model-infer-migrator 完成迁移并建立 baseline。\n3. 回复应说明 baseline 建成后即可转入探索流程，两条流程以 baseline 为界前后衔接。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "baseline",
-          "description": "回复中提到了 baseline"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 6,
       "title": "性能收益的判据",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
         "timeout": 900,
         "eval_mode": "text"
       },
       "prompt": "在探索式优化编排里，怎么判断某一轮改动到底有没有带来性能收益？只讲判据。",
-      "expected_output": "回复应说明性能收益一律以 profile-analyzer / model-infer-perf-breakdown 的分析报告（时间分布、与 baseline 的 Δ%）为判据，不以裸 wall-clock 计时下结论；必要时按同一场景、同一口径重采 profiling 再与 baseline 对照。",
+      "expected_output": "1. 回复应说明性能收益一律以 profile-analyzer / model-infer-perf-breakdown 的分析报告（时间分布、逐算子 gap、与 baseline 的 Δ%）为准，并按同一场景、同一口径重采 profiling 与 baseline 对照，不拿裸 wall-clock 计时（infer 脚本打印、time.perf_counter 等）直接下结论。\n2. 回复应说明判定要基于同口径 A/B 对照：同一输入、同一测量方法，只允许目标改动一个变量，且收益要能稳定复现。\n3. 回复应说明功能、精度或稳定性出问题、或改动未真实生效的改动不采纳（判淘汰），收益低于噪声也不计为收益。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "Δ",
-          "description": "回复中提到了 Δ"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 7,
       "title": "已有 baseline 但方法不明确时先澄清",
       "config": {
+        "ascend_platforms": ["A2"],
         "max_tokens": 150000,
-        "timeout": 900,
+        "timeout": 1800,
         "eval_mode": "text"
       },
       "prompt": "我的模型已经有可运行、精度可复现的 baseline 了，帮我继续优化推理性能。",
-      "expected_output": "回复应识别已有 baseline 但优化方法未指明，此时固定阶段流程与探索式流程都可能命中，应先向用户澄清是按固定阶段系统优化（并行/KVCache/融合/量化/图模式逐项）还是在 baseline 之上做 profiling 驱动的探索式优化，据答案再分流，而不是擅自选路。",
+      "expected_output": "1. 回复应识别出用户已有 baseline，但优化方法（固定阶段系统优化还是 profiling 驱动的探索式优化）未指明，两条流程都可能命中。\n2. 回复应向用户给出二选一澄清：是按固定阶段系统优化（并行 / KVCache / 融合 / 量化 / 图模式逐项），还是在 baseline 之上做 profiling 驱动的探索式优化。\n3. 回复应根据用户答复再分流到基础流程（optimize-workflow）或探索流程（sota-approach-workflow），不应在用户答复前擅自选定一条路径并推进。",
       "files": [],
       "expectations": []
     }

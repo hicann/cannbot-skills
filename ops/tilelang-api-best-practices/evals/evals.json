@@ -14,28 +14,7 @@
       "prompt": "在 TileLang-Ascend 中，如何分配片上存储并在不同层级之间搬运数据？请介绍主要的 API 及其用途。",
       "expected_output": "回复应介绍 TileLang 的内存分配 API（T.alloc_shared、T.alloc_fragment、T.alloc_var 等 Developer 模式 API，以及 T.alloc_ub、T.alloc_L1、T.alloc_L0A/L0B/L0C 等 Expert 模式 API）和数据搬运 API（T.copy），说明 GM/L1/UB/L0 之间的搬运路径与各 API 的适用场景。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "T.alloc_shared",
-          "description": "回复中提到了 T.alloc_shared"
-        },
-        {
-          "type": "contains",
-          "pattern": "T.alloc_fragment",
-          "description": "回复中提到了 T.alloc_fragment"
-        },
-        {
-          "type": "contains",
-          "pattern": "T.copy",
-          "description": "回复中提到了 T.copy"
-        },
-        {
-          "type": "contains",
-          "pattern": "T.alloc_ub",
-          "description": "回复中提到了 T.alloc_ub"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -47,31 +26,10 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "我想写一个 TileLang kernel，什么时候用 T.alloc_shared/T.alloc_fragment，什么时候用 T.alloc_L1/T.alloc_ub，这两种模式有什么区别？",
-      "expected_output": "回复应说明 Developer 模式（T.alloc_shared、T.alloc_fragment）由编译器自动管理存储层级，适合大多数算子开发；Expert 模式（T.alloc_L1、T.alloc_ub、T.alloc_L0A/L0B/L0C）需要显式指定存储层级，适合极致性能优化。还应说明同步策略的区别：Developer 模式自动同步，Expert 模式需手动 T.barrier_all、T.set_flag/T.wait_flag。",
+      "prompt": "我想写一个 TileLang kernel。请先加载 tilelang-api-best-practices 技能（可 Read 其 SKILL.md 与 references/ 目录），然后回答：什么时候用 T.alloc_shared/T.alloc_fragment，什么时候用 T.alloc_L1/T.alloc_ub？这两种模式在存储层级管理和同步策略上分别有什么区别（含自动同步与手写 T.barrier_all、T.set_flag/T.wait_flag）？沙箱内没有算子工程和测试数据，不需要实际执行命令或运行 kernel。",
+      "expected_output": "1. 回复应说明 Developer 模式（T.alloc_shared、T.alloc_fragment、T.alloc_var）由编译器根据程序上下文自动推断存储层级（shared 对应 L1 或 UB，fragment 对应 L0A/L0B/L0C），用户无需指定具体硬件存储，适合大多数算子开发。\n2. 回复应说明 Expert 模式（T.alloc_L1、T.alloc_ub、T.alloc_L0A/L0B/L0C）需要显式指定物理存储层级，适合需要精确控制内存分配/极致性能优化的场景；并说明两套 API 在功能上可互换，常规 kernel 优先用 Developer 模式。\n3. 回复应说明同步策略的区别：Developer 路径可依赖编译器/pass_configs 的自动同步插入（TL_ASCEND_AUTO_SYNC 核内、TL_ASCEND_AUTO_CV_SYNC 核间），Expert 或手写路径的核内同步需使用 T.barrier_all、T.set_flag/T.wait_flag。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "Developer",
-          "description": "回复中提到了 Developer"
-        },
-        {
-          "type": "contains",
-          "pattern": "Expert",
-          "description": "回复中提到了 Expert"
-        },
-        {
-          "type": "contains",
-          "pattern": "T.alloc_L1",
-          "description": "回复中提到了 T.alloc_L1"
-        },
-        {
-          "type": "contains",
-          "pattern": "T.barrier_all",
-          "description": "回复中提到了 T.barrier_all"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,

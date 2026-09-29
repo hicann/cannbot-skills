@@ -67,8 +67,8 @@
           "A2"
         ]
       },
-      "prompt": "我在调试 PyPTO kernel，extract_pypto_calls.py 的输出应该记录到哪里？",
-      "expected_output": "将 extract_pypto_calls.py 的输出粘贴进 MEMORY.md 的 Development & debug log 段；每次错误或修复后都追加日志，记录假设、改动与结果，保证调试过程可追溯。",
+      "prompt": "沙箱内没有算子工程，不需要实际执行命令或创建文件。请先加载并使用 pypto-memory-template 技能（可 Read SKILL.md 与 templates/MEMORY.template.md），回答：调试 PyPTO kernel 时 extract_pypto_calls.py 的输出应该记录到哪个文件的哪一节？调试日志按什么格式、在什么时机追加？",
+      "expected_output": "1. 应指出记录位置是算子专属的 custom/<operator_name>/MEMORY.md，把 extract_pypto_calls.py 的原始输出粘贴到该文件模板定义的调试章节（PyPTO call-site checklist (when debugging) 或 Development & debug log），而不是只留在对话里。\n2. 应说明每次错误或修复后都要在 Development & debug log 追加日志，按 | When | Action | Result | Next | 格式记录假设、改动与结果，保证调试过程可追溯。\n3. 应说明 MEMORY.md 由 Stage 5 coder 及下游 agent 维护，是跨轮次的唯一调试记录，输出与日志必须落盘。",
       "files": [],
       "expectations": []
     },

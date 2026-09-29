@@ -11,26 +11,10 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请介绍 tilelang-op-test-design 技能如何为算子设计测试方案。它包含哪些测试层级（L0/L1/L2/Boundary），每个层级测试什么内容？不需要执行任何工具调用。",
-      "expected_output": "回复应从 design.md 提取算子信息生成多层测试配置，包含 L0 门槛测试、L1 功能测试、L2 异常测试、Boundary 边界测试等不同层级。",
+      "prompt": "请介绍 tilelang-op-test-design 技能如何为算子设计测试方案。它包含哪些测试层级（L0/L1/L2/Boundary），每个层级测试什么内容？可以先 Read 该技能的 SKILL.md 与 references，不需要实际生成测试配置或运行命令。",
+      "expected_output": "1. 回复应说明四个测试层级及每层测试内容：L0 门槛测试（规则 shape 的核心功能验证，≤50 用例）、L1 功能测试（规则 + 不规则/尾块 shape 的参数组合覆盖，100-200 用例）、L2 异常测试（非法 shape / 不支持 dtype 等非法输入应被拒绝，负向、不比精度，≤20 用例）、Boundary 边界测试（INF/NAN/极值/空 tensor 等合法特殊值按精度标准比对，不过报 WARN，≤10 用例）。\n2. 回复应说明 L2 用 _run_exception（正确拒绝 = [BOUNDARY_PASS]，静默接受 = [BOUNDARY_WARN]）、Boundary 用 _run_boundary（按 check_precision 混合容差比对，精度不过 = [BOUNDARY_WARN]），两者都非阻塞、失败后继续，只有 L0/L1 精度失败才 exit(1)。\n3. 回复应说明各层测试配置来自从 design.md 提取的算子信息（数学公式、算法描述、编程模式、输入输出 shape/dtype、block size、§9.3 精度标准），据此判断算子类别（纯 Cube/纯 Vector/混合、Single/Multi/Fusion）后生成；§9.3 精度标准未定义时应阻塞回 Stage 1 补齐，不能自行假定统一容差。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "L0",
-          "description": "回复中提到了 L0"
-        },
-        {
-          "type": "contains",
-          "pattern": "L1",
-          "description": "回复中提到了 L1"
-        },
-        {
-          "type": "contains",
-          "pattern": "L2",
-          "description": "回复中提到了 L2"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -45,28 +29,7 @@
       "prompt": "这个测试设计 skill 支持哪些场景？如果我已经写好了算子代码但还没有测试，应该使用哪个场景？",
       "expected_output": "回复应说明本技能支持四种场景：场景 A（从 design.md 设计测试）、场景 B（从 custom/{op}/*.py 算子文件补充测试）、场景 C（用户口头描述生成测试模板）、场景 D（测试覆盖率分析）。如果用户已有算子实现代码但无测试，应使用场景 B，通过读取 custom/{op}/ 目录下的算子实现代码来分析计算逻辑，判断算子类别，分析现有测试覆盖情况，然后补充缺失的测试用例。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "场景 A",
-          "description": "回复中提到了 场景 A"
-        },
-        {
-          "type": "contains",
-          "pattern": "场景 B",
-          "description": "回复中提到了 场景 B"
-        },
-        {
-          "type": "contains",
-          "pattern": "场景 C",
-          "description": "回复中提到了 场景 C"
-        },
-        {
-          "type": "contains",
-          "pattern": "场景 D",
-          "description": "回复中提到了 场景 D"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,

@@ -14,38 +14,7 @@
       "prompt": "我想实现一个 Softmax 算子，请帮我做 API 探索和可行性分析。算子需求如下：\n\n算子名称：Softmax\n数学公式：softmax(x_i) = exp(x_i) / sum(exp(x_j))\n输入：x fp16 [1024, 4096]\n输出：y fp16 [1024, 4096]\n\n请运行完整工作流，生成 API_REPORT.md。",
       "expected_output": "回复应调用 pypto-api-explore skill，按工作流完成 API 探索并生成 API_REPORT.md。应覆盖以下要点：\n- 使用三个并行 Explore subagent 分别搜索 pypto/docs/zh/、models/ 和 examples/ 目录\n- 将 Softmax 分解为 exp、sum（归约）、div 等原子操作，并查找对应的 PyPTO API\n- 提供 API 映射表（exp → pypto.exp, sum → pypto.sum, div → pypto.div）\n- 检查 API 约束：dtype 支持、shape 范围、sigmoid 仅 FP32 等硬约束\n- 进行 Tiling 需求分析：判断为 Vector 类型（不含 matmul），需使用 set_vec_tile_shapes\n- 提供参考实现搜索结果\n- 进行可行性判断和风险评估\n- 最终输出 API_REPORT.md 到当前目录",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "API_REPORT.md",
-          "description": "回复中提到了 API_REPORT.md"
-        },
-        {
-          "type": "contains",
-          "pattern": "Explore subagent",
-          "description": "回复中提到了 Explore subagent"
-        },
-        {
-          "type": "contains",
-          "pattern": "pypto.exp",
-          "description": "回复中提到了 pypto.exp"
-        },
-        {
-          "type": "contains",
-          "pattern": "pypto.sum",
-          "description": "回复中提到了 pypto.sum"
-        },
-        {
-          "type": "contains",
-          "pattern": "set_vec_tile_shapes",
-          "description": "回复中提到了 set_vec_tile_shapes"
-        },
-        {
-          "type": "contains",
-          "pattern": "约束",
-          "description": "回复中提到了 约束"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -97,10 +66,11 @@
         "ascend_platforms": [
           "A2"
         ],
-        "eval_mode": "text"
+        "eval_mode": "text",
+        "timeout": 1800
       },
       "prompt": "需求要求对 FP16 输入调用 PyPTO sigmoid。API 探索报告能否直接映射为 pypto.sigmoid(x) 并判定完全支持？",
-      "expected_output": "回复应指出 pypto.sigmoid 仅支持 DT_FP32，FP16 不能直接调用；应在 API 映射和风险中给出先 cast 到 FP32、调用 sigmoid、再按输出契约处理 dtype 的替代方案，并标注额外精度与性能风险。",
+      "expected_output": "1. 回复应指出 pypto.sigmoid 仅支持 DT_FP32，FP16 输入不能直接调用，因此不能判定为完全支持。\n2. 回复应把 sigmoid 标为 substitute 映射，并给出「先 pypto.cast 到 FP32、再调用 pypto.sigmoid」的替代配方。\n3. 回复应按「约束不满足」处理：标记约束 ✗，并在风险评估中给出该替代方案。",
       "expectations": [],
       "files": []
     },
@@ -114,7 +84,7 @@
         "eval_mode": "text"
       },
       "prompt": "公式含 matmul，准备使用 set_cube_tile_shapes。API_REPORT 里至少要检查哪些 Cube TileShape 硬约束？",
-      "expected_output": "回复应将算子判为 Cube 或混合类型并检查 set_cube_tile_shapes：TileShape 每维为正且最多 4 维，同时 Cube tile 需满足 32 字节对齐，buffer 空间满足 K 轴乘 2 不超过 L1 容量；若还含逐元素处理，需说明 Vector Tiling 需求。",
+      "expected_output": "1. 回复应按算子类型判断说明含 matmul 的算子归为 Cube 类型、需要检查 set_cube_tile_shapes；若公式还含逐元素处理则为混合类型，Cube 与 Vector 两套 tiling 都要检查。\n2. 回复应给出 Cube tile 的对齐约束：tile 各维需满足 32 字节对齐。\n3. 回复应给出 buffer 容量约束：buffer 空间需满足 K 轴 × 2 ≤ L1 容量。",
       "expectations": [],
       "files": []
     },

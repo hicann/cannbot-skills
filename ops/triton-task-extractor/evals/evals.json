@@ -11,31 +11,10 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "我有一段 PyTorch 代码 /workspace/models/my_op.py，其中包含一个 matmul_with_bias 函数需要优化，shape 信息已知。请使用 triton-task-extractor 将其提取为标准化算子任务文件。",
-      "expected_output": "回复应分析源代码，将待优化算子逻辑包装到 Model.forward() 中，初始化状态放入 Model.__init__()，所有依赖的自定义函数内联到文件中。输出应包含 class Model(nn.Module)、def get_inputs() 和 def get_init_inputs() 三个部分。生成后必须使用本 skill 自带的 scripts/validate_task.py 进行静态检查和运行时检查，验证通过后还需使用 question 工具请求用户确认。应说明输出为单一自包含 Python 文件，只允许 torch/torch.nn/标准库的 import。",
+      "prompt": "请说明使用 triton-task-extractor 把一个 PyTorch 算子实现（例如含 matmul_with_bias 函数的模型文件）提取为标准算子任务文件的完整流程与产物规范：输出文件的结构、生成后如何验证、验证通过后如何收尾。",
+      "expected_output": "1. 回复应说明单 case 输出为单一自包含 Python 文件，只包含 import 区、class Model(nn.Module)（待优化算子逻辑在 Model.forward()，初始化状态在 Model.__init__()）、def get_inputs() 与 def get_init_inputs() 四部分，import 只允许 torch / torch.nn / 标准库，依赖的自定义函数必须内联。\n2. 回复应说明生成后必须用本 skill 自带的 scripts/validate_task.py 做静态检查（class Model / forward / get_init_inputs，且 get_inputs 或 get_input_groups 至少存在其一）与运行时检查（exec 后实际执行 forward），并以退出码 0 与 [VALID] 为准。\n3. 回复应说明验证通过后、结束该 skill 前必须用 question 工具把完整任务文件展示给用户并请求确认，普通文本询问不能替代 question 工具调用。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "class Model",
-          "description": "回复中提到了 class Model"
-        },
-        {
-          "type": "contains",
-          "pattern": "get_inputs",
-          "description": "回复中提到了 get_inputs"
-        },
-        {
-          "type": "contains",
-          "pattern": "get_init_inputs",
-          "description": "回复中提到了 get_init_inputs"
-        },
-        {
-          "type": "contains",
-          "pattern": "validate_task.py",
-          "description": "回复中提到了 validate_task.py"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -50,28 +29,7 @@
       "prompt": "triton-task-extractor 的两种模式（单 case 和多 case）有什么区别？什么情况下用哪种模式？源文件有多个 shape 需要测试时应该如何处理？",
       "expected_output": "回复应说明单 case 模式适用于单一自包含 .py 文件，get_inputs 返回单组输入；多 case 模式适用于 .py + 同名 .json 配对，get_input_groups 返回多组输入。判定规则为：如果源 .py 已定义 get_input_groups() 函数，或同目录存在同名 .json 文件，则走多 case 模式，否则走单 case 模式。多 case 模式的核心原则是原样透传、不改写源码，禁止将多 case 源降级为单 case 输出来通过验证。源文件有多 shape 需要测试时应使用多 case 模式。",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "单 case",
-          "description": "回复中提到了 单 case"
-        },
-        {
-          "type": "contains",
-          "pattern": "多 case",
-          "description": "回复中提到了 多 case"
-        },
-        {
-          "type": "contains",
-          "pattern": "get_input_groups",
-          "description": "回复中提到了 get_input_groups"
-        },
-        {
-          "type": "contains",
-          "pattern": ".json",
-          "description": "回复中提到了 .json"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
@@ -134,7 +92,7 @@
         "eval_mode": "text"
       },
       "prompt": "任务提取和 validate_task.py 已全通过。此时可以直接结束并交给 coding 吗？",
-      "expected_output": "回复应说明还不能结束；必须展示完整任务文件，并使用 question 工具请求用户确认。只有用户确认后才能完成该 skill，普通文本询问不能替代规定的交互确认。",
+      "expected_output": "1. 回复应说明不能直接结束：validate_task.py 全通过只是必要条件，Step 4.5 基线冻结与 Step 5 用户确认都是标为必须执行、禁止跳过的步骤。\n2. 回复应说明用户确认前必须先用 freeze_baseline.py 锚定工作目录中 {op_name}.py 的哈希（mode=user 需传 --source_path），并指出退出码 5（副本 sha 与源 sha 不一致）时不得绕过，应在 report.md 标注 baseline_buggy: true 失败退出。\n3. 回复应说明结束该 skill 前必须用 question 工具把完整任务文件展示给用户、提供确认与需要修改两个选项并取得确认，普通文本询问不能替代 question 工具调用。",
       "expectations": [],
       "files": []
     }

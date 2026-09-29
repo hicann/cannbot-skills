@@ -13,10 +13,9 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "请介绍 Triton-Ascend 算子精度对齐的五阶隔离法，每个阶段做什么？",
-      "expected_output": "回复应覆盖五阶隔离法的完整流程：Stage 0 预检查（shape/NaN/Inf/dtype/内存初始化）、Stage 1 端到端差异定位（min-reproduction）、Stage 2 逐操作微基准隔离（原子算子拆分对比）、Stage 3 ULP 级重写、Stage 4 编译器标志调查与规避。说明每阶段的目标和输入输出条件。",
+      "expected_output": "1. 回复应覆盖五阶隔离法五个阶段：Stage 0 前置检查（输出 shape、NaN 位置、Inf 位置与符号、dtype 转换、内存初始化）、Stage 1 端到端差异定位（最小 reproduction 对比）、Stage 2 逐操作隔离微基准（把算子拆成原子操作与 torch 一对一比对）、Stage 3 Scalar/Vector 路径判定（BLOCK_SIZE 矩阵测试）、Stage 4 验证修复方案（两级验证）。\n2. 回复应指出常量除法是量化类算子的高风险检查项，并说明 Stage 3 的判定规则：A/E 失败而 B/C/D 通过即确诊 scalar/vector 编译器差异。\n3. 回复应说明修复方向是把对应操作改为 vector 路径且 BLOCK_SIZE 绝不能为 1，修复后按 Stage 4 做 Level 1 单操作验证与 Level 2 全链路验证。",
       "files": [],
-      "expectations": [
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -31,8 +30,7 @@
       "prompt": "我的 Triton-Ascend 算子在 MARE 校验时发现精度不达标，该怎么排查？",
       "expected_output": "回复应说明 MARE 校验失败时按五阶隔离法逐步排查，从预检查开始，逐步定位差异区域，通过 micro-benchmark 逐操作隔离。",
       "files": [],
-      "expectations": [
-      ]
+      "expectations": []
     },
     {
       "id": 3,
@@ -45,10 +43,9 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "Triton-Ascend 算子在量化场景下出现精度偏差，怀疑是常量除法精度问题，应该怎么定位和修复？",
-      "expected_output": "回复应使用五阶隔离法定位精度问题，说明 ULP 级重写的方法和编译器标志调整策略，并提及量化场景中常量除法精度偏差的处理方式。",
+      "expected_output": "1. 回复应说明根因是 Triton-Ascend 对 scalar 与 vector 浮点除法走不同代码生成路径，scalar 路径与 torch aclnnDiv 存在 1-2 ULP 偏差，且 BLOCK_SIZE=1 可能被编译器优化回标量。\n2. 回复应给出用五阶隔离法定位的步骤：先做前置检查排除低级错误，再用最小 reproduction 端到端定位，然后逐操作微基准隔离并重点检查常量除法 max/127.0，最后用 BLOCK_SIZE 矩阵测试确诊 scalar/vector 路径差异。\n3. 回复应给出 ULP 级修复方法：把常量除法拆到独立 kernel、用 vector load 且 BLOCK_SIZE >= 2 强制走向量路径（或对 host 侧标量除法用 NPU fp32 除法校正），并在修复后做单操作与全链路两级验证。",
       "files": [],
-      "expectations": [
-      ]
+      "expectations": []
     },
     {
       "id": 4,
@@ -63,8 +60,7 @@
       "prompt": "我的算子精度不对，帮我看看什么问题。",
       "expected_output": "回复应主动追问关键信息：算子类型和输入输出规格、精度校验方式（MERE/MARE）、具体的精度偏差数值或比例、是否已有最小复现用例、相关代码或编译日志。不应在没有足够信息的情况下直接给出修复方案。",
       "files": [],
-      "expectations": [
-      ]
+      "expectations": []
     },
     {
       "id": 5,
@@ -80,8 +76,7 @@
       "prompt": "我的 Triton-Ascend 算子精度对齐不过，ULP 级别的差异怎么排查？",
       "expected_output": "回复应聚焦 Triton-Ascend 场景的五阶隔离法精度调试流程，特别是如何处理编译器标量/向量浮点行为差异和常量除法精度偏差等 Triton 特有的隐蔽问题。",
       "files": [],
-      "expectations": [
-      ]
+      "expectations": []
     },
     {
       "id": 6,
@@ -118,7 +113,7 @@
         "eval_mode": "text"
       },
       "prompt": "为了隔离精度问题新增一个辅助 @triton.jit kernel 后，静态检查只识别原来的 kernel，应该删除辅助 kernel 吗？",
-      "expected_output": "回复应先确认辅助 kernel 是真实调用链的一部分，并按多 kernel 场景调整 AST/调用结构使检查器能识别，而不是为通过检查删除必要计算或退化到 PyTorch；随后仍需用失败 case 做端到端和微基准验证。",
+      "expected_output": "1. 回复应先区分辅助 kernel 的角色：仅用于 Stage 2/3 隔离诊断的微基准 kernel 不应留在生产模块（移入隔离脚本或删除）；属于修复方案、会被生产 forward() 调用的 kernel 不应删除。\n2. 回复应指出多 kernel 场景应使用 _route() 包装器做 dispatch，使 AST 校验器（validate_triton_impl.py）能识别：forward() 只能直接启动一次 kernel，self._route() 是明确允许的合法包装器。\n3. 回复应说明接入 _route()（或内联回原 kernel）后仍需按五阶隔离法 Stage 4 做两级验证：Level 1 单操作验证 + Level 2 全链路验证。",
       "expectations": [],
       "files": []
     },

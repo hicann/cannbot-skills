@@ -24,6 +24,7 @@
       "id": 3,
       "title": "创建 Kernel 直调工程（正向看护）",
       "config": {
+        "timeout": 1800,
         "max_tokens": 320000,
         "max_tokens_by_model": {
           "deepseek-v4-flash": 576000,
@@ -103,7 +104,7 @@
         "eval_mode": "text"
       },
       "prompt": "请使用 ascendc-direct-invoke-template skill。我用 add_custom 模板建好了 Vector 算子直调工程并编译出了动态库，现在想把这个算子注册进 PyTorch，在 Python 侧用 torch.ops 调用它，应该怎么做？",
-      "expected_output": "回复应说明模板已内置 PyTorch 对接：编译后在 Python 中通过 torch.ops.load_library(\"build/libadd_custom_ops.so\") 加载动态库，再用 torch.ops.npu.add_custom(x1, x2) 调用；op_extension/ 目录包含 add_custom_torch.cpp（Tiling 计算 + kernel launch）、register.cpp（TORCH_LIBRARY 注册，含 Meta backend）与 ops.h 函数声明；run.sh 支持 --torch 参数跑 PyTorch 通路。",
+      "expected_output": "1. 回复应说明模板已内置 PyTorch 对接，并给出 Python 侧调用方式：编译后通过 torch.ops.load_library(\"build/libadd_custom_ops.so\") 加载动态库，再用 torch.ops.npu.add_custom(x1, x2) 调用，并说明 npu 命名空间与 add_custom 算子名来自 register.cpp 的 TORCH_LIBRARY_FRAGMENT / TORCH_LIBRARY_IMPL 注册。\n2. 回复应说明 op_extension/ 接入层三个文件的职责：add_custom_torch.cpp 承担 Tiling 计算与 kernel launch、register.cpp 负责 TORCH_LIBRARY 注册（含 Meta backend）、ops.h 提供函数声明。\n3. 回复应说明 run.sh 支持 --torch 参数只跑 PyTorch 通路。",
       "expectations": [],
       "files": []
     },
@@ -117,8 +118,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请使用 ascendc-direct-invoke-template skill。我准备基于 add_custom 模板开发一个自定义 Vector 算子（比如 Mul），除了替换算子名，还要按哪些标记改哪些文件？模板里内存分配、数据流和同步是怎么组织的？编译运行验证用什么命令？",
-      "expected_output": "回复应说明基于 add_custom 模板改造新算子的方法：先复制 references/add_custom 工程，全局替换 add_custom 为 <your_op>（_kernel/_torch/_tiling 是固定后缀），再按 [MODIFY] 标记改造类名与 kernel 函数名、Tiling 结构体（add_custom_tiling.h）、计算逻辑（add_custom_kernel.asc）、输入/输出数量及 CMakeLists.txt 目标名；关键模式为 TPipe+TQue 管理 UB Buffer、CopyIn→Compute→CopyOut 三段数据流、EnQue/DeQue 同步、Host 流程 ACL 初始化→KernelCall→资源释放；用 bash run.sh 编译运行，bash run.sh --skip-build 可复用编译产物。",
+      "prompt": "请使用 ascendc-direct-invoke-template skill。我准备基于 add_custom 模板开发一个自定义 Vector 算子（比如 Mul）：从复制样例工程开始，除了替换算子名，还要按哪些标记改哪些文件？模板里内存分配、数据流、同步是怎么组织的，Host 侧从初始化到资源释放的流程呢？编译运行验证用什么命令？",
+      "expected_output": "1. 回复应说明改造方法的第一步是复制样例工程并给出命令 `cp -r references/add_custom <your_op>`，再全局替换 `add_custom` 为 `<your_op>`（`_kernel`/`_torch`/`_tiling` 是固定后缀），并按 `[MODIFY]` 标记改造类名与 kernel 函数名、Tiling 结构体（`add_custom_tiling.h`）、计算逻辑（`add_custom_kernel.asc`）、输入/输出数量及 `CMakeLists.txt` 目标名。\n2. 回复应说明模板的内存分配、数据流与同步模式：TPipe + TQue 管理 UB Buffer、CopyIn → Compute → CopyOut 三段数据流、EnQue/DeQue 同步。\n3. 回复应说明 Host 侧流程为 ACL 初始化（`aclInit`）→ KernelCall → 资源释放（`aclrtFree`/`aclrtFreeHost`/`aclFinalize`），以及编译运行验证命令 `bash run.sh`（完整流程）与 `bash run.sh --skip-build`（复用编译产物）。",
       "expectations": [],
       "files": []
     }

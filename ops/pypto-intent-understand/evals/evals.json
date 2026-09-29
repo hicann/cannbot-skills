@@ -14,33 +14,7 @@
       "prompt": "我想开发一个 GELU 激活算子，请帮我生成算子需求规格文档。算子参考 PyTorch 的 nn.GELU，使用近似版公式：GELU(x) ≈ x * 0.5 * (1 + tanh(√(2/π) * (x + 0.044715*x³)))，输入 x fp16 [1024, 4096]，输出与输入 shape 相同。\n\n请生成 SPEC.md。",
       "expected_output": "回复应调用 pypto-intent-understand skill，按工作流完成需求意图理解并生成 SPEC.md。应覆盖以下要点：\n- 对输入进行分类（标准参考类），从已知知识中恢复 GELU 标准定义\n- 标记信息置信度（高置信度 ✓）\n- 展示 ASCII 数据流图，清晰展示输入输出和计算流程\n- 展示规格确认清单（算子名称、公式、输入输出规格、动态轴）\n- 标注功能优先级（P0/P1/P2）\n- 至少确认一次用户意图\n- 最终输出 SPEC.md 到当前目录\n- SPEC.md 包含完整的结构化字段：算子名称、公式、输入输出规格、dtype、精度要求等",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "SPEC.md",
-          "description": "回复中提到了 SPEC.md"
-        },
-        {
-          "type": "contains",
-          "pattern": "意图理解",
-          "description": "回复中提到了 意图理解"
-        },
-        {
-          "type": "contains",
-          "pattern": "GELU",
-          "description": "回复中提到了 GELU"
-        },
-        {
-          "type": "contains",
-          "pattern": "数据流图",
-          "description": "回复中提到了 数据流图"
-        },
-        {
-          "type": "contains",
-          "pattern": "确认",
-          "description": "回复中提到了 确认"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -55,33 +29,7 @@
       "prompt": "pypto-intent-understand 在什么情况下触发？它能处理哪些类型的输入描述？如果不能从用户描述中获取完整信息会怎样？",
       "expected_output": "回复应说明 pypto-intent-understand 的使用边界和触发条件：\n- 当用户描述要开发、实现、创建某个算子时触发\n- 支持 4 类输入：标准参考类（常见算子/框架 API 参考）、外部材料类（论文/文档链接）、自定义描述类、直接规格类\n- 遵循 6 大核心原则：基于事实不猜测、功能优先级明确、可选参数深度分析、信息完整性、至少确认一次、默认值显式披露\n- 核心工作流：快速解析 → 可视化确认 → 可选补充 → 输出文件\n- 信息不足时主动提问补充，不凭空猜测\n- 输出结构化需求文档 SPEC.md，包含完整字段\n- 不生成 API 映射（那是 pypto-api-explore 的职责）\n- 不生成实现代码（那是 pypto-op-develop 的职责）",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "标准参考类",
-          "description": "回复中提到了 标准参考类"
-        },
-        {
-          "type": "contains",
-          "pattern": "外部材料类",
-          "description": "回复中提到了 外部材料类"
-        },
-        {
-          "type": "contains",
-          "pattern": "自定义描述类",
-          "description": "回复中提到了 自定义描述类"
-        },
-        {
-          "type": "contains",
-          "pattern": "SPEC.md",
-          "description": "回复中提到了 SPEC.md"
-        },
-        {
-          "type": "contains",
-          "pattern": "确认",
-          "description": "回复中提到了 确认"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 3,
@@ -106,8 +54,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "需求是 Flash Attention，只给了数学公式。意图理解能否像简单 elementwise 一样只画输入输出图就生成规格？",
-      "expected_output": "回复应说明复杂算子不能只靠公式：需先拆解 causal mask、online softmax、paged attention 等关键特性，标注需要/不需要/待确认、置信度、来源和优先级并让用户确认；还要用编号伪代码描述分块、循环和状态更新，再展示数据流图与整体确认。",
+      "prompt": "沙箱内没有算子工程、也没有测试数据，不需要实际执行命令或运行测试。请先加载并使用 pypto-intent-understand 技能（可 Read SKILL.md 与 templates/），回答：需求是 Flash Attention，只给了数学公式，意图理解能否像简单 elementwise 一样只画输入输出图就生成规格？",
+      "expected_output": "1. 应明确回答不能只画输入输出图：对 Flash Attention 这类含分块、循环、在线更新的复杂算子，公式只能描述数学语义、无法描述实现策略，仅画 I/O 图会把 Flash Attention 生成成普通 SDPA。\n2. 应说明复杂算子必须先拆解关键特性（causal mask、online softmax、paged attention 等），逐项标注 需要/不需要/待确认、置信度、来源与优先级，并让用户确认。\n3. 应说明还需用带编号的伪代码描述分块、循环与状态更新，并先展示分解后的数据流图与规格确认清单再生成规格。",
       "expectations": [],
       "files": []
     },

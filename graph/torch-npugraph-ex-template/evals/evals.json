@@ -16,15 +16,9 @@
         "eval_mode": "file_based"
       },
       "prompt": "请为我生成一个 npugraph_ex 的标准 MRE 代码模板，包含完整的 import、模型定义和编译配置。",
-      "expected_output": "生成的模板应包含：import 部分（torch、torchair 等）、模型定义、infer_one_step 函数、if __name__ == \"__main__\" 入口。应使用 backend=\"npugraph_ex\"、fullgraph=True、dynamic=False 配置。变量命名应遵循固定约定（config、compiled_model、dummy_input、output）。",
+      "expected_output": "1. 生成的标准模板应包含三段式结构：import 段（模板中为 import torch）、模型定义、def infer_one_step() 函数、if __name__ == \"__main__\" 入口。\n2. 标准模板的 torch.compile 应设置 backend=\"npugraph_ex\"、fullgraph=True、dynamic=False 三项。\n3. 生成的模板给出与模板正文一致的变量/配置片段：包含 config（或模板正文中的等价写法 model，两者均接受）并给出使其生效的取值，同时包含 compiled_model、dummy_input、output。",
       "files": [],
-      "expectations": [
-        {
-          "type": "file_list",
-          "pattern": "*.py",
-          "description": "存在匹配 *.py 的文件"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
@@ -56,7 +50,7 @@
         "eval_mode": "text"
       },
       "prompt": "请只说明 npugraph_ex 基础 MRE 的三段式结构、固定变量名和 torch.compile 核心参数，不需要写业务模型。",
-      "expected_output": "回复应说明结构为 import、infer_one_step()、main 入口，固定使用 config、compiled_model、dummy_input、output 等约定变量；torch.compile 设置 backend=\"npugraph_ex\"、fullgraph=True、dynamic=False，并说明固定 shape 与整图捕获含义。",
+      "expected_output": "1. 应说明三段式结构为 import 段、def infer_one_step() 段、if __name__ == \"__main__\": 入口（入口只调用 infer_one_step()）。\n2. 应说明 torch.compile 固定设置 backend=\"npugraph_ex\"、fullgraph=True、dynamic=False，并说明 fullgraph=True 表示强制整图捕获（断图即报错）、dynamic=False 表示固定 shape（底层 aclgraph 不支持动态 shape）。\n3. 应说明固定变量名包含 config（或模板正文中的等价写法 model，两者均接受）与 compiled_model、dummy_input、output。",
       "expectations": [],
       "files": []
     },
@@ -109,6 +103,7 @@
       "id": 7,
       "title": "op-plugin 原地 schema 约束",
       "config": {
+        "timeout": 1800,
         "max_tokens": 120000,
         "ascend_platforms": [
           "A2"

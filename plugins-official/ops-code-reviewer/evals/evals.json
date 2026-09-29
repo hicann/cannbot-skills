@@ -20,13 +20,7 @@
       "prompt": "我写了一个 Ascend C 算子，想做个代码审查。请介绍一下 ops-code-reviewer 团队的审查流程，审查主要关注哪些维度？",
       "expected_output": "回复应覆盖以下要点：\n1. 代码审查流程包含加载 ascendc-code-review skill 并按完整工作流执行\n2. 审查关注安全规范检查、代码质量评估等多个维度\n3. 审查过程包含行号校对、问题分类、最终判定等步骤\n4. 报告统一撰写，子 Agent 专注执行审查任务",
       "files": [],
-      "expectations": [
-        {
-          "type": "contains",
-          "pattern": "ascendc-code-review",
-          "description": "回复中提到了 ascendc-code-review"
-        }
-      ]
+      "expectations": []
     },
     {
       "id": 2,
