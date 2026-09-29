@@ -1,0 +1,10 @@
+{
+  "name": "catlass-cpp-generator",
+  "displayName": "CATLASS C++ Linear Attention",
+  "description": "CATLASS C++ Linear Attention 五阶段独立开发工作流。",
+  "version": "0.1.0",
+  "author": {"name": "CANNBot"},
+  "license": "MIT",
+  "keywords": ["catlass", "cpp", "linear-attention", "ascend", "npu"],
+  "skills": "./skills/"
+}

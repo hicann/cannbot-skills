@@ -1,0 +1,30 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "Linear Attention 工作流恢复",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "Linear Attention 算子开发中途切换窗口，发现精度问题。应该读取哪些现场文件，从哪个阶段恢复？",
+      "expected_output": "回复应要求读取 docs/workflow.json、docs/api.md、docs/design.md、docs/validation.md、reference/reference.py 和算子源码；先校验开发状态，再根据失败证据分类，按主 Skill 恢复表一次更新 stage、issue_type、resume_from、validation_scope、operator_contract 和 golden_contract 并校验。实现精度错误从 implementation 恢复，issue_type 为 precision_debug；设计问题回到 design，标杆问题回到 reference，对外接口、语义或支持范围变化回到 interface。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "五阶段开发流程",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "Linear Attention CATLASS 专用工作流的五个阶段分别做什么？",
+      "expected_output": "回复应明确列出五个阶段：01 接口确认、02 标杆生成、03 方案设计、04 算子开发、05 算子测试。interface 阶段必须把 target_architecture 从 pending 冻结为 atlas_a2_a3 或 ascend950，后续阶段保持架构、CATLASS 编译标识和数据路径一致。开发规则来自专用 Skill 及 knowledge/workflow 通用知识：reference.py 是唯一标杆源码，方案设计必须按 solution-design-reference.md 完整内容和 R01-R21 完成推演，可保存 docs/design.full.md 中间产物，最终交付的 docs/design.md 仅保留两章结构；编码参考 knowledge/workflow 中的 Stage 与同步写法，编译、精度定位和性能采集按 development-and-validation.md 直接执行工具。",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "skill_name": "catlass-cpp-interface"
+}

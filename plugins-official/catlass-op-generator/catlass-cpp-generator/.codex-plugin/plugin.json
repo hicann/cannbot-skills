@@ -1,0 +1,21 @@
+{
+  "name": "catlass-cpp-generator",
+  "version": "0.1.0",
+  "description": "CATLASS C++ Linear Attention 五阶段独立开发工作流。",
+  "author": {"name": "CANNBot"},
+  "license": "MIT",
+  "keywords": ["catlass", "cpp", "linear-attention", "ascend", "npu"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CATLASS C++ Linear Attention",
+    "shortDescription": "按五阶段开发 CATLASS C++ Linear Attention 算子。",
+    "longDescription": "确认接口和 CPU 标杆，完成 Stage 设计、CATLASS C++ 开发、精度与性能验收。",
+    "developerName": "CANNBot",
+    "category": "Productivity",
+    "capabilities": ["Write", "Code Review"],
+    "defaultPrompt": [
+      "使用五阶段流程开发 CATLASS C++ Linear Attention 算子。",
+      "查询 CATLASS C++ OKF 知识。"
+    ]
+  }
+}

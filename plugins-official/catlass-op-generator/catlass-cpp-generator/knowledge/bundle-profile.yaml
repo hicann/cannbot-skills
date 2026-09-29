@@ -1,0 +1,13 @@
+{
+  "okf_version": "0.2",
+  "profile": "catlass-cpp",
+  "business_partitions": [
+    "catlass",
+    "workflow",
+    "operator"
+  ],
+  "operator_family_layout": "operator/<family>",
+  "runtime_root": ".catlass-cpp/knowledge",
+  "record": "unsupported",
+  "workflow_layout": "workflow/<concept>"
+}

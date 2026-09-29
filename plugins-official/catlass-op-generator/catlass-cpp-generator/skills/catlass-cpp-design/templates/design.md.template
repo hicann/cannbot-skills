@@ -1,0 +1,237 @@
+# {operator_name} 设计
+
+`workflow_id`: `catlass-linear-attention-v1`
+`design_rule_version`: `V1`
+`target_architecture`: `{target_architecture}`
+
+> 本模板按 Linear Attention 标准详设结构填写。进入开发阶段前，将全部花括号内容替换为当前算子事实。
+> 保留两章结构，按实际 Stage 数增删逐 Stage 小节并连续编号；各字段填写具体内容，不适用项写明原因。
+> 填写本最终交付模板前，必须按 `workflow/solution-design-reference.md` 的完整内容完成设计推演；
+> 完整推演可保存为 `docs/design.full.md` 中间产物。`docs/design.md` 只承载评审结论的两章投影，
+> 不能以最终章节精简为由跳过完整参考中的资源、精度、性能、测试、风险和规则检查。
+> `docs/api.md` 是公开接口、shape、dtype、layout、属性、异常和支持范围的唯一事实来源；本文引用接口契约，
+> 不复制容易漂移的接口表，只记录实现所需的内部映射、计算方案、资源、同步、tiling、精度观察点和性能目标。
+> 写法参照 `catlass-cpp-knowledge` 的 `workflow/solution-design-reference.md`，规则依据为
+> `workflow/stage-design-rules.md` 和 `workflow/kernel-stage-sync-patterns.md`。示例只对齐表达粒度；
+> 当前算子的公式、Stage 数、AIC/AIV 分工、CG、地址、同步和性能目标必须由当前需求推导。
+> 资源条目必须显式写作 `tensor[N]`，并分别写物理预留份数、实际激活份数/条件、dtype、每份与总大小、首次写入、最后消费及复用条件；单份对象也写 `[1]`。
+> 设计阶段只写方案和预期；开发期精度、profiling、sanitizer 和性能实测统一记录到 `docs/validation.md`。
+
+## 1. 目标与数学语义
+
+### 1.1 目标、融合范围与目标场景
+
+- 目标 SoC：
+- CATLASS 架构标识：写明 `target_architecture={target_architecture}`、`CATLASS_ARCH` 和 `ArchTag`。
+- Vector 执行模型：写明 MemBase 或 RegBase/VF，并说明选择依据；没有 Vector Stage 时写“`不适用：{not_applicable_reason}`”。
+- Cube→Vector 数据路径：写出包含 L0C、GM/UB 和必要 Fixpipe 的完整链路；没有该数据边时写“`不适用：{not_applicable_reason}`”。
+- Vector→Cube 数据路径：写出包含 UB、GM/L1 和必要 MTE 的完整链路；没有该数据边时写“`不适用：{not_applicable_reason}`”。
+- 融合或拆分范围、融合前完整调用链、融合后输出顺序：
+- 输入输出 dtype/layout/关键维度：引用 `docs/api.md` 对应章节，并说明本方案依赖的内部约束。
+- 支持场景：定长 / 变长 / 尾块 / 补齐 / 不同 head 数的比例关系：
+- 不处理范围及原因：
+- 性能目标：每个目标 case 使用相同测量口径列出基线、目标和可达性分析。
+
+| 模型 case | 关键 shape/属性 | 同口径基线 | 目标值 | 测量配置与统计口径 | 可达性分析 |
+|---|---|---:|---:|---|---|
+|  |  |  |  |  |  |
+
+### 1.2 API 契约引用与内部映射
+
+- `docs/api.md` 的公开入口及契约章节：
+- API 输入/输出到 kernel 参数、GM 基址和内部 tensor 名称的映射：
+- 可选输入、默认值和异常在内部路径中的处理；不重复定义接口语义：
+- 标杆与算子接口差异、已确认的适配关系和兼容约束：
+- 输出正式 GM 地址、返回顺序及无中间输出场景的处理：
+
+### 1.3 完整数学语义与数值边界
+
+写出每个中间量的公式、shape、dtype、有效区、计算顺序、边界行为，并说明与正式验收所用的
+PyTorch CPU 标杆的对应关系。矩阵乘统一使用带操作数 shape 的 `@` 表达式，逐元素
+gate/mask/cast 单独列出。代数变换必须给出等价依据，并说明是否改变溢出、下溢或舍入风险。
+
+| 中间量/高风险运算 | CPU 标杆公式 | 实现运算序列 | 计算 dtype | 输入/中间值范围 | NaN/Inf 风险 | mask/cast/保护时机 |
+|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |
+
+无效位置必须说明是在高风险运算前排除、替换为安全值，还是计算后屏蔽；不能只写“乘 0”。
+
+## 2. Stage 总览与完整详设
+
+### 2.1 全局符号、任务域与模型 case 代入
+
+集中定义全局符号、单位和唯一含义。至少覆盖 batch/sequence/chunk、有效长度、各 head 轴、
+head ratio、基本块、CG、slot/bank、任务数、可用核数、`blockDim` 和 `work_id`。
+
+| 符号 | 定义 | 单位/取值域 | 来源或约束 |
+|---|---|---|---|
+|  |  |  |  |
+
+- `work_id` 到 batch/sequence/chunk/head/head slice 的映射公式：
+- `Nbase`、`Nwork`、`blockDim`、grid-stride 和尾部有效任务的计算公式：
+- AIC/AIV 的拓扑关系、每个 work 的 owner，以及无写冲突证明：
+- fixed/varlen 使用不同任务域时的统一映射或分支条件：
+- 全部可达 TilingKey、模板参数、适用域、选择条件和 tail/空任务行为：
+
+至少代入一个目标模型 case，核对任务数、启动核数、每核任务数、wave 和尾部负载：
+
+| 模型 case | Nbase | CG | Nwork | blockDim | wave | 每核任务范围 | 尾 work/尾 head |
+|---|---:|---:|---:|---:|---:|---|---|
+|  |  |  |  |  |  |  |  |
+
+### 2.2 依赖图与 Stage 结果
+
+- 完整计算依赖图：全部公式节点、Cube/Vector 类型、数据边及最终输出：
+- Stage 划分依据：先按依赖、计算类型、生命周期和精度观察点划分，再映射 AIC/AIV owner：
+- 连续同类 Stage 的合并依据、不同 head 的统一处理和调用图：
+- AIV 分工选择：按 R01 选择逐 head 或同 head 分片，列出容量、依赖和负载依据：
+- Stage 数量的选择依据；不以执行单元切换本身强制拆分逻辑 Stage：
+
+| Stage | 执行单元/owner | 功能与公式 | 前驱/可并行 Stage | 输入来源 | 输出落点 | 任务映射/任务数 | 主要空间 |
+|---|---|---|---|---|---|---|---|
+| Stage 0 |  |  |  |  |  |  |  |
+| Stage 1 |  |  |  |  |  |  |  |
+
+跨 Stage 数据在首次生产处定义，在消费者处引用，不重复定义。逻辑份数与物理预留份数不同时分别写清：
+
+| 数据（名称写作 tensor[N]） | shape/dtype/layout | 物理预留份数 | 实际激活份数/条件 | 单份大小与对齐 | 生产 Stage/owner | 最后消费者 | 存放位置 | 释放/复用条件 |
+|---|---|---:|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |  |  |
+
+### 2.3 Stage 0：{stage_0_name}
+
+- 功能、公式、计算顺序和最终输出关系：
+- 输入来源、前置/并行 Stage、输入/输出 shape、dtype、layout 和有效区：
+- batch/chunk/head/head ratio/CG 映射、Cube/Vector 类型、AIC/AIV owner 和任务数：
+- GM/workspace 基址、字段 offset、索引公式、record/bank 数、总量公式和 owner：
+- 每份数据的 GM 搬入/写回次数与字节数、批量搬运方式、L2 Cache 策略：
+- L1/UB/L0 的 ping/pong slot、event/flag/Mutex、初始状态、复用闭环及固定资源获取顺序：
+- 执行顺序、原位覆盖、tail/partial/padding/varlen/空任务处理；说明无效任务是否参与同步：
+- 与前后 Stage 的数据依赖；跨 Stage ready/free 只在 2.6 集中定义：
+- Cube 的物理 layout、转置、L1/L0A/L0B/L0C、MMAD 累加和 Fixpipe 写出，或 Vector 的执行模型（MemBase queue/pass 或 RegBase/VF）、完整输入搬运、寄存器/UB 数据及 MTE3 写回：
+
+本 Stage 地址图使用绝对半开区间；仍存活到后续 Stage 的 tensor 保持原地址并在后续地址图重列：
+
+每个非空地址条目独占一行，按“地址、`tensor[N]`、shape/layout、dtype、物理预留、实际激活、每份大小、总大小、首次写入、最后消费、释放/复用”填写；地址区间大小等于物理预留总量。
+
+<!-- 格式示例，生成当前算子文档时删除：
+L1[0,64 KiB) input_slot[4]；[BT,K]/ND；主 dtype；物理预留 4 份；实际激活 ceil(valid_r/G) 份；每份 16 KiB；共 64 KiB；S0 按 leader 搬入；保留至对应 S2 末次读取；free 后复用
+-->
+```text
+
+```
+
+```text
+Stage0(...):
+  wait {input_ready_or_free}
+  {MTE2_or_MTE1_transfer}
+  {Cube_or_Vector_compute}
+  {Fixpipe_or_MTE3_write}
+  set {stage_ready_or_free}
+```
+
+### 2.4 Stage 1：{stage_1_name}
+
+- 功能、公式、计算顺序和最终输出关系：
+- 输入来源、前置/并行 Stage、输入/输出 shape、dtype、layout 和有效区：
+- batch/chunk/head/head ratio/CG 映射、Cube/Vector 类型、AIC/AIV owner 和任务数：
+- GM/workspace 基址、字段 offset、索引公式、record/bank 数、总量公式和 owner：
+- 每份数据的 GM 搬入/写回次数与字节数、批量搬运方式、L2 Cache 策略：
+- L1/UB/L0 的 ping/pong slot、event/flag/Mutex、初始状态、复用闭环及固定资源获取顺序：
+- 执行顺序、原位覆盖、tail/partial/padding/varlen/空任务处理；说明无效任务是否参与同步：
+- 与前后 Stage 的数据依赖；跨 Stage ready/free 只在 2.6 集中定义：
+- Cube 的物理 layout、转置、L1/L0A/L0B/L0C、MMAD 累加和 Fixpipe 写出，或 Vector 的执行模型（MemBase queue/pass 或 RegBase/VF）、完整输入搬运、寄存器/UB 数据及 MTE3 写回：
+
+本 Stage 地址图沿用 2.3 的逐条格式；每个非空条目均需显式写清份数、大小和生命周期。
+
+```text
+
+```
+
+```text
+Stage1(...):
+  wait {previous_stage_ready}
+  {load_and_compute}
+  {write_shared_record}
+  set {stage_ready}
+```
+
+按实际 Stage 数复制完整 Stage 结构并连续编号，不能只增加公式而省略地址、搬运、边界和释放条件。
+
+### 2.5 数据搬运汇总
+
+逐 tensor 核对每个 work 的搬入、写回和复用；统计值必须与各 Stage 地址图及生命周期一致。
+
+| tensor | GM 读/写次数 | 每次/每 work 字节数 | GM→L1/UB 路径 | L1/UB/L0 驻留与复用 | 批量搬运/stride | L2 Cache 策略 | 最后消费者 |
+|---|---:|---:|---|---|---|---|---|
+|  |  |  |  |  |  |  |  |
+
+### 2.6 Stage 间同步方案
+
+先列跨 Stage 数据边，再列同步资源。ready 表示数据已就绪，free 表示缓冲槽可复用；每个资源必须
+写清作用核、方向、pipe、slot、数量、初始状态、生产/消费方、复位和下次复用条件。多个 Mutex
+或本地资源同时持有时给出固定获取与释放顺序，并核对 EventID/MutexID/flag 数量不超过目标硬件上限。
+
+| 数据边 | 生产 Stage/owner/pipe | 消费 Stage/owner/pipe | 存放位置/slot | ready 条件 | free 条件 | 空任务参与方式 |
+|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |
+
+| 同步资源 | 所属核/范围 | 类型与方向 | 保护的数据和 slot | 数量/初始状态 | set/wait 或 lock/unlock 顺序 | 复用/释放条件 | 硬件上限依据 |
+|---|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |  |
+
+同一 AIC/AIV、同一执行管线内的连续逻辑 Stage 使用程序顺序；只有实际跨 pipe、跨核或槽位复用边
+使用成对 HardEvent、CrossCore 通知或 Mutex。伪代码必须覆盖初始化、首个任务、稳态循环、
+ping/pong 回绕、tail/partial、空任务、最后任务排空和资源释放，并与上表数量逐项一致。
+
+```text
+Initialize(...):
+  allocate event/flag/mutex resources
+  initialize free state for every reusable slot
+
+Producer(work,slot):
+  wait free[slot]
+  write record[slot]
+  set ready[slot]
+
+Consumer(work,slot):
+  wait ready[slot]
+  read record[slot]
+  set free[slot]
+
+DrainAndRelease(...):
+  wait final consumer/free state
+  release event/flag/mutex resources
+```
+
+```cpp
+// 跨 AIC/AIV 的发送和等待必须配对；聚合模式下未负责当前数据的参与核也要按角色发送或等待通知。
+CrossCoreSetFlag<aggregate, PIPE_MTE3>(vec_to_cube_ready);
+CrossCoreWaitFlag(vec_to_cube_ready);
+SetFlag<HardEvent::MTE2_V>(load_to_vec);
+WaitFlag<HardEvent::MTE2_V>(load_to_vec);
+```
+
+### 2.7 Kernel 组件与调用
+
+- AIC/AIV 入口、各核负责范围、MixBlock/任务分组和调用关系：
+- CATLASS 配置、组件实例化及其对应 Stage；固定当前源码版本中的真实签名：
+- Vector API、搬运接口、输出写回和主路径批量处理：
+- 模板与 SoC 差异对应的内部实现配置：
+- kernel 入口到各 Stage 的完整调用顺序，以及最终排空和资源释放位置：
+
+### 2.8 Workspace 总量
+
+本节只给出 workspace 的最终分区与总量，不重复逐 Stage 地址、搬运和同步细节。
+
+- 不使用算子 workspace 时明确写 `workspace_size=0`，并说明是否仍有框架保留空间：
+- 使用 workspace 时列出每个区域的 offset/索引公式、record/bank 数、单份大小、对齐和总量贡献：
+- 说明每个区域的生产者、最后消费者和释放条件，并引用 2.3--2.6 的对应设计：
+
+| Workspace 区域 | offset/索引公式 | record/bank 数 | 单份大小与对齐 | 总量贡献 | 生产者与最后消费者 | 释放条件 |
+|---|---|---:|---|---:|---|---|
+|  |  |  |  |  |  |  |
+
+```text
+workspace_size = AlignUp(sum(region_bytes), workspace_alignment)
+```

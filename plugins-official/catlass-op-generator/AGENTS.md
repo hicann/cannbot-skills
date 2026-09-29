@@ -88,11 +88,20 @@ Catlass 是 Ascend C 的高阶模板封装。**算子工程结构与通用 Ascen
 
 ### 核心任务
 
-管理 Kernel 直调算子的完整开发生命周期，确保按 Step 1-7 流程顺序执行，每个阶段通过门禁后才进入下一阶段。
+管理 Kernel 直调算子的完整开发生命周期。先执行 Step 0 工作流分类；legacy 分支继续按原 Step 1-7
+顺序执行，每个阶段通过门禁后才进入下一阶段。
 
 ### 工作流程
 
 ```
+Step 0: 工作流分类（既有工程 marker + 需求接收阶段确认的数学类别）
+    │
+    ├── linear_attention → 转发到 catlass-cpp-generator 五阶段工作流，停止执行原 Step 1-7
+    ├── legacy           → 原 Step 1-7
+    ├── pending          → 补充数学需求并重新分类
+    └── blocked          → 报告非法/冲突 marker，停止
+    │
+    ▼ legacy
 Step 1: 环境检查 + catlass 命名校验 + catlass 源码就绪
     │
     ├── 任一项失败 → 告知用户，停止
@@ -146,6 +155,32 @@ Step 6: 性能验收（Developer 采集 + 按需 /catlass-op-perf-tune 调优）
      ▼
 Step 7: 完成汇报
 ```
+
+#### Step 0：工作流分类
+
+**触发条件**：用户提交 CATLASS 算子请求，或继续已有 CATLASS 工程。
+
+1. 先检查 `operators/{operator_name}/docs/workflow.json` 和既有工程目录；已有专用 marker 优先恢复，
+   已有但没有专用 marker 的工程固定进入 `legacy`。
+2. 新工程由需求接收阶段根据数学信息确认 `algorithm_family`，取值只能是
+   `linear_attention`、`legacy` 或 `pending`。分类依据是需求中已确认的数学算法；数学信息充分时
+   Agent 直接完成分类，不要求用户显式说出 Linear Attention、GDN、KDA 等专用名词。禁止仅按
+   算子名或自由文本关键词猜测；分类信息不足时使用 `pending`，补充数学需求后重新分类。
+3. 从本插件目录调用唯一 selector：
+
+   ```bash
+   python catlass-cpp-generator/scripts/select_operator_workflow.py \
+     --workspace "{workspace_dir}" \
+     --operator-name "{operator_name}" \
+     --algorithm-family "{confirmed_algorithm_family}"
+   ```
+
+4. selector 返回 `linear_attention` 时，完整读取
+   `catlass-cpp-generator/AGENTS.md`，转交独立五阶段工作流并停止执行原 Step 1-7。
+5. 返回 `legacy` 时继续下方原 Step 1-7；返回 `pending` 时补充数学需求并重新分类；返回 `blocked` 时
+   报告 marker 问题并停止，不自动修复或覆盖状态文件。
+
+Step 0 只分类和转发，不创建算子目录、不初始化 workflow、不修改用户文件。
 
 #### Step 1：环境检查 + catlass 命名校验 + catlass 源码就绪（门禁）
 

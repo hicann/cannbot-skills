@@ -1,0 +1,18 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 4,
+      "title": "独立工作流与工程衔接",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "线性 Attention 专用流程如何只靠仓内参考完成开发，并衔接 CANNBot 工程、保持普通 CATLASS 算子的原流程？",
+      "expected_output": "回复应说明数学分类后交接到专用 Agent，它只加载 catlass-linear-attention-workflow。五阶段使用knowledge/workflow 中的详设参考、R01-R21、kernel-stage-sync-patterns.md、development-and-validation.md 和统一精度策略；环境核验、编译和性能采集直接调用工具，API 查目标版本的 CANN/CATLASS 官方文档和源码。专用流程保持初始化脚本及 host main()/ACL/<<<>>> 直调工程，CPU PyTorch 标杆与 compare_precision.py 完成验证；普通算子及既有 Linear Attention 工程继续原有 Step 1-7 和共享 Skill。",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "skill_name": "catlass-cpp-test"
+}

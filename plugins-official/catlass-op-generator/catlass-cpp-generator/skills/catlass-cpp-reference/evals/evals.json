@@ -1,0 +1,30 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 2,
+      "title": "参考实现单一源码",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "如何避免 reference.py 和 definition.json.reference 两份参考实现不一致？",
+      "expected_output": "回复应说明 reference.py 是唯一可编辑源码，每次修改后通过 generate_definition.py 自动生成 definition.json 的 reference 字段，并使用 validate_reference.py 校验一致性。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "统一精度判定规则",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "线性 Attention 如何组合混合容差、matched_ratio、max_abs、ULP、MERE 和 MARE，同时不影响普通 CATLASS 算子？",
+      "expected_output": "回复应说明专用流程使用唯一纯 PyTorch 标杆源码，默认在 CPU 上生成正式验收使用的标杆结果，GPU 可选用于交叉验证；按混合容差计算匹配比例后，全局及关键分区 matched_ratio、分区 max_abs 必须全部达标；MERE、MARE、max_ulp、error_count 记录在同一报告中，用于定位误差原因；所有阶段复用同一 compare_precision.py 和精度策略；普通 CATLASS 继续使用旧模板和旧流程。",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "skill_name": "catlass-cpp-reference"
+}

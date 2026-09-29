@@ -1,0 +1,30 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 8,
+      "title": "精度迭代验证范围",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "算子开发中发现精度问题，修复迭代期间应该跑哪些用例？什么时候恢复全量测试？",
+      "expected_output": "回复应按主 Skill 恢复表一次设置 stage=implementation、issue_type=precision_debug、resume_from=implementation、validation_scope=precision_targeted，operator_contract 和 golden_contract 为 frozen，并校验状态。迭代中只编译、运行失败用例、受影响 Stage 和最小边界精度用例；这些用例全部通过后设置 stage=validation、issue_type=null、resume_from=null、validation_scope=full，接口和标杆的确认状态保持 frozen 并重新校验，再执行全量精度用例、必要功能及受改动影响的性能回归。全部验收通过后才设置 stage=complete。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "精度问题暴露设计错误",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "精度修复时发现是 Stage、workspace 或同步方案设计错误，应该如何恢复？",
+      "expected_output": "回复应按主 Skill 恢复表一次设置 stage=design、issue_type=design_issue、resume_from=design、validation_scope=full，operator_contract 和 golden_contract 保持 frozen，并校验状态。记录失败用例和最早受影响的数据依赖，重新检查 Stage 划分、L1/UB/workspace 的读写和复用、各核负责的数据、缓冲槽位、同步通知和事件，以及 tiling；更新 docs/design.md 并运行 validate_design.py 和设计评审；通过后一次切换为 stage=implementation、issue_type=precision_debug、resume_from=implementation、validation_scope=precision_targeted，接口和标杆的确认状态保持 frozen 并校验。定向精度用例全部通过后按恢复表进入 validation/full，清空 issue_type 和 resume_from，再完成全量验收。",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "skill_name": "catlass-cpp-develop"
+}

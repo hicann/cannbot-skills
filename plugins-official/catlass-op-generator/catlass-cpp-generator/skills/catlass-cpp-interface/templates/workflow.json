@@ -1,0 +1,19 @@
+{
+  "workflow_id": "catlass-linear-attention-v1",
+  "algorithm_family": "linear_attention",
+  "target_architecture": "pending",
+  "design_rule_version": "V1",
+  "precision_policy_version": "v2",
+  "precision_policy_path": "reference/precision-policy.json",
+  "reference_framework": "pytorch",
+  "canonical_device": "cpu",
+  "canonical_dtype": "float64",
+  "accumulation_dtype": "float64",
+  "optional_cross_check_devices": ["cuda"],
+  "stage": "interface",
+  "operator_contract": "provisional",
+  "golden_contract": "provisional",
+  "issue_type": null,
+  "resume_from": null,
+  "validation_scope": "full"
+}

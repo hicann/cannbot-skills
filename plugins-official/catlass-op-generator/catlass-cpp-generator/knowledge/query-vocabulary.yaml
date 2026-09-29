@@ -1,0 +1,66 @@
+{
+  "version": "1",
+  "operator_families": {
+    "linear-attention": {
+      "aliases": [
+        "linear_attention",
+        "gdn",
+        "gdn2",
+        "kda",
+        "retention",
+        "rwkv",
+        "state-recurrence",
+        "state_recurrence"
+      ]
+    }
+  },
+  "catlass_apis": {
+    "gemm-universal": [
+      "GemmUniversal",
+      "kernel"
+    ],
+    "block-mmad": [
+      "BlockMmad",
+      "mmad"
+    ],
+    "epilogue": [
+      "Epilogue",
+      "BlockEpilogue"
+    ],
+    "dispatch-policy": [
+      "DispatchPolicy",
+      "arch-tag"
+    ],
+    "swizzle": [
+      "Swizzle",
+      "scheduler"
+    ],
+    "copy-atom": [
+      "CopyAtom",
+      "copy"
+    ]
+  },
+  "workflow_topics": {
+    "interface": [
+      "contract",
+      "api"
+    ],
+    "reference": [
+      "golden",
+      "precision"
+    ],
+    "design": [
+      "stage",
+      "sync",
+      "tiling"
+    ],
+    "develop": [
+      "build",
+      "debug"
+    ],
+    "test": [
+      "accuracy",
+      "performance"
+    ]
+  }
+}

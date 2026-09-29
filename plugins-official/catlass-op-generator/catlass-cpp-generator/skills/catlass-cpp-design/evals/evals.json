@@ -1,0 +1,42 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 5,
+      "title": "Stage 设计规则检查",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "Linear Attention 进入方案设计时，R01 到 R21 如何在 CANNBot 中执行？",
+      "expected_output": "回复应要求完整读取 knowledge/workflow/solution-design-reference.md 和 stage-design-rules.md，先从 workflow.json 读取并冻结 target_architecture，写明匹配的 CATLASS_ARCH、ArchTag、Vector 执行模型及 Cube→Vector/Vector→Cube 数据路径，再完成 Stage 划分和具体详设，并逐条应用 R01-R21。完整设计推演可保存为 docs/design.full.md 中间产物；最终按 design.md.template 将结论投影为仅含‘目标与数学语义’和‘Stage 总览与完整详设’两章的 docs/design.md，Workspace 总量必须是第 2 章最后一小节，不生成独立 R01-R21 检查表章节。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "Kernel Stage 与同步模式",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "一个本地 finalize 代码参考按 head 分配 AIV 任务。当前算子独立 head 较少，部分 shape 的完整 head 工作集超出单个 AIV 的 UB，应如何选择分工并完成 Stage 和同步实现？",
+      "expected_output": "回复应按 R01 和 R20 联合评估 CG 与逐 head、同 head 分片两种分工，依据实际容量、数据依赖、负载和同步开销选择；静态分析排除不可行方案，性能优劣以同条件实测确认。实现读取knowledge/workflow/kernel-stage-sync-patterns.md 中对应分工的地址、搬运和同步伪代码，再对应目标平台 API。同 head 分片写明连续不重叠的有效区、对齐和尾部、共享输入及跨片归约代价；两片实际写回完成后 AIC 才消费，空片按选定协议参与通知，消费者完成后返回 free。逐 head 分配由 owner 计算，聚合模式下其他参与核仍按协议发送或等待通知。workspace/UB/L1 的读写、复用及双缓冲轮换写入 docs/design.md，并覆盖所选分工的边界用例。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "Stage 与执行单元解耦",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "一个算子的所有计算都由同一个 AIV 顺序执行，Stage 应如何划分？Stage 之间如何设计同步？",
+      "expected_output": "回复应先依据数据依赖、计算类型、生命周期和精度观察点划分 Stage，再映射 AIC/AIV；同一 AIV 可以顺序执行多个逻辑 Stage。同步应按实际 producer-consumer 边使用成对 HardEvent/CrossCore 通知，同一执行管线的连续计算按程序顺序组织，并在设计和代码校验中保持一致。",
+      "files": [],
+      "expectations": []
+    }
+  ],
+  "skill_name": "catlass-cpp-design"
+}
