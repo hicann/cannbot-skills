@@ -2247,7 +2247,7 @@ def main():
     html = tmpl.safe_substitute(replacements)
 
     # Self-check
-    warnings = self_check_report(html, rounds, wm, baseline_time, round_timing)
+    warnings = self_check_report(html, rounds, ri.wm, ri.baseline_time, round_timing)
     if warnings:
         LOGGER.warning("\n[报告自检警告]")
         for w in warnings:
