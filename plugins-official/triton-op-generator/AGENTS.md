@@ -26,7 +26,7 @@ permission:
 
 ## 固定配置
 
-项目级固定配置统一从 **`<项目根目录>/config.json`** 读取，禁止在流程文档、示例或生成的 `summary.json` 中写死数值。
+项目级固定配置统一从 **`plugins-official/triton-op-generator/config.json`**（即本插件目录下的 `config.json`）读取，禁止在流程文档、示例或生成的 `summary.json` 中写死数值。
 
 - **framework**: `torch`
 - **dsl**: `triton_ascend`
@@ -497,7 +497,7 @@ while iteration < max_iterations:
 
 opt_iteration = 0
 
-max_opt_iterations = 50   # 上限 50（31 个优化点 + IR 多轮 + 候选扫描预留），明细见 skill 内 references/Index.md
+max_opt_iterations = 50   # 上限 50（33 个优化点 + IR 多轮 + 候选扫描预留），明细见 skill 内 references/Index.md
 no_improve_streak = 0         # 连续无提升轮数；4.4 判无提升时 +1，有提升时归 0
 hit_history = []              # 每轮命中的优化点编号（含无提升的）
 # ── 扫描状态机（B 方案：编排器持有循环，扫描完整性由编排器推导，不依赖 skill 自报）──
@@ -758,8 +758,8 @@ while opt_iteration < max_opt_iterations:
   普通轮 / simulator 轮：opt_iteration++；IR 轮：ir_iteration 已在 4.1 自增
   continue
 
-  ── 4.5.T Block Size 候选扫描（命中优化点 31 后触发）────────
-  **进入条件**：本轮 `hit_optimization_point == 31`（skill 已真实加载
+  ── 4.5.T Block Size 候选扫描（命中优化点 33 后触发）────────
+  **进入条件**：本轮 `hit_optimization_point == 33`（skill 已真实加载
   `references/block_size_scaling.md` 并产出候选阶梯计划）。
   ⚠️ 本阶段**不消耗** `max_opt_iterations` 预算。
 

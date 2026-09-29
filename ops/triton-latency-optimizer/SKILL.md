@@ -50,8 +50,8 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 
 - `hit_optimization_point: int | None` —— 从 `scan_from` 起**第一个**命中的编号。
   调用方据此推导 `[scan_from, hit-1]` 区间均未命中，**本 skill 无需逐条上报扫描记录**。
-  从 `scan_from` 扫到 32 均不命中时返回 `None`。
-- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 29（IR 分析）时该字段有意义；其他轮次（命中 1-31 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
+  从 `scan_from` 扫到 33 均不命中时返回 `None`。
+- `ir_has_more_suggestions: bool` —— IR 分析器是否还能给出新优化建议。仅当本轮命中点为 31（IR 分析）时该字段有意义；其他轮次（命中 1-30、32、33 或无命中）一律置 `false`。Phase 4 调用方据此判断是否进入下一轮 IR 迭代。
 
 ## 主流程（必须严格执行）
 
@@ -75,6 +75,7 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
 
 32 与 33 因编号最大，按序扫描时**必然在 1-31 全部判定完毕之后**才被检查，
 天然就是「优化点命中完的最后一步」，无需额外的调用模式。
+（1-30 为普通优化点，其中 30=MLA 专用；31=IR 分析。）
 
 - **命中 32（Autotune）**：加载 `references/autotune.md`，对可调 `tl.constexpr` 参数
   （含单维 BLOCK，任意命名）配置 `@triton.autotune`；若 BLOCK 由 host 侧按 shape 分档、
@@ -103,9 +104,9 @@ latency-optimizer 在返回信息中**必须包含**以下字段：
                  ▼
       调用方 verify + benchmark → 采纳/回退 → 更新 cursor/版本
                  │
-                 │ 编号 1-29 判定完毕后，扫描自然到达：
+                 │ 编号 1-31 判定完毕后，扫描自然到达：
                  ▼
-        30 Autotune ──不适用/失败──▶ 31 Block Size Scaling
+        32 Autotune ──不适用/失败──▶ 33 Block Size Scaling
                  │                        │ 产出候选阶梯计划
                  │                        ▼
                  │            调用方逐候选 verify+benchmark，取最优
