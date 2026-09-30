@@ -119,7 +119,7 @@ rewrite to a later optimization pass (cake-evo).
 - **[Model Definition]**: a `Model(nn.Module)` calling [module_fn]  
 - **[Configurations]**: hyper-parameters and input helper functions  
 
-### generate requirment
+### generate requirement
 Your task is to generate an **Ascend DSL** that replicates the computation in [module_fn], optimized for the input shape specified in Configurations.
 You only can launch a kernel once.
 Follow the implementation patterns demonstrated in the example, **always use `tl.num_vec_cores()` for dynamic core count** (never hard-code `n_cores = 16` or any constant), and adopt a similar core partitioning and tiling strategy where applicable.

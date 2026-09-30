@@ -8,7 +8,7 @@
 
 | 我要做什么 | 去哪个目录 | 优先看什么文件 |
 |---|---|---|
-| 了解整体架构与模块关系 | `architeture/` | 架构总览、模块边界、流程图类文档 |
+| 了解整体架构与模块关系 | `architecture/` | 架构总览、模块边界、流程图类文档 |
 | 查看规则、入库标准、规则写法 | `standards/` | 入库规则、规则模板、规则示例 |
 | 查芯片硬件差异与平台特征（`externel_refs` **按需获取**，见 `externel_refs/README.md`） | `externel_refs/hardware/` | `Ascend*.md`、`CUDA_A100.md` |
 | 查官方算子 API / 调用与开发文档（按需获取） | `externel_refs/official_operator_api_introduction/` | 各域 `docs/zh/op_api_list.md`、`op_list.md`、`context/*` |

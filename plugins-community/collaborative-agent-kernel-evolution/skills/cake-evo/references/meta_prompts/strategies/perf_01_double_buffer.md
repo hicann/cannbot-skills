@@ -62,7 +62,7 @@ TQue<QuePosition::VECOUT, DB_BUFFER> mxScaleQueue_;
 TQue<QuePosition::VECOUT, DB_BUFFER> outQueue_;
 
 int64_t maxUbAvailable = tilingParam.ubSize / N_BUFFER / EXIST_NODE_NUM;
-tilingParam.maxUbCol = static_cast<int64_t>(maxUbAvailable / static_cast<int64_t>(tilingParam.vfLen) / 
+tilingParam.maxUbCol = static_cast<int64_t>(maxUbAvailable / static_cast<int64_t>(tilingParam.vfLen) /
     (tilingParam.blockSize*DIGIT_TWO) * (tilingParam.blockSize*DIGIT_TWO));
 
 this->pipe_.InitBuffer(this->inQueue_, DB_BUFFER, bufferSize_);
@@ -130,7 +130,7 @@ Trade-off: 代码量增加，需要维护多个kernel变体
 
 ---
 
-## Variant D: 双缓冲(Doble Buffering)优化
+## Variant D: 双缓冲(Double Buffering)优化
 Source: add_rms_norm_cast
 
 在MultiN模式中，专家实现使用了双缓冲技术（DOUBLE_BUFFER_NUM = 2），允许在计算当前数据块的同时，预取下一个数据块。输入队列inQueueX深度设为2，可以容纳两个数据块；输出队列outQueueY深度也设为2。通过PipeBarrier和事件同步确保数据依赖正确。这种设计有效地隐藏了内存访问延迟，内存访问与计算重叠，提高流水线利用率。
@@ -377,11 +377,11 @@ event_t pingId_{EVENT_ID6};
 for (uint32_t idx = 0; idx < curCoreLoops_; idx++) {
     auto pipeId = (idx % 2 == 0) ? pingId_ : pongId_;
     LocalTensor<XTYPE> xLocal = (idx % 2 == 0) ? pingBuf_.Get<XTYPE>() : pongBuf_.Get<XTYPE>();
-    
+
     WaitFlag<HardEvent::MTE3_MTE2>(pipeId);  // 等待数据就绪
     CopyIn(xLocal, groupRowOffset, inRows);
     SetFlag<HardEvent::MTE2_V>(pipeId);       // 标记数据已载入
-    
+
     WaitFlag<HardEvent::MTE2_V>(pipeId);      // 等待计算完成
     ComputeDequant(xLocal, inRows, idx * curCoreLoopRow_);
     SetFlag<HardEvent::V_MTE3>(pipeId);       // 标记计算完成
@@ -440,15 +440,15 @@ Source: dynamic_block_quant
 inline static int64_t CalcPerBlockUbSize(DataType inputType, DynamicBlockQuantTilingParam& tilingParam) {
     int64_t perBlockTmpUbSize = 0;
     if (tilingParam.blockSizeRow == 1) {
-        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol 
+        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol
             * (BYTES_OF_INPUT_TYPE + BYTES_OF_OUTPUT_TYPE);
         perBlockUbSize = perBlockTmpUbSize + BLOCK_SIZE;
     } else if (inputType == DT_FLOAT16) {
-        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol 
+        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol
             * (BYTES_OF_INPUT_TYPE * DIGIT_TWO + BYTES_OF_OUTPUT_TYPE);
         perBlockUbSize = perBlockTmpUbSize + BLOCK_SIZE / BYTES_OF_INPUT_TYPE * BYTES_OF_FLOAT_TYPE + BLOCK_SIZE;
     } else {
-        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol 
+        perBlockTmpUbSize += tilingParam.blockSizeRow * tilingParam.blockSizeCol
             * (BYTES_OF_INPUT_TYPE + BYTES_OF_OUTPUT_TYPE + BYTES_OF_FLOAT_TYPE);
         perBlockUbSize = perBlockTmpUbSize + BLOCK_SIZE * DIGIT_TWO;
     }
@@ -526,15 +526,15 @@ SetFlag<HardEvent::MTE3_V>(eventMTE3V);
 
 for (uint64_t i = 0; i < multiRow; i++) {
     // ... 计算逻辑 ...
-    
+
     if (unlikely(i == 0)) {
         WaitFlag<HardEvent::MTE3_S>(eventMTE3S);  // 首次迭代等待初始化完成
     }
-    
+
     event_t event_v_mte3 = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
     SetFlag<HardEvent::V_MTE3>(event_v_mte3);
     WaitFlag<HardEvent::V_MTE3>(event_v_mte3);
-    
+
     // Copy out...
 }
 ```
@@ -571,9 +571,9 @@ __aicore__ inline void ComputeAndCopyOut(const uint64_t progress, const uint64_t
 {
     bool isNeedSwitch = CheckIsNeedSwitchAddQue(currentId);
     bool isLimite = addCount_[addParam_.switchId] == LIMIT_COUNT_NUM;
-    
+
     AtomicAddInUb(gradLocal);
-    
+
     if (isLimite || isLastRow) {
         CopyOut(addParam_.switchId, currentId, dimJ);
     }

@@ -10,7 +10,7 @@ Generate Ascend operator invocation code and project json configuration file fro
 
 ## Workflow
 1. read input functional pytorch code `{op_name}_functional.py`
-2. read three example output files in `references/{op_name}` dir by op catagory
+2. read three example output files in `references/{op_name}` dir by op category
     - For pool ops: `average_pooling2d`
     - For reduction ops: `sum_reduction_over_a_dimension`
     - For loss ops: `mse_loss`

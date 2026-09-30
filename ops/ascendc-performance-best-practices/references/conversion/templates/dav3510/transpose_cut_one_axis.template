@@ -253,7 +253,7 @@ __aicore__ inline void TransposeCutOneAxis<T>::CopyOut(int64_t loopIdx, int64_t 
     for (int64_t i = 0; i < NDDMA_MAX_DIM_NUM; i++) {
         dstAddressOffset += dstAddressOffsetMixedBase_[i] * dstLoopStride_[i];
     }
-    // MTE3 parms
+    // MTE3 params
     DataCopyExtParams copyOutParams{1, 0, 0, 0, 0};
     LoopModeParams loopParams;
 

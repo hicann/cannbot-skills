@@ -9,12 +9,12 @@
 # ----------------------------------------------------------------------------------------------------------
 
 """Tests for C34c copy-shape detector."""
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-import pytest
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parent.parent.parent))
@@ -96,7 +96,9 @@ void compute(int* arr, int count) {
 """
     result = cs.check("renamed_copy", cand, [src], threshold=0.05)
     # Renamed copy → high score
-    assert result.score > 0.3, f"renamed copy should have high score, got {result.score}"
+    assert result.score > 0.3, (
+        f"renamed copy should have high score, got {result.score}"
+    )
     assert not result.passed
 
 
@@ -126,7 +128,7 @@ def test_copy_shape_threshold_configurable(tmp_path):
     strict = cs.check("c", cand, [src], threshold=0.05)
     assert not strict.passed  # loop part matches → score > 5%
 
-    # Tunable: score is determinstic; assert score < 1.0 (some non-matching tail)
+    # Tunable: score is deterministic; assert score < 1.0 (some non-matching tail)
     assert strict.score < 1.0, "candidate has novel suffix, score should be < 1"
 
 

@@ -251,7 +251,7 @@ Source: apply_adagrad_d
 ge::graphStatus ApplyAdagradDTiling::CheckDtype() {
     auto varDesc = tilingContext_->GetInputDesc(0);
     this->varDtype_ = varDesc->GetDataType();
-    
+
     for (int32_t inputIdx = ACCUM_INDEX; inputIdx < INPUT_NUM; inputIdx++) {
         auto inputDesc = tilingContext_->GetInputDesc(inputIdx);
         auto curDtype = inputDesc->GetDataType();
@@ -757,7 +757,7 @@ int64_t GetDTypeKey(ge::DataType tensorDtype, ge::DataType paramDtype)
 
 ge::graphStatus InputDtypeCheck(...)
 {
-    OP_CHECK_IF(!isFloatDtype(xDtype), 
+    OP_CHECK_IF(!isFloatDtype(xDtype),
         OP_LOGE(context->GetNodeName(), "x dtype must be in float32, float16, bfloat16."),
         return ge::GRAPH_FAILED);
     OP_CHECK_IF(gammaDtype != betaDtype,
@@ -861,7 +861,7 @@ ge::graphStatus SparseToDenseTiling::CheckInputDtype() {
 
 ge::graphStatus SparseToDenseTiling::CheckInputShape() {
     OP_CHECK_IF((indicesDimNum_ > DIM_NUM_2),
-        OP_LOGE(opName_, "indicesDimNum cannnot be greater than 2"),
+        OP_LOGE(opName_, "indicesDimNum cannot be greater than 2"),
         return ge::GRAPH_FAILED);
 }
 ```

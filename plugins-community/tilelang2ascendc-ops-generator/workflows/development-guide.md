@@ -85,7 +85,7 @@ generation → AST退化检测 → [通过] → 功能验证 → [通过] → �
 ├── kernel/                   # AscendC kernel
 ├── model_new_tilelang.py     # TileLang 实现
 ├── model_new_ascendc.py      # AscendC 实现
-├── preformance.json          # 性能数据
+├── performance.json          # 性能数据
 └── trace.md                  # 执行记录（Phase 7 知识演进输入）
 ```
 
