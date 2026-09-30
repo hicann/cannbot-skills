@@ -67,7 +67,7 @@ repos:
         entry: bash scripts/run_codespell.sh
         args: [
             "-L",
-            "CANN,cann,NNAL,nnal,ASCEND,ascend,EnQue,CopyIn,ArchType,AND,ND,nd,te,tbe,copyin,alog,wIh,dout,indexs,inH,padD,outWeight,vor,invokable,VALU,LastR,nin,COO,registe,CLen,REGIST,fo,subtile,rIn,IndexT,ot,iput,datas",
+            "CANN,cann,NNAL,nnal,ASCEND,ascend,EnQue,CopyIn,ArchType,AND,ND,nd,te,tbe,copyin,alog,wIh,dout,indexs,inH,padD,outWeight,vor,invokable,VALU,LastR,nin,COO,registe,CLen,REGIST,fo,subtile,rIn,IndexT,ot,iput,datas,allOne,ist",
             "--skip",
             "*.cc,*.cjs,*.clang-format,*.cmake,*.cpp,*.csv,*.cts,*.gitignore,*.gitkeep,*.gitmodules,*.h,*.hpp,*.in,*.info,*.ini,*.js,*.json,*.jsonl,*.log,*.py,*.sh,*.TAG,*.ts,*.tsx,*.txt,*.xml",
           ]
