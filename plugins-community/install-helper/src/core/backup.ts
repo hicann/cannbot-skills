@@ -12,7 +12,7 @@ import { existsSync, copyFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import type { AITool, BackupInfo } from "../types/index.js";
 import { readAllManifests } from "./manifest.js";
-import { readRecord } from "./record.js";
+import { readRecords } from "./record.js";
 import { findPlugin, getAllPlugins } from "./registry.js";
 import { getAgentsFileName } from "../utils/paths.js";
 
@@ -166,10 +166,9 @@ function readAllRecords(): any[] {
   const plugins = getAllPlugins();
 
   for (const plugin of plugins) {
-    const record = readRecord(plugin.id);
-    if (record) {
-      records.push(record);
-    }
+    // A plugin may carry records for several locations — flatten them all
+    // so detectCurrentPlugin can match any of them.
+    records.push(...readRecords(plugin.id));
   }
 
   return records;

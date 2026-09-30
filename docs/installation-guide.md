@@ -63,6 +63,16 @@ npm install -g @cannbot-ai/install-helper
 
 > 完整命令参考和详细文档：[install-helper README](../plugins-community/install-helper/README.md)
 
+### 安装 cannbot 仓插件
+
+部分插件已迁移至 [cannbot 仓](https://gitcode.com/cann/cannbot) 维护，install-helper 直接支持：无需更换工具，`install-helper install <插件名>` 即可，产物与官方安装器直装完全一致（详见 [install-helper README](../plugins-community/install-helper/README.md#安装-cannbot-仓插件)）。
+
+```bash
+install-helper install ops-direct-invoke --tool opencode
+```
+
+cannbot 仓插件在 `list` / `status` 中带 `[cannbot]` 徽标；仅支持 project 级安装与 opencode / codex / claude / trae 四种工具。
+
 ### 手动执行安装脚本
 
 如果不使用 install-helper，也可以进入对应插件目录手动执行 `init.sh` 安装脚本。以安装 AscendC Kernel 直调插件到 OpenCode 为例：

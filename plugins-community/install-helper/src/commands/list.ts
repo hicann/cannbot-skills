@@ -10,6 +10,8 @@
 
 import { getAllPlugins } from "../core/registry.js";
 import { scanInstalled } from "../core/manifest.js";
+import { ensureCannbotDiscovery } from "../core/cannbot-installer.js";
+import { scanCannbotInstalled } from "../core/cannbot-registry.js";
 import { printPluginList } from "../ui/display.js";
 import { createRepositoryManager } from "../core/repository.js";
 
@@ -19,10 +21,27 @@ export async function listCommand(): Promise<void> {
     await repoManager.ensureRepoAndScan();
   } catch {
   }
+  await ensureCannbotDiscovery();
 
   const plugins = getAllPlugins();
   const installed = scanInstalled();
   const installedMap = new Map(installed.map((p) => [p.id, p]));
+
+  // cannbot-style installs: registry-driven, project-level only
+  for (const entry of scanCannbotInstalled()) {
+    if (!installedMap.has(entry.id)) {
+      installedMap.set(entry.id, {
+        id: entry.id,
+        displayName: entry.id,
+        tool: entry.tool as import("../types/index.js").AITool,
+        level: "project",
+        skillsCount: entry.skillsCount,
+        agentsCount: entry.agentsCount,
+        installTime: "",
+        configRoot: entry.registryPath,
+      });
+    }
+  }
 
   printPluginList(plugins, installedMap);
 }

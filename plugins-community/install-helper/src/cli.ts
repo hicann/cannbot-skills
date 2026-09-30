@@ -102,10 +102,11 @@ export function createCLI(): Command {
     .description("Install plugins or skills (auto-detects type)")
     .option("-t, --tool <tool>", "AI tool (opencode, claude, trae, cursor, codex, copilot, codearts)")
     .option("-l, --level <level>", "Install level (project, global)", "project")
+    .option("-s, --source <source>", "Plugin source for same-name plugins (cannbot, skills)")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("-a, --all", "Install ALL available skills")
     .option("--list", "List all available skills by category")
-    .action(async (names: string[], options: { tool?: string; level?: string; yes?: boolean; all?: boolean; list?: boolean }) => {
+    .action(async (names: string[], options: { tool?: string; level?: string; source?: string; yes?: boolean; all?: boolean; list?: boolean }) => {
       await installCommand(names, options);
     });
 

@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { getCannbotConfigDir, getSkillsRoot } from "../utils/paths.js";
 import { atomicWriteFileSync } from "../utils/fs.js";
 import { isSymlink } from "../utils/fs-helpers.js";
@@ -27,6 +27,9 @@ export interface InstallRecord {
   installTime: string;
   files: string[];
   directories: string[];
+  /** "delegated" = installed via the cannbot installer (@cannbot-plugin/cannbot);
+   *  absent/legacy = installed by install-helper itself. */
+  kind?: "legacy" | "delegated";
   backup?: {
     filePath: string;
     fromPluginId: string;
@@ -34,6 +37,25 @@ export interface InstallRecord {
     backupTime: string;
   };
 }
+
+/** Location dimensions of an install: the same plugin can be installed at
+ *  several locations (different projects, tools or levels) simultaneously —
+ *  each keeps its own record so a later install elsewhere never clobbers the
+ *  bookkeeping of an earlier one (uninstall would otherwise delete the wrong
+ *  location's files). */
+export interface RecordLocation {
+  tool: AITool;
+  level: InstallLevel;
+  installPath: string;
+}
+
+interface RecordStore {
+  version: 2;
+  /** key: `${tool}:${level}:${resolved installPath}` */
+  locations: Record<string, InstallRecord>;
+}
+
+const LEGACY_LOCATION_KEY = "__legacy__";
 
 function getInstallsDir(): string {
   return join(getCannbotConfigDir(), "installs");
@@ -43,35 +65,119 @@ export function getRecordPath(pluginId: string): string {
   return join(getInstallsDir(), `${pluginId}.json`);
 }
 
-export function readRecord(pluginId: string): InstallRecord | null {
+function locationKey(loc: RecordLocation): string {
+  return `${loc.tool}:${loc.level}:${resolve(loc.installPath)}`;
+}
+
+/** Reads the record file, migrating the v1 single-record format (a plain
+ *  InstallRecord object) to the v2 location-keyed store in memory. */
+function readStore(pluginId: string): RecordStore | null {
   const recordPath = getRecordPath(pluginId);
   if (!existsSync(recordPath)) {
     return null;
   }
 
+  let parsed: unknown;
   try {
-    const content = readFileSync(recordPath, "utf-8");
-    return JSON.parse(content) as InstallRecord;
+    parsed = JSON.parse(readFileSync(recordPath, "utf-8"));
   } catch {
     logger.warn(t("record_corrupted").replace("{file}", recordPath));
     return null;
   }
+
+  const store = parsed as Partial<RecordStore> & Partial<InstallRecord>;
+  if (store && typeof store === "object" && "locations" in store && store.locations) {
+    return { version: 2, locations: store.locations as Record<string, InstallRecord> };
+  }
+
+  // v1: a single InstallRecord object
+  const legacy = parsed as InstallRecord;
+  if (legacy && typeof legacy === "object" && typeof legacy.pluginId === "string") {
+    const key =
+      legacy.tool && legacy.level && legacy.installPath
+        ? locationKey(legacy)
+        : LEGACY_LOCATION_KEY;
+    return { version: 2, locations: { [key]: legacy } };
+  }
+
+  logger.warn(t("record_corrupted").replace("{file}", recordPath));
+  return null;
 }
 
-export function writeRecord(record: InstallRecord): void {
+function writeStore(pluginId: string, store: RecordStore): void {
   const installsDir = getInstallsDir();
   if (!existsSync(installsDir)) {
     mkdirSync(installsDir, { recursive: true });
   }
-
-  const recordPath = getRecordPath(record.pluginId);
-  atomicWriteFileSync(recordPath, JSON.stringify(record, null, 2));
+  atomicWriteFileSync(getRecordPath(pluginId), JSON.stringify(store, null, 2));
 }
 
-export function deleteRecord(pluginId: string): void {
+/** All location records for a plugin (any tool / level / install path). */
+export function readRecords(pluginId: string): InstallRecord[] {
+  const store = readStore(pluginId);
+  return store ? Object.values(store.locations) : [];
+}
+
+const byLatest = (a: InstallRecord, b: InstallRecord) =>
+  (b.installTime || "").localeCompare(a.installTime || "");
+
+/**
+ * The record uninstall/install flows should act on, preferring the one that
+ * matches the current working directory:
+ *   1. project-level record whose installPath is the cwd (latest first)
+ *   2. global-level record (latest first)
+ *   3. latest record overall (legacy compatibility: acts on the recorded
+ *      location even when run from an unrelated directory)
+ */
+export function readRecord(pluginId: string): InstallRecord | null {
+  const records = readRecords(pluginId);
+  if (records.length === 0) {
+    return null;
+  }
+
+  const cwd = resolve(process.cwd());
+  const localMatch = records
+    .filter((r) => r.level === "project" && resolve(r.installPath) === cwd)
+    .sort(byLatest);
+  if (localMatch.length > 0) return localMatch[0];
+
+  const globalMatch = records.filter((r) => r.level === "global").sort(byLatest);
+  if (globalMatch.length > 0) return globalMatch[0];
+
+  return [...records].sort(byLatest)[0];
+}
+
+export function writeRecord(record: InstallRecord): void {
+  const store = readStore(record.pluginId) ?? { version: 2, locations: {} };
+  store.locations[locationKey(record)] = record;
+  writeStore(record.pluginId, store);
+}
+
+/**
+ * Removes record locations. With `where`, only the matching location is
+ * removed (the file is pruned when the last location goes away); without it,
+ * the whole record file is deleted (legacy whole-plugin semantics).
+ */
+export function deleteRecord(pluginId: string, where?: RecordLocation): void {
   const recordPath = getRecordPath(pluginId);
-  if (existsSync(recordPath)) {
+  if (!existsSync(recordPath)) {
+    return;
+  }
+
+  if (!where) {
     unlinkSync(recordPath);
+    return;
+  }
+
+  const store = readStore(pluginId);
+  if (!store) {
+    return;
+  }
+  delete store.locations[locationKey(where)];
+  if (Object.keys(store.locations).length === 0) {
+    unlinkSync(recordPath);
+  } else {
+    writeStore(pluginId, store);
   }
 }
 

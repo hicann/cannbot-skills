@@ -40,10 +40,14 @@ describe("update", () => {
 
   it("update.ts continue on invalid plugin name instead of return (M4)", async () => {
     const src = readFileSync(join(__dirname, "..", "src", "commands", "update.ts"), "utf-8");
-    const errorBlockMatch = src.match(/if \(!plugin\) \{[\s\S]*?\n\s*\}/);
-    expect(errorBlockMatch).toBeTruthy();
-    expect(errorBlockMatch![0]).toContain("continue");
-    expect(errorBlockMatch![0]).not.toContain("return;");
+    const loopStart = src.indexOf("for (const name of pluginNames) {");
+    expect(loopStart).toBeGreaterThan(-1);
+    const loopEnd = src.indexOf("targets.length === 0", loopStart);
+    expect(loopEnd).toBeGreaterThan(loopStart);
+    const loopBody = src.slice(loopStart, loopEnd);
+    expect(loopBody).toContain("error_plugin_not_found");
+    expect(loopBody).toContain("continue");
+    expect(loopBody).not.toContain("return;");
   });
 
   it("update.ts handles multiple install targets (tool+level per plugin)", async () => {

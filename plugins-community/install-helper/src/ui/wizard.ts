@@ -10,7 +10,7 @@
 
 import { select, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
-import type { AITool, InstallLevel, WizardAnswers } from "../types/index.js";
+import type { AITool, InstallLevel, PluginSource, WizardAnswers } from "../types/index.js";
 import { getAllPlugins } from "../core/registry.js";
 import { detectTools, getToolDisplayName } from "../core/detector.js";
 import { readAllManifests } from "../core/manifest.js";
@@ -34,6 +34,18 @@ export async function selectToolWithDetection(): Promise<AITool | "back" | "canc
   if (result === BACK) return "back";
   if (result === CANCEL) return "cancel";
   return result as AITool;
+}
+
+// Wizard choice values encode the plugin source so same-name cannbot and
+// legacy entries stay distinguishable through selection, confirm and install.
+export function encodePluginChoice(id: string, source?: PluginSource): string {
+  return source === "cannbot" ? `cannbot::${id}` : `skills::${id}`;
+}
+
+export function decodePluginChoice(value: string): { id: string; source: PluginSource } {
+  if (value.startsWith("cannbot::")) return { id: value.slice("cannbot::".length), source: "cannbot" };
+  if (value.startsWith("skills::")) return { id: value.slice("skills::".length), source: "skills" };
+  return { id: value, source: "skills" };
 }
 
 export async function runWizard(): Promise<WizardAnswers> {
@@ -213,9 +225,10 @@ async function stepPlugins(tool: AITool, level: InstallLevel): Promise<string[] 
   const choices: Array<{ name: string; value: string; description?: string } | Separator> = plugins.map((p) => {
     const isInstalled = installedSet.has(p.id);
     const suffix  = isInstalled ? ` [${t("wizard_already_installed")}]` : "";
+    const badge = p.source === "cannbot" ? chalk.magenta(" [cannbot]") : "";
     return {
-      name: `> ${chalk.cyan(p.displayName)}${suffix}`,
-      value: p.id,
+      name: `> ${chalk.cyan(p.displayName)}${badge}${suffix}`,
+      value: encodePluginChoice(p.id, p.source),
       description: p.description,
     };
   });
@@ -245,7 +258,10 @@ async function stepConfirm(
   printBoxTitle(t("wizard_step_4_title"));
 
   const allPlugins = getAllPlugins();
-  const selectedPlugins = plugins.map((id) => allPlugins.find((p) => p.id === id));
+  const selectedPlugins = plugins.map((value) => {
+    const { id, source } = decodePluginChoice(value);
+    return allPlugins.find((p) => p.id === id && (p.source ?? "skills") === source);
+  });
 
   const displayPath = getConfigRoot(tool, level);
   const toolName = getToolDisplayName(tool);

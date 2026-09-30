@@ -10,7 +10,7 @@
 
 import chalk from "chalk";
 import Table from "cli-table3";
-import type { PluginEntry, InstalledPlugin, AITool } from "../types/index.js";
+import type { PluginEntry, InstalledPlugin, AITool, PluginSource } from "../types/index.js";
 import { t } from "../utils/i18n.js";
 import { getToolDisplayName } from "../core/detector.js";
 import { findPlugin } from "../core/registry.js";
@@ -36,10 +36,13 @@ export function printPluginList(
     const status = isInstalled
       ? chalk.green(`✓ ${t("status_installed")}`)
       : chalk.dim(`—`);
+    const badge = plugin.source === "cannbot"
+      ? chalk.magenta(" [cannbot]") + (plugin.version ? chalk.dim(` v${plugin.version}`) : "")
+      : "";
 
     table.push([
       String(index + 1),
-      plugin.displayName,
+      plugin.displayName + badge,
       status,
       plugin.description || chalk.dim("—"),
     ]);
@@ -59,6 +62,7 @@ export function printInstallSummary(
     success: boolean;
     skillsCount: number;
     agentsCount: number;
+    source?: PluginSource;
   }>
 ): void {
   const successCount = results.filter((r) => r.success).length;
@@ -92,6 +96,7 @@ export function printEnhancedSummary(
     success: boolean;
     skillsCount: number;
     agentsCount: number;
+    source?: PluginSource;
   }>,
   tool: AITool,
   configRoot: string
@@ -121,7 +126,12 @@ export function printEnhancedSummary(
   ];
 
   if (successResults.length === 1) {
-    const plugin = findPlugin(successResults[0].pluginId);
+    // Source-scoped: a --source skills install must point at the legacy
+    // entry's docs, not the same-name cannbot package (unscoped lookup is
+    // cannbot-first).
+    const plugin = findPlugin(successResults[0].pluginId, {
+      source: successResults[0].source,
+    });
     const docsPath = plugin ? `${plugin.dir}/quickstart.md` : `${successResults[0].pluginId}/quickstart.md`;
     lines.push(
       `  ${chalk.dim(t("install_enhanced_docs"))}: ${chalk.dim(docsPath)}`

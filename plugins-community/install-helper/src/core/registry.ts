@@ -10,7 +10,7 @@
 
 import { readdirSync, existsSync } from "fs";
 import { join } from "path";
-import type { PluginEntry } from "../types/index.js";
+import type { PluginEntry, PluginSource } from "../types/index.js";
 import { isDirectory } from "../utils/fs-helpers.js";
 import { getPluginDirs } from "./scanner.js";
 import embeddedPlugins from "../embedded-plugins.json" with { type: "json" };
@@ -24,6 +24,20 @@ function loadPlugins(): PluginEntry[] {
 }
 
 export let PLUGIN_REGISTRY: PluginEntry[] = loadPlugins();
+
+// cannbot-repo plugins discovered from the managed @cannbot-plugin/cannbot
+// package (dist/plugins manifests). Kept separate from the embedded legacy
+// snapshot: cannbot entries are resolved at runtime and never baked into
+// embedded-plugins.json (no release coupling with the cannbot repo).
+let CANNBOT_PLUGINS: PluginEntry[] = [];
+
+export function setCannbotPlugins(entries: PluginEntry[]): void {
+  CANNBOT_PLUGINS = entries.map((entry) => ({ ...entry, source: "cannbot" as PluginSource }));
+}
+
+export function getCannbotPlugins(): PluginEntry[] {
+  return [...CANNBOT_PLUGINS];
+}
 
 export function mergeDynamicPlugins(repoPath: string): void {
   if (!existsSync(repoPath)) return;
@@ -76,8 +90,27 @@ export function mergeDynamicPlugins(repoPath: string): void {
   }
 }
 
-export function findPlugin(query: string): PluginEntry | undefined {
+export function findPlugin(
+  query: string,
+  options?: { source?: PluginSource }
+): PluginEntry | undefined {
   const normalized = query.toLowerCase().trim();
+  const wantCannbot = options?.source !== "skills";
+
+  // cannbot-source plugins win for same-name ids (migration policy: the new
+  // generation in the cannbot repo is authoritative; the legacy version can
+  // still be requested explicitly via --source skills).
+  if (wantCannbot) {
+    const cannbotExact = CANNBOT_PLUGINS.find(
+      (p) => p.id === normalized || p.id === query.trim()
+    );
+    if (cannbotExact) return cannbotExact;
+
+    const cannbotAlias = CANNBOT_PLUGINS.find((p) =>
+      p.aliases.some((a) => a === normalized)
+    );
+    if (cannbotAlias) return cannbotAlias;
+  }
 
   const exactMatch = PLUGIN_REGISTRY.find(
     (p) => p.id === normalized || p.id === query.trim()
@@ -89,6 +122,11 @@ export function findPlugin(query: string): PluginEntry | undefined {
   );
   if (aliasMatch) return aliasMatch;
 
+  if (wantCannbot) {
+    const cannbotPrefixes = CANNBOT_PLUGINS.filter((p) => p.id.startsWith(normalized));
+    if (cannbotPrefixes.length === 1) return cannbotPrefixes[0];
+  }
+
   const prefixMatches = PLUGIN_REGISTRY.filter((p) => p.id.startsWith(normalized));
   if (prefixMatches.length === 1) return prefixMatches[0];
 
@@ -96,9 +134,13 @@ export function findPlugin(query: string): PluginEntry | undefined {
 }
 
 export function getAllPlugins(): PluginEntry[] {
-  return PLUGIN_REGISTRY;
+  return [...CANNBOT_PLUGINS, ...PLUGIN_REGISTRY].sort((a, b) =>
+    a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0
+  );
 }
 
 export function getPluginById(id: string): PluginEntry | undefined {
+  const cannbot = CANNBOT_PLUGINS.find((p) => p.id === id);
+  if (cannbot) return cannbot;
   return PLUGIN_REGISTRY.find((p) => p.id === id);
 }

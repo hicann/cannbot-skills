@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, readFileSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, isAbsolute } from "path";
 import { execa, execaSync } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, BackupInfo } from "../types/index.js";
 import { getPluginById } from "./registry.js";
@@ -47,7 +47,12 @@ export function scriptSupportsTool(scriptPath: string, tool: AITool): boolean {
 export async function installPlugin(
   opts: InstallOptions
 ): Promise<InstallResult> {
-  const plugin = getPluginById(opts.pluginId);
+  // Prefer the caller-resolved entry (installPluginRouted passes the entry
+  // it routed on — source-scoped). Re-resolving by bare id here would apply
+  // cannbot-first precedence to a legacy-routed install of a same-name
+  // plugin, silently swapping in the cannbot entry whose absolute dir and
+  // sentinel script violate this script-installer's contract.
+  const plugin = opts.plugin ?? getPluginById(opts.pluginId);
   if (!plugin) {
     return {
       success: false,
@@ -59,7 +64,24 @@ export async function installPlugin(
     };
   }
 
-  const pluginDir = join(opts.repoPath, plugin.dir);
+  // Guard: cannbot-source entries must go through installPluginRouted
+  // delegation, never the legacy script path. Reached only via internal
+  // routing errors — refuse with a clear message instead of a bogus
+  // double-joined script path.
+  if (plugin.source === "cannbot") {
+    return {
+      success: false,
+      pluginId: opts.pluginId,
+      skillsCount: 0,
+      agentsCount: 0,
+      errors: [t("error_cannbot_requires_delegation").replace("{plugin}", plugin.displayName)],
+      warnings: [],
+    };
+  }
+
+  // Legacy entries carry repo-relative dirs; cannbot discovery entries are
+  // absolute (managed installer package) and must never be joined onto repoPath.
+  const pluginDir = isAbsolute(plugin.dir) ? plugin.dir : join(opts.repoPath, plugin.dir);
   const cwd = opts.installPath || process.cwd();
   const configRoot = getConfigRoot(opts.tool, opts.level, opts.installPath);
   const agentsFile = join(configRoot, getAgentsFileName(opts.tool));

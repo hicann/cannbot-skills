@@ -1,4 +1,10 @@
 ## 🔥 更新日志
+
+> **记录规则**：单条不超过 **200 字**，按【领域】+ 问题 + 修复要点组织；技术细节、验证数据与发布过程放 PR 描述 / commit message，不写入日志。
+
+### 【2026-09-29】
+#### 缺陷修复 Bug Fixes
+- 【安装部署】install-helper `v1.2.1` 修复安装链路：双源同名插件经 legacy 路由被内部二次解析偷换为 cannbot 条目（路径双拼接）报"未找到安装脚本"，改为优先使用调用方已解析条目；另修复矩阵验证问题——安装记录位置键控（多处安装不覆盖、卸载不删错）、卸载用记录 configRoot、摘要按 source 域解析、失败退出码非零。单测 340/340。
 ### 【2026-09-28】
 #### 变更 Changes
 - 【AscendC 迁移】`ascendc-cross-gen-port-light` 旧分发副本从 `plugins-community/ascendc-port-orchestrator/skills/` 移除（31 个文件），唯一权威副本为 `ops/ascendc-cross-gen-port-light`；插件 init.sh 安装清单、plugin.json 描述与文档入口同步更新。该 skill 的跨 skill 引用改为仅按名称单向依赖，不再使用相对路径链接。
@@ -8,6 +14,9 @@
 - 【TileLang】修复 `ops/tilelang-perf-optimization/SKILL.md` 效果验证步骤中的失效调试指南链接，改为仓内已有的 API 调试说明和生成代码检查指南。
 
 ### 【2026-09-24】
+#### 新特性 New Features
+- 【安装部署】install-helper `v1.2.0` 新增 cannbot 仓插件兼容安装（委托转发架构）：托管 `@cannbot-plugin/cannbot` 安装器并委托执行，产物布局与直装一致；补齐卸载/列表/状态生命周期；同名插件 cannbot 优先；适配安装器 1.8.0 与目录更名。四轮 beta 试点后发布。
+
 #### 缺陷修复 Bug Fixes
 - 【cake】`ascend-call-generation/references/average_pooling2d/average_pooling2d.cpp` 补 `kernel_size > 0` 的 `TORCH_CHECK`（issue #706）。该函数经 `TORCH_LIBRARY_IMPL` 与 `PYBIND11_MODULE` 两个入口注册为对外接口，`kernel_size` 原样赋给 `actual_stride` 后作为 `height / actual_stride`、`width / actual_stride` 的除数，调用方传 0 时在主机侧触发整数除零（SIGFPE）。本文件是生成 PyTorch 调用层的参考样例，校验缺失会随样例被复制进生成结果。
 

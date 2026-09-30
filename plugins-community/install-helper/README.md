@@ -105,6 +105,24 @@ install-helper install --list                            # 查看所有可用 Sk
 | `--list` | 按类别列出所有可用 Skills |
 | `--yes` `-y` | 跳过所有确认提示 |
 
+### 安装 cannbot 仓插件
+
+部分插件已迁移至 [cannbot 仓](https://gitcode.com/cann/cannbot) 维护，install-helper 直接支持，无需额外操作：
+
+```bash
+install-helper install ops-direct-invoke --tool opencode   # 安装
+install-helper update ops-direct-invoke                    # 更新
+install-helper uninstall ops-direct-invoke                 # 卸载
+```
+
+产物与 `npx @cannbot-plugin/cannbot install` 直装完全一致；`list` / `status` 中带 `[cannbot]` 徽标与版本号。
+
+**限制**：
+
+- 仅支持 project 级安装；支持工具：opencode / codex / claude / trae（cursor / copilot / codearts 会明确报错）
+- 需要 Node.js 运行环境
+- 离线/调试：`CANNBOT_INSTALLER_PATH` 指定安装器包路径，`CANNBOT_INSTALLER_CHANNEL` 覆盖通道
+
 ### 更新
 
 ```bash

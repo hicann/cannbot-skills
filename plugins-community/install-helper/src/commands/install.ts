@@ -9,7 +9,9 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { createRepositoryManager } from "../core/repository.js";
-import { installPlugin } from "../core/installer.js";
+import { installPluginRouted } from "../core/cannbot-delegate.js";
+import { ensureCannbotDiscovery } from "../core/cannbot-installer.js";
+import { scanCannbotInstalled } from "../core/cannbot-registry.js";
 import { findPlugin, getAllPlugins } from "../core/registry.js";
 import { findSkill, getAllSkills } from "../core/skill-registry.js";
 import { installSkills, interactiveSkillSelect, listAllSkills } from "../core/skill-installer.js";
@@ -23,12 +25,21 @@ import { addInstalledPlugin } from "../utils/config.js";
 import { getConfigRoot, getSkillsRoot, validateTool, validateLevel } from "../utils/paths.js";
 import { confirm } from "@inquirer/prompts";
 import chalk from "chalk";
-import type { AITool, InstallLevel } from "../types/index.js";
+import type { AITool, InstallLevel, PluginSource } from "../types/index.js";
+
+function validateSource(source?: string): PluginSource | undefined {
+  if (!source) return undefined;
+  if (source !== "cannbot" && source !== "skills") {
+    throw new Error(t("error_invalid_source").replace("{source}", source).replace("{sources}", "cannbot, skills"));
+  }
+  return source;
+}
 
 export async function installCommand(
   names: string[],
-  options: { tool?: string; level?: string; yes?: boolean; all?: boolean; list?: boolean }
+  options: { tool?: string; level?: string; source?: string; yes?: boolean; all?: boolean; list?: boolean }
 ): Promise<void> {
+  const source = validateSource(options.source);
   // Handle --list flag
   if (options.list) {
     try {
@@ -197,13 +208,16 @@ export async function installCommand(
           logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
           logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
           logger.blank();
+          if (failCount > 0) {
+            process.exitCode = 1;
+          }
           return;
         }
       }
     }
   }
 
-  // Scan repo for dynamic skill/plugin discovery
+  // Scan repo for dynamic skill/plugin discovery + cannbot dual-source merge
   const scanSpinner = createSpinner(t("loading_skills_list"));
   scanSpinner.start();
   try {
@@ -213,13 +227,14 @@ export async function installCommand(
   } catch {
     scanSpinner.warn(t("loading_skills_list_failed"));
   }
+  await ensureCannbotDiscovery();
 
   // Classify names into plugins and skills
   const plugins: string[] = [];
   const skills: string[] = [];
 
   for (const name of names) {
-    const plugin = findPlugin(name);
+    const plugin = findPlugin(name, { source });
     if (plugin) {
       plugins.push(plugin.id);
       continue;
@@ -234,9 +249,11 @@ export async function installCommand(
     const allPlugins = getAllPlugins();
     logger.info(t("available_plugins") + ":");
     for (const p of allPlugins) {
-      logger.step(`  ${p.id} (${p.aliases.join(", ")})`);
+      const badge = p.source === "cannbot" ? chalk.magenta(" [cannbot]") : "";
+      logger.step(`  ${p.id}${badge} (${p.aliases.join(", ")})`);
     }
     logger.info(`${t("available_skills")}: ${chalk.cyan("install-helper install --list")}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -263,7 +280,11 @@ export async function installCommand(
     const skippedPlugins: string[] = [];
 
     for (const pluginId of plugins) {
-      if (installedSet.has(pluginId) && !options.yes) {
+      const pluginEntry = findPlugin(pluginId, { source });
+      const alreadyInstalled = pluginEntry?.source === "cannbot"
+        ? scanCannbotInstalled().some((e) => e.id === pluginId && e.tool === tool)
+        : installedSet.has(pluginId);
+      if (alreadyInstalled && !options.yes) {
         const plugin = findPlugin(pluginId);
         const displayName = plugin?.displayName || pluginId;
         logger.warn(`${displayName} [${t("install_already_installed")}]`);
@@ -299,29 +320,38 @@ export async function installCommand(
         return;
       }
 
-      const allPlugins = getAllPlugins();
       const results = await installPlugins(
         pluginsToInstall,
         tool,
         level,
         repoPath,
         undefined,
-        options.yes
+        options.yes,
+        source
       );
 
       const summary = results.map((result) => {
-        const plugin = allPlugins.find((p) => p.id === result.pluginId);
+        // Source-scoped so a --source skills install reports the legacy
+        // entry's displayName (unscoped lookup is cannbot-first).
+        const plugin = findPlugin(result.pluginId, { source });
         return {
           pluginId: result.pluginId,
           displayName: plugin?.displayName || result.pluginId,
           success: result.success,
           skillsCount: result.skillsCount,
           agentsCount: result.agentsCount,
+          // the command-line source is the user intent — legacy entries
+          // carry no `source` field, so plugin?.source alone would lose the
+          // "skills" scope and the docs hint would resolve cannbot-first
+          source: source ?? plugin?.source,
         };
       });
 
       printInstallSummary(summary);
       printEnhancedSummary(summary, tool, configRoot);
+      if (results.some((r) => !r.success)) {
+        process.exitCode = 1;
+      }
     }
   }
 
@@ -369,6 +399,9 @@ export async function installCommand(
     logger.info(`${t("install_to")}: ${chalk.cyan(getSkillsRoot(tool, level))}`);
     logger.info(`${t("start_to_use").replace("{tool}", chalk.green(tool))}`);
     logger.blank();
+    if (failCount > 0) {
+      process.exitCode = 1;
+    }
   }
 }
 
@@ -378,7 +411,8 @@ async function installPlugins(
   level: InstallLevel,
   repoPath: string,
   installPath?: string,
-  yes?: boolean
+  yes?: boolean,
+  source?: PluginSource
 ) {
   const results = [];
   const total = pluginIds.length;
@@ -389,13 +423,16 @@ async function installPlugins(
     const spinner = createSpinner(`${progress} ${t("install_progress")} ${pluginId}...`);
     spinner.start();
 
-    const result = await installPlugin({
+    const plugin = findPlugin(pluginId, { source });
+    const result = await installPluginRouted({
       pluginId,
       tool,
       level,
       repoPath,
       installPath,
       yes,
+      plugin,
+      source,
     });
 
     if (result.success) {
@@ -405,6 +442,9 @@ async function installPlugins(
       addInstalledPlugin(pluginId);
     } else {
       spinner.fail(`${progress} ${pluginId} — ${result.errors.join(", ")}`);
+    }
+    for (const warning of result.warnings || []) {
+      logger.warn(warning);
     }
 
     results.push(result);

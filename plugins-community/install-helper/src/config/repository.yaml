@@ -27,3 +27,12 @@ pluginDirs:
   - plugins-official
 
 scanCacheTtlHours: 24
+
+# cannbot 仓（https://gitcode.com/cann/cannbot）插件的安装器托管配置。
+# install-helper 以委托转发方式安装 cannbot 型插件：按通道将
+# @cannbot-plugin/cannbot 安装到 ~/.cannbot/installers/cannbot，
+# 超过 ttlHours 后自动按通道刷新。
+cannbotInstaller:
+  package: "@cannbot-plugin/cannbot"
+  channel: "latest"
+  ttlHours: 24

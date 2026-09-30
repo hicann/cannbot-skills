@@ -10,9 +10,10 @@
 
 import { select, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
-import { runWizard, selectToolWithDetection, stepLevel } from "../ui/wizard.js";
+import { runWizard, selectToolWithDetection, stepLevel, decodePluginChoice } from "../ui/wizard.js";
 import { createRepositoryManager } from "../core/repository.js";
-import { installPlugin } from "../core/installer.js";
+import { installPluginRouted } from "../core/cannbot-delegate.js";
+import { ensureCannbotDiscovery } from "../core/cannbot-installer.js";
 import { getAllPlugins } from "../core/registry.js";
 import { installSkills, interactiveSkillSelect } from "../core/skill-installer.js";
 import { printInstallSummary, printEnhancedSummary } from "../ui/display.js";
@@ -54,6 +55,7 @@ export async function initCommand(): Promise<void> {
   } catch {
     spinner.warn(t("loading_skills_list_failed"));
   }
+  await ensureCannbotDiscovery();
 
   let step = 0;
   let mode: "plugin" | "skill" = "plugin";
@@ -134,27 +136,37 @@ async function pluginInstallFlow(): Promise<"done" | "back"> {
   }
 
   const allPlugins = getAllPlugins();
-  const selectedPlugins = answers.plugins.map((id) =>
-    allPlugins.find((p) => p.id === id)
-  );
+  // wizard choices carry a source prefix (cannbot::<id> / skills::<id>) so
+  // same-name entries resolve to the source the user actually picked
+  const selected = answers.plugins.map((value) => {
+    const { id, source } = decodePluginChoice(value);
+    return {
+      id,
+      source,
+      plugin: allPlugins.find((p) => p.id === id && (p.source ?? "skills") === source),
+    };
+  });
 
   const total = answers.plugins.length;
   const results = [];
 
-  for (let i = 0; i < answers.plugins.length; i++) {
-    const pluginId = answers.plugins[i];
-    const plugin = selectedPlugins[i];
+  for (let i = 0; i < selected.length; i++) {
+    const pluginId = selected[i].id;
+    const source = selected[i].source;
+    const plugin = selected[i].plugin;
     const displayName = plugin?.displayName || pluginId;
     const progress = `[${i + 1}/${total}]`;
 
     const pluginSpinner = createSpinner(`${progress} ${t("install_progress")} ${displayName}...`);
     pluginSpinner.start();
 
-    const result = await installPlugin({
+    const result = await installPluginRouted({
       pluginId,
       tool: answers.tool,
       level: answers.level,
       repoPath,
+      plugin,
+      source,
     });
 
     if (result.success) {
@@ -167,16 +179,20 @@ async function pluginInstallFlow(): Promise<"done" | "back"> {
         `${progress} ${displayName} — ${result.errors.join(", ")}`
       );
     }
+    for (const warning of result.warnings || []) {
+      logger.warn(warning);
+    }
 
     results.push(result);
   }
 
   const summary = results.map((result, index) => ({
     pluginId: result.pluginId,
-    displayName: selectedPlugins[index]?.displayName || result.pluginId,
+    displayName: selected[index]?.plugin?.displayName || result.pluginId,
     success: result.success,
     skillsCount: result.skillsCount,
     agentsCount: result.agentsCount,
+    source: selected[index]?.source,
   }));
 
   printInstallSummary(summary);

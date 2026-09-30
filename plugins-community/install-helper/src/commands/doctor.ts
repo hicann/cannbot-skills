@@ -9,11 +9,23 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import chalk from "chalk";
-import { existsSync, readdirSync, lstatSync, unlinkSync, mkdirSync } from "fs";
+import { existsSync, readdirSync, lstatSync, unlinkSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { detectTools, getToolDisplayName, getAllTools } from "../core/detector.js";
 import { getAllPlugins } from "../core/registry.js";
 import { scanInstalled } from "../core/manifest.js";
+import {
+  hasNodeRuntime,
+  isCannbotInstallerReady,
+  getCannbotInstallerVersion,
+  loadCannbotInstallerConfig,
+} from "../core/cannbot-installer.js";
+import {
+  scanCannbotInstalled,
+  countMarkerBlocks,
+  findOrphanedDelegatedRecords,
+} from "../core/cannbot-registry.js";
 import { getConfigRoot, getSkillsRoot, getAgentsDir, getConfigFileName } from "../utils/paths.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
@@ -146,6 +158,12 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
     }
   }
 
+  // cannbot integration checks (Node runtime, managed installer, registry,
+  // marker blocks, recorded skills, delegated-record consistency)
+  const cannbotResult = doctorCannbotSection(options);
+  warnings += cannbotResult.warnings;
+  fixes += cannbotResult.fixes;
+
   console.log();
   console.log(chalk.dim("  " + "─".repeat(46)));
   if (options.fix && fixes > 0) {
@@ -158,6 +176,121 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
     );
   }
   console.log();
+}
+
+function doctorCannbotSection(options: { fix?: boolean }): { warnings: number; fixes: number } {
+  let warnings = 0;
+  let fixes = 0;
+
+  console.log();
+  console.log(chalk.bold(`  ${t("doctor_cannbot")}`));
+
+  // 1. Node.js runtime (required to delegate to the cannbot installer)
+  if (hasNodeRuntime()) {
+    console.log(chalk.green("  ✓") + ` ${t("doctor_cannbot_node_ok")}`);
+  } else {
+    console.log(chalk.yellow("  ⚠") + ` ${t("doctor_cannbot_node_missing")}`);
+    warnings++;
+  }
+
+  // 2. managed cannbot installer package
+  const installerConfig = loadCannbotInstallerConfig();
+  if (isCannbotInstallerReady()) {
+    const version = getCannbotInstallerVersion() || "?";
+    console.log(
+      chalk.green("  ✓") +
+        ` ${installerConfig.package} v${version} ${chalk.dim(`(${installerConfig.channel})`)}`
+    );
+  } else {
+    console.log(
+      chalk.dim("  —") + ` ${installerConfig.package} — ${t("doctor_not_installed")}`
+    );
+  }
+
+  // 3-5. cannbot registries in the current project
+  const cannbotInstalled = scanCannbotInstalled();
+  if (cannbotInstalled.length === 0) {
+    console.log(chalk.dim("  —") + ` cannbot-plugin.json — ${t("doctor_not_exist")}`);
+  } else {
+    for (const entry of cannbotInstalled) {
+      console.log(
+        chalk.green("  ✓") +
+          ` ${entry.id} ${chalk.dim(`(${entry.tool}, ${entry.skillsCount} skills, ${entry.agentsCount} agents)`)}`
+      );
+
+      // 5. recorded skills actually exist on disk
+      const missing = (entry.record.skills || []).filter((rel) => {
+        const p = join(entry.target, rel);
+        return !existsSync(p) && !lstatTryIsSymlink(p);
+      });
+      if (missing.length > 0) {
+        console.log(
+          chalk.yellow("  ⚠") +
+            ` ${entry.id}: ${t("doctor_cannbot_missing_skills").replace("{count}", String(missing.length))}`
+        );
+        warnings++;
+      }
+    }
+  }
+
+  // 4. marker block pairing in the project instructions file
+  for (const fileName of ["AGENTS.md", "CLAUDE.md"]) {
+    const filePath = join(process.cwd(), fileName);
+    if (!existsSync(filePath)) continue;
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      for (const entry of cannbotInstalled) {
+        const blocks = countMarkerBlocks(content, entry.id);
+        if (blocks > 1) {
+          console.log(
+            chalk.yellow("  ⚠") +
+              ` ${fileName}: ${t("doctor_cannbot_marker_duplicate").replace("{plugin}", entry.id)}`
+          );
+          warnings++;
+        }
+      }
+      const starts = (content.match(/<!-- cannbot:[\w.-]+:start -->/g) || []).length;
+      const ends = (content.match(/<!-- cannbot:[\w.-]+:end -->/g) || []).length;
+      if (starts !== ends) {
+        console.log(
+          chalk.yellow("  ⚠") +
+            ` ${fileName}: ${t("doctor_cannbot_marker_unpaired").replace("{start}", String(starts)).replace("{end}", String(ends))}`
+        );
+        warnings++;
+      }
+    } catch {
+      // unreadable file — skip
+    }
+  }
+
+  // 6. delegated-record ↔ registry consistency
+  const orphans = findOrphanedDelegatedRecords();
+  for (const pluginId of orphans) {
+    console.log(
+      chalk.yellow("  ⚠") +
+        ` ${t("doctor_cannbot_orphan_record").replace("{plugin}", pluginId)}`
+    );
+    warnings++;
+    if (options.fix) {
+      try {
+        unlinkSync(join(homedir(), ".cannbot", "installs", `${pluginId}.json`));
+        fixes++;
+        console.log(chalk.green("  ✓") + ` ${t("doctor_fixed").replace("{count}", "1")}: ${pluginId}`);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return { warnings, fixes };
+}
+
+function lstatTryIsSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function checkBrokenLinks(dir: string): number {

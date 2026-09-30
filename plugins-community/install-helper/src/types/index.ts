@@ -12,6 +12,8 @@ export type AITool = "opencode" | "claude" | "trae" | "cursor" | "codex" | "copi
 
 export type InstallLevel = "project" | "global";
 
+export type PluginSource = "cannbot" | "skills";
+
 export type TraeVariant = "ide" | "plugin" | "cli" | "unknown";
 
 export interface DetectedTool {
@@ -48,6 +50,7 @@ export interface PluginEntry {
   agents: number;
   description: string;
   version?: string;
+  source?: PluginSource;
   configFile?: string;
   configRootConfigLink?: boolean;
   installSkills?: PluginManifestSkillSource[];
@@ -62,6 +65,9 @@ export interface InstallOptions {
   repoPath: string;
   installPath?: string;
   yes?: boolean;
+  /** Caller-resolved registry entry (source-scoped). When omitted the legacy
+   *  installer falls back to getPluginById resolution. */
+  plugin?: PluginEntry;
 }
 
 export interface InstallResult {
@@ -124,4 +130,60 @@ export interface SkillBatchRecord {
   batchId: string;
   installedAt: string;
   skills: string[];
+}
+
+// === cannbot (@cannbot-plugin/cannbot) integration types ===
+
+export interface CannbotInstallerConfig {
+  package: string;
+  channel: string;
+  ttlHours: number;
+}
+
+export interface CannbotPluginManifest {
+  name: string;
+  version?: string;
+  description?: string;
+  agents?: string[];
+  skills?: string[];
+}
+
+export interface CannbotRegistryRecord {
+  plugin: string;
+  pluginVersion?: string;
+  sourcePackage?: string;
+  source?: { kind: string; package?: string };
+  tool: string;
+  skillInstallMode?: string;
+  skills: string[];
+  agents: string[];
+  instructions: string | null;
+  assets: string | null;
+  permissions: string | null;
+  settings: string | null;
+  hookSettings: string | null;
+  dependencies: string[];
+  nativePlugin?: {
+    pluginRoot?: string;
+    marketplacePath?: string;
+    marketplaceName?: string;
+    package?: string;
+  } | null;
+  unsupported?: string[];
+}
+
+export interface CannbotRegistryFile {
+  schemaVersion: number;
+  plugins: CannbotRegistryRecord[];
+}
+
+export interface CannbotInstalledEntry {
+  id: string;
+  version: string;
+  tool: string;
+  target: string;
+  registryPath: string;
+  skillsCount: number;
+  agentsCount: number;
+  record: CannbotRegistryRecord;
 }

@@ -32,12 +32,22 @@ function loadScanConfig() {
         ? config.pluginDirs
         : ["plugins-official", "plugins-community"],
       cacheTtlHours: config.scanCacheTtlHours || 24,
+      cannbotInstaller: {
+        package: (config.cannbotInstaller && config.cannbotInstaller.package) || "@cannbot-plugin/cannbot",
+        channel: (config.cannbotInstaller && config.cannbotInstaller.channel) || "latest",
+        ttlHours: (config.cannbotInstaller && config.cannbotInstaller.ttlHours) || 24,
+      },
     };
   } catch {}
   return {
     scanDirs: ["ops", "model", "graph", "infra", "runtime"],
     pluginDirs: ["plugins-official", "plugins-community"],
     cacheTtlHours: 24,
+    cannbotInstaller: {
+      package: "@cannbot-plugin/cannbot",
+      channel: "latest",
+      ttlHours: 24,
+    },
   };
 }
 

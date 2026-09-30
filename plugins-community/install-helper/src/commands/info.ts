@@ -14,6 +14,7 @@ import { join } from "path";
 import { findPlugin } from "../core/registry.js";
 import { createRepositoryManager } from "../core/repository.js";
 import { scanInstalled } from "../core/manifest.js";
+import { scanCannbotInstalled } from "../core/cannbot-registry.js";
 import { t } from "../utils/i18n.js";
 
 export async function infoCommand(pluginName: string): Promise<void> {
@@ -25,22 +26,38 @@ export async function infoCommand(pluginName: string): Promise<void> {
 
   const installed = scanInstalled();
   const inst = installed.find((p) => p.id === plugin.id);
-  const isInstalled = !!inst;
+  const cannbotEntry = plugin.source === "cannbot"
+    ? scanCannbotInstalled().find((e) => e.id === plugin.id)
+    : undefined;
+  const isInstalled = !!inst || !!cannbotEntry;
   const statusText = isInstalled
     ? chalk.green(`✓ ${t("status_installed")}`)
     : chalk.dim(`— ${t("status_not_installed")}`);
 
   console.log();
   console.log(chalk.bold(`  ${plugin.displayName}`));
+  if (plugin.source === "cannbot") {
+    console.log(chalk.magenta("  [cannbot]") + chalk.dim(` v${plugin.version || "?"}`));
+  }
   console.log(chalk.dim("  " + "─".repeat(40)));
   console.log();
   console.log(`  ${chalk.dim(t("info_description") + ":")} ${plugin.description}`);
   console.log(`  ${chalk.dim("ID:")} ${plugin.id}`);
   console.log(`  ${chalk.dim(t("info_status") + ":")} ${statusText}`);
-  console.log(`  ${chalk.dim(t("info_skills") + ":")} ${inst ? inst.skillsCount : plugin.skills}`);
-  console.log(`  ${chalk.dim(t("info_agents") + ":")} ${inst ? inst.agentsCount : plugin.agents}`);
-  console.log(`  ${chalk.dim(t("info_aliases") + ":")} ${plugin.aliases.join(", ")}`);
+  console.log(`  ${chalk.dim(t("info_skills") + ":")} ${inst || cannbotEntry ? (cannbotEntry?.skillsCount ?? inst?.skillsCount) : plugin.skills}`);
+  console.log(`  ${chalk.dim(t("info_agents") + ":")} ${inst || cannbotEntry ? (cannbotEntry?.agentsCount ?? inst?.agentsCount) : plugin.agents}`);
+  if (plugin.source !== "cannbot") {
+    console.log(`  ${chalk.dim(t("info_aliases") + ":")} ${plugin.aliases.join(", ")}`);
+  }
   console.log();
+
+  if (plugin.source === "cannbot") {
+    if (cannbotEntry) {
+      console.log(`  ${chalk.dim(t("info_source") + ":")} ${cannbotEntry.registryPath}`);
+    }
+    console.log();
+    return;
+  }
 
   try {
     const repoManager = createRepositoryManager();

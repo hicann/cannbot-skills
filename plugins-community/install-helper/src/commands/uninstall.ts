@@ -16,6 +16,7 @@ import { findPlugin } from "../core/registry.js";
 import { findSkill } from "../core/skill-registry.js";
 import { uninstallSkills, interactiveSkillUnselect } from "../core/skill-installer.js";
 import { readRecord, deleteRecord, getInstalledSkills, getLastBatchSkills, scanInstalledFiles, readSkillRecord } from "../core/record.js";
+import { scanCannbotInstalled, uninstallCannbotPlugin } from "../core/cannbot-registry.js";
 import { removeInstalledPlugin } from "../utils/config.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
@@ -57,11 +58,20 @@ export async function uninstallCommand(
 
   // Name-driven mode (existing behavior)
   const plugins: string[] = [];
+  const cannbotPlugins: string[] = [];
   const skills: string[] = [];
 
+  // cannbot-style installs are registry-driven: a cannbot-plugin.json record
+  // wins over the legacy bookkeeping (migration policy: cannbot first).
+  const cannbotInstalledIds = new Set(scanCannbotInstalled().map((e) => e.id));
+
   for (const name of names) {
+    if (cannbotInstalledIds.has(name)) {
+      cannbotPlugins.push(name);
+      continue;
+    }
     const plugin = findPlugin(name);
-    if (plugin) {
+    if (plugin && plugin.source !== "cannbot") {
       plugins.push(plugin.id);
       continue;
     }
@@ -86,8 +96,16 @@ export async function uninstallCommand(
     logger.error(`${t("uninstall_not_found")}: ${name}`);
   }
 
+  await uninstallCannbotPlugins(cannbotPlugins);
   await uninstallPlugins(plugins, options.yes || false);
   await uninstallSkillsByName(skills, tool, level);
+}
+
+async function uninstallCannbotPlugins(pluginIds: string[]): Promise<void> {
+  for (const pluginId of pluginIds) {
+    logger.info(`${t("uninstall_in_progress")} ${pluginId}...`);
+    await uninstallCannbotPluginById(pluginId);
+  }
 }
 
 export function isRecordedSkill(skillId: string): boolean {
@@ -108,8 +126,11 @@ async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Pr
   const installPath = level === "project" ? process.cwd() : getConfigRoot(tool, level);
   const installedSkills = getInstalledSkills(tool, level, installPath, !yes);
   const installedPlugins = scanInstalled().filter((p) => p.tool === tool && p.level === level);
+  const cannbotInstalled = level === "project"
+    ? scanCannbotInstalled().filter((e) => e.tool === tool)
+    : [];
 
-  const totalItems = installedSkills.length + installedPlugins.length;
+  const totalItems = installedSkills.length + installedPlugins.length + cannbotInstalled.length;
   if (totalItems === 0) {
     logger.warn(t("uninstall_no_installed"));
     return;
@@ -117,7 +138,7 @@ async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Pr
 
   logger.info(t("uninstall_all_summary")
     .replace("{skills}", String(installedSkills.length))
-    .replace("{plugins}", String(installedPlugins.length)));
+    .replace("{plugins}", String(installedPlugins.length + cannbotInstalled.length)));
   logger.blank();
 
   for (const s of installedSkills) {
@@ -125,6 +146,9 @@ async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Pr
   }
   for (const p of installedPlugins) {
     logger.step(`  • ${chalk.cyan(p.displayName)} ${chalk.dim(`(${p.id})`)}`);
+  }
+  for (const c of cannbotInstalled) {
+    logger.step(`  • ${chalk.cyan(c.id)} ${chalk.magenta("[cannbot]")}`);
   }
   logger.blank();
 
@@ -145,6 +169,11 @@ async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Pr
     await uninstallSkills(installedSkills, tool, level);
   }
 
+  // Uninstall cannbot-style plugins
+  for (const entry of cannbotInstalled) {
+    await uninstallCannbotPluginById(entry.id);
+  }
+
   // Uninstall plugins
   if (installedPlugins.length > 0) {
     logger.info(`${t("uninstall_plugin_batch_progress").replace("{count}", String(installedPlugins.length))}...`);
@@ -156,6 +185,22 @@ async function uninstallAll(tool: AITool, level: InstallLevel, yes: boolean): Pr
   logger.blank();
   logger.success(t("uninstall_all_done"));
   logger.blank();
+}
+
+async function uninstallCannbotPluginById(pluginId: string): Promise<void> {
+  const result = uninstallCannbotPlugin(pluginId);
+  if (result.success) {
+    logger.success(
+      t("uninstall_summary_format")
+        .replace("{name}", pluginId)
+        .replace("{files}", String(result.removedFiles))
+        .replace("{dirs}", String(result.removedDirs))
+    );
+  } else {
+    for (const error of result.errors) {
+      logger.error(`${pluginId}: ${error}`);
+    }
+  }
 }
 
 async function uninstallRecent(tool: AITool, level: InstallLevel, yes: boolean): Promise<void> {
@@ -329,8 +374,9 @@ async function interactiveSkillUninstall(tool: AITool, level: InstallLevel): Pro
 
 async function interactivePluginUninstall(tool: AITool, level: InstallLevel): Promise<void> {
   const installed = scanInstalled().filter((p) => p.tool === tool && p.level === level);
+  const cannbotInstalled = level === "project" ? scanCannbotInstalled().filter((e) => e.tool === tool) : [];
 
-  if (installed.length === 0) {
+  if (installed.length === 0 && cannbotInstalled.length === 0) {
     logger.warn(t("uninstall_no_installed_plugins"));
     return;
   }
@@ -341,6 +387,12 @@ async function interactivePluginUninstall(tool: AITool, level: InstallLevel): Pr
       value: inst.id,
       checked: false,
       description: `${inst.skillsCount} skills, ${inst.agentsCount} agents`,
+    })),
+    ...cannbotInstalled.map((entry) => ({
+      name: `${chalk.cyan(entry.id)} ${chalk.magenta("[cannbot]")}`,
+      value: entry.id,
+      checked: false,
+      description: `${entry.skillsCount} skills, ${entry.agentsCount} agents`,
     })),
   ];
 
@@ -358,15 +410,19 @@ async function interactivePluginUninstall(tool: AITool, level: InstallLevel): Pr
     pageSize: 15,
   });
 
-  const toUninstall = installed.filter((inst) => selected.includes(inst.id));
+  const toUninstallLegacy = installed.filter((inst) => selected.includes(inst.id));
+  const toUninstallCannbot = cannbotInstalled.filter((entry) => selected.includes(entry.id));
 
-  if (toUninstall.length === 0) {
+  if (toUninstallLegacy.length === 0 && toUninstallCannbot.length === 0) {
     logger.info(t("uninstall_nothing_to_uninstall"));
     return;
   }
 
   const confirmed = await confirm({
-    message: t("uninstall_confirm_prompt").replace("{count}", chalk.bold(String(toUninstall.length))),
+    message: t("uninstall_confirm_prompt").replace(
+      "{count}",
+      chalk.bold(String(toUninstallLegacy.length + toUninstallCannbot.length))
+    ),
     default: false,
   });
 
@@ -375,8 +431,12 @@ async function interactivePluginUninstall(tool: AITool, level: InstallLevel): Pr
     return;
   }
 
-  logger.info(`${t("uninstall_plugin_batch_progress").replace("{count}", String(toUninstall.length))}...`);
-  for (const inst of toUninstall) {
+  const totalCount = toUninstallLegacy.length + toUninstallCannbot.length;
+  logger.info(`${t("uninstall_plugin_batch_progress").replace("{count}", String(totalCount))}...`);
+  for (const entry of toUninstallCannbot) {
+    await uninstallCannbotPluginById(entry.id);
+  }
+  for (const inst of toUninstallLegacy) {
     await uninstallPluginById(inst.id, true);
   }
   logger.blank();
@@ -449,7 +509,11 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
 
   logger.info(`${t("uninstall_in_progress")} ${plugin.displayName}...`);
 
-  const configRoot = getConfigRoot(record.tool, record.level);
+  // Use the config root recorded at install time — deriving it from the
+  // current cwd would resolve against the wrong project when the record
+  // belongs to another location (breaking backup cleanup and potentially
+  // deleting the current project's config file via extraFiles).
+  const configRoot = record.configRoot;
   const allowedBases = [resolve(configRoot), resolve(record.installPath)];
   if (record.tool === "codex") {
     // Codex skills live under .agents/skills which is outside the .codex
@@ -526,7 +590,11 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
     }
   }
 
-  deleteRecord(plugin.id);
+  deleteRecord(plugin.id, {
+    tool: record.tool,
+    level: record.level,
+    installPath: record.installPath,
+  });
   removeInstalledPlugin(plugin.id);
 
   const backups = findBackups(configRoot);

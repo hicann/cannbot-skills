@@ -10,17 +10,19 @@
 
 import chalk from "chalk";
 import { scanInstalled } from "../core/manifest.js";
+import { scanCannbotInstalled } from "../core/cannbot-registry.js";
 import { t } from "../utils/i18n.js";
+import type { AITool } from "../types/index.js";
 
 export async function statusCommand(): Promise<void> {
   const installed = scanInstalled();
-  const installedMap = new Map(installed.map((p) => [p.id, p]));
+  const cannbotInstalled = scanCannbotInstalled();
 
   console.log();
   console.log(chalk.bold(`  ${t("status_title")}`));
   console.log();
 
-  if (installed.length === 0) {
+  if (installed.length === 0 && cannbotInstalled.length === 0) {
     console.log(chalk.dim(`  ${t("status_none")}`));
     console.log(chalk.dim(`  ${t("status_hint")}`));
     console.log();
@@ -38,6 +40,21 @@ export async function statusCommand(): Promise<void> {
     );
     console.log(chalk.dim(`    ${inst.configRoot}`));
     console.log(chalk.dim(`    ${t("status_install_time")}: ${inst.installTime}`));
+    console.log();
+  }
+
+  for (const entry of cannbotInstalled) {
+    const versionSuffix = entry.version ? chalk.dim(` v${entry.version}`) : "";
+    console.log(
+      chalk.green("  ✓") +
+        ` ${entry.id}${versionSuffix}` +
+        chalk.magenta(" [cannbot]") +
+        chalk.dim(` (${entry.tool}, project)`)
+    );
+    console.log(
+      chalk.dim(`    ${entry.skillsCount} skills, ${entry.agentsCount} agents`)
+    );
+    console.log(chalk.dim(`    ${entry.target}`));
     console.log();
   }
 }
