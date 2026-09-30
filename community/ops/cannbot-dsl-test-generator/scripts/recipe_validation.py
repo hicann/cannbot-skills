@@ -12,6 +12,8 @@
 
 """Validate executable tensor recipes against the public DSL spec."""
 
+import math
+
 CPU_DTYPES = {
     "float16",
     "float32",
@@ -25,6 +27,8 @@ CPU_DTYPES = {
     "bool",
 }
 FILLS = {
+    "values",
+    "arange",
     "normal",
     "zeros",
     "ones",
@@ -106,3 +110,35 @@ def validate_fill(case_id, name, value):
         fail(f"{case_id}.{name} nonfinite fill requires floating dtype")
     if fill in ("nan_one", "pos_inf_one", "neg_inf_one") and 0 in shape:
         fail(f"{case_id}.{name} single-position fill needs a nonempty tensor")
+
+    if fill == "values":
+
+        def flatten(values):
+            if not isinstance(values, list):
+                raise ValueError("values must be a list")
+            result = []
+            for item in values:
+                if isinstance(item, list):
+                    result.extend(flatten(item))
+                elif isinstance(item, (int, float, bool)) and math.isfinite(item):
+                    result.append(item)
+                else:
+                    raise ValueError("values must contain finite numbers")
+            return result
+
+        try:
+            values = flatten(value.get("values"))
+        except ValueError as exc:
+            fail(f"{case_id}.{name}: {exc}")
+        if len(values) != math.prod(shape):
+            fail(f"{case_id}.{name}: values count differs from shape")
+    if fill == "arange":
+        for field, default in (("start", 0), ("step", 1)):
+            number = value.get(field, default)
+            if not isinstance(number, (int, float)) or not math.isfinite(number):
+                fail(f"{case_id}.{name}: arange {field} must be finite")
+        if "axis" in value and (
+            type(value["axis"]) is not int
+            or not -len(shape) <= value["axis"] < len(shape)
+        ):
+            fail(f"{case_id}.{name}: arange axis outside rank")

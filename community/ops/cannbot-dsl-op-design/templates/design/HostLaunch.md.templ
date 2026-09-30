@@ -1,49 +1,66 @@
-# Host 侧配置与 Launch 方案
+# 调度与启动方案
 
-Host 负责可从公开输入取得的元数据、输出/Workspace 分配、已证实的零拷贝 view、配置选择和 DSL Kernel 启动。输入相关的设备值计算放入 DSL 阶段。
+## 1. 输入检查与输出所有权
 
-## 1. 输入校验与输出所有权
-| 校验项 | 允许域 | 校验位置与依据 | 失败行为 | 对应接口规则 |
+| 检查条件 | 合法域与依据 | 信息可获得的位置 | 失败行为 | 接口规则 |
 |---|---|---|---|---|
 | | | | | |
 
-逐输出写分配 shape/dtype/layout、别名约束和完整写入条件；说明空输入是否短路、何时仍需 Launch。输出 shape 值依赖设备数据时给分阶段或外部 metadata 路线。
+逐输出给分配方、形状、类型、布局及别名约束，说明完整写入的条件。尺寸依赖数据值时，给尺寸生产、取得和后续消费的顺序。
 
-## 2. 配置选择算法
-给候选配置的生成和筛选顺序、分支判定、资源估算、兜底与拒绝条件。说明所用 shape、stride、dtype、属性和设备能力来自哪里。每项选择都可回指 `TemplatePartition.md` 与 `LaunchData.md`。
-
-```text
-读取合法 Host 元数据
-→ 枚举或计算候选配置
-→ 验证每种内存池及 Workspace 峰值
-→ 确定 block_dim 与 Launch 参数
-→ 启动或明确报错
-```
-
-## 3. 任务与坐标划分
-设总任务数为 `T`、实际 block 数为 `B`，写出 `block_id` 到任务区间的公式、每任务 tile 范围、尾块有效长度和无重叠证明。说明 B 的上限如何从目标设备能力和负载均衡推导，而不是引用样例核心数。
-
-| 分支 | 任务数公式 | block 数公式 | block→输出范围 | 尾块/空输入 |
-|---|---|---|---|---|
-| | | | | |
-
-## 4. 布局与参数准备
-逐项列公开输入到 `@kernel.__call__` 的 Tensor/view/标量映射。Host 侧 reshape、permute 等须证明不发生设备 copy；需物理重排时列为 Kernel 阶段。检查 dtype、stride、容量及 workspace 初始化。
-
-## 5. Launch 与阶段边界
-写可落实的 Python/CANNBotDSL 调用草图：配置构造、Launcher、`op[block_dim](...)`、返回值。API 名称以实际能力资料为准；未证实的调用标待验证。多次 Launch 列出每阶段输入、输出、同步/可见性、失败清理和 Workspace 生命周期。
-
-## 6. Host 设备工作审计
-| 入口调用链上的操作 | 元数据/分配/零拷贝 view/设备工作 | 依据 | 归属或替代 DSL 阶段 |
+| 边界条件 | 各输出的形状及初始化 | 执行或提前完成的条件 | 完成与返回行为 |
 |---|---|---|---|
 | | | | |
 
-核对每个 `torch` 或框架调用，确保公开入口的设备语义由 DSL Kernel 完成；测试 Golden 不属于入口调用链。
+## 2. 配置选择
 
+说明判定信息、候选生成及筛选顺序、资源检查、路径选择和超限处置。各项选择关联 TemplatePartition.md 与 LaunchData.md 中的公式和支持域。
 
-## 公开入口、构建函数与 Host 启动骨架
+## 3. 任务与坐标划分
 
-以下是设计骨架。填写真实的配置、TensorSpec、Kernel 和校验函数；参数顺序在公开调用、Host 签名与编译描述之间保持一致。采用 DSL 的直接 Host 调用或显式编译。运行与导出共用参数构造逻辑，根据调用方提供的导出接口与生命周期约束，写明导出入口、参数、产物及程序和资源的有效期；缺少约束时标明待确认项。
+定义总任务数和执行单元数，给执行单元到任务区间、各任务到输出范围及内部工作项的公式。结合目标设备资源和负载均衡说明选取依据，证明覆盖完整及共享写入满足所有权协议。
+
+| 分支 | 任务数公式 | 执行单元数公式 | 单元到任务及输出范围 | 边界与不均衡处理 |
+|---|---|---|---|---|
+| | | | | |
+
+协作执行时，任务内部角色及汇合规则引用 Kernel.md；状态相互依赖的工作项遵守其推进顺序。
+
+## 4. 参数与布局准备
+
+按 LaunchData.md 的参数顺序列实际取值、形状关系、步长、容量、可选状态和初始化步骤。视图给共享地址依据，实际重排列入执行阶段并计入资源预算。
+
+## 5. 启动、阶段边界与生命周期
+
+| 阶段 | 任务范围及参数 | 前置完成条件 | 结果可见条件 | 临时资源有效期 | 失败处置 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+用流程图或算法伪代码说明配置、分配、启动、等待及返回关系。跨阶段依赖明确同步参与者与完成发布；资源保持有效至最后使用完成。
+
+调用、重复执行及导出契约有要求时，说明共享配置的范围、产物拥有者与释放时点。
+
+## 6. 操作职责
+
+| 公开入口至结果返回的操作 | 信息准备或计算职责 | 输入与输出 | 归属阶段及依据 |
+|---|---|---|---|
+| | | | |
+
+追踪所有会改变数据的操作，使计算、重排、初始化及合并都对应明确阶段、工作量和资源。
+
+## 参考示例：公开入口、构建与启动
+
+```text
+取得合法输入信息
+→ 生成与筛选候选配置
+→ 核对各内存池及临时存储
+→ 确定任务划分与阶段参数
+→ 启动、完成及返回
+```
+
+以下保留显式构建与启动的参考骨架，调用形态参考 `flash_kda.py`。本例与 Kernel.md 的一维、同形输出、带临时工作区示例对应；具名检查、分配、规格构造及边界函数是需要按设计展开的抽象操作。配置、参数规格与每次调用的顺序在本例中逐项对应。
+
+实际使用时，依据目标版本的 DSL 源码或官方资料核对程序构建、调用、持有与释放的生命周期约束。
 
 ```python
 import cannbotdsl
@@ -51,19 +68,29 @@ from cannbotdsl import Tensor, TensorSpec, dtypes, host
 
 
 class OperatorProgram:
-    def __init__(self, tile_elems):
-        self.tile_elems = tile_elems
+    def __init__(self, config, input_dtype, output_dtype, accumulator_dtype):
+        self.tile_elems = config.tile_elems
+        self.pipeline_depth = config.pipeline_depth
+        self.input_dtype = input_dtype
+        self.output_dtype = output_dtype
+        self.accumulator_dtype = accumulator_dtype
 
     @host
     def run(self, x: Tensor, out: Tensor, ws: Tensor, attr: int, block_dim: int):
-        op = OperatorKernel(self.tile_elems)
+        op = OperatorKernel(
+            self.tile_elems, self.input_dtype, self.output_dtype,
+            self.accumulator_dtype, self.pipeline_depth,
+        )
         op[block_dim](x, out, ws, attr)
 
 
-def build_program(tile_elems: int):
-    entry = OperatorProgram(tile_elems)
-    # 在此按 Interface、InferShapeDtype 和 LaunchData 构造真实规格。
-    input_spec, output_spec, workspace_spec = make_tensor_specs(tile_elems)
+def build_program(config, input_meta, plan):
+    entry = OperatorProgram(
+        config, input_meta.dtype, output_dtype_from_contract(input_meta),
+        accumulator_dtype_from_contract(input_meta),
+    )
+    # 规格包含全部形状、类型、步长及工作区容量。
+    input_spec, output_spec, workspace_spec = make_tensor_specs(config, input_meta, plan)
     return cannbotdsl.compile(
         entry.run, input_spec, output_spec, workspace_spec,
         dtypes.int64,  # attr
@@ -73,17 +100,20 @@ def build_program(tile_elems: int):
 
 def public_op(x, *, attr):
     check_interface(x, attr)
-    config, plan = select_config(metadata_of(x), device_limits(x.device))
-    out = allocate_output(output_shape(x, attr), output_dtype(x), x.device)
+    meta = metadata_of(x, attr)
+    out = allocate_output(output_shape(x, attr), output_dtype_from_contract(meta), x.device)
+    if boundary_completes_without_launch(meta):
+        return initialize_and_return_boundary_outputs(out, meta)
+    config, plan = select_config(meta, device_limits(x.device))
     ws = allocate_workspace(plan.workspace_bytes, x.device)
     block_dim = choose_blocks(x.shape, config, device_limits(x.device))
-    with build_program(config.tile_elems) as program:
+    with build_program(config, meta, plan) as program:
         program(x, out, ws, attr, block_dim)
     return out
 ```
 
-Kernel launch 直接位于 `@host` 方法中；`@jit` 仅组织 DSL 内部辅助计算。构建函数参数包含全部影响编译的静态配置，例中仅列 `tile_elems`；实际 dtype、静态 shape 等需要特化时补入具名参数。每次运行的 `attr` 和 `block_dim` 通过程序调用传入。
+本例的 `@host` 参数与规格顺序均为 x、out、ws、attr、block_dim，计算入口接收 x、out、ws、attr，长度从一维输入形状取得。分块、深度与类型在构建时确定，attr 与 block_dim 在调用时绑定。边界函数逐输出遵循接口契约。
 
-无 Workspace 时，从 Host 签名、TensorSpec 和实际调用中同时删除该参数；多输出逐个分配并传递。设备值相关计算放入 Kernel 阶段。跨 Launch 时写清依赖和临时存储生命周期，异步执行期间保持 Tensor 与程序有效。
+实际路径的工作区、输出个数及参数变体以阶段参数表为准，修改时同步检查入口、规格与实参。跨阶段保持临时资源有效至最后使用完成。
 
-示例在单次调用内管理程序；需要重复调用时，由持有方在整组调用外创建和释放程序。普通构建函数不隐含缓存行为。
+示例在单次调用内管理程序；重复调用的持有与释放位置由生命周期契约确定。构建、复用及缓存行为分别定义。

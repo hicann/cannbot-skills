@@ -10,7 +10,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Validate TDD rows in testcase.csv against native Unit obligations."""
+"""Validate TDD rows against caller-supplied Unit obligations."""
 
 from __future__ import annotations
 
@@ -20,6 +20,11 @@ import argparse
 from dataclasses import dataclass
 import json
 import re
+import importlib.util
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "assets"))
+from case_contract import validate_assertions, validate_checks, check_inputs, case_calls
 
 from casebook import read_casebook
 from recipe_validation import validate_tensor, validate_tensor_list
@@ -64,6 +69,7 @@ def validated_units(work):
             if item["status"] == "draft"
         }
     native = load_native_units(work)
+    validate_test_contracts(native)
     if any(row["unit_id"] not in {uid.lower() for uid in native} for row in tdd):
         fail("TDD row references unknown native Unit")
     adapted = adapt_native_units(native, tdd, runnable)
@@ -77,6 +83,77 @@ class CaseContext:
     input_meta: dict
     draft: dict | None
     branches: dict
+
+
+def validate_test_contracts(native):
+    all_ids = set()
+    for uid, unit in native.items():
+        obligations = unit.get("verification_obligations")
+        if not isinstance(obligations, list) or not obligations:
+            fail(f"{uid}: verification_obligations must be a nonempty list")
+        for item in obligations:
+            if not isinstance(item, dict):
+                fail(f"{uid}: obligation must be a mapping")
+            ref = item.get("id")
+            if not isinstance(ref, str) or not ref.strip() or ref in all_ids:
+                fail(f"{uid}: obligation IDs must be nonempty and globally unique")
+            all_ids.add(ref)
+            if not isinstance(item.get("kind"), str) or item["kind"] not in {
+                "numerical",
+                "structural",
+                "semantic",
+                "device",
+            }:
+                fail(
+                    f"{uid}: unsupported verification obligation kind: {item.get('kind')}"
+                )
+            conditions = item.get("input_conditions", [])
+            if conditions != []:
+                validate_checks(conditions)
+    validate_dependency_graph(
+        [
+            {"id": uid, "depends_on": unit.get("depends_on", [])}
+            for uid, unit in native.items()
+        ]
+    )
+
+
+def validate_materialized_conditions(work, units, op):
+    native = load_native_units(work)
+    module = None
+    for unit in units:
+        obligations = native[unit["native_id"]].get("verification_obligations") or []
+        required = {
+            item["id"]: item.get("input_conditions") or [] for item in obligations
+        }
+        covered = set()
+        for case in unit["cases"]:
+            _, _, calls = case_calls(case["inputs"], case["seed"], case["assertions"])
+            for call in calls:
+                checks = [
+                    c
+                    for a in call["assertions"]
+                    if a["kind"] == "input_conditions"
+                    for c in a["checks"]
+                ]
+                if checks:
+                    if module is None:
+                        spec = importlib.util.spec_from_file_location(
+                            "condition_golden", golden_path(work, op)
+                        )
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                    check_inputs(
+                        module.make_inputs(call["inputs"], call["seed"]), checks
+                    )
+                for ref in case["obligation_ids"]:
+                    if required[ref] and all(
+                        check in checks for check in required[ref]
+                    ):
+                        covered.add(ref)
+        missing = {ref for ref, checks in required.items() if checks} - covered
+        if missing:
+            fail(f"{unit['id']}: input conditions not bound to TDD: {sorted(missing)}")
 
 
 def main():
@@ -123,6 +200,7 @@ def main():
         seen.add(unit_id)
         cases.extend(validate_unit_cases(unit, context))
     validate_dependency_graph(units)
+    validate_materialized_conditions(work, units, op)
     if len({case["case_id"] for case in cases}) != len(cases):
         fail("duplicate TDD case ID")
     LOGGER.info(f"validated {len(cases)} TDD rows")
@@ -142,28 +220,28 @@ def validate_unit_evidence(row, obligations, refs):
     ):
         fail(f"{row['case_id']}: invalid input, output or assertions")
     expected = row["expected"]
+    validate_assertions(assertions)
+    runtime = [item for item in assertions if item["kind"] != "execution"]
     if expected == "assertions":
-        if not assertions or any(
-            not isinstance(item, dict)
-            or item.get("kind")
-            not in (
-                "output_shape",
-                "output_dtype",
-                "output_device",
-                "output_equals_input",
-                "probe_events",
-            )
-            for item in assertions
-        ):
-            fail(f"{row['case_id']}: invalid assertions")
-    elif expected != "match_golden" or assertions:
+        if not any(item["kind"] != "input_conditions" for item in runtime):
+            fail(f"{row['case_id']}: assertions needs an observable output or probe")
+    elif expected != "match_golden":
         fail(f"{row['case_id']}: expected must be match_golden or assertions")
     validate_obligation_evidence(row, obligations, refs, expected, assertions)
     return inputs, outputs, assertions, expected
 
 
 def validate_dependency_graph(units):
-    graph = {unit["id"]: unit.get("depends_on") or [] for unit in units}
+    graph = {}
+    for unit in units:
+        deps = unit.get("depends_on", [])
+        if (
+            not isinstance(deps, list)
+            or any(not isinstance(dep, str) or not dep for dep in deps)
+            or len(deps) != len(set(deps))
+        ):
+            fail(f"{unit['id']}: depends_on must contain unique unit IDs")
+        graph[unit["id"]] = deps
     visiting, visited = set(), set()
 
     def visit(unit_id):
@@ -225,10 +303,6 @@ def adapt_native_units(native, tdd, runnable):
             covered.update(refs)
         if not cases or covered != set(obligations):
             fail(f"{native_id}: uncovered verification obligations")
-        if unit.get("kind") == "pipeline_framework" and not any(
-            item["kind"] == "structural" for item in obligations.values()
-        ):
-            fail(f"{native_id}: pipeline framework lacks structural obligation")
         adapted.append(
             {
                 "id": uid,
@@ -271,7 +345,13 @@ def validate_unit_row(row, uid, obligations, runnable):
         "branch_ids": branch_ids,
         "expected": expected,
         "assertions": assertions,
+        "seed": int(row.get("seed") or 42),
     }
+    _, _, calls = case_calls(inputs, int(row.get("seed") or 42), assertions)
+    for call in calls[1:]:
+        validate_obligation_evidence(
+            row, obligations, refs, expected, call["assertions"]
+        )
     return case, refs
 
 
@@ -317,6 +397,22 @@ def validate_execution_case(item, index, unit, context):
     if not UNIT_ID.fullmatch(suffix):
         fail(f"{unit_id}: invalid case id suffix {suffix}")
     case_id = f"TD-{unit_id}-{suffix}"
+    _, _, calls = case_calls(
+        item["inputs"], item.get("seed", 42), item.get("assertions") or []
+    )
+    for call in calls[1:]:
+        validate_execution_inputs((unit_id, index), {"inputs": call["inputs"]}, context)
+        validate_obligation_evidence(
+            {"case_id": case_id},
+            {},
+            [],
+            item.get("expected", "match_golden"),
+            call["assertions"],
+        )
+        if item.get("expected") == "assertions" and not any(
+            a["kind"] != "input_conditions" for a in call["assertions"]
+        ):
+            fail(f"{case_id}: sequence assertion call lacks observable evidence")
     outputs = item.get("output_tensors") or {}
     if draft and draft.get("call_style") == "dst_args" and not outputs:
         if not case_branches:
@@ -332,18 +428,18 @@ def validate_execution_case(item, index, unit, context):
         "expected": item.get("expected", "match_golden"),
         "assertions": item.get("assertions") or [],
         "obligation_ids": item.get("obligation_ids") or [],
+        "seed": item.get("seed", 42),
     }
 
 
 def validate_obligation_evidence(row, obligations, refs, expected, assertions):
     if any(obligations[ref]["kind"] == "structural" for ref in refs):
-        if expected != "assertions" or not any(
-            item["kind"] == "probe_events"
-            and isinstance(item.get("events"), list)
-            and item["events"]
-            for item in assertions
+        if not any(
+            item["kind"] in {"probe_events", "probe_predicates"} for item in assertions
         ):
-            fail(f"{row['case_id']}: structural obligation requires probe_events")
+            fail(
+                f"{row['case_id']}: structural obligation requires probe_events or probe_predicates"
+            )
     if (
         any(obligations[ref]["kind"] == "numerical" for ref in refs)
         and expected != "match_golden"
@@ -351,13 +447,19 @@ def validate_obligation_evidence(row, obligations, refs, expected, assertions):
         fail(f"{row['case_id']}: numerical obligation requires Golden")
     assertion_kinds = {item.get("kind") for item in assertions}
     if any(obligations[ref]["kind"] == "device" for ref in refs):
-        if expected != "assertions" or "output_device" not in assertion_kinds:
+        if "output_device" not in assertion_kinds:
             fail(
                 f"{row['case_id']}: device obligation requires output_device assertion"
             )
     if any(obligations[ref]["kind"] == "semantic" for ref in refs):
-        if expected != "assertions" or not assertion_kinds.intersection(
-            {"output_shape", "output_dtype", "output_equals_input", "probe_events"}
+        if not assertion_kinds.intersection(
+            {
+                "output_shape",
+                "output_dtype",
+                "output_equals_input",
+                "probe_events",
+                "probe_predicates",
+            }
         ):
             fail(
                 f"{row['case_id']}: semantic obligation requires an observable behavior assertion"

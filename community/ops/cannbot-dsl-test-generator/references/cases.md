@@ -20,8 +20,10 @@ CSV 使用 `csv.DictWriter` 等标准 CSV 序列化器写入，JSON 单元格先
 
 每行 ID 为 `WB-<分支 ID>`，`design_ref` 为所提供设计文件中的实际条目，`condition` 描述分支条件。active 行的 `inputs_json` 是公开输入配方，`note` 统一写 `return_value` 或 `dst_args`；后者还需在 `output_json` 提供全部输出配方。无法执行的 DESIGN 分支写 excluded 行及理由。白盒校验器直接核对 DESIGN 引用、输入和输出；不创建分支图副本。
 
-## 原生 Unit TDD
+## 实现单元 TDD
 
-每行 ID 为 `TD-<原生 Unit ID 小写>-<用例名>`，`unit_id` 为原生 ID 小写，`obligation_ids` 以逗号分隔该 Unit 的真实验证义务，`branch_ids` 可关联 active 白盒分支。每条原生义务至少被一个 TDD 行覆盖。数值义务使用 `expected=match_golden`；结构义务使用 `expected=assertions`，在 `assertions_json` 中提供非空的 `probe_events` 断言。CSV 中的 `inputs_json`、`output_json` 和 `assertions_json` 是唯一用例内容；不生成适配 Unit、桥接计划或 TDD JSON 副本。
+每行 ID 为 `TD-<原生 Unit ID 小写>-<用例名>`，`unit_id` 为原生 ID 小写，`obligation_ids` 以逗号分隔该 Unit 的真实验证义务，`branch_ids` 可关联 active 白盒分支。每条原生义务至少被一个 TDD 行覆盖。数值义务使用 `expected=match_golden`；结构义务在 `assertions_json` 中提供非空的 `probe_events` 或 `probe_predicates`。结构专用行使用 `expected=assertions`，联合数值与结构的行可使用 `match_golden`。CSV 中的 `inputs_json`、`output_json` 和 `assertions_json` 是唯一用例内容；不生成适配 Unit、桥接计划或 TDD JSON 副本。
 
-TDD 义务类型与判定必须对应：`semantic` 使用 `assertions`，至少包含 output_shape、output_dtype、output_equals_input 或 probe_events；`device` 使用 `assertions` 且包含 output_device。`performance` 与未知类型拒绝进入 TDD，性能目标由性能阶段实测。不同判定方式不能由同一行同时承担时拆为多行，不以普通 Golden 比较覆盖非数值义务。错误码行为使用黑盒的 raises_error 用例。
+TDD 义务类型与判定必须对应：`semantic` 至少包含 output_shape、output_dtype、output_equals_input、probe_events 或 probe_predicates；`device` 包含 output_device。`performance` 与未知类型拒绝进入 TDD，性能目标须另有实际测量条件与判据。数值判定与输出/探针断言可由同一次调用共同承担；不以普通 Golden 比较覆盖非数值义务。错误码行为使用黑盒的 raises_error 用例。
+
+实际触发条件、确定性值配方、结构谓词及连续调用使用 [TDD 证据契约](evidence.md)。CSV 列保持不变，扩展均写入 assertions_json；新增条件必须由实际输入触发。

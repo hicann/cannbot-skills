@@ -1,43 +1,51 @@
-# Shape 与 DataType 推导
+# 形状与数据类型推导
 
-本文件给公开入口分配输出、构造 DSL Tensor 视图所需的推导规则；输出公式以 `spec.yaml` 为准。
+## 逐输出形状
 
-## 逐输出 Shape 推导
-| 输出 | 依赖的输入 shape/属性/值 | 逐维公式及索引域 | 标量/空维/动态边界 | Host 可得的依据 |
+| 输出 | 依赖的形状、属性或数据值 | 逐维公式及索引域 | 合法边界 | 尺寸信息可用阶段 |
 |---|---|---|---|---|
 | | | | | |
 
-对 broadcast 写出从尾轴或指定轴对齐的逐维合法条件；对 reshape、slice、ragged 等写出输出维度的计算和溢出检查。值依赖 shape 必须指出 metadata 由谁在何时产生、如何同步或分阶段取得；未知时标待确认。
+对实际采用的广播、重排、切分或变长结构给具体维度关系与范围检查。值依赖形状说明生产者、取得时点和容量约束；接口中有效长度与物理容量分别定义。
 
-## dtype 推导与计算精度
-| 输出 | 输入 dtype 组合 ID | 输出 dtype 规则 | 中间/累计 dtype | Cast 与舍入位置 |
+## 数值计算链
+
+按 Interface.md 的完整支持组合，展开输入、主要中间量、累计状态、最终输出的类型与精度。转换会影响结果时给明确位置。
+
+| 组合 ID | 运算或中间量 | 输入与输出类型 | 运算或累计精度 | 转换、舍入或溢出规则 |
 |---|---|---|---|---|
 | | | | | |
 
-逐行对照 `Interface.md` 的受支持组合；非法组合给出报错条件。多输出分别推导，不能以一个“同输入”概括不相同的规则。
+浮点路径说明误差来源和稳定性条件；整数、布尔及索引路径说明范围与精确性要求。运算重排或近似变换给适用条件，并关联 Validation.md 的比较规则。
 
-## 布局与物理视图
-| 对象 | 逻辑 shape | 物理 stride/布局来源 | view 或 DSL 搬运 | 地址/容量约束 |
+## 逻辑布局到物理存储
+
+| 对象 | 逻辑形状 | 物理布局、步长及偏移 | 容量公式 | 视图或实际数据重排 |
 |---|---|---|---|---|
 | | | | | |
 
-说明 transpose、permute、reshape、contiguous 等操作是否引发设备 copy。Host 只采用已证明的零拷贝 view；需要搬运或布局重排的工作在 Kernel 计算路径中记账。
+视图给共享存储与地址范围依据；实际重排给执行阶段、两侧存储和额外开销。填充范围与有效数据范围分别标明，相关资源计入 LaunchData.md。
 
-## 边界推导示例
-选至少一个常规、一个边界输入，将实际维度与 dtype 代入公式，算出每个输出的 shape/dtype，并核对接口分配及 Kernel 有效范围。
+## 推导代入
 
+选择正常输入及会改变边界或解释的输入，逐输出代入形状、类型和地址公式。动态维度路径另选一个维度关系变化的输入，核对参数绑定、输出范围与资源容量。
 
-## 可替换的推导伪代码
+| 输入形状、类型及属性 | 推导的输出 | 物理范围及容量 | 边界处置 | 对应验证用例 |
+|---|---|---|---|---|
+| | | | | |
 
-下面的写法分别对应纯元数据 shape、值依赖 shape；选择与本算子相符的一种并写成具体公式。`flash_kda.py` 用 Host 元数据决定输出和 padded workspace 的尺寸，公共输出只暴露有效范围。
+## 参考示例：形状与布局推导
+
+以下保留纯元信息形状与值依赖形状的推导示例，步骤函数均为数学或存储操作占位。`flash_kda.py` 提供由输入形状确定输出及填充工作区尺寸的参考；接口最终暴露实际有效范围。
 
 ```python
 # 纯元数据：每个输出逐维推导。
 logical_shape = infer_from_shapes_and_attrs(input_shapes, attrs)
 physical_shape = align_for_kernel(logical_shape, tile_requirements)
 out_storage = allocate(physical_shape, inferred_output_dtype)
-public_out = zero_copy_view(out_storage, logical_shape)
-# 证明 public_out 的 stride、偏移和有效区间，不把 padding 暴露为有效值。
+physical_strides = storage_strides(out_storage)
+public_out = zero_copy_view(out_storage, logical_shape, strides=physical_strides)
+# physical_strides 从实际分配取得，证明偏移及有效范围。
 
 # 值依赖：设备阶段先产生尺寸/前缀信息。
 shape_meta = produce_shape_metadata_on_device(inputs)

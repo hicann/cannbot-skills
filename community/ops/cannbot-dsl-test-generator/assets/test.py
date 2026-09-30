@@ -24,6 +24,8 @@ from pathlib import Path
 
 import torch
 
+from cannbotdsl_case_contract import case_calls, check_inputs, check_probe
+
 TEST_DIR = Path(__file__).resolve().parent
 OP_NAME = "__CANNBOTDSL_OP_NAME__"  # Bound from spec.op.name by prepare_golden.py.
 CASEBOOK = TEST_DIR / "testcase.csv"
@@ -351,50 +353,120 @@ def _run_case(row, invocation):
         return "passed", json.dumps({"expected_error_code": code}, ensure_ascii=False)
     if expectation not in ("match_golden", "match_golden_nan", "assertions"):
         raise ValueError(f"unsupported expected outcome: {expectation}")
-    if expectation == "assertions":
-        measurements = _run_assertion_case(row, invocation, spec_map, output_map)
-    else:
-        inputs, expected = golden.simulate(spec_map, seed=int(row.get("seed") or 42))
-        if expectation == "match_golden_nan" and not _has_nan(expected):
-            raise AssertionError("spec expects NaN but Golden returned no NaN")
-        actual = _invoke(invocation, inputs, output_map)
-        _assert_device(actual, device)
-        measurements = _compare(
-            _to_device(actual, "cpu"),
-            expected,
-            golden.TOLERANCE,
-            equal_nan=expectation == "match_golden_nan",
-        )
+    assertions = json.loads(row.get("assertions_json") or "[]")
+    repeat, bitwise, calls = case_calls(
+        spec_map, int(row.get("seed") or 42), assertions
+    )
+    baselines = {}
+    measurements = []
+    for repetition in range(repeat):
+        for index, call in enumerate(calls):
+            if set(call["inputs"]) - public_names:
+                raise ValueError("sequence inputs contain names outside spec")
+            inputs = golden.make_inputs(call["inputs"], seed=call["seed"])
+            checks = [
+                c
+                for a in call["assertions"]
+                if a["kind"] == "input_conditions"
+                for c in a["checks"]
+            ]
+            records = check_inputs(inputs, checks) if checks else []
+            numeric = expectation != "assertions"
+            expected = None
+            if numeric:
+                _, expected = golden.simulate(call["inputs"], seed=call["seed"])
+                if expectation == "match_golden_nan" and not _has_nan(expected):
+                    raise AssertionError("spec expects NaN but Golden returned no NaN")
+            probe_assertions = any(
+                a["kind"] in {"probe_events", "probe_predicates"}
+                for a in call["assertions"]
+            )
+            probe = None
+            if probe_assertions:
+                module = os.environ.get("CANNBOTDSL_PROBE_MODULE")
+                probe = importlib.import_module(module) if module else None
+                if (
+                    probe is None
+                    or not hasattr(probe, "reset")
+                    or not hasattr(probe, "snapshot")
+                ):
+                    raise RuntimeError("probe assertions require reset()/snapshot()")
+                probe.reset()
+            actual = _invoke(invocation, inputs, output_map)
+            _assert_device(actual, device)
+            if probe_assertions or bitwise:
+                _synchronize(device)
+            if numeric:
+                records.extend(
+                    _compare(
+                        _to_device(actual, "cpu"),
+                        expected,
+                        golden.TOLERANCE,
+                        equal_nan=expectation == "match_golden_nan",
+                    )
+                )
+            observable = [
+                a for a in call["assertions"] if a["kind"] != "input_conditions"
+            ]
+            if observable:
+                records.extend(
+                    _assert_nonnumeric(actual, inputs, observable, device, probe)
+                )
+            elif not numeric:
+                raise ValueError("assertions case lacks observable output or probe")
+            if bitwise:
+                snapshot = _clone_cpu(actual)
+                if repetition == 0:
+                    baselines[index] = snapshot
+                else:
+                    _bitwise_equal(snapshot, baselines[index])
+            measurements.append(
+                {"repetition": repetition, "call": index, "records": records}
+            )
     return "passed", json.dumps(measurements, ensure_ascii=False)
 
 
-def _run_assertion_case(row, invocation, spec_map, output_map):
-    _, golden, device = invocation
-    inputs = golden.make_inputs(spec_map, seed=int(row.get("seed") or 42))
-    module = os.environ.get("CANNBOTDSL_PROBE_MODULE")
-    probe = importlib.import_module(module) if module else None
-    assertions = json.loads(row.get("assertions_json") or "[]")
-    needs_probe = any(item.get("kind") == "probe_events" for item in assertions)
-    if needs_probe:
+def _clone_cpu(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().clone()
+    if isinstance(value, dict):
+        return {key: _clone_cpu(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_clone_cpu(item) for item in value)
+    raise ValueError("bitwise repeat requires tensor outputs")
+
+
+def _bitwise_equal(actual, expected):
+    if isinstance(expected, torch.Tensor):
         if (
-            probe is None
-            or not hasattr(probe, "reset")
-            or not hasattr(probe, "snapshot")
-        ):
-            raise RuntimeError(
-                "probe_events requires CANNBOTDSL_PROBE_MODULE.reset()/snapshot()"
+            not isinstance(actual, torch.Tensor)
+            or actual.shape != expected.shape
+            or actual.dtype != expected.dtype
+            or not torch.equal(
+                actual.contiguous().reshape(-1).view(torch.uint8),
+                expected.contiguous().reshape(-1).view(torch.uint8),
             )
-        probe.reset()
-    actual = _invoke(invocation, inputs, output_map)
-    _assert_device(actual, device)
-    if needs_probe:
-        _synchronize(device)
-    return _assert_nonnumeric(actual, inputs, assertions, device, probe)
+        ):
+            raise AssertionError("repeated call output changed bitwise")
+    elif isinstance(expected, dict):
+        if not isinstance(actual, dict) or set(actual) != set(expected):
+            raise AssertionError("repeated call output structure changed")
+        for key in expected:
+            _bitwise_equal(actual[key], expected[key])
+    else:
+        if type(actual) is not type(expected) or len(actual) != len(expected):
+            raise AssertionError("repeated call output structure changed")
+        for left, right in zip(actual, expected):
+            _bitwise_equal(left, right)
 
 
 def _observe_assertion(actual, inputs, assertion, device, probe):
     kind = assertion.get("kind")
-    if kind == "probe_events":
+    if kind == "probe_predicates":
+        if probe is None or not hasattr(probe, "snapshot"):
+            raise RuntimeError("probe predicates require snapshot()")
+        observed = check_probe(probe.snapshot(), assertion["checks"])
+    elif kind == "probe_events":
         if probe is None or not hasattr(probe, "snapshot"):
             raise RuntimeError(
                 "probe_events requires CANNBOTDSL_PROBE_MODULE.snapshot()"

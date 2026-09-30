@@ -1,6 +1,6 @@
 ---
 name: cannbot-dsl-test-generator
-description: "当需要设计、补充或校验 CANNBotDSL 算子测试，或生成独立 CPU Golden 与测试入口时使用；提供黑盒、白盒和原生 Unit TDD 用例及校验结果。"
+description: "当需要设计、补充或校验 CANNBotDSL 算子测试，或生成独立 CPU Golden 与测试入口时使用；根据调用方提供的规格、设计及实现单元检验义务生成黑盒、白盒和 TDD 用例及校验结果。"
 metadata:
   category: testing
 ---
@@ -11,12 +11,12 @@ metadata:
 
 - 算子规格文件，确定公开接口、数学语义、边界和容差。
 - 调用方提供的一份设计 Markdown 文档，供 Golden 和白盒用例引用；文件名与所在目录由调用方决定。
-- 原生 `U*.yaml` 所在目录，供 TDD 用例读取实现边界和验证义务。
+- 调用方提供的 `U*.yaml` 所在目录，供 TDD 用例读取实现边界和检验义务；所需字段见 [TDD 输入与证据契约](references/evidence.md)。
 - 可选：已有的测试目录及 `testcase.csv`。各模块在同一 CSV 中维护所属分组。
 
 ## 输出
 
-在调用方指定的 `TEST_DIR/` 下维护 `testcase.csv`、`<op>_golden.py`、`test_<op>.py` 和 `testcase_output/{blackbox,whitebox,tdd}/`。算子名来自 `spec.op.name`。脚本校验本 Skill 产出的用例与 Golden，具体用例由测试设计者确定。
+在调用方指定的 `TEST_DIR/` 下维护 `testcase.csv`、`<op>_golden.py`、`test_<op>.py`、固定入口辅助模块和 `testcase_output/{blackbox,whitebox,tdd}/`。算子名来自 `spec.op.name`。脚本校验本 Skill 产出的用例与 Golden，具体用例由测试设计者确定。
 
 各脚本通过 `--spec SPEC`、`--design DESIGN`、`--units-dir UNITS`、`--test-dir TEST_DIR` 接收当前步骤所需的输入和输出位置。
 
@@ -49,9 +49,9 @@ metadata:
 
 依据所提供设计文件中的算法、执行路径和验证矩阵直接编写 CSV 的 whitebox 行。每个目标对应可执行分支或带理由的 excluded 行；分支只使用 spec 公开输入。运行 `scripts/build_whitebox_cases.py --spec SPEC --design DESIGN --test-dir TEST_DIR` 核对 DESIGN 引用、输入配方和分支 ID，不依赖 Unit 或 Golden。
 
-## 原生 Unit TDD
+## 实现单元 TDD
 
-依据 `UNITS/U*.yaml` 的每项 `verification_obligation` 直接编写 CSV 的 tdd 行，明确公开输入、预期结果、断言和可选白盒分支 ID。结构义务需要可执行的 `probe_events`；数值义务使用 Golden。运行 `scripts/build_tdd_cases.py --spec SPEC --design DESIGN --units-dir UNITS --test-dir TEST_DIR`，一次校验原生 Unit 的义务覆盖与依赖、TDD 输入配方、白盒关联及 Golden；不写中间文件。
+依据 `UNITS/U*.yaml` 的 `verification_obligations` 逐项编写 CSV 的 tdd 行，明确公开输入、预期结果、断言和可选白盒分支 ID。结构义务需要可执行的 `probe_events` 或 `probe_predicates`；数值义务使用 Golden，并可在同次调用联合结构断言。实际有效工作量、连续调用与重复验证按 [TDD 输入与证据契约](references/evidence.md) 编写，物化配方确认触发，不能仅靠义务 ID 关联宣布覆盖。运行 `scripts/build_tdd_cases.py --spec SPEC --design DESIGN --units-dir UNITS --test-dir TEST_DIR`，校验义务与用例覆盖、TDD 输入配方及实际触发条件、白盒关联及 Golden；不写中间文件。
 
 ## 验收
 
@@ -60,4 +60,5 @@ metadata:
 - CSV 三组 active 用例非空、ID 唯一；所有 excluded 行有明确理由且不会执行。
 - 黑盒可追溯 spec，白盒可追溯 DESIGN，TDD 每项义务能回指原生 Unit 和具体用例。
 - Golden 的数学、设计阶段与容差与 spec 和设计文件一致；固定入口按 `--sheet blackbox|whitebox|tdd --device <设备>` 执行，设备验证时使用 `--require-accelerator`。
+- 复核每项 must_distinguish 的输入与判定确实能区分错误实现；核对自然语言 coverage_axes 和结构采集来源，脚本通过不代替这些结论。义务无法由当前公开输入及断言表达时，返回具体缺口。
 - 不修改冻结的 spec、DESIGN、Unit、目标实现或测试阈值来换取通过。

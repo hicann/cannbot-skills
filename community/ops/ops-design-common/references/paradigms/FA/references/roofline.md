@@ -206,6 +206,8 @@ fp16（2B）→ fp8（1B）：`sizeof` 减半 → **AI_HBM 翻倍（约 +100%）
 
 进入 S5 流水前，方案必须展示以下推导（**每项展示算式，禁止只给结论**）：
 
+逐阶段计算及搬运按 [FA 阶段成本](stage-cost.md) 代入；Vector 负载包含 V1 与 V2，Cube 负载包含 C1 与 C2，并关联各自共享资源与状态依赖。
+
 - [ ] AI_HBM 公式 + 代入 mBaseSize/D/sizeof 的数值 + ridge_HBM
 - [ ] 三通道 ceiling 各自估算 + min 取哪个 → 瓶颈区制
 - [ ] cross-core 校核：T_vec vs T_cube 的定性 / 定量判断（含 r_cv 配比折算）

@@ -4,6 +4,8 @@
 
 **回答：需要哪些 buffer？各自大小的符号公式？每个 buffer 的「生命周期」「物理份数 N」「跨 buffer 复用」分别是什么？**
 
+以下共享 K/V 槽池、P 的预填份数对应各自说明的候选模型。选定其他装载或交接排布时，按 [流水编排](pipeline.md) 回填逐对象的实际生命周期。max/sum、工作项缩放系数与 O_acc 分别记账。
+
 - 输入 buffer / 输出 buffer / 中间计算 buffer / 状态 buffer（max / sum / O_acc）
 - 各 buffer 单份大小公式（符号化，用 mBaseSize / s2BaseSize / D 等变量）
 - **数据生命周期**：常驻（KV 遍历期间数据不变）还是轮转（逐 KV 块替换覆写）
@@ -32,7 +34,7 @@
 
 | 生命周期 | 定义 | 命中 buffer |
 |---|---|---|
-| 常驻 | KV 遍历期间数据不变，跨 KV 块复用同一份数据 | Q_tile、O_acc、max、sum |
+| 跨块保留 | Q 保持不变，累计状态按 KV 顺序更新并承接旧值 | Q_tile、O_acc、max、sum |
 | 轮转 | 数据逐 KV 块替换（旧块数据失效、新块覆写） | K_tile、V_tile、S（UB）、P（UB 与 L1） |
 
 > **Q tile 块常驻是结构决策**：Q 在整个 Sk 遍历期间常驻片上（L1/UB），切 KV 块时不重复加载 Q，禁止每个 KV 块重搬 Q。
@@ -56,16 +58,17 @@
 | S `[mBaseSize, s2BaseSize]`（UB） | 轮转 | **恒 2** | L0C→UB 通路 pingpong，Cube 写 / Vector 读交替 |
 | P `[mBaseSize, s2BaseSize]`（UB vec1res） | 轮转 | **恒 2** | Vector 生产 / 搬出 L1 交替 |
 | P `[mBaseSize, s2BaseSize]`（L1） | 轮转 | **N_P_L1 = r + 1** | preload 阶段 Vector 连续产出多块 P 囤于 L1，与 K/V 槽池同构 |
-| O_acc `[mBaseSize, D]` fp32 | 常驻 | task 内恒 1；跨 task 1 或 2 | task 内跨块累积禁轮转；跨 task 双份是容量决策（见下「状态 buffer 轮转语义」） |
-| max `[mBaseSize]` fp32 | 常驻 | task 内恒 1；跨 task 1 或 2 | 同上 |
-| sum `[mBaseSize]` fp32 | 常驻 | task 内恒 1；跨 task 1 或 2 | 同上 |
+| O_acc `[mBaseSize, D]` fp32 | 跨块保留 | 尚未完成最后读取的 O_acc 份数 | 首次 V2 到输出读取完成，按 task 归属 |
+| max `[mBaseSize]` fp32 | 跨块保留 | 尚未完成最后读取的 max 份数 | 首次 V1 到最后使用，按 task 归属 |
+| sum `[mBaseSize]` fp32 | 跨块保留 | 尚未完成最后读取的 sum 份数 | 首次 V1 到最后使用，按 task 归属 |
+| alpha `[mBaseSize]` fp32 | 逐工作项保留 | 尚未被对应 V2 使用完成的版本数 | V1 产生，V2 延迟读取，与 task 槽分别编号 |
 | L0A `[subM, subK]` NZ | 轮转（逐 base 子块替换） | **恒 2** | 左操作数装载槽（Q / P）；单份则装载与矩阵乘串行 |
 | L0B `[subK, subN]` NZ | 轮转 | **恒 2** | 右操作数装载槽（K / V）；同上 |
 | L0C `[subM, subN]` fp32 | 轮转 | **恒 2** | 累加结果搬出槽（S / O_tile）；单份则矩阵乘与搬出串行 |
 
 ### K/V 共享槽池
 
-`K_tile` 与 `V_tile` 单份大小完全相同（`s2BaseSize×D`），且消费时刻错开（C1 消费 K(j)，C2 消费 V(j)），因此 K、V **不各自独立 ring**，而是共享一个槽池：
+当 `K_tile` 与 `V_tile` 的物理布局、类型与单份容量一致，且完成协议允许其存储复用时，可选择共享槽池；C1 消费 K(j)，C2 消费 V(j)。本模型在消费期间保留一个槽，其他槽用于预取：
 
 ```
 N_KV ≥ r + 1        # r = 预取深度（已加载未消费的槽数）；+1 = 正在消费的槽
@@ -73,15 +76,15 @@ N_KV ≥ r + 1        # r = 预取深度（已加载未消费的槽数）；+1 =
 
 推导：C1 与 C2 在同一 Cube 单元上**串行**（Cube 核一次只跑一个 GEMM），稳态下任意时刻最多 1 个槽在被消费；其余槽全部可用于预取。槽位按数据流顺序 `K(j), V(j), K(j+1), V(j+1)…` 依次承载，物理槽在 K/V 间交替复用。
 
-- **r 由 S5 流水级数决定**（2 级流水 r=1，3 级流水 r=2），是性能下界参数；**N_KV 是容量决策**：取更大值可加深预取、吸收加载抖动，以 Σ 容量校验为上界。
+- **r 由 S5 的实际预取排布决定**；份数覆盖尚未释放的预取与消费对象，选择更深预取时重新校验 Σ 容量、同步与收益。
 - 相比 K、V 各自独立 ring（各自需 r+1 槽、共 2r+2 槽），共享池只需 r+1 槽：省下的槽来自「同一时刻只有一个槽在被消费」——独立 ring 中未消费的 ring 槽无法跨张量挪用，共享池可以。
 - 约束：槽的释放须等其承载的 K 被 C1（或 V 被 C2）消费完，同步按槽序保证，**禁止 K/V 混用导致 C1/C2 读错槽**。
 
 ### 状态 buffer 轮转语义（max / sum / O_acc）
 
-「禁止轮转」的精确范围是**同一 task 的 KV 遍历期间**：跨块累积状态必须读稳定单份，task 内 pingpong 会读错槽（这才是 I3 的本意——跨任务分槽，而非禁止一切双份）。它**不禁止跨 task 双份**：task t 末块 drain（O 写回）时，task t+1 的状态（max=−1e30、sum=0、O_acc=0）可在另一份上初始化并提前启动 C1，隐藏 task 边界的 drain/初始化延迟。
+同一 task 的递推保持稳定逻辑归属，每次更新承接该 task 的正确旧值。max/sum 由 V1 更新，O_acc 由 V2 更新；初始化和最终释放按各自阶段定位。alpha 按工作项保留旧版本，直到所属 V2 使用完成。
 
-是否跨 task 双份是**纯容量决策**（Σ 校验余量是否放得下第二份）：max/sum 极小（`mBaseSize` 级）通常可双份 pingpong；O_acc 较大（`mBaseSize×D` fp32），放不下则维持跨 task 单份、新 task 初始化等旧 task drain 完成——这是容量取舍，不是结构禁止。
+分别计算各状态的最大同时占用，再校验容量。多个短 task 交错时，max/sum 可以超过两份；V2 按 task 顺序推进且最终输出完成后再初始化下一 task 时，O_acc 可以独立用一份。具体推导见 [四阶段示例](pipeline-example.md)。容量不足时调整排布或块大小，并同步修改等待和释放。
 
 ### L0：恒 pingpong（结构硬约束）
 
@@ -112,8 +115,10 @@ N_L0A = N_L0B = N_L0C = 2      # 结构硬约束，不接受 N = 1
 ## 份数决策规则
 
 ```
-# 跨块累积状态：task 内恒 1 份（I3 跨任务分槽）；跨 task 双份是容量决策
-N_状态（max/sum/O_acc） = 1（task 内 + 容量不足时跨 task）或 2（跨 task pingpong 隐藏 drain）
+# 各状态分别按尚未完成最后读取的对象计数
+N_ms = max_t active_tasks_with_unreleased_max_sum(t)
+N_Oacc = max_t active_tasks_with_unreleased_Oacc(t)
+N_alpha = max_t active_workitems_with_unconsumed_alpha(t)
 
 # 常驻 buffer：份数与生命周期无关，按预取需求独立定
 N_Q = 1（不预取） 或 ≥ 2（Sq 分块时预取下一 Q 块）
@@ -136,8 +141,8 @@ N_L0A = N_L0B = N_L0C = 2     # 硬约束：单缓冲则装载/计算/搬出三�
 单份大小 size_i（符号化，代入 mBaseSize/s2BaseSize/D/d_s）
 Σ_total = Σ_i (size_i × N_i)
         = size_Q×N_Q + size_KV×N_KV + size_S×2 + size_P×(2 + N_P_L1)
-        + size_Oacc×N_Oacc + size_max×N_ms + size_sum×N_ms
-        # N_KV ≥ r+1（K/V 共享槽池）；N_P_L1 = r+1；N_Oacc/N_ms = 1（容量不足）或 2（跨 task pingpong）
+        + size_Oacc×N_Oacc + size_max×N_ms + size_sum×N_ms + size_alpha×N_alpha
+        # K/V 与 P 的份数对应所选预取模型；各状态份数按各自最后读取推导
 
 Σ_L0（逐端口独立校验，不合并为一个池）
      = 2 × size_L0A ≤ S_L0A      # size_L0A = subM × subK × d_s

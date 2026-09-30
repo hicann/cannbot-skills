@@ -1,39 +1,54 @@
-# Launch 配置与元数据
+# 阶段参数与资源预算
 
-本文件定义公开入口与 DSL Kernel 之间实际传递的配置和数据。只记录存在的字段；无额外 metadata 时写清参数即可，不建立空的汇总结构体。
+## 配置及来源
 
-## 配置与来源
-| 字段 | 类型/单位 | 计算公式或候选集合 | 合法范围与校验 | 静态或运行时 | Kernel 消费位置 |
+| 字段 | 类型及单位 | 计算公式或候选集合 | 合法范围与校验 | 固定配置或运行参数 | 消费阶段 |
 |---|---|---|---|---|---|
 | | | | | | |
 
-配置可由 `TileConfig`/`ResourcePlan` 或等价对象承载。给出构造顺序：输入元数据 → 候选 tile/阶段 → 资源预算 → 选择/拒绝。编译期特化、运行时标量和设备 Tensor metadata 分开。
+给出配置推导顺序：输入信息、候选算法及分块、资源预算、最终选择。按需描述辅助记录，字段都有生产与消费位置。
 
-## Kernel 调用契约
-| 参数顺序 | 名称 | Python/DSL 类型及 shape/dtype | 生产者 | 消费者 | 有效范围/生命周期 |
+## 阶段参数契约
+
+多阶段或多种调用变体分别列出完整有序参数表，并与 HostLaunch.md 的实际取值及 Kernel.md 的消费位置逐项对应。
+
+| 顺序 | 参数或对象 | 形状、类型及维度关系 | 布局、步长及容量 | 生产者与消费者 | 有效期及可选状态 |
 |---|---|---|---|---|---|
 | | | | | | |
 
-逐项对齐 `HostLaunch.md` 中的调用草图和 `Kernel.md` 中的 `__call__` 签名。多阶段调用分别列参数；指针/view 的地址、stride、对齐、别名条件写明。
+定义跨对象维度等式、可变维度的上下界及来源、标量单位。逻辑布局转换后仍需解释的信息通过明确参数或可区分的契约传递。可选对象的缺省状态与真实最小对象保持可区分。
 
-## Metadata 编码（仅适用时）
-说明字段布局、元素单位、索引公式、有效记录数、最大容量、初始化方、设备可见时点与越界检查。若 Host 无法从元数据取得值，说明哪个 DSL 阶段产生它以及后续阶段如何消费。不得把 `flash_attn.py` 的 ASC metadata 当作通用协议。
+选一个最小合法输入和一个维度或配置变化的输入，列出全部实际参数取值，核对维度关系、数量、顺序和消费条件。
 
-| 字段/记录 | offset 与 stride 公式 | dtype/单位 | 生产和初始化 | 读取及边界检查 |
+## 辅助记录与临时存储布局（按需）
+
+| 区域或记录 | 类型及单位 | 偏移、步长及容量公式 | 初始化或生产方 | 可见时点与读取检查 |
 |---|---|---|---|---|
 | | | | | |
 
-## Workspace 与本地资源
-| 对象/内存池 | shape/dtype/深度 | 字节数公式 | 分配者与活跃阶段 | 同时存活对象 | 复用屏障 |
+按实际使用的区域展开数据、辅助记录、状态及同步信息，总容量覆盖全部区域及对齐间隔。间接寻址或变长结构中的数据值在生成地址前检查安全范围。并发状态更新说明独占、原子或合并协议。
+
+## 物理资源与生命周期
+
+| 对象及内存池 | 物理形状、类型及份数 | 字节公式 | 分配范围与活跃区间 | 地址复用条件 | 容量及余量 |
 |---|---|---|---|---|---|
 | | | | | | |
 
-对每个实际使用的内存池计算峰值：`peak = max(各阶段同时存活字节数)`。代入目标设备可用容量、保留量、padding 和 double buffer 深度，给出通过/拒绝条件。Workspace 的跨 Launch 可见性单独证明；未使用的池不人为添加。
+分别核算实际物理分配与各阶段活跃峰值。跨池副本、格式填充、临时转换、常驻状态和同时在途版本各自计入；明确地址复用且生命周期不冲突时才共享空间。每个实际内存池及共享范围分别与目标容量比较。
 
+采用流水时，份数引用 Kernel.md §8 的生命周期；资源超限给配置调整或符合接口契约的另一条路径。
 
-## 配置与资源计划伪代码
+## 边界调用契约
 
-下面只表示 *Host 先估算、后选择* 的数据关系，字段按本算子实际使用的资源替换。容量来自目标设备能力资料，不能沿用样例数字。`flash_attn.py` 的 `TileConfig`/`ResourcePlan` 提供这种职责拆分，`flash_kda.py` 展示了更静态的编译规格路线。
+| 条件 | 各输出分配及初值 | 需要的执行阶段 | 参数或资源变化 | 规格依据 |
+|---|---|---|---|---|
+| | | | | |
+
+逐输出推导边界调用。输出范围为空、操作范围为空、可选对象关闭等条件按实际语义展开，并与 HostLaunch.md 的调度及 Validation.md 的预期一致。
+
+## 参考示例：配置与资源计划
+
+以下保留先估算、后选择的参考骨架，来源于 `flash_attn.py` 的配置与资源职责拆分。示例假设一维 ND、单位步长、分配尺寸已满足对齐，输入输出使用相同深度。`algorithm_temporaries_bytes` 包括实际需要的累计状态和其他临时对象；字段、容量及配置边界由设计实例化。
 
 ```python
 # 设计伪代码：填入真实字段、公式与容量证据后再实现。
@@ -52,7 +67,7 @@ class ResourcePlan:
 def estimate_resources(config, input_meta):
     elem_bytes = dtype_size(input_meta.dtype)  # 按真实 dtype 查表
     input_buf = config.tile_elems * elem_bytes * config.pipeline_depth
-    output_buf = config.tile_elems * output_elem_bytes(input_meta)
+    output_buf = config.tile_elems * output_elem_bytes(input_meta) * config.pipeline_depth
     temporaries = algorithm_temporaries_bytes(config, input_meta)
     return ResourcePlan(
         config.name,
@@ -70,22 +85,42 @@ def select_config(input_meta, limits):
 
 把每个函数中的占位计算展开成上文表格的**逐项字节公式**。若有 L1/L0A/L0B/L0C，分别增加字段和容量不等式；按阶段活跃集算峰值，不把所有候选分支相加。选择结果应能在 `TemplatePartition.md` 找到唯一执行路径。
 
-## 编译规格路线（按需）
+## 参考示例：符号维度与参数绑定
 
-为 `cannbotdsl.compile` 的 `@host` 入口列出每个输入、输出、workspace 的符号维度、stride、dtype 与标量参数。实际编译调用只使用该算子需要的参数：
+以下是独立的二维正尺寸规格示例，用共享符号表达输入输出维度相等、用独立符号表达输入行步长。它演示参数契约的绑定；`MatrixViewKernel` 是需另行定义的算法占位，与一维启动示例分别实例化。
+
+实际使用时，依据目标版本的 DSL 源码或官方资料核对维度与规格声明规则；变量上界由实际支持域给出。
 
 ```python
-# 设计伪代码：shape、stride 和 dtype 由 Interface/InferShapeDtype 推导。
+import cannbotdsl
+from cannbotdsl import Tensor, dtypes
+
+
+class MatrixViewProgram:
+    def __init__(self, tile_shape, block_dim):
+        self.tile_shape = tile_shape
+        self.block_dim = block_dim
+
+    @cannbotdsl.host
+    def run(self, x: Tensor, out: Tensor, attr: int):
+        op = MatrixViewKernel(self.tile_shape)  # 算法占位
+        op[self.block_dim](x, out, attr)
+
+
+# 形状、类型及确定上界由接口和资源契约给出。
 batch = cannbotdsl.Dim("B", min=1, max=MAX_BATCH)
 length = cannbotdsl.Dim("L", min=1, max=MAX_LENGTH)
+input_row_stride = cannbotdsl.Dim("X_ROW_STRIDE", min=1)
 input_spec = cannbotdsl.TensorSpec(
     (batch, length), input_dtype, stride=(input_row_stride, 1)
 )
 output_spec = cannbotdsl.TensorSpec((batch, length), output_dtype)
-entry = OperatorProgram(static_config)  # run 为 @host 绑定方法，签名与下列描述同序
+entry = MatrixViewProgram(tile_shape, block_dim)
 compiled = cannbotdsl.compile(
-    entry.run, input_spec, output_spec, scalar_dtype
+    entry.run, input_spec, output_spec, dtypes.int64  # x、out、attr
 )
 ```
 
-动态维度、空输入和不连续布局若超出这条编译规格的表达能力，应选适用的规格或明确拒绝；不要额外创建无消费方的 metadata Tensor。
+此例的二维输入采用行内连续布局；行步长与存储容量的合法关系仍由接口校验。可选状态、零尺寸或其他布局按阶段参数表另行表达。
+
+共享符号与实际形状的绑定需要逐对象核对；确定上界与支持域及资源预算一致。

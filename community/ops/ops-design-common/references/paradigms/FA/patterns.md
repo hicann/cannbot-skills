@@ -2,6 +2,8 @@
 
 针对 Attention 及其变种（GQA、MHA、MLA、量化、稀疏等）生成语言无关的 Tiling 设计方案。用于用户描述 attention 算子并要求产出 Tiling 设计或方案文档时。
 
+进入本模块前核对实际公式中的分数计算、行归一化与加权值聚合。C1/V1/C2/V2 是相应计算图的一种阶段划分，具体排布由数据依赖、状态版本与目标资源推导。
+
 芯片规格缺失时向用户补齐；无法提供则在方案中标注"待提供"，不猜测。
 
 ## 前置知识
@@ -17,18 +19,20 @@
 | S1 选型        | 定基础形态 + 正交 trait + Feature                                           | [selection.md](./references/selection.md)                                   |
 | S2 单核计算流     | 定义单核内 stage 序列 + 数据流方向                                               | [compute-flow.md](./references/compute-flow.md)                             |
 | S3 Buffer 规划 | 出公式化 buffer 清单（大小符号化 + 份数公式化，预取深度作参数；含 L0A/L0B/L0C pingpong 硬约束） | [buffer.md](./references/buffer.md)                                         |
-| S4 基本块与性能建模  | Roofline 定候选 mBaseSize / s2BaseSize，代入 buffer 大小（份数待 S5）                            | [roofline.md](./references/roofline.md)、[buffer.md](./references/buffer.md) |
+| S4 基本块与性能建模  | Roofline 与逐阶段成本定候选块，分析两次矩阵计算、向量阶段及搬运，代入 buffer 大小 | [roofline.md](./references/roofline.md)、[stage-cost.md](./references/stage-cost.md)、[buffer.md](./references/buffer.md) |
 | S5 流水编排      | 流水级数 + stage 顺序 + 同步语义 + 回填 buffer 份数                                | [pipeline.md](./references/pipeline.md)                                     |
 | S6 负载均衡策略    | 多核切分 + 负载均衡                                                          | [load-balancing.md](./references/load-balancing.md)                         |
 | S7 自检        | 跑 Self-Check 清单                                                      | [advanced.md](./references/advanced.md)                                     |
 
-> **基本块与 buffer 的迭代闭环（S3↔S4↔S5）**：S3 出公式化 buffer 清单（大小符号化 + 份数公式化，预取深度作参数）；S4 由 Roofline 定候选 mBaseSize / s2BaseSize 代入**大小**；S5 定流水级数 → 预取深度代入**份数**；以硬件内存（UB / L1 / L0）对 Σ(size×N) 校验；不满足则调整基本块 / buffer 复用 / 流水级数后重新代入，**循环迭代**直到收敛到可行的 tiling 块。
+> **基本块与 buffer 的迭代闭环（S3↔S4↔S5）**：S3 出公式化 buffer 清单（大小、份数与生命周期）；S4 由 Roofline 与阶段成本定候选块并代入大小；S5 按实际流水、预取及最后读完成推导份数；以硬件内存（UB / L1 / L0）对 Σ(size×N) 校验。不满足则调整基本块、复用或排布并重新代入，直到收敛到可行的 tiling 块。
 
 > **自检不通过**：定位失败项，回退到对应步骤重新决策（对应关系见 Self-Check），修正后重新自检，直至全部通过；未通过不允许产出方案。
 
 ## 加载协议（按需加载）
 
 **基础加载**：S1→S7 依上表逐步加载对应文件。
+
+**四阶段排布示例**：S5 采用 C1→V1→C2→V2 并交错推进多个 KV 工作项时，按需读取 [完整时序与状态示例](./references/pipeline-example.md)。其中的阶段偏移、队列和状态份数只对应所示排布，实际路径结合 S3、S4、S5 重新代入。
 
 **特性加载**：命中下列特征时，在相关步骤额外加载对应 trait 文件：
 

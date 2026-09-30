@@ -1,98 +1,176 @@
-# DSL Kernel 计算方案
+# 计算与同步方案
 
-从 `Overview.md` 公式和 `TemplatePartition.md` 路径推导实现。`flash_attn.py` 仅供参考 `@kernel`、`@jit`、`with vf(...)`、Channel/Buffer 和阶段组织；实际 API 与设备限制以调用方提供的资料及验证为准。
+从 Overview.md 的公式及 TemplatePartition.md 的路径推导实际计算。参数契约统一引用 LaunchData.md，目标能力及约束引用 API.md。
 
-## 1. Kernel 入口与实例
-列 `@kernel` 类/函数、构造配置、`__call__` 参数顺序、输入输出 Tensor、Launch 维度。区分编译期参数、运行时标量、设备 Tensor 和 Workspace，并与 `LaunchData.md` 对齐。
+## 1. 执行入口与参数
 
-| 参数 | 来源 | DSL 类型/shape/dtype | 静态或运行时 | 首次消费阶段 |
+| 阶段参数 | 来源 | 形状、类型及维度关系 | 固定配置或运行数据 | 首次消费位置 |
 |---|---|---|---|---|
 | | | | | |
 
-## 2. 阶段图与数据所有权
-按真实算法画 producer→consumer 图，列每阶段输入、输出、执行角色、有效元素和前后不变量。只有需要时才拆 Cube/Vector、跨核通信或多次 Launch。
+说明各阶段任务范围与调用变体，并核对实际参数顺序。
 
-| 阶段 | 输入与持有者 | 计算/搬运 | 输出与下一消费者 | 同步条件 |
+## 2. 阶段与数据所有权
+
+画真实算法的数据流，列出每阶段的输入、计算或搬运、输出及完成条件。协作执行时展开每个角色的工作范围、共享对象和汇合协议。
+
+| 阶段及角色 | 工作项与读写范围 | 独占或共享对象 | 前置条件 | 完成发布与汇合责任 |
 |---|---|---|---|---|
 | | | | | |
 
-## 3. 坐标和边界公式
-写 `block_id`、task、tile、局部坐标到每个输入和输出逻辑/物理地址的公式。分别证明覆盖完整、写入不重叠、尾块 mask 正确、空输入无非法访问；与 Host 的 block 数一致。
+多个生产者或消费者共同使用一个结果时，给完成计数或等价协议、汇合方以及发布最终结果的条件。
 
-## 4. Init 与资源
-逐一列实际 Channel、Buffer、MemLoc、shape、dtype、深度、生产者、消费者和存活区间。给初始化值和谁负责释放/复用。每阶段同时存活量对应 `LaunchData.md` 的峰值。
+## 3. 坐标与边界
 
-## 5. CopyIn
-写读地址、stride/broadcast、有效范围、padding、搬运 API 和搬运完成同步。区分 Host 零拷贝 view 与 Kernel 真正的数据搬运；无 CopyIn 的路径说明理由。
+写任务、工作项及局部坐标到每个输入输出逻辑和物理地址的公式，包含基址、步长及元素单位。展平或间接寻址时保留重建地址所需的信息。
 
-## 6. Compute
-将公式拆成有序操作链：每一步的输入、输出、dtype、Cast、累计状态、特殊值处理和采用的 DSL API。列可核验的 `with vf(...)` 计算区及辅助阶段方法，以及状态初始化、更新、收尾；未知 API 标待验证而不伪造可运行代码。
+证明输出覆盖、所有权、有效范围与容量安全。任务编号、内部工作项编号和缓冲槽代次分别定义。
 
-| 顺序 | 对应公式 | 输入→输出 | dtype/精度 | DSL 调用 | 状态/边界 |
+## 4. 资源初始化与状态归属
+
+| 对象或状态 | 物理形状、类型及份数 | 所属任务或角色 | 初始化值与作用域 | 重置触发点 | 最后读取与复用条件 |
 |---|---|---|---|---|---|
 | | | | | | |
 
-## 7. CopyOut
-写有效输出地址、尾块 mask、别名/inplace 的读写顺序、Workspace partial 的最终归并和未写区域处理。明确写回完成后何时对调用方可见。
+作用域按实际需要区分每次调用、执行单元、输出任务及内部工作项。累加前说明旧值从何而来；状态跨工作项保留时证明中途不会被其他阶段覆盖。资源量统一计入 LaunchData.md。
 
-## 8. Pipeline 与同步
-按 producer/consumer 列 Channel 深度、warmup/steady/drain、跨角色/跨核事件、等待与通知的配对，以及 Buffer 何时可复用。无需流水时说明单阶段顺序和理由。
+## 5. 输入读取与数据重排
 
-## 9. 分支代码落点
-公共阶段与公式留在本文；每条路径在 `branches/DESIGN-BRANCH-<id>.md` 给具体 tile、坐标、资源和操作链。只给足以支撑实现的 Python/CANNBotDSL 草图；已有 API 经核实才写为确定调用。
+给物理地址、步长、广播映射、有效范围、填充值及读完成条件。重排明确两侧布局、容量、元素偏移和消费时点。
 
+分块矩阵或向量操作按实际采用的粒度展开装载、物理格式、完整访问宽度及尾部处理。
 
-## 单路径流式 Kernel 伪代码
+## 6. 有序计算链
 
-这是把 `flash_attn.py` 的 `@kernel` 类、`flash_kda.py` 的 block 任务循环与两者的 Channel/Buffer 用法抽象后的**设计骨架**，不是可直接执行的算子。`formula_step` 必须换成 `Overview.md` 的真实逐步 DSL 操作；TILE、dtype、资源深度和 copy 方式由本算子证明。输出设计应给真实签名和阶段方法，未用的 Channel/Buffer 删去。
+逐步实现数学公式，给输入输出、中间精度、转换及特殊边界；相关类型与舍入规则引用 InferShapeDtype.md。
+
+| 顺序 | 对应数学步骤 | 输入到输出 | 状态版本及精度 | 执行角色 | 完成与边界条件 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+递推或分块累加给旧状态、当前增量、新状态的位置与操作顺序，分别展开首次、后续及跳过工作项。矩阵分块结果拼接时给目的偏移与初始化范围。
+
+关键步骤给算法、规模相关工作量、临时存储及并行条件，关联 TemplatePartition.md 的选取依据。
+
+### 6.1 阶段成本与瓶颈
+
+按 references/stage-cost-model.md 定义公共成本模型，分支代入实际配置。计算量和搬运量由算法及物理数据流推导，时间估算注明设备参数与来源。
+
+| 阶段及执行资源 | 调用次数与作用域 | 每次计算量 | 各层搬运字节、重排与重复次数 | 时间组成及依据 | 串行依赖或争用 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+给各资源的累计占用、关键依赖及预计瓶颈。流水路径分析稳态推进间隔、填充和排空；任务划分分析最慢执行单元的负载。候选比较引用 TemplatePartition.md，观测与判定引用 Validation.md。
+
+## 7. 输出写回与完成
+
+逐输出给有效地址、尾部范围、别名读写次序、局部结果的最终合并及可见时点。共享写入给独占或受控合并依据。
+
+## 8. 流水与同步（按需）
+
+采用协作、异步推进或缓冲复用时，按 references/pipeline-design.md 推导实际机制。多个工作项交错推进时展开时序表与 warmup/steady/drain；顺序路径给阶段次序与实际复用条件。阶段数量、资源类型、状态及队列结构由当前算法确定。
+
+### 8.1 任务粒度与执行资源
+
+定义完整任务、阶段工作项和槽代次。列各角色的分工、共用资源上的发射顺序，以及状态的推进依赖。
+
+给各阶段所需的信息及取得方式。延迟消费时说明工作项描述及传递关系，包括实际需要的输出归属、有效范围、边界和状态标识。存在任务内递推时，首次、后续和末次以所属任务的有效范围判断。
+
+### 8.2 带索引的时序
+
+展开覆盖预填、实际槽复用及排空的小例子，每个阶段带具体任务或工作项索引。调度步表示依赖与预期重叠，实际耗时由证据或测量确定。
+
+| 调度步 | 各执行资源上的阶段与工作项 | 前置完成条件 | 读写对象及槽代次 | 发布与释放 |
+|---|---|---|---|---|
+| | | | | |
+
+给与表格对应的算法伪代码：warmup 的初始状态与实际预填量、steady 的等待和游标推进、drain 的剩余消费及最终释放。
+
+按本方案的实际阶段数及资源排布填写阶段索引、必要描述和发布/释放。说明各工作项如何推进、排空或重置发生在哪些边界，以及短任务的实际调度步；具体排布参考已确认适用的范式资料。
+
+### 8.3 生命周期与完成协议
+
+| 对象或队列 | 工作项到槽号及代次 | 写完成与可见条件 | 读者及最后读完成 | 允许复用条件 | 最大在途份数 |
+|---|---|---|---|---|---|
+| | | | | | |
+
+每条同步边写生产者、消费者、作用域、初始及期望状态、发布和等待位置。槽选择、数据完成、可见性和复用分别定义；共享存储中的同步状态给布局与并发访问协议。
+
+对实际存在的中间结果队列、共享输入副本或累计状态分别计算最大在途份数，槽号映射与代次对应到各自的任务或工作项序号。累计状态存续到最终更新及输出所需的最后读取完成。
+
+### 8.4 边界与排布选择
+
+按实际机制覆盖任务少于预填量、空工作项、尾部、停止生产及错误后的消费或终止。每个等待都有可到达的发布方。
+
+存在不同可行排布时比较关键依赖、搬运量、在途状态及资源占用；深度与预填量由时序和容量共同确定，收益区分估算与实测。
+
+结合 §6.1 分析实际存在的资源争用、状态依赖及流水开销，给选择条件及验证观察。
+
+## 9. 分支实例化
+
+公共公式与阶段留在本文，各分支填写真实配置、坐标、资源及操作链。共同排布引用公共定义，差异同步更新参数、预算与验证。
+
+## 参考示例：单路径流式计算
+
+以下保留从 `flash_attn.py` 的阶段对象与 `flash_kda.py` 的任务循环抽取的接口示例，适用于一维 ND、单位步长、同形输出的路径。分块大小、类型及深度来自设计；`formula_step` 是需要展开的数学步骤占位，包含所需状态初始化与更新。工作区和累计对象按算法需要使用。
+
+实际使用时，依据目标版本的 DSL 源码或官方资料核对选槽、切片与视图语义；目标版本变化时重新核对相应条件。
 
 ```python
 @kernel
 class OperatorKernel:
-    def __init__(self, tile_elems, input_dtype, output_dtype):
+    def __init__(self, tile_elems, input_dtype, output_dtype,
+                 accumulator_dtype, pipeline_depth):
         self.tile_elems = tile_elems
         self.input_ch = Channel(
-            MemLoc.UB, shape=(tile_elems,), dtype=input_dtype, depth=2
+            MemLoc.UB, shape=(tile_elems,), dtype=input_dtype, depth=pipeline_depth
         )
         self.output_ch = Channel(
-            MemLoc.UB, shape=(tile_elems,), dtype=output_dtype, depth=2
+            MemLoc.UB, shape=(tile_elems,), dtype=output_dtype, depth=pipeline_depth
         )
-        self.acc = Buffer(MemLoc.UB, (tile_elems,), accumulator_dtype)
+        self.acc = None
+        if accumulator_dtype is not None:
+            self.acc = Buffer(MemLoc.UB, (tile_elems,), accumulator_dtype)
 
     @jit
-    def copy_in(self, gm_input, start, valid):
-        gm_tile = tile_slice(gm_input, (self.tile_elems,), (start,))
-        # 写明 valid < tile_elems 时采用的合法 mask/padding 方式。
-        mem_copy(self.input_ch.produce(), gm_tile)
+    def copy_in(self, gm_input, tile_id, valid):
+        # coord 是 tile 编号；元素起点为 tile_id * tile_elems。
+        gm_tile = tile_slice(gm_input, (self.tile_elems,), (tile_id,))
+        local = reinterpret(self.input_ch.produce(), shape=(valid,), stride=(1,))
+        mem_copy(local, gm_tile)
 
     @jit
-    def compute(self, valid, attr):
-        source = self.input_ch.consume()
-        target = self.output_ch.produce()
-        # formula_step(target, source, self.acc, valid, attr)
-        # 按数学公式展开 Cast、状态更新、特殊值和同步。
+    def compute(self, tile_id, valid, attr, workspace):
+        source = reinterpret(self.input_ch.consume(), shape=(valid,), stride=(1,))
+        target = reinterpret(self.output_ch.produce(), shape=(valid,), stride=(1,))
+        # 抽象数学步骤：先按状态作用域初始化，再计算有效元素。
+        formula_step(target, source, self.acc, workspace, tile_id, valid, attr)
 
     @jit
-    def copy_out(self, gm_output, start, valid):
-        gm_tile = tile_slice(gm_output, (self.tile_elems,), (start,))
-        # 写明尾块仅 valid 个元素可写、别名读写次序。
-        mem_copy(gm_tile, self.output_ch.consume())
+    def copy_out(self, gm_output, tile_id, valid):
+        gm_tile = tile_slice(gm_output, (self.tile_elems,), (tile_id,))
+        local = reinterpret(self.output_ch.consume(), shape=(valid,), stride=(1,))
+        mem_copy(gm_tile, local)
 
-    def __call__(self, gm_input: Tensor, gm_output: Tensor, n: int, attr: int):
+    def __call__(self, gm_input: Tensor, gm_output: Tensor,
+                 workspace: Tensor, attr: int):
+        n = gm_input.shape[0]
         block = get_block_idx()
         blocks = get_block_num()
         total_tiles = (n + self.tile_elems - 1) // self.tile_elems
         for tile_id in range(block, total_tiles, blocks):
             start = tile_id * self.tile_elems
             valid = min(self.tile_elems, n - start)
-            self.copy_in(gm_input, start, valid)
-            self.compute(valid, attr)
-            self.copy_out(gm_output, start, valid)
+            self.copy_in(gm_input, tile_id, valid)
+            self.compute(tile_id, valid, attr, workspace)
+            self.copy_out(gm_output, tile_id, valid)
 ```
 
-上例只示意数据所有权和顺序。`min`、动态 `tile_slice`、尾块 `mem_copy` 的可编译性与设备语义必须由目标 DSL 能力资料验证；未验证时在设计中保留抽象操作，不把伪代码伪装成可运行代码。Buffer 用于持久或临时状态，Channel 的 `produce()`/`consume()` 配对必须和深度、复用时点一致。
+示例的槽选择位于计算区外，尾块通过保留原分配的有效视图读写。`tile_slice` 使用 tile 坐标，`reinterpret` 引用原分配与存储身份；实际访问始终落在已分配范围内。Channel 的选槽操作只推进独立游标，数据完成与复用由真实访问及同步机制保证。`formula_step` 展开后，按目标版本验证完整计算链及尾部行为。
 
-## 多阶段或跨核路径（仅适用时）
+选择多阶段流水时用 §8 的实际角色调度替换上例顺序循环；给出任务索引与同步位置，并关联依赖编译器调度的机制证据。
+
+## 参考示例：多阶段或跨核路径
 
 `flash_kda.py` 在阶段间使用 workspace 与同步，`flash_attn.py` 也有分阶段计算和部分结果归并。需要时给出**实际**阶段及全局可见性证明：
 
@@ -102,4 +180,4 @@ class OperatorKernel:
 阶段 B: block 范围 B → 读已初始化槽 → 归并 → 写最终输出
 ```
 
-在同一 Kernel 内跨 block 屏障时，证明 launch block 数不超过可同时驻留的同步参与者，列同步 API、参与角色、flag 命名空间和 arrive/wait 配对；无法证明时用独立 Launch 边界。`channel_rewind` 等重用操作只有在相关 Channel 无在途数据、所有参与者已完成阶段后才可设计。
+同一执行阶段内使用跨单元屏障时，核对参与者可同时驻留、完成通知与等待配对、状态命名空间及可见性；采用分阶段启动时给阶段边界。`channel_rewind` 示例的使用前提是相关槽无在途数据、所有参与者已经完成前一阶段。

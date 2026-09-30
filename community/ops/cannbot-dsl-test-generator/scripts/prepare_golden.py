@@ -63,6 +63,7 @@ def _seed_for(name, seed):
 
 def make_inputs(spec_map, seed=42):
     """Create deterministic, independent CPU inputs for one testcase.csv row."""
+    import math
     dtypes = {
         "float16": torch.float16,
         "float32": torch.float32,
@@ -92,7 +93,22 @@ def make_inputs(spec_map, seed=42):
         shape = item["shape"]
         generator = torch.Generator().manual_seed(_seed_for(name, seed))
         fill = item.get("fill", "normal")
-        if fill == "zeros":
+        if fill == "values":
+            def flatten(values):
+                return [number for value in values for number in (flatten(value) if isinstance(value, list) else [value])]
+            values = torch.tensor(flatten(item["values"]), dtype=dtype)
+            result[name] = values.reshape(shape)
+        elif fill == "arange":
+            axis = item.get("axis")
+            count = math.prod(shape) if axis is None else shape[axis]
+            values = (torch.arange(count, dtype=torch.float64) * item.get("step", 1) + item.get("start", 0)).to(dtype)
+            if axis is None:
+                result[name] = values.reshape(shape)
+            else:
+                view_shape = [1] * len(shape)
+                view_shape[axis] = count
+                result[name] = values.reshape(view_shape).expand(shape).clone()
+        elif fill == "zeros":
             result[name] = torch.zeros(shape, dtype=dtype)
         elif fill == "ones":
             result[name] = torch.ones(shape, dtype=dtype)
@@ -257,6 +273,8 @@ def main():
     runner = (ROOT / "assets" / "test.py").read_text(encoding="utf-8")
     runner = runner.replace('"__CANNBOTDSL_OP_NAME__"', repr(op))
     (tests / f"test_{op}.py").write_text(runner, encoding="utf-8")
+    helper = (ROOT / "assets" / "case_contract.py").read_text(encoding="utf-8")
+    (tests / "cannbotdsl_case_contract.py").write_text(helper, encoding="utf-8")
     for sheet in ("tdd", "whitebox", "blackbox"):
         (tests / "testcase_output" / sheet).mkdir(parents=True, exist_ok=True)
     LOGGER.info(f"validated {reference_path}")
