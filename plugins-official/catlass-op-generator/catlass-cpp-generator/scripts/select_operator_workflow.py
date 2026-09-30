@@ -8,7 +8,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Select legacy or Linear Attention workflow without name-based guessing."""
+"""Select legacy or dedicated (Linear Attention / BSA Arch22) workflow without name-based guessing."""
 
 from __future__ import annotations
 
@@ -19,10 +19,13 @@ from pathlib import Path
 
 
 WORKFLOW_ID = "catlass-linear-attention-v1"
+BSA_WORKFLOW_ID = "catlass-block-sparse-attention-arch22-v1"
 LINEAR_FAMILY = "linear_attention"
+BSA_FAMILY = "block_sparse_attention"
 LEGACY_FAMILY = "legacy"
 PENDING_FAMILY = "pending"
-SUPPORTED_FAMILIES = {LINEAR_FAMILY, LEGACY_FAMILY, PENDING_FAMILY}
+DEDICATED_WORKFLOWS = {LINEAR_FAMILY: WORKFLOW_ID, BSA_FAMILY: BSA_WORKFLOW_ID}
+SUPPORTED_FAMILIES = {LINEAR_FAMILY, BSA_FAMILY, LEGACY_FAMILY, PENDING_FAMILY}
 SAFE_OPERATOR = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -33,7 +36,9 @@ def _result(route: str, reason: str, marker: str | None = None) -> dict[str, obj
     return value
 
 
-def select(workspace: Path, operator_name: str, algorithm_family: str | None) -> dict[str, object]:
+def select(
+    workspace: Path, operator_name: str, algorithm_family: str | None
+) -> dict[str, object]:
     if not SAFE_OPERATOR.fullmatch(operator_name):
         return _result("blocked", "operator_name must be a safe snake_case name")
 
@@ -42,35 +47,50 @@ def select(workspace: Path, operator_name: str, algorithm_family: str | None) ->
 
     if marker.exists():
         if marker.is_symlink():
-            return _result("blocked", "workflow marker must not be a symlink", str(marker))
+            return _result(
+                "blocked", "workflow marker must not be a symlink", str(marker)
+            )
         if not marker.is_file():
-            return _result("blocked", "workflow marker is not a regular file", str(marker))
+            return _result(
+                "blocked", "workflow marker is not a regular file", str(marker)
+            )
         try:
             data = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             return _result("blocked", f"invalid workflow marker: {exc}", str(marker))
         if not isinstance(data, dict):
-            return _result("blocked", "workflow marker must be a JSON object", str(marker))
+            return _result(
+                "blocked", "workflow marker must be a JSON object", str(marker)
+            )
         workflow_id = data.get("workflow_id")
         family = data.get("algorithm_family")
-        if workflow_id == WORKFLOW_ID and family == LINEAR_FAMILY:
-            return _result("linear_attention", "existing dedicated workflow marker", str(marker))
+        if family in DEDICATED_WORKFLOWS and workflow_id == DEDICATED_WORKFLOWS[family]:
+            return _result(family, "existing dedicated workflow marker", str(marker))
         if workflow_id is not None:
             return _result("blocked", "unsupported workflow marker", str(marker))
-        return _result("legacy", "existing project without dedicated marker", str(marker))
+        return _result(
+            "legacy", "existing project without dedicated marker", str(marker)
+        )
 
     if operator_dir.exists():
         return _result("legacy", "existing project takes legacy precedence")
 
     if algorithm_family is None:
-        return _result("pending", "new project requires mathematical algorithm classification")
+        return _result(
+            "pending", "new project requires mathematical algorithm classification"
+        )
     normalized = algorithm_family.strip().lower()
     if normalized == PENDING_FAMILY or not normalized:
-        return _result("pending", "new project requires mathematical algorithm classification")
+        return _result(
+            "pending", "new project requires mathematical algorithm classification"
+        )
     if normalized not in SUPPORTED_FAMILIES:
         return _result("blocked", f"unsupported algorithm family: {algorithm_family}")
-    if normalized == LINEAR_FAMILY:
-        return _result("linear_attention", "intake classified the mathematical algorithm as Linear Attention")
+    if normalized in DEDICATED_WORKFLOWS:
+        return _result(
+            normalized,
+            "intake classified the mathematical algorithm as a dedicated-workflow family",
+        )
     return _result("legacy", "intake classified the mathematical algorithm as legacy")
 
 

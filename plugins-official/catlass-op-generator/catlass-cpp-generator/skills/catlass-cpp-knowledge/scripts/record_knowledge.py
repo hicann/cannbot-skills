@@ -142,7 +142,9 @@ def initialize(bundle: Path, target: Path) -> list[str]:
         raise ValueError("bundle must be the built-in CATLASS C++ knowledge directory")
     if _within(target, bundle) or _within(bundle, target):
         raise ValueError("built-in and project knowledge directories must not overlap")
-    _reject_symlink_chain(target, target.anchor and Path(target.anchor) or target.parent)
+    _reject_symlink_chain(
+        target, target.anchor and Path(target.anchor) or target.parent
+    )
     target.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
     for source in sorted(bundle.rglob("*")):
@@ -190,7 +192,9 @@ def _validate_root(root: Path, errors: list[str]) -> None:
         if profile.get("okf_version") != OKF_VERSION:
             errors.append("bundle profile okf_version must be 0.2")
         if set(profile.get("business_partitions", [])) != BUSINESS_PARTITIONS:
-            errors.append("bundle profile business_partitions must be catlass, workflow, and operator")
+            errors.append(
+                "bundle profile business_partitions must be catlass, workflow, and operator"
+            )
         if profile.get("runtime_root") != ".catlass-cpp/knowledge":
             errors.append("bundle profile runtime_root must be .catlass-cpp/knowledge")
     except ValueError as exc:
@@ -243,7 +247,8 @@ def _validate_concept(path: Path, root: Path, errors: list[str]) -> None:
         errors.append(f"{relative}: type must be catlass, workflow, or operator")
     if relative.split("/", 1)[0] != concept_type:
         errors.append(f"{relative}: type does not match partition")
-    if data.get("status") not in {"draft", "stable", "deprecated"}:
+    status = data.get("status")
+    if not isinstance(status, str) or status not in {"draft", "stable", "deprecated"}:
         errors.append(f"{relative}: invalid status")
     for field in ("title", "description"):
         if not isinstance(data.get(field), str) or not data[field].strip():
@@ -293,7 +298,9 @@ def _validate_concept(path: Path, root: Path, errors: list[str]) -> None:
         elif any(item not in WORKFLOW_CONSUMERS for item in consumers):
             errors.append(f"{relative}: consumers must name existing stage skills")
         if Path(relative).parent != Path("workflow"):
-            errors.append(f"{relative}: workflow concepts must be direct children of workflow/")
+            errors.append(
+                f"{relative}: workflow concepts must be direct children of workflow/"
+            )
 
 
 def _markdown_links(path: Path) -> set[str]:
@@ -316,7 +323,9 @@ def _validate_indexes(root: Path, concepts: list[Path], errors: list[str]) -> No
         if concept.name not in workflow_links:
             errors.append(f"workflow index missing link: {concept.name}")
     operator_links = _markdown_links(root / "operator" / "index.md")
-    for family_dir in sorted(path for path in (root / "operator").iterdir() if path.is_dir()):
+    for family_dir in sorted(
+        path for path in (root / "operator").iterdir() if path.is_dir()
+    ):
         required = f"{family_dir.name}/index.md"
         if required not in operator_links:
             errors.append(f"operator index missing link: {required}")
@@ -365,7 +374,9 @@ def query_bundle(
 ) -> dict[str, Any]:
     report = validate_bundle(root)
     if report["status"] != "passed":
-        raise ValueError("knowledge bundle validation failed: " + "; ".join(report["errors"]))
+        raise ValueError(
+            "knowledge bundle validation failed: " + "; ".join(report["errors"])
+        )
     vocabulary = _load_yaml(root / "query-vocabulary.yaml")
     wanted_family = _canonical_family(vocabulary, family) if family else None
     terms = [term.lower() for term in (text or "").split() if term]
@@ -407,7 +418,12 @@ def query_bundle(
             item["operator_families"] = data.get("operator_families", [])
             item["consumers"] = data.get("consumers", [])
         results.append(item)
-    return {"status": "passed", "okf_version": OKF_VERSION, "count": len(results), "results": results}
+    return {
+        "status": "passed",
+        "okf_version": OKF_VERSION,
+        "count": len(results),
+        "results": results,
+    }
 
 
 def get_concept(root: Path, value: str) -> dict[str, Any]:
@@ -416,7 +432,9 @@ def get_concept(root: Path, value: str) -> dict[str, Any]:
     path = root / relative
     _reject_symlink_chain(path, root)
     if not _within(path, root) or not path.is_file() or path.suffix != ".md":
-        raise ValueError("concept path must resolve to a Markdown file inside knowledge root")
+        raise ValueError(
+            "concept path must resolve to a Markdown file inside knowledge root"
+        )
     if path.name == "index.md":
         raise ValueError("get only accepts concept files, not indexes")
     return {
@@ -442,17 +460,23 @@ def reindex(root: Path) -> dict[str, Any]:
         if path.parent == root / "catlass":
             data, _ = _frontmatter(path)
             catlass_links.append((data["title"], path.name))
-    _write_index(root / "catlass" / "index.md", "CATLASS C++ API", sorted(catlass_links))
+    _write_index(
+        root / "catlass" / "index.md", "CATLASS C++ API", sorted(catlass_links)
+    )
 
     workflow_links = []
     for path in concepts:
         if path.parent == root / "workflow":
             data, _ = _frontmatter(path)
             workflow_links.append((data["title"], path.name))
-    _write_index(root / "workflow" / "index.md", "Workflow Knowledge", sorted(workflow_links))
+    _write_index(
+        root / "workflow" / "index.md", "Workflow Knowledge", sorted(workflow_links)
+    )
 
     family_links = []
-    for family_dir in sorted(path for path in (root / "operator").iterdir() if path.is_dir()):
+    for family_dir in sorted(
+        path for path in (root / "operator").iterdir() if path.is_dir()
+    ):
         links = []
         for path in [item for item in concepts if item.parent == family_dir]:
             data, _ = _frontmatter(path)
@@ -505,7 +529,9 @@ def main() -> int:
         if args.command == "initialize":
             validation = validate_bundle(PLUGIN_KNOWLEDGE)
             if validation["status"] != "passed":
-                raise ValueError("built-in bundle is invalid: " + "; ".join(validation["errors"]))
+                raise ValueError(
+                    "built-in bundle is invalid: " + "; ".join(validation["errors"])
+                )
             project = Path(args.project_root).resolve()
             result = {
                 "status": "passed",
@@ -514,13 +540,21 @@ def main() -> int:
             }
         elif args.command == "query":
             result = query_bundle(
-                _root(args), args.type, args.tag, args.family, args.arch, args.text, args.compact
+                _root(args),
+                args.type,
+                args.tag,
+                args.family,
+                args.arch,
+                args.text,
+                args.compact,
             )
         elif args.command == "get":
             result = get_concept(_root(args), args.path)
         elif args.command == "validate":
             if args.builtin == bool(args.project_root):
-                raise ValueError("validate requires exactly one of --builtin or --project-root")
+                raise ValueError(
+                    "validate requires exactly one of --builtin or --project-root"
+                )
             result = validate_bundle(_root(args))
         elif args.command == "reindex":
             result = reindex(_root(args))
@@ -533,7 +567,11 @@ def main() -> int:
             print(_json(result))
             return 2
     except (OSError, ValueError) as exc:
-        print(_json({"status": "failed", "okf_version": OKF_VERSION, "errors": [str(exc)]}))
+        print(
+            _json(
+                {"status": "failed", "okf_version": OKF_VERSION, "errors": [str(exc)]}
+            )
+        )
         return 1
     print(_json(result))
     return 0 if result.get("status") == "passed" else 1

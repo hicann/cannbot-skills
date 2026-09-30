@@ -12,6 +12,15 @@
         "state-recurrence",
         "state_recurrence"
       ]
+    },
+    "sparse-attention": {
+      "aliases": [
+        "block_sparse_attention",
+        "BlockSparseAttention",
+        "block-sparse-attention",
+        "block_sparse_attention-arch22",
+        "块稀疏注意力"
+      ]
     }
   },
   "catlass_apis": {
