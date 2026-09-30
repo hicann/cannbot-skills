@@ -30,6 +30,7 @@
                 <filteritem type="filename" name="requirements*.txt" desc="Dependency manifest files, license header not applicable"/>
                 <filteritem type="filename" name="*.jsonl" desc="JSON Lines data files, cannot carry license header"/>
                 <filteritem type="filepath" name="runtime/runtime_migration/assets/src/.*" desc="MIT-0 licensed runtime compat shims (Huawei-authored permissive migration assets), exempt from CANN-2.0 header policy"/>
+                <filteritem type="filepath" name="plugins-official/tilelang-op-orchestrator/workflows/Ascend950/.*" desc="DeepSeek-derived Ascend950 workflow assets retain upstream MIT licensing; exempt from repository CANN-2.0 header policy"/>
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.yml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.csv" desc="CSV test case files, no license header required"/>
@@ -47,6 +48,7 @@
             </filefilter>
             <filefilter name="licenseFileNamePolicyFilter" desc="Filters for LICENSE file policies">
                 <filteritem type="filepath" name="runtime/runtime_migration/assets/src/.*" desc="MIT-0 licensed runtime compat shims (Huawei-authored permissive migration assets), exempt from CANN-2.0 header policy"/>
+                <filteritem type="filepath" name="plugins-official/tilelang-op-orchestrator/workflows/Ascend950/.*" desc="DeepSeek-derived Ascend950 workflow assets retain upstream MIT licensing; exempt from repository CANN-2.0 header policy"/>
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.yml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.csv" desc="CSV test case files, no license header required"/>

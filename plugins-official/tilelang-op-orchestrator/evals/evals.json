@@ -19,7 +19,7 @@
         "eval_mode": "text"
       },
       "prompt": "我想用 TileLang 在昇腾 NPU 上开发算子，tilelang-op-orchestrator 团队是怎么组织的？开发流程是怎样的？",
-      "expected_output": "回复应覆盖以下要点：\n1. TileLang-Ascend 算子端到端开发编排 Agent，负责 3 阶段状态机管理\n2. 流程包含：设计 → 开发 → 审查，支持设计回退和失败恢复\n3. 调度三个 Subagent 分阶段执行，支持状态持久化和检查点恢复\n4. 支持 Developer 模式（自动化）和 Expert 模式（手动控制）两种编程范式",
+      "expected_output": "统一入口先按名称加载 ascendc-env-check Skill，以其真实目录为基准运行 scripts/get_npu_arch.py --json，探测本机完整 SoC 与 NpuArch 并校验组合。选定平台后再按名称加载 npu-arch 查询架构和硬件能力，然后完整读取 Ascend910 或 Ascend950 对应 workflow。Ascend910 包含设计、开发与性能调优三阶段；Ascend950 按设计、生成、指定用例精度、ST、确认后的 Flash/Standard 调优、再次确认后的最终代码检视执行。技能正文和依赖不跨平台复用。",
       "files": [],
       "expectations": []
     },
@@ -52,6 +52,46 @@
       },
       "prompt": "我想用 TileLang 开发一个算子，先告诉我需要提供哪些信息，不需要现在就开始开发。",
       "expected_output": "回复应在开发前主动确认必要信息：算子功能描述和数学定义、输入输出规格、目标芯片型号、性能需求等，而不是在缺少这些信息的情况下直接开始开发流程",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "Ascend950 分支与 ST 验收",
+      "prompt": "本机检测为 Ascend950PR_957b，NpuArch=3510。需要开发 TileLang 算子，并了解 ST 能力。请说明路由和流程，先不执行。",
+      "expected_output": "进入 workflows/Ascend950/workflow.md；设计后生成，指定用例精度通过后直接进入 tilelang-op-test-design/Ascend950/instructions.md 执行 ST，最终验收运行已确认的完整目标用例清单。ST 完成后询问调优，确认后进入 Ascend950 Flash/Standard；调优完成再次询问代码检视，确认后调用 tilelang-review/Ascend950/instructions.md 检视最终交付文件。不套用 Ascend910 测试门禁。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "不支持平台不默认路由",
+      "prompt": "本机 full_soc=Ascend310B1、NpuArch=3002，能否因为型号名称带 A2 就进入 Ascend910 TileLang 工作流？",
+      "expected_output": "不能。当前 Ascend910 分支针对 Ascend910B/910_93 与 NpuArch=2201，报告不支持，不默认加载任何分支。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "Ascend950 后端选择与阶段确认",
+      "prompt": "Ascend950 算子生成时可以写 @tilelang.jit(target=\"pto\") 吗？我已授权完整开发流程，后面是否可以自动调优并 review？",
+      "expected_output": "算子、测试、profiling 和辅助 Python 均不固定 target，也不在 Python 内设置后端环境变量；命令使用 TILELANG_DEFAULT_TARGET=pto 或 ascend。指定用例精度通过后直接 ST；ST 后调优和调优后的最终代码检视分别等待用户明确确认，完整流程授权不替代这两次确认。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "Ascend910 完整型号路由",
+      "prompt": "探测结果分别为 Ascend910B4-1/NpuArch=2201 和 Ascend910A/NpuArch=1001，TileLang 应如何路由？",
+      "expected_output": "Ascend910B4-1 是 CANN platform_config 中 NpuArch=2201 的受支持型号，应进入 Ascend910 工作流；Ascend910A 属于 NpuArch=1001，不在当前 TileLang Ascend910 分支范围内，必须报告不支持且不得默认路由。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "独立 Skill 未知平台自动路由",
+      "prompt": "我直接调用 tilelang-op-design，没有传入平台与硬件证据，是否必须改从主编排重新发起？",
+      "expected_output": "不必重新发起。独立 TileLang Skill 应按名称加载 ascendc-env-check Skill，以其真实目录为基准运行 scripts/get_npu_arch.py --json；仅在退出码为 0 时消费 full_soc、npu_arch 和完整 evidence 并继续。不得依赖 tilelang-op-orchestrator 的仓库位置，也不得从当前 Skill 目录拼接跨 Skill 相对路径。",
       "files": [],
       "expectations": []
     }

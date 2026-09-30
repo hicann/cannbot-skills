@@ -1,7 +1,7 @@
 {
   "name": "tilelang-op-orchestrator",
-  "description": "TileLang-Ascend 算子端到端开发 Team。3 阶段状态机编排，含 3 个 Subagent，支持设计回退、断点续跑和失败恢复。",
-  "version": "1.1.0",
+  "description": "TileLang 算子开发统一入口，按本机芯片路由到独立的 Ascend910 与 Ascend950 工作流，保留各自技能与执行顺序。",
+  "version": "1.2.0",
   "author": {
     "name": "CANNBot"
   },
@@ -14,6 +14,9 @@
   "agents": [
     "./agents/tilelang-op-analyst.md",
     "./agents/tilelang-op-developer.md",
-    "./agents/tilelang-op-perf-tuner.md"
+    "./agents/tilelang-op-perf-tuner.md",
+    "./agents/tilelang-tuning.md",
+    "./agents/tilelang-perf-analysis-expert.md",
+    "./agents/tilelang-perf-impl-expert.md"
   ]
 }

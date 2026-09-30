@@ -229,10 +229,10 @@
     },
     {
       "name": "tilelang-op-orchestrator-skills",
-      "description": "TileLang 算子开发 Skills（9 个）。环境检查、子模块拉取、算子设计、算子开发、测试设计、API 最佳实践、编程模式指南、性能优化、代码审查。",
+      "description": "TileLang 算子开发技能；统一名称、按平台隔离正文、参考资料和脚本，包含 Ascend950 ST 与调优能力。",
       "source": "./ops",
       "strict": false,
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": {
         "name": "CANNBot"
       },
@@ -250,7 +250,10 @@
         "./tilelang-perf-optimization",
         "./tilelang-programming-model-guide",
         "./tilelang-review",
-        "./tilelang-submodule-pull"
+        "./tilelang-submodule-pull",
+        "./tilelang-performance-best-practices",
+        "./npu-arch",
+        "./tilelang-op-profiling"
       ]
     },
     {
@@ -487,8 +490,8 @@
     {
       "name": "tilelang-op-orchestrator",
       "source": "./plugins-official/tilelang-op-orchestrator",
-      "description": "TileLang-Ascend 算子端到端开发 Team。含 3 个 Subagent（analyst/developer/perf-tuner），3 阶段状态机编排，支持设计回退、断点续跑和失败恢复。",
-      "version": "1.1.0",
+      "description": "TileLang 算子开发统一入口：本机芯片识别后进入独立 Ascend910 或 Ascend950 工作流。",
+      "version": "1.2.0",
       "author": {
         "name": "CANNBot"
       },

@@ -1,410 +1,91 @@
-# CANNBot TileLang 算子开发快速入门指南
+# TileLang 算子开发插件
 
-## 概述
+统一入口按本机芯片选择独立工作流：Ascend910 提供基于 tilelang-ascend 的算子开发流程，Ascend950 提供设计、生成、ST、代码检视与性能调优能力。两套技能正文、模板、脚本和角色规则独立维护。
 
-CANNBot TileLang 算子开发模式适用于通过 **TileLang-Ascend** 框架开发自定义算子。基于 TVM 编译器基础设施，使用 Python DSL + `@tilelang.jit` 编写 AI 计算 kernel，支持 Developer 模式（自动化）和 Expert 模式（手动控制）两种编程范式。
+## 安装
 
-## 一、环境搭建
-
-### 前置条件
-
-- 已安装 CANN Toolkit（≥ 8.3），具体版本配套关系请查阅 [CANN Release Notes](https://www.hiascend.com/cann/document)
-- 已安装 PyTorch（≥ 2.6.0）和 torch_npu（≥ 2.6.0）
-- 已配置 NPU 设备（支持 Ascend 910/950 PR 等芯片）
-- 已安装 OpenCode、Claude Code、TRAE、Cursor、Codex、Copilot、CodeArts 等受支持的 AI 编程工具
-
-### 操作步骤
-
-### OpenCode（推荐）
-
-#### 项目级安装
+在用户项目目录运行插件安装脚本：
 
 ```bash
-# 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/cannbot-skills.git
-
-# 2. 进入 TileLang 算子开发目录
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-
-# 3. 执行初始化脚本（项目级）
-bash init.sh project opencode
-
-# 4. 进入 TileLang-Ascend 源码仓库，安装环境
-cd tilelang-ascend
-bash install_ascend.sh
-cd ..
+bash /path/to/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh project codex /path/to/project
+bash /path/to/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh project opencode /path/to/project
+bash /path/to/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh project claude /path/to/project
 ```
 
-#### 全局安装
+也支持 `trae`、`cursor`、`copilot`、`codearts`；将 `project` 改为 `global` 可使用全局安装模式。完整参数见 `bash init.sh --help`。
+
+安装器只配置技能、角色和入口，不探测设备、不下载或编译 TileLang。SessionStart hook 只注入芯片路由入口。启动会话并选择平台后，环境准备由对应工作流处理。
+
+| 宿主 | 项目技能目录 | 项目角色目录 | 项目入口 |
+|---|---|---|---|
+| Codex | `.agents/skills/` | `.codex/agents/` | `AGENTS.md` |
+| OpenCode | `.opencode/skills/` | `.opencode/agents/` | `AGENTS.md` |
+| Claude Code | `.claude/skills/` | `.claude/agents/` | `CLAUDE.md` |
+| TRAE | 由现有 IDE / Plugin / CLI 检测选择 | 同配置根目录下 `agents/` | `AGENTS.md` |
+| Cursor | `.cursor/skills/` | `.cursor/agents/` | `AGENTS.md` |
+| Copilot | `.github/skills/` | `.github/agents/` | `AGENTS.md` |
+| CodeArts | `.codeartsdoer/skills/` | `.codeartsdoer/agents/` | `AGENTS.md` |
+
+安装后在用户项目目录启动对应工具，直接描述算子需求。配置通过链接访问本仓库，保留 cannbot-skills 源码目录；移动仓库后重新安装。
+
+## 芯片路由
+
+入口按 [TileLang 芯片路由说明](references/tilelang-routing.md) 按名称加载 `ascendc-env-check` Skill，以该 Skill 的真实目录为基准运行 `scripts/get_npu_arch.py --json`，查询完整 SoC 与 NpuArch 并校验组合：Ascend910B（含 B2C、B4-1）/ Ascend910_93、2201 进入 Ascend910；Ascend950PR / Ascend950DT、3510 进入 Ascend950。未知、冲突或不支持的型号停止路由，不默认使用某一分支；确定型号后再按名称加载 `npu-arch` 查询对应架构与硬件能力。
+
+- [Ascend910 workflow](workflows/Ascend910/workflow.md)：包含设计、开发、分层测试、覆盖门禁、状态恢复和性能调优。开始设计前运行本分支的 `scripts/prepare_framework.sh`，按需克隆并执行 `bash install_ascend.sh`；源码和编译环境有效时跳过对应步骤，再进行环境预检。
+- [Ascend950 workflow](workflows/Ascend950/workflow.md)：按设计 → 生成 → 指定用例精度通过 → ST → 询问调优 → 确认后 Flash / Standard → 询问代码检视 → 确认后检视最终交付代码的顺序执行。框架源码和实际 Python 导入版本按本分支技能核实，不使用 Ascend910 的环境安装脚本。
+
+算子产物以用户项目为工作目录：Ascend910 使用 `custom/{op}/`，Ascend950 使用 `operators/`。技能、角色和 workflow 的相对引用以源文件真实目录为基准，不能把工作流源码目录当成算子输出目录。
+
+## 首次准备与进度
+
+`init.sh` 不拉取源码。芯片路由后，各工作流只准备自己的仓库：
+
+| 平台 | 插件内默认源码路径 | 准备步骤 |
+|---|---|---|
+| Ascend910 | `repositories/Ascend910/tilelang-ascend/` | 克隆及子模块 → 按需编译安装 → 验证编译产物和 Python 环境 |
+| Ascend950 | `repositories/Ascend950/ops-tilelang/`、`repositories/Ascend950/tilelang/` | 浅克隆两个主仓库；查阅代码需要时单独获取子模块 |
+
+已有有效源码直接使用。Ascend910 优先使用用户指定路径，会检查实际编译产物及当前 Python 导入路径，验证通过时跳过编译；编译失败或中断时，下次使用保留的源码重试。Ascend950 固定使用插件内路径，不接受路径参数或环境变量覆盖；默认不下载子模块，仅准备参考源码，运行环境需另行核实。`SOURCE_READY` 不要求子模块或编译依赖完整，按需获取方式见其工作流的“源码准备”章节。
+
+准备脚本持续显示 Git 下载和编译日志，每 15 秒输出阶段及耗时；智能体每 15～30 秒同步进展。日志保存在插件 `.preparation/<平台>/` 下，每次执行打印完整路径。失败时显示阶段和退出码，日志用于定位问题。同一源码目录的准备任务互斥，避免重复下载或同时编译。
+
+## 技能与角色
+
+工作流按名称加载已安装的 Skill，并传入已确定的平台 `Ascend910` 或 `Ascend950`；各 Skill 入口负责选择该平台正文，无需每个阶段重新探测芯片。跨 Skill 调用不附正文路径，缺失时停止当前阶段并报告。
+
+| Ascend950 功能 | Skill 名称 |
+|---|---|
+| 方案设计 | `tilelang-op-design` |
+| 算子生成 | `tilelang-op-develop` |
+| ST 系统测试 | `tilelang-op-test-design` |
+| 性能优化 | `tilelang-perf-optimization` |
+| 性能最佳实践 | `tilelang-performance-best-practices` |
+| 代码检视 | `tilelang-review` |
+| 芯片识别与能力查询 | `ascendc-env-check` / `get_npu_arch.py` → `npu-arch` |
+| 性能采集与分析 | `tilelang-op-profiling` |
+
+Ascend910 工作流按阶段加载 `tilelang-env-check`、`tilelang-op-design`、`tilelang-op-test-design`、`tilelang-op-develop`、`tilelang-perf-optimization` 等 Skill；API 与编程模式参考分别加载 `tilelang-api-best-practices`、`tilelang-programming-model-guide`，需要时加载 `tilelang-submodule-pull` 和 `tilelang-review`。子代理分别按角色名 `tilelang-op-analyst`、`tilelang-op-developer`、`tilelang-op-perf-tuner` 调度；角色缺失时停止并报告。
+
+Ascend950 的 ST 能力包括覆盖设计、可信度审查、静态发现、用例规格校验和 pytest 执行证据。生成阶段通过指定用例后直接进入 ST，ST 验收运行已确认的完整目标用例清单。代码检视使用 tilelang-review 的 Ascend950 正文，包含格式检查、适用条例检视与报告生成，只检查明确指定的本地文件或目录。调优完成后经用户确认检视最终交付文件，格式修复另需用户确认。这两项技能也支持独立调用；已有测试按本分支测试执行说明运行。
+
+Ascend950 各阶段的 Python 代码不固定 `target` 或设置后端环境变量；运行命令通过 `TILELANG_DEFAULT_TARGET=pto` 或 `TILELANG_DEFAULT_TARGET=ascend` 选择后端。
+
+Ascend910 使用 `tilelang-op-analyst`、`tilelang-op-developer`、`tilelang-op-perf-tuner`。Ascend950 使用 `tilelang-tuning`、`tilelang-perf-analysis-expert`、`tilelang-perf-impl-expert`；Flash 由当前主 Agent 自主执行。`agents/` 中的发现文件是薄适配，业务正文在各自 `workflows/<platform>/agents/` 中。
+
+## 维护与验证
+
+- 修改 Ascend910 时只改 `Ascend910/`，修改 Ascend950 时只改 `Ascend950/`；不提取公共业务步骤、API 或测试标准。
+- 入口共享的只有芯片识别和路径路由。跨 Skill 按名称加载 `ascendc-env-check`，再以其真实目录内的 `scripts/get_npu_arch.py` 取得本机型号；平台确定后按名称加载 `npu-arch` 查询架构与硬件能力。Ascend950 profiling 独立保存在 tilelang-op-profiling，与通用 ops-profiling 相互独立。
+- 技能根目录的 `references/`、`scripts/`、`examples/` 等资源链接指向 Ascend910 分支。维护时编辑对应平台目录内的文件；工作流按名称加载 Skill，Skill 正文按自身目录的相对路径引用资源。
+- Ascend950 分支的许可证见 [LICENSE](workflows/Ascend950/LICENSE)。
+- 更新时逐项核对本分支技能、正文及依赖；保留模板成熟度、版本限制和验证记录。不得直接覆盖另一平台或通用 profiling 内容。
+- 新增发现入口时同时更新 `init.sh` 白名单、插件 manifest、marketplace 和对应分支的引用。芯片路由支持范围变更时补充路由测试。
+
+在仓库根目录执行离线检查：
 
 ```bash
-# 1. 克隆 CANN Skills 仓库
-git clone https://gitcode.com/cann/cannbot-skills.git
-
-# 2. 进入 TileLang 算子开发目录
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-
-# 3. 执行初始化脚本（全局）
-bash init.sh global opencode
-
-# 4. 进入 TileLang-Ascend 源码仓库，安装环境
-cd tilelang-ascend
-bash install_ascend.sh
-cd ..
+PYTHONDONTWRITEBYTECODE=1 python3 ops/tilelang-performance-best-practices/Ascend950/scripts/validate_templates.py
 ```
 
-### 其他工具
-
-<details>
-<summary>Claude Code</summary>
-
-#### 项目级安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project claude
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-#### 全局安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh global claude
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-<details>
-<summary>TRAE</summary>
-
-仅支持项目级安装。
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project trae
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-<details>
-<summary>Cursor</summary>
-
-#### 项目级安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project cursor
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-#### 全局安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh global cursor
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-<details>
-<summary>Codex</summary>
-
-Codex 的 Skill 与 Subagent 使用不同的发现目录：
-
-- 项目级 Skill：`.agents/skills/`
-- 项目级 Subagent：`.codex/agents/*.toml`
-- 全局 Skill：`~/.agents/skills/`
-- 全局 Subagent：`~/.codex/agents/*.toml`
-
-#### 项目级安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project codex
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-也可以安装到指定项目：
-
-```bash
-bash init.sh project codex /path/to/project
-```
-
-#### 全局安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh global codex
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-<details>
-<summary>Copilot</summary>
-
-#### 项目级安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project copilot
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-#### 全局安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh global copilot
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-<details>
-<summary>CodeArts</summary>
-
-#### 项目级安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh project codearts
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-#### 全局安装
-
-```bash
-cd cannbot-skills/plugins-official/tilelang-op-orchestrator
-bash init.sh global codearts
-cd tilelang-ascend && bash install_ascend.sh && cd ..
-```
-
-</details>
-
-### 安装内容
-
-init.sh 脚本会完成以下操作：
-
-| 内容 | OpenCode 项目级 | OpenCode 全局 | Claude 项目级 | Claude 全局 | TRAE 项目级 |
-|------|----------------|---------------|---------------|-------------|------------|
-| Skills 技能模块 | `.opencode/skills/` | `~/.config/opencode/skills/` | `.claude/skills/` | `~/.claude/skills/` | `.trae/skills/` |
-| Agents 子代理 | `.opencode/agents/` | `~/.config/opencode/agents/` | `.claude/agents/` | `~/.claude/agents/` | `.trae/agents/` |
-| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.config/opencode/AGENTS.md` | 项目根目录 `CLAUDE.md` | `~/.claude/CLAUDE.md` | 项目根目录 `AGENTS.md` |
-
-#### Cursor 安装路径
-
-| 内容 | Cursor 项目级 | Cursor 全局级 |
-|------|--------------|--------------|
-| Skills 技能模块 | `.cursor/skills/` | `~/.cursor/skills/` |
-| Agents 子代理 | `.cursor/agents/` | `~/.cursor/agents/` |
-| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.cursor/AGENTS.md` |
-
-#### Codex 安装路径
-
-| 内容 | Codex 项目级 | Codex 全局级 |
-|------|--------------|--------------|
-| Skills 技能模块 | `.agents/skills/` | `~/.agents/skills/` |
-| Agents 子代理 | `.codex/agents/` | `~/.codex/agents/` |
-| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.codex/AGENTS.md` |
-| 安装清单 | `.codex/cannbot-manifest.json` | `~/.codex/cannbot-manifest.json` |
-
-#### Copilot 安装路径
-
-| 内容 | Copilot 项目级 | Copilot 全局级 |
-|------|---------------|---------------|
-| Skills 技能模块 | `.github/skills/` | `~/.copilot/skills/` |
-| Agents 子代理 | `.github/agents/` | `~/.copilot/agents/` |
-| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.copilot/AGENTS.md` |
-
-#### CodeArts 安装路径
-
-| 内容 | CodeArts 项目级 | CodeArts 全局级 |
-|------|----------------|----------------|
-| Skills 技能模块 | `.codeartsdoer/skills/` | `~/.codeartsdoer/skills/` |
-| Agents 子代理 | `.codeartsdoer/agents/` | `~/.codeartsdoer/agents/` |
-| AGENTS.md | 项目根目录 `AGENTS.md` | `~/.codeartsdoer/AGENTS.md` |
-
-### 环境校验
-
-执行完上述步骤后，检查目录结构是否符合以下规范：
-
-**项目级安装**：
-```
-cannbot-skills/plugins-official/tilelang-op-orchestrator/
-├── .opencode/
-│   ├── skills/                         # 技能模块（9 个）
-│   │   ├── tilelang-env-check/
-│   │   ├── tilelang-submodule-pull/
-│   │   ├── tilelang-op-design/
-│   │   ├── tilelang-op-develop/
-│   │   ├── tilelang-op-test-design/
-│   │   ├── tilelang-perf-optimization/
-│   │   ├── tilelang-api-best-practices/
-│   │   ├── tilelang-programming-model-guide/
-│   │   └── tilelang-review/
-│   ├── agents/                         # 3 个子代理（analyst / developer / perf-tuner）
-│   └── cannbot-manifest.json           # 安装清单
-├── AGENTS.md                           # 编排器（Primary）配置
-├── tilelang-ascend                     # tilelang代码仓
-├── init.sh                             # 初始化脚本
-└── quickstart.md                       # 本文档
-```
-
-**Codex 项目级安装**：
-
-```text
-<project>/
-├── .agents/
-│   └── skills/                         # 9 个 TileLang Skill 软链接
-├── .codex/
-│   ├── agents/                         # 3 个 Codex TOML Subagent
-│   └── cannbot-manifest.json           # 安装清单
-├── AGENTS.md                           # 编排器（Primary）配置
-└── tilelang-ascend                     # TileLang-Ascend 源码软链接
-```
-
-## 二、快速上手
-
-### 启动
-
-在初始化完成的目录下执行：
-
-```bash
-opencode    # OpenCode 用户
-```
-
-### 开发算子示例
-
-对于 `softmax` 这类语义明确的算子，一句描述即可启动：
-
-```
-帮我开发一个 softmax 算子方案设计
-```
-
-> ⚠️ **开发新算子时，请根据算子难度，参照下方描述示例，补全相关提示词信息**
-
-以开发 `gelu` 算子为例：
-
-```
-帮我开发一个 gelu 算子方案设计，公式：
-  gelu(x) = 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
-
-输入输出：
-  - x: [B, N] float16，B 为动态轴，N ∈ {128, 2048, 4096}
-  - y: 与 x 同 shape / dtype
-```
-
-把算子名、公式、输入输出规格写清楚，便于 CANNBot 准确解析开发需求。
-
-### 核心工作流
-
-采用 3 阶段状态机编排，由 orchestrator 统一调度，确保算子开发质量：
-
-```
-Stage 1 算子设计（含需求理解） → Stage 2 代码实现 + 测试 + 精度调试（一站式） → Stage 3 性能调优（可选）
-```
-
-每阶段通过工件门禁校验后才进入下一阶段；Stage 2 内部完成"生成代码 → 跑测试 → 精度调试"全部循环，精度通过后才询问是否进入 Stage 3。支持断点续跑、失败恢复与设计回退（Subagent 返回 `[DESIGN_ERROR]` 时回退到 Stage 1 重做设计），详见 AGENTS.md。
-
-### 产出物示例
-
-TileLang 算子开发模式下，CANNBot 会在 `custom/{operator}/` 目录下生成文件。
-
-```
-custom/softmax/
-├── DESIGN.md                   # Stage 1 设计文档
-├── proto.yaml                  # Stage 1 算子接口规格
-├── softmax.py                  # Stage 2 纯 kernel（@tilelang.jit，可 import）
-├── test_softmax.py             # Stage 2 from softmax import kernel + golden + 分层测试 + main 块
-├── README.md                   # 实现说明（可选）
-├── perf_tuning/                # Stage 3 性能调优产物（可选）
-├── history_version/            # 设计回退 / 精度调试备份
-└── .orchestrator_state.json    # 流程状态（自动维护，支持断点续跑）
-```
-
-## 三、可用技能与代理
-
-| Skill | 用途 | 触发时机 |
-|-------|------|---------|
-| `tilelang-env-check` | 环境检查与自动修复（子模块 / 编译 / 环境变量） | Stage 1 启动前环境预检 |
-| `tilelang-submodule-pull` | 拉取代码与子模块 | env-check 发现子模块缺失时 |
-| `tilelang-op-design` | 算子方案设计，生成 DESIGN.md | Stage 1 |
-| `tilelang-op-develop` | 基于 DESIGN.md 生成算子代码与测试 | Stage 2 |
-| `tilelang-op-test-design` | 测试用例与精度标准设计 | Stage 2 辅助 |
-| `tilelang-perf-optimization` | 性能瓶颈分析与优化 | Stage 3 |
-| `tilelang-api-best-practices` | API 速查表与最佳实践 | 编写 kernel 查阅 API 时 |
-| `tilelang-programming-model-guide` | Developer/Expert 模式对照与转换 | 选择编程模式时 |
-| `tilelang-review` | 代码审查（Python + C++） | 代码 review 时 |
-
-| Agent | 用途 | 负责阶段 |
-|-------|------|---------|
-| `tilelang-op-orchestrator` | 流程编排、状态机、工件门禁、设计回退（Primary） | 全流程 |
-| `tilelang-op-analyst` | 算子设计（含需求理解、设计回退） | Stage 1 |
-| `tilelang-op-developer` | 代码实现 + 测试 + 精度调试（一站式） | Stage 2 |
-| `tilelang-op-perf-tuner` | 性能分析与调优 | Stage 3 |
-
-## 四、Developer 模式 vs Expert 模式
-
-TileLang-Ascend 支持两种编程范式，开发前需先确认使用哪种模式：
-
-| 维度 | Developer（自动化） | Expert（手动控制） |
-|------|-------------------|-------------------|
-| 内存分配 | `T.alloc_shared/fragment` 编译器自动映射 | `T.alloc_L1/ub/L0A/L0B/L0C` 显式指定 |
-| 计算 | `T.Parallel` + 符号运算 | `T.tile.add/exp/max` 等 |
-| 作用域 | 编译器自动分离 Cube/Vector | 显式 `with T.Scope("C"/"V")` |
-| 同步 | 自动 | 手动 `T.barrier_all/set_flag/wait_flag` |
-| 适合场景 | 快速开发、原型验证 | 需要精细控制性能 |
-
-详细对照参见 `tilelang-programming-model-guide` skill。
-
-## 五、常见问题
-
-### Q: 如何查看帮助信息？
-
-```bash
-bash ~/cannbot-skills/plugins-official/tilelang-op-orchestrator/init.sh --help
-```
-
-### Q: 项目级和全局安装如何选择？
-
-- **项目级**：适合多项目开发，每个项目可以有不同配置
-- **全局**：适合多个项目共用同一套配置，对当前用户全局生效
-
-### Q: 如何更新技能模块？
-
-- 修改已连接的 Skill 内容会通过软链接同步。
-- 新增 Skill 时，需要把名称加入 `init.sh` 的 `INCLUDED_SKILLS`，然后重新执行安装脚本。
-- 新增 Subagent 时，需要同时创建 `agents/<name>.md` 和
-  `agents/codex/<name>.toml`。如果 Codex 的 `agents/` 使用目录软链接，新 TOML 会自动出现；
-  如果安装时已降级为普通 TOML 文件，则需要重新执行安装脚本。
-- 新增或修改 Skill/Subagent 后，建议重新启动工具或开启新会话，确保发现列表刷新。
-
-Codex 项目级更新示例：
-
-```bash
-bash init.sh project codex /path/to/project
-```
-
-### Q: 如何选择 Developer 模式还是 Expert 模式？
-
-| 场景 | 推荐模式 |
-|------|---------|
-| 快速验证算子可行性 | Developer 模式 |
-| 原型开发和概念验证 | Developer 模式 |
-| 需要精细控制硬件资源和内存层级 | Expert 模式 |
-| 生产级高性能算子调优 | Expert 模式 |
-| 混合使用（如 Cube 用 Developer，Vector 用 Expert） | 混合模式 |
-
----
-
-## 总结
-
-1. TileLang 算子开发模式通过 Python DSL 实现昇腾 NPU 算子的快速开发
-2. 环境搭建核心两步：克隆仓库 → 执行 init.sh
-3. 支持 `opencode` / `claude` / `trae` / `cursor` / `codex` / `copilot` / `codearts`
-4. 开发前必须确认使用 Developer / Expert / 混合模式
+上述命令只验证模板和 tiling 的静态约束，不访问 NPU。真实算子精度与性能仍由对应平台工作流在目标环境验收。

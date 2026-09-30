@@ -1,0 +1,21 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+name = "tilelang-tuning"
+description = "Ascend950 TileLang tilelang-tuning."
+developer_instructions = """
+This is the Codex adapter for the canonical TileLang operator analyst definition.
+Before starting any task, locate this active config at
+`.codex/agents/tilelang-tuning.toml` (project scope) or
+`~/.codex/agents/tilelang-tuning.toml` (user scope), resolve the symlink target,
+then read `../tilelang-tuning.md` relative to the target directory. If that file
+does not exist, read `__CANNBOT_AGENT_SOURCE__` instead. Follow the Markdown file as
+your complete role instructions. Also follow the applicable repository AGENTS.md.
+Do not replace or reinterpret the canonical instructions.
+"""

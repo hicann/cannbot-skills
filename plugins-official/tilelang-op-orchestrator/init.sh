@@ -38,7 +38,7 @@ safe_install_file() {
 
     # Idempotency: skip if identical
     if [ -e "$target" ] && diff -q "$tmpfile" "$target" > /dev/null 2>&1; then
-        info "$name already up to date"
+        ok "$name already up to date"
         rm -f "$tmpfile"
         return 0
     fi
@@ -107,14 +107,14 @@ detect_trae_variant() {
 }
 
 BRAND="cannbot"
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 # --- Plugin-specific filters ---
 EXCLUDED_SKILL=""
 # Skill whitelist (space-separated list) - references shared ops
-INCLUDED_SKILLS="tilelang-api-best-practices tilelang-env-check tilelang-op-design tilelang-op-develop tilelang-op-test-design tilelang-perf-optimization tilelang-programming-model-guide tilelang-review tilelang-submodule-pull"
+INCLUDED_SKILLS="tilelang-api-best-practices tilelang-env-check tilelang-op-design tilelang-op-develop tilelang-op-test-design tilelang-perf-optimization tilelang-programming-model-guide tilelang-review tilelang-submodule-pull tilelang-performance-best-practices ascendc-env-check npu-arch tilelang-op-profiling"
 # Agent whitelist (shell pattern) - uses local agents/
-INCLUDED_AGENT_PATTERN="tilelang-op-*"
+INCLUDED_AGENT_PATTERN="tilelang-*"
 
 show_banner() {
   echo ""
@@ -190,7 +190,7 @@ TOOL="opencode"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
-# Agents: use local agents/ directory (migrated with plugin)
+# Agents: use the plugin-local agents/ directory
 LOCAL_AGENT_ROOT="$PLUGIN_ROOT/agents"
 # Codex custom agents use standalone TOML definitions.
 CODEX_AGENT_ROOT="$LOCAL_AGENT_ROOT/codex"
@@ -532,6 +532,8 @@ if [ "$TOOL" = "opencode" ]; then
             sed \
               -e "s#tilelang-ascend/#${ESCAPED_ROOT}/tilelang-ascend/#g" \
               -e "s#\.\./\.\./ops/#${ESCAPED_OPS}/#g" \
+              -e "s#(workflows/#(${ESCAPED_ROOT}/workflows/#g" \
+              -e "s#(references/#(${ESCAPED_ROOT}/references/#g" \
               "$config_src" > "$tmpfile"
             safe_install_file "$tmpfile" "$config_target" "AGENTS.md" "$LEVEL"
         else
@@ -547,7 +549,7 @@ elif [ "$TOOL" = "claude" ]; then
         config_target="$CONFIG_ROOT/CLAUDE.md"
     fi
     if [ "$config_src" = "$config_target" ]; then
-        info "$(basename "$config_target") already at target location"
+        ok "$(basename "$config_target") already at target location"
     elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
         PLUGIN_ROOT_ABS="$(realpath "$PLUGIN_ROOT")"
         ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
@@ -556,6 +558,8 @@ elif [ "$TOOL" = "claude" ]; then
         sed \
           -e "s#tilelang-ascend/#${ESCAPED_ROOT}/tilelang-ascend/#g" \
           -e "s#\.\./\.\./ops/#${ESCAPED_OPS}/#g" \
+              -e "s#(workflows/#(${ESCAPED_ROOT}/workflows/#g" \
+              -e "s#(references/#(${ESCAPED_ROOT}/references/#g" \
           "$config_src" > "$tmpfile"
         safe_install_file "$tmpfile" "$config_target" "CLAUDE.md" "$LEVEL"
     else
@@ -575,7 +579,7 @@ else
         config_target="$CONFIG_ROOT/AGENTS.md"
     fi
     if [ "$config_src" = "$config_target" ]; then
-        info "$(basename "$config_target") already at target location"
+        ok "$(basename "$config_target") already at target location"
     elif [ "$LEVEL" = "global" ] || { [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; }; then
         PLUGIN_ROOT_ABS="$(realpath "$PLUGIN_ROOT")"
         ESCAPED_ROOT="$(echo "$PLUGIN_ROOT_ABS" | sed 's/#/\\#/g')"
@@ -584,6 +588,8 @@ else
         sed \
           -e "s#tilelang-ascend/#${ESCAPED_ROOT}/tilelang-ascend/#g" \
           -e "s#\.\./\.\./ops/#${ESCAPED_OPS}/#g" \
+              -e "s#(workflows/#(${ESCAPED_ROOT}/workflows/#g" \
+              -e "s#(references/#(${ESCAPED_ROOT}/references/#g" \
           "$config_src" > "$tmpfile"
         safe_install_file "$tmpfile" "$config_target" "AGENTS.md" "$LEVEL"
     else
@@ -710,41 +716,13 @@ else
 fi
 echo ""
 
-# --- Step 4: Clone TileLang-Ascend source repository ---
-step "[4/5] Preparing TileLang-Ascend source repository..."
-
-TILELANG_DIR="$PLUGIN_ROOT/tilelang-ascend"
-if [ -d "$TILELANG_DIR" ] && [ -d "$TILELANG_DIR/.git" ]; then
-    ok "TileLang-Ascend already exists: $TILELANG_DIR"
-else
-    mkdir -p "$(dirname "$TILELANG_DIR")"
-    if command -v git &> /dev/null; then
-        info "Cloning TileLang-Ascend source repository..."
-        if timeout 60 git clone --recursive --depth=1 https://github.com/tile-ai/tilelang-ascend.git "$TILELANG_DIR" 2>/dev/null; then
-            ok "Cloned tilelang-ascend to $TILELANG_DIR"
-        else
-            warn "Clone failed — clone manually: git clone --recursive https://github.com/tile-ai/tilelang-ascend.git $TILELANG_DIR"
-        fi
-    else
-        warn "git not found — install git and clone manually: git clone --recursive https://github.com/tile-ai/tilelang-ascend.git $TILELANG_DIR"
-    fi
-fi
-
-# For global mode: also symlink tilelang-ascend into CONFIG_ROOT so it can be discovered
-# from any working directory (not just the plugin directory)
-if [ "$LEVEL" = "global" ] && [ -d "$TILELANG_DIR" ]; then
-    ln -sfn "$(realpath "$TILELANG_DIR")" "$CONFIG_ROOT/tilelang-ascend"
-    ok "tilelang-ascend → $CONFIG_ROOT/"
-fi
-
-# For project-level with custom target: also symlink tilelang-ascend into INSTALL_BASE
-# so relative references from agents work correctly
-if [ "$LEVEL" = "project" ] && [ -d "$TILELANG_DIR" ]; then
-    if [ "$INSTALL_BASE" != "$SCRIPT_DIR" ]; then
-        ln -sfn "$(realpath "$TILELANG_DIR")" "$INSTALL_BASE/tilelang-ascend"
-        ok "tilelang-ascend → $INSTALL_BASE/"
-    fi
-fi
+# --- Step 4: Check platform workflow resources; prepare sources at runtime ---
+step "[4/5] Checking platform workflow resources..."
+for branch in Ascend910 Ascend950; do
+    [ -f "$PLUGIN_ROOT/workflows/$branch/workflow.md" ] || { err "Missing $branch workflow"; exit 1; }
+    [ -f "$PLUGIN_ROOT/workflows/$branch/scripts/prepare_framework.sh" ] || { err "Missing $branch preparation script"; exit 1; }
+done
+ok "Plugin configured. Source preparation runs after chip routing."
 echo ""
 
 # --- Step 5: Health check ---
@@ -763,21 +741,6 @@ for target in "$SKILL_DISCOVERY_ROOT" "$AGENT_DISCOVERY_ROOT"; do
     health_ok=false
   fi
 done
-
-# Check TileLang-Ascend source repository
-if [ -d "$TILELANG_DIR/docs" ]; then
-    ok "TileLang-Ascend source present"
-else
-    health_errors="${health_errors}\n  $(echo -e "${YELLOW}⚠${NC}") tilelang-ascend repo not found — API Explorer / Design skills need docs/"
-fi
-# Check global tilelang-ascend symlink
-if [ "$LEVEL" = "global" ] && [ ! -d "$CONFIG_ROOT/tilelang-ascend" ]; then
-  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} tilelang-ascend symlink missing in $CONFIG_ROOT"
-fi
-# When installed to a custom directory, also check the symlink there
-if [ "$LEVEL" = "project" ] && [ "$INSTALL_BASE" != "$SCRIPT_DIR" ] && [ ! -d "$INSTALL_BASE/tilelang-ascend" ]; then
-  health_errors="${health_errors}\n  ${YELLOW}⚠${NC} tilelang-ascend symlink missing in $INSTALL_BASE"
-fi
 
 # Check config file
 if [ "$TOOL" = "opencode" ]; then

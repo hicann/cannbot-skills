@@ -101,6 +101,20 @@
       "expected_output": "回复应给 fix-python.sh --all 和 fix-cpp.sh --all，保持与检查阶段相同范围；随后重跑 lint/format check，向原报告追加逐文件修复前后、命令与验证结果的“修复结果”章节，而不是覆盖初始问题报告。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "当前平台为 Ascend950，请检查我提供的 src/example.py 的代码格式，不要修改文件。先说明需要读取的技能正文与检查范围。",
+      "expected_output": "读取 tilelang-review/Ascend950/instructions.md 和 workflows/file-review.md，只检视用户指定的 src/example.py；按阶段完成代码概要、计划、格式与适用条例检视、结果完整性检查和真实报告生成。skill_base 指向 Ascend950 分支，产物默认位于用户项目的 operators/<检视标识>/；不加载其他平台，不修改源码，格式修复须报告完成后用户明确同意。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "prompt": "Ascend950，请 review 远程 PR #123，我没有提供本地文件。",
+      "expected_output": "当前只支持本地文件检视，先取得可确定的本地文件；不声称已获得 PR 源码，不调用不存在的 PR workflow，也不自行扩大到整个仓库。",
+      "files": [],
+      "expectations": []
     }
   ],
   "skill_name": "tilelang-review"

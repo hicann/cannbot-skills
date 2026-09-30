@@ -1,0 +1,954 @@
+{
+  "source_commit": "03837f014c8c9e04f7286bbaa31dafb59af9e585",
+  "skill_mapping": {
+    "tilelang-a5-op-design": "tilelang-op-design",
+    "tilelang-a5-op-generate": "tilelang-op-develop",
+    "tilelang-op-st": "tilelang-op-test-design",
+    "tilelang-perf-optimize": "tilelang-perf-optimization",
+    "tilelang-performance-best-practices": "tilelang-performance-best-practices",
+    "ops-profiling": "tilelang-op-profiling",
+    "tilelang-op-review": "tilelang-review"
+  },
+  "files": [
+    {
+      "destination": "ops/tilelang-op-design/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "f3674581b5dd23a85f8955018103f3a0b7c54811818363ffa698da9cb7e45b44"
+    },
+    {
+      "destination": "ops/tilelang-op-design/Ascend950/references/Ascend950-backend.md",
+      "platform": "Ascend950",
+      "source_sha256": "34debad57fa3e588752df228856e2a303da9d1eb41d4f84ae80e7aadcb8355a7"
+    },
+    {
+      "destination": "ops/tilelang-op-design/Ascend950/assets/design-template.md",
+      "platform": "Ascend950",
+      "source_sha256": "df48c1900f3cb359b701b1bf3cc6341131ac542737d6da37fc5f115bfc831b8d"
+    },
+    {
+      "destination": "ops/tilelang-op-design/Ascend950/agents/openai.yaml",
+      "platform": "Ascend950",
+      "source_sha256": "839038da4c72d8a2a734c4aba3accfcf2eff889032e8d15eefc4bbc84fea52da"
+    },
+    {
+      "destination": "ops/tilelang-op-develop/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "8df30c631b07a9f39e38c5815073b2ded92499cbd5dcb539f41eb5f4b3b80eda"
+    },
+    {
+      "destination": "ops/tilelang-op-develop/Ascend950/agents/openai.yaml",
+      "platform": "Ascend950",
+      "source_sha256": "95e39a2fa4bc420f34a4e6e625197bd96eead2c3f2157205b792d8a1456e2fb5"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "596a3d741d12b70f1de2767cc7d4d033aaa0157256b101791b3de26f52625df0"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/case-specification.md",
+      "platform": "Ascend950",
+      "source_sha256": "68c888e11ac602e23c7b7083d458ed93e0f720670c0e4482744ed62daa92008e"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/pilot-evidence.md",
+      "platform": "Ascend950",
+      "source_sha256": "1a52ab2ecee22439da7759addca915883825b23b32849bf4512e4d2bedcb1009"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/delivery-workflows.md",
+      "platform": "Ascend950",
+      "source_sha256": "4294426f8145bab734338e4cafdf302fe4e5c27141641d160f2957ab90cfee22"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/test-credibility.md",
+      "platform": "Ascend950",
+      "source_sha256": "45d46a4f4d9dccebafafd4419ca913ac3944053d5a2bf3f7d17937620da8da26"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/generalization-evidence.md",
+      "platform": "Ascend950",
+      "source_sha256": "12e632618389b2b569d71051b2c18366cd97dd67d6f462e11935a4bcec809f4f"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/coverage-design.md",
+      "platform": "Ascend950",
+      "source_sha256": "a33ddaa6e5c38e92d9e666846753a9ce1b966b92280b916d1020878dd9ff263c"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/references/repository-testing.md",
+      "platform": "Ascend950",
+      "source_sha256": "03d43c6bfd4527521b980cb4ffe70769af7d174bc4ced43e6975487785092504"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/scripts/discover_tests.py",
+      "platform": "Ascend950",
+      "source_sha256": "d74e0a78d2a6c2e46ada347d08238b44eee658e690133981ad2ac4b74f42ce86"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/scripts/check_st_spec.py",
+      "platform": "Ascend950",
+      "source_sha256": "4d50fdeed3f4eddb04996fcaaa9bdcf146bff3ae8248c6d58c6767d77cf8622b"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/scripts/pytest_st_evidence.py",
+      "platform": "Ascend950",
+      "source_sha256": "391d96b108ea89ec2b3dd22c833419ad645cd82c83da78aa11f950211180120f"
+    },
+    {
+      "destination": "ops/tilelang-op-test-design/Ascend950/agents/openai.yaml",
+      "platform": "Ascend950",
+      "source_sha256": "f82d49b3f11baed29cae65b10b2ecc2b1542bb63278d085835045b93318ffb4c"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "55a51cc7a82010efdf6b9ff3a0a587945d89e2cbc5285969030fda6d5f5a982b"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/references/plan-and-validation.md",
+      "platform": "Ascend950",
+      "source_sha256": "da85cf0536ee584bf86ca64c208b6676772692f9ff3f7a87f421ce7eb7c7ca72"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/references/evidence-and-diagnosis.md",
+      "platform": "Ascend950",
+      "source_sha256": "5384acaa262292d8435eaebabab45413dd542f4beca59f7c60341124b46553df"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/references/tiling-and-cases.md",
+      "platform": "Ascend950",
+      "source_sha256": "7fe63da6c96b1199d3db59c0e3b80bcc1d42293f0ff329c83592d8ae2b929d2b"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/evals/evals.json",
+      "platform": "Ascend950",
+      "source_sha256": "a47faa93032b8198b594aadab8a3436cbfe4cfa634c80e5824a3b336eecf9ae8"
+    },
+    {
+      "destination": "ops/tilelang-perf-optimization/Ascend950/agents/openai.yaml",
+      "platform": "Ascend950",
+      "source_sha256": "fc9279dd2afe82d9c48659ed4918d21cb26e1798917084c95e29298f8d4004d6"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "9e0bc13b001981cfcc9013633b6cd9930b664fea3cd3fb8e4d45a897ad6863b3"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/tilelang_pto_guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "c7f3a559d7999133af56a2e8a74a29510ef730dc8497c7744e50c0754b9269c6"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/index.md",
+      "platform": "Ascend950",
+      "source_sha256": "f2baa40988ac77b6501b71fff839906784874a786dd0b757d19369056df55cc1"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/validation.md",
+      "platform": "Ascend950",
+      "source_sha256": "2a5bd0347d72c02be6593ca3eb17bc40cb3662aaa724dc4d5e44c7e61f34957b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/template_status.md",
+      "platform": "Ascend950",
+      "source_sha256": "56d013e3fb0f329348412d71ed1f71a010ebe18ebaa90c14c89cb7f06e8e2d51"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/scripts/validate_templates.py",
+      "platform": "Ascend950",
+      "source_sha256": "40800f7941f21f43550ecfc58ecc4ed8f539e27bafd9a0132af10b0cecd45a4e"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/evals/evals.json",
+      "platform": "Ascend950",
+      "source_sha256": "0d70908fc9ac9bbf82c5666e07c09111ea9fb59ea4d5f8bc7016431d3237e0db"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/agents/openai.yaml",
+      "platform": "Ascend950",
+      "source_sha256": "2b9e0353ff01ad9ccacd7a34d8681380c92f851cda8b67641b225c2260b809c3"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "3dee5d8f0386ba13b409a874fb15a3abc691f2dca509d25087f548758c910d8a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/rowwise_reduce_epilogue.md",
+      "platform": "Ascend950",
+      "source_sha256": "4501bace62488aeaf86d19928cafbb40e5ffd3189c8086ee120052d9daf4d446"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/wide_output_tiling.md",
+      "platform": "Ascend950",
+      "source_sha256": "2d7299d3f6a3ad41053158240e87c14596f44ad00ebf666740ff3e82f09eb012"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/fixed_small_state.md",
+      "platform": "Ascend950",
+      "source_sha256": "1664b2152a835e6344bf6bc7c28caf23ff30572eb9b1f785c99600046be0ab8c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/batched_short_reduction.md",
+      "platform": "Ascend950",
+      "source_sha256": "55b048b7dc05db3939cc03a06688dd31451790988bbf3965dc6878565305df1a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conv/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "24ecb38011038b88c6da42954fed98d7f7d24495ad259e4ba6c052f3a5d01a48"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conv/conv_common_perf_experience.md",
+      "platform": "Ascend950",
+      "source_sha256": "0790b56471e2ec5d6f5f656e205b8dd13555283e94535dd7a1501f9c07463fc6"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/fullload_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "0d8fe233b2fe20b409ca12324ce883069cd9ef35c8ed2765625f24c6a1c0e6e4"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/mte2_preload_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "345b53ef1f82744cb18d3b71620b2043ee66e0e7c1b18297577673233d9a804d"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/pingpong_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "59a333c82a36a28e02c2c028150b52e65edf0842e5d3461a13bcdb18f53318ca"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "dc9bb071c45168e7ccc5c1d4f3aff944adf7578daf9cd4c3706547be2f707455"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/scale_coalescing_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "c4fec5b656dee604d49032eeb1a7f439b18869e9710654d5b663f6fd767585c7"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/streamk_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "c0a26a92ea1169b9be4fe3617748f59f4fc58fc80c6367eb1e647c4b39bda9e3"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/matmul/swat_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "681a69c0e78ec3c23dcd08e26b9f284fc382d3baff0f0f7b43fdf5a769bdef9c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/sort/radix_sort.md",
+      "platform": "Ascend950",
+      "source_sha256": "1ce4f23803ab8c35c60c4ae6b5691db83f87a905f52032fe64e6dd1f2ea62ade"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/tilingdata_cv_ssbuf_forwarding_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "97101d66a848ba394f38be1dc07f8222a56e05323d6e9648d1793c92c3fb8695"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/scalar_general_techniques_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "b1fc072a8efbc45f2b214d02afbc3d504ab5c4df9d0155c02f961c791fa1925f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/scalarldst_subbound_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "80ff600805e439980221998647fde9e7a06081cd8567d02c3cb10831e1482399"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "73df2800ef92d4e7d90b474cff5bfd32ac5a93ca773546e70dca4c600acbf40b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/getvalue_cacheline_batching_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "5b5df40ff2d1ad335c4728b7c1c942b8381f7fcedc0500935e74f8415899d01b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/flash_attention/scalar_precompute_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "33054007b4a23262b1d7aa08ae072f8da42f8fe8b5cfdfd4714981c1b1bb7d55"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/rope/vector_fused_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "4073a3a9c215e0cb7f5c32eb19ac4a735f1c6dd516cd01749f55c80beea68084"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/rope/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "1dc47bf3c9baa616ea23d86e67759ac2e03cf279cef2925229379b0c97cc2cad"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scalar/coding_principles.md",
+      "platform": "Ascend950",
+      "source_sha256": "878dd847f2e0481cf2567cecd13006c463257d113cb3a382cde443fed89609cb"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scalar/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "ea396e62f0c4142b496894610ee7ba721b52c58feebcfb8f5724d8d32384797a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scalar/conv_scalar.md",
+      "platform": "Ascend950",
+      "source_sha256": "bc793de129230c6ae0e412e99e46de2ed92add465bcc32cd92af7c726d24d408"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scalar/buffer_management_conversion_guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "e269e67796bf099c3fc2f5be8b69db9c3432bff8516f1fd4f8cb80e96bb32449"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_cut_one_axis.md",
+      "platform": "Ascend950",
+      "source_sha256": "4c0026ac9ed6e3ead994ba7d15052e728233ca0379ed3c96ebdca49d92d287c9"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_gather.md",
+      "platform": "Ascend950",
+      "source_sha256": "e5373731ae0207760c560d9c3490da9c0955b5759627446361cee68267a4e95d"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_n_last.md",
+      "platform": "Ascend950",
+      "source_sha256": "ace729602e135435719d1fac1c428f9541c1aeb0b6d419a653c87a1226b34c32"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_small_shape.md",
+      "platform": "Ascend950",
+      "source_sha256": "9a65b7ddd13dd7cc541b05eba06774cbc3e4fbb1eb55ba3822b51bef60d57ae1"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "1f84461552fb42f2781c6a816197aa58dec0ed62c2f10458564da64b5786f72f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_vconv_021.md",
+      "platform": "Ascend950",
+      "source_sha256": "86d8c889d95b06dd9ea255c75d99c2fc06b2b7f1e2ad8eae66915a836d8ad307"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_tiling_data.md",
+      "platform": "Ascend950",
+      "source_sha256": "0479597192b0b80154cf540994142ca78d8696eabc8dd0e5c8299a2227a76289"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_big_dim.md",
+      "platform": "Ascend950",
+      "source_sha256": "469f9834c50b009a83999496feabef88fd280ea88bf7463fa754f29b6dc34748"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_tensor_move.md",
+      "platform": "Ascend950",
+      "source_sha256": "54713ab3dcd7148018797b74423a53813206a9563d6a491e0ab203804bebee4c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_cut_two_axis.md",
+      "platform": "Ascend950",
+      "source_sha256": "f22c98bfd6314acc4a39c6191356338e6ecc9a86562a3d3135eb4099b3b0c27e"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_vconv_5hd.md",
+      "platform": "Ascend950",
+      "source_sha256": "51b2fe82bf16efb7d25a390e89bcfe40e20f2169863744b1b55b505e9f3daa0d"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/transpose_fusion_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "8ab2919619693b479aff643a64ddfae1c7426ce0aef9e5fcf4bedd3f5a1e3ce9"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/simt/optimization-guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "3c76ec91e51138b8181af18ce25e450f211e5bbcdc262c910872cb331a861e99"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/common/datacopy_optimization_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "d7046c86dd4e7022c7afa06a401e59c76465968fcf628575cee5f2462f4daeac"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/common/ub_resident_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "5b31d79c9dde7f8da97e73471e536e25cb78ed8ea5accd03d7c173b765d361d2"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/common/tail_block_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "5634b3addd99fdb15388929f614562489b9773c9585a26d3b0d01feaea3021f4"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/common/persistent_task_mapping.md",
+      "platform": "Ascend950",
+      "source_sha256": "a3cfe8f3084dd2e176f3fefb9f4fb132ebda9c7a20fd1aebc98b2c2123374999"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/elementwise/double_buffer_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "c86910ea485a722e9f0f32413dc0323bcd2c1f0d41bdbd80c381efe331f5e3a3"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/elementwise/indexed_short_record.md",
+      "platform": "Ascend950",
+      "source_sha256": "a068057332dbb21544794b15f9dfff9441b55cafbca6172464f5fba8735348fd"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/elementwise/vector_efficiency_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "9652189eca0b26ec22ef6c5248f3447bba732b114c1b817d98a825e9099eb072"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "8d4ee363ede33a918312014918a1e81511c1075eaf9e0f42f0e183e6e26168b7"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/mc2/guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "47dc6c2ccd918c64666198b81e6c7947310e288ed6feefff89ed60072682292d"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/mc2/pipeline_balancing_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "e2fe5a2f341f4343cbf5ef4c3dac3f5166df080b31daf798db173c9f892e5c21"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/mc2/local_matmul_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "dd182a58bc4de1c9b9f84abcfed904a5ebfac54c596f2f9957fc6da3437ef6ae"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/nddma_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "612086263ff0b42eedbc9ec8d3b1c98e298edd9ce2be49e8c8c31aae405ec67e"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/onedim_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "2d34bef9987fba4733686acb8b762bdb34013f58d5deaa0006e0ed46d8ee861b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/broadcast_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "6b2ee8fc51fd7726f28eb165ae8c4a12dda883bd90be2b3d4eb669c4fb569e48"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/advanced_tiling.md",
+      "platform": "Ascend950",
+      "source_sha256": "fdf32be7cb90d4763c6404fdb5e2337747345219745ef92313d3d251f57efe80"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/ub_broadcast_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "9127089e1de0f003f8d78567b7093832e9467ab9c2dfe87c7f67b9e83bbba730"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/datacopypad_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "0264fbeb7a2ad2fd7dd12150ed05141727e06015d446cfea563ccca9fea89cba"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_tiling_data.py",
+      "platform": "Ascend950",
+      "source_sha256": "45e610727c7d87e64fd46e3a3f80613f5d46803e74cfd8aa6f234e755a81bc1c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ar_full_load.md",
+      "platform": "Ascend950",
+      "source_sha256": "0c17bdaf81c30ae82e0e03fe9b599eb8beba1143993a849bfb24912c38bf4a8b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ar_recompute.md",
+      "platform": "Ascend950",
+      "source_sha256": "d66ddb23934f028ce6f1c35ceb3357a811ba076dae9fd394302522091a1120bf"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_group_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "27f5e51802611aaf2a8bd3376f2efae9ac30c042840b34f95c8425781cfeda16"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ara_full_load.md",
+      "platform": "Ascend950",
+      "source_sha256": "35bcd6ef098d62dbe875b399c78d2400fd674c62620a664814ee19e2b103ce68"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_tiling_data.py",
+      "platform": "Ascend950",
+      "source_sha256": "006ec1c3bb39eb0cbaffafe11d8039b835a07c55ac230ee36b520f657722f256"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/state_resident_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "d2926fc6aba939a4c17a602a64a3f3f675cc146de5b7fe8c80112ac32503e1c0"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "92c8e23fed68758952502f02bf088ea3a563d83fa1bd352776a54c5df0d3b9ba"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_interleaved_contiguous_tailr.md",
+      "platform": "Ascend950",
+      "source_sha256": "3cc9c749d1eab8bd3c1797cfde2f4ded7f803f1d6ffc78c471c67d7572579b69"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/fused_attention_online_softmax_design.md",
+      "platform": "Ascend950",
+      "source_sha256": "870fc78d1c0124422bfd1535f9bc0465bf64abfb4fecdff10d51efc87dc1b116"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_group_block_split_r.md",
+      "platform": "Ascend950",
+      "source_sha256": "870e424feb8bf90673d5eac45a33f77a3584dac57bda38529bf12ffa69403a4b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ara_recompute.md",
+      "platform": "Ascend950",
+      "source_sha256": "b91612b672861b2b726680e29889626c12901ec8f60c02647cde85cc0b3f0d7f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "9b76e62fa5130adf4c8a3ed7508a76e3449275ad514ea76b49d2df1971a22771"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/usage_guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "3345249d13d76cab545c0cf1b9a77acea877e3a1a2fbe7ff955bea443ac381f6"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/euclidean_norm_interleaved_contiguous_tail_a.md",
+      "platform": "Ascend950",
+      "source_sha256": "c2eeb8b9f09f2e03c24bd035fab8d309fdbdc51f8f5afcc12ab7ae8d47fbff27"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ar_small_r.md",
+      "platform": "Ascend950",
+      "source_sha256": "ea94d37b1e570371bd95179efdd1f00eec3735fc95b4891e6a90416d2005b3b8"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/softmax_v2_ara_online.md",
+      "platform": "Ascend950",
+      "source_sha256": "9b25f892a5543739f7767a7b58d525667bc190ee81e3dc1e0c26d81d973de9cf"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_base.py",
+      "platform": "Ascend950",
+      "source_sha256": "6fe5387a6af363f5103b4388deb285a8010d81c07bdab56f373d8002247bb01e"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ar_recompute.py",
+      "platform": "Ascend950",
+      "source_sha256": "3c464c0ccaba5b7385634cab57d6c5cf603ddd7834dde2aed0e7754a5d00a494"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ar_small_r.py",
+      "platform": "Ascend950",
+      "source_sha256": "e29b8e18dc58073adb44f931791d7175a8b734b77cd68f288e35cb97cbe7272c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ar_full_load.py",
+      "platform": "Ascend950",
+      "source_sha256": "fef373f0565e7d861ecceb84ad5034e7ac3f32e3950b3e55c5a1ccc0f87b5193"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ara_full_load.py",
+      "platform": "Ascend950",
+      "source_sha256": "5dab8c0a617bbdae806f2202b5b81ce28b88577cd6ff7564265a9e187b47f78f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/euclidean_norm_interleaved_contiguous_tailr.py",
+      "platform": "Ascend950",
+      "source_sha256": "ac6e4b24e622e88d01167bb01f708af6242dc2c17357917ad8619258d153c641"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/euclidean_norm_group_block_split_r.py",
+      "platform": "Ascend950",
+      "source_sha256": "66a5317eafb66f092827a1dd2837c52ccfa07c2253f9f40d59423c2a0a9cdb2a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/kernel_utils.py",
+      "platform": "Ascend950",
+      "source_sha256": "27104482bb7577cd50527ad1814f32d17f0d9d5ed824dba3dabf6cf49d2ba8fe"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ara_recompute.py",
+      "platform": "Ascend950",
+      "source_sha256": "578a536c2119d6b3fea281712ec7c79d507fc79864b524d3e9a797b25302e958"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/euclidean_norm_interleaved_contiguous_tail_a.py",
+      "platform": "Ascend950",
+      "source_sha256": "ac6e4b24e622e88d01167bb01f708af6242dc2c17357917ad8619258d153c641"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/reduce/templates/dav310/softmax_v2_ara_online.py",
+      "platform": "Ascend950",
+      "source_sha256": "2d495437c04543c32168cd4a24050f16a2d2a2010e33484b43ecbd47d9272496"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/rope/code/rope_vf_common.py",
+      "platform": "Ascend950",
+      "source_sha256": "f112720ce245b049cd75ab79d3b6c1ed016e9bf773d51444b95de0a1ceb13b71"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/transpose_tiling_data.py",
+      "platform": "Ascend950",
+      "source_sha256": "2f8fe2a1419e2c3310428fddf9f70ce32976fdf747069d3811e836f1df7345c5"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_n_last.py",
+      "platform": "Ascend950",
+      "source_sha256": "23423b1a17587bed7fe1767b4485e3f8a8b83bbd11171c331f217182bf262300"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_with_gather.py",
+      "platform": "Ascend950",
+      "source_sha256": "2f26c5706c206635934f0e214681c949a046a1dc2f64a51aac405bbf3aa1bcc8"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_transdata_5hd_021axis.py",
+      "platform": "Ascend950",
+      "source_sha256": "f76ac2395719f8ed1f7ee0b6f520ad9e5eba69637d9599c4d3ab691088aaebef"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_cut_one_axis.py",
+      "platform": "Ascend950",
+      "source_sha256": "ee65e1328a3fd9559a0fa7b82f0443a331c29ecdbe835c8f8a2961bb19e2a2ea"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_big_dim.py",
+      "platform": "Ascend950",
+      "source_sha256": "97e70172dadda453d2a68a76206cd9b6fefab657865cd05f067ba18f7644c5ff"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_transdata_5hd.py",
+      "platform": "Ascend950",
+      "source_sha256": "d5cce9559dfc7efe572cfc2c51143b6c22aec1e19afddf56fd2cbfd0eaecc888"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_cut_two_axis.py",
+      "platform": "Ascend950",
+      "source_sha256": "bf08512ca044d291823444ede5e3a00ebf7527353171bac7838c80ccfaef0e56"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_small_shape.py",
+      "platform": "Ascend950",
+      "source_sha256": "4f03a22bf9a96f38dbc61fd25054da6c57a28b3b85fed3fc0028d1482ee2039f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_tensor_move.py",
+      "platform": "Ascend950",
+      "source_sha256": "3850893deb13b6dc787ad4c7c4e63d880060a784ae4f9b821a23798912796e70"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/conversion/templates/dav3510/transpose_base.py",
+      "platform": "Ascend950",
+      "source_sha256": "d9837a5ca496128a38234b01b31b2eb0c5b01dad83243ae5f6329f43b1af3dd8"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/scan_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "6159753f9aa25366b252fdc4118e2051b0070ddc3f8d573ef757b22e0bc4f5d7"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_row_kogge_stone.md",
+      "platform": "Ascend950",
+      "source_sha256": "b4110d81e027b4d92378447829883907ad2e2656616ad825071a8144c32362c4"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_tile_resident_scan.md",
+      "platform": "Ascend950",
+      "source_sha256": "15c2e8949e24eab441b93608f8f793a06a4ce6f9d248b6bd3bcc767e301d66ea"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_oneway_sklansky.md",
+      "platform": "Ascend950",
+      "source_sha256": "c9dc1cbed5bd6a7327f0a3a635876a6c00bd4f251bbb90a3929754d1b4d27d56"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_streaming_scan.md",
+      "platform": "Ascend950",
+      "source_sha256": "ccf10528f3252337931c60964fdb9bf2c4b015a1f73ef1b799a6c47fd6bcc05e"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_core_partition_scan.md",
+      "platform": "Ascend950",
+      "source_sha256": "b5996613f11e32feab2d97cb272829bb662102c45fdb7f4697fb42744bc6c727"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/cum_lane_parallel_scan.md",
+      "platform": "Ascend950",
+      "source_sha256": "9bbea764ad3f12809aab812105b097e6869affd21b4e28a756ced3c5b7172828"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/scan_tiling_data.py",
+      "platform": "Ascend950",
+      "source_sha256": "cc66812df4c190c2a0298e98a86e053d10cd45b82b3eb5136cda90a67aed4a73"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/usage_guide.md",
+      "platform": "Ascend950",
+      "source_sha256": "1731fca83cf45221fb50220943895023bae78e4acd8c5b8805ab20bbd5018f2a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_tile_resident_scan.py",
+      "platform": "Ascend950",
+      "source_sha256": "e7024cad95d8a06f0de6f68da5e4d3b3d396796d1471b33a0ac0748946057a14"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/scan_cummin_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "7cf3c84987e0dcbf631efb21e94943ff66333c9eead666157aaa56ddb145ab1f"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_row_kogge_stone.py",
+      "platform": "Ascend950",
+      "source_sha256": "bbd87756d8bc736bb90156e5b4a2649917e55ef0eff3c303a29d4350bd5e31f7"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_core_partition_scan.py",
+      "platform": "Ascend950",
+      "source_sha256": "798a23dce5b05a8aee9fac1261a7d671c600a09402312f9cd594c6103b0750a6"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_oneway_sklansky.py",
+      "platform": "Ascend950",
+      "source_sha256": "4761d2e9d567d3274a5f0d854b76944b109a0ca4677d8abbf87cc4e0ae587a9b"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/scan_base.py",
+      "platform": "Ascend950",
+      "source_sha256": "4b71052d44332bb62cd48245cf161fe62f35577b74e98cb35821b52893dbff6c"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_streaming_scan.py",
+      "platform": "Ascend950",
+      "source_sha256": "6240d0852e64405c2b453f07eefbc31ed16e8614e2d6f8653c5b501c64ff1071"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/scan/templates/dav310/cum_lane_parallel_scan.py",
+      "platform": "Ascend950",
+      "source_sha256": "e00fca3100ca156d2d6102d9e95efa7afc161b68dd16fcc620ee18e0d092b9f7"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/code/onedim_add_kernel.py",
+      "platform": "Ascend950",
+      "source_sha256": "c16d7ee2187f0bd5b0b3670d741e756218cba0fc7a7f48c0e9efef0d8e9b92e0"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/code/broadcast_add_kernel.py",
+      "platform": "Ascend950",
+      "source_sha256": "6bac67325555ed901e8e85fa1ef3ab3c60bdca7c6ae62f31688f51004cb8a39a"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/code/onedim_add_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "6a7e575f3490c079ea6b8b34fbb8b6f2a0be0078a04b30c82bb908d4785d73e2"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/code/broadcast_common.py",
+      "platform": "Ascend950",
+      "source_sha256": "f6dc2cf3d19d6a3e701a3880c5211182aeba458a9590f4c1e3a47d89f379e0c4"
+    },
+    {
+      "destination": "ops/tilelang-performance-best-practices/Ascend950/references/broadcast/code/broadcast_add_tiling.py",
+      "platform": "Ascend950",
+      "source_sha256": "31413c7b7b9b8d5feddfbdad82d9dc5f3becc583788c8e52b33ba0094fbb0541"
+    },
+    {
+      "destination": "ops/tilelang-op-profiling/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "dfa38ad6e841afc021e6b57159217365971479fcb19c289652ee89f6e5751d5d"
+    },
+    {
+      "destination": "ops/tilelang-op-profiling/Ascend950/references/optimization_quickref.md",
+      "platform": "Ascend950",
+      "source_sha256": "5a67c76b3f0777c88c3c98265659892ff9f0d81608a5f26ff6371c5907c9e1b7"
+    },
+    {
+      "destination": "ops/tilelang-op-profiling/Ascend950/references/csv_fields_reference.md",
+      "platform": "Ascend950",
+      "source_sha256": "19614b231239304865d83a7e80969860ef3727d57cf00a59b53c028eb5c3800c"
+    },
+    {
+      "destination": "ops/tilelang-op-profiling/Ascend950/scripts/perf_summary.py",
+      "platform": "Ascend950",
+      "source_sha256": "56619fb5bd52a5f01c583efaa711167f16c0701c3cb75f777e3d8dbb7c072e32"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/workflow.md",
+      "platform": "Ascend950",
+      "source_sha256": "ab638fede38bb902b46400a129040fff1e70cb53a254291156fb99629a310fc7"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/agents/tilelang-perf-analysis-expert.md",
+      "platform": "Ascend950",
+      "source_sha256": "ec93d6935e72dbc975918d9b3f1881e923b747f0fd0189fa4d76aa29b08d3b4a"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/agents/tilelang-perf-impl-expert.md",
+      "platform": "Ascend950",
+      "source_sha256": "4c228d80790b8d19c51c165b2ea020829474d6abca90c2a6f5781d4644a4468e"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/agents/tilelang-tuning.md",
+      "platform": "Ascend950",
+      "source_sha256": "676e597aece1d68ec24cdfaf09977626ac79ba88033eab5dbd847c46b66de4a9"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/workflows/task-prompts.md",
+      "platform": "Ascend950",
+      "source_sha256": "16de5dc5b5932fd74364926dfee626ca70e525004e2c9ffc005f79d78d63c431"
+    },
+    {
+      "destination": "plugins-official/tilelang-op-orchestrator/workflows/Ascend950/workflows/tilelang-tuning-flash.md",
+      "platform": "Ascend950",
+      "source_sha256": "6642d9929e180b293fb9e784a19118d82b780f2e31150ef0904cf20fa3b2670e"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/instructions.md",
+      "platform": "Ascend950",
+      "source_sha256": "e4bfa0b5cbdd2c6f34d260154630e1b73468e704dfcec1ae661a8b865d0bebc1"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/check-cpp.sh",
+      "platform": "Ascend950",
+      "source_sha256": "363e72fe4bb4b1e8649ee02822301109109665746c6f2c615f72097449628596"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/check-python.sh",
+      "platform": "Ascend950",
+      "source_sha256": "302a517868f502d54115b481b053acda3e65875bf6ae9bb543b41b7032fc88e6"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/fix-cpp.sh",
+      "platform": "Ascend950",
+      "source_sha256": "5a0a83af3fc376620b27b3a8ab39a6987737dc3780f24a6aff596588768d9480"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/fix-python.sh",
+      "platform": "Ascend950",
+      "source_sha256": "38d77b6811596e8211f8bcb3a43c214f53745f56a376980b9c2738b80097e926"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/templates/report.md",
+      "platform": "Ascend950",
+      "source_sha256": "11ba265787888c371082add70ba1a42a2261b9c341ff6001e4470f47a4ea5722"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/core/methodology.md",
+      "platform": "Ascend950",
+      "source_sha256": "aa4c88f4eadcbfe50c22cdaf531f07a3012a80f5e7c725fc3f3d912747fabba1"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/core/review-load-balance.md",
+      "platform": "Ascend950",
+      "source_sha256": "23f11863f3a88ef828e7b57e8e2317c2fc0c1070348386ac64f91d21a1304f0d"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/references/doc-style.md",
+      "platform": "Ascend950",
+      "source_sha256": "20b9318028f055652834e3d403677bcd41bdcd693814ef6a0d27a9062c8e01f7"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/references/python-secure.md",
+      "platform": "Ascend950",
+      "source_sha256": "8bdc78d37201d2289e416c4d0020661a04c5bc09a0fff558d559f0636781982b"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/references/tilelang-moe-quant.md",
+      "platform": "Ascend950",
+      "source_sha256": "7d87c7ff7b4e65ac409fb8431f20a4ffb1da095cd47658deba411e7133e8dff8"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/references/tilelang-perf.md",
+      "platform": "Ascend950",
+      "source_sha256": "a50bbe6fd7a607dc199e349c1f03ea8c8f4419c2e18ba084db231d8158c55d6b"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/references/tilelang-red-line.md",
+      "platform": "Ascend950",
+      "source_sha256": "16e64f0c529ac12412738505d9e254ac2fde84ff1dcb06d4370702413652534d"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/workflow.assemble_report.py",
+      "platform": "Ascend950",
+      "source_sha256": "085f726c59a2ab9c364e20829355c21a0fa055d51e9db05368380af08845a201"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/workflow.check_format.py",
+      "platform": "Ascend950",
+      "source_sha256": "89ee51074b8cbd88ff5cfcb933d09dde84817f12991e31baf95e5ce722eee5da"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/workflow.create_review_dir.py",
+      "platform": "Ascend950",
+      "source_sha256": "3573929e16c9aa4bb7e6441acbbd668bed6b8356bae91930d7538361037f0cad"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/scripts/workflow.submit_server.py",
+      "platform": "Ascend950",
+      "source_sha256": "1d10d84723a6175755b92cc7d5815c893761630995d41320ef6b5fec0af5d8b1"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/common.format-check.md",
+      "platform": "Ascend950",
+      "source_sha256": "1fc97381d056e5b427e7468d4ac0e57fbd06806ec98fc6908f3ab2e390c1d9f2"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/common.format-fix.md",
+      "platform": "Ascend950",
+      "source_sha256": "ecaff0a1fd0cc029d2f0ae117b4360976b60994c5b51eb89bf7fbd8e5c756467"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/common.plan-design.md",
+      "platform": "Ascend950",
+      "source_sha256": "ffea0bfbb48f3ffb0dfc90e7bc9332180610f65d0af41b95ebfd4a656fadab43"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/common.report-filter.md",
+      "platform": "Ascend950",
+      "source_sha256": "c9f24ea6d5933e2d21cfbfc85c6cf0a3b261b2f0d03414ae741e7c9f4598d415"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/common.report-write.md",
+      "platform": "Ascend950",
+      "source_sha256": "98052508e3f00952518c666732498c4a81889af470f2e51453a448fdc87540c8"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/file-review.clause-review.md",
+      "platform": "Ascend950",
+      "source_sha256": "22a248ce8112b89c22a924f499dc741da96d9b72603e299058cf38229495d67f"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/steps/file-review.code-summarize.md",
+      "platform": "Ascend950",
+      "source_sha256": "0665554c543081b8483831a807e8b2efe32e003a82c413db57ceb91e939b6957"
+    },
+    {
+      "destination": "ops/tilelang-review/Ascend950/workflows/file-review.md",
+      "platform": "Ascend950",
+      "source_sha256": "cd4fdd8201c97203a19ef5774b11db13ed2876161122ed7e889f72678e19edcb"
+    }
+  ],
+  "shared_skills": {
+    "npu-arch": "ops/npu-arch/SKILL.md"
+  },
+  "excluded_skills": [
+    "review",
+    "run-tests"
+  ],
+  "review_source_commit": "03837f014c8c9e04f7286bbaa31dafb59af9e585",
+  "source_kind": "historical_snapshot",
+  "source_note": "保留迁入时的 commit 与文件校验值；destination 是本仓库路径，source_sha256 不代表当前文件校验值。历史源目录不作为运行时索引。"
+}
