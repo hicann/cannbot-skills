@@ -1,0 +1,135 @@
+{
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "有 PyTorch 算子定义的全链路代码生成",
+      "config": {
+        "max_tokens": 288000,
+        "max_tokens_by_model": {
+          "deepseek-v4-flash": 336000,
+          "glm-5": 312000
+        },
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "file_based"
+      },
+      "prompt": "我有一个 PyTorch 自定义算子（autograd.Function 实现，带 symbolic 方法），想把它导出 ONNX 后用 ge.onnx_plugin 写 Python 插件接入 GE，再用 atc 编译并在 ACL 上执行。请帮我生成全部代码：导出脚本、插件、一键执行脚本。",
+      "expected_output": "生成的代码应从 templates/ 模板出发填充：export_onnx.py 使用 torch.onnx.export 且 custom_opsets 为自定义域登记版本；插件按回调选型生成（parse_node 优先），descriptor 的 source/domain/opsets 与导出侧 symbolic 域、custom_opsets 版本两侧一致；run.sh 将插件目录单独设置 ASCEND_CUSTOM_OPP_PATH，导出/执行脚本与插件目录分离；run_model.py 用 ACL 加载 OM 执行并与 PyTorch 参考比对（容差默认 1e-3）。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "file_list",
+          "pattern": "*.py",
+          "description": "存在生成的 Python 文件"
+        },
+        {
+          "type": "contains",
+          "pattern": "custom_opsets"
+        },
+        {
+          "type": "contains",
+          "pattern": "onnx_plugin"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "已有 ONNX 模型时先自检再写插件",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我拿到一个第三方 ONNX 模型，里面有自定义算子（不知道具体的属性和 domain 信息），想写 ge.onnx_plugin 插件接入 NPU。应该怎么入手？",
+      "expected_output": "回复应先指导用 onnx.load 检查模型 opset_import 与节点 domain（给出可直接执行的 python3 -c 命令），确认 domain/opset 后再写插件；提示 set_attr 的键是 GE 目标算子 IR 原型的属性名，与 ONNX 节点属性名不一定相同（如 ONNX LeakyRelu 的 alpha 对应 GE 的 negative_slope），动手前用 import ge.es.nn 的 docstring 或 CANN 算子文档查证属性名。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "onnx.load"
+        },
+        {
+          "type": "contains",
+          "pattern": "domain"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "回调选型决策树",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "写 ONNX Python 插件时，parse_node、parse_operator、decompose 三个回调分别什么时候用？我的算子节点带一个 tensor 类型的属性。",
+      "expected_output": "回复应给出回调选型决策：节点属性含 tensor/子图时必须用 parse_operator（node.attrs 读 tensor/子图属性会直接报错）；需要不预知属性名、整体搬运全部属性时也用 parse_operator；否则 parse_node 优先；GE 没有现成算子可一对一映射时追加 decompose（与 parse_node 接力）。同时说明同一 origin 下 parse_operator 优先于 parse_node。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "parse_node"
+        },
+        {
+          "type": "contains",
+          "pattern": "parse_operator"
+        },
+        {
+          "type": "contains",
+          "pattern": "decompose"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "E13010 报错的两侧一致排查",
+      "config": {
+        "max_tokens": 120000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "atc 编译含自定义算子的 ONNX 模型时报 E13010 算子未注册，插件文件确认放在 ASCEND_CUSTOM_OPP_PATH 指向的目录里了。怎么排查？",
+      "expected_output": "回复应按 origin type 三段拆解定位差异（example.domain::1::MyOp = domain（symbolic 写的域）::opset（custom_opsets 登记的版本）::source（算子名）），对照插件注册的 domain/opsets 与导出侧是否完全一致；说明 ai.onnx 允许使用但不要在 custom_opsets 里给 ai.onnx 登记版本（会与 opset_version 互相覆盖，连累全模型官方算子）；自定义域版本惯例恒为 1。不得声称 custom_opsets 可给 ai.onnx 登记版本。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "E13010"
+        },
+        {
+          "type": "contains",
+          "pattern": "domain"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "能力边界声明",
+      "config": {
+        "max_tokens": 110000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我想修改 GE 的 onnx_plugin bridge 加载逻辑，让它支持从多个目录扫描插件，帮我用这个 skill 改 GE 源码。",
+      "expected_output": "回复应明确本 skill 面向插件使用者，不适用于 GE 插件机制自身代码开发（bridge/loader/registry/parser 改动走常规开发流程），并说明该 skill 覆盖的范围是使用 ge.onnx_plugin 把自定义算子接入 GE 的端到端链路。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "bridge"
+        }
+      ]
+    }
+  ],
+  "skill_name": "ge-onnx-plugin-development"
+}

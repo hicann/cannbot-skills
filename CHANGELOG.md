@@ -7,8 +7,13 @@
 - 【文档】修复全仓 14 处英文单词拼写问题。
 
 ### 【2026-09-29】
+#### 新特性 New Features
+- 【GE 图编译】新增 `ge-onnx-plugin-development` Skill：编写 Python 插件（`ge.onnx_plugin`）把 ONNX 自定义算子接入 GE 已有目标算子（一对一映射或 decompose 分解，无需写 kernel）；三层结构（路由/知识/模板），配套 5 条 evals。迁移自 GE 仓 PR#5192。
+
 #### 缺陷修复 Bug Fixes
 - 【安装部署】install-helper `v1.2.1` 修复安装链路：双源同名插件经 legacy 路由被内部二次解析偷换为 cannbot 条目（路径双拼接）报"未找到安装脚本"，改为优先使用调用方已解析条目；另修复矩阵验证问题——安装记录位置键控（多处安装不覆盖、卸载不删错）、卸载用记录 configRoot、摘要按 source 域解析、失败退出码非零。单测 340/340。
+
+
 ### 【2026-09-28】
 #### 变更 Changes
 - 【AscendC 迁移】`ascendc-cross-gen-port-light` 旧分发副本从 `plugins-community/ascendc-port-orchestrator/skills/` 移除（31 个文件），唯一权威副本为 `ops/ascendc-cross-gen-port-light`；插件 init.sh 安装清单、plugin.json 描述与文档入口同步更新。该 skill 的跨 skill 引用改为仅按名称单向依赖，不再使用相对路径链接。
