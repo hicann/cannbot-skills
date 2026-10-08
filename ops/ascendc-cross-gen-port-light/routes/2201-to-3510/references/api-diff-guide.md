@@ -34,7 +34,7 @@ A5 芯片裁剪了 subnormal（次正规数）能力。当计算结果为 subnor
 
 各 API 的 Config 结构体、algo 模板参数选项与具体用法属于 API 知识，由 API 最佳实践承载：
 - Exp/Ln/Sqrt/Rsqrt/Div/Reciprocal 的 algo 参数与 Subnormal 处理：`ascendc-api-best-practices` 的 `references/api-cross-gen-migration.md`
-- asc-devkit 官方 API 文档路径：见 `references/devkit-path-map.md`
+- asc-devkit 官方 API 文档路径：见 `../../references/devkit-path-map.md`
 - 精度阈值与比对标准：`ops-precision-standard` 的 `SKILL.md`
 
 algo 参数语义速览（详见上述链接）：`INTRINSIC`（默认，单指令，最快，Subnormal 被近似为 0）；`PRECISION_1ULP_FTZ_FALSE`（软件模拟，支持 Subnormal 计算，**性能影响大**）。

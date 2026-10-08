@@ -10,13 +10,13 @@
 
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
-| 1 | `references/impl/api-diff-guide.md` | `[LOADED] api-diff-guide` |
+| 1 | `references/api-diff-guide.md` | `[LOADED] api-diff-guide` |
 
 **★ 若阶段 1 扫描发现算子命中性能退化路径，MUST 加载 `api-diff-guide` 并设计回归用例。**
 
 ## Step 5.0：全量仓性能优化参考（按需）
 
-如需查阅性能优化技巧或参考同类算子的性能调优案例，按 `references/search-rules.md` 路由到全量仓：
+如需查阅性能优化技巧或参考同类算子的性能调优案例，按 `../../search-rules.md 路由到全量仓：
 
 - **性能优化指南**：`$DEVKIT_PATH/docs/zh/guide/operator_practice/simd_operator_optimization/` 查找访存优化、流水线优化、计算优化等
 - **优秀实践案例**：`$DEVKIT_PATH/docs/zh/guide/operator_practice/best_practices/` 查找 FlashAttention、GroupedMatmul 等标杆实现

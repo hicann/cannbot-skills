@@ -6,10 +6,10 @@
 
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
-| 1 | `references/precision-testing/pytorch-binding-build-guide.md` | `[LOADED] pytorch-binding-build-guide` |
-| 2 | `references/precision-testing/torch_aclnn_helper.h.template` | `[LOADED] torch_aclnn_helper.h.template` |
-| 3 | `references/precision-testing/OPS_PRECISION_STANDARDS.md` | `[LOADED] OPS_PRECISION_STANDARDS` |
-| 4 | `references/impl/api-diff-guide.md` | `[LOADED] api-diff-guide` |
+| 1 | `../../references/precision-testing/pytorch-binding-build-guide.md` | `[LOADED] pytorch-binding-build-guide` |
+| 2 | `../../references/precision-testing/torch_aclnn_helper.h.template` | `[LOADED] torch_aclnn_helper.h.template` |
+| 3 | `../../references/precision-testing/OPS_PRECISION_STANDARDS.md` | `[LOADED] OPS_PRECISION_STANDARDS` |
+| 4 | `references/api-diff-guide.md` | `[LOADED] api-diff-guide` |
 
 **全部 4 个 LOADED Token 输出后，方可继续。任何一个缺失 → STOP。**
 
@@ -26,7 +26,7 @@
 
 ## Step 4.0：全量仓 API 精度参考（按需）
 
-如需查阅具体 API 的精度约束或数据类型支持，按 `references/search-rules.md` 路由到全量仓：
+如需查阅具体 API 的精度约束或数据类型支持，按 `../../search-rules.md 路由到全量仓：
 
 - **API 文档**：`$DEVKIT_PATH/docs/zh/api/` 下查找对应 API 的精度说明和 `<cann-filter>` 标签确认 A5 支持情况
 - **头文件**：`$DEVKIT_PATH/include/` 下 grep 函数名确认接口声明
@@ -50,10 +50,10 @@ CANN OPP 安装的算子包**不会**自动注册到 `torch.ops.npu`。需要额
 
 ### 构建流程
 
-按照已加载的 `pytorch-binding-build-guide.md` 执行（aclnn 接口名/调度路径确认与 Python 调用规范见 `references/precision-testing/aclnn-interface-guide.md`）：
+按照已加载的 `pytorch-binding-build-guide.md` 执行（aclnn 接口名/调度路径确认与 Python 调用规范见 `../../references/precision-testing/aclnn-interface-guide.md`）：
 
 1. 创建 `op_name/pytorch/` 目录
-2. 复制 `references/precision-testing/torch_aclnn_helper.h.template` 到该目录并重命名为 `torch_aclnn_helper.h`
+2. 复制 `../../references/precision-testing/torch_aclnn_helper.h.template` 到该目录并重命名为 `torch_aclnn_helper.h`
 3. 创建 `.cpp` 绑定文件（使用 `EXEC_NPU_CMD` + `TORCH_LIBRARY_FRAGMENT(npu, m)` + `TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)`）
 4. 创建 `CMakeLists.txt`（纯 C++ 编译，`LANGUAGES CXX`，链接 `dl`，**不**链接 `libcust_opapi.so`）
 5. 编译：
@@ -136,9 +136,9 @@ torch.ops.load_library("path/libcustom_ops.so")
 
 ## Step 4.3：生成测试脚本
 
-**MUST** 使用 `references/precision-testing/test_op_precision_aclnn_template.py.template` 模板（复制后去除 `.template` 后缀再填充）。
+**MUST** 使用 `../../references/precision-testing/test_op_precision_aclnn_template.py.template` 模板（复制后去除 `.template` 后缀再填充）。
 
-**前置要求**：编写完整测试脚本前，MUST 先按 `references/precision-testing/precision-test-pre-validation-guide.md` 做小规模逐元素数值前置验证（确认 NPU 与 CPU 参考语义一致）。
+**前置要求**：编写完整测试脚本前，MUST 先按 `../../references/precision-testing/precision-test-pre-validation-guide.md` 做小规模逐元素数值前置验证（确认 NPU 与 CPU 参考语义一致）。
 
 ### 核心规范
 
@@ -158,7 +158,7 @@ ${PYTHON_PATH} -m pytest test_op_name_precision.py -v --tb=short
 
 ## Step 4.5：精度标准
 
-**判定标准**（混合容差 + 双门限，真源 `ops-precision-standard` 的 `SKILL.md`）：逐元素 `|actual - golden| ≤ atol + rtol × |golden|` **且** `matched_ratio ≥ 0.99` **且** `max_abs_error ≤ max_abs_error_limit`。各 dtype 阈值表见 `references/precision-testing/OPS_PRECISION_STANDARDS.md`。
+**判定标准**（混合容差 + 双门限，真源 `ops-precision-standard` 的 `SKILL.md`）：逐元素 `|actual - golden| ≤ atol + rtol × |golden|` **且** `matched_ratio ≥ 0.99` **且** `max_abs_error ≤ max_abs_error_limit`。各 dtype 阈值表见 `../../references/precision-testing/OPS_PRECISION_STANDARDS.md`。
 
 | 输出类型 | 判定标准 |
 |---------|---------|
@@ -234,7 +234,7 @@ MERE/MARE 仅作为**分析指标**输出（误差定位用），不作为通过
 | **★ int4 量化 matmul 精度异常** | **Mmad 不支持 int4，未 cast 成 int8** | **Phase 2 查兼容性适配（`api-diff-guide.md` §2）** |
 | **卡死/超时（aicore timeout 507014），特定 shape/dtype 组合全部触发（如 fp16/bf16 卡、fp32 不卡）** | **跨核同步死锁：同步点集合粒度错配（flagId 配对假设单对、目标平台模式是全部 AIV）** | 查 Step 1.5 同步协议盘点与同步点，按处置决策禁用不可行路径复测；判别与定位方法见 `cube-debug-lessons.md` Part 1 |
 
-> cube 类算子的异常判别与定位方法（死锁/卡死、mask 与消费粒度、取证打印、路径级验证）见 `references/impl/cube-debug-lessons.md`——本文 Phase 1 速查表给出首因判断，详细排查手段在 cube-debug-lessons 对应 Part。
+> cube 类算子的异常判别与定位方法（死锁/卡死、mask 与消费粒度、取证打印、路径级验证）见 `references/cube-debug-lessons.md`——本文 Phase 1 速查表给出首因判断，详细排查手段在 cube-debug-lessons 对应 Part。
 
 > **注意**：死锁/卡死类问题（同步点集合粒度错配）插桩输出**无法到达**——卡在同步点前的核永远不会执行到插桩语句，即使执行到的核其 printf 也可能因卡死的核未释放流水而无法回传。此类问题不得依赖插桩定位，直接用"触发条件分析 + 禁用不可行路径复测"验证。
 
@@ -306,7 +306,7 @@ MERE/MARE 仅作为**分析指标**输出（误差定位用），不作为通过
 
 ## Step 4.7：生成精度报告
 
-MUST 生成并在对话中展示（报告格式用 `references/precision-testing/precision_report_template.md`；批量执行+报告自动生成可用 `references/precision-testing/run_precision_report_aclnn_template.py.template`）：
+MUST 生成并在对话中展示（报告格式用 `../../references/precision-testing/precision_report_template.md`；批量执行+报告自动生成可用 `../../references/precision-testing/run_precision_report_aclnn_template.py.template`）：
 1. 总览表（总用例/通过/失败/通过率）
 2. 常规 Shape 测试结果
 3. 边界值测试结果

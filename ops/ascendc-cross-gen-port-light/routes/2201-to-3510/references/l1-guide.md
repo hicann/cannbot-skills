@@ -204,7 +204,7 @@ grep -n "[Ee]rror" build.log
 
 ## L4 升级信号指引
 
-> 注：本节"L4"为旧分级口径（Tiling 适配 + 数据类型扩展）；现行层级模型只有 L1/L2/L3（见 SKILL.md 决策树），下列信号命中时按现行模型评估为"超出 L1，需升级评估"。
+> 注：本节"L4"为旧分级口径（Tiling 适配 + 数据类型扩展）；现行层级模型只有 L1/L2/L3（见本路线 `route.md` 的决策树），下列信号命中时按现行模型评估为"超出 L1，需升级评估"。
 
 当 L1 迁移不足以覆盖 950 适配需求时，需升级评估（Tiling 适配 + 数据类型扩展）。以下为判断信号：
 
@@ -423,4 +423,4 @@ int64_t ubFlexible_ = ubSize_ - UB_RESERVED_BYTE - ...;
 | 迁移相关官方文档 | `knowledge-query`: `220x 351x 架构 API 编译迁移` | 架构迁移、基础/高阶 API 迁移、算子编译迁移、兼容性说明 |
 | Memory-based Vector 操作 | `knowledge-query`（API/语义查证）: `TPipe TQue DataCopy` | 传统 AscendC Vector 编程模式参考 |
 | API 选型与概述 | `knowledge-query`: `API 兼容性分层 MicroAPI SIMT` | 高阶/基础/MicroAPI/SIMT 接口概述 |
-| Cube 类算子迁移 | `references/impl/cube-migration-guide.md` | Cube 数据通路/分形/跨核同步/Fixpipe 等 cube 专用迁移（含官方样例索引与踩坑速查） |
+| Cube 类算子迁移 | `references/cube-migration-guide.md` | Cube 数据通路/分形/跨核同步/Fixpipe 等 cube 专用迁移（含官方样例索引与踩坑速查） |

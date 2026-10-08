@@ -281,7 +281,7 @@ DataCopyUnAlign(output, quantInt8, uValue, postUpdateStride);
 
 ## 架构差异全景（L2 迁移决策依据）
 
-> 注：下表"影响"列的 L4/L4+ 为旧分级口径（Tiling 适配等）；现行层级模型只有 L1/L2/L3，L4+ 条目表示"超出 L1-L3 指南范围"，需升级评估（见 SKILL.md 决策树）。
+> 注：下表"影响"列的 L4/L4+ 为旧分级口径（Tiling 适配等）；现行层级模型只有 L1/L2/L3，L4+ 条目表示"超出 L1-L3 指南范围"，需升级评估（见本路线 `route.md` 的决策树）。
 
 | 维度 | 220x（MemBase） | 351x（RegBase） | 影响 |
 |------|----------------|----------------|------|
@@ -297,7 +297,7 @@ DataCopyUnAlign(output, quantInt8, uValue, postUpdateStride);
 | 新数据类型 | - | fp8_e4m3fn_t, fp8_e5m2_t, hifloat8_t | L3/L5 |
 | 溢出模式控制 | - | GetCtrlSpr/SetCtrlSpr（SPR 寄存器） | L2 |
 
-> 上表 **L4+ 条目（L1→GM / GM→L0A/L0B / UB→L1 / L0C→UB 数据通路变更）** 属于 Cube 侧差异，完整展开（含分形 ZZ→NZ、SetLoadDataBoundary 删除、L0A/L0B 初始化删除、int4b/稀疏删除、CrossCoreSetFlag 模式等）见 `references/impl/cube-migration-guide.md`「官方数据通路变更总表」。
+> 上表 **L4+ 条目（L1→GM / GM→L0A/L0B / UB→L1 / L0C→UB 数据通路变更）** 属于 Cube 侧差异，完整展开（含分形 ZZ→NZ、SetLoadDataBoundary 删除、L0A/L0B 初始化删除、int4b/稀疏删除、CrossCoreSetFlag 模式等）见 `references/cube-migration-guide.md`「官方数据通路变更总表」。
 
 ## 代表算子
 
@@ -467,7 +467,7 @@ L2 重写时，若算子使用 **Exp / Ln / Sqrt / Rsqrt / Div / Reciprocal**，
 | 新数据类型 | - | fp8_e4m3fn_t, fp8_e5m2_t, hifloat8_t | L3/L5 |
 | 溢出模式控制 | - | GetCtrlSpr/SetCtrlSpr（SPR 寄存器） | L2 |
 
-> 上表 **L4+ 条目（L1→GM / GM→L0A/L0B / UB→L1 / L0C→UB 数据通路变更、L0A 分形 ZZ→NZ、SetLoadDataBoundary 删除）** 属于 Cube 侧差异，落地方法（装载/回写 API 改写、NZ 分形适配、L1 循环读取手动绕回等）见 `references/impl/cube-migration-guide.md`「官方数据通路变更总表」与「改动 2/3/5」。L4+ 表示"超出 L1-L3 指南范围"，并非"改造深度为 L4"。 |
+> 上表 **L4+ 条目（L1→GM / GM→L0A/L0B / UB→L1 / L0C→UB 数据通路变更、L0A 分形 ZZ→NZ、SetLoadDataBoundary 删除）** 属于 Cube 侧差异，落地方法（装载/回写 API 改写、NZ 分形适配、L1 循环读取手动绕回等）见 `references/cube-migration-guide.md`「官方数据通路变更总表」与「改动 2/3/5」。L4+ 表示"超出 L1-L3 指南范围"，并非"改造深度为 L4"。 |
 
 ---
 

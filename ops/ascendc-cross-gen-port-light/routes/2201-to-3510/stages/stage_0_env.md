@@ -132,7 +132,7 @@ ls $DEVKIT_PATH/include/ && \
 ls $DEVKIT_PATH/examples/
 ```
 
-- `new-zh` → 按 `docs/zh/…` 路径使用（实测映射表见 `references/devkit-path-map.md` 顶部「布局演进与定位协议」）
+- `new-zh` → 按 `docs/zh/…` 路径使用（实测映射表见 `../../references/devkit-path-map.md` 顶部「布局演进与定位协议」）
 - `legacy` → 旧版仓：提示本 skill 按最新布局编写，建议重新 clone
 - `unknown` → MUST 用 `ls $DEVKIT_PATH/docs/` + `find … -maxdepth 3 -type d` 现场推导映射，禁止按旧表硬拼
 - `DEVKIT_DATE` 距今超过 6 个月 → 提示布局可能再次演进，按 unknown 处理

@@ -1,12 +1,12 @@
 ---
 name: ascendc-cross-gen-port-light
-description: 当用户希望将已有 A2/A3（910b/910_93、DAV_2201）AscendC 算子工程迁移到 A5（950、DAV_3510）时使用。按 Stage 0–5 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与 A5 实测双向互检。
+description: 当用户希望将已有 AscendC 算子工程跨架构迁移（当前支持 A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510），按 Step R 判定迁移路线）时使用。按 Stage 0–5 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与目标平台实测双向互检。
 metadata:
-  version: "3.3"
-  date: "2026-08-18"
+  version: "3.4"
+  date: "2026-09-30"
 ---
 
-# AscendC 算子跨架构迁移（DAV_2201 → DAV_3510，含 API 差异适配）
+# AscendC 算子跨架构迁移（轻量入口）
 
 ## 安装与知识依赖
 
@@ -15,6 +15,7 @@ metadata:
 | 知识入口 | 使用时机 |
 |---|---|
 | `knowledge-query` | 迁移指南、概念与经验卡检索，以及精确 API/语义查证 |
+| `npu-arch` | 芯片型号 ↔ 架构代号（NpuArch/SocVersion/DAV 编号）映射澄清——Step R 路线判定前置；其映射经白皮书与 CANN ini 文件验证 |
 | `ascendc-api-best-practices` | 跨代 API 差异、参数与签名 |
 | `ascendc-regbase-best-practice` | L2 RegBase 改造 |
 | `ascendc-simt-best-practices` | L3 SIMT 改造 |
@@ -22,18 +23,22 @@ metadata:
 
 `knowledge-query` 按当前工具的已安装 Skill 列表定位，先读取其 `SKILL.md`，再使用该 Skill 目录下的 `scripts/knowledge_query.py`。知识库通过 `--knowledge-root <知识库根目录>` 或 `CANNBOT_KNOWLEDGE_ROOT` 配置；精确 API 查询使用其 API/语义查证路线，带上实际 API 名和源/目标平台。多个 skill 按需组合，安装本 skill 不会自动安装其他 skill。
 
-本 Skill 是**路由器**，不包含实现细节。所有细节在 `stages/` 和 `references/` 中。
+本 Skill 是**路由器**，不包含实现细节。每条迁移路线是一个自包含路线包 `routes/<源代号>-to-<目标代号>/`（含路线入口 `route.md`、阶段执行细则 `stages/`、路线专属知识 `references/`）；路线无关的公共资产（构建/精度测试/文档查找协议）在 `references/`。
 
-本 skill 覆盖两大迁移能力：
+## Step R：迁移路线判定（必须先做，不许猜）
 
-**① A5 API 差异迁移适配**（所有层级 MUST 执行），覆盖三个维度：
-- **精度差异**：A5 裁剪 subnormal，基础算数 API（Exp/Ln/Sqrt/Div/Reciprocal/Rsqrt）在 subnormal 场景精度丢失
-- **兼容性差异**：Mmad 不支持 int4 类型，量化 matmul 需 cast 成 int8
-- **性能差异**：vnchwconv/VSLDB 吞吐下降、BilinearInterpolation 实现路径变化
+按用户工程的**源平台 → 目标平台**判定路线：
 
-详见 `references/impl/api-diff-guide.md`。
+| 源平台 → 目标平台 | 路线包（判定后 MUST READ 其 `route.md`） |
+|---|---|
+| A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510） | [routes/2201-to-3510/route.md](routes/2201-to-3510/route.md) |
 
-**② Cube 类算子迁移**（kernel 含 Mmad/LoadData/Fixpipe 等 cube API 时）：Cube 数据通路（L1/L0A/L0B/L0C）、分形变化（ZZ→NZ）、跨核同步协议等与 Vector 正交的硬件差异，详见 `references/impl/cube-migration-guide.md`（配套排查见 `references/impl/cube-debug-lessons.md`）。
+**判定规则**：
+
+1. **★ 芯片号 ↔ 架构映射 MUST 经 `npu-arch` skill 澄清（单向依赖）**——用户只给出芯片型号（如 910B3/950PR）时，先按名称加载 `npu-arch` 确认其架构代号（NpuArch/SocVersion/DAV 编号）再查上表。映射真源在 `npu-arch`（经白皮书与 CANN ini 文件验证），本 skill 不维护该映射；`npu-arch` 不可用时向用户确认架构代号，禁止凭芯片型号自行推断。
+2. 源/目标平台组合不在表内 → 本 skill 暂不支持该迁移，向用户说明并停止。**禁止套用最近路线的差异清单**——不同架构对的 API 差异、数据通路与同步语义不同，混用即臆造架构差异（违反全局约束）。
+3. 判定完成后 MUST 先读取路线包的 `route.md`，再进入 Stage 0；`route.md` 中的约束与本文「全局约束」同等强制。
+4. 新增路线时新增一个路线包目录（`routes/<源代号>-to-<目标代号>/`，可复制现行路线包后改写差异点）并在上表登记一行；本文骨架与公共 `references/` 不改动。**路线包自包含，禁止跨路线取材。**
 
 ## 外部依赖：asc-devkit 全量仓
 
@@ -48,12 +53,12 @@ metadata:
 ### 依赖初始化
 
 在 Stage 0 环境检查阶段，agent 必须确认全量仓已 clone 并记录路径。
-详见 `stages/stage_0_env.md` 中的「全量仓初始化」步骤。
+详见路线包内 `stages/stage_0_env.md` 中的「全量仓初始化」步骤。
 
 ### 文档查找协议
 
 1. **必读索引**：每次需要查找文档前，先参考 `references/knowledge-index.md`
-2. **分级查找**：按 `references/search-rules.md` 定义的优先级查找
+2. **分级查找**：按 `search-rules.md` 定义的优先级查找
 3. **目录映射**：不确定去哪个目录时，查 `references/devkit-path-map.md`
 4. **置信度评估**：每次查找后评估置信度（HIGH/MEDIUM/LOW），LOW 时扩大搜索或上报用户
 5. **LOADED 标记**：从全量仓读取文件后，输出 `[LOADED] $DEVKIT_PATH/<相对路径>`
@@ -64,53 +69,20 @@ metadata:
 |---------|------|------|
 | API 文档 | `$DEVKIT_PATH/docs/zh/api/` | SIMD/SIMT/高阶 API 完整文档 |
 | 编程指南 | `$DEVKIT_PATH/docs/zh/guide/programming_guide/` | 编程模型、语言扩展、硬件实现 |
-| 迁移指南 | `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/` | 2201→3510 迁移详述 |
+| 迁移指南 | `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/` | 跨代迁移详述（各路线对应其架构对章节） |
 | 算子实践 | `$DEVKIT_PATH/docs/zh/guide/operator_practice/` | 90+ 实现与优化指南 |
 | 算子样例 | `$DEVKIT_PATH/examples/` | SIMD/SIMT/AICPU 样例代码 |
 | 头文件 | `$DEVKIT_PATH/include/` | API 声明 |
 | 实现源码 | `$DEVKIT_PATH/impl/` | API 实现 |
 
-## 迁移层级决策树（含 API 差异适配）
-
-```
-算子是否满足以下任一条件？
-  ├─ 性能关键路径 (RMSNorm/RoPE/Softmax 等 vector 类；Attention/Matmul 等 cube 类计算型算子)
-  ├─ 量化 Cast 链路复杂 (FP32→FP8/HiFloat8/INT8)
-  ├─ 需要溢出模式控制
-  └─ 950 新增数据类型 (FP8/HiFloat8)
-  │
-  ├─ 是 → L2: RegBase API 重写（cube 类算子的 L2 = AIC 低阶直跑评估 + 同步协议重写 + AIV RegBase 评估三部分组合，语义见 stage_1 Step 1.4）
-  │
-  └─ 否，是否满足以下全部？
-      ├─ Scatter/Gather 操作
-      ├─ 索引逻辑简单
-      ├─ 无需 UB 中转
-      └─ 线程并行度高
-      │
-      ├─ 是 → L3: SIMT 优化
-      └─ 否 → L1: 基础适配
-
-  ★ 无论选择哪个层级，都 MUST 额外执行 API 差异适配（见下方）
-```
-
-### API 差异适配（所有层级 MUST 执行）
-
-无论算子判定为 L1/L2/L3，都 MUST 在阶段 1 评估时做 API 差异风险扫描，在阶段 2 改造时做适配处理：
-
-| 差异维度 | 扫描时机 | 适配时机 | 参考文件 |
-|---------|---------|---------|---------|
-| 精度（Subnormal） | 阶段 1 | 阶段 2 | `references/impl/api-diff-guide.md` §1 |
-| 兼容性（int4/Mmad） | 阶段 1 | 阶段 2 | `references/impl/api-diff-guide.md` §2 |
-| 性能（vnchwconv/VSLDB/BilinearInterpolation） | 阶段 1 | 阶段 2（优化） | `references/impl/api-diff-guide.md` §3 |
-
 ## 阶段执行流程
 
-**MUST 按顺序执行。每个阶段开始时先读取对应 stage 文件（见上方表格），完成时输出 Gate Token。**
+**MUST 按顺序执行。阶段文件在所选路线包内（`routes/<路线>/stages/`）；每个阶段开始时先读取对应 stage 文件，完成时输出 Gate Token。**
 
-| 阶段 | 文件 | Gate Token |
+| 阶段 | 文件（路线包内） | Gate Token |
 |------|------|------------|
 | 0 环境验证 | `stages/stage_0_env.md` | `[GATE-0] ENV_CONFIRMED` |
-| 1 评估定级 | `stages/stage_1_assess.md` | `[GATE-1] LEVEL=L1/L2/L3` |
+| 1 评估定级 | `stages/stage_1_assess.md` | `[GATE-1] LEVEL=L1/L2/L3`（层级判定规则见路线包 `route.md` 决策树） |
 | 2 代码改造 | `stages/stage_2_implement.md` | `[GATE-2] FILES_MODIFIED=[...]` |
 | 3 编译安装 | `stages/stage_3_build.md` | `[GATE-3] BUILD=PASS INSTALL=PASS` |
 | 4 精度验证 | `stages/stage_4_precision.md` | `[GATE-4] PRECISION=N/N_PASS`（仅当 N_FAIL==0 时允许输出 PASS；否则输出 `PRECISION=N/M_PASS BLOCKED`） |
@@ -118,40 +90,18 @@ metadata:
 
 ## Reference 文件索引
 
-### API 差异适配（★ 本 skill 新增，所有层级 MUST READ）
+### 路线专属内容
 
-| 文件 | 用途 | LOADED Token |
-|------|------|-------------|
-| `references/impl/api-diff-guide.md` | A5 API 差异（精度/兼容性/性能）适配指南 | `[LOADED] api-diff-guide` |
+层级决策树、API 差异适配指南、按层级 × 算子类别的实现指南与路线专属约束，全部在所选路线包内（`route.md` 与路线包的 `references/`），不在此索引。
 
-### 实现指南（按层级 × 算子类别加载）
-
-| 层级 | 类别 | MUST READ | 补充参考 |
-|------|------|-----------|---------|
-| L1 | Vector | `references/impl/l1-guide.md` | — |
-| L1 | Cube | `references/impl/l1-guide.md`（host 侧步骤通用）+ `references/impl/cube-migration-guide.md` | — |
-| L2 | Vector | `references/impl/l2-guide.md`（含 Reg 级搬移 VF 封装约束与编译错误速查） | `references/impl/api-mapping.md`；Reg API 速览见 `l2-guide.md`「API 速览与知识真源」 |
-| L2 | Cube | `references/impl/cube-migration-guide.md`（AIC 侧：低阶直跑/同步协议）+ `references/impl/l2-guide.md`（AIV 侧 Vector 路径，适用边界见其头部声明） | `references/impl/api-mapping.md`（AIV 侧）；Reg API 速览见 `l2-guide.md`「API 速览与知识真源」 |
-| L3 | 通用 | `references/impl/l3-guide.md` | — |
-
-**Cube 类算子**（kernel 含 Mmad/LoadData/LoadDataWithTranspose/Fixpipe/DataCopyCO12DstParams/CrossCoreSetFlag 等 cube API）：迁移时 MUST 同时阅读 `references/impl/cube-migration-guide.md`——Cube 数据通路（L1/L0A/L0B/L0C）、分形变化（ZZ→NZ）、跨核同步机制与 Vector 差异正交，独立成章；**该 guide 不替代对应层级指南，仅覆盖 AIC 侧差异，AIV 侧 Vector 路径仍用层级指南的既有经验**（各环节配套文件见 cube-guide「配套经验引用表」）。
-
-**实战经验（迁移沉淀，按需加载）**：
-
-| 文件 | 内容 |
-|------|------|
-| `references/impl/cube-debug-lessons.md` | 测试与 debug 排查：死锁/卡死/结果错误按「错误信号 → 排查手段 → 解决方法」排查（无同步路径对照法、mask 约定与消费粒度、取证打印、路径级验证）（阶段 4 测试失败/精度异常时 MUST 查阅） |
-| `references/impl/multi-stage-guide.md` | 多阶段（2+ 算法阶段共享 UB/workspace）流水模式与 UB 峰值计算（阶段 2 按需） |
-| `references/impl/ub-budget-guide.md` | UB 预算估算与溢出排查（**UB 用量与 SIMT DCache 预留的唯一权威表**；阶段 2 设计 tile 时、阶段 4/5 遇 UB out-of-range 时查阅） |
-
-### 构建与安装（阶段 3）
+### 构建与安装（阶段 3，路线无关）
 
 | 文件 | 用途 |
 |------|------|
 | `references/build_system/build_and_install.sh.template` | 一键编译+安装+验证脚本模板（**MUST 使用，禁止自行拼编译命令**） |
 | `references/build_system/build-troubleshooting.md` | 安装/构建类故障排查（路径拼接、runtime 回退内置 kernel、stub 库缺失、nm 不可见、依赖下载失败） |
 
-### 精度测试（阶段 4 MUST READ）
+### 精度测试（阶段 4 MUST READ，路线无关）
 
 | 文件 | 用途 |
 |------|------|
@@ -177,7 +127,7 @@ metadata:
 ### 外部 Sub-Skill：API 最佳实践（跨代迁移 API 知识）
 
 API 用法知识（参数语义/签名/模式表）沉淀于 `ascendc-api-best-practices` 的 `references/`：
-- `api-cross-gen-migration.md` — Subnormal 与超越函数差异（阶段 1/2 API 差异适配的 API 知识真源）
+- `api-cross-gen-migration.md` — Subnormal 与超越函数差异（跨代迁移 API 差异适配的 API 知识真源）
 - `api-cross-gen-fixpipe.md` — FixpipeParamsArch3510 字段与单位差异（L0C 回写参数真源）
 
 SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 AtomicAdd / UintDiv / __local_mem__）。
@@ -189,7 +139,7 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
 3. **GATE Token**——阶段完成时 MUST 输出对应 `[GATE-X]` token，包含实际结果值
 4. **禁止跳阶段**——没有上一阶段的 GATE Token，禁止执行下一阶段
 5. **禁止跳过 LOADED**——没有所有要求的 LOADED Token，禁止继续当前阶段
-6. **★ API 差异 LOADED**——阶段 1 MUST 加载 `api-diff-guide`，输出 `[LOADED] api-diff-guide`
+6. **★ 路线差异 LOADED**——阶段 1 MUST 加载路线文件声明的 API 差异适配指南并输出其 LOADED Token（路线 2201→3510 为 `[LOADED] api-diff-guide`）
 7. **★ Evidence-based Gate（全局约束）**——任何 Gate 不得仅依据以下因素判定 PASS：
    - Todo completed / checkbox checked
    - Agent 自我声明（"阶段已完成"、"预计没问题"）
@@ -202,11 +152,13 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
    - 所有计划用例均已执行（无 SKIPPED / NOT RUN）
    - N_PASS == N_TESTS（N_FAIL == 0）
    - 未通过修改 threshold / 跳过 case / 修改输入数据等方式规避失败
-   - 若存在 FAIL：MUST 输出 `[GATE-4] PRECISION=N/M_PASS BLOCKED`（M < N），并进入根因分析流程（见 `stage_4_precision.md` Step 4.6）
+   - 若存在 FAIL：MUST 输出 `[GATE-4] PRECISION=N/M_PASS BLOCKED`（M < N），并进入根因分析流程（见路线包 `stages/stage_4_precision.md` Step 4.6）
 
-9. **★ GATE-5 证据约束**——`[GATE-5] PERF=COLLECTED` 仅当 10 项证据全部存在时允许输出（见 `stage_5_performance.md` Gate 输出条件）。缺少任一证据时 MUST 输出 `[GATE-5] PERF=NOT_COLLECTED BLOCKED`。
+9. **★ GATE-5 证据约束**——`[GATE-5] PERF=COLLECTED` 仅当 10 项证据全部存在时允许输出（见路线包 `stages/stage_5_performance.md` Gate 输出条件）。缺少任一证据时 MUST 输出 `[GATE-5] PERF=NOT_COLLECTED BLOCKED`。
 
 ## 全局约束
+
+路线包 `route.md` 中的「路线专属约束」与本节同等强制，随 Step R 选定的路线生效。
 
 1. 未完成阶段 0 环境验证前，禁止执行任何编译或测试操作
 2. 所有 Shell 命令 MUST 使用阶段 0 记录的变量（`${CANN_SET_ENV}`、`${PYTHON_PATH}`）
@@ -217,21 +169,19 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
 7. 编译通过不算完成——MUST 通过精度验证
 8. 禁止自行拼编译命令——MUST 使用 `build_and_install.sh` 脚本
 9. 精度测试用例数 MUST ≥ 30
-10. **★ 精度测试 MUST 包含 subnormal 场景用例**（当算子使用 Exp/Ln/Sqrt/Div/Reciprocal/Rsqrt 时）
-11. **★ 性能测试 MUST 包含 API 差异高风险 shape 回归用例**
-12. **★ 精度测试中任何 NaN/Inf 输出 MUST 触发根因分析**——在根因确定且归类完成前，禁止输出 GATE-4 PASS。禁止直接用"已知限制"跳过分析（见 `stage_4_precision.md` Step 4.6.1）
-13. **★ eps / epsilon / 常量 MUST 进行 dtype 可表示性检查**——源码中存在 `+eps` 不能直接证明 eps 保护有效。MUST 对所有支持 dtype 检查 eps 值是否可表示、是否为 normal/subnormal/低于 subnormal、转换后是否为 0、是否可能导致除零/NaN（见 `api-diff-guide.md` §1.6）
-14. **★ Subnormal 风险分析 MUST 基于证据**——不得仅凭业务经验判断"不会出现 subnormal"。MUST 基于 dtype、输入范围、中间计算、常量、eps 值、minimum normal/subnormal、计算链给出证据；**受影响操作数存在结构性下界（max 归一锚点/invalid line 哨兵修复/数学推导）时优先按策略 0 给出证明（保持 INTRINSIC，见 `api-diff-guide.md` §1.4）**。无法证明无风险时按存在风险处理（见 `stage_1_assess.md` Step 1.3.1）
-15. **★ FP16 精度失败 MUST 进入五阶段调试流程**——FP16 FAIL + FP32 PASS 时，禁止直接标注"FP16 已知限制"。MUST 执行 Phase 1→5 调试，给出根因和归类（见 `stage_4_precision.md` Step 4.6.2）
-16. **★ 所有 Gate 均为 evidence-based**——禁止仅依据 Todo completed / Agent 自我声明 / 静态分析 / "预计没问题"判定 PASS。证据不足时保持 NOT VERIFIED / NOT PASSED / BLOCKED（见 Gate 协议第 7 条）
-17. **kernel 含跨核同步原语（CrossCoreSetFlag/WaitFlag、IBSet/IBWait、SyncAll、NotifyNextBlock/WaitPreBlock）时，MUST 按 stage_1 Step 1.5 逐同步点盘点参与集合粒度并对照目标平台文档**（**模式号相同 ≠ 语义相同**，以目标平台为准）
-18. **禁止臆造新旧平台架构差异**——MIX 比例（1:1/1:2）、核映射等以官方迁移指导与 API 文档为准，不得凭推断断言
+10. **★ 精度测试中任何 NaN/Inf 输出 MUST 触发根因分析**——在根因确定且归类完成前，禁止输出 GATE-4 PASS。禁止直接用"已知限制"跳过分析（见路线包 `stages/stage_4_precision.md` Step 4.6.1）
+11. **★ 所有 Gate 均为 evidence-based**——禁止仅依据 Todo completed / Agent 自我声明 / 静态分析 / "预计没问题"判定 PASS。证据不足时保持 NOT VERIFIED / NOT PASSED / BLOCKED（见 Gate 协议第 7 条）
+12. **禁止臆造新旧平台架构差异**——MIX 比例（1:1/1:2）、核映射等以官方迁移指导与 API 文档为准，不得凭推断断言；路线未覆盖的架构对不得套用其他路线的差异清单
 
 ## 绝对不要做（每条含替代方案）
 
+路线专属禁忌随路线包 `route.md` 生效；本节为路线无关部分。
+
 | 禁止 | 应该做 |
 |------|--------|
-| 跳过阶段 0 环境验证 | 执行 `stages/stage_0_env.md` 完整流程，输出 GATE-0 |
+| 跳过阶段 0 环境验证 | 执行路线包内 `stages/stage_0_env.md` 完整流程，输出 GATE-0 |
+| 跳过 Step R 直接开迁，或对表外架构对套用既有路线 | 按 Step R 判定路线并读取路线包 `route.md`；表外组合向用户说明并停止 |
+| 跨路线取材（如把 2201→3510 的 API 差异清单用于其他架构对） | 只使用所选路线包内的路线专属内容；公共资产用 `references/` |
 | 自行探测 CANN 路径（`find`/`locate`/扫描 `/home`） | 检测不到时向用户询问，不得猜测 |
 | 在 Shell 命令中写死路径 | 使用阶段 0 记录的 `${CANN_SET_ENV}`、`${PYTHON_PATH}` 变量 |
 | 用 `torch.gather`/`torch.acosh` 做精度测试 | 用 `torch.ops.npu.算子名(...)`（EXEC_NPU_CMD 绑定） |
@@ -239,19 +189,13 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
 | 手写 `aclnnXxxGetWorkspaceSize` + `aclnnXxx` | 用 `EXEC_NPU_CMD(aclnnXxx, ...)` 宏（参考 `torch_aclnn_helper.h`） |
 | 同一算子调用两次 `add_modules_sources` | 合并为一次调用，所有参数放在同一条中 |
 | 用 `""` 作为 `TILING_DIR` 元素（被 CMake 吞掉） | 用 `"default"` 代替空字符串 |
-| 用 `-soc=` 单横线 | 用 `--soc=ascend950` 双横线 |
-| L2 中 FP32→INT8 一步 Cast | 三步：FP32→INT16→FP16→INT8（见 `api-mapping.md`） |
+| 用 `-soc=` 单横线 | 用 `--soc=<目标 soc>` 双横线（路线 2201→3510 为 `--soc=ascend950`） |
+| L2 中 FP32→INT8 一步 Cast | 三步：FP32→INT16→FP16→INT8（见路线包内 `references/api-mapping.md`） |
 | L2 中 `SetCtrlSpr` 后不恢复 | 先 `GetCtrlSpr` 保存，计算完 `SetCtrlSpr` 恢复 |
 | 绑定用 `.asc` 文件或 ASC 编译器 | 用 `.cpp` + 纯 C++ 编译（`LANGUAGES CXX`） |
 | 用 `TORCH_LIBRARY(custom_ops, m)` 注册 | 用 `TORCH_LIBRARY_FRAGMENT(npu, m)` + `TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)` |
-| 假设 aclnn 接口名 = 底层 L0 算子名 | 读 aclnn L2 源码（`op_host/op_api/aclnn_*.cpp`）确认 950 调度路径 |
-| **★ 忽略 Subnormal 风险** | **扫描 Exp/Ln/Sqrt/Div/Reciprocal/Rsqrt 用法，按 `api-diff-guide.md` §1 适配** |
-| **★ 忽略 int4 Mmad 兼容性** | **扫描 int4b_t + Mmad 用法，按 `api-diff-guide.md` §2 cast 成 int8** |
-| **★ 性能回归用平均随机 shape** | **按 `api-diff-guide.md` §3 触发 shape 设计（R=16/24、小 tile、非连续 stride）** |
-| **★ 仅凭业务经验判断"不会出现 subnormal"** | **基于 dtype/输入范围/中间计算/eps 值/计算链给出证据，无法证明无风险时按存在风险处理** |
-| **★ eps 值不检查 dtype 可表示性就声称"已有 eps 保护"** | **对所有支持 dtype 检查 eps 是否可表示/normal/subnormal/下溢为 0/导致除零（`api-diff-guide.md` §1.6）** |
+| 假设 aclnn 接口名 = 底层 L0 算子名 | 读 aclnn L2 源码（`op_host/op_api/aclnn_*.cpp`）确认目标平台调度路径 |
 | **★ 精度测试出现 NaN/Inf 后直接标注"已知限制"** | **MUST 执行根因分析（除零/溢出/下溢/eps/dtype 转换），归类后才可标注** |
-| **★ FP16 FAIL + FP32 PASS 时跳过五阶段调试** | **MUST 执行 Phase 1→5，给出根因、是否 A5 特有、是否修复及理由** |
 | **★ Gate 仅依据 Todo completed / 自我声明判定 PASS** | **MUST 有实际证据（编译产物/测试输出/CSV/报告文件），证据不足时保持 BLOCKED** |
-| 原样保留依赖旧架构同步原语语义的跨核同步协议（flagId 配对、跨核 Set/Wait） | 按 stage_1 Step 1.5 逐个同步点盘点参与集合粒度，对照目标平台模式语义与型号支持范围；无法论证成立则禁用该路径走标准流程 |
-| 断言新旧平台核映射/核比例差异（如"910b 是 1:1、950 是 1:2"） | MIX 比例是算子配置项（`__mix__(1,N)` / `KERNEL_TYPE_MIX_AIC_1_2`），非平台属性；差异以官方迁移指导（`2201_to_3510_arch_changes.md`）与 API 文档为准 |
+| 断言新旧平台核映射/核比例差异（如"910b 是 1:1、950 是 1:2"） | MIX 比例是算子配置项（`__mix__(1,N)` / `KERNEL_TYPE_MIX_AIC_1_2`），非平台属性；差异以官方迁移指导与 API 文档为准 |
+| 凭芯片型号自行推断架构代号（如"910B 就是 DAV_2201"） | 用 `npu-arch` skill 澄清芯片号↔架构映射（其经白皮书与 CANN ini 文件验证），再按 Step R 查路由表 |

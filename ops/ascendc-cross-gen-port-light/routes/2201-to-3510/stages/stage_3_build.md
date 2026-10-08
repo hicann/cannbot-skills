@@ -6,7 +6,7 @@
 
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
-| 1 | `references/impl/l2-guide.md`（编译错误速查见「改动 4」末节） | `[LOADED] l2-guide` |
+| 1 | `references/l2-guide.md`（编译错误速查见「改动 4」末节） | `[LOADED] l2-guide` |
 
 **LOADED Token 输出后，方可继续。**
 
@@ -16,7 +16,7 @@
 
 ### 3.1.1 填充 build_and_install.sh
 
-读取 `references/build_system/build_and_install.sh.template`，将阶段 0 的环境变量填入：
+读取 `../../references/build_system/build_and_install.sh.template`，将阶段 0 的环境变量填入：
 
 | 模板变量 | 填入值 | 来源 |
 |---------|--------|------|
@@ -67,7 +67,7 @@ bash build_and_install.sh
 3. 修复后重新执行脚本
 4. 最多 3 次排错循环，3 次后仍失败则停止并向用户报告详细错误信息
 
-> **安装/构建类故障**（安装步路径拼接错误、runtime 回退内置 kernel、stub 库 `libopapi_math.so` 缺失、nm 符号不可见、依赖下载失败）见 `references/build_system/build-troubleshooting.md`；下表覆盖**编译期**常见错误。
+> **安装/构建类故障**（安装步路径拼接错误、runtime 回退内置 kernel、stub 库 `libopapi_math.so` 缺失、nm 符号不可见、依赖下载失败）见 `../../references/build_system/build-troubleshooting.md`；下表覆盖**编译期**常见错误。
 
 ### 常见编译错误速查
 

@@ -6,8 +6,8 @@
 
 | 序号 | MUST READ 文件 | LOADED Token |
 |------|---------------|-------------|
-| 1 | `references/impl/api-diff-guide.md` | `[LOADED] api-diff-guide` |
-| 2 | `references/impl/cube-migration-guide.md`（**cube 类算子** MUST，见 Step 1.2） | `[LOADED] cube-migration-guide` |
+| 1 | `references/api-diff-guide.md` | `[LOADED] api-diff-guide` |
+| 2 | `references/cube-migration-guide.md`（**cube 类算子** MUST，见 Step 1.2） | `[LOADED] cube-migration-guide` |
 
 **★ 本文件 MUST 在算子源码读取前加载。** API 差异指南定义了精度/兼容性/性能三个维度的风险扫描清单。
 
@@ -24,12 +24,12 @@ MUST 读取以下文件：
 
 ## Step 1.2：查阅全量仓参考（按需）
 
-在判定迁移层级之前，如果需要了解算子的参考实现或 A5 新特性，按 `references/search-rules.md` 路由到全量仓：
+在判定迁移层级之前，如果需要了解算子的参考实现或 A5 新特性，按 `../../search-rules.md 路由到全量仓：
 
 - **查看同类算子样例**：`$DEVKIT_PATH/examples/` 目录下按编程模型分类查找
 - **确认 A5 新特性**：读 `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/instructions_for_new_features/3510_new_features.md`
 - **查阅算子实践参考**：`$DEVKIT_PATH/docs/zh/guide/operator_practice/` 下查找同类算子的实现和优化案例
-- **Cube 类算子**（Step 1.1 中发现 Mmad/LoadData/Fixpipe/DataCopyCO12DstParams 等 cube API）：MUST 先读 `references/impl/cube-migration-guide.md`（输出 `[LOADED] cube-migration-guide`），再按 search-rules 路由到全量仓兼容性样例（`06_compatibility_guide/` 下 data_copy_l1togm / pattern_transformation / matmul_s4 / fill / set_loaddata_boundary）
+- **Cube 类算子**（Step 1.1 中发现 Mmad/LoadData/Fixpipe/DataCopyCO12DstParams 等 cube API）：MUST 先读 `references/cube-migration-guide.md`（输出 `[LOADED] cube-migration-guide`），再按 search-rules 路由到全量仓兼容性样例（`06_compatibility_guide/` 下 data_copy_l1togm / pattern_transformation / matmul_s4 / fill / set_loaddata_boundary）
 
 读取全量仓文件后输出：`[LOADED] $DEVKIT_PATH/<相对路径>`
 
@@ -120,7 +120,7 @@ MUST 读取以下文件：
 
 ## Step 1.4：判定迁移层级
 
-按 SKILL.md 决策树判定 L1/L2/L3。
+按本路线 `route.md` 的决策树判定 L1/L2/L3。
 
 ### L2 特有判定信号
 
@@ -172,7 +172,7 @@ MUST 读取以下文件：
 - 所用模式在目标平台的参与集合定义与 flagId 计数器驱动条件（模式 0 = 全核、模式 1 = 组内全部 AIV、模式 2 = AIC↔组内全部 AIV、模式 4 = AIC↔单个 AIV）
 - 型号支持范围（**模式 4 仅 950PR/950DT 支持**）
 - **模式号相同 ≠ 语义相同**：同一模式跨架构可能语义变化（如模式 2 从 flagId 级配对收紧为全集合），必须以目标平台文档为准，不得假设与旧平台一致
-- **参数写法按目标平台文档生效**：旧平台被忽略的参数在目标平台可能生效——无参调用（如裸 `CrossCoreWaitFlag(flagId)`）在 950 按默认模式 0（全核）执行，必须与配对 SetFlag 的模式号显式核对；"不写参数，语义也在变"（实战：910b 无参 WaitFlag 照常工作、950 上生效致模式错位死锁，见 `references/impl/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）
+- **参数写法按目标平台文档生效**：旧平台被忽略的参数在目标平台可能生效——无参调用（如裸 `CrossCoreWaitFlag(flagId)`）在 950 按默认模式 0（全核）执行，必须与配对 SetFlag 的模式号显式核对；"不写参数，语义也在变"（实战：910b 无参 WaitFlag 照常工作、950 上生效致模式错位死锁，见 `references/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）
 - **参与集合恒定**：同一 flagId 的 Set/Wait 是否在所有参与核的**无条件路径**上执行——被 needExec/needPair/if 条件分支包裹、循环 0 次（分片边界）、空闲核都可能造成参与核缺 Set（同上，沿用决策规则第 4 条）
 
 **④ 处置决策**：每个同步点给出结论——
@@ -183,7 +183,7 @@ MUST 读取以下文件：
 | 禁用（走标准路径） | 4 项中任一项无法静态论证（如粒度 < 文档粒度、无参调用默认语义错位、Set 可能缺位）→ 死锁风险 |
 | 改用其他模式 | 需支持单对粒度时改用模式 4——但须核对型号支持范围（仅 950PR/DT） |
 
-**通用判定规则：假设集合粒度 < 目标平台文档定义的集合粒度 → 死锁风险 → 禁用该路径走标准流程，禁止原样移植。默认值反转：沿用是论证结论，不是赌注——4 项中任一项无法静态论证即禁用/降级走标准路径，禁止"沿用 + 运行时验证"式风险转移（死锁失败从方案阶段 1 次静态检查前移到运行时排查=成本后置；完整前置判定框架（5 项静态论证 + 参与集合推导表）见 `references/impl/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）。**
+**通用判定规则：假设集合粒度 < 目标平台文档定义的集合粒度 → 死锁风险 → 禁用该路径走标准流程，禁止原样移植。默认值反转：沿用是论证结论，不是赌注——4 项中任一项无法静态论证即禁用/降级走标准路径，禁止"沿用 + 运行时验证"式风险转移（死锁失败从方案阶段 1 次静态检查前移到运行时排查=成本后置；完整前置判定框架（5 项静态论证 + 参与集合推导表）见 `references/cube-migration-guide.md` 改动 6 同步协议沿用决策规则）。**
 
 ## Step 1.6：生成算子源码分析摘要
 
@@ -242,7 +242,7 @@ MUST 读取以下文件：
 
 ### 逆向分析方法
 
-> 完整五步逆向方法论（接口签名提取 → 计算逻辑逆向 → 输入域约束 → 边界条件 → PyTorch 对标）见 `references/precision-testing/source-code-reverse-analysis.md`。
+> 完整五步逆向方法论（接口签名提取 → 计算逻辑逆向 → 输入域约束 → 边界条件 → PyTorch 对标）见 `../../references/precision-testing/source-code-reverse-analysis.md`。
 
 | 方法 | 适用场景 |
 |------|---------|
