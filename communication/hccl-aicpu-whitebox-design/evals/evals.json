@@ -1,0 +1,15 @@
+{
+  "skill_name": "hccl-aicpu-whitebox-design",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "由实际分支形成白盒矩阵",
+      "config": {"eval_mode": "text"},
+      "prompt": "AICPU AllGather 模板改了 repeat 地址和主从同步，executor 也改了分块阈值。已提供当前源码和 Dataflow Spec，但本题只要求设计测试计划。依据 hccl-aicpu-whitebox-design 说明用例矩阵应有哪些字段、如何选择边界，以及哪些结果不能宣称。仅输出文本。",
+      "expected_output": "逐条关联源码位置/分支条件与 case-id、输入拓扑、独立预期、工具和原始证据；分别覆盖实际可达的 repeatNum>1 与 loopTimes>1，并由 executor 公式和测试程序换算阈值。核对地址、scratch 与同步依赖，区分静态检查和 Checker。尚未执行不能称 PASS、覆盖率达标或完整功能验收。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

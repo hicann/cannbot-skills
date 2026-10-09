@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-09-24",
+  "source_commits": {
+    "hccl": "88a2a65cdd46a6b16091282fdeac81a391dcfd22",
+    "hcomm": "ce7297c6f90013e2ba9b2f62d54151722819ab0d"
+  },
+  "scope": "references/11-operator-contracts.md 的指定 executor、02-api-reference.md 的接口导航及按需 contracts 扩展卡；扩展卡单独记录来源 commit，不覆盖所有分支和传递依赖",
+  "shared": {
+    "include/hccl.h": "db20aa23eecba6469d426158fea9bfc302c20b805634f7d8d9c688ca990f8bc8",
+    "src/common/alg_parse.h": "f2787501f8751ebb641fe5da07de9760ccff0e632d75967b34f6aea18a27084a",
+    "src/ops/op_common/inc/alg_param.h": "73656d012d43b00b671796729ad90a8c059b3c15698dcca7ac92bba811fda249",
+    "src/ops/op_common/algorithm/template/alg_v2_template_base.h": "568c1a6b39092f0555cfbb388a466c0125e914e7b4e0bf7cb3b2b429d55eb5af",
+    "src/ops/op_common/algorithm/template/alg_v2_template_base.cc": "da4067e309262256efd5a9ad4c8173063fed153dfe43bdea93bcfa4767060688",
+    "src/ops/op_common/algorithm/template/common_alg_template_base.h": "0556e63ce58650b557b92bf330dae9ac8e79cc985d5a292d8a02e8bc8e2a40e6",
+    "src/ops/op_common/algorithm/template/template_utils.h": "3a2cf9a720c595eda158a4553054f4e57512356989c5ccc390a9891b2f3d744e",
+    "src/ops/op_common/algorithm/template/wrapper/alg_data_trans_wrapper.h": "1820b9d06f1b15b1cfc50b66eb56ca3ee6243ff68e44cad195315f0f0066f1b8",
+    "src/ops/op_common/algorithm/template/wrapper/alg_data_trans_wrapper.cc": "8ba4e1f1469f812a008e94739919a3301cfcaaa383de0979f523f936943571ea",
+    "src/ops/op_common/algorithm/executor/channel/channel.h": "65ece237d07305fb7c88e57f6240c98625d689027b7872d6a3e0a0bfc8f952b6",
+    "src/ops/op_common/algorithm/executor/channel/channel.cc": "50ae00759f675045bb6a4581af0b510e41a99a0158c7ac7e80347a79de8ab823",
+    "src/common/hcomm_dlsym/hcomm_primitives_dl.h": "dc07dadd50648ff630196a5c0001a55eaed53a5978226c3cfecb6ad8d03788fb",
+    "src/common/hcomm_dlsym/hcomm_primitives_dl.cc": "b53fc5611cf93908addc605fd03c19b28725506be1d30ac20820d84a32fa1ae3",
+    "src/common/hcomm_dlsym/dlsym_common.h": "448d92b0c4ee9ee7cbec02e2aeeb271c8dc644d52225edd61dd32809c906e791"
+  },
+  "hcomm": {
+    "include/hcomm_primitives.h": "b55f35debb712bd85109d87f050f3cddb7bc3d860546ff413b9b3b88ade106b3",
+    "pkg_inc/hcomm/hcomm_primitives_expt.h": "6730fe27f7c240f2226dd38693396671dd9ab03cf79f0225e8087444fe7d717a"
+  },
+  "operators": {
+    "all_reduce": {
+      "src/ops/all_reduce/algorithm/executor/ins_v2_all_reduce_sole_executor.cc": "073f44e46acb7c292c19a140bc3fa7f569c57f13e8bac7f88431cbddb50611f8",
+      "src/ops/all_reduce/algorithm/executor/ins_v2_all_reduce_two_shot_sole_executor.cc": "56387626fd437702034f0145a99014a5536f3148c7117c62363760d10981a9e8"
+    },
+    "all_gather": {
+      "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_sole_executor.cc": "19bdb77029db9be4f88b0358174c8d71ba22f85219cfdfd2a8bf43e34e938668"
+    },
+    "reduce_scatter": {
+      "src/ops/reduce_scatter/algorithm/executor/ins_v2_reduce_scatter_sole_executor.cc": "f1410475d1e259e6f895ac3c2f53b8d3855a468879d5c2aa7a5a712b578df913"
+    },
+    "broadcast": {
+      "src/ops/broadcast/algorithm/executor/ins_v2_broadcast_sole_executor.cc": "0a3df8071c6db26f057b25c81a4205129c2194cbeca406aeedd1c30ec570be25"
+    },
+    "reduce": {
+      "src/ops/reduce/algorithm/executor/reduce_sole_executor.cc": "edff2da334a51a939496d2f91d82047fd4a851b6598ede8ebe4f9d3aed9c9bcc"
+    },
+    "scatter": {
+      "src/ops/scatter/algorithm/executor/ins_v2_scatter_sole_executor.cc": "126720c392fedbcfa5b6bd0468f352912cc66079f8dd5ad7ccdab979f7de6534"
+    },
+    "all_gather_v": {
+      "src/ops/all_gather_v/algorithm/executor/ins_v2_all_gather_v_sole_executor.cc": "5bae32845691742fe5e10912bb2bb7c86a875aeef809f9beb33f41b358dbe06b"
+    },
+    "reduce_scatter_v": {
+      "src/ops/reduce_scatter_v/algorithm/executor/ins_v2_reduce_scatter_v_sole_executor.cc": "00aaff85ed2703d2441d83156c72b1527087e77793e8c42fe4285037f09fef34"
+    },
+    "all_to_all_v": {
+      "src/ops/all_to_all_v/algorithm/executor/ins_v2_all_to_all_v_sole_executor.cc": "02bffd58e810f2ab2e77d3157f8e3f7be50a66b31bd0b25e3d78e9d7f24ba64e"
+    },
+    "barrier": {
+      "src/ops/barrier/algorithm/executor/ins_v2_barrier_sole_executor.cc": "53333321e60c3b5faf06b6e25a1a8798e5a88f750c1d8ffe8152fa65fb92b76c"
+    }
+  },
+  "contracts": {
+    "all-gather-parallel": {
+      "op": "all_gather",
+      "source_commit": "978d01b68c477572962b5be67c4ea9929ca9e2d7",
+      "reference": "12-allgather-parallel.md",
+      "files": {
+        "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_parallel_executor.cc": "c7c32fa1c65b0f466584eed4dd8a5b2898884ad73f49b8cb7968f054b2cded6b",
+        "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_parallel_executor.h": "b0c00b9cba1c2a90845eebae2e91df4e3206e47e4f34fb4b23a1a250ef8edf37",
+        "src/ops/op_common/selector/cost_model.h": "27967b813fef84ea77f97c08d19668b31abcf82ea15a97056b55f0645a2577bc"
+      }
+    },
+    "all-gather-integration": {
+      "op": "all_gather",
+      "source_commit": "978d01b68c477572962b5be67c4ea9929ca9e2d7",
+      "verified_at": "2026-09-28",
+      "reference": "../../../references/allgather-integration.md",
+      "files": {
+        "src/ops/op_common/op_common.cc": "10809d41601318713b05ecf3f6196993b13dc3a774fd1fc9887ed145ae49da4c",
+        "src/common/alg_parse.h": "ce60728d4ac32d3b752c01c9a2dd93201de68599a34def71ed62787db13dab3e",
+        "src/common/alg_parse.cc": "08980942187990fd244fd37a1f223908294f76ebaffb7d73d272343036bd288e",
+        "src/ops/op_common/selector/cost_model.h": "27967b813fef84ea77f97c08d19668b31abcf82ea15a97056b55f0645a2577bc",
+        "src/ops/op_common/selector/cost_model.cc": "7342676e536b1ca750b2ec2cd1188a1ecd736c12b8fb407328abb4f949f30bf5",
+        "src/ops/op_common/selector/selector_engine.cc": "0070d1528bc25bb551b287d2148142935bb52735114e4bfca9f583184fea6cc1",
+        "src/ops/op_common/selector/alg_attrs_registry.h": "d192c94d9c3f8a9db3fbb77cfcd8cb3e2be4d02231ef369c1d852819eee644a2",
+        "src/ops/op_common/selector/alg_attrs_registry.cc": "8c40bd2d970194dbd31ba1ec290fb1cfb2ce8c6dc39d88e69516bbeebd1ba38f",
+        "src/ops/op_common/algorithm/executor/registry/coll_alg_v2_exec_registry.h": "b4853e1c210726eb96bfd72eba88f2310f3d2056bc2f0bc451170e1038fed636",
+        "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_sole_executor.cc": "d9a41606207907a85dae34629578f6d28d112c7929a0fe72c21b388ef0faa0c9",
+        "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_parallel_executor.cc": "c7c32fa1c65b0f466584eed4dd8a5b2898884ad73f49b8cb7968f054b2cded6b",
+        "src/ops/op_common/algorithm/template/alg_v2_template_base.h": "568c1a6b39092f0555cfbb388a466c0125e914e7b4e0bf7cb3b2b429d55eb5af",
+        "src/ops/op_common/algorithm/template/alg_v2_template_base.cc": "da4067e309262256efd5a9ad4c8173063fed153dfe43bdea93bcfa4767060688",
+        "src/ops/op_common/algorithm/template/common_alg_template_base.h": "0556e63ce58650b557b92bf330dae9ac8e79cc985d5a292d8a02e8bc8e2a40e6",
+        "src/ops/all_gather/algorithm/template/aicpu/CMakeLists.txt": "58d02e216bb87e65e66f00c4bac3f9c7b691b38b80bdd664cb2937f675f19a75",
+        "src/scatter_aicpu_kernel.cmake": "4545bd749eaa1c35aa99ef9ec9f08f4ebbf7e6495f52c47beefe4e6a78e50274"
+      }
+    }
+  }
+}

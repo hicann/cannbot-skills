@@ -22,6 +22,7 @@
             <filefilter name="defaultFilter" desc="Files not to check">
                 <filteritem type="filepath" name="plugins-community/collaborative-agent-kernel-evolution/skills/op-dashboard/assets/chart.umd.min.js" desc="Third-party Chart.js 4.4.7 (MIT), vendored minified build; keeps upstream MIT license, exempt from CANN-2.0 header policy."/>
                 <filteritem type="filename" name="*.mjs" desc="Workflow runtime ES modules, not distributed, skip OAT entirely"/>
+                <filteritem type="filename" name="*.tpl" desc="Code generation templates with placeholder variables, not distributed source files"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
@@ -34,6 +35,7 @@
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.yml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.csv" desc="CSV test case files, no license header required"/>
+                <filteritem type="filename" name="*.tpl" desc="Code generation templates with placeholder variables, license header injected at generation time"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
@@ -42,6 +44,7 @@
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no copyright header required"/>
                 <filteritem type="filename" name="*.yml" desc="YAML configuration files, no copyright header required"/>
                 <filteritem type="filename" name="*.csv" desc="CSV test case files cannot contain a copyright header without breaking their schema"/>
+                <filteritem type="filename" name="*.tpl" desc="Code generation templates with placeholder variables, copyright header injected at generation time"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
@@ -53,6 +56,7 @@
                 <filteritem type="filename" name="*.yml" desc="YAML configuration files, no license header required"/>
                 <filteritem type="filename" name="*.csv" desc="CSV test case files, no license header required"/>
                 <filteritem type="filename" name="*.png" desc="PNG image files for documentation"/>
+                <filteritem type="filename" name="*.tpl" desc="Code generation templates with placeholder variables, license header injected at generation time"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
@@ -69,6 +73,7 @@
             </filefilter>
             <filefilter name="binaryFileTypePolicyFilter" desc="Filters for binary file policies">
                 <filteritem type="filepath" name="community/ops/cannbot-dsl-op-design/templates/.*\.md\.templ" desc="UTF-8 Markdown design templates; text assets, not binary files"/>
+                <filteritem type="filename" name="*.tpl" desc="UTF-8 code generation templates; text assets, not binary files"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->

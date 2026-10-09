@@ -1,0 +1,33 @@
+{
+  "skill_name": "hccl-aicpu-design",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "AICPU 跨层方案与输入缺口",
+      "config": {"eval_mode": "text"},
+      "prompt": "用户只说为 AllReduce 新增 AICPU Ring 算法，没有给目标拓扑、默认选路影响和验收数据范围。依据 hccl-aicpu-design，说明可以先推导的技术方案和必须返回的输入缺口。仅输出文本，不调用工具。",
+      "expected_output": "可按目标版本源码划分 template、executor、selector、TopoMatch 的候选改动，不把所有层默认列为必改；固定算子语义与算法身份。缺少会影响设计或验收的拓扑、默认选路授权、rank/数据类型/数据量时列出输入缺口，不猜测，不代替上层 Agent 询问或推进状态。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "数据流变化要求先有可检规格",
+      "config": {"eval_mode": "text"},
+      "prompt": "AICPU template 新算法会改变 slice 和线程同步，但 Dataflow Spec 中还有语义 TBD。依据 hccl-aicpu-design，说明进入实现前的技术检查，以及 Skill 与 Agent 的边界。仅输出文本。",
+      "expected_output": "按设计 Skill 的记法与模板写每轮源、目标、偏移、长度和同步，用本 Skill 的 check_spec.py 和 check_layout.py 消除语义 TBD；未满足条件不进入实现。Skill 提供技术判据，设计产物 owner、用户交互和状态门禁仍归上层 Agent/Plugin。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "算法设计与实现示例边界",
+      "config": {"eval_mode": "text"},
+      "prompt": "要新增 AllReduce Ring AICPU 算法，仓里只有 Mesh 实现示例。依据 hccl-aicpu-design，说明算法设计先确定什么，能否直接复用示例的线程数、scratch 倍数和同步顺序。仅输出文本。",
+      "expected_output": "先确定算子语义、每阶段片归属、逻辑 peer 到 userRank 的映射、尾片、地址、同步和最终输出，再用 Dataflow Spec 与本 Skill 的检查器核对。Mesh C++ 示例只能作为实现参考，不能据此固定 Ring 的线程数、scratch 倍数或同步顺序；性能也须真实测量。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "skill_name": "hccl-aicpu-perf-optimize",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "功能通过不能证明性能收益",
+      "config": {"eval_mode": "text"},
+      "prompt": "AICPU AllReduce 候选算法的 HCCL-VM A/B 双轨 Checker 全部 PASS，成本系数来自占位值；没有性能测试程序、原始时延数据或相同环境的旧包测量。用户问是否已经达到性能优化目标。依据 hccl-aicpu-perf-optimize 回答，并提出最小可执行实验输入。仅输出文本。",
+      "expected_output": "只能确认已提供的功能证据，性能收益为 UNVERIFIED；占位成本系数和 Checker 均不是性能测量。需要确认真实测试程序及计时/字节定义、指标与数据范围、基线与候选源码包和环境身份、算法命中方式、预热和重复次数，保存原始样本后在同条件下比较分布；不能编造阈值或收益。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

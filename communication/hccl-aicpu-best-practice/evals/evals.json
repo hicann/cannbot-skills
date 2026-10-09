@@ -1,0 +1,284 @@
+{
+  "skill_name": "hccl-aicpu-best-practice",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "新 template 的实现与检查边界",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "已有冻结的 AICPU Dataflow Spec，要新增一个 Ring template。依据 hccl-aicpu-best-practice，说明实现与静态检查要核对哪些内容，能否用脚本 PASS 宣称功能完成。仅输出文本。",
+      "expected_output": "按冻结 Spec 实现数据搬运、repeat/stride、scratch、线程与 Notify；核对目标源码接口、注册和 host/device CMake。运行模板与规则检查，必要时使用内部专项检视指南。静态 PASS 不等于完整构建或双轨 Checker PASS；角色执行和完成状态由上层控制。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "只注册算法不扩大默认选路",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "设计只允许新算法经 HCCL_ALGO 显式选中，不允许改变默认选择。依据 hccl-aicpu-best-practice，说明 executor/selector 接线和验证时避免什么。仅输出文本。",
+      "expected_output": "按目标源码核对注册全名、executor 资源消费者和必要映射；不额外修改默认 selector 分支或阈值。显式命中与默认路径分别留证，Checker PASS 但未命中目标算法不能算目标验证；完整构建和双轨验收以 AICPU 引擎契约为准。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "共享契约：AICPU 算法分层能力与路由问答",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我想在 HCCL 仓（/home/hccl/vibe/hccl）里给 AllReduce 新增一个板内 1D Mesh 的小数据 AICPU 算法变体，需要动哪些层？各层分别做什么、怎么验证？请包含具体的技术内容（目录结构、注册宏、验证工具），而不仅是流程步骤名称。\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应体现共享技术 Skill 的分层路由知识，而非自行编排 Agent，覆盖：\n1. 三层结构：selector（SelectAicpuAlgo 选算法名）/ executor（REGISTER_EXEC_V2 注册 + Orchestrate）/ template（algorithm/template/aicpu/ 下 KernelRun 数据搬运），2026-09 目录重构后 executor/template 在 <op>/algorithm/ 下\n2. template 层要点：继承 InsAlgTemplateBase，实现 CalcRes/KernelRun/CalcScratchMultiple/GetNotifyIdx*，数据搬运优先用 wrapper（SendRecvBatchWrite/LocalCopy 等）\n3. 注册要点：REGISTER_EXEC_V2 的 name 是标识符（宏内字符串化），selector 的 selectAlgName 字符串必须与注册名逐字符一致\n4. 客观验收契约：build.sh --pkg --full 编译 + hccl-vm（AI_CPU 引擎）Checker 功能验证（不是只靠 ST/UT），但执行与状态裁决由 Agent/Plugin 负责\n5. 跨层一致性约束（算法名三处一致、CalcRes 与 notify 配比一致）",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "共享契约：能力输入缺口与 Agent 责任边界",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "Architect 向 hccl-aicpu-best-practice 提供了「为 AllReduce 新增 AICPU 算法」这一部分输入。请说明该 Skill 能直接推导什么、应返回哪些上游输入缺口，以及谁负责用户交互和状态推进。\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应体现 Skill 只提供技术能力和结构化缺口，不直接编排角色：\n1. 已知算子为 AllReduce、意图为新增，直接继承；依据目标版本真实源码推导改动层级、可复用 executor、算法形态、线程分配和注册方式。\n2. 缺失且无法由技术证据推导的目标拓扑/rank、数据范围、默认选路授权和验收范围，以结构化上游输入缺口返回；已确认信息和授权不重复索取。\n3. 技术 TBD 先查真实源码、蓝本、公式和已有配置；可推导项记录依据和待验证范围，不把实现设计当作用户决策。\n4. Skill 不直接询问用户、不指定下一个 Agent、不改变任务状态；Architect 处理设计需求缺口，HCCLBot/Plugin 负责用户交互、调度和状态推进。\n5. 能力输出应包含路由结论、证据位置、Dataflow Spec 需求、静态检查结果、上游缺口和未验证范围。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "共享契约：验证流程：hccl-vm 为主路径",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "一个新的 AICPU AllReduce 模板已完成 KernelRun 实现和两处 CMake 登记。请根据 hccl-aicpu-best-practice 说明后续构建与功能验收的客观契约，并说明 Skill 与 Verifier/Plugin 的责任边界。\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应覆盖：\n1. 先检查旧包/基线归档是否已经齐备。旧包默认路径基线必须在首次候选构建前完成（旧包身份、源码、日志、退出码和包哈希可追溯），不能拖到安装前；缺少时先恢复可追溯旧包并补齐。\n2. 通过 workflow.py build --check-only 预检后，正式 build.sh --pkg --full 只运行一次，保存完整日志、真实退出码与源码快照；输出目录在源码仓外，不重复构建只为获取日志。单文件语法冒烟不能代替全构建。\n3. 功能验证走 hccl-vm、AI_CPU、目标通信域与完整数据类型/大小/边界矩阵。轨道 A 强制新算法并用 --expect-algo 断言；轨道 B 不设置 HCCL_ALGO，覆盖默认路径。\n4. 默认不变任务用 evidence.py compare 比对基线；已批准 selector 变更任务按事先固定的范围/矩阵逐项验收，范围外仍与基线一致。现有 compare 没有允许改变选路的参数，须先 check 双侧证据再明确记录人工矩阵验收，不能篡改基线或伪称自动 compare 通过。\n5. Skill 只定义上述客观判据和证据格式；Verifier 执行构建/安装/双轨并产出报告，HCCLBot/Plugin 判定状态。ST/UT 是否执行按 Plugin 继承的用户授权，且不能替代 Checker。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "共享契约：AICPU 引擎范围界定与跨层一致性红线",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "hccl-aicpu-best-practice skill 的适用范围是什么？哪些场景不该用它？它把守的跨层一致性约束有哪些？\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应覆盖：\n1. 适用：AICPU 引擎的集合通信算法开发（template/executor/selector/topoMatch 各层）\n2. 不适用：AIV 引擎模板、CCU 引擎（暂不对外支持）、legacy 代码（仅 bug 修复）；环境搭建/功能验证（仅功能正确性，不支持性能验证）/调试走对应专项 skill\n3. 跨层一致性约束：\n   - 算法名三处一致（selector selectAlgName ↔ REGISTER_EXEC_V2 name ↔ REGISTER_ALG_ATTRS name）\n   - 资源配比一致（CalcRes 的 slaveThreadNum/notify 数与 GetNotifyIdx* 长度一致，否则 Pre/PostSync 报 HCCL_E_INTERNAL）\n   - 架构红线（不 include HCOMM 私有头、跨仓走 dlsym + 支持性查询、legacy 不承接新特性）\n   - 编码规范（CANN-2.0 许可头、命名规范、编译无告警）",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "共享契约：template 主从线程同步知识路由",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我要写一个新的 AICPU AllReduce Mesh 算法模板，关于主从线程怎么分配、notify 怎么配比、PreSync/PostSync 放在哪，hccl-aicpu-best-practice 会怎么指引我？64bit 类型和 PROD 归约为什么需要特殊处理？\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应路由到子 skill 的 references/08-thread-sync-patterns.md：\n1. 区分 launch 级 stream/主线程同步、主从线程同步与 wrapper 内通道 notify。\n2. 核对线程数和 notify 索引数组长度；常用模型为 N-1 从线程，每从线程一个 notify、主线程 N-1 个，MainToSub 全 0、SubToMain 递增，实际申请须匹配调用。\n3. 区分 one-shot 相对偏移、two-shot 按片号、AG/NHR 按通道的线程映射。\n4. 按真实数据依赖放置 Pre/Post；PreSync 主 record 后从 wait，PostSync 代码提交主 wait 后从 record，不能按主机提交顺序误解异步执行依赖。不把 Pre/Post 和每线程单次通信绝对化，多阶段/NHR 需逐阶段证明依赖。\n5. 对 64bit/PROD 的 AICPU 软件归约核对 needAicpuReduce_ 分支及 BatchModeEnd/Start、ThreadJoin，保证设备写完再由 AICPU 读取。\n6. 若涉及 ReduceMesh1D，root GatherData/RecvWrite 后 ReduceData，非 root SendData/SendBatchWrite，不能把通信角色倒置。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "共享契约：双轨验证：新算法定向 + 存量回归",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我按 hccl-aicpu-best-practice 的流程开发了一个新的 AllReduce 算法，注册名是 nhr_l0_new。这个算法通过 HCCL_ALGO 才能选到，默认路径不会选它。我觉得只要用 HCCL_ALGO 指定跑一轮 Checker 全 PASS 就可以交付了，还要验证什么？另外我什么时候需要跑基线？\n\n【约束】请依据 hccl-aicpu-best-practice skill 的内容回答，不要执行任何工具调用（禁止 read、glob、bash 等），不要探索项目文件或目录结构。仅输出文本回答即可。",
+      "expected_output": "回复应覆盖：\n1. 只跑轨道 A 不够；须加 --expect-algo nhr_l0_new 防止旧算法假覆盖，并运行不带 HCCL_ALGO 的轨道 B。\n2. 本题仅显式启用，默认选路应与改动前逐档一致，使用 evidence.py compare；算法或命中次数偏移须定位重验，不允许以 benchmark 为由放宽。\n3. 基线须在首次候选构建前完成，先归档旧包及包身份、源码快照、构建日志和退出码，再用旧包运行目标默认路径并保存证据；首次构建前用 workflow.py build --check-only 检查前置证据。错过时从可追溯旧源码/旧包恢复并补测，不能用候选包回填基线。\n4. 回归范围由改动层级决定：新增算法覆盖该算子典型档位；selector 覆盖受影响旧算法及相邻算子；公共代码覆盖全算子冒烟。\n5. HCCL_ALGO 格式由仓内实现核对。双轨 PASS 和选路验收是功能门禁；默认不运行 ST/UT，不承诺性能提升。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "共享契约：已授权 selector 变更的验收契约",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "用户已明确要求将 AllReduce 的默认选择阈值调整为其给定范围，并已提供拓扑、dtype、rank 和预期算法。请依据本 skill 输出下一步执行与验收方案。旧包和基线已归档，暂不执行工具或修改仓库。",
+      "expected_output": "直接继承用户授权，不再次确认是否允许改变默认选择。实现前在规格中固定需求依据、允许范围和逐用例验收矩阵（阈值内外与边界）；轨道 A 断言命中新算法、轨道 B 使用默认路径。范围内按预期算法及命中次数验收，范围外和原基线一致。现有 evidence.py compare 仅支持默认不变；不得编造 allow-change 参数，应先分别 check baseline/regression 的 role/PASS，再执行并明确标记人工矩阵验收，核对相同用例集合、配置、环境和包身份。未实际执行时只能报告方案，不能称 Checker 或矩阵已经通过。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "共享契约：用户自定义 AllReduce Ring 的最小调研路径",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "我要写自己的 AllReduce Ring，不要把算法替换为库上已有 NHR/Mesh。HCCL/HCOMM 路径已提供，当前任务绑定单层 executor，来源检查 MATCH。请依据 skill 说明从哪里开始设计、哪些资料要读、哪些需要自行设计。只输出方案，不运行工具。",
+      "expected_output": "继承 Ring 意图；从目标算子契约、绑定 executor 及所需接口开始，不强制先找到 Ring 蓝本或完整阅读 NHR/Mesh，不扫描全仓。MATCH 只证明清单文件未变，须匹配具体 executor/分支范围。独立设计 rank/peer 映射、阶段/step、切片、scratch、线程/notify 和同步；区分 step/repeat/executor 分块。使用无拓扑归约预设的 barebone，未实现时失败且成本候选为空；保留 Spec/布局检查、完整构建和双轨验收。不编造 CalcChannelRequestRing 或 AlgoType::RING。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "共享契约：自定义无归约算法与非 AllReduce 语义",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "用户想实现 AllGather 自定义转发算法；另一个任务是 Barrier。能否直接套用通用骨架中的归约、rankSize 个线程、count==0 早退？请依据 skill 回答并给出各自应读取的契约，只输出文本。",
+      "expected_output": "说明新版 barebone 不预设归约/线程/早退。AllGather 保证来源 rank 的输出槽位，不归约；单层 executor OSS 为完整 dataSize 而非本轮 sliceSize。Barrier 使用零初始化 TemplateDataParams 仍须完成同步，不可 count==0 直接成功。两者分别由算法推导资源及通知协议，读取目标算子条目，不要求阅读全量示例。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 12,
+      "title": "共享契约：来源漂移、接口单位与局部回查",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "一个 Ring 任务的 check_sources 报告只有 HCOMM 头文件变化；HCCL 算子 executor 和 wrapper 匹配基线。是否需要重新调研整个仓？如果直接用 HCOMM 代替 LocalReduce，应核对哪些内容？不要执行工具。",
+      "expected_output": "仅对实际使用且受变化影响的接口定向核对声明、dlsym/支持条件和语义；复用范围内未变化的 HCCL 结论，不把 CHANGED 当算法失败，也不自动刷新基线掩盖变化。区分 wrapper LocalReduce(thread,src,dst,...) 与 HCOMM(thread,dst,src,count,...)，count 为元素数。wrapper 自带通知协议，不可直接用裸 Read/Write 等价替换。不是每个 weak 接口都有支持查询，不能编造 HcommIsSupportHcommThreadJoin。来源校验不证明部署库支持或算法正确；保留数据流与验证要求。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 13,
+      "title": "共享契约：AllGather Parallel 已知透传缺口的构建前处理",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "用户要新增自定义 AllGather Ring，同时绑定 Sole 和 Parallel。目标版本调研已发现 Parallel 四处 CalcCostCoeffParam 初始化省略 algName，模板的显式启用守卫依赖它。来源卡可用但工作区有修复改动。请给出首次构建前的工作和测试顺序，只输出文本。",
+      "expected_output": "按需加载 AllGather Parallel 四阶段卡并校验 --contract all-gather-parallel，CHANGED 只定向核对。补齐四处 algName 及 lambda 捕获并核对消费者；GetRes 在新构造对象上与 CalcRes 预算一致。首次构建前关闭已知缺口，使用 check_cost_forwarding 的已核验调用数4，不调低数量逃避检查。先保存基线；候选先 Parallel 单例及 Sole 单例命中+Checker，再完整覆盖和默认回归；不要求读全部参考或查找已有 Ring 蓝本。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 14,
+      "title": "共享契约：多 loop 计算与批次统计",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "AllGather Ring 的64M和128M均没有触发多loop。已知目标executor源码和测试程序路径，计划支持plan.py。如何安排下一步，并统计包含dry-run和失败后未执行批次的时间？不要执行工具。",
+      "expected_output": "从实际executor缓冲区、scratch、分流、dtype和对齐推导maxCountPerLoop，核实测试程序bytes/count换算，用loop-size计算超过一轮的合法大小；不继续盲试512M或照搬其他任务HCCL_BUFFSIZE。独立证明loop与repeat，日志限定目标；排除对称内存单轮旁路。使用plan.json单例冒烟再覆盖，失败停止；summary totals区分dry-run、实际例次、pending与失败，跨计划按run去重，不把残差叫权限等待。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 15,
+      "title": "共享契约：S03 单线程说明与静态检查边界",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "单线程算法Spec第6章正文写了“没有 sync main -> sub 和 sync sub -> main”，代码围栏内只有LocalCopy。成本检查另一份代码输出UNVERIFIED，原因是参数改成先构造变量再赋值。能否直接认为两项通过？只输出文本。",
+      "expected_output": "S03只统计第6章围栏中的独立同步动作，正文和注释不计数，单线程无需改措辞；仍检查真实代码无Pre/Post。围栏缺失/未闭合/动作不明确报S00而非零同步。成本UNVERIFIED不能当PASS，定向检查变量字段赋值和调用链并保存依据，不为迎合检查改写算法或修改expected-calls，保留编译与最终命中断言。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 16,
+      "title": "共享契约：调研委派必须继承已知契约",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "AllGather 自定义 Ring 任务已经核验接入卡与 Parallel 卡，只有 comm 配置失败后的回退语义未确定。上游拟让子代理“完整读取 NHR/Mesh，搜索所有 Ring 分支，调研全部注册和选择器”。请重写这次子任务输入及停止条件。不要调用工具。",
+      "expected_output": "传递用户指定的 Sole/Parallel 和 intra/inter 组合、实际加载 Skill 路径/基线哈希、参考章节和分组校验证据；待查问题仅 comm getter 失败后的配置回退及相关调用者。固定版本定位 alg_parse.cc::FilterCmByHcclAlgo；问题解决即设计，不重读已匹配全套契约、不默认扫描分支或创建额外子代理。若没有缺口直接设计；保留独立检视，不能声称维护仓已更新就等于 OpenCode 加载新版。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 17,
+      "title": "共享契约：多字段成本传递与当前选择器版本",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "目标是接入卡的 978d01b6 版本。Sole 的 algName 检查 PASS，但模板会读取通信域配置；Parallel 只补了四处 algName。如何判断能否开始完整测试？是否必须设置 HCCL_USE_NEW_SELECTOR？只输出文本。",
+      "expected_output": "Sole comm 显式 nullptr，Parallel comm/topoInfo 默认 nullptr；按消费者选择 --require-field algName=algName --require-field comm=comm，只有依赖拓扑才加 topoInfo。调用数分别1/4，补传并检查 lambda 捕获、有效实参及共享消费者；PASS仅语法透传。新基准普通入口按 MESH_1D/IsDevType960，而非旧版本环境开关；先关闭接入缺口，再单例命中与Checker、完整覆盖和默认回归。配置getter失败回退env，解析失败不证明命中。各来源组分别判定。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 18,
+      "title": "共享契约：历史 Ring 样例与调研报告不能替代算法设计",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 900,
+        "eval_mode": "text"
+      },
+      "prompt": "子代理报告称：历史 AllGather Ring 可直接复制并注册；Ring 固定两个线程且 OFFLOAD 不用 scratch；NHR 也是 N-1 步；所有接口都为纯虚。用户要求 Parallel Ring/Ring，但历史样例是 Mesh/Ring。哪些可以作为先验？只输出文本。",
+      "expected_output": "只复用固定commit/路径的可选索引及已核验接口契约。历史AG守卫针对AllReduce Parallel，不能直接作为独立AllGather算法；不能替换用户Ring/Ring组合。线程、scratch、尾片和同步须按调度推导。GetNHRStepNum取rankSize-1位数，8ranks为3步；InsAlgTemplateBase只有Describe和两种GetNotifyIdx为纯虚，其余区分返回错误/零的默认实现。默认构造需要保留但不证明FastLaunch支持；历史报告不是当前构建或Checker证据。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}
