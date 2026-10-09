@@ -44,6 +44,31 @@ def test_intake_classified_linear_request_routes_independent_of_name(
     assert "intake classified" in result["reason"]
 
 
+def test_intake_classified_sparse_request_routes_independent_of_name(
+    tmp_path: Path,
+) -> None:
+    result = selector.select(tmp_path, "catlass_custom_attention", "sparse_flash_mla")
+    assert result["route"] == "sparse_flash_mla"
+
+
+def test_existing_sparse_marker_restores_new_workflow(tmp_path: Path) -> None:
+    marker = tmp_path / "operators/catlass_custom_attention/docs/workflow.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "workflow_id": "catlass-sparse-flash-mla-v1",
+                "algorithm_family": "sparse_flash_mla",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        selector.select(tmp_path, "catlass_custom_attention", None)["route"]
+        == "sparse_flash_mla"
+    )
+
+
 def test_intake_classified_legacy_request_routes_without_name_heuristics(
     tmp_path: Path,
 ) -> None:

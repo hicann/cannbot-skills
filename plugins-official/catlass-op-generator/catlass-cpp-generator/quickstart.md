@@ -1,6 +1,6 @@
-# CATLASS C++ Linear Attention Generator
+# CATLASS C++ Generator
 
-独立执行 PR1069 五阶段 CATLASS C++ Linear Attention 工作流。
+对 linear_attention、block_sparse_attention 与 sparse_flash_mla 执行五阶段 CATLASS C++ 工作流；其他类别沿用父插件流程。
 
 ## 安装
 
@@ -20,13 +20,17 @@ python scripts/select_operator_workflow.py \
   --algorithm-family linear_attention
 ```
 
-只有 JSON 结果中的 `route` 为 `linear_attention` 才进入本插件。新工程从
+JSON 结果中的 `route` 为 `linear_attention`、`block_sparse_attention` 或 `sparse_flash_mla` 时进入本插件。新工程从
 `catlass-cpp-interface` 开始；既有专用工程按 `docs/workflow.json` 恢复。
 
+BSA Arch22 从 `knowledge/operator/sparse-attention/index.md` 读取块稀疏知识。
+SparseFlashMla 从 `knowledge/operator/sparse-flash-mla/index.md` 读取主核、独立 metadata 和 SWA 专用知识。
 新建工程的 `target_architecture` 初始为 `pending`。离开 interface 阶段前必须按目标环境改为：
 
 - A2/A3：`atlas_a2_a3`，对应 `CATLASS_ARCH=2201`、`Arch::AtlasA2`；
 - A5/Ascend950：`ascend950`，对应 `CATLASS_ARCH=3510`、`Arch::Ascend950`。
+
+当前 SparseFlashMla 与 BSA Arch22 知识仅覆盖 A2/A3。
 
 ## 知识查询
 

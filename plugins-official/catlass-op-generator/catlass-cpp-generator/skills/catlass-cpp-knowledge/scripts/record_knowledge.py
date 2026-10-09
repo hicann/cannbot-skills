@@ -109,7 +109,8 @@ def _frontmatter(path: Path) -> tuple[dict[str, Any], str]:
         raise ValueError(f"{path}: invalid YAML frontmatter: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path}: frontmatter must be a mapping")
-    return data, text[end + 5 :]
+    body_start = end + 5
+    return data, text[body_start:]
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -379,6 +380,7 @@ def query_bundle(
         )
     vocabulary = _load_yaml(root / "query-vocabulary.yaml")
     wanted_family = _canonical_family(vocabulary, family) if family else None
+    wanted_arch = arch.lower().replace("_", "-") if arch else None
     terms = [term.lower() for term in (text or "").split() if term]
     results: list[dict[str, Any]] = []
     for path in _concept_paths(root):
@@ -392,7 +394,9 @@ def query_bundle(
         if wanted_family and wanted_family not in families:
             continue
         architectures = [str(item).lower() for item in data.get("architectures", [])]
-        if arch and arch.lower() not in architectures:
+        if wanted_arch and wanted_arch not in {
+            item.replace("_", "-") for item in architectures
+        }:
             continue
         haystack = " ".join(
             [

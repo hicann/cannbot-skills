@@ -16,6 +16,10 @@ python scripts/record_knowledge.py query --project-root <workspace> --text Block
 python scripts/record_knowledge.py get --project-root <workspace> --path catlass/block-mmad.md
 ```
 
+SparseFlashMla 连同独立 metadata 位于 `operator/sparse-flash-mla/`；
+`query --family sparse_flash_mla --compact` 可发现该家族，再按
+`operator/sparse-flash-mla/index.md` 选择本阶段所需 concept。
+
 新增或修改 concept 前，先完整读取
 [公共入库标准](references/common-entry-standards.md)，再根据目标分区读取
 [CATLASS 入库标准](references/catlass-entry-standards.md)、

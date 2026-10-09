@@ -22,7 +22,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(args: list[str], cwd: Path, expected: int = 0) -> subprocess.CompletedProcess[str]:
+def run(
+    args: list[str], cwd: Path, expected: int = 0
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         args,
         cwd=cwd,
@@ -54,7 +56,10 @@ def test_python_tools_work_from_unrelated_directory(tmp_path: Path) -> None:
     template = tmp_path / "definition.template.json"
     output = tmp_path / "definition.json"
     source.write_text("def reference(x):\n    return x\n", encoding="utf-8")
-    shutil.copy2(ROOT / "skills/catlass-cpp-reference/templates/definition.template.json", template)
+    shutil.copy2(
+        ROOT / "skills/catlass-cpp-reference/templates/definition.template.json",
+        template,
+    )
     run(
         [
             sys.executable,
@@ -68,9 +73,46 @@ def test_python_tools_work_from_unrelated_directory(tmp_path: Path) -> None:
         ],
         other,
     )
-    assert json.loads(output.read_text(encoding="utf-8"))["reference"] == source.read_text(
-        encoding="utf-8"
+    assert json.loads(output.read_text(encoding="utf-8"))[
+        "reference"
+    ] == source.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
+@pytest.mark.parametrize(
+    "family,workflow_id",
+    [
+        ("linear_attention", "catlass-linear-attention-v1"),
+        ("block_sparse_attention", "catlass-block-sparse-attention-arch22-v1"),
+        ("sparse_flash_mla", "catlass-sparse-flash-mla-v1"),
+    ],
+)
+def test_project_initializer_uses_dedicated_workflow(
+    tmp_path: Path, family: str, workflow_id: str
+) -> None:
+    script = ROOT / "skills/catlass-cpp-interface/scripts/init_operator_project.sh"
+    name = "catlass_custom_attention"
+    args = ["bash", str(script), name, "--algorithm-family", family]
+    run(args, tmp_path)
+    marker = tmp_path / "operators" / name / "docs/workflow.json"
+    state = json.loads(marker.read_text(encoding="utf-8"))
+    assert state["algorithm_family"] == family
+    assert state["workflow_id"] == workflow_id
+    run(args, tmp_path)
+    assert json.loads(marker.read_text(encoding="utf-8")) == state
+    run(["bash", str(script), name], tmp_path)
+    assert json.loads(marker.read_text(encoding="utf-8")) == state
+    before = marker.read_bytes()
+    other_family = (
+        "linear_attention" if family != "linear_attention" else "sparse_flash_mla"
     )
+    result = run(
+        ["bash", str(script), name, "--algorithm-family", other_family],
+        tmp_path,
+        expected=1,
+    )
+    assert "does not match existing workflow marker" in result.stderr
+    assert marker.read_bytes() == before
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")

@@ -1,6 +1,6 @@
 ---
 name: catlass-cpp-reference
-description: CATLASS C++ Linear Attention 五阶段工作流的 02 标杆生成。适用于需要维护唯一 PyTorch CPU 标杆、生成 definition、校准精度策略并冻结 golden contract 的算子开发场景。
+description: CATLASS C++ 已注册算法族五阶段工作流的 02 标杆生成。用于维护唯一 PyTorch CPU 标杆、生成 definition、校准精度策略并冻结 golden contract。触发条件：workflow 处于 reference 阶段且 operator_contract=frozen。
 ---
 
 # 02 标杆生成
@@ -8,6 +8,11 @@ description: CATLASS C++ Linear Attention 五阶段工作流的 02 标杆生成�
 进入条件：workflow 状态为 `reference` 且 `operator_contract=frozen`。
 读取 `workflow/interface-and-golden-contract.md` 和
 `workflow/precision-policy.md`。
+
+`sparse_flash_mla` 使用家族 `computation.md`、`validation.md` 和本次用户原始
+golden/ATK 脚本区分数学参考、低精度 cast 路径与正式验收。原 ATK 的阈值和输入不能因
+DUT 误差而放宽；辅助诊断阈值不替代原双标杆。metadata 另验证调度表的任务覆盖及
+本次有效长度、页表、layout 变化后的重新生成。
 
 `reference/reference.py` 是唯一可编辑标杆源码。修改后运行：
 

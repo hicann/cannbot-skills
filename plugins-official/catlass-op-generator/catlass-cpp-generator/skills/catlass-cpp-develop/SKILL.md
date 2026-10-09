@@ -1,6 +1,6 @@
 ---
 name: catlass-cpp-develop
-description: CATLASS C++ Linear Attention 五阶段工作流的 04 算子开发。适用于需要按已评审 Stage 实现 device kernel、host tiling 和直调入口，并逐 Stage 构建与定向精度验证的算子开发场景。
+description: CATLASS C++ 已注册算法族五阶段工作流的 04 算子开发。用于按已评审 Stage 实现 device kernel、host tiling 和直调入口，并进行逐 Stage 构建与定向精度验证。触发条件：workflow 处于 implementation 阶段，两个 contract 均已冻结且设计校验通过。
 ---
 
 # 04 算子开发
@@ -14,7 +14,10 @@ description: CATLASS C++ Linear Attention 五阶段工作流的 04 算子开发�
 逐 Stage 执行“实现、编译、设计一致性检查、运行、精度比较、记录”。device 计算必须使用
 CATLASS 组件；host tiling、workspace、AIC/AIV 分工、CrossCore/HardEvent、TilingKey 和数据
 生命周期必须与 `docs/design.md` 一致。测试程序必须核对全部输出、原始 dtype、shape、有效区域
-和关键分区。
+和关键分区。对于 `sparse_flash_mla`，读取家族 `metadata.md` 和
+`development.md`；普通 SWA 同时读取 `pipeline.md` 的协议与片上结构，
+实现独立 metadata 生产端和主核消费端；
+诊断探针不能代替完整主算子、正式注册和构建产物。
 
 每轮构建安装后重启测试进程并确认加载本轮产物。单用例连续运行 60 秒无返回视为 kernel 超时，
 清理进程和设备资源后，将现象、Stage、TilingKey 和 `blockDim` 写入 `docs/validation.md`，再按

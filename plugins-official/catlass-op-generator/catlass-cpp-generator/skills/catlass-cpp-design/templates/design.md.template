@@ -4,7 +4,7 @@
 `design_rule_version`: `V1`
 `target_architecture`: `{target_architecture}`
 
-> 本模板按 Linear Attention 标准详设结构填写。进入开发阶段前，将全部花括号内容替换为当前算子事实。
+> 本模板按已注册 CATLASS C++ 算法族的详设结构填写。进入开发阶段前，将 workflow_id 与全部花括号内容替换为当前算子事实。
 > 保留两章结构，按实际 Stage 数增删逐 Stage 小节并连续编号；各字段填写具体内容，不适用项写明原因。
 > 填写本最终交付模板前，必须按 `workflow/solution-design-reference.md` 的完整内容完成设计推演；
 > 完整推演可保存为 `docs/design.full.md` 中间产物。`docs/design.md` 只承载评审结论的两章投影，

@@ -56,6 +56,11 @@ DrainAndRelease():
 ```
 """
 STAGE_ROW = "| Stage 0 | AIC owner | score=q@k.T | 无前驱，无并行Stage | q/k GM | score GM | 每head一个work，共8个 | L1与UB |"
+SYNC_RESOURCE_ROW = (
+    "| score_ready/free | AIC-AIV跨核 | CrossCore双向 | score slot | 2组/free初始可用 | "
+    "producer set ready，consumer wait ready并set free | "
+    "free后复用，最终排空后释放 | 不超过平台flag上限 |"
+)
 
 
 def valid_design() -> str:
@@ -113,7 +118,7 @@ q/k -> Stage 0 -> score，依赖、生命周期、执行单元和 AIC/AIV 映射
 | score | Stage 0/AIC/PIPE_FIX | Stage 0/AIV/PIPE_V | UB/score slot | Fixpipe写完set ready | AIV读完set free | 只通知不访问数据 |
 | 同步资源 | 所属核/范围 | 类型与方向 | 保护的数据和 slot | 数量/初始状态 | set/wait 或 lock/unlock 顺序 | 复用/释放条件 | 硬件上限依据 |
 |---|---|---|---|---|---|---|---|
-| score_ready/free | AIC-AIV跨核 | CrossCore双向 | score slot | 2组/free初始可用 | producer set ready，consumer wait ready并set free | free后复用，最终排空后释放 | 不超过平台flag上限 |
+{SYNC_RESOURCE_ROW}
 {SYNC_CODE}
 ### 2.6 Kernel 组件与调用
 按目标平台选择 BlockMmad；Host 通过直调入口启动。
@@ -131,12 +136,16 @@ class DesignValidatorTests(unittest.TestCase):
         self.assertEqual([], validate(valid_design()))
 
     def test_template_and_validator_require_exactly_two_chapters(self) -> None:
-        titles = re.findall(r"^## \d+\. (.+)$", TEMPLATE.read_text(encoding="utf-8"), re.MULTILINE)
+        titles = re.findall(
+            r"^## \d+\. (.+)$", TEMPLATE.read_text(encoding="utf-8"), re.MULTILINE
+        )
         self.assertEqual(list(REQUIRED_SECTIONS), titles)
         self.assertEqual(["目标与数学语义", "Stage 总览与完整详设"], titles)
 
     def test_extra_or_missing_top_level_chapter_fails(self) -> None:
-        self.assert_fails_with(valid_design() + "\n## 3. 风险\n内容\n", "exactly the two")
+        self.assert_fails_with(
+            valid_design() + "\n## 3. 风险\n内容\n", "exactly the two"
+        )
         self.assert_fails_with(
             valid_design().replace("## 1. 目标与数学语义", "目标与数学语义"),
             "expected one required section",
@@ -150,14 +159,18 @@ class DesignValidatorTests(unittest.TestCase):
 
     def test_metadata_and_evidence_boundary_are_required(self) -> None:
         self.assert_fails_with(
-            valid_design().replace("`workflow_id`: `catlass-linear-attention-v1`", ""), "workflow_id"
+            valid_design().replace("`workflow_id`: `catlass-linear-attention-v1`", ""),
+            "workflow_id",
         )
         self.assert_fails_with(
-            valid_design().replace("`design_rule_version`: `V1`", "`design_rule_version`: `V2`"),
+            valid_design().replace(
+                "`design_rule_version`: `V1`", "`design_rule_version`: `V2`"
+            ),
             "design_rule_version",
         )
         self.assert_fails_with(
-            valid_design().replace("docs/validation.md", "validation record"), "docs/validation.md"
+            valid_design().replace("docs/validation.md", "validation record"),
+            "docs/validation.md",
         )
 
         self.assert_fails_with(
@@ -167,18 +180,21 @@ class DesignValidatorTests(unittest.TestCase):
 
     def test_architecture_specific_paths_are_validated(self) -> None:
         self.assert_fails_with(
-            valid_design().replace(
-                "L0C -> Fixpipe -> GM -> UB", "L0C -> AIV UB"
-            ),
+            valid_design().replace("L0C -> Fixpipe -> GM -> UB", "L0C -> AIV UB"),
             "A2/A3 Cube→Vector",
         )
         self.assert_fails_with(
-            valid_design().replace("Vector 执行模型：MemBase", "Vector 执行模型：RegBase/VF"),
+            valid_design().replace(
+                "Vector 执行模型：MemBase", "Vector 执行模型：RegBase/VF"
+            ),
             "A2/A3 Vector execution model",
         )
         a5 = (
             valid_design()
-            .replace("`target_architecture`: `atlas_a2_a3`", "`target_architecture`: `ascend950`")
+            .replace(
+                "`target_architecture`: `atlas_a2_a3`",
+                "`target_architecture`: `ascend950`",
+            )
             .replace(
                 "target_architecture=atlas_a2_a3，CATLASS_ARCH=2201，ArchTag=Arch::AtlasA2",
                 "target_architecture=ascend950，CATLASS_ARCH=3510，ArchTag=Arch::Ascend950",
@@ -219,12 +235,70 @@ class DesignValidatorTests(unittest.TestCase):
         errors = workflow_alignment_errors(valid_design(), marker)
         self.assertTrue(any("does not match" in error for error in errors), errors)
 
+    def test_sparse_design_identity_and_architecture_match_marker(self) -> None:
+        marker = {
+            "algorithm_family": "sparse_flash_mla",
+            "workflow_id": "catlass-sparse-flash-mla-v1",
+            "target_architecture": "atlas_a2_a3",
+        }
+        design = valid_design().replace(
+            "catlass-linear-attention-v1", "catlass-sparse-flash-mla-v1"
+        )
+        self.assertEqual([], validate(design))
+        self.assertEqual([], workflow_alignment_errors(design, marker))
+        self.assertTrue(
+            any(
+                "workflow_id does not match" in error
+                for error in workflow_alignment_errors(valid_design(), marker)
+            )
+        )
+        self.assertTrue(
+            any(
+                "atlas_a2_a3 only" in error
+                for error in workflow_alignment_errors(
+                    design, {**marker, "target_architecture": "ascend950"}
+                )
+            )
+        )
+
+    def test_bsa_design_identity_and_architecture_match_marker(self) -> None:
+        marker = {
+            "algorithm_family": "block_sparse_attention",
+            "workflow_id": "catlass-block-sparse-attention-arch22-v1",
+            "target_architecture": "atlas_a2_a3",
+        }
+        design = valid_design().replace(
+            "catlass-linear-attention-v1", marker["workflow_id"]
+        )
+        self.assertEqual([], validate(design))
+        self.assertEqual([], workflow_alignment_errors(design, marker))
+        self.assertTrue(
+            workflow_alignment_errors(
+                design,
+                {
+                    **marker,
+                    "workflow_id": "catlass-sparse-flash-mla-v1",
+                },
+            )
+        )
+        self.assertTrue(
+            any(
+                "atlas_a2_a3 only" in error
+                for error in workflow_alignment_errors(
+                    design, {**marker, "target_architecture": "ascend950"}
+                )
+            )
+        )
+
     def test_model_case_and_tiling_require_quantified_evidence(self) -> None:
         row = "| case0 | 8 | 1 | 8 | 8 | 1 | 每核1个work | 无尾work，head完整 |"
         self.assert_fails_with(
-            valid_design().replace(row, "|  |  |  |  |  |  |  |  |"), "model case scheduling"
+            valid_design().replace(row, "|  |  |  |  |  |  |  |  |"),
+            "model case scheduling",
         )
-        self.assert_fails_with(valid_design().replace("TilingKey=0", "dispatch key=0"), "TilingKey")
+        self.assert_fails_with(
+            valid_design().replace("TilingKey=0", "dispatch key=0"), "TilingKey"
+        )
 
     def test_each_stage_requires_a_structured_address_map(self) -> None:
         text = re.sub(
@@ -237,27 +311,35 @@ class DesignValidatorTests(unittest.TestCase):
 
     def test_data_movement_and_sync_tables_require_complete_rows(self) -> None:
         movement = "| q/k | 各读1次 | 每work各1 KiB | GM→L1→L0 | L1驻留到MMAD装载结束 | 连续二维搬运/无stride | 一次性输入关闭L2 | Stage 0 MTE1 |"
-        sync_resource = "| score_ready/free | AIC-AIV跨核 | CrossCore双向 | score slot | 2组/free初始可用 | producer set ready，consumer wait ready并set free | free后复用，最终排空后释放 | 不超过平台flag上限 |"
+        sync_resource = SYNC_RESOURCE_ROW
         for row, label, count in (
             (movement, "data movement summary", 8),
             (sync_resource, "synchronization resources", 8),
         ):
             with self.subTest(label=label):
-                self.assert_fails_with(valid_design().replace(row, "|" + "  |" * count), label)
+                self.assert_fails_with(
+                    valid_design().replace(row, "|" + "  |" * count), label
+                )
 
     def test_sync_pseudocode_requires_full_lifecycle(self) -> None:
         for phrase, expected in (
             ("if work is tail: use valid rows", "tail|partial|尾"),
-            ("if work is empty: participate in paired notification without data access", "empty|空任务|无效任务"),
+            (
+                "if work is empty: participate in paired notification without data access",
+                "empty|空任务|无效任务",
+            ),
             ("release event flag Mutex resources", r"release\s+"),
         ):
             with self.subTest(phrase=phrase):
-                self.assert_fails_with(valid_design().replace(phrase, "compute current work"), expected)
+                self.assert_fails_with(
+                    valid_design().replace(phrase, "compute current work"), expected
+                )
 
     def test_workspace_zero_is_valid_and_unquantified_workspace_fails(self) -> None:
         self.assertEqual([], validate(valid_design()))
         self.assert_fails_with(
-            valid_design().replace("workspace_size=0", "workspace is decided later"), "workspace total"
+            valid_design().replace("workspace_size=0", "workspace is decided later"),
+            "workspace total",
         )
 
     def test_nonzero_workspace_requires_table_and_total_formula(self) -> None:
@@ -268,71 +350,99 @@ class DesignValidatorTests(unittest.TestCase):
 workspace_size = AlignUp(blockDim*8192, 512)。"""
         self.assertEqual([], validate(valid_design().replace(zero, nonzero)))
         self.assert_fails_with(
-            valid_design().replace(zero, nonzero.replace("workspace_size =", "total =")),
+            valid_design().replace(
+                zero, nonzero.replace("workspace_size =", "total =")
+            ),
             "define workspace_size",
         )
 
     def test_workspace_must_be_final_subsection(self) -> None:
         text = valid_design().replace(
-            "### 2.7 Workspace 总量", "### 2.7 Workspace 总量\nworkspace_size=0\n### 2.8 附加说明"
+            "### 2.7 Workspace 总量",
+            "### 2.7 Workspace 总量\nworkspace_size=0\n### 2.8 附加说明",
         )
         self.assert_fails_with(text, "final Stage detail subsection")
 
     def test_multiple_stages_and_summary_rows_pass(self) -> None:
         stage_one = "| Stage 1 | AIV owner | 校验score | Stage 0 | score UB | score GM | 每head一个work，共8个 | UB |"
-        text = valid_design().replace(STAGE_ROW, f"{STAGE_ROW}\n{stage_one}").replace(
-            "### 2.4 数据搬运汇总", f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总"
+        text = (
+            valid_design()
+            .replace(STAGE_ROW, f"{STAGE_ROW}\n{stage_one}")
+            .replace(
+                "### 2.4 数据搬运汇总",
+                f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总",
+            )
         )
         self.assertEqual([], validate(text))
 
     def test_stage_summary_must_cover_every_detailed_stage(self) -> None:
         text = valid_design().replace(
-            "### 2.4 数据搬运汇总", f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总"
+            "### 2.4 数据搬运汇总",
+            f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总",
         )
         self.assert_fails_with(text, "Stage result summary missing row for Stage 1")
 
     def test_stage_content_cannot_come_from_a_sibling_section(self) -> None:
         self.assert_fails_with(
-            valid_design().replace(STAGE_BODY, f"### 2.25 地址附注\n{STAGE_BODY}"), "Stage section"
+            valid_design().replace(STAGE_BODY, f"### 2.25 地址附注\n{STAGE_BODY}"),
+            "Stage section",
         )
 
     def test_hidden_content_is_not_evidence(self) -> None:
         self.assert_fails_with(
-            valid_design().replace(STAGE_BODY, f"<!--\n{STAGE_BODY}\n-->"), "Stage section"
+            valid_design().replace(STAGE_BODY, f"<!--\n{STAGE_BODY}\n-->"),
+            "Stage section",
         )
 
     def test_sync_code_cannot_come_from_workspace(self) -> None:
-        text = valid_design().replace(SYNC_CODE, "").replace(
-            "### 2.7 Workspace 总量", f"### 2.7 Workspace 总量\n{SYNC_CODE}"
+        text = (
+            valid_design()
+            .replace(SYNC_CODE, "")
+            .replace("### 2.7 Workspace 总量", f"### 2.7 Workspace 总量\n{SYNC_CODE}")
         )
         self.assert_fails_with(text, "pseudocode")
 
     def test_sync_terms_in_prose_cannot_replace_code(self) -> None:
-        text = valid_design().replace(SYNC_CODE, "wait ready free set event\n```text\ncompute()\n```\n")
+        text = valid_design().replace(
+            SYNC_CODE, "wait ready free set event\n```text\ncompute()\n```\n"
+        )
         self.assert_fails_with(text, "pseudocode missing")
 
     def test_empty_and_unclosed_sync_blocks_fail(self) -> None:
         for replacement in ("```text\n```\n", SYNC_CODE.removesuffix("```\n")):
             with self.subTest(replacement=replacement):
-                self.assert_fails_with(valid_design().replace(SYNC_CODE, replacement), "pseudocode")
+                self.assert_fails_with(
+                    valid_design().replace(SYNC_CODE, replacement), "pseudocode"
+                )
 
     def test_tilde_fenced_pseudocode_passes(self) -> None:
         self.assertEqual([], validate(valid_design().replace("```", "~~~")))
 
     def test_every_template_placeholder_is_rejected(self) -> None:
-        placeholders = set(re.findall(r"\{[A-Za-z_][A-Za-z0-9_]*\}", TEMPLATE.read_text(encoding="utf-8")))
+        placeholders = set(
+            re.findall(
+                r"\{[A-Za-z_][A-Za-z0-9_]*\}", TEMPLATE.read_text(encoding="utf-8")
+            )
+        )
         self.assertTrue(placeholders)
         placeholders.add("{stage_12_name}")
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
-                self.assert_fails_with(valid_design() + f"\n{placeholder}\n", "unresolved placeholder")
+                self.assert_fails_with(
+                    valid_design() + f"\n{placeholder}\n", "unresolved placeholder"
+                )
 
     def test_normal_cpp_and_math_braces_are_allowed(self) -> None:
-        text = valid_design() + "\n```cpp\nint values[] = {0, 1};\nKernel{stage_params};\n```\n集合 {i | i < n}。"
+        text = (
+            valid_design()
+            + "\n```cpp\nint values[] = {0, 1};\nKernel{stage_params};\n```\n集合 {i | i < n}。"
+        )
         self.assertEqual([], validate(text))
 
     def test_pipe_barrier_in_design_sync_is_rejected(self) -> None:
-        text = valid_design().replace("Producer(slot):", "PipeBarrier<PIPE_V>()\nProducer(slot):")
+        text = valid_design().replace(
+            "Producer(slot):", "PipeBarrier<PIPE_V>()\nProducer(slot):"
+        )
         self.assert_fails_with(text, "paired HardEvent/CrossCore")
 
     def test_kernel_pipe_barrier_is_rejected(self) -> None:
@@ -341,9 +451,13 @@ workspace_size = AlignUp(blockDim*8192, 512)。"""
 
         with TemporaryDirectory() as directory:
             kernel = Path(directory) / "kernel.cpp"
-            kernel.write_text("void Kernel() { PipeBarrier<PIPE_V>(); }", encoding="utf-8")
+            kernel.write_text(
+                "void Kernel() { PipeBarrier<PIPE_V>(); }", encoding="utf-8"
+            )
             self.assertEqual(
-                ["kernel synchronization must use paired HardEvent/CrossCore notifications"],
+                [
+                    "kernel synchronization must use paired HardEvent/CrossCore notifications"
+                ],
                 validate_kernel(kernel),
             )
 

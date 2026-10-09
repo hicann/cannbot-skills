@@ -32,6 +32,56 @@ def test_initial_state_is_valid() -> None:
     assert workflow.validate_workflow(initial()) == []
 
 
+def test_sparse_initial_state_and_architecture_gate() -> None:
+    sparse = json.loads(
+        (ROOT / "knowledge/operator/sparse-flash-mla/workflow.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert workflow.validate_workflow(sparse) == []
+    assert (
+        workflow.validate_workflow({**sparse, "target_architecture": "atlas_a2_a3"})
+        == []
+    )
+    assert any(
+        "atlas_a2_a3 only" in error
+        for error in workflow.validate_workflow(
+            {**sparse, "target_architecture": "ascend950"}
+        )
+    )
+    assert workflow.validate_workflow(
+        {**sparse, "workflow_id": "catlass-linear-attention-v1"}
+    )
+
+
+def test_bsa_identity_architecture_and_recovery() -> None:
+    state = {
+        **initial(),
+        "algorithm_family": "block_sparse_attention",
+        "workflow_id": "catlass-block-sparse-attention-arch22-v1",
+    }
+    assert workflow.validate_workflow(state) == []
+    assert workflow.validate_workflow(
+        {**state, "workflow_id": "catlass-sparse-flash-mla-v1"}
+    )
+    assert any(
+        "atlas_a2_a3 only" in error
+        for error in workflow.validate_workflow(
+            {**state, "target_architecture": "ascend950"}
+        )
+    )
+    state.update(
+        stage="validation",
+        target_architecture="atlas_a2_a3",
+        operator_contract="frozen",
+        golden_contract="frozen",
+        issue_type="performance_optimize",
+        resume_from="validation",
+        validation_scope="full",
+    )
+    assert workflow.validate_workflow(state) == []
+
+
 def test_all_recovery_routes_validate() -> None:
     base = initial()
     base.update(
@@ -62,7 +112,10 @@ def test_all_recovery_routes_validate() -> None:
             "resume_from": stage,
             "validation_scope": scopes[issue],
         }
-        assert workflow.validate_workflow(state) == [], (issue, workflow.validate_workflow(state))
+        assert workflow.validate_workflow(state) == [], (
+            issue,
+            workflow.validate_workflow(state),
+        )
 
 
 def test_complete_requires_full_scope_and_no_issue() -> None:
@@ -75,15 +128,20 @@ def test_complete_requires_full_scope_and_no_issue() -> None:
         validation_scope="full",
     )
     assert workflow.validate_workflow(state) == []
-    assert workflow.validate_workflow({**state, "validation_scope": "precision_targeted"})
     assert workflow.validate_workflow(
-        {
-            **state,
-            "stage": "validation",
-            "issue_type": "performance_optimize",
-            "resume_from": "validation",
-        }
-    ) == []
+        {**state, "validation_scope": "precision_targeted"}
+    )
+    assert (
+        workflow.validate_workflow(
+            {
+                **state,
+                "stage": "validation",
+                "issue_type": "performance_optimize",
+                "resume_from": "validation",
+            }
+        )
+        == []
+    )
 
 
 def test_architecture_must_be_frozen_after_interface() -> None:

@@ -1,6 +1,13 @@
 {
   "version": "1",
   "operator_families": {
+    "sparse-flash-mla": {
+      "aliases": [
+        "sparse_flash_mla",
+        "sparseflashmla",
+        "smla"
+      ]
+    },
     "linear-attention": {
       "aliases": [
         "linear_attention",

@@ -60,6 +60,22 @@ def test_query_supports_workflow_type_and_family_alias(tmp_path: Path) -> None:
     )
     assert operator["results"][0]["consumers"] == []
 
+    metadata = knowledge.query_bundle(
+        target, "operator", [], "sparse_flash_mla", None, "metadata", False
+    )
+    assert metadata["status"] == "passed"
+    assert any(
+        item["path"] == "operator/sparse-flash-mla/metadata.md"
+        for item in metadata["results"]
+    )
+    by_arch = knowledge.query_bundle(
+        target, "operator", [], "sparse_flash_mla", "atlas_a2_a3", "metadata", True
+    )
+    assert any(
+        item["path"] == "operator/sparse-flash-mla/metadata.md"
+        for item in by_arch["results"]
+    )
+
 
 @pytest.mark.parametrize(
     "relative",

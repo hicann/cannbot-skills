@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills/catlass-cpp-knowledge/scripts/record_knowledge.py"
@@ -29,7 +31,7 @@ def test_builtin_bundle_validates() -> None:
     report = knowledge.validate_bundle(BUNDLE)
     assert report["status"] == "passed", report["errors"]
     assert report["okf_version"] == "0.2"
-    assert report["count"] == 27
+    assert report["count"] == 35
 
 
 def test_business_partitions_are_exact() -> None:
@@ -87,16 +89,19 @@ def _heading_anchors(text: str) -> set[str]:
             suffix += 1
             anchor = f"{base}-{suffix}"
         anchors.add(anchor)
+    anchors.update(re.findall(r'<a\s+(?:name|id)=["\x27]([^"\x27]+)', text))
     return anchors
 
 
-def test_block_sparse_attention_links_are_self_contained_after_runtime_reindex(
+@pytest.mark.parametrize("family", ["sparse-attention", "sparse-flash-mla"])
+def test_family_links_are_self_contained_after_runtime_reindex(
     tmp_path: Path,
+    family: str,
 ) -> None:
     target = tmp_path / ".catlass-cpp/knowledge"
     knowledge.initialize(BUNDLE, target)
     knowledge.reindex(target)
-    for path in (target / "operator/sparse-attention").glob("*.md"):
+    for path in (target / "operator" / family).rglob("*.md"):
         for link in re.findall(
             r"\[[^\]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8")
         ):
@@ -112,3 +117,61 @@ def test_block_sparse_attention_links_are_self_contained_after_runtime_reindex(
                 assert unquote(parsed.fragment) in _heading_anchors(
                     destination.read_text(encoding="utf-8")
                 ), (path.name, link)
+
+
+def test_sparse_family_relative_links_resolve() -> None:
+    family = BUNDLE / "operator/sparse-flash-mla"
+    for document in family.glob("*.md"):
+        for target in re.findall(
+            r"\[[^\]]+\]\(([^)#]+)", document.read_text(encoding="utf-8")
+        ):
+            if "://" not in target:
+                assert (document.parent / target).exists(), (document.name, target)
+
+
+def test_sparse_family_runtime_contains_knowledge_without_executables(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / ".catlass-cpp/knowledge"
+    knowledge.initialize(BUNDLE, target)
+    family = target / "operator/sparse-flash-mla"
+    files = [path for path in family.rglob("*") if path.is_file()]
+    assert files
+    assert all(path.suffix == ".md" or path.name == "workflow.json" for path in files)
+    assert not (family / "tools").exists()
+    assert not (family / "materials").exists()
+
+
+@pytest.mark.parametrize(
+    "query_text, concept",
+    [
+        ("五阶段", "workflow.md"),
+        ("aclnnSparseFlashMlaMetadataGetWorkspaceSize", "interface.md"),
+        ("INT32", "metadata.md"),
+        ("公共 暂存", "development.md"),
+        ("INCONCLUSIVE", "pipeline.md"),
+        ("minimum_speedup", "performance.md"),
+        ("full-K manifest", "validation.md"),
+    ],
+)
+def test_sparse_topics_are_retrievable_after_runtime_reindex(
+    tmp_path: Path,
+    query_text: str,
+    concept: str,
+) -> None:
+    target = tmp_path / ".catlass-cpp/knowledge"
+    knowledge.initialize(BUNDLE, target)
+    knowledge.reindex(target)
+    report = knowledge.query_bundle(
+        target,
+        "operator",
+        [],
+        "sparse_flash_mla",
+        "atlas_a2_a3",
+        query_text,
+        True,
+    )
+    expected = f"operator/sparse-flash-mla/{concept}"
+    assert expected in {item["path"] for item in report["results"]}
+    retrieved = knowledge.get_concept(target, expected)
+    assert retrieved["content"] == (BUNDLE / expected).read_text(encoding="utf-8")
