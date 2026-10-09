@@ -2,6 +2,10 @@
 
 > **记录规则**：单条不超过 **200 字**，按【领域】+ 问题 + 修复要点组织；技术细节、验证数据与发布过程放 PR 描述 / commit message，不写入日志。
 
+### 【2026-10-08】
+#### 缺陷修复 Bug Fixes
+- 【文档】修复 `ops/ascendc-sync-audit/SKILL.md` 执行步骤命令携带脚本不存在的 `--frontend auto` 参数、照抄即 argparse 报错中断主流程的问题（issue #792）；同步删除「范围扩大检查点」中不可达的「frontend 切换」表述——analyzer 的 frontend 硬编码为 regex 且不可切换。
+
 ### 【2026-09-30】
 #### 缺陷修复 Bug Fixes
 - 【文档】修复全仓 14 处英文单词拼写问题。
