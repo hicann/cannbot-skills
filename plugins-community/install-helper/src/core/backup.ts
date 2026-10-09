@@ -9,14 +9,18 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, copyFileSync, readdirSync, unlinkSync } from "fs";
-import { join } from "path";
+import { join, dirname, basename, resolve } from "path";
 import type { AITool, BackupInfo } from "../types/index.js";
 import { readAllManifests } from "./manifest.js";
 import { readRecords } from "./record.js";
-import { findPlugin, getAllPlugins } from "./registry.js";
-import { getAgentsFileName } from "../utils/paths.js";
+import { findPlugin } from "./registry.js";
+import { getAgentsFileName, getCannbotConfigDir } from "../utils/paths.js";
 
 export { getAgentsFileName };
+
+/** Backup owner id used when the replaced file has no known plugin owner
+ *  (a user-maintained configuration file). */
+export const UNOWNED_PLUGIN_ID = "unowned";
 
 export function detectCurrentPlugin(
   configRoot: string,
@@ -64,25 +68,30 @@ export function detectCurrentPlugin(
   return null;
 }
 
+/**
+ * Creates a backup of `targetPath` beside the file itself, so a replaced
+ * configuration file (including a project-root AGENTS.md that lives outside
+ * the tool config root) always keeps a recoverable copy next to its original
+ * location. Returns null when the file does not exist.
+ */
 export function createBackup(
-  configRoot: string,
-  tool: AITool,
+  targetPath: string,
   fromPluginId: string,
   fromPluginName: string
 ): BackupInfo | null {
-  const agentsFile = join(configRoot, getAgentsFileName(tool));
-  if (!existsSync(agentsFile)) {
+  if (!existsSync(targetPath)) {
     return null;
   }
 
   const timestamp = formatTimestamp(new Date());
-  const backupFileName = `${getAgentsFileName(tool)}.cannbot-backup.${fromPluginId}.${timestamp}`;
-  const backupPath = join(configRoot, backupFileName);
+  const backupFileName = `${basename(targetPath)}.cannbot-backup.${fromPluginId}.${timestamp}`;
+  const backupPath = join(dirname(targetPath), backupFileName);
 
   try {
-    copyFileSync(agentsFile, backupPath);
+    copyFileSync(targetPath, backupPath);
     return {
       filePath: backupPath,
+      originalPath: targetPath,
       pluginId: fromPluginId,
       pluginName: fromPluginName,
       backupTime: timestamp,
@@ -92,31 +101,74 @@ export function createBackup(
   }
 }
 
-export function findBackups(configRoot: string): BackupInfo[] {
-  if (!existsSync(configRoot)) {
-    return [];
+/** Finds the plugin whose install record owns `targetPath` (its recorded
+ *  files list contains the path), if any. Works for both config-root and
+ *  project-root configuration files. */
+export function findRecordOwner(
+  targetPath: string
+): { pluginId: string; pluginName: string } | null {
+  const resolved = resolve(targetPath);
+  for (const record of readAllRecords()) {
+    if ((record.files || []).some((f: string) => resolve(f) === resolved)) {
+      const plugin = findPlugin(record.pluginId);
+      return {
+        pluginId: record.pluginId,
+        pluginName: plugin?.displayName || record.displayName || record.pluginId,
+      };
+    }
   }
+  return null;
+}
 
-  const files = readdirSync(configRoot);
+/** True when a previous install explicitly preserved `targetPath` for the
+ *  user (recorded in `preservedTargets` and deliberately kept out of the
+ *  record's owned files). Such a file is user-maintained: it must be
+ *  re-confirmed before any install replaces it — including reinstalls of the
+ *  plugin that preserved it, whose leftover manifest would otherwise make
+ *  the file look "same-plugin" owned. */
+export function isPreservedTarget(targetPath: string): boolean {
+  const resolved = resolve(targetPath);
+  return readAllRecords().some((record) =>
+    (record.preservedTargets || []).some((p: string) => resolve(p) === resolved)
+  );
+}
+
+/**
+ * Scans one or more directories for `*.cannbot-backup.*` files. The restore
+ * target (`originalPath`) is derived from the backup file name, so backups
+ * created beside project-root files restore to the project root, not to the
+ * tool config root.
+ */
+export function findBackups(configRoot: string | string[]): BackupInfo[] {
+  const dirs = Array.isArray(configRoot) ? configRoot : [configRoot];
   const backups: BackupInfo[] = [];
 
-  for (const file of files) {
-    if (file.includes(".cannbot-backup.")) {
-      const parts = file.split(".cannbot-backup.");
-      if (parts.length === 2) {
-        const pluginIdAndTime = parts[1];
-        const lastDotIndex = pluginIdAndTime.lastIndexOf(".");
-        if (lastDotIndex > 0) {
-          const pluginId = pluginIdAndTime.substring(0, lastDotIndex);
-          const timestamp = pluginIdAndTime.substring(lastDotIndex + 1);
-          const plugin = findPlugin(pluginId);
+  for (const dir of dirs) {
+    if (!existsSync(dir)) {
+      continue;
+    }
 
-          backups.push({
-            filePath: join(configRoot, file),
-            pluginId,
-            pluginName: plugin?.displayName || pluginId,
-            backupTime: timestamp,
-          });
+    const files = readdirSync(dir);
+
+    for (const file of files) {
+      if (file.includes(".cannbot-backup.")) {
+        const parts = file.split(".cannbot-backup.");
+        if (parts.length === 2) {
+          const pluginIdAndTime = parts[1];
+          const lastDotIndex = pluginIdAndTime.lastIndexOf(".");
+          if (lastDotIndex > 0) {
+            const pluginId = pluginIdAndTime.substring(0, lastDotIndex);
+            const timestamp = pluginIdAndTime.substring(lastDotIndex + 1);
+            const plugin = findPlugin(pluginId);
+
+            backups.push({
+              filePath: join(dir, file),
+              originalPath: join(dir, parts[0]),
+              pluginId,
+              pluginName: plugin?.displayName || pluginId,
+              backupTime: timestamp,
+            });
+          }
         }
       }
     }
@@ -125,14 +177,16 @@ export function findBackups(configRoot: string): BackupInfo[] {
   return backups.sort((a, b) => b.backupTime.localeCompare(a.backupTime));
 }
 
+/**
+ * Restores a backup file to `targetPath` (the original location recorded
+ * when the backup was created).
+ */
 export function restoreBackup(
   backupPath: string,
-  configRoot: string,
-  tool: AITool
+  targetPath: string
 ): boolean {
   try {
-    const agentsFile = join(configRoot, getAgentsFileName(tool));
-    copyFileSync(backupPath, agentsFile);
+    copyFileSync(backupPath, targetPath);
     return true;
   } catch {
     return false;
@@ -163,12 +217,18 @@ function formatTimestamp(date: Date): string {
 
 function readAllRecords(): any[] {
   const records: any[] = [];
-  const plugins = getAllPlugins();
 
-  for (const plugin of plugins) {
-    // A plugin may carry records for several locations — flatten them all
-    // so detectCurrentPlugin can match any of them.
-    records.push(...readRecords(plugin.id));
+  // Scan the installs directory directly (not the plugin registry): records
+  // exist for community plugins that are not part of the embedded registry,
+  // and ownership detection must see those too.
+  const installsDir = join(getCannbotConfigDir(), "installs");
+  if (!existsSync(installsDir)) {
+    return records;
+  }
+  for (const file of readdirSync(installsDir)) {
+    if (!file.endsWith(".json") || file === "skills.json") continue;
+    const pluginId = file.replace(/\.json$/, "");
+    records.push(...readRecords(pluginId));
   }
 
   return records;

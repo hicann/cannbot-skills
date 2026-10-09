@@ -8,8 +8,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { resolve, sep } from "path";
+
+vi.mock("../src/ui/backup-prompts.js", () => ({
+  showOverwriteWarning: vi.fn(async () => "overwrite" as const),
+  showUnownedFileWarning: vi.fn(async () => "replace" as const),
+  showRestorePrompt: vi.fn(async () => "none" as const),
+}));
 
 describe("isSafePath (C2 fix verification)", () => {
   function createIsSafePath(allowedBases: string[]) {
@@ -264,6 +270,137 @@ describe("skill uninstall by name via install record", () => {
     } finally {
       process.chdir(origCwd);
       removeSkillsFromRecord(["npu-arch", "msnpureport-toolkit"], "opencode", "project", W);
+      rmSync(W, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("unowned AGENTS.md backup restore on uninstall", () => {
+  it("restores a replaced project-root AGENTS.md to its original location", async () => {
+    const { installPlugin } = await import("../src/core/installer.js");
+    const { showUnownedFileWarning, showRestorePrompt } = await import("../src/ui/backup-prompts.js");
+    const { findBackups } = await import("../src/core/backup.js");
+    const { deleteRecord } = await import("../src/core/record.js");
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const PLUGIN_ID = "zz-restore-plugin";
+    const W = join(tmpdir(), `ih-restore-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const repoDir = join(W, "repo");
+    const projectDir = join(W, "project");
+    const pluginDir = join(repoDir, PLUGIN_ID);
+    mkdirSync(join(pluginDir, "skills", "demo-skill"), { recursive: true });
+    writeFileSync(join(pluginDir, "skills", "demo-skill", "SKILL.md"), "---\nname: demo-skill\n---\n");
+    writeFileSync(join(pluginDir, "AGENTS.md"), "# Plugin agents");
+    mkdirSync(join(projectDir, ".opencode"), { recursive: true });
+    writeFileSync(join(projectDir, "AGENTS.md"), "# User config");
+
+    const origCwd = process.cwd();
+    try {
+      vi.mocked(showUnownedFileWarning).mockResolvedValueOnce("replace");
+      const installResult = await installPlugin({
+        pluginId: PLUGIN_ID,
+        tool: "opencode",
+        level: "project",
+        repoPath: repoDir,
+        installPath: projectDir,
+        plugin: {
+          id: PLUGIN_ID,
+          dir: PLUGIN_ID,
+          displayName: "ZZ Restore Plugin",
+          script: "init.sh",
+          aliases: [],
+          skills: 1,
+          agents: 0,
+          description: "",
+          configFile: "AGENTS.md",
+          installSkills: [{ dir: `${PLUGIN_ID}/skills`, skills: ["demo-skill"] }],
+          installAgents: [],
+        } as any,
+      });
+      expect(installResult.success).toBe(true);
+      // replaced by the plugin's config via symlink
+      expect(readFileSync(join(projectDir, "AGENTS.md"), "utf-8")).toBe("# Plugin agents");
+
+      const unownedBackup = findBackups([projectDir, join(projectDir, ".opencode")])
+        .find((b) => b.pluginId === "unowned");
+      expect(unownedBackup).toBeDefined();
+      expect(unownedBackup!.originalPath).toBe(join(projectDir, "AGENTS.md"));
+
+      process.chdir(projectDir);
+      vi.mocked(showRestorePrompt).mockResolvedValueOnce(unownedBackup!.filePath);
+      await uninstallCommand([PLUGIN_ID], { tool: "opencode", level: "project", yes: false });
+
+      // the user's original content is back at the original location
+      expect(readFileSync(join(projectDir, "AGENTS.md"), "utf-8")).toBe("# User config");
+      // backup consumed after restore; plugin files removed
+      expect(existsSync(unownedBackup!.filePath)).toBe(false);
+      expect(existsSync(join(projectDir, ".opencode", "skills", "demo-skill"))).toBe(false);
+    } finally {
+      process.chdir(origCwd);
+      deleteRecord(PLUGIN_ID);
+      rmSync(W, { recursive: true, force: true });
+    }
+  });
+
+  it("uninstall never removes a preserved (user-kept) AGENTS.md", async () => {
+    const { installPlugin } = await import("../src/core/installer.js");
+    const { showUnownedFileWarning } = await import("../src/ui/backup-prompts.js");
+    const { deleteRecord } = await import("../src/core/record.js");
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, lstatSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const PLUGIN_ID = "zz-preserved-uninstall";
+    const W = join(tmpdir(), `ih-preserved-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const repoDir = join(W, "repo");
+    const projectDir = join(W, "project");
+    const pluginDir = join(repoDir, PLUGIN_ID);
+    mkdirSync(join(pluginDir, "skills", "demo-skill"), { recursive: true });
+    writeFileSync(join(pluginDir, "skills", "demo-skill", "SKILL.md"), "---\nname: demo-skill\n---\n");
+    writeFileSync(join(pluginDir, "AGENTS.md"), "# Plugin agents");
+    mkdirSync(join(projectDir, ".opencode"), { recursive: true });
+    writeFileSync(join(projectDir, "AGENTS.md"), "# User config");
+
+    const origCwd = process.cwd();
+    try {
+      vi.mocked(showUnownedFileWarning).mockResolvedValueOnce("keep");
+      const installResult = await installPlugin({
+        pluginId: PLUGIN_ID,
+        tool: "opencode",
+        level: "project",
+        repoPath: repoDir,
+        installPath: projectDir,
+        plugin: {
+          id: PLUGIN_ID,
+          dir: PLUGIN_ID,
+          displayName: "ZZ Preserved Uninstall",
+          script: "init.sh",
+          aliases: [],
+          skills: 1,
+          agents: 0,
+          description: "",
+          configFile: "AGENTS.md",
+          installSkills: [{ dir: `${PLUGIN_ID}/skills`, skills: ["demo-skill"] }],
+          installAgents: [],
+        } as any,
+      });
+      expect(installResult.success).toBe(true);
+
+      process.chdir(projectDir);
+      await uninstallCommand([PLUGIN_ID], { tool: "opencode", level: "project", yes: false });
+
+      // the user-kept file survives the uninstall untouched
+      expect(readFileSync(join(projectDir, "AGENTS.md"), "utf-8")).toBe("# User config");
+      expect(lstatSync(join(projectDir, "AGENTS.md")).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(projectDir, ".opencode", "skills", "demo-skill"))).toBe(false);
+      expect(existsSync(join(projectDir, ".opencode", "AGENTS.md"))).toBe(false);
+    } finally {
+      process.chdir(origCwd);
+      deleteRecord(PLUGIN_ID);
       rmSync(W, { recursive: true, force: true });
     }
   });

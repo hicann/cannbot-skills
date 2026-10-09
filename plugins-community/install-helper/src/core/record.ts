@@ -15,7 +15,7 @@ import { atomicWriteFileSync } from "../utils/fs.js";
 import { isSymlink } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
-import type { AITool, InstallLevel, CannbotManifest, SkillBatchRecord } from "../types/index.js";
+import type { AITool, InstallLevel, CannbotManifest, SkillBatchRecord, BackupRecordEntry } from "../types/index.js";
 
 export interface InstallRecord {
   pluginId: string;
@@ -30,12 +30,22 @@ export interface InstallRecord {
   /** "delegated" = installed via the cannbot installer (@cannbot-plugin/cannbot);
    *  absent/legacy = installed by install-helper itself. */
   kind?: "legacy" | "delegated";
+  /** Legacy single-backup field (pre multi-target backups). Kept for
+   *  reading old records; new installs populate `backups` instead. */
   backup?: {
     filePath: string;
     fromPluginId: string;
     fromPluginName: string;
     backupTime: string;
   };
+  /** Backups created during this install, one per replaced configuration
+   *  file. `originalPath` is the restore target so uninstall can return
+   *  project-level files to their original locations. */
+  backups?: BackupRecordEntry[];
+  /** Configuration paths the user chose to keep (never replaced by this
+   *  install). Recorded so uninstall never removes them even though they
+   *  sit where the plugin's own config file would live. */
+  preservedTargets?: string[];
 }
 
 /** Location dimensions of an install: the same plugin can be installed at
@@ -190,7 +200,8 @@ export function scanInstalledFiles(
   configRoot: string,
   manifest: CannbotManifest | null,
   externalRepoNames?: string[],
-  configRootConfigLink?: boolean
+  configRootConfigLink?: boolean,
+  preservedTargets?: string[]
 ): InstallRecord {
   const files: string[] = [];
   const directories: string[] = [];
@@ -241,13 +252,17 @@ export function scanInstalledFiles(
   const configFilePath = level === "project"
     ? join(installPath, configFileName)
     : join(configRoot, configFileName);
-  if (existsSync(configFilePath) || isSymlink(configFilePath)) {
+  // A preserved (user-kept) file at the config location is NOT owned by this
+  // install — recording it would make uninstall delete the user's file.
+  if (!preservedTargets?.includes(configFilePath) && (existsSync(configFilePath) || isSymlink(configFilePath))) {
     files.push(configFilePath);
   }
 
   if (level === "project" && configRootConfigLink !== false) {
     const configRootConfigPath = join(configRoot, configFileName);
-    if (configRootConfigPath !== configFilePath && (existsSync(configRootConfigPath) || isSymlink(configRootConfigPath))) {
+    if (configRootConfigPath !== configFilePath &&
+        !preservedTargets?.includes(configRootConfigPath) &&
+        (existsSync(configRootConfigPath) || isSymlink(configRootConfigPath))) {
       files.push(configRootConfigPath);
     }
   }

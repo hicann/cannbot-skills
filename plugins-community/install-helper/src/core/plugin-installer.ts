@@ -112,7 +112,14 @@ function installLink(source: string, target: string): "symlink" | "copy" | "skip
   }
 }
 
-function installConfigFile(
+/**
+ * Enumerates every configuration file path `installConfigFile` will replace
+ * for this plugin/tool/level — the single source of truth shared by the
+ * installer preflight (prompt + backup) and the actual replacement. At
+ * project level the primary target is the project-root instructions file and
+ * (unless `configRootConfigLink === false`) the tool config root copy.
+ */
+export function configFileTargets(
   pluginDir: string,
   configFile: string,
   tool: AITool,
@@ -120,6 +127,37 @@ function installConfigFile(
   configRoot: string,
   installPath: string,
   configRootConfigLink?: boolean
+): string[] {
+  const sourcePath = join(pluginDir, configFile);
+  if (!existsSync(sourcePath)) return [];
+
+  const agentsFileName = getAgentsFileName(tool);
+  const targets: string[] = [];
+
+  if (level === "project") {
+    targets.push(join(installPath, agentsFileName));
+    if (configRootConfigLink !== false) {
+      const configRootTarget = join(configRoot, agentsFileName);
+      if (!targets.includes(configRootTarget)) {
+        targets.push(configRootTarget);
+      }
+    }
+  } else {
+    targets.push(join(configRoot, agentsFileName));
+  }
+
+  return targets;
+}
+
+function installConfigFile(
+  pluginDir: string,
+  configFile: string,
+  tool: AITool,
+  level: InstallLevel,
+  configRoot: string,
+  installPath: string,
+  configRootConfigLink?: boolean,
+  preservedTargets?: string[]
 ): void {
   const sourcePath = join(pluginDir, configFile);
   if (!existsSync(sourcePath)) return;
@@ -134,29 +172,37 @@ function installConfigFile(
     primaryTarget = join(configRoot, agentsFileName);
   }
 
-  try {
-    const resolvedSource = realpathSync(sourcePath);
-
-    if (existsSync(primaryTarget) || isSymlink(primaryTarget)) {
-      removePath(primaryTarget);
-    }
-
+  if (preservedTargets?.includes(primaryTarget)) {
+    logger.info(t("install_config_preserved").replace("{file}", primaryTarget));
+  } else {
     try {
-      symlinkSync(resolvedSource, primaryTarget);
-    } catch (e: any) {
-      if (e.code === "EPERM") {
-        copyFileSync(sourcePath, primaryTarget);
-      } else {
-        throw e;
+      const resolvedSource = realpathSync(sourcePath);
+
+      if (existsSync(primaryTarget) || isSymlink(primaryTarget)) {
+        removePath(primaryTarget);
       }
+
+      try {
+        symlinkSync(resolvedSource, primaryTarget);
+      } catch (e: any) {
+        if (e.code === "EPERM") {
+          copyFileSync(sourcePath, primaryTarget);
+        } else {
+          throw e;
+        }
+      }
+    } catch (e: any) {
+      logger.warn(t("install_config_failed").replace("{error}", e.message));
     }
-  } catch (e: any) {
-    logger.warn(t("install_config_failed").replace("{error}", e.message));
   }
 
   if (isProjectLevel && primaryTarget !== join(configRoot, agentsFileName)) {
     if (configRootConfigLink === false) return;
     const configRootTarget = join(configRoot, agentsFileName);
+    if (preservedTargets?.includes(configRootTarget)) {
+      logger.info(t("install_config_preserved").replace("{file}", configRootTarget));
+      return;
+    }
     if (existsSync(configRootTarget) || isSymlink(configRootTarget)) {
       removePath(configRootTarget);
     }
@@ -304,7 +350,8 @@ export async function installViaManifest(
   repoPath: string,
   tool: AITool,
   level: InstallLevel,
-  installPath?: string
+  installPath?: string,
+  preservedTargets?: string[]
 ): Promise<ManifestInstallResult> {
   const cwd = installPath || process.cwd();
   const configRoot = getConfigRoot(tool, level, installPath);
@@ -393,7 +440,7 @@ export async function installViaManifest(
       }
     }
 
-    installConfigFile(pluginDir, plugin.configFile || "AGENTS.md", tool, level, configRoot, cwd, plugin.configRootConfigLink);
+    installConfigFile(pluginDir, plugin.configFile || "AGENTS.md", tool, level, configRoot, cwd, plugin.configRootConfigLink, preservedTargets);
 
     installWorkflows(pluginDir, configRoot);
 

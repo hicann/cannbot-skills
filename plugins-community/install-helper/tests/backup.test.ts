@@ -29,25 +29,40 @@ describe("backup", () => {
   afterEach(teardown);
 
   describe("createBackup", () => {
-    it("creates backup file when AGENTS.md exists", async () => {
+    it("creates backup beside the target file and records originalPath", async () => {
       const { createBackup } = await import("../src/core/backup.js");
       const agentsFile = join(testDir, "AGENTS.md");
       writeFileSync(agentsFile, "# Original config");
-      const result = createBackup(testDir, "opencode", "plugin-a", "Plugin A");
+      const result = createBackup(agentsFile, "plugin-a", "Plugin A");
       expect(result).not.toBeNull();
       expect(existsSync(result!.filePath)).toBe(true);
+      expect(result!.filePath.startsWith(testDir)).toBe(true);
+      expect(result!.originalPath).toBe(agentsFile);
       expect(result!.pluginId).toBe("plugin-a");
     });
 
-    it("returns null when AGENTS.md does not exist", async () => {
+    it("backs up a project-root file outside the config root", async () => {
       const { createBackup } = await import("../src/core/backup.js");
-      const result = createBackup(testDir, "opencode", "plugin-a", "Plugin A");
+      const projectRoot = join(testDir, "project");
+      mkdirSync(projectRoot, { recursive: true });
+      const target = join(projectRoot, "AGENTS.md");
+      writeFileSync(target, "# User maintained");
+      const result = createBackup(target, "unowned", "User file");
+      expect(result).not.toBeNull();
+      expect(result!.originalPath).toBe(target);
+      expect(result!.filePath.startsWith(projectRoot)).toBe(true);
+      expect(readFileSync(result!.filePath, "utf-8")).toBe("# User maintained");
+    });
+
+    it("returns null when target does not exist", async () => {
+      const { createBackup } = await import("../src/core/backup.js");
+      const result = createBackup(join(testDir, "AGENTS.md"), "plugin-a", "Plugin A");
       expect(result).toBeNull();
     });
   });
 
   describe("findBackups", () => {
-    it("finds existing backup files", async () => {
+    it("finds existing backup files and derives originalPath", async () => {
       const { findBackups } = await import("../src/core/backup.js");
       const agentsFile = join(testDir, "AGENTS.md");
       writeFileSync(agentsFile, "# Config");
@@ -58,6 +73,25 @@ describe("backup", () => {
       expect(backups.length).toBe(1);
       expect(backups[0].pluginId).toBe("plugin-a");
       expect(backups[0].backupTime).toBe("20260101-120000");
+      expect(backups[0].originalPath).toBe(agentsFile);
+    });
+
+    it("scans multiple directories (config root + project root)", async () => {
+      const { findBackups } = await import("../src/core/backup.js");
+      const configRoot = join(testDir, ".opencode");
+      const projectRoot = join(testDir, "project");
+      mkdirSync(configRoot, { recursive: true });
+      mkdirSync(projectRoot, { recursive: true });
+      writeFileSync(join(configRoot, "AGENTS.md.cannbot-backup.plugin-a.20260101-120000"), "# Plugin config");
+      writeFileSync(join(projectRoot, "AGENTS.md.cannbot-backup.unowned.20260102-130000"), "# User file");
+
+      const backups = findBackups([configRoot, projectRoot]);
+      expect(backups.length).toBe(2);
+      const unowned = backups.find((b) => b.pluginId === "unowned");
+      expect(unowned).toBeDefined();
+      expect(unowned!.originalPath).toBe(join(projectRoot, "AGENTS.md"));
+      const pluginOwned = backups.find((b) => b.pluginId === "plugin-a");
+      expect(pluginOwned!.originalPath).toBe(join(configRoot, "AGENTS.md"));
     });
 
     it("returns empty array when no backups exist", async () => {
@@ -79,22 +113,66 @@ describe("backup", () => {
     });
   });
 
+  describe("findRecordOwner", () => {
+    it("finds the plugin whose record files include the target", async () => {
+      const { findRecordOwner } = await import("../src/core/backup.js");
+      const { writeRecord, deleteRecord } = await import("../src/core/record.js");
+
+      const target = join(testDir, "project", "AGENTS.md");
+      writeRecord({
+        pluginId: "zz-backup-owner-test",
+        displayName: "Backup Owner Test",
+        tool: "opencode",
+        level: "project",
+        installPath: join(testDir, "project"),
+        configRoot: join(testDir, "project", ".opencode"),
+        installTime: "2026-01-01T00:00:00.000Z",
+        files: [target],
+        directories: [],
+      });
+      try {
+        const owner = findRecordOwner(target);
+        expect(owner).not.toBeNull();
+        expect(owner!.pluginId).toBe("zz-backup-owner-test");
+      } finally {
+        deleteRecord("zz-backup-owner-test");
+      }
+    });
+
+    it("returns null for a target no record owns", async () => {
+      const { findRecordOwner } = await import("../src/core/backup.js");
+      expect(findRecordOwner(join(testDir, "nowhere", "AGENTS.md"))).toBeNull();
+    });
+  });
+
   describe("restoreBackup", () => {
-    it("restores backup to AGENTS.md", async () => {
+    it("restores backup to the original path", async () => {
       const { restoreBackup } = await import("../src/core/backup.js");
       const agentsFile = join(testDir, "AGENTS.md");
       const backupFile = join(testDir, "backup.bak");
       writeFileSync(backupFile, "# Original");
       writeFileSync(agentsFile, "# Modified");
 
-      const result = restoreBackup(backupFile, testDir, "opencode");
+      const result = restoreBackup(backupFile, agentsFile);
       expect(result).toBe(true);
       expect(readFileSync(agentsFile, "utf-8")).toBe("# Original");
     });
 
+    it("restores to a project-root path outside the config root", async () => {
+      const { restoreBackup } = await import("../src/core/backup.js");
+      const projectRoot = join(testDir, "project");
+      mkdirSync(projectRoot, { recursive: true });
+      const backupFile = join(projectRoot, "AGENTS.md.cannbot-backup.unowned.20260101-120000");
+      writeFileSync(backupFile, "# User original");
+
+      const result = restoreBackup(backupFile, join(projectRoot, "AGENTS.md"));
+      expect(result).toBe(true);
+      expect(readFileSync(join(projectRoot, "AGENTS.md"), "utf-8")).toBe("# User original");
+    });
+
     it("returns false when backup file does not exist", async () => {
       const { restoreBackup } = await import("../src/core/backup.js");
-      const result = restoreBackup(join(testDir, "nonexistent.bak"), testDir, "opencode");
+      const result = restoreBackup(join(testDir, "nonexistent.bak"), join(testDir, "AGENTS.md"));
       expect(result).toBe(false);
     });
   });

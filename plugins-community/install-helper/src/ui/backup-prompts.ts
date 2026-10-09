@@ -38,6 +38,35 @@ export async function showOverwriteWarning(
   return choice as "overwrite" | "cancel";
 }
 
+/**
+ * Prompt shown before replacing a configuration file that no known plugin
+ * owns (typically user-maintained). Defaults to keeping the user's file.
+ */
+export async function showUnownedFileWarning(
+  filePath: string,
+  newPluginName: string
+): Promise<"replace" | "keep" | "cancel"> {
+  console.log();
+  console.log(chalk.yellow(`  ⚠️  ${t("unowned_file_detected")}`));
+  console.log();
+  console.log(`    ${t("unowned_file_path")}: ${chalk.cyan(filePath)}`);
+  console.log(`    ${t("backup_installing")}: ${chalk.cyan(newPluginName)}`);
+  console.log();
+  console.log(`    ${t("unowned_file_warning")}`);
+  console.log();
+
+  const choice = await select({
+    message: t("backup_select_action"),
+    choices: [
+      { name: t("unowned_file_keep"), value: "keep" },
+      { name: t("unowned_file_replace"), value: "replace" },
+      { name: t("backup_cancel"), value: "cancel" },
+    ],
+  });
+
+  return choice as "replace" | "keep" | "cancel";
+}
+
 export async function showRestorePrompt(
   backups: BackupInfo[]
 ): Promise<string | "none"> {
@@ -46,7 +75,9 @@ export async function showRestorePrompt(
   console.log();
 
   const choices = backups.map((b) => ({
-    name: `${t("backup_restore")} ${b.pluginName} (${b.backupTime})`,
+    name: b.pluginId === "unowned"
+      ? `${t("backup_restore_user_file")} ${b.originalPath} (${b.backupTime})`
+      : `${t("backup_restore")} ${b.pluginName} (${b.backupTime})`,
     value: b.filePath,
   }));
 

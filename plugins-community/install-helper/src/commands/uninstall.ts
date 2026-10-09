@@ -524,6 +524,8 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
     const resolved = resolve(p);
     return allowedBases.some(base => resolved === base || resolved.startsWith(base + sep));
   };
+  // Paths the user kept at install time — never removed by uninstall.
+  const preservedPaths = new Set((record.preservedTargets || []).map((p) => resolve(p)));
 
   let removedFiles = 0;
   let removedDirs = 0;
@@ -540,7 +542,9 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
     extraFiles.push(configRootConfigPath);
   }
 
-  const allFiles = [...record.files, ...extraFiles];
+  const allFiles = [...record.files, ...extraFiles].filter(
+    (filePath) => !preservedPaths.has(resolve(filePath))
+  );
 
   for (const filePath of allFiles) {
     if (!isSafePath(filePath)) continue;
@@ -597,17 +601,36 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
   });
   removeInstalledPlugin(plugin.id);
 
-  const backups = findBackups(configRoot);
+  // Backups may sit beside the replaced files in the install path (project
+  // root) as well as in the config root — scan both, preferring the
+  // originalPath recorded at install time over filename derivation so
+  // project-level files restore to their original locations.
+  const backupDirs = resolve(record.installPath) === resolve(configRoot)
+    ? [configRoot]
+    : [configRoot, record.installPath];
+  const recordBackups = [
+    ...(record.backups || []),
+    ...(record.backup
+      ? [{ ...record.backup, originalPath: join(configRoot, configFileName) }]
+      : []),
+  ];
+  const backups = findBackups(backupDirs).map((b) => {
+    const recorded = recordBackups.find((rb) => resolve(rb.filePath) === resolve(b.filePath));
+    return recorded ? { ...b, originalPath: recorded.originalPath } : b;
+  });
   const otherBackups = backups.filter((b) => b.pluginId !== pluginId);
 
   if (!batchMode && otherBackups.length > 0) {
     const choice = await showRestorePrompt(otherBackups);
     if (choice !== "none") {
-      const restored = restoreBackup(choice, configRoot, record.tool);
-      if (restored) {
-        const backupInfo = otherBackups.find((b) => b.filePath === choice);
-        logger.success(`${t("backup_restore_success")}: ${backupInfo?.pluginName || ""}`);
-        deleteBackup(choice);
+      const backupInfo = otherBackups.find((b) => b.filePath === choice);
+      const restoreTarget = backupInfo?.originalPath || join(configRoot, configFileName);
+      if (isSafePath(restoreTarget)) {
+        const restored = restoreBackup(choice, restoreTarget);
+        if (restored) {
+          logger.success(`${t("backup_restore_success")}: ${backupInfo?.pluginName || ""} -> ${restoreTarget}`);
+          deleteBackup(choice);
+        }
       }
     }
   } else if (batchMode && otherBackups.length > 0) {

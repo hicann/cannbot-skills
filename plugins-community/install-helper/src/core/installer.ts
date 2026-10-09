@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import { join, basename, isAbsolute } from "path";
 import { execa, execaSync } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, BackupInfo } from "../types/index.js";
@@ -16,9 +16,10 @@ import { getPluginById } from "./registry.js";
 import { readManifest } from "./manifest.js";
 import { getConfigRoot } from "../utils/paths.js";
 import { scanInstalledFiles, writeRecord } from "./record.js";
-import { detectCurrentPlugin, createBackup, getAgentsFileName } from "./backup.js";
-import { showOverwriteWarning } from "../ui/backup-prompts.js";
-import { installViaManifest } from "./plugin-installer.js";
+import { detectCurrentPlugin, createBackup, findRecordOwner, isPreservedTarget, UNOWNED_PLUGIN_ID } from "./backup.js";
+import { isSymlink } from "../utils/fs-helpers.js";
+import { showOverwriteWarning, showUnownedFileWarning } from "../ui/backup-prompts.js";
+import { installViaManifest, configFileTargets } from "./plugin-installer.js";
 import { t } from "../utils/i18n.js";
 import { logger } from "../utils/logger.js";
 
@@ -42,6 +43,67 @@ export function scriptSupportsTool(scriptPath: string, tool: AITool): boolean {
     // script unreadable — let execa surface the failure
     return true;
   }
+}
+
+interface TargetOwner {
+  kind: "same-plugin" | "other-plugin" | "unowned";
+  pluginId: string;
+  pluginName: string;
+}
+
+/**
+ * Classifies who owns an existing configuration file that installation is
+ * about to replace:
+ *  - "same-plugin": the file is this plugin's own (reinstall) — no prompt;
+ *  - "other-plugin": a recorded/manifested install of another plugin;
+ *  - "unowned": a user-maintained or unknown-origin file — must be confirmed
+ *    by the user before it is replaced.
+ */
+function classifyConfigTarget(
+  targetPath: string,
+  pluginConfigSource: string,
+  pluginId: string,
+  pluginName: string,
+  configRoot: string,
+  tool: AITool,
+  installPath: string
+): TargetOwner {
+  // A symlink pointing at this plugin's own source file: reinstall.
+  if (isSymlink(targetPath)) {
+    try {
+      if (realpathSync(targetPath) === realpathSync(pluginConfigSource)) {
+        return { kind: "same-plugin", pluginId, pluginName };
+      }
+    } catch {
+      // dangling/unreadable link — fall through to the record lookup
+    }
+  }
+
+  // A previous install explicitly preserved this file for the user — it is
+  // user-maintained, not plugin-owned (its record keeps it out of `files`),
+  // so it must be re-confirmed instead of silently replaced by a reinstall
+  // that otherwise looks like "same-plugin" via the leftover manifest.
+  if (isPreservedTarget(targetPath)) {
+    return { kind: "unowned", pluginId: UNOWNED_PLUGIN_ID, pluginName: UNOWNED_PLUGIN_ID };
+  }
+
+  // A recorded install owns the target (covers project-root files too).
+  const recordOwner = findRecordOwner(targetPath);
+  if (recordOwner) {
+    return recordOwner.pluginId === pluginId
+      ? { kind: "same-plugin", pluginId, pluginName }
+      : { kind: "other-plugin", ...recordOwner };
+  }
+
+  // Config-root manifests: the legacy ownership signal.
+  const currentPlugin = detectCurrentPlugin(configRoot, tool, installPath);
+  if (currentPlugin) {
+    return currentPlugin.pluginId === pluginId
+      ? { kind: "same-plugin", pluginId, pluginName }
+      : { kind: "other-plugin", ...currentPlugin };
+  }
+
+  return { kind: "unowned", pluginId: UNOWNED_PLUGIN_ID, pluginName: UNOWNED_PLUGIN_ID };
 }
 
 export async function installPlugin(
@@ -84,44 +146,74 @@ export async function installPlugin(
   const pluginDir = isAbsolute(plugin.dir) ? plugin.dir : join(opts.repoPath, plugin.dir);
   const cwd = opts.installPath || process.cwd();
   const configRoot = getConfigRoot(opts.tool, opts.level, opts.installPath);
-  const agentsFile = join(configRoot, getAgentsFileName(opts.tool));
-  let backupInfo: BackupInfo | null = null;
 
-  if (existsSync(agentsFile)) {
-    const currentPlugin = detectCurrentPlugin(configRoot, opts.tool, opts.installPath);
+  // --- Multi-target preflight: every configuration file this install will
+  // replace is detected, confirmed and backed up before anything is touched.
+  // At project level that includes the project-root instructions file, which
+  // used to be replaced silently (no prompt, no backup) whenever the tool
+  // config root held no previous install.
+  const pluginConfigSource = join(pluginDir, plugin.configFile || "AGENTS.md");
+  const existingTargets = configFileTargets(
+    pluginDir,
+    plugin.configFile || "AGENTS.md",
+    opts.tool,
+    opts.level,
+    configRoot,
+    cwd,
+    plugin.configRootConfigLink
+  ).filter((p) => existsSync(p) || isSymlink(p));
 
-    if (currentPlugin && currentPlugin.pluginId !== opts.pluginId) {
-      let choice: "overwrite" | "cancel" = "overwrite";
-      
-      if (!opts.yes) {
-        choice = await showOverwriteWarning(
-          currentPlugin.pluginName,
-          plugin.displayName
-        );
-      }
+  const backups: BackupInfo[] = [];
+  // Targets the user chose to keep (or that --yes preserves) — passed to the
+  // manifest installer so it skips them. Legacy init.sh scripts cannot honor
+  // this list (see issue #372); for them the preflight backup above is the
+  // recovery path.
+  const preservedTargets: string[] = [];
+  const promptedPlugins = new Set<string>();
 
-      if (choice === "cancel") {
-        logger.info(t("backup_cancel"));
-        return {
-          success: false,
-          pluginId: opts.pluginId,
-          skillsCount: 0,
-          agentsCount: 0,
-          errors: [t("backup_cancel")],
-          warnings: [],
-        };
-      }
+  for (const target of existingTargets) {
+    const owner = classifyConfigTarget(
+      target,
+      pluginConfigSource,
+      opts.pluginId,
+      plugin.displayName,
+      configRoot,
+      opts.tool,
+      cwd
+    );
+
+    if (owner.kind === "same-plugin") {
+      // Reinstall of the same plugin: content identical, keep the safety
+      // backup but never prompt (historical behavior).
+      const backup = createBackup(target, owner.pluginId, owner.pluginName);
+      if (backup) backups.push(backup);
+      continue;
     }
 
-    if (currentPlugin) {
-      backupInfo = createBackup(
-        configRoot,
-        opts.tool,
-        currentPlugin.pluginId,
-        currentPlugin.pluginName
-      );
+    if (owner.kind === "other-plugin") {
+      if (!promptedPlugins.has(owner.pluginId)) {
+        promptedPlugins.add(owner.pluginId);
+        let choice: "overwrite" | "cancel" = "overwrite";
 
-      if (!backupInfo) {
+        if (!opts.yes) {
+          choice = await showOverwriteWarning(owner.pluginName, plugin.displayName);
+        }
+
+        if (choice === "cancel") {
+          logger.info(t("backup_cancel"));
+          return {
+            success: false,
+            pluginId: opts.pluginId,
+            skillsCount: 0,
+            agentsCount: 0,
+            errors: [t("backup_cancel")],
+            warnings: [],
+          };
+        }
+      }
+
+      const backup = createBackup(target, owner.pluginId, owner.pluginName);
+      if (!backup) {
         logger.error(t("backup_failed"));
         return {
           success: false,
@@ -132,9 +224,52 @@ export async function installPlugin(
           warnings: [],
         };
       }
-
-      logger.success(`${t("backup_created")}: ${backupInfo.filePath}`);
+      backups.push(backup);
+      logger.success(`${t("backup_created")}: ${backup.filePath}`);
+      continue;
     }
+
+    // Unowned file: user-maintained or unknown origin.
+    if (opts.yes) {
+      // Non-interactive: no explicit user confirmation exists — preserve it.
+      preservedTargets.push(target);
+      logger.warn(t("unowned_preserved_yes").replace("{file}", target));
+      continue;
+    }
+
+    const choice = await showUnownedFileWarning(target, plugin.displayName);
+    if (choice === "cancel") {
+      logger.info(t("backup_cancel"));
+      return {
+        success: false,
+        pluginId: opts.pluginId,
+        skillsCount: 0,
+        agentsCount: 0,
+        errors: [t("backup_cancel")],
+        warnings: [],
+      };
+    }
+
+    if (choice === "keep") {
+      preservedTargets.push(target);
+      logger.info(t("unowned_preserved").replace("{file}", target));
+      continue;
+    }
+
+    const backup = createBackup(target, UNOWNED_PLUGIN_ID, t("unowned_backup_label"));
+    if (!backup) {
+      logger.error(t("backup_failed"));
+      return {
+        success: false,
+        pluginId: opts.pluginId,
+        skillsCount: 0,
+        agentsCount: 0,
+        errors: [t("backup_failed")],
+        warnings: [],
+      };
+    }
+    backups.push(backup);
+    logger.success(`${t("backup_created")}: ${backup.filePath}`);
   }
 
   if (plugin.installSkills && plugin.installSkills.length > 0) {
@@ -143,7 +278,8 @@ export async function installPlugin(
       opts.repoPath,
       opts.tool,
       opts.level,
-      opts.installPath
+      opts.installPath,
+      preservedTargets
     );
 
     if (result.success) {
@@ -157,18 +293,23 @@ export async function installPlugin(
           configRoot,
           result.manifest,
           plugin.externalRepos?.map(r => basename(r.dir)),
-          plugin.configRootConfigLink
+          plugin.configRootConfigLink,
+          preservedTargets
         );
-        
-        if (backupInfo) {
-          record.backup = {
-            filePath: backupInfo.filePath,
-            fromPluginId: backupInfo.pluginId,
-            fromPluginName: backupInfo.pluginName,
-            backupTime: backupInfo.backupTime,
-          };
+
+        if (backups.length > 0) {
+          record.backups = backups.map((b) => ({
+            filePath: b.filePath,
+            originalPath: b.originalPath,
+            fromPluginId: b.pluginId,
+            fromPluginName: b.pluginName,
+            backupTime: b.backupTime,
+          }));
         }
-        
+        if (preservedTargets.length > 0) {
+          record.preservedTargets = [...preservedTargets];
+        }
+
         writeRecord(record);
       } catch {
         logger.warn(t("record_write_failed"));
@@ -270,18 +411,23 @@ export async function installPlugin(
         configRoot,
         manifest,
         plugin.externalRepos?.map(r => basename(r.dir)),
-        plugin.configRootConfigLink
+        plugin.configRootConfigLink,
+        preservedTargets
       );
-      
-      if (backupInfo) {
-        record.backup = {
-          filePath: backupInfo.filePath,
-          fromPluginId: backupInfo.pluginId,
-          fromPluginName: backupInfo.pluginName,
-          backupTime: backupInfo.backupTime,
-        };
+
+      if (backups.length > 0) {
+        record.backups = backups.map((b) => ({
+          filePath: b.filePath,
+          originalPath: b.originalPath,
+          fromPluginId: b.pluginId,
+          fromPluginName: b.pluginName,
+          backupTime: b.backupTime,
+        }));
       }
-      
+      if (preservedTargets.length > 0) {
+        record.preservedTargets = [...preservedTargets];
+      }
+
       writeRecord(record);
     } catch {
       logger.warn(t("record_write_failed"));

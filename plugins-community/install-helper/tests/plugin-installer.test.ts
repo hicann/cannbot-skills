@@ -515,4 +515,115 @@ describe("plugin-installer", () => {
       expect(shouldInitializeIssueHandlerConfig("project", ["other-skill"])).toBe(false);
     });
   });
+
+  describe("configFileTargets", () => {
+    it("returns project-root and config-root targets at project level", async () => {
+      const { configFileTargets } = await import("../src/core/plugin-installer.js");
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const configRoot = join(testDir, ".opencode");
+
+      const targets = configFileTargets(pluginDir, "AGENTS.md", "opencode", "project", configRoot, testDir);
+      expect(targets).toEqual([join(testDir, "AGENTS.md"), join(configRoot, "AGENTS.md")]);
+    });
+
+    it("omits the config-root target when configRootConfigLink is false", async () => {
+      const { configFileTargets } = await import("../src/core/plugin-installer.js");
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const configRoot = join(testDir, ".opencode");
+
+      const targets = configFileTargets(pluginDir, "AGENTS.md", "opencode", "project", configRoot, testDir, false);
+      expect(targets).toEqual([join(testDir, "AGENTS.md")]);
+    });
+
+    it("returns only the config-root target at global level", async () => {
+      const { configFileTargets } = await import("../src/core/plugin-installer.js");
+      const pluginDir = join(testDir, "my-plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Agents");
+      const configRoot = join(testDir, ".config", "opencode");
+
+      const targets = configFileTargets(pluginDir, "AGENTS.md", "opencode", "global", configRoot, testDir);
+      expect(targets).toEqual([join(configRoot, "AGENTS.md")]);
+    });
+
+    it("returns empty when the plugin ships no config file", async () => {
+      const { configFileTargets } = await import("../src/core/plugin-installer.js");
+      const pluginDir = join(testDir, "no-config-plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      const configRoot = join(testDir, ".opencode");
+
+      const targets = configFileTargets(pluginDir, "AGENTS.md", "opencode", "project", configRoot, testDir);
+      expect(targets).toEqual([]);
+    });
+  });
+
+  describe("installViaManifest preserved targets", () => {
+    function makePlugin(id: string) {
+      const pluginDir = join(testDir, id);
+      mkdirSync(join(pluginDir, "skills", "demo-skill"), { recursive: true });
+      writeFileSync(join(pluginDir, "skills", "demo-skill", "SKILL.md"), "---\nname: demo-skill\n---\n");
+      writeFileSync(join(pluginDir, "AGENTS.md"), "# Plugin agents");
+      return {
+        id,
+        dir: id,
+        displayName: id,
+        script: "init.sh",
+        aliases: [],
+        skills: 1,
+        agents: 0,
+        description: "",
+        configFile: "AGENTS.md",
+        installSkills: [{ dir: `${id}/skills`, skills: ["demo-skill"] }],
+        installAgents: [],
+      };
+    }
+
+    it("keeps an unowned project-root AGENTS.md when it is preserved", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const plugin = makePlugin("keep-plugin");
+      writeFileSync(join(testDir, "AGENTS.md"), "# User config");
+
+      const result = await installViaManifest(plugin, testDir, "opencode", "project", testDir, [join(testDir, "AGENTS.md")]);
+
+      expect(result.success).toBe(true);
+      expect(result.skillsCount).toBe(1);
+      expect(readFileSync(join(testDir, "AGENTS.md"), "utf-8")).toBe("# User config");
+      expect(lstatSync(join(testDir, "AGENTS.md")).isSymbolicLink()).toBe(false);
+      // the config-root copy is a separate target and still installs
+      expect(existsSync(join(testDir, ".opencode", "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(testDir, ".opencode", "skills", "demo-skill"))).toBe(true);
+    });
+
+    it("keeps the config-root copy when it is preserved instead", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const plugin = makePlugin("keep-root-plugin");
+      const configRoot = join(testDir, ".opencode");
+      mkdirSync(configRoot, { recursive: true });
+      writeFileSync(join(configRoot, "AGENTS.md"), "# User config root");
+
+      const result = await installViaManifest(plugin, testDir, "opencode", "project", testDir, [join(configRoot, "AGENTS.md")]);
+
+      expect(result.success).toBe(true);
+      expect(readFileSync(join(configRoot, "AGENTS.md"), "utf-8")).toBe("# User config root");
+      expect(lstatSync(join(configRoot, "AGENTS.md")).isSymbolicLink()).toBe(false);
+      // project-root file did not exist before — still installed
+      expect(existsSync(join(testDir, "AGENTS.md"))).toBe(true);
+    });
+
+    it("replaces the project-root file when not preserved (regression)", async () => {
+      const { installViaManifest } = await import("../src/core/plugin-installer.js");
+      const plugin = makePlugin("replace-plugin");
+      writeFileSync(join(testDir, "AGENTS.md"), "# User config");
+
+      const result = await installViaManifest(plugin, testDir, "opencode", "project", testDir);
+
+      expect(result.success).toBe(true);
+      expect(lstatSync(join(testDir, "AGENTS.md")).isSymbolicLink()).toBe(true);
+      expect(readFileSync(join(testDir, "AGENTS.md"), "utf-8")).toBe("# Plugin agents");
+    });
+  });
 });

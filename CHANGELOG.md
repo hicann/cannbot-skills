@@ -4,6 +4,7 @@
 
 ### 【2026-10-08】
 #### 缺陷修复 Bug Fixes
+- 【安装部署】install-helper `v1.2.2` 修复静默覆盖用户 AGENTS.md：预检只查工具配置根而实际替换项目根文件，无确认、无备份、卸载不可恢复。改为枚举全部替换目标，无主文件须确认（默认保留，`--yes` 保留），逐文件就地备份并记录原路径，卸载按原路径还原。另同步 `tilelang-op-orchestrator` yml 漂移。
 - 【文档】修复 `ops/ascendc-sync-audit/SKILL.md` 执行步骤命令携带脚本不存在的 `--frontend auto` 参数、照抄即 argparse 报错中断主流程的问题（issue #792）；同步删除「范围扩大检查点」中不可达的「frontend 切换」表述——analyzer 的 frontend 硬编码为 regex 且不可切换。
 
 ### 【2026-09-30】

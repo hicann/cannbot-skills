@@ -81,8 +81,19 @@ export interface InstallResult {
 
 export interface BackupInfo {
   filePath: string;
+  /** Path of the file that was backed up — also the restore target. */
+  originalPath: string;
   pluginId: string;
   pluginName: string;
+  backupTime: string;
+}
+
+/** Install-record entry describing one backup created during an install. */
+export interface BackupRecordEntry {
+  filePath: string;
+  originalPath: string;
+  fromPluginId: string;
+  fromPluginName: string;
   backupTime: string;
 }
 
@@ -131,6 +142,12 @@ export interface SkillBatchRecord {
   installedAt: string;
   skills: string[];
 }
+
+// === record (install bookkeeping) ===
+
+/** Paths the user chose to keep during an install — install-helper must not
+ *  replace them during install nor remove them at uninstall. */
+export type PreservedTargets = string[];
 
 // === cannbot (@cannbot-plugin/cannbot) integration types ===
 

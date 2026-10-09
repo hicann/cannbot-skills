@@ -10,7 +10,7 @@ configRootConfigLink: false
 installSkills:
   - dir: ops
     skills: [tilelang-api-best-practices, tilelang-env-check, tilelang-op-design, tilelang-op-develop, tilelang-op-test-design, tilelang-perf-optimization, tilelang-programming-model-guide, tilelang-review, tilelang-submodule-pull]
-installAgents: [tilelang-op-analyst, tilelang-op-developer, tilelang-op-perf-tuner]
+installAgents: [tilelang-op-analyst, tilelang-op-developer, tilelang-op-perf-tuner, tilelang-perf-analysis-expert, tilelang-perf-impl-expert, tilelang-tuning]
 externalRepos:
   - url: https://github.com/tile-ai/tilelang-ascend.git
     dir: plugins-official/tilelang-op-orchestrator/tilelang-ascend
