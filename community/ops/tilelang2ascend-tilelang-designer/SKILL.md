@@ -69,17 +69,17 @@ argument-hint: >
 
 ### 本 skill 自带脚本
 
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/evaluate_tilelang.sh` — TileLang 功能验证脚本（步骤 3c 强制使用；精度通过是步骤 4 性能迭代的强制前置）
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/validate_tilelang_impl.py` — TileLang 实现退化检测（检测 PyTorch 回退）
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/verification_tilelang.py` — TileLang 精度验证
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/scripts/evaluate_tilelang.sh` — TileLang 功能验证脚本（步骤 3c 强制使用；精度通过是步骤 4 性能迭代的强制前置）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/scripts/validate_tilelang_impl.py` — TileLang 实现退化检测（检测 PyTorch 回退）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/scripts/verification_tilelang.py` — TileLang 精度验证
 
 ### 本 skill 自带设计模式参考
 
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/DesignPatternIndex.md` — 归约/重排/排序TopK/Norm 族/克隆搬运类设计模式索引（(O,R,I) 路径路由、规律 pattern vs 建表、广播源行共享、按最终布局摆放、核数分档、值域二分 vs 分段 sort 路由、组间独立归一化并行范式、克隆段独立 memcpy kernel 结构）
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/reduce_design.md` — 归约族算子设计决策要点（设计阶段定，可 TileLang DSL 表达）
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/shuffle_design.md` — 重排/搬运类算子设计决策要点
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/sort_topk_design.md` — 排序/TopK/采样类算子设计决策要点（TopK 主结构路由：值域二分 vs 分段 sort、tie 语义、p/k 输入约束）
-- `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/references/design-patterns/references/norm_fusion_design.md` — Norm 族+激活融合算子设计决策要点（组间独立归一化并行范式、两遍中心化 + mean 修正、affine 融合、双缓冲流水）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/references/design-patterns/DesignPatternIndex.md` — 归约/重排/排序TopK/Norm 族/克隆搬运类设计模式索引（(O,R,I) 路径路由、规律 pattern vs 建表、广播源行共享、按最终布局摆放、核数分档、值域二分 vs 分段 sort 路由、组间独立归一化并行范式、克隆段独立 memcpy kernel 结构）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/references/design-patterns/references/reduce_design.md` — 归约族算子设计决策要点（设计阶段定，可 TileLang DSL 表达）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/references/design-patterns/references/shuffle_design.md` — 重排/搬运类算子设计决策要点
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/references/design-patterns/references/sort_topk_design.md` — 排序/TopK/采样类算子设计决策要点（TopK 主结构路由：值域二分 vs 分段 sort、tie 语义、p/k 输入约束）
+- `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/references/design-patterns/references/norm_fusion_design.md` — Norm 族+激活融合算子设计决策要点（组间独立归一化并行范式、两遍中心化 + mean 修正、affine 融合、双缓冲流水）
 
 > 设计模式参考只含**设计阶段决策**；AscendC 实现细节见 translator references
 > （ascendc_reduce_patterns / ascendc_shuffle_patterns / ascendc_sort_topk_patterns / ascendc_norm_fusion_patterns）。
@@ -424,7 +424,7 @@ Read `ops/tilelang-op-develop/references/checklist.md`，按 22 项逐项检查�
 
 #### 3c. TileLang 功能验证（强制）
 
-调用 `cannbot-skills/plugins-community/tilelang2ascendc-ops-generator/skills/tilelang2ascend-tilelang-designer/scripts/evaluate_tilelang.sh {output_dir}` 执行功能验证。**本步骤默认必须执行、且精度必须通过**——它是步骤 4 性能迭代的强制前置条件（`tilelang-perf-optimization` 的核心约束：精度未通过，禁止性能优化；3c 不过则步骤 4 不会触发）。
+调用 `cannbot-skills/community/ops/tilelang2ascend-tilelang-designer/scripts/evaluate_tilelang.sh {output_dir}` 执行功能验证。**本步骤默认必须执行、且精度必须通过**——它是步骤 4 性能迭代的强制前置条件（`tilelang-perf-optimization` 的核心约束：精度未通过，禁止性能优化；3c 不过则步骤 4 不会触发）。
 
 **唯一的跳过条件**：通过对照实验确认属 **TileLang 编译器/框架底层不支持**（如特定 dtype 的 cube MMA 不支持、框架 bug），必须持有证据（例如同结构 fp16 通过 / fp32 失败）。满足时允许跳过，但必须在最终说明中记录跳过原因与对照实验证据；条件允许时，应先用框架支持的 dtype（如 fp16/bf16）做代理验证确认设计逻辑正确——代理验证不通过则说明设计本身有问题，不得以"框架问题"为由放行。
 

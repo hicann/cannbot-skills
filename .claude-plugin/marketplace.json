@@ -680,7 +680,7 @@
     {
       "name": "tilelang2ascend-ops-developer-skills",
       "description": "TileLang2AscendC 算子自动生成 Skills（7 个）。TileLang 设计、AscendC 转译、Case 精简、性能分析、精度调优、Trace 记录。",
-      "source": "./plugins-community/tilelang2ascendc-ops-generator/skills",
+      "source": "./community/ops",
       "strict": false,
       "version": "1.0.0",
       "author": {

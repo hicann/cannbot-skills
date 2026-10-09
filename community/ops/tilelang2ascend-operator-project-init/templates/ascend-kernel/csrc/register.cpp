@@ -17,12 +17,12 @@ namespace {
 TORCH_LIBRARY_FRAGMENT(npu, m)
 {
     m.def("helloworld(Tensor x, Tensor y) -> Tensor");
-    m.def("avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor");
+    m.def("avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, "
+          "bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor");
 
 #ifdef BUILD_CATLASS_MODULE
     m.def("catlass_matmul_basic(Tensor tensor_a, Tensor tensor_b, Tensor(a!) tensor_c, str? format_mode=None) -> ()");
 #endif
-
 }
 
 TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)
@@ -33,6 +33,5 @@ TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)
 #ifdef BUILD_CATLASS_MODULE
     m.impl("catlass_matmul_basic", TORCH_FN(ascend_kernel::catlass_matmul_basic));
 #endif
-
 }
 }  // namespace

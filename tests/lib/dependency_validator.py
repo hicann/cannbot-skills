@@ -143,7 +143,8 @@ class DependencyValidator:
         """Discover all top-level SKILL.md files in the repository.
 
         Only considers SKILL.md files that are direct children of recognized
-        skill root directories (ops/, graph/, model/, ops-lab/*/skills/).
+        skill root directories (ops/, graph/, model/, community/<category>/,
+        ops-lab/*/skills/).
         Skips nested SKILL.md files inside team directories or sub-skills.
         Also discovers skills that are renamed at install time via init.sh.
         """
@@ -178,6 +179,10 @@ class DependencyValidator:
 
             if top_dir in skill_root_dirs:
                 if len(parts) != 2:
+                    continue
+            elif top_dir == "community":
+                # Community-contributed skills: community/<category>/<skill>/SKILL.md
+                if len(parts) != 3:
                     continue
             elif top_dir == "ops-lab":
                 if len(parts) < 4 or parts[2] != "skills":

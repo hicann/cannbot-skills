@@ -8,8 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-
-
 #ifndef TORCH_KERNEL_HELPER_H
 #define TORCH_KERNEL_HELPER_H
 
@@ -23,8 +21,7 @@ namespace ascend_kernel {
 
 #define DEVICE_TYPE c10::DeviceType::PrivateUse1
 
-class TorchNpuHelper
-{
+class TorchKernelHelper {
 public:
     inline static at::Tensor CopyTensorHostToDevice(const at::Tensor &cpu_tensor)
     {
@@ -67,8 +64,8 @@ public:
 #define EXEC_KERNEL_CMD(kernel_name, blockdim, ...)                                            \
     do {                                                                                       \
         auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);                        \
-        auto converted_params = ascend_kernel::TorchNpuHelper::ConvertTypes(__VA_ARGS__); \
-        auto acl_call = [acl_stream, blockdim, converted_params]() -> int {                    \
+        auto converted_params = ascend_kernel::TorchKernelHelper::ConvertTypes(__VA_ARGS__); \
+        auto acl_call = [acl_stream, blockdim, converted_params]() {                          \
             std::apply(                                                                        \
                 [&](auto &&...params) {                                                        \
                     ACLRT_LAUNCH_KERNEL(kernel_name)                                           \

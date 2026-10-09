@@ -60,7 +60,7 @@
 
 ## TileLang2AscendC 算子开发
 
-> 以下 Skill 位于 `plugins-community/tilelang2ascendc-ops-generator/skills/` 目录，属实验/非正式版本，可能存在平台或能力限制。
+> 以下 Skill 位于 `community/ops/` 目录，属实验/非正式版本，可能存在平台或能力限制。
 
 ### Skills
 
