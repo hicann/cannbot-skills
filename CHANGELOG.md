@@ -8,6 +8,9 @@
 - 【文档】修复 `ops/ascendc-sync-audit/SKILL.md` 执行步骤命令携带脚本不存在的 `--frontend auto` 参数、照抄即 argparse 报错中断主流程的问题（issue #792）；同步删除「范围扩大检查点」中不可达的「frontend 切换」表述——analyzer 的 frontend 硬编码为 regex 且不可切换。
 
 ### 【2026-09-30】
+#### 新特性 New Features
+- 【通信】新增 `hccl-test-tool-hvm` Skill：HCCL-VM 仿真测试能力，覆盖环境就绪检查、测试覆盖计划、用例执行、证据固化、基线回归比较与定点补测，无需实物 NPU(#743)
+
 #### 缺陷修复 Bug Fixes
 - 【文档】修复全仓 14 处英文单词拼写问题。
 
@@ -17,7 +20,6 @@
 
 #### 缺陷修复 Bug Fixes
 - 【安装部署】install-helper `v1.2.1` 修复安装链路：双源同名插件经 legacy 路由被内部二次解析偷换为 cannbot 条目（路径双拼接）报"未找到安装脚本"，改为优先使用调用方已解析条目；另修复矩阵验证问题——安装记录位置键控（多处安装不覆盖、卸载不删错）、卸载用记录 configRoot、摘要按 source 域解析、失败退出码非零。单测 340/340。
-
 
 ### 【2026-09-28】
 #### 变更 Changes
