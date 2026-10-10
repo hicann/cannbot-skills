@@ -1,5 +1,5 @@
 ---
-name: ops-design-common
+name: ops-design-paradigms
 description: 当需要设计或修订 Broadcast、Reduction 等算子范式方案，或查询对应算法、资源规划、语言实现约束和故障经验时使用；提供 Ascend C regbase 与 CANNBotDSL 的设计依据、适用条件和验证要点。
 ---
 

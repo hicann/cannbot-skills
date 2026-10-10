@@ -11,7 +11,7 @@
 # example-routes.yaml — 范式 → 参考实现路由表（按语言维度）
 #
 # 根据 op.paradigms + op.language 路由到对应语言适配层的参考实现示例代码。
-# 路径相对于 ops-design-common skill 根目录。
+# 路径相对于 ops-design-paradigms skill 根目录。
 #
 # 匹配规则：
 #   op.paradigms 列表逐项匹配，结果自动去重；

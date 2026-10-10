@@ -11,7 +11,7 @@
 # routes.yaml — 范式路由表
 #
 # 根据 spec.yaml 的 op.paradigms 注入范式参考材料。
-# 路径相对于 ops-design-common skill 根目录。
+# 路径相对于 ops-design-paradigms skill 根目录。
 #
 # 匹配规则：
 #   op.paradigms 列表逐项匹配，结果自动去重。
