@@ -1,5 +1,5 @@
 ---
-name: ascendc-cross-gen-port-light
+name: ascendc-cross-gen-migration
 description: 当用户希望将已有 AscendC 算子工程跨架构迁移（当前支持 A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510），按 Step R 判定迁移路线）时使用。按 Stage 0–5 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与目标平台实测双向互检。
 metadata:
   version: "3.4"
@@ -53,7 +53,7 @@ metadata:
 ### 依赖初始化
 
 在 Stage 0 环境检查阶段，agent 必须确认全量仓已 clone 并记录路径。
-详见路线包内 `stages/stage_0_env.md` 中的「全量仓初始化」步骤。
+详见路线包内 `routes/<路线>/stages/stage_0_env.md` 中的「全量仓初始化」步骤。
 
 ### 文档查找协议
 
@@ -81,12 +81,12 @@ metadata:
 
 | 阶段 | 文件（路线包内） | Gate Token |
 |------|------|------------|
-| 0 环境验证 | `stages/stage_0_env.md` | `[GATE-0] ENV_CONFIRMED` |
-| 1 评估定级 | `stages/stage_1_assess.md` | `[GATE-1] LEVEL=L1/L2/L3`（层级判定规则见路线包 `route.md` 决策树） |
-| 2 代码改造 | `stages/stage_2_implement.md` | `[GATE-2] FILES_MODIFIED=[...]` |
-| 3 编译安装 | `stages/stage_3_build.md` | `[GATE-3] BUILD=PASS INSTALL=PASS` |
-| 4 精度验证 | `stages/stage_4_precision.md` | `[GATE-4] PRECISION=N/N_PASS`（仅当 N_FAIL==0 时允许输出 PASS；否则输出 `PRECISION=N/M_PASS BLOCKED`） |
-| 5 性能验证 | `stages/stage_5_performance.md` | `[GATE-5] PERF=COLLECTED`（仅当 10 项证据全部存在时允许输出；否则输出 `PERF=NOT_COLLECTED BLOCKED`） |
+| 0 环境验证 | `routes/<路线>/stages/stage_0_env.md` | `[GATE-0] ENV_CONFIRMED` |
+| 1 评估定级 | `routes/<路线>/stages/stage_1_assess.md` | `[GATE-1] LEVEL=L1/L2/L3`（层级判定规则见路线包 `route.md` 决策树） |
+| 2 代码改造 | `routes/<路线>/stages/stage_2_implement.md` | `[GATE-2] FILES_MODIFIED=[...]` |
+| 3 编译安装 | `routes/<路线>/stages/stage_3_build.md` | `[GATE-3] BUILD=PASS INSTALL=PASS` |
+| 4 精度验证 | `routes/<路线>/stages/stage_4_precision.md` | `[GATE-4] PRECISION=N/N_PASS`（仅当 N_FAIL==0 时允许输出 PASS；否则输出 `PRECISION=N/M_PASS BLOCKED`） |
+| 5 性能验证 | `routes/<路线>/stages/stage_5_performance.md` | `[GATE-5] PERF=COLLECTED`（仅当 10 项证据全部存在时允许输出；否则输出 `PERF=NOT_COLLECTED BLOCKED`） |
 
 ## Reference 文件索引
 
@@ -152,9 +152,9 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
    - 所有计划用例均已执行（无 SKIPPED / NOT RUN）
    - N_PASS == N_TESTS（N_FAIL == 0）
    - 未通过修改 threshold / 跳过 case / 修改输入数据等方式规避失败
-   - 若存在 FAIL：MUST 输出 `[GATE-4] PRECISION=N/M_PASS BLOCKED`（M < N），并进入根因分析流程（见路线包 `stages/stage_4_precision.md` Step 4.6）
+   - 若存在 FAIL：MUST 输出 `[GATE-4] PRECISION=N/M_PASS BLOCKED`（M < N），并进入根因分析流程（见路线包 `routes/<路线>/stages/stage_4_precision.md` Step 4.6）
 
-9. **★ GATE-5 证据约束**——`[GATE-5] PERF=COLLECTED` 仅当 10 项证据全部存在时允许输出（见路线包 `stages/stage_5_performance.md` Gate 输出条件）。缺少任一证据时 MUST 输出 `[GATE-5] PERF=NOT_COLLECTED BLOCKED`。
+9. **★ GATE-5 证据约束**——`[GATE-5] PERF=COLLECTED` 仅当 10 项证据全部存在时允许输出（见路线包 `routes/<路线>/stages/stage_5_performance.md` Gate 输出条件）。缺少任一证据时 MUST 输出 `[GATE-5] PERF=NOT_COLLECTED BLOCKED`。
 
 ## 全局约束
 
@@ -169,7 +169,7 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
 7. 编译通过不算完成——MUST 通过精度验证
 8. 禁止自行拼编译命令——MUST 使用 `build_and_install.sh` 脚本
 9. 精度测试用例数 MUST ≥ 30
-10. **★ 精度测试中任何 NaN/Inf 输出 MUST 触发根因分析**——在根因确定且归类完成前，禁止输出 GATE-4 PASS。禁止直接用"已知限制"跳过分析（见路线包 `stages/stage_4_precision.md` Step 4.6.1）
+10. **★ 精度测试中任何 NaN/Inf 输出 MUST 触发根因分析**——在根因确定且归类完成前，禁止输出 GATE-4 PASS。禁止直接用"已知限制"跳过分析（见路线包 `routes/<路线>/stages/stage_4_precision.md` Step 4.6.1）
 11. **★ 所有 Gate 均为 evidence-based**——禁止仅依据 Todo completed / Agent 自我声明 / 静态分析 / "预计没问题"判定 PASS。证据不足时保持 NOT VERIFIED / NOT PASSED / BLOCKED（见 Gate 协议第 7 条）
 12. **禁止臆造新旧平台架构差异**——MIX 比例（1:1/1:2）、核映射等以官方迁移指导与 API 文档为准，不得凭推断断言；路线未覆盖的架构对不得套用其他路线的差异清单
 
@@ -179,7 +179,7 @@ SIMT 侧（L3）：`ascendc-simt-best-practices`（含本 skill 沉淀的 Atomic
 
 | 禁止 | 应该做 |
 |------|--------|
-| 跳过阶段 0 环境验证 | 执行路线包内 `stages/stage_0_env.md` 完整流程，输出 GATE-0 |
+| 跳过阶段 0 环境验证 | 执行路线包内 `routes/<路线>/stages/stage_0_env.md` 完整流程，输出 GATE-0 |
 | 跳过 Step R 直接开迁，或对表外架构对套用既有路线 | 按 Step R 判定路线并读取路线包 `route.md`；表外组合向用户说明并停止 |
 | 跨路线取材（如把 2201→3510 的 API 差异清单用于其他架构对） | 只使用所选路线包内的路线专属内容；公共资产用 `references/` |
 | 自行探测 CANN 路径（`find`/`locate`/扫描 `/home`） | 检测不到时向用户询问，不得猜测 |

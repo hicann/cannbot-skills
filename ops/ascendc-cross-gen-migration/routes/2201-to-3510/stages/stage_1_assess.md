@@ -24,7 +24,7 @@ MUST 读取以下文件：
 
 ## Step 1.2：查阅全量仓参考（按需）
 
-在判定迁移层级之前，如果需要了解算子的参考实现或 A5 新特性，按 `../../search-rules.md 路由到全量仓：
+在判定迁移层级之前，如果需要了解算子的参考实现或 A5 新特性，按 `../../search-rules.md` 路由到全量仓：
 
 - **查看同类算子样例**：`$DEVKIT_PATH/examples/` 目录下按编程模型分类查找
 - **确认 A5 新特性**：读 `$DEVKIT_PATH/docs/zh/guide/cross_gen_migration_guide/instructions_for_new_features/3510_new_features.md`

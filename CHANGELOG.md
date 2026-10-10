@@ -2,6 +2,13 @@
 
 > **记录规则**：单条不超过 **200 字**，按【领域】+ 问题 + 修复要点组织；技术细节、验证数据与发布过程放 PR 描述 / commit message，不写入日志。
 
+### 【2026-10-10】
+#### 变更 Changes
+- 【AscendC 迁移】skill `ascendc-cross-gen-port-light` 更名为 `ascendc-cross-gen-migration`（目录、SKILL.md、evals 及 feature-list、api-cross-gen-fixpipe 引用同步更新；`plugins-community/ascendc-port-orchestrator` 不在修改范围）。
+
+#### 缺陷修复 Bug Fixes
+- 【文档】修复 `ascendc-cross-gen-migration` 路线化重构遗留问题：4 处 stage 文件中 `search-rules.md` 引用丢失收尾反引号致代码段吞并后续文本；`search-rules.md` 引用不存在的 `references/routes/` 路径，改为实际布局 `routes/<源代号>-to-<目标代号>/`；`route.md` 2 处 `l2-guide.md` 简写补 `references/` 前缀；SKILL.md 阶段表路径补 `routes/<路线>/` 前缀使字面可解析。
+
 ### 【2026-10-09】
 #### 新特性 New Features
 - 【算子】新增 `samples` Skill：在 cann-samples 官方样例仓检索。

@@ -114,7 +114,7 @@ GATE-1 LEVEL 值
 
 ### 全量仓 API 查阅（按需）
 
-改造过程中如需查阅具体 API 的签名、参数、约束或示例，按 `../../search-rules.md 路由到全量仓：
+改造过程中如需查阅具体 API 的签名、参数、约束或示例，按 `../../search-rules.md` 路由到全量仓：
 
 - **API 文档**：`$DEVKIT_PATH/docs/zh/api/SIMD-API/` 下按 API 类型查找对应子目录
 - **头文件声明**：`$DEVKIT_PATH/include/` 目录下 grep 函数名确认原型

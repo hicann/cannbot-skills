@@ -2,7 +2,7 @@
 
 > **适用**：DAV_2201（A2/A3）→ DAV_3510（950）迁移时 L0C 回写参数体系的切换。V220 与 Arch3510 两套参数**同名不同义、单位不同**，照搬旧参数必错。
 > **参数真源**：官方文档 `$DEVKIT_PATH/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_store/`（Fixpipe / FixpipeParamsArch3510 全字段）。
-> 迁移决策（何时弃高阶走低阶直跑、Fixpipe 与 Mmad 的 unitFlag 配合）见迁移技能 `ascendc-cross-gen-port-light` 的 cube-migration-guide 改动 3。
+> 迁移决策（何时弃高阶走低阶直跑、Fixpipe 与 Mmad 的 unitFlag 配合）见迁移技能 `ascendc-cross-gen-migration` 的 cube-migration-guide 改动 3。
 
 ## FixpipeConfig（输出格式配置，950 增强）
 

@@ -17,7 +17,7 @@
 | **npu-arch** | NPU 架构知识、芯片型号映射 | — |
 | **ascendc-docs-search** | API 文档索引 + 在线搜索 | — |
 | **ascendc-env-check** | NPU 设备查询、CANN 环境验证 | — |
-| **ascendc-cross-gen-port-light** | 已有 A2/A3 AscendC 算子按 Stage 0–5 迁移到 A5；从源码自合成标杆并完成精度和性能验证 | — |
+| **ascendc-cross-gen-migration** | 已有 A2/A3 AscendC 算子按 Stage 0–5 迁移到 A5；从源码自合成标杆并完成精度和性能验证 | — |
 | **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 | — |
 | **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 | — |
 | **ascendc-runtime-debug** | 运行时错误调试，错误码解析（161xxx/361xxx/561xxx） | — |

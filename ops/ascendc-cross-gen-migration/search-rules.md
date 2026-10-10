@@ -10,7 +10,7 @@
 
 ### Level 1：本地 Skill 文件（最高优先）
 
-本 skill 自带的迁移工作流与实现指南**必须先查**——完整清单见 `SKILL.md` 的「Reference 文件索引」（stages/ 阶段文件、build_system/ 构建模板、precision-testing/ 精度资产）与 SKILL.md Step R 选定的路线文件（`references/routes/`，层级决策树、impl/ 实现指南索引）。这些是 skill 独有内容，全量仓中没有对应物。
+本 skill 自带的迁移工作流与实现指南**必须先查**——完整清单见 `SKILL.md` 的「Reference 文件索引」（stages/ 阶段文件、build_system/ 构建模板、precision-testing/ 精度资产）与 SKILL.md Step R 选定的路线包（`routes/<源代号>-to-<目标代号>/`，含层级决策树 `route.md` 与路线专属实现指南 `references/`）。这些是 skill 独有内容，全量仓中没有对应物。
 
 ### Level 2：全量仓精确查找（按索引路由）
 

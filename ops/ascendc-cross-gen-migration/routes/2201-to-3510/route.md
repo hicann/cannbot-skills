@@ -75,8 +75,8 @@
 |------|------|-----------|---------|
 | L1 | Vector | `references/l1-guide.md` | — |
 | L1 | Cube | `references/l1-guide.md`（host 侧步骤通用）+ `references/cube-migration-guide.md` | — |
-| L2 | Vector | `references/l2-guide.md`（含 Reg 级搬移 VF 封装约束与编译错误速查） | `references/api-mapping.md`；Reg API 速览见 `l2-guide.md`「API 速览与知识真源」 |
-| L2 | Cube | `references/cube-migration-guide.md`（AIC 侧：低阶直跑/同步协议）+ `references/l2-guide.md`（AIV 侧 Vector 路径，适用边界见其头部声明） | `references/api-mapping.md`（AIV 侧）；Reg API 速览见 `l2-guide.md`「API 速览与知识真源」 |
+| L2 | Vector | `references/l2-guide.md`（含 Reg 级搬移 VF 封装约束与编译错误速查） | `references/api-mapping.md`；Reg API 速览见 `references/l2-guide.md`「API 速览与知识真源」 |
+| L2 | Cube | `references/cube-migration-guide.md`（AIC 侧：低阶直跑/同步协议）+ `references/l2-guide.md`（AIV 侧 Vector 路径，适用边界见其头部声明） | `references/api-mapping.md`（AIV 侧）；Reg API 速览见 `references/l2-guide.md`「API 速览与知识真源」 |
 | L3 | 通用 | `references/l3-guide.md` | — |
 
 **Cube 类算子**（kernel 含 Mmad/LoadData/LoadDataWithTranspose/Fixpipe/DataCopyCO12DstParams/CrossCoreSetFlag 等 cube API）：迁移时 MUST 同时阅读 `references/cube-migration-guide.md`——Cube 数据通路（L1/L0A/L0B/L0C）、分形变化（ZZ→NZ）、跨核同步机制与 Vector 差异正交，独立成章；**该 guide 不替代对应层级指南，仅覆盖 AIC 侧差异，AIV 侧 Vector 路径仍用层级指南的既有经验**（各环节配套文件见 cube-guide「配套经验引用表」）。

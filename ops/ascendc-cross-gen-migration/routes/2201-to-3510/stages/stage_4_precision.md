@@ -26,7 +26,7 @@
 
 ## Step 4.0：全量仓 API 精度参考（按需）
 
-如需查阅具体 API 的精度约束或数据类型支持，按 `../../search-rules.md 路由到全量仓：
+如需查阅具体 API 的精度约束或数据类型支持，按 `../../search-rules.md` 路由到全量仓：
 
 - **API 文档**：`$DEVKIT_PATH/docs/zh/api/` 下查找对应 API 的精度说明和 `<cann-filter>` 标签确认 A5 支持情况
 - **头文件**：`$DEVKIT_PATH/include/` 下 grep 函数名确认接口声明
