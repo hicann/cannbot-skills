@@ -178,6 +178,34 @@ def test_intake_classified_bsa_request_routes_independent_of_name(
     assert "intake classified" in result["reason"]
 
 
+def test_intake_classified_bsag_request_routes_independent_of_name(
+    tmp_path: Path,
+) -> None:
+    result = selector.select(
+        tmp_path, "catlass_custom_grad", "block_sparse_attention_grad"
+    )
+    assert result["route"] == "block_sparse_attention_grad"
+    assert "intake classified" in result["reason"]
+
+
+def test_existing_valid_bsag_marker_restores_new_workflow(tmp_path: Path) -> None:
+    marker = tmp_path / "operators/catlass_bsag/docs/workflow.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "workflow_id": "catlass-block-sparse-attention-grad-v1",
+                "algorithm_family": "block_sparse_attention_grad",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        selector.select(tmp_path, "catlass_bsag", None)["route"]
+        == "block_sparse_attention_grad"
+    )
+
+
 def test_existing_valid_bsa_marker_restores_new_workflow(tmp_path: Path) -> None:
     marker = tmp_path / "operators/catlass_bsa/docs/workflow.json"
     marker.parent.mkdir(parents=True)
@@ -194,6 +222,31 @@ def test_existing_valid_bsa_marker_restores_new_workflow(tmp_path: Path) -> None
         selector.select(tmp_path, "catlass_bsa", None)["route"]
         == "block_sparse_attention"
     )
+
+
+def test_bsa_and_bsag_marker_mismatch_is_blocked(tmp_path: Path) -> None:
+    marker = tmp_path / "operators/catlass_sparse/docs/workflow.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "workflow_id": "catlass-block-sparse-attention-grad-v1",
+                "algorithm_family": "block_sparse_attention",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert selector.select(tmp_path, "catlass_sparse", None)["route"] == "blocked"
+    marker.write_text(
+        json.dumps(
+            {
+                "workflow_id": "catlass-block-sparse-attention-arch22-v1",
+                "algorithm_family": "block_sparse_attention_grad",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert selector.select(tmp_path, "catlass_sparse", None)["route"] == "blocked"
 
 
 def test_cross_family_marker_mismatch_is_blocked(tmp_path: Path) -> None:

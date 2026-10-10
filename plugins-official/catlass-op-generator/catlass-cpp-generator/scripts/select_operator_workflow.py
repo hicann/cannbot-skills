@@ -8,7 +8,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Select legacy or dedicated (Linear Attention / BSA Arch22 / SparseFlashMLA) workflow without name-based guessing."""
+"""Select legacy or dedicated attention workflows without name-based guessing."""
 
 from __future__ import annotations
 
@@ -20,15 +20,18 @@ from pathlib import Path
 
 WORKFLOW_ID = "catlass-linear-attention-v1"
 BSA_WORKFLOW_ID = "catlass-block-sparse-attention-arch22-v1"
+BSAG_WORKFLOW_ID = "catlass-block-sparse-attention-grad-v1"
 LINEAR_FAMILY = "linear_attention"
 BSA_FAMILY = "block_sparse_attention"
 SMLA_FAMILY = "sparse_flash_mla"
+BSAG_FAMILY = "block_sparse_attention_grad"
 LEGACY_FAMILY = "legacy"
 PENDING_FAMILY = "pending"
 DEDICATED_WORKFLOWS = {
     LINEAR_FAMILY: WORKFLOW_ID,
     BSA_FAMILY: BSA_WORKFLOW_ID,
     SMLA_FAMILY: "catlass-sparse-flash-mla-v1",
+    BSAG_FAMILY: BSAG_WORKFLOW_ID,
 }
 SUPPORTED_FAMILIES = set(DEDICATED_WORKFLOWS) | {LEGACY_FAMILY, PENDING_FAMILY}
 SAFE_OPERATOR = re.compile(r"^[a-z][a-z0-9_]*$")

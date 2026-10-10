@@ -96,7 +96,7 @@ Catlass 是 Ascend C 的高阶模板封装。**算子工程结构与通用 Ascen
 ```
 Step 0: 工作流分类（既有工程 marker + 需求接收阶段确认的数学类别）
     │
-    ├── linear_attention / block_sparse_attention / sparse_flash_mla → 转发到 catlass-cpp-generator 五阶段工作流，停止执行原 Step 1-7
+    ├── linear_attention / block_sparse_attention / sparse_flash_mla / block_sparse_attention_grad → 转发到 catlass-cpp-generator 五阶段工作流，停止执行原 Step 1-7
     ├── legacy           → 原 Step 1-7
     ├── pending          → 补充数学需求并重新分类
     └── blocked          → 报告非法/冲突 marker，停止
@@ -163,11 +163,12 @@ Step 7: 完成汇报
 1. 先检查 `operators/{operator_name}/docs/workflow.json` 和既有工程目录；已有专用 marker 优先恢复，
    已有但没有专用 marker 的工程固定进入 `legacy`。
 2. 新工程由需求接收阶段根据数学信息确认 `algorithm_family`，取值只能是
-   `linear_attention`、`block_sparse_attention`、`sparse_flash_mla`、`legacy` 或 `pending`。分类依据是需求中已确认的
+   `linear_attention`、`block_sparse_attention`、`sparse_flash_mla`、`block_sparse_attention_grad`、`legacy` 或 `pending`。分类依据是需求中已确认的
    数学算法；数学信息充分时 Agent 直接完成分类，不要求用户显式说出 Linear Attention、GDN、
    KDA、BSA 等专用名词。数学上以 Q 块 × KV 块粒度的 0/1 block mask 表达稀疏的注意力
-   （块稀疏注意力）分类为 `block_sparse_attention`。符合共享 KV、窗口/压缩/索引注意力和配套 metadata 契约的
-   MLA 计算分类为 `sparse_flash_mla`，从对应家族索引核对数学与接口。禁止仅按算子名或自由文本关键词猜测；
+   （块稀疏注意力前向）分类为 `block_sparse_attention`；若接口以 `dO/Q/K/V/O/LSE` 为输入并输出
+   `dQ/dK/dV` 等梯度，则分类为 `block_sparse_attention_grad`。符合共享 KV、窗口/压缩/索引注意力和配套
+   metadata 契约的 MLA 计算分类为 `sparse_flash_mla`，从对应家族索引核对数学与接口。禁止仅按算子名或自由文本关键词猜测；
    分类信息不足时使用 `pending`，补充数学需求后重新分类。
 3. 从本插件目录调用唯一 selector：
 
@@ -178,7 +179,7 @@ Step 7: 完成汇报
      --algorithm-family "{confirmed_algorithm_family}"
    ```
 
-4. selector 返回 `linear_attention`、`block_sparse_attention` 或 `sparse_flash_mla` 时，完整读取
+4. selector 返回 `linear_attention`、`block_sparse_attention`、`sparse_flash_mla` 或 `block_sparse_attention_grad` 时，完整读取
    `catlass-cpp-generator/AGENTS.md`，转交独立五阶段工作流并停止执行原 Step 1-7。
 5. 返回 `legacy` 时继续下方原 Step 1-7；返回 `pending` 时补充数学需求并重新分类；返回 `blocked` 时
    报告 marker 问题并停止，不自动修复或覆盖状态文件。

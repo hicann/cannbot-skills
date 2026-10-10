@@ -31,7 +31,7 @@ def test_builtin_bundle_validates() -> None:
     report = knowledge.validate_bundle(BUNDLE)
     assert report["status"] == "passed", report["errors"]
     assert report["okf_version"] == "0.2"
-    assert report["count"] == 35
+    assert report["count"] == 36
 
 
 def test_business_partitions_are_exact() -> None:
@@ -76,6 +76,21 @@ def test_block_sparse_attention_stays_within_a2a3_scope() -> None:
             body,
             re.IGNORECASE,
         ), path
+
+
+def test_bsag_knowledge_stays_in_its_ascend950_operator_family() -> None:
+    family = BUNDLE / "operator/block-sparse-attention-grad"
+    concepts = [path for path in family.glob("*.md") if path.name != "index.md"]
+    assert [path.name for path in concepts] == ["block-sparse-patterns.md"]
+    data, body = knowledge._frontmatter(concepts[0])
+    assert data["operator_families"] == ["block-sparse-attention-grad"]
+    assert data["architectures"] == ["ascend950"]
+    assert "provenance" not in data
+    assert not re.search(
+        r"EXP-[A-Z0-9]+-\d+|\bround\s*\d+|legacy_evidence_ids|/(?:home|root|Users)/",
+        body,
+        re.IGNORECASE,
+    )
 
 
 def _heading_anchors(text: str) -> set[str]:

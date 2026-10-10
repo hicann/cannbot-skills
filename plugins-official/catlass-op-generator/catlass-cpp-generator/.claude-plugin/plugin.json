@@ -1,6 +1,6 @@
 {
   "name": "catlass-cpp-generator",
-  "description": "CATLASS C++ 领域算子五阶段独立开发工作流（Linear Attention / BSA Arch22）。",
+  "description": "CATLASS C++ 领域算子五阶段独立开发工作流（Linear Attention / BSA Arch22 / BSAG Ascend 950）。",
   "version": "0.1.0",
   "author": {
     "name": "CANNBot"
@@ -13,6 +13,8 @@
     "ascend",
     "npu",
     "block-sparse-attention",
-    "bsa"
+    "bsa",
+    "block-sparse-attention-grad",
+    "bsag"
   ]
 }

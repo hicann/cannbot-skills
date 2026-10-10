@@ -28,6 +28,14 @@
         "block_sparse_attention-arch22",
         "块稀疏注意力"
       ]
+    },
+    "block-sparse-attention-grad": {
+      "aliases": [
+        "block_sparse_attention_grad",
+        "BlockSparseAttentionGrad",
+        "block-sparse-attention-grad",
+        "bsag"
+      ]
     }
   },
   "catlass_apis": {

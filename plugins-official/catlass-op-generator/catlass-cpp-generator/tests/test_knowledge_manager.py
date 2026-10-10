@@ -232,10 +232,41 @@ def test_block_sparse_attention_queries_do_not_expand_architecture_or_linear_att
     result = knowledge.query_bundle(
         target, None, [], None, None, "sparse-attention", True
     )
-    assert result["count"] == 14
+    assert result["count"] == 15
     assert all(
-        item["path"].startswith("operator/sparse-attention/")
+        item["path"].startswith(
+            ("operator/sparse-attention/", "operator/block-sparse-attention-grad/")
+        )
         for item in result["results"]
+    )
+
+
+@pytest.mark.parametrize(
+    "family",
+    [
+        "block-sparse-attention-grad",
+        "block_sparse_attention_grad",
+        "BlockSparseAttentionGrad",
+        "bsag",
+    ],
+)
+def test_bsag_aliases_resolve_only_to_ascend950_operator_knowledge(
+    tmp_path: Path, family: str
+) -> None:
+    target = tmp_path / ".catlass-cpp/knowledge"
+    knowledge.initialize(BUNDLE, target)
+    knowledge.reindex(target)
+    result = knowledge.query_bundle(
+        target, "operator", [], family, "ascend950", None, True
+    )
+    assert [item["path"] for item in result["results"]] == [
+        "operator/block-sparse-attention-grad/block-sparse-patterns.md"
+    ]
+    assert (
+        knowledge.query_bundle(
+            target, "operator", [], family, "DAV_2201", None, True
+        )["count"]
+        == 0
     )
 
 
