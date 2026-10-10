@@ -40,11 +40,13 @@ import math
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import statistics
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -668,17 +670,19 @@ def _extract_shape_dtype_from_jsonl(case):
 def _case_has_empty_tensor(case):
     """判断 case 中是否包含 0 元素张量（空 tensor）。
 
-    shape=None 表示形状未指定（如可选 bias），不应视作空 tensor。
-    只有形状明确包含 0 维度或为空列表的才是真正的空 tensor。
+    shape 缺失或为 None 表示形状未指定（如可选 bias），不应视作空 tensor；
+    shape == [] 是 0-d 标量（numel == 1，合法可测输入），同样不是空 tensor
+    ——与 npubench_runner 的 numel()==0 语义一致。
+    只有形状为列表且明确包含 0 维度的才是真正的空 tensor。
     """
     if not case:
         return False
     for inp in case.get("inputs", []):
         if inp.get("type") == "tensor":
-            shape = inp.get("shape", [])
-            if shape is None:
+            shape = inp.get("shape")
+            if not isinstance(shape, list):
                 continue
-            if not shape or any(s == 0 for s in shape):
+            if any(s == 0 for s in shape):
                 return True
     return False
 
@@ -884,13 +888,21 @@ import inspect
 import logging
 import os
 import sys
+
+# Pin the visible device BEFORE torch import: CANN re-reads this variable at
+# first device touch, so setting it after ``import torch`` contradicts the
+# RawDriver the engine already bound and faults with 507033 / "Operation not
+# permitted" (empty stderr, silent wrapper exit).  setdefault never overrides
+# an exec-time pin the engine applied for its physical lane; standalone use
+# (no pin) still gets the --device value here.
+os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "{device_id}")
+
 import torch
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 
 out_dir = Path("{out_dir}")
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "{device_id}"
 sys.path.insert(0, str(out_dir / "kernel" / "build"))
 sys.path.insert(0, str(out_dir))
 
@@ -1145,6 +1157,59 @@ def _run_msprof_standard(wrapper_script: str, output_dir: str, device_id: int, w
     return str(prof_dirs[-1]), None
 
 
+_MSPROF_QUICK_CALL_TIMEOUT_ENV = "CANNBOT_MSPROF_QUICK_CALL_TIMEOUT_SEC"
+# Degraded-driver slow state makes each fresh wrapper/msprof process pay ~90s
+# torch init; a shorter cap risks false timeouts on a slow-but-alive box
+# (a false timeout aborts the whole perf run).
+_MSPROF_QUICK_CALL_TIMEOUT_DEFAULT = 1200
+
+
+def _quick_call_timeout_seconds() -> int:
+    raw = os.environ.get(_MSPROF_QUICK_CALL_TIMEOUT_ENV)
+    if raw is None:
+        return _MSPROF_QUICK_CALL_TIMEOUT_DEFAULT
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _MSPROF_QUICK_CALL_TIMEOUT_DEFAULT
+    return max(value, 1)
+
+
+def _run_guarded(cmd, env, timeout_seconds, label):
+    """Bounded subprocess with process-group kill (msprof spawns children).
+
+    During host bad-state windows the device profiler wedges and
+    msprof/wrapper hang forever (wrappers busy-spin at 100%+ CPU while the
+    card stays idle).  The legacy code waited indefinitely, so one wedged
+    case stalled the whole perf task until the outer task timeout.  This
+    guard converts a hang into a fast per-case failure.
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=env, start_new_session=True,
+        )
+        try:
+            out, err = proc.communicate(timeout=timeout_seconds)
+            return proc.returncode, out, err, False
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError as kill_exc:
+                # The wedged group may have already exited (or be unsignalable);
+                # the drain below still reaps whatever is left.  Never fatal here:
+                # the caller only needs the timed-out verdict.
+                LOGGER.debug("%s: process-group kill skipped: %s", label, kill_exc)
+            try:
+                out, err = proc.communicate(timeout=10)
+            except Exception as drain_exc:  # noqa: BLE001 - best-effort drain
+                LOGGER.debug("%s: post-kill output drain failed: %s", label, drain_exc)
+                out, err = "", ""
+            return None, out, err, True
+    except OSError as exc:
+        return None, "", f"{label} failed to start: {exc}", False
+
+
 def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warmup: int = 3):
     """快速模式：只采集 1 轮（不采集 7 个 aic-metrics，只获取 kernel 时间）。
 
@@ -1162,12 +1227,15 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warm
     env = os.environ.copy()
 
     # Warmup: 在 msprof 外部执行，不采集
+    call_timeout = _quick_call_timeout_seconds()
     warmup_crash = None
     for _ in range(warmup):
-        w = subprocess.run([sys.executable, wrapper_path],
-                           capture_output=True, text=True, env=env)
-        if w.returncode != 0 and warmup_crash is None:
-            warmup_crash = _extract_app_crash(w.stdout, w.stderr) or (w.stderr or "")[-200:]
+        rc, wout, werr, timed_out = _run_guarded(
+            [sys.executable, wrapper_path], env, call_timeout, "warmup wrapper")
+        if timed_out:
+            return None, f"msprof quick timed out after {call_timeout}s (warmup wrapper)"
+        if rc != 0 and warmup_crash is None:
+            warmup_crash = _extract_app_crash(wout, werr) or (werr or "")[-200:]
 
     # Measurement: msprof 只采集正式 timed run
     cmd = [
@@ -1178,7 +1246,10 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warm
         "--ascendcl=on",
         sys.executable, wrapper_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    rc, mout, merr, timed_out = _run_guarded(
+        cmd, env, call_timeout, "msprof measurement")
+    result = types.SimpleNamespace(
+        returncode=rc, stdout=mout or "", stderr=merr or "")
 
     try:
         os.remove(wrapper_path)
@@ -1187,6 +1258,10 @@ def _run_msprof_quick(wrapper_script: str, output_dir: str, device_id: int, warm
 
     app_log = _save_app_output(output_dir, result.stdout, result.stderr)
 
+    if timed_out:
+        return None, (
+            f"msprof quick timed out after {call_timeout}s "
+            f"(measurement; app log: {app_log})")
     if result.returncode != 0:
         return None, f"msprof failed: {result.stderr[-500:]}\n(app log: {app_log})"
 
@@ -1350,49 +1425,6 @@ def _collect_kernels(rows):
             continue
         kernels.append((start, r.get("kernel_name", "unknown"), dur))
     return kernels
-
-
-def _collect_compute_kernels(rows):
-    """Compute kernels only — exclude meta tasks AND data-movement (Memcpy/Rdma/H2D/D2D).
-
-    Used by _launch_wall_min so the launch wall reflects the compute kernel span, not the
-    per-call H2D tiling copies that some hosts issue before the kernel launch."""
-    out = []
-    for r in rows:
-        kt = r.get("kernel_type", "")
-        kn = (r.get("kernel_name", "") or "").strip()
-        if kt in _META_KERNEL_TYPES or not kn:
-            continue
-        if any(s in kn for s in ("Memcpy", "MEMCPY", "Rdma", "RDMA")):
-            continue
-        try:
-            dur = float(r.get("task_time(us)", "") or 0)
-            start = float((r.get("task_start(us)", "") or "0").strip())
-        except ValueError:
-            continue
-        if dur <= 0:
-            continue
-        out.append((start, kn, dur))
-    return out
-
-
-def _launch_wall_min(kernels, warmup: int, repeats: int, gap_us: float = 8.0):
-    """Per-launch wall time = max(end)-min(start) of the compute tasks in one launch, min over
-    the active (last `repeats`) launches. Robust to multi-task-per-launch kernels: clusters tasks
-    into launches by inter-task gap (within a launch tasks overlap/chain tightly; between launches
-    the gap exceeds gap_us). Returns None if no clusters."""
-    if not kernels:
-        return None
-    pts = sorted((st, st + du) for st, _, du in kernels)
-    clusters = [[pts[0]]]
-    for st, en in pts[1:]:
-        if st - clusters[-1][-1][1] > gap_us:
-            clusters.append([(st, en)])
-        else:
-            clusters[-1].append((st, en))
-    walls = sorted(max(en for _, en in c) - min(st for st, _ in c) for c in clusters)
-    active = walls[-repeats:] if (0 < repeats < len(walls)) else walls
-    return min(active) if active else None
 
 
 def _split_kernels_by_position(kernels, warmup: int, repeats: int):
@@ -1723,6 +1755,11 @@ def _measure_one_impl_quick(mi: _MeasureInput):
                   + tag_suffix)
         _cleanup_prof_dirs(tmpdir)
         prof_dir, err = _run_msprof_quick(wrapper, tmpdir, mi.device_id, ext_warmup)
+        if err and "timed out" in err:
+            # A wedged device wedges every case; fail the whole profiling run
+            # fast instead of grinding through all remaining cases.  The O5
+            # infra retry (with backoff) is the recovery.
+            raise RuntimeError(err)
         if not prof_dir:
             continue
 

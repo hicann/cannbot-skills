@@ -122,6 +122,10 @@ Usage: bash msprof_profile_run.sh [OPTIONS] -- <executable> [args...]
   --device=N             指定 NPU 设备 ID；未指定时自动选择空闲卡
   --repeats=N            重复采集次数（默认 1）
   --retry=N              单 case 解析失败重试次数（默认 2）
+  --keep-prof            保留 msprof 原始 PROF 目录
+  --prof-tag=<tag>       PROF 临时目录后缀（同 case 多次采集互不覆盖）
+  --cases=a,b,c          只跑指定 case 下标（逗号分隔）
+  --max-cases=N          最多跑 N 个 case
 
 批量模式 (--batch):
   --batch                启用批量模式：扫描 base-dir 下所有子目录并行测试
@@ -148,6 +152,9 @@ while [[ $# -gt 0 ]]; do
         --repeats=*) REPEATS="${1#*=}"; shift ;;
         --retry=*)   RETRY="${1#*=}"; shift ;;
         --keep-prof) KEEP_PROF=1; shift ;;
+        --prof-tag=*) PROF_TAG="${1#*=}"; shift ;;
+        --cases=*)   CASES="${1#*=}"; shift ;;
+        --max-cases=*) MAX_CASES="${1#*=}"; shift ;;
         --compare)   MODE="compare"; shift ;;
         --quick)     MODE="quick"; shift ;;
         --batch)     MODE="batch"; shift ;;
@@ -277,12 +284,19 @@ run_quick() {
     OUT_DIR="$(cd "$OUTPUT_DIR_ARG" && pwd)"
 
     # 调用 msprof_perf_summary.py --quick（只测时间，不采集 7 个 metrics）
+    # 透传 keep-prof/prof-tag/cases/max-cases——ascendc-port-orchestrator 的
+    # npubench perf lane 需要原始 PROF 目录归档取证、run_id 绑定与门禁子集。
+    # PYTHON_BIN 供调用方指定目标 python（默认 python3）。
     local extra_args=()
     [[ -n "$DEVICE_ID" ]] && extra_args+=("--device" "$DEVICE_ID")
     [[ -n "${REPEATS:-}" ]] && extra_args+=("--repeats" "$REPEATS")
     [[ -n "${RETRY:-}" ]] && extra_args+=("--retry" "$RETRY")
+    [[ "${KEEP_PROF:-0}" == "1" ]] && extra_args+=("--keep-prof")
+    [[ -n "${PROF_TAG:-}" ]] && extra_args+=("--prof-tag" "$PROF_TAG")
+    [[ -n "${CASES:-}" ]] && extra_args+=("--cases" "$CASES")
+    [[ -n "${MAX_CASES:-}" ]] && extra_args+=("--max-cases" "$MAX_CASES")
 
-    python3 "${SCRIPT_DIR}/msprof_perf_summary.py" --quick \
+    "${PYTHON_BIN:-python3}" "${SCRIPT_DIR}/msprof_perf_summary.py" --quick \
         --output-dir "$OUT_DIR" \
         --warmup "$WARM_UP" \
         "${extra_args[@]}"
