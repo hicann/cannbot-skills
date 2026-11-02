@@ -21,13 +21,13 @@ import { execa } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, PluginEntry, PluginSource } from "../types/index.js";
 import { discoverCannbotPlugins, ensureCannbotInstaller, getCannbotBinPath, hasNodeRuntime } from "./cannbot-installer.js";
 import { findCannbotRegistryPath, readCannbotRegistry } from "./cannbot-registry.js";
-import { writeRecord } from "./record.js";
+import { readRecords, writeRecord } from "./record.js";
 import { findPlugin } from "./registry.js";
 import { isMigratedPlugin } from "./migrated-plugins.js";
 import { installPlugin } from "./installer.js";
 import { addInstalledPlugin } from "../utils/config.js";
 import { getConfigFileName, getSkillsRoot } from "../utils/paths.js";
-import { isSymlink } from "../utils/fs-helpers.js";
+import { isSameDirectory, isSymlink } from "../utils/fs-helpers.js";
 import { t } from "../utils/i18n.js";
 
 export const DELEGATE_TOOLS: AITool[] = ["opencode", "claude", "trae", "codex"];
@@ -172,7 +172,7 @@ function installerSupportsBundledFlag(): boolean {
 
 export async function delegateInstall(options: DelegateInstallOptions): Promise<InstallResult> {
   const { pluginId, tool, level } = options;
-  const target = resolve(options.target || process.cwd());
+  const requestedTarget = resolve(options.target || process.cwd());
   const displayName = options.displayName || pluginId;
 
   const result: InstallResult = {
@@ -189,6 +189,11 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
   if (result.errors.length > 0) {
     return result;
   }
+
+  const previous = readRecords(pluginId).find((entry) =>
+    entry.tool === tool && entry.level === "project" && isSameDirectory(entry.installPath, requestedTarget)
+  );
+  const target = previous ? resolve(previous.installPath) : requestedTarget;
 
   // 2. Node.js runtime is required to run the cannbot installer
   if (!hasNodeRuntime()) {
@@ -292,8 +297,10 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
   }
 
   const registryPath = findCannbotRegistryPath(target, tool);
+  const instructionsPath = record.instructions ? resolve(target, record.instructions) : null;
 
   writeRecord({
+    ...previous,
     pluginId,
     displayName,
     tool,
@@ -301,8 +308,8 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
     installPath: target,
     configRoot: registryPath ? join(registryPath, "..") : target,
     installTime: new Date().toISOString(),
-    files,
-    directories,
+    files: [...new Set([...(previous?.files || []), ...files])].filter((path) => resolve(path) !== instructionsPath),
+    directories: [...new Set([...(previous?.directories || []), ...directories])],
     kind: "delegated",
   });
   addInstalledPlugin(pluginId);

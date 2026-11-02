@@ -10,7 +10,7 @@
 
 import type { PluginEntry } from "../types/index.js";
 
-// Plugins removed from this repository and migrated to the cannbot repo.
+// Plugins migrated to the cannbot repo, with optional frozen local copies.
 // Tombstones preserve discovery and aliases, then delegate installation to
 // @cannbot-plugin/cannbot. Modern installers use their bundled snapshot;
 // these entries do not download source or provide missing plugin assets.
@@ -24,6 +24,30 @@ export const MIGRATED_PLUGINS: PluginEntry[] = [
     skills: 0,
     agents: 0,
     description: "AscendC 算子性能调优工作流；已迁移至 cannbot 仓，经托管安装器安装（仅 project 级）",
+    source: "cannbot",
+  },
+  {
+    id: "catlass-op-generator",
+    dir: "",
+    displayName: "Catlass 算子直调",
+    script: "cannbot",
+    aliases: ["catlass"],
+    skills: 6,
+    agents: 0,
+    version: "0.1.0",
+    description: "CATLASS C++ 算子开发工作流；已迁移至 cannbot 仓，经托管安装器安装",
+    source: "cannbot",
+  },
+  {
+    id: "model-infer-optimize",
+    dir: "",
+    displayName: "NPU 推理优化",
+    script: "cannbot",
+    aliases: ["model-infer", "infer", "inference", "sota", "sota-approach", "model-infer-sota"],
+    skills: 14,
+    agents: 9,
+    version: "1.0.6",
+    description: "NPU 模型推理端到端优化；已迁移至 cannbot 仓，经托管安装器安装",
     source: "cannbot",
   },
   {

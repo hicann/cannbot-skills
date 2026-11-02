@@ -8,7 +8,15 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { lstatSync, statSync, unlinkSync, rmSync } from "fs";
+import { lstatSync, statSync, unlinkSync, rmSync, realpathSync } from "fs";
+
+export function isSameDirectory(left: string, right: string): boolean {
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
+}
 
 export function isSymlink(path: string): boolean {
   try {

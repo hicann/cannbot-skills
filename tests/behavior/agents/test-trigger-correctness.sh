@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# ----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ----------------------------------------------------------------------------------------------------------
 # =============================================================================
 # Test: Agent Trigger Correctness
 # =============================================================================
@@ -55,21 +64,6 @@ run_behavior_test "ascendc-ops-tester" \
 run_behavior_test "ascendc-ops-reviewer" \
     "你是一个代码检视专家。检视 Ascend C 代码时主要关注哪些方面？" \
     "检视|review|规范|安全|质量|代码|内存|性能|并行|优化" \
-    "$TIMEOUT"
-
-run_behavior_test "model-infer-analyzer" \
-    "你是 NPU 推理优化分析专家。给定模型代码和 profiling 数据，你怎么分析架构和并行策略，是否会改模型代码？" \
-    "架构|并行|策略|profiling|只读|不改|不修改" \
-    "$TIMEOUT"
-
-run_behavior_test "model-infer-implementer" \
-    "你是 NPU 推理优化实施专家。方案已确认，你应该怎么推进？" \
-    "实施|改造|实现|调试|修复|验证|代码" \
-    "$TIMEOUT"
-
-run_behavior_test "model-infer-reviewer" \
-    "你是 NPU 推理优化验证专家。改造完成后你怎么验证是否达标，输出什么交给实施工程师？" \
-    "验证|精度|性能|诊断|报告|基线" \
     "$TIMEOUT"
 
 # =============================================================================

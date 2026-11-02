@@ -236,7 +236,10 @@ describe("cannbot-registry", () => {
     mkdirSync(installsDir, { recursive: true });
     writeFileSync(
       join(installsDir, "alpha.json"),
-      JSON.stringify({ pluginId: "alpha", kind: "delegated", files: [], directories: [] })
+      JSON.stringify({
+        pluginId: "alpha", kind: "delegated", tool: "opencode", level: "project",
+        installPath: testDir, configRoot: join(testDir, ".opencode"), files: [], directories: [],
+      })
     );
 
     const { uninstallCannbotPlugin, scanCannbotInstalled } = await import("../src/core/cannbot-registry.js");

@@ -65,12 +65,13 @@ export async function uninstallCommand(
   // wins over the legacy bookkeeping (migration policy: cannbot first).
   const cannbotInstalledIds = new Set(scanCannbotInstalled().map((e) => e.id));
 
-  for (const name of names) {
+  for (const query of names) {
+    const plugin = findPlugin(query);
+    const name = plugin?.id || query;
     if (cannbotInstalledIds.has(name)) {
       cannbotPlugins.push(name);
       continue;
     }
-    const plugin = findPlugin(name);
     if (plugin && plugin.source !== "cannbot") {
       plugins.push(plugin.id);
       continue;

@@ -213,7 +213,7 @@ install-helper lang set en_US      # 切换为英文
 | 2 | AscendC Kernel 直调（快速版，已迁移至 cannbot） | ops-direct-invoke-flash | flash, kernel-flash |
 | 3 | AscendC 算子注册调用 | ops-registry-invoke | ops-registry, ascendc-registry, registry |
 | 4 | Catlass 算子直调 | catlass-op-generator | catlass |
-| 5 | NPU 推理优化 | model-infer-optimize | model-infer, infer, inference, sota, sota-approach, model-infer-sota |
+| 5 | NPU 推理优化（已迁移至 cannbot） | model-infer-optimize | model-infer, infer, inference, sota, sota-approach, model-infer-sota |
 | 6 | PyPTO 算子开发 | pypto-op-orchestrator | pypto, pytorch |
 | 7 | TileLang 算子开发 | tilelang-op-orchestrator | tilelang |
 | 8 | 算子性能调优（已迁移至 cannbot） | ops-perf-optimize | perf-optimize, perf-optimization, performance |
@@ -224,6 +224,8 @@ install-helper lang set en_US      # 切换为英文
 `ops-perf-optimize` 的本地副本已移除，由 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-perf-optimize) 维护；插件名及 `perf-optimize`、`perf-optimization`、`performance` 别名继续有效，安装由 cannbot 托管安装器提供，`--source skills` 不再提供此插件。通过本 helper 安装仅支持 opencode / claude / trae / codex 的 project 级别，已删除的本地副本不再提供回退。
 
 `ops-direct-invoke-flash` 的本地副本已移除，由 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke-flash) 维护；插件名及 `flash`、`kernel-flash` 别名继续有效，安装由 cannbot 托管安装器提供，`--source skills` 不再提供此插件。通过本 helper 安装仅支持 project 级别，已删除的本地副本不再提供回退。
+
+`model-infer-optimize` 的基础优化与 SOTA 探索工作流统一由 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) 维护；插件名及上表历史别名继续有效，`--source skills` 不再提供此插件。通过本 helper 安装仅支持 opencode / claude / trae / codex 的 project 级别，DSH 使用应用仓安装器。旧版 global 安装及超出委托范围的客户端不再回退旧副本；已有安装的卸载沿用记录清理机制，原子 Skill 的安装范围不变。
 
 ## 适配范围
 

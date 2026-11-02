@@ -500,7 +500,9 @@ class TestResolveAgent:
     def test_other_workflow_role_agents_build(monkeypatch, tmp_path):
         # 非 ops-direct-invoke 前缀的角色 agent 也应判定为新插件 (build)
         monkeypatch.delenv("CANNBOT_AGENT", raising=False)
-        work = TestResolveAgent._make_work_dir(tmp_path, ["architect.md", "developer.md"])
+        work = TestResolveAgent._make_work_dir(
+            tmp_path, ["architect.md", "developer.md"]
+        )
         assert run_eval.resolve_agent(work) == run_eval.NEW_PLUGIN_AGENT
 
     @staticmethod

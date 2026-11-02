@@ -8,6 +8,7 @@
 
 #### 变更 Changes
 - 【算子】`ascendc-tensor-api-best-practice` 新增 L3 算法实现路由、本地官方源码仓映射、路径一致性检查与 cannbot-knowledge 检索证据规则，并澄清 A5 UB 容量口径与默认 .asc 工程结构。
+- 【模型推理】删除 model-infer-optimize 旧插件及本地入口，基础优化与 SOTA 探索工作流统一由 cannbot 维护；保留原子 Skill、插件名和别名，安装范围以应用仓及 install-helper 的支持范围为准，不再回退旧副本。
 
 ### 【2026-10-29】
 #### 变更 Changes

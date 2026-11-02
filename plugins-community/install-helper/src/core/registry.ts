@@ -129,7 +129,7 @@ export function findPlugin(
     // Migrated tombstones: exact/alias resolve before any prefix matching so
     // the historical alias (e.g. "triton") is not captured by a prefix match
     // on a different cannbot plugin (e.g. triton-auto-evolve).
-    if (tombstone) return tombstone;
+    if (tombstone) return CANNBOT_PLUGINS.find((p) => p.id === tombstone.id) || tombstone;
   }
 
   const exactMatch = PLUGIN_REGISTRY.find(
@@ -149,15 +149,13 @@ export function findPlugin(
   if (wantCannbot) {
     const cannbotPrefixes = CANNBOT_PLUGINS.filter((p) => p.id.startsWith(normalized));
     if (cannbotPrefixes.length === 1) return cannbotPrefixes[0];
+
+    const tombstonePrefixes = MIGRATED_PLUGINS.filter((p) => p.id.startsWith(normalized));
+    if (tombstonePrefixes.length === 1) return tombstonePrefixes[0];
   }
 
   const prefixMatches = PLUGIN_REGISTRY.filter((p) => p.id.startsWith(normalized));
   if (prefixMatches.length === 1) return prefixMatches[0];
-
-  if (wantCannbot) {
-    const tombstonePrefixes = MIGRATED_PLUGINS.filter((p) => p.id.startsWith(normalized));
-    if (tombstonePrefixes.length === 1) return tombstonePrefixes[0];
-  }
 
   return undefined;
 }

@@ -24,6 +24,7 @@ import { removeInstalledPlugin } from "../utils/config.js";
 import { getCannbotConfigDir } from "../utils/paths.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
+import { isSameDirectory, isSymlink } from "../utils/fs-helpers.js";
 
 // Mirror of cannbot installer TOOL_DIRECTORIES (script/bin/cannbot.js) for
 // the tools install-helper delegates to. configDirs are probed in order; the
@@ -474,9 +475,31 @@ export function uninstallCannbotPlugin(pluginId: string, target?: string): Cannb
     }
   }
 
-  // 9. install-helper side bookkeeping
-  deleteRecord(pluginId);
-  removeInstalledPlugin(pluginId);
+  // Remove recorded legacy files only at the uninstalled location.
+  const locations = readRecords(pluginId).filter((entry) =>
+    entry.tool === record.tool && entry.level === "project" && isSameDirectory(entry.installPath, root)
+  );
+  for (const location of locations) {
+    const locationRoot = resolve(location.installPath);
+    const preserved = new Set((location.preservedTargets || []).map((path) => resolve(path)));
+    if (record.instructions) preserved.add(resolve(locationRoot, record.instructions));
+    for (const filePath of location.files) {
+      const absolute = resolve(filePath);
+      if (!absolute.startsWith(locationRoot + sep) || preserved.has(absolute)) continue;
+      if (!existsSync(absolute) && !isSymlink(absolute)) continue;
+      try {
+        unlinkSync(absolute);
+        result.removedFiles++;
+      } catch (error) {
+        result.errors.push(error instanceof Error ? error.message : t("error_unknown"));
+      }
+    }
+    for (const dirPath of [...location.directories].sort((a, b) => b.length - a.length)) {
+      if (removeEmptyDirUpward(dirPath, locationRoot)) result.removedDirs++;
+    }
+    if (result.errors.length === 0) deleteRecord(pluginId, location);
+  }
+  if (readRecords(pluginId).length === 0) removeInstalledPlugin(pluginId);
 
   result.success = result.errors.length === 0;
   return result;

@@ -20,7 +20,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 
 **面向用户**：CANN / 昇腾 NPU 各领域开发者（算子开发、图模式、模型推理、Runtime 等），同时欢迎社区开发者共建 Skills 和 Agents。
 
-> 📣 **迁移公告**：本仓 `plugins-official/` 与 `plugins-community/` 插件正逐步迁移至应用仓 [cannbot](https://gitcode.com/cann/cannbot) 统一维护。已迁移：官方 `ops-direct-invoke`、`ops-direct-invoke-flash`、`ops-registry-invoke`、`ops-perf-optimize`、`model-infer-optimize`，社区 `collaborative-agent-kernel-evolution`、`tilelang2ascendc-ops-generator`。`ops-direct-invoke`、`ops-direct-invoke-flash`、`ops-perf-optimize`、`ascendc-port-orchestrator`、`collaborative-agent-kernel-evolution` 的本仓副本已删除，其余已迁移插件在本仓冻结，一段时间后删除；`install.sh` / `install-helper` 将已迁移插件交由 cannbot 的已发布安装包提供，支持的工具与安装级别以安装助手及应用仓说明为准。
+> 📣 **迁移公告**：本仓 `plugins-official/` 与 `plugins-community/` 插件正逐步迁移至应用仓 [cannbot](https://gitcode.com/cann/cannbot) 统一维护。已迁移：官方 `ops-direct-invoke`、`ops-direct-invoke-flash`、`ops-registry-invoke`、`ops-perf-optimize`、`model-infer-optimize`，社区 `collaborative-agent-kernel-evolution`、`tilelang2ascendc-ops-generator`。`ops-direct-invoke`、`ops-direct-invoke-flash`、`ops-perf-optimize`、`model-infer-optimize`、`ascendc-port-orchestrator`、`collaborative-agent-kernel-evolution` 的本仓副本已删除，其余已迁移插件在本仓冻结，一段时间后删除；`install.sh` / `install-helper` 将已迁移插件交由 cannbot 的已发布安装包提供，支持的工具与安装级别以安装助手及应用仓说明为准。
 
 ## 🚀 快速开始
 
@@ -82,7 +82,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **TileLang** | 按本机芯片路由，Ascend910 与 Ascend950 工作流及技能独立 | [tilelang-op-orchestrator](plugins-official/tilelang-op-orchestrator/AGENTS.md) |
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | triton-op-generator（已迁移至 [cannbot](https://gitcode.com/cann/cannbot) 仓 `plugins-official/triton-op-generator`） |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile](plugins-official/torch-compile/AGENTS.md) |
-| **模型推理优化** | NPU 推理端到端优化 | [model-infer-optimize](plugins-official/model-infer-optimize/AGENTS.md) |
+| **模型推理优化** | 固定阶段优化与 baseline 之上的 SOTA 探索优化 | [model-infer-optimize（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) |
 | **模型训练精度诊断** | PyTorch on Ascend NPU 的有限值偏差、非有限值和确定性异常诊断 | [cannbot 社区 Plugin](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) |
 
 ## 🔍 项目架构

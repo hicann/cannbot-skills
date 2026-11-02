@@ -18,7 +18,6 @@ cannbot-skills/
 │   ├── ops-registry-invoke/         # AscendC 算子注册调用开发
 │   ├── pypto-op-orchestrator/       # PyPTO 算子开发
 │   ├── torch-compile/               # torch.compile 图模式
-│   ├── model-infer-optimize/        # NPU 推理端到端优化流程
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
 ├── plugins-community/               # 社区 Plugins
 │   ├── install-helper/              # CANNBot Install Helper 工具
@@ -221,7 +220,7 @@ cannbot-skills/
 
 ### NPU 模型推理优化
 
-`model-infer-optimize` 插件编排 NPU 推理端到端优化流程。Plugin 编排 `model-infer-analyzer`、`model-infer-implementer`、`model-infer-reviewer` 三个 Agent，分别负责模型分析与方案设计、代码改造与调试修复、精度验证与性能对比。详见插件目录下的 `AGENTS.md`。
+`model-infer-optimize` 的基础优化、SOTA 探索工作流及配套 Agent 由 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) 维护，本仓保留 `model/` 下的原子 Skill。
 
 ### NPU 模型训练精度诊断
 

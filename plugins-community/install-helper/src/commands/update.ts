@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { createRepositoryManager } from "../core/repository.js";
-import { installPluginRouted } from "../core/cannbot-delegate.js";
+import { boundaryErrors, installPluginRouted } from "../core/cannbot-delegate.js";
 import { ensureCannbotDiscovery, ensureCannbotInstaller } from "../core/cannbot-installer.js";
 import { scanCannbotInstalled } from "../core/cannbot-registry.js";
 import { findPlugin } from "../core/registry.js";
@@ -20,13 +20,24 @@ import { logger, createSpinner } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import { validateTool, validateLevel } from "../utils/paths.js";
 import chalk from "chalk";
-import type { AITool, InstallLevel } from "../types/index.js";
+import type { AITool, InstalledPlugin, InstallLevel } from "../types/index.js";
 
 interface UpdateTarget {
   pluginId: string;
   tool: AITool;
   level: InstallLevel;
   source: "cannbot" | "skills";
+}
+
+function legacyUpdateTarget(plugin: InstalledPlugin): UpdateTarget {
+  const useLocal = boundaryErrors(plugin.tool, plugin.level).length > 0 &&
+    findPlugin(plugin.id, { source: "skills" });
+  return {
+    pluginId: plugin.id,
+    tool: plugin.tool,
+    level: plugin.level,
+    source: isMigratedPlugin(plugin.id) && !useLocal ? "cannbot" : "skills",
+  };
 }
 
 export async function updateCommand(
@@ -57,6 +68,8 @@ export async function updateCommand(
   const cannbotInstalled = scanCannbotInstalled();
 
   let targets: UpdateTarget[] = [];
+  const defaultTool = options.tool ? validateTool(options.tool) : undefined;
+  const defaultLevel = options.level ? validateLevel(options.level) : undefined;
 
   if (pluginNames.length === 0) {
     if (installed.length === 0 && cannbotInstalled.length === 0) {
@@ -65,65 +78,32 @@ export async function updateCommand(
       return;
     }
     targets = [
-      ...installed.map((p) => ({
-        pluginId: p.id,
-        tool: p.tool,
-        level: p.level,
-        // Migrated plugins have no legacy tree left in this repo — route their
-        // legacy records to the cannbot source so update re-installs from the
-        // cannbot repo.
-        source: (isMigratedPlugin(p.id) ? "cannbot" : "skills") as "cannbot" | "skills",
-      })),
+      ...installed.map(legacyUpdateTarget),
       ...cannbotInstalled.map((e) => ({ pluginId: e.id, tool: e.tool as AITool, level: "project" as InstallLevel, source: "cannbot" as const })),
     ];
   } else {
-    let defaultTool: AITool | undefined;
-    let defaultLevel: InstallLevel | undefined;
-
-    if (options.tool) {
-      defaultTool = validateTool(options.tool);
-    }
-    if (options.level) {
-      defaultLevel = validateLevel(options.level);
-    }
-
     for (const name of pluginNames) {
       // cannbot registry records win for same-name ids (migration policy);
       // legacy resolution must be source-scoped so a same-name cannbot
       // entry never shadows an installed legacy plugin
-      const cannbotMatches = cannbotInstalled.filter((e) => e.id === name);
       const legacyPlugin = findPlugin(name, { source: "skills" });
       const anyPlugin = findPlugin(name);
+      const cannbotMatches = cannbotInstalled.filter((e) => e.id === (anyPlugin?.id || name));
 
       if (cannbotMatches.length === 0 && !legacyPlugin && !anyPlugin) {
         logger.error(`${t("error_plugin_not_found")}: ${name}`);
         continue;
       }
 
-      const legacyMatches = cannbotMatches.length === 0 && legacyPlugin
-        ? installed.filter((p) => p.id === legacyPlugin.id)
-        : [];
-
-      // Migrated plugins have no legacy tree left in this repo — without this
-      // rerouting their legacy install records would fall through to the
-      // "not installed" branch (legacyPlugin is undefined for tombstones).
-      // Route them to the cannbot source so update re-installs from cannbot.
-      const migratedLegacy = cannbotMatches.length === 0 && !legacyPlugin && isMigratedPlugin(name)
-        ? installed.filter((p) => p.id === name)
-        : [];
+      const legacyMatches = installed.filter((p) => p.id === (legacyPlugin?.id || anyPlugin?.id || name));
 
       const matches = [
         ...cannbotMatches.map((e) => ({ pluginId: e.id, tool: e.tool as AITool, level: "project" as InstallLevel, source: "cannbot" as const })),
-        ...legacyMatches.map((p) => ({ pluginId: p.id, tool: p.tool, level: p.level, source: "skills" as const })),
-        ...migratedLegacy.map((p) => ({ pluginId: p.id, tool: p.tool, level: p.level, source: "cannbot" as const })),
+        ...legacyMatches.map(legacyUpdateTarget),
       ];
 
       if (matches.length > 0) {
-        for (const match of matches) {
-          if (defaultTool && match.tool !== defaultTool) continue;
-          if (defaultLevel && match.level !== defaultLevel) continue;
-          targets.push(match);
-        }
+        targets.push(...matches);
       } else {
         const displayName = cannbotMatches.length
           ? cannbotMatches[0].id
@@ -132,6 +112,17 @@ export async function updateCommand(
       }
     }
   }
+
+  const uniqueTargets = new Map<string, UpdateTarget>();
+  for (const target of targets) {
+    const key = `${target.pluginId}:${target.tool}:${target.level}`;
+    if (!uniqueTargets.has(key) || target.source === "cannbot") {
+      uniqueTargets.set(key, target);
+    }
+  }
+  targets = [...uniqueTargets.values()].filter((target) =>
+    (!defaultTool || target.tool === defaultTool) && (!defaultLevel || target.level === defaultLevel)
+  );
 
   if (targets.length === 0) {
     logger.info(t("update_no_plugins"));

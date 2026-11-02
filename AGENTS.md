@@ -90,7 +90,6 @@ cannbot-skills/
 │   │   ├── AGENTS.md         # Plugin 配置
 │   │   ├── init.sh           # 依赖安装脚本
 │   │   └── quickstart.md     # 快速入门
-│   ├── model-infer-optimize/
 │   └── ...                   # 各官方 Plugin
 ├── plugins-community/        # 社区 Plugin（实验/非正式版）
 ├── tests/                    # 测试框架与用例
@@ -109,6 +108,8 @@ cannbot-skills/
 > 算子性能调优插件 `ops-perf-optimize` 已从本仓迁出，入口与开发说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-perf-optimize)。
 
 > Ascend C Kernel 直调（快速版）插件 `ops-direct-invoke-flash` 已从本仓迁出，入口与开发说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke-flash)。
+
+> 模型推理优化插件 `model-infer-optimize` 的基础优化与 SOTA 探索工作流已从本仓迁出，入口与角色定义见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize)；原子 Skill 继续在本仓 `model/` 维护。
 
 ## Skills 分类
 

@@ -237,19 +237,7 @@
 | **model-infer-perf-breakdown** | 把 kernel_details / trace 按模型结构切成 component 实例并分桶，输出 wall/bubble 中位数与异常 layer 单页 HTML |
 | **model-infer-harmony** | 麒麟 NPU 端侧（Kirin9030）ASR 模型 4bit 量化、omg 模型转换与 CANNPAK 打包 |
 
-### Agents
-
-| Agent | 功能 |
-|-------|------|
-| **model-infer-analyzer** | 模型分析、方案设计、并行策略推荐 |
-| **model-infer-implementer** | 代码改造、调试修复 |
-| **model-infer-reviewer** | 精度验证、性能对比 |
-| **model-infer-sota-scenario** | 构造可复现推理输入、跑通精度基线、定可机判的判定口径（model-infer-optimize） |
-| **model-infer-sota-profiling-instrumenter** | 用 model-infer-profiling 为场景插桩/启用采集并产出 profile（model-infer-optimize） |
-| **model-infer-sota-profile-analyzer** | 用 model-infer-perf-breakdown 跑性能分析，产出时间分布 + 逐算子实测/理论 gap（model-infer-optimize） |
-| **model-infer-sota-candidate** | 按候选来源并行发现优化候选，产出候选 Plan 草案（model-infer-optimize） |
-| **model-infer-sota-implementer** | 按 Plan 用单点技术 skill 实施单个优化并保留 enable 开关、自验证（model-infer-optimize） |
-| **model-infer-sota-reviewer** | 只复核不改码，验证 Plan 是否真实生效、精度/性能是否达验收口径（model-infer-optimize） |
+基础优化、SOTA 探索工作流及配套 Agent 由 [cannbot 中的 model-infer-optimize](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) 维护，不再作为本仓本地 Agent 列出；上列原子 Skill 继续在本仓维护。
 
 ## 推荐模型推理优化
 
