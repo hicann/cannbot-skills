@@ -25,7 +25,7 @@
 # 未配置路由的 paradigm（按 fallback 走通用方法论）：
 #   Padding, IndexGather, ScatterUpdate, AtomicUpdate, Interpolation,
 #   SortSelect, Histogram, SlidingWindow, ControlFlow,
-#   Spectral, RandomSampling,
+#   Spectral,
 #   Sparse, CollectiveCommunication, FusedComposite,
 #   以及 Elementwise, ReductionComposite, ArgReduce,
 #   LayoutTransform, Quantization, Recurrence, NumericalStable, DynamicShape,
@@ -41,3 +41,5 @@ routes:
       - references/paradigms/contraction/patterns.md
     Histogram:
       - references/paradigms/histogram/patterns.md
+    RandomSampling:
+      - references/paradigms/random_sampling/patterns.md

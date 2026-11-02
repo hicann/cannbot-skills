@@ -82,5 +82,5 @@ def run(seed: Tensor, offset: Tensor, out: Tensor, ...) -> None:
 
 1. `@host` 函数体内直接 `kernel[dim3(block), dim3(thread)](...)`——**纯 SIMT 形态**，禁与混合形态（`kernel[block_count]` + `vf(thread=N)`）混用（编译器校验）
 2. `cb.compile` + `lru_cache` 缓存键含（shape、dtype、core 数、thread 数、全部 Constexpr）——thread 数进键（AscendC 侧线程随 TilingKey 分档的等价物）
-3. `N=0` 不 launch；核数经平台 API 查询（`vector_core_num`），有用核数截断同 [../../../sparse/adapters/dsl/kernel-entrance.md](../../../sparse/adapters/dsl/kernel-entrance.md) §6
+3. `N=0` 不 launch；核数经平台 API 查询（`vector_core_num`），有用核数截断同 Sparse 范式 DSL 适配层 kernel-entrance §6（**该范式尚未合入本仓**，合入前按 cannbot-dsl `docs/zh/guide/compute.md`「Host 启动规则」口径执行）
 4. CANN ≥ 9.2.0（SIMT 前提）；目标环境低于此版本时 B/D 族无可用路线，设计须声明
