@@ -2,6 +2,10 @@
 
 每个范式提供独立的场景判定、算法模型和实现约束。现有结构参考 [Broadcast](broadcast/patterns.md)、[Reduction](reduction/patterns.md) 与 [Contraction](contraction/patterns.md)。
 
+## 开发规则
+
+范式文档的命名、目录、章节骨架与设计契约见 [paradigm-dev-rules.md](paradigm-dev-rules.md)。
+
 ## 组织方式
 
 - `patterns.md`：场景判定、语言选择和主题索引。
