@@ -10,9 +10,6 @@
 介绍: Kernel 侧 AscendC API 使用与工程约定规范（数据搬运推荐 DataCopyPad/内存管理配对/API 参数限制/核间与核内同步配对/硬件参数 + TilingKey 注册/Kernel 派发/命名约定 + VF 编程），由 ascendc-api.md 与 ascendc-perf.md 合并而来，另自 ascendc-op-conventions.md 迁入 3 条（重编号 KERNEL-6~8）；日落检查独立于 ascendc-sunset-api.md
 </适用>
 
-<检视负载>
-通用检视子 agent 检视条款容量上限: 5
-</检视负载>
 
 > **适用范围**：Kernel 侧（Device 侧）
 >

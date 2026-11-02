@@ -1,6 +1,8 @@
 # 规则集总览
 
-> **声明**：本表**仅供人读**，用于快速了解全部规则文件的分类与定位。机器路由（规则加载、侧别过滤、触发匹配）依赖各规则文件自身的「适用」声明头，**不依赖本表**。新增或修改规则文件时须同步更新本表（见 `docs/architecture.md` 5.1 节）。
+> **声明**：本表**仅供人读**，用于快速了解全部规则文件的分类与定位。机器路由（规则加载、侧别过滤、触发匹配）依赖各规则文件自身的「适用」声明头，**不依赖本表**。任何检视流程不得以「确认文件清单」为由读取本表；主题文件清单以各文件 `<适用>` 声明为准，本概览仅导航不参与判定。新增或修改规则文件时须同步更新本表（见 `docs/architecture.md` 5.1 节）。
+>
+> 最后更新：2026-10-31（负载均衡机制下线：删除全部 <检视负载> 容量声明头，检视改为单波派发——每个子 Agent 负责一个规则文件的全部条款；派发方式列同步更新）
 >
 > 最后更新：2026-10-27（SIMT 文件合并：simt-api-analysis.md（16 条）+ simt-constraints.md（知识参考，无声明头）合并为 ascendc-simt.md，条款 16→15（SIMT-1-1~SIMT-1-15，原 UintDiv 保留条款移除），触发词更新为 Simt/simt_api/asc_simt.h，侧别 Kernel、领域 true、通用分组容量 5，原约束清单（头文件位置/变量名冲突/参数传递/启动方式/UB/线程数/VF 调用）并入「执行流程」章节并新增检视前置要求（先经 /ascendc-docs-search 查 SIMT 头文件核实）；本表原 #10/#11 两行合并为一行，特殊机制注记删除 simt-constraints.md 条目，总表行号重排为连续 1-13；依据 commit 77fdc791）
 >
@@ -18,28 +20,28 @@
 
 | # | 规则文件 | 分类 | 条款前缀 | 语言 | 适用侧别 | 启用/触发机制 | 派发方式 | 条款数 | 内容定位 |
 |---|---------|------|---------|------|---------|-------------|---------|--------|---------|
-| 1 | cpp-secure.md | C++安全编码 | SEC | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 通用分组（容量10） | 24 | 内存/指针安全、输入校验、资源管理、安全函数、LOG API 安全，红线级规范 |
-| 2 | cpp-general.md | C++通用编码 | GEN | C++ | All | 语言+侧别匹配即启用 | 通用分组（容量10） | 39 | 代码设计、头文件、数据类型、常量、表达式、函数使用等通用编码规范 |
+| 1 | cpp-secure.md | C++安全编码 | SEC | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件 | 24 | 内存/指针安全、输入校验、资源管理、安全函数、LOG API 安全，红线级规范 |
+| 2 | cpp-general.md | C++通用编码 | GEN | C++ | All | 语言+侧别匹配即启用 | 单波单文件 | 39 | 代码设计、头文件、数据类型、常量、表达式、函数使用等通用编码规范 |
 | 3 | cpp-style.md | 代码风格 | STYLE | C++ | All | 默认启用 | 专项子 agent 独立托管（组名 style） | 16 | 命名/格式/注释风格，结果以 yaml category: style 输出，违反计入报告问题数（severity 取条款声明） |
-| 4 | ascendc-sunset-api.md | AscendC 日落检查 | SUNSET | C++ | All | 关键词触发（aclnn、aclrt、aclop） | 通用分组（容量2） | 2 | 跨侧别日落（废弃）API/头文件/库检查，预研报告驱动 + clause.get_sunset_api.py fallback |
-| 5 | ascendc-host-rules.md | AscendC工程约定 | HOST | C++ | Host | 关键词触发（InferDataType、IMPL_OP、REG_OP、IMPL_OP_INFERSHAPE、GetPlatformInfo、GetCoreNumAic/Aiv、GetUbBlockSize、TilingParse） | 通用分组（容量2） | 4 | HOST-1 InferDataType 须放 op_graph 目录（禁 op_host 链式写法）；HOST-2 REG_OP 算子必须实现 InferDataType（互斥分工）；HOST-3 platform 参数须校验取值合法性（判空+类型匹配零值拦截）；HOST-4 platform 参数须在 Tiling 方法中直接获取（禁 TilingParse→compileInfo→Tiling 传递） |
-| 6 | ascendc-log.md | AscendC日志 | LOG | C++ | Host | 关键词触发（OP_LOGE、OP_LOGI、OP_LOGW、OP_LOGD） | 通用分组（容量1） | 2 | LOG-1 基于 cann-error-code-standard 核验实际入口，禁止推荐废弃宏，与 ERR 同根因合并；LOG-2 检查算子名来自上下文，保留判空分支豁免 |
-| 7 | ascendc-error-code.md | CANN错误码 | ERR | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 通用分组（容量2） | 4 | ERR-1 检测 EZ0001、EZ0002、EZ0003、EZ0005、EZ0006、EZ0007 及旧宏；ERR-2 语义/注册/Arglist；ERR-3 首报唯一性；ERR-4 失败返回诊断；唯一基准 cann-error-code-standard |
-| 8 | ascendc-red-line.md | 高频问题清单 | RED | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 通用分组（容量3），**最高优先级** | 10 | 生产环境总结的红线问题（除零/越界/溢出/未初始化/数据竞争等） |
-| 9 | ascendc-topk.md | 高频问题清单 | TOPK | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 通用分组（容量3），**最高优先级** | 14 | 检视实践中高频风险点（野指针/特殊值/返回值校验/atomic 清零等） |
+| 4 | ascendc-sunset-api.md | AscendC 日落检查 | SUNSET | C++ | All | 关键词触发（aclnn、aclrt、aclop） | 单波单文件 | 2 | 跨侧别日落（废弃）API/头文件/库检查，预研报告驱动 + clause.get_sunset_api.py fallback |
+| 5 | ascendc-host-rules.md | AscendC工程约定 | HOST | C++ | Host | 关键词触发（InferDataType、IMPL_OP、REG_OP、IMPL_OP_INFERSHAPE、GetPlatformInfo、GetCoreNumAic/Aiv、GetUbBlockSize、TilingParse） | 单波单文件 | 4 | HOST-1 InferDataType 须放 op_graph 目录（禁 op_host 链式写法）；HOST-2 REG_OP 算子必须实现 InferDataType（互斥分工）；HOST-3 platform 参数须校验取值合法性（判空+类型匹配零值拦截）；HOST-4 platform 参数须在 Tiling 方法中直接获取（禁 TilingParse→compileInfo→Tiling 传递） |
+| 6 | ascendc-log.md | AscendC日志 | LOG | C++ | Host | 关键词触发（OP_LOGE、OP_LOGI、OP_LOGW、OP_LOGD） | 单波单文件 | 2 | LOG-1 基于 cann-error-code-standard 核验实际入口，禁止推荐废弃宏，与 ERR 同根因合并；LOG-2 检查算子名来自上下文，保留判空分支豁免 |
+| 7 | ascendc-error-code.md | CANN错误码 | ERR | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件 | 4 | ERR-1 检测 EZ0001、EZ0002、EZ0003、EZ0005、EZ0006、EZ0007 及旧宏；ERR-2 语义/注册/Arglist；ERR-3 首报唯一性；ERR-4 失败返回诊断；唯一基准 cann-error-code-standard |
+| 8 | ascendc-red-line.md | 高频问题清单 | RED | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件，**最高优先级** | 10 | 生产环境总结的红线问题（除零/越界/溢出/未初始化/数据竞争等） |
+| 9 | ascendc-topk.md | 高频问题清单 | TOPK | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件，**最高优先级** | 14 | 检视实践中高频风险点（野指针/特殊值/返回值校验/atomic 清零等） |
 | 10 | [mc2-specific.md](mc2-specific.md) | 领域总览 | MC2 | 不限 | All | 主题文件按关键词或已确认关联关系选规 | 总览不派发；主题文件见下表 | 41（主题文件合计） | MC2 适用范围、主题文件及条款导航 |
-| 11 | ascendc-simt.md | 领域专项 | SIMT | C++ | Kernel | 关键词触发（Simt、simt_api/asc_simt.h） | 通用分组（容量5） | 15 | SIMT API C 风格转换规则（Simt::GetThreadNum→blockDim.x、VF_CALL→asc_vf_call 等 15 条 API 转换），含检视前置要求（先经 /ascendc-docs-search 查 SIMT 头文件核实转换规则）与执行流程（头文件位置/变量名冲突/参数传递/启动方式/UB 使用/线程数/VF 调用检视步骤，吸收原 simt-constraints.md 约束清单），由 simt-api-analysis.md + simt-constraints.md 合并 |
-| 12 | ascendc-kernel-rules.md | AscendC Kernel编码 | KERNEL | C++ | Kernel | 关键词触发（AscendC::、DataCopy、EnQue、TILING_KEY_IS 等 22 个） | 通用分组（容量5） | 13 | Kernel 侧编码规范（KERNEL-1~5 API 使用与硬件约定 + 6~8 TilingKey注册/派发/命名 + 9 核内同步推荐 Lock/Unlock + 10 SetFlag/WaitFlag 配对 + 11 禁 PipeBarrier<PIPE_ALL> + 12 禁 __VEC_SCOPE__ 用具名 VF 函数+asc_vf_call + 13 VF 内禁 if 分支），由 api+perf+op-conventions 合并 |
-| 13 | blaze-specific.md | 领域专项 | BLAZE | C++ | Host, Kernel | 关键词触发（blaze/、Blaze::、GemmUniversal、BlockMmad 等 14 个） | 通用分组（容量5） | 21 | Blaze 矩阵乘框架（ops-tensor）：架构分层/核心类模板参数兼容/策略注册与声明头-聚合头约定/编码约束（高阶API禁令、头文件路径与自包含、tile 转发头与 arch35 约定、名称空间、架构宏统一、Params 结构）/命名规范/Tile 层接口风格统一与对外接口严格控制/AIC-AIV Mix 同步（含核类型守卫）/交付件完整性，有 `排除场景` 声明（third_party、纯构建、纯脚本改动排除） |
+| 11 | ascendc-simt.md | 领域专项 | SIMT | C++ | Kernel | 关键词触发（Simt、simt_api/asc_simt.h） | 单波单文件 | 15 | SIMT API C 风格转换规则（Simt::GetThreadNum→blockDim.x、VF_CALL→asc_vf_call 等 15 条 API 转换），含检视前置要求（先经 /ascendc-docs-search 查 SIMT 头文件核实转换规则）与执行流程（头文件位置/变量名冲突/参数传递/启动方式/UB 使用/线程数/VF 调用检视步骤，吸收原 simt-constraints.md 约束清单），由 simt-api-analysis.md + simt-constraints.md 合并 |
+| 12 | ascendc-kernel-rules.md | AscendC Kernel编码 | KERNEL | C++ | Kernel | 关键词触发（AscendC::、DataCopy、EnQue、TILING_KEY_IS 等 22 个） | 单波单文件 | 13 | Kernel 侧编码规范（KERNEL-1~5 API 使用与硬件约定 + 6~8 TilingKey注册/派发/命名 + 9 核内同步推荐 Lock/Unlock + 10 SetFlag/WaitFlag 配对 + 11 禁 PipeBarrier<PIPE_ALL> + 12 禁 __VEC_SCOPE__ 用具名 VF 函数+asc_vf_call + 13 VF 内禁 if 分支），由 api+perf+op-conventions 合并 |
+| 13 | blaze-specific.md | 领域专项 | BLAZE | C++ | Host, Kernel | 关键词触发（blaze/、Blaze::、GemmUniversal、BlockMmad 等 14 个） | 单波单文件 | 21 | Blaze 矩阵乘框架（ops-tensor）：架构分层/核心类模板参数兼容/策略注册与声明头-聚合头约定/编码约束（高阶API禁令、头文件路径与自包含、tile 转发头与 arch35 约定、名称空间、架构宏统一、Params 结构）/命名规范/Tile 层接口风格统一与对外接口严格控制/AIC-AIV Mix 同步（含核类型守卫）/交付件完整性，有 `排除场景` 声明（third_party、纯构建、纯脚本改动排除） |
 
 ## MC2 主题文件
 
-| 文件 | 语言 | 侧别 | 触发机制 | 每组容量 | 条款数 |
-|---|---|---|---|---|---|
-| [mc2-interface-tiling.md](mc2-interface-tiling.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 5 | 8 |
-| [mc2-communication-compute.md](mc2-communication-compute.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 5 | 14 |
-| [mc2-resources-errors.md](mc2-resources-errors.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 5 | 8 |
-| [mc2-integration-tests.md](mc2-integration-tests.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 5 | 11 |
+| 文件 | 语言 | 侧别 | 触发机制 | 条款数 |
+|---|---|---|---|---|
+| [mc2-interface-tiling.md](mc2-interface-tiling.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 8 |
+| [mc2-communication-compute.md](mc2-communication-compute.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 14 |
+| [mc2-resources-errors.md](mc2-resources-errors.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 8 |
+| [mc2-integration-tests.md](mc2-integration-tests.md) | 不限 | All | 关键词或已确认关联，按声明排除 | 11 |
 
 侧别为文件级声明；选规时继续按各条款的侧别和实际变更筛选。MC2-9.8 仅检查本次公共修改对调用者的影响，包含受影响的非 MC2 调用者。
 
@@ -47,14 +49,14 @@
 
 | 文件 | 特殊机制 |
 |------|---------|
-| ascendc-red-line.md / ascendc-topk.md | 最高优先级：独立成组、不参与跨条款合并、必进第一波（`steps/common.plan-design.md` Step 6.2/7） |
-| cpp-style.md | 16 条单独成 1 组（组名 style），全文 Read，结果以 yaml `category: style` 字段输出（无文本前缀），不走假设检验，违反计入报告问题数（severity 取条款声明） |
-| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活且不参与 Step 5 内容筛查 |
+| ascendc-red-line.md / ascendc-topk.md | 最高优先级规则文件，无条件激活 |
+| cpp-style.md | 专项组（组名 style），全文 Read，结果以 yaml `category: style` 字段输出（无文本前缀），不走假设检验，违反计入报告问题数（severity 取条款声明） |
+| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活（文件级匹配即纳入） |
 | mc2-specific.md | 总览提供主题导航；四份主题文件声明适用与排除条件，plan-design Step 3 按关键词或已确认的调用、注册、构建关系选规 |
 
 ## 维护说明
 
-- **新增规则文件**：放入 `references/` + 写适用/检视负载声明头即自动注册；同时在本表追加一行（按分类归位排序）
+- **新增规则文件**：放入 `references/` + 写适用声明头即自动注册；同时在本表追加一行（按分类归位排序）
 - **修改规则文件**（条款增删、触发词变化、侧别调整）：同步更新本表对应行的条款数/触发机制/侧别等列
 - **删除规则文件**：同步删除本表对应行
 - 各列取值须与文件实际声明头和快速索引一致，禁止凭记忆填写

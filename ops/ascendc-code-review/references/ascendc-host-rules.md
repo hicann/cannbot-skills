@@ -10,9 +10,6 @@
 介绍: 四条检视规则：HOST-1 InferDataType 注册与实现必须放 op_graph 目录（禁止 op_host）；HOST-2 REG_OP 注册的算子必须实现 InferDataType（自 ascendc-op-conventions.md 条款 3 迁入，与 HOST-1 互斥分工）；HOST-3 获取的 platform 参数（coreNum/ubSize/blockSize 等）必须校验取值合法性——GetPlatformInfo 返回判空、有符号核数 <= 0 拦截、无符号容量 == 0 拦截（类型匹配），检视意见须给出标准拦截写法；HOST-4 platform 参数须在 Tiling 方法中直接获取，禁止 TilingParse 经 compileInfo 传递（写端/读端任一命中即 FAIL）
 </适用>
 
-<检视负载>
-通用检视子 agent 检视条款容量上限: 2
-</检视负载>
 
 ## 快速索引
 

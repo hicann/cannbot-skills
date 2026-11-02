@@ -1,6 +1,6 @@
 # 逐条检视 prompt 模板（PR 检视）
 
-workflow 按 plan-design 产出的检视计划，逐波派发子 Agent。每组使用以下 prompt 模板。
+workflow 按 plan-design 产出的检视计划，单波并行派发子 Agent（每组 = 一个规则文件的全部条款）。每组使用以下 prompt 模板。
 
 派发时，仅为所属规则声明了 `关联适用` 的条款填入已有的关联依据，保留来源、确认状态和证据位置；无则省略该输入。混合分组须标明依据对应的条款。
 
@@ -9,25 +9,21 @@ workflow 按 plan-design 产出的检视计划，逐波派发子 Agent。每组�
 ```
 【已由上游完成】
 - 代码侧别识别：{Kernel侧/Host侧}
-- 条款过滤：已按侧别过滤，保留以下条款
-- 代码概要：{code_summary_path}
+- 分组方式：按规则文件整文件分组，本组承接该文件全部条款
 - 关联依据（若有）：{对应条款、关联文件、调用/注册/构建关系、来源、确认状态及证据位置}
-- API 预研报告：{api_prestudy_path}（仅 Kernel 侧，若存在）
 - yaml 提交端点：http://127.0.0.1:{collector_port}/submit（每条条例结果通过 curl 提交到此端点，**禁止使用 Write 工具写 yaml 文件，禁止读取 yaml 输出目录中的已有文件**）
 
 检视 PR diff：{diff_file_path}
-检视代码范围：{仅Kernel / 仅Host / 全部}
 完整源码路径：{repo_path}
 
 检视条款：{条例ID-1} {条例标题}、{条例ID-2} {条例标题}
 
 【执行要求】
 - 第一步加载 ascendc-code-review skill，然后 Read `{skill_base}/core/methodology.md` 掌握假设检验方法、置信度标准、红线问题和 PR 交叉验证规则
-- 若提供了代码概要，Read 获取全局视角（重点关注「API 调用索引」和「跨文件防御摘要」）
 - 若提供了关联依据，仅用于其对应条款的适用判断；保留用户来源，不写成已查阅源码确认。
-- API 约束信息：若已提供 API 预研报告，以其为主要来源。若预研报告未覆盖当前条款涉及的 API，使用 `/ascendc-docs-search` 补充查阅
-- 对每条分配的条例（含所属规则文件名），定位条款章节并只读该章节：起始行 = `grep -nE '^#+ .*{条例ID}([ :.]|$)' {规则文件}` 的首个命中行（各文件条款标题形如 `#### SEC-1.1 …`、`##### 规则 GEN-1.1 …`、`## KERNEL-1: …`、`### TOPK-3 …`）；结束行 = 从起始行向下第一个**井号数不多于起始标题井号数**的标题行的前一行（用 `grep -nE '^#{2,6} '` 逐行核对级别）。Read offset={起始} limit={结束-起始}。**只读该条例章节，禁止 Read 整个规则文档。**若条例包含专属检视方法，必须严格按该指引执行
-- 若检视条款来自 ascendc-kernel-rules / ascendc-sunset-api / ascendc-simt 且预研报告未覆盖，使用 `/ascendc-docs-search` 查阅对应 API 的最新官方文档
+- API 约束信息：检视条款涉及的 API（DataCopy、repeatTime 限制等），使用 `/ascendc-docs-search` 查阅官方文档核实约束（对齐要求、参数限制、代际差异），禁止凭记忆或推测
+- Read 本组所属规则文件**全文**——仅当本组承接该文件**全部条款**时（1M 上下文足够容纳，全文阅读提供跨条款上下文；快速索引与条款正文一并读取，轨迹如实记录）。若本次任务是**定向/部分条款检视**，退回单章边界：只读 `<适用>` 声明头 + 目标条款章节（见 quick-review 读取硬约束）。逐条检视文件内全部条款：快速索引中的每条条例都要产出结果；判定某条款不适用于当前代码时提交 `status: PASS` 并在 problem_desc 注明「不适用：<原因>」（侧别不符/无对应代码模式/触发场景缺失等）——**禁止跳过不提交**（完整性校验按条例 ID 对账）。若条例包含专属检视方法，必须严格按该指引执行；所属规则文件若有「交付声明要求」类共用节（如 ascendc-error-code.md），交付须逐项满足
+- 若检视条款来自 ascendc-kernel-rules / ascendc-sunset-api / ascendc-simt，使用 `/ascendc-docs-search` 查阅对应 API 的最新官方文档
 - 先 Read diff 了解变更范围，再 Read 完整源码追溯变量来源
 - 严格按假设检验驱动流程执行（H0/H1、证据收集、自信值计算）。**例外**：若条例的专属检视方法已声明不走假设检验（如 cpp-style 的 16 条、ascendc-sunset-api 的 SUNSET-1/2），按专属方法执行，不收集证据分值；此类条款 FAIL/SUSPICIOUS 的 yaml 提交时使用对应 category（cpp-style → `category: style`，SUNSET-* → `category: sunset`），不带 evidence/confidence 字段（collector 已豁免校验）
 - 所有条款检视完成后，**将每条结果按下方 yaml schema 通过 curl 提交到 collector 端点**。提交命令模板：

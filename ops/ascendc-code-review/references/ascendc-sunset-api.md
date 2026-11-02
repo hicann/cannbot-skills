@@ -10,9 +10,6 @@
 介绍: CANN 日落（废弃）API 与头文件/库的兼容性检查，清单由 clause.get_sunset_api.py 动态解析官方废弃文档生成，检视策略为预研报告驱动的确定性符号匹配（不走假设检验）
 </适用>
 
-<检视负载>
-通用检视子 agent 检视条款容量上限: 2
-</检视负载>
 
 > **机制联动**：api-prestudy Step 2.5 运行 `{skill_base}/scripts/clause.get_sunset_api.py` 比对代码 API 清单，产出预研报告「## 日落 API」章节；本文件条款优先消费该章节，无章节时 fallback 脚本自查（检视策略见各条款）。
 >

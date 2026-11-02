@@ -2,7 +2,7 @@
 ## 触发
 检视 PR、审核 PR、帮我检视这个 PR
 
-核心流程：从用户输入提取 PR 链接（解析 repo_url 与 pr_number）并判断托管平台（仅支持 GitCode）→ 派发 code-fetch 子 Agent 获取 diff 与完整源码（脚本由子 Agent 执行，主 Agent 不直接执行）→ 并行派发代码概要/API 预研子 Agent（API 预研仅 Kernel 侧）→ 生成检视计划（通用分组、跳过清单、仅核对清单）→ 分波派发通用检视子 agent 逐条检视 → 行号校对 → 撰写报告 → 可选行内评论。
+核心流程：从用户输入提取 PR 链接（解析 repo_url 与 pr_number）并判断托管平台（仅支持 GitCode）→ 派发 code-fetch 子 Agent 获取 diff 与完整源码（脚本由子 Agent 执行，主 Agent 不直接执行）→ 主 Agent 直接执行检视计划设计（侧别识别 + 文档级分组）→ 单波派发通用检视子 agent（每文件一个）逐条检视 → 行号校对 → 撰写报告 → 可选行内评论。
 
 ---
 
@@ -13,33 +13,27 @@
 
 | 任务 | 阶段 | 内容 |
 |------|------|------|
-| 任务0 | 获取 diff + 代码概要 + API 预研 + 检视计划设计 | 派发 code-fetch 子 Agent 获取 diff 和完整源码 → 并行派发 code-summarize + api-prestudy（仅 Kernel 侧）→ 检视计划（通用分组 + 跳过清单 + 仅核对清单） |
-| 任务1 | 逐条检视 | 按波次派发通用检视子 agent |
+| 任务0 | 获取 diff + 检视计划设计 | 派发 code-fetch 子 Agent 获取 diff 和完整源码 → 主 Agent 直接执行检视计划（侧别识别 + 文档级分组） |
+| 任务1 | 逐条检视 | 单波派发通用检视子 agent（每文件一个） |
 | 任务2 | 行号校对 | steps/pr-review.line-verify.md |
 | 任务3 | 撰写报告 | steps/common.report-write.md |
 | 任务4 | 可选行内评论 | 检查 gitcode-toolkit 可用性后执行 steps/pr-review.inline-pr-comment.md |
 
-### 阶段0：获取 diff + 代码概要 + API 预研 + 检视计划设计
+### 阶段0：获取 diff + 检视计划设计
 
 1. 将任务0 标记为 in_progress
 2. 从用户输入中提取 PR 链接，解析出 repo_url 与 pr_number，判断托管平台（仅支持 GitCode，非 GitCode PR 终止）
 3. Read + 执行 `steps/pr-review.code-fetch.md` 的派发指令，派发 code-fetch 子 Agent 获取 diff 和完整源码（获取/克隆脚本由子 Agent 执行，主 Agent 不直接执行）
-4. 等待 code-fetch 子 Agent 返回（产出 diff_path + repo_path + mode + routing + guidance + 变更文件数 + 变更行数——后两者记录备用，供阶段3 报告头部元信息）
-5. **超大 PR 提示**（mode 由 code-fetch 调 review_mode.py 判定，阈值见 `{skill_base}/scripts/workflow.review-thresholds.yaml`）。`routing` 恒为 `pr-review`，本流程不再有分支切换：
-   - `mode=oversized`（变更文件数与变更行数双高）→ **先向用户输出下方提示，再继续标准流程**（提示不阻断、不等待用户回复）
-   - `mode=minimal/compact/standard` → 直接继续
+4. 等待 code-fetch 子 Agent 返回（产出 diff_path + repo_path + oversized + 变更文件数 + 变更行数——后两者记录备用，供阶段3 报告头部元信息）
+5. **超大 PR 提示**（oversized 由 code-fetch 调 review_mode.py 双高判定，阈值见 `{skill_base}/scripts/workflow.review-thresholds.yaml`）：
+   - `oversized=true` → **先向用户输出下方提示，再继续标准流程**（提示不阻断、不等待用户回复，编排不变）
+   - `oversized=false` → 直接继续
 
-   **用户可见提示（仅 `mode=oversized` 时输出一次）**：
+   **用户可见提示（仅 `oversized=true` 时输出一次）**：
 
-   > 检测到超大 PR（变更文件数与变更行数双高）。**强烈建议先在本地手工拆分**：按算子或子系统边界把它拆成几个小 PR，再分批走文件检视流程（`workflows/file-review.md`）逐个检视——超大 diff 单次全量检视容易因上下文超载而漏检，失败重跑代价也高。本次全量 PR 检视仍将继续（已按超大 PR 收紧编排）；若想改为分批检视，请中断并告知我。
-6. **在单个消息中并行派发子 Agent**（代码概要总是派发，API 预研仅当 diff 含 `op_kernel/` 路径时派发）：
-
-- **代码概要子 Agent**：Read+执行 `steps/pr-review.code-summarize.md`，传入 diff 路径 + repo_path + 概要输出路径 `./operators/pr-{pr_number}/code_summary.md`
-- **API 预研子 Agent**（仅当 diff 含 `op_kernel/` 路径）：Read+执行 `steps/common.api-prestudy.md`，传入 Kernel 侧文件列表（从 repo_path 筛选）+ 输出路径 `./operators/pr-{pr_number}/api_prestudy.md`
-
-7. 等待已派发的子 Agent 全部返回（1-2 个），收集：代码概要→侧别+概要路径；API 预研→预研报告路径（若已派发）
-8. Read + 执行 `steps/common.plan-design.md`，派发子 Agent 产出检视计划（通用分组 + 跳过清单 + 仅核对清单）。传入 diff 路径 + repo_path + 概要路径 + API 预研路径（若存在）+ scope_hint + 检视类型 `pr` + 检视标识 `{pr_number}` + mode + guidance（mode/guidance 由 code-fetch 调 review_mode.py 判定，plan-design 按该 mode 的 guidance 编排）。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py --type pr --id {pr_number}` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
-9. 将任务0 标记为 done
+   > 检测到超大 PR（变更文件数与变更行数双高）。**强烈建议先在本地手工拆分**：按算子或子系统边界把它拆成几个小 PR，再分批走文件检视流程（`workflows/file-review.md`）逐个检视——超大 diff 单次全量检视容易因上下文超载而漏检，失败重跑代价也高。本次全量 PR 检视仍将继续；若想改为分批检视，请中断并告知我。
+6. Read + 执行 `steps/common.plan-design.md`（主 Agent 直接执行，不派发子 Agent）：做侧别识别 + 文档级检视分组。传入 diff 路径 + repo_path + scope_hint + 检视类型 `pr` + 检视标识 `{pr_number}`。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py --type pr --id {pr_number}` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
+7. 将任务0 标记为 done
 
 ### 阶段1：逐条检视
 
@@ -49,18 +43,19 @@
    - 后台启动（分离 stdio 避免阻塞 shell）：`setsid python3 {skill_base}/scripts/workflow.submit_server.py {yaml_dir} {PORT} > /tmp/collector_{PORT}.log 2>&1 < /dev/null &`（保存 PID）
    - 就绪检查（最多重试 2 次）：`sleep 1 && curl -s http://127.0.0.1:{PORT}/health || (sleep 2 && curl -s http://127.0.0.1:{PORT}/health)`；若仍失败，检查 `/tmp/collector_{PORT}.log` 排查原因并尝试重启
 3. Read `steps/pr-review.clause-review.md` 获取 prompt 模板
-4. 按阶段0 检视计划的通用分组，逐波派发：
-   - 每波在单个消息中并行调用 ≤6 个 `Agent` 工具（上限见 `core/review-load-balance.md`），`subagent_type` 使用 `"general"`
-   - 每组用 prompt 模板填入：**{skill_base}（本 skill 根目录绝对路径）** + 侧别 + 条例ID + diff路径 + repo_path + 概要路径 + API 预研路径（若存在）+ **collector_port（=步骤2 选定的 PORT）**，**不传 yaml_output_dir**
-   - **代码范围**：使用 plan-design 输出中每组的侧别标签（仅Kernel / 仅Host / 全部），填入 prompt 的「检视代码范围」字段
-   - 波次内并行，波次间串行
+4. 按阶段0 检视计划的分组**单波派发**：在单个消息中并行调用全部组的 `Agent` 工具（每组 = 一个规则文件的全部条款），`subagent_type` 使用 `"general"`
+   - 每组用 prompt 模板填入：**{skill_base}（本 skill 根目录绝对路径）** + 侧别 + 条例ID + diff路径 + repo_path + **collector_port（=步骤2 选定的 PORT）**，**不传 yaml_output_dir**
    - 子 Agent 通过 `curl -X POST http://127.0.0.1:{PORT}/submit` 提交 yaml 结果，不再以文本消息返回结果
-5. 每波完成后输出进度，所有波次完成后汇总（子 Agent 结果已通过 collector 落盘 yaml，无需收集文本返回值）
-6. **波次完整性校验（按条款清单，非文件总数）**：主 Agent 维护「期望条款清单」——随每波派发累计所有已派发组的条例 ID，并记录每个子 Agent 的会话 ID 与其承接的组名对应关系（供补派阶梯重试时引用）。每波所有子 Agent 返回后比对：
+5. 所有子 Agent 返回后汇总（子 Agent 结果已通过 collector 落盘 yaml，无需收集文本返回值）
+6. **完整性校验（按条款清单）**：主 Agent 维护「期望条款清单」= 检视计划中所有已派发组的条例 ID，并记录每个子 Agent 的会话 ID 与其承接的组名对应关系。所有子 Agent 返回后比对：
    - 已落盘清单：`ls {yaml_dir}/ | sed 's/\.yaml$//; s/_dup[0-9]*$//'`
    - 缺失清单 = 期望条款清单 − 已落盘清单
-   - 缺失非空 → 定位缺失条例 ID 所属的组（检视计划中已知），按 `core/review-load-balance.md` 的「补派阶梯」三级重试（整组补派 → 拆子组 → 保留记录）。落盘文件名为 `{条例ID}.yaml`。校验与补派照常执行但**不再写入报告**（静默保证覆盖完整）
-7. **关闭 collector**：`kill {COLLECTOR_PID}`（所有波次完成后）
+   - 缺失非空 → 按三级补派重试：
+     ① **从原子 Agent 捞**：向缺失条款所属的子 Agent（会话 ID 已记录）发消息，要求补交缺失的 yaml（该 Agent 上下文里已有检视过程，通常只是漏提交）
+     ② **拼组重派**：捞不回的缺失条款，无论来源文件，合并成一个额外的子 Agent 重跑（该 Agent 按各条例所属规则文件 Read 对应章节，只补缺失条例）
+     ③ 仍缺失则标注「该条款结果缺失」，记录失败组名与子 Agent 会话 ID
+     落盘文件名为 `{条例ID}.yaml`。校验与补派照常执行但**不再写入报告**（静默保证覆盖完整）
+7. **关闭 collector**：`kill {COLLECTOR_PID}`（所有子 Agent 返回后）
 8. 将任务1 标记为 done
 
 ### 阶段2：行号校对
@@ -86,17 +81,17 @@
 
 | 差异点 | 说明 |
 |--------|------|
-| 阶段0 多一步 code-fetch | 先派发 code-fetch 子 Agent 获取 diff + clone 源码，再并行派发 |
-| 阶段1 传 diff + 完整源码 | 每组额外传入 diff 路径、完整源码路径、代码范围 |
+| 阶段0 多一步 code-fetch | 先派发 code-fetch 子 Agent 获取 diff + clone 源码，再主 Agent 直接执行检视计划 |
+| 阶段1 传 diff + 完整源码 | 每组额外传入 diff 路径、完整源码路径 |
 | 阶段2 走 pr-review.line-verify | 薄壳调 `{skill_base}/scripts/workflow.line_verify.py --diff`，带 diff 红线校验 |
 | 报告路径 | `./operators/pr-{pr_number}/` |
 
 ## 约束
 
 - 严格按阶段顺序执行，禁止跳步
-- 阶段0 的子 Agent 必须在单个消息中并行派发（代码概要总是，API 预研仅 Kernel 侧）；plan-design 在已派发的子 Agent 全部返回后单独派发
+- plan-design 由主 Agent 直接执行，不派发子 Agent
 - code-fetch 返回的变更文件数/变更行数必须传递到阶段3（报告头部元信息 {{FILE_COUNT}}/{{TOTAL_LINES}}）
 - 阶段2 走 `steps/pr-review.line-verify.md` 薄壳：脚本内部对 yaml 做 diff 红线校验与行号校对
 - PR 检视模式下 code-fetch 失败则终止流程
-- `mode=oversized` 的拆分建议只提示、不阻断：不等待用户回复、不标记任务为 deleted、不改变后续阶段顺序
+- `oversized=true` 的拆分建议只提示、不阻断：不等待用户回复、不标记任务为 deleted、不改变后续阶段顺序
 - 禁止提前 Read 未执行阶段的 step 文件

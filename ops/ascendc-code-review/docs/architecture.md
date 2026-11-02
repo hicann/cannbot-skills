@@ -23,10 +23,10 @@ ascendc-code-review/
 ├── steps/                           可执行积木，命名规则：{scope}.{step}.md
 │   │                                scope = 对应 workflow 文件名去掉 .md 后缀
 │   │                                scope = "common" 表示跨场景公共步骤
-│   ├── common.{step}.md            跨场景公共（api-prestudy、plan-design、line-verify、
+│   ├── common.{step}.md            跨场景公共（plan-design、line-verify、
 │   │                                report-write、report-filter）
-│   ├── file-review.{step}.md       文件检视（code-summarize、clause-review）
-│   ├── pr-review.{step}.md         PR检视（code-fetch、code-summarize、clause-review、line-verify）
+│   ├── file-review.{step}.md       文件检视（clause-review）
+│   ├── pr-review.{step}.md         PR检视（code-fetch、clause-review、line-verify）
 │   └── ...
 │
 ├── references/                      规则文档，按领域命名：{domain}.md
@@ -96,9 +96,8 @@ ascendc-code-review/
 |-----|------|---------|------|
 | 路由 | SKILL.md | ≤60（含工作流概览表） | 主Agent |
 | 蓝图 | workflows/*.md | ≤100 | 主Agent |
-| 派发 | steps/{x}.code-summarize.md（派发部分） | ≤40 | 主Agent |
 | 模板 | steps/{x}.clause-review.md | ≤40 | 主Agent |
-| 执行 | steps/{x}.code-summarize.md（执行指南部分） | 不限 | 子Agent |
+| 执行 | common.plan-design.md | ≤90 | 主Agent |
 | 执行 | common.line-verify.md | ≤20 | 主Agent |
 | 执行 | common.report-write.md | ≤90 | 主Agent |
 | 知识 | core/methodology.md | ≤130 | 通用检视子 agent |
@@ -114,38 +113,32 @@ ascendc-code-review/
 SKILL.md (53行)
   │  匹配"检视 PR" → workflows/pr-review.md
   ▼
-pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步骤细节
+pr-review.md (~90行)          ← 主Agent只看到阶段蓝图，不接触步骤细节
   │
   ├─ 阶段0 ──────────────────────────────────────
-  │   │  获取 diff + 代码概要 + API 预研 + 检视计划设计
+  │   │  获取 diff + 检视计划设计
   │   │
-  │   ├─ steps/pr-review.code-fetch.md (20行)       主Agent执行
+  │   ├─ steps/pr-review.code-fetch.md (54行)       主Agent派发子Agent执行
   │   │
-  │   ├─ steps/pr-review.code-summarize.md           代码概要子 Agent (并行)
-  │   │   ├─ 派发指令 (~30行) → 主Agent读到
-  │   │   └─ 执行指南 (~230行) → 仅子Agent读到
-  │   │
-  │   ├─ steps/common.api-prestudy.md                 API 预研子 Agent (并行, 仅 Kernel 侧)
-  │   │
-  │   └─ steps/common.plan-design.md (~90行)         检视计划子 Agent (已派发子 Agent 全部返回后派发)
-  │       读概要 → 匹配/筛查/合并 → 检视计划
+  │   └─ steps/common.plan-design.md (~75行)        主Agent直接执行
+  │       侧别识别 → 声明式匹配 → 文档级分组 → 检视计划
   │
   ├─ 阶段1 ──────────────────────────────────────
   │   │  逐条检视
   │   │
-  │   ├─ steps/pr-review.clause-review.md (37行)     prompt模板
-  │   │      主Agent填充: 条例ID + diff路径 + 代码范围
+  │   ├─ steps/pr-review.clause-review.md           prompt模板
+  │   │      主Agent填充: 条例ID + diff路径 + 侧别
   │   │
-  │   └─ 逐波派发通用检视子 agent (≤6/波，见 core/review-load-balance.md)
-  │       子Agent加载链: skill → methodology.md → 概要 → 规则文档
+  │   └─ 单波派发通用检视子 agent（每文件一个，全量并行）
+  │       子Agent加载链: skill → methodology.md → 规则文档
   │                                                   ◀── 扩展点：放新规则
   │
   ├─ 阶段2 ──────────────────────────────────────
-  │   └─ steps/pr-review.line-verify.md (22行)       主Agent执行
+  │   └─ steps/pr-review.line-verify.md (39行)       主Agent执行
   │       diff行号→实际行号 + 越界移除
   │
   └─ 阶段3 ──────────────────────────────────────
-      └─ steps/common.report-write.md (65行)          主Agent执行
+      └─ steps/common.report-write.md (56行)          主Agent执行
           yaml 结果 → 检视概览 + 检视意见大表报告
 ```
 
@@ -153,11 +146,9 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
 
 | 读者 | 文件 | 行数 |
 |------|------|------|
-| 主Agent | SKILL.md → pr-review.md | 53 + 102 |
-| 主Agent | code-fetch / 派发指令 / prompt模板 / line-verify / report-write | 20 + 30 + 37 + 22 + 65 |
-| 计划设计子Agent | common.plan-design.md | 200 |
-| 概要子Agent | 执行指南 | 230 |
-| 通用检视子 agent | methodology.md + 分配的规则文档 | 126 + 按需 |
+| 主Agent | SKILL.md → pr-review.md | 56 + ~90 |
+| 主Agent | code-fetch / plan-design / prompt模板 / line-verify / report-write | 54 + 75 + 165 + 39 + 56 |
+| 通用检视子 agent | methodology.md + 分配的规则文档 | 146 + 按需 |
 
 主Agent全程加载 ≤300行编排内容，子Agent各自独立加载执行细节，不互相污染。
 
@@ -217,7 +208,7 @@ pr-review.md (88行)          ← 主Agent只看到阶段蓝图，不接触步�
 
 工作流负责子Agent的派发编排。step 文件提供 prompt 模板，不包含 `Agent()` 调用逻辑。子Agent类型统一使用 `"general"`。
 
-每波 ≤6 个子Agent（上限见 `core/review-load-balance.md`），波次内并行，波次间串行。
+单波派发：每个匹配的规则文件一个子 Agent，全量并行，无波次。
 
 ### 2.5 注册新工作流
 
@@ -247,7 +238,7 @@ steps/{scope}.{step-name}.md
 | scope | 含义 | 示例 |
 |-------|------|------|
 | common | 跨工作流复用 | common.plan-design.md |
-| file-review | 文件检视专用 | file-review.code-summarize.md |
+| file-review | 文件检视专用 | file-review.clause-review.md |
 | pr-review | PR检视专用 | pr-review.code-fetch.md |
 
 #### 鼓励复用 common.* 步骤
@@ -256,7 +247,7 @@ steps/{scope}.{step-name}.md
 
 | 公共步骤 | 作用 |
 |---------|------|
-| common.plan-design.md | 检视计划设计（条例匹配/合并/分组/筛查） |
+| common.plan-design.md | 检视计划设计（侧别识别/声明式匹配/文档级分组） |
 | common.line-verify.md | 行号校对 |
 | common.report-write.md | 报告生成 |
 
@@ -266,8 +257,8 @@ steps/{scope}.{step-name}.md
 
 | 类型 | 特征 | 示例 |
 |------|------|------|
-| 派发指令 | 文件顶部有 `Agent({...})` 调用块和 prompt。主Agent读取后派发子Agent执行，执行指南部分仅子Agent读取 | file-review.code-summarize.md |
-| 执行指令 | 主Agent直接按步骤执行，不派发子Agent | common.line-verify.md |
+| 派发指令 | 文件顶部有 `Agent({...})` 调用块和 prompt。主Agent读取后派发子Agent执行，执行指南部分仅子Agent读取 | pr-review.code-fetch.md |
+| 执行指令 | 主Agent直接按步骤执行，不派发子Agent | common.plan-design.md、common.line-verify.md |
 | prompt模板 | 含 `{占位符}` 的模板，由工作流填充后传给子Agent。不包含 `Agent()` 调用逻辑 | file-review.clause-review.md |
 
 ### 3.3 派发指令型步骤结构
@@ -332,18 +323,9 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 </适用>
 ```
 
-### 4.1.1 `<检视负载>` 声明头
+### 4.1.1 已删除：`<检视负载>` 声明头
 
-每个 `references/{id}.md` 文件 `<适用>` 头之后必须有 `<检视负载>` 声明，定义通用检视子 agent 检视该文件条款时的派发参数。路由子 agent 扫描该头读取容量，按其打包每组条款（规则见 `core/review-load-balance.md`）。
-
-```markdown
-<检视负载>
-通用检视子 agent 检视条款容量上限: {数字}
-</检视负载>
-```
-
-- 数字（如 3/5/10）= 一个通用检视子 agent 一次检视该文件条款的上限；越小表示检视负载越重（少打包）
-- 专项文件（如 cpp-style）写「此条款文档由专项检视子 agent 独立托管，不参与条款派发流程」，不进通用检视波次
+负载均衡机制已下线（单波派发：每文件一个子 Agent，全量条款，无容量切分、无波次排布）。规则文件只需 `<适用>` 声明头；cpp-style 等专项文件的专项处理约定保留在各 workflow/plan-design 文本中。
 
 ### 4.2 字段说明
 
@@ -355,7 +337,7 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 | 触发 | 领域=true时必需 | 逗号分隔的关键词列表。代码中出现任一关键词即激活该规则文件。关键词应具体有区分度。保留值 `必须触发` 表示无条件激活（不依赖代码命中关键词），用于红线/高频规范（如 cpp-secure、ascendc-topk） |
 | 默认启用 | 是 | `true`=默认纳入检视，`false`=需用户显式要求（预留能力，当前所有规则文件均为 true；cpp-style 虽默认启用但由专项子 agent 托管） |
 | 排除场景 | 否 | 领域规则的排除条件，按规则文件声明执行 |
-| 关联适用 | 否 | 关键词未命中时的补充条件。仅声明此字段的规则可使用任务输入或概要已有的关联证据；仍须满足语言、侧别、默认启用及排除条件。关联依据随计划传给对应条款，保留来源及确认状态 |
+| 关联适用 | 否 | 关键词未命中时的补充条件。仅声明此字段的规则可使用任务输入提供的关联证据；仍须满足语言、侧别、默认启用及排除条件。关联依据随计划传给对应条款，保留来源及确认状态 |
 
 #### `<适用>` 头是规则自发现的唯一接口
 
@@ -488,7 +470,6 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 
 **必须包含**：
 1. `<适用>` 声明头（见第四章）
-2. `<检视负载>` 声明头（见 4.1.1）
 3. `## 快速索引` 表（含范畴和适用范围列）
 4. 每条条例的完整详情（问题描述/错误示例/正确示例）
 5. 同步更新 `references/README.md` 规则集总览表（追加/修改一行：分类/前缀/侧别/触发机制/派发方式/条款数/定位，取值须与文件实际声明头一致）

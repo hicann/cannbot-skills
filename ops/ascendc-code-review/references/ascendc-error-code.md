@@ -6,12 +6,9 @@
 领域: true
 触发: 必须触发
 默认启用: true
-介绍: 基于 cann-error-code-standard 检测废弃错误码、根因语义和注册契约、首报唯一性与失败返回路径；无错误码字符串的失败出口也需检查。
+介绍: 基于 cann-error-code-standard 的 SKILL.md、references/development-standard.md 与 references/documented-error-codes.json 三件套检测废弃错误码、根因语义和注册契约、首报唯一性与失败返回路径；无错误码字符串的失败出口也需检查。
 </适用>
 
-<检视负载>
-通用检视子 agent 检视条款容量上限: 2
-</检视负载>
 
 ## 快速索引
 
@@ -21,6 +18,12 @@
 | ERR-2 | 错误码语义、目标版本注册与 Arglist 必须匹配 | 错误码规范 | 高 | [适用: All] |
 | ERR-3 | 根因层一次首报，包装层仅日志并透传 | 错误码规范 | 高 | [适用: All] |
 | ERR-4 | 失败返回路径需有明确首报责任和可操作诊断 | 错误码规范 | 中 | [适用: All] |
+
+## 交付声明要求（ERR-1~ERR-4 共用）
+
+- 检视/咨询结论须显式说明**公开返回值与公开 errno 保持兼容**，不得建议改变公开返回行为
+- 静态咨询未执行的验证项（编译/注册核验/负向日志/首报唯一性）必须逐项标注「本次未验证」，不得只报已验证项
+- 引用依据须列出 cann-error-code-standard 的 SKILL.md、development-standard.md、documented-error-codes.json 三件，部分引用视为缺项
 
 ## ERR-1: 禁止新增治理废弃错误码及旧宏
 
@@ -43,6 +46,16 @@ OP_LOGE_WITH_INVALID_INPUT_SHAPE(context->GetNodeName(), 0, actual, expected);
 // 单参数 shape 约束；须先确认目标版本的宏存在、签名及 EZ0008 注册项。
 OP_LOGE_FOR_INVALID_SHAPE(context->GetNodeName(), "x", actual, expected);
 ```
+
+### 替换入口选路（先选路，再替换）
+
+| 约束场景 | 入口选择 | 前提 |
+|---------|---------|------|
+| 单参数 shape 约束 | 单参宏（如 `OP_LOGE_FOR_INVALID_SHAPE`） | 目标版本已注册 + 头文件可见 |
+| 跨参数约束 | 对应跨参数宏，按 `development-standard.md` 路由 | 同上 |
+| 带 expected/actual 或 reason | expected/reason 形态宏，按 `development-standard.md` 路由 | 同上 |
+
+替换建议必须先声明**选路依据**（命中上表哪一行）与**版本可见性前提**（目标版本已注册、头文件可见、签名匹配），再给出替换示例；只给单一示例而不说明选路的交付视为缺项。
 
 ### 专属检视方法
 
