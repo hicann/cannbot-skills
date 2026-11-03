@@ -66,5 +66,7 @@ plugins-official/model-infer-optimize/cann-recipes-infer/
 .cannbot/
 
 # 其他
-pre-commit_reports/
+codespell_reports/
 
+# OAT 远程 hook 报告目录
+oat_reports/

@@ -23,7 +23,7 @@ pre-commit 是一个 Git Hooks 框架，在 `git commit` 时自动运行代码�
 
 | Hook | 功能 |
 |------|------|
-| **pre-commit-hooks** | 行尾空格、文件末尾换行、YAML/JSON 合法性、大文件、合并冲突标记、私钥检测 |
+| **pre-commit-hooks** | 行尾空格、文件末尾换行、YAML/JSON 合法性、合并冲突标记、私钥检测 |
 | **clang-format** | C/C++/asc 代码格式化，遵循 `.clang-format` |
 | **ruff-check / ruff-format** | Python 静态检查（自动修复）+ 格式化 |
 | **codespell** | 拼写检查（CANN/ascend 等术语已加白名单） |
@@ -64,19 +64,21 @@ pre-commit run clang-format           # 单个hook
 pre-commit run --files src/foo.py tests/bar.cpp
 
 # 检查指定目录（pre-commit 不支持目录参数，需用 find 展开成文件列表）
-find ops -type f | xargs pre-commit run --files
+find ops -type f -print0 | xargs -0 pre-commit run --files
 
 # 跳过（紧急情况）
 git commit --no-verify -m "msg"
 ```
 
-> ⚠️ 本仓存量文件（数千 md / 上千 py）从未被检查过，hook 只查**暂存文件**属增量生效；**不建议** `pre-commit run --all-files` 全量跑（会翻出大量存量问题），存量债按目录分批用 `find <目录> | xargs pre-commit run --files` 治理。
 
 ## 五、失败排查
 
 搜索输出中的 `Failed` 定位失败项，查看该 hook 下方输出处理，或粘贴给 AI 获取修复建议。
 
-拦截类钩子的报告同时落盘在 `pre-commit_reports/`（不入 git）：`codespell.log`（拼写命中清单）、`oat_result.txt`（合规违规明细），可随时复查。
+拦截类钩子的报告落盘（不入 git），可随时复查：
+
+- `codespell_reports/codespell.log`：拼写命中清单
+- `oat_reports/result.txt`：OAT（远程 hook）报告
 
 | 报错                  | 原因               | 处理方式                                          |
 |-----------------------|--------------------|---------------------------------------------------|
@@ -96,11 +98,11 @@ git pc <commit>^     # 某一笔提交
 
 ## 七、检查项说明
 
-1. **pre-commit-hooks** (v4.6.0)：trailing-whitespace（md 文件保留行尾双空格硬换行语法）、end-of-file-fixer、check-yaml/json（`tsconfig*` 与 `.claude/settings.json` 等 JSONC 豁免）、check-added-large-files（`*.jsonl` eval 数据集豁免）、check-merge-conflict、detect-private-key（2 个脱敏测试固件豁免）
+1. **pre-commit-hooks** (v4.6.0)：trailing-whitespace（md 文件保留行尾双空格硬换行语法）、end-of-file-fixer、check-yaml/json（`tsconfig*` 与 `.claude/settings.json` 等 JSONC 豁免）、check-merge-conflict、detect-private-key（2 个脱敏测试固件豁免）；check-added-large-files 已移除（eval 数据集等合法大文件不拦口径）
 2. **clang-format** (v18.1.8)：遵循项目 `.clang-format`（Google 风格，4 空格缩进，120 列限宽，枚举逐行，构造函数初始化列表逐行换行，函数定义大括号换行，指针左对齐 `int* ptr`）；`third_party/`、`kb/`（提取快照）、`.html/.csv/.svg` 排除
-3. **ruff** (v0.14.14)：ruff-check（`--fix` 自动修复，豁免 `E501,RUF001-003,E402,E701,E702,N815`——F 系列真 bug 类规则全启用）+ ruff-format
-4. **codespell** (v2.4.1)：拼写检查，**覆盖 markdown**（面向用户的主内容）；py/ts/cpp 不查（变量名误报多）；CANN、ascend、`AscendC::Te`、nd 格式等术语已加白名单；`kb/` 提取快照不检
-5. **OAT**：基于 oat-py，检查许可证头（YAML/CSV/PNG/mjs 已豁免；**存量无 header 的 sh 脚本触碰时需补齐**，参照仓内文件头）、禁止二进制和归档文件。注：`tools/opsbot` 等自带 `[tool.ruff]` 的子工程按其文件级配置检查
+3. **ruff** (v0.14.14)：ruff-check（`--fix` + `--unsafe-fixes`，可自动修复的规则全启用，豁免仅限不可自动修复的规则）+ ruff-format
+4. **codespell** (v2.4.1)：拼写检查，**只查 markdown**（`files: \.md$`）；CANN、ascend、`AscendC::Te`、nd 格式等术语已加白名单；`kb/` 提取快照不检
+5. **OAT**：远程 compliance hook（HiAgent/compliance，rev v1.0.6，业务仓不维护脚本），基于 oat-py 检查许可证头（YAML/CSV/PNG/mjs 已豁免；无 header 的 sh 脚本触碰时需补齐，参照仓内文件头）、禁止二进制和归档文件。注：`tools/opsbot` 等自带 `[tool.ruff]` 的子工程按其文件级配置检查
 
 ## 八、常见问题
 
