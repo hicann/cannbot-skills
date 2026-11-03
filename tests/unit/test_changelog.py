@@ -26,8 +26,8 @@ class ChangelogFragmentTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.repo = Path(self.tempdir.name)
-        self.fragments = self.repo / "changelog.d"
-        self.fragments.mkdir()
+        self.fragments = self.repo / "docs/changelog.d"
+        self.fragments.mkdir(parents=True)
         (self.fragments / "README.md").write_text("fragments\n", encoding="utf-8")
         self.old_text = (
             "## 🔥 更新日志\n\n"
@@ -87,7 +87,7 @@ class ChangelogFragmentTests(unittest.TestCase):
     def test_valid_fragment_without_changelog_edit_passes(self):
         self.fragment("123.fixed.md")
         with patch.object(
-            changelog, "changed_files", return_value=["changelog.d/123.fixed.md"]
+            changelog, "changed_files", return_value=["docs/changelog.d/123.fixed.md"]
         ):
             changelog.check(self.repo, "base", "head", 123)
 
@@ -95,14 +95,14 @@ class ChangelogFragmentTests(unittest.TestCase):
         self.fragment("999.fixed.md", "- 【测试】存量条目。")
         self.fragment("123.fixed.md")
         with patch.object(
-            changelog, "changed_files", return_value=["changelog.d/123.fixed.md"]
+            changelog, "changed_files", return_value=["docs/changelog.d/123.fixed.md"]
         ):
             changelog.check(self.repo, "base", "head", 123)
 
     def test_changing_other_pr_fragment_is_rejected(self):
         self.fragment("999.fixed.md")
         with patch.object(
-            changelog, "changed_files", return_value=["changelog.d/999.fixed.md"]
+            changelog, "changed_files", return_value=["docs/changelog.d/999.fixed.md"]
         ):
             with self.assertRaisesRegex(ValueError, "不一致"):
                 changelog.check(self.repo, "base", "head", 123)

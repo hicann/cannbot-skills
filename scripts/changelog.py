@@ -18,10 +18,10 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
 
-FRAGMENT_DIR = "changelog.d"
+FRAGMENT_DIR = "docs/changelog.d"
 CHANGELOG = "CHANGELOG.md"
 GENERATED_HEADER = (
-    "<!-- GENERATED FILE: 由 scripts/changelog.py 从 changelog.d 聚合；请勿直接修改。 -->"
+    "<!-- GENERATED FILE: 由 scripts/changelog.py 从 docs/changelog.d 聚合；请勿直接修改。 -->"
 )
 NAME_PATTERN = re.compile(r"(?P<pr>[1-9]\d*)\.(?P<kind>added|fixed|docs|chore)\.md")
 DATE_PATTERN = re.compile(r"^### 【\d{4}-\d{2}-\d{2}】", re.MULTILINE)
@@ -114,7 +114,7 @@ def check_changed_fragment_paths(files: List[str], expected_pr: Optional[int]) -
 def check(repo: Path, base: str, head: str, expected_pr: Optional[int]) -> None:
     files = changed_files(repo, base, head)
     if CHANGELOG in files:
-        raise ValueError("禁止直接修改 CHANGELOG.md；请新增 changelog.d fragment")
+        raise ValueError("禁止直接修改 CHANGELOG.md；请新增 docs/changelog.d fragment")
     check_changed_fragment_paths(files, expected_pr)
     fragments = load_fragments(repo)
     print(f"fragment 校验通过：{len(fragments)} 个；CHANGELOG.md 未被直接修改")
