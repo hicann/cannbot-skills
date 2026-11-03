@@ -23,7 +23,7 @@
 
 ## 功能说明
 
-- 接口功能：[aclnnUpsampleBicubic2dAA](../../upsample_bicubic2d_aa/docs/aclnnUpsampleBicubic2dAA.md)的反向传播。如果输入张量的shape为(N, C, H, W)，则输出张量的shape为(N, C, inputSize[2], inputSize[3])。
+- 接口功能：[aclnnUpsampleBicubic2dAA](../../upsample_bicubic2d_aa/docs/aclnnUpsampleBicubic2dAA.md)的反向传播，按双三次抗锯齿插值权重将上游梯度累加到输入采样位置，缩放及边界对齐影响采样位置和权重。如果输入张量的shape为(N, C, H, W)，则输出张量的shape为(N, C, inputSize[2], inputSize[3])。
 - 计算公式：对于一个二维插值点$(N, C, h, w)$，插值$gradInput(N, C, h, w)$可以表示为：
 
   $$
@@ -220,40 +220,14 @@ aclnnStatus aclnnUpsampleBicubic2dAAGrad(
   </colgroup>
   <thead>
     <tr>
-      <th>返回码</th>
-      <th>错误码</th>
+      <th>返回码/状态码</th>
+      <th>码值</th>
       <th>描述</th>
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td>ACLNN_ERR_PARAM_NULLPTR</td>
-      <td>161001</td>
-      <td>传入的gradOutput、inputSize或out是空指针。</td>
-    </tr>
-    <tr>
-      <td rowspan="7">ACLNN_ERR_PARAM_INVALID</td>
-      <td rowspan="7">161002</td>
-      <td>gradOutput或out的数据类型不在支持的范围之内。</td>
-    </tr>
-    <tr>
-      <td>gradOutput与out的数据类型不一致。</td>
-    </tr>
-    <tr>
-      <td>gradOutput的shape不是4维。</td>
-    </tr>
-    <tr>
-      <td>inputSize的H维或W维的取值小于1。</td>
-    </tr>
-    <tr>
-      <td>inputSize的size不为4。</td>
-    </tr>
-    <tr>
-      <td>outputSize的size不为2。</td>
-    </tr>
-    <tr>
-      <td>scalesH或scalesW的值为负数。</td>
-    </tr>
+    <tr><td>ACLNN_ERR_PARAM_NULLPTR</td><td>161001</td><td>传入的gradOutput、inputSize或out是空指针。</td></tr>
+    <tr><td>ACLNN_ERR_PARAM_INVALID</td><td>161002</td><td>gradOutput或out的数据类型不在支持的范围之内；gradOutput与out的数据类型不一致；gradOutput的shape不是4维；inputSize的H维或W维的取值小于1；inputSize的size不为4；outputSize的size不为2；scalesH或scalesW的值为负数。</td></tr>
   </tbody></table>
 
 ## aclnnUpsampleBicubic2dAAGrad
@@ -273,22 +247,22 @@ aclnnStatus aclnnUpsampleBicubic2dAAGrad(
     </tr></thead>
   <tbody>
     <tr>
-      <td>workspace</td>
+      <td>workspace（void*）</td>
       <td>输入</td>
       <td>在Device侧申请的workspace内存地址。</td>
     </tr>
     <tr>
-      <td>workspaceSize</td>
+      <td>workspaceSize（uint64_t）</td>
       <td>输入</td>
       <td>在Device侧申请的workspace大小，由第一段接口aclnnUpsampleBicubic2dAAGradGetWorkspaceSize获取。</td>
     </tr>
     <tr>
-      <td>executor</td>
+      <td>executor（aclOpExecutor*）</td>
       <td>输入</td>
       <td>op执行器，包含了算子计算流程。</td>
     </tr>
     <tr>
-      <td>stream</td>
+      <td>stream（aclrtStream）</td>
       <td>输入</td>
       <td>指定执行任务的Stream。</td>
     </tr>
@@ -352,6 +326,8 @@ aclnnStatus aclnnUpsampleBicubic2dAAGrad(
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
 
 ```cpp
+#include <cstdio>
+#include <cstdint>
 #include <iostream>
 #include <vector>
 #include "acl/acl.h"
@@ -400,7 +376,7 @@ int CreateAclNchTensor(const std::vector<T> &hostData, const std::vector<int64_t
     CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtMemcpy failed. ERROR: %d\n", ret); return ret);
 
     std::vector<int64_t> strides(shape.size(), 1);
-    for (int64_t i = shape.size() - 2; i >= 0; i--) {
+    for (int64_t i = static_cast<int64_t>(shape.size()) - 2; i >= 0; --i) {
         strides[i] = shape[i + 1] * strides[i + 1];
     }
 
@@ -413,13 +389,14 @@ int CreateAclNchTensor(const std::vector<T> &hostData, const std::vector<int64_t
         shape.data(),
         shape.size(),
         *deviceAddr);
+    CHECK_RET(*tensor != nullptr, LOG_PRINT("aclCreateTensor failed\n"); return -1);
     return 0;
 }
 
 int main()
 {
     int32_t deviceId = 0;
-    aclrtStream stream;
+    aclrtStream stream = nullptr;
     auto ret = Init(deviceId, &stream);
     CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclInit failed. ERROR: %d\n", ret); return ret);
 
@@ -444,12 +421,13 @@ int main()
 
     auto outputSizeArray = aclCreateIntArray(outputSize.data(), 2);
     auto inputSizeArray = aclCreateIntArray(inputSize.data(), 4);
+    CHECK_RET(outputSizeArray != nullptr && inputSizeArray != nullptr, return -1);
 
     ret = CreateAclNchTensor(outHostData, outShape, &outDeviceAddr, aclDataType::ACL_FLOAT, &out);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
 
     uint64_t workspaceSize = 0;
-    aclOpExecutor *executor;
+    aclOpExecutor *executor = nullptr;
     ret = aclnnUpsampleBicubic2dAAGradGetWorkspaceSize(
         input, outputSizeArray, inputSizeArray, alignCorners, scalesH, scalesW, out, &workspaceSize, &executor);
     CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnUpsampleBicubic2dAAGradGetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
@@ -478,6 +456,8 @@ int main()
         LOG_PRINT("result[%ld] is: %f\n", i, resultData[i]);
     }
 
+    aclDestroyIntArray(outputSizeArray);
+    aclDestroyIntArray(inputSizeArray);
     aclDestroyTensor(input);
     aclDestroyTensor(out);
 

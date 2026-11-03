@@ -14,6 +14,9 @@
 #### 新特性 New Features
 - 【算子文档】在既有 `ascendc-docs-gen`、`ascendc-api-docs-gen` 的 references 下新增 ACLNN 与 AscendC 完整 API 文档生成流程，提供源码取证、分阶段生成、审阅与交付校验，保留原有写作和局部修订能力。
 
+#### 缺陷修复 Bug Fixes
+- 【算子文档】调整`ascendc-docs-gen`写作规则；撤回独立咨询指南和通用判据扩张，统一参考读取、输出路径及README链接，完善设计锁定与修订记录；平台差异在支持列表和约束中按接口记录并打标签，稀疏表先说明支持范围和batch维，功能概述仅写已确认机制，校准评测提问范围。
+
 #### 变更 Changes
 - 【算子】`ascendc-tensor-api-best-practice` 新增 L3 算法实现路由、本地官方源码仓映射、路径一致性检查与 cannbot-knowledge 检索证据规则，并澄清 A5 UB 容量口径与默认 .asc 工程结构。
 - 【模型推理】删除 model-infer-optimize 旧插件及本地入口，基础优化与 SOTA 探索工作流统一由 cannbot 维护；保留原子 Skill、插件名和别名，安装范围以应用仓及 install-helper 的支持范围为准，不再回退旧副本。

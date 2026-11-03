@@ -4,6 +4,7 @@
 > 文档存放路径：`operators/{operator_name}/docs/aclnn{OperatorName}.md`
 > 格式依据：[ops-transformer Wiki](https://gitcode.com/cann/ops-transformer/wiki) 的 aclnn API 文档模板。下列支持度和参数仅为格式示例，须按目标接口源码核验。
 
+
 ## 产品支持情况
 
 > **写作规范：阐述接口适用的产品型号。**
@@ -12,6 +13,7 @@
 > 2. 写作样式：①必须无序列表，表格废弃不再使用。②每个产品支持情况单行呈现，产品名顺序不变，最新产品在最上层位置。③按“产品：支持/不支持”样式写作
 > 3. 本领域API文档要求产品名需加“term”标记对，且符合html/md语法规范。
 > 4. 格式不证明支持度：逐产品核验 config、AddConfig、接口校验及实现和发布范围，再填写支持/不支持；证据不足保留待确认。下列列表和成品示例仅演示格式，不能作为其他算子的支持证据。
+> 5. 两类文档格式不同：本模板用无序列表“支持/不支持”；[README模板](operator-readme-template.md#产品支持情况)用表格“√/×”。确定性默认行为和产品支持度都须逐平台核验，不沿用示例结论。
 
 <!-- npu="950" id1 -->
 - <term>Ascend 950PR&950DT系列产品</term>：支持
@@ -37,9 +39,10 @@
 > **写作规范：旨在帮助理解接口功能、V版本差异、使用场景和计算流程等。**
 >
 > 1. 接口功能（必选）：
->    - ①先一句话整体介绍接口使用场景和具体功能。
+>    - ①介绍用途、输入输出及相对同类算子的特点，说明影响结果的核心处理方式；不能只复述算子名。详细程度与计算复杂度相称，不在功能概述罗列约束。
 >    - ②如果涉及多个子接口配套使用，请阐述调用场景和配合使用的过程。
 >    - ③如果功能在不同产品上有差异，请分别描述功能差异点。
+>    - ④只写已确认的处理机制；“调用者提供索引”不确定索引是源位置还是目标位置，也不证明排序、截断或数值等价行为。没有证据时只描述已知的处理顺序、输入输出和差异，把缺失语义列为待确认问题；不把这些行为推测或约束清单写入功能概述。
 > 2. 版本演进（可选）：aclnnXxx有多个V版本时，必须介绍最新版本能力差异。例如：本接口兼容aclnnXxxxV2功能，在其基础上本接口新增支持xxx功能。
 > 3. 计算公式/计算流程（可选）：①大部分算子均需提供公式，介绍API实现原理或计算过程。②若无法用公式呈现，可采用mermaid语法绘制流程图。
 > 4. 示例（可选）：复杂算子根据实际需要，可通过示例阐述计算逻辑。
@@ -69,7 +72,7 @@
 > 1. 两段式接口介绍（必选）：阐述算子两段式接口的调用逻辑，参考样例话术。
 > 2. 原型定义（必选）：代码块呈现，要求
 >     - ①必须与`op_api/aclnn_xx.h`定义的参数名、参数类型、参数顺序完全一致；
->     - ②参数名需要为驼峰格式；
+>     - ②参数名从具体API接口的入参声明获取，不转换命名风格；
 >     - ③代码段里末尾不带分号；
 >     - ④参数单行呈现，不用添加参数注释;
 >     - ⑤参数垂直缩进位置对齐；
@@ -106,11 +109,13 @@ aclnnStatus aclnn{Op}(
   > 1. 呈现形式：
   >    - 参数说明必须为html表格，列宽总和不超过1550px
   >    - 表格固定有8个字段：参数名、输入/输出、描述、使用说明、数据类型、数据格式、维度(shape)、非连续Tensor
-  > 2. 参数表 > 参数名（必选）：填写`参数名（参数类型）`，要求中文括号，`*` 前后不带空格，参数名不能换行。参数与[函数原型](#函数原型)定义完全一致。
+  > 2. 参数表 > 参数名（必选）：按具体API接口入参声明的顺序，采用“参数名（C/C++类型）”，保留参数原名、类型中的const及指针层级，并与函数原型一致。
   > 3. 参数表 > 输入/输出（必选）：只允许填写“输入、输出、输入/输出、输入|输出、可选输出、可选输入、输入和输出”其中一种。
   > 4. 参数表 > 描述（必选）：指明参数含义+与公式变量的映射关系，不要写约束。
   > 5. 参数表 > 使用说明（必选）：
-  >    - 填写单参数的简单约束：①是否支持空Tensor；②带Optioal后缀的参数，传空指针时代表的含义；③基础类型参数的取值范围或枚举值范围以及含义。
+  >    - 填写单参数的简单约束：①是否支持空Tensor；②可选指针参数的nullptr含义、条件必需性及实际可选性的例外，以该接口校验逻辑为准；③基础类型参数的取值范围或枚举值范围以及含义。普通输入/输出的常规非空要求由参数分类表达，不逐行重复。
+  >    - 按[参数使用说明写法](source-extraction-guide.md#13-参数使用说明写法)表达调用要求。“输入/输出”列已表达常规必选性时，不再重复“必传”“必须配置”“显式传入”。保留空Tensor、正维度及参数间匹配等实际约束，不把空指针与空Tensor混为一谈。
+  >    - 条件必需的可选参数说明具体触发条件、传入内容及其他条件下的处理；可传nullptr时说明其实际含义。不要写“TND必传；INT64前缀和”等需要读者补全的短语；dtype、format和shape放在对应列，条件引起的变化须说明对应关系。
   >    - 默认值说法：针对C接口里基础类型的参数不允许出现默认值说法，例如bool、int类型等；针对C接口里指针类型的参数，若空指针有特殊含义的请明确其含义。
   >    - 复杂参数的约束可在[约束说明](#约束说明)章节按场景化维度阐述，例如xx场景下多个参数dtype需组合使用。
   > 6. 参数表 > 数据类型（必选）：
@@ -233,16 +238,17 @@ aclnnStatus aclnn{Op}(
   > **写作规范**（第一段接口返回值说明）：
   >
   > 1. aclnn返回码（必选）：话术固定，参考下方示例。
-  > 2. 一阶段参数校验（必选）：一阶段接口必须进行参数异常拦截，异常场景需罗列清楚，要求如下。
+  > 2. 一阶段异常返回表（必选）：列出入参校验及其他显式异常返回分支，要求如下。
   >    - 样式必须为表格，列宽总长固定为1000px
-  >    - 表格要求：仅罗列该算子aclnn层独有的异常问题，通用异常（例如框架异常或所有算子通用问题无需罗列，直接查看aclnn返回码，例如ACLNN_ERR_RUNTIME_ERROR）
-  >    - 表格字段名固定，要求给出返回值、错误码、描述（指出异常可能的原因，例如空指针、dtype、shape、format、取值异常等）。
+  >    - 表格要求：覆盖对应阶段接口实现中显式返回的异常码，包括使用通用错误码的分支，不能按错误码名称前缀排除或只在表外说明。仅由框架或运行时透传、接口内未明确列出的通用异常通过aclnn返回码链接说明；提取与归组边界见[接口返回分支提取错误码](source-extraction-guide.md#44-接口返回分支提取错误码)。
+  >    - 表格字段名固定，要求给出返回码/状态码、码值、描述（指出异常可能的原因，例如空指针、dtype、shape、format、取值异常等）。
   >    - 写大颗粒原因，不要写细节，提供定位方向即可。描述列里不要区分产品
   >    - 注意异常描述需与软件实现一致。
+  >    - 同一返回码类型和错误码数值只占一行，各失败原因合并在描述中；不用rowspan拆行。
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](https://gitcode.com/cann/ops-math/blob/master/docs/zh/context/aclnn_return_code.md)。
 
-  第一段接口完成入参校验，出现以下场景时报错：
+  第一段接口出现以下场景时报错：
 
   <table style="table-layout: fixed; width: 1000px">
   <colgroup>
@@ -252,31 +258,14 @@ aclnnStatus aclnn{Op}(
   </colgroup>
   <thead>
     <tr>
-      <th>返回值</th>
-      <th>错误码</th>
+      <th>返回码/状态码</th>
+      <th>码值</th>
       <th>描述</th>
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td>ACLNN_ERR_PARAM_NULLPTR</td>
-      <td>161001</td>
-      <td>self、other、alpha、out存在空指针。</td>
-    </tr>
-    <tr>
-      <td rowspan="4">ACLNN_ERR_PARAM_INVALID</td>
-      <td rowspan="4">161002</td>
-      <td>self、other或alpha的数据类型不在支持的范围之内。</td>
-    </tr>
-    <tr>
-      <td>self、other或alpha的数据类型不匹配。</td>
-    </tr>
-    <tr>
-      <td>self或other的shape维度不在支持的范围之内。</td>
-    </tr>
-    <tr>
-      <td>self、other的shape不满足broadcast规则。</td>
-    </tr>
+    <tr><td>ACLNN_ERR_PARAM_NULLPTR</td><td>161001</td><td>self、other、alpha、out存在空指针。</td></tr>
+    <tr><td>ACLNN_ERR_PARAM_INVALID</td><td>161002</td><td>self、other或alpha的数据类型不在支持的范围之内；self、other或alpha的数据类型不匹配；self或other的shape维度不在支持的范围之内；self、other的shape不满足broadcast规则。</td></tr>
   </tbody>
   </table>
 
@@ -304,15 +293,17 @@ aclnnStatus aclnn{Op}(
     </tr>
   </thead>
   <tbody>
-    <tr><td>workspace</td><td>输入</td><td>在Device侧申请的workspace内存地址。</td></tr>
-    <tr><td>workspaceSize</td><td>输入</td><td>在Device侧申请的workspace大小，由第一段接口aclnn{Op}GetWorkspaceSize获取。</td></tr>
-    <tr><td>executor</td><td>输入</td><td>op执行器，包含了算子计算流程。</td></tr>
-    <tr><td>stream</td><td>输入</td><td>指定执行任务的Stream。</td></tr>
+    <tr><td>workspace（void*）</td><td>输入</td><td>在Device侧申请的workspace内存地址。</td></tr>
+    <tr><td>workspaceSize（uint64_t）</td><td>输入</td><td>在Device侧申请的workspace大小，由第一段接口aclnn{Op}GetWorkspaceSize获取。</td></tr>
+    <tr><td>executor（aclOpExecutor*）</td><td>输入</td><td>op执行器，包含了算子计算流程。</td></tr>
+    <tr><td>stream（aclrtStream）</td><td>输入</td><td>指定执行任务的Stream。</td></tr>
   </tbody></table>
 
 - **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](https://gitcode.com/cann/ops-math/blob/master/docs/zh/context/aclnn_return_code.md)。
+
+  > 第二段接口若包含显式异常返回分支，同样按第一段返回值表的格式列出；仅调用框架执行器并透传状态时保留返回码链接，不推测框架内部的错误码列表。
 
 ## Inplace接口（如适用）
 
@@ -330,6 +321,37 @@ aclnnStatus aclnn{Op}(
 - 广播后的shape必须等于selfRef的shape
 
 ## 约束说明
+
+> 约束从L2辅助校验、全部适用架构Tiling和Kernel读取/Cast提取；记录触发条件、允许值/关系及调用影响。mask模式、左右window与可选mask依赖须组合核验并集中说明。精度表述写清具体转换和影响，未检测到特殊值限制时不追加“无保证”等推测。
+
+> 按[约束分组与文档覆盖](source-extraction-guide.md#55-约束分组与文档覆盖)区分公共限制、模式/布局及平台专有限制，逐条记录最终文档位置；入口存在多条校验路径时分别核验，不能将一条路径的限制当作全局要求。与既有文档冲突时先核对目标源码版本；参数表与约束章节可以分工，但不能共同遗漏实际使用条件。
+
+> **layout章节为可选项。** 按[选择说明位置与写作规则](source-extraction-guide.md#12-layout与关联tensor)决定使用参数表、已有场景约束、有效引用或独立章节。有layout参数、多种布局、输入输出布局不同或稀疏索引均不自动要求成章；必要的shape、轴含义、支持组合与平台差异仍须说明。无需独立章节时，将下方标题及示例整体省略，不输出空章节或“无layout”占位。
+
+### layout对应关系说明
+
+> **可选章节示例**：复杂跨Tensor关系需要集中对照或用户明确要求时选用。根据实际内容选择布局组合表、shape关系表、稀疏模式表或简短说明，不要求固定表格与顺序。下表仅演示稀疏索引布局，不能作为所有接口的layout模板。
+>
+> 以下为包含layoutSparsePattern、sparseBlockIdx、sparseBlockCount的稀疏布局接口参考。生成时参数名取实际API声明；表中的0～7仅为已确认相应枚举语义时的结构参考，不代表目标算子的实现或支持情况。缺少枚举定义时删去未经确认的行，不套用本表。
+>
+> 选用稀疏表时，先在表前同时说明实际支持范围，以及当前支持模式在各已确认layout下是否保留batch维，再列模式四列表，表后解释维度与容量，按需补充LSE等特殊排布及平台差异。不能仅在表后说明batch维，因为完整规格表可能同时含有当前不支持的模式。存在更复杂的布局组合时，可先列组合关系。枚举列只写数值。默认只保留当前支持行；仅在用户要求或解释需要且语义已确认时展示完整枚举。Q/K/V等常规shape在参数表中就近说明，避免重复。
+
+sparseBlockIdx、sparseBlockCount的shape由layoutSparsePattern决定，当前layoutSparsePattern仅支持〈源码确认的值〉，〈其他已确认枚举〉当前不支持。当前支持模式在〈已确认的各layout〉下〈保留/不保留〉batch维；〈存在例外时逐layout分别说明，不沿用本表推断〉。
+
+| **layoutSparsePattern** | **sparseBlockIdx** | **sparseBlockCount** | **描述** |
+| :--- | :--- | :--- | :--- |
+| 0 | [batch, numKeyValueHeads, maxQBlockCount, maxKvBlockCount] | [batch, numKeyValueHeads, maxQBlockCount] | 同一个Group中的qHead共享sparsePattern；表示每个Q块选择了哪些KV块 |
+| 1 | [batch, numKeyValueHeads, maxKvBlockCount, maxQBlockCount] | [batch, numKeyValueHeads, maxKvBlockCount] | 同一个Group中的qHead共享sparsePattern；表示每个KV块选择了哪些Q块 |
+| 2 | [batch, headNum, maxQBlockCount, maxKvBlockCount] | [batch, headNum, maxQBlockCount] | 同一个Group中的qHead有独立的sparsePattern；表示每个Q块选择了哪些KV块 |
+| 3 | [batch, headNum, maxKvBlockCount, maxQBlockCount] | [batch, headNum, maxKvBlockCount] | 同一个Group中的qHead有独立的sparsePattern；表示每个KV块选择了哪些Q块 |
+| 4 | [numKeyValueHeads, totalQBlocks, maxKvBlockCount] | [numKeyValueHeads, totalQBlocks] | 同一个Group中的qHead共享sparsePattern；表示每个Q块选择了哪些KV块 |
+| 5 | [numKeyValueHeads, totalKBlocks, maxQBlockCount] | [numKeyValueHeads, totalKBlocks] | 同一个Group中的qHead共享sparsePattern；表示每个KV块选择了哪些Q块 |
+| 6 | [headNum, totalQBlocks, maxKvBlockCount] | [headNum, totalQBlocks] | 同一个Group中的qHead有独立的sparsePattern；表示每个Q块选择了哪些KV块 |
+| 7 | [headNum, totalKBlocks, maxQBlockCount] | [headNum, totalKBlocks] | 同一个Group中的qHead有独立的sparsePattern；表示每个KV块选择了哪些Q块 |
+
+其中，batch、headNum、numKeyValueHeads分别对应B、N1、N2；保留totalQBlocks、totalKBlocks时须说明其按各batch存储长度分块并求和的含义，并核验分块和尾块规则。layoutSparsePattern=1时，应解释maxQBlockCount、maxKvBlockCount的容量、实际有效计数以及blockShape与序列长度的关系；例如blockShapeX=1时索引容量与maxS1的映射，以及maxKvBlockCount的ceilDiv计算，具体等式、不等式以源码为准。
+
+> 上述示例之外的关联关系放在本表之后，仅补充调用必需且参数表无法清楚表达的内容。LSE等中间结果不默认跟随输入layout；平台差异须保留已核验的shape，按[平台差异的产品化表达](source-extraction-guide.md#123-平台差异的产品化表达)将已确认的架构标识转为正式产品名，用`<term>`及配对npu注释标签包裹，不能仅写裸Arch22/Arch35。没有稀疏索引布局参数的接口不输出本表。
 
 > **写作规范**：
 >
@@ -374,6 +396,10 @@ aclnnStatus aclnn{Op}(
 
 ## 调用示例
 
+> 样例按目标仓库代码规范和格式配置整理；检查缩进、宏、命名、实参、返回值及资源释放。优先使用已有格式化器，未编译运行如实说明。
+
+> 文档内嵌代码不添加或复制Copyright/License文件头；从必要include开始。独立源码文件许可声明保持原样。
+
 > **写作规范**：
 >
 > 1. 编译与运行（必选）：话术固定，不要轻易修改。建议跳转算子仓工程通用的[编译与运行样例](https://gitcode.com/cann/ops-math/blob/master/docs/zh/context/compile_and_run_sample.md)（以math仓为例）。
@@ -404,19 +430,22 @@ aclnnStatus aclnn{Op}(
 
 - 扫描全部 `aclnn_*.h` 中的所有 `ACLNN_API` 声明，不得按文件数量推断接口数量。
 - 每个 aclnn 接口独立生成文档，并分别核验签名、参数、平台支持、约束、示例和废弃状态。
+- 平台差异有两个落点：各接口的“产品支持情况”无序列表记录支持结论，“约束说明”记录该接口在该平台的可用边界或不支持范围。仅列出约束章节标题、在README表下说明或在交付清单记录，不能代替接口约束正文；两处结论须一致，差异段按模板打产品标签。
 - 单个接口在某平台废弃或不支持时，只更新该接口的产品支持情况，并注明替代接口；不得扩大为整个算子不支持。
 - Inplace 接口继续使用本模板的“Inplace 接口”章节，并核验输入/输出复用与 shape 约束。
 
 ### 参数表格式
 
-- 参数名必须包含与函数原型一致的类型，例如 `query（const aclTensor*）`，保留声明中的 `const`。
+- 参数名列从具体API接口的入参声明逐项提取，采用“参数名（C/C++类型）”；保留const和指针层级，与函数原型逐项核对。
 - 输入/输出列只允许：输入、输出、输入/输出、输入|输出、可选输出、可选输入、输入和输出。
-- Tensor 参数的使用说明使用 `<ul><li>` 包裹；非 Tensor 参数用纯文本描述；不涉及填写“-”，不得留空。
+- Tensor 参数有使用说明时，将完整说明置于同一`<td>`内的`<ul><li>`中；非 Tensor 参数用纯文本描述；不涉及填写“-”，不得留空。不要把列表移到表格外或拆成独立Markdown表格，每行仍须保持8列。
 - 数据类型不带 `DT_` 前缀，多种类型使用中文顿号分隔；非 Tensor 参数按模板规则填写或使用“-”。
 - 非连续 Tensor：支持标“√”，不支持标“×”，不涉及标“-”。
 - 产品差异化描述放在参数表下方，产品名使用 `<term>` 标签。
 
 ### 调用示例格式
+
+格式、许可头及代码规范见[调用示例](#调用示例)。
 
 - 优先从对应 `examples/test_aclnn_*.cpp` 提取，确保接口名和参数顺序与源码一致。
 - 示例包含 CHECK_RET/LOG_PRINT、初始化、Tensor 构造、两段式调用、同步取结果和资源释放的完整流程。
@@ -523,10 +552,11 @@ aclnnStatus aclnn{Op}(
   - [ ] 参数是否齐全，要求与`op_host/{op}_def.cpp`定义的参数对应
   - [ ] 一阶段参数表8个字段、二阶段参数表3个字段是否齐全
   - [ ] 是否缺少aclnn返回码跳转
-  - [ ] 一阶段接口是否缺少参数异常拦截表
+  - [ ] 一阶段接口是否缺少异常返回表；各阶段的显式异常码是否全部入表，而非仅写在表外
 - [ ] 约束说明：
   - [ ] 是否缺少aclnnXxx确定性说明
   - [ ] 是否缺少aclnnXxx Batch一致性说明
+  - [ ] 是否按需要选择layout说明位置；即使省略独立章节，必要的shape、轴含义、支持组合及平台差异是否仍完整，引用是否有效
 - [ ] 调用示例：是否缺少直接复制可运行的代码段，不允许出现伪代码
 - [ ] 检查产品标签是否漏打：扫描md里所有含“产品名”的关键字，检查是否被起始标签（<!-- npu="npu值" id序号 -->）和结束标签（<!-- end id序号 -->）包裹。
 
@@ -539,11 +569,13 @@ aclnnStatus aclnn{Op}(
 - [ ] 功能描述、公式表达、变量、产品差异描述与软件是否匹配
 - [ ] 函数原型：是否与`op_api/aclnn_xx.h`定义的参数名、参数类型、参数类型完全一致
 - [ ] 参数说明：
-  - [ ] 参数名是否为小写+下换线形式
+  - [ ] 参数名及顺序是否逐字对应具体API接口的入参声明
   - [ ] 输入/输出/属性是否与`op_host/{op}_def.cpp`定义一致
   - [ ] 数据类型是否为大写
-  - [ ] 一阶段接口的参数异常拦截表是否与软件拦截一致
+  - [ ] 使用说明是否给出明确的条件、传入内容和已核验的nullptr含义，未重复常规“必传”或以孤立缩写代替调用要求
+  - [ ] 各阶段返回值表是否覆盖实际显式异常分支及全部已核验原因，同码合并为一行，未按通用码前缀过滤或推测框架透传码
 - [ ] 约束说明：
+  - [ ] 选用layout表时是否沿用实际参数原名和已定义维度名；枚举、支持集合、batch维、共享方向、容量和平台差异是否有依据，未把示例表作为必填项
 
 #### 内容可读性
 
@@ -585,3 +617,11 @@ aclnnStatus aclnn{Op}(
 
 - [ ] 具备操作指导性，新用户无断点
 - [ ] demo是否满足主流场景
+
+
+### 章节引用规则（仅供写作，不输出）
+
+引用其他章节时必须提供可点击链接，不能只写“具体关系见约束说明”“详见上文”等纯文本。Markdown正文使用“具体关系见[约束说明](#约束说明)。”；HTML表格单元格使用“具体关系见<a href="#约束说明">约束说明</a>。”。跨文件引用使用实际相对路径及章节锚点；优先链接具体相关小节，并核验目标文件、标题及锚点存在。链接用于补充细节，不能替代参数基本用途、触发条件及关键调用边界。
+
+
+引用可定位的内容、样例代码、源码文件或接口文档时，应提供可点击链接，方便开发者直接查找；调用说明表的“样例代码”列不得仅写“本地torch_extension/flash_attn_grad.py”等纯文本路径。使用有意义的文件名或接口名作为链接文字，仓内文件按最终文档位置计算相对路径，例如[flash_attn_grad.py](torch_extension/flash_attn_grad.py)；HTML表格使用<a href="torch_extension/flash_attn_grad.py">flash_attn_grad.py</a>。文档输出到源码仓外时，使用可访问的仓库文件链接或正确的相对路径，不沿用已失效的仓内相对路径。核验文件及目标章节存在；缺少目标时如实说明，不编造链接。

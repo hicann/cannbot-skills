@@ -13,7 +13,7 @@
 
 ## 功能说明
 
-- 算子功能：[UpsampleBicubic2dAA](../upsample_bicubic2d_aa/README.md)的反向传播。如果输入张量的shape为(N, C, H, W)，则输出张量的shape为(N, C, inputSize[2], inputSize[3])。
+- 算子功能：[UpsampleBicubic2dAA](../upsample_bicubic2d_aa/README.md)的反向传播，按双三次抗锯齿插值权重将上游梯度累加到输入采样位置，缩放及边界对齐影响采样位置和权重。如果输入张量的shape为(N, C, H, W)，则输出张量的shape为(N, C, inputSize[2], inputSize[3])。
 
 - 计算公式：对于一个二维插值点$(N, C, h, w)$，插值$gradInput(N, C, h, w)$可以表示为：
 
