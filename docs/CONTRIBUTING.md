@@ -103,7 +103,9 @@ git notes --ref=ai show HEAD
 PR 需包含:
 - 新增/变更的能力文件
 - 功能说明
-- 更新 `CHANGELOG.md`
+- 用户可见变更对应的 `docs/changelog.d/<PR号>.<类型>.md` fragment（类型：`added` / `fixed` / `docs` / `chore`）；无用户可见变更时在 PR 描述中说明
+
+**不要直接修改 `CHANGELOG.md`**。每个 fragment 只写一条以 `- ` 开头的变更说明，正文不超过 200 字；CI 会校验 fragment 并拒绝手工修改 `CHANGELOG.md` 的 PR。发版时维护者运行聚合脚本，结果通过普通 PR 提交，不在 CI 中直接推送主线。格式与示例见 [changelog.d/README.md](changelog.d/README.md)。
 
 > PR 模板请参考仓库中的 `.gitcode/PULL_REQUEST_TEMPLATE.zh-CN.md`
 
