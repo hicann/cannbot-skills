@@ -13,7 +13,7 @@
 
 ## 标准化 bottleneck_labels 词表
 
-供 Stage 2 LLM 诊断输出使用，**必须从此表选**，超出词表的 labels 由 wm_ops.refine 校验拒收。
+供 Stage 2 LLM 诊断输出使用，**必须从此表选**。运行时契约是 `ascendc-evolution-world-model/scripts/profiling_evidence.py` 的 `KNOWN_BOTTLENECK_LABELS`，由 `wm_ops.py validate-diagnosis --strict` 校验。
 
 ### 主标签（14 个，对齐 ascendc-evolution-strategies/cards/SCHEMA.md）
 
@@ -24,7 +24,7 @@
 | `tiling_imbalance` | 分核负载不均 | 各核 `aiv_time` 差异 >10% |
 | `scalar_loading` | Scalar 加载瓶颈 | `ai*_scalar_ratio` 高 + tiling 数据加载 |
 | `scalar_compute` | Scalar 计算瓶颈 | `ai*_scalar_ratio` >30% |
-| `compute_bound` | Vector/Cube 计算密集 | `aiv_vec_ratio` 或 `aic_cube_ratio` >70% |
+| `compute_bound` | Vector 计算密集；Cube 使用 `cube_bound` | `aiv_vec_ratio` >70% |
 | `near_optimal` | 接近硬件极限 | 各 ratio < 50%，task duration ≈ 理论最长流水 |
 | `no_overlap` | 无流水重叠 | MTE2 / VEC / CUBE 完全串行 |
 | `partial_overlap` | 部分流水重叠 | 重叠比 10-30% |
@@ -33,6 +33,20 @@
 | `bus_contention` | 总线竞争 | 多核同地址访问，各核 mte2 差异大 |
 | `l2_cache_thrash` | L2 Cache 抖动 | `l2_total_hit_rate` < 50% |
 | `ub_memory_pressure` | UB 内存压力 | UB 占用 >85% |
+
+### AIC 流水标签（3 个）
+
+| Label | 诊断方向 | Stage 1 fact | 原始指标 |
+|---|---|---|---|
+| `cube_bound` | Cube 计算占主要耗时 | `cube_ratio` | `aic_cube_ratio`，兼容 `aic_mac_ratio`、`cube_utilization(%)` |
+| `fixp_bound` | FIXP 输出（L0C→GM/L1）受限 | `fixpipe_ratio` | `aic_fixpipe_ratio` |
+| `mte1_stall` | MTE1（L1→L0A/L0B）搬运停等 | `mte1_ratio` | `aic_mte1_ratio` |
+
+上述占比参与 `dominant_pipe`（`cube` / `fixpipe` / `mte1`）选择，但占比高本身不等于瓶颈结论，仍需结合带宽、流水重叠和访问模式诊断。字段定义见 `ops/ops-profiling/references/csv_fields_reference.md`，Cube 字段别名见同目录 `cost-model-contract.md`。
+
+三个 fact 均归一到 0~1：`*_ratio` 延续现有规则，大于 1 时按百分比解释；`cube_utilization(%)` 始终除以 100（例如 0.5% → 0.005）。优先采用 deep profiling 中可解析的值，缺失时从原始 pipeline CSV 补齐；Cube 在同一来源内按表中顺序选字段。实测 0 保留为 0，缺失或不可解析为 `None`，不假定默认占比。
+
+Stage 3 可按 `cube_bound` / `mte1_stall` 检索 P122 等策略，按 `fixp_bound` 检索 P66 的 GM 512B 对齐策略；候选仍需通过前置条件检查。`compute_expected_gain()` 使用对应 fact 估算理论收益上限，指标缺失时该标签贡献为 0。
 
 ### 增量标签（Stage 1 facts 补充判定，4 个）
 
@@ -45,7 +59,7 @@
 | `bank_conflict` | `aiv_vec_total_cflt_ratio` >5% | 独立标签，常与 `compute_bound` 同时出现 |
 | `db_not_effective` | MTE2/VEC 重叠 <5% + `BUFFER_NUM>1` | 独立标签，意味着 P1 已用但配置错 |
 
-**总计 18 个 labels**，比单纯映射 12 类 bottleneck_type 更精细，能区分根因。
+**总计 21 个 labels**：14 个主标签、3 个 AIC 流水标签、4 个精细化标签。
 
 ### 多 label 组合的典型场景
 
@@ -71,8 +85,8 @@ bottleneck_labels: [fake_mte2_bound, undersize_transfer]
 confidence: 0.75
 ```
 
-wm_ops.refine 校验：
-- `bottleneck_labels` ⊂ 18 个标签词表
+`wm_ops.py validate-diagnosis --strict` 校验：
+- `bottleneck_labels` ⊂ 21 个标签词表
 - `confidence` ∈ [0, 1]
 - `diagnosis_text` 非空且 ≥ 20 字符
 

@@ -28,6 +28,7 @@
 | 换行符     | `unit/test-line-endings.sh`                 | 全局 CRLF 检测                                                                                 |
 | 安装       | `unit/install/test-init-install.sh`         | init.sh 安装产物静态验证                                                                       |
 | 基础设施   | `unit/infra/test-gitcode-issue-workflow.sh` | GitCode 工作流 pytest 单元测试                                                                 |
+| 进化诊断   | `unit/test-evolution-diagnosis-contract.sh` | Cube/FIXP/MTE1 事实、校验、检索与收益契约；Python 3.10+，可用 `EVOLUTION_TEST_PYTHON` 指定解释器，无 NPU/第三方依赖 |
 
 ### 1.3 运行方式
 

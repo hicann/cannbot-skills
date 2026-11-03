@@ -3046,7 +3046,7 @@ def _register_audit_commands(subparsers):
 
     p_vd = subparsers.add_parser(
         "validate-diagnosis",
-        help="v3.2: 校验节点 diagnosis 字段 (bottleneck_labels ⊂ 18 项词表 + confidence + text)",
+        help="v3.2: 校验节点 diagnosis 字段 (bottleneck_labels ⊂ 21 项词表 + confidence + text)",
     )
     p_vd.add_argument("--wm-path", required=True, help="Path to world_model.json")
     p_vd.add_argument("--node-id", default=None, help="单个节点 ID（默认校验所有节点）")

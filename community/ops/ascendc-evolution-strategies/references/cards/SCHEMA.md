@@ -48,7 +48,7 @@ checks:
 ### `bottlenecks` (必填，可为空列表 `[]`)
 - 类型：字符串列表（行内 flow 格式）
 - 含义：该策略能**缓解**的瓶颈类型
-- 取值枚举（26 种，与 `community/ops/ascendc-evolution-world-model/scripts/profiling_evidence.py` BOTTLENECK_STRATEGY_MAP 对齐）：
+- 取值由 `scripts/query_strategies.py` 的 `VALID_BOTTLENECKS` 校验。策略元数据还包含适用性标签；诊断输出必须使用世界模型 `KNOWN_BOTTLENECK_LABELS`，不能直接照搬全部策略标签。
 
 | 瓶颈值 | 含义 |
 |---|---|
@@ -58,6 +58,9 @@ checks:
 | `scalar_loading` | Scalar 加载瓶颈 |
 | `scalar_compute` | Scalar 计算瓶颈 |
 | `compute_bound` | 计算密集型 |
+| `cube_bound` | Cube 计算受限 |
+| `fixp_bound` | FIXP 输出（L0C→GM/L1）受限 |
+| `db_not_effective` | 已启用双缓冲但流水重叠不足 |
 | `near_optimal` | 接近最优（无明显瓶颈）|
 | `no_overlap` | 无流水重叠 |
 | `partial_overlap` | 部分流水重叠 |
@@ -67,7 +70,7 @@ checks:
 | `l2_cache_thrash` | L2 Cache 抖动 |
 | `ub_memory_pressure` | UB 内存压力 |
 | `memory_bound` | GM 访存带宽打满 |
-| `mte1_stall` | MTE1（GM→L1 搬运）停等 |
+| `mte1_stall` | MTE1（L1→L0A/L0B 搬运）停等 |
 | `mte2_bound` | MTE2 搬入带宽打满（区别于 `mte2_stall` 的停等）|
 | `parallelism_underutil` | 核间并行度不足（未用满 AI Core）|
 | `tiling_mismatch` | tile 尺寸与硬件约束/shape 不匹配 |

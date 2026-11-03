@@ -38,6 +38,10 @@ python3 community/ops/ascendc-evolution-world-model/scripts/wm_ops.py select \
 python3 community/ops/ascendc-evolution-world-model/scripts/wm_ops.py validate \
     --path {world_model.json}
 
+# 诊断校验：检查标签、置信度、诊断文本及下一轮提示
+python3 community/ops/ascendc-evolution-world-model/scripts/wm_ops.py validate-diagnosis \
+    --wm-path {world_model.json} --strict
+
 # 摘要生成：生成精简文本摘要用于 prompt 注入
 python3 community/ops/ascendc-evolution-world-model/scripts/wm_ops.py summary \
     --path {world_model.json} [--max-chars 1200]
@@ -75,6 +79,10 @@ utility = 3.0 * parent_score
         + w_root_explore    # +2.0 if parent is root
         + w_evidence         # +1.5 if parent has profiling_evidence
 ```
+
+### Profiling 诊断契约
+
+Stage 1 `extract_facts()` 提供 `cube_ratio`、`fixpipe_ratio`、`mte1_ratio`；Stage 2 分别使用 `cube_bound`、`fixp_bound`、`mte1_stall`。这些标签同时用于诊断校验、策略检索和预期收益估算。字段单位、缺失值规则及完整词表见 [Profiling Reference](../ascendc-evolution-knowledge/references/a3/profiling_reference/INDEX.md)。
 
 ## 参考文档
 

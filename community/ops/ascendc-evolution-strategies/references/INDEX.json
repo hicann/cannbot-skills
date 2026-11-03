@@ -18,6 +18,8 @@
       "l2_cache_thrash",
       "ub_memory_pressure",
       "cube_bound",
+      "fixp_bound",
+      "mte1_stall",
       "db_not_effective"
     ],
     "op_families": [
@@ -3276,7 +3278,8 @@
       "triggers": {
         "bottleneck_labels": [
           "mte2_stall",
-          "undersize_transfer"
+          "undersize_transfer",
+          "fixp_bound"
         ]
       },
       "conflicts_with": [],

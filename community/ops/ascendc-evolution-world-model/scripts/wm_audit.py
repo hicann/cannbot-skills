@@ -407,7 +407,7 @@ def cmd_validate_diagnosis(args: argparse.Namespace) -> int:
     """v3.2/v3.3: 校验 world_model.json 中节点的 diagnosis 字段是否合规。
 
     检查项：
-    1. diagnosis.bottleneck_labels ⊂ KNOWN_BOTTLENECK_LABELS（18 项词表）
+    1. diagnosis.bottleneck_labels ⊂ KNOWN_BOTTLENECK_LABELS（21 项词表）
     2. diagnosis.confidence ∈ [0, 1]
     3. diagnosis.diagnosis_text 非空且 ≥ 20 字符
     4. (v3.3) passed+round_ 节点必有 next_round_hint，且 prefer/avoid 合法 ID、

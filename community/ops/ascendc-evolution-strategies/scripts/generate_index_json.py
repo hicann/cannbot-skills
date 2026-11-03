@@ -437,8 +437,7 @@ def discover_okf() -> list[dict]:
     return entries
 
 
-# 标签词表（与 ascendc-evolution-world-model/scripts/profiling_evidence.py 的
-# BOTTLENECK_STRATEGY_MAP 对齐）
+# 策略索引的瓶颈标签词表；包含 AIC 诊断标签，精细化诊断的召回另行扩展。
 BOTTLENECK_LABELS = [
     "mte2_stall",
     "mte3_stall",
@@ -455,6 +454,8 @@ BOTTLENECK_LABELS = [
     "l2_cache_thrash",
     "ub_memory_pressure",
     "cube_bound",
+    "fixp_bound",
+    "mte1_stall",
     "db_not_effective",
 ]
 

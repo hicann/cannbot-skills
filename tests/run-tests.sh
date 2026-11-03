@@ -145,7 +145,7 @@ list_tests() {
     echo " Available Tests"
     echo "========================================"
     echo ""
-    
+
     echo "L1 Unit Tests - Repo Hygiene:"
     for f in "$SCRIPT_DIR"/unit/test-*.sh; do
         [ -f "$f" ] && echo "  unit/$(basename "$f")"
@@ -163,13 +163,13 @@ list_tests() {
         [ -f "$f" ] && echo "  unit/skills/$(basename "$f")"
     done
     echo ""
-    
+
     echo "L1 Unit Tests - Agents:"
     for f in "$SCRIPT_DIR"/unit/agents/test-*.sh; do
         [ -f "$f" ] && echo "  unit/agents/$(basename "$f")"
     done
     echo ""
-    
+
     echo "L1 Unit Tests - Teams:"
     for f in "$SCRIPT_DIR"/unit/teams/test-*.sh; do
         [ -f "$f" ] && echo "  unit/teams/$(basename "$f")"
@@ -187,7 +187,7 @@ list_tests() {
         [ -f "$f" ] && echo "  behavior/skills/$(basename "$f")"
     done
     echo ""
-    
+
     echo "L2 Behavior Tests - Agents:"
     for f in "$SCRIPT_DIR"/behavior/agents/test-*.sh; do
         [ -f "$f" ] && echo "  behavior/agents/$(basename "$f")"
@@ -532,6 +532,12 @@ get_incremental_tests() {
               "${CHANGED_SKILLS[gitcode-toolkit]:-}" == "1" ]]; then
             tests+="unit/infra/test-gitcode-issue-workflow.sh:fast\n"
         fi
+
+        if [[ "${CHANGED_SKILLS[ascendc-evolution-world-model]:-}" == "1" || \
+              "${CHANGED_SKILLS[ascendc-evolution-strategies]:-}" == "1" || \
+              "${CHANGED_SKILLS[ascendc-evolution-knowledge]:-}" == "1" ]]; then
+            tests+="unit/test-evolution-diagnosis-contract.sh:fast\n"
+        fi
     fi
 
     # Always run structure and content tests for changed agents
@@ -585,6 +591,7 @@ get_tests_for_category() {
             echo "unit/test-line-endings.sh:fast"
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/test-markdown-anchors.sh:fast"
+            echo "unit/test-evolution-diagnosis-contract.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"

@@ -165,7 +165,7 @@ BOTTLENECK_STRATEGY_MAP = {
         "primary": ["P122"],
         "secondary": [],
         "anti": [],
-        "description": "MTE1（GM→L1 搬运）停等，应预取或调整 L1 侧数据供给节奏",
+        "description": "MTE1（L1→L0A/L0B 搬运）停等，应预取或调整 L1 侧数据供给节奏",
     },
     "mte2_bound": {
         "primary": ["P105", "P107"],
@@ -495,7 +495,7 @@ def merge_strategies_with_evidence(
 # v3.2 新 API: 三阶段诊断管线
 # ═══════════════════════════════════════════════════════════════════
 
-# 标准化 bottleneck_labels 词表（18 个 = 14 主标签 + 4 Stage 2 精细化标签）
+# 标准化 bottleneck_labels 词表（21 个 = 14 主标签 + 3 AIC 标签 + 4 精细化标签）
 # 与 community/ops/ascendc-evolution-knowledge/references/a3/profiling_reference/INDEX.md 对齐
 KNOWN_BOTTLENECK_LABELS = frozenset(
     {
@@ -514,6 +514,10 @@ KNOWN_BOTTLENECK_LABELS = frozenset(
         "bus_contention",
         "l2_cache_thrash",
         "ub_memory_pressure",
+        # AIC 流水诊断：Cube 计算、FIXP 输出、MTE1 搬运
+        "cube_bound",
+        "fixp_bound",
+        "mte1_stall",
         # 增量 4 个，Stage 2 LLM 精细化标签（真假 bound + bank conflict + db_not_effective）
         "fake_mte2_bound",
         "fake_compute_bound",
@@ -523,15 +527,35 @@ KNOWN_BOTTLENECK_LABELS = frozenset(
 )
 
 
-def _normalize_ratio(value, default=None):
-    """把可能是 0~1 或 0~100 的数值统一归一到 0~1。"""
+def _normalize_ratio(value, default=None, *, percent=False):
+    """把 ratio 统一归一到 0~1；明确标注百分比的字段始终除以 100。"""
     if value is None:
         return default
     try:
         v = float(value)
     except (TypeError, ValueError):
         return default
-    return v / 100.0 if v > 1.0 else v
+    return v / 100.0 if percent or v > 1.0 else v
+
+
+def _extract_aic_ratios(data: dict, pipeline: dict) -> dict:
+    """优先采用选定来源的 AIC 数据，缺失时从原始 CSV 补齐；保留实测零值。"""
+    fields = {
+        "cube_ratio": ("aic_cube_ratio", "aic_mac_ratio", "cube_utilization(%)"),
+        "fixpipe_ratio": ("aic_fixpipe_ratio",),
+        "mte1_ratio": ("aic_mte1_ratio",),
+    }
+    ratios = dict.fromkeys(fields)
+    for fact, keys in fields.items():
+        for source in (data, pipeline):
+            for key in keys:
+                value = _normalize_ratio(source.get(key), percent=key.endswith("(%)"))
+                if value is not None:
+                    ratios[fact] = value
+                    break
+            if ratios[fact] is not None:
+                break
+    return ratios
 
 
 def _select_fact_source(evaluation_results: dict):
@@ -572,6 +596,9 @@ def extract_facts(evaluation_results: dict) -> Optional[dict]:
             mte3_ratio        : MTE3 占比
             vec_ratio         : VEC 占比
             scalar_ratio      : Scalar 占比
+            cube_ratio        : Cube 占比 (aic_cube_ratio / aic_mac_ratio)
+            fixpipe_ratio     : FIXP 占比 (L0C→GM/L1)
+            mte1_ratio        : MTE1 占比 (L1→L0A/L0B)
             bw_utilization    : 带宽利用率 (用于真假 MTE2 bound 区分)
             bank_cflt_ratio   : Bank conflict 占比
             l2_hit_rate       : L2 cache 命中率
@@ -592,6 +619,7 @@ def extract_facts(evaluation_results: dict) -> Optional[dict]:
     mte3_ratio = _normalize_ratio(data.get("aiv_mte3_ratio"))
     vec_ratio = _normalize_ratio(data.get("aiv_vec_ratio"))
     scalar_ratio = _normalize_ratio(data.get("aiv_scalar_ratio"))
+    aic_ratios = _extract_aic_ratios(data, evaluation_results.get("pipeline") or {})
 
     # 兜底：如果 ratio 字段缺失，用 d/c_class_pct 反推
     if mte2_ratio is None:
@@ -607,6 +635,9 @@ def extract_facts(evaluation_results: dict) -> Optional[dict]:
         "mte3": mte3_ratio or 0,
         "vec": vec_ratio or 0,
         "scalar": scalar_ratio or 0,
+        "cube": aic_ratios["cube_ratio"] or 0,
+        "fixpipe": aic_ratios["fixpipe_ratio"] or 0,
+        "mte1": aic_ratios["mte1_ratio"] or 0,
     }
     dominant = max(pipes, key=pipes.get) if any(v for v in pipes.values()) else None
 
@@ -620,6 +651,7 @@ def extract_facts(evaluation_results: dict) -> Optional[dict]:
         "mte3_ratio": mte3_ratio,
         "vec_ratio": vec_ratio,
         "scalar_ratio": scalar_ratio,
+        **aic_ratios,
         "bw_utilization": _normalize_ratio(
             data.get("bw_utilization") or data.get("bw_usage_rate")
         ),
@@ -758,7 +790,7 @@ def validate_labels(labels: list[str]) -> dict:
     """校验 bottleneck_labels 列表是否合法（用于 wm_ops.refine 校验 LLM 输出）。
 
     Returns:
-        {"valid": bool, "unknown": [labels not in vocab], "vocabulary_size": 18}
+        {"valid": bool, "unknown": [labels not in vocab], "vocabulary_size": 21}
     """
     unknown = [label for label in labels if label not in KNOWN_BOTTLENECK_LABELS]
     return {
@@ -775,7 +807,7 @@ def validate_labels(labels: list[str]) -> dict:
 # bottleneck label → 该 label 在 facts dict 中的占比来源 key 列表
 # - 值是 facts 字段名 list，compute_expected_gain 按 LABEL_AGGREGATION 聚合
 # - 值为 None 表示无直接 facts 字段，用 LABEL_FALLBACK_RATIO 保守默认值
-# - 与 KNOWN_BOTTLENECK_LABELS 一一对应（18 项全覆盖）
+# - 与 KNOWN_BOTTLENECK_LABELS 一一对应
 LABEL_TO_FACTS_RATIO_KEYS: dict[str, Optional[list[str]]] = {
     "mte2_stall": ["mte2_ratio"],
     "fake_mte2_bound": ["mte2_ratio"],
@@ -791,6 +823,9 @@ LABEL_TO_FACTS_RATIO_KEYS: dict[str, Optional[list[str]]] = {
     "bus_contention": ["mte2_ratio", "mte3_ratio"],  # 总线竞争 → 用 sum 聚合
     "bank_conflict": ["bank_cflt_ratio"],
     "compute_bound": ["vec_ratio"],
+    "cube_bound": ["cube_ratio"],
+    "fixp_bound": ["fixpipe_ratio"],
+    "mte1_stall": ["mte1_ratio"],
     "fake_compute_bound": ["vec_ratio"],
     "l2_cache_thrash": None,
     "ub_memory_pressure": None,

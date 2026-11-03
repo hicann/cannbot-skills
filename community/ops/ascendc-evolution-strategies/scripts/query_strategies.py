@@ -85,6 +85,7 @@ VALID_BOTTLENECKS = {
     "l2_cache_thrash",
     "ub_memory_pressure",
     "cube_bound",
+    "fixp_bound",
     "db_not_effective",
     # P104+ 批次引入的瓶颈分类
     "memory_bound",
