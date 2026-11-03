@@ -126,7 +126,10 @@ function getStatePath(): string {
 
 function readState(): InstallerState | null {
   try {
-    return JSON.parse(readFileSync(getStatePath(), "utf-8")) as InstallerState;
+    const state = JSON.parse(readFileSync(getStatePath(), "utf-8")) as InstallerState;
+    if (!state || typeof state.channel !== "string" || !state.channel ||
+        typeof state.installedAt !== "number" || !Number.isFinite(state.installedAt)) return null;
+    return state;
   } catch {
     return null;
   }
@@ -164,7 +167,7 @@ export function hasNodeRuntime(): boolean {
   }
 }
 
-async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolean): Promise<void> {
+async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolean): Promise<boolean> {
   const prefix = getCannbotInstallerPrefix();
   if (!existsSync(prefix)) {
     mkdirSync(prefix, { recursive: true });
@@ -177,7 +180,7 @@ async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolea
     if (registry) args.push("--registry", registry);
     try {
       await execa("npm", args, { timeout: 300000 });
-      return;
+      return true;
     } catch (error) {
       lastError = error;
       if (force || !isCannbotInstallerReady()) {
@@ -190,7 +193,7 @@ async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolea
   if (isCannbotInstallerReady() && !force) {
     // refresh failed but a cached copy exists — degrade to the cache
     logger.warn(t("cannbot_installer_refresh_failed"));
-    return;
+    return false;
   }
   throw lastError instanceof Error
     ? lastError
@@ -217,9 +220,11 @@ export async function ensureCannbotInstaller(options?: { force?: boolean }): Pro
   }
 
   const ready = isCannbotInstallerReady();
+  const state = readState();
+  const channelChanged = !!state && state.channel !== config.channel;
 
-  if (!ready || options?.force) {
-    await npmInstallInstaller(config, options?.force || !ready);
+  if (!ready || options?.force || channelChanged) {
+    await npmInstallInstaller(config, true);
     writeState({
       version: getCannbotInstallerVersion() || "unknown",
       channel: config.channel,
@@ -228,16 +233,17 @@ export async function ensureCannbotInstaller(options?: { force?: boolean }): Pro
     return packageRoot;
   }
 
-  const state = readState();
   const ttlMs = config.ttlHours * 60 * 60 * 1000;
   if (!state || Date.now() - state.installedAt > ttlMs) {
     try {
-      await npmInstallInstaller(config, false);
-      writeState({
-        version: getCannbotInstallerVersion() || "unknown",
-        channel: config.channel,
-        installedAt: Date.now(),
-      });
+      const installed = await npmInstallInstaller(config, false);
+      if (installed) {
+        writeState({
+          version: getCannbotInstallerVersion() || "unknown",
+          channel: config.channel,
+          installedAt: Date.now(),
+        });
+      }
     } catch {
       // already handled inside npmInstallInstaller (cache fallback / throw)
     }

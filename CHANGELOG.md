@@ -2,6 +2,10 @@
 
 > **记录规则**：单条不超过 **200 字**，按【领域】+ 问题 + 修复要点组织；技术细节、验证数据与发布过程放 PR 描述 / commit message，不写入日志。
 
+### 【2026-11-02】
+#### 缺陷修复 Bug Fixes
+- 【安装部署】修复安装器通道变更后仍在缓存有效期内复用旧通道的问题。
+
 ### 【2026-10-31】
 #### 新特性 New Features
 - 【算子】`ops-design-paradigms` 新增 RandomSampling 范式：随机流代数（不重叠不变量、预留律、seed 语义与 offset 递进）、分布变换消耗目录与双轨验证；AscendC 适配层含 random_common 接入契约与 TF 对标 SIMD / torch 对标 SIMT 双路线，另含 CANNBotDSL 适配层；蒸馏自 22 算子。
