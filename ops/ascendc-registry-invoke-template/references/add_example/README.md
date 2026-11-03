@@ -61,44 +61,11 @@ bash build.sh -s --soc=ascend910b
 
 ## 参数说明
 
-<table style="undefined;table-layout: fixed; width: 980px"><colgroup>
-  <col style="width: 100px">
-  <col style="width: 150px">
-  <col style="width: 280px">
-  <col style="width: 330px">
-  <col style="width: 120px">
-  </colgroup>
-  <thead>
-    <tr>
-      <th>参数名</th>
-      <th>输入/输出/属性</th>
-      <th>描述</th>
-      <th>数据类型</th>
-      <th>数据格式</th>
-    </tr></thead>
-  <tbody>
-    <tr>
-      <td>x1</td>
-      <td>输入</td>
-      <td>待进行add_example计算的入参，公式中的x1。</td>
-      <td>FLOAT、INT32</td>
-      <td>ND</td>
-    </tr>
-    <tr>
-      <td>x2</td>
-      <td>输入</td>
-      <td>待进行add_example计算的入参，公式中的x2。</td>
-      <td>FLOAT、INT32</td>
-      <td>ND</td>
-    </tr>
-    <tr>
-      <td>y</td>
-      <td>输出</td>
-      <td>待进行add_example计算的出参，公式中的y。</td>
-      <td>FLOAT、INT32</td>
-      <td>ND</td>
-    </tr>
-  </tbody></table>
+| 参数名 | 输入/输出/属性 | 描述 | 数据类型 | 数据格式 |
+| --- | --- | --- | --- | --- |
+| x1 | 输入 | 待进行add_example计算的入参，公式中的x1。 | FLOAT、INT32 | ND |
+| x2 | 输入 | 待进行add_example计算的入参，公式中的x2。 | FLOAT、INT32 | ND |
+| y | 输出 | 待进行add_example计算的出参，公式中的y。 | FLOAT、INT32 | ND |
 
 ## 约束说明
 
@@ -106,17 +73,6 @@ bash build.sh -s --soc=ascend910b
 
 ## 调用说明
 
-<table><thead>
-  <tr>
-    <th>调用方式</th>
-    <th>调用样例</th>
-    <th>说明</th>
-  </tr></thead>
-<tbody>
-  <tr>
-    <td>aclnn调用</td>
-    <td><a href="./tests/st/">ST 测试 (C++)</a></td>
-    <td>参见<a href="./tests/st/README.md">ST 测试说明</a>。系统测试通过 C++ 原生测试验证算子精度。</td>
-  </tr>
-</tbody>
-</table>
+| 调用方式 | 调用样例 | 说明 |
+| --- | --- | --- |
+| aclnn调用 | [ST 测试 (C++)](./tests/st/) | 参见[ST 测试说明](./tests/st/README.md)。系统测试通过 C++ 原生测试验证算子精度。 |
