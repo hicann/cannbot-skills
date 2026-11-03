@@ -28,7 +28,7 @@ PR 号必须与当前 PR 一致；CI 校验文件名、类型、单条内容和 
 python3 scripts/changelog.py aggregate --repo . --date 2026-11-03
 ```
 
-聚合结果写入 `GENERATED FILE` 标记。检查变更后通过普通 PR 提交，不由 CI 直接推送主线。同一日期只允许聚合一次；没有 fragment 时不产生改动。
+聚合结果写入 `GENERATED FILE` 标记。检查变更后通过普通 PR 提交，不由 CI 直接推送主线。CI 会从基线重放聚合，只有 `CHANGELOG.md` 与删除 fragment 集合、重放结果完全一致才通过。基线不含本机制的历史 PR 跳过禁改，rebase 到新基线后才启用。同一日期只允许聚合一次；没有 fragment 时不产生改动。
 
 仅校验 fragment：
 

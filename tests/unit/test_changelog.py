@@ -59,7 +59,9 @@ class ChangelogFragmentTests(unittest.TestCase):
         self.assertEqual(list(self.fragments.glob("[0-9]*.md")), [])
 
     def test_git_diff_disables_rename_detection(self):
-        with patch.object(changelog.subprocess, "run", return_value=Mock(stdout="")) as run:
+        with patch.object(
+            changelog.subprocess, "run", return_value=Mock(stdout="")
+        ) as run:
             changelog.changed_files(self.repo, "base", "head")
         command = run.call_args[0][0]
         self.assertIn("--no-renames", command)
@@ -106,6 +108,19 @@ class ChangelogFragmentTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "不一致"):
                 changelog.check(self.repo, "base", "head", 123)
+
+    def test_release_requires_deleted_fragment(self):
+        with patch.object(
+            changelog, "changed_file_statuses", return_value=[("M", "CHANGELOG.md")]
+        ):
+            with self.assertRaisesRegex(ValueError, "至少要删除"):
+                changelog.verify_release(self.repo, "base", "head")
+
+    def test_release_rejects_fragment_modification(self):
+        changes = [("M", "CHANGELOG.md"), ("M", "docs/changelog.d/123.fixed.md")]
+        with patch.object(changelog, "changed_file_statuses", return_value=changes):
+            with self.assertRaisesRegex(ValueError, "只能删除"):
+                changelog.verify_release(self.repo, "base", "head")
 
     def test_duplicate_date_does_not_delete_fragment(self):
         self.fragment("123.fixed.md")

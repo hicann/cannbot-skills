@@ -86,17 +86,24 @@ stages:
               set -euo pipefail
               cd ${{ steps.process_checkout.outputs.path }}
               if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-                git fetch --deepen=1 origin
+                git fetch --unshallow origin
               fi
-              git cat-file -e 'HEAD^1^{commit}'
-              # 门禁策略必须取目标分支父提交的可信副本，不能执行 PR 自带版本。
-              git show 'HEAD^1:scripts/changelog.py' > /tmp/changelog.py
-              python3 /tmp/changelog.py check \
-                --repo . \
-                --base 'HEAD^1' \
-                --head HEAD \
-                --pr-number "${MERGE_ID}"
-              python3 -m unittest discover -s tests/unit -p 'test_changelog.py' -v
+              git cat-file -e 'HEAD^1^{commit}' 'HEAD^2^{commit}'
+              BASE_TREE=$(git merge-base HEAD^1 HEAD^2)
+              if git cat-file -e "${BASE_TREE}:scripts/changelog.py" 2>/dev/null; then
+                # 基线已有机制才启用门禁；策略取可信基线，PR 新规则由其单测验证。
+                git show "${BASE_TREE}:scripts/changelog.py" > /tmp/changelog.py
+                if git diff --no-renames --name-only "${BASE_TREE}...HEAD^2" -- CHANGELOG.md | grep -q .; then
+                  python3 /tmp/changelog.py verify-release --repo . --base "${BASE_TREE}" --head HEAD^2
+                else
+                  python3 /tmp/changelog.py check --repo . --base "${BASE_TREE}" --head HEAD^2 --pr-number "${MERGE_ID}"
+                fi
+              else
+                echo "存量 PR 或首笔 bootstrap：基线无 fragment 机制，跳过禁改"
+              fi
+              if [ -f tests/unit/test_changelog.py ]; then
+                python3 -m unittest discover -s tests/unit -p 'test_changelog.py' -v
+              fi
         runs-on: ['self-hosted', 'arch=x64', 'spec=small']
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
