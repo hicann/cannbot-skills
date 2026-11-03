@@ -74,6 +74,7 @@ stages:
           pr_number: ${{ atomgit.event.pull_request.number }}
       JOB_changelog:
         name: Changelog_fragment
+        if: "${{ atomgit.event.pull_request.number > 0 }}"
         steps:
           - name: Checkout
             identifier: process_checkout

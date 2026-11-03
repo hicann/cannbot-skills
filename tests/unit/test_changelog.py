@@ -76,6 +76,26 @@ class ChangelogFragmentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "只能包含一条"):
             changelog.load_fragments(self.repo)
 
+    def test_unknown_fragment_kind_is_rejected(self):
+        self.fragment("123.feature.md")
+        with self.assertRaisesRegex(ValueError, "文件名"):
+            changelog.load_fragments(self.repo)
+
+    def test_fragment_body_over_200_chars_is_rejected(self):
+        self.fragment("123.fixed.md", "- " + "甲" * 201)
+        with self.assertRaisesRegex(ValueError, "200"):
+            changelog.load_fragments(self.repo)
+
+    def test_fragment_body_at_200_chars_is_accepted(self):
+        self.fragment("123.fixed.md", "- " + "甲" * 200)
+        fragments = changelog.load_fragments(self.repo)
+        self.assertEqual(len(fragments), 1)
+
+    def test_empty_fragment_is_rejected(self):
+        self.fragment("123.fixed.md", "   ")
+        with self.assertRaises(ValueError):
+            changelog.load_fragments(self.repo)
+
     def test_pr_number_must_match_current_pr(self):
         self.fragment("123.fixed.md")
         with self.assertRaisesRegex(ValueError, "不一致"):
