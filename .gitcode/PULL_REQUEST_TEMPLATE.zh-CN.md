@@ -21,6 +21,11 @@
 ## 文档更新
 <!--如果这个PR包含文档的更新，请在这里指出。例如：更新了README.md文件。-->
 
+## Changelog
+<!-- 用户可见变更请新增 changelog.d/<PR号>.<added|fixed|docs|chore>.md，每个文件只写一条以 "- " 开头的说明；不要直接修改 CHANGELOG.md。 -->
+- [ ] 已添加与当前 PR 号一致的 changelog fragment
+- [ ] 本 PR 无用户可见变更，无需 changelog（请在描述中说明）
+
 ## 类型标签
 <!--  [x] 表示选中 -->
 - [ ] 🌟 新特性

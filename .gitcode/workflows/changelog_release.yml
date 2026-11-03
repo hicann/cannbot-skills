@@ -1,0 +1,54 @@
+name: changelog-release
+
+concurrency:
+  max: 1
+  exceed-action: QUEUE
+  enable: true
+
+on:
+  workflow_dispatch:
+
+stages:
+  stage1:
+    name: AggregateFragments
+    jobs:
+      JOB_release:
+        name: Aggregate_changelog
+        steps:
+          - name: Checkout
+            identifier: process_checkout
+            uses: checkout
+            with:
+              ref: master
+              allow-unsafe-pr-checkout: true
+          - name: aggregate_and_publish
+            env:
+              CHANGELOG_RELEASE_TOKEN: ${{ secrets.CHANGELOG_RELEASE_TOKEN }}
+            run: |
+              set -euo pipefail
+              cd ${{ steps.process_checkout.outputs.path }}
+              if [ -z "${CHANGELOG_RELEASE_TOKEN}" ]; then
+                echo "缺少 secret CHANGELOG_RELEASE_TOKEN，无法推送聚合结果" >&2
+                exit 1
+              fi
+              AUTH=$(printf 'x-access-token:%s' "${CHANGELOG_RELEASE_TOKEN}" | base64 | tr -d '\n')
+              git -c "http.https://gitcode.com/.extraheader=AUTHORIZATION: basic ${AUTH}" pull --rebase origin master
+              RELEASE_DATE=$(TZ=Asia/Shanghai date +%F)
+              python3 scripts/changelog.py aggregate --repo . --date "${RELEASE_DATE}"
+              git config user.name "cann-robot"
+              git config user.email "cann-robot@ci"
+              git add CHANGELOG.md changelog.d
+              if git diff --cached --quiet; then
+                echo "没有待发布的 changelog 变更"
+                exit 0
+              fi
+              if [ -n "$(git diff --cached --name-only -- . ':!CHANGELOG.md' ':!changelog.d')" ]; then
+                echo "聚合产生了范围外改动，停止推送" >&2
+                git diff --cached --name-only
+                exit 1
+              fi
+              git commit -m "docs: aggregate changelog fragments"
+              git -c "http.https://gitcode.com/.extraheader=AUTHORIZATION: basic ${AUTH}" push origin HEAD:master
+        runs-on: ['self-hosted', 'arch=x64', 'spec=small']
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
