@@ -89,7 +89,7 @@ stages:
               if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
                 git fetch --unshallow origin
               fi
-              git cat-file -e 'HEAD^1^{commit}' 'HEAD^2^{commit}'
+              git cat-file -e 'HEAD^1^{commit}' && git cat-file -e 'HEAD^2^{commit}'
               BASE_TREE=$(git merge-base HEAD^1 HEAD^2)
               if git cat-file -e "${BASE_TREE}:scripts/changelog.py" 2>/dev/null; then
                 # 基线已有机制才启用门禁；策略取可信基线，PR 新规则由其单测验证。
