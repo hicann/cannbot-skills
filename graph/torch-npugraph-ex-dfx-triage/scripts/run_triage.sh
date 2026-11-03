@@ -161,7 +161,9 @@ STEPS=(
 for entry in "${STEPS[@]}"; do
   name=${entry%:*}
   idx=${entry##*:}
-  if ! run_step "$name"; then
+  if run_step "$name"; then
+    :
+  else
     rc=$?
     if [ "$rc" -eq 64 ]; then
       exit 64
